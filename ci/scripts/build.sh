@@ -18,7 +18,7 @@ Usage:
   $0 [flags] [Arguments]
 
     clean                     Remove all existing build artifacts and configuration (start over)
-    -o [ARCTERN_INSTALL_PREFIX] or --install_prefix=[ARCTERN_INSTALL_PREFIX]
+    -o [INSTALL_PREFIX] or --install_prefix=[INSTALL_PREFIX]
                               Install directory used by install.
     -t [BUILD_TYPE] or --build_type=[BUILD_TYPE]
                               Build type (default: Release)
