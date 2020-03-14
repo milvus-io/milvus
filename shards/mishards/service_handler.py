@@ -108,7 +108,6 @@ class ServiceHandler(milvus_pb2_grpc.MilvusServiceServicer):
                   vectors,
                   topk,
                   search_params,
-                  # range_array=None,
                   partition_tags=None,
                   **kwargs):
         metadata = kwargs.get('metadata', None)
@@ -151,6 +150,7 @@ class ServiceHandler(milvus_pb2_grpc.MilvusServiceServicer):
                                                         params=params)
                 if ret.status.error_code != 0:
                     logger.error(ret.status)
+
                 end = time.time()
 
                 all_topk_results.append(ret)
@@ -187,6 +187,7 @@ class ServiceHandler(milvus_pb2_grpc.MilvusServiceServicer):
         _status, unpacks = Parser.parse_proto_TableSchema(request)
 
         if not _status.OK():
+            logging.warning('[CreateTable] parse fail: {}'.format(_status))
             return status_pb2.Status(error_code=_status.code,
                                      reason=_status.message)
 
@@ -359,7 +360,6 @@ class ServiceHandler(milvus_pb2_grpc.MilvusServiceServicer):
                                                          query_record_array,
                                                          topk,
                                                          params,
-                                                         # query_range_array,
                                                          partition_tags=getattr(request, "partition_tag_array", []),
                                                          metadata=metadata)
 
