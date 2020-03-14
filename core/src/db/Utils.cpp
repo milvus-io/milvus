@@ -12,6 +12,7 @@
 #include "db/Utils.h"
 
 #include <fiu-local.h>
+
 #include <boost/filesystem.hpp>
 #include <chrono>
 #include <mutex>
@@ -230,6 +231,8 @@ bool
 IsBinaryMetricType(int32_t metric_type) {
     return (metric_type == (int32_t)engine::MetricType::HAMMING) ||
            (metric_type == (int32_t)engine::MetricType::JACCARD) ||
+           (metric_type == (int32_t)engine::MetricType::SUBSTRUCTURE) ||
+           (metric_type == (int32_t)engine::MetricType::SUPERSTRUCTURE) ||
            (metric_type == (int32_t)engine::MetricType::TANIMOTO);
 }
 

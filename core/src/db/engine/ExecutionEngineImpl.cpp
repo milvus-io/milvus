@@ -60,6 +60,12 @@ MappingMetricType(MetricType metric_type, milvus::json& conf) {
         case MetricType::TANIMOTO:
             conf[knowhere::Metric::TYPE] = knowhere::Metric::TANIMOTO;
             break;
+        case MetricType::SUBSTRUCTURE:
+            conf[knowhere::Metric::TYPE] = knowhere::Metric::SUBSTRUCTURE;
+            break;
+        case MetricType::SUPERSTRUCTURE:
+            conf[knowhere::Metric::TYPE] = knowhere::Metric::SUPERSTRUCTURE;
+            break;
         default:
             return Status(DB_ERROR, "Unsupported metric type");
     }
