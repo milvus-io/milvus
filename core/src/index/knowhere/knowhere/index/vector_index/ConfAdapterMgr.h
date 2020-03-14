@@ -12,8 +12,8 @@
 #pragma once
 
 #include <functional>
-#include <map>
 #include <memory>
+#include <unordered_map>
 
 #include "knowhere/index/vector_index/ConfAdapter.h"
 #include "knowhere/index/vector_index/IndexType.h"
@@ -25,8 +25,8 @@ class AdapterMgr {
  public:
     template <typename T>
     struct register_t {
-        explicit register_t(const IndexType& key) {
-            AdapterMgr::GetInstance().table_.emplace(key, [] { return std::make_shared<T>(); });
+        explicit register_t(const IndexType type, const IndexMode mode) {
+            AdapterMgr::GetInstance().table_[type][mode] = ( [] { return std::make_shared<T>(); });
         }
     };
 
@@ -37,14 +37,14 @@ class AdapterMgr {
     }
 
     ConfAdapterPtr
-    GetAdapter(const IndexType& indexType);
+    GetAdapter(const IndexType indexType, const IndexMode mode);
 
     void
     RegisterAdapter();
 
  protected:
     bool init_ = false;
-    std::map<IndexType, std::function<ConfAdapterPtr()> > table_;
+    std::unordered_map<IndexType, std::unordered_map<IndexMode, std::function<ConfAdapterPtr()>>> table_;
 };
 
 }  // namespace knowhere
