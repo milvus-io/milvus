@@ -94,7 +94,6 @@ set(server_delivery_files
         ${server_delivery_request_files})
 
 aux_source_directory(${MILVUS_ENGINE_SRC}/utils utils_files)
-aux_source_directory(${MILVUS_ENGINE_SRC}/wrapper wrapper_files)
 aux_source_directory(${MILVUS_ENGINE_SRC}/tracing tracing_files)
 
 aux_source_directory(${MILVUS_ENGINE_SRC}/storage storage_main_files)
@@ -136,7 +135,6 @@ set(common_files
         ${metrics_files}
         ${thirdparty_files}
         ${scheduler_files}
-        ${wrapper_files}
         ${storage_files}
         ${helper_files}
         ${server_context_files}
@@ -190,14 +188,9 @@ if (MILVUS_GPU_VERSION)
             cudart
             cublas
             )
-    aux_source_directory(${MILVUS_ENGINE_SRC}/wrapper/gpu wrapper_gpu_files)
-    set(common_files ${common_files}
-            ${wrapper_gpu_files}
-            )
 endif ()
 
 add_subdirectory(db)
-add_subdirectory(wrapper)
 add_subdirectory(metrics)
 add_subdirectory(scheduler)
 add_subdirectory(server)

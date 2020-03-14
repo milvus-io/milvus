@@ -10,16 +10,13 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
 #include <gtest/gtest.h>
-
 #include <iostream>
 #include <thread>
 
-#include "knowhere/adapter/VectorAdapter.h"
 #include "knowhere/common/Exception.h"
 #include "knowhere/common/Timer.h"
-
 #include "knowhere/index/vector_index/IndexBinaryIVF.h"
-
+#include "knowhere/index/vector_index/adapter/VectorAdapter.h"
 #include "unittest/Helper.h"
 #include "unittest/utils.h"
 
@@ -70,9 +67,9 @@ TEST_P(BinaryIVFTest, binaryivf_basic) {
     //    index_->set_index_model(model);
     //    index_->Add(base_dataset, conf);
     EXPECT_EQ(index_->Count(), nb);
-    EXPECT_EQ(index_->Dimension(), dim);
+    EXPECT_EQ(index_->Dim(), dim);
 
-    auto result = index_->Search(query_dataset, conf);
+    auto result = index_->Query(query_dataset, conf);
     AssertAnns(result, nq, conf[knowhere::meta::TOPK]);
     // PrintResult(result, nq, k);
 
@@ -82,7 +79,7 @@ TEST_P(BinaryIVFTest, binaryivf_basic) {
     }
     index_->SetBlacklist(concurrent_bitset_ptr);
 
-    auto result2 = index_->Search(query_dataset, conf);
+    auto result2 = index_->Query(query_dataset, conf);
     AssertAnns(result2, nq, k, CheckMode::CHECK_NOT_EQUAL);
 
     auto result3 = index_->SearchById(id_dataset, conf);
@@ -120,7 +117,7 @@ TEST_P(BinaryIVFTest, binaryivf_serialize) {
     //
     //        index_->set_index_model(model);
     //        index_->Add(base_dataset, conf);
-    //        auto result = index_->Search(query_dataset, conf);
+    //        auto result = index_->Query(query_dataset, conf);
     //        AssertAnns(result, nq, conf[knowhere::meta::TOPK]);
     //    }
 
@@ -143,8 +140,8 @@ TEST_P(BinaryIVFTest, binaryivf_serialize) {
 
         index_->Load(binaryset);
         EXPECT_EQ(index_->Count(), nb);
-        EXPECT_EQ(index_->Dimension(), dim);
-        auto result = index_->Search(query_dataset, conf);
+        EXPECT_EQ(index_->Dim(), dim);
+        auto result = index_->Query(query_dataset, conf);
         AssertAnns(result, nq, conf[knowhere::meta::TOPK]);
         // PrintResult(result, nq, k);
     }
