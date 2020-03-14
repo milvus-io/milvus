@@ -17,6 +17,7 @@ Please mark all change in change log and use the issue from GitHub
 -   \#1546 Move Config.cpp to config directory
 -   \#1547 Rename storage/file to storage/disk and rename classes
 -   \#1548 Move store/Directory to storage/Operation and add FSHandler
+-   \#1649 Fix Milvus crash on old CPU 
 
 ## Task
 
