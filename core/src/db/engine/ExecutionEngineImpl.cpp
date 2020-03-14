@@ -733,7 +733,7 @@ ExecutionEngineImpl::BuildIndex(const std::string& location, EngineType engine_t
         throw Exception(DB_ERROR, status.message());
     }
 
-    ENGINE_LOG_DEBUG << "Finish build index: " << location << " size: " << to_index->Size();
+    ENGINE_LOG_DEBUG << "Finish build index: " << location;
     return std::make_shared<ExecutionEngineImpl>(to_index, location, engine_type, metric_type_, index_params_);
 }
 
