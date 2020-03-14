@@ -39,10 +39,10 @@ KnowhereResource::Initialize() {
     CONFIG_CHECK(config.GetEngineConfigUseAVX512(use_avx512));
     faiss::faiss_use_avx512 = use_avx512;
     std::string cpu_flag;
-    bool faiss_hook_success = faiss::hook_init(cpu_flag);
-    ENGINE_LOG_DEBUG << "FAISS hook " << cpu_flag;
-    if (!faiss_hook_success) {
-        return Status(KNOWHERE_UNEXPECTED_ERROR, "CPU not supported!");
+    if (faiss::hook_init(cpu_flag)) {
+        ENGINE_LOG_DEBUG << "FAISS hook " << cpu_flag;
+    } else {
+        return Status(KNOWHERE_UNEXPECTED_ERROR, "FAISS hook fail, CPU not supported!");
     }
 
 #ifdef MILVUS_GPU_VERSION

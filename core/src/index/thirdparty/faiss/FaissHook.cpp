@@ -64,7 +64,6 @@ bool hook_init(std::string& cpu_flag) {
         sq_get_distance_computer_IP = sq_get_distance_computer_IP_avx512;
         sq_sel_quantizer = sq_select_quantizer_avx512;
 
-        std::cout << "FAISS hook AVX512" << std::endl;
         cpu_flag = "AVX512";
     } else if (support_avx()) {
         /* for IVFFLAT */
@@ -78,7 +77,6 @@ bool hook_init(std::string& cpu_flag) {
         sq_get_distance_computer_IP = sq_get_distance_computer_IP_avx;
         sq_sel_quantizer = sq_select_quantizer_avx;
 
-        std::cout << "FAISS hook AVX" << std::endl;
         cpu_flag = "AVX";
     } else if (support_sse()) {
         /* for IVFFLAT */
@@ -92,7 +90,6 @@ bool hook_init(std::string& cpu_flag) {
         sq_get_distance_computer_IP = sq_get_distance_computer_IP_sse;
         sq_sel_quantizer = sq_select_quantizer_sse;
 
-        std::cout << "FAISS hook SSE" << std::endl;
         cpu_flag = "SSE";
     } else {
         cpu_flag = "UNSUPPORTED";
