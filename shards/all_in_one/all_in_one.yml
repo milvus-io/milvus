@@ -4,6 +4,8 @@ services:
         runtime: nvidia
         restart: always
         image: milvusdb/milvus:0.6.0-gpu-d120719-2b40dd
+        ports:
+            - "0.0.0.0:19540:19530"
         volumes:
             - /tmp/milvus/db:/var/lib/milvus/db
             - ./wr_server.yml:/opt/milvus/conf/server_config.yaml
@@ -12,6 +14,8 @@ services:
         runtime: nvidia
         restart: always
         image: milvusdb/milvus:0.6.0-gpu-d120719-2b40dd
+        ports:
+            - "0.0.0.0:19541:19530"
         volumes:
             - /tmp/milvus/db:/var/lib/milvus/db
             - ./ro_server.yml:/opt/milvus/conf/server_config.yaml
