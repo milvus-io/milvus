@@ -296,16 +296,6 @@ IVF::SearchById(const DatasetPtr& dataset_ptr, const Config& config) {
 }
 
 void
-IVF::SetBlacklist(faiss::ConcurrentBitsetPtr list) {
-    bitset_ = std::move(list);
-}
-
-void
-IVF::GetBlacklist(faiss::ConcurrentBitsetPtr& list) {
-    list = bitset_;
-}
-
-void
 IVF::QueryImpl(int64_t n, const float* data, int64_t k, float* distances, int64_t* labels, const Config& config) {
     auto params = GenParams(config);
     auto ivf_index = dynamic_cast<faiss::IndexIVF*>(index_.get());

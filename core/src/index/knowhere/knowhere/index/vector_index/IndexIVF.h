@@ -74,12 +74,6 @@ class IVF : public VecIndex, public FaissBaseIndex {
     DatasetPtr
     SearchById(const DatasetPtr& dataset, const Config& config) override;
 
-    void
-    SetBlacklist(faiss::ConcurrentBitsetPtr list);
-
-    void
-    GetBlacklist(faiss::ConcurrentBitsetPtr& list);
-
  protected:
     virtual std::shared_ptr<faiss::IVFSearchParameters>
     GenParams(const Config&);
@@ -92,9 +86,6 @@ class IVF : public VecIndex, public FaissBaseIndex {
 
  protected:
     std::mutex mutex_;
-
- private:
-    faiss::ConcurrentBitsetPtr bitset_ = nullptr;
 };
 
 using IVFPtr = std::shared_ptr<IVF>;

@@ -208,16 +208,6 @@ IDMAP::SearchById(const DatasetPtr& dataset_ptr, const Config& config) {
 }
 
 void
-IDMAP::SetBlacklist(faiss::ConcurrentBitsetPtr list) {
-    bitset_ = std::move(list);
-}
-
-void
-IDMAP::GetBlacklist(faiss::ConcurrentBitsetPtr& list) {
-    list = bitset_;
-}
-
-void
 IDMAP::QueryImpl(int64_t n, const float* data, int64_t k, float* distances, int64_t* labels, const Config& config) {
     index_->search(n, (float*)data, k, distances, labels, bitset_);
 }

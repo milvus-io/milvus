@@ -11,7 +11,6 @@
 
 #pragma once
 
-#include <faiss/utils/ConcurrentBitset.h>
 #include <memory>
 #include <mutex>
 #include <utility>
@@ -77,21 +76,12 @@ class BinaryIDMAP : public VecIndex, public FaissBaseBinaryIndex {
     DatasetPtr
     SearchById(const DatasetPtr& dataset_ptr, const Config& config);
 
-    void
-    SetBlacklist(faiss::ConcurrentBitsetPtr list);
-
-    void
-    GetBlacklist(faiss::ConcurrentBitsetPtr& list);
-
  protected:
     virtual void
     QueryImpl(int64_t n, const uint8_t* data, int64_t k, float* distances, int64_t* labels, const Config& config);
 
  protected:
     std::mutex mutex_;
-
- private:
-    faiss::ConcurrentBitsetPtr bitset_ = nullptr;
 };
 
 using BinaryIDMAPPtr = std::shared_ptr<BinaryIDMAP>;

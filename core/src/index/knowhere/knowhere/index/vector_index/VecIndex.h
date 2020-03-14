@@ -12,6 +12,7 @@
 #pragma once
 
 #include <memory>
+#include <faiss/utils/ConcurrentBitset.h>
 
 #include "knowhere/common/Dataset.h"
 #include "knowhere/common/Typedef.h"
@@ -85,6 +86,16 @@ class VecIndex : public Index {
         return nullptr;
     }
 
+    virtual void
+    SetBlacklist(faiss::ConcurrentBitsetPtr bitset_ptr) {
+        bitset_ = std::move(bitset_ptr);
+    }
+
+    virtual void
+    GetBlacklist(faiss::ConcurrentBitsetPtr& bitset_ptr) {
+        bitset_ptr = bitset_;
+    }
+
     virtual const std::vector<milvus::segment::doc_id_t>&
     GetUids() const {
         return uids_;
@@ -99,6 +110,7 @@ class VecIndex : public Index {
  protected:
     IndexType index_type_ = IndexType::INVALID;
     IndexMode index_mode_ = IndexMode::MODE_CPU;
+    faiss::ConcurrentBitsetPtr bitset_ = nullptr;
 
  private:
     std::vector<milvus::segment::doc_id_t> uids_;

@@ -210,15 +210,5 @@ BinaryIVF::SearchById(const DatasetPtr& dataset_ptr, const Config& config) {
     }
 }
 
-void
-BinaryIVF::SetBlacklist(faiss::ConcurrentBitsetPtr list) {
-    bitset_ = std::move(list);
-}
-
-void
-BinaryIVF::GetBlacklist(faiss::ConcurrentBitsetPtr& list) {
-    list = bitset_;
-}
-
 }  // namespace knowhere
 }  // namespace milvus

@@ -205,15 +205,5 @@ BinaryIDMAP::SearchById(const DatasetPtr& dataset_ptr, const Config& config) {
     return ret_ds;
 }
 
-void
-BinaryIDMAP::SetBlacklist(faiss::ConcurrentBitsetPtr list) {
-    bitset_ = std::move(list);
-}
-
-void
-BinaryIDMAP::GetBlacklist(faiss::ConcurrentBitsetPtr& list) {
-    list = bitset_;
-}
-
 }  // namespace knowhere
 }  // namespace milvus
