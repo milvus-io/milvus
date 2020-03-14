@@ -1,15 +1,11 @@
-//
-// Created by czr on 2019/12/19.
-//
-
 namespace faiss {
 
-    struct JaccardComputer8 {
+    struct SubstructureComputer8 {
         uint64_t a0;
 
-        JaccardComputer8 () {}
+        SubstructureComputer8 () {}
 
-        JaccardComputer8 (const uint8_t *a8, int code_size) {
+        SubstructureComputer8 (const uint8_t *a8, int code_size) {
             set (a8, code_size);
         }
 
@@ -22,7 +18,7 @@ namespace faiss {
         inline float compute (const uint8_t *b8) const {
             const uint64_t *b = (uint64_t *)b8;
             int accu_num = popcount64 (b[0] & a0);
-            int accu_den = popcount64 (b[0] | a0);
+            int accu_den = popcount64 (b[0]);
             if (accu_num == 0)
                 return 1.0;
             return 1.0 - (float)(accu_num) / (float)(accu_den);
@@ -30,12 +26,12 @@ namespace faiss {
 
     };
 
-    struct JaccardComputer16 {
+    struct SubstructureComputer16 {
         uint64_t a0, a1;
 
-        JaccardComputer16 () {}
+        SubstructureComputer16 () {}
 
-        JaccardComputer16 (const uint8_t *a8, int code_size) {
+        SubstructureComputer16 (const uint8_t *a8, int code_size) {
             set (a8, code_size);
         }
 
@@ -48,7 +44,7 @@ namespace faiss {
         inline float compute (const uint8_t *b8) const {
             const uint64_t *b = (uint64_t *)b8;
             int accu_num = popcount64 (b[0] & a0) + popcount64 (b[1] & a1);
-            int accu_den = popcount64 (b[0] | a0) + popcount64 (b[1] | a1);
+            int accu_den = popcount64 (b[0]) + popcount64 (b[1]);
             if (accu_num == 0)
                 return 1.0;
             return 1.0 - (float)(accu_num) / (float)(accu_den);
@@ -56,12 +52,12 @@ namespace faiss {
 
     };
 
-    struct JaccardComputer32 {
+    struct SubstructureComputer32 {
         uint64_t a0, a1, a2, a3;
 
-        JaccardComputer32 () {}
+        SubstructureComputer32 () {}
 
-        JaccardComputer32 (const uint8_t *a8, int code_size) {
+        SubstructureComputer32 (const uint8_t *a8, int code_size) {
             set (a8, code_size);
         }
 
@@ -75,8 +71,8 @@ namespace faiss {
             const uint64_t *b = (uint64_t *)b8;
             int accu_num = popcount64 (b[0] & a0) + popcount64 (b[1] & a1) +
                            popcount64 (b[2] & a2) + popcount64 (b[3] & a3);
-            int accu_den = popcount64 (b[0] | a0) + popcount64 (b[1] | a1) +
-                           popcount64 (b[2] | a2) + popcount64 (b[3] | a3);
+            int accu_den = popcount64 (b[0]) + popcount64 (b[1]) +
+                           popcount64 (b[2]) + popcount64 (b[3]);
             if (accu_num == 0)
                 return 1.0;
             return 1.0 - (float)(accu_num) / (float)(accu_den);
@@ -84,12 +80,12 @@ namespace faiss {
 
     };
 
-    struct JaccardComputer64 {
+    struct SubstructureComputer64 {
         uint64_t a0, a1, a2, a3, a4, a5, a6, a7;
 
-        JaccardComputer64 () {}
+        SubstructureComputer64 () {}
 
-        JaccardComputer64 (const uint8_t *a8, int code_size) {
+        SubstructureComputer64 (const uint8_t *a8, int code_size) {
             set (a8, code_size);
         }
 
@@ -106,10 +102,10 @@ namespace faiss {
                            popcount64 (b[2] & a2) + popcount64 (b[3] & a3) +
                            popcount64 (b[4] & a4) + popcount64 (b[5] & a5) +
                            popcount64 (b[6] & a6) + popcount64 (b[7] & a7);
-            int accu_den = popcount64 (b[0] | a0) + popcount64 (b[1] | a1) +
-                           popcount64 (b[2] | a2) + popcount64 (b[3] | a3) +
-                           popcount64 (b[4] | a4) + popcount64 (b[5] | a5) +
-                           popcount64 (b[6] | a6) + popcount64 (b[7] | a7);
+            int accu_den = popcount64 (b[0]) + popcount64 (b[1]) +
+                           popcount64 (b[2]) + popcount64 (b[3]) +
+                           popcount64 (b[4]) + popcount64 (b[5]) +
+                           popcount64 (b[6]) + popcount64 (b[7]);
             if (accu_num == 0)
                 return 1.0;
             return 1.0 - (float)(accu_num) / (float)(accu_den);
@@ -117,13 +113,13 @@ namespace faiss {
 
     };
 
-    struct JaccardComputer128 {
+    struct SubstructureComputer128 {
         uint64_t a0, a1, a2, a3, a4, a5, a6, a7,
                 a8, a9, a10, a11, a12, a13, a14, a15;
 
-        JaccardComputer128 () {}
+        SubstructureComputer128 () {}
 
-        JaccardComputer128 (const uint8_t *a8, int code_size) {
+        SubstructureComputer128 (const uint8_t *a8, int code_size) {
             set (a8, code_size);
         }
 
@@ -146,14 +142,14 @@ namespace faiss {
                            popcount64 (b[10] & a10) + popcount64 (b[11] & a11) +
                            popcount64 (b[12] & a12) + popcount64 (b[13] & a13) +
                            popcount64 (b[14] & a14) + popcount64 (b[15] & a15);
-            int accu_den = popcount64 (b[0] | a0) + popcount64 (b[1] | a1) +
-                           popcount64 (b[2] | a2) + popcount64 (b[3] | a3) +
-                           popcount64 (b[4] | a4) + popcount64 (b[5] | a5) +
-                           popcount64 (b[6] | a6) + popcount64 (b[7] | a7) +
-                           popcount64 (b[8] | a8) + popcount64 (b[9] | a9) +
-                           popcount64 (b[10] | a10) + popcount64 (b[11] | a11) +
-                           popcount64 (b[12] | a12) + popcount64 (b[13] | a13) +
-                           popcount64 (b[14] | a14) + popcount64 (b[15] | a15);
+            int accu_den = popcount64 (b[0]) + popcount64 (b[1]) +
+                           popcount64 (b[2]) + popcount64 (b[3]) +
+                           popcount64 (b[4]) + popcount64 (b[5]) +
+                           popcount64 (b[6]) + popcount64 (b[7]) +
+                           popcount64 (b[8]) + popcount64 (b[9]) +
+                           popcount64 (b[10]) + popcount64 (b[11]) +
+                           popcount64 (b[12]) + popcount64 (b[13]) +
+                           popcount64 (b[14]) + popcount64 (b[15]);
             if (accu_num == 0)
                 return 1.0;
             return 1.0 - (float)(accu_num) / (float)(accu_den);
@@ -161,15 +157,15 @@ namespace faiss {
 
     };
 
-struct JaccardComputer256 {
+    struct SubstructureComputer256 {
         uint64_t a0,a1,a2,a3,a4,a5,a6,a7,
             a8,a9,a10,a11,a12,a13,a14,a15,
             a16,a17,a18,a19,a20,a21,a22,a23,
             a24,a25,a26,a27,a28,a29,a30,a31;
 
-        JaccardComputer256 () {}
+        SubstructureComputer256 () {}
 
-        JaccardComputer256 (const uint8_t *a8, int code_size) {
+        SubstructureComputer256 (const uint8_t *a8, int code_size) {
             set (a8, code_size);
         }
 
@@ -204,22 +200,22 @@ struct JaccardComputer256 {
                            popcount64 (b[26] & a26) + popcount64 (b[27] & a27) +
                            popcount64 (b[28] & a28) + popcount64 (b[29] & a29) +
                            popcount64 (b[30] & a30) + popcount64 (b[31] & a31);
-            int accu_den = popcount64 (b[0] | a0) + popcount64 (b[1] | a1) +
-                           popcount64 (b[2] | a2) + popcount64 (b[3] | a3) +
-                           popcount64 (b[4] | a4) + popcount64 (b[5] | a5) +
-                           popcount64 (b[6] | a6) + popcount64 (b[7] | a7) +
-                           popcount64 (b[8] | a8) + popcount64 (b[9] | a9) +
-                           popcount64 (b[10] | a10) + popcount64 (b[11] | a11) +
-                           popcount64 (b[12] | a12) + popcount64 (b[13] | a13) +
-                           popcount64 (b[14] | a14) + popcount64 (b[15] | a15) +
-                           popcount64 (b[16] | a16) + popcount64 (b[17] | a17) +
-                           popcount64 (b[18] | a18) + popcount64 (b[19] | a19) +
-                           popcount64 (b[20] | a20) + popcount64 (b[21] | a21) +
-                           popcount64 (b[22] | a22) + popcount64 (b[23] | a23) +
-                           popcount64 (b[24] | a24) + popcount64 (b[25] | a25) +
-                           popcount64 (b[26] | a26) + popcount64 (b[27] | a27) +
-                           popcount64 (b[28] | a28) + popcount64 (b[29] | a29) +
-                           popcount64 (b[30] | a30) + popcount64 (b[31] | a31);
+            int accu_den = popcount64 (b[0]) + popcount64 (b[1]) +
+                           popcount64 (b[2]) + popcount64 (b[3]) +
+                           popcount64 (b[4]) + popcount64 (b[5]) +
+                           popcount64 (b[6]) + popcount64 (b[7]) +
+                           popcount64 (b[8]) + popcount64 (b[9]) +
+                           popcount64 (b[10]) + popcount64 (b[11]) +
+                           popcount64 (b[12]) + popcount64 (b[13]) +
+                           popcount64 (b[14]) + popcount64 (b[15]) +
+                           popcount64 (b[16]) + popcount64 (b[17]) +
+                           popcount64 (b[18]) + popcount64 (b[19]) +
+                           popcount64 (b[20]) + popcount64 (b[21]) +
+                           popcount64 (b[22]) + popcount64 (b[23]) +
+                           popcount64 (b[24]) + popcount64 (b[25]) +
+                           popcount64 (b[26]) + popcount64 (b[27]) +
+                           popcount64 (b[28]) + popcount64 (b[29]) +
+                           popcount64 (b[30]) + popcount64 (b[31]);
             if (accu_num == 0)
                 return 1.0;
             return 1.0 - (float)(accu_num) / (float)(accu_den);
@@ -227,7 +223,7 @@ struct JaccardComputer256 {
 
     };
 
-    struct JaccardComputer512 {
+    struct SubstructureComputer512 {
         uint64_t a0,a1,a2,a3,a4,a5,a6,a7,
             a8,a9,a10,a11,a12,a13,a14,a15,
             a16,a17,a18,a19,a20,a21,a22,a23,
@@ -237,9 +233,9 @@ struct JaccardComputer256 {
             a48,a49,a50,a51,a52,a53,a54,a55,
             a56,a57,a58,a59,a60,a61,a62,a63;
 
-        JaccardComputer512 () {}
+        SubstructureComputer512 () {}
 
-        JaccardComputer512 (const uint8_t *a8, int code_size) {
+        SubstructureComputer512 (const uint8_t *a8, int code_size) {
             set (a8, code_size);
         }
 
@@ -298,38 +294,38 @@ struct JaccardComputer256 {
                            popcount64 (b[58] & a58) + popcount64 (b[59] & a59) +
                            popcount64 (b[60] & a60) + popcount64 (b[61] & a61) +
                            popcount64 (b[62] & a62) + popcount64 (b[63] & a63);
-            int accu_den = popcount64 (b[0] | a0) + popcount64 (b[1] | a1) +
-                           popcount64 (b[2] | a2) + popcount64 (b[3] | a3) +
-                           popcount64 (b[4] | a4) + popcount64 (b[5] | a5) +
-                           popcount64 (b[6] | a6) + popcount64 (b[7] | a7) +
-                           popcount64 (b[8] | a8) + popcount64 (b[9] | a9) +
-                           popcount64 (b[10] | a10) + popcount64 (b[11] | a11) +
-                           popcount64 (b[12] | a12) + popcount64 (b[13] | a13) +
-                           popcount64 (b[14] | a14) + popcount64 (b[15] | a15) +
-                           popcount64 (b[16] | a16) + popcount64 (b[17] | a17) +
-                           popcount64 (b[18] | a18) + popcount64 (b[19] | a19) +
-                           popcount64 (b[20] | a20) + popcount64 (b[21] | a21) +
-                           popcount64 (b[22] | a22) + popcount64 (b[23] | a23) +
-                           popcount64 (b[24] | a24) + popcount64 (b[25] | a25) +
-                           popcount64 (b[26] | a26) + popcount64 (b[27] | a27) +
-                           popcount64 (b[28] | a28) + popcount64 (b[29] | a29) +
-                           popcount64 (b[30] | a30) + popcount64 (b[31] | a31) +
-                           popcount64 (b[32] | a32) + popcount64 (b[33] | a33) +
-                           popcount64 (b[34] | a34) + popcount64 (b[35] | a35) +
-                           popcount64 (b[36] | a36) + popcount64 (b[37] | a37) +
-                           popcount64 (b[38] | a38) + popcount64 (b[39] | a39) +
-                           popcount64 (b[40] | a40) + popcount64 (b[41] | a41) +
-                           popcount64 (b[42] | a42) + popcount64 (b[43] | a43) +
-                           popcount64 (b[44] | a44) + popcount64 (b[45] | a45) +
-                           popcount64 (b[46] | a46) + popcount64 (b[47] | a47) +
-                           popcount64 (b[48] | a48) + popcount64 (b[49] | a49) +
-                           popcount64 (b[50] | a50) + popcount64 (b[51] | a51) +
-                           popcount64 (b[52] | a52) + popcount64 (b[53] | a53) +
-                           popcount64 (b[54] | a54) + popcount64 (b[55] | a55) +
-                           popcount64 (b[56] | a56) + popcount64 (b[57] | a57) +
-                           popcount64 (b[58] | a58) + popcount64 (b[59] | a59) +
-                           popcount64 (b[60] | a60) + popcount64 (b[61] | a61) +
-                           popcount64 (b[62] | a62) + popcount64 (b[63] | a63);
+            int accu_den = popcount64 (b[0]) + popcount64 (b[1]) +
+                           popcount64 (b[2]) + popcount64 (b[3]) +
+                           popcount64 (b[4]) + popcount64 (b[5]) +
+                           popcount64 (b[6]) + popcount64 (b[7]) +
+                           popcount64 (b[8]) + popcount64 (b[9]) +
+                           popcount64 (b[10]) + popcount64 (b[11]) +
+                           popcount64 (b[12]) + popcount64 (b[13]) +
+                           popcount64 (b[14]) + popcount64 (b[15]) +
+                           popcount64 (b[16]) + popcount64 (b[17]) +
+                           popcount64 (b[18]) + popcount64 (b[19]) +
+                           popcount64 (b[20]) + popcount64 (b[21]) +
+                           popcount64 (b[22]) + popcount64 (b[23]) +
+                           popcount64 (b[24]) + popcount64 (b[25]) +
+                           popcount64 (b[26]) + popcount64 (b[27]) +
+                           popcount64 (b[28]) + popcount64 (b[29]) +
+                           popcount64 (b[30]) + popcount64 (b[31]) +
+                           popcount64 (b[32]) + popcount64 (b[33]) +
+                           popcount64 (b[34]) + popcount64 (b[35]) +
+                           popcount64 (b[36]) + popcount64 (b[37]) +
+                           popcount64 (b[38]) + popcount64 (b[39]) +
+                           popcount64 (b[40]) + popcount64 (b[41]) +
+                           popcount64 (b[42]) + popcount64 (b[43]) +
+                           popcount64 (b[44]) + popcount64 (b[45]) +
+                           popcount64 (b[46]) + popcount64 (b[47]) +
+                           popcount64 (b[48]) + popcount64 (b[49]) +
+                           popcount64 (b[50]) + popcount64 (b[51]) +
+                           popcount64 (b[52]) + popcount64 (b[53]) +
+                           popcount64 (b[54]) + popcount64 (b[55]) +
+                           popcount64 (b[56]) + popcount64 (b[57]) +
+                           popcount64 (b[58]) + popcount64 (b[59]) +
+                           popcount64 (b[60]) + popcount64 (b[61]) +
+                           popcount64 (b[62]) + popcount64 (b[63]);
             if (accu_num == 0)
                 return 1.0;
             return 1.0 - (float)(accu_num) / (float)(accu_den);
@@ -337,13 +333,13 @@ struct JaccardComputer256 {
 
     };
 
-    struct JaccardComputerDefault {
+    struct SubstructureComputerDefault {
         const uint8_t *a;
         int n;
 
-        JaccardComputerDefault () {}
+        SubstructureComputerDefault () {}
 
-        JaccardComputerDefault (const uint8_t *a8, int code_size) {
+        SubstructureComputerDefault (const uint8_t *a8, int code_size) {
             set (a8, code_size);
         }
 
@@ -357,7 +353,7 @@ struct JaccardComputer256 {
             int accu_den = 0;
             for (int i = 0; i < n; i++) {
                 accu_num += popcount64(a[i] & b8[i]);
-                accu_den += popcount64(a[i] | b8[i]);
+                accu_den += popcount64(b8[i]);
             }
             if (accu_num == 0)
                 return 1.0;
@@ -368,16 +364,16 @@ struct JaccardComputer256 {
 
 // default template
     template<int CODE_SIZE>
-    struct JaccardComputer: JaccardComputerDefault {
-        JaccardComputer (const uint8_t *a, int code_size):
-                JaccardComputerDefault(a, code_size) {}
+    struct SubstructureComputer: SubstructureComputerDefault {
+        SubstructureComputer (const uint8_t *a, int code_size):
+                SubstructureComputerDefault(a, code_size) {}
     };
 
 #define SPECIALIZED_HC(CODE_SIZE)                     \
-    template<> struct JaccardComputer<CODE_SIZE>:     \
-            JaccardComputer ## CODE_SIZE {            \
-        JaccardComputer (const uint8_t *a):           \
-        JaccardComputer ## CODE_SIZE(a, CODE_SIZE) {} \
+    template<> struct SubstructureComputer<CODE_SIZE>:     \
+            SubstructureComputer ## CODE_SIZE {            \
+        SubstructureComputer (const uint8_t *a):           \
+        SubstructureComputer ## CODE_SIZE(a, CODE_SIZE) {} \
     }
 
     SPECIALIZED_HC(8);

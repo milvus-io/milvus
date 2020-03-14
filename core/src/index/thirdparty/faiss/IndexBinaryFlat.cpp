@@ -13,8 +13,8 @@
 
 #include <cmath>
 #include <cstring>
+#include <faiss/utils/BinaryDistance.h>
 #include <faiss/utils/hamming.h>
-#include <faiss/utils/jaccard.h>
 #include <faiss/utils/utils.h>
 #include <faiss/utils/Heap.h>
 #include <faiss/impl/FaissAssert.h>
@@ -41,8 +41,9 @@ void IndexBinaryFlat::reset() {
 void IndexBinaryFlat::search(idx_t n, const uint8_t *x, idx_t k,
                              int32_t *distances, idx_t *labels, ConcurrentBitsetPtr bitset) const {
     const idx_t block_size = query_batch_size;
-    if (metric_type == METRIC_Jaccard || metric_type == METRIC_Tanimoto) {
-        float *D = new float[k * n];
+    if (metric_type == METRIC_Jaccard || metric_type == METRIC_Tanimoto ||
+        metric_type == METRIC_Substructure || metric_type == METRIC_Superstructure) {
+        float *D = reinterpret_cast<float*>(distances);
         for (idx_t s = 0; s < n; s += block_size) {
             idx_t nn = block_size;
             if (s + block_size > n) {
@@ -56,7 +57,7 @@ void IndexBinaryFlat::search(idx_t n, const uint8_t *x, idx_t k,
                         size_t(nn), size_t(k), labels + s * k, D + s * k
                 };
 
-                jaccard_knn_hc(&res, x + s * code_size, xb.data(), ntotal, code_size,
+                binary_distence_knn_hc(metric_type, &res, x + s * code_size, xb.data(), ntotal, code_size,
                         /* ordered = */ true, bitset);
 
             } else {
@@ -68,8 +69,7 @@ void IndexBinaryFlat::search(idx_t n, const uint8_t *x, idx_t k,
                 D[i] = -log2(1-D[i]);
             }
         }
-        memcpy(distances, D, sizeof(float) * n * k);
-        delete [] D;
+
     } else {
         for (idx_t s = 0; s < n; s += block_size) {
             idx_t nn = block_size;
