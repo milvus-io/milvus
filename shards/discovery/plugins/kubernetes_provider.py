@@ -181,7 +181,7 @@ class EventHandler(threading.Thread):
         self.mgr.delete_pod(name=event['pod'])
 
     def on_pod_heartbeat(self, event, **kwargs):
-        names = self.mgr.conn_mgr.conn_names
+        names = self.mgr.readonly_topo.group_names
 
         running_names = set()
         for each_event in event['events']:
@@ -195,7 +195,7 @@ class EventHandler(threading.Thread):
         for name in to_delete:
             self.mgr.delete_pod(name)
 
-        logger.info(self.mgr.conn_mgr.conn_names)
+        logger.info(self.mgr.readonly_topo.group_names)
 
     def handle_event(self, event):
         if event['eType'] == EventType.PodHeartBeat:
@@ -237,7 +237,7 @@ class KubernetesProviderSettings:
 class KubernetesProvider(object):
     name = 'kubernetes'
 
-    def __init__(self, plugin_config, conn_mgr, **kwargs):
+    def __init__(self, plugin_config, readonly_topo, **kwargs):
         self.namespace = plugin_config.DISCOVERY_KUBERNETES_NAMESPACE
         self.pod_patt = plugin_config.DISCOVERY_KUBERNETES_POD_PATT
         self.label_selector = plugin_config.DISCOVERY_KUBERNETES_LABEL_SELECTOR
@@ -250,7 +250,7 @@ class KubernetesProvider(object):
         self.kwargs = kwargs
         self.queue = queue.Queue()
 
-        self.conn_mgr = conn_mgr
+        self.readonly_topo = readonly_topo
 
         if not self.namespace:
             self.namespace = open(incluster_namespace_path).read()
@@ -281,10 +281,24 @@ class KubernetesProvider(object):
                                           **kwargs)
 
     def add_pod(self, name, ip):
-        self.conn_mgr.register(name, 'tcp://{}:{}'.format(ip, self.port))
+        ok = True
+        status = StatusType.OK
+        try:
+            uri = 'tcp://{}:{}'.format(ip, self.port)
+            status, group = self.readonly_topo.create(name=name)
+            if status == StatusType.OK:
+                status, pool = group.create(name=name, uri=uri)
+        except ConnectionConnectError as exc:
+            ok = False
+            logger.error('Connection error to: {}'.format(addr))
+
+        if ok and status == StatusType.OK:
+            logger.info('KubernetesProvider Add Group \"{}\" Of 1 Address: {}'.format(name, uri))
+        return ok
 
     def delete_pod(self, name):
-        self.conn_mgr.unregister(name)
+        pool = self.readonly_topo.delete_group(name)
+        return True
 
     def start(self):
         self.listener.daemon = True
@@ -299,8 +313,8 @@ class KubernetesProvider(object):
         self.event_handler.stop()
 
     @classmethod
-    def Create(cls, conn_mgr, plugin_config, **kwargs):
-        discovery = cls(plugin_config=plugin_config, conn_mgr=conn_mgr, **kwargs)
+    def Create(cls, readonly_topo, plugin_config, **kwargs):
+        discovery = cls(config=plugin_config, readonly_topo=readonly_topo, **kwargs)
         return discovery
 
 
