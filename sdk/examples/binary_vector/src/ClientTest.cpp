@@ -22,7 +22,7 @@
 
 namespace {
 
-const char* COLLECTION_NAME = milvus_sdk::Utils::GenCollectionName().c_str();
+const char* COLLECTION_NAME = "BBB";//milvus_sdk::Utils::GenCollectionName().c_str();
 
 constexpr int64_t COLLECTION_DIMENSION = 512;
 constexpr int64_t COLLECTION_INDEX_FILE_SIZE = 128;
@@ -32,7 +32,7 @@ constexpr int64_t NQ = 5;
 constexpr int64_t TOP_K = 10;
 constexpr int64_t NPROBE = 32;
 constexpr int64_t SEARCH_TARGET = 5000;  // change this value, result is different, ensure less than BATCH_ENTITY_COUNT
-constexpr int64_t ADD_ENTITY_LOOP = 20;
+constexpr int64_t ADD_ENTITY_LOOP = 10;
 constexpr milvus::IndexType INDEX_TYPE = milvus::IndexType::IVFFLAT;
 
 milvus::CollectionParam
@@ -85,17 +85,17 @@ ClientTest::Test(const std::string& address, const std::string& port) {
         std::cout << "Connect function call status: " << stat.message() << std::endl;
     }
 
-    {  // create collection
-        milvus::CollectionParam collection_param = BuildCollectionParam();
-        stat = conn->CreateCollection(collection_param);
-        std::cout << "CreateCollection function call status: " << stat.message() << std::endl;
-        milvus_sdk::Utils::PrintCollectionParam(collection_param);
-
-        bool has_collection = conn->HasCollection(collection_param.collection_name);
-        if (has_collection) {
-            std::cout << "Collection is created" << std::endl;
-        }
-    }
+//    {  // create collection
+//        milvus::CollectionParam collection_param = BuildCollectionParam();
+//        stat = conn->CreateCollection(collection_param);
+//        std::cout << "CreateCollection function call status: " << stat.message() << std::endl;
+//        milvus_sdk::Utils::PrintCollectionParam(collection_param);
+//
+//        bool has_collection = conn->HasCollection(collection_param.collection_name);
+//        if (has_collection) {
+//            std::cout << "Collection is created" << std::endl;
+//        }
+//    }
 
     std::vector<std::pair<int64_t, milvus::Entity>> search_entity_array;
     {  // insert vectors
@@ -116,18 +116,18 @@ ClientTest::Test(const std::string& address, const std::string& port) {
                 search_entity_array.push_back(std::make_pair(entity_ids[SEARCH_TARGET], entity_array[SEARCH_TARGET]));
             }
 
-            std::string title = "Insert " + std::to_string(entity_array.size()) + " entities No." + std::to_string(i);
-            milvus_sdk::TimeRecorder rc(title);
-            stat = conn->Insert(COLLECTION_NAME, "", entity_array, entity_ids);
-            std::cout << "Insert function call status: " << stat.message() << std::endl;
-            std::cout << "Returned id array count: " << entity_ids.size() << std::endl;
+//            std::string title = "Insert " + std::to_string(entity_array.size()) + " entities No." + std::to_string(i);
+//            milvus_sdk::TimeRecorder rc(title);
+//            stat = conn->Insert(COLLECTION_NAME, "", entity_array, entity_ids);
+//            std::cout << "Insert function call status: " << stat.message() << std::endl;
+//            std::cout << "Returned id array count: " << entity_ids.size() << std::endl;
         }
     }
 
-    {  // flush buffer
-        stat = conn->FlushCollection(COLLECTION_NAME);
-        std::cout << "FlushCollection function call status: " << stat.message() << std::endl;
-    }
+//    {  // flush buffer
+//        stat = conn->FlushCollection(COLLECTION_NAME);
+//        std::cout << "FlushCollection function call status: " << stat.message() << std::endl;
+//    }
 
     {  // search vectors
         std::vector<std::string> partition_tags;
@@ -136,31 +136,31 @@ ClientTest::Test(const std::string& address, const std::string& port) {
                                     topk_query_result);
     }
 
-    {  // wait unit build index finish
-        milvus_sdk::TimeRecorder rc("Create index");
-        std::cout << "Wait until create all index done" << std::endl;
-        milvus::IndexParam index1 = BuildIndexParam();
-        milvus_sdk::Utils::PrintIndexParam(index1);
-        stat = conn->CreateIndex(index1);
-        std::cout << "CreateIndex function call status: " << stat.message() << std::endl;
-
-        milvus::IndexParam index2;
-        stat = conn->DescribeIndex(COLLECTION_NAME, index2);
-        std::cout << "DescribeIndex function call status: " << stat.message() << std::endl;
-        milvus_sdk::Utils::PrintIndexParam(index2);
-    }
-
-    {  // search vectors
-        std::vector<std::string> partition_tags;
-        milvus::TopKQueryResult topk_query_result;
-        milvus_sdk::Utils::DoSearch(conn, COLLECTION_NAME, partition_tags, TOP_K, NPROBE, search_entity_array,
-                                    topk_query_result);
-    }
-
-    {  // drop collection
-        stat = conn->DropCollection(COLLECTION_NAME);
-        std::cout << "DropCollection function call status: " << stat.message() << std::endl;
-    }
+//    {  // wait unit build index finish
+//        milvus_sdk::TimeRecorder rc("Create index");
+//        std::cout << "Wait until create all index done" << std::endl;
+//        milvus::IndexParam index1 = BuildIndexParam();
+//        milvus_sdk::Utils::PrintIndexParam(index1);
+//        stat = conn->CreateIndex(index1);
+//        std::cout << "CreateIndex function call status: " << stat.message() << std::endl;
+//
+//        milvus::IndexParam index2;
+//        stat = conn->DescribeIndex(COLLECTION_NAME, index2);
+//        std::cout << "DescribeIndex function call status: " << stat.message() << std::endl;
+//        milvus_sdk::Utils::PrintIndexParam(index2);
+//    }
+//
+//    {  // search vectors
+//        std::vector<std::string> partition_tags;
+//        milvus::TopKQueryResult topk_query_result;
+//        milvus_sdk::Utils::DoSearch(conn, COLLECTION_NAME, partition_tags, TOP_K, NPROBE, search_entity_array,
+//                                    topk_query_result);
+//    }
+//
+//    {  // drop collection
+//        stat = conn->DropCollection(COLLECTION_NAME);
+//        std::cout << "DropCollection function call status: " << stat.message() << std::endl;
+//    }
 
     milvus::Connection::Destroy(conn);
 }
