@@ -18,7 +18,7 @@ Usage:
   $0 [flags] [Arguments]
 
     clean                     Remove all existing build artifacts and configuration (start over)
-    -o [INSTALL_PREFIX] or --install_prefix=[INSTALL_PREFIX]
+    -i [INSTALL_PREFIX] or --install_prefix=[INSTALL_PREFIX]
                               Install directory used by install.
     -t [BUILD_TYPE] or --build_type=[BUILD_TYPE]
                               Build type (default: Release)
@@ -38,13 +38,13 @@ Usage:
 Use \"$0  --help\" for more information about a given command.
 "
 
-ARGS=`getopt -o "o:t:j::lngcupvh" -l "install_prefix::,build_type::,jobs::,with_mkl,with_fiu,coverage,tests,privileges,help" -n "$0" -- "$@"`
+ARGS=`getopt -o "i:t:j::lngcupvh" -l "install_prefix::,build_type::,jobs::,with_mkl,with_fiu,coverage,tests,privileges,help" -n "$0" -- "$@"`
 
 eval set -- "${ARGS}"
 
 while true ; do
         case "$1" in
-                -o|--install_prefix)
+                -i|--install_prefix)
                         # o has an optional argument. As we are in quoted mode,
                         # an empty parameter will be generated if its optional
                         # argument is not found.
