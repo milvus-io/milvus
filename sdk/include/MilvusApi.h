@@ -43,6 +43,8 @@ enum class MetricType {
     HAMMING = 3,   // Hamming Distance
     JACCARD = 4,   // Jaccard Distance
     TANIMOTO = 5,  // Tanimoto Distance
+    SUBSTRUCTURE = 6,   // Substructure Distance
+    SUPERSTRUCTURE = 7,  // Superstructure Distance
 };
 
 /**

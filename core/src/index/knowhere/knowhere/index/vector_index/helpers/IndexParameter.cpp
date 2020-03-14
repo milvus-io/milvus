@@ -33,6 +33,13 @@ GetMetricType(const std::string& type) {
     if (type == Metric::HAMMING) {
         return faiss::METRIC_Hamming;
     }
+    if (type == Metric::SUBSTRUCTURE) {
+        return faiss::METRIC_Substructure;
+    }
+    if (type == Metric::SUPERSTRUCTURE) {
+        return faiss::METRIC_Superstructure;
+    }
+
     KNOWHERE_THROW_MSG("Metric type is invalid");
 }
 

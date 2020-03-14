@@ -77,6 +77,8 @@ Utils::MetricTypeName(const milvus::MetricType& metric_type) {
         case milvus::MetricType::HAMMING:return "Hamming distance";
         case milvus::MetricType::JACCARD:return "Jaccard distance";
         case milvus::MetricType::TANIMOTO:return "Tanimoto distance";
+        case milvus::MetricType::SUBSTRUCTURE:return "Substructure distance";
+        case milvus::MetricType::SUPERSTRUCTURE:return "Superstructure distance";
         default:return "Unknown metric type";
     }
 }
