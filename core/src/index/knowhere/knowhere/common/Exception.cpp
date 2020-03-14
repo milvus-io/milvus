@@ -14,6 +14,7 @@
 #include "Log.h"
 #include "knowhere/common/Exception.h"
 
+namespace milvus {
 namespace knowhere {
 
 KnowhereException::KnowhereException(const std::string& msg) : msg(msg) {
@@ -41,3 +42,4 @@ KnowhereException::what() const noexcept {
 }
 
 }  // namespace knowhere
+}  // namespace milvus

@@ -28,53 +28,53 @@ using ::testing::TestWithParam;
 using ::testing::Values;
 
 class VecIndexTest : public DataGen,
-                     public TestWithParam<::std::tuple<knowhere::IndexType, knowhere::IndexMode, ParameterType>> {
+public Tuple<milvus::knowhere::IndexType, milvus::knowhere::IndexMode, ParameterType>> {
  protected:
     void
     SetUp() override {
 #ifdef MILVUS_GPU_VERSION
-        knowhere::FaissGpuResourceMgr::GetInstance().InitDevice(DEVICEID, PINMEM, TEMPMEM, RESNUM);
+        milvus::knowhere::FaissGpuResourceMgr::GetInstance().InitDevice(DEVICEID, PINMEM, TEMPMEM, RESNUM);
 #endif
         std::tie(index_type_, index_mode_, parameter_type_) = GetParam();
         Generate(DIM, NB, NQ);
-        index_ = knowhere::VecIndexFactory::GetInstance().CreateVecIndex(index_type_, index_mode_);
+        index_ = milvus::knowhere::VecIndexFactory::GetInstance().CreateVecIndex(index_type_, index_mode_);
         conf = ParamGenerator::GetInstance().Gen(parameter_type_);
     }
 
     void
     TearDown() override {
 #ifdef MILVUS_GPU_VERSION
-        knowhere::FaissGpuResourceMgr::GetInstance().Free();
+        milvus::knowhere::FaissGpuResourceMgr::GetInstance().Free();
 #endif
     }
 
  protected:
-    knowhere::IndexType index_type_;
-    knowhere::IndexMode index_mode_;
+    milvus::knowhere::IndexType index_type_;
+    milvus::knowhere::IndexMode index_mode_;
     ParameterType parameter_type_;
-    knowhere::Config conf;
-    knowhere::VecIndexPtr index_ = nullptr;
+    milvus::knowhere::Config conf;
+    milvus::knowhere::VecIndexPtr index_ = nullptr;
 };
 
 INSTANTIATE_TEST_CASE_P(
     IVFParameters, IVFTest,
     Values(
 #ifdef MILVUS_GPU_VERSION
-        std::make_tuple(knowhere::IndexType::INDEX_FAISS_IVFFLAT, knowhere::IndexMode::MODE_GPU, ParameterType::ivf),
-        std::make_tuple(knowhere::IndexType::INDEX_FAISS_IVFPQ, knowhere::IndexMode::MODE_GPU, ParameterType::ivfpq),
-        std::make_tuple(knowhere::IndexType::INDEX_FAISS_IVFSQ8, knowhere::IndexMode::MODE_GPU, ParameterType::ivfsq),
+        std::make_tuple(milvus::knowhere::IndexType::INDEX_FAISS_IVFFLAT, milvus::knowhere::IndexMode::MODE_GPU, ParameterType::ivf),
+        std::make_tuple(milvus::knowhere::IndexType::INDEX_FAISS_IVFPQ, milvus::knowhere::IndexMode::MODE_GPU, ParameterType::ivfpq),
+        std::make_tuple(milvus::knowhere::IndexType::INDEX_FAISS_IVFSQ8, milvus::knowhere::IndexMode::MODE_GPU, ParameterType::ivfsq),
 #ifdef CUSTOMIZATION
-        std::make_tuple(knowhere::IndexType::INDEX_FAISS_IVFSQ8H, knowhere::IndexMode::MODE_GPU, ParameterType::ivfsq),
+        std::make_tuple(milvus::knowhere::IndexType::INDEX_FAISS_IVFSQ8H, milvus::knowhere::IndexMode::MODE_GPU, ParameterType::ivfsq),
 #endif
 #endif
-        std::make_tuple(knowhere::IndexType::INDEX_FAISS_IVFFLAT, knowhere::IndexMode::MODE_CPU, ParameterType::ivf),
-        std::make_tuple(knowhere::IndexType::INDEX_FAISS_IVFPQ, knowhere::IndexMode::MODE_CPU, ParameterType::ivfpq),
-        std::make_tuple(knowhere::IndexType::INDEX_FAISS_IVFSQ8, knowhere::IndexMode::MODE_CPU, ParameterType::ivfsq)
-        // std::make_tuple(knowhere::IndexType::INDEX_NSG, knowhere::IndexMode::MODE_CPU, ParameterType::ivfsq),
-        // std::make_tuple(knowhere::IndexType::INDEX_HNSW, knowhere::IndexMode::MODE_CPU, ParameterType::ivfsq),
-        // std::make_tuple(knowhere::IndexType::INDEX_SPTAG_KDT_RNT, knowhere::IndexMode::MODE_CPU,
-        // ParameterType::ivfsq), std::make_tuple(knowhere::IndexType::INDEX_SPTAG_BKT_RNT,
-        // knowhere::IndexMode::MODE_CPU, ParameterType::ivfsq),
+        std::make_tuple(milvus::knowhere::IndexType::INDEX_FAISS_IVFFLAT, milvus::knowhere::IndexMode::MODE_CPU, ParameterType::ivf),
+        std::make_tuple(milvus::knowhere::IndexType::INDEX_FAISS_IVFPQ, milvus::knowhere::IndexMode::MODE_CPU, ParameterType::ivfpq),
+        std::make_tuple(milvus::knowhere::IndexType::INDEX_FAISS_IVFSQ8, milvus::knowhere::IndexMode::MODE_CPU, ParameterType::ivfsq)
+        // std::make_tuple(milvus::knowhere::IndexType::INDEX_NSG, milvus::knowhere::IndexMode::MODE_CPU, ParameterType::ivfsq),
+        // std::make_tuple(milvus::knowhere::IndexType::INDEX_HNSW, milvus::knowhere::IndexMode::MODE_CPU, ParameterType::ivfsq),
+        // std::make_tuple(milvus::knowhere::IndexType::INDEX_SPTAG_KDT_RNT, milvus::knowhere::IndexMode::MODE_CPU,
+        // ParameterType::ivfsq), std::make_tuple(milvus::knowhere::IndexType::INDEX_SPTAG_BKT_RNT,
+        // milvus::knowhere::IndexMode::MODE_CPU, ParameterType::ivfsq),
         ));
 
 TEST_P(VecIndexTest, basic) {
@@ -88,7 +88,7 @@ TEST_P(VecIndexTest, basic) {
     EXPECT_EQ(index_->index_mode(), index_mode_);
 
     auto result = index_->Query(query_dataset, conf);
-    AssertAnns(result, nq, conf[knowhere::meta::TOPK]);
+    AssertAnns(result, nq, conf[milvus::knowhere::meta::TOPK]);
     PrintResult(result, nq, k);
 }
 
@@ -99,17 +99,17 @@ TEST_P(VecIndexTest, serialize) {
     EXPECT_EQ(index_->index_type(), index_type_);
     EXPECT_EQ(index_->index_mode(), index_mode_);
     auto result = index_->Query(query_dataset, conf);
-    AssertAnns(result, nq, conf[knowhere::meta::TOPK]);
+    AssertAnns(result, nq, conf[milvus::knowhere::meta::TOPK]);
 
     auto binaryset = index_->Serialize();
-    auto new_index = knowhere::VecIndexFactory::GetInstance().CreateVecIndex(index_type_, index_mode_);
+    auto new_index = milvus::knowhere::VecIndexFactory::GetInstance().CreateVecIndex(index_type_, index_mode_);
     new_index->Load(binaryset);
     EXPECT_EQ(index_->Dim(), new_index->Dim());
     EXPECT_EQ(index_->Count(), new_index->Count());
     EXPECT_EQ(index_->index_type(), new_index->index_type());
     EXPECT_EQ(index_->index_mode(), new_index->index_mode());
     auto new_result = new_index_->Query(query_dataset, conf);
-    AssertAnns(new_result, nq, conf[knowhere::meta::TOPK]);
+    AssertAnns(new_result, nq, conf[milvus::knowhere::meta::TOPK]);
 }
 
 // todo

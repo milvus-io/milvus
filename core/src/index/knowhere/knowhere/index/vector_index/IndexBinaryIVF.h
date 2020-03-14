@@ -23,6 +23,7 @@
 #include "knowhere/index/vector_index/FaissBaseBinaryIndex.h"
 #include "knowhere/index/vector_index/VecIndex.h"
 
+namespace milvus {
 namespace knowhere {
 
 class BinaryIVF : public VecIndex, public FaissBaseBinaryIndex {
@@ -98,3 +99,4 @@ class BinaryIVF : public VecIndex, public FaissBaseBinaryIndex {
 using BinaryIVFIndexPtr = std::shared_ptr<BinaryIVF>;
 
 }  // namespace knowhere
+}  // namespace milvus

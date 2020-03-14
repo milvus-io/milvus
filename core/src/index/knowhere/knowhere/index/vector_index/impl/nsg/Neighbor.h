@@ -13,6 +13,7 @@
 
 #include <mutex>
 
+namespace milvus {
 namespace knowhere {
 namespace impl {
 
@@ -42,3 +43,4 @@ typedef std::lock_guard<std::mutex> LockGuard;
 
 }  // namespace impl
 }  // namespace knowhere
+}  // namespace milvus

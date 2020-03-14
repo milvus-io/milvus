@@ -8,6 +8,7 @@
 // Unless required by applicable law or agreed to in writing, software distributed under the License
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
+
 #include "knowhere/index/vector_index/ConfAdapter.h"
 
 #include <cmath>
@@ -16,8 +17,8 @@
 #include <vector>
 
 #include "knowhere/index/vector_index/helpers/IndexParameter.h"
-// #include "server/Config.h"
 
+namespace milvus {
 namespace knowhere {
 
 #if CUDA_VERSION > 9000
@@ -297,3 +298,4 @@ BinIVFConfAdapter::CheckTrain(Config& oricfg) {
 }
 
 }  // namespace knowhere
+}  // namespace milvus

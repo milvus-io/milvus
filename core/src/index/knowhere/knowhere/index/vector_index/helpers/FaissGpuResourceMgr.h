@@ -20,6 +20,7 @@
 
 #include "src/utils/BlockingQueue.h"
 
+namespace milvus {
 namespace knowhere {
 
 struct Resource {
@@ -125,3 +126,4 @@ class ResScope {
 };
 
 }  // namespace knowhere
+}  // namespace milvus

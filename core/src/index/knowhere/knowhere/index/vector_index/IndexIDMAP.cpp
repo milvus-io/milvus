@@ -32,6 +32,7 @@
 #include "knowhere/index/vector_index/helpers/FaissGpuResourceMgr.h"
 #endif
 
+namespace milvus {
 namespace knowhere {
 
 BinarySet
@@ -222,3 +223,4 @@ IDMAP::QueryImpl(int64_t n, const float* data, int64_t k, float* distances, int6
 }
 
 }  // namespace knowhere
+}  // namespace milvus

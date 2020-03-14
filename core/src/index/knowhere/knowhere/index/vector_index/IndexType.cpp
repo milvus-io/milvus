@@ -13,6 +13,7 @@
 #include <unordered_map>
 #include "knowhere/common/Exception.h"
 
+namespace milvus {
 namespace knowhere {
 
 static std::unordered_map<int32_t, std::string> index_type_str_map = {
@@ -40,3 +41,4 @@ IndexTypeToStr(const IndexType type) {
 }
 
 }  // namespace knowhere
+}  // namespace milvus

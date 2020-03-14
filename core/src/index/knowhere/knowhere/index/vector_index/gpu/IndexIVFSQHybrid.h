@@ -20,6 +20,7 @@
 #include "knowhere/index/vector_index/gpu/IndexGPUIVFSQ.h"
 #include "knowhere/index/vector_index/gpu/Quantizer.h"
 
+namespace milvus {
 namespace knowhere {
 
 #ifdef CUSTOMIZATION
@@ -95,3 +96,4 @@ using IVFSQHybridPtr = std::shared_ptr<IVFSQHybrid>;
 #endif
 
 }  // namespace knowhere
+}  // namespace milvus

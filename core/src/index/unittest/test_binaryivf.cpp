@@ -34,12 +34,12 @@ class BinaryIVFTest : public BinaryDataGen, public TestWithParam<std::string> {
         //        nq = 1000;
         //        k = 1000;
         //        Generate(DIM, NB, NQ);
-        index_ = std::make_shared<knowhere::BinaryIVF>();
+        index_ = std::make_shared<milvus::knowhere::BinaryIVF>();
 
-        knowhere::Config temp_conf{
-            {knowhere::meta::DIM, dim},           {knowhere::meta::TOPK, k},
-            {knowhere::IndexParams::nlist, 100},  {knowhere::IndexParams::nprobe, 10},
-            {knowhere::Metric::TYPE, MetricType},
+        milvus::knowhere::Config temp_conf{
+            {milvus::knowhere::meta::DIM, dim},           {milvus::knowhere::meta::TOPK, k},
+            {milvus::knowhere::IndexParams::nlist, 100},  {milvus::knowhere::IndexParams::nprobe, 10},
+            {milvus::knowhere::Metric::TYPE, MetricType},
         };
         conf = temp_conf;
     }
@@ -50,8 +50,8 @@ class BinaryIVFTest : public BinaryDataGen, public TestWithParam<std::string> {
 
  protected:
     std::string index_type;
-    knowhere::Config conf;
-    knowhere::BinaryIVFIndexPtr index_ = nullptr;
+    milvus::knowhere::Config conf;
+    milvus::knowhere::BinaryIVFIndexPtr index_ = nullptr;
 };
 
 INSTANTIATE_TEST_CASE_P(METRICParameters, BinaryIVFTest,
@@ -70,7 +70,7 @@ TEST_P(BinaryIVFTest, binaryivf_basic) {
     EXPECT_EQ(index_->Dim(), dim);
 
     auto result = index_->Query(query_dataset, conf);
-    AssertAnns(result, nq, conf[knowhere::meta::TOPK]);
+    AssertAnns(result, nq, conf[milvus::knowhere::meta::TOPK]);
     // PrintResult(result, nq, k);
 
     faiss::ConcurrentBitsetPtr concurrent_bitset_ptr = std::make_shared<faiss::ConcurrentBitset>(nb);
@@ -90,7 +90,7 @@ TEST_P(BinaryIVFTest, binaryivf_basic) {
 }
 
 TEST_P(BinaryIVFTest, binaryivf_serialize) {
-    auto serialize = [](const std::string& filename, knowhere::BinaryPtr& bin, uint8_t* ret) {
+    auto serialize = [](const std::string& filename, milvus::knowhere::BinaryPtr& bin, uint8_t* ret) {
         FileIOWriter writer(filename);
         writer(static_cast<void*>(bin->data.get()), bin->size);
 
@@ -118,7 +118,7 @@ TEST_P(BinaryIVFTest, binaryivf_serialize) {
     //        index_->set_index_model(model);
     //        index_->Add(base_dataset, conf);
     //        auto result = index_->Query(query_dataset, conf);
-    //        AssertAnns(result, nq, conf[knowhere::meta::TOPK]);
+    //        AssertAnns(result, nq, conf[milvus::knowhere::meta::TOPK]);
     //    }
 
     {
@@ -142,7 +142,7 @@ TEST_P(BinaryIVFTest, binaryivf_serialize) {
         EXPECT_EQ(index_->Count(), nb);
         EXPECT_EQ(index_->Dim(), dim);
         auto result = index_->Query(query_dataset, conf);
-        AssertAnns(result, nq, conf[knowhere::meta::TOPK]);
+        AssertAnns(result, nq, conf[milvus::knowhere::meta::TOPK]);
         // PrintResult(result, nq, k);
     }
 }

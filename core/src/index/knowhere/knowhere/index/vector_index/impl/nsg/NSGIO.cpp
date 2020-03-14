@@ -13,6 +13,7 @@
 
 #include "NSGIO.h"
 
+namespace milvus {
 namespace knowhere {
 namespace impl {
 
@@ -61,3 +62,4 @@ read_index(MemoryIOReader& reader) {
 
 }  // namespace impl
 }  // namespace knowhere
+}  // namespace milvus

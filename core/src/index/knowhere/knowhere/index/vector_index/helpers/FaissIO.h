@@ -13,6 +13,7 @@
 
 #include <faiss/impl/io.h>
 
+namespace milvus {
 namespace knowhere {
 
 struct MemoryIOWriter : public faiss::IOWriter {
@@ -46,3 +47,4 @@ struct MemoryIOReader : public faiss::IOReader {
 };
 
 }  // namespace knowhere
+}  // namespace milvus

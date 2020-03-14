@@ -20,6 +20,7 @@
 #include "knowhere/index/vector_index/gpu/IndexGPUIVFSQ.h"
 #include "knowhere/index/vector_index/helpers/IndexParameter.h"
 
+namespace milvus {
 namespace knowhere {
 
 void
@@ -59,3 +60,4 @@ GPUIVFSQ::CopyGpuToCpu(const Config& config) {
 }
 
 }  // namespace knowhere
+}  // namespace milvus

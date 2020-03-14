@@ -15,6 +15,7 @@
 #include "knowhere/common/Dataset.h"
 #include "knowhere/index/vector_index/helpers/IndexParameter.h"
 
+namespace milvus {
 namespace knowhere {
 
 #define GETTENSOR(dataset_ptr)                         \
@@ -28,3 +29,4 @@ namespace knowhere {
     auto p_data = dataset_ptr->Get<const uint8_t*>(meta::TENSOR);
 
 }  // namespace knowhere
+}  // namespace milvus

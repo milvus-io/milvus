@@ -13,6 +13,7 @@
 
 #include "knowhere/index/vector_index/VecIndex.h"
 
+namespace milvus {
 namespace knowhere {
 namespace cloner {
 
@@ -24,3 +25,4 @@ CopyGpuToCpu(const VecIndexPtr& index, const Config& config);
 
 }  // namespace cloner
 }  // namespace knowhere
+}  // namespace milvus

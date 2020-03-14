@@ -13,6 +13,7 @@
 
 #include "Neighbor.h"
 
+namespace milvus {
 namespace knowhere {
 namespace impl {
 
@@ -21,3 +22,4 @@ InsertIntoPool(Neighbor* addr, unsigned K, Neighbor nn);
 
 }  // namespace impl
 }  // namespace knowhere
+}  // namespace milvus

@@ -13,8 +13,10 @@
 
 #include "src/utils/Json.h"
 
+namespace milvus {
 namespace knowhere {
 
 using Config = milvus::json;
 
 }  // namespace knowhere
+}  // namespace milvus

@@ -18,6 +18,7 @@
 #include "knowhere/index/vector_index/IndexIDMAP.h"
 #include "knowhere/index/vector_index/gpu/GPUIndex.h"
 
+namespace milvus {
 namespace knowhere {
 
 using Graph = std::vector<std::vector<int64_t>>;
@@ -58,3 +59,4 @@ class GPUIDMAP : public IDMAP, public GPUIndex {
 using GPUIDMAPPtr = std::shared_ptr<GPUIDMAP>;
 
 }  // namespace knowhere
+}  // namespace milvus

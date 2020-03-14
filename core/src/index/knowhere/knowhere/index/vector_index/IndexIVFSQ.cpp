@@ -26,6 +26,7 @@
 #include "knowhere/index/vector_index/helpers/FaissGpuResourceMgr.h"
 #endif
 
+namespace milvus {
 namespace knowhere {
 
 void
@@ -62,3 +63,4 @@ IVFSQ::CopyCpuToGpu(const int64_t device_id, const Config& config) {
 }
 
 }  // namespace knowhere
+}  // namespace milvus

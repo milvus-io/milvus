@@ -27,6 +27,7 @@
 #include "knowhere/index/vector_index/helpers/Cloner.h"
 #endif
 
+namespace milvus {
 namespace knowhere {
 
 BinarySet
@@ -153,3 +154,4 @@ NSG::Dim() {
 }
 
 }  // namespace knowhere
+}  // namespace milvus

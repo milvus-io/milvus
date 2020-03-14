@@ -17,6 +17,7 @@
 #include "knowhere/common/BinarySet.h"
 #include "knowhere/common/Config.h"
 
+namespace milvus {
 namespace knowhere {
 
 class Index : public milvus::cache::DataObj {
@@ -59,3 +60,4 @@ class ToIndexData : public milvus::cache::DataObj {
 };
 
 }  // namespace knowhere
+}  // namespace milvus

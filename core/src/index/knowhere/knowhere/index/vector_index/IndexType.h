@@ -13,6 +13,7 @@
 
 #include <string>
 
+namespace milvus {
 namespace knowhere {
 
 // todo: enum => string
@@ -37,3 +38,4 @@ extern std::string
 IndexTypeToStr(const IndexType type);
 
 }  // namespace knowhere
+}  // namespace milvus

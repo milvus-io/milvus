@@ -14,6 +14,7 @@
 #include <memory>
 #include "knowhere/common/Config.h"
 
+namespace milvus {
 namespace knowhere {
 
 struct Quantizer {
@@ -29,3 +30,4 @@ using QuantizerPtr = std::shared_ptr<Quantizer>;
 // using QuantizerConfig = std::shared_ptr<QuantizerCfg>;
 
 }  // namespace knowhere
+}  // namespace milvus

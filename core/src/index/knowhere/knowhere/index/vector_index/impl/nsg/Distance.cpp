@@ -13,6 +13,7 @@
 
 #include "Distance.h"
 
+namespace milvus {
 namespace knowhere {
 namespace impl {
 
@@ -237,3 +238,4 @@ DistanceIP::Compare(const float* a, const float* b, unsigned size) const {
 
 }  // namespace impl
 }  // namespace knowhere
+}  // namespace milvus

@@ -14,6 +14,7 @@
 #include "knowhere/common/Exception.h"
 #include "knowhere/common/Log.h"
 
+namespace milvus {
 namespace knowhere {
 
 ConfAdapterPtr
@@ -55,3 +56,4 @@ AdapterMgr::RegisterAdapter() {
 }
 
 }  // namespace knowhere
+}  // namespace milvus

@@ -14,6 +14,7 @@
 #include <faiss/Index.h>
 #include <string>
 
+namespace milvus {
 namespace knowhere {
 
 namespace meta {
@@ -58,3 +59,4 @@ extern faiss::MetricType
 GetMetricType(const std::string& type);
 
 }  // namespace knowhere
+}  // namespace milvus

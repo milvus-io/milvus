@@ -18,6 +18,7 @@
 #include "knowhere/common/BinarySet.h"
 #include "knowhere/index/vector_index/IndexType.h"
 
+namespace milvus {
 namespace knowhere {
 
 class FaissBaseIndex {
@@ -38,3 +39,4 @@ class FaissBaseIndex {
 };
 
 }  // namespace knowhere
+}  // namespace milvus

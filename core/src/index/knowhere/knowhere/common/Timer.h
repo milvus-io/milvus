@@ -14,6 +14,7 @@
 #include <chrono>
 #include <string>
 
+namespace milvus {
 namespace knowhere {
 
 class TimeRecorder {
@@ -45,3 +46,4 @@ class TimeRecorder {
 };
 
 }  // namespace knowhere
+}  // namespace milvus

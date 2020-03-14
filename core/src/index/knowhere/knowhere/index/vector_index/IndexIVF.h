@@ -22,6 +22,7 @@
 #include "knowhere/index/vector_index/FaissBaseIndex.h"
 #include "knowhere/index/vector_index/VecIndex.h"
 
+namespace milvus {
 namespace knowhere {
 
 class IVF : public VecIndex, public FaissBaseIndex {
@@ -99,3 +100,4 @@ class IVF : public VecIndex, public FaissBaseIndex {
 using IVFPtr = std::shared_ptr<IVF>;
 
 }  // namespace knowhere
+}  // namespace milvus

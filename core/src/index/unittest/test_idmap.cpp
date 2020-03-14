@@ -30,7 +30,7 @@ class IDMAPTest : public DataGen, public TestGpuIndexBase {
         TestGpuIndexBase::SetUp();
 
         Init_with_default();
-        index_ = std::make_shared<knowhere::IDMAP>();
+        index_ = std::make_shared<milvus::knowhere::IDMAP>();
     }
 
     void
@@ -39,14 +39,15 @@ class IDMAPTest : public DataGen, public TestGpuIndexBase {
     }
 
  protected:
-    knowhere::IDMAPPtr index_ = nullptr;
+    milvus::knowhere::IDMAPPtr index_ = nullptr;
 };
 
 TEST_F(IDMAPTest, idmap_basic) {
     ASSERT_TRUE(!xb.empty());
 
-    knowhere::Config conf{
-        {knowhere::meta::DIM, dim}, {knowhere::meta::TOPK, k}, {knowhere::Metric::TYPE, knowhere::Metric::L2}};
+    milvus::knowhere::Config conf{
+        {milvus::knowhere::meta::DIM, dim}, {milvus::knowhere::meta::TOPK, k},
+        {milvus::knowhere::Metric::TYPE, milvus::knowhere::Metric::L2}};
 
     // null faiss index
     {
@@ -68,7 +69,7 @@ TEST_F(IDMAPTest, idmap_basic) {
 
     index_->Seal();
     auto binaryset = index_->Serialize();
-    auto new_index = std::make_shared<knowhere::IDMAP>();
+    auto new_index = std::make_shared<milvus::knowhere::IDMAP>();
     new_index->Load(binaryset);
     auto result2 = index_->Query(query_dataset, conf);
     AssertAnns(result2, nq, k);
@@ -97,7 +98,7 @@ TEST_F(IDMAPTest, idmap_basic) {
 }
 
 TEST_F(IDMAPTest, idmap_serialize) {
-    auto serialize = [](const std::string& filename, knowhere::BinaryPtr& bin, uint8_t* ret) {
+    auto serialize = [](const std::string& filename, milvus::knowhere::BinaryPtr& bin, uint8_t* ret) {
         FileIOWriter writer(filename);
         writer(static_cast<void*>(bin->data.get()), bin->size);
 
@@ -105,13 +106,13 @@ TEST_F(IDMAPTest, idmap_serialize) {
         reader(ret, bin->size);
     };
 
-    knowhere::Config conf{
-        {knowhere::meta::DIM, dim}, {knowhere::meta::TOPK, k}, {knowhere::Metric::TYPE, knowhere::Metric::L2}};
+    milvus::knowhere::Config conf{
+        {milvus::knowhere::meta::DIM, dim}, {milvus::knowhere::meta::TOPK, k}, {milvus::knowhere::Metric::TYPE, milvus::knowhere::Metric::L2}};
 
     {
         // serialize index
         index_->Train(base_dataset, conf);
-        index_->Add(base_dataset, knowhere::Config());
+        index_->Add(base_dataset, milvus::knowhere::Config());
         auto re_result = index_->Query(query_dataset, conf);
         AssertAnns(re_result, nq, k);
         //        PrintResult(re_result, nq, k);
@@ -142,8 +143,8 @@ TEST_F(IDMAPTest, idmap_serialize) {
 TEST_F(IDMAPTest, copy_test) {
     ASSERT_TRUE(!xb.empty());
 
-    knowhere::Config conf{
-        {knowhere::meta::DIM, dim}, {knowhere::meta::TOPK, k}, {knowhere::Metric::TYPE, knowhere::Metric::L2}};
+    milvus::knowhere::Config conf{
+        {milvus::knowhere::meta::DIM, dim}, {milvus::knowhere::meta::TOPK, k}, {milvus::knowhere::Metric::TYPE, milvus::knowhere::Metric::L2}};
 
     index_->Train(base_dataset, conf);
     index_->Add(base_dataset, conf);
@@ -164,14 +165,14 @@ TEST_F(IDMAPTest, copy_test) {
 
     {
         // cpu to gpu
-        ASSERT_ANY_THROW(knowhere::cloner::CopyCpuToGpu(index_, -1, conf));
-        auto clone_index = knowhere::cloner::CopyCpuToGpu(index_, DEVICEID, conf);
+        ASSERT_ANY_THROW(milvus::knowhere::cloner::CopyCpuToGpu(index_, -1, conf));
+        auto clone_index = milvus::knowhere::cloner::CopyCpuToGpu(index_, DEVICEID, conf);
         auto clone_result = clone_index->Query(query_dataset, conf);
         AssertAnns(clone_result, nq, k);
-        ASSERT_THROW({ std::static_pointer_cast<knowhere::GPUIDMAP>(clone_index)->GetRawVectors(); },
-                     knowhere::KnowhereException);
-        ASSERT_THROW({ std::static_pointer_cast<knowhere::GPUIDMAP>(clone_index)->GetRawIds(); },
-                     knowhere::KnowhereException);
+        ASSERT_THROW({ std::static_pointer_cast<milvus::knowhere::GPUIDMAP>(clone_index)->GetRawVectors(); },
+                     milvus::knowhere::KnowhereException);
+        ASSERT_THROW({ std::static_pointer_cast<milvus::knowhere::GPUIDMAP>(clone_index)->GetRawIds(); },
+                     milvus::knowhere::KnowhereException);
 
         fiu_init(0);
         fiu_enable("GPUIDMP.SerializeImpl.throw_exception", 1, nullptr, 0);
@@ -188,16 +189,16 @@ TEST_F(IDMAPTest, copy_test) {
         //        AssertAnns(clone_gpu_res, nq, k);
 
         // gpu to cpu
-        auto host_index = knowhere::cloner::CopyGpuToCpu(clone_index, conf);
+        auto host_index = milvus::knowhere::cloner::CopyGpuToCpu(clone_index, conf);
         auto host_result = host_index->Query(query_dataset, conf);
         AssertAnns(host_result, nq, k);
-        ASSERT_TRUE(std::static_pointer_cast<knowhere::IDMAP>(host_index)->GetRawVectors() != nullptr);
-        ASSERT_TRUE(std::static_pointer_cast<knowhere::IDMAP>(host_index)->GetRawIds() != nullptr);
+        ASSERT_TRUE(std::static_pointer_cast<milvus::knowhere::IDMAP>(host_index)->GetRawVectors() != nullptr);
+        ASSERT_TRUE(std::static_pointer_cast<milvus::knowhere::IDMAP>(host_index)->GetRawIds() != nullptr);
 
         // gpu to gpu
-        auto device_index = knowhere::cloner::CopyCpuToGpu(index_, DEVICEID, conf);
+        auto device_index = milvus::knowhere::cloner::CopyCpuToGpu(index_, DEVICEID, conf);
         auto new_device_index =
-            std::static_pointer_cast<knowhere::GPUIDMAP>(device_index)->CopyGpuToGpu(DEVICEID, conf);
+            std::static_pointer_cast<milvus::knowhere::GPUIDMAP>(device_index)->CopyGpuToGpu(DEVICEID, conf);
         auto device_result = new_device_index->Query(query_dataset, conf);
         AssertAnns(device_result, nq, k);
     }

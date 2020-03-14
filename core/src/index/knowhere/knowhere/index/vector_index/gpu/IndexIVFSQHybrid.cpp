@@ -22,6 +22,7 @@
 #include "knowhere/index/vector_index/helpers/FaissIO.h"
 #include "knowhere/index/vector_index/helpers/IndexParameter.h"
 
+namespace milvus {
 namespace knowhere {
 
 #ifdef CUSTOMIZATION
@@ -276,3 +277,4 @@ FaissIVFQuantizer::~FaissIVFQuantizer() {
 #endif
 
 }  // namespace knowhere
+}  // namespace milvus

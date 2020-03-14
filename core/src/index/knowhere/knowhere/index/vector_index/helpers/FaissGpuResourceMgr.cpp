@@ -14,6 +14,7 @@
 #include <fiu-local.h>
 #include <utility>
 
+namespace milvus {
 namespace knowhere {
 
 FaissGpuResourceMgr&
@@ -120,3 +121,4 @@ FaissGpuResourceMgr::Dump() {
 }
 
 }  // namespace knowhere
+}  // namespace milvus

@@ -21,6 +21,7 @@
 #include "knowhere/common/Log.h"
 #include "knowhere/index/vector_index/adapter/VectorAdapter.h"
 
+namespace milvus {
 namespace knowhere {
 
 using stdclock = std::chrono::high_resolution_clock;
@@ -220,3 +221,4 @@ BinaryIVF::GetBlacklist(faiss::ConcurrentBitsetPtr& list) {
 }
 
 }  // namespace knowhere
+}  // namespace milvus

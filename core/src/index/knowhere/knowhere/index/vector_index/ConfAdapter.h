@@ -16,6 +16,7 @@
 #include "knowhere/common/Config.h"
 #include "knowhere/index/vector_index/IndexType.h"
 
+namespace milvus {
 namespace knowhere {
 
 class ConfAdapter {
@@ -88,3 +89,4 @@ class HNSWConfAdapter : public ConfAdapter {
 };
 
 }  // namespace knowhere
+}  // namespace milvus

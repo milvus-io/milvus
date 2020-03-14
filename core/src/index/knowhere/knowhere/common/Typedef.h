@@ -15,6 +15,7 @@
 #include <string>
 #include <vector>
 
+namespace milvus {
 namespace knowhere {
 
 using MetricType = std::string;
@@ -25,3 +26,4 @@ using BinaryType = uint8_t;
 using GraphType = std::vector<std::vector<IDType>>;
 
 }  // namespace knowhere
+}  // namespace milvus

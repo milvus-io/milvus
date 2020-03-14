@@ -11,6 +11,7 @@
 
 #pragma once
 
+namespace milvus {
 namespace knowhere {
 namespace impl {
 
@@ -31,3 +32,4 @@ struct DistanceIP : public Distance {
 
 }  // namespace impl
 }  // namespace knowhere
+}  // namespace milvus

@@ -40,6 +40,7 @@
 
 #include <fiu-local.h>
 
+namespace milvus {
 namespace knowhere {
 
 using stdclock = std::chrono::high_resolution_clock;
@@ -335,3 +336,4 @@ IVF::SealImpl() {
 }
 
 }  // namespace knowhere
+}  // namespace milvus

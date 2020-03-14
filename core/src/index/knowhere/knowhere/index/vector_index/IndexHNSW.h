@@ -19,6 +19,7 @@
 #include "knowhere/common/Exception.h"
 #include "knowhere/index/vector_index/VecIndex.h"
 
+namespace milvus {
 namespace knowhere {
 
 class IndexHNSW : public VecIndex {
@@ -60,3 +61,4 @@ class IndexHNSW : public VecIndex {
 };
 
 }  // namespace knowhere
+}  // namespace milvus

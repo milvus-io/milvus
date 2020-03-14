@@ -19,6 +19,7 @@
 #include "knowhere/index/vector_index/IndexType.h"
 #include "segment/Types.h"
 
+namespace milvus {
 namespace knowhere {
 
 class VecIndex : public Index {
@@ -106,3 +107,4 @@ class VecIndex : public Index {
 using VecIndexPtr = std::shared_ptr<VecIndex>;
 
 }  // namespace knowhere
+}  // namespace milvus

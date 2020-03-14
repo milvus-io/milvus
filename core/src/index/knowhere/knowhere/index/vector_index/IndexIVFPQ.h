@@ -16,6 +16,7 @@
 
 #include "knowhere/index/vector_index/IndexIVF.h"
 
+namespace milvus {
 namespace knowhere {
 
 class IVFPQ : public IVF {
@@ -42,3 +43,4 @@ class IVFPQ : public IVF {
 using IVFPQPtr = std::shared_ptr<IVFPQ>;
 
 }  // namespace knowhere
+}  // namespace milvus

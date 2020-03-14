@@ -24,6 +24,7 @@
 #include "knowhere/index/vector_index/helpers/FaissIO.h"
 #include "knowhere/index/vector_index/helpers/IndexParameter.h"
 
+namespace milvus {
 namespace knowhere {
 
 void
@@ -150,3 +151,4 @@ GPUIVF::CopyGpuToGpu(const int64_t device_id, const Config& config) {
 }
 
 }  // namespace knowhere
+}  // namespace milvus

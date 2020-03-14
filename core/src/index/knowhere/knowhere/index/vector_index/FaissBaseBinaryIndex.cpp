@@ -17,6 +17,7 @@
 #include "knowhere/index/vector_index/FaissBaseBinaryIndex.h"
 #include "knowhere/index/vector_index/helpers/FaissIO.h"
 
+namespace milvus {
 namespace knowhere {
 
 FaissBaseBinaryIndex::FaissBaseBinaryIndex(std::shared_ptr<faiss::IndexBinary> index) : index_(std::move(index)) {
@@ -54,3 +55,4 @@ FaissBaseBinaryIndex::LoadImpl(const BinarySet& index_binary, const IndexType& t
 }
 
 }  // namespace knowhere
+}  // namespace milvus

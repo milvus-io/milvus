@@ -19,6 +19,7 @@
 #include "knowhere/index/vector_index/gpu/IndexGPUIVF.h"
 #include "knowhere/index/vector_index/gpu/IndexIVFSQHybrid.h"
 
+namespace milvus {
 namespace knowhere {
 namespace cloner {
 
@@ -70,3 +71,4 @@ CopyCpuToGpu(const VecIndexPtr& index, const int64_t device_id, const Config& co
 
 }  // namespace cloner
 }  // namespace knowhere
+}  // namespace milvus

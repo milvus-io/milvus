@@ -21,6 +21,7 @@
 #include "Neighbor.h"
 #include "knowhere/common/Config.h"
 
+namespace milvus {
 namespace knowhere {
 namespace impl {
 
@@ -137,3 +138,4 @@ class NsgIndex {
 
 }  // namespace impl
 }  // namespace knowhere
+}  // namespace milvus

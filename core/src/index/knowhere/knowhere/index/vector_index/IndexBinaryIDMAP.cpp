@@ -20,6 +20,7 @@
 #include "knowhere/common/Exception.h"
 #include "knowhere/index/vector_index/adapter/VectorAdapter.h"
 
+namespace milvus {
 namespace knowhere {
 
 BinarySet
@@ -215,3 +216,4 @@ BinaryIDMAP::GetBlacklist(faiss::ConcurrentBitsetPtr& list) {
 }
 
 }  // namespace knowhere
+}  // namespace milvus

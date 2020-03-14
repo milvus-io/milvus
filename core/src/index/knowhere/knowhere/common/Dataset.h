@@ -18,6 +18,7 @@
 #include <string>
 #include <utility>
 
+namespace milvus {
 namespace knowhere {
 
 using Value = std::any;
@@ -57,3 +58,4 @@ class Dataset {
 using DatasetPtr = std::shared_ptr<Dataset>;
 
 }  // namespace knowhere
+}  // namespace milvus

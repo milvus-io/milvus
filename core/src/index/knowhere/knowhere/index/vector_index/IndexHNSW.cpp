@@ -25,6 +25,7 @@
 #include "knowhere/index/vector_index/adapter/VectorAdapter.h"
 #include "knowhere/index/vector_index/helpers/FaissIO.h"
 
+namespace milvus {
 namespace knowhere {
 
 void
@@ -198,3 +199,4 @@ IndexHNSW::Dim() {
 }
 
 }  // namespace knowhere
+}  // namespace milvus

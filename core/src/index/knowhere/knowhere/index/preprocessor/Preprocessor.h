@@ -15,6 +15,7 @@
 
 #include "knowhere/common/Dataset.h"
 
+namespace milvus {
 namespace knowhere {
 
 class Preprocessor {
@@ -26,3 +27,4 @@ class Preprocessor {
 using PreprocessorPtr = std::shared_ptr<Preprocessor>;
 
 }  // namespace knowhere
+}  // namespace milvus

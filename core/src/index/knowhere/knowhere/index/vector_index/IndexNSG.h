@@ -18,6 +18,7 @@
 #include "knowhere/common/Log.h"
 #include "knowhere/index/vector_index/VecIndex.h"
 
+namespace milvus {
 namespace knowhere {
 
 namespace impl {
@@ -71,6 +72,8 @@ class NSG : public VecIndex {
     std::mutex mutex_;
     int64_t gpu_;
 };
+
 using NSGIndexPtr = std::shared_ptr<NSG>();
 
 }  // namespace knowhere
+}  // namespace milvus

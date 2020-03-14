@@ -22,6 +22,7 @@
 #include "knowhere/common/Log.h"
 #include "knowhere/common/Timer.h"
 
+namespace milvus {
 namespace knowhere {
 namespace impl {
 
@@ -837,3 +838,4 @@ NsgIndex::SetKnnGraph(Graph& g) {
 
 }  // namespace impl
 }  // namespace knowhere
+}  // namespace milvus

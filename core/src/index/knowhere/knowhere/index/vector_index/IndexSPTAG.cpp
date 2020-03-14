@@ -25,6 +25,7 @@
 #include "knowhere/index/vector_index/adapter/VectorAdapter.h"
 #include "knowhere/index/vector_index/helpers/SPTAGParameterMgr.h"
 
+namespace milvus {
 namespace knowhere {
 
 CPUSPTAGRNG::CPUSPTAGRNG(const std::string& IndexType) {
@@ -228,3 +229,4 @@ CPUSPTAGRNG::Dim() {
 // }
 
 }  // namespace knowhere
+}  // namespace milvus

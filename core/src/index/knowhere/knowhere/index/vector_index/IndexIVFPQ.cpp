@@ -26,6 +26,7 @@
 #include "knowhere/index/vector_index/gpu/IndexGPUIVFPQ.h"
 #endif
 
+namespace milvus {
 namespace knowhere {
 
 void
@@ -71,3 +72,4 @@ IVFPQ::GenParams(const Config& config) {
 }
 
 }  // namespace knowhere
+}  // namespace milvus
