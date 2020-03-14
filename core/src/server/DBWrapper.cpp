@@ -147,6 +147,7 @@ DBWrapper::StartService() {
         std::cerr << s.ToString() << std::endl;
         return s;
     }
+    faiss::distance_compute_blas_threshold = use_blas_threshold;
 
     // set archive config
     engine::ArchiveConf::CriteriaT criterial;
