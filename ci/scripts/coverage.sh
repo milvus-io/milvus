@@ -8,38 +8,46 @@ while [ -h "$SOURCE" ]; do # resolve $SOURCE until the file is no longer a symli
 done
 SCRIPTS_DIR="$( cd -P "$( dirname "$SOURCE" )" && pwd )"
 
-MILVUS_CORE_DIR="${SCRIPTS_DIR}/../../core"
-CORE_BUILD_DIR="${MILVUS_CORE_DIR}/cmake_build"
-CODECOV_TOKEN=""
+HELP="
+Usage:
+  $0 [flags] [Arguments]
 
-while getopts "b:c:h" arg
-do
-        case $arg in
-             b)
-                CORE_BUILD_DIR=$OPTARG # CORE_BUILD_DIR
-                ;;
-             c)
-                CODECOV_TOKEN=$OPTARG
-                ;;
-             h) # help
-                echo "
+    -b                                Core Code build directory
+    -c                                Codecov token
+    -h or --help                      Print help information
 
-parameter:
--b: core code build directory
--c: codecov token
--h: help
 
-usage:
-./coverage.sh -b \${CORE_BUILD_DIR} -c \${CODECOV_TOKEN} [-h]
-                "
-                exit 0
-                ;;
-             ?)
-                echo "ERROR! unknown argument"
-        exit 1
-        ;;
+Use \"$0  --help\" for more information about a given command.
+"
+
+ARGS=`getopt -o "b:c:h" -l "help" -n "$0" -- "$@"`
+
+eval set -- "${ARGS}"
+
+while true ; do
+        case "$1" in
+                -b)
+                        # o has an optional argument. As we are in quoted mode,
+                        # an empty parameter will be generated if its optional
+                        # argument is not found.
+                        case "$2" in
+                                "") echo "Option CORE_BUILD_DIR, no argument"; exit 1 ;;
+                                *)  CORE_BUILD_DIR=$2 ; shift 2 ;;
+                        esac ;;
+                -c)
+                        case "$2" in
+                                "") echo "Option CODECOV_TOKEN, no argument"; exit 1 ;;
+                                *)  CODECOV_TOKEN=$2 ; shift 2 ;;
+                        esac ;;
+                -h|--help) echo -e "${HELP}" ; exit 0 ;;
+                --) shift ; break ;;
+                *) echo "Internal error!" ; exit 1 ;;
         esac
 done
+
+# Set defaults for vars modified by flags to this script
+MILVUS_CORE_DIR="${SCRIPTS_DIR}/../../core"
+CORE_BUILD_DIR=${CORE_BUILD_DIR:="${MILVUS_CORE_DIR}/cmake_build"}
 
 LCOV_CMD="lcov"
 # LCOV_GEN_CMD="genhtml"
@@ -90,7 +98,7 @@ if [ $? -ne 0 ]; then
     exit 2
 fi
 
-if [[ ! -z ${CODECOV_TOKEN} ]];then
+if [[ -n ${CODECOV_TOKEN} ]];then
     export CODECOV_TOKEN="${CODECOV_TOKEN}"
     curl -s https://codecov.io/bash | bash -s - -f output_new.info || echo "Codecov did not collect coverage reports"
 fi
