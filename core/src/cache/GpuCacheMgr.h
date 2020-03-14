@@ -9,13 +9,12 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
-#include "CacheMgr.h"
-#include "DataObj.h"
-
 #include <memory>
 #include <string>
 #include <unordered_map>
 
+#include "cache/CacheMgr.h"
+#include "cache/DataObj.h"
 #include "config/handler/GpuResourceConfigHandler.h"
 
 namespace milvus {
