@@ -38,7 +38,7 @@ services:
       - ${ARCH}-ubuntu-${UBUNTU}-cache:/build:delegated
     networks:
       - milvus
-    command: &ubuntu-command >
+    command: &ubuntu-command
       ["/milvus/ci/scripts/build.sh -t Release -i ${MILVUS_INSTALL_PREFIX} --with_fiu -l -u -c &&
         /milvus/ci/scripts/run_unittest.sh -i ${MILVUS_INSTALL_PREFIX} --mysql_user=root --mysql_password=123456 --mysql_host=mysql &&
         /milvus/ci/scripts/coverage.sh"]
@@ -58,7 +58,7 @@ services:
       - ${ARCH}-centos-${CENTOS}-cache:/build:delegated
     networks:
       - milvus
-    command: &centos-command >
+    command: &centos-command
       ["/milvus/ci/scripts/build.sh -t Release -i ${MILVUS_INSTALL_PREFIX} --with_fiu -l -u -c &&
         /milvus/ci/scripts/run_unittest.sh -i ${MILVUS_INSTALL_PREFIX} --mysql_user=root --mysql_password=123456 --mysql_host=mysql &&
         /milvus/ci/scripts/coverage.sh"]
