@@ -7,7 +7,7 @@ on:
     paths:
       - 'ci/**'
       - 'core/**'
-      - 'docker/**'
+      - '.github/workflows/core.yml'
       - '!**.md'
       - '!ci/jenkins/**'
   pull_request:
@@ -15,7 +15,7 @@ on:
     paths:
       - 'ci/**'
       - 'core/**'
-      - 'docker/**'
+      - '.github/workflows/core.yml'
       - '!**.md'
       - '!ci/jenkins/**'
 
