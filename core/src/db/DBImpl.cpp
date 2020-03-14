@@ -75,10 +75,14 @@ DBImpl::DBImpl(const DBOptions& options)
         wal_mgr_ = std::make_shared<wal::WalManager>(mxlog_config);
     }
 
+    SetIdentity("DBImpl");
+    AddCacheInsertDataListener();
+
     Start();
 }
 
 DBImpl::~DBImpl() {
+    RemoveCacheInsertDataListener();
     Stop();
 }
 
@@ -362,13 +366,15 @@ DBImpl::PreloadTable(const std::string& table_id) {
         if (file.file_type_ == meta::TableFileSchema::FILE_TYPE::RAW ||
             file.file_type_ == meta::TableFileSchema::FILE_TYPE::TO_INDEX ||
             file.file_type_ == meta::TableFileSchema::FILE_TYPE::BACKUP) {
-            engine_type = server::ValidationUtil::IsBinaryMetricType(file.metric_type_) ? EngineType::FAISS_BIN_IDMAP
-                                                                                        : EngineType::FAISS_IDMAP;
+            engine_type =
+                utils::IsBinaryMetricType(file.metric_type_) ? EngineType::FAISS_BIN_IDMAP : EngineType::FAISS_IDMAP;
         } else {
             engine_type = (EngineType)file.engine_type_;
         }
-        ExecutionEnginePtr engine = EngineFactory::Build(file.dimension_, file.location_, engine_type,
-                                                         (MetricType)file.metric_type_, file.nlist_);
+
+        auto json = milvus::json::parse(file.index_params_);
+        ExecutionEnginePtr engine =
+            EngineFactory::Build(file.dimension_, file.location_, engine_type, (MetricType)file.metric_type_, json);
         fiu_do_on("DBImpl.PreloadTable.null_engine", engine = nullptr);
         if (engine == nullptr) {
             ENGINE_LOG_ERROR << "Invalid engine type";
@@ -378,7 +384,7 @@ DBImpl::PreloadTable(const std::string& table_id) {
         size += engine->PhysicalSize();
         fiu_do_on("DBImpl.PreloadTable.exceed_cache", size = available_size + 1);
         if (size > available_size) {
-            ENGINE_LOG_DEBUG << "Pre-load canceled since cache almost full";
+            ENGINE_LOG_DEBUG << "Pre-load cancelled since cache is almost full";
             return Status(SERVER_CACHE_FULL, "Cache is full");
         } else {
             try {
@@ -635,7 +641,6 @@ DBImpl::Flush() {
 
 Status
 DBImpl::Compact(const std::string& table_id) {
-    // TODO: WAL???
     if (!initialized_.load(std::memory_order_acquire)) {
         return SHUTDOWN_ERROR;
     }
@@ -657,31 +662,18 @@ DBImpl::Compact(const std::string& table_id) {
         }
     }
 
+    ENGINE_LOG_DEBUG << "Before compacting, wait for build index thread to finish...";
+
+    // WaitBuildIndexFinish();
+
+    const std::lock_guard<std::mutex> index_lock(build_index_mutex_);
+    const std::lock_guard<std::mutex> merge_lock(flush_merge_compact_mutex_);
+
     ENGINE_LOG_DEBUG << "Compacting table: " << table_id;
 
-    const std::lock_guard<std::mutex> lock(flush_merge_compact_mutex_);
-
-    // Save table index
-    TableIndex table_index;
-    status = DescribeIndex(table_id, table_index);
-    if (!status.ok()) {
-        return status;
-    }
-
-    // Drop all index
-    status = DropIndex(table_id);
-    if (!status.ok()) {
-        return status;
-    }
-
-    // Then update table index to the previous index
-    status = UpdateTableIndexRecursively(table_id, table_index);
-    if (!status.ok()) {
-        return status;
-    }
-
     // Get files to compact from meta.
-    std::vector<int> file_types{meta::TableFileSchema::FILE_TYPE::RAW, meta::TableFileSchema::FILE_TYPE::TO_INDEX};
+    std::vector<int> file_types{meta::TableFileSchema::FILE_TYPE::RAW, meta::TableFileSchema::FILE_TYPE::TO_INDEX,
+                                meta::TableFileSchema::FILE_TYPE::BACKUP};
     meta::TableFilesSchema files_to_compact;
     status = meta_ptr_->FilesByType(table_id, file_types, files_to_compact);
     if (!status.ok()) {
@@ -694,45 +686,57 @@ DBImpl::Compact(const std::string& table_id) {
 
     OngoingFileChecker::GetInstance().MarkOngoingFiles(files_to_compact);
 
-    meta::TableFilesSchema files_to_update;
     Status compact_status;
-    for (auto& file : files_to_compact) {
-        compact_status = CompactFile(table_id, file, files_to_update);
+    for (meta::TableFilesSchema::iterator iter = files_to_compact.begin(); iter != files_to_compact.end();) {
+        meta::TableFileSchema file = *iter;
+        iter = files_to_compact.erase(iter);
 
-        if (!compact_status.ok()) {
-            ENGINE_LOG_ERROR << "Compact failed for file " << file.file_id_ << ": " << compact_status.message();
-            break;
+        // Check if the segment needs compacting
+        std::string segment_dir;
+        utils::GetParentPath(file.location_, segment_dir);
+
+        segment::SegmentReader segment_reader(segment_dir);
+        segment::DeletedDocsPtr deleted_docs;
+        status = segment_reader.LoadDeletedDocs(deleted_docs);
+        if (!status.ok()) {
+            std::string msg = "Failed to load deleted_docs from " + segment_dir;
+            ENGINE_LOG_ERROR << msg;
+            OngoingFileChecker::GetInstance().UnmarkOngoingFile(file);
+            continue;  // skip this file and try compact next one
+        }
+
+        meta::TableFilesSchema files_to_update;
+        if (deleted_docs->GetSize() != 0) {
+            compact_status = CompactFile(table_id, file, files_to_update);
+
+            if (!compact_status.ok()) {
+                ENGINE_LOG_ERROR << "Compact failed for segment " << file.segment_id_ << ": "
+                                 << compact_status.message();
+                OngoingFileChecker::GetInstance().UnmarkOngoingFile(file);
+                continue;  // skip this file and try compact next one
+            }
+        } else {
+            OngoingFileChecker::GetInstance().UnmarkOngoingFile(file);
+            ENGINE_LOG_DEBUG << "Segment " << file.segment_id_ << " has no deleted data. No need to compact";
+            continue;  // skip this file and try compact next one
+        }
+
+        ENGINE_LOG_DEBUG << "Updating meta after compaction...";
+        status = meta_ptr_->UpdateTableFiles(files_to_update);
+        OngoingFileChecker::GetInstance().UnmarkOngoingFile(file);
+        if (!status.ok()) {
+            compact_status = status;
+            break;  // meta error, could not go on
         }
     }
+
+    OngoingFileChecker::GetInstance().UnmarkOngoingFiles(files_to_compact);
 
     if (compact_status.ok()) {
         ENGINE_LOG_DEBUG << "Finished compacting table: " << table_id;
     }
 
-    ENGINE_LOG_ERROR << "Updating meta after compaction...";
-
-    // Drop index again, in case some files were in the index building process during compacting
-    status = DropIndex(table_id);
-    if (!status.ok()) {
-        return status;
-    }
-
-    // Update index
-    status = UpdateTableIndexRecursively(table_id, table_index);
-    if (!status.ok()) {
-        return status;
-    }
-
-    status = meta_ptr_->UpdateTableFiles(files_to_update);
-    if (!status.ok()) {
-        return status;
-    }
-
-    OngoingFileChecker::GetInstance().UnmarkOngoingFiles(files_to_compact);
-
-    ENGINE_LOG_DEBUG << "Finished updating meta after compaction";
-
-    return status;
+    return compact_status;
 }
 
 Status
@@ -753,7 +757,6 @@ DBImpl::CompactFile(const std::string& table_id, const meta::TableFileSchema& fi
     }
 
     // Compact (merge) file to the newly created table file
-    meta::TableFilesSchema updated;
 
     std::string new_segment_dir;
     utils::GetParentPath(compacted_file.location_, new_segment_dir);
@@ -764,10 +767,6 @@ DBImpl::CompactFile(const std::string& table_id, const meta::TableFileSchema& fi
 
     ENGINE_LOG_DEBUG << "Compacting begin...";
     segment_writer_ptr->Merge(segment_dir_to_merge, compacted_file.file_id_);
-
-    auto file_to_compact = file;
-    file_to_compact.file_type_ = meta::TableFileSchema::TO_DELETE;
-    updated.emplace_back(file_to_compact);
 
     // Serialize
     ENGINE_LOG_DEBUG << "Serializing compacted segment...";
@@ -785,7 +784,7 @@ DBImpl::CompactFile(const std::string& table_id, const meta::TableFileSchema& fi
     // Update table files state
     // if index type isn't IDMAP, set file type to TO_INDEX if file size exceed index_file_size
     // else set file type to RAW, no need to build index
-    if (compacted_file.engine_type_ != (int)EngineType::FAISS_IDMAP) {
+    if (!utils::IsRawIndexType(compacted_file.engine_type_)) {
         compacted_file.file_type_ = (segment_writer_ptr->Size() >= compacted_file.index_file_size_)
                                         ? meta::TableFileSchema::TO_INDEX
                                         : meta::TableFileSchema::RAW;
@@ -800,15 +799,23 @@ DBImpl::CompactFile(const std::string& table_id, const meta::TableFileSchema& fi
         compacted_file.file_type_ = meta::TableFileSchema::TO_DELETE;
     }
 
-    updated.emplace_back(compacted_file);
+    files_to_update.emplace_back(compacted_file);
 
-    for (auto& f : updated) {
+    // Set all files in segment to TO_DELETE
+    auto& segment_id = file.segment_id_;
+    meta::TableFilesSchema segment_files;
+    status = meta_ptr_->GetTableFilesBySegmentId(segment_id, segment_files);
+    if (!status.ok()) {
+        return status;
+    }
+    for (auto& f : segment_files) {
+        f.file_type_ = meta::TableFileSchema::FILE_TYPE::TO_DELETE;
         files_to_update.emplace_back(f);
     }
 
     ENGINE_LOG_DEBUG << "Compacted segment " << compacted_file.segment_id_ << " from "
-                     << std::to_string(file_to_compact.file_size_) << " bytes to "
-                     << std::to_string(compacted_file.file_size_) << " bytes";
+                     << std::to_string(file.file_size_) << " bytes to " << std::to_string(compacted_file.file_size_)
+                     << " bytes";
 
     if (options_.insert_cache_immediately_) {
         segment_writer_ptr->Cache();
@@ -984,7 +991,7 @@ DBImpl::GetVectorByIdHelper(const std::string& table_id, IDNumber vector_id, Vec
                 auto deleted = std::find(deleted_docs.begin(), deleted_docs.end(), offset);
                 if (deleted == deleted_docs.end()) {
                     // Load raw vector
-                    bool is_binary = server::ValidationUtil::IsBinaryMetricType(file.metric_type_);
+                    bool is_binary = utils::IsBinaryMetricType(file.metric_type_);
                     size_t single_vector_bytes = is_binary ? file.dimension_ / 8 : file.dimension_ * sizeof(float);
                     std::vector<uint8_t> raw_vector;
                     status = segment_reader.LoadVectors(offset * single_vector_bytes, single_vector_bytes, raw_vector);
@@ -1051,7 +1058,7 @@ DBImpl::CreateIndex(const std::string& table_id, const TableIndex& index) {
 
     // step 4: wait and build index
     status = index_failed_checker_.CleanFailedIndexFileOfTable(table_id);
-    status = BuildTableIndexRecursively(table_id, index);
+    status = WaitTableIndexRecursively(table_id, index);
 
     return status;
 }
@@ -1077,8 +1084,8 @@ DBImpl::DropIndex(const std::string& table_id) {
 
 Status
 DBImpl::QueryByID(const std::shared_ptr<server::Context>& context, const std::string& table_id,
-                  const std::vector<std::string>& partition_tags, uint64_t k, uint64_t nprobe, IDNumber vector_id,
-                  ResultIds& result_ids, ResultDistances& result_distances) {
+                  const std::vector<std::string>& partition_tags, uint64_t k, const milvus::json& extra_params,
+                  IDNumber vector_id, ResultIds& result_ids, ResultDistances& result_distances) {
     if (!initialized_.load(std::memory_order_acquire)) {
         return SHUTDOWN_ERROR;
     }
@@ -1086,14 +1093,15 @@ DBImpl::QueryByID(const std::shared_ptr<server::Context>& context, const std::st
     VectorsData vectors_data = VectorsData();
     vectors_data.id_array_.emplace_back(vector_id);
     vectors_data.vector_count_ = 1;
-    Status result = Query(context, table_id, partition_tags, k, nprobe, vectors_data, result_ids, result_distances);
+    Status result =
+        Query(context, table_id, partition_tags, k, extra_params, vectors_data, result_ids, result_distances);
     return result;
 }
 
 Status
 DBImpl::Query(const std::shared_ptr<server::Context>& context, const std::string& table_id,
-              const std::vector<std::string>& partition_tags, uint64_t k, uint64_t nprobe, const VectorsData& vectors,
-              ResultIds& result_ids, ResultDistances& result_distances) {
+              const std::vector<std::string>& partition_tags, uint64_t k, const milvus::json& extra_params,
+              const VectorsData& vectors, ResultIds& result_ids, ResultDistances& result_distances) {
     auto query_ctx = context->Child("Query");
 
     if (!initialized_.load(std::memory_order_acquire)) {
@@ -1136,7 +1144,7 @@ DBImpl::Query(const std::shared_ptr<server::Context>& context, const std::string
     }
 
     cache::CpuCacheMgr::GetInstance()->PrintInfo();  // print cache info before query
-    status = QueryAsync(query_ctx, table_id, files_array, k, nprobe, vectors, result_ids, result_distances);
+    status = QueryAsync(query_ctx, table_id, files_array, k, extra_params, vectors, result_ids, result_distances);
     cache::CpuCacheMgr::GetInstance()->PrintInfo();  // print cache info after query
 
     query_ctx->GetTraceContext()->GetSpan()->Finish();
@@ -1146,8 +1154,8 @@ DBImpl::Query(const std::shared_ptr<server::Context>& context, const std::string
 
 Status
 DBImpl::QueryByFileID(const std::shared_ptr<server::Context>& context, const std::string& table_id,
-                      const std::vector<std::string>& file_ids, uint64_t k, uint64_t nprobe, const VectorsData& vectors,
-                      ResultIds& result_ids, ResultDistances& result_distances) {
+                      const std::vector<std::string>& file_ids, uint64_t k, const milvus::json& extra_params,
+                      const VectorsData& vectors, ResultIds& result_ids, ResultDistances& result_distances) {
     auto query_ctx = context->Child("Query by file id");
 
     if (!initialized_.load(std::memory_order_acquire)) {
@@ -1175,7 +1183,7 @@ DBImpl::QueryByFileID(const std::shared_ptr<server::Context>& context, const std
     }
 
     cache::CpuCacheMgr::GetInstance()->PrintInfo();  // print cache info before query
-    status = QueryAsync(query_ctx, table_id, files_array, k, nprobe, vectors, result_ids, result_distances);
+    status = QueryAsync(query_ctx, table_id, files_array, k, extra_params, vectors, result_ids, result_distances);
     cache::CpuCacheMgr::GetInstance()->PrintInfo();  // print cache info after query
 
     query_ctx->GetTraceContext()->GetSpan()->Finish();
@@ -1197,8 +1205,8 @@ DBImpl::Size(uint64_t& result) {
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 Status
 DBImpl::QueryAsync(const std::shared_ptr<server::Context>& context, const std::string& table_id,
-                   const meta::TableFilesSchema& files, uint64_t k, uint64_t nprobe, const VectorsData& vectors,
-                   ResultIds& result_ids, ResultDistances& result_distances) {
+                   const meta::TableFilesSchema& files, uint64_t k, const milvus::json& extra_params,
+                   const VectorsData& vectors, ResultIds& result_ids, ResultDistances& result_distances) {
     auto query_async_ctx = context->Child("Query Async");
 
     server::CollectQueryMetrics metrics(vectors.vector_count_);
@@ -1209,7 +1217,7 @@ DBImpl::QueryAsync(const std::shared_ptr<server::Context>& context, const std::s
     auto status = OngoingFileChecker::GetInstance().MarkOngoingFiles(files);
 
     ENGINE_LOG_DEBUG << "Engine query begin, index file count: " << files.size();
-    scheduler::SearchJobPtr job = std::make_shared<scheduler::SearchJob>(query_async_ctx, k, nprobe, vectors);
+    scheduler::SearchJobPtr job = std::make_shared<scheduler::SearchJob>(query_async_ctx, k, extra_params, vectors);
     for (auto& file : files) {
         scheduler::TableFileSchemaPtr file_ptr = std::make_shared<meta::TableFileSchema>(file);
         job->AddIndexFile(file_ptr);
@@ -1365,7 +1373,7 @@ DBImpl::StartMergeTask() {
 
 Status
 DBImpl::MergeFiles(const std::string& table_id, const meta::TableFilesSchema& files) {
-    const std::lock_guard<std::mutex> lock(flush_merge_compact_mutex_);
+    // const std::lock_guard<std::mutex> lock(flush_merge_compact_mutex_);
 
     ENGINE_LOG_DEBUG << "Merge files for table: " << table_id;
 
@@ -1432,7 +1440,7 @@ DBImpl::MergeFiles(const std::string& table_id, const meta::TableFilesSchema& fi
     // step 4: update table files state
     // if index type isn't IDMAP, set file type to TO_INDEX if file size exceed index_file_size
     // else set file type to RAW, no need to build index
-    if (table_file.engine_type_ != (int)EngineType::FAISS_IDMAP) {
+    if (!utils::IsRawIndexType(table_file.engine_type_)) {
         table_file.file_type_ = (segment_writer_ptr->Size() >= table_file.index_file_size_)
                                     ? meta::TableFileSchema::TO_INDEX
                                     : meta::TableFileSchema::RAW;
@@ -1455,7 +1463,7 @@ DBImpl::MergeFiles(const std::string& table_id, const meta::TableFilesSchema& fi
 
 Status
 DBImpl::BackgroundMergeFiles(const std::string& table_id) {
-    // const std::lock_guard<std::mutex> lock(flush_merge_compact_mutex_);
+    const std::lock_guard<std::mutex> lock(flush_merge_compact_mutex_);
 
     meta::TableFilesSchema raw_files;
     auto status = meta_ptr_->FilesToMerge(table_id, raw_files);
@@ -1730,11 +1738,11 @@ DBImpl::UpdateTableIndexRecursively(const std::string& table_id, const TableInde
 }
 
 Status
-DBImpl::BuildTableIndexRecursively(const std::string& table_id, const TableIndex& index) {
+DBImpl::WaitTableIndexRecursively(const std::string& table_id, const TableIndex& index) {
     // for IDMAP type, only wait all NEW file converted to RAW file
     // for other type, wait NEW/RAW/NEW_MERGE/NEW_INDEX/TO_INDEX files converted to INDEX files
     std::vector<int> file_types;
-    if (index.engine_type_ == static_cast<int32_t>(EngineType::FAISS_IDMAP)) {
+    if (utils::IsRawIndexType(index.engine_type_)) {
         file_types = {
             static_cast<int32_t>(meta::TableFileSchema::NEW),
             static_cast<int32_t>(meta::TableFileSchema::NEW_MERGE),
@@ -1756,7 +1764,7 @@ DBImpl::BuildTableIndexRecursively(const std::string& table_id, const TableIndex
 
     while (!table_files.empty()) {
         ENGINE_LOG_DEBUG << "Non index files detected! Will build index " << times;
-        if (index.engine_type_ != (int)EngineType::FAISS_IDMAP) {
+        if (!utils::IsRawIndexType(index.engine_type_)) {
             status = meta_ptr_->UpdateTableFilesToIndex(table_id);
         }
 
@@ -1771,8 +1779,8 @@ DBImpl::BuildTableIndexRecursively(const std::string& table_id, const TableIndex
     std::vector<meta::TableSchema> partition_array;
     status = meta_ptr_->ShowPartitions(table_id, partition_array);
     for (auto& schema : partition_array) {
-        status = BuildTableIndexRecursively(schema.table_id_, index);
-        fiu_do_on("DBImpl.BuildTableIndexRecursively.fail_build_table_Index_for_partition",
+        status = WaitTableIndexRecursively(schema.table_id_, index);
+        fiu_do_on("DBImpl.WaitTableIndexRecursively.fail_build_table_Index_for_partition",
                   status = Status(DB_ERROR, ""));
         if (!status.ok()) {
             return status;
@@ -1782,7 +1790,7 @@ DBImpl::BuildTableIndexRecursively(const std::string& table_id, const TableIndex
     // failed to build index for some files, return error
     std::string err_msg;
     index_failed_checker_.GetErrMsgForTable(table_id, err_msg);
-    fiu_do_on("DBImpl.BuildTableIndexRecursively.not_empty_err_msg", err_msg.append("fiu"));
+    fiu_do_on("DBImpl.WaitTableIndexRecursively.not_empty_err_msg", err_msg.append("fiu"));
     if (!err_msg.empty()) {
         return Status(DB_ERROR, err_msg);
     }
@@ -2053,6 +2061,11 @@ DBImpl::BackgroundWalTask() {
             }
         }
     }
+}
+
+void
+DBImpl::OnCacheInsertDataChanged(bool value) {
+    options_.insert_cache_immediately_ = value;
 }
 
 }  // namespace engine

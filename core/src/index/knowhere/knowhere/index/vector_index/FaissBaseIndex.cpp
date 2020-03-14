@@ -14,6 +14,7 @@
 #include <utility>
 
 #include "knowhere/common/Exception.h"
+#include "knowhere/common/Log.h"
 #include "knowhere/index/vector_index/FaissBaseIndex.h"
 #include "knowhere/index/vector_index/IndexIVF.h"
 #include "knowhere/index/vector_index/helpers/FaissIO.h"

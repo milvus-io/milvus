@@ -5,6 +5,14 @@ import "status.proto";
 package milvus.grpc;
 
 /**
+ * @brief general usage
+ */
+message KeyValuePair {
+    string key = 1;
+    string value = 2;
+}
+
+/**
  * @brief Table name
  */
 message TableName {
@@ -21,6 +29,7 @@ message TableNameList {
 
 /**
  * @brief Table schema
+ * metric_type: 1-L2, 2-IP
  */
 message TableSchema {
     Status status = 1;
@@ -28,6 +37,7 @@ message TableSchema {
     int64 dimension = 3;
     int64 index_file_size = 4;
     int32 metric_type = 5;
+    repeated KeyValuePair extra_params = 6;
 }
 
 /**
@@ -62,6 +72,7 @@ message InsertParam {
     repeated RowRecord row_record_array = 2;
     repeated int64 row_id_array = 3;            //optional
     string partition_tag = 4;
+    repeated KeyValuePair extra_params = 5;
 }
 
 /**
@@ -77,10 +88,10 @@ message VectorIds {
  */
 message SearchParam {
     string table_name = 1;
-    repeated RowRecord query_record_array = 2;
-    int64 topk = 3;
-    int64 nprobe = 4;
-    repeated string partition_tag_array = 5;
+    repeated string partition_tag_array = 2;
+    repeated RowRecord query_record_array = 3;
+    int64 topk = 4;
+    repeated KeyValuePair extra_params = 5;
 }
 
 /**
@@ -96,10 +107,10 @@ message SearchInFilesParam {
  */
 message SearchByIDParam {
     string table_name = 1;
-    int64 id = 2;
-    int64 topk = 3;
-    int64 nprobe = 4;
-    repeated string partition_tag_array = 5;
+    repeated string partition_tag_array = 2;
+    int64 id = 3;
+    int64 topk = 4;
+    repeated KeyValuePair extra_params = 5;
 }
 
 /**
@@ -144,22 +155,14 @@ message Command {
 }
 
 /**
- * @brief Index
- * @index_type: 0-invalid, 1-idmap, 2-ivflat, 3-ivfsq8, 4-nsgmix
- * @metric_type: 1-L2, 2-IP
- */
-message Index {
-    int32 index_type = 1;
-    int32 nlist = 2;
-}
-
-/**
  * @brief Index params
+ * @index_type: 0-invalid, 1-idmap, 2-ivflat, 3-ivfsq8, 4-nsgmix
  */
 message IndexParam {
     Status status = 1;
     string table_name = 2;
-    Index index = 3;
+    int32 index_type = 3;
+    repeated KeyValuePair extra_params = 4;
 }
 
 /**

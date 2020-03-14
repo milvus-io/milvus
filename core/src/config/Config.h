@@ -214,6 +214,8 @@ class Config {
     Status
     CheckDBConfigBackendUrl(const std::string& value);
     Status
+    CheckDBConfigPreloadTable(const std::string& value);
+    Status
     CheckDBConfigArchiveDiskThreshold(const std::string& value);
     Status
     CheckDBConfigArchiveDaysThreshold(const std::string& value);
@@ -280,6 +282,10 @@ class Config {
     Status
     CheckGpuResourceConfigBuildIndexResources(const std::vector<std::string>& value);
 #endif
+
+    /* tracing config */
+    Status
+    CheckTracingConfigJsonConfigPath(const std::string& value);
 
     /* wal config */
     Status
@@ -422,9 +428,13 @@ class Config {
     Status
     SetDBConfigBackendUrl(const std::string& value);
     Status
+    SetDBConfigPreloadTable(const std::string& value);
+    Status
     SetDBConfigArchiveDiskThreshold(const std::string& value);
     Status
     SetDBConfigArchiveDaysThreshold(const std::string& value);
+    Status
+    SetDBConfigAutoFlushInterval(const std::string& value);
 
     /* storage config */
     Status
@@ -469,6 +479,10 @@ class Config {
     SetEngineConfigOmpThreadNum(const std::string& value);
     Status
     SetEngineConfigUseAVX512(const std::string& value);
+
+    /* tracing config */
+    Status
+    SetTracingConfigJsonConfigPath(const std::string& value);
 
     /* wal config */
     Status

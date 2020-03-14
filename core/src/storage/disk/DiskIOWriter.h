@@ -9,33 +9,46 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
-#include "storage/file/FileIOReader.h"
+#pragma once
+
+#include <fstream>
+#include <string>
+#include "storage/IOWriter.h"
 
 namespace milvus {
 namespace storage {
 
-FileIOReader::FileIOReader(const std::string& name) : IOReader(name) {
-    fs_ = std::fstream(name_, std::ios::in | std::ios::binary);
-}
+class DiskIOWriter : public IOWriter {
+ public:
+    DiskIOWriter() = default;
+    ~DiskIOWriter() = default;
 
-FileIOReader::~FileIOReader() {
-    fs_.close();
-}
+    // No copy and move
+    DiskIOWriter(const DiskIOWriter&) = delete;
+    DiskIOWriter(DiskIOWriter&&) = delete;
 
-void
-FileIOReader::read(void* ptr, size_t size) {
-    fs_.read(reinterpret_cast<char*>(ptr), size);
-}
+    DiskIOWriter&
+    operator=(const DiskIOWriter&) = delete;
+    DiskIOWriter&
+    operator=(DiskIOWriter&&) = delete;
 
-void
-FileIOReader::seekg(size_t pos) {
-    fs_.seekg(pos);
-}
+    void
+    open(const std::string& name) override;
 
-size_t
-FileIOReader::length() {
-    fs_.seekg(0, fs_.end);
-    return fs_.tellg();
-}
+    void
+    write(void* ptr, size_t size) override;
+
+    size_t
+    length() override;
+
+    void
+    close() override;
+
+ public:
+    std::string name_;
+    size_t len_;
+    std::fstream fs_;
+};
+
 }  // namespace storage
 }  // namespace milvus

@@ -20,7 +20,7 @@ def get_milvus(handler=None):
 
 
 def gen_inaccuracy(num):
-    return num/255.0
+    return num / 255.0
 
 
 def gen_vectors(num, dim):
@@ -66,21 +66,7 @@ def gen_vector(nb, d, seed=np.random.RandomState(1234)):
 
 def gen_unique_str(str_value=None):
     prefix = "".join(random.choice(string.ascii_letters + string.digits) for _ in range(8))
-    return "test_"+prefix if str_value is None else str_value+"_"+prefix
-
-
-def get_current_day():
-    return time.strftime('%Y-%m-%d', time.localtime())
-
-
-def get_last_day(day):
-    tmp = datetime.datetime.now()-datetime.timedelta(days=day)
-    return tmp.strftime('%Y-%m-%d')
-
-
-def get_next_day(day):
-    tmp = datetime.datetime.now()+datetime.timedelta(days=day)
-    return tmp.strftime('%Y-%m-%d')
+    return "test_" + prefix if str_value is None else str_value + "_" + prefix
 
 
 def gen_long_str(num):
@@ -104,8 +90,6 @@ def gen_invalid_ips():
             "BB。A",
             " siede ",
             "(mn)",
-            "\n",
-            "\t",
             "中文",
             "a".join("a" for _ in range(256))
     ]
@@ -124,8 +108,6 @@ def gen_invalid_ports():
             "BB。A",
             " siede ",
             "(mn)",
-            "\n",
-            "\t",
             "中文"
     ]
     return ports
@@ -160,10 +142,9 @@ def gen_invalid_uris():
     return uris
 
 
-def gen_invalid_table_names():
-    table_names = [
+def gen_invalid_collection_names():
+    collection_names = [
             "12-s",
-            "12/s",
             " ",
             # "",
             # None,
@@ -172,15 +153,12 @@ def gen_invalid_table_names():
             "c|c",
             " siede ",
             "(mn)",
-            "#12s",
             "pip+",
             "=c",
-            "\n",
-            "\t",
             "中文",
             "a".join("a" for i in range(256))
     ]
-    return table_names
+    return collection_names
 
 
 def gen_invalid_top_ks():
@@ -198,11 +176,8 @@ def gen_invalid_top_ks():
             "BB。A",
             " siede ",
             "(mn)",
-            "#12s",
             "pip+",
             "=c",
-            "\n",
-            "\t",
             "中文",
             "a".join("a" for i in range(256))
     ]
@@ -227,11 +202,8 @@ def gen_invalid_dims():
             "BB。A",
             " siede ",
             "(mn)",
-            "#12s",
             "pip+",
             "=c",
-            "\n",
-            "\t",
             "中文",
             "a".join("a" for i in range(256))
     ]
@@ -255,11 +227,8 @@ def gen_invalid_file_sizes():
             "BB。A",
             " siede ",
             "(mn)",
-            "#12s",
             "pip+",
             "=c",
-            "\n",
-            "\t",
             "中文",
             "a".join("a" for i in range(256))
     ]
@@ -284,19 +253,17 @@ def gen_invalid_index_types():
             "BB。A",
             " siede ",
             "(mn)",
-            "#12s",
             "pip+",
             "=c",
-            "\n",
-            "\t",
             "中文",
             "a".join("a" for i in range(256))
     ]
     return invalid_types
 
 
-def gen_invalid_nlists():
-    nlists = [
+def gen_invalid_params():
+    params = [
+            9999999999,
             -1,
             # None,
             [1,2,3],
@@ -309,14 +276,11 @@ def gen_invalid_nlists():
             "BB。A",
             " siede ",
             "(mn)",
-            "#12s",
             "pip+",
             "=c",
-            "\n",
-            "\t",
             "中文"
     ]
-    return nlists
+    return params
 
 
 def gen_invalid_nprobes():
@@ -335,11 +299,8 @@ def gen_invalid_nprobes():
             "BB。A",
             " siede ",
             "(mn)",
-            "#12s",
             "pip+",
             "=c",
-            "\n",
-            "\t",
             "中文"
     ]
     return nprobes
@@ -361,11 +322,8 @@ def gen_invalid_metric_types():
             "BB。A",
             " siede ",
             "(mn)",
-            "#12s",
             "pip+",
             "=c",
-            "\n",
-            "\t",
             "中文"    
     ]
     return metric_types
@@ -390,11 +348,8 @@ def gen_invalid_vectors():
             "BB。A",
             " siede ",
             "(mn)",
-            "#12s",
             "pip+",
             "=c",
-            "\n",
-            "\t",
             "中文",
             "a".join("a" for i in range(256))
     ]
@@ -414,53 +369,216 @@ def gen_invalid_vector_ids():
             "BB。A",
             " siede ",
             "(mn)",
-            "#12s",
             "=c",
-            "\n",
             "中文",
     ]
     return invalid_vector_ids
 
 
-def gen_invalid_index_params():
+def gen_invalid_cache_config():
+    invalid_configs = [
+            0,
+            -1,
+            9223372036854775808,
+            [1,2,3],
+            (1,2),
+            {"a": 1},
+            " ",
+            "",
+            "String",
+            "12-s",
+            "BB。A",
+            " siede ",
+            "(mn)",
+            "pip+",
+            "=c",
+            "中文",
+            "'123'",
+            "さようなら"
+    ]
+    return invalid_configs
+
+
+def gen_invalid_engine_config():
+    invalid_configs = [
+            -1,
+            [1,2,3],
+            (1,2),
+            {"a": 1},
+            " ",
+            "",
+            "String",
+            "12-s",
+            "BB。A",
+            " siede ",
+            "(mn)",
+            "pip+",
+            "=c",
+            "中文",
+            "'123'",
+    ]
+    return invalid_configs
+
+
+def gen_invaild_search_params():
+    index_types = [
+        IndexType.FLAT,
+        IndexType.IVFLAT,
+        IndexType.IVF_SQ8,
+        IndexType.IVF_SQ8H,
+        IndexType.IVF_PQ,
+        IndexType.HNSW,
+    #    IndexType.RNSG
+    ]
+
+    search_params = []
+    for index_type in index_types:
+        if index_type in [IndexType.IVFLAT, IndexType.IVF_SQ8, IndexType.IVF_SQ8H, IndexType.IVF_PQ]:
+            for nprobe in gen_invalid_params():
+                ivf_search_params = {"index_type": index_type, "search_param": {"nprobe": nprobe}}
+                search_params.append(ivf_search_params)
+            search_params.append({"index_type": index_type, "search_param": {"invalid_key": 100}})
+        elif index_type == IndexType.HNSW:
+            for ef in gen_invalid_params():
+                hnsw_search_param = {"index_type": index_type, "search_param": {"ef": ef}}
+                search_params.append(hnsw_search_param)
+            search_params.append({"index_type": index_type, "search_param": {"invalid_key": 100}})
+        # elif index_type == IndexType.RNSG:
+        #     for search_length in gen_invalid_params():
+        #         nsg_search_param = {"index_type": index_type, "search_param": {"search_length": search_length}}
+        #         search_params.append(nsg_search_param)
+        #     search_params.append({"index_type": index_type, "search_param": {"invalid_key": 100}})
+
+    return search_params
+
+
+def gen_invalid_index():
     index_params = []
     for index_type in gen_invalid_index_types():
-        index_param = {"index_type": index_type, "nlist": 16384}
+        index_param = {"index_type": index_type, "index_param": {"nlist": 1024}}
         index_params.append(index_param)
-    for nlist in gen_invalid_nlists():
-        index_param = {"index_type": IndexType.IVFLAT, "nlist": nlist}
+    for nlist in gen_invalid_params():
+        index_param = {"index_type": IndexType.IVFLAT, "index_param": {"nlist": nlist}}
         index_params.append(index_param)
+    for M in gen_invalid_params():
+        index_param = {"index_type": IndexType.HNSW, "index_param": {"M": M, "efConstruction": 100}}
+        index_params.append(index_param)
+    for efConstruction in gen_invalid_params():
+        index_param = {"index_type": IndexType.HNSW, "index_param": {"M": 16, "efConstruction": efConstruction}}
+        index_params.append(index_param)
+    # for search_length in gen_invalid_params():
+    #     index_param = {"index_type": IndexType.RNSG,
+    #                    "index_param": {"search_length": search_length, "out_degree": 40, "candidate_pool_size": 50,
+    #                                    "knng": 100}}
+    #     index_params.append(index_param)
+    # for out_degree in gen_invalid_params():
+    #     index_param = {"index_type": IndexType.RNSG,
+    #                    "index_param": {"search_length": 100, "out_degree": out_degree, "candidate_pool_size": 50,
+    #                                    "knng": 100}}
+    #     index_params.append(index_param)
+    # for candidate_pool_size in gen_invalid_params():
+    #     index_param = {"index_type": IndexType.RNSG, "index_param": {"search_length": 100, "out_degree": 40,
+    #                                                                  "candidate_pool_size": candidate_pool_size,
+    #                                                                  "knng": 100}}
+    #     index_params.append(index_param)
+    index_params.append({"index_type": IndexType.IVF_FLAT, "index_param": {"invalid_key": 1024}})
+    index_params.append({"index_type": IndexType.HNSW, "index_param": {"invalid_key": 16, "efConstruction": 100}})
+    # index_params.append({"index_type": IndexType.RNSG,
+    #                      "index_param": {"invalid_key": 100, "out_degree": 40, "candidate_pool_size": 300,
+    #                                      "knng": 100}})
     return index_params
 
 
-def gen_index_params():
+def gen_index():
+    index_types = [
+        IndexType.FLAT,
+        IndexType.IVFLAT,
+        IndexType.IVF_SQ8,
+        IndexType.IVF_SQ8H,
+        IndexType.IVF_PQ,
+        IndexType.HNSW,
+    #    IndexType.RNSG
+    ]
+
+    nlists = [1, 1024, 16384]
+    pq_ms = [128, 64, 32, 16, 8, 4]
+    Ms = [5, 24, 48]
+    efConstructions = [100, 300, 500]
+    search_lengths = [10, 100, 300]
+    out_degrees = [5, 40, 300]
+    candidate_pool_sizes = [50, 100, 300]
+    knngs = [5, 100, 300]
+
     index_params = []
-    index_types = [IndexType.FLAT, IndexType.IVFLAT, IndexType.IVF_SQ8, IndexType.IVF_SQ8H, IndexType.IVF_PQ, IndexType.HNSW]
-    nlists = [1, 16384, 50000]
+    for index_type in index_types:
+        if index_type == IndexType.FLAT:
+            index_params.append({"index_type": index_type, "index_param": {"nlist": 1024}})
+        elif index_type in [IndexType.IVFLAT, IndexType.IVF_SQ8, IndexType.IVF_SQ8H]:
+            ivf_params = [{"index_type": index_type, "index_param": {"nlist": nlist}} \
+                          for nlist in nlists]
+            index_params.extend(ivf_params)
+        elif index_type == IndexType.IVF_PQ:
+            ivf_pq_params = [{"index_type": index_type, "index_param": {"nlist": nlist, "m": m}} \
+                        for nlist in nlists \
+                        for m in pq_ms]
+            index_params.extend(ivf_pq_params)
+        elif index_type == IndexType.HNSW:
+            hnsw_params = [{"index_type": index_type, "index_param": {"M": M, "efConstruction": efConstruction}} \
+                           for M in Ms \
+                           for efConstruction in efConstructions]
+            index_params.extend(hnsw_params)
+        # elif index_type == IndexType.RNSG:
+        #     nsg_params = [{"index_type": index_type,
+        #                    "index_param": {"search_length": search_length, "out_degree": out_degree,
+        #                                    "candidate_pool_size": candidate_pool_size, "knng": knng}} \
+        #                   for search_length in search_lengths \
+        #                   for out_degree in out_degrees \
+        #                   for candidate_pool_size in candidate_pool_sizes \
+        #                   for knng in knngs]
+        #     index_params.extend(nsg_params)
 
-    def gen_params(index_types, nlists):
-        return [ {"index_type": index_type, "nlist": nlist} \
-            for index_type in index_types \
-                for nlist in nlists]
-
-    return gen_params(index_types, nlists)
+    return index_params
 
 
-def gen_simple_index_params():
+def gen_simple_index():
+    index_types = [
+        IndexType.FLAT,
+        IndexType.IVFLAT,
+        IndexType.IVF_SQ8,
+        IndexType.IVF_SQ8H,
+        IndexType.IVF_PQ,
+        IndexType.HNSW,
+        IndexType.RNSG
+    ]
+    params = [
+        {"nlist": 1024},
+        {"nlist": 1024},
+        {"nlist": 1024},
+        {"nlist": 1024},
+        {"nlist": 1024, "m": 16},
+        {"M": 16, "efConstruction": 500},
+        {"search_length": 50, "out_degree": 40, "candidate_pool_size": 100, "knng": 50}
+    ]
+
     index_params = []
-    index_types = [IndexType.FLAT, IndexType.IVFLAT, IndexType.IVF_SQ8, IndexType.IVF_SQ8H, IndexType.IVF_PQ, IndexType.HNSW]
-    nlists = [1024]
-
-    def gen_params(index_types, nlists):
-        return [ {"index_type": index_type, "nlist": nlist} \
-            for index_type in index_types \
-                for nlist in nlists]
-
-    return gen_params(index_types, nlists)
+    for i in range(len(index_types)):
+        index_params.append({"index_type": index_types[i], "index_param": params[i]})
+    return index_params
 
 
-def assert_has_table(conn, table_name):
-    status, ok = conn.has_table(table_name)
+def get_search_param(index_type):
+    if index_type in [IndexType.FLAT, IndexType.IVFLAT, IndexType.IVF_SQ8, IndexType.IVF_SQ8H, IndexType.IVF_PQ]:
+        return {"nprobe": 32}
+    elif index_type == IndexType.HNSW:
+        return {"ef": 64}
+    elif index_type == IndexType.RNSG:
+        return {"search_length": 50}
+    else:
+        logging.getLogger().info("Invalid index_type.")
+
+
+def assert_has_collection(conn, collection_name):
+    status, ok = conn.has_collection(collection_name)
     return status.OK() and ok
 
 

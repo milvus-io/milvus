@@ -11,7 +11,8 @@
 
 #pragma once
 
-#include <src/segment/SegmentReader.h>
+#include "segment/SegmentReader.h"
+#include "utils/Json.h"
 
 #include <memory>
 #include <string>
@@ -26,10 +27,10 @@ namespace engine {
 class ExecutionEngineImpl : public ExecutionEngine {
  public:
     ExecutionEngineImpl(uint16_t dimension, const std::string& location, EngineType index_type, MetricType metric_type,
-                        int32_t nlist);
+                        const milvus::json& index_params);
 
     ExecutionEngineImpl(VecIndexPtr index, const std::string& location, EngineType index_type, MetricType metric_type,
-                        int32_t nlist);
+                        const milvus::json& index_params);
 
     Status
     AddWithIds(int64_t n, const float* xdata, const int64_t* xids) override;
@@ -77,16 +78,16 @@ class ExecutionEngineImpl : public ExecutionEngine {
     GetVectorByID(const int64_t& id, uint8_t* vector, bool hybrid) override;
 
     Status
-    Search(int64_t n, const float* data, int64_t k, int64_t nprobe, float* distances, int64_t* labels,
+    Search(int64_t n, const float* data, int64_t k, const milvus::json& extra_params, float* distances, int64_t* labels,
            bool hybrid = false) override;
 
     Status
-    Search(int64_t n, const uint8_t* data, int64_t k, int64_t nprobe, float* distances, int64_t* labels,
-           bool hybrid = false) override;
+    Search(int64_t n, const uint8_t* data, int64_t k, const milvus::json& extra_params, float* distances,
+           int64_t* labels, bool hybrid = false) override;
 
     Status
-    Search(int64_t n, const std::vector<int64_t>& ids, int64_t k, int64_t nprobe, float* distances, int64_t* labels,
-           bool hybrid) override;
+    Search(int64_t n, const std::vector<int64_t>& ids, int64_t k, const milvus::json& extra_params, float* distances,
+           int64_t* labels, bool hybrid) override;
 
     ExecutionEnginePtr
     BuildIndex(const std::string& location, EngineType engine_type) override;
@@ -136,7 +137,7 @@ class ExecutionEngineImpl : public ExecutionEngine {
     int64_t dim_;
     std::string location_;
 
-    int64_t nlist_ = 0;
+    milvus::json index_params_;
     int64_t gpu_num_ = 0;
 };
 

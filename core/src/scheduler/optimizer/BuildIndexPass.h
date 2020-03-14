@@ -22,13 +22,13 @@
 #include <unordered_map>
 #include <vector>
 
+#include "config/handler/GpuBuildConfigHandler.h"
 #include "scheduler/optimizer/Pass.h"
-#include "scheduler/optimizer/handler/GpuBuildResHandler.h"
 
 namespace milvus {
 namespace scheduler {
 
-class BuildIndexPass : public Pass, public GpuBuildResHandler {
+class BuildIndexPass : public Pass, public server::GpuBuildConfigHandler {
  public:
     BuildIndexPass() = default;
 

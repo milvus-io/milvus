@@ -72,35 +72,32 @@ class ParamGenerator {
     knowhere::Config
     Gen(const ParameterType& type) {
         if (type == ParameterType::ivf) {
-            auto tempconf = std::make_shared<knowhere::IVFCfg>();
-            tempconf->d = DIM;
-            tempconf->gpu_id = DEVICEID;
-            tempconf->nlist = 100;
-            tempconf->nprobe = 4;
-            tempconf->k = K;
-            tempconf->metric_type = knowhere::METRICTYPE::L2;
-            return tempconf;
+            return knowhere::Config{
+                {knowhere::meta::DIM, DIM},
+                {knowhere::meta::TOPK, K},
+                {knowhere::IndexParams::nlist, 100},
+                {knowhere::IndexParams::nprobe, 4},
+                {knowhere::Metric::TYPE, knowhere::Metric::L2},
+                {knowhere::meta::DEVICEID, DEVICEID},
+            };
         } else if (type == ParameterType::ivfpq) {
-            auto tempconf = std::make_shared<knowhere::IVFPQCfg>();
-            tempconf->d = DIM;
-            tempconf->gpu_id = DEVICEID;
-            tempconf->nlist = 100;
-            tempconf->nprobe = 4;
-            tempconf->k = K;
-            tempconf->m = 4;
-            tempconf->nbits = 8;
-            tempconf->metric_type = knowhere::METRICTYPE::L2;
-            return tempconf;
+            return knowhere::Config{
+                {knowhere::meta::DIM, DIM},
+                {knowhere::meta::TOPK, K},
+                {knowhere::IndexParams::nlist, 100},
+                {knowhere::IndexParams::nprobe, 4},
+                {knowhere::IndexParams::m, 4},
+                {knowhere::IndexParams::nbits, 8},
+                {knowhere::Metric::TYPE, knowhere::Metric::L2},
+                {knowhere::meta::DEVICEID, DEVICEID},
+            };
         } else if (type == ParameterType::ivfsq) {
-            auto tempconf = std::make_shared<knowhere::IVFSQCfg>();
-            tempconf->d = DIM;
-            tempconf->gpu_id = DEVICEID;
-            tempconf->nlist = 100;
-            tempconf->nprobe = 4;
-            tempconf->k = K;
-            tempconf->nbits = 8;
-            tempconf->metric_type = knowhere::METRICTYPE::L2;
-            return tempconf;
+            return knowhere::Config{
+                {knowhere::meta::DIM, DIM},           {knowhere::meta::TOPK, K},
+                {knowhere::IndexParams::nlist, 100},  {knowhere::IndexParams::nprobe, 4},
+                {knowhere::IndexParams::nbits, 8},    {knowhere::Metric::TYPE, knowhere::Metric::L2},
+                {knowhere::meta::DEVICEID, DEVICEID},
+            };
         }
     }
 };

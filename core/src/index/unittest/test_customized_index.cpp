@@ -69,7 +69,7 @@ TEST_F(SingleIndexTest, IVFSQHybrid) {
             for (int i = 0; i < 3; ++i) {
                 auto gpu_idx = cpu_idx->CopyCpuToGpu(DEVICEID, conf);
                 auto result = gpu_idx->Search(query_dataset, conf);
-                AssertAnns(result, nq, conf->k);
+                AssertAnns(result, nq, conf[knowhere::meta::TOPK]);
                 // PrintResult(result, nq, k);
             }
         }
@@ -86,29 +86,17 @@ TEST_F(SingleIndexTest, IVFSQHybrid) {
         auto quantization = pair.second;
 
         auto result = gpu_idx->Search(query_dataset, conf);
-        AssertAnns(result, nq, conf->k);
+        AssertAnns(result, nq, conf[knowhere::meta::TOPK]);
         //        PrintResult(result, nq, k);
 
-        auto quantizer_conf = std::make_shared<knowhere::QuantizerCfg>();
-        quantizer_conf->mode = 2;  // only copy data
-        quantizer_conf->gpu_id = DEVICEID;
+        milvus::json quantizer_conf{{knowhere::meta::DEVICEID, DEVICEID}, {"mode", 2}};
         for (int i = 0; i < 2; ++i) {
             auto hybrid_idx = std::make_shared<knowhere::IVFSQHybrid>(DEVICEID);
             hybrid_idx->Load(binaryset);
             auto new_idx = hybrid_idx->LoadData(quantization, quantizer_conf);
             auto result = new_idx->Search(query_dataset, conf);
-            AssertAnns(result, nq, conf->k);
+            AssertAnns(result, nq, conf[knowhere::meta::TOPK]);
             //            PrintResult(result, nq, k);
-        }
-
-        {
-            // invalid quantizer config
-            quantizer_conf = std::make_shared<knowhere::QuantizerCfg>();
-            auto hybrid_idx = std::make_shared<knowhere::IVFSQHybrid>(DEVICEID);
-            ASSERT_ANY_THROW(hybrid_idx->LoadData(quantization, nullptr));
-            ASSERT_ANY_THROW(hybrid_idx->LoadData(quantization, quantizer_conf));
-            quantizer_conf->mode = 2;  // only copy data
-            ASSERT_ANY_THROW(hybrid_idx->LoadData(quantization, quantizer_conf));
         }
     }
 
@@ -126,7 +114,7 @@ TEST_F(SingleIndexTest, IVFSQHybrid) {
 
             hybrid_idx->SetQuantizer(quantization);
             auto result = hybrid_idx->Search(query_dataset, conf);
-            AssertAnns(result, nq, conf->k);
+            AssertAnns(result, nq, conf[knowhere::meta::TOPK]);
             //            PrintResult(result, nq, k);
             hybrid_idx->UnsetQuantizer();
         }

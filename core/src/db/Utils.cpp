@@ -12,13 +12,14 @@
 #include "db/Utils.h"
 
 #include <fiu-local.h>
+
 #include <boost/filesystem.hpp>
 #include <chrono>
 #include <mutex>
 #include <regex>
 #include <vector>
 
-#include "server/Config.h"
+#include "config/Config.h"
 #include "storage/s3/S3ClientWrapper.h"
 #include "utils/CommonUtil.h"
 #include "utils/Log.h"
@@ -211,8 +212,28 @@ GetParentPath(const std::string& path, std::string& parent_path) {
 
 bool
 IsSameIndex(const TableIndex& index1, const TableIndex& index2) {
-    return index1.engine_type_ == index2.engine_type_ && index1.nlist_ == index2.nlist_ &&
+    return index1.engine_type_ == index2.engine_type_ && index1.extra_params_ == index2.extra_params_ &&
            index1.metric_type_ == index2.metric_type_;
+}
+
+bool
+IsRawIndexType(int32_t type) {
+    return (type == (int32_t)EngineType::FAISS_IDMAP) || (type == (int32_t)EngineType::FAISS_BIN_IDMAP);
+}
+
+bool
+IsBinaryIndexType(int32_t index_type) {
+    return (index_type == (int32_t)engine::EngineType::FAISS_BIN_IDMAP) ||
+           (index_type == (int32_t)engine::EngineType::FAISS_BIN_IVFFLAT);
+}
+
+bool
+IsBinaryMetricType(int32_t metric_type) {
+    return (metric_type == (int32_t)engine::MetricType::HAMMING) ||
+           (metric_type == (int32_t)engine::MetricType::JACCARD) ||
+           (metric_type == (int32_t)engine::MetricType::SUBSTRUCTURE) ||
+           (metric_type == (int32_t)engine::MetricType::SUPERSTRUCTURE) ||
+           (metric_type == (int32_t)engine::MetricType::TANIMOTO);
 }
 
 meta::DateT

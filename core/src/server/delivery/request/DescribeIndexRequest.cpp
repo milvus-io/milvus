@@ -78,7 +78,7 @@ DescribeIndexRequest::OnExecute() {
 
         index_param_.table_name_ = table_name_;
         index_param_.index_type_ = index.engine_type_;
-        index_param_.nlist_ = index.nlist_;
+        index_param_.extra_params_ = index.extra_params_.dump();
     } catch (std::exception& ex) {
         return Status(SERVER_UNEXPECTED_ERROR, ex.what());
     }

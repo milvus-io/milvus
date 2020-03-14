@@ -14,10 +14,6 @@
 
 #include <omp.h>
 
-#ifdef __SSE__
-#include <immintrin.h>
-#endif
-
 #include <faiss/utils/utils.h>
 #include <faiss/impl/FaissAssert.h>
 #include <faiss/impl/AuxIndexStructures.h>

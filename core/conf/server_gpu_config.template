@@ -44,7 +44,8 @@ server_config:
 #----------------------+------------------------------------------------------------+------------+-----------------+
 # preload_table        | A comma-separated list of table names that need to be pre- | StringList |                 |
 #                      | loaded when Milvus server starts up.                       |            |                 |
-#                      | '*' means preload all existing tables.                     |            |                 |
+#                      | '*' means preload all existing tables (single-quote or     |            |                 |
+#                      | double-quote required).                                    |            |                 |
 #----------------------+------------------------------------------------------------+------------+-----------------+
 # auto_flush_interval  | The interval, in seconds, at which Milvus automatically    | Integer    | 1 (s)           |
 #                      | flushes data to disk.                                      |            |                 |
@@ -64,27 +65,9 @@ db_config:
 # secondary_path       | A semicolon-separated list of secondary directories used   | Path       |                 |
 #                      | to save vector data and index data.                        |            |                 |
 #----------------------+------------------------------------------------------------+------------+-----------------+
-# s3_enable            | Enable Simple Storage Service or not.                      | Boolean    | false           |
-#----------------------+------------------------------------------------------------+------------+-----------------+
-# s3_address           | Simple Storage Service IP address.                         | IP         | 127.0.0.1       |
-#----------------------+------------------------------------------------------------+------------+-----------------+
-# s3_port              | Simple Storage Service port. Port range (1024, 65535)      | Integer    | 9000            |
-#----------------------+------------------------------------------------------------+------------+-----------------+
-# s3_access_key        | Simple Storage Service access key.                         | String     | minioadmin      |
-#----------------------+------------------------------------------------------------+------------+-----------------+
-# s3_secret_key        | Simple Storage Service secret key.                         | String     | minioadmin      |
-#----------------------+------------------------------------------------------------+------------+-----------------+
-# s3_bucket            | Simple Storage Service bucket name.                        | String     | milvus-bucket   |
-#----------------------+------------------------------------------------------------+------------+-----------------+
 storage_config:
   primary_path: @MILVUS_DB_PATH@
   secondary_path:
-  s3_enable: false
-  s3_address: 127.0.0.1
-  s3_port: 9000
-  s3_access_key: minioadmin
-  s3_secret_key: minioadmin
-  s3_bucket: milvus-bucket
 
 #----------------------+------------------------------------------------------------+------------+-----------------+
 # Metric Config        | Description                                                | Type       | Default         |
@@ -124,10 +107,10 @@ cache_config:
 # use_blas_threshold   | A Milvus performance tuning parameter. This value will be  | Integer    | 1100            |
 #                      | compared with 'nq' to decide if OpenBLAS should be used.   |            |                 |
 #                      | If nq >= use_blas_threshold, OpenBLAS will be used, search |            |                 |
-#                      | response times will be stable but the search speed will be |            |                 |
-#                      | slower; if nq < use_blas_threshold, SSE will be used,      |            |                 |
-#                      | search speed will be faster but search response times will |            |                 |
-#                      | fluctuate.                                                 |            |                 |
+#                      | response time will be stable but the search speed will be  |            |                 |
+#                      | slower; if nq < use_blas_threshold, AVX or SSE will be     |            |                 |
+#                      | used, search speed will be faster but search response time |            |                 |
+#                      | will fluctuate.                                            |            |                 |
 #----------------------+------------------------------------------------------------+------------+-----------------+
 # gpu_search_threshold | A Milvus performance tuning parameter. This value will be  | Integer    | 1000            |
 #                      | compared with 'nq' to decide if the search computation will|            |                 |

@@ -30,6 +30,7 @@ endforeach ()
 
 aux_source_directory(${MILVUS_ENGINE_SRC}/cache cache_files)
 aux_source_directory(${MILVUS_ENGINE_SRC}/config config_files)
+aux_source_directory(${MILVUS_ENGINE_SRC}/config/handler config_handler_files)
 aux_source_directory(${MILVUS_ENGINE_SRC}/metrics metrics_files)
 aux_source_directory(${MILVUS_ENGINE_SRC}/metrics/prometheus metrics_prometheus_files)
 aux_source_directory(${MILVUS_ENGINE_SRC}/db db_main_files)
@@ -50,7 +51,6 @@ aux_source_directory(${MILVUS_ENGINE_SRC}/scheduler/action scheduler_action_file
 aux_source_directory(${MILVUS_ENGINE_SRC}/scheduler/event scheduler_event_files)
 aux_source_directory(${MILVUS_ENGINE_SRC}/scheduler/job scheduler_job_files)
 aux_source_directory(${MILVUS_ENGINE_SRC}/scheduler/optimizer scheduler_optimizer_files)
-aux_source_directory(${MILVUS_ENGINE_SRC}/scheduler/optimizer/handler scheduler_optimizer_handler_files)
 aux_source_directory(${MILVUS_ENGINE_SRC}/scheduler/resource scheduler_resource_files)
 aux_source_directory(${MILVUS_ENGINE_SRC}/scheduler/task scheduler_task_files)
 set(scheduler_files
@@ -59,7 +59,6 @@ set(scheduler_files
         ${scheduler_event_files}
         ${scheduler_job_files}
         ${scheduler_optimizer_files}
-        ${scheduler_optimizer_handler_files}
         ${scheduler_resource_files}
         ${scheduler_task_files}
         )
@@ -107,11 +106,11 @@ set(web_server_files
         )
 
 aux_source_directory(${MILVUS_ENGINE_SRC}/storage storage_main_files)
-aux_source_directory(${MILVUS_ENGINE_SRC}/storage/file storage_file_files)
+aux_source_directory(${MILVUS_ENGINE_SRC}/storage/disk storage_disk_files)
 aux_source_directory(${MILVUS_ENGINE_SRC}/storage/s3 storage_s3_files)
 set(storage_files
         ${storage_main_files}
-        ${storage_file_files}
+        ${storage_disk_files}
         ${storage_s3_files}
         )
 
@@ -125,8 +124,6 @@ aux_source_directory(${MILVUS_ENGINE_SRC}/codecs codecs_files)
 aux_source_directory(${MILVUS_ENGINE_SRC}/codecs/default codecs_default_files)
 
 aux_source_directory(${MILVUS_ENGINE_SRC}/segment segment_files)
-
-aux_source_directory(${MILVUS_ENGINE_SRC}/store store_files)
 
 set(engine_files
         ${CMAKE_CURRENT_SOURCE_DIR}/main.cpp
@@ -144,7 +141,6 @@ set(engine_files
         ${codecs_files}
         ${codecs_default_files}
         ${segment_files}
-        ${store_files}
         )
 
 if (MILVUS_WITH_PROMETHEUS)
@@ -279,6 +275,7 @@ set(server_libs
 
 add_executable(milvus_server
         ${config_files}
+        ${config_handler_files}
         ${metrics_files}
         ${scheduler_files}
         ${server_files}

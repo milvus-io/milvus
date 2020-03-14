@@ -19,6 +19,7 @@
 #include <faiss/gpu/GpuIndexIVF.h>
 #include <faiss/index_factory.h>
 #include <fiu-local.h>
+#include <string>
 #include <utility>
 
 namespace knowhere {
@@ -30,19 +31,14 @@ namespace knowhere {
 IndexModelPtr
 IVFSQHybrid::Train(const DatasetPtr& dataset, const Config& config) {
     //    std::lock_guard<std::mutex> lk(g_mutex);
-
-    auto build_cfg = std::dynamic_pointer_cast<IVFSQCfg>(config);
-    if (build_cfg != nullptr) {
-        build_cfg->CheckValid();  // throw exception
-    }
-    gpu_id_ = build_cfg->gpu_id;
-
     GETTENSOR(dataset)
+    gpu_id_ = config[knowhere::meta::DEVICEID];
 
     std::stringstream index_type;
-    index_type << "IVF" << build_cfg->nlist << ","
+    index_type << "IVF" << config[IndexParams::nlist] << ","
                << "SQ8Hybrid";
-    auto build_index = faiss::index_factory(dim, index_type.str().c_str(), GetMetricType(build_cfg->metric_type));
+    auto build_index =
+        faiss::index_factory(dim, index_type.str().c_str(), GetMetricType(config[Metric::TYPE].get<std::string>()));
 
     auto temp_resource = FaissGpuResourceMgr::GetInstance().GetRes(gpu_id_);
     if (temp_resource != nullptr) {
@@ -133,17 +129,10 @@ IVFSQHybrid::search_impl(int64_t n, const float* data, int64_t k, float* distanc
 }
 
 QuantizerPtr
-IVFSQHybrid::LoadQuantizer(const Config& conf) {
+IVFSQHybrid::LoadQuantizer(const Config& config) {
     //    std::lock_guard<std::mutex> lk(g_mutex);
 
-    auto quantizer_conf = std::dynamic_pointer_cast<QuantizerCfg>(conf);
-    if (quantizer_conf != nullptr) {
-        if (quantizer_conf->mode != 1) {
-            KNOWHERE_THROW_MSG("mode only support 1 in this func");
-        }
-    }
-    auto gpu_id = quantizer_conf->gpu_id;
-
+    auto gpu_id = config[knowhere::meta::DEVICEID].get<int64_t>();
     if (auto res = FaissGpuResourceMgr::GetInstance().GetRes(gpu_id)) {
         ResScope rs(res, gpu_id, false);
         faiss::gpu::GpuClonerOptions option;
@@ -152,7 +141,7 @@ IVFSQHybrid::LoadQuantizer(const Config& conf) {
         auto index_composition = new faiss::IndexComposition;
         index_composition->index = index_.get();
         index_composition->quantizer = nullptr;
-        index_composition->mode = quantizer_conf->mode;  // only 1
+        index_composition->mode = 1;  // only 1
 
         auto gpu_index = faiss::gpu::index_cpu_to_gpu(res->faiss_res.get(), gpu_id, index_composition, &option);
         delete gpu_index;
@@ -205,19 +194,10 @@ IVFSQHybrid::UnsetQuantizer() {
 }
 
 VectorIndexPtr
-IVFSQHybrid::LoadData(const knowhere::QuantizerPtr& q, const Config& conf) {
+IVFSQHybrid::LoadData(const knowhere::QuantizerPtr& q, const Config& config) {
     //    std::lock_guard<std::mutex> lk(g_mutex);
 
-    auto quantizer_conf = std::dynamic_pointer_cast<QuantizerCfg>(conf);
-    if (quantizer_conf != nullptr) {
-        if (quantizer_conf->mode != 2) {
-            KNOWHERE_THROW_MSG("mode only support 2 in this func");
-        }
-    } else {
-        KNOWHERE_THROW_MSG("conf error");
-    }
-
-    auto gpu_id = quantizer_conf->gpu_id;
+    int64_t gpu_id = config[knowhere::meta::DEVICEID];
 
     if (auto res = FaissGpuResourceMgr::GetInstance().GetRes(gpu_id)) {
         ResScope rs(res, gpu_id, false);
@@ -231,7 +211,7 @@ IVFSQHybrid::LoadData(const knowhere::QuantizerPtr& q, const Config& conf) {
         auto index_composition = new faiss::IndexComposition;
         index_composition->index = index_.get();
         index_composition->quantizer = ivf_quantizer->quantizer;
-        index_composition->mode = quantizer_conf->mode;  // only 2
+        index_composition->mode = 2;  // only 2
 
         auto gpu_index = faiss::gpu::index_cpu_to_gpu(res->faiss_res.get(), gpu_id, index_composition, &option);
         std::shared_ptr<faiss::Index> new_idx;

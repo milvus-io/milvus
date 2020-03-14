@@ -45,10 +45,8 @@ class IDMAPTest : public DataGen, public TestGpuIndexBase {
 TEST_F(IDMAPTest, idmap_basic) {
     ASSERT_TRUE(!xb.empty());
 
-    auto conf = std::make_shared<knowhere::Cfg>();
-    conf->d = dim;
-    conf->k = k;
-    conf->metric_type = knowhere::METRICTYPE::L2;
+    knowhere::Config conf{
+        {knowhere::meta::DIM, dim}, {knowhere::meta::TOPK, k}, {knowhere::Metric::TYPE, knowhere::Metric::L2}};
 
     // null faiss index
     {
@@ -107,10 +105,8 @@ TEST_F(IDMAPTest, idmap_serialize) {
         reader(ret, bin->size);
     };
 
-    auto conf = std::make_shared<knowhere::Cfg>();
-    conf->d = dim;
-    conf->k = k;
-    conf->metric_type = knowhere::METRICTYPE::L2;
+    knowhere::Config conf{
+        {knowhere::meta::DIM, dim}, {knowhere::meta::TOPK, k}, {knowhere::Metric::TYPE, knowhere::Metric::L2}};
 
     {
         // serialize index
@@ -146,10 +142,8 @@ TEST_F(IDMAPTest, idmap_serialize) {
 TEST_F(IDMAPTest, copy_test) {
     ASSERT_TRUE(!xb.empty());
 
-    auto conf = std::make_shared<knowhere::Cfg>();
-    conf->d = dim;
-    conf->k = k;
-    conf->metric_type = knowhere::METRICTYPE::L2;
+    knowhere::Config conf{
+        {knowhere::meta::DIM, dim}, {knowhere::meta::TOPK, k}, {knowhere::Metric::TYPE, knowhere::Metric::L2}};
 
     index_->Train(conf);
     index_->Add(base_dataset, conf);

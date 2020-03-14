@@ -19,17 +19,58 @@
 #include <fiu-local.h>
 #include <fiu-control.h>
 
+namespace {
+
+static constexpr uint16_t DIMENSION = 64;
+static constexpr int64_t ROW_COUNT = 1000;
+static const char* INIT_PATH = "/tmp/milvus_index_1";
+
+milvus::engine::ExecutionEnginePtr
+CreateExecEngine(const milvus::json& json_params, milvus::engine::MetricType metric = milvus::engine::MetricType::IP) {
+    auto engine_ptr = milvus::engine::EngineFactory::Build(
+        DIMENSION,
+        INIT_PATH,
+        milvus::engine::EngineType::FAISS_IDMAP,
+        metric,
+        json_params);
+
+    std::vector<float> data;
+    std::vector<int64_t> ids;
+    data.reserve(ROW_COUNT * DIMENSION);
+    ids.reserve(ROW_COUNT);
+    for (int64_t i = 0; i < ROW_COUNT; i++) {
+        ids.push_back(i);
+        for (uint16_t k = 0; k < DIMENSION; k++) {
+            data.push_back(i * DIMENSION + k);
+        }
+    }
+
+    auto status = engine_ptr->AddWithIds((int64_t)ids.size(), data.data(), ids.data());
+    return engine_ptr;
+}
+
+} // namespace
+
 TEST_F(EngineTest, FACTORY_TEST) {
+    const milvus::json index_params = {{"nlist", 1024}};
     {
         auto engine_ptr = milvus::engine::EngineFactory::Build(
-            512, "/tmp/milvus_index_1", milvus::engine::EngineType::INVALID, milvus::engine::MetricType::IP, 1024);
+            512,
+            "/tmp/milvus_index_1",
+            milvus::engine::EngineType::INVALID,
+            milvus::engine::MetricType::IP,
+            index_params);
 
         ASSERT_TRUE(engine_ptr == nullptr);
     }
 
     {
         auto engine_ptr = milvus::engine::EngineFactory::Build(
-            512, "/tmp/milvus_index_1", milvus::engine::EngineType::FAISS_IDMAP, milvus::engine::MetricType::IP, 1024);
+            512,
+            "/tmp/milvus_index_1",
+            milvus::engine::EngineType::FAISS_IDMAP,
+            milvus::engine::MetricType::IP,
+            index_params);
 
         ASSERT_TRUE(engine_ptr != nullptr);
     }
@@ -37,28 +78,40 @@ TEST_F(EngineTest, FACTORY_TEST) {
     {
         auto engine_ptr =
             milvus::engine::EngineFactory::Build(512, "/tmp/milvus_index_1", milvus::engine::EngineType::FAISS_IVFFLAT,
-                                                 milvus::engine::MetricType::IP, 1024);
+                                                 milvus::engine::MetricType::IP, index_params);
 
         ASSERT_TRUE(engine_ptr != nullptr);
     }
 
     {
         auto engine_ptr = milvus::engine::EngineFactory::Build(
-            512, "/tmp/milvus_index_1", milvus::engine::EngineType::FAISS_IVFSQ8, milvus::engine::MetricType::IP, 1024);
+            512,
+            "/tmp/milvus_index_1",
+            milvus::engine::EngineType::FAISS_IVFSQ8,
+            milvus::engine::MetricType::IP,
+            index_params);
 
         ASSERT_TRUE(engine_ptr != nullptr);
     }
 
     {
         auto engine_ptr = milvus::engine::EngineFactory::Build(
-            512, "/tmp/milvus_index_1", milvus::engine::EngineType::NSG_MIX, milvus::engine::MetricType::IP, 1024);
+            512,
+            "/tmp/milvus_index_1",
+            milvus::engine::EngineType::NSG_MIX,
+            milvus::engine::MetricType::IP,
+            index_params);
 
         ASSERT_TRUE(engine_ptr != nullptr);
     }
 
     {
         auto engine_ptr = milvus::engine::EngineFactory::Build(
-            512, "/tmp/milvus_index_1", milvus::engine::EngineType::FAISS_PQ, milvus::engine::MetricType::IP, 1024);
+            512,
+            "/tmp/milvus_index_1",
+            milvus::engine::EngineType::FAISS_PQ,
+            milvus::engine::MetricType::IP,
+            index_params);
 
         ASSERT_TRUE(engine_ptr != nullptr);
     }
@@ -66,7 +119,7 @@ TEST_F(EngineTest, FACTORY_TEST) {
     {
         auto engine_ptr = milvus::engine::EngineFactory::Build(
             512, "/tmp/milvus_index_1", milvus::engine::EngineType::SPTAG_KDT,
-            milvus::engine::MetricType::L2, 1024);
+            milvus::engine::MetricType::L2, index_params);
 
         ASSERT_TRUE(engine_ptr != nullptr);
     }
@@ -74,7 +127,7 @@ TEST_F(EngineTest, FACTORY_TEST) {
     {
         auto engine_ptr = milvus::engine::EngineFactory::Build(
             512, "/tmp/milvus_index_1", milvus::engine::EngineType::SPTAG_KDT,
-            milvus::engine::MetricType::L2, 1024);
+            milvus::engine::MetricType::L2, index_params);
 
         ASSERT_TRUE(engine_ptr != nullptr);
     }
@@ -85,7 +138,7 @@ TEST_F(EngineTest, FACTORY_TEST) {
         FIU_ENABLE_FIU("ExecutionEngineImpl.CreatetVecIndex.invalid_type");
         ASSERT_ANY_THROW(milvus::engine::EngineFactory::Build(
             512, "/tmp/milvus_index_1", milvus::engine::EngineType::SPTAG_KDT,
-            milvus::engine::MetricType::L2, 1024));
+            milvus::engine::MetricType::L2, index_params));
         fiu_disable("ExecutionEngineImpl.CreatetVecIndex.invalid_type");
     }
 
@@ -94,91 +147,88 @@ TEST_F(EngineTest, FACTORY_TEST) {
         FIU_ENABLE_FIU("BFIndex.Build.throw_knowhere_exception");
         ASSERT_ANY_THROW(milvus::engine::EngineFactory::Build(
             512, "/tmp/milvus_index_1", milvus::engine::EngineType::SPTAG_KDT,
-            milvus::engine::MetricType::L2, 1024));
+            milvus::engine::MetricType::L2, index_params));
         fiu_disable("BFIndex.Build.throw_knowhere_exception");
     }
 }
 
 TEST_F(EngineTest, ENGINE_IMPL_TEST) {
     fiu_init(0);
-    uint16_t dimension = 64;
-    std::string file_path = "/tmp/milvus_index_1";
-    auto engine_ptr = milvus::engine::EngineFactory::Build(
-        dimension, file_path, milvus::engine::EngineType::FAISS_IVFFLAT, milvus::engine::MetricType::IP, 1024);
 
-    std::vector<float> data;
-    std::vector<int64_t> ids;
-    const int row_count = 500;
-    data.reserve(row_count * dimension);
-    ids.reserve(row_count);
-    for (int64_t i = 0; i < row_count; i++) {
-        ids.push_back(i);
-        for (uint16_t k = 0; k < dimension; k++) {
-            data.push_back(i * dimension + k);
-        }
+    {
+        milvus::json index_params = {{"nlist", 10}};
+        auto engine_ptr = CreateExecEngine(index_params);
+
+        ASSERT_EQ(engine_ptr->Dimension(), DIMENSION);
+        ASSERT_EQ(engine_ptr->Count(), ROW_COUNT);
+        ASSERT_EQ(engine_ptr->GetLocation(), INIT_PATH);
+        ASSERT_EQ(engine_ptr->IndexMetricType(), milvus::engine::MetricType::IP);
+
+        ASSERT_ANY_THROW(engine_ptr->BuildIndex(INIT_PATH, milvus::engine::EngineType::INVALID));
+        FIU_ENABLE_FIU("VecIndexImpl.BuildAll.throw_knowhere_exception");
+        ASSERT_ANY_THROW(engine_ptr->BuildIndex(INIT_PATH, milvus::engine::EngineType::SPTAG_KDT));
+        fiu_disable("VecIndexImpl.BuildAll.throw_knowhere_exception");
+
+        auto engine_build = engine_ptr->BuildIndex("/tmp/milvus_index_2", milvus::engine::EngineType::FAISS_IVFSQ8);
+        ASSERT_NE(engine_build, nullptr);
     }
 
-    auto status = engine_ptr->AddWithIds((int64_t)ids.size(), data.data(), ids.data());
-    ASSERT_TRUE(status.ok());
-
-    ASSERT_EQ(engine_ptr->Dimension(), dimension);
-    ASSERT_EQ(engine_ptr->Count(), ids.size());
-
-    ASSERT_EQ(engine_ptr->GetLocation(), file_path);
-    ASSERT_EQ(engine_ptr->IndexMetricType(), milvus::engine::MetricType::IP);
-
-    ASSERT_ANY_THROW(engine_ptr->BuildIndex(file_path, milvus::engine::EngineType::INVALID));
-    FIU_ENABLE_FIU("VecIndexImpl.BuildAll.throw_knowhere_exception");
-    ASSERT_ANY_THROW(engine_ptr->BuildIndex(file_path, milvus::engine::EngineType::SPTAG_KDT));
-    fiu_disable("VecIndexImpl.BuildAll.throw_knowhere_exception");
-
-    auto engine_build = engine_ptr->BuildIndex("/tmp/milvus_index_2", milvus::engine::EngineType::FAISS_IVFSQ8);
+    {
 #ifndef MILVUS_GPU_VERSION
-    //PQ don't support IP In gpu version
-    engine_build = engine_ptr->BuildIndex("/tmp/milvus_index_3", milvus::engine::EngineType::FAISS_PQ);
+        milvus::json index_params = {{"nlist", 10}, {"m", 16}};
+        auto engine_ptr = CreateExecEngine(index_params);
+        //PQ don't support IP In gpu version
+        auto engine_build = engine_ptr->BuildIndex("/tmp/milvus_index_3", milvus::engine::EngineType::FAISS_PQ);
+        ASSERT_NE(engine_build, nullptr);
 #endif
-    engine_build = engine_ptr->BuildIndex("/tmp/milvus_index_4", milvus::engine::EngineType::SPTAG_KDT);
-    engine_build = engine_ptr->BuildIndex("/tmp/milvus_index_5", milvus::engine::EngineType::SPTAG_BKT);
-    engine_ptr->BuildIndex("/tmp/milvus_index_SPTAG_BKT", milvus::engine::EngineType::SPTAG_BKT);
+    }
+
+    {
+        milvus::json index_params = {{"nlist", 10}};
+        auto engine_ptr = CreateExecEngine(index_params);
+        auto engine_build = engine_ptr->BuildIndex("/tmp/milvus_index_4", milvus::engine::EngineType::SPTAG_KDT);
+        engine_build = engine_ptr->BuildIndex("/tmp/milvus_index_5", milvus::engine::EngineType::SPTAG_BKT);
+        engine_ptr->BuildIndex("/tmp/milvus_index_SPTAG_BKT", milvus::engine::EngineType::SPTAG_BKT);
+
+        //CPU version invoke CopyToCpu will fail
+        auto status = engine_ptr->CopyToCpu();
+        ASSERT_FALSE(status.ok());
+    }
 
 #ifdef MILVUS_GPU_VERSION
-    FIU_ENABLE_FIU("ExecutionEngineImpl.CreatetVecIndex.gpu_res_disabled");
-    engine_ptr->BuildIndex("/tmp/milvus_index_NSG_MIX", milvus::engine::EngineType::NSG_MIX);
-    engine_ptr->BuildIndex("/tmp/milvus_index_6", milvus::engine::EngineType::FAISS_IVFFLAT);
-    engine_ptr->BuildIndex("/tmp/milvus_index_7", milvus::engine::EngineType::FAISS_IVFSQ8);
-    ASSERT_ANY_THROW(engine_ptr->BuildIndex("/tmp/milvus_index_8", milvus::engine::EngineType::FAISS_IVFSQ8H));
-    ASSERT_ANY_THROW(engine_ptr->BuildIndex("/tmp/milvus_index_9", milvus::engine::EngineType::FAISS_PQ));
-    fiu_disable("ExecutionEngineImpl.CreatetVecIndex.gpu_res_disabled");
-#endif
+    {
+        FIU_ENABLE_FIU("ExecutionEngineImpl.CreatetVecIndex.gpu_res_disabled");
+        milvus::json index_params = {{"search_length", 100}, {"out_degree", 40}, {"pool_size", 100}, {"knng", 200},
+                                     {"candidate_pool_size", 500}};
+        auto engine_ptr = CreateExecEngine(index_params, milvus::engine::MetricType::L2);
+        engine_ptr->BuildIndex("/tmp/milvus_index_NSG_MIX", milvus::engine::EngineType::NSG_MIX);
+        fiu_disable("ExecutionEngineImpl.CreatetVecIndex.gpu_res_disabled");
 
-    //CPU version invoke CopyToCpu will fail
-    status = engine_ptr->CopyToCpu();
-    ASSERT_FALSE(status.ok());
+        auto status = engine_ptr->CopyToGpu(0, false);
+        ASSERT_TRUE(status.ok());
+        status = engine_ptr->GpuCache(0);
+        ASSERT_TRUE(status.ok());
+        status = engine_ptr->CopyToGpu(0, false);
+        ASSERT_TRUE(status.ok());
 
-#ifdef MILVUS_GPU_VERSION
-    status = engine_ptr->CopyToGpu(0, false);
-    ASSERT_TRUE(status.ok());
-    status = engine_ptr->GpuCache(0);
-    ASSERT_TRUE(status.ok());
-    status = engine_ptr->CopyToGpu(0, false);
-    ASSERT_TRUE(status.ok());
+        //    auto new_engine = engine_ptr->Clone();
+        //    ASSERT_EQ(new_engine->Dimension(), dimension);
+        //    ASSERT_EQ(new_engine->Count(), ids.size());
 
-//    auto new_engine = engine_ptr->Clone();
-//    ASSERT_EQ(new_engine->Dimension(), dimension);
-//    ASSERT_EQ(new_engine->Count(), ids.size());
-
-    status = engine_ptr->CopyToCpu();
-    ASSERT_TRUE(status.ok());
-    engine_ptr->CopyToCpu();
-    ASSERT_TRUE(status.ok());
+        status = engine_ptr->CopyToCpu();
+        ASSERT_TRUE(status.ok());
+        engine_ptr->CopyToCpu();
+        ASSERT_TRUE(status.ok());
+    }
 #endif
 }
 
 TEST_F(EngineTest, ENGINE_IMPL_NULL_INDEX_TEST) {
     uint16_t dimension = 64;
     std::string file_path = "/tmp/milvus_index_1";
+    milvus::json index_params = {{"nlist", 1024}};
     auto engine_ptr = milvus::engine::EngineFactory::Build(
-        dimension, file_path, milvus::engine::EngineType::FAISS_IVFFLAT, milvus::engine::MetricType::IP, 1024);
+        dimension, file_path, milvus::engine::EngineType::FAISS_IVFFLAT, milvus::engine::MetricType::IP, index_params);
 
     fiu_init(0); // init
     fiu_enable("read_null_index", 1, NULL, 0);
@@ -209,11 +259,13 @@ TEST_F(EngineTest, ENGINE_IMPL_NULL_INDEX_TEST) {
 TEST_F(EngineTest, ENGINE_IMPL_THROW_EXCEPTION_TEST) {
     uint16_t dimension = 64;
     std::string file_path = "/tmp/invalid_file";
+    milvus::json index_params = {{"nlist", 1024}};
+
     fiu_init(0); // init
     fiu_enable("ValidateStringNotBool", 1, NULL, 0);
 
     auto engine_ptr = milvus::engine::EngineFactory::Build(
-        dimension, file_path, milvus::engine::EngineType::FAISS_IVFFLAT, milvus::engine::MetricType::IP, 1024);
+        dimension, file_path, milvus::engine::EngineType::FAISS_IVFFLAT, milvus::engine::MetricType::IP, index_params);
 
     fiu_disable("ValidateStringNotBool");
 

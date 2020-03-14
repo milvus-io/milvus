@@ -383,6 +383,47 @@ TEST_F(MetaTest, TABLE_FILE_TEST) {
     ASSERT_EQ(table_file.file_type_, new_file_type);
 }
 
+TEST_F(MetaTest, TABLE_FILE_ROW_COUNT_TEST) {
+    auto table_id = "row_count_test_table";
+
+    milvus::engine::meta::TableSchema table;
+    table.table_id_ = table_id;
+    table.dimension_ = 256;
+    auto status = impl_->CreateTable(table);
+
+    milvus::engine::meta::TableFileSchema table_file;
+    table_file.row_count_ = 100;
+    table_file.table_id_ = table.table_id_;
+    table_file.file_type_ = 1;
+    status = impl_->CreateTableFile(table_file);
+
+    uint64_t cnt = 0;
+    status = impl_->Count(table_id, cnt);
+    ASSERT_EQ(table_file.row_count_, cnt);
+
+    table_file.row_count_ = 99999;
+    milvus::engine::meta::TableFilesSchema table_files = {table_file};
+    status = impl_->UpdateTableFilesRowCount(table_files);
+    ASSERT_TRUE(status.ok());
+
+    cnt = 0;
+    status = impl_->Count(table_id, cnt);
+    ASSERT_EQ(table_file.row_count_, cnt);
+
+    std::vector<size_t> ids = {table_file.id_};
+    milvus::engine::meta::TableFilesSchema schemas;
+    status = impl_->GetTableFiles(table_id, ids, schemas);
+    ASSERT_EQ(schemas.size(), 1UL);
+    ASSERT_EQ(table_file.row_count_, schemas[0].row_count_);
+    ASSERT_EQ(table_file.file_id_, schemas[0].file_id_);
+    ASSERT_EQ(table_file.file_type_, schemas[0].file_type_);
+    ASSERT_EQ(table_file.segment_id_, schemas[0].segment_id_);
+    ASSERT_EQ(table_file.table_id_, schemas[0].table_id_);
+    ASSERT_EQ(table_file.engine_type_, schemas[0].engine_type_);
+    ASSERT_EQ(table_file.dimension_, schemas[0].dimension_);
+    ASSERT_EQ(table_file.flush_lsn_, schemas[0].flush_lsn_);
+}
+
 TEST_F(MetaTest, ARCHIVE_TEST_DAYS) {
     srand(time(0));
     milvus::engine::DBMetaOptions options;
@@ -647,7 +688,7 @@ TEST_F(MetaTest, INDEX_TEST) {
 
     milvus::engine::TableIndex index;
     index.metric_type_ = 2;
-    index.nlist_ = 1234;
+    index.extra_params_ = {{"nlist", 1234}};
     index.engine_type_ = 3;
     status = impl_->UpdateTableIndex(table_id, index);
     ASSERT_TRUE(status.ok());
@@ -664,14 +705,13 @@ TEST_F(MetaTest, INDEX_TEST) {
     milvus::engine::TableIndex index_out;
     status = impl_->DescribeTableIndex(table_id, index_out);
     ASSERT_EQ(index_out.metric_type_, index.metric_type_);
-    ASSERT_EQ(index_out.nlist_, index.nlist_);
+    ASSERT_EQ(index_out.extra_params_, index.extra_params_);
     ASSERT_EQ(index_out.engine_type_, index.engine_type_);
 
     status = impl_->DropTableIndex(table_id);
     ASSERT_TRUE(status.ok());
     status = impl_->DescribeTableIndex(table_id, index_out);
     ASSERT_EQ(index_out.metric_type_, index.metric_type_);
-    ASSERT_NE(index_out.nlist_, index.nlist_);
     ASSERT_NE(index_out.engine_type_, index.engine_type_);
 
     status = impl_->UpdateTableFilesToIndex(table_id);

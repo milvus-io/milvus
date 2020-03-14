@@ -16,7 +16,7 @@
 #include <algorithm>
 #include <memory>
 
-#include "server/Config.h"
+#include "config/Config.h"
 #include "utils/CommonUtil.h"
 #include "utils/Exception.h"
 #include "utils/Log.h"
@@ -189,7 +189,9 @@ WalManager::GetNextRecord(MXLogRecord& record) {
         std::lock_guard<std::mutex> lck(mutex_);
         auto it = tables_.find(record.table_id);
         if (it != tables_.end()) {
-            break;
+            if (it->second.flush_lsn < record.lsn) {
+                break;
+            }
         }
     }
 

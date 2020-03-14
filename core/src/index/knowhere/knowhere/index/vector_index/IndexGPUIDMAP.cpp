@@ -16,6 +16,7 @@
 #include <faiss/MetaIndexes.h>
 #include <faiss/index_io.h>
 #include <fiu-local.h>
+#include <string>
 
 #ifdef MILVUS_GPU_VERSION
 
@@ -127,7 +128,7 @@ GPUIDMAP::GenGraph(const float* data, const int64_t& k, Graph& graph, const Conf
     int64_t K = k + 1;
     auto ntotal = Count();
 
-    size_t dim = config->d;
+    size_t dim = config[meta::DIM];
     auto batch_size = 1000;
     auto tail_batch_size = ntotal % batch_size;
     auto batch_search_count = ntotal / batch_size;

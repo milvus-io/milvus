@@ -19,8 +19,20 @@ namespace storage {
 
 class S3IOReader : public IOReader {
  public:
-    explicit S3IOReader(const std::string& name);
-    ~S3IOReader();
+    S3IOReader() = default;
+    ~S3IOReader() = default;
+
+    // No copy and move
+    S3IOReader(const S3IOReader&) = delete;
+    S3IOReader(S3IOReader&&) = delete;
+
+    S3IOReader&
+    operator=(const S3IOReader&) = delete;
+    S3IOReader&
+    operator=(S3IOReader&&) = delete;
+
+    void
+    open(const std::string& name) override;
 
     void
     read(void* ptr, size_t size) override;
@@ -31,7 +43,11 @@ class S3IOReader : public IOReader {
     size_t
     length() override;
 
+    void
+    close() override;
+
  public:
+    std::string name_;
     std::string buffer_;
     size_t pos_;
 };

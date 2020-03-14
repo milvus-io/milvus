@@ -18,18 +18,15 @@
 
 #include <SPTAG/AnnService/inc/Core/Common.h>
 #include "IndexParameter.h"
+#include "knowhere/common/Config.h"
 
 namespace knowhere {
-
-using KDTConfig = std::shared_ptr<KDTCfg>;
-using BKTConfig = std::shared_ptr<BKTCfg>;
-
 class SPTAGParameterMgr {
  public:
-    const KDTConfig&
+    const Config&
     GetKDTParameters();
 
-    const BKTConfig&
+    const Config&
     GetBKTParameters();
 
  public:
@@ -48,8 +45,8 @@ class SPTAGParameterMgr {
     SPTAGParameterMgr();
 
  private:
-    KDTConfig kdt_config_;
-    BKTConfig bkt_config_;
+    Config kdt_config_;
+    Config bkt_config_;
 };
 
 }  // namespace knowhere

@@ -274,5 +274,10 @@ MemManagerImpl::GetMaxLSN(const MemList& tables) {
     return max_lsn;
 }
 
+void
+MemManagerImpl::OnInsertBufferSizeChanged(int64_t value) {
+    options_.insert_buffer_size_ = value * ONE_GB;
+}
+
 }  // namespace engine
 }  // namespace milvus

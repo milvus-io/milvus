@@ -40,7 +40,7 @@ Status
 VecIndexImpl::BuildAll(const int64_t& nb, const float* xb, const int64_t* ids, const Config& cfg, const int64_t& nt,
                        const float* xt) {
     try {
-        dim = cfg->d;
+        dim = cfg[knowhere::meta::DIM];
         auto dataset = GenDatasetWithIds(nb, dim, xb, ids);
         fiu_do_on("VecIndexImpl.BuildAll.throw_knowhere_exception", throw knowhere::KnowhereException(""));
         fiu_do_on("VecIndexImpl.BuildAll.throw_std_exception", throw std::exception());
@@ -80,15 +80,13 @@ VecIndexImpl::Add(const int64_t& nb, const float* xb, const int64_t* ids, const 
 Status
 VecIndexImpl::Search(const int64_t& nq, const float* xq, float* dist, int64_t* ids, const Config& cfg) {
     try {
-        auto k = cfg->k;
+        int64_t k = cfg[knowhere::meta::TOPK];
         auto dataset = GenDataset(nq, dim, xq);
-
-        Config search_cfg = cfg;
 
         fiu_do_on("VecIndexImpl.Search.throw_knowhere_exception", throw knowhere::KnowhereException(""));
         fiu_do_on("VecIndexImpl.Search.throw_std_exception", throw std::exception());
 
-        auto res = index_->Search(dataset, search_cfg);
+        auto res = index_->Search(dataset, cfg);
         //{
         //    auto& ids = ids_array;
         //    auto& dists = dis_array;
@@ -216,8 +214,7 @@ VecIndexImpl::GetVectorById(const int64_t n, const int64_t* xid, float* x, const
         dataset->Set(knowhere::meta::DIM, dim);
         dataset->Set(knowhere::meta::IDS, xid);
 
-        Config search_cfg = cfg;
-        auto res = index_->GetVectorById(dataset, search_cfg);
+        auto res = index_->GetVectorById(dataset, cfg);
 
         // TODO(linxj): avoid copy here.
         auto res_x = res->Get<float*>(knowhere::meta::TENSOR);
@@ -242,14 +239,13 @@ VecIndexImpl::SearchById(const int64_t& nq, const int64_t* xq, float* dist, int6
     }
 
     try {
-        auto k = cfg->k;
+        int64_t k = cfg[knowhere::meta::TOPK];
         auto dataset = std::make_shared<knowhere::Dataset>();
         dataset->Set(knowhere::meta::ROWS, nq);
         dataset->Set(knowhere::meta::DIM, dim);
         dataset->Set(knowhere::meta::IDS, xq);
 
-        Config search_cfg = cfg;
-        auto res = index_->SearchById(dataset, search_cfg);
+        auto res = index_->SearchById(dataset, cfg);
         //{
         //    auto& ids = ids_array;
         //    auto& dists = dis_array;
@@ -337,7 +333,7 @@ BFIndex::Build(const Config& cfg) {
     try {
         fiu_do_on("BFIndex.Build.throw_knowhere_exception", throw knowhere::KnowhereException(""));
         fiu_do_on("BFIndex.Build.throw_std_exception", throw std::exception());
-        dim = cfg->d;
+        dim = cfg[knowhere::meta::DIM];
         std::static_pointer_cast<knowhere::IDMAP>(index_)->Train(cfg);
     } catch (knowhere::KnowhereException& e) {
         WRAPPER_LOG_ERROR << e.what();
@@ -353,7 +349,7 @@ Status
 BFIndex::BuildAll(const int64_t& nb, const float* xb, const int64_t* ids, const Config& cfg, const int64_t& nt,
                   const float* xt) {
     try {
-        dim = cfg->d;
+        dim = cfg[knowhere::meta::DIM];
         auto dataset = GenDatasetWithIds(nb, dim, xb, ids);
         fiu_do_on("BFIndex.BuildAll.throw_knowhere_exception", throw knowhere::KnowhereException(""));
         fiu_do_on("BFIndex.BuildAll.throw_std_exception", throw std::exception());

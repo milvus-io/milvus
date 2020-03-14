@@ -33,17 +33,17 @@ class SPTAGTest : public DataGen, public TestWithParam<std::string> {
         Generate(128, 100, 5);
         index_ = std::make_shared<knowhere::CPUSPTAGRNG>(IndexType);
         if (IndexType == "KDT") {
-            auto tempconf = std::make_shared<knowhere::KDTCfg>();
-            tempconf->tptnumber = 1;
-            tempconf->k = 10;
-            tempconf->metric_type = knowhere::METRICTYPE::L2;
-            conf = tempconf;
+            conf = knowhere::Config{
+                {knowhere::meta::DIM, dim},
+                {knowhere::meta::TOPK, 10},
+                {knowhere::Metric::TYPE, knowhere::Metric::L2},
+            };
         } else {
-            auto tempconf = std::make_shared<knowhere::BKTCfg>();
-            tempconf->tptnumber = 1;
-            tempconf->k = 10;
-            tempconf->metric_type = knowhere::METRICTYPE::L2;
-            conf = tempconf;
+            conf = knowhere::Config{
+                {knowhere::meta::DIM, dim},
+                {knowhere::meta::TOPK, 10},
+                {knowhere::Metric::TYPE, knowhere::Metric::L2},
+            };
         }
 
         Init_with_default();

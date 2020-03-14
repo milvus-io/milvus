@@ -10,6 +10,7 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
 #include "knowhere/adapter/SptagAdapter.h"
+
 #include "VectorAdapter.h"
 
 namespace knowhere {
@@ -19,7 +20,7 @@ ConvertToMetadataSet(const DatasetPtr& dataset) {
     auto elems = dataset->Get<int64_t>(meta::ROWS);
     auto p_data = dataset->Get<const int64_t*>(meta::IDS);
 
-    auto p_offset = (int64_t*)malloc(sizeof(int64_t) * elems);
+    auto p_offset = (int64_t*)malloc(sizeof(int64_t) * (elems + 1));
     for (auto i = 0; i <= elems; ++i) p_offset[i] = i * 8;
 
     std::shared_ptr<SPTAG::MetadataSet> metaset(
@@ -43,7 +44,8 @@ std::vector<SPTAG::QueryResult>
 ConvertToQueryResult(const DatasetPtr& dataset, const Config& config) {
     GETTENSOR(dataset);
 
-    std::vector<SPTAG::QueryResult> query_results(rows, SPTAG::QueryResult(nullptr, config->k, true));
+    std::vector<SPTAG::QueryResult> query_results(rows,
+                                                  SPTAG::QueryResult(nullptr, config[meta::TOPK].get<int64_t>(), true));
     for (auto i = 0; i < rows; ++i) {
         query_results[i].SetTarget(&p_data[i * dim]);
     }

@@ -16,6 +16,7 @@
 #endif
 
 #include <memory>
+#include <string>
 #include <utility>
 
 #include "knowhere/adapter/VectorAdapter.h"
@@ -30,16 +31,12 @@ namespace knowhere {
 
 IndexModelPtr
 IVFPQ::Train(const DatasetPtr& dataset, const Config& config) {
-    auto build_cfg = std::dynamic_pointer_cast<IVFPQCfg>(config);
-    if (build_cfg != nullptr) {
-        build_cfg->CheckValid();  // throw exception
-    }
-
     GETTENSOR(dataset)
 
-    faiss::Index* coarse_quantizer = new faiss::IndexFlat(dim, GetMetricType(build_cfg->metric_type));
-    auto index =
-        std::make_shared<faiss::IndexIVFPQ>(coarse_quantizer, dim, build_cfg->nlist, build_cfg->m, build_cfg->nbits);
+    faiss::Index* coarse_quantizer = new faiss::IndexFlat(dim, GetMetricType(config[Metric::TYPE].get<std::string>()));
+    auto index = std::make_shared<faiss::IndexIVFPQ>(coarse_quantizer, dim, config[IndexParams::nlist].get<int64_t>(),
+                                                     config[IndexParams::m].get<int64_t>(),
+                                                     config[IndexParams::nbits].get<int64_t>());
     index->train(rows, (float*)p_data);
 
     return std::make_shared<IVFIndexModel>(index);
@@ -48,11 +45,10 @@ IVFPQ::Train(const DatasetPtr& dataset, const Config& config) {
 std::shared_ptr<faiss::IVFSearchParameters>
 IVFPQ::GenParams(const Config& config) {
     auto params = std::make_shared<faiss::IVFPQSearchParameters>();
-    auto search_cfg = std::dynamic_pointer_cast<IVFPQCfg>(config);
-    params->nprobe = search_cfg->nprobe;
-    //    params->scan_table_threshold = conf->scan_table_threhold;
-    //    params->polysemous_ht = conf->polysemous_ht;
-    //    params->max_codes = conf->max_codes;
+    params->nprobe = config[IndexParams::nprobe];
+    // params->scan_table_threshold = config["scan_table_threhold"]
+    // params->polysemous_ht = config["polysemous_ht"]
+    // params->max_codes = config["max_codes"]
 
     return params;
 }

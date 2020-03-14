@@ -78,16 +78,20 @@ TEST_F(MySqlDBTest, DB_TEST) {
         std::stringstream ss;
         uint64_t count = 0;
         uint64_t prev_count = 0;
+        milvus::json json_params = {{"nprobe", 10}};
 
         for (auto j = 0; j < 10; ++j) {
             ss.str("");
             db_->Size(count);
             prev_count = count;
+            if (count == 0) {
+                continue;
+            }
 
             START_TIMER;
 
             std::vector<std::string> tags;
-            stat = db_->Query(dummy_context_, TABLE_NAME, tags, k, 10, qxb, result_ids, result_distances);
+            stat = db_->Query(dummy_context_, TABLE_NAME, tags, k, json_params, qxb, result_ids, result_distances);
             ss << "Search " << j << " With Size " << count / milvus::engine::M << " M";
             STOP_TIMER(ss.str());
 
@@ -186,7 +190,8 @@ TEST_F(MySqlDBTest, SEARCH_TEST) {
     std::vector<std::string> tags;
     milvus::engine::ResultIds result_ids;
     milvus::engine::ResultDistances result_distances;
-    stat = db_->Query(dummy_context_, TABLE_NAME, tags, k, 10, xq, result_ids, result_distances);
+    milvus::json json_params = {{"nprobe", 10}};
+    stat = db_->Query(dummy_context_, TABLE_NAME, tags, k, json_params, xq, result_ids, result_distances);
     ASSERT_TRUE(stat.ok());
 }
 
@@ -377,7 +382,8 @@ TEST_F(MySqlDBTest, PARTITION_TEST) {
         std::vector<std::string> tags = {"0", std::to_string(PARTITION_COUNT - 1)};
         milvus::engine::ResultIds result_ids;
         milvus::engine::ResultDistances result_distances;
-        stat = db_->Query(dummy_context_, TABLE_NAME, tags, 10, 10, xq, result_ids, result_distances);
+        milvus::json json_params = {{"nprobe", nprobe}};
+        stat = db_->Query(dummy_context_, TABLE_NAME, tags, topk, json_params, xq, result_ids, result_distances);
         ASSERT_TRUE(stat.ok());
         ASSERT_EQ(result_ids.size() / topk, nq);
 
@@ -385,7 +391,7 @@ TEST_F(MySqlDBTest, PARTITION_TEST) {
         tags.clear();
         result_ids.clear();
         result_distances.clear();
-        stat = db_->Query(dummy_context_, TABLE_NAME, tags, 10, 10, xq, result_ids, result_distances);
+        stat = db_->Query(dummy_context_, TABLE_NAME, tags, topk, json_params, xq, result_ids, result_distances);
         ASSERT_TRUE(stat.ok());
         ASSERT_EQ(result_ids.size() / topk, nq);
 
@@ -393,7 +399,7 @@ TEST_F(MySqlDBTest, PARTITION_TEST) {
         tags.push_back("\\d");
         result_ids.clear();
         result_distances.clear();
-        stat = db_->Query(dummy_context_, TABLE_NAME, tags, 10, 10, xq, result_ids, result_distances);
+        stat = db_->Query(dummy_context_, TABLE_NAME, tags, topk, json_params, xq, result_ids, result_distances);
         ASSERT_TRUE(stat.ok());
         ASSERT_EQ(result_ids.size() / topk, nq);
     }

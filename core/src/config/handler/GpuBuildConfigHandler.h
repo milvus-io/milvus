@@ -8,30 +8,37 @@
 // Unless required by applicable law or agreed to in writing, software distributed under the License
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
+#ifdef MILVUS_GPU_VERSION
+#pragma once
 
-#include "storage/file/FileIOWriter.h"
+#include <vector>
+
+#include "config/handler/GpuConfigHandler.h"
 
 namespace milvus {
-namespace storage {
+namespace server {
 
-FileIOWriter::FileIOWriter(const std::string& name) : IOWriter(name) {
-    fs_ = std::fstream(name_, std::ios::out | std::ios::binary);
-}
+class GpuBuildConfigHandler : virtual public GpuConfigHandler {
+ public:
+    GpuBuildConfigHandler();
 
-FileIOWriter::~FileIOWriter() {
-    fs_.close();
-}
+    ~GpuBuildConfigHandler();
 
-void
-FileIOWriter::write(void* ptr, size_t size) {
-    fs_.write(reinterpret_cast<char*>(ptr), size);
-    len_ += size;
-}
+ public:
+    virtual void
+    OnGpuBuildResChanged(const std::vector<int64_t>& gpus);
 
-size_t
-FileIOWriter::length() {
-    return len_;
-}
+ protected:
+    void
+    AddGpuBuildResListener();
 
-}  // namespace storage
+    void
+    RemoveGpuBuildResListener();
+
+ protected:
+    std::vector<int64_t> build_gpus_;
+};
+
+}  // namespace server
 }  // namespace milvus
+#endif

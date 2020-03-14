@@ -10,7 +10,8 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
 #include "server/delivery/request/CreateIndexRequest.h"
-#include "server/Config.h"
+#include "config/Config.h"
+#include "db/Utils.h"
 #include "server/DBWrapper.h"
 #include "utils/Log.h"
 #include "utils/TimeRecorder.h"
@@ -24,14 +25,17 @@ namespace milvus {
 namespace server {
 
 CreateIndexRequest::CreateIndexRequest(const std::shared_ptr<Context>& context, const std::string& table_name,
-                                       int64_t index_type, int64_t nlist)
-    : BaseRequest(context, DDL_DML_REQUEST_GROUP), table_name_(table_name), index_type_(index_type), nlist_(nlist) {
+                                       int64_t index_type, const milvus::json& json_params)
+    : BaseRequest(context, DDL_DML_REQUEST_GROUP),
+      table_name_(table_name),
+      index_type_(index_type),
+      json_params_(json_params) {
 }
 
 BaseRequestPtr
 CreateIndexRequest::Create(const std::shared_ptr<Context>& context, const std::string& table_name, int64_t index_type,
-                           int64_t nlist) {
-    return std::shared_ptr<BaseRequest>(new CreateIndexRequest(context, table_name, index_type, nlist));
+                           const milvus::json& json_params) {
+    return std::shared_ptr<BaseRequest>(new CreateIndexRequest(context, table_name, index_type, json_params));
 }
 
 Status
@@ -69,7 +73,7 @@ CreateIndexRequest::OnExecute() {
             return status;
         }
 
-        status = ValidationUtil::ValidateTableIndexNlist(nlist_);
+        status = ValidationUtil::ValidateIndexParams(json_params_, table_schema, index_type_);
         if (!status.ok()) {
             return status;
         }
@@ -80,7 +84,7 @@ CreateIndexRequest::OnExecute() {
         status = DBWrapper::DB()->DescribeTable(table_info);
 
         int32_t adapter_index_type = index_type_;
-        if (ValidationUtil::IsBinaryMetricType(table_info.metric_type_)) {  // binary vector not allow
+        if (engine::utils::IsBinaryMetricType(table_info.metric_type_)) {  // binary vector not allow
             if (adapter_index_type == static_cast<int32_t>(engine::EngineType::FAISS_IDMAP)) {
                 adapter_index_type = static_cast<int32_t>(engine::EngineType::FAISS_BIN_IDMAP);
             } else if (adapter_index_type == static_cast<int32_t>(engine::EngineType::FAISS_IVFFLAT)) {
@@ -109,7 +113,7 @@ CreateIndexRequest::OnExecute() {
         // step 3: create index
         engine::TableIndex index;
         index.engine_type_ = adapter_index_type;
-        index.nlist_ = nlist_;
+        index.extra_params_ = json_params_;
         status = DBWrapper::DB()->CreateIndex(table_name_, index);
         fiu_do_on("CreateIndexRequest.OnExecute.create_index_fail",
                   status = Status(milvus::SERVER_UNEXPECTED_ERROR, ""));

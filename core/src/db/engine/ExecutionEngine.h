@@ -15,6 +15,7 @@
 #include <string>
 #include <vector>
 
+#include "utils/Json.h"
 #include "utils/Status.h"
 
 namespace milvus {
@@ -38,12 +39,14 @@ enum class EngineType {
 };
 
 enum class MetricType {
-    L2 = 1,        // Euclidean Distance
-    IP = 2,        // Cosine Similarity
-    HAMMING = 3,   // Hamming Distance
-    JACCARD = 4,   // Jaccard Distance
-    TANIMOTO = 5,  // Tanimoto Distance
-    MAX_VALUE = TANIMOTO,
+    L2 = 1,              // Euclidean Distance
+    IP = 2,              // Cosine Similarity
+    HAMMING = 3,         // Hamming Distance
+    JACCARD = 4,         // Jaccard Distance
+    TANIMOTO = 5,        // Tanimoto Distance
+    SUBSTRUCTURE = 6,    // Substructure Distance
+    SUPERSTRUCTURE = 7,  // Superstructure Distance
+    MAX_VALUE = SUPERSTRUCTURE
 };
 
 class ExecutionEngine {
@@ -94,15 +97,16 @@ class ExecutionEngine {
     GetVectorByID(const int64_t& id, uint8_t* vector, bool hybrid) = 0;
 
     virtual Status
-    Search(int64_t n, const float* data, int64_t k, int64_t nprobe, float* distances, int64_t* labels, bool hybrid) = 0;
-
-    virtual Status
-    Search(int64_t n, const uint8_t* data, int64_t k, int64_t nprobe, float* distances, int64_t* labels,
+    Search(int64_t n, const float* data, int64_t k, const milvus::json& extra_params, float* distances, int64_t* labels,
            bool hybrid) = 0;
 
     virtual Status
-    Search(int64_t n, const std::vector<int64_t>& ids, int64_t k, int64_t nprobe, float* distances, int64_t* labels,
-           bool hybrid) = 0;
+    Search(int64_t n, const uint8_t* data, int64_t k, const milvus::json& extra_params, float* distances,
+           int64_t* labels, bool hybrid) = 0;
+
+    virtual Status
+    Search(int64_t n, const std::vector<int64_t>& ids, int64_t k, const milvus::json& extra_params, float* distances,
+           int64_t* labels, bool hybrid) = 0;
 
     virtual std::shared_ptr<ExecutionEngine>
     BuildIndex(const std::string& location, EngineType engine_type) = 0;

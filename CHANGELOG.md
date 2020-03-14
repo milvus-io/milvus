@@ -2,7 +2,26 @@
 
 Please mark all change in change log and use the issue from GitHub
 
-# Milvus 0.7.0 (TBD)
+# Milvus 0.7.1 (TBD)
+
+## Bug
+-   \#1301 Data in WAL may be accidentally inserted into a new table with the same name.
+-   \#1634 Fix search demo bug in HTTP doc
+-   \#1635 Vectors can be returned by searching after vectors deleted if `cache_insert_data` set true
+
+## Feature
+-   \#1603 BinaryFlat add 2 Metric: Substructure and Superstructure
+
+## Improvement
+-   \#1537 Optimize raw vector and uids read/write
+-   \#1546 Move Config.cpp to config directory
+-   \#1547 Rename storage/file to storage/disk and rename classes
+-   \#1548 Move store/Directory to storage/Operation and add FSHandler
+
+## Task
+
+
+# Milvus 0.7.0 (2020-03-11)
 
 ## Bug
 -   \#715 Milvus crash when searching and building index simultaneously using SQ8H
@@ -11,30 +30,55 @@ Please mark all change in change log and use the issue from GitHub
 -   \#805 IVFTest.gpu_seal_test unittest failed
 -   \#831 Judge branch error in CommonUtil.cpp
 -   \#977 Server crash when create tables concurrently
--   \#990 check gpu resources setting when assign repeated value
--   \#995 table count set to 0 if no tables found
--   \#1010 improve error message when offset or page_size is equal 0
--   \#1022 check if partition name is legal
+-   \#990 Check gpu resources setting when assign repeated value
+-   \#995 Table count set to 0 if no tables found
+-   \#1010 Improve error message when offset or page_size is equal 0
+-   \#1022 Check if partition name is valid
 -   \#1028 check if table exists when show partitions
 -   \#1029 check if table exists when try to delete partition
--   \#1066 optimize http insert and search speed
+-   \#1066 Optimize http insert and search speed
+-   \#1022 Check if partition name is legal
+-   \#1028 Check if table exists when show partitions
+-   \#1029 Check if table exists when try to delete partition
+-   \#1066 Optimize http insert and search speed
 -   \#1067 Add binary vectors support in http server
--   \#1075 improve error message when page size or offset is illegal
--   \#1082 check page_size or offset value to avoid float
--   \#1115 http server support load table into memory
+-   \#1075 Improve error message when page size or offset is illegal
+-   \#1082 Check page_size or offset value to avoid float
+-   \#1115 Http server support load table into memory
 -   \#1152 Error log output continuously after server start
 -   \#1211 Server down caused by searching with index_type: HNSW
 -   \#1240 Update license declaration
--   \#1298 Unittest failed when on CPU2GPU case
+-   \#1298 Unit test failed when on CPU2GPU case
 -   \#1359 Negative distance value returned when searching with HNSW index type
--   \#1429 Server crashed when searching vectors using GPU
+-   \#1429 Server crashed when searching vectors with GPU
 -   \#1476 Fix vectors results bug when getting vectors from segments
--   \#1484 Index type changed to IDMAP after compacted 
+-   \#1484 Index type changed to IDMAP after compacted
+-   \#1491 Server crashed during adding vectors
 -   \#1499 Fix duplicated ID number issue
--   \#1491 Server crashed during adding vectors  
--   \#1504 Avoid possible race condition between delete and search 
+-   \#1504 Avoid possible race condition between delete and search
+-   \#1507 set_config for insert_buffer_size is wrong
 -   \#1510 Add set interfaces for WAL configurations
 -   \#1511 Fix big integer cannot pass to server correctly
+-   \#1517 Result is not correct when search vectors in multi partition, index type is RNSG 
+-   \#1518 Table count did not match after deleting vectors and compact
+-   \#1521 Make cache_insert_data take effect in-service
+-   \#1525 Add setter API for config preload_table
+-   \#1529 Fix server crash when cache_insert_data enabled
+-   \#1530 Set table file with correct engine type in meta
+-   \#1532 Search with ivf_flat failed with open-dataset: sift-256-hamming
+-   \#1535 Degradation searching performance with metric_type: binary_idmap
+-   \#1549 Fix server/wal config setting bug
+-   \#1556 Index file not created after table and index created
+-   \#1560 Search crashed with Super-high dimensional binary vector
+-   \#1564 Too low recall for glove-200-angular, ivf_pq index
+-   \#1571 Meta engine type become IDMAP after dropping index for BINARY table
+-   \#1574 Set all existing bitset in cache when applying deletes
+-   \#1577 Row count incorrect if delete vectors then create index
+-   \#1580 Old segment folder not removed after merge/compact if create_index is called before adding data
+-   \#1590 Server down caused by failure to write file during concurrent mixed operations
+-   \#1598 Server down during mixed operations
+-   \#1601 External link bug in HTTP doc
+-   \#1609 Refine Compact function
 
 ## Feature
 -   \#216 Add CLI to get server info
@@ -57,12 +101,13 @@ Please mark all change in change log and use the issue from GitHub
 -   \#1302 Get all record IDs in a segment by given a segment id
 -   \#1461 Add crud APIs and segments APIs into http module
 -   \#1463 Update config version to 0.2
+-   \#1531 Remove S3 related config
 
 ## Improvement
 -   \#738 Use Openblas / lapack from apt install
 -   \#758 Enhance config description
 -   \#791 Remove Arrow
--   \#834 add cpu mode for built-in Faiss
+-   \#834 Add cpu mode for built-in Faiss
 -   \#848 Add ready-to-use config files to the Milvus repo for enhanced user experince
 -   \#860 Remove redundant checks in CacheMgr's constructor
 -   \#908 Move "primary_path" and "secondary_path" to storage config
@@ -73,14 +118,17 @@ Please mark all change in change log and use the issue from GitHub
 -   \#1105 Error message is not clear when creating IVFSQ8H index without gpu resources
 -   \#740, #849, #878, #972, #1033, #1161, #1173, #1199, #1190, #1223, #1222, #1257, #1264, #1269, #1164, #1303, #1304, #1324, #1388, #1459 Various fixes and improvements for Milvus documentation.
 -   \#1297 Hide partition_name parameter, avid user directly access partition table
--   \#1310 Add default partition tag for a table
 -   \#1234 Do S3 server validation check when Milvus startup
 -   \#1263 Allow system conf modifiable and some take effect directly
+-   \#1310 Add default partition tag for a table
 -   \#1320 Remove debug logging from faiss
 -   \#1426 Support to configure whether to enabled autoflush and the autoflush interval
 -   \#1444 Improve delete
+-   \#1448 General proto api for NNS libraries 
 -   \#1480 Add return code for AVX512 selection
-
+-   \#1524 Update config "preload_table" description
+-   \#1544 Update resources name in HTTP module
+-   \#1567 Update yaml config description
 
 ## Task
 -   \#1327 Exclude third-party code from codebeat

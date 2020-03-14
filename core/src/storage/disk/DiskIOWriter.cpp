@@ -8,34 +8,34 @@
 // Unless required by applicable law or agreed to in writing, software distributed under the License
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
-#ifdef MILVUS_GPU_VERSION
-#pragma once
 
-#include "scheduler/optimizer/handler/GpuResourcesHandler.h"
-
-#include <vector>
+#include "storage/disk/DiskIOWriter.h"
 
 namespace milvus {
-namespace scheduler {
+namespace storage {
 
-class GpuBuildResHandler : virtual public GpuResourcesHandler {
- public:
-    GpuBuildResHandler();
+void
+DiskIOWriter::open(const std::string& name) {
+    name_ = name;
+    len_ = 0;
+    fs_ = std::fstream(name_, std::ios::out | std::ios::binary);
+}
 
-    ~GpuBuildResHandler();
+void
+DiskIOWriter::write(void* ptr, size_t size) {
+    fs_.write(reinterpret_cast<char*>(ptr), size);
+    len_ += size;
+}
 
- public:
-    virtual void
-    OnGpuBuildResChanged(const std::vector<int64_t>& gpus);
+size_t
+DiskIOWriter::length() {
+    return len_;
+}
 
- protected:
-    void
-    AddGpuBuildResListener();
+void
+DiskIOWriter::close() {
+    fs_.close();
+}
 
- protected:
-    std::vector<int64_t> build_gpus_;
-};
-
-}  // namespace scheduler
+}  // namespace storage
 }  // namespace milvus
-#endif

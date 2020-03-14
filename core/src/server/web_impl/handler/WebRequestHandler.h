@@ -84,6 +84,9 @@ class WebRequestHandler {
     Status
     ParseQueryStr(const OQueryParams& query_params, const std::string& key, std::string& value, bool nullable = true);
 
+    Status
+    ParseQueryBool(const OQueryParams& query_params, const std::string& key, bool& value, bool nullable = true);
+
  private:
     void
     AddStatusToJson(nlohmann::json& json, int64_t code, const std::string& msg);
@@ -189,10 +192,10 @@ class WebRequestHandler {
      * Index
      */
     StatusDto::ObjectWrapper
-    CreateIndex(const OString& table_name, const IndexRequestDto::ObjectWrapper& index_param);
+    CreateIndex(const OString& table_name, const OString& body);
 
     StatusDto::ObjectWrapper
-    GetIndex(const OString& table_name, IndexDto::ObjectWrapper& index_dto);
+    GetIndex(const OString& table_name, OString& result);
 
     StatusDto::ObjectWrapper
     DropIndex(const OString& table_name);

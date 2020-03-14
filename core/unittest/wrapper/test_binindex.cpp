@@ -28,12 +28,12 @@ class BinIndexTest : public BinDataGen,
         std::tie(index_type, dim, nb, nq, k) = GetParam();
         Generate(dim, nb, nq, k);
 
-        milvus::engine::TempMetaConf tempconf;
-        tempconf.metric_type = knowhere::METRICTYPE::TANIMOTO;
-        tempconf.size = nb;
-        tempconf.dim = dim;
-        tempconf.k = k;
-        tempconf.nprobe = 16;
+        knowhere::Config tempconf{
+            {knowhere::Metric::TYPE, knowhere::Metric::TANIMOTO},
+            {knowhere::meta::ROWS, nb},
+            {knowhere::meta::DIM, dim},
+            {knowhere::meta::TOPK, k}
+        };
 
         index_ = GetVecIndexFactory(index_type);
         conf = ParamGenerator::GetInstance().GenBuild(index_type, tempconf);
@@ -59,8 +59,8 @@ INSTANTIATE_TEST_CASE_P(WrapperParam, BinIndexTest,
 
 TEST_P(BinIndexTest, BASE_TEST) {
     EXPECT_EQ(index_->GetType(), index_type);
-    conf->Dump();
-    searchconf->Dump();
+    // conf->Dump();
+    // searchconf->Dump();
 
     auto elems = nq * k;
     std::vector<int64_t> res_ids(elems);

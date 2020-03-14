@@ -637,6 +637,55 @@ TEST(WalTest, MANAGER_TEST) {
     ASSERT_TRUE(record.table_id.empty());
 }
 
+TEST(WalTest, MANAGER_SAME_NAME_TABLE) {
+    MakeEmptyTestPath();
+
+    milvus::engine::DBMetaOptions opt = {WAL_GTEST_PATH};
+    milvus::engine::meta::MetaPtr meta = std::make_shared<milvus::engine::meta::TestWalMeta>(opt);
+
+    milvus::engine::wal::MXLogConfiguration wal_config;
+    wal_config.mxlog_path = WAL_GTEST_PATH;
+    wal_config.buffer_size = 64;
+    wal_config.recovery_error_ignore = true;
+
+    // first run
+    std::shared_ptr<milvus::engine::wal::WalManager> manager =
+        std::make_shared<milvus::engine::wal::WalManager>(wal_config);
+    ASSERT_EQ(manager->Init(meta), milvus::WAL_SUCCESS);
+
+    // adjest the buffer size for test
+    manager->mxlog_config_.buffer_size = 16384;
+    manager->p_buffer_->mxlog_buffer_size_ = 16384;
+
+    std::string table_id_1 = "table1";
+    std::string table_id_2 = "table2";
+    std::vector<int64_t> ids(1024, 0);
+    std::vector<uint8_t> data_byte(1024 * 512, 0);
+
+    // create 2 tables
+    manager->CreateTable(table_id_1);
+    manager->CreateTable(table_id_2);
+
+    // command
+    ASSERT_TRUE(manager->Insert(table_id_1, "", ids, data_byte));
+    ASSERT_TRUE(manager->Insert(table_id_2, "", ids, data_byte));
+    ASSERT_TRUE(manager->DeleteById(table_id_1, ids));
+    ASSERT_TRUE(manager->DeleteById(table_id_2, ids));
+
+    // re-create table
+    manager->DropTable(table_id_1);
+    manager->CreateTable(table_id_1);
+
+    milvus::engine::wal::MXLogRecord record;
+    while (1) {
+        ASSERT_EQ(manager->GetNextRecord(record), milvus::WAL_SUCCESS);
+        if (record.type == milvus::engine::wal::MXLogType::None) {
+            break;
+        }
+        ASSERT_EQ(record.table_id, table_id_2);
+    }
+}
+
 #if 0
 TEST(WalTest, LargeScaleRecords) {
     std::string data_path = "/home/zilliz/workspace/data/";

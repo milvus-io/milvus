@@ -70,8 +70,8 @@ RequestHandler::DropTable(const std::shared_ptr<Context>& context, const std::st
 
 Status
 RequestHandler::CreateIndex(const std::shared_ptr<Context>& context, const std::string& table_name, int64_t index_type,
-                            int64_t nlist) {
-    BaseRequestPtr request_ptr = CreateIndexRequest::Create(context, table_name, index_type, nlist);
+                            const milvus::json& json_params) {
+    BaseRequestPtr request_ptr = CreateIndexRequest::Create(context, table_name, index_type, json_params);
     RequestScheduler::ExecRequest(request_ptr);
 
     return request_ptr->status();
@@ -123,11 +123,11 @@ RequestHandler::ShowTableInfo(const std::shared_ptr<Context>& context, const std
 
 Status
 RequestHandler::Search(const std::shared_ptr<Context>& context, const std::string& table_name,
-                       const engine::VectorsData& vectors, int64_t topk, int64_t nprobe,
+                       const engine::VectorsData& vectors, int64_t topk, const milvus::json& extra_params,
                        const std::vector<std::string>& partition_list, const std::vector<std::string>& file_id_list,
                        TopKQueryResult& result) {
     BaseRequestPtr request_ptr =
-        SearchRequest::Create(context, table_name, vectors, topk, nprobe, partition_list, file_id_list, result);
+        SearchRequest::Create(context, table_name, vectors, topk, extra_params, partition_list, file_id_list, result);
     RequestScheduler::ExecRequest(request_ptr);
 
     return request_ptr->status();
@@ -135,10 +135,10 @@ RequestHandler::Search(const std::shared_ptr<Context>& context, const std::strin
 
 Status
 RequestHandler::SearchByID(const std::shared_ptr<Context>& context, const std::string& table_name, int64_t vector_id,
-                           int64_t topk, int64_t nprobe, const std::vector<std::string>& partition_list,
-                           TopKQueryResult& result) {
+                           int64_t topk, const milvus::json& extra_params,
+                           const std::vector<std::string>& partition_list, TopKQueryResult& result) {
     BaseRequestPtr request_ptr =
-        SearchByIDRequest::Create(context, table_name, vector_id, topk, nprobe, partition_list, result);
+        SearchByIDRequest::Create(context, table_name, vector_id, topk, extra_params, partition_list, result);
     RequestScheduler::ExecRequest(request_ptr);
 
     return request_ptr->status();

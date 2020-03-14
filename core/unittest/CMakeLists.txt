@@ -22,6 +22,7 @@ include_directories(${CMAKE_CURRENT_SOURCE_DIR})
 
 aux_source_directory(${MILVUS_ENGINE_SRC}/cache cache_files)
 aux_source_directory(${MILVUS_ENGINE_SRC}/config config_files)
+aux_source_directory(${MILVUS_ENGINE_SRC}/config/handler config_handler_files)
 aux_source_directory(${MILVUS_ENGINE_SRC}/metrics metrics_files)
 aux_source_directory(${MILVUS_ENGINE_SRC}/db db_main_files)
 aux_source_directory(${MILVUS_ENGINE_SRC}/db/engine db_engine_files)
@@ -43,7 +44,6 @@ aux_source_directory(${MILVUS_ENGINE_SRC}/scheduler/job scheduler_job_files)
 aux_source_directory(${MILVUS_ENGINE_SRC}/scheduler/resource scheduler_resource_files)
 aux_source_directory(${MILVUS_ENGINE_SRC}/scheduler/task scheduler_task_files)
 aux_source_directory(${MILVUS_ENGINE_SRC}/scheduler/optimizer scheduler_optimizer_files)
-aux_source_directory(${MILVUS_ENGINE_SRC}/scheduler/optimizer/handler scheduler_optimizer_handler_files)
 set(scheduler_files
         ${scheduler_main_files}
         ${scheduler_action_files}
@@ -52,7 +52,6 @@ set(scheduler_files
         ${scheduler_resource_files}
         ${scheduler_task_files}
         ${scheduler_optimizer_files}
-        ${scheduler_optimizer_handler_files}
         )
 
 aux_source_directory(${MILVUS_THIRDPARTY_SRC}/easyloggingpp thirdparty_easyloggingpp_files)
@@ -99,11 +98,11 @@ aux_source_directory(${MILVUS_ENGINE_SRC}/wrapper wrapper_files)
 aux_source_directory(${MILVUS_ENGINE_SRC}/tracing tracing_files)
 
 aux_source_directory(${MILVUS_ENGINE_SRC}/storage storage_main_files)
-aux_source_directory(${MILVUS_ENGINE_SRC}/storage/file storage_file_files)
+aux_source_directory(${MILVUS_ENGINE_SRC}/storage/disk storage_disk_files)
 aux_source_directory(${MILVUS_ENGINE_SRC}/storage/s3 storage_s3_files)
 set(storage_files
         ${storage_main_files}
-        ${storage_file_files}
+        ${storage_disk_files}
         ${storage_s3_files}
         )
 
@@ -112,13 +111,11 @@ aux_source_directory(${MILVUS_ENGINE_SRC}/codecs/default codecs_default_files)
 
 aux_source_directory(${MILVUS_ENGINE_SRC}/segment segment_files)
 
-aux_source_directory(${MILVUS_ENGINE_SRC}/store store_files)
-
 set(entry_file
         ${CMAKE_CURRENT_SOURCE_DIR}/main.cpp)
 
 set(helper_files
-        ${MILVUS_ENGINE_SRC}/server/Config.cpp
+        ${MILVUS_ENGINE_SRC}/config/Config.cpp
         ${MILVUS_ENGINE_SRC}/utils/CommonUtil.cpp
         ${MILVUS_ENGINE_SRC}/utils/TimeRecorder.cpp
         ${MILVUS_ENGINE_SRC}/utils/Status.cpp
@@ -130,6 +127,7 @@ set(helper_files
 set(common_files
         ${cache_files}
         ${config_files}
+        ${config_handler_files}
         ${db_main_files}
         ${db_engine_files}
         ${db_insert_files}
@@ -146,7 +144,6 @@ set(common_files
         ${codecs_files}
         ${codecs_default_files}
         ${segment_files}
-        ${store_files}
         )
 
 set(unittest_libs

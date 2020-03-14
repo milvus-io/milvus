@@ -82,6 +82,9 @@ class SqliteMetaImpl : public Meta {
     UpdateTableFiles(TableFilesSchema& files) override;
 
     Status
+    UpdateTableFilesRowCount(TableFilesSchema& files) override;
+
+    Status
     DescribeTableIndex(const std::string& table_id, TableIndex& index) override;
 
     Status

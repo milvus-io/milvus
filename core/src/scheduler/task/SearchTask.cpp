@@ -9,7 +9,10 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
+#include "scheduler/task/SearchTask.h"
+
 #include <fiu-local.h>
+
 #include <algorithm>
 #include <memory>
 #include <string>
@@ -21,7 +24,6 @@
 #include "metrics/Metrics.h"
 #include "scheduler/SchedInst.h"
 #include "scheduler/job/SearchJob.h"
-#include "scheduler/task/SearchTask.h"
 #include "segment/SegmentReader.h"
 #include "utils/Log.h"
 #include "utils/TimeRecorder.h"
@@ -101,7 +103,8 @@ XSearchTask::XSearchTask(const std::shared_ptr<server::Context>& context, TableF
     if (file_) {
         // distance -- value 0 means two vectors equal, ascending reduce, L2/HAMMING/JACCARD/TONIMOTO ...
         // similarity -- infinity value means two vectors equal, descending reduce, IP
-        if (file_->metric_type_ == static_cast<int>(MetricType::IP)) {
+        if (file_->metric_type_ == static_cast<int>(MetricType::IP) &&
+            file_->engine_type_ != static_cast<int>(EngineType::FAISS_PQ)) {
             ascending_reduce = false;
         }
 
@@ -109,14 +112,18 @@ XSearchTask::XSearchTask(const std::shared_ptr<server::Context>& context, TableF
         if (file->file_type_ == TableFileSchema::FILE_TYPE::RAW ||
             file->file_type_ == TableFileSchema::FILE_TYPE::TO_INDEX ||
             file->file_type_ == TableFileSchema::FILE_TYPE::BACKUP) {
-            engine_type = server::ValidationUtil::IsBinaryMetricType(file->metric_type_) ? EngineType::FAISS_BIN_IDMAP
-                                                                                         : EngineType::FAISS_IDMAP;
+            engine_type = engine::utils::IsBinaryMetricType(file->metric_type_) ? EngineType::FAISS_BIN_IDMAP
+                                                                                : EngineType::FAISS_IDMAP;
         } else {
             engine_type = (EngineType)file->engine_type_;
         }
 
+        milvus::json json_params;
+        if (!file_->index_params_.empty()) {
+            json_params = milvus::json::parse(file_->index_params_);
+        }
         index_engine_ = EngineFactory::Build(file_->dimension_, file_->location_, engine_type,
-                                             (MetricType)file_->metric_type_, file_->nlist_);
+                                             (MetricType)file_->metric_type_, json_params);
     }
 }
 
@@ -217,7 +224,8 @@ XSearchTask::Execute() {
         // step 1: allocate memory
         uint64_t nq = search_job->nq();
         uint64_t topk = search_job->topk();
-        uint64_t nprobe = search_job->nprobe();
+        const milvus::json& extra_params = search_job->extra_params();
+        ENGINE_LOG_DEBUG << "Search job extra params: " << extra_params.dump();
         const engine::VectorsData& vectors = search_job->vectors();
 
         output_ids.resize(topk * nq);
@@ -235,13 +243,13 @@ XSearchTask::Execute() {
             }
             Status s;
             if (!vectors.float_data_.empty()) {
-                s = index_engine_->Search(nq, vectors.float_data_.data(), topk, nprobe, output_distance.data(),
+                s = index_engine_->Search(nq, vectors.float_data_.data(), topk, extra_params, output_distance.data(),
                                           output_ids.data(), hybrid);
             } else if (!vectors.binary_data_.empty()) {
-                s = index_engine_->Search(nq, vectors.binary_data_.data(), topk, nprobe, output_distance.data(),
+                s = index_engine_->Search(nq, vectors.binary_data_.data(), topk, extra_params, output_distance.data(),
                                           output_ids.data(), hybrid);
             } else if (!vectors.id_array_.empty()) {
-                s = index_engine_->Search(nq, vectors.id_array_, topk, nprobe, output_distance.data(),
+                s = index_engine_->Search(nq, vectors.id_array_, topk, extra_params, output_distance.data(),
                                           output_ids.data(), hybrid);
             }
 
@@ -258,13 +266,21 @@ XSearchTask::Execute() {
 
             // step 3: pick up topk result
             auto spec_k = file_->row_count_ < topk ? file_->row_count_ : topk;
-            if (search_job->GetResultIds().front() == -1 && search_job->GetResultIds().size() > spec_k) {
-                // initialized results set
-                search_job->GetResultIds().resize(spec_k);
-                search_job->GetResultDistances().resize(spec_k);
+            if (spec_k == 0) {
+                ENGINE_LOG_WARNING << "Searching in an empty file. file location = " << file_->location_;
             }
+
             {
                 std::unique_lock<std::mutex> lock(search_job->mutex());
+
+                if (search_job->GetResultIds().size() > spec_k) {
+                    if (search_job->GetResultIds().front() == -1) {
+                        // initialized results set
+                        search_job->GetResultIds().resize(spec_k * nq);
+                        search_job->GetResultDistances().resize(spec_k * nq);
+                    }
+                }
+
                 XSearchTask::MergeTopkToResultSet(output_ids, output_distance, spec_k, nq, topk, ascending_reduce,
                                                   search_job->GetResultIds(), search_job->GetResultDistances());
             }

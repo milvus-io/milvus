@@ -15,33 +15,33 @@
 #include <limits>
 #include <string>
 
-#include "server/Config.h"
+#include "config/Config.h"
+#include "config/handler/ConfigHandler.h"
 
 namespace milvus {
-namespace scheduler {
+namespace server {
 
-class GpuResourcesHandler {
+class GpuConfigHandler : virtual public ConfigHandler {
  public:
-    GpuResourcesHandler();
+    GpuConfigHandler();
 
-    ~GpuResourcesHandler();
+    ~GpuConfigHandler();
 
- public:
+ protected:
     virtual void
     OnGpuEnableChanged(bool enable);
 
  protected:
     void
-    SetIdentity(const std::string& identity);
+    AddGpuEnableListener();
 
     void
-    AddGpuEnableListener();
+    RemoveGpuEnableListener();
 
  protected:
     bool gpu_enable_ = true;
-    std::string identity_;
 };
 
-}  // namespace scheduler
+}  // namespace server
 }  // namespace milvus
 #endif
