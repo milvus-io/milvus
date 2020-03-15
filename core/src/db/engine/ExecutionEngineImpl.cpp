@@ -331,15 +331,6 @@ ExecutionEngineImpl::Count() const {
 }
 
 size_t
-ExecutionEngineImpl::Size() const {
-    if (IsBinaryIndexType(index_->GetType())) {
-        return (size_t)(Count() * Dimension() / 8);
-    } else {
-        return (size_t)(Count() * Dimension()) * sizeof(float);
-    }
-}
-
-size_t
 ExecutionEngineImpl::Dimension() const {
     if (index_ == nullptr) {
         ENGINE_LOG_ERROR << "ExecutionEngineImpl: index is null, return dimension " << dim_;
@@ -349,8 +340,12 @@ ExecutionEngineImpl::Dimension() const {
 }
 
 size_t
-ExecutionEngineImpl::PhysicalSize() const {
-    return server::CommonUtil::GetFileSize(location_);
+ExecutionEngineImpl::Size() const {
+    if (index_ == nullptr) {
+        ENGINE_LOG_ERROR << "ExecutionEngineImpl: index is null, return size 0";
+        return 0;
+    }
+    return index_->Size();
 }
 
 Status
@@ -359,7 +354,7 @@ ExecutionEngineImpl::Serialize() {
 
     // here we reset index size by file size,
     // since some index type(such as SQ8) data size become smaller after serialized
-    index_->set_size(PhysicalSize());
+    index_->set_size(server::CommonUtil::GetFileSize(location_));
     ENGINE_LOG_DEBUG << "Finish serialize index file: " << location_ << " size: " << index_->Size();
 
     if (index_->Size() == 0) {
@@ -369,36 +364,6 @@ ExecutionEngineImpl::Serialize() {
 
     return status;
 }
-
-/*
-Status
-ExecutionEngineImpl::Load(bool to_cache) {
-    index_ = std::static_pointer_cast<VecIndex>(cache::CpuCacheMgr::GetInstance()->GetIndex(location_));
-    bool already_in_cache = (index_ != nullptr);
-    if (!already_in_cache) {
-        try {
-            double physical_size = PhysicalSize();
-            server::CollectExecutionEngineMetrics metrics(physical_size);
-            index_ = read_index(location_);
-            if (index_ == nullptr) {
-                std::string msg = "Failed to load index from " + location_;
-                ENGINE_LOG_ERROR << msg;
-                return Status(DB_ERROR, msg);
-            } else {
-                ENGINE_LOG_DEBUG << "Disk io from: " << location_;
-            }
-        } catch (std::exception& e) {
-            ENGINE_LOG_ERROR << e.what();
-            return Status(DB_ERROR, e.what());
-        }
-    }
-
-    if (!already_in_cache && to_cache) {
-        Cache();
-    }
-    return Status::OK();
-}
-*/
 
 Status
 ExecutionEngineImpl::Load(bool to_cache) {
@@ -460,10 +425,6 @@ ExecutionEngineImpl::Load(bool to_cache) {
                 status = std::static_pointer_cast<BFIndex>(index_)->AddWithoutIds(vectors->GetCount(),
                                                                                   float_vectors.data(), Config());
                 status = std::static_pointer_cast<BFIndex>(index_)->SetBlacklist(concurrent_bitset_ptr);
-
-                int64_t index_size = vectors->GetCount() * dim_ * sizeof(float);
-                int64_t bitset_size = vectors->GetCount() / 8;
-                index_->set_size(index_size + bitset_size);
             } else if (index_type_ == EngineType::FAISS_BIN_IDMAP) {
                 ec = std::static_pointer_cast<BinBFIndex>(index_)->Build(conf);
                 if (ec != KNOWHERE_SUCCESS) {
@@ -472,11 +433,12 @@ ExecutionEngineImpl::Load(bool to_cache) {
                 status = std::static_pointer_cast<BinBFIndex>(index_)->AddWithoutIds(vectors->GetCount(),
                                                                                      vectors_data.data(), Config());
                 status = std::static_pointer_cast<BinBFIndex>(index_)->SetBlacklist(concurrent_bitset_ptr);
-
-                int64_t index_size = vectors->GetCount() * dim_ * sizeof(uint8_t);
-                int64_t bitset_size = vectors->GetCount() / 8;
-                index_->set_size(index_size + bitset_size);
             }
+
+            int64_t index_size = vectors->Size();       // vector data size + vector ids size
+            int64_t bitset_size = vectors->GetCount();  // delete list size
+            index_->set_size(index_size + bitset_size);
+
             if (!status.ok()) {
                 return status;
             }
@@ -485,8 +447,8 @@ ExecutionEngineImpl::Load(bool to_cache) {
 
         } else {
             try {
-                double physical_size = PhysicalSize();
-                server::CollectExecutionEngineMetrics metrics(physical_size);
+                //                size_t physical_size = PhysicalSize();
+                //                server::CollectExecutionEngineMetrics metrics((double)physical_size);
                 index_ = read_index(location_);
 
                 if (index_ == nullptr) {
@@ -517,6 +479,10 @@ ExecutionEngineImpl::Load(bool to_cache) {
                     segment_reader_ptr->LoadUids(uids);
                     index_->SetUids(uids);
                     ENGINE_LOG_DEBUG << "set uids " << index_->GetUids().size() << " for index " << location_;
+
+                    int64_t index_size = index_->Size();    // vector data size + vector ids size
+                    int64_t bitset_size = index_->Count();  // delete list size
+                    index_->set_size(index_size + bitset_size);
 
                     ENGINE_LOG_DEBUG << "Finished loading index file from segment " << segment_dir;
                 }
@@ -619,10 +585,12 @@ Status
 ExecutionEngineImpl::CopyToIndexFileToGpu(uint64_t device_id) {
 #ifdef MILVUS_GPU_VERSION
     // the ToIndexData is only a placeholder, cpu-copy-to-gpu action is performed in
-    gpu_num_ = device_id;
-    auto to_index_data = std::make_shared<ToIndexData>(PhysicalSize());
-    cache::DataObjPtr obj = std::static_pointer_cast<cache::DataObj>(to_index_data);
-    milvus::cache::GpuCacheMgr::GetInstance(device_id)->InsertItem(location_ + "_placeholder", obj);
+    if (index_) {
+        gpu_num_ = device_id;
+        auto to_index_data = std::make_shared<ToIndexData>(index_->Size());
+        cache::DataObjPtr obj = std::static_pointer_cast<cache::DataObj>(to_index_data);
+        milvus::cache::GpuCacheMgr::GetInstance(device_id)->InsertItem(location_ + "_placeholder", obj);
+    }
 #endif
     return Status::OK();
 }
@@ -765,7 +733,7 @@ ExecutionEngineImpl::BuildIndex(const std::string& location, EngineType engine_t
         throw Exception(DB_ERROR, status.message());
     }
 
-    ENGINE_LOG_DEBUG << "Finish build index file: " << location << " size: " << to_index->Size();
+    ENGINE_LOG_DEBUG << "Finish build index: " << location;
     return std::make_shared<ExecutionEngineImpl>(to_index, location, engine_type, metric_type_, index_params_);
 }
 
