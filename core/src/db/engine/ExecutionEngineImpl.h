@@ -42,13 +42,10 @@ class ExecutionEngineImpl : public ExecutionEngine {
     Count() const override;
 
     size_t
-    Size() const override;
-
-    size_t
     Dimension() const override;
 
     size_t
-    PhysicalSize() const override;
+    Size() const override;
 
     Status
     Serialize() override;

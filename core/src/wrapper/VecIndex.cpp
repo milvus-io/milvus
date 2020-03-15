@@ -50,10 +50,7 @@ namespace engine {
 
 int64_t
 VecIndex::Size() {
-    if (size_ != 0) {
-        return size_;
-    }
-    return Count() * Dimension() * sizeof(float);
+    return size_;
 }
 
 void

@@ -36,6 +36,8 @@ class LessItemCacheMgr : public milvus::cache::CacheMgr<milvus::cache::DataObjPt
 class MockVecIndex : public milvus::engine::VecIndex {
  public:
     MockVecIndex(int64_t dim, int64_t total) : dimension_(dim), ntotal_(total) {
+        int64_t data_size = Dimension() * Count() * sizeof(float);
+        set_size(data_size);
     }
 
     virtual milvus::Status
