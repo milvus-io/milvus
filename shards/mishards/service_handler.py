@@ -10,6 +10,7 @@ from concurrent.futures import ThreadPoolExecutor
 from milvus.grpc_gen import milvus_pb2, milvus_pb2_grpc, status_pb2
 from milvus.grpc_gen.milvus_pb2 import TopKQueryResult
 from milvus.client import types as Types
+from milvus import MetricType
 
 from mishards import (db, settings, exceptions)
 from mishards.grpc_utils import mark_grpc_method
@@ -107,20 +108,20 @@ class ServiceHandler(milvus_pb2_grpc.MilvusServiceServicer):
                   vectors,
                   topk,
                   search_params,
-                  range_array=None,
+                  # range_array=None,
                   partition_tags=None,
                   **kwargs):
         metadata = kwargs.get('metadata', None)
-        range_array = [
-            utilities.range_to_date(r, metadata=metadata) for r in range_array
-        ] if range_array else None
+        # range_array = [
+        #     utilities.range_to_date(r, metadata=metadata) for r in range_array
+        # ] if range_array else None
 
         routing = {}
         p_span = None if self.tracer.empty else context.get_active_span(
         ).context
         with self.tracer.start_span('get_routing', child_of=p_span):
             routing = self.router.routing(table_id,
-                                          range_array=range_array,
+                                          # range_array=range_array,
                                           partition_tags=partition_tags,
                                           metadata=metadata)
         logger.info('Routing: {}'.format(routing))
@@ -308,15 +309,18 @@ class ServiceHandler(milvus_pb2_grpc.MilvusServiceServicer):
     @mark_grpc_method
     def Search(self, request, context):
 
+        metadata = {'resp_class': milvus_pb2.TopKQueryResult}
+
         table_name = request.table_name
 
         topk = request.topk
+
+        if len(request.extra_params) == 0:
+            raise exceptions.SearchParamError(message="Search parma loss", metadata=metadata)
         params = ujson.loads(str(request.extra_params[0].value))
 
         logger.info('Search {}: topk={} params={}'.format(
             table_name, topk, params))
-
-        metadata = {'resp_class': milvus_pb2.TopKQueryResult}
 
         # if nprobe > self.MAX_NPROBE or nprobe <= 0:
         #     raise exceptions.InvalidArgumentError(
@@ -341,14 +345,17 @@ class ServiceHandler(milvus_pb2_grpc.MilvusServiceServicer):
         start = time.time()
 
         query_record_array = []
+        if int(table_meta.metric_type) >= MetricType.HAMMING.value:
+            for query_record in request.query_record_array:
+                query_record_array.append(bytes(query_record.binary_data))
+        else:
+            for query_record in request.query_record_array:
+                query_record_array.append(list(query_record.float_data))
 
-        for query_record in request.query_record_array:
-            query_record_array.append(list(query_record.vector_data))
-
-        query_range_array = []
-        for query_range in request.query_range_array:
-            query_range_array.append(
-                Range(query_range.start_value, query_range.end_value))
+        # query_range_array = []
+        # for query_range in request.query_range_array:
+        #     query_range_array.append(
+        #         Range(query_range.start_value, query_range.end_value))
 
         status, id_results, dis_results = self._do_query(context,
                                                          table_name,
@@ -356,7 +363,7 @@ class ServiceHandler(milvus_pb2_grpc.MilvusServiceServicer):
                                                          query_record_array,
                                                          topk,
                                                          params,
-                                                         query_range_array,
+                                                         # query_range_array,
                                                          partition_tags=getattr(request, "partition_tag_array", []),
                                                          metadata=metadata)
 
