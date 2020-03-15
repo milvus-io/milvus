@@ -50,6 +50,9 @@ class BinaryIDMAP : public VecIndex, public FaissBaseBinaryIndex {
     DatasetPtr
     Query(const DatasetPtr&, const Config&) override;
 
+    DatasetPtr
+    QueryById(const DatasetPtr& dataset_ptr, const Config& config) override;
+
     int64_t
     Count() override;
 
@@ -72,9 +75,6 @@ class BinaryIDMAP : public VecIndex, public FaissBaseBinaryIndex {
 
     DatasetPtr
     GetVectorById(const DatasetPtr& dataset_ptr, const Config& config);
-
-    DatasetPtr
-    SearchById(const DatasetPtr& dataset_ptr, const Config& config);
 
  protected:
     virtual void

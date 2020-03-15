@@ -71,11 +71,41 @@ BinaryIDMAP::Query(const DatasetPtr& dataset_ptr, const Config& config) {
     return ret_ds;
 }
 
-void
-BinaryIDMAP::QueryImpl(int64_t n, const uint8_t* data, int64_t k, float* distances, int64_t* labels,
-                         const Config& config) {
-    int32_t* pdistances = (int32_t*)distances;
-    index_->search(n, (uint8_t*)data, k, pdistances, labels, bitset_);
+DatasetPtr
+BinaryIDMAP::QueryById(const DatasetPtr& dataset_ptr, const Config& config) {
+    if (!index_) {
+        KNOWHERE_THROW_MSG("index not initialize");
+    }
+
+    auto dim = dataset_ptr->Get<int64_t>(meta::DIM);
+    auto rows = dataset_ptr->Get<int64_t>(meta::ROWS);
+    auto p_data = dataset_ptr->Get<const int64_t*>(meta::IDS);
+
+    auto elems = rows * config[meta::TOPK].get<int64_t>();
+    size_t p_id_size = sizeof(int64_t) * elems;
+    size_t p_dist_size = sizeof(float) * elems;
+    auto p_id = (int64_t*)malloc(p_id_size);
+    auto p_dist = (float*)malloc(p_dist_size);
+
+    auto* pdistances = (int32_t*)p_dist;
+    index_->search_by_id(rows, p_data, config[meta::TOPK].get<int64_t>(), pdistances, p_id, bitset_);
+
+    auto ret_ds = std::make_shared<Dataset>();
+    if (index_->metric_type == faiss::METRIC_Hamming) {
+        auto pf_dist = (float*)malloc(p_dist_size);
+        int32_t* pi_dist = (int32_t*)p_dist;
+        for (int i = 0; i < elems; i++) {
+            *(pf_dist + i) = (float)(*(pi_dist + i));
+        }
+        ret_ds->Set(meta::IDS, p_id);
+        ret_ds->Set(meta::DISTANCE, pf_dist);
+        free(p_dist);
+    } else {
+        ret_ds->Set(meta::IDS, p_id);
+        ret_ds->Set(meta::DISTANCE, p_dist);
+    }
+
+    return ret_ds;
 }
 
 void
@@ -168,41 +198,11 @@ BinaryIDMAP::GetVectorById(const DatasetPtr& dataset_ptr, const Config& config) 
     return ret_ds;
 }
 
-DatasetPtr
-BinaryIDMAP::SearchById(const DatasetPtr& dataset_ptr, const Config& config) {
-    if (!index_) {
-        KNOWHERE_THROW_MSG("index not initialize");
-    }
-
-    auto dim = dataset_ptr->Get<int64_t>(meta::DIM);
-    auto rows = dataset_ptr->Get<int64_t>(meta::ROWS);
-    auto p_data = dataset_ptr->Get<const int64_t*>(meta::IDS);
-
-    auto elems = rows * config[meta::TOPK].get<int64_t>();
-    size_t p_id_size = sizeof(int64_t) * elems;
-    size_t p_dist_size = sizeof(float) * elems;
-    auto p_id = (int64_t*)malloc(p_id_size);
-    auto p_dist = (float*)malloc(p_dist_size);
-
-    auto* pdistances = (int32_t*)p_dist;
-    index_->search_by_id(rows, p_data, config[meta::TOPK].get<int64_t>(), pdistances, p_id, bitset_);
-
-    auto ret_ds = std::make_shared<Dataset>();
-    if (index_->metric_type == faiss::METRIC_Hamming) {
-        auto pf_dist = (float*)malloc(p_dist_size);
-        int32_t* pi_dist = (int32_t*)p_dist;
-        for (int i = 0; i < elems; i++) {
-            *(pf_dist + i) = (float)(*(pi_dist + i));
-        }
-        ret_ds->Set(meta::IDS, p_id);
-        ret_ds->Set(meta::DISTANCE, pf_dist);
-        free(p_dist);
-    } else {
-        ret_ds->Set(meta::IDS, p_id);
-        ret_ds->Set(meta::DISTANCE, p_dist);
-    }
-
-    return ret_ds;
+void
+BinaryIDMAP::QueryImpl(int64_t n, const uint8_t* data, int64_t k, float* distances, int64_t* labels,
+                       const Config& config) {
+    int32_t* pdistances = (int32_t*)distances;
+    index_->search(n, (uint8_t*)data, k, pdistances, labels, bitset_);
 }
 
 }  // namespace knowhere

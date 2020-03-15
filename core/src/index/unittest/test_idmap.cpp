@@ -75,7 +75,7 @@ TEST_F(IDMAPTest, idmap_basic) {
     AssertAnns(result2, nq, k);
     //    PrintResult(re_result, nq, k);
 
-    auto result3 = index_->SearchById(id_dataset, conf);
+    auto result3 = index_->QueryById(id_dataset, conf);
     AssertAnns(result3, nq, k);
 
     auto result4 = index_->GetVectorById(xid_dataset, conf);
@@ -90,7 +90,7 @@ TEST_F(IDMAPTest, idmap_basic) {
     auto result_bs_1 = index_->Query(query_dataset, conf);
     AssertAnns(result_bs_1, nq, k, CheckMode::CHECK_NOT_EQUAL);
 
-    auto result_bs_2 = index_->SearchById(id_dataset, conf);
+    auto result_bs_2 = index_->QueryById(id_dataset, conf);
     AssertAnns(result_bs_2, nq, k, CheckMode::CHECK_NOT_EQUAL);
 
     auto result_bs_3 = index_->GetVectorById(xid_dataset, conf);

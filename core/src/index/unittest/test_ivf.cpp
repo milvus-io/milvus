@@ -108,7 +108,7 @@ TEST_P(IVFTest, ivf_basic) {
 
     if (index_mode_ == milvus::knowhere::IndexMode::MODE_CPU &&
         index_type_ != milvus::knowhere::IndexType::INDEX_FAISS_IVFPQ) {
-        auto result2 = index_->SearchById(id_dataset, conf_);
+        auto result2 = index_->QueryById(id_dataset, conf_);
         AssertAnns(result2, nq, k);
 
         if (index_type_ != milvus::knowhere::IndexType::INDEX_FAISS_IVFSQ8) {
@@ -130,7 +130,7 @@ TEST_P(IVFTest, ivf_basic) {
         AssertAnns(result_bs_1, nq, k, CheckMode::CHECK_NOT_EQUAL);
         // PrintResult(result, nq, k);
 
-        auto result_bs_2 = index_->SearchById(id_dataset, conf_);
+        auto result_bs_2 = index_->QueryById(id_dataset, conf_);
         AssertAnns(result_bs_2, nq, k, CheckMode::CHECK_NOT_EQUAL);
         // PrintResult(result, nq, k);
 

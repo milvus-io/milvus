@@ -48,6 +48,9 @@ class IDMAP : public VecIndex, public FaissBaseIndex {
     DatasetPtr
     Query(const DatasetPtr&, const Config&) override;
 
+    DatasetPtr
+    QueryById(const DatasetPtr& dataset, const Config& config) override;
+
     int64_t
     Count() override;
 
@@ -68,9 +71,6 @@ class IDMAP : public VecIndex, public FaissBaseIndex {
 
     DatasetPtr
     GetVectorById(const DatasetPtr& dataset, const Config& config);
-
-    DatasetPtr
-    SearchById(const DatasetPtr& dataset, const Config& config);
 
  protected:
     virtual void

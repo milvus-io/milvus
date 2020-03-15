@@ -142,6 +142,52 @@ IVF::Query(const DatasetPtr& dataset_ptr, const Config& config) {
     }
 }
 
+DatasetPtr
+IVF::QueryById(const DatasetPtr& dataset_ptr, const Config& config) {
+    if (!index_ || !index_->is_trained) {
+        KNOWHERE_THROW_MSG("index not initialize or trained");
+    }
+
+    auto rows = dataset_ptr->Get<int64_t>(meta::ROWS);
+    auto p_data = dataset_ptr->Get<const int64_t*>(meta::IDS);
+
+    try {
+        auto elems = rows * config[meta::TOPK].get<int64_t>();
+
+        size_t p_id_size = sizeof(int64_t) * elems;
+        size_t p_dist_size = sizeof(float) * elems;
+        auto p_id = (int64_t*)malloc(p_id_size);
+        auto p_dist = (float*)malloc(p_dist_size);
+
+        // todo: enable search by id (zhiru)
+        //        auto blacklist = dataset_ptr->Get<faiss::ConcurrentBitsetPtr>("bitset");
+        auto index_ivf = std::static_pointer_cast<faiss::IndexIVF>(index_);
+        index_ivf->search_by_id(rows, p_data, config[meta::TOPK].get<int64_t>(), p_dist, p_id, bitset_);
+
+        //    std::stringstream ss_res_id, ss_res_dist;
+        //    for (int i = 0; i < 10; ++i) {
+        //        printf("%llu", res_ids[i]);
+        //        printf("\n");
+        //        printf("%.6f", res_dis[i]);
+        //        printf("\n");
+        //        ss_res_id << res_ids[i] << " ";
+        //        ss_res_dist << res_dis[i] << " ";
+        //    }
+        //    std::cout << std::endl << "after search: " << std::endl;
+        //    std::cout << ss_res_id.str() << std::endl;
+        //    std::cout << ss_res_dist.str() << std::endl << std::endl;
+
+        auto ret_ds = std::make_shared<Dataset>();
+        ret_ds->Set(meta::IDS, p_id);
+        ret_ds->Set(meta::DISTANCE, p_dist);
+        return ret_ds;
+    } catch (faiss::FaissException& e) {
+        KNOWHERE_THROW_MSG(e.what());
+    } catch (std::exception& e) {
+        KNOWHERE_THROW_MSG(e.what());
+    }
+}
+
 int64_t
 IVF::Count() {
     return index_->ntotal;
@@ -241,52 +287,6 @@ IVF::GetVectorById(const DatasetPtr& dataset_ptr, const Config& config) {
 
         auto ret_ds = std::make_shared<Dataset>();
         ret_ds->Set(meta::TENSOR, p_x);
-        return ret_ds;
-    } catch (faiss::FaissException& e) {
-        KNOWHERE_THROW_MSG(e.what());
-    } catch (std::exception& e) {
-        KNOWHERE_THROW_MSG(e.what());
-    }
-}
-
-DatasetPtr
-IVF::SearchById(const DatasetPtr& dataset_ptr, const Config& config) {
-    if (!index_ || !index_->is_trained) {
-        KNOWHERE_THROW_MSG("index not initialize or trained");
-    }
-
-    auto rows = dataset_ptr->Get<int64_t>(meta::ROWS);
-    auto p_data = dataset_ptr->Get<const int64_t*>(meta::IDS);
-
-    try {
-        auto elems = rows * config[meta::TOPK].get<int64_t>();
-
-        size_t p_id_size = sizeof(int64_t) * elems;
-        size_t p_dist_size = sizeof(float) * elems;
-        auto p_id = (int64_t*)malloc(p_id_size);
-        auto p_dist = (float*)malloc(p_dist_size);
-
-        // todo: enable search by id (zhiru)
-        //        auto blacklist = dataset_ptr->Get<faiss::ConcurrentBitsetPtr>("bitset");
-        auto index_ivf = std::static_pointer_cast<faiss::IndexIVF>(index_);
-        index_ivf->search_by_id(rows, p_data, config[meta::TOPK].get<int64_t>(), p_dist, p_id, bitset_);
-
-        //    std::stringstream ss_res_id, ss_res_dist;
-        //    for (int i = 0; i < 10; ++i) {
-        //        printf("%llu", res_ids[i]);
-        //        printf("\n");
-        //        printf("%.6f", res_dis[i]);
-        //        printf("\n");
-        //        ss_res_id << res_ids[i] << " ";
-        //        ss_res_dist << res_dis[i] << " ";
-        //    }
-        //    std::cout << std::endl << "after search: " << std::endl;
-        //    std::cout << ss_res_id.str() << std::endl;
-        //    std::cout << ss_res_dist.str() << std::endl << std::endl;
-
-        auto ret_ds = std::make_shared<Dataset>();
-        ret_ds->Set(meta::IDS, p_id);
-        ret_ds->Set(meta::DISTANCE, p_dist);
         return ret_ds;
     } catch (faiss::FaissException& e) {
         KNOWHERE_THROW_MSG(e.what());

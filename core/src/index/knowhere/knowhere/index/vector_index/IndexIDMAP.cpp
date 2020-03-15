@@ -112,6 +112,32 @@ IDMAP::Query(const DatasetPtr& dataset_ptr, const Config& config) {
     return ret_ds;
 }
 
+DatasetPtr
+IDMAP::QueryById(const DatasetPtr& dataset_ptr, const Config& config) {
+    if (!index_) {
+        KNOWHERE_THROW_MSG("index not initialize");
+    }
+    //    GETTENSOR(dataset)
+    auto rows = dataset_ptr->Get<int64_t>(meta::ROWS);
+    auto p_data = dataset_ptr->Get<const int64_t*>(meta::IDS);
+
+    auto elems = rows * config[meta::TOPK].get<int64_t>();
+    size_t p_id_size = sizeof(int64_t) * elems;
+    size_t p_dist_size = sizeof(float) * elems;
+    auto p_id = (int64_t*)malloc(p_id_size);
+    auto p_dist = (float*)malloc(p_dist_size);
+
+    // todo: enable search by id (zhiru)
+    //    auto blacklist = dataset_ptr->Get<faiss::ConcurrentBitsetPtr>("bitset");
+    //    index_->searchById(rows, (float*)p_data, config[meta::TOPK].get<int64_t>(), p_dist, p_id, blacklist);
+    index_->search_by_id(rows, p_data, config[meta::TOPK].get<int64_t>(), p_dist, p_id, bitset_);
+
+    auto ret_ds = std::make_shared<Dataset>();
+    ret_ds->Set(meta::IDS, p_id);
+    ret_ds->Set(meta::DISTANCE, p_dist);
+    return ret_ds;
+}
+
 int64_t
 IDMAP::Count() {
     return index_->ntotal;
@@ -178,32 +204,6 @@ IDMAP::GetVectorById(const DatasetPtr& dataset_ptr, const Config& config) {
 
     auto ret_ds = std::make_shared<Dataset>();
     ret_ds->Set(meta::TENSOR, p_x);
-    return ret_ds;
-}
-
-DatasetPtr
-IDMAP::SearchById(const DatasetPtr& dataset_ptr, const Config& config) {
-    if (!index_) {
-        KNOWHERE_THROW_MSG("index not initialize");
-    }
-    //    GETTENSOR(dataset)
-    auto rows = dataset_ptr->Get<int64_t>(meta::ROWS);
-    auto p_data = dataset_ptr->Get<const int64_t*>(meta::IDS);
-
-    auto elems = rows * config[meta::TOPK].get<int64_t>();
-    size_t p_id_size = sizeof(int64_t) * elems;
-    size_t p_dist_size = sizeof(float) * elems;
-    auto p_id = (int64_t*)malloc(p_id_size);
-    auto p_dist = (float*)malloc(p_dist_size);
-
-    // todo: enable search by id (zhiru)
-    //    auto blacklist = dataset_ptr->Get<faiss::ConcurrentBitsetPtr>("bitset");
-    //    index_->searchById(rows, (float*)p_data, config[meta::TOPK].get<int64_t>(), p_dist, p_id, blacklist);
-    index_->search_by_id(rows, p_data, config[meta::TOPK].get<int64_t>(), p_dist, p_id, bitset_);
-
-    auto ret_ds = std::make_shared<Dataset>();
-    ret_ds->Set(meta::IDS, p_id);
-    ret_ds->Set(meta::DISTANCE, p_dist);
     return ret_ds;
 }
 

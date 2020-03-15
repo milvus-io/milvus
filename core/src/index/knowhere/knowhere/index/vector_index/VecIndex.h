@@ -32,20 +32,22 @@ class VecIndex : public Index {
     }
 
     virtual void
-    Train(const DatasetPtr&, const Config&) = 0;
+    Train(const DatasetPtr& dataset, const Config& config) = 0;
 
     virtual void
-    Add(const DatasetPtr&, const Config&) = 0;
+    Add(const DatasetPtr& dataset, const Config& config) = 0;
 
     virtual void
-    AddWithoutIds(const DatasetPtr&, const Config&) = 0;
+    AddWithoutIds(const DatasetPtr& dataset, const Config& config) = 0;
 
     virtual DatasetPtr
-    Query(const DatasetPtr&, const Config&) = 0;
+    Query(const DatasetPtr& dataset, const Config& config) = 0;
 
-    // virtual DatasetPtr
-    // QueryById(const DatasetPtr&, const Config&) = 0;
-    //
+    virtual DatasetPtr
+    QueryById(const DatasetPtr& dataset, const Config& config) {
+        return nullptr;
+    }
+
     // virtual DatasetPtr
     // QueryByRange(const DatasetPtr&, const Config&) = 0;
     //
@@ -78,11 +80,6 @@ class VecIndex : public Index {
 
     virtual DatasetPtr
     GetVectorById(const DatasetPtr& dataset, const Config& config) {
-        return nullptr;
-    }
-
-    virtual DatasetPtr
-    SearchById(const DatasetPtr& dataset, const Config& config) {
         return nullptr;
     }
 

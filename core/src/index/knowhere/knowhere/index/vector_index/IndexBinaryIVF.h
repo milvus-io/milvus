@@ -55,6 +55,9 @@ class BinaryIVF : public VecIndex, public FaissBaseBinaryIndex {
     DatasetPtr
     Query(const DatasetPtr& dataset_ptr, const Config& config) override;
 
+    DatasetPtr
+    QueryById(const DatasetPtr& dataset_ptr, const Config& config) override;
+
     int64_t
     Count() override;
 
@@ -71,9 +74,6 @@ class BinaryIVF : public VecIndex, public FaissBaseBinaryIndex {
 
     DatasetPtr
     GetVectorById(const DatasetPtr& dataset_ptr, const Config& config);
-
-    DatasetPtr
-    SearchById(const DatasetPtr& dataset_ptr, const Config& config);
 
  protected:
     virtual std::shared_ptr<faiss::IVFSearchParameters>

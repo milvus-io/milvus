@@ -9,30 +9,31 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
-#pragma once
-
-#include <string>
+#include "knowhere/index/vector_index/adapter/VectorAdapter.h"
 #include "knowhere/common/Dataset.h"
 #include "knowhere/index/vector_index/helpers/IndexParameter.h"
 
 namespace milvus {
 namespace knowhere {
 
-#define GETTENSOR(dataset_ptr)                         \
-    auto dim = dataset_ptr->Get<int64_t>(meta::DIM);   \
-    auto rows = dataset_ptr->Get<int64_t>(meta::ROWS); \
-    auto p_data = dataset_ptr->Get<const float*>(meta::TENSOR);
+DatasetPtr
+GenDatasetWithIds(const int64_t nb, const int64_t dim, const void* xb, const int64_t* ids) {
+    auto ret_ds = std::make_shared<Dataset>();
+    ret_ds->Set(meta::ROWS, nb);
+    ret_ds->Set(meta::DIM, dim);
+    ret_ds->Set(meta::TENSOR, xb);
+    ret_ds->Set(meta::IDS, ids);
+    return ret_ds;
+}
 
-#define GETBINARYTENSOR(dataset_ptr)                   \
-    auto dim = dataset_ptr->Get<int64_t>(meta::DIM);   \
-    auto rows = dataset_ptr->Get<int64_t>(meta::ROWS); \
-    auto p_data = dataset_ptr->Get<const uint8_t*>(meta::TENSOR);
-
-extern DatasetPtr
-GenDatasetWithIds(const int64_t nb, const int64_t dim, const void* xb, const int64_t* ids);
-
-extern DatasetPtr
-GenDataset(const int64_t nb, const int64_t dim, const void* xb);
+DatasetPtr
+GenDataset(const int64_t nb, const int64_t dim, const void* xb) {
+    auto ret_ds = std::make_shared<Dataset>();
+    ret_ds->Set(meta::ROWS, nb);
+    ret_ds->Set(meta::DIM, dim);
+    ret_ds->Set(meta::TENSOR, xb);
+    return ret_ds;
+}
 
 }  // namespace knowhere
 }  // namespace milvus

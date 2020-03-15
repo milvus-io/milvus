@@ -82,33 +82,47 @@ BinaryIVF::Query(const DatasetPtr& dataset_ptr, const Config& config) {
     }
 }
 
-void
-BinaryIVF::QueryImpl(int64_t n, const uint8_t* data, int64_t k, float* distances, int64_t* labels,
-                       const Config& config) {
-    auto params = GenParams(config);
-    auto ivf_index = dynamic_cast<faiss::IndexBinaryIVF*>(index_.get());
-    ivf_index->nprobe = params->nprobe;
-    int32_t* pdistances = (int32_t*)distances;
-    stdclock::time_point before = stdclock::now();
+DatasetPtr
+BinaryIVF::QueryById(const DatasetPtr& dataset_ptr, const Config& config) {
+    if (!index_ || !index_->is_trained) {
+        KNOWHERE_THROW_MSG("index not initialize or trained");
+    }
 
-    // todo: remove static cast (zhiru)
-    static_cast<faiss::IndexBinary*>(index_.get())->search(n, (uint8_t*)data, k, pdistances, labels, bitset_);
+    auto rows = dataset_ptr->Get<int64_t>(meta::ROWS);
+    auto p_data = dataset_ptr->Get<const int64_t*>(meta::IDS);
 
-    stdclock::time_point after = stdclock::now();
-    double search_cost = (std::chrono::duration<double, std::micro>(after - before)).count();
-    KNOWHERE_LOG_DEBUG << "IVF search cost: " << search_cost
-                       << ", quantization cost: " << faiss::indexIVF_stats.quantization_time
-                       << ", data search cost: " << faiss::indexIVF_stats.search_time;
-    faiss::indexIVF_stats.quantization_time = 0;
-    faiss::indexIVF_stats.search_time = 0;
-}
+    try {
+        auto elems = rows * config[meta::TOPK].get<int64_t>();
 
-std::shared_ptr<faiss::IVFSearchParameters>
-BinaryIVF::GenParams(const Config& config) {
-    auto params = std::make_shared<faiss::IVFSearchParameters>();
-    params->nprobe = config[IndexParams::nprobe];
-    // params->max_codes = config["max_code"];
-    return params;
+        size_t p_id_size = sizeof(int64_t) * elems;
+        size_t p_dist_size = sizeof(float) * elems;
+        auto p_id = (int64_t*)malloc(p_id_size);
+        auto p_dist = (float*)malloc(p_dist_size);
+
+        int32_t* pdistances = (int32_t*)p_dist;
+        index_->search_by_id(rows, p_data, config[meta::TOPK].get<int64_t>(), pdistances, p_id, bitset_);
+
+        auto ret_ds = std::make_shared<Dataset>();
+        if (index_->metric_type == faiss::METRIC_Hamming) {
+            auto pf_dist = (float*)malloc(p_dist_size);
+            int32_t* pi_dist = (int32_t*)p_dist;
+            for (int i = 0; i < elems; i++) {
+                *(pf_dist + i) = (float)(*(pi_dist + i));
+            }
+            ret_ds->Set(meta::IDS, p_id);
+            ret_ds->Set(meta::DISTANCE, pf_dist);
+            free(p_dist);
+        } else {
+            ret_ds->Set(meta::IDS, p_id);
+            ret_ds->Set(meta::DISTANCE, p_dist);
+        }
+
+        return ret_ds;
+    } catch (faiss::FaissException& e) {
+        KNOWHERE_THROW_MSG(e.what());
+    } catch (std::exception& e) {
+        KNOWHERE_THROW_MSG(e.what());
+    }
 }
 
 void
@@ -167,47 +181,33 @@ BinaryIVF::GetVectorById(const DatasetPtr& dataset_ptr, const Config& config) {
     }
 }
 
-DatasetPtr
-BinaryIVF::SearchById(const DatasetPtr& dataset_ptr, const Config& config) {
-    if (!index_ || !index_->is_trained) {
-        KNOWHERE_THROW_MSG("index not initialize or trained");
-    }
+std::shared_ptr<faiss::IVFSearchParameters>
+BinaryIVF::GenParams(const Config& config) {
+    auto params = std::make_shared<faiss::IVFSearchParameters>();
+    params->nprobe = config[IndexParams::nprobe];
+    // params->max_codes = config["max_code"];
+    return params;
+}
 
-    auto rows = dataset_ptr->Get<int64_t>(meta::ROWS);
-    auto p_data = dataset_ptr->Get<const int64_t*>(meta::IDS);
+void
+BinaryIVF::QueryImpl(int64_t n, const uint8_t* data, int64_t k, float* distances, int64_t* labels,
+                     const Config& config) {
+    auto params = GenParams(config);
+    auto ivf_index = dynamic_cast<faiss::IndexBinaryIVF*>(index_.get());
+    ivf_index->nprobe = params->nprobe;
+    int32_t* pdistances = (int32_t*)distances;
+    stdclock::time_point before = stdclock::now();
 
-    try {
-        auto elems = rows * config[meta::TOPK].get<int64_t>();
+    // todo: remove static cast (zhiru)
+    static_cast<faiss::IndexBinary*>(index_.get())->search(n, (uint8_t*)data, k, pdistances, labels, bitset_);
 
-        size_t p_id_size = sizeof(int64_t) * elems;
-        size_t p_dist_size = sizeof(float) * elems;
-        auto p_id = (int64_t*)malloc(p_id_size);
-        auto p_dist = (float*)malloc(p_dist_size);
-
-        int32_t* pdistances = (int32_t*)p_dist;
-        index_->search_by_id(rows, p_data, config[meta::TOPK].get<int64_t>(), pdistances, p_id, bitset_);
-
-        auto ret_ds = std::make_shared<Dataset>();
-        if (index_->metric_type == faiss::METRIC_Hamming) {
-            auto pf_dist = (float*)malloc(p_dist_size);
-            int32_t* pi_dist = (int32_t*)p_dist;
-            for (int i = 0; i < elems; i++) {
-                *(pf_dist + i) = (float)(*(pi_dist + i));
-            }
-            ret_ds->Set(meta::IDS, p_id);
-            ret_ds->Set(meta::DISTANCE, pf_dist);
-            free(p_dist);
-        } else {
-            ret_ds->Set(meta::IDS, p_id);
-            ret_ds->Set(meta::DISTANCE, p_dist);
-        }
-
-        return ret_ds;
-    } catch (faiss::FaissException& e) {
-        KNOWHERE_THROW_MSG(e.what());
-    } catch (std::exception& e) {
-        KNOWHERE_THROW_MSG(e.what());
-    }
+    stdclock::time_point after = stdclock::now();
+    double search_cost = (std::chrono::duration<double, std::micro>(after - before)).count();
+    KNOWHERE_LOG_DEBUG << "IVF search cost: " << search_cost
+                       << ", quantization cost: " << faiss::indexIVF_stats.quantization_time
+                       << ", data search cost: " << faiss::indexIVF_stats.search_time;
+    faiss::indexIVF_stats.quantization_time = 0;
+    faiss::indexIVF_stats.search_time = 0;
 }
 
 }  // namespace knowhere
