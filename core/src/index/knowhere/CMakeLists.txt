@@ -27,26 +27,27 @@ set(external_srcs
 
 set(index_srcs
         knowhere/index/vector_index/adapter/SptagAdapter.cpp
+        knowhere/index/vector_index/adapter/VectorAdapter.cpp
         knowhere/index/vector_index/helpers/FaissIO.cpp
-        knowhere/index/vector_index/FaissBaseBinaryIndex.cpp
-        knowhere/index/vector_index/FaissBaseIndex.cpp
-        knowhere/index/vector_index/IndexIVF.cpp
-        knowhere/index/vector_index/IndexIDMAP.cpp
-        knowhere/index/vector_index/IndexIVFSQ.cpp
-        knowhere/index/vector_index/IndexIVFPQ.cpp
-        knowhere/index/vector_index/IndexBinaryIVF.cpp
-        knowhere/index/vector_index/IndexBinaryIDMAP.cpp
-        knowhere/index/vector_index/IndexSPTAG.cpp
-        knowhere/index/vector_index/helpers/SPTAGParameterMgr.cpp
-        knowhere/index/vector_index/IndexNSG.cpp
-        knowhere/index/vector_index/IndexHNSW.cpp
-        knowhere/index/vector_index/impl/nsg/NSG.cpp
-        knowhere/index/vector_index/impl/nsg/NSGIO.cpp
-        knowhere/index/vector_index/impl/nsg/NSGHelper.cpp
-        knowhere/index/vector_index/impl/nsg/Distance.cpp
         knowhere/index/vector_index/helpers/IndexParameter.cpp
+        knowhere/index/vector_index/helpers/SPTAGParameterMgr.cpp
+        knowhere/index/vector_index/impl/nsg/Distance.cpp
+        knowhere/index/vector_index/impl/nsg/NSG.cpp
+        knowhere/index/vector_index/impl/nsg/NSGHelper.cpp
+        knowhere/index/vector_index/impl/nsg/NSGIO.cpp
         knowhere/index/vector_index/ConfAdapter.cpp
         knowhere/index/vector_index/ConfAdapterMgr.cpp
+        knowhere/index/vector_index/FaissBaseBinaryIndex.cpp
+        knowhere/index/vector_index/FaissBaseIndex.cpp
+        knowhere/index/vector_index/IndexBinaryIDMAP.cpp
+        knowhere/index/vector_index/IndexBinaryIVF.cpp
+        knowhere/index/vector_index/IndexHNSW.cpp
+        knowhere/index/vector_index/IndexIDMAP.cpp
+        knowhere/index/vector_index/IndexIVF.cpp
+        knowhere/index/vector_index/IndexIVFPQ.cpp
+        knowhere/index/vector_index/IndexIVFSQ.cpp
+        knowhere/index/vector_index/IndexNSG.cpp
+        knowhere/index/vector_index/IndexSPTAG.cpp
         knowhere/index/vector_index/IndexType.cpp
         knowhere/index/vector_index/VecIndexFactory.cpp
         )
@@ -85,11 +86,11 @@ if (KNOWHERE_GPU_VERSION)
             )
 
     set(index_srcs ${index_srcs}
+            knowhere/index/vector_index/gpu/IndexGPUIDMAP.cpp
             knowhere/index/vector_index/gpu/IndexGPUIVF.cpp
+            knowhere/index/vector_index/gpu/IndexGPUIVFPQ.cpp
             knowhere/index/vector_index/gpu/IndexGPUIVFSQ.cpp
             knowhere/index/vector_index/gpu/IndexIVFSQHybrid.cpp
-            knowhere/index/vector_index/gpu/IndexGPUIVFPQ.cpp
-            knowhere/index/vector_index/gpu/IndexGPUIDMAP.cpp
             knowhere/index/vector_index/helpers/Cloner.cpp
             knowhere/index/vector_index/helpers/FaissGpuResourceMgr.cpp
             )
@@ -113,7 +114,7 @@ set(INDEX_INCLUDE_DIRS
         ${INDEX_SOURCE_DIR}/knowhere
         ${INDEX_SOURCE_DIR}/thirdparty
         ${INDEX_SOURCE_DIR}/thirdparty/SPTAG/AnnService
-        ${ARROW_INCLUDE_DIR}
+#        ${ARROW_INCLUDE_DIR}
         ${FAISS_INCLUDE_DIR}
         ${OPENBLAS_INCLUDE_DIR}
         ${LAPACK_INCLUDE_DIR}

@@ -22,24 +22,27 @@
 #include "cache/GpuCacheMgr.h"
 #include "config/Config.h"
 #include "db/Utils.h"
+#include "index/archive/VecIndex.h"
 #include "knowhere/common/Config.h"
+#include "knowhere/index/vector_index/ConfAdapter.h"
+#include "knowhere/index/vector_index/ConfAdapterMgr.h"
+#include "knowhere/index/vector_index/IndexBinaryIDMAP.h"
+#include "knowhere/index/vector_index/IndexIDMAP.h"
+#include "knowhere/index/vector_index/VecIndex.h"
+#include "knowhere/index/vector_index/VecIndexFactory.h"
+#include "knowhere/index/vector_index/adapter/VectorAdapter.h"
+#include "knowhere/index/vector_index/gpu/IndexIVFSQHybrid.h"
+#include "knowhere/index/vector_index/gpu/Quantizer.h"
+#include "knowhere/index/vector_index/helpers/Cloner.h"
+#include "knowhere/index/vector_index/helpers/IndexParameter.h"
 #include "metrics/Metrics.h"
 #include "scheduler/Utils.h"
 #include "utils/CommonUtil.h"
 #include "utils/Exception.h"
 #include "utils/Log.h"
+#include "utils/Status.h"
 #include "utils/TimeRecorder.h"
 #include "utils/ValidationUtil.h"
-//#include "knowhere/index/vector_index/BinVecImpl.h"
-#include "knowhere/index/vector_index/gpu/Quantizer.h"
-#include "knowhere/index/vector_index/helpers/IndexParameter.h"
-#include "knowhere/index/vector_index/ConfAdapter.h"
-#include "knowhere/index/vector_index/ConfAdapterMgr.h"
-#include "knowhere/index/vector_index/IndexBinaryIDMAP.h"
-#include "knowhere/index/vector_index/IndexIDMAP.h"
-#include "knowhere/index/vector_index/gpu/IndexIVFSQHybrid.h"
-#include "knowhere/index/vector_index/VecIndex.h"
-#include "knowhere/index/vector_index/VecIndexFactory.h"
 
 //#define ON_SEARCH
 namespace milvus {
@@ -283,25 +286,25 @@ ExecutionEngineImpl::HybridLoad() const {
 
 void
 ExecutionEngineImpl::HybridUnset() const {
-    if (index_type_ != EngineType::FAISS_IVFSQ8H) {
+    auto hybrid_index = std::dynamic_pointer_cast<knowhere::IVFSQHybrid>(index_);
+    if (hybrid_index == nullptr) {
         return;
     }
-    if (index_->GetType() == IndexType::FAISS_IDMAP) {
-        return;
-    }
-    index_->UnsetQuantizer();
+    hybrid_index->UnsetQuantizer();
 }
 
 Status
 ExecutionEngineImpl::AddWithIds(int64_t n, const float* xdata, const int64_t* xids) {
-    auto status = index_->Add(n, xdata, xids);
-    return status;
+    auto dataset = knowhere::GenDatasetWithIds(n, index_->Dim(), xdata, xids);
+    index_->Add(dataset, knowhere::Config());
+    return Status::OK();
 }
 
 Status
 ExecutionEngineImpl::AddWithIds(int64_t n, const uint8_t* xdata, const int64_t* xids) {
-    auto status = index_->Add(n, xdata, xids);
-    return status;
+    auto dataset = knowhere::GenDatasetWithIds(n, index_->Dim(), xdata, xids);
+    index_->Add(dataset, knowhere::Config());
+    return Status::OK();
 }
 
 size_t
@@ -315,7 +318,7 @@ ExecutionEngineImpl::Count() const {
 
 size_t
 ExecutionEngineImpl::Size() const {
-    if (IsBinaryIndexType(index_->GetType())) {
+    if (IsBinaryIndexType(index_->index_type())) {
         return (size_t)(Count() * Dimension() / 8);
     } else {
         return (size_t)(Count() * Dimension()) * sizeof(float);
@@ -328,7 +331,7 @@ ExecutionEngineImpl::Dimension() const {
         ENGINE_LOG_ERROR << "ExecutionEngineImpl: index is null, return dimension " << dim_;
         return dim_;
     }
-    return index_->Dimension();
+    return index_->Dim();
 }
 
 size_t
@@ -387,16 +390,20 @@ Status
 ExecutionEngineImpl::Load(bool to_cache) {
     // TODO(zhiru): refactor
 
-    index_ = std::static_pointer_cast<VecIndex>(cache::CpuCacheMgr::GetInstance()->GetIndex(location_));
+    index_ = std::static_pointer_cast<knowhere::VecIndex>(cache::CpuCacheMgr::GetInstance()->GetIndex(location_));
     bool already_in_cache = (index_ != nullptr);
     if (!already_in_cache) {
         std::string segment_dir;
         utils::GetParentPath(location_, segment_dir);
         auto segment_reader_ptr = std::make_shared<segment::SegmentReader>(segment_dir);
+        knowhere::VecIndexFactory& vec_index_factory = knowhere::VecIndexFactory::GetInstance();
 
         if (utils::IsRawIndexType((int32_t)index_type_)) {
-            index_ = index_type_ == EngineType::FAISS_IDMAP ? GetVecIndexFactory(IndexType::FAISS_IDMAP)
-                                                            : GetVecIndexFactory(IndexType::FAISS_BIN_IDMAP);
+            if (index_type_ == EngineType::FAISS_IDMAP) {
+                index_ = vec_index_factory.CreateVecIndex(knowhere::IndexType::INDEX_FAISS_IDMAP);
+            } else {
+                index_ = vec_index_factory.CreateVecIndex(knowhere::IndexType::INDEX_FAISS_BIN_IDMAP);
+            }
             milvus::json conf{{knowhere::meta::DEVICEID, gpu_num_}, {knowhere::meta::DIM, dim_}};
             MappingMetricType(metric_type_, conf);
             auto adapter = knowhere::AdapterMgr::GetInstance().GetAdapter(index_->index_type(), index_->index_mode());
@@ -431,41 +438,31 @@ ExecutionEngineImpl::Load(bool to_cache) {
                 }
             }
 
-            ErrorCode ec = KNOWHERE_UNEXPECTED_ERROR;
             if (index_type_ == EngineType::FAISS_IDMAP) {
+                auto bf_index = std::static_pointer_cast<knowhere::IDMAP>(index_);
                 std::vector<float> float_vectors;
                 float_vectors.resize(vectors_data.size() / sizeof(float));
                 memcpy(float_vectors.data(), vectors_data.data(), vectors_data.size());
-                ec = std::static_pointer_cast<BFIndex>(index_)->Build(conf);
-                if (ec != KNOWHERE_SUCCESS) {
-                    return status;
-                }
-                status = std::static_pointer_cast<BFIndex>(index_)->AddWithoutIds(vectors->GetCount(),
-                                                                                  float_vectors.data(), Config());
-                status = std::static_pointer_cast<BFIndex>(index_)->SetBlacklist(concurrent_bitset_ptr);
+                bf_index->Train(knowhere::DatasetPtr(), conf);
+                auto dataset = knowhere::GenDataset(vectors->GetCount(), bf_index->Dim(), float_vectors.data());
+                bf_index->AddWithoutIds(dataset, conf);
+                bf_index->SetBlacklist(concurrent_bitset_ptr);
 
                 int64_t index_size = vectors->GetCount() * dim_ * sizeof(float);
                 int64_t bitset_size = vectors->GetCount() / 8;
                 index_->set_size(index_size + bitset_size);
             } else if (index_type_ == EngineType::FAISS_BIN_IDMAP) {
-                ec = std::static_pointer_cast<BinBFIndex>(index_)->Build(conf);
-                if (ec != KNOWHERE_SUCCESS) {
-                    return status;
-                }
-                status = std::static_pointer_cast<BinBFIndex>(index_)->AddWithoutIds(vectors->GetCount(),
-                                                                                     vectors_data.data(), Config());
-                status = std::static_pointer_cast<BinBFIndex>(index_)->SetBlacklist(concurrent_bitset_ptr);
+                auto bin_bf_index = std::static_pointer_cast<knowhere::BinaryIDMAP>(index_);
+                bin_bf_index->Train(knowhere::DatasetPtr(), conf);
+                auto dataset = knowhere::GenDataset(vectors->GetCount(), bin_bf_index->Dim(), vectors_data.data());
+                bin_bf_index->AddWithoutIds(dataset, conf);
+                bin_bf_index->SetBlacklist(concurrent_bitset_ptr);
 
                 int64_t index_size = vectors->GetCount() * dim_ * sizeof(uint8_t);
                 int64_t bitset_size = vectors->GetCount() / 8;
                 index_->set_size(index_size + bitset_size);
             }
-            if (!status.ok()) {
-                return status;
-            }
-
             ENGINE_LOG_DEBUG << "Finished loading raw data from segment " << segment_dir;
-
         } else {
             try {
                 double physical_size = PhysicalSize();
@@ -571,7 +568,7 @@ ExecutionEngineImpl::CopyToGpu(uint64_t device_id, bool hybrid) {
 #endif
 
 #ifdef MILVUS_GPU_VERSION
-    auto index = std::static_pointer_cast<VecIndex>(cache::GpuCacheMgr::GetInstance(device_id)->GetIndex(location_));
+    auto index = std::static_pointer_cast<knowhere::VecIndex>(cache::GpuCacheMgr::GetInstance(device_id)->GetIndex(location_));
     bool already_in_cache = (index != nullptr);
     if (already_in_cache) {
         index_ = index;
@@ -582,7 +579,7 @@ ExecutionEngineImpl::CopyToGpu(uint64_t device_id, bool hybrid) {
         }
 
         try {
-            index_ = index_->CopyToGpu(device_id);
+            index_ = knowhere::cloner::CopyCpuToGpu(index_, device_id, knowhere::Config());
             ENGINE_LOG_DEBUG << "CPU to GPU" << device_id;
         } catch (std::exception& e) {
             ENGINE_LOG_ERROR << e.what();
@@ -603,7 +600,7 @@ ExecutionEngineImpl::CopyToIndexFileToGpu(uint64_t device_id) {
 #ifdef MILVUS_GPU_VERSION
     // the ToIndexData is only a placeholder, cpu-copy-to-gpu action is performed in
     gpu_num_ = device_id;
-    auto to_index_data = std::make_shared<ToIndexData>(PhysicalSize());
+    auto to_index_data = std::make_shared<knowhere::ToIndexData>(PhysicalSize());
     cache::DataObjPtr obj = std::static_pointer_cast<cache::DataObj>(to_index_data);
     milvus::cache::GpuCacheMgr::GetInstance(device_id)->InsertItem(location_ + "_placeholder", obj);
 #endif
@@ -612,7 +609,7 @@ ExecutionEngineImpl::CopyToIndexFileToGpu(uint64_t device_id) {
 
 Status
 ExecutionEngineImpl::CopyToCpu() {
-    auto index = std::static_pointer_cast<VecIndex>(cache::CpuCacheMgr::GetInstance()->GetIndex(location_));
+    auto index = std::static_pointer_cast<knowhere::VecIndex>(cache::CpuCacheMgr::GetInstance()->GetIndex(location_));
     bool already_in_cache = (index != nullptr);
     if (already_in_cache) {
         index_ = index;
@@ -623,7 +620,7 @@ ExecutionEngineImpl::CopyToCpu() {
         }
 
         try {
-            index_ = index_->CopyToCpu();
+            index_ = knowhere::cloner::CopyGpuToCpu(index_, knowhere::Config());
             ENGINE_LOG_DEBUG << "GPU to CPU";
         } catch (std::exception& e) {
             ENGINE_LOG_ERROR << e.what();
@@ -701,8 +698,8 @@ ExecutionEnginePtr
 ExecutionEngineImpl::BuildIndex(const std::string& location, EngineType engine_type) {
     ENGINE_LOG_DEBUG << "Build index file: " << location << " from: " << location_;
 
-    auto from_index = std::dynamic_pointer_cast<BFIndex>(index_);
-    auto bin_from_index = std::dynamic_pointer_cast<BinBFIndex>(index_);
+    auto from_index = std::dynamic_pointer_cast<knowhere::IDMAP>(index_);
+    auto bin_from_index = std::dynamic_pointer_cast<knowhere::BinaryIDMAP>(index_);
     if (from_index == nullptr && bin_from_index == nullptr) {
         ENGINE_LOG_ERROR << "ExecutionEngineImpl: from_index is null, failed to build index";
         return nullptr;
@@ -725,15 +722,16 @@ ExecutionEngineImpl::BuildIndex(const std::string& location, EngineType engine_t
     }
     ENGINE_LOG_DEBUG << "Index config: " << conf.dump();
 
-    auto status = Status::OK();
     std::vector<segment::doc_id_t> uids;
     faiss::ConcurrentBitsetPtr blacklist;
     if (from_index) {
-        status = to_index->BuildAll(Count(), from_index->GetRawVectors(), from_index->GetRawIds(), conf);
+        auto dataset = knowhere::GenDatasetWithIds(Count(), to_index->Dim(), from_index->GetRawVectors(), from_index->GetRawIds());
+        to_index->BuildAll(dataset, conf);
         uids = from_index->GetUids();
         from_index->GetBlacklist(blacklist);
     } else if (bin_from_index) {
-        status = to_index->BuildAll(Count(), bin_from_index->GetRawVectors(), bin_from_index->GetRawIds(), conf);
+        auto dataset = knowhere::GenDatasetWithIds(Count(), to_index->Dim(), bin_from_index->GetRawVectors(), bin_from_index->GetRawIds());
+        to_index->BuildAll(dataset, conf);
         uids = bin_from_index->GetUids();
         bin_from_index->GetBlacklist(blacklist);
     }
@@ -742,10 +740,6 @@ ExecutionEngineImpl::BuildIndex(const std::string& location, EngineType engine_t
     if (blacklist != nullptr) {
         to_index->SetBlacklist(blacklist);
         ENGINE_LOG_DEBUG << "Set blacklist for index " << location;
-    }
-
-    if (!status.ok()) {
-        throw Exception(DB_ERROR, status.message());
     }
 
     ENGINE_LOG_DEBUG << "Finish build index file: " << location << " size: " << to_index->Size();
@@ -838,7 +832,10 @@ ExecutionEngineImpl::Search(int64_t n, const float* data, int64_t k, const milvu
     }
 
     rc.RecordSection("search prepare");
-    auto status = index_->Query(n, data, distances, labels, conf);
+    auto dataset = knowhere::GenDataset(n, index_->Dim(), data);
+    auto result = index_->Query(dataset, conf);
+    labels = result->Get<int64_t*>(knowhere::meta::IDS);
+    distances = result->Get<float*>(knowhere::meta::DISTANCE);
     rc.RecordSection("search done");
 
     // map offsets to ids
@@ -851,10 +848,7 @@ ExecutionEngineImpl::Search(int64_t n, const float* data, int64_t k, const milvu
         HybridUnset();
     }
 
-    if (!status.ok()) {
-        ENGINE_LOG_ERROR << "Search error:" << status.message();
-    }
-    return status;
+    return Status::OK();
 }
 
 Status
@@ -880,7 +874,10 @@ ExecutionEngineImpl::Search(int64_t n, const uint8_t* data, int64_t k, const mil
     }
 
     rc.RecordSection("search prepare");
-    auto status = index_->Query(n, data, distances, labels, conf);
+    auto dataset = knowhere::GenDataset(n, index_->Dim(), data);
+    auto result = index_->Query(dataset, conf);
+    labels = result->Get<int64_t*>(knowhere::meta::IDS);
+    distances = result->Get<float*>(knowhere::meta::DISTANCE);
     rc.RecordSection("search done");
 
     // map offsets to ids
@@ -893,10 +890,7 @@ ExecutionEngineImpl::Search(int64_t n, const uint8_t* data, int64_t k, const mil
         HybridUnset();
     }
 
-    if (!status.ok()) {
-        ENGINE_LOG_ERROR << "Search error:" << status.message();
-    }
-    return status;
+    return Status::OK();
 }
 
 Status
@@ -962,9 +956,11 @@ ExecutionEngineImpl::Search(int64_t n, const std::vector<int64_t>& ids, int64_t 
 
     rc.RecordSection("get offset");
 
-    auto status = Status::OK();
     if (!offsets.empty()) {
-        status = index_->SearchById(offsets.size(), offsets.data(), distances, labels, conf);
+        auto dataset = knowhere::GenDataset(offsets.size(), index_->Dim(), offsets.data());
+        auto result = index_->QueryById(dataset, conf);
+        labels = result->Get<int64_t*>(knowhere::meta::IDS);
+        distances = result->Get<float*>(knowhere::meta::DISTANCE);
         rc.RecordSection("search done");
 
         // map offsets to ids
@@ -978,10 +974,7 @@ ExecutionEngineImpl::Search(int64_t n, const std::vector<int64_t>& ids, int64_t 
         HybridUnset();
     }
 
-    if (!status.ok()) {
-        ENGINE_LOG_ERROR << "Search error:" << status.message();
-    }
-    return status;
+    return Status::OK();
 }
 
 Status
@@ -997,16 +990,15 @@ ExecutionEngineImpl::GetVectorByID(const int64_t& id, float* vector, bool hybrid
 
     // Only one id for now
     std::vector<int64_t> ids{id};
-    auto status = index_->GetVectorById(1, ids.data(), vector, milvus::json());
+    auto dataset = knowhere::GenDatasetWithIds(1, index_->Dim(), nullptr, ids.data());
+    auto result = index_->GetVectorById(dataset, knowhere::Config());
+    vector = result->Get<float*>(knowhere::meta::TENSOR);
 
     if (hybrid) {
         HybridUnset();
     }
 
-    if (!status.ok()) {
-        ENGINE_LOG_ERROR << "Search error:" << status.message();
-    }
-    return status;
+    return Status::OK();
 }
 
 Status
@@ -1024,16 +1016,15 @@ ExecutionEngineImpl::GetVectorByID(const int64_t& id, uint8_t* vector, bool hybr
 
     // Only one id for now
     std::vector<int64_t> ids{id};
-    auto status = index_->GetVectorById(1, ids.data(), vector, milvus::json());
+    auto dataset = knowhere::GenDatasetWithIds(1, index_->Dim(), nullptr, ids.data());
+    auto result = index_->GetVectorById(dataset, knowhere::Config());
+    vector = result->Get<uint8_t*>(knowhere::meta::TENSOR);
 
     if (hybrid) {
         HybridUnset();
     }
 
-    if (!status.ok()) {
-        ENGINE_LOG_ERROR << "Search error:" << status.message();
-    }
-    return status;
+    return Status::OK();
 }
 
 Status

@@ -116,6 +116,8 @@ set(storage_files
 
 aux_source_directory(${MILVUS_ENGINE_SRC}/utils utils_files)
 
+aux_source_directory(${MILVUS_ENGINE_SRC}/index/archive wrapper_files)
+
 aux_source_directory(${MILVUS_ENGINE_SRC}/tracing tracing_files)
 
 aux_source_directory(${MILVUS_ENGINE_SRC}/codecs codecs_files)
@@ -135,6 +137,7 @@ set(engine_files
         ${storage_files}
         ${thirdparty_files}
         ${utils_files}
+        ${wrapper_files}
         ${codecs_files}
         ${codecs_default_files}
         ${segment_files}
