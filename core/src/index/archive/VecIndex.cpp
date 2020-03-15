@@ -17,17 +17,16 @@
 
 #include <memory>
 
+#include "config/Config.h"
 #include "knowhere/common/Exception.h"
 #include "knowhere/index/vector_index/VecIndex.h"
 #include "knowhere/index/vector_index/VecIndexFactory.h"
-#include "server/Config.h"
-#include "storage/file/FileIOReader.h"
-#include "storage/file/FileIOWriter.h"
+#include "storage/disk/DiskIOReader.h"
+#include "storage/disk/DiskIOWriter.h"
 #include "storage/s3/S3IOReader.h"
 #include "storage/s3/S3IOWriter.h"
 #include "utils/Log.h"
 #include "utils/TimeRecorder.h"
-#include "wrapper/VecIndex.h"
 
 namespace milvus {
 namespace engine {
@@ -49,18 +48,19 @@ read_index(const std::string& location) {
     milvus::TimeRecorder recorder("read_index");
     knowhere::BinarySet load_data_list;
 
-    bool minio_enable = false;
+    bool s3_enable = false;
     milvus::server::Config& config = milvus::server::Config::GetInstance();
-    config.GetStorageConfigMinioEnable(minio_enable);
+    config.GetStorageConfigS3Enable(s3_enable);
 
     std::shared_ptr<milvus::storage::IOReader> reader_ptr;
-    if (minio_enable) {
-        reader_ptr = std::make_shared<milvus::storage::S3IOReader>(location);
+    if (s3_enable) {
+        reader_ptr = std::make_shared<milvus::storage::S3IOReader>();
     } else {
-        reader_ptr = std::make_shared<milvus::storage::FileIOReader>(location);
+        reader_ptr = std::make_shared<milvus::storage::DiskIOReader>();
     }
 
     recorder.RecordSection("Start");
+    reader_ptr->open(location);
 
     size_t length = reader_ptr->length();
     if (length <= 0) {
@@ -101,6 +101,7 @@ read_index(const std::string& location) {
         load_data_list.Append(std::string(meta, meta_length), binptr, bin_length);
         delete[] meta;
     }
+    reader_ptr->close();
 
     double span = recorder.RecordSection("End");
     double rate = length * 1000000.0 / span / 1024 / 1024;
@@ -114,21 +115,22 @@ write_index(knowhere::VecIndexPtr index, const std::string& location) {
     try {
         milvus::TimeRecorder recorder("write_index");
 
-        auto binaryset = index->Serialize(knowhere::CfgPtr());
+        auto binaryset = index->Serialize(knowhere::Config());
         auto index_type = index->index_type();
 
-        bool minio_enable = false;
+        bool s3_enable = false;
         milvus::server::Config& config = milvus::server::Config::GetInstance();
-        config.GetStorageConfigMinioEnable(minio_enable);
+        config.GetStorageConfigS3Enable(s3_enable);
 
         std::shared_ptr<milvus::storage::IOWriter> writer_ptr;
-        if (minio_enable) {
-            writer_ptr = std::make_shared<milvus::storage::S3IOWriter>(location);
+        if (s3_enable) {
+            writer_ptr = std::make_shared<milvus::storage::S3IOWriter>();
         } else {
-            writer_ptr = std::make_shared<milvus::storage::FileIOWriter>(location);
+            writer_ptr = std::make_shared<milvus::storage::DiskIOWriter>();
         }
 
         recorder.RecordSection("Start");
+        writer_ptr->open(location);
 
         writer_ptr->write(&index_type, sizeof(knowhere::IndexType));
 
@@ -143,6 +145,7 @@ write_index(knowhere::VecIndexPtr index, const std::string& location) {
             writer_ptr->write(&binary_length, sizeof(binary_length));
             writer_ptr->write((void*)binary->data.get(), binary_length);
         }
+        writer_ptr->close();
 
         double span = recorder.RecordSection("End");
         double rate = writer_ptr->length() * 1000000.0 / span / 1024 / 1024;

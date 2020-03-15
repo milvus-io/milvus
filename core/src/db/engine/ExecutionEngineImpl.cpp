@@ -207,7 +207,7 @@ ExecutionEngineImpl::CreatetVecIndex(EngineType type) {
             break;
         }
         default: {
-            ENGINE_LOG_ERROR << "Unsupported index type " << type;
+            ENGINE_LOG_ERROR << "Unsupported index type " << (int)type;
             return nullptr;
         }
     }

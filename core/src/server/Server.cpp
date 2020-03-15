@@ -28,7 +28,7 @@
 #include "utils/LogUtil.h"
 #include "utils/SignalUtil.h"
 #include "utils/TimeRecorder.h"
-#include "wrapper/KnowhereResource.h"
+#include "index/archive/KnowhereResource.h"
 
 namespace milvus {
 namespace server {

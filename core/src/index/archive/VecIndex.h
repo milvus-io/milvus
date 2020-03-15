@@ -33,8 +33,5 @@ write_index(knowhere::VecIndexPtr index, const std::string& location);
 extern knowhere::VecIndexPtr
 read_index(const std::string& location);
 
-knowhere::VecIndexPtr
-read_index(const std::string& location, knowhere::BinarySet& index_binary);
-
 }  // namespace engine
 }  // namespace milvus

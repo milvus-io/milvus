@@ -48,7 +48,7 @@ bool support_sse() {
     return (instruction_set_inst.SSE());
 }
 
-std::string hook_init() {
+bool hook_init(std::string& cpu_flag) {
     static std::mutex hook_mutex;
     std::lock_guard<std::mutex> lock(hook_mutex);
 
@@ -64,8 +64,7 @@ std::string hook_init() {
         sq_get_distance_computer_IP = sq_get_distance_computer_IP_avx512;
         sq_sel_quantizer = sq_select_quantizer_avx512;
 
-        std::cout << "FAISS hook AVX512" << std::endl;
-        return "AVX512";
+        cpu_flag = "AVX512";
     } else if (support_avx()) {
         /* for IVFFLAT */
         fvec_inner_product = fvec_inner_product_avx;
@@ -78,8 +77,7 @@ std::string hook_init() {
         sq_get_distance_computer_IP = sq_get_distance_computer_IP_avx;
         sq_sel_quantizer = sq_select_quantizer_avx;
 
-        std::cout << "FAISS hook AVX" << std::endl;
-        return "AVX";
+        cpu_flag = "AVX";
     } else if (support_sse()) {
         /* for IVFFLAT */
         fvec_inner_product = fvec_inner_product_sse;
@@ -92,12 +90,13 @@ std::string hook_init() {
         sq_get_distance_computer_IP = sq_get_distance_computer_IP_sse;
         sq_sel_quantizer = sq_select_quantizer_sse;
 
-        std::cout << "FAISS hook SSE" << std::endl;
-        return "SSE";
+        cpu_flag = "SSE";
     } else {
-        FAISS_ASSERT_MSG(false, "CPU not supported!");
-        return "UNSUPPORTED";
+        cpu_flag = "UNSUPPORTED";
+        return false;
     }
+
+    return true;
 }
 
 } // namespace faiss
