@@ -61,12 +61,12 @@ class VecIndex : public Index {
     Count() = 0;
 
     virtual IndexType
-    index_type() {
+    index_type() const {
         return index_type_;
     }
 
     virtual IndexMode
-    index_mode() {
+    index_mode() const {
         return index_mode_;
     }
 

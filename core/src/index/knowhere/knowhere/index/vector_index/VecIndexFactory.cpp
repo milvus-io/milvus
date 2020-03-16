@@ -13,6 +13,8 @@
 
 #include "knowhere/common/Exception.h"
 #include "knowhere/common/Log.h"
+#include "knowhere/index/vector_index/IndexBinaryIDMAP.h"
+#include "knowhere/index/vector_index/IndexBinaryIVF.h"
 #include "knowhere/index/vector_index/IndexHNSW.h"
 #include "knowhere/index/vector_index/IndexIDMAP.h"
 #include "knowhere/index/vector_index/IndexIVF.h"
@@ -46,11 +48,11 @@ VecIndexFactory::CreateVecIndex(const IndexType type, const IndexMode mode) {
             case IndexType::INDEX_FAISS_IVFFLAT: {
                 return std::make_shared<knowhere::GPUIVF>(gpu_device);
             }
-            case IndexType::INDEX_FAISS_IVFSQ8: {
-                return std::make_shared<knowhere::GPUIVFSQ>(gpu_device);
-            }
             case IndexType::INDEX_FAISS_IVFPQ: {
                 return std::make_shared<knowhere::GPUIVFPQ>(gpu_device);
+            }
+            case IndexType::INDEX_FAISS_IVFSQ8: {
+                return std::make_shared<knowhere::GPUIVFSQ>(gpu_device);
             }
             case IndexType::INDEX_FAISS_IVFSQ8H: {
                 return std::make_shared<knowhere::IVFSQHybrid>(gpu_device);
@@ -66,20 +68,26 @@ VecIndexFactory::CreateVecIndex(const IndexType type, const IndexMode mode) {
         case IndexType::INDEX_FAISS_IVFFLAT: {
             return std::make_shared<knowhere::IVF>();
         }
+        case IndexType::INDEX_FAISS_IVFPQ: {
+            return std::make_shared<knowhere::IVFPQ>();
+        }
         case IndexType::INDEX_FAISS_IVFSQ8: {
             return std::make_shared<knowhere::IVFSQ>();
         }
-        case IndexType::INDEX_FAISS_IVFPQ: {
-            return std::make_shared<knowhere::IVFPQ>();
+        case IndexType::INDEX_FAISS_BIN_IDMAP: {
+            return std::make_shared<knowhere::BinaryIDMAP>();
+        }
+        case IndexType::INDEX_FAISS_BIN_IVFFLAT: {
+            return std::make_shared<knowhere::BinaryIVF>();
+        }
+        case IndexType::INDEX_NSG: {
+            return std::make_shared<knowhere::NSG>(-1);
         }
         case IndexType::INDEX_SPTAG_KDT_RNT: {
             return std::make_shared<knowhere::CPUSPTAGRNG>("KDT");
         }
         case IndexType::INDEX_SPTAG_BKT_RNT: {
             return std::make_shared<knowhere::CPUSPTAGRNG>("BKT");
-        }
-        case IndexType::INDEX_NSG: {
-            return std::make_shared<knowhere::NSG>(-1);
         }
         case IndexType::INDEX_HNSW: {
             return std::make_shared<knowhere::IndexHNSW>();

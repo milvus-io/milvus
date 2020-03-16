@@ -94,6 +94,7 @@ set(server_delivery_files
         ${server_delivery_request_files})
 
 aux_source_directory(${MILVUS_ENGINE_SRC}/utils utils_files)
+aux_source_directory(${MILVUS_ENGINE_SRC}/index/archive wrapper_files)
 aux_source_directory(${MILVUS_ENGINE_SRC}/tracing tracing_files)
 
 aux_source_directory(${MILVUS_ENGINE_SRC}/storage storage_main_files)
@@ -135,6 +136,7 @@ set(common_files
         ${metrics_files}
         ${thirdparty_files}
         ${scheduler_files}
+        ${wrapper_files}
         ${storage_files}
         ${helper_files}
         ${server_context_files}
