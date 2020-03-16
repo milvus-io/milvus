@@ -13,6 +13,7 @@ class RouterMixin:
         conn = self.writable_topo.get_group('default').get('WOSERVER').fetch()
         if conn:
             conn.on_connect(metadata=metadata)
+        # PXU TODO: should return conn
         return conn.conn
 
     def query_conn(self, name, metadata=None):
@@ -20,4 +21,4 @@ class RouterMixin:
         if not conn:
             raise exceptions.ConnectionNotFoundError(name, metadata=metadata)
         conn.on_connect(metadata=metadata)
-        return conn.conn
+        return conn
