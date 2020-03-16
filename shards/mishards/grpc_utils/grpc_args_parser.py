@@ -37,6 +37,11 @@ class GrpcArgsParser(object):
 
     @classmethod
     @error_status
+    def parse_proto_FlushParam(cls, param):
+        return list(param.table_name_array)
+
+    @classmethod
+    @error_status
     def parse_proto_Index(cls, param):
         _index = {
             'index_type': param.index_type,
@@ -110,3 +115,27 @@ class GrpcArgsParser(object):
         _end_value = _range.end_value
 
         return _table_name, _start_value, _end_value
+
+    @classmethod
+    @error_status
+    def parse_proto_DeleteByIDParam(cls, param):
+        _table_name = param.table_name
+        _id_array = list(_table_name.id_array)
+
+        return _table_name, _id_array
+
+    @classmethod
+    @error_status
+    def parse_proto_VectorIdentity(cls, param):
+        _table_name = param.table_name
+        _id = param.id
+
+        return _table_name, _id
+
+    @classmethod
+    @error_status
+    def parse_proto_GetVectorIDsParam(cls, param):
+        _table__name = param.table_name
+        _segment_name = param.segment_name
+
+        return _table__name, _segment_name

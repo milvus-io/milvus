@@ -134,7 +134,7 @@ class ServiceHandler(milvus_pb2_grpc.MilvusServiceServicer):
         def search(addr, query_params, vectors, topk, params, **kwargs):
             logger.info(
                 'Send Search Request: addr={};params={};nq={};topk={};params={}'
-                .format(addr, query_params, len(vectors), topk, params))
+                    .format(addr, query_params, len(vectors), topk, params))
 
             conn = self.router.query_conn(addr, metadata=metadata)
             start = time.time()
@@ -229,7 +229,7 @@ class ServiceHandler(milvus_pb2_grpc.MilvusServiceServicer):
 
     @mark_grpc_method
     def DropPartition(self, request, context):
-        _table_name, _partition_name, _tag  = Parser.parse_proto_PartitionParam(request)
+        _table_name, _partition_name, _tag = Parser.parse_proto_PartitionParam(request)
 
         _status = self.router.connection().drop_partition(_table_name, _tag)
         return status_pb2.Status(error_code=_status.code,
@@ -251,7 +251,7 @@ class ServiceHandler(milvus_pb2_grpc.MilvusServiceServicer):
             error_code=_status.code, reason=_status.message),
             partition_array=[milvus_pb2.PartitionParam(table_name=param.table_name,
                                                        tag=param.tag)
-                                                       for param in partition_array])
+                             for param in partition_array])
 
     def _delete_table(self, table_name):
         return self.router.connection().drop_collection(table_name)
@@ -415,6 +415,51 @@ class ServiceHandler(milvus_pb2_grpc.MilvusServiceServicer):
                                      reason=_status.message),
         )
 
+    def _table_info(self, table_name, metadata=None):
+        return self.router.connection(metadata=metadata).collection_info(table_name)
+
+    @mark_grpc_method
+    def ShowTableInfo(self, request, context):
+        _status, _table_name = Parser.parse_proto_TableName(request)
+
+        if not _status.OK():
+            return milvus_pb2.TableInfo(status=status_pb2.Status(
+                error_code=_status.code, reason=_status.message), )
+
+        metadata = {'resp_class': milvus_pb2.TableInfo}
+
+        logger.info('ShowTableInfo {}'.format(_table_name))
+        _status, _info = self._table_info(metadata=metadata, table_name=_table_name)
+
+        if _status.OK():
+            _table_info = milvus_pb2.TableInfo(
+                status=status_pb2.Status(error_code=_status.code,
+                                         reason=_status.message),
+                total_row_count=_info.count
+            )
+
+            for par_stat in _info.partitions_stat:
+                _par = milvus_pb2.PartitionStat(
+                    tag=par_stat.tag,
+                    total_row_count=par_stat.count
+                )
+                for seg_stat in par_stat.segments_stat:
+                    _seg = milvus_pb2.SegmentStat(
+                        segment_name=seg_stat.segment_name,
+                        row_count=seg_stat.count,
+                        index_name=seg_stat.index_name,
+                        data_size=seg_stat.data_size,
+                    )
+                    _par.segments_stat.add(_seg)
+
+                _table_info.partitions_stat.add(_par)
+            return _table_info
+
+        return milvus_pb2.TableInfo(
+            status=status_pb2.Status(error_code=_status.code,
+                                     reason=_status.message),
+        )
+
     def _count_table(self, table_name, metadata=None):
         return self.router.connection(
             metadata=metadata).count_collection(table_name)
@@ -552,6 +597,80 @@ class ServiceHandler(milvus_pb2_grpc.MilvusServiceServicer):
         grpc_index.extra_params.add(key='params', value=ujson.dumps(_index_param._params))
         return grpc_index
 
+    def _get_vector_by_id(self, table_name, vec_id, metadata):
+        return self.router.connection(metadata=metadata).get_vector_by_id(table_name, vec_id)
+
+    @mark_grpc_method
+    def GetVectorByID(self, request, context):
+        _status, unpacks = Parser.parse_proto_VectorIdentity(request)
+        if not _status.OK():
+            return status_pb2.Status(error_code=_status.code,
+                                     reason=_status.message)
+
+        metadata = {'resp_class': milvus_pb2.VectorData}
+
+        _table_name, _id = unpacks
+        logger.info('GetVectorByID {}'.format(_table_name))
+        _status, vector = self._get_vector_by_id(_table_name, _id, metadata)
+
+        if not vector:
+            return milvus_pb2.VectorData(status=status_pb2.Status(
+                error_code=_status.code, reason=_status.message), )
+
+        if isinstance(vector, bytes):
+            records = milvus_pb2.RowRecord(binary_data=vector)
+        else:
+            records = milvus_pb2.RowRecord(float_data=vector)
+
+        return milvus_pb2.VectorData(status=status_pb2.Status(
+            error_code=_status.code, reason=_status.message),
+            vector_data=records
+        )
+
+    def _get_vector_ids(self, table_name, segment_name, metadata):
+        return self.router.connection(metadata=metadata).get_vector_ids(table_name, segment_name)
+
+    @mark_grpc_method
+    def GetVectorIDs(self, request, context):
+        _status, unpacks = Parser.parse_proto_GetVectorIDsParam(request)
+
+        if not _status.OK():
+            return status_pb2.Status(error_code=_status.code,
+                                     reason=_status.message)
+
+        metadata = {'resp_class': milvus_pb2.VectorIds}
+
+        _table_name, _segment_name = unpacks
+        logger.info('GetVectorIDs {}'.format(_table_name))
+        _status, ids = self._get_vector_ids(_table_name, _segment_name, metadata)
+
+        if not ids:
+            return milvus_pb2.VectorIds(status=status_pb2.Status(
+                error_code=_status.code, reason=_status.message), )
+
+        return milvus_pb2.VectorIds(status=status_pb2.Status(
+            error_code=_status.code, reason=_status.message),
+            vector_id_array=ids
+        )
+
+    def _delete_by_id(self, table_name, id_array):
+        return self.router.connection().delete_by_id(table_name, id_array)
+
+    @mark_grpc_method
+    def DeleteByID(self, request, context):
+        _status, unpacks = Parser.parse_proto_DeleteByIDParam(request)
+
+        if not _status.OK():
+            return status_pb2.Status(error_code=_status.code,
+                                     reason=_status.message)
+
+        _table_name, _ids = unpacks
+        logger.info('DeleteByID {}'.format(_table_name))
+        _status = self._delete_by_id(_table_name, _ids)
+
+        return status_pb2.Status(error_code=_status.code,
+                                 reason=_status.message)
+
     def _drop_index(self, table_name):
         return self.router.connection().drop_index(table_name)
 
@@ -565,5 +684,37 @@ class ServiceHandler(milvus_pb2_grpc.MilvusServiceServicer):
 
         logger.info('DropIndex {}'.format(_table_name))
         _status = self._drop_index(_table_name)
+        return status_pb2.Status(error_code=_status.code,
+                                 reason=_status.message)
+
+    def _flush(self, table_names):
+        return self.router.connection().flush(table_names)
+
+    @mark_grpc_method
+    def Flush(self, request, context):
+        _status, _table_names = Parser.parse_proto_FlushParam(request)
+
+        if not _status.OK():
+            return status_pb2.Status(error_code=_status.code,
+                                     reason=_status.message)
+
+        logger.info('Flush {}'.format(_table_names))
+        _status = self._flush(_table_names)
+        return status_pb2.Status(error_code=_status.code,
+                                 reason=_status.message)
+
+    def _compact(self, table_name):
+        return self.router.connection().compact(table_name)
+
+    @mark_grpc_method
+    def Compact(self, request, context):
+        _status, _table_name = Parser.parse_proto_TableName(request)
+
+        if not _status.OK():
+            return status_pb2.Status(error_code=_status.code,
+                                     reason=_status.message)
+
+        logger.info('Compact {}'.format(_table_name))
+        _status = self._compact(_table_name)
         return status_pb2.Status(error_code=_status.code,
                                  reason=_status.message)
