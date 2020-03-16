@@ -396,6 +396,8 @@ class TestSearchBase:
         index_param = get_simple_index["index_param"]
         index_type = get_simple_index["index_type"]
         logging.getLogger().info(get_simple_index)
+        if index_type == IndexType.RNSG:
+            pytest.skip("rnsg not support in ip")
         vectors, ids = self.init_data(connect, ip_collection)
         status = connect.create_index(ip_collection, index_type, index_param)
         query_vec = [vectors[0]]
@@ -422,6 +424,8 @@ class TestSearchBase:
         index_param = get_simple_index["index_param"]
         index_type = get_simple_index["index_type"]
         logging.getLogger().info(get_simple_index)
+        if index_type == IndexType.RNSG:
+            pytest.skip("rnsg not support in ip")
         vectors, ids = self.init_data(connect, ip_collection)
         status = connect.create_index(ip_collection, index_type, index_param)
         query_vec = []
@@ -446,6 +450,8 @@ class TestSearchBase:
         index_param = get_simple_index["index_param"]
         index_type = get_simple_index["index_type"]
         logging.getLogger().info(index_param)
+        if index_type == IndexType.RNSG:
+            pytest.skip("rnsg not support in ip")
         status = connect.create_partition(ip_collection, tag)
         vectors, ids = self.init_data(connect, ip_collection)
         status = connect.create_index(ip_collection, index_type, index_param)
@@ -473,6 +479,8 @@ class TestSearchBase:
         index_param = get_simple_index["index_param"]
         index_type = get_simple_index["index_type"]
         logging.getLogger().info(index_param)
+        if index_type == IndexType.RNSG:
+            pytest.skip("rnsg not support in ip")
         status = connect.create_partition(ip_collection, tag)
         vectors, ids = self.init_data(connect, ip_collection, partition_tags=tag)
         status = connect.create_index(ip_collection, index_type, index_param)
@@ -666,9 +674,11 @@ class TestSearchBase:
         '''
         top_k = 2
         nprobe = 1
-        vectors, ids = self.init_data(connect, ip_collection, nb=2)
         index_param = get_index["index_param"]
         index_type = get_index["index_type"]
+        if index_type == IndexType.RNSG:
+            pytest.skip("rnsg not support in ip")
+        vectors, ids = self.init_data(connect, ip_collection, nb=2)
         connect.create_index(ip_collection, index_type, index_param)
         logging.getLogger().info(connect.describe_index(ip_collection))
         query_vecs = [[0.50 for i in range(dim)]]
