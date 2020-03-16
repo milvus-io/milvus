@@ -39,12 +39,14 @@ enum class EngineType {
 };
 
 enum class MetricType {
-    L2 = 1,        // Euclidean Distance
-    IP = 2,        // Cosine Similarity
-    HAMMING = 3,   // Hamming Distance
-    JACCARD = 4,   // Jaccard Distance
-    TANIMOTO = 5,  // Tanimoto Distance
-    MAX_VALUE = TANIMOTO,
+    L2 = 1,              // Euclidean Distance
+    IP = 2,              // Cosine Similarity
+    HAMMING = 3,         // Hamming Distance
+    JACCARD = 4,         // Jaccard Distance
+    TANIMOTO = 5,        // Tanimoto Distance
+    SUBSTRUCTURE = 6,    // Substructure Distance
+    SUPERSTRUCTURE = 7,  // Superstructure Distance
+    MAX_VALUE = SUPERSTRUCTURE
 };
 
 class ExecutionEngine {
@@ -59,13 +61,10 @@ class ExecutionEngine {
     Count() const = 0;
 
     virtual size_t
-    Size() const = 0;
-
-    virtual size_t
     Dimension() const = 0;
 
     virtual size_t
-    PhysicalSize() const = 0;
+    Size() const = 0;
 
     virtual Status
     Serialize() = 0;

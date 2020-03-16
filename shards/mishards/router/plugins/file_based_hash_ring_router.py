@@ -12,8 +12,9 @@ logger = logging.getLogger(__name__)
 class Factory(RouterMixin):
     name = 'FileBasedHashRingRouter'
 
-    def __init__(self, conn_mgr, **kwargs):
-        super(Factory, self).__init__(conn_mgr)
+    def __init__(self, writable_topo, readonly_topo, **kwargs):
+        super(Factory, self).__init__(writable_topo=writable_topo,
+                readonly_topo=readonly_topo)
 
     def routing(self, table_name, partition_tags=None, metadata=None, **kwargs):
         range_array = kwargs.pop('range_array', None)
@@ -46,7 +47,7 @@ class Factory(RouterMixin):
 
         db.remove_session()
 
-        servers = self.conn_mgr.conn_names
+        servers = self.readonly_topo.group_names
         logger.info('Available servers: {}'.format(servers))
 
         ring = HashRing(servers)
@@ -65,10 +66,13 @@ class Factory(RouterMixin):
 
     @classmethod
     def Create(cls, **kwargs):
-        conn_mgr = kwargs.pop('conn_mgr', None)
-        if not conn_mgr:
-            raise RuntimeError('Cannot find \'conn_mgr\' to initialize \'{}\''.format(self.name))
-        router = cls(conn_mgr, **kwargs)
+        writable_topo = kwargs.pop('writable_topo', None)
+        if not writable_topo:
+            raise RuntimeError('Cannot find \'writable_topo\' to initialize \'{}\''.format(self.name))
+        readonly_topo = kwargs.pop('readonly_topo', None)
+        if not readonly_topo:
+            raise RuntimeError('Cannot find \'readonly_topo\' to initialize \'{}\''.format(self.name))
+        router = cls(writable_topo=writable_topo, readonly_topo=readonly_topo, **kwargs)
         return router
 
 

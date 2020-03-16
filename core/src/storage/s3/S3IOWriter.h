@@ -19,8 +19,20 @@ namespace storage {
 
 class S3IOWriter : public IOWriter {
  public:
-    explicit S3IOWriter(const std::string& name);
-    ~S3IOWriter();
+    S3IOWriter() = default;
+    ~S3IOWriter() = default;
+
+    // No copy and move
+    S3IOWriter(const S3IOWriter&) = delete;
+    S3IOWriter(S3IOWriter&&) = delete;
+
+    S3IOWriter&
+    operator=(const S3IOWriter&) = delete;
+    S3IOWriter&
+    operator=(S3IOWriter&&) = delete;
+
+    void
+    open(const std::string& name) override;
 
     void
     write(void* ptr, size_t size) override;
@@ -28,7 +40,12 @@ class S3IOWriter : public IOWriter {
     size_t
     length() override;
 
+    void
+    close() override;
+
  public:
+    std::string name_;
+    size_t len_;
     std::string buffer_;
 };
 

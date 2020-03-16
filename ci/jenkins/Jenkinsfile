@@ -99,6 +99,20 @@ pipeline {
                                         }
                                     }
 
+                                    stage('Unittest') {
+                                        steps {
+                                            container("milvus-${BINARY_VERSION}-build-env") {
+                                                script {
+                                                    if ("${BINARY_VERSION}" == "gpu") {
+                                                        load "${env.WORKSPACE}/ci/jenkins/step/unittest.groovy"
+                                                    } else {
+                                                        echo "Skip Unittest"
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+
                                     stage('Code Coverage') {
                                         steps {
                                             container("milvus-${BINARY_VERSION}-build-env") {

@@ -112,9 +112,6 @@ struct IndexBinaryIVF : IndexBinary {
     virtual BinaryInvertedListScanner *get_InvertedListScanner (
                                          bool store_pairs=false) const;
 
-    virtual BinaryInvertedListScanner *get_InvertedListScannerJaccard (
-                                         bool store_pairs=false) const;
-
     /** assign the vectors, then call search_preassign */
     void search(idx_t n, const uint8_t *x, idx_t k, int32_t *distances, idx_t *labels,
                 ConcurrentBitsetPtr bitset = nullptr) const override;

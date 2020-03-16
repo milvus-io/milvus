@@ -25,6 +25,7 @@
 #include "scheduler/SchedInst.h"
 #include "scheduler/job/SearchJob.h"
 #include "segment/SegmentReader.h"
+#include "utils/CommonUtil.h"
 #include "utils/Log.h"
 #include "utils/TimeRecorder.h"
 #include "utils/ValidationUtil.h"
@@ -181,7 +182,7 @@ XSearchTask::Load(LoadType type, uint8_t device_id) {
         return;
     }
 
-    size_t file_size = index_engine_->PhysicalSize();
+    size_t file_size = index_engine_->Size();
 
     std::string info = "Search task load file id:" + std::to_string(file_->id_) + " " + type_str +
                        " file type:" + std::to_string(file_->file_type_) + " size:" + std::to_string(file_size) +

@@ -33,6 +33,7 @@
 #include <math.h>
 #include <assert.h>
 #include <limits.h>
+#include <omp.h>
 
 #include <faiss/utils/Heap.h>
 #include <faiss/impl/FaissAssert.h>
@@ -279,28 +280,71 @@ void hammings_knn_hc (
     size_t k = ha->k;
     if (init_heap) ha->heapify ();
 
-    const size_t block_size = hamming_batch_size;
-    for (size_t j0 = 0; j0 < n2; j0 += block_size) {
-      const size_t j1 = std::min(j0 + block_size, n2);
-#pragma omp parallel for
-      for (size_t i = 0; i < ha->nh; i++) {
-        HammingComputer hc (bs1 + i * bytes_per_code, bytes_per_code);
+    int thread_max_num = omp_get_max_threads();
+    if (ha->nh < thread_max_num) {
+        // omp for n2
+        int all_hash_size = thread_max_num * k;
+        hamdis_t *value = new hamdis_t[all_hash_size];
+        int64_t *labels = new int64_t[all_hash_size];
 
-        const uint8_t * bs2_ = bs2 + j0 * bytes_per_code;
-        hamdis_t dis;
-        hamdis_t * __restrict bh_val_ = ha->val + i * k;
-        int64_t * __restrict bh_ids_ = ha->ids + i * k;
-        size_t j;
-        for (j = j0; j < j1; j++, bs2_+= bytes_per_code) {
-            if(!bitset || !bitset->test(j)){
-                dis = hc.hamming (bs2_);
-                if (dis < bh_val_[0]) {
+        for (int i = 0; i < ha->nh; i++) {
+            HammingComputer hc (bs1 + i * bytes_per_code, bytes_per_code);
+            // init hash
+            for (int i = 0; i < all_hash_size; i++) {
+                value[i] = 0x7fffffff;
+            }
+#pragma omp parallel for
+            for (size_t j = 0; j < n2; j++) {
+                if(!bitset || !bitset->test(j)) {
+                    const uint8_t * bs2_ = bs2 + j * bytes_per_code;
+                    hamdis_t dis = hc.hamming (bs2_);
+
+                    int thread_no = omp_get_thread_num();
+                    hamdis_t * __restrict val_ = value + thread_no * k;
+                    int64_t * __restrict ids_ = labels + thread_no * k;
+                    if (dis < val_[0]) {
+                        faiss::maxheap_pop<hamdis_t> (k, val_, ids_);
+                        faiss::maxheap_push<hamdis_t> (k, val_, ids_, dis, j);
+                    }
+                }
+            }
+            // merge hash
+            hamdis_t * __restrict bh_val_ = ha->val + i * k;
+            int64_t * __restrict bh_ids_ = ha->ids + i * k;
+            for (int i = 0; i < all_hash_size; i++) {
+                if (value[i] < bh_val_[0]) {
                     faiss::maxheap_pop<hamdis_t> (k, bh_val_, bh_ids_);
-                    faiss::maxheap_push<hamdis_t> (k, bh_val_, bh_ids_, dis, j);
+                    faiss::maxheap_push<hamdis_t> (k, bh_val_, bh_ids_, value[i], labels[i]);
                 }
             }
         }
-      }
+        delete[] value;
+        delete[] labels;
+
+    } else {
+        const size_t block_size = hamming_batch_size;
+        for (size_t j0 = 0; j0 < n2; j0 += block_size) {
+        const size_t j1 = std::min(j0 + block_size, n2);
+#pragma omp parallel for
+            for (size_t i = 0; i < ha->nh; i++) {
+                HammingComputer hc (bs1 + i * bytes_per_code, bytes_per_code);
+
+                const uint8_t * bs2_ = bs2 + j0 * bytes_per_code;
+                hamdis_t dis;
+                hamdis_t * __restrict bh_val_ = ha->val + i * k;
+                int64_t * __restrict bh_ids_ = ha->ids + i * k;
+                size_t j;
+                for (j = j0; j < j1; j++, bs2_+= bytes_per_code) {
+                    if(!bitset || !bitset->test(j)){
+                        dis = hc.hamming (bs2_);
+                        if (dis < bh_val_[0]) {
+                            faiss::maxheap_pop<hamdis_t> (k, bh_val_, bh_ids_);
+                            faiss::maxheap_push<hamdis_t> (k, bh_val_, bh_ids_, dis, j);
+                        }
+                    }
+                }
+            }
+        }
     }
     if (order) ha->reorder ();
  }
@@ -387,22 +431,64 @@ void hammings_knn_hc_1 (
         ha->heapify ();
     }
 
+    int thread_max_num = omp_get_max_threads();
+    if (ha->nh < thread_max_num) {
+        // omp for n2
+        int all_hash_size = thread_max_num * k;
+        hamdis_t *value = new hamdis_t[all_hash_size];
+        int64_t *labels = new int64_t[all_hash_size];
+
+        for (int i = 0; i < ha->nh; i++) {
+            // init hash
+            for (int i = 0; i < all_hash_size; i++) {
+                value[i] = 0x7fffffff;
+            }
+            const uint64_t bs1_ = bs1 [i];
 #pragma omp parallel for
-    for (size_t i = 0; i < ha->nh; i++) {
-        const uint64_t bs1_ = bs1 [i];
-        const uint64_t * bs2_ = bs2;
-        hamdis_t dis;
-        hamdis_t * bh_val_ = ha->val + i * k;
-        hamdis_t bh_val_0 = bh_val_[0];
-        int64_t * bh_ids_ = ha->ids + i * k;
-        size_t j;
-        for (j = 0; j < n2; j++, bs2_+= nwords) {
-            if(!bitset || !bitset->test(j)){
-                dis = popcount64 (bs1_ ^ *bs2_);
-                if (dis < bh_val_0) {
+            for (size_t j = 0; j < n2; j++) {
+                if(!bitset || !bitset->test(j)) {
+                    hamdis_t dis = popcount64 (bs1_ ^ bs2[j]);
+
+                    int thread_no = omp_get_thread_num();
+                    hamdis_t * __restrict val_ = value + thread_no * k;
+                    int64_t * __restrict ids_ = labels + thread_no * k;
+                    if (dis < val_[0]) {
+                        faiss::maxheap_pop<hamdis_t> (k, val_, ids_);
+                        faiss::maxheap_push<hamdis_t> (k, val_, ids_, dis, j);
+                    }
+                }
+            }
+            // merge hash
+            hamdis_t * __restrict bh_val_ = ha->val + i * k;
+            int64_t * __restrict bh_ids_ = ha->ids + i * k;
+            for (int i = 0; i < all_hash_size; i++) {
+                if (value[i] < bh_val_[0]) {
                     faiss::maxheap_pop<hamdis_t> (k, bh_val_, bh_ids_);
-                    faiss::maxheap_push<hamdis_t> (k, bh_val_, bh_ids_, dis, j);
-                    bh_val_0 = bh_val_[0];
+                    faiss::maxheap_push<hamdis_t> (k, bh_val_, bh_ids_, value[i], labels[i]);
+                }
+            }
+        }
+        delete[] value;
+        delete[] labels;
+
+    } else {
+#pragma omp parallel for
+        for (size_t i = 0; i < ha->nh; i++) {
+            const uint64_t bs1_ = bs1 [i];
+            const uint64_t * bs2_ = bs2;
+            hamdis_t dis;
+            hamdis_t * bh_val_ = ha->val + i * k;
+            hamdis_t bh_val_0 = bh_val_[0];
+            int64_t * bh_ids_ = ha->ids + i * k;
+            size_t j;
+            for (j = 0; j < n2; j++, bs2_+= nwords) {
+                if(!bitset || !bitset->test(j)){
+                    dis = popcount64 (bs1_ ^ *bs2_);
+                    if (dis < bh_val_0) {
+                        faiss::maxheap_pop<hamdis_t> (k, bh_val_, bh_ids_);
+                        faiss::maxheap_push<hamdis_t> (k, bh_val_, bh_ids_, dis, j);
+                        bh_val_0 = bh_val_[0];
+                    }
                 }
             }
         }

@@ -17,6 +17,7 @@
 #include "config/Config.h"
 #include "faiss/FaissHook.h"
 #include "scheduler/Utils.h"
+#include "utils/Error.h"
 #include "utils/Log.h"
 
 #include <fiu-local.h>
@@ -37,8 +38,12 @@ KnowhereResource::Initialize() {
     bool use_avx512 = true;
     CONFIG_CHECK(config.GetEngineConfigUseAVX512(use_avx512));
     faiss::faiss_use_avx512 = use_avx512;
-    std::string type = faiss::hook_init();
-    ENGINE_LOG_DEBUG << "FAISS hook " << type;
+    std::string cpu_flag;
+    if (faiss::hook_init(cpu_flag)) {
+        ENGINE_LOG_DEBUG << "FAISS hook " << cpu_flag;
+    } else {
+        return Status(KNOWHERE_UNEXPECTED_ERROR, "FAISS hook fail, CPU not supported!");
+    }
 
 #ifdef MILVUS_GPU_VERSION
     bool enable_gpu = false;

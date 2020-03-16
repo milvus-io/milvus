@@ -22,7 +22,7 @@
 #include <vector>
 
 #include "segment/Types.h"
-#include "store/Directory.h"
+#include "storage/FSHandler.h"
 #include "utils/Status.h"
 
 namespace milvus {
@@ -58,7 +58,7 @@ class SegmentReader {
     ReadDeletedDocsSize(size_t& size);
 
  private:
-    store::DirectoryPtr directory_ptr_;
+    storage::FSHandlerPtr fs_ptr_;
     SegmentPtr segment_ptr_;
 };
 

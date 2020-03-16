@@ -1145,7 +1145,7 @@ $ curl -X GET "http://127.0.0.1:19121/collections/test_collection/segments/15837
 ##### Request
 
 ```shell
-$ curl -X PUT "http://127.0.0.1:19121/collections/test_collection/vectors" -H "accept: application/json" -H "Content-Type: application/json" -d "{\"topk\":2,\"vectors\":[[0.1]], \"params\":{\"nprobe\":16}}"
+$ curl -X PUT "http://127.0.0.1:19121/collections/test_collection/vectors" -H "accept: application/json" -H "Content-Type: application/json" -d "{\"search\":{\"topk\":2,\"vectors\":[[0.1]], \"params\":{\"nprobe\":16}}}"
 ```
 
 ##### Response
@@ -1388,7 +1388,7 @@ $ curl -X GET "http://127.0.0.1:19121/system/version" -H "accept: application/js
 ##### Response
 
 ```json
-{ "reply": "0.7.0" }
+{"code":0,"message":"OK","reply": "0.7.0" }
 ```
 
 ### `system/{op}` (PUT)

@@ -1,6 +1,6 @@
-timeout(time: 30, unit: 'MINUTES') {
+timeout(time: 10, unit: 'MINUTES') {
     dir ("ci/scripts") {
-        sh "./coverage.sh -o ${env.MILVUS_INSTALL_PREFIX} -u root -p 123456 -t \$POD_IP"
+        sh "./coverage.sh"
         boolean isNightlyTest = currentBuild.getBuildCauses('hudson.triggers.TimerTrigger$TimerTriggerCause').size() != 0 ? true : false
         String formatFlag = "${BINARY_VERSION}-version-${OS_NAME}-unittest".replaceAll("\\.", "_").replaceAll("-", "_")
         if (isNightlyTest) {

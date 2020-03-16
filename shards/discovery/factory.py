@@ -13,10 +13,10 @@ class DiscoveryFactory(BaseMixin):
         super().__init__(searchpath=searchpath, package_name=PLUGIN_PACKAGE_NAME)
 
     def _create(self, plugin_class, **kwargs):
-        conn_mgr = kwargs.pop('conn_mgr', None)
-        if not conn_mgr:
-            raise RuntimeError('Please pass conn_mgr to create discovery!')
+        readonly_topo = kwargs.pop('readonly_topo', None)
+        if not readonly_topo:
+            raise RuntimeError('Please pass readonly_topo to create discovery!')
 
         plugin_config = DiscoveryConfig.Create()
-        plugin = plugin_class.Create(plugin_config=plugin_config, conn_mgr=conn_mgr, **kwargs)
+        plugin = plugin_class.Create(plugin_config=plugin_config, readonly_topo=readonly_topo, **kwargs)
         return plugin
