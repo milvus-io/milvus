@@ -33,7 +33,7 @@ namespace faiss {
         if (init_heap) ha->heapify ();
 
         int thread_max_num = omp_get_max_threads();
-        if (ha->nh < thread_max_num) {
+        if (ha->nh < 4) {
             // omp for n2
             int all_hash_size = thread_max_num * k;
             float *value = new float[all_hash_size];
