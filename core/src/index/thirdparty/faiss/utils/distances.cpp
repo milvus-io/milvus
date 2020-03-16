@@ -154,7 +154,7 @@ static void knn_inner_product_sse (const float * x,
     size_t k = res->k;
 
     size_t thread_max_num = omp_get_max_threads();
-    if (nx < thread_max_num) {
+    if (nx < thread_max_num / 2) {
         // omp for ny
         size_t all_hash_size = thread_max_num * k;
         float *value = new float[all_hash_size];
@@ -242,7 +242,7 @@ static void knn_L2sqr_sse (
     size_t k = res->k;
 
     size_t thread_max_num = omp_get_max_threads();
-    if (nx < thread_max_num) {
+    if (nx < thread_max_num / 2) {
         // omp for ny
         size_t all_hash_size = thread_max_num * k;
         float *value = new float[all_hash_size];
@@ -252,6 +252,9 @@ static void knn_L2sqr_sse (
             // init hash
             for (size_t i = 0; i < all_hash_size; i++) {
                 value[i] = 1.0 / 0.0;
+            }
+            for (size_t i = 0; i < k; i++) {
+                labels[i] = -1;
             }
             const float *x_i = x + i * d;
 #pragma omp parallel for
@@ -273,8 +276,10 @@ static void knn_L2sqr_sse (
             // merge hash
             float * __restrict simi = res->get_val(i);
             int64_t * __restrict idxi = res->get_ids (i);
-            maxheap_heapify (k, simi, idxi);
-            for (size_t i = 0; i < all_hash_size; i++) {
+            memcpy(simi, value, k * sizeof(float));
+            memcpy(idxi, labels, k * sizeof(int64_t));
+            maxheap_heapify (k, simi, idxi, value, labels, k);
+            for (size_t i = k; i < all_hash_size; i++) {
                 if (value[i] < simi[0]) {
                     maxheap_pop (k, simi, idxi);
                     maxheap_push (k, simi, idxi, value[i], labels[i]);
