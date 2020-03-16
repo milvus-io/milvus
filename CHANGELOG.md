@@ -8,7 +8,8 @@ Please mark all change in change log and use the issue from GitHub
 -   \#1301 Data in WAL may be accidentally inserted into a new table with the same name.
 -   \#1634 Fix search demo bug in HTTP doc
 -   \#1635 Vectors can be returned by searching after vectors deleted if `cache_insert_data` set true
--   \#1648 The cache cannot be used all when the type is binary
+-   \#1648 The cache cannot be used all when the vector type is binary
+-   \#1651 Check validity of dimension when collection metric type is binary one
 
 ## Feature
 -   \#1603 BinaryFlat add 2 Metric: Substructure and Superstructure
