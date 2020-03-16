@@ -39,7 +39,10 @@ BuildBinaryVectors(int64_t from, int64_t to, std::vector<milvus::Entity>& entity
     entity_array.clear();
     entity_ids.clear();
 
-    int64_t dim_byte = dimension / 8;
+    int64_t dim_byte = ceil(dimension / 8);
+    if ((dimension % 8) > 0) {
+        dim_byte++;
+    }
     for (int64_t k = from; k < to; k++) {
         milvus::Entity entity;
         entity.binary_data.resize(dim_byte);
@@ -151,8 +154,8 @@ ClientTest::Test(const std::string& address, const std::string& port) {
     {
         milvus::CollectionParam collection_param = {
                 "collection_1",
-                512,
-                256,
+                512, // dimension
+                256, // index file size
                 milvus::MetricType::TANIMOTO
             };
 
@@ -169,12 +172,12 @@ ClientTest::Test(const std::string& address, const std::string& port) {
     {
         milvus::CollectionParam collection_param = {
                 "collection_2",
-                256,
-                512,
+                512, // dimension
+                512, // index file size
                 milvus::MetricType::SUBSTRUCTURE
             };
 
-        JSON json_params = {{"nlist", 2048}};
+        JSON json_params = {};
         milvus::IndexParam index_param = {
                 collection_param.collection_name,
                 milvus::IndexType::FLAT,
@@ -187,12 +190,12 @@ ClientTest::Test(const std::string& address, const std::string& port) {
     {
         milvus::CollectionParam collection_param = {
                 "collection_3",
-                128,
-                1024,
+                128, // dimension
+                1024, // index file size
                 milvus::MetricType::SUPERSTRUCTURE
             };
 
-        JSON json_params = {{"nlist", 4092}};
+        JSON json_params = {};
         milvus::IndexParam index_param = {
                 collection_param.collection_name,
                 milvus::IndexType::FLAT,

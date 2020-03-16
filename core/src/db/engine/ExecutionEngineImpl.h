@@ -62,12 +62,6 @@ class ExecutionEngineImpl : public ExecutionEngine {
     Status
     CopyToCpu() override;
 
-    //    ExecutionEnginePtr
-    //    Clone() override;
-
-    //    Status
-    //    Merge(const std::string& location) override;
-
     Status
     GetVectorByID(const int64_t& id, float* vector, bool hybrid) override;
 

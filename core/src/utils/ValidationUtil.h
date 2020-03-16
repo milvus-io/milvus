@@ -30,7 +30,7 @@ class ValidationUtil {
     ValidateTableName(const std::string& table_name);
 
     static Status
-    ValidateTableDimension(int64_t dimension);
+    ValidateTableDimension(int64_t dimension, int64_t metric_type);
 
     static Status
     ValidateTableIndexType(int32_t index_type);
