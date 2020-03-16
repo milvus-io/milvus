@@ -58,6 +58,7 @@ Milvus [リリースノート](https://www.milvus.io/docs/releases/release_notes
 -   [Java](https://github.com/milvus-io/milvus-sdk-java)
 -   [C++](https://github.com/milvus-io/milvus/tree/master/sdk)
 -   [RESTful API](https://github.com/milvus-io/milvus/tree/master/core/src/server/web_impl)
+-   [GUI](https://www.milvus.io/gui)
 -   [Node.js](https://www.npmjs.com/package/@arkie-ai/milvus-client) ([arkie](https://www.arkie.cn/)が提供した)
 
 ## はじめに
