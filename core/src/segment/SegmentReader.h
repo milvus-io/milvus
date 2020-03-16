@@ -54,6 +54,9 @@ class SegmentReader {
     Status
     GetSegment(SegmentPtr& segment_ptr);
 
+    Status
+    ReadDeletedDocsSize(size_t& size);
+
  private:
     storage::FSHandlerPtr fs_ptr_;
     SegmentPtr segment_ptr_;

@@ -146,5 +146,35 @@ DefaultDeletedDocsFormat::write(const storage::FSHandlerPtr& fs_ptr, const segme
     boost::filesystem::rename(temp_path, del_file_path);
 }
 
+void
+DefaultDeletedDocsFormat::readSize(const storage::FSHandlerPtr& fs_ptr, size_t& size) {
+    const std::lock_guard<std::mutex> lock(mutex_);
+
+    std::string dir_path = fs_ptr->operation_ptr_->GetDirectory();
+    const std::string del_file_path = dir_path + "/" + deleted_docs_filename_;
+
+    int del_fd = open(del_file_path.c_str(), O_RDONLY, 00664);
+    if (del_fd == -1) {
+        std::string err_msg = "Failed to open file: " + del_file_path + ", error: " + std::strerror(errno);
+        ENGINE_LOG_ERROR << err_msg;
+        throw Exception(SERVER_CANNOT_CREATE_FILE, err_msg);
+    }
+
+    size_t num_bytes;
+    if (::read(del_fd, &num_bytes, sizeof(size_t)) == -1) {
+        std::string err_msg = "Failed to read from file: " + del_file_path + ", error: " + std::strerror(errno);
+        ENGINE_LOG_ERROR << err_msg;
+        throw Exception(SERVER_WRITE_ERROR, err_msg);
+    }
+
+    size = num_bytes / sizeof(segment::offset_t);
+
+    if (::close(del_fd) == -1) {
+        std::string err_msg = "Failed to close file: " + del_file_path + ", error: " + std::strerror(errno);
+        ENGINE_LOG_ERROR << err_msg;
+        throw Exception(SERVER_WRITE_ERROR, err_msg);
+    }
+}
+
 }  // namespace codec
 }  // namespace milvus

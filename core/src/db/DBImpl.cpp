@@ -688,7 +688,7 @@ DBImpl::Compact(const std::string& table_id) {
     OngoingFileChecker::GetInstance().MarkOngoingFiles(files_to_compact);
 
     Status compact_status;
-    for (meta::TableFilesSchema::iterator iter = files_to_compact.begin(); iter != files_to_compact.end();) {
+    for (auto iter = files_to_compact.begin(); iter != files_to_compact.end();) {
         meta::TableFileSchema file = *iter;
         iter = files_to_compact.erase(iter);
 
@@ -697,17 +697,15 @@ DBImpl::Compact(const std::string& table_id) {
         utils::GetParentPath(file.location_, segment_dir);
 
         segment::SegmentReader segment_reader(segment_dir);
-        segment::DeletedDocsPtr deleted_docs;
-        status = segment_reader.LoadDeletedDocs(deleted_docs);
+        size_t deleted_docs_size;
+        status = segment_reader.ReadDeletedDocsSize(deleted_docs_size);
         if (!status.ok()) {
-            std::string msg = "Failed to load deleted_docs from " + segment_dir;
-            ENGINE_LOG_ERROR << msg;
             OngoingFileChecker::GetInstance().UnmarkOngoingFile(file);
             continue;  // skip this file and try compact next one
         }
 
         meta::TableFilesSchema files_to_update;
-        if (deleted_docs->GetSize() != 0) {
+        if (deleted_docs_size != 0) {
             compact_status = CompactFile(table_id, file, files_to_update);
 
             if (!compact_status.ok()) {
