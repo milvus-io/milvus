@@ -70,13 +70,13 @@ class GrpcArgsParser(object):
 
         return _cmd
 
-    @classmethod
-    @error_status
-    def parse_proto_Range(cls, param):
-        _start_value = param.start_value
-        _end_value = param.end_value
+    # @classmethod
+    # @error_status
+    # def parse_proto_Range(cls, param):
+    #     _start_value = param.start_value
+    #     _end_value = param.end_value
 
-        return _start_value, _end_value
+    #     return _start_value, _end_value
 
     @classmethod
     @error_status
@@ -86,18 +86,15 @@ class GrpcArgsParser(object):
     @classmethod
     def parse_proto_PartitionParam(cls, param):
         _table_name = param.table_name
-        _partition_name = param.partition_name
         _tag = param.tag
 
-        return _table_name, _partition_name, _tag
+        return _table_name, _tag
 
     @classmethod
     @error_status
     def parse_proto_SearchParam(cls, param):
         _table_name = param.table_name
         _topk = param.topk
-        _nprobe = param.nprobe
-        _status, _range = cls.parse_proto_Range(param.query_range_array)
 
         if not _status.OK():
             raise Exception("Argument parse error")
@@ -106,15 +103,15 @@ class GrpcArgsParser(object):
 
         return _table_name, _row_record, _range, _topk
 
-    @classmethod
-    @error_status
-    def parse_proto_DeleteByRangeParam(cls, param):
-        _table_name = param.table_name
-        _range = param.range
-        _start_value = _range.start_value
-        _end_value = _range.end_value
+    # @classmethod
+    # @error_status
+    # def parse_proto_DeleteByRangeParam(cls, param):
+    #     _table_name = param.table_name
+    #     _range = param.range
+    #     _start_value = _range.start_value
+    #     _end_value = _range.end_value
 
-        return _table_name, _start_value, _end_value
+    #     return _table_name, _start_value, _end_value
 
     @classmethod
     @error_status

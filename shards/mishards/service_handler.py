@@ -144,8 +144,8 @@ class ServiceHandler(milvus_pb2_grpc.MilvusServiceServicer):
 
             with self.tracer.start_span('search_{}'.format(addr),
                                         child_of=span):
-                ret = conn.conn.search_vectors_in_files(table_name=table_id,
-                                                   file_ids=file_ids,
+                ret = conn.search_vectors_in_files(collection_name=query_params['table_id'],
+                                                   file_ids=query_params['file_ids'],
                                                    query_records=vectors,
                                                    top_k=topk,
                                                    params=params)
@@ -222,14 +222,14 @@ class ServiceHandler(milvus_pb2_grpc.MilvusServiceServicer):
 
     @mark_grpc_method
     def CreatePartition(self, request, context):
-        _table_name, _partition_name, _tag = Parser.parse_proto_PartitionParam(request)
-        _status = self.router.connection().create_partition(_table_name, _partition_name, _tag)
+        _table_name, _tag = Parser.parse_proto_PartitionParam(request)
+        _status = self.router.connection().create_partition(_table_name, _tag)
         return status_pb2.Status(error_code=_status.code,
                                  reason=_status.message)
 
     @mark_grpc_method
     def DropPartition(self, request, context):
-        _table_name, _partition_name, _tag = Parser.parse_proto_PartitionParam(request)
+        _table_name, _tag = Parser.parse_proto_PartitionParam(request)
 
         _status = self.router.connection().drop_partition(_table_name, _tag)
         return status_pb2.Status(error_code=_status.code,
@@ -249,9 +249,7 @@ class ServiceHandler(milvus_pb2_grpc.MilvusServiceServicer):
 
         return milvus_pb2.PartitionList(status=status_pb2.Status(
             error_code=_status.code, reason=_status.message),
-            partition_array=[milvus_pb2.PartitionParam(table_name=param.table_name,
-                                                       tag=param.tag)
-                             for param in partition_array])
+            partition_tag_array=[param.tag for param in partition_array])
 
     def _delete_table(self, table_name):
         return self.router.connection().drop_collection(table_name)
