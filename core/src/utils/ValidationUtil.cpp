@@ -11,6 +11,7 @@
 
 #include "utils/ValidationUtil.h"
 #include "Log.h"
+#include "db/Utils.h"
 #include "db/engine/ExecutionEngine.h"
 #include "index/knowhere/knowhere/index/vector_index/helpers/IndexParameter.h"
 #include "utils/StringHelpFunctions.h"
@@ -128,16 +129,25 @@ ValidationUtil::ValidateTableName(const std::string& table_name) {
 }
 
 Status
-ValidationUtil::ValidateTableDimension(int64_t dimension) {
+ValidationUtil::ValidateTableDimension(int64_t dimension, int64_t metric_type) {
     if (dimension <= 0 || dimension > TABLE_DIMENSION_LIMIT) {
         std::string msg = "Invalid table dimension: " + std::to_string(dimension) + ". " +
                           "The table dimension must be within the range of 1 ~ " +
                           std::to_string(TABLE_DIMENSION_LIMIT) + ".";
         SERVER_LOG_ERROR << msg;
         return Status(SERVER_INVALID_VECTOR_DIMENSION, msg);
-    } else {
-        return Status::OK();
     }
+
+    if (milvus::engine::utils::IsBinaryMetricType(metric_type)) {
+        if ((dimension % 8) != 0) {
+            std::string msg = "Invalid table dimension: " + std::to_string(dimension) + ". " +
+                              "The table dimension must be a multiple of 8";
+            SERVER_LOG_ERROR << msg;
+            return Status(SERVER_INVALID_VECTOR_DIMENSION, msg);
+        }
+    }
+
+    return Status::OK();
 }
 
 Status

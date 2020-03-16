@@ -52,7 +52,7 @@ CreateTableRequest::OnExecute() {
             return status;
         }
 
-        status = ValidationUtil::ValidateTableDimension(dimension_);
+        status = ValidationUtil::ValidateTableDimension(dimension_, metric_type_);
         if (!status.ok()) {
             return status;
         }

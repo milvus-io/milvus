@@ -622,66 +622,6 @@ ExecutionEngineImpl::CopyToCpu() {
     return Status::OK();
 }
 
-// ExecutionEnginePtr
-// ExecutionEngineImpl::Clone() {
-//    if (index_ == nullptr) {
-//        ENGINE_LOG_ERROR << "ExecutionEngineImpl: index is null, failed to clone";
-//        return nullptr;
-//    }
-//
-//    auto ret = std::make_shared<ExecutionEngineImpl>(dim_, location_, index_type_, metric_type_, nlist_);
-//    ret->Init();
-//    ret->index_ = index_->Clone();
-//    return ret;
-//}
-
-/*
-Status
-ExecutionEngineImpl::Merge(const std::string& location) {
-    if (location == location_) {
-        return Status(DB_ERROR, "Cannot Merge Self");
-    }
-    ENGINE_LOG_DEBUG << "Merge index file: " << location << " to: " << location_;
-
-    auto to_merge = cache::CpuCacheMgr::GetInstance()->GetIndex(location);
-    if (!to_merge) {
-        try {
-            double physical_size = server::CommonUtil::GetFileSize(location);
-            server::CollectExecutionEngineMetrics metrics(physical_size);
-            to_merge = read_index(location);
-        } catch (std::exception& e) {
-            ENGINE_LOG_ERROR << e.what();
-            return Status(DB_ERROR, e.what());
-        }
-    }
-
-    if (index_ == nullptr) {
-        ENGINE_LOG_ERROR << "ExecutionEngineImpl: index is null, failed to merge";
-        return Status(DB_ERROR, "index is null");
-    }
-
-    if (auto file_index = std::dynamic_pointer_cast<BFIndex>(to_merge)) {
-        auto status = index_->Add(file_index->Count(), file_index->GetRawVectors(), file_index->GetRawIds());
-        if (!status.ok()) {
-            ENGINE_LOG_ERROR << "Failed to merge: " << location << " to: " << location_;
-        } else {
-            ENGINE_LOG_DEBUG << "Finish merge index file: " << location;
-        }
-        return status;
-    } else if (auto bin_index = std::dynamic_pointer_cast<BinBFIndex>(to_merge)) {
-        auto status = index_->Add(bin_index->Count(), bin_index->GetRawVectors(), bin_index->GetRawIds());
-        if (!status.ok()) {
-            ENGINE_LOG_ERROR << "Failed to merge: " << location << " to: " << location_;
-        } else {
-            ENGINE_LOG_DEBUG << "Finish merge index file: " << location;
-        }
-        return status;
-    } else {
-        return Status(DB_ERROR, "file index type is not idmap");
-    }
-}
-*/
-
 ExecutionEnginePtr
 ExecutionEngineImpl::BuildIndex(const std::string& location, EngineType engine_type) {
     ENGINE_LOG_DEBUG << "Build index file: " << location << " from: " << location_;
