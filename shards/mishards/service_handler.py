@@ -444,13 +444,12 @@ class ServiceHandler(milvus_pb2_grpc.MilvusServiceServicer):
                     total_row_count=par_stat.count
                 )
                 for seg_stat in par_stat.segments_stat:
-                    _seg = milvus_pb2.SegmentStat(
+                    _par.segments_stat.add(
                         segment_name=seg_stat.segment_name,
                         row_count=seg_stat.count,
                         index_name=seg_stat.index_name,
                         data_size=seg_stat.data_size,
                     )
-                    _par.segments_stat.add(_seg)
 
                 _table_info.partitions_stat.add(_par)
             return _table_info
