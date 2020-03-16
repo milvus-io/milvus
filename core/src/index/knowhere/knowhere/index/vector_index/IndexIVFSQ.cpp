@@ -15,6 +15,7 @@
 #include <faiss/gpu/GpuAutoTune.h>
 #include <faiss/gpu/GpuCloner.h>
 #endif
+#include <faiss/clone_index.h>
 #include <faiss/index_factory.h>
 
 #include "knowhere/common/Exception.h"

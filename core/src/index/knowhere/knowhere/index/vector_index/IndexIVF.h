@@ -69,7 +69,7 @@ class IVF : public VecIndex, public FaissBaseIndex {
     CopyCpuToGpu(const int64_t, const Config&);
 
     virtual void
-    GenGraph(const float* data, const int64_t& k, GraphType& graph, const Config& config);
+    GenGraph(const float* data, const int64_t k, GraphType& graph, const Config& config);
     
     DatasetPtr
     GetVectorById(const DatasetPtr& dataset, const Config& config) override;

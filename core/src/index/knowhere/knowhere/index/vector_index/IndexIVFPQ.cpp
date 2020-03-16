@@ -11,6 +11,7 @@
 
 #include "knowhere/index/vector_index/IndexIVFPQ.h"
 
+#include <faiss/clone_index.h>
 #include <faiss/IndexFlat.h>
 #include <faiss/IndexIVFPQ.h>
 #ifdef MILVUS_GPU_VERSION

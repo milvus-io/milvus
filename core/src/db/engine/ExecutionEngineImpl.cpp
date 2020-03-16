@@ -31,9 +31,11 @@
 #include "knowhere/index/vector_index/VecIndex.h"
 #include "knowhere/index/vector_index/VecIndexFactory.h"
 #include "knowhere/index/vector_index/adapter/VectorAdapter.h"
+#ifdef MILVUS_GPU_VERSION
 #include "knowhere/index/vector_index/gpu/IndexIVFSQHybrid.h"
 #include "knowhere/index/vector_index/gpu/Quantizer.h"
 #include "knowhere/index/vector_index/helpers/Cloner.h"
+#endif
 #include "knowhere/index/vector_index/helpers/IndexParameter.h"
 #include "metrics/Metrics.h"
 #include "scheduler/Utils.h"
@@ -82,6 +84,7 @@ IsBinaryIndexType(knowhere::IndexType type) {
 
 }  // namespace
 
+#ifdef MILVUS_GPU_VERSION
 class CachedQuantizer : public cache::DataObj {
  public:
     explicit CachedQuantizer(knowhere::QuantizerPtr data) : data_(std::move(data)) {
@@ -100,6 +103,7 @@ class CachedQuantizer : public cache::DataObj {
  private:
     knowhere::QuantizerPtr data_;
 };
+#endif
 
 ExecutionEngineImpl::ExecutionEngineImpl(uint16_t dimension, const std::string& location, EngineType index_type,
                                          MetricType metric_type, const milvus::json& index_params)
@@ -286,11 +290,13 @@ ExecutionEngineImpl::HybridLoad() const {
 
 void
 ExecutionEngineImpl::HybridUnset() const {
+#ifdef MILVUS_GPU_VERSION
     auto hybrid_index = std::dynamic_pointer_cast<knowhere::IVFSQHybrid>(index_);
     if (hybrid_index == nullptr) {
         return;
     }
     hybrid_index->UnsetQuantizer();
+#endif
 }
 
 Status
@@ -609,6 +615,7 @@ ExecutionEngineImpl::CopyToIndexFileToGpu(uint64_t device_id) {
 
 Status
 ExecutionEngineImpl::CopyToCpu() {
+#ifdef MILVUS_GPU_VERSION
     auto index = std::static_pointer_cast<knowhere::VecIndex>(cache::CpuCacheMgr::GetInstance()->GetIndex(location_));
     bool already_in_cache = (index != nullptr);
     if (already_in_cache) {
@@ -631,6 +638,7 @@ ExecutionEngineImpl::CopyToCpu() {
     if (!already_in_cache) {
         Cache();
     }
+#endif
     return Status::OK();
 }
 

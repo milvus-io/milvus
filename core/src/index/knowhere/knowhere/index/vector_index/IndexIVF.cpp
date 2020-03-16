@@ -24,21 +24,20 @@
 #endif
 
 #include <chrono>
+#include <fiu-local.h>
 #include <memory>
 #include <utility>
 #include <vector>
 
+#include "knowhere/index/vector_index/IndexIVF.h"
 #include "knowhere/common/Exception.h"
 #include "knowhere/common/Log.h"
 #include "knowhere/index/vector_index/adapter/VectorAdapter.h"
+#include "knowhere/index/vector_index/helpers/IndexParameter.h"
 #ifdef MILVUS_GPU_VERSION
 #include "knowhere/index/vector_index/gpu/IndexGPUIVF.h"
-#endif
-#include "knowhere/index/vector_index/IndexIVF.h"
 #include "knowhere/index/vector_index/helpers/FaissGpuResourceMgr.h"
-#include "knowhere/index/vector_index/helpers/IndexParameter.h"
-
-#include <fiu-local.h>
+#endif
 
 namespace milvus {
 namespace knowhere {
@@ -226,7 +225,7 @@ IVF::CopyCpuToGpu(const int64_t device_id, const Config& config) {
 }
 
 void
-IVF::GenGraph(const float* data, const int64_t& k, GraphType& graph, const Config& config) {
+IVF::GenGraph(const float* data, const int64_t k, GraphType& graph, const Config& config) {
     int64_t K = k + 1;
     auto ntotal = Count();
 

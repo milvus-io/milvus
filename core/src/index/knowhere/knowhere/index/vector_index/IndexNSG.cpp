@@ -109,25 +109,26 @@ NSG::Train(const DatasetPtr& dataset_ptr, const Config& config) {
     auto idmap = std::make_shared<IDMAP>();
     idmap->Train(dataset_ptr, config);
     idmap->AddWithoutIds(dataset_ptr, config);
-    Graph knng;
+    impl::Graph knng;
     const float* raw_data = idmap->GetRawVectors();
+    const int64_t device_id = config[knowhere::meta::DEVICEID].get<int64_t>();
+    const int64_t k = config[IndexParams::knng].get<int64_t>();
 #ifdef MILVUS_GPU_VERSION
-    if (config[knowhere::meta::DEVICEID].get<int64_t>() == -1) {
+    if (device_id == -1) {
         auto preprocess_index = std::make_shared<IVF>();
         preprocess_index->Train(dataset_ptr, config);
         preprocess_index->AddWithoutIds(dataset_ptr, config);
-        preprocess_index->GenGraph(raw_data, config[IndexParams::knng].get<int64_t>(), knng, config);
+        preprocess_index->GenGraph(raw_data, k, knng, config);
     } else {
-        auto gpu_idx = cloner::CopyCpuToGpu(idmap, config[knowhere::meta::DEVICEID].get<int64_t>(), config);
+        auto gpu_idx = cloner::CopyCpuToGpu(idmap, device_id, config);
         auto gpu_idmap = std::dynamic_pointer_cast<GPUIDMAP>(gpu_idx);
-        gpu_idmap->GenGraph(raw_data, config[IndexParams::knng].get<int64_t>(), knng, config);
+        gpu_idmap->GenGraph(raw_data, k, knng, config);
     }
 #else
     auto preprocess_index = std::make_shared<IVF>();
-    auto model = preprocess_index->Train(dataset_ptr, config);
-    preprocess_index->set_index_model(model);
+    preprocess_index->Train(dataset_ptr, config);
     preprocess_index->AddWithoutIds(dataset_ptr, config);
-    preprocess_index->GenGraph(raw_data, config[IndexParams::knng].get<int64_t>(), knng, config);
+    preprocess_index->GenGraph(raw_data, k, knng, config);
 #endif
 
     impl::BuildParams b_params;
