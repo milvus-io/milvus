@@ -451,7 +451,7 @@ class ServiceHandler(milvus_pb2_grpc.MilvusServiceServicer):
                         data_size=seg_stat.data_size,
                     )
 
-                _table_info.partitions_stat.add(_par)
+                _table_info.partitions_stat.append(_par)
             return _table_info
 
         return milvus_pb2.TableInfo(
