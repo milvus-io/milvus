@@ -1,4 +1,5 @@
 import logging
+import sys
 import grpc
 import time
 import socket
@@ -23,7 +24,8 @@ class Server:
         self.exit_flag = False
 
     def init_app(self,
-                 conn_mgr,
+                 writable_topo,
+                 readonly_topo,
                  tracer,
                  router,
                  discover,
@@ -31,10 +33,13 @@ class Server:
                  max_workers=10,
                  **kwargs):
         self.port = int(port)
-        self.conn_mgr = conn_mgr
+        self.writable_topo = writable_topo
+        self.readonly_topo = readonly_topo
         self.tracer = tracer
         self.router = router
         self.discover = discover
+
+        logger.debug('Init grpc server with max_workers: {}'.format(max_workers))
 
         self.server_impl = grpc.server(
             thread_pool=futures.ThreadPoolExecutor(max_workers=max_workers),
@@ -50,8 +55,8 @@ class Server:
         url = urlparse(woserver)
         ip = socket.gethostbyname(url.hostname)
         socket.inet_pton(socket.AF_INET, ip)
-        self.conn_mgr.register(
-            'WOSERVER', '{}://{}:{}'.format(url.scheme, ip, url.port or 80))
+        _, group = self.writable_topo.create('default')
+        group.create(name='WOSERVER', uri='{}://{}:{}'.format(url.scheme, ip, url.port or 80))
 
     def register_pre_run_handler(self, func):
         logger.info('Regiterring {} into server pre_run_handlers'.format(func))
@@ -83,7 +88,7 @@ class Server:
     def on_pre_run(self):
         for handler in self.pre_run_handlers:
             handler()
-        self.discover.start()
+        return self.discover.start()
 
     def start(self, port=None):
         handler_class = self.decorate_handler(ServiceHandler)
@@ -97,7 +102,11 @@ class Server:
     def run(self, port):
         logger.info('Milvus server start ......')
         port = port or self.port
-        self.on_pre_run()
+        ok = self.on_pre_run()
+
+        if not ok:
+            logger.error('Terminate server due to error found in on_pre_run')
+            sys.exit(1)
 
         self.start(port)
         logger.info('Listening on port {}'.format(port))

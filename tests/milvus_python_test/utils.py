@@ -428,7 +428,7 @@ def gen_invaild_search_params():
         IndexType.IVF_SQ8H,
         IndexType.IVF_PQ,
         IndexType.HNSW,
-    #    IndexType.RNSG
+        IndexType.RNSG
     ]
 
     search_params = []
@@ -443,11 +443,11 @@ def gen_invaild_search_params():
                 hnsw_search_param = {"index_type": index_type, "search_param": {"ef": ef}}
                 search_params.append(hnsw_search_param)
             search_params.append({"index_type": index_type, "search_param": {"invalid_key": 100}})
-        # elif index_type == IndexType.RNSG:
-        #     for search_length in gen_invalid_params():
-        #         nsg_search_param = {"index_type": index_type, "search_param": {"search_length": search_length}}
-        #         search_params.append(nsg_search_param)
-        #     search_params.append({"index_type": index_type, "search_param": {"invalid_key": 100}})
+        elif index_type == IndexType.RNSG:
+            for search_length in gen_invalid_params():
+                nsg_search_param = {"index_type": index_type, "search_param": {"search_length": search_length}}
+                search_params.append(nsg_search_param)
+            search_params.append({"index_type": index_type, "search_param": {"invalid_key": 100}})
 
     return search_params
 
@@ -466,26 +466,26 @@ def gen_invalid_index():
     for efConstruction in gen_invalid_params():
         index_param = {"index_type": IndexType.HNSW, "index_param": {"M": 16, "efConstruction": efConstruction}}
         index_params.append(index_param)
-    # for search_length in gen_invalid_params():
-    #     index_param = {"index_type": IndexType.RNSG,
-    #                    "index_param": {"search_length": search_length, "out_degree": 40, "candidate_pool_size": 50,
-    #                                    "knng": 100}}
-    #     index_params.append(index_param)
-    # for out_degree in gen_invalid_params():
-    #     index_param = {"index_type": IndexType.RNSG,
-    #                    "index_param": {"search_length": 100, "out_degree": out_degree, "candidate_pool_size": 50,
-    #                                    "knng": 100}}
-    #     index_params.append(index_param)
-    # for candidate_pool_size in gen_invalid_params():
-    #     index_param = {"index_type": IndexType.RNSG, "index_param": {"search_length": 100, "out_degree": 40,
-    #                                                                  "candidate_pool_size": candidate_pool_size,
-    #                                                                  "knng": 100}}
-    #     index_params.append(index_param)
+    for search_length in gen_invalid_params():
+        index_param = {"index_type": IndexType.RNSG,
+                       "index_param": {"search_length": search_length, "out_degree": 40, "candidate_pool_size": 50,
+                                       "knng": 100}}
+        index_params.append(index_param)
+    for out_degree in gen_invalid_params():
+        index_param = {"index_type": IndexType.RNSG,
+                       "index_param": {"search_length": 100, "out_degree": out_degree, "candidate_pool_size": 50,
+                                       "knng": 100}}
+        index_params.append(index_param)
+    for candidate_pool_size in gen_invalid_params():
+        index_param = {"index_type": IndexType.RNSG, "index_param": {"search_length": 100, "out_degree": 40,
+                                                                     "candidate_pool_size": candidate_pool_size,
+                                                                     "knng": 100}}
+        index_params.append(index_param)
     index_params.append({"index_type": IndexType.IVF_FLAT, "index_param": {"invalid_key": 1024}})
     index_params.append({"index_type": IndexType.HNSW, "index_param": {"invalid_key": 16, "efConstruction": 100}})
-    # index_params.append({"index_type": IndexType.RNSG,
-    #                      "index_param": {"invalid_key": 100, "out_degree": 40, "candidate_pool_size": 300,
-    #                                      "knng": 100}})
+    index_params.append({"index_type": IndexType.RNSG,
+                         "index_param": {"invalid_key": 100, "out_degree": 40, "candidate_pool_size": 300,
+                                         "knng": 100}})
     return index_params
 
 
@@ -497,7 +497,7 @@ def gen_index():
         IndexType.IVF_SQ8H,
         IndexType.IVF_PQ,
         IndexType.HNSW,
-    #    IndexType.RNSG
+        IndexType.RNSG
     ]
 
     nlists = [1, 1024, 16384]
@@ -527,15 +527,15 @@ def gen_index():
                            for M in Ms \
                            for efConstruction in efConstructions]
             index_params.extend(hnsw_params)
-        # elif index_type == IndexType.RNSG:
-        #     nsg_params = [{"index_type": index_type,
-        #                    "index_param": {"search_length": search_length, "out_degree": out_degree,
-        #                                    "candidate_pool_size": candidate_pool_size, "knng": knng}} \
-        #                   for search_length in search_lengths \
-        #                   for out_degree in out_degrees \
-        #                   for candidate_pool_size in candidate_pool_sizes \
-        #                   for knng in knngs]
-        #     index_params.extend(nsg_params)
+        elif index_type == IndexType.RNSG:
+            nsg_params = [{"index_type": index_type,
+                           "index_param": {"search_length": search_length, "out_degree": out_degree,
+                                           "candidate_pool_size": candidate_pool_size, "knng": knng}} \
+                          for search_length in search_lengths \
+                          for out_degree in out_degrees \
+                          for candidate_pool_size in candidate_pool_sizes \
+                          for knng in knngs]
+            index_params.extend(nsg_params)
 
     return index_params
 
