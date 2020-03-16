@@ -55,6 +55,18 @@ def tanimoto(x, y):
     return -np.log2(np.double(np.bitwise_and(x, y).sum()) / np.double(np.bitwise_or(x, y).sum()))
 
 
+def substructure(x, y):
+    x = np.asarray(x, np.bool)
+    y = np.asarray(y, np.bool)
+    return 1 - np.double(np.bitwise_and(x, y).sum()) / np.count_nonzero(y)
+
+
+def superstructure(x, y):
+    x = np.asarray(x, np.bool)
+    y = np.asarray(y, np.bool)
+    return 1 - np.double(np.bitwise_and(x, y).sum()) / np.count_nonzero(x)
+
+
 def gen_single_vector(dim):
     return [[random.random() for _ in range(dim)]]
 

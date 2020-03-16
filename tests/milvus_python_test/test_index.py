@@ -1437,7 +1437,7 @@ class TestIndexJAC:
         assert result._index_type == IndexType.FLAT
 
 
-class TestIndexHAM:
+class TestIndexBinary:
     tmp, vectors = gen_binary_vectors(nb, dim)
 
     @pytest.fixture(
@@ -1471,6 +1471,28 @@ class TestIndexHAM:
     def get_hamming_index(self, request, connect):
         logging.getLogger().info(request.param)
         if request.param["index_type"] == IndexType.IVFLAT or request.param["index_type"] == IndexType.FLAT:
+            return request.param
+        else:
+            pytest.skip("Skip index Temporary")
+
+    @pytest.fixture(
+        scope="function",
+        params=gen_simple_index()
+    )
+    def get_substructure_index(self, request, connect):
+        logging.getLogger().info(request.param)
+        if request.param["index_type"] == IndexType.FLAT:
+            return request.param
+        else:
+            pytest.skip("Skip index Temporary")
+
+    @pytest.fixture(
+        scope="function",
+        params=gen_simple_index()
+    )
+    def get_superstructure_index(self, request, connect):
+        logging.getLogger().info(request.param)
+        if request.param["index_type"] == IndexType.FLAT:
             return request.param
         else:
             pytest.skip("Skip index Temporary")
@@ -1514,6 +1536,23 @@ class TestIndexHAM:
         status, res = connect.count_collection(ham_collection)
         assert res == len(self.vectors)
 
+    @pytest.mark.timeout(BUILD_TIMEOUT)
+    def test_create_index_partition_structure(self, connect, substructure_collection, get_substructure_index):
+        '''
+        target: test create index interface
+        method: create collection, create partition, and add vectors in it, create index
+        expected: return code equals to 0, and search success
+        '''
+        index_param = get_substructure_index["index_param"]
+        index_type = get_substructure_index["index_type"]
+        logging.getLogger().info(get_substructure_index)
+        status = connect.create_partition(substructure_collection, tag)
+        status, ids = connect.add_vectors(substructure_collection, self.vectors, partition_tag=tag)
+        status = connect.create_index(substructure_collection, index_type, index_param)
+        assert status.OK()
+        status, res = connect.count_collection(substructure_collection,)
+        assert res == len(self.vectors)
+
     @pytest.mark.level(2)
     def test_create_index_without_connect(self, dis_connect, ham_collection):
         '''
@@ -1543,6 +1582,27 @@ class TestIndexHAM:
         top_k = 5
         search_param = get_search_param(index_type)
         status, result = connect.search_vectors(ham_collection, top_k, query_vecs, params=search_param)
+        logging.getLogger().info(result)
+        assert status.OK()
+        assert len(result) == len(query_vecs)
+
+    @pytest.mark.timeout(BUILD_TIMEOUT)
+    def test_create_index_search_with_query_vectors_superstructure(self, connect, superstructure_collection, get_superstructure_index):
+        '''
+        target: test create index interface, search with more query vectors
+        method: create collection and add vectors in it, create index
+        expected: return code equals to 0, and search success
+        '''
+        index_param = get_superstructure_index["index_param"]
+        index_type = get_superstructure_index["index_type"]
+        logging.getLogger().info(get_superstructure_index)
+        status, ids = connect.add_vectors(superstructure_collection, self.vectors)
+        status = connect.create_index(superstructure_collection, index_type, index_param)
+        logging.getLogger().info(connect.describe_index(superstructure_collection))
+        query_vecs = [self.vectors[0], self.vectors[1], self.vectors[2]]
+        top_k = 5
+        search_param = get_search_param(index_type)
+        status, result = connect.search_vectors(superstructure_collection, top_k, query_vecs, params=search_param)
         logging.getLogger().info(result)
         assert status.OK()
         assert len(result) == len(query_vecs)
@@ -1588,6 +1648,24 @@ class TestIndexHAM:
         assert result._collection_name == ham_collection
         assert result._index_type == index_type
 
+    def test_describe_index_partition_superstructrue(self, connect, superstructure_collection, get_superstructure_index):
+        '''
+        target: test describe index interface
+        method: create collection, create partition and add vectors in it, create index, call describe index
+        expected: return code 0, and index instructure
+        '''
+        index_param = get_superstructure_index["index_param"]
+        index_type = get_superstructure_index["index_type"]
+        logging.getLogger().info(get_superstructure_index)
+        status = connect.create_partition(superstructure_collection, tag)
+        status, ids = connect.add_vectors(superstructure_collection, vectors, partition_tag=tag)
+        status = connect.create_index(superstructure_collection, index_type, index_param)
+        status, result = connect.describe_index(superstructure_collection)
+        logging.getLogger().info(result)
+        assert result._params == index_param
+        assert result._collection_name == superstructure_collection
+        assert result._index_type == index_type
+
     """
     ******************************************************************
       The following cases are used to test `drop_index` function
@@ -1614,6 +1692,27 @@ class TestIndexHAM:
         status, result = connect.describe_index(ham_collection)
         logging.getLogger().info(result)
         assert result._collection_name == ham_collection
+        assert result._index_type == IndexType.FLAT
+
+    def test_drop_index_substructure(self, connect, substructure_collection, get_substructure_index):
+        '''
+        target: test drop index interface
+        method: create collection and add vectors in it, create index, call drop index
+        expected: return code 0, and default index param
+        '''
+        index_param = get_substructure_index["index_param"]
+        index_type = get_substructure_index["index_type"]
+        status, mode = connect._cmd("mode")
+        assert status.OK()
+        status = connect.create_index(substructure_collection, index_type, index_param)
+        assert status.OK()
+        status, result = connect.describe_index(substructure_collection)
+        logging.getLogger().info(result)
+        status = connect.drop_index(substructure_collection)
+        assert status.OK()
+        status, result = connect.describe_index(substructure_collection)
+        logging.getLogger().info(result)
+        assert result._collection_name == substructure_collection
         assert result._index_type == IndexType.FLAT
 
     def test_drop_index_partition(self, connect, ham_collection, get_hamming_index):
