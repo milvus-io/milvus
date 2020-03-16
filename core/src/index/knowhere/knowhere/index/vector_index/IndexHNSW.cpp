@@ -94,7 +94,7 @@ IndexHNSW::Query(const DatasetPtr& dataset_ptr, const Config& config) {
 #pragma omp parallel for
     for (unsigned int i = 0; i < rows; ++i) {
         std::vector<P> ret;
-        const float* single_query = p_data + i * Dim();
+        const float* single_query = (float*)p_data + i * Dim();
 
         // if (normalize) {
         //     std::vector<float> norm_vector(Dim());

@@ -53,9 +53,10 @@ IDMAP::Load(const BinarySet& binary_set) {
 
 void
 IDMAP::Train(const DatasetPtr& dataset_ptr, const Config& config) {
-    const char* type = "IDMap,Flat";
-    auto index = faiss::index_factory(config[meta::DIM].get<int64_t>(), type,
-                                      GetMetricType(config[Metric::TYPE].get<std::string>()));
+    const char* desc = "IDMap,Flat";
+    int64_t dim = config[meta::DIM].get<int64_t>();
+    faiss::MetricType metric_type = GetMetricType(config[Metric::TYPE].get<std::string>());
+    auto index = faiss::index_factory(dim, desc, metric_type);
     index_.reset(index);
 }
 
@@ -66,9 +67,7 @@ IDMAP::Add(const DatasetPtr& dataset_ptr, const Config& config) {
     }
 
     std::lock_guard<std::mutex> lk(mutex_);
-    GETTENSOR(dataset_ptr)
-
-    auto p_ids = dataset_ptr->Get<const int64_t*>(meta::IDS);
+    GETTENSORWITHIDS(dataset_ptr)
     index_->add_with_ids(rows, (float*)p_data, p_ids);
 }
 
@@ -80,7 +79,7 @@ IDMAP::AddWithoutIds(const DatasetPtr& dataset_ptr, const Config& config) {
 
     std::lock_guard<std::mutex> lk(mutex_);
     auto rows = dataset_ptr->Get<int64_t>(meta::ROWS);
-    auto p_data = dataset_ptr->Get<const float*>(meta::TENSOR);
+    auto p_data = dataset_ptr->Get<const void*>(meta::TENSOR);
 
     // TODO: caiyd need check
     std::vector<int64_t> new_ids(rows);
@@ -98,13 +97,14 @@ IDMAP::Query(const DatasetPtr& dataset_ptr, const Config& config) {
     }
     GETTENSOR(dataset_ptr)
 
-    auto elems = rows * config[meta::TOPK].get<int64_t>();
+    int64_t k = config[meta::TOPK].get<int64_t>();
+    auto elems = rows * k;
     size_t p_id_size = sizeof(int64_t) * elems;
     size_t p_dist_size = sizeof(float) * elems;
     auto p_id = (int64_t*)malloc(p_id_size);
     auto p_dist = (float*)malloc(p_dist_size);
 
-    QueryImpl(rows, (float*)p_data, config[meta::TOPK].get<int64_t>(), p_dist, p_id, Config());
+    QueryImpl(rows, (float*)p_data, k, p_dist, p_id, Config());
 
     auto ret_ds = std::make_shared<Dataset>();
     ret_ds->Set(meta::IDS, p_id);
@@ -121,7 +121,8 @@ IDMAP::QueryById(const DatasetPtr& dataset_ptr, const Config& config) {
     auto rows = dataset_ptr->Get<int64_t>(meta::ROWS);
     auto p_data = dataset_ptr->Get<const int64_t*>(meta::IDS);
 
-    auto elems = rows * config[meta::TOPK].get<int64_t>();
+    int64_t k = config[meta::TOPK].get<int64_t>();
+    auto elems = rows * k;
     size_t p_id_size = sizeof(int64_t) * elems;
     size_t p_dist_size = sizeof(float) * elems;
     auto p_id = (int64_t*)malloc(p_id_size);
@@ -130,7 +131,7 @@ IDMAP::QueryById(const DatasetPtr& dataset_ptr, const Config& config) {
     // todo: enable search by id (zhiru)
     //    auto blacklist = dataset_ptr->Get<faiss::ConcurrentBitsetPtr>("bitset");
     //    index_->searchById(rows, (float*)p_data, config[meta::TOPK].get<int64_t>(), p_dist, p_id, blacklist);
-    index_->search_by_id(rows, p_data, config[meta::TOPK].get<int64_t>(), p_dist, p_id, bitset_);
+    index_->search_by_id(rows, p_data, k, p_dist, p_id, bitset_);
 
     auto ret_ds = std::make_shared<Dataset>();
     ret_ds->Set(meta::IDS, p_id);

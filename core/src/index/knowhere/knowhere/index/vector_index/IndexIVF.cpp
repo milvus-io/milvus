@@ -66,8 +66,9 @@ IVF::Train(const DatasetPtr& dataset_ptr, const Config& config) {
     GETTENSOR(dataset_ptr)
 
     faiss::Index* coarse_quantizer = new faiss::IndexFlatL2(dim);
-    auto index = std::make_shared<faiss::IndexIVFFlat>(coarse_quantizer, dim, config[IndexParams::nlist].get<int64_t>(),
-                                                       GetMetricType(config[Metric::TYPE].get<std::string>()));
+    int64_t nlist = config[IndexParams::nlist].get<int64_t>();
+    faiss::MetricType metric_type = GetMetricType(config[Metric::TYPE].get<std::string>());
+    auto index = std::make_shared<faiss::IndexIVFFlat>(coarse_quantizer, dim, nlist, metric_type);
     index->train(rows, (float*)p_data);
 
     index_.reset(faiss::clone_index(index.get()));
@@ -80,9 +81,7 @@ IVF::Add(const DatasetPtr& dataset_ptr, const Config& config) {
     }
 
     std::lock_guard<std::mutex> lk(mutex_);
-    GETTENSOR(dataset_ptr)
-
-    auto p_ids = dataset_ptr->Get<const int64_t*>(meta::IDS);
+    GETTENSORWITHIDS(dataset_ptr)
     index_->add_with_ids(rows, (float*)p_data, p_ids);
 }
 
@@ -94,7 +93,6 @@ IVF::AddWithoutIds(const DatasetPtr& dataset_ptr, const Config& config) {
 
     std::lock_guard<std::mutex> lk(mutex_);
     GETTENSOR(dataset_ptr)
-
     index_->add(rows, (float*)p_data);
 }
 
@@ -109,14 +107,15 @@ IVF::Query(const DatasetPtr& dataset_ptr, const Config& config) {
     try {
         fiu_do_on("IVF.Search.throw_std_exception", throw std::exception());
         fiu_do_on("IVF.Search.throw_faiss_exception", throw faiss::FaissException(""));
-        auto elems = rows * config[meta::TOPK].get<int64_t>();
+        int64_t k = config[meta::TOPK].get<int64_t>();
+        auto elems = rows * k;
 
         size_t p_id_size = sizeof(int64_t) * elems;
         size_t p_dist_size = sizeof(float) * elems;
         auto p_id = (int64_t*)malloc(p_id_size);
         auto p_dist = (float*)malloc(p_dist_size);
 
-        QueryImpl(rows, (float*)p_data, config[meta::TOPK].get<int64_t>(), p_dist, p_id, config);
+        QueryImpl(rows, (float*)p_data, k, p_dist, p_id, config);
 
         //    std::stringstream ss_res_id, ss_res_dist;
         //    for (int i = 0; i < 10; ++i) {
@@ -152,7 +151,8 @@ IVF::QueryById(const DatasetPtr& dataset_ptr, const Config& config) {
     auto p_data = dataset_ptr->Get<const int64_t*>(meta::IDS);
 
     try {
-        auto elems = rows * config[meta::TOPK].get<int64_t>();
+        int64_t k = config[meta::TOPK].get<int64_t>();
+        auto elems = rows * k;
 
         size_t p_id_size = sizeof(int64_t) * elems;
         size_t p_dist_size = sizeof(float) * elems;
@@ -162,7 +162,7 @@ IVF::QueryById(const DatasetPtr& dataset_ptr, const Config& config) {
         // todo: enable search by id (zhiru)
         //        auto blacklist = dataset_ptr->Get<faiss::ConcurrentBitsetPtr>("bitset");
         auto index_ivf = std::static_pointer_cast<faiss::IndexIVF>(index_);
-        index_ivf->search_by_id(rows, p_data, config[meta::TOPK].get<int64_t>(), p_dist, p_id, bitset_);
+        index_ivf->search_by_id(rows, p_data, k, p_dist, p_id, bitset_);
 
         //    std::stringstream ss_res_id, ss_res_dist;
         //    for (int i = 0; i < 10; ++i) {

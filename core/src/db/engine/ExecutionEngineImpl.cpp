@@ -444,7 +444,7 @@ ExecutionEngineImpl::Load(bool to_cache) {
                 float_vectors.resize(vectors_data.size() / sizeof(float));
                 memcpy(float_vectors.data(), vectors_data.data(), vectors_data.size());
                 bf_index->Train(knowhere::DatasetPtr(), conf);
-                auto dataset = knowhere::GenDataset(vectors->GetCount(), bf_index->Dim(), float_vectors.data());
+                auto dataset = knowhere::GenDataset(vectors->GetCount(), this->dim_, float_vectors.data());
                 bf_index->AddWithoutIds(dataset, conf);
                 bf_index->SetBlacklist(concurrent_bitset_ptr);
 
@@ -454,7 +454,7 @@ ExecutionEngineImpl::Load(bool to_cache) {
             } else if (index_type_ == EngineType::FAISS_BIN_IDMAP) {
                 auto bin_bf_index = std::static_pointer_cast<knowhere::BinaryIDMAP>(index_);
                 bin_bf_index->Train(knowhere::DatasetPtr(), conf);
-                auto dataset = knowhere::GenDataset(vectors->GetCount(), bin_bf_index->Dim(), vectors_data.data());
+                auto dataset = knowhere::GenDataset(vectors->GetCount(), this->dim_, vectors_data.data());
                 bin_bf_index->AddWithoutIds(dataset, conf);
                 bin_bf_index->SetBlacklist(concurrent_bitset_ptr);
 
@@ -725,12 +725,12 @@ ExecutionEngineImpl::BuildIndex(const std::string& location, EngineType engine_t
     std::vector<segment::doc_id_t> uids;
     faiss::ConcurrentBitsetPtr blacklist;
     if (from_index) {
-        auto dataset = knowhere::GenDatasetWithIds(Count(), to_index->Dim(), from_index->GetRawVectors(), from_index->GetRawIds());
+        auto dataset = knowhere::GenDatasetWithIds(Count(), Dimension(), from_index->GetRawVectors(), from_index->GetRawIds());
         to_index->BuildAll(dataset, conf);
         uids = from_index->GetUids();
         from_index->GetBlacklist(blacklist);
     } else if (bin_from_index) {
-        auto dataset = knowhere::GenDatasetWithIds(Count(), to_index->Dim(), bin_from_index->GetRawVectors(), bin_from_index->GetRawIds());
+        auto dataset = knowhere::GenDatasetWithIds(Count(), Dimension(), bin_from_index->GetRawVectors(), bin_from_index->GetRawIds());
         to_index->BuildAll(dataset, conf);
         uids = bin_from_index->GetUids();
         bin_from_index->GetBlacklist(blacklist);
@@ -746,15 +746,27 @@ ExecutionEngineImpl::BuildIndex(const std::string& location, EngineType engine_t
     return std::make_shared<ExecutionEngineImpl>(to_index, location, engine_type, metric_type_, index_params_);
 }
 
-// map offsets to ids
 void
-MapUids(const std::vector<segment::doc_id_t>& uids, int64_t* labels, size_t num) {
+MapAndCopyResult(const knowhere::DatasetPtr& dataset, const std::vector<milvus::segment::doc_id_t>& uids,
+                 int64_t nq, int64_t k, float* distances, int64_t* labels) {
+    int64_t* res_ids = dataset->Get<int64_t*>(knowhere::meta::IDS);
+    float* res_dist = dataset->Get<float*>(knowhere::meta::DISTANCE);
+
+    memcpy(distances, res_dist, sizeof(float) * nq * k);
+
+    /* map offsets to ids */
+    int64_t num = nq * k;
     for (int64_t i = 0; i < num; ++i) {
-        int64_t& offset = labels[i];
+        int64_t offset = res_ids[i];
         if (offset != -1) {
-            offset = uids[offset];
+            labels[i] = uids[offset];
+        } else {
+            labels[i] = -1;
         }
     }
+
+    free(res_ids);
+    free(res_dist);
 }
 
 Status
@@ -831,17 +843,13 @@ ExecutionEngineImpl::Search(int64_t n, const float* data, int64_t k, const milvu
         HybridLoad();
     }
 
-    rc.RecordSection("search prepare");
+    rc.RecordSection("query prepare");
     auto dataset = knowhere::GenDataset(n, index_->Dim(), data);
     auto result = index_->Query(dataset, conf);
-    labels = result->Get<int64_t*>(knowhere::meta::IDS);
-    distances = result->Get<float*>(knowhere::meta::DISTANCE);
-    rc.RecordSection("search done");
+    rc.RecordSection("query done");
 
-    // map offsets to ids
     ENGINE_LOG_DEBUG << "get uids " << index_->GetUids().size() << " from index " << location_;
-    MapUids(index_->GetUids(), labels, n * k);
-
+    MapAndCopyResult(result, index_->GetUids(), n, k, distances, labels);
     rc.RecordSection("map uids " + std::to_string(n * k));
 
     if (hybrid) {
@@ -873,17 +881,13 @@ ExecutionEngineImpl::Search(int64_t n, const uint8_t* data, int64_t k, const mil
         HybridLoad();
     }
 
-    rc.RecordSection("search prepare");
+    rc.RecordSection("query prepare");
     auto dataset = knowhere::GenDataset(n, index_->Dim(), data);
     auto result = index_->Query(dataset, conf);
-    labels = result->Get<int64_t*>(knowhere::meta::IDS);
-    distances = result->Get<float*>(knowhere::meta::DISTANCE);
-    rc.RecordSection("search done");
+    rc.RecordSection("query done");
 
-    // map offsets to ids
     ENGINE_LOG_DEBUG << "get uids " << index_->GetUids().size() << " from index " << location_;
-    MapUids(index_->GetUids(), labels, n * k);
-
+    MapAndCopyResult(result, index_->GetUids(), n, k, distances, labels);
     rc.RecordSection("map uids " + std::to_string(n * k));
 
     if (hybrid) {
@@ -959,14 +963,10 @@ ExecutionEngineImpl::Search(int64_t n, const std::vector<int64_t>& ids, int64_t 
     if (!offsets.empty()) {
         auto dataset = knowhere::GenDataset(offsets.size(), index_->Dim(), offsets.data());
         auto result = index_->QueryById(dataset, conf);
-        labels = result->Get<int64_t*>(knowhere::meta::IDS);
-        distances = result->Get<float*>(knowhere::meta::DISTANCE);
-        rc.RecordSection("search done");
+        rc.RecordSection("query by id done");
 
-        // map offsets to ids
         ENGINE_LOG_DEBUG << "get uids " << index_->GetUids().size() << " from index " << location_;
-        MapUids(uids, labels, offsets.size() * k);
-
+        MapAndCopyResult(result, uids, offsets.size(), k, distances, labels);
         rc.RecordSection("map uids " + std::to_string(offsets.size() * k));
     }
 
@@ -992,7 +992,8 @@ ExecutionEngineImpl::GetVectorByID(const int64_t& id, float* vector, bool hybrid
     std::vector<int64_t> ids{id};
     auto dataset = knowhere::GenDatasetWithIds(1, index_->Dim(), nullptr, ids.data());
     auto result = index_->GetVectorById(dataset, knowhere::Config());
-    vector = result->Get<float*>(knowhere::meta::TENSOR);
+    float* res_vec = (float*)(result->Get<void*>(knowhere::meta::TENSOR));
+    memcpy(vector, res_vec, sizeof(float) * 1 * index_->Dim());
 
     if (hybrid) {
         HybridUnset();
@@ -1018,7 +1019,8 @@ ExecutionEngineImpl::GetVectorByID(const int64_t& id, uint8_t* vector, bool hybr
     std::vector<int64_t> ids{id};
     auto dataset = knowhere::GenDatasetWithIds(1, index_->Dim(), nullptr, ids.data());
     auto result = index_->GetVectorById(dataset, knowhere::Config());
-    vector = result->Get<uint8_t*>(knowhere::meta::TENSOR);
+    uint8_t* res_vec = (uint8_t*)(result->Get<void*>(knowhere::meta::TENSOR));
+    memcpy(vector, res_vec, sizeof(uint8_t) * 1 * index_->Dim());
 
     if (hybrid) {
         HybridUnset();

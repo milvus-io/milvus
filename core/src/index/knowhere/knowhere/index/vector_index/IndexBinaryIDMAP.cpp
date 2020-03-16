@@ -44,15 +44,16 @@ BinaryIDMAP::Query(const DatasetPtr& dataset_ptr, const Config& config) {
     if (!index_) {
         KNOWHERE_THROW_MSG("index not initialize");
     }
-    GETBINARYTENSOR(dataset_ptr)
+    GETTENSOR(dataset_ptr)
 
-    auto elems = rows * config[meta::TOPK].get<int64_t>();
+    int64_t k = config[meta::TOPK].get<int64_t>();
+    auto elems = rows * k;
     size_t p_id_size = sizeof(int64_t) * elems;
     size_t p_dist_size = sizeof(float) * elems;
     auto p_id = (int64_t*)malloc(p_id_size);
     auto p_dist = (float*)malloc(p_dist_size);
 
-    QueryImpl(rows, (uint8_t*)p_data, config[meta::TOPK].get<int64_t>(), p_dist, p_id, Config());
+    QueryImpl(rows, (uint8_t*)p_data, k, p_dist, p_id, Config());
 
     auto ret_ds = std::make_shared<Dataset>();
     if (index_->metric_type == faiss::METRIC_Hamming) {
@@ -81,14 +82,15 @@ BinaryIDMAP::QueryById(const DatasetPtr& dataset_ptr, const Config& config) {
     auto rows = dataset_ptr->Get<int64_t>(meta::ROWS);
     auto p_data = dataset_ptr->Get<const int64_t*>(meta::IDS);
 
-    auto elems = rows * config[meta::TOPK].get<int64_t>();
+    int64_t k = config[meta::TOPK].get<int64_t>();
+    auto elems = rows * k;
     size_t p_id_size = sizeof(int64_t) * elems;
     size_t p_dist_size = sizeof(float) * elems;
     auto p_id = (int64_t*)malloc(p_id_size);
     auto p_dist = (float*)malloc(p_dist_size);
 
     auto* pdistances = (int32_t*)p_dist;
-    index_->search_by_id(rows, p_data, config[meta::TOPK].get<int64_t>(), pdistances, p_id, bitset_);
+    index_->search_by_id(rows, p_data, k, pdistances, p_id, bitset_);
 
     auto ret_ds = std::make_shared<Dataset>();
     if (index_->metric_type == faiss::METRIC_Hamming) {
@@ -115,17 +117,17 @@ BinaryIDMAP::Add(const DatasetPtr& dataset_ptr, const Config& config) {
     }
 
     std::lock_guard<std::mutex> lk(mutex_);
-    GETBINARYTENSOR(dataset_ptr)
+    GETTENSORWITHIDS(dataset_ptr)
 
-    auto p_ids = dataset_ptr->Get<const int64_t*>(meta::IDS);
     index_->add_with_ids(rows, (uint8_t*)p_data, p_ids);
 }
 
 void
 BinaryIDMAP::Train(const DatasetPtr& dataset_ptr, const Config& config) {
-    const char* type = "BFlat";
-    auto index = faiss::index_binary_factory(config[meta::DIM].get<int64_t>(), type,
-                                             GetMetricType(config[Metric::TYPE].get<std::string>()));
+    const char* desc = "BFlat";
+    int64_t dim = config[meta::DIM].get<int64_t>();
+    faiss::MetricType metric_type = GetMetricType(config[Metric::TYPE].get<std::string>());
+    auto index = faiss::index_binary_factory(dim, desc, metric_type);
     index_.reset(index);
 }
 
@@ -167,7 +169,7 @@ BinaryIDMAP::AddWithoutIds(const DatasetPtr& dataset_ptr, const Config& config) 
     }
 
     std::lock_guard<std::mutex> lk(mutex_);
-    GETBINARYTENSOR(dataset_ptr)
+    GETTENSOR(dataset_ptr)
 
     std::vector<int64_t> new_ids(rows);
     for (int i = 0; i < rows; ++i) {

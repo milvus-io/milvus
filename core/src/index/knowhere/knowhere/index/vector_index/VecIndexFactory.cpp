@@ -36,8 +36,6 @@ namespace knowhere {
 
 VecIndexPtr
 VecIndexFactory::CreateVecIndex(const IndexType type, const IndexMode mode) {
-    std::shared_ptr<knowhere::VecIndex> index;
-
 #ifdef MILVUS_GPU_VERSION
     auto gpu_device = -1;  // TODO: remove hardcode here, get from invoker
     if (mode == IndexMode::MODE_GPU) {
