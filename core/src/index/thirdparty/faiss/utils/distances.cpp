@@ -154,7 +154,7 @@ static void knn_inner_product_sse (const float * x,
     size_t k = res->k;
 
     size_t thread_max_num = omp_get_max_threads();
-    if (nx < thread_max_num / 2) {
+    if (nx < 4) {
         // omp for ny
         size_t all_hash_size = thread_max_num * k;
         float *value = new float[all_hash_size];
@@ -242,7 +242,7 @@ static void knn_L2sqr_sse (
     size_t k = res->k;
 
     size_t thread_max_num = omp_get_max_threads();
-    if (nx < thread_max_num / 2) {
+    if (nx < 4) {
         // omp for ny
         size_t all_hash_size = thread_max_num * k;
         float *value = new float[all_hash_size];
