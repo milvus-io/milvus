@@ -22,74 +22,73 @@
 #include "scheduler/task/TestTask.h"
 #include "scheduler/tasklabel/SpecResLabel.h"
 #include "utils/Error.h"
-#include "wrapper/VecIndex.h"
 
 namespace milvus {
 namespace scheduler {
 
-class MockVecIndex : public engine::VecIndex {
- public:
-    virtual Status
-    BuildAll(const int64_t& nb, const float* xb, const int64_t* ids, const engine::Config& cfg, const int64_t& nt = 0,
-             const float* xt = nullptr) {
-    }
-
-    //    engine::VecIndexPtr
-    //    Clone() override {
-    //        return milvus::engine::VecIndexPtr();
-    //    }
-
-    int64_t
-    GetDeviceId() override {
-        return 0;
-    }
-
-    engine::IndexType
-    GetType() const override {
-        return engine::IndexType::INVALID;
-    }
-
-    virtual Status
-    Add(const int64_t& nb, const float* xb, const int64_t* ids, const engine::Config& cfg = engine::Config()) {
-    }
-
-    virtual Status
-    Search(const int64_t& nq, const float* xq, float* dist, int64_t* ids,
-           const engine::Config& cfg = engine::Config()) {
-    }
-
-    engine::VecIndexPtr
-    CopyToGpu(const int64_t& device_id, const engine::Config& cfg) override {
-    }
-
-    engine::VecIndexPtr
-    CopyToCpu(const engine::Config& cfg) override {
-    }
-
-    virtual int64_t
-    Dimension() {
-        return dimension_;
-    }
-
-    virtual int64_t
-    Count() {
-        return ntotal_;
-    }
-
-    virtual knowhere::BinarySet
-    Serialize() {
-        knowhere::BinarySet binset;
-        return binset;
-    }
-
-    virtual Status
-    Load(const knowhere::BinarySet& index_binary) {
-    }
-
- public:
-    int64_t dimension_ = 512;
-    int64_t ntotal_ = 0;
-};
+//class MockVecIndex : public engine::VecIndex {
+// public:
+//    virtual Status
+//    BuildAll(const int64_t& nb, const float* xb, const int64_t* ids, const engine::Config& cfg, const int64_t& nt = 0,
+//             const float* xt = nullptr) {
+//    }
+//
+//    //    engine::VecIndexPtr
+//    //    Clone() override {
+//    //        return milvus::engine::VecIndexPtr();
+//    //    }
+//
+//    int64_t
+//    GetDeviceId() override {
+//        return 0;
+//    }
+//
+//    engine::IndexType
+//    GetType() const override {
+//        return engine::IndexType::INVALID;
+//    }
+//
+//    virtual Status
+//    Add(const int64_t& nb, const float* xb, const int64_t* ids, const engine::Config& cfg = engine::Config()) {
+//    }
+//
+//    virtual Status
+//    Search(const int64_t& nq, const float* xq, float* dist, int64_t* ids,
+//           const engine::Config& cfg = engine::Config()) {
+//    }
+//
+//    engine::VecIndexPtr
+//    CopyToGpu(const int64_t& device_id, const engine::Config& cfg) override {
+//    }
+//
+//    engine::VecIndexPtr
+//    CopyToCpu(const engine::Config& cfg) override {
+//    }
+//
+//    virtual int64_t
+//    Dimension() {
+//        return dimension_;
+//    }
+//
+//    virtual int64_t
+//    Count() {
+//        return ntotal_;
+//    }
+//
+//    virtual knowhere::BinarySet
+//    Serialize() {
+//        knowhere::BinarySet binset;
+//        return binset;
+//    }
+//
+//    virtual Status
+//    Load(const knowhere::BinarySet& index_binary) {
+//    }
+//
+// public:
+//    int64_t dimension_ = 512;
+//    int64_t ntotal_ = 0;
+//};
 
 class SchedulerTest : public testing::Test {
  protected:
@@ -209,47 +208,47 @@ class SchedulerTest2 : public testing::Test {
 //    ASSERT_EQ(res_mgr_->GetResource(ResourceType::GPU, 1)->task_table().Size(), NUM);
 //}
 
-TEST(SchedulerTestResource, SPECIFIED_RESOURCE_TEST) {
-    auto mock_index_ptr = std::make_shared<MockVecIndex>();
-    milvus::engine::Config config;
-    auto quantizer_ptr = mock_index_ptr->LoadQuantizer(config);
-    ASSERT_EQ(quantizer_ptr, nullptr);
-
-    auto vec_index_ptr = mock_index_ptr->LoadData(quantizer_ptr, config);
-    ASSERT_EQ(vec_index_ptr, nullptr);
-
-    auto s = mock_index_ptr->SetQuantizer(quantizer_ptr);
-    ASSERT_TRUE(s.ok());
-
-    s = mock_index_ptr->UnsetQuantizer();
-    ASSERT_TRUE(s.ok());
-
-    auto res = mock_index_ptr->CopyToGpuWithQuantizer(0, config);
-    ASSERT_EQ(res.first, nullptr);
-    ASSERT_EQ(res.second, nullptr);
-
-    using IndexType = milvus::engine::IndexType;
-    auto index = GetVecIndexFactory(IndexType::SPTAG_KDT_RNT_CPU, config);
-    ASSERT_EQ(index->GetType(), IndexType::SPTAG_KDT_RNT_CPU);
-
-    index = GetVecIndexFactory(IndexType::SPTAG_BKT_RNT_CPU, config);
-    ASSERT_EQ(index->GetType(), IndexType::SPTAG_BKT_RNT_CPU);
-
-#ifdef MILVUS_GPU_VERSION
-    index = GetVecIndexFactory(IndexType::FAISS_IVFPQ_GPU, config);
-    ASSERT_EQ(index->GetType(), IndexType::FAISS_IVFPQ_GPU);
-#endif
-
-    index = GetVecIndexFactory(IndexType::NSG_MIX, config);
-    ASSERT_EQ(index->GetType(), IndexType::NSG_MIX);
-
-    index = GetVecIndexFactory(IndexType::INVALID, config);
-    ASSERT_EQ(index, nullptr);
-
-    knowhere::BinarySet empty_set;
-    auto res_ptr = LoadVecIndex(IndexType::INVALID, empty_set, 0);
-    ASSERT_EQ(res_ptr, nullptr);
-}
+//TEST(SchedulerTestResource, SPECIFIED_RESOURCE_TEST) {
+//    auto mock_index_ptr = std::make_shared<MockVecIndex>();
+//    milvus::engine::Config config;
+//    auto quantizer_ptr = mock_index_ptr->LoadQuantizer(config);
+//    ASSERT_EQ(quantizer_ptr, nullptr);
+//
+//    auto vec_index_ptr = mock_index_ptr->LoadData(quantizer_ptr, config);
+//    ASSERT_EQ(vec_index_ptr, nullptr);
+//
+//    auto s = mock_index_ptr->SetQuantizer(quantizer_ptr);
+//    ASSERT_TRUE(s.ok());
+//
+//    s = mock_index_ptr->UnsetQuantizer();
+//    ASSERT_TRUE(s.ok());
+//
+//    auto res = mock_index_ptr->CopyToGpuWithQuantizer(0, config);
+//    ASSERT_EQ(res.first, nullptr);
+//    ASSERT_EQ(res.second, nullptr);
+//
+//    using IndexType = milvus::engine::IndexType;
+//    auto index = GetVecIndexFactory(IndexType::SPTAG_KDT_RNT_CPU, config);
+//    ASSERT_EQ(index->GetType(), IndexType::SPTAG_KDT_RNT_CPU);
+//
+//    index = GetVecIndexFactory(IndexType::SPTAG_BKT_RNT_CPU, config);
+//    ASSERT_EQ(index->GetType(), IndexType::SPTAG_BKT_RNT_CPU);
+//
+//#ifdef MILVUS_GPU_VERSION
+//    index = GetVecIndexFactory(IndexType::FAISS_IVFPQ_GPU, config);
+//    ASSERT_EQ(index->GetType(), IndexType::FAISS_IVFPQ_GPU);
+//#endif
+//
+//    index = GetVecIndexFactory(IndexType::NSG_MIX, config);
+//    ASSERT_EQ(index->GetType(), IndexType::NSG_MIX);
+//
+//    index = GetVecIndexFactory(IndexType::INVALID, config);
+//    ASSERT_EQ(index, nullptr);
+//
+//    knowhere::BinarySet empty_set;
+//    auto res_ptr = LoadVecIndex(IndexType::INVALID, empty_set, 0);
+//    ASSERT_EQ(res_ptr, nullptr);
+//}
 
 TEST_F(SchedulerTest, schedule) {
     scheduler_->Dump();
