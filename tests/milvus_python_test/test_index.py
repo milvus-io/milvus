@@ -689,6 +689,8 @@ class TestIndexIP:
         if str(connect._cmd("mode")[1]) == "GPU":
             if request.param["index_type"] == IndexType.IVF_PQ:
                 pytest.skip("ivfpq not support in GPU mode")
+        if request.param["index_type"] == IndexType.RNSG:
+            pytest.skip("rnsg not support in ip")
         return request.param
 
     @pytest.fixture(
@@ -702,6 +704,8 @@ class TestIndexIP:
         if str(connect._cmd("mode")[1]) == "GPU":
             if request.param["index_type"] == IndexType.IVF_PQ:
                 pytest.skip("ivfpq not support in GPU mode")
+        if request.param["index_type"] == IndexType.RNSG:
+            pytest.skip("rnsg not support in ip")
         return request.param
     """
     ******************************************************************
@@ -719,8 +723,6 @@ class TestIndexIP:
         index_param = get_simple_index["index_param"]
         index_type = get_simple_index["index_type"]
         logging.getLogger().info(get_simple_index)
-        if index_type in [IndexType.RNSG]:
-            pytest.skip("Skip some RNSG cases")
         status, ids = connect.add_vectors(ip_collection, vectors)
         status = connect.create_index(ip_collection, index_type, index_param)
         assert status.OK()
@@ -734,8 +736,6 @@ class TestIndexIP:
         '''
         index_param = get_simple_index["index_param"]
         index_type = get_simple_index["index_type"]
-        if index_type in [IndexType.RNSG]:
-            pytest.skip("Skip some RNSG cases")
         logging.getLogger().info(get_simple_index)
         status = connect.create_partition(ip_collection, tag)
         status, ids = connect.add_vectors(ip_collection, vectors, partition_tag=tag)
@@ -765,8 +765,6 @@ class TestIndexIP:
         index_param = get_simple_index["index_param"]
         index_type = get_simple_index["index_type"]
         logging.getLogger().info(get_simple_index)
-        if index_type in [IndexType.RNSG]:
-            pytest.skip("Skip some RNSG cases")
         status, ids = connect.add_vectors(ip_collection, vectors)
         status = connect.create_index(ip_collection, index_type, index_param)
         logging.getLogger().info(connect.describe_index(ip_collection))
@@ -888,8 +886,6 @@ class TestIndexIP:
         '''
         index_param = get_simple_index["index_param"]
         index_type = get_simple_index["index_type"]
-        if index_type in [IndexType.RNSG]:
-            pytest.skip("Skip some RNSG cases")
         status = connect.create_index(ip_collection, index_type, index_param)
         status, ids = connect.add_vectors(ip_collection, vectors)
         assert status.OK()
@@ -951,9 +947,7 @@ class TestIndexIP:
         index_param = get_simple_index["index_param"]
         index_type = get_simple_index["index_type"]
         logging.getLogger().info(get_simple_index)
-        if index_type in [IndexType.RNSG]:
-            pytest.skip()
-    # status, ids = connect.add_vectors(ip_collection, vectors[:5000])
+        # status, ids = connect.add_vectors(ip_collection, vectors[:5000])
         status = connect.create_index(ip_collection, index_type, index_param)
         status, result = connect.describe_index(ip_collection)
         logging.getLogger().info(result)
@@ -974,8 +968,6 @@ class TestIndexIP:
         '''
         index_param = get_simple_index["index_param"]
         index_type = get_simple_index["index_type"]
-        if index_type in [IndexType.RNSG]:
-            pytest.skip("Skip some RNSG cases")
         logging.getLogger().info(get_simple_index)
         status = connect.create_partition(ip_collection, tag)
         status, ids = connect.add_vectors(ip_collection, vectors, partition_tag=tag)
@@ -995,8 +987,6 @@ class TestIndexIP:
         new_tag = "new_tag"
         index_param = get_simple_index["index_param"]
         index_type = get_simple_index["index_type"]
-        if index_type in [IndexType.RNSG]:
-            pytest.skip("Skip some RNSG cases")
         logging.getLogger().info(get_simple_index)
         status = connect.create_partition(ip_collection, tag)
         status = connect.create_partition(ip_collection, new_tag)
@@ -1028,8 +1018,6 @@ class TestIndexIP:
             connect.create_collection(param)
             index_param = get_simple_index["index_param"]
             index_type = get_simple_index["index_type"]
-            if index_type in [IndexType.RNSG]:
-                pytest.skip("Skip some RNSG cases")
             logging.getLogger().info(get_simple_index)
             status, ids = connect.add_vectors(collection_name=collection_name, records=vectors)
             status = connect.create_index(collection_name, index_type, index_param)
@@ -1089,8 +1077,6 @@ class TestIndexIP:
         index_type = get_simple_index["index_type"]
         status, mode = connect._cmd("mode")
         assert status.OK()
-        if index_type in [IndexType.RNSG]:
-            pytest.skip()
         # status, ids = connect.add_vectors(ip_collection, vectors)
         status = connect.create_index(ip_collection, index_type, index_param)
         if str(mode) == "GPU" and (index_type == IndexType.IVF_PQ):
@@ -1114,8 +1100,6 @@ class TestIndexIP:
         '''
         index_param = get_simple_index["index_param"]
         index_type = get_simple_index["index_type"]
-        if index_type in [IndexType.RNSG]:
-            pytest.skip("Skip some RNSG cases")
         status = connect.create_partition(ip_collection, tag)
         status, ids = connect.add_vectors(ip_collection, vectors, partition_tag=tag)
         status = connect.create_index(ip_collection, index_type, index_param)
@@ -1138,8 +1122,6 @@ class TestIndexIP:
         new_tag = "new_tag"
         index_param = get_simple_index["index_param"]
         index_type = get_simple_index["index_type"]
-        if index_type in [IndexType.RNSG]:
-            pytest.skip("Skip some RNSG cases")
         status = connect.create_partition(ip_collection, tag)
         status = connect.create_partition(ip_collection, new_tag)
         status, ids = connect.add_vectors(ip_collection, vectors)
@@ -1163,8 +1145,6 @@ class TestIndexIP:
         # status, ids = connect.add_vectors(ip_collection, vectors)
         status, mode = connect._cmd("mode")
         assert status.OK()
-        if index_type in [IndexType.RNSG]:
-            pytest.skip()
         # status, ids = connect.add_vectors(ip_collection, vectors)
         status = connect.create_index(ip_collection, index_type, index_param)
         if str(mode) == "GPU" and (index_type == IndexType.IVF_PQ):
@@ -1217,8 +1197,6 @@ class TestIndexIP:
         '''
         index_param = get_simple_index["index_param"]
         index_type = get_simple_index["index_type"]
-        if index_type in [IndexType.RNSG]:
-            pytest.skip("Skip some RNSG cases")
         status, ids = connect.add_vectors(ip_collection, vectors)
         for i in range(2):
             status = connect.create_index(ip_collection, index_type, index_param)
