@@ -96,8 +96,8 @@ class GrpcArgsParser(object):
         _table_name = param.table_name
         _topk = param.topk
 
-        if not _status.OK():
-            raise Exception("Argument parse error")
+        # if not _status.OK():
+        #     raise Exception("Argument parse error")
 
         _row_record = param.query_record_array
 

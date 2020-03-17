@@ -131,10 +131,10 @@ class ServiceHandler(milvus_pb2_grpc.MilvusServiceServicer):
         rs = []
         all_topk_results = []
 
-        def search(addr, query_params, vectors, topk, params, **kwargs):
+        def search(addr, table_id, file_ids, vectors, topk, params, **kwargs):
             logger.info(
-                'Send Search Request: addr={};params={};nq={};topk={};params={}'
-                    .format(addr, query_params, len(vectors), topk, params))
+                'Send Search Request: addr={};table_id={};ids={};nq={};topk={};params={}'
+                    .format(addr, table_id, file_ids, len(vectors), topk, params))
 
             conn = self.router.query_conn(addr, metadata=metadata)
             start = time.time()
@@ -144,11 +144,11 @@ class ServiceHandler(milvus_pb2_grpc.MilvusServiceServicer):
 
             with self.tracer.start_span('search_{}'.format(addr),
                                         child_of=span):
-                ret = conn.search_vectors_in_files(collection_name=query_params['table_id'],
-                                                   file_ids=query_params['file_ids'],
-                                                   query_records=vectors,
-                                                   top_k=topk,
-                                                   params=params)
+                ret = conn.conn.search_vectors_in_files(collection_name=table_id,
+                                                        file_ids=file_ids,
+                                                        query_records=vectors,
+                                                        top_k=topk,
+                                                        params=params)
                 end = time.time()
 
                 all_topk_results.append(ret)
@@ -156,14 +156,16 @@ class ServiceHandler(milvus_pb2_grpc.MilvusServiceServicer):
         with self.tracer.start_span('do_search', child_of=p_span) as span:
             with ThreadPoolExecutor(max_workers=self.max_workers) as pool:
                 for addr, params in routing.items():
-                    res = pool.submit(search,
-                                      addr,
-                                      params,
-                                      vectors,
-                                      topk,
-                                      search_params,
-                                      span=span)
-                    rs.append(res)
+                    for table_id, file_ids in params.items():
+                        res = pool.submit(search,
+                                          addr,
+                                          table_id,
+                                          file_ids,
+                                          vectors,
+                                          topk,
+                                          search_params,
+                                          span=span)
+                        rs.append(res)
 
                 for res in rs:
                     res.result()
@@ -180,14 +182,13 @@ class ServiceHandler(milvus_pb2_grpc.MilvusServiceServicer):
 
     @mark_grpc_method
     def CreateTable(self, request, context):
-        _status, packs = Parser.parse_proto_TableSchema(request)
+        _status, unpacks = Parser.parse_proto_TableSchema(request)
 
         if not _status.OK():
-            logging.warning('[CreateTable] parse fail: {}'.format(_status))
             return status_pb2.Status(error_code=_status.code,
                                      reason=_status.message)
 
-        _status, _table_schema = packs
+        _status, _table_schema = unpacks
         # if _status.error_code == 0:
         #     logging.warning('[CreateTable] table schema error occurred: {}'.format(_status))
         #     return _status
