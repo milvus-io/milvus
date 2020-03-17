@@ -82,6 +82,9 @@ Milvus 可以广泛应用于各类场景。下图展示了基于 Milvus 和 VGG 
 
 欢迎加入我们的 [Slack 频道](https://join.slack.com/t/milvusio/shared_invite/enQtNzY1OTQ0NDI3NjMzLWNmYmM1NmNjOTQ5MGI5NDhhYmRhMGU5M2NhNzhhMDMzY2MzNDdlYjM5ODQ5MmE3ODFlYzU3YjJkNmVlNDQ2ZTk)以便与其他用户和贡献者进行交流。
 
+## 加入 Milvus 技术交流微信群
+
+![qrcode](https://github.com/milvus-io/docs/blob/v0.7.0/assets/qrcode.png)
 
 ## 相关链接
 
