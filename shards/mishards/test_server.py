@@ -265,7 +265,7 @@ class TestServer:
 
         param['nprobe'] = 2048
         RouterMixin.connection = mock.MagicMock(return_value=Milvus())
-        RouterMixin.query_conn = mock.MagicMock(return_value=Milvus())
+        RouterMixin.query_conn.conn = mock.MagicMock(return_value=Milvus())
         Milvus.describe_table = mock.MagicMock(return_value=(BAD,
                                                              table_schema))
         status, ret = self.client.search_vectors(**param)
