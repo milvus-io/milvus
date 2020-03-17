@@ -563,6 +563,7 @@ Config::UpdateFileConfigFromMem(const std::string& parent_key, const std::string
         std::vector<std::string> vec;
         StringHelpFunctions::SplitStringByDelimeter(value, ",", vec);
         for (auto& s : vec) {
+            std::transform(s.begin(), s.end(), s.begin(), ::tolower);
             value_str += "\n    - " + s;
         }
     } else {
