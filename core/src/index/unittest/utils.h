@@ -97,19 +97,13 @@ extern void
 InitLog();
 
 milvus::knowhere::DatasetPtr
-generate_dataset(int64_t nb, int64_t dim, const float* xb, const int64_t* ids);
+generate_dataset(int64_t nb, int64_t dim, const void* xb, const int64_t* ids);
 
 milvus::knowhere::DatasetPtr
-generate_binary_dataset(int64_t nb, int64_t dim, const uint8_t* xb, const int64_t* ids);
-
-milvus::knowhere::DatasetPtr
-generate_query_dataset(int64_t nb, int64_t dim, const float* xb);
+generate_query_dataset(int64_t nb, int64_t dim, const void* xb);
 
 milvus::knowhere::DatasetPtr
 generate_id_dataset(int64_t nb, const int64_t* ids);
-
-milvus::knowhere::DatasetPtr
-generate_binary_query_dataset(int64_t nb, int64_t dim, const uint8_t* xb);
 
 enum class CheckMode {
     CHECK_EQUAL = 0,
