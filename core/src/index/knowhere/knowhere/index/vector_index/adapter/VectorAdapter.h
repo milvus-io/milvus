@@ -19,20 +19,15 @@ namespace milvus {
 namespace knowhere {
 
 #define GETTENSOR(dataset_ptr)                         \
-    auto dim = dataset_ptr->Get<int64_t>(meta::DIM);   \
-    auto rows = dataset_ptr->Get<int64_t>(meta::ROWS); \
-    auto p_data = dataset_ptr->Get<const void*>(meta::TENSOR);
+    int64_t dim = dataset_ptr->Get<int64_t>(meta::DIM);   \
+    int64_t rows = dataset_ptr->Get<int64_t>(meta::ROWS); \
+    const void* p_data = dataset_ptr->Get<const void*>(meta::TENSOR);
 
 #define GETTENSORWITHIDS(dataset_ptr)                          \
-    auto dim = dataset_ptr->Get<int64_t>(meta::DIM);           \
-    auto rows = dataset_ptr->Get<int64_t>(meta::ROWS);         \
-    auto p_data = dataset_ptr->Get<const void*>(meta::TENSOR); \
-    auto p_ids = dataset_ptr->Get<const int64_t*>(meta::IDS);
-
-//#define GETBINARYTENSOR(dataset_ptr)                   \
-//    auto dim = dataset_ptr->Get<int64_t>(meta::DIM);   \
-//    auto rows = dataset_ptr->Get<int64_t>(meta::ROWS); \
-//    auto p_data = dataset_ptr->Get<const uint8_t*>(meta::TENSOR);
+    int64_t dim = dataset_ptr->Get<int64_t>(meta::DIM);           \
+    int64_t rows = dataset_ptr->Get<int64_t>(meta::ROWS);         \
+    const void* p_data = dataset_ptr->Get<const void*>(meta::TENSOR); \
+    const int64_t* p_ids = dataset_ptr->Get<const int64_t*>(meta::IDS);
 
 extern DatasetPtr
 GenDatasetWithIds(const int64_t nb, const int64_t dim, const void* xb, const int64_t* ids);

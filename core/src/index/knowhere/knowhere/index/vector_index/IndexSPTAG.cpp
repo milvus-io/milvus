@@ -184,7 +184,7 @@ DatasetPtr
 CPUSPTAGRNG::Query(const DatasetPtr& dataset_ptr, const Config& config) {
     SetParameters(config);
 
-    auto p_data = dataset_ptr->Get<const float*>(meta::TENSOR);
+    float* p_data = (float*)dataset_ptr->Get<const void*>(meta::TENSOR);
     for (auto i = 0; i < 10; ++i) {
         for (auto j = 0; j < 10; ++j) {
             std::cout << p_data[i * 10 + j] << " ";
