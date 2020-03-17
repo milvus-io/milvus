@@ -14,11 +14,12 @@
 #include <faiss/gpu/GpuIndexIVF.h>
 #include <faiss/index_factory.h>
 #include <fiu-local.h>
+#include <string>
 #include <utility>
 
-#include "knowhere/index/vector_index/gpu/IndexIVFSQHybrid.h"
 #include "knowhere/common/Exception.h"
 #include "knowhere/index/vector_index/adapter/VectorAdapter.h"
+#include "knowhere/index/vector_index/gpu/IndexIVFSQHybrid.h"
 #include "knowhere/index/vector_index/helpers/FaissIO.h"
 #include "knowhere/index/vector_index/helpers/IndexParameter.h"
 

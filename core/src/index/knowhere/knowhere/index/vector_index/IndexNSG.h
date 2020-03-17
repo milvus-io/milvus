@@ -40,7 +40,7 @@ class NSG : public VecIndex {
     void
     Load(const BinarySet&) override;
 
-    virtual void
+    void
     BuildAll(const DatasetPtr& dataset_ptr, const Config& config) override {
         Train(dataset_ptr, config);
     }

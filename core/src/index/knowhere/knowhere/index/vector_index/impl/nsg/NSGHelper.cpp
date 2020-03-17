@@ -11,7 +11,7 @@
 
 #include <cstring>
 
-#include "NSGHelper.h"
+#include "knowhere/index/vector_index/impl/nsg/NSGHelper.h"
 
 namespace milvus {
 namespace knowhere {

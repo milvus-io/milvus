@@ -247,8 +247,8 @@ MemTable::ApplyDeletes() {
         std::vector<knowhere::VecIndexPtr> indexes;
         std::vector<faiss::ConcurrentBitsetPtr> blacklists;
         for (auto& file : segment_files) {
-            auto index =
-                std::static_pointer_cast<knowhere::VecIndex>(cache::CpuCacheMgr::GetInstance()->GetIndex(file.location_));
+            auto data_obj_ptr = cache::CpuCacheMgr::GetInstance()->GetIndex(file.location_);
+            auto index = std::static_pointer_cast<knowhere::VecIndex>(data_obj_ptr);
             faiss::ConcurrentBitsetPtr blacklist = nullptr;
             if (index != nullptr) {
                 index->GetBlacklist(blacklist);

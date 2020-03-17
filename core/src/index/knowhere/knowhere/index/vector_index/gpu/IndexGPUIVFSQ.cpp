@@ -13,6 +13,7 @@
 #include <faiss/index_factory.h>
 
 #include <memory>
+#include <string>
 
 #include "knowhere/common/Exception.h"
 #include "knowhere/index/vector_index/IndexIVFSQ.h"
@@ -31,8 +32,8 @@ GPUIVFSQ::Train(const DatasetPtr& dataset_ptr, const Config& config) {
     std::stringstream index_type;
     index_type << "IVF" << config[IndexParams::nlist] << ","
                << "SQ" << config[IndexParams::nbits];
-    auto build_index =
-        faiss::index_factory(dim, index_type.str().c_str(), GetMetricType(config[Metric::TYPE].get<std::string>()));
+    faiss::MetricType metric_type = GetMetricType(config[Metric::TYPE].get<std::string>());
+    auto build_index = faiss::index_factory(dim, index_type.str().c_str(), metric_type);
 
     auto gpu_res = FaissGpuResourceMgr::GetInstance().GetRes(gpu_id_);
     if (gpu_res != nullptr) {

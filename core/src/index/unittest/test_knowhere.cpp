@@ -13,8 +13,8 @@
 #include "wrapper/KnowhereResource.h"
 #include "wrapper/utils.h"
 
-#include <fiu-local.h>
 #include <fiu-control.h>
+#include <fiu-local.h>
 #include <gtest/gtest.h>
 
 TEST_F(KnowhereTest, KNOWHERE_RESOURCE_TEST) {

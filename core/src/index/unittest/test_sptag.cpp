@@ -14,9 +14,9 @@
 #include <sstream>
 
 #include "knowhere/common/Exception.h"
+#include "knowhere/index/vector_index/IndexSPTAG.h"
 #include "knowhere/index/vector_index/adapter/SptagAdapter.h"
 #include "knowhere/index/vector_index/adapter/VectorAdapter.h"
-#include "knowhere/index/vector_index/IndexSPTAG.h"
 
 #include "unittest/utils.h"
 
@@ -90,7 +90,7 @@ TEST_P(SPTAGTest, sptag_serialize) {
     assert(!xb.empty());
 
     index_->Train(base_dataset, conf);
-    //index_->Add(base_dataset, conf);
+    // index_->Add(base_dataset, conf);
     auto binaryset = index_->Serialize();
     auto new_index = std::make_shared<milvus::knowhere::CPUSPTAGRNG>(IndexType);
     new_index->Load(binaryset);

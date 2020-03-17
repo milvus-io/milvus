@@ -11,8 +11,10 @@
 
 #pragma once
 
-#include <memory>
 #include <faiss/utils/ConcurrentBitset.h>
+#include <memory>
+#include <utility>
+#include <vector>
 
 #include "knowhere/common/Dataset.h"
 #include "knowhere/common/Typedef.h"

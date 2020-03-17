@@ -14,13 +14,14 @@
 #include <cstring>
 #include <iostream>
 #include <stack>
+#include <string>
 #include <utility>
 
-#include "NSG.h"
-#include "NSGHelper.h"
 #include "knowhere/common/Exception.h"
 #include "knowhere/common/Log.h"
 #include "knowhere/common/Timer.h"
+#include "knowhere/index/vector_index/impl/nsg/NSG.h"
+#include "knowhere/index/vector_index/impl/nsg/NSGHelper.h"
 
 namespace milvus {
 namespace knowhere {

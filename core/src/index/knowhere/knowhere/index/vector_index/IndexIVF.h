@@ -70,7 +70,7 @@ class IVF : public VecIndex, public FaissBaseIndex {
 
     virtual void
     GenGraph(const float* data, const int64_t k, GraphType& graph, const Config& config);
-    
+
     DatasetPtr
     GetVectorById(const DatasetPtr& dataset, const Config& config) override;
 

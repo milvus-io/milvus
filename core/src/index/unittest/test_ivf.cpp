@@ -22,13 +22,13 @@
 
 #include "knowhere/common/Exception.h"
 #include "knowhere/common/Timer.h"
-#include "knowhere/index/vector_index/adapter/VectorAdapter.h"
-#include "knowhere/index/vector_index/helpers/Cloner.h"
-#include "knowhere/index/vector_index/helpers/FaissGpuResourceMgr.h"
 #include "knowhere/index/vector_index/IndexIVF.h"
 #include "knowhere/index/vector_index/IndexIVFPQ.h"
 #include "knowhere/index/vector_index/IndexIVFSQ.h"
 #include "knowhere/index/vector_index/IndexType.h"
+#include "knowhere/index/vector_index/adapter/VectorAdapter.h"
+#include "knowhere/index/vector_index/helpers/Cloner.h"
+#include "knowhere/index/vector_index/helpers/FaissGpuResourceMgr.h"
 
 #ifdef MILVUS_GPU_VERSION
 #include "knowhere/index/vector_index/gpu/IndexGPUIVF.h"
@@ -44,7 +44,8 @@ using ::testing::Combine;
 using ::testing::TestWithParam;
 using ::testing::Values;
 
-class IVFTest : public DataGen, public TestWithParam<::std::tuple<milvus::knowhere::IndexType, milvus::knowhere::IndexMode>> {
+class IVFTest : public DataGen,
+                public TestWithParam<::std::tuple<milvus::knowhere::IndexType, milvus::knowhere::IndexMode>> {
  protected:
     void
     SetUp() override {
@@ -76,19 +77,20 @@ class IVFTest : public DataGen, public TestWithParam<::std::tuple<milvus::knowhe
     milvus::knowhere::IVFPtr index_ = nullptr;
 };
 
-INSTANTIATE_TEST_CASE_P(IVFParameters, IVFTest,
-                        Values(
+INSTANTIATE_TEST_CASE_P(
+    IVFParameters, IVFTest,
+    Values(
 #ifdef MILVUS_GPU_VERSION
-                            std::make_tuple(milvus::knowhere::IndexType::INDEX_FAISS_IVFFLAT, milvus::knowhere::IndexMode::MODE_GPU),
-                            std::make_tuple(milvus::knowhere::IndexType::INDEX_FAISS_IVFPQ, milvus::knowhere::IndexMode::MODE_GPU),
-                            std::make_tuple(milvus::knowhere::IndexType::INDEX_FAISS_IVFSQ8, milvus::knowhere::IndexMode::MODE_GPU),
+        std::make_tuple(milvus::knowhere::IndexType::INDEX_FAISS_IVFFLAT, milvus::knowhere::IndexMode::MODE_GPU),
+        std::make_tuple(milvus::knowhere::IndexType::INDEX_FAISS_IVFPQ, milvus::knowhere::IndexMode::MODE_GPU),
+        std::make_tuple(milvus::knowhere::IndexType::INDEX_FAISS_IVFSQ8, milvus::knowhere::IndexMode::MODE_GPU),
 #ifdef CUSTOMIZATION
-                            std::make_tuple(milvus::knowhere::IndexType::INDEX_FAISS_IVFSQ8H, milvus::knowhere::IndexMode::MODE_GPU),
+        std::make_tuple(milvus::knowhere::IndexType::INDEX_FAISS_IVFSQ8H, milvus::knowhere::IndexMode::MODE_GPU),
 #endif
 #endif
-                            std::make_tuple(milvus::knowhere::IndexType::INDEX_FAISS_IVFFLAT, milvus::knowhere::IndexMode::MODE_CPU),
-                            std::make_tuple(milvus::knowhere::IndexType::INDEX_FAISS_IVFPQ, milvus::knowhere::IndexMode::MODE_CPU),
-                            std::make_tuple(milvus::knowhere::IndexType::INDEX_FAISS_IVFSQ8, milvus::knowhere::IndexMode::MODE_CPU)));
+        std::make_tuple(milvus::knowhere::IndexType::INDEX_FAISS_IVFFLAT, milvus::knowhere::IndexMode::MODE_CPU),
+        std::make_tuple(milvus::knowhere::IndexType::INDEX_FAISS_IVFPQ, milvus::knowhere::IndexMode::MODE_CPU),
+        std::make_tuple(milvus::knowhere::IndexType::INDEX_FAISS_IVFSQ8, milvus::knowhere::IndexMode::MODE_CPU)));
 
 TEST_P(IVFTest, ivf_basic) {
     assert(!xb.empty());
@@ -228,12 +230,14 @@ TEST_P(IVFTest, clone_test) {
                 auto clone_index = milvus::knowhere::cloner::CopyGpuToCpu(index_, milvus::knowhere::Config());
                 auto clone_result = clone_index->Query(query_dataset, conf_);
                 AssertEqual(result, clone_result);
-                std::cout << "clone G <=> C [" << milvus::knowhere::IndexTypeToStr(index_type_) << "] success" << std::endl;
+                std::cout << "clone G <=> C [" << milvus::knowhere::IndexTypeToStr(index_type_) << "] success"
+                          << std::endl;
             });
         } else {
             EXPECT_THROW(
                 {
-                    std::cout << "clone G <=> C [" << milvus::knowhere::IndexTypeToStr(index_type_) << "] failed" << std::endl;
+                    std::cout << "clone G <=> C [" << milvus::knowhere::IndexTypeToStr(index_type_) << "] failed"
+                              << std::endl;
                     auto clone_index = milvus::knowhere::cloner::CopyGpuToCpu(index_, milvus::knowhere::Config());
                 },
                 milvus::knowhere::KnowhereException);
@@ -247,7 +251,8 @@ TEST_P(IVFTest, clone_test) {
                 auto clone_index = milvus::knowhere::cloner::CopyCpuToGpu(index_, DEVICEID, milvus::knowhere::Config());
                 auto clone_result = clone_index->Query(query_dataset, conf_);
                 AssertEqual(result, clone_result);
-                std::cout << "clone C <=> G [" << milvus::knowhere::IndexTypeToStr(index_type_) << "] success" << std::endl;
+                std::cout << "clone C <=> G [" << milvus::knowhere::IndexTypeToStr(index_type_) << "] success"
+                          << std::endl;
             });
             EXPECT_ANY_THROW(milvus::knowhere::cloner::CopyCpuToGpu(index_, -1, milvus::knowhere::Config()));
         }

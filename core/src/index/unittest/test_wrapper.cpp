@@ -45,13 +45,11 @@ class KnowhereWrapperTest
         std::tie(index_type, generator_type, dim, nb, nq, k) = GetParam();
         GenData(dim, nb, nq, xb, xq, ids, k, gt_ids, gt_dis);
 
-        knowhere::Config tempconf{
-            {knowhere::Metric::TYPE, knowhere::Metric::L2},
-            {knowhere::meta::ROWS, nb},
-            {knowhere::meta::DIM, dim},
-            {knowhere::meta::TOPK, k},
-            {knowhere::meta::DEVICEID, DEVICEID}
-        };
+        knowhere::Config tempconf{{knowhere::Metric::TYPE, knowhere::Metric::L2},
+                                  {knowhere::meta::ROWS, nb},
+                                  {knowhere::meta::DIM, dim},
+                                  {knowhere::meta::TOPK, k},
+                                  {knowhere::meta::DEVICEID, DEVICEID}};
 
         index_ = GetVecIndexFactory(index_type);
         conf = ParamGenerator::GetInstance().GenBuild(index_type, tempconf);

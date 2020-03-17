@@ -21,6 +21,7 @@
 #include <faiss/gpu/GpuCloner.h>
 #endif
 
+#include <string>
 #include <vector>
 
 #include "knowhere/common/Exception.h"

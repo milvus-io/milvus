@@ -58,7 +58,8 @@ class IDMAP : public VecIndex, public FaissBaseIndex {
     Dim() override;
 
     virtual void
-    Seal() {}
+    Seal() {
+    }
 
     VecIndexPtr
     CopyCpuToGpu(const int64_t, const Config&);

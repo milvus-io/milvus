@@ -11,7 +11,7 @@
 
 #include <cstring>
 
-#include "NSGIO.h"
+#include "knowhere/index/vector_index/impl/nsg/NSGIO.h"
 
 namespace milvus {
 namespace knowhere {

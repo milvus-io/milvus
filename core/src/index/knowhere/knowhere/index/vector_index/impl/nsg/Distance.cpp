@@ -11,7 +11,7 @@
 
 #include <immintrin.h>
 
-#include "Distance.h"
+#include "knowhere/index/vector_index/impl/nsg/Distance.h"
 
 namespace milvus {
 namespace knowhere {

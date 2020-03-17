@@ -18,6 +18,7 @@
 #include <memory>
 
 #include "config/Config.h"
+#include "index/archive/VecIndex.h"
 #include "knowhere/common/Exception.h"
 #include "knowhere/index/vector_index/VecIndex.h"
 #include "knowhere/index/vector_index/VecIndexFactory.h"

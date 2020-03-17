@@ -16,6 +16,7 @@
 #include <faiss/gpu/GpuIndexIVFFlat.h>
 #include <faiss/index_io.h>
 #include <fiu-local.h>
+#include <string>
 
 #include "knowhere/common/Exception.h"
 #include "knowhere/index/vector_index/adapter/VectorAdapter.h"
@@ -37,8 +38,9 @@ GPUIVF::Train(const DatasetPtr& dataset_ptr, const Config& config) {
         ResScope rs(gpu_res, gpu_id_, true);
         faiss::gpu::GpuIndexIVFFlatConfig idx_config;
         idx_config.device = gpu_id_;
-        faiss::gpu::GpuIndexIVFFlat device_index(gpu_res->faiss_res.get(), dim, config[IndexParams::nlist],
-                                                 GetMetricType(config[Metric::TYPE].get<std::string>()), idx_config);
+        int32_t nlist = config[IndexParams::nlist];
+        faiss::MetricType metric_type = GetMetricType(config[Metric::TYPE].get<std::string>());
+        faiss::gpu::GpuIndexIVFFlat device_index(gpu_res->faiss_res.get(), dim, nlist, metric_type, idx_config);
         device_index.train(rows, (float*)p_data);
 
         std::shared_ptr<faiss::Index> host_index = nullptr;

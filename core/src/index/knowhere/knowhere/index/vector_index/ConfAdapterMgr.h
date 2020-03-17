@@ -26,7 +26,7 @@ class AdapterMgr {
     template <typename T>
     struct register_t {
         explicit register_t(const IndexType type) {
-            AdapterMgr::GetInstance().table_[type] = ( [] { return std::make_shared<T>(); });
+            AdapterMgr::GetInstance().table_[type] = ([] { return std::make_shared<T>(); });
         }
     };
 

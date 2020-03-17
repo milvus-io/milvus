@@ -23,9 +23,9 @@ namespace knowhere {
     auto rows = dataset_ptr->Get<int64_t>(meta::ROWS); \
     auto p_data = dataset_ptr->Get<const void*>(meta::TENSOR);
 
-#define GETTENSORWITHIDS(dataset_ptr)                   \
-    auto dim = dataset_ptr->Get<int64_t>(meta::DIM);   \
-    auto rows = dataset_ptr->Get<int64_t>(meta::ROWS); \
+#define GETTENSORWITHIDS(dataset_ptr)                          \
+    auto dim = dataset_ptr->Get<int64_t>(meta::DIM);           \
+    auto rows = dataset_ptr->Get<int64_t>(meta::ROWS);         \
     auto p_data = dataset_ptr->Get<const void*>(meta::TENSOR); \
     auto p_ids = dataset_ptr->Get<const int64_t*>(meta::IDS);
 

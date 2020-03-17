@@ -9,8 +9,8 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
-#include "SptagAdapter.h"
-#include "VectorAdapter.h"
+#include "knowhere/index/vector_index/adapter/SptagAdapter.h"
+#include "knowhere/index/vector_index/adapter/VectorAdapter.h"
 
 namespace milvus {
 namespace knowhere {
@@ -47,7 +47,7 @@ ConvertToQueryResult(const DatasetPtr& dataset_ptr, const Config& config) {
     std::vector<SPTAG::QueryResult> query_results(rows,
                                                   SPTAG::QueryResult(nullptr, config[meta::TOPK].get<int64_t>(), true));
     for (auto i = 0; i < rows; ++i) {
-        query_results[i].SetTarget(&((float*)p_data)[i * dim]);
+        query_results[i].SetTarget(p_data + i * dim);
     }
 
     return query_results;

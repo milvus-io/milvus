@@ -45,9 +45,9 @@ class IDMAPTest : public DataGen, public TestGpuIndexBase {
 TEST_F(IDMAPTest, idmap_basic) {
     ASSERT_TRUE(!xb.empty());
 
-    milvus::knowhere::Config conf{
-        {milvus::knowhere::meta::DIM, dim}, {milvus::knowhere::meta::TOPK, k},
-        {milvus::knowhere::Metric::TYPE, milvus::knowhere::Metric::L2}};
+    milvus::knowhere::Config conf{{milvus::knowhere::meta::DIM, dim},
+                                  {milvus::knowhere::meta::TOPK, k},
+                                  {milvus::knowhere::Metric::TYPE, milvus::knowhere::Metric::L2}};
 
     // null faiss index
     {
@@ -106,8 +106,9 @@ TEST_F(IDMAPTest, idmap_serialize) {
         reader(ret, bin->size);
     };
 
-    milvus::knowhere::Config conf{
-        {milvus::knowhere::meta::DIM, dim}, {milvus::knowhere::meta::TOPK, k}, {milvus::knowhere::Metric::TYPE, milvus::knowhere::Metric::L2}};
+    milvus::knowhere::Config conf{{milvus::knowhere::meta::DIM, dim},
+                                  {milvus::knowhere::meta::TOPK, k},
+                                  {milvus::knowhere::Metric::TYPE, milvus::knowhere::Metric::L2}};
 
     {
         // serialize index
@@ -143,8 +144,9 @@ TEST_F(IDMAPTest, idmap_serialize) {
 TEST_F(IDMAPTest, copy_test) {
     ASSERT_TRUE(!xb.empty());
 
-    milvus::knowhere::Config conf{
-        {milvus::knowhere::meta::DIM, dim}, {milvus::knowhere::meta::TOPK, k}, {milvus::knowhere::Metric::TYPE, milvus::knowhere::Metric::L2}};
+    milvus::knowhere::Config conf{{milvus::knowhere::meta::DIM, dim},
+                                  {milvus::knowhere::meta::TOPK, k},
+                                  {milvus::knowhere::Metric::TYPE, milvus::knowhere::Metric::L2}};
 
     index_->Train(base_dataset, conf);
     index_->Add(base_dataset, conf);

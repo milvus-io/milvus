@@ -27,8 +27,7 @@ using ::testing::Combine;
 using ::testing::TestWithParam;
 using ::testing::Values;
 
-class VecIndexTest : public DataGen,
-public Tuple<milvus::knowhere::IndexType, milvus::knowhere::IndexMode, ParameterType>> {
+class VecIndexTest : public DataGen, public Tuple<milvus::knowhere::IndexType, milvus::knowhere::IndexMode>> {
  protected:
     void
     SetUp() override {
@@ -60,22 +59,20 @@ INSTANTIATE_TEST_CASE_P(
     IVFParameters, IVFTest,
     Values(
 #ifdef MILVUS_GPU_VERSION
-        std::make_tuple(milvus::knowhere::IndexType::INDEX_FAISS_IVFFLAT, milvus::knowhere::IndexMode::MODE_GPU, ParameterType::ivf),
-        std::make_tuple(milvus::knowhere::IndexType::INDEX_FAISS_IVFPQ, milvus::knowhere::IndexMode::MODE_GPU, ParameterType::ivfpq),
-        std::make_tuple(milvus::knowhere::IndexType::INDEX_FAISS_IVFSQ8, milvus::knowhere::IndexMode::MODE_GPU, ParameterType::ivfsq),
+        std::make_tuple(milvus::knowhere::IndexType::INDEX_FAISS_IVFFLAT, milvus::knowhere::IndexMode::MODE_GPU),
+        std::make_tuple(milvus::knowhere::IndexType::INDEX_FAISS_IVFPQ, milvus::knowhere::IndexMode::MODE_GPU),
+        std::make_tuple(milvus::knowhere::IndexType::INDEX_FAISS_IVFSQ8, milvus::knowhere::IndexMode::MODE_GPU),
 #ifdef CUSTOMIZATION
-        std::make_tuple(milvus::knowhere::IndexType::INDEX_FAISS_IVFSQ8H, milvus::knowhere::IndexMode::MODE_GPU, ParameterType::ivfsq),
+        std::make_tuple(milvus::knowhere::IndexType::INDEX_FAISS_IVFSQ8H, milvus::knowhere::IndexMode::MODE_GPU),
 #endif
 #endif
-        std::make_tuple(milvus::knowhere::IndexType::INDEX_FAISS_IVFFLAT, milvus::knowhere::IndexMode::MODE_CPU, ParameterType::ivf),
-        std::make_tuple(milvus::knowhere::IndexType::INDEX_FAISS_IVFPQ, milvus::knowhere::IndexMode::MODE_CPU, ParameterType::ivfpq),
-        std::make_tuple(milvus::knowhere::IndexType::INDEX_FAISS_IVFSQ8, milvus::knowhere::IndexMode::MODE_CPU, ParameterType::ivfsq)
-        // std::make_tuple(milvus::knowhere::IndexType::INDEX_NSG, milvus::knowhere::IndexMode::MODE_CPU, ParameterType::ivfsq),
-        // std::make_tuple(milvus::knowhere::IndexType::INDEX_HNSW, milvus::knowhere::IndexMode::MODE_CPU, ParameterType::ivfsq),
-        // std::make_tuple(milvus::knowhere::IndexType::INDEX_SPTAG_KDT_RNT, milvus::knowhere::IndexMode::MODE_CPU,
-        // ParameterType::ivfsq), std::make_tuple(milvus::knowhere::IndexType::INDEX_SPTAG_BKT_RNT,
-        // milvus::knowhere::IndexMode::MODE_CPU, ParameterType::ivfsq),
-        ));
+        std::make_tuple(milvus::knowhere::IndexType::INDEX_FAISS_IVFFLAT, milvus::knowhere::IndexMode::MODE_CPU),
+        std::make_tuple(milvus::knowhere::IndexType::INDEX_FAISS_IVFPQ, milvus::knowhere::IndexMode::MODE_CPU),
+        std::make_tuple(milvus::knowhere::IndexType::INDEX_FAISS_IVFSQ8, milvus::knowhere::IndexMode::MODE_CPU)
+            std::make_tuple(milvus::knowhere::IndexType::INDEX_NSG, milvus::knowhere::IndexMode::MODE_CPU),
+        std::make_tuple(milvus::knowhere::IndexType::INDEX_HNSW, milvus::knowhere::IndexMode::MODE_CPU),
+        std::make_tuple(milvus::knowhere::IndexType::INDEX_SPTAG_KDT_RNT, milvus::knowhere::IndexMode::MODE_CPU),
+        std::make_tuple(milvus::knowhere::IndexType::INDEX_SPTAG_BKT_RNT, milvus::knowhere::IndexMode::MODE_CPU)));
 
 TEST_P(VecIndexTest, basic) {
     assert(!xb.empty());

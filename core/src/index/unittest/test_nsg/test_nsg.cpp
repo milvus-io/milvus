@@ -48,13 +48,13 @@ class NSGInterfaceTest : public DataGen, public ::testing::Test {
         index_ = std::make_shared<milvus::knowhere::NSG>();
 
         train_conf = milvus::knowhere::Config{{milvus::knowhere::meta::DIM, 256},
-                                      {milvus::knowhere::IndexParams::nlist, 163},
-                                      {milvus::knowhere::IndexParams::nprobe, 8},
-                                      {milvus::knowhere::IndexParams::knng, 20},
-                                      {milvus::knowhere::IndexParams::search_length, 40},
-                                      {milvus::knowhere::IndexParams::out_degree, 30},
-                                      {milvus::knowhere::IndexParams::candidate, 100},
-                                      {milvus::knowhere::Metric::TYPE, milvus::knowhere::Metric::L2}};
+                                              {milvus::knowhere::IndexParams::nlist, 163},
+                                              {milvus::knowhere::IndexParams::nprobe, 8},
+                                              {milvus::knowhere::IndexParams::knng, 20},
+                                              {milvus::knowhere::IndexParams::search_length, 40},
+                                              {milvus::knowhere::IndexParams::out_degree, 30},
+                                              {milvus::knowhere::IndexParams::candidate, 100},
+                                              {milvus::knowhere::Metric::TYPE, milvus::knowhere::Metric::L2}};
 
         search_conf = milvus::knowhere::Config{
             {milvus::knowhere::meta::TOPK, k},

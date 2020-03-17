@@ -23,15 +23,16 @@
 #include <faiss/gpu/GpuCloner.h>
 #endif
 
-#include <chrono>
 #include <fiu-local.h>
+#include <chrono>
 #include <memory>
+#include <string>
 #include <utility>
 #include <vector>
 
-#include "knowhere/index/vector_index/IndexIVF.h"
 #include "knowhere/common/Exception.h"
 #include "knowhere/common/Log.h"
+#include "knowhere/index/vector_index/IndexIVF.h"
 #include "knowhere/index/vector_index/adapter/VectorAdapter.h"
 #include "knowhere/index/vector_index/helpers/IndexParameter.h"
 #ifdef MILVUS_GPU_VERSION

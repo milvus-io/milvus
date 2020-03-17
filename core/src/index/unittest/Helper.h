@@ -12,11 +12,11 @@
 #include <memory>
 #include <string>
 
-#include "knowhere/index/vector_index/helpers/IndexParameter.h"
 #include "knowhere/index/vector_index/IndexIVF.h"
 #include "knowhere/index/vector_index/IndexIVFPQ.h"
 #include "knowhere/index/vector_index/IndexIVFSQ.h"
 #include "knowhere/index/vector_index/IndexType.h"
+#include "knowhere/index/vector_index/helpers/IndexParameter.h"
 
 #ifdef MILVUS_GPU_VERSION
 #include "knowhere/index/vector_index/gpu/IndexGPUIVF.h"
@@ -51,7 +51,7 @@ IndexFactory(const milvus::knowhere::IndexType type, const milvus::knowhere::Ind
                 std::cout << "IVFSQ8H does not support MODE_CPU" << std::endl;
             }
             default:
-                std::cout << "Invalid IndexType " << (int) type << std::endl;
+                std::cout << "Invalid IndexType " << (int)type << std::endl;
         }
 #ifdef MILVUS_GPU_VERSION
     } else {
@@ -71,7 +71,7 @@ IndexFactory(const milvus::knowhere::IndexType type, const milvus::knowhere::Ind
             }
 #endif
             default:
-                std::cout << "Invalid IndexType " << (int) type << std::endl;
+                std::cout << "Invalid IndexType " << (int)type << std::endl;
         }
 #endif
     }
@@ -90,35 +90,35 @@ class ParamGenerator {
         switch (type) {
             case milvus::knowhere::IndexType::INDEX_FAISS_IVFFLAT:
                 return milvus::knowhere::Config{
-                            {milvus::knowhere::meta::DIM, DIM},
-                            {milvus::knowhere::meta::TOPK, K},
-                            {milvus::knowhere::IndexParams::nlist, 100},
-                            {milvus::knowhere::IndexParams::nprobe, 4},
-                            {milvus::knowhere::Metric::TYPE, milvus::knowhere::Metric::L2},
-                            {milvus::knowhere::meta::DEVICEID, DEVICEID},
-                            };
+                    {milvus::knowhere::meta::DIM, DIM},
+                    {milvus::knowhere::meta::TOPK, K},
+                    {milvus::knowhere::IndexParams::nlist, 100},
+                    {milvus::knowhere::IndexParams::nprobe, 4},
+                    {milvus::knowhere::Metric::TYPE, milvus::knowhere::Metric::L2},
+                    {milvus::knowhere::meta::DEVICEID, DEVICEID},
+                };
             case milvus::knowhere::IndexType::INDEX_FAISS_IVFPQ:
                 return milvus::knowhere::Config{
-                            {milvus::knowhere::meta::DIM, DIM},
-                            {milvus::knowhere::meta::TOPK, K},
-                            {milvus::knowhere::IndexParams::nlist, 100},
-                            {milvus::knowhere::IndexParams::nprobe, 4},
-                            {milvus::knowhere::IndexParams::m, 4},
-                            {milvus::knowhere::IndexParams::nbits, 8},
-                            {milvus::knowhere::Metric::TYPE, milvus::knowhere::Metric::L2},
-                            {milvus::knowhere::meta::DEVICEID, DEVICEID},
-                            };
+                    {milvus::knowhere::meta::DIM, DIM},
+                    {milvus::knowhere::meta::TOPK, K},
+                    {milvus::knowhere::IndexParams::nlist, 100},
+                    {milvus::knowhere::IndexParams::nprobe, 4},
+                    {milvus::knowhere::IndexParams::m, 4},
+                    {milvus::knowhere::IndexParams::nbits, 8},
+                    {milvus::knowhere::Metric::TYPE, milvus::knowhere::Metric::L2},
+                    {milvus::knowhere::meta::DEVICEID, DEVICEID},
+                };
             case milvus::knowhere::IndexType::INDEX_FAISS_IVFSQ8:
             case milvus::knowhere::IndexType::INDEX_FAISS_IVFSQ8H:
                 return milvus::knowhere::Config{
-                            {milvus::knowhere::meta::DIM, DIM},
-                            {milvus::knowhere::meta::TOPK, K},
-                            {milvus::knowhere::IndexParams::nlist, 100},
-                            {milvus::knowhere::IndexParams::nprobe, 4},
-                            {milvus::knowhere::IndexParams::nbits, 8},
-                            {milvus::knowhere::Metric::TYPE, milvus::knowhere::Metric::L2},
-                            {milvus::knowhere::meta::DEVICEID, DEVICEID},
-                            };
+                    {milvus::knowhere::meta::DIM, DIM},
+                    {milvus::knowhere::meta::TOPK, K},
+                    {milvus::knowhere::IndexParams::nlist, 100},
+                    {milvus::knowhere::IndexParams::nprobe, 4},
+                    {milvus::knowhere::IndexParams::nbits, 8},
+                    {milvus::knowhere::Metric::TYPE, milvus::knowhere::Metric::L2},
+                    {milvus::knowhere::meta::DEVICEID, DEVICEID},
+                };
             default:
                 std::cout << "Invalid index type " << (int)type << std::endl;
         }

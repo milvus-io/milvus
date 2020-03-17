@@ -13,6 +13,7 @@
 
 #include <cstddef>
 #include <mutex>
+#include <string>
 #include <vector>
 
 #include <boost/dynamic_bitset.hpp>

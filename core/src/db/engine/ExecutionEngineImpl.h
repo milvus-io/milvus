@@ -29,8 +29,8 @@ class ExecutionEngineImpl : public ExecutionEngine {
     ExecutionEngineImpl(uint16_t dimension, const std::string& location, EngineType index_type, MetricType metric_type,
                         const milvus::json& index_params);
 
-    ExecutionEngineImpl(knowhere::VecIndexPtr index, const std::string& location, EngineType index_type, MetricType metric_type,
-                        const milvus::json& index_params);
+    ExecutionEngineImpl(knowhere::VecIndexPtr index, const std::string& location, EngineType index_type,
+                        MetricType metric_type, const milvus::json& index_params);
 
     Status
     AddWithIds(int64_t n, const float* xdata, const int64_t* xids) override;

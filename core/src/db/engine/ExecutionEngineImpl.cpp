@@ -142,8 +142,9 @@ ExecutionEngineImpl::ExecutionEngineImpl(uint16_t dimension, const std::string& 
     }
 }
 
-ExecutionEngineImpl::ExecutionEngineImpl(knowhere::VecIndexPtr index, const std::string& location, EngineType index_type,
-                                         MetricType metric_type, const milvus::json& index_params)
+ExecutionEngineImpl::ExecutionEngineImpl(knowhere::VecIndexPtr index, const std::string& location,
+                                         EngineType index_type, MetricType metric_type,
+                                         const milvus::json& index_params)
     : index_(std::move(index)),
       location_(location),
       index_type_(index_type),
@@ -550,7 +551,8 @@ ExecutionEngineImpl::CopyToGpu(uint64_t device_id, bool hybrid) {
 #endif
 
 #ifdef MILVUS_GPU_VERSION
-    auto index = std::static_pointer_cast<knowhere::VecIndex>(cache::GpuCacheMgr::GetInstance(device_id)->GetIndex(location_));
+    auto data_obj_ptr = cache::GpuCacheMgr::GetInstance(device_id)->GetIndex(location_);
+    auto index = std::static_pointer_cast<knowhere::VecIndex>(data_obj_ptr);
     bool already_in_cache = (index != nullptr);
     if (already_in_cache) {
         index_ = index;
@@ -651,12 +653,14 @@ ExecutionEngineImpl::BuildIndex(const std::string& location, EngineType engine_t
     std::vector<segment::doc_id_t> uids;
     faiss::ConcurrentBitsetPtr blacklist;
     if (from_index) {
-        auto dataset = knowhere::GenDatasetWithIds(Count(), Dimension(), from_index->GetRawVectors(), from_index->GetRawIds());
+        auto dataset =
+            knowhere::GenDatasetWithIds(Count(), Dimension(), from_index->GetRawVectors(), from_index->GetRawIds());
         to_index->BuildAll(dataset, conf);
         uids = from_index->GetUids();
         from_index->GetBlacklist(blacklist);
     } else if (bin_from_index) {
-        auto dataset = knowhere::GenDatasetWithIds(Count(), Dimension(), bin_from_index->GetRawVectors(), bin_from_index->GetRawIds());
+        auto dataset = knowhere::GenDatasetWithIds(Count(), Dimension(), bin_from_index->GetRawVectors(),
+                                                   bin_from_index->GetRawIds());
         to_index->BuildAll(dataset, conf);
         uids = bin_from_index->GetUids();
         bin_from_index->GetBlacklist(blacklist);
@@ -673,8 +677,8 @@ ExecutionEngineImpl::BuildIndex(const std::string& location, EngineType engine_t
 }
 
 void
-MapAndCopyResult(const knowhere::DatasetPtr& dataset, const std::vector<milvus::segment::doc_id_t>& uids,
-                 int64_t nq, int64_t k, float* distances, int64_t* labels) {
+MapAndCopyResult(const knowhere::DatasetPtr& dataset, const std::vector<milvus::segment::doc_id_t>& uids, int64_t nq,
+                 int64_t k, float* distances, int64_t* labels) {
     int64_t* res_ids = dataset->Get<int64_t*>(knowhere::meta::IDS);
     float* res_dist = dataset->Get<float*>(knowhere::meta::DISTANCE);
 
