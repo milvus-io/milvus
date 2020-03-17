@@ -77,6 +77,34 @@ class TestCollection:
         status = connect.create_collection(param)
         assert status.OK()
 
+    def test_create_collection_substructure(self, connect):
+        '''
+        target: test create normal collection
+        method: create collection with corrent params
+        expected: create status return ok
+        '''
+        collection_name = gen_unique_str("test_collection")
+        param = {'collection_name': collection_name,
+                 'dimension': dim,
+                 'index_file_size': index_file_size,
+                 'metric_type': MetricType.SUBSTRUCTURE}
+        status = connect.create_collection(param)
+        assert status.OK()
+
+    def test_create_collection_superstructure(self, connect):
+        '''
+        target: test create normal collection
+        method: create collection with corrent params
+        expected: create status return ok
+        '''
+        collection_name = gen_unique_str("test_collection")
+        param = {'collection_name': collection_name,
+                 'dimension': dim,
+                 'index_file_size': index_file_size,
+                 'metric_type': MetricType.SUPERSTRUCTURE}
+        status = connect.create_collection(param)
+        assert status.OK()
+
     @pytest.mark.level(2)
     def test_create_collection_without_connection(self, dis_connect):
         '''
@@ -252,6 +280,38 @@ class TestCollection:
         status, res = connect.describe_collection(collection_name)
         assert res.collection_name == collection_name
         assert res.metric_type == MetricType.HAMMING
+
+    def test_collection_describe_collection_name_substructure(self, connect):
+        '''
+        target: test describe collection created with correct params
+        method: create collection, assert the value returned by describe method
+        expected: collection_name equals with the collection name created
+        '''
+        collection_name = gen_unique_str("test_collection")
+        param = {'collection_name': collection_name,
+                 'dimension': dim,
+                 'index_file_size': index_file_size,
+                 'metric_type': MetricType.SUBSTRUCTURE}
+        connect.create_collection(param)
+        status, res = connect.describe_collection(collection_name)
+        assert res.collection_name == collection_name
+        assert res.metric_type == MetricType.SUBSTRUCTURE
+
+    def test_collection_describe_collection_name_superstructure(self, connect):
+        '''
+        target: test describe collection created with correct params
+        method: create collection, assert the value returned by describe method
+        expected: collection_name equals with the collection name created
+        '''
+        collection_name = gen_unique_str("test_collection")
+        param = {'collection_name': collection_name,
+                 'dimension': dim,
+                 'index_file_size': index_file_size,
+                 'metric_type': MetricType.SUPERSTRUCTURE}
+        connect.create_collection(param)
+        status, res = connect.describe_collection(collection_name)
+        assert res.collection_name == collection_name
+        assert res.metric_type == MetricType.SUPERSTRUCTURE
 
     # TODO: enable
     @pytest.mark.level(2)
@@ -658,6 +718,38 @@ class TestCollection:
         assert status.OK()
         assert collection_name in result
 
+    def test_show_collections_substructure(self, connect):
+        '''
+        target: test show collections is correct or not, if collection created
+        method: create collection, assert the value returned by show_collections method is equal to 0
+        expected: collection_name in show collections
+        '''
+        collection_name = gen_unique_str("test_collection")
+        param = {'collection_name': collection_name,
+                 'dimension': dim,
+                 'index_file_size': index_file_size,
+                 'metric_type': MetricType.SUBSTRUCTURE}
+        connect.create_collection(param)
+        status, result = connect.show_collections()
+        assert status.OK()
+        assert collection_name in result
+
+    def test_show_collections_superstructure(self, connect):
+        '''
+        target: test show collections is correct or not, if collection created
+        method: create collection, assert the value returned by show_collections method is equal to 0
+        expected: collection_name in show collections
+        '''
+        collection_name = gen_unique_str("test_collection")
+        param = {'collection_name': collection_name,
+                 'dimension': dim,
+                 'index_file_size': index_file_size,
+                 'metric_type': MetricType.SUPERSTRUCTURE}
+        connect.create_collection(param)
+        status, result = connect.show_collections()
+        assert status.OK()
+        assert collection_name in result
+
     @pytest.mark.level(2)
     def test_show_collections_without_connection(self, dis_connect):
         '''
@@ -989,7 +1081,9 @@ class TestCollectionLogic(object):
 
     @pytest.mark.parametrize("logic_seq", gen_sequence())
     @pytest.mark.level(2)
-    def test_logic(self, connect, logic_seq):
+    def test_logic(self, connect, logic_seq, args):
+        if args["handler"] == "HTTP":
+            pytest.skip("Skip in http mode")
         if self.is_right(logic_seq):
             self.execute(logic_seq, connect)
         else:

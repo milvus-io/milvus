@@ -256,7 +256,8 @@ HNSWConfAdapter::CheckSearch(Config& oricfg, const IndexType type, const IndexMo
 bool
 BinIDMAPConfAdapter::CheckTrain(Config& oricfg, const IndexMode mode) {
     static std::vector<std::string> METRICS{knowhere::Metric::HAMMING, knowhere::Metric::JACCARD,
-                                            knowhere::Metric::TANIMOTO};
+                                            knowhere::Metric::TANIMOTO, knowhere::Metric::SUBSTRUCTURE,
+                                            knowhere::Metric::SUPERSTRUCTURE};
 
     CheckIntByRange(knowhere::meta::DIM, DEFAULT_MIN_DIM, DEFAULT_MAX_DIM);
     CheckStrByValues(knowhere::Metric::TYPE, METRICS);

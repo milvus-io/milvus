@@ -203,5 +203,48 @@ def tanimoto_collection(request, connect):
             connect.drop_collection(collection_name)
 
     request.addfinalizer(teardown)
+    return collection_name
 
+@pytest.fixture(scope="function")
+def substructure_collection(request, connect):
+    ori_collection_name = getattr(request.module, "collection_id", "test")
+    collection_name = gen_unique_str(ori_collection_name)
+    dim = getattr(request.module, "dim", "128")
+    param = {'collection_name': collection_name,
+             'dimension': dim,
+             'index_file_size': index_file_size,
+             'metric_type': MetricType.SUBSTRUCTURE}
+    status = connect.create_collection(param)
+    # logging.getLogger().info(status)
+    if not status.OK():
+        pytest.exit("collection can not be created, exit pytest ...")
+
+    def teardown():
+        status, collection_names = connect.show_collections()
+        for collection_name in collection_names:
+            connect.drop_collection(collection_name)
+
+    request.addfinalizer(teardown)
+    return collection_name
+
+@pytest.fixture(scope="function")
+def superstructure_collection(request, connect):
+    ori_collection_name = getattr(request.module, "collection_id", "test")
+    collection_name = gen_unique_str(ori_collection_name)
+    dim = getattr(request.module, "dim", "128")
+    param = {'collection_name': collection_name,
+             'dimension': dim,
+             'index_file_size': index_file_size,
+             'metric_type': MetricType.SUPERSTRUCTURE}
+    status = connect.create_collection(param)
+    # logging.getLogger().info(status)
+    if not status.OK():
+        pytest.exit("collection can not be created, exit pytest ...")
+
+    def teardown():
+        status, collection_names = connect.show_collections()
+        for collection_name in collection_names:
+            connect.drop_collection(collection_name)
+
+    request.addfinalizer(teardown)
     return collection_name

@@ -629,6 +629,8 @@ class TestAddBase:
             assert the value returned by count_collection method is equal to length of vectors
         expected: the count is equal to the length of vectors
         '''
+        if args["handler"] == "HTTP":
+            pytest.skip("Skip test in http mode")
         thread_num = 8
         threads = []
         collection = gen_unique_str()
@@ -643,7 +645,7 @@ class TestAddBase:
         vectors = gen_vectors(nb, dim)
         def add(thread_i):
             logging.getLogger().info("In thread-%d" % thread_i)
-            milvus = get_milvus()
+            milvus = get_milvus(args["handler"])
             milvus.connect(uri=uri)
             status, result = milvus.add_vectors(collection, records=vectors)
             assert status.OK()

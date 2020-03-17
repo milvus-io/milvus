@@ -22,6 +22,7 @@
 #include "db/engine/EngineFactory.h"
 #include "metrics/Metrics.h"
 #include "scheduler/job/BuildIndexJob.h"
+#include "utils/CommonUtil.h"
 #include "utils/Exception.h"
 #include "utils/Log.h"
 #include "utils/TimeRecorder.h"
@@ -95,7 +96,7 @@ XBuildIndexTask::Load(milvus::scheduler::LoadType type, uint8_t device_id) {
             return;
         }
 
-        size_t file_size = to_index_engine_->PhysicalSize();
+        size_t file_size = to_index_engine_->Size();
 
         std::string info = "Build index task load file id:" + std::to_string(file_->id_) + " " + type_str +
                            " file type:" + std::to_string(file_->file_type_) + " size:" + std::to_string(file_size) +
@@ -207,7 +208,7 @@ XBuildIndexTask::Execute() {
 
         // step 6: update meta
         table_file.file_type_ = engine::meta::TableFileSchema::INDEX;
-        table_file.file_size_ = index->PhysicalSize();
+        table_file.file_size_ = server::CommonUtil::GetFileSize(table_file.location_);
         table_file.row_count_ = file_->row_count_;  // index->Count();
 
         auto origin_file = *file_;
@@ -221,7 +222,7 @@ XBuildIndexTask::Execute() {
 
         fiu_do_on("XBuildIndexTask.Execute.update_table_file_fail", status = Status(SERVER_UNEXPECTED_ERROR, ""));
         if (status.ok()) {
-            ENGINE_LOG_DEBUG << "New index file " << table_file.file_id_ << " of size " << index->PhysicalSize()
+            ENGINE_LOG_DEBUG << "New index file " << table_file.file_id_ << " of size " << table_file.file_size_
                              << " bytes"
                              << " from file " << origin_file.file_id_;
             if (build_index_job->options().insert_cache_immediately_) {

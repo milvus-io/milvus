@@ -381,22 +381,23 @@ DBImpl::PreloadTable(const std::string& table_id) {
             return Status(DB_ERROR, "Invalid engine type");
         }
 
-        size += engine->PhysicalSize();
         fiu_do_on("DBImpl.PreloadTable.exceed_cache", size = available_size + 1);
-        if (size > available_size) {
-            ENGINE_LOG_DEBUG << "Pre-load cancelled since cache is almost full";
-            return Status(SERVER_CACHE_FULL, "Cache is full");
-        } else {
-            try {
-                fiu_do_on("DBImpl.PreloadTable.engine_throw_exception", throw std::exception());
-                std::string msg = "Pre-loaded file: " + file.file_id_ + " size: " + std::to_string(file.file_size_);
-                TimeRecorderAuto rc_1(msg);
-                engine->Load(true);
-            } catch (std::exception& ex) {
-                std::string msg = "Pre-load table encounter exception: " + std::string(ex.what());
-                ENGINE_LOG_ERROR << msg;
-                return Status(DB_ERROR, msg);
+
+        try {
+            fiu_do_on("DBImpl.PreloadTable.engine_throw_exception", throw std::exception());
+            std::string msg = "Pre-loaded file: " + file.file_id_ + " size: " + std::to_string(file.file_size_);
+            TimeRecorderAuto rc_1(msg);
+            engine->Load(true);
+
+            size += engine->Size();
+            if (size > available_size) {
+                ENGINE_LOG_DEBUG << "Pre-load cancelled since cache is almost full";
+                return Status(SERVER_CACHE_FULL, "Cache is full");
             }
+        } catch (std::exception& ex) {
+            std::string msg = "Pre-load table encounter exception: " + std::string(ex.what());
+            ENGINE_LOG_ERROR << msg;
+            return Status(DB_ERROR, msg);
         }
     }
 
@@ -687,7 +688,7 @@ DBImpl::Compact(const std::string& table_id) {
     OngoingFileChecker::GetInstance().MarkOngoingFiles(files_to_compact);
 
     Status compact_status;
-    for (meta::TableFilesSchema::iterator iter = files_to_compact.begin(); iter != files_to_compact.end();) {
+    for (auto iter = files_to_compact.begin(); iter != files_to_compact.end();) {
         meta::TableFileSchema file = *iter;
         iter = files_to_compact.erase(iter);
 
@@ -696,17 +697,15 @@ DBImpl::Compact(const std::string& table_id) {
         utils::GetParentPath(file.location_, segment_dir);
 
         segment::SegmentReader segment_reader(segment_dir);
-        segment::DeletedDocsPtr deleted_docs;
-        status = segment_reader.LoadDeletedDocs(deleted_docs);
+        size_t deleted_docs_size;
+        status = segment_reader.ReadDeletedDocsSize(deleted_docs_size);
         if (!status.ok()) {
-            std::string msg = "Failed to load deleted_docs from " + segment_dir;
-            ENGINE_LOG_ERROR << msg;
             OngoingFileChecker::GetInstance().UnmarkOngoingFile(file);
             continue;  // skip this file and try compact next one
         }
 
         meta::TableFilesSchema files_to_update;
-        if (deleted_docs->GetSize() != 0) {
+        if (deleted_docs_size != 0) {
             compact_status = CompactFile(table_id, file, files_to_update);
 
             if (!compact_status.ok()) {

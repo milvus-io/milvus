@@ -42,13 +42,10 @@ class ExecutionEngineImpl : public ExecutionEngine {
     Count() const override;
 
     size_t
-    Size() const override;
-
-    size_t
     Dimension() const override;
 
     size_t
-    PhysicalSize() const override;
+    Size() const override;
 
     Status
     Serialize() override;
@@ -64,12 +61,6 @@ class ExecutionEngineImpl : public ExecutionEngine {
 
     Status
     CopyToCpu() override;
-
-    //    ExecutionEnginePtr
-    //    Clone() override;
-
-    //    Status
-    //    Merge(const std::string& location) override;
 
     Status
     GetVectorByID(const int64_t& id, float* vector, bool hybrid) override;

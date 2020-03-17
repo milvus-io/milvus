@@ -104,7 +104,7 @@ CPUSPTAGRNG::Load(const BinarySet& binary_set) {
     index_blobs.push_back(SPTAG::ByteArray(deleteid->data.get(), deleteid->size, false));
 
     auto metadata1 = binary_set.GetByName("metadata1");
-    index_blobs.push_back(SPTAG::ByteArray(metadata1->data.get(), metadata1->size, false));
+    index_blobs.push_back(SPTAG::ByteArray(CopyBinary(metadata1), metadata1->size, true));
 
     auto metadata2 = binary_set.GetByName("metadata2");
     index_blobs.push_back(SPTAG::ByteArray(metadata2->data.get(), metadata2->size, false));

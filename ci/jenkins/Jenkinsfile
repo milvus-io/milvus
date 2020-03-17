@@ -13,6 +13,7 @@ pipeline {
 
     options {
         timestamps()
+        timeout(time: 3, unit: 'HOURS')
     }
 
     parameters{
@@ -64,22 +65,6 @@ pipeline {
 
                         stages {
                             stage('Run Build') {
-                                // when {
-                                //     allOf {
-                                //         anyOf {
-                                //             expression { isEmptyChangelog() == true }
-                                //             changeset 'ci/**'
-                                //             changeset 'core/**'
-                                //             changeset 'docker/**'
-                                //             changeset 'test/**'
-                                //         }
-                                //         not {
-                                //             anyOf {
-                                //                 changeset '**/*.md'
-                                //             }
-                                //         }
-                                //     }
-                                // }
                                 agent {
                                     kubernetes {
                                         label "${OS_NAME}-${BINARY_VERSION}-build-${env.PIPELINE_NAME}-${env.BUILD_NUMBER}"
@@ -94,6 +79,20 @@ pipeline {
                                             container("milvus-${BINARY_VERSION}-build-env") {
                                                 script {
                                                     load "${env.WORKSPACE}/ci/jenkins/step/build.groovy"
+                                                }
+                                            }
+                                        }
+                                    }
+
+                                    stage('Unittest') {
+                                        steps {
+                                            container("milvus-${BINARY_VERSION}-build-env") {
+                                                script {
+                                                    if ("${BINARY_VERSION}" == "gpu") {
+                                                        load "${env.WORKSPACE}/ci/jenkins/step/unittest.groovy"
+                                                    } else {
+                                                        echo "Skip Unittest"
+                                                    }
                                                 }
                                             }
                                         }
@@ -126,22 +125,6 @@ pipeline {
                             }
 
                             stage('Publish docker images') {
-                                // when {
-                                //     allOf {
-                                //         anyOf {
-                                //             expression { isEmptyChangelog() == true }
-                                //             changeset 'ci/**'
-                                //             changeset 'core/**'
-                                //             changeset 'docker/**'
-                                //             changeset 'test/**'
-                                //         }
-                                //         not {
-                                //             anyOf {
-                                //                 changeset '**/*.md'
-                                //             }
-                                //         }
-                                //     }
-                                // }
                                 agent {
                                     kubernetes {
                                         label "${OS_NAME}-${BINARY_VERSION}-publish-${env.PIPELINE_NAME}-${env.BUILD_NUMBER}"
@@ -164,22 +147,6 @@ pipeline {
                             }
 
                             stage('Deploy to Development') {
-                                // when {
-                                //     allOf {
-                                //         anyOf {
-                                //             expression { isEmptyChangelog() == true }
-                                //             changeset 'ci/**'
-                                //             changeset 'core/**'
-                                //             changeset 'docker/**'
-                                //             changeset 'test/**'
-                                //         }
-                                //         not {
-                                //             anyOf {
-                                //                 changeset '**/*.md'
-                                //             }
-                                //         }
-                                //     }
-                                // }
                                 environment {
                                     FROMAT_SEMVER = "${env.SEMVER}".replaceAll("\\.", "-").replaceAll("_", "-")
                                     FORMAT_OS_NAME = "${OS_NAME}".replaceAll("\\.", "-").replaceAll("_", "-")

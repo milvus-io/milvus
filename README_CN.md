@@ -58,6 +58,7 @@ Milvus 可以广泛应用于各类场景。下图展示了基于 Milvus 和 VGG 
 -   [Java](https://github.com/milvus-io/milvus-sdk-java)
 -   [C++](https://github.com/milvus-io/milvus/tree/master/sdk)
 -   [RESTful API](https://github.com/milvus-io/milvus/tree/master/core/src/server/web_impl)
+-   [GUI](https://www.milvus.io/gui)
 -   [Node.js](https://www.npmjs.com/package/@arkie-ai/milvus-client) (由 [arkie](https://www.arkie.cn/) 提供)
 
 ## 开始使用 Milvus

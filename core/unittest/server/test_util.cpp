@@ -358,14 +358,55 @@ TEST(ValidationUtilTest, VALIDATE_TABLENAME_TEST) {
 }
 
 TEST(ValidationUtilTest, VALIDATE_DIMENSION_TEST) {
-    ASSERT_EQ(milvus::server::ValidationUtil::ValidateTableDimension(-1).code(),
-              milvus::SERVER_INVALID_VECTOR_DIMENSION);
-    ASSERT_EQ(milvus::server::ValidationUtil::ValidateTableDimension(0).code(),
-              milvus::SERVER_INVALID_VECTOR_DIMENSION);
-    ASSERT_EQ(milvus::server::ValidationUtil::ValidateTableDimension(32769).code(),
-              milvus::SERVER_INVALID_VECTOR_DIMENSION);
-    ASSERT_EQ(milvus::server::ValidationUtil::ValidateTableDimension(32768).code(), milvus::SERVER_SUCCESS);
-    ASSERT_EQ(milvus::server::ValidationUtil::ValidateTableDimension(1).code(), milvus::SERVER_SUCCESS);
+    std::vector<int64_t>
+        float_metric_types = {(int64_t)milvus::engine::MetricType::L2, (int64_t)milvus::engine::MetricType::IP};
+
+    std::vector<int64_t>
+        binary_metric_types = {
+        (int64_t)milvus::engine::MetricType::JACCARD,
+        (int64_t)milvus::engine::MetricType::TANIMOTO,
+        (int64_t)milvus::engine::MetricType::HAMMING,
+        (int64_t)milvus::engine::MetricType::SUBSTRUCTURE,
+        (int64_t)milvus::engine::MetricType::SUPERSTRUCTURE
+    };
+
+    std::vector<int64_t> valid_float_dimensions = {1, 512, 32768};
+    std::vector<int64_t> invalid_float_dimensions = {-1, 0, 32769};
+
+    std::vector<int64_t> valid_binary_dimensions = {8, 1024, 32768};
+    std::vector<int64_t> invalid_binary_dimensions = {-1, 0, 32769, 1, 15, 999};
+
+    // valid float dimensions
+    for (auto dim : valid_float_dimensions) {
+        for (auto metric : float_metric_types) {
+            ASSERT_EQ(milvus::server::ValidationUtil::ValidateTableDimension(dim, metric).code(),
+                      milvus::SERVER_SUCCESS);
+        }
+    }
+
+    // invalid float dimensions
+    for (auto dim : invalid_float_dimensions) {
+        for (auto metric : float_metric_types) {
+            ASSERT_EQ(milvus::server::ValidationUtil::ValidateTableDimension(dim, metric).code(),
+                      milvus::SERVER_INVALID_VECTOR_DIMENSION);
+        }
+    }
+
+    // valid binary dimensions
+    for (auto dim : valid_binary_dimensions) {
+        for (auto metric : binary_metric_types) {
+            ASSERT_EQ(milvus::server::ValidationUtil::ValidateTableDimension(dim, metric).code(),
+                      milvus::SERVER_SUCCESS);
+        }
+    }
+
+    // invalid binary dimensions
+    for (auto dim : invalid_binary_dimensions) {
+        for (auto metric : binary_metric_types) {
+            ASSERT_EQ(milvus::server::ValidationUtil::ValidateTableDimension(dim, metric).code(),
+                      milvus::SERVER_INVALID_VECTOR_DIMENSION);
+        }
+    }
 }
 
 TEST(ValidationUtilTest, VALIDATE_INDEX_TEST) {

@@ -70,6 +70,12 @@ MappingMetricType(MetricType metric_type, milvus::json& conf) {
         case MetricType::TANIMOTO:
             conf[knowhere::Metric::TYPE] = knowhere::Metric::TANIMOTO;
             break;
+        case MetricType::SUBSTRUCTURE:
+            conf[knowhere::Metric::TYPE] = knowhere::Metric::SUBSTRUCTURE;
+            break;
+        case MetricType::SUPERSTRUCTURE:
+            conf[knowhere::Metric::TYPE] = knowhere::Metric::SUPERSTRUCTURE;
+            break;
         default:
             return Status(DB_ERROR, "Unsupported metric type");
     }
@@ -323,15 +329,6 @@ ExecutionEngineImpl::Count() const {
 }
 
 size_t
-ExecutionEngineImpl::Size() const {
-    if (IsBinaryIndexType(index_->index_type())) {
-        return (size_t)(Count() * Dimension() / 8);
-    } else {
-        return (size_t)(Count() * Dimension()) * sizeof(float);
-    }
-}
-
-size_t
 ExecutionEngineImpl::Dimension() const {
     if (index_ == nullptr) {
         ENGINE_LOG_ERROR << "ExecutionEngineImpl: index is null, return dimension " << dim_;
@@ -341,8 +338,12 @@ ExecutionEngineImpl::Dimension() const {
 }
 
 size_t
-ExecutionEngineImpl::PhysicalSize() const {
-    return server::CommonUtil::GetFileSize(location_);
+ExecutionEngineImpl::Size() const {
+    if (index_ == nullptr) {
+        ENGINE_LOG_ERROR << "ExecutionEngineImpl: index is null, return size 0";
+        return 0;
+    }
+    return index_->Size();
 }
 
 Status
@@ -351,7 +352,7 @@ ExecutionEngineImpl::Serialize() {
 
     // here we reset index size by file size,
     // since some index type(such as SQ8) data size become smaller after serialized
-    index_->set_size(PhysicalSize());
+    index_->set_size(server::CommonUtil::GetFileSize(location_));
     ENGINE_LOG_DEBUG << "Finish serialize index file: " << location_ << " size: " << index_->Size();
 
     if (index_->Size() == 0) {
@@ -361,36 +362,6 @@ ExecutionEngineImpl::Serialize() {
 
     return status;
 }
-
-/*
-Status
-ExecutionEngineImpl::Load(bool to_cache) {
-    index_ = std::static_pointer_cast<VecIndex>(cache::CpuCacheMgr::GetInstance()->GetIndex(location_));
-    bool already_in_cache = (index_ != nullptr);
-    if (!already_in_cache) {
-        try {
-            double physical_size = PhysicalSize();
-            server::CollectExecutionEngineMetrics metrics(physical_size);
-            index_ = read_index(location_);
-            if (index_ == nullptr) {
-                std::string msg = "Failed to load index from " + location_;
-                ENGINE_LOG_ERROR << msg;
-                return Status(DB_ERROR, msg);
-            } else {
-                ENGINE_LOG_DEBUG << "Disk io from: " << location_;
-            }
-        } catch (std::exception& e) {
-            ENGINE_LOG_ERROR << e.what();
-            return Status(DB_ERROR, e.what());
-        }
-    }
-
-    if (!already_in_cache && to_cache) {
-        Cache();
-    }
-    return Status::OK();
-}
-*/
 
 Status
 ExecutionEngineImpl::Load(bool to_cache) {
@@ -453,26 +424,27 @@ ExecutionEngineImpl::Load(bool to_cache) {
                 auto dataset = knowhere::GenDataset(vectors->GetCount(), this->dim_, float_vectors.data());
                 bf_index->AddWithoutIds(dataset, conf);
                 bf_index->SetBlacklist(concurrent_bitset_ptr);
-
-                int64_t index_size = vectors->GetCount() * dim_ * sizeof(float);
-                int64_t bitset_size = vectors->GetCount() / 8;
-                index_->set_size(index_size + bitset_size);
             } else if (index_type_ == EngineType::FAISS_BIN_IDMAP) {
                 auto bin_bf_index = std::static_pointer_cast<knowhere::BinaryIDMAP>(index_);
                 bin_bf_index->Train(knowhere::DatasetPtr(), conf);
                 auto dataset = knowhere::GenDataset(vectors->GetCount(), this->dim_, vectors_data.data());
                 bin_bf_index->AddWithoutIds(dataset, conf);
                 bin_bf_index->SetBlacklist(concurrent_bitset_ptr);
-
-                int64_t index_size = vectors->GetCount() * dim_ * sizeof(uint8_t);
-                int64_t bitset_size = vectors->GetCount() / 8;
-                index_->set_size(index_size + bitset_size);
             }
+
+            int64_t index_size = vectors->Size();       // vector data size + vector ids size
+            int64_t bitset_size = vectors->GetCount();  // delete list size
+            index_->set_size(index_size + bitset_size);
+
+            if (!status.ok()) {
+                return status;
+            }
+
             ENGINE_LOG_DEBUG << "Finished loading raw data from segment " << segment_dir;
         } else {
             try {
-                double physical_size = PhysicalSize();
-                server::CollectExecutionEngineMetrics metrics(physical_size);
+                //                size_t physical_size = PhysicalSize();
+                //                server::CollectExecutionEngineMetrics metrics((double)physical_size);
                 index_ = read_index(location_);
 
                 if (index_ == nullptr) {
@@ -503,6 +475,10 @@ ExecutionEngineImpl::Load(bool to_cache) {
                     segment_reader_ptr->LoadUids(uids);
                     index_->SetUids(uids);
                     ENGINE_LOG_DEBUG << "set uids " << index_->GetUids().size() << " for index " << location_;
+
+                    int64_t index_size = index_->Size();    // vector data size + vector ids size
+                    int64_t bitset_size = index_->Count();  // delete list size
+                    index_->set_size(index_size + bitset_size);
 
                     ENGINE_LOG_DEBUG << "Finished loading index file from segment " << segment_dir;
                 }
@@ -605,10 +581,12 @@ Status
 ExecutionEngineImpl::CopyToIndexFileToGpu(uint64_t device_id) {
 #ifdef MILVUS_GPU_VERSION
     // the ToIndexData is only a placeholder, cpu-copy-to-gpu action is performed in
-    gpu_num_ = device_id;
-    auto to_index_data = std::make_shared<knowhere::ToIndexData>(PhysicalSize());
-    cache::DataObjPtr obj = std::static_pointer_cast<cache::DataObj>(to_index_data);
-    milvus::cache::GpuCacheMgr::GetInstance(device_id)->InsertItem(location_ + "_placeholder", obj);
+    if (index_) {
+        gpu_num_ = device_id;
+        auto to_index_data = std::make_shared<knowhere::ToIndexData>(index_->Size());
+        cache::DataObjPtr obj = std::static_pointer_cast<cache::DataObj>(to_index_data);
+        milvus::cache::GpuCacheMgr::GetInstance(device_id)->InsertItem(location_ + "_placeholder", obj);
+    }
 #endif
     return Status::OK();
 }
@@ -641,66 +619,6 @@ ExecutionEngineImpl::CopyToCpu() {
 #endif
     return Status::OK();
 }
-
-// ExecutionEnginePtr
-// ExecutionEngineImpl::Clone() {
-//    if (index_ == nullptr) {
-//        ENGINE_LOG_ERROR << "ExecutionEngineImpl: index is null, failed to clone";
-//        return nullptr;
-//    }
-//
-//    auto ret = std::make_shared<ExecutionEngineImpl>(dim_, location_, index_type_, metric_type_, nlist_);
-//    ret->Init();
-//    ret->index_ = index_->Clone();
-//    return ret;
-//}
-
-/*
-Status
-ExecutionEngineImpl::Merge(const std::string& location) {
-    if (location == location_) {
-        return Status(DB_ERROR, "Cannot Merge Self");
-    }
-    ENGINE_LOG_DEBUG << "Merge index file: " << location << " to: " << location_;
-
-    auto to_merge = cache::CpuCacheMgr::GetInstance()->GetIndex(location);
-    if (!to_merge) {
-        try {
-            double physical_size = server::CommonUtil::GetFileSize(location);
-            server::CollectExecutionEngineMetrics metrics(physical_size);
-            to_merge = read_index(location);
-        } catch (std::exception& e) {
-            ENGINE_LOG_ERROR << e.what();
-            return Status(DB_ERROR, e.what());
-        }
-    }
-
-    if (index_ == nullptr) {
-        ENGINE_LOG_ERROR << "ExecutionEngineImpl: index is null, failed to merge";
-        return Status(DB_ERROR, "index is null");
-    }
-
-    if (auto file_index = std::dynamic_pointer_cast<BFIndex>(to_merge)) {
-        auto status = index_->Add(file_index->Count(), file_index->GetRawVectors(), file_index->GetRawIds());
-        if (!status.ok()) {
-            ENGINE_LOG_ERROR << "Failed to merge: " << location << " to: " << location_;
-        } else {
-            ENGINE_LOG_DEBUG << "Finish merge index file: " << location;
-        }
-        return status;
-    } else if (auto bin_index = std::dynamic_pointer_cast<BinBFIndex>(to_merge)) {
-        auto status = index_->Add(bin_index->Count(), bin_index->GetRawVectors(), bin_index->GetRawIds());
-        if (!status.ok()) {
-            ENGINE_LOG_ERROR << "Failed to merge: " << location << " to: " << location_;
-        } else {
-            ENGINE_LOG_DEBUG << "Finish merge index file: " << location;
-        }
-        return status;
-    } else {
-        return Status(DB_ERROR, "file index type is not idmap");
-    }
-}
-*/
 
 ExecutionEnginePtr
 ExecutionEngineImpl::BuildIndex(const std::string& location, EngineType engine_type) {
@@ -750,7 +668,7 @@ ExecutionEngineImpl::BuildIndex(const std::string& location, EngineType engine_t
         ENGINE_LOG_DEBUG << "Set blacklist for index " << location;
     }
 
-    ENGINE_LOG_DEBUG << "Finish build index file: " << location << " size: " << to_index->Size();
+    ENGINE_LOG_DEBUG << "Finish build index: " << location;
     return std::make_shared<ExecutionEngineImpl>(to_index, location, engine_type, metric_type_, index_params_);
 }
 

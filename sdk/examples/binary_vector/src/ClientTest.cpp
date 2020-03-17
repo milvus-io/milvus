@@ -22,32 +22,12 @@
 
 namespace {
 
-const char* COLLECTION_NAME = milvus_sdk::Utils::GenCollectionName().c_str();
-
-constexpr int64_t COLLECTION_DIMENSION = 512;
-constexpr int64_t COLLECTION_INDEX_FILE_SIZE = 128;
-constexpr milvus::MetricType COLLECTION_METRIC_TYPE = milvus::MetricType::TANIMOTO;
 constexpr int64_t BATCH_ENTITY_COUNT = 100000;
 constexpr int64_t NQ = 5;
 constexpr int64_t TOP_K = 10;
 constexpr int64_t NPROBE = 32;
 constexpr int64_t SEARCH_TARGET = 5000;  // change this value, result is different, ensure less than BATCH_ENTITY_COUNT
-constexpr int64_t ADD_ENTITY_LOOP = 20;
-constexpr milvus::IndexType INDEX_TYPE = milvus::IndexType::IVFFLAT;
-
-milvus::CollectionParam
-BuildCollectionParam() {
-    milvus::CollectionParam
-        collection_param = {COLLECTION_NAME, COLLECTION_DIMENSION, COLLECTION_INDEX_FILE_SIZE, COLLECTION_METRIC_TYPE};
-    return collection_param;
-}
-
-milvus::IndexParam
-BuildIndexParam() {
-    JSON json_params = {{"nlist", 1024}};
-    milvus::IndexParam index_param = {COLLECTION_NAME, INDEX_TYPE, json_params.dump()};
-    return index_param;
-}
+constexpr int64_t ADD_ENTITY_LOOP = 10;
 
 void
 BuildBinaryVectors(int64_t from, int64_t to, std::vector<milvus::Entity>& entity_array,
@@ -59,7 +39,10 @@ BuildBinaryVectors(int64_t from, int64_t to, std::vector<milvus::Entity>& entity
     entity_array.clear();
     entity_ids.clear();
 
-    int64_t dim_byte = dimension/8;
+    int64_t dim_byte = ceil(dimension / 8);
+    if ((dimension % 8) > 0) {
+        dim_byte++;
+    }
     for (int64_t k = from; k < to; k++) {
         milvus::Entity entity;
         entity.binary_data.resize(dim_byte);
@@ -72,29 +55,16 @@ BuildBinaryVectors(int64_t from, int64_t to, std::vector<milvus::Entity>& entity
     }
 }
 
-}  // namespace
-
 void
-ClientTest::Test(const std::string& address, const std::string& port) {
-    std::shared_ptr<milvus::Connection> conn = milvus::Connection::Create();
-
+TestProcess(std::shared_ptr<milvus::Connection> connection,
+            const milvus::CollectionParam& collection_param,
+            const milvus::IndexParam& index_param) {
     milvus::Status stat;
-    {  // connect server
-        milvus::ConnectParam param = {address, port};
-        stat = conn->Connect(param);
-        std::cout << "Connect function call status: " << stat.message() << std::endl;
-    }
 
     {  // create collection
-        milvus::CollectionParam collection_param = BuildCollectionParam();
-        stat = conn->CreateCollection(collection_param);
+        stat = connection->CreateCollection(collection_param);
         std::cout << "CreateCollection function call status: " << stat.message() << std::endl;
         milvus_sdk::Utils::PrintCollectionParam(collection_param);
-
-        bool has_collection = conn->HasCollection(collection_param.collection_name);
-        if (has_collection) {
-            std::cout << "Collection is created" << std::endl;
-        }
     }
 
     std::vector<std::pair<int64_t, milvus::Entity>> search_entity_array;
@@ -109,7 +79,7 @@ ClientTest::Test(const std::string& address, const std::string& port) {
                                    begin_index + BATCH_ENTITY_COUNT,
                                    entity_array,
                                    entity_ids,
-                                   COLLECTION_DIMENSION);
+                                   collection_param.dimension);
             }
 
             if (search_entity_array.size() < NQ) {
@@ -118,49 +88,122 @@ ClientTest::Test(const std::string& address, const std::string& port) {
 
             std::string title = "Insert " + std::to_string(entity_array.size()) + " entities No." + std::to_string(i);
             milvus_sdk::TimeRecorder rc(title);
-            stat = conn->Insert(COLLECTION_NAME, "", entity_array, entity_ids);
+            stat = connection->Insert(collection_param.collection_name, "", entity_array, entity_ids);
             std::cout << "Insert function call status: " << stat.message() << std::endl;
             std::cout << "Returned id array count: " << entity_ids.size() << std::endl;
         }
     }
 
     {  // flush buffer
-        stat = conn->FlushCollection(COLLECTION_NAME);
+        stat = connection->FlushCollection(collection_param.collection_name);
         std::cout << "FlushCollection function call status: " << stat.message() << std::endl;
     }
 
     {  // search vectors
         std::vector<std::string> partition_tags;
         milvus::TopKQueryResult topk_query_result;
-        milvus_sdk::Utils::DoSearch(conn, COLLECTION_NAME, partition_tags, TOP_K, NPROBE, search_entity_array,
+        milvus_sdk::Utils::DoSearch(connection,
+                                    collection_param.collection_name,
+                                    partition_tags,
+                                    TOP_K,
+                                    NPROBE,
+                                    search_entity_array,
                                     topk_query_result);
     }
 
     {  // wait unit build index finish
         milvus_sdk::TimeRecorder rc("Create index");
         std::cout << "Wait until create all index done" << std::endl;
-        milvus::IndexParam index1 = BuildIndexParam();
-        milvus_sdk::Utils::PrintIndexParam(index1);
-        stat = conn->CreateIndex(index1);
+        milvus_sdk::Utils::PrintIndexParam(index_param);
+        stat = connection->CreateIndex(index_param);
         std::cout << "CreateIndex function call status: " << stat.message() << std::endl;
-
-        milvus::IndexParam index2;
-        stat = conn->DescribeIndex(COLLECTION_NAME, index2);
-        std::cout << "DescribeIndex function call status: " << stat.message() << std::endl;
-        milvus_sdk::Utils::PrintIndexParam(index2);
     }
 
     {  // search vectors
         std::vector<std::string> partition_tags;
         milvus::TopKQueryResult topk_query_result;
-        milvus_sdk::Utils::DoSearch(conn, COLLECTION_NAME, partition_tags, TOP_K, NPROBE, search_entity_array,
+        milvus_sdk::Utils::DoSearch(connection,
+                                    collection_param.collection_name,
+                                    partition_tags,
+                                    TOP_K,
+                                    NPROBE,
+                                    search_entity_array,
                                     topk_query_result);
     }
 
     {  // drop collection
-        stat = conn->DropCollection(COLLECTION_NAME);
+        stat = connection->DropCollection(collection_param.collection_name);
         std::cout << "DropCollection function call status: " << stat.message() << std::endl;
     }
+}
 
-    milvus::Connection::Destroy(conn);
+}  // namespace
+
+void
+ClientTest::Test(const std::string& address, const std::string& port) {
+    std::shared_ptr<milvus::Connection> connection = milvus::Connection::Create();
+    {  // connect server
+        milvus::ConnectParam param = {address, port};
+        auto stat = connection->Connect(param);
+        std::cout << "Connect function call status: " << stat.message() << std::endl;
+        if (!stat.ok()) {
+            return;
+        }
+    }
+
+    {
+        milvus::CollectionParam collection_param = {
+                "collection_1",
+                512, // dimension
+                256, // index file size
+                milvus::MetricType::TANIMOTO
+            };
+
+        JSON json_params = {{"nlist", 1024}};
+        milvus::IndexParam index_param = {
+                collection_param.collection_name,
+                milvus::IndexType::IVFFLAT,
+                json_params.dump()
+            };
+
+        TestProcess(connection, collection_param, index_param);
+    }
+
+    {
+        milvus::CollectionParam collection_param = {
+                "collection_2",
+                512, // dimension
+                512, // index file size
+                milvus::MetricType::SUBSTRUCTURE
+            };
+
+        JSON json_params = {};
+        milvus::IndexParam index_param = {
+                collection_param.collection_name,
+                milvus::IndexType::FLAT,
+                json_params.dump()
+            };
+
+        TestProcess(connection, collection_param, index_param);
+    }
+
+    {
+        milvus::CollectionParam collection_param = {
+                "collection_3",
+                128, // dimension
+                1024, // index file size
+                milvus::MetricType::SUPERSTRUCTURE
+            };
+
+        JSON json_params = {};
+        milvus::IndexParam index_param = {
+                collection_param.collection_name,
+                milvus::IndexType::FLAT,
+                json_params.dump()
+            };
+
+        TestProcess(connection, collection_param, index_param);
+    }
+
+    milvus::Connection::Destroy(connection);
 }

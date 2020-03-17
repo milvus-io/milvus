@@ -20,7 +20,7 @@ ConvertToMetadataSet(const DatasetPtr& dataset_ptr) {
     auto elems = dataset_ptr->Get<int64_t>(meta::ROWS);
     auto p_data = dataset_ptr->Get<const int64_t*>(meta::IDS);
 
-    auto p_offset = (int64_t*)malloc(sizeof(int64_t) * elems);
+    auto p_offset = (int64_t*)malloc(sizeof(int64_t) * (elems + 1));
     for (auto i = 0; i <= elems; ++i) p_offset[i] = i * 8;
 
     std::shared_ptr<SPTAG::MetadataSet> metaset(
