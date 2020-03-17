@@ -1,6 +1,7 @@
 import logging
 import time
 import datetime
+import json
 from collections import defaultdict
 
 import multiprocessing
@@ -129,10 +130,10 @@ class ServiceHandler(milvus_pb2_grpc.MilvusServiceServicer):
         rs = []
         all_topk_results = []
 
-        def search(addr, query_params, vectors, topk, nprobe, **kwargs):
+        def search(addr, table_id, file_ids, vectors, topk, nprobe, **kwargs):
             logger.info(
-                'Send Search Request: addr={};params={};nq={};topk={};nprobe={}'
-                .format(addr, query_params, len(vectors), topk, nprobe))
+                'Send Search Request: addr={};table_id={};ids={};nq={};topk={};nprobe={}'
+                .format(addr, table_id, file_ids, len(vectors), topk, nprobe))
 
             conn = self.router.query_conn(addr, metadata=metadata)
             start = time.time()
@@ -142,8 +143,8 @@ class ServiceHandler(milvus_pb2_grpc.MilvusServiceServicer):
 
             with self.tracer.start_span('search_{}'.format(addr),
                                         child_of=span):
-                ret = conn.search_vectors_in_files(table_name=query_params['table_id'],
-                                                   file_ids=query_params['file_ids'],
+                ret = conn.conn.search_vectors_in_files(table_name=table_id,
+                                                   file_ids=file_ids,
                                                    query_records=vectors,
                                                    top_k=topk,
                                                    nprobe=nprobe)
@@ -154,14 +155,16 @@ class ServiceHandler(milvus_pb2_grpc.MilvusServiceServicer):
         with self.tracer.start_span('do_search', child_of=p_span) as span:
             with ThreadPoolExecutor(max_workers=self.max_workers) as pool:
                 for addr, params in routing.items():
-                    res = pool.submit(search,
-                                      addr,
-                                      params,
-                                      vectors,
-                                      topk,
-                                      nprobe,
-                                      span=span)
-                    rs.append(res)
+                    for table_id, file_ids in params.items():
+                        res = pool.submit(search,
+                                          addr,
+                                          table_id,
+                                          file_ids,
+                                          vectors,
+                                          topk,
+                                          nprobe,
+                                          span=span)
+                        rs.append(res)
 
                 for res in rs:
                     res.result()
@@ -439,6 +442,12 @@ class ServiceHandler(milvus_pb2_grpc.MilvusServiceServicer):
                 error_code=_status.code, reason=_status.message))
 
         metadata = {'resp_class': milvus_pb2.StringReply}
+
+        if _cmd == 'conn_stats':
+            stats = self.router.readonly_topo.stats()
+            return milvus_pb2.StringReply(status=status_pb2.Status(
+                error_code=status_pb2.SUCCESS),
+                string_reply=json.dumps(stats, indent=2))
 
         if _cmd == 'version':
             _status, _reply = self._get_server_version(metadata=metadata)

@@ -281,7 +281,7 @@ void hammings_knn_hc (
     if (init_heap) ha->heapify ();
 
     int thread_max_num = omp_get_max_threads();
-    if (ha->nh < thread_max_num) {
+    if (ha->nh < 4) {
         // omp for n2
         int all_hash_size = thread_max_num * k;
         hamdis_t *value = new hamdis_t[all_hash_size];
@@ -432,7 +432,7 @@ void hammings_knn_hc_1 (
     }
 
     int thread_max_num = omp_get_max_threads();
-    if (ha->nh < thread_max_num) {
+    if (ha->nh < 4) {
         // omp for n2
         int all_hash_size = thread_max_num * k;
         hamdis_t *value = new hamdis_t[all_hash_size];

@@ -1,33 +1,31 @@
-timeout(time: 15, unit: 'MINUTES') {
-    dir ("docker/deploy/${BINARY_VERSION}/${OS_NAME}") {
-        def binaryPackage = "${PROJECT_NAME}-${PACKAGE_VERSION}.tar.gz"
+dir ("docker/deploy/${BINARY_VERSION}/${OS_NAME}") {
+    def binaryPackage = "${PROJECT_NAME}-${PACKAGE_VERSION}.tar.gz"
 
-        withCredentials([usernamePassword(credentialsId: "${params.JFROG_CREDENTIALS_ID}", usernameVariable: 'JFROG_USERNAME', passwordVariable: 'JFROG_PASSWORD')]) {
-            def downloadStatus = sh(returnStatus: true, script: "curl -u${JFROG_USERNAME}:${JFROG_PASSWORD} -O ${params.JFROG_ARTFACTORY_URL}/milvus/package/${binaryPackage}")
+    withCredentials([usernamePassword(credentialsId: "${params.JFROG_CREDENTIALS_ID}", usernameVariable: 'JFROG_USERNAME', passwordVariable: 'JFROG_PASSWORD')]) {
+        def downloadStatus = sh(returnStatus: true, script: "curl -u${JFROG_USERNAME}:${JFROG_PASSWORD} -O ${params.JFROG_ARTFACTORY_URL}/milvus/package/${binaryPackage}")
 
-            if (downloadStatus != 0) {
-                error("\" Download \" ${params.JFROG_ARTFACTORY_URL}/milvus/package/${binaryPackage} \" failed!")
-            }
+        if (downloadStatus != 0) {
+            error("\" Download \" ${params.JFROG_ARTFACTORY_URL}/milvus/package/${binaryPackage} \" failed!")
         }
-        sh "tar zxvf ${binaryPackage}"
-        def imageName = "${PROJECT_NAME}/engine:${DOCKER_VERSION}"
+    }
+    sh "tar zxvf ${binaryPackage}"
+    def imageName = "${PROJECT_NAME}/engine:${DOCKER_VERSION}"
 
-        try {
-            deleteImages("${imageName}", true)
+    try {
+        deleteImages("${imageName}", true)
 
-            def customImage = docker.build("${imageName}")
+        def customImage = docker.build("${imageName}")
 
-            deleteImages("${params.DOKCER_REGISTRY_URL}/${imageName}", true)
+        deleteImages("${params.DOKCER_REGISTRY_URL}/${imageName}", true)
 
-            docker.withRegistry("https://${params.DOKCER_REGISTRY_URL}", "${params.DOCKER_CREDENTIALS_ID}") {
-                customImage.push()
-            }
-        } catch (exc) {
-            throw exc
-        } finally {
-            deleteImages("${imageName}", true)
-            deleteImages("${params.DOKCER_REGISTRY_URL}/${imageName}", true)
+        docker.withRegistry("https://${params.DOKCER_REGISTRY_URL}", "${params.DOCKER_CREDENTIALS_ID}") {
+            customImage.push()
         }
+    } catch (exc) {
+        throw exc
+    } finally {
+        deleteImages("${imageName}", true)
+        deleteImages("${params.DOKCER_REGISTRY_URL}/${imageName}", true)
     }
 }
 
