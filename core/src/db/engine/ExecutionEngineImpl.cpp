@@ -124,8 +124,8 @@ ExecutionEngineImpl::ExecutionEngineImpl(uint16_t dimension, const std::string& 
     conf[knowhere::meta::DIM] = dimension;
     MappingMetricType(metric_type, conf);
     ENGINE_LOG_DEBUG << "Index params: " << conf.dump();
-    auto adapter = knowhere::AdapterMgr::GetInstance().GetAdapter(index_->index_type(), index_->index_mode());
-    if (!adapter->CheckTrain(conf)) {
+    auto adapter = knowhere::AdapterMgr::GetInstance().GetAdapter(index_->index_type());
+    if (!adapter->CheckTrain(conf, index_->index_mode())) {
         throw Exception(DB_ERROR, "Illegal index params");
     }
 
@@ -412,9 +412,9 @@ ExecutionEngineImpl::Load(bool to_cache) {
             }
             milvus::json conf{{knowhere::meta::DEVICEID, gpu_num_}, {knowhere::meta::DIM, dim_}};
             MappingMetricType(metric_type_, conf);
-            auto adapter = knowhere::AdapterMgr::GetInstance().GetAdapter(index_->index_type(), index_->index_mode());
+            auto adapter = knowhere::AdapterMgr::GetInstance().GetAdapter(index_->index_type());
             ENGINE_LOG_DEBUG << "Index params: " << conf.dump();
-            if (!adapter->CheckTrain(conf)) {
+            if (!adapter->CheckTrain(conf, index_->index_mode())) {
                 throw Exception(DB_ERROR, "Illegal index params");
             }
 
@@ -724,8 +724,8 @@ ExecutionEngineImpl::BuildIndex(const std::string& location, EngineType engine_t
     conf[knowhere::meta::DEVICEID] = gpu_num_;
     MappingMetricType(metric_type_, conf);
     ENGINE_LOG_DEBUG << "Index params: " << conf.dump();
-    auto adapter = knowhere::AdapterMgr::GetInstance().GetAdapter(to_index->index_type(), to_index->index_mode());
-    if (!adapter->CheckTrain(conf)) {
+    auto adapter = knowhere::AdapterMgr::GetInstance().GetAdapter(to_index->index_type());
+    if (!adapter->CheckTrain(conf, to_index->index_mode())) {
         throw Exception(DB_ERROR, "Illegal index params");
     }
     ENGINE_LOG_DEBUG << "Index config: " << conf.dump();
@@ -841,9 +841,9 @@ ExecutionEngineImpl::Search(int64_t n, const float* data, int64_t k, const milvu
 
     milvus::json conf = extra_params;
     conf[knowhere::meta::TOPK] = k;
-    auto adapter = knowhere::AdapterMgr::GetInstance().GetAdapter(index_->index_type(), index_->index_mode());
+    auto adapter = knowhere::AdapterMgr::GetInstance().GetAdapter(index_->index_type());
     ENGINE_LOG_DEBUG << "Search params: " << conf.dump();
-    if (!adapter->CheckSearch(conf, index_->index_type())) {
+    if (!adapter->CheckSearch(conf, index_->index_type(), index_->index_mode())) {
         throw Exception(DB_ERROR, "Illegal search params");
     }
 
@@ -879,9 +879,9 @@ ExecutionEngineImpl::Search(int64_t n, const uint8_t* data, int64_t k, const mil
 
     milvus::json conf = extra_params;
     conf[knowhere::meta::TOPK] = k;
-    auto adapter = knowhere::AdapterMgr::GetInstance().GetAdapter(index_->index_type(), index_->index_mode());
+    auto adapter = knowhere::AdapterMgr::GetInstance().GetAdapter(index_->index_type());
     ENGINE_LOG_DEBUG << "Search params: " << conf.dump();
-    if (!adapter->CheckSearch(conf, index_->index_type())) {
+    if (!adapter->CheckSearch(conf, index_->index_type(), index_->index_mode())) {
         throw Exception(DB_ERROR, "Illegal search params");
     }
 
@@ -917,9 +917,9 @@ ExecutionEngineImpl::Search(int64_t n, const std::vector<int64_t>& ids, int64_t 
 
     milvus::json conf = extra_params;
     conf[knowhere::meta::TOPK] = k;
-    auto adapter = knowhere::AdapterMgr::GetInstance().GetAdapter(index_->index_type(), index_->index_mode());
+    auto adapter = knowhere::AdapterMgr::GetInstance().GetAdapter(index_->index_type());
     ENGINE_LOG_DEBUG << "Search params: " << conf.dump();
-    if (!adapter->CheckSearch(conf, index_->index_type())) {
+    if (!adapter->CheckSearch(conf, index_->index_type(), index_->index_mode())) {
         throw Exception(DB_ERROR, "Illegal search params");
     }
 

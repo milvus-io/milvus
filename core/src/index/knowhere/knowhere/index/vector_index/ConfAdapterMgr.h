@@ -25,8 +25,8 @@ class AdapterMgr {
  public:
     template <typename T>
     struct register_t {
-        explicit register_t(const IndexType type, const IndexMode mode) {
-            AdapterMgr::GetInstance().table_[type][mode] = ( [] { return std::make_shared<T>(); });
+        explicit register_t(const IndexType type) {
+            AdapterMgr::GetInstance().table_[type] = ( [] { return std::make_shared<T>(); });
         }
     };
 
@@ -37,14 +37,14 @@ class AdapterMgr {
     }
 
     ConfAdapterPtr
-    GetAdapter(const IndexType indexType, const IndexMode mode);
+    GetAdapter(const IndexType indexType);
 
     void
     RegisterAdapter();
 
  protected:
     bool init_ = false;
-    std::unordered_map<IndexType, std::unordered_map<IndexMode, std::function<ConfAdapterPtr()>>> table_;
+    std::unordered_map<IndexType, std::function<ConfAdapterPtr()>> table_;
 };
 
 }  // namespace knowhere

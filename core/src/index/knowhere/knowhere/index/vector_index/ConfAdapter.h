@@ -22,70 +22,62 @@ namespace knowhere {
 class ConfAdapter {
  public:
     virtual bool
-    CheckTrain(Config& oricfg);
+    CheckTrain(Config& oricfg, const IndexMode mode);
 
     virtual bool
-    CheckSearch(Config& oricfg, const IndexType& type);
-
-    //  todo(linxj): refactor in next release.
-    //
-    //  virtual bool
-    //  CheckTrain(Config&, IndexMode&) = 0;
-    //
-    //  virtual bool
-    //  CheckSearch(Config&, const IndexType&, IndexMode&) = 0;
+    CheckSearch(Config& oricfg, const IndexType type, const IndexMode mode);
 };
 using ConfAdapterPtr = std::shared_ptr<ConfAdapter>;
 
 class IVFConfAdapter : public ConfAdapter {
  public:
     bool
-    CheckTrain(Config& oricfg) override;
+    CheckTrain(Config& oricfg, const IndexMode mode) override;
 
     bool
-    CheckSearch(Config& oricfg, const IndexType& type) override;
+    CheckSearch(Config& oricfg, const IndexType type, const IndexMode mode) override;
 };
 
 class IVFSQConfAdapter : public IVFConfAdapter {
  public:
     bool
-    CheckTrain(Config& oricfg) override;
+    CheckTrain(Config& oricfg, const IndexMode mode) override;
 };
 
 class IVFPQConfAdapter : public IVFConfAdapter {
  public:
     bool
-    CheckTrain(Config& oricfg) override;
+    CheckTrain(Config& oricfg, const IndexMode mode) override;
 };
 
 class NSGConfAdapter : public IVFConfAdapter {
  public:
     bool
-    CheckTrain(Config& oricfg) override;
+    CheckTrain(Config& oricfg, const IndexMode mode) override;
 
     bool
-    CheckSearch(Config& oricfg, const IndexType& type) override;
+    CheckSearch(Config& oricfg, const IndexType type, const IndexMode mode) override;
 };
 
 class BinIDMAPConfAdapter : public ConfAdapter {
  public:
     bool
-    CheckTrain(Config& oricfg) override;
+    CheckTrain(Config& oricfg, const IndexMode mode) override;
 };
 
 class BinIVFConfAdapter : public IVFConfAdapter {
  public:
     bool
-    CheckTrain(Config& oricfg) override;
+    CheckTrain(Config& oricfg, const IndexMode mode) override;
 };
 
 class HNSWConfAdapter : public ConfAdapter {
  public:
     bool
-    CheckTrain(Config& oricfg) override;
+    CheckTrain(Config& oricfg, const IndexMode mode) override;
 
     bool
-    CheckSearch(Config& oricfg, const IndexType& type) override;
+    CheckSearch(Config& oricfg, const IndexType type, const IndexMode mode) override;
 };
 
 }  // namespace knowhere
