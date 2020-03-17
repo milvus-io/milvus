@@ -48,7 +48,7 @@ class Factory(RouterMixin):
         db.remove_session()
 
         servers = self.readonly_topo.group_names
-        logger.info('Available servers: {}'.format(servers))
+        logger.info('Available servers: {}'.format(list(servers)))
 
         ring = HashRing(servers)
 
@@ -59,8 +59,13 @@ class Factory(RouterMixin):
                 target_host = ring.get_node(str(f.id))
                 sub = routing.get(target_host, None)
                 if not sub:
-                    routing[target_host] = {'table_id': f.table_id, 'file_ids': []}
-                routing[target_host]['file_ids'].append(str(f.id))
+                    sub = {}
+                    routing[target_host] = sub
+                kv = sub.get(f.table_id, None)
+                if not kv:
+                    kv = []
+                    sub[f.table_id] = kv
+                sub[f.table_id].append(str(f.id))
 
         return routing
 
