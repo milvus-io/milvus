@@ -18,14 +18,14 @@
 namespace milvus {
 namespace knowhere {
 
-#define GETTENSOR(dataset_ptr)                         \
+#define GETTENSOR(dataset_ptr)                            \
     int64_t dim = dataset_ptr->Get<int64_t>(meta::DIM);   \
     int64_t rows = dataset_ptr->Get<int64_t>(meta::ROWS); \
     const void* p_data = dataset_ptr->Get<const void*>(meta::TENSOR);
 
-#define GETTENSORWITHIDS(dataset_ptr)                          \
-    int64_t dim = dataset_ptr->Get<int64_t>(meta::DIM);           \
-    int64_t rows = dataset_ptr->Get<int64_t>(meta::ROWS);         \
+#define GETTENSORWITHIDS(dataset_ptr)                                 \
+    int64_t dim = dataset_ptr->Get<int64_t>(meta::DIM);               \
+    int64_t rows = dataset_ptr->Get<int64_t>(meta::ROWS);             \
     const void* p_data = dataset_ptr->Get<const void*>(meta::TENSOR); \
     const int64_t* p_ids = dataset_ptr->Get<const int64_t*>(meta::IDS);
 
