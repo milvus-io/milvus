@@ -53,11 +53,13 @@ class MockVecIndex : public milvus::knowhere::VecIndex {
     }
 
     virtual void
-    AddWithoutIds(const milvus::knowhere::DatasetPtr& dataset, const milvus::knowhere::Config& cfg = milvus::knowhere::Config()) {
+    AddWithoutIds(const milvus::knowhere::DatasetPtr& dataset,
+                  const milvus::knowhere::Config& cfg = milvus::knowhere::Config()) {
     }
 
     virtual milvus::knowhere::DatasetPtr
-    Query(const milvus::knowhere::DatasetPtr& dataset, const milvus::knowhere::Config& cfg = milvus::knowhere::Config()) {
+    Query(const milvus::knowhere::DatasetPtr& dataset,
+          const milvus::knowhere::Config& cfg = milvus::knowhere::Config()) {
         return nullptr;
     }
 
@@ -76,7 +78,7 @@ class MockVecIndex : public milvus::knowhere::VecIndex {
         return milvus::knowhere::IndexType::INVALID;
     }
 
-    virtual milvus::knowhere::BinarySet
+    milvus::knowhere::BinarySet
     Serialize(const milvus::knowhere::Config& config = milvus::knowhere::Config()) override {
         milvus::knowhere::BinarySet binset;
         return binset;
