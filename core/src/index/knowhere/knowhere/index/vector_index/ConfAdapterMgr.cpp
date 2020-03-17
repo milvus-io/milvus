@@ -36,6 +36,7 @@ AdapterMgr::RegisterAdapter() {
     init_ = true;
 
     REGISTER_CONF_ADAPTER(ConfAdapter, IndexType::INDEX_FAISS_IDMAP, IndexMode::MODE_CPU, idmap_cpu);
+    REGISTER_CONF_ADAPTER(ConfAdapter, IndexType::INDEX_FAISS_IDMAP, IndexMode::MODE_GPU, idmap_gpu);
 
     REGISTER_CONF_ADAPTER(IVFConfAdapter, IndexType::INDEX_FAISS_IVFFLAT, IndexMode::MODE_CPU, ivf_cpu);
     REGISTER_CONF_ADAPTER(IVFConfAdapter, IndexType::INDEX_FAISS_IVFFLAT, IndexMode::MODE_GPU, ivf_gpu);

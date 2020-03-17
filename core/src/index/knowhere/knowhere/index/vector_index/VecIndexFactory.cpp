@@ -38,42 +38,40 @@ namespace knowhere {
 
 VecIndexPtr
 VecIndexFactory::CreateVecIndex(const IndexType type, const IndexMode mode) {
-#ifdef MILVUS_GPU_VERSION
     auto gpu_device = -1;  // TODO: remove hardcode here, get from invoker
-    if (mode == IndexMode::MODE_GPU) {
-        switch (type) {
-            // case IndexType::INDEX_FAISS_IDMAP {
-            //     return std::make_shared<knowhere::GPUIDMAP>(gpu_device);
-            // }
-            case IndexType::INDEX_FAISS_IVFFLAT: {
-                return std::make_shared<knowhere::GPUIVF>(gpu_device);
-            }
-            case IndexType::INDEX_FAISS_IVFPQ: {
-                return std::make_shared<knowhere::GPUIVFPQ>(gpu_device);
-            }
-            case IndexType::INDEX_FAISS_IVFSQ8: {
-                return std::make_shared<knowhere::GPUIVFSQ>(gpu_device);
-            }
-            case IndexType::INDEX_FAISS_IVFSQ8H: {
-                return std::make_shared<knowhere::IVFSQHybrid>(gpu_device);
-            }
-        }
-    }
-#endif
-
     switch (type) {
         case IndexType::INDEX_FAISS_IDMAP: {
             return std::make_shared<knowhere::IDMAP>();
         }
         case IndexType::INDEX_FAISS_IVFFLAT: {
+#ifdef MILVUS_GPU_VERSION
+            if (mode == IndexMode::MODE_GPU) {
+                return std::make_shared<knowhere::GPUIVF>(gpu_device);
+            }
+#endif
             return std::make_shared<knowhere::IVF>();
         }
         case IndexType::INDEX_FAISS_IVFPQ: {
+#ifdef MILVUS_GPU_VERSION
+            if (mode == IndexMode::MODE_GPU) {
+                return std::make_shared<knowhere::GPUIVFPQ>(gpu_device);
+            }
+#endif
             return std::make_shared<knowhere::IVFPQ>();
         }
         case IndexType::INDEX_FAISS_IVFSQ8: {
+#ifdef MILVUS_GPU_VERSION
+            if (mode == IndexMode::MODE_GPU) {
+                return std::make_shared<knowhere::GPUIVFSQ>(gpu_device);
+            }
+#endif
             return std::make_shared<knowhere::IVFSQ>();
         }
+#ifdef MILVUS_GPU_VERSION
+        case IndexType::INDEX_FAISS_IVFSQ8H: {
+            return std::make_shared<knowhere::IVFSQHybrid>(gpu_device);
+        }
+#endif
         case IndexType::INDEX_FAISS_BIN_IDMAP: {
             return std::make_shared<knowhere::BinaryIDMAP>();
         }
