@@ -22,7 +22,7 @@ Please mark all change in change log and use the issue from GitHub
 -   \#1548 Move store/Directory to storage/Operation and add FSHandler
 -   \#1619 Improve compact performance
 -   \#1649 Fix Milvus crash on old CPU 
--   \#1653 IndexFlat performance improvement for NQ less than thread_number
+-   \#1653 IndexFlat (SSE) and IndexBinaryFlat performance improvement for small NQ
 
 ## Task
 

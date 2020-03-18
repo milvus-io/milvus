@@ -154,50 +154,68 @@ static void knn_inner_product_sse (const float * x,
     size_t k = res->k;
 
     size_t thread_max_num = omp_get_max_threads();
-    if (nx < 4) {
-        // omp for ny
-        size_t all_hash_size = thread_max_num * k;
-        float *value = new float[all_hash_size];
-        int64_t *labels = new int64_t[all_hash_size];
+    
+    size_t thread_hash_size = nx * k;
+    size_t all_hash_size = thread_hash_size * thread_max_num;
+    float *value = new float[all_hash_size];
+    int64_t *labels = new int64_t[all_hash_size];
 
-        for (size_t i = 0; i < nx; i++) {
-            // init hash
-            for (size_t i = 0; i < all_hash_size; i++) {
-                value[i] = -1.0 / 0.0;
-            }
-            const float *x_i = x + i * d;
+    // init hash
+    for (size_t i = 0; i < all_hash_size; i++) {
+        value[i] = -1.0 / 0.0;
+        labels[i] = -1;
+    }
+
 #pragma omp parallel for
-            for (size_t j = 0; j < ny; j++) {
-                if(!bitset || !bitset->test(j)) {
-                    const float *y_j = y + j * d;
-                    float ip = fvec_inner_product (x_i, y_j, d);
+    for (size_t j = 0; j < ny; j++) {
+        if(!bitset || !bitset->test(j)) {
+            size_t thread_no = omp_get_thread_num();
+            const float *y_j = y + j * d;
+            for (size_t i = 0; i < nx; i++) {
+                const float *x_i = x + i * d;
+                float ip = fvec_inner_product (x_i, y_j, d);
 
-                    size_t thread_no = omp_get_thread_num();
-                    float * __restrict val_ = value + thread_no * k;
-                    int64_t * __restrict ids_ = labels + thread_no * k;
-                    if (ip > val_[0]) {
-                        minheap_pop (k, val_, ids_);
-                        minheap_push (k, val_, ids_, ip, j);
-                    }
+                float * val_ = value + thread_no * thread_hash_size + i * k;
+                int64_t * ids_ = labels + thread_no * thread_hash_size + i * k;
+                if (ip > val_[0]) {
+                    minheap_pop (k, val_, ids_);
+                    minheap_push (k, val_, ids_, ip, j);
                 }
             }
-
-            // merge hash
-            float * __restrict simi = res->get_val(i);
-            int64_t * __restrict idxi = res->get_ids (i);
-            minheap_heapify (k, simi, idxi);
-            for (size_t i = 0; i < all_hash_size; i++) {
-                if (value[i] > simi[0]) {
-                    minheap_pop (k, simi, idxi);
-                    minheap_push (k, simi, idxi, value[i], labels[i]);
-                }
-            }
-            minheap_reorder (k, simi, idxi);
         }
-        delete[] value;
-        delete[] labels;
+    }
 
-    } else {
+    for (size_t t = 1; t < thread_max_num; t++) {
+        // merge hash
+        for (size_t i = 0; i < nx; i++) {
+            float * __restrict value_x = value + i * k;
+            int64_t * __restrict labels_x = labels + i * k;
+            float *value_x_t = value_x + t * thread_hash_size;
+            int64_t *labels_x_t = labels_x + t * thread_hash_size;
+            for (size_t j = 0; j < k; j++) {
+                if (value_x_t[j] > value_x[0]) {
+                    minheap_pop (k, value_x, labels_x);
+                    minheap_push (k, value_x, labels_x, value_x_t[j], labels_x_t[j]);
+                }
+            }
+        }
+    }
+
+    for (size_t i = 0; i < nx; i++) {
+        float * value_x = value + i * k;
+        int64_t * labels_x = labels + i * k;
+        minheap_reorder (k, value_x, labels_x);
+    }
+
+    // copy result
+    memcpy(res->val, value, thread_hash_size * sizeof(float));
+    memcpy(res->ids, labels, thread_hash_size * sizeof(int64_t));
+
+    delete[] value;
+    delete[] labels;
+
+/*
+    else {
         size_t check_period = InterruptCallback::get_period_hint (ny * d);
         check_period *= thread_max_num;
 
@@ -230,6 +248,7 @@ static void knn_inner_product_sse (const float * x,
             InterruptCallback::check ();
         }
     }
+    */
 }
 
 static void knn_L2sqr_sse (
@@ -242,55 +261,68 @@ static void knn_L2sqr_sse (
     size_t k = res->k;
 
     size_t thread_max_num = omp_get_max_threads();
-    if (nx < 4) {
-        // omp for ny
-        size_t all_hash_size = thread_max_num * k;
-        float *value = new float[all_hash_size];
-        int64_t *labels = new int64_t[all_hash_size];
 
-        for (size_t i = 0; i < nx; i++) {
-            // init hash
-            for (size_t i = 0; i < all_hash_size; i++) {
-                value[i] = 1.0 / 0.0;
-            }
-            for (size_t i = 0; i < k; i++) {
-                labels[i] = -1;
-            }
-            const float *x_i = x + i * d;
+    size_t thread_hash_size = nx * k;
+    size_t all_hash_size = thread_hash_size * thread_max_num;
+    float *value = new float[all_hash_size];
+    int64_t *labels = new int64_t[all_hash_size];
+
+    // init hash
+    for (size_t i = 0; i < all_hash_size; i++) {
+        value[i] = 1.0 / 0.0;
+        labels[i] = -1;
+    }
+
 #pragma omp parallel for
-            for (size_t j = 0; j < ny; j++) {
-                if(!bitset || !bitset->test(j)) {
-                    const float *y_j = y + j * d;
-                    float disij = fvec_L2sqr (x_i, y_j, d);
+    for (size_t j = 0; j < ny; j++) {
+        if(!bitset || !bitset->test(j)) {
+            size_t thread_no = omp_get_thread_num();
+            const float *y_j = y + j * d;
+            for (size_t i = 0; i < nx; i++) {
+                const float *x_i = x + i * d;
+                float disij = fvec_L2sqr (x_i, y_j, d);
 
-                    size_t thread_no = omp_get_thread_num();
-                    float * __restrict val_ = value + thread_no * k;
-                    int64_t * __restrict ids_ = labels + thread_no * k;
-                    if (disij < val_[0]) {
-                        maxheap_pop (k, val_, ids_);
-                        maxheap_push (k, val_, ids_, disij, j);
-                    }
+                float * val_ = value + thread_no * thread_hash_size + i * k;
+                int64_t * ids_ = labels + thread_no * thread_hash_size + i * k;
+                if (disij < val_[0]) {
+                    maxheap_pop (k, val_, ids_);
+                    maxheap_push (k, val_, ids_, disij, j);
                 }
             }
-
-            // merge hash
-            float * __restrict simi = res->get_val(i);
-            int64_t * __restrict idxi = res->get_ids (i);
-            memcpy(simi, value, k * sizeof(float));
-            memcpy(idxi, labels, k * sizeof(int64_t));
-            maxheap_heapify (k, simi, idxi, value, labels, k);
-            for (size_t i = k; i < all_hash_size; i++) {
-                if (value[i] < simi[0]) {
-                    maxheap_pop (k, simi, idxi);
-                    maxheap_push (k, simi, idxi, value[i], labels[i]);
-                }
-            }
-            maxheap_reorder (k, simi, idxi);
         }
-        delete[] value;
-        delete[] labels;
+    }
 
-    } else {
+    for (size_t t = 1; t < thread_max_num; t++) {
+        // merge hash
+        for (size_t i = 0; i < nx; i++) {
+            float * __restrict value_x = value + i * k;
+            int64_t * __restrict labels_x = labels + i * k;
+            float *value_x_t = value_x + t * thread_hash_size;
+            int64_t *labels_x_t = labels_x + t * thread_hash_size;
+            for (size_t j = 0; j < k; j++) {
+                if (value_x_t[j] < value_x[0]) {
+                    maxheap_pop (k, value_x, labels_x);
+                    maxheap_push (k, value_x, labels_x, value_x_t[j], labels_x_t[j]);
+                }
+            }
+        }
+    }
+
+    for (size_t i = 0; i < nx; i++) {
+        float * value_x = value + i * k;
+        int64_t * labels_x = labels + i * k;
+        maxheap_reorder (k, value_x, labels_x);
+    }
+
+    // copy result
+    memcpy(res->val, value, thread_hash_size * sizeof(float));
+    memcpy(res->ids, labels, thread_hash_size * sizeof(int64_t));
+
+    delete[] value;
+    delete[] labels;
+
+    /*
+    else {
         size_t check_period = InterruptCallback::get_period_hint (ny * d);
         check_period *= thread_max_num;
 
@@ -322,6 +354,7 @@ static void knn_L2sqr_sse (
             InterruptCallback::check ();
         }
     }
+    */
 }
 
 
