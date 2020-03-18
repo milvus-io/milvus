@@ -670,11 +670,13 @@ ExecutionEngineImpl::BuildIndex(const std::string& location, EngineType engine_t
         bin_from_index->GetBlacklist(blacklist);
     }
 
+#ifdef MILVUS_GPU_VERSION
     /* for GPU index, need copy back to CPU */
     if (to_index->index_mode() == knowhere::IndexMode::MODE_GPU) {
         auto device_index = std::dynamic_pointer_cast<knowhere::GPUIndex>(to_index);
         to_index = device_index->CopyGpuToCpu(conf);
     }
+#endif
 
     to_index->SetUids(uids);
     ENGINE_LOG_DEBUG << "Set " << to_index->GetUids().size() << "uids for " << location;
