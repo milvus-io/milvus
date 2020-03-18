@@ -450,11 +450,12 @@ class TestIndexBase:
         logging.getLogger().info(get_index)
         # status, ids = connect.add_vectors(collection, vectors)
         status = connect.create_index(collection, index_type, index_param)
-        status, result = connect.describe_index(collection)
-        logging.getLogger().info(result)
-        assert result._params == index_param
-        assert result._collection_name == collection
-        assert result._index_type == index_type
+        if status.OK():
+            status, result = connect.describe_index(collection)
+            logging.getLogger().info(result)
+            assert result._params == index_param
+            assert result._collection_name == collection
+            assert result._index_type == index_type
 
     def test_describe_and_drop_index_multi_collections(self, connect, get_simple_index):
         '''

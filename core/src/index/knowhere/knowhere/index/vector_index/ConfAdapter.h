@@ -12,6 +12,7 @@
 #pragma once
 
 #include <memory>
+#include <vector>
 
 #include "knowhere/common/Config.h"
 #include "knowhere/index/vector_index/IndexType.h"
@@ -48,6 +49,9 @@ class IVFPQConfAdapter : public IVFConfAdapter {
  public:
     bool
     CheckTrain(Config& oricfg, const IndexMode mode) override;
+
+    static void
+    GetValidMList(int64_t dimension, std::vector<int64_t>& resset);
 };
 
 class NSGConfAdapter : public IVFConfAdapter {

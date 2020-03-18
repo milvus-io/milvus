@@ -8,13 +8,13 @@ namespace faiss {
 
         SuperstructureComputer8 (const uint8_t *a8, int code_size) {
             set (a8, code_size);
-            accu_den = (float)(popcount64 (a0));
         }
 
         void set (const uint8_t *a8, int code_size) {
             assert (code_size == 8);
             const uint64_t *a = (uint64_t *)a8;
             a0 = a[0];
+            accu_den = (float)(popcount64 (a0));
         }
 
         inline float compute (const uint8_t *b8) const {
@@ -35,13 +35,13 @@ namespace faiss {
 
         SuperstructureComputer16 (const uint8_t *a8, int code_size) {
             set (a8, code_size);
-            accu_den = (float)(popcount64 (a0) + popcount64 (a1));
         }
 
         void set (const uint8_t *a8, int code_size) {
             assert (code_size == 16);
             const uint64_t *a = (uint64_t *)a8;
             a0 = a[0]; a1 = a[1];
+            accu_den = (float)(popcount64 (a0) + popcount64 (a1));
         }
 
         inline float compute (const uint8_t *b8) const {
