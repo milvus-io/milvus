@@ -1153,7 +1153,7 @@ class TestSearchParamsInvalid(object):
         if index_type in [IndexType.IVFLAT, IndexType.IVF_SQ8, IndexType.IVF_SQ8H]:
             connect.create_index(collection, index_type, {"nlist": 16384})
         if (index_type == IndexType.IVF_PQ):
-            connect.create_index(collection, index_type, {"nlist": 16384, "m": 10})
+            connect.create_index(collection, index_type, {"nlist": 16384, "m": 16})
         if(index_type == IndexType.HNSW):
             connect.create_index(collection, index_type, {"M": 16, "efConstruction": 500})
         if (index_type == IndexType.RNSG):

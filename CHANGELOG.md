@@ -10,6 +10,7 @@ Please mark all change in change log and use the issue from GitHub
 -   \#1635 Vectors can be returned by searching after vectors deleted if `cache_insert_data` set true
 -   \#1648 The cache cannot be used all when the vector type is binary
 -   \#1651 Check validity of dimension when collection metric type is binary one
+-   \#1663 PQ index parameter 'm' validation
 
 ## Feature
 -   \#1603 BinaryFlat add 2 Metric: Substructure and Superstructure
@@ -21,7 +22,7 @@ Please mark all change in change log and use the issue from GitHub
 -   \#1548 Move store/Directory to storage/Operation and add FSHandler
 -   \#1619 Improve compact performance
 -   \#1649 Fix Milvus crash on old CPU 
--   \#1653 IndexFlat performance improvement for NQ < thread_number
+-   \#1653 IndexFlat performance improvement for NQ less than thread_number
 
 ## Task
 

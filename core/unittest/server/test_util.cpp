@@ -551,6 +551,29 @@ TEST(ValidationUtilTest, VALIDATE_INDEX_PARAMS_TEST) {
                                                             table_schema,
                                                             (int32_t)milvus::engine::EngineType::NSG_MIX);
     ASSERT_TRUE(status.ok());
+
+    // special check for PQ 'm'
+    json_params = {{"nlist", 32}, {"m", 4}};
+    status =
+        milvus::server::ValidationUtil::ValidateIndexParams(json_params,
+                                                            table_schema,
+                                                            (int32_t)milvus::engine::EngineType::FAISS_PQ);
+    ASSERT_TRUE(status.ok());
+
+    json_params = {{"nlist", 32}, {"m", 3}};
+    status =
+        milvus::server::ValidationUtil::ValidateIndexParams(json_params,
+                                                            table_schema,
+                                                            (int32_t)milvus::engine::EngineType::FAISS_PQ);
+    ASSERT_FALSE(status.ok());
+
+    table_schema.dimension_ = 99;
+    json_params = {{"nlist", 32}, {"m", 4}};
+    status =
+        milvus::server::ValidationUtil::ValidateIndexParams(json_params,
+                                                            table_schema,
+                                                            (int32_t)milvus::engine::EngineType::FAISS_PQ);
+    ASSERT_FALSE(status.ok());
 }
 
 TEST(ValidationUtilTest, VALIDATE_SEARCH_PARAMS_TEST) {
