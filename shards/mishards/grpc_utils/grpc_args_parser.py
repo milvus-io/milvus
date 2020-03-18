@@ -96,22 +96,21 @@ class GrpcArgsParser(object):
         _table_name = param.table_name
         _topk = param.topk
 
-        # if not _status.OK():
-        #     raise Exception("Argument parse error")
+        if len(param.extra_params) == 0:
+            raise Exception("Search param loss")
+        _params = ujson.loads(str(param.extra_params[0].value))
 
-        _row_record = param.query_record_array
+        _query_record_array = []
+        if param.query_record_array:
+            for record in param.query_record_array:
+                if record.float_data:
+                    _query_record_array.append(list(record.float_data))
+                else:
+                    _query_record_array.append(bytes(record.binary_data))
+        else:
+            raise Exception("Search argument parse error: record array is empty")
 
-        return _table_name, _row_record, _range, _topk
-
-    # @classmethod
-    # @error_status
-    # def parse_proto_DeleteByRangeParam(cls, param):
-    #     _table_name = param.table_name
-    #     _range = param.range
-    #     _start_value = _range.start_value
-    #     _end_value = _range.end_value
-
-    #     return _table_name, _start_value, _end_value
+        return _table_name, _query_record_array, _topk, _params
 
     @classmethod
     @error_status

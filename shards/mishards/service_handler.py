@@ -522,28 +522,6 @@ class ServiceHandler(milvus_pb2_grpc.MilvusServiceServicer):
             error_code=_status.code, reason=_status.message),
             table_names=_results)
 
-    # def _delete_by_range(self, table_name, start_date, end_date):
-    #     return self.router.connection().delete_vectors_by_range(table_name,
-    #                                                             start_date,
-    #                                                             end_date)
-    #
-    # @mark_grpc_method
-    # def DeleteByRange(self, request, context):
-    #     _status, unpacks = \
-    #         Parser.parse_proto_DeleteByRangeParam(request)
-    #
-    #     if not _status.OK():
-    #         return status_pb2.Status(error_code=_status.code,
-    #                                  reason=_status.message)
-    #
-    #     _table_name, _start_date, _end_date = unpacks
-    #
-    #     logger.info('DeleteByRange {}: {} {}'.format(_table_name, _start_date,
-    #                                                  _end_date))
-    #     _status = self._delete_by_range(_table_name, _start_date, _end_date)
-    #     return status_pb2.Status(error_code=_status.code,
-    #                              reason=_status.message)
-
     def _preload_table(self, table_name):
         return self.router.connection().preload_collection(table_name)
 
