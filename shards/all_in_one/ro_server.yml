@@ -29,7 +29,7 @@ version: 0.2
 server_config:
   address: 0.0.0.0
   port: 19530
-  deploy_mode: single
+  deploy_mode: cluster_readonly
   time_zone: UTC+8
   web_port: 19121
 
