@@ -482,6 +482,9 @@ class ServiceHandler(milvus_pb2_grpc.MilvusServiceServicer):
     def _get_server_version(self, metadata=None):
         return self.router.connection(metadata=metadata).server_version()
 
+    def _cmd(self, cmd, metadata=None):
+        return self.router.connection(metadata=metadata)._cmd(cmd)
+
     @mark_grpc_method
     def Cmd(self, request, context):
         _status, _cmd = Parser.parse_proto_Command(request)
@@ -499,11 +502,12 @@ class ServiceHandler(milvus_pb2_grpc.MilvusServiceServicer):
                 error_code=status_pb2.SUCCESS),
                 string_reply=json.dumps(stats, indent=2))
 
-        if _cmd == 'version':
-            _status, _reply = self._get_server_version(metadata=metadata)
-        else:
-            _status, _reply = self.router.connection(
-                metadata=metadata).server_status()
+        # if _cmd == 'version':
+        #     _status, _reply = self._get_server_version(metadata=metadata)
+        # else:
+        #     _status, _reply = self.router.connection(
+        #         metadata=metadata).server_status()
+        _status, _reply = self._cmd(_cmd, metadata=metadata)
 
         return milvus_pb2.StringReply(status=status_pb2.Status(
             error_code=_status.code, reason=_status.message),

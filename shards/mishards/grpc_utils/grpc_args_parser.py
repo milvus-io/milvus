@@ -70,14 +70,6 @@ class GrpcArgsParser(object):
 
         return _cmd
 
-    # @classmethod
-    # @error_status
-    # def parse_proto_Range(cls, param):
-    #     _start_value = param.start_value
-    #     _end_value = param.end_value
-
-    #     return _start_value, _end_value
-
     @classmethod
     @error_status
     def parse_proto_RowRecord(cls, param):
