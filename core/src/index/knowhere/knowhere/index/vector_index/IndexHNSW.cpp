@@ -154,8 +154,7 @@ IndexHNSW::Add(const DatasetPtr& dataset_ptr, const Config& config) {
 
     std::lock_guard<std::mutex> lk(mutex_);
 
-    GETTENSOR(dataset_ptr)
-    auto p_ids = dataset_ptr->Get<const int64_t*>(meta::IDS);
+    GETTENSORWITHIDS(dataset_ptr)
 
     //     if (normalize) {
     //         std::vector<float> ep_norm_vector(Dim());
@@ -175,10 +174,10 @@ IndexHNSW::Add(const DatasetPtr& dataset_ptr, const Config& config) {
     //         }
     //     }
 
-    index_->addPoint((void*)(p_data), p_ids[0]);
+    index_->addPoint(p_data, p_ids[0]);
 #pragma omp parallel for
     for (int i = 1; i < rows; ++i) {
-        index_->addPoint((void*)(p_data + Dim() * i), p_ids[i]);
+        index_->addPoint(((float*)p_data + Dim() * i), p_ids[i]);
     }
 }
 
