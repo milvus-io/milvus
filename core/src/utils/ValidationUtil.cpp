@@ -15,6 +15,7 @@
 #include "db/engine/ExecutionEngine.h"
 #include "index/knowhere/knowhere/index/vector_index/helpers/IndexParameter.h"
 #include "utils/StringHelpFunctions.h"
+#include "wrapper/ConfAdapter.h"
 
 #include <arpa/inet.h>
 
@@ -44,7 +45,9 @@ CheckParameterRange(const milvus::json& json_params, const std::string& param_na
                     bool min_close = true, bool max_closed = true) {
     if (json_params.find(param_name) == json_params.end()) {
         std::string msg = "Parameter list must contain: ";
-        return Status(SERVER_INVALID_ARGUMENT, msg + param_name);
+        msg += param_name;
+        SERVER_LOG_ERROR << msg;
+        return Status(SERVER_INVALID_ARGUMENT, msg);
     }
 
     try {
@@ -60,7 +63,9 @@ CheckParameterRange(const milvus::json& json_params, const std::string& param_na
         }
     } catch (std::exception& e) {
         std::string msg = "Invalid " + param_name + ": ";
-        return Status(SERVER_INVALID_ARGUMENT, msg + e.what());
+        msg += e.what();
+        SERVER_LOG_ERROR << msg;
+        return Status(SERVER_INVALID_ARGUMENT, msg);
     }
 
     return Status::OK();
@@ -70,7 +75,9 @@ Status
 CheckParameterExistence(const milvus::json& json_params, const std::string& param_name) {
     if (json_params.find(param_name) == json_params.end()) {
         std::string msg = "Parameter list must contain: ";
-        return Status(SERVER_INVALID_ARGUMENT, msg + param_name);
+        msg += param_name;
+        SERVER_LOG_ERROR << msg;
+        return Status(SERVER_INVALID_ARGUMENT, msg);
     }
 
     try {
@@ -82,7 +89,9 @@ CheckParameterExistence(const milvus::json& json_params, const std::string& para
         }
     } catch (std::exception& e) {
         std::string msg = "Invalid " + param_name + ": ";
-        return Status(SERVER_INVALID_ARGUMENT, msg + e.what());
+        msg += e.what();
+        SERVER_LOG_ERROR << msg;
+        return Status(SERVER_INVALID_ARGUMENT, msg);
     }
 
     return Status::OK();
@@ -199,6 +208,31 @@ ValidationUtil::ValidateIndexParams(const milvus::json& index_params, const engi
             status = CheckParameterExistence(index_params, knowhere::IndexParams::m);
             if (!status.ok()) {
                 return status;
+            }
+
+            // special check for 'm' parameter
+            std::vector<int64_t> resset;
+            milvus::engine::IVFPQConfAdapter::GetValidMList(table_schema.dimension_, resset);
+            int64_t m_value = index_params[index_params, knowhere::IndexParams::m];
+            if (resset.empty()) {
+                std::string msg = "Invalid table dimension, unable to get reasonable values for 'm'";
+                SERVER_LOG_ERROR << msg;
+                return Status(SERVER_INVALID_TABLE_DIMENSION, msg);
+            }
+
+            auto iter = std::find(std::begin(resset), std::end(resset), m_value);
+            if (iter == std::end(resset)) {
+                std::string msg =
+                    "Invalid " + std::string(knowhere::IndexParams::m) + ", must be one of the following values: ";
+                for (size_t i = 0; i < resset.size(); i++) {
+                    if (i != 0) {
+                        msg += ",";
+                    }
+                    msg += std::to_string(resset[i]);
+                }
+
+                SERVER_LOG_ERROR << msg;
+                return Status(SERVER_INVALID_ARGUMENT, msg);
             }
 
             break;

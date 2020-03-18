@@ -182,6 +182,18 @@ IVFPQConfAdapter::CheckTrain(milvus::json& oricfg) {
     // static int64_t MAX_POINTS_PER_CENTROID = 256;
     // CheckIntByRange(knowhere::meta::ROWS, MIN_POINTS_PER_CENTROID * nlist, MAX_POINTS_PER_CENTROID * nlist);
 
+    std::vector<int64_t> resset;
+    int64_t dimension = oricfg[knowhere::meta::DIM].get<int64_t>();
+    IVFPQConfAdapter::GetValidMList(dimension, resset);
+
+    CheckIntByValues(knowhere::IndexParams::m, resset);
+
+    return true;
+}
+
+void
+IVFPQConfAdapter::GetValidMList(int64_t dimension, std::vector<int64_t>& resset) {
+    resset.clear();
     /*
      * Faiss 1.6
      * Only 1, 2, 3, 4, 6, 8, 10, 12, 16, 20, 24, 28, 32 dims per sub-quantizer are currently supported with
@@ -189,19 +201,16 @@ IVFPQConfAdapter::CheckTrain(milvus::json& oricfg) {
      */
     static std::vector<int64_t> support_dim_per_subquantizer{32, 28, 24, 20, 16, 12, 10, 8, 6, 4, 3, 2, 1};
     static std::vector<int64_t> support_subquantizer{96, 64, 56, 48, 40, 32, 28, 24, 20, 16, 12, 8, 4, 3, 2, 1};
-    std::vector<int64_t> resset;
+
     for (const auto& dimperquantizer : support_dim_per_subquantizer) {
-        if (!(oricfg[knowhere::meta::DIM].get<int64_t>() % dimperquantizer)) {
-            auto subquantzier_num = oricfg[knowhere::meta::DIM].get<int64_t>() / dimperquantizer;
+        if (!(dimension % dimperquantizer)) {
+            auto subquantzier_num = dimension / dimperquantizer;
             auto finder = std::find(support_subquantizer.begin(), support_subquantizer.end(), subquantzier_num);
             if (finder != support_subquantizer.end()) {
                 resset.push_back(subquantzier_num);
             }
         }
     }
-    CheckIntByValues(knowhere::IndexParams::m, resset);
-
-    return true;
 }
 
 bool
