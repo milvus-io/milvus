@@ -189,7 +189,7 @@ TEST_F(EngineTest, ENGINE_IMPL_TEST) {
 
         //CPU version invoke CopyToCpu will fail
         auto status = engine_ptr->CopyToCpu();
-        ASSERT_TRUE(status.ok());
+        ASSERT_FALSE(status.ok());
     }
 
 #ifdef MILVUS_GPU_VERSION

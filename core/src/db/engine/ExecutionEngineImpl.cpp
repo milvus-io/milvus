@@ -619,8 +619,11 @@ ExecutionEngineImpl::CopyToCpu() {
     if (!already_in_cache) {
         Cache();
     }
-#endif
     return Status::OK();
+#else
+    ENGINE_LOG_ERROR << "Calling ExecutionEngineImpl::CopyToCpu when using CPU version";
+    return Status(DB_ERROR, "Calling ExecutionEngineImpl::CopyToCpu when using CPU version");
+#endif
 }
 
 ExecutionEnginePtr
