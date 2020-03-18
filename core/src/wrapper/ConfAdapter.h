@@ -12,6 +12,7 @@
 #pragma once
 
 #include <memory>
+#include <vector>
 
 #include "VecIndex.h"
 #include "utils/Json.h"
@@ -56,6 +57,9 @@ class IVFPQConfAdapter : public IVFConfAdapter {
  public:
     bool
     CheckTrain(milvus::json& oricfg) override;
+
+    static void
+    GetValidMList(int64_t dimension, std::vector<int64_t>& resset);
 };
 
 class NSGConfAdapter : public IVFConfAdapter {
