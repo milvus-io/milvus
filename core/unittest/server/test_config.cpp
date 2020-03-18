@@ -1134,7 +1134,8 @@ TEST_F(ConfigTest, SERVER_CONFIG_UPDATE_TEST) {
     std::string reply_set, reply_get;
     std::string cmd_set, cmd_get;
 
-    auto lambda = [&conf_file](const std::string& key, const std::string& child_key, const std::string& default_value, std::string& value) {
+    auto lambda = [&conf_file](const std::string& key, const std::string& child_key,
+        const std::string& default_value, std::string& value) {
         auto * ymgr = milvus::server::YamlConfigMgr::GetInstance();
         auto status = ymgr->LoadConfigFile(conf_file);
 
@@ -1154,50 +1155,59 @@ TEST_F(ConfigTest, SERVER_CONFIG_UPDATE_TEST) {
     cmd_set = gen_set_command(ms::CONFIG_CACHE, ms::CONFIG_CACHE_INSERT_BUFFER_SIZE, "2");
     ASSERT_TRUE(config.ProcessConfigCli(reply_set, cmd_set).ok());
 
-    ASSERT_TRUE(lambda(ms::CONFIG_CACHE, ms::CONFIG_CACHE_INSERT_BUFFER_SIZE, ms::CONFIG_CACHE_INSERT_BUFFER_SIZE_DEFAULT, yaml_value).ok());
+    ASSERT_TRUE(lambda(ms::CONFIG_CACHE, ms::CONFIG_CACHE_INSERT_BUFFER_SIZE,
+        ms::CONFIG_CACHE_INSERT_BUFFER_SIZE_DEFAULT, yaml_value).ok());
     ASSERT_EQ("2", yaml_value);
 
     // test boolean config value
     cmd_set = gen_set_command(ms::CONFIG_METRIC, ms::CONFIG_METRIC_ENABLE_MONITOR, "True");
     ASSERT_TRUE(config.ProcessConfigCli(reply_set, cmd_set).ok());
-    ASSERT_TRUE(lambda(ms::CONFIG_METRIC, ms::CONFIG_METRIC_ENABLE_MONITOR, ms::CONFIG_METRIC_ENABLE_MONITOR_DEFAULT, yaml_value).ok());
+    ASSERT_TRUE(lambda(ms::CONFIG_METRIC, ms::CONFIG_METRIC_ENABLE_MONITOR,
+        ms::CONFIG_METRIC_ENABLE_MONITOR_DEFAULT, yaml_value).ok());
     ASSERT_EQ("true", yaml_value);
 
     cmd_set = gen_set_command(ms::CONFIG_METRIC, ms::CONFIG_METRIC_ENABLE_MONITOR, "On");
     ASSERT_TRUE(config.ProcessConfigCli(reply_set, cmd_set).ok());
-    ASSERT_TRUE(lambda(ms::CONFIG_METRIC, ms::CONFIG_METRIC_ENABLE_MONITOR, ms::CONFIG_METRIC_ENABLE_MONITOR_DEFAULT, yaml_value).ok());
+    ASSERT_TRUE(lambda(ms::CONFIG_METRIC, ms::CONFIG_METRIC_ENABLE_MONITOR,
+        ms::CONFIG_METRIC_ENABLE_MONITOR_DEFAULT, yaml_value).ok());
     ASSERT_EQ("true", yaml_value);
 
     cmd_set = gen_set_command(ms::CONFIG_METRIC, ms::CONFIG_METRIC_ENABLE_MONITOR, "False");
     ASSERT_TRUE(config.ProcessConfigCli(reply_set, cmd_set).ok());
-    ASSERT_TRUE(lambda(ms::CONFIG_METRIC, ms::CONFIG_METRIC_ENABLE_MONITOR, ms::CONFIG_METRIC_ENABLE_MONITOR_DEFAULT, yaml_value).ok());
+    ASSERT_TRUE(lambda(ms::CONFIG_METRIC, ms::CONFIG_METRIC_ENABLE_MONITOR,
+        ms::CONFIG_METRIC_ENABLE_MONITOR_DEFAULT, yaml_value).ok());
     ASSERT_EQ("false", yaml_value);
 
     cmd_set = gen_set_command(ms::CONFIG_METRIC, ms::CONFIG_METRIC_ENABLE_MONITOR, "Off");
     ASSERT_TRUE(config.ProcessConfigCli(reply_set, cmd_set).ok());
-    ASSERT_TRUE(lambda(ms::CONFIG_METRIC, ms::CONFIG_METRIC_ENABLE_MONITOR, ms::CONFIG_METRIC_ENABLE_MONITOR_DEFAULT, yaml_value).ok());
+    ASSERT_TRUE(lambda(ms::CONFIG_METRIC, ms::CONFIG_METRIC_ENABLE_MONITOR,
+        ms::CONFIG_METRIC_ENABLE_MONITOR_DEFAULT, yaml_value).ok());
     ASSERT_EQ("false", yaml_value);
 
     // test path
     cmd_set = gen_set_command(ms::CONFIG_STORAGE, ms::CONFIG_STORAGE_PRIMARY_PATH, "/tmp/milvus_config_unittest");
     ASSERT_TRUE(config.ProcessConfigCli(reply_set, cmd_set).ok());
-    ASSERT_TRUE(lambda(ms::CONFIG_STORAGE, ms::CONFIG_STORAGE_PRIMARY_PATH, ms::CONFIG_STORAGE_PRIMARY_PATH_DEFAULT, yaml_value).ok());
+    ASSERT_TRUE(lambda(ms::CONFIG_STORAGE, ms::CONFIG_STORAGE_PRIMARY_PATH,
+        ms::CONFIG_STORAGE_PRIMARY_PATH_DEFAULT, yaml_value).ok());
     ASSERT_EQ("/tmp/milvus_config_unittest", yaml_value);
 
     cmd_set = gen_set_command(ms::CONFIG_STORAGE, ms::CONFIG_STORAGE_SECONDARY_PATH, "/home/zilliz,/home/milvus");
     ASSERT_TRUE(config.ProcessConfigCli(reply_set, cmd_set).ok());
-    ASSERT_TRUE(lambda(ms::CONFIG_STORAGE, ms::CONFIG_STORAGE_SECONDARY_PATH, ms::CONFIG_STORAGE_SECONDARY_PATH_DEFAULT, yaml_value).ok());
+    ASSERT_TRUE(lambda(ms::CONFIG_STORAGE, ms::CONFIG_STORAGE_SECONDARY_PATH,
+        ms::CONFIG_STORAGE_SECONDARY_PATH_DEFAULT, yaml_value).ok());
     ASSERT_EQ("/home/zilliz,/home/milvus", yaml_value);
 
 #ifdef MILVUS_GPU_VERSION
     cmd_set = gen_set_command(ms::CONFIG_GPU_RESOURCE, ms::CONFIG_GPU_RESOURCE_BUILD_INDEX_RESOURCES, "gpu0");
     ASSERT_TRUE(config.ProcessConfigCli(reply_set, cmd_set).ok());
-    ASSERT_TRUE(lambda(ms::CONFIG_GPU_RESOURCE, ms::CONFIG_GPU_RESOURCE_BUILD_INDEX_RESOURCES, ms::CONFIG_GPU_RESOURCE_BUILD_INDEX_RESOURCES_DEFAULT, yaml_value).ok());
+    ASSERT_TRUE(lambda(ms::CONFIG_GPU_RESOURCE, ms::CONFIG_GPU_RESOURCE_BUILD_INDEX_RESOURCES,
+        ms::CONFIG_GPU_RESOURCE_BUILD_INDEX_RESOURCES_DEFAULT, yaml_value).ok());
     ASSERT_EQ("gpu0", yaml_value);
 
     cmd_set = gen_set_command(ms::CONFIG_GPU_RESOURCE, ms::CONFIG_GPU_RESOURCE_BUILD_INDEX_RESOURCES, "GPU0");
     ASSERT_TRUE(config.ProcessConfigCli(reply_set, cmd_set).ok());
-    ASSERT_TRUE(lambda(ms::CONFIG_GPU_RESOURCE, ms::CONFIG_GPU_RESOURCE_BUILD_INDEX_RESOURCES, ms::CONFIG_GPU_RESOURCE_BUILD_INDEX_RESOURCES_DEFAULT, yaml_value).ok());
+    ASSERT_TRUE(lambda(ms::CONFIG_GPU_RESOURCE, ms::CONFIG_GPU_RESOURCE_BUILD_INDEX_RESOURCES,
+        ms::CONFIG_GPU_RESOURCE_BUILD_INDEX_RESOURCES_DEFAULT, yaml_value).ok());
     ASSERT_EQ("gpu0", yaml_value);
 #endif
 }
