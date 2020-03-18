@@ -32,6 +32,7 @@
 #include "knowhere/index/vector_index/VecIndexFactory.h"
 #include "knowhere/index/vector_index/adapter/VectorAdapter.h"
 #ifdef MILVUS_GPU_VERSION
+#include "knowhere/index/vector_index/gpu/GPUIndex.h"
 #include "knowhere/index/vector_index/gpu/IndexIVFSQHybrid.h"
 #include "knowhere/index/vector_index/gpu/Quantizer.h"
 #include "knowhere/index/vector_index/helpers/Cloner.h"
@@ -46,7 +47,6 @@
 #include "utils/TimeRecorder.h"
 #include "utils/ValidationUtil.h"
 
-//#define ON_SEARCH
 namespace milvus {
 namespace engine {
 
@@ -669,6 +669,13 @@ ExecutionEngineImpl::BuildIndex(const std::string& location, EngineType engine_t
         uids = bin_from_index->GetUids();
         bin_from_index->GetBlacklist(blacklist);
     }
+
+    /* for GPU index, need copy back to CPU */
+    if (to_index->index_mode() == knowhere::IndexMode::MODE_GPU) {
+        auto device_index = std::dynamic_pointer_cast<knowhere::GPUIndex>(to_index);
+        to_index = device_index->CopyGpuToCpu(conf);
+    }
+
     to_index->SetUids(uids);
     ENGINE_LOG_DEBUG << "Set " << to_index->GetUids().size() << "uids for " << location;
     if (blacklist != nullptr) {
