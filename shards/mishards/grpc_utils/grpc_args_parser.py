@@ -117,7 +117,7 @@ class GrpcArgsParser(object):
     @error_status
     def parse_proto_DeleteByIDParam(cls, param):
         _table_name = param.table_name
-        _id_array = list(_table_name.id_array)
+        _id_array = list(param.id_array)
 
         return _table_name, _id_array
 

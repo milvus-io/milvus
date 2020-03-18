@@ -149,6 +149,8 @@ class ServiceHandler(milvus_pb2_grpc.MilvusServiceServicer):
                                                         query_records=vectors,
                                                         top_k=topk,
                                                         params=params)
+                if ret.status.error_code != 0:
+                    logger.error(ret.status)
                 end = time.time()
 
                 all_topk_results.append(ret)
@@ -156,7 +158,7 @@ class ServiceHandler(milvus_pb2_grpc.MilvusServiceServicer):
         with self.tracer.start_span('do_search', child_of=p_span) as span:
             with ThreadPoolExecutor(max_workers=self.max_workers) as pool:
                 for addr, params in routing.items():
-                    for table_id, file_ids in params.items():
+                    for sub_table_id, file_ids in params.items():
                         res = pool.submit(search,
                                           addr,
                                           table_id,
@@ -351,11 +353,6 @@ class ServiceHandler(milvus_pb2_grpc.MilvusServiceServicer):
             for query_record in request.query_record_array:
                 query_record_array.append(list(query_record.float_data))
 
-        # query_range_array = []
-        # for query_range in request.query_range_array:
-        #     query_range_array.append(
-        #         Range(query_range.start_value, query_range.end_value))
-
         status, id_results, dis_results = self._do_query(context,
                                                          table_name,
                                                          table_meta,
@@ -367,7 +364,7 @@ class ServiceHandler(milvus_pb2_grpc.MilvusServiceServicer):
                                                          metadata=metadata)
 
         now = time.time()
-        # logger.info('SearchVector takes: {}'.format(now - start))
+        logger.info('SearchVector takes: {}'.format(now - start))
 
         topk_result_list = milvus_pb2.TopKQueryResult(
             status=status_pb2.Status(error_code=status.error_code,
@@ -585,8 +582,6 @@ class ServiceHandler(milvus_pb2_grpc.MilvusServiceServicer):
                 error_code=_status.code, reason=_status.message))
 
         _index_type = _index_param._index_type
-        # _index = milvus_pb2.Index(index_type=_index_param._index_type,
-        #                           nlist=_index_param._nlist)
 
         grpc_index = milvus_pb2.IndexParam(status=status_pb2.Status(
             error_code=_status.code, reason=_status.message),
@@ -659,6 +654,7 @@ class ServiceHandler(milvus_pb2_grpc.MilvusServiceServicer):
         _status, unpacks = Parser.parse_proto_DeleteByIDParam(request)
 
         if not _status.OK():
+            logging.error('DeleteByID {}'.format(_status.message))
             return status_pb2.Status(error_code=_status.code,
                                      reason=_status.message)
 
