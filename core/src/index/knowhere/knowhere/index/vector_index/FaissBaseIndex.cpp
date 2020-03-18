@@ -37,7 +37,7 @@ FaissBaseIndex::SerializeImpl(const IndexType& type) {
 
         BinarySet res_set;
         // TODO(linxj): use virtual func Name() instead of raw string.
-        res_set.Append(IndexTypeToStr(type), data, writer.rp);
+        res_set.Append("IVF", data, writer.rp);
         return res_set;
     } catch (std::exception& e) {
         KNOWHERE_THROW_MSG(e.what());
@@ -46,7 +46,7 @@ FaissBaseIndex::SerializeImpl(const IndexType& type) {
 
 void
 FaissBaseIndex::LoadImpl(const BinarySet& binary_set, const IndexType& type) {
-    auto binary = binary_set.GetByName(IndexTypeToStr(type));
+    auto binary = binary_set.GetByName("IVF");
 
     MemoryIOReader reader;
     reader.total = binary->size;

@@ -120,7 +120,7 @@ TEST_F(IDMAPTest, idmap_serialize) {
         EXPECT_EQ(index_->Count(), nb);
         EXPECT_EQ(index_->Dim(), dim);
         auto binaryset = index_->Serialize();
-        auto bin = binaryset.GetByName("IDMAP");
+        auto bin = binaryset.GetByName("IVF");
 
         std::string filename = "/tmp/idmap_test_serialize.bin";
         auto load_data = new uint8_t[bin->size];
@@ -129,7 +129,7 @@ TEST_F(IDMAPTest, idmap_serialize) {
         binaryset.clear();
         auto data = std::make_shared<uint8_t>();
         data.reset(load_data);
-        binaryset.Append("IDMAP", data, bin->size);
+        binaryset.Append("IVF", data, bin->size);
 
         index_->Load(binaryset);
         EXPECT_EQ(index_->Count(), nb);

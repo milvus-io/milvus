@@ -56,7 +56,7 @@ GPUIDMAP::SerializeImpl(const IndexType& type) {
         data.reset(writer.data_);
 
         BinarySet res_set;
-        res_set.Append(IndexTypeToStr(type), data, writer.rp);
+        res_set.Append("IVF", data, writer.rp);
 
         return res_set;
     } catch (std::exception& e) {
@@ -66,7 +66,7 @@ GPUIDMAP::SerializeImpl(const IndexType& type) {
 
 void
 GPUIDMAP::LoadImpl(const BinarySet& index_binary, const IndexType& type) {
-    auto binary = index_binary.GetByName(IndexTypeToStr(type));
+    auto binary = index_binary.GetByName("IVF");
     MemoryIOReader reader;
     {
         reader.total = binary->size;

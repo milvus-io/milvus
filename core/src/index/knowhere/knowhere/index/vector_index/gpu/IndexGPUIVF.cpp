@@ -84,7 +84,7 @@ GPUIVF::SerializeImpl(const IndexType& type) {
         data.reset(writer.data_);
 
         BinarySet res_set;
-        res_set.Append(IndexTypeToStr(type), data, writer.rp);
+        res_set.Append("IVF", data, writer.rp);
 
         return res_set;
     } catch (std::exception& e) {
@@ -94,7 +94,7 @@ GPUIVF::SerializeImpl(const IndexType& type) {
 
 void
 GPUIVF::LoadImpl(const BinarySet& binary_set, const IndexType& type) {
-    auto binary = binary_set.GetByName(IndexTypeToStr(type));
+    auto binary = binary_set.GetByName("IVF");
     MemoryIOReader reader;
     {
         reader.total = binary->size;

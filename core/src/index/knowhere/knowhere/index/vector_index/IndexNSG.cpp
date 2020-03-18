@@ -47,7 +47,7 @@ NSG::Serialize(const Config& config) {
         data.reset(writer.data_);
 
         BinarySet res_set;
-        res_set.Append(IndexTypeToStr(index_type_), data, writer.total);
+        res_set.Append("NSG", data, writer.total);
         return res_set;
     } catch (std::exception& e) {
         KNOWHERE_THROW_MSG(e.what());
@@ -59,7 +59,7 @@ NSG::Load(const BinarySet& index_binary) {
     try {
         fiu_do_on("NSG.Load.throw_exception", throw std::exception());
         std::lock_guard<std::mutex> lk(mutex_);
-        auto binary = index_binary.GetByName(IndexTypeToStr(index_type_));
+        auto binary = index_binary.GetByName("NSG");
 
         MemoryIOReader reader;
         reader.total = binary->size;

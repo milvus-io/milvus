@@ -160,7 +160,7 @@ TEST_P(IVFTest, ivf_serialize) {
         index_->Train(base_dataset, conf_);
         index_->Add(base_dataset, conf_);
         auto binaryset = index_->Serialize();
-        auto bin = binaryset.GetByName(milvus::knowhere::IndexTypeToStr(index_type_));
+        auto bin = binaryset.GetByName("IVF");
 
         std::string filename = "/tmp/ivf_test_serialize.bin";
         auto load_data = new uint8_t[bin->size];
@@ -169,7 +169,7 @@ TEST_P(IVFTest, ivf_serialize) {
         binaryset.clear();
         auto data = std::make_shared<uint8_t>();
         data.reset(load_data);
-        binaryset.Append(milvus::knowhere::IndexTypeToStr(index_type_), data, bin->size);
+        binaryset.Append("IVF", data, bin->size);
 
         index_->Load(binaryset);
         EXPECT_EQ(index_->Count(), nb);

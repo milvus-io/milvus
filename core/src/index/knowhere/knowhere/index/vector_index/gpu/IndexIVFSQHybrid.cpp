@@ -231,7 +231,7 @@ IVFSQHybrid::SerializeImpl(const IndexType& type) {
         data.reset(writer.data_);
 
         BinarySet res_set;
-        res_set.Append(IndexTypeToStr(type), data, writer.rp);
+        res_set.Append("IVF", data, writer.rp);
 
         return res_set;
     } else if (gpu_mode_ == 2) {
