@@ -22,11 +22,11 @@ namespace knowhere {
 class IVFSQ : public IVF {
  public:
     IVFSQ() : IVF() {
-        index_type_ = IndexType::INDEX_FAISS_IVFSQ8;
+        index_type_ = IndexEnum::INDEX_FAISS_IVFSQ8;
     }
 
     explicit IVFSQ(std::shared_ptr<faiss::Index> index) : IVF(std::move(index)) {
-        index_type_ = IndexType::INDEX_FAISS_IVFSQ8;
+        index_type_ = IndexEnum::INDEX_FAISS_IVFSQ8;
     }
 
     void

@@ -35,19 +35,19 @@ using FaissIVFQuantizerPtr = std::shared_ptr<FaissIVFQuantizer>;
 class IVFSQHybrid : public GPUIVFSQ {
  public:
     explicit IVFSQHybrid(const int& device_id) : GPUIVFSQ(device_id) {
-        index_type_ = IndexType::INDEX_FAISS_IVFSQ8H;
+        index_type_ = IndexEnum::INDEX_FAISS_IVFSQ8H;
         gpu_mode_ = 0;
     }
 
     explicit IVFSQHybrid(std::shared_ptr<faiss::Index> index) : GPUIVFSQ(-1) {
-        index_type_ = IndexType::INDEX_FAISS_IVFSQ8H;
+        index_type_ = IndexEnum::INDEX_FAISS_IVFSQ8H;
         index_ = index;
         gpu_mode_ = 0;
     }
 
     explicit IVFSQHybrid(std::shared_ptr<faiss::Index> index, const int64_t& device_id, ResPtr& resource)
         : GPUIVFSQ(index, device_id, resource) {
-        index_type_ = IndexType::INDEX_FAISS_IVFSQ8H;
+        index_type_ = IndexEnum::INDEX_FAISS_IVFSQ8H;
         gpu_mode_ = 2;
     }
 

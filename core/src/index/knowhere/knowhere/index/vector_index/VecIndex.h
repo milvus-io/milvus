@@ -107,7 +107,7 @@ class VecIndex : public Index {
     }
 
  protected:
-    IndexType index_type_ = IndexType::INVALID;
+    IndexType index_type_ = "";
     IndexMode index_mode_ = IndexMode::MODE_CPU;
     faiss::ConcurrentBitsetPtr bitset_ = nullptr;
 

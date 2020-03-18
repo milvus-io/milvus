@@ -34,7 +34,7 @@ class VecIndexFactory {
     }
 
     knowhere::VecIndexPtr
-    CreateVecIndex(const IndexType type, const IndexMode mode = IndexMode::MODE_CPU);
+    CreateVecIndex(const IndexType& type, const IndexMode mode = IndexMode::MODE_CPU);
 };
 
 }  // namespace knowhere

@@ -85,7 +85,7 @@ MappingMetricType(MetricType metric_type, milvus::json& conf) {
 
 bool
 IsBinaryIndexType(knowhere::IndexType type) {
-    return type == knowhere::IndexType::INDEX_FAISS_BIN_IDMAP || type == knowhere::IndexType::INDEX_FAISS_BIN_IVFFLAT;
+    return type == knowhere::IndexEnum::INDEX_FAISS_BIN_IDMAP || type == knowhere::IndexEnum::INDEX_FAISS_BIN_IVFFLAT;
 }
 
 }  // namespace
@@ -171,51 +171,51 @@ ExecutionEngineImpl::CreatetVecIndex(EngineType type) {
     knowhere::VecIndexPtr index = nullptr;
     switch (type) {
         case EngineType::FAISS_IDMAP: {
-            index = vec_index_factory.CreateVecIndex(knowhere::IndexType::INDEX_FAISS_IDMAP, mode);
+            index = vec_index_factory.CreateVecIndex(knowhere::IndexEnum::INDEX_FAISS_IDMAP, mode);
             break;
         }
         case EngineType::FAISS_IVFFLAT: {
-            index = vec_index_factory.CreateVecIndex(knowhere::IndexType::INDEX_FAISS_IVFFLAT, mode);
+            index = vec_index_factory.CreateVecIndex(knowhere::IndexEnum::INDEX_FAISS_IVFFLAT, mode);
             break;
         }
         case EngineType::FAISS_PQ: {
-            index = vec_index_factory.CreateVecIndex(knowhere::IndexType::INDEX_FAISS_IVFPQ, mode);
+            index = vec_index_factory.CreateVecIndex(knowhere::IndexEnum::INDEX_FAISS_IVFPQ, mode);
             break;
         }
         case EngineType::FAISS_IVFSQ8: {
-            index = vec_index_factory.CreateVecIndex(knowhere::IndexType::INDEX_FAISS_IVFSQ8, mode);
+            index = vec_index_factory.CreateVecIndex(knowhere::IndexEnum::INDEX_FAISS_IVFSQ8, mode);
             break;
         }
 #ifdef CUSTOMIZATION
 #ifdef MILVUS_GPU_VERSION
         case EngineType::FAISS_IVFSQ8H: {
-            index = vec_index_factory.CreateVecIndex(knowhere::IndexType::INDEX_FAISS_IVFSQ8H, mode);
+            index = vec_index_factory.CreateVecIndex(knowhere::IndexEnum::INDEX_FAISS_IVFSQ8H, mode);
             break;
         }
 #endif
 #endif
         case EngineType::FAISS_BIN_IDMAP: {
-            index = vec_index_factory.CreateVecIndex(knowhere::IndexType::INDEX_FAISS_BIN_IDMAP, mode);
+            index = vec_index_factory.CreateVecIndex(knowhere::IndexEnum::INDEX_FAISS_BIN_IDMAP, mode);
             break;
         }
         case EngineType::FAISS_BIN_IVFFLAT: {
-            index = vec_index_factory.CreateVecIndex(knowhere::IndexType::INDEX_FAISS_BIN_IVFFLAT, mode);
+            index = vec_index_factory.CreateVecIndex(knowhere::IndexEnum::INDEX_FAISS_BIN_IVFFLAT, mode);
             break;
         }
         case EngineType::NSG_MIX: {
-            index = vec_index_factory.CreateVecIndex(knowhere::IndexType::INDEX_NSG, mode);
+            index = vec_index_factory.CreateVecIndex(knowhere::IndexEnum::INDEX_NSG, mode);
             break;
         }
         case EngineType::SPTAG_KDT: {
-            index = vec_index_factory.CreateVecIndex(knowhere::IndexType::INDEX_SPTAG_KDT_RNT, mode);
+            index = vec_index_factory.CreateVecIndex(knowhere::IndexEnum::INDEX_SPTAG_KDT_RNT, mode);
             break;
         }
         case EngineType::SPTAG_BKT: {
-            index = vec_index_factory.CreateVecIndex(knowhere::IndexType::INDEX_SPTAG_BKT_RNT, mode);
+            index = vec_index_factory.CreateVecIndex(knowhere::IndexEnum::INDEX_SPTAG_BKT_RNT, mode);
             break;
         }
         case EngineType::HNSW: {
-            index = vec_index_factory.CreateVecIndex(knowhere::IndexType::INDEX_HNSW, mode);
+            index = vec_index_factory.CreateVecIndex(knowhere::IndexEnum::INDEX_HNSW, mode);
             break;
         }
         default: {
@@ -379,9 +379,9 @@ ExecutionEngineImpl::Load(bool to_cache) {
 
         if (utils::IsRawIndexType((int32_t)index_type_)) {
             if (index_type_ == EngineType::FAISS_IDMAP) {
-                index_ = vec_index_factory.CreateVecIndex(knowhere::IndexType::INDEX_FAISS_IDMAP);
+                index_ = vec_index_factory.CreateVecIndex(knowhere::IndexEnum::INDEX_FAISS_IDMAP);
             } else {
-                index_ = vec_index_factory.CreateVecIndex(knowhere::IndexType::INDEX_FAISS_BIN_IDMAP);
+                index_ = vec_index_factory.CreateVecIndex(knowhere::IndexEnum::INDEX_FAISS_BIN_IDMAP);
             }
             milvus::json conf{{knowhere::meta::DEVICEID, gpu_num_}, {knowhere::meta::DIM, dim_}};
             MappingMetricType(metric_type_, conf);

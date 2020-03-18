@@ -37,61 +37,50 @@ namespace milvus {
 namespace knowhere {
 
 VecIndexPtr
-VecIndexFactory::CreateVecIndex(const IndexType type, const IndexMode mode) {
+VecIndexFactory::CreateVecIndex(const IndexType& type, const IndexMode mode) {
     auto gpu_device = -1;  // TODO: remove hardcode here, get from invoker
-    switch (type) {
-        case IndexType::INDEX_FAISS_IDMAP: {
-            return std::make_shared<knowhere::IDMAP>();
-        }
-        case IndexType::INDEX_FAISS_IVFFLAT: {
+    if (type == IndexEnum::INDEX_FAISS_IDMAP) {
+        return std::make_shared<knowhere::IDMAP>();
+    } else if (type == IndexEnum::INDEX_FAISS_IVFFLAT) {
 #ifdef MILVUS_GPU_VERSION
-            if (mode == IndexMode::MODE_GPU) {
-                return std::make_shared<knowhere::GPUIVF>(gpu_device);
-            }
-#endif
-            return std::make_shared<knowhere::IVF>();
-        }
-        case IndexType::INDEX_FAISS_IVFPQ: {
-#ifdef MILVUS_GPU_VERSION
-            if (mode == IndexMode::MODE_GPU) {
-                return std::make_shared<knowhere::GPUIVFPQ>(gpu_device);
-            }
-#endif
-            return std::make_shared<knowhere::IVFPQ>();
-        }
-        case IndexType::INDEX_FAISS_IVFSQ8: {
-#ifdef MILVUS_GPU_VERSION
-            if (mode == IndexMode::MODE_GPU) {
-                return std::make_shared<knowhere::GPUIVFSQ>(gpu_device);
-            }
-#endif
-            return std::make_shared<knowhere::IVFSQ>();
-        }
-#ifdef MILVUS_GPU_VERSION
-        case IndexType::INDEX_FAISS_IVFSQ8H: {
-            return std::make_shared<knowhere::IVFSQHybrid>(gpu_device);
+        if (mode == IndexMode::MODE_GPU) {
+            return std::make_shared<knowhere::GPUIVF>(gpu_device);
         }
 #endif
-        case IndexType::INDEX_FAISS_BIN_IDMAP: {
-            return std::make_shared<knowhere::BinaryIDMAP>();
+        return std::make_shared<knowhere::IVF>();
+    } else if (type == IndexEnum::INDEX_FAISS_IVFPQ) {
+#ifdef MILVUS_GPU_VERSION
+        if (mode == IndexMode::MODE_GPU) {
+            return std::make_shared<knowhere::GPUIVFPQ>(gpu_device);
         }
-        case IndexType::INDEX_FAISS_BIN_IVFFLAT: {
-            return std::make_shared<knowhere::BinaryIVF>();
+#endif
+        return std::make_shared<knowhere::IVFPQ>();
+    } else if (type == IndexEnum::INDEX_FAISS_IVFSQ8) {
+#ifdef MILVUS_GPU_VERSION
+        if (mode == IndexMode::MODE_GPU) {
+            return std::make_shared<knowhere::GPUIVFSQ>(gpu_device);
         }
-        case IndexType::INDEX_NSG: {
-            return std::make_shared<knowhere::NSG>(-1);
-        }
-        case IndexType::INDEX_SPTAG_KDT_RNT: {
-            return std::make_shared<knowhere::CPUSPTAGRNG>("KDT");
-        }
-        case IndexType::INDEX_SPTAG_BKT_RNT: {
-            return std::make_shared<knowhere::CPUSPTAGRNG>("BKT");
-        }
-        case IndexType::INDEX_HNSW: {
-            return std::make_shared<knowhere::IndexHNSW>();
-        }
+#endif
+        return std::make_shared<knowhere::IVFSQ>();
+#ifdef MILVUS_GPU_VERSION
+    } else if (type == IndexEnum::INDEX_FAISS_IVFSQ8H) {
+        return std::make_shared<knowhere::IVFSQHybrid>(gpu_device);
+#endif
+    } else if (type == IndexEnum::INDEX_FAISS_BIN_IDMAP) {
+        return std::make_shared<knowhere::BinaryIDMAP>();
+    } else if (type == IndexEnum::INDEX_FAISS_BIN_IVFFLAT) {
+        return std::make_shared<knowhere::BinaryIVF>();
+    } else if (type == IndexEnum::INDEX_NSG) {
+        return std::make_shared<knowhere::NSG>(-1);
+    } else if (type == IndexEnum::INDEX_SPTAG_KDT_RNT) {
+        return std::make_shared<knowhere::CPUSPTAGRNG>("KDT");
+    } else if (type == IndexEnum::INDEX_SPTAG_BKT_RNT) {
+        return std::make_shared<knowhere::CPUSPTAGRNG>("BKT");
+    } else if (type == IndexEnum::INDEX_HNSW) {
+        return std::make_shared<knowhere::IndexHNSW>();
+    } else {
+        return nullptr;
     }
-    return nullptr;
 }
 
 }  // namespace knowhere

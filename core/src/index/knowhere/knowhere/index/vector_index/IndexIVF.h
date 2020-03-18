@@ -28,11 +28,11 @@ namespace knowhere {
 class IVF : public VecIndex, public FaissBaseIndex {
  public:
     IVF() : FaissBaseIndex(nullptr) {
-        index_type_ = IndexType::INDEX_FAISS_IVFFLAT;
+        index_type_ = IndexEnum::INDEX_FAISS_IVFFLAT;
     }
 
     explicit IVF(std::shared_ptr<faiss::Index> index) : FaissBaseIndex(std::move(index)) {
-        index_type_ = IndexType::INDEX_FAISS_IVFFLAT;
+        index_type_ = IndexEnum::INDEX_FAISS_IVFFLAT;
     }
 
     BinarySet

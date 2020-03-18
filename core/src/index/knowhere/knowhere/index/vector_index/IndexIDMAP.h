@@ -23,11 +23,11 @@ namespace knowhere {
 class IDMAP : public VecIndex, public FaissBaseIndex {
  public:
     IDMAP() : FaissBaseIndex(nullptr) {
-        index_type_ = IndexType::INDEX_FAISS_IDMAP;
+        index_type_ = IndexEnum::INDEX_FAISS_IDMAP;
     }
 
     explicit IDMAP(std::shared_ptr<faiss::Index> index) : FaissBaseIndex(std::move(index)) {
-        index_type_ = IndexType::INDEX_FAISS_IDMAP;
+        index_type_ = IndexEnum::INDEX_FAISS_IDMAP;
     }
 
     BinarySet

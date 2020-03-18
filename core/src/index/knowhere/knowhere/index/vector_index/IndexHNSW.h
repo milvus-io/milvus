@@ -25,7 +25,7 @@ namespace knowhere {
 class IndexHNSW : public VecIndex {
  public:
     IndexHNSW() {
-        index_type_ = IndexType::INDEX_HNSW;
+        index_type_ = IndexEnum::INDEX_HNSW;
     }
 
     BinarySet

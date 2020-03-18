@@ -20,6 +20,7 @@
 #include "config/Config.h"
 #include "index/archive/VecIndex.h"
 #include "knowhere/common/Exception.h"
+#include "knowhere/index/vector_index/IndexType.h"
 #include "knowhere/index/vector_index/VecIndex.h"
 #include "knowhere/index/vector_index/VecIndexFactory.h"
 #include "storage/disk/DiskIOReader.h"
@@ -33,7 +34,7 @@ namespace milvus {
 namespace engine {
 
 knowhere::VecIndexPtr
-LoadVecIndex(const knowhere::IndexType type, const knowhere::BinarySet& index_binary, int64_t size) {
+LoadVecIndex(const knowhere::IndexType& type, const knowhere::BinarySet& index_binary, int64_t size) {
     knowhere::VecIndexFactory& vec_index_factory = knowhere::VecIndexFactory::GetInstance();
     auto index = vec_index_factory.CreateVecIndex(type, knowhere::IndexMode::MODE_CPU);
     if (index == nullptr)
@@ -71,7 +72,7 @@ read_index(const std::string& location) {
     size_t rp = 0;
     reader_ptr->seekg(0);
 
-    auto current_type = knowhere::IndexType::INVALID;
+    int32_t current_type = 0;
     reader_ptr->read(&current_type, sizeof(current_type));
     rp += sizeof(current_type);
     reader_ptr->seekg(rp);
@@ -108,7 +109,7 @@ read_index(const std::string& location) {
     double rate = length * 1000000.0 / span / 1024 / 1024;
     STORAGE_LOG_DEBUG << "read_index(" << location << ") rate " << rate << "MB/s";
 
-    return LoadVecIndex(current_type, load_data_list, length);
+    return LoadVecIndex(knowhere::OldIndexTypeToStr(current_type), load_data_list, length);
 }
 
 milvus::Status
@@ -117,7 +118,7 @@ write_index(knowhere::VecIndexPtr index, const std::string& location) {
         milvus::TimeRecorder recorder("write_index");
 
         auto binaryset = index->Serialize(knowhere::Config());
-        auto index_type = index->index_type();
+        int32_t index_type = knowhere::StrToOldIndexType(index->index_type());
 
         bool s3_enable = false;
         milvus::server::Config& config = milvus::server::Config::GetInstance();

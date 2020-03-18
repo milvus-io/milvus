@@ -22,12 +22,12 @@ namespace knowhere {
 class GPUIVFPQ : public GPUIVF {
  public:
     explicit GPUIVFPQ(const int& device_id) : GPUIVF(device_id) {
-        index_type_ = IndexType::INDEX_FAISS_IVFPQ;
+        index_type_ = IndexEnum::INDEX_FAISS_IVFPQ;
     }
 
     GPUIVFPQ(std::shared_ptr<faiss::Index> index, const int64_t device_id, ResPtr& res)
         : GPUIVF(std::move(index), device_id, res) {
-        index_type_ = IndexType::INDEX_FAISS_IVFPQ;
+        index_type_ = IndexEnum::INDEX_FAISS_IVFPQ;
     }
 
     void

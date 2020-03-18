@@ -31,7 +31,7 @@ class NSG : public VecIndex {
         if (gpu_ >= 0) {
             index_mode_ = IndexMode::MODE_GPU;
         }
-        index_type_ = IndexType::INDEX_NSG;
+        index_type_ = IndexEnum::INDEX_NSG;
     }
 
     BinarySet
