@@ -77,34 +77,34 @@ class ParamGenerator {
     Gen(const milvus::knowhere::IndexType& type) {
         if (type == milvus::knowhere::IndexEnum::INDEX_FAISS_IVFFLAT) {
             return milvus::knowhere::Config{
-                    {milvus::knowhere::meta::DIM,           DIM},
-                    {milvus::knowhere::meta::TOPK,          K},
-                    {milvus::knowhere::IndexParams::nlist,  100},
-                    {milvus::knowhere::IndexParams::nprobe, 4},
-                    {milvus::knowhere::Metric::TYPE,        milvus::knowhere::Metric::L2},
-                    {milvus::knowhere::meta::DEVICEID,      DEVICEID},
+                {milvus::knowhere::meta::DIM, DIM},
+                {milvus::knowhere::meta::TOPK, K},
+                {milvus::knowhere::IndexParams::nlist, 100},
+                {milvus::knowhere::IndexParams::nprobe, 4},
+                {milvus::knowhere::Metric::TYPE, milvus::knowhere::Metric::L2},
+                {milvus::knowhere::meta::DEVICEID, DEVICEID},
             };
         } else if (type == milvus::knowhere::IndexEnum::INDEX_FAISS_IVFPQ) {
             return milvus::knowhere::Config{
-                    {milvus::knowhere::meta::DIM,           DIM},
-                    {milvus::knowhere::meta::TOPK,          K},
-                    {milvus::knowhere::IndexParams::nlist,  100},
-                    {milvus::knowhere::IndexParams::nprobe, 4},
-                    {milvus::knowhere::IndexParams::m,      4},
-                    {milvus::knowhere::IndexParams::nbits,  8},
-                    {milvus::knowhere::Metric::TYPE,        milvus::knowhere::Metric::L2},
-                    {milvus::knowhere::meta::DEVICEID,      DEVICEID},
+                {milvus::knowhere::meta::DIM, DIM},
+                {milvus::knowhere::meta::TOPK, K},
+                {milvus::knowhere::IndexParams::nlist, 100},
+                {milvus::knowhere::IndexParams::nprobe, 4},
+                {milvus::knowhere::IndexParams::m, 4},
+                {milvus::knowhere::IndexParams::nbits, 8},
+                {milvus::knowhere::Metric::TYPE, milvus::knowhere::Metric::L2},
+                {milvus::knowhere::meta::DEVICEID, DEVICEID},
             };
         } else if (type == milvus::knowhere::IndexEnum::INDEX_FAISS_IVFSQ8 ||
                    type == milvus::knowhere::IndexEnum::INDEX_FAISS_IVFSQ8H) {
             return milvus::knowhere::Config{
-                    {milvus::knowhere::meta::DIM,           DIM},
-                    {milvus::knowhere::meta::TOPK,          K},
-                    {milvus::knowhere::IndexParams::nlist,  100},
-                    {milvus::knowhere::IndexParams::nprobe, 4},
-                    {milvus::knowhere::IndexParams::nbits,  8},
-                    {milvus::knowhere::Metric::TYPE,        milvus::knowhere::Metric::L2},
-                    {milvus::knowhere::meta::DEVICEID,      DEVICEID},
+                {milvus::knowhere::meta::DIM, DIM},
+                {milvus::knowhere::meta::TOPK, K},
+                {milvus::knowhere::IndexParams::nlist, 100},
+                {milvus::knowhere::IndexParams::nprobe, 4},
+                {milvus::knowhere::IndexParams::nbits, 8},
+                {milvus::knowhere::Metric::TYPE, milvus::knowhere::Metric::L2},
+                {milvus::knowhere::meta::DEVICEID, DEVICEID},
             };
         } else {
             std::cout << "Invalid index type " << type << std::endl;

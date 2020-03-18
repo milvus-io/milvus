@@ -235,8 +235,7 @@ TEST_P(IVFTest, clone_test) {
         } else {
             EXPECT_THROW(
                 {
-                    std::cout << "clone G <=> C [" << index_type_ << "] failed"
-                              << std::endl;
+                    std::cout << "clone G <=> C [" << index_type_ << "] failed" << std::endl;
                     auto clone_index = milvus::knowhere::cloner::CopyGpuToCpu(index_, milvus::knowhere::Config());
                 },
                 milvus::knowhere::KnowhereException);
@@ -250,8 +249,7 @@ TEST_P(IVFTest, clone_test) {
                 auto clone_index = milvus::knowhere::cloner::CopyCpuToGpu(index_, DEVICEID, milvus::knowhere::Config());
                 auto clone_result = clone_index->Query(query_dataset, conf_);
                 AssertEqual(result, clone_result);
-                std::cout << "clone C <=> G [" << index_type_ << "] success"
-                          << std::endl;
+                std::cout << "clone C <=> G [" << index_type_ << "] success" << std::endl;
             });
             EXPECT_ANY_THROW(milvus::knowhere::cloner::CopyCpuToGpu(index_, -1, milvus::knowhere::Config()));
         }
