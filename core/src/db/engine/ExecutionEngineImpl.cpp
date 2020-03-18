@@ -135,6 +135,7 @@ ExecutionEngineImpl::ExecutionEngineImpl(uint16_t dimension, const std::string& 
         throw Exception(DB_ERROR, "Illegal index params");
     }
 
+    fiu_do_on("ExecutionEngineImpl.throw_exception", throw Exception(DB_ERROR, ""));
     if (auto bf_index = std::dynamic_pointer_cast<knowhere::IDMAP>(index_)) {
         bf_index->Train(knowhere::DatasetPtr(), conf);
     } else if (auto bf_bin_index = std::dynamic_pointer_cast<knowhere::BinaryIDMAP>(index_)) {
@@ -166,7 +167,7 @@ ExecutionEngineImpl::CreatetVecIndex(EngineType type) {
     }
 #endif
 
-    fiu_do_on("ExecutionEngineImpl.CreatetVecIndex.invalid_type", type = EngineType::INVALID);
+    fiu_do_on("ExecutionEngineImpl.CreateVecIndex.invalid_type", type = EngineType::INVALID);
     knowhere::VecIndexPtr index = nullptr;
     switch (type) {
         case EngineType::FAISS_IDMAP: {
@@ -891,7 +892,7 @@ ExecutionEngineImpl::Search(int64_t n, const std::vector<int64_t>& ids, int64_t 
     rc.RecordSection("get offset");
 
     if (!offsets.empty()) {
-        auto dataset = knowhere::GenDataset(offsets.size(), index_->Dim(), offsets.data());
+        auto dataset = knowhere::GenDatasetWithIds(offsets.size(), index_->Dim(), nullptr, offsets.data());
         auto result = index_->QueryById(dataset, conf);
         rc.RecordSection("query by id done");
 

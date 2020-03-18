@@ -13,13 +13,11 @@
 #include <fiu-local.h>
 #include <gtest/gtest.h>
 #include <thread>
-#include "knowhere/index/vector_index/helpers/Cloner.h"
-
-#include "unittest/Helper.h"
-#include "unittest/utils.h"
 
 #include "knowhere/common/Timer.h"
 #include "knowhere/index/vector_index/IndexType.h"
+#include "unittest/Helper.h"
+#include "unittest/utils.h"
 
 class SingleIndexTest : public DataGen, public TestGpuIndexBase {
  protected:

@@ -34,6 +34,11 @@ class CPUSPTAGRNG : public VecIndex {
     Load(const BinarySet& index_array) override;
 
     void
+    BuildAll(const DatasetPtr& dataset_ptr, const Config& config) override {
+        Train(dataset_ptr, config);
+    }
+
+    void
     Train(const DatasetPtr& dataset_ptr, const Config& config) override;
 
     void
