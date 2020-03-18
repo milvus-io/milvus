@@ -11,12 +11,12 @@
 
 #pragma once
 
-#include "CacheMgr.h"
-#include "DataObj.h"
-#include "config/handler/CacheConfigHandler.h"
-
 #include <memory>
 #include <string>
+
+#include "cache/CacheMgr.h"
+#include "cache/DataObj.h"
+#include "config/handler/CacheConfigHandler.h"
 
 namespace milvus {
 namespace cache {
