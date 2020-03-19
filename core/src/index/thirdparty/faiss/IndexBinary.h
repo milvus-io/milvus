@@ -134,7 +134,8 @@ struct IndexBinary {
    * @param result      result table
    */
   virtual void range_search(idx_t n, const uint8_t *x, int radius,
-                            RangeSearchResult *result) const;
+                            RangeSearchResult *result,
+                            ConcurrentBitsetPtr bitset = nullptr) const;
 
   /** Return the indexes of the k vectors closest to the query x.
    *
