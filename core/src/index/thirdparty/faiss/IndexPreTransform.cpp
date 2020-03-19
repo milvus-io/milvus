@@ -190,7 +190,8 @@ void IndexPreTransform::search (idx_t n, const float *x, idx_t k,
 }
 
 void IndexPreTransform::range_search (idx_t n, const float* x, float radius,
-                                      RangeSearchResult* result) const
+                                      RangeSearchResult* result,
+                                      ConcurrentBitsetPtr bitset) const
 {
     FAISS_THROW_IF_NOT (is_trained);
     const float *xt = apply_chain (n, x);

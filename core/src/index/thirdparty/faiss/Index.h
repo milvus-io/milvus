@@ -176,7 +176,8 @@ struct Index {
      * @param result      result table
      */
     virtual void range_search (idx_t n, const float *x, float radius,
-                               RangeSearchResult *result) const;
+                               RangeSearchResult *result,
+                               ConcurrentBitsetPtr bitset = nullptr) const;
 
     /** return the indexes of the k vectors closest to the query x.
      *
