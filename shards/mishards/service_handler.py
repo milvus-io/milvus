@@ -131,7 +131,7 @@ class ServiceHandler(milvus_pb2_grpc.MilvusServiceServicer):
         all_topk_results = []
 
         def search(addr, table_id, file_ids, vectors, topk, params, **kwargs):
-            logger.info(
+            logger.warning(
                 'Send Search Request: addr={};table_id={};ids={};nq={};topk={};params={}'
                     .format(addr, table_id, file_ids, len(vectors), topk, params))
 
@@ -148,6 +148,7 @@ class ServiceHandler(milvus_pb2_grpc.MilvusServiceServicer):
                                                         query_records=vectors,
                                                         top_k=topk,
                                                         params=params)
+                logger.warning("Search: addr={}, result count={}".format(addr, ret.row_num))
                 if ret.status.error_code != 0:
                     logger.error(ret.status)
 
