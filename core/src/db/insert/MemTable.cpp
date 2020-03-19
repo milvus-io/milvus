@@ -11,19 +11,18 @@
 
 #include "db/insert/MemTable.h"
 
-#include <cache/CpuCacheMgr.h>
-#include <segment/SegmentReader.h>
-#include <wrapper/VecIndex.h>
-
 #include <algorithm>
 #include <chrono>
 #include <memory>
 #include <string>
 #include <unordered_map>
 
+#include "cache/CpuCacheMgr.h"
 #include "db/OngoingFileChecker.h"
 #include "db/Utils.h"
+#include "segment/SegmentReader.h"
 #include "utils/Log.h"
+#include "wrapper/VecIndex.h"
 
 namespace milvus {
 namespace engine {

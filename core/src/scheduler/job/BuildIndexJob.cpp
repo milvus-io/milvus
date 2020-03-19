@@ -24,10 +24,6 @@ BuildIndexJob::BuildIndexJob(engine::meta::MetaPtr meta_ptr, engine::DBOptions o
     AddCacheInsertDataListener();
 }
 
-BuildIndexJob::~BuildIndexJob() {
-    RemoveCacheInsertDataListener();
-}
-
 bool
 BuildIndexJob::AddToIndexFiles(const engine::meta::TableFileSchemaPtr& to_index_file) {
     std::unique_lock<std::mutex> lock(mutex_);

@@ -331,7 +331,7 @@ endif ()
 if (DEFINED ENV{MILVUS_OATPP_URL})
     set(MILVUS_OATPP_URL "$ENV{MILVUS_OATPP_URL}")
 else ()
-#    set(OATPP_SOURCE_URL "https://github.com/oatpp/oatpp/archive/${OATPP_VERSION}.tar.gz")
+    # set(OATPP_SOURCE_URL "https://github.com/oatpp/oatpp/archive/${OATPP_VERSION}.tar.gz")
     set(OATPP_SOURCE_URL "https://github.com/BossZou/oatpp/archive/master.zip")
 endif ()
 

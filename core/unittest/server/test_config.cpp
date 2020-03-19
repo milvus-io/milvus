@@ -9,13 +9,13 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
+#include <cmath>
 #include <limits>
 
 #include <fiu-control.h>
 #include <fiu-local.h>
 #include <gtest/gtest-death-test.h>
 #include <gtest/gtest.h>
-#include <cmath>
 
 #include "config/Config.h"
 #include "config/YamlConfigMgr.h"
@@ -23,7 +23,6 @@
 #include "utils/CommonUtil.h"
 #include "utils/StringHelpFunctions.h"
 #include "utils/ValidationUtil.h"
-
 
 namespace {
 
@@ -196,6 +195,16 @@ TEST_F(ConfigTest, SERVER_CONFIG_VALID_TEST) {
     ASSERT_TRUE(str_val == storage_primary_path);
 
     std::string storage_secondary_path = "/home/zilliz";
+    ASSERT_TRUE(config.SetStorageConfigSecondaryPath(storage_secondary_path).ok());
+    ASSERT_TRUE(config.GetStorageConfigSecondaryPath(str_val).ok());
+    ASSERT_TRUE(str_val == storage_secondary_path);
+
+    storage_secondary_path = "/home/zilliz,/tmp/milvus";
+    ASSERT_TRUE(config.SetStorageConfigSecondaryPath(storage_secondary_path).ok());
+    ASSERT_TRUE(config.GetStorageConfigSecondaryPath(str_val).ok());
+    ASSERT_TRUE(str_val == storage_secondary_path);
+
+    storage_secondary_path = "";
     ASSERT_TRUE(config.SetStorageConfigSecondaryPath(storage_secondary_path).ok());
     ASSERT_TRUE(config.GetStorageConfigSecondaryPath(str_val).ok());
     ASSERT_TRUE(str_val == storage_secondary_path);
@@ -582,8 +591,13 @@ TEST_F(ConfigTest, SERVER_CONFIG_INVALID_TEST) {
 
     /* storage config */
     ASSERT_FALSE(config.SetStorageConfigPrimaryPath("").ok());
+    ASSERT_FALSE(config.SetStorageConfigPrimaryPath("./milvus").ok());
+    ASSERT_FALSE(config.SetStorageConfigPrimaryPath("../milvus").ok());
+    ASSERT_FALSE(config.SetStorageConfigPrimaryPath("/**milvus").ok());
+    ASSERT_FALSE(config.SetStorageConfigPrimaryPath("/milvus--/path").ok());
 
-    // ASSERT_FALSE(config.SetStorageConfigSecondaryPath("").ok());
+    ASSERT_FALSE(config.SetStorageConfigSecondaryPath("../milvus,./zilliz").ok());
+    ASSERT_FALSE(config.SetStorageConfigSecondaryPath("/home/^^__^^,/zilliz").ok());
 
     ASSERT_FALSE(config.SetStorageConfigS3Enable("10").ok());
 
@@ -1116,58 +1130,84 @@ TEST_F(ConfigTest, SERVER_CONFIG_OTHER_CONFIGS_FAIL_TEST) {
 
 TEST_F(ConfigTest, SERVER_CONFIG_UPDATE_TEST) {
     std::string conf_file = std::string(CONFIG_PATH) + VALID_CONFIG_FILE;
+    std::string yaml_value;
+    std::string reply_set, reply_get;
+    std::string cmd_set, cmd_get;
+
+    auto lambda = [&conf_file](const std::string& key, const std::string& child_key,
+        const std::string& default_value, std::string& value) {
+        auto * ymgr = milvus::server::YamlConfigMgr::GetInstance();
+        auto status = ymgr->LoadConfigFile(conf_file);
+
+        if (status.ok())
+            value = ymgr->GetRootNode().GetChild(key).GetValue(child_key, default_value);
+
+        return status;
+    };
+
     milvus::server::Config& config = milvus::server::Config::GetInstance();
 
     auto status = config.LoadConfigFile(conf_file);
     ASSERT_TRUE(status.ok()) << status.message();
 
-    // validate if setting config store in files
-    status = config.SetCacheConfigInsertBufferSize("2");
-    ASSERT_TRUE(status.ok()) << status.message();
-
+    /* validate if setting config store in files */
     // test numeric config value
-    status = config.LoadConfigFile(conf_file);
-    ASSERT_TRUE(status.ok()) << status.message();
-    int64_t value;
-    status = config.GetCacheConfigInsertBufferSize(value);
-    ASSERT_TRUE(status.ok()) << status.message();
-    ASSERT_EQ(value, 2);
+    cmd_set = gen_set_command(ms::CONFIG_CACHE, ms::CONFIG_CACHE_INSERT_BUFFER_SIZE, "2");
+    ASSERT_TRUE(config.ProcessConfigCli(reply_set, cmd_set).ok());
+
+    ASSERT_TRUE(lambda(ms::CONFIG_CACHE, ms::CONFIG_CACHE_INSERT_BUFFER_SIZE,
+        ms::CONFIG_CACHE_INSERT_BUFFER_SIZE_DEFAULT, yaml_value).ok());
+    ASSERT_EQ("2", yaml_value);
 
     // test boolean config value
-    status = config.SetMetricConfigEnableMonitor("True");
-    ASSERT_TRUE(status.ok()) << status.message();
+    cmd_set = gen_set_command(ms::CONFIG_METRIC, ms::CONFIG_METRIC_ENABLE_MONITOR, "True");
+    ASSERT_TRUE(config.ProcessConfigCli(reply_set, cmd_set).ok());
+    ASSERT_TRUE(lambda(ms::CONFIG_METRIC, ms::CONFIG_METRIC_ENABLE_MONITOR,
+        ms::CONFIG_METRIC_ENABLE_MONITOR_DEFAULT, yaml_value).ok());
+    ASSERT_EQ("true", yaml_value);
 
-    status = config.LoadConfigFile(conf_file);
-    ASSERT_TRUE(status.ok()) << status.message();
-    bool enable;
-    status = config.GetMetricConfigEnableMonitor(enable);
-    ASSERT_TRUE(status.ok()) << status.message();
-    ASSERT_EQ(true, enable);
+    cmd_set = gen_set_command(ms::CONFIG_METRIC, ms::CONFIG_METRIC_ENABLE_MONITOR, "On");
+    ASSERT_TRUE(config.ProcessConfigCli(reply_set, cmd_set).ok());
+    ASSERT_TRUE(lambda(ms::CONFIG_METRIC, ms::CONFIG_METRIC_ENABLE_MONITOR,
+        ms::CONFIG_METRIC_ENABLE_MONITOR_DEFAULT, yaml_value).ok());
+    ASSERT_EQ("true", yaml_value);
 
-    // invalid path
-    status = config.SetStorageConfigPrimaryPath("/a--/a");
-    ASSERT_FALSE(status.ok());
+    cmd_set = gen_set_command(ms::CONFIG_METRIC, ms::CONFIG_METRIC_ENABLE_MONITOR, "False");
+    ASSERT_TRUE(config.ProcessConfigCli(reply_set, cmd_set).ok());
+    ASSERT_TRUE(lambda(ms::CONFIG_METRIC, ms::CONFIG_METRIC_ENABLE_MONITOR,
+        ms::CONFIG_METRIC_ENABLE_MONITOR_DEFAULT, yaml_value).ok());
+    ASSERT_EQ("false", yaml_value);
+
+    cmd_set = gen_set_command(ms::CONFIG_METRIC, ms::CONFIG_METRIC_ENABLE_MONITOR, "Off");
+    ASSERT_TRUE(config.ProcessConfigCli(reply_set, cmd_set).ok());
+    ASSERT_TRUE(lambda(ms::CONFIG_METRIC, ms::CONFIG_METRIC_ENABLE_MONITOR,
+        ms::CONFIG_METRIC_ENABLE_MONITOR_DEFAULT, yaml_value).ok());
+    ASSERT_EQ("false", yaml_value);
 
     // test path
-    status = config.SetStorageConfigPrimaryPath("/tmp/milvus_config_unittest");
-    ASSERT_TRUE(status.ok());
+    cmd_set = gen_set_command(ms::CONFIG_STORAGE, ms::CONFIG_STORAGE_PRIMARY_PATH, "/tmp/milvus_config_unittest");
+    ASSERT_TRUE(config.ProcessConfigCli(reply_set, cmd_set).ok());
+    ASSERT_TRUE(lambda(ms::CONFIG_STORAGE, ms::CONFIG_STORAGE_PRIMARY_PATH,
+        ms::CONFIG_STORAGE_PRIMARY_PATH_DEFAULT, yaml_value).ok());
+    ASSERT_EQ("/tmp/milvus_config_unittest", yaml_value);
 
-    std::string path_value;
-    status = config.GetStorageConfigPrimaryPath(path_value);
-    ASSERT_TRUE(status.ok());
-    ASSERT_EQ(path_value, "/tmp/milvus_config_unittest");
+    cmd_set = gen_set_command(ms::CONFIG_STORAGE, ms::CONFIG_STORAGE_SECONDARY_PATH, "/home/zilliz,/home/milvus");
+    ASSERT_TRUE(config.ProcessConfigCli(reply_set, cmd_set).ok());
+    ASSERT_TRUE(lambda(ms::CONFIG_STORAGE, ms::CONFIG_STORAGE_SECONDARY_PATH,
+        ms::CONFIG_STORAGE_SECONDARY_PATH_DEFAULT, yaml_value).ok());
+    ASSERT_EQ("/home/zilliz,/home/milvus", yaml_value);
 
 #ifdef MILVUS_GPU_VERSION
-    status = config.SetGpuResourceConfigBuildIndexResources("gpu0");
-    ASSERT_TRUE(status.ok()) << status.message();
+    cmd_set = gen_set_command(ms::CONFIG_GPU_RESOURCE, ms::CONFIG_GPU_RESOURCE_BUILD_INDEX_RESOURCES, "gpu0");
+    ASSERT_TRUE(config.ProcessConfigCli(reply_set, cmd_set).ok());
+    ASSERT_TRUE(lambda(ms::CONFIG_GPU_RESOURCE, ms::CONFIG_GPU_RESOURCE_BUILD_INDEX_RESOURCES,
+        ms::CONFIG_GPU_RESOURCE_BUILD_INDEX_RESOURCES_DEFAULT, yaml_value).ok());
+    ASSERT_EQ("gpu0", yaml_value);
 
-    status = config.LoadConfigFile(conf_file);
-    ASSERT_TRUE(status.ok()) << status.message();
-    std::vector<int64_t> gpus;
-    status = config.GetGpuResourceConfigBuildIndexResources(gpus);
-    ASSERT_TRUE(status.ok()) << status.message();
-    ASSERT_EQ(1, gpus.size());
-    ASSERT_EQ(0, gpus[0]);
-    ASSERT_EQ(value, 2);
+    cmd_set = gen_set_command(ms::CONFIG_GPU_RESOURCE, ms::CONFIG_GPU_RESOURCE_BUILD_INDEX_RESOURCES, "GPU0");
+    ASSERT_TRUE(config.ProcessConfigCli(reply_set, cmd_set).ok());
+    ASSERT_TRUE(lambda(ms::CONFIG_GPU_RESOURCE, ms::CONFIG_GPU_RESOURCE_BUILD_INDEX_RESOURCES,
+        ms::CONFIG_GPU_RESOURCE_BUILD_INDEX_RESOURCES_DEFAULT, yaml_value).ok());
+    ASSERT_EQ("gpu0", yaml_value);
 #endif
 }

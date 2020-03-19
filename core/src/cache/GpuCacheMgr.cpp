@@ -32,15 +32,6 @@ GpuCacheMgr::GpuCacheMgr() {
     // All config values have been checked in Config::ValidateConfig()
     server::Config& config = server::Config::GetInstance();
 
-    config.GenUniqueIdentityID("GpuCacheMar", identity_);
-
-    config.GetGpuResourceConfigEnable(gpu_enable_);
-    server::ConfigCallBackF lambda = [this](const std::string& value) -> Status {
-        auto& config = server::Config::GetInstance();
-        return config.GetGpuResourceConfigEnable(this->gpu_enable_);
-    };
-    config.RegisterCallBack(server::CONFIG_GPU_RESOURCE, server::CONFIG_GPU_RESOURCE_ENABLE, identity_, lambda);
-
     int64_t gpu_cache_cap;
     config.GetGpuResourceConfigCacheCapacity(gpu_cache_cap);
     int64_t cap = gpu_cache_cap * G_BYTE;
@@ -49,6 +40,10 @@ GpuCacheMgr::GpuCacheMgr() {
     float gpu_mem_threshold;
     config.GetGpuResourceConfigCacheThreshold(gpu_mem_threshold);
     cache_->set_freemem_percent(gpu_mem_threshold);
+
+    SetIdentity("GpuCacheMgr");
+    AddGpuEnableListener();
+    AddGpuCacheCapacityListener();
 }
 
 GpuCacheMgr::~GpuCacheMgr() {
@@ -80,6 +75,13 @@ void
 GpuCacheMgr::InsertItem(const std::string& key, const milvus::cache::DataObjPtr& data) {
     if (gpu_enable_) {
         CacheMgr<DataObjPtr>::InsertItem(key, data);
+    }
+}
+
+void
+GpuCacheMgr::OnGpuCacheCapacityChanged(int64_t capacity) {
+    for (auto& iter : instance_) {
+        iter.second->SetCapacity(capacity * G_BYTE);
     }
 }
 

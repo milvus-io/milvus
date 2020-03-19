@@ -45,10 +45,6 @@ MemTableFile::MemTableFile(const std::string& table_id, const meta::MetaPtr& met
     AddCacheInsertDataListener();
 }
 
-MemTableFile::~MemTableFile() {
-    RemoveCacheInsertDataListener();
-}
-
 Status
 MemTableFile::CreateTableFile() {
     meta::TableFileSchema table_file_schema;

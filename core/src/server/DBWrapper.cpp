@@ -9,15 +9,17 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
-#include <faiss/utils/distances.h>
+#include "server/DBWrapper.h"
+
 #include <omp.h>
 #include <cmath>
 #include <string>
 #include <vector>
 
+#include <faiss/utils/distances.h>
+
 #include "config/Config.h"
 #include "db/DBFactory.h"
-#include "server/DBWrapper.h"
 #include "utils/CommonUtil.h"
 #include "utils/Log.h"
 #include "utils/StringHelpFunctions.h"
@@ -145,19 +147,7 @@ DBWrapper::StartService() {
         std::cerr << s.ToString() << std::endl;
         return s;
     }
-
     faiss::distance_compute_blas_threshold = use_blas_threshold;
-    server::ConfigCallBackF lambda = [](const std::string& value) -> Status {
-        Config& config = Config::GetInstance();
-        int64_t blas_threshold;
-        auto status = config.GetEngineConfigUseBlasThreshold(blas_threshold);
-        if (status.ok()) {
-            faiss::distance_compute_blas_threshold = blas_threshold;
-        }
-
-        return status;
-    };
-    config.RegisterCallBack(server::CONFIG_ENGINE, server::CONFIG_ENGINE_USE_BLAS_THRESHOLD, "DBWrapper", lambda);
 
     // set archive config
     engine::ArchiveConf::CriteriaT criterial;

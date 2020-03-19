@@ -20,17 +20,20 @@ namespace server {
 class CacheConfigHandler : virtual public ConfigHandler {
  public:
     CacheConfigHandler();
-    ~CacheConfigHandler();
+    virtual ~CacheConfigHandler();
 
  protected:
     virtual void
-    OnCpuCacheCapacityChanged(int64_t value);
+    OnCpuCacheCapacityChanged(int64_t value) {
+    }
 
     virtual void
-    OnInsertBufferSizeChanged(int64_t value);
+    OnInsertBufferSizeChanged(int64_t value) {
+    }
 
     virtual void
-    OnCacheInsertDataChanged(bool value);
+    OnCacheInsertDataChanged(bool value) {
+    }
 
  protected:
     void
@@ -52,8 +55,8 @@ class CacheConfigHandler : virtual public ConfigHandler {
     RemoveCacheInsertDataListener();
 
  private:
-    int64_t cpu_cache_capacity_ = 4 /*GiB*/;
-    int64_t insert_buffer_size_ = 1 /*GiB*/;
+    int64_t cpu_cache_capacity_ = std::stoll(CONFIG_CACHE_CPU_CACHE_CAPACITY_DEFAULT) /*GiB*/;
+    int64_t insert_buffer_size_ = std::stoll(CONFIG_CACHE_INSERT_BUFFER_SIZE_DEFAULT) /*GiB*/;
     bool cache_insert_data_ = false;
 };
 
