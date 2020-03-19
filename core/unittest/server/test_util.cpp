@@ -413,7 +413,7 @@ TEST(ValidationUtilTest, VALIDATE_INDEX_TEST) {
     ASSERT_EQ(milvus::server::ValidationUtil::ValidateTableIndexType((int)milvus::engine::EngineType::INVALID).code(),
               milvus::SERVER_INVALID_INDEX_TYPE);
     for (int i = 1; i <= (int)milvus::engine::EngineType::MAX_VALUE; i++) {
-#ifndef CUSTOMIZATION
+#ifndef MILVUS_GPU_VERSION
         if (i == (int)milvus::engine::EngineType::FAISS_IVFSQ8H) {
             ASSERT_NE(milvus::server::ValidationUtil::ValidateTableIndexType(i).code(), milvus::SERVER_SUCCESS);
             continue;

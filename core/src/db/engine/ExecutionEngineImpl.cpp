@@ -186,13 +186,11 @@ ExecutionEngineImpl::CreatetVecIndex(EngineType type) {
             index = vec_index_factory.CreateVecIndex(knowhere::IndexEnum::INDEX_FAISS_IVFSQ8, mode);
             break;
         }
-#ifdef CUSTOMIZATION
 #ifdef MILVUS_GPU_VERSION
         case EngineType::FAISS_IVFSQ8H: {
             index = vec_index_factory.CreateVecIndex(knowhere::IndexEnum::INDEX_FAISS_IVFSQ8H, mode);
             break;
         }
-#endif
 #endif
         case EngineType::FAISS_BIN_IDMAP: {
             index = vec_index_factory.CreateVecIndex(knowhere::IndexEnum::INDEX_FAISS_BIN_IDMAP, mode);

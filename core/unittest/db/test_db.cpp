@@ -348,7 +348,6 @@ TEST_F(DBTest, SEARCH_TEST) {
         ASSERT_TRUE(stat.ok());
     }
 
-#ifdef CUSTOMIZATION
 #ifdef MILVUS_GPU_VERSION
     index.engine_type_ = (int)milvus::engine::EngineType::FAISS_IVFSQ8H;
     db_->CreateIndex(TABLE_NAME, index);  // wait until build index finish
@@ -360,7 +359,6 @@ TEST_F(DBTest, SEARCH_TEST) {
         stat = db_->Query(dummy_context_, TABLE_NAME, tags, k, json_params, xq, result_ids, result_distances);
         ASSERT_TRUE(stat.ok());
     }
-#endif
 #endif
 
     {  // search by specify index file
@@ -411,7 +409,6 @@ TEST_F(DBTest, SEARCH_TEST) {
     }
 #endif
 
-#ifdef CUSTOMIZATION
 #ifdef MILVUS_GPU_VERSION
     // test FAISS_IVFSQ8H optimizer
     index.engine_type_ = (int)milvus::engine::EngineType::FAISS_IVFSQ8H;
@@ -440,7 +437,6 @@ TEST_F(DBTest, SEARCH_TEST) {
         stat = db_->QueryByFileID(dummy_context_, TABLE_NAME, file_ids, k, json_params, xq, result_ids, result_dists);
         ASSERT_TRUE(stat.ok());
     }
-#endif
 #endif
 }
 
@@ -747,12 +743,10 @@ TEST_F(DBTest, INDEX_TEST) {
     ASSERT_FALSE(stat.ok());
     fiu_disable("DBImpl.UpdateTableIndexRecursively.fail_update_table_index");
 
-#ifdef CUSTOMIZATION
 #ifdef MILVUS_GPU_VERSION
     index.engine_type_ = (int)milvus::engine::EngineType::FAISS_IVFSQ8H;
     stat = db_->CreateIndex(table_info.table_id_, index);
     ASSERT_TRUE(stat.ok());
-#endif
 #endif
 
     milvus::engine::TableIndex index_out;

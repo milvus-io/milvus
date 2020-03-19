@@ -11,6 +11,7 @@
 
 #include "utils/ValidationUtil.h"
 #include "Log.h"
+#include "db/Types.h"
 #include "db/Utils.h"
 #include "db/engine/ExecutionEngine.h"
 #include "knowhere/index/vector_index/ConfAdapter.h"
@@ -20,13 +21,10 @@
 #include <arpa/inet.h>
 
 #ifdef MILVUS_GPU_VERSION
-
 #include <cuda_runtime.h>
-
 #endif
 
 #include <fiu-local.h>
-#include <src/db/Types.h>
 #include <algorithm>
 #include <cmath>
 #include <regex>
@@ -169,7 +167,7 @@ ValidationUtil::ValidateTableIndexType(int32_t index_type) {
         return Status(SERVER_INVALID_INDEX_TYPE, msg);
     }
 
-#ifndef CUSTOMIZATION
+#ifndef MILVUS_GPU_VERSION
     // special case, hybird index only available in customize faiss library
     if (engine_type == static_cast<int>(engine::EngineType::FAISS_IVFSQ8H)) {
         std::string msg = "Unsupported index type: " + std::to_string(index_type);

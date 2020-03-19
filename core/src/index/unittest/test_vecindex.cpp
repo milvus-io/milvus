@@ -62,14 +62,12 @@ INSTANTIATE_TEST_CASE_P(
         std::make_tuple(milvus::knowhere::IndexType::INDEX_FAISS_IVFFLAT, milvus::knowhere::IndexMode::MODE_GPU),
         std::make_tuple(milvus::knowhere::IndexType::INDEX_FAISS_IVFPQ, milvus::knowhere::IndexMode::MODE_GPU),
         std::make_tuple(milvus::knowhere::IndexType::INDEX_FAISS_IVFSQ8, milvus::knowhere::IndexMode::MODE_GPU),
-#ifdef CUSTOMIZATION
         std::make_tuple(milvus::knowhere::IndexType::INDEX_FAISS_IVFSQ8H, milvus::knowhere::IndexMode::MODE_GPU),
-#endif
 #endif
         std::make_tuple(milvus::knowhere::IndexType::INDEX_FAISS_IVFFLAT, milvus::knowhere::IndexMode::MODE_CPU),
         std::make_tuple(milvus::knowhere::IndexType::INDEX_FAISS_IVFPQ, milvus::knowhere::IndexMode::MODE_CPU),
-        std::make_tuple(milvus::knowhere::IndexType::INDEX_FAISS_IVFSQ8, milvus::knowhere::IndexMode::MODE_CPU)
-            std::make_tuple(milvus::knowhere::IndexType::INDEX_NSG, milvus::knowhere::IndexMode::MODE_CPU),
+        std::make_tuple(milvus::knowhere::IndexType::INDEX_FAISS_IVFSQ8, milvus::knowhere::IndexMode::MODE_CPU),
+        std::make_tuple(milvus::knowhere::IndexType::INDEX_NSG, milvus::knowhere::IndexMode::MODE_CPU),
         std::make_tuple(milvus::knowhere::IndexType::INDEX_HNSW, milvus::knowhere::IndexMode::MODE_CPU),
         std::make_tuple(milvus::knowhere::IndexType::INDEX_SPTAG_KDT_RNT, milvus::knowhere::IndexMode::MODE_CPU),
         std::make_tuple(milvus::knowhere::IndexType::INDEX_SPTAG_BKT_RNT, milvus::knowhere::IndexMode::MODE_CPU)));
