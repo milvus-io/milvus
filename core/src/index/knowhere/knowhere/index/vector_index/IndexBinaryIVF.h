@@ -50,11 +50,13 @@ class BinaryIVF : public VecIndex, public FaissBaseBinaryIndex {
     Train(const DatasetPtr& dataset_ptr, const Config& config) override;
 
     void
-    Add(const DatasetPtr& dataset_ptr, const Config& config) override;
+    Add(const DatasetPtr& dataset_ptr, const Config& config) override {
+        KNOWHERE_THROW_MSG("not support yet");
+    }
 
     void
     AddWithoutIds(const DatasetPtr&, const Config&) override {
-        KNOWHERE_THROW_MSG("Addwithout ids is not supported");
+        KNOWHERE_THROW_MSG("AddWithoutIds is not supported");
     }
 
     DatasetPtr
@@ -64,10 +66,14 @@ class BinaryIVF : public VecIndex, public FaissBaseBinaryIndex {
     QueryById(const DatasetPtr& dataset_ptr, const Config& config) override;
 
     int64_t
-    Count() override;
+    Count() override {
+        return index_->ntotal;
+    }
 
     int64_t
-    Dim() override;
+    Dim() override {
+        return index_->d;
+    }
 
     int64_t
     Size() override {

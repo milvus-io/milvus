@@ -68,9 +68,9 @@ class NSG : public VecIndex {
     Dim() override;
 
  private:
-    std::shared_ptr<impl::NsgIndex> index_;
     std::mutex mutex_;
     int64_t gpu_;
+    std::shared_ptr<impl::NsgIndex> index_;
 };
 
 using NSGIndexPtr = std::shared_ptr<NSG>();

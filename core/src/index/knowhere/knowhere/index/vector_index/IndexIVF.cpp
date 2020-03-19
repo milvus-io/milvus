@@ -188,14 +188,30 @@ IVF::QueryById(const DatasetPtr& dataset_ptr, const Config& config) {
     }
 }
 
-int64_t
-IVF::Count() {
-    return index_->ntotal;
-}
+DatasetPtr
+IVF::GetVectorById(const DatasetPtr& dataset_ptr, const Config& config) {
+    if (!index_ || !index_->is_trained) {
+        KNOWHERE_THROW_MSG("index not initialize or trained");
+    }
 
-int64_t
-IVF::Dim() {
-    return index_->d;
+    auto p_data = dataset_ptr->Get<const int64_t*>(meta::IDS);
+    auto elems = dataset_ptr->Get<int64_t>(meta::DIM);
+
+    try {
+        size_t p_x_size = sizeof(float) * elems;
+        auto p_x = (float*)malloc(p_x_size);
+
+        auto index_ivf = std::static_pointer_cast<faiss::IndexIVF>(index_);
+        index_ivf->get_vector_by_id(1, p_data, p_x, bitset_);
+
+        auto ret_ds = std::make_shared<Dataset>();
+        ret_ds->Set(meta::TENSOR, p_x);
+        return ret_ds;
+    } catch (faiss::FaissException& e) {
+        KNOWHERE_THROW_MSG(e.what());
+    } catch (std::exception& e) {
+        KNOWHERE_THROW_MSG(e.what());
+    }
 }
 
 void
@@ -262,37 +278,9 @@ IVF::GenGraph(const float* data, const int64_t k, GraphType& graph, const Config
 std::shared_ptr<faiss::IVFSearchParameters>
 IVF::GenParams(const Config& config) {
     auto params = std::make_shared<faiss::IVFSearchParameters>();
-
     params->nprobe = config[IndexParams::nprobe];
     // params->max_codes = config["max_codes"];
-
     return params;
-}
-
-DatasetPtr
-IVF::GetVectorById(const DatasetPtr& dataset_ptr, const Config& config) {
-    if (!index_ || !index_->is_trained) {
-        KNOWHERE_THROW_MSG("index not initialize or trained");
-    }
-
-    auto p_data = dataset_ptr->Get<const int64_t*>(meta::IDS);
-    auto elems = dataset_ptr->Get<int64_t>(meta::DIM);
-
-    try {
-        size_t p_x_size = sizeof(float) * elems;
-        auto p_x = (float*)malloc(p_x_size);
-
-        auto index_ivf = std::static_pointer_cast<faiss::IndexIVF>(index_);
-        index_ivf->get_vector_by_id(1, p_data, p_x, bitset_);
-
-        auto ret_ds = std::make_shared<Dataset>();
-        ret_ds->Set(meta::TENSOR, p_x);
-        return ret_ds;
-    } catch (faiss::FaissException& e) {
-        KNOWHERE_THROW_MSG(e.what());
-    } catch (std::exception& e) {
-        KNOWHERE_THROW_MSG(e.what());
-    }
 }
 
 void
@@ -318,8 +306,7 @@ IVF::SealImpl() {
     auto idx = dynamic_cast<faiss::IndexIVF*>(index);
     if (idx != nullptr) {
         // To be deleted
-        KNOWHERE_LOG_DEBUG << "Test before to_readonly:"
-                           << " IVF READONLY " << std::boolalpha << idx->is_readonly();
+        KNOWHERE_LOG_DEBUG << "Test before to_readonly: IVF READONLY " << std::boolalpha << idx->is_readonly();
         idx->to_readonly();
     }
 #endif

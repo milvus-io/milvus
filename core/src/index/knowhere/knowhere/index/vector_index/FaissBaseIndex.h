@@ -12,6 +12,7 @@
 #pragma once
 
 #include <memory>
+#include <utility>
 
 #include <faiss/Index.h>
 
@@ -23,7 +24,8 @@ namespace knowhere {
 
 class FaissBaseIndex {
  protected:
-    explicit FaissBaseIndex(std::shared_ptr<faiss::Index>);
+    explicit FaissBaseIndex(std::shared_ptr<faiss::Index> index) : index_(std::move(index)) {
+    }
 
     virtual BinarySet
     SerializeImpl(const IndexType& type);

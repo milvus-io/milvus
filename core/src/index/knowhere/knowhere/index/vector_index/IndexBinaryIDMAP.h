@@ -54,10 +54,14 @@ class BinaryIDMAP : public VecIndex, public FaissBaseBinaryIndex {
     QueryById(const DatasetPtr& dataset_ptr, const Config& config) override;
 
     int64_t
-    Count() override;
+    Count() override {
+        return index_->ntotal;
+    }
 
     int64_t
-    Dim() override;
+    Dim() override {
+        return index_->d;
+    }
 
     int64_t
     Size() override {
@@ -67,14 +71,14 @@ class BinaryIDMAP : public VecIndex, public FaissBaseBinaryIndex {
         return Count() * Dim() * sizeof(uint8_t);
     }
 
-    const uint8_t*
+    DatasetPtr
+    GetVectorById(const DatasetPtr& dataset_ptr, const Config& config) override;
+
+    virtual const uint8_t*
     GetRawVectors();
 
-    const int64_t*
+    virtual const int64_t*
     GetRawIds();
-
-    DatasetPtr
-    GetVectorById(const DatasetPtr& dataset_ptr, const Config& config);
 
  protected:
     virtual void

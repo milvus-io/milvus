@@ -52,14 +52,17 @@ class IDMAP : public VecIndex, public FaissBaseIndex {
     QueryById(const DatasetPtr& dataset, const Config& config) override;
 
     int64_t
-    Count() override;
+    Count() override {
+        return index_->ntotal;
+    }
 
     int64_t
-    Dim() override;
-
-    virtual void
-    Seal() {
+    Dim() override {
+        return index_->d;
     }
+
+    DatasetPtr
+    GetVectorById(const DatasetPtr& dataset, const Config& config) override;
 
     VecIndexPtr
     CopyCpuToGpu(const int64_t, const Config&);
@@ -69,9 +72,6 @@ class IDMAP : public VecIndex, public FaissBaseIndex {
 
     virtual const int64_t*
     GetRawIds();
-
-    DatasetPtr
-    GetVectorById(const DatasetPtr& dataset, const Config& config);
 
  protected:
     virtual void

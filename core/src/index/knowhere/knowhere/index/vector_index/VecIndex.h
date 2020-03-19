@@ -72,27 +72,19 @@ class VecIndex : public Index {
         return index_mode_;
     }
 
-    int64_t
-    Size() override {
-        if (size_ != -1) {
-            return size_;
-        }
-        return Count() * Dim() * sizeof(FloatType);
-    }
-
     virtual DatasetPtr
     GetVectorById(const DatasetPtr& dataset, const Config& config) {
         return nullptr;
     }
 
     virtual void
-    SetBlacklist(faiss::ConcurrentBitsetPtr bitset_ptr) {
-        bitset_ = std::move(bitset_ptr);
+    GetBlacklist(faiss::ConcurrentBitsetPtr& bitset_ptr) {
+        bitset_ptr = bitset_;
     }
 
     virtual void
-    GetBlacklist(faiss::ConcurrentBitsetPtr& bitset_ptr) {
-        bitset_ptr = bitset_;
+    SetBlacklist(faiss::ConcurrentBitsetPtr bitset_ptr) {
+        bitset_ = std::move(bitset_ptr);
     }
 
     virtual const std::vector<milvus::segment::doc_id_t>&
@@ -104,6 +96,14 @@ class VecIndex : public Index {
     SetUids(std::vector<milvus::segment::doc_id_t>& uids) {
         uids_.clear();
         uids_.swap(uids);
+    }
+
+    int64_t
+    Size() override {
+        if (size_ != -1) {
+            return size_;
+        }
+        return Count() * Dim() * sizeof(FloatType);
     }
 
  protected:

@@ -11,17 +11,12 @@
 
 #include <faiss/index_io.h>
 
-#include <utility>
-
 #include "knowhere/common/Exception.h"
 #include "knowhere/index/vector_index/FaissBaseBinaryIndex.h"
 #include "knowhere/index/vector_index/helpers/FaissIO.h"
 
 namespace milvus {
 namespace knowhere {
-
-FaissBaseBinaryIndex::FaissBaseBinaryIndex(std::shared_ptr<faiss::IndexBinary> index) : index_(std::move(index)) {
-}
 
 BinarySet
 FaissBaseBinaryIndex::SerializeImpl(const IndexType& type) {
@@ -50,7 +45,6 @@ FaissBaseBinaryIndex::LoadImpl(const BinarySet& index_binary, const IndexType& t
     reader.data_ = binary->data.get();
 
     faiss::IndexBinary* index = faiss::read_index_binary(&reader);
-
     index_.reset(index);
 }
 

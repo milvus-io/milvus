@@ -75,6 +75,56 @@ IndexHNSW::Load(const BinarySet& index_binary) {
     }
 }
 
+void
+IndexHNSW::Train(const DatasetPtr& dataset_ptr, const Config& config) {
+    GETTENSOR(dataset_ptr)
+
+    hnswlib::SpaceInterface<float>* space;
+    if (config[Metric::TYPE] == Metric::L2) {
+        space = new hnswlib::L2Space(dim);
+    } else if (config[Metric::TYPE] == Metric::IP) {
+        space = new hnswlib::InnerProductSpace(dim);
+        normalize = true;
+    }
+    index_ = std::make_shared<hnswlib::HierarchicalNSW<float>>(space, rows, config[IndexParams::M].get<int64_t>(),
+                                                               config[IndexParams::efConstruction].get<int64_t>());
+}
+
+void
+IndexHNSW::Add(const DatasetPtr& dataset_ptr, const Config& config) {
+    if (!index_) {
+        KNOWHERE_THROW_MSG("index not initialize");
+    }
+
+    std::lock_guard<std::mutex> lk(mutex_);
+
+    GETTENSORWITHIDS(dataset_ptr)
+
+    //     if (normalize) {
+    //         std::vector<float> ep_norm_vector(Dim());
+    //         normalize_vector((float*)(p_data), ep_norm_vector.data(), Dim());
+    //         index_->addPoint((void*)(ep_norm_vector.data()), p_ids[0]);
+    // #pragma omp parallel for
+    //         for (int i = 1; i < rows; ++i) {
+    //             std::vector<float> norm_vector(Dim());
+    //             normalize_vector((float*)(p_data + Dim() * i), norm_vector.data(), Dim());
+    //             index_->addPoint((void*)(norm_vector.data()), p_ids[i]);
+    //         }
+    //     } else {
+    //         index_->addPoint((void*)(p_data), p_ids[0]);
+    // #pragma omp parallel for
+    //         for (int i = 1; i < rows; ++i) {
+    //             index_->addPoint((void*)(p_data + Dim() * i), p_ids[i]);
+    //         }
+    //     }
+
+    index_->addPoint(p_data, p_ids[0]);
+#pragma omp parallel for
+    for (int i = 1; i < rows; ++i) {
+        index_->addPoint(((float*)p_data + Dim() * i), p_ids[i]);
+    }
+}
+
 DatasetPtr
 IndexHNSW::Query(const DatasetPtr& dataset_ptr, const Config& config) {
     if (!index_) {
@@ -129,56 +179,6 @@ IndexHNSW::Query(const DatasetPtr& dataset_ptr, const Config& config) {
     ret_ds->Set(meta::IDS, p_id);
     ret_ds->Set(meta::DISTANCE, p_dist);
     return ret_ds;
-}
-
-void
-IndexHNSW::Train(const DatasetPtr& dataset_ptr, const Config& config) {
-    GETTENSOR(dataset_ptr)
-
-    hnswlib::SpaceInterface<float>* space;
-    if (config[Metric::TYPE] == Metric::L2) {
-        space = new hnswlib::L2Space(dim);
-    } else if (config[Metric::TYPE] == Metric::IP) {
-        space = new hnswlib::InnerProductSpace(dim);
-        normalize = true;
-    }
-    index_ = std::make_shared<hnswlib::HierarchicalNSW<float>>(space, rows, config[IndexParams::M].get<int64_t>(),
-                                                               config[IndexParams::efConstruction].get<int64_t>());
-}
-
-void
-IndexHNSW::Add(const DatasetPtr& dataset_ptr, const Config& config) {
-    if (!index_) {
-        KNOWHERE_THROW_MSG("index not initialize");
-    }
-
-    std::lock_guard<std::mutex> lk(mutex_);
-
-    GETTENSORWITHIDS(dataset_ptr)
-
-    //     if (normalize) {
-    //         std::vector<float> ep_norm_vector(Dim());
-    //         normalize_vector((float*)(p_data), ep_norm_vector.data(), Dim());
-    //         index_->addPoint((void*)(ep_norm_vector.data()), p_ids[0]);
-    // #pragma omp parallel for
-    //         for (int i = 1; i < rows; ++i) {
-    //             std::vector<float> norm_vector(Dim());
-    //             normalize_vector((float*)(p_data + Dim() * i), norm_vector.data(), Dim());
-    //             index_->addPoint((void*)(norm_vector.data()), p_ids[i]);
-    //         }
-    //     } else {
-    //         index_->addPoint((void*)(p_data), p_ids[0]);
-    // #pragma omp parallel for
-    //         for (int i = 1; i < rows; ++i) {
-    //             index_->addPoint((void*)(p_data + Dim() * i), p_ids[i]);
-    //         }
-    //     }
-
-    index_->addPoint(p_data, p_ids[0]);
-#pragma omp parallel for
-    for (int i = 1; i < rows; ++i) {
-        index_->addPoint(((float*)p_data + Dim() * i), p_ids[i]);
-    }
 }
 
 int64_t

@@ -140,21 +140,6 @@ BinaryIVF::Train(const DatasetPtr& dataset_ptr, const Config& config) {
     index_ = index;
 }
 
-int64_t
-BinaryIVF::Count() {
-    return index_->ntotal;
-}
-
-int64_t
-BinaryIVF::Dim() {
-    return index_->d;
-}
-
-void
-BinaryIVF::Add(const DatasetPtr& dataset_ptr, const Config& config) {
-    KNOWHERE_THROW_MSG("not support yet");
-}
-
 DatasetPtr
 BinaryIVF::GetVectorById(const DatasetPtr& dataset_ptr, const Config& config) {
     if (!index_ || !index_->is_trained) {

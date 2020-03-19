@@ -57,10 +57,17 @@ class IVF : public VecIndex, public FaissBaseIndex {
     QueryById(const DatasetPtr& dataset, const Config& config) override;
 
     int64_t
-    Count() override;
+    Count() override {
+        return index_->ntotal;
+    }
 
     int64_t
-    Dim() override;
+    Dim() override {
+        return index_->d;
+    }
+
+    DatasetPtr
+    GetVectorById(const DatasetPtr& dataset, const Config& config) override;
 
     virtual void
     Seal();
@@ -70,9 +77,6 @@ class IVF : public VecIndex, public FaissBaseIndex {
 
     virtual void
     GenGraph(const float* data, const int64_t k, GraphType& graph, const Config& config);
-
-    DatasetPtr
-    GetVectorById(const DatasetPtr& dataset, const Config& config) override;
 
  protected:
     virtual std::shared_ptr<faiss::IVFSearchParameters>

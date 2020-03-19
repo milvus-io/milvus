@@ -64,6 +64,28 @@ GPUIVF::Add(const DatasetPtr& dataset_ptr, const Config& config) {
     }
 }
 
+VecIndexPtr
+GPUIVF::CopyGpuToCpu(const Config& config) {
+    std::lock_guard<std::mutex> lk(mutex_);
+
+    if (auto device_idx = std::dynamic_pointer_cast<faiss::gpu::GpuIndexIVF>(index_)) {
+        faiss::Index* device_index = index_.get();
+        faiss::Index* host_index = faiss::gpu::index_gpu_to_cpu(device_index);
+
+        std::shared_ptr<faiss::Index> new_index;
+        new_index.reset(host_index);
+        return std::make_shared<IVF>(new_index);
+    } else {
+        return std::make_shared<IVF>(index_);
+    }
+}
+
+VecIndexPtr
+GPUIVF::CopyGpuToGpu(const int64_t device_id, const Config& config) {
+    auto host_index = CopyGpuToCpu(config);
+    return std::static_pointer_cast<IVF>(host_index)->CopyCpuToGpu(device_id, config);
+}
+
 BinarySet
 GPUIVF::SerializeImpl(const IndexType& type) {
     if (!index_ || !index_->is_trained) {
@@ -128,28 +150,6 @@ GPUIVF::QueryImpl(int64_t n, const float* data, int64_t k, float* distances, int
     } else {
         KNOWHERE_THROW_MSG("Not a GpuIndexIVF type.");
     }
-}
-
-VecIndexPtr
-GPUIVF::CopyGpuToCpu(const Config& config) {
-    std::lock_guard<std::mutex> lk(mutex_);
-
-    if (auto device_idx = std::dynamic_pointer_cast<faiss::gpu::GpuIndexIVF>(index_)) {
-        faiss::Index* device_index = index_.get();
-        faiss::Index* host_index = faiss::gpu::index_gpu_to_cpu(device_index);
-
-        std::shared_ptr<faiss::Index> new_index;
-        new_index.reset(host_index);
-        return std::make_shared<IVF>(new_index);
-    } else {
-        return std::make_shared<IVF>(index_);
-    }
-}
-
-VecIndexPtr
-GPUIVF::CopyGpuToGpu(const int64_t device_id, const Config& config) {
-    auto host_index = CopyGpuToCpu(config);
-    return std::static_pointer_cast<IVF>(host_index)->CopyCpuToGpu(device_id, config);
 }
 
 }  // namespace knowhere

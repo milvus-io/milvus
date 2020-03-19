@@ -131,16 +131,6 @@ BinaryIDMAP::Train(const DatasetPtr& dataset_ptr, const Config& config) {
     index_.reset(index);
 }
 
-int64_t
-BinaryIDMAP::Count() {
-    return index_->ntotal;
-}
-
-int64_t
-BinaryIDMAP::Dim() {
-    return index_->d;
-}
-
 const uint8_t*
 BinaryIDMAP::GetRawVectors() {
     try {
