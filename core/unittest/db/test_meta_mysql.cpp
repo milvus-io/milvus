@@ -250,6 +250,13 @@ TEST_F(MySqlMetaTest, TABLE_FILE_TEST) {
     ASSERT_TRUE(status.ok());
 
     table_file.table_id_ = table.table_id_;
+    table_file.file_type_ = milvus::engine::meta::TableFileSchema::RAW;
+    status = impl_->CreateTableFile(table_file);
+    ids = {table_file.id_};
+    status = impl_->FilesByID(ids, files);
+    ASSERT_EQ(files.size(), 1UL);
+
+    table_file.table_id_ = table.table_id_;
     table_file.file_type_ = milvus::engine::meta::TableFileSchema::TO_DELETE;
     status = impl_->CreateTableFile(table_file);
 
