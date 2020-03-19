@@ -7,43 +7,42 @@
 //
 // Unless required by applicable law or agreed to in writing, software distributed under the License
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
-// or implied. See the License for the specific language governing permissions and limitations under the License.
-
-#include "knowhere/index/vector_index/IndexNSG.h"
-
-#include "knowhere/adapter/VectorAdapter.h"
-#include "knowhere/common/Exception.h"
-#include "knowhere/common/Timer.h"
-
-#ifdef MILVUS_GPU_VERSION
-
-#include "knowhere/index/vector_index/IndexGPUIDMAP.h"
-#include "knowhere/index/vector_index/IndexGPUIVF.h"
-#include "knowhere/index/vector_index/helpers/Cloner.h"
-
-#endif
+// or implied. See the License for the specific language governing permissions and limitations under the License
 
 #include <fiu-local.h>
 
+#include "knowhere/common/Exception.h"
+#include "knowhere/common/Timer.h"
 #include "knowhere/index/vector_index/IndexIDMAP.h"
 #include "knowhere/index/vector_index/IndexIVF.h"
-#include "knowhere/index/vector_index/nsg/NSG.h"
-#include "knowhere/index/vector_index/nsg/NSGIO.h"
+#include "knowhere/index/vector_index/IndexNSG.h"
+#include "knowhere/index/vector_index/IndexType.h"
+#include "knowhere/index/vector_index/adapter/VectorAdapter.h"
+#include "knowhere/index/vector_index/impl/nsg/NSG.h"
+#include "knowhere/index/vector_index/impl/nsg/NSGIO.h"
 
+#ifdef MILVUS_GPU_VERSION
+#include "knowhere/index/vector_index/gpu/IndexGPUIDMAP.h"
+#include "knowhere/index/vector_index/gpu/IndexGPUIVF.h"
+#include "knowhere/index/vector_index/helpers/Cloner.h"
+#endif
+
+namespace milvus {
 namespace knowhere {
 
 BinarySet
-NSG::Serialize() {
+NSG::Serialize(const Config& config) {
     if (!index_ || !index_->is_trained) {
         KNOWHERE_THROW_MSG("index not initialize or trained");
     }
 
     try {
         fiu_do_on("NSG.Serialize.throw_exception", throw std::exception());
-        algo::NsgIndex* index = index_.get();
+        std::lock_guard<std::mutex> lk(mutex_);
+        impl::NsgIndex* index = index_.get();
 
         MemoryIOWriter writer;
-        algo::write_index(index, writer);
+        impl::write_index(index, writer);
         auto data = std::make_shared<uint8_t>();
         data.reset(writer.data_);
 
@@ -59,13 +58,14 @@ void
 NSG::Load(const BinarySet& index_binary) {
     try {
         fiu_do_on("NSG.Load.throw_exception", throw std::exception());
+        std::lock_guard<std::mutex> lk(mutex_);
         auto binary = index_binary.GetByName("NSG");
 
         MemoryIOReader reader;
         reader.total = binary->size;
         reader.data_ = binary->data.get();
 
-        auto index = algo::read_index(reader);
+        auto index = impl::read_index(reader);
         index_.reset(index);
     } catch (std::exception& e) {
         KNOWHERE_THROW_MSG(e.what());
@@ -73,73 +73,75 @@ NSG::Load(const BinarySet& index_binary) {
 }
 
 DatasetPtr
-NSG::Search(const DatasetPtr& dataset, const Config& config) {
+NSG::Query(const DatasetPtr& dataset_ptr, const Config& config) {
     if (!index_ || !index_->is_trained) {
         KNOWHERE_THROW_MSG("index not initialize or trained");
     }
 
-    GETTENSOR(dataset)
+    GETTENSOR(dataset_ptr)
 
-    auto elems = rows * config[meta::TOPK].get<int64_t>();
-    size_t p_id_size = sizeof(int64_t) * elems;
-    size_t p_dist_size = sizeof(float) * elems;
-    auto p_id = (int64_t*)malloc(p_id_size);
-    auto p_dist = (float*)malloc(p_dist_size);
+    try {
+        auto elems = rows * config[meta::TOPK].get<int64_t>();
+        size_t p_id_size = sizeof(int64_t) * elems;
+        size_t p_dist_size = sizeof(float) * elems;
+        auto p_id = (int64_t*)malloc(p_id_size);
+        auto p_dist = (float*)malloc(p_dist_size);
 
-    algo::SearchParams s_params;
-    s_params.search_length = config[IndexParams::search_length];
-    index_->Search((float*)p_data, rows, dim, config[meta::TOPK].get<int64_t>(), p_dist, p_id, s_params);
+        impl::SearchParams s_params;
+        s_params.search_length = config[IndexParams::search_length];
+        s_params.k = config[meta::TOPK];
+        {
+            std::lock_guard<std::mutex> lk(mutex_);
+            index_->Search((float*)p_data, rows, dim, config[meta::TOPK].get<int64_t>(), p_dist, p_id, s_params);
+        }
 
-    auto ret_ds = std::make_shared<Dataset>();
-    ret_ds->Set(meta::IDS, p_id);
-    ret_ds->Set(meta::DISTANCE, p_dist);
-    return ret_ds;
+        auto ret_ds = std::make_shared<Dataset>();
+        ret_ds->Set(meta::IDS, p_id);
+        ret_ds->Set(meta::DISTANCE, p_dist);
+        return ret_ds;
+    } catch (std::exception& e) {
+        KNOWHERE_THROW_MSG(e.what());
+    }
 }
 
-IndexModelPtr
-NSG::Train(const DatasetPtr& dataset, const Config& config) {
+void
+NSG::Train(const DatasetPtr& dataset_ptr, const Config& config) {
     auto idmap = std::make_shared<IDMAP>();
-    idmap->Train(config);
-    idmap->AddWithoutId(dataset, config);
-    Graph knng;
+    idmap->Train(dataset_ptr, config);
+    idmap->AddWithoutIds(dataset_ptr, config);
+    impl::Graph knng;
     const float* raw_data = idmap->GetRawVectors();
+    const int64_t device_id = config[knowhere::meta::DEVICEID].get<int64_t>();
+    const int64_t k = config[IndexParams::knng].get<int64_t>();
 #ifdef MILVUS_GPU_VERSION
-    if (config[knowhere::meta::DEVICEID].get<int64_t>() == -1) {
+    if (device_id == -1) {
         auto preprocess_index = std::make_shared<IVF>();
-        auto model = preprocess_index->Train(dataset, config);
-        preprocess_index->set_index_model(model);
-        preprocess_index->AddWithoutIds(dataset, config);
-        preprocess_index->GenGraph(raw_data, config[IndexParams::knng].get<int64_t>(), knng, config);
+        preprocess_index->Train(dataset_ptr, config);
+        preprocess_index->AddWithoutIds(dataset_ptr, config);
+        preprocess_index->GenGraph(raw_data, k, knng, config);
     } else {
-        auto gpu_idx = cloner::CopyCpuToGpu(idmap, config[knowhere::meta::DEVICEID].get<int64_t>(), config);
+        auto gpu_idx = cloner::CopyCpuToGpu(idmap, device_id, config);
         auto gpu_idmap = std::dynamic_pointer_cast<GPUIDMAP>(gpu_idx);
-        gpu_idmap->GenGraph(raw_data, config[IndexParams::knng].get<int64_t>(), knng, config);
+        gpu_idmap->GenGraph(raw_data, k, knng, config);
     }
 #else
     auto preprocess_index = std::make_shared<IVF>();
-    auto model = preprocess_index->Train(dataset, config);
-    preprocess_index->set_index_model(model);
-    preprocess_index->AddWithoutIds(dataset, config);
-    preprocess_index->GenGraph(raw_data, config[IndexParams::knng].get<int64_t>(), knng, config);
+    preprocess_index->Train(dataset_ptr, config);
+    preprocess_index->AddWithoutIds(dataset_ptr, config);
+    preprocess_index->GenGraph(raw_data, k, knng, config);
 #endif
 
-    algo::BuildParams b_params;
+    impl::BuildParams b_params;
     b_params.candidate_pool_size = config[IndexParams::candidate];
     b_params.out_degree = config[IndexParams::out_degree];
     b_params.search_length = config[IndexParams::search_length];
 
-    auto p_ids = dataset->Get<const int64_t*>(meta::IDS);
+    auto p_ids = dataset_ptr->Get<const int64_t*>(meta::IDS);
 
-    GETTENSOR(dataset)
-    index_ = std::make_shared<algo::NsgIndex>(dim, rows);
+    GETTENSOR(dataset_ptr)
+    index_ = std::make_shared<impl::NsgIndex>(dim, rows);
     index_->SetKnnGraph(knng);
     index_->Build_with_ids(rows, (float*)p_data, (int64_t*)p_ids, b_params);
-    return nullptr;  // TODO(linxj): support serialize
-}
-
-void
-NSG::Add(const DatasetPtr& dataset, const Config& config) {
-    // do nothing
 }
 
 int64_t
@@ -148,18 +150,9 @@ NSG::Count() {
 }
 
 int64_t
-NSG::Dimension() {
+NSG::Dim() {
     return index_->dimension;
 }
 
-// VectorIndexPtr
-// NSG::Clone() {
-//    KNOWHERE_THROW_MSG("not support");
-//}
-
-void
-NSG::Seal() {
-    // do nothing
-}
-
 }  // namespace knowhere
+}  // namespace milvus

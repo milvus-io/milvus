@@ -16,44 +16,43 @@
 
 #include "hnswlib/hnswlib.h"
 
-#include "knowhere/index/vector_index/VectorIndex.h"
+#include "knowhere/common/Exception.h"
+#include "knowhere/index/vector_index/VecIndex.h"
 
+namespace milvus {
 namespace knowhere {
 
-class IndexHNSW : public VectorIndex {
+class IndexHNSW : public VecIndex {
  public:
+    IndexHNSW() {
+        index_type_ = IndexEnum::INDEX_HNSW;
+    }
+
     BinarySet
-    Serialize() override;
+    Serialize(const Config& config = Config()) override;
 
     void
     Load(const BinarySet& index_binary) override;
 
+    void
+    Train(const DatasetPtr& dataset_ptr, const Config& config) override;
+
+    void
+    Add(const DatasetPtr& dataset_ptr, const Config& config) override;
+
+    void
+    AddWithoutIds(const DatasetPtr&, const Config&) override {
+        KNOWHERE_THROW_MSG("Incremental index is not supported");
+    }
+
     DatasetPtr
-    Search(const DatasetPtr& dataset, const Config& config) override;
-
-    //    void
-    //    set_preprocessor(PreprocessorPtr preprocessor) override;
-    //
-    //    void
-    //    set_index_model(IndexModelPtr model) override;
-    //
-    //    PreprocessorPtr
-    //    BuildPreprocessor(const DatasetPtr& dataset, const Config& config) override;
-
-    IndexModelPtr
-    Train(const DatasetPtr& dataset, const Config& config) override;
-
-    void
-    Add(const DatasetPtr& dataset, const Config& config) override;
-
-    void
-    Seal() override;
+    Query(const DatasetPtr& dataset_ptr, const Config& config) override;
 
     int64_t
     Count() override;
 
     int64_t
-    Dimension() override;
+    Dim() override;
 
  private:
     bool normalize = false;
@@ -62,3 +61,4 @@ class IndexHNSW : public VectorIndex {
 };
 
 }  // namespace knowhere
+}  // namespace milvus

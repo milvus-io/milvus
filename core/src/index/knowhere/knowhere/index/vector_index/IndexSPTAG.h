@@ -17,71 +17,58 @@
 #include <memory>
 #include <string>
 
-#include "VectorIndex.h"
-#include "knowhere/index/IndexModel.h"
+#include "knowhere/index/vector_index/VecIndex.h"
 
+namespace milvus {
 namespace knowhere {
 
-class CPUSPTAGRNG : public VectorIndex {
+class CPUSPTAGRNG : public VecIndex {
  public:
     explicit CPUSPTAGRNG(const std::string& IndexType);
 
  public:
     BinarySet
-    Serialize() override;
-
-    //    VectorIndexPtr
-    //    Clone() override;
+    Serialize(const Config& config = Config()) override;
 
     void
     Load(const BinarySet& index_array) override;
 
- public:
-    // PreprocessorPtr
-    // BuildPreprocessor(const DatasetPtr &dataset, const Config &config) override;
+    void
+    BuildAll(const DatasetPtr& dataset_ptr, const Config& config) override {
+        Train(dataset_ptr, config);
+    }
+
+    void
+    Train(const DatasetPtr& dataset_ptr, const Config& config) override;
+
+    void
+    Add(const DatasetPtr&, const Config&) override {
+        KNOWHERE_THROW_MSG("Incremental index is not supported");
+    }
+
+    void
+    AddWithoutIds(const DatasetPtr&, const Config&) override {
+        KNOWHERE_THROW_MSG("Incremental index is not supported");
+    }
+
+    DatasetPtr
+    Query(const DatasetPtr& dataset_ptr, const Config& config) override;
 
     int64_t
     Count() override;
 
     int64_t
-    Dimension() override;
-
-    IndexModelPtr
-    Train(const DatasetPtr& dataset, const Config& config) override;
-
-    void
-    Add(const DatasetPtr& dataset, const Config& config) override;
-
-    DatasetPtr
-    Search(const DatasetPtr& dataset, const Config& config) override;
-
-    void
-    Seal() override;
+    Dim() override;
 
  private:
     void
     SetParameters(const Config& config);
 
  private:
-    PreprocessorPtr preprocessor_;
     std::shared_ptr<SPTAG::VectorIndex> index_ptr_;
-    SPTAG::IndexAlgoType index_type_;
 };
 
 using CPUSPTAGRNGPtr = std::shared_ptr<CPUSPTAGRNG>;
 
-class CPUSPTAGRNGIndexModel : public IndexModel {
- public:
-    BinarySet
-    Serialize() override;
-
-    void
-    Load(const BinarySet& binary) override;
-
- private:
-    std::shared_ptr<SPTAG::VectorIndex> index_;
-};
-
-using CPUSPTAGRNGIndexModelPtr = std::shared_ptr<CPUSPTAGRNGIndexModel>;
-
 }  // namespace knowhere
+}  // namespace milvus

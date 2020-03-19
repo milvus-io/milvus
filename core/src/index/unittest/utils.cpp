@@ -10,7 +10,7 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
 #include "unittest/utils.h"
-#include "knowhere/adapter/VectorAdapter.h"
+#include "knowhere/index/vector_index/adapter/VectorAdapter.h"
 
 #include <gtest/gtest.h>
 #include <math.h>
@@ -52,7 +52,7 @@ DataGen::Generate(const int& dim, const int& nb, const int& nq) {
     query_dataset = generate_query_dataset(nq, dim, xq.data());
     id_dataset = generate_id_dataset(nq, ids.data());
     xid_dataset = generate_id_dataset(nq, xids.data());
-    xid_dataset->Set(knowhere::meta::DIM, (int64_t)dim);
+    xid_dataset->Set(milvus::knowhere::meta::DIM, (int64_t)dim);
 }
 
 void
@@ -66,8 +66,8 @@ BinaryDataGen::Generate(const int& dim, const int& nb, const int& nq) {
     assert(xb.size() == (size_t)dim_x * nb);
     assert(xq.size() == (size_t)dim_x * nq);
 
-    base_dataset = generate_binary_dataset(nb, dim, xb.data(), ids.data());
-    query_dataset = generate_binary_query_dataset(nq, dim, xq.data());
+    base_dataset = generate_dataset(nb, dim, xb.data(), ids.data());
+    query_dataset = generate_query_dataset(nq, dim, xq.data());
     id_dataset = generate_id_dataset(nq, ids.data());
     xid_dataset = generate_id_dataset(nq, xids.data());
 }
@@ -176,55 +176,36 @@ FileIOWriter::operator()(void* ptr, size_t size) {
     return size;
 }
 
-knowhere::DatasetPtr
-generate_dataset(int64_t nb, int64_t dim, const float* xb, const int64_t* ids) {
-    auto ret_ds = std::make_shared<knowhere::Dataset>();
-    ret_ds->Set(knowhere::meta::ROWS, nb);
-    ret_ds->Set(knowhere::meta::DIM, dim);
-    ret_ds->Set(knowhere::meta::TENSOR, xb);
-    ret_ds->Set(knowhere::meta::IDS, ids);
+milvus::knowhere::DatasetPtr
+generate_dataset(int64_t nb, int64_t dim, const void* xb, const int64_t* ids) {
+    auto ret_ds = std::make_shared<milvus::knowhere::Dataset>();
+    ret_ds->Set(milvus::knowhere::meta::ROWS, nb);
+    ret_ds->Set(milvus::knowhere::meta::DIM, dim);
+    ret_ds->Set(milvus::knowhere::meta::TENSOR, xb);
+    ret_ds->Set(milvus::knowhere::meta::IDS, ids);
     return ret_ds;
 }
 
-knowhere::DatasetPtr
-generate_binary_dataset(int64_t nb, int64_t dim, const uint8_t* xb, const int64_t* ids) {
-    auto ret_ds = std::make_shared<knowhere::Dataset>();
-    ret_ds->Set(knowhere::meta::ROWS, nb);
-    ret_ds->Set(knowhere::meta::DIM, dim);
-    ret_ds->Set(knowhere::meta::TENSOR, xb);
-    ret_ds->Set(knowhere::meta::IDS, ids);
+milvus::knowhere::DatasetPtr
+generate_query_dataset(int64_t nb, int64_t dim, const void* xb) {
+    auto ret_ds = std::make_shared<milvus::knowhere::Dataset>();
+    ret_ds->Set(milvus::knowhere::meta::ROWS, nb);
+    ret_ds->Set(milvus::knowhere::meta::DIM, dim);
+    ret_ds->Set(milvus::knowhere::meta::TENSOR, xb);
     return ret_ds;
 }
 
-knowhere::DatasetPtr
-generate_query_dataset(int64_t nb, int64_t dim, const float* xb) {
-    auto ret_ds = std::make_shared<knowhere::Dataset>();
-    ret_ds->Set(knowhere::meta::ROWS, nb);
-    ret_ds->Set(knowhere::meta::DIM, dim);
-    ret_ds->Set(knowhere::meta::TENSOR, xb);
-    return ret_ds;
-}
-
-knowhere::DatasetPtr
+milvus::knowhere::DatasetPtr
 generate_id_dataset(int64_t nb, const int64_t* ids) {
-    auto ret_ds = std::make_shared<knowhere::Dataset>();
-    ret_ds->Set(knowhere::meta::ROWS, nb);
-    ret_ds->Set(knowhere::meta::IDS, ids);
-    return ret_ds;
-}
-
-knowhere::DatasetPtr
-generate_binary_query_dataset(int64_t nb, int64_t dim, const uint8_t* xb) {
-    auto ret_ds = std::make_shared<knowhere::Dataset>();
-    ret_ds->Set(knowhere::meta::ROWS, nb);
-    ret_ds->Set(knowhere::meta::DIM, dim);
-    ret_ds->Set(knowhere::meta::TENSOR, xb);
+    auto ret_ds = std::make_shared<milvus::knowhere::Dataset>();
+    ret_ds->Set(milvus::knowhere::meta::ROWS, nb);
+    ret_ds->Set(milvus::knowhere::meta::IDS, ids);
     return ret_ds;
 }
 
 void
-AssertAnns(const knowhere::DatasetPtr& result, const int nq, const int k, const CheckMode check_mode) {
-    auto ids = result->Get<int64_t*>(knowhere::meta::IDS);
+AssertAnns(const milvus::knowhere::DatasetPtr& result, const int nq, const int k, const CheckMode check_mode) {
+    auto ids = result->Get<int64_t*>(milvus::knowhere::meta::IDS);
     for (auto i = 0; i < nq; i++) {
         switch (check_mode) {
             case CheckMode::CHECK_EQUAL:
@@ -241,11 +222,11 @@ AssertAnns(const knowhere::DatasetPtr& result, const int nq, const int k, const 
 }
 
 void
-AssertVec(const knowhere::DatasetPtr& result, const knowhere::DatasetPtr& base_dataset,
-          const knowhere::DatasetPtr& id_dataset, const int n, const int dim, const CheckMode check_mode) {
-    auto base = base_dataset->Get<const float*>(knowhere::meta::TENSOR);
-    auto ids = id_dataset->Get<const int64_t*>(knowhere::meta::IDS);
-    auto x = result->Get<float*>(knowhere::meta::TENSOR);
+AssertVec(const milvus::knowhere::DatasetPtr& result, const milvus::knowhere::DatasetPtr& base_dataset,
+          const milvus::knowhere::DatasetPtr& id_dataset, const int n, const int dim, const CheckMode check_mode) {
+    float* base = (float*)base_dataset->Get<const void*>(milvus::knowhere::meta::TENSOR);
+    auto ids = id_dataset->Get<const int64_t*>(milvus::knowhere::meta::IDS);
+    auto x = result->Get<float*>(milvus::knowhere::meta::TENSOR);
     for (auto i = 0; i < n; i++) {
         auto id = ids[i];
         for (auto j = 0; j < dim; j++) {
@@ -273,11 +254,11 @@ AssertVec(const knowhere::DatasetPtr& result, const knowhere::DatasetPtr& base_d
 }
 
 void
-AssertBinVeceq(const knowhere::DatasetPtr& result, const knowhere::DatasetPtr& base_dataset,
-               const knowhere::DatasetPtr& id_dataset, const int n, const int dim) {
-    auto base = base_dataset->Get<const uint8_t*>(knowhere::meta::TENSOR);
-    auto ids = id_dataset->Get<const int64_t*>(knowhere::meta::IDS);
-    auto x = result->Get<uint8_t*>(knowhere::meta::TENSOR);
+AssertBinVeceq(const milvus::knowhere::DatasetPtr& result, const milvus::knowhere::DatasetPtr& base_dataset,
+               const milvus::knowhere::DatasetPtr& id_dataset, const int n, const int dim) {
+    auto base = base_dataset->Get<const uint8_t*>(milvus::knowhere::meta::TENSOR);
+    auto ids = id_dataset->Get<const int64_t*>(milvus::knowhere::meta::IDS);
+    auto x = result->Get<uint8_t*>(milvus::knowhere::meta::TENSOR);
     for (auto i = 0; i < 1; i++) {
         auto id = ids[i];
         for (auto j = 0; j < dim; j++) {
@@ -287,9 +268,9 @@ AssertBinVeceq(const knowhere::DatasetPtr& result, const knowhere::DatasetPtr& b
 }
 
 void
-PrintResult(const knowhere::DatasetPtr& result, const int& nq, const int& k) {
-    auto ids = result->Get<int64_t*>(knowhere::meta::IDS);
-    auto dist = result->Get<float*>(knowhere::meta::DISTANCE);
+PrintResult(const milvus::knowhere::DatasetPtr& result, const int& nq, const int& k) {
+    auto ids = result->Get<int64_t*>(milvus::knowhere::meta::IDS);
+    auto dist = result->Get<float*>(milvus::knowhere::meta::DISTANCE);
 
     std::stringstream ss_id;
     std::stringstream ss_dist;

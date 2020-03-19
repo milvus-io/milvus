@@ -9,23 +9,24 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
+#include <fiu-control.h>
+#include <fiu-local.h>
 #include <gtest/gtest.h>
 #include <memory>
 
 #include "knowhere/common/Exception.h"
 #include "knowhere/index/vector_index/FaissBaseIndex.h"
 #include "knowhere/index/vector_index/IndexNSG.h"
+#include "knowhere/index/vector_index/helpers/IndexParameter.h"
 #ifdef MILVUS_GPU_VERSION
-#include "knowhere/index/vector_index/IndexGPUIDMAP.h"
+#include "knowhere/index/vector_index/gpu/IndexGPUIDMAP.h"
 #include "knowhere/index/vector_index/helpers/Cloner.h"
 #include "knowhere/index/vector_index/helpers/FaissGpuResourceMgr.h"
 #endif
 
 #include "knowhere/common/Timer.h"
-#include "knowhere/index/vector_index/nsg/NSGIO.h"
+#include "knowhere/index/vector_index/impl/nsg/NSGIO.h"
 
-#include <fiu-control.h>
-#include <fiu-local.h>
 #include "unittest/utils.h"
 
 using ::testing::Combine;
@@ -41,37 +42,37 @@ class NSGInterfaceTest : public DataGen, public ::testing::Test {
 // Init_with_default();
 #ifdef MILVUS_GPU_VERSION
         int64_t MB = 1024 * 1024;
-        knowhere::FaissGpuResourceMgr::GetInstance().InitDevice(DEVICEID, MB * 200, MB * 600, 1);
+        milvus::knowhere::FaissGpuResourceMgr::GetInstance().InitDevice(DEVICEID, MB * 200, MB * 600, 1);
 #endif
         Generate(256, 1000000 / 100, 1);
-        index_ = std::make_shared<knowhere::NSG>();
+        index_ = std::make_shared<milvus::knowhere::NSG>();
 
-        train_conf = knowhere::Config{{knowhere::meta::DIM, 256},
-                                      {knowhere::IndexParams::nlist, 163},
-                                      {knowhere::IndexParams::nprobe, 8},
-                                      {knowhere::IndexParams::knng, 20},
-                                      {knowhere::IndexParams::search_length, 40},
-                                      {knowhere::IndexParams::out_degree, 30},
-                                      {knowhere::IndexParams::candidate, 100},
-                                      {knowhere::Metric::TYPE, knowhere::Metric::L2}};
+        train_conf = milvus::knowhere::Config{{milvus::knowhere::meta::DIM, 256},
+                                              {milvus::knowhere::IndexParams::nlist, 163},
+                                              {milvus::knowhere::IndexParams::nprobe, 8},
+                                              {milvus::knowhere::IndexParams::knng, 20},
+                                              {milvus::knowhere::IndexParams::search_length, 40},
+                                              {milvus::knowhere::IndexParams::out_degree, 30},
+                                              {milvus::knowhere::IndexParams::candidate, 100},
+                                              {milvus::knowhere::Metric::TYPE, milvus::knowhere::Metric::L2}};
 
-        search_conf = knowhere::Config{
-            {knowhere::meta::TOPK, k},
-            {knowhere::IndexParams::search_length, 30},
+        search_conf = milvus::knowhere::Config{
+            {milvus::knowhere::meta::TOPK, k},
+            {milvus::knowhere::IndexParams::search_length, 30},
         };
     }
 
     void
     TearDown() override {
 #ifdef MILVUS_GPU_VERSION
-        knowhere::FaissGpuResourceMgr::GetInstance().Free();
+        milvus::knowhere::FaissGpuResourceMgr::GetInstance().Free();
 #endif
     }
 
  protected:
-    std::shared_ptr<knowhere::NSG> index_;
-    knowhere::Config train_conf;
-    knowhere::Config search_conf;
+    std::shared_ptr<milvus::knowhere::NSG> index_;
+    milvus::knowhere::Config train_conf;
+    milvus::knowhere::Config search_conf;
 };
 
 TEST_F(NSGInterfaceTest, basic_test) {
@@ -79,14 +80,14 @@ TEST_F(NSGInterfaceTest, basic_test) {
     fiu_init(0);
     // untrained index
     {
-        ASSERT_ANY_THROW(index_->Search(query_dataset, search_conf));
+        ASSERT_ANY_THROW(index_->Query(query_dataset, search_conf));
         ASSERT_ANY_THROW(index_->Serialize());
     }
-    // train_conf->gpu_id = knowhere::INVALID_VALUE;
+    // train_conf->gpu_id = milvus::knowhere::INVALID_VALUE;
     // auto model_invalid_gpu = index_->Train(base_dataset, train_conf);
-    train_conf[knowhere::meta::DEVICEID] = DEVICEID;
-    auto model = index_->Train(base_dataset, train_conf);
-    auto result = index_->Search(query_dataset, search_conf);
+    train_conf[milvus::knowhere::meta::DEVICEID] = DEVICEID;
+    index_->Train(base_dataset, train_conf);
+    auto result = index_->Query(query_dataset, search_conf);
     AssertAnns(result, nq, k);
 
     auto binaryset = index_->Serialize();
@@ -96,7 +97,7 @@ TEST_F(NSGInterfaceTest, basic_test) {
         fiu_disable("NSG.Serialize.throw_exception");
     }
 
-    auto new_index = std::make_shared<knowhere::NSG>();
+    auto new_index = std::make_shared<milvus::knowhere::NSG>();
     new_index->Load(binaryset);
     {
         fiu_enable("NSG.Load.throw_exception", 1, nullptr, 0);
@@ -104,23 +105,23 @@ TEST_F(NSGInterfaceTest, basic_test) {
         fiu_disable("NSG.Load.throw_exception");
     }
 
-    auto new_result = new_index->Search(query_dataset, search_conf);
+    auto new_result = new_index->Query(query_dataset, search_conf);
     AssertAnns(result, nq, k);
 
     ASSERT_EQ(index_->Count(), nb);
-    ASSERT_EQ(index_->Dimension(), dim);
-    //    ASSERT_THROW({ index_->Clone(); }, knowhere::KnowhereException);
-    ASSERT_NO_THROW({
-        index_->Add(base_dataset, knowhere::Config());
-        index_->Seal();
-    });
+    ASSERT_EQ(index_->Dim(), dim);
+    //    ASSERT_THROW({ index_->Clone(); }, milvus::knowhere::KnowhereException);
+    // ASSERT_NO_THROW({
+    //     index_->Add(base_dataset, milvus::knowhere::Config());
+    //     index_->Seal();
+    // });
 }
 
 TEST_F(NSGInterfaceTest, comparetest) {
-    knowhere::algo::DistanceL2 distanceL2;
-    knowhere::algo::DistanceIP distanceIP;
+    milvus::knowhere::impl::DistanceL2 distanceL2;
+    milvus::knowhere::impl::DistanceIP distanceIP;
 
-    knowhere::TimeRecorder tc("Compare");
+    milvus::knowhere::TimeRecorder tc("Compare");
     for (int i = 0; i < 1000; ++i) {
         distanceL2.Compare(xb.data(), xq.data(), 256);
     }
@@ -233,7 +234,7 @@ TEST_F(NSGInterfaceTest, comparetest) {
 //            }
 //        }
 //    }
-//    printf("R@1 = %.4f\n", n_1 / float(nq));;
+//    printf("R@1 = %.4f\n", n_1 / float(nq));
 //    printf("R@10 = %.4f\n", n_10 / float(nq));
 //    printf("R@100 = %.4f\n", n_100 / float(nq));
 //}

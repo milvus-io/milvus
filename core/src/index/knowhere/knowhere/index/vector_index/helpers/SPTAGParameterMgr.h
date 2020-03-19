@@ -20,7 +20,9 @@
 #include "IndexParameter.h"
 #include "knowhere/common/Config.h"
 
+namespace milvus {
 namespace knowhere {
+
 class SPTAGParameterMgr {
  public:
     const Config&
@@ -50,3 +52,4 @@ class SPTAGParameterMgr {
 };
 
 }  // namespace knowhere
+}  // namespace milvus

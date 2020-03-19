@@ -10,14 +10,13 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
 #include <gtest/gtest.h>
-
 #include <iostream>
 #include <sstream>
-#include "knowhere/adapter/SptagAdapter.h"
-#include "knowhere/adapter/VectorAdapter.h"
+
 #include "knowhere/common/Exception.h"
 #include "knowhere/index/vector_index/IndexSPTAG.h"
-#include "knowhere/index/vector_index/helpers/Definitions.h"
+#include "knowhere/index/vector_index/adapter/SptagAdapter.h"
+#include "knowhere/index/vector_index/adapter/VectorAdapter.h"
 
 #include "unittest/utils.h"
 
@@ -31,18 +30,18 @@ class SPTAGTest : public DataGen, public TestWithParam<std::string> {
     SetUp() override {
         IndexType = GetParam();
         Generate(128, 100, 5);
-        index_ = std::make_shared<knowhere::CPUSPTAGRNG>(IndexType);
+        index_ = std::make_shared<milvus::knowhere::CPUSPTAGRNG>(IndexType);
         if (IndexType == "KDT") {
-            conf = knowhere::Config{
-                {knowhere::meta::DIM, dim},
-                {knowhere::meta::TOPK, 10},
-                {knowhere::Metric::TYPE, knowhere::Metric::L2},
+            conf = milvus::knowhere::Config{
+                {milvus::knowhere::meta::DIM, dim},
+                {milvus::knowhere::meta::TOPK, 10},
+                {milvus::knowhere::Metric::TYPE, milvus::knowhere::Metric::L2},
             };
         } else {
-            conf = knowhere::Config{
-                {knowhere::meta::DIM, dim},
-                {knowhere::meta::TOPK, 10},
-                {knowhere::Metric::TYPE, knowhere::Metric::L2},
+            conf = milvus::knowhere::Config{
+                {milvus::knowhere::meta::DIM, dim},
+                {milvus::knowhere::meta::TOPK, 10},
+                {milvus::knowhere::Metric::TYPE, milvus::knowhere::Metric::L2},
             };
         }
 
@@ -50,8 +49,8 @@ class SPTAGTest : public DataGen, public TestWithParam<std::string> {
     }
 
  protected:
-    knowhere::Config conf;
-    std::shared_ptr<knowhere::CPUSPTAGRNG> index_ = nullptr;
+    milvus::knowhere::Config conf;
+    std::shared_ptr<milvus::knowhere::CPUSPTAGRNG> index_ = nullptr;
     std::string IndexType;
 };
 
@@ -61,18 +60,14 @@ INSTANTIATE_TEST_CASE_P(SPTAGParameters, SPTAGTest, Values("KDT", "BKT"));
 TEST_P(SPTAGTest, sptag_basic) {
     assert(!xb.empty());
 
-    auto preprocessor = index_->BuildPreprocessor(base_dataset, conf);
-    index_->set_preprocessor(preprocessor);
-
-    auto model = index_->Train(base_dataset, conf);
-    index_->set_index_model(model);
-    index_->Add(base_dataset, conf);
-    auto result = index_->Search(query_dataset, conf);
+    index_->Train(base_dataset, conf);
+    // index_->Add(base_dataset, conf);
+    auto result = index_->Query(query_dataset, conf);
     AssertAnns(result, nq, k);
 
     {
-        auto ids = result->Get<int64_t*>(knowhere::meta::IDS);
-        auto dist = result->Get<float*>(knowhere::meta::DISTANCE);
+        auto ids = result->Get<int64_t*>(milvus::knowhere::meta::IDS);
+        auto dist = result->Get<float*>(milvus::knowhere::meta::DISTANCE);
 
         std::stringstream ss_id;
         std::stringstream ss_dist;
@@ -89,36 +84,22 @@ TEST_P(SPTAGTest, sptag_basic) {
         std::cout << "id\n" << ss_id.str() << std::endl;
         std::cout << "dist\n" << ss_dist.str() << std::endl;
     }
-
-    // Though these functions do nothing, use them to improve code coverage
-    {
-        index_->Seal();
-        knowhere::CPUSPTAGRNGIndexModel index_model;
-        // Function Serialize's implementation do'nt have return value,
-        // which will cause undefined behavior.
-        // index_model.Serialize();
-        index_model.Load(knowhere::BinarySet());
-    }
 }
 
 TEST_P(SPTAGTest, sptag_serialize) {
     assert(!xb.empty());
 
-    auto preprocessor = index_->BuildPreprocessor(base_dataset, conf);
-    index_->set_preprocessor(preprocessor);
-
-    auto model = index_->Train(base_dataset, conf);
-
-    index_->Add(base_dataset, conf);
+    index_->Train(base_dataset, conf);
+    // index_->Add(base_dataset, conf);
     auto binaryset = index_->Serialize();
-    auto new_index = std::make_shared<knowhere::CPUSPTAGRNG>(IndexType);
+    auto new_index = std::make_shared<milvus::knowhere::CPUSPTAGRNG>(IndexType);
     new_index->Load(binaryset);
-    auto result = new_index->Search(query_dataset, conf);
+    auto result = new_index->Query(query_dataset, conf);
     AssertAnns(result, nq, k);
     PrintResult(result, nq, k);
     ASSERT_EQ(new_index->Count(), nb);
-    ASSERT_EQ(new_index->Dimension(), dim);
-    //        ASSERT_THROW({ new_index->Clone(); }, knowhere::KnowhereException);
+    ASSERT_EQ(new_index->Dim(), dim);
+    //        ASSERT_THROW({ new_index->Clone(); }, milvus::knowhere::KnowhereException);
     //        ASSERT_NO_THROW({ new_index->Seal(); });
 
     {
@@ -136,7 +117,7 @@ TEST_P(SPTAGTest, sptag_serialize) {
             ++fileno;
         }
 
-        knowhere::BinarySet load_data_list;
+        milvus::knowhere::BinarySet load_data_list;
         for (int i = 0; i < filename_list.size() && i < meta_list.size(); ++i) {
             auto bin_size = meta_list[i].second;
             FileIOReader reader(filename_list[i]);
@@ -148,9 +129,9 @@ TEST_P(SPTAGTest, sptag_serialize) {
             load_data_list.Append(meta_list[i].first, data, bin_size);
         }
 
-        auto new_index = std::make_shared<knowhere::CPUSPTAGRNG>(IndexType);
+        auto new_index = std::make_shared<milvus::knowhere::CPUSPTAGRNG>(IndexType);
         new_index->Load(load_data_list);
-        auto result = new_index->Search(query_dataset, conf);
+        auto result = new_index->Query(query_dataset, conf);
         AssertAnns(result, nq, k);
         PrintResult(result, nq, k);
     }
