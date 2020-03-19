@@ -154,7 +154,7 @@ SearchRequest::OnExecute() {
             status = DBWrapper::DB()->Query(context_, table_name_, partition_list_, (size_t)topk_, extra_params_,
                                             vectors_data_, result_ids, result_distances);
         } else {
-            status = DBWrapper::DB()->QueryByFileID(context_, table_name_, file_id_list_, (size_t)topk_, extra_params_,
+            status = DBWrapper::DB()->QueryByFileID(context_, file_id_list_, (size_t)topk_, extra_params_,
                                                     vectors_data_, result_ids, result_distances);
         }
 
