@@ -187,7 +187,6 @@ class ServiceHandler(milvus_pb2_grpc.MilvusServiceServicer):
         _status, unpacks = Parser.parse_proto_TableSchema(request)
 
         if not _status.OK():
-            logging.warning('[CreateTable] parse fail: {}'.format(_status))
             return status_pb2.Status(error_code=_status.code,
                                      reason=_status.message)
 
