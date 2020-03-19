@@ -42,6 +42,7 @@ using IndexType = std::string;
 
 /* used in 0.8.0 */
 namespace IndexEnum {
+constexpr const char* INVALID = "";
 constexpr const char* INDEX_FAISS_IDMAP = "IDMAP";
 constexpr const char* INDEX_FAISS_IVFFLAT = "IVF_FLAT";
 constexpr const char* INDEX_FAISS_IVFPQ = "IVF_PQ";

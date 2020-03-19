@@ -75,7 +75,7 @@ class MockVecIndex : public milvus::knowhere::VecIndex {
 
     milvus::knowhere::IndexType
     index_type() const override {
-        return milvus::knowhere::IndexType::INVALID;
+        return milvus::knowhere::IndexEnum::INVALID;
     }
 
     milvus::knowhere::BinarySet
