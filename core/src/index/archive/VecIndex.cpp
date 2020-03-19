@@ -134,7 +134,7 @@ write_index(knowhere::VecIndexPtr index, const std::string& location) {
         recorder.RecordSection("Start");
         writer_ptr->open(location);
 
-        writer_ptr->write(&index_type, sizeof(knowhere::IndexType));
+        writer_ptr->write(&index_type, sizeof(index_type));
 
         for (auto& iter : binaryset.binary_map_) {
             auto meta = iter.first.c_str();
