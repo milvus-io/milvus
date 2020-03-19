@@ -29,7 +29,7 @@ BuildIndexPass::Init() {
 
     SetIdentity("BuildIndexPass");
     AddGpuEnableListener();
-    AddGpuBuildResListener();
+    AddGpuBuildResourcesListener();
 }
 
 bool

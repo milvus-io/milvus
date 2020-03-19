@@ -10,11 +10,13 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
 #include "cache/CpuCacheMgr.h"
-#include "config/Config.h"
-#include "utils/Log.h"
+
+#include <utility>
 
 #include <fiu-local.h>
-#include <utility>
+
+#include "config/Config.h"
+#include "utils/Log.h"
 
 namespace milvus {
 namespace cache {
@@ -35,6 +37,9 @@ CpuCacheMgr::CpuCacheMgr() {
     float cpu_cache_threshold;
     config.GetCacheConfigCpuCacheThreshold(cpu_cache_threshold);
     cache_->set_freemem_percent(cpu_cache_threshold);
+
+    SetIdentity("CpuCacheMgr");
+    AddCpuCacheCapacityListener();
 }
 
 CpuCacheMgr*
@@ -47,6 +52,11 @@ DataObjPtr
 CpuCacheMgr::GetIndex(const std::string& key) {
     DataObjPtr obj = GetItem(key);
     return obj;
+}
+
+void
+CpuCacheMgr::OnCpuCacheCapacityChanged(int64_t value) {
+    SetCapacity(value * unit);
 }
 
 }  // namespace cache

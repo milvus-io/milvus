@@ -11,16 +11,17 @@
 
 #pragma once
 
-#include "CacheMgr.h"
-#include "DataObj.h"
-
 #include <memory>
 #include <string>
+
+#include "cache/CacheMgr.h"
+#include "cache/DataObj.h"
+#include "config/handler/CacheConfigHandler.h"
 
 namespace milvus {
 namespace cache {
 
-class CpuCacheMgr : public CacheMgr<DataObjPtr> {
+class CpuCacheMgr : public CacheMgr<DataObjPtr>, public server::CacheConfigHandler {
  private:
     CpuCacheMgr();
 
@@ -31,6 +32,10 @@ class CpuCacheMgr : public CacheMgr<DataObjPtr> {
 
     DataObjPtr
     GetIndex(const std::string& key);
+
+ protected:
+    void
+    OnCpuCacheCapacityChanged(int64_t value) override;
 };
 
 }  // namespace cache

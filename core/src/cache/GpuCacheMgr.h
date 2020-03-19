@@ -9,12 +9,13 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
-#include "CacheMgr.h"
-#include "DataObj.h"
-
 #include <memory>
 #include <string>
 #include <unordered_map>
+
+#include "cache/CacheMgr.h"
+#include "cache/DataObj.h"
+#include "config/handler/GpuResourceConfigHandler.h"
 
 namespace milvus {
 namespace cache {
@@ -23,7 +24,7 @@ namespace cache {
 class GpuCacheMgr;
 using GpuCacheMgrPtr = std::shared_ptr<GpuCacheMgr>;
 
-class GpuCacheMgr : public CacheMgr<DataObjPtr> {
+class GpuCacheMgr : public CacheMgr<DataObjPtr>, public server::GpuResourceConfigHandler {
  public:
     GpuCacheMgr();
 
@@ -37,6 +38,10 @@ class GpuCacheMgr : public CacheMgr<DataObjPtr> {
 
     void
     InsertItem(const std::string& key, const DataObjPtr& data);
+
+ protected:
+    void
+    OnGpuCacheCapacityChanged(int64_t capacity) override;
 
  private:
     bool gpu_enable_ = true;

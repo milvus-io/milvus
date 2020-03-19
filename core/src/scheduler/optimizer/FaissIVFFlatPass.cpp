@@ -37,7 +37,7 @@ FaissIVFFlatPass::Init() {
     SetIdentity("FaissIVFFlatPass");
     AddGpuEnableListener();
     AddGpuSearchThresholdListener();
-    AddGpuSearchResListener();
+    AddGpuSearchResourcesListener();
 #endif
 }
 
