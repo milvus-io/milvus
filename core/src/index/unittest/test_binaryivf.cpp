@@ -10,16 +10,13 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
 #include <gtest/gtest.h>
-
 #include <iostream>
 #include <thread>
 
-#include "knowhere/adapter/VectorAdapter.h"
 #include "knowhere/common/Exception.h"
 #include "knowhere/common/Timer.h"
-
 #include "knowhere/index/vector_index/IndexBinaryIVF.h"
-
+#include "knowhere/index/vector_index/adapter/VectorAdapter.h"
 #include "unittest/Helper.h"
 #include "unittest/utils.h"
 
@@ -37,12 +34,12 @@ class BinaryIVFTest : public BinaryDataGen, public TestWithParam<std::string> {
         //        nq = 1000;
         //        k = 1000;
         //        Generate(DIM, NB, NQ);
-        index_ = std::make_shared<knowhere::BinaryIVF>();
+        index_ = std::make_shared<milvus::knowhere::BinaryIVF>();
 
-        knowhere::Config temp_conf{
-            {knowhere::meta::DIM, dim},           {knowhere::meta::TOPK, k},
-            {knowhere::IndexParams::nlist, 100},  {knowhere::IndexParams::nprobe, 10},
-            {knowhere::Metric::TYPE, MetricType},
+        milvus::knowhere::Config temp_conf{
+            {milvus::knowhere::meta::DIM, dim},           {milvus::knowhere::meta::TOPK, k},
+            {milvus::knowhere::IndexParams::nlist, 100},  {milvus::knowhere::IndexParams::nprobe, 10},
+            {milvus::knowhere::Metric::TYPE, MetricType},
         };
         conf = temp_conf;
     }
@@ -53,8 +50,8 @@ class BinaryIVFTest : public BinaryDataGen, public TestWithParam<std::string> {
 
  protected:
     std::string index_type;
-    knowhere::Config conf;
-    knowhere::BinaryIVFIndexPtr index_ = nullptr;
+    milvus::knowhere::Config conf;
+    milvus::knowhere::BinaryIVFIndexPtr index_ = nullptr;
 };
 
 INSTANTIATE_TEST_CASE_P(METRICParameters, BinaryIVFTest,
@@ -70,10 +67,10 @@ TEST_P(BinaryIVFTest, binaryivf_basic) {
     //    index_->set_index_model(model);
     //    index_->Add(base_dataset, conf);
     EXPECT_EQ(index_->Count(), nb);
-    EXPECT_EQ(index_->Dimension(), dim);
+    EXPECT_EQ(index_->Dim(), dim);
 
-    auto result = index_->Search(query_dataset, conf);
-    AssertAnns(result, nq, conf[knowhere::meta::TOPK]);
+    auto result = index_->Query(query_dataset, conf);
+    AssertAnns(result, nq, conf[milvus::knowhere::meta::TOPK]);
     // PrintResult(result, nq, k);
 
     faiss::ConcurrentBitsetPtr concurrent_bitset_ptr = std::make_shared<faiss::ConcurrentBitset>(nb);
@@ -82,10 +79,10 @@ TEST_P(BinaryIVFTest, binaryivf_basic) {
     }
     index_->SetBlacklist(concurrent_bitset_ptr);
 
-    auto result2 = index_->Search(query_dataset, conf);
+    auto result2 = index_->Query(query_dataset, conf);
     AssertAnns(result2, nq, k, CheckMode::CHECK_NOT_EQUAL);
 
-    auto result3 = index_->SearchById(id_dataset, conf);
+    auto result3 = index_->QueryById(id_dataset, conf);
     AssertAnns(result3, nq, k, CheckMode::CHECK_NOT_EQUAL);
 
     //    auto result4 = index_->GetVectorById(xid_dataset, conf);
@@ -93,7 +90,7 @@ TEST_P(BinaryIVFTest, binaryivf_basic) {
 }
 
 TEST_P(BinaryIVFTest, binaryivf_serialize) {
-    auto serialize = [](const std::string& filename, knowhere::BinaryPtr& bin, uint8_t* ret) {
+    auto serialize = [](const std::string& filename, milvus::knowhere::BinaryPtr& bin, uint8_t* ret) {
         FileIOWriter writer(filename);
         writer(static_cast<void*>(bin->data.get()), bin->size);
 
@@ -120,8 +117,8 @@ TEST_P(BinaryIVFTest, binaryivf_serialize) {
     //
     //        index_->set_index_model(model);
     //        index_->Add(base_dataset, conf);
-    //        auto result = index_->Search(query_dataset, conf);
-    //        AssertAnns(result, nq, conf[knowhere::meta::TOPK]);
+    //        auto result = index_->Query(query_dataset, conf);
+    //        AssertAnns(result, nq, conf[milvus::knowhere::meta::TOPK]);
     //    }
 
     {
@@ -143,9 +140,9 @@ TEST_P(BinaryIVFTest, binaryivf_serialize) {
 
         index_->Load(binaryset);
         EXPECT_EQ(index_->Count(), nb);
-        EXPECT_EQ(index_->Dimension(), dim);
-        auto result = index_->Search(query_dataset, conf);
-        AssertAnns(result, nq, conf[knowhere::meta::TOPK]);
+        EXPECT_EQ(index_->Dim(), dim);
+        auto result = index_->Query(query_dataset, conf);
+        AssertAnns(result, nq, conf[milvus::knowhere::meta::TOPK]);
         // PrintResult(result, nq, k);
     }
 }

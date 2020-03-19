@@ -7,13 +7,14 @@
 //
 // Unless required by applicable law or agreed to in writing, software distributed under the License
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
-// or implied. See the License for the specific language governing permissions and limitations under the License.
+// or implied. See the License for the specific language governing permissions and limitations under the License
 
 #include <iostream>  // TODO(linxj): using Log instead
 
 #include "knowhere/common/Log.h"
 #include "knowhere/common/Timer.h"
 
+namespace milvus {
 namespace knowhere {
 
 TimeRecorder::TimeRecorder(const std::string& header, int64_t log_level) : header_(header), log_level_(log_level) {
@@ -81,3 +82,4 @@ TimeRecorder::ElapseFromBegin(const std::string& msg) {
 }
 
 }  // namespace knowhere
+}  // namespace milvus

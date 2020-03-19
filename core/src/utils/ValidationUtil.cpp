@@ -13,9 +13,9 @@
 #include "Log.h"
 #include "db/Utils.h"
 #include "db/engine/ExecutionEngine.h"
-#include "index/knowhere/knowhere/index/vector_index/helpers/IndexParameter.h"
+#include "knowhere/index/vector_index/ConfAdapter.h"
+#include "knowhere/index/vector_index/helpers/IndexParameter.h"
 #include "utils/StringHelpFunctions.h"
-#include "wrapper/ConfAdapter.h"
 
 #include <arpa/inet.h>
 
@@ -212,7 +212,7 @@ ValidationUtil::ValidateIndexParams(const milvus::json& index_params, const engi
 
             // special check for 'm' parameter
             std::vector<int64_t> resset;
-            milvus::engine::IVFPQConfAdapter::GetValidMList(table_schema.dimension_, resset);
+            milvus::knowhere::IVFPQConfAdapter::GetValidMList(table_schema.dimension_, resset);
             int64_t m_value = index_params[index_params, knowhere::IndexParams::m];
             if (resset.empty()) {
                 std::string msg = "Invalid table dimension, unable to get reasonable values for 'm'";
