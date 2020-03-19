@@ -30,7 +30,7 @@ class MemTableFile : public server::CacheConfigHandler {
  public:
     MemTableFile(const std::string& table_id, const meta::MetaPtr& meta, const DBOptions& options);
 
-    ~MemTableFile();
+    ~MemTableFile() = default;
 
  public:
     Status

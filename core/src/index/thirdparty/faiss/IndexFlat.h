@@ -40,7 +40,8 @@ struct IndexFlat: Index {
         idx_t n,
         const float* x,
         float radius,
-        RangeSearchResult* result) const override;
+        RangeSearchResult* result,
+        ConcurrentBitsetPtr bitset = nullptr) const override;
 
     void reconstruct(idx_t key, float* recons) const override;
 

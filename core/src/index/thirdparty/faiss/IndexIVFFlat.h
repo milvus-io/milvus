@@ -97,7 +97,8 @@ struct IndexIVFFlatDedup: IndexIVFFlat {
         idx_t n,
         const float* x,
         float radius,
-        RangeSearchResult* result) const override;
+        RangeSearchResult* result,
+        ConcurrentBitsetPtr bitset = nullptr) const override;
 
     /// not implemented
     void update_vectors (int nv, idx_t *idx, const float *v) override;

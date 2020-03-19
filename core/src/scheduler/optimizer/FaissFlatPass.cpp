@@ -37,7 +37,7 @@ FaissFlatPass::Init() {
     SetIdentity("FaissFlatPass");
     AddGpuEnableListener();
     AddGpuSearchThresholdListener();
-    AddGpuSearchResListener();
+    AddGpuSearchResourcesListener();
 }
 
 bool

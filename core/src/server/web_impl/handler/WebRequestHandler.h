@@ -172,10 +172,6 @@ class WebRequestHandler {
     SetGpuConfig(const GPUConfigDto::ObjectWrapper& gpu_config_dto);
 #endif
 
-    /**********
-     *
-     * Table
-     */
     StatusDto::ObjectWrapper
     CreateTable(const TableRequestDto::ObjectWrapper& table_schema);
     StatusDto::ObjectWrapper
@@ -187,10 +183,6 @@ class WebRequestHandler {
     StatusDto::ObjectWrapper
     DropTable(const OString& table_name);
 
-    /**********
-     *
-     * Index
-     */
     StatusDto::ObjectWrapper
     CreateIndex(const OString& table_name, const OString& body);
 
@@ -200,10 +192,6 @@ class WebRequestHandler {
     StatusDto::ObjectWrapper
     DropIndex(const OString& table_name);
 
-    /***********
-     *
-     * Partition
-     */
     StatusDto::ObjectWrapper
     CreatePartition(const OString& table_name, const PartitionRequestDto::ObjectWrapper& param);
 

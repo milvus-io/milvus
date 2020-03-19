@@ -38,7 +38,7 @@ class BuildIndexJob : public Job, public server::CacheConfigHandler {
  public:
     explicit BuildIndexJob(engine::meta::MetaPtr meta_ptr, engine::DBOptions options);
 
-    ~BuildIndexJob();
+    ~BuildIndexJob() = default;
 
  public:
     bool

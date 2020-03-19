@@ -30,6 +30,7 @@
 #include "cache/GpuCacheMgr.h"
 #include "db/IDGenerator.h"
 #include "engine/EngineFactory.h"
+#include "index/thirdparty/faiss/utils/distances.h"
 #include "insert/MemMenagerFactory.h"
 #include "meta/MetaConsts.h"
 #include "meta/MetaFactory.h"
@@ -77,12 +78,12 @@ DBImpl::DBImpl(const DBOptions& options)
 
     SetIdentity("DBImpl");
     AddCacheInsertDataListener();
+    AddUseBlasThresholdListener();
 
     Start();
 }
 
 DBImpl::~DBImpl() {
-    RemoveCacheInsertDataListener();
     Stop();
 }
 
@@ -2065,6 +2066,11 @@ DBImpl::BackgroundWalTask() {
 void
 DBImpl::OnCacheInsertDataChanged(bool value) {
     options_.insert_cache_immediately_ = value;
+}
+
+void
+DBImpl::OnUseBlasThresholdChanged(int64_t threshold) {
+    faiss::distance_compute_blas_threshold = threshold;
 }
 
 }  // namespace engine

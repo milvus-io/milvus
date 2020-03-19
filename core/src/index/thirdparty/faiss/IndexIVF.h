@@ -18,6 +18,7 @@
 #include <faiss/InvertedLists.h>
 #include <faiss/Clustering.h>
 #include <faiss/utils/Heap.h>
+#include <faiss/utils/ConcurrentBitset.h>
 
 
 namespace faiss {
@@ -193,11 +194,13 @@ struct IndexIVF: Index, Level1Quantizer {
                        ConcurrentBitsetPtr bitset = nullptr) override;
 
     void range_search (idx_t n, const float* x, float radius,
-                       RangeSearchResult* result) const override;
+                       RangeSearchResult* result,
+                       ConcurrentBitsetPtr bitset = nullptr) const override;
 
     void range_search_preassigned(idx_t nx, const float *x, float radius,
                                   const idx_t *keys, const float *coarse_dis,
-                                  RangeSearchResult *result) const;
+                                  RangeSearchResult *result,
+                                  ConcurrentBitsetPtr bitset = nullptr) const;
 
     /// get a scanner for this index (store_pairs means ignore labels)
     virtual InvertedListScanner *get_InvertedListScanner (
@@ -342,7 +345,8 @@ struct InvertedListScanner {
                                    const uint8_t *codes,
                                    const idx_t *ids,
                                    float radius,
-                                   RangeQueryResult &result) const;
+                                   RangeQueryResult &result,
+                                   ConcurrentBitsetPtr bitset = nullptr) const;
 
     virtual ~InvertedListScanner () {}
 

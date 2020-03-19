@@ -9,20 +9,18 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
-#include "db/insert/MemTable.h"
-
-#include <cache/CpuCacheMgr.h>
-#include <knowhere/index/vector_index/VecIndex.h>
-#include <segment/SegmentReader.h>
-
 #include <algorithm>
 #include <chrono>
 #include <memory>
 #include <string>
 #include <unordered_map>
 
+#include "cache/CpuCacheMgr.h"
 #include "db/OngoingFileChecker.h"
 #include "db/Utils.h"
+#include "db/insert/MemTable.h"
+#include "knowhere/index/vector_index/VecIndex.h"
+#include "segment/SegmentReader.h"
 #include "utils/Log.h"
 
 namespace milvus {

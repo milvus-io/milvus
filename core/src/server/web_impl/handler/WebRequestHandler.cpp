@@ -1077,10 +1077,6 @@ WebRequestHandler::DropIndex(const OString& collection_name) {
     ASSIGN_RETURN_STATUS_DTO(status)
 }
 
-/***********
- *
- * Partition {
- */
 StatusDto::ObjectWrapper
 WebRequestHandler::CreatePartition(const OString& collection_name, const PartitionRequestDto::ObjectWrapper& param) {
     if (nullptr == param->partition_tag.get()) {
