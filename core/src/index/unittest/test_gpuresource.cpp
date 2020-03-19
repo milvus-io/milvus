@@ -67,7 +67,7 @@ TEST_F(GPURESTEST, copyandsearch) {
     // search and copy at the same time
     printf("==================\n");
 
-    index_type_ = milvus::knowhere::IndexType::INDEX_FAISS_IVFFLAT;
+    index_type_ = milvus::knowhere::IndexEnum::INDEX_FAISS_IVFFLAT;
     index_mode_ = milvus::knowhere::IndexMode::MODE_GPU;
     index_ = IndexFactory(index_type_, index_mode_);
 
@@ -121,7 +121,7 @@ TEST_F(GPURESTEST, copyandsearch) {
 }
 
 TEST_F(GPURESTEST, trainandsearch) {
-    index_type_ = milvus::knowhere::IndexType::INDEX_FAISS_IVFFLAT;
+    index_type_ = milvus::knowhere::IndexEnum::INDEX_FAISS_IVFFLAT;
     index_mode_ = milvus::knowhere::IndexMode::MODE_GPU;
     index_ = IndexFactory(index_type_, index_mode_);
 

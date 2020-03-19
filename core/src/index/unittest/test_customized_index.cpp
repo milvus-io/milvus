@@ -46,7 +46,7 @@ class SingleIndexTest : public DataGen, public TestGpuIndexBase {
 TEST_F(SingleIndexTest, IVFSQHybrid) {
     assert(!xb.empty());
 
-    index_type_ = milvus::knowhere::IndexType::INDEX_FAISS_IVFSQ8H;
+    index_type_ = milvus::knowhere::IndexEnum::INDEX_FAISS_IVFSQ8H;
     index_mode_ = milvus::knowhere::IndexMode::MODE_GPU;
     index_ = IndexFactory(index_type_, index_mode_);
 
