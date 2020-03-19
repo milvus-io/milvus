@@ -173,7 +173,8 @@ struct IVFFlatScanner: InvertedListScanner {
                            const uint8_t *codes,
                            const idx_t *ids,
                            float radius,
-                           RangeQueryResult & res) const override
+                           RangeQueryResult & res,
+                           ConcurrentBitsetPtr bitset = nullptr) const override
     {
         const float *list_vecs = (const float*)codes;
         for (size_t j = 0; j < list_size; j++) {
@@ -483,7 +484,8 @@ void IndexIVFFlatDedup::range_search(
         idx_t ,
         const float* ,
         float ,
-        RangeSearchResult* ) const
+        RangeSearchResult* ,
+        ConcurrentBitsetPtr) const
 {
     FAISS_THROW_MSG ("not implemented");
 }
