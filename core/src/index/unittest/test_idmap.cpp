@@ -67,7 +67,6 @@ TEST_F(IDMAPTest, idmap_basic) {
     AssertAnns(result, nq, k);
     //    PrintResult(result, nq, k);
 
-    index_->Seal();
     auto binaryset = index_->Serialize();
     auto new_index = std::make_shared<milvus::knowhere::IDMAP>();
     new_index->Load(binaryset);
