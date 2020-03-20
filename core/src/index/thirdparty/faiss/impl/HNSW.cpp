@@ -751,7 +751,7 @@ void HNSW::search(DistanceComputer& qdis, int k,
         nres = search_from_candidates(
           qdis, candidates_size,
           I_to_next.data(), D_to_next.data(),
-          candidates, vt, level, 0, bitset
+          candidates, vt, level
         );
       }
       vt.advance();
