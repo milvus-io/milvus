@@ -28,6 +28,7 @@ Please mark all change in change log and use the issue from GitHub
 -   \#1649 Fix Milvus crash on old CPU 
 -   \#1653 IndexFlat (SSE) and IndexBinaryFlat performance improvement for small NQ
 -   \#1678 Remove CUSTOMIZATION macro 
+-   \#1698 Upgrade mishards to v0.7.0
 
 ## Task
 
