@@ -9,10 +9,7 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
-#define USE_FAISS_V_0_3_0
-
 #include <gtest/gtest.h>
-
 #include <hdf5.h>
 #include <sys/time.h>
 #include <sys/types.h>
@@ -25,31 +22,14 @@
 #include <faiss/AutoTune.h>
 #include <faiss/Index.h>
 #include <faiss/IndexIVF.h>
-#include <faiss/gpu/GpuIndexFlat.h>
-#include <faiss/gpu/StandardGpuResources.h>
-#include <faiss/index_io.h>
-
-#ifdef USE_FAISS_V_0_3_0  // faiss_0.3.0
-
 #include <faiss/gpu/GpuCloner.h>
-#include <faiss/index_factory.h>
-#include <faiss/utils/distances.h>
-
-#else  // faiss_0.2.1
-
-#include <faiss/gpu/GpuAutoTune.h>
-#include <faiss/utils.h>
-#include <sys/stat.h>
-#include <cstdlib>
-#include <cstring>
-
-#endif
-
-#ifdef CUSTOMIZATION
-#include <faiss/gpu/GpuIndexIVFSQHybrid.h>
-#else
+#include <faiss/gpu/GpuIndexFlat.h>
 #include <faiss/gpu/GpuIndexIVF.h>
-#endif
+#include <faiss/gpu/GpuIndexIVFSQHybrid.h>
+#include <faiss/gpu/StandardGpuResources.h>
+#include <faiss/index_factory.h>
+#include <faiss/index_io.h>
+#include <faiss/utils/distances.h>
 
 /*****************************************************
  * To run this test, please download the HDF5 from
@@ -291,12 +271,10 @@ load_base_data(faiss::Index*& index, const std::string& ann_test_name, const std
         cpu_index = faiss::gpu::index_gpu_to_cpu(gpu_index);
         delete gpu_index;
 
-#ifdef CUSTOMIZATION
         faiss::IndexIVF* cpu_ivf_index = dynamic_cast<faiss::IndexIVF*>(cpu_index);
         if (cpu_ivf_index != nullptr) {
             cpu_ivf_index->to_readonly();
         }
-#endif
 
         printf("[%.3f s] Writing index file: %s\n", elapsed() - t0, index_file_name.c_str());
         faiss::write_index(cpu_index, index_file_name.c_str());
@@ -372,15 +350,12 @@ test_with_nprobes(const std::string& ann_test_name, const std::string& index_key
     faiss::Index *gpu_index, *index;
     if (query_mode != MODE_CPU) {
         faiss::gpu::GpuClonerOptions option;
-#ifdef CUSTOMIZATION
         option.allInGpu = true;
 
         faiss::IndexComposition index_composition;
         index_composition.index = cpu_index;
         index_composition.quantizer = nullptr;
-#endif
         switch (query_mode) {
-#ifdef CUSTOMIZATION
             case MODE_MIX: {
                 index_composition.mode = 1;  // 0: all data, 1: copy quantizer, 2: copy data
 
@@ -403,9 +378,8 @@ test_with_nprobes(const std::string& ann_test_name, const std::string& index_key
                 index = cpu_index;
                 break;
             }
-#endif
             case MODE_GPU:
-#ifdef CUSTOMIZATION
+#if 1
                 index_composition.mode = 0;  // 0: all data, 1: copy quantizer, 2: copy data
 
                 // warm up the transmission
@@ -571,14 +545,12 @@ TEST(FAISSTEST, BENCHMARK) {
     test_ann_hdf5("sift-128-euclidean", "IVF16384", "SQ8", MODE_CPU, SIFT_INSERT_LOOPS, param_nprobes, SEARCH_LOOPS);
     test_ann_hdf5("sift-128-euclidean", "IVF16384", "SQ8", MODE_GPU, SIFT_INSERT_LOOPS, param_nprobes, SEARCH_LOOPS);
 
-#ifdef CUSTOMIZATION
     test_ann_hdf5("sift-128-euclidean", "IVF16384", "SQ8Hybrid", MODE_CPU, SIFT_INSERT_LOOPS, param_nprobes,
                   SEARCH_LOOPS);
     test_ann_hdf5("sift-128-euclidean", "IVF16384", "SQ8Hybrid", MODE_MIX, SIFT_INSERT_LOOPS, param_nprobes,
                   SEARCH_LOOPS);
     test_ann_hdf5("sift-128-euclidean", "IVF16384", "SQ8Hybrid", MODE_GPU, SIFT_INSERT_LOOPS, param_nprobes,
                   SEARCH_LOOPS);
-#endif
 
     ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////
     const int32_t GLOVE_INSERT_LOOPS = 1;
@@ -589,12 +561,10 @@ TEST(FAISSTEST, BENCHMARK) {
     test_ann_hdf5("glove-200-angular", "IVF16384", "SQ8", MODE_CPU, GLOVE_INSERT_LOOPS, param_nprobes, SEARCH_LOOPS);
     test_ann_hdf5("glove-200-angular", "IVF16384", "SQ8", MODE_GPU, GLOVE_INSERT_LOOPS, param_nprobes, SEARCH_LOOPS);
 
-#ifdef CUSTOMIZATION
     test_ann_hdf5("glove-200-angular", "IVF16384", "SQ8Hybrid", MODE_CPU, GLOVE_INSERT_LOOPS, param_nprobes,
                   SEARCH_LOOPS);
     test_ann_hdf5("glove-200-angular", "IVF16384", "SQ8Hybrid", MODE_MIX, GLOVE_INSERT_LOOPS, param_nprobes,
                   SEARCH_LOOPS);
     test_ann_hdf5("glove-200-angular", "IVF16384", "SQ8Hybrid", MODE_GPU, GLOVE_INSERT_LOOPS, param_nprobes,
                   SEARCH_LOOPS);
-#endif
 }

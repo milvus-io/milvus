@@ -30,6 +30,7 @@ set(util_srcs
         ${MILVUS_THIRDPARTY_SRC}/easyloggingpp/easylogging++.cc
         ${INDEX_SOURCE_DIR}/knowhere/knowhere/index/vector_index/helpers/FaissIO.cpp
         ${INDEX_SOURCE_DIR}/knowhere/knowhere/index/vector_index/helpers/IndexParameter.cpp
+        ${INDEX_SOURCE_DIR}/knowhere/knowhere/index/vector_index/IndexType.cpp
         ${INDEX_SOURCE_DIR}/knowhere/knowhere/common/Exception.cpp
         ${INDEX_SOURCE_DIR}/knowhere/knowhere/common/Timer.cpp
         ${INDEX_SOURCE_DIR}/unittest/utils.cpp
@@ -52,23 +53,23 @@ endif ()
 
 #<IVF-TEST>
 set(ivf_srcs
-        ${INDEX_SOURCE_DIR}/knowhere/knowhere/index/vector_index/IndexIVF.cpp
-        ${INDEX_SOURCE_DIR}/knowhere/knowhere/index/vector_index/IndexIVFSQ.cpp
-        ${INDEX_SOURCE_DIR}/knowhere/knowhere/index/vector_index/IndexIVFPQ.cpp
-        ${INDEX_SOURCE_DIR}/knowhere/knowhere/index/vector_index/IndexIDMAP.cpp
         ${INDEX_SOURCE_DIR}/knowhere/knowhere/index/vector_index/FaissBaseIndex.cpp
         ${INDEX_SOURCE_DIR}/knowhere/knowhere/index/vector_index/FaissBaseBinaryIndex.cpp
         ${INDEX_SOURCE_DIR}/knowhere/knowhere/index/vector_index/IndexBinaryIDMAP.cpp
         ${INDEX_SOURCE_DIR}/knowhere/knowhere/index/vector_index/IndexBinaryIVF.cpp
+        ${INDEX_SOURCE_DIR}/knowhere/knowhere/index/vector_index/IndexIDMAP.cpp
+        ${INDEX_SOURCE_DIR}/knowhere/knowhere/index/vector_index/IndexIVF.cpp
+        ${INDEX_SOURCE_DIR}/knowhere/knowhere/index/vector_index/IndexIVFSQ.cpp
+        ${INDEX_SOURCE_DIR}/knowhere/knowhere/index/vector_index/IndexIVFPQ.cpp
         )
 if (KNOWHERE_GPU_VERSION)
     set(ivf_srcs ${ivf_srcs}
-            ${INDEX_SOURCE_DIR}/knowhere/knowhere/index/vector_index/IndexGPUIDMAP.cpp
             ${INDEX_SOURCE_DIR}/knowhere/knowhere/index/vector_index/helpers/Cloner.cpp
-            ${INDEX_SOURCE_DIR}/knowhere/knowhere/index/vector_index/IndexGPUIVF.cpp
-            ${INDEX_SOURCE_DIR}/knowhere/knowhere/index/vector_index/IndexGPUIVFSQ.cpp
-            ${INDEX_SOURCE_DIR}/knowhere/knowhere/index/vector_index/IndexGPUIVFPQ.cpp
-            ${INDEX_SOURCE_DIR}/knowhere/knowhere/index/vector_index/IndexIVFSQHybrid.cpp
+            ${INDEX_SOURCE_DIR}/knowhere/knowhere/index/vector_index/gpu/IndexGPUIDMAP.cpp
+            ${INDEX_SOURCE_DIR}/knowhere/knowhere/index/vector_index/gpu/IndexGPUIVF.cpp
+            ${INDEX_SOURCE_DIR}/knowhere/knowhere/index/vector_index/gpu/IndexGPUIVFSQ.cpp
+            ${INDEX_SOURCE_DIR}/knowhere/knowhere/index/vector_index/gpu/IndexGPUIVFPQ.cpp
+            ${INDEX_SOURCE_DIR}/knowhere/knowhere/index/vector_index/gpu/IndexIVFSQHybrid.cpp
             )
 endif ()
 if (NOT TARGET test_ivf)
@@ -96,8 +97,7 @@ target_link_libraries(test_binaryidmap ${depend_libs} ${unittest_libs} ${basic_l
 
 #<SPTAG-TEST>
 set(sptag_srcs
-        ${INDEX_SOURCE_DIR}/knowhere/knowhere/adapter/SptagAdapter.cpp
-        ${INDEX_SOURCE_DIR}/knowhere/knowhere/index/preprocessor/Normalize.cpp
+        ${INDEX_SOURCE_DIR}/knowhere/knowhere/index/vector_index/adapter/SptagAdapter.cpp
         ${INDEX_SOURCE_DIR}/knowhere/knowhere/index/vector_index/helpers/SPTAGParameterMgr.cpp
         ${INDEX_SOURCE_DIR}/knowhere/knowhere/index/vector_index/IndexSPTAG.cpp
         )

@@ -153,10 +153,6 @@ if (MILVUS_USE_CCACHE)
     endif (CCACHE_FOUND)
 endif ()
 
-if (CUSTOMIZATION)
-    add_compile_definitions(CUSTOMIZATION)
-endif ()
-
 if (MILVUS_GPU_VERSION)
     message(STATUS "Building Milvus GPU version")
     add_compile_definitions("MILVUS_GPU_VERSION")

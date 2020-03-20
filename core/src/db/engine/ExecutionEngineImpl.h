@@ -19,7 +19,7 @@
 #include <vector>
 
 #include "ExecutionEngine.h"
-#include "wrapper/VecIndex.h"
+#include "knowhere/index/vector_index/VecIndex.h"
 
 namespace milvus {
 namespace engine {
@@ -29,8 +29,8 @@ class ExecutionEngineImpl : public ExecutionEngine {
     ExecutionEngineImpl(uint16_t dimension, const std::string& location, EngineType index_type, MetricType metric_type,
                         const milvus::json& index_params);
 
-    ExecutionEngineImpl(VecIndexPtr index, const std::string& location, EngineType index_type, MetricType metric_type,
-                        const milvus::json& index_params);
+    ExecutionEngineImpl(knowhere::VecIndexPtr index, const std::string& location, EngineType index_type,
+                        MetricType metric_type, const milvus::json& index_params);
 
     Status
     AddWithIds(int64_t n, const float* xdata, const int64_t* xids) override;
@@ -108,10 +108,10 @@ class ExecutionEngineImpl : public ExecutionEngine {
     }
 
  private:
-    VecIndexPtr
+    knowhere::VecIndexPtr
     CreatetVecIndex(EngineType type);
 
-    VecIndexPtr
+    knowhere::VecIndexPtr
     Load(const std::string& location);
 
     void
@@ -121,7 +121,7 @@ class ExecutionEngineImpl : public ExecutionEngine {
     HybridUnset() const;
 
  protected:
-    VecIndexPtr index_ = nullptr;
+    knowhere::VecIndexPtr index_ = nullptr;
     EngineType index_type_;
     MetricType metric_type_;
 

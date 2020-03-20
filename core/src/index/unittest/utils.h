@@ -28,7 +28,7 @@ class DataGen {
     void
     Generate(const int& dim, const int& nb, const int& nq);
 
-    knowhere::DatasetPtr
+    milvus::knowhere::DatasetPtr
     GenQuery(const int& nq);
 
  protected:
@@ -40,10 +40,10 @@ class DataGen {
     std::vector<float> xq;
     std::vector<int64_t> ids;
     std::vector<int64_t> xids;
-    knowhere::DatasetPtr base_dataset = nullptr;
-    knowhere::DatasetPtr query_dataset = nullptr;
-    knowhere::DatasetPtr id_dataset = nullptr;
-    knowhere::DatasetPtr xid_dataset = nullptr;
+    milvus::knowhere::DatasetPtr base_dataset = nullptr;
+    milvus::knowhere::DatasetPtr query_dataset = nullptr;
+    milvus::knowhere::DatasetPtr id_dataset = nullptr;
+    milvus::knowhere::DatasetPtr xid_dataset = nullptr;
 };
 
 class BinaryDataGen {
@@ -54,7 +54,7 @@ class BinaryDataGen {
     void
     Generate(const int& dim, const int& nb, const int& nq);
 
-    knowhere::DatasetPtr
+    milvus::knowhere::DatasetPtr
     GenQuery(const int& nq);
 
  protected:
@@ -66,10 +66,10 @@ class BinaryDataGen {
     std::vector<uint8_t> xq;
     std::vector<int64_t> ids;
     std::vector<int64_t> xids;
-    knowhere::DatasetPtr base_dataset = nullptr;
-    knowhere::DatasetPtr query_dataset = nullptr;
-    knowhere::DatasetPtr id_dataset = nullptr;
-    knowhere::DatasetPtr xid_dataset = nullptr;
+    milvus::knowhere::DatasetPtr base_dataset = nullptr;
+    milvus::knowhere::DatasetPtr query_dataset = nullptr;
+    milvus::knowhere::DatasetPtr id_dataset = nullptr;
+    milvus::knowhere::DatasetPtr xid_dataset = nullptr;
 };
 
 extern void
@@ -96,20 +96,14 @@ GenBinaryBase(const int64_t& dim, const int64_t& nb, uint8_t* xb, int64_t* ids);
 extern void
 InitLog();
 
-knowhere::DatasetPtr
-generate_dataset(int64_t nb, int64_t dim, const float* xb, const int64_t* ids);
+milvus::knowhere::DatasetPtr
+generate_dataset(int64_t nb, int64_t dim, const void* xb, const int64_t* ids);
 
-knowhere::DatasetPtr
-generate_binary_dataset(int64_t nb, int64_t dim, const uint8_t* xb, const int64_t* ids);
+milvus::knowhere::DatasetPtr
+generate_query_dataset(int64_t nb, int64_t dim, const void* xb);
 
-knowhere::DatasetPtr
-generate_query_dataset(int64_t nb, int64_t dim, const float* xb);
-
-knowhere::DatasetPtr
+milvus::knowhere::DatasetPtr
 generate_id_dataset(int64_t nb, const int64_t* ids);
-
-knowhere::DatasetPtr
-generate_binary_query_dataset(int64_t nb, int64_t dim, const uint8_t* xb);
 
 enum class CheckMode {
     CHECK_EQUAL = 0,
@@ -118,21 +112,21 @@ enum class CheckMode {
 };
 
 void
-AssertAnns(const knowhere::DatasetPtr& result, const int nq, const int k,
+AssertAnns(const milvus::knowhere::DatasetPtr& result, const int nq, const int k,
            const CheckMode check_mode = CheckMode::CHECK_EQUAL);
 
 void
-AssertVec(const knowhere::DatasetPtr& result, const knowhere::DatasetPtr& base_dataset,
-          const knowhere::DatasetPtr& id_dataset, const int n, const int dim,
+AssertVec(const milvus::knowhere::DatasetPtr& result, const milvus::knowhere::DatasetPtr& base_dataset,
+          const milvus::knowhere::DatasetPtr& id_dataset, const int n, const int dim,
           const CheckMode check_mode = CheckMode::CHECK_EQUAL);
 
 void
-AssertBinVeceq(const knowhere::DatasetPtr& result, const knowhere::DatasetPtr& base_dataset,
-               const knowhere::DatasetPtr& id_dataset, const int n, const int dim,
+AssertBinVeceq(const milvus::knowhere::DatasetPtr& result, const milvus::knowhere::DatasetPtr& base_dataset,
+               const milvus::knowhere::DatasetPtr& id_dataset, const int n, const int dim,
                const CheckMode check_mode = CheckMode::CHECK_EQUAL);
 
 void
-PrintResult(const knowhere::DatasetPtr& result, const int& nq, const int& k);
+PrintResult(const milvus::knowhere::DatasetPtr& result, const int& nq, const int& k);
 
 struct FileIOWriter {
     std::fstream fs;

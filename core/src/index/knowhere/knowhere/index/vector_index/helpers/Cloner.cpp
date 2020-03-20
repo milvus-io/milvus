@@ -7,24 +7,27 @@
 //
 // Unless required by applicable law or agreed to in writing, software distributed under the License
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
-// or implied. See the License for the specific language governing permissions and limitations under the License.
+// or implied. See the License for the specific language governing permissions and limitations under the License
 
+#ifdef MILVUS_GPU_VERSION
 #include "knowhere/index/vector_index/helpers/Cloner.h"
 #include "knowhere/common/Exception.h"
-#include "knowhere/index/vector_index/IndexGPUIVF.h"
 #include "knowhere/index/vector_index/IndexIDMAP.h"
 #include "knowhere/index/vector_index/IndexIVF.h"
 #include "knowhere/index/vector_index/IndexIVFPQ.h"
 #include "knowhere/index/vector_index/IndexIVFSQ.h"
-#include "knowhere/index/vector_index/IndexIVFSQHybrid.h"
+#include "knowhere/index/vector_index/gpu/GPUIndex.h"
+#include "knowhere/index/vector_index/gpu/IndexGPUIVF.h"
+#include "knowhere/index/vector_index/gpu/IndexIVFSQHybrid.h"
 
+namespace milvus {
 namespace knowhere {
 namespace cloner {
 
-VectorIndexPtr
-CopyGpuToCpu(const VectorIndexPtr& index, const Config& config) {
+VecIndexPtr
+CopyGpuToCpu(const VecIndexPtr& index, const Config& config) {
     if (auto device_index = std::dynamic_pointer_cast<GPUIndex>(index)) {
-        VectorIndexPtr result = device_index->CopyGpuToCpu(config);
+        VecIndexPtr result = device_index->CopyGpuToCpu(config);
         auto uids = index->GetUids();
         result->SetUids(uids);
         return result;
@@ -33,17 +36,15 @@ CopyGpuToCpu(const VectorIndexPtr& index, const Config& config) {
     }
 }
 
-VectorIndexPtr
-CopyCpuToGpu(const VectorIndexPtr& index, const int64_t& device_id, const Config& config) {
-    VectorIndexPtr result;
+VecIndexPtr
+CopyCpuToGpu(const VecIndexPtr& index, const int64_t device_id, const Config& config) {
+    VecIndexPtr result;
     auto uids = index->GetUids();
-#ifdef CUSTOMIZATION
     if (auto device_index = std::dynamic_pointer_cast<IVFSQHybrid>(index)) {
         result = device_index->CopyCpuToGpu(device_id, config);
         result->SetUids(uids);
         return result;
     }
-#endif
 
     if (auto device_index = std::dynamic_pointer_cast<GPUIndex>(index)) {
         result = device_index->CopyGpuToGpu(device_id, config);
@@ -60,7 +61,7 @@ CopyCpuToGpu(const VectorIndexPtr& index, const int64_t& device_id, const Config
     } else if (auto cpu_index = std::dynamic_pointer_cast<IDMAP>(index)) {
         result = cpu_index->CopyCpuToGpu(device_id, config);
     } else {
-        KNOWHERE_THROW_MSG("this index type not support tranfer to gpu");
+        KNOWHERE_THROW_MSG("this index type not support transfer to gpu");
     }
 
     result->SetUids(uids);
@@ -69,3 +70,5 @@ CopyCpuToGpu(const VectorIndexPtr& index, const int64_t& device_id, const Config
 
 }  // namespace cloner
 }  // namespace knowhere
+}  // namespace milvus
+#endif

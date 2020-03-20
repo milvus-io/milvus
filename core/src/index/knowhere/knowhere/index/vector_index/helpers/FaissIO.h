@@ -7,12 +7,13 @@
 //
 // Unless required by applicable law or agreed to in writing, software distributed under the License
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
-// or implied. See the License for the specific language governing permissions and limitations under the License.
+// or implied. See the License for the specific language governing permissions and limitations under the License
 
 #pragma once
 
 #include <faiss/impl/io.h>
 
+namespace milvus {
 namespace knowhere {
 
 struct MemoryIOWriter : public faiss::IOWriter {
@@ -46,3 +47,4 @@ struct MemoryIOReader : public faiss::IOReader {
 };
 
 }  // namespace knowhere
+}  // namespace milvus

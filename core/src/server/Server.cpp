@@ -16,6 +16,7 @@
 #include <unistd.h>
 
 #include "config/Config.h"
+#include "index/archive/KnowhereResource.h"
 #include "metrics/Metrics.h"
 #include "scheduler/SchedInst.h"
 #include "server/DBWrapper.h"
@@ -28,7 +29,6 @@
 #include "utils/LogUtil.h"
 #include "utils/SignalUtil.h"
 #include "utils/TimeRecorder.h"
-#include "wrapper/KnowhereResource.h"
 
 namespace milvus {
 namespace server {

@@ -134,21 +134,21 @@ TEST_F(EngineTest, FACTORY_TEST) {
 
     {
         fiu_init(0);
-        // test ExecutionEngineImpl constructor when create vecindex failed
-        FIU_ENABLE_FIU("ExecutionEngineImpl.CreatetVecIndex.invalid_type");
+        // test ExecutionEngineImpl constructor when create VecIndex failed
+        FIU_ENABLE_FIU("ExecutionEngineImpl.CreateVecIndex.invalid_type");
         ASSERT_ANY_THROW(milvus::engine::EngineFactory::Build(
             512, "/tmp/milvus_index_1", milvus::engine::EngineType::SPTAG_KDT,
             milvus::engine::MetricType::L2, index_params));
-        fiu_disable("ExecutionEngineImpl.CreatetVecIndex.invalid_type");
+        fiu_disable("ExecutionEngineImpl.CreateVecIndex.invalid_type");
     }
 
     {
-        // test ExecutionEngineImpl constructor when build BFindex failed
-        FIU_ENABLE_FIU("BFIndex.Build.throw_knowhere_exception");
+        // test ExecutionEngineImpl constructor when build failed
+        FIU_ENABLE_FIU("ExecutionEngineImpl.throw_exception");
         ASSERT_ANY_THROW(milvus::engine::EngineFactory::Build(
             512, "/tmp/milvus_index_1", milvus::engine::EngineType::SPTAG_KDT,
             milvus::engine::MetricType::L2, index_params));
-        fiu_disable("BFIndex.Build.throw_knowhere_exception");
+        fiu_disable("ExecutionEngineImpl.throw_exception");
     }
 }
 
@@ -165,9 +165,6 @@ TEST_F(EngineTest, ENGINE_IMPL_TEST) {
         ASSERT_EQ(engine_ptr->IndexMetricType(), milvus::engine::MetricType::IP);
 
         ASSERT_ANY_THROW(engine_ptr->BuildIndex(INIT_PATH, milvus::engine::EngineType::INVALID));
-        FIU_ENABLE_FIU("VecIndexImpl.BuildAll.throw_knowhere_exception");
-        ASSERT_ANY_THROW(engine_ptr->BuildIndex(INIT_PATH, milvus::engine::EngineType::SPTAG_KDT));
-        fiu_disable("VecIndexImpl.BuildAll.throw_knowhere_exception");
 
         auto engine_build = engine_ptr->BuildIndex("/tmp/milvus_index_2", milvus::engine::EngineType::FAISS_IVFSQ8);
         ASSERT_NE(engine_build, nullptr);

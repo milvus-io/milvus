@@ -11,23 +11,17 @@
 
 #include <faiss/index_io.h>
 
-#include <utility>
-
 #include "knowhere/common/Exception.h"
 #include "knowhere/index/vector_index/FaissBaseBinaryIndex.h"
 #include "knowhere/index/vector_index/helpers/FaissIO.h"
 
+namespace milvus {
 namespace knowhere {
 
-FaissBaseBinaryIndex::FaissBaseBinaryIndex(std::shared_ptr<faiss::IndexBinary> index) : index_(std::move(index)) {
-}
-
 BinarySet
-FaissBaseBinaryIndex::SerializeImpl() {
+FaissBaseBinaryIndex::SerializeImpl(const IndexType& type) {
     try {
         faiss::IndexBinary* index = index_.get();
-
-        // SealImpl();
 
         MemoryIOWriter writer;
         faiss::write_index_binary(index, &writer);
@@ -35,7 +29,6 @@ FaissBaseBinaryIndex::SerializeImpl() {
         data.reset(writer.data_);
 
         BinarySet res_set;
-        // TODO(linxj): use virtual func Name() instead of raw string.
         res_set.Append("BinaryIVF", data, writer.rp);
         return res_set;
     } catch (std::exception& e) {
@@ -44,7 +37,7 @@ FaissBaseBinaryIndex::SerializeImpl() {
 }
 
 void
-FaissBaseBinaryIndex::LoadImpl(const BinarySet& index_binary) {
+FaissBaseBinaryIndex::LoadImpl(const BinarySet& index_binary, const IndexType& type) {
     auto binary = index_binary.GetByName("BinaryIVF");
 
     MemoryIOReader reader;
@@ -52,8 +45,8 @@ FaissBaseBinaryIndex::LoadImpl(const BinarySet& index_binary) {
     reader.data_ = binary->data.get();
 
     faiss::IndexBinary* index = faiss::read_index_binary(&reader);
-
     index_.reset(index);
 }
 
 }  // namespace knowhere
+}  // namespace milvus

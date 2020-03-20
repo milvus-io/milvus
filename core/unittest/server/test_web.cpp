@@ -41,7 +41,7 @@
 #include "unittest/server/utils.h"
 #include "utils/CommonUtil.h"
 #include "version.h"
-#include "wrapper/VecIndex.h"
+//#include "knowhere/VecIndex.h"
 
 
 static const char* TABLE_NAME = "test_web";

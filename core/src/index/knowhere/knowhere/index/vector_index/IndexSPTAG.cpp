@@ -19,29 +19,29 @@
 
 #undef mkdir
 
-#include "knowhere/adapter/SptagAdapter.h"
-#include "knowhere/adapter/VectorAdapter.h"
 #include "knowhere/common/Exception.h"
 #include "knowhere/index/vector_index/IndexSPTAG.h"
-#include "knowhere/index/vector_index/helpers/Definitions.h"
+#include "knowhere/index/vector_index/adapter/SptagAdapter.h"
+#include "knowhere/index/vector_index/adapter/VectorAdapter.h"
 #include "knowhere/index/vector_index/helpers/SPTAGParameterMgr.h"
 
+namespace milvus {
 namespace knowhere {
 
 CPUSPTAGRNG::CPUSPTAGRNG(const std::string& IndexType) {
     if (IndexType == "KDT") {
         index_ptr_ = SPTAG::VectorIndex::CreateInstance(SPTAG::IndexAlgoType::KDT, SPTAG::VectorValueType::Float);
         index_ptr_->SetParameter("DistCalcMethod", "L2");
-        index_type_ = SPTAG::IndexAlgoType::KDT;
+        index_type_ = IndexEnum::INDEX_SPTAG_KDT_RNT;
     } else {
         index_ptr_ = SPTAG::VectorIndex::CreateInstance(SPTAG::IndexAlgoType::BKT, SPTAG::VectorValueType::Float);
         index_ptr_->SetParameter("DistCalcMethod", "L2");
-        index_type_ = SPTAG::IndexAlgoType::BKT;
+        index_type_ = IndexEnum::INDEX_SPTAG_BKT_RNT;
     }
 }
 
 BinarySet
-CPUSPTAGRNG::Serialize() {
+CPUSPTAGRNG::Serialize(const Config& config) {
     std::string index_config;
     std::vector<SPTAG::ByteArray> index_blobs;
 
@@ -72,15 +72,15 @@ CPUSPTAGRNG::Serialize() {
     metadata1.reset(static_cast<uint8_t*>(index_blobs[4].Data()));
     auto metadata2 = std::make_shared<uint8_t>();
     metadata2.reset(static_cast<uint8_t*>(index_blobs[5].Data()));
-    auto config = std::make_shared<uint8_t>();
-    config.reset(static_cast<uint8_t*>((void*)cstr));
+    auto x_cfg = std::make_shared<uint8_t>();
+    x_cfg.reset(static_cast<uint8_t*>((void*)cstr));
 
     binary_set.Append("samples", sample, index_blobs[0].Length());
     binary_set.Append("tree", tree, index_blobs[1].Length());
     binary_set.Append("deleteid", deleteid, index_blobs[3].Length());
     binary_set.Append("metadata1", metadata1, index_blobs[4].Length());
     binary_set.Append("metadata2", metadata2, index_blobs[5].Length());
-    binary_set.Append("config", config, length);
+    binary_set.Append("config", x_cfg, length);
     binary_set.Append("graph", graph, index_blobs[2].Length());
 
     return binary_set;
@@ -115,16 +115,11 @@ CPUSPTAGRNG::Load(const BinarySet& binary_set) {
     index_ptr_->LoadIndex(index_config, index_blobs);
 }
 
-// PreprocessorPtr
-// CPUKDTRNG::BuildPreprocessor(const DatasetPtr &dataset, const Config &config) {
-//    return std::make_shared<NormalizePreprocessor>();
-//}
-
-IndexModelPtr
+void
 CPUSPTAGRNG::Train(const DatasetPtr& origin, const Config& train_config) {
     SetParameters(train_config);
 
-    DatasetPtr dataset = origin;  // TODO(linxj): copy or reference?
+    DatasetPtr dataset = origin;
 
     // if (index_ptr_->GetDistCalcMethod() == SPTAG::DistCalcMethod::Cosine
     //    && preprocessor_) {
@@ -134,24 +129,6 @@ CPUSPTAGRNG::Train(const DatasetPtr& origin, const Config& train_config) {
     auto vectorset = ConvertToVectorSet(dataset);
     auto metaset = ConvertToMetadataSet(dataset);
     index_ptr_->BuildIndex(vectorset, metaset);
-
-    // TODO: return IndexModelPtr
-    return nullptr;
-}
-
-void
-CPUSPTAGRNG::Add(const DatasetPtr& origin, const Config& add_config) {
-    //    SetParameters(add_config);
-    //    DatasetPtr dataset = origin->Clone();
-    //
-    //    // if (index_ptr_->GetDistCalcMethod() == SPTAG::DistCalcMethod::Cosine
-    //    //    && preprocessor_) {
-    //    //    preprocessor_->Preprocess(dataset);
-    //    //}
-    //
-    //    auto vectorset = ConvertToVectorSet(dataset);
-    //    auto metaset = ConvertToMetadataSet(dataset);
-    //    index_ptr_->AddIndex(vectorset, metaset);
 }
 
 void
@@ -159,7 +136,7 @@ CPUSPTAGRNG::SetParameters(const Config& config) {
 #define Assign(param_name, str_name) \
     index_ptr_->SetParameter(str_name, std::to_string(build_cfg[param_name].get<int64_t>()))
 
-    if (index_type_ == SPTAG::IndexAlgoType::KDT) {
+    if (index_type_ == IndexEnum::INDEX_SPTAG_KDT_RNT) {
         auto build_cfg = SPTAGParameterMgr::GetInstance().GetKDTParameters();
 
         Assign("kdtnumber", "KDTNumber");
@@ -204,17 +181,17 @@ CPUSPTAGRNG::SetParameters(const Config& config) {
 }
 
 DatasetPtr
-CPUSPTAGRNG::Search(const DatasetPtr& dataset, const Config& config) {
+CPUSPTAGRNG::Query(const DatasetPtr& dataset_ptr, const Config& config) {
     SetParameters(config);
 
-    auto p_data = dataset->Get<const float*>(meta::TENSOR);
+    float* p_data = (float*)dataset_ptr->Get<const void*>(meta::TENSOR);
     for (auto i = 0; i < 10; ++i) {
         for (auto j = 0; j < 10; ++j) {
             std::cout << p_data[i * 10 + j] << " ";
         }
         std::cout << std::endl;
     }
-    std::vector<SPTAG::QueryResult> query_results = ConvertToQueryResult(dataset, config);
+    std::vector<SPTAG::QueryResult> query_results = ConvertToQueryResult(dataset_ptr, config);
 
 #pragma omp parallel for
     for (auto i = 0; i < query_results.size(); ++i) {
@@ -232,28 +209,24 @@ CPUSPTAGRNG::Count() {
 }
 
 int64_t
-CPUSPTAGRNG::Dimension() {
+CPUSPTAGRNG::Dim() {
     return index_ptr_->GetFeatureDim();
 }
 
-// VectorIndexPtr
-// CPUSPTAGRNG::Clone() {
-//    KNOWHERE_THROW_MSG("not support");
-//}
+// void
+// CPUSPTAGRNG::Add(const DatasetPtr& origin, const Config& add_config) {
+//     SetParameters(add_config);
+//     DatasetPtr dataset = origin->Clone();
 
-void
-CPUSPTAGRNG::Seal() {
-    return;  // do nothing
-}
+//     // if (index_ptr_->GetDistCalcMethod() == SPTAG::DistCalcMethod::Cosine
+//     //    && preprocessor_) {
+//     //    preprocessor_->Preprocess(dataset);
+//     //}
 
-BinarySet
-CPUSPTAGRNGIndexModel::Serialize() {
-    //    KNOWHERE_THROW_MSG("not support"); // not support
-}
-
-void
-CPUSPTAGRNGIndexModel::Load(const BinarySet& binary) {
-    //    KNOWHERE_THROW_MSG("not support"); // not support
-}
+//     auto vectorset = ConvertToVectorSet(dataset);
+//     auto metaset = ConvertToMetadataSet(dataset);
+//     index_ptr_->AddIndex(vectorset, metaset);
+// }
 
 }  // namespace knowhere
+}  // namespace milvus
