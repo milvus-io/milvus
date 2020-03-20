@@ -26,6 +26,7 @@ Please mark all change in change log and use the issue from GitHub
 -   \#1619 Improve compact performance
 -   \#1649 Fix Milvus crash on old CPU 
 -   \#1653 IndexFlat (SSE) and IndexBinaryFlat performance improvement for small NQ
+-   \#1678 Remove CUSTOMIZATION macro 
 
 ## Task
 
