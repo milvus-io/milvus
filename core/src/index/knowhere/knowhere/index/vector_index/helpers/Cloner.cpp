@@ -9,6 +9,7 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
+#ifdef MILVUS_GPU_VERSION
 #include "knowhere/index/vector_index/helpers/Cloner.h"
 #include "knowhere/common/Exception.h"
 #include "knowhere/index/vector_index/IndexIDMAP.h"
@@ -39,13 +40,11 @@ VecIndexPtr
 CopyCpuToGpu(const VecIndexPtr& index, const int64_t device_id, const Config& config) {
     VecIndexPtr result;
     auto uids = index->GetUids();
-#ifdef CUSTOMIZATION
     if (auto device_index = std::dynamic_pointer_cast<IVFSQHybrid>(index)) {
         result = device_index->CopyCpuToGpu(device_id, config);
         result->SetUids(uids);
         return result;
     }
-#endif
 
     if (auto device_index = std::dynamic_pointer_cast<GPUIndex>(index)) {
         result = device_index->CopyGpuToGpu(device_id, config);
@@ -72,3 +71,4 @@ CopyCpuToGpu(const VecIndexPtr& index, const int64_t device_id, const Config& co
 }  // namespace cloner
 }  // namespace knowhere
 }  // namespace milvus
+#endif

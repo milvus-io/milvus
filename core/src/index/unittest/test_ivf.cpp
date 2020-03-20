@@ -84,9 +84,7 @@ INSTANTIATE_TEST_CASE_P(
         std::make_tuple(milvus::knowhere::IndexEnum::INDEX_FAISS_IVFFLAT, milvus::knowhere::IndexMode::MODE_GPU),
         std::make_tuple(milvus::knowhere::IndexEnum::INDEX_FAISS_IVFPQ, milvus::knowhere::IndexMode::MODE_GPU),
         std::make_tuple(milvus::knowhere::IndexEnum::INDEX_FAISS_IVFSQ8, milvus::knowhere::IndexMode::MODE_GPU),
-#ifdef CUSTOMIZATION
         std::make_tuple(milvus::knowhere::IndexEnum::INDEX_FAISS_IVFSQ8H, milvus::knowhere::IndexMode::MODE_GPU),
-#endif
 #endif
         std::make_tuple(milvus::knowhere::IndexEnum::INDEX_FAISS_IVFFLAT, milvus::knowhere::IndexMode::MODE_CPU),
         std::make_tuple(milvus::knowhere::IndexEnum::INDEX_FAISS_IVFPQ, milvus::knowhere::IndexMode::MODE_CPU),
@@ -255,11 +253,9 @@ TEST_P(IVFTest, clone_test) {
         }
     }
 }
-
 #endif
 
 #ifdef MILVUS_GPU_VERSION
-#ifdef CUSTOMIZATION
 TEST_P(IVFTest, gpu_seal_test) {
     if (index_mode_ != milvus::knowhere::IndexMode::MODE_GPU) {
         return;
@@ -300,8 +296,6 @@ TEST_P(IVFTest, gpu_seal_test) {
     ASSERT_ANY_THROW(milvus::knowhere::cloner::CopyCpuToGpu(cpu_idx, -1, milvus::knowhere::Config()));
 }
 
-#endif
-
 TEST_P(IVFTest, invalid_gpu_source) {
     if (index_mode_ != milvus::knowhere::IndexMode::MODE_GPU) {
         return;
@@ -337,7 +331,6 @@ TEST_P(IVFTest, invalid_gpu_source) {
     ASSERT_ANY_THROW(index_->Train(base_dataset, invalid_conf));
 }
 
-#ifdef CUSTOMIZATION
 TEST_P(IVFTest, IVFSQHybrid_test) {
     if (index_type_ != milvus::knowhere::IndexEnum::INDEX_FAISS_IVFSQ8H) {
         return;
@@ -359,6 +352,4 @@ TEST_P(IVFTest, IVFSQHybrid_test) {
 
     ASSERT_ANY_THROW(index->SetQuantizer(nullptr));
 }
-#endif
-
 #endif
