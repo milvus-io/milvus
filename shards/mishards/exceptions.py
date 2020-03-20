@@ -30,6 +30,10 @@ class InvalidTopKError(BaseException):
     code = codes.INVALID_TOPK_CODE
 
 
+class SearchParamError(BaseException):
+    code = codes.SEARCH_PARAM_LOSS_CODE
+
+
 class InvalidArgumentError(BaseException):
     code = codes.INVALID_ARGUMENT_CODE
 
