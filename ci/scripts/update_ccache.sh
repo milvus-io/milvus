@@ -78,19 +78,17 @@ function check_ccache() {
 }
 
 if [[ -n "${CHANGE_TARGET}" && "${BRANCH_NAME}" =~ "PR-" ]]; then
-    REMOTE_PACKAGE_PATH="${ARTIFACTORY_URL}/${BRANCH_NAME}"
     check_ccache ${CHANGE_TARGET}
     if [[ $? == 0 ]];then
         echo "Skip Update ccache package ..." && exit 0
     fi
 fi
 
-REMOTE_PACKAGE_PATH="${ARTIFACTORY_URL}/${BRANCH_NAME}"
-
 echo -e "===\n=== ccache statistics after build\n==="
 ccache --show-stats
 
 if [[ "${BRANCH_NAME}" != "HEAD" ]];then
+    REMOTE_PACKAGE_PATH="${ARTIFACTORY_URL}/${BRANCH_NAME}"
     echo "Updating ccache package file: ${PACKAGE_FILE}"
     tar zcf ./${PACKAGE_FILE} -C ${CCACHE_DIR} .
     echo "Uploading ccache package file ${PACKAGE_FILE} to ${REMOTE_PACKAGE_PATH}"
@@ -103,3 +101,5 @@ if [[ "${BRANCH_NAME}" != "HEAD" ]];then
         exit 1
     fi
 fi
+
+echo "Skip Update ccache package ..."
