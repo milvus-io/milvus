@@ -13,7 +13,7 @@ Usage:
 Use \"$0  --help\" for more information about a given command.
 "
 
-ARGS=`getopt -o "l:f:h" -l "cache_dir::,file::,help" -n "$0" -- "$@"`
+ARGS=$(getopt -o "l:f:h" -l "cache_dir::,file::,help" -n "$0" -- "$@")
 
 eval set -- "${ARGS}"
 
@@ -63,8 +63,8 @@ function check_ccache() {
 function download_file() {
     BRANCH=$1
     wget -q "${ARTIFACTORY_URL}/${BRANCH}/${PACKAGE_FILE}" && \
-    mkdir -p ${CCACHE_DIR} && \
-    tar zxf ${PACKAGE_FILE} -C ${CCACHE_DIR} && \
+    mkdir -p "${CCACHE_DIR}" && \
+    tar zxf "${PACKAGE_FILE}" -C "${CCACHE_DIR}" && \
     rm ${PACKAGE_FILE}
     return $?
 }

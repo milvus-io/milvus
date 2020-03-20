@@ -15,7 +15,7 @@ Usage:
 Use \"$0  --help\" for more information about a given command.
 "
 
-ARGS=`getopt -o "l:f:u:p:h" -l "cache_dir::,file::,help" -n "$0" -- "$@"`
+ARGS=$(getopt -o "l:f:u:p:h" -l "cache_dir::,file::,help" -n "$0" -- "$@")
 
 eval set -- "${ARGS}"
 
@@ -65,7 +65,7 @@ if [[ -z "${ARTIFACTORY_URL}" || "${ARTIFACTORY_URL}" == "" ]];then
     exit 1
 fi
 
-if [[ ! -d ${CCACHE_DIR} ]]; then
+if [[ ! -d "${CCACHE_DIR}" ]]; then
     echo "\"${CCACHE_DIR}\" directory does not exist !"
     exit 1
 fi
@@ -89,9 +89,9 @@ ccache --show-stats
 if [[ "${BRANCH_NAME}" != "HEAD" ]];then
     REMOTE_PACKAGE_PATH="${ARTIFACTORY_URL}/${BRANCH_NAME}"
     echo "Updating ccache package file: ${PACKAGE_FILE}"
-    tar zcf ./${PACKAGE_FILE} -C ${CCACHE_DIR} .
+    tar zcf ./"${PACKAGE_FILE}" -C "${CCACHE_DIR}" .
     echo "Uploading ccache package file ${PACKAGE_FILE} to ${REMOTE_PACKAGE_PATH}"
-    curl -u${USERNAME}:${PASSWORD} -T ${PACKAGE_FILE} ${REMOTE_PACKAGE_PATH}/${PACKAGE_FILE}
+    curl -u"${USERNAME}":"${PASSWORD}" -T "${PACKAGE_FILE}" "${REMOTE_PACKAGE_PATH}"/"${PACKAGE_FILE}"
     if [[ $? == 0 ]];then
         echo "Uploading ccache package file success !"
         exit 0
