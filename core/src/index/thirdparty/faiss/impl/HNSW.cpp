@@ -528,7 +528,7 @@ int HNSW::search_from_candidates(
   idx_t *I, float *D,
   MinimaxHeap& candidates,
   VisitedTable& vt,
-  int level, int nres_in) const
+  int level, int nres_in, ConcurrentBitsetPtr bitset) const
 {
   int nres = nres_in;
   int ndis = 0;
@@ -536,11 +536,13 @@ int HNSW::search_from_candidates(
     idx_t v1 = candidates.ids[i];
     float d = candidates.dis[i];
     FAISS_ASSERT(v1 >= 0);
-    if (nres < k) {
-      faiss::maxheap_push(++nres, D, I, d, v1);
-    } else if (d < D[0]) {
-      faiss::maxheap_pop(nres--, D, I);
-      faiss::maxheap_push(++nres, D, I, d, v1);
+    if (bitset == nullptr || !bitset->test((ConcurrentBitset::id_type_t)v1)) {
+      if (nres < k) {
+        faiss::maxheap_push(++nres, D, I, d, v1);
+      } else if (d < D[0]) {
+        faiss::maxheap_pop(nres--, D, I);
+        faiss::maxheap_push(++nres, D, I, d, v1);
+      }
     }
     vt.set(v1);
   }
@@ -575,11 +577,13 @@ int HNSW::search_from_candidates(
       vt.set(v1);
       ndis++;
       float d = qdis(v1);
-      if (nres < k) {
-        faiss::maxheap_push(++nres, D, I, d, v1);
-      } else if (d < D[0]) {
-        faiss::maxheap_pop(nres--, D, I);
-        faiss::maxheap_push(++nres, D, I, d, v1);
+      if (bitset == nullptr || !bitset->test((ConcurrentBitset::id_type_t)v1)) {
+        if (nres < k) {
+          faiss::maxheap_push(++nres, D, I, d, v1);
+        } else if (d < D[0]) {
+          faiss::maxheap_pop(nres--, D, I);
+          faiss::maxheap_push(++nres, D, I, d, v1);
+        }
       }
       candidates.push(v1, d);
     }
@@ -613,7 +617,7 @@ std::priority_queue<HNSW::Node> HNSW::search_from_candidate_unbounded(
   const Node& node,
   DistanceComputer& qdis,
   int ef,
-  VisitedTable *vt) const
+  VisitedTable *vt, ConcurrentBitsetPtr bitset) const
 {
   int ndis = 0;
   std::priority_queue<Node> top_candidates;
@@ -654,8 +658,10 @@ std::priority_queue<HNSW::Node> HNSW::search_from_candidate_unbounded(
       ++ndis;
 
       if (top_candidates.top().first > d1 || top_candidates.size() < ef) {
-        candidates.emplace(d1, v1);
-        top_candidates.emplace(d1, v1);
+        if (bitset == nullptr || !bitset->test((ConcurrentBitset::id_type_t)v1)) {
+          candidates.emplace(d1, v1);
+          top_candidates.emplace(d1, v1);
+        }
 
         if (top_candidates.size() > ef) {
           top_candidates.pop();
@@ -678,7 +684,7 @@ std::priority_queue<HNSW::Node> HNSW::search_from_candidate_unbounded(
 
 void HNSW::search(DistanceComputer& qdis, int k,
                   idx_t *I, float *D,
-                  VisitedTable& vt) const
+                  VisitedTable& vt, ConcurrentBitsetPtr bitset) const
 {
   if (upper_beam == 1) {
 
@@ -696,11 +702,11 @@ void HNSW::search(DistanceComputer& qdis, int k,
 
       candidates.push(nearest, d_nearest);
 
-      search_from_candidates(qdis, k, I, D, candidates, vt, 0);
+      search_from_candidates(qdis, k, I, D, candidates, vt, 0, 0, bitset);
     } else {
       std::priority_queue<Node> top_candidates =
         search_from_candidate_unbounded(Node(d_nearest, nearest),
-                                        qdis, ef, &vt);
+                                        qdis, ef, &vt, bitset);
 
       while (top_candidates.size() > k) {
         top_candidates.pop();
@@ -740,12 +746,12 @@ void HNSW::search(DistanceComputer& qdis, int k,
       }
 
       if (level == 0) {
-        nres = search_from_candidates(qdis, k, I, D, candidates, vt, 0);
+        nres = search_from_candidates(qdis, k, I, D, candidates, vt, 0, 0, bitset);
       } else  {
         nres = search_from_candidates(
           qdis, candidates_size,
           I_to_next.data(), D_to_next.data(),
-          candidates, vt, level
+          candidates, vt, level, 0, bitset
         );
       }
       vt.advance();

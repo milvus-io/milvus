@@ -268,7 +268,7 @@ void IndexHNSW::search (idx_t n, const float *x, idx_t k,
                 dis->set_query(x + i * d);
 
                 maxheap_heapify (k, simi, idxi);
-                hnsw.search(*dis, k, idxi, simi, vt);
+                hnsw.search(*dis, k, idxi, simi, vt, bitset);
 
                 maxheap_reorder (k, simi, idxi);
 
@@ -361,7 +361,7 @@ void IndexHNSW::search_level_0(
     idx_t n, const float *x, idx_t k,
     const storage_idx_t *nearest, const float *nearest_d,
     float *distances, idx_t *labels, int nprobe,
-    int search_type) const
+    int search_type, ConcurrentBitsetPtr bitset) const
 {
 
     storage_idx_t ntotal = hnsw.levels.size();
@@ -398,7 +398,7 @@ void IndexHNSW::search_level_0(
 
                     nres = hnsw.search_from_candidates(
                       *qdis, k, idxi, simi,
-                      candidates, vt, 0, nres
+                      candidates, vt, 0, nres, bitset
                     );
                 }
             } else if (search_type == 2) {
@@ -415,7 +415,7 @@ void IndexHNSW::search_level_0(
                 }
                 hnsw.search_from_candidates(
                   *qdis, k, idxi, simi,
-                  candidates, vt, 0
+                  candidates, vt, 0, 0, bitset
                 );
 
             }
@@ -896,7 +896,7 @@ int search_from_candidates_2(const HNSW & hnsw,
                              idx_t *I, float * D,
                              MinimaxHeap &candidates,
                              VisitedTable &vt,
-                             int level, int nres_in = 0)
+                             int level, int nres_in = 0, ConcurrentBitsetPtr bitset = nullptr)
 {
     int nres = nres_in;
     int ndis = 0;
@@ -927,11 +927,13 @@ int search_from_candidates_2(const HNSW & hnsw,
 
                 // never seen before --> add to heap
                 if (vt.visited[v1] < vt.visno) {
-                    if (nres < k) {
-                        faiss::maxheap_push (++nres, D, I, d, v1);
-                    } else if (d < D[0]) {
-                        faiss::maxheap_pop (nres--, D, I);
-                        faiss::maxheap_push (++nres, D, I, d, v1);
+                    if (bitset == nullptr || !bitset->test((ConcurrentBitset::id_type_t)v1)) {
+                        if (nres < k) {
+                            faiss::maxheap_push (++nres, D, I, d, v1);
+                        } else if (d < D[0]) {
+                            faiss::maxheap_pop (nres--, D, I);
+                            faiss::maxheap_push (++nres, D, I, d, v1);
+                        }
                     }
                 }
                 vt.visited[v1] = vt.visno + 1;
@@ -964,7 +966,7 @@ void IndexHNSW2Level::search (idx_t n, const float *x, idx_t k,
                               float *distances, idx_t *labels, ConcurrentBitsetPtr bitset) const
 {
     if (dynamic_cast<const Index2Layer*>(storage)) {
-        IndexHNSW::search (n, x, k, distances, labels);
+        IndexHNSW::search (n, x, k, distances, labels, bitset);
 
     } else { // "mixed" search
 
@@ -981,7 +983,7 @@ void IndexHNSW2Level::search (idx_t n, const float *x, idx_t k,
 
         index_ivfpq->search_preassigned (n, x, k, coarse_assign.get(),
                                          coarse_dis.get(), distances, labels,
-                                         false);
+                                         false, nullptr, bitset);
 
 #pragma omp parallel
         {
@@ -1031,7 +1033,7 @@ void IndexHNSW2Level::search (idx_t n, const float *x, idx_t k,
 
                     hnsw.search_from_candidates(
                       *dis, k, idxi, simi,
-                      candidates, vt, 0, k
+                      candidates, vt, 0, k, bitset
                     );
 
                     vt.advance();
@@ -1048,7 +1050,7 @@ void IndexHNSW2Level::search (idx_t n, const float *x, idx_t k,
 
                     search_from_candidates_2 (
                         hnsw, *dis, k, idxi, simi,
-                        candidates, vt, 0, k);
+                        candidates, vt, 0, k, bitset);
                     vt.advance ();
                     vt.advance ();
 

@@ -108,7 +108,7 @@ struct IndexHNSW : Index {
     void search_level_0(idx_t n, const float *x, idx_t k,
                         const storage_idx_t *nearest, const float *nearest_d,
                         float *distances, idx_t *labels, int nprobe = 1,
-                        int search_type = 1) const;
+                        int search_type = 1, ConcurrentBitsetPtr bitset = nullptr) const;
 
     /// alternative graph building
     void init_level_0_from_knngraph(

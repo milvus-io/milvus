@@ -186,19 +186,22 @@ struct HNSW {
                              idx_t *I, float *D,
                              MinimaxHeap& candidates,
                              VisitedTable &vt,
-                             int level, int nres_in = 0) const;
+                             int level, int nres_in = 0,
+                             ConcurrentBitsetPtr bitset = nullptr) const;
 
   std::priority_queue<Node> search_from_candidate_unbounded(
     const Node& node,
     DistanceComputer& qdis,
     int ef,
-    VisitedTable *vt
+    VisitedTable *vt,
+    ConcurrentBitsetPtr bitset = nullptr
   ) const;
 
   /// search interface
   void search(DistanceComputer& qdis, int k,
               idx_t *I, float *D,
-              VisitedTable& vt) const;
+              VisitedTable& vt,
+              ConcurrentBitsetPtr bitset = nullptr) const;
 
   void reset();
 
