@@ -29,7 +29,9 @@ class Env;
 class DB {
  public:
     DB() = default;
+
     DB(const DB&) = delete;
+
     DB&
     operator=(const DB&) = delete;
 
@@ -37,6 +39,7 @@ class DB {
 
     virtual Status
     Start() = 0;
+
     virtual Status
     Stop() = 0;
 
@@ -121,9 +124,9 @@ class DB {
           const VectorsData& vectors, ResultIds& result_ids, ResultDistances& result_distances) = 0;
 
     virtual Status
-    QueryByFileID(const std::shared_ptr<server::Context>& context, const std::string& table_id,
-                  const std::vector<std::string>& file_ids, uint64_t k, const milvus::json& extra_params,
-                  const VectorsData& vectors, ResultIds& result_ids, ResultDistances& result_distances) = 0;
+    QueryByFileID(const std::shared_ptr<server::Context>& context, const std::vector<std::string>& file_ids, uint64_t k,
+                  const milvus::json& extra_params, const VectorsData& vectors, ResultIds& result_ids,
+                  ResultDistances& result_distances) = 0;
 
     virtual Status
     Size(uint64_t& result) = 0;
