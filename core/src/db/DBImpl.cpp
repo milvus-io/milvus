@@ -339,9 +339,8 @@ DBImpl::PreloadTable(const std::string& table_id) {
     }
 
     // step 1: get all table files from parent table
-    std::vector<size_t> ids;
     meta::TableFilesSchema files_array;
-    auto status = GetFilesToSearch(table_id, ids, files_array);
+    auto status = GetFilesToSearch(table_id, files_array);
     if (!status.ok()) {
         return status;
     }
@@ -350,7 +349,7 @@ DBImpl::PreloadTable(const std::string& table_id) {
     std::vector<meta::TableSchema> partition_array;
     status = meta_ptr_->ShowPartitions(table_id, partition_array);
     for (auto& schema : partition_array) {
-        status = GetFilesToSearch(schema.table_id_, ids, files_array);
+        status = GetFilesToSearch(schema.table_id_, files_array);
     }
 
     int64_t size = 0;
@@ -1109,13 +1108,12 @@ DBImpl::Query(const std::shared_ptr<server::Context>& context, const std::string
     }
 
     Status status;
-    std::vector<size_t> ids;
     meta::TableFilesSchema files_array;
 
     if (partition_tags.empty()) {
         // no partition tag specified, means search in whole table
         // get all table files from parent table
-        status = GetFilesToSearch(table_id, ids, files_array);
+        status = GetFilesToSearch(table_id, files_array);
         if (!status.ok()) {
             return status;
         }
@@ -1123,7 +1121,7 @@ DBImpl::Query(const std::shared_ptr<server::Context>& context, const std::string
         std::vector<meta::TableSchema> partition_array;
         status = meta_ptr_->ShowPartitions(table_id, partition_array);
         for (auto& schema : partition_array) {
-            status = GetFilesToSearch(schema.table_id_, ids, files_array);
+            status = GetFilesToSearch(schema.table_id_, files_array);
         }
 
         if (files_array.empty()) {
@@ -1135,7 +1133,7 @@ DBImpl::Query(const std::shared_ptr<server::Context>& context, const std::string
         GetPartitionsByTags(table_id, partition_tags, partition_name_array);
 
         for (auto& partition_name : partition_name_array) {
-            status = GetFilesToSearch(partition_name, ids, files_array);
+            status = GetFilesToSearch(partition_name, files_array);
         }
 
         if (files_array.empty()) {
@@ -1144,7 +1142,7 @@ DBImpl::Query(const std::shared_ptr<server::Context>& context, const std::string
     }
 
     cache::CpuCacheMgr::GetInstance()->PrintInfo();  // print cache info before query
-    status = QueryAsync(query_ctx, table_id, files_array, k, extra_params, vectors, result_ids, result_distances);
+    status = QueryAsync(query_ctx, files_array, k, extra_params, vectors, result_ids, result_distances);
     cache::CpuCacheMgr::GetInstance()->PrintInfo();  // print cache info after query
 
     query_ctx->GetTraceContext()->GetSpan()->Finish();
@@ -1153,9 +1151,9 @@ DBImpl::Query(const std::shared_ptr<server::Context>& context, const std::string
 }
 
 Status
-DBImpl::QueryByFileID(const std::shared_ptr<server::Context>& context, const std::string& table_id,
-                      const std::vector<std::string>& file_ids, uint64_t k, const milvus::json& extra_params,
-                      const VectorsData& vectors, ResultIds& result_ids, ResultDistances& result_distances) {
+DBImpl::QueryByFileID(const std::shared_ptr<server::Context>& context, const std::vector<std::string>& file_ids,
+                      uint64_t k, const milvus::json& extra_params, const VectorsData& vectors, ResultIds& result_ids,
+                      ResultDistances& result_distances) {
     auto query_ctx = context->Child("Query by file id");
 
     if (!initialized_.load(std::memory_order_acquire)) {
@@ -1165,25 +1163,23 @@ DBImpl::QueryByFileID(const std::shared_ptr<server::Context>& context, const std
     // get specified files
     std::vector<size_t> ids;
     for (auto& id : file_ids) {
-        meta::TableFileSchema table_file;
-        table_file.table_id_ = table_id;
         std::string::size_type sz;
         ids.push_back(std::stoul(id, &sz));
     }
 
-    meta::TableFilesSchema files_array;
-    auto status = GetFilesToSearch(table_id, ids, files_array);
+    meta::TableFilesSchema search_files;
+    auto status = meta_ptr_->FilesByID(ids, search_files);
     if (!status.ok()) {
         return status;
     }
 
-    fiu_do_on("DBImpl.QueryByFileID.empty_files_array", files_array.clear());
-    if (files_array.empty()) {
+    fiu_do_on("DBImpl.QueryByFileID.empty_files_array", search_files.clear());
+    if (search_files.empty()) {
         return Status(DB_ERROR, "Invalid file id");
     }
 
     cache::CpuCacheMgr::GetInstance()->PrintInfo();  // print cache info before query
-    status = QueryAsync(query_ctx, table_id, files_array, k, extra_params, vectors, result_ids, result_distances);
+    status = QueryAsync(query_ctx, search_files, k, extra_params, vectors, result_ids, result_distances);
     cache::CpuCacheMgr::GetInstance()->PrintInfo();  // print cache info after query
 
     query_ctx->GetTraceContext()->GetSpan()->Finish();
@@ -1204,9 +1200,9 @@ DBImpl::Size(uint64_t& result) {
 // internal methods
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 Status
-DBImpl::QueryAsync(const std::shared_ptr<server::Context>& context, const std::string& table_id,
-                   const meta::TableFilesSchema& files, uint64_t k, const milvus::json& extra_params,
-                   const VectorsData& vectors, ResultIds& result_ids, ResultDistances& result_distances) {
+DBImpl::QueryAsync(const std::shared_ptr<server::Context>& context, const meta::TableFilesSchema& files, uint64_t k,
+                   const milvus::json& extra_params, const VectorsData& vectors, ResultIds& result_ids,
+                   ResultDistances& result_distances) {
     auto query_async_ctx = context->Child("Query Async");
 
     server::CollectQueryMetrics metrics(vectors.vector_count_);
@@ -1610,12 +1606,11 @@ DBImpl::GetFilesToBuildIndex(const std::string& table_id, const std::vector<int>
 }
 
 Status
-DBImpl::GetFilesToSearch(const std::string& table_id, const std::vector<size_t>& file_ids,
-                         meta::TableFilesSchema& files) {
+DBImpl::GetFilesToSearch(const std::string& table_id, meta::TableFilesSchema& files) {
     ENGINE_LOG_DEBUG << "Collect files from table: " << table_id;
 
     meta::TableFilesSchema search_files;
-    auto status = meta_ptr_->FilesToSearch(table_id, file_ids, search_files);
+    auto status = meta_ptr_->FilesToSearch(table_id, search_files);
     if (!status.ok()) {
         return status;
     }

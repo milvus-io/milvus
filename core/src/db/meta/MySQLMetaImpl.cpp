@@ -1544,7 +1544,7 @@ MySQLMetaImpl::GetPartitionName(const std::string& table_id, const std::string& 
 }
 
 Status
-MySQLMetaImpl::FilesToSearch(const std::string& table_id, const std::vector<size_t>& ids, TableFilesSchema& files) {
+MySQLMetaImpl::FilesToSearch(const std::string& table_id, TableFilesSchema& files) {
     files.clear();
 
     try {
@@ -1565,16 +1565,6 @@ MySQLMetaImpl::FilesToSearch(const std::string& table_id, const std::vector<size
                 << "SELECT id, table_id, segment_id, engine_type, file_id, file_type, file_size, row_count, date"
                 << " FROM " << META_TABLEFILES << " WHERE table_id = " << mysqlpp::quote << table_id;
 
-            if (!ids.empty()) {
-                std::stringstream idSS;
-                for (auto& id : ids) {
-                    idSS << "id = " << std::to_string(id) << " OR ";
-                }
-                std::string idStr = idSS.str();
-                idStr = idStr.substr(0, idStr.size() - 4);  // remove the last " OR "
-
-                filesToSearchQuery << " AND (" << idStr << ")";
-            }
             // End
             filesToSearchQuery << " AND"
                                << " (file_type = " << std::to_string(TableFileSchema::RAW)
@@ -1782,8 +1772,7 @@ MySQLMetaImpl::FilesToIndex(TableFilesSchema& files) {
 }
 
 Status
-MySQLMetaImpl::FilesByType(const std::string& table_id, const std::vector<int>& file_types,
-                           TableFilesSchema& table_files) {
+MySQLMetaImpl::FilesByType(const std::string& table_id, const std::vector<int>& file_types, TableFilesSchema& files) {
     if (file_types.empty()) {
         return Status(DB_ERROR, "file types array is empty");
     }
@@ -1791,7 +1780,7 @@ MySQLMetaImpl::FilesByType(const std::string& table_id, const std::vector<int>& 
     Status ret = Status::OK();
 
     try {
-        table_files.clear();
+        files.clear();
 
         mysqlpp::StoreQueryResult res;
         {
@@ -1857,7 +1846,7 @@ MySQLMetaImpl::FilesByType(const std::string& table_id, const std::vector<int>& 
                     ret = status;
                 }
 
-                table_files.emplace_back(file_schema);
+                files.emplace_back(file_schema);
 
                 int32_t file_type = resRow["file_type"];
                 switch (file_type) {
@@ -1922,6 +1911,104 @@ MySQLMetaImpl::FilesByType(const std::string& table_id, const std::vector<int>& 
     }
 
     return ret;
+}
+
+Status
+MySQLMetaImpl::FilesByID(const std::vector<size_t>& ids, TableFilesSchema& files) {
+    files.clear();
+
+    if (ids.empty()) {
+        return Status::OK();
+    }
+
+    try {
+        server::MetricCollector metric;
+        mysqlpp::StoreQueryResult res;
+        {
+            mysqlpp::ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab_);
+
+            bool is_null_connection = (connectionPtr == nullptr);
+            fiu_do_on("MySQLMetaImpl.FilesByID.null_connection", is_null_connection = true);
+            fiu_do_on("MySQLMetaImpl.FilesByID.throw_exception", throw std::exception(););
+            if (is_null_connection) {
+                return Status(DB_ERROR, "Failed to connect to meta server(mysql)");
+            }
+
+            mysqlpp::Query filesToSearchQuery = connectionPtr->query();
+            filesToSearchQuery
+                << "SELECT id, table_id, segment_id, engine_type, file_id, file_type, file_size, row_count, date"
+                << " FROM " << META_TABLEFILES;
+
+            std::stringstream idSS;
+            for (auto& id : ids) {
+                idSS << "id = " << std::to_string(id) << " OR ";
+            }
+            std::string idStr = idSS.str();
+            idStr = idStr.substr(0, idStr.size() - 4);  // remove the last " OR "
+
+            filesToSearchQuery << " WHERE (" << idStr << ")";
+
+            // End
+            filesToSearchQuery << " AND"
+                               << " (file_type = " << std::to_string(TableFileSchema::RAW)
+                               << " OR file_type = " << std::to_string(TableFileSchema::TO_INDEX)
+                               << " OR file_type = " << std::to_string(TableFileSchema::INDEX) << ");";
+
+            ENGINE_LOG_DEBUG << "MySQLMetaImpl::FilesToSearch: " << filesToSearchQuery.str();
+
+            res = filesToSearchQuery.store();
+        }  // Scoped Connection
+
+        std::map<std::string, meta::TableSchema> tables;
+        Status ret;
+        for (auto& resRow : res) {
+            TableFileSchema table_file;
+            table_file.id_ = resRow["id"];  // implicit conversion
+            resRow["table_id"].to_string(table_file.table_id_);
+            resRow["segment_id"].to_string(table_file.segment_id_);
+            table_file.engine_type_ = resRow["engine_type"];
+            resRow["file_id"].to_string(table_file.file_id_);
+            table_file.file_type_ = resRow["file_type"];
+            table_file.file_size_ = resRow["file_size"];
+            table_file.row_count_ = resRow["row_count"];
+            table_file.date_ = resRow["date"];
+
+            if (tables.find(table_file.table_id_) == tables.end()) {
+                TableSchema table_schema;
+                table_schema.table_id_ = table_file.table_id_;
+                auto status = DescribeTable(table_schema);
+                if (!status.ok()) {
+                    return status;
+                }
+                tables.insert(std::make_pair(table_file.table_id_, table_schema));
+            }
+
+            auto status = utils::GetTableFilePath(options_, table_file);
+            if (!status.ok()) {
+                ret = status;
+            }
+
+            files.emplace_back(table_file);
+        }
+
+        for (auto& table_file : files) {
+            TableSchema& table_schema = tables[table_file.table_id_];
+            table_file.dimension_ = table_schema.dimension_;
+            table_file.index_file_size_ = table_schema.index_file_size_;
+            table_file.index_params_ = table_schema.index_params_;
+            table_file.metric_type_ = table_schema.metric_type_;
+        }
+
+        if (files.empty()) {
+            ENGINE_LOG_ERROR << "No file to search in file id list";
+        } else {
+            ENGINE_LOG_DEBUG << "Collect " << files.size() << " files by id";
+        }
+
+        return ret;
+    } catch (std::exception& e) {
+        return HandleException("GENERAL ERROR WHEN FINDING TABLE FILES BY ID", e.what());
+    }
 }
 
 // TODO(myh): Support swap to cloud storage
