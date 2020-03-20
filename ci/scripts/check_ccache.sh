@@ -1,7 +1,5 @@
 #!/bin/bash
 
-set -e
-
 HELP="
 Usage:
   $0 [flags] [Arguments]
