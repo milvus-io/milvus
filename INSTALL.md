@@ -188,19 +188,41 @@ $ cd ./milvus/core
 
 ### Step 4 Compile Milvus in the container
 
-If you are using a CPU-only image, compile it like this:
+If you are using a CPU-only image:
+
+1. run `build.sh`:
 
 ```shell
 $ ./build.sh -t Release
 ```
 
-If you are using a GPU-enabled image, you need to add a `-g` parameter:
+2. Start Milvus server：
+
+```shell
+$ ./start_server.sh
+```
+
+If you are using a GPU-enabled image:
+
+1. Add cuda library path to `LD_LIBRARY_PATH`:
+
+```shell
+$ export LD_LIBRARY_PATH=/usr/local/cuda/lib64:$LD_LIBRARY_PATH
+```
+
+2. Add cuda binary path to `PATH`:
+
+```shell
+$ export PATH=/usr/local/cuda/bin:$PATH
+```
+
+3. Add a `-g` parameter to run `build.sh`:
 
 ```shell
 $ ./build.sh -g -t Release
 ```
 
-Then start Milvus server：
+4. Start Milvus server：
 
 ```shell
 $ ./start_server.sh

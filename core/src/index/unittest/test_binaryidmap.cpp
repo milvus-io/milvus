@@ -26,14 +26,14 @@ class BinaryIDMAPTest : public BinaryDataGen, public TestWithParam<std::string> 
     void
     SetUp() override {
         Init_with_binary_default();
-        index_ = std::make_shared<knowhere::BinaryIDMAP>();
+        index_ = std::make_shared<milvus::knowhere::BinaryIDMAP>();
     }
 
     void
     TearDown() override{};
 
  protected:
-    knowhere::BinaryIDMAPPtr index_ = nullptr;
+    milvus::knowhere::BinaryIDMAPPtr index_ = nullptr;
 };
 
 INSTANTIATE_TEST_CASE_P(METRICParameters, BinaryIDMAPTest,
@@ -43,26 +43,26 @@ TEST_P(BinaryIDMAPTest, binaryidmap_basic) {
     ASSERT_TRUE(!xb.empty());
 
     std::string MetricType = GetParam();
-    knowhere::Config conf{
-        {knowhere::meta::DIM, dim},
-        {knowhere::meta::TOPK, k},
-        {knowhere::Metric::TYPE, MetricType},
+    milvus::knowhere::Config conf{
+        {milvus::knowhere::meta::DIM, dim},
+        {milvus::knowhere::meta::TOPK, k},
+        {milvus::knowhere::Metric::TYPE, MetricType},
     };
 
-    index_->Train(conf);
+    index_->Train(base_dataset, conf);
     index_->Add(base_dataset, conf);
     EXPECT_EQ(index_->Count(), nb);
-    EXPECT_EQ(index_->Dimension(), dim);
+    EXPECT_EQ(index_->Dim(), dim);
     ASSERT_TRUE(index_->GetRawVectors() != nullptr);
     ASSERT_TRUE(index_->GetRawIds() != nullptr);
-    auto result = index_->Search(query_dataset, conf);
+    auto result = index_->Query(query_dataset, conf);
     AssertAnns(result, nq, k);
     // PrintResult(result, nq, k);
 
     auto binaryset = index_->Serialize();
-    auto new_index = std::make_shared<knowhere::BinaryIDMAP>();
+    auto new_index = std::make_shared<milvus::knowhere::BinaryIDMAP>();
     new_index->Load(binaryset);
-    auto result2 = index_->Search(query_dataset, conf);
+    auto result2 = index_->Query(query_dataset, conf);
     AssertAnns(result2, nq, k);
     // PrintResult(re_result, nq, k);
 
@@ -72,7 +72,7 @@ TEST_P(BinaryIDMAPTest, binaryidmap_basic) {
     }
     index_->SetBlacklist(concurrent_bitset_ptr);
 
-    auto result3 = index_->Search(query_dataset, conf);
+    auto result3 = index_->Query(query_dataset, conf);
     AssertAnns(result3, nq, k, CheckMode::CHECK_NOT_EQUAL);
 
     //    auto result4 = index_->SearchById(id_dataset, conf);
@@ -80,7 +80,7 @@ TEST_P(BinaryIDMAPTest, binaryidmap_basic) {
 }
 
 TEST_P(BinaryIDMAPTest, binaryidmap_serialize) {
-    auto serialize = [](const std::string& filename, knowhere::BinaryPtr& bin, uint8_t* ret) {
+    auto serialize = [](const std::string& filename, milvus::knowhere::BinaryPtr& bin, uint8_t* ret) {
         FileIOWriter writer(filename);
         writer(static_cast<void*>(bin->data.get()), bin->size);
 
@@ -89,21 +89,21 @@ TEST_P(BinaryIDMAPTest, binaryidmap_serialize) {
     };
 
     std::string MetricType = GetParam();
-    knowhere::Config conf{
-        {knowhere::meta::DIM, dim},
-        {knowhere::meta::TOPK, k},
-        {knowhere::Metric::TYPE, MetricType},
+    milvus::knowhere::Config conf{
+        {milvus::knowhere::meta::DIM, dim},
+        {milvus::knowhere::meta::TOPK, k},
+        {milvus::knowhere::Metric::TYPE, MetricType},
     };
 
     {
         // serialize index
-        index_->Train(conf);
-        index_->Add(base_dataset, knowhere::Config());
-        auto re_result = index_->Search(query_dataset, conf);
+        index_->Train(base_dataset, conf);
+        index_->Add(base_dataset, milvus::knowhere::Config());
+        auto re_result = index_->Query(query_dataset, conf);
         AssertAnns(re_result, nq, k);
         //        PrintResult(re_result, nq, k);
         EXPECT_EQ(index_->Count(), nb);
-        EXPECT_EQ(index_->Dimension(), dim);
+        EXPECT_EQ(index_->Dim(), dim);
         auto binaryset = index_->Serialize();
         auto bin = binaryset.GetByName("BinaryIVF");
 
@@ -118,8 +118,8 @@ TEST_P(BinaryIDMAPTest, binaryidmap_serialize) {
 
         index_->Load(binaryset);
         EXPECT_EQ(index_->Count(), nb);
-        EXPECT_EQ(index_->Dimension(), dim);
-        auto result = index_->Search(query_dataset, conf);
+        EXPECT_EQ(index_->Dim(), dim);
+        auto result = index_->Query(query_dataset, conf);
         AssertAnns(result, nq, k);
         //        PrintResult(result, nq, k);
     }

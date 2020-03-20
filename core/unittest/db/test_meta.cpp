@@ -260,13 +260,12 @@ TEST_F(MetaTest, FALID_TEST) {
         fiu_disable("SqliteMetaImpl.GetPartitionName.throw_exception");
     }
     {
-        std::vector<size_t> ids;
         milvus::engine::meta::TableFilesSchema table_files;
-        status = impl_->FilesToSearch("notexist", ids, table_files);
+        status = impl_->FilesToSearch("notexist", table_files);
         ASSERT_EQ(status.code(), milvus::DB_NOT_FOUND);
 
         FIU_ENABLE_FIU("SqliteMetaImpl.FilesToSearch.throw_exception");
-        status = impl_->FilesToSearch(table_id, ids, table_files);
+        status = impl_->FilesToSearch(table_id, table_files);
         ASSERT_EQ(status.code(), milvus::DB_META_TRANSACTION_FAILED);
         fiu_disable("SqliteMetaImpl.FilesToSearch.throw_exception");
     }
@@ -622,13 +621,21 @@ TEST_F(MetaTest, TABLE_FILES_TEST) {
     ASSERT_EQ(files.size(), to_index_files_cnt);
 
     table_files.clear();
-    std::vector<size_t> ids;
-    status = impl_->FilesToSearch(table_id, ids, table_files);
+    status = impl_->FilesToSearch(table_id, table_files);
     ASSERT_EQ(table_files.size(), to_index_files_cnt + raw_files_cnt + index_files_cnt);
 
+    std::vector<size_t> ids;
+    for (auto& file : table_files) {
+        ids.push_back(file.id_);
+    }
+    size_t cnt = table_files.size();
     table_files.clear();
-    ids.push_back(size_t(9999999999));
-    status = impl_->FilesToSearch(table_id, ids, table_files);
+    status = impl_->FilesByID(ids, table_files);
+    ASSERT_EQ(table_files.size(), cnt);
+
+    table_files.clear();
+    ids = {9999999999UL};
+    status = impl_->FilesByID(ids, table_files);
     ASSERT_EQ(table_files.size(), 0);
 
     table_files.clear();

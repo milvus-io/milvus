@@ -9,14 +9,12 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
-#include <cache/CpuCacheMgr.h>
-#include <cache/GpuCacheMgr.h>
-#include <fiu-local.h>
 #include <sys/stat.h>
 #include <unistd.h>
 
 #include <algorithm>
 #include <chrono>
+#include <fstream>
 #include <iostream>
 #include <regex>
 #include <string>
@@ -25,11 +23,14 @@
 #include <unordered_set>
 #include <vector>
 
+#include <fiu-local.h>
+
 #include "config/Config.h"
 #include "config/YamlConfigMgr.h"
 #include "server/DBWrapper.h"
 #include "thirdparty/nlohmann/json.hpp"
 #include "utils/CommonUtil.h"
+#include "utils/Log.h"
 #include "utils/StringHelpFunctions.h"
 #include "utils/ValidationUtil.h"
 
@@ -562,6 +563,7 @@ Config::UpdateFileConfigFromMem(const std::string& parent_key, const std::string
         std::vector<std::string> vec;
         StringHelpFunctions::SplitStringByDelimeter(value, ",", vec);
         for (auto& s : vec) {
+            std::transform(s.begin(), s.end(), s.begin(), ::tolower);
             value_str += "\n    - " + s;
         }
     } else {
@@ -1947,8 +1949,7 @@ Status
 Config::SetCacheConfigCpuCacheCapacity(const std::string& value) {
     CONFIG_CHECK(CheckCacheConfigCpuCacheCapacity(value));
     CONFIG_CHECK(SetConfigValueInMem(CONFIG_CACHE, CONFIG_CACHE_CPU_CACHE_CAPACITY, value));
-    cache::CpuCacheMgr::GetInstance()->SetCapacity(std::stol(value) << 30);
-    return Status::OK();
+    return ExecCallBacks(CONFIG_CACHE, CONFIG_CACHE_CPU_CACHE_CAPACITY, value);
 }
 
 Status
@@ -2046,14 +2047,7 @@ Status
 Config::SetGpuResourceConfigCacheCapacity(const std::string& value) {
     CONFIG_CHECK(CheckGpuResourceConfigCacheCapacity(value));
     CONFIG_CHECK(SetConfigValueInMem(CONFIG_GPU_RESOURCE, CONFIG_GPU_RESOURCE_CACHE_CAPACITY, value));
-
-    int64_t cap = std::stol(value);
-    std::vector<int64_t> gpus;
-    GetGpuResourceConfigSearchResources(gpus);
-    for (auto& gpu_id : gpus) {
-        cache::GpuCacheMgr::GetInstance(gpu_id)->SetCapacity(cap << 30);
-    }
-    return Status::OK();
+    return ExecCallBacks(CONFIG_GPU_RESOURCE, CONFIG_GPU_RESOURCE_CACHE_CAPACITY, value);
 }
 
 Status

@@ -12,26 +12,31 @@
 #pragma once
 
 #include <memory>
+#include <utility>
 
 #include <faiss/IndexBinary.h>
 
 #include "knowhere/common/BinarySet.h"
 #include "knowhere/common/Dataset.h"
+#include "knowhere/index/vector_index/IndexType.h"
 
+namespace milvus {
 namespace knowhere {
 
 class FaissBaseBinaryIndex {
  protected:
-    explicit FaissBaseBinaryIndex(std::shared_ptr<faiss::IndexBinary> index);
+    explicit FaissBaseBinaryIndex(std::shared_ptr<faiss::IndexBinary> index) : index_(std::move(index)) {
+    }
 
     virtual BinarySet
-    SerializeImpl();
+    SerializeImpl(const IndexType& type);
 
     virtual void
-    LoadImpl(const BinarySet& index_binary);
+    LoadImpl(const BinarySet& index_binary, const IndexType& type);
 
  public:
     std::shared_ptr<faiss::IndexBinary> index_ = nullptr;
 };
 
 }  // namespace knowhere
+}  // namespace milvus

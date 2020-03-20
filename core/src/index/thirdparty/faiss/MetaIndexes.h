@@ -53,7 +53,8 @@ struct IndexIDMapTemplate : IndexT {
     size_t remove_ids(const IDSelector& sel) override;
 
     void range_search (idx_t n, const component_t *x, distance_t radius,
-                       RangeSearchResult *result) const override;
+                       RangeSearchResult *result,
+                       ConcurrentBitsetPtr bitset = nullptr) const override;
 
     ~IndexIDMapTemplate () override;
     IndexIDMapTemplate () {own_fields=false; index=nullptr; }

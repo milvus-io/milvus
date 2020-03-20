@@ -968,11 +968,11 @@ SqliteMetaImpl::GetPartitionName(const std::string& table_id, const std::string&
 }
 
 Status
-SqliteMetaImpl::FilesToSearch(const std::string& table_id, const std::vector<size_t>& ids, TableFilesSchema& files) {
+SqliteMetaImpl::FilesToSearch(const std::string& table_id, TableFilesSchema& files) {
     files.clear();
-    server::MetricCollector metric;
 
     try {
+        server::MetricCollector metric;
         fiu_do_on("SqliteMetaImpl.FilesToSearch.throw_exception", throw std::exception());
 
         auto select_columns =
@@ -995,14 +995,8 @@ SqliteMetaImpl::FilesToSearch(const std::string& table_id, const std::vector<siz
 
         // perform query
         decltype(ConnectorPtr->select(select_columns)) selected;
-        if (ids.empty()) {
-            auto filter = where(match_tableid and match_type);
-            selected = ConnectorPtr->select(select_columns, filter);
-        } else {
-            auto match_fileid = in(&TableFileSchema::id_, ids);
-            auto filter = where(match_tableid and match_fileid and match_type);
-            selected = ConnectorPtr->select(select_columns, filter);
-        }
+        auto filter = where(match_tableid and match_type);
+        selected = ConnectorPtr->select(select_columns, filter);
 
         Status ret;
         for (auto& file : selected) {
@@ -1172,8 +1166,7 @@ SqliteMetaImpl::FilesToIndex(TableFilesSchema& files) {
 }
 
 Status
-SqliteMetaImpl::FilesByType(const std::string& table_id, const std::vector<int>& file_types,
-                            TableFilesSchema& table_files) {
+SqliteMetaImpl::FilesByType(const std::string& table_id, const std::vector<int>& file_types, TableFilesSchema& files) {
     if (file_types.empty()) {
         return Status(DB_ERROR, "file types array is empty");
     }
@@ -1190,7 +1183,7 @@ SqliteMetaImpl::FilesByType(const std::string& table_id, const std::vector<int>&
     try {
         fiu_do_on("SqliteMetaImpl.FilesByType.throw_exception", throw std::exception());
 
-        table_files.clear();
+        files.clear();
         auto selected = ConnectorPtr->select(
             columns(&TableFileSchema::id_, &TableFileSchema::segment_id_, &TableFileSchema::file_id_,
                     &TableFileSchema::file_type_, &TableFileSchema::file_size_, &TableFileSchema::row_count_,
@@ -1241,7 +1234,7 @@ SqliteMetaImpl::FilesByType(const std::string& table_id, const std::vector<int>&
                     ret = status;
                 }
 
-                table_files.emplace_back(file_schema);
+                files.emplace_back(file_schema);
             }
 
             std::string msg = "Get table files by type.";
@@ -1275,6 +1268,87 @@ SqliteMetaImpl::FilesByType(const std::string& table_id, const std::vector<int>&
     }
 
     return ret;
+}
+
+Status
+SqliteMetaImpl::FilesByID(const std::vector<size_t>& ids, TableFilesSchema& files) {
+    files.clear();
+
+    if (ids.empty()) {
+        return Status::OK();
+    }
+
+    try {
+        server::MetricCollector metric;
+        fiu_do_on("SqliteMetaImpl.FilesByID.throw_exception", throw std::exception());
+
+        auto select_columns =
+            columns(&TableFileSchema::id_, &TableFileSchema::table_id_, &TableFileSchema::segment_id_,
+                    &TableFileSchema::file_id_, &TableFileSchema::file_type_, &TableFileSchema::file_size_,
+                    &TableFileSchema::row_count_, &TableFileSchema::date_, &TableFileSchema::engine_type_);
+
+
+        std::vector<int> file_types = {(int)TableFileSchema::RAW, (int)TableFileSchema::TO_INDEX,
+                                       (int)TableFileSchema::INDEX};
+        auto match_type = in(&TableFileSchema::file_type_, file_types);
+
+        // perform query
+        decltype(ConnectorPtr->select(select_columns)) selected;
+        auto match_fileid = in(&TableFileSchema::id_, ids);
+        auto filter = where(match_fileid and match_type);
+        selected = ConnectorPtr->select(select_columns, filter);
+
+        std::map<std::string, meta::TableSchema> tables;
+        Status ret;
+        for (auto& file : selected) {
+            TableFileSchema table_file;
+            table_file.id_ = std::get<0>(file);
+            table_file.table_id_ = std::get<1>(file);
+            table_file.segment_id_ = std::get<2>(file);
+            table_file.file_id_ = std::get<3>(file);
+            table_file.file_type_ = std::get<4>(file);
+            table_file.file_size_ = std::get<5>(file);
+            table_file.row_count_ = std::get<6>(file);
+            table_file.date_ = std::get<7>(file);
+            table_file.engine_type_ = std::get<8>(file);
+
+            if (tables.find(table_file.table_id_) == tables.end()) {
+                TableSchema table_schema;
+                table_schema.table_id_ = table_file.table_id_;
+                auto status = DescribeTable(table_schema);
+                if (!status.ok()) {
+                    return status;
+                }
+                tables.insert(std::make_pair(table_file.table_id_, table_schema));
+            }
+
+            auto status = utils::GetTableFilePath(options_, table_file);
+            if (!status.ok()) {
+                ret = status;
+            }
+
+            files.emplace_back(table_file);
+        }
+
+        for (auto& table_file : files) {
+            TableSchema& table_schema = tables[table_file.table_id_];
+            table_file.dimension_ = table_schema.dimension_;
+            table_file.index_file_size_ = table_schema.index_file_size_;
+            table_file.index_params_ = table_schema.index_params_;
+            table_file.metric_type_ = table_schema.metric_type_;
+        }
+
+        if (files.empty()) {
+            ENGINE_LOG_ERROR << "No file to search in file id list";
+        } else {
+            ENGINE_LOG_DEBUG << "Collect " << selected.size() << " files by id";
+        }
+
+        return ret;
+    } catch (std::exception& e) {
+        return HandleException("Encounter exception when iterate index files", e.what());
+    }
+    return Status::OK();
 }
 
 // TODO(myh): Support swap to cloud storage

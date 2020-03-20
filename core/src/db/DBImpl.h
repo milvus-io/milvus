@@ -23,6 +23,7 @@
 #include <vector>
 
 #include "config/handler/CacheConfigHandler.h"
+#include "config/handler/EngineConfigHandler.h"
 #include "db/DB.h"
 #include "db/IndexFailedChecker.h"
 #include "db/OngoingFileChecker.h"
@@ -38,15 +39,18 @@ namespace meta {
 class Meta;
 }
 
-class DBImpl : public DB, public server::CacheConfigHandler {
+class DBImpl : public DB, public server::CacheConfigHandler, public server::EngineConfigHandler {
  public:
     explicit DBImpl(const DBOptions& options);
+
     ~DBImpl();
 
     Status
     Start() override;
+
     Status
     Stop() override;
+
     Status
     DropAll() override;
 
@@ -140,9 +144,9 @@ class DBImpl : public DB, public server::CacheConfigHandler {
           const VectorsData& vectors, ResultIds& result_ids, ResultDistances& result_distances) override;
 
     Status
-    QueryByFileID(const std::shared_ptr<server::Context>& context, const std::string& table_id,
-                  const std::vector<std::string>& file_ids, uint64_t k, const milvus::json& extra_params,
-                  const VectorsData& vectors, ResultIds& result_ids, ResultDistances& result_distances) override;
+    QueryByFileID(const std::shared_ptr<server::Context>& context, const std::vector<std::string>& file_ids, uint64_t k,
+                  const milvus::json& extra_params, const VectorsData& vectors, ResultIds& result_ids,
+                  ResultDistances& result_distances) override;
 
     Status
     Size(uint64_t& result) override;
@@ -151,11 +155,14 @@ class DBImpl : public DB, public server::CacheConfigHandler {
     void
     OnCacheInsertDataChanged(bool value) override;
 
+    void
+    OnUseBlasThresholdChanged(int64_t threshold) override;
+
  private:
     Status
-    QueryAsync(const std::shared_ptr<server::Context>& context, const std::string& table_id,
-               const meta::TableFilesSchema& files, uint64_t k, const milvus::json& extra_params,
-               const VectorsData& vectors, ResultIds& result_ids, ResultDistances& result_distances);
+    QueryAsync(const std::shared_ptr<server::Context>& context, const meta::TableFilesSchema& files, uint64_t k,
+               const milvus::json& extra_params, const VectorsData& vectors, ResultIds& result_ids,
+               ResultDistances& result_distances);
 
     Status
     GetVectorByIdHelper(const std::string& table_id, IDNumber vector_id, VectorsData& vector,
@@ -163,8 +170,10 @@ class DBImpl : public DB, public server::CacheConfigHandler {
 
     void
     BackgroundTimerTask();
+
     void
     WaitMergeFileFinish();
+
     void
     WaitBuildIndexFinish();
 
@@ -176,13 +185,16 @@ class DBImpl : public DB, public server::CacheConfigHandler {
 
     Status
     MergeFiles(const std::string& table_id, const meta::TableFilesSchema& files);
+
     Status
     BackgroundMergeFiles(const std::string& table_id);
+
     void
     BackgroundMerge(std::set<std::string> table_ids);
 
     void
     StartBuildIndexTask(bool force = false);
+
     void
     BackgroundBuildIndex();
 
@@ -200,7 +212,7 @@ class DBImpl : public DB, public server::CacheConfigHandler {
                          meta::TableFilesSchema& files);
 
     Status
-    GetFilesToSearch(const std::string& table_id, const std::vector<size_t>& file_ids, meta::TableFilesSchema& files);
+    GetFilesToSearch(const std::string& table_id, meta::TableFilesSchema& files);
 
     Status
     GetPartitionByTag(const std::string& table_id, const std::string& partition_tag, std::string& partition_name);

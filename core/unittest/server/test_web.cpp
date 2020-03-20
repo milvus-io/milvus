@@ -29,7 +29,6 @@
 #include "server/delivery/RequestScheduler.h"
 #include "server/delivery/request/BaseRequest.h"
 #include "server/Server.h"
-#include "src/version.h"
 #include "server/web_impl/Types.h"
 #include "server/web_impl/WebServer.h"
 #include "server/web_impl/component/AppComponent.hpp"
@@ -42,7 +41,7 @@
 #include "unittest/server/utils.h"
 #include "utils/CommonUtil.h"
 #include "version.h"
-#include "wrapper/VecIndex.h"
+//#include "knowhere/VecIndex.h"
 
 
 static const char* TABLE_NAME = "test_web";
@@ -638,43 +637,53 @@ class TestClient : public oatpp::web::client::ApiClient {
 
     API_CALL("GET", "/collections", showTables, QUERY(String, offset), QUERY(String, page_size))
 
-    API_CALL("OPTIONS", "/collections/{collection_name}", optionsTable, PATH(String, collection_name, "collection_name"))
+    API_CALL("OPTIONS", "/collections/{collection_name}", optionsTable,
+             PATH(String, collection_name, "collection_name"))
 
-    API_CALL("GET", "/collections/{collection_name}", getTable, PATH(String, collection_name, "collection_name"), QUERY(String, info))
+    API_CALL("GET", "/collections/{collection_name}", getTable,
+             PATH(String, collection_name, "collection_name"), QUERY(String, info))
 
     API_CALL("DELETE", "/collections/{collection_name}", dropTable, PATH(String, collection_name, "collection_name"))
 
-    API_CALL("OPTIONS", "/collections/{collection_name}/indexes", optionsIndexes, PATH(String, collection_name, "collection_name"))
+    API_CALL("OPTIONS", "/collections/{collection_name}/indexes", optionsIndexes,
+             PATH(String, collection_name, "collection_name"))
 
-    API_CALL("POST", "/collections/{collection_name}/indexes", createIndex, PATH(String, collection_name, "collection_name"),
-             BODY_STRING(OString, body))
+    API_CALL("POST", "/collections/{collection_name}/indexes", createIndex,
+             PATH(String, collection_name, "collection_name"), BODY_STRING(OString, body))
 
-    API_CALL("GET", "/collections/{collection_name}/indexes", getIndex, PATH(String, collection_name, "collection_name"))
+    API_CALL("GET", "/collections/{collection_name}/indexes", getIndex,
+             PATH(String, collection_name, "collection_name"))
 
-    API_CALL("DELETE", "/collections/{collection_name}/indexes", dropIndex, PATH(String, collection_name, "collection_name"))
+    API_CALL("DELETE", "/collections/{collection_name}/indexes", dropIndex,
+             PATH(String, collection_name, "collection_name"))
 
-    API_CALL("OPTIONS", "/collections/{collection_name}/partitions", optionsPartitions, PATH(String, collection_name, "collection_name"))
+    API_CALL("OPTIONS", "/collections/{collection_name}/partitions", optionsPartitions,
+             PATH(String, collection_name, "collection_name"))
 
-    API_CALL("POST", "/collections/{collection_name}/partitions", createPartition, PATH(String, collection_name, "collection_name"),
+    API_CALL("POST", "/collections/{collection_name}/partitions", createPartition,
+             PATH(String, collection_name, "collection_name"),
              BODY_DTO(milvus::server::web::PartitionRequestDto::ObjectWrapper, body))
 
-    API_CALL("GET", "/collections/{collection_name}/partitions", showPartitions, PATH(String, collection_name, "collection_name"),
+    API_CALL("GET", "/collections/{collection_name}/partitions", showPartitions,
+        PATH(String, collection_name, "collection_name"),
              QUERY(String, offset), QUERY(String, page_size))
 
     API_CALL("DELETE", "/collections/{collection_name}/partitions", dropPartition,
              PATH(String, collection_name, "collection_name"), BODY_STRING(String, body))
 
-    API_CALL("GET", "/collections/{collection_name}/segments", showSegments, PATH(String, collection_name, "collection_name"),
-        QUERY(String, offset), QUERY(String, page_size), QUERY(String, partition_tag))
+    API_CALL("GET", "/collections/{collection_name}/segments", showSegments,
+             PATH(String, collection_name, "collection_name"),
+             QUERY(String, offset), QUERY(String, page_size), QUERY(String, partition_tag))
 
     API_CALL("GET", "/collections/{collection_name}/segments/{segment_name}/{info}", getSegmentInfo,
              PATH(String, collection_name, "collection_name"), PATH(String, segment_name, "segment_name"),
              PATH(String, info, "info"), QUERY(String, offset), QUERY(String, page_size))
 
-    API_CALL("OPTIONS", "/collections/{collection_name}/vectors", optionsVectors, PATH(String, collection_name, "collection_name"))
+    API_CALL("OPTIONS", "/collections/{collection_name}/vectors", optionsVectors,
+             PATH(String, collection_name, "collection_name"))
 
     API_CALL("GET", "/collections/{collection_name}/vectors", getVectors,
-        PATH(String, collection_name, "collection_name"), QUERY(String, id))
+             PATH(String, collection_name, "collection_name"), QUERY(String, id))
 
     API_CALL("POST", "/collections/{collection_name}/vectors", insert,
              PATH(String, collection_name, "collection_name"), BODY_STRING(String, body))
@@ -1133,7 +1142,8 @@ TEST_F(WebControllerTest, INDEX) {
     ASSERT_EQ(OStatus::CODE_204.code, response->getStatusCode());
 
     // create index without existing table
-    response = client_ptr->createIndex(collection_name + "fgafafafafafUUUUUUa124254", index_json.dump().c_str(), conncetion_ptr);
+    response = client_ptr->createIndex(collection_name + "fgafafafafafUUUUUUa124254",
+        index_json.dump().c_str(), conncetion_ptr);
     ASSERT_EQ(OStatus::CODE_404.code, response->getStatusCode());
 
     // invalid index type

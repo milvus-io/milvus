@@ -39,7 +39,7 @@ FaissIVFPQPass::Init() {
     SetIdentity("FaissIVFPQPass");
     AddGpuEnableListener();
     AddGpuSearchThresholdListener();
-    AddGpuSearchResListener();
+    AddGpuSearchResourcesListener();
 #endif
 }
 

@@ -543,7 +543,8 @@ void IndexIVF::search_preassigned (idx_t n, const float *x, idx_t k,
 
 
 void IndexIVF::range_search (idx_t nx, const float *x, float radius,
-                             RangeSearchResult *result) const
+                             RangeSearchResult *result,
+                             ConcurrentBitsetPtr bitset) const
 {
     std::unique_ptr<idx_t[]> keys (new idx_t[nx * nprobe]);
     std::unique_ptr<float []> coarse_dis (new float[nx * nprobe]);
@@ -556,7 +557,7 @@ void IndexIVF::range_search (idx_t nx, const float *x, float radius,
     invlists->prefetch_lists (keys.get(), nx * nprobe);
 
     range_search_preassigned (nx, x, radius, keys.get (), coarse_dis.get (),
-                              result);
+                              result, bitset);
 
     indexIVF_stats.search_time += getmillisecs() - t0;
 }
@@ -564,7 +565,8 @@ void IndexIVF::range_search (idx_t nx, const float *x, float radius,
 void IndexIVF::range_search_preassigned (
          idx_t nx, const float *x, float radius,
          const idx_t *keys, const float *coarse_dis,
-         RangeSearchResult *result) const
+         RangeSearchResult *result,
+         ConcurrentBitsetPtr bitset) const
 {
 
     size_t nlistv = 0, ndis = 0;
@@ -601,7 +603,7 @@ void IndexIVF::range_search_preassigned (
             nlistv++;
             ndis += list_size;
             scanner->scan_codes_range (list_size, scodes.get(),
-                                       ids.get(), radius, qres);
+                                       ids.get(), radius, qres, bitset);
         };
 
         if (parallel_mode == 0) {
@@ -983,7 +985,8 @@ void InvertedListScanner::scan_codes_range (size_t ,
                        const uint8_t *,
                        const idx_t *,
                        float ,
-                       RangeQueryResult &) const
+                       RangeQueryResult &,
+                       ConcurrentBitsetPtr) const
 {
     FAISS_THROW_MSG ("scan_codes_range not implemented");
 }

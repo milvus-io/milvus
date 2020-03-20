@@ -116,7 +116,7 @@ set(storage_files
 
 aux_source_directory(${MILVUS_ENGINE_SRC}/utils utils_files)
 
-aux_source_directory(${MILVUS_ENGINE_SRC}/wrapper wrapper_files)
+aux_source_directory(${MILVUS_ENGINE_SRC}/index/archive wrapper_files)
 
 aux_source_directory(${MILVUS_ENGINE_SRC}/tracing tracing_files)
 

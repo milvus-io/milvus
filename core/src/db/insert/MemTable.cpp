@@ -9,20 +9,18 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
-#include "db/insert/MemTable.h"
-
-#include <cache/CpuCacheMgr.h>
-#include <segment/SegmentReader.h>
-#include <wrapper/VecIndex.h>
-
 #include <algorithm>
 #include <chrono>
 #include <memory>
 #include <string>
 #include <unordered_map>
 
+#include "cache/CpuCacheMgr.h"
 #include "db/OngoingFileChecker.h"
 #include "db/Utils.h"
+#include "db/insert/MemTable.h"
+#include "knowhere/index/vector_index/VecIndex.h"
+#include "segment/SegmentReader.h"
 #include "utils/Log.h"
 
 namespace milvus {
@@ -244,11 +242,11 @@ MemTable::ApplyDeletes() {
         }
 
         // Get all index that contains blacklist in cache
-        std::vector<VecIndexPtr> indexes;
+        std::vector<knowhere::VecIndexPtr> indexes;
         std::vector<faiss::ConcurrentBitsetPtr> blacklists;
         for (auto& file : segment_files) {
-            auto index =
-                std::static_pointer_cast<VecIndex>(cache::CpuCacheMgr::GetInstance()->GetIndex(file.location_));
+            auto data_obj_ptr = cache::CpuCacheMgr::GetInstance()->GetIndex(file.location_);
+            auto index = std::static_pointer_cast<knowhere::VecIndex>(data_obj_ptr);
             faiss::ConcurrentBitsetPtr blacklist = nullptr;
             if (index != nullptr) {
                 index->GetBlacklist(blacklist);

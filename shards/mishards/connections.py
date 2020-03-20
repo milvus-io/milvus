@@ -1,7 +1,10 @@
+import time
+import enum
+import json
 import logging
 import threading
-import enum
 from functools import wraps
+from collections import defaultdict
 from milvus import Milvus
 from milvus.client.hooks import BaseSearchHook
 
@@ -89,6 +92,26 @@ class Connection:
         return self.__str__()
 
 
+class Duration:
+    def __init__(self):
+        self.start_ts = time.time()
+        self.end_ts = None
+
+    def stop(self):
+        if self.end_ts:
+            return False
+
+        self.end_ts = time.time()
+        return True
+
+    @property
+    def value(self):
+        if not self.end_ts:
+            return None
+
+        return self.end_ts - self.start_ts
+
+
 class ProxyMixin:
     def __getattr__(self, name):
         target = self.__dict__.get(name, None)
@@ -101,6 +124,7 @@ class ScopedConnection(ProxyMixin):
     def __init__(self, pool, connection):
         self.pool = pool
         self.connection = connection
+        self.duration = Duration()
 
     def __del__(self):
         self.release()
@@ -112,6 +136,8 @@ class ScopedConnection(ProxyMixin):
         if not self.pool or not self.connection:
             return
         self.pool.release(self.connection)
+        self.duration.stop()
+        self.pool.record_duration(self.connection, self.duration)
         self.pool = None
         self.connection = None
 
@@ -127,6 +153,30 @@ class ConnectionPool(topology.TopoObject):
         self.max_retry = max_retry
         self.kwargs = kwargs
         self.cv = threading.Condition()
+        self.durations = defaultdict(list)
+
+    def record_duration(self, conn, duration):
+        if len(self.durations[conn]) >= 10000:
+            self.durations[conn].pop(0)
+
+        self.durations[conn].append(duration)
+
+    def stats(self):
+        out = {'connections': {}}
+        connections = out['connections']
+        take_time = []
+        for conn, durations in self.durations.items():
+            total_time = sum(d.value for d in durations)
+            connections[id(conn)] = {
+                'total_time': total_time,
+                'called_times': len(durations)
+            }
+            take_time.append(total_time)
+
+        out['max-time'] = max(take_time)
+        out['num'] = len(self.durations)
+        logger.debug(json.dumps(out, indent=2))
+        return out
 
     def __len__(self):
         return len(self.pending_pool) + len(self.active_pool)
@@ -152,7 +202,7 @@ class ConnectionPool(topology.TopoObject):
             if timeout_times >= 1:
                 return connection
 
-            # logger.debug('[Connection] Pool \"{}\" SIZE={} ACTIVE={}'.format(self.name, len(self), self.active_num))
+            # logger.error('[Connection] Pool \"{}\" SIZE={} ACTIVE={}'.format(self.name, len(self), self.active_num))
             if len(self.pending_pool) == 0:
                 connection = self.create()
             else:
@@ -179,6 +229,13 @@ class ConnectionPool(topology.TopoObject):
 class ConnectionGroup(topology.TopoGroup):
     def __init__(self, name):
         super().__init__(name)
+
+    def stats(self):
+        out = {}
+        for name, item in self.items.items():
+            out[name] = item.stats()
+
+        return out
 
     def on_pre_add(self, topo_object):
         conn = topo_object.fetch()
@@ -208,6 +265,13 @@ class ConnectionGroup(topology.TopoGroup):
 class ConnectionTopology(topology.Topology):
     def __init__(self):
         super().__init__()
+
+    def stats(self):
+        out = {}
+        for name, group in self.topo_groups.items():
+            out[name] = group.stats()
+
+        return out
 
     def create(self, name):
         group = ConnectionGroup(name)

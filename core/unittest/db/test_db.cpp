@@ -348,7 +348,6 @@ TEST_F(DBTest, SEARCH_TEST) {
         ASSERT_TRUE(stat.ok());
     }
 
-#ifdef CUSTOMIZATION
 #ifdef MILVUS_GPU_VERSION
     index.engine_type_ = (int)milvus::engine::EngineType::FAISS_IVFSQ8H;
     db_->CreateIndex(TABLE_NAME, index);  // wait until build index finish
@@ -361,7 +360,6 @@ TEST_F(DBTest, SEARCH_TEST) {
         ASSERT_TRUE(stat.ok());
     }
 #endif
-#endif
 
     {  // search by specify index file
         std::vector<std::string> file_ids;
@@ -373,24 +371,18 @@ TEST_F(DBTest, SEARCH_TEST) {
         }
         milvus::engine::ResultIds result_ids;
         milvus::engine::ResultDistances result_distances;
-        stat = db_->QueryByFileID(dummy_context_, TABLE_NAME, file_ids, k,
+        stat = db_->QueryByFileID(dummy_context_, file_ids, k,
                                   json_params,
                                   xq,
                                   result_ids,
                                   result_distances);
         ASSERT_TRUE(stat.ok());
 
-        FIU_ENABLE_FIU("SqliteMetaImpl.FilesToSearch.throw_exception");
-        stat =
-            db_->QueryByFileID(dummy_context_, TABLE_NAME, file_ids, k, json_params, xq, result_ids, result_distances);
-        ASSERT_FALSE(stat.ok());
-        fiu_disable("SqliteMetaImpl.FilesToSearch.throw_exception");
-
-        FIU_ENABLE_FIU("DBImpl.QueryByFileID.empty_files_array");
-        stat =
-            db_->QueryByFileID(dummy_context_, TABLE_NAME, file_ids, k, json_params, xq, result_ids, result_distances);
-        ASSERT_FALSE(stat.ok());
-        fiu_disable("DBImpl.QueryByFileID.empty_files_array");
+//        FIU_ENABLE_FIU("DBImpl.QueryByFileID.empty_files_array");
+//        stat =
+//            db_->QueryByFileID(dummy_context_, file_ids, k, json_params, xq, result_ids, result_distances);
+//        ASSERT_FALSE(stat.ok());
+//        fiu_disable("DBImpl.QueryByFileID.empty_files_array");
     }
 
     // TODO(zhiru): PQ build takes forever
@@ -411,7 +403,6 @@ TEST_F(DBTest, SEARCH_TEST) {
     }
 #endif
 
-#ifdef CUSTOMIZATION
 #ifdef MILVUS_GPU_VERSION
     // test FAISS_IVFSQ8H optimizer
     index.engine_type_ = (int)milvus::engine::EngineType::FAISS_IVFSQ8H;
@@ -437,10 +428,9 @@ TEST_F(DBTest, SEARCH_TEST) {
         }
         result_ids.clear();
         result_dists.clear();
-        stat = db_->QueryByFileID(dummy_context_, TABLE_NAME, file_ids, k, json_params, xq, result_ids, result_dists);
+        stat = db_->QueryByFileID(dummy_context_, file_ids, k, json_params, xq, result_ids, result_dists);
         ASSERT_TRUE(stat.ok());
     }
-#endif
 #endif
 }
 
@@ -583,7 +573,6 @@ TEST_F(DBTest, SHUTDOWN_TEST) {
     ASSERT_FALSE(stat.ok());
     std::vector<std::string> file_ids;
     stat = db_->QueryByFileID(dummy_context_,
-                              table_info.table_id_,
                               file_ids,
                               1,
                               json_params,
@@ -747,12 +736,10 @@ TEST_F(DBTest, INDEX_TEST) {
     ASSERT_FALSE(stat.ok());
     fiu_disable("DBImpl.UpdateTableIndexRecursively.fail_update_table_index");
 
-#ifdef CUSTOMIZATION
 #ifdef MILVUS_GPU_VERSION
     index.engine_type_ = (int)milvus::engine::EngineType::FAISS_IVFSQ8H;
     stat = db_->CreateIndex(table_info.table_id_, index);
     ASSERT_TRUE(stat.ok());
-#endif
 #endif
 
     milvus::engine::TableIndex index_out;

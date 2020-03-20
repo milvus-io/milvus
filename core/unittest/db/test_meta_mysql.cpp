@@ -250,6 +250,13 @@ TEST_F(MySqlMetaTest, TABLE_FILE_TEST) {
     ASSERT_TRUE(status.ok());
 
     table_file.table_id_ = table.table_id_;
+    table_file.file_type_ = milvus::engine::meta::TableFileSchema::RAW;
+    status = impl_->CreateTableFile(table_file);
+    ids = {table_file.id_};
+    status = impl_->FilesByID(ids, files);
+    ASSERT_EQ(files.size(), 1UL);
+
+    table_file.table_id_ = table.table_id_;
     table_file.file_type_ = milvus::engine::meta::TableFileSchema::TO_DELETE;
     status = impl_->CreateTableFile(table_file);
 
@@ -641,26 +648,25 @@ TEST_F(MySqlMetaTest, TABLE_FILES_TEST) {
     fiu_disable("MySQLMetaImpl.FilesToIndex.throw_exception");
 
     table_files.clear();
-    std::vector<size_t> ids;
-    status = impl_->FilesToSearch(table_id, ids, table_files);
+    status = impl_->FilesToSearch(table_id, table_files);
     ASSERT_EQ(table_files.size(), to_index_files_cnt + raw_files_cnt + index_files_cnt);
 
     table_files.clear();
-    ids.push_back(size_t(9999999999));
-    status = impl_->FilesToSearch(table_id, ids, table_files);
+    std::vector<size_t> ids = {9999999999UL};
+    status = impl_->FilesByID(ids, table_files);
     ASSERT_EQ(table_files.size(), 0);
 
     FIU_ENABLE_FIU("MySQLMetaImpl.FilesToSearch.null_connection");
-    status = impl_->FilesToSearch(table_id, ids, table_files);
+    status = impl_->FilesToSearch(table_id, table_files);
     ASSERT_FALSE(status.ok());
     fiu_disable("MySQLMetaImpl.FilesToSearch.null_connection");
 
     FIU_ENABLE_FIU("MySQLMetaImpl.FilesToSearch.throw_exception");
-    status = impl_->FilesToSearch(table_id, ids, table_files);
+    status = impl_->FilesToSearch(table_id, table_files);
     ASSERT_FALSE(status.ok());
     fiu_disable("MySQLMetaImpl.FilesToSearch.throw_exception");
 
-    status = impl_->FilesToSearch("notexist", ids, table_files);
+    status = impl_->FilesToSearch("notexist", table_files);
     ASSERT_EQ(status.code(), milvus::DB_NOT_FOUND);
 
     table_files.clear();

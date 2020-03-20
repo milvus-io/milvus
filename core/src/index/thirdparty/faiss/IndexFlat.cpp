@@ -65,7 +65,8 @@ void IndexFlat::search(idx_t n, const float* x, idx_t k, float* distances, idx_t
 }
 
 void IndexFlat::range_search (idx_t n, const float *x, float radius,
-                              RangeSearchResult *result) const
+                              RangeSearchResult *result,
+                              ConcurrentBitsetPtr bitset) const
 {
     switch (metric_type) {
     case METRIC_INNER_PRODUCT:

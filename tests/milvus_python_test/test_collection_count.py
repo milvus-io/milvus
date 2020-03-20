@@ -485,7 +485,7 @@ class TestCollectionCountJAC:
             assert status.OK()
             assert res == nq
 
-class TestCollectionCountHAM:
+class TestCollectionCountBinary:
     """
     params means different nb, the nb value may trigger merge, or not
     """
@@ -516,6 +516,28 @@ class TestCollectionCountHAM:
         else:
             pytest.skip("Skip index Temporary")
 
+    @pytest.fixture(
+        scope="function",
+        params=gen_simple_index()
+    )
+    def get_substructure_index(self, request, connect):
+        logging.getLogger().info(request.param)
+        if request.param["index_type"] == IndexType.FLAT:
+            return request.param
+        else:
+            pytest.skip("Skip index Temporary")
+
+    @pytest.fixture(
+        scope="function",
+        params=gen_simple_index()
+    )
+    def get_superstructure_index(self, request, connect):
+        logging.getLogger().info(request.param)
+        if request.param["index_type"] == IndexType.FLAT:
+            return request.param
+        else:
+            pytest.skip("Skip index Temporary")
+
     def test_collection_rows_count(self, connect, ham_collection, add_vectors_nb):
         '''
         target: test collection rows_count is correct or not
@@ -528,6 +550,34 @@ class TestCollectionCountHAM:
         res = connect.add_vectors(collection_name=ham_collection, records=vectors)
         connect.flush([ham_collection])
         status, res = connect.count_collection(ham_collection)
+        assert res == nb
+
+    def test_collection_rows_count_substructure(self, connect, substructure_collection, add_vectors_nb):
+        '''
+        target: test collection rows_count is correct or not
+        method: create collection and add vectors in it,
+            assert the value returned by count_collection method is equal to length of vectors
+        expected: the count is equal to the length of vectors
+        '''
+        nb = add_vectors_nb
+        tmp, vectors = gen_binary_vectors(nb, dim)
+        res = connect.add_vectors(collection_name=substructure_collection, records=vectors)
+        connect.flush([substructure_collection])
+        status, res = connect.count_collection(substructure_collection)
+        assert res == nb
+
+    def test_collection_rows_count_superstructure(self, connect, superstructure_collection, add_vectors_nb):
+        '''
+        target: test collection rows_count is correct or not
+        method: create collection and add vectors in it,
+            assert the value returned by count_collection method is equal to length of vectors
+        expected: the count is equal to the length of vectors
+        '''
+        nb = add_vectors_nb
+        tmp, vectors = gen_binary_vectors(nb, dim)
+        res = connect.add_vectors(collection_name=superstructure_collection, records=vectors)
+        connect.flush([superstructure_collection])
+        status, res = connect.count_collection(superstructure_collection)
         assert res == nb
 
     def test_collection_rows_count_after_index_created(self, connect, ham_collection, get_hamming_index):
@@ -544,6 +594,38 @@ class TestCollectionCountHAM:
         connect.flush([ham_collection])
         connect.create_index(ham_collection, index_type, index_param)
         status, res = connect.count_collection(ham_collection)
+        assert res == nb
+
+    def test_collection_rows_count_after_index_created_substructure(self, connect, substructure_collection, get_substructure_index):
+        '''
+        target: test count_collection, after index have been created
+        method: add vectors in db, and create index, then calling count_collection with correct params
+        expected: count_collection raise exception
+        '''
+        nb = 100
+        index_type = get_substructure_index["index_type"]
+        index_param = get_substructure_index["index_param"]
+        tmp, vectors = gen_binary_vectors(nb, dim)
+        res = connect.add_vectors(collection_name=substructure_collection, records=vectors)
+        connect.flush([substructure_collection])
+        connect.create_index(substructure_collection, index_type, index_param)
+        status, res = connect.count_collection(substructure_collection)
+        assert res == nb
+
+    def test_collection_rows_count_after_index_created_superstructure(self, connect, superstructure_collection, get_superstructure_index):
+        '''
+        target: test count_collection, after index have been created
+        method: add vectors in db, and create index, then calling count_collection with correct params
+        expected: count_collection raise exception
+        '''
+        nb = 100
+        index_type = get_superstructure_index["index_type"]
+        index_param = get_superstructure_index["index_param"]
+        tmp, vectors = gen_binary_vectors(nb, dim)
+        res = connect.add_vectors(collection_name=superstructure_collection, records=vectors)
+        connect.flush([superstructure_collection])
+        connect.create_index(superstructure_collection, index_type, index_param)
+        status, res = connect.count_collection(superstructure_collection)
         assert res == nb
 
     @pytest.mark.level(2)
