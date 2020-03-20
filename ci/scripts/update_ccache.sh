@@ -72,7 +72,6 @@ fi
 
 function check_ccache() {
     BRANCH=$1
-    echo "fetching ${BRANCH}/${PACKAGE_FILE}"
     wget -q --spider "${ARTIFACTORY_URL}/${BRANCH}/${PACKAGE_FILE}"
     return $?
 }
