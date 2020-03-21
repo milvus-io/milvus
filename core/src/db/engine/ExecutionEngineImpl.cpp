@@ -418,7 +418,7 @@ ExecutionEngineImpl::Load(bool to_cache) {
             if (index_type_ == EngineType::FAISS_IDMAP) {
                 auto bf_index = std::static_pointer_cast<knowhere::IDMAP>(index_);
                 std::vector<float> float_vectors;
-                float_vectors.resize(12800);
+                float_vectors.resize(vectors_data.size() / sizeof(float));
                 memcpy(float_vectors.data(), vectors_data.data(), vectors_data.size());
                 bf_index->Train(knowhere::DatasetPtr(), conf);
                 auto dataset = knowhere::GenDataset(vectors->GetCount(), this->dim_, float_vectors.data());
