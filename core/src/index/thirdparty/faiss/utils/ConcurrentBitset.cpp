@@ -19,7 +19,8 @@
 
 namespace faiss {
 
-ConcurrentBitset::ConcurrentBitset(id_type_t size) : size_(size), bitset_((size + 7) >> 3) {
+ConcurrentBitset::ConcurrentBitset(id_type_t capacity)
+    : capacity_(capacity), bitset_((capacity + sizeof(uint8_t) - 1) >> 3) {
 }
 
 bool
@@ -37,14 +38,19 @@ ConcurrentBitset::clear(id_type_t id) {
     bitset_[id >> 3].fetch_and(~(0x1 << (id & 0x7)));
 }
 
-ConcurrentBitset::id_type_t
-ConcurrentBitset::size() {
-    return size_;
+size_t
+ConcurrentBitset::capacity() {
+    return capacity_;
 }
 
-const unsigned char*
+size_t
+ConcurrentBitset::size() {
+    return bitset_.size();
+}
+
+const uint8_t*
 ConcurrentBitset::bitset() {
-    return reinterpret_cast<const unsigned char*>(bitset_.data());
+    return reinterpret_cast<const uint8_t*>(bitset_.data());
 }
 
 }  // namespace faiss

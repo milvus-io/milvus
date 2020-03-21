@@ -27,19 +27,6 @@ class Index : public milvus::cache::DataObj {
 
     virtual void
     Load(const BinarySet&) = 0;
-
-    int64_t
-    Size() override {
-        return size_;
-    }
-
-    void
-    set_size(const int64_t& size) {
-        size_ = size;
-    }
-
- protected:
-    int64_t size_ = -1;
 };
 
 using IndexPtr = std::shared_ptr<Index>;

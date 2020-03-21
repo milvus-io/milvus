@@ -41,7 +41,7 @@ LoadVecIndex(const knowhere::IndexType& type, const knowhere::BinarySet& index_b
         return nullptr;
     // else
     index->Load(index_binary);
-    index->set_size(size);
+    index->SetIndexSize(size);
     return index;
 }
 
