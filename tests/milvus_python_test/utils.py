@@ -76,7 +76,7 @@ def gen_binary_sub_vectors(vectors, length):
         vector = vectors[i]
         for index, j in enumerate(vector):
             if j == 1:
-                raw_vector[j] = 1
+                raw_vector[index] = 1
         raw_vectors.append(raw_vector)
         binary_vectors.append(bytes(np.packbits(raw_vector, axis=-1).tolist()))
     return raw_vectors, binary_vectors
