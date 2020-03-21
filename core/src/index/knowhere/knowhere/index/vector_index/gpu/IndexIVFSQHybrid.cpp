@@ -26,7 +26,7 @@
 namespace milvus {
 namespace knowhere {
 
-#ifdef CUSTOMIZATION
+#ifdef MILVUS_GPU_VERSION
 
 void
 IVFSQHybrid::Train(const DatasetPtr& dataset_ptr, const Config& config) {
