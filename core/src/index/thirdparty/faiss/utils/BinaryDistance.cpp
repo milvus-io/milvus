@@ -172,7 +172,7 @@ void binary_distence_knn_mc(
         size_t n1,
         size_t n2,
         size_t k,
-        int32_t *distances,
+        float *distances,
         int64_t *labels,
         ConcurrentBitsetPtr bitset)
 {
@@ -211,7 +211,7 @@ void binary_distence_knn_mc(
         }
         for (size_t i = 0, ni = 0; i < n1; i++) {
             size_t n_i = 0;
-            int32_t *distances_i = distances + i * k;
+            float *distances_i = distances + i * k;
             int64_t *labels_i = labels + i * k;
 
             for (size_t t = 0; t < thread_max_num && n_i < k; t++) {
@@ -222,7 +222,7 @@ void binary_distence_knn_mc(
                 n_i += copy_num;
             }
             for (; n_i < k; n_i++) {
-                distances_i[n_i] = 1;
+                distances_i[n_i] = 1.0 / 0.0;
                 labels_i[n_i] = -1;
             }
         }
@@ -244,7 +244,7 @@ void binary_distence_knn_mc(
             for (size_t i = 0; i < n1; i++) {
                 size_t num_i = num[i];
                 if (num_i == k) continue;
-                int32_t * dis = distances + i * k;
+                float * dis = distances + i * k;
                 int64_t * lab = labels + i * k;
 
                 T hc (bs1 + i * bytes_per_code, bytes_per_code);
@@ -263,10 +263,10 @@ void binary_distence_knn_mc(
         }
 
         for (size_t i = 0; i < n1; i++) {
-            int32_t * dis = distances + i * k;
+            float * dis = distances + i * k;
             int64_t * lab = labels + i * k;
             for (size_t num_i = num[i]; num_i < k; num_i++) {
-                dis[num_i] = 1;
+                dis[num_i] = 1.0 / 0.0;
                 lab[num_i] = -1;
             }
         }
@@ -283,7 +283,7 @@ void binary_distence_knn_mc (
         size_t nb,
         size_t k,
         size_t ncodes,
-        int32_t *distances,
+        float *distances,
         int64_t *labels,
         ConcurrentBitsetPtr bitset) {
 

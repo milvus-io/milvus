@@ -49,7 +49,7 @@ namespace faiss {
             size_t nb,
             size_t k,
             size_t ncodes,
-            int32_t *distances,
+            float *distances,
             int64_t *labels,
             ConcurrentBitsetPtr bitset);
 

@@ -65,6 +65,7 @@ void IndexBinaryFlat::search(idx_t n, const uint8_t *x, idx_t k,
         }
 
     } else if (metric_type == METRIC_Substructure || metric_type == METRIC_Superstructure) {
+        float *D = reinterpret_cast<float*>(distances);
         for (idx_t s = 0; s < n; s += block_size) {
             idx_t nn = block_size;
             if (s + block_size > n) {
@@ -73,7 +74,7 @@ void IndexBinaryFlat::search(idx_t n, const uint8_t *x, idx_t k,
 
             // only match ids will be chosed, not to use heap
             binary_distence_knn_mc(metric_type, x + s * code_size, xb.data(), nn, ntotal, k, code_size,
-                    distances + s * k, labels + s * k, bitset);
+                    D + s * k, labels + s * k, bitset);
         }
 
     } else {
