@@ -115,7 +115,7 @@ Scheduler::OnLoadCompleted(const EventPtr& event) {
         }
         default: { break; }
     }
-    // resource->WakeupLoader();
+    resource->WakeupLoader();
 }
 
 void
@@ -125,7 +125,7 @@ Scheduler::OnStartUp(const EventPtr& event) {
 
 void
 Scheduler::OnFinishTask(const EventPtr& event) {
-    // event->resource_->WakeupLoader();
+    event->resource_->WakeupLoader();
 }
 
 void
