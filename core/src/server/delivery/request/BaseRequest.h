@@ -31,10 +31,6 @@
 namespace milvus {
 namespace server {
 
-static const char* DQL_REQUEST_GROUP = "dql";
-static const char* DDL_DML_REQUEST_GROUP = "ddl_dml";
-static const char* INFO_REQUEST_GROUP = "info";
-
 struct TableSchema {
     std::string table_name_;
     int64_t dimension_;
@@ -117,8 +113,46 @@ struct TableInfo {
 };
 
 class BaseRequest {
+ public:
+    enum RequestType {
+        // general operations
+        kCmd = 100,
+
+        // data operations
+        kInsert = 200,
+        kCompact,
+        kFlush,
+        kDeleteByID,
+        kGetVectorByID,
+        kGetVectorIDs,
+
+        // table operations
+        kShowTables = 300,
+        kCreateTable,
+        kHasTable,
+        kDescribeTable,
+        kCountTable,
+        kShowTableInfo,
+        kDropTable,
+        kPreloadTable,
+
+        // partition operations
+        kCreatePartition = 400,
+        kShowPartitions,
+        kDropPartition,
+
+        // index operations
+        kCreateIndex = 500,
+        kDescribeIndex,
+        kDropIndex,
+
+        // search operations
+        kSearchByID = 600,
+        kSearch,
+    };
+
  protected:
-    BaseRequest(const std::shared_ptr<Context>& context, const std::string& request_group, bool async = false);
+    BaseRequest(const std::shared_ptr<Context>& context, BaseRequest::RequestType type, bool async = false);
 
     virtual ~BaseRequest();
 
@@ -131,6 +165,11 @@ class BaseRequest {
 
     Status
     WaitToFinish();
+
+    RequestType
+    GetRequestType() const {
+        return type_;
+    }
 
     std::string
     RequestGroup() const {
@@ -163,6 +202,7 @@ class BaseRequest {
     mutable std::mutex finish_mtx_;
     std::condition_variable finish_cond_;
 
+    RequestType type_;
     std::string request_group_;
     bool async_;
     bool done_;

@@ -23,7 +23,7 @@ namespace server {
 
 HasTableRequest::HasTableRequest(const std::shared_ptr<Context>& context, const std::string& table_name,
                                  bool& has_table)
-    : BaseRequest(context, INFO_REQUEST_GROUP), table_name_(table_name), has_table_(has_table) {
+    : BaseRequest(context, BaseRequest::kHasTable), table_name_(table_name), has_table_(has_table) {
 }
 
 BaseRequestPtr

@@ -29,7 +29,7 @@ namespace server {
 
 GetVectorByIDRequest::GetVectorByIDRequest(const std::shared_ptr<Context>& context, const std::string& table_name,
                                            const std::vector<int64_t>& ids, engine::VectorsData& vectors)
-    : BaseRequest(context, INFO_REQUEST_GROUP), table_name_(table_name), ids_(ids), vectors_(vectors) {
+    : BaseRequest(context, BaseRequest::kGetVectorByID), table_name_(table_name), ids_(ids), vectors_(vectors) {
 }
 
 BaseRequestPtr

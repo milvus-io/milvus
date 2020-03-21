@@ -23,7 +23,7 @@ namespace server {
 
 DescribeTableRequest::DescribeTableRequest(const std::shared_ptr<Context>& context, const std::string& table_name,
                                            TableSchema& schema)
-    : BaseRequest(context, INFO_REQUEST_GROUP), table_name_(table_name), schema_(schema) {
+    : BaseRequest(context, BaseRequest::kDescribeTable), table_name_(table_name), schema_(schema) {
 }
 
 BaseRequestPtr

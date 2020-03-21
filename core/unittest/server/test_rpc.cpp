@@ -709,13 +709,14 @@ class DummyRequest : public milvus::server::BaseRequest {
     }
 
     static milvus::server::BaseRequestPtr
-    Create(std::string& dummy) {
-        return std::shared_ptr<milvus::server::BaseRequest>(new DummyRequest(dummy));
+    Create() {
+        return std::shared_ptr<milvus::server::BaseRequest>(new DummyRequest());
     }
 
  public:
-    explicit DummyRequest(std::string& dummy)
-        : BaseRequest(std::make_shared<milvus::server::Context>("dummy_request_id"), dummy) {
+    explicit DummyRequest()
+        : BaseRequest(std::make_shared<milvus::server::Context>("dummy_request_id"),
+                      milvus::server::BaseRequest::kCmd) {
     }
 };
 
@@ -723,8 +724,7 @@ class RpcSchedulerTest : public testing::Test {
  protected:
     void
     SetUp() override {
-        std::string dummy = "dql";
-        request_ptr = std::make_shared<DummyRequest>(dummy);
+        request_ptr = std::make_shared<DummyRequest>();
     }
 
     std::shared_ptr<DummyRequest> request_ptr;
@@ -738,8 +738,8 @@ class AsyncDummyRequest : public milvus::server::BaseRequest {
     }
 
     static milvus::server::BaseRequestPtr
-    Create(std::string& dummy) {
-        return std::shared_ptr<milvus::server::BaseRequest>(new DummyRequest(dummy));
+    Create() {
+        return std::shared_ptr<milvus::server::BaseRequest>(new DummyRequest());
     }
 
     void TestSetStatus() {
@@ -747,8 +747,10 @@ class AsyncDummyRequest : public milvus::server::BaseRequest {
     }
 
  public:
-    explicit AsyncDummyRequest(std::string& dummy)
-        : BaseRequest(std::make_shared<milvus::server::Context>("dummy_request_id2"), dummy, true) {
+    explicit AsyncDummyRequest()
+        : BaseRequest(std::make_shared<milvus::server::Context>("dummy_request_id2"),
+                      milvus::server::BaseRequest::kCmd,
+                      true) {
     }
 };
 }  // namespace
@@ -761,8 +763,7 @@ TEST_F(RpcSchedulerTest, BASE_TASK_TEST) {
 //    milvus::server::RequestScheduler::GetInstance().Stop();
 //    milvus::server::RequestScheduler::GetInstance().Start();
 
-    std::string dummy = "dql";
-    milvus::server::BaseRequestPtr base_task_ptr = DummyRequest::Create(dummy);
+    milvus::server::BaseRequestPtr base_task_ptr = DummyRequest::Create();
     milvus::server::RequestScheduler::ExecRequest(base_task_ptr);
 
     milvus::server::RequestScheduler::GetInstance().ExecuteRequest(request_ptr);
@@ -778,20 +779,17 @@ TEST_F(RpcSchedulerTest, BASE_TASK_TEST) {
 //    milvus::server::RequestScheduler::GetInstance().ExecuteRequest(base_task_ptr2);
 //    fiu_disable("RequestScheduler.PutToQueue.null_queue");
 
-    std::string dummy3 = "dql3";
-    milvus::server::BaseRequestPtr base_task_ptr3 = DummyRequest::Create(dummy3);
+    milvus::server::BaseRequestPtr base_task_ptr3 = DummyRequest::Create();
     fiu_enable("RequestScheduler.TakeToExecute.throw_std_exception", 1, NULL, 0);
     milvus::server::RequestScheduler::GetInstance().ExecuteRequest(base_task_ptr3);
     fiu_disable("RequestScheduler.TakeToExecute.throw_std_exception");
 
-    std::string dummy4 = "dql4";
-    milvus::server::BaseRequestPtr base_task_ptr4 = DummyRequest::Create(dummy4);
+    milvus::server::BaseRequestPtr base_task_ptr4 = DummyRequest::Create();
     fiu_enable("RequestScheduler.TakeToExecute.execute_fail", 1, NULL, 0);
     milvus::server::RequestScheduler::GetInstance().ExecuteRequest(base_task_ptr4);
     fiu_disable("RequestScheduler.TakeToExecute.execute_fail");
 
-    std::string dummy5 = "dql5";
-    milvus::server::BaseRequestPtr base_task_ptr5 = DummyRequest::Create(dummy5);
+    milvus::server::BaseRequestPtr base_task_ptr5 = DummyRequest::Create();
     fiu_enable("RequestScheduler.PutToQueue.push_null_thread", 1, NULL, 0);
     milvus::server::RequestScheduler::GetInstance().ExecuteRequest(base_task_ptr5);
     fiu_disable("RequestScheduler.PutToQueue.push_null_thread");
@@ -802,8 +800,7 @@ TEST_F(RpcSchedulerTest, BASE_TASK_TEST) {
     milvus::server::BaseRequestPtr null_ptr = nullptr;
     milvus::server::RequestScheduler::ExecRequest(null_ptr);
 
-    std::string async_dummy = "AsyncDummyRequest";
-    auto async_ptr = std::make_shared<AsyncDummyRequest>(async_dummy);
+    auto async_ptr = std::make_shared<AsyncDummyRequest>();
     auto base_ptr = std::static_pointer_cast<milvus::server::BaseRequest>(async_ptr);
     milvus::server::RequestScheduler::ExecRequest(base_ptr);
     async_ptr->TestSetStatus();

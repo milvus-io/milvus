@@ -22,7 +22,7 @@ namespace milvus {
 namespace server {
 
 PreloadTableRequest::PreloadTableRequest(const std::shared_ptr<Context>& context, const std::string& table_name)
-    : BaseRequest(context, DQL_REQUEST_GROUP), table_name_(table_name) {
+    : BaseRequest(context, BaseRequest::kPreloadTable), table_name_(table_name) {
 }
 
 BaseRequestPtr

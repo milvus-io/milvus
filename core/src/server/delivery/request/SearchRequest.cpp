@@ -30,7 +30,7 @@ SearchRequest::SearchRequest(const std::shared_ptr<Context>& context, const std:
                              const engine::VectorsData& vectors, int64_t topk, const milvus::json& extra_params,
                              const std::vector<std::string>& partition_list,
                              const std::vector<std::string>& file_id_list, TopKQueryResult& result)
-    : BaseRequest(context, DQL_REQUEST_GROUP),
+    : BaseRequest(context, BaseRequest::kSearch),
       table_name_(table_name),
       vectors_data_(vectors),
       topk_(topk),

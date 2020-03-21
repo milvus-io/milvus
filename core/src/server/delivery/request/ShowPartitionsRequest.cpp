@@ -24,7 +24,7 @@ namespace server {
 
 ShowPartitionsRequest::ShowPartitionsRequest(const std::shared_ptr<Context>& context, const std::string& table_name,
                                              std::vector<PartitionParam>& partition_list)
-    : BaseRequest(context, INFO_REQUEST_GROUP), table_name_(table_name), partition_list_(partition_list) {
+    : BaseRequest(context, BaseRequest::kShowPartitions), table_name_(table_name), partition_list_(partition_list) {
 }
 
 BaseRequestPtr

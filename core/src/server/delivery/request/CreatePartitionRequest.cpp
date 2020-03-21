@@ -24,7 +24,7 @@ namespace server {
 
 CreatePartitionRequest::CreatePartitionRequest(const std::shared_ptr<Context>& context, const std::string& table_name,
                                                const std::string& tag)
-    : BaseRequest(context, DDL_DML_REQUEST_GROUP), table_name_(table_name), tag_(tag) {
+    : BaseRequest(context, BaseRequest::kCreatePartition), table_name_(table_name), tag_(tag) {
 }
 
 BaseRequestPtr

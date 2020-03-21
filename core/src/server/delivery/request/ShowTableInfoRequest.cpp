@@ -45,7 +45,7 @@ ConstructPartitionStat(const engine::PartitionStat& partition_stat, PartitionSta
 
 ShowTableInfoRequest::ShowTableInfoRequest(const std::shared_ptr<Context>& context, const std::string& table_name,
                                            TableInfo& table_info)
-    : BaseRequest(context, INFO_REQUEST_GROUP), table_name_(table_name), table_info_(table_info) {
+    : BaseRequest(context, BaseRequest::kShowTableInfo), table_name_(table_name), table_info_(table_info) {
 }
 
 BaseRequestPtr

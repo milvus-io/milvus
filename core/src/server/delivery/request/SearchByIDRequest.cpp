@@ -36,7 +36,7 @@ namespace server {
 SearchByIDRequest::SearchByIDRequest(const std::shared_ptr<Context>& context, const std::string& table_name,
                                      int64_t vector_id, int64_t topk, const milvus::json& extra_params,
                                      const std::vector<std::string>& partition_list, TopKQueryResult& result)
-    : BaseRequest(context, DQL_REQUEST_GROUP),
+    : BaseRequest(context, BaseRequest::kSearchByID),
       table_name_(table_name),
       vector_id_(vector_id),
       topk_(topk),
