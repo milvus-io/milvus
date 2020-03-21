@@ -634,7 +634,6 @@ TEST_F(MetaTest, TABLE_FILES_TEST) {
     ASSERT_EQ(table_files.size(), cnt);
 
     table_files.clear();
-
     ids = {9999999999UL};
     status = impl_->FilesByID(ids, table_files);
     ASSERT_EQ(table_files.size(), 0);
