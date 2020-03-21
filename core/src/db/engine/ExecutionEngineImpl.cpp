@@ -546,14 +546,11 @@ ExecutionEngineImpl::CopyToGpu(uint64_t device_id, bool hybrid) {
         try {
             index_ = knowhere::cloner::CopyCpuToGpu(index_, device_id, knowhere::Config());
             ENGINE_LOG_DEBUG << "CPU to GPU" << device_id;
+            GpuCache(device_id);
         } catch (std::exception& e) {
             ENGINE_LOG_ERROR << e.what();
             return Status(DB_ERROR, e.what());
         }
-    }
-
-    if (!already_in_cache) {
-        GpuCache(device_id);
     }
 #endif
 

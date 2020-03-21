@@ -40,15 +40,18 @@ VecIndexPtr
 CopyCpuToGpu(const VecIndexPtr& index, const int64_t device_id, const Config& config) {
     VecIndexPtr result;
     auto uids = index->GetUids();
+    int64_t index_size = index->IndexSize();
     if (auto device_index = std::dynamic_pointer_cast<IVFSQHybrid>(index)) {
         result = device_index->CopyCpuToGpu(device_id, config);
         result->SetUids(uids);
+        result->SetIndexSize(index_size);
         return result;
     }
 
     if (auto device_index = std::dynamic_pointer_cast<GPUIndex>(index)) {
         result = device_index->CopyGpuToGpu(device_id, config);
         result->SetUids(uids);
+        result->SetIndexSize(index_size);
         return result;
     }
 
@@ -65,6 +68,7 @@ CopyCpuToGpu(const VecIndexPtr& index, const int64_t device_id, const Config& co
     }
 
     result->SetUids(uids);
+    result->SetIndexSize(index_size);
     return result;
 }
 
