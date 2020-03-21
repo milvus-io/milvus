@@ -101,7 +101,7 @@ class VecIndex : public Index {
 
     size_t
     BlacklistSize() {
-        return bitset_->size();
+        return bitset_->size() * sizeof(uint8_t);
     }
 
     size_t

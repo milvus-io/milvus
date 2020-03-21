@@ -19,8 +19,7 @@
 
 namespace faiss {
 
-ConcurrentBitset::ConcurrentBitset(id_type_t capacity)
-    : capacity_(capacity), bitset_((capacity + sizeof(uint8_t) - 1) >> 3) {
+ConcurrentBitset::ConcurrentBitset(id_type_t capacity) : capacity_(capacity), bitset_((capacity + 8 - 1) >> 3) {
 }
 
 bool
