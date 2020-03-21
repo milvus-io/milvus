@@ -675,7 +675,7 @@ class TestSearchBase:
         status, result = connect.search_vectors(substructure_collection, top_k, query_vecs, params=search_param)
         logging.getLogger().info(status)
         logging.getLogger().info(result)
-        assert abs(result[0][0].distance - min(distance_0, distance_1).astype(float)) <= epsilon
+        assert result[0] == -1
 
     def test_search_distance_superstructure_flat_index(self, connect, superstructure_collection):
         '''
@@ -701,7 +701,7 @@ class TestSearchBase:
         status, result = connect.search_vectors(superstructure_collection, top_k, query_vecs, params=search_param)
         logging.getLogger().info(status)
         logging.getLogger().info(result)
-        assert abs(result[0][0].distance - min(distance_0, distance_1).astype(float)) <= epsilon
+        assert result[0] == -1
 
     def test_search_distance_tanimoto_flat_index(self, connect, tanimoto_collection):
         '''
