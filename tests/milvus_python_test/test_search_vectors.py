@@ -677,6 +677,34 @@ class TestSearchBase:
         logging.getLogger().info(result)
         assert result[0][0].id == -1
 
+    def test_search_distance_substructure_flat_index_B(self, connect, substructure_collection):
+        '''
+        target: search ip_collection, and check the result: distance
+        method: compare the return distance value with value computed with SUB 
+        expected: the return distance equals to the computed value
+        '''
+        # from scipy.spatial import distance
+        top_k = 3
+        nprobe = 512
+        int_vectors, vectors, ids = self.init_binary_data(connect, substructure_collection, nb=2)
+        index_type = IndexType.FLAT
+        index_param = {
+            "nlist": 16384
+        }
+        connect.create_index(substructure_collection, index_type, index_param)
+        logging.getLogger().info(connect.describe_collection(substructure_collection))
+        logging.getLogger().info(connect.describe_index(substructure_collection))
+        query_int_vectors, query_vecs = gen_binary_sub_vectors(int_vectors, 2)
+        search_param = get_search_param(index_type)
+        status, result = connect.search_vectors(substructure_collection, top_k, query_vecs, params=search_param)
+        logging.getLogger().info(status)
+        logging.getLogger().info(result) 
+        assert result[0][0].id == ids[0]
+        assert result[0][0].distance <= epsilon
+        assert result[0][1].id == ids[1]
+        assert result[0][1].distance <= epsilon
+        assert result[0][2].id == -1
+
     def test_search_distance_superstructure_flat_index(self, connect, superstructure_collection):
         '''
         target: search ip_collection, and check the result: distance
@@ -702,6 +730,34 @@ class TestSearchBase:
         logging.getLogger().info(status)
         logging.getLogger().info(result)
         assert result[0][0].id == -1
+
+    def test_search_distance_superstructure_flat_index_B(self, connect, superstructure_collection):
+        '''
+        target: search ip_collection, and check the result: distance
+        method: compare the return distance value with value computed with SUPER
+        expected: the return distance equals to the computed value
+        '''
+        # from scipy.spatial import distance
+        top_k = 3
+        nprobe = 512
+        int_vectors, vectors, ids = self.init_binary_data(connect, superstructure_collection, nb=2)
+        index_type = IndexType.FLAT
+        index_param = {
+            "nlist": 16384
+        }
+        connect.create_index(superstructure_collection, index_type, index_param)
+        logging.getLogger().info(connect.describe_collection(superstructure_collection))
+        logging.getLogger().info(connect.describe_index(superstructure_collection))
+        query_int_vectors, query_vecs = gen_binary_super_vectors(int_vectors, 2)
+        search_param = get_search_param(index_type)
+        status, result = connect.search_vectors(superstructure_collection, top_k, query_vecs, params=search_param)
+        logging.getLogger().info(status)
+        logging.getLogger().info(result)
+        assert result[0][0].id == ids[0]
+        assert result[0][0].distance <= epsilon
+        assert result[0][1].id == ids[1]
+        assert result[0][1].distance <= epsilon
+        assert result[0][2].id == -1
 
     def test_search_distance_tanimoto_flat_index(self, connect, tanimoto_collection):
         '''
