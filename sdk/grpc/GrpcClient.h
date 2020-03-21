@@ -104,6 +104,13 @@ class GrpcClient {
     Status
     Disconnect();
 
+    /*******************************New Interface**********************************/
+    Status
+    CreateHybridCollection(milvus::grpc::Mapping& mapping);
+
+    Status
+    InsertEntities(milvus::grpc::HInsertParam& entities, milvus::grpc::HEntityIDs& ids);
+
  private:
     std::unique_ptr<grpc::MilvusService::Stub> stub_;
 };

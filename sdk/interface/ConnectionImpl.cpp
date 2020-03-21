@@ -190,4 +190,19 @@ ConnectionImpl::CompactCollection(const std::string& collection_name) {
     return client_proxy_->CompactCollection(collection_name);
 }
 
+/*******************************New Interface**********************************/
+
+Status
+ConnectionImpl::CreateHybridCollection(const HMapping& mapping) {
+    return client_proxy_->CreateHybridCollection(mapping);
+}
+
+Status
+ConnectionImpl::InsertEntity(const std::string& collection_name,
+             const std::string& partition_tag,
+             HEntity& entities,
+             std::vector<uint64_t>& id_array) {
+    return client_proxy_->InsertEntity(collection_name, partition_tag, entities, id_array);
+}
+
 }  // namespace milvus

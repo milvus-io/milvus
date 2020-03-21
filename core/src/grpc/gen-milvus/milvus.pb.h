@@ -4529,11 +4529,10 @@ class VectorFieldInfo :
   // accessors -------------------------------------------------------
 
   enum : int {
-    kExtraParamsFieldNumber = 3,
+    kExtraParamsFieldNumber = 2,
     kDimensionFieldNumber = 1,
-    kDistanceMetricFieldNumber = 2,
   };
-  // repeated .milvus.grpc.KeyValuePair extra_params = 3;
+  // repeated .milvus.grpc.KeyValuePair extra_params = 2;
   int extra_params_size() const;
   void clear_extra_params();
   ::milvus::grpc::KeyValuePair* mutable_extra_params(int index);
@@ -4549,11 +4548,6 @@ class VectorFieldInfo :
   ::PROTOBUF_NAMESPACE_ID::int64 dimension() const;
   void set_dimension(::PROTOBUF_NAMESPACE_ID::int64 value);
 
-  // int64 distance_metric = 2;
-  void clear_distance_metric();
-  ::PROTOBUF_NAMESPACE_ID::int64 distance_metric() const;
-  void set_distance_metric(::PROTOBUF_NAMESPACE_ID::int64 value);
-
   // @@protoc_insertion_point(class_scope:milvus.grpc.VectorFieldInfo)
  private:
   class _Internal;
@@ -4561,7 +4555,6 @@ class VectorFieldInfo :
   ::PROTOBUF_NAMESPACE_ID::internal::InternalMetadataWithArena _internal_metadata_;
   ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField< ::milvus::grpc::KeyValuePair > extra_params_;
   ::PROTOBUF_NAMESPACE_ID::int64 dimension_;
-  ::PROTOBUF_NAMESPACE_ID::int64 distance_metric_;
   mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
   friend struct ::TableStruct_milvus_2eproto;
 };
@@ -7676,23 +7669,12 @@ class HInsertParam :
   // accessors -------------------------------------------------------
 
   enum : int {
-    kEntitiesFieldNumber = 3,
     kEntityIdArrayFieldNumber = 4,
     kExtraParamsFieldNumber = 5,
     kCollectionNameFieldNumber = 1,
     kPartitionTagFieldNumber = 2,
+    kEntitiesFieldNumber = 3,
   };
-  // repeated .milvus.grpc.HEntity entities = 3;
-  int entities_size() const;
-  void clear_entities();
-  ::milvus::grpc::HEntity* mutable_entities(int index);
-  ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField< ::milvus::grpc::HEntity >*
-      mutable_entities();
-  const ::milvus::grpc::HEntity& entities(int index) const;
-  ::milvus::grpc::HEntity* add_entities();
-  const ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField< ::milvus::grpc::HEntity >&
-      entities() const;
-
   // repeated int64 entity_id_array = 4;
   int entity_id_array_size() const;
   void clear_entity_id_array();
@@ -7737,17 +7719,25 @@ class HInsertParam :
   std::string* release_partition_tag();
   void set_allocated_partition_tag(std::string* partition_tag);
 
+  // .milvus.grpc.HEntity entities = 3;
+  bool has_entities() const;
+  void clear_entities();
+  const ::milvus::grpc::HEntity& entities() const;
+  ::milvus::grpc::HEntity* release_entities();
+  ::milvus::grpc::HEntity* mutable_entities();
+  void set_allocated_entities(::milvus::grpc::HEntity* entities);
+
   // @@protoc_insertion_point(class_scope:milvus.grpc.HInsertParam)
  private:
   class _Internal;
 
   ::PROTOBUF_NAMESPACE_ID::internal::InternalMetadataWithArena _internal_metadata_;
-  ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField< ::milvus::grpc::HEntity > entities_;
   ::PROTOBUF_NAMESPACE_ID::RepeatedField< ::PROTOBUF_NAMESPACE_ID::int64 > entity_id_array_;
   mutable std::atomic<int> _entity_id_array_cached_byte_size_;
   ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField< ::milvus::grpc::KeyValuePair > extra_params_;
   ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr collection_name_;
   ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr partition_tag_;
+  ::milvus::grpc::HEntity* entities_;
   mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
   friend struct ::TableStruct_milvus_2eproto;
 };
@@ -11653,21 +11643,7 @@ inline void VectorFieldInfo::set_dimension(::PROTOBUF_NAMESPACE_ID::int64 value)
   // @@protoc_insertion_point(field_set:milvus.grpc.VectorFieldInfo.dimension)
 }
 
-// int64 distance_metric = 2;
-inline void VectorFieldInfo::clear_distance_metric() {
-  distance_metric_ = PROTOBUF_LONGLONG(0);
-}
-inline ::PROTOBUF_NAMESPACE_ID::int64 VectorFieldInfo::distance_metric() const {
-  // @@protoc_insertion_point(field_get:milvus.grpc.VectorFieldInfo.distance_metric)
-  return distance_metric_;
-}
-inline void VectorFieldInfo::set_distance_metric(::PROTOBUF_NAMESPACE_ID::int64 value) {
-  
-  distance_metric_ = value;
-  // @@protoc_insertion_point(field_set:milvus.grpc.VectorFieldInfo.distance_metric)
-}
-
-// repeated .milvus.grpc.KeyValuePair extra_params = 3;
+// repeated .milvus.grpc.KeyValuePair extra_params = 2;
 inline int VectorFieldInfo::extra_params_size() const {
   return extra_params_.size();
 }
@@ -14135,34 +14111,55 @@ inline void HInsertParam::set_allocated_partition_tag(std::string* partition_tag
   // @@protoc_insertion_point(field_set_allocated:milvus.grpc.HInsertParam.partition_tag)
 }
 
-// repeated .milvus.grpc.HEntity entities = 3;
-inline int HInsertParam::entities_size() const {
-  return entities_.size();
+// .milvus.grpc.HEntity entities = 3;
+inline bool HInsertParam::has_entities() const {
+  return this != internal_default_instance() && entities_ != nullptr;
 }
 inline void HInsertParam::clear_entities() {
-  entities_.Clear();
+  if (GetArenaNoVirtual() == nullptr && entities_ != nullptr) {
+    delete entities_;
+  }
+  entities_ = nullptr;
 }
-inline ::milvus::grpc::HEntity* HInsertParam::mutable_entities(int index) {
-  // @@protoc_insertion_point(field_mutable:milvus.grpc.HInsertParam.entities)
-  return entities_.Mutable(index);
-}
-inline ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField< ::milvus::grpc::HEntity >*
-HInsertParam::mutable_entities() {
-  // @@protoc_insertion_point(field_mutable_list:milvus.grpc.HInsertParam.entities)
-  return &entities_;
-}
-inline const ::milvus::grpc::HEntity& HInsertParam::entities(int index) const {
+inline const ::milvus::grpc::HEntity& HInsertParam::entities() const {
+  const ::milvus::grpc::HEntity* p = entities_;
   // @@protoc_insertion_point(field_get:milvus.grpc.HInsertParam.entities)
-  return entities_.Get(index);
+  return p != nullptr ? *p : *reinterpret_cast<const ::milvus::grpc::HEntity*>(
+      &::milvus::grpc::_HEntity_default_instance_);
 }
-inline ::milvus::grpc::HEntity* HInsertParam::add_entities() {
-  // @@protoc_insertion_point(field_add:milvus.grpc.HInsertParam.entities)
-  return entities_.Add();
+inline ::milvus::grpc::HEntity* HInsertParam::release_entities() {
+  // @@protoc_insertion_point(field_release:milvus.grpc.HInsertParam.entities)
+  
+  ::milvus::grpc::HEntity* temp = entities_;
+  entities_ = nullptr;
+  return temp;
 }
-inline const ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField< ::milvus::grpc::HEntity >&
-HInsertParam::entities() const {
-  // @@protoc_insertion_point(field_list:milvus.grpc.HInsertParam.entities)
+inline ::milvus::grpc::HEntity* HInsertParam::mutable_entities() {
+  
+  if (entities_ == nullptr) {
+    auto* p = CreateMaybeMessage<::milvus::grpc::HEntity>(GetArenaNoVirtual());
+    entities_ = p;
+  }
+  // @@protoc_insertion_point(field_mutable:milvus.grpc.HInsertParam.entities)
   return entities_;
+}
+inline void HInsertParam::set_allocated_entities(::milvus::grpc::HEntity* entities) {
+  ::PROTOBUF_NAMESPACE_ID::Arena* message_arena = GetArenaNoVirtual();
+  if (message_arena == nullptr) {
+    delete entities_;
+  }
+  if (entities) {
+    ::PROTOBUF_NAMESPACE_ID::Arena* submessage_arena = nullptr;
+    if (message_arena != submessage_arena) {
+      entities = ::PROTOBUF_NAMESPACE_ID::internal::GetOwnedMessage(
+          message_arena, entities, submessage_arena);
+    }
+    
+  } else {
+    
+  }
+  entities_ = entities;
+  // @@protoc_insertion_point(field_set_allocated:milvus.grpc.HInsertParam.entities)
 }
 
 // repeated int64 entity_id_array = 4;

@@ -455,4 +455,39 @@ GrpcClient::Disconnect() {
     return Status::OK();
 }
 
+Status
+GrpcClient::CreateHybridCollection(milvus::grpc::Mapping& mapping) {
+    ClientContext context;
+    ::milvus::grpc::Status response;
+    ::grpc::Status grpc_status = stub_->CreateCollection(&context, mapping, &response);
+
+    if (!grpc_status.ok()) {
+        std::cerr << "CreateHybridCollection gRPC failed!" << std::endl;
+        return Status(StatusCode::RPCFailed, grpc_status.error_message());
+    }
+
+    if (response.error_code() != grpc::SUCCESS) {
+        std::cerr << response.reason() << std::endl;
+        return Status(StatusCode::ServerFailed, response.reason());
+    }
+    return Status::OK();
+}
+
+Status
+GrpcClient::InsertEntities(milvus::grpc::HInsertParam& entities, milvus::grpc::HEntityIDs& ids) {
+    ClientContext context;
+    ::grpc::Status grpc_status = stub_->InsertEntity(&context, entities, &ids);
+
+    if (!grpc_status.ok()) {
+        std::cerr << "InsertEntities gRPC failed!" << std::endl;
+        return Status(StatusCode::RPCFailed, grpc_status.error_message());
+    }
+
+    if (ids.status().error_code() != grpc::SUCCESS) {
+        std::cerr << ids.status().reason() << std::endl;
+        return Status(StatusCode::ServerFailed, ids.status().reason());
+    }
+    return Status::OK();
+}
+
 }  // namespace milvus

@@ -257,9 +257,7 @@ enum DataType {
 
 message VectorFieldInfo {
     int64 dimension = 1;
-     int64 distance_metric = 2;
-    repeated KeyValuePair extra_params = 3;
-    // int64 index_file_size = 3;
+    repeated KeyValuePair extra_params = 2;
 }
 
 message FieldType {
@@ -406,7 +404,7 @@ message HQueryResult {
 message HInsertParam {
     string collection_name = 1;
     string partition_tag = 2;
-    repeated HEntity entities = 3;
+    HEntity entities = 3;
     repeated int64 entity_id_array = 4;
     repeated KeyValuePair extra_params = 5;
 }

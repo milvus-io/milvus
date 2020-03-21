@@ -14,7 +14,9 @@
 #include <memory>
 #include <string>
 #include <vector>
+#include <unordered_map>
 
+#include "Field.h"
 #include "Status.h"
 
 /** \brief Milvus SDK namespace
@@ -140,6 +142,26 @@ struct CollectionInfo {
     int64_t total_row_count;                      ///< Collection total entity count
     std::vector<PartitionStat> partitions_stat;   ///< Collection's partitions statistics
 };
+
+
+
+struct FieldParam {
+    FieldPtr numeric_field;
+    VectorFieldPtr vector_field;
+};
+
+struct HMapping {
+    std::string collection_name;
+    std::vector<FieldParam> fields;
+};
+
+struct HEntity {
+    std::unordered_map<std::string, std::string> numerica_value;
+    std::unordered_map<std::string, std::vector<Entity>> vector_value;
+};
+
+
+
 
 /**
  * @brief SDK main class
@@ -572,6 +594,17 @@ class Connection {
      */
     virtual Status
     CompactCollection(const std::string& collection_name) = 0;
+
+    /*******************************New Interface**********************************/
+
+    virtual Status
+    CreateHybridCollection(const HMapping& mapping) = 0;
+
+    virtual Status
+    InsertEntity(const std::string& collection_name,
+                 const std::string& partition_tag,
+                 HEntity& entities,
+                 std::vector<uint64_t>& id_array) = 0;
 };
 
 }  // namespace milvus

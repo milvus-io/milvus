@@ -124,6 +124,17 @@ class ConnectionImpl : public Connection {
     Status
     CompactCollection(const std::string& collection_name) override;
 
+    /*******************************New Interface**********************************/
+
+    Status
+    CreateHybridCollection(const HMapping& mapping) override ;
+
+    Status
+    InsertEntity(const std::string& collection_name,
+                 const std::string& partition_tag,
+                 HEntity& entities,
+                 std::vector<uint64_t>& id_array) override ;
+
  private:
     std::shared_ptr<ClientProxy> client_proxy_;
 };
