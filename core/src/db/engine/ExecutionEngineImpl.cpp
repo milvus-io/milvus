@@ -775,7 +775,6 @@ ExecutionEngineImpl::Search(int64_t n, const float* data, int64_t k, const milvu
     milvus::json conf = extra_params;
     conf[knowhere::meta::TOPK] = k;
     auto adapter = knowhere::AdapterMgr::GetInstance().GetAdapter(index_->index_type());
-    ENGINE_LOG_DEBUG << "Search params: " << conf.dump();
     if (!adapter->CheckSearch(conf, index_->index_type(), index_->index_mode())) {
         throw Exception(DB_ERROR, "Illegal search params");
     }
@@ -813,7 +812,6 @@ ExecutionEngineImpl::Search(int64_t n, const uint8_t* data, int64_t k, const mil
     milvus::json conf = extra_params;
     conf[knowhere::meta::TOPK] = k;
     auto adapter = knowhere::AdapterMgr::GetInstance().GetAdapter(index_->index_type());
-    ENGINE_LOG_DEBUG << "Search params: " << conf.dump();
     if (!adapter->CheckSearch(conf, index_->index_type(), index_->index_mode())) {
         throw Exception(DB_ERROR, "Illegal search params");
     }
@@ -851,7 +849,6 @@ ExecutionEngineImpl::Search(int64_t n, const std::vector<int64_t>& ids, int64_t 
     milvus::json conf = extra_params;
     conf[knowhere::meta::TOPK] = k;
     auto adapter = knowhere::AdapterMgr::GetInstance().GetAdapter(index_->index_type());
-    ENGINE_LOG_DEBUG << "Search params: " << conf.dump();
     if (!adapter->CheckSearch(conf, index_->index_type(), index_->index_mode())) {
         throw Exception(DB_ERROR, "Illegal search params");
     }
