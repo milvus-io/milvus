@@ -149,6 +149,7 @@ class BaseRequest {
         // search operations
         kSearchByID = 600,
         kSearch,
+        kSearchCombine,
     };
 
  protected:
@@ -181,6 +182,9 @@ class BaseRequest {
         return status_;
     }
 
+    Status
+    set_status(ErrorCode error_code, const std::string& error_msg);
+
     bool
     IsAsync() const {
         return async_;
@@ -189,9 +193,6 @@ class BaseRequest {
  protected:
     virtual Status
     OnExecute() = 0;
-
-    Status
-    SetStatus(ErrorCode error_code, const std::string& error_msg);
 
     std::string
     TableNotExistMsg(const std::string& table_name);

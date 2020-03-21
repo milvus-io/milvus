@@ -714,7 +714,7 @@ class DummyRequest : public milvus::server::BaseRequest {
     }
 
  public:
-    explicit DummyRequest()
+    DummyRequest()
         : BaseRequest(std::make_shared<milvus::server::Context>("dummy_request_id"),
                       milvus::server::BaseRequest::kCmd) {
     }
@@ -742,12 +742,8 @@ class AsyncDummyRequest : public milvus::server::BaseRequest {
         return std::shared_ptr<milvus::server::BaseRequest>(new DummyRequest());
     }
 
-    void TestSetStatus() {
-        SetStatus(milvus::SERVER_INVALID_ARGUMENT, "");
-    }
-
  public:
-    explicit AsyncDummyRequest()
+    AsyncDummyRequest()
         : BaseRequest(std::make_shared<milvus::server::Context>("dummy_request_id2"),
                       milvus::server::BaseRequest::kCmd,
                       true) {
@@ -803,7 +799,7 @@ TEST_F(RpcSchedulerTest, BASE_TASK_TEST) {
     auto async_ptr = std::make_shared<AsyncDummyRequest>();
     auto base_ptr = std::static_pointer_cast<milvus::server::BaseRequest>(async_ptr);
     milvus::server::RequestScheduler::ExecRequest(base_ptr);
-    async_ptr->TestSetStatus();
+    async_ptr->set_status(milvus::SERVER_INVALID_ARGUMENT, "");
 
     milvus::server::RequestScheduler::GetInstance().Stop();
     milvus::server::RequestScheduler::GetInstance().Start();

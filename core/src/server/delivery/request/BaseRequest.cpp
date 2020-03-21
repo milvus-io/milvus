@@ -11,8 +11,8 @@
 
 #include "server/delivery/request/BaseRequest.h"
 #include "utils/CommonUtil.h"
-#include "utils/Log.h"
 #include "utils/Exception.h"
+#include "utils/Log.h"
 
 #include <map>
 
@@ -24,51 +24,52 @@ static const char* DDL_DML_REQUEST_GROUP = "ddl_dml";
 static const char* INFO_REQUEST_GROUP = "info";
 
 namespace {
-    std::string RequestGroup(BaseRequest::RequestType type) {
-        static std::map<BaseRequest::RequestType, std::string> s_map_type_group = {
-            // general operations
-            {BaseRequest::kCmd, INFO_REQUEST_GROUP},
+std::string
+RequestGroup(BaseRequest::RequestType type) {
+    static std::map<BaseRequest::RequestType, std::string> s_map_type_group = {
+        // general operations
+        {BaseRequest::kCmd, INFO_REQUEST_GROUP},
 
-            // data operations
-            {BaseRequest::kInsert, DDL_DML_REQUEST_GROUP},
-            {BaseRequest::kCompact, DDL_DML_REQUEST_GROUP},
-            {BaseRequest::kFlush, DDL_DML_REQUEST_GROUP},
-            {BaseRequest::kDeleteByID, DDL_DML_REQUEST_GROUP},
-            {BaseRequest::kGetVectorByID, INFO_REQUEST_GROUP},
-            {BaseRequest::kGetVectorIDs, INFO_REQUEST_GROUP},
+        // data operations
+        {BaseRequest::kInsert, DDL_DML_REQUEST_GROUP},
+        {BaseRequest::kCompact, DDL_DML_REQUEST_GROUP},
+        {BaseRequest::kFlush, DDL_DML_REQUEST_GROUP},
+        {BaseRequest::kDeleteByID, DDL_DML_REQUEST_GROUP},
+        {BaseRequest::kGetVectorByID, INFO_REQUEST_GROUP},
+        {BaseRequest::kGetVectorIDs, INFO_REQUEST_GROUP},
 
-            // table operations
-            {BaseRequest::kShowTables, INFO_REQUEST_GROUP},
-            {BaseRequest::kCreateTable, DDL_DML_REQUEST_GROUP},
-            {BaseRequest::kHasTable, INFO_REQUEST_GROUP},
-            {BaseRequest::kDescribeTable, INFO_REQUEST_GROUP},
-            {BaseRequest::kCountTable, INFO_REQUEST_GROUP},
-            {BaseRequest::kShowTableInfo, INFO_REQUEST_GROUP},
-            {BaseRequest::kDropTable, DDL_DML_REQUEST_GROUP},
-            {BaseRequest::kPreloadTable, DQL_REQUEST_GROUP},
+        // table operations
+        {BaseRequest::kShowTables, INFO_REQUEST_GROUP},
+        {BaseRequest::kCreateTable, DDL_DML_REQUEST_GROUP},
+        {BaseRequest::kHasTable, INFO_REQUEST_GROUP},
+        {BaseRequest::kDescribeTable, INFO_REQUEST_GROUP},
+        {BaseRequest::kCountTable, INFO_REQUEST_GROUP},
+        {BaseRequest::kShowTableInfo, INFO_REQUEST_GROUP},
+        {BaseRequest::kDropTable, DDL_DML_REQUEST_GROUP},
+        {BaseRequest::kPreloadTable, DQL_REQUEST_GROUP},
 
-            // partition operations
-            {BaseRequest::kCreatePartition, DDL_DML_REQUEST_GROUP},
-            {BaseRequest::kShowPartitions, INFO_REQUEST_GROUP},
-            {BaseRequest::kDropPartition, DDL_DML_REQUEST_GROUP},
+        // partition operations
+        {BaseRequest::kCreatePartition, DDL_DML_REQUEST_GROUP},
+        {BaseRequest::kShowPartitions, INFO_REQUEST_GROUP},
+        {BaseRequest::kDropPartition, DDL_DML_REQUEST_GROUP},
 
-            // index operations
-            {BaseRequest::kCreateIndex, DDL_DML_REQUEST_GROUP},
-            {BaseRequest::kDescribeIndex, INFO_REQUEST_GROUP},
-            {BaseRequest::kDropIndex, DDL_DML_REQUEST_GROUP},
+        // index operations
+        {BaseRequest::kCreateIndex, DDL_DML_REQUEST_GROUP},
+        {BaseRequest::kDescribeIndex, INFO_REQUEST_GROUP},
+        {BaseRequest::kDropIndex, DDL_DML_REQUEST_GROUP},
 
-            // search operations
-            {BaseRequest::kSearchByID, DQL_REQUEST_GROUP},
-            {BaseRequest::kSearch, DQL_REQUEST_GROUP},
-        };
+        // search operations
+        {BaseRequest::kSearchByID, DQL_REQUEST_GROUP},
+        {BaseRequest::kSearch, DQL_REQUEST_GROUP},
+    };
 
-        auto iter = s_map_type_group.find(type);
-        if (iter == s_map_type_group.end()) {
-            throw Exception(SERVER_NOT_IMPLEMENT, "request group undefined");
-        }
-        return iter->second;
+    auto iter = s_map_type_group.find(type);
+    if (iter == s_map_type_group.end()) {
+        throw Exception(SERVER_NOT_IMPLEMENT, "request group undefined");
     }
-} // namespace
+    return iter->second;
+}
+}  // namespace
 
 BaseRequest::BaseRequest(const std::shared_ptr<Context>& context, BaseRequest::RequestType type, bool async)
     : context_(context), type_(type), async_(async), done_(false) {
@@ -93,7 +94,7 @@ BaseRequest::Done() {
 }
 
 Status
-BaseRequest::SetStatus(ErrorCode error_code, const std::string& error_msg) {
+BaseRequest::set_status(ErrorCode error_code, const std::string& error_msg) {
     status_ = Status(error_code, error_msg);
     SERVER_LOG_ERROR << error_msg;
     return status_;

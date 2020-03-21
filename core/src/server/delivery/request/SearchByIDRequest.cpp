@@ -71,7 +71,13 @@ SearchByIDRequest::OnExecute() {
             return status;
         }
 
-        // step 3: check table existence
+        // step 3: check search parameter
+        status = ValidationUtil::ValidateSearchTopk(topk_);
+        if (!status.ok()) {
+            return status;
+        }
+
+        // step 4: check table existence
         // only process root table, ignore partition table
         engine::meta::TableSchema table_schema;
         table_schema.table_id_ = table_name_;
@@ -88,12 +94,13 @@ SearchByIDRequest::OnExecute() {
             }
         }
 
+        // step 5: check search parameters
         status = ValidationUtil::ValidateSearchParams(extra_params_, table_schema, topk_);
         if (!status.ok()) {
             return status;
         }
 
-        // Check whether GPU search resource is enabled
+        // step 6: check whether GPU search resource is enabled
 #ifdef MILVUS_GPU_VERSION
         Config& config = Config::GetInstance();
         bool gpu_enable;
@@ -109,7 +116,7 @@ SearchByIDRequest::OnExecute() {
         }
 #endif
 
-        // Check table's index type supports search by id
+        // step 7: check table's index type supports search by id
         if (table_schema.engine_type_ != (int32_t)engine::EngineType::FAISS_IDMAP &&
             table_schema.engine_type_ != (int32_t)engine::EngineType::FAISS_BIN_IDMAP &&
             table_schema.engine_type_ != (int32_t)engine::EngineType::FAISS_IVFFLAT &&
@@ -121,15 +128,9 @@ SearchByIDRequest::OnExecute() {
             return Status(SERVER_UNSUPPORTED_ERROR, err_msg);
         }
 
-        // step 4: check search parameter
-        status = ValidationUtil::ValidateSearchTopk(topk_, table_schema);
-        if (!status.ok()) {
-            return status;
-        }
-
         rc.RecordSection("check validation");
 
-        // step 5: search vectors
+        // step 8: search vectors
         engine::ResultIds result_ids;
         engine::ResultDistances result_distances;
 
@@ -158,14 +159,13 @@ SearchByIDRequest::OnExecute() {
 
         auto post_query_ctx = context_->Child("Constructing result");
 
-        // step 7: construct result array
+        // step 9: construct result array
         result_.row_num_ = 1;
         result_.distance_list_ = result_distances;
         result_.id_list_ = result_ids;
 
         post_query_ctx->GetTraceContext()->GetSpan()->Finish();
 
-        // step 8: print time cost percent
         rc.RecordSection("construct result and send");
         rc.ElapseFromBegin("totally cost");
     } catch (std::exception& ex) {

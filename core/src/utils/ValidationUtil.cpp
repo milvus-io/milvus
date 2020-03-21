@@ -331,7 +331,7 @@ ValidationUtil::ValidateTableIndexMetricType(int32_t metric_type) {
 }
 
 Status
-ValidationUtil::ValidateSearchTopk(int64_t top_k, const engine::meta::TableSchema& table_schema) {
+ValidationUtil::ValidateSearchTopk(int64_t top_k) {
     if (top_k <= 0 || top_k > 2048) {
         std::string msg =
             "Invalid topk: " + std::to_string(top_k) + ". " + "The topk must be within the range of 1 ~ 2048.";

@@ -14,57 +14,20 @@
 #include "server/delivery/strategy/RequestStrategy.h"
 #include "utils/Status.h"
 
-#include <map>
 #include <memory>
-#include <string>
-#include <thread>
-#include <vector>
 
 namespace milvus {
 namespace server {
 
-using ThreadPtr = std::shared_ptr<std::thread>;
-
-class RequestScheduler {
+class SearchReqStrategy : public RequestStrategy {
  public:
-    static RequestScheduler&
-    GetInstance() {
-        static RequestScheduler scheduler;
-        return scheduler;
-    }
-
-    void
-    Start();
-
-    void
-    Stop();
+    SearchReqStrategy();
 
     Status
-    ExecuteRequest(const BaseRequestPtr& request_ptr);
-
-    static void
-    ExecRequest(BaseRequestPtr& request_ptr);
-
- protected:
-    RequestScheduler();
-
-    virtual ~RequestScheduler();
-
-    void
-    TakeToExecute(RequestQueuePtr request_queue);
-
-    Status
-    PutToQueue(const BaseRequestPtr& request_ptr);
-
- private:
-    mutable std::mutex queue_mtx_;
-
-    std::map<std::string, RequestQueuePtr> request_groups_;
-
-    std::vector<ThreadPtr> execute_threads_;
-
-    bool stopped_;
+    ReScheduleQueue(const BaseRequestPtr& request, RequestQueuePtr& queue) override;
 };
+
+using RequestStrategyPtr = std::shared_ptr<RequestStrategy>;
 
 }  // namespace server
 }  // namespace milvus

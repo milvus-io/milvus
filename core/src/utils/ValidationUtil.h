@@ -50,7 +50,7 @@ class ValidationUtil {
     ValidateTableIndexMetricType(int32_t metric_type);
 
     static Status
-    ValidateSearchTopk(int64_t top_k, const engine::meta::TableSchema& table_schema);
+    ValidateSearchTopk(int64_t top_k);
 
     static Status
     ValidatePartitionName(const std::string& partition_name);

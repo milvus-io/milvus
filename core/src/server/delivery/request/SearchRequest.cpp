@@ -67,7 +67,13 @@ SearchRequest::OnExecute() {
             return status;
         }
 
-        // step 2: check table existence
+        // step 2: check search parameter
+        status = ValidationUtil::ValidateSearchTopk(topk_);
+        if (!status.ok()) {
+            return status;
+        }
+
+        // step 3: check table existence
         // only process root table, ignore partition table
         engine::meta::TableSchema table_schema;
         table_schema.table_id_ = table_name_;
@@ -85,13 +91,8 @@ SearchRequest::OnExecute() {
             }
         }
 
+        // step 4: check search parameters
         status = ValidationUtil::ValidateSearchParams(extra_params_, table_schema, topk_);
-        if (!status.ok()) {
-            return status;
-        }
-
-        // step 3: check search parameter
-        status = ValidationUtil::ValidateSearchTopk(topk_, table_schema);
         if (!status.ok()) {
             return status;
         }
@@ -101,9 +102,7 @@ SearchRequest::OnExecute() {
                           "The vector array is empty. Make sure you have entered vector records.");
         }
 
-        rc.RecordSection("check validation");
-
-        // step 4: check metric type
+        // step 5: check metric type
         if (engine::utils::IsBinaryMetricType(table_schema.metric_type_)) {
             // check prepared binary data
             if (vectors_data_.binary_data_.size() % vector_count != 0) {
@@ -130,9 +129,9 @@ SearchRequest::OnExecute() {
             }
         }
 
-        rc.RecordSection("prepare vector data");
+        rc.RecordSection("check validation");
 
-        // step 5: search vectors
+        // step 6: search vectors
         engine::ResultIds result_ids;
         engine::ResultDistances result_distances;
 
@@ -181,7 +180,6 @@ SearchRequest::OnExecute() {
 
         post_query_ctx->GetTraceContext()->GetSpan()->Finish();
 
-        // step 8: print time cost percent
         rc.RecordSection("construct result and send");
         rc.ElapseFromBegin("totally cost");
     } catch (std::exception& ex) {
