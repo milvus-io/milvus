@@ -24,15 +24,19 @@ class InsertEntityRequest : public BaseRequest {
  public:
     static BaseRequestPtr
     Create(const std::shared_ptr<Context>& context,
-           std::string& collection_name,
-           std::string& partition_tag,
-           engine::Entities& entities);
+           const std::string& collection_name,
+           const std::string& partition_tag,
+           std::vector<std::string> field_name_array,
+           std::vector<std::vector<std::string>>& field_values,
+           std::vector<engine::VectorsData>& vector_data);
 
  protected:
     InsertEntityRequest(const std::shared_ptr<Context>& context,
-                        std::string& collection_name,
-                        std::string& partition_tag,
-                        engine::Entities& entities);
+                        const std::string& collection_name,
+                        const std::string& partition_tag,
+                        std::vector<std::string> field_name_array,
+                        std::vector<std::vector<std::string>>& field_values,
+                        std::vector<engine::VectorsData>& vector_data);
 
     Status
     OnExecute() override;
@@ -40,7 +44,9 @@ class InsertEntityRequest : public BaseRequest {
  private:
     std::string collection_name_;
     std::string partition_tag_;
-    engine::Entities entities_;
+    std::vector<std::string> field_name_array_;
+    std::vector<std::vector<std::string>> field_values_;
+    std::vector<engine::VectorsData> vector_data_;
 };
 
 }  // namespace server

@@ -151,10 +151,27 @@ struct CollectionSchema {
 using CollectionSchemaPtr = std::shared_ptr<CollectionSchema>;
 
 struct FieldSchema {
+    typedef enum {
+        INT8 = 1,
+        INT16 = 2,
+        INT32 = 3,
+        INT64 = 4,
+
+        STRING = 20,
+
+        BOOL = 30,
+
+        FLOAT = 40,
+        DOUBLE = 41,
+
+        VECTOR = 100,
+        UNKNOWN = 9999,
+    }FIELD_TYPE;
+
     //TODO(yukun): need field_id?
     size_t collection_id_;
     std::string field_name_;
-    std::string field_type_;
+    int32_t field_type_;
     std::string field_params_;
 //    std::vector<std::string> field_ids_;
 //    std::vector<DataType> field_types_;

@@ -111,8 +111,8 @@ class RequestHandler {
 
     Status
     CreateCollection(const std::shared_ptr<Context>& context,
-                     std::string& collection_name,
-                     std::vector<std::pair<std::string, std::string>>& field_types,
+                     const std::string& collection_name,
+                     std::vector<std::pair<std::string, engine::meta::hybrid::DataType>>& field_types,
                      std::vector<std::pair<std::string, uint64_t>>& vector_dimensions,
                      std::vector<std::pair<std::string, std::string>>& field_extra_params);
 
@@ -124,10 +124,10 @@ class RequestHandler {
 
     Status
     InsertEntity(const std::shared_ptr<Context>& context,
-                 std::string& collection_name,
-                 std::string& partition_tag,
+                 const std::string& collection_name,
+                 const std::string& partition_tag,
                  std::vector<std::string> field_name_array,
-                 std::vector<std::string>& field_values,
+                 std::vector<std::vector<std::string>>& field_values,
                  std::vector<engine::VectorsData>& vector_data);
 
     Status

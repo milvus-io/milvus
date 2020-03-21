@@ -670,11 +670,79 @@ GrpcRequestHandler::Compact(::grpc::ServerContext* context, const ::milvus::grpc
 
 ::grpc::Status
 GrpcRequestHandler::CreateCollection(::grpc::ServerContext* context,
-                 const ::milvus::grpc::Mapping* request,
-                 ::milvus::grpc::Status* response) {
+                                     const ::milvus::grpc::Mapping* request,
+                                     ::milvus::grpc::Status* response) {
+
     CHECK_NULLPTR_RETURN(request);
 
-//    Status status = request_handler_.
+    std::vector<std::pair<std::string, engine::meta::hybrid::DataType>> field_types;
+    std::vector<std::pair<std::string, uint64_t>> vector_dimensions;
+    std::vector<std::pair<std::string, std::string>> field_params;
+    for (uint64_t i = 0; i < request->fields_size(); ++i) {
+        if(request->fields(i).type().has_vector_param()){
+            auto vector_dimension = std::make_pair(request->fields(i).name(), request->fields(i).type().vector_param().dimension());
+            vector_dimensions.emplace_back(vector_dimension);
+        } else {
+            auto type = std::make_pair(request->fields(i).name(),
+                                       (engine::meta::hybrid::DataType)request->fields(i).type().data_type());
+            field_types.emplace_back(type);
+        }
+        // Currently only one extra_param
+        auto extra_params = std::make_pair(request->fields(i).name(), request->fields(i).extra_params(0).value());
+        field_params.emplace_back(extra_params);
+    }
+
+    Status status = request_handler_.CreateCollection(context_map_[context],
+                                                      request->collection_name(),
+                                                      field_types,
+                                                      vector_dimensions,
+                                                      field_params);
+
+    SET_RESPONSE(response, status, context);
+
+    return ::grpc::Status::OK;
+}
+
+::grpc::Status
+GrpcRequestHandler::InsertEntity(::grpc::ServerContext* context,
+                                 const ::milvus::grpc::HInsertParam* request,
+                                 ::milvus::grpc::HEntityIDs* response) {
+    CHECK_NULLPTR_RETURN(request);
+
+    std::vector<std::string> field_name_array;
+    std::vector<std::vector<std::string>> field_values;
+    std::vector<engine::VectorsData> vector_data;
+
+    auto size = request->entities().field_names_size();
+    field_name_array.resize(size);
+    field_values.resize(request->entities().attr_records_size());
+    for (uint64_t i = 0; i < request->entities().attr_records_size(); ++i) {
+        auto value_size = request->entities().attr_records(i).value_size();
+        field_values[i].resize(value_size);
+        memcpy(field_values[i].data(), request->entities().attr_records(i).value().data(), value_size);
+    }
+
+    auto vector_size = request->entities().result_values_size();
+    vector_data.resize(vector_size);
+    for (uint64_t i = 0; i < vector_size; ++i) {
+        engine::VectorsData vectors;
+        CopyRowRecords(request->entities().result_values(i).vector_value().value(), request->entity_id_array(), vectors);
+        vector_data[i] = vectors;
+    }
+
+    Status status = request_handler_.InsertEntity(context_map_[context],
+                                                  request->collection_name(),
+                                                  request->partition_tag(),
+                                                  field_name_array,
+                                                  field_values,
+                                                  vector_data);
+
+    response->mutable_entity_id_array()->Resize(static_cast<int>(vector_data[0].id_array_.size()), 0);
+    memcpy(response->mutable_entity_id_array()->mutable_data(), vector_data[0].id_array_.data(),
+           vector_data[0].id_array_.size() * sizeof(int64_t));
+
+    SET_RESPONSE(response->mutable_status(), status, context);
+    return ::grpc::Status::OK;
 }
 
 }  // namespace grpc

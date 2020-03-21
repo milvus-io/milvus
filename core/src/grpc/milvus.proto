@@ -255,15 +255,14 @@ enum DataType {
 
 ///////////////////////////////////////////////////////////////////
 
-message VectorFieldInfo {
+message VectorFieldParam {
     int64 dimension = 1;
-    repeated KeyValuePair extra_params = 2;
 }
 
 message FieldType {
     oneof value {
-        DataType type = 1;
-        VectorFieldInfo info = 2;
+        DataType data_type = 1;
+        VectorFieldParam vector_param = 2;
     }
 }
 
@@ -271,11 +270,11 @@ message FieldParam {
     uint64 id = 1;
     string name = 2;
     FieldType type = 3;
+    repeated KeyValuePair extra_params = 4;
 }
 
 message VectorFieldValue {
-    repeated float float_value = 1;
-    bytes binary_value = 2;
+    repeated RowRecord value = 1;
 }
 
 message FieldValue {
@@ -385,11 +384,15 @@ message HSearchInSegmentsParam {
 
 ///////////////////////////////////////////////////////////////////
 
+message AttrRecord {
+    repeated string value = 1;
+}
+
 message HEntity {
     Status status = 1;
     int64 entity_id = 2;
     repeated string field_names = 3;
-    repeated string values = 4;
+    repeated AttrRecord attr_records = 4;
     repeated FieldValue result_values = 5;
 }
 

@@ -23,27 +23,26 @@ class CreateCollectionRequest : public BaseRequest {
  public:
     static BaseRequestPtr
     Create(const std::shared_ptr<Context>& context,
-           std::string& collection_name,
-           std::vector<std::string>& field_names,
-           std::vector<std::string>& field_types,
-           const std::vector<std::string>& field_params);
+           const std::string& collection_name,
+           std::vector<std::pair<std::string, engine::meta::hybrid::DataType>>& field_types,
+           std::vector<std::pair<std::string, uint64_t>>& vector_dimensions,
+           std::vector<std::pair<std::string, std::string>>& field_params);
 
  protected:
     CreateCollectionRequest(const std::shared_ptr<Context>& context,
-                            std::string& collection_name,
-                            std::vector<std::string>& field_names,
-                            std::vector<std::string>& field_types,
-                            const std::vector<std::string>& fields_params);
+                            const std::string& collection_name,
+                            std::vector<std::pair<std::string, engine::meta::hybrid::DataType>>& field_types,
+                            std::vector<std::pair<std::string, uint64_t>>& vector_dimensions,
+                            std::vector<std::pair<std::string, std::string>>& field_arams);
 
     Status
     OnExecute() override;
 
  private:
     const std::string collection_name_;
-    std::string collection_name;
-    std::vector<std::string> field_names_;
-    std::vector<std::string> field_types_;
-    const std::vector<std::string> field_params_;
+    std::vector<std::pair<std::string, engine::meta::hybrid::DataType>>& field_types_;
+    std::vector<std::pair<std::string, uint64_t>> vector_dimensions_;
+    std::vector<std::pair<std::string, std::string>>& field_params_;
 };
 
 }  // namespace server

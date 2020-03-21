@@ -344,10 +344,10 @@ class GrpcRequestHandler final : public ::milvus::grpc::MilvusService::Service, 
 //                      const ::milvus::grpc::CollectionName* request,
 //                      ::milvus::grpc::Status* response) override;
 //
-//    ::grpc::Status
-//    InsertEntity(::grpc::ServerContext* context,
-//                 const ::milvus::grpc::HInsertParam* request,
-//                 ::milvus::grpc::HEntityIDs* response) override;
+    ::grpc::Status
+    InsertEntity(::grpc::ServerContext* context,
+                 const ::milvus::grpc::HInsertParam* request,
+                 ::milvus::grpc::HEntityIDs* response) override;
 //
 //    ::grpc::Status
 //    HybridSearch(::grpc::ServerContext* context,

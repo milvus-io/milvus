@@ -29,24 +29,32 @@ namespace milvus {
 namespace server {
 
 InsertEntityRequest::InsertEntityRequest(const std::shared_ptr<Context>& context,
-                                         std::string& collection_name,
-                                         std::string& partition_tag,
-                                         engine::Entities& entities)
+                                         const std::string& collection_name,
+                                         const std::string& partition_tag,
+                                         std::vector<std::string> field_name_array,
+                                         std::vector<std::vector<std::string>>& field_values,
+                                         std::vector<engine::VectorsData>& vector_data)
     : BaseRequest(context, DDL_DML_REQUEST_GROUP),
       collection_name_(collection_name),
       partition_tag_(partition_tag),
-      entities_(entities){
+      field_name_array_(field_name_array),
+      field_values_(field_values),
+      vector_data_(vector_data){
 }
 
 BaseRequestPtr
 InsertEntityRequest::Create(const std::shared_ptr<Context>& context,
-                            std::string& collection_name,
-                            std::string& partition_tag,
-                            engine::Entities& entities) {
+                            const std::string& collection_name,
+                            const std::string& partition_tag,
+                            std::vector<std::string> field_name_array,
+                            std::vector<std::vector<std::string>>& field_values,
+                            std::vector<engine::VectorsData>& vector_data) {
     return std::shared_ptr<BaseRequest>(new InsertEntityRequest(context,
                                                                 collection_name,
                                                                 partition_tag,
-                                                                entities));
+                                                                field_name_array,
+                                                                field_values,
+                                                                vector_data));
 }
 
 Status
@@ -54,7 +62,7 @@ InsertEntityRequest::OnExecute() {
     try {
         fiu_do_on("InsertEntityRequest.OnExecute.throw_std_exception", throw std::exception());
         std::string
-            hdr = "InsertEntityRequest(table=" + collection_name_ + ", n=" + std::to_string(entities_.entity_count_) +
+            hdr = "InsertEntityRequest(table=" + collection_name_ + ", n=" + std::to_string(field_values_[0].size()) +
                   ", partition_tag=" + partition_tag_ + ")";
         TimeRecorder rc(hdr);
 
@@ -63,11 +71,9 @@ InsertEntityRequest::OnExecute() {
         if (!status.ok()) {
             return status;
         }
-        for (uint64_t i = 0; i < entities_.entity_count_; ++i) {
-            if (entities_.vector_data_[i].float_data_.empty() && entities_.vector_data_[i].binary_data_.empty()) {
-                return Status(SERVER_INVALID_ROWRECORD_ARRAY,
-                              "The vector array is empty. Make sure you have entered vector records.");
-            }
+        if (vector_data_[0].float_data_.empty() && vector_data_[0].binary_data_.empty()) {
+            return Status(SERVER_INVALID_ROWRECORD_ARRAY,
+                          "The vector array is empty. Make sure you have entered vector records.");
         }
 
 
@@ -91,7 +97,7 @@ InsertEntityRequest::OnExecute() {
 
         // step 3: check table flag
         // all user provide id, or all internal id
-        bool user_provide_ids = !entities_.id_array_.empty();
+        bool user_provide_ids = !vector_data_[0].id_array_.empty();
         fiu_do_on("InsertEntityRequest.OnExecute.illegal_vector_id", user_provide_ids = false;
             table_schema.flag_ = engine::meta::FLAG_MASK_HAS_USERID);
         // user already provided id before, all insert action require user id
@@ -145,10 +151,27 @@ InsertEntityRequest::OnExecute() {
 //        }
 
         // step 5: insert entities
-        auto vec_count = static_cast<uint64_t>(entities_.entity_count_);
+        auto vec_count = static_cast<uint64_t>(vector_data_[0].vector_count_);
+
+        engine::Entities entities;
+        entities.entity_count_ = vector_data_[0].vector_count_;
+        auto size = field_values_.size();
+        entities.entity_field_name_.resize(size);
+        entities.entity_data_.resize(size);
+        uint64_t i;
+        for (i = 0; i < size; ++i) {
+            entities.entity_field_name_[i] = field_name_array_[i];
+            engine::Entity entity;
+            entity.field_value_ = field_values_[i];
+            entities.entity_data_[i] = entity;
+        }
+        entities.vector_field_name_.resize(1);
+        entities.vector_data_.resize(1);
+        entities.vector_field_name_[0] = field_name_array_[i];
+        entities.vector_data_[0] = vector_data_[0];
 
         rc.RecordSection("prepare vectors data");
-        status = DBWrapper::DB()->InsertEntities(collection_name_, partition_tag_, entities_)
+        status = DBWrapper::DB()->InsertEntities(collection_name_, partition_tag_, entities)
         fiu_do_on("InsertRequest.OnExecute.insert_fail", status = Status(milvus::SERVER_UNEXPECTED_ERROR, ""));
         if (!status.ok()) {
             return status;

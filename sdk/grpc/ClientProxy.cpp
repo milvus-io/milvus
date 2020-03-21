@@ -582,12 +582,15 @@ ClientProxy::CreateHybridCollection(const HMapping& mapping) {
             ::milvus::grpc::FieldParam* field_param = grpc_mapping.add_fields();
             field_param->set_name(field.numeric_field->field_name);
             if (field.numeric_field != nullptr) {
-                field_param->mutable_type()->set_type((::milvus::grpc::DataType)field.numeric_field->field_type);
+                field_param->mutable_type()->set_data_type((::milvus::grpc::DataType)field.numeric_field->field_type);
+                ::milvus::grpc::KeyValuePair* kv_pair = field_param->add_extra_params();
+                kv_pair->set_key("params");
+                kv_pair->set_value(field.numeric_field->extram_params);
             } else if (field.vector_field != nullptr) {
-                ::milvus::grpc::KeyValuePair* kv_pair = field_param->mutable_type()->mutable_info()->add_extra_params();
+                field_param->mutable_type()->mutable_vector_param()->set_dimension(field.vector_field->dimension);
+                ::milvus::grpc::KeyValuePair* kv_pair = field_param->add_extra_params();
                 kv_pair->set_key("params");
                 kv_pair->set_value(field.vector_field->extram_params);
-                field_param->mutable_type()->mutable_info()->set_dimension(field.vector_field->dimension);
             }
         }
         return client_ptr_->CreateHybridCollection(grpc_mapping);
@@ -598,15 +601,15 @@ ClientProxy::CreateHybridCollection(const HMapping& mapping) {
 }
 
 void
-CopyVectorField(::milvus::grpc::VectorFieldValue* target, const Entity& src) {
+CopyVectorField(::milvus::grpc::RowRecord* target, const Entity& src) {
     if (!src.float_data.empty()) {
-        auto vector_data = target->mutable_float_value();
+        auto vector_data = target->mutable_float_data();
         vector_data->Resize(static_cast<int>(src.float_data.size()), 0.0);
         memcpy(vector_data->mutable_data(), src.float_data.data(), src.float_data.size() * sizeof(float));
     }
 
     if (!src.binary_data.empty()) {
-        target->set_binary_value(src.binary_data.data(), src.binary_data.size());
+        target->set_binary_data(src.binary_data.data(), src.binary_data.size());
     }
 }
 
@@ -623,17 +626,21 @@ ClientProxy::InsertEntity(const std::string& collection_name,
     for (; numerica_it != entities.numerica_value.end(); numerica_it++) {
         auto name = grpc_param.mutable_entities()->add_field_names();
         *name = numerica_it->first;
-        auto value = grpc_param.mutable_entities()->add_values();
-        *value = numerica_it->second;
+        auto records = grpc_param.mutable_entities()->add_attr_records();
+        for (auto value : numerica_it->second) {
+            auto attr = records->add_value();
+            *attr = value;
+        }
     }
 
     auto vector_it = entities.vector_value.begin();
     for (; vector_it != entities.vector_value.end();) {
         auto name = grpc_param.mutable_entities()->add_field_names();
         *name = vector_it->first;
+        ::milvus::grpc::FieldValue* vector_field = grpc_param.mutable_entities()->add_result_values();
         for (auto entity : vector_it->second) {
-            ::milvus::grpc::FieldValue* vector_field = grpc_param.mutable_entities()->add_result_values();
-            CopyVectorField(vector_field->mutable_vector_value(), entity);
+            ::milvus::grpc::RowRecord* record = vector_field->mutable_vector_value()->add_value();
+            CopyVectorField(record, entity);
         }
     }
 

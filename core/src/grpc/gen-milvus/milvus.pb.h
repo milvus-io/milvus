@@ -49,7 +49,7 @@ struct TableStruct_milvus_2eproto {
     PROTOBUF_SECTION_VARIABLE(protodesc_cold);
   static const ::PROTOBUF_NAMESPACE_ID::internal::AuxillaryParseTableField aux[]
     PROTOBUF_SECTION_VARIABLE(protodesc_cold);
-  static const ::PROTOBUF_NAMESPACE_ID::internal::ParseTable schema[53]
+  static const ::PROTOBUF_NAMESPACE_ID::internal::ParseTable schema[54]
     PROTOBUF_SECTION_VARIABLE(protodesc_cold);
   static const ::PROTOBUF_NAMESPACE_ID::internal::FieldMetadata field_metadata[];
   static const ::PROTOBUF_NAMESPACE_ID::internal::SerializationTable serialization_table[];
@@ -58,6 +58,9 @@ struct TableStruct_milvus_2eproto {
 extern const ::PROTOBUF_NAMESPACE_ID::internal::DescriptorTable descriptor_table_milvus_2eproto;
 namespace milvus {
 namespace grpc {
+class AttrRecord;
+class AttrRecordDefaultTypeInternal;
+extern AttrRecordDefaultTypeInternal _AttrRecord_default_instance_;
 class BoolReply;
 class BoolReplyDefaultTypeInternal;
 extern BoolReplyDefaultTypeInternal _BoolReply_default_instance_;
@@ -199,9 +202,9 @@ extern TopKQueryResultDefaultTypeInternal _TopKQueryResult_default_instance_;
 class VectorData;
 class VectorDataDefaultTypeInternal;
 extern VectorDataDefaultTypeInternal _VectorData_default_instance_;
-class VectorFieldInfo;
-class VectorFieldInfoDefaultTypeInternal;
-extern VectorFieldInfoDefaultTypeInternal _VectorFieldInfo_default_instance_;
+class VectorFieldParam;
+class VectorFieldParamDefaultTypeInternal;
+extern VectorFieldParamDefaultTypeInternal _VectorFieldParam_default_instance_;
 class VectorFieldValue;
 class VectorFieldValueDefaultTypeInternal;
 extern VectorFieldValueDefaultTypeInternal _VectorFieldValue_default_instance_;
@@ -220,6 +223,7 @@ extern VectorRecordDefaultTypeInternal _VectorRecord_default_instance_;
 }  // namespace grpc
 }  // namespace milvus
 PROTOBUF_NAMESPACE_OPEN
+template<> ::milvus::grpc::AttrRecord* Arena::CreateMaybeMessage<::milvus::grpc::AttrRecord>(Arena*);
 template<> ::milvus::grpc::BoolReply* Arena::CreateMaybeMessage<::milvus::grpc::BoolReply>(Arena*);
 template<> ::milvus::grpc::BooleanQuery* Arena::CreateMaybeMessage<::milvus::grpc::BooleanQuery>(Arena*);
 template<> ::milvus::grpc::CollectionInfo* Arena::CreateMaybeMessage<::milvus::grpc::CollectionInfo>(Arena*);
@@ -267,7 +271,7 @@ template<> ::milvus::grpc::TableSchema* Arena::CreateMaybeMessage<::milvus::grpc
 template<> ::milvus::grpc::TermQuery* Arena::CreateMaybeMessage<::milvus::grpc::TermQuery>(Arena*);
 template<> ::milvus::grpc::TopKQueryResult* Arena::CreateMaybeMessage<::milvus::grpc::TopKQueryResult>(Arena*);
 template<> ::milvus::grpc::VectorData* Arena::CreateMaybeMessage<::milvus::grpc::VectorData>(Arena*);
-template<> ::milvus::grpc::VectorFieldInfo* Arena::CreateMaybeMessage<::milvus::grpc::VectorFieldInfo>(Arena*);
+template<> ::milvus::grpc::VectorFieldParam* Arena::CreateMaybeMessage<::milvus::grpc::VectorFieldParam>(Arena*);
 template<> ::milvus::grpc::VectorFieldValue* Arena::CreateMaybeMessage<::milvus::grpc::VectorFieldValue>(Arena*);
 template<> ::milvus::grpc::VectorIdentity* Arena::CreateMaybeMessage<::milvus::grpc::VectorIdentity>(Arena*);
 template<> ::milvus::grpc::VectorIds* Arena::CreateMaybeMessage<::milvus::grpc::VectorIds>(Arena*);
@@ -4416,23 +4420,23 @@ class GetVectorIDsParam :
 };
 // -------------------------------------------------------------------
 
-class VectorFieldInfo :
-    public ::PROTOBUF_NAMESPACE_ID::Message /* @@protoc_insertion_point(class_definition:milvus.grpc.VectorFieldInfo) */ {
+class VectorFieldParam :
+    public ::PROTOBUF_NAMESPACE_ID::Message /* @@protoc_insertion_point(class_definition:milvus.grpc.VectorFieldParam) */ {
  public:
-  VectorFieldInfo();
-  virtual ~VectorFieldInfo();
+  VectorFieldParam();
+  virtual ~VectorFieldParam();
 
-  VectorFieldInfo(const VectorFieldInfo& from);
-  VectorFieldInfo(VectorFieldInfo&& from) noexcept
-    : VectorFieldInfo() {
+  VectorFieldParam(const VectorFieldParam& from);
+  VectorFieldParam(VectorFieldParam&& from) noexcept
+    : VectorFieldParam() {
     *this = ::std::move(from);
   }
 
-  inline VectorFieldInfo& operator=(const VectorFieldInfo& from) {
+  inline VectorFieldParam& operator=(const VectorFieldParam& from) {
     CopyFrom(from);
     return *this;
   }
-  inline VectorFieldInfo& operator=(VectorFieldInfo&& from) noexcept {
+  inline VectorFieldParam& operator=(VectorFieldParam&& from) noexcept {
     if (GetArenaNoVirtual() == from.GetArenaNoVirtual()) {
       if (this != &from) InternalSwap(&from);
     } else {
@@ -4450,37 +4454,37 @@ class VectorFieldInfo :
   static const ::PROTOBUF_NAMESPACE_ID::Reflection* GetReflection() {
     return GetMetadataStatic().reflection;
   }
-  static const VectorFieldInfo& default_instance();
+  static const VectorFieldParam& default_instance();
 
   static void InitAsDefaultInstance();  // FOR INTERNAL USE ONLY
-  static inline const VectorFieldInfo* internal_default_instance() {
-    return reinterpret_cast<const VectorFieldInfo*>(
-               &_VectorFieldInfo_default_instance_);
+  static inline const VectorFieldParam* internal_default_instance() {
+    return reinterpret_cast<const VectorFieldParam*>(
+               &_VectorFieldParam_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
     26;
 
-  friend void swap(VectorFieldInfo& a, VectorFieldInfo& b) {
+  friend void swap(VectorFieldParam& a, VectorFieldParam& b) {
     a.Swap(&b);
   }
-  inline void Swap(VectorFieldInfo* other) {
+  inline void Swap(VectorFieldParam* other) {
     if (other == this) return;
     InternalSwap(other);
   }
 
   // implements Message ----------------------------------------------
 
-  inline VectorFieldInfo* New() const final {
-    return CreateMaybeMessage<VectorFieldInfo>(nullptr);
+  inline VectorFieldParam* New() const final {
+    return CreateMaybeMessage<VectorFieldParam>(nullptr);
   }
 
-  VectorFieldInfo* New(::PROTOBUF_NAMESPACE_ID::Arena* arena) const final {
-    return CreateMaybeMessage<VectorFieldInfo>(arena);
+  VectorFieldParam* New(::PROTOBUF_NAMESPACE_ID::Arena* arena) const final {
+    return CreateMaybeMessage<VectorFieldParam>(arena);
   }
   void CopyFrom(const ::PROTOBUF_NAMESPACE_ID::Message& from) final;
   void MergeFrom(const ::PROTOBUF_NAMESPACE_ID::Message& from) final;
-  void CopyFrom(const VectorFieldInfo& from);
-  void MergeFrom(const VectorFieldInfo& from);
+  void CopyFrom(const VectorFieldParam& from);
+  void MergeFrom(const VectorFieldParam& from);
   PROTOBUF_ATTRIBUTE_REINITIALIZES void Clear() final;
   bool IsInitialized() const final;
 
@@ -4501,10 +4505,10 @@ class VectorFieldInfo :
   inline void SharedCtor();
   inline void SharedDtor();
   void SetCachedSize(int size) const final;
-  void InternalSwap(VectorFieldInfo* other);
+  void InternalSwap(VectorFieldParam* other);
   friend class ::PROTOBUF_NAMESPACE_ID::internal::AnyMetadata;
   static ::PROTOBUF_NAMESPACE_ID::StringPiece FullMessageName() {
-    return "milvus.grpc.VectorFieldInfo";
+    return "milvus.grpc.VectorFieldParam";
   }
   private:
   inline ::PROTOBUF_NAMESPACE_ID::Arena* GetArenaNoVirtual() const {
@@ -4529,31 +4533,18 @@ class VectorFieldInfo :
   // accessors -------------------------------------------------------
 
   enum : int {
-    kExtraParamsFieldNumber = 2,
     kDimensionFieldNumber = 1,
   };
-  // repeated .milvus.grpc.KeyValuePair extra_params = 2;
-  int extra_params_size() const;
-  void clear_extra_params();
-  ::milvus::grpc::KeyValuePair* mutable_extra_params(int index);
-  ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField< ::milvus::grpc::KeyValuePair >*
-      mutable_extra_params();
-  const ::milvus::grpc::KeyValuePair& extra_params(int index) const;
-  ::milvus::grpc::KeyValuePair* add_extra_params();
-  const ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField< ::milvus::grpc::KeyValuePair >&
-      extra_params() const;
-
   // int64 dimension = 1;
   void clear_dimension();
   ::PROTOBUF_NAMESPACE_ID::int64 dimension() const;
   void set_dimension(::PROTOBUF_NAMESPACE_ID::int64 value);
 
-  // @@protoc_insertion_point(class_scope:milvus.grpc.VectorFieldInfo)
+  // @@protoc_insertion_point(class_scope:milvus.grpc.VectorFieldParam)
  private:
   class _Internal;
 
   ::PROTOBUF_NAMESPACE_ID::internal::InternalMetadataWithArena _internal_metadata_;
-  ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField< ::milvus::grpc::KeyValuePair > extra_params_;
   ::PROTOBUF_NAMESPACE_ID::int64 dimension_;
   mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
   friend struct ::TableStruct_milvus_2eproto;
@@ -4597,8 +4588,8 @@ class FieldType :
   static const FieldType& default_instance();
 
   enum ValueCase {
-    kType = 1,
-    kInfo = 2,
+    kDataType = 1,
+    kVectorParam = 2,
     VALUE_NOT_SET = 0,
   };
 
@@ -4679,32 +4670,32 @@ class FieldType :
   // accessors -------------------------------------------------------
 
   enum : int {
-    kTypeFieldNumber = 1,
-    kInfoFieldNumber = 2,
+    kDataTypeFieldNumber = 1,
+    kVectorParamFieldNumber = 2,
   };
-  // .milvus.grpc.DataType type = 1;
+  // .milvus.grpc.DataType data_type = 1;
   private:
-  bool has_type() const;
+  bool has_data_type() const;
   public:
-  void clear_type();
-  ::milvus::grpc::DataType type() const;
-  void set_type(::milvus::grpc::DataType value);
+  void clear_data_type();
+  ::milvus::grpc::DataType data_type() const;
+  void set_data_type(::milvus::grpc::DataType value);
 
-  // .milvus.grpc.VectorFieldInfo info = 2;
-  bool has_info() const;
-  void clear_info();
-  const ::milvus::grpc::VectorFieldInfo& info() const;
-  ::milvus::grpc::VectorFieldInfo* release_info();
-  ::milvus::grpc::VectorFieldInfo* mutable_info();
-  void set_allocated_info(::milvus::grpc::VectorFieldInfo* info);
+  // .milvus.grpc.VectorFieldParam vector_param = 2;
+  bool has_vector_param() const;
+  void clear_vector_param();
+  const ::milvus::grpc::VectorFieldParam& vector_param() const;
+  ::milvus::grpc::VectorFieldParam* release_vector_param();
+  ::milvus::grpc::VectorFieldParam* mutable_vector_param();
+  void set_allocated_vector_param(::milvus::grpc::VectorFieldParam* vector_param);
 
   void clear_value();
   ValueCase value_case() const;
   // @@protoc_insertion_point(class_scope:milvus.grpc.FieldType)
  private:
   class _Internal;
-  void set_has_type();
-  void set_has_info();
+  void set_has_data_type();
+  void set_has_vector_param();
 
   inline bool has_value() const;
   inline void clear_has_value();
@@ -4712,8 +4703,8 @@ class FieldType :
   ::PROTOBUF_NAMESPACE_ID::internal::InternalMetadataWithArena _internal_metadata_;
   union ValueUnion {
     ValueUnion() {}
-    int type_;
-    ::milvus::grpc::VectorFieldInfo* info_;
+    int data_type_;
+    ::milvus::grpc::VectorFieldParam* vector_param_;
   } value_;
   mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
   ::PROTOBUF_NAMESPACE_ID::uint32 _oneof_case_[1];
@@ -4835,10 +4826,22 @@ class FieldParam :
   // accessors -------------------------------------------------------
 
   enum : int {
+    kExtraParamsFieldNumber = 4,
     kNameFieldNumber = 2,
     kTypeFieldNumber = 3,
     kIdFieldNumber = 1,
   };
+  // repeated .milvus.grpc.KeyValuePair extra_params = 4;
+  int extra_params_size() const;
+  void clear_extra_params();
+  ::milvus::grpc::KeyValuePair* mutable_extra_params(int index);
+  ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField< ::milvus::grpc::KeyValuePair >*
+      mutable_extra_params();
+  const ::milvus::grpc::KeyValuePair& extra_params(int index) const;
+  ::milvus::grpc::KeyValuePair* add_extra_params();
+  const ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField< ::milvus::grpc::KeyValuePair >&
+      extra_params() const;
+
   // string name = 2;
   void clear_name();
   const std::string& name() const;
@@ -4868,6 +4871,7 @@ class FieldParam :
   class _Internal;
 
   ::PROTOBUF_NAMESPACE_ID::internal::InternalMetadataWithArena _internal_metadata_;
+  ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField< ::milvus::grpc::KeyValuePair > extra_params_;
   ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr name_;
   ::milvus::grpc::FieldType* type_;
   ::PROTOBUF_NAMESPACE_ID::uint64 id_;
@@ -4989,39 +4993,25 @@ class VectorFieldValue :
   // accessors -------------------------------------------------------
 
   enum : int {
-    kFloatValueFieldNumber = 1,
-    kBinaryValueFieldNumber = 2,
+    kValueFieldNumber = 1,
   };
-  // repeated float float_value = 1;
-  int float_value_size() const;
-  void clear_float_value();
-  float float_value(int index) const;
-  void set_float_value(int index, float value);
-  void add_float_value(float value);
-  const ::PROTOBUF_NAMESPACE_ID::RepeatedField< float >&
-      float_value() const;
-  ::PROTOBUF_NAMESPACE_ID::RepeatedField< float >*
-      mutable_float_value();
-
-  // bytes binary_value = 2;
-  void clear_binary_value();
-  const std::string& binary_value() const;
-  void set_binary_value(const std::string& value);
-  void set_binary_value(std::string&& value);
-  void set_binary_value(const char* value);
-  void set_binary_value(const void* value, size_t size);
-  std::string* mutable_binary_value();
-  std::string* release_binary_value();
-  void set_allocated_binary_value(std::string* binary_value);
+  // repeated .milvus.grpc.RowRecord value = 1;
+  int value_size() const;
+  void clear_value();
+  ::milvus::grpc::RowRecord* mutable_value(int index);
+  ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField< ::milvus::grpc::RowRecord >*
+      mutable_value();
+  const ::milvus::grpc::RowRecord& value(int index) const;
+  ::milvus::grpc::RowRecord* add_value();
+  const ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField< ::milvus::grpc::RowRecord >&
+      value() const;
 
   // @@protoc_insertion_point(class_scope:milvus.grpc.VectorFieldValue)
  private:
   class _Internal;
 
   ::PROTOBUF_NAMESPACE_ID::internal::InternalMetadataWithArena _internal_metadata_;
-  ::PROTOBUF_NAMESPACE_ID::RepeatedField< float > float_value_;
-  mutable std::atomic<int> _float_value_cached_byte_size_;
-  ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr binary_value_;
+  ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField< ::milvus::grpc::RowRecord > value_;
   mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
   friend struct ::TableStruct_milvus_2eproto;
 };
@@ -7182,6 +7172,149 @@ class HSearchInSegmentsParam :
 };
 // -------------------------------------------------------------------
 
+class AttrRecord :
+    public ::PROTOBUF_NAMESPACE_ID::Message /* @@protoc_insertion_point(class_definition:milvus.grpc.AttrRecord) */ {
+ public:
+  AttrRecord();
+  virtual ~AttrRecord();
+
+  AttrRecord(const AttrRecord& from);
+  AttrRecord(AttrRecord&& from) noexcept
+    : AttrRecord() {
+    *this = ::std::move(from);
+  }
+
+  inline AttrRecord& operator=(const AttrRecord& from) {
+    CopyFrom(from);
+    return *this;
+  }
+  inline AttrRecord& operator=(AttrRecord&& from) noexcept {
+    if (GetArenaNoVirtual() == from.GetArenaNoVirtual()) {
+      if (this != &from) InternalSwap(&from);
+    } else {
+      CopyFrom(from);
+    }
+    return *this;
+  }
+
+  static const ::PROTOBUF_NAMESPACE_ID::Descriptor* descriptor() {
+    return GetDescriptor();
+  }
+  static const ::PROTOBUF_NAMESPACE_ID::Descriptor* GetDescriptor() {
+    return GetMetadataStatic().descriptor;
+  }
+  static const ::PROTOBUF_NAMESPACE_ID::Reflection* GetReflection() {
+    return GetMetadataStatic().reflection;
+  }
+  static const AttrRecord& default_instance();
+
+  static void InitAsDefaultInstance();  // FOR INTERNAL USE ONLY
+  static inline const AttrRecord* internal_default_instance() {
+    return reinterpret_cast<const AttrRecord*>(
+               &_AttrRecord_default_instance_);
+  }
+  static constexpr int kIndexInFileMessages =
+    43;
+
+  friend void swap(AttrRecord& a, AttrRecord& b) {
+    a.Swap(&b);
+  }
+  inline void Swap(AttrRecord* other) {
+    if (other == this) return;
+    InternalSwap(other);
+  }
+
+  // implements Message ----------------------------------------------
+
+  inline AttrRecord* New() const final {
+    return CreateMaybeMessage<AttrRecord>(nullptr);
+  }
+
+  AttrRecord* New(::PROTOBUF_NAMESPACE_ID::Arena* arena) const final {
+    return CreateMaybeMessage<AttrRecord>(arena);
+  }
+  void CopyFrom(const ::PROTOBUF_NAMESPACE_ID::Message& from) final;
+  void MergeFrom(const ::PROTOBUF_NAMESPACE_ID::Message& from) final;
+  void CopyFrom(const AttrRecord& from);
+  void MergeFrom(const AttrRecord& from);
+  PROTOBUF_ATTRIBUTE_REINITIALIZES void Clear() final;
+  bool IsInitialized() const final;
+
+  size_t ByteSizeLong() const final;
+  #if GOOGLE_PROTOBUF_ENABLE_EXPERIMENTAL_PARSER
+  const char* _InternalParse(const char* ptr, ::PROTOBUF_NAMESPACE_ID::internal::ParseContext* ctx) final;
+  #else
+  bool MergePartialFromCodedStream(
+      ::PROTOBUF_NAMESPACE_ID::io::CodedInputStream* input) final;
+  #endif  // GOOGLE_PROTOBUF_ENABLE_EXPERIMENTAL_PARSER
+  void SerializeWithCachedSizes(
+      ::PROTOBUF_NAMESPACE_ID::io::CodedOutputStream* output) const final;
+  ::PROTOBUF_NAMESPACE_ID::uint8* InternalSerializeWithCachedSizesToArray(
+      ::PROTOBUF_NAMESPACE_ID::uint8* target) const final;
+  int GetCachedSize() const final { return _cached_size_.Get(); }
+
+  private:
+  inline void SharedCtor();
+  inline void SharedDtor();
+  void SetCachedSize(int size) const final;
+  void InternalSwap(AttrRecord* other);
+  friend class ::PROTOBUF_NAMESPACE_ID::internal::AnyMetadata;
+  static ::PROTOBUF_NAMESPACE_ID::StringPiece FullMessageName() {
+    return "milvus.grpc.AttrRecord";
+  }
+  private:
+  inline ::PROTOBUF_NAMESPACE_ID::Arena* GetArenaNoVirtual() const {
+    return nullptr;
+  }
+  inline void* MaybeArenaPtr() const {
+    return nullptr;
+  }
+  public:
+
+  ::PROTOBUF_NAMESPACE_ID::Metadata GetMetadata() const final;
+  private:
+  static ::PROTOBUF_NAMESPACE_ID::Metadata GetMetadataStatic() {
+    ::PROTOBUF_NAMESPACE_ID::internal::AssignDescriptors(&::descriptor_table_milvus_2eproto);
+    return ::descriptor_table_milvus_2eproto.file_level_metadata[kIndexInFileMessages];
+  }
+
+  public:
+
+  // nested types ----------------------------------------------------
+
+  // accessors -------------------------------------------------------
+
+  enum : int {
+    kValueFieldNumber = 1,
+  };
+  // repeated string value = 1;
+  int value_size() const;
+  void clear_value();
+  const std::string& value(int index) const;
+  std::string* mutable_value(int index);
+  void set_value(int index, const std::string& value);
+  void set_value(int index, std::string&& value);
+  void set_value(int index, const char* value);
+  void set_value(int index, const char* value, size_t size);
+  std::string* add_value();
+  void add_value(const std::string& value);
+  void add_value(std::string&& value);
+  void add_value(const char* value);
+  void add_value(const char* value, size_t size);
+  const ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField<std::string>& value() const;
+  ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField<std::string>* mutable_value();
+
+  // @@protoc_insertion_point(class_scope:milvus.grpc.AttrRecord)
+ private:
+  class _Internal;
+
+  ::PROTOBUF_NAMESPACE_ID::internal::InternalMetadataWithArena _internal_metadata_;
+  ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField<std::string> value_;
+  mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
+  friend struct ::TableStruct_milvus_2eproto;
+};
+// -------------------------------------------------------------------
+
 class HEntity :
     public ::PROTOBUF_NAMESPACE_ID::Message /* @@protoc_insertion_point(class_definition:milvus.grpc.HEntity) */ {
  public:
@@ -7224,7 +7357,7 @@ class HEntity :
                &_HEntity_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    43;
+    44;
 
   friend void swap(HEntity& a, HEntity& b) {
     a.Swap(&b);
@@ -7296,7 +7429,7 @@ class HEntity :
 
   enum : int {
     kFieldNamesFieldNumber = 3,
-    kValuesFieldNumber = 4,
+    kAttrRecordsFieldNumber = 4,
     kResultValuesFieldNumber = 5,
     kStatusFieldNumber = 1,
     kEntityIdFieldNumber = 2,
@@ -7318,22 +7451,16 @@ class HEntity :
   const ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField<std::string>& field_names() const;
   ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField<std::string>* mutable_field_names();
 
-  // repeated string values = 4;
-  int values_size() const;
-  void clear_values();
-  const std::string& values(int index) const;
-  std::string* mutable_values(int index);
-  void set_values(int index, const std::string& value);
-  void set_values(int index, std::string&& value);
-  void set_values(int index, const char* value);
-  void set_values(int index, const char* value, size_t size);
-  std::string* add_values();
-  void add_values(const std::string& value);
-  void add_values(std::string&& value);
-  void add_values(const char* value);
-  void add_values(const char* value, size_t size);
-  const ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField<std::string>& values() const;
-  ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField<std::string>* mutable_values();
+  // repeated .milvus.grpc.AttrRecord attr_records = 4;
+  int attr_records_size() const;
+  void clear_attr_records();
+  ::milvus::grpc::AttrRecord* mutable_attr_records(int index);
+  ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField< ::milvus::grpc::AttrRecord >*
+      mutable_attr_records();
+  const ::milvus::grpc::AttrRecord& attr_records(int index) const;
+  ::milvus::grpc::AttrRecord* add_attr_records();
+  const ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField< ::milvus::grpc::AttrRecord >&
+      attr_records() const;
 
   // repeated .milvus.grpc.FieldValue result_values = 5;
   int result_values_size() const;
@@ -7365,7 +7492,7 @@ class HEntity :
 
   ::PROTOBUF_NAMESPACE_ID::internal::InternalMetadataWithArena _internal_metadata_;
   ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField<std::string> field_names_;
-  ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField<std::string> values_;
+  ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField< ::milvus::grpc::AttrRecord > attr_records_;
   ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField< ::milvus::grpc::FieldValue > result_values_;
   ::milvus::grpc::Status* status_;
   ::PROTOBUF_NAMESPACE_ID::int64 entity_id_;
@@ -7416,7 +7543,7 @@ class HQueryResult :
                &_HQueryResult_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    44;
+    45;
 
   friend void swap(HQueryResult& a, HQueryResult& b) {
     a.Swap(&b);
@@ -7598,7 +7725,7 @@ class HInsertParam :
                &_HInsertParam_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    45;
+    46;
 
   friend void swap(HInsertParam& a, HInsertParam& b) {
     a.Swap(&b);
@@ -7785,7 +7912,7 @@ class HEntityIdentity :
                &_HEntityIdentity_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    46;
+    47;
 
   friend void swap(HEntityIdentity& a, HEntityIdentity& b) {
     a.Swap(&b);
@@ -7929,7 +8056,7 @@ class HEntityIDs :
                &_HEntityIDs_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    47;
+    48;
 
   friend void swap(HEntityIDs& a, HEntityIDs& b) {
     a.Swap(&b);
@@ -8077,7 +8204,7 @@ class HGetEntityIDsParam :
                &_HGetEntityIDsParam_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    48;
+    49;
 
   friend void swap(HGetEntityIDsParam& a, HGetEntityIDsParam& b) {
     a.Swap(&b);
@@ -8227,7 +8354,7 @@ class HDeleteByIDParam :
                &_HDeleteByIDParam_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    49;
+    50;
 
   friend void swap(HDeleteByIDParam& a, HDeleteByIDParam& b) {
     a.Swap(&b);
@@ -8378,7 +8505,7 @@ class CollectionRowCount :
                &_CollectionRowCount_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    50;
+    51;
 
   friend void swap(CollectionRowCount& a, CollectionRowCount& b) {
     a.Swap(&b);
@@ -8519,7 +8646,7 @@ class CollectionInfo :
                &_CollectionInfo_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    51;
+    52;
 
   friend void swap(CollectionInfo& a, CollectionInfo& b) {
     a.Swap(&b);
@@ -8673,7 +8800,7 @@ class HIndexParam :
                &_HIndexParam_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    52;
+    53;
 
   friend void swap(HIndexParam& a, HIndexParam& b) {
     a.Swap(&b);
@@ -11627,124 +11754,94 @@ inline void GetVectorIDsParam::set_allocated_segment_name(std::string* segment_n
 
 // -------------------------------------------------------------------
 
-// VectorFieldInfo
+// VectorFieldParam
 
 // int64 dimension = 1;
-inline void VectorFieldInfo::clear_dimension() {
+inline void VectorFieldParam::clear_dimension() {
   dimension_ = PROTOBUF_LONGLONG(0);
 }
-inline ::PROTOBUF_NAMESPACE_ID::int64 VectorFieldInfo::dimension() const {
-  // @@protoc_insertion_point(field_get:milvus.grpc.VectorFieldInfo.dimension)
+inline ::PROTOBUF_NAMESPACE_ID::int64 VectorFieldParam::dimension() const {
+  // @@protoc_insertion_point(field_get:milvus.grpc.VectorFieldParam.dimension)
   return dimension_;
 }
-inline void VectorFieldInfo::set_dimension(::PROTOBUF_NAMESPACE_ID::int64 value) {
+inline void VectorFieldParam::set_dimension(::PROTOBUF_NAMESPACE_ID::int64 value) {
   
   dimension_ = value;
-  // @@protoc_insertion_point(field_set:milvus.grpc.VectorFieldInfo.dimension)
-}
-
-// repeated .milvus.grpc.KeyValuePair extra_params = 2;
-inline int VectorFieldInfo::extra_params_size() const {
-  return extra_params_.size();
-}
-inline void VectorFieldInfo::clear_extra_params() {
-  extra_params_.Clear();
-}
-inline ::milvus::grpc::KeyValuePair* VectorFieldInfo::mutable_extra_params(int index) {
-  // @@protoc_insertion_point(field_mutable:milvus.grpc.VectorFieldInfo.extra_params)
-  return extra_params_.Mutable(index);
-}
-inline ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField< ::milvus::grpc::KeyValuePair >*
-VectorFieldInfo::mutable_extra_params() {
-  // @@protoc_insertion_point(field_mutable_list:milvus.grpc.VectorFieldInfo.extra_params)
-  return &extra_params_;
-}
-inline const ::milvus::grpc::KeyValuePair& VectorFieldInfo::extra_params(int index) const {
-  // @@protoc_insertion_point(field_get:milvus.grpc.VectorFieldInfo.extra_params)
-  return extra_params_.Get(index);
-}
-inline ::milvus::grpc::KeyValuePair* VectorFieldInfo::add_extra_params() {
-  // @@protoc_insertion_point(field_add:milvus.grpc.VectorFieldInfo.extra_params)
-  return extra_params_.Add();
-}
-inline const ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField< ::milvus::grpc::KeyValuePair >&
-VectorFieldInfo::extra_params() const {
-  // @@protoc_insertion_point(field_list:milvus.grpc.VectorFieldInfo.extra_params)
-  return extra_params_;
+  // @@protoc_insertion_point(field_set:milvus.grpc.VectorFieldParam.dimension)
 }
 
 // -------------------------------------------------------------------
 
 // FieldType
 
-// .milvus.grpc.DataType type = 1;
-inline bool FieldType::has_type() const {
-  return value_case() == kType;
+// .milvus.grpc.DataType data_type = 1;
+inline bool FieldType::has_data_type() const {
+  return value_case() == kDataType;
 }
-inline void FieldType::set_has_type() {
-  _oneof_case_[0] = kType;
+inline void FieldType::set_has_data_type() {
+  _oneof_case_[0] = kDataType;
 }
-inline void FieldType::clear_type() {
-  if (has_type()) {
-    value_.type_ = 0;
+inline void FieldType::clear_data_type() {
+  if (has_data_type()) {
+    value_.data_type_ = 0;
     clear_has_value();
   }
 }
-inline ::milvus::grpc::DataType FieldType::type() const {
-  // @@protoc_insertion_point(field_get:milvus.grpc.FieldType.type)
-  if (has_type()) {
-    return static_cast< ::milvus::grpc::DataType >(value_.type_);
+inline ::milvus::grpc::DataType FieldType::data_type() const {
+  // @@protoc_insertion_point(field_get:milvus.grpc.FieldType.data_type)
+  if (has_data_type()) {
+    return static_cast< ::milvus::grpc::DataType >(value_.data_type_);
   }
   return static_cast< ::milvus::grpc::DataType >(0);
 }
-inline void FieldType::set_type(::milvus::grpc::DataType value) {
-  if (!has_type()) {
+inline void FieldType::set_data_type(::milvus::grpc::DataType value) {
+  if (!has_data_type()) {
     clear_value();
-    set_has_type();
+    set_has_data_type();
   }
-  value_.type_ = value;
-  // @@protoc_insertion_point(field_set:milvus.grpc.FieldType.type)
+  value_.data_type_ = value;
+  // @@protoc_insertion_point(field_set:milvus.grpc.FieldType.data_type)
 }
 
-// .milvus.grpc.VectorFieldInfo info = 2;
-inline bool FieldType::has_info() const {
-  return value_case() == kInfo;
+// .milvus.grpc.VectorFieldParam vector_param = 2;
+inline bool FieldType::has_vector_param() const {
+  return value_case() == kVectorParam;
 }
-inline void FieldType::set_has_info() {
-  _oneof_case_[0] = kInfo;
+inline void FieldType::set_has_vector_param() {
+  _oneof_case_[0] = kVectorParam;
 }
-inline void FieldType::clear_info() {
-  if (has_info()) {
-    delete value_.info_;
+inline void FieldType::clear_vector_param() {
+  if (has_vector_param()) {
+    delete value_.vector_param_;
     clear_has_value();
   }
 }
-inline ::milvus::grpc::VectorFieldInfo* FieldType::release_info() {
-  // @@protoc_insertion_point(field_release:milvus.grpc.FieldType.info)
-  if (has_info()) {
+inline ::milvus::grpc::VectorFieldParam* FieldType::release_vector_param() {
+  // @@protoc_insertion_point(field_release:milvus.grpc.FieldType.vector_param)
+  if (has_vector_param()) {
     clear_has_value();
-      ::milvus::grpc::VectorFieldInfo* temp = value_.info_;
-    value_.info_ = nullptr;
+      ::milvus::grpc::VectorFieldParam* temp = value_.vector_param_;
+    value_.vector_param_ = nullptr;
     return temp;
   } else {
     return nullptr;
   }
 }
-inline const ::milvus::grpc::VectorFieldInfo& FieldType::info() const {
-  // @@protoc_insertion_point(field_get:milvus.grpc.FieldType.info)
-  return has_info()
-      ? *value_.info_
-      : *reinterpret_cast< ::milvus::grpc::VectorFieldInfo*>(&::milvus::grpc::_VectorFieldInfo_default_instance_);
+inline const ::milvus::grpc::VectorFieldParam& FieldType::vector_param() const {
+  // @@protoc_insertion_point(field_get:milvus.grpc.FieldType.vector_param)
+  return has_vector_param()
+      ? *value_.vector_param_
+      : *reinterpret_cast< ::milvus::grpc::VectorFieldParam*>(&::milvus::grpc::_VectorFieldParam_default_instance_);
 }
-inline ::milvus::grpc::VectorFieldInfo* FieldType::mutable_info() {
-  if (!has_info()) {
+inline ::milvus::grpc::VectorFieldParam* FieldType::mutable_vector_param() {
+  if (!has_vector_param()) {
     clear_value();
-    set_has_info();
-    value_.info_ = CreateMaybeMessage< ::milvus::grpc::VectorFieldInfo >(
+    set_has_vector_param();
+    value_.vector_param_ = CreateMaybeMessage< ::milvus::grpc::VectorFieldParam >(
         GetArenaNoVirtual());
   }
-  // @@protoc_insertion_point(field_mutable:milvus.grpc.FieldType.info)
-  return value_.info_;
+  // @@protoc_insertion_point(field_mutable:milvus.grpc.FieldType.vector_param)
+  return value_.vector_param_;
 }
 
 inline bool FieldType::has_value() const {
@@ -11876,89 +11973,68 @@ inline void FieldParam::set_allocated_type(::milvus::grpc::FieldType* type) {
   // @@protoc_insertion_point(field_set_allocated:milvus.grpc.FieldParam.type)
 }
 
+// repeated .milvus.grpc.KeyValuePair extra_params = 4;
+inline int FieldParam::extra_params_size() const {
+  return extra_params_.size();
+}
+inline void FieldParam::clear_extra_params() {
+  extra_params_.Clear();
+}
+inline ::milvus::grpc::KeyValuePair* FieldParam::mutable_extra_params(int index) {
+  // @@protoc_insertion_point(field_mutable:milvus.grpc.FieldParam.extra_params)
+  return extra_params_.Mutable(index);
+}
+inline ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField< ::milvus::grpc::KeyValuePair >*
+FieldParam::mutable_extra_params() {
+  // @@protoc_insertion_point(field_mutable_list:milvus.grpc.FieldParam.extra_params)
+  return &extra_params_;
+}
+inline const ::milvus::grpc::KeyValuePair& FieldParam::extra_params(int index) const {
+  // @@protoc_insertion_point(field_get:milvus.grpc.FieldParam.extra_params)
+  return extra_params_.Get(index);
+}
+inline ::milvus::grpc::KeyValuePair* FieldParam::add_extra_params() {
+  // @@protoc_insertion_point(field_add:milvus.grpc.FieldParam.extra_params)
+  return extra_params_.Add();
+}
+inline const ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField< ::milvus::grpc::KeyValuePair >&
+FieldParam::extra_params() const {
+  // @@protoc_insertion_point(field_list:milvus.grpc.FieldParam.extra_params)
+  return extra_params_;
+}
+
 // -------------------------------------------------------------------
 
 // VectorFieldValue
 
-// repeated float float_value = 1;
-inline int VectorFieldValue::float_value_size() const {
-  return float_value_.size();
+// repeated .milvus.grpc.RowRecord value = 1;
+inline int VectorFieldValue::value_size() const {
+  return value_.size();
 }
-inline void VectorFieldValue::clear_float_value() {
-  float_value_.Clear();
+inline void VectorFieldValue::clear_value() {
+  value_.Clear();
 }
-inline float VectorFieldValue::float_value(int index) const {
-  // @@protoc_insertion_point(field_get:milvus.grpc.VectorFieldValue.float_value)
-  return float_value_.Get(index);
+inline ::milvus::grpc::RowRecord* VectorFieldValue::mutable_value(int index) {
+  // @@protoc_insertion_point(field_mutable:milvus.grpc.VectorFieldValue.value)
+  return value_.Mutable(index);
 }
-inline void VectorFieldValue::set_float_value(int index, float value) {
-  float_value_.Set(index, value);
-  // @@protoc_insertion_point(field_set:milvus.grpc.VectorFieldValue.float_value)
+inline ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField< ::milvus::grpc::RowRecord >*
+VectorFieldValue::mutable_value() {
+  // @@protoc_insertion_point(field_mutable_list:milvus.grpc.VectorFieldValue.value)
+  return &value_;
 }
-inline void VectorFieldValue::add_float_value(float value) {
-  float_value_.Add(value);
-  // @@protoc_insertion_point(field_add:milvus.grpc.VectorFieldValue.float_value)
+inline const ::milvus::grpc::RowRecord& VectorFieldValue::value(int index) const {
+  // @@protoc_insertion_point(field_get:milvus.grpc.VectorFieldValue.value)
+  return value_.Get(index);
 }
-inline const ::PROTOBUF_NAMESPACE_ID::RepeatedField< float >&
-VectorFieldValue::float_value() const {
-  // @@protoc_insertion_point(field_list:milvus.grpc.VectorFieldValue.float_value)
-  return float_value_;
+inline ::milvus::grpc::RowRecord* VectorFieldValue::add_value() {
+  // @@protoc_insertion_point(field_add:milvus.grpc.VectorFieldValue.value)
+  return value_.Add();
 }
-inline ::PROTOBUF_NAMESPACE_ID::RepeatedField< float >*
-VectorFieldValue::mutable_float_value() {
-  // @@protoc_insertion_point(field_mutable_list:milvus.grpc.VectorFieldValue.float_value)
-  return &float_value_;
-}
-
-// bytes binary_value = 2;
-inline void VectorFieldValue::clear_binary_value() {
-  binary_value_.ClearToEmptyNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
-}
-inline const std::string& VectorFieldValue::binary_value() const {
-  // @@protoc_insertion_point(field_get:milvus.grpc.VectorFieldValue.binary_value)
-  return binary_value_.GetNoArena();
-}
-inline void VectorFieldValue::set_binary_value(const std::string& value) {
-  
-  binary_value_.SetNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(), value);
-  // @@protoc_insertion_point(field_set:milvus.grpc.VectorFieldValue.binary_value)
-}
-inline void VectorFieldValue::set_binary_value(std::string&& value) {
-  
-  binary_value_.SetNoArena(
-    &::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(), ::std::move(value));
-  // @@protoc_insertion_point(field_set_rvalue:milvus.grpc.VectorFieldValue.binary_value)
-}
-inline void VectorFieldValue::set_binary_value(const char* value) {
-  GOOGLE_DCHECK(value != nullptr);
-  
-  binary_value_.SetNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(), ::std::string(value));
-  // @@protoc_insertion_point(field_set_char:milvus.grpc.VectorFieldValue.binary_value)
-}
-inline void VectorFieldValue::set_binary_value(const void* value, size_t size) {
-  
-  binary_value_.SetNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(),
-      ::std::string(reinterpret_cast<const char*>(value), size));
-  // @@protoc_insertion_point(field_set_pointer:milvus.grpc.VectorFieldValue.binary_value)
-}
-inline std::string* VectorFieldValue::mutable_binary_value() {
-  
-  // @@protoc_insertion_point(field_mutable:milvus.grpc.VectorFieldValue.binary_value)
-  return binary_value_.MutableNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
-}
-inline std::string* VectorFieldValue::release_binary_value() {
-  // @@protoc_insertion_point(field_release:milvus.grpc.VectorFieldValue.binary_value)
-  
-  return binary_value_.ReleaseNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
-}
-inline void VectorFieldValue::set_allocated_binary_value(std::string* binary_value) {
-  if (binary_value != nullptr) {
-    
-  } else {
-    
-  }
-  binary_value_.SetAllocatedNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(), binary_value);
-  // @@protoc_insertion_point(field_set_allocated:milvus.grpc.VectorFieldValue.binary_value)
+inline const ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField< ::milvus::grpc::RowRecord >&
+VectorFieldValue::value() const {
+  // @@protoc_insertion_point(field_list:milvus.grpc.VectorFieldValue.value)
+  return value_;
 }
 
 // -------------------------------------------------------------------
@@ -13631,6 +13707,75 @@ inline void HSearchInSegmentsParam::set_allocated_search_param(::milvus::grpc::H
 
 // -------------------------------------------------------------------
 
+// AttrRecord
+
+// repeated string value = 1;
+inline int AttrRecord::value_size() const {
+  return value_.size();
+}
+inline void AttrRecord::clear_value() {
+  value_.Clear();
+}
+inline const std::string& AttrRecord::value(int index) const {
+  // @@protoc_insertion_point(field_get:milvus.grpc.AttrRecord.value)
+  return value_.Get(index);
+}
+inline std::string* AttrRecord::mutable_value(int index) {
+  // @@protoc_insertion_point(field_mutable:milvus.grpc.AttrRecord.value)
+  return value_.Mutable(index);
+}
+inline void AttrRecord::set_value(int index, const std::string& value) {
+  // @@protoc_insertion_point(field_set:milvus.grpc.AttrRecord.value)
+  value_.Mutable(index)->assign(value);
+}
+inline void AttrRecord::set_value(int index, std::string&& value) {
+  // @@protoc_insertion_point(field_set:milvus.grpc.AttrRecord.value)
+  value_.Mutable(index)->assign(std::move(value));
+}
+inline void AttrRecord::set_value(int index, const char* value) {
+  GOOGLE_DCHECK(value != nullptr);
+  value_.Mutable(index)->assign(value);
+  // @@protoc_insertion_point(field_set_char:milvus.grpc.AttrRecord.value)
+}
+inline void AttrRecord::set_value(int index, const char* value, size_t size) {
+  value_.Mutable(index)->assign(
+    reinterpret_cast<const char*>(value), size);
+  // @@protoc_insertion_point(field_set_pointer:milvus.grpc.AttrRecord.value)
+}
+inline std::string* AttrRecord::add_value() {
+  // @@protoc_insertion_point(field_add_mutable:milvus.grpc.AttrRecord.value)
+  return value_.Add();
+}
+inline void AttrRecord::add_value(const std::string& value) {
+  value_.Add()->assign(value);
+  // @@protoc_insertion_point(field_add:milvus.grpc.AttrRecord.value)
+}
+inline void AttrRecord::add_value(std::string&& value) {
+  value_.Add(std::move(value));
+  // @@protoc_insertion_point(field_add:milvus.grpc.AttrRecord.value)
+}
+inline void AttrRecord::add_value(const char* value) {
+  GOOGLE_DCHECK(value != nullptr);
+  value_.Add()->assign(value);
+  // @@protoc_insertion_point(field_add_char:milvus.grpc.AttrRecord.value)
+}
+inline void AttrRecord::add_value(const char* value, size_t size) {
+  value_.Add()->assign(reinterpret_cast<const char*>(value), size);
+  // @@protoc_insertion_point(field_add_pointer:milvus.grpc.AttrRecord.value)
+}
+inline const ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField<std::string>&
+AttrRecord::value() const {
+  // @@protoc_insertion_point(field_list:milvus.grpc.AttrRecord.value)
+  return value_;
+}
+inline ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField<std::string>*
+AttrRecord::mutable_value() {
+  // @@protoc_insertion_point(field_mutable_list:milvus.grpc.AttrRecord.value)
+  return &value_;
+}
+
+// -------------------------------------------------------------------
+
 // HEntity
 
 // .milvus.grpc.Status status = 1;
@@ -13757,69 +13902,34 @@ HEntity::mutable_field_names() {
   return &field_names_;
 }
 
-// repeated string values = 4;
-inline int HEntity::values_size() const {
-  return values_.size();
+// repeated .milvus.grpc.AttrRecord attr_records = 4;
+inline int HEntity::attr_records_size() const {
+  return attr_records_.size();
 }
-inline void HEntity::clear_values() {
-  values_.Clear();
+inline void HEntity::clear_attr_records() {
+  attr_records_.Clear();
 }
-inline const std::string& HEntity::values(int index) const {
-  // @@protoc_insertion_point(field_get:milvus.grpc.HEntity.values)
-  return values_.Get(index);
+inline ::milvus::grpc::AttrRecord* HEntity::mutable_attr_records(int index) {
+  // @@protoc_insertion_point(field_mutable:milvus.grpc.HEntity.attr_records)
+  return attr_records_.Mutable(index);
 }
-inline std::string* HEntity::mutable_values(int index) {
-  // @@protoc_insertion_point(field_mutable:milvus.grpc.HEntity.values)
-  return values_.Mutable(index);
+inline ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField< ::milvus::grpc::AttrRecord >*
+HEntity::mutable_attr_records() {
+  // @@protoc_insertion_point(field_mutable_list:milvus.grpc.HEntity.attr_records)
+  return &attr_records_;
 }
-inline void HEntity::set_values(int index, const std::string& value) {
-  // @@protoc_insertion_point(field_set:milvus.grpc.HEntity.values)
-  values_.Mutable(index)->assign(value);
+inline const ::milvus::grpc::AttrRecord& HEntity::attr_records(int index) const {
+  // @@protoc_insertion_point(field_get:milvus.grpc.HEntity.attr_records)
+  return attr_records_.Get(index);
 }
-inline void HEntity::set_values(int index, std::string&& value) {
-  // @@protoc_insertion_point(field_set:milvus.grpc.HEntity.values)
-  values_.Mutable(index)->assign(std::move(value));
+inline ::milvus::grpc::AttrRecord* HEntity::add_attr_records() {
+  // @@protoc_insertion_point(field_add:milvus.grpc.HEntity.attr_records)
+  return attr_records_.Add();
 }
-inline void HEntity::set_values(int index, const char* value) {
-  GOOGLE_DCHECK(value != nullptr);
-  values_.Mutable(index)->assign(value);
-  // @@protoc_insertion_point(field_set_char:milvus.grpc.HEntity.values)
-}
-inline void HEntity::set_values(int index, const char* value, size_t size) {
-  values_.Mutable(index)->assign(
-    reinterpret_cast<const char*>(value), size);
-  // @@protoc_insertion_point(field_set_pointer:milvus.grpc.HEntity.values)
-}
-inline std::string* HEntity::add_values() {
-  // @@protoc_insertion_point(field_add_mutable:milvus.grpc.HEntity.values)
-  return values_.Add();
-}
-inline void HEntity::add_values(const std::string& value) {
-  values_.Add()->assign(value);
-  // @@protoc_insertion_point(field_add:milvus.grpc.HEntity.values)
-}
-inline void HEntity::add_values(std::string&& value) {
-  values_.Add(std::move(value));
-  // @@protoc_insertion_point(field_add:milvus.grpc.HEntity.values)
-}
-inline void HEntity::add_values(const char* value) {
-  GOOGLE_DCHECK(value != nullptr);
-  values_.Add()->assign(value);
-  // @@protoc_insertion_point(field_add_char:milvus.grpc.HEntity.values)
-}
-inline void HEntity::add_values(const char* value, size_t size) {
-  values_.Add()->assign(reinterpret_cast<const char*>(value), size);
-  // @@protoc_insertion_point(field_add_pointer:milvus.grpc.HEntity.values)
-}
-inline const ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField<std::string>&
-HEntity::values() const {
-  // @@protoc_insertion_point(field_list:milvus.grpc.HEntity.values)
-  return values_;
-}
-inline ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField<std::string>*
-HEntity::mutable_values() {
-  // @@protoc_insertion_point(field_mutable_list:milvus.grpc.HEntity.values)
-  return &values_;
+inline const ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField< ::milvus::grpc::AttrRecord >&
+HEntity::attr_records() const {
+  // @@protoc_insertion_point(field_list:milvus.grpc.HEntity.attr_records)
+  return attr_records_;
 }
 
 // repeated .milvus.grpc.FieldValue result_values = 5;
@@ -14864,6 +14974,8 @@ HIndexParam::extra_params() const {
 #ifdef __GNUC__
   #pragma GCC diagnostic pop
 #endif  // __GNUC__
+// -------------------------------------------------------------------
+
 // -------------------------------------------------------------------
 
 // -------------------------------------------------------------------

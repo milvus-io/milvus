@@ -25,25 +25,25 @@ namespace milvus {
 namespace server {
 
 CreateCollectionRequest::CreateCollectionRequest(const std::shared_ptr<Context>& context,
-                                                 std::string& collection_name,
-                                                 std::vector<std::string>& field_names,
-                                                 std::vector<std::string>& field_types,
-                                                 const std::vector<std::string>& field_params)
+                                                 const std::string& collection_name,
+                                                 std::vector<std::pair<std::string, engine::meta::hybrid::DataType>>& field_types,
+                                                 std::vector<std::pair<std::string, uint64_t>>& vector_dimensions,
+                                                 std::vector<std::pair<std::string, std::string>>& field_params)
     : BaseRequest(context, DDL_DML_REQUEST_GROUP),
       collection_name_(collection_name),
-      field_names_(field_names),
       field_types_(field_types),
+      vector_dimensions_(vector_dimensions),
       field_params_(field_params) {
 }
 
 BaseRequestPtr
 CreateCollectionRequest::Create(const std::shared_ptr<Context>& context,
-                                std::string& collection_name,
-                                std::vector<std::string>& field_names,
-                                std::vector<std::string>& field_types,
-                                const std::vector<std::string>& field_params) {
+                                const std::string& collection_name,
+                                std::vector<std::pair<std::string, engine::meta::hybrid::DataType>>& field_types,
+                                std::vector<std::pair<std::string, uint64_t>>& vector_dimensions,
+                                std::vector<std::pair<std::string, std::string>>& field_params) {
     return std::shared_ptr<BaseRequest>(
-        new CreateCollectionRequest(context, collection_name, field_names, field_types, field_params));
+        new CreateCollectionRequest(context, collection_name, field_types, vector_dimensions, field_params));
 }
 
 Status
@@ -64,13 +64,14 @@ CreateCollectionRequest::OnExecute() {
         engine::meta::hybrid::CollectionSchema collection_info;
         engine::meta::hybrid::FieldsSchema fields_schema;
 
+        auto size = field_types_.size();
         collection_info.collection_id_ = collection_name_;
-        collection_info.field_num = field_names_.size();
-        fields_schema.fields_schema_.resize(field_names_.size());
-        for (uint64_t i = 0; i < field_names_.size(); ++i) {
-            fields_schema.fields_schema_[i].field_name_ = field_names_[i];
-            fields_schema.fields_schema_[i].field_type_ = field_types_[i];
-            fields_schema.fields_schema_[i].field_params_ = field_params_[i];
+        collection_info.field_num = size;
+        fields_schema.fields_schema_.resize(size);
+        for (uint64_t i = 0; i < size; ++i) {
+            fields_schema.fields_schema_[i].field_name_ =  field_types_[i].first;
+            fields_schema.fields_schema_[i].field_type_ = (int32_t)field_types_[i].second;
+            fields_schema.fields_schema_[i].field_params_ = field_params_[i].second;
         }
 
         // TODO(yukun): check dimension, metric_type, and assign engine_type

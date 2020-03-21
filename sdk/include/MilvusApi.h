@@ -156,7 +156,7 @@ struct HMapping {
 };
 
 struct HEntity {
-    std::unordered_map<std::string, std::string> numerica_value;
+    std::unordered_map<std::string, std::vector<std::string>> numerica_value;
     std::unordered_map<std::string, std::vector<Entity>> vector_value;
 };
 
