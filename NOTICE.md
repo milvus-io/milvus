@@ -21,3 +21,4 @@
 | aws-sdk-cpp      | [Apache 2.0](https://github.com/aws/aws-sdk-cpp/blob/master/LICENSE)                                                           |
 | SPTAG            | [MIT](https://github.com/microsoft/SPTAG/blob/master/LICENSE)                                                                  |
 | hnswlib          | [Apache 2.0](https://github.com/nmslib/hnswlib/blob/master/LICENSE)                                                            |
+| annoy            | [Apache 2.0](https://github.com/spotify/annoy/blob/master/LICENSE)                                                             |
