@@ -1,3 +1,4 @@
+import ujson
 from milvus import Status
 from functools import wraps
 
@@ -21,14 +22,13 @@ class GrpcArgsParser(object):
     @error_status
     def parse_proto_TableSchema(cls, param):
         _table_schema = {
-            'status': param.status,
-            'table_name': param.table_name,
+            'collection_name': param.table_name,
             'dimension': param.dimension,
             'index_file_size': param.index_file_size,
             'metric_type': param.metric_type
         }
 
-        return _table_schema
+        return param.status, _table_schema
 
     @classmethod
     @error_status
@@ -37,10 +37,15 @@ class GrpcArgsParser(object):
 
     @classmethod
     @error_status
+    def parse_proto_FlushParam(cls, param):
+        return list(param.table_name_array)
+
+    @classmethod
+    @error_status
     def parse_proto_Index(cls, param):
         _index = {
             'index_type': param.index_type,
-            'nlist': param.nlist
+            'params': param.extra_params[0].value
         }
 
         return _index
@@ -49,12 +54,14 @@ class GrpcArgsParser(object):
     @error_status
     def parse_proto_IndexParam(cls, param):
         _table_name = param.table_name
-        _status, _index = cls.parse_proto_Index(param.index)
+        _index_type = param.index_type
+        _index_param = {}
 
-        if not _status.OK():
-            raise Exception("Argument parse error")
+        for params in param.extra_params:
+            if params.key == 'params':
+                _index_param = ujson.loads(str(params.value))
 
-        return _table_name, _index
+        return _table_name, _index_type, _index_param
 
     @classmethod
     @error_status
@@ -65,46 +72,58 @@ class GrpcArgsParser(object):
 
     @classmethod
     @error_status
-    def parse_proto_Range(cls, param):
-        _start_value = param.start_value
-        _end_value = param.end_value
-
-        return _start_value, _end_value
-
-    @classmethod
-    @error_status
     def parse_proto_RowRecord(cls, param):
         return list(param.vector_data)
 
     @classmethod
     def parse_proto_PartitionParam(cls, param):
         _table_name = param.table_name
-        _partition_name = param.partition_name
         _tag = param.tag
 
-        return _table_name, _partition_name, _tag
+        return _table_name, _tag
 
     @classmethod
     @error_status
     def parse_proto_SearchParam(cls, param):
         _table_name = param.table_name
         _topk = param.topk
-        _nprobe = param.nprobe
-        _status, _range = cls.parse_proto_Range(param.query_range_array)
 
-        if not _status.OK():
-            raise Exception("Argument parse error")
+        if len(param.extra_params) == 0:
+            raise Exception("Search param loss")
+        _params = ujson.loads(str(param.extra_params[0].value))
 
-        _row_record = param.query_record_array
+        _query_record_array = []
+        if param.query_record_array:
+            for record in param.query_record_array:
+                if record.float_data:
+                    _query_record_array.append(list(record.float_data))
+                else:
+                    _query_record_array.append(bytes(record.binary_data))
+        else:
+            raise Exception("Search argument parse error: record array is empty")
 
-        return _table_name, _row_record, _range, _topk
+        return _table_name, _query_record_array, _topk, _params
 
     @classmethod
     @error_status
-    def parse_proto_DeleteByRangeParam(cls, param):
+    def parse_proto_DeleteByIDParam(cls, param):
         _table_name = param.table_name
-        _range = param.range
-        _start_value = _range.start_value
-        _end_value = _range.end_value
+        _id_array = list(param.id_array)
 
-        return _table_name, _start_value, _end_value
+        return _table_name, _id_array
+
+    @classmethod
+    @error_status
+    def parse_proto_VectorIdentity(cls, param):
+        _table_name = param.table_name
+        _id = param.id
+
+        return _table_name, _id
+
+    @classmethod
+    @error_status
+    def parse_proto_GetVectorIDsParam(cls, param):
+        _table__name = param.table_name
+        _segment_name = param.segment_name
+
+        return _table__name, _segment_name

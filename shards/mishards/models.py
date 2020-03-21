@@ -23,6 +23,7 @@ class TableFiles(db.Model):
 
     id = Column(BigInteger, primary_key=True, autoincrement=True)
     table_id = Column(String(50))
+    segment_id = Column(String(50))
     engine_type = Column(Integer)
     file_id = Column(String(50))
     file_type = Column(Integer)
@@ -31,6 +32,7 @@ class TableFiles(db.Model):
     updated_time = Column(BigInteger)
     created_on = Column(BigInteger)
     date = Column(Integer)
+    flush_lsn = Column(Integer)
 
     table = relationship(
         'Tables',
@@ -55,9 +57,10 @@ class Tables(db.Model):
     created_on = Column(Integer)
     flag = Column(Integer, default=0)
     index_file_size = Column(Integer)
+    index_params = Column(String(50))
     engine_type = Column(Integer)
-    nlist = Column(Integer)
     metric_type = Column(Integer)
+    flush_lsn = Column(Integer)
 
     def files_to_search(self, date_range=None):
         cond = or_(
