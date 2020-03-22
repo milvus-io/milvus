@@ -44,7 +44,7 @@ ConcurrentBitset::capacity() {
 
 size_t
 ConcurrentBitset::size() {
-    return bitset_.size();
+    return ((capacity_ + 8 - 1) >> 3);
 }
 
 const uint8_t*
