@@ -1,5 +1,4 @@
 import pdb
-import copy
 import struct
 from random import sample
 
