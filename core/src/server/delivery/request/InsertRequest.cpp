@@ -28,7 +28,7 @@
 namespace milvus {
 namespace server {
 
-InsertRequest::InsertRequest(const std::shared_ptr<Context>& context, const std::string& table_name,
+InsertRequest::InsertRequest(const std::shared_ptr<milvus::server::Context>& context, const std::string& table_name,
                              engine::VectorsData& vectors, const std::string& partition_tag)
     : BaseRequest(context, BaseRequest::kInsert),
       table_name_(table_name),
@@ -37,7 +37,7 @@ InsertRequest::InsertRequest(const std::shared_ptr<Context>& context, const std:
 }
 
 BaseRequestPtr
-InsertRequest::Create(const std::shared_ptr<Context>& context, const std::string& table_name,
+InsertRequest::Create(const std::shared_ptr<milvus::server::Context>& context, const std::string& table_name,
                       engine::VectorsData& vectors, const std::string& partition_tag) {
     return std::shared_ptr<BaseRequest>(new InsertRequest(context, table_name, vectors, partition_tag));
 }

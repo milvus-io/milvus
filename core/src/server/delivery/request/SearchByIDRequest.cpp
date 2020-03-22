@@ -33,9 +33,10 @@
 namespace milvus {
 namespace server {
 
-SearchByIDRequest::SearchByIDRequest(const std::shared_ptr<Context>& context, const std::string& table_name,
-                                     int64_t vector_id, int64_t topk, const milvus::json& extra_params,
-                                     const std::vector<std::string>& partition_list, TopKQueryResult& result)
+SearchByIDRequest::SearchByIDRequest(const std::shared_ptr<milvus::server::Context>& context,
+                                     const std::string& table_name, int64_t vector_id, int64_t topk,
+                                     const milvus::json& extra_params, const std::vector<std::string>& partition_list,
+                                     TopKQueryResult& result)
     : BaseRequest(context, BaseRequest::kSearchByID),
       table_name_(table_name),
       vector_id_(vector_id),
@@ -46,8 +47,8 @@ SearchByIDRequest::SearchByIDRequest(const std::shared_ptr<Context>& context, co
 }
 
 BaseRequestPtr
-SearchByIDRequest::Create(const std::shared_ptr<Context>& context, const std::string& table_name, int64_t vector_id,
-                          int64_t topk, const milvus::json& extra_params,
+SearchByIDRequest::Create(const std::shared_ptr<milvus::server::Context>& context, const std::string& table_name,
+                          int64_t vector_id, int64_t topk, const milvus::json& extra_params,
                           const std::vector<std::string>& partition_list, TopKQueryResult& result) {
     return std::shared_ptr<BaseRequest>(
         new SearchByIDRequest(context, table_name, vector_id, topk, extra_params, partition_list, result));
@@ -71,7 +72,7 @@ SearchByIDRequest::OnExecute() {
             return status;
         }
 
-        // step 3: check search parameter
+        // step 3: check search topk
         status = ValidationUtil::ValidateSearchTopk(topk_);
         if (!status.ok()) {
             return status;

@@ -23,10 +23,11 @@ namespace server {
 class ShowTablesRequest : public BaseRequest {
  public:
     static BaseRequestPtr
-    Create(const std::shared_ptr<Context>& context, std::vector<std::string>& table_name_list);
+    Create(const std::shared_ptr<milvus::server::Context>& context, std::vector<std::string>& table_name_list);
 
  protected:
-    ShowTablesRequest(const std::shared_ptr<Context>& context, std::vector<std::string>& table_name_list);
+    ShowTablesRequest(const std::shared_ptr<milvus::server::Context>& context,
+                      std::vector<std::string>& table_name_list);
 
     Status
     OnExecute() override;

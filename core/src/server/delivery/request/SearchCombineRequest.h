@@ -15,17 +15,16 @@
 #include "server/delivery/request/SearchRequest.h"
 
 #include <memory>
+#include <set>
 #include <string>
 #include <vector>
-#include <set>
 
 namespace milvus {
 namespace server {
 
 class SearchCombineRequest : public BaseRequest {
  public:
-    explicit
-    SearchCombineRequest(const std::shared_ptr<Context>& context);
+    SearchCombineRequest();
 
     Status
     Combine(const SearchRequestPtr& request);

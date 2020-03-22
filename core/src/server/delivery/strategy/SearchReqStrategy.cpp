@@ -10,8 +10,8 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
 #include "server/delivery/strategy/SearchReqStrategy.h"
-#include "server/delivery/request/SearchRequest.h"
 #include "server/delivery/request/SearchCombineRequest.h"
+#include "server/delivery/request/SearchRequest.h"
 #include "utils/CommonUtil.h"
 #include "utils/Error.h"
 #include "utils/Log.h"
@@ -39,7 +39,7 @@ SearchReqStrategy::ReScheduleQueue(const BaseRequestPtr& request, RequestQueuePt
             queue->Take();
 
             // combine request
-            SearchCombineRequestPtr combine_request = std::make_shared<SearchCombineRequest>(nullptr);
+            SearchCombineRequestPtr combine_request = std::make_shared<SearchCombineRequest>();
             combine_request->Combine(last_search_req);
             combine_request->Combine(new_search_req);
             queue->Put(combine_request);
@@ -51,7 +51,7 @@ SearchReqStrategy::ReScheduleQueue(const BaseRequestPtr& request, RequestQueuePt
         SearchCombineRequestPtr combine_req = std::static_pointer_cast<SearchCombineRequest>(last_req);
         if (combine_req->CanCombine(new_search_req)) {
             // combine request
-            SearchCombineRequestPtr combine_request = std::make_shared<SearchCombineRequest>(nullptr);
+            SearchCombineRequestPtr combine_request = std::make_shared<SearchCombineRequest>();
             combine_request->Combine(new_search_req);
         } else {
             // directly put to queue

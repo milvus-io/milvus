@@ -28,8 +28,13 @@ ScheduleRequest(const BaseRequestPtr& request, RequestQueuePtr& queue) {
         return Status(SERVER_NULL_POINTER, "request schedule cannot handle null object");
     }
 
+    if (queue->Empty()) {
+        queue->Put(request);
+        return Status::OK();
+    }
+
     static std::map<BaseRequest::RequestType, RequestStrategyPtr> s_schedulers = {
-#if 1
+#if 0
         {BaseRequest::kSearch, std::make_shared<SearchReqStrategy>()}
 #endif
     };
@@ -43,7 +48,7 @@ ScheduleRequest(const BaseRequestPtr& request, RequestQueuePtr& queue) {
 
     return Status::OK();
 }
-}
+}  // namespace
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 RequestScheduler::RequestScheduler() : stopped_(false) {

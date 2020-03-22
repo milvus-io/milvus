@@ -21,12 +21,12 @@ namespace server {
 class CreateIndexRequest : public BaseRequest {
  public:
     static BaseRequestPtr
-    Create(const std::shared_ptr<Context>& context, const std::string& table_name, int64_t index_type,
+    Create(const std::shared_ptr<milvus::server::Context>& context, const std::string& table_name, int64_t index_type,
            const milvus::json& json_params);
 
  protected:
-    CreateIndexRequest(const std::shared_ptr<Context>& context, const std::string& table_name, int64_t index_type,
-                       const milvus::json& json_params);
+    CreateIndexRequest(const std::shared_ptr<milvus::server::Context>& context, const std::string& table_name,
+                       int64_t index_type, const milvus::json& json_params);
 
     Status
     OnExecute() override;
