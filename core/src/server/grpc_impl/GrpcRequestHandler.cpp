@@ -363,6 +363,8 @@ GrpcRequestHandler::Search(::grpc::ServerContext* context, const ::milvus::grpc:
                            ::milvus::grpc::TopKQueryResult* response) {
     CHECK_NULLPTR_RETURN(request);
 
+    SERVER_LOG_DEBUG << "Receive grpc Search request";
+
     // step 1: copy vector data
     engine::VectorsData vectors;
     CopyRowRecords(request->query_record_array(), google::protobuf::RepeatedField<google::protobuf::int64>(), vectors);

@@ -182,8 +182,8 @@ class BaseRequest {
         return status_;
     }
 
-    Status
-    set_status(ErrorCode error_code, const std::string& error_msg);
+    void
+    set_status(const Status& status);
 
     bool
     IsAsync() const {

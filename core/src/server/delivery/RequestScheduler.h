@@ -11,7 +11,7 @@
 
 #pragma once
 
-#include "server/delivery/strategy/RequestStrategy.h"
+#include "server/delivery/RequestQueue.h"
 #include "utils/Status.h"
 
 #include <map>

@@ -16,6 +16,7 @@
 #include "utils/Status.h"
 
 #include <memory>
+#include <queue>
 #include <string>
 #include <utility>
 #include <vector>
@@ -23,16 +24,13 @@
 namespace milvus {
 namespace server {
 
-using RequestQueue = BlockingQueue<BaseRequestPtr>;
-using RequestQueuePtr = std::shared_ptr<RequestQueue>;
-
 class RequestStrategy {
  protected:
     RequestStrategy() = default;
 
  public:
     virtual Status
-    ReScheduleQueue(const BaseRequestPtr& request, RequestQueuePtr& queue) = 0;
+    ReScheduleQueue(const BaseRequestPtr& request, std::queue<BaseRequestPtr>& queue) = 0;
 };
 
 using RequestStrategyPtr = std::shared_ptr<RequestStrategy>;

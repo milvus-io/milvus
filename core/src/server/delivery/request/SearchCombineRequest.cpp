@@ -52,6 +52,11 @@ IsSameList(const std::set<std::string>& left, const std::set<std::string>& right
     return true;
 }
 
+void
+FreeRequest(SearchRequestPtr& request, const Status& status) {
+    request->set_status(status);
+    request->Done();
+}
 }  // namespace
 
 SearchCombineRequest::SearchCombineRequest() : BaseRequest(nullptr, BaseRequest::kSearchCombine) {
@@ -164,57 +169,70 @@ SearchCombineRequest::CanCombine(const SearchRequestPtr& left, const SearchReque
 }
 
 Status
+SearchCombineRequest::FreeRequests(const Status& status) {
+    for (auto request : request_list_) {
+        FreeRequest(request, status);
+    }
+
+    return Status::OK();
+}
+
+Status
 SearchCombineRequest::OnExecute() {
     try {
         size_t combined_request = request_list_.size();
-        std::string hdr = "SearchCombineRequest(table=" + table_name_ +
-                          ", combined requests=" + std::to_string(combined_request) +
-                          ", k=" + std::to_string(search_topk_) + ", extra_params=" + extra_params_.dump() + ")";
+        SERVER_LOG_DEBUG << "SearchCombineRequest begin execute, combined requests=" << combined_request
+                         << ", extra_params=" << extra_params_.dump();
+        std::string hdr = "SearchCombineRequest(table=" + table_name_ + ")";
 
         TimeRecorder rc(hdr);
 
         // step 1: check table name
         auto status = ValidationUtil::ValidateTableName(table_name_);
         if (!status.ok()) {
+            FreeRequests(status);
             return status;
         }
 
-        // step 2: check search topk
-        if (search_topk_ > QUERY_MAX_TOPK) {
-            search_topk_ = QUERY_MAX_TOPK;
-        }
-        status = ValidationUtil::ValidateSearchTopk(search_topk_);
-        if (!status.ok()) {
-            return status;
-        }
-
-        // step 3: check table existence
+        // step 2: check table existence
         // only process root table, ignore partition table
         engine::meta::TableSchema table_schema;
         table_schema.table_id_ = table_name_;
         status = DBWrapper::DB()->DescribeTable(table_schema);
         if (!status.ok()) {
             if (status.code() == DB_NOT_FOUND) {
-                return Status(SERVER_TABLE_NOT_EXIST, TableNotExistMsg(table_name_));
+                status = Status(SERVER_TABLE_NOT_EXIST, TableNotExistMsg(table_name_));
+                FreeRequests(status);
+                return status;
             } else {
+                FreeRequests(status);
                 return status;
             }
         } else {
             if (!table_schema.owner_table_.empty()) {
-                return Status(SERVER_INVALID_TABLE_NAME, TableNotExistMsg(table_name_));
+                status = Status(SERVER_INVALID_TABLE_NAME, TableNotExistMsg(table_name_));
+                FreeRequests(status);
+                return status;
             }
         }
 
-        // step 4: check input
+        // step 3: check input
         size_t run_request = 0;
         std::vector<SearchRequestPtr>::iterator iter = request_list_.begin();
         for (; iter != request_list_.end();) {
             SearchRequestPtr& request = *iter;
+            status = ValidationUtil::ValidateSearchTopk(request->TopK());
+            if (!status.ok()) {
+                // check failed, erase request and let it return error status
+                FreeRequest(request, status);
+                iter = request_list_.erase(iter);
+                continue;
+            }
+
             status = ValidationUtil::ValidateSearchParams(extra_params_, table_schema, request->TopK());
             if (!status.ok()) {
                 // check failed, erase request and let it return error status
-                request->set_status(status.code(), status.message());
-                request->Done();
+                FreeRequest(request, status);
                 iter = request_list_.erase(iter);
                 continue;
             }
@@ -222,8 +240,7 @@ SearchCombineRequest::OnExecute() {
             status = ValidationUtil::ValidateVectorData(request->VectorsData(), table_schema);
             if (!status.ok()) {
                 // check failed, erase request and let it return error status
-                request->set_status(status.code(), status.message());
-                request->Done();
+                FreeRequest(request, status);
                 iter = request_list_.erase(iter);
                 continue;
             }
@@ -231,12 +248,15 @@ SearchCombineRequest::OnExecute() {
             status = ValidationUtil::ValidatePartitionTags(request->PartitionList());
             if (!status.ok()) {
                 // check failed, erase request and let it return error status
-                request->set_status(status.code(), status.message());
-                request->Done();
+                FreeRequest(request, status);
                 iter = request_list_.erase(iter);
                 continue;
             }
 
+            // reset topk
+            search_topk_ = request->TopK() > search_topk_ ? request->TopK() : search_topk_;
+
+            // next one
             run_request++;
             iter++;
         }
@@ -248,6 +268,7 @@ SearchCombineRequest::OnExecute() {
         }
 
         SERVER_LOG_DEBUG << std::to_string(combined_request - run_request) << " requests were skipped";
+        SERVER_LOG_DEBUG << "reset topk to " << search_topk_;
         rc.RecordSection("check validation");
 
         // step 5: construct vectors_data and set search_topk
@@ -256,6 +277,7 @@ SearchCombineRequest::OnExecute() {
         for (auto& request : request_list_) {
             total_count += request->VectorsData().vector_count_;
         }
+        vectors_data_.vector_count_ = total_count;
 
         uint16_t dimension = table_schema.dimension_;
         bool is_float = true;
@@ -279,6 +301,7 @@ SearchCombineRequest::OnExecute() {
             }
             offset += data_size;
         }
+        SERVER_LOG_DEBUG << "combined " << total_count << " query vectors";
 
         // step 6: search vectors
         const std::vector<std::string>& partition_list = first_request->PartitionList();
@@ -300,37 +323,31 @@ SearchCombineRequest::OnExecute() {
 
         if (!status.ok()) {
             // let all request return
-            for (auto request : request_list_) {
-                request->set_status(status.code(), status.message());
-                request->Done();
-            }
-
+            FreeRequests(status);
             return status;
         }
         if (result_ids.empty()) {
+            status = Status(DB_ERROR, "no result returned for combined request");
             // let all request return
-            for (auto request : request_list_) {
-                request->set_status(status.code(), status.message());
-                request->Done();
-            }
-
-            return Status::OK();  // empty table
+            FreeRequests(status);
+            return status;
         }
 
         // step 6: construct result array
         offset = 0;
-        status = Status::OK();
         for (auto& request : request_list_) {
             uint64_t count = request->VectorsData().vector_count_;
             int64_t topk = request->TopK();
+            uint64_t element_cnt = count * topk;
             TopKQueryResult& result = request->QueryResult();
-            memcpy(result.id_list_.data(), result_ids.data() + offset, count * topk * sizeof(int64_t));
-            memcpy(result.distance_list_.data(), result_distances.data() + offset, count * topk * sizeof(float));
-            offset += count;
+            result.id_list_.resize(element_cnt);
+            result.distance_list_.resize(element_cnt);
+            memcpy(result.id_list_.data(), result_ids.data() + offset, element_cnt * sizeof(int64_t));
+            memcpy(result.distance_list_.data(), result_distances.data() + offset, element_cnt * sizeof(float));
+            offset += (count * search_topk_);
 
             // let request return
-            request->set_status(status.code(), status.message());
-            request->Done();
+            FreeRequest(request, Status::OK());
         }
 
         rc.RecordSection("construct result and send");

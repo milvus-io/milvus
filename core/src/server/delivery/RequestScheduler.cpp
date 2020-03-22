@@ -10,8 +10,6 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
 #include "server/delivery/RequestScheduler.h"
-#include "server/delivery/strategy/RequestStrategy.h"
-#include "server/delivery/strategy/SearchReqStrategy.h"
 #include "utils/Log.h"
 
 #include <fiu-local.h>
@@ -20,35 +18,6 @@
 
 namespace milvus {
 namespace server {
-
-namespace {
-Status
-ScheduleRequest(const BaseRequestPtr& request, RequestQueuePtr& queue) {
-    if (request == nullptr || queue == nullptr) {
-        return Status(SERVER_NULL_POINTER, "request schedule cannot handle null object");
-    }
-
-    if (queue->Empty()) {
-        queue->Put(request);
-        return Status::OK();
-    }
-
-    static std::map<BaseRequest::RequestType, RequestStrategyPtr> s_schedulers = {
-#if 0
-        {BaseRequest::kSearch, std::make_shared<SearchReqStrategy>()}
-#endif
-    };
-
-    auto iter = s_schedulers.find(request->GetRequestType());
-    if (iter == s_schedulers.end() || iter->second == nullptr) {
-        queue->Put(request);
-    } else {
-        iter->second->ReScheduleQueue(request, queue);
-    }
-
-    return Status::OK();
-}
-}  // namespace
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 RequestScheduler::RequestScheduler() : stopped_(false) {
@@ -136,7 +105,7 @@ RequestScheduler::TakeToExecute(RequestQueuePtr request_queue) {
     }
 
     while (true) {
-        BaseRequestPtr request = request_queue->Take();
+        BaseRequestPtr request = request_queue->TakeRequest();
         if (request == nullptr) {
             SERVER_LOG_ERROR << "Take null from request queue, stop thread";
             break;  // stop the thread
@@ -162,11 +131,10 @@ RequestScheduler::PutToQueue(const BaseRequestPtr& request_ptr) {
 
     std::string group_name = request_ptr->RequestGroup();
     if (request_groups_.count(group_name) > 0) {
-        RequestQueuePtr& queue = request_groups_[group_name];
-        ScheduleRequest(request_ptr, queue);
+        request_groups_[group_name]->PutRequest(request_ptr);
     } else {
         RequestQueuePtr queue = std::make_shared<RequestQueue>();
-        queue->Put(request_ptr);
+        queue->PutRequest(request_ptr);
         request_groups_.insert(std::make_pair(group_name, queue));
         fiu_do_on("RequestScheduler.PutToQueue.null_queue", queue = nullptr);
 

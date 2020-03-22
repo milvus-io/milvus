@@ -799,7 +799,7 @@ TEST_F(RpcSchedulerTest, BASE_TASK_TEST) {
     auto async_ptr = std::make_shared<AsyncDummyRequest>();
     auto base_ptr = std::static_pointer_cast<milvus::server::BaseRequest>(async_ptr);
     milvus::server::RequestScheduler::ExecRequest(base_ptr);
-    async_ptr->set_status(milvus::SERVER_INVALID_ARGUMENT, "");
+    async_ptr->set_status(milvus::Status(milvus::SERVER_INVALID_ARGUMENT, ""));
 
     milvus::server::RequestScheduler::GetInstance().Stop();
     milvus::server::RequestScheduler::GetInstance().Start();

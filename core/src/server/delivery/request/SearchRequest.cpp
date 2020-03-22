@@ -57,8 +57,9 @@ SearchRequest::OnExecute() {
         uint64_t vector_count = vectors_data_.vector_count_;
         auto pre_query_ctx = context_->Child("Pre query");
 
+        SERVER_LOG_DEBUG << "SearchRequest begin execute, extra_params=" << extra_params_.dump();
         std::string hdr = "SearchRequest(table=" + table_name_ + ", nq=" + std::to_string(vector_count) +
-                          ", k=" + std::to_string(topk_) + ", extra_params=" + extra_params_.dump() + ")";
+                          ", k=" + std::to_string(topk_) + ")";
 
         TimeRecorder rc(hdr);
 

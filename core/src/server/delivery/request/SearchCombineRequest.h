@@ -40,6 +40,10 @@ class SearchCombineRequest : public BaseRequest {
     OnExecute() override;
 
  private:
+    Status
+    FreeRequests(const Status& status);
+
+ private:
     std::string table_name_;
     engine::VectorsData vectors_data_;
     int64_t min_topk_ = 0;

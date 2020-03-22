@@ -61,10 +61,12 @@ RequestGroup(BaseRequest::RequestType type) {
         // search operations
         {BaseRequest::kSearchByID, DQL_REQUEST_GROUP},
         {BaseRequest::kSearch, DQL_REQUEST_GROUP},
+        {BaseRequest::kSearchCombine, DQL_REQUEST_GROUP},
     };
 
     auto iter = s_map_type_group.find(type);
     if (iter == s_map_type_group.end()) {
+        SERVER_LOG_ERROR << "Unsupported request type: " << type;
         throw Exception(SERVER_NOT_IMPLEMENT, "request group undefined");
     }
     return iter->second;
@@ -94,11 +96,12 @@ BaseRequest::Done() {
     finish_cond_.notify_all();
 }
 
-Status
-BaseRequest::set_status(ErrorCode error_code, const std::string& error_msg) {
-    status_ = Status(error_code, error_msg);
-    SERVER_LOG_ERROR << error_msg;
-    return status_;
+void
+BaseRequest::set_status(const Status& status) {
+    status_ = status;
+    if (!status_.ok()) {
+        SERVER_LOG_ERROR << status_.message();
+    }
 }
 
 std::string
@@ -112,7 +115,6 @@ Status
 BaseRequest::WaitToFinish() {
     std::unique_lock<std::mutex> lock(finish_mtx_);
     finish_cond_.wait(lock, [this] { return done_; });
-
     return status_;
 }
 

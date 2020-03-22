@@ -16,6 +16,8 @@
 #include "utils/Error.h"
 #include "utils/Log.h"
 
+#include <queue>
+
 namespace milvus {
 namespace server {
 
@@ -23,7 +25,7 @@ SearchReqStrategy::SearchReqStrategy() {
 }
 
 Status
-SearchReqStrategy::ReScheduleQueue(const BaseRequestPtr& request, RequestQueuePtr& queue) {
+SearchReqStrategy::ReScheduleQueue(const BaseRequestPtr& request, std::queue<BaseRequestPtr>& queue) {
     if (request->GetRequestType() != BaseRequest::kSearch) {
         SERVER_LOG_ERROR << "search strategy can only handle search request";
         return Status(SERVER_UNSUPPORTED_ERROR, "");
@@ -31,31 +33,32 @@ SearchReqStrategy::ReScheduleQueue(const BaseRequestPtr& request, RequestQueuePt
 
     SearchRequestPtr new_search_req = std::static_pointer_cast<SearchRequest>(request);
 
-    BaseRequestPtr last_req = queue->Back();
+    BaseRequestPtr last_req = queue.back();
     if (last_req->GetRequestType() == BaseRequest::kSearch) {
         SearchRequestPtr last_search_req = std::static_pointer_cast<SearchRequest>(last_req);
         if (SearchCombineRequest::CanCombine(last_search_req, new_search_req)) {
             // pop last request
-            queue->Take();
+            queue.pop();
 
             // combine request
             SearchCombineRequestPtr combine_request = std::make_shared<SearchCombineRequest>();
             combine_request->Combine(last_search_req);
             combine_request->Combine(new_search_req);
-            queue->Put(combine_request);
+            queue.push(combine_request);
+            SERVER_LOG_DEBUG << "Combine search request strategy";
         } else {
             // directly put to queue
-            queue->Put(request);
+            queue.push(request);
         }
     } else if (last_req->GetRequestType() == BaseRequest::kSearchCombine) {
         SearchCombineRequestPtr combine_req = std::static_pointer_cast<SearchCombineRequest>(last_req);
         if (combine_req->CanCombine(new_search_req)) {
             // combine request
-            SearchCombineRequestPtr combine_request = std::make_shared<SearchCombineRequest>();
-            combine_request->Combine(new_search_req);
+            combine_req->Combine(new_search_req);
+            SERVER_LOG_DEBUG << "Combine search request";
         } else {
             // directly put to queue
-            queue->Put(request);
+            queue.push(request);
         }
     } else {
         SERVER_LOG_ERROR << "search strategy can only handle search request";

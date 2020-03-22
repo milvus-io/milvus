@@ -26,6 +26,9 @@ class BlockingQueue {
     BlockingQueue() : mtx(), full_(), empty_() {
     }
 
+    virtual ~BlockingQueue() {
+    }
+
     BlockingQueue(const BlockingQueue& rhs) = delete;
 
     BlockingQueue&
@@ -52,7 +55,7 @@ class BlockingQueue {
     void
     SetCapacity(const size_t capacity);
 
- private:
+ protected:
     mutable std::mutex mtx;
     std::condition_variable full_;
     std::condition_variable empty_;
