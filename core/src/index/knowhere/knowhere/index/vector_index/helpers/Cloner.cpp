@@ -30,6 +30,7 @@ CopyGpuToCpu(const VecIndexPtr& index, const Config& config) {
         VecIndexPtr result = device_index->CopyGpuToCpu(config);
         auto uids = index->GetUids();
         result->SetUids(uids);
+        result->SetIndexSize(index->IndexSize());
         return result;
     } else {
         KNOWHERE_THROW_MSG("index type is not gpuindex");
