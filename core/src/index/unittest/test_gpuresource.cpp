@@ -80,6 +80,7 @@ TEST_F(GPURESTEST, copyandsearch) {
     auto cpu_idx = milvus::knowhere::cloner::CopyGpuToCpu(index_, milvus::knowhere::Config());
     milvus::knowhere::IVFPtr ivf_idx = std::dynamic_pointer_cast<milvus::knowhere::IVF>(cpu_idx);
     ivf_idx->Seal();
+    ivf_idx->SetIndexSize(nb * dim * sizeof(float));
     auto search_idx = milvus::knowhere::cloner::CopyCpuToGpu(cpu_idx, DEVICEID, milvus::knowhere::Config());
 
     constexpr int64_t search_count = 50;
@@ -131,6 +132,7 @@ TEST_F(GPURESTEST, trainandsearch) {
     auto cpu_idx = milvus::knowhere::cloner::CopyGpuToCpu(index_, milvus::knowhere::Config());
     milvus::knowhere::IVFPtr ivf_idx = std::dynamic_pointer_cast<milvus::knowhere::IVF>(cpu_idx);
     ivf_idx->Seal();
+    ivf_idx->SetIndexSize(nb * dim * sizeof(float));
     auto search_idx = milvus::knowhere::cloner::CopyCpuToGpu(cpu_idx, DEVICEID, milvus::knowhere::Config());
 
     constexpr int train_count = 5;
