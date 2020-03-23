@@ -105,7 +105,7 @@ class MySQLMetaImpl : public Meta {
     GetPartitionName(const std::string& table_id, const std::string& tag, std::string& partition_name) override;
 
     Status
-    FilesToSearch(const std::string& table_id, const std::vector<size_t>& ids, TableFilesSchema& files) override;
+    FilesToSearch(const std::string& table_id, TableFilesSchema& files) override;
 
     Status
     FilesToMerge(const std::string& table_id, TableFilesSchema& files) override;
@@ -114,8 +114,10 @@ class MySQLMetaImpl : public Meta {
     FilesToIndex(TableFilesSchema&) override;
 
     Status
-    FilesByType(const std::string& table_id, const std::vector<int>& file_types,
-                TableFilesSchema& table_files) override;
+    FilesByType(const std::string& table_id, const std::vector<int>& file_types, TableFilesSchema& files) override;
+
+    Status
+    FilesByID(const std::vector<size_t>& ids, TableFilesSchema& table_files) override;
 
     Status
     Archive() override;

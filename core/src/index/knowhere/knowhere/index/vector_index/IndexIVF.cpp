@@ -289,6 +289,11 @@ IVF::QueryImpl(int64_t n, const float* data, int64_t k, float* distances, int64_
     auto ivf_index = dynamic_cast<faiss::IndexIVF*>(index_.get());
     ivf_index->nprobe = params->nprobe;
     stdclock::time_point before = stdclock::now();
+    if (params->nprobe > 1 && n <= 4) {
+        ivf_index->parallel_mode = 1;
+    } else {
+        ivf_index->parallel_mode = 0;
+    }
     ivf_index->search(n, (float*)data, k, distances, labels, bitset_);
     stdclock::time_point after = stdclock::now();
     double search_cost = (std::chrono::duration<double, std::micro>(after - before)).count();
@@ -301,7 +306,7 @@ IVF::QueryImpl(int64_t n, const float* data, int64_t k, float* distances, int64_
 
 void
 IVF::SealImpl() {
-#ifdef CUSTOMIZATION
+#ifdef MILVUS_GPU_VERSION
     faiss::Index* index = index_.get();
     auto idx = dynamic_cast<faiss::IndexIVF*>(index);
     if (idx != nullptr) {

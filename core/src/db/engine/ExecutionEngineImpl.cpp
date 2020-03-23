@@ -186,13 +186,11 @@ ExecutionEngineImpl::CreatetVecIndex(EngineType type) {
             index = vec_index_factory.CreateVecIndex(knowhere::IndexEnum::INDEX_FAISS_IVFSQ8, mode);
             break;
         }
-#ifdef CUSTOMIZATION
 #ifdef MILVUS_GPU_VERSION
         case EngineType::FAISS_IVFSQ8H: {
             index = vec_index_factory.CreateVecIndex(knowhere::IndexEnum::INDEX_FAISS_IVFSQ8H, mode);
             break;
         }
-#endif
 #endif
         case EngineType::FAISS_BIN_IDMAP: {
             index = vec_index_factory.CreateVecIndex(knowhere::IndexEnum::INDEX_FAISS_BIN_IDMAP, mode);
@@ -777,7 +775,6 @@ ExecutionEngineImpl::Search(int64_t n, const float* data, int64_t k, const milvu
     milvus::json conf = extra_params;
     conf[knowhere::meta::TOPK] = k;
     auto adapter = knowhere::AdapterMgr::GetInstance().GetAdapter(index_->index_type());
-    ENGINE_LOG_DEBUG << "Search params: " << conf.dump();
     if (!adapter->CheckSearch(conf, index_->index_type(), index_->index_mode())) {
         throw Exception(DB_ERROR, "Illegal search params");
     }
@@ -815,7 +812,6 @@ ExecutionEngineImpl::Search(int64_t n, const uint8_t* data, int64_t k, const mil
     milvus::json conf = extra_params;
     conf[knowhere::meta::TOPK] = k;
     auto adapter = knowhere::AdapterMgr::GetInstance().GetAdapter(index_->index_type());
-    ENGINE_LOG_DEBUG << "Search params: " << conf.dump();
     if (!adapter->CheckSearch(conf, index_->index_type(), index_->index_mode())) {
         throw Exception(DB_ERROR, "Illegal search params");
     }
@@ -853,7 +849,6 @@ ExecutionEngineImpl::Search(int64_t n, const std::vector<int64_t>& ids, int64_t 
     milvus::json conf = extra_params;
     conf[knowhere::meta::TOPK] = k;
     auto adapter = knowhere::AdapterMgr::GetInstance().GetAdapter(index_->index_type());
-    ENGINE_LOG_DEBUG << "Search params: " << conf.dump();
     if (!adapter->CheckSearch(conf, index_->index_type(), index_->index_mode())) {
         throw Exception(DB_ERROR, "Illegal search params");
     }
