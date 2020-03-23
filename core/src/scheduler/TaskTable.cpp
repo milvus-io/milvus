@@ -149,7 +149,7 @@ TaskTableItem::Dump() const {
 std::vector<uint64_t>
 TaskTable::PickToLoad(uint64_t limit) {
 #if 1
-    TimeRecorder rc("");
+    // TimeRecorder rc("");
     std::vector<uint64_t> indexes;
     bool cross = false;
 
@@ -182,7 +182,7 @@ TaskTable::PickToLoad(uint64_t limit) {
             ++pick_count;
         }
     }
-    rc.ElapseFromBegin("PickToLoad ");
+    // rc.ElapseFromBegin("PickToLoad ");
     return indexes;
 #else
     size_t count = 0;
@@ -233,7 +233,7 @@ TaskTable::PickToLoad(uint64_t limit) {
 
 std::vector<uint64_t>
 TaskTable::PickToExecute(uint64_t limit) {
-    TimeRecorder rc("");
+    // TimeRecorder rc("");
     std::vector<uint64_t> indexes;
     bool cross = false;
     uint64_t available_begin = table_.front() + 1;
@@ -254,7 +254,7 @@ TaskTable::PickToExecute(uint64_t limit) {
             ++pick_count;
         }
     }
-    rc.ElapseFromBegin("PickToExecute ");
+    // rc.ElapseFromBegin("PickToExecute ");
     return indexes;
 }
 
