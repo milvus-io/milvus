@@ -17,6 +17,7 @@
 #include <vector>
 
 #include "knowhere/common/Dataset.h"
+#include "knowhere/common/Exception.h"
 #include "knowhere/common/Typedef.h"
 #include "knowhere/index/Index.h"
 #include "knowhere/index/vector_index/IndexType.h"
@@ -77,42 +78,65 @@ class VecIndex : public Index {
         return nullptr;
     }
 
-    virtual void
+    void
     GetBlacklist(faiss::ConcurrentBitsetPtr& bitset_ptr) {
         bitset_ptr = bitset_;
     }
 
-    virtual void
+    void
     SetBlacklist(faiss::ConcurrentBitsetPtr bitset_ptr) {
         bitset_ = std::move(bitset_ptr);
     }
 
-    virtual const std::vector<milvus::segment::doc_id_t>&
+    const std::vector<milvus::segment::doc_id_t>&
     GetUids() const {
         return uids_;
     }
 
-    virtual void
+    void
     SetUids(std::vector<milvus::segment::doc_id_t>& uids) {
         uids_.clear();
         uids_.swap(uids);
     }
 
+    size_t
+    BlacklistSize() {
+        if (bitset_) {
+            return bitset_->size() * sizeof(uint8_t);
+        } else {
+            return 0;
+        }
+    }
+
+    size_t
+    UidsSize() {
+        return uids_.size() * sizeof(segment::doc_id_t);
+    }
+
+    virtual int64_t
+    IndexSize() {
+        if (index_size_ == -1) {
+            KNOWHERE_THROW_MSG("Index size not set");
+        }
+        return index_size_;
+    }
+
+    void
+    SetIndexSize(int64_t size) {
+        index_size_ = size;
+    }
+
     int64_t
     Size() override {
-        if (size_ != -1) {
-            return size_;
-        }
-        return Count() * Dim() * sizeof(FloatType);
+        return BlacklistSize() + UidsSize() + IndexSize();
     }
 
  protected:
     IndexType index_type_ = "";
     IndexMode index_mode_ = IndexMode::MODE_CPU;
     faiss::ConcurrentBitsetPtr bitset_ = nullptr;
-
- private:
-    std::vector<milvus::segment::doc_id_t> uids_;
+    std::vector<segment::doc_id_t> uids_;
+    int64_t index_size_ = -1;
 };
 
 using VecIndexPtr = std::shared_ptr<VecIndex>;

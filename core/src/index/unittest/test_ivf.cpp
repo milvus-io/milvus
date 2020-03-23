@@ -186,6 +186,10 @@ TEST_P(IVFTest, clone_test) {
     index_->Add(base_dataset, conf_);
     EXPECT_EQ(index_->Count(), nb);
     EXPECT_EQ(index_->Dim(), dim);
+
+    /* set peseodo index size, avoid throw exception */
+    index_->SetIndexSize(nq * dim * sizeof(float));
+
     auto result = index_->Query(query_dataset, conf_);
     AssertAnns(result, nq, conf_[milvus::knowhere::meta::TOPK]);
     // PrintResult(result, nq, k);
@@ -269,6 +273,10 @@ TEST_P(IVFTest, gpu_seal_test) {
     index_->Add(base_dataset, conf_);
     EXPECT_EQ(index_->Count(), nb);
     EXPECT_EQ(index_->Dim(), dim);
+
+    /* set peseodo index size, avoid throw exception */
+    index_->SetIndexSize(nq * dim * sizeof(float));
+
     auto result = index_->Query(query_dataset, conf_);
     AssertAnns(result, nq, conf_[milvus::knowhere::meta::TOPK]);
 
@@ -306,6 +314,7 @@ TEST_P(IVFTest, invalid_gpu_source) {
 
     if (index_type_ == milvus::knowhere::IndexEnum::INDEX_FAISS_IVFFLAT) {
         // null faiss index
+        index_->SetIndexSize(0);
         milvus::knowhere::cloner::CopyGpuToCpu(index_, milvus::knowhere::Config());
     }
 
@@ -337,6 +346,7 @@ TEST_P(IVFTest, IVFSQHybrid_test) {
     }
     fiu_init(0);
 
+    index_->SetIndexSize(0);
     milvus::knowhere::cloner::CopyGpuToCpu(index_, conf_);
     ASSERT_ANY_THROW(milvus::knowhere::cloner::CopyCpuToGpu(index_, -1, conf_));
 

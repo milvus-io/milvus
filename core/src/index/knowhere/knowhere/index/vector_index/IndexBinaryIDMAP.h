@@ -64,11 +64,8 @@ class BinaryIDMAP : public VecIndex, public FaissBaseBinaryIndex {
     }
 
     int64_t
-    Size() override {
-        if (size_ != -1) {
-            return size_;
-        }
-        return Count() * Dim() * sizeof(uint8_t);
+    IndexSize() override {
+        return Count() * Dim() / 8;
     }
 
     DatasetPtr
