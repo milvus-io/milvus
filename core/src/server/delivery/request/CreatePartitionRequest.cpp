@@ -22,13 +22,13 @@
 namespace milvus {
 namespace server {
 
-CreatePartitionRequest::CreatePartitionRequest(const std::shared_ptr<Context>& context, const std::string& table_name,
-                                               const std::string& tag)
-    : BaseRequest(context, DDL_DML_REQUEST_GROUP), table_name_(table_name), tag_(tag) {
+CreatePartitionRequest::CreatePartitionRequest(const std::shared_ptr<milvus::server::Context>& context,
+                                               const std::string& table_name, const std::string& tag)
+    : BaseRequest(context, BaseRequest::kCreatePartition), table_name_(table_name), tag_(tag) {
 }
 
 BaseRequestPtr
-CreatePartitionRequest::Create(const std::shared_ptr<Context>& context, const std::string& table_name,
+CreatePartitionRequest::Create(const std::shared_ptr<milvus::server::Context>& context, const std::string& table_name,
                                const std::string& tag) {
     return std::shared_ptr<BaseRequest>(new CreatePartitionRequest(context, table_name, tag));
 }

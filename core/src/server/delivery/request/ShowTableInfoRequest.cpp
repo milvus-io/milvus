@@ -43,13 +43,13 @@ ConstructPartitionStat(const engine::PartitionStat& partition_stat, PartitionSta
     req_partition_stat.total_row_num_ = row_count;
 }
 
-ShowTableInfoRequest::ShowTableInfoRequest(const std::shared_ptr<Context>& context, const std::string& table_name,
-                                           TableInfo& table_info)
-    : BaseRequest(context, INFO_REQUEST_GROUP), table_name_(table_name), table_info_(table_info) {
+ShowTableInfoRequest::ShowTableInfoRequest(const std::shared_ptr<milvus::server::Context>& context,
+                                           const std::string& table_name, TableInfo& table_info)
+    : BaseRequest(context, BaseRequest::kShowTableInfo), table_name_(table_name), table_info_(table_info) {
 }
 
 BaseRequestPtr
-ShowTableInfoRequest::Create(const std::shared_ptr<Context>& context, const std::string& table_name,
+ShowTableInfoRequest::Create(const std::shared_ptr<milvus::server::Context>& context, const std::string& table_name,
                              TableInfo& table_info) {
     return std::shared_ptr<BaseRequest>(new ShowTableInfoRequest(context, table_name, table_info));
 }

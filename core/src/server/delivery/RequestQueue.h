@@ -12,32 +12,33 @@
 #pragma once
 
 #include "server/delivery/request/BaseRequest.h"
+#include "utils/BlockingQueue.h"
+#include "utils/Status.h"
 
+#include <map>
 #include <memory>
 #include <string>
+#include <thread>
 #include <vector>
 
 namespace milvus {
 namespace server {
 
-class InsertRequest : public BaseRequest {
- public:
-    static BaseRequestPtr
-    Create(const std::shared_ptr<milvus::server::Context>& context, const std::string& table_name,
-           engine::VectorsData& vectors, const std::string& partition_tag);
+using BlockingRequestQueue = BlockingQueue<BaseRequestPtr>;
 
- protected:
-    InsertRequest(const std::shared_ptr<milvus::server::Context>& context, const std::string& table_name,
-                  engine::VectorsData& vectors, const std::string& partition_tag);
+class RequestQueue : public BlockingRequestQueue {
+ public:
+    RequestQueue();
+    virtual ~RequestQueue();
+
+    BaseRequestPtr
+    TakeRequest();
 
     Status
-    OnExecute() override;
-
- private:
-    const std::string table_name_;
-    engine::VectorsData& vectors_data_;
-    const std::string partition_tag_;
+    PutRequest(const BaseRequestPtr& request_ptr);
 };
+
+using RequestQueuePtr = std::shared_ptr<RequestQueue>;
 
 }  // namespace server
 }  // namespace milvus
