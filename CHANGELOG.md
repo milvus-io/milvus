@@ -17,6 +17,7 @@ Please mark all change in change log and use the issue from GitHub
 ## Feature
 -   \#1603 BinaryFlat add 2 Metric: Substructure and Superstructure
 -   \#1660 IVF PQ CPU support deleted vectors searching
+-   \#1661 HNSW support deleted vectors searching
 
 ## Improvement
 -   \#267 Improve search performance: reduce delay
