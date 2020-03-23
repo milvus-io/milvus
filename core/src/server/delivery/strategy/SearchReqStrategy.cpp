@@ -18,6 +18,7 @@
 #include "utils/TimeRecorder.h"
 
 #include <queue>
+#include <string>
 
 namespace milvus {
 namespace server {
@@ -28,8 +29,9 @@ SearchReqStrategy::SearchReqStrategy() {
 Status
 SearchReqStrategy::ReScheduleQueue(const BaseRequestPtr& request, std::queue<BaseRequestPtr>& queue) {
     if (request->GetRequestType() != BaseRequest::kSearch) {
-        SERVER_LOG_ERROR << "search strategy can only handle search request";
-        return Status(SERVER_UNSUPPORTED_ERROR, "");
+        std::string msg = "search strategy can only handle search request";
+        SERVER_LOG_ERROR << msg;
+        return Status(SERVER_UNSUPPORTED_ERROR, msg);
     }
 
     //    TimeRecorderAuto rc("SearchReqStrategy::ReScheduleQueue");
@@ -47,7 +49,7 @@ SearchReqStrategy::ReScheduleQueue(const BaseRequestPtr& request, std::queue<Bas
             combine_request->Combine(last_search_req);
             combine_request->Combine(new_search_req);
             queue.push(combine_request);
-            SERVER_LOG_DEBUG << "Combine search request strategy";
+            SERVER_LOG_DEBUG << "Combine 2 search request";
         } else {
             // directly put to queue
             queue.push(request);
@@ -57,14 +59,15 @@ SearchReqStrategy::ReScheduleQueue(const BaseRequestPtr& request, std::queue<Bas
         if (combine_req->CanCombine(new_search_req)) {
             // combine request
             combine_req->Combine(new_search_req);
-            SERVER_LOG_DEBUG << "Combine search request";
+            SERVER_LOG_DEBUG << "Combine more search request";
         } else {
             // directly put to queue
             queue.push(request);
         }
     } else {
-        SERVER_LOG_ERROR << "search strategy can only handle search request";
-        return Status(SERVER_UNSUPPORTED_ERROR, "");
+        std::string msg = "unsupported request type for search strategy";
+        SERVER_LOG_ERROR << msg;
+        return Status(SERVER_UNSUPPORTED_ERROR, msg);
     }
 
     return Status::OK();

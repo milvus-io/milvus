@@ -301,7 +301,7 @@ SearchCombineRequest::OnExecute() {
             }
             offset += data_size;
         }
-        SERVER_LOG_DEBUG << "combined " << total_count << " query vectors";
+        SERVER_LOG_DEBUG << total_count << " query vectors combined";
 
         // step 6: search vectors
         const std::vector<std::string>& partition_list = first_request->PartitionList();
