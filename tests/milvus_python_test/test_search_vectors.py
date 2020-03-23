@@ -698,10 +698,10 @@ class TestSearchBase:
         status, result = connect.search_vectors(substructure_collection, top_k, query_vecs, params=search_param)
         logging.getLogger().info(status)
         logging.getLogger().info(result) 
-        assert result[0][0].id == ids[0]
         assert result[0][0].distance <= epsilon
-        assert result[1][0].id == ids[1]
+        assert result[0][0].id == ids[0]
         assert result[1][0].distance <= epsilon
+        assert result[1][0].id == ids[1]
         assert result[0][1].id == -1
         assert result[1][1].id == -1
 
@@ -753,9 +753,9 @@ class TestSearchBase:
         status, result = connect.search_vectors(superstructure_collection, top_k, query_vecs, params=search_param)
         logging.getLogger().info(status)
         logging.getLogger().info(result)
-        assert result[0][0].id == ids[0]
+        assert result[0][0].id in ids
         assert result[0][0].distance <= epsilon
-        assert result[1][0].id == ids[1]
+        assert result[1][0].id in ids
         assert result[1][0].distance <= epsilon
         assert result[0][1].id == -1
         assert result[1][1].id == -1
