@@ -77,6 +77,7 @@ TEST_F(GPURESTEST, copyandsearch) {
     auto result = index_->Query(query_dataset, conf);
     AssertAnns(result, nq, k);
 
+    index_->SetIndexSize(nb * dim * sizeof(float));
     auto cpu_idx = milvus::knowhere::cloner::CopyGpuToCpu(index_, milvus::knowhere::Config());
     milvus::knowhere::IVFPtr ivf_idx = std::dynamic_pointer_cast<milvus::knowhere::IVF>(cpu_idx);
     ivf_idx->Seal();
@@ -128,6 +129,7 @@ TEST_F(GPURESTEST, trainandsearch) {
     auto conf = ParamGenerator::GetInstance().Gen(index_type_);
     index_->Train(base_dataset, conf);
     index_->Add(base_dataset, conf);
+    index_->SetIndexSize(nb * dim * sizeof(float));
     auto cpu_idx = milvus::knowhere::cloner::CopyGpuToCpu(index_, milvus::knowhere::Config());
     milvus::knowhere::IVFPtr ivf_idx = std::dynamic_pointer_cast<milvus::knowhere::IVF>(cpu_idx);
     ivf_idx->Seal();
