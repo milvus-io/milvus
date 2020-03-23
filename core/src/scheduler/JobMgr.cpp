@@ -138,6 +138,7 @@ JobMgr::worker_function() {
 
         // disk resources NEVER be empty.
         if (auto disk = res_mgr_->GetDiskResources()[0].lock()) {
+            // if (auto disk = res_mgr_->GetCpuResources()[0].lock()) {
             for (auto& task : tasks) {
                 disk->task_table().Put(task, nullptr);
             }
