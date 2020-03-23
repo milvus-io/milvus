@@ -217,14 +217,11 @@ GpuIndexFlat::searchImpl_(int n,
     resources_->getMemoryManagerCurrentDevice(), {n, k}, stream);
 
   // Copy bitset to GPU
-  printf("Here judge\n");
   if (!bitset) {
-    printf("we are here search impl nullptr\n");
     DeviceTensor<uint8_t, 1, true> bitsetDevice({0});
     data_->query(queries, k, outDistances, outIntLabels, true, bitsetDevice);
   } else {
     auto bitsetData = bitset->bitset();
-    printf("n: %d, this.d: %d, k: %d, bitsetlength: %d\n", n, (int) this->d, k, bitset->size());
     DeviceTensor<uint8_t, 1, true> bitsetDevice =
       toDevice<uint8_t, 1>(resources_, device_, 
                                   const_cast<uint8_t*>(bitsetData), stream,
