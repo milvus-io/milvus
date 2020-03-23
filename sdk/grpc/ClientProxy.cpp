@@ -578,20 +578,22 @@ ClientProxy::CreateHybridCollection(const HMapping& mapping) {
     try {
         ::milvus::grpc::Mapping grpc_mapping;
         grpc_mapping.set_collection_name(mapping.collection_name);
-        for (auto field : mapping.fields) {
+        for (auto field : mapping.numerica_fields) {
             ::milvus::grpc::FieldParam* field_param = grpc_mapping.add_fields();
-            field_param->set_name(field.numeric_field->field_name);
-            if (field.numeric_field != nullptr) {
-                field_param->mutable_type()->set_data_type((::milvus::grpc::DataType)field.numeric_field->field_type);
-                ::milvus::grpc::KeyValuePair* kv_pair = field_param->add_extra_params();
-                kv_pair->set_key("params");
-                kv_pair->set_value(field.numeric_field->extram_params);
-            } else if (field.vector_field != nullptr) {
-                field_param->mutable_type()->mutable_vector_param()->set_dimension(field.vector_field->dimension);
-                ::milvus::grpc::KeyValuePair* kv_pair = field_param->add_extra_params();
-                kv_pair->set_key("params");
-                kv_pair->set_value(field.vector_field->extram_params);
-            }
+            field_param->set_name(field->field_name);
+            field_param->mutable_type()->set_data_type((::milvus::grpc::DataType)field->field_type);
+            ::milvus::grpc::KeyValuePair* kv_pair = field_param->add_extra_params();
+            kv_pair->set_key("params");
+            kv_pair->set_value(field->extram_params);
+        }
+        for (auto field : mapping.vector_fields) {
+            ::milvus::grpc::FieldParam* field_param = grpc_mapping.add_fields();
+            field_param->set_name(field->field_name);
+            field_param->mutable_type()->set_data_type((::milvus::grpc::DataType)field->field_type);
+            field_param->mutable_type()->mutable_vector_param()->set_dimension(field->dimension);
+            ::milvus::grpc::KeyValuePair* kv_pair = field_param->add_extra_params();
+            kv_pair->set_key("params");
+            kv_pair->set_value(field->extram_params);
         }
         return client_ptr_->CreateHybridCollection(grpc_mapping);
     } catch (std::exception& exception) {

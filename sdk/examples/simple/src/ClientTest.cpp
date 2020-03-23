@@ -34,6 +34,7 @@ constexpr int64_t SEARCH_TARGET = 5000;  // change this value, result is differe
 constexpr int64_t ADD_ENTITY_LOOP = 5;
 constexpr milvus::IndexType INDEX_TYPE = milvus::IndexType::IVFSQ8;
 constexpr int32_t NLIST = 16384;
+constexpr uint64_t FIELD_NUM = 3;
 
 }  // namespace
 
@@ -226,6 +227,63 @@ ClientTest::DropCollection(const std::string& collection_name) {
 }
 
 void
+ClientTest::InsertHybridEntities(std::string& collection_name, int64_t row_num) {
+    std::unordered_map<std::string, std::vector<std::string>> numerica_value;
+    std::vector<std::string> value1, value2;
+    value1.resize(row_num);
+    value2.resize(row_num);
+    for (uint64_t i = 0; i < row_num; ++i) {
+        value1[i] = "123";
+        value2[i] = "111.222";
+    }
+    numerica_value.insert(std::make_pair("field_1", value1));
+    numerica_value.insert(std::make_pair("field_2", value2));
+
+    std::unordered_map<std::string, std::vector<milvus::Entity>> vector_value;
+    std::vector<milvus::Entity> entity_array;
+    std::vector<int64_t> record_ids;
+    int64_t begin_index = 0;
+    {  // generate vectors
+        milvus_sdk::TimeRecorder rc("Build entities No." + std::to_string(i));
+        milvus_sdk::Utils::BuildEntities(begin_index,
+                                         begin_index + row_num,
+                                         entity_array,
+                                         record_ids,
+                                         128);
+    }
+
+    vector_value.insert(std::make_pair("field_3", entity_array));
+    milvus::HEntity entity = {numerica_value, vector_value};
+    std::vector<uint64_t> id_array;
+    milvus::Status status = conn_->InsertEntity(collection_name, "", entity, id_array);
+    std::cout << "InsertHybridEntities function call status: " << status.message() << std::endl;
+}
+
+void
+ClientTest::CreateHybridCollection(const std::string& collection_name) {
+    milvus::FieldPtr field_ptr1 = std::make_shared<milvus::Field>();
+    milvus::FieldPtr field_ptr2 = std::make_shared<milvus::Field>();
+    milvus::VectorFieldPtr vec_field_ptr = std::make_shared<milvus::VectorField>();
+    field_ptr1->field_type = milvus::DataType::INT64;
+    field_ptr1->field_name = "field_1";
+    field_ptr2->field_type = milvus::DataType::FLOAT;
+    field_ptr2->field_name = "field_2";
+    vec_field_ptr->field_type = milvus::DataType::VECTOR;
+    vec_field_ptr->field_name = "field_3";
+    vec_field_ptr->dimension = 128;
+
+    std::vector<milvus::FieldPtr> numerica_fields;
+    std::vector<milvus::VectorFieldPtr> vector_fields;
+    numerica_fields.emplace_back(field_ptr1);
+    numerica_fields.emplace_back(field_ptr2);
+    vector_fields.emplace_back(vector_fields);
+
+    milvus::HMapping mapping = {collection_name, numerica_fields, vector_fields};
+    milvus::Status stat = conn_->CreateHybridCollection(mapping);
+    std::cout << "CreateHybridCollection function call status: " << stat.message() << std::endl;
+}
+
+void
 ClientTest::Test() {
     std::string collection_name = COLLECTION_NAME;
     int64_t dim = COLLECTION_DIMENSION;
@@ -259,4 +317,12 @@ ClientTest::Test() {
 
     DropIndex(collection_name);
     DropCollection(collection_name);
+}
+
+void
+ClientTest::TestHybrid() {
+    std::string collection_name = "HYBRID_TEST";
+    CreateHybridCollection(collection_name);
+    InsertHybridEntities(collection_name, 100);
+    Flush(collection_name);
 }

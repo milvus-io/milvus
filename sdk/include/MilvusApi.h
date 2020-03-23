@@ -145,14 +145,10 @@ struct CollectionInfo {
 
 
 
-struct FieldParam {
-    FieldPtr numeric_field;
-    VectorFieldPtr vector_field;
-};
-
 struct HMapping {
     std::string collection_name;
-    std::vector<FieldParam> fields;
+    std::vector<FieldPtr> numerica_fields;
+    std::vector<VectorFieldPtr> vector_fields;
 };
 
 struct HEntity {
