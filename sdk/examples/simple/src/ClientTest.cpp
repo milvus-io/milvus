@@ -244,7 +244,6 @@ ClientTest::InsertHybridEntities(std::string& collection_name, int64_t row_num) 
     std::vector<int64_t> record_ids;
     int64_t begin_index = 0;
     {  // generate vectors
-        milvus_sdk::TimeRecorder rc("Build entities No." + std::to_string(i));
         milvus_sdk::Utils::BuildEntities(begin_index,
                                          begin_index + row_num,
                                          entity_array,
@@ -276,7 +275,7 @@ ClientTest::CreateHybridCollection(const std::string& collection_name) {
     std::vector<milvus::VectorFieldPtr> vector_fields;
     numerica_fields.emplace_back(field_ptr1);
     numerica_fields.emplace_back(field_ptr2);
-    vector_fields.emplace_back(vector_fields);
+    vector_fields.emplace_back(vec_field_ptr);
 
     milvus::HMapping mapping = {collection_name, numerica_fields, vector_fields};
     milvus::Status stat = conn_->CreateHybridCollection(mapping);

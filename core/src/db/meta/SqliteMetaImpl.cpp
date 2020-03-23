@@ -104,7 +104,7 @@ CollectionPrototype(const std::string& path) {
                    make_column("version", &hybrid::CollectionSchema::version_, default_value(CURRENT_VERSION)),
                    make_column("flush_lsn", &hybrid::CollectionSchema::flush_lsn_)),
         make_table(META_FIELDS, make_column("collection_id", &hybrid::FieldSchema::collection_id_),
-                   make_column("field_name", &hybrid::FieldSchema::field_name_, primary_key()),
+                   make_column("field_name", &hybrid::FieldSchema::field_name_),
                    make_column("field_type", &hybrid::FieldSchema::field_type_),
                    make_column("field_params", &hybrid::FieldSchema::field_params_)),
         make_table(
@@ -122,10 +122,10 @@ CollectionPrototype(const std::string& path) {
             make_column("flush_lsn", &hybrid::CollectionFileSchema::flush_lsn_)));
 }
 
-using ConnectorT = decltype(StoragePrototype(""));
+using ConnectorT = decltype(StoragePrototype("table"));
 static std::unique_ptr<ConnectorT> ConnectorPtr;
 
-using CollectionConnectT = decltype(CollectionPrototype("collection"));
+using CollectionConnectT = decltype(CollectionPrototype(""));
 static std::unique_ptr<CollectionConnectT> CollectionConnectPtr;
 
 SqliteMetaImpl::SqliteMetaImpl(const DBMetaOptions& options) : options_(options) {
@@ -175,6 +175,30 @@ SqliteMetaImpl::ValidateMetaSchema() {
     }
 }
 
+void
+SqliteMetaImpl::ValidateCollectionMetaSchema() {
+    bool is_null_connector{CollectionConnectPtr == nullptr};
+    fiu_do_on("SqliteMetaImpl.ValidateMetaSchema.NullConnection", is_null_connector = true);
+    if (is_null_connector) {
+        return;
+    }
+
+    // old meta could be recreated since schema changed, throw exception if meta schema is not compatible
+    auto ret = CollectionConnectPtr->sync_schema_simulate();
+    if (ret.find(META_COLLECTIONS) != ret.end() &&
+        sqlite_orm::sync_schema_result::dropped_and_recreated == ret[META_COLLECTIONS]) {
+        throw Exception(DB_INCOMPATIB_META, "Meta Tables schema is created by Milvus old version");
+    }
+    if (ret.find(META_FIELDS) != ret.end()
+        && sqlite_orm::sync_schema_result::dropped_and_recreated == ret[META_FIELDS]) {
+        throw Exception(DB_INCOMPATIB_META, "Meta Tables schema is created by Milvus old version");
+    }
+    if (ret.find(META_COLLECTIONFILES) != ret.end() &&
+        sqlite_orm::sync_schema_result::dropped_and_recreated == ret[META_TABLEFILES]) {
+        throw Exception(DB_INCOMPATIB_META, "Meta TableFiles schema is created by Milvus old version");
+    }
+}
+
 Status
 SqliteMetaImpl::Initialize() {
     if (!boost::filesystem::is_directory(options_.path_)) {
@@ -194,6 +218,14 @@ SqliteMetaImpl::Initialize() {
     ConnectorPtr->sync_schema();
     ConnectorPtr->open_forever();                          // thread safe option
     ConnectorPtr->pragma.journal_mode(journal_mode::WAL);  // WAL => write ahead log
+
+    CollectionConnectPtr = std::make_unique<CollectionConnectT>(CollectionPrototype(options_.path_ + "/metah.sqlite"));
+
+    ValidateCollectionMetaSchema();
+
+    CollectionConnectPtr->sync_schema();
+    CollectionConnectPtr->open_forever();
+    CollectionConnectPtr->pragma.journal_mode(journal_mode::WAL);  // WAL => write ahead log
 
     CleanUpShadowFiles();
 
@@ -1770,10 +1802,11 @@ SqliteMetaImpl::CreateHybridCollection(meta::hybrid::CollectionSchema& collectio
         ENGINE_LOG_DEBUG << "Successfully create collection table: " << collection_schema.collection_id_;
 
         try {
-            for (auto field_schema : fields_schema.fields_schema_) {
-                auto field_id = CollectionConnectPtr->insert(field_schema);
+            for (uint64_t i = 0; i < fields_schema.fields_schema_.size(); ++i) {
+                hybrid::FieldSchema schema = fields_schema.fields_schema_[i];
+                auto field_id = CollectionConnectPtr->insert(schema);
                 ENGINE_LOG_DEBUG << "Successfully create collection field table" << field_id;
-                auto status = utils::CreateTablePath(options_, field_schema.field_name_);
+                auto status = utils::CreateTablePath(options_, fields_schema.fields_schema_[i].field_name_);
                 if (!status.ok()) {
                     return status;
                 }
