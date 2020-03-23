@@ -757,8 +757,8 @@ class TestSearchBase:
         assert result[0][0].distance <= epsilon
         assert result[1][0].id in ids
         assert result[1][0].distance <= epsilon
-        assert result[0][1].id == -1
-        assert result[1][1].id == -1
+        assert result[0][2].id == -1
+        assert result[1][2].id == -1
 
     def test_search_distance_tanimoto_flat_index(self, connect, tanimoto_collection):
         '''
