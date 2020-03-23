@@ -198,7 +198,7 @@ void binary_distence_knn_mc(
 
                 const uint8_t * bs2_ = bs2 + j * bytes_per_code;
                 for (size_t i = 0; i < n1; i++) {
-                    if (hc[i].compute(bs2)) {
+                    if (hc[i].compute(bs2_)) {
                         size_t match_index = thread_no * n1 + i;
                         size_t &index = match_num[match_index];
                         if (index < k) {
