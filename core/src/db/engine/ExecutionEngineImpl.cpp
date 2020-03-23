@@ -352,7 +352,7 @@ ExecutionEngineImpl::Serialize() {
 
     // here we reset index size by file size,
     // since some index type(such as SQ8) data size become smaller after serialized
-    index_->set_size(server::CommonUtil::GetFileSize(location_));
+    index_->SetIndexSize(server::CommonUtil::GetFileSize(location_));
     ENGINE_LOG_DEBUG << "Finish serialize index file: " << location_ << " size: " << index_->Size();
 
     if (index_->Size() == 0) {
@@ -415,36 +415,22 @@ ExecutionEngineImpl::Load(bool to_cache) {
                 }
             }
 
+            auto dataset = knowhere::GenDataset(vectors->GetCount(), this->dim_, vectors_data.data());
             if (index_type_ == EngineType::FAISS_IDMAP) {
                 auto bf_index = std::static_pointer_cast<knowhere::IDMAP>(index_);
-                std::vector<float> float_vectors;
-                float_vectors.resize(vectors_data.size() / sizeof(float));
-                memcpy(float_vectors.data(), vectors_data.data(), vectors_data.size());
                 bf_index->Train(knowhere::DatasetPtr(), conf);
-                auto dataset = knowhere::GenDataset(vectors->GetCount(), this->dim_, float_vectors.data());
                 bf_index->AddWithoutIds(dataset, conf);
                 bf_index->SetBlacklist(concurrent_bitset_ptr);
             } else if (index_type_ == EngineType::FAISS_BIN_IDMAP) {
                 auto bin_bf_index = std::static_pointer_cast<knowhere::BinaryIDMAP>(index_);
                 bin_bf_index->Train(knowhere::DatasetPtr(), conf);
-                auto dataset = knowhere::GenDataset(vectors->GetCount(), this->dim_, vectors_data.data());
                 bin_bf_index->AddWithoutIds(dataset, conf);
                 bin_bf_index->SetBlacklist(concurrent_bitset_ptr);
-            }
-
-            int64_t index_size = vectors->Size();       // vector data size + vector ids size
-            int64_t bitset_size = vectors->GetCount();  // delete list size
-            index_->set_size(index_size + bitset_size);
-
-            if (!status.ok()) {
-                return status;
             }
 
             ENGINE_LOG_DEBUG << "Finished loading raw data from segment " << segment_dir;
         } else {
             try {
-                //                size_t physical_size = PhysicalSize();
-                //                server::CollectExecutionEngineMetrics metrics((double)physical_size);
                 index_ = read_index(location_);
 
                 if (index_ == nullptr) {
@@ -475,10 +461,6 @@ ExecutionEngineImpl::Load(bool to_cache) {
                     segment_reader_ptr->LoadUids(uids);
                     index_->SetUids(uids);
                     ENGINE_LOG_DEBUG << "set uids " << index_->GetUids().size() << " for index " << location_;
-
-                    int64_t index_size = index_->Size();    // vector data size + vector ids size
-                    int64_t bitset_size = index_->Count();  // delete list size
-                    index_->set_size(index_size + bitset_size);
 
                     ENGINE_LOG_DEBUG << "Finished loading index file from segment " << segment_dir;
                 }
@@ -564,14 +546,11 @@ ExecutionEngineImpl::CopyToGpu(uint64_t device_id, bool hybrid) {
         try {
             index_ = knowhere::cloner::CopyCpuToGpu(index_, device_id, knowhere::Config());
             ENGINE_LOG_DEBUG << "CPU to GPU" << device_id;
+            GpuCache(device_id);
         } catch (std::exception& e) {
             ENGINE_LOG_ERROR << e.what();
             return Status(DB_ERROR, e.what());
         }
-    }
-
-    if (!already_in_cache) {
-        GpuCache(device_id);
     }
 #endif
 

@@ -42,15 +42,18 @@ class ConcurrentBitset {
     void
     clear(id_type_t id);
 
-    id_type_t
+    size_t
+    capacity();
+
+    size_t
     size();
 
-    const unsigned char*
+    const uint8_t*
     bitset();
 
  private:
-    id_type_t size_;
-    std::vector<std::atomic<unsigned char>> bitset_;
+    size_t capacity_;
+    std::vector<std::atomic<uint8_t>> bitset_;
 
 };
 

@@ -1409,7 +1409,7 @@ SqliteMetaImpl::Size(uint64_t& result) {
             result += (uint64_t)(*std::get<0>(total_size));
         }
     } catch (std::exception& e) {
-        return HandleException("Encounter exception when calculte db size", e.what());
+        return HandleException("Encounter exception when calculate db size", e.what());
     }
 
     return Status::OK();
