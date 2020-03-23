@@ -253,7 +253,7 @@ public:
 
     template <bool has_deletions>
     std::priority_queue<std::pair<dist_t, tableint>, std::vector<std::pair<dist_t, tableint>>, CompareByFirst>
-    searchBaseLayerST(tableint ep_id, const void *data_point, size_t ef) const {
+    searchBaseLayerST(tableint ep_id, const void *data_point, size_t ef, faiss::ConcurrentBitsetPtr bitset) const {
         VisitedList *vl = visited_list_pool_->getFreeVisitedList();
         vl_type *visited_array = vl->mass;
         vl_type visited_array_tag = vl->curV;
@@ -262,7 +262,8 @@ public:
         std::priority_queue<std::pair<dist_t, tableint>, std::vector<std::pair<dist_t, tableint>>, CompareByFirst> candidate_set;
 
         dist_t lowerBound;
-        if (!has_deletions || !isMarkedDeleted(ep_id)) {
+//        if (!has_deletions || !isMarkedDeleted(ep_id)) {
+          if (!has_deletions || !bitset->test((faiss::ConcurrentBitset::id_type_t)getExternalLabel(ep_id))) {
             dist_t dist = fstdistfunc_(data_point, getDataByInternalId(ep_id), dist_func_param_);
             lowerBound = dist;
             top_candidates.emplace(dist, ep_id);
@@ -318,7 +319,8 @@ public:
                                      _MM_HINT_T0);////////////////////////
 #endif
 
-                        if (!has_deletions || !isMarkedDeleted(candidate_id))
+//                        if (!has_deletions || !isMarkedDeleted(candidate_id))
+                        if (!has_deletions || (!bitset->test((faiss::ConcurrentBitset::id_type_t)getExternalLabel(candidate_id))))
                             top_candidates.emplace(dist, candidate_id);
 
                         if (top_candidates.size() > ef)
@@ -1061,7 +1063,7 @@ public:
     };
 
     std::priority_queue<std::pair<dist_t, labeltype >>
-    searchKnn(const void *query_data, size_t k) const {
+    searchKnn(const void *query_data, size_t k, faiss::ConcurrentBitsetPtr bitset) const {
         std::priority_queue<std::pair<dist_t, labeltype >> result;
         if (cur_element_count == 0) return result;
 
@@ -1093,14 +1095,14 @@ public:
         }
 
         std::priority_queue<std::pair<dist_t, tableint>, std::vector<std::pair<dist_t, tableint>>, CompareByFirst> top_candidates;
-        if (has_deletions_) {
-            std::priority_queue<std::pair<dist_t, tableint>, std::vector<std::pair<dist_t, tableint>>, CompareByFirst> top_candidates1=searchBaseLayerST<true>(
-                    currObj, query_data, std::max(ef_, k));
+        if (bitset != nullptr) {
+            std::priority_queue<std::pair<dist_t, tableint>, std::vector<std::pair<dist_t, tableint>>, CompareByFirst>
+                top_candidates1 = searchBaseLayerST<true>(currObj, query_data, std::max(ef_, k), bitset);
             top_candidates.swap(top_candidates1);
         }
         else{
-            std::priority_queue<std::pair<dist_t, tableint>, std::vector<std::pair<dist_t, tableint>>, CompareByFirst> top_candidates1=searchBaseLayerST<false>(
-                    currObj, query_data, std::max(ef_, k));
+            std::priority_queue<std::pair<dist_t, tableint>, std::vector<std::pair<dist_t, tableint>>, CompareByFirst>
+                top_candidates1 = searchBaseLayerST<false>(currObj, query_data, std::max(ef_, k), bitset);
             top_candidates.swap(top_candidates1);
         }
         while (top_candidates.size() > k) {
@@ -1116,11 +1118,11 @@ public:
 
     template <typename Comp>
     std::vector<std::pair<dist_t, labeltype>>
-    searchKnn(const void* query_data, size_t k, Comp comp) {
+    searchKnn(const void* query_data, size_t k, Comp comp, faiss::ConcurrentBitsetPtr bitset) {
         std::vector<std::pair<dist_t, labeltype>> result;
         if (cur_element_count == 0) return result;
 
-        auto ret = searchKnn(query_data, k);
+        auto ret = searchKnn(query_data, k, bitset);
 
         while (!ret.empty()) {
             result.push_back(ret.top());
