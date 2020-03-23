@@ -28,10 +28,10 @@ namespace server {
 class CompactRequest : public BaseRequest {
  public:
     static BaseRequestPtr
-    Create(const std::shared_ptr<Context>& context, const std::string& table_name);
+    Create(const std::shared_ptr<milvus::server::Context>& context, const std::string& table_name);
 
  protected:
-    CompactRequest(const std::shared_ptr<Context>& context, const std::string& table_name);
+    CompactRequest(const std::shared_ptr<milvus::server::Context>& context, const std::string& table_name);
 
     Status
     OnExecute() override;

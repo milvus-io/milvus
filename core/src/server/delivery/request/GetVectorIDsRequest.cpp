@@ -27,16 +27,17 @@
 namespace milvus {
 namespace server {
 
-GetVectorIDsRequest::GetVectorIDsRequest(const std::shared_ptr<Context>& context, const std::string& table_name,
-                                         const std::string& segment_name, std::vector<int64_t>& vector_ids)
-    : BaseRequest(context, INFO_REQUEST_GROUP),
+GetVectorIDsRequest::GetVectorIDsRequest(const std::shared_ptr<milvus::server::Context>& context,
+                                         const std::string& table_name, const std::string& segment_name,
+                                         std::vector<int64_t>& vector_ids)
+    : BaseRequest(context, BaseRequest::kGetVectorIDs),
       table_name_(table_name),
       segment_name_(segment_name),
       vector_ids_(vector_ids) {
 }
 
 BaseRequestPtr
-GetVectorIDsRequest::Create(const std::shared_ptr<Context>& context, const std::string& table_name,
+GetVectorIDsRequest::Create(const std::shared_ptr<milvus::server::Context>& context, const std::string& table_name,
                             const std::string& segment_name, std::vector<int64_t>& vector_ids) {
     return std::shared_ptr<BaseRequest>(new GetVectorIDsRequest(context, table_name, segment_name, vector_ids));
 }

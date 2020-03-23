@@ -26,12 +26,14 @@
 namespace milvus {
 namespace server {
 
-FlushRequest::FlushRequest(const std::shared_ptr<Context>& context, const std::vector<std::string>& table_names)
-    : BaseRequest(context, DDL_DML_REQUEST_GROUP), table_names_(table_names) {
+FlushRequest::FlushRequest(const std::shared_ptr<milvus::server::Context>& context,
+                           const std::vector<std::string>& table_names)
+    : BaseRequest(context, BaseRequest::kFlush), table_names_(table_names) {
 }
 
 BaseRequestPtr
-FlushRequest::Create(const std::shared_ptr<Context>& context, const std::vector<std::string>& table_names) {
+FlushRequest::Create(const std::shared_ptr<milvus::server::Context>& context,
+                     const std::vector<std::string>& table_names) {
     return std::shared_ptr<BaseRequest>(new FlushRequest(context, table_names));
 }
 

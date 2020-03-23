@@ -177,9 +177,7 @@ Cache<ItemObj>::print() {
 #endif
     }
 
-    SERVER_LOG_DEBUG << "[Cache item count]: " << cache_count;
-    SERVER_LOG_DEBUG << "[Cache usage]: " << usage_ << " bytes";
-    SERVER_LOG_DEBUG << "[Cache capacity]: " << capacity_ << " bytes";
+    SERVER_LOG_DEBUG << "[Cache] [item count]: " << cache_count << " [capacity] " << capacity_ << "(bytes) [usage] " << usage_ << "(bytes)";
 }
 
 }  // namespace cache
