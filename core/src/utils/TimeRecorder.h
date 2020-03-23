@@ -13,8 +13,19 @@
 
 #include <chrono>
 #include <string>
+#include "utils/Log.h"
 
 namespace milvus {
+inline void
+print_timestamp(const std::string& message) {
+    std::chrono::time_point<std::chrono::system_clock> now = std::chrono::system_clock::now();
+    auto duration = now.time_since_epoch();
+    auto micros = std::chrono::duration_cast<std::chrono::microseconds>(duration).count();
+    micros %= 1000000;
+    double millisecond = (double)micros / 1000.0;
+
+    SERVER_LOG_DEBUG << std::fixed << " " << millisecond << "(ms) [timestamp]" << message;
+}
 
 class TimeRecorder {
     using stdclock = std::chrono::high_resolution_clock;

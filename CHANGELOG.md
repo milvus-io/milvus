@@ -12,6 +12,7 @@ Please mark all change in change log and use the issue from GitHub
 -   \#1651 Check validity of dimension when collection metric type is binary one
 -   \#1663 PQ index parameter 'm' validation
 -   \#1686 API search_in_files cannot work correctly when vectors is stored in certain non-default partition
+-   \#1689 Fix SQ8H search fail on SIFT-1B dataset
 -   \#1724 Remove unused unittests
 
 ## Feature
@@ -19,6 +20,7 @@ Please mark all change in change log and use the issue from GitHub
 -   \#1660 IVF PQ CPU support deleted vectors searching
 
 ## Improvement
+-   \#267 Improve search performance: reduce delay
 -   \#342 Knowhere and Wrapper refactor
 -   \#1537 Optimize raw vector and uids read/write
 -   \#1546 Move Config.cpp to config directory
@@ -47,8 +49,8 @@ Please mark all change in change log and use the issue from GitHub
 -   \#995 Table count set to 0 if no tables found
 -   \#1010 Improve error message when offset or page_size is equal 0
 -   \#1022 Check if partition name is valid
--   \#1028 check if table exists when show partitions
--   \#1029 check if table exists when try to delete partition
+-   \#1028 Check if table exists when show partitions
+-   \#1029 Check if table exists when try to delete partition
 -   \#1066 Optimize http insert and search speed
 -   \#1022 Check if partition name is legal
 -   \#1028 Check if table exists when show partitions
