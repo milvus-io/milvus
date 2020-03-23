@@ -174,7 +174,8 @@ IVFFlat::classifyAndAddVectors(Tensor<float, 2, true>& vecs,
     listIds2d(mem, {vecs.getSize(0), 1},  stream);
   auto listIds = listIds2d.view<1>({vecs.getSize(0)});
 
-  quantizer_->query(vecs, 1, listDistance2d, listIds2d, false);
+  DeviceTensor<uint8_t, 1, true> bitsetDevice({0});
+  quantizer_->query(vecs, 1, listDistance2d, listIds2d, false, bitsetDevice);
 
   // Calculate residuals for these vectors, if needed
   DeviceTensor<float, 2, true>
@@ -329,7 +330,8 @@ IVFFlat::query(Tensor<float, 2, true>& queries,
                int nprobe,
                int k,
                Tensor<float, 2, true>& outDistances,
-               Tensor<long, 2, true>& outIndices) {
+               Tensor<long, 2, true>& outIndices,
+               Tensor<uint8_t, 1, true> bitset) {
   auto& mem = resources_->getMemoryManagerCurrentDevice();
   auto stream = resources_->getDefaultStreamCurrentDevice();
 
@@ -355,7 +357,8 @@ IVFFlat::query(Tensor<float, 2, true>& queries,
                     nprobe,
                     coarseDistances,
                     coarseIndices,
-                    false);
+                    false,
+                    bitset);
 
   DeviceTensor<float, 3, true>
     residualBase(mem, {queries.getSize(0), nprobe, dim_}, stream);

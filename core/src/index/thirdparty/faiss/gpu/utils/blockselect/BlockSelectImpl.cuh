@@ -17,7 +17,8 @@
     Tensor<int, 2, true>& outV,                                         \
     bool dir,                                                           \
     int k,                                                              \
-    cudaStream_t stream);                                               \
+    cudaStream_t stream,                                                \
+    Tensor<uint8_t, 1, true> bitset);                                   \
                                                                         \
   extern void runBlockSelectPair_ ## TYPE ## _ ## DIR ## _ ## WARP_Q ## _( \
     Tensor<TYPE, 2, true>& inK,                                         \
@@ -26,7 +27,8 @@
     Tensor<int, 2, true>& outV,                                         \
     bool dir,                                                           \
     int k,                                                              \
-    cudaStream_t stream)
+    cudaStream_t stream,                                                \
+    Tensor<uint8_t, 1, true> bitset)
 
 #define BLOCK_SELECT_IMPL(TYPE, DIR, WARP_Q, THREAD_Q)                  \
   void runBlockSelect_ ## TYPE ## _ ## DIR ## _ ## WARP_Q ## _(         \
@@ -35,7 +37,8 @@
     Tensor<int, 2, true>& outV,                                         \
     bool dir,                                                           \
     int k,                                                              \
-    cudaStream_t stream) {                                              \
+    cudaStream_t stream,                                                \
+    Tensor<uint8_t, 1, true> bitset) {                                  \
     FAISS_ASSERT(in.getSize(0) == outK.getSize(0));                     \
     FAISS_ASSERT(in.getSize(0) == outV.getSize(0));                     \
     FAISS_ASSERT(outK.getSize(1) == k);                                 \
@@ -52,8 +55,12 @@
     auto kInit = dir ? Limits<TYPE>::getMin() : Limits<TYPE>::getMax(); \
     auto vInit = -1;                                                    \
                                                                         \
-    blockSelect<TYPE, int, DIR, WARP_Q, THREAD_Q, kBlockSelectNumThreads> \
-      <<<grid, block, 0, stream>>>(in, outK, outV, kInit, vInit, k);    \
+    if (bitset.getSize(0) == 0)                                       \
+      blockSelect<TYPE, int, DIR, WARP_Q, THREAD_Q, kBlockSelectNumThreads> \
+        <<<grid, block, 0, stream>>>(in, outK, outV, kInit, vInit, k);  \
+    else                                                                \
+      blockSelect<TYPE, int, DIR, WARP_Q, THREAD_Q, kBlockSelectNumThreads> \
+        <<<grid, block, 0, stream>>>(in, outK, outV, kInit, vInit, k, bitset);    \
     CUDA_TEST_ERROR();                                                  \
   }                                                                     \
                                                                         \
@@ -64,7 +71,8 @@
     Tensor<int, 2, true>& outV,                                         \
     bool dir,                                                           \
     int k,                                                              \
-    cudaStream_t stream) {                                              \
+    cudaStream_t stream,                                                \
+    Tensor<uint8_t, 1, true> bitset) {                                  \
     FAISS_ASSERT(inK.isSameSize(inV));                                  \
     FAISS_ASSERT(outK.isSameSize(outV));                                \
                                                                         \
@@ -79,16 +87,20 @@
     auto kInit = dir ? Limits<TYPE>::getMin() : Limits<TYPE>::getMax(); \
     auto vInit = -1;                                                    \
                                                                         \
-    blockSelectPair<TYPE, int, DIR, WARP_Q, THREAD_Q, kBlockSelectNumThreads> \
-      <<<grid, block, 0, stream>>>(inK, inV, outK, outV, kInit, vInit, k); \
+    if (bitset.getSize(0) == 0)                                         \
+      blockSelectPair<TYPE, int, DIR, WARP_Q, THREAD_Q, kBlockSelectNumThreads> \
+        <<<grid, block, 0, stream>>>(inK, inV, outK, outV, kInit, vInit, k);  \
+    else                                                                \
+      blockSelectPair<TYPE, int, DIR, WARP_Q, THREAD_Q, kBlockSelectNumThreads> \
+        <<<grid, block, 0, stream>>>(inK, inV, outK, outV, kInit, vInit, k, bitset); \
     CUDA_TEST_ERROR();                                                  \
   }
 
 
 #define BLOCK_SELECT_CALL(TYPE, DIR, WARP_Q)                    \
   runBlockSelect_ ## TYPE ## _ ## DIR ## _ ## WARP_Q ## _(      \
-    in, outK, outV, dir, k, stream)
+    in, outK, outV, dir, k, stream, bitset)
 
 #define BLOCK_SELECT_PAIR_CALL(TYPE, DIR, WARP_Q)               \
   runBlockSelectPair_ ## TYPE ## _ ## DIR ## _ ## WARP_Q ## _(  \
-    inK, inV, outK, outV, dir, k, stream)
+    inK, inV, outK, outV, dir, k, stream, bitset)

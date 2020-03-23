@@ -349,7 +349,8 @@ GpuIndexIVFPQ::searchImpl_(int n,
                            const float* x,
                            int k,
                            float* distances,
-                           Index::idx_t* labels) const {
+                           Index::idx_t* labels,
+                           ConcurrentBitsetPtr bitset) const {
   // Device is already set in GpuIndex::search
   FAISS_ASSERT(index_);
   FAISS_ASSERT(n > 0);
@@ -361,7 +362,8 @@ GpuIndexIVFPQ::searchImpl_(int n,
   static_assert(sizeof(long) == sizeof(Index::idx_t), "size mismatch");
   Tensor<long, 2, true> outLabels(const_cast<long*>(labels), {n, k});
 
-  index_->query(queries, nprobe, k, outDistances, outLabels);
+  DeviceTensor<uint8_t, 1, true> bitsetDevice({0});
+  index_->query(queries, nprobe, k, outDistances, outLabels, bitsetDevice);
 }
 
 int

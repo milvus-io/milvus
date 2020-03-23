@@ -131,6 +131,7 @@ void runDistance(bool computeL2,
                  Tensor<T, 2, true>& queries,
                  bool queriesRowMajor,
                  int k,
+                 Tensor<uint8_t, 1, true> bitset,
                  Tensor<T, 2, true>& outDistances,
                  Tensor<int, 2, true>& outIndices,
                  bool useHgemm,
@@ -309,7 +310,8 @@ void runDistance(bool computeL2,
                          outDistanceView,
                          outIndexView,
                          k,
-                         streams[curStream]);
+                         streams[curStream],
+                         bitset);
 
           if (!ignoreOutDistances) {
             // expand (query id) to (query id, k) by duplicating along rows
@@ -329,7 +331,8 @@ void runDistance(bool computeL2,
                          outDistanceBufColView,
                          outIndexBufColView,
                          k,
-                         streams[curStream]);
+                         streams[curStream],
+                         bitset);
 
           if (!ignoreOutDistances) {
             // expand (query id) to (query id, k) by duplicating along rows
@@ -348,13 +351,15 @@ void runDistance(bool computeL2,
           runBlockSelect(distanceBufView,
                          outDistanceView,
                          outIndexView,
-                         true, k, streams[curStream]);
+                         true, k, streams[curStream],
+                         bitset);
         } else {
           // Write into the intermediate output
           runBlockSelect(distanceBufView,
                          outDistanceBufColView,
                          outIndexBufColView,
-                         true, k, streams[curStream]);
+                         true, k, streams[curStream],
+                         bitset);
         }
       }
     }
@@ -370,7 +375,8 @@ void runDistance(bool computeL2,
                          outIndexBufRowView,
                          outDistanceView,
                          outIndexView,
-                         computeL2 ? false : true, k, streams[curStream]);
+                         computeL2 ? false : true, k, streams[curStream],
+                         bitset);
     }
 
     curStream = (curStream + 1) % 2;
@@ -384,6 +390,7 @@ void runDistance(bool computeL2,
   }
 }
 
+// Bitset added
 template <typename T>
 void runL2Distance(GpuResources* resources,
                    Tensor<T, 2, true>& centroids,
@@ -392,6 +399,7 @@ void runL2Distance(GpuResources* resources,
                    Tensor<T, 2, true>& queries,
                    bool queriesRowMajor,
                    int k,
+                   Tensor<uint8_t, 1, true> bitset,
                    Tensor<T, 2, true>& outDistances,
                    Tensor<int, 2, true>& outIndices,
                    bool useHgemm,
@@ -404,6 +412,7 @@ void runL2Distance(GpuResources* resources,
                  queries,
                  queriesRowMajor,
                  k,
+                 bitset,
                  outDistances,
                  outIndices,
                  useHgemm,
@@ -417,6 +426,7 @@ void runIPDistance(GpuResources* resources,
                    Tensor<T, 2, true>& queries,
                    bool queriesRowMajor,
                    int k,
+                   Tensor<uint8_t, 1, true> bitset,
                    Tensor<T, 2, true>& outDistances,
                    Tensor<int, 2, true>& outIndices,
                    bool useHgemm) {
@@ -428,6 +438,7 @@ void runIPDistance(GpuResources* resources,
                  queries,
                  queriesRowMajor,
                  k,
+                 bitset,
                  outDistances,
                  outIndices,
                  useHgemm,
@@ -445,6 +456,7 @@ runIPDistance(GpuResources* resources,
               Tensor<float, 2, true>& queries,
               bool queriesRowMajor,
               int k,
+              Tensor<uint8_t, 1, true> bitset,
               Tensor<float, 2, true>& outDistances,
               Tensor<int, 2, true>& outIndices) {
   runIPDistance<float>(resources,
@@ -453,6 +465,7 @@ runIPDistance(GpuResources* resources,
                        queries,
                        queriesRowMajor,
                        k,
+                       bitset,
                        outDistances,
                        outIndices,
                        false);
@@ -465,6 +478,7 @@ runIPDistance(GpuResources* resources,
               Tensor<half, 2, true>& queries,
               bool queriesRowMajor,
               int k,
+              Tensor<uint8_t, 1, true> bitset,
               Tensor<half, 2, true>& outDistances,
               Tensor<int, 2, true>& outIndices,
               bool useHgemm) {
@@ -474,6 +488,7 @@ runIPDistance(GpuResources* resources,
                       queries,
                       queriesRowMajor,
                       k,
+                      bitset,
                       outDistances,
                       outIndices,
                       useHgemm);
@@ -487,6 +502,7 @@ runL2Distance(GpuResources* resources,
               Tensor<float, 2, true>& queries,
               bool queriesRowMajor,
               int k,
+              Tensor<uint8_t, 1, true> bitset,
               Tensor<float, 2, true>& outDistances,
               Tensor<int, 2, true>& outIndices,
               bool ignoreOutDistances) {
@@ -497,6 +513,7 @@ runL2Distance(GpuResources* resources,
                        queries,
                        queriesRowMajor,
                        k,
+                       bitset,
                        outDistances,
                        outIndices,
                        false,
@@ -511,6 +528,7 @@ runL2Distance(GpuResources* resources,
               Tensor<half, 2, true>& queries,
               bool queriesRowMajor,
               int k,
+              Tensor<uint8_t, 1, true> bitset,
               Tensor<half, 2, true>& outDistances,
               Tensor<int, 2, true>& outIndices,
               bool useHgemm,
@@ -522,6 +540,7 @@ runL2Distance(GpuResources* resources,
                       queries,
                       queriesRowMajor,
                       k,
+                      bitset,
                       outDistances,
                       outIndices,
                       useHgemm,

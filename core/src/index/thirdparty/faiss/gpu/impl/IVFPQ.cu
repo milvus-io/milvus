@@ -128,7 +128,8 @@ IVFPQ::classifyAndAddVectors(Tensor<float, 2, true>& vecs,
   DeviceTensor<int, 2, true> listIds2d(mem, {vecs.getSize(0), 1}, stream);
   auto listIds = listIds2d.view<1>({vecs.getSize(0)});
 
-  quantizer_->query(vecs, 1, listDistance, listIds2d, false);
+  DeviceTensor<uint8_t, 1, true> bitsetDevice({0});
+  quantizer_->query(vecs, 1, listDistance, listIds2d, false, bitsetDevice);
 
   // Copy the lists that we wish to append to back to the CPU
   // FIXME: really this can be into pinned memory and a true async
@@ -185,6 +186,7 @@ IVFPQ::classifyAndAddVectors(Tensor<float, 2, true>& vecs,
                   residualsTransposeView,
                   true, // residualsTransposeView is row major
                   1,
+                  bitsetDevice,
                   closestSubQDistanceView,
                   closestSubQIndexView,
                   // We don't care about distances
@@ -509,7 +511,8 @@ IVFPQ::query(Tensor<float, 2, true>& queries,
              int nprobe,
              int k,
              Tensor<float, 2, true>& outDistances,
-             Tensor<long, 2, true>& outIndices) {
+             Tensor<long, 2, true>& outIndices,
+             Tensor<uint8_t, 1, true> bitset) {
   // These are caught at a higher level
   FAISS_ASSERT(nprobe <= GPU_MAX_SELECTION_K);
   FAISS_ASSERT(k <= GPU_MAX_SELECTION_K);
@@ -534,7 +537,8 @@ IVFPQ::query(Tensor<float, 2, true>& queries,
                     nprobe,
                     coarseDistances,
                     coarseIndices,
-                    true);
+                    true,
+                    bitset);
 
   if (precomputedCodes_) {
     runPQPrecomputedCodes_(queries,

@@ -106,7 +106,8 @@ FlatIndex::query(Tensor<float, 2, true>& input,
                  int k,
                  Tensor<float, 2, true>& outDistances,
                  Tensor<int, 2, true>& outIndices,
-                 bool exactDistance) {
+                 bool exactDistance,
+                 Tensor<uint8_t, 1, true> bitset) {
   auto stream = resources_->getDefaultStreamCurrentDevice();
   auto& mem = resources_->getMemoryManagerCurrentDevice();
 
@@ -119,7 +120,7 @@ FlatIndex::query(Tensor<float, 2, true>& input,
     DeviceTensor<half, 2, true> outDistancesHalf(
       mem, {outDistances.getSize(0), outDistances.getSize(1)}, stream);
 
-    query(inputHalf, k, outDistancesHalf, outIndices, exactDistance);
+    query(inputHalf, k, outDistancesHalf, outIndices, exactDistance, bitset);
 
     if (exactDistance) {
       // Convert outDistances back
@@ -136,6 +137,7 @@ FlatIndex::query(Tensor<float, 2, true>& input,
                     input,
                     true, // input is row major
                     k,
+                    bitset,
                     outDistances,
                     outIndices,
                     !exactDistance);
@@ -146,6 +148,7 @@ FlatIndex::query(Tensor<float, 2, true>& input,
                     input,
                     true, // input is row major
                     k,
+                    bitset,
                     outDistances,
                     outIndices);
     }
@@ -157,7 +160,8 @@ FlatIndex::query(Tensor<half, 2, true>& input,
                  int k,
                  Tensor<half, 2, true>& outDistances,
                  Tensor<int, 2, true>& outIndices,
-                 bool exactDistance) {
+                 bool exactDistance,
+                 Tensor<uint8_t, 1, true> bitset) {
   FAISS_ASSERT(useFloat16_);
 
   if (l2Distance_) {
@@ -168,6 +172,7 @@ FlatIndex::query(Tensor<half, 2, true>& input,
                   input,
                   true, // input is row major
                   k,
+                  bitset,
                   outDistances,
                   outIndices,
                   useFloat16Accumulator_,
@@ -180,6 +185,7 @@ FlatIndex::query(Tensor<half, 2, true>& input,
                   input,
                   true, // input is row major
                   k,
+                  bitset,
                   outDistances,
                   outIndices,
                   useFloat16Accumulator_);

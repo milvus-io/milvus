@@ -60,7 +60,8 @@ class IVFPQ : public IVFBase {
              int nprobe,
              int k,
              Tensor<float, 2, true>& outDistances,
-             Tensor<long, 2, true>& outIndices);
+             Tensor<long, 2, true>& outIndices,
+             Tensor<uint8_t, 1, true> bitset);
 
   /// Return the list codes of a particular list back to the CPU
   std::vector<unsigned char> getListCodes(int listId) const;

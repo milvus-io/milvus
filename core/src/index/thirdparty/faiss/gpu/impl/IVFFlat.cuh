@@ -52,7 +52,8 @@ class IVFFlat : public IVFBase {
              int nprobe,
              int k,
              Tensor<float, 2, true>& outDistances,
-             Tensor<long, 2, true>& outIndices);
+             Tensor<long, 2, true>& outIndices,
+             Tensor<uint8_t, 1, true> bitset);
 
  private:
   /// Returns the size of our stored vectors, in bytes

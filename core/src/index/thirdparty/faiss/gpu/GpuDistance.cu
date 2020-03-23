@@ -64,6 +64,9 @@ void bruteForceKnn(GpuResources* resources,
   // temporary memory for it
   DeviceTensor<int, 2, true> tOutIntIndices(mem, {numQueries, k}, stream);
 
+  // Empty bitset
+  DeviceTensor<uint8_t, 1, true> bitsetDevice({0});
+
   // Do the work
   if (metric == faiss::MetricType::METRIC_L2) {
     runL2Distance(resources,
@@ -73,6 +76,7 @@ void bruteForceKnn(GpuResources* resources,
                   tQueries,
                   queriesRowMajor,
                   k,
+                  bitsetDevice,
                   tOutDistances,
                   tOutIntIndices);
   } else if (metric == faiss::MetricType::METRIC_INNER_PRODUCT) {
@@ -82,6 +86,7 @@ void bruteForceKnn(GpuResources* resources,
                   tQueries,
                   queriesRowMajor,
                   k,
+                  bitsetDevice,
                   tOutDistances,
                   tOutIntIndices);
   } else {

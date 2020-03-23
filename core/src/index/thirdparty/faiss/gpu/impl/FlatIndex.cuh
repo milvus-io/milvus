@@ -56,13 +56,15 @@ class FlatIndex {
              int k,
              Tensor<float, 2, true>& outDistances,
              Tensor<int, 2, true>& outIndices,
-             bool exactDistance);
+             bool exactDistance,
+             Tensor<uint8_t, 1, true> bitset);
 
   void query(Tensor<half, 2, true>& vecs,
              int k,
              Tensor<half, 2, true>& outDistances,
              Tensor<int, 2, true>& outIndices,
-             bool exactDistance);
+             bool exactDistance,
+             Tensor<uint8_t, 1, true> bitset);
 
   /// Compute residual for set of vectors
   void computeResidual(Tensor<float, 2, true>& vecs,
