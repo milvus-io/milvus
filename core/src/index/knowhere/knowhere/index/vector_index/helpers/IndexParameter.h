@@ -44,6 +44,9 @@ constexpr const char* candidate = "candidate_pool_size";
 constexpr const char* efConstruction = "efConstruction";
 constexpr const char* M = "M";
 constexpr const char* ef = "ef";
+
+// Annoy Params
+constexpr const char* Q = "Q";
 }  // namespace IndexParams
 
 namespace Metric {
