@@ -12,32 +12,51 @@
 #pragma once
 
 #include "server/delivery/request/BaseRequest.h"
+#include "server/delivery/request/SearchRequest.h"
 
 #include <memory>
+#include <set>
 #include <string>
 #include <vector>
 
 namespace milvus {
 namespace server {
 
-class InsertRequest : public BaseRequest {
+class SearchCombineRequest : public BaseRequest {
  public:
-    static BaseRequestPtr
-    Create(const std::shared_ptr<milvus::server::Context>& context, const std::string& table_name,
-           engine::VectorsData& vectors, const std::string& partition_tag);
+    SearchCombineRequest();
+
+    Status
+    Combine(const SearchRequestPtr& request);
+
+    bool
+    CanCombine(const SearchRequestPtr& request);
+
+    static bool
+    CanCombine(const SearchRequestPtr& left, const SearchRequestPtr& right);
 
  protected:
-    InsertRequest(const std::shared_ptr<milvus::server::Context>& context, const std::string& table_name,
-                  engine::VectorsData& vectors, const std::string& partition_tag);
-
     Status
     OnExecute() override;
 
  private:
-    const std::string table_name_;
-    engine::VectorsData& vectors_data_;
-    const std::string partition_tag_;
+    Status
+    FreeRequests(const Status& status);
+
+ private:
+    std::string table_name_;
+    engine::VectorsData vectors_data_;
+    int64_t min_topk_ = 0;
+    int64_t search_topk_ = 0;
+    int64_t max_topk_ = 0;
+    milvus::json extra_params_;
+    std::set<std::string> partition_list_;
+    std::set<std::string> file_id_list_;
+
+    std::vector<SearchRequestPtr> request_list_;
 };
+
+using SearchCombineRequestPtr = std::shared_ptr<SearchCombineRequest>;
 
 }  // namespace server
 }  // namespace milvus

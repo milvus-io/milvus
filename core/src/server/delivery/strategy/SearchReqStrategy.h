@@ -11,33 +11,23 @@
 
 #pragma once
 
-#include "server/delivery/request/BaseRequest.h"
+#include "server/delivery/strategy/RequestStrategy.h"
+#include "utils/Status.h"
 
 #include <memory>
-#include <string>
-#include <vector>
+#include <queue>
 
 namespace milvus {
 namespace server {
 
-class InsertRequest : public BaseRequest {
+class SearchReqStrategy : public RequestStrategy {
  public:
-    static BaseRequestPtr
-    Create(const std::shared_ptr<milvus::server::Context>& context, const std::string& table_name,
-           engine::VectorsData& vectors, const std::string& partition_tag);
-
- protected:
-    InsertRequest(const std::shared_ptr<milvus::server::Context>& context, const std::string& table_name,
-                  engine::VectorsData& vectors, const std::string& partition_tag);
+    SearchReqStrategy();
 
     Status
-    OnExecute() override;
-
- private:
-    const std::string table_name_;
-    engine::VectorsData& vectors_data_;
-    const std::string partition_tag_;
+    ReScheduleQueue(const BaseRequestPtr& request, std::queue<BaseRequestPtr>& queue) override;
 };
 
+using RequestStrategyPtr = std::shared_ptr<RequestStrategy>;
 }  // namespace server
 }  // namespace milvus

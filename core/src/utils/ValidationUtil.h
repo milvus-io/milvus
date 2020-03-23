@@ -11,6 +11,7 @@
 
 #pragma once
 
+#include "db/Types.h"
 #include "db/meta/MetaTypes.h"
 #include "utils/Json.h"
 #include "utils/Status.h"
@@ -20,6 +21,8 @@
 
 namespace milvus {
 namespace server {
+
+constexpr int64_t QUERY_MAX_TOPK = 2048;
 
 class ValidationUtil {
  private:
@@ -44,13 +47,16 @@ class ValidationUtil {
                          int64_t topk);
 
     static Status
+    ValidateVectorData(const engine::VectorsData& vectors, const engine::meta::TableSchema& table_schema);
+
+    static Status
     ValidateTableIndexFileSize(int64_t index_file_size);
 
     static Status
     ValidateTableIndexMetricType(int32_t metric_type);
 
     static Status
-    ValidateSearchTopk(int64_t top_k, const engine::meta::TableSchema& table_schema);
+    ValidateSearchTopk(int64_t top_k);
 
     static Status
     ValidatePartitionName(const std::string& partition_name);

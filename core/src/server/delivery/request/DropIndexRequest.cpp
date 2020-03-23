@@ -21,12 +21,13 @@
 namespace milvus {
 namespace server {
 
-DropIndexRequest::DropIndexRequest(const std::shared_ptr<Context>& context, const std::string& table_name)
-    : BaseRequest(context, DDL_DML_REQUEST_GROUP), table_name_(table_name) {
+DropIndexRequest::DropIndexRequest(const std::shared_ptr<milvus::server::Context>& context,
+                                   const std::string& table_name)
+    : BaseRequest(context, BaseRequest::kDropIndex), table_name_(table_name) {
 }
 
 BaseRequestPtr
-DropIndexRequest::Create(const std::shared_ptr<Context>& context, const std::string& table_name) {
+DropIndexRequest::Create(const std::shared_ptr<milvus::server::Context>& context, const std::string& table_name) {
     return std::shared_ptr<BaseRequest>(new DropIndexRequest(context, table_name));
 }
 

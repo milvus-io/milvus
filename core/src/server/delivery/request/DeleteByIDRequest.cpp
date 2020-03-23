@@ -29,13 +29,13 @@
 namespace milvus {
 namespace server {
 
-DeleteByIDRequest::DeleteByIDRequest(const std::shared_ptr<Context>& context, const std::string& table_name,
-                                     const std::vector<int64_t>& vector_ids)
-    : BaseRequest(context, DDL_DML_REQUEST_GROUP), table_name_(table_name), vector_ids_(vector_ids) {
+DeleteByIDRequest::DeleteByIDRequest(const std::shared_ptr<milvus::server::Context>& context,
+                                     const std::string& table_name, const std::vector<int64_t>& vector_ids)
+    : BaseRequest(context, BaseRequest::kDeleteByID), table_name_(table_name), vector_ids_(vector_ids) {
 }
 
 BaseRequestPtr
-DeleteByIDRequest::Create(const std::shared_ptr<Context>& context, const std::string& table_name,
+DeleteByIDRequest::Create(const std::shared_ptr<milvus::server::Context>& context, const std::string& table_name,
                           const std::vector<int64_t>& vector_ids) {
     return std::shared_ptr<BaseRequest>(new DeleteByIDRequest(context, table_name, vector_ids));
 }
@@ -70,9 +70,11 @@ DeleteByIDRequest::OnExecute() {
         // Check table's index type supports delete
         if (table_schema.engine_type_ != (int32_t)engine::EngineType::FAISS_IDMAP &&
             table_schema.engine_type_ != (int32_t)engine::EngineType::FAISS_BIN_IDMAP &&
+            table_schema.engine_type_ != (int32_t)engine::EngineType::HNSW &&
             table_schema.engine_type_ != (int32_t)engine::EngineType::FAISS_IVFFLAT &&
             table_schema.engine_type_ != (int32_t)engine::EngineType::FAISS_BIN_IVFFLAT &&
-            table_schema.engine_type_ != (int32_t)engine::EngineType::FAISS_IVFSQ8) {
+            table_schema.engine_type_ != (int32_t)engine::EngineType::FAISS_IVFSQ8 &&
+            table_schema.engine_type_ != (int32_t)engine::EngineType::FAISS_PQ) {
             std::string err_msg =
                 "Index type " + std::to_string(table_schema.engine_type_) + " does not support delete operation";
             SERVER_LOG_ERROR << err_msg;
