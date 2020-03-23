@@ -15,6 +15,7 @@
 #include "utils/CommonUtil.h"
 #include "utils/Error.h"
 #include "utils/Log.h"
+#include "utils/TimeRecorder.h"
 
 #include <queue>
 
@@ -31,6 +32,7 @@ SearchReqStrategy::ReScheduleQueue(const BaseRequestPtr& request, std::queue<Bas
         return Status(SERVER_UNSUPPORTED_ERROR, "");
     }
 
+    //    TimeRecorderAuto rc("SearchReqStrategy::ReScheduleQueue");
     SearchRequestPtr new_search_req = std::static_pointer_cast<SearchRequest>(request);
 
     BaseRequestPtr last_req = queue.back();

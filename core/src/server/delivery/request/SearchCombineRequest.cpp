@@ -267,7 +267,7 @@ SearchCombineRequest::OnExecute() {
             return Status::OK();
         }
 
-        SERVER_LOG_DEBUG << std::to_string(combined_request - run_request) << " requests were skipped";
+        SERVER_LOG_DEBUG << (combined_request - run_request) << " requests were skipped";
         SERVER_LOG_DEBUG << "reset topk to " << search_topk_;
         rc.RecordSection("check validation");
 
