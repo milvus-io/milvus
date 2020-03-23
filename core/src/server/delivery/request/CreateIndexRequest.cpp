@@ -24,17 +24,18 @@
 namespace milvus {
 namespace server {
 
-CreateIndexRequest::CreateIndexRequest(const std::shared_ptr<Context>& context, const std::string& table_name,
-                                       int64_t index_type, const milvus::json& json_params)
-    : BaseRequest(context, DDL_DML_REQUEST_GROUP),
+CreateIndexRequest::CreateIndexRequest(const std::shared_ptr<milvus::server::Context>& context,
+                                       const std::string& table_name, int64_t index_type,
+                                       const milvus::json& json_params)
+    : BaseRequest(context, BaseRequest::kCreateIndex),
       table_name_(table_name),
       index_type_(index_type),
       json_params_(json_params) {
 }
 
 BaseRequestPtr
-CreateIndexRequest::Create(const std::shared_ptr<Context>& context, const std::string& table_name, int64_t index_type,
-                           const milvus::json& json_params) {
+CreateIndexRequest::Create(const std::shared_ptr<milvus::server::Context>& context, const std::string& table_name,
+                           int64_t index_type, const milvus::json& json_params) {
     return std::shared_ptr<BaseRequest>(new CreateIndexRequest(context, table_name, index_type, json_params));
 }
 

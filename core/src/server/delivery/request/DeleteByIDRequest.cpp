@@ -29,13 +29,13 @@
 namespace milvus {
 namespace server {
 
-DeleteByIDRequest::DeleteByIDRequest(const std::shared_ptr<Context>& context, const std::string& table_name,
-                                     const std::vector<int64_t>& vector_ids)
-    : BaseRequest(context, DDL_DML_REQUEST_GROUP), table_name_(table_name), vector_ids_(vector_ids) {
+DeleteByIDRequest::DeleteByIDRequest(const std::shared_ptr<milvus::server::Context>& context,
+                                     const std::string& table_name, const std::vector<int64_t>& vector_ids)
+    : BaseRequest(context, BaseRequest::kDeleteByID), table_name_(table_name), vector_ids_(vector_ids) {
 }
 
 BaseRequestPtr
-DeleteByIDRequest::Create(const std::shared_ptr<Context>& context, const std::string& table_name,
+DeleteByIDRequest::Create(const std::shared_ptr<milvus::server::Context>& context, const std::string& table_name,
                           const std::vector<int64_t>& vector_ids) {
     return std::shared_ptr<BaseRequest>(new DeleteByIDRequest(context, table_name, vector_ids));
 }

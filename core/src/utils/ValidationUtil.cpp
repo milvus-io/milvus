@@ -307,6 +307,39 @@ ValidationUtil::ValidateSearchParams(const milvus::json& search_params, const en
 }
 
 Status
+ValidationUtil::ValidateVectorData(const engine::VectorsData& vectors, const engine::meta::TableSchema& table_schema) {
+    if (vectors.float_data_.empty() && vectors.binary_data_.empty()) {
+        return Status(SERVER_INVALID_ROWRECORD_ARRAY,
+                      "The vector array is empty. Make sure you have entered vector records.");
+    }
+
+    uint64_t vector_count = vectors.vector_count_;
+    if (engine::utils::IsBinaryMetricType(table_schema.metric_type_)) {
+        // check prepared binary data
+        if (vectors.binary_data_.size() % vector_count != 0) {
+            return Status(SERVER_INVALID_ROWRECORD_ARRAY, "The vector dimension must be equal to the table dimension.");
+        }
+
+        if (vectors.binary_data_.size() * 8 / vector_count != table_schema.dimension_) {
+            return Status(SERVER_INVALID_VECTOR_DIMENSION,
+                          "The vector dimension must be equal to the table dimension.");
+        }
+    } else {
+        // check prepared float data
+        fiu_do_on("SearchRequest.OnExecute.invalod_rowrecord_array", vector_count = vectors.float_data_.size() + 1);
+        if (vectors.float_data_.size() % vector_count != 0) {
+            return Status(SERVER_INVALID_ROWRECORD_ARRAY, "The vector dimension must be equal to the table dimension.");
+        }
+        if (vectors.float_data_.size() / vector_count != table_schema.dimension_) {
+            return Status(SERVER_INVALID_VECTOR_DIMENSION,
+                          "The vector dimension must be equal to the table dimension.");
+        }
+    }
+
+    return Status::OK();
+}
+
+Status
 ValidationUtil::ValidateTableIndexFileSize(int64_t index_file_size) {
     if (index_file_size <= 0 || index_file_size > INDEX_FILE_SIZE_LIMIT) {
         std::string msg = "Invalid index file size: " + std::to_string(index_file_size) + ". " +
@@ -331,8 +364,8 @@ ValidationUtil::ValidateTableIndexMetricType(int32_t metric_type) {
 }
 
 Status
-ValidationUtil::ValidateSearchTopk(int64_t top_k, const engine::meta::TableSchema& table_schema) {
-    if (top_k <= 0 || top_k > 2048) {
+ValidationUtil::ValidateSearchTopk(int64_t top_k) {
+    if (top_k <= 0 || top_k > QUERY_MAX_TOPK) {
         std::string msg =
             "Invalid topk: " + std::to_string(top_k) + ". " + "The topk must be within the range of 1 ~ 2048.";
         SERVER_LOG_ERROR << msg;
