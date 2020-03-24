@@ -9,7 +9,7 @@ from utils import *
 
 dim = 128
 index_file_size = 10
-COMPACT_TIMEOUT = 60
+COMPACT_TIMEOUT = 180
 nprobe = 1
 top_k = 1
 tag = "1970-01-01"
@@ -351,6 +351,10 @@ class TestCompactBase:
         '''
         vectors = gen_vector(nb, dim)
         status, ids = connect.add_vectors(collection, vectors)
+        assert status.OK()
+        status = connect.flush([collection])
+        assert status.OK()
+        status = connect.delete_by_id(collection, ids[:10])
         assert status.OK()
         status = connect.flush([collection])
         assert status.OK()
