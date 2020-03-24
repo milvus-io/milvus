@@ -34,10 +34,9 @@ NsgIndex::NsgIndex(const size_t& dimension, const size_t& n, std::string metric)
     : dimension(dimension), ntotal(n), metric_type(metric) {
     if (metric == knowhere::Metric::L2) {
         distance_ = new DistanceL2;
-    } else
-        (metric == knowhere::Metric::IP) {
-            distance_ = new DistanceIP;
-        }
+    } else if (metric == knowhere::Metric::IP) {
+        distance_ = new DistanceIP;
+    }
 }
 
 NsgIndex::~NsgIndex() {
