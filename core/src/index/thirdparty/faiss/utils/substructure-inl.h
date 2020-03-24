@@ -15,13 +15,9 @@ namespace faiss {
             a0 = a[0];
         }
 
-        inline float compute (const uint8_t *b8) const {
+        inline bool compute (const uint8_t *b8) const {
             const uint64_t *b = (uint64_t *)b8;
-            int accu_num = popcount64 (b[0] & a0);
-            int accu_den = popcount64 (b[0]);
-            if (accu_num == 0)
-                return 1.0;
-            return 1.0 - (float)(accu_num) / (float)(accu_den);
+            return (a0 & b[0]) == a0;
         }
 
     };
@@ -41,13 +37,9 @@ namespace faiss {
             a0 = a[0]; a1 = a[1];
         }
 
-        inline float compute (const uint8_t *b8) const {
+        inline bool compute (const uint8_t *b8) const {
             const uint64_t *b = (uint64_t *)b8;
-            int accu_num = popcount64 (b[0] & a0) + popcount64 (b[1] & a1);
-            int accu_den = popcount64 (b[0]) + popcount64 (b[1]);
-            if (accu_num == 0)
-                return 1.0;
-            return 1.0 - (float)(accu_num) / (float)(accu_den);
+            return (a0 & b[0]) == a0 && (a1 & b[1]) == a1;
         }
 
     };
@@ -67,15 +59,10 @@ namespace faiss {
             a0 = a[0]; a1 = a[1]; a2 = a[2]; a3 = a[3];
         }
 
-        inline float compute (const uint8_t *b8) const {
+        inline bool compute (const uint8_t *b8) const {
             const uint64_t *b = (uint64_t *)b8;
-            int accu_num = popcount64 (b[0] & a0) + popcount64 (b[1] & a1) +
-                           popcount64 (b[2] & a2) + popcount64 (b[3] & a3);
-            int accu_den = popcount64 (b[0]) + popcount64 (b[1]) +
-                           popcount64 (b[2]) + popcount64 (b[3]);
-            if (accu_num == 0)
-                return 1.0;
-            return 1.0 - (float)(accu_num) / (float)(accu_den);
+            return (a0 & b[0]) == a0 && (a1 & b[1]) == a1 &&
+                   (a2 & b[2]) == a2 && (a3 & b[3]) == a3;
         }
 
     };
@@ -96,19 +83,12 @@ namespace faiss {
             a4 = a[4]; a5 = a[5]; a6 = a[6]; a7 = a[7];
         }
 
-        inline float compute (const uint8_t *b8) const {
+        inline bool compute (const uint8_t *b8) const {
             const uint64_t *b = (uint64_t *)b8;
-            int accu_num = popcount64 (b[0] & a0) + popcount64 (b[1] & a1) +
-                           popcount64 (b[2] & a2) + popcount64 (b[3] & a3) +
-                           popcount64 (b[4] & a4) + popcount64 (b[5] & a5) +
-                           popcount64 (b[6] & a6) + popcount64 (b[7] & a7);
-            int accu_den = popcount64 (b[0]) + popcount64 (b[1]) +
-                           popcount64 (b[2]) + popcount64 (b[3]) +
-                           popcount64 (b[4]) + popcount64 (b[5]) +
-                           popcount64 (b[6]) + popcount64 (b[7]);
-            if (accu_num == 0)
-                return 1.0;
-            return 1.0 - (float)(accu_num) / (float)(accu_den);
+            return (a0 & b[0]) == a0 && (a1 & b[1]) == a1 &&
+                   (a2 & b[2]) == a2 && (a3 & b[3]) == a3 &&
+                   (a4 & b[4]) == a4 && (a5 & b[5]) == a5 &&
+                   (a6 & b[6]) == a6 && (a7 & b[7]) == a7;
         }
 
     };
@@ -132,27 +112,16 @@ namespace faiss {
             a12 = a[12]; a13 = a[13]; a14 = a[14]; a15 = a[15];
         }
 
-        inline float compute (const uint8_t *b16) const {
+        inline bool compute (const uint8_t *b16) const {
             const uint64_t *b = (uint64_t *)b16;
-            int accu_num = popcount64 (b[0] & a0) + popcount64 (b[1] & a1) +
-                           popcount64 (b[2] & a2) + popcount64 (b[3] & a3) +
-                           popcount64 (b[4] & a4) + popcount64 (b[5] & a5) +
-                           popcount64 (b[6] & a6) + popcount64 (b[7] & a7) +
-                           popcount64 (b[8] & a8) + popcount64 (b[9] & a9) +
-                           popcount64 (b[10] & a10) + popcount64 (b[11] & a11) +
-                           popcount64 (b[12] & a12) + popcount64 (b[13] & a13) +
-                           popcount64 (b[14] & a14) + popcount64 (b[15] & a15);
-            int accu_den = popcount64 (b[0]) + popcount64 (b[1]) +
-                           popcount64 (b[2]) + popcount64 (b[3]) +
-                           popcount64 (b[4]) + popcount64 (b[5]) +
-                           popcount64 (b[6]) + popcount64 (b[7]) +
-                           popcount64 (b[8]) + popcount64 (b[9]) +
-                           popcount64 (b[10]) + popcount64 (b[11]) +
-                           popcount64 (b[12]) + popcount64 (b[13]) +
-                           popcount64 (b[14]) + popcount64 (b[15]);
-            if (accu_num == 0)
-                return 1.0;
-            return 1.0 - (float)(accu_num) / (float)(accu_den);
+            return (a0 & b[0]) == a0 && (a1 & b[1]) == a1 &&
+                   (a2 & b[2]) == a2 && (a3 & b[3]) == a3 &&
+                   (a4 & b[4]) == a4 && (a5 & b[5]) == a5 &&
+                   (a6 & b[6]) == a6 && (a7 & b[7]) == a7 &&
+                   (a8 & b[8]) == a8 && (a9 & b[9]) == a9 &&
+                   (a10 & b[10]) == a10 && (a11 & b[11]) == a11 &&
+                   (a12 & b[12]) == a12 && (a13 & b[13]) == a13 &&
+                   (a14 & b[14]) == a14 && (a15 & b[15]) == a15;
         }
 
     };
@@ -182,43 +151,24 @@ namespace faiss {
             a28 = a[28]; a29 = a[29]; a30 = a[30]; a31 = a[31];
         }
 
-        inline float compute (const uint8_t *b16) const {
+        inline bool compute (const uint8_t *b16) const {
             const uint64_t *b = (uint64_t *)b16;
-            int accu_num = popcount64 (b[0] & a0) + popcount64 (b[1] & a1) +
-                           popcount64 (b[2] & a2) + popcount64 (b[3] & a3) +
-                           popcount64 (b[4] & a4) + popcount64 (b[5] & a5) +
-                           popcount64 (b[6] & a6) + popcount64 (b[7] & a7) +
-                           popcount64 (b[8] & a8) + popcount64 (b[9] & a9) +
-                           popcount64 (b[10] & a10) + popcount64 (b[11] & a11) +
-                           popcount64 (b[12] & a12) + popcount64 (b[13] & a13) +
-                           popcount64 (b[14] & a14) + popcount64 (b[15] & a15) +
-                           popcount64 (b[16] & a16) + popcount64 (b[17] & a17) +
-                           popcount64 (b[18] & a18) + popcount64 (b[19] & a19) +
-                           popcount64 (b[20] & a20) + popcount64 (b[21] & a21) +
-                           popcount64 (b[22] & a22) + popcount64 (b[23] & a23) +
-                           popcount64 (b[24] & a24) + popcount64 (b[25] & a25) +
-                           popcount64 (b[26] & a26) + popcount64 (b[27] & a27) +
-                           popcount64 (b[28] & a28) + popcount64 (b[29] & a29) +
-                           popcount64 (b[30] & a30) + popcount64 (b[31] & a31);
-            int accu_den = popcount64 (b[0]) + popcount64 (b[1]) +
-                           popcount64 (b[2]) + popcount64 (b[3]) +
-                           popcount64 (b[4]) + popcount64 (b[5]) +
-                           popcount64 (b[6]) + popcount64 (b[7]) +
-                           popcount64 (b[8]) + popcount64 (b[9]) +
-                           popcount64 (b[10]) + popcount64 (b[11]) +
-                           popcount64 (b[12]) + popcount64 (b[13]) +
-                           popcount64 (b[14]) + popcount64 (b[15]) +
-                           popcount64 (b[16]) + popcount64 (b[17]) +
-                           popcount64 (b[18]) + popcount64 (b[19]) +
-                           popcount64 (b[20]) + popcount64 (b[21]) +
-                           popcount64 (b[22]) + popcount64 (b[23]) +
-                           popcount64 (b[24]) + popcount64 (b[25]) +
-                           popcount64 (b[26]) + popcount64 (b[27]) +
-                           popcount64 (b[28]) + popcount64 (b[29]) +
-                           popcount64 (b[30]) + popcount64 (b[31]);
-            if (accu_num == 0)
-                return 1.0;
-            return 1.0 - (float)(accu_num) / (float)(accu_den);
+            return (a0 & b[0]) == a0 && (a1 & b[1]) == a1 &&
+                   (a2 & b[2]) == a2 && (a3 & b[3]) == a3 &&
+                   (a4 & b[4]) == a4 && (a5 & b[5]) == a5 &&
+                   (a6 & b[6]) == a6 && (a7 & b[7]) == a7 &&
+                   (a8 & b[8]) == a8 && (a9 & b[9]) == a9 &&
+                   (a10 & b[10]) == a10 && (a11 & b[11]) == a11 &&
+                   (a12 & b[12]) == a12 && (a13 & b[13]) == a13 &&
+                   (a14 & b[14]) == a14 && (a15 & b[15]) == a15 &&
+                   (a16 & b[16]) == a16 && (a17 & b[17]) == a17 &&
+                   (a18 & b[18]) == a18 && (a19 & b[19]) == a19 &&
+                   (a20 & b[20]) == a20 && (a21 & b[21]) == a21 &&
+                   (a22 & b[22]) == a22 && (a23 & b[23]) == a23 &&
+                   (a24 & b[24]) == a24 && (a25 & b[25]) == a25 &&
+                   (a26 & b[26]) == a26 && (a27 & b[27]) == a27 &&
+                   (a28 & b[28]) == a28 && (a29 & b[29]) == a29 &&
+                   (a30 & b[30]) == a30 && (a31 & b[31]) == a31;
         }
 
     };
@@ -260,76 +210,41 @@ namespace faiss {
             a60 = a[60]; a61 = a[61]; a62 = a[62]; a63 = a[63];
         }
 
-        inline float compute (const uint8_t *b16) const {
+        inline bool compute (const uint8_t *b16) const {
             const uint64_t *b = (uint64_t *)b16;
-            int accu_num = popcount64 (b[0] & a0) + popcount64 (b[1] & a1) +
-                           popcount64 (b[2] & a2) + popcount64 (b[3] & a3) +
-                           popcount64 (b[4] & a4) + popcount64 (b[5] & a5) +
-                           popcount64 (b[6] & a6) + popcount64 (b[7] & a7) +
-                           popcount64 (b[8] & a8) + popcount64 (b[9] & a9) +
-                           popcount64 (b[10] & a10) + popcount64 (b[11] & a11) +
-                           popcount64 (b[12] & a12) + popcount64 (b[13] & a13) +
-                           popcount64 (b[14] & a14) + popcount64 (b[15] & a15) +
-                           popcount64 (b[16] & a16) + popcount64 (b[17] & a17) +
-                           popcount64 (b[18] & a18) + popcount64 (b[19] & a19) +
-                           popcount64 (b[20] & a20) + popcount64 (b[21] & a21) +
-                           popcount64 (b[22] & a22) + popcount64 (b[23] & a23) +
-                           popcount64 (b[24] & a24) + popcount64 (b[25] & a25) +
-                           popcount64 (b[26] & a26) + popcount64 (b[27] & a27) +
-                           popcount64 (b[28] & a28) + popcount64 (b[29] & a29) +
-                           popcount64 (b[30] & a30) + popcount64 (b[31] & a31) +
-                           popcount64 (b[32] & a32) + popcount64 (b[33] & a33) +
-                           popcount64 (b[34] & a34) + popcount64 (b[35] & a35) +
-                           popcount64 (b[36] & a36) + popcount64 (b[37] & a37) +
-                           popcount64 (b[38] & a38) + popcount64 (b[39] & a39) +
-                           popcount64 (b[40] & a40) + popcount64 (b[41] & a41) +
-                           popcount64 (b[42] & a42) + popcount64 (b[43] & a43) +
-                           popcount64 (b[44] & a44) + popcount64 (b[45] & a45) +
-                           popcount64 (b[46] & a46) + popcount64 (b[47] & a47) +
-                           popcount64 (b[48] & a48) + popcount64 (b[49] & a49) +
-                           popcount64 (b[50] & a50) + popcount64 (b[51] & a51) +
-                           popcount64 (b[52] & a52) + popcount64 (b[53] & a53) +
-                           popcount64 (b[54] & a54) + popcount64 (b[55] & a55) +
-                           popcount64 (b[56] & a56) + popcount64 (b[57] & a57) +
-                           popcount64 (b[58] & a58) + popcount64 (b[59] & a59) +
-                           popcount64 (b[60] & a60) + popcount64 (b[61] & a61) +
-                           popcount64 (b[62] & a62) + popcount64 (b[63] & a63);
-            int accu_den = popcount64 (b[0]) + popcount64 (b[1]) +
-                           popcount64 (b[2]) + popcount64 (b[3]) +
-                           popcount64 (b[4]) + popcount64 (b[5]) +
-                           popcount64 (b[6]) + popcount64 (b[7]) +
-                           popcount64 (b[8]) + popcount64 (b[9]) +
-                           popcount64 (b[10]) + popcount64 (b[11]) +
-                           popcount64 (b[12]) + popcount64 (b[13]) +
-                           popcount64 (b[14]) + popcount64 (b[15]) +
-                           popcount64 (b[16]) + popcount64 (b[17]) +
-                           popcount64 (b[18]) + popcount64 (b[19]) +
-                           popcount64 (b[20]) + popcount64 (b[21]) +
-                           popcount64 (b[22]) + popcount64 (b[23]) +
-                           popcount64 (b[24]) + popcount64 (b[25]) +
-                           popcount64 (b[26]) + popcount64 (b[27]) +
-                           popcount64 (b[28]) + popcount64 (b[29]) +
-                           popcount64 (b[30]) + popcount64 (b[31]) +
-                           popcount64 (b[32]) + popcount64 (b[33]) +
-                           popcount64 (b[34]) + popcount64 (b[35]) +
-                           popcount64 (b[36]) + popcount64 (b[37]) +
-                           popcount64 (b[38]) + popcount64 (b[39]) +
-                           popcount64 (b[40]) + popcount64 (b[41]) +
-                           popcount64 (b[42]) + popcount64 (b[43]) +
-                           popcount64 (b[44]) + popcount64 (b[45]) +
-                           popcount64 (b[46]) + popcount64 (b[47]) +
-                           popcount64 (b[48]) + popcount64 (b[49]) +
-                           popcount64 (b[50]) + popcount64 (b[51]) +
-                           popcount64 (b[52]) + popcount64 (b[53]) +
-                           popcount64 (b[54]) + popcount64 (b[55]) +
-                           popcount64 (b[56]) + popcount64 (b[57]) +
-                           popcount64 (b[58]) + popcount64 (b[59]) +
-                           popcount64 (b[60]) + popcount64 (b[61]) +
-                           popcount64 (b[62]) + popcount64 (b[63]);
-            if (accu_num == 0)
-                return 1.0;
-            return 1.0 - (float)(accu_num) / (float)(accu_den);
-        }
+            return (a0 & b[0]) == a0 && (a1 & b[1]) == a1 &&
+                   (a2 & b[2]) == a2 && (a3 & b[3]) == a3 &&
+                   (a4 & b[4]) == a4 && (a5 & b[5]) == a5 &&
+                   (a6 & b[6]) == a6 && (a7 & b[7]) == a7 &&
+                   (a8 & b[8]) == a8 && (a9 & b[9]) == a9 &&
+                   (a10 & b[10]) == a10 && (a11 & b[11]) == a11 &&
+                   (a12 & b[12]) == a12 && (a13 & b[13]) == a13 &&
+                   (a14 & b[14]) == a14 && (a15 & b[15]) == a15 &&
+                   (a16 & b[16]) == a16 && (a17 & b[17]) == a17 &&
+                   (a18 & b[18]) == a18 && (a19 & b[19]) == a19 &&
+                   (a20 & b[20]) == a20 && (a21 & b[21]) == a21 &&
+                   (a22 & b[22]) == a22 && (a23 & b[23]) == a23 &&
+                   (a24 & b[24]) == a24 && (a25 & b[25]) == a25 &&
+                   (a26 & b[26]) == a26 && (a27 & b[27]) == a27 &&
+                   (a28 & b[28]) == a28 && (a29 & b[29]) == a29 &&
+                   (a30 & b[30]) == a30 && (a31 & b[31]) == a31 &&
+                   (a32 & b[32]) == a32 && (a33 & b[33]) == a33 &&
+                   (a34 & b[34]) == a34 && (a35 & b[35]) == a35 &&
+                   (a36 & b[36]) == a36 && (a37 & b[37]) == a37 &&
+                   (a38 & b[38]) == a38 && (a39 & b[39]) == a39 &&
+                   (a40 & b[40]) == a40 && (a41 & b[41]) == a41 &&
+                   (a42 & b[42]) == a42 && (a43 & b[43]) == a43 &&
+                   (a44 & b[44]) == a44 && (a45 & b[45]) == a45 &&
+                   (a46 & b[46]) == a46 && (a47 & b[47]) == a47 &&
+                   (a48 & b[48]) == a48 && (a49 & b[49]) == a49 &&
+                   (a50 & b[50]) == a50 && (a51 & b[51]) == a51 &&
+                   (a52 & b[52]) == a52 && (a53 & b[53]) == a53 &&
+                   (a54 & b[54]) == a54 && (a55 & b[55]) == a55 &&
+                   (a56 & b[56]) == a56 && (a57 & b[57]) == a57 &&
+                   (a58 & b[58]) == a58 && (a59 & b[59]) == a59 &&
+                   (a60 & b[60]) == a60 && (a61 & b[61]) == a61 &&
+                   (a62 & b[62]) == a62 && (a63 & b[63]) == a63;
+         }
 
     };
 
@@ -348,16 +263,14 @@ namespace faiss {
             n = code_size;
         }
 
-        float compute (const uint8_t *b8) const {
-            int accu_num = 0;
-            int accu_den = 0;
+        bool compute (const uint8_t *b8) const {
+            const uint64_t *b = (uint64_t *)b8;
             for (int i = 0; i < n; i++) {
-                accu_num += popcount64(a[i] & b8[i]);
-                accu_den += popcount64(b8[i]);
+                if ((a[i] & b[i]) != a[i]) {
+                    return false;
+                }
             }
-            if (accu_num == 0)
-                return 1.0;
-            return 1.0 - (float)(accu_num) / (float)(accu_den);
+            return true;
         }
 
     };
