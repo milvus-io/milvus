@@ -43,7 +43,8 @@ CreateTableRequest::Create(const std::shared_ptr<milvus::server::Context>& conte
 
 Status
 CreateTableRequest::OnExecute() {
-    std::string hdr = "CreateTableRequest(collection=" + table_name_ + ", dimension=" + std::to_string(dimension_) + ")";
+    std::string hdr =
+        "CreateTableRequest(collection=" + table_name_ + ", dimension=" + std::to_string(dimension_) + ")";
     TimeRecorderAuto rc(hdr);
 
     try {

@@ -147,12 +147,12 @@ class WalManager {
 };
 
 extern template bool
-WalManager::Insert<float>(const std::string& collection_id, const std::string& partition_tag, const IDNumbers& vector_ids,
-                          const std::vector<float>& vectors);
+WalManager::Insert<float>(const std::string& collection_id, const std::string& partition_tag,
+                          const IDNumbers& vector_ids, const std::vector<float>& vectors);
 
 extern template bool
-WalManager::Insert<uint8_t>(const std::string& collection_id, const std::string& partition_tag, const IDNumbers& vector_ids,
-                            const std::vector<uint8_t>& vectors);
+WalManager::Insert<uint8_t>(const std::string& collection_id, const std::string& partition_tag,
+                            const IDNumbers& vector_ids, const std::vector<uint8_t>& vectors);
 
 }  // namespace wal
 }  // namespace engine

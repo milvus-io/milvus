@@ -317,7 +317,8 @@ ValidationUtil::ValidateVectorData(const engine::VectorsData& vectors, const eng
     if (engine::utils::IsBinaryMetricType(table_schema.metric_type_)) {
         // check prepared binary data
         if (vectors.binary_data_.size() % vector_count != 0) {
-            return Status(SERVER_INVALID_ROWRECORD_ARRAY, "The vector dimension must be equal to the collection dimension.");
+            return Status(SERVER_INVALID_ROWRECORD_ARRAY,
+                          "The vector dimension must be equal to the collection dimension.");
         }
 
         if (vectors.binary_data_.size() * 8 / vector_count != table_schema.dimension_) {
@@ -328,7 +329,8 @@ ValidationUtil::ValidateVectorData(const engine::VectorsData& vectors, const eng
         // check prepared float data
         fiu_do_on("SearchRequest.OnExecute.invalod_rowrecord_array", vector_count = vectors.float_data_.size() + 1);
         if (vectors.float_data_.size() % vector_count != 0) {
-            return Status(SERVER_INVALID_ROWRECORD_ARRAY, "The vector dimension must be equal to the collection dimension.");
+            return Status(SERVER_INVALID_ROWRECORD_ARRAY,
+                          "The vector dimension must be equal to the collection dimension.");
         }
         if (vectors.float_data_.size() / vector_count != table_schema.dimension_) {
             return Status(SERVER_INVALID_VECTOR_DIMENSION,

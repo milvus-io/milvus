@@ -195,7 +195,8 @@ WalManager::GetNextRecord(MXLogRecord& record) {
         }
     }
 
-    WAL_LOG_INFO << "record type " << (int32_t)record.type << " collection " << record.collection_id << " lsn " << record.lsn;
+    WAL_LOG_INFO << "record type " << (int32_t)record.type << " collection " << record.collection_id << " lsn "
+                 << record.lsn;
     return error_code;
 }
 
@@ -391,12 +392,12 @@ WalManager::RemoveOldFiles(uint64_t flushed_lsn) {
 }
 
 template bool
-WalManager::Insert<float>(const std::string& collection_id, const std::string& partition_tag, const IDNumbers& vector_ids,
-                          const std::vector<float>& vectors);
+WalManager::Insert<float>(const std::string& collection_id, const std::string& partition_tag,
+                          const IDNumbers& vector_ids, const std::vector<float>& vectors);
 
 template bool
-WalManager::Insert<uint8_t>(const std::string& collection_id, const std::string& partition_tag, const IDNumbers& vector_ids,
-                            const std::vector<uint8_t>& vectors);
+WalManager::Insert<uint8_t>(const std::string& collection_id, const std::string& partition_tag,
+                            const IDNumbers& vector_ids, const std::vector<uint8_t>& vectors);
 
 }  // namespace wal
 }  // namespace engine
