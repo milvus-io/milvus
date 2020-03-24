@@ -10,9 +10,9 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
 #include <gtest/gtest.h>
+#include <src/index/knowhere/knowhere/index/vector_index/helpers/IndexParameter.h>
 #include <iostream>
 #include <sstream>
-#include <src/index/knowhere/knowhere/index/vector_index/helpers/IndexParameter.h>
 
 #include "knowhere/common/Exception.h"
 #include "knowhere/index/vector_index/IndexAnnoy.h"
@@ -22,7 +22,6 @@
 using ::testing::Combine;
 using ::testing::TestWithParam;
 using ::testing::Values;
-
 
 int
 main() {
@@ -36,8 +35,7 @@ main() {
     float* xq = new float[d * nq];
 
     for (int i = 0; i < nb; i++) {
-        for (int j = 0; j < d; j++)
-            xb[d * i + j] = (float)drand48();
+        for (int j = 0; j < d; j++) xb[d * i + j] = (float)drand48();
         xb[d * i] += i / 1000.;
         ids[i] = i;
     }
@@ -129,7 +127,6 @@ main() {
 
     return 0;
 }
-
 
 /*
 class AnnoyTest : public DataGen, public TestWithParam<std::string> {

@@ -39,7 +39,7 @@ IndexAnnoy::Serialize(const Config& config) {
     auto metric_type = std::make_shared<uint8_t>();
     char* metric_type_str = new char[metric_type_length];
     snprintf(metric_type_str, metric_type_length, "%s", metric_type_.c_str());
-//    memcpy(metric_type_str, metric_type_.data(), metric_type_.length());
+    //    memcpy(metric_type_str, metric_type_.data(), metric_type_.length());
     metric_type.reset(static_cast<uint8_t*>((void*)metric_type_str));
 
     auto index_length = index_->get_index_length();
@@ -63,7 +63,7 @@ IndexAnnoy::Load(const BinarySet& index_binary) {
     memcpy(metric_type_.data(), metric_type->data.get(), (size_t)metric_type->size);
 
     auto index_data = index_binary.GetByName("annoy_index_data");
-    char* error_msg = new char[256];//hard code here because this length is enough
+    char* error_msg = new char[256];  // hard code here because this length is enough
     if (!index_->load_index(index_data->data.get(), index_data->size, &error_msg)) {
         KNOWHERE_THROW_MSG(error_msg);
     }
@@ -87,7 +87,7 @@ IndexAnnoy::BuildAll(const DatasetPtr& dataset_ptr, const Config& config) {
         KNOWHERE_THROW_MSG("metric not supported " + metric_type_);
     }
 
-    for (int i = 0; i < rows; ++ i) {
+    for (int i = 0; i < rows; ++i) {
         index_->add_item(p_ids[i], (const float*)p_data + dim * i);
     }
 
@@ -102,6 +102,7 @@ IndexAnnoy::Query(const DatasetPtr& dataset_ptr, const Config& config) {
 
     GETTENSOR(dataset_ptr)
     auto k = config[meta::TOPK].get<int64_t>();
+    auto search_k = config[IndexParams::search_k].get<int64_t>();
     auto all_num = rows * k;
     auto p_id = (int64_t*)malloc(all_num * sizeof(int64_t));
     auto p_dist = (float*)malloc(all_num * sizeof(float));
@@ -110,15 +111,14 @@ IndexAnnoy::Query(const DatasetPtr& dataset_ptr, const Config& config) {
 
 #pragma omp parallel for
     for (unsigned int i = 0; i < rows; ++i) {
-        std::vector<int64_t > result;
+        std::vector<int64_t> result;
         result.reserve(k);
         std::vector<float> distances;
         distances.reserve(k);
-        index_->get_nns_by_vector((const float*)p_data + i * dim, k, config[IndexParams::search_k].get<int64_t>(), &result, &distances, blacklist);
+        index_->get_nns_by_vector((const float*)p_data + i * dim, k, search_k, &result, &distances, blacklist);
 
         memcpy(p_id + k * i, result.data(), k * sizeof(int64_t));
         memcpy(p_dist + k * i, distances.data(), k * sizeof(float));
-
     }
 
     auto ret_ds = std::make_shared<Dataset>();
