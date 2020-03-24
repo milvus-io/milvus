@@ -153,7 +153,8 @@ class BaseRequest {
     };
 
  protected:
-    BaseRequest(const std::shared_ptr<Context>& context, BaseRequest::RequestType type, bool async = false);
+    BaseRequest(const std::shared_ptr<milvus::server::Context>& context, BaseRequest::RequestType type,
+                bool async = false);
 
     virtual ~BaseRequest();
 
