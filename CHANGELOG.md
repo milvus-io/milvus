@@ -15,6 +15,7 @@ Please mark all change in change log and use the issue from GitHub
 -   \#1689 Fix SQ8H search fail on SIFT-1B dataset
 -   \#1724 Remove unused unittests
 -   \#1734 Opentracing for combined search request
+-   \#1735 Fix search out of memory with ivf_flat 
 
 ## Feature
 -   \#1603 BinaryFlat add 2 Metric: Substructure and Superstructure

@@ -83,8 +83,8 @@ Cache<ItemObj>::insert(const std::string& key, const ItemObj& item) {
 
     // if usage exceed capacity, free some items
     if (usage_ > capacity_) {
-        SERVER_LOG_DEBUG << "Current usage " << usage_ << " exceeds cache capacity " << capacity_
-                         << ", start free memory";
+        SERVER_LOG_DEBUG << "Current usage " << (usage_ >> 20) << "MB exceeds cache capacity " << (capacity_ >> 20)
+                         << "MB, start free memory";
         free_memory();
     }
 
@@ -93,8 +93,8 @@ Cache<ItemObj>::insert(const std::string& key, const ItemObj& item) {
         std::lock_guard<std::mutex> lock(mutex_);
 
         lru_.put(key, item);
-        SERVER_LOG_DEBUG << "Insert " << key << " size: " << item->Size() << " bytes into cache, usage: " << usage_
-                         << " bytes," << " capacity: " << capacity_ << " bytes";
+        SERVER_LOG_DEBUG << "Insert " << key << " size: " << (item->Size() >> 20) << "MB into cache";
+        SERVER_LOG_DEBUG << "Current usage: " << (usage_ >> 20) << "MB, capacity: " << (capacity_ >> 20) << "MB";
     }
 }
 
@@ -107,12 +107,11 @@ Cache<ItemObj>::erase(const std::string& key) {
     }
 
     const ItemObj& old_item = lru_.get(key);
-    usage_ -= old_item->Size();
-
-    SERVER_LOG_DEBUG << "Erase " << key << " size: " << old_item->Size() << " bytes from cache, usage: " << usage_
-                     << " bytes," << " capacity: " << capacity_ << " bytes";
-
     lru_.erase(key);
+
+    usage_ -= old_item->Size();
+    SERVER_LOG_DEBUG << "Erase " << key << " size: " << (old_item->Size() >> 20) << "MB from cache";
+    SERVER_LOG_DEBUG << "Current usage: " << (usage_ >> 20) << "MB, capacity: " << (capacity_ >> 20) << "MB";
 }
 
 template <typename ItemObj>
@@ -154,7 +153,7 @@ Cache<ItemObj>::free_memory() {
         }
     }
 
-    SERVER_LOG_DEBUG << "to be released memory size: " << released_size;
+    SERVER_LOG_DEBUG << "To be released memory size: " << (released_size >> 20) << "MB";
 
     for (auto& key : key_array) {
         erase(key);
@@ -177,7 +176,8 @@ Cache<ItemObj>::print() {
 #endif
     }
 
-    SERVER_LOG_DEBUG << "[Cache] [item count]: " << cache_count << " [capacity] " << capacity_ << "(bytes) [usage] " << usage_ << "(bytes)";
+    SERVER_LOG_DEBUG << "[Cache] [item count]: " << cache_count << ", [usage] " << (usage_ >> 20) << "MB, [capacity] "
+                     << (capacity_ >> 20) << "MB";
 }
 
 }  // namespace cache
