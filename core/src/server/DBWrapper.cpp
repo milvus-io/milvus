@@ -241,7 +241,7 @@ DBWrapper::PreloadTables(const std::string& preload_tables) {
         db_->AllTables(table_schema_array);
 
         for (auto& schema : table_schema_array) {
-            auto status = db_->PreloadTable(schema.table_id_);
+            auto status = db_->PreloadTable(schema.collection_id_);
             if (!status.ok()) {
                 return status;
             }

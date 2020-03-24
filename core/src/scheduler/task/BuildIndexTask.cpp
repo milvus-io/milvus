@@ -124,7 +124,7 @@ XBuildIndexTask::Execute() {
 
         // step 2: create collection file
         engine::meta::TableFileSchema table_file;
-        table_file.table_id_ = file_->table_id_;
+        table_file.collection_id_ = file_->collection_id_;
         table_file.segment_id_ = file_->file_id_;
         table_file.date_ = file_->date_;
         table_file.file_type_ = engine::meta::TableFileSchema::NEW_INDEX;
@@ -164,11 +164,11 @@ XBuildIndexTask::Execute() {
 
         // step 4: if collection has been deleted, dont save index file
         bool has_table = false;
-        meta_ptr->HasTable(file_->table_id_, has_table);
+        meta_ptr->HasTable(file_->collection_id_, has_table);
         fiu_do_on("XBuildIndexTask.Execute.has_table", has_table = true);
 
         if (!has_table) {
-            meta_ptr->DeleteTableFiles(file_->table_id_);
+            meta_ptr->DeleteTableFiles(file_->collection_id_);
 
             build_index_job->BuildIndexDone(to_index_id_);
             build_index_job->GetStatus() = Status(DB_ERROR, "Collection has been deleted, discard index file.");

@@ -27,7 +27,7 @@ namespace milvus {
 namespace engine {
 
 MemTable::MemTable(const std::string& collection_id, const meta::MetaPtr& meta, const DBOptions& options)
-    : table_id_(collection_id), meta_(meta), options_(options) {
+    : collection_id_(collection_id), meta_(meta), options_(options) {
     SetIdentity("MemTable");
     AddCacheInsertDataListener();
 }
@@ -42,7 +42,7 @@ MemTable::Add(const VectorSourcePtr& source) {
 
         Status status;
         if (mem_table_file_list_.empty() || current_mem_table_file->IsFull()) {
-            MemTableFilePtr new_mem_table_file = std::make_shared<MemTableFile>(table_id_, meta_, options_);
+            MemTableFilePtr new_mem_table_file = std::make_shared<MemTableFile>(collection_id_, meta_, options_);
             status = new_mem_table_file->Add(source);
             if (status.ok()) {
                 mem_table_file_list_.emplace_back(new_mem_table_file);
@@ -122,7 +122,7 @@ MemTable::Serialize(uint64_t wal_lsn, bool apply_delete) {
     }
 
     // Update flush lsn
-    auto status = meta_->UpdateTableFlushLSN(table_id_, wal_lsn);
+    auto status = meta_->UpdateTableFlushLSN(collection_id_, wal_lsn);
     if (!status.ok()) {
         std::string err_msg = "Failed to write flush lsn to meta: " + status.ToString();
         ENGINE_LOG_ERROR << err_msg;
@@ -131,7 +131,7 @@ MemTable::Serialize(uint64_t wal_lsn, bool apply_delete) {
 
     auto end = std::chrono::high_resolution_clock::now();
     std::chrono::duration<double> diff = end - start;
-    ENGINE_LOG_DEBUG << "Finished flushing for collection " << table_id_ << " in " << diff.count() << " s";
+    ENGINE_LOG_DEBUG << "Finished flushing for collection " << collection_id_ << " in " << diff.count() << " s";
 
     return Status::OK();
 }
@@ -143,7 +143,7 @@ MemTable::Empty() {
 
 const std::string&
 MemTable::GetTableId() const {
-    return table_id_;
+    return collection_id_;
 }
 
 size_t
@@ -173,7 +173,7 @@ MemTable::ApplyDeletes() {
     //     Serialize segment's deletedDoc TODO(zhiru): append directly to previous file for now, may have duplicates
     //     Serialize bloom filter
 
-    ENGINE_LOG_DEBUG << "Applying " << doc_ids_to_delete_.size() << " deletes in collection: " << table_id_;
+    ENGINE_LOG_DEBUG << "Applying " << doc_ids_to_delete_.size() << " deletes in collection: " << collection_id_;
 
     auto start_total = std::chrono::high_resolution_clock::now();
 
@@ -182,7 +182,7 @@ MemTable::ApplyDeletes() {
     std::vector<int> file_types{meta::TableFileSchema::FILE_TYPE::RAW, meta::TableFileSchema::FILE_TYPE::TO_INDEX,
                                 meta::TableFileSchema::FILE_TYPE::BACKUP};
     meta::TableFilesSchema table_files;
-    auto status = meta_->FilesByType(table_id_, file_types, table_files);
+    auto status = meta_->FilesByType(collection_id_, file_types, table_files);
     if (!status.ok()) {
         std::string err_msg = "Failed to apply deletes: " + status.ToString();
         ENGINE_LOG_ERROR << err_msg;
@@ -381,9 +381,9 @@ MemTable::ApplyDeletes() {
 
     auto end_total = std::chrono::high_resolution_clock::now();
     std::chrono::duration<double> diff7 = end_total - time7;
-    ENGINE_LOG_DEBUG << "Update deletes to meta in collection " << table_id_ << " in " << diff7.count() << " s";
+    ENGINE_LOG_DEBUG << "Update deletes to meta in collection " << collection_id_ << " in " << diff7.count() << " s";
     std::chrono::duration<double> diff_total = end_total - start_total;
-    ENGINE_LOG_DEBUG << "Finished applying deletes in collection " << table_id_ << " in " << diff_total.count() << " s";
+    ENGINE_LOG_DEBUG << "Finished applying deletes in collection " << collection_id_ << " in " << diff_total.count() << " s";
 
     OngoingFileChecker::GetInstance().UnmarkOngoingFiles(files_to_check);
 

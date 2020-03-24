@@ -47,7 +47,7 @@ DescribeTableRequest::OnExecute() {
         // step 2: get collection info
         // only process root collection, ignore partition collection
         engine::meta::TableSchema table_schema;
-        table_schema.table_id_ = table_name_;
+        table_schema.collection_id_ = table_name_;
         status = DBWrapper::DB()->DescribeTable(table_schema);
         fiu_do_on("DescribeTableRequest.OnExecute.describe_table_fail",
                   status = Status(milvus::SERVER_UNEXPECTED_ERROR, ""));
@@ -64,7 +64,7 @@ DescribeTableRequest::OnExecute() {
             }
         }
 
-        schema_.table_name_ = table_schema.table_id_;
+        schema_.table_name_ = table_schema.collection_id_;
         schema_.dimension_ = static_cast<int64_t>(table_schema.dimension_);
         schema_.index_file_size_ = table_schema.index_file_size_;
         schema_.metric_type_ = table_schema.metric_type_;

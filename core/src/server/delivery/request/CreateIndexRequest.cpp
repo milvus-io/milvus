@@ -53,7 +53,7 @@ CreateIndexRequest::OnExecute() {
 
         // only process root collection, ignore partition collection
         engine::meta::TableSchema table_schema;
-        table_schema.table_id_ = table_name_;
+        table_schema.collection_id_ = table_name_;
         status = DBWrapper::DB()->DescribeTable(table_schema);
         fiu_do_on("CreateIndexRequest.OnExecute.not_has_table", status = Status(milvus::SERVER_UNEXPECTED_ERROR, ""));
         fiu_do_on("CreateIndexRequest.OnExecute.throw_std.exception", throw std::exception());
@@ -81,7 +81,7 @@ CreateIndexRequest::OnExecute() {
 
         // step 2: binary and float vector support different index/metric type, need to adapt here
         engine::meta::TableSchema table_info;
-        table_info.table_id_ = table_name_;
+        table_info.collection_id_ = table_name_;
         status = DBWrapper::DB()->DescribeTable(table_info);
 
         int32_t adapter_index_type = index_type_;

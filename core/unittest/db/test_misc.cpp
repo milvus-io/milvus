@@ -121,7 +121,7 @@ TEST(DBMiscTest, UTILS_TEST) {
 
     milvus::engine::meta::TableFileSchema file;
     file.id_ = 50;
-    file.table_id_ = TABLE_NAME;
+    file.collection_id_ = TABLE_NAME;
     file.file_type_ = 3;
     file.date_ = 155000;
     status = milvus::engine::utils::GetTableFilePath(options, file);
@@ -182,10 +182,10 @@ TEST(DBMiscTest, CHECKER_TEST) {
     {
         milvus::engine::IndexFailedChecker checker;
         milvus::engine::meta::TableFileSchema schema;
-        schema.table_id_ = "aaa";
+        schema.collection_id_ = "aaa";
         schema.file_id_ = "5000";
         checker.MarkFailedIndexFile(schema, "5000 fail");
-        schema.table_id_ = "bbb";
+        schema.collection_id_ = "bbb";
         schema.file_id_ = "5001";
         checker.MarkFailedIndexFile(schema, "5001 fail");
 
@@ -193,7 +193,7 @@ TEST(DBMiscTest, CHECKER_TEST) {
         checker.GetErrMsgForTable("aaa", err_msg);
         ASSERT_EQ(err_msg, "5000 fail");
 
-        schema.table_id_ = "bbb";
+        schema.collection_id_ = "bbb";
         schema.file_id_ = "5002";
         checker.MarkFailedIndexFile(schema, "5002 fail");
         checker.MarkFailedIndexFile(schema, "5002 fail");
@@ -213,13 +213,13 @@ TEST(DBMiscTest, CHECKER_TEST) {
     {
         milvus::engine::OngoingFileChecker& checker = milvus::engine::OngoingFileChecker::GetInstance();
         milvus::engine::meta::TableFileSchema schema;
-        schema.table_id_ = "aaa";
+        schema.collection_id_ = "aaa";
         schema.file_id_ = "5000";
         checker.MarkOngoingFile(schema);
 
         ASSERT_TRUE(checker.IsIgnored(schema));
 
-        schema.table_id_ = "bbb";
+        schema.collection_id_ = "bbb";
         schema.file_id_ = "5001";
         milvus::engine::meta::TableFilesSchema table_files = {schema};
         checker.MarkOngoingFiles(table_files);
@@ -229,7 +229,7 @@ TEST(DBMiscTest, CHECKER_TEST) {
         checker.UnmarkOngoingFile(schema);
         ASSERT_FALSE(checker.IsIgnored(schema));
 
-        schema.table_id_ = "aaa";
+        schema.collection_id_ = "aaa";
         schema.file_id_ = "5000";
         checker.UnmarkOngoingFile(schema);
         ASSERT_FALSE(checker.IsIgnored(schema));

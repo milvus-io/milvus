@@ -37,7 +37,7 @@ std::mutex index_file_counter_mutex;
 
 static std::string
 ConstructParentFolder(const std::string& db_path, const meta::TableFileSchema& table_file) {
-    std::string table_path = db_path + TABLES_FOLDER + table_file.table_id_;
+    std::string table_path = db_path + TABLES_FOLDER + table_file.collection_id_;
     std::string partition_path = table_path + "/" + table_file.segment_id_;
     return partition_path;
 }
@@ -181,7 +181,7 @@ GetTableFilePath(const DBMetaOptions& options, meta::TableFileSchema& table_file
 
     std::string msg = "Collection file doesn't exist: " + file_path;
     if (table_file.file_size_ > 0) {  // no need to pop error for empty file
-        ENGINE_LOG_ERROR << msg << " in path: " << options.path_ << " for collection: " << table_file.table_id_;
+        ENGINE_LOG_ERROR << msg << " in path: " << options.path_ << " for collection: " << table_file.collection_id_;
     }
 
     return Status(DB_ERROR, msg);

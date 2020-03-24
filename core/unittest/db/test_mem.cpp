@@ -47,7 +47,7 @@ milvus::engine::meta::TableSchema
 BuildTableSchema() {
     milvus::engine::meta::TableSchema table_info;
     table_info.dimension_ = TABLE_DIM;
-    table_info.table_id_ = GetTableName();
+    table_info.collection_id_ = GetTableName();
     table_info.engine_type_ = (int)milvus::engine::EngineType::FAISS_IDMAP;
     return table_info;
 }
@@ -70,7 +70,7 @@ TEST_F(MemManagerTest, VECTOR_SOURCE_TEST) {
     ASSERT_TRUE(status.ok());
 
     milvus::engine::meta::TableFileSchema table_file_schema;
-    table_file_schema.table_id_ = GetTableName();
+    table_file_schema.collection_id_ = GetTableName();
     status = impl_->CreateTableFile(table_file_schema);
     ASSERT_TRUE(status.ok());
 
@@ -163,7 +163,7 @@ TEST_F(MemManagerTest, MEM_TABLE_FILE_TEST) {
     {
         options.insert_cache_immediately_ = true;
         milvus::engine::meta::TableSchema table_schema = BuildTableSchema();
-        table_schema.table_id_ = "faiss_pq";
+        table_schema.collection_id_ = "faiss_pq";
         table_schema.engine_type_ = (int)milvus::engine::EngineType::FAISS_PQ;
         auto status = impl_->CreateTable(table_schema);
         ASSERT_TRUE(status.ok());
@@ -249,7 +249,7 @@ TEST_F(MemManagerTest2, SERIAL_INSERT_SEARCH_TEST) {
     auto stat = db_->CreateTable(table_info);
 
     milvus::engine::meta::TableSchema table_info_get;
-    table_info_get.table_id_ = GetTableName();
+    table_info_get.collection_id_ = GetTableName();
     stat = db_->DescribeTable(table_info_get);
     ASSERT_TRUE(stat.ok());
     ASSERT_EQ(table_info_get.dimension_, TABLE_DIM);
@@ -306,7 +306,7 @@ TEST_F(MemManagerTest2, INSERT_TEST) {
     auto stat = db_->CreateTable(table_info);
 
     milvus::engine::meta::TableSchema table_info_get;
-    table_info_get.table_id_ = GetTableName();
+    table_info_get.collection_id_ = GetTableName();
     stat = db_->DescribeTable(table_info_get);
     ASSERT_TRUE(stat.ok());
     ASSERT_EQ(table_info_get.dimension_, TABLE_DIM);
@@ -330,14 +330,14 @@ TEST_F(MemManagerTest2, INSERT_TEST) {
 TEST_F(MemManagerTest2, INSERT_BINARY_TEST) {
     milvus::engine::meta::TableSchema table_info;
     table_info.dimension_ = TABLE_DIM;
-    table_info.table_id_ = GetTableName();
+    table_info.collection_id_ = GetTableName();
     table_info.engine_type_ = (int)milvus::engine::EngineType::FAISS_BIN_IDMAP;
     table_info.metric_type_ = (int32_t)milvus::engine::MetricType::JACCARD;
     auto stat = db_->CreateTable(table_info);
     ASSERT_TRUE(stat.ok());
 
     milvus::engine::meta::TableSchema table_info_get;
-    table_info_get.table_id_ = GetTableName();
+    table_info_get.collection_id_ = GetTableName();
     stat = db_->DescribeTable(table_info_get);
     ASSERT_TRUE(stat.ok());
     ASSERT_EQ(table_info_get.dimension_, TABLE_DIM);
@@ -367,7 +367,7 @@ TEST_F(MemManagerTest2, INSERT_BINARY_TEST) {
 //    auto stat = db_->CreateTable(table_info);
 //
 //    milvus::engine::meta::TableSchema table_info_get;
-//    table_info_get.table_id_ = GetTableName();
+//    table_info_get.collection_id_ = GetTableName();
 //    stat = db_->DescribeTable(table_info_get);
 //    ASSERT_TRUE(stat.ok());
 //    ASSERT_EQ(table_info_get.dimension_, TABLE_DIM);
@@ -443,7 +443,7 @@ TEST_F(MemManagerTest2, VECTOR_IDS_TEST) {
     auto stat = db_->CreateTable(table_info);
 
     milvus::engine::meta::TableSchema table_info_get;
-    table_info_get.table_id_ = GetTableName();
+    table_info_get.collection_id_ = GetTableName();
     stat = db_->DescribeTable(table_info_get);
     ASSERT_TRUE(stat.ok());
     ASSERT_EQ(table_info_get.dimension_, TABLE_DIM);

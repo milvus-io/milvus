@@ -89,7 +89,7 @@ WalManager::Init(const meta::MetaPtr& meta) {
 
             for (auto& schema : table_schema_array) {
                 TableLsn tb_lsn = {schema.flush_lsn_, applied_lsn};
-                tables_[schema.table_id_] = tb_lsn;
+                tables_[schema.collection_id_] = tb_lsn;
             }
         }
     }
@@ -162,7 +162,7 @@ WalManager::GetNextRecord(MXLogRecord& record) {
             if (p_buffer_->GetReadLsn() >= flush_info_.lsn_) {
                 // can exec flush requirement
                 record.type = MXLogType::Flush;
-                record.collection_id = flush_info_.table_id_;
+                record.collection_id = flush_info_.collection_id_;
                 record.lsn = flush_info_.lsn_;
                 flush_info_.Clear();
 
@@ -375,7 +375,7 @@ WalManager::Flush(const std::string& collection_id) {
     }
 
     if (lsn != 0) {
-        flush_info_.table_id_ = collection_id;
+        flush_info_.collection_id_ = collection_id;
         flush_info_.lsn_ = lsn;
     }
 

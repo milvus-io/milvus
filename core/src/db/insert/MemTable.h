@@ -74,7 +74,7 @@ class MemTable : public server::CacheConfigHandler {
     ApplyDeletes();
 
  private:
-    const std::string table_id_;
+    const std::string collection_id_;
 
     MemTableFileList mem_table_file_list_;
 

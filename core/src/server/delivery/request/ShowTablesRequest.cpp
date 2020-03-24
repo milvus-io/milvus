@@ -45,7 +45,7 @@ ShowTablesRequest::OnExecute() {
     }
 
     for (auto& schema : schema_array) {
-        table_name_list_.push_back(schema.table_id_);
+        table_name_list_.push_back(schema.collection_id_);
     }
     return Status::OK();
 }

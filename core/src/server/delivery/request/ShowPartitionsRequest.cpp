@@ -49,7 +49,7 @@ ShowPartitionsRequest::OnExecute() {
     // step 2: check collection existence
     // only process root collection, ignore partition collection
     engine::meta::TableSchema table_schema;
-    table_schema.table_id_ = table_name_;
+    table_schema.collection_id_ = table_name_;
     status = DBWrapper::DB()->DescribeTable(table_schema);
     if (!status.ok()) {
         if (status.code() == DB_NOT_FOUND) {

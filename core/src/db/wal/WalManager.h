@@ -131,7 +131,7 @@ class WalManager {
 
     // if multi-thread call Flush(), use list
     struct FlushInfo {
-        std::string table_id_;
+        std::string collection_id_;
         uint64_t lsn_ = 0;
 
         bool

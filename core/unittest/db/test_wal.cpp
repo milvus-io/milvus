@@ -418,17 +418,17 @@ TEST(WalTest, MANAGER_INIT_TEST) {
     milvus::engine::meta::MetaPtr meta = std::make_shared<milvus::engine::meta::TestWalMeta>(opt);
 
     milvus::engine::meta::TableSchema table_schema_1;
-    table_schema_1.table_id_ = "table1";
+    table_schema_1.collection_id_ = "table1";
     table_schema_1.flush_lsn_ = (uint64_t)1 << 32 | 60;
     meta->CreateTable(table_schema_1);
 
     milvus::engine::meta::TableSchema table_schema_2;
-    table_schema_2.table_id_ = "table2";
+    table_schema_2.collection_id_ = "table2";
     table_schema_2.flush_lsn_ = (uint64_t)1 << 32 | 20;
     meta->CreateTable(table_schema_2);
 
     milvus::engine::meta::TableSchema table_schema_3;
-    table_schema_3.table_id_ = "table3";
+    table_schema_3.collection_id_ = "table3";
     table_schema_3.flush_lsn_ = (uint64_t)2 << 32 | 40;
     meta->CreateTable(table_schema_3);
 
@@ -464,7 +464,7 @@ TEST(WalTest, MANAGER_APPEND_FAILED) {
     milvus::engine::meta::MetaPtr meta = std::make_shared<milvus::engine::meta::TestWalMeta>(opt);
 
     milvus::engine::meta::TableSchema schema;
-    schema.table_id_ = "table1";
+    schema.collection_id_ = "table1";
     schema.flush_lsn_ = 0;
     meta->CreateTable(schema);
 
@@ -483,12 +483,12 @@ TEST(WalTest, MANAGER_APPEND_FAILED) {
 
     std::vector<int64_t> ids(1, 0);
     std::vector<float> data_float(1024, 0);
-    ASSERT_FALSE(manager->Insert(schema.table_id_, "", ids, data_float));
+    ASSERT_FALSE(manager->Insert(schema.collection_id_, "", ids, data_float));
 
     ids.clear();
     data_float.clear();
-    ASSERT_FALSE(manager->Insert(schema.table_id_, "", ids, data_float));
-    ASSERT_FALSE(manager->DeleteById(schema.table_id_, ids));
+    ASSERT_FALSE(manager->Insert(schema.collection_id_, "", ids, data_float));
+    ASSERT_FALSE(manager->DeleteById(schema.collection_id_, ids));
 }
 
 TEST(WalTest, MANAGER_RECOVERY_TEST) {
@@ -507,14 +507,14 @@ TEST(WalTest, MANAGER_RECOVERY_TEST) {
     ASSERT_EQ(manager->Init(meta), milvus::WAL_SUCCESS);
 
     milvus::engine::meta::TableSchema schema;
-    schema.table_id_ = "collection";
+    schema.collection_id_ = "collection";
     schema.flush_lsn_ = 0;
     meta->CreateTable(schema);
 
     std::vector<int64_t> ids(1024, 0);
     std::vector<float> data_float(1024 * 512, 0);
-    manager->CreateTable(schema.table_id_);
-    ASSERT_TRUE(manager->Insert(schema.table_id_, "", ids, data_float));
+    manager->CreateTable(schema.collection_id_);
+    ASSERT_TRUE(manager->Insert(schema.collection_id_, "", ids, data_float));
 
     // recovery
     manager = std::make_shared<milvus::engine::wal::WalManager>(wal_config);
@@ -527,7 +527,7 @@ TEST(WalTest, MANAGER_RECOVERY_TEST) {
             break;
         }
         ASSERT_EQ(record.type, milvus::engine::wal::MXLogType::InsertVector);
-        ASSERT_EQ(record.collection_id, schema.table_id_);
+        ASSERT_EQ(record.collection_id, schema.collection_id_);
         ASSERT_EQ(record.partition_tag, "");
     }
 

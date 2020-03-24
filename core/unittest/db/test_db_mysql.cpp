@@ -33,7 +33,7 @@ milvus::engine::meta::TableSchema
 BuildTableSchema() {
     milvus::engine::meta::TableSchema table_info;
     table_info.dimension_ = TABLE_DIM;
-    table_info.table_id_ = TABLE_NAME;
+    table_info.collection_id_ = TABLE_NAME;
     table_info.engine_type_ = (int)milvus::engine::EngineType::FAISS_IDMAP;
     return table_info;
 }
@@ -59,7 +59,7 @@ TEST_F(MySqlDBTest, DB_TEST) {
     auto stat = db_->CreateTable(table_info);
 
     milvus::engine::meta::TableSchema table_info_get;
-    table_info_get.table_id_ = TABLE_NAME;
+    table_info_get.collection_id_ = TABLE_NAME;
     stat = db_->DescribeTable(table_info_get);
     ASSERT_TRUE(stat.ok());
     ASSERT_EQ(table_info_get.dimension_, TABLE_DIM);
@@ -144,7 +144,7 @@ TEST_F(MySqlDBTest, SEARCH_TEST) {
     auto stat = db_->CreateTable(table_info);
 
     milvus::engine::meta::TableSchema table_info_get;
-    table_info_get.table_id_ = TABLE_NAME;
+    table_info_get.collection_id_ = TABLE_NAME;
     stat = db_->DescribeTable(table_info_get);
     ASSERT_TRUE(stat.ok());
     ASSERT_EQ(table_info_get.dimension_, TABLE_DIM);
@@ -204,7 +204,7 @@ TEST_F(MySqlDBTest, ARHIVE_DISK_CHECK) {
     ASSERT_TRUE(stat.ok());
     bool bfound = false;
     for (auto& schema : table_schema_array) {
-        if (schema.table_id_ == TABLE_NAME) {
+        if (schema.collection_id_ == TABLE_NAME) {
             bfound = true;
             break;
         }
@@ -223,7 +223,7 @@ TEST_F(MySqlDBTest, ARHIVE_DISK_CHECK) {
     fiu_disable("MySQLMetaImpl.AllTable.throw_exception");
 
     milvus::engine::meta::TableSchema table_info_get;
-    table_info_get.table_id_ = TABLE_NAME;
+    table_info_get.collection_id_ = TABLE_NAME;
     stat = db_->DescribeTable(table_info_get);
     ASSERT_TRUE(stat.ok());
     ASSERT_EQ(table_info_get.dimension_, TABLE_DIM);
@@ -268,7 +268,7 @@ TEST_F(MySqlDBTest, DELETE_TEST) {
     //    std::cout << stat.ToString() << std::endl;
 
     milvus::engine::meta::TableSchema table_info_get;
-    table_info_get.table_id_ = TABLE_NAME;
+    table_info_get.collection_id_ = TABLE_NAME;
     stat = db_->DescribeTable(table_info_get);
     ASSERT_TRUE(stat.ok());
 
@@ -355,14 +355,14 @@ TEST_F(MySqlDBTest, PARTITION_TEST) {
     ASSERT_TRUE(stat.ok());
     ASSERT_EQ(partition_schema_array.size(), PARTITION_COUNT);
     for (int64_t i = 0; i < PARTITION_COUNT; i++) {
-        ASSERT_EQ(partition_schema_array[i].table_id_, table_name + "_" + std::to_string(i));
+        ASSERT_EQ(partition_schema_array[i].collection_id_, table_name + "_" + std::to_string(i));
     }
 
     {  // build index
         milvus::engine::TableIndex index;
         index.engine_type_ = (int)milvus::engine::EngineType::FAISS_IVFFLAT;
         index.metric_type_ = (int)milvus::engine::MetricType::L2;
-        stat = db_->CreateIndex(table_info.table_id_, index);
+        stat = db_->CreateIndex(table_info.collection_id_, index);
         ASSERT_TRUE(stat.ok());
 
         uint64_t row_count = 0;

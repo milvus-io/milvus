@@ -72,11 +72,11 @@ TEST_F(MetricTest, METRIC_TEST) {
 
     milvus::engine::meta::TableSchema group_info;
     group_info.dimension_ = group_dim;
-    group_info.table_id_ = group_name;
+    group_info.collection_id_ = group_name;
     auto stat = db_->CreateTable(group_info);
 
     milvus::engine::meta::TableSchema group_info_get;
-    group_info_get.table_id_ = group_name;
+    group_info_get.collection_id_ = group_name;
     stat = db_->DescribeTable(group_info_get);
 
     int nb = 50;

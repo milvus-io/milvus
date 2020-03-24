@@ -75,7 +75,7 @@ CreateTableRequest::OnExecute() {
 
         // step 2: construct collection schema
         engine::meta::TableSchema table_info;
-        table_info.table_id_ = table_name_;
+        table_info.collection_id_ = table_name_;
         table_info.dimension_ = static_cast<uint16_t>(dimension_);
         table_info.index_file_size_ = index_file_size_;
         table_info.metric_type_ = metric_type_;

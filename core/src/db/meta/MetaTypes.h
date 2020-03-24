@@ -47,7 +47,7 @@ struct TableSchema {
     } TABLE_STATE;
 
     size_t id_ = 0;
-    std::string table_id_;
+    std::string collection_id_;
     int32_t state_ = (int)NORMAL;
     uint16_t dimension_ = 0;
     int64_t created_on_ = 0;
@@ -75,7 +75,7 @@ struct TableFileSchema {
     } FILE_TYPE;
 
     size_t id_ = 0;
-    std::string table_id_;
+    std::string collection_id_;
     std::string segment_id_;
     std::string file_id_;
     int32_t file_type_ = NEW;

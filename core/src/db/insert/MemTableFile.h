@@ -66,7 +66,7 @@ class MemTableFile : public server::CacheConfigHandler {
     CreateTableFile();
 
  private:
-    const std::string table_id_;
+    const std::string collection_id_;
     meta::TableFileSchema table_file_schema_;
     meta::MetaPtr meta_;
     DBOptions options_;

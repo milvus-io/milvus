@@ -367,11 +367,11 @@ MySQLMetaImpl::CreateTable(TableSchema& table_schema) {
 
             mysqlpp::Query createTableQuery = connectionPtr->query();
 
-            if (table_schema.table_id_.empty()) {
-                NextTableId(table_schema.table_id_);
+            if (table_schema.collection_id_.empty()) {
+                NextTableId(table_schema.collection_id_);
             } else {
                 createTableQuery << "SELECT state FROM " << META_TABLES << " WHERE table_id = " << mysqlpp::quote
-                                 << table_schema.table_id_ << ";";
+                                 << table_schema.collection_id_ << ";";
 
                 ENGINE_LOG_DEBUG << "MySQLMetaImpl::CreateTable: " << createTableQuery.str();
 
@@ -392,7 +392,7 @@ MySQLMetaImpl::CreateTable(TableSchema& table_schema) {
             table_schema.created_on_ = utils::GetMicroSecTimeStamp();
 
             std::string id = "NULL";  // auto-increment
-            std::string& collection_id = table_schema.table_id_;
+            std::string& collection_id = table_schema.collection_id_;
             std::string state = std::to_string(table_schema.state_);
             std::string dimension = std::to_string(table_schema.dimension_);
             std::string created_on = std::to_string(table_schema.created_on_);
@@ -424,8 +424,8 @@ MySQLMetaImpl::CreateTable(TableSchema& table_schema) {
             }
         }  // Scoped Connection
 
-        ENGINE_LOG_DEBUG << "Successfully create collection: " << table_schema.table_id_;
-        return utils::CreateTablePath(options_, table_schema.table_id_);
+        ENGINE_LOG_DEBUG << "Successfully create collection: " << table_schema.collection_id_;
+        return utils::CreateTablePath(options_, table_schema.collection_id_);
     } catch (std::exception& e) {
         return HandleException("GENERAL ERROR WHEN CREATING TABLE", e.what());
     }
@@ -450,7 +450,7 @@ MySQLMetaImpl::DescribeTable(TableSchema& table_schema) {
             describeTableQuery
                 << "SELECT id, state, dimension, created_on, flag, index_file_size, engine_type, index_params"
                 << " , metric_type ,owner_table, partition_tag, version, flush_lsn"
-                << " FROM " << META_TABLES << " WHERE table_id = " << mysqlpp::quote << table_schema.table_id_
+                << " FROM " << META_TABLES << " WHERE table_id = " << mysqlpp::quote << table_schema.collection_id_
                 << " AND state <> " << std::to_string(TableSchema::TO_DELETE) << ";";
 
             ENGINE_LOG_DEBUG << "MySQLMetaImpl::DescribeTable: " << describeTableQuery.str();
@@ -474,7 +474,7 @@ MySQLMetaImpl::DescribeTable(TableSchema& table_schema) {
             resRow["version"].to_string(table_schema.version_);
             table_schema.flush_lsn_ = resRow["flush_lsn"];
         } else {
-            return Status(DB_NOT_FOUND, "Collection " + table_schema.table_id_ + " not found");
+            return Status(DB_NOT_FOUND, "Collection " + table_schema.collection_id_ + " not found");
         }
     } catch (std::exception& e) {
         return HandleException("GENERAL ERROR WHEN DESCRIBING TABLE", e.what());
@@ -549,7 +549,7 @@ MySQLMetaImpl::AllTables(std::vector<TableSchema>& table_schema_array) {
         for (auto& resRow : res) {
             TableSchema table_schema;
             table_schema.id_ = resRow["id"];  // implicit conversion
-            resRow["table_id"].to_string(table_schema.table_id_);
+            resRow["table_id"].to_string(table_schema.collection_id_);
             table_schema.dimension_ = resRow["dimension"];
             table_schema.index_file_size_ = resRow["index_file_size"];
             table_schema.engine_type_ = resRow["engine_type"];
@@ -656,7 +656,7 @@ MySQLMetaImpl::CreateTableFile(TableFileSchema& file_schema) {
         file_schema.date_ = utils::GetDate();
     }
     TableSchema table_schema;
-    table_schema.table_id_ = file_schema.table_id_;
+    table_schema.collection_id_ = file_schema.collection_id_;
     auto status = DescribeTable(table_schema);
     if (!status.ok()) {
         return status;
@@ -680,7 +680,7 @@ MySQLMetaImpl::CreateTableFile(TableFileSchema& file_schema) {
         file_schema.metric_type_ = table_schema.metric_type_;
 
         std::string id = "NULL";  // auto-increment
-        std::string collection_id = file_schema.table_id_;
+        std::string collection_id = file_schema.collection_id_;
         std::string segment_id = file_schema.segment_id_;
         std::string engine_type = std::to_string(file_schema.engine_type_);
         std::string file_id = file_schema.file_id_;
@@ -767,14 +767,14 @@ MySQLMetaImpl::GetTableFiles(const std::string& collection_id, const std::vector
         }  // Scoped Connection
 
         TableSchema table_schema;
-        table_schema.table_id_ = collection_id;
+        table_schema.collection_id_ = collection_id;
         DescribeTable(table_schema);
 
         Status ret;
         for (auto& resRow : res) {
             TableFileSchema file_schema;
             file_schema.id_ = resRow["id"];
-            file_schema.table_id_ = collection_id;
+            file_schema.collection_id_ = collection_id;
             resRow["segment_id"].to_string(file_schema.segment_id_);
             file_schema.index_file_size_ = table_schema.index_file_size_;
             file_schema.engine_type_ = resRow["engine_type"];
@@ -824,7 +824,7 @@ MySQLMetaImpl::GetTableFilesBySegmentId(const std::string& segment_id,
 
         if (!res.empty()) {
             TableSchema table_schema;
-            res[0]["table_id"].to_string(table_schema.table_id_);
+            res[0]["table_id"].to_string(table_schema.collection_id_);
             auto status = DescribeTable(table_schema);
             if (!status.ok()) {
                 return status;
@@ -833,7 +833,7 @@ MySQLMetaImpl::GetTableFilesBySegmentId(const std::string& segment_id,
             for (auto& resRow : res) {
                 TableFileSchema file_schema;
                 file_schema.id_ = resRow["id"];
-                file_schema.table_id_ = table_schema.table_id_;
+                file_schema.collection_id_ = table_schema.collection_id_;
                 resRow["segment_id"].to_string(file_schema.segment_id_);
                 file_schema.index_file_size_ = table_schema.index_file_size_;
                 file_schema.engine_type_ = resRow["engine_type"];
@@ -1017,7 +1017,7 @@ MySQLMetaImpl::GetTableFilesByFlushLSN(uint64_t flush_lsn, TableFilesSchema& tab
         TableFileSchema table_file;
         for (auto& resRow : res) {
             table_file.id_ = resRow["id"];  // implicit conversion
-            resRow["table_id"].to_string(table_file.table_id_);
+            resRow["table_id"].to_string(table_file.collection_id_);
             resRow["segment_id"].to_string(table_file.segment_id_);
             table_file.engine_type_ = resRow["engine_type"];
             resRow["file_id"].to_string(table_file.file_id_);
@@ -1027,20 +1027,20 @@ MySQLMetaImpl::GetTableFilesByFlushLSN(uint64_t flush_lsn, TableFilesSchema& tab
             table_file.date_ = resRow["date"];
             table_file.created_on_ = resRow["created_on"];
 
-            auto groupItr = groups.find(table_file.table_id_);
+            auto groupItr = groups.find(table_file.collection_id_);
             if (groupItr == groups.end()) {
                 TableSchema table_schema;
-                table_schema.table_id_ = table_file.table_id_;
+                table_schema.collection_id_ = table_file.collection_id_;
                 auto status = DescribeTable(table_schema);
                 if (!status.ok()) {
                     return status;
                 }
-                groups[table_file.table_id_] = table_schema;
+                groups[table_file.collection_id_] = table_schema;
             }
-            table_file.dimension_ = groups[table_file.table_id_].dimension_;
-            table_file.index_file_size_ = groups[table_file.table_id_].index_file_size_;
-            table_file.index_params_ = groups[table_file.table_id_].index_params_;
-            table_file.metric_type_ = groups[table_file.table_id_].metric_type_;
+            table_file.dimension_ = groups[table_file.collection_id_].dimension_;
+            table_file.index_file_size_ = groups[table_file.collection_id_].index_file_size_;
+            table_file.index_params_ = groups[table_file.collection_id_].index_params_;
+            table_file.metric_type_ = groups[table_file.collection_id_].metric_type_;
 
             auto status = utils::GetTableFilePath(options_, table_file);
             if (!status.ok()) {
@@ -1081,7 +1081,7 @@ MySQLMetaImpl::UpdateTableFile(TableFileSchema& file_schema) {
             // if the collection has been deleted, just mark the collection file as TO_DELETE
             // clean thread will delete the file later
             updateTableFileQuery << "SELECT state FROM " << META_TABLES << " WHERE table_id = " << mysqlpp::quote
-                                 << file_schema.table_id_ << ";";
+                                 << file_schema.collection_id_ << ";";
 
             ENGINE_LOG_DEBUG << "MySQLMetaImpl::UpdateTableFile: " << updateTableFileQuery.str();
 
@@ -1097,7 +1097,7 @@ MySQLMetaImpl::UpdateTableFile(TableFileSchema& file_schema) {
             }
 
             std::string id = std::to_string(file_schema.id_);
-            std::string collection_id = file_schema.table_id_;
+            std::string collection_id = file_schema.collection_id_;
             std::string engine_type = std::to_string(file_schema.engine_type_);
             std::string file_id = file_schema.file_id_;
             std::string file_type = std::to_string(file_schema.file_type_);
@@ -1117,7 +1117,7 @@ MySQLMetaImpl::UpdateTableFile(TableFileSchema& file_schema) {
             ENGINE_LOG_DEBUG << "MySQLMetaImpl::UpdateTableFile: " << updateTableFileQuery.str();
 
             if (!updateTableFileQuery.exec()) {
-                ENGINE_LOG_DEBUG << "collection_id= " << file_schema.table_id_ << " file_id=" << file_schema.file_id_;
+                ENGINE_LOG_DEBUG << "collection_id= " << file_schema.collection_id_ << " file_id=" << file_schema.file_id_;
                 return HandleException("QUERY ERROR WHEN UPDATING TABLE FILE", updateTableFileQuery.error());
             }
         }  // Scoped Connection
@@ -1183,13 +1183,13 @@ MySQLMetaImpl::UpdateTableFiles(TableFilesSchema& files) {
 
             std::map<std::string, bool> has_tables;
             for (auto& file_schema : files) {
-                if (has_tables.find(file_schema.table_id_) != has_tables.end()) {
+                if (has_tables.find(file_schema.collection_id_) != has_tables.end()) {
                     continue;
                 }
 
                 updateTableFilesQuery << "SELECT EXISTS"
                                       << " (SELECT 1 FROM " << META_TABLES << " WHERE table_id = " << mysqlpp::quote
-                                      << file_schema.table_id_ << " AND state <> "
+                                      << file_schema.collection_id_ << " AND state <> "
                                       << std::to_string(TableSchema::TO_DELETE) << ")"
                                       << " AS " << mysqlpp::quote << "check"
                                       << ";";
@@ -1199,17 +1199,17 @@ MySQLMetaImpl::UpdateTableFiles(TableFilesSchema& files) {
                 mysqlpp::StoreQueryResult res = updateTableFilesQuery.store();
 
                 int check = res[0]["check"];
-                has_tables[file_schema.table_id_] = (check == 1);
+                has_tables[file_schema.collection_id_] = (check == 1);
             }
 
             for (auto& file_schema : files) {
-                if (!has_tables[file_schema.table_id_]) {
+                if (!has_tables[file_schema.collection_id_]) {
                     file_schema.file_type_ = TableFileSchema::TO_DELETE;
                 }
                 file_schema.updated_time_ = utils::GetMicroSecTimeStamp();
 
                 std::string id = std::to_string(file_schema.id_);
-                std::string& collection_id = file_schema.table_id_;
+                std::string& collection_id = file_schema.collection_id_;
                 std::string engine_type = std::to_string(file_schema.engine_type_);
                 std::string& file_id = file_schema.file_id_;
                 std::string file_type = std::to_string(file_schema.file_type_);
@@ -1400,7 +1400,7 @@ MySQLMetaImpl::CreatePartition(const std::string& collection_id, const std::stri
     server::MetricCollector metric;
 
     TableSchema table_schema;
-    table_schema.table_id_ = collection_id;
+    table_schema.collection_id_ = collection_id;
     auto status = DescribeTable(table_schema);
     if (!status.ok()) {
         return status;
@@ -1425,9 +1425,9 @@ MySQLMetaImpl::CreatePartition(const std::string& collection_id, const std::stri
 
     if (partition_name == "") {
         // generate unique partition name
-        NextTableId(table_schema.table_id_);
+        NextTableId(table_schema.collection_id_);
     } else {
-        table_schema.table_id_ = partition_name;
+        table_schema.collection_id_ = partition_name;
     }
 
     table_schema.id_ = -1;
@@ -1480,7 +1480,7 @@ MySQLMetaImpl::ShowPartitions(const std::string& collection_id,
 
         for (auto& resRow : res) {
             meta::TableSchema partition_schema;
-            resRow["table_id"].to_string(partition_schema.table_id_);
+            resRow["table_id"].to_string(partition_schema.collection_id_);
             partition_schema.id_ = resRow["id"];  // implicit conversion
             partition_schema.state_ = resRow["state"];
             partition_schema.dimension_ = resRow["dimension"];
@@ -1581,7 +1581,7 @@ MySQLMetaImpl::FilesToSearch(const std::string& collection_id, TableFilesSchema&
         }  // Scoped Connection
 
         TableSchema table_schema;
-        table_schema.table_id_ = collection_id;
+        table_schema.collection_id_ = collection_id;
         auto status = DescribeTable(table_schema);
         if (!status.ok()) {
             return status;
@@ -1591,7 +1591,7 @@ MySQLMetaImpl::FilesToSearch(const std::string& collection_id, TableFilesSchema&
         for (auto& resRow : res) {
             TableFileSchema table_file;
             table_file.id_ = resRow["id"];  // implicit conversion
-            resRow["table_id"].to_string(table_file.table_id_);
+            resRow["table_id"].to_string(table_file.collection_id_);
             resRow["segment_id"].to_string(table_file.segment_id_);
             table_file.index_file_size_ = table_schema.index_file_size_;
             table_file.engine_type_ = resRow["engine_type"];
@@ -1630,7 +1630,7 @@ MySQLMetaImpl::FilesToMerge(const std::string& collection_id, TableFilesSchema& 
 
         // check collection existence
         TableSchema table_schema;
-        table_schema.table_id_ = collection_id;
+        table_schema.collection_id_ = collection_id;
         auto status = DescribeTable(table_schema);
         if (!status.ok()) {
             return status;
@@ -1669,7 +1669,7 @@ MySQLMetaImpl::FilesToMerge(const std::string& collection_id, TableFilesSchema& 
             }
 
             table_file.id_ = resRow["id"];  // implicit conversion
-            resRow["table_id"].to_string(table_file.table_id_);
+            resRow["table_id"].to_string(table_file.collection_id_);
             resRow["segment_id"].to_string(table_file.segment_id_);
             resRow["file_id"].to_string(table_file.file_id_);
             table_file.file_type_ = resRow["file_type"];
@@ -1733,7 +1733,7 @@ MySQLMetaImpl::FilesToIndex(TableFilesSchema& files) {
         TableFileSchema table_file;
         for (auto& resRow : res) {
             table_file.id_ = resRow["id"];  // implicit conversion
-            resRow["table_id"].to_string(table_file.table_id_);
+            resRow["table_id"].to_string(table_file.collection_id_);
             resRow["segment_id"].to_string(table_file.segment_id_);
             table_file.engine_type_ = resRow["engine_type"];
             resRow["file_id"].to_string(table_file.file_id_);
@@ -1743,20 +1743,20 @@ MySQLMetaImpl::FilesToIndex(TableFilesSchema& files) {
             table_file.date_ = resRow["date"];
             table_file.created_on_ = resRow["created_on"];
 
-            auto groupItr = groups.find(table_file.table_id_);
+            auto groupItr = groups.find(table_file.collection_id_);
             if (groupItr == groups.end()) {
                 TableSchema table_schema;
-                table_schema.table_id_ = table_file.table_id_;
+                table_schema.collection_id_ = table_file.collection_id_;
                 auto status = DescribeTable(table_schema);
                 if (!status.ok()) {
                     return status;
                 }
-                groups[table_file.table_id_] = table_schema;
+                groups[table_file.collection_id_] = table_schema;
             }
-            table_file.dimension_ = groups[table_file.table_id_].dimension_;
-            table_file.index_file_size_ = groups[table_file.table_id_].index_file_size_;
-            table_file.index_params_ = groups[table_file.table_id_].index_params_;
-            table_file.metric_type_ = groups[table_file.table_id_].metric_type_;
+            table_file.dimension_ = groups[table_file.collection_id_].dimension_;
+            table_file.index_file_size_ = groups[table_file.collection_id_].index_file_size_;
+            table_file.index_params_ = groups[table_file.collection_id_].index_params_;
+            table_file.metric_type_ = groups[table_file.collection_id_].metric_type_;
 
             auto status = utils::GetTableFilePath(options_, table_file);
             if (!status.ok()) {
@@ -1819,7 +1819,7 @@ MySQLMetaImpl::FilesByType(const std::string& collection_id, const std::vector<i
         }  // Scoped Connection
 
         TableSchema table_schema;
-        table_schema.table_id_ = collection_id;
+        table_schema.collection_id_ = collection_id;
         auto status = DescribeTable(table_schema);
         if (!status.ok()) {
             return status;
@@ -1831,7 +1831,7 @@ MySQLMetaImpl::FilesByType(const std::string& collection_id, const std::vector<i
             for (auto& resRow : res) {
                 TableFileSchema file_schema;
                 file_schema.id_ = resRow["id"];
-                file_schema.table_id_ = collection_id;
+                file_schema.collection_id_ = collection_id;
                 resRow["segment_id"].to_string(file_schema.segment_id_);
                 file_schema.engine_type_ = resRow["engine_type"];
                 resRow["file_id"].to_string(file_schema.file_id_);
@@ -1969,7 +1969,7 @@ MySQLMetaImpl::FilesByID(const std::vector<size_t>& ids, TableFilesSchema& files
         for (auto& resRow : res) {
             TableFileSchema table_file;
             table_file.id_ = resRow["id"];  // implicit conversion
-            resRow["table_id"].to_string(table_file.table_id_);
+            resRow["table_id"].to_string(table_file.collection_id_);
             resRow["segment_id"].to_string(table_file.segment_id_);
             table_file.engine_type_ = resRow["engine_type"];
             resRow["file_id"].to_string(table_file.file_id_);
@@ -1978,14 +1978,14 @@ MySQLMetaImpl::FilesByID(const std::vector<size_t>& ids, TableFilesSchema& files
             table_file.row_count_ = resRow["row_count"];
             table_file.date_ = resRow["date"];
 
-            if (tables.find(table_file.table_id_) == tables.end()) {
+            if (tables.find(table_file.collection_id_) == tables.end()) {
                 TableSchema table_schema;
-                table_schema.table_id_ = table_file.table_id_;
+                table_schema.collection_id_ = table_file.collection_id_;
                 auto status = DescribeTable(table_schema);
                 if (!status.ok()) {
                     return status;
                 }
-                tables.insert(std::make_pair(table_file.table_id_, table_schema));
+                tables.insert(std::make_pair(table_file.collection_id_, table_schema));
             }
 
             auto status = utils::GetTableFilePath(options_, table_file);
@@ -1997,7 +1997,7 @@ MySQLMetaImpl::FilesByID(const std::vector<size_t>& ids, TableFilesSchema& files
         }
 
         for (auto& table_file : files) {
-            TableSchema& table_schema = tables[table_file.table_id_];
+            TableSchema& table_schema = tables[table_file.collection_id_];
             table_file.dimension_ = table_schema.dimension_;
             table_file.index_file_size_ = table_schema.index_file_size_;
             table_file.index_params_ = table_schema.index_params_;
@@ -2192,7 +2192,7 @@ MySQLMetaImpl::CleanUpFilesWithTTL(uint64_t seconds /*, CleanUpFilter* filter*/)
             int64_t clean_files = 0;
             for (auto& resRow : res) {
                 table_file.id_ = resRow["id"];  // implicit conversion
-                resRow["table_id"].to_string(table_file.table_id_);
+                resRow["table_id"].to_string(table_file.collection_id_);
                 resRow["segment_id"].to_string(table_file.segment_id_);
                 table_file.engine_type_ = resRow["engine_type"];
                 resRow["file_id"].to_string(table_file.file_id_);
@@ -2217,7 +2217,7 @@ MySQLMetaImpl::CleanUpFilesWithTTL(uint64_t seconds /*, CleanUpFilter* filter*/)
                     ENGINE_LOG_DEBUG << "Remove file id:" << table_file.id_ << " location:" << table_file.location_;
 
                     delete_ids.emplace_back(std::to_string(table_file.id_));
-                    table_ids.insert(table_file.table_id_);
+                    table_ids.insert(table_file.collection_id_);
                     segment_ids.insert(std::make_pair(table_file.segment_id_, table_file));
 
                     clean_files++;
@@ -2397,7 +2397,7 @@ MySQLMetaImpl::Count(const std::string& collection_id, uint64_t& result) {
         server::MetricCollector metric;
 
         TableSchema table_schema;
-        table_schema.table_id_ = collection_id;
+        table_schema.collection_id_ = collection_id;
         auto status = DescribeTable(table_schema);
 
         if (!status.ok()) {

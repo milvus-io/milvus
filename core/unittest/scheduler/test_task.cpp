@@ -74,7 +74,7 @@ TEST(TaskTest, TEST_TASK) {
     options.insert_cache_immediately_ = true;
     auto meta_ptr = std::make_shared<milvus::engine::meta::SqliteMetaImpl>(options.meta_);
 
-    file->table_id_ = "111";
+    file->collection_id_ = "111";
     file->location_ = "/tmp/milvus_test/index_file1.txt";
     auto build_index_job = std::make_shared<BuildIndexJob>(meta_ptr, options);
     XBuildIndexTask build_index_task(file, label);

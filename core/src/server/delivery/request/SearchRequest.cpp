@@ -78,7 +78,7 @@ SearchRequest::OnExecute() {
         // step 3: check collection existence
         // only process root collection, ignore partition collection
         engine::meta::TableSchema table_schema;
-        table_schema.table_id_ = table_name_;
+        table_schema.collection_id_ = table_name_;
         status = DBWrapper::DB()->DescribeTable(table_schema);
         fiu_do_on("SearchRequest.OnExecute.describe_table_fail", status = Status(milvus::SERVER_UNEXPECTED_ERROR, ""));
         if (!status.ok()) {
