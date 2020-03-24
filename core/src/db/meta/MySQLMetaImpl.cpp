@@ -381,7 +381,8 @@ MySQLMetaImpl::CreateTable(TableSchema& table_schema) {
                     int state = res[0]["state"];
                     fiu_do_on("MySQLMetaImpl.CreateTableTable.schema_TO_DELETE", state = TableSchema::TO_DELETE);
                     if (TableSchema::TO_DELETE == state) {
-                        return Status(DB_ERROR, "Collection already exists and it is in delete state, please wait a second");
+                        return Status(DB_ERROR,
+                                      "Collection already exists and it is in delete state, please wait a second");
                     } else {
                         return Status(DB_ALREADY_EXIST, "Collection already exists");
                     }
@@ -1117,7 +1118,8 @@ MySQLMetaImpl::UpdateTableFile(TableFileSchema& file_schema) {
             ENGINE_LOG_DEBUG << "MySQLMetaImpl::UpdateTableFile: " << updateTableFileQuery.str();
 
             if (!updateTableFileQuery.exec()) {
-                ENGINE_LOG_DEBUG << "collection_id= " << file_schema.collection_id_ << " file_id=" << file_schema.file_id_;
+                ENGINE_LOG_DEBUG << "collection_id= " << file_schema.collection_id_
+                                 << " file_id=" << file_schema.file_id_;
                 return HandleException("QUERY ERROR WHEN UPDATING TABLE FILE", updateTableFileQuery.error());
             }
         }  // Scoped Connection

@@ -124,8 +124,8 @@ TEST_F(DeleteTest, delete_in_mem) {
         std::vector<std::string> tags;
         milvus::engine::ResultIds result_ids;
         milvus::engine::ResultDistances result_distances;
-        stat = db_->Query(dummy_context_, table_info.collection_id_, tags, topk, {{"nprobe", nprobe}}, search, result_ids,
-                          result_distances);
+        stat = db_->Query(dummy_context_, table_info.collection_id_, tags, topk,
+                {{"nprobe", nprobe}}, search, result_ids, result_distances);
         ASSERT_NE(result_ids[0], pair.first);
         //        ASSERT_LT(result_distances[0], 1e-4);
         ASSERT_GT(result_distances[0], 1);
@@ -193,8 +193,8 @@ TEST_F(DeleteTest, delete_on_disk) {
         std::vector<std::string> tags;
         milvus::engine::ResultIds result_ids;
         milvus::engine::ResultDistances result_distances;
-        stat = db_->Query(dummy_context_, table_info.collection_id_, tags, topk, {{"nprobe", nprobe}}, search, result_ids,
-                          result_distances);
+        stat = db_->Query(dummy_context_,
+                table_info.collection_id_, tags, topk, {{"nprobe", nprobe}}, search, result_ids, result_distances);
         ASSERT_NE(result_ids[0], pair.first);
         //        ASSERT_LT(result_distances[0], 1e-4);
         ASSERT_GT(result_distances[0], 1);
@@ -256,8 +256,8 @@ TEST_F(DeleteTest, delete_multiple_times) {
         std::vector<std::string> tags;
         milvus::engine::ResultIds result_ids;
         milvus::engine::ResultDistances result_distances;
-        stat = db_->Query(dummy_context_, table_info.collection_id_, tags, topk, {{"nprobe", nprobe}}, search, result_ids,
-                          result_distances);
+        stat = db_->Query(dummy_context_,
+                table_info.collection_id_, tags, topk, {{"nprobe", nprobe}}, search, result_ids, result_distances);
         ASSERT_NE(result_ids[0], pair.first);
         //        ASSERT_LT(result_distances[0], 1e-4);
         ASSERT_GT(result_distances[0], 1);
@@ -332,8 +332,8 @@ TEST_F(DeleteTest, delete_before_create_index) {
         std::vector<std::string> tags;
         milvus::engine::ResultIds result_ids;
         milvus::engine::ResultDistances result_distances;
-        stat = db_->Query(dummy_context_, table_info.collection_id_, tags, topk, {{"nprobe", nprobe}}, search, result_ids,
-                          result_distances);
+        stat = db_->Query(dummy_context_,
+                table_info.collection_id_, tags, topk, {{"nprobe", nprobe}}, search, result_ids, result_distances);
         ASSERT_NE(result_ids[0], pair.first);
         //        ASSERT_LT(result_distances[0], 1e-4);
         ASSERT_GT(result_distances[0], 1);
@@ -409,8 +409,8 @@ TEST_F(DeleteTest, delete_with_index) {
         std::vector<std::string> tags;
         milvus::engine::ResultIds result_ids;
         milvus::engine::ResultDistances result_distances;
-        stat = db_->Query(dummy_context_, table_info.collection_id_, tags, topk, {{"nprobe", nprobe}}, search, result_ids,
-                          result_distances);
+        stat = db_->Query(dummy_context_,
+                table_info.collection_id_, tags, topk, {{"nprobe", nprobe}}, search, result_ids, result_distances);
         ASSERT_NE(result_ids[0], pair.first);
         //        ASSERT_LT(result_distances[0], 1e-4);
         ASSERT_GT(result_distances[0], 1);
@@ -486,8 +486,8 @@ TEST_F(DeleteTest, delete_multiple_times_with_index) {
         std::vector<std::string> tags;
         milvus::engine::ResultIds result_ids;
         milvus::engine::ResultDistances result_distances;
-        stat = db_->Query(dummy_context_, table_info.collection_id_, tags, topk, {{"nprobe", nprobe}}, search, result_ids,
-                          result_distances);
+        stat = db_->Query(dummy_context_,
+                table_info.collection_id_, tags, topk, {{"nprobe", nprobe}}, search, result_ids, result_distances);
         ASSERT_TRUE(stat.ok());
         ASSERT_NE(result_ids[0], pair.first);
         //        ASSERT_LT(result_distances[0], 1e-4);
@@ -533,7 +533,8 @@ TEST_F(DeleteTest, delete_single_vector) {
     std::vector<std::string> tags;
     milvus::engine::ResultIds result_ids;
     milvus::engine::ResultDistances result_distances;
-    stat = db_->Query(dummy_context_, table_info.collection_id_, tags, topk, json_params, xb, result_ids, result_distances);
+    stat = db_->Query(dummy_context_,
+            table_info.collection_id_, tags, topk, json_params, xb, result_ids, result_distances);
     ASSERT_TRUE(result_ids.empty());
     ASSERT_TRUE(result_distances.empty());
     // ASSERT_EQ(result_ids[0], -1);
@@ -597,7 +598,8 @@ TEST_F(DeleteTest, delete_add_create_index) {
     qb.float_data_.resize(TABLE_DIM);
     qb.vector_count_ = 1;
     qb.id_array_.clear();
-    stat = db_->Query(dummy_context_, table_info.collection_id_, tags, topk, json_params, qb, result_ids, result_distances);
+    stat = db_->Query(dummy_context_,
+            table_info.collection_id_, tags, topk, json_params, qb, result_ids, result_distances);
 
     ASSERT_EQ(result_ids[0], xb2.id_array_.front());
     ASSERT_LT(result_distances[0], 1e-4);
@@ -668,15 +670,17 @@ TEST_F(DeleteTest, delete_add_auto_flush) {
     qb.float_data_.resize(TABLE_DIM);
     qb.vector_count_ = 1;
     qb.id_array_.clear();
-    stat = db_->Query(dummy_context_, table_info.collection_id_, tags, topk, json_params, qb, result_ids, result_distances);
+    stat = db_->Query(dummy_context_,
+            table_info.collection_id_, tags, topk, json_params, qb, result_ids, result_distances);
 
     ASSERT_EQ(result_ids[0], xb2.id_array_.front());
     ASSERT_LT(result_distances[0], 1e-4);
 
     result_ids.clear();
     result_distances.clear();
-    stat = db_->QueryByID(dummy_context_, table_info.collection_id_, tags, topk, {{"nprobe", nprobe}}, ids_to_delete.front(),
-                          result_ids, result_distances);
+    stat = db_->QueryByID(dummy_context_,
+            table_info.collection_id_, tags, topk, {{"nprobe", nprobe}},
+            ids_to_delete.front(), result_ids, result_distances);
     ASSERT_EQ(result_ids[0], -1);
     ASSERT_EQ(result_distances[0], std::numeric_limits<float>::max());
 }

@@ -383,7 +383,7 @@ MemTable::ApplyDeletes() {
     std::chrono::duration<double> diff7 = end_total - time7;
     ENGINE_LOG_DEBUG << "Update deletes to meta in collection " << collection_id_ << " in " << diff7.count() << " s";
     std::chrono::duration<double> diff_total = end_total - start_total;
-    ENGINE_LOG_DEBUG << "Finished applying deletes in collection " << collection_id_ << " in " << diff_total.count() << " s";
+    ENGINE_LOG_DEBUG << "Finished deletes in collection " << collection_id_ << " in " << diff_total.count() << " s";
 
     OngoingFileChecker::GetInstance().UnmarkOngoingFiles(files_to_check);
 

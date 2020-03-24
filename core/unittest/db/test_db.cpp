@@ -569,7 +569,8 @@ TEST_F(DBTest, SHUTDOWN_TEST) {
     milvus::engine::ResultIds result_ids;
     milvus::engine::ResultDistances result_distances;
     milvus::json json_params = {{"nprobe", 1}};
-    stat = db_->Query(dummy_context_, table_info.collection_id_, tags, 1, json_params, xb, result_ids, result_distances);
+    stat = db_->Query(dummy_context_,
+            table_info.collection_id_, tags, 1, json_params, xb, result_ids, result_distances);
     ASSERT_FALSE(stat.ok());
     std::vector<std::string> file_ids;
     stat = db_->QueryByFileID(dummy_context_,
@@ -1096,7 +1097,8 @@ TEST_F(DBTestWAL, DB_STOP_TEST) {
     milvus::engine::ResultDistances result_distances;
     milvus::engine::VectorsData qxb;
     BuildVectors(qb, 0, qxb);
-    stat = db_->Query(dummy_context_, table_info.collection_id_, {}, topk, json_params, qxb, result_ids, result_distances);
+    stat = db_->Query(dummy_context_,
+            table_info.collection_id_, {}, topk, json_params, qxb, result_ids, result_distances);
     ASSERT_TRUE(stat.ok());
     ASSERT_EQ(result_ids.size() / topk, qb);
 
@@ -1125,7 +1127,8 @@ TEST_F(DBTestWALRecovery, RECOVERY_WITH_NO_ERROR) {
     milvus::engine::ResultDistances result_distances;
     milvus::engine::VectorsData qxb;
     BuildVectors(qb, 0, qxb);
-    stat = db_->Query(dummy_context_, table_info.collection_id_, {}, topk, json_params, qxb, result_ids, result_distances);
+    stat = db_->Query(dummy_context_,
+            table_info.collection_id_, {}, topk, json_params, qxb, result_ids, result_distances);
     ASSERT_TRUE(stat.ok());
     ASSERT_NE(result_ids.size() / topk, qb);
 
@@ -1138,14 +1141,16 @@ TEST_F(DBTestWALRecovery, RECOVERY_WITH_NO_ERROR) {
 
     result_ids.clear();
     result_distances.clear();
-    stat = db_->Query(dummy_context_, table_info.collection_id_, {}, topk, json_params, qxb, result_ids, result_distances);
+    stat = db_->Query(dummy_context_,
+            table_info.collection_id_, {}, topk, json_params, qxb, result_ids, result_distances);
     ASSERT_TRUE(stat.ok());
     ASSERT_EQ(result_ids.size(), 0);
 
     db_->Flush();
     result_ids.clear();
     result_distances.clear();
-    stat = db_->Query(dummy_context_, table_info.collection_id_, {}, topk, json_params, qxb, result_ids, result_distances);
+    stat = db_->Query(dummy_context_,
+            table_info.collection_id_, {}, topk, json_params, qxb, result_ids, result_distances);
     ASSERT_TRUE(stat.ok());
     ASSERT_EQ(result_ids.size() / topk, qb);
 }
