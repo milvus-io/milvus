@@ -10,6 +10,7 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #include <fiu-local.h>
+#include <string>
 
 #include "knowhere/common/Exception.h"
 #include "knowhere/common/Timer.h"
