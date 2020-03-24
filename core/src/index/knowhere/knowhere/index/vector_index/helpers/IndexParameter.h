@@ -46,7 +46,8 @@ constexpr const char* M = "M";
 constexpr const char* ef = "ef";
 
 // Annoy Params
-constexpr const char* Q = "Q";
+constexpr const char* n_trees = "n_trees";
+constexpr const char* search_k = "search_k";
 }  // namespace IndexParams
 
 namespace Metric {

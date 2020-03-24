@@ -291,6 +291,7 @@ DBImpl::GetTableInfo(const std::string& table_id, TableInfo& table_info) {
         {(int32_t)engine::EngineType::FAISS_IVFFLAT, "IVFFLAT"},
         {(int32_t)engine::EngineType::FAISS_IVFSQ8, "IVFSQ8"},
         {(int32_t)engine::EngineType::NSG_MIX, "NSG"},
+        {(int32_t)engine::EngineType::ANNOY, "ANNOY"},
         {(int32_t)engine::EngineType::FAISS_IVFSQ8H, "IVFSQ8H"},
         {(int32_t)engine::EngineType::FAISS_PQ, "PQ"},
         {(int32_t)engine::EngineType::SPTAG_KDT, "KDT"},

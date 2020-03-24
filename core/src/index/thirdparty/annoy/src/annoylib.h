@@ -120,6 +120,8 @@ inline void set_error_from_string(char **error, const char* msg) {
 #include <intrin.h>
 #elif defined(__GNUC__)
 #include <x86intrin.h>
+#include <src/index/thirdparty/faiss/utils/ConcurrentBitset.h>
+
 #endif
 #endif
 
@@ -815,11 +817,17 @@ class AnnoyIndexInterface {
   virtual bool save(const char* filename, bool prefault=false, char** error=NULL) = 0;
   virtual void unload() = 0;
   virtual bool load(const char* filename, bool prefault=false, char** error=NULL) = 0;
+  virtual bool load_index(const unsigned char* index_data, const int64_t& index_size, char** error = NULL) = 0;
   virtual T get_distance(S i, S j) const = 0;
-  virtual void get_nns_by_item(S item, size_t n, int search_k, vector<S>* result, vector<T>* distances) const = 0;
-  virtual void get_nns_by_vector(const T* w, size_t n, int search_k, vector<S>* result, vector<T>* distances) const = 0;
+  virtual void get_nns_by_item(S item, size_t n, int search_k, vector<S>* result, vector<T>* distances,
+                               faiss::ConcurrentBitsetPtr bitset = nullptr) const = 0;
+  virtual void get_nns_by_vector(const T* w, size_t n, int search_k, vector<S>* result, vector<T>* distances,
+                               faiss::ConcurrentBitsetPtr bitset = nullptr) const = 0;
   virtual S get_n_items() const = 0;
+  virtual S get_dim() const = 0;
   virtual S get_n_trees() const = 0;
+  virtual int64_t get_index_length() const = 0;
+  virtual void* get_index() const = 0;
   virtual void verbose(bool v) = 0;
   virtual void get_item(S item, T* v) const = 0;
   virtual void set_seed(int q) = 0;
@@ -1101,27 +1109,80 @@ public:
     return true;
   }
 
+  bool load_index(const unsigned char* index_data, const int64_t& index_size, char** error) {
+    if (index_size == -1) {
+      set_error_from_errno(error, "Unable to get size");
+      return false;
+    } else if (index_size == 0) {
+      set_error_from_errno(error, "Size of file is zero");
+      return false;
+    } else if (index_size % _s) {
+      // Something is fishy with this index!
+      set_error_from_errno(error, "Index size is not a multiple of vector size");
+      return false;
+    }
+
+    _n_nodes = (S)(index_size / _s);
+    _nodes = (Node*)malloc(_s * _n_nodes);
+    memcpy(_nodes, index_data, (size_t)index_size);
+
+    // Find the roots by scanning the end of the file and taking the nodes with most descendants
+    _roots.clear();
+    S m = -1;
+    for (S i = _n_nodes - 1; i >= 0; i--) {
+      S k = _get(i)->n_descendants;
+      if (m == -1 || k == m) {
+        _roots.push_back(i);
+        m = k;
+      } else {
+        break;
+      }
+    }
+    // hacky fix: since the last root precedes the copy of all roots, delete it
+    if (_roots.size() > 1 && _get(_roots.front())->children[0] == _get(_roots.back())->children[0])
+      _roots.pop_back();
+    _loaded = true;
+    _built = true;
+    _n_items = m;
+    if (_verbose) showUpdate("found %lu roots with degree %d\n", _roots.size(), m);
+    return true;
+  }
+
   T get_distance(S i, S j) const {
     return D::normalized_distance(D::distance(_get(i), _get(j), _f));
   }
 
-  void get_nns_by_item(S item, size_t n, int search_k, vector<S>* result, vector<T>* distances) const {
+  void get_nns_by_item(S item, size_t n, int search_k, vector<S>* result, vector<T>* distances,
+                       faiss::ConcurrentBitsetPtr bitset) const {
     // TODO: handle OOB
     const Node* m = _get(item);
-    _get_all_nns(m->v, n, search_k, result, distances);
+    _get_all_nns(m->v, n, search_k, result, distances, bitset);
   }
 
-  void get_nns_by_vector(const T* w, size_t n, int search_k, vector<S>* result, vector<T>* distances) const {
-    _get_all_nns(w, n, search_k, result, distances);
+  void get_nns_by_vector(const T* w, size_t n, int search_k, vector<S>* result, vector<T>* distances,
+                         faiss::ConcurrentBitsetPtr bitset) const {
+    _get_all_nns(w, n, search_k, result, distances, bitset);
   }
 
   S get_n_items() const {
     return _n_items;
   }
 
+  S get_dim() const {
+     return _f;
+  }
+
   S get_n_trees() const {
     return (S)_roots.size();
   }
+
+  int64_t get_index_length() const {
+     return (int64_t)_s * _nodes_size;
+   }
+
+  void* get_index() const {
+     return _nodes;
+   }
 
   void verbose(bool v) {
     _verbose = v;
@@ -1246,7 +1307,8 @@ protected:
     return item;
   }
 
-  void _get_all_nns(const T* v, size_t n, int search_k, vector<S>* result, vector<T>* distances) const {
+  void _get_all_nns(const T* v, size_t n, int search_k, vector<S>* result, vector<T>* distances,
+                    faiss::ConcurrentBitsetPtr bitset) const {
     Node* v_node = (Node *)alloca(_s);
     D::template zero_value<Node>(v_node);
     memcpy(v_node->v, v, sizeof(T) * _f);
@@ -1269,11 +1331,16 @@ protected:
       S i = top.second;
       Node* nd = _get(i);
       q.pop();
-      if (nd->n_descendants == 1 && i < _n_items) {
-        nns.push_back(i);
+      if (nd->n_descendants == 1 && i < _n_items) { // raw data
+        if (bitset == nullptr || !bitset->test((faiss::ConcurrentBitset::id_type_t)i))
+          nns.push_back(i);
       } else if (nd->n_descendants <= _K) {
         const S* dst = nd->children;
-        nns.insert(nns.end(), dst, &dst[nd->n_descendants]);
+        for (auto ii = 0; ii < nd->n_descendants; ++ ii) {
+          if (bitset == nullptr || !bitset->test((faiss::ConcurrentBitset::id_type_t)dst[ii]))
+            nns.push_back(dst[ii]);
+//            nns.insert(nns.end(), dst, &dst[nd->n_descendants]);
+        }
       } else {
         T margin = D::margin(nd, v, _f);
         q.push(make_pair(D::pq_distance(d, margin, 1), static_cast<S>(nd->children[1])));

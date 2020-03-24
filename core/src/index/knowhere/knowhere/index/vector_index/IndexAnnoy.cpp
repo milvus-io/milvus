@@ -35,54 +35,67 @@ IndexAnnoy::Serialize(const Config& config) {
     }
 
     BinarySet res_set;
+    auto metric_type_length = metric_type_.length();
+    auto metric_type = std::make_shared<uint8_t>();
+    char* metric_type_str = new char[metric_type_length];
+    snprintf(metric_type_str, metric_type_length, "%s", metric_type_.c_str());
+//    memcpy(metric_type_str, metric_type_.data(), metric_type_.length());
+    metric_type.reset(static_cast<uint8_t*>((void*)metric_type_str));
+
+    auto index_length = index_->get_index_length();
+    char* p_index_data = new char[index_length];
+    memcpy(p_index_data, index_->get_index(), (size_t)index_length);
+    auto index_data = std::make_shared<uint8_t>();
+    index_data.reset(static_cast<uint8_t*>((void*)p_index_data));
+
+    res_set.Append("annoy_metric_type", metric_type, metric_type_length);
+    res_set.Append("annoy_index_data", index_data, index_length);
     return res_set;
 }
 
 void
 IndexAnnoy::Load(const BinarySet& index_binary) {
+    if (!index_) {
+        KNOWHERE_THROW_MSG("index not initialize or trained");
+    }
+    auto metric_type = index_binary.GetByName("annoy_metric_type");
+    metric_type_.resize(metric_type->size);
+    memcpy(metric_type_.data(), metric_type->data.get(), (size_t)metric_type->size);
 
+    auto index_data = index_binary.GetByName("annoy_index_data");
+    char* error_msg = new char[256];//hard code here because this length is enough
+    if (!index_->load_index(index_data->data.get(), index_data->size, &error_msg)) {
+        KNOWHERE_THROW_MSG(error_msg);
+    }
 }
 
 void
-IndexAnnoy::Train(const DatasetPtr& dataset_ptr, const Config& config) {
-    std::lock_guard<std::mutex> lk(mutex_);
+IndexAnnoy::BuildAll(const DatasetPtr& dataset_ptr, const Config& config) {
     if (index_) {
-        // it is trained
+        // it is builded all
         return;
     }
 
-    dim_ = dataset_ptr->Get<int64_t>(meta::DIM);
-
-    auto metric_type = config[Metric::TYPE];
-    if (metric_type == Metric::L2) {
-        index_ = std::make_shared<AnnoyIndex<int64_t, float, ::DotProduct, ::Kiss64Random>>(dim_);
-    } else if (metric_type == Metric::IP) {
-        index_ = std::make_shared<AnnoyIndex<int64_t, float, ::Euclidean, ::Kiss64Random>>(dim_);
-    } else if (metric_type == Metric::HAMMING) {
-        index_ = std::make_shared<AnnoyIndex<int64_t, float, ::Hamming, ::Kiss64Random>>(dim_);
-    } else {
-        KNOWHERE_THROW_MSG("metric not supported " + metric_type);
-    }
-
-    index_->build(config[IndexParams::Q].get<int64_t>());
-}
-
-void
-IndexAnnoy::Add(const DatasetPtr& dataset_ptr, const Config& config) {
-    std::lock_guard<std::mutex> lk(mutex_);
-    if (!index_) {
-        KNOWHERE_THROW_MSG("index not initialize");
-    }
-
     GETTENSORWITHIDS(dataset_ptr)
-    for (int i = 1; i < rows; ++i) {
+
+    metric_type_ = config[Metric::TYPE];
+    if (metric_type_ == Metric::L2) {
+        index_ = std::make_shared<AnnoyIndex<int64_t, float, ::Euclidean, ::Kiss64Random>>(dim);
+    } else if (metric_type_ == Metric::IP) {
+        index_ = std::make_shared<AnnoyIndex<int64_t, float, ::DotProduct, ::Kiss64Random>>(dim);
+    } else {
+        KNOWHERE_THROW_MSG("metric not supported " + metric_type_);
+    }
+
+    for (int i = 0; i < rows; ++ i) {
         index_->add_item(p_ids[i], (const float*)p_data + dim * i);
     }
+
+    index_->build(config[IndexParams::n_trees].get<int64_t>());
 }
 
 DatasetPtr
 IndexAnnoy::Query(const DatasetPtr& dataset_ptr, const Config& config) {
-    std::lock_guard<std::mutex> lk(mutex_);
     if (!index_) {
         KNOWHERE_THROW_MSG("index not initialize or trained");
     }
@@ -92,15 +105,20 @@ IndexAnnoy::Query(const DatasetPtr& dataset_ptr, const Config& config) {
     auto all_num = rows * k;
     auto p_id = (int64_t*)malloc(all_num * sizeof(int64_t));
     auto p_dist = (float*)malloc(all_num * sizeof(float));
+    faiss::ConcurrentBitsetPtr blacklist = nullptr;
+    GetBlacklist(blacklist);
 
 #pragma omp parallel for
     for (unsigned int i = 0; i < rows; ++i) {
-        std::vector<int32_t> result;
+        std::vector<int64_t > result;
+        result.reserve(k);
         std::vector<float> distances;
-        index_->get_nns_by_vector((const float*)p_data + i * k, k, -1, &result, &distances);
+        distances.reserve(k);
+        index_->get_nns_by_vector((const float*)p_data + i * dim, k, config[IndexParams::search_k].get<int64_t>(), &result, &distances, blacklist);
 
         memcpy(p_id + k * i, result.data(), k * sizeof(int64_t));
         memcpy(p_dist + k * i, distances.data(), k * sizeof(float));
+
     }
 
     auto ret_ds = std::make_shared<Dataset>();
@@ -111,7 +129,6 @@ IndexAnnoy::Query(const DatasetPtr& dataset_ptr, const Config& config) {
 
 int64_t
 IndexAnnoy::Count() {
-    std::lock_guard<std::mutex> lk(mutex_);
     if (!index_) {
         KNOWHERE_THROW_MSG("index not initialize");
     }
@@ -121,13 +138,20 @@ IndexAnnoy::Count() {
 
 int64_t
 IndexAnnoy::Dim() {
-    std::lock_guard<std::mutex> lk(mutex_);
     if (!index_) {
         KNOWHERE_THROW_MSG("index not initialize");
     }
 
-    return dim_;
+    return index_->get_dim();
 }
 
+int64_t
+IndexAnnoy::Size() {
+    if (size_ != -1) {
+        return size_;
+    }
+
+    return size_ = Dim() * Count() * sizeof(float);
+}
 }  // namespace knowhere
 }  // namespace milvus

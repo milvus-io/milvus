@@ -36,10 +36,17 @@ class IndexAnnoy : public VecIndex {
     Load(const BinarySet& index_binary) override;
 
     void
-    Train(const DatasetPtr& dataset_ptr, const Config& config) override;
+    BuildAll(const DatasetPtr& dataset_ptr, const Config& config) override;
 
     void
-    Add(const DatasetPtr& dataset_ptr, const Config& config) override;
+    Train(const DatasetPtr& dataset_ptr, const Config& config) override {
+        KNOWHERE_THROW_MSG("Annoy not support build item dynamically, please invoke BuildAll interface.");
+    }
+
+    void
+    Add(const DatasetPtr& dataset_ptr, const Config& config) override {
+        KNOWHERE_THROW_MSG("Annoy not support add item dynamically, please invoke BuildAll interface.");
+    }
 
     void
     AddWithoutIds(const DatasetPtr&, const Config&) override {
@@ -55,9 +62,11 @@ class IndexAnnoy : public VecIndex {
     int64_t
     Dim() override;
 
+    int64_t
+    Size() override;
+
  private:
-    std::mutex mutex_;
-    int64_t dim_ = 0;
+    MetricType metric_type_;
     std::shared_ptr<AnnoyIndexInterface<int64_t, float>> index_ = nullptr;
 };
 

@@ -216,6 +216,10 @@ ExecutionEngineImpl::CreatetVecIndex(EngineType type) {
             index = vec_index_factory.CreateVecIndex(knowhere::IndexEnum::INDEX_HNSW, mode);
             break;
         }
+        case EngineType::ANNOY: {
+            index = vec_index_factory.CreateVecIndex(knowhere::IndexEnum::INDEX_ANNOY, mode);
+            break;
+        }
         default: {
             ENGINE_LOG_ERROR << "Unsupported index type " << (int)type;
             return nullptr;
