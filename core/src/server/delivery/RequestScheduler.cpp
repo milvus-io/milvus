@@ -36,10 +36,6 @@ RequestScheduler::ExecRequest(BaseRequestPtr& request_ptr) {
 
     RequestScheduler& scheduler = RequestScheduler::GetInstance();
     scheduler.ExecuteRequest(request_ptr);
-
-    if (!request_ptr->IsAsync()) {
-        request_ptr->WaitToFinish();
-    }
 }
 
 void
@@ -86,6 +82,7 @@ RequestScheduler::ExecuteRequest(const BaseRequestPtr& request_ptr) {
 
     auto status = request_ptr->PreExecute();
     if (!status.ok()) {
+        request_ptr->Done();
         return status;
     }
 
@@ -94,6 +91,7 @@ RequestScheduler::ExecuteRequest(const BaseRequestPtr& request_ptr) {
 
     if (!status.ok()) {
         SERVER_LOG_ERROR << "Put request to queue failed with code: " << status.ToString();
+        request_ptr->Done();
         return status;
     }
 

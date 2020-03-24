@@ -380,6 +380,12 @@ TEST_F(RpcHandlerTest, SEARCH_TEST) {
     ::milvus::grpc::VectorIds vector_ids;
     handler->Insert(&context, &insert_param, &vector_ids);
 
+    // flush
+    ::milvus::grpc::Status grpc_status;
+    ::milvus::grpc::FlushParam flush_param;
+    handler->Flush(&context, &flush_param, &grpc_status);
+
+    // search
     BuildVectors(0, 10, record_array);
     for (auto& record : record_array) {
         ::milvus::grpc::RowRecord* row_record = request.add_query_record_array();

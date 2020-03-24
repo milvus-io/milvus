@@ -322,7 +322,6 @@ SearchCombineRequest::OnExecute() {
             offset += (count * search_topk_);
 
             // let request return
-            request->SkipPostExecute();
             FreeRequest(request, Status::OK());
         }
 

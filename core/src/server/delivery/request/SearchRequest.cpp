@@ -122,13 +122,18 @@ SearchRequest::OnExecute() {
         ProfilerStart(fname.c_str());
 #endif
         Status status;
+        engine::ResultIds result_ids;
+        engine::ResultDistances result_distances;
+
         if (file_id_list_.empty()) {
             status = DBWrapper::DB()->Query(context_, table_name_, partition_list_, (size_t)topk_, extra_params_,
-                                            vectors_data_, result_ids_, result_distances_);
+                                            vectors_data_, result_ids, result_distances);
         } else {
             status = DBWrapper::DB()->QueryByFileID(context_, file_id_list_, (size_t)topk_, extra_params_,
-                                                    vectors_data_, result_ids_, result_distances_);
+                                                    vectors_data_, result_ids, result_distances);
         }
+
+        rc.RecordSection("query vectors from engine");
 
 #ifdef MILVUS_ENABLE_PROFILING
         ProfilerStop();
@@ -137,34 +142,22 @@ SearchRequest::OnExecute() {
         if (!status.ok()) {
             return status;
         }
-        fiu_do_on("SearchRequest.OnExecute.empty_result_ids", result_ids_.clear());
-        if (result_ids_.empty()) {
+        fiu_do_on("SearchRequest.OnExecute.empty_result_ids", result_ids.clear());
+        if (result_ids.empty()) {
             return Status::OK();  // empty table
         }
+
+        // step 8: construct result array
+        milvus::server::ContextChild tracer(context_, "Constructing result");
+        result_.row_num_ = vectors_data_.vector_count_;
+        result_.id_list_.swap(result_ids);
+        result_.distance_list_.swap(result_distances);
+        rc.RecordSection("construct result");
     } catch (std::exception& ex) {
         return Status(SERVER_UNEXPECTED_ERROR, ex.what());
     }
 
     return Status::OK();
 }
-
-Status
-SearchRequest::PostExecute() {
-    if (skip_post_execute_) {
-        return Status::OK();
-    }
-
-    milvus::server::ContextChild tracer(context_, "Constructing result");
-    std::string hdr = "SearchRequest post-execute(table=" + table_name_ + ")";
-    TimeRecorderAuto rc(hdr);
-
-    // step 8: construct result array
-    result_.row_num_ = vectors_data_.vector_count_;
-    result_.distance_list_ = result_distances_;
-    result_.id_list_ = result_ids_;
-
-    return Status::OK();
-}
-
 }  // namespace server
 }  // namespace milvus
