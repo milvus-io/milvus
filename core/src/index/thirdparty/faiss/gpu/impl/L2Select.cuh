@@ -28,18 +28,18 @@ void runL2SelectMin(Tensor<half, 2, true>& productDistances,
 
 void runL2SelectMin(Tensor<float, 2, true>& productDistances,
                     Tensor<float, 1, true>& centroidDistances,
+                    Tensor<uint8_t, 1, true> bitset,
                     Tensor<float, 2, true>& outDistances,
                     Tensor<int, 2, true>& outIndices,
                     int k,
-                    cudaStream_t stream,
-                    Tensor<uint8_t, 1, true> bitset);
+                    cudaStream_t stream);
 
 void runL2SelectMin(Tensor<half, 2, true>& productDistances,
                     Tensor<half, 1, true>& centroidDistances,
+                    Tensor<uint8_t, 1, true> bitset,
                     Tensor<half, 2, true>& outDistances,
                     Tensor<int, 2, true>& outIndices,
                     int k,
-                    cudaStream_t stream,
-                    Tensor<uint8_t, 1, true> bitset);
+                    cudaStream_t stream);
 
 } } // namespace

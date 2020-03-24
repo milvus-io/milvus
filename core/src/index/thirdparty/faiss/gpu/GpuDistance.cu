@@ -75,8 +75,8 @@ void bruteForceKnn(GpuResources* resources,
                   nullptr, // compute norms in temp memory
                   tQueries,
                   queriesRowMajor,
-                  k,
                   bitsetDevice,
+                  k,
                   tOutDistances,
                   tOutIntIndices);
   } else if (metric == faiss::MetricType::METRIC_INNER_PRODUCT) {
@@ -85,8 +85,8 @@ void bruteForceKnn(GpuResources* resources,
                   vectorsRowMajor,
                   tQueries,
                   queriesRowMajor,
-                  k,
                   bitsetDevice,
+                  k,
                   tOutDistances,
                   tOutIntIndices);
   } else {

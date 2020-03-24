@@ -53,18 +53,18 @@ class FlatIndex {
                                                      cudaStream_t stream);
 
   void query(Tensor<float, 2, true>& vecs,
+             Tensor<uint8_t, 1, true> bitset,
              int k,
              Tensor<float, 2, true>& outDistances,
              Tensor<int, 2, true>& outIndices,
-             bool exactDistance,
-             Tensor<uint8_t, 1, true> bitset);
+             bool exactDistance);
 
   void query(Tensor<half, 2, true>& vecs,
+             Tensor<uint8_t, 1, true> bitset,
              int k,
              Tensor<half, 2, true>& outDistances,
              Tensor<int, 2, true>& outIndices,
-             bool exactDistance,
-             Tensor<uint8_t, 1, true> bitset);
+             bool exactDistance);
 
   /// Compute residual for set of vectors
   void computeResidual(Tensor<float, 2, true>& vecs,

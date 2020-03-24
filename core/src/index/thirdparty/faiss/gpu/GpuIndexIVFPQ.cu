@@ -363,7 +363,7 @@ GpuIndexIVFPQ::searchImpl_(int n,
   Tensor<long, 2, true> outLabels(const_cast<long*>(labels), {n, k});
 
   DeviceTensor<uint8_t, 1, true> bitsetDevice({0});
-  index_->query(queries, nprobe, k, outDistances, outLabels, bitsetDevice);
+  index_->query(queries, bitsetDevice, nprobe, k, outDistances, outLabels);
 }
 
 int

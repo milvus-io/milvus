@@ -43,10 +43,10 @@ BLOCK_SELECT_DECL(half, false, 2048);
 #endif
 
 void runBlockSelect(Tensor<half, 2, true>& in,
+                    Tensor<uint8_t, 1, true> bitset,
                     Tensor<half, 2, true>& outK,
                     Tensor<int, 2, true>& outV,
-                    bool dir, int k, cudaStream_t stream,
-                    Tensor<uint8_t, 1, true> bitset) {
+                    bool dir, int k, cudaStream_t stream) {
   FAISS_ASSERT(k <= GPU_MAX_SELECTION_K);
 
   if (dir) {
@@ -94,10 +94,10 @@ void runBlockSelect(Tensor<half, 2, true>& in,
 
 void runBlockSelectPair(Tensor<half, 2, true>& inK,
                         Tensor<int, 2, true>& inV,
+                        Tensor<uint8_t, 1, true> bitset,
                         Tensor<half, 2, true>& outK,
                         Tensor<int, 2, true>& outV,
-                        bool dir, int k, cudaStream_t stream,
-                        Tensor<uint8_t, 1, true> bitset) {
+                        bool dir, int k, cudaStream_t stream) {
   FAISS_ASSERT(k <= GPU_MAX_SELECTION_K);
 
   if (dir) {

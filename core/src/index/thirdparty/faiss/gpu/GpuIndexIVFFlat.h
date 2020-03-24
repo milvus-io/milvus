@@ -71,7 +71,7 @@ class GpuIndexIVFFlat : public GpuIndexIVF {
                    int k,
                    float* distances,
                    Index::idx_t* labels,
-                   ConcurrentBitsetPtr bitset) const override;
+                   ConcurrentBitsetPtr bitset = nullptr) const override;
 
  private:
   GpuIndexIVFFlatConfig ivfFlatConfig_;

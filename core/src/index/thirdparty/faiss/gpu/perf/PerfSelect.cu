@@ -61,8 +61,8 @@ int main(int argc, char** argv) {
         faiss::gpu::runWarpSelect(gpuVal, gpuOutVal, gpuOutInd,
                                   FLAGS_dir, k, 0);
       } else {
-        faiss::gpu::runBlockSelect(gpuVal, gpuOutVal, gpuOutInd,
-                                   FLAGS_dir, k, 0, bitset);
+        faiss::gpu::runBlockSelect(gpuVal, bitset, gpuOutVal, gpuOutInd,
+                                   FLAGS_dir, k, 0);
       }
     }
   }

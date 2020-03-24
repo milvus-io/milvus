@@ -164,9 +164,9 @@ __global__ void l2SelectMinK(Tensor<T, 2, true> productDistances,
 template <typename T, int kRowsPerBlock, int kBlockSize>
 __global__ void l2SelectMin1(Tensor<T, 2, true> productDistances,
                              Tensor<T, 1, true> centroidDistances,
+                             Tensor<uint8_t, 1, true> bitset,
                              Tensor<T, 2, true> outDistances,
-                             Tensor<int, 2, true> outIndices,
-                             Tensor<uint8_t, 1, true> bitset) {
+                             Tensor<int, 2, true> outIndices) {
   // Each block handles kRowsPerBlock rows of the distances (results)
   Pair<T, int> threadMin[kRowsPerBlock];
   __shared__ Pair<T, int> blockMin[kRowsPerBlock * (kBlockSize / kWarpSize)];
@@ -265,10 +265,10 @@ __global__ void l2SelectMin1(Tensor<T, 2, true> productDistances,
 template <typename T, int NumWarpQ, int NumThreadQ, int ThreadsPerBlock>
 __global__ void l2SelectMinK(Tensor<T, 2, true> productDistances,
                              Tensor<T, 1, true> centroidDistances,
+                             Tensor<uint8_t, 1, true> bitset,
                              Tensor<T, 2, true> outDistances,
                              Tensor<int, 2, true> outIndices,
-                             int k, T initK,
-                             Tensor<uint8_t, 1, true> bitset) {
+                             int k, T initK) {
   // Each block handles a single row of the distances (results)
   constexpr int kNumWarps = ThreadsPerBlock / kWarpSize;
 
@@ -312,11 +312,11 @@ __global__ void l2SelectMinK(Tensor<T, 2, true> productDistances,
 template <typename T>
 void runL2SelectMin(Tensor<T, 2, true>& productDistances,
                     Tensor<T, 1, true>& centroidDistances,
+                    Tensor<uint8_t, 1, true> bitset,
                     Tensor<T, 2, true>& outDistances,
                     Tensor<int, 2, true>& outIndices,
                     int k,
-                    cudaStream_t stream,
-                    Tensor<uint8_t, 1, true> bitset) {
+                    cudaStream_t stream) {
   FAISS_ASSERT(productDistances.getSize(0) == outDistances.getSize(0));
   FAISS_ASSERT(productDistances.getSize(0) == outIndices.getSize(0));
   FAISS_ASSERT(centroidDistances.getSize(0) == productDistances.getSize(1));
@@ -332,8 +332,8 @@ void runL2SelectMin(Tensor<T, 2, true>& productDistances,
     auto grid = dim3(utils::divUp(outDistances.getSize(0), kRowsPerBlock));
 
     l2SelectMin1<T, kRowsPerBlock, kThreadsPerBlock>
-      <<<grid, block, 0, stream>>>(productDistances, centroidDistances,
-                                   outDistances, outIndices, bitset);
+      <<<grid, block, 0, stream>>>(productDistances, centroidDistances, bitset,
+                                   outDistances, outIndices);
   } else {
     auto grid = dim3(outDistances.getSize(0));
 
@@ -349,8 +349,8 @@ void runL2SelectMin(Tensor<T, 2, true>& productDistances,
     do {                                                                \
       l2SelectMinK<T, NUM_WARP_Q, NUM_THREAD_Q, BLOCK>                  \
         <<<grid, BLOCK, 0, stream>>>(productDistances, centroidDistances, \
-                                    outDistances, outIndices,          \
-                                    k, Limits<T>::getMax(), bitset);           \
+                                    bitset, outDistances, outIndices,      \
+                                    k, Limits<T>::getMax());           \
     } while (0)
 
     if (bitset.getSize(0) == 0) {
@@ -410,34 +410,34 @@ void runL2SelectMin(Tensor<T, 2, true>& productDistances,
 
 void runL2SelectMin(Tensor<float, 2, true>& productDistances,
                     Tensor<float, 1, true>& centroidDistances,
+                    Tensor<uint8_t, 1, true> bitset,
                     Tensor<float, 2, true>& outDistances,
                     Tensor<int, 2, true>& outIndices,
                     int k,
-                    cudaStream_t stream,
-                    Tensor<uint8_t, 1, true> bitset) {
+                    cudaStream_t stream) {
   runL2SelectMin<float>(productDistances,
                         centroidDistances,
+                        bitset,
                         outDistances,
                         outIndices,
                         k,
-                        stream,
-                        bitset);
+                        stream);
 }
 
 void runL2SelectMin(Tensor<half, 2, true>& productDistances,
                     Tensor<half, 1, true>& centroidDistances,
+                    Tensor<uint8_t, 1, true> bitset,
                     Tensor<half, 2, true>& outDistances,
                     Tensor<int, 2, true>& outIndices,
                     int k,
-                    cudaStream_t stream,
-                    Tensor<uint8_t, 1, true> bitset) {
+                    cudaStream_t stream) {
   runL2SelectMin<half>(productDistances,
                        centroidDistances,
+                       bitset,
                        outDistances,
                        outIndices,
                        k,
-                       stream,
-                       bitset);
+                       stream);
 }
 
 } } // namespace

@@ -118,12 +118,12 @@ template <typename K,
           int NumThreadQ,
           int ThreadsPerBlock>
 __global__ void blockSelect(Tensor<K, 2, true> in,
+                            Tensor<uint8_t, 1, true> bitset,
                             Tensor<K, 2, true> outK,
                             Tensor<IndexType, 2, true> outV,
                             K initK,
                             IndexType initV,
-                            int k,
-                            Tensor<uint8_t, 1, true> bitset) {
+                            int k) {
   constexpr int kNumWarps = ThreadsPerBlock / kWarpSize;
 
   __shared__ K smemK[kNumWarps * NumWarpQ];
@@ -172,12 +172,12 @@ template <typename K,
           int ThreadsPerBlock>
 __global__ void blockSelectPair(Tensor<K, 2, true> inK,
                                 Tensor<IndexType, 2, true> inV,
+                                Tensor<uint8_t, 1, true> bitset,
                                 Tensor<K, 2, true> outK,
                                 Tensor<IndexType, 2, true> outV,
                                 K initK,
                                 IndexType initV,
-                                int k,
-                                Tensor<uint8_t, 1, true> bitset) {
+                                int k) {
   constexpr int kNumWarps = ThreadsPerBlock / kWarpSize;
 
   __shared__ K smemK[kNumWarps * NumWarpQ];
@@ -221,29 +221,29 @@ __global__ void blockSelectPair(Tensor<K, 2, true> inK,
 }
 
 void runBlockSelect(Tensor<float, 2, true>& in,
+                    Tensor<uint8_t, 1, true> bitset,
                     Tensor<float, 2, true>& outKeys,
                     Tensor<int, 2, true>& outIndices,
-                    bool dir, int k, cudaStream_t stream,
-                    Tensor<uint8_t, 1, true> bitset);
+                    bool dir, int k, cudaStream_t stream);
 
 void runBlockSelectPair(Tensor<float, 2, true>& inKeys,
                         Tensor<int, 2, true>& inIndices,
+                        Tensor<uint8_t, 1, true> bitset,
                         Tensor<float, 2, true>& outKeys,
                         Tensor<int, 2, true>& outIndices,
-                        bool dir, int k, cudaStream_t stream,
-                        Tensor<uint8_t, 1, true> bitset);
+                        bool dir, int k, cudaStream_t stream);
 
 void runBlockSelect(Tensor<half, 2, true>& in,
+                    Tensor<uint8_t, 1, true> bitset,
                     Tensor<half, 2, true>& outKeys,
                     Tensor<int, 2, true>& outIndices,
-                    bool dir, int k, cudaStream_t stream,
-                    Tensor<uint8_t, 1, true> bitset);
+                    bool dir, int k, cudaStream_t stream);
 
 void runBlockSelectPair(Tensor<half, 2, true>& inKeys,
                         Tensor<int, 2, true>& inIndices,
+                        Tensor<uint8_t, 1, true> bitset,
                         Tensor<half, 2, true>& outKeys,
                         Tensor<int, 2, true>& outIndices,
-                        bool dir, int k, cudaStream_t stream,
-                        Tensor<uint8_t, 1, true> bitset);
+                        bool dir, int k, cudaStream_t stream);
 
 } } // namespace

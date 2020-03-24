@@ -129,7 +129,7 @@ IVFPQ::classifyAndAddVectors(Tensor<float, 2, true>& vecs,
   auto listIds = listIds2d.view<1>({vecs.getSize(0)});
 
   DeviceTensor<uint8_t, 1, true> bitsetDevice({0});
-  quantizer_->query(vecs, 1, listDistance, listIds2d, false, bitsetDevice);
+  quantizer_->query(vecs, bitsetDevice, 1, listDistance, listIds2d, false);
 
   // Copy the lists that we wish to append to back to the CPU
   // FIXME: really this can be into pinned memory and a true async
@@ -185,8 +185,8 @@ IVFPQ::classifyAndAddVectors(Tensor<float, 2, true>& vecs,
                   nullptr, // no precomputed norms
                   residualsTransposeView,
                   true, // residualsTransposeView is row major
-                  1,
                   bitsetDevice,
+                  1,
                   closestSubQDistanceView,
                   closestSubQIndexView,
                   // We don't care about distances
@@ -508,11 +508,11 @@ IVFPQ::precomputeCodes_() {
 
 void
 IVFPQ::query(Tensor<float, 2, true>& queries,
+             Tensor<uint8_t, 1, true> bitset,
              int nprobe,
              int k,
              Tensor<float, 2, true>& outDistances,
-             Tensor<long, 2, true>& outIndices,
-             Tensor<uint8_t, 1, true> bitset) {
+             Tensor<long, 2, true>& outIndices) {
   // These are caught at a higher level
   FAISS_ASSERT(nprobe <= GPU_MAX_SELECTION_K);
   FAISS_ASSERT(k <= GPU_MAX_SELECTION_K);
@@ -534,11 +534,11 @@ IVFPQ::query(Tensor<float, 2, true>& queries,
   // Find the `nprobe` closest coarse centroids; we can use int
   // indices both internally and externally
   quantizer_->query(queries,
+                    bitset,
                     nprobe,
                     coarseDistances,
                     coarseIndices,
-                    true,
-                    bitset);
+                    true);
 
   if (precomputedCodes_) {
     runPQPrecomputedCodes_(queries,
