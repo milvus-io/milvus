@@ -130,7 +130,7 @@ XSearchTask::XSearchTask(const std::shared_ptr<server::Context>& context, TableF
 
 void
 XSearchTask::Load(LoadType type, uint8_t device_id) {
-    auto load_ctx = context_->Follower("XSearchTask::Load " + std::to_string(file_->id_));
+    milvus::server::ContextFollower tracer(context_, "XSearchTask::Load " + std::to_string(file_->id_));
 
     TimeRecorder rc("");
     Status stat = Status::OK();
@@ -198,8 +198,6 @@ XSearchTask::Load(LoadType type, uint8_t device_id) {
     index_id_ = file_->id_;
     index_type_ = file_->file_type_;
     //    search_contexts_.swap(search_contexts_);
-
-    load_ctx->GetTraceContext()->GetSpan()->Finish();
 }
 
 void
