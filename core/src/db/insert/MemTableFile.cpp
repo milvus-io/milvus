@@ -28,8 +28,8 @@
 namespace milvus {
 namespace engine {
 
-MemTableFile::MemTableFile(const std::string& table_id, const meta::MetaPtr& meta, const DBOptions& options)
-    : table_id_(table_id), meta_(meta), options_(options) {
+MemTableFile::MemTableFile(const std::string& collection_id, const meta::MetaPtr& meta, const DBOptions& options)
+    : table_id_(collection_id), meta_(meta), options_(options) {
     current_mem_ = 0;
     auto status = CreateTableFile();
     if (status.ok()) {
@@ -64,7 +64,7 @@ MemTableFile::Add(const VectorSourcePtr& source) {
     if (table_file_schema_.dimension_ <= 0) {
         std::string err_msg =
             "MemTableFile::Add: table_file_schema dimension = " + std::to_string(table_file_schema_.dimension_) +
-            ", table_id = " + table_file_schema_.table_id_;
+            ", collection_id = " + table_file_schema_.table_id_;
         ENGINE_LOG_ERROR << err_msg;
         return Status(DB_ERROR, "Not able to create table file");
     }

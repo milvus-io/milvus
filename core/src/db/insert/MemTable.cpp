@@ -26,8 +26,8 @@
 namespace milvus {
 namespace engine {
 
-MemTable::MemTable(const std::string& table_id, const meta::MetaPtr& meta, const DBOptions& options)
-    : table_id_(table_id), meta_(meta), options_(options) {
+MemTable::MemTable(const std::string& collection_id, const meta::MetaPtr& meta, const DBOptions& options)
+    : table_id_(collection_id), meta_(meta), options_(options) {
     SetIdentity("MemTable");
     AddCacheInsertDataListener();
 }

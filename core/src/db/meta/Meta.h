@@ -49,34 +49,34 @@ class Meta {
     DescribeTable(TableSchema& table_schema) = 0;
 
     virtual Status
-    HasTable(const std::string& table_id, bool& has_or_not) = 0;
+    HasTable(const std::string& collection_id, bool& has_or_not) = 0;
 
     virtual Status
     AllTables(std::vector<TableSchema>& table_schema_array) = 0;
 
     virtual Status
-    UpdateTableFlag(const std::string& table_id, int64_t flag) = 0;
+    UpdateTableFlag(const std::string& collection_id, int64_t flag) = 0;
 
     virtual Status
-    UpdateTableFlushLSN(const std::string& table_id, uint64_t flush_lsn) = 0;
+    UpdateTableFlushLSN(const std::string& collection_id, uint64_t flush_lsn) = 0;
 
     virtual Status
-    GetTableFlushLSN(const std::string& table_id, uint64_t& flush_lsn) = 0;
+    GetTableFlushLSN(const std::string& collection_id, uint64_t& flush_lsn) = 0;
 
     virtual Status
     GetTableFilesByFlushLSN(uint64_t flush_lsn, TableFilesSchema& table_files) = 0;
 
     virtual Status
-    DropTable(const std::string& table_id) = 0;
+    DropTable(const std::string& collection_id) = 0;
 
     virtual Status
-    DeleteTableFiles(const std::string& table_id) = 0;
+    DeleteTableFiles(const std::string& collection_id) = 0;
 
     virtual Status
     CreateTableFile(TableFileSchema& file_schema) = 0;
 
     virtual Status
-    GetTableFiles(const std::string& table_id, const std::vector<size_t>& ids, TableFilesSchema& table_files) = 0;
+    GetTableFiles(const std::string& collection_id, const std::vector<size_t>& ids, TableFilesSchema& table_files) = 0;
 
     virtual Status
     GetTableFilesBySegmentId(const std::string& segment_id, TableFilesSchema& table_files) = 0;
@@ -91,16 +91,16 @@ class Meta {
     UpdateTableFilesRowCount(TableFilesSchema& files) = 0;
 
     virtual Status
-    UpdateTableIndex(const std::string& table_id, const TableIndex& index) = 0;
+    UpdateTableIndex(const std::string& collection_id, const TableIndex& index) = 0;
 
     virtual Status
-    UpdateTableFilesToIndex(const std::string& table_id) = 0;
+    UpdateTableFilesToIndex(const std::string& collection_id) = 0;
 
     virtual Status
-    DescribeTableIndex(const std::string& table_id, TableIndex& index) = 0;
+    DescribeTableIndex(const std::string& collection_id, TableIndex& index) = 0;
 
     virtual Status
-    DropTableIndex(const std::string& table_id) = 0;
+    DropTableIndex(const std::string& collection_id) = 0;
 
     virtual Status
     CreatePartition(const std::string& table_name, const std::string& partition_name, const std::string& tag,
@@ -116,16 +116,16 @@ class Meta {
     GetPartitionName(const std::string& table_name, const std::string& tag, std::string& partition_name) = 0;
 
     virtual Status
-    FilesToSearch(const std::string& table_id, TableFilesSchema& files) = 0;
+    FilesToSearch(const std::string& collection_id, TableFilesSchema& files) = 0;
 
     virtual Status
-    FilesToMerge(const std::string& table_id, TableFilesSchema& files) = 0;
+    FilesToMerge(const std::string& collection_id, TableFilesSchema& files) = 0;
 
     virtual Status
     FilesToIndex(TableFilesSchema&) = 0;
 
     virtual Status
-    FilesByType(const std::string& table_id, const std::vector<int>& file_types, TableFilesSchema& files) = 0;
+    FilesByType(const std::string& collection_id, const std::vector<int>& file_types, TableFilesSchema& files) = 0;
 
     virtual Status
     FilesByID(const std::vector<size_t>& ids, TableFilesSchema& files) = 0;
@@ -146,7 +146,7 @@ class Meta {
     DropAll() = 0;
 
     virtual Status
-    Count(const std::string& table_id, uint64_t& result) = 0;
+    Count(const std::string& collection_id, uint64_t& result) = 0;
 
     virtual Status
     SetGlobalLastLSN(uint64_t lsn) = 0;

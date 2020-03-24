@@ -20,17 +20,17 @@ namespace engine {
 constexpr uint64_t INDEX_FAILED_RETRY_TIME = 1;
 
 Status
-IndexFailedChecker::CleanFailedIndexFileOfTable(const std::string& table_id) {
+IndexFailedChecker::CleanFailedIndexFileOfTable(const std::string& collection_id) {
     std::lock_guard<std::mutex> lck(mutex_);
-    index_failed_files_.erase(table_id);  // rebuild failed index files for this table
+    index_failed_files_.erase(collection_id);  // rebuild failed index files for this table
 
     return Status::OK();
 }
 
 Status
-IndexFailedChecker::GetErrMsgForTable(const std::string& table_id, std::string& err_msg) {
+IndexFailedChecker::GetErrMsgForTable(const std::string& collection_id, std::string& err_msg) {
     std::lock_guard<std::mutex> lck(mutex_);
-    auto iter = index_failed_files_.find(table_id);
+    auto iter = index_failed_files_.find(collection_id);
     if (iter != index_failed_files_.end()) {
         err_msg = iter->second.begin()->second[0];
     }

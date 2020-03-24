@@ -79,9 +79,9 @@ GetMicroSecTimeStamp() {
 }
 
 Status
-CreateTablePath(const DBMetaOptions& options, const std::string& table_id) {
+CreateTablePath(const DBMetaOptions& options, const std::string& collection_id) {
     std::string db_path = options.path_;
-    std::string table_path = db_path + TABLES_FOLDER + table_id;
+    std::string table_path = db_path + TABLES_FOLDER + collection_id;
     auto status = server::CommonUtil::CreateDirectory(table_path);
     if (!status.ok()) {
         ENGINE_LOG_ERROR << status.message();
@@ -89,7 +89,7 @@ CreateTablePath(const DBMetaOptions& options, const std::string& table_id) {
     }
 
     for (auto& path : options.slave_paths_) {
-        table_path = path + TABLES_FOLDER + table_id;
+        table_path = path + TABLES_FOLDER + collection_id;
         status = server::CommonUtil::CreateDirectory(table_path);
         fiu_do_on("CreateTablePath.creat_slave_path", status = Status(DB_INVALID_PATH, ""));
         if (!status.ok()) {
@@ -102,12 +102,12 @@ CreateTablePath(const DBMetaOptions& options, const std::string& table_id) {
 }
 
 Status
-DeleteTablePath(const DBMetaOptions& options, const std::string& table_id, bool force) {
+DeleteTablePath(const DBMetaOptions& options, const std::string& collection_id, bool force) {
     std::vector<std::string> paths = options.slave_paths_;
     paths.push_back(options.path_);
 
     for (auto& path : paths) {
-        std::string table_path = path + TABLES_FOLDER + table_id;
+        std::string table_path = path + TABLES_FOLDER + collection_id;
         if (force) {
             boost::filesystem::remove_all(table_path);
             ENGINE_LOG_DEBUG << "Remove table folder: " << table_path;
@@ -122,7 +122,7 @@ DeleteTablePath(const DBMetaOptions& options, const std::string& table_id, bool 
     config.GetStorageConfigS3Enable(s3_enable);
 
     if (s3_enable) {
-        std::string table_path = options.path_ + TABLES_FOLDER + table_id;
+        std::string table_path = options.path_ + TABLES_FOLDER + collection_id;
 
         auto& storage_inst = milvus::storage::S3ClientWrapper::GetInstance();
         Status stat = storage_inst.DeleteObjects(table_path);

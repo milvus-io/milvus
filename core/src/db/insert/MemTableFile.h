@@ -28,7 +28,7 @@ namespace engine {
 
 class MemTableFile : public server::CacheConfigHandler {
  public:
-    MemTableFile(const std::string& table_id, const meta::MetaPtr& meta, const DBOptions& options);
+    MemTableFile(const std::string& collection_id, const meta::MetaPtr& meta, const DBOptions& options);
 
     ~MemTableFile() = default;
 

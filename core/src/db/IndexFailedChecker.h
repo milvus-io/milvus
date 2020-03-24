@@ -25,10 +25,10 @@ namespace engine {
 class IndexFailedChecker {
  public:
     Status
-    CleanFailedIndexFileOfTable(const std::string& table_id);
+    CleanFailedIndexFileOfTable(const std::string& collection_id);
 
     Status
-    GetErrMsgForTable(const std::string& table_id, std::string& err_msg);
+    GetErrMsgForTable(const std::string& collection_id, std::string& err_msg);
 
     Status
     MarkFailedIndexFile(const meta::TableFileSchema& file, const std::string& err_msg);

@@ -273,7 +273,7 @@ TEST(WalTest, BUFFER_TEST) {
 
     // write 0
     record[0].type = milvus::engine::wal::MXLogType::InsertVector;
-    record[0].table_id = "insert_table";
+    record[0].collection_id = "insert_table";
     record[0].partition_tag = "parti1";
     record[0].length = 50;
     record[0].ids = (milvus::engine::IDNumber*)malloc(record[0].length * sizeof(milvus::engine::IDNumber));
@@ -285,7 +285,7 @@ TEST(WalTest, BUFFER_TEST) {
 
     // write 1
     record[1].type = milvus::engine::wal::MXLogType::Delete;
-    record[1].table_id = "insert_table";
+    record[1].collection_id = "insert_table";
     record[1].partition_tag = "parti1";
     record[1].length = 10;
     record[1].ids = (milvus::engine::IDNumber*)malloc(record[0].length * sizeof(milvus::engine::IDNumber));
@@ -298,7 +298,7 @@ TEST(WalTest, BUFFER_TEST) {
     // read 0
     ASSERT_EQ(buffer.Next(record[1].lsn, read_rst), milvus::WAL_SUCCESS);
     ASSERT_EQ(read_rst.type, record[0].type);
-    ASSERT_EQ(read_rst.table_id, record[0].table_id);
+    ASSERT_EQ(read_rst.collection_id, record[0].collection_id);
     ASSERT_EQ(read_rst.partition_tag, record[0].partition_tag);
     ASSERT_EQ(read_rst.length, record[0].length);
     ASSERT_EQ(memcmp(read_rst.ids, record[0].ids, read_rst.length * sizeof(milvus::engine::IDNumber)), 0);
@@ -308,7 +308,7 @@ TEST(WalTest, BUFFER_TEST) {
     // read 1
     ASSERT_EQ(buffer.Next(record[1].lsn, read_rst), milvus::WAL_SUCCESS);
     ASSERT_EQ(read_rst.type, record[1].type);
-    ASSERT_EQ(read_rst.table_id, record[1].table_id);
+    ASSERT_EQ(read_rst.collection_id, record[1].collection_id);
     ASSERT_EQ(read_rst.partition_tag, record[1].partition_tag);
     ASSERT_EQ(read_rst.length, record[1].length);
     ASSERT_EQ(memcmp(read_rst.ids, record[1].ids, read_rst.length * sizeof(milvus::engine::IDNumber)), 0);
@@ -321,7 +321,7 @@ TEST(WalTest, BUFFER_TEST) {
 
     // write 2 (new file)
     record[2].type = milvus::engine::wal::MXLogType::InsertVector;
-    record[2].table_id = "insert_table";
+    record[2].collection_id = "insert_table";
     record[2].partition_tag = "parti1";
     record[2].length = 50;
     record[2].ids = (milvus::engine::IDNumber*)malloc(record[2].length * sizeof(milvus::engine::IDNumber));
@@ -333,7 +333,7 @@ TEST(WalTest, BUFFER_TEST) {
 
     // write 3 (new file)
     record[3].type = milvus::engine::wal::MXLogType::InsertBinary;
-    record[3].table_id = "insert_table";
+    record[3].collection_id = "insert_table";
     record[3].partition_tag = "parti1";
     record[3].length = 100;
     record[3].ids = (milvus::engine::IDNumber*)malloc(record[3].length * sizeof(milvus::engine::IDNumber));
@@ -355,7 +355,7 @@ TEST(WalTest, BUFFER_TEST) {
     // read 2
     ASSERT_EQ(buffer.Next(record[3].lsn, read_rst), milvus::WAL_SUCCESS);
     ASSERT_EQ(read_rst.type, record[2].type);
-    ASSERT_EQ(read_rst.table_id, record[2].table_id);
+    ASSERT_EQ(read_rst.collection_id, record[2].collection_id);
     ASSERT_EQ(read_rst.partition_tag, record[2].partition_tag);
     ASSERT_EQ(read_rst.length, record[2].length);
     ASSERT_EQ(memcmp(read_rst.ids, record[2].ids, read_rst.length * sizeof(milvus::engine::IDNumber)), 0);
@@ -365,7 +365,7 @@ TEST(WalTest, BUFFER_TEST) {
     // read 3
     ASSERT_EQ(buffer.Next(record[3].lsn, read_rst), milvus::WAL_SUCCESS);
     ASSERT_EQ(read_rst.type, record[3].type);
-    ASSERT_EQ(read_rst.table_id, record[3].table_id);
+    ASSERT_EQ(read_rst.collection_id, record[3].collection_id);
     ASSERT_EQ(read_rst.partition_tag, record[3].partition_tag);
     ASSERT_EQ(read_rst.length, record[3].length);
     ASSERT_EQ(memcmp(read_rst.ids, record[3].ids, read_rst.length * sizeof(milvus::engine::IDNumber)), 0);
@@ -380,7 +380,7 @@ TEST(WalTest, BUFFER_TEST) {
     ASSERT_EQ(buffer.Append(empty), milvus::WAL_SUCCESS);
     ASSERT_EQ(buffer.Next(empty.lsn, read_rst), milvus::WAL_SUCCESS);
     ASSERT_EQ(read_rst.type, milvus::engine::wal::MXLogType::None);
-    ASSERT_TRUE(read_rst.table_id.empty());
+    ASSERT_TRUE(read_rst.collection_id.empty());
     ASSERT_TRUE(read_rst.partition_tag.empty());
     ASSERT_EQ(read_rst.length, 0);
     ASSERT_EQ(read_rst.data_size, 0);
@@ -527,7 +527,7 @@ TEST(WalTest, MANAGER_RECOVERY_TEST) {
             break;
         }
         ASSERT_EQ(record.type, milvus::engine::wal::MXLogType::InsertVector);
-        ASSERT_EQ(record.table_id, schema.table_id_);
+        ASSERT_EQ(record.collection_id, schema.table_id_);
         ASSERT_EQ(record.partition_tag, "");
     }
 
@@ -602,18 +602,18 @@ TEST(WalTest, MANAGER_TEST) {
     while (1) {
         ASSERT_EQ(manager->GetNextRecord(record), milvus::WAL_SUCCESS);
         if (record.type == milvus::engine::wal::MXLogType::Flush) {
-            ASSERT_EQ(record.table_id, table_id_1);
+            ASSERT_EQ(record.collection_id, table_id_1);
             ASSERT_EQ(new_lsn, flush_lsn);
             manager->TableFlushed(table_id_1, new_lsn);
             break;
 
         } else {
             ASSERT_TRUE((record.type == milvus::engine::wal::MXLogType::InsertVector &&
-                             record.table_id == table_id_1) ||
+                             record.collection_id == table_id_1) ||
                         (record.type == milvus::engine::wal::MXLogType::Delete &&
-                             record.table_id == table_id_1) ||
+                             record.collection_id == table_id_1) ||
                         (record.type == milvus::engine::wal::MXLogType::InsertBinary &&
-                             record.table_id == table_id_2));
+                             record.collection_id == table_id_2));
             new_lsn = record.lsn;
         }
     }
@@ -624,7 +624,7 @@ TEST(WalTest, MANAGER_TEST) {
 
     ASSERT_EQ(manager->GetNextRecord(record), milvus::WAL_SUCCESS);
     ASSERT_EQ(record.type, milvus::engine::wal::MXLogType::Flush);
-    ASSERT_EQ(record.table_id, table_id_2);
+    ASSERT_EQ(record.collection_id, table_id_2);
     manager->TableFlushed(table_id_2, flush_lsn);
     ASSERT_EQ(manager->Flush(table_id_2), 0);
 
@@ -634,7 +634,7 @@ TEST(WalTest, MANAGER_TEST) {
 
     ASSERT_EQ(manager->GetNextRecord(record), milvus::WAL_SUCCESS);
     ASSERT_EQ(record.type, milvus::engine::wal::MXLogType::Flush);
-    ASSERT_TRUE(record.table_id.empty());
+    ASSERT_TRUE(record.collection_id.empty());
 }
 
 TEST(WalTest, MANAGER_SAME_NAME_TABLE) {
@@ -682,7 +682,7 @@ TEST(WalTest, MANAGER_SAME_NAME_TABLE) {
         if (record.type == milvus::engine::wal::MXLogType::None) {
             break;
         }
-        ASSERT_EQ(record.table_id, table_id_2);
+        ASSERT_EQ(record.collection_id, table_id_2);
     }
 }
 

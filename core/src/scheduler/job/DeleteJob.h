@@ -29,7 +29,7 @@ namespace scheduler {
 
 class DeleteJob : public Job {
  public:
-    DeleteJob(std::string table_id, engine::meta::MetaPtr meta_ptr, uint64_t num_resource);
+    DeleteJob(std::string collection_id, engine::meta::MetaPtr meta_ptr, uint64_t num_resource);
 
  public:
     void
@@ -43,7 +43,7 @@ class DeleteJob : public Job {
 
  public:
     std::string
-    table_id() const {
+    collection_id() const {
         return table_id_;
     }
 

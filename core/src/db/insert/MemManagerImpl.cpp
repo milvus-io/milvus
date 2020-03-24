@@ -21,18 +21,18 @@ namespace milvus {
 namespace engine {
 
 MemTablePtr
-MemManagerImpl::GetMemByTable(const std::string& table_id) {
-    auto memIt = mem_id_map_.find(table_id);
+MemManagerImpl::GetMemByTable(const std::string& collection_id) {
+    auto memIt = mem_id_map_.find(collection_id);
     if (memIt != mem_id_map_.end()) {
         return memIt->second;
     }
 
-    mem_id_map_[table_id] = std::make_shared<MemTable>(table_id, meta_, options_);
-    return mem_id_map_[table_id];
+    mem_id_map_[collection_id] = std::make_shared<MemTable>(collection_id, meta_, options_);
+    return mem_id_map_[collection_id];
 }
 
 Status
-MemManagerImpl::InsertVectors(const std::string& table_id, int64_t length, const IDNumber* vector_ids, int64_t dim,
+MemManagerImpl::InsertVectors(const std::string& collection_id, int64_t length, const IDNumber* vector_ids, int64_t dim,
                               const float* vectors, uint64_t lsn, std::set<std::string>& flushed_tables) {
     flushed_tables.clear();
     if (GetCurrentMem() > options_.insert_buffer_size_) {
@@ -54,11 +54,11 @@ MemManagerImpl::InsertVectors(const std::string& table_id, int64_t length, const
 
     std::unique_lock<std::mutex> lock(mutex_);
 
-    return InsertVectorsNoLock(table_id, source, lsn);
+    return InsertVectorsNoLock(collection_id, source, lsn);
 }
 
 Status
-MemManagerImpl::InsertVectors(const std::string& table_id, int64_t length, const IDNumber* vector_ids, int64_t dim,
+MemManagerImpl::InsertVectors(const std::string& collection_id, int64_t length, const IDNumber* vector_ids, int64_t dim,
                               const uint8_t* vectors, uint64_t lsn, std::set<std::string>& flushed_tables) {
     flushed_tables.clear();
     if (GetCurrentMem() > options_.insert_buffer_size_) {
@@ -80,12 +80,12 @@ MemManagerImpl::InsertVectors(const std::string& table_id, int64_t length, const
 
     std::unique_lock<std::mutex> lock(mutex_);
 
-    return InsertVectorsNoLock(table_id, source, lsn);
+    return InsertVectorsNoLock(collection_id, source, lsn);
 }
 
 Status
-MemManagerImpl::InsertVectorsNoLock(const std::string& table_id, const VectorSourcePtr& source, uint64_t lsn) {
-    MemTablePtr mem = GetMemByTable(table_id);
+MemManagerImpl::InsertVectorsNoLock(const std::string& collection_id, const VectorSourcePtr& source, uint64_t lsn) {
+    MemTablePtr mem = GetMemByTable(collection_id);
     mem->SetLSN(lsn);
 
     auto status = mem->Add(source);
@@ -93,18 +93,18 @@ MemManagerImpl::InsertVectorsNoLock(const std::string& table_id, const VectorSou
 }
 
 Status
-MemManagerImpl::DeleteVector(const std::string& table_id, IDNumber vector_id, uint64_t lsn) {
+MemManagerImpl::DeleteVector(const std::string& collection_id, IDNumber vector_id, uint64_t lsn) {
     std::unique_lock<std::mutex> lock(mutex_);
-    MemTablePtr mem = GetMemByTable(table_id);
+    MemTablePtr mem = GetMemByTable(collection_id);
     mem->SetLSN(lsn);
     auto status = mem->Delete(vector_id);
     return status;
 }
 
 Status
-MemManagerImpl::DeleteVectors(const std::string& table_id, int64_t length, const IDNumber* vector_ids, uint64_t lsn) {
+MemManagerImpl::DeleteVectors(const std::string& collection_id, int64_t length, const IDNumber* vector_ids, uint64_t lsn) {
     std::unique_lock<std::mutex> lock(mutex_);
-    MemTablePtr mem = GetMemByTable(table_id);
+    MemTablePtr mem = GetMemByTable(collection_id);
     mem->SetLSN(lsn);
 
     IDNumbers ids;
@@ -128,8 +128,8 @@ MemManagerImpl::DeleteVectors(const std::string& table_id, int64_t length, const
 }
 
 Status
-MemManagerImpl::Flush(const std::string& table_id, bool apply_delete) {
-    ToImmutable(table_id);
+MemManagerImpl::Flush(const std::string& collection_id, bool apply_delete) {
+    ToImmutable(collection_id);
     // TODO: There is actually only one memTable in the immutable list
     MemList temp_immutable_list;
     {
@@ -182,15 +182,15 @@ MemManagerImpl::Flush(std::set<std::string>& table_ids, bool apply_delete) {
 }
 
 Status
-MemManagerImpl::ToImmutable(const std::string& table_id) {
+MemManagerImpl::ToImmutable(const std::string& collection_id) {
     std::unique_lock<std::mutex> lock(mutex_);
-    auto memIt = mem_id_map_.find(table_id);
+    auto memIt = mem_id_map_.find(collection_id);
     if (memIt != mem_id_map_.end()) {
         if (!memIt->second->Empty()) {
             immu_mem_list_.push_back(memIt->second);
             mem_id_map_.erase(memIt);
         }
-        //        std::string err_msg = "Could not find table = " + table_id + " to flush";
+        //        std::string err_msg = "Could not find table = " + collection_id + " to flush";
         //        ENGINE_LOG_ERROR << err_msg;
         //        return Status(DB_NOT_FOUND, err_msg);
     }
@@ -216,17 +216,17 @@ MemManagerImpl::ToImmutable() {
 }
 
 Status
-MemManagerImpl::EraseMemVector(const std::string& table_id) {
+MemManagerImpl::EraseMemVector(const std::string& collection_id) {
     {  // erase MemVector from rapid-insert cache
         std::unique_lock<std::mutex> lock(mutex_);
-        mem_id_map_.erase(table_id);
+        mem_id_map_.erase(collection_id);
     }
 
     {  // erase MemVector from serialize cache
         std::unique_lock<std::mutex> lock(serialization_mtx_);
         MemList temp_list;
         for (auto& mem : immu_mem_list_) {
-            if (mem->GetTableId() != table_id) {
+            if (mem->GetTableId() != collection_id) {
                 temp_list.push_back(mem);
             }
         }

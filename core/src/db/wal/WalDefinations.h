@@ -33,7 +33,7 @@ enum class MXLogType { InsertBinary, InsertVector, Delete, Update, Flush, None }
 struct MXLogRecord {
     uint64_t lsn;
     MXLogType type;
-    std::string table_id;
+    std::string collection_id;
     std::string partition_tag;
     uint32_t length;
     const IDNumber* ids;

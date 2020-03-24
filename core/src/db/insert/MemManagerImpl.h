@@ -41,21 +41,21 @@ class MemManagerImpl : public MemManager, public server::CacheConfigHandler {
     }
 
     Status
-    InsertVectors(const std::string& table_id, int64_t length, const IDNumber* vector_ids, int64_t dim,
+    InsertVectors(const std::string& collection_id, int64_t length, const IDNumber* vector_ids, int64_t dim,
                   const float* vectors, uint64_t lsn, std::set<std::string>& flushed_tables) override;
 
     Status
-    InsertVectors(const std::string& table_id, int64_t length, const IDNumber* vector_ids, int64_t dim,
+    InsertVectors(const std::string& collection_id, int64_t length, const IDNumber* vector_ids, int64_t dim,
                   const uint8_t* vectors, uint64_t lsn, std::set<std::string>& flushed_tables) override;
 
     Status
-    DeleteVector(const std::string& table_id, IDNumber vector_id, uint64_t lsn) override;
+    DeleteVector(const std::string& collection_id, IDNumber vector_id, uint64_t lsn) override;
 
     Status
-    DeleteVectors(const std::string& table_id, int64_t length, const IDNumber* vector_ids, uint64_t lsn) override;
+    DeleteVectors(const std::string& collection_id, int64_t length, const IDNumber* vector_ids, uint64_t lsn) override;
 
     Status
-    Flush(const std::string& table_id, bool apply_delete = true) override;
+    Flush(const std::string& collection_id, bool apply_delete = true) override;
 
     Status
     Flush(std::set<std::string>& table_ids, bool apply_delete = true) override;
@@ -64,7 +64,7 @@ class MemManagerImpl : public MemManager, public server::CacheConfigHandler {
     //    Serialize(std::set<std::string>& table_ids) override;
 
     Status
-    EraseMemVector(const std::string& table_id) override;
+    EraseMemVector(const std::string& collection_id) override;
 
     size_t
     GetCurrentMutableMem() override;
@@ -81,16 +81,16 @@ class MemManagerImpl : public MemManager, public server::CacheConfigHandler {
 
  private:
     MemTablePtr
-    GetMemByTable(const std::string& table_id);
+    GetMemByTable(const std::string& collection_id);
 
     Status
-    InsertVectorsNoLock(const std::string& table_id, const VectorSourcePtr& source, uint64_t lsn);
+    InsertVectorsNoLock(const std::string& collection_id, const VectorSourcePtr& source, uint64_t lsn);
 
     Status
     ToImmutable();
 
     Status
-    ToImmutable(const std::string& table_id);
+    ToImmutable(const std::string& collection_id);
 
     uint64_t
     GetMaxLSN(const MemList& tables);

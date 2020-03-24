@@ -30,7 +30,7 @@ class MemTable : public server::CacheConfigHandler {
  public:
     using MemTableFileList = std::vector<MemTableFilePtr>;
 
-    MemTable(const std::string& table_id, const meta::MetaPtr& meta, const DBOptions& options);
+    MemTable(const std::string& collection_id, const meta::MetaPtr& meta, const DBOptions& options);
 
     Status
     Add(const VectorSourcePtr& source);

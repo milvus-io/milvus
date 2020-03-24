@@ -26,9 +26,9 @@ int64_t
 GetMicroSecTimeStamp();
 
 Status
-CreateTablePath(const DBMetaOptions& options, const std::string& table_id);
+CreateTablePath(const DBMetaOptions& options, const std::string& collection_id);
 Status
-DeleteTablePath(const DBMetaOptions& options, const std::string& table_id, bool force = true);
+DeleteTablePath(const DBMetaOptions& options, const std::string& collection_id, bool force = true);
 
 Status
 CreateTableFilePath(const DBMetaOptions& options, meta::TableFileSchema& table_file);
