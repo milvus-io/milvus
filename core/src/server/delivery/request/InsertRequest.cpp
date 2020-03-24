@@ -95,17 +95,18 @@ InsertRequest::OnExecute() {
                   table_schema.flag_ = engine::meta::FLAG_MASK_HAS_USERID);
         // user already provided id before, all insert action require user id
         if ((table_schema.flag_ & engine::meta::FLAG_MASK_HAS_USERID) != 0 && !user_provide_ids) {
-            return Status(SERVER_ILLEGAL_VECTOR_ID,
-                          "Collection vector IDs are user-defined. Please provide IDs for all vectors of this collection.");
+            return Status(
+                SERVER_ILLEGAL_VECTOR_ID,
+                "Collection vector IDs are user-defined. Please provide IDs for all vectors of this collection.");
         }
 
         fiu_do_on("InsertRequest.OnExecute.illegal_vector_id2", user_provide_ids = true;
                   table_schema.flag_ = engine::meta::FLAG_MASK_NO_USERID);
         // user didn't provided id before, no need to provide user id
         if ((table_schema.flag_ & engine::meta::FLAG_MASK_NO_USERID) != 0 && user_provide_ids) {
-            return Status(
-                SERVER_ILLEGAL_VECTOR_ID,
-                "Collection vector IDs are auto-generated. All vectors of this collection must use auto-generated IDs.");
+            return Status(SERVER_ILLEGAL_VECTOR_ID,
+                          "Collection vector IDs are auto-generated. All vectors of this collection must use "
+                          "auto-generated IDs.");
         }
 
         rc.RecordSection("check validation");

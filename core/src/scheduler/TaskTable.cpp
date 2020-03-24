@@ -192,7 +192,8 @@ TaskTable::PickToLoad(uint64_t limit) {
         }
 
         if (collection_[j]->task->path().Current() == "cpu") {
-            if (collection_[j]->task->Type() == TaskType::BuildIndexTask && BuildMgrInst::GetInstance()->numoftasks() < 1) {
+            if (collection_[j]->task->Type() == TaskType::BuildIndexTask &&
+                BuildMgrInst::GetInstance()->numoftasks() < 1) {
                 return std::vector<uint64_t>();
             }
         }

@@ -381,7 +381,8 @@ MySQLMetaImpl::CreateTable(TableSchema& table_schema) {
                     int state = res[0]["state"];
                     fiu_do_on("MySQLMetaImpl.CreateTableTable.schema_TO_DELETE", state = TableSchema::TO_DELETE);
                     if (TableSchema::TO_DELETE == state) {
-                        return Status(DB_ERROR, "Collection already exists and it is in delete state, please wait a second");
+                        return Status(DB_ERROR,
+                                      "Collection already exists and it is in delete state, please wait a second");
                     } else {
                         return Status(DB_ALREADY_EXIST, "Collection already exists");
                     }
