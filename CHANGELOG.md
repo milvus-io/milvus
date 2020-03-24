@@ -14,6 +14,7 @@ Please mark all change in change log and use the issue from GitHub
 -   \#1686 API search_in_files cannot work correctly when vectors is stored in certain non-default partition
 -   \#1689 Fix SQ8H search fail on SIFT-1B dataset
 -   \#1724 Remove unused unittests
+-   \#1734 Opentracing for combined search request
 
 ## Feature
 -   \#1603 BinaryFlat add 2 Metric: Substructure and Superstructure
