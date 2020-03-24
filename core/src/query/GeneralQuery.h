@@ -11,6 +11,8 @@
 
 #pragma once
 
+#include <faiss/utils/ConcurrentBitset.h>
+
 #include <iostream>
 #include <memory>
 #include <vector>
@@ -48,7 +50,7 @@ struct TermQuery {
     std::vector<std::string> field_value;
     float boost;
 };
-using TermQueryPtr = std::shared_ptr<TermQuery>();
+using TermQueryPtr = std::shared_ptr<TermQuery>;
 
 struct CompareExpr {
     CompareOperator compare_operator;
@@ -60,7 +62,7 @@ struct RangeQuery {
     std::vector<CompareExpr> compare_expr;
     float boost;
 };
-using RangeQueryPtr = std::shared_ptr<RangeQuery>();
+using RangeQueryPtr = std::shared_ptr<RangeQuery>;
 
 struct VectorRecord {
     std::vector<float> float_data;
@@ -74,7 +76,7 @@ struct VectorQuery {
     float boost;
     std::vector<VectorRecord> query_vector;
 };
-using VectorQueryPtr = std::shared_ptr<VectorQuery>();
+using VectorQueryPtr = std::shared_ptr<VectorQuery>;
 
 struct LeafQuery;
 using LeafQueryPtr = std::shared_ptr<LeafQuery>;
@@ -89,9 +91,9 @@ struct GeneralQuery {
 using GeneralQueryPtr = std::shared_ptr<GeneralQuery>;
 
 struct LeafQuery {
-    TermQuery term_query;
-    RangeQuery range_query;
-    VectorQuery vector_query;
+    TermQueryPtr term_query;
+    RangeQueryPtr range_query;
+    VectorQueryPtr vector_query;
     float query_boost;
 };
 
@@ -100,6 +102,8 @@ struct BinaryQuery {
     GeneralQueryPtr right_query;
     QueryRelation relation;
     float query_boost;
+
+    faiss::ConcurrentBitsetPtr bitset_ptr_;
 };
 
 }  // namespace query

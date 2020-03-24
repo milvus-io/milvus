@@ -11,6 +11,7 @@
 
 #pragma once
 
+#include "query/GeneralQuery.h"
 #include "segment/SegmentReader.h"
 #include "utils/Json.h"
 
@@ -30,6 +31,14 @@ class ExecutionEngineImpl : public ExecutionEngine {
                         const milvus::json& index_params);
 
     ExecutionEngineImpl(VecIndexPtr index, const std::string& location, EngineType index_type, MetricType metric_type,
+                        const milvus::json& index_params);
+
+    ExecutionEngineImpl(uint64_t dimension,
+                        const std::string& location,
+                        EngineType index_type,
+                        MetricType metric_type,
+                        std::unordered_map<std::string, DataType> attr_types,
+                        query::BinaryQueryPtr binary_query,
                         const milvus::json& index_params);
 
     Status
@@ -76,6 +85,9 @@ class ExecutionEngineImpl : public ExecutionEngine {
 
     Status
     GetVectorByID(const int64_t& id, uint8_t* vector, bool hybrid) override;
+
+    void
+    ExecBinaryQuery(query::GeneralQueryPtr& general_query, faiss::ConcurrentBitsetPtr bitset);
 
     Status
     Search(int64_t n, const float* data, int64_t k, const milvus::json& extra_params, float* distances, int64_t* labels,
@@ -133,6 +145,11 @@ class ExecutionEngineImpl : public ExecutionEngine {
     VecIndexPtr index_ = nullptr;
     EngineType index_type_;
     MetricType metric_type_;
+
+    std::unordered_map<std::string, DataType> attr_types_;
+    std::unordered_map<std::string, const void*> attr_data_;
+    std::unordered_map<std::string, size_t> attr_size_;
+    query::BinaryQueryPtr binary_query_;
 
     int64_t dim_;
     std::string location_;

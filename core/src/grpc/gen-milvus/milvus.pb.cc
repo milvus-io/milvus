@@ -1723,7 +1723,7 @@ const char descriptor_table_protodef_milvus_2eproto[] PROTOBUF_SECTION_VARIABLE(
   "lvus.grpc.VectorQueryH\000B\007\n\005query\"\247\001\n\014HSe"
   "archParam\022\027\n\017collection_name\030\001 \001(\t\022\033\n\023pa"
   "rtition_tag_array\030\002 \003(\t\0220\n\rgeneral_query"
-  "\030\003 \003(\0132\031.milvus.grpc.GeneralQuery\022/\n\014ext"
+  "\030\003 \001(\0132\031.milvus.grpc.GeneralQuery\022/\n\014ext"
   "ra_params\030\004 \003(\0132\031.milvus.grpc.KeyValuePa"
   "ir\"c\n\026HSearchInSegmentsParam\022\030\n\020segment_"
   "id_array\030\001 \003(\t\022/\n\014search_param\030\002 \001(\0132\031.m"
@@ -17109,11 +17109,18 @@ void GeneralQuery::InternalSwap(GeneralQuery* other) {
 // ===================================================================
 
 void HSearchParam::InitAsDefaultInstance() {
+  ::milvus::grpc::_HSearchParam_default_instance_._instance.get_mutable()->general_query_ = const_cast< ::milvus::grpc::GeneralQuery*>(
+      ::milvus::grpc::GeneralQuery::internal_default_instance());
 }
 class HSearchParam::_Internal {
  public:
+  static const ::milvus::grpc::GeneralQuery& general_query(const HSearchParam* msg);
 };
 
+const ::milvus::grpc::GeneralQuery&
+HSearchParam::_Internal::general_query(const HSearchParam* msg) {
+  return *msg->general_query_;
+}
 HSearchParam::HSearchParam()
   : ::PROTOBUF_NAMESPACE_ID::Message(), _internal_metadata_(nullptr) {
   SharedCtor();
@@ -17123,12 +17130,16 @@ HSearchParam::HSearchParam(const HSearchParam& from)
   : ::PROTOBUF_NAMESPACE_ID::Message(),
       _internal_metadata_(nullptr),
       partition_tag_array_(from.partition_tag_array_),
-      general_query_(from.general_query_),
       extra_params_(from.extra_params_) {
   _internal_metadata_.MergeFrom(from._internal_metadata_);
   collection_name_.UnsafeSetDefault(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
   if (!from.collection_name().empty()) {
     collection_name_.AssignWithDefault(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(), from.collection_name_);
+  }
+  if (from.has_general_query()) {
+    general_query_ = new ::milvus::grpc::GeneralQuery(*from.general_query_);
+  } else {
+    general_query_ = nullptr;
   }
   // @@protoc_insertion_point(copy_constructor:milvus.grpc.HSearchParam)
 }
@@ -17136,6 +17147,7 @@ HSearchParam::HSearchParam(const HSearchParam& from)
 void HSearchParam::SharedCtor() {
   ::PROTOBUF_NAMESPACE_ID::internal::InitSCC(&scc_info_HSearchParam_milvus_2eproto.base);
   collection_name_.UnsafeSetDefault(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
+  general_query_ = nullptr;
 }
 
 HSearchParam::~HSearchParam() {
@@ -17145,6 +17157,7 @@ HSearchParam::~HSearchParam() {
 
 void HSearchParam::SharedDtor() {
   collection_name_.DestroyNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
+  if (this != internal_default_instance()) delete general_query_;
 }
 
 void HSearchParam::SetCachedSize(int size) const {
@@ -17163,9 +17176,12 @@ void HSearchParam::Clear() {
   (void) cached_has_bits;
 
   partition_tag_array_.Clear();
-  general_query_.Clear();
   extra_params_.Clear();
   collection_name_.ClearToEmptyNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
+  if (GetArenaNoVirtual() == nullptr && general_query_ != nullptr) {
+    delete general_query_;
+  }
+  general_query_ = nullptr;
   _internal_metadata_.Clear();
 }
 
@@ -17196,16 +17212,11 @@ const char* HSearchParam::_InternalParse(const char* ptr, ::PROTOBUF_NAMESPACE_I
           } while (::PROTOBUF_NAMESPACE_ID::internal::UnalignedLoad<::PROTOBUF_NAMESPACE_ID::uint8>(ptr) == 18);
         } else goto handle_unusual;
         continue;
-      // repeated .milvus.grpc.GeneralQuery general_query = 3;
+      // .milvus.grpc.GeneralQuery general_query = 3;
       case 3:
         if (PROTOBUF_PREDICT_TRUE(static_cast<::PROTOBUF_NAMESPACE_ID::uint8>(tag) == 26)) {
-          ptr -= 1;
-          do {
-            ptr += 1;
-            ptr = ctx->ParseMessage(add_general_query(), ptr);
-            CHK_(ptr);
-            if (!ctx->DataAvailable(ptr)) break;
-          } while (::PROTOBUF_NAMESPACE_ID::internal::UnalignedLoad<::PROTOBUF_NAMESPACE_ID::uint8>(ptr) == 26);
+          ptr = ctx->ParseMessage(mutable_general_query(), ptr);
+          CHK_(ptr);
         } else goto handle_unusual;
         continue;
       // repeated .milvus.grpc.KeyValuePair extra_params = 4;
@@ -17281,11 +17292,11 @@ bool HSearchParam::MergePartialFromCodedStream(
         break;
       }
 
-      // repeated .milvus.grpc.GeneralQuery general_query = 3;
+      // .milvus.grpc.GeneralQuery general_query = 3;
       case 3: {
         if (static_cast< ::PROTOBUF_NAMESPACE_ID::uint8>(tag) == (26 & 0xFF)) {
           DO_(::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::ReadMessage(
-                input, add_general_query()));
+               input, mutable_general_query()));
         } else {
           goto handle_unusual;
         }
@@ -17350,13 +17361,10 @@ void HSearchParam::SerializeWithCachedSizes(
       2, this->partition_tag_array(i), output);
   }
 
-  // repeated .milvus.grpc.GeneralQuery general_query = 3;
-  for (unsigned int i = 0,
-      n = static_cast<unsigned int>(this->general_query_size()); i < n; i++) {
+  // .milvus.grpc.GeneralQuery general_query = 3;
+  if (this->has_general_query()) {
     ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteMessageMaybeToArray(
-      3,
-      this->general_query(static_cast<int>(i)),
-      output);
+      3, _Internal::general_query(this), output);
   }
 
   // repeated .milvus.grpc.KeyValuePair extra_params = 4;
@@ -17402,12 +17410,11 @@ void HSearchParam::SerializeWithCachedSizes(
       WriteStringToArray(2, this->partition_tag_array(i), target);
   }
 
-  // repeated .milvus.grpc.GeneralQuery general_query = 3;
-  for (unsigned int i = 0,
-      n = static_cast<unsigned int>(this->general_query_size()); i < n; i++) {
+  // .milvus.grpc.GeneralQuery general_query = 3;
+  if (this->has_general_query()) {
     target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::
       InternalWriteMessageToArray(
-        3, this->general_query(static_cast<int>(i)), target);
+        3, _Internal::general_query(this), target);
   }
 
   // repeated .milvus.grpc.KeyValuePair extra_params = 4;
@@ -17447,17 +17454,6 @@ size_t HSearchParam::ByteSizeLong() const {
       this->partition_tag_array(i));
   }
 
-  // repeated .milvus.grpc.GeneralQuery general_query = 3;
-  {
-    unsigned int count = static_cast<unsigned int>(this->general_query_size());
-    total_size += 1UL * count;
-    for (unsigned int i = 0; i < count; i++) {
-      total_size +=
-        ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::MessageSize(
-          this->general_query(static_cast<int>(i)));
-    }
-  }
-
   // repeated .milvus.grpc.KeyValuePair extra_params = 4;
   {
     unsigned int count = static_cast<unsigned int>(this->extra_params_size());
@@ -17474,6 +17470,13 @@ size_t HSearchParam::ByteSizeLong() const {
     total_size += 1 +
       ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::StringSize(
         this->collection_name());
+  }
+
+  // .milvus.grpc.GeneralQuery general_query = 3;
+  if (this->has_general_query()) {
+    total_size += 1 +
+      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::MessageSize(
+        *general_query_);
   }
 
   int cached_size = ::PROTOBUF_NAMESPACE_ID::internal::ToCachedSize(total_size);
@@ -17504,11 +17507,13 @@ void HSearchParam::MergeFrom(const HSearchParam& from) {
   (void) cached_has_bits;
 
   partition_tag_array_.MergeFrom(from.partition_tag_array_);
-  general_query_.MergeFrom(from.general_query_);
   extra_params_.MergeFrom(from.extra_params_);
   if (from.collection_name().size() > 0) {
 
     collection_name_.AssignWithDefault(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(), from.collection_name_);
+  }
+  if (from.has_general_query()) {
+    mutable_general_query()->::milvus::grpc::GeneralQuery::MergeFrom(from.general_query());
   }
 }
 
@@ -17534,10 +17539,10 @@ void HSearchParam::InternalSwap(HSearchParam* other) {
   using std::swap;
   _internal_metadata_.Swap(&other->_internal_metadata_);
   partition_tag_array_.InternalSwap(CastToBase(&other->partition_tag_array_));
-  CastToBase(&general_query_)->InternalSwap(CastToBase(&other->general_query_));
   CastToBase(&extra_params_)->InternalSwap(CastToBase(&other->extra_params_));
   collection_name_.Swap(&other->collection_name_, &::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(),
     GetArenaNoVirtual());
+  swap(general_query_, other->general_query_);
 }
 
 ::PROTOBUF_NAMESPACE_ID::Metadata HSearchParam::GetMetadata() const {

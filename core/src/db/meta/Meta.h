@@ -155,12 +155,12 @@ class Meta {
     GetGlobalLastLSN(uint64_t& lsn) = 0;
 
     virtual Status
-    CreateHybridCollection(hybrid::CollectionSchema& collection_schema,
+    CreateHybridCollection(TableSchema& collection_schema,
                            hybrid::FieldsSchema& fields_schema) = 0;
 
     virtual Status
-    DescribeHybridCollection(hybrid::CollectionSchema& collection_schema,
-                           hybrid::FieldsSchema& fields_schema) = 0;
+    DescribeHybridCollection(TableSchema& collection_schema,
+                             hybrid::FieldsSchema& fields_schema) = 0;
 };  // MetaData
 
 using MetaPtr = std::shared_ptr<Meta>;

@@ -193,13 +193,13 @@ DBImpl::CreateTable(meta::TableSchema& table_schema) {
 
 
 Status
-DBImpl::CreateHybridCollection(meta::hybrid::CollectionSchema& collection_schema,
+DBImpl::CreateHybridCollection(meta::TableSchema& collection_schema,
                          meta::hybrid::FieldsSchema& fields_schema){
     if (!initialized_.load(std::memory_order_acquire)) {
         return SHUTDOWN_ERROR;
     }
 
-    meta::hybrid::CollectionSchema temp_schema = collection_schema;
+    meta::TableSchema temp_schema = collection_schema;
     if (options_.wal_enable_) {
         //TODO(yukun): wal_mgr_->CreateCollection()
     }
@@ -208,7 +208,7 @@ DBImpl::CreateHybridCollection(meta::hybrid::CollectionSchema& collection_schema
 }
 
 Status
-DBImpl::DescribeHybridCollection(milvus::engine::meta::hybrid::CollectionSchema& collection_schema,
+DBImpl::DescribeHybridCollection(meta::TableSchema& collection_schema,
                                  milvus::engine::meta::hybrid::FieldsSchema& fields_schema) {
     if (!initialized_.load(std::memory_order_acquire)) {
         return SHUTDOWN_ERROR;
@@ -1171,6 +1171,63 @@ DBImpl::QueryByID(const std::shared_ptr<server::Context>& context, const std::st
 }
 
 Status
+DBImpl::HybridQuery(const std::shared_ptr<server::Context>& context,
+                    const std::string& collection_id,
+                    const std::vector<std::string>& partition_tags,
+                    query::GeneralQueryPtr general_query,
+                    ResultIds& result_ids,
+                    ResultDistances& result_distances) {
+    auto query_ctx = context->Child("Query");
+
+    if (!initialized_.load(std::memory_order_acquire)) {
+        return SHUTDOWN_ERROR;
+    }
+
+    Status status;
+    std::vector<size_t> ids;
+    meta::TableFilesSchema files_array;
+
+    if (partition_tags.empty()) {
+        // no partition tag specified, means search in whole table
+        // get all table files from parent table
+        status = GetFilesToSearch(collection_id, ids, files_array);
+        if (!status.ok()) {
+            return status;
+        }
+
+        std::vector<meta::TableSchema> partition_array;
+        status = meta_ptr_->ShowPartitions(collection_id, partition_array);
+        for (auto& schema : partition_array) {
+            status = GetFilesToSearch(schema.table_id_, ids, files_array);
+        }
+
+        if (files_array.empty()) {
+            return Status::OK();
+        }
+    } else {
+        // get files from specified partitions
+        std::set<std::string> partition_name_array;
+        GetPartitionsByTags(collection_id, partition_tags, partition_name_array);
+
+        for (auto& partition_name : partition_name_array) {
+            status = GetFilesToSearch(partition_name, ids, files_array);
+        }
+
+        if (files_array.empty()) {
+            return Status::OK();
+        }
+    }
+
+    cache::CpuCacheMgr::GetInstance()->PrintInfo();  // print cache info before query
+    status = HybridQueryAsync(query_ctx, collection_id, files_array, result_ids, result_distances);
+    cache::CpuCacheMgr::GetInstance()->PrintInfo();  // print cache info after query
+
+    query_ctx->GetTraceContext()->GetSpan()->Finish();
+
+    return status;
+}
+
+Status
 DBImpl::Query(const std::shared_ptr<server::Context>& context, const std::string& table_id,
               const std::vector<std::string>& partition_tags, uint64_t k, const milvus::json& extra_params,
               const VectorsData& vectors, ResultIds& result_ids, ResultDistances& result_distances) {
@@ -1290,6 +1347,48 @@ DBImpl::QueryAsync(const std::shared_ptr<server::Context>& context, const std::s
 
     ENGINE_LOG_DEBUG << "Engine query begin, index file count: " << files.size();
     scheduler::SearchJobPtr job = std::make_shared<scheduler::SearchJob>(query_async_ctx, k, extra_params, vectors);
+    for (auto& file : files) {
+        scheduler::TableFileSchemaPtr file_ptr = std::make_shared<meta::TableFileSchema>(file);
+        job->AddIndexFile(file_ptr);
+    }
+
+    // step 2: put search job to scheduler and wait result
+    scheduler::JobMgrInst::GetInstance()->Put(job);
+    job->WaitResult();
+
+    status = OngoingFileChecker::GetInstance().UnmarkOngoingFiles(files);
+    if (!job->GetStatus().ok()) {
+        return job->GetStatus();
+    }
+
+    // step 3: construct results
+    result_ids = job->GetResultIds();
+    result_distances = job->GetResultDistances();
+    rc.ElapseFromBegin("Engine query totally cost");
+
+    query_async_ctx->GetTraceContext()->GetSpan()->Finish();
+
+    return Status::OK();
+}
+
+Status
+DBImpl::HybridQueryAsync(const std::shared_ptr<server::Context>& context,
+                         const std::string& table_id,
+                         const meta::TableFilesSchema& files,
+                         query::GeneralQueryPtr general_query,
+                         ResultIds& result_ids,
+                         ResultDistances& result_distances) {
+    auto query_async_ctx = context->Child("Query Async");
+
+    TimeRecorder rc("");
+
+    // step 1: construct search job
+    auto status = OngoingFileChecker::GetInstance().MarkOngoingFiles(files);
+
+    VectorsData vectors;
+
+    ENGINE_LOG_DEBUG << "Engine query begin, index file count: " << files.size();
+    scheduler::SearchJobPtr job = std::make_shared<scheduler::SearchJob>(query_async_ctx, general_query, vectors);
     for (auto& file : files) {
         scheduler::TableFileSchemaPtr file_ptr = std::make_shared<meta::TableFileSchema>(file);
         job->AddIndexFile(file_ptr);

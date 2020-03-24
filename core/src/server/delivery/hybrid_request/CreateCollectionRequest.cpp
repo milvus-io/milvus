@@ -61,12 +61,11 @@ CreateCollectionRequest::OnExecute() {
         rc.RecordSection("check validation");
 
         // step 2: construct collection schema and vector schema
-        engine::meta::hybrid::CollectionSchema collection_info;
+        engine::meta::TableSchema table_info;
         engine::meta::hybrid::FieldsSchema fields_schema;
 
         auto size = field_types_.size();
-        collection_info.collection_id_ = collection_name_;
-        collection_info.field_num = size + 1;
+        table_info.table_id_ = collection_name_;
         fields_schema.fields_schema_.resize(size + 1);
         for (uint64_t i = 0; i < size; ++i) {
             fields_schema.fields_schema_[i].field_name_ =  field_types_[i].first;
@@ -79,7 +78,7 @@ CreateCollectionRequest::OnExecute() {
         // TODO(yukun): check dimension, metric_type, and assign engine_type
 
         // step 3: create collection
-        status = DBWrapper::DB()->CreateHybridCollection(collection_info, fields_schema);
+        status = DBWrapper::DB()->CreateHybridCollection(table_info, fields_schema);
         if (!status.ok()) {
             // collection could exist
             if (status.code() == DB_ALREADY_EXIST) {

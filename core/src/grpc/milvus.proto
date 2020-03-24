@@ -373,7 +373,7 @@ message GeneralQuery {
 message HSearchParam {
     string collection_name = 1;
     repeated string partition_tag_array = 2;
-    repeated GeneralQuery general_query = 3;
+    GeneralQuery general_query = 3;
     repeated KeyValuePair extra_params = 4;
 }
 

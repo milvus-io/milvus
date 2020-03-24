@@ -18,6 +18,7 @@
 #include "Options.h"
 #include "Types.h"
 #include "meta/Meta.h"
+#include "query/GeneralQuery.h"
 #include "server/context/Context.h"
 #include "utils/Status.h"
 
@@ -141,15 +142,23 @@ class DB {
     DropAll() = 0;
 
     virtual Status
-    CreateHybridCollection(meta::hybrid::CollectionSchema& collection_schema,
+    CreateHybridCollection(meta::TableSchema& collection_schema,
                            meta::hybrid::FieldsSchema& fields_schema) = 0;
 
     virtual Status
-    DescribeHybridCollection(meta::hybrid::CollectionSchema& collection_schema,
+    DescribeHybridCollection(meta::TableSchema& collection_schema,
                              meta::hybrid::FieldsSchema& fields_schema) = 0;
 
     virtual Status
     InsertEntities(std::string& collection_id, std::string& partition_tag, Entities& entities) = 0;
+
+    virtual Status
+    HybridQuery(const std::shared_ptr<server::Context>& context,
+                const std::string& collection_id,
+                const std::vector<std::string>& partition_tags,
+                query::GeneralQueryPtr general_query,
+                engine::ResultIds& result_ids,
+                engine::ResultDistances& result_distances) = 0;
 
 };  // DB
 

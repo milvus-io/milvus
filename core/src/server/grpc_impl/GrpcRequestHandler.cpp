@@ -16,6 +16,7 @@
 #include <unordered_map>
 #include <vector>
 
+#include "query/BinaryQuery.h"
 #include "tracing/TextMapCarrier.h"
 #include "tracing/TracerUtil.h"
 #include "utils/Log.h"
@@ -742,6 +743,95 @@ GrpcRequestHandler::InsertEntity(::grpc::ServerContext* context,
            vector_data[0].id_array_.size() * sizeof(int64_t));
 
     SET_RESPONSE(response->mutable_status(), status, context);
+    return ::grpc::Status::OK;
+}
+
+void
+DeSerialization(const ::milvus::grpc::GeneralQuery& general_query, query::BooleanQueryPtr boolean_clause) {
+    if (general_query.has_boolean_query()) {
+        boolean_clause->SetOccur((query::Occur)(general_query.boolean_query().occur()));
+        for (uint64_t i = 0; i < general_query.boolean_query().general_query_size(); ++i) {
+            auto clause = std::make_shared<query::BooleanQuery>();
+            DeSerialization(general_query.boolean_query().general_query(i), clause);
+            boolean_clause->AddBooleanQuery(clause);
+        }
+    }
+
+    auto leaf_query = std::make_shared<query::LeafQuery>();
+    if (general_query.has_term_query()) {
+        query::TermQueryPtr term_query = std::make_shared<query::TermQuery>();
+        term_query->field_name = general_query.term_query().field_name();
+        term_query->boost = general_query.term_query().boost();
+        term_query->field_value.resize(general_query.term_query().values_size());
+        for (uint64_t i = 0; i < general_query.term_query().values_size(); ++i) {
+            term_query->field_value[i] = general_query.term_query().values(i);
+        }
+        leaf_query->term_query = term_query;
+    }
+    if (general_query.has_range_query()) {
+        query::RangeQueryPtr range_query = std::make_shared<query::RangeQuery>();
+        range_query->field_name = general_query.range_query().field_name();
+        range_query->boost = general_query.range_query().boost();
+        range_query->compare_expr.resize(general_query.range_query().operand_size());
+        for (uint64_t i = 0; i < general_query.range_query().operand_size(); ++i) {
+            range_query->compare_expr[i].compare_operator =
+                query::CompareOperator(general_query.range_query().operand(i).operator_());
+            range_query->compare_expr[i].operand = general_query.range_query().operand(i).operand();
+        }
+        leaf_query->range_query = range_query;
+    }
+    if (general_query.has_vector_query()) {
+        query::VectorQueryPtr vector_query = std::make_shared<query::VectorQuery>();
+        vector_query->boost = general_query.vector_query().query_boost();
+        vector_query->field_name = general_query.vector_query().field_name();
+        vector_query->query_vector.resize(general_query.vector_query().records_size());
+        for (uint64_t i = 0; i < general_query.vector_query().records_size(); ++i) {
+            vector_query->query_vector[i].float_data.resize(general_query.vector_query().records(i).float_data_size());
+            vector_query->query_vector[i].binary_data.resize(general_query.vector_query().records(i).binary_data().size() / 8);
+            memcpy(vector_query->query_vector[i].float_data.data(), general_query.vector_query().records(i).float_data().data(),
+                   sizeof(float) * general_query.vector_query().records(i).float_data_size());
+            memcpy(vector_query->query_vector[i].binary_data.data(),
+                   general_query.vector_query().records(i).binary_data().data(),
+                   general_query.vector_query().records(i).binary_data().size());
+        }
+        leaf_query->vector_query = vector_query;
+    }
+    boolean_clause->AddLeafQuery(leaf_query);
+}
+
+::grpc::Status
+GrpcRequestHandler::HybridSearch(::grpc::ServerContext* context,
+                                 const ::milvus::grpc::HSearchParam* request,
+                                 ::milvus::grpc::HQueryResult* response) {
+    CHECK_NULLPTR_RETURN(request);
+
+    query::BooleanQueryPtr boolean_query = std::make_shared<query::BooleanQuery>();
+    DeSerialization(request->general_query(), boolean_query);
+
+    query::GeneralQueryPtr general_query = std::make_shared<query::GeneralQuery>();
+    general_query->bin = std::make_shared<query::BinaryQuery>();
+    query::GenBinaryQuery(boolean_query, general_query->bin);
+
+    std::vector<std::string> partition_list;
+    partition_list.resize(request->partition_tag_array_size());
+    for (uint64_t i = 0; i < request->partition_tag_array_size(); ++i) {
+        partition_list[i] = request->partition_tag_array(i);
+    }
+
+    HybridQueryResult result;
+
+    Status status = request_handler_.HybridSearch(context_map_[context],
+                                                  request->collection_name(),
+                                                  partition_list,
+                                                  general_query,
+                                                  result);
+
+    // step 6: construct and return result
+//    ConstructHybridResult
+//    ConstructResults(result, response);
+
+    SET_RESPONSE(response->mutable_status(), status, context);
+
     return ::grpc::Status::OK;
 }
 

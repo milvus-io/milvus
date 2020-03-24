@@ -132,8 +132,10 @@ class RequestHandler {
 
     Status
     HybridSearch(const std::shared_ptr<Context>& context,
-                 std::vector<std::string>& partition_tag_array,
-                 query::BooleanQueryPtr& boolean_query);
+                 const std::string& collection_name,
+                 std::vector<std::string>& partition_list,
+                 query::GeneralQueryPtr& boolean_query,
+                 HybridQueryResult& result);
 
 };
 

@@ -130,15 +130,23 @@ class DBImpl : public DB, public server::CacheConfigHandler {
     DropIndex(const std::string& table_id) override;
 
     Status
-    CreateHybridCollection(meta::hybrid::CollectionSchema& collection_schema,
+    CreateHybridCollection(meta::TableSchema& collection_schema,
                            meta::hybrid::FieldsSchema& fields_schema) override;
 
     Status
-    DescribeHybridCollection(meta::hybrid::CollectionSchema& collection_schema,
+    DescribeHybridCollection(meta::TableSchema& collection_schema,
                              meta::hybrid::FieldsSchema& fields_schema) override;
 
     Status
     InsertEntities(std::string& collection_name, std::string& partition_tag, engine::Entities& entities) override;
+
+    Status
+    HybridQuery(const std::shared_ptr<server::Context>& context,
+                const std::string& collection_id,
+                const std::vector<std::string>& partition_tags,
+                query::GeneralQueryPtr general_query,
+                ResultIds& result_ids,
+                ResultDistances& result_distances) override;
 
     Status
     QueryByID(const std::shared_ptr<server::Context>& context, const std::string& table_id,
@@ -167,6 +175,14 @@ class DBImpl : public DB, public server::CacheConfigHandler {
     QueryAsync(const std::shared_ptr<server::Context>& context, const std::string& table_id,
                const meta::TableFilesSchema& files, uint64_t k, const milvus::json& extra_params,
                const VectorsData& vectors, ResultIds& result_ids, ResultDistances& result_distances);
+
+    Status
+    HybridQueryAsync(const std::shared_ptr<server::Context>& context,
+                     const std::string& table_id,
+                     const meta::TableFilesSchema& files,
+                     query::GeneralQueryPtr general_query,
+                     ResultIds& result_ids,
+                     ResultDistances& result_distances);
 
     Status
     GetVectorByIdHelper(const std::string& table_id, IDNumber vector_id, VectorsData& vector,

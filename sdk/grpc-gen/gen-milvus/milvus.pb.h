@@ -6951,9 +6951,9 @@ class HSearchParam :
 
   enum : int {
     kPartitionTagArrayFieldNumber = 2,
-    kGeneralQueryFieldNumber = 3,
     kExtraParamsFieldNumber = 4,
     kCollectionNameFieldNumber = 1,
+    kGeneralQueryFieldNumber = 3,
   };
   // repeated string partition_tag_array = 2;
   int partition_tag_array_size() const;
@@ -6971,17 +6971,6 @@ class HSearchParam :
   void add_partition_tag_array(const char* value, size_t size);
   const ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField<std::string>& partition_tag_array() const;
   ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField<std::string>* mutable_partition_tag_array();
-
-  // repeated .milvus.grpc.GeneralQuery general_query = 3;
-  int general_query_size() const;
-  void clear_general_query();
-  ::milvus::grpc::GeneralQuery* mutable_general_query(int index);
-  ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField< ::milvus::grpc::GeneralQuery >*
-      mutable_general_query();
-  const ::milvus::grpc::GeneralQuery& general_query(int index) const;
-  ::milvus::grpc::GeneralQuery* add_general_query();
-  const ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField< ::milvus::grpc::GeneralQuery >&
-      general_query() const;
 
   // repeated .milvus.grpc.KeyValuePair extra_params = 4;
   int extra_params_size() const;
@@ -7005,15 +6994,23 @@ class HSearchParam :
   std::string* release_collection_name();
   void set_allocated_collection_name(std::string* collection_name);
 
+  // .milvus.grpc.GeneralQuery general_query = 3;
+  bool has_general_query() const;
+  void clear_general_query();
+  const ::milvus::grpc::GeneralQuery& general_query() const;
+  ::milvus::grpc::GeneralQuery* release_general_query();
+  ::milvus::grpc::GeneralQuery* mutable_general_query();
+  void set_allocated_general_query(::milvus::grpc::GeneralQuery* general_query);
+
   // @@protoc_insertion_point(class_scope:milvus.grpc.HSearchParam)
  private:
   class _Internal;
 
   ::PROTOBUF_NAMESPACE_ID::internal::InternalMetadataWithArena _internal_metadata_;
   ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField<std::string> partition_tag_array_;
-  ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField< ::milvus::grpc::GeneralQuery > general_query_;
   ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField< ::milvus::grpc::KeyValuePair > extra_params_;
   ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr collection_name_;
+  ::milvus::grpc::GeneralQuery* general_query_;
   mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
   friend struct ::TableStruct_milvus_2eproto;
 };
@@ -13525,34 +13522,55 @@ HSearchParam::mutable_partition_tag_array() {
   return &partition_tag_array_;
 }
 
-// repeated .milvus.grpc.GeneralQuery general_query = 3;
-inline int HSearchParam::general_query_size() const {
-  return general_query_.size();
+// .milvus.grpc.GeneralQuery general_query = 3;
+inline bool HSearchParam::has_general_query() const {
+  return this != internal_default_instance() && general_query_ != nullptr;
 }
 inline void HSearchParam::clear_general_query() {
-  general_query_.Clear();
+  if (GetArenaNoVirtual() == nullptr && general_query_ != nullptr) {
+    delete general_query_;
+  }
+  general_query_ = nullptr;
 }
-inline ::milvus::grpc::GeneralQuery* HSearchParam::mutable_general_query(int index) {
-  // @@protoc_insertion_point(field_mutable:milvus.grpc.HSearchParam.general_query)
-  return general_query_.Mutable(index);
-}
-inline ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField< ::milvus::grpc::GeneralQuery >*
-HSearchParam::mutable_general_query() {
-  // @@protoc_insertion_point(field_mutable_list:milvus.grpc.HSearchParam.general_query)
-  return &general_query_;
-}
-inline const ::milvus::grpc::GeneralQuery& HSearchParam::general_query(int index) const {
+inline const ::milvus::grpc::GeneralQuery& HSearchParam::general_query() const {
+  const ::milvus::grpc::GeneralQuery* p = general_query_;
   // @@protoc_insertion_point(field_get:milvus.grpc.HSearchParam.general_query)
-  return general_query_.Get(index);
+  return p != nullptr ? *p : *reinterpret_cast<const ::milvus::grpc::GeneralQuery*>(
+      &::milvus::grpc::_GeneralQuery_default_instance_);
 }
-inline ::milvus::grpc::GeneralQuery* HSearchParam::add_general_query() {
-  // @@protoc_insertion_point(field_add:milvus.grpc.HSearchParam.general_query)
-  return general_query_.Add();
+inline ::milvus::grpc::GeneralQuery* HSearchParam::release_general_query() {
+  // @@protoc_insertion_point(field_release:milvus.grpc.HSearchParam.general_query)
+  
+  ::milvus::grpc::GeneralQuery* temp = general_query_;
+  general_query_ = nullptr;
+  return temp;
 }
-inline const ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField< ::milvus::grpc::GeneralQuery >&
-HSearchParam::general_query() const {
-  // @@protoc_insertion_point(field_list:milvus.grpc.HSearchParam.general_query)
+inline ::milvus::grpc::GeneralQuery* HSearchParam::mutable_general_query() {
+  
+  if (general_query_ == nullptr) {
+    auto* p = CreateMaybeMessage<::milvus::grpc::GeneralQuery>(GetArenaNoVirtual());
+    general_query_ = p;
+  }
+  // @@protoc_insertion_point(field_mutable:milvus.grpc.HSearchParam.general_query)
   return general_query_;
+}
+inline void HSearchParam::set_allocated_general_query(::milvus::grpc::GeneralQuery* general_query) {
+  ::PROTOBUF_NAMESPACE_ID::Arena* message_arena = GetArenaNoVirtual();
+  if (message_arena == nullptr) {
+    delete general_query_;
+  }
+  if (general_query) {
+    ::PROTOBUF_NAMESPACE_ID::Arena* submessage_arena = nullptr;
+    if (message_arena != submessage_arena) {
+      general_query = ::PROTOBUF_NAMESPACE_ID::internal::GetOwnedMessage(
+          message_arena, general_query, submessage_arena);
+    }
+    
+  } else {
+    
+  }
+  general_query_ = general_query;
+  // @@protoc_insertion_point(field_set_allocated:milvus.grpc.HSearchParam.general_query)
 }
 
 // repeated .milvus.grpc.KeyValuePair extra_params = 4;
