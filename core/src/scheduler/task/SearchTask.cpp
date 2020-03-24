@@ -204,7 +204,7 @@ XSearchTask::Load(LoadType type, uint8_t device_id) {
 
 void
 XSearchTask::Execute() {
-    auto execute_ctx = context_->Follower("XSearchTask::Execute " + std::to_string(index_id_));
+    milvus::server::ContextFollower tracer(context_, "XSearchTask::Execute " + std::to_string(index_id_));
 
     if (index_engine_ == nullptr) {
         return;
@@ -300,8 +300,6 @@ XSearchTask::Execute() {
 
     // release index in resource
     index_engine_ = nullptr;
-
-    execute_ctx->GetTraceContext()->GetSpan()->Finish();
 }
 
 void
