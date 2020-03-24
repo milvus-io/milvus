@@ -159,8 +159,14 @@ class BaseRequest {
     virtual ~BaseRequest();
 
  public:
+    virtual Status
+    PreExecute();
+
     Status
     Execute();
+
+    virtual Status
+    PostExecute();
 
     void
     Done();

@@ -27,6 +27,7 @@ namespace server {
 namespace {
 
 constexpr int64_t MAX_TOPK_GAP = 200;
+constexpr uint64_t MAX_NQ = 200;
 
 void
 GetUniqueList(const std::vector<std::string>& list, std::set<std::string>& unique_list) {
@@ -181,6 +182,12 @@ SearchCombineRequest::CanCombine(const SearchRequestPtr& left, const SearchReque
         return false;
     }
 
+    // sum of nq must less-equal than MAX_NQ
+    uint64_t total_nq = left->VectorsData().vector_count_ + right->VectorsData().vector_count_;
+    if (total_nq > MAX_NQ) {
+        return false;
+    }
+
     // partition list must be equal for each one
     std::set<std::string> left_partition_list, right_partition_list;
     GetUniqueList(left->PartitionList(), left_partition_list);
@@ -213,98 +220,28 @@ Status
 SearchCombineRequest::OnExecute() {
     try {
         size_t combined_request = request_list_.size();
-        SERVER_LOG_DEBUG << "SearchCombineRequest begin execute, combined requests=" << combined_request
+        SERVER_LOG_DEBUG << "SearchCombineRequest execute, request count=" << combined_request
                          << ", extra_params=" << extra_params_.dump();
         std::string hdr = "SearchCombineRequest(table=" + table_name_ + ")";
 
-        TimeRecorder rc(hdr);
+        TimeRecorderAuto rc(hdr);
 
-        // step 1: check table name
-        auto status = ValidationUtil::ValidateTableName(table_name_);
-        if (!status.ok()) {
-            FreeRequests(status);
-            return status;
-        }
-
-        // step 2: check table existence
-        // only process root table, ignore partition table
-        engine::meta::TableSchema table_schema;
-        table_schema.table_id_ = table_name_;
-        status = DBWrapper::DB()->DescribeTable(table_schema);
-        if (!status.ok()) {
-            if (status.code() == DB_NOT_FOUND) {
-                status = Status(SERVER_TABLE_NOT_EXIST, TableNotExistMsg(table_name_));
-                FreeRequests(status);
-                return status;
-            } else {
-                FreeRequests(status);
-                return status;
-            }
-        } else {
-            if (!table_schema.owner_table_.empty()) {
-                status = Status(SERVER_INVALID_TABLE_NAME, TableNotExistMsg(table_name_));
-                FreeRequests(status);
-                return status;
-            }
-        }
-
-        // step 3: check input
+        // step 1: reset topk
         size_t run_request = 0;
         std::vector<SearchRequestPtr>::iterator iter = request_list_.begin();
         for (; iter != request_list_.end();) {
             SearchRequestPtr& request = *iter;
-            status = ValidationUtil::ValidateSearchTopk(request->TopK());
-            if (!status.ok()) {
-                // check failed, erase request and let it return error status
-                FreeRequest(request, status);
-                iter = request_list_.erase(iter);
-                continue;
-            }
-
-            status = ValidationUtil::ValidateSearchParams(extra_params_, table_schema, request->TopK());
-            if (!status.ok()) {
-                // check failed, erase request and let it return error status
-                FreeRequest(request, status);
-                iter = request_list_.erase(iter);
-                continue;
-            }
-
-            status = ValidationUtil::ValidateVectorData(request->VectorsData(), table_schema);
-            if (!status.ok()) {
-                // check failed, erase request and let it return error status
-                FreeRequest(request, status);
-                iter = request_list_.erase(iter);
-                continue;
-            }
-
-            status = ValidationUtil::ValidatePartitionTags(request->PartitionList());
-            if (!status.ok()) {
-                // check failed, erase request and let it return error status
-                FreeRequest(request, status);
-                iter = request_list_.erase(iter);
-                continue;
-            }
-
-            // reset topk
             search_topk_ = request->TopK() > search_topk_ ? request->TopK() : search_topk_;
 
-            // next one
             run_request++;
             iter++;
         }
 
-        // all requests are skipped
-        if (request_list_.empty()) {
-            SERVER_LOG_DEBUG << "all combined requests were skipped";
-            return Status::OK();
-        }
-
-        SERVER_LOG_DEBUG << (combined_request - run_request) << " requests were skipped";
         SERVER_LOG_DEBUG << "reset topk to " << search_topk_;
-        rc.RecordSection("check validation");
 
-        // step 5: construct vectors_data and set search_topk
+        // step 2: construct vectors_data and set search_topk
         SearchRequestPtr& first_request = *request_list_.begin();
+        const milvus::engine::meta::TableSchema& table_schema = first_request->TableSchema();
         uint64_t total_count = 0;
         for (auto& request : request_list_) {
             total_count += request->VectorsData().vector_count_;
@@ -333,15 +270,17 @@ SearchCombineRequest::OnExecute() {
             }
             offset += data_size;
         }
-        SERVER_LOG_DEBUG << total_count << " query vectors combined";
 
-        // step 6: search vectors
+        SERVER_LOG_DEBUG << total_count << " query vectors combined";
+        rc.RecordSection("combined query vectors");
+
+        // step 5: search vectors
         const std::vector<std::string>& partition_list = first_request->PartitionList();
         const std::vector<std::string>& file_id_list = first_request->FileIDList();
 
+        Status status;
         engine::ResultIds result_ids;
         engine::ResultDistances result_distances;
-
         {
             TracingContextList context_list;
             context_list.CreateChild(request_list_, "Combine Query");
@@ -355,7 +294,7 @@ SearchCombineRequest::OnExecute() {
             }
         }
 
-        rc.RecordSection("search combined vectors from engine");
+        rc.RecordSection("search vectors from engine");
 
         if (!status.ok()) {
             // let all request return
@@ -383,13 +322,15 @@ SearchCombineRequest::OnExecute() {
             offset += (count * search_topk_);
 
             // let request return
+            request->SkipPostExecute();
             FreeRequest(request, Status::OK());
         }
 
         rc.RecordSection("construct result and send");
-        rc.ElapseFromBegin("totally cost");
     } catch (std::exception& ex) {
-        return Status(SERVER_UNEXPECTED_ERROR, ex.what());
+        Status status = Status(SERVER_UNEXPECTED_ERROR, ex.what());
+        FreeRequests(status);
+        return status;
     }
 
     return Status::OK();

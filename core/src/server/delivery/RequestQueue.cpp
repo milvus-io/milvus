@@ -25,7 +25,7 @@ namespace server {
 namespace {
 Status
 ScheduleRequest(const BaseRequestPtr& request, std::queue<BaseRequestPtr>& queue) {
-#if 1
+#if 0
     if (request == nullptr) {
         return Status(SERVER_NULL_POINTER, "request schedule cannot handle null object");
     }

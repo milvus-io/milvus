@@ -63,6 +63,22 @@ class SearchRequest : public BaseRequest {
         return result_;
     }
 
+    const milvus::engine::meta::TableSchema&
+    TableSchema() const {
+        return table_schema_;
+    }
+
+    Status
+    PreExecute() override;
+
+    Status
+    PostExecute() override;
+
+    void
+    SkipPostExecute() {
+        skip_post_execute_ = true;
+    }
+
  protected:
     SearchRequest(const std::shared_ptr<milvus::server::Context>& context, const std::string& table_name,
                   const engine::VectorsData& vectors, int64_t topk, const milvus::json& extra_params,
@@ -81,6 +97,14 @@ class SearchRequest : public BaseRequest {
     const std::vector<std::string> file_id_list_;
 
     TopKQueryResult& result_;
+
+    // for validation
+    milvus::engine::meta::TableSchema table_schema_;
+
+    // for async construct result
+    bool skip_post_execute_ = false;
+    engine::ResultIds result_ids_;
+    engine::ResultDistances result_distances_;
 };
 
 using SearchRequestPtr = std::shared_ptr<SearchRequest>;

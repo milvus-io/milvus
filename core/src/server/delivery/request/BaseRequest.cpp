@@ -84,10 +84,20 @@ BaseRequest::~BaseRequest() {
 }
 
 Status
+BaseRequest::PreExecute() {
+    return Status::OK();
+}
+
+Status
 BaseRequest::Execute() {
     status_ = OnExecute();
     Done();
     return status_;
+}
+
+Status
+BaseRequest::PostExecute() {
+    return Status::OK();
 }
 
 void
