@@ -897,7 +897,7 @@ WebRequestHandler::SetGpuConfig(const GPUConfigDto::ObjectWrapper& gpu_config_dt
 
 /*************
  *
- * Table {
+ * Collection {
  */
 StatusDto::ObjectWrapper
 WebRequestHandler::CreateTable(const TableRequestDto::ObjectWrapper& collection_schema) {

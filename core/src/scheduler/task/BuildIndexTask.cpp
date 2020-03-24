@@ -171,7 +171,7 @@ XBuildIndexTask::Execute() {
             meta_ptr->DeleteTableFiles(file_->table_id_);
 
             build_index_job->BuildIndexDone(to_index_id_);
-            build_index_job->GetStatus() = Status(DB_ERROR, "Table has been deleted, discard index file.");
+            build_index_job->GetStatus() = Status(DB_ERROR, "Collection has been deleted, discard index file.");
             to_index_engine_ = nullptr;
             return;
         }

@@ -99,22 +99,22 @@ CheckParameterExistence(const milvus::json& json_params, const std::string& para
 
 Status
 ValidationUtil::ValidateTableName(const std::string& table_name) {
-    // Table name shouldn't be empty.
+    // Collection name shouldn't be empty.
     if (table_name.empty()) {
-        std::string msg = "Table name should not be empty.";
+        std::string msg = "Collection name should not be empty.";
         SERVER_LOG_ERROR << msg;
         return Status(SERVER_INVALID_TABLE_NAME, msg);
     }
 
     std::string invalid_msg = "Invalid collection name: " + table_name + ". ";
-    // Table name size shouldn't exceed 16384.
+    // Collection name size shouldn't exceed 16384.
     if (table_name.size() > TABLE_NAME_SIZE_LIMIT) {
         std::string msg = invalid_msg + "The length of a collection name must be less than 255 characters.";
         SERVER_LOG_ERROR << msg;
         return Status(SERVER_INVALID_TABLE_NAME, msg);
     }
 
-    // Table name first character should be underscore or character.
+    // Collection name first character should be underscore or character.
     char first_char = table_name[0];
     if (first_char != '_' && std::isalpha(first_char) == 0) {
         std::string msg = invalid_msg + "The first character of a collection name must be an underscore or letter.";
@@ -126,7 +126,7 @@ ValidationUtil::ValidateTableName(const std::string& table_name) {
     for (int64_t i = 1; i < table_name_size; ++i) {
         char name_char = table_name[i];
         if (name_char != '_' && std::isalnum(name_char) == 0) {
-            std::string msg = invalid_msg + "Table name can only contain numbers, letters, and underscores.";
+            std::string msg = invalid_msg + "Collection name can only contain numbers, letters, and underscores.";
             SERVER_LOG_ERROR << msg;
             return Status(SERVER_INVALID_TABLE_NAME, msg);
         }
@@ -384,14 +384,14 @@ ValidationUtil::ValidatePartitionName(const std::string& partition_name) {
     }
 
     std::string invalid_msg = "Invalid partition name: " + partition_name + ". ";
-    // Table name size shouldn't exceed 16384.
+    // Collection name size shouldn't exceed 16384.
     if (partition_name.size() > TABLE_NAME_SIZE_LIMIT) {
         std::string msg = invalid_msg + "The length of a partition name must be less than 255 characters.";
         SERVER_LOG_ERROR << msg;
         return Status(SERVER_INVALID_TABLE_NAME, msg);
     }
 
-    // Table name first character should be underscore or character.
+    // Collection name first character should be underscore or character.
     char first_char = partition_name[0];
     if (first_char != '_' && std::isalpha(first_char) == 0) {
         std::string msg = invalid_msg + "The first character of a partition name must be an underscore or letter.";

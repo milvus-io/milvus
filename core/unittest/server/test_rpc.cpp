@@ -489,7 +489,7 @@ TEST_F(RpcHandlerTest, TABLES_TEST) {
     handler->ShowTables(&context, &cmd, &table_name_list);
     fiu_disable("ShowTablesRequest.OnExecute.show_tables_fail");
 
-    // Count Table
+    // Count Collection
     ::milvus::grpc::TableRowCount count;
     table_name.Clear();
     status = handler->CountTable(&context, &table_name, &count);
@@ -510,7 +510,7 @@ TEST_F(RpcHandlerTest, TABLES_TEST) {
     status = handler->CountTable(&context, &table_name, &count);
     fiu_disable("CountTableRequest.OnExecute.throw_std_exception");
 
-    // Preload Table
+    // Preload Collection
     table_name.Clear();
     status = handler->PreloadTable(&context, &table_name, &response);
     table_name.set_table_name(TABLE_NAME);

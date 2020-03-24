@@ -73,7 +73,7 @@ class WalManager {
     DropTable(const std::string& collection_id);
 
     /*
-     * Table is flushed
+     * Collection is flushed
      * @param collection_id: collection id
      * @param lsn: flushed lsn
      */

@@ -96,7 +96,7 @@ InsertRequest::OnExecute() {
         // user already provided id before, all insert action require user id
         if ((table_schema.flag_ & engine::meta::FLAG_MASK_HAS_USERID) != 0 && !user_provide_ids) {
             return Status(SERVER_ILLEGAL_VECTOR_ID,
-                          "Table vector IDs are user-defined. Please provide IDs for all vectors of this collection.");
+                          "Collection vector IDs are user-defined. Please provide IDs for all vectors of this collection.");
         }
 
         fiu_do_on("InsertRequest.OnExecute.illegal_vector_id2", user_provide_ids = true;
@@ -105,7 +105,7 @@ InsertRequest::OnExecute() {
         if ((table_schema.flag_ & engine::meta::FLAG_MASK_NO_USERID) != 0 && user_provide_ids) {
             return Status(
                 SERVER_ILLEGAL_VECTOR_ID,
-                "Table vector IDs are auto-generated. All vectors of this collection must use auto-generated IDs.");
+                "Collection vector IDs are auto-generated. All vectors of this collection must use auto-generated IDs.");
         }
 
         rc.RecordSection("check validation");
@@ -117,7 +117,7 @@ InsertRequest::OnExecute() {
         // step 4: some metric type doesn't support float vectors
         if (!vectors_data_.float_data_.empty()) {  // insert float vectors
             if (engine::utils::IsBinaryMetricType(table_schema.metric_type_)) {
-                return Status(SERVER_INVALID_ROWRECORD_ARRAY, "Table metric type doesn't support float vectors.");
+                return Status(SERVER_INVALID_ROWRECORD_ARRAY, "Collection metric type doesn't support float vectors.");
             }
 
             // check prepared float data
@@ -133,7 +133,7 @@ InsertRequest::OnExecute() {
             }
         } else if (!vectors_data_.binary_data_.empty()) {  // insert binary vectors
             if (!engine::utils::IsBinaryMetricType(table_schema.metric_type_)) {
-                return Status(SERVER_INVALID_ROWRECORD_ARRAY, "Table metric type doesn't support binary vectors.");
+                return Status(SERVER_INVALID_ROWRECORD_ARRAY, "Collection metric type doesn't support binary vectors.");
             }
 
             // check prepared binary data

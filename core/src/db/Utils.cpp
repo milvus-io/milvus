@@ -179,7 +179,7 @@ GetTableFilePath(const DBMetaOptions& options, meta::TableFileSchema& table_file
         }
     }
 
-    std::string msg = "Table file doesn't exist: " + file_path;
+    std::string msg = "Collection file doesn't exist: " + file_path;
     if (table_file.file_size_ > 0) {  // no need to pop error for empty file
         ENGINE_LOG_ERROR << msg << " in path: " << options.path_ << " for collection: " << table_file.table_id_;
     }

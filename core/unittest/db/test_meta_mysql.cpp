@@ -26,7 +26,7 @@
 #include <src/db/OngoingFileChecker.h>
 
 const char* FAILED_CONNECT_SQL_SERVER = "Failed to connect to meta server(mysql)";
-const char* TABLE_ALREADY_EXISTS = "Table already exists and it is in delete state, please wait a second";
+const char* TABLE_ALREADY_EXISTS = "Collection already exists and it is in delete state, please wait a second";
 
 TEST_F(MySqlMetaTest, TABLE_TEST) {
     auto collection_id = "meta_test_table";

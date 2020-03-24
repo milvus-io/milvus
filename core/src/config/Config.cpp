@@ -794,7 +794,7 @@ Config::CheckDBConfigPreloadTable(const std::string& value) {
         bool exist = false;
         auto status = DBWrapper::DB()->HasNativeTable(collection, exist);
         if (!(status.ok() && exist)) {
-            return Status(SERVER_TABLE_NOT_EXIST, "Table " + collection + " not exist");
+            return Status(SERVER_TABLE_NOT_EXIST, "Collection " + collection + " not exist");
         }
         table_set.insert(collection);
     }

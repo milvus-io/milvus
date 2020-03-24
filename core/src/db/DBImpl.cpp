@@ -583,8 +583,8 @@ DBImpl::Flush(const std::string& collection_id) {
         return status;
     }
     if (!has_table) {
-        ENGINE_LOG_ERROR << "Table to flush does not exist: " << collection_id;
-        return Status(DB_NOT_FOUND, "Table to flush does not exist");
+        ENGINE_LOG_ERROR << "Collection to flush does not exist: " << collection_id;
+        return Status(DB_NOT_FOUND, "Collection to flush does not exist");
     }
 
     ENGINE_LOG_DEBUG << "Begin flush collection: " << collection_id;
@@ -651,15 +651,15 @@ DBImpl::Compact(const std::string& collection_id) {
     auto status = DescribeTable(table_schema);
     if (!status.ok()) {
         if (status.code() == DB_NOT_FOUND) {
-            ENGINE_LOG_ERROR << "Table to compact does not exist: " << collection_id;
-            return Status(DB_NOT_FOUND, "Table to compact does not exist");
+            ENGINE_LOG_ERROR << "Collection to compact does not exist: " << collection_id;
+            return Status(DB_NOT_FOUND, "Collection to compact does not exist");
         } else {
             return status;
         }
     } else {
         if (!table_schema.owner_table_.empty()) {
-            ENGINE_LOG_ERROR << "Table to compact does not exist: " << collection_id;
-            return Status(DB_NOT_FOUND, "Table to compact does not exist");
+            ENGINE_LOG_ERROR << "Collection to compact does not exist: " << collection_id;
+            return Status(DB_NOT_FOUND, "Collection to compact does not exist");
         }
     }
 
@@ -832,8 +832,8 @@ DBImpl::GetVectorByID(const std::string& collection_id, const IDNumber& vector_i
     bool has_table;
     auto status = HasTable(collection_id, has_table);
     if (!has_table) {
-        ENGINE_LOG_ERROR << "Table " << collection_id << " does not exist: ";
-        return Status(DB_NOT_FOUND, "Table does not exist");
+        ENGINE_LOG_ERROR << "Collection " << collection_id << " does not exist: ";
+        return Status(DB_NOT_FOUND, "Collection does not exist");
     }
     if (!status.ok()) {
         return status;
@@ -891,8 +891,8 @@ DBImpl::GetVectorIDs(const std::string& collection_id, const std::string& segmen
     bool has_table;
     auto status = HasTable(collection_id, has_table);
     if (!has_table) {
-        ENGINE_LOG_ERROR << "Table " << collection_id << " does not exist: ";
-        return Status(DB_NOT_FOUND, "Table does not exist");
+        ENGINE_LOG_ERROR << "Collection " << collection_id << " does not exist: ";
+        return Status(DB_NOT_FOUND, "Collection does not exist");
     }
     if (!status.ok()) {
         return status;

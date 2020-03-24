@@ -381,9 +381,9 @@ MySQLMetaImpl::CreateTable(TableSchema& table_schema) {
                     int state = res[0]["state"];
                     fiu_do_on("MySQLMetaImpl.CreateTableTable.schema_TO_DELETE", state = TableSchema::TO_DELETE);
                     if (TableSchema::TO_DELETE == state) {
-                        return Status(DB_ERROR, "Table already exists and it is in delete state, please wait a second");
+                        return Status(DB_ERROR, "Collection already exists and it is in delete state, please wait a second");
                     } else {
-                        return Status(DB_ALREADY_EXIST, "Table already exists");
+                        return Status(DB_ALREADY_EXIST, "Collection already exists");
                     }
                 }
             }
@@ -419,7 +419,7 @@ MySQLMetaImpl::CreateTable(TableSchema& table_schema) {
 
                 // Consume all results to avoid "Commands out of sync" error
             } else {
-                return HandleException("Add Table Error", createTableQuery.error());
+                return HandleException("Add Collection Error", createTableQuery.error());
             }
         }  // Scoped Connection
 
@@ -473,7 +473,7 @@ MySQLMetaImpl::DescribeTable(TableSchema& table_schema) {
             resRow["version"].to_string(table_schema.version_);
             table_schema.flush_lsn_ = resRow["flush_lsn"];
         } else {
-            return Status(DB_NOT_FOUND, "Table " + table_schema.table_id_ + " not found");
+            return Status(DB_NOT_FOUND, "Collection " + table_schema.table_id_ + " not found");
         }
     } catch (std::exception& e) {
         return HandleException("GENERAL ERROR WHEN DESCRIBING TABLE", e.what());
@@ -904,7 +904,7 @@ MySQLMetaImpl::UpdateTableIndex(const std::string& collection_id, const TableInd
                                            updateTableIndexParamQuery.error());
                 }
             } else {
-                return Status(DB_NOT_FOUND, "Table " + collection_id + " not found");
+                return Status(DB_NOT_FOUND, "Collection " + collection_id + " not found");
             }
         }  // Scoped Connection
 
@@ -1313,7 +1313,7 @@ MySQLMetaImpl::DescribeTableIndex(const std::string& collection_id, TableIndex& 
                 index.extra_params_ = milvus::json::parse(str_index_params);
                 index.metric_type_ = resRow["metric_type"];
             } else {
-                return Status(DB_NOT_FOUND, "Table " + collection_id + " not found");
+                return Status(DB_NOT_FOUND, "Collection " + collection_id + " not found");
             }
         }  // Scoped Connection
     } catch (std::exception& e) {

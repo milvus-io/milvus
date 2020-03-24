@@ -179,10 +179,10 @@ SqliteMetaImpl::CreateTable(TableSchema& table_schema) {
                                               where(c(&TableSchema::table_id_) == table_schema.table_id_));
             if (collection.size() == 1) {
                 if (TableSchema::TO_DELETE == std::get<0>(collection[0])) {
-                    return Status(DB_ERROR, "Table already exists and it is in delete state, please wait a second");
+                    return Status(DB_ERROR, "Collection already exists and it is in delete state, please wait a second");
                 } else {
                     // Change from no error to already exist.
-                    return Status(DB_ALREADY_EXIST, "Table already exists");
+                    return Status(DB_ALREADY_EXIST, "Collection already exists");
                 }
             }
         }
@@ -234,7 +234,7 @@ SqliteMetaImpl::DescribeTable(TableSchema& table_schema) {
             table_schema.version_ = std::get<11>(groups[0]);
             table_schema.flush_lsn_ = std::get<12>(groups[0]);
         } else {
-            return Status(DB_NOT_FOUND, "Table " + table_schema.table_id_ + " not found");
+            return Status(DB_NOT_FOUND, "Collection " + table_schema.table_id_ + " not found");
         }
     } catch (std::exception& e) {
         return HandleException("Encounter exception when describe collection", e.what());
@@ -537,7 +537,7 @@ SqliteMetaImpl::GetTableFlushLSN(const std::string& collection_id, uint64_t& flu
         if (selected.size() > 0) {
             flush_lsn = std::get<0>(selected[0]);
         } else {
-            return Status(DB_NOT_FOUND, "Table " + collection_id + " not found");
+            return Status(DB_NOT_FOUND, "Collection " + collection_id + " not found");
         }
 
     } catch (std::exception& e) {
@@ -738,7 +738,7 @@ SqliteMetaImpl::UpdateTableIndex(const std::string& collection_id, const TableIn
 
             ConnectorPtr->update(table_schema);
         } else {
-            return Status(DB_NOT_FOUND, "Table " + collection_id + " not found");
+            return Status(DB_NOT_FOUND, "Collection " + collection_id + " not found");
         }
 
         // set all backup file to raw
@@ -793,7 +793,7 @@ SqliteMetaImpl::DescribeTableIndex(const std::string& collection_id, TableIndex&
             index.extra_params_ = milvus::json::parse(std::get<1>(groups[0]));
             index.metric_type_ = std::get<2>(groups[0]);
         } else {
-            return Status(DB_NOT_FOUND, "Table " + collection_id + " not found");
+            return Status(DB_NOT_FOUND, "Collection " + collection_id + " not found");
         }
     } catch (std::exception& e) {
         return HandleException("Encounter exception when describe index", e.what());
@@ -958,7 +958,7 @@ SqliteMetaImpl::GetPartitionName(const std::string& collection_id, const std::st
         if (name.size() > 0) {
             partition_name = std::get<0>(name[0]);
         } else {
-            return Status(DB_NOT_FOUND, "Table " + collection_id + "'s partition " + valid_tag + " not found");
+            return Status(DB_NOT_FOUND, "Collection " + collection_id + "'s partition " + valid_tag + " not found");
         }
     } catch (std::exception& e) {
         return HandleException("Encounter exception when get partition name", e.what());
