@@ -35,7 +35,7 @@ HasTableRequest::Create(const std::shared_ptr<milvus::server::Context>& context,
 Status
 HasTableRequest::OnExecute() {
     try {
-        std::string hdr = "HasTableRequest(table=" + table_name_ + ")";
+        std::string hdr = "HasTableRequest(collection=" + table_name_ + ")";
         TimeRecorderAuto rc(hdr);
 
         // step 1: check arguments
@@ -44,7 +44,7 @@ HasTableRequest::OnExecute() {
             return status;
         }
 
-        // step 2: check table existence
+        // step 2: check collection existence
         status = DBWrapper::DB()->HasNativeTable(table_name_, has_table_);
         fiu_do_on("HasTableRequest.OnExecute.table_not_exist", status = Status(milvus::SERVER_UNEXPECTED_ERROR, ""));
         fiu_do_on("HasTableRequest.OnExecute.throw_std_exception", throw std::exception());
@@ -52,7 +52,7 @@ HasTableRequest::OnExecute() {
             return status;
         }
 
-        // only process root table, ignore partition table
+        // only process root collection, ignore partition collection
         if (has_table_) {
             engine::meta::TableSchema table_schema;
             table_schema.table_id_ = table_name_;

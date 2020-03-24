@@ -88,7 +88,7 @@ class RpcHandlerTest : public testing::Test {
 
         milvus::server::DBWrapper::GetInstance().StartService();
 
-        // initialize handler, create table
+        // initialize handler, create collection
         handler = std::make_shared<milvus::server::grpc::GrpcRequestHandler>(opentracing::Tracer::Global());
         dummy_context = std::make_shared<milvus::server::Context>("dummy_request_id");
         opentracing::mocktracer::MockTracerOptions tracer_options;
@@ -347,10 +347,10 @@ TEST_F(RpcHandlerTest, SEARCH_TEST) {
     // test null input
     handler->Search(&context, nullptr, &response);
 
-    // test invalid table name
+    // test invalid collection name
     handler->Search(&context, &request, &response);
 
-    // test table not exist
+    // test collection not exist
     request.set_table_name("test3");
     handler->Search(&context, &request, &response);
 
@@ -401,12 +401,12 @@ TEST_F(RpcHandlerTest, TABLES_TEST) {
     ::milvus::grpc::Status response;
     std::string tablename = "tbl";
 
-    // create table test
+    // create collection test
     // test null input
     handler->CreateTable(&context, nullptr, &response);
-    // test invalid table name
+    // test invalid collection name
     handler->CreateTable(&context, &tableschema, &response);
-    // test invalid table dimension
+    // test invalid collection dimension
     tableschema.set_table_name(tablename);
     handler->CreateTable(&context, &tableschema, &response);
     // test invalid index file size
@@ -415,12 +415,12 @@ TEST_F(RpcHandlerTest, TABLES_TEST) {
     // test invalid index metric type
     tableschema.set_index_file_size(INDEX_FILE_SIZE);
     handler->CreateTable(&context, &tableschema, &response);
-    // test table already exist
+    // test collection already exist
     tableschema.set_metric_type(1);
     handler->CreateTable(&context, &tableschema, &response);
 
-    // describe table test
-    // test invalid table name
+    // describe collection test
+    // test invalid collection name
     ::milvus::grpc::TableName table_name;
     ::milvus::grpc::TableSchema table_schema;
     handler->DescribeTable(&context, &table_name, &table_schema);
@@ -446,7 +446,7 @@ TEST_F(RpcHandlerTest, TABLES_TEST) {
         vector_ids.add_vector_id_array(i);
     }
     // Insert vectors
-    // test invalid table name
+    // test invalid collection name
     handler->Insert(&context, &request, &vector_ids);
     request.set_table_name(tablename);
     // test empty row record
@@ -479,7 +479,7 @@ TEST_F(RpcHandlerTest, TABLES_TEST) {
     status = handler->ShowTables(&context, &cmd, &table_name_list);
     ASSERT_EQ(status.error_code(), ::grpc::Status::OK.error_code());
 
-    // show table info
+    // show collection info
     ::milvus::grpc::TableInfo table_info;
     status = handler->ShowTableInfo(&context, &table_name, &table_info);
     ASSERT_EQ(status.error_code(), ::grpc::Status::OK.error_code());
@@ -550,9 +550,9 @@ TEST_F(RpcHandlerTest, TABLES_TEST) {
     ASSERT_NE(response.error_code(), ::grpc::Status::OK.error_code());
     fiu_disable("CreateTableRequest.OnExecute.throw_std_exception");
 
-    // Drop table
+    // Drop collection
     table_name.set_table_name("");
-    // test invalid table name
+    // test invalid collection name
     ::grpc::Status grpc_status = handler->DropTable(&context, &table_name, &response);
     table_name.set_table_name(tablename);
 

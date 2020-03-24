@@ -805,7 +805,7 @@ TEST_F(DBTest, PARTITION_TEST) {
         ASSERT_EQ(partition_schema_array[i].table_id_, table_name + "_" + std::to_string(i));
     }
 
-    // check table existence
+    // check collection existence
     std::string special_part = "special";
     stat = db_->CreatePartition(table_name, special_part, special_part);
     ASSERT_TRUE(stat.ok());
@@ -866,7 +866,7 @@ TEST_F(DBTest, PARTITION_TEST) {
         ASSERT_TRUE(stat.ok());
         ASSERT_EQ(result_ids.size() / topk, nq);
 
-        // search in whole table
+        // search in whole collection
         tags.clear();
         result_ids.clear();
         result_distances.clear();
@@ -973,11 +973,11 @@ TEST_F(DBTest2, DELETE_TEST) {
     milvus::engine::TableIndex index;
     stat = db_->CreateIndex(TABLE_NAME, index);
 
-    // create partition, drop table will drop partition recursively
+    // create partition, drop collection will drop partition recursively
     stat = db_->CreatePartition(TABLE_NAME, "part0", "0");
     ASSERT_TRUE(stat.ok());
 
-    // fail drop table
+    // fail drop collection
     fiu_init(0);
     FIU_ENABLE_FIU("DBImpl.DropTableRecursively.failed");
     stat = db_->DropTable(TABLE_NAME);

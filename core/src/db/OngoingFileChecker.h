@@ -52,7 +52,7 @@ class OngoingFileChecker {
 
  private:
     std::mutex mutex_;
-    Table2FileRef ongoing_files_;  // table id mapping to (file id mapping to ongoing ref-count)
+    Table2FileRef ongoing_files_;  // collection id mapping to (file id mapping to ongoing ref-count)
 };
 
 }  // namespace engine

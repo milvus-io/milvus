@@ -66,7 +66,7 @@ MemTableFile::Add(const VectorSourcePtr& source) {
             "MemTableFile::Add: table_file_schema dimension = " + std::to_string(table_file_schema_.dimension_) +
             ", collection_id = " + table_file_schema_.table_id_;
         ENGINE_LOG_ERROR << err_msg;
-        return Status(DB_ERROR, "Not able to create table file");
+        return Status(DB_ERROR, "Not able to create collection file");
     }
 
     size_t single_vector_mem_size = source->SingleVectorSize(table_file_schema_.dimension_);
@@ -162,9 +162,9 @@ MemTableFile::Serialize(uint64_t wal_lsn) {
     if (!status.ok()) {
         ENGINE_LOG_ERROR << "Failed to serialize segment: " << table_file_schema_.segment_id_;
 
-        /* Can't mark it as to_delete because data is stored in this mem table file. Any further flush
-         * will try to serialize the same mem table file and it won't be able to find the directory
-         * to write to or update the associated table file in meta.
+        /* Can't mark it as to_delete because data is stored in this mem collection file. Any further flush
+         * will try to serialize the same mem collection file and it won't be able to find the directory
+         * to write to or update the associated collection file in meta.
          *
         table_file_schema_.file_type_ = meta::TableFileSchema::TO_DELETE;
         meta_->UpdateTableFile(table_file_schema_);
@@ -192,7 +192,7 @@ MemTableFile::Serialize(uint64_t wal_lsn) {
         table_file_schema_.file_type_ = meta::TableFileSchema::RAW;
     }
 
-    // Set table file's flush_lsn so WAL can roll back and delete garbage files which can be obtained from
+    // Set collection file's flush_lsn so WAL can roll back and delete garbage files which can be obtained from
     // GetTableFilesByFlushLSN() in meta.
     table_file_schema_.flush_lsn_ = wal_lsn;
 

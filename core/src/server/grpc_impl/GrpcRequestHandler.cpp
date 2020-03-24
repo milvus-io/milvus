@@ -511,8 +511,8 @@ GrpcRequestHandler::ShowTables(::grpc::ServerContext* context, const ::milvus::g
 
     std::vector<std::string> tables;
     Status status = request_handler_.ShowTables(context_map_[context], tables);
-    for (auto& table : tables) {
-        response->add_table_names(table);
+    for (auto& collection : tables) {
+        response->add_table_names(collection);
     }
     SET_RESPONSE(response->mutable_status(), status, context);
 

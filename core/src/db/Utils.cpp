@@ -110,10 +110,10 @@ DeleteTablePath(const DBMetaOptions& options, const std::string& collection_id, 
         std::string table_path = path + TABLES_FOLDER + collection_id;
         if (force) {
             boost::filesystem::remove_all(table_path);
-            ENGINE_LOG_DEBUG << "Remove table folder: " << table_path;
+            ENGINE_LOG_DEBUG << "Remove collection folder: " << table_path;
         } else if (boost::filesystem::exists(table_path) && boost::filesystem::is_empty(table_path)) {
             boost::filesystem::remove_all(table_path);
-            ENGINE_LOG_DEBUG << "Remove table folder: " << table_path;
+            ENGINE_LOG_DEBUG << "Remove collection folder: " << table_path;
         }
     }
 
@@ -181,7 +181,7 @@ GetTableFilePath(const DBMetaOptions& options, meta::TableFileSchema& table_file
 
     std::string msg = "Table file doesn't exist: " + file_path;
     if (table_file.file_size_ > 0) {  // no need to pop error for empty file
-        ENGINE_LOG_ERROR << msg << " in path: " << options.path_ << " for table: " << table_file.table_id_;
+        ENGINE_LOG_ERROR << msg << " in path: " << options.path_ << " for collection: " << table_file.table_id_;
     }
 
     return Status(DB_ERROR, msg);

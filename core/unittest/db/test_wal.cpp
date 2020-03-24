@@ -507,7 +507,7 @@ TEST(WalTest, MANAGER_RECOVERY_TEST) {
     ASSERT_EQ(manager->Init(meta), milvus::WAL_SUCCESS);
 
     milvus::engine::meta::TableSchema schema;
-    schema.table_id_ = "table";
+    schema.table_id_ = "collection";
     schema.flush_lsn_ = 0;
     meta->CreateTable(schema);
 
@@ -672,7 +672,7 @@ TEST(WalTest, MANAGER_SAME_NAME_TABLE) {
     ASSERT_TRUE(manager->DeleteById(table_id_1, ids));
     ASSERT_TRUE(manager->DeleteById(table_id_2, ids));
 
-    // re-create table
+    // re-create collection
     manager->DropTable(table_id_1);
     manager->CreateTable(table_id_1);
 

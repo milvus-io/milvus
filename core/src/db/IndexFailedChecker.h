@@ -41,7 +41,7 @@ class IndexFailedChecker {
 
  private:
     std::mutex mutex_;
-    Table2FileErr index_failed_files_;  // table id mapping to (file id mapping to failed times)
+    Table2FileErr index_failed_files_;  // collection id mapping to (file id mapping to failed times)
 };
 
 }  // namespace engine

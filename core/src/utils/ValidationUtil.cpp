@@ -106,10 +106,10 @@ ValidationUtil::ValidateTableName(const std::string& table_name) {
         return Status(SERVER_INVALID_TABLE_NAME, msg);
     }
 
-    std::string invalid_msg = "Invalid table name: " + table_name + ". ";
+    std::string invalid_msg = "Invalid collection name: " + table_name + ". ";
     // Table name size shouldn't exceed 16384.
     if (table_name.size() > TABLE_NAME_SIZE_LIMIT) {
-        std::string msg = invalid_msg + "The length of a table name must be less than 255 characters.";
+        std::string msg = invalid_msg + "The length of a collection name must be less than 255 characters.";
         SERVER_LOG_ERROR << msg;
         return Status(SERVER_INVALID_TABLE_NAME, msg);
     }
@@ -117,7 +117,7 @@ ValidationUtil::ValidateTableName(const std::string& table_name) {
     // Table name first character should be underscore or character.
     char first_char = table_name[0];
     if (first_char != '_' && std::isalpha(first_char) == 0) {
-        std::string msg = invalid_msg + "The first character of a table name must be an underscore or letter.";
+        std::string msg = invalid_msg + "The first character of a collection name must be an underscore or letter.";
         SERVER_LOG_ERROR << msg;
         return Status(SERVER_INVALID_TABLE_NAME, msg);
     }
@@ -138,8 +138,8 @@ ValidationUtil::ValidateTableName(const std::string& table_name) {
 Status
 ValidationUtil::ValidateTableDimension(int64_t dimension, int64_t metric_type) {
     if (dimension <= 0 || dimension > TABLE_DIMENSION_LIMIT) {
-        std::string msg = "Invalid table dimension: " + std::to_string(dimension) + ". " +
-                          "The table dimension must be within the range of 1 ~ " +
+        std::string msg = "Invalid collection dimension: " + std::to_string(dimension) + ". " +
+                          "The collection dimension must be within the range of 1 ~ " +
                           std::to_string(TABLE_DIMENSION_LIMIT) + ".";
         SERVER_LOG_ERROR << msg;
         return Status(SERVER_INVALID_VECTOR_DIMENSION, msg);
@@ -147,8 +147,8 @@ ValidationUtil::ValidateTableDimension(int64_t dimension, int64_t metric_type) {
 
     if (milvus::engine::utils::IsBinaryMetricType(metric_type)) {
         if ((dimension % 8) != 0) {
-            std::string msg = "Invalid table dimension: " + std::to_string(dimension) + ". " +
-                              "The table dimension must be a multiple of 8";
+            std::string msg = "Invalid collection dimension: " + std::to_string(dimension) + ". " +
+                              "The collection dimension must be a multiple of 8";
             SERVER_LOG_ERROR << msg;
             return Status(SERVER_INVALID_VECTOR_DIMENSION, msg);
         }
@@ -213,7 +213,7 @@ ValidationUtil::ValidateIndexParams(const milvus::json& index_params, const engi
             milvus::knowhere::IVFPQConfAdapter::GetValidMList(table_schema.dimension_, resset);
             int64_t m_value = index_params[index_params, knowhere::IndexParams::m];
             if (resset.empty()) {
-                std::string msg = "Invalid table dimension, unable to get reasonable values for 'm'";
+                std::string msg = "Invalid collection dimension, unable to get reasonable values for 'm'";
                 SERVER_LOG_ERROR << msg;
                 return Status(SERVER_INVALID_TABLE_DIMENSION, msg);
             }
@@ -317,22 +317,22 @@ ValidationUtil::ValidateVectorData(const engine::VectorsData& vectors, const eng
     if (engine::utils::IsBinaryMetricType(table_schema.metric_type_)) {
         // check prepared binary data
         if (vectors.binary_data_.size() % vector_count != 0) {
-            return Status(SERVER_INVALID_ROWRECORD_ARRAY, "The vector dimension must be equal to the table dimension.");
+            return Status(SERVER_INVALID_ROWRECORD_ARRAY, "The vector dimension must be equal to the collection dimension.");
         }
 
         if (vectors.binary_data_.size() * 8 / vector_count != table_schema.dimension_) {
             return Status(SERVER_INVALID_VECTOR_DIMENSION,
-                          "The vector dimension must be equal to the table dimension.");
+                          "The vector dimension must be equal to the collection dimension.");
         }
     } else {
         // check prepared float data
         fiu_do_on("SearchRequest.OnExecute.invalod_rowrecord_array", vector_count = vectors.float_data_.size() + 1);
         if (vectors.float_data_.size() % vector_count != 0) {
-            return Status(SERVER_INVALID_ROWRECORD_ARRAY, "The vector dimension must be equal to the table dimension.");
+            return Status(SERVER_INVALID_ROWRECORD_ARRAY, "The vector dimension must be equal to the collection dimension.");
         }
         if (vectors.float_data_.size() / vector_count != table_schema.dimension_) {
             return Status(SERVER_INVALID_VECTOR_DIMENSION,
-                          "The vector dimension must be equal to the table dimension.");
+                          "The vector dimension must be equal to the collection dimension.");
         }
     }
 

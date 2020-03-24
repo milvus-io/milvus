@@ -47,7 +47,7 @@ InsertRequest::OnExecute() {
     try {
         int64_t vector_count = vectors_data_.vector_count_;
         fiu_do_on("InsertRequest.OnExecute.throw_std_exception", throw std::exception());
-        std::string hdr = "InsertRequest(table=" + table_name_ + ", n=" + std::to_string(vector_count) +
+        std::string hdr = "InsertRequest(collection=" + table_name_ + ", n=" + std::to_string(vector_count) +
                           ", partition_tag=" + partition_tag_ + ")";
         TimeRecorder rc(hdr);
 
@@ -69,8 +69,8 @@ InsertRequest::OnExecute() {
             }
         }
 
-        // step 2: check table existence
-        // only process root table, ignore partition table
+        // step 2: check collection existence
+        // only process root collection, ignore partition collection
         engine::meta::TableSchema table_schema;
         table_schema.table_id_ = table_name_;
         status = DBWrapper::DB()->DescribeTable(table_schema);
@@ -88,7 +88,7 @@ InsertRequest::OnExecute() {
             }
         }
 
-        // step 3: check table flag
+        // step 3: check collection flag
         // all user provide id, or all internal id
         bool user_provide_ids = !vectors_data_.id_array_.empty();
         fiu_do_on("InsertRequest.OnExecute.illegal_vector_id", user_provide_ids = false;
@@ -96,7 +96,7 @@ InsertRequest::OnExecute() {
         // user already provided id before, all insert action require user id
         if ((table_schema.flag_ & engine::meta::FLAG_MASK_HAS_USERID) != 0 && !user_provide_ids) {
             return Status(SERVER_ILLEGAL_VECTOR_ID,
-                          "Table vector IDs are user-defined. Please provide IDs for all vectors of this table.");
+                          "Table vector IDs are user-defined. Please provide IDs for all vectors of this collection.");
         }
 
         fiu_do_on("InsertRequest.OnExecute.illegal_vector_id2", user_provide_ids = true;
@@ -105,7 +105,7 @@ InsertRequest::OnExecute() {
         if ((table_schema.flag_ & engine::meta::FLAG_MASK_NO_USERID) != 0 && user_provide_ids) {
             return Status(
                 SERVER_ILLEGAL_VECTOR_ID,
-                "Table vector IDs are auto-generated. All vectors of this table must use auto-generated IDs.");
+                "Table vector IDs are auto-generated. All vectors of this collection must use auto-generated IDs.");
         }
 
         rc.RecordSection("check validation");
@@ -123,13 +123,13 @@ InsertRequest::OnExecute() {
             // check prepared float data
             if (vectors_data_.float_data_.size() % vector_count != 0) {
                 return Status(SERVER_INVALID_ROWRECORD_ARRAY,
-                              "The vector dimension must be equal to the table dimension.");
+                              "The vector dimension must be equal to the collection dimension.");
             }
 
             fiu_do_on("InsertRequest.OnExecute.invalid_dim", table_schema.dimension_ = -1);
             if (vectors_data_.float_data_.size() / vector_count != table_schema.dimension_) {
                 return Status(SERVER_INVALID_VECTOR_DIMENSION,
-                              "The vector dimension must be equal to the table dimension.");
+                              "The vector dimension must be equal to the collection dimension.");
             }
         } else if (!vectors_data_.binary_data_.empty()) {  // insert binary vectors
             if (!engine::utils::IsBinaryMetricType(table_schema.metric_type_)) {
@@ -139,12 +139,12 @@ InsertRequest::OnExecute() {
             // check prepared binary data
             if (vectors_data_.binary_data_.size() % vector_count != 0) {
                 return Status(SERVER_INVALID_ROWRECORD_ARRAY,
-                              "The vector dimension must be equal to the table dimension.");
+                              "The vector dimension must be equal to the collection dimension.");
             }
 
             if (vectors_data_.binary_data_.size() * 8 / vector_count != table_schema.dimension_) {
                 return Status(SERVER_INVALID_VECTOR_DIMENSION,
-                              "The vector dimension must be equal to the table dimension.");
+                              "The vector dimension must be equal to the collection dimension.");
             }
         }
 
@@ -166,7 +166,7 @@ InsertRequest::OnExecute() {
             return Status(SERVER_ILLEGAL_VECTOR_ID, msg);
         }
 
-        // step 6: update table flag
+        // step 6: update collection flag
         user_provide_ids ? table_schema.flag_ |= engine::meta::FLAG_MASK_HAS_USERID
                          : table_schema.flag_ |= engine::meta::FLAG_MASK_NO_USERID;
         status = DBWrapper::DB()->UpdateTableFlag(table_name_, table_schema.flag_);

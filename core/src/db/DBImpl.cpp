@@ -282,7 +282,7 @@ DBImpl::GetTableInfo(const std::string& collection_id, TableInfo& table_info) {
         name2tag.push_back(std::make_pair(schema.table_id_, schema.partition_tag_));
     }
 
-    // step2: get native table info
+    // step2: get native collection info
     std::vector<int> file_types{meta::TableFileSchema::FILE_TYPE::RAW, meta::TableFileSchema::FILE_TYPE::TO_INDEX,
                                 meta::TableFileSchema::FILE_TYPE::INDEX};
 
@@ -303,7 +303,7 @@ DBImpl::GetTableInfo(const std::string& collection_id, TableInfo& table_info) {
         meta::TableFilesSchema table_files;
         status = meta_ptr_->FilesByType(name_tag.first, file_types, table_files);
         if (!status.ok()) {
-            std::string err_msg = "Failed to get table info: " + status.ToString();
+            std::string err_msg = "Failed to get collection info: " + status.ToString();
             ENGINE_LOG_ERROR << err_msg;
             return Status(DB_ERROR, err_msg);
         }
@@ -338,7 +338,7 @@ DBImpl::PreloadTable(const std::string& collection_id) {
         return SHUTDOWN_ERROR;
     }
 
-    // step 1: get all table files from parent table
+    // step 1: get all collection files from parent collection
     meta::TableFilesSchema files_array;
     auto status = GetFilesToSearch(collection_id, files_array);
     if (!status.ok()) {
@@ -358,9 +358,9 @@ DBImpl::PreloadTable(const std::string& collection_id) {
     int64_t available_size = cache_total - cache_usage;
 
     // step 3: load file one by one
-    ENGINE_LOG_DEBUG << "Begin pre-load table:" + collection_id + ", totally " << files_array.size()
+    ENGINE_LOG_DEBUG << "Begin pre-load collection:" + collection_id + ", totally " << files_array.size()
                      << " files need to be pre-loaded";
-    TimeRecorderAuto rc("Pre-load table:" + collection_id);
+    TimeRecorderAuto rc("Pre-load collection:" + collection_id);
     for (auto& file : files_array) {
         EngineType engine_type;
         if (file.file_type_ == meta::TableFileSchema::FILE_TYPE::RAW ||
@@ -395,7 +395,7 @@ DBImpl::PreloadTable(const std::string& collection_id) {
                 return Status(SERVER_CACHE_FULL, "Cache is full");
             }
         } catch (std::exception& ex) {
-            std::string msg = "Pre-load table encounter exception: " + std::string(ex.what());
+            std::string msg = "Pre-load collection encounter exception: " + std::string(ex.what());
             ENGINE_LOG_ERROR << msg;
             return Status(DB_ERROR, msg);
         }
@@ -441,13 +441,13 @@ DBImpl::DropPartition(const std::string& partition_name) {
     }
 
     mem_mgr_->EraseMemVector(partition_name);                // not allow insert
-    auto status = meta_ptr_->DropPartition(partition_name);  // soft delete table
+    auto status = meta_ptr_->DropPartition(partition_name);  // soft delete collection
     if (!status.ok()) {
         ENGINE_LOG_ERROR << status.message();
         return status;
     }
 
-    // scheduler will determine when to delete table files
+    // scheduler will determine when to delete collection files
     auto nres = scheduler::ResMgrInst::GetInstance()->GetNumOfComputeResource();
     scheduler::DeleteJobPtr job = std::make_shared<scheduler::DeleteJob>(partition_name, meta_ptr_, nres);
     scheduler::JobMgrInst::GetInstance()->Put(job);
@@ -488,7 +488,7 @@ DBImpl::InsertVectors(const std::string& collection_id, const std::string& parti
         return SHUTDOWN_ERROR;
     }
 
-    // insert vectors into target table
+    // insert vectors into target collection
     // (zhiru): generate ids
     if (vectors.id_array_.empty()) {
         SafeIDGenerator& id_generator = SafeIDGenerator::GetInstance();
@@ -587,7 +587,7 @@ DBImpl::Flush(const std::string& collection_id) {
         return Status(DB_NOT_FOUND, "Table to flush does not exist");
     }
 
-    ENGINE_LOG_DEBUG << "Begin flush table: " << collection_id;
+    ENGINE_LOG_DEBUG << "Begin flush collection: " << collection_id;
 
     if (options_.wal_enable_) {
         ENGINE_LOG_DEBUG << "WAL flush";
@@ -607,7 +607,7 @@ DBImpl::Flush(const std::string& collection_id) {
         status = ExecWalRecord(record);
     }
 
-    ENGINE_LOG_DEBUG << "End flush table: " << collection_id;
+    ENGINE_LOG_DEBUG << "End flush collection: " << collection_id;
 
     return status;
 }
@@ -670,7 +670,7 @@ DBImpl::Compact(const std::string& collection_id) {
     const std::lock_guard<std::mutex> index_lock(build_index_mutex_);
     const std::lock_guard<std::mutex> merge_lock(flush_merge_compact_mutex_);
 
-    ENGINE_LOG_DEBUG << "Compacting table: " << collection_id;
+    ENGINE_LOG_DEBUG << "Compacting collection: " << collection_id;
 
     // Get files to compact from meta.
     std::vector<int> file_types{meta::TableFileSchema::FILE_TYPE::RAW, meta::TableFileSchema::FILE_TYPE::TO_INDEX,
@@ -732,7 +732,7 @@ DBImpl::Compact(const std::string& collection_id) {
     OngoingFileChecker::GetInstance().UnmarkOngoingFiles(files_to_compact);
 
     if (compact_status.ok()) {
-        ENGINE_LOG_DEBUG << "Finished compacting table: " << collection_id;
+        ENGINE_LOG_DEBUG << "Finished compacting collection: " << collection_id;
     }
 
     return compact_status;
@@ -741,9 +741,9 @@ DBImpl::Compact(const std::string& collection_id) {
 Status
 DBImpl::CompactFile(const std::string& collection_id, const meta::TableFileSchema& file,
                     meta::TableFilesSchema& files_to_update) {
-    ENGINE_LOG_DEBUG << "Compacting segment " << file.segment_id_ << " for table: " << collection_id;
+    ENGINE_LOG_DEBUG << "Compacting segment " << file.segment_id_ << " for collection: " << collection_id;
 
-    // Create new table file
+    // Create new collection file
     meta::TableFileSchema compacted_file;
     compacted_file.table_id_ = collection_id;
     // compacted_file.date_ = date;
@@ -751,11 +751,11 @@ DBImpl::CompactFile(const std::string& collection_id, const meta::TableFileSchem
     Status status = meta_ptr_->CreateTableFile(compacted_file);
 
     if (!status.ok()) {
-        ENGINE_LOG_ERROR << "Failed to create table file: " << status.message();
+        ENGINE_LOG_ERROR << "Failed to create collection file: " << status.message();
         return status;
     }
 
-    // Compact (merge) file to the newly created table file
+    // Compact (merge) file to the newly created collection file
 
     std::string new_segment_dir;
     utils::GetParentPath(compacted_file.location_, new_segment_dir);
@@ -780,7 +780,7 @@ DBImpl::CompactFile(const std::string& collection_id, const meta::TableFileSchem
         return status;
     }
 
-    // Update table files state
+    // Update collection files state
     // if index type isn't IDMAP, set file type to TO_INDEX if file size exceed index_file_size
     // else set file type to RAW, no need to build index
     if (!utils::IsRawIndexType(compacted_file.engine_type_)) {
@@ -887,7 +887,7 @@ DBImpl::GetVectorIDs(const std::string& collection_id, const std::string& segmen
         return SHUTDOWN_ERROR;
     }
 
-    // step 1: check table existence
+    // step 1: check collection existence
     bool has_table;
     auto status = HasTable(collection_id, has_table);
     if (!has_table) {
@@ -909,14 +909,14 @@ DBImpl::GetVectorIDs(const std::string& collection_id, const std::string& segmen
         return Status(DB_NOT_FOUND, "Segment does not exist");
     }
 
-    // check the segment is belong to this table
+    // check the segment is belong to this collection
     if (table_files[0].table_id_ != collection_id) {
-        // the segment could be in a partition under this table
+        // the segment could be in a partition under this collection
         meta::TableSchema table_schema;
         table_schema.table_id_ = table_files[0].table_id_;
         status = DescribeTable(table_schema);
         if (table_schema.owner_table_ != collection_id) {
-            return Status(DB_NOT_FOUND, "Segment does not belong to this table");
+            return Status(DB_NOT_FOUND, "Segment does not belong to this collection");
         }
     }
 
@@ -1036,7 +1036,7 @@ DBImpl::CreateIndex(const std::string& collection_id, const TableIndex& index) {
         TableIndex old_index;
         status = DescribeIndex(collection_id, old_index);
         if (!status.ok()) {
-            ENGINE_LOG_ERROR << "Failed to get table index info for table: " << collection_id;
+            ENGINE_LOG_ERROR << "Failed to get collection index info for collection: " << collection_id;
             return status;
         }
 
@@ -1077,7 +1077,7 @@ DBImpl::DropIndex(const std::string& collection_id) {
         return SHUTDOWN_ERROR;
     }
 
-    ENGINE_LOG_DEBUG << "Drop index for table: " << collection_id;
+    ENGINE_LOG_DEBUG << "Drop index for collection: " << collection_id;
     return DropTableIndexRecursively(collection_id);
 }
 
@@ -1111,8 +1111,8 @@ DBImpl::Query(const std::shared_ptr<server::Context>& context, const std::string
     meta::TableFilesSchema files_array;
 
     if (partition_tags.empty()) {
-        // no partition tag specified, means search in whole table
-        // get all table files from parent table
+        // no partition tag specified, means search in whole collection
+        // get all collection files from parent collection
         status = GetFilesToSearch(collection_id, files_array);
         if (!status.ok()) {
             return status;
@@ -1364,16 +1364,16 @@ Status
 DBImpl::MergeFiles(const std::string& collection_id, const meta::TableFilesSchema& files) {
     // const std::lock_guard<std::mutex> lock(flush_merge_compact_mutex_);
 
-    ENGINE_LOG_DEBUG << "Merge files for table: " << collection_id;
+    ENGINE_LOG_DEBUG << "Merge files for collection: " << collection_id;
 
-    // step 1: create table file
+    // step 1: create collection file
     meta::TableFileSchema table_file;
     table_file.table_id_ = collection_id;
     table_file.file_type_ = meta::TableFileSchema::NEW_MERGE;
     Status status = meta_ptr_->CreateTableFile(table_file);
 
     if (!status.ok()) {
-        ENGINE_LOG_ERROR << "Failed to create table: " << status.ToString();
+        ENGINE_LOG_ERROR << "Failed to create collection: " << status.ToString();
         return status;
     }
 
@@ -1426,7 +1426,7 @@ DBImpl::MergeFiles(const std::string& collection_id, const meta::TableFilesSchem
         return status;
     }
 
-    // step 4: update table files state
+    // step 4: update collection files state
     // if index type isn't IDMAP, set file type to TO_INDEX if file size exceed index_file_size
     // else set file type to RAW, no need to build index
     if (!utils::IsRawIndexType(table_file.engine_type_)) {
@@ -1457,7 +1457,7 @@ DBImpl::BackgroundMergeFiles(const std::string& collection_id) {
     meta::TableFilesSchema raw_files;
     auto status = meta_ptr_->FilesToMerge(collection_id, raw_files);
     if (!status.ok()) {
-        ENGINE_LOG_ERROR << "Failed to get merge files for table: " << collection_id;
+        ENGINE_LOG_ERROR << "Failed to get merge files for collection: " << collection_id;
         return status;
     }
 
@@ -1471,7 +1471,7 @@ DBImpl::BackgroundMergeFiles(const std::string& collection_id) {
     status = OngoingFileChecker::GetInstance().UnmarkOngoingFiles(raw_files);
 
     if (!initialized_.load(std::memory_order_acquire)) {
-        ENGINE_LOG_DEBUG << "Server will shutdown, skip merge action for table: " << collection_id;
+        ENGINE_LOG_DEBUG << "Server will shutdown, skip merge action for collection: " << collection_id;
     }
 
     return Status::OK();
@@ -1485,7 +1485,7 @@ DBImpl::BackgroundMerge(std::set<std::string> table_ids) {
     for (auto& collection_id : table_ids) {
         status = BackgroundMergeFiles(collection_id);
         if (!status.ok()) {
-            ENGINE_LOG_ERROR << "Merge files for table " << collection_id << " failed: " << status.ToString();
+            ENGINE_LOG_ERROR << "Merge files for collection " << collection_id << " failed: " << status.ToString();
         }
 
         if (!initialized_.load(std::memory_order_acquire)) {
@@ -1600,7 +1600,7 @@ DBImpl::GetFilesToBuildIndex(const std::string& collection_id, const std::vector
 
 Status
 DBImpl::GetFilesToSearch(const std::string& collection_id, meta::TableFilesSchema& files) {
-    ENGINE_LOG_DEBUG << "Collect files from table: " << collection_id;
+    ENGINE_LOG_DEBUG << "Collect files from collection: " << collection_id;
 
     meta::TableFilesSchema search_files;
     auto status = meta_ptr_->FilesToSearch(collection_id, search_files);
@@ -1670,8 +1670,8 @@ DBImpl::GetPartitionsByTags(const std::string& collection_id, const std::vector<
 
 Status
 DBImpl::DropTableRecursively(const std::string& collection_id) {
-    // dates partly delete files of the table but currently we don't support
-    ENGINE_LOG_DEBUG << "Prepare to delete table " << collection_id;
+    // dates partly delete files of the collection but currently we don't support
+    ENGINE_LOG_DEBUG << "Prepare to delete collection " << collection_id;
 
     Status status;
     if (options_.wal_enable_) {
@@ -1679,10 +1679,10 @@ DBImpl::DropTableRecursively(const std::string& collection_id) {
     }
 
     status = mem_mgr_->EraseMemVector(collection_id);  // not allow insert
-    status = meta_ptr_->DropTable(collection_id);      // soft delete table
+    status = meta_ptr_->DropTable(collection_id);      // soft delete collection
     index_failed_checker_.CleanFailedIndexFileOfTable(collection_id);
 
-    // scheduler will determine when to delete table files
+    // scheduler will determine when to delete collection files
     auto nres = scheduler::ResMgrInst::GetInstance()->GetNumOfComputeResource();
     scheduler::DeleteJobPtr job = std::make_shared<scheduler::DeleteJob>(collection_id, meta_ptr_, nres);
     scheduler::JobMgrInst::GetInstance()->Put(job);
@@ -1709,7 +1709,7 @@ DBImpl::UpdateTableIndexRecursively(const std::string& collection_id, const Tabl
     fiu_do_on("DBImpl.UpdateTableIndexRecursively.fail_update_table_index",
               status = Status(DB_META_TRANSACTION_FAILED, ""));
     if (!status.ok()) {
-        ENGINE_LOG_ERROR << "Failed to update table index info for table: " << collection_id;
+        ENGINE_LOG_ERROR << "Failed to update collection index info for collection: " << collection_id;
         return status;
     }
 
@@ -1788,7 +1788,7 @@ DBImpl::WaitTableIndexRecursively(const std::string& collection_id, const TableI
 
 Status
 DBImpl::DropTableIndexRecursively(const std::string& collection_id) {
-    ENGINE_LOG_DEBUG << "Drop index for table: " << collection_id;
+    ENGINE_LOG_DEBUG << "Drop index for collection: " << collection_id;
     index_failed_checker_.CleanFailedIndexFileOfTable(collection_id);
     auto status = meta_ptr_->DropTableIndex(collection_id);
     if (!status.ok()) {
@@ -1847,10 +1847,10 @@ DBImpl::ExecWalRecord(const wal::MXLogRecord& record) {
 
         uint64_t max_lsn = 0;
         if (options_.wal_enable_) {
-            for (auto& table : table_ids) {
+            for (auto& collection : table_ids) {
                 uint64_t lsn = 0;
-                meta_ptr_->GetTableFlushLSN(table, lsn);
-                wal_mgr_->TableFlushed(table, lsn);
+                meta_ptr_->GetTableFlushLSN(collection, lsn);
+                wal_mgr_->TableFlushed(collection, lsn);
                 if (lsn > max_lsn) {
                     max_lsn = lsn;
                 }
@@ -1858,8 +1858,8 @@ DBImpl::ExecWalRecord(const wal::MXLogRecord& record) {
         }
 
         std::lock_guard<std::mutex> lck(merge_result_mutex_);
-        for (auto& table : table_ids) {
-            merge_table_ids_.insert(table);
+        for (auto& collection : table_ids) {
+            merge_table_ids_.insert(collection);
         }
         return max_lsn;
     };
@@ -1938,7 +1938,7 @@ DBImpl::ExecWalRecord(const wal::MXLogRecord& record) {
 
         case wal::MXLogType::Flush: {
             if (!record.collection_id.empty()) {
-                // flush one table
+                // flush one collection
                 std::vector<meta::TableSchema> partition_array;
                 status = meta_ptr_->ShowPartitions(record.collection_id, partition_array);
                 if (!status.ok()) {

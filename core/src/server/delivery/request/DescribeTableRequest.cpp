@@ -34,7 +34,7 @@ DescribeTableRequest::Create(const std::shared_ptr<milvus::server::Context>& con
 
 Status
 DescribeTableRequest::OnExecute() {
-    std::string hdr = "DescribeTableRequest(table=" + table_name_ + ")";
+    std::string hdr = "DescribeTableRequest(collection=" + table_name_ + ")";
     TimeRecorderAuto rc(hdr);
 
     try {
@@ -44,8 +44,8 @@ DescribeTableRequest::OnExecute() {
             return status;
         }
 
-        // step 2: get table info
-        // only process root table, ignore partition table
+        // step 2: get collection info
+        // only process root collection, ignore partition collection
         engine::meta::TableSchema table_schema;
         table_schema.table_id_ = table_name_;
         status = DBWrapper::DB()->DescribeTable(table_schema);

@@ -32,57 +32,57 @@ TEST_F(MySqlMetaTest, TABLE_TEST) {
     auto collection_id = "meta_test_table";
     fiu_init(0);
 
-    milvus::engine::meta::TableSchema table;
-    table.table_id_ = collection_id;
-    auto status = impl_->CreateTable(table);
+    milvus::engine::meta::TableSchema collection;
+    collection.table_id_ = collection_id;
+    auto status = impl_->CreateTable(collection);
     ASSERT_TRUE(status.ok());
 
-    auto gid = table.id_;
-    table.id_ = -1;
-    status = impl_->DescribeTable(table);
+    auto gid = collection.id_;
+    collection.id_ = -1;
+    status = impl_->DescribeTable(collection);
     ASSERT_TRUE(status.ok());
-    ASSERT_EQ(table.id_, gid);
-    ASSERT_EQ(table.table_id_, collection_id);
+    ASSERT_EQ(collection.id_, gid);
+    ASSERT_EQ(collection.table_id_, collection_id);
 
-    table.table_id_ = "not_found";
-    status = impl_->DescribeTable(table);
+    collection.table_id_ = "not_found";
+    status = impl_->DescribeTable(collection);
     ASSERT_TRUE(!status.ok());
 
-    table.table_id_ = collection_id;
-    status = impl_->CreateTable(table);
+    collection.table_id_ = collection_id;
+    status = impl_->CreateTable(collection);
     ASSERT_EQ(status.code(), milvus::DB_ALREADY_EXIST);
 
-    table.table_id_ = "";
-    status = impl_->CreateTable(table);
+    collection.table_id_ = "";
+    status = impl_->CreateTable(collection);
     //    ASSERT_TRUE(status.ok());
 
-    table.table_id_ = collection_id;
+    collection.table_id_ = collection_id;
     FIU_ENABLE_FIU("MySQLMetaImpl.CreateTable.null_connection");
-    auto stat = impl_->CreateTable(table);
+    auto stat = impl_->CreateTable(collection);
     ASSERT_FALSE(stat.ok());
     ASSERT_EQ(stat.message(), FAILED_CONNECT_SQL_SERVER);
     fiu_disable("MySQLMetaImpl.CreateTable.null_connection");
 
     FIU_ENABLE_FIU("MySQLMetaImpl.CreateTable.throw_exception");
-    stat = impl_->CreateTable(table);
+    stat = impl_->CreateTable(collection);
     ASSERT_FALSE(stat.ok());
     fiu_disable("MySQLMetaImpl.CreateTable.throw_exception");
 
-    //ensure table exists
-    stat = impl_->CreateTable(table);
+    //ensure collection exists
+    stat = impl_->CreateTable(collection);
     FIU_ENABLE_FIU("MySQLMetaImpl.CreateTableTable.schema_TO_DELETE");
-    stat = impl_->CreateTable(table);
+    stat = impl_->CreateTable(collection);
     ASSERT_FALSE(stat.ok());
     ASSERT_EQ(stat.message(), TABLE_ALREADY_EXISTS);
     fiu_disable("MySQLMetaImpl.CreateTableTable.schema_TO_DELETE");
 
     FIU_ENABLE_FIU("MySQLMetaImpl.DescribeTable.null_connection");
-    stat = impl_->DescribeTable(table);
+    stat = impl_->DescribeTable(collection);
     ASSERT_FALSE(stat.ok());
     fiu_disable("MySQLMetaImpl.DescribeTable.null_connection");
 
     FIU_ENABLE_FIU("MySQLMetaImpl.DescribeTable.throw_exception");
-    stat = impl_->DescribeTable(table);
+    stat = impl_->DescribeTable(collection);
     ASSERT_FALSE(stat.ok());
     fiu_disable("MySQLMetaImpl.DescribeTable.throw_exception");
 
@@ -131,14 +131,14 @@ TEST_F(MySqlMetaTest, TABLE_FILE_TEST) {
     ASSERT_TRUE(status.ok());
     ASSERT_EQ(size, 0);
 
-    milvus::engine::meta::TableSchema table;
-    table.table_id_ = collection_id;
-    table.dimension_ = 256;
-    status = impl_->CreateTable(table);
+    milvus::engine::meta::TableSchema collection;
+    collection.table_id_ = collection_id;
+    collection.dimension_ = 256;
+    status = impl_->CreateTable(collection);
 
     //CreateTableFile
     milvus::engine::meta::TableFileSchema table_file;
-    table_file.table_id_ = table.table_id_;
+    table_file.table_id_ = collection.table_id_;
     status = impl_->CreateTableFile(table_file);
     ASSERT_TRUE(status.ok());
     ASSERT_EQ(table_file.file_type_, milvus::engine::meta::TableFileSchema::NEW);
@@ -249,14 +249,14 @@ TEST_F(MySqlMetaTest, TABLE_FILE_TEST) {
     status = impl_->GetTableFiles(table_file.table_id_, ids, files);
     ASSERT_TRUE(status.ok());
 
-    table_file.table_id_ = table.table_id_;
+    table_file.table_id_ = collection.table_id_;
     table_file.file_type_ = milvus::engine::meta::TableFileSchema::RAW;
     status = impl_->CreateTableFile(table_file);
     ids = {table_file.id_};
     status = impl_->FilesByID(ids, files);
     ASSERT_EQ(files.size(), 1UL);
 
-    table_file.table_id_ = table.table_id_;
+    table_file.table_id_ = collection.table_id_;
     table_file.file_type_ = milvus::engine::meta::TableFileSchema::TO_DELETE;
     status = impl_->CreateTableFile(table_file);
 
@@ -281,14 +281,14 @@ TEST_F(MySqlMetaTest, TABLE_FILE_TEST) {
 TEST_F(MySqlMetaTest, TABLE_FILE_ROW_COUNT_TEST) {
     auto collection_id = "row_count_test_table";
 
-    milvus::engine::meta::TableSchema table;
-    table.table_id_ = collection_id;
-    table.dimension_ = 256;
-    auto status = impl_->CreateTable(table);
+    milvus::engine::meta::TableSchema collection;
+    collection.table_id_ = collection_id;
+    collection.dimension_ = 256;
+    auto status = impl_->CreateTable(collection);
 
     milvus::engine::meta::TableFileSchema table_file;
     table_file.row_count_ = 100;
-    table_file.table_id_ = table.table_id_;
+    table_file.table_id_ = collection.table_id_;
     table_file.file_type_ = 1;
     status = impl_->CreateTableFile(table_file);
 
@@ -335,13 +335,13 @@ TEST_F(MySqlMetaTest, ARCHIVE_TEST_DAYS) {
 
     auto collection_id = "meta_test_table";
 
-    milvus::engine::meta::TableSchema table;
-    table.table_id_ = collection_id;
-    auto status = impl.CreateTable(table);
+    milvus::engine::meta::TableSchema collection;
+    collection.table_id_ = collection_id;
+    auto status = impl.CreateTable(collection);
 
     milvus::engine::meta::TableFilesSchema files;
     milvus::engine::meta::TableFileSchema table_file;
-    table_file.table_id_ = table.table_id_;
+    table_file.table_id_ = collection.table_id_;
 
     auto cnt = 100;
     int64_t ts = milvus::engine::utils::GetMicroSecTimeStamp();
@@ -428,9 +428,9 @@ TEST_F(MySqlMetaTest, ARCHIVE_TEST_DISK) {
     milvus::engine::meta::MySQLMetaImpl impl(options, mode);
     auto collection_id = "meta_test_group";
 
-    milvus::engine::meta::TableSchema table;
-    table.table_id_ = collection_id;
-    auto status = impl.CreateTable(table);
+    milvus::engine::meta::TableSchema collection;
+    collection.table_id_ = collection_id;
+    auto status = impl.CreateTable(collection);
 
     milvus::engine::meta::TableSchema table_schema;
     table_schema.table_id_ = "";
@@ -438,7 +438,7 @@ TEST_F(MySqlMetaTest, ARCHIVE_TEST_DISK) {
 
     milvus::engine::meta::TableFilesSchema files;
     milvus::engine::meta::TableFileSchema table_file;
-    table_file.table_id_ = table.table_id_;
+    table_file.table_id_ = collection.table_id_;
 
     auto cnt = 10;
     auto each_size = 2UL;
@@ -481,8 +481,8 @@ TEST_F(MySqlMetaTest, ARCHIVE_TEST_DISK) {
 TEST_F(MySqlMetaTest, INVALID_INITILIZE_TEST) {
     fiu_init(0);
     auto collection_id = "meta_test_group";
-    milvus::engine::meta::TableSchema table;
-    table.table_id_ = collection_id;
+    milvus::engine::meta::TableSchema collection;
+    collection.table_id_ = collection_id;
     milvus::engine::DBMetaOptions meta = GetOptions().meta_;
     {
         FIU_ENABLE_FIU("MySQLMetaImpl.Initialize.fail_create_directory");
@@ -530,9 +530,9 @@ TEST_F(MySqlMetaTest, TABLE_FILES_TEST) {
     auto collection_id = "meta_test_group";
     fiu_init(0);
 
-    milvus::engine::meta::TableSchema table;
-    table.table_id_ = collection_id;
-    auto status = impl_->CreateTable(table);
+    milvus::engine::meta::TableSchema collection;
+    collection.table_id_ = collection_id;
+    auto status = impl_->CreateTable(collection);
 
     uint64_t new_merge_files_cnt = 1;
     uint64_t new_index_files_cnt = 2;
@@ -543,7 +543,7 @@ TEST_F(MySqlMetaTest, TABLE_FILES_TEST) {
     uint64_t index_files_cnt = 7;
 
     milvus::engine::meta::TableFileSchema table_file;
-    table_file.table_id_ = table.table_id_;
+    table_file.table_id_ = collection.table_id_;
 
     for (auto i = 0; i < new_merge_files_cnt; ++i) {
         status = impl_->CreateTableFile(table_file);
@@ -601,16 +601,16 @@ TEST_F(MySqlMetaTest, TABLE_FILES_TEST) {
     ASSERT_EQ(files.size(), to_index_files_cnt);
 
     milvus::engine::meta::TableFilesSchema table_files;
-    status = impl_->FilesToMerge(table.table_id_, table_files);
+    status = impl_->FilesToMerge(collection.table_id_, table_files);
     ASSERT_EQ(table_files.size(), raw_files_cnt);
 
     FIU_ENABLE_FIU("MySQLMetaImpl.FilesToMerge.null_connection");
-    status = impl_->FilesToMerge(table.table_id_, table_files);
+    status = impl_->FilesToMerge(collection.table_id_, table_files);
     ASSERT_FALSE(status.ok());
     fiu_disable("MySQLMetaImpl.FilesToMerge.null_connection");
 
     FIU_ENABLE_FIU("MySQLMetaImpl.FilesToMerge.throw_exception");
-    status = impl_->FilesToMerge(table.table_id_, table_files);
+    status = impl_->FilesToMerge(collection.table_id_, table_files);
     ASSERT_FALSE(status.ok());
     fiu_disable("MySQLMetaImpl.FilesToMerge.throw_exception");
 
@@ -625,7 +625,7 @@ TEST_F(MySqlMetaTest, TABLE_FILES_TEST) {
     {
         //skip large files
         milvus::engine::meta::TableFilesSchema table_files;
-        status = impl_->FilesToMerge(table.table_id_, table_files);
+        status = impl_->FilesToMerge(collection.table_id_, table_files);
         ASSERT_EQ(dated_files[table_file.date_].size(), raw_files_cnt);
     }
 #endif
@@ -671,7 +671,7 @@ TEST_F(MySqlMetaTest, TABLE_FILES_TEST) {
 
     table_files.clear();
     std::vector<int> file_types;
-    status = impl_->FilesByType(table.table_id_, file_types, table_files);
+    status = impl_->FilesByType(collection.table_id_, file_types, table_files);
     ASSERT_TRUE(table_files.empty());
     ASSERT_FALSE(status.ok());
 
@@ -681,7 +681,7 @@ TEST_F(MySqlMetaTest, TABLE_FILES_TEST) {
         milvus::engine::meta::TableFileSchema::INDEX, milvus::engine::meta::TableFileSchema::RAW,
         milvus::engine::meta::TableFileSchema::BACKUP,
     };
-    status = impl_->FilesByType(table.table_id_, file_types, table_files);
+    status = impl_->FilesByType(collection.table_id_, file_types, table_files);
     ASSERT_TRUE(status.ok());
     uint64_t total_cnt = new_index_files_cnt + new_merge_files_cnt + backup_files_cnt + new_files_cnt + raw_files_cnt +
                          to_index_files_cnt + index_files_cnt;
@@ -741,9 +741,9 @@ TEST_F(MySqlMetaTest, INDEX_TEST) {
     auto collection_id = "index_test";
     fiu_init(0);
 
-    milvus::engine::meta::TableSchema table;
-    table.table_id_ = collection_id;
-    auto status = impl_->CreateTable(table);
+    milvus::engine::meta::TableSchema collection;
+    collection.table_id_ = collection_id;
+    auto status = impl_->CreateTable(collection);
 
     milvus::engine::TableIndex index;
     index.metric_type_ = 2;

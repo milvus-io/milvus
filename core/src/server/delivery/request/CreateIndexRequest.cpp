@@ -42,7 +42,7 @@ CreateIndexRequest::Create(const std::shared_ptr<milvus::server::Context>& conte
 Status
 CreateIndexRequest::OnExecute() {
     try {
-        std::string hdr = "CreateIndexRequest(table=" + table_name_ + ")";
+        std::string hdr = "CreateIndexRequest(collection=" + table_name_ + ")";
         TimeRecorderAuto rc(hdr);
 
         // step 1: check arguments
@@ -51,7 +51,7 @@ CreateIndexRequest::OnExecute() {
             return status;
         }
 
-        // only process root table, ignore partition table
+        // only process root collection, ignore partition collection
         engine::meta::TableSchema table_schema;
         table_schema.table_id_ = table_name_;
         status = DBWrapper::DB()->DescribeTable(table_schema);
@@ -91,7 +91,7 @@ CreateIndexRequest::OnExecute() {
             } else if (adapter_index_type == static_cast<int32_t>(engine::EngineType::FAISS_IVFFLAT)) {
                 adapter_index_type = static_cast<int32_t>(engine::EngineType::FAISS_BIN_IVFFLAT);
             } else {
-                return Status(SERVER_INVALID_INDEX_TYPE, "Invalid index type for table metric type");
+                return Status(SERVER_INVALID_INDEX_TYPE, "Invalid index type for collection metric type");
             }
         }
 

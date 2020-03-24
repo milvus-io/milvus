@@ -202,7 +202,7 @@ ClientTest::DeleteByIds(const std::string& collection_name, const std::vector<in
     }
 
     {
-        // compact table
+        // compact collection
         milvus_sdk::TimeRecorder rc1("Compact");
         stat = conn_->CompactCollection(collection_name);
         std::cout << "CompactCollection function call status: " << stat.message() << std::endl;

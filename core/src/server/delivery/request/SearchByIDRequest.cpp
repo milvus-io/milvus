@@ -59,14 +59,14 @@ SearchByIDRequest::OnExecute() {
     try {
         auto pre_query_ctx = context_->Child("Pre query");
 
-        std::string hdr = "SearchByIDRequest(table=" + table_name_ + ", id=" + std::to_string(vector_id_) +
+        std::string hdr = "SearchByIDRequest(collection=" + table_name_ + ", id=" + std::to_string(vector_id_) +
                           ", k=" + std::to_string(topk_) + ", extra_params=" + extra_params_.dump() + ")";
 
         TimeRecorder rc(hdr);
 
         // step 1: check empty id
 
-        // step 2: check table name
+        // step 2: check collection name
         auto status = ValidationUtil::ValidateTableName(table_name_);
         if (!status.ok()) {
             return status;
@@ -78,8 +78,8 @@ SearchByIDRequest::OnExecute() {
             return status;
         }
 
-        // step 4: check table existence
-        // only process root table, ignore partition table
+        // step 4: check collection existence
+        // only process root collection, ignore partition collection
         engine::meta::TableSchema table_schema;
         table_schema.table_id_ = table_name_;
         status = DBWrapper::DB()->DescribeTable(table_schema);
@@ -117,7 +117,7 @@ SearchByIDRequest::OnExecute() {
         }
 #endif
 
-        // step 7: check table's index type supports search by id
+        // step 7: check collection's index type supports search by id
         if (table_schema.engine_type_ != (int32_t)engine::EngineType::FAISS_IDMAP &&
             table_schema.engine_type_ != (int32_t)engine::EngineType::FAISS_BIN_IDMAP &&
             table_schema.engine_type_ != (int32_t)engine::EngineType::FAISS_IVFFLAT &&
@@ -155,7 +155,7 @@ SearchByIDRequest::OnExecute() {
         }
 
         if (result_ids.empty()) {
-            return Status::OK();  // empty table
+            return Status::OK();  // empty collection
         }
 
         auto post_query_ctx = context_->Child("Constructing result");

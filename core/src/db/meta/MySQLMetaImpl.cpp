@@ -230,7 +230,7 @@ MySQLMetaImpl::ValidateMetaSchema() {
                 exist_fields.push_back(MetaField(name, type, ""));
             }
         } catch (std::exception& e) {
-            ENGINE_LOG_DEBUG << "Meta table '" << schema.name() << "' not exist and will be created";
+            ENGINE_LOG_DEBUG << "Meta collection '" << schema.name() << "' not exist and will be created";
         }
 
         if (exist_fields.empty()) {
@@ -319,7 +319,7 @@ MySQLMetaImpl::Initialize() {
         throw Exception(DB_INVALID_META_URI, msg);
     }
 
-    // step 7: create meta table Tables
+    // step 7: create meta collection Tables
     mysqlpp::Query InitializeQuery = connectionPtr->query();
 
     InitializeQuery << "CREATE TABLE IF NOT EXISTS " << TABLES_SCHEMA.name() << " (" << TABLES_SCHEMA.ToString() + ");";
@@ -329,12 +329,12 @@ MySQLMetaImpl::Initialize() {
     bool initialize_query_exec = InitializeQuery.exec();
     fiu_do_on("MySQLMetaImpl.Initialize.fail_create_table_scheme", initialize_query_exec = false);
     if (!initialize_query_exec) {
-        std::string msg = "Failed to create meta table 'Tables' in MySQL";
+        std::string msg = "Failed to create meta collection 'Tables' in MySQL";
         ENGINE_LOG_ERROR << msg;
         throw Exception(DB_META_TRANSACTION_FAILED, msg);
     }
 
-    // step 8: create meta table TableFiles
+    // step 8: create meta collection TableFiles
     InitializeQuery << "CREATE TABLE IF NOT EXISTS " << TABLEFILES_SCHEMA.name() << " ("
                     << TABLEFILES_SCHEMA.ToString() + ");";
 
@@ -343,7 +343,7 @@ MySQLMetaImpl::Initialize() {
     initialize_query_exec = InitializeQuery.exec();
     fiu_do_on("MySQLMetaImpl.Initialize.fail_create_table_files", initialize_query_exec = false);
     if (!initialize_query_exec) {
-        std::string msg = "Failed to create meta table 'TableFiles' in MySQL";
+        std::string msg = "Failed to create meta collection 'TableFiles' in MySQL";
         ENGINE_LOG_ERROR << msg;
         throw Exception(DB_META_TRANSACTION_FAILED, msg);
     }
@@ -423,7 +423,7 @@ MySQLMetaImpl::CreateTable(TableSchema& table_schema) {
             }
         }  // Scoped Connection
 
-        ENGINE_LOG_DEBUG << "Successfully create table: " << table_schema.table_id_;
+        ENGINE_LOG_DEBUG << "Successfully create collection: " << table_schema.table_id_;
         return utils::CreateTablePath(options_, table_schema.table_id_);
     } catch (std::exception& e) {
         return HandleException("GENERAL ERROR WHEN CREATING TABLE", e.what());
@@ -583,7 +583,7 @@ MySQLMetaImpl::DropTable(const std::string& collection_id) {
                 return Status(DB_ERROR, "Failed to connect to meta server(mysql)");
             }
 
-            // soft delete table
+            // soft delete collection
             mysqlpp::Query deleteTableQuery = connectionPtr->query();
             //
             deleteTableQuery << "UPDATE " << META_TABLES << " SET state = " << std::to_string(TableSchema::TO_DELETE)
@@ -602,7 +602,7 @@ MySQLMetaImpl::DropTable(const std::string& collection_id) {
             DeleteTableFiles(collection_id);
         }
 
-        ENGINE_LOG_DEBUG << "Successfully delete table, table id = " << collection_id;
+        ENGINE_LOG_DEBUG << "Successfully delete collection, collection id = " << collection_id;
     } catch (std::exception& e) {
         return HandleException("GENERAL ERROR WHEN DELETING TABLE", e.what());
     }
@@ -625,7 +625,7 @@ MySQLMetaImpl::DeleteTableFiles(const std::string& collection_id) {
                 return Status(DB_ERROR, "Failed to connect to meta server(mysql)");
             }
 
-            // soft delete table files
+            // soft delete collection files
             mysqlpp::Query deleteTableFilesQuery = connectionPtr->query();
             //
             deleteTableFilesQuery << "UPDATE " << META_TABLEFILES
@@ -641,7 +641,7 @@ MySQLMetaImpl::DeleteTableFiles(const std::string& collection_id) {
             }
         }  // Scoped Connection
 
-        ENGINE_LOG_DEBUG << "Successfully delete table files, table id = " << collection_id;
+        ENGINE_LOG_DEBUG << "Successfully delete collection files, collection id = " << collection_id;
     } catch (std::exception& e) {
         return HandleException("GENERAL ERROR WHEN DELETING TABLE FILES", e.what());
     }
@@ -720,7 +720,7 @@ MySQLMetaImpl::CreateTableFile(TableFileSchema& file_schema) {
             }
         }  // Scoped Connection
 
-        ENGINE_LOG_DEBUG << "Successfully create table file, file id = " << file_schema.file_id_;
+        ENGINE_LOG_DEBUG << "Successfully create collection file, file id = " << file_schema.file_id_;
         return utils::CreateTableFilePath(options_, file_schema);
     } catch (std::exception& e) {
         return HandleException("GENERAL ERROR WHEN CREATING TABLE FILE", e.what());
@@ -791,7 +791,7 @@ MySQLMetaImpl::GetTableFiles(const std::string& collection_id, const std::vector
             table_files.emplace_back(file_schema);
         }
 
-        ENGINE_LOG_DEBUG << "Get table files by id";
+        ENGINE_LOG_DEBUG << "Get collection files by id";
         return ret;
     } catch (std::exception& e) {
         return HandleException("GENERAL ERROR WHEN RETRIEVING TABLE FILES", e.what());
@@ -851,7 +851,7 @@ MySQLMetaImpl::GetTableFilesBySegmentId(const std::string& segment_id,
             }
         }
 
-        ENGINE_LOG_DEBUG << "Get table files by segment id";
+        ENGINE_LOG_DEBUG << "Get collection files by segment id";
         return Status::OK();
     } catch (std::exception& e) {
         return HandleException("GENERAL ERROR WHEN RETRIEVING TABLE FILES BY SEGMENT ID", e.what());
@@ -908,7 +908,7 @@ MySQLMetaImpl::UpdateTableIndex(const std::string& collection_id, const TableInd
             }
         }  // Scoped Connection
 
-        ENGINE_LOG_DEBUG << "Successfully update table index, table id = " << collection_id;
+        ENGINE_LOG_DEBUG << "Successfully update collection index, collection id = " << collection_id;
     } catch (std::exception& e) {
         return HandleException("GENERAL ERROR WHEN UPDATING TABLE INDEX PARAM", e.what());
     }
@@ -942,7 +942,7 @@ MySQLMetaImpl::UpdateTableFlag(const std::string& collection_id, int64_t flag) {
             }
         }  // Scoped Connection
 
-        ENGINE_LOG_DEBUG << "Successfully update table flag, table id = " << collection_id;
+        ENGINE_LOG_DEBUG << "Successfully update collection flag, collection id = " << collection_id;
     } catch (std::exception& e) {
         return HandleException("GENERAL ERROR WHEN UPDATING TABLE FLAG", e.what());
     }
@@ -973,7 +973,7 @@ MySQLMetaImpl::UpdateTableFlushLSN(const std::string& collection_id, uint64_t fl
             }
         }  // Scoped Connection
 
-        ENGINE_LOG_DEBUG << "Successfully update table flush_lsn, table id = " << collection_id;
+        ENGINE_LOG_DEBUG << "Successfully update collection flush_lsn, collection id = " << collection_id;
     } catch (std::exception& e) {
         return HandleException("GENERAL ERROR WHEN UPDATING TABLE FLUSH_LSN", e.what());
     }
@@ -1076,7 +1076,7 @@ MySQLMetaImpl::UpdateTableFile(TableFileSchema& file_schema) {
 
             mysqlpp::Query updateTableFileQuery = connectionPtr->query();
 
-            // if the table has been deleted, just mark the table file as TO_DELETE
+            // if the collection has been deleted, just mark the collection file as TO_DELETE
             // clean thread will delete the file later
             updateTableFileQuery << "SELECT state FROM " << META_TABLES << " WHERE table_id = " << mysqlpp::quote
                                  << file_schema.table_id_ << ";";
@@ -1120,7 +1120,7 @@ MySQLMetaImpl::UpdateTableFile(TableFileSchema& file_schema) {
             }
         }  // Scoped Connection
 
-        ENGINE_LOG_DEBUG << "Update single table file, file id = " << file_schema.file_id_;
+        ENGINE_LOG_DEBUG << "Update single collection file, file id = " << file_schema.file_id_;
     } catch (std::exception& e) {
         return HandleException("GENERAL ERROR WHEN UPDATING TABLE FILE", e.what());
     }
@@ -1155,7 +1155,7 @@ MySQLMetaImpl::UpdateTableFilesToIndex(const std::string& collection_id) {
                                    updateTableFilesToIndexQuery.error());
         }
 
-        ENGINE_LOG_DEBUG << "Update files to to_index, table id = " << collection_id;
+        ENGINE_LOG_DEBUG << "Update files to to_index, collection id = " << collection_id;
     } catch (std::exception& e) {
         return HandleException("GENERAL ERROR WHEN UPDATING TABLE FILES TO INDEX", e.what());
     }
@@ -1232,7 +1232,7 @@ MySQLMetaImpl::UpdateTableFiles(TableFilesSchema& files) {
             }
         }  // Scoped Connection
 
-        ENGINE_LOG_DEBUG << "Update " << files.size() << " table files";
+        ENGINE_LOG_DEBUG << "Update " << files.size() << " collection files";
     } catch (std::exception& e) {
         return HandleException("GENERAL ERROR WHEN UPDATING TABLE FILES", e.what());
     }
@@ -1272,7 +1272,7 @@ MySQLMetaImpl::UpdateTableFilesRowCount(TableFilesSchema& files) {
             }
         }  // Scoped Connection
 
-        ENGINE_LOG_DEBUG << "Update " << files.size() << " table files";
+        ENGINE_LOG_DEBUG << "Update " << files.size() << " collection files";
     } catch (std::exception& e) {
         return HandleException("GENERAL ERROR WHEN UPDATING TABLE FILES ROW COUNT", e.what());
     }
@@ -1366,7 +1366,7 @@ MySQLMetaImpl::DropTableIndex(const std::string& collection_id) {
                 return HandleException("QUERY ERROR WHEN DROPPING TABLE INDEX", dropTableIndexQuery.error());
             }
 
-            // set table index type to raw
+            // set collection index type to raw
             dropTableIndexQuery << "UPDATE " << META_TABLES << " SET engine_type = "
                                 << " (CASE"
                                 << " WHEN metric_type in (" << (int32_t)MetricType::HAMMING << " ,"
@@ -1383,7 +1383,7 @@ MySQLMetaImpl::DropTableIndex(const std::string& collection_id) {
             }
         }  // Scoped Connection
 
-        ENGINE_LOG_DEBUG << "Successfully drop table index, table id = " << collection_id;
+        ENGINE_LOG_DEBUG << "Successfully drop collection index, collection id = " << collection_id;
     } catch (std::exception& e) {
         return HandleException("GENERAL ERROR WHEN DROPPING TABLE INDEX", e.what());
     }
@@ -1534,7 +1534,7 @@ MySQLMetaImpl::GetPartitionName(const std::string& collection_id, const std::str
             const mysqlpp::Row& resRow = res[0];
             resRow["table_id"].to_string(partition_name);
         } else {
-            return Status(DB_NOT_FOUND, "Partition " + valid_tag + " of table " + collection_id + " not found");
+            return Status(DB_NOT_FOUND, "Partition " + valid_tag + " of collection " + collection_id + " not found");
         }
     } catch (std::exception& e) {
         return HandleException("GENERAL ERROR WHEN GET PARTITION NAME", e.what());
@@ -1624,7 +1624,7 @@ MySQLMetaImpl::FilesToMerge(const std::string& collection_id, TableFilesSchema& 
     try {
         server::MetricCollector metric;
 
-        // check table existence
+        // check collection existence
         TableSchema table_schema;
         table_schema.table_id_ = collection_id;
         auto status = DescribeTable(table_schema);
@@ -1876,7 +1876,7 @@ MySQLMetaImpl::FilesByType(const std::string& collection_id, const std::vector<i
                 }
             }
 
-            std::string msg = "Get table files by type.";
+            std::string msg = "Get collection files by type.";
             for (int file_type : file_types) {
                 switch (file_type) {
                     case (int)TableFileSchema::RAW:
@@ -2128,7 +2128,7 @@ MySQLMetaImpl::CleanUpShadowFiles() {
         mysqlpp::StoreQueryResult res = cleanUpQuery.store();
 
         if (!res.empty()) {
-            ENGINE_LOG_DEBUG << "Remove table file type as NEW";
+            ENGINE_LOG_DEBUG << "Remove collection file type as NEW";
             cleanUpQuery << "DELETE FROM " << META_TABLEFILES << " WHERE file_type IN ("
                          << std::to_string(TableFileSchema::NEW) << "," << std::to_string(TableFileSchema::NEW_MERGE)
                          << "," << std::to_string(TableFileSchema::NEW_INDEX) << ");";
@@ -2299,8 +2299,8 @@ MySQLMetaImpl::CleanUpFilesWithTTL(uint64_t seconds /*, CleanUpFilter* filter*/)
         return HandleException("GENERAL ERROR WHEN CLEANING UP TABLES WITH TTL", e.what());
     }
 
-    // remove deleted table folder
-    // don't remove table folder until all its files has been deleted
+    // remove deleted collection folder
+    // don't remove collection folder until all its files has been deleted
     try {
         server::MetricCollector metric;
 

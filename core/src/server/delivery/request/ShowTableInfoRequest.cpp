@@ -56,17 +56,17 @@ ShowTableInfoRequest::Create(const std::shared_ptr<milvus::server::Context>& con
 
 Status
 ShowTableInfoRequest::OnExecute() {
-    std::string hdr = "ShowTableInfoRequest(table=" + table_name_ + ")";
+    std::string hdr = "ShowTableInfoRequest(collection=" + table_name_ + ")";
     TimeRecorderAuto rc(hdr);
 
-    // step 1: check table name
+    // step 1: check collection name
     auto status = ValidationUtil::ValidateTableName(table_name_);
     if (!status.ok()) {
         return status;
     }
 
-    // step 2: check table existence
-    // only process root table, ignore partition table
+    // step 2: check collection existence
+    // only process root collection, ignore partition collection
     engine::meta::TableSchema table_schema;
     table_schema.table_id_ = table_name_;
     status = DBWrapper::DB()->DescribeTable(table_schema);

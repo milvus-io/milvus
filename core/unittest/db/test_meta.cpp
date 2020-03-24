@@ -27,34 +27,34 @@
 TEST_F(MetaTest, TABLE_TEST) {
     auto collection_id = "meta_test_table";
 
-    milvus::engine::meta::TableSchema table;
-    table.table_id_ = collection_id;
-    auto status = impl_->CreateTable(table);
+    milvus::engine::meta::TableSchema collection;
+    collection.table_id_ = collection_id;
+    auto status = impl_->CreateTable(collection);
     ASSERT_TRUE(status.ok());
 
-    auto gid = table.id_;
-    table.id_ = -1;
-    status = impl_->DescribeTable(table);
+    auto gid = collection.id_;
+    collection.id_ = -1;
+    status = impl_->DescribeTable(collection);
     ASSERT_TRUE(status.ok());
-    ASSERT_EQ(table.id_, gid);
-    ASSERT_EQ(table.table_id_, collection_id);
+    ASSERT_EQ(collection.id_, gid);
+    ASSERT_EQ(collection.table_id_, collection_id);
 
-    table.table_id_ = "not_found";
-    status = impl_->DescribeTable(table);
+    collection.table_id_ = "not_found";
+    status = impl_->DescribeTable(collection);
     ASSERT_TRUE(!status.ok());
 
-    table.table_id_ = collection_id;
-    status = impl_->CreateTable(table);
+    collection.table_id_ = collection_id;
+    status = impl_->CreateTable(collection);
     ASSERT_EQ(status.code(), milvus::DB_ALREADY_EXIST);
 
-    status = impl_->DropTable(table.table_id_);
+    status = impl_->DropTable(collection.table_id_);
     ASSERT_TRUE(status.ok());
 
-    status = impl_->CreateTable(table);
+    status = impl_->CreateTable(collection);
     ASSERT_EQ(status.code(), milvus::DB_ERROR);
 
-    table.table_id_ = "";
-    status = impl_->CreateTable(table);
+    collection.table_id_ = "";
+    status = impl_->CreateTable(collection);
     ASSERT_TRUE(status.ok());
 }
 
@@ -62,8 +62,8 @@ TEST_F(MetaTest, FALID_TEST) {
     fiu_init(0);
     auto options = GetOptions();
     auto collection_id = "meta_test_table";
-    milvus::engine::meta::TableSchema table;
-    table.table_id_ = collection_id;
+    milvus::engine::meta::TableSchema collection;
+    collection.table_id_ = collection_id;
     milvus::Status status;
 
     {
@@ -87,32 +87,32 @@ TEST_F(MetaTest, FALID_TEST) {
     }
     {
         FIU_ENABLE_FIU("SqliteMetaImpl.CreateTable.throw_exception");
-        status = impl_->CreateTable(table);
+        status = impl_->CreateTable(collection);
         ASSERT_FALSE(status.ok());
         ASSERT_EQ(status.code(), milvus::DB_META_TRANSACTION_FAILED);
         fiu_disable("SqliteMetaImpl.CreateTable.throw_exception");
 
         FIU_ENABLE_FIU("SqliteMetaImpl.CreateTable.insert_throw_exception");
-        table.table_id_ = "";
-        status = impl_->CreateTable(table);
+        collection.table_id_ = "";
+        status = impl_->CreateTable(collection);
         ASSERT_FALSE(status.ok());
         fiu_disable("SqliteMetaImpl.CreateTable.insert_throw_exception");
 
-        //success create table
-        table.table_id_ = collection_id;
-        status = impl_->CreateTable(table);
+        //success create collection
+        collection.table_id_ = collection_id;
+        status = impl_->CreateTable(collection);
         ASSERT_TRUE(status.ok());
     }
     {
         FIU_ENABLE_FIU("SqliteMetaImpl.DescribeTable.throw_exception");
-        status = impl_->DescribeTable(table);
+        status = impl_->DescribeTable(collection);
         ASSERT_FALSE(status.ok());
         fiu_disable("SqliteMetaImpl.DescribeTable.throw_exception");
     }
     {
         FIU_ENABLE_FIU("SqliteMetaImpl.HasTable.throw_exception");
         bool has = false;
-        status = impl_->HasTable(table.table_id_, has);
+        status = impl_->HasTable(collection.table_id_, has);
         ASSERT_FALSE(status.ok());
         ASSERT_FALSE(has);
         fiu_disable("SqliteMetaImpl.HasTable.throw_exception");
@@ -126,7 +126,7 @@ TEST_F(MetaTest, FALID_TEST) {
     }
     {
         FIU_ENABLE_FIU("SqliteMetaImpl.DropTable.throw_exception");
-        status = impl_->DropTable(table.table_id_);
+        status = impl_->DropTable(collection.table_id_);
         ASSERT_FALSE(status.ok());
         fiu_disable("SqliteMetaImpl.DropTable.throw_exception");
     }
@@ -144,7 +144,7 @@ TEST_F(MetaTest, FALID_TEST) {
     }
     {
         FIU_ENABLE_FIU("SqliteMetaImpl.DeleteTableFiles.throw_exception");
-        status = impl_->DeleteTableFiles(table.table_id_);
+        status = impl_->DeleteTableFiles(collection.table_id_);
         ASSERT_FALSE(status.ok());
         fiu_disable("SqliteMetaImpl.DeleteTableFiles.throw_exception");
     }
@@ -356,13 +356,13 @@ TEST_F(MetaTest, FALID_TEST) {
 TEST_F(MetaTest, TABLE_FILE_TEST) {
     auto collection_id = "meta_test_table";
 
-    milvus::engine::meta::TableSchema table;
-    table.table_id_ = collection_id;
-    table.dimension_ = 256;
-    auto status = impl_->CreateTable(table);
+    milvus::engine::meta::TableSchema collection;
+    collection.table_id_ = collection_id;
+    collection.dimension_ = 256;
+    auto status = impl_->CreateTable(collection);
 
     milvus::engine::meta::TableFileSchema table_file;
-    table_file.table_id_ = table.table_id_;
+    table_file.table_id_ = collection.table_id_;
     status = impl_->CreateTableFile(table_file);
     ASSERT_TRUE(status.ok());
     ASSERT_EQ(table_file.file_type_, milvus::engine::meta::TableFileSchema::NEW);
@@ -385,14 +385,14 @@ TEST_F(MetaTest, TABLE_FILE_TEST) {
 TEST_F(MetaTest, TABLE_FILE_ROW_COUNT_TEST) {
     auto collection_id = "row_count_test_table";
 
-    milvus::engine::meta::TableSchema table;
-    table.table_id_ = collection_id;
-    table.dimension_ = 256;
-    auto status = impl_->CreateTable(table);
+    milvus::engine::meta::TableSchema collection;
+    collection.table_id_ = collection_id;
+    collection.dimension_ = 256;
+    auto status = impl_->CreateTable(collection);
 
     milvus::engine::meta::TableFileSchema table_file;
     table_file.row_count_ = 100;
-    table_file.table_id_ = table.table_id_;
+    table_file.table_id_ = collection.table_id_;
     table_file.file_type_ = 1;
     status = impl_->CreateTableFile(table_file);
 
@@ -436,13 +436,13 @@ TEST_F(MetaTest, ARCHIVE_TEST_DAYS) {
     milvus::engine::meta::SqliteMetaImpl impl(options);
     auto collection_id = "meta_test_table";
 
-    milvus::engine::meta::TableSchema table;
-    table.table_id_ = collection_id;
-    auto status = impl.CreateTable(table);
+    milvus::engine::meta::TableSchema collection;
+    collection.table_id_ = collection_id;
+    auto status = impl.CreateTable(collection);
 
     milvus::engine::meta::TableFilesSchema files;
     milvus::engine::meta::TableFileSchema table_file;
-    table_file.table_id_ = table.table_id_;
+    table_file.table_id_ = collection.table_id_;
 
     auto cnt = 100;
     int64_t ts = milvus::engine::utils::GetMicroSecTimeStamp();
@@ -492,13 +492,13 @@ TEST_F(MetaTest, ARCHIVE_TEST_DISK) {
     milvus::engine::meta::SqliteMetaImpl impl(options);
     auto collection_id = "meta_test_group";
 
-    milvus::engine::meta::TableSchema table;
-    table.table_id_ = collection_id;
-    auto status = impl.CreateTable(table);
+    milvus::engine::meta::TableSchema collection;
+    collection.table_id_ = collection_id;
+    auto status = impl.CreateTable(collection);
 
     milvus::engine::meta::TableFilesSchema files;
     milvus::engine::meta::TableFileSchema table_file;
-    table_file.table_id_ = table.table_id_;
+    table_file.table_id_ = collection.table_id_;
 
     auto cnt = 10;
     auto each_size = 2UL;
@@ -543,9 +543,9 @@ TEST_F(MetaTest, ARCHIVE_TEST_DISK) {
 TEST_F(MetaTest, TABLE_FILES_TEST) {
     auto collection_id = "meta_test_group";
 
-    milvus::engine::meta::TableSchema table;
-    table.table_id_ = collection_id;
-    auto status = impl_->CreateTable(table);
+    milvus::engine::meta::TableSchema collection;
+    collection.table_id_ = collection_id;
+    auto status = impl_->CreateTable(collection);
 
     uint64_t new_merge_files_cnt = 1;
     uint64_t new_index_files_cnt = 2;
@@ -556,7 +556,7 @@ TEST_F(MetaTest, TABLE_FILES_TEST) {
     uint64_t index_files_cnt = 7;
 
     milvus::engine::meta::TableFileSchema table_file;
-    table_file.table_id_ = table.table_id_;
+    table_file.table_id_ = collection.table_id_;
 
     for (auto i = 0; i < new_merge_files_cnt; ++i) {
         status = impl_->CreateTableFile(table_file);
@@ -614,7 +614,7 @@ TEST_F(MetaTest, TABLE_FILES_TEST) {
     ASSERT_EQ(files.size(), to_index_files_cnt);
 
     milvus::engine::meta::TableFilesSchema table_files;
-    status = impl_->FilesToMerge(table.table_id_, table_files);
+    status = impl_->FilesToMerge(collection.table_id_, table_files);
     ASSERT_EQ(table_files.size(), raw_files_cnt);
 
     status = impl_->FilesToIndex(files);
@@ -640,7 +640,7 @@ TEST_F(MetaTest, TABLE_FILES_TEST) {
 
     table_files.clear();
     std::vector<int> file_types;
-    status = impl_->FilesByType(table.table_id_, file_types, table_files);
+    status = impl_->FilesByType(collection.table_id_, file_types, table_files);
     ASSERT_TRUE(table_files.empty());
     ASSERT_FALSE(status.ok());
 
@@ -650,7 +650,7 @@ TEST_F(MetaTest, TABLE_FILES_TEST) {
         milvus::engine::meta::TableFileSchema::INDEX, milvus::engine::meta::TableFileSchema::RAW,
         milvus::engine::meta::TableFileSchema::BACKUP,
     };
-    status = impl_->FilesByType(table.table_id_, file_types, table_files);
+    status = impl_->FilesByType(collection.table_id_, file_types, table_files);
     ASSERT_TRUE(status.ok());
     uint64_t total_cnt = new_index_files_cnt + new_merge_files_cnt + backup_files_cnt + new_files_cnt + raw_files_cnt +
                          to_index_files_cnt + index_files_cnt;
@@ -665,7 +665,7 @@ TEST_F(MetaTest, TABLE_FILES_TEST) {
     status = impl_->CleanUpShadowFiles();
     ASSERT_TRUE(status.ok());
 
-    table_file.table_id_ = table.table_id_;
+    table_file.table_id_ = collection.table_id_;
     table_file.file_type_ = milvus::engine::meta::TableFileSchema::TO_DELETE;
     status = impl_->CreateTableFile(table_file);
 
@@ -689,9 +689,9 @@ TEST_F(MetaTest, TABLE_FILES_TEST) {
 TEST_F(MetaTest, INDEX_TEST) {
     auto collection_id = "index_test";
 
-    milvus::engine::meta::TableSchema table;
-    table.table_id_ = collection_id;
-    auto status = impl_->CreateTable(table);
+    milvus::engine::meta::TableSchema collection;
+    collection.table_id_ = collection_id;
+    auto status = impl_->CreateTable(collection);
 
     milvus::engine::TableIndex index;
     index.metric_type_ = 2;
@@ -729,9 +729,9 @@ TEST_F(MetaTest, LSN_TEST) {
     auto collection_id = "lsn_test";
     uint64_t lsn = 42949672960;
 
-    milvus::engine::meta::TableSchema table;
-    table.table_id_ = collection_id;
-    auto status = impl_->CreateTable(table);
+    milvus::engine::meta::TableSchema collection;
+    collection.table_id_ = collection_id;
+    auto status = impl_->CreateTable(collection);
 
     status = impl_->UpdateTableFlushLSN(collection_id, lsn);
     ASSERT_TRUE(status.ok());

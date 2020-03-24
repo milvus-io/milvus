@@ -77,7 +77,7 @@ OngoingFileChecker::IsIgnored(const meta::TableFileSchema& schema) {
 Status
 OngoingFileChecker::MarkOngoingFileNoLock(const meta::TableFileSchema& table_file) {
     if (table_file.table_id_.empty() || table_file.file_id_.empty()) {
-        return Status(DB_ERROR, "Invalid table files");
+        return Status(DB_ERROR, "Invalid collection files");
     }
 
     auto iter = ongoing_files_.find(table_file.table_id_);
@@ -103,7 +103,7 @@ OngoingFileChecker::MarkOngoingFileNoLock(const meta::TableFileSchema& table_fil
 Status
 OngoingFileChecker::UnmarkOngoingFileNoLock(const meta::TableFileSchema& table_file) {
     if (table_file.table_id_.empty() || table_file.file_id_.empty()) {
-        return Status(DB_ERROR, "Invalid table files");
+        return Status(DB_ERROR, "Invalid collection files");
     }
 
     auto iter = ongoing_files_.find(table_file.table_id_);

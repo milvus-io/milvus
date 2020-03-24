@@ -140,13 +140,13 @@ MemManagerImpl::Flush(const std::string& collection_id, bool apply_delete) {
     std::unique_lock<std::mutex> lock(serialization_mtx_);
     auto max_lsn = GetMaxLSN(temp_immutable_list);
     for (auto& mem : temp_immutable_list) {
-        ENGINE_LOG_DEBUG << "Flushing table: " << mem->GetTableId();
+        ENGINE_LOG_DEBUG << "Flushing collection: " << mem->GetTableId();
         auto status = mem->Serialize(max_lsn, apply_delete);
         if (!status.ok()) {
-            ENGINE_LOG_ERROR << "Flush table " << mem->GetTableId() << " failed";
+            ENGINE_LOG_ERROR << "Flush collection " << mem->GetTableId() << " failed";
             return status;
         }
-        ENGINE_LOG_DEBUG << "Flushed table: " << mem->GetTableId();
+        ENGINE_LOG_DEBUG << "Flushed collection: " << mem->GetTableId();
     }
 
     return Status::OK();
@@ -166,14 +166,14 @@ MemManagerImpl::Flush(std::set<std::string>& table_ids, bool apply_delete) {
     table_ids.clear();
     auto max_lsn = GetMaxLSN(temp_immutable_list);
     for (auto& mem : temp_immutable_list) {
-        ENGINE_LOG_DEBUG << "Flushing table: " << mem->GetTableId();
+        ENGINE_LOG_DEBUG << "Flushing collection: " << mem->GetTableId();
         auto status = mem->Serialize(max_lsn, apply_delete);
         if (!status.ok()) {
-            ENGINE_LOG_ERROR << "Flush table " << mem->GetTableId() << " failed";
+            ENGINE_LOG_ERROR << "Flush collection " << mem->GetTableId() << " failed";
             return status;
         }
         table_ids.insert(mem->GetTableId());
-        ENGINE_LOG_DEBUG << "Flushed table: " << mem->GetTableId();
+        ENGINE_LOG_DEBUG << "Flushed collection: " << mem->GetTableId();
     }
 
     meta_->SetGlobalLastLSN(max_lsn);
@@ -190,7 +190,7 @@ MemManagerImpl::ToImmutable(const std::string& collection_id) {
             immu_mem_list_.push_back(memIt->second);
             mem_id_map_.erase(memIt);
         }
-        //        std::string err_msg = "Could not find table = " + collection_id + " to flush";
+        //        std::string err_msg = "Could not find collection = " + collection_id + " to flush";
         //        ENGINE_LOG_ERROR << err_msg;
         //        return Status(DB_NOT_FOUND, err_msg);
     }
@@ -204,7 +204,7 @@ MemManagerImpl::ToImmutable() {
     MemIdMap temp_map;
     for (auto& kv : mem_id_map_) {
         if (kv.second->Empty()) {
-            // empty table without any deletes, no need to serialize
+            // empty collection without any deletes, no need to serialize
             temp_map.insert(kv);
         } else {
             immu_mem_list_.push_back(kv.second);
@@ -265,9 +265,9 @@ MemManagerImpl::GetCurrentMem() {
 uint64_t
 MemManagerImpl::GetMaxLSN(const MemList& tables) {
     uint64_t max_lsn = 0;
-    for (auto& table : tables) {
-        auto cur_lsn = table->GetLSN();
-        if (table->GetLSN() > max_lsn) {
+    for (auto& collection : tables) {
+        auto cur_lsn = collection->GetLSN();
+        if (collection->GetLSN() > max_lsn) {
             max_lsn = cur_lsn;
         }
     }

@@ -387,7 +387,7 @@ TEST_F(MySqlDBTest, PARTITION_TEST) {
         ASSERT_TRUE(stat.ok());
         ASSERT_EQ(result_ids.size() / topk, nq);
 
-        // search in whole table
+        // search in whole collection
         tags.clear();
         result_ids.clear();
         result_distances.clear();
@@ -416,7 +416,7 @@ TEST_F(MySqlDBTest, PARTITION_TEST) {
         ASSERT_FALSE(stat.ok());
         fiu_disable("MySQLMetaImpl.DescribeTable.throw_exception");
 
-        //Drop partition will failed,since it firstly drop partition meta table.
+        //Drop partition will failed,since it firstly drop partition meta collection.
         FIU_ENABLE_FIU("MySQLMetaImpl.DropTable.null_connection");
         stat = db_->DropPartition(table_name + "_5");
         //TODO(sjh): add assert expr, since DropPartion always return Status::OK() for now.

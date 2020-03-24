@@ -51,7 +51,7 @@ DeleteByIDRequest::OnExecute() {
             return status;
         }
 
-        // step 2: check table existence
+        // step 2: check collection existence
         engine::meta::TableSchema table_schema;
         table_schema.table_id_ = table_name_;
         status = DBWrapper::DB()->DescribeTable(table_schema);
@@ -67,7 +67,7 @@ DeleteByIDRequest::OnExecute() {
             }
         }
 
-        // Check table's index type supports delete
+        // Check collection's index type supports delete
         if (table_schema.engine_type_ != (int32_t)engine::EngineType::FAISS_IDMAP &&
             table_schema.engine_type_ != (int32_t)engine::EngineType::FAISS_BIN_IDMAP &&
             table_schema.engine_type_ != (int32_t)engine::EngineType::HNSW &&

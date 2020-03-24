@@ -35,13 +35,13 @@ DropPartitionRequest::Create(const std::shared_ptr<milvus::server::Context>& con
 
 Status
 DropPartitionRequest::OnExecute() {
-    std::string hdr = "DropPartitionRequest(table=" + table_name_ + ", partition_tag=" + tag_ + ")";
+    std::string hdr = "DropPartitionRequest(collection=" + table_name_ + ", partition_tag=" + tag_ + ")";
     TimeRecorderAuto rc(hdr);
 
     std::string table_name = table_name_;
     std::string partition_tag = tag_;
 
-    // step 1: check table name
+    // step 1: check collection name
     auto status = ValidationUtil::ValidateTableName(table_name);
     fiu_do_on("DropPartitionRequest.OnExecute.invalid_table_name",
               status = Status(milvus::SERVER_UNEXPECTED_ERROR, ""));
@@ -61,8 +61,8 @@ DropPartitionRequest::OnExecute() {
         return status;
     }
 
-    // step 3: check table
-    // only process root table, ignore partition table
+    // step 3: check collection
+    // only process root collection, ignore partition collection
     engine::meta::TableSchema table_schema;
     table_schema.table_id_ = table_name_;
     status = DBWrapper::DB()->DescribeTable(table_schema);

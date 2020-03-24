@@ -122,7 +122,7 @@ XBuildIndexTask::Execute() {
         EngineType engine_type = (EngineType)file_->engine_type_;
         std::shared_ptr<engine::ExecutionEngine> index;
 
-        // step 2: create table file
+        // step 2: create collection file
         engine::meta::TableFileSchema table_file;
         table_file.table_id_ = file_->table_id_;
         table_file.segment_id_ = file_->file_id_;
@@ -133,7 +133,7 @@ XBuildIndexTask::Execute() {
         Status status = meta_ptr->CreateTableFile(table_file);
         fiu_do_on("XBuildIndexTask.Execute.create_table_success", status = Status::OK());
         if (!status.ok()) {
-            ENGINE_LOG_ERROR << "Failed to create table file: " << status.ToString();
+            ENGINE_LOG_ERROR << "Failed to create collection file: " << status.ToString();
             build_index_job->BuildIndexDone(to_index_id_);
             build_index_job->GetStatus() = status;
             to_index_engine_ = nullptr;
@@ -162,7 +162,7 @@ XBuildIndexTask::Execute() {
             return;
         }
 
-        // step 4: if table has been deleted, dont save index file
+        // step 4: if collection has been deleted, dont save index file
         bool has_table = false;
         meta_ptr->HasTable(file_->table_id_, has_table);
         fiu_do_on("XBuildIndexTask.Execute.has_table", has_table = true);

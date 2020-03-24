@@ -126,7 +126,7 @@ class BaseRequest {
         kGetVectorByID,
         kGetVectorIDs,
 
-        // table operations
+        // collection operations
         kShowTables = 300,
         kCreateTable,
         kHasTable,

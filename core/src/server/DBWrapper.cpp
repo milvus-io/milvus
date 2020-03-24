@@ -204,7 +204,7 @@ DBWrapper::StartService() {
 
     db_->Start();
 
-    // preload table
+    // preload collection
     std::string preload_tables;
     s = config.GetDBConfigPreloadTable(preload_tables);
     if (!s.ok()) {

@@ -38,7 +38,7 @@ RequestGroup(BaseRequest::RequestType type) {
         {BaseRequest::kGetVectorByID, INFO_REQUEST_GROUP},
         {BaseRequest::kGetVectorIDs, INFO_REQUEST_GROUP},
 
-        // table operations
+        // collection operations
         {BaseRequest::kShowTables, INFO_REQUEST_GROUP},
         {BaseRequest::kCreateTable, DDL_DML_REQUEST_GROUP},
         {BaseRequest::kHasTable, INFO_REQUEST_GROUP},
@@ -107,8 +107,8 @@ BaseRequest::set_status(const Status& status) {
 std::string
 BaseRequest::TableNotExistMsg(const std::string& table_name) {
     return "Table " + table_name +
-           " does not exist. Use milvus.has_table to verify whether the table exists. "
-           "You also can check whether the table name exists.";
+           " does not exist. Use milvus.has_table to verify whether the collection exists. "
+           "You also can check whether the collection name exists.";
 }
 
 Status

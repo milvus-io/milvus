@@ -188,7 +188,7 @@ TaskTable::PickToLoad(uint64_t limit) {
     size_t count = 0;
     for (uint64_t j = last_finish_ + 1; j < table_.size(); ++j) {
         if (not table_[j]) {
-            SERVER_LOG_WARNING << "table[" << j << "] is nullptr";
+            SERVER_LOG_WARNING << "collection[" << j << "] is nullptr";
         }
 
         if (table_[j]->task->path().Current() == "cpu") {

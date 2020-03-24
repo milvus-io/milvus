@@ -43,7 +43,7 @@ CreateTableRequest::Create(const std::shared_ptr<milvus::server::Context>& conte
 
 Status
 CreateTableRequest::OnExecute() {
-    std::string hdr = "CreateTableRequest(table=" + table_name_ + ", dimension=" + std::to_string(dimension_) + ")";
+    std::string hdr = "CreateTableRequest(collection=" + table_name_ + ", dimension=" + std::to_string(dimension_) + ")";
     TimeRecorderAuto rc(hdr);
 
     try {
@@ -72,7 +72,7 @@ CreateTableRequest::OnExecute() {
 
         rc.RecordSection("check validation");
 
-        // step 2: construct table schema
+        // step 2: construct collection schema
         engine::meta::TableSchema table_info;
         table_info.table_id_ = table_name_;
         table_info.dimension_ = static_cast<uint16_t>(dimension_);
@@ -88,14 +88,14 @@ CreateTableRequest::OnExecute() {
             }
         }
 
-        // step 3: create table
+        // step 3: create collection
         status = DBWrapper::DB()->CreateTable(table_info);
         fiu_do_on("CreateTableRequest.OnExecute.db_already_exist", status = Status(milvus::DB_ALREADY_EXIST, ""));
         fiu_do_on("CreateTableRequest.OnExecute.create_table_fail",
                   status = Status(milvus::SERVER_UNEXPECTED_ERROR, ""));
         fiu_do_on("CreateTableRequest.OnExecute.throw_std_exception", throw std::exception());
         if (!status.ok()) {
-            // table could exist
+            // collection could exist
             if (status.code() == DB_ALREADY_EXIST) {
                 return Status(SERVER_INVALID_TABLE_NAME, status.message());
             }

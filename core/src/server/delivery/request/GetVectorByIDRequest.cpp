@@ -42,7 +42,7 @@ GetVectorByIDRequest::Create(const std::shared_ptr<milvus::server::Context>& con
 Status
 GetVectorByIDRequest::OnExecute() {
     try {
-        std::string hdr = "GetVectorByIDRequest(table=" + table_name_ + ")";
+        std::string hdr = "GetVectorByIDRequest(collection=" + table_name_ + ")";
         TimeRecorderAuto rc(hdr);
 
         // step 1: check arguments
@@ -55,7 +55,7 @@ GetVectorByIDRequest::OnExecute() {
             return Status(SERVER_INVALID_ARGUMENT, "No vector id specified");
         }
 
-        // only process root table, ignore partition table
+        // only process root collection, ignore partition collection
         engine::meta::TableSchema table_schema;
         table_schema.table_id_ = table_name_;
         status = DBWrapper::DB()->DescribeTable(table_schema);

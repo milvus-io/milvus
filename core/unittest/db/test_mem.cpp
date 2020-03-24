@@ -150,7 +150,7 @@ TEST_F(MemManagerTest, MEM_TABLE_FILE_TEST) {
     ASSERT_TRUE(status.ok());
 
     {
-        //test fail create table file
+        //test fail create collection file
         FIU_ENABLE_FIU("SqliteMetaImpl.CreateTableFile.throw_exception");
         milvus::engine::MemTableFile mem_table_file_1(GetTableName(), impl_, options);
         fiu_disable("SqliteMetaImpl.CreateTableFile.throw_exception");

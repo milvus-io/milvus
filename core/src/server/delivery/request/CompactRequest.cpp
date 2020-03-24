@@ -38,7 +38,7 @@ CompactRequest::Create(const std::shared_ptr<milvus::server::Context>& context, 
 Status
 CompactRequest::OnExecute() {
     try {
-        std::string hdr = "CompactRequest(table=" + table_name_ + ")";
+        std::string hdr = "CompactRequest(collection=" + table_name_ + ")";
         TimeRecorderAuto rc(hdr);
 
         // step 1: check arguments
@@ -47,7 +47,7 @@ CompactRequest::OnExecute() {
             return status;
         }
 
-        // only process root table, ignore partition table
+        // only process root collection, ignore partition collection
         engine::meta::TableSchema table_schema;
         table_schema.table_id_ = table_name_;
         status = DBWrapper::DB()->DescribeTable(table_schema);
@@ -65,7 +65,7 @@ CompactRequest::OnExecute() {
 
         rc.RecordSection("check validation");
 
-        // step 2: check table existence
+        // step 2: check collection existence
         status = DBWrapper::DB()->Compact(table_name_);
         if (!status.ok()) {
             return status;

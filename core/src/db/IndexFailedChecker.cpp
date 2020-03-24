@@ -22,7 +22,7 @@ constexpr uint64_t INDEX_FAILED_RETRY_TIME = 1;
 Status
 IndexFailedChecker::CleanFailedIndexFileOfTable(const std::string& collection_id) {
     std::lock_guard<std::mutex> lck(mutex_);
-    index_failed_files_.erase(collection_id);  // rebuild failed index files for this table
+    index_failed_files_.erase(collection_id);  // rebuild failed index files for this collection
 
     return Status::OK();
 }
@@ -78,7 +78,7 @@ Status
 IndexFailedChecker::IgnoreFailedIndexFiles(meta::TableFilesSchema& table_files) {
     std::lock_guard<std::mutex> lck(mutex_);
 
-    // there could be some failed files belong to different table.
+    // there could be some failed files belong to different collection.
     // some files may has failed for several times, no need to build index for these files.
     // thus we can avoid dead circle for build index operation
     for (auto it_file = table_files.begin(); it_file != table_files.end();) {

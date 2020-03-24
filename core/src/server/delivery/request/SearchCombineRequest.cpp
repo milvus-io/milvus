@@ -215,19 +215,19 @@ SearchCombineRequest::OnExecute() {
         size_t combined_request = request_list_.size();
         SERVER_LOG_DEBUG << "SearchCombineRequest begin execute, combined requests=" << combined_request
                          << ", extra_params=" << extra_params_.dump();
-        std::string hdr = "SearchCombineRequest(table=" + table_name_ + ")";
+        std::string hdr = "SearchCombineRequest(collection=" + table_name_ + ")";
 
         TimeRecorder rc(hdr);
 
-        // step 1: check table name
+        // step 1: check collection name
         auto status = ValidationUtil::ValidateTableName(table_name_);
         if (!status.ok()) {
             FreeRequests(status);
             return status;
         }
 
-        // step 2: check table existence
-        // only process root table, ignore partition table
+        // step 2: check collection existence
+        // only process root collection, ignore partition collection
         engine::meta::TableSchema table_schema;
         table_schema.table_id_ = table_name_;
         status = DBWrapper::DB()->DescribeTable(table_schema);

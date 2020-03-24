@@ -57,16 +57,16 @@ class WalManager {
     GetNextRecord(MXLogRecord& record);
 
     /*
-     * Create table
-     * @param collection_id: table id
+     * Create collection
+     * @param collection_id: collection id
      * @retval lsn
      */
     uint64_t
     CreateTable(const std::string& collection_id);
 
     /*
-     * Drop table
-     * @param collection_id: table id
+     * Drop collection
+     * @param collection_id: collection id
      * @retval none
      */
     void
@@ -74,7 +74,7 @@ class WalManager {
 
     /*
      * Table is flushed
-     * @param collection_id: table id
+     * @param collection_id: collection id
      * @param lsn: flushed lsn
      */
     void
@@ -82,7 +82,7 @@ class WalManager {
 
     /*
      * Insert
-     * @param collection_id: table id
+     * @param collection_id: collection id
      * @param collection_id: partition tag
      * @param vector_ids: vector ids
      * @param vectors: vectors
@@ -94,7 +94,7 @@ class WalManager {
 
     /*
      * Insert
-     * @param collection_id: table id
+     * @param collection_id: collection id
      * @param vector_ids: vector ids
      */
     bool
@@ -102,7 +102,7 @@ class WalManager {
 
     /*
      * Get flush lsn
-     * @param collection_id: table id (empty means all tables)
+     * @param collection_id: collection id (empty means all tables)
      * @retval if there is something not flushed, return lsn;
      *         else, return 0
      */

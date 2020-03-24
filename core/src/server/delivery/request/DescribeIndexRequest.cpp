@@ -36,7 +36,7 @@ Status
 DescribeIndexRequest::OnExecute() {
     try {
         fiu_do_on("DescribeIndexRequest.OnExecute.throw_std_exception", throw std::exception());
-        std::string hdr = "DescribeIndexRequest(table=" + table_name_ + ")";
+        std::string hdr = "DescribeIndexRequest(collection=" + table_name_ + ")";
         TimeRecorderAuto rc(hdr);
 
         // step 1: check arguments
@@ -45,7 +45,7 @@ DescribeIndexRequest::OnExecute() {
             return status;
         }
 
-        // only process root table, ignore partition table
+        // only process root collection, ignore partition collection
         engine::meta::TableSchema table_schema;
         table_schema.table_id_ = table_name_;
         status = DBWrapper::DB()->DescribeTable(table_schema);
@@ -61,7 +61,7 @@ DescribeIndexRequest::OnExecute() {
             }
         }
 
-        // step 2: check table existence
+        // step 2: check collection existence
         engine::TableIndex index;
         status = DBWrapper::DB()->DescribeIndex(table_name_, index);
         if (!status.ok()) {

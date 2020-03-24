@@ -175,10 +175,10 @@ SqliteMetaImpl::CreateTable(TableSchema& table_schema) {
             NextTableId(table_schema.table_id_);
         } else {
             fiu_do_on("SqliteMetaImpl.CreateTable.throw_exception", throw std::exception());
-            auto table = ConnectorPtr->select(columns(&TableSchema::state_),
+            auto collection = ConnectorPtr->select(columns(&TableSchema::state_),
                                               where(c(&TableSchema::table_id_) == table_schema.table_id_));
-            if (table.size() == 1) {
-                if (TableSchema::TO_DELETE == std::get<0>(table[0])) {
+            if (collection.size() == 1) {
+                if (TableSchema::TO_DELETE == std::get<0>(collection[0])) {
                     return Status(DB_ERROR, "Table already exists and it is in delete state, please wait a second");
                 } else {
                     // Change from no error to already exist.
@@ -195,14 +195,14 @@ SqliteMetaImpl::CreateTable(TableSchema& table_schema) {
             auto id = ConnectorPtr->insert(table_schema);
             table_schema.id_ = id;
         } catch (std::exception& e) {
-            return HandleException("Encounter exception when create table", e.what());
+            return HandleException("Encounter exception when create collection", e.what());
         }
 
-        ENGINE_LOG_DEBUG << "Successfully create table: " << table_schema.table_id_;
+        ENGINE_LOG_DEBUG << "Successfully create collection: " << table_schema.table_id_;
 
         return utils::CreateTablePath(options_, table_schema.table_id_);
     } catch (std::exception& e) {
-        return HandleException("Encounter exception when create table", e.what());
+        return HandleException("Encounter exception when create collection", e.what());
     }
 }
 
@@ -237,7 +237,7 @@ SqliteMetaImpl::DescribeTable(TableSchema& table_schema) {
             return Status(DB_NOT_FOUND, "Table " + table_schema.table_id_ + " not found");
         }
     } catch (std::exception& e) {
-        return HandleException("Encounter exception when describe table", e.what());
+        return HandleException("Encounter exception when describe collection", e.what());
     }
 
     return Status::OK();
@@ -259,7 +259,7 @@ SqliteMetaImpl::HasTable(const std::string& collection_id, bool& has_or_not) {
             has_or_not = false;
         }
     } catch (std::exception& e) {
-        return HandleException("Encounter exception when lookup table", e.what());
+        return HandleException("Encounter exception when lookup collection", e.what());
     }
 
     return Status::OK();
@@ -276,21 +276,21 @@ SqliteMetaImpl::AllTables(std::vector<TableSchema>& table_schema_array) {
                     &TableSchema::index_params_, &TableSchema::metric_type_, &TableSchema::owner_table_,
                     &TableSchema::partition_tag_, &TableSchema::version_, &TableSchema::flush_lsn_),
             where(c(&TableSchema::state_) != (int)TableSchema::TO_DELETE and c(&TableSchema::owner_table_) == ""));
-        for (auto& table : selected) {
+        for (auto& collection : selected) {
             TableSchema schema;
-            schema.id_ = std::get<0>(table);
-            schema.table_id_ = std::get<1>(table);
-            schema.dimension_ = std::get<2>(table);
-            schema.created_on_ = std::get<3>(table);
-            schema.flag_ = std::get<4>(table);
-            schema.index_file_size_ = std::get<5>(table);
-            schema.engine_type_ = std::get<6>(table);
-            schema.index_params_ = std::get<7>(table);
-            schema.metric_type_ = std::get<8>(table);
-            schema.owner_table_ = std::get<9>(table);
-            schema.partition_tag_ = std::get<10>(table);
-            schema.version_ = std::get<11>(table);
-            schema.flush_lsn_ = std::get<12>(table);
+            schema.id_ = std::get<0>(collection);
+            schema.table_id_ = std::get<1>(collection);
+            schema.dimension_ = std::get<2>(collection);
+            schema.created_on_ = std::get<3>(collection);
+            schema.flag_ = std::get<4>(collection);
+            schema.index_file_size_ = std::get<5>(collection);
+            schema.engine_type_ = std::get<6>(collection);
+            schema.index_params_ = std::get<7>(collection);
+            schema.metric_type_ = std::get<8>(collection);
+            schema.owner_table_ = std::get<9>(collection);
+            schema.partition_tag_ = std::get<10>(collection);
+            schema.version_ = std::get<11>(collection);
+            schema.flush_lsn_ = std::get<12>(collection);
 
             table_schema_array.emplace_back(schema);
         }
@@ -311,14 +311,14 @@ SqliteMetaImpl::DropTable(const std::string& collection_id) {
         // multi-threads call sqlite update may get exception('bad logic', etc), so we add a lock here
         std::lock_guard<std::mutex> meta_lock(meta_mutex_);
 
-        // soft delete table
+        // soft delete collection
         ConnectorPtr->update_all(
             set(c(&TableSchema::state_) = (int)TableSchema::TO_DELETE),
             where(c(&TableSchema::table_id_) == collection_id and c(&TableSchema::state_) != (int)TableSchema::TO_DELETE));
 
-        ENGINE_LOG_DEBUG << "Successfully delete table, table id = " << collection_id;
+        ENGINE_LOG_DEBUG << "Successfully delete collection, collection id = " << collection_id;
     } catch (std::exception& e) {
-        return HandleException("Encounter exception when delete table", e.what());
+        return HandleException("Encounter exception when delete collection", e.what());
     }
 
     return Status::OK();
@@ -334,15 +334,15 @@ SqliteMetaImpl::DeleteTableFiles(const std::string& collection_id) {
         // multi-threads call sqlite update may get exception('bad logic', etc), so we add a lock here
         std::lock_guard<std::mutex> meta_lock(meta_mutex_);
 
-        // soft delete table files
+        // soft delete collection files
         ConnectorPtr->update_all(set(c(&TableFileSchema::file_type_) = (int)TableFileSchema::TO_DELETE,
                                      c(&TableFileSchema::updated_time_) = utils::GetMicroSecTimeStamp()),
                                  where(c(&TableFileSchema::table_id_) == collection_id and
                                        c(&TableFileSchema::file_type_) != (int)TableFileSchema::TO_DELETE));
 
-        ENGINE_LOG_DEBUG << "Successfully delete table files, table id = " << collection_id;
+        ENGINE_LOG_DEBUG << "Successfully delete collection files, collection id = " << collection_id;
     } catch (std::exception& e) {
-        return HandleException("Encounter exception when delete table files", e.what());
+        return HandleException("Encounter exception when delete collection files", e.what());
     }
 
     return Status::OK();
@@ -384,10 +384,10 @@ SqliteMetaImpl::CreateTableFile(TableFileSchema& file_schema) {
         auto id = ConnectorPtr->insert(file_schema);
         file_schema.id_ = id;
 
-        ENGINE_LOG_DEBUG << "Successfully create table file, file id = " << file_schema.file_id_;
+        ENGINE_LOG_DEBUG << "Successfully create collection file, file id = " << file_schema.file_id_;
         return utils::CreateTableFilePath(options_, file_schema);
     } catch (std::exception& e) {
-        return HandleException("Encounter exception when create table file", e.what());
+        return HandleException("Encounter exception when create collection file", e.what());
     }
 
     return Status::OK();
@@ -436,10 +436,10 @@ SqliteMetaImpl::GetTableFiles(const std::string& collection_id, const std::vecto
             table_files.emplace_back(file_schema);
         }
 
-        ENGINE_LOG_DEBUG << "Get table files by id";
+        ENGINE_LOG_DEBUG << "Get collection files by id";
         return result;
     } catch (std::exception& e) {
-        return HandleException("Encounter exception when lookup table files", e.what());
+        return HandleException("Encounter exception when lookup collection files", e.what());
     }
 }
 
@@ -486,10 +486,10 @@ SqliteMetaImpl::GetTableFilesBySegmentId(const std::string& segment_id,
             }
         }
 
-        ENGINE_LOG_DEBUG << "Get table files by segment id";
+        ENGINE_LOG_DEBUG << "Get collection files by segment id";
         return Status::OK();
     } catch (std::exception& e) {
-        return HandleException("Encounter exception when lookup table files by segment id", e.what());
+        return HandleException("Encounter exception when lookup collection files by segment id", e.what());
     }
 }
 
@@ -501,9 +501,9 @@ SqliteMetaImpl::UpdateTableFlag(const std::string& collection_id, int64_t flag) 
 
         // set all backup file to raw
         ConnectorPtr->update_all(set(c(&TableSchema::flag_) = flag), where(c(&TableSchema::table_id_) == collection_id));
-        ENGINE_LOG_DEBUG << "Successfully update table flag, table id = " << collection_id;
+        ENGINE_LOG_DEBUG << "Successfully update collection flag, collection id = " << collection_id;
     } catch (std::exception& e) {
-        std::string msg = "Encounter exception when update table flag: collection_id = " + collection_id;
+        std::string msg = "Encounter exception when update collection flag: collection_id = " + collection_id;
         return HandleException(msg, e.what());
     }
 
@@ -517,9 +517,9 @@ SqliteMetaImpl::UpdateTableFlushLSN(const std::string& collection_id, uint64_t f
 
         ConnectorPtr->update_all(set(c(&TableSchema::flush_lsn_) = flush_lsn),
                                  where(c(&TableSchema::table_id_) == collection_id));
-        ENGINE_LOG_DEBUG << "Successfully update table flush_lsn, table id = " << collection_id;
+        ENGINE_LOG_DEBUG << "Successfully update collection flush_lsn, collection id = " << collection_id;
     } catch (std::exception& e) {
-        std::string msg = "Encounter exception when update table lsn: collection_id = " + collection_id;
+        std::string msg = "Encounter exception when update collection lsn: collection_id = " + collection_id;
         return HandleException(msg, e.what());
     }
 
@@ -541,7 +541,7 @@ SqliteMetaImpl::GetTableFlushLSN(const std::string& collection_id, uint64_t& flu
         }
 
     } catch (std::exception& e) {
-        return HandleException("Encounter exception when getting table files by flush_lsn", e.what());
+        return HandleException("Encounter exception when getting collection files by flush_lsn", e.what());
     }
 
     return Status::OK();
@@ -603,7 +603,7 @@ SqliteMetaImpl::GetTableFilesByFlushLSN(uint64_t flush_lsn, TableFilesSchema& ta
         }
         return ret;
     } catch (std::exception& e) {
-        return HandleException("Encounter exception when getting table files by flush_lsn", e.what());
+        return HandleException("Encounter exception when getting collection files by flush_lsn", e.what());
     }
 }
 
@@ -620,7 +620,7 @@ SqliteMetaImpl::UpdateTableFile(TableFileSchema& file_schema) {
         auto tables = ConnectorPtr->select(columns(&TableSchema::state_),
                                            where(c(&TableSchema::table_id_) == file_schema.table_id_));
 
-        // if the table has been deleted, just mark the table file as TO_DELETE
+        // if the collection has been deleted, just mark the collection file as TO_DELETE
         // clean thread will delete the file later
         if (tables.size() < 1 || std::get<0>(tables[0]) == (int)TableSchema::TO_DELETE) {
             file_schema.file_type_ = TableFileSchema::TO_DELETE;
@@ -628,10 +628,10 @@ SqliteMetaImpl::UpdateTableFile(TableFileSchema& file_schema) {
 
         ConnectorPtr->update(file_schema);
 
-        ENGINE_LOG_DEBUG << "Update single table file, file id = " << file_schema.file_id_;
+        ENGINE_LOG_DEBUG << "Update single collection file, file id = " << file_schema.file_id_;
     } catch (std::exception& e) {
         std::string msg =
-            "Exception update table file: collection_id = " + file_schema.table_id_ + " file_id = " + file_schema.file_id_;
+            "Exception update collection file: collection_id = " + file_schema.table_id_ + " file_id = " + file_schema.file_id_;
         return HandleException(msg, e.what());
     }
     return Status::OK();
@@ -678,9 +678,9 @@ SqliteMetaImpl::UpdateTableFiles(TableFilesSchema& files) {
             return HandleException("UpdateTableFiles error: sqlite transaction failed");
         }
 
-        ENGINE_LOG_DEBUG << "Update " << files.size() << " table files";
+        ENGINE_LOG_DEBUG << "Update " << files.size() << " collection files";
     } catch (std::exception& e) {
-        return HandleException("Encounter exception when update table files", e.what());
+        return HandleException("Encounter exception when update collection files", e.what());
     }
     return Status::OK();
 }
@@ -700,7 +700,7 @@ SqliteMetaImpl::UpdateTableFilesRowCount(TableFilesSchema& files) {
             ENGINE_LOG_DEBUG << "Update file " << file.file_id_ << " row count to " << file.row_count_;
         }
     } catch (std::exception& e) {
-        return HandleException("Encounter exception when update table files row count", e.what());
+        return HandleException("Encounter exception when update collection files row count", e.what());
     }
     return Status::OK();
 }
@@ -747,9 +747,9 @@ SqliteMetaImpl::UpdateTableIndex(const std::string& collection_id, const TableIn
                                  where(c(&TableFileSchema::table_id_) == collection_id and
                                        c(&TableFileSchema::file_type_) == (int)TableFileSchema::BACKUP));
 
-        ENGINE_LOG_DEBUG << "Successfully update table index, table id = " << collection_id;
+        ENGINE_LOG_DEBUG << "Successfully update collection index, collection id = " << collection_id;
     } catch (std::exception& e) {
-        std::string msg = "Encounter exception when update table index: collection_id = " + collection_id;
+        std::string msg = "Encounter exception when update collection index: collection_id = " + collection_id;
         return HandleException(msg, e.what());
     }
 
@@ -770,9 +770,9 @@ SqliteMetaImpl::UpdateTableFilesToIndex(const std::string& collection_id) {
                                        c(&TableFileSchema::row_count_) >= meta::BUILD_INDEX_THRESHOLD and
                                        c(&TableFileSchema::file_type_) == (int)TableFileSchema::RAW));
 
-        ENGINE_LOG_DEBUG << "Update files to to_index, table id = " << collection_id;
+        ENGINE_LOG_DEBUG << "Update files to to_index, collection id = " << collection_id;
     } catch (std::exception& e) {
-        return HandleException("Encounter exception when update table files to to_index", e.what());
+        return HandleException("Encounter exception when update collection files to to_index", e.what());
     }
 
     return Status::OK();
@@ -823,7 +823,7 @@ SqliteMetaImpl::DropTableIndex(const std::string& collection_id) {
                                  where(c(&TableFileSchema::table_id_) == collection_id and
                                        c(&TableFileSchema::file_type_) == (int)TableFileSchema::BACKUP));
 
-        // set table index type to raw
+        // set collection index type to raw
         auto groups = ConnectorPtr->select(columns(&TableSchema::metric_type_),
                                            where(c(&TableSchema::table_id_) == collection_id));
 
@@ -838,9 +838,9 @@ SqliteMetaImpl::DropTableIndex(const std::string& collection_id) {
             set(c(&TableSchema::engine_type_) = raw_engine_type, c(&TableSchema::index_params_) = "{}"),
             where(c(&TableSchema::table_id_) == collection_id));
 
-        ENGINE_LOG_DEBUG << "Successfully drop table index, table id = " << collection_id;
+        ENGINE_LOG_DEBUG << "Successfully drop collection index, collection id = " << collection_id;
     } catch (std::exception& e) {
-        return HandleException("Encounter exception when delete table index files", e.what());
+        return HandleException("Encounter exception when delete collection index files", e.what());
     }
 
     return Status::OK();
@@ -1023,7 +1023,7 @@ SqliteMetaImpl::FilesToSearch(const std::string& collection_id, TableFilesSchema
             files.emplace_back(table_file);
         }
         if (files.empty()) {
-            ENGINE_LOG_ERROR << "No file to search for table: " << collection_id;
+            ENGINE_LOG_ERROR << "No file to search for collection: " << collection_id;
         }
 
         if (selected.size() > 0) {
@@ -1044,7 +1044,7 @@ SqliteMetaImpl::FilesToMerge(const std::string& collection_id, TableFilesSchema&
 
         server::MetricCollector metric;
 
-        // check table existence
+        // check collection existence
         TableSchema table_schema;
         table_schema.table_id_ = collection_id;
         auto status = DescribeTable(table_schema);
@@ -1143,7 +1143,7 @@ SqliteMetaImpl::FilesToIndex(TableFilesSchema& files) {
                 table_schema.table_id_ = table_file.table_id_;
                 auto status = DescribeTable(table_schema);
                 fiu_do_on("SqliteMetaImpl_FilesToIndex_TableNotFound",
-                          status = Status(DB_NOT_FOUND, "table not found"));
+                          status = Status(DB_NOT_FOUND, "collection not found"));
                 if (!status.ok()) {
                     return status;
                 }
@@ -1237,7 +1237,7 @@ SqliteMetaImpl::FilesByType(const std::string& collection_id, const std::vector<
                 files.emplace_back(file_schema);
             }
 
-            std::string msg = "Get table files by type.";
+            std::string msg = "Get collection files by type.";
             for (int file_type : file_types) {
                 switch (file_type) {
                     case (int)TableFileSchema::RAW:msg = msg + " raw files:" + std::to_string(raw_count);
@@ -1375,7 +1375,7 @@ SqliteMetaImpl::Archive() {
                                          where(c(&TableFileSchema::created_on_) < (int64_t)(now - usecs) and
                                                c(&TableFileSchema::file_type_) != (int)TableFileSchema::TO_DELETE));
             } catch (std::exception& e) {
-                return HandleException("Encounter exception when update table files", e.what());
+                return HandleException("Encounter exception when update collection files", e.what());
             }
 
             ENGINE_LOG_DEBUG << "Archive old files";
@@ -1430,7 +1430,7 @@ SqliteMetaImpl::CleanUpShadowFiles() {
 
         auto commited = ConnectorPtr->transaction([&]() mutable {
             for (auto& file : files) {
-                ENGINE_LOG_DEBUG << "Remove table file type as NEW";
+                ENGINE_LOG_DEBUG << "Remove collection file type as NEW";
                 ConnectorPtr->remove<TableFileSchema>(std::get<0>(file));
             }
             return true;
@@ -1446,7 +1446,7 @@ SqliteMetaImpl::CleanUpShadowFiles() {
             ENGINE_LOG_DEBUG << "Clean " << files.size() << " files";
         }
     } catch (std::exception& e) {
-        return HandleException("Encounter exception when clean table file", e.what());
+        return HandleException("Encounter exception when clean collection file", e.what());
     }
 
     return Status::OK();
@@ -1532,7 +1532,7 @@ SqliteMetaImpl::CleanUpFilesWithTTL(uint64_t seconds /*, CleanUpFilter* filter*/
             ENGINE_LOG_DEBUG << "Clean " << clean_files << " files expired in " << seconds << " seconds";
         }
     } catch (std::exception& e) {
-        return HandleException("Encounter exception when clean table files", e.what());
+        return HandleException("Encounter exception when clean collection files", e.what());
     }
 
     // remove to_delete tables
@@ -1547,9 +1547,9 @@ SqliteMetaImpl::CleanUpFilesWithTTL(uint64_t seconds /*, CleanUpFilter* filter*/
                                            where(c(&TableSchema::state_) == (int)TableSchema::TO_DELETE));
 
         auto commited = ConnectorPtr->transaction([&]() mutable {
-            for (auto& table : tables) {
-                utils::DeleteTablePath(options_, std::get<1>(table), false);  // only delete empty folder
-                ConnectorPtr->remove<TableSchema>(std::get<0>(table));
+            for (auto& collection : tables) {
+                utils::DeleteTablePath(options_, std::get<1>(collection), false);  // only delete empty folder
+                ConnectorPtr->remove<TableSchema>(std::get<0>(collection));
             }
 
             return true;
@@ -1564,11 +1564,11 @@ SqliteMetaImpl::CleanUpFilesWithTTL(uint64_t seconds /*, CleanUpFilter* filter*/
             ENGINE_LOG_DEBUG << "Remove " << tables.size() << " tables from meta";
         }
     } catch (std::exception& e) {
-        return HandleException("Encounter exception when clean table files", e.what());
+        return HandleException("Encounter exception when clean collection files", e.what());
     }
 
-    // remove deleted table folder
-    // don't remove table folder until all its files has been deleted
+    // remove deleted collection folder
+    // don't remove collection folder until all its files has been deleted
     try {
         fiu_do_on("SqliteMetaImpl.CleanUpFilesWithTTL.RemoveTableFolder_ThrowException", throw std::exception());
         server::MetricCollector metric;
@@ -1587,7 +1587,7 @@ SqliteMetaImpl::CleanUpFilesWithTTL(uint64_t seconds /*, CleanUpFilter* filter*/
             ENGINE_LOG_DEBUG << "Remove " << remove_tables << " tables folder";
         }
     } catch (std::exception& e) {
-        return HandleException("Encounter exception when delete table folder", e.what());
+        return HandleException("Encounter exception when delete collection folder", e.what());
     }
 
     // remove deleted segment folder
@@ -1613,7 +1613,7 @@ SqliteMetaImpl::CleanUpFilesWithTTL(uint64_t seconds /*, CleanUpFilter* filter*/
             ENGINE_LOG_DEBUG << "Remove " << remove_segments << " segments folder";
         }
     } catch (std::exception& e) {
-        return HandleException("Encounter exception when delete table folder", e.what());
+        return HandleException("Encounter exception when delete collection folder", e.what());
     }
 
     return Status::OK();
@@ -1645,7 +1645,7 @@ SqliteMetaImpl::Count(const std::string& collection_id, uint64_t& result) {
             result += std::get<0>(file);
         }
     } catch (std::exception& e) {
-        return HandleException("Encounter exception when calculate table file size", e.what());
+        return HandleException("Encounter exception when calculate collection file size", e.what());
     }
     return Status::OK();
 }
@@ -1715,7 +1715,7 @@ SqliteMetaImpl::DiscardFiles(int64_t to_discard_size) {
             return HandleException("DiscardFiles error: sqlite transaction failed");
         }
     } catch (std::exception& e) {
-        return HandleException("Encounter exception when discard table file", e.what());
+        return HandleException("Encounter exception when discard collection file", e.what());
     }
 
     return DiscardFiles(to_discard_size);
@@ -1761,7 +1761,7 @@ SqliteMetaImpl::GetGlobalLastLSN(uint64_t& lsn) {
             lsn = std::get<0>(selected[0]);
         }
     } catch (std::exception& e) {
-        return HandleException("Encounter exception when delete table folder", e.what());
+        return HandleException("Encounter exception when delete collection folder", e.what());
     }
 
     return Status::OK();

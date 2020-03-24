@@ -58,12 +58,12 @@ SearchRequest::OnExecute() {
         auto pre_query_ctx = context_->Child("Pre query");
 
         SERVER_LOG_DEBUG << "SearchRequest begin execute, extra_params=" << extra_params_.dump();
-        std::string hdr = "SearchRequest(table=" + table_name_ + ", nq=" + std::to_string(vector_count) +
+        std::string hdr = "SearchRequest(collection=" + table_name_ + ", nq=" + std::to_string(vector_count) +
                           ", k=" + std::to_string(topk_) + ")";
 
         TimeRecorder rc(hdr);
 
-        // step 1: check table name
+        // step 1: check collection name
         auto status = ValidationUtil::ValidateTableName(table_name_);
         if (!status.ok()) {
             return status;
@@ -75,8 +75,8 @@ SearchRequest::OnExecute() {
             return status;
         }
 
-        // step 3: check table existence
-        // only process root table, ignore partition table
+        // step 3: check collection existence
+        // only process root collection, ignore partition collection
         engine::meta::TableSchema table_schema;
         table_schema.table_id_ = table_name_;
         status = DBWrapper::DB()->DescribeTable(table_schema);
@@ -145,7 +145,7 @@ SearchRequest::OnExecute() {
         }
         fiu_do_on("SearchRequest.OnExecute.empty_result_ids", result_ids.clear());
         if (result_ids.empty()) {
-            return Status::OK();  // empty table
+            return Status::OK();  // empty collection
         }
 
         auto post_query_ctx = context_->Child("Constructing result");

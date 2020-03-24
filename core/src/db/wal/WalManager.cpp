@@ -166,7 +166,7 @@ WalManager::GetNextRecord(MXLogRecord& record) {
                 record.lsn = flush_info_.lsn_;
                 flush_info_.Clear();
 
-                WAL_LOG_INFO << "record flush table " << record.collection_id << " lsn " << record.lsn;
+                WAL_LOG_INFO << "record flush collection " << record.collection_id << " lsn " << record.lsn;
                 return true;
             }
         }
@@ -195,13 +195,13 @@ WalManager::GetNextRecord(MXLogRecord& record) {
         }
     }
 
-    WAL_LOG_INFO << "record type " << (int32_t)record.type << " table " << record.collection_id << " lsn " << record.lsn;
+    WAL_LOG_INFO << "record type " << (int32_t)record.type << " collection " << record.collection_id << " lsn " << record.lsn;
     return error_code;
 }
 
 uint64_t
 WalManager::CreateTable(const std::string& collection_id) {
-    WAL_LOG_INFO << "create table " << collection_id << " " << last_applied_lsn_;
+    WAL_LOG_INFO << "create collection " << collection_id << " " << last_applied_lsn_;
     std::lock_guard<std::mutex> lck(mutex_);
     uint64_t applied_lsn = last_applied_lsn_;
     tables_[collection_id] = {applied_lsn, applied_lsn};
@@ -210,7 +210,7 @@ WalManager::CreateTable(const std::string& collection_id) {
 
 void
 WalManager::DropTable(const std::string& collection_id) {
-    WAL_LOG_INFO << "drop table " << collection_id;
+    WAL_LOG_INFO << "drop collection " << collection_id;
     std::lock_guard<std::mutex> lck(mutex_);
     tables_.erase(collection_id);
 }
@@ -364,7 +364,7 @@ WalManager::Flush(const std::string& collection_id) {
         }
 
     } else {
-        // flush one table
+        // flush one collection
         auto it = tables_.find(collection_id);
         if (it != tables_.end()) {
             if (it->second.wal_lsn > it->second.flush_lsn) {

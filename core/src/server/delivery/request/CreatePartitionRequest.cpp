@@ -35,7 +35,7 @@ CreatePartitionRequest::Create(const std::shared_ptr<milvus::server::Context>& c
 
 Status
 CreatePartitionRequest::OnExecute() {
-    std::string hdr = "CreatePartitionRequest(table=" + table_name_ + ", partition_tag=" + tag_ + ")";
+    std::string hdr = "CreatePartitionRequest(collection=" + table_name_ + ", partition_tag=" + tag_ + ")";
     TimeRecorderAuto rc(hdr);
 
     try {
@@ -54,7 +54,7 @@ CreatePartitionRequest::OnExecute() {
             return status;
         }
 
-        // only process root table, ignore partition table
+        // only process root collection, ignore partition collection
         engine::meta::TableSchema table_schema;
         table_schema.table_id_ = table_name_;
         status = DBWrapper::DB()->DescribeTable(table_schema);

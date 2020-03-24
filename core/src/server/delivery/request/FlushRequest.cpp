@@ -50,7 +50,7 @@ FlushRequest::OnExecute() {
     SERVER_LOG_DEBUG << hdr;
 
     for (auto& name : table_names_) {
-        // only process root table, ignore partition table
+        // only process root collection, ignore partition collection
         engine::meta::TableSchema table_schema;
         table_schema.table_id_ = name;
         status = DBWrapper::DB()->DescribeTable(table_schema);
