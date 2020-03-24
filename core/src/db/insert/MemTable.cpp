@@ -363,8 +363,8 @@ MemTable::ApplyDeletes() {
         auto time7 = std::chrono::high_resolution_clock::now();
         std::chrono::duration<double> diff6 = time7 - time6;
         diff6 = time6 - time5;
-        ENGINE_LOG_DEBUG << "Update collection file row count in vector of segment: " << table_file.segment_id_ << " in "
-                         << diff6.count() << " s";
+        ENGINE_LOG_DEBUG << "Update collection file row count in vector of segment: " << table_file.segment_id_
+                         << " in " << diff6.count() << " s";
     }
 
     auto time7 = std::chrono::high_resolution_clock::now();

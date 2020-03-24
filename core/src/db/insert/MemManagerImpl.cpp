@@ -102,7 +102,8 @@ MemManagerImpl::DeleteVector(const std::string& collection_id, IDNumber vector_i
 }
 
 Status
-MemManagerImpl::DeleteVectors(const std::string& collection_id, int64_t length, const IDNumber* vector_ids, uint64_t lsn) {
+MemManagerImpl::DeleteVectors(const std::string& collection_id, int64_t length, const IDNumber* vector_ids,
+                              uint64_t lsn) {
     std::unique_lock<std::mutex> lock(mutex_);
     MemTablePtr mem = GetMemByTable(collection_id);
     mem->SetLSN(lsn);

@@ -1615,7 +1615,8 @@ DBImpl::GetFilesToSearch(const std::string& collection_id, meta::TableFilesSchem
 }
 
 Status
-DBImpl::GetPartitionByTag(const std::string& collection_id, const std::string& partition_tag, std::string& partition_name) {
+DBImpl::GetPartitionByTag(const std::string& collection_id, const std::string& partition_tag,
+                          std::string& partition_name) {
     Status status;
 
     if (partition_tag.empty()) {

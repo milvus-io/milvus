@@ -406,11 +406,12 @@ MySQLMetaImpl::CreateTable(TableSchema& table_schema) {
             std::string& version = table_schema.version_;
             std::string flush_lsn = std::to_string(table_schema.flush_lsn_);
 
-            createTableQuery << "INSERT INTO " << META_TABLES << " VALUES(" << id << ", " << mysqlpp::quote << collection_id
-                             << ", " << state << ", " << dimension << ", " << created_on << ", " << flag << ", "
-                             << index_file_size << ", " << engine_type << ", " << mysqlpp::quote << index_params << ", "
-                             << metric_type << ", " << mysqlpp::quote << owner_table << ", " << mysqlpp::quote
-                             << partition_tag << ", " << mysqlpp::quote << version << ", " << flush_lsn << ");";
+            createTableQuery << "INSERT INTO " << META_TABLES << " VALUES(" << id << ", " << mysqlpp::quote
+                             << collection_id << ", " << state << ", " << dimension << ", " << created_on << ", "
+                             << flag << ", " << index_file_size << ", " << engine_type << ", " << mysqlpp::quote
+                             << index_params << ", " << metric_type << ", " << mysqlpp::quote << owner_table << ", "
+                             << mysqlpp::quote << partition_tag << ", " << mysqlpp::quote << version << ", "
+                             << flush_lsn << ");";
 
             ENGINE_LOG_DEBUG << "MySQLMetaImpl::CreateTable: " << createTableQuery.str();
 
@@ -500,8 +501,8 @@ MySQLMetaImpl::HasTable(const std::string& collection_id, bool& has_or_not) {
             mysqlpp::Query hasTableQuery = connectionPtr->query();
             // since collection_id is a unique column we just need to check whether it exists or not
             hasTableQuery << "SELECT EXISTS"
-                          << " (SELECT 1 FROM " << META_TABLES << " WHERE table_id = " << mysqlpp::quote << collection_id
-                          << " AND state <> " << std::to_string(TableSchema::TO_DELETE) << ")"
+                          << " (SELECT 1 FROM " << META_TABLES << " WHERE table_id = " << mysqlpp::quote
+                          << collection_id << " AND state <> " << std::to_string(TableSchema::TO_DELETE) << ")"
                           << " AS " << mysqlpp::quote << "check"
                           << ";";
 
@@ -875,8 +876,9 @@ MySQLMetaImpl::UpdateTableIndex(const std::string& collection_id, const TableInd
 
             mysqlpp::Query updateTableIndexParamQuery = connectionPtr->query();
             updateTableIndexParamQuery << "SELECT id, state, dimension, created_on"
-                                       << " FROM " << META_TABLES << " WHERE table_id = " << mysqlpp::quote << collection_id
-                                       << " AND state <> " << std::to_string(TableSchema::TO_DELETE) << ";";
+                                       << " FROM " << META_TABLES << " WHERE table_id = " << mysqlpp::quote
+                                       << collection_id << " AND state <> " << std::to_string(TableSchema::TO_DELETE)
+                                       << ";";
 
             ENGINE_LOG_DEBUG << "MySQLMetaImpl::UpdateTableIndex: " << updateTableIndexParamQuery.str();
 
@@ -1105,12 +1107,12 @@ MySQLMetaImpl::UpdateTableFile(TableFileSchema& file_schema) {
             std::string created_on = std::to_string(file_schema.created_on_);
             std::string date = std::to_string(file_schema.date_);
 
-            updateTableFileQuery << "UPDATE " << META_TABLEFILES << " SET table_id = " << mysqlpp::quote << collection_id
-                                 << " ,engine_type = " << engine_type << " ,file_id = " << mysqlpp::quote << file_id
-                                 << " ,file_type = " << file_type << " ,file_size = " << file_size
-                                 << " ,row_count = " << row_count << " ,updated_time = " << updated_time
-                                 << " ,created_on = " << created_on << " ,date = " << date << " WHERE id = " << id
-                                 << ";";
+            updateTableFileQuery << "UPDATE " << META_TABLEFILES << " SET table_id = " << mysqlpp::quote
+                                 << collection_id << " ,engine_type = " << engine_type
+                                 << " ,file_id = " << mysqlpp::quote << file_id << " ,file_type = " << file_type
+                                 << " ,file_size = " << file_size << " ,row_count = " << row_count
+                                 << " ,updated_time = " << updated_time << " ,created_on = " << created_on
+                                 << " ,date = " << date << " WHERE id = " << id << ";";
 
             ENGINE_LOG_DEBUG << "MySQLMetaImpl::UpdateTableFile: " << updateTableFileQuery.str();
 
@@ -1297,8 +1299,9 @@ MySQLMetaImpl::DescribeTableIndex(const std::string& collection_id, TableIndex& 
 
             mysqlpp::Query describeTableIndexQuery = connectionPtr->query();
             describeTableIndexQuery << "SELECT engine_type, index_params, index_file_size, metric_type"
-                                    << " FROM " << META_TABLES << " WHERE table_id = " << mysqlpp::quote << collection_id
-                                    << " AND state <> " << std::to_string(TableSchema::TO_DELETE) << ";";
+                                    << " FROM " << META_TABLES << " WHERE table_id = " << mysqlpp::quote
+                                    << collection_id << " AND state <> " << std::to_string(TableSchema::TO_DELETE)
+                                    << ";";
 
             ENGINE_LOG_DEBUG << "MySQLMetaImpl::DescribeTableIndex: " << describeTableIndexQuery.str();
 
@@ -1392,8 +1395,8 @@ MySQLMetaImpl::DropTableIndex(const std::string& collection_id) {
 }
 
 Status
-MySQLMetaImpl::CreatePartition(const std::string& collection_id, const std::string& partition_name, const std::string& tag,
-                               uint64_t lsn) {
+MySQLMetaImpl::CreatePartition(const std::string& collection_id, const std::string& partition_name,
+                               const std::string& tag, uint64_t lsn) {
     server::MetricCollector metric;
 
     TableSchema table_schema;
@@ -1449,7 +1452,8 @@ MySQLMetaImpl::DropPartition(const std::string& partition_name) {
 }
 
 Status
-MySQLMetaImpl::ShowPartitions(const std::string& collection_id, std::vector<meta::TableSchema>& partition_schema_array) {
+MySQLMetaImpl::ShowPartitions(const std::string& collection_id,
+                              std::vector<meta::TableSchema>& partition_schema_array) {
     try {
         server::MetricCollector metric;
         mysqlpp::StoreQueryResult res;
@@ -1522,8 +1526,8 @@ MySQLMetaImpl::GetPartitionName(const std::string& collection_id, const std::str
 
             mysqlpp::Query allPartitionsQuery = connectionPtr->query();
             allPartitionsQuery << "SELECT table_id FROM " << META_TABLES << " WHERE owner_table = " << mysqlpp::quote
-                               << collection_id << " AND partition_tag = " << mysqlpp::quote << valid_tag << " AND state <> "
-                               << std::to_string(TableSchema::TO_DELETE) << ";";
+                               << collection_id << " AND partition_tag = " << mysqlpp::quote << valid_tag
+                               << " AND state <> " << std::to_string(TableSchema::TO_DELETE) << ";";
 
             ENGINE_LOG_DEBUG << "MySQLMetaImpl::AllTables: " << allPartitionsQuery.str();
 
@@ -1772,7 +1776,8 @@ MySQLMetaImpl::FilesToIndex(TableFilesSchema& files) {
 }
 
 Status
-MySQLMetaImpl::FilesByType(const std::string& collection_id, const std::vector<int>& file_types, TableFilesSchema& files) {
+MySQLMetaImpl::FilesByType(const std::string& collection_id, const std::vector<int>& file_types,
+                           TableFilesSchema& files) {
     if (file_types.empty()) {
         return Status(DB_ERROR, "file types array is empty");
     }
