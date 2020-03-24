@@ -132,8 +132,9 @@ IndexHNSW::Query(const DatasetPtr& dataset_ptr, const Config& config) {
     }
     GETTENSOR(dataset_ptr)
 
-    size_t id_size = sizeof(int64_t) * config[meta::TOPK].get<int64_t>();
-    size_t dist_size = sizeof(float) * config[meta::TOPK].get<int64_t>();
+    size_t k = config[meta::TOPK].get<int64_t>();
+    size_t id_size = sizeof(int64_t) * k;
+    size_t dist_size = sizeof(float) * k;
     auto p_id = (int64_t*)malloc(id_size * rows);
     auto p_dist = (float*)malloc(dist_size * rows);
 
@@ -141,6 +142,9 @@ IndexHNSW::Query(const DatasetPtr& dataset_ptr, const Config& config) {
 
     using P = std::pair<float, int64_t>;
     auto compare = [](const P& v1, const P& v2) { return v1.first < v2.first; };
+
+    faiss::ConcurrentBitsetPtr blacklist = nullptr;
+    GetBlacklist(blacklist);
 #pragma omp parallel for
     for (unsigned int i = 0; i < rows; ++i) {
         std::vector<P> ret;
@@ -153,9 +157,9 @@ IndexHNSW::Query(const DatasetPtr& dataset_ptr, const Config& config) {
         // } else {
         //     ret = index_->searchKnn((float*)single_query, config[meta::TOPK].get<int64_t>(), compare);
         // }
-        ret = index_->searchKnn((float*)single_query, config[meta::TOPK].get<int64_t>(), compare);
+        ret = index_->searchKnn((float*)single_query, k, compare, blacklist);
 
-        while (ret.size() < config[meta::TOPK]) {
+        while (ret.size() < k) {
             ret.push_back(std::make_pair(-1, -1));
         }
         std::vector<float> dist;
@@ -171,8 +175,8 @@ IndexHNSW::Query(const DatasetPtr& dataset_ptr, const Config& config) {
         std::transform(ret.begin(), ret.end(), std::back_inserter(ids),
                        [](const std::pair<float, int64_t>& e) { return e.second; });
 
-        memcpy(p_dist + i * config[meta::TOPK].get<int64_t>(), dist.data(), dist_size);
-        memcpy(p_id + i * config[meta::TOPK].get<int64_t>(), ids.data(), id_size);
+        memcpy(p_dist + i * k, dist.data(), dist_size);
+        memcpy(p_id + i * k, ids.data(), id_size);
     }
 
     auto ret_ds = std::make_shared<Dataset>();

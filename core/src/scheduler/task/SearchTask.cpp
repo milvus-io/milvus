@@ -130,7 +130,7 @@ XSearchTask::XSearchTask(const std::shared_ptr<server::Context>& context, TableF
 
 void
 XSearchTask::Load(LoadType type, uint8_t device_id) {
-    auto load_ctx = context_->Follower("XSearchTask::Load " + std::to_string(file_->id_));
+    milvus::server::ContextFollower tracer(context_, "XSearchTask::Load " + std::to_string(file_->id_));
 
     TimeRecorder rc("");
     Status stat = Status::OK();
@@ -198,13 +198,11 @@ XSearchTask::Load(LoadType type, uint8_t device_id) {
     index_id_ = file_->id_;
     index_type_ = file_->file_type_;
     //    search_contexts_.swap(search_contexts_);
-
-    load_ctx->GetTraceContext()->GetSpan()->Finish();
 }
 
 void
 XSearchTask::Execute() {
-    auto execute_ctx = context_->Follower("XSearchTask::Execute " + std::to_string(index_id_));
+    milvus::server::ContextFollower tracer(context_, "XSearchTask::Execute " + std::to_string(index_id_));
 
     if (index_engine_ == nullptr) {
         return;
@@ -226,7 +224,6 @@ XSearchTask::Execute() {
         uint64_t nq = search_job->nq();
         uint64_t topk = search_job->topk();
         const milvus::json& extra_params = search_job->extra_params();
-        ENGINE_LOG_DEBUG << "Search job extra params: " << extra_params.dump();
         const engine::VectorsData& vectors = search_job->vectors();
 
         output_ids.resize(topk * nq);
@@ -301,8 +298,6 @@ XSearchTask::Execute() {
 
     // release index in resource
     index_engine_ = nullptr;
-
-    execute_ctx->GetTraceContext()->GetSpan()->Finish();
 }
 
 void

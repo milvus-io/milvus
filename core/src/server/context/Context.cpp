@@ -40,5 +40,31 @@ Context::Follower(const std::string& operation_name) const {
     return new_context;
 }
 
+/////////////////////////////////////////////////////////////////////////////////////////////////
+ContextChild::ContextChild(const ContextPtr& context, const std::string& operation_name) {
+    if (context) {
+        context_ = context->Child(operation_name);
+    }
+}
+
+ContextChild::~ContextChild() {
+    if (context_) {
+        context_->GetTraceContext()->GetSpan()->Finish();
+    }
+}
+
+/////////////////////////////////////////////////////////////////////////////////////////////////
+ContextFollower::ContextFollower(const ContextPtr& context, const std::string& operation_name) {
+    if (context) {
+        context_ = context->Child(operation_name);
+    }
+}
+
+ContextFollower::~ContextFollower() {
+    if (context_) {
+        context_->GetTraceContext()->GetSpan()->Finish();
+    }
+}
+
 }  // namespace server
 }  // namespace milvus

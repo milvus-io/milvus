@@ -41,7 +41,7 @@ LoadVecIndex(const knowhere::IndexType& type, const knowhere::BinarySet& index_b
         return nullptr;
     // else
     index->Load(index_binary);
-    index->set_size(size);
+    index->SetIndexSize(size);
     return index;
 }
 
@@ -66,6 +66,7 @@ read_index(const std::string& location) {
 
     size_t length = reader_ptr->length();
     if (length <= 0) {
+        STORAGE_LOG_DEBUG << "read_index(" << location << ") failed!";
         return nullptr;
     }
 
@@ -77,6 +78,7 @@ read_index(const std::string& location) {
     rp += sizeof(current_type);
     reader_ptr->seekg(rp);
 
+    STORAGE_LOG_DEBUG << "Start to read_index(" << location << ") length: " << length << " bytes";
     while (rp < length) {
         size_t meta_length;
         reader_ptr->read(&meta_length, sizeof(meta_length));

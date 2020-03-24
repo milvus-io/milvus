@@ -99,6 +99,16 @@ if (NOT TARGET test_annoy)
 endif ()
 target_link_libraries(test_annoy ${depend_libs} ${unittest_libs} ${basic_libs})
 
+#<HNSW-TEST>
+set(hnsw_srcs
+        ${INDEX_SOURCE_DIR}/knowhere/knowhere/index/vector_index/IndexHNSW.cpp
+        )
+
+if (NOT TARGET test_hnsw)
+    add_executable(test_hnsw test_hnsw.cpp ${hnsw_srcs} ${util_srcs})
+endif ()
+target_link_libraries(test_hnsw ${depend_libs} ${unittest_libs} ${basic_libs})
+
 #<BinaryIDMAP-TEST>
 if (NOT TARGET test_binaryidmap)
     add_executable(test_binaryidmap test_binaryidmap.cpp ${ivf_srcs} ${util_srcs})
@@ -138,6 +148,7 @@ endif ()
 target_link_libraries(test_knowhere_common ${depend_libs} ${unittest_libs} ${basic_libs})
 
 install(TARGETS test_ivf DESTINATION unittest)
+install(TARGETS test_hnsw DESTINATION unittest)
 install(TARGETS test_binaryivf DESTINATION unittest)
 install(TARGETS test_idmap DESTINATION unittest)
 install(TARGETS test_binaryidmap DESTINATION unittest)

@@ -1,47 +1,57 @@
 #!/bin/bash
 
-OS_NAME="${OS_NAME}"
-BUILD_ENV_DOCKER_IMAGE_ID="${BUILD_ENV_IMAGE_ID}"
-BRANCH_NAMES=$(git log --decorate | head -n 1 | sed 's/.*(\(.*\))/\1/' | sed 's=[a-zA-Z]*\/==g' | awk -F", " '{$1=""; print $0}')
-ARTIFACTORY_URL=""
-CCACHE_DIRECTORY="${HOME}/.ccache"
+HELP="
+Usage:
+  $0 [flags] [Arguments]
 
-while getopts "l:d:h" arg
-do
-        case $arg in
-             l)
-                ARTIFACTORY_URL=$OPTARG
-                ;;
-             d)
-                CCACHE_DIRECTORY=$OPTARG
-                ;;
-             h) # help
-                echo "
+    -l [ARTIFACTORY_URL]          Artifactory URL
+    --cache_dir=[CCACHE_DIR]      Ccache directory
+    -f [FILE] or --file=[FILE]    Ccache compress package file
+    -h or --help                  Print help information
 
-parameter:
--l: artifactory url
--d: ccache directory
--h: help
 
-usage:
-./build.sh -l \${ARTIFACTORY_URL} -d \${CCACHE_DIRECTORY} [-h]
-                "
-                exit 0
-                ;;
-             ?)
-                echo "ERROR! unknown argument"
-        exit 1
-        ;;
+Use \"$0  --help\" for more information about a given command.
+"
+
+ARGS=$(getopt -o "l:f:h" -l "cache_dir::,file::,help" -n "$0" -- "$@")
+
+eval set -- "${ARGS}"
+
+while true ; do
+        case "$1" in
+                -l)
+                        # o has an optional argument. As we are in quoted mode,
+                        # an empty parameter will be generated if its optional
+                        # argument is not found.
+                        case "$2" in
+                                "") echo "Option Artifactory URL, no argument"; exit 1 ;;
+                                *)  ARTIFACTORY_URL=$2 ; shift 2 ;;
+                        esac ;;
+                --cache_dir)
+                        case "$2" in
+                                "") echo "Option cache_dir, no argument"; exit 1 ;;
+                                *)  CCACHE_DIR=$2 ; shift 2 ;;
+                        esac ;;
+                -f|--file)
+                        case "$2" in
+                                "") echo "Option file, no argument"; exit 1 ;;
+                                *)  PACKAGE_FILE=$2 ; shift 2 ;;
+                        esac ;;
+                -h|--help) echo -e "${HELP}" ; exit 0 ;;
+                --) shift ; break ;;
+                *) echo "Internal error!" ; exit 1 ;;
         esac
 done
 
+# Set defaults for vars modified by flags to this script
+CCACHE_DIR=${CCACHE_DIR:="${HOME}/.ccache"}
+PACKAGE_FILE=${PACKAGE_FILE:="ccache-${OS_NAME}-${BUILD_ENV_IMAGE_ID}.tar.gz"}
+BRANCH_NAMES=$(git log --decorate | head -n 1 | sed 's/.*(\(.*\))/\1/' | sed 's=[a-zA-Z]*\/==g' | awk -F", " '{$1=""; print $0}')
+
 if [[ -z "${ARTIFACTORY_URL}" || "${ARTIFACTORY_URL}" == "" ]];then
-    echo "you have not input ARTIFACTORY_URL !"
+    echo "You have not input ARTIFACTORY_URL !"
     exit 1
 fi
-
-
-PACKAGE_FILE="ccache-${OS_NAME}-${BUILD_ENV_DOCKER_IMAGE_ID}.tar.gz"
 
 function check_ccache() {
     BRANCH=$1
@@ -53,8 +63,8 @@ function check_ccache() {
 function download_file() {
     BRANCH=$1
     wget -q "${ARTIFACTORY_URL}/${BRANCH}/${PACKAGE_FILE}" && \
-    mkdir -p ${CCACHE_DIRECTORY} && \
-    tar zxf ${PACKAGE_FILE} -C ${CCACHE_DIRECTORY} && \
+    mkdir -p "${CCACHE_DIR}" && \
+    tar zxf "${PACKAGE_FILE}" -C "${CCACHE_DIR}" && \
     rm ${PACKAGE_FILE}
     return $?
 }
