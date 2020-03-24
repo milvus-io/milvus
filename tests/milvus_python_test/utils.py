@@ -67,6 +67,33 @@ def superstructure(x, y):
     return 1 - np.double(np.bitwise_and(x, y).sum()) / np.count_nonzero(x)
 
 
+def gen_binary_sub_vectors(vectors, length):
+    raw_vectors = []
+    binary_vectors = []
+    dim = len(vectors[0])
+    for i in range(length):
+        raw_vector = [0 for i in range(dim)]
+        vector = vectors[i]
+        for index, j in enumerate(vector):
+            if j == 1:
+                raw_vector[index] = 1
+        raw_vectors.append(raw_vector)
+        binary_vectors.append(bytes(np.packbits(raw_vector, axis=-1).tolist()))
+    return raw_vectors, binary_vectors
+
+
+def gen_binary_super_vectors(vectors, length):
+    raw_vectors = []
+    binary_vectors = []
+    dim = len(vectors[0])
+    for i in range(length):
+        cnt_1 = np.count_nonzero(vectors[i])
+        raw_vector = [1 for i in range(dim)] 
+        raw_vectors.append(raw_vector)
+        binary_vectors.append(bytes(np.packbits(raw_vector, axis=-1).tolist()))
+    return raw_vectors, binary_vectors
+    
+
 def gen_single_vector(dim):
     return [[random.random() for _ in range(dim)]]
 

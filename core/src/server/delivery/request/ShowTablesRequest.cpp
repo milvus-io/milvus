@@ -22,12 +22,14 @@
 namespace milvus {
 namespace server {
 
-ShowTablesRequest::ShowTablesRequest(const std::shared_ptr<Context>& context, std::vector<std::string>& table_name_list)
-    : BaseRequest(context, INFO_REQUEST_GROUP), table_name_list_(table_name_list) {
+ShowTablesRequest::ShowTablesRequest(const std::shared_ptr<milvus::server::Context>& context,
+                                     std::vector<std::string>& table_name_list)
+    : BaseRequest(context, BaseRequest::kShowTables), table_name_list_(table_name_list) {
 }
 
 BaseRequestPtr
-ShowTablesRequest::Create(const std::shared_ptr<Context>& context, std::vector<std::string>& table_name_list) {
+ShowTablesRequest::Create(const std::shared_ptr<milvus::server::Context>& context,
+                          std::vector<std::string>& table_name_list) {
     return std::shared_ptr<BaseRequest>(new ShowTablesRequest(context, table_name_list));
 }
 

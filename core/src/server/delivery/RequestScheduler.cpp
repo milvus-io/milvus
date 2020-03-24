@@ -105,7 +105,7 @@ RequestScheduler::TakeToExecute(RequestQueuePtr request_queue) {
     }
 
     while (true) {
-        BaseRequestPtr request = request_queue->Take();
+        BaseRequestPtr request = request_queue->TakeRequest();
         if (request == nullptr) {
             SERVER_LOG_ERROR << "Take null from request queue, stop thread";
             break;  // stop the thread
@@ -131,10 +131,10 @@ RequestScheduler::PutToQueue(const BaseRequestPtr& request_ptr) {
 
     std::string group_name = request_ptr->RequestGroup();
     if (request_groups_.count(group_name) > 0) {
-        request_groups_[group_name]->Put(request_ptr);
+        request_groups_[group_name]->PutRequest(request_ptr);
     } else {
         RequestQueuePtr queue = std::make_shared<RequestQueue>();
-        queue->Put(request_ptr);
+        queue->PutRequest(request_ptr);
         request_groups_.insert(std::make_pair(group_name, queue));
         fiu_do_on("RequestScheduler.PutToQueue.null_queue", queue = nullptr);
 

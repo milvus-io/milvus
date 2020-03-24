@@ -11,8 +11,7 @@
 
 #pragma once
 
-#include "server/delivery/request/BaseRequest.h"
-#include "utils/BlockingQueue.h"
+#include "server/delivery/RequestQueue.h"
 #include "utils/Status.h"
 
 #include <map>
@@ -24,8 +23,6 @@
 namespace milvus {
 namespace server {
 
-using RequestQueue = BlockingQueue<BaseRequestPtr>;
-using RequestQueuePtr = std::shared_ptr<RequestQueue>;
 using ThreadPtr = std::shared_ptr<std::thread>;
 
 class RequestScheduler {

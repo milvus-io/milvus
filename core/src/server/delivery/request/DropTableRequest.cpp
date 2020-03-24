@@ -22,12 +22,13 @@
 namespace milvus {
 namespace server {
 
-DropTableRequest::DropTableRequest(const std::shared_ptr<Context>& context, const std::string& table_name)
-    : BaseRequest(context, DDL_DML_REQUEST_GROUP), table_name_(table_name) {
+DropTableRequest::DropTableRequest(const std::shared_ptr<milvus::server::Context>& context,
+                                   const std::string& table_name)
+    : BaseRequest(context, BaseRequest::kDropTable), table_name_(table_name) {
 }
 
 BaseRequestPtr
-DropTableRequest::Create(const std::shared_ptr<Context>& context, const std::string& table_name) {
+DropTableRequest::Create(const std::shared_ptr<milvus::server::Context>& context, const std::string& table_name) {
     return std::shared_ptr<BaseRequest>(new DropTableRequest(context, table_name));
 }
 
