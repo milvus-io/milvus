@@ -57,6 +57,38 @@ FreeRequest(SearchRequestPtr& request, const Status& status) {
     request->set_status(status);
     request->Done();
 }
+
+class TracingContextList {
+ public:
+    TracingContextList() = default;
+    ~TracingContextList() {
+        Finish();
+    }
+
+    void
+    CreateChild(std::vector<SearchRequestPtr>& requests, const std::string& operation_name) {
+        Finish();
+        for (auto& request : requests) {
+            auto parent_context = request->Context();
+            if (parent_context) {
+                auto child_context = request->Context()->Child(operation_name);
+                context_list_.emplace_back(child_context);
+            }
+        }
+    }
+
+    void
+    Finish() {
+        for (auto& context : context_list_) {
+            context->GetTraceContext()->GetSpan()->Finish();
+        }
+        context_list_.clear();
+    }
+
+ private:
+    std::vector<milvus::server::ContextPtr> context_list_;
+};
+
 }  // namespace
 
 SearchCombineRequest::SearchCombineRequest() : BaseRequest(nullptr, BaseRequest::kSearchCombine) {
@@ -306,17 +338,21 @@ SearchCombineRequest::OnExecute() {
         // step 6: search vectors
         const std::vector<std::string>& partition_list = first_request->PartitionList();
         const std::vector<std::string>& file_id_list = first_request->FileIDList();
-        auto context = first_request->Context();
 
         engine::ResultIds result_ids;
         engine::ResultDistances result_distances;
 
-        if (file_id_list_.empty()) {
-            status = DBWrapper::DB()->Query(context, table_name_, partition_list, (size_t)search_topk_, extra_params_,
-                                            vectors_data_, result_ids, result_distances);
-        } else {
-            status = DBWrapper::DB()->QueryByFileID(context, file_id_list, (size_t)search_topk_, extra_params_,
-                                                    vectors_data_, result_ids, result_distances);
+        {
+            TracingContextList context_list;
+            context_list.CreateChild(request_list_, "Combine Query");
+
+            if (file_id_list_.empty()) {
+                status = DBWrapper::DB()->Query(nullptr, table_name_, partition_list, (size_t)search_topk_,
+                                                extra_params_, vectors_data_, result_ids, result_distances);
+            } else {
+                status = DBWrapper::DB()->QueryByFileID(nullptr, file_id_list, (size_t)search_topk_, extra_params_,
+                                                        vectors_data_, result_ids, result_distances);
+            }
         }
 
         rc.RecordSection("search combined vectors from engine");

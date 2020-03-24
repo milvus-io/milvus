@@ -1101,7 +1101,7 @@ Status
 DBImpl::Query(const std::shared_ptr<server::Context>& context, const std::string& table_id,
               const std::vector<std::string>& partition_tags, uint64_t k, const milvus::json& extra_params,
               const VectorsData& vectors, ResultIds& result_ids, ResultDistances& result_distances) {
-    auto query_ctx = context->Child("Query");
+    milvus::server::ContextChild tracer(context, "Query");
 
     if (!initialized_.load(std::memory_order_acquire)) {
         return SHUTDOWN_ERROR;
@@ -1142,10 +1142,8 @@ DBImpl::Query(const std::shared_ptr<server::Context>& context, const std::string
     }
 
     cache::CpuCacheMgr::GetInstance()->PrintInfo();  // print cache info before query
-    status = QueryAsync(query_ctx, files_array, k, extra_params, vectors, result_ids, result_distances);
+    status = QueryAsync(tracer.Context(), files_array, k, extra_params, vectors, result_ids, result_distances);
     cache::CpuCacheMgr::GetInstance()->PrintInfo();  // print cache info after query
-
-    query_ctx->GetTraceContext()->GetSpan()->Finish();
 
     return status;
 }
@@ -1154,7 +1152,7 @@ Status
 DBImpl::QueryByFileID(const std::shared_ptr<server::Context>& context, const std::vector<std::string>& file_ids,
                       uint64_t k, const milvus::json& extra_params, const VectorsData& vectors, ResultIds& result_ids,
                       ResultDistances& result_distances) {
-    auto query_ctx = context->Child("Query by file id");
+    milvus::server::ContextChild tracer(context, "Query by file id");
 
     if (!initialized_.load(std::memory_order_acquire)) {
         return SHUTDOWN_ERROR;
@@ -1179,10 +1177,8 @@ DBImpl::QueryByFileID(const std::shared_ptr<server::Context>& context, const std
     }
 
     cache::CpuCacheMgr::GetInstance()->PrintInfo();  // print cache info before query
-    status = QueryAsync(query_ctx, search_files, k, extra_params, vectors, result_ids, result_distances);
+    status = QueryAsync(tracer.Context(), search_files, k, extra_params, vectors, result_ids, result_distances);
     cache::CpuCacheMgr::GetInstance()->PrintInfo();  // print cache info after query
-
-    query_ctx->GetTraceContext()->GetSpan()->Finish();
 
     return status;
 }
@@ -1203,8 +1199,7 @@ Status
 DBImpl::QueryAsync(const std::shared_ptr<server::Context>& context, const meta::TableFilesSchema& files, uint64_t k,
                    const milvus::json& extra_params, const VectorsData& vectors, ResultIds& result_ids,
                    ResultDistances& result_distances) {
-    auto query_async_ctx = context->Child("Query Async");
-
+    milvus::server::ContextChild tracer(context, "Query Async");
     server::CollectQueryMetrics metrics(vectors.vector_count_);
 
     TimeRecorder rc("");
@@ -1213,7 +1208,7 @@ DBImpl::QueryAsync(const std::shared_ptr<server::Context>& context, const meta::
     auto status = OngoingFileChecker::GetInstance().MarkOngoingFiles(files);
 
     ENGINE_LOG_DEBUG << "Engine query begin, index file count: " << files.size();
-    scheduler::SearchJobPtr job = std::make_shared<scheduler::SearchJob>(query_async_ctx, k, extra_params, vectors);
+    scheduler::SearchJobPtr job = std::make_shared<scheduler::SearchJob>(tracer.Context(), k, extra_params, vectors);
     for (auto& file : files) {
         scheduler::TableFileSchemaPtr file_ptr = std::make_shared<meta::TableFileSchema>(file);
         job->AddIndexFile(file_ptr);
@@ -1232,8 +1227,6 @@ DBImpl::QueryAsync(const std::shared_ptr<server::Context>& context, const meta::
     result_ids = job->GetResultIds();
     result_distances = job->GetResultDistances();
     rc.ElapseFromBegin("Engine query totally cost");
-
-    query_async_ctx->GetTraceContext()->GetSpan()->Finish();
 
     return Status::OK();
 }
