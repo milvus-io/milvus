@@ -32,6 +32,27 @@ namespace faiss {
             int ordered,
             ConcurrentBitsetPtr bitset = nullptr);
 
+ /** Return the k matched distances for a set of binary query vectors,
+  * using a max heap.
+  * @param a       queries, size ha->nh * ncodes
+  * @param b       database, size nb * ncodes
+  * @param na      number of queries vectors
+  * @param nb      number of database vectors
+  * @param k       number of the matched vectors to return
+  * @param ncodes  size of the binary codes (bytes)
+ */
+    void binary_distence_knn_mc (
+            MetricType metric_type,
+            const uint8_t * a,
+            const uint8_t * b,
+            size_t na,
+            size_t nb,
+            size_t k,
+            size_t ncodes,
+            float *distances,
+            int64_t *labels,
+            ConcurrentBitsetPtr bitset);
+
 } // namespace faiss
 
 #include <faiss/utils/jaccard-inl.h>

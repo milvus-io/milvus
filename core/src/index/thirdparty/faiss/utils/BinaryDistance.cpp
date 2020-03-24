@@ -158,46 +158,176 @@ void binary_distence_knn_hc (
         }
         break;
 
+    default:
+        break;
+    }
+}
+
+template <class T>
+static
+void binary_distence_knn_mc(
+        int bytes_per_code,
+        const uint8_t * bs1,
+        const uint8_t * bs2,
+        size_t n1,
+        size_t n2,
+        size_t k,
+        float *distances,
+        int64_t *labels,
+        ConcurrentBitsetPtr bitset)
+{
+    if ((bytes_per_code + sizeof(size_t) + k * sizeof(int64_t)) * n1 < size_1M) {
+        int thread_max_num = omp_get_max_threads();
+
+        size_t group_num = n1 * thread_max_num;
+        size_t *match_num = new size_t[group_num];
+        int64_t *match_data = new int64_t[group_num * k];
+        for (size_t i = 0; i < group_num; i++) {
+            match_num[i] = 0;
+        }
+
+        T *hc = new T[n1];
+        for (size_t i = 0; i < n1; i++) {
+            hc[i].set(bs1 + i * bytes_per_code, bytes_per_code);
+        }
+
+#pragma omp parallel for
+        for (size_t j = 0; j < n2; j++) {
+            if(!bitset || !bitset->test(j)) {
+                int thread_no = omp_get_thread_num();
+
+                const uint8_t * bs2_ = bs2 + j * bytes_per_code;
+                for (size_t i = 0; i < n1; i++) {
+                    if (hc[i].compute(bs2_)) {
+                        size_t match_index = thread_no * n1 + i;
+                        size_t &index = match_num[match_index];
+                        if (index < k) {
+                            match_data[match_index * k + index] = j;
+                            index++;
+                        }
+                    }
+                }
+            }
+        }
+        for (size_t i = 0, ni = 0; i < n1; i++) {
+            size_t n_i = 0;
+            float *distances_i = distances + i * k;
+            int64_t *labels_i = labels + i * k;
+
+            for (size_t t = 0; t < thread_max_num && n_i < k; t++) {
+                size_t match_index = t * n1 + i;
+                size_t copy_num = std::min(k - n_i, match_num[match_index]);
+                memcpy(labels_i + n_i, match_data + match_index * k, copy_num * sizeof(int64_t));
+                memset(distances + n_i, 0, copy_num * sizeof(int32_t));
+                n_i += copy_num;
+            }
+            for (; n_i < k; n_i++) {
+                distances_i[n_i] = 1.0 / 0.0;
+                labels_i[n_i] = -1;
+            }
+        }
+
+        delete[] hc;
+        delete[] match_num;
+        delete[] match_data;
+
+    } else {
+        size_t *num = new size_t[n1];
+        for (size_t i = 0; i < n1; i++) {
+            num[i] = 0;
+        }
+
+        const size_t block_size = batch_size;
+        for (size_t j0 = 0; j0 < n2; j0 += block_size) {
+            const size_t j1 = std::min(j0 + block_size, n2);
+#pragma omp parallel for
+            for (size_t i = 0; i < n1; i++) {
+                size_t num_i = num[i];
+                if (num_i == k) continue;
+                float * dis = distances + i * k;
+                int64_t * lab = labels + i * k;
+
+                T hc (bs1 + i * bytes_per_code, bytes_per_code);
+                const uint8_t * bs2_ = bs2 + j0 * bytes_per_code;
+                for (size_t j = j0; j < j1; j++, bs2_ += bytes_per_code) {
+                    if(!bitset || !bitset->test(j)){
+                        if (hc.compute (bs2_)) {
+                            dis[num_i] = 0;
+                            lab[num_i] = j;
+                            if (++num_i == k) break;
+                        }
+                    }
+                }
+                num[i] = num_i;
+            }
+        }
+
+        for (size_t i = 0; i < n1; i++) {
+            float * dis = distances + i * k;
+            int64_t * lab = labels + i * k;
+            for (size_t num_i = num[i]; num_i < k; num_i++) {
+                dis[num_i] = 1.0 / 0.0;
+                lab[num_i] = -1;
+            }
+        }
+
+        delete[] num;
+    }
+}
+
+void binary_distence_knn_mc (
+        MetricType metric_type,
+        const uint8_t * a,
+        const uint8_t * b,
+        size_t na,
+        size_t nb,
+        size_t k,
+        size_t ncodes,
+        float *distances,
+        int64_t *labels,
+        ConcurrentBitsetPtr bitset) {
+
+    switch (metric_type) {
     case METRIC_Substructure:
         switch (ncodes) {
-#define binary_distence_knn_hc_Substructure(ncodes) \
+#define binary_distence_knn_mc_Substructure(ncodes) \
         case ncodes: \
-            binary_distence_knn_hc<faiss::SubstructureComputer ## ncodes> \
-                (ncodes, ha, a, b, nb, order, true, bitset); \
+            binary_distence_knn_mc<faiss::SubstructureComputer ## ncodes> \
+                (ncodes, a, b, na, nb, k, distances, labels, bitset); \
         break;
-        binary_distence_knn_hc_Substructure(8);
-        binary_distence_knn_hc_Substructure(16);
-        binary_distence_knn_hc_Substructure(32);
-        binary_distence_knn_hc_Substructure(64);
-        binary_distence_knn_hc_Substructure(128);
-        binary_distence_knn_hc_Substructure(256);
-        binary_distence_knn_hc_Substructure(512);
-#undef binary_distence_knn_hc_Substructure
+        binary_distence_knn_mc_Substructure(8);
+        binary_distence_knn_mc_Substructure(16);
+        binary_distence_knn_mc_Substructure(32);
+        binary_distence_knn_mc_Substructure(64);
+        binary_distence_knn_mc_Substructure(128);
+        binary_distence_knn_mc_Substructure(256);
+        binary_distence_knn_mc_Substructure(512);
+#undef binary_distence_knn_mc_Substructure
         default:
-            binary_distence_knn_hc<faiss::SubstructureComputerDefault>
-                    (ncodes, ha, a, b, nb, order, true, bitset);
+            binary_distence_knn_mc<faiss::SubstructureComputerDefault>
+                    (ncodes, a, b, na, nb, k, distances, labels, bitset);
             break;
         }
         break;
 
     case METRIC_Superstructure:
         switch (ncodes) {
-#define binary_distence_knn_hc_Superstructure(ncodes) \
+#define binary_distence_knn_mc_Superstructure(ncodes) \
         case ncodes: \
-            binary_distence_knn_hc<faiss::SuperstructureComputer ## ncodes> \
-                (ncodes, ha, a, b, nb, order, true, bitset); \
+            binary_distence_knn_mc<faiss::SuperstructureComputer ## ncodes> \
+                (ncodes, a, b, na, nb, k, distances, labels, bitset); \
         break;
-        binary_distence_knn_hc_Superstructure(8);
-        binary_distence_knn_hc_Superstructure(16);
-        binary_distence_knn_hc_Superstructure(32);
-        binary_distence_knn_hc_Superstructure(64);
-        binary_distence_knn_hc_Superstructure(128);
-        binary_distence_knn_hc_Superstructure(256);
-        binary_distence_knn_hc_Superstructure(512);
-#undef binary_distence_knn_hc_Superstructure
+        binary_distence_knn_mc_Superstructure(8);
+        binary_distence_knn_mc_Superstructure(16);
+        binary_distence_knn_mc_Superstructure(32);
+        binary_distence_knn_mc_Superstructure(64);
+        binary_distence_knn_mc_Superstructure(128);
+        binary_distence_knn_mc_Superstructure(256);
+        binary_distence_knn_mc_Superstructure(512);
+#undef binary_distence_knn_mc_Superstructure
         default:
-            binary_distence_knn_hc<faiss::SuperstructureComputerDefault>
-                    (ncodes, ha, a, b, nb, order, true, bitset);
+            binary_distence_knn_mc<faiss::SuperstructureComputerDefault>
+                    (ncodes, a, b, na, nb, k, distances, labels, bitset);
             break;
         }
         break;
@@ -207,4 +337,4 @@ void binary_distence_knn_hc (
     }
 }
 
-}
+} // namespace faiss
