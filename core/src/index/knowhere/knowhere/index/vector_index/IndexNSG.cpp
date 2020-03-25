@@ -10,6 +10,7 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #include <fiu-local.h>
+#include <string>
 
 #include "knowhere/common/Exception.h"
 #include "knowhere/common/Timer.h"
@@ -139,7 +140,7 @@ NSG::Train(const DatasetPtr& dataset_ptr, const Config& config) {
     auto p_ids = dataset_ptr->Get<const int64_t*>(meta::IDS);
 
     GETTENSOR(dataset_ptr)
-    index_ = std::make_shared<impl::NsgIndex>(dim, rows);
+    index_ = std::make_shared<impl::NsgIndex>(dim, rows, config[Metric::TYPE].get<std::string>());
     index_->SetKnnGraph(knng);
     index_->Build_with_ids(rows, (float*)p_data, (int64_t*)p_ids, b_params);
 }
