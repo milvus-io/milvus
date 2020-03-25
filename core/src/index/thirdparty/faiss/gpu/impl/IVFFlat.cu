@@ -174,7 +174,7 @@ IVFFlat::classifyAndAddVectors(Tensor<float, 2, true>& vecs,
     listIds2d(mem, {vecs.getSize(0), 1},  stream);
   auto listIds = listIds2d.view<1>({vecs.getSize(0)});
 
-  DeviceTensor<uint8_t, 1, true> bitsetDevice({0});
+  DeviceTensor<uint8_t, 1, true> bitsetDevice(nullptr, {0});
   quantizer_->query(vecs, bitsetDevice, 1, listDistance2d, listIds2d, false);
 
   // Calculate residuals for these vectors, if needed

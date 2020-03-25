@@ -218,7 +218,7 @@ GpuIndexFlat::searchImpl_(int n,
 
   // Copy bitset to GPU
   if (!bitset) {
-    DeviceTensor<uint8_t, 1, true> bitsetDevice({0});
+    DeviceTensor<uint8_t, 1, true> bitsetDevice(nullptr, {0});
     data_->query(queries, bitsetDevice, k, outDistances, outIntLabels, true);
   } else {
     auto bitsetData = bitset->bitset();

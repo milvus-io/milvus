@@ -65,7 +65,7 @@ void bruteForceKnn(GpuResources* resources,
   DeviceTensor<int, 2, true> tOutIntIndices(mem, {numQueries, k}, stream);
 
   // Empty bitset
-  DeviceTensor<uint8_t, 1, true> bitsetDevice({0});
+  DeviceTensor<uint8_t, 1, true> bitsetDevice(nullptr, {0});
 
   // Do the work
   if (metric == faiss::MetricType::METRIC_L2) {

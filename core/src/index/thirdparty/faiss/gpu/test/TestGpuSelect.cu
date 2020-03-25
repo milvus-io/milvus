@@ -29,7 +29,7 @@ void testForSize(int rows, int cols, int k, bool dir, bool warp) {
     }
   }
 
-  faiss::gpu::DeviceTensor<uint8_t, 1, true> bitset({0});
+  faiss::gpu::DeviceTensor<uint8_t, 1, true> bitset(nullptr, {0});
 
   // row -> (val -> idx)
   std::unordered_map<int, std::vector<std::pair<int, float>>> hostOutValAndInd;
