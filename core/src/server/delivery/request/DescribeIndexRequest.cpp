@@ -27,8 +27,8 @@ DescribeIndexRequest::DescribeIndexRequest(const std::shared_ptr<milvus::server:
 }
 
 BaseRequestPtr
-DescribeIndexRequest::Create(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name,
-                             IndexParam& index_param) {
+DescribeIndexRequest::Create(const std::shared_ptr<milvus::server::Context>& context,
+                             const std::string& collection_name, IndexParam& index_param) {
     return std::shared_ptr<BaseRequest>(new DescribeIndexRequest(context, collection_name, index_param));
 }
 

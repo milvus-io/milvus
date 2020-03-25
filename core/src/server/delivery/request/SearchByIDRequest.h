@@ -29,9 +29,9 @@ namespace server {
 class SearchByIDRequest : public BaseRequest {
  public:
     static BaseRequestPtr
-    Create(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name, int64_t vector_id,
-           int64_t topk, const milvus::json& extra_params, const std::vector<std::string>& partition_list,
-           TopKQueryResult& result);
+    Create(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name,
+           int64_t vector_id, int64_t topk, const milvus::json& extra_params,
+           const std::vector<std::string>& partition_list, TopKQueryResult& result);
 
  protected:
     SearchByIDRequest(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name,

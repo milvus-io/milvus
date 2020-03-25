@@ -28,8 +28,8 @@ DropPartitionRequest::DropPartitionRequest(const std::shared_ptr<milvus::server:
 }
 
 BaseRequestPtr
-DropPartitionRequest::Create(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name,
-                             const std::string& tag) {
+DropPartitionRequest::Create(const std::shared_ptr<milvus::server::Context>& context,
+                             const std::string& collection_name, const std::string& tag) {
     return std::shared_ptr<BaseRequest>(new DropPartitionRequest(context, collection_name, tag));
 }
 

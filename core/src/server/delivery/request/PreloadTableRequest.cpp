@@ -27,7 +27,8 @@ PreloadTableRequest::PreloadTableRequest(const std::shared_ptr<milvus::server::C
 }
 
 BaseRequestPtr
-PreloadTableRequest::Create(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name) {
+PreloadTableRequest::Create(const std::shared_ptr<milvus::server::Context>& context,
+                            const std::string& collection_name) {
     return std::shared_ptr<BaseRequest>(new PreloadTableRequest(context, collection_name));
 }
 

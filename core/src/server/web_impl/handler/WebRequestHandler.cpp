@@ -1043,7 +1043,8 @@ WebRequestHandler::CreateIndex(const OString& collection_name, const OString& bo
         if (!request_json.contains("params")) {
             RETURN_STATUS_DTO(BODY_FIELD_LOSS, "Field \'params\' is required")
         }
-        auto status = request_handler_.CreateIndex(context_ptr_, collection_name->std_str(), index, request_json["params"]);
+        auto status =
+            request_handler_.CreateIndex(context_ptr_, collection_name->std_str(), index, request_json["params"]);
         ASSIGN_RETURN_STATUS_DTO(status);
     } catch (nlohmann::detail::parse_error& e) {
         RETURN_STATUS_DTO(BODY_PARSE_FAIL, e.what())

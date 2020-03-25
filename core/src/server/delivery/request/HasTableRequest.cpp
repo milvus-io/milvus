@@ -21,8 +21,8 @@
 namespace milvus {
 namespace server {
 
-HasTableRequest::HasTableRequest(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name,
-                                 bool& has_table)
+HasTableRequest::HasTableRequest(const std::shared_ptr<milvus::server::Context>& context,
+                                 const std::string& collection_name, bool& has_table)
     : BaseRequest(context, BaseRequest::kHasTable), collection_name_(collection_name), has_table_(has_table) {
 }
 

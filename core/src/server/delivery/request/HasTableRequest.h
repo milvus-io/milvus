@@ -22,7 +22,8 @@ namespace server {
 class HasTableRequest : public BaseRequest {
  public:
     static BaseRequestPtr
-    Create(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name, bool& has_table);
+    Create(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name,
+           bool& has_table);
 
  protected:
     HasTableRequest(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name,

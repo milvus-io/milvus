@@ -32,7 +32,8 @@ class FlushRequest : public BaseRequest {
     Create(const std::shared_ptr<milvus::server::Context>& context, const std::vector<std::string>& collection_names);
 
  protected:
-    FlushRequest(const std::shared_ptr<milvus::server::Context>& context, const std::vector<std::string>& collection_names);
+    FlushRequest(const std::shared_ptr<milvus::server::Context>& context,
+                 const std::vector<std::string>& collection_names);
 
     Status
     OnExecute() override;

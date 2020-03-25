@@ -59,17 +59,19 @@ class RequestHandler {
     ShowTableInfo(const std::shared_ptr<Context>& context, const std::string& collection_name, TableInfo& table_info);
 
     Status
-    Search(const std::shared_ptr<Context>& context, const std::string& collection_name, const engine::VectorsData& vectors,
-           int64_t topk, const milvus::json& extra_params, const std::vector<std::string>& partition_list,
-           const std::vector<std::string>& file_id_list, TopKQueryResult& result);
+    Search(const std::shared_ptr<Context>& context, const std::string& collection_name,
+           const engine::VectorsData& vectors, int64_t topk, const milvus::json& extra_params,
+           const std::vector<std::string>& partition_list, const std::vector<std::string>& file_id_list,
+           TopKQueryResult& result);
 
     Status
-    SearchByID(const std::shared_ptr<Context>& context, const std::string& collection_name, int64_t vector_id, int64_t topk,
-               const milvus::json& extra_params, const std::vector<std::string>& partition_list,
+    SearchByID(const std::shared_ptr<Context>& context, const std::string& collection_name, int64_t vector_id,
+               int64_t topk, const milvus::json& extra_params, const std::vector<std::string>& partition_list,
                TopKQueryResult& result);
 
     Status
-    DescribeTable(const std::shared_ptr<Context>& context, const std::string& collection_name, TableSchema& table_schema);
+    DescribeTable(const std::shared_ptr<Context>& context, const std::string& collection_name,
+                  TableSchema& table_schema);
 
     Status
     CountTable(const std::shared_ptr<Context>& context, const std::string& collection_name, int64_t& count);
@@ -91,7 +93,8 @@ class RequestHandler {
     DropIndex(const std::shared_ptr<Context>& context, const std::string& collection_name);
 
     Status
-    CreatePartition(const std::shared_ptr<Context>& context, const std::string& collection_name, const std::string& tag);
+    CreatePartition(const std::shared_ptr<Context>& context, const std::string& collection_name,
+                    const std::string& tag);
 
     Status
     ShowPartitions(const std::shared_ptr<Context>& context, const std::string& collection_name,

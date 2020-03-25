@@ -27,8 +27,8 @@ DescribeTableRequest::DescribeTableRequest(const std::shared_ptr<milvus::server:
 }
 
 BaseRequestPtr
-DescribeTableRequest::Create(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name,
-                             TableSchema& schema) {
+DescribeTableRequest::Create(const std::shared_ptr<milvus::server::Context>& context,
+                             const std::string& collection_name, TableSchema& schema) {
     return std::shared_ptr<BaseRequest>(new DescribeTableRequest(context, collection_name, schema));
 }
 

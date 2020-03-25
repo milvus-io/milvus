@@ -27,9 +27,9 @@
 namespace milvus {
 namespace server {
 
-SearchRequest::SearchRequest(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name,
-                             const engine::VectorsData& vectors, int64_t topk, const milvus::json& extra_params,
-                             const std::vector<std::string>& partition_list,
+SearchRequest::SearchRequest(const std::shared_ptr<milvus::server::Context>& context,
+                             const std::string& collection_name, const engine::VectorsData& vectors, int64_t topk,
+                             const milvus::json& extra_params, const std::vector<std::string>& partition_list,
                              const std::vector<std::string>& file_id_list, TopKQueryResult& result)
     : BaseRequest(context, BaseRequest::kSearch),
       collection_name_(collection_name),

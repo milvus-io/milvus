@@ -576,7 +576,7 @@ TEST_F(RpcHandlerTest, TABLES_TEST) {
     int error_code = response.error_code();
     ASSERT_EQ(error_code, ::milvus::grpc::ErrorCode::SUCCESS);
 
-    tableschema.set_table_name(collection_name.collection_name());
+    tableschema.set_table_name(collection_name.table_name());
     handler->DropTable(&context, &collection_name, &response);
     sleep(1);
     handler->CreateTable(&context, &tableschema, &response);

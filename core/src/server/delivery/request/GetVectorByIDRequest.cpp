@@ -30,12 +30,16 @@ namespace server {
 GetVectorByIDRequest::GetVectorByIDRequest(const std::shared_ptr<milvus::server::Context>& context,
                                            const std::string& collection_name, const std::vector<int64_t>& ids,
                                            engine::VectorsData& vectors)
-    : BaseRequest(context, BaseRequest::kGetVectorByID), collection_name_(collection_name), ids_(ids), vectors_(vectors) {
+    : BaseRequest(context, BaseRequest::kGetVectorByID),
+      collection_name_(collection_name),
+      ids_(ids),
+      vectors_(vectors) {
 }
 
 BaseRequestPtr
-GetVectorByIDRequest::Create(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name,
-                             const std::vector<int64_t>& ids, engine::VectorsData& vectors) {
+GetVectorByIDRequest::Create(const std::shared_ptr<milvus::server::Context>& context,
+                             const std::string& collection_name, const std::vector<int64_t>& ids,
+                             engine::VectorsData& vectors) {
     return std::shared_ptr<BaseRequest>(new GetVectorByIDRequest(context, collection_name, ids, vectors));
 }
 

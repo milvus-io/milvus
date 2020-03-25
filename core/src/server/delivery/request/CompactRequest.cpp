@@ -26,7 +26,8 @@
 namespace milvus {
 namespace server {
 
-CompactRequest::CompactRequest(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name)
+CompactRequest::CompactRequest(const std::shared_ptr<milvus::server::Context>& context,
+                               const std::string& collection_name)
     : BaseRequest(context, BaseRequest::kCompact), collection_name_(collection_name) {
 }
 

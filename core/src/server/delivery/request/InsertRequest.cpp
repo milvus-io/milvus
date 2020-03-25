@@ -21,6 +21,7 @@
 #include <memory>
 #include <string>
 #include <vector>
+
 #ifdef MILVUS_ENABLE_PROFILING
 #include <gperftools/profiler.h>
 #endif
@@ -28,8 +29,9 @@
 namespace milvus {
 namespace server {
 
-InsertRequest::InsertRequest(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name,
-                             engine::VectorsData& vectors, const std::string& partition_tag)
+InsertRequest::InsertRequest(const std::shared_ptr<milvus::server::Context>& context,
+                             const std::string& collection_name, engine::VectorsData& vectors,
+                             const std::string& partition_tag)
     : BaseRequest(context, BaseRequest::kInsert),
       collection_name_(collection_name),
       vectors_data_(vectors),

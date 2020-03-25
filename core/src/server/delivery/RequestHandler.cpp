@@ -43,8 +43,8 @@ namespace milvus {
 namespace server {
 
 Status
-RequestHandler::CreateTable(const std::shared_ptr<Context>& context, const std::string& collection_name, int64_t dimension,
-                            int64_t index_file_size, int64_t metric_type) {
+RequestHandler::CreateTable(const std::shared_ptr<Context>& context, const std::string& collection_name,
+                            int64_t dimension, int64_t index_file_size, int64_t metric_type) {
     BaseRequestPtr request_ptr =
         CreateTableRequest::Create(context, collection_name, dimension, index_file_size, metric_type);
     RequestScheduler::ExecRequest(request_ptr);
@@ -69,8 +69,8 @@ RequestHandler::DropTable(const std::shared_ptr<Context>& context, const std::st
 }
 
 Status
-RequestHandler::CreateIndex(const std::shared_ptr<Context>& context, const std::string& collection_name, int64_t index_type,
-                            const milvus::json& json_params) {
+RequestHandler::CreateIndex(const std::shared_ptr<Context>& context, const std::string& collection_name,
+                            int64_t index_type, const milvus::json& json_params) {
     BaseRequestPtr request_ptr = CreateIndexRequest::Create(context, collection_name, index_type, json_params);
     RequestScheduler::ExecRequest(request_ptr);
 
@@ -126,16 +126,16 @@ RequestHandler::Search(const std::shared_ptr<Context>& context, const std::strin
                        const engine::VectorsData& vectors, int64_t topk, const milvus::json& extra_params,
                        const std::vector<std::string>& partition_list, const std::vector<std::string>& file_id_list,
                        TopKQueryResult& result) {
-    BaseRequestPtr request_ptr =
-        SearchRequest::Create(context, collection_name, vectors, topk, extra_params, partition_list, file_id_list, result);
+    BaseRequestPtr request_ptr = SearchRequest::Create(context, collection_name, vectors, topk, extra_params,
+                                                       partition_list, file_id_list, result);
     RequestScheduler::ExecRequest(request_ptr);
 
     return request_ptr->status();
 }
 
 Status
-RequestHandler::SearchByID(const std::shared_ptr<Context>& context, const std::string& collection_name, int64_t vector_id,
-                           int64_t topk, const milvus::json& extra_params,
+RequestHandler::SearchByID(const std::shared_ptr<Context>& context, const std::string& collection_name,
+                           int64_t vector_id, int64_t topk, const milvus::json& extra_params,
                            const std::vector<std::string>& partition_list, TopKQueryResult& result) {
     BaseRequestPtr request_ptr =
         SearchByIDRequest::Create(context, collection_name, vector_id, topk, extra_params, partition_list, result);
@@ -154,7 +154,8 @@ RequestHandler::DescribeTable(const std::shared_ptr<Context>& context, const std
 }
 
 Status
-RequestHandler::CountTable(const std::shared_ptr<Context>& context, const std::string& collection_name, int64_t& count) {
+RequestHandler::CountTable(const std::shared_ptr<Context>& context, const std::string& collection_name,
+                           int64_t& count) {
     BaseRequestPtr request_ptr = CountTableRequest::Create(context, collection_name, count);
     RequestScheduler::ExecRequest(request_ptr);
 

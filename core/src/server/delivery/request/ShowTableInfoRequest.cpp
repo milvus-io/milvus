@@ -49,8 +49,8 @@ ShowTableInfoRequest::ShowTableInfoRequest(const std::shared_ptr<milvus::server:
 }
 
 BaseRequestPtr
-ShowTableInfoRequest::Create(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name,
-                             TableInfo& table_info) {
+ShowTableInfoRequest::Create(const std::shared_ptr<milvus::server::Context>& context,
+                             const std::string& collection_name, TableInfo& table_info) {
     return std::shared_ptr<BaseRequest>(new ShowTableInfoRequest(context, collection_name, table_info));
 }
 

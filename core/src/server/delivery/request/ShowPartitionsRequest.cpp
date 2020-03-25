@@ -23,13 +23,16 @@ namespace milvus {
 namespace server {
 
 ShowPartitionsRequest::ShowPartitionsRequest(const std::shared_ptr<milvus::server::Context>& context,
-                                             const std::string& collection_name, std::vector<PartitionParam>& partition_list)
-    : BaseRequest(context, BaseRequest::kShowPartitions), collection_name_(collection_name), partition_list_(partition_list) {
+                                             const std::string& collection_name,
+                                             std::vector<PartitionParam>& partition_list)
+    : BaseRequest(context, BaseRequest::kShowPartitions),
+      collection_name_(collection_name),
+      partition_list_(partition_list) {
 }
 
 BaseRequestPtr
-ShowPartitionsRequest::Create(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name,
-                              std::vector<PartitionParam>& partition_list) {
+ShowPartitionsRequest::Create(const std::shared_ptr<milvus::server::Context>& context,
+                              const std::string& collection_name, std::vector<PartitionParam>& partition_list) {
     return std::shared_ptr<BaseRequest>(new ShowPartitionsRequest(context, collection_name, partition_list));
 }
 
