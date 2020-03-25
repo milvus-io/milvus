@@ -12,12 +12,16 @@
 namespace milvus {
 namespace cache {
 
-constexpr double DEFAULT_THRESHHOLD_PERCENT = 0.85;
+constexpr double DEFAULT_THRESHHOLD_PERCENT = 0.7;
+constexpr double WARNING_THRESHHOLD_PERCENT = 0.9;
 
 template <typename ItemObj>
-Cache<ItemObj>::Cache(int64_t capacity, uint64_t cache_max_count)
-    : usage_(0), capacity_(capacity), freemem_percent_(DEFAULT_THRESHHOLD_PERCENT), lru_(cache_max_count) {
-    //    AGENT_LOG_DEBUG << "Construct Cache with capacity " << std::to_string(mem_capacity)
+Cache<ItemObj>::Cache(int64_t capacity, int64_t cache_max_count, const std::string& header)
+    : usage_(0),
+      capacity_(capacity),
+      header_(header),
+      freemem_percent_(DEFAULT_THRESHHOLD_PERCENT),
+      lru_(cache_max_count) {
 }
 
 template <typename ItemObj>
@@ -61,12 +65,7 @@ Cache<ItemObj>::insert(const std::string& key, const ItemObj& item) {
         return;
     }
 
-    //    if(item->size() > capacity_) {
-    //        SERVER_LOG_ERROR << "Item size " << item->size()
-    //                        << " is too large to insert into cache, capacity " << capacity_;
-    //        return;
-    //    }
-
+    size_t item_size = item->Size();
     // calculate usage
     {
         std::lock_guard<std::mutex> lock(mutex_);
@@ -78,13 +77,13 @@ Cache<ItemObj>::insert(const std::string& key, const ItemObj& item) {
         }
 
         // plus new item size
-        usage_ += item->Size();
+        usage_ += item_size;
     }
 
     // if usage exceed capacity, free some items
-    if (usage_ > capacity_) {
-        SERVER_LOG_DEBUG << "Current usage " << usage_ << " exceeds cache capacity " << capacity_
-                         << ", start free memory";
+    if (usage_ > (int64_t)(capacity_ * WARNING_THRESHHOLD_PERCENT)) {
+        SERVER_LOG_DEBUG << header_ << " Current usage " << (usage_ >> 20) << "MB is too high for capacity "
+                         << (capacity_ >> 20) << "MB, start free memory";
         free_memory();
     }
 
@@ -93,8 +92,9 @@ Cache<ItemObj>::insert(const std::string& key, const ItemObj& item) {
         std::lock_guard<std::mutex> lock(mutex_);
 
         lru_.put(key, item);
-        SERVER_LOG_DEBUG << "Insert " << key << " size: " << item->Size() << " bytes into cache, usage: " << usage_
-                         << " bytes," << " capacity: " << capacity_ << " bytes";
+        SERVER_LOG_DEBUG << header_ << " Insert " << key << " size: " << (item_size >> 20) << "MB into cache";
+        SERVER_LOG_DEBUG << header_ << " Count: " << lru_.size() << ", Usage: " << (usage_ >> 20) << "MB, Capacity: "
+                         << (capacity_ >> 20) << "MB";
     }
 }
 
@@ -106,13 +106,15 @@ Cache<ItemObj>::erase(const std::string& key) {
         return;
     }
 
-    const ItemObj& old_item = lru_.get(key);
-    usage_ -= old_item->Size();
-
-    SERVER_LOG_DEBUG << "Erase " << key << " size: " << old_item->Size() << " bytes from cache, usage: " << usage_
-                     << " bytes," << " capacity: " << capacity_ << " bytes";
+    const ItemObj& item = lru_.get(key);
+    size_t item_size = item->Size();
 
     lru_.erase(key);
+
+    usage_ -= item_size;
+    SERVER_LOG_DEBUG << header_ << " Erase " << key << " size: " << (item_size >> 20) << "MB from cache";
+    SERVER_LOG_DEBUG << header_ << " Count: " << lru_.size() << ", Usage: " << (usage_ >> 20) << "MB, Capacity: "
+                     << (capacity_ >> 20) << "MB";
 }
 
 template <typename ItemObj>
@@ -121,15 +123,15 @@ Cache<ItemObj>::clear() {
     std::lock_guard<std::mutex> lock(mutex_);
     lru_.clear();
     usage_ = 0;
-    SERVER_LOG_DEBUG << "Clear cache !";
+    SERVER_LOG_DEBUG << header_ << " Clear cache !";
 }
 
 /* free memory space when CACHE occupation exceed its capacity */
 template <typename ItemObj>
 void
 Cache<ItemObj>::free_memory() {
-    if (usage_ <= capacity_)
-        return;
+    // if (usage_ <= capacity_)
+    //     return;
 
     int64_t threshhold = capacity_ * freemem_percent_;
     int64_t delta_size = usage_ - threshhold;
@@ -154,13 +156,11 @@ Cache<ItemObj>::free_memory() {
         }
     }
 
-    SERVER_LOG_DEBUG << "to be released memory size: " << released_size;
+    SERVER_LOG_DEBUG << header_ << " To be released memory size: " << (released_size >> 20) << "MB";
 
     for (auto& key : key_array) {
         erase(key);
     }
-
-    print();
 }
 
 template <typename ItemObj>
@@ -177,7 +177,8 @@ Cache<ItemObj>::print() {
 #endif
     }
 
-    SERVER_LOG_DEBUG << "[Cache] [item count]: " << cache_count << " [capacity] " << capacity_ << "(bytes) [usage] " << usage_ << "(bytes)";
+    SERVER_LOG_DEBUG << header_ << " [item count]: " << cache_count << ", [usage] " << (usage_ >> 20)
+                     << "MB, [capacity] " << (capacity_ >> 20) << "MB";
 }
 
 }  // namespace cache
