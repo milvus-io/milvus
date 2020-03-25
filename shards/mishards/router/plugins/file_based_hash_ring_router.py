@@ -42,9 +42,10 @@ class Factory(RouterMixin):
             raise exceptions.DBError(message=str(e), metadata=metadata)
 
         if not tables:
+            logger.error("Cannot find table {} / {} in metadata".format(table_name, partition_tags))
             raise exceptions.TableNotFoundError('{}:{}'.format(table_name, partition_tags), metadata=metadata)
 
-        table_list = [table.table_id for table in tables]
+        table_list = [str(table.table_id) for table in tables]
 
         file_type_cond = or_(
             TableFiles.file_type == TableFiles.FILE_TYPE_RAW,
@@ -58,8 +59,10 @@ class Factory(RouterMixin):
             raise exceptions.DBError(message=str(e), metadata=metadata)
 
         if not files:
-            raise exceptions.TableNotFoundError('Table file id not found. {}:{}'.format(table_name, partition_tags),
-                                                metadata=metadata)
+            logger.warning("Table file is empty. {}".format(table_list))
+        #     logger.error("Cannot find table file id {} / {} in metadata".format(table_name, partition_tags))
+        #     raise exceptions.TableNotFoundError('Table file id not found. {}:{}'.format(table_name, partition_tags),
+        #                                         metadata=metadata)
 
         db.remove_session()
 
