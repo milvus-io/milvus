@@ -221,27 +221,27 @@ __global__ void blockSelectPair(Tensor<K, 2, true> inK,
 }
 
 void runBlockSelect(Tensor<float, 2, true>& in,
-                    Tensor<uint8_t, 1, true> bitset,
+                    Tensor<uint8_t, 1, true>& bitset,
                     Tensor<float, 2, true>& outKeys,
                     Tensor<int, 2, true>& outIndices,
                     bool dir, int k, cudaStream_t stream);
 
 void runBlockSelectPair(Tensor<float, 2, true>& inKeys,
                         Tensor<int, 2, true>& inIndices,
-                        Tensor<uint8_t, 1, true> bitset,
+                        Tensor<uint8_t, 1, true>& bitset,
                         Tensor<float, 2, true>& outKeys,
                         Tensor<int, 2, true>& outIndices,
                         bool dir, int k, cudaStream_t stream);
 
 void runBlockSelect(Tensor<half, 2, true>& in,
-                    Tensor<uint8_t, 1, true> bitset,
+                    Tensor<uint8_t, 1, true>& bitset,
                     Tensor<half, 2, true>& outKeys,
                     Tensor<int, 2, true>& outIndices,
                     bool dir, int k, cudaStream_t stream);
 
 void runBlockSelectPair(Tensor<half, 2, true>& inKeys,
                         Tensor<int, 2, true>& inIndices,
-                        Tensor<uint8_t, 1, true> bitset,
+                        Tensor<uint8_t, 1, true>& bitset,
                         Tensor<half, 2, true>& outKeys,
                         Tensor<int, 2, true>& outIndices,
                         bool dir, int k, cudaStream_t stream);

@@ -271,7 +271,7 @@ GpuIndexIVFScalarQuantizer::searchImpl_(int n,
   static_assert(sizeof(long) == sizeof(Index::idx_t), "size mismatch");
   Tensor<long, 2, true> outLabels(const_cast<long*>(labels), {n, k});
 
-  DeviceTensor<uint8_t, 1, true> bitsetDevice({0});
+  Tensor<uint8_t, 1, true> bitsetDevice({0});
   index_->query(queries, bitsetDevice, nprobe, k, outDistances, outLabels);
 }
 

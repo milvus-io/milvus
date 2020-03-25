@@ -327,7 +327,7 @@ IVFFlat::classifyAndAddVectors(Tensor<float, 2, true>& vecs,
 
 void
 IVFFlat::query(Tensor<float, 2, true>& queries,
-               Tensor<uint8_t, 1, true> bitset,
+               Tensor<uint8_t, 1, true>& bitset,
                int nprobe,
                int k,
                Tensor<float, 2, true>& outDistances,
