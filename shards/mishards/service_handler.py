@@ -161,17 +161,16 @@ class ServiceHandler(milvus_pb2_grpc.MilvusServiceServicer):
 
         with self.tracer.start_span('do_search', child_of=p_span) as span:
             with ThreadPoolExecutor(max_workers=self.max_workers) as pool:
-                for addr, params in routing.items():
-                    for sub_table_id, file_ids in params.items():
-                        res = pool.submit(search,
-                                          addr,
-                                          table_id,
-                                          file_ids,
-                                          vectors,
-                                          topk,
-                                          search_params,
-                                          span=span)
-                        rs.append(res)
+                for addr, file_ids in routing.items():
+                    res = pool.submit(search,
+                                      addr,
+                                      table_id,
+                                      file_ids,
+                                      vectors,
+                                      topk,
+                                      search_params,
+                                      span=span)
+                    rs.append(res)
 
                 for res in rs:
                     res.result()

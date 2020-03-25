@@ -41,9 +41,7 @@ class Factory(RouterMixin):
         if not tables:
             raise exceptions.TableNotFoundError('{}:{}'.format(table_name, partition_tags), metadata=metadata)
 
-        table_list = []
-        for table in tables:
-            table_list.append(table.table_id)
+        table_list = [table.table_id for table in tables]
 
         file_type_cond = or_(
             TableFiles.file_type == TableFiles.FILE_TYPE_RAW,
@@ -77,13 +75,14 @@ class Factory(RouterMixin):
             target_host = ring.get_node(str(f.id))
             sub = routing.get(target_host, None)
             if not sub:
-                sub = {}
+                sub = []
                 routing[target_host] = sub
-            kv = sub.get(f.table_id, None)
-            if not kv:
-                kv = []
-                sub[f.table_id] = kv
-            sub[f.table_id].append(str(f.id))
+            # kv = sub.get(f.table_id, None)
+            routing[target_host].append(str(f.id))
+            # if not kv:
+            #     kv = []
+            #     sub[f.table_id] = kv
+            # sub[f.table_id].append(str(f.id))
 
         return routing
 
