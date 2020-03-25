@@ -63,7 +63,7 @@ class IndexAnnoy : public VecIndex {
     Dim() override;
 
     int64_t
-    Size() override;
+    IndexSize() override;
 
  private:
     MetricType metric_type_;

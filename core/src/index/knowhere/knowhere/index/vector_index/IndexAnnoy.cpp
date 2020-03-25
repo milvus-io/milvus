@@ -146,12 +146,12 @@ IndexAnnoy::Dim() {
 }
 
 int64_t
-IndexAnnoy::Size() {
-    if (size_ != -1) {
-        return size_;
+IndexAnnoy::IndexSize() {
+    if (index_size_ != -1) {
+        return index_size_;
     }
 
-    return size_ = Dim() * Count() * sizeof(float);
+    return index_size_ = Dim() * Count() * sizeof(float);
 }
 }  // namespace knowhere
 }  // namespace milvus
