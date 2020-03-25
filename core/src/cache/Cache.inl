@@ -65,6 +65,7 @@ Cache<ItemObj>::insert(const std::string& key, const ItemObj& item) {
         return;
     }
 
+    size_t item_size = item->Size();
     // calculate usage
     {
         std::lock_guard<std::mutex> lock(mutex_);
@@ -76,7 +77,7 @@ Cache<ItemObj>::insert(const std::string& key, const ItemObj& item) {
         }
 
         // plus new item size
-        usage_ += item->Size();
+        usage_ += item_size;
     }
 
     // if usage exceed capacity, free some items
@@ -91,7 +92,7 @@ Cache<ItemObj>::insert(const std::string& key, const ItemObj& item) {
         std::lock_guard<std::mutex> lock(mutex_);
 
         lru_.put(key, item);
-        SERVER_LOG_DEBUG << header_ << " Insert " << key << " size: " << (item->Size() >> 20) << "MB into cache";
+        SERVER_LOG_DEBUG << header_ << " Insert " << key << " size: " << (item_size >> 20) << "MB into cache";
         SERVER_LOG_DEBUG << header_ << " Count: " << lru_.size() << ", Usage: " << (usage_ >> 20) << "MB, Capacity: "
                          << (capacity_ >> 20) << "MB";
     }
@@ -105,11 +106,13 @@ Cache<ItemObj>::erase(const std::string& key) {
         return;
     }
 
-    const ItemObj& old_item = lru_.get(key);
+    const ItemObj& item = lru_.get(key);
+    size_t item_size = item->Size();
+
     lru_.erase(key);
 
-    usage_ -= old_item->Size();
-    SERVER_LOG_DEBUG << header_ << " Erase " << key << " size: " << (old_item->Size() >> 20) << "MB from cache";
+    usage_ -= item_size;
+    SERVER_LOG_DEBUG << header_ << " Erase " << key << " size: " << (item_size >> 20) << "MB from cache";
     SERVER_LOG_DEBUG << header_ << " Count: " << lru_.size() << ", Usage: " << (usage_ >> 20) << "MB, Capacity: "
                      << (capacity_ >> 20) << "MB";
 }
