@@ -11,16 +11,16 @@
 
 #pragma once
 
+#include <boost/dynamic_bitset.hpp>
 #include <cstddef>
 #include <mutex>
 #include <string>
 #include <vector>
 
-#include <boost/dynamic_bitset.hpp>
-
 #include "Distance.h"
 #include "Neighbor.h"
 #include "knowhere/common/Config.h"
+#include "knowhere/index/vector_index/helpers/IndexParameter.h"
 
 namespace milvus {
 namespace knowhere {
@@ -65,7 +65,7 @@ class NsgIndex {
     size_t out_degree;
 
  public:
-    explicit NsgIndex(const size_t& dimension, const size_t& n, std::string metric = "L2");
+    explicit NsgIndex(const size_t& dimension, const size_t& n, std::string metric = knowhere::Metric::L2);
 
     NsgIndex() = default;
 
@@ -111,9 +111,9 @@ class NsgIndex {
     void
     GetNeighbors(const float* query, std::vector<Neighbor>& resset, Graph& graph, SearchParams* param = nullptr);
 
-    // used by search
-    void
-    GetNeighbors(const float* query, node_t* I, float* D, SearchParams* params);
+    // only for search
+    // void
+    // GetNeighbors(const float* query, node_t* I, float* D, SearchParams* params);
 
     void
     Link();
