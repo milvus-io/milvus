@@ -68,14 +68,14 @@ class SearchRequest : public BaseRequest {
         return table_schema_;
     }
 
-    Status
-    PreExecute() override;
-
  protected:
     SearchRequest(const std::shared_ptr<milvus::server::Context>& context, const std::string& table_name,
                   const engine::VectorsData& vectors, int64_t topk, const milvus::json& extra_params,
                   const std::vector<std::string>& partition_list, const std::vector<std::string>& file_id_list,
                   TopKQueryResult& result);
+
+    Status
+    OnPreExecute() override;
 
     Status
     OnExecute() override;

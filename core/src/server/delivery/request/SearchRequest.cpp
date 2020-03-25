@@ -51,7 +51,7 @@ SearchRequest::Create(const std::shared_ptr<milvus::server::Context>& context, c
 }
 
 Status
-SearchRequest::PreExecute() {
+SearchRequest::OnPreExecute() {
     std::string hdr = "SearchRequest pre-execute(table=" + table_name_ + ")";
     TimeRecorderAuto rc(hdr);
 
