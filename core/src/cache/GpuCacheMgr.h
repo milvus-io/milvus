@@ -10,8 +10,10 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
 #include <memory>
+#include <mutex>
 #include <string>
 #include <unordered_map>
+#include <utility>
 
 #include "cache/CacheMgr.h"
 #include "cache/DataObj.h"
@@ -23,6 +25,7 @@ namespace cache {
 #ifdef MILVUS_GPU_VERSION
 class GpuCacheMgr;
 using GpuCacheMgrPtr = std::shared_ptr<GpuCacheMgr>;
+using MutexPtr = std::shared_ptr<std::mutex>;
 
 class GpuCacheMgr : public CacheMgr<DataObjPtr>, public server::GpuResourceConfigHandler {
  public:
@@ -30,14 +33,17 @@ class GpuCacheMgr : public CacheMgr<DataObjPtr>, public server::GpuResourceConfi
 
     ~GpuCacheMgr();
 
-    static GpuCacheMgr*
-    GetInstance(uint64_t gpu_id);
-
     DataObjPtr
     GetIndex(const std::string& key);
 
     void
     InsertItem(const std::string& key, const DataObjPtr& data);
+
+    static GpuCacheMgrPtr
+    GetInstance(int64_t gpu_id);
+
+    static MutexPtr
+    GetInstanceMutex(int64_t gpu_id);
 
  protected:
     void
@@ -45,9 +51,9 @@ class GpuCacheMgr : public CacheMgr<DataObjPtr>, public server::GpuResourceConfi
 
  private:
     bool gpu_enable_ = true;
+    static std::mutex global_mutex_;
+    static std::unordered_map<int64_t, std::pair<GpuCacheMgrPtr, MutexPtr>> instance_;
     std::string identity_;
-    static std::mutex mutex_;
-    static std::unordered_map<uint64_t, GpuCacheMgrPtr> instance_;
 };
 #endif
 
