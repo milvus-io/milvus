@@ -158,8 +158,6 @@ Cache<ItemObj>::free_memory() {
     for (auto& key : key_array) {
         erase(key);
     }
-
-    print();
 }
 
 template <typename ItemObj>
