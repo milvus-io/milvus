@@ -62,6 +62,7 @@ FreeRequest(SearchRequestPtr& request, const Status& status) {
 class TracingContextList {
  public:
     TracingContextList() = default;
+
     ~TracingContextList() {
         Finish();
     }
@@ -260,15 +261,13 @@ SearchCombineRequest::OnExecute() {
         int64_t offset = 0;
         for (auto& request : request_list_) {
             const engine::VectorsData& src = request->VectorsData();
-            size_t data_size = 0;
+            size_t element_cnt = src.vector_count_ * dimension;
             if (is_float) {
-                data_size = src.vector_count_ * dimension;
-                memcpy(vectors_data_.float_data_.data() + offset, src.float_data_.data(), data_size);
+                memcpy(vectors_data_.float_data_.data() + offset, src.float_data_.data(), element_cnt * sizeof(float));
             } else {
-                data_size = src.vector_count_ * dimension / 8;
-                memcpy(vectors_data_.binary_data_.data() + offset, src.binary_data_.data(), data_size);
+                memcpy(vectors_data_.binary_data_.data() + offset, src.binary_data_.data(), element_cnt / 8);
             }
-            offset += data_size;
+            offset += element_cnt;
         }
 
         SERVER_LOG_DEBUG << total_count << " query vectors combined";
