@@ -13,6 +13,8 @@ Please mark all change in change log and use the issue from GitHub
 -   \#1663 PQ index parameter 'm' validation
 -   \#1686 API search_in_files cannot work correctly when vectors is stored in certain non-default partition
 -   \#1689 Fix SQ8H search fail on SIFT-1B dataset
+-   \#1667 Create index failed with type: rnsg if metric_type is IP
+-   \#1708 NSG search crashed
 -   \#1724 Remove unused unittests
 -   \#1734 Opentracing for combined search request
 

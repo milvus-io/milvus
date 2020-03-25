@@ -211,7 +211,7 @@ NSGConfAdapter::CheckTrain(Config& oricfg, const IndexMode mode) {
     static int64_t MAX_OUT_DEGREE = 300;
     static int64_t MIN_CANDIDATE_POOL_SIZE = 50;
     static int64_t MAX_CANDIDATE_POOL_SIZE = 1000;
-    static std::vector<std::string> METRICS{knowhere::Metric::L2};
+    static std::vector<std::string> METRICS{knowhere::Metric::L2, knowhere::Metric::IP};
 
     CheckStrByValues(knowhere::Metric::TYPE, METRICS);
     CheckIntByRange(knowhere::meta::ROWS, DEFAULT_MIN_ROWS, DEFAULT_MAX_ROWS);
