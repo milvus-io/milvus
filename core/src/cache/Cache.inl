@@ -16,10 +16,10 @@ constexpr double DEFAULT_THRESHHOLD_PERCENT = 0.7;
 constexpr double WARNING_THRESHHOLD_PERCENT = 0.9;
 
 template <typename ItemObj>
-Cache<ItemObj>::Cache(const std::string& header, int64_t capacity, int64_t cache_max_count)
-    : header_(header),
-      usage_(0),
+Cache<ItemObj>::Cache(int64_t capacity, int64_t cache_max_count, const std::string& header)
+    : usage_(0),
       capacity_(capacity),
+      header_(header),
       freemem_percent_(DEFAULT_THRESHHOLD_PERCENT),
       lru_(cache_max_count) {
 }
@@ -80,7 +80,7 @@ Cache<ItemObj>::insert(const std::string& key, const ItemObj& item) {
     }
 
     // if usage exceed capacity, free some items
-    if (usage_ > capacity_ * WARNING_THRESHHOLD_PERCENT) {
+    if (usage_ > (int64_t)(capacity_ * WARNING_THRESHHOLD_PERCENT)) {
         SERVER_LOG_DEBUG << header_ << " Current usage " << (usage_ >> 20) << "MB is too high for capacity "
                          << (capacity_ >> 20) << "MB, start free memory";
         free_memory();
@@ -127,8 +127,8 @@ Cache<ItemObj>::clear() {
 template <typename ItemObj>
 void
 Cache<ItemObj>::free_memory() {
-    if (usage_ <= capacity_)
-        return;
+    // if (usage_ <= capacity_)
+    //     return;
 
     int64_t threshhold = capacity_ * freemem_percent_;
     int64_t delta_size = usage_ - threshhold;

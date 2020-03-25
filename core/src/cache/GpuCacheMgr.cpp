@@ -36,7 +36,7 @@ GpuCacheMgr::GpuCacheMgr(int64_t gpu_id) : gpu_id_(gpu_id) {
     config.GetGpuResourceConfigCacheCapacity(gpu_cache_cap);
     int64_t cap = gpu_cache_cap * G_BYTE;
     std::string header = "[CACHE GPU" + std::to_string(gpu_id) + "]";
-    cache_ = std::make_shared<Cache<DataObjPtr>>(header, cap, 1UL << 32);
+    cache_ = std::make_shared<Cache<DataObjPtr>>(cap, 1UL << 32, header);
 
     float gpu_mem_threshold;
     config.GetGpuResourceConfigCacheThreshold(gpu_mem_threshold);
