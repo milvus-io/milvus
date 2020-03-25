@@ -48,7 +48,6 @@ class ServiceHandler(milvus_pb2_grpc.MilvusServiceServicer):
         return id_m_out, diss_m_out
 
     def _do_merge(self, files_n_topk_results, topk, reverse=False, **kwargs):
-        logger.warning("|Search | do merge ....")
         status = status_pb2.Status(error_code=status_pb2.SUCCESS,
                                    reason="Success")
         if not files_n_topk_results:
@@ -111,7 +110,6 @@ class ServiceHandler(milvus_pb2_grpc.MilvusServiceServicer):
                   search_params,
                   partition_tags=None,
                   **kwargs):
-        logger.warning("| Search | do query ...")
         metadata = kwargs.get('metadata', None)
         # range_array = [
         #     utilities.range_to_date(r, metadata=metadata) for r in range_array
@@ -121,12 +119,10 @@ class ServiceHandler(milvus_pb2_grpc.MilvusServiceServicer):
         p_span = None if self.tracer.empty else context.get_active_span(
         ).context
         with self.tracer.start_span('get_routing', child_of=p_span):
-            logger.warning("| Search | routing | Start ...")
             routing = self.router.routing(table_id,
                                           # range_array=range_array,
                                           partition_tags=partition_tags,
                                           metadata=metadata)
-        logger.warning("| Search | routing | done ...")
         logger.info('Routing: {}'.format(routing))
 
         metadata = kwargs.get('metadata', None)

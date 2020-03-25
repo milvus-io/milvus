@@ -33,6 +33,9 @@ class Factory(RouterMixin):
             cond = and_(Tables.state != Tables.TO_DELETE,
                         Tables.owner_table == table_name,
                         Tables.partition_tag.in_(partition_tags))
+            if '_default' in partition_tags:
+                default_par_cond = and_(Tables.table_id == table_name, Tables.state != Tables.TO_DELETE)
+                cond = or_(cond, default_par_cond)
         try:
             tables = db.Session.query(Tables).filter(cond).all()
         except sqlalchemy_exc.SQLAlchemyError as e:
@@ -58,9 +61,6 @@ class Factory(RouterMixin):
             raise exceptions.TableNotFoundError('Table file id not found. {}:{}'.format(table_name, partition_tags),
                                                 metadata=metadata)
 
-        # for table in tables:
-        #     files = table.files_to_search(range_array)
-        #     total_files.append(files)
         db.remove_session()
 
         servers = self.readonly_topo.group_names
@@ -70,19 +70,13 @@ class Factory(RouterMixin):
 
         routing = {}
 
-        # for files in total_files:
         for f in files:
             target_host = ring.get_node(str(f.id))
             sub = routing.get(target_host, None)
             if not sub:
                 sub = []
                 routing[target_host] = sub
-            # kv = sub.get(f.table_id, None)
             routing[target_host].append(str(f.id))
-            # if not kv:
-            #     kv = []
-            #     sub[f.table_id] = kv
-            # sub[f.table_id].append(str(f.id))
 
         return routing
 
