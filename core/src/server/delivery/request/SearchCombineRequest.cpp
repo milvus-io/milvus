@@ -261,13 +261,15 @@ SearchCombineRequest::OnExecute() {
         int64_t offset = 0;
         for (auto& request : request_list_) {
             const engine::VectorsData& src = request->VectorsData();
-            size_t element_cnt = src.vector_count_ * dimension;
             if (is_float) {
+                size_t element_cnt = src.vector_count_ * dimension;
                 memcpy(vectors_data_.float_data_.data() + offset, src.float_data_.data(), element_cnt * sizeof(float));
+                offset += element_cnt;
             } else {
-                memcpy(vectors_data_.binary_data_.data() + offset, src.binary_data_.data(), element_cnt / 8);
+                size_t element_cnt = src.vector_count_ * dimension / 8;
+                memcpy(vectors_data_.binary_data_.data() + offset, src.binary_data_.data(), element_cnt);
+                offset += element_cnt;
             }
-            offset += element_cnt;
         }
 
         SERVER_LOG_DEBUG << total_count << " query vectors combined";
