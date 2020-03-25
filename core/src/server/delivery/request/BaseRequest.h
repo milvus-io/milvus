@@ -31,19 +31,20 @@
 namespace milvus {
 namespace server {
 
-struct TableSchema {
+struct CollectionSchema {
     std::string collection_name_;
     int64_t dimension_;
     int64_t index_file_size_;
     int64_t metric_type_;
 
-    TableSchema() {
+    CollectionSchema() {
         dimension_ = 0;
         index_file_size_ = 0;
         metric_type_ = 0;
     }
 
-    TableSchema(const std::string& collection_name, int64_t dimension, int64_t index_file_size, int64_t metric_type) {
+    CollectionSchema(const std::string& collection_name, int64_t dimension, int64_t index_file_size,
+                     int64_t metric_type) {
         collection_name_ = collection_name;
         dimension_ = dimension;
         index_file_size_ = index_file_size;

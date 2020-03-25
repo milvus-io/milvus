@@ -52,7 +52,7 @@ CreateIndexRequest::OnExecute() {
         }
 
         // only process root collection, ignore partition collection
-        engine::meta::TableSchema table_schema;
+        engine::meta::CollectionSchema table_schema;
         table_schema.collection_id_ = collection_name_;
         status = DBWrapper::DB()->DescribeTable(table_schema);
         fiu_do_on("CreateIndexRequest.OnExecute.not_has_table", status = Status(milvus::SERVER_UNEXPECTED_ERROR, ""));
@@ -80,7 +80,7 @@ CreateIndexRequest::OnExecute() {
         }
 
         // step 2: binary and float vector support different index/metric type, need to adapt here
-        engine::meta::TableSchema table_info;
+        engine::meta::CollectionSchema table_info;
         table_info.collection_id_ = collection_name_;
         status = DBWrapper::DB()->DescribeTable(table_info);
 

@@ -45,7 +45,7 @@ DropIndexRequest::OnExecute() {
         }
 
         // only process root collection, ignore partition collection
-        engine::meta::TableSchema table_schema;
+        engine::meta::CollectionSchema table_schema;
         table_schema.collection_id_ = collection_name_;
         status = DBWrapper::DB()->DescribeTable(table_schema);
         fiu_do_on("DropIndexRequest.OnExecute.table_not_exist", status = Status(milvus::SERVER_UNEXPECTED_ERROR, ""));

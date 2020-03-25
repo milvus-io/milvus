@@ -186,8 +186,8 @@ MemTableFile::Serialize(uint64_t wal_lsn) {
     // else set file type to RAW, no need to build index
     if (table_file_schema_.engine_type_ != (int)EngineType::FAISS_IDMAP &&
         table_file_schema_.engine_type_ != (int)EngineType::FAISS_BIN_IDMAP) {
-        table_file_schema_.file_type_ = (size >= table_file_schema_.index_file_size_) ? meta::SegmentSchema::TO_INDEX
-                                                                                      : meta::SegmentSchema::RAW;
+        table_file_schema_.file_type_ =
+            (size >= table_file_schema_.index_file_size_) ? meta::SegmentSchema::TO_INDEX : meta::SegmentSchema::RAW;
     } else {
         table_file_schema_.file_type_ = meta::SegmentSchema::RAW;
     }

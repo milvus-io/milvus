@@ -146,7 +146,7 @@ RequestHandler::SearchByID(const std::shared_ptr<Context>& context, const std::s
 
 Status
 RequestHandler::DescribeTable(const std::shared_ptr<Context>& context, const std::string& collection_name,
-                              TableSchema& table_schema) {
+                              CollectionSchema& table_schema) {
     BaseRequestPtr request_ptr = DescribeTableRequest::Create(context, collection_name, table_schema);
     RequestScheduler::ExecRequest(request_ptr);
 

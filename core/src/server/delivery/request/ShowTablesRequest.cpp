@@ -37,7 +37,7 @@ Status
 ShowTablesRequest::OnExecute() {
     TimeRecorderAuto rc("ShowTablesRequest");
 
-    std::vector<engine::meta::TableSchema> schema_array;
+    std::vector<engine::meta::CollectionSchema> schema_array;
     auto status = DBWrapper::DB()->AllTables(schema_array);
     fiu_do_on("ShowTablesRequest.OnExecute.show_tables_fail", status = Status(milvus::SERVER_UNEXPECTED_ERROR, ""));
     if (!status.ok()) {

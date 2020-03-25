@@ -27,7 +27,7 @@
 TEST_F(MetaTest, TABLE_TEST) {
     auto collection_id = "meta_test_table";
 
-    milvus::engine::meta::TableSchema collection;
+    milvus::engine::meta::CollectionSchema collection;
     collection.collection_id_ = collection_id;
     auto status = impl_->CreateTable(collection);
     ASSERT_TRUE(status.ok());
@@ -62,7 +62,7 @@ TEST_F(MetaTest, FALID_TEST) {
     fiu_init(0);
     auto options = GetOptions();
     auto collection_id = "meta_test_table";
-    milvus::engine::meta::TableSchema collection;
+    milvus::engine::meta::CollectionSchema collection;
     collection.collection_id_ = collection_id;
     milvus::Status status;
 
@@ -119,7 +119,7 @@ TEST_F(MetaTest, FALID_TEST) {
     }
     {
         FIU_ENABLE_FIU("SqliteMetaImpl.AllTables.throw_exception");
-        std::vector<milvus::engine::meta::TableSchema> table_schema_array;
+        std::vector<milvus::engine::meta::CollectionSchema> table_schema_array;
         status = impl_->AllTables(table_schema_array);
         ASSERT_FALSE(status.ok());
         fiu_disable("SqliteMetaImpl.AllTables.throw_exception");
@@ -242,7 +242,7 @@ TEST_F(MetaTest, FALID_TEST) {
         status = impl_->CreatePartition(collection_id, partition, partition_tag, 0);
         ASSERT_TRUE(status.ok());
 
-        std::vector<milvus::engine::meta::TableSchema> partions_schema;
+        std::vector<milvus::engine::meta::CollectionSchema> partions_schema;
         status = impl_->ShowPartitions(collection_id, partions_schema);
         ASSERT_TRUE(status.ok());
         ASSERT_EQ(partions_schema.size(), 2);
@@ -356,7 +356,7 @@ TEST_F(MetaTest, FALID_TEST) {
 TEST_F(MetaTest, TABLE_FILE_TEST) {
     auto collection_id = "meta_test_table";
 
-    milvus::engine::meta::TableSchema collection;
+    milvus::engine::meta::CollectionSchema collection;
     collection.collection_id_ = collection_id;
     collection.dimension_ = 256;
     auto status = impl_->CreateTable(collection);
@@ -385,7 +385,7 @@ TEST_F(MetaTest, TABLE_FILE_TEST) {
 TEST_F(MetaTest, TABLE_FILE_ROW_COUNT_TEST) {
     auto collection_id = "row_count_test_table";
 
-    milvus::engine::meta::TableSchema collection;
+    milvus::engine::meta::CollectionSchema collection;
     collection.collection_id_ = collection_id;
     collection.dimension_ = 256;
     auto status = impl_->CreateTable(collection);
@@ -436,7 +436,7 @@ TEST_F(MetaTest, ARCHIVE_TEST_DAYS) {
     milvus::engine::meta::SqliteMetaImpl impl(options);
     auto collection_id = "meta_test_table";
 
-    milvus::engine::meta::TableSchema collection;
+    milvus::engine::meta::CollectionSchema collection;
     collection.collection_id_ = collection_id;
     auto status = impl.CreateTable(collection);
 
@@ -492,7 +492,7 @@ TEST_F(MetaTest, ARCHIVE_TEST_DISK) {
     milvus::engine::meta::SqliteMetaImpl impl(options);
     auto collection_id = "meta_test_group";
 
-    milvus::engine::meta::TableSchema collection;
+    milvus::engine::meta::CollectionSchema collection;
     collection.collection_id_ = collection_id;
     auto status = impl.CreateTable(collection);
 
@@ -543,7 +543,7 @@ TEST_F(MetaTest, ARCHIVE_TEST_DISK) {
 TEST_F(MetaTest, TABLE_FILES_TEST) {
     auto collection_id = "meta_test_group";
 
-    milvus::engine::meta::TableSchema collection;
+    milvus::engine::meta::CollectionSchema collection;
     collection.collection_id_ = collection_id;
     auto status = impl_->CreateTable(collection);
 
@@ -689,7 +689,7 @@ TEST_F(MetaTest, TABLE_FILES_TEST) {
 TEST_F(MetaTest, INDEX_TEST) {
     auto collection_id = "index_test";
 
-    milvus::engine::meta::TableSchema collection;
+    milvus::engine::meta::CollectionSchema collection;
     collection.collection_id_ = collection_id;
     auto status = impl_->CreateTable(collection);
 
@@ -704,7 +704,7 @@ TEST_F(MetaTest, INDEX_TEST) {
     status = impl_->UpdateTableFlag(collection_id, flag);
     ASSERT_TRUE(status.ok());
 
-    milvus::engine::meta::TableSchema table_info;
+    milvus::engine::meta::CollectionSchema table_info;
     table_info.collection_id_ = collection_id;
     status = impl_->DescribeTable(table_info);
     ASSERT_EQ(table_info.flag_, flag);
@@ -729,7 +729,7 @@ TEST_F(MetaTest, LSN_TEST) {
     auto collection_id = "lsn_test";
     uint64_t lsn = 42949672960;
 
-    milvus::engine::meta::TableSchema collection;
+    milvus::engine::meta::CollectionSchema collection;
     collection.collection_id_ = collection_id;
     auto status = impl_->CreateTable(collection);
 

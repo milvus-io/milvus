@@ -73,7 +73,7 @@ InsertRequest::OnExecute() {
 
         // step 2: check collection existence
         // only process root collection, ignore partition collection
-        engine::meta::TableSchema table_schema;
+        engine::meta::CollectionSchema table_schema;
         table_schema.collection_id_ = collection_name_;
         status = DBWrapper::DB()->DescribeTable(table_schema);
         fiu_do_on("InsertRequest.OnExecute.db_not_found", status = Status(milvus::DB_NOT_FOUND, ""));

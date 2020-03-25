@@ -41,9 +41,9 @@ GetTableName() {
     return collection_name;
 }
 
-milvus::engine::meta::TableSchema
+milvus::engine::meta::CollectionSchema
 BuildTableSchema() {
-    milvus::engine::meta::TableSchema table_info;
+    milvus::engine::meta::CollectionSchema table_info;
     table_info.dimension_ = TABLE_DIM;
     table_info.collection_id_ = GetTableName();
     table_info.metric_type_ = (int32_t)milvus::engine::MetricType::L2;
@@ -64,10 +64,10 @@ BuildVectors(uint64_t n, milvus::engine::VectorsData& vectors) {
 }  // namespace
 
 TEST_F(SearchByIdTest, basic) {
-    milvus::engine::meta::TableSchema table_info = BuildTableSchema();
+    milvus::engine::meta::CollectionSchema table_info = BuildTableSchema();
     auto stat = db_->CreateTable(table_info);
 
-    milvus::engine::meta::TableSchema table_info_get;
+    milvus::engine::meta::CollectionSchema table_info_get;
     table_info_get.collection_id_ = table_info.collection_id_;
     stat = db_->DescribeTable(table_info_get);
     ASSERT_TRUE(stat.ok());
@@ -116,10 +116,10 @@ TEST_F(SearchByIdTest, basic) {
 }
 
 TEST_F(SearchByIdTest, with_index) {
-    milvus::engine::meta::TableSchema table_info = BuildTableSchema();
+    milvus::engine::meta::CollectionSchema table_info = BuildTableSchema();
     auto stat = db_->CreateTable(table_info);
 
-    milvus::engine::meta::TableSchema table_info_get;
+    milvus::engine::meta::CollectionSchema table_info_get;
     table_info_get.collection_id_ = table_info.collection_id_;
     stat = db_->DescribeTable(table_info_get);
     ASSERT_TRUE(stat.ok());
@@ -174,10 +174,10 @@ TEST_F(SearchByIdTest, with_index) {
 }
 
 TEST_F(SearchByIdTest, with_delete) {
-    milvus::engine::meta::TableSchema table_info = BuildTableSchema();
+    milvus::engine::meta::CollectionSchema table_info = BuildTableSchema();
     auto stat = db_->CreateTable(table_info);
 
-    milvus::engine::meta::TableSchema table_info_get;
+    milvus::engine::meta::CollectionSchema table_info_get;
     table_info_get.collection_id_ = table_info.collection_id_;
     stat = db_->DescribeTable(table_info_get);
     ASSERT_TRUE(stat.ok());
@@ -235,10 +235,10 @@ TEST_F(SearchByIdTest, with_delete) {
 }
 
 TEST_F(GetVectorByIdTest, basic) {
-    milvus::engine::meta::TableSchema table_info = BuildTableSchema();
+    milvus::engine::meta::CollectionSchema table_info = BuildTableSchema();
     auto stat = db_->CreateTable(table_info);
 
-    milvus::engine::meta::TableSchema table_info_get;
+    milvus::engine::meta::CollectionSchema table_info_get;
     table_info_get.collection_id_ = table_info.collection_id_;
     stat = db_->DescribeTable(table_info_get);
     ASSERT_TRUE(stat.ok());
@@ -292,10 +292,10 @@ TEST_F(GetVectorByIdTest, basic) {
 }
 
 TEST_F(GetVectorByIdTest, with_index) {
-    milvus::engine::meta::TableSchema table_info = BuildTableSchema();
+    milvus::engine::meta::CollectionSchema table_info = BuildTableSchema();
     auto stat = db_->CreateTable(table_info);
 
-    milvus::engine::meta::TableSchema table_info_get;
+    milvus::engine::meta::CollectionSchema table_info_get;
     table_info_get.collection_id_ = table_info.collection_id_;
     stat = db_->DescribeTable(table_info_get);
     ASSERT_TRUE(stat.ok());
@@ -354,10 +354,10 @@ TEST_F(GetVectorByIdTest, with_index) {
 }
 
 TEST_F(GetVectorByIdTest, with_delete) {
-    milvus::engine::meta::TableSchema table_info = BuildTableSchema();
+    milvus::engine::meta::CollectionSchema table_info = BuildTableSchema();
     auto stat = db_->CreateTable(table_info);
 
-    milvus::engine::meta::TableSchema table_info_get;
+    milvus::engine::meta::CollectionSchema table_info_get;
     table_info_get.collection_id_ = table_info.collection_id_;
     stat = db_->DescribeTable(table_info_get);
     ASSERT_TRUE(stat.ok());
@@ -413,7 +413,7 @@ TEST_F(GetVectorByIdTest, with_delete) {
 }
 
 TEST_F(SearchByIdTest, BINARY) {
-    milvus::engine::meta::TableSchema table_info;
+    milvus::engine::meta::CollectionSchema table_info;
     table_info.dimension_ = TABLE_DIM;
     table_info.collection_id_ = GetTableName();
     table_info.engine_type_ = (int)milvus::engine::EngineType::FAISS_BIN_IDMAP;
@@ -421,7 +421,7 @@ TEST_F(SearchByIdTest, BINARY) {
     auto stat = db_->CreateTable(table_info);
     ASSERT_TRUE(stat.ok());
 
-    milvus::engine::meta::TableSchema table_info_get;
+    milvus::engine::meta::CollectionSchema table_info_get;
     table_info_get.collection_id_ = table_info.collection_id_;
     stat = db_->DescribeTable(table_info_get);
     ASSERT_TRUE(stat.ok());

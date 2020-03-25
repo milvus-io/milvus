@@ -70,12 +70,12 @@ TEST_F(MetricTest, METRIC_TEST) {
     static const char* group_name = "test_group";
     static const int group_dim = 256;
 
-    milvus::engine::meta::TableSchema group_info;
+    milvus::engine::meta::CollectionSchema group_info;
     group_info.dimension_ = group_dim;
     group_info.collection_id_ = group_name;
     auto stat = db_->CreateTable(group_info);
 
-    milvus::engine::meta::TableSchema group_info_get;
+    milvus::engine::meta::CollectionSchema group_info_get;
     group_info_get.collection_id_ = group_name;
     stat = db_->DescribeTable(group_info_get);
 

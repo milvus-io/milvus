@@ -55,13 +55,13 @@ class DBImpl : public DB, public server::CacheConfigHandler, public server::Engi
     DropAll() override;
 
     Status
-    CreateTable(meta::TableSchema& table_schema) override;
+    CreateTable(meta::CollectionSchema& table_schema) override;
 
     Status
     DropTable(const std::string& collection_id) override;
 
     Status
-    DescribeTable(meta::TableSchema& table_schema) override;
+    DescribeTable(meta::CollectionSchema& table_schema) override;
 
     Status
     HasTable(const std::string& collection_id, bool& has_or_not) override;
@@ -70,7 +70,7 @@ class DBImpl : public DB, public server::CacheConfigHandler, public server::Engi
     HasNativeTable(const std::string& collection_id, bool& has_or_not_) override;
 
     Status
-    AllTables(std::vector<meta::TableSchema>& table_schema_array) override;
+    AllTables(std::vector<meta::CollectionSchema>& table_schema_array) override;
 
     Status
     GetTableInfo(const std::string& collection_id, TableInfo& table_info) override;
@@ -95,7 +95,8 @@ class DBImpl : public DB, public server::CacheConfigHandler, public server::Engi
     DropPartitionByTag(const std::string& collection_id, const std::string& partition_tag) override;
 
     Status
-    ShowPartitions(const std::string& collection_id, std::vector<meta::TableSchema>& partition_schema_array) override;
+    ShowPartitions(const std::string& collection_id,
+                   std::vector<meta::CollectionSchema>& partition_schema_array) override;
 
     Status
     InsertVectors(const std::string& collection_id, const std::string& partition_tag, VectorsData& vectors) override;

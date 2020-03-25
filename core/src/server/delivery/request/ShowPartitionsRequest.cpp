@@ -51,7 +51,7 @@ ShowPartitionsRequest::OnExecute() {
 
     // step 2: check collection existence
     // only process root collection, ignore partition collection
-    engine::meta::TableSchema table_schema;
+    engine::meta::CollectionSchema table_schema;
     table_schema.collection_id_ = collection_name_;
     status = DBWrapper::DB()->DescribeTable(table_schema);
     if (!status.ok()) {
@@ -67,7 +67,7 @@ ShowPartitionsRequest::OnExecute() {
     }
 
     // step 3: get partitions
-    std::vector<engine::meta::TableSchema> schema_array;
+    std::vector<engine::meta::CollectionSchema> schema_array;
     status = DBWrapper::DB()->ShowPartitions(collection_name_, schema_array);
     fiu_do_on("ShowPartitionsRequest.OnExecute.show_partition_fail",
               status = Status(milvus::SERVER_UNEXPECTED_ERROR, ""));

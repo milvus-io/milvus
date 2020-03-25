@@ -22,13 +22,13 @@ namespace milvus {
 namespace server {
 
 DescribeTableRequest::DescribeTableRequest(const std::shared_ptr<milvus::server::Context>& context,
-                                           const std::string& collection_name, TableSchema& schema)
+                                           const std::string& collection_name, CollectionSchema& schema)
     : BaseRequest(context, BaseRequest::kDescribeTable), collection_name_(collection_name), schema_(schema) {
 }
 
 BaseRequestPtr
 DescribeTableRequest::Create(const std::shared_ptr<milvus::server::Context>& context,
-                             const std::string& collection_name, TableSchema& schema) {
+                             const std::string& collection_name, CollectionSchema& schema) {
     return std::shared_ptr<BaseRequest>(new DescribeTableRequest(context, collection_name, schema));
 }
 
@@ -46,7 +46,7 @@ DescribeTableRequest::OnExecute() {
 
         // step 2: get collection info
         // only process root collection, ignore partition collection
-        engine::meta::TableSchema table_schema;
+        engine::meta::CollectionSchema table_schema;
         table_schema.collection_id_ = collection_name_;
         status = DBWrapper::DB()->DescribeTable(table_schema);
         fiu_do_on("DescribeTableRequest.OnExecute.describe_table_fail",

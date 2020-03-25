@@ -237,7 +237,7 @@ DBWrapper::PreloadTables(const std::string& preload_tables) {
         // do nothing
     } else if (preload_tables == "*") {
         // load all tables
-        std::vector<engine::meta::TableSchema> table_schema_array;
+        std::vector<engine::meta::CollectionSchema> table_schema_array;
         db_->AllTables(table_schema_array);
 
         for (auto& schema : table_schema_array) {

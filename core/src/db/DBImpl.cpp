@@ -178,12 +178,12 @@ DBImpl::DropAll() {
 }
 
 Status
-DBImpl::CreateTable(meta::TableSchema& table_schema) {
+DBImpl::CreateTable(meta::CollectionSchema& table_schema) {
     if (!initialized_.load(std::memory_order_acquire)) {
         return SHUTDOWN_ERROR;
     }
 
-    meta::TableSchema temp_schema = table_schema;
+    meta::CollectionSchema temp_schema = table_schema;
     temp_schema.index_file_size_ *= ONE_MB;  // store as MB
     if (options_.wal_enable_) {
         temp_schema.flush_lsn_ = wal_mgr_->CreateTable(table_schema.collection_id_);
@@ -206,7 +206,7 @@ DBImpl::DropTable(const std::string& collection_id) {
 }
 
 Status
-DBImpl::DescribeTable(meta::TableSchema& table_schema) {
+DBImpl::DescribeTable(meta::CollectionSchema& table_schema) {
     if (!initialized_.load(std::memory_order_acquire)) {
         return SHUTDOWN_ERROR;
     }
@@ -231,7 +231,7 @@ DBImpl::HasNativeTable(const std::string& collection_id, bool& has_or_not_) {
         return SHUTDOWN_ERROR;
     }
 
-    engine::meta::TableSchema table_schema;
+    engine::meta::CollectionSchema table_schema;
     table_schema.collection_id_ = collection_id;
     auto status = DescribeTable(table_schema);
     if (!status.ok()) {
@@ -249,12 +249,12 @@ DBImpl::HasNativeTable(const std::string& collection_id, bool& has_or_not_) {
 }
 
 Status
-DBImpl::AllTables(std::vector<meta::TableSchema>& table_schema_array) {
+DBImpl::AllTables(std::vector<meta::CollectionSchema>& table_schema_array) {
     if (!initialized_.load(std::memory_order_acquire)) {
         return SHUTDOWN_ERROR;
     }
 
-    std::vector<meta::TableSchema> all_tables;
+    std::vector<meta::CollectionSchema> all_tables;
     auto status = meta_ptr_->AllTables(all_tables);
 
     // only return real tables, dont return partition tables
@@ -276,7 +276,7 @@ DBImpl::GetTableInfo(const std::string& collection_id, TableInfo& table_info) {
 
     // step1: get all partition ids
     std::vector<std::pair<std::string, std::string>> name2tag = {{collection_id, milvus::engine::DEFAULT_PARTITON_TAG}};
-    std::vector<meta::TableSchema> partition_array;
+    std::vector<meta::CollectionSchema> partition_array;
     auto status = meta_ptr_->ShowPartitions(collection_id, partition_array);
     for (auto& schema : partition_array) {
         name2tag.push_back(std::make_pair(schema.collection_id_, schema.partition_tag_));
@@ -346,7 +346,7 @@ DBImpl::PreloadTable(const std::string& collection_id) {
     }
 
     // step 2: get files from partition tables
-    std::vector<meta::TableSchema> partition_array;
+    std::vector<meta::CollectionSchema> partition_array;
     status = meta_ptr_->ShowPartitions(collection_id, partition_array);
     for (auto& schema : partition_array) {
         status = GetFilesToSearch(schema.collection_id_, files_array);
@@ -473,7 +473,7 @@ DBImpl::DropPartitionByTag(const std::string& collection_id, const std::string& 
 }
 
 Status
-DBImpl::ShowPartitions(const std::string& collection_id, std::vector<meta::TableSchema>& partition_schema_array) {
+DBImpl::ShowPartitions(const std::string& collection_id, std::vector<meta::CollectionSchema>& partition_schema_array) {
     if (!initialized_.load(std::memory_order_acquire)) {
         return SHUTDOWN_ERROR;
     }
@@ -646,7 +646,7 @@ DBImpl::Compact(const std::string& collection_id) {
         return SHUTDOWN_ERROR;
     }
 
-    engine::meta::TableSchema table_schema;
+    engine::meta::CollectionSchema table_schema;
     table_schema.collection_id_ = collection_id;
     auto status = DescribeTable(table_schema);
     if (!status.ok()) {
@@ -851,7 +851,7 @@ DBImpl::GetVectorByID(const std::string& collection_id, const IDNumber& vector_i
         return status;
     }
 
-    std::vector<meta::TableSchema> partition_array;
+    std::vector<meta::CollectionSchema> partition_array;
     status = meta_ptr_->ShowPartitions(collection_id, partition_array);
     for (auto& schema : partition_array) {
         meta::SegmentsSchema files;
@@ -912,7 +912,7 @@ DBImpl::GetVectorIDs(const std::string& collection_id, const std::string& segmen
     // check the segment is belong to this collection
     if (table_files[0].collection_id_ != collection_id) {
         // the segment could be in a partition under this collection
-        meta::TableSchema table_schema;
+        meta::CollectionSchema table_schema;
         table_schema.collection_id_ = table_files[0].collection_id_;
         status = DescribeTable(table_schema);
         if (table_schema.owner_table_ != collection_id) {
@@ -1118,7 +1118,7 @@ DBImpl::Query(const std::shared_ptr<server::Context>& context, const std::string
             return status;
         }
 
-        std::vector<meta::TableSchema> partition_array;
+        std::vector<meta::CollectionSchema> partition_array;
         status = meta_ptr_->ShowPartitions(collection_id, partition_array);
         for (auto& schema : partition_array) {
             status = GetFilesToSearch(schema.collection_id_, files_array);
@@ -1343,7 +1343,7 @@ DBImpl::StartMergeTask() {
             // 1. other tables may still has un-merged files
             // 2. server may be closed unexpected, these un-merge files need to be merged when server restart
             if (merge_table_ids_.empty()) {
-                std::vector<meta::TableSchema> table_schema_array;
+                std::vector<meta::CollectionSchema> table_schema_array;
                 meta_ptr_->AllTables(table_schema_array);
                 for (auto& schema : table_schema_array) {
                     merge_table_ids_.insert(schema.collection_id_);
@@ -1645,7 +1645,7 @@ DBImpl::GetPartitionByTag(const std::string& collection_id, const std::string& p
 Status
 DBImpl::GetPartitionsByTags(const std::string& collection_id, const std::vector<std::string>& partition_tags,
                             std::set<std::string>& partition_name_array) {
-    std::vector<meta::TableSchema> partition_array;
+    std::vector<meta::CollectionSchema> partition_array;
     auto status = meta_ptr_->ShowPartitions(collection_id, partition_array);
 
     for (auto& tag : partition_tags) {
@@ -1689,7 +1689,7 @@ DBImpl::DropTableRecursively(const std::string& collection_id) {
     scheduler::JobMgrInst::GetInstance()->Put(job);
     job->WaitAndDelete();
 
-    std::vector<meta::TableSchema> partition_array;
+    std::vector<meta::CollectionSchema> partition_array;
     status = meta_ptr_->ShowPartitions(collection_id, partition_array);
     for (auto& schema : partition_array) {
         status = DropTableRecursively(schema.collection_id_);
@@ -1714,7 +1714,7 @@ DBImpl::UpdateTableIndexRecursively(const std::string& collection_id, const Tabl
         return status;
     }
 
-    std::vector<meta::TableSchema> partition_array;
+    std::vector<meta::CollectionSchema> partition_array;
     status = meta_ptr_->ShowPartitions(collection_id, partition_array);
     for (auto& schema : partition_array) {
         status = UpdateTableIndexRecursively(schema.collection_id_, index);
@@ -1738,10 +1738,8 @@ DBImpl::WaitTableIndexRecursively(const std::string& collection_id, const TableI
         };
     } else {
         file_types = {
-            static_cast<int32_t>(meta::SegmentSchema::RAW),
-            static_cast<int32_t>(meta::SegmentSchema::NEW),
-            static_cast<int32_t>(meta::SegmentSchema::NEW_MERGE),
-            static_cast<int32_t>(meta::SegmentSchema::NEW_INDEX),
+            static_cast<int32_t>(meta::SegmentSchema::RAW),       static_cast<int32_t>(meta::SegmentSchema::NEW),
+            static_cast<int32_t>(meta::SegmentSchema::NEW_MERGE), static_cast<int32_t>(meta::SegmentSchema::NEW_INDEX),
             static_cast<int32_t>(meta::SegmentSchema::TO_INDEX),
         };
     }
@@ -1765,7 +1763,7 @@ DBImpl::WaitTableIndexRecursively(const std::string& collection_id, const TableI
     }
 
     // build index for partition
-    std::vector<meta::TableSchema> partition_array;
+    std::vector<meta::CollectionSchema> partition_array;
     status = meta_ptr_->ShowPartitions(collection_id, partition_array);
     for (auto& schema : partition_array) {
         status = WaitTableIndexRecursively(schema.collection_id_, index);
@@ -1797,7 +1795,7 @@ DBImpl::DropTableIndexRecursively(const std::string& collection_id) {
     }
 
     // drop partition index
-    std::vector<meta::TableSchema> partition_array;
+    std::vector<meta::CollectionSchema> partition_array;
     status = meta_ptr_->ShowPartitions(collection_id, partition_array);
     for (auto& schema : partition_array) {
         status = DropTableIndexRecursively(schema.collection_id_);
@@ -1820,7 +1818,7 @@ DBImpl::GetTableRowCountRecursively(const std::string& collection_id, uint64_t& 
     }
 
     // get partition row count
-    std::vector<meta::TableSchema> partition_array;
+    std::vector<meta::CollectionSchema> partition_array;
     status = meta_ptr_->ShowPartitions(collection_id, partition_array);
     for (auto& schema : partition_array) {
         uint64_t partition_row_count = 0;
@@ -1907,7 +1905,7 @@ DBImpl::ExecWalRecord(const wal::MXLogRecord& record) {
         }
 
         case wal::MXLogType::Delete: {
-            std::vector<meta::TableSchema> partition_array;
+            std::vector<meta::CollectionSchema> partition_array;
             status = meta_ptr_->ShowPartitions(record.collection_id, partition_array);
             if (!status.ok()) {
                 return status;
@@ -1940,7 +1938,7 @@ DBImpl::ExecWalRecord(const wal::MXLogRecord& record) {
         case wal::MXLogType::Flush: {
             if (!record.collection_id.empty()) {
                 // flush one collection
-                std::vector<meta::TableSchema> partition_array;
+                std::vector<meta::CollectionSchema> partition_array;
                 status = meta_ptr_->ShowPartitions(record.collection_id, partition_array);
                 if (!status.ok()) {
                     return status;

@@ -51,7 +51,7 @@ FlushRequest::OnExecute() {
 
     for (auto& name : collection_names_) {
         // only process root collection, ignore partition collection
-        engine::meta::TableSchema table_schema;
+        engine::meta::CollectionSchema table_schema;
         table_schema.collection_id_ = name;
         status = DBWrapper::DB()->DescribeTable(table_schema);
         if (!status.ok()) {

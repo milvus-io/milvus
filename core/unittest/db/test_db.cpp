@@ -37,9 +37,9 @@ static constexpr int64_t INSERT_LOOP = 1000;
 static constexpr int64_t SECONDS_EACH_HOUR = 3600;
 static constexpr int64_t DAY_SECONDS = 24 * 60 * 60;
 
-milvus::engine::meta::TableSchema
+milvus::engine::meta::CollectionSchema
 BuildTableSchema() {
-    milvus::engine::meta::TableSchema table_info;
+    milvus::engine::meta::CollectionSchema table_info;
     table_info.dimension_ = TABLE_DIM;
     table_info.collection_id_ = TABLE_NAME;
     return table_info;
@@ -163,10 +163,10 @@ TEST_F(DBTest, CONFIG_TEST) {
 }
 
 TEST_F(DBTest, DB_TEST) {
-    milvus::engine::meta::TableSchema table_info = BuildTableSchema();
+    milvus::engine::meta::CollectionSchema table_info = BuildTableSchema();
     auto stat = db_->CreateTable(table_info);
 
-    milvus::engine::meta::TableSchema table_info_get;
+    milvus::engine::meta::CollectionSchema table_info_get;
     table_info_get.collection_id_ = TABLE_NAME;
     stat = db_->DescribeTable(table_info_get);
     ASSERT_TRUE(stat.ok());
@@ -267,10 +267,10 @@ TEST_F(DBTest, SEARCH_TEST) {
     milvus::server::Config& config = milvus::server::Config::GetInstance();
     milvus::Status s = config.LoadConfigFile(config_path);
 
-    milvus::engine::meta::TableSchema table_info = BuildTableSchema();
+    milvus::engine::meta::CollectionSchema table_info = BuildTableSchema();
     auto stat = db_->CreateTable(table_info);
 
-    milvus::engine::meta::TableSchema table_info_get;
+    milvus::engine::meta::CollectionSchema table_info_get;
     table_info_get.collection_id_ = TABLE_NAME;
     stat = db_->DescribeTable(table_info_get);
     ASSERT_TRUE(stat.ok());
@@ -437,10 +437,10 @@ TEST_F(DBTest, SEARCH_TEST) {
 TEST_F(DBTest, PRELOADTABLE_TEST) {
     fiu_init(0);
 
-    milvus::engine::meta::TableSchema table_info = BuildTableSchema();
+    milvus::engine::meta::CollectionSchema table_info = BuildTableSchema();
     auto stat = db_->CreateTable(table_info);
 
-    milvus::engine::meta::TableSchema table_info_get;
+    milvus::engine::meta::CollectionSchema table_info_get;
     table_info_get.collection_id_ = TABLE_NAME;
     stat = db_->DescribeTable(table_info_get);
     ASSERT_TRUE(stat.ok());
@@ -496,7 +496,7 @@ TEST_F(DBTest, PRELOADTABLE_TEST) {
 TEST_F(DBTest, SHUTDOWN_TEST) {
     db_->Stop();
 
-    milvus::engine::meta::TableSchema table_info = BuildTableSchema();
+    milvus::engine::meta::CollectionSchema table_info = BuildTableSchema();
     auto stat = db_->CreateTable(table_info);
     ASSERT_FALSE(stat.ok());
 
@@ -515,11 +515,11 @@ TEST_F(DBTest, SHUTDOWN_TEST) {
     stat = db_->DropPartitionByTag(TABLE_NAME, "0");
     ASSERT_FALSE(stat.ok());
 
-    std::vector<milvus::engine::meta::TableSchema> partition_schema_array;
+    std::vector<milvus::engine::meta::CollectionSchema> partition_schema_array;
     stat = db_->ShowPartitions(TABLE_NAME, partition_schema_array);
     ASSERT_FALSE(stat.ok());
 
-    std::vector<milvus::engine::meta::TableSchema> table_infos;
+    std::vector<milvus::engine::meta::CollectionSchema> table_infos;
     stat = db_->AllTables(table_infos);
     ASSERT_EQ(stat.code(), milvus::DB_ERROR);
 
@@ -598,7 +598,7 @@ TEST_F(DBTest, SHUTDOWN_TEST) {
 
 TEST_F(DBTest, BACK_TIMER_THREAD_1) {
     fiu_init(0);
-    milvus::engine::meta::TableSchema table_info = BuildTableSchema();
+    milvus::engine::meta::CollectionSchema table_info = BuildTableSchema();
     milvus::Status stat;
     // test background timer thread
     {
@@ -633,7 +633,7 @@ TEST_F(DBTest, BACK_TIMER_THREAD_1) {
 TEST_F(DBTest, BACK_TIMER_THREAD_2) {
     fiu_init(0);
     milvus::Status stat;
-    milvus::engine::meta::TableSchema table_info = BuildTableSchema();
+    milvus::engine::meta::CollectionSchema table_info = BuildTableSchema();
 
     stat = db_->CreateTable(table_info);
     ASSERT_TRUE(stat.ok());
@@ -657,7 +657,7 @@ TEST_F(DBTest, BACK_TIMER_THREAD_2) {
 TEST_F(DBTest, BACK_TIMER_THREAD_3) {
     fiu_init(0);
     milvus::Status stat;
-    milvus::engine::meta::TableSchema table_info = BuildTableSchema();
+    milvus::engine::meta::CollectionSchema table_info = BuildTableSchema();
 
     stat = db_->CreateTable(table_info);
     ASSERT_TRUE(stat.ok());
@@ -682,7 +682,7 @@ TEST_F(DBTest, BACK_TIMER_THREAD_3) {
 TEST_F(DBTest, BACK_TIMER_THREAD_4) {
     fiu_init(0);
     milvus::Status stat;
-    milvus::engine::meta::TableSchema table_info = BuildTableSchema();
+    milvus::engine::meta::CollectionSchema table_info = BuildTableSchema();
 
     stat = db_->CreateTable(table_info);
     ASSERT_TRUE(stat.ok());
@@ -705,7 +705,7 @@ TEST_F(DBTest, BACK_TIMER_THREAD_4) {
 }
 
 TEST_F(DBTest, INDEX_TEST) {
-    milvus::engine::meta::TableSchema table_info = BuildTableSchema();
+    milvus::engine::meta::CollectionSchema table_info = BuildTableSchema();
     auto stat = db_->CreateTable(table_info);
 
     uint64_t nb = VECTOR_COUNT;
@@ -755,7 +755,7 @@ TEST_F(DBTest, INDEX_TEST) {
 }
 
 TEST_F(DBTest, PARTITION_TEST) {
-    milvus::engine::meta::TableSchema table_info = BuildTableSchema();
+    milvus::engine::meta::CollectionSchema table_info = BuildTableSchema();
     auto stat = db_->CreateTable(table_info);
     ASSERT_TRUE(stat.ok());
 
@@ -798,7 +798,7 @@ TEST_F(DBTest, PARTITION_TEST) {
     stat = db_->CreatePartition(collection_name, "", "0");
     ASSERT_FALSE(stat.ok());
 
-    std::vector<milvus::engine::meta::TableSchema> partition_schema_array;
+    std::vector<milvus::engine::meta::CollectionSchema> partition_schema_array;
     stat = db_->ShowPartitions(collection_name, partition_schema_array);
     ASSERT_TRUE(stat.ok());
     ASSERT_EQ(partition_schema_array.size(), PARTITION_COUNT);
@@ -908,10 +908,10 @@ TEST_F(DBTest, PARTITION_TEST) {
 }
 
 TEST_F(DBTest2, ARHIVE_DISK_CHECK) {
-    milvus::engine::meta::TableSchema table_info = BuildTableSchema();
+    milvus::engine::meta::CollectionSchema table_info = BuildTableSchema();
     auto stat = db_->CreateTable(table_info);
 
-    std::vector<milvus::engine::meta::TableSchema> table_schema_array;
+    std::vector<milvus::engine::meta::CollectionSchema> table_schema_array;
     stat = db_->AllTables(table_schema_array);
     ASSERT_TRUE(stat.ok());
     bool bfound = false;
@@ -923,7 +923,7 @@ TEST_F(DBTest2, ARHIVE_DISK_CHECK) {
     }
     ASSERT_TRUE(bfound);
 
-    milvus::engine::meta::TableSchema table_info_get;
+    milvus::engine::meta::CollectionSchema table_info_get;
     table_info_get.collection_id_ = TABLE_NAME;
     stat = db_->DescribeTable(table_info_get);
     ASSERT_TRUE(stat.ok());
@@ -950,10 +950,10 @@ TEST_F(DBTest2, ARHIVE_DISK_CHECK) {
 }
 
 TEST_F(DBTest2, DELETE_TEST) {
-    milvus::engine::meta::TableSchema table_info = BuildTableSchema();
+    milvus::engine::meta::CollectionSchema table_info = BuildTableSchema();
     auto stat = db_->CreateTable(table_info);
 
-    milvus::engine::meta::TableSchema table_info_get;
+    milvus::engine::meta::CollectionSchema table_info_get;
     table_info_get.collection_id_ = TABLE_NAME;
     stat = db_->DescribeTable(table_info_get);
     ASSERT_TRUE(stat.ok());
@@ -996,7 +996,7 @@ TEST_F(DBTest2, DELETE_TEST) {
 
 TEST_F(DBTest2, SHOW_TABLE_INFO_TEST) {
     std::string collection_name = TABLE_NAME;
-    milvus::engine::meta::TableSchema table_schema = BuildTableSchema();
+    milvus::engine::meta::CollectionSchema table_schema = BuildTableSchema();
     auto stat = db_->CreateTable(table_schema);
 
     uint64_t nb = VECTOR_COUNT;
@@ -1046,7 +1046,7 @@ TEST_F(DBTest2, SHOW_TABLE_INFO_TEST) {
 }
 
 TEST_F(DBTestWAL, DB_INSERT_TEST) {
-    milvus::engine::meta::TableSchema table_info = BuildTableSchema();
+    milvus::engine::meta::CollectionSchema table_info = BuildTableSchema();
     auto stat = db_->CreateTable(table_info);
     ASSERT_TRUE(stat.ok());
 
@@ -1075,7 +1075,7 @@ TEST_F(DBTestWAL, DB_INSERT_TEST) {
 }
 
 TEST_F(DBTestWAL, DB_STOP_TEST) {
-    milvus::engine::meta::TableSchema table_info = BuildTableSchema();
+    milvus::engine::meta::CollectionSchema table_info = BuildTableSchema();
     auto stat = db_->CreateTable(table_info);
     ASSERT_TRUE(stat.ok());
 
@@ -1107,7 +1107,7 @@ TEST_F(DBTestWAL, DB_STOP_TEST) {
 }
 
 TEST_F(DBTestWALRecovery, RECOVERY_WITH_NO_ERROR) {
-    milvus::engine::meta::TableSchema table_info = BuildTableSchema();
+    milvus::engine::meta::CollectionSchema table_info = BuildTableSchema();
     auto stat = db_->CreateTable(table_info);
     ASSERT_TRUE(stat.ok());
 
@@ -1156,7 +1156,7 @@ TEST_F(DBTestWALRecovery, RECOVERY_WITH_NO_ERROR) {
 }
 
 TEST_F(DBTestWALRecovery_Error, RECOVERY_WITH_INVALID_LOG_FILE) {
-    milvus::engine::meta::TableSchema table_info = BuildTableSchema();
+    milvus::engine::meta::CollectionSchema table_info = BuildTableSchema();
     auto stat = db_->CreateTable(table_info);
     ASSERT_TRUE(stat.ok());
 
@@ -1190,7 +1190,7 @@ TEST_F(DBTest2, GET_VECTOR_NON_EXISTING_TABLE) {
 }
 
 TEST_F(DBTest2, GET_VECTOR_BY_ID_TEST) {
-    milvus::engine::meta::TableSchema table_info = BuildTableSchema();
+    milvus::engine::meta::CollectionSchema table_info = BuildTableSchema();
     auto stat = db_->CreateTable(table_info);
     ASSERT_TRUE(stat.ok());
 
@@ -1220,7 +1220,7 @@ TEST_F(DBTest2, GET_VECTOR_BY_ID_TEST) {
 }
 
 TEST_F(DBTest2, GET_VECTOR_IDS_TEST) {
-    milvus::engine::meta::TableSchema table_schema = BuildTableSchema();
+    milvus::engine::meta::CollectionSchema table_schema = BuildTableSchema();
     auto stat = db_->CreateTable(table_schema);
     ASSERT_TRUE(stat.ok());
 
@@ -1279,7 +1279,7 @@ TEST_F(DBTest2, INSERT_DUPLICATE_ID) {
     options.wal_enable_ = false;
     db_ = milvus::engine::DBFactory::Build(options);
 
-    milvus::engine::meta::TableSchema table_schema = BuildTableSchema();
+    milvus::engine::meta::CollectionSchema table_schema = BuildTableSchema();
     auto stat = db_->CreateTable(table_schema);
     ASSERT_TRUE(stat.ok());
 
@@ -1300,7 +1300,7 @@ TEST_F(DBTest2, INSERT_DUPLICATE_ID) {
 
 /*
 TEST_F(DBTest2, SEARCH_WITH_DIFFERENT_INDEX) {
-    milvus::engine::meta::TableSchema table_info = BuildTableSchema();
+    milvus::engine::meta::CollectionSchema table_info = BuildTableSchema();
     // table_info.index_file_size_ = 1 * milvus::engine::M;
     auto stat = db_->CreateTable(table_info);
 

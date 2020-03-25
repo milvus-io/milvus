@@ -44,13 +44,13 @@ class DB {
     Stop() = 0;
 
     virtual Status
-    CreateTable(meta::TableSchema& table_schema_) = 0;
+    CreateTable(meta::CollectionSchema& table_schema_) = 0;
 
     virtual Status
     DropTable(const std::string& collection_id) = 0;
 
     virtual Status
-    DescribeTable(meta::TableSchema& table_schema_) = 0;
+    DescribeTable(meta::CollectionSchema& table_schema_) = 0;
 
     virtual Status
     HasTable(const std::string& collection_id, bool& has_or_not_) = 0;
@@ -59,7 +59,7 @@ class DB {
     HasNativeTable(const std::string& collection_id, bool& has_or_not_) = 0;
 
     virtual Status
-    AllTables(std::vector<meta::TableSchema>& table_schema_array) = 0;
+    AllTables(std::vector<meta::CollectionSchema>& table_schema_array) = 0;
 
     virtual Status
     GetTableInfo(const std::string& collection_id, TableInfo& table_info) = 0;
@@ -84,7 +84,7 @@ class DB {
     DropPartitionByTag(const std::string& collection_id, const std::string& partition_tag) = 0;
 
     virtual Status
-    ShowPartitions(const std::string& collection_id, std::vector<meta::TableSchema>& partition_schema_array) = 0;
+    ShowPartitions(const std::string& collection_id, std::vector<meta::CollectionSchema>& partition_schema_array) = 0;
 
     virtual Status
     InsertVectors(const std::string& collection_id, const std::string& partition_tag, VectorsData& vectors) = 0;

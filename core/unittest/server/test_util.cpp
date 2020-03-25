@@ -437,7 +437,7 @@ TEST(ValidationUtilTest, VALIDATE_INDEX_TEST) {
 }
 
 TEST(ValidationUtilTest, VALIDATE_INDEX_PARAMS_TEST) {
-    milvus::engine::meta::TableSchema table_schema;
+    milvus::engine::meta::CollectionSchema table_schema;
     table_schema.dimension_ = 64;
     milvus::json json_params = {};
 
@@ -578,7 +578,7 @@ TEST(ValidationUtilTest, VALIDATE_INDEX_PARAMS_TEST) {
 
 TEST(ValidationUtilTest, VALIDATE_SEARCH_PARAMS_TEST) {
     int64_t topk = 10;
-    milvus::engine::meta::TableSchema table_schema;
+    milvus::engine::meta::CollectionSchema table_schema;
     table_schema.dimension_ = 64;
 
     milvus::json json_params = {};

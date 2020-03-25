@@ -51,13 +51,13 @@ class TestWalMeta : public SqliteMetaImpl {
     }
 
     Status
-    CreateTable(TableSchema& table_schema) override {
+    CreateTable(CollectionSchema& table_schema) override {
         tables_.push_back(table_schema);
         return Status::OK();
     }
 
     Status
-    AllTables(std::vector<TableSchema>& table_schema_array) override {
+    AllTables(std::vector<CollectionSchema>& table_schema_array) override {
         table_schema_array = tables_;
         return Status::OK();
     }
@@ -75,7 +75,7 @@ class TestWalMeta : public SqliteMetaImpl {
     }
 
  private:
-    std::vector<TableSchema> tables_;
+    std::vector<CollectionSchema> tables_;
     uint64_t global_lsn_ = 0;
 };
 
@@ -85,7 +85,7 @@ class TestWalMetaError : public SqliteMetaImpl {
     }
 
     Status
-    AllTables(std::vector<TableSchema>& table_schema_array) override {
+    AllTables(std::vector<CollectionSchema>& table_schema_array) override {
         return Status(DB_ERROR, "error");
     }
 };
@@ -417,17 +417,17 @@ TEST(WalTest, MANAGER_INIT_TEST) {
     milvus::engine::DBMetaOptions opt = {WAL_GTEST_PATH};
     milvus::engine::meta::MetaPtr meta = std::make_shared<milvus::engine::meta::TestWalMeta>(opt);
 
-    milvus::engine::meta::TableSchema table_schema_1;
+    milvus::engine::meta::CollectionSchema table_schema_1;
     table_schema_1.collection_id_ = "table1";
     table_schema_1.flush_lsn_ = (uint64_t)1 << 32 | 60;
     meta->CreateTable(table_schema_1);
 
-    milvus::engine::meta::TableSchema table_schema_2;
+    milvus::engine::meta::CollectionSchema table_schema_2;
     table_schema_2.collection_id_ = "table2";
     table_schema_2.flush_lsn_ = (uint64_t)1 << 32 | 20;
     meta->CreateTable(table_schema_2);
 
-    milvus::engine::meta::TableSchema table_schema_3;
+    milvus::engine::meta::CollectionSchema table_schema_3;
     table_schema_3.collection_id_ = "table3";
     table_schema_3.flush_lsn_ = (uint64_t)2 << 32 | 40;
     meta->CreateTable(table_schema_3);
@@ -463,7 +463,7 @@ TEST(WalTest, MANAGER_APPEND_FAILED) {
     milvus::engine::DBMetaOptions opt = {WAL_GTEST_PATH};
     milvus::engine::meta::MetaPtr meta = std::make_shared<milvus::engine::meta::TestWalMeta>(opt);
 
-    milvus::engine::meta::TableSchema schema;
+    milvus::engine::meta::CollectionSchema schema;
     schema.collection_id_ = "table1";
     schema.flush_lsn_ = 0;
     meta->CreateTable(schema);
@@ -506,7 +506,7 @@ TEST(WalTest, MANAGER_RECOVERY_TEST) {
     manager = std::make_shared<milvus::engine::wal::WalManager>(wal_config);
     ASSERT_EQ(manager->Init(meta), milvus::WAL_SUCCESS);
 
-    milvus::engine::meta::TableSchema schema;
+    milvus::engine::meta::CollectionSchema schema;
     schema.collection_id_ = "collection";
     schema.flush_lsn_ = 0;
     meta->CreateTable(schema);

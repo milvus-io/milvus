@@ -74,7 +74,7 @@ CreateTableRequest::OnExecute() {
         rc.RecordSection("check validation");
 
         // step 2: construct collection schema
-        engine::meta::TableSchema table_info;
+        engine::meta::CollectionSchema table_info;
         table_info.collection_id_ = collection_name_;
         table_info.dimension_ = static_cast<uint16_t>(dimension_);
         table_info.index_file_size_ = index_file_size_;

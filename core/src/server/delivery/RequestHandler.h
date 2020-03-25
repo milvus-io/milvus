@@ -71,7 +71,7 @@ class RequestHandler {
 
     Status
     DescribeTable(const std::shared_ptr<Context>& context, const std::string& collection_name,
-                  TableSchema& table_schema);
+                  CollectionSchema& table_schema);
 
     Status
     CountTable(const std::shared_ptr<Context>& context, const std::string& collection_name, int64_t& count);

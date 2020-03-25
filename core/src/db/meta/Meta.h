@@ -43,16 +43,16 @@ class Meta {
     virtual ~Meta() = default;
 
     virtual Status
-    CreateTable(TableSchema& table_schema) = 0;
+    CreateTable(CollectionSchema& table_schema) = 0;
 
     virtual Status
-    DescribeTable(TableSchema& table_schema) = 0;
+    DescribeTable(CollectionSchema& table_schema) = 0;
 
     virtual Status
     HasTable(const std::string& collection_id, bool& has_or_not) = 0;
 
     virtual Status
-    AllTables(std::vector<TableSchema>& table_schema_array) = 0;
+    AllTables(std::vector<CollectionSchema>& table_schema_array) = 0;
 
     virtual Status
     UpdateTableFlag(const std::string& collection_id, int64_t flag) = 0;
@@ -110,7 +110,7 @@ class Meta {
     DropPartition(const std::string& partition_name) = 0;
 
     virtual Status
-    ShowPartitions(const std::string& collection_name, std::vector<meta::TableSchema>& partition_schema_array) = 0;
+    ShowPartitions(const std::string& collection_name, std::vector<meta::CollectionSchema>& partition_schema_array) = 0;
 
     virtual Status
     GetPartitionName(const std::string& collection_name, const std::string& tag, std::string& partition_name) = 0;

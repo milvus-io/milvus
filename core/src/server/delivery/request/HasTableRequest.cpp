@@ -54,7 +54,7 @@ HasTableRequest::OnExecute() {
 
         // only process root collection, ignore partition collection
         if (has_table_) {
-            engine::meta::TableSchema table_schema;
+            engine::meta::CollectionSchema table_schema;
             table_schema.collection_id_ = collection_name_;
             status = DBWrapper::DB()->DescribeTable(table_schema);
             if (!table_schema.owner_table_.empty()) {

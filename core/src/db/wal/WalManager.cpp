@@ -61,7 +61,7 @@ WalManager::Init(const meta::MetaPtr& meta) {
     if (meta != nullptr) {
         meta->GetGlobalLastLSN(recovery_start);
 
-        std::vector<meta::TableSchema> table_schema_array;
+        std::vector<meta::CollectionSchema> table_schema_array;
         auto status = meta->AllTables(table_schema_array);
         if (!status.ok()) {
             return WAL_META_ERROR;

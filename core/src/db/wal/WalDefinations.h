@@ -22,7 +22,7 @@ namespace milvus {
 namespace engine {
 namespace wal {
 
-using TableSchemaPtr = std::shared_ptr<milvus::engine::meta::TableSchema>;
+using TableSchemaPtr = std::shared_ptr<milvus::engine::meta::CollectionSchema>;
 using TableMetaPtr = std::shared_ptr<std::unordered_map<std::string, TableSchemaPtr> >;
 
 #define UNIT_MB (1024 * 1024)

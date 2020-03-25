@@ -180,8 +180,8 @@ ValidationUtil::ValidateTableIndexType(int32_t index_type) {
 }
 
 Status
-ValidationUtil::ValidateIndexParams(const milvus::json& index_params, const engine::meta::TableSchema& table_schema,
-                                    int32_t index_type) {
+ValidationUtil::ValidateIndexParams(const milvus::json& index_params,
+                                    const engine::meta::CollectionSchema& table_schema, int32_t index_type) {
     switch (index_type) {
         case (int32_t)engine::EngineType::FAISS_IDMAP:
         case (int32_t)engine::EngineType::FAISS_BIN_IDMAP: {
@@ -270,8 +270,8 @@ ValidationUtil::ValidateIndexParams(const milvus::json& index_params, const engi
 }
 
 Status
-ValidationUtil::ValidateSearchParams(const milvus::json& search_params, const engine::meta::TableSchema& table_schema,
-                                     int64_t topk) {
+ValidationUtil::ValidateSearchParams(const milvus::json& search_params,
+                                     const engine::meta::CollectionSchema& table_schema, int64_t topk) {
     switch (table_schema.engine_type_) {
         case (int32_t)engine::EngineType::FAISS_IDMAP:
         case (int32_t)engine::EngineType::FAISS_BIN_IDMAP: {
@@ -307,7 +307,8 @@ ValidationUtil::ValidateSearchParams(const milvus::json& search_params, const en
 }
 
 Status
-ValidationUtil::ValidateVectorData(const engine::VectorsData& vectors, const engine::meta::TableSchema& table_schema) {
+ValidationUtil::ValidateVectorData(const engine::VectorsData& vectors,
+                                   const engine::meta::CollectionSchema& table_schema) {
     if (vectors.float_data_.empty() && vectors.binary_data_.empty()) {
         return Status(SERVER_INVALID_ROWRECORD_ARRAY,
                       "The vector array is empty. Make sure you have entered vector records.");

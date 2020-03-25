@@ -40,7 +40,7 @@ struct EnvironmentSchema {
     uint64_t global_lsn_ = 0;
 };  // EnvironmentSchema
 
-struct TableSchema {
+struct CollectionSchema {
     typedef enum {
         NORMAL,
         TO_DELETE,
@@ -60,7 +60,7 @@ struct TableSchema {
     std::string partition_tag_;
     std::string version_ = CURRENT_VERSION;
     uint64_t flush_lsn_ = 0;
-};  // TableSchema
+};  // CollectionSchema
 
 struct SegmentSchema {
     typedef enum {

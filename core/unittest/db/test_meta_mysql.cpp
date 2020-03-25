@@ -32,7 +32,7 @@ TEST_F(MySqlMetaTest, TABLE_TEST) {
     auto collection_id = "meta_test_table";
     fiu_init(0);
 
-    milvus::engine::meta::TableSchema collection;
+    milvus::engine::meta::CollectionSchema collection;
     collection.collection_id_ = collection_id;
     auto status = impl_->CreateTable(collection);
     ASSERT_TRUE(status.ok());
@@ -131,7 +131,7 @@ TEST_F(MySqlMetaTest, TABLE_FILE_TEST) {
     ASSERT_TRUE(status.ok());
     ASSERT_EQ(size, 0);
 
-    milvus::engine::meta::TableSchema collection;
+    milvus::engine::meta::CollectionSchema collection;
     collection.collection_id_ = collection_id;
     collection.dimension_ = 256;
     status = impl_->CreateTable(collection);
@@ -281,7 +281,7 @@ TEST_F(MySqlMetaTest, TABLE_FILE_TEST) {
 TEST_F(MySqlMetaTest, TABLE_FILE_ROW_COUNT_TEST) {
     auto collection_id = "row_count_test_table";
 
-    milvus::engine::meta::TableSchema collection;
+    milvus::engine::meta::CollectionSchema collection;
     collection.collection_id_ = collection_id;
     collection.dimension_ = 256;
     auto status = impl_->CreateTable(collection);
@@ -335,7 +335,7 @@ TEST_F(MySqlMetaTest, ARCHIVE_TEST_DAYS) {
 
     auto collection_id = "meta_test_table";
 
-    milvus::engine::meta::TableSchema collection;
+    milvus::engine::meta::CollectionSchema collection;
     collection.collection_id_ = collection_id;
     auto status = impl.CreateTable(collection);
 
@@ -428,11 +428,11 @@ TEST_F(MySqlMetaTest, ARCHIVE_TEST_DISK) {
     milvus::engine::meta::MySQLMetaImpl impl(options, mode);
     auto collection_id = "meta_test_group";
 
-    milvus::engine::meta::TableSchema collection;
+    milvus::engine::meta::CollectionSchema collection;
     collection.collection_id_ = collection_id;
     auto status = impl.CreateTable(collection);
 
-    milvus::engine::meta::TableSchema table_schema;
+    milvus::engine::meta::CollectionSchema table_schema;
     table_schema.collection_id_ = "";
     status = impl.CreateTable(table_schema);
 
@@ -481,7 +481,7 @@ TEST_F(MySqlMetaTest, ARCHIVE_TEST_DISK) {
 TEST_F(MySqlMetaTest, INVALID_INITILIZE_TEST) {
     fiu_init(0);
     auto collection_id = "meta_test_group";
-    milvus::engine::meta::TableSchema collection;
+    milvus::engine::meta::CollectionSchema collection;
     collection.collection_id_ = collection_id;
     milvus::engine::DBMetaOptions meta = GetOptions().meta_;
     {
@@ -530,7 +530,7 @@ TEST_F(MySqlMetaTest, TABLE_FILES_TEST) {
     auto collection_id = "meta_test_group";
     fiu_init(0);
 
-    milvus::engine::meta::TableSchema collection;
+    milvus::engine::meta::CollectionSchema collection;
     collection.collection_id_ = collection_id;
     auto status = impl_->CreateTable(collection);
 
@@ -741,7 +741,7 @@ TEST_F(MySqlMetaTest, INDEX_TEST) {
     auto collection_id = "index_test";
     fiu_init(0);
 
-    milvus::engine::meta::TableSchema collection;
+    milvus::engine::meta::CollectionSchema collection;
     collection.collection_id_ = collection_id;
     auto status = impl_->CreateTable(collection);
 
@@ -779,7 +779,7 @@ TEST_F(MySqlMetaTest, INDEX_TEST) {
     ASSERT_FALSE(status.ok());
     fiu_disable("MySQLMetaImpl.UpdateTableFlag.throw_exception");
 
-    milvus::engine::meta::TableSchema table_info;
+    milvus::engine::meta::CollectionSchema table_info;
     table_info.collection_id_ = collection_id;
     status = impl_->DescribeTable(table_info);
     ASSERT_EQ(table_info.flag_, flag);

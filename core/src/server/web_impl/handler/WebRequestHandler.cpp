@@ -163,7 +163,7 @@ WebRequestHandler::ParsePartitionStat(const milvus::server::PartitionStat& par_s
 
 Status
 WebRequestHandler::IsBinaryTable(const std::string& collection_name, bool& bin) {
-    TableSchema schema;
+    CollectionSchema schema;
     auto status = request_handler_.DescribeTable(context_ptr_, collection_name, schema);
     if (status.ok()) {
         auto metric = engine::MetricType(schema.metric_type_);
@@ -208,7 +208,7 @@ WebRequestHandler::CopyRecordsFromJson(const nlohmann::json& json, engine::Vecto
 ///////////////////////// WebRequestHandler methods ///////////////////////////////////////
 Status
 WebRequestHandler::GetTableMetaInfo(const std::string& collection_name, nlohmann::json& json_out) {
-    TableSchema schema;
+    CollectionSchema schema;
     auto status = request_handler_.DescribeTable(context_ptr_, collection_name, schema);
     if (!status.ok()) {
         return status;

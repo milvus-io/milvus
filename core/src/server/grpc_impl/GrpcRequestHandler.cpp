@@ -481,7 +481,7 @@ GrpcRequestHandler::DescribeTable(::grpc::ServerContext* context, const ::milvus
                                   ::milvus::grpc::TableSchema* response) {
     CHECK_NULLPTR_RETURN(request);
 
-    TableSchema table_schema;
+    CollectionSchema table_schema;
     Status status = request_handler_.DescribeTable(context_map_[context], request->table_name(), table_schema);
     response->set_table_name(table_schema.collection_name_);
     response->set_dimension(table_schema.dimension_);

@@ -32,16 +32,16 @@ class MySQLMetaImpl : public Meta {
     ~MySQLMetaImpl();
 
     Status
-    CreateTable(TableSchema& table_schema) override;
+    CreateTable(CollectionSchema& table_schema) override;
 
     Status
-    DescribeTable(TableSchema& table_schema) override;
+    DescribeTable(CollectionSchema& table_schema) override;
 
     Status
     HasTable(const std::string& collection_id, bool& has_or_not) override;
 
     Status
-    AllTables(std::vector<TableSchema>& table_schema_array) override;
+    AllTables(std::vector<CollectionSchema>& table_schema_array) override;
 
     Status
     DropTable(const std::string& collection_id) override;
@@ -100,7 +100,8 @@ class MySQLMetaImpl : public Meta {
     DropPartition(const std::string& partition_name) override;
 
     Status
-    ShowPartitions(const std::string& collection_id, std::vector<meta::TableSchema>& partition_schema_array) override;
+    ShowPartitions(const std::string& collection_id,
+                   std::vector<meta::CollectionSchema>& partition_schema_array) override;
 
     Status
     GetPartitionName(const std::string& collection_id, const std::string& tag, std::string& partition_name) override;
