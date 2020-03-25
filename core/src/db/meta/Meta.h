@@ -103,17 +103,17 @@ class Meta {
     DropTableIndex(const std::string& collection_id) = 0;
 
     virtual Status
-    CreatePartition(const std::string& table_name, const std::string& partition_name, const std::string& tag,
+    CreatePartition(const std::string& collection_name, const std::string& partition_name, const std::string& tag,
                     uint64_t lsn) = 0;
 
     virtual Status
     DropPartition(const std::string& partition_name) = 0;
 
     virtual Status
-    ShowPartitions(const std::string& table_name, std::vector<meta::TableSchema>& partition_schema_array) = 0;
+    ShowPartitions(const std::string& collection_name, std::vector<meta::TableSchema>& partition_schema_array) = 0;
 
     virtual Status
-    GetPartitionName(const std::string& table_name, const std::string& tag, std::string& partition_name) = 0;
+    GetPartitionName(const std::string& collection_name, const std::string& tag, std::string& partition_name) = 0;
 
     virtual Status
     FilesToSearch(const std::string& collection_id, TableFilesSchema& files) = 0;

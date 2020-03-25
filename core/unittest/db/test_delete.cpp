@@ -37,8 +37,8 @@ std::string
 GetTableName() {
     auto now = std::chrono::system_clock::now();
     auto micros = std::chrono::duration_cast<std::chrono::microseconds>(now.time_since_epoch()).count();
-    static std::string table_name = std::to_string(micros);
-    return table_name;
+    static std::string collection_name= std::to_string(micros);
+    return collection_name;
 }
 
 milvus::engine::meta::TableSchema

@@ -23,26 +23,26 @@ namespace milvus {
 namespace server {
 
 DropPartitionRequest::DropPartitionRequest(const std::shared_ptr<milvus::server::Context>& context,
-                                           const std::string& table_name, const std::string& tag)
-    : BaseRequest(context, BaseRequest::kDropPartition), table_name_(table_name), tag_(tag) {
+                                           const std::string& collection_name, const std::string& tag)
+    : BaseRequest(context, BaseRequest::kDropPartition), collection_name_(collection_name), tag_(tag) {
 }
 
 BaseRequestPtr
-DropPartitionRequest::Create(const std::shared_ptr<milvus::server::Context>& context, const std::string& table_name,
+DropPartitionRequest::Create(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name,
                              const std::string& tag) {
-    return std::shared_ptr<BaseRequest>(new DropPartitionRequest(context, table_name, tag));
+    return std::shared_ptr<BaseRequest>(new DropPartitionRequest(context, collection_name, tag));
 }
 
 Status
 DropPartitionRequest::OnExecute() {
-    std::string hdr = "DropPartitionRequest(collection=" + table_name_ + ", partition_tag=" + tag_ + ")";
+    std::string hdr = "DropPartitionRequest(collection=" + collection_name_ + ", partition_tag=" + tag_ + ")";
     TimeRecorderAuto rc(hdr);
 
-    std::string table_name = table_name_;
+    std::string collection_name = collection_name_;
     std::string partition_tag = tag_;
 
     // step 1: check collection name
-    auto status = ValidationUtil::ValidateTableName(table_name);
+    auto status = ValidationUtil::ValidateCollectionName(collection_name);
     fiu_do_on("DropPartitionRequest.OnExecute.invalid_table_name",
               status = Status(milvus::SERVER_UNEXPECTED_ERROR, ""));
     if (!status.ok()) {
@@ -64,24 +64,24 @@ DropPartitionRequest::OnExecute() {
     // step 3: check collection
     // only process root collection, ignore partition collection
     engine::meta::TableSchema table_schema;
-    table_schema.collection_id_ = table_name_;
+    table_schema.collection_id_ = collection_name_;
     status = DBWrapper::DB()->DescribeTable(table_schema);
     if (!status.ok()) {
         if (status.code() == DB_NOT_FOUND) {
-            return Status(SERVER_TABLE_NOT_EXIST, TableNotExistMsg(table_name_));
+            return Status(SERVER_TABLE_NOT_EXIST, TableNotExistMsg(collection_name_));
         } else {
             return status;
         }
     } else {
         if (!table_schema.owner_table_.empty()) {
-            return Status(SERVER_INVALID_TABLE_NAME, TableNotExistMsg(table_name_));
+            return Status(SERVER_INVALID_TABLE_NAME, TableNotExistMsg(collection_name_));
         }
     }
 
     rc.RecordSection("check validation");
 
     // step 4: drop partition
-    return DBWrapper::DB()->DropPartitionByTag(table_name, partition_tag);
+    return DBWrapper::DB()->DropPartitionByTag(collection_name, partition_tag);
 }
 
 }  // namespace server

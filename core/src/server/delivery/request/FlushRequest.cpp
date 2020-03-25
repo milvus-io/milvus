@@ -27,20 +27,20 @@ namespace milvus {
 namespace server {
 
 FlushRequest::FlushRequest(const std::shared_ptr<milvus::server::Context>& context,
-                           const std::vector<std::string>& table_names)
-    : BaseRequest(context, BaseRequest::kFlush), table_names_(table_names) {
+                           const std::vector<std::string>& collection_names)
+    : BaseRequest(context, BaseRequest::kFlush), collection_names_(collection_names) {
 }
 
 BaseRequestPtr
 FlushRequest::Create(const std::shared_ptr<milvus::server::Context>& context,
-                     const std::vector<std::string>& table_names) {
-    return std::shared_ptr<BaseRequest>(new FlushRequest(context, table_names));
+                     const std::vector<std::string>& collection_names) {
+    return std::shared_ptr<BaseRequest>(new FlushRequest(context, collection_names));
 }
 
 Status
 FlushRequest::OnExecute() {
     std::string hdr = "FlushRequest flush tables: ";
-    for (auto& name : table_names_) {
+    for (auto& name : collection_names_) {
         hdr += name;
         hdr += ", ";
     }
@@ -49,7 +49,7 @@ FlushRequest::OnExecute() {
     Status status = Status::OK();
     SERVER_LOG_DEBUG << hdr;
 
-    for (auto& name : table_names_) {
+    for (auto& name : collection_names_) {
         // only process root collection, ignore partition collection
         engine::meta::TableSchema table_schema;
         table_schema.collection_id_ = name;

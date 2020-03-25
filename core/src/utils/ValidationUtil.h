@@ -30,7 +30,7 @@ class ValidationUtil {
 
  public:
     static Status
-    ValidateTableName(const std::string& table_name);
+    ValidateCollectionName(const std::string& collection_name);
 
     static Status
     ValidateTableDimension(int64_t dimension, int64_t metric_type);

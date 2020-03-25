@@ -25,31 +25,31 @@ namespace milvus {
 namespace server {
 
 CreateTableRequest::CreateTableRequest(const std::shared_ptr<milvus::server::Context>& context,
-                                       const std::string& table_name, int64_t dimension, int64_t index_file_size,
+                                       const std::string& collection_name, int64_t dimension, int64_t index_file_size,
                                        int64_t metric_type)
     : BaseRequest(context, BaseRequest::kCreateTable),
-      table_name_(table_name),
+      collection_name_(collection_name),
       dimension_(dimension),
       index_file_size_(index_file_size),
       metric_type_(metric_type) {
 }
 
 BaseRequestPtr
-CreateTableRequest::Create(const std::shared_ptr<milvus::server::Context>& context, const std::string& table_name,
+CreateTableRequest::Create(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name,
                            int64_t dimension, int64_t index_file_size, int64_t metric_type) {
     return std::shared_ptr<BaseRequest>(
-        new CreateTableRequest(context, table_name, dimension, index_file_size, metric_type));
+        new CreateTableRequest(context, collection_name, dimension, index_file_size, metric_type));
 }
 
 Status
 CreateTableRequest::OnExecute() {
     std::string hdr =
-        "CreateTableRequest(collection=" + table_name_ + ", dimension=" + std::to_string(dimension_) + ")";
+        "CreateTableRequest(collection=" + collection_name_ + ", dimension=" + std::to_string(dimension_) + ")";
     TimeRecorderAuto rc(hdr);
 
     try {
         // step 1: check arguments
-        auto status = ValidationUtil::ValidateTableName(table_name_);
+        auto status = ValidationUtil::ValidateCollectionName(collection_name_);
         if (!status.ok()) {
             return status;
         }
@@ -75,7 +75,7 @@ CreateTableRequest::OnExecute() {
 
         // step 2: construct collection schema
         engine::meta::TableSchema table_info;
-        table_info.collection_id_ = table_name_;
+        table_info.collection_id_ = collection_name_;
         table_info.dimension_ = static_cast<uint16_t>(dimension_);
         table_info.index_file_size_ = index_file_size_;
         table_info.metric_type_ = metric_type_;

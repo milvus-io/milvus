@@ -226,7 +226,7 @@ WebRequestHandler::GetTableMetaInfo(const std::string& collection_name, nlohmann
         return status;
     }
 
-    json_out["collection_name"] = schema.table_name_;
+    json_out["collection_name"] = schema.collection_name_;
     json_out["dimension"] = schema.dimension_;
     json_out["index_file_size"] = schema.index_file_size_;
     json_out["index"] = IndexMap.at(engine::EngineType(index_param.index_type_));
@@ -1028,7 +1028,7 @@ WebRequestHandler::DropTable(const OString& collection_name) {
  */
 
 StatusDto::ObjectWrapper
-WebRequestHandler::CreateIndex(const OString& table_name, const OString& body) {
+WebRequestHandler::CreateIndex(const OString& collection_name, const OString& body) {
     try {
         auto request_json = nlohmann::json::parse(body->std_str());
         if (!request_json.contains("index_type")) {
@@ -1043,7 +1043,7 @@ WebRequestHandler::CreateIndex(const OString& table_name, const OString& body) {
         if (!request_json.contains("params")) {
             RETURN_STATUS_DTO(BODY_FIELD_LOSS, "Field \'params\' is required")
         }
-        auto status = request_handler_.CreateIndex(context_ptr_, table_name->std_str(), index, request_json["params"]);
+        auto status = request_handler_.CreateIndex(context_ptr_, collection_name->std_str(), index, request_json["params"]);
         ASSIGN_RETURN_STATUS_DTO(status);
     } catch (nlohmann::detail::parse_error& e) {
         RETURN_STATUS_DTO(BODY_PARSE_FAIL, e.what())

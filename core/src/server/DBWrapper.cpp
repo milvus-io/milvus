@@ -247,9 +247,9 @@ DBWrapper::PreloadTables(const std::string& preload_tables) {
             }
         }
     } else {
-        std::vector<std::string> table_names;
-        StringHelpFunctions::SplitStringByDelimeter(preload_tables, ",", table_names);
-        for (auto& name : table_names) {
+        std::vector<std::string> collection_names;
+        StringHelpFunctions::SplitStringByDelimeter(preload_tables, ",", collection_names);
+        for (auto& name : collection_names) {
             auto status = db_->PreloadTable(name);
             if (!status.ok()) {
                 return status;

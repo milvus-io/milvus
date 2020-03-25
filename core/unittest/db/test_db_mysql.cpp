@@ -312,16 +312,16 @@ TEST_F(MySqlDBTest, PARTITION_TEST) {
     // create partition and insert data
     const int64_t PARTITION_COUNT = 5;
     const int64_t INSERT_BATCH = 2000;
-    std::string table_name = TABLE_NAME;
+    std::string collection_name = TABLE_NAME;
     for (int64_t i = 0; i < PARTITION_COUNT; i++) {
         std::string partition_tag = std::to_string(i);
-        std::string partition_name = table_name + "_" + partition_tag;
-        stat = db_->CreatePartition(table_name, partition_name, partition_tag);
+        std::string partition_name = collection_name + "_" + partition_tag;
+        stat = db_->CreatePartition(collection_name, partition_name, partition_tag);
         ASSERT_TRUE(stat.ok());
 
         fiu_init(0);
         FIU_ENABLE_FIU("MySQLMetaImpl.CreatePartition.aleady_exist");
-        stat = db_->CreatePartition(table_name, partition_name, partition_tag);
+        stat = db_->CreatePartition(collection_name, partition_name, partition_tag);
         ASSERT_FALSE(stat.ok());
         fiu_disable("MySQLMetaImpl.CreatePartition.aleady_exist");
 
@@ -330,7 +330,7 @@ TEST_F(MySqlDBTest, PARTITION_TEST) {
         ASSERT_FALSE(stat.ok());
 
         // not allow duplicated partition
-        stat = db_->CreatePartition(table_name, partition_name, partition_tag);
+        stat = db_->CreatePartition(collection_name, partition_name, partition_tag);
         ASSERT_FALSE(stat.ok());
 
         milvus::engine::IDNumbers vector_ids;
@@ -342,20 +342,20 @@ TEST_F(MySqlDBTest, PARTITION_TEST) {
         milvus::engine::VectorsData xb;
         BuildVectors(INSERT_BATCH, i, xb);
 
-        db_->InsertVectors(table_name, partition_tag, xb);
+        db_->InsertVectors(collection_name, partition_tag, xb);
         ASSERT_EQ(vector_ids.size(), INSERT_BATCH);
     }
 
     // duplicated partition is not allowed
-    stat = db_->CreatePartition(table_name, "", "0");
+    stat = db_->CreatePartition(collection_name, "", "0");
     ASSERT_FALSE(stat.ok());
 
     std::vector<milvus::engine::meta::TableSchema> partition_schema_array;
-    stat = db_->ShowPartitions(table_name, partition_schema_array);
+    stat = db_->ShowPartitions(collection_name, partition_schema_array);
     ASSERT_TRUE(stat.ok());
     ASSERT_EQ(partition_schema_array.size(), PARTITION_COUNT);
     for (int64_t i = 0; i < PARTITION_COUNT; i++) {
-        ASSERT_EQ(partition_schema_array[i].collection_id_, table_name + "_" + std::to_string(i));
+        ASSERT_EQ(partition_schema_array[i].collection_id_, collection_name + "_" + std::to_string(i));
     }
 
     {  // build index
@@ -407,79 +407,79 @@ TEST_F(MySqlDBTest, PARTITION_TEST) {
     fiu_init(0);
     {
         //create partition with dummy name
-        stat = db_->CreatePartition(table_name, "", "6");
+        stat = db_->CreatePartition(collection_name, "", "6");
         ASSERT_TRUE(stat.ok());
 
         // ensure DescribeTable failed
         FIU_ENABLE_FIU("MySQLMetaImpl.DescribeTable.throw_exception");
-        stat = db_->CreatePartition(table_name, "", "7");
+        stat = db_->CreatePartition(collection_name, "", "7");
         ASSERT_FALSE(stat.ok());
         fiu_disable("MySQLMetaImpl.DescribeTable.throw_exception");
 
         //Drop partition will failed,since it firstly drop partition meta collection.
         FIU_ENABLE_FIU("MySQLMetaImpl.DropTable.null_connection");
-        stat = db_->DropPartition(table_name + "_5");
+        stat = db_->DropPartition(collection_name + "_5");
         //TODO(sjh): add assert expr, since DropPartion always return Status::OK() for now.
         //ASSERT_TRUE(stat.ok());
         fiu_disable("MySQLMetaImpl.DropTable.null_connection");
 
         std::vector<milvus::engine::meta::TableSchema> partition_schema_array;
-        stat = db_->ShowPartitions(table_name, partition_schema_array);
+        stat = db_->ShowPartitions(collection_name, partition_schema_array);
         ASSERT_TRUE(stat.ok());
         ASSERT_EQ(partition_schema_array.size(), PARTITION_COUNT + 1);
 
         FIU_ENABLE_FIU("MySQLMetaImpl.ShowPartitions.null_connection");
-        stat = db_->ShowPartitions(table_name, partition_schema_array);
+        stat = db_->ShowPartitions(collection_name, partition_schema_array);
         ASSERT_FALSE(stat.ok());
 
         FIU_ENABLE_FIU("MySQLMetaImpl.ShowPartitions.throw_exception");
-        stat = db_->ShowPartitions(table_name, partition_schema_array);
+        stat = db_->ShowPartitions(collection_name, partition_schema_array);
         ASSERT_FALSE(stat.ok());
 
         FIU_ENABLE_FIU("MySQLMetaImpl.DropTable.throw_exception");
-        stat = db_->DropPartition(table_name + "_4");
+        stat = db_->DropPartition(collection_name + "_4");
         fiu_disable("MySQLMetaImpl.DropTable.throw_exception");
 
-        stat = db_->DropPartition(table_name + "_0");
+        stat = db_->DropPartition(collection_name + "_0");
         ASSERT_TRUE(stat.ok());
     }
 
     {
         FIU_ENABLE_FIU("MySQLMetaImpl.GetPartitionName.null_connection");
-        stat = db_->DropPartitionByTag(table_name, "1");
+        stat = db_->DropPartitionByTag(collection_name, "1");
         ASSERT_FALSE(stat.ok());
         fiu_disable("MySQLMetaImpl.GetPartitionName.null_connection");
 
         FIU_ENABLE_FIU("MySQLMetaImpl.GetPartitionName.throw_exception");
-        stat = db_->DropPartitionByTag(table_name, "1");
+        stat = db_->DropPartitionByTag(collection_name, "1");
         ASSERT_FALSE(stat.ok());
         fiu_disable("MySQLMetaImpl.GetPartitionName.throw_exception");
 
-        stat = db_->DropPartitionByTag(table_name, "1");
+        stat = db_->DropPartitionByTag(collection_name, "1");
         ASSERT_TRUE(stat.ok());
 
-        stat = db_->CreatePartition(table_name, table_name + "_1", "1");
+        stat = db_->CreatePartition(collection_name, collection_name + "_1", "1");
         FIU_ENABLE_FIU("MySQLMetaImpl.DeleteTableFiles.null_connection");
-        stat = db_->DropPartition(table_name + "_1");
+        stat = db_->DropPartition(collection_name + "_1");
         fiu_disable("MySQLMetaImpl.DeleteTableFiles.null_connection");
 
         FIU_ENABLE_FIU("MySQLMetaImpl.DeleteTableFiles.throw_exception");
-        stat = db_->DropPartition(table_name + "_1");
+        stat = db_->DropPartition(collection_name + "_1");
         fiu_disable("MySQLMetaImpl.DeleteTableFiles.throw_exception");
     }
 
     {
         FIU_ENABLE_FIU("MySQLMetaImpl.DropTableIndex.null_connection");
-        stat = db_->DropIndex(table_name);
+        stat = db_->DropIndex(collection_name);
         ASSERT_FALSE(stat.ok());
         fiu_disable("MySQLMetaImpl.DropTableIndex.null_connection");
 
         FIU_ENABLE_FIU("MySQLMetaImpl.DropTableIndex.throw_exception");
-        stat = db_->DropIndex(table_name);
+        stat = db_->DropIndex(collection_name);
         ASSERT_FALSE(stat.ok());
         fiu_disable("MySQLMetaImpl.DropTableIndex.throw_exception");
 
-        stat = db_->DropIndex(table_name);
+        stat = db_->DropIndex(collection_name);
         ASSERT_TRUE(stat.ok());
     }
 }

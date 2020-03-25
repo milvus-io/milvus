@@ -91,7 +91,7 @@ class GrpcRequestHandler final : public ::milvus::grpc::MilvusService::Service, 
     // *
     // @brief This method is used to test collection existence.
     //
-    // @param TableName, collection name is going to be tested.
+    // @param CollectionName, collection name is going to be tested.
     //
     // @return BoolReply
     ::grpc::Status
@@ -100,7 +100,7 @@ class GrpcRequestHandler final : public ::milvus::grpc::MilvusService::Service, 
     // *
     // @brief This method is used to get collection schema.
     //
-    // @param TableName, target collection name.
+    // @param CollectionName, target collection name.
     //
     // @return TableSchema
     ::grpc::Status
@@ -109,7 +109,7 @@ class GrpcRequestHandler final : public ::milvus::grpc::MilvusService::Service, 
     // *
     // @brief This method is used to get collection schema.
     //
-    // @param TableName, target collection name.
+    // @param CollectionName, target collection name.
     //
     // @return TableRowCount
     ::grpc::Status
@@ -120,14 +120,14 @@ class GrpcRequestHandler final : public ::milvus::grpc::MilvusService::Service, 
     //
     // @param Command, dummy parameter.
     //
-    // @return TableNameList
+    // @return CollectionNameList
     ::grpc::Status
     ShowTables(::grpc::ServerContext* context, const ::milvus::grpc::Command* request,
                ::milvus::grpc::TableNameList* response) override;
     // *
     // @brief This method is used to get collection detail information.
     //
-    // @param TableName, target collection name.
+    // @param CollectionName, target collection name.
     //
     // @return TableInfo
     ::grpc::Status
@@ -137,9 +137,9 @@ class GrpcRequestHandler final : public ::milvus::grpc::MilvusService::Service, 
     // *
     // @brief This method is used to delete collection.
     //
-    // @param TableName, collection name is going to be deleted.
+    // @param CollectionName, collection name is going to be deleted.
     //
-    // @return TableNameList
+    // @return CollectionNameList
     ::grpc::Status
     DropTable(::grpc::ServerContext* context, const ::milvus::grpc::TableName* request,
               ::milvus::grpc::Status* response) override;
@@ -155,7 +155,7 @@ class GrpcRequestHandler final : public ::milvus::grpc::MilvusService::Service, 
     // *
     // @brief This method is used to describe index
     //
-    // @param TableName, target collection name.
+    // @param CollectionName, target collection name.
     //
     // @return IndexParam
     ::grpc::Status
@@ -164,7 +164,7 @@ class GrpcRequestHandler final : public ::milvus::grpc::MilvusService::Service, 
     // *
     // @brief This method is used to drop index
     //
-    // @param TableName, target collection name.
+    // @param CollectionName, target collection name.
     //
     // @return Status
     ::grpc::Status
@@ -182,7 +182,7 @@ class GrpcRequestHandler final : public ::milvus::grpc::MilvusService::Service, 
     // *
     // @brief This method is used to show partition information
     //
-    // @param TableName, target collection name.
+    // @param CollectionName, target collection name.
     //
     // @return PartitionList
     ::grpc::Status
@@ -277,7 +277,7 @@ class GrpcRequestHandler final : public ::milvus::grpc::MilvusService::Service, 
     // *
     // @brief This method is used to preload collection
     //
-    // @param TableName, target collection name.
+    // @param CollectionName, target collection name.
     //
     // @return Status
     ::grpc::Status
@@ -296,7 +296,7 @@ class GrpcRequestHandler final : public ::milvus::grpc::MilvusService::Service, 
     // *
     // @brief This method is used to compact collection
     //
-    // @param TableName, target collection name.
+    // @param CollectionName, target collection name.
     //
     // @return Status
     ::grpc::Status

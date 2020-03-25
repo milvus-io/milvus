@@ -23,14 +23,14 @@ namespace server {
 class SearchRequest : public BaseRequest {
  public:
     static BaseRequestPtr
-    Create(const std::shared_ptr<milvus::server::Context>& context, const std::string& table_name,
+    Create(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name,
            const engine::VectorsData& vectors, int64_t topk, const milvus::json& extra_params,
            const std::vector<std::string>& partition_list, const std::vector<std::string>& file_id_list,
            TopKQueryResult& result);
 
     const std::string&
-    TableName() const {
-        return table_name_;
+    CollectionName() const {
+        return collection_name_;
     }
 
     const engine::VectorsData&
@@ -64,7 +64,7 @@ class SearchRequest : public BaseRequest {
     }
 
  protected:
-    SearchRequest(const std::shared_ptr<milvus::server::Context>& context, const std::string& table_name,
+    SearchRequest(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name,
                   const engine::VectorsData& vectors, int64_t topk, const milvus::json& extra_params,
                   const std::vector<std::string>& partition_list, const std::vector<std::string>& file_id_list,
                   TopKQueryResult& result);
@@ -73,7 +73,7 @@ class SearchRequest : public BaseRequest {
     OnExecute() override;
 
  private:
-    const std::string table_name_;
+    const std::string collection_name_;
     const engine::VectorsData& vectors_data_;
     int64_t topk_;
     milvus::json extra_params_;

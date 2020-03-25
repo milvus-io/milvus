@@ -26,47 +26,47 @@
 namespace milvus {
 namespace server {
 
-CompactRequest::CompactRequest(const std::shared_ptr<milvus::server::Context>& context, const std::string& table_name)
-    : BaseRequest(context, BaseRequest::kCompact), table_name_(table_name) {
+CompactRequest::CompactRequest(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name)
+    : BaseRequest(context, BaseRequest::kCompact), collection_name_(collection_name) {
 }
 
 BaseRequestPtr
-CompactRequest::Create(const std::shared_ptr<milvus::server::Context>& context, const std::string& table_name) {
-    return std::shared_ptr<BaseRequest>(new CompactRequest(context, table_name));
+CompactRequest::Create(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name) {
+    return std::shared_ptr<BaseRequest>(new CompactRequest(context, collection_name));
 }
 
 Status
 CompactRequest::OnExecute() {
     try {
-        std::string hdr = "CompactRequest(collection=" + table_name_ + ")";
+        std::string hdr = "CompactRequest(collection=" + collection_name_ + ")";
         TimeRecorderAuto rc(hdr);
 
         // step 1: check arguments
-        auto status = ValidationUtil::ValidateTableName(table_name_);
+        auto status = ValidationUtil::ValidateCollectionName(collection_name_);
         if (!status.ok()) {
             return status;
         }
 
         // only process root collection, ignore partition collection
         engine::meta::TableSchema table_schema;
-        table_schema.collection_id_ = table_name_;
+        table_schema.collection_id_ = collection_name_;
         status = DBWrapper::DB()->DescribeTable(table_schema);
         if (!status.ok()) {
             if (status.code() == DB_NOT_FOUND) {
-                return Status(SERVER_TABLE_NOT_EXIST, TableNotExistMsg(table_name_));
+                return Status(SERVER_TABLE_NOT_EXIST, TableNotExistMsg(collection_name_));
             } else {
                 return status;
             }
         } else {
             if (!table_schema.owner_table_.empty()) {
-                return Status(SERVER_INVALID_TABLE_NAME, TableNotExistMsg(table_name_));
+                return Status(SERVER_INVALID_TABLE_NAME, TableNotExistMsg(collection_name_));
             }
         }
 
         rc.RecordSection("check validation");
 
         // step 2: check collection existence
-        status = DBWrapper::DB()->Compact(table_name_);
+        status = DBWrapper::DB()->Compact(collection_name_);
         if (!status.ok()) {
             return status;
         }

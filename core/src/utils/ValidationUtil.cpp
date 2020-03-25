@@ -98,33 +98,33 @@ CheckParameterExistence(const milvus::json& json_params, const std::string& para
 }  // namespace
 
 Status
-ValidationUtil::ValidateTableName(const std::string& table_name) {
+ValidationUtil::ValidateCollectionName(const std::string& collection_name) {
     // Collection name shouldn't be empty.
-    if (table_name.empty()) {
+    if (collection_name.empty()) {
         std::string msg = "Collection name should not be empty.";
         SERVER_LOG_ERROR << msg;
         return Status(SERVER_INVALID_TABLE_NAME, msg);
     }
 
-    std::string invalid_msg = "Invalid collection name: " + table_name + ". ";
+    std::string invalid_msg = "Invalid collection name: " + collection_name + ". ";
     // Collection name size shouldn't exceed 16384.
-    if (table_name.size() > TABLE_NAME_SIZE_LIMIT) {
+    if (collection_name.size() > TABLE_NAME_SIZE_LIMIT) {
         std::string msg = invalid_msg + "The length of a collection name must be less than 255 characters.";
         SERVER_LOG_ERROR << msg;
         return Status(SERVER_INVALID_TABLE_NAME, msg);
     }
 
     // Collection name first character should be underscore or character.
-    char first_char = table_name[0];
+    char first_char = collection_name[0];
     if (first_char != '_' && std::isalpha(first_char) == 0) {
         std::string msg = invalid_msg + "The first character of a collection name must be an underscore or letter.";
         SERVER_LOG_ERROR << msg;
         return Status(SERVER_INVALID_TABLE_NAME, msg);
     }
 
-    int64_t table_name_size = table_name.size();
+    int64_t table_name_size = collection_name.size();
     for (int64_t i = 1; i < table_name_size; ++i) {
-        char name_char = table_name[i];
+        char name_char = collection_name[i];
         if (name_char != '_' && std::isalnum(name_char) == 0) {
             std::string msg = invalid_msg + "Collection name can only contain numbers, letters, and underscores.";
             SERVER_LOG_ERROR << msg;

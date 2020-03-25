@@ -23,23 +23,23 @@ namespace milvus {
 namespace server {
 
 ShowPartitionsRequest::ShowPartitionsRequest(const std::shared_ptr<milvus::server::Context>& context,
-                                             const std::string& table_name, std::vector<PartitionParam>& partition_list)
-    : BaseRequest(context, BaseRequest::kShowPartitions), table_name_(table_name), partition_list_(partition_list) {
+                                             const std::string& collection_name, std::vector<PartitionParam>& partition_list)
+    : BaseRequest(context, BaseRequest::kShowPartitions), collection_name_(collection_name), partition_list_(partition_list) {
 }
 
 BaseRequestPtr
-ShowPartitionsRequest::Create(const std::shared_ptr<milvus::server::Context>& context, const std::string& table_name,
+ShowPartitionsRequest::Create(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name,
                               std::vector<PartitionParam>& partition_list) {
-    return std::shared_ptr<BaseRequest>(new ShowPartitionsRequest(context, table_name, partition_list));
+    return std::shared_ptr<BaseRequest>(new ShowPartitionsRequest(context, collection_name, partition_list));
 }
 
 Status
 ShowPartitionsRequest::OnExecute() {
-    std::string hdr = "ShowPartitionsRequest(collection=" + table_name_ + ")";
+    std::string hdr = "ShowPartitionsRequest(collection=" + collection_name_ + ")";
     TimeRecorderAuto rc(hdr);
 
     // step 1: check collection name
-    auto status = ValidationUtil::ValidateTableName(table_name_);
+    auto status = ValidationUtil::ValidateCollectionName(collection_name_);
     fiu_do_on("ShowPartitionsRequest.OnExecute.invalid_table_name",
               status = Status(milvus::SERVER_UNEXPECTED_ERROR, ""));
     if (!status.ok()) {
@@ -49,23 +49,23 @@ ShowPartitionsRequest::OnExecute() {
     // step 2: check collection existence
     // only process root collection, ignore partition collection
     engine::meta::TableSchema table_schema;
-    table_schema.collection_id_ = table_name_;
+    table_schema.collection_id_ = collection_name_;
     status = DBWrapper::DB()->DescribeTable(table_schema);
     if (!status.ok()) {
         if (status.code() == DB_NOT_FOUND) {
-            return Status(SERVER_TABLE_NOT_EXIST, TableNotExistMsg(table_name_));
+            return Status(SERVER_TABLE_NOT_EXIST, TableNotExistMsg(collection_name_));
         } else {
             return status;
         }
     } else {
         if (!table_schema.owner_table_.empty()) {
-            return Status(SERVER_INVALID_TABLE_NAME, TableNotExistMsg(table_name_));
+            return Status(SERVER_INVALID_TABLE_NAME, TableNotExistMsg(collection_name_));
         }
     }
 
     // step 3: get partitions
     std::vector<engine::meta::TableSchema> schema_array;
-    status = DBWrapper::DB()->ShowPartitions(table_name_, schema_array);
+    status = DBWrapper::DB()->ShowPartitions(collection_name_, schema_array);
     fiu_do_on("ShowPartitionsRequest.OnExecute.show_partition_fail",
               status = Status(milvus::SERVER_UNEXPECTED_ERROR, ""));
     if (!status.ok()) {
@@ -73,7 +73,7 @@ ShowPartitionsRequest::OnExecute() {
     }
 
     partition_list_.clear();
-    partition_list_.emplace_back(table_name_, milvus::engine::DEFAULT_PARTITON_TAG);
+    partition_list_.emplace_back(collection_name_, milvus::engine::DEFAULT_PARTITON_TAG);
     for (auto& schema : schema_array) {
         partition_list_.emplace_back(schema.owner_table_, schema.partition_tag_);
     }

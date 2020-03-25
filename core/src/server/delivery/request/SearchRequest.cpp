@@ -27,12 +27,12 @@
 namespace milvus {
 namespace server {
 
-SearchRequest::SearchRequest(const std::shared_ptr<milvus::server::Context>& context, const std::string& table_name,
+SearchRequest::SearchRequest(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name,
                              const engine::VectorsData& vectors, int64_t topk, const milvus::json& extra_params,
                              const std::vector<std::string>& partition_list,
                              const std::vector<std::string>& file_id_list, TopKQueryResult& result)
     : BaseRequest(context, BaseRequest::kSearch),
-      table_name_(table_name),
+      collection_name_(collection_name),
       vectors_data_(vectors),
       topk_(topk),
       extra_params_(extra_params),
@@ -42,12 +42,12 @@ SearchRequest::SearchRequest(const std::shared_ptr<milvus::server::Context>& con
 }
 
 BaseRequestPtr
-SearchRequest::Create(const std::shared_ptr<milvus::server::Context>& context, const std::string& table_name,
+SearchRequest::Create(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name,
                       const engine::VectorsData& vectors, int64_t topk, const milvus::json& extra_params,
                       const std::vector<std::string>& partition_list, const std::vector<std::string>& file_id_list,
                       TopKQueryResult& result) {
     return std::shared_ptr<BaseRequest>(
-        new SearchRequest(context, table_name, vectors, topk, extra_params, partition_list, file_id_list, result));
+        new SearchRequest(context, collection_name, vectors, topk, extra_params, partition_list, file_id_list, result));
 }
 
 Status
@@ -58,13 +58,13 @@ SearchRequest::OnExecute() {
         auto pre_query_ctx = context_->Child("Pre query");
 
         SERVER_LOG_DEBUG << "SearchRequest begin execute, extra_params=" << extra_params_.dump();
-        std::string hdr = "SearchRequest(collection=" + table_name_ + ", nq=" + std::to_string(vector_count) +
+        std::string hdr = "SearchRequest(collection=" + collection_name_ + ", nq=" + std::to_string(vector_count) +
                           ", k=" + std::to_string(topk_) + ")";
 
         TimeRecorder rc(hdr);
 
         // step 1: check collection name
-        auto status = ValidationUtil::ValidateTableName(table_name_);
+        auto status = ValidationUtil::ValidateCollectionName(collection_name_);
         if (!status.ok()) {
             return status;
         }
@@ -78,18 +78,18 @@ SearchRequest::OnExecute() {
         // step 3: check collection existence
         // only process root collection, ignore partition collection
         engine::meta::TableSchema table_schema;
-        table_schema.collection_id_ = table_name_;
+        table_schema.collection_id_ = collection_name_;
         status = DBWrapper::DB()->DescribeTable(table_schema);
         fiu_do_on("SearchRequest.OnExecute.describe_table_fail", status = Status(milvus::SERVER_UNEXPECTED_ERROR, ""));
         if (!status.ok()) {
             if (status.code() == DB_NOT_FOUND) {
-                return Status(SERVER_TABLE_NOT_EXIST, TableNotExistMsg(table_name_));
+                return Status(SERVER_TABLE_NOT_EXIST, TableNotExistMsg(collection_name_));
             } else {
                 return status;
             }
         } else {
             if (!table_schema.owner_table_.empty()) {
-                return Status(SERVER_INVALID_TABLE_NAME, TableNotExistMsg(table_name_));
+                return Status(SERVER_INVALID_TABLE_NAME, TableNotExistMsg(collection_name_));
             }
         }
 
@@ -127,7 +127,7 @@ SearchRequest::OnExecute() {
         pre_query_ctx->GetTraceContext()->GetSpan()->Finish();
 
         if (file_id_list_.empty()) {
-            status = DBWrapper::DB()->Query(context_, table_name_, partition_list_, (size_t)topk_, extra_params_,
+            status = DBWrapper::DB()->Query(context_, collection_name_, partition_list_, (size_t)topk_, extra_params_,
                                             vectors_data_, result_ids, result_distances);
         } else {
             status = DBWrapper::DB()->QueryByFileID(context_, file_id_list_, (size_t)topk_, extra_params_,

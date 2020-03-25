@@ -483,7 +483,7 @@ GrpcRequestHandler::DescribeTable(::grpc::ServerContext* context, const ::milvus
 
     TableSchema table_schema;
     Status status = request_handler_.DescribeTable(context_map_[context], request->table_name(), table_schema);
-    response->set_table_name(table_schema.table_name_);
+    response->set_table_name(table_schema.collection_name_);
     response->set_dimension(table_schema.dimension_);
     response->set_index_file_size(table_schema.index_file_size_);
     response->set_metric_type(table_schema.metric_type_);
@@ -581,7 +581,7 @@ GrpcRequestHandler::DescribeIndex(::grpc::ServerContext* context, const ::milvus
 
     IndexParam param;
     Status status = request_handler_.DescribeIndex(context_map_[context], request->table_name(), param);
-    response->set_table_name(param.table_name_);
+    response->set_table_name(param.collection_name_);
     response->set_index_type(param.index_type_);
     ::milvus::grpc::KeyValuePair* kv = response->add_extra_params();
     kv->set_key(EXTRA_PARAM_KEY);
@@ -645,11 +645,11 @@ GrpcRequestHandler::Flush(::grpc::ServerContext* context, const ::milvus::grpc::
                           ::milvus::grpc::Status* response) {
     CHECK_NULLPTR_RETURN(request);
 
-    std::vector<std::string> table_names;
+    std::vector<std::string> collection_names;
     for (int32_t i = 0; i < request->table_name_array().size(); i++) {
-        table_names.push_back(request->table_name_array(i));
+        collection_names.push_back(request->table_name_array(i));
     }
-    Status status = request_handler_.Flush(context_map_[context], table_names);
+    Status status = request_handler_.Flush(context_map_[context], collection_names);
     SET_RESPONSE(response, status, context);
 
     return ::grpc::Status::OK;

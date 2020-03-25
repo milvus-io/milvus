@@ -22,17 +22,17 @@ namespace server {
 class DescribeTableRequest : public BaseRequest {
  public:
     static BaseRequestPtr
-    Create(const std::shared_ptr<milvus::server::Context>& context, const std::string& table_name, TableSchema& schema);
+    Create(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name, TableSchema& schema);
 
  protected:
-    DescribeTableRequest(const std::shared_ptr<milvus::server::Context>& context, const std::string& table_name,
+    DescribeTableRequest(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name,
                          TableSchema& schema);
 
     Status
     OnExecute() override;
 
  private:
-    const std::string table_name_;
+    const std::string collection_name_;
     TableSchema& schema_;
 };
 

@@ -762,11 +762,11 @@ TEST_F(DBTest, PARTITION_TEST) {
     // create partition and insert data
     const int64_t PARTITION_COUNT = 5;
     const int64_t INSERT_BATCH = 2000;
-    std::string table_name = TABLE_NAME;
+    std::string collection_name = TABLE_NAME;
     for (int64_t i = 0; i < PARTITION_COUNT; i++) {
         std::string partition_tag = std::to_string(i);
-        std::string partition_name = table_name + "_" + partition_tag;
-        stat = db_->CreatePartition(table_name, partition_name, partition_tag);
+        std::string partition_name = collection_name + "_" + partition_tag;
+        stat = db_->CreatePartition(collection_name, partition_name, partition_tag);
         ASSERT_TRUE(stat.ok());
 
         // not allow nested partition
@@ -774,7 +774,7 @@ TEST_F(DBTest, PARTITION_TEST) {
         ASSERT_FALSE(stat.ok());
 
         // not allow duplicated partition
-        stat = db_->CreatePartition(table_name, partition_name, partition_tag);
+        stat = db_->CreatePartition(collection_name, partition_name, partition_tag);
         ASSERT_FALSE(stat.ok());
 
         milvus::engine::VectorsData xb;
@@ -786,7 +786,7 @@ TEST_F(DBTest, PARTITION_TEST) {
             vector_ids[k] = i * INSERT_BATCH + k;
         }
 
-        db_->InsertVectors(table_name, partition_tag, xb);
+        db_->InsertVectors(collection_name, partition_tag, xb);
         ASSERT_EQ(vector_ids.size(), INSERT_BATCH);
 
         // insert data into not existed partition
@@ -795,20 +795,20 @@ TEST_F(DBTest, PARTITION_TEST) {
     }
 
     // duplicated partition is not allowed
-    stat = db_->CreatePartition(table_name, "", "0");
+    stat = db_->CreatePartition(collection_name, "", "0");
     ASSERT_FALSE(stat.ok());
 
     std::vector<milvus::engine::meta::TableSchema> partition_schema_array;
-    stat = db_->ShowPartitions(table_name, partition_schema_array);
+    stat = db_->ShowPartitions(collection_name, partition_schema_array);
     ASSERT_TRUE(stat.ok());
     ASSERT_EQ(partition_schema_array.size(), PARTITION_COUNT);
     for (int64_t i = 0; i < PARTITION_COUNT; i++) {
-        ASSERT_EQ(partition_schema_array[i].collection_id_, table_name + "_" + std::to_string(i));
+        ASSERT_EQ(partition_schema_array[i].collection_id_, collection_name + "_" + std::to_string(i));
     }
 
     // check collection existence
     std::string special_part = "special";
-    stat = db_->CreatePartition(table_name, special_part, special_part);
+    stat = db_->CreatePartition(collection_name, special_part, special_part);
     ASSERT_TRUE(stat.ok());
     bool has_table = false;
     stat = db_->HasNativeTable(special_part, has_table);
@@ -884,10 +884,10 @@ TEST_F(DBTest, PARTITION_TEST) {
         ASSERT_EQ(result_ids.size() / topk, nq);
     }
 
-    stat = db_->DropPartition(table_name + "_0");
+    stat = db_->DropPartition(collection_name + "_0");
     ASSERT_TRUE(stat.ok());
 
-    stat = db_->DropPartitionByTag(table_name, "1");
+    stat = db_->DropPartitionByTag(collection_name, "1");
     ASSERT_TRUE(stat.ok());
 
     FIU_ENABLE_FIU("DBImpl.DropTableIndexRecursively.fail_drop_table_Index_for_partition");
@@ -900,10 +900,10 @@ TEST_F(DBTest, PARTITION_TEST) {
     ASSERT_FALSE(stat.ok());
     fiu_disable("DBImpl.DropTableIndexRecursively.fail_drop_table_Index_for_partition");
 
-    stat = db_->DropIndex(table_name);
+    stat = db_->DropIndex(collection_name);
     ASSERT_TRUE(stat.ok());
 
-    stat = db_->DropTable(table_name);
+    stat = db_->DropTable(collection_name);
     ASSERT_TRUE(stat.ok());
 }
 
@@ -995,7 +995,7 @@ TEST_F(DBTest2, DELETE_TEST) {
 }
 
 TEST_F(DBTest2, SHOW_TABLE_INFO_TEST) {
-    std::string table_name = TABLE_NAME;
+    std::string collection_name = TABLE_NAME;
     milvus::engine::meta::TableSchema table_schema = BuildTableSchema();
     auto stat = db_->CreateTable(table_schema);
 
@@ -1004,21 +1004,21 @@ TEST_F(DBTest2, SHOW_TABLE_INFO_TEST) {
     BuildVectors(nb, 0, xb);
 
     milvus::engine::IDNumbers vector_ids;
-    stat = db_->InsertVectors(table_name, "", xb);
+    stat = db_->InsertVectors(collection_name, "", xb);
 
     // create partition and insert data
     const int64_t PARTITION_COUNT = 2;
     const int64_t INSERT_BATCH = 2000;
     for (int64_t i = 0; i < PARTITION_COUNT; i++) {
         std::string partition_tag = std::to_string(i);
-        std::string partition_name = table_name + "_" + partition_tag;
-        stat = db_->CreatePartition(table_name, partition_name, partition_tag);
+        std::string partition_name = collection_name + "_" + partition_tag;
+        stat = db_->CreatePartition(collection_name, partition_name, partition_tag);
         ASSERT_TRUE(stat.ok());
 
         milvus::engine::VectorsData xb;
         BuildVectors(INSERT_BATCH, i, xb);
 
-        db_->InsertVectors(table_name, partition_tag, xb);
+        db_->InsertVectors(collection_name, partition_tag, xb);
     }
 
     stat = db_->Flush();
@@ -1026,7 +1026,7 @@ TEST_F(DBTest2, SHOW_TABLE_INFO_TEST) {
 
     {
         milvus::engine::TableInfo table_info;
-        stat = db_->GetTableInfo(table_name, table_info);
+        stat = db_->GetTableInfo(collection_name, table_info);
         ASSERT_TRUE(stat.ok());
         int64_t row_count = 0;
         for (auto& part : table_info.partitions_stat_) {

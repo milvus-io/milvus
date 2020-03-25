@@ -788,7 +788,7 @@ Config::CheckDBConfigPreloadTable(const std::string& value) {
     std::unordered_set<std::string> table_set;
 
     for (auto& collection : tables) {
-        if (!ValidationUtil::ValidateTableName(collection).ok()) {
+        if (!ValidationUtil::ValidateCollectionName(collection).ok()) {
             return Status(SERVER_INVALID_ARGUMENT, "Invalid collection name: " + collection);
         }
         bool exist = false;

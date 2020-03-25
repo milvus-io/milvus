@@ -28,18 +28,18 @@
 namespace milvus {
 namespace server {
 
-InsertRequest::InsertRequest(const std::shared_ptr<milvus::server::Context>& context, const std::string& table_name,
+InsertRequest::InsertRequest(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name,
                              engine::VectorsData& vectors, const std::string& partition_tag)
     : BaseRequest(context, BaseRequest::kInsert),
-      table_name_(table_name),
+      collection_name_(collection_name),
       vectors_data_(vectors),
       partition_tag_(partition_tag) {
 }
 
 BaseRequestPtr
-InsertRequest::Create(const std::shared_ptr<milvus::server::Context>& context, const std::string& table_name,
+InsertRequest::Create(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name,
                       engine::VectorsData& vectors, const std::string& partition_tag) {
-    return std::shared_ptr<BaseRequest>(new InsertRequest(context, table_name, vectors, partition_tag));
+    return std::shared_ptr<BaseRequest>(new InsertRequest(context, collection_name, vectors, partition_tag));
 }
 
 Status
@@ -47,12 +47,12 @@ InsertRequest::OnExecute() {
     try {
         int64_t vector_count = vectors_data_.vector_count_;
         fiu_do_on("InsertRequest.OnExecute.throw_std_exception", throw std::exception());
-        std::string hdr = "InsertRequest(collection=" + table_name_ + ", n=" + std::to_string(vector_count) +
+        std::string hdr = "InsertRequest(collection=" + collection_name_ + ", n=" + std::to_string(vector_count) +
                           ", partition_tag=" + partition_tag_ + ")";
         TimeRecorder rc(hdr);
 
         // step 1: check arguments
-        auto status = ValidationUtil::ValidateTableName(table_name_);
+        auto status = ValidationUtil::ValidateCollectionName(collection_name_);
         if (!status.ok()) {
             return status;
         }
@@ -72,19 +72,19 @@ InsertRequest::OnExecute() {
         // step 2: check collection existence
         // only process root collection, ignore partition collection
         engine::meta::TableSchema table_schema;
-        table_schema.collection_id_ = table_name_;
+        table_schema.collection_id_ = collection_name_;
         status = DBWrapper::DB()->DescribeTable(table_schema);
         fiu_do_on("InsertRequest.OnExecute.db_not_found", status = Status(milvus::DB_NOT_FOUND, ""));
         fiu_do_on("InsertRequest.OnExecute.describe_table_fail", status = Status(milvus::SERVER_UNEXPECTED_ERROR, ""));
         if (!status.ok()) {
             if (status.code() == DB_NOT_FOUND) {
-                return Status(SERVER_TABLE_NOT_EXIST, TableNotExistMsg(table_name_));
+                return Status(SERVER_TABLE_NOT_EXIST, TableNotExistMsg(collection_name_));
             } else {
                 return status;
             }
         } else {
             if (!table_schema.owner_table_.empty()) {
-                return Status(SERVER_INVALID_TABLE_NAME, TableNotExistMsg(table_name_));
+                return Status(SERVER_INVALID_TABLE_NAME, TableNotExistMsg(collection_name_));
             }
         }
 
@@ -152,7 +152,7 @@ InsertRequest::OnExecute() {
         auto vec_count = static_cast<uint64_t>(vector_count);
 
         rc.RecordSection("prepare vectors data");
-        status = DBWrapper::DB()->InsertVectors(table_name_, partition_tag_, vectors_data_);
+        status = DBWrapper::DB()->InsertVectors(collection_name_, partition_tag_, vectors_data_);
         fiu_do_on("InsertRequest.OnExecute.insert_fail", status = Status(milvus::SERVER_UNEXPECTED_ERROR, ""));
         if (!status.ok()) {
             return status;
@@ -169,7 +169,7 @@ InsertRequest::OnExecute() {
         // step 6: update collection flag
         user_provide_ids ? table_schema.flag_ |= engine::meta::FLAG_MASK_HAS_USERID
                          : table_schema.flag_ |= engine::meta::FLAG_MASK_NO_USERID;
-        status = DBWrapper::DB()->UpdateTableFlag(table_name_, table_schema.flag_);
+        status = DBWrapper::DB()->UpdateTableFlag(collection_name_, table_schema.flag_);
 
 #ifdef MILVUS_ENABLE_PROFILING
         ProfilerStop();

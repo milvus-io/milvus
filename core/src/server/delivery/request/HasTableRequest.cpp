@@ -21,31 +21,31 @@
 namespace milvus {
 namespace server {
 
-HasTableRequest::HasTableRequest(const std::shared_ptr<milvus::server::Context>& context, const std::string& table_name,
+HasTableRequest::HasTableRequest(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name,
                                  bool& has_table)
-    : BaseRequest(context, BaseRequest::kHasTable), table_name_(table_name), has_table_(has_table) {
+    : BaseRequest(context, BaseRequest::kHasTable), collection_name_(collection_name), has_table_(has_table) {
 }
 
 BaseRequestPtr
-HasTableRequest::Create(const std::shared_ptr<milvus::server::Context>& context, const std::string& table_name,
+HasTableRequest::Create(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name,
                         bool& has_table) {
-    return std::shared_ptr<BaseRequest>(new HasTableRequest(context, table_name, has_table));
+    return std::shared_ptr<BaseRequest>(new HasTableRequest(context, collection_name, has_table));
 }
 
 Status
 HasTableRequest::OnExecute() {
     try {
-        std::string hdr = "HasTableRequest(collection=" + table_name_ + ")";
+        std::string hdr = "HasTableRequest(collection=" + collection_name_ + ")";
         TimeRecorderAuto rc(hdr);
 
         // step 1: check arguments
-        auto status = ValidationUtil::ValidateTableName(table_name_);
+        auto status = ValidationUtil::ValidateCollectionName(collection_name_);
         if (!status.ok()) {
             return status;
         }
 
         // step 2: check collection existence
-        status = DBWrapper::DB()->HasNativeTable(table_name_, has_table_);
+        status = DBWrapper::DB()->HasNativeTable(collection_name_, has_table_);
         fiu_do_on("HasTableRequest.OnExecute.table_not_exist", status = Status(milvus::SERVER_UNEXPECTED_ERROR, ""));
         fiu_do_on("HasTableRequest.OnExecute.throw_std_exception", throw std::exception());
         if (!status.ok()) {
@@ -55,7 +55,7 @@ HasTableRequest::OnExecute() {
         // only process root collection, ignore partition collection
         if (has_table_) {
             engine::meta::TableSchema table_schema;
-            table_schema.collection_id_ = table_name_;
+            table_schema.collection_id_ = collection_name_;
             status = DBWrapper::DB()->DescribeTable(table_schema);
             if (!table_schema.owner_table_.empty()) {
                 has_table_ = false;

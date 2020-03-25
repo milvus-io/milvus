@@ -32,7 +32,7 @@ namespace milvus {
 namespace server {
 
 struct TableSchema {
-    std::string table_name_;
+    std::string collection_name_;
     int64_t dimension_;
     int64_t index_file_size_;
     int64_t metric_type_;
@@ -43,8 +43,8 @@ struct TableSchema {
         metric_type_ = 0;
     }
 
-    TableSchema(const std::string& table_name, int64_t dimension, int64_t index_file_size, int64_t metric_type) {
-        table_name_ = table_name;
+    TableSchema(const std::string& collection_name, int64_t dimension, int64_t index_file_size, int64_t metric_type) {
+        collection_name_ = collection_name;
         dimension_ = dimension;
         index_file_size_ = index_file_size;
         metric_type_ = metric_type;
@@ -68,7 +68,7 @@ struct TopKQueryResult {
 };
 
 struct IndexParam {
-    std::string table_name_;
+    std::string collection_name_;
     int64_t index_type_;
     std::string extra_params_;
 
@@ -76,20 +76,20 @@ struct IndexParam {
         index_type_ = 0;
     }
 
-    IndexParam(const std::string& table_name, int64_t index_type) {
-        table_name_ = table_name;
+    IndexParam(const std::string& collection_name, int64_t index_type) {
+        collection_name_ = collection_name;
         index_type_ = index_type;
     }
 };
 
 struct PartitionParam {
-    std::string table_name_;
+    std::string collection_name_;
     std::string tag_;
 
     PartitionParam() = default;
 
-    PartitionParam(const std::string& table_name, const std::string& tag) {
-        table_name_ = table_name;
+    PartitionParam(const std::string& collection_name, const std::string& tag) {
+        collection_name_ = collection_name;
         tag_ = tag;
     }
 };
@@ -196,7 +196,7 @@ class BaseRequest {
     OnExecute() = 0;
 
     std::string
-    TableNotExistMsg(const std::string& table_name);
+    TableNotExistMsg(const std::string& collection_name);
 
  protected:
     const std::shared_ptr<milvus::server::Context>& context_;
