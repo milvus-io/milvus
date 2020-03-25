@@ -29,7 +29,7 @@ using MutexPtr = std::shared_ptr<std::mutex>;
 
 class GpuCacheMgr : public CacheMgr<DataObjPtr>, public server::GpuResourceConfigHandler {
  public:
-    GpuCacheMgr();
+    explicit GpuCacheMgr(int64_t gpu_id);
 
     ~GpuCacheMgr();
 
@@ -51,6 +51,7 @@ class GpuCacheMgr : public CacheMgr<DataObjPtr>, public server::GpuResourceConfi
 
  private:
     bool gpu_enable_ = true;
+    int64_t gpu_id_;
     static std::mutex global_mutex_;
     static std::unordered_map<int64_t, std::pair<GpuCacheMgrPtr, MutexPtr>> instance_;
     std::string identity_;

@@ -28,14 +28,15 @@ namespace {
 constexpr int64_t G_BYTE = 1024 * 1024 * 1024;
 }
 
-GpuCacheMgr::GpuCacheMgr() {
+GpuCacheMgr::GpuCacheMgr(int64_t gpu_id) : gpu_id_(gpu_id) {
     // All config values have been checked in Config::ValidateConfig()
     server::Config& config = server::Config::GetInstance();
 
     int64_t gpu_cache_cap;
     config.GetGpuResourceConfigCacheCapacity(gpu_cache_cap);
     int64_t cap = gpu_cache_cap * G_BYTE;
-    cache_ = std::make_shared<Cache<DataObjPtr>>(cap, 1UL << 32);
+    std::string header = "[CACHE GPU" + std::to_string(gpu_id) + "]";
+    cache_ = std::make_shared<Cache<DataObjPtr>>(header, cap, 1UL << 32);
 
     float gpu_mem_threshold;
     config.GetGpuResourceConfigCacheThreshold(gpu_mem_threshold);
@@ -69,7 +70,7 @@ GpuCacheMgr::GetInstance(int64_t gpu_id) {
     if (instance_.find(gpu_id) == instance_.end()) {
         std::lock_guard<std::mutex> lock(global_mutex_);
         if (instance_.find(gpu_id) == instance_.end()) {
-            instance_[gpu_id] = std::make_pair(std::make_shared<GpuCacheMgr>(), std::make_shared<std::mutex>());
+            instance_[gpu_id] = std::make_pair(std::make_shared<GpuCacheMgr>(gpu_id), std::make_shared<std::mutex>());
         }
     }
     return instance_[gpu_id].first;
@@ -80,7 +81,7 @@ GpuCacheMgr::GetInstanceMutex(int64_t gpu_id) {
     if (instance_.find(gpu_id) == instance_.end()) {
         std::lock_guard<std::mutex> lock(global_mutex_);
         if (instance_.find(gpu_id) == instance_.end()) {
-            instance_[gpu_id] = std::make_pair(std::make_shared<GpuCacheMgr>(), std::make_shared<std::mutex>());
+            instance_[gpu_id] = std::make_pair(std::make_shared<GpuCacheMgr>(gpu_id), std::make_shared<std::mutex>());
         }
     }
     return instance_[gpu_id].second;

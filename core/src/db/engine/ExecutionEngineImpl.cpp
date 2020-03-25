@@ -549,9 +549,10 @@ ExecutionEngineImpl::CopyToGpu(uint64_t device_id, bool hybrid) {
              * which will potentially cause GPU out of memory.
              */
             std::lock_guard<std::mutex> lock(*(cache::GpuCacheMgr::GetInstanceMutex(device_id)));
-            ENGINE_LOG_DEBUG << "CPU to GPU" << device_id;
+            ENGINE_LOG_DEBUG << "CPU to GPU" << device_id << " locked";
             index_ = knowhere::cloner::CopyCpuToGpu(index_, device_id, knowhere::Config());
             GpuCache(device_id);
+            ENGINE_LOG_DEBUG << "CPU to GPU" << device_id << " unlocked";
         } catch (std::exception& e) {
             ENGINE_LOG_ERROR << e.what();
             return Status(DB_ERROR, e.what());
