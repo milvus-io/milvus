@@ -137,11 +137,11 @@ TEST_F(MySqlMetaTest, TABLE_FILE_TEST) {
     status = impl_->CreateTable(collection);
 
     //CreateTableFile
-    milvus::engine::meta::TableFileSchema table_file;
+    milvus::engine::meta::SegmentSchema table_file;
     table_file.collection_id_ = collection.collection_id_;
     status = impl_->CreateTableFile(table_file);
     ASSERT_TRUE(status.ok());
-    ASSERT_EQ(table_file.file_type_, milvus::engine::meta::TableFileSchema::NEW);
+    ASSERT_EQ(table_file.file_type_, milvus::engine::meta::SegmentSchema::NEW);
 
     FIU_ENABLE_FIU("MySQLMetaImpl.CreateTableFiles.null_connection");
     status = impl_->CreateTableFile(table_file);
@@ -180,7 +180,7 @@ TEST_F(MySqlMetaTest, TABLE_FILE_TEST) {
     fiu_disable("MySQLMetaImpl.Count.throw_exception");
     auto file_id = table_file.file_id_;
 
-    auto new_file_type = milvus::engine::meta::TableFileSchema::INDEX;
+    auto new_file_type = milvus::engine::meta::SegmentSchema::INDEX;
     table_file.file_type_ = new_file_type;
 
     //UpdateTableFile
@@ -216,7 +216,7 @@ TEST_F(MySqlMetaTest, TABLE_FILE_TEST) {
     status = impl_->CleanUpShadowFiles();
     ASSERT_TRUE(status.ok());
 
-    milvus::engine::meta::TableFilesSchema files_schema;
+    milvus::engine::meta::SegmentsSchema files_schema;
     FIU_ENABLE_FIU("MySQLMetaImpl.UpdateTableFiles.null_connection");
     status = impl_->UpdateTableFiles(files_schema);
     ASSERT_FALSE(status.ok());
@@ -231,7 +231,7 @@ TEST_F(MySqlMetaTest, TABLE_FILE_TEST) {
     ASSERT_TRUE(status.ok());
 
     std::vector<size_t> ids = {table_file.id_};
-    milvus::engine::meta::TableFilesSchema files;
+    milvus::engine::meta::SegmentsSchema files;
     status = impl_->GetTableFiles(table_file.collection_id_, ids, files);
     ASSERT_EQ(files.size(), 0UL);
 
@@ -250,23 +250,23 @@ TEST_F(MySqlMetaTest, TABLE_FILE_TEST) {
     ASSERT_TRUE(status.ok());
 
     table_file.collection_id_ = collection.collection_id_;
-    table_file.file_type_ = milvus::engine::meta::TableFileSchema::RAW;
+    table_file.file_type_ = milvus::engine::meta::SegmentSchema::RAW;
     status = impl_->CreateTableFile(table_file);
     ids = {table_file.id_};
     status = impl_->FilesByID(ids, files);
     ASSERT_EQ(files.size(), 1UL);
 
     table_file.collection_id_ = collection.collection_id_;
-    table_file.file_type_ = milvus::engine::meta::TableFileSchema::TO_DELETE;
+    table_file.file_type_ = milvus::engine::meta::SegmentSchema::TO_DELETE;
     status = impl_->CreateTableFile(table_file);
 
     std::vector<int> files_to_delete;
-    files_to_delete.push_back(milvus::engine::meta::TableFileSchema::TO_DELETE);
+    files_to_delete.push_back(milvus::engine::meta::SegmentSchema::TO_DELETE);
     status = impl_->FilesByType(collection_id, files_to_delete, files_schema);
     ASSERT_TRUE(status.ok());
 
     table_file.collection_id_ = collection_id;
-    table_file.file_type_ = milvus::engine::meta::TableFileSchema::TO_DELETE;
+    table_file.file_type_ = milvus::engine::meta::SegmentSchema::TO_DELETE;
     table_file.file_id_ = files_schema.front().file_id_;
     milvus::engine::OngoingFileChecker::GetInstance().MarkOngoingFile(table_file);
     status = impl_->CleanUpFilesWithTTL(1UL);
@@ -286,7 +286,7 @@ TEST_F(MySqlMetaTest, TABLE_FILE_ROW_COUNT_TEST) {
     collection.dimension_ = 256;
     auto status = impl_->CreateTable(collection);
 
-    milvus::engine::meta::TableFileSchema table_file;
+    milvus::engine::meta::SegmentSchema table_file;
     table_file.row_count_ = 100;
     table_file.collection_id_ = collection.collection_id_;
     table_file.file_type_ = 1;
@@ -297,7 +297,7 @@ TEST_F(MySqlMetaTest, TABLE_FILE_ROW_COUNT_TEST) {
     ASSERT_EQ(table_file.row_count_, cnt);
 
     table_file.row_count_ = 99999;
-    milvus::engine::meta::TableFilesSchema table_files = {table_file};
+    milvus::engine::meta::SegmentsSchema table_files = {table_file};
     status = impl_->UpdateTableFilesRowCount(table_files);
     ASSERT_TRUE(status.ok());
 
@@ -306,7 +306,7 @@ TEST_F(MySqlMetaTest, TABLE_FILE_ROW_COUNT_TEST) {
     ASSERT_EQ(table_file.row_count_, cnt);
 
     std::vector<size_t> ids = {table_file.id_};
-    milvus::engine::meta::TableFilesSchema schemas;
+    milvus::engine::meta::SegmentsSchema schemas;
     status = impl_->GetTableFiles(collection_id, ids, schemas);
     ASSERT_EQ(schemas.size(), 1UL);
     ASSERT_EQ(table_file.row_count_, schemas[0].row_count_);
@@ -339,8 +339,8 @@ TEST_F(MySqlMetaTest, ARCHIVE_TEST_DAYS) {
     collection.collection_id_ = collection_id;
     auto status = impl.CreateTable(collection);
 
-    milvus::engine::meta::TableFilesSchema files;
-    milvus::engine::meta::TableFileSchema table_file;
+    milvus::engine::meta::SegmentsSchema files;
+    milvus::engine::meta::SegmentSchema table_file;
     table_file.collection_id_ = collection.collection_id_;
 
     auto cnt = 100;
@@ -349,7 +349,7 @@ TEST_F(MySqlMetaTest, ARCHIVE_TEST_DAYS) {
     std::vector<size_t> ids;
     for (auto i = 0; i < cnt; ++i) {
         status = impl.CreateTableFile(table_file);
-        table_file.file_type_ = milvus::engine::meta::TableFileSchema::NEW;
+        table_file.file_type_ = milvus::engine::meta::SegmentSchema::NEW;
         int day = rand_r(&seed) % (days_num * 2);
         table_file.created_on_ = ts - day * milvus::engine::meta::DAY * milvus::engine::meta::US_PS - 10000;
         status = impl.UpdateTableFile(table_file);
@@ -371,21 +371,21 @@ TEST_F(MySqlMetaTest, ARCHIVE_TEST_DAYS) {
     impl.Archive();
     int i = 0;
 
-    milvus::engine::meta::TableFilesSchema files_get;
+    milvus::engine::meta::SegmentsSchema files_get;
     status = impl.GetTableFiles(table_file.collection_id_, ids, files_get);
     ASSERT_TRUE(status.ok());
 
     for (auto& file : files_get) {
         if (days[i] < days_num) {
-            ASSERT_EQ(file.file_type_, milvus::engine::meta::TableFileSchema::NEW);
+            ASSERT_EQ(file.file_type_, milvus::engine::meta::SegmentSchema::NEW);
         }
         i++;
     }
 
     std::vector<int> file_types = {
-        (int)milvus::engine::meta::TableFileSchema::NEW,
+        (int)milvus::engine::meta::SegmentSchema::NEW,
     };
-    milvus::engine::meta::TableFilesSchema table_files;
+    milvus::engine::meta::SegmentsSchema table_files;
     status = impl.FilesByType(collection_id, file_types, table_files);
     ASSERT_FALSE(table_files.empty());
 
@@ -436,8 +436,8 @@ TEST_F(MySqlMetaTest, ARCHIVE_TEST_DISK) {
     table_schema.collection_id_ = "";
     status = impl.CreateTable(table_schema);
 
-    milvus::engine::meta::TableFilesSchema files;
-    milvus::engine::meta::TableFileSchema table_file;
+    milvus::engine::meta::SegmentsSchema files;
+    milvus::engine::meta::SegmentSchema table_file;
     table_file.collection_id_ = collection.collection_id_;
 
     auto cnt = 10;
@@ -445,7 +445,7 @@ TEST_F(MySqlMetaTest, ARCHIVE_TEST_DISK) {
     std::vector<size_t> ids;
     for (auto i = 0; i < cnt; ++i) {
         status = impl.CreateTableFile(table_file);
-        table_file.file_type_ = milvus::engine::meta::TableFileSchema::NEW;
+        table_file.file_type_ = milvus::engine::meta::SegmentSchema::NEW;
         table_file.file_size_ = each_size * milvus::engine::G;
         status = impl.UpdateTableFile(table_file);
         files.push_back(table_file);
@@ -463,13 +463,13 @@ TEST_F(MySqlMetaTest, ARCHIVE_TEST_DISK) {
     impl.Archive();
     int i = 0;
 
-    milvus::engine::meta::TableFilesSchema files_get;
+    milvus::engine::meta::SegmentsSchema files_get;
     status = impl.GetTableFiles(table_file.collection_id_, ids, files_get);
     ASSERT_TRUE(status.ok());
 
     for (auto& file : files_get) {
         if (i >= 5) {
-            ASSERT_EQ(file.file_type_, milvus::engine::meta::TableFileSchema::NEW);
+            ASSERT_EQ(file.file_type_, milvus::engine::meta::SegmentSchema::NEW);
         }
         ++i;
     }
@@ -542,51 +542,51 @@ TEST_F(MySqlMetaTest, TABLE_FILES_TEST) {
     uint64_t to_index_files_cnt = 6;
     uint64_t index_files_cnt = 7;
 
-    milvus::engine::meta::TableFileSchema table_file;
+    milvus::engine::meta::SegmentSchema table_file;
     table_file.collection_id_ = collection.collection_id_;
 
     for (auto i = 0; i < new_merge_files_cnt; ++i) {
         status = impl_->CreateTableFile(table_file);
-        table_file.file_type_ = milvus::engine::meta::TableFileSchema::NEW_MERGE;
+        table_file.file_type_ = milvus::engine::meta::SegmentSchema::NEW_MERGE;
         status = impl_->UpdateTableFile(table_file);
     }
 
     for (auto i = 0; i < new_index_files_cnt; ++i) {
         status = impl_->CreateTableFile(table_file);
-        table_file.file_type_ = milvus::engine::meta::TableFileSchema::NEW_INDEX;
+        table_file.file_type_ = milvus::engine::meta::SegmentSchema::NEW_INDEX;
         status = impl_->UpdateTableFile(table_file);
     }
 
     for (auto i = 0; i < backup_files_cnt; ++i) {
         status = impl_->CreateTableFile(table_file);
-        table_file.file_type_ = milvus::engine::meta::TableFileSchema::BACKUP;
+        table_file.file_type_ = milvus::engine::meta::SegmentSchema::BACKUP;
         table_file.row_count_ = 1;
         status = impl_->UpdateTableFile(table_file);
     }
 
     for (auto i = 0; i < new_files_cnt; ++i) {
         status = impl_->CreateTableFile(table_file);
-        table_file.file_type_ = milvus::engine::meta::TableFileSchema::NEW;
+        table_file.file_type_ = milvus::engine::meta::SegmentSchema::NEW;
         status = impl_->UpdateTableFile(table_file);
     }
 
     for (auto i = 0; i < raw_files_cnt; ++i) {
         status = impl_->CreateTableFile(table_file);
-        table_file.file_type_ = milvus::engine::meta::TableFileSchema::RAW;
+        table_file.file_type_ = milvus::engine::meta::SegmentSchema::RAW;
         table_file.row_count_ = 1;
         status = impl_->UpdateTableFile(table_file);
     }
 
     for (auto i = 0; i < to_index_files_cnt; ++i) {
         status = impl_->CreateTableFile(table_file);
-        table_file.file_type_ = milvus::engine::meta::TableFileSchema::TO_INDEX;
+        table_file.file_type_ = milvus::engine::meta::SegmentSchema::TO_INDEX;
         table_file.row_count_ = 1;
         status = impl_->UpdateTableFile(table_file);
     }
 
     for (auto i = 0; i < index_files_cnt; ++i) {
         status = impl_->CreateTableFile(table_file);
-        table_file.file_type_ = milvus::engine::meta::TableFileSchema::INDEX;
+        table_file.file_type_ = milvus::engine::meta::SegmentSchema::INDEX;
         table_file.row_count_ = 1;
         status = impl_->UpdateTableFile(table_file);
     }
@@ -596,11 +596,11 @@ TEST_F(MySqlMetaTest, TABLE_FILES_TEST) {
     ASSERT_TRUE(status.ok());
     ASSERT_EQ(total_row_count, raw_files_cnt + to_index_files_cnt + index_files_cnt);
 
-    milvus::engine::meta::TableFilesSchema files;
+    milvus::engine::meta::SegmentsSchema files;
     status = impl_->FilesToIndex(files);
     ASSERT_EQ(files.size(), to_index_files_cnt);
 
-    milvus::engine::meta::TableFilesSchema table_files;
+    milvus::engine::meta::SegmentsSchema table_files;
     status = impl_->FilesToMerge(collection.collection_id_, table_files);
     ASSERT_EQ(table_files.size(), raw_files_cnt);
 
@@ -617,14 +617,14 @@ TEST_F(MySqlMetaTest, TABLE_FILES_TEST) {
     status = impl_->FilesToMerge("notexist", table_files);
     ASSERT_EQ(status.code(), milvus::DB_NOT_FOUND);
 
-    table_file.file_type_ = milvus::engine::meta::TableFileSchema::RAW;
+    table_file.file_type_ = milvus::engine::meta::SegmentSchema::RAW;
     table_file.file_size_ = milvus::engine::ONE_GB + 1;
     status = impl_->UpdateTableFile(table_file);
     ASSERT_TRUE(status.ok());
 #if 0
     {
         //skip large files
-        milvus::engine::meta::TableFilesSchema table_files;
+        milvus::engine::meta::SegmentsSchema table_files;
         status = impl_->FilesToMerge(collection.collection_id_, table_files);
         ASSERT_EQ(dated_files[table_file.date_].size(), raw_files_cnt);
     }
@@ -676,10 +676,10 @@ TEST_F(MySqlMetaTest, TABLE_FILES_TEST) {
     ASSERT_FALSE(status.ok());
 
     file_types = {
-        milvus::engine::meta::TableFileSchema::NEW, milvus::engine::meta::TableFileSchema::NEW_MERGE,
-        milvus::engine::meta::TableFileSchema::NEW_INDEX, milvus::engine::meta::TableFileSchema::TO_INDEX,
-        milvus::engine::meta::TableFileSchema::INDEX, milvus::engine::meta::TableFileSchema::RAW,
-        milvus::engine::meta::TableFileSchema::BACKUP,
+        milvus::engine::meta::SegmentSchema::NEW, milvus::engine::meta::SegmentSchema::NEW_MERGE,
+        milvus::engine::meta::SegmentSchema::NEW_INDEX, milvus::engine::meta::SegmentSchema::TO_INDEX,
+        milvus::engine::meta::SegmentSchema::INDEX, milvus::engine::meta::SegmentSchema::RAW,
+        milvus::engine::meta::SegmentSchema::BACKUP,
     };
     status = impl_->FilesByType(collection.collection_id_, file_types, table_files);
     ASSERT_TRUE(status.ok());

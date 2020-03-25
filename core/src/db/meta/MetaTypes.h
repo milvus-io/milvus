@@ -62,7 +62,7 @@ struct TableSchema {
     uint64_t flush_lsn_ = 0;
 };  // TableSchema
 
-struct TableFileSchema {
+struct SegmentSchema {
     typedef enum {
         NEW,
         RAW,
@@ -92,10 +92,10 @@ struct TableFileSchema {
     std::string index_params_;                   // not persist to meta
     int32_t metric_type_ = DEFAULT_METRIC_TYPE;  // not persist to meta
     uint64_t flush_lsn_ = 0;
-};  // TableFileSchema
+};  // SegmentSchema
 
-using TableFileSchemaPtr = std::shared_ptr<meta::TableFileSchema>;
-using TableFilesSchema = std::vector<TableFileSchema>;
+using SegmentSchemaPtr = std::shared_ptr<meta::SegmentSchema>;
+using SegmentsSchema = std::vector<SegmentSchema>;
 
 }  // namespace meta
 }  // namespace engine

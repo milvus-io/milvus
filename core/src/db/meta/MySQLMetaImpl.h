@@ -50,14 +50,14 @@ class MySQLMetaImpl : public Meta {
     DeleteTableFiles(const std::string& collection_id) override;
 
     Status
-    CreateTableFile(TableFileSchema& file_schema) override;
+    CreateTableFile(SegmentSchema& file_schema) override;
 
     Status
     GetTableFiles(const std::string& collection_id, const std::vector<size_t>& ids,
-                  TableFilesSchema& table_files) override;
+                  SegmentsSchema& table_files) override;
 
     Status
-    GetTableFilesBySegmentId(const std::string& segment_id, TableFilesSchema& table_files) override;
+    GetTableFilesBySegmentId(const std::string& segment_id, SegmentsSchema& table_files) override;
 
     Status
     UpdateTableIndex(const std::string& collection_id, const TableIndex& index) override;
@@ -72,19 +72,19 @@ class MySQLMetaImpl : public Meta {
     GetTableFlushLSN(const std::string& collection_id, uint64_t& flush_lsn) override;
 
     Status
-    GetTableFilesByFlushLSN(uint64_t flush_lsn, TableFilesSchema& table_files) override;
+    GetTableFilesByFlushLSN(uint64_t flush_lsn, SegmentsSchema& table_files) override;
 
     Status
-    UpdateTableFile(TableFileSchema& file_schema) override;
+    UpdateTableFile(SegmentSchema& file_schema) override;
 
     Status
     UpdateTableFilesToIndex(const std::string& collection_id) override;
 
     Status
-    UpdateTableFiles(TableFilesSchema& files) override;
+    UpdateTableFiles(SegmentsSchema& files) override;
 
     Status
-    UpdateTableFilesRowCount(TableFilesSchema& files) override;
+    UpdateTableFilesRowCount(SegmentsSchema& files) override;
 
     Status
     DescribeTableIndex(const std::string& collection_id, TableIndex& index) override;
@@ -106,19 +106,19 @@ class MySQLMetaImpl : public Meta {
     GetPartitionName(const std::string& collection_id, const std::string& tag, std::string& partition_name) override;
 
     Status
-    FilesToSearch(const std::string& collection_id, TableFilesSchema& files) override;
+    FilesToSearch(const std::string& collection_id, SegmentsSchema& files) override;
 
     Status
-    FilesToMerge(const std::string& collection_id, TableFilesSchema& files) override;
+    FilesToMerge(const std::string& collection_id, SegmentsSchema& files) override;
 
     Status
-    FilesToIndex(TableFilesSchema&) override;
+    FilesToIndex(SegmentsSchema&) override;
 
     Status
-    FilesByType(const std::string& collection_id, const std::vector<int>& file_types, TableFilesSchema& files) override;
+    FilesByType(const std::string& collection_id, const std::vector<int>& file_types, SegmentsSchema& files) override;
 
     Status
-    FilesByID(const std::vector<size_t>& ids, TableFilesSchema& table_files) override;
+    FilesByID(const std::vector<size_t>& ids, SegmentsSchema& table_files) override;
 
     Status
     Archive() override;

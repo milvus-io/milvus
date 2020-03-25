@@ -18,7 +18,7 @@
 namespace milvus {
 namespace scheduler {
 
-TestTask::TestTask(const std::shared_ptr<server::Context>& context, TableFileSchemaPtr& file, TaskLabelPtr label)
+TestTask::TestTask(const std::shared_ptr<server::Context>& context, SegmentSchemaPtr& file, TaskLabelPtr label)
     : XSearchTask(context, file, std::move(label)) {
 }
 

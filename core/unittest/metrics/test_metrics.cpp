@@ -157,13 +157,13 @@ TEST_F(MetricTest, COLLECTOR_METRICS_TEST) {
 
     milvus::server::CollectAddMetrics add_metrics(10, 128);
 
-    milvus::server::CollectDurationMetrics duration_metrics_raw(milvus::engine::meta::TableFileSchema::RAW);
-    milvus::server::CollectDurationMetrics duration_metrics_index(milvus::engine::meta::TableFileSchema::TO_INDEX);
-    milvus::server::CollectDurationMetrics duration_metrics_delete(milvus::engine::meta::TableFileSchema::TO_DELETE);
+    milvus::server::CollectDurationMetrics duration_metrics_raw(milvus::engine::meta::SegmentSchema::RAW);
+    milvus::server::CollectDurationMetrics duration_metrics_index(milvus::engine::meta::SegmentSchema::TO_INDEX);
+    milvus::server::CollectDurationMetrics duration_metrics_delete(milvus::engine::meta::SegmentSchema::TO_DELETE);
 
-    milvus::server::CollectSearchTaskMetrics search_metrics_raw(milvus::engine::meta::TableFileSchema::RAW);
-    milvus::server::CollectSearchTaskMetrics search_metrics_index(milvus::engine::meta::TableFileSchema::TO_INDEX);
-    milvus::server::CollectSearchTaskMetrics search_metrics_delete(milvus::engine::meta::TableFileSchema::TO_DELETE);
+    milvus::server::CollectSearchTaskMetrics search_metrics_raw(milvus::engine::meta::SegmentSchema::RAW);
+    milvus::server::CollectSearchTaskMetrics search_metrics_index(milvus::engine::meta::SegmentSchema::TO_INDEX);
+    milvus::server::CollectSearchTaskMetrics search_metrics_delete(milvus::engine::meta::SegmentSchema::TO_DELETE);
 
     milvus::server::MetricCollector metric_collector();
 }

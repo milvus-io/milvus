@@ -39,7 +39,7 @@ IndexFailedChecker::GetErrMsgForTable(const std::string& collection_id, std::str
 }
 
 Status
-IndexFailedChecker::MarkFailedIndexFile(const meta::TableFileSchema& file, const std::string& err_msg) {
+IndexFailedChecker::MarkFailedIndexFile(const meta::SegmentSchema& file, const std::string& err_msg) {
     std::lock_guard<std::mutex> lck(mutex_);
 
     auto iter = index_failed_files_.find(file.collection_id_);
@@ -60,7 +60,7 @@ IndexFailedChecker::MarkFailedIndexFile(const meta::TableFileSchema& file, const
 }
 
 Status
-IndexFailedChecker::MarkSucceedIndexFile(const meta::TableFileSchema& file) {
+IndexFailedChecker::MarkSucceedIndexFile(const meta::SegmentSchema& file) {
     std::lock_guard<std::mutex> lck(mutex_);
 
     auto iter = index_failed_files_.find(file.collection_id_);
@@ -75,7 +75,7 @@ IndexFailedChecker::MarkSucceedIndexFile(const meta::TableFileSchema& file) {
 }
 
 Status
-IndexFailedChecker::IgnoreFailedIndexFiles(meta::TableFilesSchema& table_files) {
+IndexFailedChecker::IgnoreFailedIndexFiles(meta::SegmentsSchema& table_files) {
     std::lock_guard<std::mutex> lck(mutex_);
 
     // there could be some failed files belong to different collection.

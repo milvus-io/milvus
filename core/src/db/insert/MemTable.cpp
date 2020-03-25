@@ -179,9 +179,9 @@ MemTable::ApplyDeletes() {
 
     //    auto start = std::chrono::high_resolution_clock::now();
 
-    std::vector<int> file_types{meta::TableFileSchema::FILE_TYPE::RAW, meta::TableFileSchema::FILE_TYPE::TO_INDEX,
-                                meta::TableFileSchema::FILE_TYPE::BACKUP};
-    meta::TableFilesSchema table_files;
+    std::vector<int> file_types{meta::SegmentSchema::FILE_TYPE::RAW, meta::SegmentSchema::FILE_TYPE::TO_INDEX,
+                                meta::SegmentSchema::FILE_TYPE::BACKUP};
+    meta::SegmentsSchema table_files;
     auto status = meta_->FilesByType(collection_id_, file_types, table_files);
     if (!status.ok()) {
         std::string err_msg = "Failed to apply deletes: " + status.ToString();
@@ -209,7 +209,7 @@ MemTable::ApplyDeletes() {
         }
     }
 
-    meta::TableFilesSchema files_to_check;
+    meta::SegmentsSchema files_to_check;
     for (auto& kv : ids_to_check_map) {
         files_to_check.emplace_back(table_files[kv.first]);
     }
@@ -222,7 +222,7 @@ MemTable::ApplyDeletes() {
     std::chrono::duration<double> diff0 = time0 - start_total;
     ENGINE_LOG_DEBUG << "Found " << ids_to_check_map.size() << " segment to apply deletes in " << diff0.count() << " s";
 
-    meta::TableFilesSchema table_files_to_update;
+    meta::SegmentsSchema table_files_to_update;
 
     for (auto& kv : ids_to_check_map) {
         auto& table_file = table_files[kv.first];
@@ -235,7 +235,7 @@ MemTable::ApplyDeletes() {
         segment::SegmentReader segment_reader(segment_dir);
 
         auto& segment_id = table_file.segment_id_;
-        meta::TableFilesSchema segment_files;
+        meta::SegmentsSchema segment_files;
         status = meta_->GetTableFilesBySegmentId(segment_id, segment_files);
         if (!status.ok()) {
             break;
@@ -354,8 +354,8 @@ MemTable::ApplyDeletes() {
 
         // Update collection file row count
         for (auto& file : segment_files) {
-            if (file.file_type_ == meta::TableFileSchema::RAW || file.file_type_ == meta::TableFileSchema::TO_INDEX ||
-                file.file_type_ == meta::TableFileSchema::INDEX || file.file_type_ == meta::TableFileSchema::BACKUP) {
+            if (file.file_type_ == meta::SegmentSchema::RAW || file.file_type_ == meta::SegmentSchema::TO_INDEX ||
+                file.file_type_ == meta::SegmentSchema::INDEX || file.file_type_ == meta::SegmentSchema::BACKUP) {
                 file.row_count_ -= delete_count;
                 table_files_to_update.emplace_back(file);
             }

@@ -160,13 +160,13 @@ class DBImpl : public DB, public server::CacheConfigHandler, public server::Engi
 
  private:
     Status
-    QueryAsync(const std::shared_ptr<server::Context>& context, const meta::TableFilesSchema& files, uint64_t k,
+    QueryAsync(const std::shared_ptr<server::Context>& context, const meta::SegmentsSchema& files, uint64_t k,
                const milvus::json& extra_params, const VectorsData& vectors, ResultIds& result_ids,
                ResultDistances& result_distances);
 
     Status
     GetVectorByIdHelper(const std::string& collection_id, IDNumber vector_id, VectorsData& vector,
-                        const meta::TableFilesSchema& files);
+                        const meta::SegmentsSchema& files);
 
     void
     BackgroundTimerTask();
@@ -184,7 +184,7 @@ class DBImpl : public DB, public server::CacheConfigHandler, public server::Engi
     StartMergeTask();
 
     Status
-    MergeFiles(const std::string& collection_id, const meta::TableFilesSchema& files);
+    MergeFiles(const std::string& collection_id, const meta::SegmentsSchema& files);
 
     Status
     BackgroundMergeFiles(const std::string& collection_id);
@@ -199,8 +199,8 @@ class DBImpl : public DB, public server::CacheConfigHandler, public server::Engi
     BackgroundBuildIndex();
 
     Status
-    CompactFile(const std::string& collection_id, const meta::TableFileSchema& file,
-                meta::TableFilesSchema& files_to_update);
+    CompactFile(const std::string& collection_id, const meta::SegmentSchema& file,
+                meta::SegmentsSchema& files_to_update);
 
     /*
     Status
@@ -209,10 +209,10 @@ class DBImpl : public DB, public server::CacheConfigHandler, public server::Engi
 
     Status
     GetFilesToBuildIndex(const std::string& collection_id, const std::vector<int>& file_types,
-                         meta::TableFilesSchema& files);
+                         meta::SegmentsSchema& files);
 
     Status
-    GetFilesToSearch(const std::string& collection_id, meta::TableFilesSchema& files);
+    GetFilesToSearch(const std::string& collection_id, meta::SegmentsSchema& files);
 
     Status
     GetPartitionByTag(const std::string& collection_id, const std::string& partition_tag, std::string& partition_name);

@@ -69,7 +69,7 @@ TEST_F(MemManagerTest, VECTOR_SOURCE_TEST) {
     auto status = impl_->CreateTable(table_schema);
     ASSERT_TRUE(status.ok());
 
-    milvus::engine::meta::TableFileSchema table_file_schema;
+    milvus::engine::meta::SegmentSchema table_file_schema;
     table_file_schema.collection_id_ = GetTableName();
     status = impl_->CreateTableFile(table_file_schema);
     ASSERT_TRUE(status.ok());

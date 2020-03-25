@@ -31,13 +31,13 @@ class IndexFailedChecker {
     GetErrMsgForTable(const std::string& collection_id, std::string& err_msg);
 
     Status
-    MarkFailedIndexFile(const meta::TableFileSchema& file, const std::string& err_msg);
+    MarkFailedIndexFile(const meta::SegmentSchema& file, const std::string& err_msg);
 
     Status
-    MarkSucceedIndexFile(const meta::TableFileSchema& file);
+    MarkSucceedIndexFile(const meta::SegmentSchema& file);
 
     Status
-    IgnoreFailedIndexFiles(meta::TableFilesSchema& table_files);
+    IgnoreFailedIndexFiles(meta::SegmentsSchema& table_files);
 
  private:
     std::mutex mutex_;

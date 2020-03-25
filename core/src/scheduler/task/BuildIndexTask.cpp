@@ -31,13 +31,13 @@
 namespace milvus {
 namespace scheduler {
 
-XBuildIndexTask::XBuildIndexTask(TableFileSchemaPtr file, TaskLabelPtr label)
+XBuildIndexTask::XBuildIndexTask(SegmentSchemaPtr file, TaskLabelPtr label)
     : Task(TaskType::BuildIndexTask, std::move(label)), file_(file) {
     if (file_) {
         EngineType engine_type;
-        if (file->file_type_ == TableFileSchema::FILE_TYPE::RAW ||
-            file->file_type_ == TableFileSchema::FILE_TYPE::TO_INDEX ||
-            file->file_type_ == TableFileSchema::FILE_TYPE::BACKUP) {
+        if (file->file_type_ == SegmentSchema::FILE_TYPE::RAW ||
+            file->file_type_ == SegmentSchema::FILE_TYPE::TO_INDEX ||
+            file->file_type_ == SegmentSchema::FILE_TYPE::BACKUP) {
             engine_type = engine::utils::IsBinaryMetricType(file->metric_type_) ? EngineType::FAISS_BIN_IDMAP
                                                                                 : EngineType::FAISS_IDMAP;
         } else {
@@ -123,11 +123,11 @@ XBuildIndexTask::Execute() {
         std::shared_ptr<engine::ExecutionEngine> index;
 
         // step 2: create collection file
-        engine::meta::TableFileSchema table_file;
+        engine::meta::SegmentSchema table_file;
         table_file.collection_id_ = file_->collection_id_;
         table_file.segment_id_ = file_->file_id_;
         table_file.date_ = file_->date_;
-        table_file.file_type_ = engine::meta::TableFileSchema::NEW_INDEX;
+        table_file.file_type_ = engine::meta::SegmentSchema::NEW_INDEX;
 
         engine::meta::MetaPtr meta_ptr = build_index_job->meta();
         Status status = meta_ptr->CreateTableFile(table_file);
@@ -152,7 +152,7 @@ XBuildIndexTask::Execute() {
             std::string msg = "Build index exception: " + std::string(ex.what());
             ENGINE_LOG_ERROR << msg;
 
-            table_file.file_type_ = engine::meta::TableFileSchema::TO_DELETE;
+            table_file.file_type_ = engine::meta::SegmentSchema::TO_DELETE;
             status = meta_ptr->UpdateTableFile(table_file);
             ENGINE_LOG_DEBUG << "Build index fail, mark file: " << table_file.file_id_ << " to to_delete";
 
@@ -193,7 +193,7 @@ XBuildIndexTask::Execute() {
         if (!status.ok()) {
             // if failed to serialize index file to disk
             // typical error: out of disk space, out of memory or permition denied
-            table_file.file_type_ = engine::meta::TableFileSchema::TO_DELETE;
+            table_file.file_type_ = engine::meta::SegmentSchema::TO_DELETE;
             status = meta_ptr->UpdateTableFile(table_file);
             ENGINE_LOG_DEBUG << "Failed to update file to index, mark file: " << table_file.file_id_ << " to to_delete";
 
@@ -207,14 +207,14 @@ XBuildIndexTask::Execute() {
         }
 
         // step 6: update meta
-        table_file.file_type_ = engine::meta::TableFileSchema::INDEX;
+        table_file.file_type_ = engine::meta::SegmentSchema::INDEX;
         table_file.file_size_ = server::CommonUtil::GetFileSize(table_file.location_);
         table_file.row_count_ = file_->row_count_;  // index->Count();
 
         auto origin_file = *file_;
-        origin_file.file_type_ = engine::meta::TableFileSchema::BACKUP;
+        origin_file.file_type_ = engine::meta::SegmentSchema::BACKUP;
 
-        engine::meta::TableFilesSchema update_files = {table_file, origin_file};
+        engine::meta::SegmentsSchema update_files = {table_file, origin_file};
 
         if (status.ok()) {  // makesure index file is sucessfully serialized to disk
             status = meta_ptr->UpdateTableFiles(update_files);
@@ -230,11 +230,11 @@ XBuildIndexTask::Execute() {
             }
         } else {
             // failed to update meta, mark the new file as to_delete, don't delete old file
-            origin_file.file_type_ = engine::meta::TableFileSchema::TO_INDEX;
+            origin_file.file_type_ = engine::meta::SegmentSchema::TO_INDEX;
             status = meta_ptr->UpdateTableFile(origin_file);
             ENGINE_LOG_DEBUG << "Failed to update file to index, mark file: " << origin_file.file_id_ << " to to_index";
 
-            table_file.file_type_ = engine::meta::TableFileSchema::TO_DELETE;
+            table_file.file_type_ = engine::meta::SegmentSchema::TO_DELETE;
             status = meta_ptr->UpdateTableFile(table_file);
             ENGINE_LOG_DEBUG << "Failed to up  date file to index, mark file: " << table_file.file_id_
                              << " to to_delete";

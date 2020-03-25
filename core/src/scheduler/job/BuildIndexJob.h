@@ -29,10 +29,10 @@
 namespace milvus {
 namespace scheduler {
 
-using engine::meta::TableFileSchemaPtr;
+using engine::meta::SegmentSchemaPtr;
 
-using Id2ToIndexMap = std::unordered_map<size_t, TableFileSchemaPtr>;
-using Id2ToTableFileMap = std::unordered_map<size_t, TableFileSchema>;
+using Id2ToIndexMap = std::unordered_map<size_t, SegmentSchemaPtr>;
+using Id2ToTableFileMap = std::unordered_map<size_t, SegmentSchema>;
 
 class BuildIndexJob : public Job, public server::CacheConfigHandler {
  public:
@@ -42,7 +42,7 @@ class BuildIndexJob : public Job, public server::CacheConfigHandler {
 
  public:
     bool
-    AddToIndexFiles(const TableFileSchemaPtr& to_index_file);
+    AddToIndexFiles(const SegmentSchemaPtr& to_index_file);
 
     void
     WaitBuildIndexFinish();

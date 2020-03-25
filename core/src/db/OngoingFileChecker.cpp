@@ -24,13 +24,13 @@ OngoingFileChecker::GetInstance() {
 }
 
 Status
-OngoingFileChecker::MarkOngoingFile(const meta::TableFileSchema& table_file) {
+OngoingFileChecker::MarkOngoingFile(const meta::SegmentSchema& table_file) {
     std::lock_guard<std::mutex> lck(mutex_);
     return MarkOngoingFileNoLock(table_file);
 }
 
 Status
-OngoingFileChecker::MarkOngoingFiles(const meta::TableFilesSchema& table_files) {
+OngoingFileChecker::MarkOngoingFiles(const meta::SegmentsSchema& table_files) {
     std::lock_guard<std::mutex> lck(mutex_);
 
     for (auto& table_file : table_files) {
@@ -41,13 +41,13 @@ OngoingFileChecker::MarkOngoingFiles(const meta::TableFilesSchema& table_files) 
 }
 
 Status
-OngoingFileChecker::UnmarkOngoingFile(const meta::TableFileSchema& table_file) {
+OngoingFileChecker::UnmarkOngoingFile(const meta::SegmentSchema& table_file) {
     std::lock_guard<std::mutex> lck(mutex_);
     return UnmarkOngoingFileNoLock(table_file);
 }
 
 Status
-OngoingFileChecker::UnmarkOngoingFiles(const meta::TableFilesSchema& table_files) {
+OngoingFileChecker::UnmarkOngoingFiles(const meta::SegmentsSchema& table_files) {
     std::lock_guard<std::mutex> lck(mutex_);
 
     for (auto& table_file : table_files) {
@@ -58,7 +58,7 @@ OngoingFileChecker::UnmarkOngoingFiles(const meta::TableFilesSchema& table_files
 }
 
 bool
-OngoingFileChecker::IsIgnored(const meta::TableFileSchema& schema) {
+OngoingFileChecker::IsIgnored(const meta::SegmentSchema& schema) {
     std::lock_guard<std::mutex> lck(mutex_);
 
     auto iter = ongoing_files_.find(schema.collection_id_);
@@ -75,7 +75,7 @@ OngoingFileChecker::IsIgnored(const meta::TableFileSchema& schema) {
 }
 
 Status
-OngoingFileChecker::MarkOngoingFileNoLock(const meta::TableFileSchema& table_file) {
+OngoingFileChecker::MarkOngoingFileNoLock(const meta::SegmentSchema& table_file) {
     if (table_file.collection_id_.empty() || table_file.file_id_.empty()) {
         return Status(DB_ERROR, "Invalid collection files");
     }
@@ -101,7 +101,7 @@ OngoingFileChecker::MarkOngoingFileNoLock(const meta::TableFileSchema& table_fil
 }
 
 Status
-OngoingFileChecker::UnmarkOngoingFileNoLock(const meta::TableFileSchema& table_file) {
+OngoingFileChecker::UnmarkOngoingFileNoLock(const meta::SegmentSchema& table_file) {
     if (table_file.collection_id_.empty() || table_file.file_id_.empty()) {
         return Status(DB_ERROR, "Invalid collection files");
     }

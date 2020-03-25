@@ -119,7 +119,7 @@ TEST(DBMiscTest, UTILS_TEST) {
     //    status =  engine::utils::CreateTablePath(options, TABLE_NAME);
     //    ASSERT_FALSE(status.ok());
 
-    milvus::engine::meta::TableFileSchema file;
+    milvus::engine::meta::SegmentSchema file;
     file.id_ = 50;
     file.collection_id_ = TABLE_NAME;
     file.file_type_ = 3;
@@ -181,7 +181,7 @@ TEST(DBMiscTest, SAFE_ID_GENERATOR_TEST) {
 TEST(DBMiscTest, CHECKER_TEST) {
     {
         milvus::engine::IndexFailedChecker checker;
-        milvus::engine::meta::TableFileSchema schema;
+        milvus::engine::meta::SegmentSchema schema;
         schema.collection_id_ = "aaa";
         schema.file_id_ = "5000";
         checker.MarkFailedIndexFile(schema, "5000 fail");
@@ -198,7 +198,7 @@ TEST(DBMiscTest, CHECKER_TEST) {
         checker.MarkFailedIndexFile(schema, "5002 fail");
         checker.MarkFailedIndexFile(schema, "5002 fail");
 
-        milvus::engine::meta::TableFilesSchema table_files = {schema};
+        milvus::engine::meta::SegmentsSchema table_files = {schema};
         checker.IgnoreFailedIndexFiles(table_files);
         ASSERT_TRUE(table_files.empty());
 
@@ -212,7 +212,7 @@ TEST(DBMiscTest, CHECKER_TEST) {
 
     {
         milvus::engine::OngoingFileChecker& checker = milvus::engine::OngoingFileChecker::GetInstance();
-        milvus::engine::meta::TableFileSchema schema;
+        milvus::engine::meta::SegmentSchema schema;
         schema.collection_id_ = "aaa";
         schema.file_id_ = "5000";
         checker.MarkOngoingFile(schema);
@@ -221,7 +221,7 @@ TEST(DBMiscTest, CHECKER_TEST) {
 
         schema.collection_id_ = "bbb";
         schema.file_id_ = "5001";
-        milvus::engine::meta::TableFilesSchema table_files = {schema};
+        milvus::engine::meta::SegmentsSchema table_files = {schema};
         checker.MarkOngoingFiles(table_files);
 
         ASSERT_TRUE(checker.IsIgnored(schema));

@@ -283,8 +283,8 @@ DBImpl::GetTableInfo(const std::string& collection_id, TableInfo& table_info) {
     }
 
     // step2: get native collection info
-    std::vector<int> file_types{meta::TableFileSchema::FILE_TYPE::RAW, meta::TableFileSchema::FILE_TYPE::TO_INDEX,
-                                meta::TableFileSchema::FILE_TYPE::INDEX};
+    std::vector<int> file_types{meta::SegmentSchema::FILE_TYPE::RAW, meta::SegmentSchema::FILE_TYPE::TO_INDEX,
+                                meta::SegmentSchema::FILE_TYPE::INDEX};
 
     static std::map<int32_t, std::string> index_type_name = {
         {(int32_t)engine::EngineType::FAISS_IDMAP, "IDMAP"},
@@ -300,7 +300,7 @@ DBImpl::GetTableInfo(const std::string& collection_id, TableInfo& table_info) {
     };
 
     for (auto& name_tag : name2tag) {
-        meta::TableFilesSchema table_files;
+        meta::SegmentsSchema table_files;
         status = meta_ptr_->FilesByType(name_tag.first, file_types, table_files);
         if (!status.ok()) {
             std::string err_msg = "Failed to get collection info: " + status.ToString();
@@ -339,7 +339,7 @@ DBImpl::PreloadTable(const std::string& collection_id) {
     }
 
     // step 1: get all collection files from parent collection
-    meta::TableFilesSchema files_array;
+    meta::SegmentsSchema files_array;
     auto status = GetFilesToSearch(collection_id, files_array);
     if (!status.ok()) {
         return status;
@@ -363,9 +363,9 @@ DBImpl::PreloadTable(const std::string& collection_id) {
     TimeRecorderAuto rc("Pre-load collection:" + collection_id);
     for (auto& file : files_array) {
         EngineType engine_type;
-        if (file.file_type_ == meta::TableFileSchema::FILE_TYPE::RAW ||
-            file.file_type_ == meta::TableFileSchema::FILE_TYPE::TO_INDEX ||
-            file.file_type_ == meta::TableFileSchema::FILE_TYPE::BACKUP) {
+        if (file.file_type_ == meta::SegmentSchema::FILE_TYPE::RAW ||
+            file.file_type_ == meta::SegmentSchema::FILE_TYPE::TO_INDEX ||
+            file.file_type_ == meta::SegmentSchema::FILE_TYPE::BACKUP) {
             engine_type =
                 utils::IsBinaryMetricType(file.metric_type_) ? EngineType::FAISS_BIN_IDMAP : EngineType::FAISS_IDMAP;
         } else {
@@ -673,9 +673,9 @@ DBImpl::Compact(const std::string& collection_id) {
     ENGINE_LOG_DEBUG << "Compacting collection: " << collection_id;
 
     // Get files to compact from meta.
-    std::vector<int> file_types{meta::TableFileSchema::FILE_TYPE::RAW, meta::TableFileSchema::FILE_TYPE::TO_INDEX,
-                                meta::TableFileSchema::FILE_TYPE::BACKUP};
-    meta::TableFilesSchema files_to_compact;
+    std::vector<int> file_types{meta::SegmentSchema::FILE_TYPE::RAW, meta::SegmentSchema::FILE_TYPE::TO_INDEX,
+                                meta::SegmentSchema::FILE_TYPE::BACKUP};
+    meta::SegmentsSchema files_to_compact;
     status = meta_ptr_->FilesByType(collection_id, file_types, files_to_compact);
     if (!status.ok()) {
         std::string err_msg = "Failed to get files to compact: " + status.message();
@@ -689,7 +689,7 @@ DBImpl::Compact(const std::string& collection_id) {
 
     Status compact_status;
     for (auto iter = files_to_compact.begin(); iter != files_to_compact.end();) {
-        meta::TableFileSchema file = *iter;
+        meta::SegmentSchema file = *iter;
         iter = files_to_compact.erase(iter);
 
         // Check if the segment needs compacting
@@ -704,7 +704,7 @@ DBImpl::Compact(const std::string& collection_id) {
             continue;  // skip this file and try compact next one
         }
 
-        meta::TableFilesSchema files_to_update;
+        meta::SegmentsSchema files_to_update;
         if (deleted_docs_size != 0) {
             compact_status = CompactFile(collection_id, file, files_to_update);
 
@@ -739,15 +739,15 @@ DBImpl::Compact(const std::string& collection_id) {
 }
 
 Status
-DBImpl::CompactFile(const std::string& collection_id, const meta::TableFileSchema& file,
-                    meta::TableFilesSchema& files_to_update) {
+DBImpl::CompactFile(const std::string& collection_id, const meta::SegmentSchema& file,
+                    meta::SegmentsSchema& files_to_update) {
     ENGINE_LOG_DEBUG << "Compacting segment " << file.segment_id_ << " for collection: " << collection_id;
 
     // Create new collection file
-    meta::TableFileSchema compacted_file;
+    meta::SegmentSchema compacted_file;
     compacted_file.collection_id_ = collection_id;
     // compacted_file.date_ = date;
-    compacted_file.file_type_ = meta::TableFileSchema::NEW_MERGE;  // TODO: use NEW_MERGE for now
+    compacted_file.file_type_ = meta::SegmentSchema::NEW_MERGE;  // TODO: use NEW_MERGE for now
     Status status = meta_ptr_->CreateTableFile(compacted_file);
 
     if (!status.ok()) {
@@ -772,7 +772,7 @@ DBImpl::CompactFile(const std::string& collection_id, const meta::TableFileSchem
     status = segment_writer_ptr->Serialize();
     if (!status.ok()) {
         ENGINE_LOG_ERROR << "Failed to serialize compacted segment: " << status.message();
-        compacted_file.file_type_ = meta::TableFileSchema::TO_DELETE;
+        compacted_file.file_type_ = meta::SegmentSchema::TO_DELETE;
         auto mark_status = meta_ptr_->UpdateTableFile(compacted_file);
         if (mark_status.ok()) {
             ENGINE_LOG_DEBUG << "Mark file: " << compacted_file.file_id_ << " to to_delete";
@@ -785,30 +785,30 @@ DBImpl::CompactFile(const std::string& collection_id, const meta::TableFileSchem
     // else set file type to RAW, no need to build index
     if (!utils::IsRawIndexType(compacted_file.engine_type_)) {
         compacted_file.file_type_ = (segment_writer_ptr->Size() >= compacted_file.index_file_size_)
-                                        ? meta::TableFileSchema::TO_INDEX
-                                        : meta::TableFileSchema::RAW;
+                                        ? meta::SegmentSchema::TO_INDEX
+                                        : meta::SegmentSchema::RAW;
     } else {
-        compacted_file.file_type_ = meta::TableFileSchema::RAW;
+        compacted_file.file_type_ = meta::SegmentSchema::RAW;
     }
     compacted_file.file_size_ = segment_writer_ptr->Size();
     compacted_file.row_count_ = segment_writer_ptr->VectorCount();
 
     if (compacted_file.row_count_ == 0) {
         ENGINE_LOG_DEBUG << "Compacted segment is empty. Mark it as TO_DELETE";
-        compacted_file.file_type_ = meta::TableFileSchema::TO_DELETE;
+        compacted_file.file_type_ = meta::SegmentSchema::TO_DELETE;
     }
 
     files_to_update.emplace_back(compacted_file);
 
     // Set all files in segment to TO_DELETE
     auto& segment_id = file.segment_id_;
-    meta::TableFilesSchema segment_files;
+    meta::SegmentsSchema segment_files;
     status = meta_ptr_->GetTableFilesBySegmentId(segment_id, segment_files);
     if (!status.ok()) {
         return status;
     }
     for (auto& f : segment_files) {
-        f.file_type_ = meta::TableFileSchema::FILE_TYPE::TO_DELETE;
+        f.file_type_ = meta::SegmentSchema::FILE_TYPE::TO_DELETE;
         files_to_update.emplace_back(f);
     }
 
@@ -839,11 +839,11 @@ DBImpl::GetVectorByID(const std::string& collection_id, const IDNumber& vector_i
         return status;
     }
 
-    meta::TableFilesSchema files_to_query;
+    meta::SegmentsSchema files_to_query;
 
-    std::vector<int> file_types{meta::TableFileSchema::FILE_TYPE::RAW, meta::TableFileSchema::FILE_TYPE::TO_INDEX,
-                                meta::TableFileSchema::FILE_TYPE::BACKUP};
-    meta::TableFilesSchema table_files;
+    std::vector<int> file_types{meta::SegmentSchema::FILE_TYPE::RAW, meta::SegmentSchema::FILE_TYPE::TO_INDEX,
+                                meta::SegmentSchema::FILE_TYPE::BACKUP};
+    meta::SegmentsSchema table_files;
     status = meta_ptr_->FilesByType(collection_id, file_types, files_to_query);
     if (!status.ok()) {
         std::string err_msg = "Failed to get files for GetVectorByID: " + status.message();
@@ -854,7 +854,7 @@ DBImpl::GetVectorByID(const std::string& collection_id, const IDNumber& vector_i
     std::vector<meta::TableSchema> partition_array;
     status = meta_ptr_->ShowPartitions(collection_id, partition_array);
     for (auto& schema : partition_array) {
-        meta::TableFilesSchema files;
+        meta::SegmentsSchema files;
         status = meta_ptr_->FilesByType(schema.collection_id_, file_types, files);
         if (!status.ok()) {
             std::string err_msg = "Failed to get files for GetVectorByID: " + status.message();
@@ -899,7 +899,7 @@ DBImpl::GetVectorIDs(const std::string& collection_id, const std::string& segmen
     }
 
     //  step 2: find segment
-    meta::TableFilesSchema table_files;
+    meta::SegmentsSchema table_files;
     status = meta_ptr_->GetTableFilesBySegmentId(segment_id, table_files);
     if (!status.ok()) {
         return status;
@@ -954,7 +954,7 @@ DBImpl::GetVectorIDs(const std::string& collection_id, const std::string& segmen
 
 Status
 DBImpl::GetVectorByIdHelper(const std::string& collection_id, IDNumber vector_id, VectorsData& vector,
-                            const meta::TableFilesSchema& files) {
+                            const meta::SegmentsSchema& files) {
     ENGINE_LOG_DEBUG << "Getting vector by id in " << files.size() << " files";
 
     for (auto& file : files) {
@@ -1108,7 +1108,7 @@ DBImpl::Query(const std::shared_ptr<server::Context>& context, const std::string
     }
 
     Status status;
-    meta::TableFilesSchema files_array;
+    meta::SegmentsSchema files_array;
 
     if (partition_tags.empty()) {
         // no partition tag specified, means search in whole collection
@@ -1165,7 +1165,7 @@ DBImpl::QueryByFileID(const std::shared_ptr<server::Context>& context, const std
         ids.push_back(std::stoul(id, &sz));
     }
 
-    meta::TableFilesSchema search_files;
+    meta::SegmentsSchema search_files;
     auto status = meta_ptr_->FilesByID(ids, search_files);
     if (!status.ok()) {
         return status;
@@ -1196,7 +1196,7 @@ DBImpl::Size(uint64_t& result) {
 // internal methods
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 Status
-DBImpl::QueryAsync(const std::shared_ptr<server::Context>& context, const meta::TableFilesSchema& files, uint64_t k,
+DBImpl::QueryAsync(const std::shared_ptr<server::Context>& context, const meta::SegmentsSchema& files, uint64_t k,
                    const milvus::json& extra_params, const VectorsData& vectors, ResultIds& result_ids,
                    ResultDistances& result_distances) {
     milvus::server::ContextChild tracer(context, "Query Async");
@@ -1210,7 +1210,7 @@ DBImpl::QueryAsync(const std::shared_ptr<server::Context>& context, const meta::
     ENGINE_LOG_DEBUG << "Engine query begin, index file count: " << files.size();
     scheduler::SearchJobPtr job = std::make_shared<scheduler::SearchJob>(tracer.Context(), k, extra_params, vectors);
     for (auto& file : files) {
-        scheduler::TableFileSchemaPtr file_ptr = std::make_shared<meta::TableFileSchema>(file);
+        scheduler::SegmentSchemaPtr file_ptr = std::make_shared<meta::SegmentSchema>(file);
         job->AddIndexFile(file_ptr);
     }
 
@@ -1361,15 +1361,15 @@ DBImpl::StartMergeTask() {
 }
 
 Status
-DBImpl::MergeFiles(const std::string& collection_id, const meta::TableFilesSchema& files) {
+DBImpl::MergeFiles(const std::string& collection_id, const meta::SegmentsSchema& files) {
     // const std::lock_guard<std::mutex> lock(flush_merge_compact_mutex_);
 
     ENGINE_LOG_DEBUG << "Merge files for collection: " << collection_id;
 
     // step 1: create collection file
-    meta::TableFileSchema table_file;
+    meta::SegmentSchema table_file;
     table_file.collection_id_ = collection_id;
-    table_file.file_type_ = meta::TableFileSchema::NEW_MERGE;
+    table_file.file_type_ = meta::SegmentSchema::NEW_MERGE;
     Status status = meta_ptr_->CreateTableFile(table_file);
 
     if (!status.ok()) {
@@ -1383,7 +1383,7 @@ DBImpl::MergeFiles(const std::string& collection_id, const meta::TableFilesSchem
         EngineFactory::Build(table_file.dimension_, table_file.location_, (EngineType)table_file.engine_type_,
                              (MetricType)table_file.metric_type_, table_file.nlist_);
 */
-    meta::TableFilesSchema updated;
+    meta::SegmentsSchema updated;
 
     std::string new_segment_dir;
     utils::GetParentPath(table_file.location_, new_segment_dir);
@@ -1395,7 +1395,7 @@ DBImpl::MergeFiles(const std::string& collection_id, const meta::TableFilesSchem
         utils::GetParentPath(file.location_, segment_dir_to_merge);
         segment_writer_ptr->Merge(segment_dir_to_merge, table_file.file_id_);
         auto file_schema = file;
-        file_schema.file_type_ = meta::TableFileSchema::TO_DELETE;
+        file_schema.file_type_ = meta::SegmentSchema::TO_DELETE;
         updated.push_back(file_schema);
         auto size = segment_writer_ptr->Size();
         if (size >= file_schema.index_file_size_) {
@@ -1419,7 +1419,7 @@ DBImpl::MergeFiles(const std::string& collection_id, const meta::TableFilesSchem
 
         // if failed to serialize merge file to disk
         // typical error: out of disk space, out of memory or permission denied
-        table_file.file_type_ = meta::TableFileSchema::TO_DELETE;
+        table_file.file_type_ = meta::SegmentSchema::TO_DELETE;
         status = meta_ptr_->UpdateTableFile(table_file);
         ENGINE_LOG_DEBUG << "Failed to update file to index, mark file: " << table_file.file_id_ << " to to_delete";
 
@@ -1431,10 +1431,10 @@ DBImpl::MergeFiles(const std::string& collection_id, const meta::TableFilesSchem
     // else set file type to RAW, no need to build index
     if (!utils::IsRawIndexType(table_file.engine_type_)) {
         table_file.file_type_ = (segment_writer_ptr->Size() >= table_file.index_file_size_)
-                                    ? meta::TableFileSchema::TO_INDEX
-                                    : meta::TableFileSchema::RAW;
+                                    ? meta::SegmentSchema::TO_INDEX
+                                    : meta::SegmentSchema::RAW;
     } else {
-        table_file.file_type_ = meta::TableFileSchema::RAW;
+        table_file.file_type_ = meta::SegmentSchema::RAW;
     }
     table_file.file_size_ = segment_writer_ptr->Size();
     table_file.row_count_ = segment_writer_ptr->VectorCount();
@@ -1454,7 +1454,7 @@ Status
 DBImpl::BackgroundMergeFiles(const std::string& collection_id) {
     const std::lock_guard<std::mutex> lock(flush_merge_compact_mutex_);
 
-    meta::TableFilesSchema raw_files;
+    meta::SegmentsSchema raw_files;
     auto status = meta_ptr_->FilesToMerge(collection_id, raw_files);
     if (!status.ok()) {
         ENGINE_LOG_ERROR << "Failed to get merge files for collection: " << collection_id;
@@ -1539,7 +1539,7 @@ DBImpl::StartBuildIndexTask(bool force) {
 void
 DBImpl::BackgroundBuildIndex() {
     std::unique_lock<std::mutex> lock(build_index_mutex_);
-    meta::TableFilesSchema to_index_files;
+    meta::SegmentsSchema to_index_files;
     meta_ptr_->FilesToIndex(to_index_files);
     Status status = index_failed_checker_.IgnoreFailedIndexFiles(to_index_files);
 
@@ -1548,10 +1548,10 @@ DBImpl::BackgroundBuildIndex() {
         status = OngoingFileChecker::GetInstance().MarkOngoingFiles(to_index_files);
 
         // step 2: put build index task to scheduler
-        std::vector<std::pair<scheduler::BuildIndexJobPtr, scheduler::TableFileSchemaPtr>> job2file_map;
+        std::vector<std::pair<scheduler::BuildIndexJobPtr, scheduler::SegmentSchemaPtr>> job2file_map;
         for (auto& file : to_index_files) {
             scheduler::BuildIndexJobPtr job = std::make_shared<scheduler::BuildIndexJob>(meta_ptr_, options_);
-            scheduler::TableFileSchemaPtr file_ptr = std::make_shared<meta::TableFileSchema>(file);
+            scheduler::SegmentSchemaPtr file_ptr = std::make_shared<meta::SegmentSchema>(file);
             job->AddToIndexFiles(file_ptr);
             scheduler::JobMgrInst::GetInstance()->Put(job);
             job2file_map.push_back(std::make_pair(job, file_ptr));
@@ -1560,7 +1560,7 @@ DBImpl::BackgroundBuildIndex() {
         // step 3: wait build index finished and mark failed files
         for (auto iter = job2file_map.begin(); iter != job2file_map.end(); ++iter) {
             scheduler::BuildIndexJobPtr job = iter->first;
-            meta::TableFileSchema& file_schema = *(iter->second.get());
+            meta::SegmentSchema& file_schema = *(iter->second.get());
             job->WaitBuildIndexFinish();
             if (!job->GetStatus().ok()) {
                 Status status = job->GetStatus();
@@ -1581,13 +1581,13 @@ DBImpl::BackgroundBuildIndex() {
 
 Status
 DBImpl::GetFilesToBuildIndex(const std::string& collection_id, const std::vector<int>& file_types,
-                             meta::TableFilesSchema& files) {
+                             meta::SegmentsSchema& files) {
     files.clear();
     auto status = meta_ptr_->FilesByType(collection_id, file_types, files);
 
     // only build index for files that row count greater than certain threshold
     for (auto it = files.begin(); it != files.end();) {
-        if ((*it).file_type_ == static_cast<int>(meta::TableFileSchema::RAW) &&
+        if ((*it).file_type_ == static_cast<int>(meta::SegmentSchema::RAW) &&
             (*it).row_count_ < meta::BUILD_INDEX_THRESHOLD) {
             it = files.erase(it);
         } else {
@@ -1599,10 +1599,10 @@ DBImpl::GetFilesToBuildIndex(const std::string& collection_id, const std::vector
 }
 
 Status
-DBImpl::GetFilesToSearch(const std::string& collection_id, meta::TableFilesSchema& files) {
+DBImpl::GetFilesToSearch(const std::string& collection_id, meta::SegmentsSchema& files) {
     ENGINE_LOG_DEBUG << "Collect files from collection: " << collection_id;
 
-    meta::TableFilesSchema search_files;
+    meta::SegmentsSchema search_files;
     auto status = meta_ptr_->FilesToSearch(collection_id, search_files);
     if (!status.ok()) {
         return status;
@@ -1733,21 +1733,21 @@ DBImpl::WaitTableIndexRecursively(const std::string& collection_id, const TableI
     std::vector<int> file_types;
     if (utils::IsRawIndexType(index.engine_type_)) {
         file_types = {
-            static_cast<int32_t>(meta::TableFileSchema::NEW),
-            static_cast<int32_t>(meta::TableFileSchema::NEW_MERGE),
+            static_cast<int32_t>(meta::SegmentSchema::NEW),
+            static_cast<int32_t>(meta::SegmentSchema::NEW_MERGE),
         };
     } else {
         file_types = {
-            static_cast<int32_t>(meta::TableFileSchema::RAW),
-            static_cast<int32_t>(meta::TableFileSchema::NEW),
-            static_cast<int32_t>(meta::TableFileSchema::NEW_MERGE),
-            static_cast<int32_t>(meta::TableFileSchema::NEW_INDEX),
-            static_cast<int32_t>(meta::TableFileSchema::TO_INDEX),
+            static_cast<int32_t>(meta::SegmentSchema::RAW),
+            static_cast<int32_t>(meta::SegmentSchema::NEW),
+            static_cast<int32_t>(meta::SegmentSchema::NEW_MERGE),
+            static_cast<int32_t>(meta::SegmentSchema::NEW_INDEX),
+            static_cast<int32_t>(meta::SegmentSchema::TO_INDEX),
         };
     }
 
     // get files to build index
-    meta::TableFilesSchema table_files;
+    meta::SegmentsSchema table_files;
     auto status = GetFilesToBuildIndex(collection_id, file_types, table_files);
     int times = 1;
 

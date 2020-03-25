@@ -47,7 +47,7 @@ MemTableFile::MemTableFile(const std::string& collection_id, const meta::MetaPtr
 
 Status
 MemTableFile::CreateTableFile() {
-    meta::TableFileSchema table_file_schema;
+    meta::SegmentSchema table_file_schema;
     table_file_schema.collection_id_ = collection_id_;
     auto status = meta_->CreateTableFile(table_file_schema);
     if (status.ok()) {
@@ -166,7 +166,7 @@ MemTableFile::Serialize(uint64_t wal_lsn) {
          * will try to serialize the same mem collection file and it won't be able to find the directory
          * to write to or update the associated collection file in meta.
          *
-        table_file_schema_.file_type_ = meta::TableFileSchema::TO_DELETE;
+        table_file_schema_.file_type_ = meta::SegmentSchema::TO_DELETE;
         meta_->UpdateTableFile(table_file_schema_);
         ENGINE_LOG_DEBUG << "Failed to serialize segment, mark file: " << table_file_schema_.file_id_
                          << " to to_delete";
@@ -186,10 +186,10 @@ MemTableFile::Serialize(uint64_t wal_lsn) {
     // else set file type to RAW, no need to build index
     if (table_file_schema_.engine_type_ != (int)EngineType::FAISS_IDMAP &&
         table_file_schema_.engine_type_ != (int)EngineType::FAISS_BIN_IDMAP) {
-        table_file_schema_.file_type_ = (size >= table_file_schema_.index_file_size_) ? meta::TableFileSchema::TO_INDEX
-                                                                                      : meta::TableFileSchema::RAW;
+        table_file_schema_.file_type_ = (size >= table_file_schema_.index_file_size_) ? meta::SegmentSchema::TO_INDEX
+                                                                                      : meta::SegmentSchema::RAW;
     } else {
-        table_file_schema_.file_type_ = meta::TableFileSchema::RAW;
+        table_file_schema_.file_type_ = meta::SegmentSchema::RAW;
     }
 
     // Set collection file's flush_lsn so WAL can roll back and delete garbage files which can be obtained from
@@ -198,7 +198,7 @@ MemTableFile::Serialize(uint64_t wal_lsn) {
 
     status = meta_->UpdateTableFile(table_file_schema_);
 
-    ENGINE_LOG_DEBUG << "New " << ((table_file_schema_.file_type_ == meta::TableFileSchema::RAW) ? "raw" : "to_index")
+    ENGINE_LOG_DEBUG << "New " << ((table_file_schema_.file_type_ == meta::SegmentSchema::RAW) ? "raw" : "to_index")
                      << " file " << table_file_schema_.file_id_ << " of size " << size << " bytes, lsn = " << wal_lsn;
 
     // TODO(zhiru): cache

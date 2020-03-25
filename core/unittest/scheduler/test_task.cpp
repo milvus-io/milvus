@@ -35,7 +35,7 @@ TEST(TaskTest, INVALID_INDEX) {
     auto trace_context = std::make_shared<milvus::tracing::TraceContext>(mock_span);
     dummy_context->SetTraceContext(trace_context);
 
-    TableFileSchemaPtr dummy_file = std::make_shared<engine::meta::TableFileSchema>();
+    SegmentSchemaPtr dummy_file = std::make_shared<engine::meta::SegmentSchema>();
     dummy_file->index_params_ = "{ \"nlist\": 16384 }";
     dummy_file->dimension_ = 64;
     auto search_task =
@@ -51,7 +51,7 @@ TEST(TaskTest, INVALID_INDEX) {
 TEST(TaskTest, TEST_TASK) {
     auto dummy_context = std::make_shared<milvus::server::Context>("dummy_request_id");
 
-    auto file = std::make_shared<TableFileSchema>();
+    auto file = std::make_shared<SegmentSchema>();
     file->index_params_ = "{ \"nlist\": 16384 }";
     file->dimension_ = 64;
     auto label = std::make_shared<BroadcastLabel>();

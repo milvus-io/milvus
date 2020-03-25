@@ -31,13 +31,13 @@ Status
 DeleteTablePath(const DBMetaOptions& options, const std::string& collection_id, bool force = true);
 
 Status
-CreateTableFilePath(const DBMetaOptions& options, meta::TableFileSchema& table_file);
+CreateTableFilePath(const DBMetaOptions& options, meta::SegmentSchema& table_file);
 Status
-GetTableFilePath(const DBMetaOptions& options, meta::TableFileSchema& table_file);
+GetTableFilePath(const DBMetaOptions& options, meta::SegmentSchema& table_file);
 Status
-DeleteTableFilePath(const DBMetaOptions& options, meta::TableFileSchema& table_file);
+DeleteTableFilePath(const DBMetaOptions& options, meta::SegmentSchema& table_file);
 Status
-DeleteSegment(const DBMetaOptions& options, meta::TableFileSchema& table_file);
+DeleteSegment(const DBMetaOptions& options, meta::SegmentSchema& table_file);
 
 Status
 GetParentPath(const std::string& path, std::string& parent_path);

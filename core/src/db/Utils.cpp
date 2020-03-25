@@ -36,19 +36,19 @@ uint64_t index_file_counter = 0;
 std::mutex index_file_counter_mutex;
 
 static std::string
-ConstructParentFolder(const std::string& db_path, const meta::TableFileSchema& table_file) {
+ConstructParentFolder(const std::string& db_path, const meta::SegmentSchema& table_file) {
     std::string table_path = db_path + TABLES_FOLDER + table_file.collection_id_;
     std::string partition_path = table_path + "/" + table_file.segment_id_;
     return partition_path;
 }
 
 static std::string
-GetTableFileParentFolder(const DBMetaOptions& options, const meta::TableFileSchema& table_file) {
+GetTableFileParentFolder(const DBMetaOptions& options, const meta::SegmentSchema& table_file) {
     uint64_t path_count = options.slave_paths_.size() + 1;
     std::string target_path = options.path_;
     uint64_t index = 0;
 
-    if (meta::TableFileSchema::NEW_INDEX == table_file.file_type_) {
+    if (meta::SegmentSchema::NEW_INDEX == table_file.file_type_) {
         // index file is large file and to be persisted permanently
         // we need to distribute index files to each db_path averagely
         // round robin according to a file counter
@@ -135,7 +135,7 @@ DeleteTablePath(const DBMetaOptions& options, const std::string& collection_id, 
 }
 
 Status
-CreateTableFilePath(const DBMetaOptions& options, meta::TableFileSchema& table_file) {
+CreateTableFilePath(const DBMetaOptions& options, meta::SegmentSchema& table_file) {
     std::string parent_path = GetTableFileParentFolder(options, table_file);
 
     auto status = server::CommonUtil::CreateDirectory(parent_path);
@@ -151,7 +151,7 @@ CreateTableFilePath(const DBMetaOptions& options, meta::TableFileSchema& table_f
 }
 
 Status
-GetTableFilePath(const DBMetaOptions& options, meta::TableFileSchema& table_file) {
+GetTableFilePath(const DBMetaOptions& options, meta::SegmentSchema& table_file) {
     std::string parent_path = ConstructParentFolder(options.path_, table_file);
     std::string file_path = parent_path + "/" + table_file.file_id_;
 
@@ -188,14 +188,14 @@ GetTableFilePath(const DBMetaOptions& options, meta::TableFileSchema& table_file
 }
 
 Status
-DeleteTableFilePath(const DBMetaOptions& options, meta::TableFileSchema& table_file) {
+DeleteTableFilePath(const DBMetaOptions& options, meta::SegmentSchema& table_file) {
     utils::GetTableFilePath(options, table_file);
     boost::filesystem::remove(table_file.location_);
     return Status::OK();
 }
 
 Status
-DeleteSegment(const DBMetaOptions& options, meta::TableFileSchema& table_file) {
+DeleteSegment(const DBMetaOptions& options, meta::SegmentSchema& table_file) {
     utils::GetTableFilePath(options, table_file);
     std::string segment_dir;
     GetParentPath(table_file.location_, segment_dir);

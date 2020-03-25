@@ -67,7 +67,7 @@ class MemTableFile : public server::CacheConfigHandler {
 
  private:
     const std::string collection_id_;
-    meta::TableFileSchema table_file_schema_;
+    meta::SegmentSchema table_file_schema_;
     meta::MetaPtr meta_;
     DBOptions options_;
     size_t current_mem_;
