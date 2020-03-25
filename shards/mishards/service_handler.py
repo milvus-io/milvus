@@ -62,6 +62,9 @@ class ServiceHandler(milvus_pb2_grpc.MilvusServiceServicer):
                 status, _ = files_collection
                 return status, [], []
 
+            if files_collection.status.error_code != 0:
+                return files_collection.status, [], []
+
             row_num = files_collection.row_num
             # row_num is equal to 0, result is empty
             if not row_num:
@@ -111,16 +114,12 @@ class ServiceHandler(milvus_pb2_grpc.MilvusServiceServicer):
                   partition_tags=None,
                   **kwargs):
         metadata = kwargs.get('metadata', None)
-        # range_array = [
-        #     utilities.range_to_date(r, metadata=metadata) for r in range_array
-        # ] if range_array else None
 
         routing = {}
         p_span = None if self.tracer.empty else context.get_active_span(
         ).context
         with self.tracer.start_span('get_routing', child_of=p_span):
             routing = self.router.routing(table_id,
-                                          # range_array=range_array,
                                           partition_tags=partition_tags,
                                           metadata=metadata)
         logger.info('Routing: {}'.format(routing))
@@ -149,7 +148,7 @@ class ServiceHandler(milvus_pb2_grpc.MilvusServiceServicer):
                                                         top_k=topk,
                                                         params=params)
                 if ret.status.error_code != 0:
-                    logger.error(ret.status)
+                    logger.error("Search fail {}".format(ret.status))
 
                 end = time.time()
 
@@ -336,7 +335,6 @@ class ServiceHandler(milvus_pb2_grpc.MilvusServiceServicer):
             status, info = self.router.connection(
                 metadata=metadata).describe_collection(table_name)
             if not status.OK():
-                logger.error("| Search | describe_collection fail. ", status)
                 raise exceptions.TableNotFoundError(table_name,
                                                     metadata=metadata)
 
