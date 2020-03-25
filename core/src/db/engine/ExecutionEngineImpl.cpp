@@ -544,9 +544,15 @@ ExecutionEngineImpl::CopyToGpu(uint64_t device_id, bool hybrid) {
         }
 
         try {
+            /* Index data is copied to GPU first, then added into GPU cache.
+             * We MUST add a lock here to avoid more than one INDEX are copied to one GPU card at same time,
+             * which will potentially cause GPU out of memory.
+             */
+            std::lock_guard<std::mutex> lock(*(cache::GpuCacheMgr::GetInstanceMutex(device_id)));
+            ENGINE_LOG_DEBUG << "CPU to GPU" << device_id << " start";
             index_ = knowhere::cloner::CopyCpuToGpu(index_, device_id, knowhere::Config());
-            ENGINE_LOG_DEBUG << "CPU to GPU" << device_id;
             GpuCache(device_id);
+            ENGINE_LOG_DEBUG << "CPU to GPU" << device_id << " finished";
         } catch (std::exception& e) {
             ENGINE_LOG_ERROR << e.what();
             return Status(DB_ERROR, e.what());
