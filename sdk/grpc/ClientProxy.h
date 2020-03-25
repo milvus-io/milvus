@@ -133,6 +133,13 @@ class ClientProxy : public Connection {
                  HEntity& entities,
                  std::vector<uint64_t>& id_array) override;
 
+    Status
+    HybridSearch(const std::string& collection_name,
+                 const std::vector<std::string>& partition_list,
+                 BooleanQueryPtr& boolean_query,
+                 const std::string& extra_params,
+                 TopKQueryResult& topk_query_result) override;
+
  private:
     std::shared_ptr<::grpc::Channel> channel_;
     std::shared_ptr<GrpcClient> client_ptr_;

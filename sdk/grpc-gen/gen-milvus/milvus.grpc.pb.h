@@ -434,19 +434,20 @@ class MilvusService final {
     std::unique_ptr< ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::HEntityIDs>> PrepareAsyncInsertEntity(::grpc::ClientContext* context, const ::milvus::grpc::HInsertParam& request, ::grpc::CompletionQueue* cq) {
       return std::unique_ptr< ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::HEntityIDs>>(PrepareAsyncInsertEntityRaw(context, request, cq));
     }
-    virtual ::grpc::Status HybridSearch(::grpc::ClientContext* context, const ::milvus::grpc::HSearchParam& request, ::milvus::grpc::HQueryResult* response) = 0;
-    std::unique_ptr< ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::HQueryResult>> AsyncHybridSearch(::grpc::ClientContext* context, const ::milvus::grpc::HSearchParam& request, ::grpc::CompletionQueue* cq) {
-      return std::unique_ptr< ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::HQueryResult>>(AsyncHybridSearchRaw(context, request, cq));
+    // TODO(yukun): will change to HQueryResult
+    virtual ::grpc::Status HybridSearch(::grpc::ClientContext* context, const ::milvus::grpc::HSearchParam& request, ::milvus::grpc::TopKQueryResult* response) = 0;
+    std::unique_ptr< ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::TopKQueryResult>> AsyncHybridSearch(::grpc::ClientContext* context, const ::milvus::grpc::HSearchParam& request, ::grpc::CompletionQueue* cq) {
+      return std::unique_ptr< ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::TopKQueryResult>>(AsyncHybridSearchRaw(context, request, cq));
     }
-    std::unique_ptr< ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::HQueryResult>> PrepareAsyncHybridSearch(::grpc::ClientContext* context, const ::milvus::grpc::HSearchParam& request, ::grpc::CompletionQueue* cq) {
-      return std::unique_ptr< ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::HQueryResult>>(PrepareAsyncHybridSearchRaw(context, request, cq));
+    std::unique_ptr< ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::TopKQueryResult>> PrepareAsyncHybridSearch(::grpc::ClientContext* context, const ::milvus::grpc::HSearchParam& request, ::grpc::CompletionQueue* cq) {
+      return std::unique_ptr< ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::TopKQueryResult>>(PrepareAsyncHybridSearchRaw(context, request, cq));
     }
-    virtual ::grpc::Status HybridSearchInSegments(::grpc::ClientContext* context, const ::milvus::grpc::HSearchInSegmentsParam& request, ::milvus::grpc::HQueryResult* response) = 0;
-    std::unique_ptr< ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::HQueryResult>> AsyncHybridSearchInSegments(::grpc::ClientContext* context, const ::milvus::grpc::HSearchInSegmentsParam& request, ::grpc::CompletionQueue* cq) {
-      return std::unique_ptr< ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::HQueryResult>>(AsyncHybridSearchInSegmentsRaw(context, request, cq));
+    virtual ::grpc::Status HybridSearchInSegments(::grpc::ClientContext* context, const ::milvus::grpc::HSearchInSegmentsParam& request, ::milvus::grpc::TopKQueryResult* response) = 0;
+    std::unique_ptr< ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::TopKQueryResult>> AsyncHybridSearchInSegments(::grpc::ClientContext* context, const ::milvus::grpc::HSearchInSegmentsParam& request, ::grpc::CompletionQueue* cq) {
+      return std::unique_ptr< ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::TopKQueryResult>>(AsyncHybridSearchInSegmentsRaw(context, request, cq));
     }
-    std::unique_ptr< ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::HQueryResult>> PrepareAsyncHybridSearchInSegments(::grpc::ClientContext* context, const ::milvus::grpc::HSearchInSegmentsParam& request, ::grpc::CompletionQueue* cq) {
-      return std::unique_ptr< ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::HQueryResult>>(PrepareAsyncHybridSearchInSegmentsRaw(context, request, cq));
+    std::unique_ptr< ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::TopKQueryResult>> PrepareAsyncHybridSearchInSegments(::grpc::ClientContext* context, const ::milvus::grpc::HSearchInSegmentsParam& request, ::grpc::CompletionQueue* cq) {
+      return std::unique_ptr< ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::TopKQueryResult>>(PrepareAsyncHybridSearchInSegmentsRaw(context, request, cq));
     }
     virtual ::grpc::Status GetEntityByID(::grpc::ClientContext* context, const ::milvus::grpc::HEntityIdentity& request, ::milvus::grpc::HEntity* response) = 0;
     std::unique_ptr< ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::HEntity>> AsyncGetEntityByID(::grpc::ClientContext* context, const ::milvus::grpc::HEntityIdentity& request, ::grpc::CompletionQueue* cq) {
@@ -760,14 +761,15 @@ class MilvusService final {
       virtual void InsertEntity(::grpc::ClientContext* context, const ::grpc::ByteBuffer* request, ::milvus::grpc::HEntityIDs* response, std::function<void(::grpc::Status)>) = 0;
       virtual void InsertEntity(::grpc::ClientContext* context, const ::milvus::grpc::HInsertParam* request, ::milvus::grpc::HEntityIDs* response, ::grpc::experimental::ClientUnaryReactor* reactor) = 0;
       virtual void InsertEntity(::grpc::ClientContext* context, const ::grpc::ByteBuffer* request, ::milvus::grpc::HEntityIDs* response, ::grpc::experimental::ClientUnaryReactor* reactor) = 0;
-      virtual void HybridSearch(::grpc::ClientContext* context, const ::milvus::grpc::HSearchParam* request, ::milvus::grpc::HQueryResult* response, std::function<void(::grpc::Status)>) = 0;
-      virtual void HybridSearch(::grpc::ClientContext* context, const ::grpc::ByteBuffer* request, ::milvus::grpc::HQueryResult* response, std::function<void(::grpc::Status)>) = 0;
-      virtual void HybridSearch(::grpc::ClientContext* context, const ::milvus::grpc::HSearchParam* request, ::milvus::grpc::HQueryResult* response, ::grpc::experimental::ClientUnaryReactor* reactor) = 0;
-      virtual void HybridSearch(::grpc::ClientContext* context, const ::grpc::ByteBuffer* request, ::milvus::grpc::HQueryResult* response, ::grpc::experimental::ClientUnaryReactor* reactor) = 0;
-      virtual void HybridSearchInSegments(::grpc::ClientContext* context, const ::milvus::grpc::HSearchInSegmentsParam* request, ::milvus::grpc::HQueryResult* response, std::function<void(::grpc::Status)>) = 0;
-      virtual void HybridSearchInSegments(::grpc::ClientContext* context, const ::grpc::ByteBuffer* request, ::milvus::grpc::HQueryResult* response, std::function<void(::grpc::Status)>) = 0;
-      virtual void HybridSearchInSegments(::grpc::ClientContext* context, const ::milvus::grpc::HSearchInSegmentsParam* request, ::milvus::grpc::HQueryResult* response, ::grpc::experimental::ClientUnaryReactor* reactor) = 0;
-      virtual void HybridSearchInSegments(::grpc::ClientContext* context, const ::grpc::ByteBuffer* request, ::milvus::grpc::HQueryResult* response, ::grpc::experimental::ClientUnaryReactor* reactor) = 0;
+      // TODO(yukun): will change to HQueryResult
+      virtual void HybridSearch(::grpc::ClientContext* context, const ::milvus::grpc::HSearchParam* request, ::milvus::grpc::TopKQueryResult* response, std::function<void(::grpc::Status)>) = 0;
+      virtual void HybridSearch(::grpc::ClientContext* context, const ::grpc::ByteBuffer* request, ::milvus::grpc::TopKQueryResult* response, std::function<void(::grpc::Status)>) = 0;
+      virtual void HybridSearch(::grpc::ClientContext* context, const ::milvus::grpc::HSearchParam* request, ::milvus::grpc::TopKQueryResult* response, ::grpc::experimental::ClientUnaryReactor* reactor) = 0;
+      virtual void HybridSearch(::grpc::ClientContext* context, const ::grpc::ByteBuffer* request, ::milvus::grpc::TopKQueryResult* response, ::grpc::experimental::ClientUnaryReactor* reactor) = 0;
+      virtual void HybridSearchInSegments(::grpc::ClientContext* context, const ::milvus::grpc::HSearchInSegmentsParam* request, ::milvus::grpc::TopKQueryResult* response, std::function<void(::grpc::Status)>) = 0;
+      virtual void HybridSearchInSegments(::grpc::ClientContext* context, const ::grpc::ByteBuffer* request, ::milvus::grpc::TopKQueryResult* response, std::function<void(::grpc::Status)>) = 0;
+      virtual void HybridSearchInSegments(::grpc::ClientContext* context, const ::milvus::grpc::HSearchInSegmentsParam* request, ::milvus::grpc::TopKQueryResult* response, ::grpc::experimental::ClientUnaryReactor* reactor) = 0;
+      virtual void HybridSearchInSegments(::grpc::ClientContext* context, const ::grpc::ByteBuffer* request, ::milvus::grpc::TopKQueryResult* response, ::grpc::experimental::ClientUnaryReactor* reactor) = 0;
       virtual void GetEntityByID(::grpc::ClientContext* context, const ::milvus::grpc::HEntityIdentity* request, ::milvus::grpc::HEntity* response, std::function<void(::grpc::Status)>) = 0;
       virtual void GetEntityByID(::grpc::ClientContext* context, const ::grpc::ByteBuffer* request, ::milvus::grpc::HEntity* response, std::function<void(::grpc::Status)>) = 0;
       virtual void GetEntityByID(::grpc::ClientContext* context, const ::milvus::grpc::HEntityIdentity* request, ::milvus::grpc::HEntity* response, ::grpc::experimental::ClientUnaryReactor* reactor) = 0;
@@ -849,10 +851,10 @@ class MilvusService final {
     virtual ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::Status>* PrepareAsyncPreloadCollectionRaw(::grpc::ClientContext* context, const ::milvus::grpc::CollectionName& request, ::grpc::CompletionQueue* cq) = 0;
     virtual ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::HEntityIDs>* AsyncInsertEntityRaw(::grpc::ClientContext* context, const ::milvus::grpc::HInsertParam& request, ::grpc::CompletionQueue* cq) = 0;
     virtual ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::HEntityIDs>* PrepareAsyncInsertEntityRaw(::grpc::ClientContext* context, const ::milvus::grpc::HInsertParam& request, ::grpc::CompletionQueue* cq) = 0;
-    virtual ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::HQueryResult>* AsyncHybridSearchRaw(::grpc::ClientContext* context, const ::milvus::grpc::HSearchParam& request, ::grpc::CompletionQueue* cq) = 0;
-    virtual ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::HQueryResult>* PrepareAsyncHybridSearchRaw(::grpc::ClientContext* context, const ::milvus::grpc::HSearchParam& request, ::grpc::CompletionQueue* cq) = 0;
-    virtual ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::HQueryResult>* AsyncHybridSearchInSegmentsRaw(::grpc::ClientContext* context, const ::milvus::grpc::HSearchInSegmentsParam& request, ::grpc::CompletionQueue* cq) = 0;
-    virtual ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::HQueryResult>* PrepareAsyncHybridSearchInSegmentsRaw(::grpc::ClientContext* context, const ::milvus::grpc::HSearchInSegmentsParam& request, ::grpc::CompletionQueue* cq) = 0;
+    virtual ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::TopKQueryResult>* AsyncHybridSearchRaw(::grpc::ClientContext* context, const ::milvus::grpc::HSearchParam& request, ::grpc::CompletionQueue* cq) = 0;
+    virtual ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::TopKQueryResult>* PrepareAsyncHybridSearchRaw(::grpc::ClientContext* context, const ::milvus::grpc::HSearchParam& request, ::grpc::CompletionQueue* cq) = 0;
+    virtual ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::TopKQueryResult>* AsyncHybridSearchInSegmentsRaw(::grpc::ClientContext* context, const ::milvus::grpc::HSearchInSegmentsParam& request, ::grpc::CompletionQueue* cq) = 0;
+    virtual ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::TopKQueryResult>* PrepareAsyncHybridSearchInSegmentsRaw(::grpc::ClientContext* context, const ::milvus::grpc::HSearchInSegmentsParam& request, ::grpc::CompletionQueue* cq) = 0;
     virtual ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::HEntity>* AsyncGetEntityByIDRaw(::grpc::ClientContext* context, const ::milvus::grpc::HEntityIdentity& request, ::grpc::CompletionQueue* cq) = 0;
     virtual ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::HEntity>* PrepareAsyncGetEntityByIDRaw(::grpc::ClientContext* context, const ::milvus::grpc::HEntityIdentity& request, ::grpc::CompletionQueue* cq) = 0;
     virtual ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::HEntityIDs>* AsyncGetEntityIDsRaw(::grpc::ClientContext* context, const ::milvus::grpc::HGetEntityIDsParam& request, ::grpc::CompletionQueue* cq) = 0;
@@ -1094,19 +1096,19 @@ class MilvusService final {
     std::unique_ptr< ::grpc::ClientAsyncResponseReader< ::milvus::grpc::HEntityIDs>> PrepareAsyncInsertEntity(::grpc::ClientContext* context, const ::milvus::grpc::HInsertParam& request, ::grpc::CompletionQueue* cq) {
       return std::unique_ptr< ::grpc::ClientAsyncResponseReader< ::milvus::grpc::HEntityIDs>>(PrepareAsyncInsertEntityRaw(context, request, cq));
     }
-    ::grpc::Status HybridSearch(::grpc::ClientContext* context, const ::milvus::grpc::HSearchParam& request, ::milvus::grpc::HQueryResult* response) override;
-    std::unique_ptr< ::grpc::ClientAsyncResponseReader< ::milvus::grpc::HQueryResult>> AsyncHybridSearch(::grpc::ClientContext* context, const ::milvus::grpc::HSearchParam& request, ::grpc::CompletionQueue* cq) {
-      return std::unique_ptr< ::grpc::ClientAsyncResponseReader< ::milvus::grpc::HQueryResult>>(AsyncHybridSearchRaw(context, request, cq));
+    ::grpc::Status HybridSearch(::grpc::ClientContext* context, const ::milvus::grpc::HSearchParam& request, ::milvus::grpc::TopKQueryResult* response) override;
+    std::unique_ptr< ::grpc::ClientAsyncResponseReader< ::milvus::grpc::TopKQueryResult>> AsyncHybridSearch(::grpc::ClientContext* context, const ::milvus::grpc::HSearchParam& request, ::grpc::CompletionQueue* cq) {
+      return std::unique_ptr< ::grpc::ClientAsyncResponseReader< ::milvus::grpc::TopKQueryResult>>(AsyncHybridSearchRaw(context, request, cq));
     }
-    std::unique_ptr< ::grpc::ClientAsyncResponseReader< ::milvus::grpc::HQueryResult>> PrepareAsyncHybridSearch(::grpc::ClientContext* context, const ::milvus::grpc::HSearchParam& request, ::grpc::CompletionQueue* cq) {
-      return std::unique_ptr< ::grpc::ClientAsyncResponseReader< ::milvus::grpc::HQueryResult>>(PrepareAsyncHybridSearchRaw(context, request, cq));
+    std::unique_ptr< ::grpc::ClientAsyncResponseReader< ::milvus::grpc::TopKQueryResult>> PrepareAsyncHybridSearch(::grpc::ClientContext* context, const ::milvus::grpc::HSearchParam& request, ::grpc::CompletionQueue* cq) {
+      return std::unique_ptr< ::grpc::ClientAsyncResponseReader< ::milvus::grpc::TopKQueryResult>>(PrepareAsyncHybridSearchRaw(context, request, cq));
     }
-    ::grpc::Status HybridSearchInSegments(::grpc::ClientContext* context, const ::milvus::grpc::HSearchInSegmentsParam& request, ::milvus::grpc::HQueryResult* response) override;
-    std::unique_ptr< ::grpc::ClientAsyncResponseReader< ::milvus::grpc::HQueryResult>> AsyncHybridSearchInSegments(::grpc::ClientContext* context, const ::milvus::grpc::HSearchInSegmentsParam& request, ::grpc::CompletionQueue* cq) {
-      return std::unique_ptr< ::grpc::ClientAsyncResponseReader< ::milvus::grpc::HQueryResult>>(AsyncHybridSearchInSegmentsRaw(context, request, cq));
+    ::grpc::Status HybridSearchInSegments(::grpc::ClientContext* context, const ::milvus::grpc::HSearchInSegmentsParam& request, ::milvus::grpc::TopKQueryResult* response) override;
+    std::unique_ptr< ::grpc::ClientAsyncResponseReader< ::milvus::grpc::TopKQueryResult>> AsyncHybridSearchInSegments(::grpc::ClientContext* context, const ::milvus::grpc::HSearchInSegmentsParam& request, ::grpc::CompletionQueue* cq) {
+      return std::unique_ptr< ::grpc::ClientAsyncResponseReader< ::milvus::grpc::TopKQueryResult>>(AsyncHybridSearchInSegmentsRaw(context, request, cq));
     }
-    std::unique_ptr< ::grpc::ClientAsyncResponseReader< ::milvus::grpc::HQueryResult>> PrepareAsyncHybridSearchInSegments(::grpc::ClientContext* context, const ::milvus::grpc::HSearchInSegmentsParam& request, ::grpc::CompletionQueue* cq) {
-      return std::unique_ptr< ::grpc::ClientAsyncResponseReader< ::milvus::grpc::HQueryResult>>(PrepareAsyncHybridSearchInSegmentsRaw(context, request, cq));
+    std::unique_ptr< ::grpc::ClientAsyncResponseReader< ::milvus::grpc::TopKQueryResult>> PrepareAsyncHybridSearchInSegments(::grpc::ClientContext* context, const ::milvus::grpc::HSearchInSegmentsParam& request, ::grpc::CompletionQueue* cq) {
+      return std::unique_ptr< ::grpc::ClientAsyncResponseReader< ::milvus::grpc::TopKQueryResult>>(PrepareAsyncHybridSearchInSegmentsRaw(context, request, cq));
     }
     ::grpc::Status GetEntityByID(::grpc::ClientContext* context, const ::milvus::grpc::HEntityIdentity& request, ::milvus::grpc::HEntity* response) override;
     std::unique_ptr< ::grpc::ClientAsyncResponseReader< ::milvus::grpc::HEntity>> AsyncGetEntityByID(::grpc::ClientContext* context, const ::milvus::grpc::HEntityIdentity& request, ::grpc::CompletionQueue* cq) {
@@ -1264,14 +1266,14 @@ class MilvusService final {
       void InsertEntity(::grpc::ClientContext* context, const ::grpc::ByteBuffer* request, ::milvus::grpc::HEntityIDs* response, std::function<void(::grpc::Status)>) override;
       void InsertEntity(::grpc::ClientContext* context, const ::milvus::grpc::HInsertParam* request, ::milvus::grpc::HEntityIDs* response, ::grpc::experimental::ClientUnaryReactor* reactor) override;
       void InsertEntity(::grpc::ClientContext* context, const ::grpc::ByteBuffer* request, ::milvus::grpc::HEntityIDs* response, ::grpc::experimental::ClientUnaryReactor* reactor) override;
-      void HybridSearch(::grpc::ClientContext* context, const ::milvus::grpc::HSearchParam* request, ::milvus::grpc::HQueryResult* response, std::function<void(::grpc::Status)>) override;
-      void HybridSearch(::grpc::ClientContext* context, const ::grpc::ByteBuffer* request, ::milvus::grpc::HQueryResult* response, std::function<void(::grpc::Status)>) override;
-      void HybridSearch(::grpc::ClientContext* context, const ::milvus::grpc::HSearchParam* request, ::milvus::grpc::HQueryResult* response, ::grpc::experimental::ClientUnaryReactor* reactor) override;
-      void HybridSearch(::grpc::ClientContext* context, const ::grpc::ByteBuffer* request, ::milvus::grpc::HQueryResult* response, ::grpc::experimental::ClientUnaryReactor* reactor) override;
-      void HybridSearchInSegments(::grpc::ClientContext* context, const ::milvus::grpc::HSearchInSegmentsParam* request, ::milvus::grpc::HQueryResult* response, std::function<void(::grpc::Status)>) override;
-      void HybridSearchInSegments(::grpc::ClientContext* context, const ::grpc::ByteBuffer* request, ::milvus::grpc::HQueryResult* response, std::function<void(::grpc::Status)>) override;
-      void HybridSearchInSegments(::grpc::ClientContext* context, const ::milvus::grpc::HSearchInSegmentsParam* request, ::milvus::grpc::HQueryResult* response, ::grpc::experimental::ClientUnaryReactor* reactor) override;
-      void HybridSearchInSegments(::grpc::ClientContext* context, const ::grpc::ByteBuffer* request, ::milvus::grpc::HQueryResult* response, ::grpc::experimental::ClientUnaryReactor* reactor) override;
+      void HybridSearch(::grpc::ClientContext* context, const ::milvus::grpc::HSearchParam* request, ::milvus::grpc::TopKQueryResult* response, std::function<void(::grpc::Status)>) override;
+      void HybridSearch(::grpc::ClientContext* context, const ::grpc::ByteBuffer* request, ::milvus::grpc::TopKQueryResult* response, std::function<void(::grpc::Status)>) override;
+      void HybridSearch(::grpc::ClientContext* context, const ::milvus::grpc::HSearchParam* request, ::milvus::grpc::TopKQueryResult* response, ::grpc::experimental::ClientUnaryReactor* reactor) override;
+      void HybridSearch(::grpc::ClientContext* context, const ::grpc::ByteBuffer* request, ::milvus::grpc::TopKQueryResult* response, ::grpc::experimental::ClientUnaryReactor* reactor) override;
+      void HybridSearchInSegments(::grpc::ClientContext* context, const ::milvus::grpc::HSearchInSegmentsParam* request, ::milvus::grpc::TopKQueryResult* response, std::function<void(::grpc::Status)>) override;
+      void HybridSearchInSegments(::grpc::ClientContext* context, const ::grpc::ByteBuffer* request, ::milvus::grpc::TopKQueryResult* response, std::function<void(::grpc::Status)>) override;
+      void HybridSearchInSegments(::grpc::ClientContext* context, const ::milvus::grpc::HSearchInSegmentsParam* request, ::milvus::grpc::TopKQueryResult* response, ::grpc::experimental::ClientUnaryReactor* reactor) override;
+      void HybridSearchInSegments(::grpc::ClientContext* context, const ::grpc::ByteBuffer* request, ::milvus::grpc::TopKQueryResult* response, ::grpc::experimental::ClientUnaryReactor* reactor) override;
       void GetEntityByID(::grpc::ClientContext* context, const ::milvus::grpc::HEntityIdentity* request, ::milvus::grpc::HEntity* response, std::function<void(::grpc::Status)>) override;
       void GetEntityByID(::grpc::ClientContext* context, const ::grpc::ByteBuffer* request, ::milvus::grpc::HEntity* response, std::function<void(::grpc::Status)>) override;
       void GetEntityByID(::grpc::ClientContext* context, const ::milvus::grpc::HEntityIdentity* request, ::milvus::grpc::HEntity* response, ::grpc::experimental::ClientUnaryReactor* reactor) override;
@@ -1361,10 +1363,10 @@ class MilvusService final {
     ::grpc::ClientAsyncResponseReader< ::milvus::grpc::Status>* PrepareAsyncPreloadCollectionRaw(::grpc::ClientContext* context, const ::milvus::grpc::CollectionName& request, ::grpc::CompletionQueue* cq) override;
     ::grpc::ClientAsyncResponseReader< ::milvus::grpc::HEntityIDs>* AsyncInsertEntityRaw(::grpc::ClientContext* context, const ::milvus::grpc::HInsertParam& request, ::grpc::CompletionQueue* cq) override;
     ::grpc::ClientAsyncResponseReader< ::milvus::grpc::HEntityIDs>* PrepareAsyncInsertEntityRaw(::grpc::ClientContext* context, const ::milvus::grpc::HInsertParam& request, ::grpc::CompletionQueue* cq) override;
-    ::grpc::ClientAsyncResponseReader< ::milvus::grpc::HQueryResult>* AsyncHybridSearchRaw(::grpc::ClientContext* context, const ::milvus::grpc::HSearchParam& request, ::grpc::CompletionQueue* cq) override;
-    ::grpc::ClientAsyncResponseReader< ::milvus::grpc::HQueryResult>* PrepareAsyncHybridSearchRaw(::grpc::ClientContext* context, const ::milvus::grpc::HSearchParam& request, ::grpc::CompletionQueue* cq) override;
-    ::grpc::ClientAsyncResponseReader< ::milvus::grpc::HQueryResult>* AsyncHybridSearchInSegmentsRaw(::grpc::ClientContext* context, const ::milvus::grpc::HSearchInSegmentsParam& request, ::grpc::CompletionQueue* cq) override;
-    ::grpc::ClientAsyncResponseReader< ::milvus::grpc::HQueryResult>* PrepareAsyncHybridSearchInSegmentsRaw(::grpc::ClientContext* context, const ::milvus::grpc::HSearchInSegmentsParam& request, ::grpc::CompletionQueue* cq) override;
+    ::grpc::ClientAsyncResponseReader< ::milvus::grpc::TopKQueryResult>* AsyncHybridSearchRaw(::grpc::ClientContext* context, const ::milvus::grpc::HSearchParam& request, ::grpc::CompletionQueue* cq) override;
+    ::grpc::ClientAsyncResponseReader< ::milvus::grpc::TopKQueryResult>* PrepareAsyncHybridSearchRaw(::grpc::ClientContext* context, const ::milvus::grpc::HSearchParam& request, ::grpc::CompletionQueue* cq) override;
+    ::grpc::ClientAsyncResponseReader< ::milvus::grpc::TopKQueryResult>* AsyncHybridSearchInSegmentsRaw(::grpc::ClientContext* context, const ::milvus::grpc::HSearchInSegmentsParam& request, ::grpc::CompletionQueue* cq) override;
+    ::grpc::ClientAsyncResponseReader< ::milvus::grpc::TopKQueryResult>* PrepareAsyncHybridSearchInSegmentsRaw(::grpc::ClientContext* context, const ::milvus::grpc::HSearchInSegmentsParam& request, ::grpc::CompletionQueue* cq) override;
     ::grpc::ClientAsyncResponseReader< ::milvus::grpc::HEntity>* AsyncGetEntityByIDRaw(::grpc::ClientContext* context, const ::milvus::grpc::HEntityIdentity& request, ::grpc::CompletionQueue* cq) override;
     ::grpc::ClientAsyncResponseReader< ::milvus::grpc::HEntity>* PrepareAsyncGetEntityByIDRaw(::grpc::ClientContext* context, const ::milvus::grpc::HEntityIdentity& request, ::grpc::CompletionQueue* cq) override;
     ::grpc::ClientAsyncResponseReader< ::milvus::grpc::HEntityIDs>* AsyncGetEntityIDsRaw(::grpc::ClientContext* context, const ::milvus::grpc::HGetEntityIDsParam& request, ::grpc::CompletionQueue* cq) override;
@@ -1605,8 +1607,9 @@ class MilvusService final {
     // /////////////////////////////////////////////////////////////////
     //
     virtual ::grpc::Status InsertEntity(::grpc::ServerContext* context, const ::milvus::grpc::HInsertParam* request, ::milvus::grpc::HEntityIDs* response);
-    virtual ::grpc::Status HybridSearch(::grpc::ServerContext* context, const ::milvus::grpc::HSearchParam* request, ::milvus::grpc::HQueryResult* response);
-    virtual ::grpc::Status HybridSearchInSegments(::grpc::ServerContext* context, const ::milvus::grpc::HSearchInSegmentsParam* request, ::milvus::grpc::HQueryResult* response);
+    // TODO(yukun): will change to HQueryResult
+    virtual ::grpc::Status HybridSearch(::grpc::ServerContext* context, const ::milvus::grpc::HSearchParam* request, ::milvus::grpc::TopKQueryResult* response);
+    virtual ::grpc::Status HybridSearchInSegments(::grpc::ServerContext* context, const ::milvus::grpc::HSearchInSegmentsParam* request, ::milvus::grpc::TopKQueryResult* response);
     virtual ::grpc::Status GetEntityByID(::grpc::ServerContext* context, const ::milvus::grpc::HEntityIdentity* request, ::milvus::grpc::HEntity* response);
     virtual ::grpc::Status GetEntityIDs(::grpc::ServerContext* context, const ::milvus::grpc::HGetEntityIDsParam* request, ::milvus::grpc::HEntityIDs* response);
     virtual ::grpc::Status DeleteEntitiesByID(::grpc::ServerContext* context, const ::milvus::grpc::HDeleteByIDParam* request, ::milvus::grpc::Status* response);
@@ -2283,11 +2286,11 @@ class MilvusService final {
       BaseClassMustBeDerivedFromService(this);
     }
     // disable synchronous version of this method
-    ::grpc::Status HybridSearch(::grpc::ServerContext* /*context*/, const ::milvus::grpc::HSearchParam* /*request*/, ::milvus::grpc::HQueryResult* /*response*/) override {
+    ::grpc::Status HybridSearch(::grpc::ServerContext* /*context*/, const ::milvus::grpc::HSearchParam* /*request*/, ::milvus::grpc::TopKQueryResult* /*response*/) override {
       abort();
       return ::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "");
     }
-    void RequestHybridSearch(::grpc::ServerContext* context, ::milvus::grpc::HSearchParam* request, ::grpc::ServerAsyncResponseWriter< ::milvus::grpc::HQueryResult>* response, ::grpc::CompletionQueue* new_call_cq, ::grpc::ServerCompletionQueue* notification_cq, void *tag) {
+    void RequestHybridSearch(::grpc::ServerContext* context, ::milvus::grpc::HSearchParam* request, ::grpc::ServerAsyncResponseWriter< ::milvus::grpc::TopKQueryResult>* response, ::grpc::CompletionQueue* new_call_cq, ::grpc::ServerCompletionQueue* notification_cq, void *tag) {
       ::grpc::Service::RequestAsyncUnary(33, context, request, response, new_call_cq, notification_cq, tag);
     }
   };
@@ -2303,11 +2306,11 @@ class MilvusService final {
       BaseClassMustBeDerivedFromService(this);
     }
     // disable synchronous version of this method
-    ::grpc::Status HybridSearchInSegments(::grpc::ServerContext* /*context*/, const ::milvus::grpc::HSearchInSegmentsParam* /*request*/, ::milvus::grpc::HQueryResult* /*response*/) override {
+    ::grpc::Status HybridSearchInSegments(::grpc::ServerContext* /*context*/, const ::milvus::grpc::HSearchInSegmentsParam* /*request*/, ::milvus::grpc::TopKQueryResult* /*response*/) override {
       abort();
       return ::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "");
     }
-    void RequestHybridSearchInSegments(::grpc::ServerContext* context, ::milvus::grpc::HSearchInSegmentsParam* request, ::grpc::ServerAsyncResponseWriter< ::milvus::grpc::HQueryResult>* response, ::grpc::CompletionQueue* new_call_cq, ::grpc::ServerCompletionQueue* notification_cq, void *tag) {
+    void RequestHybridSearchInSegments(::grpc::ServerContext* context, ::milvus::grpc::HSearchInSegmentsParam* request, ::grpc::ServerAsyncResponseWriter< ::milvus::grpc::TopKQueryResult>* response, ::grpc::CompletionQueue* new_call_cq, ::grpc::ServerCompletionQueue* notification_cq, void *tag) {
       ::grpc::Service::RequestAsyncUnary(34, context, request, response, new_call_cq, notification_cq, tag);
     }
   };
@@ -3402,17 +3405,17 @@ class MilvusService final {
    public:
     ExperimentalWithCallbackMethod_HybridSearch() {
       ::grpc::Service::experimental().MarkMethodCallback(33,
-        new ::grpc_impl::internal::CallbackUnaryHandler< ::milvus::grpc::HSearchParam, ::milvus::grpc::HQueryResult>(
+        new ::grpc_impl::internal::CallbackUnaryHandler< ::milvus::grpc::HSearchParam, ::milvus::grpc::TopKQueryResult>(
           [this](::grpc::ServerContext* context,
                  const ::milvus::grpc::HSearchParam* request,
-                 ::milvus::grpc::HQueryResult* response,
+                 ::milvus::grpc::TopKQueryResult* response,
                  ::grpc::experimental::ServerCallbackRpcController* controller) {
                    return this->HybridSearch(context, request, response, controller);
                  }));
     }
     void SetMessageAllocatorFor_HybridSearch(
-        ::grpc::experimental::MessageAllocator< ::milvus::grpc::HSearchParam, ::milvus::grpc::HQueryResult>* allocator) {
-      static_cast<::grpc_impl::internal::CallbackUnaryHandler< ::milvus::grpc::HSearchParam, ::milvus::grpc::HQueryResult>*>(
+        ::grpc::experimental::MessageAllocator< ::milvus::grpc::HSearchParam, ::milvus::grpc::TopKQueryResult>* allocator) {
+      static_cast<::grpc_impl::internal::CallbackUnaryHandler< ::milvus::grpc::HSearchParam, ::milvus::grpc::TopKQueryResult>*>(
           ::grpc::Service::experimental().GetHandler(33))
               ->SetMessageAllocator(allocator);
     }
@@ -3420,11 +3423,11 @@ class MilvusService final {
       BaseClassMustBeDerivedFromService(this);
     }
     // disable synchronous version of this method
-    ::grpc::Status HybridSearch(::grpc::ServerContext* /*context*/, const ::milvus::grpc::HSearchParam* /*request*/, ::milvus::grpc::HQueryResult* /*response*/) override {
+    ::grpc::Status HybridSearch(::grpc::ServerContext* /*context*/, const ::milvus::grpc::HSearchParam* /*request*/, ::milvus::grpc::TopKQueryResult* /*response*/) override {
       abort();
       return ::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "");
     }
-    virtual void HybridSearch(::grpc::ServerContext* /*context*/, const ::milvus::grpc::HSearchParam* /*request*/, ::milvus::grpc::HQueryResult* /*response*/, ::grpc::experimental::ServerCallbackRpcController* controller) { controller->Finish(::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "")); }
+    virtual void HybridSearch(::grpc::ServerContext* /*context*/, const ::milvus::grpc::HSearchParam* /*request*/, ::milvus::grpc::TopKQueryResult* /*response*/, ::grpc::experimental::ServerCallbackRpcController* controller) { controller->Finish(::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "")); }
   };
   template <class BaseClass>
   class ExperimentalWithCallbackMethod_HybridSearchInSegments : public BaseClass {
@@ -3433,17 +3436,17 @@ class MilvusService final {
    public:
     ExperimentalWithCallbackMethod_HybridSearchInSegments() {
       ::grpc::Service::experimental().MarkMethodCallback(34,
-        new ::grpc_impl::internal::CallbackUnaryHandler< ::milvus::grpc::HSearchInSegmentsParam, ::milvus::grpc::HQueryResult>(
+        new ::grpc_impl::internal::CallbackUnaryHandler< ::milvus::grpc::HSearchInSegmentsParam, ::milvus::grpc::TopKQueryResult>(
           [this](::grpc::ServerContext* context,
                  const ::milvus::grpc::HSearchInSegmentsParam* request,
-                 ::milvus::grpc::HQueryResult* response,
+                 ::milvus::grpc::TopKQueryResult* response,
                  ::grpc::experimental::ServerCallbackRpcController* controller) {
                    return this->HybridSearchInSegments(context, request, response, controller);
                  }));
     }
     void SetMessageAllocatorFor_HybridSearchInSegments(
-        ::grpc::experimental::MessageAllocator< ::milvus::grpc::HSearchInSegmentsParam, ::milvus::grpc::HQueryResult>* allocator) {
-      static_cast<::grpc_impl::internal::CallbackUnaryHandler< ::milvus::grpc::HSearchInSegmentsParam, ::milvus::grpc::HQueryResult>*>(
+        ::grpc::experimental::MessageAllocator< ::milvus::grpc::HSearchInSegmentsParam, ::milvus::grpc::TopKQueryResult>* allocator) {
+      static_cast<::grpc_impl::internal::CallbackUnaryHandler< ::milvus::grpc::HSearchInSegmentsParam, ::milvus::grpc::TopKQueryResult>*>(
           ::grpc::Service::experimental().GetHandler(34))
               ->SetMessageAllocator(allocator);
     }
@@ -3451,11 +3454,11 @@ class MilvusService final {
       BaseClassMustBeDerivedFromService(this);
     }
     // disable synchronous version of this method
-    ::grpc::Status HybridSearchInSegments(::grpc::ServerContext* /*context*/, const ::milvus::grpc::HSearchInSegmentsParam* /*request*/, ::milvus::grpc::HQueryResult* /*response*/) override {
+    ::grpc::Status HybridSearchInSegments(::grpc::ServerContext* /*context*/, const ::milvus::grpc::HSearchInSegmentsParam* /*request*/, ::milvus::grpc::TopKQueryResult* /*response*/) override {
       abort();
       return ::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "");
     }
-    virtual void HybridSearchInSegments(::grpc::ServerContext* /*context*/, const ::milvus::grpc::HSearchInSegmentsParam* /*request*/, ::milvus::grpc::HQueryResult* /*response*/, ::grpc::experimental::ServerCallbackRpcController* controller) { controller->Finish(::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "")); }
+    virtual void HybridSearchInSegments(::grpc::ServerContext* /*context*/, const ::milvus::grpc::HSearchInSegmentsParam* /*request*/, ::milvus::grpc::TopKQueryResult* /*response*/, ::grpc::experimental::ServerCallbackRpcController* controller) { controller->Finish(::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "")); }
   };
   template <class BaseClass>
   class ExperimentalWithCallbackMethod_GetEntityByID : public BaseClass {
@@ -4124,7 +4127,7 @@ class MilvusService final {
       BaseClassMustBeDerivedFromService(this);
     }
     // disable synchronous version of this method
-    ::grpc::Status HybridSearch(::grpc::ServerContext* /*context*/, const ::milvus::grpc::HSearchParam* /*request*/, ::milvus::grpc::HQueryResult* /*response*/) override {
+    ::grpc::Status HybridSearch(::grpc::ServerContext* /*context*/, const ::milvus::grpc::HSearchParam* /*request*/, ::milvus::grpc::TopKQueryResult* /*response*/) override {
       abort();
       return ::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "");
     }
@@ -4141,7 +4144,7 @@ class MilvusService final {
       BaseClassMustBeDerivedFromService(this);
     }
     // disable synchronous version of this method
-    ::grpc::Status HybridSearchInSegments(::grpc::ServerContext* /*context*/, const ::milvus::grpc::HSearchInSegmentsParam* /*request*/, ::milvus::grpc::HQueryResult* /*response*/) override {
+    ::grpc::Status HybridSearchInSegments(::grpc::ServerContext* /*context*/, const ::milvus::grpc::HSearchInSegmentsParam* /*request*/, ::milvus::grpc::TopKQueryResult* /*response*/) override {
       abort();
       return ::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "");
     }
@@ -4869,7 +4872,7 @@ class MilvusService final {
       BaseClassMustBeDerivedFromService(this);
     }
     // disable synchronous version of this method
-    ::grpc::Status HybridSearch(::grpc::ServerContext* /*context*/, const ::milvus::grpc::HSearchParam* /*request*/, ::milvus::grpc::HQueryResult* /*response*/) override {
+    ::grpc::Status HybridSearch(::grpc::ServerContext* /*context*/, const ::milvus::grpc::HSearchParam* /*request*/, ::milvus::grpc::TopKQueryResult* /*response*/) override {
       abort();
       return ::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "");
     }
@@ -4889,7 +4892,7 @@ class MilvusService final {
       BaseClassMustBeDerivedFromService(this);
     }
     // disable synchronous version of this method
-    ::grpc::Status HybridSearchInSegments(::grpc::ServerContext* /*context*/, const ::milvus::grpc::HSearchInSegmentsParam* /*request*/, ::milvus::grpc::HQueryResult* /*response*/) override {
+    ::grpc::Status HybridSearchInSegments(::grpc::ServerContext* /*context*/, const ::milvus::grpc::HSearchInSegmentsParam* /*request*/, ::milvus::grpc::TopKQueryResult* /*response*/) override {
       abort();
       return ::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "");
     }
@@ -5801,7 +5804,7 @@ class MilvusService final {
       BaseClassMustBeDerivedFromService(this);
     }
     // disable synchronous version of this method
-    ::grpc::Status HybridSearch(::grpc::ServerContext* /*context*/, const ::milvus::grpc::HSearchParam* /*request*/, ::milvus::grpc::HQueryResult* /*response*/) override {
+    ::grpc::Status HybridSearch(::grpc::ServerContext* /*context*/, const ::milvus::grpc::HSearchParam* /*request*/, ::milvus::grpc::TopKQueryResult* /*response*/) override {
       abort();
       return ::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "");
     }
@@ -5826,7 +5829,7 @@ class MilvusService final {
       BaseClassMustBeDerivedFromService(this);
     }
     // disable synchronous version of this method
-    ::grpc::Status HybridSearchInSegments(::grpc::ServerContext* /*context*/, const ::milvus::grpc::HSearchInSegmentsParam* /*request*/, ::milvus::grpc::HQueryResult* /*response*/) override {
+    ::grpc::Status HybridSearchInSegments(::grpc::ServerContext* /*context*/, const ::milvus::grpc::HSearchInSegmentsParam* /*request*/, ::milvus::grpc::TopKQueryResult* /*response*/) override {
       abort();
       return ::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "");
     }
@@ -6574,18 +6577,18 @@ class MilvusService final {
    public:
     WithStreamedUnaryMethod_HybridSearch() {
       ::grpc::Service::MarkMethodStreamed(33,
-        new ::grpc::internal::StreamedUnaryHandler< ::milvus::grpc::HSearchParam, ::milvus::grpc::HQueryResult>(std::bind(&WithStreamedUnaryMethod_HybridSearch<BaseClass>::StreamedHybridSearch, this, std::placeholders::_1, std::placeholders::_2)));
+        new ::grpc::internal::StreamedUnaryHandler< ::milvus::grpc::HSearchParam, ::milvus::grpc::TopKQueryResult>(std::bind(&WithStreamedUnaryMethod_HybridSearch<BaseClass>::StreamedHybridSearch, this, std::placeholders::_1, std::placeholders::_2)));
     }
     ~WithStreamedUnaryMethod_HybridSearch() override {
       BaseClassMustBeDerivedFromService(this);
     }
     // disable regular version of this method
-    ::grpc::Status HybridSearch(::grpc::ServerContext* /*context*/, const ::milvus::grpc::HSearchParam* /*request*/, ::milvus::grpc::HQueryResult* /*response*/) override {
+    ::grpc::Status HybridSearch(::grpc::ServerContext* /*context*/, const ::milvus::grpc::HSearchParam* /*request*/, ::milvus::grpc::TopKQueryResult* /*response*/) override {
       abort();
       return ::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "");
     }
     // replace default version of method with streamed unary
-    virtual ::grpc::Status StreamedHybridSearch(::grpc::ServerContext* context, ::grpc::ServerUnaryStreamer< ::milvus::grpc::HSearchParam,::milvus::grpc::HQueryResult>* server_unary_streamer) = 0;
+    virtual ::grpc::Status StreamedHybridSearch(::grpc::ServerContext* context, ::grpc::ServerUnaryStreamer< ::milvus::grpc::HSearchParam,::milvus::grpc::TopKQueryResult>* server_unary_streamer) = 0;
   };
   template <class BaseClass>
   class WithStreamedUnaryMethod_HybridSearchInSegments : public BaseClass {
@@ -6594,18 +6597,18 @@ class MilvusService final {
    public:
     WithStreamedUnaryMethod_HybridSearchInSegments() {
       ::grpc::Service::MarkMethodStreamed(34,
-        new ::grpc::internal::StreamedUnaryHandler< ::milvus::grpc::HSearchInSegmentsParam, ::milvus::grpc::HQueryResult>(std::bind(&WithStreamedUnaryMethod_HybridSearchInSegments<BaseClass>::StreamedHybridSearchInSegments, this, std::placeholders::_1, std::placeholders::_2)));
+        new ::grpc::internal::StreamedUnaryHandler< ::milvus::grpc::HSearchInSegmentsParam, ::milvus::grpc::TopKQueryResult>(std::bind(&WithStreamedUnaryMethod_HybridSearchInSegments<BaseClass>::StreamedHybridSearchInSegments, this, std::placeholders::_1, std::placeholders::_2)));
     }
     ~WithStreamedUnaryMethod_HybridSearchInSegments() override {
       BaseClassMustBeDerivedFromService(this);
     }
     // disable regular version of this method
-    ::grpc::Status HybridSearchInSegments(::grpc::ServerContext* /*context*/, const ::milvus::grpc::HSearchInSegmentsParam* /*request*/, ::milvus::grpc::HQueryResult* /*response*/) override {
+    ::grpc::Status HybridSearchInSegments(::grpc::ServerContext* /*context*/, const ::milvus::grpc::HSearchInSegmentsParam* /*request*/, ::milvus::grpc::TopKQueryResult* /*response*/) override {
       abort();
       return ::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "");
     }
     // replace default version of method with streamed unary
-    virtual ::grpc::Status StreamedHybridSearchInSegments(::grpc::ServerContext* context, ::grpc::ServerUnaryStreamer< ::milvus::grpc::HSearchInSegmentsParam,::milvus::grpc::HQueryResult>* server_unary_streamer) = 0;
+    virtual ::grpc::Status StreamedHybridSearchInSegments(::grpc::ServerContext* context, ::grpc::ServerUnaryStreamer< ::milvus::grpc::HSearchInSegmentsParam,::milvus::grpc::TopKQueryResult>* server_unary_streamer) = 0;
   };
   template <class BaseClass>
   class WithStreamedUnaryMethod_GetEntityByID : public BaseClass {

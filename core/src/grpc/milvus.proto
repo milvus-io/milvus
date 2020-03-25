@@ -337,15 +337,10 @@ message RangeQuery {
     repeated KeyValuePair extra_params = 4;
 }
 
-message VectorRecord {
-    repeated float float_data = 1;
-    bytes binary_data = 2;
-}
-
 message VectorQuery {
     string field_name = 1;
     float query_boost = 2;
-    repeated VectorRecord records = 3;
+    repeated RowRecord records = 3;
     repeated KeyValuePair extra_params = 4;
 }
 
@@ -700,9 +695,10 @@ service MilvusService {
 
     rpc InsertEntity(HInsertParam) returns (HEntityIDs) {}
 
-    rpc HybridSearch(HSearchParam) returns (HQueryResult) {}
+    // TODO(yukun): will change to HQueryResult
+    rpc HybridSearch(HSearchParam) returns (TopKQueryResult) {}
 
-    rpc HybridSearchInSegments(HSearchInSegmentsParam) returns (HQueryResult) {}
+    rpc HybridSearchInSegments(HSearchInSegmentsParam) returns (TopKQueryResult) {}
 
     rpc GetEntityByID(HEntityIdentity) returns (HEntity) {}
 

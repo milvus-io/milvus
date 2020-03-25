@@ -205,4 +205,13 @@ ConnectionImpl::InsertEntity(const std::string& collection_name,
     return client_proxy_->InsertEntity(collection_name, partition_tag, entities, id_array);
 }
 
+Status
+ConnectionImpl::HybridSearch(const std::string& collection_name,
+                             const std::vector<std::string>& partition_list,
+                             BooleanQueryPtr& boolean_query,
+                             const std::string& extra_params,
+                             TopKQueryResult& topk_query_result) {
+    return client_proxy_->HybridSearch(collection_name, partition_list, boolean_query, extra_params, topk_query_result);
+}
+
 }  // namespace milvus

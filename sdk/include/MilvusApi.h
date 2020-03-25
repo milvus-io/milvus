@@ -16,6 +16,7 @@
 #include <vector>
 #include <unordered_map>
 
+#include "BooleanQuery.h"
 #include "Field.h"
 #include "Status.h"
 
@@ -63,14 +64,6 @@ struct CollectionParam {
     int64_t dimension = 0;                    ///< Vector dimension, must be a positive value
     int64_t index_file_size = 1024;           ///< Index file size, must be a positive value, unit: MB
     MetricType metric_type = MetricType::L2;  ///< Index metric type
-};
-
-/**
- * @brief Entity inserted, currently each entity represent a vector
- */
-struct Entity {
-    std::vector<float> float_data;     ///< Vector raw float data
-    std::vector<uint8_t> binary_data;  ///< Vector raw binary data
 };
 
 /**
@@ -601,6 +594,13 @@ class Connection {
                  const std::string& partition_tag,
                  HEntity& entities,
                  std::vector<uint64_t>& id_array) = 0;
+
+    virtual Status
+    HybridSearch(const std::string& collection_name,
+                 const std::vector<std::string>& partition_list,
+                 BooleanQueryPtr& boolean_query,
+                 const std::string& extra_params,
+                 TopKQueryResult& topk_query_result) = 0;
 };
 
 }  // namespace milvus

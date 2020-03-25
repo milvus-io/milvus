@@ -659,4 +659,92 @@ ClientProxy::InsertEntity(const std::string& collection_name,
     }
 }
 
+void
+WriteQueryToProto(::milvus::grpc::GeneralQuery* general_query, BooleanQueryPtr boolean_query) {
+    if (!boolean_query->GetBooleanQueries().empty()) {
+        for (auto query : boolean_query->GetBooleanQueries()) {
+            auto grpc_boolean_query = general_query->mutable_boolean_query();
+            grpc_boolean_query->set_occur((::milvus::grpc::Occur)query->GetOccur());
+            ::milvus::grpc::GeneralQuery* grpc_query = grpc_boolean_query->add_general_query();
+            WriteQueryToProto(grpc_query, query);
+        }
+    } else {
+        for (auto leaf_query : boolean_query->GetLeafQueries()) {
+            if (leaf_query->term_query_ptr != nullptr) {
+                auto term_query = general_query->mutable_term_query();
+                term_query->set_field_name(leaf_query->term_query_ptr->field_name);
+                term_query->set_boost(leaf_query->term_query_ptr->boost);
+                for (auto field_value : leaf_query->term_query_ptr->field_value) {
+                    auto value = term_query->add_values();
+                    *value = field_value;
+                }
+            }
+            if (leaf_query->range_query_ptr != nullptr) {
+                auto range_query = general_query->mutable_range_query();
+                range_query->set_boost(leaf_query->range_query_ptr->boost);
+                range_query->set_field_name(leaf_query->range_query_ptr->field_name);
+                for (auto com_expr : leaf_query->range_query_ptr->compare_expr) {
+                    auto grpc_com_expr = range_query->add_operand();
+                    grpc_com_expr->set_operand(com_expr.operand);
+                    grpc_com_expr->set_operator_((milvus::grpc::CompareOperator)com_expr.compare_operator);
+                }
+            }
+            if (leaf_query->vector_query_ptr != nullptr) {
+                auto vector_query = general_query->mutable_vector_query();
+                vector_query->set_field_name(leaf_query->vector_query_ptr->field_name);
+                vector_query->set_query_boost(leaf_query->vector_query_ptr->query_boost);
+                for (auto record : leaf_query->vector_query_ptr->query_vector) {
+                    ::milvus::grpc::RowRecord* row_record = vector_query->add_records();
+                    CopyRowRecord(row_record, record);
+                }
+                auto extra_param = vector_query->add_extra_params();
+                extra_param->set_key("params");
+                extra_param->set_value(leaf_query->vector_query_ptr->extra_params);
+            }
+        }
+    }
+}
+
+Status
+ClientProxy::HybridSearch(const std::string& collection_name,
+                          const std::vector<std::string>& partition_list,
+                          BooleanQueryPtr& boolean_query,
+                          const std::string& extra_params,
+                          TopKQueryResult& topk_query_result) {
+    try {
+        // convert boolean_query to proto
+        ::milvus::grpc::HSearchParam search_param;
+        search_param.set_collection_name(collection_name);
+        for (auto partition : partition_list) {
+            auto value = search_param.add_partition_tag_array();
+            *value = partition;
+        }
+        auto extra_param = search_param.add_extra_params();
+        extra_param->set_key("params");
+        extra_param->set_value(extra_params);
+        WriteQueryToProto(search_param.mutable_general_query(), boolean_query);
+
+        // step 2: search vectors
+        ::milvus::grpc::TopKQueryResult result;
+        Status status = client_ptr_->HybridSearch(search_param, result);
+
+        // step 3: convert result array
+        topk_query_result.reserve(result.row_num());
+        int64_t nq = result.row_num();
+        int64_t topk = result.ids().size() / nq;
+        for (int64_t i = 0; i < result.row_num(); i++) {
+            milvus::QueryResult one_result;
+            one_result.ids.resize(topk);
+            one_result.distances.resize(topk);
+            memcpy(one_result.ids.data(), result.ids().data() + topk * i, topk * sizeof(int64_t));
+            memcpy(one_result.distances.data(), result.distances().data() + topk * i, topk * sizeof(float));
+            topk_query_result.emplace_back(one_result);
+        }
+
+        return status;
+    } catch (std::exception& ex) {
+        return Status(StatusCode::UnknownError, "Failed to search entities: " + std::string(ex.what()));
+    }
+}
+
 }  // namespace milvus

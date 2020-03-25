@@ -111,6 +111,9 @@ class GrpcClient {
     Status
     InsertEntities(milvus::grpc::HInsertParam& entities, milvus::grpc::HEntityIDs& ids);
 
+    Status
+    HybridSearch(milvus::grpc::HSearchParam& search_param, milvus::grpc::TopKQueryResult& result);
+
  private:
     std::unique_ptr<grpc::MilvusService::Stub> stub_;
 };
