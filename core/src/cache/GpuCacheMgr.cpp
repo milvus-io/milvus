@@ -21,21 +21,22 @@ namespace milvus {
 namespace cache {
 
 #ifdef MILVUS_GPU_VERSION
-std::mutex GpuCacheMgr::mutex_;
-std::unordered_map<uint64_t, GpuCacheMgrPtr> GpuCacheMgr::instance_;
+std::mutex GpuCacheMgr::global_mutex_;
+std::unordered_map<int64_t, std::pair<GpuCacheMgrPtr, MutexPtr>> GpuCacheMgr::instance_;
 
 namespace {
 constexpr int64_t G_BYTE = 1024 * 1024 * 1024;
 }
 
-GpuCacheMgr::GpuCacheMgr() {
+GpuCacheMgr::GpuCacheMgr(int64_t gpu_id) : gpu_id_(gpu_id) {
     // All config values have been checked in Config::ValidateConfig()
     server::Config& config = server::Config::GetInstance();
 
     int64_t gpu_cache_cap;
     config.GetGpuResourceConfigCacheCapacity(gpu_cache_cap);
     int64_t cap = gpu_cache_cap * G_BYTE;
-    cache_ = std::make_shared<Cache<DataObjPtr>>(cap, 1UL << 32);
+    std::string header = "[CACHE GPU" + std::to_string(gpu_id) + "]";
+    cache_ = std::make_shared<Cache<DataObjPtr>>(cap, 1UL << 32, header);
 
     float gpu_mem_threshold;
     config.GetGpuResourceConfigCacheThreshold(gpu_mem_threshold);
@@ -51,20 +52,6 @@ GpuCacheMgr::~GpuCacheMgr() {
     config.CancelCallBack(server::CONFIG_GPU_RESOURCE, server::CONFIG_GPU_RESOURCE_ENABLE, identity_);
 }
 
-GpuCacheMgr*
-GpuCacheMgr::GetInstance(uint64_t gpu_id) {
-    if (instance_.find(gpu_id) == instance_.end()) {
-        std::lock_guard<std::mutex> lock(mutex_);
-        if (instance_.find(gpu_id) == instance_.end()) {
-            instance_.insert(std::pair<uint64_t, GpuCacheMgrPtr>(gpu_id, std::make_shared<GpuCacheMgr>()));
-        }
-        return instance_[gpu_id].get();
-    } else {
-        std::lock_guard<std::mutex> lock(mutex_);
-        return instance_[gpu_id].get();
-    }
-}
-
 DataObjPtr
 GpuCacheMgr::GetIndex(const std::string& key) {
     DataObjPtr obj = GetItem(key);
@@ -78,10 +65,33 @@ GpuCacheMgr::InsertItem(const std::string& key, const milvus::cache::DataObjPtr&
     }
 }
 
+GpuCacheMgrPtr
+GpuCacheMgr::GetInstance(int64_t gpu_id) {
+    if (instance_.find(gpu_id) == instance_.end()) {
+        std::lock_guard<std::mutex> lock(global_mutex_);
+        if (instance_.find(gpu_id) == instance_.end()) {
+            instance_[gpu_id] = std::make_pair(std::make_shared<GpuCacheMgr>(gpu_id), std::make_shared<std::mutex>());
+        }
+    }
+    return instance_[gpu_id].first;
+}
+
+MutexPtr
+GpuCacheMgr::GetInstanceMutex(int64_t gpu_id) {
+    if (instance_.find(gpu_id) == instance_.end()) {
+        std::lock_guard<std::mutex> lock(global_mutex_);
+        if (instance_.find(gpu_id) == instance_.end()) {
+            instance_[gpu_id] = std::make_pair(std::make_shared<GpuCacheMgr>(gpu_id), std::make_shared<std::mutex>());
+        }
+    }
+    return instance_[gpu_id].second;
+}
+
 void
 GpuCacheMgr::OnGpuCacheCapacityChanged(int64_t capacity) {
     for (auto& iter : instance_) {
-        iter.second->SetCapacity(capacity * G_BYTE);
+        std::lock_guard<std::mutex> lock(*(iter.second.second));
+        iter.second.first->SetCapacity(capacity * G_BYTE);
     }
 }
 

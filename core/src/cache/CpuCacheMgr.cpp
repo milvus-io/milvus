@@ -32,7 +32,7 @@ CpuCacheMgr::CpuCacheMgr() {
     int64_t cpu_cache_cap;
     config.GetCacheConfigCpuCacheCapacity(cpu_cache_cap);
     int64_t cap = cpu_cache_cap * unit;
-    cache_ = std::make_shared<Cache<DataObjPtr>>(cap, 1UL << 32);
+    cache_ = std::make_shared<Cache<DataObjPtr>>(cap, 1UL << 32, "[CACHE CPU]");
 
     float cpu_cache_threshold;
     config.GetCacheConfigCpuCacheThreshold(cpu_cache_threshold);
