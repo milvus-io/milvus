@@ -86,6 +86,9 @@ class ClientTest {
     void
     InsertHybridEntities(std::string&, int64_t);
 
+    void
+    HybridSearch(std::string&);
+
  private:
     std::shared_ptr<milvus::Connection> conn_;
     std::vector<std::pair<int64_t, milvus::Entity>> search_entity_array_;

@@ -10,6 +10,7 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
 #include "include/MilvusApi.h"
+#include "include/BooleanQuery.h"
 #include "examples/utils/TimeRecorder.h"
 #include "examples/utils/Utils.h"
 #include "examples/simple/src/ClientTest.h"
@@ -227,6 +228,30 @@ ClientTest::DropCollection(const std::string& collection_name) {
 }
 
 void
+ClientTest::CreateHybridCollection(const std::string& collection_name) {
+    milvus::FieldPtr field_ptr1 = std::make_shared<milvus::Field>();
+    milvus::FieldPtr field_ptr2 = std::make_shared<milvus::Field>();
+    milvus::VectorFieldPtr vec_field_ptr = std::make_shared<milvus::VectorField>();
+    field_ptr1->field_type = milvus::DataType::INT64;
+    field_ptr1->field_name = "field_1";
+    field_ptr2->field_type = milvus::DataType::FLOAT;
+    field_ptr2->field_name = "field_2";
+    vec_field_ptr->field_type = milvus::DataType::VECTOR;
+    vec_field_ptr->field_name = "field_3";
+    vec_field_ptr->dimension = 128;
+
+    std::vector<milvus::FieldPtr> numerica_fields;
+    std::vector<milvus::VectorFieldPtr> vector_fields;
+    numerica_fields.emplace_back(field_ptr1);
+    numerica_fields.emplace_back(field_ptr2);
+    vector_fields.emplace_back(vec_field_ptr);
+
+    milvus::HMapping mapping = {collection_name, numerica_fields, vector_fields};
+    milvus::Status stat = conn_->CreateHybridCollection(mapping);
+    std::cout << "CreateHybridCollection function call status: " << stat.message() << std::endl;
+}
+
+void
 ClientTest::InsertHybridEntities(std::string& collection_name, int64_t row_num) {
     std::unordered_map<std::string, std::vector<std::string>> numerica_value;
     std::vector<std::string> value1, value2;
@@ -259,27 +284,22 @@ ClientTest::InsertHybridEntities(std::string& collection_name, int64_t row_num) 
 }
 
 void
-ClientTest::CreateHybridCollection(const std::string& collection_name) {
-    milvus::FieldPtr field_ptr1 = std::make_shared<milvus::Field>();
-    milvus::FieldPtr field_ptr2 = std::make_shared<milvus::Field>();
-    milvus::VectorFieldPtr vec_field_ptr = std::make_shared<milvus::VectorField>();
-    field_ptr1->field_type = milvus::DataType::INT64;
-    field_ptr1->field_name = "field_1";
-    field_ptr2->field_type = milvus::DataType::FLOAT;
-    field_ptr2->field_name = "field_2";
-    vec_field_ptr->field_type = milvus::DataType::VECTOR;
-    vec_field_ptr->field_name = "field_3";
-    vec_field_ptr->dimension = 128;
+ClientTest::HybridSearch(std::string& collection_name) {
+    std::vector<std::string> partition_tags;
+    milvus::TopKQueryResult topk_query_result;
 
-    std::vector<milvus::FieldPtr> numerica_fields;
-    std::vector<milvus::VectorFieldPtr> vector_fields;
-    numerica_fields.emplace_back(field_ptr1);
-    numerica_fields.emplace_back(field_ptr2);
-    vector_fields.emplace_back(vec_field_ptr);
+    auto boolean_clause = std::make_shared<milvus::BooleanQuery>();
+    auto leaf_queries = milvus_sdk::Utils::GenLeafQuery();
 
-    milvus::HMapping mapping = {collection_name, numerica_fields, vector_fields};
-    milvus::Status stat = conn_->CreateHybridCollection(mapping);
-    std::cout << "CreateHybridCollection function call status: " << stat.message() << std::endl;
+    //must
+    auto must_clause = std::make_shared<milvus::BooleanQuery>(milvus::Occur::MUST);
+    must_clause->AddLeafQuery(leaf_queries[0]);
+    must_clause->AddLeafQuery(leaf_queries[1]);
+    must_clause->AddLeafQuery(leaf_queries[2]);
+
+    std::string extra_params;
+    milvus::Status
+        status = conn_->HybridSearch(collection_name, partition_tags, boolean_clause, extra_params, topk_query_result);
 }
 
 void
@@ -324,4 +344,5 @@ ClientTest::TestHybrid() {
     CreateHybridCollection(collection_name);
     InsertHybridEntities(collection_name, 100);
     Flush(collection_name);
+    HybridSearch(collection_name);
 }
