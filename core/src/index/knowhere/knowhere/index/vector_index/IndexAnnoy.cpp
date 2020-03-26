@@ -14,6 +14,7 @@
 #include <algorithm>
 #include <cassert>
 #include <iterator>
+#include <string>
 #include <utility>
 #include <vector>
 
@@ -36,35 +37,49 @@ IndexAnnoy::Serialize(const Config& config) {
 
     BinarySet res_set;
     auto metric_type_length = metric_type_.length();
-    auto metric_type = std::make_shared<uint8_t>();
-    char* metric_type_str = new char[metric_type_length];
-    snprintf(metric_type_str, metric_type_length, "%s", metric_type_.c_str());
-    //    memcpy(metric_type_str, metric_type_.data(), metric_type_.length());
-    metric_type.reset(static_cast<uint8_t*>((void*)metric_type_str));
+    uint8_t* p = new uint8_t[metric_type_length];
+    std::shared_ptr<uint8_t> metric_type(p, [](uint8_t* p) { delete[] p; });
+    memcpy(p, metric_type_.data(), metric_type_.length());
+
+    uint8_t* p_dim = new uint8_t[sizeof(uint64_t)];
+    std::shared_ptr<uint8_t> dim_data(p_dim, [](uint8_t* p_dim) { delete[] p_dim; });
+    auto dim = Dim();
+    memcpy(p_dim, &dim, sizeof(uint64_t));
 
     auto index_length = index_->get_index_length();
-    char* p_index_data = new char[index_length];
-    memcpy(p_index_data, index_->get_index(), (size_t)index_length);
-    auto index_data = std::make_shared<uint8_t>();
-    index_data.reset(static_cast<uint8_t*>((void*)p_index_data));
+    uint8_t* q = new uint8_t[index_length];
+    std::shared_ptr<uint8_t> index_data(q, [](uint8_t* q) { delete[] q; });
+    memcpy(q, index_->get_index(), (size_t)index_length);
 
     res_set.Append("annoy_metric_type", metric_type, metric_type_length);
+    res_set.Append("annoy_dim", dim_data, sizeof(uint64_t));
     res_set.Append("annoy_index_data", index_data, index_length);
     return res_set;
 }
 
 void
 IndexAnnoy::Load(const BinarySet& index_binary) {
-    if (!index_) {
-        KNOWHERE_THROW_MSG("index not initialize or trained");
-    }
     auto metric_type = index_binary.GetByName("annoy_metric_type");
-    metric_type_.resize(metric_type->size);
+    metric_type_.resize((size_t)metric_type->size + 1);
     memcpy(metric_type_.data(), metric_type->data.get(), (size_t)metric_type->size);
 
+    auto dim_data = index_binary.GetByName("annoy_dim");
+    uint64_t dim;
+    memcpy(&dim, dim_data->data.get(), (size_t)dim_data->size);
+
+    if (metric_type_ == Metric::L2) {
+        index_ = std::make_shared<AnnoyIndex<int64_t, float, ::Euclidean, ::Kiss64Random>>(dim);
+    } else if (metric_type_ == Metric::IP) {
+        index_ = std::make_shared<AnnoyIndex<int64_t, float, ::DotProduct, ::Kiss64Random>>(dim);
+    } else {
+        KNOWHERE_THROW_MSG("metric not supported " + metric_type_);
+    }
+
     auto index_data = index_binary.GetByName("annoy_index_data");
-    char* error_msg = new char[256];  // hard code here because this length is enough
-    if (!index_->load_index(index_data->data.get(), index_data->size, &error_msg)) {
+    char* p = nullptr;
+    if (!index_->load_index(index_data->data.get(), index_data->size, &p)) {
+        std::string error_msg(p);
+        free(p);
         KNOWHERE_THROW_MSG(error_msg);
     }
 }
