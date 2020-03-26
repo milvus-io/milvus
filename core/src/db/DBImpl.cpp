@@ -1137,7 +1137,7 @@ DBImpl::Query(const std::shared_ptr<server::Context>& context, const std::string
         }
 
         if (files_array.empty()) {
-            return Status::OK();
+            return Status(PARTITION_NOT_FOUND, "Cannot find the specified partitions");
         }
     }
 
