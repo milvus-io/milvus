@@ -46,11 +46,7 @@ HasTableRequest::OnExecute() {
 
         // step 2: check table existence
         status = DBWrapper::DB()->HasNativeTable(table_name_, has_table_);
-        fiu_do_on("HasTableRequest.OnExecute.table_not_exist", status = Status(milvus::SERVER_UNEXPECTED_ERROR, ""));
         fiu_do_on("HasTableRequest.OnExecute.throw_std_exception", throw std::exception());
-        if (!status.ok()) {
-            return status;
-        }
 
         // only process root table, ignore partition table
         if (has_table_) {
