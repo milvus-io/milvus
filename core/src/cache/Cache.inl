@@ -12,15 +12,16 @@
 namespace milvus {
 namespace cache {
 
-constexpr double DEFAULT_THRESHHOLD_PERCENT = 0.7;
-constexpr double WARNING_THRESHHOLD_PERCENT = 0.9;
+constexpr double DEFAULT_THRESHOLD_PERCENT = 0.7;
+constexpr double WARNING_THRESHOLD_PERCENT = 0.9;
+constexpr double BIG_ITEM_THRESHOLD_PERCENT = 0.1;
 
 template <typename ItemObj>
 Cache<ItemObj>::Cache(int64_t capacity, int64_t cache_max_count, const std::string& header)
     : usage_(0),
       capacity_(capacity),
       header_(header),
-      freemem_percent_(DEFAULT_THRESHHOLD_PERCENT),
+      freemem_percent_(DEFAULT_THRESHOLD_PERCENT),
       lru_(cache_max_count) {
 }
 
@@ -81,7 +82,9 @@ Cache<ItemObj>::insert(const std::string& key, const ItemObj& item) {
     }
 
     // if usage exceed capacity, free some items
-    if (usage_ > (int64_t)(capacity_ * WARNING_THRESHHOLD_PERCENT)) {
+    if (usage_ > capacity_ ||
+        (item_size > (int64_t)(capacity_ * BIG_ITEM_THRESHOLD_PERCENT) &&
+         usage_ > (int64_t)(capacity_ * WARNING_THRESHOLD_PERCENT))) {
         SERVER_LOG_DEBUG << header_ << " Current usage " << (usage_ >> 20) << "MB is too high for capacity "
                          << (capacity_ >> 20) << "MB, start free memory";
         free_memory();
