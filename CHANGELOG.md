@@ -5,6 +5,7 @@ Please mark all change in change log and use the issue from GitHub
 # Milvus 0.8.0 (TBD)
 
 ## Bug
+-   \#1762 Server is not forbidden to create new partition which tag is "_default"
 
 ## Feature
 
