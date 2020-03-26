@@ -1130,7 +1130,10 @@ DBImpl::Query(const std::shared_ptr<server::Context>& context, const std::string
     } else {
         // get files from specified partitions
         std::set<std::string> partition_name_array;
-        GetPartitionsByTags(table_id, partition_tags, partition_name_array);
+        status = GetPartitionsByTags(table_id, partition_tags, partition_name_array);
+        if (!status.ok()) {
+            return status;  // didn't match any partition.
+        }
 
         for (auto& partition_name : partition_name_array) {
             status = GetFilesToSearch(partition_name, files_array);
@@ -1663,6 +1666,10 @@ DBImpl::GetPartitionsByTags(const std::string& table_id, const std::vector<std::
                 partition_name_array.insert(schema.table_id_);
             }
         }
+    }
+
+    if (partition_name_array.empty()) {
+        return Status(PARTITION_NOT_FOUND, "Cannot find the specified partitions");
     }
 
     return Status::OK();
