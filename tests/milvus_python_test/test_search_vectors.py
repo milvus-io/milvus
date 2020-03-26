@@ -1047,6 +1047,16 @@ class TestSearchParamsInvalid(object):
         query_vecs = gen_vectors(1, dim)
         with pytest.raises(Exception) as e:
             status, result = connect.search_vectors(collection, top_k, query_vecs, partition_tags="tag")
+            logging.getLogger().debug(result)
+
+    @pytest.mark.level(1)
+    def test_search_with_tag_not_existed(self, connect, collection):
+        top_k = 1
+        nprobe = 1
+        query_vecs = gen_vectors(1, dim)
+        status, result = connect.search_vectors(collection, top_k, query_vecs, partition_tags=["tag"])
+        logging.getLogger().info(result)
+        assert not status.OK()
 
     """
     Test search collection with invalid top-k
