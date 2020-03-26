@@ -221,10 +221,9 @@ GpuIndexFlat::searchImpl_(int n,
     auto bitsetDevice = toDevice<uint8_t, 1>(resources_, device_, nullptr, stream, {0});
     data_->query(queries, bitsetDevice, k, outDistances, outIntLabels, true);
   } else {
-    auto bitsetData = bitset->bitset();
     auto bitsetDevice = toDevice<uint8_t, 1>(resources_, device_,
-                                  const_cast<uint8_t*>(bitsetData), stream,
-                                  {(int) bitset->size()});
+                                             const_cast<uint8_t*>(bitset->data()), stream,
+                                             {(int) bitset->size()});
     data_->query(queries, bitsetDevice, k, outDistances, outIntLabels, true);
   }
 

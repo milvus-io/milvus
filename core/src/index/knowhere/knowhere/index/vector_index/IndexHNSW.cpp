@@ -143,8 +143,7 @@ IndexHNSW::Query(const DatasetPtr& dataset_ptr, const Config& config) {
     using P = std::pair<float, int64_t>;
     auto compare = [](const P& v1, const P& v2) { return v1.first < v2.first; };
 
-    faiss::ConcurrentBitsetPtr blacklist = nullptr;
-    GetBlacklist(blacklist);
+    faiss::ConcurrentBitsetPtr blacklist = GetBlacklist();
 #pragma omp parallel for
     for (unsigned int i = 0; i < rows; ++i) {
         std::vector<P> ret;
