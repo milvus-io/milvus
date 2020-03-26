@@ -37,7 +37,6 @@
 namespace {
 
 static const char* TABLE_NAME = "test_grpc";
-static const char* BIN_TABLE_NAME = "bin_test_grpc";
 static constexpr int64_t TABLE_DIM = 256;
 static constexpr int64_t INDEX_FILE_SIZE = 1024;
 static constexpr int64_t VECTOR_COUNT = 1000;
@@ -443,6 +442,17 @@ TEST_F(RpcHandlerTest, COMBINE_SEARCH_TEST) {
     handler->SetContext(&context, dummy_context);
     handler->RegisterRequestHandler(milvus::server::RequestHandler());
 
+    // create table
+    std::string table_name = "combine";
+    ::milvus::grpc::TableSchema tableschema;
+    tableschema.set_table_name(table_name);
+    tableschema.set_dimension(TABLE_DIM);
+    tableschema.set_index_file_size(INDEX_FILE_SIZE);
+    tableschema.set_metric_type(1); // L2 metric
+    ::milvus::grpc::Status status;
+    handler->CreateTable(&context, &tableschema, &status);
+    ASSERT_EQ(status.error_code(), 0);
+
     // insert vectors
     std::vector<std::vector<float>> record_array;
     BuildVectors(0, VECTOR_COUNT, record_array);
@@ -454,14 +464,14 @@ TEST_F(RpcHandlerTest, COMBINE_SEARCH_TEST) {
         insert_param.add_row_id_array(++vec_id);
     }
 
-    insert_param.set_table_name(TABLE_NAME);
+    insert_param.set_table_name(table_name);
     ::milvus::grpc::VectorIds vector_ids;
     handler->Insert(&context, &insert_param, &vector_ids);
 
     // flush
     ::milvus::grpc::Status grpc_status;
     ::milvus::grpc::FlushParam flush_param;
-    flush_param.add_table_name_array(TABLE_NAME);
+    flush_param.add_table_name_array(table_name);
     handler->Flush(&context, &flush_param, &grpc_status);
 
     // multi thread search requests will be combined
@@ -472,7 +482,7 @@ TEST_F(RpcHandlerTest, COMBINE_SEARCH_TEST) {
     std::vector<RequestPtr> request_array;
     for (int i = 0; i < QUERY_COUNT; i++) {
         RequestPtr request = std::make_shared<::milvus::grpc::SearchParam>();
-        request->set_table_name(TABLE_NAME);
+        request->set_table_name(table_name);
         request->set_topk(TOPK);
         milvus::grpc::KeyValuePair* kv = request->add_extra_params();
         kv->set_key(milvus::server::grpc::EXTRA_PARAM_KEY);
@@ -508,7 +518,7 @@ TEST_F(RpcHandlerTest, COMBINE_SEARCH_TEST) {
     int64_t index = 0;
     for (auto& result_ptr : result_array) {
         ASSERT_NE(result_ptr->ids_size(), 0);
-        std::string msg = "Result no." + std::to_string(++index) + ": \n";
+        std::string msg = "Result no." + std::to_string(index) + ": \n";
         for (int64_t i = 0; i < NQ; i++) {
             for (int64_t k = 0; k < TOPK; k++) {
                 msg += "[";
@@ -520,9 +530,11 @@ TEST_F(RpcHandlerTest, COMBINE_SEARCH_TEST) {
             }
             msg += "\n";
 
+            ASSERT_NE(result_ptr->ids(i * TOPK), 0);
             ASSERT_LT(result_ptr->distances(i * TOPK), 0.00001);
         }
         std::cout << msg << std::endl;
+        index++;
     }
 }
 
@@ -532,8 +544,9 @@ TEST_F(RpcHandlerTest, COMBINE_SEARCH_BINARY_TEST) {
     handler->RegisterRequestHandler(milvus::server::RequestHandler());
 
     // create table
+    std::string table_name = "combine_bin";
     ::milvus::grpc::TableSchema tableschema;
-    tableschema.set_table_name(BIN_TABLE_NAME);
+    tableschema.set_table_name(table_name);
     tableschema.set_dimension(TABLE_DIM);
     tableschema.set_index_file_size(INDEX_FILE_SIZE);
     tableschema.set_metric_type(5); // tanimoto metric
@@ -552,14 +565,14 @@ TEST_F(RpcHandlerTest, COMBINE_SEARCH_BINARY_TEST) {
         insert_param.add_row_id_array(++vec_id);
     }
 
-    insert_param.set_table_name(BIN_TABLE_NAME);
+    insert_param.set_table_name(table_name);
     ::milvus::grpc::VectorIds vector_ids;
     handler->Insert(&context, &insert_param, &vector_ids);
 
     // flush
     ::milvus::grpc::Status grpc_status;
     ::milvus::grpc::FlushParam flush_param;
-    flush_param.add_table_name_array(BIN_TABLE_NAME);
+    flush_param.add_table_name_array(table_name);
     handler->Flush(&context, &flush_param, &grpc_status);
 
     // multi thread search requests will be combined
@@ -570,7 +583,7 @@ TEST_F(RpcHandlerTest, COMBINE_SEARCH_BINARY_TEST) {
     std::vector<RequestPtr> request_array;
     for (int i = 0; i < QUERY_COUNT; i++) {
         RequestPtr request = std::make_shared<::milvus::grpc::SearchParam>();
-        request->set_table_name(BIN_TABLE_NAME);
+        request->set_table_name(table_name);
         request->set_topk(TOPK);
         milvus::grpc::KeyValuePair* kv = request->add_extra_params();
         kv->set_key(milvus::server::grpc::EXTRA_PARAM_KEY);
@@ -618,7 +631,7 @@ TEST_F(RpcHandlerTest, COMBINE_SEARCH_BINARY_TEST) {
             }
             msg += "\n";
 
-            ASSERT_EQ(result_ptr->ids(i * TOPK), i * TOPK + 1);
+            ASSERT_NE(result_ptr->ids(i * TOPK), 0);
             ASSERT_LT(result_ptr->distances(i * TOPK), 0.00001);
         }
         std::cout << msg << std::endl;
