@@ -160,7 +160,13 @@ class BaseRequest {
 
  public:
     Status
+    PreExecute();
+
+    Status
     Execute();
+
+    Status
+    PostExecute();
 
     void
     Done();
@@ -193,7 +199,13 @@ class BaseRequest {
 
  protected:
     virtual Status
+    OnPreExecute();
+
+    virtual Status
     OnExecute() = 0;
+
+    virtual Status
+    OnPostExecute();
 
     std::string
     TableNotExistMsg(const std::string& table_name);

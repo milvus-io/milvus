@@ -50,6 +50,21 @@ CopyRowRecord(::milvus::grpc::RowRecord* target, const std::vector<float>& src) 
     memcpy(vector_data->mutable_data(), src.data(), src.size() * sizeof(float));
 }
 
+void
+CopyBinRowRecord(::milvus::grpc::RowRecord* target, const std::vector<uint8_t>& src) {
+    auto vector_data = target->mutable_binary_data();
+    vector_data->resize(static_cast<int>(src.size()));
+    memcpy(vector_data->data(), src.data(), src.size());
+}
+
+void
+SearchFunc(std::shared_ptr<milvus::server::grpc::GrpcRequestHandler> handler,
+           ::grpc::ServerContext* context,
+           std::shared_ptr<::milvus::grpc::SearchParam> request,
+           std::shared_ptr<::milvus::grpc::TopKQueryResult> result) {
+    handler->Search(context, request.get(), result.get());
+}
+
 class RpcHandlerTest : public testing::Test {
  protected:
     void
@@ -135,7 +150,25 @@ BuildVectors(int64_t from, int64_t to, std::vector<std::vector<float>>& vector_r
         std::vector<float> record;
         record.resize(TABLE_DIM);
         for (int64_t i = 0; i < TABLE_DIM; i++) {
-            record[i] = (float)(k % (i + 1));
+            record[i] = (float)(i + k);
+        }
+
+        vector_record_array.emplace_back(record);
+    }
+}
+
+void
+BuildBinVectors(int64_t from, int64_t to, std::vector<std::vector<uint8_t>>& vector_record_array) {
+    if (to <= from) {
+        return;
+    }
+
+    vector_record_array.clear();
+    for (int64_t k = from; k < to; k++) {
+        std::vector<uint8_t> record;
+        record.resize(TABLE_DIM / 8);
+        for (int64_t i = 0; i < TABLE_DIM / 8; i++) {
+            record[i] = (i + k) % 256;
         }
 
         vector_record_array.emplace_back(record);
@@ -367,6 +400,7 @@ TEST_F(RpcHandlerTest, SEARCH_TEST) {
     kv->set_key(milvus::server::grpc::EXTRA_PARAM_KEY);
     kv->set_value("{ \"nprobe\": 32 }");
     handler->Search(&context, &request, &response);
+    ASSERT_EQ(response.ids_size(), 0UL);
 
     std::vector<std::vector<float>> record_array;
     BuildVectors(0, VECTOR_COUNT, record_array);
@@ -380,17 +414,228 @@ TEST_F(RpcHandlerTest, SEARCH_TEST) {
     ::milvus::grpc::VectorIds vector_ids;
     handler->Insert(&context, &insert_param, &vector_ids);
 
+    // flush
+    ::milvus::grpc::Status grpc_status;
+    ::milvus::grpc::FlushParam flush_param;
+    flush_param.add_table_name_array(TABLE_NAME);
+    handler->Flush(&context, &flush_param, &grpc_status);
+
+    // search
     BuildVectors(0, 10, record_array);
     for (auto& record : record_array) {
         ::milvus::grpc::RowRecord* row_record = request.add_query_record_array();
         CopyRowRecord(row_record, record);
     }
     handler->Search(&context, &request, &response);
+    ASSERT_NE(response.ids_size(), 0UL);
 
+    // wrong file id
     ::milvus::grpc::SearchInFilesParam search_in_files_param;
     std::string* file_id = search_in_files_param.add_file_id_array();
     *file_id = "test_tbl";
     handler->SearchInFiles(&context, &search_in_files_param, &response);
+    ASSERT_EQ(response.ids_size(), 0UL);
+}
+
+TEST_F(RpcHandlerTest, COMBINE_SEARCH_TEST) {
+    ::grpc::ServerContext context;
+    handler->SetContext(&context, dummy_context);
+    handler->RegisterRequestHandler(milvus::server::RequestHandler());
+
+    // create table
+    std::string table_name = "combine";
+    ::milvus::grpc::TableSchema tableschema;
+    tableschema.set_table_name(table_name);
+    tableschema.set_dimension(TABLE_DIM);
+    tableschema.set_index_file_size(INDEX_FILE_SIZE);
+    tableschema.set_metric_type(1); // L2 metric
+    ::milvus::grpc::Status status;
+    handler->CreateTable(&context, &tableschema, &status);
+    ASSERT_EQ(status.error_code(), 0);
+
+    // insert vectors
+    std::vector<std::vector<float>> record_array;
+    BuildVectors(0, VECTOR_COUNT, record_array);
+    ::milvus::grpc::InsertParam insert_param;
+    int64_t vec_id = 0;
+    for (auto& record : record_array) {
+        ::milvus::grpc::RowRecord* grpc_record = insert_param.add_row_record_array();
+        CopyRowRecord(grpc_record, record);
+        insert_param.add_row_id_array(++vec_id);
+    }
+
+    insert_param.set_table_name(table_name);
+    ::milvus::grpc::VectorIds vector_ids;
+    handler->Insert(&context, &insert_param, &vector_ids);
+
+    // flush
+    ::milvus::grpc::Status grpc_status;
+    ::milvus::grpc::FlushParam flush_param;
+    flush_param.add_table_name_array(table_name);
+    handler->Flush(&context, &flush_param, &grpc_status);
+
+    // multi thread search requests will be combined
+    int QUERY_COUNT = 10;
+    int64_t NQ = 2;
+    int64_t TOPK = 5;
+    using RequestPtr = std::shared_ptr<::milvus::grpc::SearchParam>;
+    std::vector<RequestPtr> request_array;
+    for (int i = 0; i < QUERY_COUNT; i++) {
+        RequestPtr request = std::make_shared<::milvus::grpc::SearchParam>();
+        request->set_table_name(table_name);
+        request->set_topk(TOPK);
+        milvus::grpc::KeyValuePair* kv = request->add_extra_params();
+        kv->set_key(milvus::server::grpc::EXTRA_PARAM_KEY);
+        kv->set_value("{}");
+
+        BuildVectors(i * NQ, (i + 1) * NQ, record_array);
+        for (auto& record : record_array) {
+            ::milvus::grpc::RowRecord* row_record = request->add_query_record_array();
+            CopyRowRecord(row_record, record);
+        }
+        request_array.emplace_back(request);
+    }
+
+    using ResultPtr = std::shared_ptr<::milvus::grpc::TopKQueryResult>;
+    std::vector<ResultPtr> result_array;
+    using ThreadPtr = std::shared_ptr<std::thread>;
+    std::vector<ThreadPtr> thread_list;
+    for (int i = 0; i < QUERY_COUNT; i++) {
+        ResultPtr result_ptr = std::make_shared<::milvus::grpc::TopKQueryResult>();
+        result_array.push_back(result_ptr);
+        ThreadPtr
+            thread = std::make_shared<std::thread>(SearchFunc, handler, &context, request_array[i], result_ptr);
+        thread_list.emplace_back(thread);
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+
+    // wait search finish
+    for (auto& iter : thread_list) {
+        iter->join();
+    }
+
+    // check result
+    int64_t index = 0;
+    for (auto& result_ptr : result_array) {
+        ASSERT_NE(result_ptr->ids_size(), 0);
+        std::string msg = "Result no." + std::to_string(index) + ": \n";
+        for (int64_t i = 0; i < NQ; i++) {
+            for (int64_t k = 0; k < TOPK; k++) {
+                msg += "[";
+                msg += std::to_string(result_ptr->ids(i * TOPK + k));
+                msg += ", ";
+                msg += std::to_string(result_ptr->distances(i * TOPK + k));
+                msg += "]";
+                msg += ", ";
+            }
+            msg += "\n";
+
+            ASSERT_NE(result_ptr->ids(i * TOPK), 0);
+            ASSERT_LT(result_ptr->distances(i * TOPK), 0.00001);
+        }
+        std::cout << msg << std::endl;
+        index++;
+    }
+}
+
+TEST_F(RpcHandlerTest, COMBINE_SEARCH_BINARY_TEST) {
+    ::grpc::ServerContext context;
+    handler->SetContext(&context, dummy_context);
+    handler->RegisterRequestHandler(milvus::server::RequestHandler());
+
+    // create table
+    std::string table_name = "combine_bin";
+    ::milvus::grpc::TableSchema tableschema;
+    tableschema.set_table_name(table_name);
+    tableschema.set_dimension(TABLE_DIM);
+    tableschema.set_index_file_size(INDEX_FILE_SIZE);
+    tableschema.set_metric_type(5); // tanimoto metric
+    ::milvus::grpc::Status status;
+    handler->CreateTable(&context, &tableschema, &status);
+    ASSERT_EQ(status.error_code(), 0);
+
+    // insert vectors
+    std::vector<std::vector<uint8_t>> record_array;
+    BuildBinVectors(0, VECTOR_COUNT, record_array);
+    ::milvus::grpc::InsertParam insert_param;
+    int64_t vec_id = 0;
+    for (auto& record : record_array) {
+        ::milvus::grpc::RowRecord* grpc_record = insert_param.add_row_record_array();
+        CopyBinRowRecord(grpc_record, record);
+        insert_param.add_row_id_array(++vec_id);
+    }
+
+    insert_param.set_table_name(table_name);
+    ::milvus::grpc::VectorIds vector_ids;
+    handler->Insert(&context, &insert_param, &vector_ids);
+
+    // flush
+    ::milvus::grpc::Status grpc_status;
+    ::milvus::grpc::FlushParam flush_param;
+    flush_param.add_table_name_array(table_name);
+    handler->Flush(&context, &flush_param, &grpc_status);
+
+    // multi thread search requests will be combined
+    int QUERY_COUNT = 10;
+    int64_t NQ = 2;
+    int64_t TOPK = 5;
+    using RequestPtr = std::shared_ptr<::milvus::grpc::SearchParam>;
+    std::vector<RequestPtr> request_array;
+    for (int i = 0; i < QUERY_COUNT; i++) {
+        RequestPtr request = std::make_shared<::milvus::grpc::SearchParam>();
+        request->set_table_name(table_name);
+        request->set_topk(TOPK);
+        milvus::grpc::KeyValuePair* kv = request->add_extra_params();
+        kv->set_key(milvus::server::grpc::EXTRA_PARAM_KEY);
+        kv->set_value("{}");
+
+        BuildBinVectors(i * NQ, (i + 1) * NQ, record_array);
+        for (auto& record : record_array) {
+            ::milvus::grpc::RowRecord* row_record = request->add_query_record_array();
+            CopyBinRowRecord(row_record, record);
+        }
+        request_array.emplace_back(request);
+    }
+
+    using ResultPtr = std::shared_ptr<::milvus::grpc::TopKQueryResult>;
+    std::vector<ResultPtr> result_array;
+    using ThreadPtr = std::shared_ptr<std::thread>;
+    std::vector<ThreadPtr> thread_list;
+    for (int i = 0; i < QUERY_COUNT; i++) {
+        ResultPtr result_ptr = std::make_shared<::milvus::grpc::TopKQueryResult>();
+        result_array.push_back(result_ptr);
+        ThreadPtr
+            thread = std::make_shared<std::thread>(SearchFunc, handler, &context, request_array[i], result_ptr);
+        thread_list.emplace_back(thread);
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+
+    // wait search finish
+    for (auto& iter : thread_list) {
+        iter->join();
+    }
+
+    // check result
+    int64_t index = 0;
+    for (auto& result_ptr : result_array) {
+        ASSERT_NE(result_ptr->ids_size(), 0);
+        std::string msg = "Result no." + std::to_string(++index) + ": \n";
+        for (int64_t i = 0; i < NQ; i++) {
+            for (int64_t k = 0; k < TOPK; k++) {
+                msg += "[";
+                msg += std::to_string(result_ptr->ids(i * TOPK + k));
+                msg += ", ";
+                msg += std::to_string(result_ptr->distances(i * TOPK + k));
+                msg += "]";
+                msg += ", ";
+            }
+            msg += "\n";
+
+            ASSERT_NE(result_ptr->ids(i * TOPK), 0);
+            ASSERT_LT(result_ptr->distances(i * TOPK), 0.00001);
+        }
+        std::cout << msg << std::endl;
+    }
 }
 
 TEST_F(RpcHandlerTest, TABLES_TEST) {
