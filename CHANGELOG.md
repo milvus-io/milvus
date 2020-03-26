@@ -16,6 +16,7 @@ Please mark all change in change log and use the issue from GitHub
 -   \#1667 Create index failed with type: rnsg if metric_type is IP
 -   \#1708 NSG search crashed
 -   \#1724 Remove unused unittests
+-   \#1728 Optimize request handler to combine similar query
 -   \#1734 Opentracing for combined search request
 -   \#1735 Fix search out of memory with ivf_flat 
 -   \#1756 Fix memory exhausted during searching 
