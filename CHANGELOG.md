@@ -38,6 +38,7 @@ Please mark all change in change log and use the issue from GitHub
 -   \#1678 Remove CUSTOMIZATION macro 
 -   \#1698 Upgrade mishards to v0.7.0
 -   \#1719 Improve Milvus log
+-   \#1754 Optimize behavior to get file ids from metadata in mishards
 
 ## Task
 
