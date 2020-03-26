@@ -1132,7 +1132,7 @@ DBImpl::Query(const std::shared_ptr<server::Context>& context, const std::string
         std::set<std::string> partition_name_array;
         status = GetPartitionsByTags(table_id, partition_tags, partition_name_array);
         if (!status.ok()) {
-            return status; // didn't match any partition.
+            return status;  // didn't match any partition.
         }
 
         for (auto& partition_name : partition_name_array) {
