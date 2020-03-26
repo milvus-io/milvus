@@ -206,10 +206,6 @@ TEST_F(RpcHandlerTest, HAS_TABLE_TEST) {
     ASSERT_EQ(error_code, ::milvus::grpc::ErrorCode::SUCCESS);
 
     fiu_init(0);
-    fiu_enable("HasTableRequest.OnExecute.table_not_exist", 1, NULL, 0);
-    handler->HasTable(&context, &request, &reply);
-    ASSERT_NE(reply.status().error_code(), ::milvus::grpc::ErrorCode::SUCCESS);
-    fiu_disable("HasTableRequest.OnExecute.table_not_exist");
 
     fiu_enable("HasTableRequest.OnExecute.throw_std_exception", 1, NULL, 0);
     handler->HasTable(&context, &request, &reply);
