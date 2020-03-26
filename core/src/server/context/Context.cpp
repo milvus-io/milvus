@@ -48,21 +48,35 @@ ContextChild::ContextChild(const ContextPtr& context, const std::string& operati
 }
 
 ContextChild::~ContextChild() {
+    Finish();
+}
+
+void
+ContextChild::Finish() {
     if (context_) {
         context_->GetTraceContext()->GetSpan()->Finish();
+        context_ = nullptr;
     }
 }
 
 /////////////////////////////////////////////////////////////////////////////////////////////////
 ContextFollower::ContextFollower(const ContextPtr& context, const std::string& operation_name) {
     if (context) {
-        context_ = context->Child(operation_name);
+        context_ = context->Follower(operation_name);
     }
 }
 
 ContextFollower::~ContextFollower() {
     if (context_) {
         context_->GetTraceContext()->GetSpan()->Finish();
+    }
+}
+
+void
+ContextFollower::Finish() {
+    if (context_) {
+        context_->GetTraceContext()->GetSpan()->Finish();
+        context_ = nullptr;
     }
 }
 

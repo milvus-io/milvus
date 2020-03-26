@@ -27,6 +27,7 @@ namespace server {
 namespace {
 
 constexpr int64_t MAX_TOPK_GAP = 200;
+constexpr uint64_t MAX_NQ = 200;
 
 void
 GetUniqueList(const std::vector<std::string>& list, std::set<std::string>& unique_list) {
@@ -61,6 +62,7 @@ FreeRequest(SearchRequestPtr& request, const Status& status) {
 class TracingContextList {
  public:
     TracingContextList() = default;
+
     ~TracingContextList() {
         Finish();
     }
@@ -181,6 +183,15 @@ SearchCombineRequest::CanCombine(const SearchRequestPtr& left, const SearchReque
         return false;
     }
 
+    // sum of nq must less-equal than MAX_NQ
+    if (left->VectorsData().vector_count_ > MAX_NQ || right->VectorsData().vector_count_ > MAX_NQ) {
+        return false;
+    }
+    uint64_t total_nq = left->VectorsData().vector_count_ + right->VectorsData().vector_count_;
+    if (total_nq > MAX_NQ) {
+        return false;
+    }
+
     // partition list must be equal for each one
     std::set<std::string> left_partition_list, right_partition_list;
     GetUniqueList(left->PartitionList(), left_partition_list);
@@ -213,24 +224,17 @@ Status
 SearchCombineRequest::OnExecute() {
     try {
         size_t combined_request = request_list_.size();
-        SERVER_LOG_DEBUG << "SearchCombineRequest begin execute, combined requests=" << combined_request
+        SERVER_LOG_DEBUG << "SearchCombineRequest execute, request count=" << combined_request
                          << ", extra_params=" << extra_params_.dump();
         std::string hdr = "SearchCombineRequest(table=" + table_name_ + ")";
 
-        TimeRecorder rc(hdr);
+        TimeRecorderAuto rc(hdr);
 
-        // step 1: check table name
-        auto status = ValidationUtil::ValidateTableName(table_name_);
-        if (!status.ok()) {
-            FreeRequests(status);
-            return status;
-        }
-
-        // step 2: check table existence
+        // step 1: check table existence
         // only process root table, ignore partition table
         engine::meta::TableSchema table_schema;
         table_schema.table_id_ = table_name_;
-        status = DBWrapper::DB()->DescribeTable(table_schema);
+        auto status = DBWrapper::DB()->DescribeTable(table_schema);
         if (!status.ok()) {
             if (status.code() == DB_NOT_FOUND) {
                 status = Status(SERVER_TABLE_NOT_EXIST, TableNotExistMsg(table_name_));
@@ -248,7 +252,7 @@ SearchCombineRequest::OnExecute() {
             }
         }
 
-        // step 3: check input
+        // step 2: check input
         size_t run_request = 0;
         std::vector<SearchRequestPtr>::iterator iter = request_list_.begin();
         for (; iter != request_list_.end();) {
@@ -303,7 +307,7 @@ SearchCombineRequest::OnExecute() {
         SERVER_LOG_DEBUG << "reset topk to " << search_topk_;
         rc.RecordSection("check validation");
 
-        // step 5: construct vectors_data and set search_topk
+        // step 3: construct vectors_data
         SearchRequestPtr& first_request = *request_list_.begin();
         uint64_t total_count = 0;
         for (auto& request : request_list_) {
@@ -323,25 +327,26 @@ SearchCombineRequest::OnExecute() {
         int64_t offset = 0;
         for (auto& request : request_list_) {
             const engine::VectorsData& src = request->VectorsData();
-            size_t data_size = 0;
             if (is_float) {
-                data_size = src.vector_count_ * dimension;
-                memcpy(vectors_data_.float_data_.data() + offset, src.float_data_.data(), data_size);
+                size_t element_cnt = src.vector_count_ * dimension;
+                memcpy(vectors_data_.float_data_.data() + offset, src.float_data_.data(), element_cnt * sizeof(float));
+                offset += element_cnt;
             } else {
-                data_size = src.vector_count_ * dimension / 8;
-                memcpy(vectors_data_.binary_data_.data() + offset, src.binary_data_.data(), data_size);
+                size_t element_cnt = src.vector_count_ * dimension / 8;
+                memcpy(vectors_data_.binary_data_.data() + offset, src.binary_data_.data(), element_cnt);
+                offset += element_cnt;
             }
-            offset += data_size;
         }
-        SERVER_LOG_DEBUG << total_count << " query vectors combined";
 
-        // step 6: search vectors
+        SERVER_LOG_DEBUG << total_count << " query vectors combined";
+        rc.RecordSection("combined query vectors");
+
+        // step 4: search vectors
         const std::vector<std::string>& partition_list = first_request->PartitionList();
         const std::vector<std::string>& file_id_list = first_request->FileIDList();
 
         engine::ResultIds result_ids;
         engine::ResultDistances result_distances;
-
         {
             TracingContextList context_list;
             context_list.CreateChild(request_list_, "Combine Query");
@@ -355,7 +360,7 @@ SearchCombineRequest::OnExecute() {
             }
         }
 
-        rc.RecordSection("search combined vectors from engine");
+        rc.RecordSection("search vectors from engine");
 
         if (!status.ok()) {
             // let all request return
@@ -369,7 +374,7 @@ SearchCombineRequest::OnExecute() {
             return status;
         }
 
-        // step 6: construct result array
+        // step 5: construct result array
         offset = 0;
         for (auto& request : request_list_) {
             uint64_t count = request->VectorsData().vector_count_;
@@ -387,9 +392,10 @@ SearchCombineRequest::OnExecute() {
         }
 
         rc.RecordSection("construct result and send");
-        rc.ElapseFromBegin("totally cost");
     } catch (std::exception& ex) {
-        return Status(SERVER_UNEXPECTED_ERROR, ex.what());
+        Status status = Status(SERVER_UNEXPECTED_ERROR, ex.what());
+        FreeRequests(status);
+        return status;
     }
 
     return Status::OK();

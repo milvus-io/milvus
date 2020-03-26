@@ -210,6 +210,9 @@ Status
 SqliteMetaImpl::DescribeTable(TableSchema& table_schema) {
     try {
         server::MetricCollector metric;
+
+        // multi-threads call sqlite update may get exception('bad logic', etc), so we add a lock here
+        std::lock_guard<std::mutex> meta_lock(meta_mutex_);
         fiu_do_on("SqliteMetaImpl.DescribeTable.throw_exception", throw std::exception());
         auto groups = ConnectorPtr->select(
             columns(&TableSchema::id_, &TableSchema::state_, &TableSchema::dimension_, &TableSchema::created_on_,

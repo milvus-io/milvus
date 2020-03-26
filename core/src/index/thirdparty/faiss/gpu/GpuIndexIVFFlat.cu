@@ -207,14 +207,18 @@ GpuIndexIVFFlat::addImpl_(int n,
   FAISS_ASSERT(index_);
   FAISS_ASSERT(n > 0);
 
+  auto stream = resources_->getDefaultStream(device_);
+
   // Data is already resident on the GPU
   Tensor<float, 2, true> data(const_cast<float*>(x), {n, (int) this->d});
+
+  auto bitset = toDevice<uint8_t, 1>(resources_, device_, nullptr, stream, {0});
 
   static_assert(sizeof(long) == sizeof(Index::idx_t), "size mismatch");
   Tensor<long, 1, true> labels(const_cast<long*>(xids), {n});
 
   // Not all vectors may be able to be added (some may contain NaNs etc)
-  index_->classifyAndAddVectors(data, labels);
+  index_->classifyAndAddVectors(data, labels, bitset);
 
   // but keep the ntotal based on the total number of vectors that we attempted
   // to add
@@ -226,10 +230,13 @@ GpuIndexIVFFlat::searchImpl_(int n,
                              const float* x,
                              int k,
                              float* distances,
-                             Index::idx_t* labels) const {
+                             Index::idx_t* labels,
+                             ConcurrentBitsetPtr bitset) const {
   // Device is already set in GpuIndex::search
   FAISS_ASSERT(index_);
   FAISS_ASSERT(n > 0);
+
+  auto stream = resources_->getDefaultStream(device_);
 
   // Data is already resident on the GPU
   Tensor<float, 2, true> queries(const_cast<float*>(x), {n, (int) this->d});
@@ -238,7 +245,9 @@ GpuIndexIVFFlat::searchImpl_(int n,
   static_assert(sizeof(long) == sizeof(Index::idx_t), "size mismatch");
   Tensor<long, 2, true> outLabels(const_cast<long*>(labels), {n, k});
 
-  index_->query(queries, nprobe, k, outDistances, outLabels);
+  auto bitsetDevice = toDevice<uint8_t, 1>(resources_, device_, nullptr, stream, {0});
+  
+  index_->query(queries, bitsetDevice, nprobe, k, outDistances, outLabels);
 }
 
 

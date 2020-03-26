@@ -26,7 +26,7 @@ template <typename ItemObj>
 class Cache {
  public:
     // mem_capacity, units:GB
-    Cache(int64_t capacity_gb, uint64_t cache_max_count);
+    Cache(int64_t capacity_gb, int64_t cache_max_count, const std::string& header = "");
     ~Cache() = default;
 
     int64_t
@@ -80,6 +80,7 @@ class Cache {
     free_memory();
 
  private:
+    std::string header_;
     int64_t usage_;
     int64_t capacity_;
     double freemem_percent_;

@@ -327,8 +327,7 @@ class TestSearchBase:
         search_param = get_search_param(index_type)
         status, result = connect.search_vectors(collection, top_k, query_vec, partition_tags=["new_tag"], params=search_param)
         logging.getLogger().info(result)
-        assert status.OK()
-        assert len(result) == 0
+        assert not status.OK()
 
     def test_search_l2_index_params_partition_E(self, connect, collection, get_simple_index):
         '''
