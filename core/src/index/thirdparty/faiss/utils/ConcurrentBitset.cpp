@@ -48,7 +48,7 @@ ConcurrentBitset::size() {
 }
 
 const uint8_t*
-ConcurrentBitset::bitset() {
+ConcurrentBitset::data() {
     return reinterpret_cast<const uint8_t*>(bitset_.data());
 }
 

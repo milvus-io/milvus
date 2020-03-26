@@ -30,7 +30,7 @@ constexpr int64_t BATCH_ENTITY_COUNT = 100000;
 constexpr int64_t NQ = 5;
 constexpr int64_t TOP_K = 10;
 constexpr int64_t NPROBE = 32;
-constexpr int64_t SEARCH_TARGET = 5000;  // change this value, result is different
+constexpr int64_t SEARCH_TARGET = BATCH_ENTITY_COUNT / 2;  // change this value, result is different
 constexpr int64_t ADD_ENTITY_LOOP = 5;
 constexpr milvus::IndexType INDEX_TYPE = milvus::IndexType::IVFSQ8;
 constexpr int32_t NLIST = 16384;
@@ -180,8 +180,16 @@ ClientTest::CreateIndex(const std::string& collection_name, milvus::IndexType ty
 
 void
 ClientTest::PreloadCollection(const std::string& collection_name) {
+    milvus_sdk::TimeRecorder rc("Preload");
     milvus::Status stat = conn_->PreloadCollection(collection_name);
     std::cout << "PreloadCollection function call status: " << stat.message() << std::endl;
+}
+
+void
+ClientTest::CompactCollection(const std::string& collection_name) {
+    milvus_sdk::TimeRecorder rc("Compact");
+    milvus::Status stat = conn_->CompactCollection(collection_name);
+    std::cout << "CompactCollection function call status: " << stat.message() << std::endl;
 }
 
 void
@@ -199,13 +207,6 @@ ClientTest::DeleteByIds(const std::string& collection_name, const std::vector<in
         milvus_sdk::TimeRecorder rc("Flush");
         stat = conn_->FlushCollection(collection_name);
         std::cout << "FlushCollection function call status: " << stat.message() << std::endl;
-    }
-
-    {
-        // compact table
-        milvus_sdk::TimeRecorder rc1("Compact");
-        stat = conn_->CompactCollection(collection_name);
-        std::cout << "CompactCollection function call status: " << stat.message() << std::endl;
     }
 }
 
@@ -255,6 +256,7 @@ ClientTest::Test() {
 
     std::vector<int64_t> delete_ids = {search_id_array_[0], search_id_array_[1]};
     DeleteByIds(collection_name, delete_ids);
+    CompactCollection(collection_name);
     SearchEntities(collection_name, TOP_K, NPROBE); // this line get two search error since we delete two entities
 
     DropIndex(collection_name);

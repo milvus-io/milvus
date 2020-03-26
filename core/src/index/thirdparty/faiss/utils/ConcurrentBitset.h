@@ -49,7 +49,7 @@ class ConcurrentBitset {
     size();
 
     const uint8_t*
-    bitset();
+    data();
 
  private:
     size_t capacity_;

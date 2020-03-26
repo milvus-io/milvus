@@ -10,6 +10,7 @@
 
 #include <vector>
 #include <faiss/gpu/GpuIndex.h>
+#include <faiss/utils/ConcurrentBitset.h>
 
 namespace faiss {
 
