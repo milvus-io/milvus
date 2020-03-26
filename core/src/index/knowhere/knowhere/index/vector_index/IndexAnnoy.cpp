@@ -112,7 +112,7 @@ IndexAnnoy::BuildAll(const DatasetPtr& dataset_ptr, const Config& config) {
 DatasetPtr
 IndexAnnoy::Query(const DatasetPtr& dataset_ptr, const Config& config) {
     if (!index_) {
-        KNOWHERE_THROW_MSG("index not initialize or trained");
+        KNOWHERE_THROW_MSG("index not initialize or trained!");
     }
 
     GETTENSOR(dataset_ptr)
