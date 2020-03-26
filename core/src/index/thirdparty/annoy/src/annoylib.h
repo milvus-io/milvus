@@ -1316,7 +1316,7 @@ protected:
 
     std::priority_queue<pair<T, S> > q;
 
-    if (search_k == -1) {
+    if (search_k <= 0) {
       search_k = n * _roots.size();
     }
 
