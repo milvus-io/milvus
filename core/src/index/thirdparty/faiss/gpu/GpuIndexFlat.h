@@ -126,7 +126,8 @@ class GpuIndexFlat : public GpuIndex {
                    const float* x,
                    int k,
                    float* distances,
-                   faiss::Index::idx_t* labels) const override;
+                   faiss::Index::idx_t* labels,
+                   ConcurrentBitsetPtr bitset = nullptr) const override;
 
  private:
   /// Checks user settings for consistency

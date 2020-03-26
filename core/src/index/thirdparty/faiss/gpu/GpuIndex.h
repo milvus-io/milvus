@@ -103,7 +103,8 @@ class GpuIndex : public faiss::Index {
                            const float* x,
                            int k,
                            float* distances,
-                           Index::idx_t* labels) const = 0;
+                           Index::idx_t* labels,
+                           ConcurrentBitsetPtr bitset = nullptr) const = 0;
 
 private:
   /// Handles paged adds if the add set is too large, passes to
@@ -122,7 +123,8 @@ private:
                        const float* x,
                        int k,
                        float* outDistancesData,
-                       Index::idx_t* outIndicesData) const;
+                       Index::idx_t* outIndicesData,
+                      ConcurrentBitsetPtr bitset = nullptr) const;
 
   /// Calls searchImpl_ for a single page of GPU-resident data,
   /// handling paging of the data and copies from the CPU
@@ -130,7 +132,8 @@ private:
                            const float* x,
                            int k,
                            float* outDistancesData,
-                           Index::idx_t* outIndicesData) const;
+                           Index::idx_t* outIndicesData,
+                           ConcurrentBitsetPtr bitset = nullptr) const;
 
  protected:
   /// Manages streams, cuBLAS handles and scratch memory for devices

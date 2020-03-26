@@ -157,7 +157,8 @@ IVFFlat::addCodeVectorsFromCpu(int listId,
 
 int
 IVFFlat::classifyAndAddVectors(Tensor<float, 2, true>& vecs,
-                               Tensor<long, 1, true>& indices) {
+                               Tensor<long, 1, true>& indices,
+                               Tensor<uint8_t, 1, true>& bitset) {
   FAISS_ASSERT(vecs.getSize(0) == indices.getSize(0));
   FAISS_ASSERT(vecs.getSize(1) == dim_);
 
@@ -174,7 +175,7 @@ IVFFlat::classifyAndAddVectors(Tensor<float, 2, true>& vecs,
     listIds2d(mem, {vecs.getSize(0), 1},  stream);
   auto listIds = listIds2d.view<1>({vecs.getSize(0)});
 
-  quantizer_->query(vecs, 1, listDistance2d, listIds2d, false);
+  quantizer_->query(vecs, bitset, 1, listDistance2d, listIds2d, false);
 
   // Calculate residuals for these vectors, if needed
   DeviceTensor<float, 2, true>
@@ -326,6 +327,7 @@ IVFFlat::classifyAndAddVectors(Tensor<float, 2, true>& vecs,
 
 void
 IVFFlat::query(Tensor<float, 2, true>& queries,
+               Tensor<uint8_t, 1, true>& bitset,
                int nprobe,
                int k,
                Tensor<float, 2, true>& outDistances,
@@ -352,6 +354,7 @@ IVFFlat::query(Tensor<float, 2, true>& queries,
   // Find the `nprobe` closest lists; we can use int indices both
   // internally and externally
   quantizer_->query(queries,
+                    bitset,
                     nprobe,
                     coarseDistances,
                     coarseIndices,
