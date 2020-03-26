@@ -644,13 +644,13 @@ ExecutionEngineImpl::BuildIndex(const std::string& location, EngineType engine_t
             knowhere::GenDatasetWithIds(Count(), Dimension(), from_index->GetRawVectors(), from_index->GetRawIds());
         to_index->BuildAll(dataset, conf);
         uids = from_index->GetUids();
-        from_index->GetBlacklist(blacklist);
+        blacklist = from_index->GetBlacklist();
     } else if (bin_from_index) {
         auto dataset = knowhere::GenDatasetWithIds(Count(), Dimension(), bin_from_index->GetRawVectors(),
                                                    bin_from_index->GetRawIds());
         to_index->BuildAll(dataset, conf);
         uids = bin_from_index->GetUids();
-        bin_from_index->GetBlacklist(blacklist);
+        blacklist = bin_from_index->GetBlacklist();
     }
 
 #ifdef MILVUS_GPU_VERSION
