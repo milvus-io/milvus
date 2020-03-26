@@ -618,6 +618,7 @@ TEST_F(RpcHandlerTest, COMBINE_SEARCH_BINARY_TEST) {
             }
             msg += "\n";
 
+            ASSERT_EQ(result_ptr->ids(i * TOPK), i * TOPK + 1);
             ASSERT_LT(result_ptr->distances(i * TOPK), 0.00001);
         }
         std::cout << msg << std::endl;

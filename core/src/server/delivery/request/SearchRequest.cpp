@@ -75,35 +75,6 @@ SearchRequest::OnPreExecute() {
         return status;
     }
 
-    // step 4: check table existence
-    // only process root table, ignore partition table
-    table_schema_.table_id_ = table_name_;
-    status = DBWrapper::DB()->DescribeTable(table_schema_);
-    fiu_do_on("SearchRequest.OnExecute.describe_table_fail", status = Status(milvus::SERVER_UNEXPECTED_ERROR, ""));
-    if (!status.ok()) {
-        if (status.code() == DB_NOT_FOUND) {
-            return Status(SERVER_TABLE_NOT_EXIST, TableNotExistMsg(table_name_));
-        } else {
-            return status;
-        }
-    } else {
-        if (!table_schema_.owner_table_.empty()) {
-            return Status(SERVER_INVALID_TABLE_NAME, TableNotExistMsg(table_name_));
-        }
-    }
-
-    // step 5: check search parameters
-    status = ValidationUtil::ValidateSearchParams(extra_params_, table_schema_, topk_);
-    if (!status.ok()) {
-        return status;
-    }
-
-    // step 6: check vector data according to metric type
-    status = ValidationUtil::ValidateVectorData(vectors_data_, table_schema_);
-    if (!status.ok()) {
-        return status;
-    }
-
     return Status::OK();
 }
 
@@ -116,12 +87,43 @@ SearchRequest::OnExecute() {
                           ", k=" + std::to_string(topk_) + ")";
         TimeRecorderAuto rc(hdr);
 
+        // step 4: check table existence
+        // only process root table, ignore partition table
+        table_schema_.table_id_ = table_name_;
+        auto status = DBWrapper::DB()->DescribeTable(table_schema_);
+        fiu_do_on("SearchRequest.OnExecute.describe_table_fail", status = Status(milvus::SERVER_UNEXPECTED_ERROR, ""));
+        if (!status.ok()) {
+            if (status.code() == DB_NOT_FOUND) {
+                return Status(SERVER_TABLE_NOT_EXIST, TableNotExistMsg(table_name_));
+            } else {
+                return status;
+            }
+        } else {
+            if (!table_schema_.owner_table_.empty()) {
+                return Status(SERVER_INVALID_TABLE_NAME, TableNotExistMsg(table_name_));
+            }
+        }
+
+        // step 5: check search parameters
+        status = ValidationUtil::ValidateSearchParams(extra_params_, table_schema_, topk_);
+        if (!status.ok()) {
+            return status;
+        }
+
+        // step 6: check vector data according to metric type
+        status = ValidationUtil::ValidateVectorData(vectors_data_, table_schema_);
+        if (!status.ok()) {
+            return status;
+        }
+
+        rc.RecordSection("check validation");
+
         // step 7: search vectors
 #ifdef MILVUS_ENABLE_PROFILING
         std::string fname = "/tmp/search_" + CommonUtil::GetCurrentTimeStr() + ".profiling";
         ProfilerStart(fname.c_str());
 #endif
-        Status status;
+
         engine::ResultIds result_ids;
         engine::ResultDistances result_distances;
 

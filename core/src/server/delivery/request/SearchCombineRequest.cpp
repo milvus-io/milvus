@@ -184,6 +184,9 @@ SearchCombineRequest::CanCombine(const SearchRequestPtr& left, const SearchReque
     }
 
     // sum of nq must less-equal than MAX_NQ
+    if (left->VectorsData().vector_count_ > MAX_NQ || right->VectorsData().vector_count_ > MAX_NQ) {
+        return false;
+    }
     uint64_t total_nq = left->VectorsData().vector_count_ + right->VectorsData().vector_count_;
     if (total_nq > MAX_NQ) {
         return false;
@@ -227,22 +230,85 @@ SearchCombineRequest::OnExecute() {
 
         TimeRecorderAuto rc(hdr);
 
-        // step 1: reset topk
+        // step 1: check table existence
+        // only process root table, ignore partition table
+        engine::meta::TableSchema table_schema;
+        table_schema.table_id_ = table_name_;
+        auto status = DBWrapper::DB()->DescribeTable(table_schema);
+        if (!status.ok()) {
+            if (status.code() == DB_NOT_FOUND) {
+                status = Status(SERVER_TABLE_NOT_EXIST, TableNotExistMsg(table_name_));
+                FreeRequests(status);
+                return status;
+            } else {
+                FreeRequests(status);
+                return status;
+            }
+        } else {
+            if (!table_schema.owner_table_.empty()) {
+                status = Status(SERVER_INVALID_TABLE_NAME, TableNotExistMsg(table_name_));
+                FreeRequests(status);
+                return status;
+            }
+        }
+
+        // step 2: check input
         size_t run_request = 0;
         std::vector<SearchRequestPtr>::iterator iter = request_list_.begin();
         for (; iter != request_list_.end();) {
             SearchRequestPtr& request = *iter;
+            status = ValidationUtil::ValidateSearchTopk(request->TopK());
+            if (!status.ok()) {
+                // check failed, erase request and let it return error status
+                FreeRequest(request, status);
+                iter = request_list_.erase(iter);
+                continue;
+            }
+
+            status = ValidationUtil::ValidateSearchParams(extra_params_, table_schema, request->TopK());
+            if (!status.ok()) {
+                // check failed, erase request and let it return error status
+                FreeRequest(request, status);
+                iter = request_list_.erase(iter);
+                continue;
+            }
+
+            status = ValidationUtil::ValidateVectorData(request->VectorsData(), table_schema);
+            if (!status.ok()) {
+                // check failed, erase request and let it return error status
+                FreeRequest(request, status);
+                iter = request_list_.erase(iter);
+                continue;
+            }
+
+            status = ValidationUtil::ValidatePartitionTags(request->PartitionList());
+            if (!status.ok()) {
+                // check failed, erase request and let it return error status
+                FreeRequest(request, status);
+                iter = request_list_.erase(iter);
+                continue;
+            }
+
+            // reset topk
             search_topk_ = request->TopK() > search_topk_ ? request->TopK() : search_topk_;
 
+            // next one
             run_request++;
             iter++;
         }
 
-        SERVER_LOG_DEBUG << "reset topk to " << search_topk_;
+        // all requests are skipped
+        if (request_list_.empty()) {
+            SERVER_LOG_DEBUG << "all combined requests were skipped";
+            return Status::OK();
+        }
 
-        // step 2: construct vectors_data and set search_topk
+        SERVER_LOG_DEBUG << (combined_request - run_request) << " requests were skipped";
+        SERVER_LOG_DEBUG << "reset topk to " << search_topk_;
+        rc.RecordSection("check validation");
+
+        // step 3: construct vectors_data
         SearchRequestPtr& first_request = *request_list_.begin();
-        const milvus::engine::meta::TableSchema& table_schema = first_request->TableSchema();
         uint64_t total_count = 0;
         for (auto& request : request_list_) {
             total_count += request->VectorsData().vector_count_;
@@ -275,11 +341,10 @@ SearchCombineRequest::OnExecute() {
         SERVER_LOG_DEBUG << total_count << " query vectors combined";
         rc.RecordSection("combined query vectors");
 
-        // step 5: search vectors
+        // step 4: search vectors
         const std::vector<std::string>& partition_list = first_request->PartitionList();
         const std::vector<std::string>& file_id_list = first_request->FileIDList();
 
-        Status status;
         engine::ResultIds result_ids;
         engine::ResultDistances result_distances;
         {
@@ -309,7 +374,7 @@ SearchCombineRequest::OnExecute() {
             return status;
         }
 
-        // step 6: construct result array
+        // step 5: construct result array
         offset = 0;
         for (auto& request : request_list_) {
             uint64_t count = request->VectorsData().vector_count_;
