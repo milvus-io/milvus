@@ -52,11 +52,13 @@ class IVFPQ : public IVFBase {
   /// Returns the number of vectors successfully added. Vectors may
   /// not be able to be added because they contain NaNs.
   int classifyAndAddVectors(Tensor<float, 2, true>& vecs,
-                            Tensor<long, 1, true>& indices);
+                            Tensor<long, 1, true>& indices,
+                            Tensor<uint8_t, 1, true>& bitset);
 
   /// Find the approximate k nearest neigbors for `queries` against
   /// our database
   void query(Tensor<float, 2, true>& queries,
+             Tensor<uint8_t, 1, true>& bitset,
              int nprobe,
              int k,
              Tensor<float, 2, true>& outDistances,
