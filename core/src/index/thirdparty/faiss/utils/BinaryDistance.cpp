@@ -209,7 +209,7 @@ void binary_distence_knn_mc(
                 }
             }
         }
-        for (size_t i = 0, ni = 0; i < n1; i++) {
+        for (size_t i = 0; i < n1; i++) {
             size_t n_i = 0;
             float *distances_i = distances + i * k;
             int64_t *labels_i = labels + i * k;
@@ -218,7 +218,7 @@ void binary_distence_knn_mc(
                 size_t match_index = t * n1 + i;
                 size_t copy_num = std::min(k - n_i, match_num[match_index]);
                 memcpy(labels_i + n_i, match_data + match_index * k, copy_num * sizeof(int64_t));
-                memset(distances + n_i, 0, copy_num * sizeof(int32_t));
+                memset(distances_i + n_i, 0, copy_num * sizeof(float));
                 n_i += copy_num;
             }
             for (; n_i < k; n_i++) {
