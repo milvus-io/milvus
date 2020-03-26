@@ -16,9 +16,11 @@ Please mark all change in change log and use the issue from GitHub
 -   \#1667 Create index failed with type: rnsg if metric_type is IP
 -   \#1708 NSG search crashed
 -   \#1724 Remove unused unittests
+-   \#1728 Optimize request handler to combine similar query
 -   \#1734 Opentracing for combined search request
 -   \#1735 Fix search out of memory with ivf_flat 
 -   \#1747 Expected error status if search with partition_tag not existed
+-   \#1756 Fix memory exhausted during searching 
 
 ## Feature
 -   \#1603 BinaryFlat add 2 Metric: Substructure and Superstructure
@@ -39,6 +41,7 @@ Please mark all change in change log and use the issue from GitHub
 -   \#1678 Remove CUSTOMIZATION macro 
 -   \#1698 Upgrade mishards to v0.7.0
 -   \#1719 Improve Milvus log
+-   \#1754 Optimize behavior to get file ids from metadata in mishards
 
 ## Task
 

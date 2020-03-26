@@ -53,6 +53,9 @@ class ContextChild {
         return context_;
     }
 
+    void
+    Finish();
+
  private:
     ContextPtr context_;
 };
@@ -66,6 +69,9 @@ class ContextFollower {
     Context() {
         return context_;
     }
+
+    void
+    Finish();
 
  private:
     ContextPtr context_;
