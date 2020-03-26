@@ -2,7 +2,7 @@
 
 Please mark all change in change log and use the issue from GitHub
 
-# Milvus 0.7.1 (TBD)
+# Milvus 0.7.1 (2020-04-01)
 
 ## Bug
 -   \#1301 Data in WAL may be accidentally inserted into a new table with the same name.
