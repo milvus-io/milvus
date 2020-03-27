@@ -28,7 +28,11 @@ class VectorSource {
  public:
     explicit VectorSource(VectorsData vectors);
 
-    VectorSource(VectorsData vectors, std::vector<uint64_t> attr_nbytes, std::vector<uint64_t> attr_size, std::vector<void*> attr_data);
+    VectorSource(VectorsData vectors,
+                 std::vector<uint64_t> attr_nbytes,
+                 std::vector<uint64_t> attr_size,
+                 std::vector<void*> attr_data,
+                 const std::vector<std::string>& field_name);
 
     Status
     Add(/*const ExecutionEnginePtr& execution_engine,*/ const segment::SegmentWriterPtr& segment_writer_ptr,

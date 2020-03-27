@@ -31,7 +31,7 @@ namespace server {
 InsertEntityRequest::InsertEntityRequest(const std::shared_ptr<Context>& context,
                                          const std::string& collection_name,
                                          const std::string& partition_tag,
-                                         std::vector<std::string> field_name_array,
+                                         std::vector<std::string>& field_name_array,
                                          std::vector<std::vector<std::string>>& field_values,
                                          std::vector<engine::VectorsData>& vector_data)
     : BaseRequest(context, DDL_DML_REQUEST_GROUP),
@@ -46,7 +46,7 @@ BaseRequestPtr
 InsertEntityRequest::Create(const std::shared_ptr<Context>& context,
                             const std::string& collection_name,
                             const std::string& partition_tag,
-                            std::vector<std::string> field_name_array,
+                            std::vector<std::string>& field_name_array,
                             std::vector<std::vector<std::string>>& field_values,
                             std::vector<engine::VectorsData>& vector_data) {
     return std::shared_ptr<BaseRequest>(new InsertEntityRequest(context,
@@ -79,9 +79,9 @@ InsertEntityRequest::OnExecute() {
 
         // step 2: check table existence
         // only process root table, ignore partition table
-        engine::meta::hybrid::CollectionSchema collection_schema;
+        engine::meta::TableSchema collection_schema;
         engine::meta::hybrid::FieldsSchema fields_schema;
-        collection_schema.collection_id_ = collection_name_;
+        collection_schema.table_id_ = collection_name_;
         status = DBWrapper::DB()->DescribeHybridCollection(collection_schema, fields_schema);
         if (!status.ok()) {
             if (status.code() == DB_NOT_FOUND) {
@@ -90,9 +90,16 @@ InsertEntityRequest::OnExecute() {
                 return status;
             }
         } else {
-            if (!collection_schema.owner_collection_.empty()) {
+            if (!collection_schema.owner_table_.empty()) {
                 return Status(SERVER_INVALID_TABLE_NAME, TableNotExistMsg(collection_name_));
             }
+        }
+
+        std::vector<engine::meta::hybrid::DataType> field_types;
+        auto size = fields_schema.fields_schema_.size();
+        field_types.resize(size);
+        for (uint64_t i = 0; i < size; ++i) {
+            field_types[i] = (engine::meta::hybrid::DataType)fields_schema.fields_schema_[i].field_type_;
         }
 
         // step 3: check table flag
@@ -155,7 +162,7 @@ InsertEntityRequest::OnExecute() {
 
         engine::Entities entities;
         entities.entity_count_ = vector_data_[0].vector_count_;
-        auto size = field_values_.size();
+        size = field_values_.size();
         entities.entity_field_name_.resize(size);
         entities.entity_data_.resize(size);
         uint64_t i;
@@ -171,11 +178,13 @@ InsertEntityRequest::OnExecute() {
         entities.vector_data_[0] = vector_data_[0];
 
         rc.RecordSection("prepare vectors data");
-        status = DBWrapper::DB()->InsertEntities(collection_name_, partition_tag_, entities)
+        status = DBWrapper::DB()->InsertEntities(collection_name_, partition_tag_, entities, field_types);
         fiu_do_on("InsertRequest.OnExecute.insert_fail", status = Status(milvus::SERVER_UNEXPECTED_ERROR, ""));
         if (!status.ok()) {
             return status;
         }
+        vector_data_[0].id_array_ = entities.id_array_;
+
 
 //        auto ids_size = vectors_data_.id_array_.size();
 //        fiu_do_on("InsertRequest.OnExecute.invalid_ids_size", ids_size = vec_count - 1);

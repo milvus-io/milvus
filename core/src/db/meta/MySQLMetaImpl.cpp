@@ -2454,12 +2454,12 @@ MySQLMetaImpl::GetGlobalLastLSN(uint64_t& lsn) {
 }
 
 Status
-MySQLMetaImpl::CreateHybridCollection(hybrid::CollectionSchema& collection_schema,
+MySQLMetaImpl::CreateHybridCollection(TableSchema& collection_schema,
                                       hybrid::FieldsSchema& fields_schema) {
 }
 
 Status
-MySQLMetaImpl::DescribeHybridCollection(hybrid::CollectionSchema& collection_schema,
+MySQLMetaImpl::DescribeHybridCollection(TableSchema& collection_schema,
                                         hybrid::FieldsSchema& fields_schema) {
 
 }

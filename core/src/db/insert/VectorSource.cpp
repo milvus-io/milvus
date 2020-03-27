@@ -29,8 +29,14 @@ VectorSource::VectorSource(VectorsData vectors) : vectors_(std::move(vectors)) {
 VectorSource::VectorSource(milvus::engine::VectorsData vectors,
                            std::vector<uint64_t> attr_nbytes,
                            std::vector<uint64_t> attr_size,
-                           std::vector<void*> attr_data)
-    : vectors_(std::move(vectors)), attr_nbytes_(attr_nbytes), attr_size_(attr_size), attr_data_(attr_data) {
+                           std::vector<void*> attr_data,
+                           const std::vector<std::string>& field_name)
+    : vectors_(std::move(vectors)),
+      attr_nbytes_(attr_nbytes),
+      attr_size_(attr_size),
+      attr_data_(attr_data),
+      field_name_(field_name) {
+
     current_num_vectors_added = 0;
     current_num_attrs_added = 0;
 }
@@ -113,7 +119,7 @@ VectorSource::AddEntities(const milvus::segment::SegmentWriterPtr& segment_write
     num_entities_added =
         current_num_attrs_added + num_entities_to_add <= n ? num_entities_to_add : n - current_num_attrs_added;
     IDNumbers vector_ids_to_add;
-    if (vector_ids_.empty()) {
+    if (vectors_.id_array_.empty()) {
         SafeIDGenerator& id_generator = SafeIDGenerator::GetInstance();
         Status status = id_generator.GetNextIDNumbers(num_entities_added, vector_ids_to_add);
         if (!status.ok()) {
@@ -131,7 +137,7 @@ VectorSource::AddEntities(const milvus::segment::SegmentWriterPtr& segment_write
                                           field_name_,
                                           attr_data_,
                                           attr_size_,
-                                          vector_ids_);
+                                          vector_ids_to_add);
 
     if (status.ok()) {
         current_num_attrs_added += num_entities_added;
@@ -146,6 +152,11 @@ VectorSource::AddEntities(const milvus::segment::SegmentWriterPtr& segment_write
     memcpy(vectors.data(), vectors_.float_data_.data() + current_num_vectors_added * collection_file_schema.dimension_,
            size);
     status = segment_writer_ptr->AddVectors(collection_file_schema.file_id_, vectors, vector_ids_to_add);
+    if (status.ok()) {
+        current_num_vectors_added += num_entities_added;
+        vector_ids_.insert(vector_ids_.end(), std::make_move_iterator(vector_ids_to_add.begin()),
+                           std::make_move_iterator(vector_ids_to_add.end()));
+    }
 
     // don't need to add current_num_attrs_added again
     if (!status.ok()) {

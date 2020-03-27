@@ -716,11 +716,17 @@ GrpcRequestHandler::InsertEntity(::grpc::ServerContext* context,
 
     auto size = request->entities().field_names_size();
     field_name_array.resize(size);
+    for (uint64_t i = 0; i < size; ++i) {
+        field_name_array[i] = request->entities().field_names(i);
+    }
     field_values.resize(request->entities().attr_records_size());
     for (uint64_t i = 0; i < request->entities().attr_records_size(); ++i) {
         auto value_size = request->entities().attr_records(i).value_size();
         field_values[i].resize(value_size);
-        memcpy(field_values[i].data(), request->entities().attr_records(i).value().data(), value_size);
+        for (uint64_t j = 0; j < value_size; ++j) {
+            field_values[i][j] = request->entities().attr_records(i).value(j);
+        }
+//        memcpy(field_values[i].data(), request->entities().attr_records(i).value().data(), value_size);
     }
 
     auto vector_size = request->entities().result_values_size();
@@ -731,9 +737,11 @@ GrpcRequestHandler::InsertEntity(::grpc::ServerContext* context,
         vector_data[i] = vectors;
     }
 
+    std::string collection_name = request->collection_name();
+    std::string partition_tag = request->partition_tag();
     Status status = request_handler_.InsertEntity(context_map_[context],
-                                                  request->collection_name(),
-                                                  request->partition_tag(),
+                                                  collection_name,
+                                                  partition_tag,
                                                   field_name_array,
                                                   field_values,
                                                   vector_data);
@@ -782,19 +790,25 @@ DeSerialization(const ::milvus::grpc::GeneralQuery& general_query, query::Boolea
     }
     if (general_query.has_vector_query()) {
         query::VectorQueryPtr vector_query = std::make_shared<query::VectorQuery>();
+
+        engine::VectorsData vectors;
+        CopyRowRecords(general_query.vector_query().records(), google::protobuf::RepeatedField<google::protobuf::int64>(),
+                       vectors);
+
+        vector_query->query_vector.float_data = vectors.float_data_;
+        vector_query->query_vector.binary_data = vectors.binary_data_;
+
         vector_query->boost = general_query.vector_query().query_boost();
         vector_query->field_name = general_query.vector_query().field_name();
-        vector_query->query_vector.resize(general_query.vector_query().records_size());
-        for (uint64_t i = 0; i < general_query.vector_query().records_size(); ++i) {
-            vector_query->query_vector[i].float_data.resize(general_query.vector_query().records(i).float_data_size());
-            vector_query->query_vector[i].binary_data.resize(general_query.vector_query().records(i).binary_data().size() / 8);
-            memcpy(vector_query->query_vector[i].float_data.data(), general_query.vector_query().records(i).float_data().data(),
-                   sizeof(float) * general_query.vector_query().records(i).float_data_size());
-            memcpy(vector_query->query_vector[i].binary_data.data(),
-                   general_query.vector_query().records(i).binary_data().data(),
-                   general_query.vector_query().records(i).binary_data().size());
-        }
         leaf_query->vector_query = vector_query;
+
+        milvus::json json_params;
+        for (int i = 0; i < general_query.vector_query().extra_params_size(); i++) {
+            const ::milvus::grpc::KeyValuePair& extra = general_query.vector_query().extra_params(i);
+            if (extra.key() == EXTRA_PARAM_KEY) {
+                json_params = json::parse(extra.value());
+            }
+        }
     }
     boolean_clause->AddLeafQuery(leaf_query);
 }
@@ -802,7 +816,7 @@ DeSerialization(const ::milvus::grpc::GeneralQuery& general_query, query::Boolea
 ::grpc::Status
 GrpcRequestHandler::HybridSearch(::grpc::ServerContext* context,
                                  const ::milvus::grpc::HSearchParam* request,
-                                 ::milvus::grpc::HQueryResult* response) {
+                                 ::milvus::grpc::TopKQueryResult* response) {
     CHECK_NULLPTR_RETURN(request);
 
     query::BooleanQueryPtr boolean_query = std::make_shared<query::BooleanQuery>();

@@ -169,7 +169,7 @@ struct FieldSchema {
     }FIELD_TYPE;
 
     //TODO(yukun): need field_id?
-    size_t collection_id_;
+    std::string collection_id_;
     std::string field_name_;
     int32_t field_type_;
     std::string field_params_;

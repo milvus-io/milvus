@@ -57,7 +57,7 @@ Status
 HybridSearchRequest::OnExecute() {
     try {
         fiu_do_on("SearchRequest.OnExecute.throw_std_exception", throw std::exception());
-        std::string hdr = "SearchRequest(table=" + collection_name_";
+        std::string hdr = "SearchRequest(table=" + collection_name_;
 
         TimeRecorder rc(hdr);
 
@@ -69,9 +69,10 @@ HybridSearchRequest::OnExecute() {
 
         // step 2: check table existence
         // only process root table, ignore partition table
-        engine::meta::hybrid::CollectionSchema collection_schema;
-        collection_schema.collection_id_ = collection_name_;
-        status = DBWrapper::DB()->DescribeHybridCollection(collection_schema);
+        engine::meta::TableSchema collection_schema;
+        engine::meta::hybrid::FieldsSchema fields_schema;
+        collection_schema.table_id_ = collection_name_;
+        status = DBWrapper::DB()->DescribeHybridCollection(collection_schema,fields_schema);
         fiu_do_on("SearchRequest.OnExecute.describe_table_fail", status = Status(milvus::SERVER_UNEXPECTED_ERROR, ""));
         if (!status.ok()) {
             if (status.code() == DB_NOT_FOUND) {
@@ -80,7 +81,7 @@ HybridSearchRequest::OnExecute() {
                 return status;
             }
         } else {
-            if (!collection_schema.owner_collection_.empty()) {
+            if (!collection_schema.owner_table_.empty()) {
                 return Status(SERVER_INVALID_TABLE_NAME, TableNotExistMsg(collection_name_));
             }
         }
@@ -94,7 +95,6 @@ HybridSearchRequest::OnExecute() {
                                               general_query_,
                                               result_ids,
                                               result_distances);
-
 
 #ifdef MILVUS_ENABLE_PROFILING
         ProfilerStop();
@@ -127,3 +127,6 @@ HybridSearchRequest::OnExecute() {
 
     return Status::OK();
 }
+
+} // namespace server
+} // namespace milvus

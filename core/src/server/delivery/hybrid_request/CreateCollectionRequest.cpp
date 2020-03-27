@@ -68,13 +68,16 @@ CreateCollectionRequest::OnExecute() {
         table_info.table_id_ = collection_name_;
         fields_schema.fields_schema_.resize(size + 1);
         for (uint64_t i = 0; i < size; ++i) {
+            fields_schema.fields_schema_[i].collection_id_ = collection_name_;
             fields_schema.fields_schema_[i].field_name_ =  field_types_[i].first;
             fields_schema.fields_schema_[i].field_type_ = (int32_t)field_types_[i].second;
             fields_schema.fields_schema_[i].field_params_ = field_params_[i].second;
         }
+        fields_schema.fields_schema_[size].collection_id_ = collection_name_;
         fields_schema.fields_schema_[size].field_name_ = vector_dimensions_[0].first;
         fields_schema.fields_schema_[size].field_type_ = (int32_t)engine::meta::hybrid::DataType::VECTOR;
 
+        table_info.dimension_ = vector_dimensions_[0].second;
         // TODO(yukun): check dimension, metric_type, and assign engine_type
 
         // step 3: create collection

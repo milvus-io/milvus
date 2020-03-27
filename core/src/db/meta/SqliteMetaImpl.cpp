@@ -1801,7 +1801,7 @@ SqliteMetaImpl::CreateHybridCollection(meta::TableSchema& collection_schema,
 
         try {
             fiu_do_on("SqliteMetaImpl.CreateHybridCollection.insert_throw_exception", throw std::exception());
-            auto id = CollectionConnectPtr->insert(collection_schema);
+            auto id = ConnectorPtr->insert(collection_schema);
             collection_schema.id_ = id;
         } catch (std::exception& e) {
             return HandleException("Encounter exception when create collection", e.what());
@@ -1809,12 +1809,13 @@ SqliteMetaImpl::CreateHybridCollection(meta::TableSchema& collection_schema,
 
         ENGINE_LOG_DEBUG << "Successfully create collection table: " << collection_schema.table_id_;
 
+        Status status = utils::CreateTablePath(options_, collection_schema.table_id_);
+
         try {
             for (uint64_t i = 0; i < fields_schema.fields_schema_.size(); ++i) {
                 hybrid::FieldSchema schema = fields_schema.fields_schema_[i];
-                auto field_id = CollectionConnectPtr->insert(schema);
+                auto field_id = ConnectorPtr->insert(schema);
                 ENGINE_LOG_DEBUG << "Successfully create collection field table" << field_id;
-                auto status = utils::CreateTablePath(options_, fields_schema.fields_schema_[i].field_name_);
                 if (!status.ok()) {
                     return status;
                 }
@@ -1823,7 +1824,7 @@ SqliteMetaImpl::CreateHybridCollection(meta::TableSchema& collection_schema,
             return HandleException("Encounter exception when create collection field", e.what());
         }
 
-        return utils::CreateTablePath(options_, collection_schema.table_id_);
+        return status;
     } catch (std::exception& e) {
         return HandleException("Encounter exception when create table", e.what());
     }
@@ -1861,7 +1862,7 @@ SqliteMetaImpl::DescribeHybridCollection(milvus::engine::meta::TableSchema& tabl
             return Status(DB_NOT_FOUND, "Table " + table_schema.table_id_ + " not found");
         }
 
-        auto field_groups = CollectionConnectPtr->select(
+        auto field_groups = ConnectorPtr->select(
             columns(&hybrid::FieldSchema::collection_id_,
                     &hybrid::FieldSchema::field_name_,
                     &hybrid::FieldSchema::field_type_,

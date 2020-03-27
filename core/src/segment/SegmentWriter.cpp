@@ -51,10 +51,10 @@ SegmentWriter::AddVectors(const std::string& name, const std::vector<uint8_t>& d
 
 Status
 SegmentWriter::AddAttrs(const std::string& name,
-                                 const std::vector<std::string>& field_name,
-                                 const std::vector<void*> data,
-                                 const std::vector<size_t> nbytes,
-                                 const std::vector<int64_t>& uids) {
+                        const std::vector<std::string>& field_name,
+                        const std::vector<void*> data,
+                        const std::vector<size_t> nbytes,
+                        const std::vector<int64_t>& uids) {
     for (uint64_t i = 0; i < data.size(); ++i) {
         AttrPtr attr = std::make_shared<Attr>(data[i], nbytes[i], uids, field_name[i]);
         segment_ptr_->attrs_ptr_->attrs.insert(std::make_pair(field_name[i], attr));

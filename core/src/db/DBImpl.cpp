@@ -564,9 +564,12 @@ DBImpl::InsertVectors(const std::string& table_id, const std::string& partition_
     return status;
 }
 
-
 Status
-DBImpl::InsertEntities(std::string& collection_id, std::string& partition_tag, Entities& entities) {
+DBImpl::InsertEntities(const std::string& collection_id,
+                       const std::string& partition_tag,
+                       Entities& entities,
+                       std::vector<meta::hybrid::DataType>& field_types) {
+
     if (!initialized_.load(std::memory_order_acquire)) {
         return SHUTDOWN_ERROR;
     }
@@ -588,21 +591,91 @@ DBImpl::InsertEntities(std::string& collection_id, std::string& partition_tag, E
     record.partition_tag = partition_tag;
     record.ids = entities.id_array_.data();
     record.length = entities.entity_count_;
+    record.entity_field_name = entities.entity_field_name_;
 
     if (entities.vector_data_[0].binary_data_.empty()) {
-        record.type = wal::MXLogType::InsertVector;
+        record.type = wal::MXLogType::Entity;
         record.data = entities.vector_data_[0].float_data_.data();
-        record.length = entities.vector_data_[0].float_data_.size() * sizeof(float);
+        record.data_size = entities.vector_data_[0].float_data_.size() * sizeof(float);
     } else {
-        record.type = wal::MXLogType::InsertBinary;
-        record.data = entities.vector_data_[0].binary_data_.data();
-        record.length = entities.vector_data_[0].binary_data_.size() * sizeof(uint8_t);
+//        record.type = wal::MXLogType::InsertBinary;
+//        record.data = entities.vector_data_[0].binary_data_.data();
+//        record.length = entities.vector_data_[0].binary_data_.size() * sizeof(uint8_t);
     }
 
     auto entity_size = entities.entity_data_.size();
+    record.entity_data.resize(entity_size);
+    record.entity_data_size.resize(entity_size);
+    record.entity_nbytes.resize(entity_size);
     for (uint64_t i = 0; i < entity_size; ++i) {
-        record.entity_data[i] = entities.entity_data_[i].field_value_.data();
-        record.entity_data_size[i] = entities.entity_data_[i].field_value_.size();
+        switch (field_types[i]) {
+            case meta::hybrid::DataType::INT8: {
+                std::vector<int8_t> entity_data;
+                entity_data.resize(entities.entity_count_);
+                for (uint64_t j = 0; j < entities.entity_count_; ++j) {
+                    entity_data[j] = atoi(entities.entity_data_[i].field_value_[j].c_str());
+                }
+                record.entity_data[i] = entity_data.data();
+                record.entity_nbytes[i] = sizeof(int8_t);
+                record.entity_data_size[i] = entities.entity_count_ * sizeof(int8_t);
+                break;
+            }
+            case meta::hybrid::DataType::INT16: {
+                std::vector<int16_t> entity_data;
+                entity_data.resize(entities.entity_count_);
+                for (uint64_t j = 0; j < entities.entity_count_; ++j) {
+                    entity_data[j] = atoi(entities.entity_data_[i].field_value_[j].c_str());
+                }
+                record.entity_data[i] = entity_data.data();
+                record.entity_nbytes[i] = sizeof(int16_t);
+                record.entity_data_size[i] = entities.entity_count_ * sizeof(int16_t);
+                break;
+            }
+            case meta::hybrid::DataType::INT32: {
+                std::vector<int32_t> entity_data;
+                entity_data.resize(entities.entity_count_);
+                for (uint64_t j = 0; j < entities.entity_count_; ++j) {
+                    entity_data[j] = atoi(entities.entity_data_[i].field_value_[j].c_str());
+                }
+                record.entity_data[i] = entity_data.data();
+                record.entity_nbytes[i] = sizeof(int32_t);
+                record.entity_data_size[i] = entities.entity_count_ * sizeof(int32_t);
+                break;
+            }
+            case meta::hybrid::DataType::INT64: {
+                std::vector<int64_t> entity_data;
+                entity_data.resize(entities.entity_count_);
+                for (uint64_t j = 0; j < entities.entity_count_; ++j) {
+                    entity_data[j] = atoi(entities.entity_data_[i].field_value_[j].c_str());
+                }
+                record.entity_data[i] = entity_data.data();
+                record.entity_nbytes[i] = sizeof(int64_t);
+                record.entity_data_size[i] = entities.entity_count_ * sizeof(int64_t);
+                break;
+            }
+            case meta::hybrid::DataType::FLOAT: {
+                std::vector<float> entity_data;
+                entity_data.resize(entities.entity_count_);
+                for (uint64_t j = 0; j < entities.entity_count_; ++j) {
+                    entity_data[j] = atof(entities.entity_data_[i].field_value_[j].c_str());
+                }
+                record.entity_data[i] = entity_data.data();
+                record.entity_nbytes[i] = sizeof(float);
+                record.entity_data_size[i] = entities.entity_count_ * sizeof(float);
+                break;
+            }
+            case meta::hybrid::DataType::DOUBLE: {
+                std::vector<double > entity_data;
+                entity_data.resize(entities.entity_count_);
+                for (uint64_t j = 0; j < entities.entity_count_; ++j) {
+                    entity_data[j] = atof(entities.entity_data_[i].field_value_[j].c_str());
+                }
+                record.entity_data[i] = entity_data.data();
+                record.entity_nbytes[i] = sizeof(double);
+                record.entity_data_size[i] = entities.entity_count_ * sizeof(double);
+                break;
+            }
+        }
     }
 
     status = ExecWalRecord(record);
@@ -1219,7 +1292,7 @@ DBImpl::HybridQuery(const std::shared_ptr<server::Context>& context,
     }
 
     cache::CpuCacheMgr::GetInstance()->PrintInfo();  // print cache info before query
-    status = HybridQueryAsync(query_ctx, collection_id, files_array, result_ids, result_distances);
+    status = HybridQueryAsync(query_ctx, collection_id, files_array, general_query, result_ids, result_distances);
     cache::CpuCacheMgr::GetInstance()->PrintInfo();  // print cache info after query
 
     query_ctx->GetTraceContext()->GetSpan()->Finish();
@@ -2063,7 +2136,8 @@ DBImpl::ExecWalRecord(const wal::MXLogRecord& record) {
                                               (const float*)record.data,
                                               record.entity_nbytes,
                                               record.entity_data_size,
-                                              record.entity_data, record.lsn, flushed_tables);
+                                              record.entity_data,
+                                              record.entity_field_name, record.lsn, flushed_tables);
             tables_flushed(flushed_tables);
 
             milvus::server::CollectInsertMetrics metrics(record.length, status);

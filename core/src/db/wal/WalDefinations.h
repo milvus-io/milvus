@@ -39,6 +39,7 @@ struct MXLogRecord {
     const IDNumber* ids;
     uint32_t data_size;
     const void* data;
+    std::vector<std::string> entity_field_name;
     std::vector<uint64_t> entity_nbytes;
     std::vector<uint64_t> entity_data_size;
     std::vector<void*> entity_data;

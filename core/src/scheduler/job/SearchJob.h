@@ -105,6 +105,11 @@ class SearchJob : public Job {
         return mutex_;
     }
 
+    query::GeneralQueryPtr
+    general_query() {
+        return general_query_;
+    }
+
  private:
     const std::shared_ptr<server::Context> context_;
 

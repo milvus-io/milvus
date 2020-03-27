@@ -222,8 +222,11 @@ XSearchTask::Execute() {
     if (auto job = job_.lock()) {
         auto search_job = std::static_pointer_cast<scheduler::SearchJob>(job);
         // step 1: allocate memory
+        query::GeneralQueryPtr general_query = search_job->general_query();
+
         uint64_t nq = search_job->nq();
         uint64_t topk = search_job->topk();
+
         const milvus::json& extra_params = search_job->extra_params();
         ENGINE_LOG_DEBUG << "Search job extra params: " << extra_params.dump();
         const engine::VectorsData& vectors = search_job->vectors();
@@ -242,6 +245,10 @@ XSearchTask::Execute() {
                 hybrid = true;
             }
             Status s;
+            if (general_query != nullptr) {
+                faiss::ConcurrentBitsetPtr bitset;
+                s = index_engine_->ExecBinaryQuery(general_query, bitset, output_distance, output_ids);
+            }
             if (!vectors.float_data_.empty()) {
                 s = index_engine_->Search(nq, vectors.float_data_.data(), topk, extra_params, output_distance.data(),
                                           output_ids.data(), hybrid);

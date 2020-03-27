@@ -40,6 +40,7 @@ class MemManager {
                    const std::vector<uint64_t>& attr_nbytes,
                    const std::vector<uint64_t>& attr_size,
                    const std::vector<void*>& attr_data,
+                   const std::vector<std::string>& field_name,
                    uint64_t lsn,
                    std::set<std::string>& flushed_tables) = 0;
 

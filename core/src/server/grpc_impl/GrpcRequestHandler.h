@@ -352,7 +352,7 @@ class GrpcRequestHandler final : public ::milvus::grpc::MilvusService::Service, 
     ::grpc::Status
     HybridSearch(::grpc::ServerContext* context,
                  const ::milvus::grpc::HSearchParam* request,
-                 ::milvus::grpc::HQueryResult* response) override;
+                 ::milvus::grpc::TopKQueryResult* response) override;
 //
 //    ::grpc::Status
 //    HybridSearchInSegments(::grpc::ServerContext* context,

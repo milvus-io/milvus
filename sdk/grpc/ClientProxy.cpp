@@ -620,43 +620,49 @@ ClientProxy::InsertEntity(const std::string& collection_name,
              const std::string& partition_tag,
              HEntity& entities,
              std::vector<uint64_t>& id_array) {
-    ::milvus::grpc::HInsertParam grpc_param;
-    grpc_param.set_collection_name(collection_name);
-    grpc_param.set_partition_tag(partition_tag);
-
-    auto numerica_it = entities.numerica_value.begin();
-    for (; numerica_it != entities.numerica_value.end(); numerica_it++) {
-        auto name = grpc_param.mutable_entities()->add_field_names();
-        *name = numerica_it->first;
-        auto records = grpc_param.mutable_entities()->add_attr_records();
-        for (auto value : numerica_it->second) {
-            auto attr = records->add_value();
-            *attr = value;
-        }
-    }
-
-    auto vector_it = entities.vector_value.begin();
-    for (; vector_it != entities.vector_value.end();) {
-        auto name = grpc_param.mutable_entities()->add_field_names();
-        *name = vector_it->first;
-        ::milvus::grpc::FieldValue* vector_field = grpc_param.mutable_entities()->add_result_values();
-        for (auto entity : vector_it->second) {
-            ::milvus::grpc::RowRecord* record = vector_field->mutable_vector_value()->add_value();
-            CopyVectorField(record, entity);
-        }
-    }
-
     Status status;
-    ::milvus::grpc::HEntityIDs entity_ids;
-    if (!id_array.empty()) {
-        auto row_ids = grpc_param.mutable_entity_id_array();
-        row_ids->Resize(static_cast<int>(id_array.size()), -1);
-        memcpy(row_ids->mutable_data(), id_array.data(), id_array.size() * sizeof(int64_t));
-        status = client_ptr_->InsertEntities(grpc_param, entity_ids);
-    } else {
-        status = client_ptr_->InsertEntities(grpc_param, entity_ids);
-        id_array.insert(id_array.end(), entity_ids.entity_id_array().begin(), entity_ids.entity_id_array().end());
+    try {
+        ::milvus::grpc::HInsertParam grpc_param;
+        grpc_param.set_collection_name(collection_name);
+        grpc_param.set_partition_tag(partition_tag);
+
+        auto numerica_it = entities.numerica_value.begin();
+        for (; numerica_it != entities.numerica_value.end(); numerica_it++) {
+            auto name = grpc_param.mutable_entities()->add_field_names();
+            *name = numerica_it->first;
+            auto records = grpc_param.mutable_entities()->add_attr_records();
+            for (auto value : numerica_it->second) {
+                auto attr = records->add_value();
+                *attr = value;
+            }
+        }
+
+        auto vector_it = entities.vector_value.begin();
+        for (; vector_it != entities.vector_value.end(); vector_it++) {
+            auto name = grpc_param.mutable_entities()->add_field_names();
+            *name = vector_it->first;
+            ::milvus::grpc::FieldValue* vector_field = grpc_param.mutable_entities()->add_result_values();
+            for (auto entity : vector_it->second) {
+                ::milvus::grpc::RowRecord* record = vector_field->mutable_vector_value()->add_value();
+                CopyVectorField(record, entity);
+            }
+        }
+
+        ::milvus::grpc::HEntityIDs entity_ids;
+        if (!id_array.empty()) {
+            auto row_ids = grpc_param.mutable_entity_id_array();
+            row_ids->Resize(static_cast<int>(id_array.size()), -1);
+            memcpy(row_ids->mutable_data(), id_array.data(), id_array.size() * sizeof(int64_t));
+            status = client_ptr_->InsertEntities(grpc_param, entity_ids);
+        } else {
+            status = client_ptr_->InsertEntities(grpc_param, entity_ids);
+            id_array.insert(id_array.end(), entity_ids.entity_id_array().begin(), entity_ids.entity_id_array().end());
+        }
+    } catch (std::exception& exception) {
+        return Status(StatusCode::UnknownError, "Failed to create collection: " + std::string(exception.what()));
     }
+
+    return status;
 }
 
 void

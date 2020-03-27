@@ -890,17 +890,25 @@ ProcessRangeQuery(std::vector<T> data, T value, query::CompareOperator type, uin
     }
 }
 
-void
-ExecutionEngineImpl::ExecBinaryQuery(milvus::query::GeneralQueryPtr& general_query,
-                                     faiss::ConcurrentBitsetPtr bitset) {
+Status
+ExecutionEngineImpl::ExecBinaryQuery(milvus::query::GeneralQueryPtr general_query,
+                                     faiss::ConcurrentBitsetPtr bitset,
+                                     std::vector<float>& distances,
+                                     std::vector<int64_t>& labels) {
+
+    if (bitset == nullptr) {
+        bitset = std::make_shared<faiss::ConcurrentBitset>(vector_count_);
+    }
 
     if (general_query->leaf == nullptr) {
+        Status status;
         if (general_query->bin->left_query != nullptr) {
-            ExecBinaryQuery(general_query->bin->left_query, bitset);
+            status = ExecBinaryQuery(general_query->bin->left_query, bitset, distances, labels);
         }
         if (general_query->bin->right_query != nullptr) {
-            ExecBinaryQuery(general_query->bin->right_query, bitset);
+            status = ExecBinaryQuery(general_query->bin->right_query, bitset, distances, labels);
         }
+        return status;
     } else {
         if (general_query->leaf->term_query != nullptr) {
             // process attrs_data
@@ -997,6 +1005,7 @@ ExecutionEngineImpl::ExecBinaryQuery(milvus::query::GeneralQueryPtr& general_que
                     break;
                 }
             }
+            return Status::OK();
         }
         if (general_query->leaf->range_query != nullptr) {
             auto field_name = general_query->leaf->range_query->field_name;
@@ -1060,10 +1069,32 @@ ExecutionEngineImpl::ExecBinaryQuery(milvus::query::GeneralQueryPtr& general_que
                     }
                 }
             }
+            return Status::OK();
         }
         if (general_query->leaf->vector_query != nullptr) {
             // Do search
+            faiss::ConcurrentBitsetPtr list;
+            Status status = std::static_pointer_cast<BFIndex>(index_)->GetBlacklist(list);
+            // Do and
+            for (uint64_t i = 0; i < vector_count_; ++i) {
+                if (!list->test(i) || !bitset->test(i)) {
+                    bitset->clear(i);
+                }
+            }
+            status = std::static_pointer_cast<BFIndex>(index_)->SetBlacklist(bitset);
+            auto vector_query = general_query->leaf->vector_query;
+            int64_t topk = vector_query->topk;
+            int64_t nq = vector_query->query_vector.float_data.size() / topk;
 
+            distances.resize(nq * topk);
+            labels.resize(nq * topk);
+
+            return Search(nq,
+                          vector_query->query_vector.float_data.data(),
+                          vector_query->topk,
+                          vector_query->extra_params,
+                          distances.data(),
+                          labels.data());
         }
     }
 }

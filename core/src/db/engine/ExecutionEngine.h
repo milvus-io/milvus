@@ -15,6 +15,9 @@
 #include <string>
 #include <vector>
 
+#include <faiss/utils/ConcurrentBitset.h>
+
+#include "query/GeneralQuery.h"
 #include "utils/Json.h"
 #include "utils/Status.h"
 
@@ -110,6 +113,12 @@ class ExecutionEngine {
 
     virtual Status
     GetVectorByID(const int64_t& id, uint8_t* vector, bool hybrid) = 0;
+
+    virtual Status
+    ExecBinaryQuery(query::GeneralQueryPtr general_query,
+                    faiss::ConcurrentBitsetPtr bitset,
+                    std::vector<float>& distances,
+                    std::vector<int64_t>& labels) = 0;
 
     virtual Status
     Search(int64_t n, const float* data, int64_t k, const milvus::json& extra_params, float* distances, int64_t* labels,

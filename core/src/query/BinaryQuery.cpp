@@ -11,6 +11,9 @@
 
 #pragma once
 
+#include <string>
+#include <vector>
+
 #include "BinaryQuery.h"
 
 namespace milvus {

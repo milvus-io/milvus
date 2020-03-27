@@ -11,12 +11,11 @@
 
 #pragma once
 
-#include <faiss/utils/ConcurrentBitset.h>
-
 #include <iostream>
 #include <memory>
 #include <vector>
 #include <string>
+#include "utils/Json.h"
 
 namespace milvus {
 namespace query {
@@ -71,10 +70,10 @@ struct VectorRecord {
 
 struct VectorQuery {
     std::string field_name;
-    std::string vector_query_param;
-    uint64_t topk;
+    milvus::json extra_params;
+    int64_t topk;
     float boost;
-    std::vector<VectorRecord> query_vector;
+    VectorRecord query_vector;
 };
 using VectorQueryPtr = std::shared_ptr<VectorQuery>;
 
@@ -102,8 +101,6 @@ struct BinaryQuery {
     GeneralQueryPtr right_query;
     QueryRelation relation;
     float query_boost;
-
-    faiss::ConcurrentBitsetPtr bitset_ptr_;
 };
 
 }  // namespace query

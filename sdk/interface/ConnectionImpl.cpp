@@ -199,9 +199,9 @@ ConnectionImpl::CreateHybridCollection(const HMapping& mapping) {
 
 Status
 ConnectionImpl::InsertEntity(const std::string& collection_name,
-             const std::string& partition_tag,
-             HEntity& entities,
-             std::vector<uint64_t>& id_array) {
+                             const std::string& partition_tag,
+                             HEntity& entities,
+                             std::vector<uint64_t>& id_array) {
     return client_proxy_->InsertEntity(collection_name, partition_tag, entities, id_array);
 }
 
