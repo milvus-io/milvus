@@ -22,10 +22,10 @@
 #ifdef MILVUS_GPU_VERSION
 #include <faiss/gpu/GpuCloner.h>
 #include "knowhere/index/vector_index/gpu/IndexGPUIDMAP.h"
-#endif
-#include "Helper.h"
 #include "knowhere/index/vector_index/helpers/Cloner.h"
 #include "knowhere/index/vector_index/helpers/FaissGpuResourceMgr.h"
+#endif
+#include "Helper.h"
 #include "unittest/utils.h"
 
 using ::testing::Combine;
