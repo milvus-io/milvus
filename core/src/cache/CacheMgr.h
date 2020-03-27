@@ -39,6 +39,9 @@ class CacheMgr {
     virtual void
     EraseItem(const std::string& key);
 
+    virtual bool
+    Reserve(const int64_t size);
+
     virtual void
     PrintInfo();
 
@@ -54,14 +57,20 @@ class CacheMgr {
     void
     SetCapacity(int64_t capacity);
 
+    void
+    Lock();
+
+    void
+    Unlock();
+
  protected:
     CacheMgr();
 
     virtual ~CacheMgr();
 
  protected:
-    using CachePtr = std::shared_ptr<Cache<ItemObj>>;
-    CachePtr cache_;
+    std::shared_ptr<Cache<ItemObj>> cache_;
+    std::mutex mutex_;
 };
 
 }  // namespace cache

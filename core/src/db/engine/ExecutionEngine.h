@@ -112,9 +112,6 @@ class ExecutionEngine {
     Cache() = 0;
 
     virtual Status
-    GpuCache(uint64_t gpu_id) = 0;
-
-    virtual Status
     Init() = 0;
 
     virtual EngineType
