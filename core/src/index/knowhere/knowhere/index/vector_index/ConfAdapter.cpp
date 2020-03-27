@@ -297,5 +297,21 @@ BinIVFConfAdapter::CheckTrain(Config& oricfg, const IndexMode mode) {
     return true;
 }
 
+bool
+ANNOYConfAdapter::CheckTrain(Config& oricfg, const IndexMode mode) {
+    static int64_t MIN_NTREES = 0;
+    // too large of n_trees takes much time, if there is real requirement, change this threshold.
+    static int64_t MAX_NTREES = 16384;
+
+    CheckIntByRange(knowhere::IndexParams::n_trees, MIN_NTREES, MAX_NTREES);
+
+    return ConfAdapter::CheckTrain(oricfg, mode);
+}
+
+bool
+ANNOYConfAdapter::CheckSearch(Config& oricfg, const IndexType type, const IndexMode mode) {
+    return ConfAdapter::CheckSearch(oricfg, type, mode);
+}
+
 }  // namespace knowhere
 }  // namespace milvus

@@ -71,6 +71,7 @@ DeleteByIDRequest::OnExecute() {
         if (table_schema.engine_type_ != (int32_t)engine::EngineType::FAISS_IDMAP &&
             table_schema.engine_type_ != (int32_t)engine::EngineType::FAISS_BIN_IDMAP &&
             table_schema.engine_type_ != (int32_t)engine::EngineType::HNSW &&
+            table_schema.engine_type_ != (int32_t)engine::EngineType::ANNOY &&
             table_schema.engine_type_ != (int32_t)engine::EngineType::FAISS_IVFFLAT &&
             table_schema.engine_type_ != (int32_t)engine::EngineType::FAISS_BIN_IVFFLAT &&
             table_schema.engine_type_ != (int32_t)engine::EngineType::FAISS_IVFSQ8 &&

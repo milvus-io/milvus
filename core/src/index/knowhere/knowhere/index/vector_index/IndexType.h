@@ -34,6 +34,7 @@ enum class OldIndexType {
     FAISS_IVFPQ_MIX,
     SPTAG_BKT_RNT_CPU,
     HNSW,
+    ANNOY,
     FAISS_BIN_IDMAP = 100,
     FAISS_BIN_IVFLAT_CPU = 101,
 };
@@ -54,6 +55,7 @@ constexpr const char* INDEX_NSG = "NSG";
 constexpr const char* INDEX_SPTAG_KDT_RNT = "SPTAG_KDT_RNT";
 constexpr const char* INDEX_SPTAG_BKT_RNT = "SPTAG_BKT_RNT";
 constexpr const char* INDEX_HNSW = "HNSW";
+constexpr const char* INDEX_ANNOY = "ANNOY";
 }  // namespace IndexEnum
 
 enum class IndexMode { MODE_CPU = 0, MODE_GPU = 1 };

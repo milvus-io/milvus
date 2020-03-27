@@ -34,6 +34,7 @@ static std::unordered_map<int32_t, std::string> old_index_type_str_map = {
     {(int32_t)OldIndexType::SPTAG_KDT_RNT_CPU, IndexEnum::INDEX_SPTAG_KDT_RNT},
     {(int32_t)OldIndexType::SPTAG_BKT_RNT_CPU, IndexEnum::INDEX_SPTAG_BKT_RNT},
     {(int32_t)OldIndexType::HNSW, IndexEnum::INDEX_HNSW},
+    {(int32_t)OldIndexType::ANNOY, IndexEnum::INDEX_ANNOY},
     {(int32_t)OldIndexType::FAISS_BIN_IDMAP, IndexEnum::INDEX_FAISS_BIN_IDMAP},
     {(int32_t)OldIndexType::FAISS_BIN_IVFLAT_CPU, IndexEnum::INDEX_FAISS_BIN_IVFFLAT},
 };
@@ -49,6 +50,7 @@ static std::unordered_map<std::string, int32_t> str_old_index_type_map = {
     {IndexEnum::INDEX_SPTAG_KDT_RNT, (int32_t)OldIndexType::SPTAG_KDT_RNT_CPU},
     {IndexEnum::INDEX_SPTAG_BKT_RNT, (int32_t)OldIndexType::SPTAG_BKT_RNT_CPU},
     {IndexEnum::INDEX_HNSW, (int32_t)OldIndexType::HNSW},
+    {IndexEnum::INDEX_ANNOY, (int32_t)OldIndexType::ANNOY},
     {IndexEnum::INDEX_FAISS_BIN_IDMAP, (int32_t)OldIndexType::FAISS_BIN_IDMAP},
     {IndexEnum::INDEX_FAISS_BIN_IVFFLAT, (int32_t)OldIndexType::FAISS_BIN_IVFLAT_CPU},
 };
