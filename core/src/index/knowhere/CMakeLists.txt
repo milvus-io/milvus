@@ -50,6 +50,7 @@ set(index_srcs
         knowhere/index/vector_index/IndexSPTAG.cpp
         knowhere/index/vector_index/IndexType.cpp
         knowhere/index/vector_index/VecIndexFactory.cpp
+        knowhere/index/vector_index/IndexAnnoy.cpp
         )
 
 set(depend_libs
