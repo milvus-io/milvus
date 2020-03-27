@@ -141,8 +141,13 @@ Vectors::GetCodeLength() const {
 }
 
 size_t
-Vectors::Size() {
-    return data_.size() + uids_.size() * sizeof(doc_id_t);
+Vectors::VectorsSize() {
+    return data_.size();
+}
+
+size_t
+Vectors::UidsSize() {
+    return uids_.size();
 }
 
 void

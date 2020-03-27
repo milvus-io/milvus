@@ -10,6 +10,7 @@
 
 #include <faiss/Index.h>
 #include <faiss/gpu/utils/MemorySpace.h>
+#include <faiss/utils/ConcurrentBitset.h>
 
 namespace faiss { namespace gpu {
 
@@ -124,7 +125,7 @@ private:
                        int k,
                        float* outDistancesData,
                        Index::idx_t* outIndicesData,
-                      ConcurrentBitsetPtr bitset = nullptr) const;
+                       ConcurrentBitsetPtr bitset = nullptr) const;
 
   /// Calls searchImpl_ for a single page of GPU-resident data,
   /// handling paging of the data and copies from the CPU

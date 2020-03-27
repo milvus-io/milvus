@@ -78,9 +78,9 @@ class VecIndex : public Index {
         return nullptr;
     }
 
-    void
-    GetBlacklist(faiss::ConcurrentBitsetPtr& bitset_ptr) {
-        bitset_ptr = bitset_;
+    faiss::ConcurrentBitsetPtr
+    GetBlacklist() {
+        return bitset_;
     }
 
     void

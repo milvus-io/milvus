@@ -67,6 +67,9 @@ class ClientTest {
     PreloadCollection(const std::string&);
 
     void
+    CompactCollection(const std::string&);
+
+    void
     DeleteByIds(const std::string&, const std::vector<int64_t>& id_array);
 
     void
