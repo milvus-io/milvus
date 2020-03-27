@@ -84,7 +84,9 @@ GpuCacheMgr::GetInstance(int64_t gpu_id) {
 void
 GpuCacheMgr::OnGpuCacheCapacityChanged(int64_t capacity) {
     for (auto& iter : instance_) {
+        iter.second->Lock();
         iter.second->SetCapacity(capacity * G_BYTE);
+        iter.second->Unlock();
     }
 }
 
