@@ -57,12 +57,6 @@ class CacheMgr {
     void
     SetCapacity(int64_t capacity);
 
-    void
-    Lock();
-
-    void
-    Unlock();
-
  protected:
     CacheMgr();
 
@@ -70,7 +64,6 @@ class CacheMgr {
 
  protected:
     std::shared_ptr<Cache<ItemObj>> cache_;
-    std::mutex mutex_;
 };
 
 }  // namespace cache
