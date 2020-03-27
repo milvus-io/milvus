@@ -80,7 +80,13 @@ class Cache {
 
  private:
     void
-    free_memory(const int64_t target_size);
+    insert_internal(const std::string& key, const ItemObj& item);
+
+    void
+    erase_internal(const std::string& key);
+
+    void
+    free_memory_internal(const int64_t target_size);
 
  private:
     std::string header_;
