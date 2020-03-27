@@ -23,17 +23,16 @@
 #include <faiss/gpu/GpuCloner.h>
 #include "knowhere/index/vector_index/gpu/IndexGPUIDMAP.h"
 #endif
+#include "Helper.h"
 #include "knowhere/index/vector_index/helpers/Cloner.h"
 #include "knowhere/index/vector_index/helpers/FaissGpuResourceMgr.h"
-#include "Helper.h"
 #include "unittest/utils.h"
 
 using ::testing::Combine;
 using ::testing::TestWithParam;
 using ::testing::Values;
 
-class IDMAPTest : public DataGen,
-                  public TestWithParam<milvus::knowhere::IndexMode> {
+class IDMAPTest : public DataGen, public TestWithParam<milvus::knowhere::IndexMode> {
  protected:
     void
     SetUp() override {
@@ -57,13 +56,12 @@ class IDMAPTest : public DataGen,
     milvus::knowhere::IndexMode index_mode_;
 };
 
-INSTANTIATE_TEST_CASE_P(
-        IDMAPParameters, IDMAPTest,
-        Values(
+INSTANTIATE_TEST_CASE_P(IDMAPParameters, IDMAPTest,
+                        Values(
 #ifdef MILVUS_GPU_VERSION
-        milvus::knowhere::IndexMode::MODE_GPU,
+                            milvus::knowhere::IndexMode::MODE_GPU,
 #endif
-        milvus::knowhere::IndexMode::MODE_CPU));
+                            milvus::knowhere::IndexMode::MODE_CPU));
 
 TEST_P(IDMAPTest, idmap_basic) {
     ASSERT_TRUE(!xb.empty());
