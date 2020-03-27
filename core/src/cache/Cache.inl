@@ -13,8 +13,6 @@ namespace milvus {
 namespace cache {
 
 constexpr double DEFAULT_THRESHOLD_PERCENT = 0.7;
-constexpr double WARNING_THRESHOLD_PERCENT = 0.9;
-constexpr double BIG_ITEM_THRESHOLD_PERCENT = 0.1;
 
 template <typename ItemObj>
 Cache<ItemObj>::Cache(int64_t capacity, int64_t cache_max_count, const std::string& header)
@@ -30,7 +28,7 @@ void
 Cache<ItemObj>::set_capacity(int64_t capacity) {
     if (capacity > 0) {
         capacity_ = capacity;
-        free_memory();
+        free_memory(capacity);
     }
 }
 
@@ -66,39 +64,23 @@ Cache<ItemObj>::insert(const std::string& key, const ItemObj& item) {
         return;
     }
 
-    size_t item_size = item->Size();
     // calculate usage
-    {
-        std::lock_guard<std::mutex> lock(mutex_);
+    std::lock_guard<std::mutex> lock(mutex_);
+    size_t item_size = item->Size();
 
-        // if key already exist, subtract old item size
-        if (lru_.exists(key)) {
-            const ItemObj& old_item = lru_.get(key);
-            usage_ -= old_item->Size();
-        }
-
-        // plus new item size
-        usage_ += item_size;
+    // if key already exist, subtract old item size
+    if (lru_.exists(key)) {
+        const ItemObj& old_item = lru_.get(key);
+        usage_ -= old_item->Size();
     }
 
-    // if usage exceed capacity, free some items
-    if (usage_ > capacity_ ||
-        (item_size > (int64_t)(capacity_ * BIG_ITEM_THRESHOLD_PERCENT) &&
-         usage_ > (int64_t)(capacity_ * WARNING_THRESHOLD_PERCENT))) {
-        SERVER_LOG_DEBUG << header_ << " Current usage " << (usage_ >> 20) << "MB is too high for capacity "
-                         << (capacity_ >> 20) << "MB, start free memory";
-        free_memory();
-    }
+    // plus new item size
+    usage_ += item_size;
 
-    // insert new item
-    {
-        std::lock_guard<std::mutex> lock(mutex_);
-
-        lru_.put(key, item);
-        SERVER_LOG_DEBUG << header_ << " Insert " << key << " size: " << (item_size >> 20) << "MB into cache";
-        SERVER_LOG_DEBUG << header_ << " Count: " << lru_.size() << ", Usage: " << (usage_ >> 20) << "MB, Capacity: "
-                         << (capacity_ >> 20) << "MB";
-    }
+    lru_.put(key, item);
+    SERVER_LOG_DEBUG << header_ << " Insert " << key << " size: " << (item_size >> 20) << "MB into cache";
+    SERVER_LOG_DEBUG << header_ << " Count: " << lru_.size() << ", Usage: " << (usage_ >> 20) << "MB, Capacity: "
+                     << (capacity_ >> 20) << "MB";
 }
 
 template <typename ItemObj>
@@ -121,6 +103,20 @@ Cache<ItemObj>::erase(const std::string& key) {
 }
 
 template <typename ItemObj>
+bool
+Cache<ItemObj>::reserve(const int64_t item_size) {
+    if (item_size > capacity_) {
+        SERVER_LOG_ERROR << header_ << " item size " << (item_size >> 20) << "MB too big to insert into cache capacity"
+                         << (capacity_ >> 20) << "MB";
+        return false;
+    }
+    if (item_size > capacity_ - usage_) {
+        free_memory(capacity_ - item_size);
+    }
+    return true;
+}
+
+template <typename ItemObj>
 void
 Cache<ItemObj>::clear() {
     std::lock_guard<std::mutex> lock(mutex_);
@@ -132,12 +128,9 @@ Cache<ItemObj>::clear() {
 /* free memory space when CACHE occupation exceed its capacity */
 template <typename ItemObj>
 void
-Cache<ItemObj>::free_memory() {
-    // if (usage_ <= capacity_)
-    //     return;
-
-    int64_t threshhold = capacity_ * freemem_percent_;
-    int64_t delta_size = usage_ - threshhold;
+Cache<ItemObj>::free_memory(const int64_t target_size) {
+    int64_t threshold = std::min((int64_t)(capacity_ * freemem_percent_), target_size);
+    int64_t delta_size = usage_ - threshold;
     if (delta_size <= 0) {
         delta_size = 1;  // ensure at least one item erased
     }
