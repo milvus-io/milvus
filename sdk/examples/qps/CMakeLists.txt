@@ -11,9 +11,18 @@
 # or implied. See the License for the specific language governing permissions and limitations under the License.
 #-------------------------------------------------------------------------------
 
-aux_source_directory(${CMAKE_CURRENT_SOURCE_DIR}/utils util_files)
+aux_source_directory(src src_files)
+aux_source_directory(../utils util_files)
 
-add_subdirectory(simple)
-add_subdirectory(partition)
-add_subdirectory(binary_vector)
-add_subdirectory(qps)
+add_executable(sdk_qps
+        main.cpp
+        ${src_files}
+        ${util_files}
+        )
+
+target_link_libraries(sdk_qps
+        milvus_sdk
+        pthread
+        )
+
+install(TARGETS sdk_qps DESTINATION bin)

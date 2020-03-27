@@ -381,6 +381,7 @@ SearchCombineRequest::OnExecute() {
             int64_t topk = request->TopK();
             uint64_t element_cnt = count * topk;
             TopKQueryResult& result = request->QueryResult();
+            result.row_num_ = count;
             result.id_list_.resize(element_cnt);
             result.distance_list_.resize(element_cnt);
             memcpy(result.id_list_.data(), result_ids.data() + offset, element_cnt * sizeof(int64_t));
