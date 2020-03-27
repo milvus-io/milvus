@@ -69,6 +69,9 @@ class Cache {
     void
     erase(const std::string& key);
 
+    bool
+    reserve(const int64_t size);
+
     void
     print();
 
@@ -77,7 +80,13 @@ class Cache {
 
  private:
     void
-    free_memory();
+    insert_internal(const std::string& key, const ItemObj& item);
+
+    void
+    erase_internal(const std::string& key);
+
+    void
+    free_memory_internal(const int64_t target_size);
 
  private:
     std::string header_;

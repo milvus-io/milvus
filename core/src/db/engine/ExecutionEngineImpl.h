@@ -87,9 +87,6 @@ class ExecutionEngineImpl : public ExecutionEngine {
     Cache() override;
 
     Status
-    GpuCache(uint64_t gpu_id) override;
-
-    Status
     Init() override;
 
     EngineType
