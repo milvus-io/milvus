@@ -41,7 +41,6 @@
 #include "unittest/server/utils.h"
 #include "utils/CommonUtil.h"
 #include "version.h"
-//#include "knowhere/VecIndex.h"
 
 
 static const char* TABLE_NAME = "test_web";
@@ -58,7 +57,7 @@ using OChunkedBuffer = oatpp::data::stream::ChunkedBuffer;
 using OOutputStream = oatpp::data::stream::BufferOutputStream;
 using OFloat32 = milvus::server::web::OFloat32;
 using OInt64 = milvus::server::web::OInt64;
-template <class T>
+template<class T>
 using OList = milvus::server::web::OList<T>;
 
 using StatusCode = milvus::server::web::StatusCode;
@@ -572,7 +571,7 @@ static const char* CONTROLLER_TEST_VALID_CONFIG_STR =
     "-+\n"
     "engine_config:\n"
     "  use_blas_threshold: 1100\n"
-#ifdef MILVUS_GPU_VERSION
+    #ifdef MILVUS_GPU_VERSION
     "  gpu_search_threshold: 1000\n"
     "\n"
     "#----------------------+------------------------------------------------------------+------------+----------------"
@@ -588,7 +587,7 @@ static const char* CONTROLLER_TEST_VALID_CONFIG_STR =
     "    - gpu0\n"
     "  build_index_resources:\n"
     "    - gpu0\n"
-#endif
+    #endif
     "\n"
     "#----------------------+------------------------------------------------------------+------------+----------------"
     "-+\n"
@@ -599,6 +598,7 @@ static const char* CONTROLLER_TEST_VALID_CONFIG_STR =
     "tracing_config:\n"
     " json_config_path:\n"
     "";
+}  // namespace
 
 static const char* CONTROLLER_TEST_TABLE_NAME = "controller_unit_test";
 static const char* CONTROLLER_TEST_CONFIG_DIR = "/tmp/milvus_web_controller_test/";
@@ -607,7 +607,7 @@ static const char* CONTROLLER_TEST_CONFIG_FILE = "config.yaml";
 class TestClient : public oatpp::web::client::ApiClient {
  public:
 #include OATPP_CODEGEN_BEGIN(ApiClient)
-    API_CLIENT_INIT(TestClient)
+ API_CLIENT_INIT(TestClient)
 
     API_CALL("GET", "/", root)
 
@@ -623,12 +623,14 @@ class TestClient : public oatpp::web::client::ApiClient {
              BODY_DTO(milvus::server::web::AdvancedConfigDto::ObjectWrapper, body))
 
 #ifdef MILVUS_GPU_VERSION
+
     API_CALL("OPTIONS", "config/gpu_resources", optionsGpuConfig)
 
     API_CALL("GET", "/config/gpu_resources", getGPUConfig)
 
     API_CALL("PUT", "/config/gpu_resources", setGPUConfig,
              BODY_DTO(milvus::server::web::GPUConfigDto::ObjectWrapper, body))
+
 #endif
 
     API_CALL("OPTIONS", "/collections", optionsTables)
@@ -665,7 +667,7 @@ class TestClient : public oatpp::web::client::ApiClient {
              BODY_DTO(milvus::server::web::PartitionRequestDto::ObjectWrapper, body))
 
     API_CALL("GET", "/collections/{collection_name}/partitions", showPartitions,
-        PATH(String, collection_name, "collection_name"),
+             PATH(String, collection_name, "collection_name"),
              QUERY(String, offset), QUERY(String, page_size))
 
     API_CALL("DELETE", "/collections/{collection_name}/partitions", dropPartition,
@@ -777,7 +779,7 @@ class WebControllerTest : public ::testing::Test {
     }
 
     void
-    TearDown() override{};
+    TearDown() override {};
 
  protected:
     std::shared_ptr<oatpp::data::mapping::ObjectMapper> object_mapper;
@@ -787,7 +789,12 @@ class WebControllerTest : public ::testing::Test {
 
 namespace {
 void
-GenTable(const TestClientP& client_ptr, const TestConnP& connection_ptr, const OString& collection_name, int64_t dim, int64_t index_size, const OString& metric) {
+GenTable(const TestClientP& client_ptr,
+         const TestConnP& connection_ptr,
+         const OString& collection_name,
+         int64_t dim,
+         int64_t index_size,
+         const OString& metric) {
     auto response = client_ptr->getTable(collection_name, "", connection_ptr);
     if (OStatus::CODE_200.code == response->getStatusCode()) {
         return;
@@ -825,7 +832,13 @@ FlushTable(const TestClientP& client_ptr, const TestConnP& connection_ptr, const
 }
 
 milvus::Status
-InsertData(const TestClientP& client_ptr, const TestConnP& connection_ptr, const OString& collection_name, int64_t dim, int64_t count, std::string tag = "", bool bin = false) {
+InsertData(const TestClientP& client_ptr,
+           const TestConnP& connection_ptr,
+           const OString& collection_name,
+           int64_t dim,
+           int64_t count,
+           std::string tag = "",
+           bool bin = false) {
     nlohmann::json insert_json;
 
     if (bin)
@@ -846,8 +859,14 @@ InsertData(const TestClientP& client_ptr, const TestConnP& connection_ptr, const
 }
 
 milvus::Status
-InsertData(const TestClientP& client_ptr, const TestConnP& connection_ptr, const OString& collection_name, int64_t dim, int64_t count,
-           const std::vector<int64_t>& ids, std::string tag = "", bool bin = false) {
+InsertData(const TestClientP& client_ptr,
+           const TestConnP& connection_ptr,
+           const OString& collection_name,
+           int64_t dim,
+           int64_t count,
+           const std::vector<int64_t>& ids,
+           std::string tag = "",
+           bool bin = false) {
     nlohmann::json insert_json;
 
     if (bin)
@@ -872,7 +891,10 @@ InsertData(const TestClientP& client_ptr, const TestConnP& connection_ptr, const
 }
 
 milvus::Status
-GenPartition(const TestClientP& client_ptr, const TestConnP& connection_ptr, const OString& collection_name, const OString& tag) {
+GenPartition(const TestClientP& client_ptr,
+             const TestConnP& connection_ptr,
+             const OString& collection_name,
+             const OString& tag) {
     auto par_param = milvus::server::web::PartitionRequestDto::createShared();
     par_param->partition_tag = tag;
     auto response = client_ptr->createPartition(collection_name, par_param);
@@ -882,9 +904,8 @@ GenPartition(const TestClientP& client_ptr, const TestConnP& connection_ptr, con
 
     return milvus::Status::OK();
 }
-}
-
 }  // namespace
+
 TEST_F(WebControllerTest, OPTIONS) {
     auto response = client_ptr->root(conncetion_ptr);
     ASSERT_EQ(OStatus::CODE_200.code, response->getStatusCode());
@@ -1140,7 +1161,7 @@ TEST_F(WebControllerTest, INDEX) {
 
     // create index without existing table
     response = client_ptr->createIndex(collection_name + "fgafafafafafUUUUUUa124254",
-        index_json.dump().c_str(), conncetion_ptr);
+                                       index_json.dump().c_str(), conncetion_ptr);
     ASSERT_EQ(OStatus::CODE_404.code, response->getStatusCode());
 
     // invalid index type
@@ -1241,7 +1262,7 @@ TEST_F(WebControllerTest, PARTITION) {
 
     // drop without existing collections
     response = client_ptr->dropPartition(collection_name + "565755682353464aaasafdsfagagqq1223",
-        "{\"partition_tag\": \"tag01\"}", conncetion_ptr);
+                                         "{\"partition_tag\": \"tag01\"}", conncetion_ptr);
     ASSERT_EQ(OStatus::CODE_404.code, response->getStatusCode());
 }
 
@@ -1339,7 +1360,7 @@ TEST_F(WebControllerTest, SEGMENT_FILTER) {
     ASSERT_TRUE(result_json.contains("segments"));
     auto segments_json = result_json["segments"];
     ASSERT_TRUE(segments_json.is_array());
-    for (auto & s : segments_json) {
+    for (auto& s : segments_json) {
         ASSERT_TRUE(s.contains("partition_tag"));
         ASSERT_EQ("_default", s["partition_tag"].get<std::string>());
     }
@@ -1358,7 +1379,7 @@ TEST_F(WebControllerTest, SEARCH) {
     par_param->partition_tag = "tag" + OString(RandomName().c_str());
     auto response = client_ptr->createPartition(collection_name, par_param);
     ASSERT_EQ(OStatus::CODE_201.code, response->getStatusCode())
-        << "Error: " << response->getStatusDescription()->std_str();
+                        << "Error: " << response->getStatusDescription()->std_str();
 
     status = InsertData(client_ptr, conncetion_ptr, collection_name, 64, 200, par_param->partition_tag->std_str());
     ASSERT_TRUE(status.ok()) << status.message();
@@ -1425,7 +1446,8 @@ TEST_F(WebControllerTest, SEARCH_BIN) {
     ASSERT_EQ(OStatus::CODE_201.code, response->getStatusCode())
                         << "Error: " << response->readBodyToString()->std_str();
 
-    status = InsertData(client_ptr, conncetion_ptr, collection_name, 64, 200, par_param->partition_tag->std_str(), true);
+    status =
+        InsertData(client_ptr, conncetion_ptr, collection_name, 64, 200, par_param->partition_tag->std_str(), true);
     ASSERT_TRUE(status.ok()) << status.message();
 
     // Test search
@@ -1543,7 +1565,7 @@ TEST_F(WebControllerTest, GET_VECTOR_BY_ID) {
     auto vec_json = vector_json["vector"];
     ASSERT_TRUE(vec_json.is_array());
     std::vector<int64_t> vec;
-    for (auto & v : vec_json) {
+    for (auto& v : vec_json) {
         vec.emplace_back(v.get<int64_t>());
     }
 
@@ -1570,7 +1592,7 @@ TEST_F(WebControllerTest, DELETE_BY_ID) {
     ASSERT_TRUE(ids_json.is_array());
 
     std::vector<std::string> ids;
-    for (auto & id : ids_json) {
+    for (auto& id : ids_json) {
         ids.emplace_back(id.get<std::string>());
     }
 
@@ -1763,6 +1785,7 @@ TEST_F(WebControllerTest, GPU_CONFIG) {
     response = client_ptr->setGPUConfig(gpu_config_dto, conncetion_ptr);
     ASSERT_EQ(OStatus::CODE_400.code, response->getStatusCode());
 }
+
 #endif
 
 TEST_F(WebControllerTest, DEVICES_CONFIG) {
@@ -1821,116 +1844,3 @@ TEST_F(WebControllerTest, LOAD) {
     ASSERT_EQ(OStatus::CODE_400.code, response->getStatusCode());
 }
 
-//class WebMetricTest : public::testing::TestWithParam<const char *> {
-// public:
-//    static void
-//    SetUpTestCase() {
-//        mkdir(CONTROLLER_TEST_CONFIG_DIR, S_IRWXU);
-//        // Basic config
-//        std::string config_path = std::string(CONTROLLER_TEST_CONFIG_DIR).append(CONTROLLER_TEST_CONFIG_FILE);
-//        std::fstream fs(config_path.c_str(), std::ios_base::out);
-//        fs << CONTROLLER_TEST_VALID_CONFIG_STR;
-//        fs.flush();
-//        fs.close();
-//
-//        milvus::server::Config& config = milvus::server::Config::GetInstance();
-//        config.LoadConfigFile(config_path);
-//
-//        auto res_mgr = milvus::scheduler::ResMgrInst::GetInstance();
-//        res_mgr->Clear();
-//        res_mgr->Add(milvus::scheduler::ResourceFactory::Create("disk", "DISK", 0, false));
-//        res_mgr->Add(milvus::scheduler::ResourceFactory::Create("cpu", "CPU", 0));
-//        res_mgr->Add(milvus::scheduler::ResourceFactory::Create("gtx1660", "GPU", 0));
-//
-//        auto default_conn = milvus::scheduler::Connection("IO", 500.0);
-//        auto PCIE = milvus::scheduler::Connection("IO", 11000.0);
-//        res_mgr->Connect("disk", "cpu", default_conn);
-//        res_mgr->Connect("cpu", "gtx1660", PCIE);
-//        res_mgr->Start();
-//        milvus::scheduler::SchedInst::GetInstance()->Start();
-//        milvus::scheduler::JobMgrInst::GetInstance()->Start();
-//
-//        milvus::engine::DBOptions opt;
-//
-//        milvus::server::Config::GetInstance().SetDBConfigBackendUrl("sqlite://:@:/");
-//        boost::filesystem::remove_all(CONTROLLER_TEST_CONFIG_DIR);
-//        milvus::server::Config::GetInstance().SetStorageConfigPrimaryPath(CONTROLLER_TEST_CONFIG_DIR);
-//
-//        milvus::server::DBWrapper::GetInstance().StartService();
-//
-//        milvus::server::Config::GetInstance().SetServerConfigWebPort("29999");
-//
-//        milvus::server::web::WebServer::GetInstance().Start();
-//
-//        sleep(3);
-//    }
-//
-//    static void
-//    TearDownTestCase() {
-//        milvus::server::web::WebServer::GetInstance().Stop();
-//
-//        milvus::server::DBWrapper::GetInstance().StopService();
-//        milvus::scheduler::JobMgrInst::GetInstance()->Stop();
-//        milvus::scheduler::ResMgrInst::GetInstance()->Stop();
-//        milvus::scheduler::SchedInst::GetInstance()->Stop();
-//        boost::filesystem::remove_all(CONTROLLER_TEST_CONFIG_DIR);
-//    }
-//
-//    void
-//    SetUp() override {
-//        std::string config_path = std::string(CONTROLLER_TEST_CONFIG_DIR).append(CONTROLLER_TEST_CONFIG_FILE);
-//        std::fstream fs(config_path.c_str(), std::ios_base::out);
-//        fs << CONTROLLER_TEST_VALID_CONFIG_STR;
-//        fs.close();
-//
-//        milvus::server::Config& config = milvus::server::Config::GetInstance();
-//        config.LoadConfigFile(std::string(CONTROLLER_TEST_CONFIG_DIR) + CONTROLLER_TEST_CONFIG_FILE);
-//
-//        OATPP_COMPONENT(std::shared_ptr<oatpp::network::ClientConnectionProvider>, clientConnectionProvider);
-//        OATPP_COMPONENT(std::shared_ptr<oatpp::data::mapping::ObjectMapper>, objectMapper);
-//        object_mapper = objectMapper;
-//
-//        auto requestExecutor = oatpp::web::client::HttpRequestExecutor::createShared(clientConnectionProvider);
-//        client_ptr = TestClient::createShared(requestExecutor, objectMapper);
-//
-//        conncetion_ptr = client_ptr->getConnection();
-//    }
-//
-//    void
-//    TearDown() override{};
-//
-// protected:
-//    std::shared_ptr<oatpp::data::mapping::ObjectMapper> object_mapper;
-//    TestConnP conncetion_ptr;
-//    TestClientP client_ptr;
-//};
-//
-//namespace mv = milvus::server::web;
-//INSTANTIATE_TEST_CASE_P(MetricTest, WebMetricTest, testing::Values(mv::NAME_METRIC_TYPE_L2, mv::NAME_METRIC_TYPE_IP,
-//    mv::NAME_METRIC_TYPE_HAMMING, mv::NAME_METRIC_TYPE_JACCARD, mv::NAME_METRIC_TYPE_TANIMOTO,
-//    mv::NAME_METRIC_TYPE_SUBSTRUCTURE, mv::NAME_METRIC_TYPE_SUPERSTRUCTURE));
-//
-//TEST_P(WebMetricTest, INSERT) {
-//    auto collection_name = "test_insert_collection_test_metric_" + OString(RandomName().c_str());
-//    const int64_t dim = 64;
-//    const char * metric = GetParam();
-//    GenTable(client_ptr, conncetion_ptr, collection_name, dim, 100, metric);
-//
-//    nlohmann::json insert_json;
-//
-//    if (metric == mv::NAME_METRIC_TYPE_IP || metric == mv::NAME_METRIC_TYPE_L2)
-//        insert_json["vectors"] = RandomRecordsJson(dim, 20);
-//    else
-//        insert_json["vectors"] = RandomBinRecordsJson(dim, 20);
-//
-//    auto response = client_ptr->insert(collection_name, insert_json.dump().c_str(), conncetion_ptr);
-//    ASSERT_EQ(OStatus::CODE_201.code, response->getStatusCode());
-//    auto result_dto = response->readBodyToDto<milvus::server::web::VectorIdsDto>(object_mapper.get());
-//    ASSERT_EQ(20, result_dto->ids->count());
-//
-//    response = client_ptr->insert(collection_name + "ooowrweindexsgs", insert_json.dump().c_str(), conncetion_ptr);
-//    ASSERT_EQ(OStatus::CODE_404.code, response->getStatusCode());
-//
-//    response = client_ptr->dropTable(collection_name, conncetion_ptr);
-//    ASSERT_EQ(OStatus::CODE_204.code, response->getStatusCode());
-//}
