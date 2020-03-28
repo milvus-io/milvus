@@ -21,6 +21,7 @@ Please mark all change in change log and use the issue from GitHub
 -   \#1735 Fix search out of memory with ivf_flat 
 -   \#1747 Expected error status if search with partition_tag not existed
 -   \#1756 Fix memory exhausted during searching 
+-   \#1781 Fix search hang with SQ8H 
 
 ## Feature
 -   \#1603 BinaryFlat add 2 Metric: Substructure and Superstructure
