@@ -698,8 +698,11 @@ class TestClient : public oatpp::web::client::ApiClient {
 #include OATPP_CODEGEN_END(ApiClient)
 };
 
-class WebControllerTest : public testing::Test {
- protected:
+using TestClientP = std::shared_ptr<TestClient>;
+using TestConnP = std::shared_ptr<oatpp::web::client::RequestExecutor::ConnectionHandle>;
+
+class WebControllerTest : public ::testing::Test {
+ public:
     static void
     SetUpTestCase() {
         mkdir(CONTROLLER_TEST_CONFIG_DIR, S_IRWXU);
@@ -739,7 +742,7 @@ class WebControllerTest : public testing::Test {
 
         milvus::server::web::WebServer::GetInstance().Start();
 
-        sleep(5);
+        sleep(3);
     }
 
     static void
@@ -751,103 +754,6 @@ class WebControllerTest : public testing::Test {
         milvus::scheduler::ResMgrInst::GetInstance()->Stop();
         milvus::scheduler::SchedInst::GetInstance()->Stop();
         boost::filesystem::remove_all(CONTROLLER_TEST_CONFIG_DIR);
-    }
-
-    void
-    GenTable(const OString& collection_name, int64_t dim, int64_t index_size, const OString& metric) {
-        auto response = client_ptr->getTable(collection_name, "", conncetion_ptr);
-        if (OStatus::CODE_200.code == response->getStatusCode()) {
-            return;
-        }
-        auto collection_dto = milvus::server::web::TableRequestDto::createShared();
-        collection_dto->collection_name = collection_name;
-        collection_dto->dimension = dim;
-        collection_dto->index_file_size = index_size;
-        collection_dto->metric_type = metric;
-        client_ptr->createTable(collection_dto, conncetion_ptr);
-    }
-
-    milvus::Status
-    FlushTable(const std::string& collection_name) {
-        nlohmann::json flush_json;
-        flush_json["flush"]["collection_names"] = {collection_name};
-        auto response = client_ptr->op("task", flush_json.dump().c_str(), conncetion_ptr);
-        if (OStatus::CODE_200.code != response->getStatusCode()) {
-            return milvus::Status(milvus::SERVER_UNEXPECTED_ERROR, response->readBodyToString()->std_str());
-        }
-
-        return milvus::Status::OK();
-    }
-
-    milvus::Status
-    FlushTable(const OString& collection_name) {
-        nlohmann::json flush_json;
-        flush_json["flush"]["collection_names"] = {collection_name->std_str()};
-        auto response = client_ptr->op("task", flush_json.dump().c_str(), conncetion_ptr);
-        if (OStatus::CODE_200.code != response->getStatusCode()) {
-            return milvus::Status(milvus::SERVER_UNEXPECTED_ERROR, response->readBodyToString()->std_str());
-        }
-
-        return milvus::Status::OK();
-    }
-
-    milvus::Status
-    InsertData(const OString& collection_name, int64_t dim, int64_t count, std::string tag = "", bool bin = false) {
-        nlohmann::json insert_json;
-
-        if (bin)
-            insert_json["vectors"] = RandomBinRecordsJson(dim, count);
-        else
-            insert_json["vectors"] = RandomRecordsJson(dim, count);
-
-        if (!tag.empty()) {
-            insert_json["partition_tag"] = tag;
-        }
-
-        auto response = client_ptr->insert(collection_name, insert_json.dump().c_str(), conncetion_ptr);
-        if (OStatus::CODE_201.code != response->getStatusCode()) {
-            return milvus::Status(milvus::SERVER_UNEXPECTED_ERROR, response->readBodyToString()->c_str());
-        }
-
-        return FlushTable(collection_name);
-    }
-
-    milvus::Status
-    InsertData(const OString& collection_name, int64_t dim, int64_t count,
-               const std::vector<int64_t>& ids, std::string tag = "", bool bin = false) {
-        nlohmann::json insert_json;
-
-        if (bin)
-            insert_json["vectors"] = RandomBinRecordsJson(dim, count);
-        else
-            insert_json["vectors"] = RandomRecordsJson(dim, count);
-
-        if (!ids.empty()) {
-            insert_json["ids"] = ids;
-        }
-
-        if (!tag.empty()) {
-            insert_json["partition_tag"] = tag;
-        }
-
-        auto response = client_ptr->insert(collection_name, insert_json.dump().c_str(), conncetion_ptr);
-        if (OStatus::CODE_201.code != response->getStatusCode()) {
-            return milvus::Status(milvus::SERVER_UNEXPECTED_ERROR, response->readBodyToString()->c_str());
-        }
-
-        return FlushTable(collection_name);
-    }
-
-    milvus::Status
-    GenPartition(const OString& collection_name, const OString& tag) {
-        auto par_param = milvus::server::web::PartitionRequestDto::createShared();
-        par_param->partition_tag = tag;
-        auto response = client_ptr->createPartition(collection_name, par_param);
-        if (OStatus::CODE_201.code != response->getStatusCode()) {
-            return milvus::Status(milvus::SERVER_UNEXPECTED_ERROR, response->readBodyToString()->c_str());
-        }
-
-        return milvus::Status::OK();
     }
 
     void
@@ -875,21 +781,108 @@ class WebControllerTest : public testing::Test {
 
  protected:
     std::shared_ptr<oatpp::data::mapping::ObjectMapper> object_mapper;
-    std::shared_ptr<oatpp::web::client::RequestExecutor::ConnectionHandle> conncetion_ptr;
-    std::shared_ptr<TestClient> client_ptr;
-
- protected:
-    void
-    GenTable(const std::string& collection_name, int64_t dim, int64_t index_file_size, int64_t metric_type) {
-        auto collection_dto = milvus::server::web::TableRequestDto::createShared();
-        collection_dto->collection_name = OString(collection_name.c_str());
-        collection_dto->dimension = dim;
-        collection_dto->index_file_size = index_file_size;
-        collection_dto->metric_type = metric_type;
-
-        client_ptr->createTable(collection_dto, conncetion_ptr);
-    }
+    TestConnP conncetion_ptr;
+    TestClientP client_ptr;
 };
+
+namespace {
+void
+GenTable(const TestClientP& client_ptr, const TestConnP& connection_ptr, const OString& collection_name, int64_t dim, int64_t index_size, const OString& metric) {
+    auto response = client_ptr->getTable(collection_name, "", connection_ptr);
+    if (OStatus::CODE_200.code == response->getStatusCode()) {
+        return;
+    }
+    auto collection_dto = milvus::server::web::TableRequestDto::createShared();
+    collection_dto->collection_name = collection_name;
+    collection_dto->dimension = dim;
+    collection_dto->index_file_size = index_size;
+    collection_dto->metric_type = metric;
+    client_ptr->createTable(collection_dto, connection_ptr);
+}
+
+milvus::Status
+FlushTable(const TestClientP& client_ptr, const TestConnP& connection_ptr, const std::string& collection_name) {
+    nlohmann::json flush_json;
+    flush_json["flush"]["collection_names"] = {collection_name};
+    auto response = client_ptr->op("task", flush_json.dump().c_str(), connection_ptr);
+    if (OStatus::CODE_200.code != response->getStatusCode()) {
+        return milvus::Status(milvus::SERVER_UNEXPECTED_ERROR, response->readBodyToString()->std_str());
+    }
+
+    return milvus::Status::OK();
+}
+
+milvus::Status
+FlushTable(const TestClientP& client_ptr, const TestConnP& connection_ptr, const OString& collection_name) {
+    nlohmann::json flush_json;
+    flush_json["flush"]["collection_names"] = {collection_name->std_str()};
+    auto response = client_ptr->op("task", flush_json.dump().c_str(), connection_ptr);
+    if (OStatus::CODE_200.code != response->getStatusCode()) {
+        return milvus::Status(milvus::SERVER_UNEXPECTED_ERROR, response->readBodyToString()->std_str());
+    }
+
+    return milvus::Status::OK();
+}
+
+milvus::Status
+InsertData(const TestClientP& client_ptr, const TestConnP& connection_ptr, const OString& collection_name, int64_t dim, int64_t count, std::string tag = "", bool bin = false) {
+    nlohmann::json insert_json;
+
+    if (bin)
+        insert_json["vectors"] = RandomBinRecordsJson(dim, count);
+    else
+        insert_json["vectors"] = RandomRecordsJson(dim, count);
+
+    if (!tag.empty()) {
+        insert_json["partition_tag"] = tag;
+    }
+
+    auto response = client_ptr->insert(collection_name, insert_json.dump().c_str(), connection_ptr);
+    if (OStatus::CODE_201.code != response->getStatusCode()) {
+        return milvus::Status(milvus::SERVER_UNEXPECTED_ERROR, response->readBodyToString()->c_str());
+    }
+
+    return FlushTable(client_ptr, connection_ptr, collection_name);
+}
+
+milvus::Status
+InsertData(const TestClientP& client_ptr, const TestConnP& connection_ptr, const OString& collection_name, int64_t dim, int64_t count,
+           const std::vector<int64_t>& ids, std::string tag = "", bool bin = false) {
+    nlohmann::json insert_json;
+
+    if (bin)
+        insert_json["vectors"] = RandomBinRecordsJson(dim, count);
+    else
+        insert_json["vectors"] = RandomRecordsJson(dim, count);
+
+    if (!ids.empty()) {
+        insert_json["ids"] = ids;
+    }
+
+    if (!tag.empty()) {
+        insert_json["partition_tag"] = tag;
+    }
+
+    auto response = client_ptr->insert(collection_name, insert_json.dump().c_str(), connection_ptr);
+    if (OStatus::CODE_201.code != response->getStatusCode()) {
+        return milvus::Status(milvus::SERVER_UNEXPECTED_ERROR, response->readBodyToString()->c_str());
+    }
+
+    return FlushTable(client_ptr, connection_ptr, collection_name);
+}
+
+milvus::Status
+GenPartition(const TestClientP& client_ptr, const TestConnP& connection_ptr, const OString& collection_name, const OString& tag) {
+    auto par_param = milvus::server::web::PartitionRequestDto::createShared();
+    par_param->partition_tag = tag;
+    auto response = client_ptr->createPartition(collection_name, par_param);
+    if (OStatus::CODE_201.code != response->getStatusCode()) {
+        return milvus::Status(milvus::SERVER_UNEXPECTED_ERROR, response->readBodyToString()->c_str());
+    }
+
+    return milvus::Status::OK();
+}
+}
 
 }  // namespace
 TEST_F(WebControllerTest, OPTIONS) {
@@ -955,7 +948,7 @@ TEST_F(WebControllerTest, CREATE_TABLE) {
 
 TEST_F(WebControllerTest, GET_TABLE_META) {
     OString collection_name = "web_test_create_collection" + OString(RandomName().c_str());
-    GenTable(collection_name, 10, 10, "L2");
+    GenTable(client_ptr, conncetion_ptr, collection_name, 10, 10, "L2");
 
     OQueryParams params;
 
@@ -982,10 +975,10 @@ TEST_F(WebControllerTest, GET_TABLE_META) {
 
 TEST_F(WebControllerTest, GET_TABLE_STAT) {
     OString collection_name = "web_test_get_collection_stat" + OString(RandomName().c_str());
-    GenTable(collection_name, 128, 5, "L2");
+    GenTable(client_ptr, conncetion_ptr, collection_name, 128, 5, "L2");
 
     for (size_t i = 0; i < 5; i++) {
-        InsertData(collection_name, 128, 1000);
+        InsertData(client_ptr, conncetion_ptr, collection_name, 128, 1000);
     }
 
     auto response = client_ptr->getTable(collection_name, "stat", conncetion_ptr);
@@ -1041,7 +1034,7 @@ TEST_F(WebControllerTest, SHOW_TABLES) {
 
 TEST_F(WebControllerTest, DROP_TABLE) {
     auto collection_name = "collection_drop_test" + OString(RandomName().c_str());
-    GenTable(collection_name, 128, 100, "L2");
+    GenTable(client_ptr, conncetion_ptr, collection_name, 128, 100, "L2");
     sleep(1);
 
     auto response = client_ptr->dropTable(collection_name, conncetion_ptr);
@@ -1057,7 +1050,7 @@ TEST_F(WebControllerTest, DROP_TABLE) {
 TEST_F(WebControllerTest, INSERT) {
     auto collection_name = "test_insert_collection_test" + OString(RandomName().c_str());
     const int64_t dim = 64;
-    GenTable(collection_name, dim, 100, "L2");
+    GenTable(client_ptr, conncetion_ptr, collection_name, dim, 100, "L2");
 
     nlohmann::json insert_json;
     insert_json["vectors"] = RandomRecordsJson(dim, 20);
@@ -1077,20 +1070,24 @@ TEST_F(WebControllerTest, INSERT) {
 TEST_F(WebControllerTest, INSERT_BIN) {
     auto collection_name = "test_insert_bin_collection_test" + OString(RandomName().c_str());
     const int64_t dim = 64;
-    GenTable(collection_name, dim, 100, "HAMMING");
-
+    GenTable(client_ptr, conncetion_ptr, collection_name, dim, 100, "HAMMING");
     nlohmann::json insert_json;
     insert_json["vectors"] = RandomBinRecordsJson(dim, 20);
-
     auto response = client_ptr->insert(collection_name, insert_json.dump().c_str(), conncetion_ptr);
     ASSERT_EQ(OStatus::CODE_201.code, response->getStatusCode()) << response->readBodyToString()->std_str();
-
-    auto status = FlushTable(collection_name);
+    auto status = FlushTable(client_ptr, conncetion_ptr, collection_name);
     ASSERT_TRUE(status.ok()) << status.message();
-
     auto result_dto = response->readBodyToDto<milvus::server::web::VectorIdsDto>(object_mapper.get());
     ASSERT_EQ(20, result_dto->ids->count());
+    response = client_ptr->dropTable(collection_name, conncetion_ptr);
+    ASSERT_EQ(OStatus::CODE_204.code, response->getStatusCode());
 
+    collection_name = "test_insert_bin_collection_test" + OString(RandomName().c_str());
+    GenTable(client_ptr, conncetion_ptr, collection_name, dim, 100, milvus::server::web::NAME_METRIC_TYPE_SUBSTRUCTURE);
+    response = client_ptr->insert(collection_name, insert_json.dump().c_str(), conncetion_ptr);
+    ASSERT_EQ(OStatus::CODE_201.code, response->getStatusCode()) << response->readBodyToString()->std_str();
+    status = FlushTable(client_ptr, conncetion_ptr, collection_name);
+    ASSERT_TRUE(status.ok()) << status.message();
     response = client_ptr->dropTable(collection_name, conncetion_ptr);
     ASSERT_EQ(OStatus::CODE_204.code, response->getStatusCode());
 }
@@ -1098,7 +1095,7 @@ TEST_F(WebControllerTest, INSERT_BIN) {
 TEST_F(WebControllerTest, INSERT_IDS) {
     auto collection_name = "test_insert_collection_test" + OString(RandomName().c_str());
     const int64_t dim = 64;
-    GenTable(collection_name, dim, 100, "L2");
+    GenTable(client_ptr, conncetion_ptr, collection_name, dim, 100, "L2");
 
     std::vector<int64_t> ids;
     for (size_t i = 0; i < 20; i++) {
@@ -1120,7 +1117,7 @@ TEST_F(WebControllerTest, INSERT_IDS) {
 
 TEST_F(WebControllerTest, INDEX) {
     auto collection_name = "test_insert_collection_test" + OString(RandomName().c_str());
-    GenTable(collection_name, 64, 100, "L2");
+    GenTable(client_ptr, conncetion_ptr, collection_name, 64, 100, "L2");
 
     // test index with imcomplete param
     nlohmann::json index_json;
@@ -1158,7 +1155,7 @@ TEST_F(WebControllerTest, INDEX) {
     ASSERT_EQ(OStatus::CODE_204.code, response->getStatusCode());
 
     // insert data and create index
-    auto status = InsertData(collection_name, 64, 200);
+    auto status = InsertData(client_ptr, conncetion_ptr, collection_name, 64, 200);
     ASSERT_TRUE(status.ok()) << status.message();
 
     index_json["index_type"] = milvus::server::web::IndexMap.at(milvus::engine::EngineType::FAISS_IVFFLAT);
@@ -1189,7 +1186,7 @@ TEST_F(WebControllerTest, INDEX) {
 
 TEST_F(WebControllerTest, PARTITION) {
     const OString collection_name = "test_controller_partition_" + OString(RandomName().c_str());
-    GenTable(collection_name, 64, 100, "L2");
+    GenTable(client_ptr, conncetion_ptr, collection_name, 64, 100, "L2");
 
     auto par_param = milvus::server::web::PartitionRequestDto::createShared();
     auto response = client_ptr->createPartition(collection_name, par_param);
@@ -1214,7 +1211,7 @@ TEST_F(WebControllerTest, PARTITION) {
     ASSERT_EQ(milvus::server::web::StatusCode::TABLE_NOT_EXISTS, error_dto->code);
 
     // insert 200 vectors into collection with tag = 'tag01'
-    auto status = InsertData(collection_name, 64, 200, "tag01");
+    auto status = InsertData(client_ptr, conncetion_ptr, collection_name, 64, 200, "tag01");
     ASSERT_TRUE(status.ok()) << status.message();
 
     // Show all partitins
@@ -1251,9 +1248,9 @@ TEST_F(WebControllerTest, PARTITION) {
 TEST_F(WebControllerTest, SHOW_SEGMENTS) {
     OString collection_name = OString("test_milvus_web_segments_test_") + RandomName().c_str();
 
-    GenTable(collection_name, 256, 1, "L2");
+    GenTable(client_ptr, conncetion_ptr, collection_name, 256, 1, "L2");
 
-    auto status = InsertData(collection_name, 256, 2000);
+    auto status = InsertData(client_ptr, conncetion_ptr, collection_name, 256, 2000);
     ASSERT_TRUE(status.ok()) << status.message();
 
     auto response = client_ptr->showSegments(collection_name, "0", "10", "", conncetion_ptr);
@@ -1273,9 +1270,9 @@ TEST_F(WebControllerTest, SHOW_SEGMENTS) {
 TEST_F(WebControllerTest, GET_SEGMENT_INFO) {
     OString collection_name = OString("test_milvus_web_get_segment_info_test_") + RandomName().c_str();
 
-    GenTable(collection_name, 16, 1, "L2");
+    GenTable(client_ptr, conncetion_ptr, collection_name, 16, 1, "L2");
 
-    auto status = InsertData(collection_name, 16, 2000);
+    auto status = InsertData(client_ptr, conncetion_ptr, collection_name, 16, 2000);
     ASSERT_TRUE(status.ok()) << status.message();
 
     auto response = client_ptr->showSegments(collection_name, "0", "10", "", conncetion_ptr);
@@ -1315,21 +1312,21 @@ TEST_F(WebControllerTest, GET_SEGMENT_INFO) {
 
 TEST_F(WebControllerTest, SEGMENT_FILTER) {
     OString collection_name = OString("test_milvus_web_segment_filter_test_") + RandomName().c_str();
-    GenTable(collection_name, 16, 1, "L2");
+    GenTable(client_ptr, conncetion_ptr, collection_name, 16, 1, "L2");
 
-    auto status = InsertData(collection_name, 16, 1000);
+    auto status = InsertData(client_ptr, conncetion_ptr, collection_name, 16, 1000);
     ASSERT_TRUE(status.ok()) << status.message();
 
-    status = GenPartition(collection_name, "tag01");
+    status = GenPartition(client_ptr, conncetion_ptr, collection_name, "tag01");
     ASSERT_TRUE(status.ok()) << status.message();
 
-    status = InsertData(collection_name, 16, 1000, "tag01");
+    status = InsertData(client_ptr, conncetion_ptr, collection_name, 16, 1000, "tag01");
     ASSERT_TRUE(status.ok()) << status.message();
 
-    status = GenPartition(collection_name, "tag02");
+    status = GenPartition(client_ptr, conncetion_ptr, collection_name, "tag02");
     ASSERT_TRUE(status.ok()) << status.message();
 
-    status = InsertData(collection_name, 16, 1000, "tag02");
+    status = InsertData(client_ptr, conncetion_ptr, collection_name, 16, 1000, "tag02");
     ASSERT_TRUE(status.ok()) << status.message();
 
     // show segments filtering tag
@@ -1350,10 +1347,10 @@ TEST_F(WebControllerTest, SEGMENT_FILTER) {
 
 TEST_F(WebControllerTest, SEARCH) {
     const OString collection_name = "test_search_collection_test" + OString(RandomName().c_str());
-    GenTable(collection_name, 64, 100, "L2");
+    GenTable(client_ptr, conncetion_ptr, collection_name, 64, 100, "L2");
 
     // Insert 200 vectors into collection
-    auto status = InsertData(collection_name, 64, 200);
+    auto status = InsertData(client_ptr, conncetion_ptr, collection_name, 64, 200);
     ASSERT_TRUE(status.ok()) << status.message();
 
     // Create partition and insert 200 vectors into it
@@ -1363,7 +1360,7 @@ TEST_F(WebControllerTest, SEARCH) {
     ASSERT_EQ(OStatus::CODE_201.code, response->getStatusCode())
         << "Error: " << response->getStatusDescription()->std_str();
 
-    status = InsertData(collection_name, 64, 200, par_param->partition_tag->std_str());
+    status = InsertData(client_ptr, conncetion_ptr, collection_name, 64, 200, par_param->partition_tag->std_str());
     ASSERT_TRUE(status.ok()) << status.message();
 
     // Test search
@@ -1415,10 +1412,10 @@ TEST_F(WebControllerTest, SEARCH) {
 
 TEST_F(WebControllerTest, SEARCH_BIN) {
     const OString collection_name = "test_search_bin_collection_test" + OString(RandomName().c_str());
-    GenTable(collection_name, 64, 100, "HAMMING");
+    GenTable(client_ptr, conncetion_ptr, collection_name, 64, 100, "HAMMING");
 
     // Insert 200 vectors into collection
-    auto status = InsertData(collection_name, 64, 200, "", true);
+    auto status = InsertData(client_ptr, conncetion_ptr, collection_name, 64, 200, "", true);
     ASSERT_TRUE(status.ok()) << status.message();
 
     // Create partition and insert 200 vectors into it
@@ -1428,7 +1425,7 @@ TEST_F(WebControllerTest, SEARCH_BIN) {
     ASSERT_EQ(OStatus::CODE_201.code, response->getStatusCode())
                         << "Error: " << response->readBodyToString()->std_str();
 
-    status = InsertData(collection_name, 64, 200, par_param->partition_tag->std_str(), true);
+    status = InsertData(client_ptr, conncetion_ptr, collection_name, 64, 200, par_param->partition_tag->std_str(), true);
     ASSERT_TRUE(status.ok()) << status.message();
 
     // Test search
@@ -1515,7 +1512,7 @@ TEST_F(WebControllerTest, SEARCH_BIN) {
 
 TEST_F(WebControllerTest, GET_VECTOR_BY_ID) {
     const OString collection_name = "test_milvus_web_get_vector_by_id_test_" + OString(RandomName().c_str());
-    GenTable(collection_name, 64, 100, "L2");
+    GenTable(client_ptr, conncetion_ptr, collection_name, 64, 100, "L2");
 
     // Insert 100 vectors into collection
     std::vector<int64_t> ids;
@@ -1523,7 +1520,7 @@ TEST_F(WebControllerTest, GET_VECTOR_BY_ID) {
         ids.emplace_back(i);
     }
 
-    auto status = InsertData(collection_name, 64, 100, ids);
+    auto status = InsertData(client_ptr, conncetion_ptr, collection_name, 64, 100, ids);
     ASSERT_TRUE(status.ok()) << status.message();
 
     /* test task load */
@@ -1559,7 +1556,7 @@ TEST_F(WebControllerTest, GET_VECTOR_BY_ID) {
 
 TEST_F(WebControllerTest, DELETE_BY_ID) {
     const OString collection_name = "test_search_bin_collection_test" + OString(RandomName().c_str());
-    GenTable(collection_name, 64, 100, "L2");
+    GenTable(client_ptr, conncetion_ptr, collection_name, 64, 100, "L2");
 
     // Insert 200 vectors into collection
     nlohmann::json insert_json;
@@ -1636,10 +1633,10 @@ TEST_F(WebControllerTest, CONFIG) {
     ASSERT_TRUE(result_json.contains("restart_required"));
 
     OString collection_name = "milvus_test_webcontroller_test_preload_collection";
-    GenTable(collection_name, 16, 10, "L2");
+    GenTable(client_ptr, conncetion_ptr, collection_name, 16, 10, "L2");
 
     OString collection_name_s = "milvus_test_webcontroller_test_preload_collection_s";
-    GenTable(collection_name_s, 16, 10, "L2");
+    GenTable(client_ptr, conncetion_ptr, collection_name_s, 16, 10, "L2");
 
     OString body_str = "{\"db_config\": {\"preload_table\": \"" + collection_name + "\"}}";
     response = client_ptr->op("config", body_str, conncetion_ptr);
@@ -1775,9 +1772,9 @@ TEST_F(WebControllerTest, DEVICES_CONFIG) {
 
 TEST_F(WebControllerTest, FLUSH) {
     auto collection_name = milvus::server::web::OString(TABLE_NAME) + RandomName().c_str();
-    GenTable(collection_name, 16, 10, "L2");
+    GenTable(client_ptr, conncetion_ptr, collection_name, 16, 10, "L2");
 
-    auto status = InsertData(collection_name, 16, 1000);
+    auto status = InsertData(client_ptr, conncetion_ptr, collection_name, 16, 1000);
     ASSERT_TRUE(status.ok()) << status.message();
 
     nlohmann::json flush_json;
@@ -1798,9 +1795,9 @@ TEST_F(WebControllerTest, FLUSH) {
 
 TEST_F(WebControllerTest, COMPACT) {
     auto collection_name = milvus::server::web::OString("milvus_web_test_compact_") + RandomName().c_str();
-    GenTable(collection_name, 16, 10, "L2");
+    GenTable(client_ptr, conncetion_ptr, collection_name, 16, 10, "L2");
 
-    auto status = InsertData(collection_name, 16, 1000);
+    auto status = InsertData(client_ptr, conncetion_ptr, collection_name, 16, 1000);
     ASSERT_TRUE(status.ok()) << status.message();
 
     nlohmann::json compact_json;
@@ -1811,17 +1808,129 @@ TEST_F(WebControllerTest, COMPACT) {
 
 TEST_F(WebControllerTest, LOAD) {
     OString collection_name = "milvus_web_test_load_" + OString(RandomName().c_str());
-    GenTable(collection_name, 128, 100, "L2");
+    GenTable(client_ptr, conncetion_ptr, collection_name, 128, 100, "L2");
 
     nlohmann::json load_json;
     load_json["load"]["collection_name"] = collection_name->c_str();
-
     auto response = client_ptr->op("task", load_json.dump().c_str(), conncetion_ptr);
     ASSERT_EQ(OStatus::CODE_200.code, response->getStatusCode());
 
     // load with a non-existent name
     load_json["load"]["collection_name"] = "sssssssssssssssssssssssfsfsfsrrrttt";
-
     response = client_ptr->op("task", load_json.dump().c_str(), conncetion_ptr);
     ASSERT_EQ(OStatus::CODE_400.code, response->getStatusCode());
 }
+
+//class WebMetricTest : public::testing::TestWithParam<const char *> {
+// public:
+//    static void
+//    SetUpTestCase() {
+//        mkdir(CONTROLLER_TEST_CONFIG_DIR, S_IRWXU);
+//        // Basic config
+//        std::string config_path = std::string(CONTROLLER_TEST_CONFIG_DIR).append(CONTROLLER_TEST_CONFIG_FILE);
+//        std::fstream fs(config_path.c_str(), std::ios_base::out);
+//        fs << CONTROLLER_TEST_VALID_CONFIG_STR;
+//        fs.flush();
+//        fs.close();
+//
+//        milvus::server::Config& config = milvus::server::Config::GetInstance();
+//        config.LoadConfigFile(config_path);
+//
+//        auto res_mgr = milvus::scheduler::ResMgrInst::GetInstance();
+//        res_mgr->Clear();
+//        res_mgr->Add(milvus::scheduler::ResourceFactory::Create("disk", "DISK", 0, false));
+//        res_mgr->Add(milvus::scheduler::ResourceFactory::Create("cpu", "CPU", 0));
+//        res_mgr->Add(milvus::scheduler::ResourceFactory::Create("gtx1660", "GPU", 0));
+//
+//        auto default_conn = milvus::scheduler::Connection("IO", 500.0);
+//        auto PCIE = milvus::scheduler::Connection("IO", 11000.0);
+//        res_mgr->Connect("disk", "cpu", default_conn);
+//        res_mgr->Connect("cpu", "gtx1660", PCIE);
+//        res_mgr->Start();
+//        milvus::scheduler::SchedInst::GetInstance()->Start();
+//        milvus::scheduler::JobMgrInst::GetInstance()->Start();
+//
+//        milvus::engine::DBOptions opt;
+//
+//        milvus::server::Config::GetInstance().SetDBConfigBackendUrl("sqlite://:@:/");
+//        boost::filesystem::remove_all(CONTROLLER_TEST_CONFIG_DIR);
+//        milvus::server::Config::GetInstance().SetStorageConfigPrimaryPath(CONTROLLER_TEST_CONFIG_DIR);
+//
+//        milvus::server::DBWrapper::GetInstance().StartService();
+//
+//        milvus::server::Config::GetInstance().SetServerConfigWebPort("29999");
+//
+//        milvus::server::web::WebServer::GetInstance().Start();
+//
+//        sleep(3);
+//    }
+//
+//    static void
+//    TearDownTestCase() {
+//        milvus::server::web::WebServer::GetInstance().Stop();
+//
+//        milvus::server::DBWrapper::GetInstance().StopService();
+//        milvus::scheduler::JobMgrInst::GetInstance()->Stop();
+//        milvus::scheduler::ResMgrInst::GetInstance()->Stop();
+//        milvus::scheduler::SchedInst::GetInstance()->Stop();
+//        boost::filesystem::remove_all(CONTROLLER_TEST_CONFIG_DIR);
+//    }
+//
+//    void
+//    SetUp() override {
+//        std::string config_path = std::string(CONTROLLER_TEST_CONFIG_DIR).append(CONTROLLER_TEST_CONFIG_FILE);
+//        std::fstream fs(config_path.c_str(), std::ios_base::out);
+//        fs << CONTROLLER_TEST_VALID_CONFIG_STR;
+//        fs.close();
+//
+//        milvus::server::Config& config = milvus::server::Config::GetInstance();
+//        config.LoadConfigFile(std::string(CONTROLLER_TEST_CONFIG_DIR) + CONTROLLER_TEST_CONFIG_FILE);
+//
+//        OATPP_COMPONENT(std::shared_ptr<oatpp::network::ClientConnectionProvider>, clientConnectionProvider);
+//        OATPP_COMPONENT(std::shared_ptr<oatpp::data::mapping::ObjectMapper>, objectMapper);
+//        object_mapper = objectMapper;
+//
+//        auto requestExecutor = oatpp::web::client::HttpRequestExecutor::createShared(clientConnectionProvider);
+//        client_ptr = TestClient::createShared(requestExecutor, objectMapper);
+//
+//        conncetion_ptr = client_ptr->getConnection();
+//    }
+//
+//    void
+//    TearDown() override{};
+//
+// protected:
+//    std::shared_ptr<oatpp::data::mapping::ObjectMapper> object_mapper;
+//    TestConnP conncetion_ptr;
+//    TestClientP client_ptr;
+//};
+//
+//namespace mv = milvus::server::web;
+//INSTANTIATE_TEST_CASE_P(MetricTest, WebMetricTest, testing::Values(mv::NAME_METRIC_TYPE_L2, mv::NAME_METRIC_TYPE_IP,
+//    mv::NAME_METRIC_TYPE_HAMMING, mv::NAME_METRIC_TYPE_JACCARD, mv::NAME_METRIC_TYPE_TANIMOTO,
+//    mv::NAME_METRIC_TYPE_SUBSTRUCTURE, mv::NAME_METRIC_TYPE_SUPERSTRUCTURE));
+//
+//TEST_P(WebMetricTest, INSERT) {
+//    auto collection_name = "test_insert_collection_test_metric_" + OString(RandomName().c_str());
+//    const int64_t dim = 64;
+//    const char * metric = GetParam();
+//    GenTable(client_ptr, conncetion_ptr, collection_name, dim, 100, metric);
+//
+//    nlohmann::json insert_json;
+//
+//    if (metric == mv::NAME_METRIC_TYPE_IP || metric == mv::NAME_METRIC_TYPE_L2)
+//        insert_json["vectors"] = RandomRecordsJson(dim, 20);
+//    else
+//        insert_json["vectors"] = RandomBinRecordsJson(dim, 20);
+//
+//    auto response = client_ptr->insert(collection_name, insert_json.dump().c_str(), conncetion_ptr);
+//    ASSERT_EQ(OStatus::CODE_201.code, response->getStatusCode());
+//    auto result_dto = response->readBodyToDto<milvus::server::web::VectorIdsDto>(object_mapper.get());
+//    ASSERT_EQ(20, result_dto->ids->count());
+//
+//    response = client_ptr->insert(collection_name + "ooowrweindexsgs", insert_json.dump().c_str(), conncetion_ptr);
+//    ASSERT_EQ(OStatus::CODE_404.code, response->getStatusCode());
+//
+//    response = client_ptr->dropTable(collection_name, conncetion_ptr);
+//    ASSERT_EQ(OStatus::CODE_204.code, response->getStatusCode());
+//}
