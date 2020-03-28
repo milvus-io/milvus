@@ -551,11 +551,11 @@ ExecutionEngineImpl::CopyToGpu(uint64_t device_id, bool hybrid) {
              */
             ENGINE_LOG_DEBUG << "CPU to GPU" << device_id << " start";
             auto gpu_cache_mgr = cache::GpuCacheMgr::GetInstance(device_id);
-            gpu_cache_mgr->Lock();
-            gpu_cache_mgr->Reserve(index_->Size());
+            // gpu_cache_mgr->Lock();
+            // gpu_cache_mgr->Reserve(index_->Size());
             index_ = knowhere::cloner::CopyCpuToGpu(index_, device_id, knowhere::Config());
-            gpu_cache_mgr->InsertItem(location_, std::static_pointer_cast<cache::DataObj>(index_));
-            gpu_cache_mgr->Unlock();
+            // gpu_cache_mgr->InsertItem(location_, std::static_pointer_cast<cache::DataObj>(index_));
+            // gpu_cache_mgr->Unlock();
             ENGINE_LOG_DEBUG << "CPU to GPU" << device_id << " finished";
         } catch (std::exception& e) {
             ENGINE_LOG_ERROR << e.what();
