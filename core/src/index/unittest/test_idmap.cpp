@@ -72,10 +72,10 @@ TEST_P(IDMAPTest, idmap_basic) {
 
     // null faiss index
     {
-        ASSERT_ANY_THROW(index_->Serialize(conf));
+        ASSERT_ANY_THROW(index_->Serialize());
         ASSERT_ANY_THROW(index_->Query(query_dataset, conf));
-        ASSERT_ANY_THROW(index_->Add(base_dataset, conf));
-        ASSERT_ANY_THROW(index_->AddWithoutIds(base_dataset, conf));
+        ASSERT_ANY_THROW(index_->Add(nullptr, conf));
+        ASSERT_ANY_THROW(index_->AddWithoutIds(nullptr, conf));
     }
 
     index_->Train(base_dataset, conf);
@@ -86,17 +86,18 @@ TEST_P(IDMAPTest, idmap_basic) {
     ASSERT_TRUE(index_->GetRawIds() != nullptr);
     auto result = index_->Query(query_dataset, conf);
     AssertAnns(result, nq, k);
+    //    PrintResult(result, nq, k);
 
-#ifdef MILVUS_GPU_VERSION
     if (index_mode_ == milvus::knowhere::IndexMode::MODE_GPU) {
+#ifdef MILVUS_GPU_VERSION
         // cpu to gpu
         index_ = std::dynamic_pointer_cast<milvus::knowhere::IDMAP>(index_->CopyCpuToGpu(DEVICEID, conf));
 #endif
     }
 
     auto binaryset = index_->Serialize();
-    // auto new_index = std::make_shared<milvus::knowhere::IDMAP>();
-    // new_index->Load(binaryset);
+    auto new_index = std::make_shared<milvus::knowhere::IDMAP>();
+    new_index->Load(binaryset);
     auto result2 = index_->Query(query_dataset, conf);
     AssertAnns(result2, nq, k);
     //    PrintResult(re_result, nq, k);
@@ -141,8 +142,8 @@ TEST_P(IDMAPTest, idmap_serialize) {
         index_->Train(base_dataset, conf);
         index_->Add(base_dataset, milvus::knowhere::Config());
 
-#ifdef MILVUS_GPU_VERSION
         if (index_mode_ == milvus::knowhere::IndexMode::MODE_GPU) {
+#ifdef MILVUS_GPU_VERSION
             // cpu to gpu
             index_ = std::dynamic_pointer_cast<milvus::knowhere::IDMAP>(index_->CopyCpuToGpu(DEVICEID, conf));
 #endif
