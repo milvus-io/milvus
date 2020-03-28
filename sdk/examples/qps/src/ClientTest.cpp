@@ -58,6 +58,8 @@ InsertEntities(std::shared_ptr<milvus::Connection>& conn) {
         milvus::Status stat = conn->Insert(COLLECTION_NAME, "", entity_array, record_ids);
         std::cout << "InsertEntities function call status: " << stat.message() << std::endl;
         std::cout << "Returned id array count: " << record_ids.size() << std::endl;
+
+        stat = conn->FlushCollection(COLLECTION_NAME);
     }
 
     return true;
