@@ -121,8 +121,7 @@ IndexAnnoy::Query(const DatasetPtr& dataset_ptr, const Config& config) {
     auto all_num = rows * k;
     auto p_id = (int64_t*)malloc(all_num * sizeof(int64_t));
     auto p_dist = (float*)malloc(all_num * sizeof(float));
-    faiss::ConcurrentBitsetPtr blacklist = nullptr;
-    GetBlacklist(blacklist);
+    faiss::ConcurrentBitsetPtr blacklist = GetBlacklist();
 
 #pragma omp parallel for
     for (unsigned int i = 0; i < rows; ++i) {
