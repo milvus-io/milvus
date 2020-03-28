@@ -211,7 +211,7 @@ class BaseRequest {
     TableNotExistMsg(const std::string& table_name);
 
  protected:
-    const std::shared_ptr<milvus::server::Context>& context_;
+    const std::shared_ptr<milvus::server::Context> context_;
 
     mutable std::mutex finish_mtx_;
     std::condition_variable finish_cond_;
