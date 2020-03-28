@@ -35,7 +35,7 @@ MemoryIOWriter::operator()(const void* ptr, size_t size, size_t nitems) {
         total = total_need * magic_num;
         auto new_data = new uint8_t[total];
         memcpy((void*)new_data, (void*)data_, rp);
-        delete data_;
+        delete[] data_;
         data_ = new_data;
 
         memcpy((void*)(data_ + rp), ptr, size * nitems);

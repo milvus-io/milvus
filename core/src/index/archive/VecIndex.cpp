@@ -100,8 +100,7 @@ read_index(const std::string& location) {
         rp += bin_length;
         reader_ptr->seekg(rp);
 
-        auto binptr = std::make_shared<uint8_t>();
-        binptr.reset(bin);
+        std::shared_ptr<uint8_t[]> binptr(bin);
         load_data_list.Append(std::string(meta, meta_length), binptr, bin_length);
         delete[] meta;
     }

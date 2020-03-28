@@ -48,7 +48,7 @@ struct MXLogBufferHandler {
     uint8_t buf_idx;
 };
 
-using BufferPtr = std::shared_ptr<char>;
+using BufferPtr = std::shared_ptr<char[]>;
 
 class MXLogBuffer {
  public:
