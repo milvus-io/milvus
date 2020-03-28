@@ -41,7 +41,8 @@ MXLogFileHandler::Load(char* buf, uint32_t data_offset) {
         if (file_size > data_offset) {
             read_size = file_size - data_offset;
             fseek(p_file_, data_offset, SEEK_SET);
-            fread(buf, 1, read_size, p_file_);
+            auto ret = fread(buf, 1, read_size, p_file_);
+            __glibcxx_assert(ret == read_size);
         }
     }
     return read_size;
@@ -56,7 +57,8 @@ MXLogFileHandler::Load(char* buf, uint32_t data_offset, uint32_t data_size) {
         }
 
         fseek(p_file_, data_offset, SEEK_SET);
-        fread(buf, 1, data_size, p_file_);
+        auto ret = fread(buf, 1, data_size, p_file_);
+        __glibcxx_assert(ret == data_size);
     }
     return true;
 }
