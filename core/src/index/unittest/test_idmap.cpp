@@ -126,8 +126,7 @@ TEST_F(IDMAPTest, idmap_serialize) {
         serialize(filename, bin, load_data);
 
         binaryset.clear();
-        auto data = std::make_shared<uint8_t>();
-        data.reset(load_data);
+        std::shared_ptr<uint8_t[]> data(load_data);
         binaryset.Append("IVF", data, bin->size);
 
         index_->Load(binaryset);

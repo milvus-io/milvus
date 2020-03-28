@@ -44,8 +44,7 @@ NSG::Serialize(const Config& config) {
 
         MemoryIOWriter writer;
         impl::write_index(index, writer);
-        auto data = std::make_shared<uint8_t>();
-        data.reset(writer.data_);
+        std::shared_ptr<uint8_t[]> data(writer.data_);
 
         BinarySet res_set;
         res_set.Append("NSG", data, writer.total);

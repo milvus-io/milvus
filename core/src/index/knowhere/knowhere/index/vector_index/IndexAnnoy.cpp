@@ -35,22 +35,19 @@ IndexAnnoy::Serialize(const Config& config) {
         KNOWHERE_THROW_MSG("index not initialize or trained");
     }
 
-    BinarySet res_set;
     auto metric_type_length = metric_type_.length();
-    uint8_t* p = new uint8_t[metric_type_length];
-    std::shared_ptr<uint8_t> metric_type(p, [](uint8_t* p) { delete[] p; });
-    memcpy(p, metric_type_.data(), metric_type_.length());
+    std::shared_ptr<uint8_t[]> metric_type(new uint8_t[metric_type_length]);
+    memcpy(metric_type.get(), metric_type_.data(), metric_type_.length());
 
-    uint8_t* p_dim = new uint8_t[sizeof(uint64_t)];
-    std::shared_ptr<uint8_t> dim_data(p_dim, [](uint8_t* p_dim) { delete[] p_dim; });
     auto dim = Dim();
-    memcpy(p_dim, &dim, sizeof(uint64_t));
+    std::shared_ptr<uint8_t[]> dim_data(new uint8_t[sizeof(uint64_t)]);
+    memcpy(dim_data.get(), &dim, sizeof(uint64_t));
 
     auto index_length = index_->get_index_length();
-    uint8_t* q = new uint8_t[index_length];
-    std::shared_ptr<uint8_t> index_data(q, [](uint8_t* q) { delete[] q; });
-    memcpy(q, index_->get_index(), (size_t)index_length);
+    std::shared_ptr<uint8_t[]> index_data(new uint8_t[index_length]);
+    memcpy(index_data.get(), index_->get_index(), (size_t)index_length);
 
+    BinarySet res_set;
     res_set.Append("annoy_metric_type", metric_type, metric_type_length);
     res_set.Append("annoy_dim", dim_data, sizeof(uint64_t));
     res_set.Append("annoy_index_data", index_data, index_length);

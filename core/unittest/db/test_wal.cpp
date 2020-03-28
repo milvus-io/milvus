@@ -32,11 +32,13 @@ namespace {
 
 void
 MakeEmptyTestPath() {
+    pid_t ret;
     if (access(WAL_GTEST_PATH, 0) == 0) {
-        ::system("rm -rf " WAL_GTEST_PATH "*");
+        ret = ::system("rm -rf " WAL_GTEST_PATH "*");
     } else {
-        ::system("mkdir -m 777 -p " WAL_GTEST_PATH);
+        ret = ::system("mkdir -m 777 -p " WAL_GTEST_PATH);
     }
+    __glibcxx_assert(ret != -1);
 }
 
 } // namespace
