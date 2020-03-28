@@ -10,6 +10,7 @@ Please mark all change in change log and use the issue from GitHub
 ## Feature
 
 ## Improvement
+-   \#1793 easylog works under async mode.
 
 ## Task
 
