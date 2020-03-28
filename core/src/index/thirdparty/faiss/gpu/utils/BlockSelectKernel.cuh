@@ -143,7 +143,7 @@ __global__ void blockSelect(Tensor<K, 2, true> in,
   int limit = utils::roundDown(in.getSize(1), kWarpSize);
 
   for (; i < limit; i += ThreadsPerBlock) {
-    if (!(bitset[i >> 3] & (0x1 << (i & 0x7)))) {
+    if ((bitset.getSize(0) == 0) || (!(bitset[i >> 3] & (0x1 << (i & 0x7))))) {
       heap.add(*inStart, (IndexType) i);
       inStart += ThreadsPerBlock;
     }
@@ -151,7 +151,7 @@ __global__ void blockSelect(Tensor<K, 2, true> in,
 
   // Handle last remainder fraction of a warp of elements
   if (i < in.getSize(1)) {
-    if (!(bitset[i >> 3] & (0x1 << (i & 0x7)))) {
+    if ((bitset.getSize(0) == 0) || (!(bitset[i >> 3] & (0x1 << (i & 0x7))))) {
       heap.addThreadQ(*inStart, (IndexType) i);
     }
   }
@@ -198,7 +198,7 @@ __global__ void blockSelectPair(Tensor<K, 2, true> inK,
   int limit = utils::roundDown(inK.getSize(1), kWarpSize);
 
   for (; i < limit; i += ThreadsPerBlock) {
-    if (!(bitset[i >> 3] & (0x1 << (i & 0x7)))) {
+    if ((bitset.getSize(0) == 0) || (!(bitset[i >> 3] & (0x1 << (i & 0x7))))) {
       heap.add(*inKStart, *inVStart);
       inKStart += ThreadsPerBlock;
       inVStart += ThreadsPerBlock;
@@ -207,7 +207,7 @@ __global__ void blockSelectPair(Tensor<K, 2, true> inK,
 
   // Handle last remainder fraction of a warp of elements
   if (i < inK.getSize(1)) {
-    if (!(bitset[i >> 3] & (0x1 << (i & 0x7)))) {
+    if ((bitset.getSize(0) == 0) || (!(bitset[i >> 3] & (0x1 << (i & 0x7))))) {
       heap.addThreadQ(*inKStart, *inVStart);
     }
   }
