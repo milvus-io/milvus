@@ -514,6 +514,7 @@ TEST_F(RpcHandlerTest, COMBINE_SEARCH_TEST) {
     int64_t index = 0;
     for (auto& result_ptr : result_array) {
         ASSERT_NE(result_ptr->ids_size(), 0);
+        ASSERT_NE(result_ptr->row_num(), 0);
         std::string msg = "Result no." + std::to_string(index) + ": \n";
         for (int64_t i = 0; i < NQ; i++) {
             for (int64_t k = 0; k < TOPK; k++) {
@@ -615,6 +616,7 @@ TEST_F(RpcHandlerTest, COMBINE_SEARCH_BINARY_TEST) {
     int64_t index = 0;
     for (auto& result_ptr : result_array) {
         ASSERT_NE(result_ptr->ids_size(), 0);
+        ASSERT_NE(result_ptr->row_num(), 0);
         std::string msg = "Result no." + std::to_string(++index) + ": \n";
         for (int64_t i = 0; i < NQ; i++) {
             for (int64_t k = 0; k < TOPK; k++) {
