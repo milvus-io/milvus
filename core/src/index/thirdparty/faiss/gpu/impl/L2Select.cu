@@ -51,18 +51,20 @@ __global__ void l2SelectMin1(Tensor<T, 2, true> productDistances,
     }
   }
 
+  bool bitset_is_empty = (bitset.getSize(0) == 0);
   if (endRow) {
     for (int row = rowStart; row < productDistances.getSize(0); ++row) {
       for (int col = threadIdx.x; col < productDistances.getSize(1);
            col += blockDim.x) {
-        if ((bitset.getSize(0) == 0) || (!(bitset[col >> 3] & (0x1 << (col & 0x7))))) {
-          distance[0] = Math<T>::add(centroidDistances[col],
-                                    productDistances[row][col]);
+        if (bitset_is_empty || (!(bitset[col >> 3] & (0x1 << (col & 0x7))))) {
+          distance[0] = Math<T>::add(centroidDistances[col], productDistances[row][col]);
+        } else {
+          distance[0] = (T)MAXFLOAT;
+        }
 
-          if (Math<T>::lt(distance[0], threadMin[0].k)) {
-            threadMin[0].k = distance[0];
-            threadMin[0].v = col;
-          }
+        if (Math<T>::lt(distance[0], threadMin[0].k)) {
+          threadMin[0].k = distance[0];
+          threadMin[0].v = col;
         }
       }
 
@@ -144,21 +146,25 @@ __global__ void l2SelectMinK(Tensor<T, 2, true> productDistances,
   // Whole warps must participate in the selection
   int limit = utils::roundDown(productDistances.getSize(1), kWarpSize);
   int i = threadIdx.x;
+  bool bitset_is_empty = (bitset.getSize(0) == 0);
+  T v;
 
   for (; i < limit; i += blockDim.x) {
-    if ((bitset.getSize(0) == 0) || (!(bitset[i >> 3] & (0x1 << (i & 0x7))))) {
-      T v = Math<T>::add(centroidDistances[i],
-                        productDistances[row][i]);
-      heap.add(v, i);
+    if (bitset_is_empty || (!(bitset[i >> 3] & (0x1 << (i & 0x7))))) {
+      v = Math<T>::add(centroidDistances[i], productDistances[row][i]);
+    } else {
+      v = (T)MAXFLOAT;
     }
+    heap.add(v, i);
   }
 
   if (i < productDistances.getSize(1)) {
-    if ((bitset.getSize(0) == 0) || (!(bitset[i >> 3] & (0x1 << (i & 0x7))))) {
-      T v = Math<T>::add(centroidDistances[i],
-                        productDistances[row][i]);
-      heap.addThreadQ(v, i);
+    if (bitset_is_empty || (!(bitset[i >> 3] & (0x1 << (i & 0x7))))) {
+      v = Math<T>::add(centroidDistances[i], productDistances[row][i]);
+    } else {
+      v = (T)MAXFLOAT;
     }
+    heap.addThreadQ(v, i);
   }
 
   heap.reduce();
