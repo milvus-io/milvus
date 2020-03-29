@@ -39,11 +39,11 @@ class GpuCacheMgr : public CacheMgr<DataObjPtr>, public server::GpuResourceConfi
     void
     InsertItem(const std::string& key, const DataObjPtr& data);
 
+    bool
+    Reserve(const int64_t size);
+
     static GpuCacheMgrPtr
     GetInstance(int64_t gpu_id);
-
-    static MutexPtr
-    GetInstanceMutex(int64_t gpu_id);
 
  protected:
     void
@@ -53,7 +53,7 @@ class GpuCacheMgr : public CacheMgr<DataObjPtr>, public server::GpuResourceConfi
     bool gpu_enable_ = true;
     int64_t gpu_id_;
     static std::mutex global_mutex_;
-    static std::unordered_map<int64_t, std::pair<GpuCacheMgrPtr, MutexPtr>> instance_;
+    static std::unordered_map<int64_t, GpuCacheMgrPtr> instance_;
     std::string identity_;
 };
 #endif
