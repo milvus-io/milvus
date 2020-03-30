@@ -26,6 +26,7 @@ void runCalcListOffsets(Tensor<int, 2, true>& topQueryToCentroid,
 
 /// Performs a first pass of k-selection on the results
 void runPass1SelectLists(Tensor<int, 2, true>& prefixSumOffsets,
+                         Tensor<uint8_t, 1, true>& bitset,
                          Tensor<float, 1, true>& distance,
                          int nprobe,
                          int k,

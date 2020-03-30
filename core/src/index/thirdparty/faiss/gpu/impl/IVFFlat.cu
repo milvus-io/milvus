@@ -353,8 +353,9 @@ IVFFlat::query(Tensor<float, 2, true>& queries,
 
   // Find the `nprobe` closest lists; we can use int indices both
   // internally and externally
+  DeviceTensor<uint8_t, 1, true> coarseBitset(mem, {0}, stream);
   quantizer_->query(queries,
-                    bitset,
+                    coarseBitset,
                     nprobe,
                     coarseDistances,
                     coarseIndices,
@@ -370,6 +371,7 @@ IVFFlat::query(Tensor<float, 2, true>& queries,
 
   runIVFFlatScan(queries,
                  coarseIndices,
+                 bitset,
                  deviceListDataPointers_,
                  deviceListIndexPointers_,
                  indicesOptions_,

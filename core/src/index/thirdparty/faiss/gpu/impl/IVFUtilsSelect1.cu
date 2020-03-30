@@ -24,6 +24,7 @@ namespace faiss { namespace gpu {
 template <int ThreadsPerBlock, int NumWarpQ, int NumThreadQ, bool Dir>
 __global__ void
 pass1SelectLists(Tensor<int, 2, true> prefixSumOffsets,
+                 Tensor<uint8_t, 1, true> bitset,
                  Tensor<float, 1, true> distance,
                  int nprobe,
                  int k,
@@ -58,16 +59,49 @@ pass1SelectLists(Tensor<int, 2, true> prefixSumOffsets,
 
   int i = threadIdx.x;
   auto distanceStart = distance[start].data();
+  bool bitsetEmpty = (bitset.getSize(0) == 0);
+  int blockId, threadId;
+  int idx;
 
   // BlockSelect add cannot be used in a warp divergent circumstance; we
   // handle the remainder warp below
   for (; i < limit; i += blockDim.x) {
-    heap.add(distanceStart[i], start + i);
+    /* 2D-grid, 1D-block */
+    //blockId = blockIdx.x + blockIdx.y * gridDim.x + blockIdx.z * gridDim.x * gridDim.y;
+    //threadId = blockId * (blockDim.x * blockDim.y * blockDim.z) + (threadIdx.z * (blockDim.x * blockDim.y))
+    //           + (threadIdx.y * blockDim.x) + threadIdx.x;
+    blockId = blockIdx.y * gridDim.x + blockIdx.x;
+    threadId = blockId * blockDim.x + i;
+    idx = start + i;
+//      printf("CYD(%s:%d) - gridDim(%d, %d, %d), blockDim(%d, %d, %d), blockIdx(%d, %d, %d), threadIdx(%d, %d),"
+//             "start = %d, i = %d, blockId = %d, threadId = %d, bitset %s\n",
+//             __FUNCTION__, __LINE__,
+//             gridDim.x, gridDim.y, gridDim.z,
+//             blockDim.x, blockDim.y, blockDim.z,
+//             blockIdx.x, blockIdx.y, blockIdx.z,
+//             threadIdx.x, threadIdx.y,
+//             start, i, blockId, threadId, ((bitset[threadId >> 3] & (0x1 << (threadId & 0x7))))? "TRUE ===========" : "FALSE");
+    if (bitsetEmpty || (!(bitset[threadId >> 3] & (0x1 << (threadId & 0x7))))) {
+      heap.add(distanceStart[i], start + i);
+//      printf("CYD - add %f %d\n", distanceStart[i], start + i);
+    } else {
+      heap.add((1.0 / 0.0), start + i);
+//      printf("CYD - add %f %d\n", (1.0/0.0), start + i);
+    }
   }
 
   // Handle warp divergence separately
   if (i < num) {
-    heap.addThreadQ(distanceStart[i], start + i);
+    blockId = blockIdx.y * gridDim.x + blockIdx.x;
+    threadId = blockId * blockDim.x + i;
+    if (bitsetEmpty || (!(bitset[threadId >> 3] & (0x1 << (threadId & 0x7))))) {
+      heap.addThreadQ(distanceStart[i], start + i);
+    } else {
+      heap.addThreadQ((1.0 / 0.0), start + i);
+//      printf("CYD(%s:%d) - blockDim(%d, %d), blockIdx(%d, %d), threadIdx(%d, %d), i = %d, blockId = %d, threadId = %d, bitset %s\n",
+//             __FUNCTION__, __LINE__, blockDim.x, blockDim.y, blockIdx.x, blockIdx.y, threadIdx.x, threadIdx.y,
+//             i, blockId, threadId, ((bitset[threadId >> 3] & (0x1 << (threadId & 0x7))))? "TRUE ===========" : "FALSE");
+    }
   }
 
   // Merge all final results
@@ -76,6 +110,7 @@ pass1SelectLists(Tensor<int, 2, true> prefixSumOffsets,
   // Write out the final k-selected values; they should be all
   // together
   for (int i = threadIdx.x; i < k; i += blockDim.x) {
+    printf("XY - i = %d, %d\n", i, smemV[i]);
     heapDistances[queryId][sliceId][i] = smemK[i];
     heapIndices[queryId][sliceId][i] = smemV[i];
   }
@@ -83,6 +118,7 @@ pass1SelectLists(Tensor<int, 2, true> prefixSumOffsets,
 
 void
 runPass1SelectLists(Tensor<int, 2, true>& prefixSumOffsets,
+                    Tensor<uint8_t, 1, true>& bitset,
                     Tensor<float, 1, true>& distance,
                     int nprobe,
                     int k,
@@ -99,6 +135,7 @@ runPass1SelectLists(Tensor<int, 2, true>& prefixSumOffsets,
   do {                                                                  \
     pass1SelectLists<BLOCK, NUM_WARP_Q, NUM_THREAD_Q, DIR>              \
       <<<grid, BLOCK, 0, stream>>>(prefixSumOffsets,                    \
+                                   bitset,                              \
                                    distance,                            \
                                    nprobe,                              \
                                    k,                                   \
