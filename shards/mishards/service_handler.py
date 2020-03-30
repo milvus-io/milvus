@@ -151,7 +151,6 @@ class ServiceHandler(milvus_pb2_grpc.MilvusServiceServicer):
                     logger.error("Search fail {}".format(ret.status))
 
                 end = time.time()
-
                 all_topk_results.append(ret)
 
         with self.tracer.start_span('do_search', child_of=p_span) as span:
