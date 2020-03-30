@@ -43,6 +43,7 @@ Please mark all change in change log and use the issue from GitHub
 -   \#1698 Upgrade mishards to v0.7.0
 -   \#1719 Improve Milvus log
 -   \#1754 Optimize behavior to get file ids from metadata in mishards
+-   \#1799 Update docker images to 0.7.1 in mishards
 
 ## Task
 
