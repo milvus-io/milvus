@@ -10,6 +10,7 @@ Please mark all change in change log and use the issue from GitHub
 ## Feature
 
 ## Improvement
+-   \#1799 Update docker images to 0.7.1 in mishards
 
 ## Task
 
