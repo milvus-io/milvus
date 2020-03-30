@@ -555,11 +555,9 @@ ExecutionEngineImpl::CopyToGpu(uint64_t device_id, bool hybrid) {
              */
             ENGINE_LOG_DEBUG << "CPU to GPU" << device_id << " start";
             auto gpu_cache_mgr = cache::GpuCacheMgr::GetInstance(device_id);
-            // gpu_cache_mgr->Lock();
             // gpu_cache_mgr->Reserve(index_->Size());
             index_ = knowhere::cloner::CopyCpuToGpu(index_, device_id, knowhere::Config());
             // gpu_cache_mgr->InsertItem(location_, std::static_pointer_cast<cache::DataObj>(index_));
-            // gpu_cache_mgr->Unlock();
             ENGINE_LOG_DEBUG << "CPU to GPU" << device_id << " finished";
         } catch (std::exception& e) {
             ENGINE_LOG_ERROR << e.what();
@@ -577,10 +575,8 @@ ExecutionEngineImpl::CopyToIndexFileToGpu(uint64_t device_id) {
     // the ToIndexData is only a placeholder, cpu-copy-to-gpu action is performed in
     if (index_) {
         auto gpu_cache_mgr = milvus::cache::GpuCacheMgr::GetInstance(device_id);
-        gpu_cache_mgr->Lock();
         gpu_num_ = device_id;
         gpu_cache_mgr->Reserve(index_->Size());
-        gpu_cache_mgr->Unlock();
     }
 #endif
     return Status::OK();
@@ -964,10 +960,8 @@ ExecutionEngineImpl::GetVectorByID(const int64_t& id, uint8_t* vector, bool hybr
 Status
 ExecutionEngineImpl::Cache() {
     auto cpu_cache_mgr = milvus::cache::CpuCacheMgr::GetInstance();
-    cpu_cache_mgr->Lock();
     cache::DataObjPtr obj = std::static_pointer_cast<cache::DataObj>(index_);
     cpu_cache_mgr->InsertItem(location_, obj);
-    cpu_cache_mgr->Unlock();
     return Status::OK();
 }
 
