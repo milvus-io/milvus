@@ -22,6 +22,19 @@
 namespace {
 constexpr int64_t BATCH_ENTITY_COUNT = 100000;
 constexpr int64_t ADD_ENTITY_LOOP = 10;
+
+bool IsSupportedIndex(int64_t index) {
+    if (index != (int64_t)milvus::IndexType::FLAT
+        && index != (int64_t)milvus::IndexType::IVFFLAT
+        && index != (int64_t)milvus::IndexType::IVFSQ8
+        && index != (int64_t)milvus::IndexType::IVFSQ8H) {
+        std::cout << "Unsupported index type: " << index << std::endl;
+        return false;
+    }
+
+    return true;
+}
+
 }  // namespace
 
 ClientTest::ClientTest(const std::string& address, const std::string& port)
@@ -46,11 +59,7 @@ ClientTest::Connect() {
 
 bool
 ClientTest::CheckParameters(const TestParameters& parameters) {
-    if (parameters.index_type_ != (int64_t)milvus::IndexType::FLAT
-        && parameters.index_type_ != (int64_t)milvus::IndexType::IVFFLAT
-        && parameters.index_type_ != (int64_t)milvus::IndexType::IVFSQ8
-        && parameters.index_type_ != (int64_t)milvus::IndexType::IVFSQ8H) {
-        std::cout << "Unsupportted index type: " << parameters.index_type_ << std::endl;
+    if (!IsSupportedIndex(parameters.index_type_)) {
         return false;
     }
 
@@ -103,10 +112,6 @@ ClientTest::BuildCollection() {
     if (collection_name.empty()) {
         collection_name = milvus_sdk::Utils::GenCollectionName();
         parameters_.collection_name_ = collection_name;
-    } else {
-        conn->PreloadCollection(collection_name);
-        milvus::Connection::Destroy(conn);
-        return true; // target collection already exist, no need to create
     }
 
     milvus::CollectionParam collection_param = {
@@ -165,8 +170,59 @@ ClientTest::CreateIndex(std::shared_ptr<milvus::Connection>& conn) {
     milvus_sdk::Utils::PrintIndexParam(index);
     milvus::Status stat = conn->CreateIndex(index);
     std::cout << "CreateIndex function call status: " << stat.message() << std::endl;
+}
 
-    conn->PreloadCollection(parameters_.collection_name_);
+bool
+ClientTest::PreloadCollection() {
+    std::shared_ptr<milvus::Connection> conn = Connect();
+    if (conn == nullptr) {
+        return false;
+    }
+
+    if (!conn->HasCollection(parameters_.collection_name_)) {
+        std::cout << "Collection not found: " << parameters_.collection_name_ << std::endl;
+        return false;
+    }
+
+    milvus::Status stat = conn->PreloadCollection(parameters_.collection_name_);
+    if (!stat.ok()) {
+        milvus::Connection::Destroy(conn);
+        std::string msg = "PreloadCollection function call status: " + stat.message();
+        std::cout << msg << std::endl;
+        return false;
+    }
+
+    milvus::Connection::Destroy(conn);
+    return true;
+}
+
+bool
+ClientTest::GetCollectionInfo() {
+    std::shared_ptr<milvus::Connection> conn = Connect();
+    if (conn == nullptr) {
+        return false;
+    }
+
+    milvus::CollectionParam collection_param;
+    milvus::Status stat = conn->DescribeCollection(parameters_.collection_name_, collection_param);
+
+    milvus::IndexParam index_param;
+    stat = conn->DescribeIndex(parameters_.collection_name_, index_param);
+
+    int64_t row_count = 0;
+    stat = conn->CountCollection(parameters_.collection_name_, row_count);
+
+    parameters_.index_type_ = (int64_t)index_param.index_type;
+    if (!IsSupportedIndex(parameters_.index_type_)) {
+        return false;
+    }
+    parameters_.row_count_ = row_count;
+    parameters_.dimensions_ = collection_param.dimension;
+    parameters_.metric_type_ = (int64_t)collection_param.metric_type;
+    parameters_.index_file_size_ = collection_param.index_file_size;
+
+    milvus::Connection::Destroy(conn);
+    return true;
 }
 
 void
@@ -177,8 +233,6 @@ ClientTest::DropCollection() {
     }
 
     milvus::Status stat = conn->DropCollection(parameters_.collection_name_);
-    std::cout << "DropCollection function call status: " << stat.message() << std::endl;
-
     milvus::Connection::Destroy(conn);
 }
 
@@ -198,14 +252,23 @@ ClientTest::BuildSearchEntities(std::vector<EntityList>& entity_array) {
                                          parameters_.dimensions_);
         entity_array.emplace_back(entities);
     }
-
-//    std::cout << "Build search entities finish" << std::endl;
 }
 
 void
 ClientTest::Search() {
+    if (!PreloadCollection()) {
+        return;
+    }
+
+    if (!GetCollectionInfo()) {
+        return;
+    }
+
     std::vector<EntityList> search_entities;
     BuildSearchEntities(search_entities);
+
+    // search with index
+    std::cout << "Searching ..." << std::endl;
 
     std::list<std::future<milvus::TopKQueryResult>> query_thread_results;
     milvus_sdk::ThreadPool query_thread_pool(parameters_.concurrency_, parameters_.concurrency_ * 2);
@@ -243,12 +306,13 @@ ClientTest::Search() {
 
     // print search detail statistics
     JSON search_stats = JSON();
+    search_stats["table_name"] = parameters_.collection_name_;
     search_stats["index"] = milvus_sdk::Utils::IndexTypeName((milvus::IndexType)parameters_.index_type_);
     search_stats["index_file_size"] = parameters_.index_file_size_;
     search_stats["nlist"] = parameters_.nlist_;
     search_stats["metric"] = milvus_sdk::Utils::MetricTypeName((milvus::MetricType)parameters_.metric_type_);
     search_stats["dimension"] = parameters_.dimensions_;
-    search_stats["row_count"] = parameters_.row_count_ * BATCH_ENTITY_COUNT * ADD_ENTITY_LOOP;
+    search_stats["row_count"] = parameters_.row_count_;
     search_stats["concurrency"] = parameters_.concurrency_;
     search_stats["query_count"] = parameters_.query_count_;
     search_stats["nq"] = parameters_.nq_;
@@ -337,18 +401,9 @@ ClientTest::Test(const TestParameters& parameters) {
             return;
         }
 
-        // search with index
-        std::cout << "Search with index: "
-                  << milvus_sdk::Utils::IndexTypeName((milvus::IndexType)parameters.index_type_)
-                  << std::endl;
         Search();
-
         DropCollection();
     } else {
-        // search with index
-        std::cout << "Search with index: "
-                  << milvus_sdk::Utils::IndexTypeName((milvus::IndexType)parameters.index_type_)
-                  << std::endl;
         Search();
     }
 }

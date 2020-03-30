@@ -64,6 +64,12 @@ class ClientTest {
     void
     CreateIndex(std::shared_ptr<milvus::Connection>& conn);
 
+    bool
+    PreloadCollection();
+
+    bool
+    GetCollectionInfo();
+
     void
     DropCollection();
 

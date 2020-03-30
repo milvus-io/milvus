@@ -64,7 +64,7 @@ main(int argc, char* argv[]) {
             }
             case 't': {
                 char* ptr = strdup(optarg);
-                parameters.collection_name_ = atol(ptr);
+                parameters.collection_name_ = ptr;
                 free(ptr);
                 break;
             }
