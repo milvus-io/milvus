@@ -157,13 +157,14 @@ IVFFlat::addCodeVectorsFromCpu(int listId,
 
 int
 IVFFlat::classifyAndAddVectors(Tensor<float, 2, true>& vecs,
-                               Tensor<long, 1, true>& indices,
-                               Tensor<uint8_t, 1, true>& bitset) {
+                               Tensor<long, 1, true>& indices) {
   FAISS_ASSERT(vecs.getSize(0) == indices.getSize(0));
   FAISS_ASSERT(vecs.getSize(1) == dim_);
 
   auto& mem = resources_->getMemoryManagerCurrentDevice();
   auto stream = resources_->getDefaultStreamCurrentDevice();
+
+  DeviceTensor<uint8_t, 1, true> bitset(mem, {0}, stream);
 
   // Number of valid vectors that we actually add; we return this
   int numAdded = 0;
