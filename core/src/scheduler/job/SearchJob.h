@@ -47,6 +47,7 @@ class SearchJob : public Job {
 
     SearchJob(const std::shared_ptr<server::Context>& context,
               query::GeneralQueryPtr general_query,
+              std::unordered_map<std::string, engine::meta::hybrid::DataType>& attr_type,
               const engine::VectorsData& vectorsData);
 
  public:
@@ -110,6 +111,11 @@ class SearchJob : public Job {
         return general_query_;
     }
 
+    std::unordered_map<std::string, engine::meta::hybrid::DataType>&
+    attr_type() {
+        return attr_type_;
+    }
+
  private:
     const std::shared_ptr<server::Context> context_;
 
@@ -125,6 +131,7 @@ class SearchJob : public Job {
     Status status_;
 
     query::GeneralQueryPtr general_query_;
+    std::unordered_map<std::string, engine::meta::hybrid::DataType> attr_type_;
 
     std::mutex mutex_;
     std::condition_variable cv_;

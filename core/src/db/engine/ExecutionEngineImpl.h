@@ -37,7 +37,6 @@ class ExecutionEngineImpl : public ExecutionEngine {
                         EngineType index_type,
                         MetricType metric_type,
                         std::unordered_map<std::string, DataType> attr_types,
-                        query::BinaryQueryPtr binary_query,
                         const milvus::json& index_params);
 
     Status
@@ -88,6 +87,7 @@ class ExecutionEngineImpl : public ExecutionEngine {
     Status
     ExecBinaryQuery(query::GeneralQueryPtr general_query,
                     faiss::ConcurrentBitsetPtr bitset,
+                    std::unordered_map<std::string, DataType>& attr_type,
                     std::vector<float>& distances,
                     std::vector<int64_t>& labels) override ;
 

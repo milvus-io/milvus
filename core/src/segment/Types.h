@@ -32,7 +32,6 @@ typedef int64_t doc_id_t;
 struct Segment {
     VectorsPtr vectors_ptr_ = std::make_shared<Vectors>();
     AttrsPtr attrs_ptr_ = std::make_shared<Attrs>();
-//    AttrPtr attr_ptr_ = std::make_shared<Attr>();
     DeletedDocsPtr deleted_docs_ptr_ = nullptr;
     IdBloomFilterPtr id_bloom_filter_ptr_ = nullptr;
 };

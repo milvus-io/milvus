@@ -160,6 +160,7 @@ class DB {
                 const std::string& collection_id,
                 const std::vector<std::string>& partition_tags,
                 query::GeneralQueryPtr general_query,
+                std::unordered_map<std::string, engine::meta::hybrid::DataType>& attr_type,
                 engine::ResultIds& result_ids,
                 engine::ResultDistances& result_distances) = 0;
 

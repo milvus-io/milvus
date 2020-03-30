@@ -261,6 +261,7 @@ Utils::GenLeafQuery() {
     std::vector<std::string> field_value{"10", "20", "30"};
     milvus::TermQueryPtr tq = std::make_shared<milvus::TermQuery>();
     tq->field_name = "field_1";
+    tq->field_value = field_value;
 
     //Construct RangeQuery
     milvus::CompareExpr ce1 = {milvus::CompareOperator::LTE, "20"}, ce2 = {milvus::CompareOperator::GTE, "10"};

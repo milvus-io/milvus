@@ -86,6 +86,12 @@ HybridSearchRequest::OnExecute() {
             }
         }
 
+        std::unordered_map<std::string, engine::meta::hybrid::DataType> attr_type;
+        for (uint64_t i = 0; i < fields_schema.fields_schema_.size(); ++i) {
+            attr_type.insert(std::make_pair(fields_schema.fields_schema_[i].field_name_,
+                                            (engine::meta::hybrid::DataType)fields_schema.fields_schema_[i].field_type_));
+        }
+
         engine::ResultIds result_ids;
         engine::ResultDistances result_distances;
 
@@ -93,6 +99,7 @@ HybridSearchRequest::OnExecute() {
                                               collection_name_,
                                               partition_list_,
                                               general_query_,
+                                              attr_type,
                                               result_ids,
                                               result_distances);
 

@@ -31,7 +31,7 @@ namespace milvus {
 namespace codec {
 
 void
-DefaultAttrsFormat::read_attrs_internal(const std::string& file_path, off_t offset, size_t num, void* raw_attrs, size_t& nbytes) {
+DefaultAttrsFormat::read_attrs_internal(const std::string& file_path, off_t offset, size_t num, std::vector<uint8_t>& raw_attrs, size_t& nbytes) {
     int ra_fd = open(file_path.c_str(), O_RDONLY, 00664);
     if (ra_fd == -1) {
         std::string err_msg = "Failed to open file: " + file_path + ", error: " + std::strerror(errno);
@@ -56,7 +56,8 @@ DefaultAttrsFormat::read_attrs_internal(const std::string& file_path, off_t offs
         throw Exception(SERVER_WRITE_ERROR, err_msg);
     }
 
-    if (::read(ra_fd, raw_attrs, num) == -1) {
+    raw_attrs.resize(num / sizeof(uint8_t));
+    if (::read(ra_fd, raw_attrs.data(), num) == -1) {
         std::string err_msg = "Failed to read from file: " + file_path + ", error: " + std::strerror(errno);
         ENGINE_LOG_ERROR << err_msg;
         throw Exception(SERVER_WRITE_ERROR, err_msg);
@@ -112,30 +113,27 @@ DefaultAttrsFormat::read(const milvus::storage::FSHandlerPtr& fs_ptr, milvus::se
         throw Exception(SERVER_INVALID_ARGUMENT, err_msg);
     }
 
-    auto attrs_it = attrs_read->attrs.begin();
-    for(; attrs_it!= attrs_read->attrs.end(); ++attrs_it) {
-        boost::filesystem::path target_path(dir_path);
-        typedef boost::filesystem::directory_iterator d_it;
-        d_it it_end;
-        d_it it(target_path);
-        //    for (auto& it : boost::filesystem::directory_iterator(dir_path)) {
-        for (; it != it_end; ++it) {
-            const auto& path = it->path();
-            if (path.string() == attrs_it->second->GetName() + raw_attr_extension_) {
-                void* attr_list;
-                size_t nbytes;
-                read_attrs_internal(path.string(), 0, INT64_MAX, attr_list, nbytes);
-                attrs_it->second->AddAttr(attr_list, nbytes);
-                attrs_it->second->SetName(path.stem().string());
-            }
-            //TODO process uids
-//            if (path.extension().string() == user_id_extension_) {
-//                std::vector<int64_t> uids;
-//                read_uids_internal(path.string(), uids);
-//                attrs_it->second->AddUids(uids);
-//            }
+    boost::filesystem::path target_path(dir_path);
+    typedef boost::filesystem::directory_iterator d_it;
+    d_it it_end;
+    d_it it(target_path);
+    //    for (auto& it : boost::filesystem::directory_iterator(dir_path)) {
+    for (; it != it_end; ++it) {
+        const auto& path = it->path();
+        if (path.extension().string() == raw_attr_extension_) {
+            auto file_name = path.filename().string();
+            auto field_name = file_name.substr(0, file_name.size() - 3);
+//            void* attr_list;
+            std::vector<uint8_t> attr_list;
+            size_t nbytes;
+            read_attrs_internal(path.string(), 0, INT64_MAX, attr_list, nbytes);
+            std::vector<int64_t> uids;
+            milvus::segment::AttrPtr
+                attr = std::make_shared<milvus::segment::Attr>(attr_list.data(), nbytes, uids, field_name);
+            attrs_read->attrs.insert(std::pair(field_name, attr));
         }
     }
+    //TODO process uids
 }
 
 void

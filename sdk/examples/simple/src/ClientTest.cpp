@@ -258,8 +258,8 @@ ClientTest::InsertHybridEntities(std::string& collection_name, int64_t row_num) 
     value1.resize(row_num);
     value2.resize(row_num);
     for (uint64_t i = 0; i < row_num; ++i) {
-        value1[i] = "123";
-        value2[i] = "111.222";
+        value1[i] = "111";
+        value2[i] = "222";
     }
     numerica_value.insert(std::make_pair("field_1", value1));
     numerica_value.insert(std::make_pair("field_2", value2));
@@ -297,9 +297,16 @@ ClientTest::HybridSearch(std::string& collection_name) {
     must_clause->AddLeafQuery(leaf_queries[1]);
     must_clause->AddLeafQuery(leaf_queries[2]);
 
+    auto query_clause = std::make_shared<milvus::BooleanQuery>();
+    query_clause->AddBooleanQuery(must_clause);
+
     std::string extra_params;
     milvus::Status
-        status = conn_->HybridSearch(collection_name, partition_tags, boolean_clause, extra_params, topk_query_result);
+        status = conn_->HybridSearch(collection_name, partition_tags, query_clause, extra_params, topk_query_result);
+    for (uint64_t i = 0; i < topk_query_result.size(); ++i) {
+        std::cout << topk_query_result[i].ids[0] << "  ---------  " << topk_query_result[i].distances[0] << std::endl;
+    }
+    std::cout << "HybridSearch function call status: " << status.message() << std::endl;
 }
 
 void

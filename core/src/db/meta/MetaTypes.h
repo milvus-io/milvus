@@ -171,10 +171,8 @@ struct FieldSchema {
     //TODO(yukun): need field_id?
     std::string collection_id_;
     std::string field_name_;
-    int32_t field_type_;
+    int32_t field_type_ = (int)INT8;
     std::string field_params_;
-//    std::vector<std::string> field_ids_;
-//    std::vector<DataType> field_types_;
 };
 
 struct FieldsSchema {

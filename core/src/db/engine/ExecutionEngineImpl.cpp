@@ -142,14 +142,12 @@ ExecutionEngineImpl::ExecutionEngineImpl(uint64_t dimension,
                                          milvus::engine::EngineType index_type,
                                          milvus::engine::MetricType metric_type,
                                          std::unordered_map<std::string, DataType> attr_types,
-                                         query::BinaryQueryPtr binary_query,
                                          const milvus::json& index_params)
     : location_(location),
       dim_(dimension),
       index_type_(index_type),
       metric_type_(metric_type),
       attr_types_(attr_types),
-      binary_query_(binary_query),
       index_params_(index_params) {
 
 }
@@ -451,7 +449,7 @@ ExecutionEngineImpl::Load(bool to_cache) {
 
             auto vectors_data = vectors->GetData();
 
-            auto& attrs = segment_ptr->attrs_ptr_;
+            auto attrs = segment_ptr->attrs_ptr_;
 
             auto attrs_it = attrs->attrs.begin();
             for (; attrs_it != attrs->attrs.end(); ++attrs_it) {
@@ -459,13 +457,15 @@ ExecutionEngineImpl::Load(bool to_cache) {
                 attr_size_.insert(std::pair(attrs_it->first, attrs_it->second->GetNbytes()));
             }
 
+            vector_count_ = vectors->GetCount();
+
             faiss::ConcurrentBitsetPtr concurrent_bitset_ptr =
                 std::make_shared<faiss::ConcurrentBitset>(vectors->GetCount());
-            for (auto& offset : deleted_docs) {
-                if (!concurrent_bitset_ptr->test(offset)) {
-                    concurrent_bitset_ptr->set(offset);
-                }
-            }
+//            for (auto& offset : deleted_docs) {
+//                if (!concurrent_bitset_ptr->test(offset)) {
+//                    concurrent_bitset_ptr->set(offset);
+//                }
+//            }
 
             ErrorCode ec = KNOWHERE_UNEXPECTED_ERROR;
             if (index_type_ == EngineType::FAISS_IDMAP) {
@@ -893,6 +893,7 @@ ProcessRangeQuery(std::vector<T> data, T value, query::CompareOperator type, uin
 Status
 ExecutionEngineImpl::ExecBinaryQuery(milvus::query::GeneralQueryPtr general_query,
                                      faiss::ConcurrentBitsetPtr bitset,
+                                     std::unordered_map<std::string, DataType>& attr_type,
                                      std::vector<float>& distances,
                                      std::vector<int64_t>& labels) {
 
@@ -903,17 +904,17 @@ ExecutionEngineImpl::ExecBinaryQuery(milvus::query::GeneralQueryPtr general_quer
     if (general_query->leaf == nullptr) {
         Status status;
         if (general_query->bin->left_query != nullptr) {
-            status = ExecBinaryQuery(general_query->bin->left_query, bitset, distances, labels);
+            status = ExecBinaryQuery(general_query->bin->left_query, bitset, attr_type, distances, labels);
         }
         if (general_query->bin->right_query != nullptr) {
-            status = ExecBinaryQuery(general_query->bin->right_query, bitset, distances, labels);
+            status = ExecBinaryQuery(general_query->bin->right_query, bitset, attr_type, distances, labels);
         }
         return status;
     } else {
         if (general_query->leaf->term_query != nullptr) {
             // process attrs_data
             auto field_name = general_query->leaf->term_query->field_name;
-            auto type = attr_types_.at(field_name);
+            auto type = attr_type.at(field_name);
             auto size = attr_size_.at(field_name);
             switch (type) {
                 case DataType::INT8: {
@@ -1010,7 +1011,7 @@ ExecutionEngineImpl::ExecBinaryQuery(milvus::query::GeneralQueryPtr general_quer
         if (general_query->leaf->range_query != nullptr) {
             auto field_name = general_query->leaf->range_query->field_name;
             auto com_expr = general_query->leaf->range_query->compare_expr;
-            auto type = attr_types_.at(field_name);
+            auto type = attr_type.at(field_name);
             auto size = attr_size_.at(field_name);
             for (uint64_t j = 0; j < com_expr.size(); ++j) {
                 auto operand = com_expr[j].operand;

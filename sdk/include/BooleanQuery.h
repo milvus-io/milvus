@@ -39,7 +39,7 @@ class BooleanQuery {
     }
 
     void
-    AddBooleanQuery(Occur occur, std::shared_ptr<BooleanQuery> boolean_query) {
+    AddBooleanQuery(std::shared_ptr<BooleanQuery> boolean_query) {
         boolean_queries_.emplace_back(boolean_query);
     }
 

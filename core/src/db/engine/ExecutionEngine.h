@@ -117,6 +117,7 @@ class ExecutionEngine {
     virtual Status
     ExecBinaryQuery(query::GeneralQueryPtr general_query,
                     faiss::ConcurrentBitsetPtr bitset,
+                    std::unordered_map<std::string, DataType>& attr_type,
                     std::vector<float>& distances,
                     std::vector<int64_t>& labels) = 0;
 

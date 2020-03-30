@@ -341,7 +341,8 @@ message VectorQuery {
     string field_name = 1;
     float query_boost = 2;
     repeated RowRecord records = 3;
-    repeated KeyValuePair extra_params = 4;
+    int64 topk = 4;
+    repeated KeyValuePair extra_params = 5;
 }
 
 enum Occur {

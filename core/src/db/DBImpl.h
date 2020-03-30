@@ -148,6 +148,7 @@ class DBImpl : public DB, public server::CacheConfigHandler {
                 const std::string& collection_id,
                 const std::vector<std::string>& partition_tags,
                 query::GeneralQueryPtr general_query,
+                std::unordered_map<std::string, engine::meta::hybrid::DataType>& attr_type,
                 ResultIds& result_ids,
                 ResultDistances& result_distances) override;
 
@@ -184,6 +185,7 @@ class DBImpl : public DB, public server::CacheConfigHandler {
                      const std::string& table_id,
                      const meta::TableFilesSchema& files,
                      query::GeneralQueryPtr general_query,
+                     std::unordered_map<std::string, engine::meta::hybrid::DataType>& attr_type,
                      ResultIds& result_ids,
                      ResultDistances& result_distances);
 

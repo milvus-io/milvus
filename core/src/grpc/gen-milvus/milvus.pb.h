@@ -6296,8 +6296,9 @@ class VectorQuery :
 
   enum : int {
     kRecordsFieldNumber = 3,
-    kExtraParamsFieldNumber = 4,
+    kExtraParamsFieldNumber = 5,
     kFieldNameFieldNumber = 1,
+    kTopkFieldNumber = 4,
     kQueryBoostFieldNumber = 2,
   };
   // repeated .milvus.grpc.RowRecord records = 3;
@@ -6311,7 +6312,7 @@ class VectorQuery :
   const ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField< ::milvus::grpc::RowRecord >&
       records() const;
 
-  // repeated .milvus.grpc.KeyValuePair extra_params = 4;
+  // repeated .milvus.grpc.KeyValuePair extra_params = 5;
   int extra_params_size() const;
   void clear_extra_params();
   ::milvus::grpc::KeyValuePair* mutable_extra_params(int index);
@@ -6333,6 +6334,11 @@ class VectorQuery :
   std::string* release_field_name();
   void set_allocated_field_name(std::string* field_name);
 
+  // int64 topk = 4;
+  void clear_topk();
+  ::PROTOBUF_NAMESPACE_ID::int64 topk() const;
+  void set_topk(::PROTOBUF_NAMESPACE_ID::int64 value);
+
   // float query_boost = 2;
   void clear_query_boost();
   float query_boost() const;
@@ -6346,6 +6352,7 @@ class VectorQuery :
   ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField< ::milvus::grpc::RowRecord > records_;
   ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField< ::milvus::grpc::KeyValuePair > extra_params_;
   ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr field_name_;
+  ::PROTOBUF_NAMESPACE_ID::int64 topk_;
   float query_boost_;
   mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
   friend struct ::TableStruct_milvus_2eproto;
@@ -12907,7 +12914,21 @@ VectorQuery::records() const {
   return records_;
 }
 
-// repeated .milvus.grpc.KeyValuePair extra_params = 4;
+// int64 topk = 4;
+inline void VectorQuery::clear_topk() {
+  topk_ = PROTOBUF_LONGLONG(0);
+}
+inline ::PROTOBUF_NAMESPACE_ID::int64 VectorQuery::topk() const {
+  // @@protoc_insertion_point(field_get:milvus.grpc.VectorQuery.topk)
+  return topk_;
+}
+inline void VectorQuery::set_topk(::PROTOBUF_NAMESPACE_ID::int64 value) {
+  
+  topk_ = value;
+  // @@protoc_insertion_point(field_set:milvus.grpc.VectorQuery.topk)
+}
+
+// repeated .milvus.grpc.KeyValuePair extra_params = 5;
 inline int VectorQuery::extra_params_size() const {
   return extra_params_.size();
 }

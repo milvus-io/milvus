@@ -1248,6 +1248,7 @@ DBImpl::HybridQuery(const std::shared_ptr<server::Context>& context,
                     const std::string& collection_id,
                     const std::vector<std::string>& partition_tags,
                     query::GeneralQueryPtr general_query,
+                    std::unordered_map<std::string, engine::meta::hybrid::DataType>& attr_type,
                     ResultIds& result_ids,
                     ResultDistances& result_distances) {
     auto query_ctx = context->Child("Query");
@@ -1292,7 +1293,7 @@ DBImpl::HybridQuery(const std::shared_ptr<server::Context>& context,
     }
 
     cache::CpuCacheMgr::GetInstance()->PrintInfo();  // print cache info before query
-    status = HybridQueryAsync(query_ctx, collection_id, files_array, general_query, result_ids, result_distances);
+    status = HybridQueryAsync(query_ctx, collection_id, files_array, general_query, attr_type, result_ids, result_distances);
     cache::CpuCacheMgr::GetInstance()->PrintInfo();  // print cache info after query
 
     query_ctx->GetTraceContext()->GetSpan()->Finish();
@@ -1449,6 +1450,7 @@ DBImpl::HybridQueryAsync(const std::shared_ptr<server::Context>& context,
                          const std::string& table_id,
                          const meta::TableFilesSchema& files,
                          query::GeneralQueryPtr general_query,
+                         std::unordered_map<std::string, engine::meta::hybrid::DataType>& attr_type,
                          ResultIds& result_ids,
                          ResultDistances& result_distances) {
     auto query_async_ctx = context->Child("Query Async");
@@ -1461,7 +1463,7 @@ DBImpl::HybridQueryAsync(const std::shared_ptr<server::Context>& context,
     VectorsData vectors;
 
     ENGINE_LOG_DEBUG << "Engine query begin, index file count: " << files.size();
-    scheduler::SearchJobPtr job = std::make_shared<scheduler::SearchJob>(query_async_ctx, general_query, vectors);
+    scheduler::SearchJobPtr job = std::make_shared<scheduler::SearchJob>(query_async_ctx, general_query, attr_type, vectors);
     for (auto& file : files) {
         scheduler::TableFileSchemaPtr file_ptr = std::make_shared<meta::TableFileSchema>(file);
         job->AddIndexFile(file_ptr);
