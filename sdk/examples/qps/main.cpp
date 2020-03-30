@@ -27,6 +27,7 @@ main(int argc, char* argv[]) {
     static struct option long_options[] = {{"server", optional_argument, nullptr, 's'},
                                            {"port", optional_argument, nullptr, 'p'},
                                            {"help", no_argument, nullptr, 'h'},
+                                           {"collection_name", no_argument, nullptr, 't'},
                                            {"index", optional_argument, nullptr, 'i'},
                                            {"index_file_size", optional_argument, nullptr, 'f'},
                                            {"nlist", optional_argument, nullptr, 'l'},
@@ -38,7 +39,7 @@ main(int argc, char* argv[]) {
                                            {"nq", optional_argument, nullptr, 'n'},
                                            {"topk", optional_argument, nullptr, 'k'},
                                            {"nprobe", optional_argument, nullptr, 'b'},
-                                           {"print", optional_argument, nullptr, 't'},
+                                           {"print", optional_argument, nullptr, 'v'},
                                            {nullptr, 0, nullptr, 0}};
 
     int option_index = 0;
@@ -47,7 +48,7 @@ main(int argc, char* argv[]) {
 
     TestParameters parameters;
     int value;
-    while ((value = getopt_long(argc, argv, "s:p:i:f:l:m:d:r:c:q:n:k:b:th", long_options, &option_index)) != -1) {
+    while ((value = getopt_long(argc, argv, "s:p:t:i:f:l:m:d:r:c:q:n:k:b:vh", long_options, &option_index)) != -1) {
         switch (value) {
             case 's': {
                 char* address_ptr = strdup(optarg);
@@ -59,6 +60,12 @@ main(int argc, char* argv[]) {
                 char* port_ptr = strdup(optarg);
                 port = port_ptr;
                 free(port_ptr);
+                break;
+            }
+            case 't': {
+                char* ptr = strdup(optarg);
+                parameters.collection_name_ = atol(ptr);
+                free(ptr);
                 break;
             }
             case 'i': {
@@ -127,7 +134,7 @@ main(int argc, char* argv[]) {
                 free(ptr);
                 break;
             }
-            case 't': {
+            case 'v': {
                 parameters.print_result_ = true;
                 break;
             }
@@ -149,8 +156,10 @@ void
 print_help(const std::string& app_name) {
     printf("\n Usage: %s [OPTIONS]\n\n", app_name.c_str());
     printf("  Options:\n");
-    printf("   -s --server           Server address, default 127.0.0.1\n");
-    printf("   -p --port             Server port, default 19530\n");
+    printf("   -s --server           Server address, default:127.0.0.1\n");
+    printf("   -p --port             Server port, default:19530\n");
+    printf("   -t --collection_name  target collection name, specify this will ignore collection parameters, "
+           "default empty\n");
     printf("   -h --help             Print help information\n");
     printf("   -i --index            "
            "Collection index type(1=IDMAP, 2=IVFLAT, 3=IVFSQ8, 5=IVFSQ8H), default:3\n");
@@ -166,6 +175,6 @@ print_help(const std::string& app_name) {
     printf("   -n --nq               nq of each query, default:1\n");
     printf("   -k --topk             topk of each query, default:10\n");
     printf("   -b --nprobe           nprobe of each query, default:16\n");
-    printf("   -t --print            Print query result, default:false\n");
+    printf("   -v --print_result     Print query result, default:false\n");
     printf("\n");
 }

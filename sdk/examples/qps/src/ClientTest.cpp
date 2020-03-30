@@ -20,7 +20,6 @@
 #include <vector>
 
 namespace {
-const char* COLLECTION_NAME = milvus_sdk::Utils::GenCollectionName().c_str();
 constexpr int64_t BATCH_ENTITY_COUNT = 100000;
 constexpr int64_t ADD_ENTITY_LOOP = 10;
 }  // namespace
@@ -100,8 +99,18 @@ ClientTest::BuildCollection() {
         return false;
     }
 
+    std::string collection_name = parameters_.collection_name_;
+    if (collection_name.empty()) {
+        collection_name = milvus_sdk::Utils::GenCollectionName();
+        parameters_.collection_name_ = collection_name;
+    } else {
+        conn->PreloadCollection(collection_name);
+        milvus::Connection::Destroy(conn);
+        return true; // target collection already exist, no need to create
+    }
+
     milvus::CollectionParam collection_param = {
-        COLLECTION_NAME,
+        collection_name,
         parameters_.dimensions_,
         parameters_.index_file_size_,
         (milvus::MetricType)parameters_.metric_type_
@@ -109,12 +118,12 @@ ClientTest::BuildCollection() {
     auto stat = conn->CreateCollection(collection_param);
     std::cout << "CreateCollection function call status: " << stat.message() << std::endl;
     if (!stat.ok()) {
+        milvus::Connection::Destroy(conn);
         return false;
     }
 
     InsertEntities(conn);
-
-    conn->PreloadCollection(COLLECTION_NAME);
+    CreateIndex(conn);
     milvus::Connection::Destroy(conn);
     return true;
 }
@@ -137,32 +146,27 @@ ClientTest::InsertEntities(std::shared_ptr<milvus::Connection>& conn) {
 
         std::string title = "Insert " + std::to_string(entity_array.size()) + " entities No." + std::to_string(i);
         milvus_sdk::TimeRecorder rc(title);
-        milvus::Status stat = conn->Insert(COLLECTION_NAME, "", entity_array, record_ids);
+        milvus::Status stat = conn->Insert(parameters_.collection_name_, "", entity_array, record_ids);
 //        std::cout << "InsertEntities function call status: " << stat.message() << std::endl;
 //        std::cout << "Returned id array count: " << record_ids.size() << std::endl;
 
-        stat = conn->FlushCollection(COLLECTION_NAME);
+        stat = conn->FlushCollection(parameters_.collection_name_);
     }
 
     return true;
 }
 
 void
-ClientTest::CreateIndex() {
-    std::shared_ptr<milvus::Connection> conn = Connect();
-    if (conn == nullptr) {
-        return;
-    }
-
+ClientTest::CreateIndex(std::shared_ptr<milvus::Connection>& conn) {
     std::cout << "Wait create index ..." << std::endl;
     JSON json_params = {{"nlist", parameters_.nlist_}};
-    milvus::IndexParam index = {COLLECTION_NAME, (milvus::IndexType)parameters_.index_type_, json_params.dump()};
+    milvus::IndexParam
+        index = {parameters_.collection_name_, (milvus::IndexType)parameters_.index_type_, json_params.dump()};
     milvus_sdk::Utils::PrintIndexParam(index);
     milvus::Status stat = conn->CreateIndex(index);
     std::cout << "CreateIndex function call status: " << stat.message() << std::endl;
 
-    conn->PreloadCollection(COLLECTION_NAME);
-    milvus::Connection::Destroy(conn);
+    conn->PreloadCollection(parameters_.collection_name_);
 }
 
 void
@@ -172,7 +176,7 @@ ClientTest::DropCollection() {
         return;
     }
 
-    milvus::Status stat = conn->DropCollection(COLLECTION_NAME);
+    milvus::Status stat = conn->DropCollection(parameters_.collection_name_);
     std::cout << "DropCollection function call status: " << stat.message() << std::endl;
 
     milvus::Connection::Destroy(conn);
@@ -272,7 +276,7 @@ ClientTest::SearchWorker(EntityList& entities) {
 
     JSON json_params = {{"nprobe", parameters_.nprobe_}};
     std::vector<std::string> partition_tags;
-    stat = conn->Search(COLLECTION_NAME,
+    stat = conn->Search(parameters_.collection_name_,
                         partition_tags,
                         entities,
                         parameters_.topk_,
@@ -327,16 +331,24 @@ ClientTest::Test(const TestParameters& parameters) {
         return;
     }
     parameters_ = parameters;
-    if (!BuildCollection()) {
-        return;
+
+    if (parameters_.collection_name_.empty()) {
+        if (!BuildCollection()) {
+            return;
+        }
+
+        // search with index
+        std::cout << "Search with index: "
+                  << milvus_sdk::Utils::IndexTypeName((milvus::IndexType)parameters.index_type_)
+                  << std::endl;
+        Search();
+
+        DropCollection();
+    } else {
+        // search with index
+        std::cout << "Search with index: "
+                  << milvus_sdk::Utils::IndexTypeName((milvus::IndexType)parameters.index_type_)
+                  << std::endl;
+        Search();
     }
-
-    CreateIndex();
-
-    // search with index
-    std::cout << "Search with index: " << milvus_sdk::Utils::IndexTypeName((milvus::IndexType)parameters.index_type_)
-              << std::endl;
-    Search();
-
-    DropCollection();
 }
