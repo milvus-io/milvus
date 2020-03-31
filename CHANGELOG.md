@@ -662,7 +662,7 @@ Please mark all change in change log and use the issue from GitHub
 -   MS-6 Implement SDK interface part 1
 -   MS-16 Implement metrics without prometheus
 -   MS-21 Implement SDK interface part 2
--   MS-26 cmake. Add thirdparty packages
+-   MS-26 CMake. Add thirdparty packages
 -   MS-31 cmake: add prometheus
 -   MS-33 cmake: add -j4 to make third party packages build faster
 -   MS-27 support gpu config and disable license build config in cmake
