@@ -26,10 +26,10 @@ void
 print_help(const std::string& app_name) {
     std::cout << std::endl << "Usage: " << app_name << " [OPTIONS]" << std::endl << std::endl;
     std::cout << "  Options:" << std::endl;
-    std::cout << "   -h --help                 Print this help" << std::endl;
-    std::cout << "   -c --conf_file filename   Read configuration from the file" << std::endl;
-    std::cout << "   -d --daemon               Daemonize this application" << std::endl;
-    std::cout << "   -p --pid_file  filename   PID file used by daemonized app" << std::endl;
+    std::cout << "   -h --help                 Print this help." << std::endl;
+    std::cout << "   -c --conf_file filename   Read configuration from the file." << std::endl;
+    std::cout << "   -d --daemon               Daemonize this application." << std::endl;
+    std::cout << "   -p --pid_file  filename   PID file used by daemonized app." << std::endl;
     std::cout << std::endl;
 }
 
