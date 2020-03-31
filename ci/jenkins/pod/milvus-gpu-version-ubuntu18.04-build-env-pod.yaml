@@ -38,6 +38,13 @@ spec:
     ports:
     - containerPort: 3306
       name: mysql
+    resources:
+      limits:
+        memory: "500Mi"
+        cpu: "0.5"
+      requests:
+        memory: "200Mi"
+        cpu: "0.2"
   tolerations:
   - key: dedicated
     operator: Equal
