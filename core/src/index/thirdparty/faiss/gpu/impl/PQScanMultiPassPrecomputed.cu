@@ -345,7 +345,10 @@ runMultiPassTile(Tensor<float, 2, true>& queries,
   }
 
   // k-select the output in chunks, to increase parallelism
-  runPass1SelectLists(prefixSumOffsets,
+  runPass1SelectLists(listIndices,
+                      indicesOptions,
+                      prefixSumOffsets,
+                      topQueryToCentroid,
                       bitset,
                       allDistances,
                       topQueryToCentroid.getSize(1),

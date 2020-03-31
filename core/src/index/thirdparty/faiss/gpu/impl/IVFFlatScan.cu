@@ -316,7 +316,10 @@ runIVFFlatScanTile(Tensor<float, 2, true>& queries,
 #undef RUN_IVF_FLAT
 
   // k-select the output in chunks, to increase parallelism
-  runPass1SelectLists(prefixSumOffsets,
+  runPass1SelectLists(listIndices,
+                      indicesOptions,
+                      prefixSumOffsets,
+                      listIds,
                       bitset,
                       allDistances,
                       listIds.getSize(1),
