@@ -299,23 +299,25 @@ ClientTest::Search() {
     std::vector<EntityList> search_entities;
     BuildSearchEntities(search_entities);
 
-    // search with index
-    std::cout << "Searching " << parameters_.collection_name_ << std::endl;
-
     std::list<std::future<milvus::TopKQueryResult>> query_thread_results;
     milvus_sdk::ThreadPool query_thread_pool(parameters_.concurrency_, parameters_.concurrency_ * 2);
 
     auto start = std::chrono::system_clock::now();
-    // multi-threads query
-    for (int32_t i = 0; i < parameters_.query_count_; i++) {
-        query_thread_results.push_back(query_thread_pool.enqueue(&ClientTest::SearchWorker,
-                                                                 this,
-                                                                 search_entities[i]));
-    }
+    {
+        std::string title = "Searching " + parameters_.collection_name_;
+        milvus_sdk::TimeRecorder rc(title);
 
-    // wait all query return
-    for (auto& iter : query_thread_results) {
-        iter.wait();
+        // multi-threads query
+        for (int32_t i = 0; i < parameters_.query_count_; i++) {
+            query_thread_results.push_back(query_thread_pool.enqueue(&ClientTest::SearchWorker,
+                                                                     this,
+                                                                     search_entities[i]));
+        }
+
+        // wait all query return
+        for (auto& iter : query_thread_results) {
+            iter.wait();
+        }
     }
 
     // print result
