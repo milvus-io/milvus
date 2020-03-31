@@ -119,8 +119,6 @@ IVFPQ::classifyAndAddVectors(Tensor<float, 2, true>& vecs,
   auto& mem = resources_->getMemoryManagerCurrentDevice();
   auto stream = resources_->getDefaultStreamCurrentDevice();
   
-  DeviceTensor<uint8_t, 1, true> bitset(mem, {0}, stream);
-
   // Number of valid vectors that we actually add; we return this
   int numAdded = 0;
 
@@ -130,6 +128,8 @@ IVFPQ::classifyAndAddVectors(Tensor<float, 2, true>& vecs,
   DeviceTensor<int, 2, true> listIds2d(mem, {vecs.getSize(0), 1}, stream);
   auto listIds = listIds2d.view<1>({vecs.getSize(0)});
 
+  /* pseudo bitset */
+  DeviceTensor<uint8_t, 1, true> bitset(mem, {0}, stream);
   quantizer_->query(vecs, bitset, 1, listDistance, listIds2d, false);
 
   // Copy the lists that we wish to append to back to the CPU
