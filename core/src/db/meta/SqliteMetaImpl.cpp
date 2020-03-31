@@ -520,7 +520,7 @@ SqliteMetaImpl::UpdateTableFlushLSN(const std::string& table_id, uint64_t flush_
 
         ConnectorPtr->update_all(set(c(&TableSchema::flush_lsn_) = flush_lsn),
                                  where(c(&TableSchema::table_id_) == table_id));
-        ENGINE_LOG_DEBUG << "Successfully update table flush_lsn, table id = " << table_id;
+        ENGINE_LOG_DEBUG << "Update table flush_lsn, table_id = " << table_id << " flush_lsn = " << flush_lsn;
     } catch (std::exception& e) {
         std::string msg = "Encounter exception when update table lsn: table_id = " + table_id;
         return HandleException(msg, e.what());
@@ -720,7 +720,7 @@ SqliteMetaImpl::UpdateTableIndex(const std::string& table_id, const TableIndex& 
         auto tables = ConnectorPtr->select(
             columns(&TableSchema::id_, &TableSchema::state_, &TableSchema::dimension_, &TableSchema::created_on_,
                     &TableSchema::flag_, &TableSchema::index_file_size_, &TableSchema::owner_table_,
-                    &TableSchema::partition_tag_, &TableSchema::version_),
+                    &TableSchema::partition_tag_, &TableSchema::version_, &TableSchema::flush_lsn_),
             where(c(&TableSchema::table_id_) == table_id and c(&TableSchema::state_) != (int)TableSchema::TO_DELETE));
 
         if (tables.size() > 0) {
@@ -735,6 +735,7 @@ SqliteMetaImpl::UpdateTableIndex(const std::string& table_id, const TableIndex& 
             table_schema.owner_table_ = std::get<6>(tables[0]);
             table_schema.partition_tag_ = std::get<7>(tables[0]);
             table_schema.version_ = std::get<8>(tables[0]);
+            table_schema.flush_lsn_ = std::get<9>(tables[0]);
             table_schema.engine_type_ = index.engine_type_;
             table_schema.index_params_ = index.extra_params_.dump();
             table_schema.metric_type_ = index.metric_type_;
