@@ -90,8 +90,12 @@ INSTANTIATE_TEST_CASE_P(
         std::make_tuple(milvus::knowhere::IndexEnum::INDEX_FAISS_IVFPQ, milvus::knowhere::IndexMode::MODE_CPU),
         std::make_tuple(milvus::knowhere::IndexEnum::INDEX_FAISS_IVFSQ8, milvus::knowhere::IndexMode::MODE_CPU)));
 
-TEST_P(IVFTest, ivf_basic) {
+TEST_P(IVFTest, ivf_basic_cpu) {
     assert(!xb.empty());
+
+    if (index_mode_ != milvus::knowhere::IndexMode::MODE_CPU) {
+        return;
+    }
 
     // null faiss index
     ASSERT_ANY_THROW(index_->Add(base_dataset, conf_));
@@ -103,11 +107,10 @@ TEST_P(IVFTest, ivf_basic) {
     EXPECT_EQ(index_->Dim(), dim);
 
     auto result = index_->Query(query_dataset, conf_);
-    AssertAnns(result, nq, conf_[milvus::knowhere::meta::TOPK]);
+    AssertAnns(result, nq, k);
     // PrintResult(result, nq, k);
 
-    if (index_mode_ == milvus::knowhere::IndexMode::MODE_CPU &&
-        index_type_ != milvus::knowhere::IndexEnum::INDEX_FAISS_IVFPQ) {
+    if (index_type_ != milvus::knowhere::IndexEnum::INDEX_FAISS_IVFPQ) {
         auto result2 = index_->QueryById(id_dataset, conf_);
         AssertAnns(result2, nq, k);
 
@@ -136,6 +139,43 @@ TEST_P(IVFTest, ivf_basic) {
 
         auto result_bs_3 = index_->GetVectorById(xid_dataset, conf_);
         AssertVec(result_bs_3, base_dataset, xid_dataset, 1, dim, CheckMode::CHECK_NOT_EQUAL);
+    }
+
+#ifdef MILVUS_GPU_VERSION
+    milvus::knowhere::FaissGpuResourceMgr::GetInstance().Dump();
+#endif
+}
+
+TEST_P(IVFTest, ivf_basic_gpu) {
+    assert(!xb.empty());
+
+    if (index_mode_ != milvus::knowhere::IndexMode::MODE_GPU) {
+        return;
+    }
+
+    // null faiss index
+    ASSERT_ANY_THROW(index_->Add(base_dataset, conf_));
+    ASSERT_ANY_THROW(index_->AddWithoutIds(base_dataset, conf_));
+
+    index_->Train(base_dataset, conf_);
+    index_->Add(base_dataset, conf_);
+    EXPECT_EQ(index_->Count(), nb);
+    EXPECT_EQ(index_->Dim(), dim);
+
+    auto result = index_->Query(query_dataset, conf_);
+    AssertAnns(result, nq, k);
+    // PrintResult(result, nq, k);
+
+    if (index_type_ != milvus::knowhere::IndexEnum::INDEX_FAISS_IVFSQ8H) {
+        faiss::ConcurrentBitsetPtr concurrent_bitset_ptr = std::make_shared<faiss::ConcurrentBitset>(nb);
+        for (int64_t i = 0; i < nq; ++i) {
+            concurrent_bitset_ptr->set(i);
+        }
+        index_->SetBlacklist(concurrent_bitset_ptr);
+
+        auto result_bs_1 = index_->Query(query_dataset, conf_);
+        AssertAnns(result_bs_1, nq, k, CheckMode::CHECK_NOT_EQUAL);
+        // PrintResult(result, nq, k);
     }
 
 #ifdef MILVUS_GPU_VERSION
