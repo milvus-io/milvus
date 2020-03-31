@@ -23,7 +23,8 @@ namespace {
 constexpr int64_t BATCH_ENTITY_COUNT = 100000;
 constexpr int64_t ADD_ENTITY_LOOP = 10;
 
-bool IsSupportedIndex(int64_t index) {
+bool
+IsSupportedIndex(int64_t index) {
     if (index != (int64_t)milvus::IndexType::FLAT
         && index != (int64_t)milvus::IndexType::IVFFLAT
         && index != (int64_t)milvus::IndexType::IVFSQ8
@@ -34,6 +35,25 @@ bool IsSupportedIndex(int64_t index) {
 
     return true;
 }
+
+class ConnectionWrapper {
+ public:
+    explicit ConnectionWrapper(std::shared_ptr<milvus::Connection>& connection)
+        : connection_(connection) {
+    }
+
+    ~ConnectionWrapper() {
+        if (connection_) {
+            milvus::Connection::Destroy(connection_);
+        }
+    }
+
+    std::shared_ptr<milvus::Connection>& Connection() {
+        return connection_;
+    }
+ private:
+    std::shared_ptr<milvus::Connection> connection_;
+};
 
 }  // namespace
 
@@ -104,6 +124,7 @@ ClientTest::CheckParameters(const TestParameters& parameters) {
 bool
 ClientTest::BuildCollection() {
     std::shared_ptr<milvus::Connection> conn = Connect();
+    ConnectionWrapper wrapper(conn);
     if (conn == nullptr) {
         return false;
     }
@@ -120,16 +141,16 @@ ClientTest::BuildCollection() {
         parameters_.index_file_size_,
         (milvus::MetricType)parameters_.metric_type_
     };
+
+    std::cout << "Create collection " << collection_param.collection_name << std::endl;
     auto stat = conn->CreateCollection(collection_param);
-    std::cout << "CreateCollection function call status: " << stat.message() << std::endl;
     if (!stat.ok()) {
-        milvus::Connection::Destroy(conn);
+        std::cout << "CreateCollection function call status: " << stat.message() << std::endl;
         return false;
     }
 
     InsertEntities(conn);
     CreateIndex(conn);
-    milvus::Connection::Destroy(conn);
     return true;
 }
 
@@ -152,6 +173,9 @@ ClientTest::InsertEntities(std::shared_ptr<milvus::Connection>& conn) {
         std::string title = "Insert " + std::to_string(entity_array.size()) + " entities No." + std::to_string(i);
         milvus_sdk::TimeRecorder rc(title);
         milvus::Status stat = conn->Insert(parameters_.collection_name_, "", entity_array, record_ids);
+        if (!stat.ok()) {
+            std::cout << "CreateIndex function call status: " << stat.message() << std::endl;
+        }
 //        std::cout << "InsertEntities function call status: " << stat.message() << std::endl;
 //        std::cout << "Returned id array count: " << record_ids.size() << std::endl;
 
@@ -163,18 +187,22 @@ ClientTest::InsertEntities(std::shared_ptr<milvus::Connection>& conn) {
 
 void
 ClientTest::CreateIndex(std::shared_ptr<milvus::Connection>& conn) {
-    std::cout << "Wait create index ..." << std::endl;
+    std::string title = "Create index " + milvus_sdk::Utils::IndexTypeName((milvus::IndexType)parameters_.index_type_);
+    milvus_sdk::TimeRecorder rc(title);
     JSON json_params = {{"nlist", parameters_.nlist_}};
     milvus::IndexParam
         index = {parameters_.collection_name_, (milvus::IndexType)parameters_.index_type_, json_params.dump()};
     milvus_sdk::Utils::PrintIndexParam(index);
     milvus::Status stat = conn->CreateIndex(index);
-    std::cout << "CreateIndex function call status: " << stat.message() << std::endl;
+    if (!stat.ok()) {
+        std::cout << "CreateIndex function call status: " << stat.message() << std::endl;
+    }
 }
 
 bool
 ClientTest::PreloadCollection() {
     std::shared_ptr<milvus::Connection> conn = Connect();
+    ConnectionWrapper wrapper(conn);
     if (conn == nullptr) {
         return false;
     }
@@ -184,21 +212,22 @@ ClientTest::PreloadCollection() {
         return false;
     }
 
+    std::string title = "Preload table " + parameters_.collection_name_;
+    milvus_sdk::TimeRecorder rc(title);
     milvus::Status stat = conn->PreloadCollection(parameters_.collection_name_);
     if (!stat.ok()) {
-        milvus::Connection::Destroy(conn);
         std::string msg = "PreloadCollection function call status: " + stat.message();
         std::cout << msg << std::endl;
         return false;
     }
 
-    milvus::Connection::Destroy(conn);
     return true;
 }
 
 bool
 ClientTest::GetCollectionInfo() {
     std::shared_ptr<milvus::Connection> conn = Connect();
+    ConnectionWrapper wrapper(conn);
     if (conn == nullptr) {
         return false;
     }
@@ -221,19 +250,22 @@ ClientTest::GetCollectionInfo() {
     parameters_.metric_type_ = (int64_t)collection_param.metric_type;
     parameters_.index_file_size_ = collection_param.index_file_size;
 
-    milvus::Connection::Destroy(conn);
     return true;
 }
 
 void
 ClientTest::DropCollection() {
     std::shared_ptr<milvus::Connection> conn = Connect();
+    ConnectionWrapper wrapper(conn);
     if (conn == nullptr) {
         return;
     }
 
     milvus::Status stat = conn->DropCollection(parameters_.collection_name_);
-    milvus::Connection::Destroy(conn);
+    if (!stat.ok()) {
+        std::string msg = "DropCollection function call status: " + stat.message();
+        std::cout << msg << std::endl;
+    }
 }
 
 void
@@ -268,7 +300,7 @@ ClientTest::Search() {
     BuildSearchEntities(search_entities);
 
     // search with index
-    std::cout << "Searching ..." << std::endl;
+    std::cout << "Searching " << parameters_.collection_name_ << std::endl;
 
     std::list<std::future<milvus::TopKQueryResult>> query_thread_results;
     milvus_sdk::ThreadPool query_thread_pool(parameters_.concurrency_, parameters_.concurrency_ * 2);
@@ -394,8 +426,8 @@ ClientTest::Test(const TestParameters& parameters) {
     if (!CheckParameters(parameters)) {
         return;
     }
-    parameters_ = parameters;
 
+    parameters_ = parameters;
     if (parameters_.collection_name_.empty()) {
         if (!BuildCollection()) {
             return;
