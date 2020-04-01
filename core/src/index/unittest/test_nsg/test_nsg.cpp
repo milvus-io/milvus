@@ -181,7 +181,6 @@ TEST_F(NSGInterfaceTest, delete_test) {
         }
     }
 
-
     ASSERT_EQ(index_->Count(), nb);
     ASSERT_EQ(index_->Dim(), dim);
 }

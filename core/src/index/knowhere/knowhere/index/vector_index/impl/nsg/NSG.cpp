@@ -846,7 +846,7 @@ NsgIndex::Search(const float* query, const unsigned& nq, const unsigned& dim, co
         unsigned int pos = 0;
         for (unsigned int j = 0; j < resset[i].size(); ++j) {
             if (pos >= k)
-                break; // already top k
+                break;  // already top k
             if (!bitset || !bitset->test((faiss::ConcurrentBitset::id_type_t)resset[i][j].id)) {
                 ids[i * k + pos] = ids_[resset[i][j].id];
                 dist[i * k + pos] = resset[i][j].distance;
