@@ -2,7 +2,19 @@
 
 Please mark all change in change log and use the issue from GitHub
 
-# Milvus 0.7.1 (TBD)
+# Milvus 0.8.0 (TBD)
+
+## Bug
+-   \#1762 Server is not forbidden to create new partition which tag is "_default"
+
+## Feature
+-   \#1655 GPU index support delete vectors
+
+## Improvement
+
+## Task
+
+# Milvus 0.7.1 (2020-03-29)
 
 ## Bug
 -   \#1301 Data in WAL may be accidentally inserted into a new table with the same name.
@@ -13,10 +25,18 @@ Please mark all change in change log and use the issue from GitHub
 -   \#1663 PQ index parameter 'm' validation
 -   \#1686 API search_in_files cannot work correctly when vectors is stored in certain non-default partition
 -   \#1689 Fix SQ8H search fail on SIFT-1B dataset
+-   \#1667 Create index failed with type: rnsg if metric_type is IP
+-   \#1708 NSG search crashed
 -   \#1724 Remove unused unittests
+-   \#1728 Optimize request handler to combine similar query
 -   \#1734 Opentracing for combined search request
+-   \#1735 Fix search out of memory with ivf_flat 
+-   \#1747 Expected error status if search with partition_tag not existed
+-   \#1756 Fix memory exhausted during searching 
+-   \#1781 Fix search hang with SQ8H 
 
 ## Feature
+-   \#261  Integrate ANNOY into Milvus
 -   \#1603 BinaryFlat add 2 Metric: Substructure and Superstructure
 -   \#1660 IVF PQ CPU support deleted vectors searching
 -   \#1661 HNSW support deleted vectors searching
@@ -35,6 +55,8 @@ Please mark all change in change log and use the issue from GitHub
 -   \#1678 Remove CUSTOMIZATION macro 
 -   \#1698 Upgrade mishards to v0.7.0
 -   \#1719 Improve Milvus log
+-   \#1754 Optimize behavior to get file ids from metadata in mishards
+-   \#1784 Add Substructure and Superstructure in http module
 
 ## Task
 
@@ -154,7 +176,7 @@ Please mark all change in change log and use the issue from GitHub
 # Milvus 0.6.0 (2019-12-07)
 
 ## Bug
--   \#228 memory usage increased slowly during searching vectors
+-   \#228 Memory usage increased slowly during searching vectors
 -   \#246 Exclude src/external folder from code coverage for jenkin ci
 -   \#248 Reside src/external in thirdparty
 -   \#316 Some files not merged after vectors added
@@ -181,7 +203,7 @@ Please mark all change in change log and use the issue from GitHub
 -   \#523 Erase file data from cache once the file is marked as deleted
 -   \#527 faiss benchmark not compatible with faiss 1.6.0
 -   \#530 BuildIndex stop when do build index and search simultaneously
--   \#532 assigin value to `table_name` from confest shell
+-   \#532 Assigin value to `table_name` from confest shell
 -   \#533 NSG build failed with MetricType Inner Product
 -   \#543 client raise exception in shards when search results is empty
 -   \#545 Avoid dead circle of build index thread when error occurs

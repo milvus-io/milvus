@@ -51,35 +51,47 @@ SearchRequest::Create(const std::shared_ptr<milvus::server::Context>& context, c
 }
 
 Status
+SearchRequest::OnPreExecute() {
+    std::string hdr = "SearchRequest pre-execute(collection=" + collection_name_ + ")";
+    TimeRecorderAuto rc(hdr);
+
+    milvus::server::ContextChild tracer_pre(context_, "Pre Query");
+    // step 1: check table name
+    auto status = ValidationUtil::ValidateCollectionName(collection_name_);
+    if (!status.ok()) {
+        return status;
+    }
+
+    // step 2: check search topk
+    status = ValidationUtil::ValidateSearchTopk(topk_);
+    if (!status.ok()) {
+        return status;
+    }
+
+    // step 3: check partition tags
+    status = ValidationUtil::ValidatePartitionTags(partition_list_);
+    fiu_do_on("SearchRequest.OnExecute.invalid_partition_tags", status = Status(milvus::SERVER_UNEXPECTED_ERROR, ""));
+    if (!status.ok()) {
+        return status;
+    }
+
+    return Status::OK();
+}
+
+Status
 SearchRequest::OnExecute() {
     try {
-        fiu_do_on("SearchRequest.OnExecute.throw_std_exception", throw std::exception());
         uint64_t vector_count = vectors_data_.vector_count_;
-        auto pre_query_ctx = context_->Child("Pre query");
-
-        SERVER_LOG_DEBUG << "SearchRequest begin execute, extra_params=" << extra_params_.dump();
-        std::string hdr = "SearchRequest(collection=" + collection_name_ + ", nq=" + std::to_string(vector_count) +
+        fiu_do_on("SearchRequest.OnExecute.throw_std_exception", throw std::exception());
+        std::string hdr = "SearchRequest execute(collection=" + collection_name_ + ", nq=" + std::to_string(vector_count) +
                           ", k=" + std::to_string(topk_) + ")";
+        TimeRecorderAuto rc(hdr);
 
-        TimeRecorder rc(hdr);
+        // step 4: check table existence
+        // only process root table, ignore partition table
+        collection_schema_.collection_id_ = collection_name_;
+        auto status = DBWrapper::DB()->DescribeTable(collection_schema_);
 
-        // step 1: check collection name
-        auto status = ValidationUtil::ValidateCollectionName(collection_name_);
-        if (!status.ok()) {
-            return status;
-        }
-
-        // step 2: check search topk
-        status = ValidationUtil::ValidateSearchTopk(topk_);
-        if (!status.ok()) {
-            return status;
-        }
-
-        // step 3: check collection existence
-        // only process root collection, ignore partition collection
-        engine::meta::CollectionSchema table_schema;
-        table_schema.collection_id_ = collection_name_;
-        status = DBWrapper::DB()->DescribeTable(table_schema);
         fiu_do_on("SearchRequest.OnExecute.describe_table_fail", status = Status(milvus::SERVER_UNEXPECTED_ERROR, ""));
         if (!status.ok()) {
             if (status.code() == DB_NOT_FOUND) {
@@ -88,27 +100,19 @@ SearchRequest::OnExecute() {
                 return status;
             }
         } else {
-            if (!table_schema.owner_table_.empty()) {
+            if (!collection_schema_.owner_table_.empty()) {
                 return Status(SERVER_INVALID_TABLE_NAME, TableNotExistMsg(collection_name_));
             }
         }
 
-        // step 4: check search parameters
-        status = ValidationUtil::ValidateSearchParams(extra_params_, table_schema, topk_);
+        // step 5: check search parameters
+        status = ValidationUtil::ValidateSearchParams(extra_params_, collection_schema_, topk_);
         if (!status.ok()) {
             return status;
         }
 
-        // step 5: check vector data according to metric type
-        status = ValidationUtil::ValidateVectorData(vectors_data_, table_schema);
-        if (!status.ok()) {
-            return status;
-        }
-
-        // step 6: check partition tags
-        status = ValidationUtil::ValidatePartitionTags(partition_list_);
-        fiu_do_on("SearchRequest.OnExecute.invalid_partition_tags",
-                  status = Status(milvus::SERVER_UNEXPECTED_ERROR, ""));
+        // step 6: check vector data according to metric type
+        status = ValidationUtil::ValidateVectorData(vectors_data_, collection_schema_);
         if (!status.ok()) {
             return status;
         }
@@ -116,15 +120,13 @@ SearchRequest::OnExecute() {
         rc.RecordSection("check validation");
 
         // step 7: search vectors
-        engine::ResultIds result_ids;
-        engine::ResultDistances result_distances;
-
 #ifdef MILVUS_ENABLE_PROFILING
         std::string fname = "/tmp/search_" + CommonUtil::GetCurrentTimeStr() + ".profiling";
         ProfilerStart(fname.c_str());
 #endif
 
-        pre_query_ctx->GetTraceContext()->GetSpan()->Finish();
+        engine::ResultIds result_ids;
+        engine::ResultDistances result_distances;
 
         if (file_id_list_.empty()) {
             status = DBWrapper::DB()->Query(context_, collection_name_, partition_list_, (size_t)topk_, extra_params_,
@@ -134,11 +136,11 @@ SearchRequest::OnExecute() {
                                                     vectors_data_, result_ids, result_distances);
         }
 
+        rc.RecordSection("query vectors from engine");
+
 #ifdef MILVUS_ENABLE_PROFILING
         ProfilerStop();
 #endif
-
-        rc.RecordSection("search vectors from engine");
         fiu_do_on("SearchRequest.OnExecute.query_fail", status = Status(milvus::SERVER_UNEXPECTED_ERROR, ""));
         if (!status.ok()) {
             return status;
@@ -148,23 +150,17 @@ SearchRequest::OnExecute() {
             return Status::OK();  // empty collection
         }
 
-        auto post_query_ctx = context_->Child("Constructing result");
-
         // step 8: construct result array
-        result_.row_num_ = vector_count;
-        result_.distance_list_ = result_distances;
-        result_.id_list_ = result_ids;
-
-        post_query_ctx->GetTraceContext()->GetSpan()->Finish();
-
-        rc.RecordSection("construct result and send");
-        rc.ElapseFromBegin("totally cost");
+        milvus::server::ContextChild tracer(context_, "Constructing result");
+        result_.row_num_ = vectors_data_.vector_count_;
+        result_.id_list_.swap(result_ids);
+        result_.distance_list_.swap(result_distances);
+        rc.RecordSection("construct result");
     } catch (std::exception& ex) {
         return Status(SERVER_UNEXPECTED_ERROR, ex.what());
     }
 
     return Status::OK();
 }
-
 }  // namespace server
 }  // namespace milvus

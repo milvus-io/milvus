@@ -1388,7 +1388,7 @@ $ curl -X GET "http://127.0.0.1:19121/system/version" -H "accept: application/js
 ##### Response
 
 ```json
-{"code":0,"message":"OK","reply": "0.7.0" }
+{"code":0,"message":"OK","reply": "0.7.1" }
 ```
 
 ### `system/{op}` (PUT)

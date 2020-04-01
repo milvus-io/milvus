@@ -203,8 +203,6 @@ TEST_F(EngineTest, ENGINE_IMPL_TEST) {
 
         auto status = engine_ptr->CopyToGpu(0, false);
         ASSERT_TRUE(status.ok());
-        status = engine_ptr->GpuCache(0);
-        ASSERT_TRUE(status.ok());
         status = engine_ptr->CopyToGpu(0, false);
         ASSERT_TRUE(status.ok());
 

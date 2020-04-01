@@ -13,6 +13,7 @@
 
 #include "knowhere/common/Exception.h"
 #include "knowhere/common/Log.h"
+#include "knowhere/index/vector_index/IndexAnnoy.h"
 #include "knowhere/index/vector_index/IndexBinaryIDMAP.h"
 #include "knowhere/index/vector_index/IndexBinaryIVF.h"
 #include "knowhere/index/vector_index/IndexHNSW.h"
@@ -78,6 +79,8 @@ VecIndexFactory::CreateVecIndex(const IndexType& type, const IndexMode mode) {
         return std::make_shared<knowhere::CPUSPTAGRNG>("BKT");
     } else if (type == IndexEnum::INDEX_HNSW) {
         return std::make_shared<knowhere::IndexHNSW>();
+    } else if (type == IndexEnum::INDEX_ANNOY) {
+        return std::make_shared<knowhere::IndexAnnoy>();
     } else {
         return nullptr;
     }

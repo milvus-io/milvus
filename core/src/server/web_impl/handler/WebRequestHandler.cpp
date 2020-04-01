@@ -168,7 +168,8 @@ WebRequestHandler::IsBinaryTable(const std::string& collection_name, bool& bin) 
     if (status.ok()) {
         auto metric = engine::MetricType(schema.metric_type_);
         bin = engine::MetricType::HAMMING == metric || engine::MetricType::JACCARD == metric ||
-              engine::MetricType::TANIMOTO == metric;
+              engine::MetricType::TANIMOTO == metric || engine::MetricType::SUPERSTRUCTURE == metric ||
+              engine::MetricType::SUBSTRUCTURE == metric;
     }
 
     return status;

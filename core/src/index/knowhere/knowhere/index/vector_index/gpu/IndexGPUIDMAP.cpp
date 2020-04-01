@@ -52,8 +52,7 @@ GPUIDMAP::SerializeImpl(const IndexType& type) {
             faiss::write_index(host_index, &writer);
             delete host_index;
         }
-        auto data = std::make_shared<uint8_t>();
-        data.reset(writer.data_);
+        std::shared_ptr<uint8_t[]> data(writer.data_);
 
         BinarySet res_set;
         res_set.Append("IVF", data, writer.rp);
@@ -106,7 +105,7 @@ GPUIDMAP::GetRawIds() {
 void
 GPUIDMAP::QueryImpl(int64_t n, const float* data, int64_t k, float* distances, int64_t* labels, const Config& config) {
     ResScope rs(res_, gpu_id_);
-    index_->search(n, (float*)data, k, distances, labels);
+    index_->search(n, (float*)data, k, distances, labels, bitset_);
 }
 
 void

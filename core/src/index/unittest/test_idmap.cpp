@@ -9,40 +9,61 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
+#include <gtest/gtest.h>
+
 #include <fiu-control.h>
 #include <fiu-local.h>
-#include <gtest/gtest.h>
 #include <iostream>
+#include <thread>
 
 #include "knowhere/common/Exception.h"
 #include "knowhere/index/vector_index/IndexIDMAP.h"
+#include "knowhere/index/vector_index/IndexType.h"
 #ifdef MILVUS_GPU_VERSION
+#include <faiss/gpu/GpuCloner.h>
 #include "knowhere/index/vector_index/gpu/IndexGPUIDMAP.h"
 #include "knowhere/index/vector_index/helpers/Cloner.h"
+#include "knowhere/index/vector_index/helpers/FaissGpuResourceMgr.h"
 #endif
 #include "Helper.h"
 #include "unittest/utils.h"
 
-class IDMAPTest : public DataGen, public TestGpuIndexBase {
+using ::testing::Combine;
+using ::testing::TestWithParam;
+using ::testing::Values;
+
+class IDMAPTest : public DataGen, public TestWithParam<milvus::knowhere::IndexMode> {
  protected:
     void
     SetUp() override {
-        TestGpuIndexBase::SetUp();
-
+#ifdef MILVUS_GPU_VERSION
+        milvus::knowhere::FaissGpuResourceMgr::GetInstance().InitDevice(DEVICEID, PINMEM, TEMPMEM, RESNUM);
+#endif
+        index_mode_ = GetParam();
         Init_with_default();
         index_ = std::make_shared<milvus::knowhere::IDMAP>();
     }
 
     void
     TearDown() override {
-        TestGpuIndexBase::TearDown();
+#ifdef MILVUS_GPU_VERSION
+        milvus::knowhere::FaissGpuResourceMgr::GetInstance().Free();
+#endif
     }
 
  protected:
     milvus::knowhere::IDMAPPtr index_ = nullptr;
+    milvus::knowhere::IndexMode index_mode_;
 };
 
-TEST_F(IDMAPTest, idmap_basic) {
+INSTANTIATE_TEST_CASE_P(IDMAPParameters, IDMAPTest,
+                        Values(
+#ifdef MILVUS_GPU_VERSION
+                            milvus::knowhere::IndexMode::MODE_GPU,
+#endif
+                            milvus::knowhere::IndexMode::MODE_CPU));
+
+TEST_P(IDMAPTest, idmap_basic) {
     ASSERT_TRUE(!xb.empty());
 
     milvus::knowhere::Config conf{{milvus::knowhere::meta::DIM, dim},
@@ -66,6 +87,13 @@ TEST_F(IDMAPTest, idmap_basic) {
     auto result = index_->Query(query_dataset, conf);
     AssertAnns(result, nq, k);
     //    PrintResult(result, nq, k);
+
+    if (index_mode_ == milvus::knowhere::IndexMode::MODE_GPU) {
+#ifdef MILVUS_GPU_VERSION
+        // cpu to gpu
+        index_ = std::dynamic_pointer_cast<milvus::knowhere::IDMAP>(index_->CopyCpuToGpu(DEVICEID, conf));
+#endif
+    }
 
     auto binaryset = index_->Serialize();
     auto new_index = std::make_shared<milvus::knowhere::IDMAP>();
@@ -96,7 +124,7 @@ TEST_F(IDMAPTest, idmap_basic) {
     AssertVec(result_bs_3, base_dataset, xid_dataset, 1, dim, CheckMode::CHECK_NOT_EQUAL);
 }
 
-TEST_F(IDMAPTest, idmap_serialize) {
+TEST_P(IDMAPTest, idmap_serialize) {
     auto serialize = [](const std::string& filename, milvus::knowhere::BinaryPtr& bin, uint8_t* ret) {
         FileIOWriter writer(filename);
         writer(static_cast<void*>(bin->data.get()), bin->size);
@@ -113,6 +141,14 @@ TEST_F(IDMAPTest, idmap_serialize) {
         // serialize index
         index_->Train(base_dataset, conf);
         index_->Add(base_dataset, milvus::knowhere::Config());
+
+        if (index_mode_ == milvus::knowhere::IndexMode::MODE_GPU) {
+#ifdef MILVUS_GPU_VERSION
+            // cpu to gpu
+            index_ = std::dynamic_pointer_cast<milvus::knowhere::IDMAP>(index_->CopyCpuToGpu(DEVICEID, conf));
+#endif
+        }
+
         auto re_result = index_->Query(query_dataset, conf);
         AssertAnns(re_result, nq, k);
         //        PrintResult(re_result, nq, k);
@@ -126,8 +162,7 @@ TEST_F(IDMAPTest, idmap_serialize) {
         serialize(filename, bin, load_data);
 
         binaryset.clear();
-        auto data = std::make_shared<uint8_t>();
-        data.reset(load_data);
+        std::shared_ptr<uint8_t[]> data(load_data);
         binaryset.Append("IVF", data, bin->size);
 
         index_->Load(binaryset);
@@ -140,7 +175,7 @@ TEST_F(IDMAPTest, idmap_serialize) {
 }
 
 #ifdef MILVUS_GPU_VERSION
-TEST_F(IDMAPTest, copy_test) {
+TEST_P(IDMAPTest, copy_test) {
     ASSERT_TRUE(!xb.empty());
 
     milvus::knowhere::Config conf{{milvus::knowhere::meta::DIM, dim},

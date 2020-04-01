@@ -41,6 +41,7 @@
 #include "metrics/Metrics.h"
 #include "scheduler/Utils.h"
 #include "utils/CommonUtil.h"
+#include "utils/Error.h"
 #include "utils/Exception.h"
 #include "utils/Log.h"
 #include "utils/Status.h"
@@ -214,6 +215,10 @@ ExecutionEngineImpl::CreatetVecIndex(EngineType type) {
         }
         case EngineType::HNSW: {
             index = vec_index_factory.CreateVecIndex(knowhere::IndexEnum::INDEX_HNSW, mode);
+            break;
+        }
+        case EngineType::ANNOY: {
+            index = vec_index_factory.CreateVecIndex(knowhere::IndexEnum::INDEX_ANNOY, mode);
             break;
         }
         default: {
@@ -544,9 +549,16 @@ ExecutionEngineImpl::CopyToGpu(uint64_t device_id, bool hybrid) {
         }
 
         try {
+            /* Index data is copied to GPU first, then added into GPU cache.
+             * Add lock here to avoid multiple INDEX are copied to one GPU card at same time.
+             * And reserve space to avoid GPU out of memory issue.
+             */
+            ENGINE_LOG_DEBUG << "CPU to GPU" << device_id << " start";
+            auto gpu_cache_mgr = cache::GpuCacheMgr::GetInstance(device_id);
+            // gpu_cache_mgr->Reserve(index_->Size());
             index_ = knowhere::cloner::CopyCpuToGpu(index_, device_id, knowhere::Config());
-            ENGINE_LOG_DEBUG << "CPU to GPU" << device_id;
-            GpuCache(device_id);
+            // gpu_cache_mgr->InsertItem(location_, std::static_pointer_cast<cache::DataObj>(index_));
+            ENGINE_LOG_DEBUG << "CPU to GPU" << device_id << " finished";
         } catch (std::exception& e) {
             ENGINE_LOG_ERROR << e.what();
             return Status(DB_ERROR, e.what());
@@ -562,10 +574,9 @@ ExecutionEngineImpl::CopyToIndexFileToGpu(uint64_t device_id) {
 #ifdef MILVUS_GPU_VERSION
     // the ToIndexData is only a placeholder, cpu-copy-to-gpu action is performed in
     if (index_) {
+        auto gpu_cache_mgr = milvus::cache::GpuCacheMgr::GetInstance(device_id);
         gpu_num_ = device_id;
-        auto to_index_data = std::make_shared<knowhere::ToIndexData>(index_->Size());
-        cache::DataObjPtr obj = std::static_pointer_cast<cache::DataObj>(to_index_data);
-        milvus::cache::GpuCacheMgr::GetInstance(device_id)->InsertItem(location_ + "_placeholder", obj);
+        gpu_cache_mgr->Reserve(index_->Size());
     }
 #endif
     return Status::OK();
@@ -638,13 +649,13 @@ ExecutionEngineImpl::BuildIndex(const std::string& location, EngineType engine_t
             knowhere::GenDatasetWithIds(Count(), Dimension(), from_index->GetRawVectors(), from_index->GetRawIds());
         to_index->BuildAll(dataset, conf);
         uids = from_index->GetUids();
-        from_index->GetBlacklist(blacklist);
+        blacklist = from_index->GetBlacklist();
     } else if (bin_from_index) {
         auto dataset = knowhere::GenDatasetWithIds(Count(), Dimension(), bin_from_index->GetRawVectors(),
                                                    bin_from_index->GetRawIds());
         to_index->BuildAll(dataset, conf);
         uids = bin_from_index->GetUids();
-        bin_from_index->GetBlacklist(blacklist);
+        blacklist = bin_from_index->GetBlacklist();
     }
 
 #ifdef MILVUS_GPU_VERSION
@@ -948,18 +959,9 @@ ExecutionEngineImpl::GetVectorByID(const int64_t& id, uint8_t* vector, bool hybr
 
 Status
 ExecutionEngineImpl::Cache() {
+    auto cpu_cache_mgr = milvus::cache::CpuCacheMgr::GetInstance();
     cache::DataObjPtr obj = std::static_pointer_cast<cache::DataObj>(index_);
-    milvus::cache::CpuCacheMgr::GetInstance()->InsertItem(location_, obj);
-
-    return Status::OK();
-}
-
-Status
-ExecutionEngineImpl::GpuCache(uint64_t gpu_id) {
-#ifdef MILVUS_GPU_VERSION
-    cache::DataObjPtr obj = std::static_pointer_cast<cache::DataObj>(index_);
-    milvus::cache::GpuCacheMgr::GetInstance(gpu_id)->InsertItem(location_, obj);
-#endif
+    cpu_cache_mgr->InsertItem(location_, obj);
     return Status::OK();
 }
 

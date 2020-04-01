@@ -291,6 +291,7 @@ DBImpl::GetTableInfo(const std::string& collection_id, TableInfo& table_info) {
         {(int32_t)engine::EngineType::FAISS_IVFFLAT, "IVFFLAT"},
         {(int32_t)engine::EngineType::FAISS_IVFSQ8, "IVFSQ8"},
         {(int32_t)engine::EngineType::NSG_MIX, "NSG"},
+        {(int32_t)engine::EngineType::ANNOY, "ANNOY"},
         {(int32_t)engine::EngineType::FAISS_IVFSQ8H, "IVFSQ8H"},
         {(int32_t)engine::EngineType::FAISS_PQ, "PQ"},
         {(int32_t)engine::EngineType::SPTAG_KDT, "KDT"},
@@ -1130,7 +1131,10 @@ DBImpl::Query(const std::shared_ptr<server::Context>& context, const std::string
     } else {
         // get files from specified partitions
         std::set<std::string> partition_name_array;
-        GetPartitionsByTags(collection_id, partition_tags, partition_name_array);
+        status = GetPartitionsByTags(collection_id, partition_tags, partition_name_array);
+        if (!status.ok()) {
+            return status;  // didn't match any partition.
+        }
 
         for (auto& partition_name : partition_name_array) {
             status = GetFilesToSearch(partition_name, files_array);
@@ -1664,6 +1668,10 @@ DBImpl::GetPartitionsByTags(const std::string& collection_id, const std::vector<
                 partition_name_array.insert(schema.collection_id_);
             }
         }
+    }
+
+    if (partition_name_array.empty()) {
+        return Status(PARTITION_NOT_FOUND, "Cannot find the specified partitions");
     }
 
     return Status::OK();

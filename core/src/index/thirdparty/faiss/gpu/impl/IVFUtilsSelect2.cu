@@ -23,30 +23,30 @@ namespace faiss { namespace gpu {
 
 // This is warp divergence central, but this is really a final step
 // and happening a small number of times
-inline __device__ int binarySearchForBucket(int* prefixSumOffsets,
-                                            int size,
-                                            int val) {
-  int start = 0;
-  int end = size;
-
-  while (end - start > 0) {
-    int mid = start + (end - start) / 2;
-
-    int midVal = prefixSumOffsets[mid];
-
-    // Find the first bucket that we are <=
-    if (midVal <= val) {
-      start = mid + 1;
-    } else {
-      end = mid;
-    }
-  }
-
-  // We must find the bucket that it is in
-  assert(start != size);
-
-  return start;
-}
+//inline __device__ int binarySearchForBucket(int* prefixSumOffsets,
+//                                            int size,
+//                                            int val) {
+//  int start = 0;
+//  int end = size;
+//
+//  while (end - start > 0) {
+//    int mid = start + (end - start) / 2;
+//
+//    int midVal = prefixSumOffsets[mid];
+//
+//    // Find the first bucket that we are <=
+//    if (midVal <= val) {
+//      start = mid + 1;
+//    } else {
+//      end = mid;
+//    }
+//  }
+//
+//  // We must find the bucket that it is in
+//  assert(start != size);
+//
+//  return start;
+//}
 
 template <int ThreadsPerBlock,
           int NumWarpQ,
@@ -113,30 +113,12 @@ pass2SelectLists(Tensor<float, 2, true> heapDistances,
       // calculated by the original scan.
       int offset = heapIndices[queryId][v];
 
-      // In order to determine the actual user index, we need to first
-      // determine what list it was in.
-      // We do this by binary search in the prefix sum list.
-      int probe = binarySearchForBucket(prefixSumOffsets[queryId].data(),
-                                        prefixSumOffsets.getSize(1),
-                                        offset);
-
-      // This is then the probe for the query; we can find the actual
-      // list ID from this
-      int listId = topQueryToCentroid[queryId][probe];
-
-      // Now, we need to know the offset within the list
-      // We ensure that before the array (at offset -1), there is a 0 value
-      int listStart = *(prefixSumOffsets[queryId][probe].data() - 1);
-      int listOffset = offset - listStart;
-
-      // This gives us our final index
-      if (opt == INDICES_32_BIT) {
-        index = (long) ((int*) listIndices[listId])[listOffset];
-      } else if (opt == INDICES_64_BIT) {
-        index = ((long*) listIndices[listId])[listOffset];
-      } else {
-        index = ((long) listId << 32 | (long) listOffset);
-      }
+      index = getListIndex(queryId,
+                           offset,
+                           listIndices,
+                           prefixSumOffsets,
+                           topQueryToCentroid,
+                           opt);
     }
 
     outIndices[queryId][i] = index;

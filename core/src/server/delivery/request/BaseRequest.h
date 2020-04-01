@@ -161,7 +161,13 @@ class BaseRequest {
 
  public:
     Status
+    PreExecute();
+
+    Status
     Execute();
+
+    Status
+    PostExecute();
 
     void
     Done();
@@ -194,13 +200,19 @@ class BaseRequest {
 
  protected:
     virtual Status
+    OnPreExecute();
+
+    virtual Status
     OnExecute() = 0;
+
+    virtual Status
+    OnPostExecute();
 
     std::string
     TableNotExistMsg(const std::string& collection_name);
 
  protected:
-    const std::shared_ptr<milvus::server::Context>& context_;
+    const std::shared_ptr<milvus::server::Context> context_;
 
     mutable std::mutex finish_mtx_;
     std::condition_variable finish_cond_;

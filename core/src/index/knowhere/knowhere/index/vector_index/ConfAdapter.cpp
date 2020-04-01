@@ -211,7 +211,7 @@ NSGConfAdapter::CheckTrain(Config& oricfg, const IndexMode mode) {
     static int64_t MAX_OUT_DEGREE = 300;
     static int64_t MIN_CANDIDATE_POOL_SIZE = 50;
     static int64_t MAX_CANDIDATE_POOL_SIZE = 1000;
-    static std::vector<std::string> METRICS{knowhere::Metric::L2};
+    static std::vector<std::string> METRICS{knowhere::Metric::L2, knowhere::Metric::IP};
 
     CheckStrByValues(knowhere::Metric::TYPE, METRICS);
     CheckIntByRange(knowhere::meta::ROWS, DEFAULT_MIN_ROWS, DEFAULT_MAX_ROWS);
@@ -295,6 +295,22 @@ BinIVFConfAdapter::CheckTrain(Config& oricfg, const IndexMode mode) {
     // CheckIntByRange(knowhere::meta::ROWS, MIN_POINTS_PER_CENTROID * nlist, MAX_POINTS_PER_CENTROID * nlist);
 
     return true;
+}
+
+bool
+ANNOYConfAdapter::CheckTrain(Config& oricfg, const IndexMode mode) {
+    static int64_t MIN_NTREES = 0;
+    // too large of n_trees takes much time, if there is real requirement, change this threshold.
+    static int64_t MAX_NTREES = 16384;
+
+    CheckIntByRange(knowhere::IndexParams::n_trees, MIN_NTREES, MAX_NTREES);
+
+    return ConfAdapter::CheckTrain(oricfg, mode);
+}
+
+bool
+ANNOYConfAdapter::CheckSearch(Config& oricfg, const IndexType type, const IndexMode mode) {
+    return ConfAdapter::CheckSearch(oricfg, type, mode);
 }
 
 }  // namespace knowhere

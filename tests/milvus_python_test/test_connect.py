@@ -38,7 +38,7 @@ class TestConnect:
         if not connect.connected():
             milvus = get_milvus(args["handler"])
             uri_value = "tcp://%s:%s" % (args["ip"], args["port"])
-            milvus.connect(uri=uri_value)
+            milvus.connect(uri=uri_value, timeout=5)
             res = milvus.disconnect()
             with pytest.raises(Exception) as e:
                 res = milvus.disconnect()
@@ -181,9 +181,8 @@ class TestConnect:
         '''
         milvus = get_milvus(args["handler"])
         uri_value = "tcp://%s:%s" % (args["ip"], args["port"])
-        milvus.connect(uri=uri_value)
-        
-        milvus.connect(uri=uri_value)
+        milvus.connect(uri=uri_value, timeout=5)
+        milvus.connect(uri=uri_value, timeout=5)
         assert milvus.connected()
 
     def test_connect_disconnect_repeatedly_once(self, args):
@@ -209,10 +208,10 @@ class TestConnect:
         times = 10
         milvus = get_milvus(args["handler"])
         uri_value = "tcp://%s:%s" % (args["ip"], args["port"])
-        milvus.connect(uri=uri_value)
+        milvus.connect(uri=uri_value, timeout=5)
         for i in range(times):
             milvus.disconnect()
-            milvus.connect(uri=uri_value)
+            milvus.connect(uri=uri_value, timeout=5)
         assert milvus.connected()
 
     # TODO: enable

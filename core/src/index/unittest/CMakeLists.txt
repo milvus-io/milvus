@@ -89,6 +89,16 @@ if (NOT TARGET test_idmap)
 endif ()
 target_link_libraries(test_idmap ${depend_libs} ${unittest_libs} ${basic_libs})
 
+#<ANNOY-TEST>
+set(annoy_srcs
+        ${INDEX_SOURCE_DIR}/knowhere/knowhere/index/vector_index/IndexAnnoy.cpp
+        )
+
+if (NOT TARGET test_annoy)
+    add_executable(test_annoy test_annoy.cpp ${annoy_srcs} ${util_srcs})
+endif ()
+target_link_libraries(test_annoy ${depend_libs} ${unittest_libs} ${basic_libs})
+
 #<HNSW-TEST>
 set(hnsw_srcs
         ${INDEX_SOURCE_DIR}/knowhere/knowhere/index/vector_index/IndexHNSW.cpp
@@ -144,6 +154,7 @@ install(TARGETS test_idmap DESTINATION unittest)
 install(TARGETS test_binaryidmap DESTINATION unittest)
 install(TARGETS test_sptag DESTINATION unittest)
 install(TARGETS test_knowhere_common DESTINATION unittest)
+install(TARGETS test_annoy DESTINATION unittest)
 
 if (KNOWHERE_GPU_VERSION)
     install(TARGETS test_gpuresource DESTINATION unittest)
