@@ -1159,7 +1159,7 @@ TEST_F(WebControllerTest, INDEX) {
     response = client_ptr->dropIndex(collection_name, conncetion_ptr);
     ASSERT_EQ(OStatus::CODE_204.code, response->getStatusCode());
 
-    // create index without existing table
+    // create index without existing collection
     response = client_ptr->createIndex(collection_name + "fgafafafafafUUUUUUa124254",
                                        index_json.dump().c_str(), conncetion_ptr);
     ASSERT_EQ(OStatus::CODE_404.code, response->getStatusCode());
@@ -1198,7 +1198,7 @@ TEST_F(WebControllerTest, INDEX) {
     ASSERT_TRUE(nlist_json.is_number());
     ASSERT_EQ(10, nlist_json.get<int64_t>());
 
-    // get index of table which not exists
+    // get index of collection which not exists
     response = client_ptr->getIndex(collection_name + "dfaedXXXdfdfet4t343aa4", conncetion_ptr);
     ASSERT_EQ(OStatus::CODE_404.code, response->getStatusCode());
     auto error_dto = response->readBodyToDto<milvus::server::web::StatusDto>(object_mapper.get());

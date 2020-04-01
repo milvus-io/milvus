@@ -26,8 +26,8 @@
 namespace milvus {
 namespace engine {
 
-MemTable::MemTable(const std::string& table_id, const meta::MetaPtr& meta, const DBOptions& options)
-    : table_id_(table_id), meta_(meta), options_(options) {
+MemTable::MemTable(const std::string& collection_id, const meta::MetaPtr& meta, const DBOptions& options)
+    : collection_id_(collection_id), meta_(meta), options_(options) {
     SetIdentity("MemTable");
     AddCacheInsertDataListener();
 }
@@ -42,7 +42,7 @@ MemTable::Add(const VectorSourcePtr& source) {
 
         Status status;
         if (mem_table_file_list_.empty() || current_mem_table_file->IsFull()) {
-            MemTableFilePtr new_mem_table_file = std::make_shared<MemTableFile>(table_id_, meta_, options_);
+            MemTableFilePtr new_mem_table_file = std::make_shared<MemTableFile>(collection_id_, meta_, options_);
             status = new_mem_table_file->Add(source);
             if (status.ok()) {
                 mem_table_file_list_.emplace_back(new_mem_table_file);
@@ -62,7 +62,7 @@ MemTable::Add(const VectorSourcePtr& source) {
 
 Status
 MemTable::Delete(segment::doc_id_t doc_id) {
-    // Locate which table file the doc id lands in
+    // Locate which collection file the doc id lands in
     for (auto& table_file : mem_table_file_list_) {
         table_file->Delete(doc_id);
     }
@@ -74,7 +74,7 @@ MemTable::Delete(segment::doc_id_t doc_id) {
 
 Status
 MemTable::Delete(const std::vector<segment::doc_id_t>& doc_ids) {
-    // Locate which table file the doc id lands in
+    // Locate which collection file the doc id lands in
     for (auto& table_file : mem_table_file_list_) {
         table_file->Delete(doc_ids);
     }
@@ -122,7 +122,7 @@ MemTable::Serialize(uint64_t wal_lsn, bool apply_delete) {
     }
 
     // Update flush lsn
-    auto status = meta_->UpdateTableFlushLSN(table_id_, wal_lsn);
+    auto status = meta_->UpdateTableFlushLSN(collection_id_, wal_lsn);
     if (!status.ok()) {
         std::string err_msg = "Failed to write flush lsn to meta: " + status.ToString();
         ENGINE_LOG_ERROR << err_msg;
@@ -131,7 +131,7 @@ MemTable::Serialize(uint64_t wal_lsn, bool apply_delete) {
 
     auto end = std::chrono::high_resolution_clock::now();
     std::chrono::duration<double> diff = end - start;
-    ENGINE_LOG_DEBUG << "Finished flushing for table " << table_id_ << " in " << diff.count() << " s";
+    ENGINE_LOG_DEBUG << "Finished flushing for collection " << collection_id_ << " in " << diff.count() << " s";
 
     return Status::OK();
 }
@@ -143,7 +143,7 @@ MemTable::Empty() {
 
 const std::string&
 MemTable::GetTableId() const {
-    return table_id_;
+    return collection_id_;
 }
 
 size_t
@@ -159,7 +159,7 @@ MemTable::GetCurrentMem() {
 Status
 MemTable::ApplyDeletes() {
     // Applying deletes to other segments on disk and their corresponding cache:
-    // For each segment in table:
+    // For each segment in collection:
     //     Load its bloom filter
     //     For each id in delete list:
     //         If present, add the uid to segment's uid list
@@ -173,16 +173,16 @@ MemTable::ApplyDeletes() {
     //     Serialize segment's deletedDoc TODO(zhiru): append directly to previous file for now, may have duplicates
     //     Serialize bloom filter
 
-    ENGINE_LOG_DEBUG << "Applying " << doc_ids_to_delete_.size() << " deletes in table: " << table_id_;
+    ENGINE_LOG_DEBUG << "Applying " << doc_ids_to_delete_.size() << " deletes in collection: " << collection_id_;
 
     auto start_total = std::chrono::high_resolution_clock::now();
 
     //    auto start = std::chrono::high_resolution_clock::now();
 
-    std::vector<int> file_types{meta::TableFileSchema::FILE_TYPE::RAW, meta::TableFileSchema::FILE_TYPE::TO_INDEX,
-                                meta::TableFileSchema::FILE_TYPE::BACKUP};
-    meta::TableFilesSchema table_files;
-    auto status = meta_->FilesByType(table_id_, file_types, table_files);
+    std::vector<int> file_types{meta::SegmentSchema::FILE_TYPE::RAW, meta::SegmentSchema::FILE_TYPE::TO_INDEX,
+                                meta::SegmentSchema::FILE_TYPE::BACKUP};
+    meta::SegmentsSchema table_files;
+    auto status = meta_->FilesByType(collection_id_, file_types, table_files);
     if (!status.ok()) {
         std::string err_msg = "Failed to apply deletes: " + status.ToString();
         ENGINE_LOG_ERROR << err_msg;
@@ -209,7 +209,7 @@ MemTable::ApplyDeletes() {
         }
     }
 
-    meta::TableFilesSchema files_to_check;
+    meta::SegmentsSchema files_to_check;
     for (auto& kv : ids_to_check_map) {
         files_to_check.emplace_back(table_files[kv.first]);
     }
@@ -222,7 +222,7 @@ MemTable::ApplyDeletes() {
     std::chrono::duration<double> diff0 = time0 - start_total;
     ENGINE_LOG_DEBUG << "Found " << ids_to_check_map.size() << " segment to apply deletes in " << diff0.count() << " s";
 
-    meta::TableFilesSchema table_files_to_update;
+    meta::SegmentsSchema table_files_to_update;
 
     for (auto& kv : ids_to_check_map) {
         auto& table_file = table_files[kv.first];
@@ -235,7 +235,7 @@ MemTable::ApplyDeletes() {
         segment::SegmentReader segment_reader(segment_dir);
 
         auto& segment_id = table_file.segment_id_;
-        meta::TableFilesSchema segment_files;
+        meta::SegmentsSchema segment_files;
         status = meta_->GetTableFilesBySegmentId(segment_id, segment_files);
         if (!status.ok()) {
             break;
@@ -351,10 +351,10 @@ MemTable::ApplyDeletes() {
         ENGINE_LOG_DEBUG << "Updated bloom filter in segment: " << table_file.segment_id_ << " in " << diff5.count()
                          << " s";
 
-        // Update table file row count
+        // Update collection file row count
         for (auto& file : segment_files) {
-            if (file.file_type_ == meta::TableFileSchema::RAW || file.file_type_ == meta::TableFileSchema::TO_INDEX ||
-                file.file_type_ == meta::TableFileSchema::INDEX || file.file_type_ == meta::TableFileSchema::BACKUP) {
+            if (file.file_type_ == meta::SegmentSchema::RAW || file.file_type_ == meta::SegmentSchema::TO_INDEX ||
+                file.file_type_ == meta::SegmentSchema::INDEX || file.file_type_ == meta::SegmentSchema::BACKUP) {
                 file.row_count_ -= delete_count;
                 table_files_to_update.emplace_back(file);
             }
@@ -362,8 +362,8 @@ MemTable::ApplyDeletes() {
         auto time7 = std::chrono::high_resolution_clock::now();
         std::chrono::duration<double> diff6 = time7 - time6;
         diff6 = time6 - time5;
-        ENGINE_LOG_DEBUG << "Update table file row count in vector of segment: " << table_file.segment_id_ << " in "
-                         << diff6.count() << " s";
+        ENGINE_LOG_DEBUG << "Update collection file row count in vector of segment: " << table_file.segment_id_
+                         << " in " << diff6.count() << " s";
     }
 
     auto time7 = std::chrono::high_resolution_clock::now();
@@ -380,9 +380,9 @@ MemTable::ApplyDeletes() {
 
     auto end_total = std::chrono::high_resolution_clock::now();
     std::chrono::duration<double> diff7 = end_total - time7;
-    ENGINE_LOG_DEBUG << "Update deletes to meta in table " << table_id_ << " in " << diff7.count() << " s";
+    ENGINE_LOG_DEBUG << "Update deletes to meta in collection " << collection_id_ << " in " << diff7.count() << " s";
     std::chrono::duration<double> diff_total = end_total - start_total;
-    ENGINE_LOG_DEBUG << "Finished applying deletes in table " << table_id_ << " in " << diff_total.count() << " s";
+    ENGINE_LOG_DEBUG << "Finished deletes in collection " << collection_id_ << " in " << diff_total.count() << " s";
 
     OngoingFileChecker::GetInstance().UnmarkOngoingFiles(files_to_check);
 

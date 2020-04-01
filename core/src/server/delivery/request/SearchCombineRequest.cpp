@@ -106,7 +106,7 @@ SearchCombineRequest::Combine(const SearchRequestPtr& request) {
     // reset some parameters in necessary
     if (request_list_.empty()) {
         // validate first request input
-        auto status = ValidationUtil::ValidateTableName(request->TableName());
+        auto status = ValidationUtil::ValidateCollectionName(request->CollectionName());
         if (!status.ok()) {
             return status;
         }
@@ -117,7 +117,7 @@ SearchCombineRequest::Combine(const SearchRequestPtr& request) {
         }
 
         // assign base parameters
-        table_name_ = request->TableName();
+        collection_name_ = request->CollectionName();
         min_topk_ = request->TopK() - MAX_TOPK_GAP / 2;
         if (min_topk_ < 0) {
             min_topk_ = 0;
@@ -138,7 +138,7 @@ SearchCombineRequest::Combine(const SearchRequestPtr& request) {
 
 bool
 SearchCombineRequest::CanCombine(const SearchRequestPtr& request) {
-    if (table_name_ != request->TableName()) {
+    if (collection_name_ != request->CollectionName()) {
         return false;
     }
 
@@ -170,7 +170,7 @@ SearchCombineRequest::CanCombine(const SearchRequestPtr& request) {
 
 bool
 SearchCombineRequest::CanCombine(const SearchRequestPtr& left, const SearchRequestPtr& right) {
-    if (left->TableName() != right->TableName()) {
+    if (left->CollectionName() != right->CollectionName()) {
         return false;
     }
 
@@ -226,18 +226,19 @@ SearchCombineRequest::OnExecute() {
         size_t combined_request = request_list_.size();
         SERVER_LOG_DEBUG << "SearchCombineRequest execute, request count=" << combined_request
                          << ", extra_params=" << extra_params_.dump();
-        std::string hdr = "SearchCombineRequest(table=" + table_name_ + ")";
+        std::string hdr = "SearchCombineRequest(collection=" + collection_name_ + ")";
 
         TimeRecorderAuto rc(hdr);
 
         // step 1: check table existence
         // only process root table, ignore partition table
-        engine::meta::TableSchema table_schema;
-        table_schema.table_id_ = table_name_;
+        engine::meta::CollectionSchema table_schema;
+        table_schema.collection_id_ = collection_name_;
         auto status = DBWrapper::DB()->DescribeTable(table_schema);
+
         if (!status.ok()) {
             if (status.code() == DB_NOT_FOUND) {
-                status = Status(SERVER_TABLE_NOT_EXIST, TableNotExistMsg(table_name_));
+                status = Status(SERVER_TABLE_NOT_EXIST, TableNotExistMsg(collection_name_));
                 FreeRequests(status);
                 return status;
             } else {
@@ -246,7 +247,7 @@ SearchCombineRequest::OnExecute() {
             }
         } else {
             if (!table_schema.owner_table_.empty()) {
-                status = Status(SERVER_INVALID_TABLE_NAME, TableNotExistMsg(table_name_));
+                status = Status(SERVER_INVALID_TABLE_NAME, TableNotExistMsg(collection_name_));
                 FreeRequests(status);
                 return status;
             }
@@ -352,7 +353,7 @@ SearchCombineRequest::OnExecute() {
             context_list.CreateChild(request_list_, "Combine Query");
 
             if (file_id_list_.empty()) {
-                status = DBWrapper::DB()->Query(nullptr, table_name_, partition_list, (size_t)search_topk_,
+                status = DBWrapper::DB()->Query(nullptr, collection_name_, partition_list, (size_t)search_topk_,
                                                 extra_params_, vectors_data_, result_ids, result_distances);
             } else {
                 status = DBWrapper::DB()->QueryByFileID(nullptr, file_id_list, (size_t)search_topk_, extra_params_,

@@ -32,92 +32,94 @@ class MySQLMetaImpl : public Meta {
     ~MySQLMetaImpl();
 
     Status
-    CreateTable(TableSchema& table_schema) override;
+    CreateTable(CollectionSchema& table_schema) override;
 
     Status
-    DescribeTable(TableSchema& table_schema) override;
+    DescribeTable(CollectionSchema& table_schema) override;
 
     Status
-    HasTable(const std::string& table_id, bool& has_or_not) override;
+    HasTable(const std::string& collection_id, bool& has_or_not) override;
 
     Status
-    AllTables(std::vector<TableSchema>& table_schema_array) override;
+    AllTables(std::vector<CollectionSchema>& table_schema_array) override;
 
     Status
-    DropTable(const std::string& table_id) override;
+    DropTable(const std::string& collection_id) override;
 
     Status
-    DeleteTableFiles(const std::string& table_id) override;
+    DeleteTableFiles(const std::string& collection_id) override;
 
     Status
-    CreateTableFile(TableFileSchema& file_schema) override;
+    CreateTableFile(SegmentSchema& file_schema) override;
 
     Status
-    GetTableFiles(const std::string& table_id, const std::vector<size_t>& ids, TableFilesSchema& table_files) override;
+    GetTableFiles(const std::string& collection_id, const std::vector<size_t>& ids,
+                  SegmentsSchema& table_files) override;
 
     Status
-    GetTableFilesBySegmentId(const std::string& segment_id, TableFilesSchema& table_files) override;
+    GetTableFilesBySegmentId(const std::string& segment_id, SegmentsSchema& table_files) override;
 
     Status
-    UpdateTableIndex(const std::string& table_id, const TableIndex& index) override;
+    UpdateTableIndex(const std::string& collection_id, const TableIndex& index) override;
 
     Status
-    UpdateTableFlag(const std::string& table_id, int64_t flag) override;
+    UpdateTableFlag(const std::string& collection_id, int64_t flag) override;
 
     Status
-    UpdateTableFlushLSN(const std::string& table_id, uint64_t flush_lsn) override;
+    UpdateTableFlushLSN(const std::string& collection_id, uint64_t flush_lsn) override;
 
     Status
-    GetTableFlushLSN(const std::string& table_id, uint64_t& flush_lsn) override;
+    GetTableFlushLSN(const std::string& collection_id, uint64_t& flush_lsn) override;
 
     Status
-    GetTableFilesByFlushLSN(uint64_t flush_lsn, TableFilesSchema& table_files) override;
+    GetTableFilesByFlushLSN(uint64_t flush_lsn, SegmentsSchema& table_files) override;
 
     Status
-    UpdateTableFile(TableFileSchema& file_schema) override;
+    UpdateTableFile(SegmentSchema& file_schema) override;
 
     Status
-    UpdateTableFilesToIndex(const std::string& table_id) override;
+    UpdateTableFilesToIndex(const std::string& collection_id) override;
 
     Status
-    UpdateTableFiles(TableFilesSchema& files) override;
+    UpdateTableFiles(SegmentsSchema& files) override;
 
     Status
-    UpdateTableFilesRowCount(TableFilesSchema& files) override;
+    UpdateTableFilesRowCount(SegmentsSchema& files) override;
 
     Status
-    DescribeTableIndex(const std::string& table_id, TableIndex& index) override;
+    DescribeTableIndex(const std::string& collection_id, TableIndex& index) override;
 
     Status
-    DropTableIndex(const std::string& table_id) override;
+    DropTableIndex(const std::string& collection_id) override;
 
     Status
-    CreatePartition(const std::string& table_id, const std::string& partition_name, const std::string& tag,
+    CreatePartition(const std::string& collection_id, const std::string& partition_name, const std::string& tag,
                     uint64_t lsn) override;
 
     Status
     DropPartition(const std::string& partition_name) override;
 
     Status
-    ShowPartitions(const std::string& table_id, std::vector<meta::TableSchema>& partition_schema_array) override;
+    ShowPartitions(const std::string& collection_id,
+                   std::vector<meta::CollectionSchema>& partition_schema_array) override;
 
     Status
-    GetPartitionName(const std::string& table_id, const std::string& tag, std::string& partition_name) override;
+    GetPartitionName(const std::string& collection_id, const std::string& tag, std::string& partition_name) override;
 
     Status
-    FilesToSearch(const std::string& table_id, TableFilesSchema& files) override;
+    FilesToSearch(const std::string& collection_id, SegmentsSchema& files) override;
 
     Status
-    FilesToMerge(const std::string& table_id, TableFilesSchema& files) override;
+    FilesToMerge(const std::string& collection_id, SegmentsSchema& files) override;
 
     Status
-    FilesToIndex(TableFilesSchema&) override;
+    FilesToIndex(SegmentsSchema&) override;
 
     Status
-    FilesByType(const std::string& table_id, const std::vector<int>& file_types, TableFilesSchema& files) override;
+    FilesByType(const std::string& collection_id, const std::vector<int>& file_types, SegmentsSchema& files) override;
 
     Status
-    FilesByID(const std::vector<size_t>& ids, TableFilesSchema& table_files) override;
+    FilesByID(const std::vector<size_t>& ids, SegmentsSchema& table_files) override;
 
     Status
     Archive() override;
@@ -135,7 +137,7 @@ class MySQLMetaImpl : public Meta {
     DropAll() override;
 
     Status
-    Count(const std::string& table_id, uint64_t& result) override;
+    Count(const std::string& collection_id, uint64_t& result) override;
 
     Status
     SetGlobalLastLSN(uint64_t lsn) override;
@@ -147,7 +149,7 @@ class MySQLMetaImpl : public Meta {
     Status
     NextFileId(std::string& file_id);
     Status
-    NextTableId(std::string& table_id);
+    NextTableId(std::string& collection_id);
     Status
     DiscardFiles(int64_t to_discard_size);
 
