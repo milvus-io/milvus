@@ -15,9 +15,13 @@
 
 ## What is Milvus
 
-As an open source vector similarity search engine, Milvus is easy-to-use, highly reliable, scalable, robust, and blazing fast. Adopted by over 100 organizations and institutions worldwide, Milvus empowers applications in a variety of fields, including image processing, computer vision, natural language processing, voice recognition, recommender systems, drug discovery, etc. For more detailed introduction of Milvus and its architecture, see [Milvus overview](https://www.milvus.io/docs/about_milvus/overview.md).
+As an open source vector similarity search engine, Milvus is easy-to-use, highly reliable, scalable, robust, and blazing fast. Adopted by over 100 organizations and institutions worldwide, Milvus empowers applications in a variety of fields, including image processing, computer vision, natural language processing, voice recognition, recommender systems, drug discovery, etc. 
 
-Keep up-to-date with newest releases and latest updates by reading Milvus [release notes](https://www.milvus.io/docs/releases/release_notes.md).
+Milvus has the following architecture:
+
+![arch](https://github.com/milvus-io/docs/blob/v0.7.1/assets/milvus_arch.png)
+
+For more detailed introduction of Milvus and its architecture, see [Milvus overview](https://www.milvus.io/docs/about_milvus/overview.md). Keep up-to-date with newest releases and latest updates by reading Milvus [release notes](https://www.milvus.io/docs/releases/release_notes.md).
 
 ## Get started
 
@@ -27,32 +31,6 @@ To edit Milvus settings, read [Milvus configuration](https://www.milvus.io/docs/
 
 Try running a program with Milvus using [Python](https://www.milvus.io/docs/guides/get_started/example_code.md), [Java](https://github.com/milvus-io/milvus-sdk-java/tree/master/examples), [Go](https://github.com/milvus-io/milvus-sdk-go/tree/master/examples), or [C++ example code](https://github.com/milvus-io/milvus/tree/master/sdk/examples).
 
-## Application scenarios
-
-Milvus can be used to build intelligent systems in most AI application scenarios:
-
-- Image search
-
-  Query by image content，including content-based image retrieval such as bio-identification, object detection and recognition, etc.
-
-- Video processing
-
-  Real-time object detection and tracing.
-
-- Natural language analysis
-
-  Semantics-based text analysis and suggestion, and text similarity search.
-
-- Voiceprint recognition and audio search
-
-- Remove duplicated files by file fingerprint
-
-To explore more Milvus solutions and application scenarios, see our [bootcamp](https://github.com/milvus-io/bootcamp) repository.
-
-## Benchmark
-
-See our [test reports](https://github.com/milvus-io/milvus/tree/master/docs) for more information about performance benchmarking of different indexes in Milvus.
-
 ## Supported clients
 
 -   [Go](https://github.com/milvus-io/milvus-sdk-go)
@@ -61,6 +39,30 @@ See our [test reports](https://github.com/milvus-io/milvus/tree/master/docs) for
 -   [C++](https://github.com/milvus-io/milvus/tree/master/sdk)
 -   [RESTful API](https://github.com/milvus-io/milvus/tree/master/core/src/server/web_impl)
 -   [Node.js](https://www.npmjs.com/package/@arkie-ai/milvus-client) (Provided by [arkie](https://www.arkie.cn/))
+
+## Application scenarios
+
+Milvus can be used to build intelligent systems in most AI application scenarios. Refer to [Milvus Scenarios](https://milvus.io/scenarios) for live demos.
+
+### Computer vision
+
+![cv](https://milvus.io/static/cv-159967bf4d72f481b7982de63fc4ae73.png)
+
+### Natural language processing
+
+![nlp](https://milvus.io/static/nlp-58674a4e40fa44a8512a8d48b26a2522.png)
+
+### Traditional vector calculations
+
+![tvc](https://milvus.io/static/molsearch-67e29b54f64ef90aa163046324bb7b0d.png)
+
+### Audio data processing
+
+![adp](https://milvus.io/static/audio-0c156653b3e3a7d2fd5af8e3021af304.png)
+
+## Benchmark
+
+See our [test reports](https://github.com/milvus-io/milvus/tree/master/docs) for more information about performance benchmarking of different indexes in Milvus.
 
 ## Roadmap
 
