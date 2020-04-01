@@ -37,10 +37,9 @@ class MemManager {
                    const IDNumber* vector_ids,
                    int64_t dim,
                    const float* vectors,
-                   const std::vector<uint64_t>& attr_nbytes,
-                   const std::vector<uint64_t>& attr_size,
-                   const std::vector<void*>& attr_data,
-                   const std::vector<std::string>& field_name,
+                   const std::unordered_map<std::string, uint64_t>& attr_nbytes,
+                   const std::unordered_map<std::string, uint64_t>& attr_size,
+                   const std::unordered_map<std::string, std::vector<uint8_t>>& attr_data,
                    uint64_t lsn,
                    std::set<std::string>& flushed_tables) = 0;
 

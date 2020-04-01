@@ -140,8 +140,8 @@ class DBImpl : public DB, public server::CacheConfigHandler {
     Status
     InsertEntities(const std::string& collection_name,
                    const std::string& partition_tag,
-                   engine::Entities& entities,
-                   std::vector<meta::hybrid::DataType>& field_types) override;
+                   engine::Entity& entity,
+                   std::unordered_map<std::string, meta::hybrid::DataType>& field_types) override;
 
     Status
     HybridQuery(const std::shared_ptr<server::Context>& context,

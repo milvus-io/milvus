@@ -27,14 +27,14 @@
 namespace milvus {
 namespace segment {
 
-Attr::Attr(void* data, size_t nbytes, std::vector<int64_t> uids, const std::string& name)
+Attr::Attr(const std::vector<uint8_t>& data, size_t nbytes, std::vector<int64_t> uids, const std::string& name)
     : data_(data), nbytes_(nbytes), uids_(uids), name_(name) {
 
 }
 
 void
 Attr::AddAttr(const void* data, size_t nbytes) {
-    memcpy((void *)(static_cast<char *>(data_) + nbytes_), data, nbytes);
+//    memcpy((void *)(static_cast<char *>(data_) + nbytes_), data, nbytes);
     nbytes_ += nbytes;
 }
 
@@ -49,7 +49,7 @@ Attr::SetName(const std::string& name) {
     name_ = name;
 }
 
-const void*
+const std::vector<uint8_t>&
 Attr::GetData() const {
     return data_;
 }

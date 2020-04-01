@@ -51,17 +51,18 @@ SegmentWriter::AddVectors(const std::string& name, const std::vector<uint8_t>& d
 
 Status
 SegmentWriter::AddAttrs(const std::string& name,
-                        const std::vector<std::string>& field_name,
-                        const std::vector<void*> data,
-                        const std::vector<size_t> nbytes,
-                        const std::vector<int64_t>& uids) {
-    for (uint64_t i = 0; i < data.size(); ++i) {
-        AttrPtr attr = std::make_shared<Attr>(data[i], nbytes[i], uids, field_name[i]);
-        segment_ptr_->attrs_ptr_->attrs.insert(std::make_pair(field_name[i], attr));
-//        segment_ptr_->attr_ptr_->AddAttr(data[i], nbytes[i]);
-//        segment_ptr_->attr_ptr_->SetName(field_name[i]);
+                        const std::unordered_map<std::string, uint64_t>& attr_nbytes,
+                        const std::unordered_map<std::string, std::vector<uint8_t>>& attr_data) {
+    auto attr_data_it = attr_data.begin();
+    for (; attr_data_it != attr_data.end(); ++attr_data_it) {
+        std::vector<int64_t> uids;
+
+        AttrPtr attr = std::make_shared<Attr>(attr_data_it->second,
+                                              attr_nbytes.at(attr_data_it->first),
+                                              uids,
+                                              attr_data_it->first);
+        segment_ptr_->attrs_ptr_->attrs.insert(std::make_pair(attr_data_it->first, attr));
     }
-//    segment_ptr_->attr_ptr_->AddUids(uids);
 
     return Status::OK();
 }

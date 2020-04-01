@@ -31,30 +31,26 @@ namespace server {
 InsertEntityRequest::InsertEntityRequest(const std::shared_ptr<Context>& context,
                                          const std::string& collection_name,
                                          const std::string& partition_tag,
-                                         std::vector<std::string>& field_name_array,
-                                         std::vector<std::vector<std::string>>& field_values,
-                                         std::vector<engine::VectorsData>& vector_data)
+                                         std::unordered_map<std::string, std::vector<std::string>>& field_values,
+                                         std::unordered_map<std::string, engine::VectorsData>& vector_datas)
     : BaseRequest(context, DDL_DML_REQUEST_GROUP),
       collection_name_(collection_name),
       partition_tag_(partition_tag),
-      field_name_array_(field_name_array),
       field_values_(field_values),
-      vector_data_(vector_data){
+      vector_datas_(vector_datas){
 }
 
 BaseRequestPtr
 InsertEntityRequest::Create(const std::shared_ptr<Context>& context,
                             const std::string& collection_name,
                             const std::string& partition_tag,
-                            std::vector<std::string>& field_name_array,
-                            std::vector<std::vector<std::string>>& field_values,
-                            std::vector<engine::VectorsData>& vector_data) {
+                            std::unordered_map<std::string, std::vector<std::string>>& field_values,
+                            std::unordered_map<std::string, engine::VectorsData>& vector_datas) {
     return std::shared_ptr<BaseRequest>(new InsertEntityRequest(context,
                                                                 collection_name,
                                                                 partition_tag,
-                                                                field_name_array,
                                                                 field_values,
-                                                                vector_data));
+                                                                vector_datas));
 }
 
 Status
@@ -62,7 +58,7 @@ InsertEntityRequest::OnExecute() {
     try {
         fiu_do_on("InsertEntityRequest.OnExecute.throw_std_exception", throw std::exception());
         std::string
-            hdr = "InsertEntityRequest(table=" + collection_name_ + ", n=" + std::to_string(field_values_[0].size()) +
+            hdr = "InsertEntityRequest(table=" + collection_name_ + ", n=" + field_values_.begin()->first +
                   ", partition_tag=" + partition_tag_ + ")";
         TimeRecorder rc(hdr);
 
@@ -71,11 +67,12 @@ InsertEntityRequest::OnExecute() {
         if (!status.ok()) {
             return status;
         }
-        if (vector_data_[0].float_data_.empty() && vector_data_[0].binary_data_.empty()) {
-            return Status(SERVER_INVALID_ROWRECORD_ARRAY,
-                          "The vector array is empty. Make sure you have entered vector records.");
-        }
 
+        auto vector_datas_it = vector_datas_.begin();
+        if (vector_datas_it->second.float_data_.empty() && vector_datas_it->second.binary_data_.empty()) {
+            return Status(SERVER_INVALID_ROWRECORD_ARRAY,
+                          "The vector array is emp ty. Make sure you have entered vector records.");
+        }
 
         // step 2: check table existence
         // only process root table, ignore partition table
@@ -95,16 +92,19 @@ InsertEntityRequest::OnExecute() {
             }
         }
 
-        std::vector<engine::meta::hybrid::DataType> field_types;
+        std::unordered_map<std::string, engine::meta::hybrid::DataType> field_types;
         auto size = fields_schema.fields_schema_.size();
-        field_types.resize(size);
         for (uint64_t i = 0; i < size; ++i) {
-            field_types[i] = (engine::meta::hybrid::DataType)fields_schema.fields_schema_[i].field_type_;
+            if (fields_schema.fields_schema_[i].field_type_ == (int32_t)engine::meta::hybrid::DataType::VECTOR) {
+                continue;
+            }
+            field_types.insert(std::make_pair(fields_schema.fields_schema_[i].field_name_,
+                                              (engine::meta::hybrid::DataType)fields_schema.fields_schema_[i].field_type_));
         }
 
         // step 3: check table flag
         // all user provide id, or all internal id
-        bool user_provide_ids = !vector_data_[0].id_array_.empty();
+        bool user_provide_ids = !vector_datas_it->second.id_array_.empty();
         fiu_do_on("InsertEntityRequest.OnExecute.illegal_vector_id", user_provide_ids = false;
             table_schema.flag_ = engine::meta::FLAG_MASK_HAS_USERID);
         // user already provided id before, all insert action require user id
@@ -158,33 +158,21 @@ InsertEntityRequest::OnExecute() {
 //        }
 
         // step 5: insert entities
-        auto vec_count = static_cast<uint64_t>(vector_data_[0].vector_count_);
+        auto vec_count = static_cast<uint64_t>(vector_datas_it->second.vector_count_);
 
-        engine::Entities entities;
-        entities.entity_count_ = vector_data_[0].vector_count_;
-        size = field_values_.size();
-        entities.entity_field_name_.resize(size);
-        entities.entity_data_.resize(size);
-        uint64_t i;
-        for (i = 0; i < size; ++i) {
-            entities.entity_field_name_[i] = field_name_array_[i];
-            engine::Entity entity;
-            entity.field_value_ = field_values_[i];
-            entities.entity_data_[i] = entity;
-        }
-        entities.vector_field_name_.resize(1);
-        entities.vector_data_.resize(1);
-        entities.vector_field_name_[0] = field_name_array_[i];
-        entities.vector_data_[0] = vector_data_[0];
+        engine::Entity entity;
+        entity.entity_count_ = vector_datas_it->second.vector_count_;
+
+        entity.attr_data_ = field_values_;
+        entity.vector_data_.insert(std::make_pair(vector_datas_it->first, vector_datas_it->second));
 
         rc.RecordSection("prepare vectors data");
-        status = DBWrapper::DB()->InsertEntities(collection_name_, partition_tag_, entities, field_types);
+        status = DBWrapper::DB()->InsertEntities(collection_name_, partition_tag_, entity, field_types);
         fiu_do_on("InsertRequest.OnExecute.insert_fail", status = Status(milvus::SERVER_UNEXPECTED_ERROR, ""));
         if (!status.ok()) {
             return status;
         }
-        vector_data_[0].id_array_ = entities.id_array_;
-
+        vector_datas_it->second.id_array_ = entity.id_array_;
 
 //        auto ids_size = vectors_data_.id_array_.size();
 //        fiu_do_on("InsertRequest.OnExecute.invalid_ids_size", ids_size = vec_count - 1);

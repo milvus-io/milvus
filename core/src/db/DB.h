@@ -152,8 +152,8 @@ class DB {
     virtual Status
     InsertEntities(const std::string& collection_id,
                    const std::string& partition_tag,
-                   Entities& entities,
-                   std::vector<meta::hybrid::DataType>& field_types) = 0;
+                   Entity& entity,
+                   std::unordered_map<std::string, meta::hybrid::DataType>& field_types) = 0;
 
     virtual Status
     HybridQuery(const std::shared_ptr<server::Context>& context,

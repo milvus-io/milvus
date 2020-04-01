@@ -90,7 +90,7 @@ MemTableFile::Add(const VectorSourcePtr& source) {
 }
 
 Status
-MemTableFile::AddEntities(const milvus::engine::VectorSourcePtr& source) {
+MemTableFile::AddEntities(const VectorSourcePtr& source) {
     if (table_file_schema_.dimension_ <= 0) {
         std::string err_msg =
             "MemTableFile::Add: table_file_schema dimension = " + std::to_string(table_file_schema_.dimension_) +

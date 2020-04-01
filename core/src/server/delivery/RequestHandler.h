@@ -126,9 +126,8 @@ class RequestHandler {
     InsertEntity(const std::shared_ptr<Context>& context,
                  const std::string& collection_name,
                  const std::string& partition_tag,
-                 std::vector<std::string>& field_name_array,
-                 std::vector<std::vector<std::string>>& field_values,
-                 std::vector<engine::VectorsData>& vector_data);
+                 std::unordered_map<std::string, std::vector<std::string>>& field_values,
+                 std::unordered_map<std::string, engine::VectorsData>& vector_datas);
 
     Status
     HybridSearch(const std::shared_ptr<Context>& context,

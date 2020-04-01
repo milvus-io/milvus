@@ -48,15 +48,9 @@ struct VectorsData {
 };
 
 struct Entity {
-    std::vector<std::string> field_value_;
-};
-
-struct Entities {
     uint64_t entity_count_ = 0;
-    std::vector<std::string> entity_field_name_;
-    std::vector<Entity> entity_data_;
-    std::vector<std::string> vector_field_name_;
-    std::vector<VectorsData> vector_data_;
+    std::unordered_map<std::string, std::vector<std::string>> attr_data_;
+    std::unordered_map<std::string, VectorsData> vector_data_;
     IDNumbers id_array_;
 };
 

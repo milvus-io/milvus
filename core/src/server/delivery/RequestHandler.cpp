@@ -274,16 +274,14 @@ Status
 RequestHandler::InsertEntity(const std::shared_ptr<Context>& context,
                              const std::string& collection_name,
                              const std::string& partition_tag,
-                             std::vector<std::string>& field_name_array,
-                             std::vector<std::vector<std::string>>& field_values,
-                             std::vector<engine::VectorsData>& vector_data) {
+                             std::unordered_map<std::string, std::vector<std::string>>& field_values,
+                             std::unordered_map<std::string, engine::VectorsData>& vector_datas) {
     BaseRequestPtr request_ptr =
         InsertEntityRequest::Create(context,
                                     collection_name,
                                     partition_tag,
-                                    field_name_array,
                                     field_values,
-                                    vector_data);
+                                    vector_datas);
 
     RequestScheduler::ExecRequest(request_ptr);
     return request_ptr->status();

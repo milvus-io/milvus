@@ -89,10 +89,9 @@ MemManagerImpl::InsertEntities(const std::string& table_id,
                                const IDNumber* vector_ids,
                                int64_t dim,
                                const float* vectors,
-                               const std::vector<uint64_t>& attr_nbytes,
-                               const std::vector<uint64_t>& attr_size,
-                               const std::vector<void*>& attr_data,
-                               const std::vector<std::string>& field_name,
+                               const std::unordered_map<std::string, uint64_t>& attr_nbytes,
+                               const std::unordered_map<std::string, uint64_t>& attr_size,
+                               const std::unordered_map<std::string, std::vector<uint8_t>>& attr_data,
                                uint64_t lsn,
                                std::set<std::string>& flushed_tables) {
     flushed_tables.clear();
@@ -110,7 +109,8 @@ MemManagerImpl::InsertEntities(const std::string& table_id,
     memcpy(vectors_data.float_data_.data(), vectors, length * dim * sizeof(float));
     vectors_data.id_array_.resize(length);
     memcpy(vectors_data.id_array_.data(), vector_ids, length * sizeof(IDNumber));
-    VectorSourcePtr source = std::make_shared<VectorSource>(vectors_data, attr_nbytes, attr_size, attr_data, field_name);
+
+    VectorSourcePtr source = std::make_shared<VectorSource>(vectors_data, attr_nbytes, attr_size, attr_data);
 
     std::unique_lock<std::mutex> lock(mutex_);
 

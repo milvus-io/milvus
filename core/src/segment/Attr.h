@@ -24,7 +24,7 @@ namespace segment {
 
 class Attr {
  public:
-    Attr(void* data, size_t nbytes, std::vector<int64_t> uids, const std::string& name);
+    Attr(const std::vector<uint8_t>& data, size_t nbytes, std::vector<int64_t> uids, const std::string& name);
 
     Attr();
 
@@ -37,7 +37,7 @@ class Attr {
     void
     SetName(const std::string& name);
 
-    const void*
+    const std::vector<uint8_t>&
     GetData() const;
 
     const std::string&
@@ -68,7 +68,7 @@ class Attr {
     operator=(Attr&&) = delete;
 
  private:
-    void* data_;
+    const std::vector<uint8_t> data_;
     size_t nbytes_;
     std::vector<int64_t> uids_;
     std::string name_;

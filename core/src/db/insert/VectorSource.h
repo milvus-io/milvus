@@ -29,10 +29,9 @@ class VectorSource {
     explicit VectorSource(VectorsData vectors);
 
     VectorSource(VectorsData vectors,
-                 std::vector<uint64_t> attr_nbytes,
-                 std::vector<uint64_t> attr_size,
-                 std::vector<void*> attr_data,
-                 const std::vector<std::string>& field_name);
+                 const std::unordered_map<std::string, uint64_t>& attr_nbytes,
+                 const std::unordered_map<std::string, uint64_t>& attr_size,
+                 const std::unordered_map<std::string, std::vector<uint8_t>>& attr_data);
 
     Status
     Add(/*const ExecutionEnginePtr& execution_engine,*/ const segment::SegmentWriterPtr& segment_writer_ptr,
@@ -62,10 +61,9 @@ class VectorSource {
  private:
     VectorsData vectors_;
     IDNumbers vector_ids_;
-    std::vector<std::string> field_name_;
-    std::vector<uint64_t> attr_nbytes_;
-    std::vector<uint64_t> attr_size_;
-    std::vector<void*> attr_data_;
+    const std::unordered_map<std::string, uint64_t> attr_nbytes_;
+    const std::unordered_map<std::string, uint64_t> attr_size_;
+    const std::unordered_map<std::string, std::vector<uint8_t>> attr_data_;
 
     size_t current_num_vectors_added;
     size_t current_num_attrs_added;

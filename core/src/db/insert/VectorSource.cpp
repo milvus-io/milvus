@@ -27,15 +27,13 @@ VectorSource::VectorSource(VectorsData vectors) : vectors_(std::move(vectors)) {
 }
 
 VectorSource::VectorSource(milvus::engine::VectorsData vectors,
-                           std::vector<uint64_t> attr_nbytes,
-                           std::vector<uint64_t> attr_size,
-                           std::vector<void*> attr_data,
-                           const std::vector<std::string>& field_name)
+                           const std::unordered_map<std::string, uint64_t>& attr_nbytes,
+                           const std::unordered_map<std::string, uint64_t>& attr_size,
+                           const std::unordered_map<std::string, std::vector<uint8_t>>& attr_data)
     : vectors_(std::move(vectors)),
       attr_nbytes_(attr_nbytes),
       attr_size_(attr_size),
-      attr_data_(attr_data),
-      field_name_(field_name) {
+      attr_data_(attr_data) {
 
     current_num_vectors_added = 0;
     current_num_attrs_added = 0;
@@ -134,10 +132,8 @@ VectorSource::AddEntities(const milvus::segment::SegmentWriterPtr& segment_write
 
     Status status;
     status = segment_writer_ptr->AddAttrs(collection_file_schema.table_id_,
-                                          field_name_,
-                                          attr_data_,
                                           attr_size_,
-                                          vector_ids_to_add);
+                                          attr_data_);
 
     if (status.ok()) {
         current_num_attrs_added += num_entities_added;
@@ -187,8 +183,9 @@ VectorSource::SingleEntitySize(uint16_t dimension) {
     // TODO(yukun) add entity type and size compute
     size_t size = 0;
     size += dimension * FLOAT_TYPE_SIZE;
-    for (auto nbytes : attr_nbytes_) {
-        size += nbytes;
+    auto nbyte_it = attr_nbytes_.begin();
+    for (; nbyte_it != attr_nbytes_.end(); ++nbyte_it) {
+        size += nbyte_it->second;
     }
     return size;
 }

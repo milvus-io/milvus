@@ -351,5 +351,6 @@ ClientTest::TestHybrid() {
     CreateHybridCollection(collection_name);
     InsertHybridEntities(collection_name, 100);
     Flush(collection_name);
+//    SearchEntities(collection_name, )
     HybridSearch(collection_name);
 }

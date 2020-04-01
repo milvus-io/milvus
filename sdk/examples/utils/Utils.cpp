@@ -136,7 +136,7 @@ Utils::BuildEntities(int64_t from, int64_t to, std::vector<milvus::Entity>& enti
         milvus::Entity entity;
         entity.float_data.resize(dimension);
         for (int64_t i = 0; i < dimension; i++) {
-            entity.float_data[i] = (float)(k % (i + 1));
+            entity.float_data[i] = (float)((k + 100) % (i + 1));
         }
 
         entity_array.emplace_back(entity);
@@ -267,7 +267,7 @@ Utils::GenLeafQuery() {
     milvus::CompareExpr ce1 = {milvus::CompareOperator::LTE, "20"}, ce2 = {milvus::CompareOperator::GTE, "10"};
     std::vector<milvus::CompareExpr> ces{ce1, ce2};
     milvus::RangeQueryPtr rq = std::make_shared<milvus::RangeQuery>();
-    rq->field_name = "field_1";
+    rq->field_name = "field_2";
     rq->compare_expr = ces;
 
     //Construct VectorQuery

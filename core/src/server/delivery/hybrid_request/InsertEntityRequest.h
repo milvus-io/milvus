@@ -26,17 +26,15 @@ class InsertEntityRequest : public BaseRequest {
     Create(const std::shared_ptr<Context>& context,
            const std::string& collection_name,
            const std::string& partition_tag,
-           std::vector<std::string>& field_name_array,
-           std::vector<std::vector<std::string>>& field_values,
-           std::vector<engine::VectorsData>& vector_data);
+           std::unordered_map<std::string, std::vector<std::string>>& field_values,
+           std::unordered_map<std::string, engine::VectorsData>& vector_datas);
 
  protected:
     InsertEntityRequest(const std::shared_ptr<Context>& context,
                         const std::string& collection_name,
                         const std::string& partition_tag,
-                        std::vector<std::string>& field_name_array,
-                        std::vector<std::vector<std::string>>& field_values,
-                        std::vector<engine::VectorsData>& vector_data);
+                        std::unordered_map<std::string, std::vector<std::string>>& field_values,
+                        std::unordered_map<std::string, engine::VectorsData>& vector_datas);
 
     Status
     OnExecute() override;
@@ -44,9 +42,8 @@ class InsertEntityRequest : public BaseRequest {
  private:
     const std::string collection_name_;
     const std::string partition_tag_;
-    std::vector<std::string> field_name_array_;
-    std::vector<std::vector<std::string>> field_values_;
-    std::vector<engine::VectorsData>& vector_data_;
+    std::unordered_map<std::string, std::vector<std::string>> field_values_;
+    std::unordered_map<std::string, engine::VectorsData>& vector_datas_;
 };
 
 }  // namespace server

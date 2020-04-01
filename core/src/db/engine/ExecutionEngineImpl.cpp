@@ -461,11 +461,11 @@ ExecutionEngineImpl::Load(bool to_cache) {
 
             faiss::ConcurrentBitsetPtr concurrent_bitset_ptr =
                 std::make_shared<faiss::ConcurrentBitset>(vectors->GetCount());
-//            for (auto& offset : deleted_docs) {
-//                if (!concurrent_bitset_ptr->test(offset)) {
-//                    concurrent_bitset_ptr->set(offset);
-//                }
-//            }
+            for (auto& offset : deleted_docs) {
+                if (!concurrent_bitset_ptr->test(offset)) {
+                    concurrent_bitset_ptr->set(offset);
+                }
+            }
 
             ErrorCode ec = KNOWHERE_UNEXPECTED_ERROR;
             if (index_type_ == EngineType::FAISS_IDMAP) {
@@ -805,14 +805,9 @@ ProcessRangeQuery(std::vector<T> data, T value, query::CompareOperator type, uin
     switch (type) {
         case query::CompareOperator::LT: {
             for (uint64_t i = 0; i < data.size(); ++i) {
-                if (j == 0) {
-                    if (data[i] < value) {
+                if (data[i] >= value) {
+                    if (!bitset->test(i)) {
                         bitset->set(i);
-                    }
-                } else {
-                    if (data[i] >= value) {
-                        // set bitset 0
-                        bitset->clear(i);
                     }
                 }
             }
@@ -820,13 +815,9 @@ ProcessRangeQuery(std::vector<T> data, T value, query::CompareOperator type, uin
         }
         case query::CompareOperator::LTE: {
             for (uint64_t i = 0; i < data.size(); ++i) {
-                if (j == 0) {
-                    if (data[i] <= value) {
+                if (data[i] > value) {
+                    if (!bitset->test(i)) {
                         bitset->set(i);
-                    }
-                } else {
-                    if (data[i] > value) {
-                        bitset->clear(i);
                     }
                 }
             }
@@ -834,13 +825,9 @@ ProcessRangeQuery(std::vector<T> data, T value, query::CompareOperator type, uin
         }
         case query::CompareOperator::GT: {
             for (uint64_t i = 0; i < data.size(); ++i) {
-                if (j == 0) {
-                    if (data[i] > value) {
+                if (data[i] <= value) {
+                    if (!bitset->test(i)) {
                         bitset->set(i);
-                    }
-                } else {
-                    if (data[i] <= value) {
-                        bitset->clear(i);
                     }
                 }
             }
@@ -848,13 +835,9 @@ ProcessRangeQuery(std::vector<T> data, T value, query::CompareOperator type, uin
         }
         case  query::CompareOperator::GTE: {
             for (uint64_t i = 0; i < data.size(); ++i) {
-                if (j == 0) {
-                    if (data[i] >= value) {
+                if (data[i] < value) {
+                    if (!bitset->test(i)) {
                         bitset->set(i);
-                    }
-                } else {
-                    if (data[i] < value) {
-                        bitset->clear(i);
                     }
                 }
             }
@@ -862,26 +845,18 @@ ProcessRangeQuery(std::vector<T> data, T value, query::CompareOperator type, uin
         }
         case query::CompareOperator::EQ: {
             for (uint64_t i = 0; i < data.size(); ++i) {
-                if (j == 0) {
-                    if (data[i] == value) {
+                if (data[i] != value) {
+                    if (!bitset->test(i)) {
                         bitset->set(i);
-                    }
-                } else {
-                    if (data[i] != value) {
-                        bitset->clear(i);
                     }
                 }
             }
         }
         case query::CompareOperator::NE: {
             for (uint64_t i = 0; i < data.size(); ++i) {
-                if (j == 0) {
-                    if (data[i] != value) {
+                if (data[i] == value) {
+                    if (!bitset->test(i)) {
                         bitset->set(i);
-                    }
-                } else {
-                    if (data[i] == value) {
-                        bitset->clear(i);
                     }
                 }
             }
@@ -919,13 +894,15 @@ ExecutionEngineImpl::ExecBinaryQuery(milvus::query::GeneralQueryPtr general_quer
             switch (type) {
                 case DataType::INT8: {
                     std::vector<int8_t> data;
-                    data.resize(size);
-                    memcpy(data.data(), attr_data_.at(field_name), size);
+                    data.resize(size / sizeof(int8_t));
+                    memcpy(data.data(), attr_data_.at(field_name).data(), size);
                     for (auto term_value : general_query->leaf->term_query->field_value) {
                         int8_t query_value = atoi(term_value.c_str());
                         for (uint64_t i = 0; i < data.size(); ++i) {
-                            if (data[i] == query_value) {
-                                bitset->set(i);
+                            if (data[i] != query_value) {
+                                if (!bitset->test(i)) {
+                                    bitset->set(i);
+                                }
                             }
                         }
                     }
@@ -933,13 +910,15 @@ ExecutionEngineImpl::ExecBinaryQuery(milvus::query::GeneralQueryPtr general_quer
                 }
                 case DataType::INT16: {
                     std::vector<int16_t> data;
-                    data.resize(size);
-                    memcpy(data.data(), attr_data_.at(field_name), size / sizeof(int16_t));
+                    data.resize(size / sizeof(int16_t));
+                    memcpy(data.data(), attr_data_.at(field_name).data(), size);
                     for (auto term_value : general_query->leaf->term_query->field_value) {
                         int16_t query_value = atoi(term_value.c_str());
                         for (uint64_t i = 0; i < data.size(); ++i) {
-                            if (data[i] == query_value) {
-                                bitset->set(i);
+                            if (data[i] != query_value) {
+                                if (!bitset->test(i)) {
+                                    bitset->set(i);
+                                }
                             }
                         }
                     }
@@ -947,13 +926,15 @@ ExecutionEngineImpl::ExecBinaryQuery(milvus::query::GeneralQueryPtr general_quer
                 }
                 case DataType::INT32: {
                     std::vector<int32_t> data;
-                    data.resize(size);
-                    memcpy(data.data(), attr_data_.at(field_name), size / sizeof(int32_t));
+                    data.resize(size / sizeof(int32_t));
+                    memcpy(data.data(), attr_data_.at(field_name).data(), size);
                     for (auto term_value : general_query->leaf->term_query->field_value) {
                         int32_t query_value = atoi(term_value.c_str());
                         for (uint64_t i = 0; i < data.size(); ++i) {
-                            if (data[i] == query_value) {
-                                bitset->set(i);
+                            if (data[i] != query_value) {
+                                if (!bitset->test(i)) {
+                                    bitset->set(i);
+                                }
                             }
                         }
                     }
@@ -961,13 +942,15 @@ ExecutionEngineImpl::ExecBinaryQuery(milvus::query::GeneralQueryPtr general_quer
                 }
                 case DataType::INT64: {
                     std::vector<int64_t> data;
-                    data.resize(size);
-                    memcpy(data.data(), attr_data_.at(field_name), size / sizeof(int64_t));
+                    data.resize(size / sizeof(int64_t));
+                    memcpy(data.data(), attr_data_.at(field_name).data(), size);
                     for (auto term_value : general_query->leaf->term_query->field_value) {
                         int64_t query_value = atoi(term_value.c_str());
                         for (uint64_t i = 0; i < data.size(); ++i) {
-                            if (data[i] == query_value) {
-                                bitset->set(i);
+                            if (data[i] != query_value) {
+                                if (!bitset->test(i)) {
+                                    bitset->set(i);
+                                }
                             }
                         }
                     }
@@ -975,15 +958,17 @@ ExecutionEngineImpl::ExecBinaryQuery(milvus::query::GeneralQueryPtr general_quer
                 }
                 case DataType::FLOAT: {
                     std::vector<float> data;
-                    data.resize(size);
-                    memcpy(data.data(), attr_data_.at(field_name), size / sizeof(float));
+                    data.resize(size / sizeof(float));
+                    memcpy(data.data(), attr_data_.at(field_name).data(), size);
                     for (auto term_value : general_query->leaf->term_query->field_value) {
                         std::istringstream iss(term_value);
                         float query_value;
                         iss >> query_value;
                         for (uint64_t i = 0; i < data.size(); ++i) {
-                            if (data[i] == query_value) {
-                                bitset->set(i);
+                            if (data[i] != query_value) {
+                                if (!bitset->test(i)) {
+                                    bitset->set(i);
+                                }
                             }
                         }
                     }
@@ -991,15 +976,17 @@ ExecutionEngineImpl::ExecBinaryQuery(milvus::query::GeneralQueryPtr general_quer
                 }
                 case DataType::DOUBLE: {
                     std::vector<double> data;
-                    data.resize(size);
-                    memcpy(data.data(), attr_data_.at(field_name), size / sizeof(double));
+                    data.resize(size / sizeof(double));
+                    memcpy(data.data(), attr_data_.at(field_name).data(), size);
                     for (auto term_value : general_query->leaf->term_query->field_value) {
                         std::istringstream iss(term_value);
                         double query_value;
                         iss >> query_value;
                         for (uint64_t i = 0; i < data.size(); ++i) {
-                            if (data[i] == query_value) {
-                                bitset->set(i);
+                            if (data[i] != query_value) {
+                                if (!bitset->test(i)) {
+                                    bitset->set(i);
+                                }
                             }
                         }
                     }
@@ -1018,40 +1005,40 @@ ExecutionEngineImpl::ExecBinaryQuery(milvus::query::GeneralQueryPtr general_quer
                 switch (type) {
                     case DataType::INT8: {
                         std::vector<int8_t> data;
-                        data.resize(size);
-                        memcpy(data.data(), attr_data_.at(field_name), size);
+                        data.resize(size / sizeof(int8_t));
+                        memcpy(data.data(), attr_data_.at(field_name).data(), size);
                         int8_t value = atoi(operand.c_str());
                         ProcessRangeQuery<int8_t>(data, value, com_expr[j].compare_operator, j, bitset);
                         break;
                     }
                     case DataType::INT16: {
                         std::vector<int16_t> data;
-                        data.resize(size);
-                        memcpy(data.data(), attr_data_.at(field_name), size / sizeof(int16_t));
+                        data.resize(size / sizeof(int16_t));
+                        memcpy(data.data(), attr_data_.at(field_name).data(), size);
                         int16_t value = atoi(operand.c_str());
                         ProcessRangeQuery<int16_t>(data, value, com_expr[j].compare_operator, j, bitset);
                         break;
                     }
                     case DataType::INT32: {
                         std::vector<int32_t> data;
-                        data.resize(size);
-                        memcpy(data.data(), attr_data_.at(field_name), size / sizeof(int32_t));
+                        data.resize(size / sizeof(int32_t));
+                        memcpy(data.data(), attr_data_.at(field_name).data(), size);
                         int32_t value = atoi(operand.c_str());
                         ProcessRangeQuery<int32_t>(data, value, com_expr[j].compare_operator, j, bitset);
                         break;
                     }
                     case DataType::INT64: {
                         std::vector<int64_t> data;
-                        data.resize(size);
-                        memcpy(data.data(), attr_data_.at(field_name), size / sizeof(int64_t));
+                        data.resize(size / sizeof(int64_t));
+                        memcpy(data.data(), attr_data_.at(field_name).data(), size);
                         int64_t value = atoi(operand.c_str());
                         ProcessRangeQuery<int64_t>(data, value, com_expr[j].compare_operator, j, bitset);
                         break;
                     }
                     case DataType::FLOAT: {
                         std::vector<float> data;
-                        data.resize(size);
-                        memcpy(data.data(), attr_data_.at(field_name), size / sizeof(float));
+                        data.resize(size / sizeof(float));
+                        memcpy(data.data(), attr_data_.at(field_name).data(), size);
                         std::istringstream iss(operand);
                         double value;
                         iss >> value;
@@ -1060,8 +1047,8 @@ ExecutionEngineImpl::ExecBinaryQuery(milvus::query::GeneralQueryPtr general_quer
                     }
                     case DataType::DOUBLE: {
                         std::vector<double> data;
-                        data.resize(size);
-                        memcpy(data.data(), attr_data_.at(field_name), size / sizeof(double));
+                        data.resize(size / sizeof(double));
+                        memcpy(data.data(), attr_data_.at(field_name).data(), size);
                         std::istringstream iss(operand);
                         double value;
                         iss >> value;
@@ -1085,7 +1072,7 @@ ExecutionEngineImpl::ExecBinaryQuery(milvus::query::GeneralQueryPtr general_quer
             status = std::static_pointer_cast<BFIndex>(index_)->SetBlacklist(bitset);
             auto vector_query = general_query->leaf->vector_query;
             int64_t topk = vector_query->topk;
-            int64_t nq = vector_query->query_vector.float_data.size() / topk;
+            int64_t nq = vector_query->query_vector.float_data.size() / dim_;
 
             distances.resize(nq * topk);
             labels.resize(nq * topk);

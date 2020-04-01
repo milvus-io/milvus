@@ -37,10 +37,8 @@ class SegmentWriter {
 
     Status
     AddAttrs(const std::string& name,
-               const std::vector<std::string>& field_name,
-               const std::vector<void*> data,
-               const std::vector<size_t> nbytes,
-               const std::vector<int64_t>& uids);
+             const std::unordered_map<std::string, uint64_t>& attr_nbytes,
+             const std::unordered_map<std::string, std::vector<uint8_t>>& attr_data);
 
     Status
     WriteBloomFilter(const IdBloomFilterPtr& bloom_filter_ptr);
