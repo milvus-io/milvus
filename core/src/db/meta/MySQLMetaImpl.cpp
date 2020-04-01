@@ -1010,8 +1010,7 @@ MySQLMetaImpl::UpdateTableFlushLSN(const std::string& collection_id, uint64_t fl
 }
 
 Status
-<<<<<<< HEAD
-MySQLMetaImpl::GetTableFlushLSN(const std::string& table_id, uint64_t& flush_lsn) {
+MySQLMetaImpl::GetTableFlushLSN(const std::string& collection_id, uint64_t& flush_lsn) {
     try {
         server::MetricCollector metric;
 
@@ -1023,8 +1022,8 @@ MySQLMetaImpl::GetTableFlushLSN(const std::string& table_id, uint64_t& flush_lsn
             }
 
             mysqlpp::Query statement = connectionPtr->query();
-            statement << "SELECT flush_lsn FROM " << META_TABLES << " WHERE table_id = " << mysqlpp::quote << table_id
-                      << ";";
+            statement << "SELECT flush_lsn FROM " << META_TABLES << " WHERE collection_id = " << mysqlpp::quote
+                      << collection_id << ";";
 
             ENGINE_LOG_DEBUG << "MySQLMetaImpl::GetTableFlushLSN: " << statement.str();
 
@@ -1038,9 +1037,6 @@ MySQLMetaImpl::GetTableFlushLSN(const std::string& table_id, uint64_t& flush_lsn
         return HandleException("GENERAL ERROR WHEN GET TABLE FLUSH_LSN", e.what());
     }
 
-=======
-MySQLMetaImpl::GetTableFlushLSN(const std::string& collection_id, uint64_t& flush_lsn) {
->>>>>>> main/master
     return Status::OK();
 }
 
