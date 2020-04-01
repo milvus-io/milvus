@@ -22,7 +22,7 @@ SearchJob::SearchJob(const std::shared_ptr<server::Context>& context, uint64_t t
 }
 
 bool
-SearchJob::AddIndexFile(const TableFileSchemaPtr& index_file) {
+SearchJob::AddIndexFile(const SegmentSchemaPtr& index_file) {
     std::unique_lock<std::mutex> lock(mutex_);
     if (index_file == nullptr || index_files_.find(index_file->id_) != index_files_.end()) {
         return false;

@@ -196,7 +196,7 @@ TEST_F(ResourceMgrAdvanceTest, REGISTER_SUBSCRIBER) {
         flag = true;
     };
     mgr1_->RegisterSubscriber(callback);
-    TableFileSchemaPtr dummy = nullptr;
+    SegmentSchemaPtr dummy = nullptr;
     disk_res->task_table().Put(
         std::make_shared<TestTask>(std::make_shared<server::Context>("dummy_request_id"), dummy, nullptr));
     sleep(1);

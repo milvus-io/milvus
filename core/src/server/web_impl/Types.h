@@ -99,6 +99,8 @@ static const std::unordered_map<engine::MetricType, std::string> MetricMap = {
     {engine::MetricType::HAMMING, NAME_METRIC_TYPE_HAMMING},
     {engine::MetricType::JACCARD, NAME_METRIC_TYPE_JACCARD},
     {engine::MetricType::TANIMOTO, NAME_METRIC_TYPE_TANIMOTO},
+    {engine::MetricType::SUBSTRUCTURE, NAME_METRIC_TYPE_SUBSTRUCTURE},
+    {engine::MetricType::SUPERSTRUCTURE, NAME_METRIC_TYPE_SUPERSTRUCTURE},
 };
 
 static const std::unordered_map<std::string, engine::MetricType> MetricNameMap = {
@@ -107,6 +109,8 @@ static const std::unordered_map<std::string, engine::MetricType> MetricNameMap =
     {NAME_METRIC_TYPE_HAMMING, engine::MetricType::HAMMING},
     {NAME_METRIC_TYPE_JACCARD, engine::MetricType::JACCARD},
     {NAME_METRIC_TYPE_TANIMOTO, engine::MetricType::TANIMOTO},
+    {NAME_METRIC_TYPE_SUBSTRUCTURE, engine::MetricType::SUBSTRUCTURE},
+    {NAME_METRIC_TYPE_SUPERSTRUCTURE, engine::MetricType::SUPERSTRUCTURE},
 };
 
 }  // namespace web

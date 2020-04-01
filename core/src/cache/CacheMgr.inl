@@ -133,17 +133,5 @@ CacheMgr<ItemObj>::SetCapacity(int64_t capacity) {
     cache_->set_capacity(capacity);
 }
 
-template <typename ItemObj>
-void
-CacheMgr<ItemObj>::Lock() {
-    mutex_.lock();
-}
-
-template <typename ItemObj>
-void
-CacheMgr<ItemObj>::Unlock() {
-    mutex_.unlock();
-}
-
 }  // namespace cache
 }  // namespace milvus

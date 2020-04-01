@@ -25,14 +25,14 @@ class CreatePartitionRequest : public BaseRequest {
            const std::string& tag);
 
  protected:
-    CreatePartitionRequest(const std::shared_ptr<milvus::server::Context>& context, const std::string& table_name,
+    CreatePartitionRequest(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name,
                            const std::string& tag);
 
     Status
     OnExecute() override;
 
  private:
-    const std::string table_name_;
+    const std::string collection_name_;
     const std::string tag_;
 };
 

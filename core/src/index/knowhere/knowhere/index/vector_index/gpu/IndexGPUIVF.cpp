@@ -102,8 +102,7 @@ GPUIVF::SerializeImpl(const IndexType& type) {
             faiss::write_index(host_index, &writer);
             delete host_index;
         }
-        auto data = std::make_shared<uint8_t>();
-        data.reset(writer.data_);
+        std::shared_ptr<uint8_t[]> data(writer.data_);
 
         BinarySet res_set;
         res_set.Append("IVF", data, writer.rp);
@@ -146,7 +145,7 @@ GPUIVF::QueryImpl(int64_t n, const float* data, int64_t k, float* distances, int
     if (device_index) {
         device_index->nprobe = config[IndexParams::nprobe];
         ResScope rs(res_, gpu_id_);
-        device_index->search(n, (float*)data, k, distances, labels);
+        device_index->search(n, (float*)data, k, distances, labels, bitset_);
     } else {
         KNOWHERE_THROW_MSG("Not a GpuIndexIVF type.");
     }

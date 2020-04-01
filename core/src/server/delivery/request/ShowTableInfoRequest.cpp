@@ -44,47 +44,47 @@ ConstructPartitionStat(const engine::PartitionStat& partition_stat, PartitionSta
 }
 
 ShowTableInfoRequest::ShowTableInfoRequest(const std::shared_ptr<milvus::server::Context>& context,
-                                           const std::string& table_name, TableInfo& table_info)
-    : BaseRequest(context, BaseRequest::kShowTableInfo), table_name_(table_name), table_info_(table_info) {
+                                           const std::string& collection_name, TableInfo& table_info)
+    : BaseRequest(context, BaseRequest::kShowTableInfo), collection_name_(collection_name), table_info_(table_info) {
 }
 
 BaseRequestPtr
-ShowTableInfoRequest::Create(const std::shared_ptr<milvus::server::Context>& context, const std::string& table_name,
-                             TableInfo& table_info) {
-    return std::shared_ptr<BaseRequest>(new ShowTableInfoRequest(context, table_name, table_info));
+ShowTableInfoRequest::Create(const std::shared_ptr<milvus::server::Context>& context,
+                             const std::string& collection_name, TableInfo& table_info) {
+    return std::shared_ptr<BaseRequest>(new ShowTableInfoRequest(context, collection_name, table_info));
 }
 
 Status
 ShowTableInfoRequest::OnExecute() {
-    std::string hdr = "ShowTableInfoRequest(table=" + table_name_ + ")";
+    std::string hdr = "ShowTableInfoRequest(collection=" + collection_name_ + ")";
     TimeRecorderAuto rc(hdr);
 
-    // step 1: check table name
-    auto status = ValidationUtil::ValidateTableName(table_name_);
+    // step 1: check collection name
+    auto status = ValidationUtil::ValidateCollectionName(collection_name_);
     if (!status.ok()) {
         return status;
     }
 
-    // step 2: check table existence
-    // only process root table, ignore partition table
-    engine::meta::TableSchema table_schema;
-    table_schema.table_id_ = table_name_;
+    // step 2: check collection existence
+    // only process root collection, ignore partition collection
+    engine::meta::CollectionSchema table_schema;
+    table_schema.collection_id_ = collection_name_;
     status = DBWrapper::DB()->DescribeTable(table_schema);
     if (!status.ok()) {
         if (status.code() == DB_NOT_FOUND) {
-            return Status(SERVER_TABLE_NOT_EXIST, TableNotExistMsg(table_name_));
+            return Status(SERVER_TABLE_NOT_EXIST, TableNotExistMsg(collection_name_));
         } else {
             return status;
         }
     } else {
         if (!table_schema.owner_table_.empty()) {
-            return Status(SERVER_INVALID_TABLE_NAME, TableNotExistMsg(table_name_));
+            return Status(SERVER_INVALID_TABLE_NAME, TableNotExistMsg(collection_name_));
         }
     }
 
     // step 3: get partitions
     engine::TableInfo table_info;
-    status = DBWrapper::DB()->GetTableInfo(table_name_, table_info);
+    status = DBWrapper::DB()->GetTableInfo(collection_name_, table_info);
     if (!status.ok()) {
         return status;
     }

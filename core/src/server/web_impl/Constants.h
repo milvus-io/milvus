@@ -46,6 +46,8 @@ static const char* NAME_METRIC_TYPE_IP = "IP";
 static const char* NAME_METRIC_TYPE_HAMMING = "HAMMING";
 static const char* NAME_METRIC_TYPE_JACCARD = "JACCARD";
 static const char* NAME_METRIC_TYPE_TANIMOTO = "TANIMOTO";
+static const char* NAME_METRIC_TYPE_SUBSTRUCTURE = "SUBSTRUCTURE";
+static const char* NAME_METRIC_TYPE_SUPERSTRUCTURE = "SUPERSTRUCTURE";
 
 ////////////////////////////////////////////////////
 

@@ -30,7 +30,7 @@ class VectorSource {
 
     Status
     Add(/*const ExecutionEnginePtr& execution_engine,*/ const segment::SegmentWriterPtr& segment_writer_ptr,
-        const meta::TableFileSchema& table_file_schema, const size_t& num_vectors_to_add, size_t& num_vectors_added);
+        const meta::SegmentSchema& table_file_schema, const size_t& num_vectors_to_add, size_t& num_vectors_added);
 
     size_t
     GetNumVectorsAdded();

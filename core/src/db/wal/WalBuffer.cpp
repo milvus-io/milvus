@@ -185,7 +185,7 @@ MXLogBuffer::SurplusSpace() {
 
 uint32_t
 MXLogBuffer::RecordSize(const MXLogRecord& record) {
-    return SizeOfMXLogRecordHeader + (uint32_t)record.table_id.size() + (uint32_t)record.partition_tag.size() +
+    return SizeOfMXLogRecordHeader + (uint32_t)record.collection_id.size() + (uint32_t)record.partition_tag.size() +
            record.length * (uint32_t)sizeof(IDNumber) + record.data_size;
 }
 
@@ -218,7 +218,7 @@ MXLogBuffer::Append(MXLogRecord& record) {
     MXLogRecordHeader head;
     BuildLsn(mxlog_buffer_writer_.file_no, mxlog_buffer_writer_.buf_offset + (uint32_t)record_size, head.mxl_lsn);
     head.mxl_type = (uint8_t)record.type;
-    head.table_id_size = (uint16_t)record.table_id.size();
+    head.table_id_size = (uint16_t)record.collection_id.size();
     head.partition_tag_size = (uint16_t)record.partition_tag.size();
     head.vector_num = record.length;
     head.data_size = record.data_size;
@@ -226,9 +226,9 @@ MXLogBuffer::Append(MXLogRecord& record) {
     memcpy(current_write_buf + current_write_offset, &head, SizeOfMXLogRecordHeader);
     current_write_offset += SizeOfMXLogRecordHeader;
 
-    if (!record.table_id.empty()) {
-        memcpy(current_write_buf + current_write_offset, record.table_id.data(), record.table_id.size());
-        current_write_offset += record.table_id.size();
+    if (!record.collection_id.empty()) {
+        memcpy(current_write_buf + current_write_offset, record.collection_id.data(), record.collection_id.size());
+        current_write_offset += record.collection_id.size();
     }
 
     if (!record.partition_tag.empty()) {
@@ -307,10 +307,10 @@ MXLogBuffer::Next(const uint64_t last_applied_lsn, MXLogRecord& record) {
     current_read_offset += SizeOfMXLogRecordHeader;
 
     if (head->table_id_size != 0) {
-        record.table_id.assign(current_read_buf + current_read_offset, head->table_id_size);
+        record.collection_id.assign(current_read_buf + current_read_offset, head->table_id_size);
         current_read_offset += head->table_id_size;
     } else {
-        record.table_id = "";
+        record.collection_id = "";
     }
 
     if (head->partition_tag_size != 0) {

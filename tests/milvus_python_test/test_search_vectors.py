@@ -851,7 +851,7 @@ class TestSearchBase:
                  'store_raw_vector': False}
         # create collection
         milvus = get_milvus(args["handler"])
-        milvus.connect(uri=uri)
+        milvus.connect(uri=uri, timeout=5)
         milvus.create_collection(param)
         vectors, ids = self.init_data(milvus, collection, nb=nb)
         query_vecs = vectors[nb//2:nb]
@@ -864,7 +864,7 @@ class TestSearchBase:
 
         for i in range(threads_num):
             milvus = get_milvus(args["handler"])
-            milvus.connect(uri=uri)
+            milvus.connect(uri=uri, timeout=5)
             t = threading.Thread(target=search, args=(milvus, ))
             threads.append(t)
             t.start()
@@ -932,7 +932,7 @@ class TestSearchBase:
                      'metric_type': MetricType.L2}
             # create collection
             milvus = get_milvus(args["handler"])
-            milvus.connect(uri=uri)
+            milvus.connect(uri=uri, timeout=5)
             milvus.create_collection(param)
             status, ids = milvus.add_vectors(collection, vectors)
             assert status.OK()
@@ -973,7 +973,7 @@ class TestSearchBase:
                      'metric_type': MetricType.L2}
             # create collection
             milvus = get_milvus(args["handler"])
-            milvus.connect(uri=uri)
+            milvus.connect(uri=uri, timeout=5)
             milvus.create_collection(param)
             status, ids = milvus.add_vectors(collection, vectors)
             assert status.OK()
@@ -1047,6 +1047,16 @@ class TestSearchParamsInvalid(object):
         query_vecs = gen_vectors(1, dim)
         with pytest.raises(Exception) as e:
             status, result = connect.search_vectors(collection, top_k, query_vecs, partition_tags="tag")
+            logging.getLogger().debug(result)
+
+    @pytest.mark.level(1)
+    def test_search_with_tag_not_existed(self, connect, collection):
+        top_k = 1
+        nprobe = 1
+        query_vecs = gen_vectors(1, dim)
+        status, result = connect.search_vectors(collection, top_k, query_vecs, partition_tags=["tag"])
+        logging.getLogger().info(result)
+        assert not status.OK()
 
     """
     Test search collection with invalid top-k

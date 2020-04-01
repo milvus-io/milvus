@@ -788,22 +788,22 @@ Config::CheckDBConfigPreloadTable(const std::string& value) {
 
     std::unordered_set<std::string> table_set;
 
-    for (auto& table : tables) {
-        if (!ValidationUtil::ValidateTableName(table).ok()) {
-            return Status(SERVER_INVALID_ARGUMENT, "Invalid table name: " + table);
+    for (auto& collection : tables) {
+        if (!ValidationUtil::ValidateCollectionName(collection).ok()) {
+            return Status(SERVER_INVALID_ARGUMENT, "Invalid collection name: " + collection);
         }
         bool exist = false;
-        auto status = DBWrapper::DB()->HasNativeTable(table, exist);
+        auto status = DBWrapper::DB()->HasNativeTable(collection, exist);
         if (!(status.ok() && exist)) {
-            return Status(SERVER_TABLE_NOT_EXIST, "Table " + table + " not exist");
+            return Status(SERVER_TABLE_NOT_EXIST, "Collection " + collection + " not exist");
         }
-        table_set.insert(table);
+        table_set.insert(collection);
     }
 
     if (table_set.size() != tables.size()) {
         std::string msg =
             "Invalid preload tables. "
-            "Possible reason: db_config.preload_table contains duplicate table.";
+            "Possible reason: db_config.preload_table contains duplicate collection.";
         return Status(SERVER_INVALID_ARGUMENT, msg);
     }
 

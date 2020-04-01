@@ -153,22 +153,22 @@ TaskTable::PickToLoad(uint64_t limit) {
     std::vector<uint64_t> indexes;
     bool cross = false;
 
-    uint64_t available_begin = table_.front() + 1;
-    for (uint64_t i = 0, loaded_count = 0, pick_count = 0; i < table_.size() && pick_count < limit; ++i) {
+    uint64_t available_begin = collection_.front() + 1;
+    for (uint64_t i = 0, loaded_count = 0, pick_count = 0; i < collection_.size() && pick_count < limit; ++i) {
         auto index = available_begin + i;
-        if (not table_[index])
+        if (not collection_[index])
             break;
-        if (index % table_.capacity() == table_.rear())
+        if (index % collection_.capacity() == collection_.rear())
             break;
-        if (not cross && table_[index]->IsFinish()) {
-            table_.set_front(index);
-        } else if (table_[index]->state == TaskTableItemState::LOADED) {
+        if (not cross && collection_[index]->IsFinish()) {
+            collection_.set_front(index);
+        } else if (collection_[index]->state == TaskTableItemState::LOADED) {
             cross = true;
             ++loaded_count;
             if (loaded_count > 2)
                 return std::vector<uint64_t>();
-        } else if (table_[index]->state == TaskTableItemState::START) {
-            auto task = table_[index]->task;
+        } else if (collection_[index]->state == TaskTableItemState::START) {
+            auto task = collection_[index]->task;
 
             // if task is a build index task, limit it
             if (task->Type() == TaskType::BuildIndexTask && task->path().Current() == "cpu") {
@@ -186,18 +186,19 @@ TaskTable::PickToLoad(uint64_t limit) {
     return indexes;
 #else
     size_t count = 0;
-    for (uint64_t j = last_finish_ + 1; j < table_.size(); ++j) {
-        if (not table_[j]) {
-            SERVER_LOG_WARNING << "table[" << j << "] is nullptr";
+    for (uint64_t j = last_finish_ + 1; j < collection_.size(); ++j) {
+        if (not collection_[j]) {
+            SERVER_LOG_WARNING << "collection[" << j << "] is nullptr";
         }
 
-        if (table_[j]->task->path().Current() == "cpu") {
-            if (table_[j]->task->Type() == TaskType::BuildIndexTask && BuildMgrInst::GetInstance()->numoftasks() < 1) {
+        if (collection_[j]->task->path().Current() == "cpu") {
+            if (collection_[j]->task->Type() == TaskType::BuildIndexTask &&
+                BuildMgrInst::GetInstance()->numoftasks() < 1) {
                 return std::vector<uint64_t>();
             }
         }
 
-        if (table_[j]->state == TaskTableItemState::LOADED) {
+        if (collection_[j]->state == TaskTableItemState::LOADED) {
             ++count;
             if (count > 2)
                 return std::vector<uint64_t>();
@@ -206,11 +207,11 @@ TaskTable::PickToLoad(uint64_t limit) {
 
     std::vector<uint64_t> indexes;
     bool cross = false;
-    for (uint64_t i = last_finish_ + 1, count = 0; i < table_.size() && count < limit; ++i) {
-        if (not cross && table_[i]->IsFinish()) {
+    for (uint64_t i = last_finish_ + 1, count = 0; i < collection_.size() && count < limit; ++i) {
+        if (not cross && collection_[i]->IsFinish()) {
             last_finish_ = i;
-        } else if (table_[i]->state == TaskTableItemState::START) {
-            auto task = table_[i]->task;
+        } else if (collection_[i]->state == TaskTableItemState::START) {
+            auto task = collection_[i]->task;
             if (task->Type() == TaskType::BuildIndexTask && task->path().Current() == "cpu") {
                 if (BuildMgrInst::GetInstance()->numoftasks() == 0) {
                     break;
@@ -236,19 +237,19 @@ TaskTable::PickToExecute(uint64_t limit) {
     // TimeRecorder rc("");
     std::vector<uint64_t> indexes;
     bool cross = false;
-    uint64_t available_begin = table_.front() + 1;
-    for (uint64_t i = 0, pick_count = 0; i < table_.size() && pick_count < limit; ++i) {
+    uint64_t available_begin = collection_.front() + 1;
+    for (uint64_t i = 0, pick_count = 0; i < collection_.size() && pick_count < limit; ++i) {
         uint64_t index = available_begin + i;
-        if (not table_[index]) {
+        if (not collection_[index]) {
             break;
         }
-        if (index % table_.capacity() == table_.rear()) {
+        if (index % collection_.capacity() == collection_.rear()) {
             break;
         }
 
-        if (not cross && table_[index]->IsFinish()) {
-            table_.set_front(index);
-        } else if (table_[index]->state == TaskTableItemState::LOADED) {
+        if (not cross && collection_[index]->IsFinish()) {
+            collection_.set_front(index);
+        } else if (collection_[index]->state == TaskTableItemState::LOADED) {
             cross = true;
             indexes.push_back(index);
             ++pick_count;
@@ -265,7 +266,7 @@ TaskTable::Put(TaskPtr task, TaskTableItemPtr from) {
     item->task = std::move(task);
     item->state = TaskTableItemState::START;
     item->timestamp.start = get_current_timestamp();
-    table_.put(std::move(item));
+    collection_.put(std::move(item));
     if (subscriber_) {
         subscriber_();
     }
@@ -274,10 +275,10 @@ TaskTable::Put(TaskPtr task, TaskTableItemPtr from) {
 size_t
 TaskTable::TaskToExecute() {
     size_t count = 0;
-    auto begin = table_.front() + 1;
-    for (size_t i = 0; i < table_.size(); ++i) {
+    auto begin = collection_.front() + 1;
+    for (size_t i = 0; i < collection_.size(); ++i) {
         auto index = begin + i;
-        if (table_[index] && table_[index]->state == TaskTableItemState::LOADED) {
+        if (collection_[index] && collection_[index]->state == TaskTableItemState::LOADED) {
             ++count;
         }
     }

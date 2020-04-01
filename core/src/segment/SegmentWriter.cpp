@@ -247,13 +247,14 @@ SegmentWriter::Merge(const std::string& dir_to_merge, const std::string& name) {
 size_t
 SegmentWriter::Size() {
     // TODO(zhiru): switch to actual directory size
-    size_t ret = segment_ptr_->vectors_ptr_->Size();
+    size_t vectors_size = segment_ptr_->vectors_ptr_->VectorsSize();
+    size_t uids_size = segment_ptr_->vectors_ptr_->UidsSize();
     /*
     if (segment_ptr_->id_bloom_filter_ptr_) {
         ret += segment_ptr_->id_bloom_filter_ptr_->Size();
     }
      */
-    return ret;
+    return (vectors_size * sizeof(uint8_t) + uids_size * sizeof(doc_id_t));
 }
 
 size_t

@@ -54,10 +54,10 @@ GrpcClient::CreateTable(const ::milvus::grpc::TableSchema& table_schema) {
 }
 
 bool
-GrpcClient::HasTable(const ::milvus::grpc::TableName& table_name, Status& status) {
+GrpcClient::HasTable(const ::milvus::grpc::TableName& collection_name, Status& status) {
     ClientContext context;
     ::milvus::grpc::BoolReply response;
-    ::grpc::Status grpc_status = stub_->HasTable(&context, table_name, &response);
+    ::grpc::Status grpc_status = stub_->HasTable(&context, collection_name, &response);
 
     if (!grpc_status.ok()) {
         std::cerr << "HasTable gRPC failed!" << std::endl;
@@ -72,10 +72,10 @@ GrpcClient::HasTable(const ::milvus::grpc::TableName& table_name, Status& status
 }
 
 Status
-GrpcClient::DropTable(const ::milvus::grpc::TableName& table_name) {
+GrpcClient::DropTable(const ::milvus::grpc::TableName& collection_name) {
     ClientContext context;
     grpc::Status response;
-    ::grpc::Status grpc_status = stub_->DropTable(&context, table_name, &response);
+    ::grpc::Status grpc_status = stub_->DropTable(&context, collection_name, &response);
 
     if (!grpc_status.ok()) {
         std::cerr << "DropTable gRPC failed!" << std::endl;
@@ -179,10 +179,10 @@ GrpcClient::Search(
 }
 
 Status
-GrpcClient::DescribeTable(const std::string& table_name, ::milvus::grpc::TableSchema& grpc_schema) {
+GrpcClient::DescribeTable(const std::string& collection_name, ::milvus::grpc::TableSchema& grpc_schema) {
     ClientContext context;
     ::milvus::grpc::TableName grpc_tablename;
-    grpc_tablename.set_table_name(table_name);
+    grpc_tablename.set_table_name(collection_name);
     ::grpc::Status grpc_status = stub_->DescribeTable(&context, grpc_tablename, &grpc_schema);
 
     if (!grpc_status.ok()) {
@@ -200,10 +200,10 @@ GrpcClient::DescribeTable(const std::string& table_name, ::milvus::grpc::TableSc
 }
 
 int64_t
-GrpcClient::CountTable(grpc::TableName& table_name, Status& status) {
+GrpcClient::CountTable(grpc::TableName& collection_name, Status& status) {
     ClientContext context;
     ::milvus::grpc::TableRowCount response;
-    ::grpc::Status grpc_status = stub_->CountTable(&context, table_name, &response);
+    ::grpc::Status grpc_status = stub_->CountTable(&context, collection_name, &response);
 
     if (!grpc_status.ok()) {
         std::cerr << "CountTable rpc failed!" << std::endl;
@@ -242,10 +242,10 @@ GrpcClient::ShowTables(milvus::grpc::TableNameList& table_name_list) {
 }
 
 Status
-GrpcClient::ShowTableInfo(grpc::TableName& table_name, grpc::TableInfo& table_info) {
+GrpcClient::ShowTableInfo(grpc::TableName& collection_name, grpc::TableInfo& table_info) {
     ClientContext context;
     ::milvus::grpc::Command command;
-    ::grpc::Status grpc_status = stub_->ShowTableInfo(&context, table_name, &table_info);
+    ::grpc::Status grpc_status = stub_->ShowTableInfo(&context, collection_name, &table_info);
 
     if (!grpc_status.ok()) {
         std::cerr << "ShowTableInfo gRPC failed!" << std::endl;
@@ -284,10 +284,10 @@ GrpcClient::Cmd(const std::string& cmd, std::string& result) {
 }
 
 Status
-GrpcClient::PreloadTable(milvus::grpc::TableName& table_name) {
+GrpcClient::PreloadTable(milvus::grpc::TableName& collection_name) {
     ClientContext context;
     ::milvus::grpc::Status response;
-    ::grpc::Status grpc_status = stub_->PreloadTable(&context, table_name, &response);
+    ::grpc::Status grpc_status = stub_->PreloadTable(&context, collection_name, &response);
 
     if (!grpc_status.ok()) {
         std::cerr << "PreloadTable gRPC failed!" << std::endl;
@@ -320,9 +320,9 @@ GrpcClient::DeleteByID(grpc::DeleteByIDParam& delete_by_id_param) {
 }
 
 Status
-GrpcClient::DescribeIndex(grpc::TableName& table_name, grpc::IndexParam& index_param) {
+GrpcClient::DescribeIndex(grpc::TableName& collection_name, grpc::IndexParam& index_param) {
     ClientContext context;
-    ::grpc::Status grpc_status = stub_->DescribeIndex(&context, table_name, &index_param);
+    ::grpc::Status grpc_status = stub_->DescribeIndex(&context, collection_name, &index_param);
 
     if (!grpc_status.ok()) {
         std::cerr << "DescribeIndex rpc failed!" << std::endl;
@@ -337,10 +337,10 @@ GrpcClient::DescribeIndex(grpc::TableName& table_name, grpc::IndexParam& index_p
 }
 
 Status
-GrpcClient::DropIndex(grpc::TableName& table_name) {
+GrpcClient::DropIndex(grpc::TableName& collection_name) {
     ClientContext context;
     ::milvus::grpc::Status response;
-    ::grpc::Status grpc_status = stub_->DropIndex(&context, table_name, &response);
+    ::grpc::Status grpc_status = stub_->DropIndex(&context, collection_name, &response);
 
     if (!grpc_status.ok()) {
         std::cerr << "DropIndex gRPC failed!" << std::endl;
@@ -373,9 +373,9 @@ GrpcClient::CreatePartition(const grpc::PartitionParam& partition_param) {
 }
 
 Status
-GrpcClient::ShowPartitions(const grpc::TableName& table_name, grpc::PartitionList& partition_array) const {
+GrpcClient::ShowPartitions(const grpc::TableName& collection_name, grpc::PartitionList& partition_array) const {
     ClientContext context;
-    ::grpc::Status grpc_status = stub_->ShowPartitions(&context, table_name, &partition_array);
+    ::grpc::Status grpc_status = stub_->ShowPartitions(&context, collection_name, &partition_array);
 
     if (!grpc_status.ok()) {
         std::cerr << "ShowPartitions gRPC failed!" << std::endl;
@@ -408,12 +408,12 @@ GrpcClient::DropPartition(const ::milvus::grpc::PartitionParam& partition_param)
 }
 
 Status
-GrpcClient::Flush(const std::string& table_name) {
+GrpcClient::Flush(const std::string& collection_name) {
     ClientContext context;
 
     ::milvus::grpc::FlushParam param;
-    if (!table_name.empty()) {
-        param.add_table_name_array(table_name);
+    if (!collection_name.empty()) {
+        param.add_table_name_array(collection_name);
     }
 
     ::milvus::grpc::Status response;
@@ -432,10 +432,10 @@ GrpcClient::Flush(const std::string& table_name) {
 }
 
 Status
-GrpcClient::Compact(milvus::grpc::TableName& table_name) {
+GrpcClient::Compact(milvus::grpc::TableName& collection_name) {
     ClientContext context;
     ::milvus::grpc::Status response;
-    ::grpc::Status grpc_status = stub_->Compact(&context, table_name, &response);
+    ::grpc::Status grpc_status = stub_->Compact(&context, collection_name, &response);
 
     if (!grpc_status.ok()) {
         std::cerr << "Compact gRPC failed!" << std::endl;

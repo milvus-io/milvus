@@ -26,7 +26,7 @@ class AdapterMgr {
     template <typename T>
     struct register_t {
         explicit register_t(const IndexType type) {
-            AdapterMgr::GetInstance().table_[type] = ([] { return std::make_shared<T>(); });
+            AdapterMgr::GetInstance().collection_[type] = ([] { return std::make_shared<T>(); });
         }
     };
 
@@ -44,7 +44,7 @@ class AdapterMgr {
 
  protected:
     bool init_ = false;
-    std::unordered_map<IndexType, std::function<ConfAdapterPtr()>> table_;
+    std::unordered_map<IndexType, std::function<ConfAdapterPtr()>> collection_;
 };
 
 }  // namespace knowhere

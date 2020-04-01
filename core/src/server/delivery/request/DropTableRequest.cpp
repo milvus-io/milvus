@@ -23,31 +23,31 @@ namespace milvus {
 namespace server {
 
 DropTableRequest::DropTableRequest(const std::shared_ptr<milvus::server::Context>& context,
-                                   const std::string& table_name)
-    : BaseRequest(context, BaseRequest::kDropTable), table_name_(table_name) {
+                                   const std::string& collection_name)
+    : BaseRequest(context, BaseRequest::kDropTable), collection_name_(collection_name) {
 }
 
 BaseRequestPtr
-DropTableRequest::Create(const std::shared_ptr<milvus::server::Context>& context, const std::string& table_name) {
-    return std::shared_ptr<BaseRequest>(new DropTableRequest(context, table_name));
+DropTableRequest::Create(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name) {
+    return std::shared_ptr<BaseRequest>(new DropTableRequest(context, collection_name));
 }
 
 Status
 DropTableRequest::OnExecute() {
     try {
-        std::string hdr = "DropTableRequest(table=" + table_name_ + ")";
+        std::string hdr = "DropTableRequest(collection=" + collection_name_ + ")";
         TimeRecorder rc(hdr);
 
         // step 1: check arguments
-        auto status = ValidationUtil::ValidateTableName(table_name_);
+        auto status = ValidationUtil::ValidateCollectionName(collection_name_);
         if (!status.ok()) {
             return status;
         }
 
-        // step 2: check table existence
-        // only process root table, ignore partition table
-        engine::meta::TableSchema table_schema;
-        table_schema.table_id_ = table_name_;
+        // step 2: check collection existence
+        // only process root collection, ignore partition collection
+        engine::meta::CollectionSchema table_schema;
+        table_schema.collection_id_ = collection_name_;
         status = DBWrapper::DB()->DescribeTable(table_schema);
         fiu_do_on("DropTableRequest.OnExecute.db_not_found", status = Status(milvus::DB_NOT_FOUND, ""));
         fiu_do_on("DropTableRequest.OnExecute.describe_table_fail",
@@ -55,20 +55,20 @@ DropTableRequest::OnExecute() {
         fiu_do_on("DropTableRequest.OnExecute.throw_std_exception", throw std::exception());
         if (!status.ok()) {
             if (status.code() == DB_NOT_FOUND) {
-                return Status(SERVER_TABLE_NOT_EXIST, TableNotExistMsg(table_name_));
+                return Status(SERVER_TABLE_NOT_EXIST, TableNotExistMsg(collection_name_));
             } else {
                 return status;
             }
         } else {
             if (!table_schema.owner_table_.empty()) {
-                return Status(SERVER_INVALID_TABLE_NAME, TableNotExistMsg(table_name_));
+                return Status(SERVER_INVALID_TABLE_NAME, TableNotExistMsg(collection_name_));
             }
         }
 
         rc.RecordSection("check validation");
 
-        // step 3: Drop table
-        status = DBWrapper::DB()->DropTable(table_name_);
+        // step 3: Drop collection
+        status = DBWrapper::DB()->DropTable(collection_name_);
         fiu_do_on("DropTableRequest.OnExecute.drop_table_fail", status = Status(milvus::SERVER_UNEXPECTED_ERROR, ""));
         if (!status.ok()) {
             return status;

@@ -80,36 +80,36 @@ class GrpcRequestHandler final : public ::milvus::grpc::MilvusService::Service, 
     random_id() const;
 
     // *
-    // @brief This method is used to create table
+    // @brief This method is used to create collection
     //
-    // @param TableSchema, use to provide table information to be created.
+    // @param TableSchema, use to provide collection information to be created.
     //
     // @return Status
     ::grpc::Status
     CreateTable(::grpc::ServerContext* context, const ::milvus::grpc::TableSchema* request,
                 ::milvus::grpc::Status* response) override;
     // *
-    // @brief This method is used to test table existence.
+    // @brief This method is used to test collection existence.
     //
-    // @param TableName, table name is going to be tested.
+    // @param CollectionName, collection name is going to be tested.
     //
     // @return BoolReply
     ::grpc::Status
     HasTable(::grpc::ServerContext* context, const ::milvus::grpc::TableName* request,
              ::milvus::grpc::BoolReply* response) override;
     // *
-    // @brief This method is used to get table schema.
+    // @brief This method is used to get collection schema.
     //
-    // @param TableName, target table name.
+    // @param CollectionName, target collection name.
     //
     // @return TableSchema
     ::grpc::Status
     DescribeTable(::grpc::ServerContext* context, const ::milvus::grpc::TableName* request,
                   ::milvus::grpc::TableSchema* response) override;
     // *
-    // @brief This method is used to get table schema.
+    // @brief This method is used to get collection schema.
     //
-    // @param TableName, target table name.
+    // @param CollectionName, target collection name.
     //
     // @return TableRowCount
     ::grpc::Status
@@ -120,14 +120,14 @@ class GrpcRequestHandler final : public ::milvus::grpc::MilvusService::Service, 
     //
     // @param Command, dummy parameter.
     //
-    // @return TableNameList
+    // @return CollectionNameList
     ::grpc::Status
     ShowTables(::grpc::ServerContext* context, const ::milvus::grpc::Command* request,
                ::milvus::grpc::TableNameList* response) override;
     // *
-    // @brief This method is used to get table detail information.
+    // @brief This method is used to get collection detail information.
     //
-    // @param TableName, target table name.
+    // @param CollectionName, target collection name.
     //
     // @return TableInfo
     ::grpc::Status
@@ -135,16 +135,16 @@ class GrpcRequestHandler final : public ::milvus::grpc::MilvusService::Service, 
                   ::milvus::grpc::TableInfo* response);
 
     // *
-    // @brief This method is used to delete table.
+    // @brief This method is used to delete collection.
     //
-    // @param TableName, table name is going to be deleted.
+    // @param CollectionName, collection name is going to be deleted.
     //
-    // @return TableNameList
+    // @return CollectionNameList
     ::grpc::Status
     DropTable(::grpc::ServerContext* context, const ::milvus::grpc::TableName* request,
               ::milvus::grpc::Status* response) override;
     // *
-    // @brief This method is used to build index by table in sync mode.
+    // @brief This method is used to build index by collection in sync mode.
     //
     // @param IndexParam, index paramters.
     //
@@ -155,7 +155,7 @@ class GrpcRequestHandler final : public ::milvus::grpc::MilvusService::Service, 
     // *
     // @brief This method is used to describe index
     //
-    // @param TableName, target table name.
+    // @param CollectionName, target collection name.
     //
     // @return IndexParam
     ::grpc::Status
@@ -164,7 +164,7 @@ class GrpcRequestHandler final : public ::milvus::grpc::MilvusService::Service, 
     // *
     // @brief This method is used to drop index
     //
-    // @param TableName, target table name.
+    // @param CollectionName, target collection name.
     //
     // @return Status
     ::grpc::Status
@@ -182,7 +182,7 @@ class GrpcRequestHandler final : public ::milvus::grpc::MilvusService::Service, 
     // *
     // @brief This method is used to show partition information
     //
-    // @param TableName, target table name.
+    // @param CollectionName, target collection name.
     //
     // @return PartitionList
     ::grpc::Status
@@ -198,7 +198,7 @@ class GrpcRequestHandler final : public ::milvus::grpc::MilvusService::Service, 
     DropPartition(::grpc::ServerContext* context, const ::milvus::grpc::PartitionParam* request,
                   ::milvus::grpc::Status* response) override;
     // *
-    // @brief This method is used to add vector array to table.
+    // @brief This method is used to add vector array to collection.
     //
     // @param InsertParam, insert parameters.
     //
@@ -218,14 +218,14 @@ class GrpcRequestHandler final : public ::milvus::grpc::MilvusService::Service, 
     // *
     // @brief This method is used to get vector ids from a segment
     //
-    // @param GetVectorIDsParam, target table and segment
+    // @param GetVectorIDsParam, target collection and segment
     //
     // @return VectorIds
     ::grpc::Status
     GetVectorIDs(::grpc::ServerContext* context, const ::milvus::grpc::GetVectorIDsParam* request,
                  ::milvus::grpc::VectorIds* response);
     // *
-    // @brief This method is used to query vector in table.
+    // @brief This method is used to query vector in collection.
     //
     // @param SearchParam, search parameters.
     //
@@ -275,9 +275,9 @@ class GrpcRequestHandler final : public ::milvus::grpc::MilvusService::Service, 
                ::milvus::grpc::Status* response);
 
     // *
-    // @brief This method is used to preload table
+    // @brief This method is used to preload collection
     //
-    // @param TableName, target table name.
+    // @param CollectionName, target collection name.
     //
     // @return Status
     ::grpc::Status
@@ -294,9 +294,9 @@ class GrpcRequestHandler final : public ::milvus::grpc::MilvusService::Service, 
     Flush(::grpc::ServerContext* context, const ::milvus::grpc::FlushParam* request, ::milvus::grpc::Status* response);
 
     // *
-    // @brief This method is used to compact table
+    // @brief This method is used to compact collection
     //
-    // @param TableName, target table name.
+    // @param CollectionName, target collection name.
     //
     // @return Status
     ::grpc::Status

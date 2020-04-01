@@ -63,7 +63,10 @@ class Vectors {
     Erase(std::vector<int32_t>& offsets);
 
     size_t
-    Size();
+    VectorsSize();
+
+    size_t
+    UidsSize();
 
     void
     Clear();

@@ -49,7 +49,7 @@ class StringHelpFunctions {
     static void
     MergeStringWithDelimeter(const std::vector<std::string>& strs, const std::string& delimeter, std::string& result);
 
-    // assume the table has two columns, quote='\"', delimeter=','
+    // assume the collection has two columns, quote='\"', delimeter=','
     //  a,b             a | b
     //  "aa,gg,yy",b    aa,gg,yy | b
     //  aa"dd,rr"kk,pp  aadd,rrkk | pp

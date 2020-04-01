@@ -2,6 +2,20 @@
 
 Please mark all change in change log and use the issue from GitHub
 
+# Milvus 0.8.0 (TBD)
+
+## Bug
+-   \#1762 Server is not forbidden to create new partition which tag is "_default"
+
+## Feature
+-   \#1655 GPU index support delete vectors
+-   \#1825 Add annoy index type in C++ sdk
+
+## Improvement
+-   \#1784 Add Substructure and Superstructure in http module
+
+## Task
+
 # Milvus 0.7.1 (2020-03-29)
 
 ## Bug
@@ -25,6 +39,7 @@ Please mark all change in change log and use the issue from GitHub
 -   \#1818 Duplicate data generated after restart milvus server
 
 ## Feature
+-   \#261  Integrate ANNOY into Milvus
 -   \#1603 BinaryFlat add 2 Metric: Substructure and Superstructure
 -   \#1660 IVF PQ CPU support deleted vectors searching
 -   \#1661 HNSW support deleted vectors searching

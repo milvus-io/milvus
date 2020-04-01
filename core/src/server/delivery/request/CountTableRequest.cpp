@@ -23,41 +23,41 @@ namespace milvus {
 namespace server {
 
 CountTableRequest::CountTableRequest(const std::shared_ptr<milvus::server::Context>& context,
-                                     const std::string& table_name, int64_t& row_count)
-    : BaseRequest(context, BaseRequest::kCountTable), table_name_(table_name), row_count_(row_count) {
+                                     const std::string& collection_name, int64_t& row_count)
+    : BaseRequest(context, BaseRequest::kCountTable), collection_name_(collection_name), row_count_(row_count) {
 }
 
 BaseRequestPtr
-CountTableRequest::Create(const std::shared_ptr<milvus::server::Context>& context, const std::string& table_name,
+CountTableRequest::Create(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name,
                           int64_t& row_count) {
-    return std::shared_ptr<BaseRequest>(new CountTableRequest(context, table_name, row_count));
+    return std::shared_ptr<BaseRequest>(new CountTableRequest(context, collection_name, row_count));
 }
 
 Status
 CountTableRequest::OnExecute() {
     try {
-        std::string hdr = "CountTableRequest(table=" + table_name_ + ")";
+        std::string hdr = "CountTableRequest(collection=" + collection_name_ + ")";
         TimeRecorderAuto rc(hdr);
 
         // step 1: check arguments
-        auto status = ValidationUtil::ValidateTableName(table_name_);
+        auto status = ValidationUtil::ValidateCollectionName(collection_name_);
         if (!status.ok()) {
             return status;
         }
 
-        // only process root table, ignore partition table
-        engine::meta::TableSchema table_schema;
-        table_schema.table_id_ = table_name_;
+        // only process root collection, ignore partition collection
+        engine::meta::CollectionSchema table_schema;
+        table_schema.collection_id_ = collection_name_;
         status = DBWrapper::DB()->DescribeTable(table_schema);
         if (!status.ok()) {
             if (status.code() == DB_NOT_FOUND) {
-                return Status(SERVER_TABLE_NOT_EXIST, TableNotExistMsg(table_name_));
+                return Status(SERVER_TABLE_NOT_EXIST, TableNotExistMsg(collection_name_));
             } else {
                 return status;
             }
         } else {
             if (!table_schema.owner_table_.empty()) {
-                return Status(SERVER_INVALID_TABLE_NAME, TableNotExistMsg(table_name_));
+                return Status(SERVER_INVALID_TABLE_NAME, TableNotExistMsg(collection_name_));
             }
         }
 
@@ -65,13 +65,13 @@ CountTableRequest::OnExecute() {
 
         // step 2: get row count
         uint64_t row_count = 0;
-        status = DBWrapper::DB()->GetTableRowCount(table_name_, row_count);
+        status = DBWrapper::DB()->GetTableRowCount(collection_name_, row_count);
         fiu_do_on("CountTableRequest.OnExecute.db_not_found", status = Status(DB_NOT_FOUND, ""));
         fiu_do_on("CountTableRequest.OnExecute.status_error", status = Status(SERVER_UNEXPECTED_ERROR, ""));
         fiu_do_on("CountTableRequest.OnExecute.throw_std_exception", throw std::exception());
         if (!status.ok()) {
             if (status.code() == DB_NOT_FOUND) {
-                return Status(SERVER_TABLE_NOT_EXIST, TableNotExistMsg(table_name_));
+                return Status(SERVER_TABLE_NOT_EXIST, TableNotExistMsg(collection_name_));
             } else {
                 return status;
             }

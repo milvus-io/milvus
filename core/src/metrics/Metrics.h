@@ -186,11 +186,11 @@ class CollectDurationMetrics : CollectMetricsBase {
     ~CollectDurationMetrics() {
         auto total_time = TimeFromBegine();
         switch (index_type_) {
-            case engine::meta::TableFileSchema::RAW: {
+            case engine::meta::SegmentSchema::RAW: {
                 server::Metrics::GetInstance().SearchRawDataDurationSecondsHistogramObserve(total_time);
                 break;
             }
-            case engine::meta::TableFileSchema::TO_INDEX: {
+            case engine::meta::SegmentSchema::TO_INDEX: {
                 server::Metrics::GetInstance().SearchRawDataDurationSecondsHistogramObserve(total_time);
                 break;
             }
@@ -214,11 +214,11 @@ class CollectSearchTaskMetrics : CollectMetricsBase {
     ~CollectSearchTaskMetrics() {
         auto total_time = TimeFromBegine();
         switch (index_type_) {
-            case engine::meta::TableFileSchema::RAW: {
+            case engine::meta::SegmentSchema::RAW: {
                 server::Metrics::GetInstance().SearchRawDataDurationSecondsHistogramObserve(total_time);
                 break;
             }
-            case engine::meta::TableFileSchema::TO_INDEX: {
+            case engine::meta::SegmentSchema::TO_INDEX: {
                 server::Metrics::GetInstance().SearchRawDataDurationSecondsHistogramObserve(total_time);
                 break;
             }
