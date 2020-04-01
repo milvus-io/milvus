@@ -119,8 +119,6 @@ IVFPQ::classifyAndAddVectors(Tensor<float, 2, true>& vecs,
   auto& mem = resources_->getMemoryManagerCurrentDevice();
   auto stream = resources_->getDefaultStreamCurrentDevice();
   
-  DeviceTensor<uint8_t, 1, true> bitset(mem, {0}, stream);
-
   // Number of valid vectors that we actually add; we return this
   int numAdded = 0;
 
@@ -130,6 +128,8 @@ IVFPQ::classifyAndAddVectors(Tensor<float, 2, true>& vecs,
   DeviceTensor<int, 2, true> listIds2d(mem, {vecs.getSize(0), 1}, stream);
   auto listIds = listIds2d.view<1>({vecs.getSize(0)});
 
+  /* pseudo bitset */
+  DeviceTensor<uint8_t, 1, true> bitset(mem, {0}, stream);
   quantizer_->query(vecs, bitset, 1, listDistance, listIds2d, false);
 
   // Copy the lists that we wish to append to back to the CPU
@@ -532,10 +532,11 @@ IVFPQ::query(Tensor<float, 2, true>& queries,
   DeviceTensor<int, 2, true>
     coarseIndices(mem, {queries.getSize(0), nprobe}, stream);
 
+  DeviceTensor<uint8_t, 1, true> coarseBitset(mem, {0}, stream);
   // Find the `nprobe` closest coarse centroids; we can use int
   // indices both internally and externally
   quantizer_->query(queries,
-                    bitset,
+                    coarseBitset,
                     nprobe,
                     coarseDistances,
                     coarseIndices,
@@ -543,6 +544,7 @@ IVFPQ::query(Tensor<float, 2, true>& queries,
 
   if (precomputedCodes_) {
     runPQPrecomputedCodes_(queries,
+                           bitset,
                            coarseDistances,
                            coarseIndices,
                            k,
@@ -550,6 +552,7 @@ IVFPQ::query(Tensor<float, 2, true>& queries,
                            outIndices);
   } else {
     runPQNoPrecomputedCodes_(queries,
+                             bitset,
                              coarseDistances,
                              coarseIndices,
                              k,
@@ -592,6 +595,7 @@ IVFPQ::getPQCentroids() {
 void
 IVFPQ::runPQPrecomputedCodes_(
   Tensor<float, 2, true>& queries,
+  Tensor<uint8_t, 1, true>& bitset,
   DeviceTensor<float, 2, true>& coarseDistances,
   DeviceTensor<int, 2, true>& coarseIndices,
   int k,
@@ -655,6 +659,7 @@ IVFPQ::runPQPrecomputedCodes_(
                                 term2, // term 2
                                 term3, // term 3
                                 coarseIndices,
+                                bitset,
                                 useFloat16LookupTables_,
                                 bytesPerVector_,
                                 numSubQuantizers_,
@@ -673,6 +678,7 @@ IVFPQ::runPQPrecomputedCodes_(
 void
 IVFPQ::runPQNoPrecomputedCodes_(
   Tensor<float, 2, true>& queries,
+  Tensor<uint8_t, 1, true>& bitset,
   DeviceTensor<float, 2, true>& coarseDistances,
   DeviceTensor<int, 2, true>& coarseIndices,
   int k,
@@ -685,6 +691,7 @@ IVFPQ::runPQNoPrecomputedCodes_(
                                   coarseCentroids,
                                   pqCentroidsInnermostCode_,
                                   coarseIndices,
+                                  bitset,
                                   useFloat16LookupTables_,
                                   bytesPerVector_,
                                   numSubQuantizers_,

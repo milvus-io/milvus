@@ -83,6 +83,7 @@ class IVFPQ : public IVFBase {
 
   /// Runs kernels for scanning inverted lists with precomputed codes
   void runPQPrecomputedCodes_(Tensor<float, 2, true>& queries,
+                              Tensor<uint8_t, 1, true>& bitset,
                               DeviceTensor<float, 2, true>& coarseDistances,
                               DeviceTensor<int, 2, true>& coarseIndices,
                               int k,
@@ -91,6 +92,7 @@ class IVFPQ : public IVFBase {
 
   /// Runs kernels for scanning inverted lists without precomputed codes
   void runPQNoPrecomputedCodes_(Tensor<float, 2, true>& queries,
+                                Tensor<uint8_t, 1, true>& bitset,
                                 DeviceTensor<float, 2, true>& coarseDistances,
                                 DeviceTensor<int, 2, true>& coarseIndices,
                                 int k,
