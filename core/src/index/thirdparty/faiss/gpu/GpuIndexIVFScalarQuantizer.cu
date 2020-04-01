@@ -244,13 +244,11 @@ GpuIndexIVFScalarQuantizer::addImpl_(int n,
   // Data is already resident on the GPU
   Tensor<float, 2, true> data(const_cast<float*>(x), {n, (int) this->d});
 
-  auto bitset = toDevice<uint8_t, 1>(resources_, device_, nullptr, stream, {0});
-
   static_assert(sizeof(long) == sizeof(Index::idx_t), "size mismatch");
   Tensor<long, 1, true> labels(const_cast<long*>(xids), {n});
 
   // Not all vectors may be able to be added (some may contain NaNs etc)
-  index_->classifyAndAddVectors(data, labels, bitset);
+  index_->classifyAndAddVectors(data, labels);
 
   // but keep the ntotal based on the total number of vectors that we attempted
   // to add
@@ -277,9 +275,15 @@ GpuIndexIVFScalarQuantizer::searchImpl_(int n,
   static_assert(sizeof(long) == sizeof(Index::idx_t), "size mismatch");
   Tensor<long, 2, true> outLabels(const_cast<long*>(labels), {n, k});
 
-  auto bitsetDevice = toDevice<uint8_t, 1>(resources_, device_, nullptr, stream, {0});
-
-  index_->query(queries, bitsetDevice, nprobe, k, outDistances, outLabels);
+  if (!bitset) {
+    auto bitsetDevice = toDevice<uint8_t, 1>(resources_, device_, nullptr, stream, {0});
+    index_->query(queries, bitsetDevice, nprobe, k, outDistances, outLabels);
+  } else {
+    auto bitsetDevice = toDevice<uint8_t, 1>(resources_, device_,
+                                             const_cast<uint8_t*>(bitset->data()), stream,
+                                             {(int) bitset->size()});
+    index_->query(queries, bitsetDevice, nprobe, k, outDistances, outLabels);
+  }
 }
 
 } } // namespace

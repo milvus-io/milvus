@@ -310,7 +310,7 @@ void IndexIVF::search (idx_t n, const float *x, idx_t k, float *distances, idx_t
     invlists->prefetch_lists (idx.get(), n * nprobe);
 
     search_preassigned (n, x, k, idx.get(), coarse_dis.get(),
-                        distances, labels, false, nullptr,bitset);
+                        distances, labels, false, nullptr, bitset);
     indexIVF_stats.search_time += getmillisecs() - t0;
 }
 

@@ -12,7 +12,6 @@
 #pragma once
 
 #include "include/MilvusApi.h"
-#include "examples/utils/ThreadPool.h"
 
 #include <string>
 #include <list>
@@ -20,23 +19,56 @@
 #include <vector>
 #include <future>
 
+struct TestParameters {
+    // specify this will ignore index_type/index_file_size/nlist/metric_type/dimension/dow_count
+    std::string collection_name_;
+
+    // collection parameters, only works when collection_name_ is empty
+    int64_t index_type_ = (int64_t)milvus::IndexType::IVFSQ8; // sq8
+    int64_t index_file_size_ = 1024; // 1024 MB
+    int64_t nlist_ = 16384;
+    int64_t metric_type_ = (int64_t)milvus::MetricType::L2; // L2
+    int64_t dimensions_ = 128;
+    int64_t row_count_ = 1; // 1 million
+
+    // query parameters
+    int64_t concurrency_ = 20; // 20 connections
+    int64_t query_count_ = 1000;
+    int64_t nq_ = 1;
+    int64_t topk_ = 10;
+    int64_t nprobe_ = 16;
+    bool print_result_ = false;
+};
+
 class ClientTest {
  public:
     ClientTest(const std::string&, const std::string&);
     ~ClientTest();
 
     void
-    Test();
+    Test(const TestParameters& parameters);
 
  private:
     std::shared_ptr<milvus::Connection>
     Connect();
 
     bool
+    CheckParameters(const TestParameters& parameters);
+
+    bool
     BuildCollection();
 
+    bool
+    InsertEntities(std::shared_ptr<milvus::Connection>& conn);
+
     void
-    CreateIndex();
+    CreateIndex(std::shared_ptr<milvus::Connection>& conn);
+
+    bool
+    PreloadCollection();
+
+    bool
+    GetCollectionInfo();
 
     void
     DropCollection();
@@ -51,10 +83,15 @@ class ClientTest {
     milvus::TopKQueryResult
     SearchWorker(EntityList& entities);
 
+    void
+    PrintSearchResult(int64_t batch_num, const milvus::TopKQueryResult& result);
+
+    void
+    CheckSearchResult(int64_t batch_num, const milvus::TopKQueryResult& result);
+
  private:
     std::string server_ip_;
     std::string server_port_;
 
-    milvus_sdk::ThreadPool query_thread_pool_;
-    std::list<std::future<milvus::TopKQueryResult>> query_thread_results_;
+    TestParameters parameters_;
 };

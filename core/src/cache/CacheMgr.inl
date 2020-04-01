@@ -27,7 +27,6 @@ CacheMgr<ItemObj>::ItemCount() const {
         SERVER_LOG_ERROR << "Cache doesn't exist";
         return 0;
     }
-
     return (uint64_t)(cache_->size());
 }
 
@@ -38,7 +37,6 @@ CacheMgr<ItemObj>::ItemExists(const std::string& key) {
         SERVER_LOG_ERROR << "Cache doesn't exist";
         return false;
     }
-
     return cache_->exists(key);
 }
 
@@ -60,7 +58,6 @@ CacheMgr<ItemObj>::InsertItem(const std::string& key, const ItemObj& data) {
         SERVER_LOG_ERROR << "Cache doesn't exist";
         return;
     }
-
     cache_->insert(key, data);
     server::Metrics::GetInstance().CacheAccessTotalIncrement();
 }
@@ -72,9 +69,18 @@ CacheMgr<ItemObj>::EraseItem(const std::string& key) {
         SERVER_LOG_ERROR << "Cache doesn't exist";
         return;
     }
-
     cache_->erase(key);
     server::Metrics::GetInstance().CacheAccessTotalIncrement();
+}
+
+template <typename ItemObj>
+bool
+CacheMgr<ItemObj>::Reserve(const int64_t size) {
+    if (cache_ == nullptr) {
+        SERVER_LOG_ERROR << "Cache doesn't exist";
+        return false;
+    }
+    return cache_->reserve(size);
 }
 
 template <typename ItemObj>
@@ -84,7 +90,6 @@ CacheMgr<ItemObj>::PrintInfo() {
         SERVER_LOG_ERROR << "Cache doesn't exist";
         return;
     }
-
     cache_->print();
 }
 
@@ -95,7 +100,6 @@ CacheMgr<ItemObj>::ClearCache() {
         SERVER_LOG_ERROR << "Cache doesn't exist";
         return;
     }
-
     cache_->clear();
 }
 
@@ -106,7 +110,6 @@ CacheMgr<ItemObj>::CacheUsage() const {
         SERVER_LOG_ERROR << "Cache doesn't exist";
         return 0;
     }
-
     return cache_->usage();
 }
 
@@ -117,7 +120,6 @@ CacheMgr<ItemObj>::CacheCapacity() const {
         SERVER_LOG_ERROR << "Cache doesn't exist";
         return 0;
     }
-
     return cache_->capacity();
 }
 

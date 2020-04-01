@@ -52,8 +52,7 @@ class IVFPQ : public IVFBase {
   /// Returns the number of vectors successfully added. Vectors may
   /// not be able to be added because they contain NaNs.
   int classifyAndAddVectors(Tensor<float, 2, true>& vecs,
-                            Tensor<long, 1, true>& indices,
-                            Tensor<uint8_t, 1, true>& bitset);
+                            Tensor<long, 1, true>& indices);
 
   /// Find the approximate k nearest neigbors for `queries` against
   /// our database
@@ -84,6 +83,7 @@ class IVFPQ : public IVFBase {
 
   /// Runs kernels for scanning inverted lists with precomputed codes
   void runPQPrecomputedCodes_(Tensor<float, 2, true>& queries,
+                              Tensor<uint8_t, 1, true>& bitset,
                               DeviceTensor<float, 2, true>& coarseDistances,
                               DeviceTensor<int, 2, true>& coarseIndices,
                               int k,
@@ -92,6 +92,7 @@ class IVFPQ : public IVFBase {
 
   /// Runs kernels for scanning inverted lists without precomputed codes
   void runPQNoPrecomputedCodes_(Tensor<float, 2, true>& queries,
+                                Tensor<uint8_t, 1, true>& bitset,
                                 DeviceTensor<float, 2, true>& coarseDistances,
                                 DeviceTensor<int, 2, true>& coarseIndices,
                                 int k,
