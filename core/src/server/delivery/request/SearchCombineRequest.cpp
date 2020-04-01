@@ -151,6 +151,15 @@ SearchCombineRequest::CanCombine(const SearchRequestPtr& request) {
         return false;
     }
 
+    // sum of nq must less-equal than MAX_NQ
+    if (vectors_data_.vector_count_ > MAX_NQ || request->VectorsData().vector_count_ > MAX_NQ) {
+        return false;
+    }
+    uint64_t total_nq = vectors_data_.vector_count_ + request->VectorsData().vector_count_;
+    if (total_nq > MAX_NQ) {
+        return false;
+    }
+
     // partition list must be equal for each one
     std::set<std::string> partition_list;
     GetUniqueList(request->PartitionList(), partition_list);
