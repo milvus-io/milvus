@@ -23,6 +23,11 @@ TSC members have the following responsibilities:
 
 To become a TSC member, a committer must be sponsored by a TSC member and the sponsorship must be approved by 2/3 of all TSC members.
 
+The TSC members are listed below:
+
+-   @cxie
+-   @JinHai-CN
+
 ## Committers
 
 Committers lead project feature discussions and oversee the overall project quality.
@@ -37,6 +42,10 @@ Committers have the following responsibilities:
 
 To become a committer, a reviewer must have contributed broadly throughout the Milvus project. A reviewer must also be sponsored by a committer and the sponsorship must be approved by the TSC.
 
+The committers are listed below:
+
+-   @JinHai-CN
+
 ## Reviewers
 
 Reviewers review new code contributions and ensure the quality of existing code.
@@ -50,6 +59,41 @@ Reviewers have the following responsibilities:
 
 To become a reviewer, a contributor must have provided continued and quality contribution to the Milvus project for at least 6 months and have contributed at least one major component where the contributor has taken an ownership role.
 
+The reviewers are listed below:
+
+-   @XuPeng-SH
+-   @yhmo
+-   @scsven
+-   @cydrain
+-   @shengjun1985
+
 ## Contributors
 
 Contributors can be anyone who has successfully submitted at least one PR to the Milvus project.
+
+The contributors are listed below:
+
+-   @ZhifengZhang-CN
+-   @tinkerlin
+-   @youny626
+-   @fishpenguin
+-   @BossZou
+-   @del-zhenwu
+-   @jielinxu
+-   @yamasite
+-   @Yukikaze-CZR
+-   @Heisenberg-Y
+-   @sahuang
+-   @op-hunter
+-   @GuanyunFeng
+-   @thywdy
+-   @erdustiggen
+-   @akihoni
+-   @shiyu22
+-   @shengjh
+-   @dvzubarev
+-   @aaronjin2010
+-   @ReigenAraka
+-   @JackLCL
+-   @Bennu-Li
+-   @ABNER-1
