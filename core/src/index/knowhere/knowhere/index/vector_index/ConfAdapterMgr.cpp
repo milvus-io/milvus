@@ -23,7 +23,7 @@ AdapterMgr::GetAdapter(const IndexType type) {
         RegisterAdapter();
 
     try {
-        return table_.at(type)();
+        return collection_.at(type)();
     } catch (...) {
         KNOWHERE_THROW_MSG("Can not find this type of confadapter");
     }

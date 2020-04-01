@@ -29,30 +29,30 @@ class OngoingFileChecker {
     GetInstance();
 
     Status
-    MarkOngoingFile(const meta::TableFileSchema& table_file);
+    MarkOngoingFile(const meta::SegmentSchema& table_file);
 
     Status
-    MarkOngoingFiles(const meta::TableFilesSchema& table_files);
+    MarkOngoingFiles(const meta::SegmentsSchema& table_files);
 
     Status
-    UnmarkOngoingFile(const meta::TableFileSchema& table_file);
+    UnmarkOngoingFile(const meta::SegmentSchema& table_file);
 
     Status
-    UnmarkOngoingFiles(const meta::TableFilesSchema& table_files);
+    UnmarkOngoingFiles(const meta::SegmentsSchema& table_files);
 
     bool
-    IsIgnored(const meta::TableFileSchema& schema);
+    IsIgnored(const meta::SegmentSchema& schema);
 
  private:
     Status
-    MarkOngoingFileNoLock(const meta::TableFileSchema& table_file);
+    MarkOngoingFileNoLock(const meta::SegmentSchema& table_file);
 
     Status
-    UnmarkOngoingFileNoLock(const meta::TableFileSchema& table_file);
+    UnmarkOngoingFileNoLock(const meta::SegmentSchema& table_file);
 
  private:
     std::mutex mutex_;
-    Table2FileRef ongoing_files_;  // table id mapping to (file id mapping to ongoing ref-count)
+    Table2FileRef ongoing_files_;  // collection id mapping to (file id mapping to ongoing ref-count)
 };
 
 }  // namespace engine

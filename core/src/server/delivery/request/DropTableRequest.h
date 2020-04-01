@@ -22,16 +22,16 @@ namespace server {
 class DropTableRequest : public BaseRequest {
  public:
     static BaseRequestPtr
-    Create(const std::shared_ptr<milvus::server::Context>& context, const std::string& table_name);
+    Create(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name);
 
  protected:
-    DropTableRequest(const std::shared_ptr<milvus::server::Context>& context, const std::string& table_name);
+    DropTableRequest(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name);
 
     Status
     OnExecute() override;
 
  private:
-    std::string table_name_;
+    std::string collection_name_;
 };
 
 }  // namespace server

@@ -22,16 +22,16 @@ namespace server {
 class PreloadTableRequest : public BaseRequest {
  public:
     static BaseRequestPtr
-    Create(const std::shared_ptr<milvus::server::Context>& context, const std::string& table_name);
+    Create(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name);
 
  protected:
-    PreloadTableRequest(const std::shared_ptr<milvus::server::Context>& context, const std::string& table_name);
+    PreloadTableRequest(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name);
 
     Status
     OnExecute() override;
 
  private:
-    const std::string table_name_;
+    const std::string collection_name_;
 };
 
 }  // namespace server

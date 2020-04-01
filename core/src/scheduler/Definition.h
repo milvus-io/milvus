@@ -27,8 +27,8 @@
 namespace milvus {
 namespace scheduler {
 
-using TableFileSchemaPtr = engine::meta::TableFileSchemaPtr;
-using TableFileSchema = engine::meta::TableFileSchema;
+using SegmentSchemaPtr = engine::meta::SegmentSchemaPtr;
+using SegmentSchema = engine::meta::SegmentSchema;
 
 using ExecutionEnginePtr = engine::ExecutionEnginePtr;
 using EngineFactory = engine::EngineFactory;

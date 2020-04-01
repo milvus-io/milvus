@@ -320,40 +320,40 @@ TEST(UtilTest, STATUS_TEST) {
 }
 
 TEST(ValidationUtilTest, VALIDATE_TABLENAME_TEST) {
-    std::string table_name = "Normal123_";
-    auto status = milvus::server::ValidationUtil::ValidateTableName(table_name);
+    std::string collection_name = "Normal123_";
+    auto status = milvus::server::ValidationUtil::ValidateCollectionName(collection_name);
     ASSERT_TRUE(status.ok());
 
-    table_name = "12sds";
-    status = milvus::server::ValidationUtil::ValidateTableName(table_name);
+    collection_name = "12sds";
+    status = milvus::server::ValidationUtil::ValidateCollectionName(collection_name);
     ASSERT_EQ(status.code(), milvus::SERVER_INVALID_TABLE_NAME);
 
-    table_name = "";
-    status = milvus::server::ValidationUtil::ValidateTableName(table_name);
+    collection_name = "";
+    status = milvus::server::ValidationUtil::ValidateCollectionName(collection_name);
     ASSERT_EQ(status.code(), milvus::SERVER_INVALID_TABLE_NAME);
 
-    table_name = "_asdasd";
-    status = milvus::server::ValidationUtil::ValidateTableName(table_name);
+    collection_name = "_asdasd";
+    status = milvus::server::ValidationUtil::ValidateCollectionName(collection_name);
     ASSERT_EQ(status.code(), milvus::SERVER_SUCCESS);
 
-    table_name = "!@#!@";
-    status = milvus::server::ValidationUtil::ValidateTableName(table_name);
+    collection_name = "!@#!@";
+    status = milvus::server::ValidationUtil::ValidateCollectionName(collection_name);
     ASSERT_EQ(status.code(), milvus::SERVER_INVALID_TABLE_NAME);
 
-    table_name = "_!@#!@";
-    status = milvus::server::ValidationUtil::ValidateTableName(table_name);
+    collection_name = "_!@#!@";
+    status = milvus::server::ValidationUtil::ValidateCollectionName(collection_name);
     ASSERT_EQ(status.code(), milvus::SERVER_INVALID_TABLE_NAME);
 
-    table_name = "中文";
-    status = milvus::server::ValidationUtil::ValidateTableName(table_name);
+    collection_name = "中文";
+    status = milvus::server::ValidationUtil::ValidateCollectionName(collection_name);
     ASSERT_EQ(status.code(), milvus::SERVER_INVALID_TABLE_NAME);
 
-    table_name = std::string(10000, 'a');
-    status = milvus::server::ValidationUtil::ValidateTableName(table_name);
+    collection_name = std::string(10000, 'a');
+    status = milvus::server::ValidationUtil::ValidateCollectionName(collection_name);
     ASSERT_EQ(status.code(), milvus::SERVER_INVALID_TABLE_NAME);
 
-    table_name = "";
-    status = milvus::server::ValidationUtil::ValidatePartitionName(table_name);
+    collection_name = "";
+    status = milvus::server::ValidationUtil::ValidatePartitionName(collection_name);
     ASSERT_EQ(status.code(), milvus::SERVER_INVALID_TABLE_NAME);
 }
 
@@ -437,7 +437,7 @@ TEST(ValidationUtilTest, VALIDATE_INDEX_TEST) {
 }
 
 TEST(ValidationUtilTest, VALIDATE_INDEX_PARAMS_TEST) {
-    milvus::engine::meta::TableSchema table_schema;
+    milvus::engine::meta::CollectionSchema table_schema;
     table_schema.dimension_ = 64;
     milvus::json json_params = {};
 
@@ -578,7 +578,7 @@ TEST(ValidationUtilTest, VALIDATE_INDEX_PARAMS_TEST) {
 
 TEST(ValidationUtilTest, VALIDATE_SEARCH_PARAMS_TEST) {
     int64_t topk = 10;
-    milvus::engine::meta::TableSchema table_schema;
+    milvus::engine::meta::CollectionSchema table_schema;
     table_schema.dimension_ = 64;
 
     milvus::json json_params = {};

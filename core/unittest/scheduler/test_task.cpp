@@ -35,7 +35,7 @@ TEST(TaskTest, INVALID_INDEX) {
     auto trace_context = std::make_shared<milvus::tracing::TraceContext>(mock_span);
     dummy_context->SetTraceContext(trace_context);
 
-    TableFileSchemaPtr dummy_file = std::make_shared<engine::meta::TableFileSchema>();
+    SegmentSchemaPtr dummy_file = std::make_shared<engine::meta::SegmentSchema>();
     dummy_file->index_params_ = "{ \"nlist\": 16384 }";
     dummy_file->dimension_ = 64;
     auto search_task =
@@ -51,7 +51,7 @@ TEST(TaskTest, INVALID_INDEX) {
 TEST(TaskTest, TEST_TASK) {
     auto dummy_context = std::make_shared<milvus::server::Context>("dummy_request_id");
 
-    auto file = std::make_shared<TableFileSchema>();
+    auto file = std::make_shared<SegmentSchema>();
     file->index_params_ = "{ \"nlist\": 16384 }";
     file->dimension_ = 64;
     auto label = std::make_shared<BroadcastLabel>();
@@ -74,7 +74,7 @@ TEST(TaskTest, TEST_TASK) {
     options.insert_cache_immediately_ = true;
     auto meta_ptr = std::make_shared<milvus::engine::meta::SqliteMetaImpl>(options.meta_);
 
-    file->table_id_ = "111";
+    file->collection_id_ = "111";
     file->location_ = "/tmp/milvus_test/index_file1.txt";
     auto build_index_job = std::make_shared<BuildIndexJob>(meta_ptr, options);
     XBuildIndexTask build_index_task(file, label);

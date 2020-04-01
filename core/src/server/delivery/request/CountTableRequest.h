@@ -22,17 +22,18 @@ namespace server {
 class CountTableRequest : public BaseRequest {
  public:
     static BaseRequestPtr
-    Create(const std::shared_ptr<milvus::server::Context>& context, const std::string& table_name, int64_t& row_count);
+    Create(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name,
+           int64_t& row_count);
 
  protected:
-    CountTableRequest(const std::shared_ptr<milvus::server::Context>& context, const std::string& table_name,
+    CountTableRequest(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name,
                       int64_t& row_count);
 
     Status
     OnExecute() override;
 
  private:
-    const std::string table_name_;
+    const std::string collection_name_;
     int64_t& row_count_;
 };
 

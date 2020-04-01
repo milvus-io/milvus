@@ -22,7 +22,7 @@ namespace milvus {
 namespace engine {
 namespace wal {
 
-using TableSchemaPtr = std::shared_ptr<milvus::engine::meta::TableSchema>;
+using TableSchemaPtr = std::shared_ptr<milvus::engine::meta::CollectionSchema>;
 using TableMetaPtr = std::shared_ptr<std::unordered_map<std::string, TableSchemaPtr> >;
 
 #define UNIT_MB (1024 * 1024)
@@ -33,7 +33,7 @@ enum class MXLogType { InsertBinary, InsertVector, Delete, Update, Flush, None }
 struct MXLogRecord {
     uint64_t lsn;
     MXLogType type;
-    std::string table_id;
+    std::string collection_id;
     std::string partition_tag;
     uint32_t length;
     const IDNumber* ids;

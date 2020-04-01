@@ -44,7 +44,7 @@ class SearchCombineRequest : public BaseRequest {
     FreeRequests(const Status& status);
 
  private:
-    std::string table_name_;
+    std::string collection_name_;
     engine::VectorsData vectors_data_;
     int64_t min_topk_ = 0;
     int64_t search_topk_ = 0;
