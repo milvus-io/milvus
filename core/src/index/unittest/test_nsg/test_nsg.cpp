@@ -44,7 +44,7 @@ class NSGInterfaceTest : public DataGen, public ::testing::Test {
         int64_t MB = 1024 * 1024;
         milvus::knowhere::FaissGpuResourceMgr::GetInstance().InitDevice(DEVICEID, MB * 200, MB * 600, 1);
 #endif
-        Generate(256, 1000000 / 100, 1);
+        Generate(256, 1000000 / 100, 10);
         index_ = std::make_shared<milvus::knowhere::NSG>();
 
         train_conf = milvus::knowhere::Config{{milvus::knowhere::meta::DIM, 256},
@@ -117,7 +117,7 @@ TEST_F(NSGInterfaceTest, basic_test) {
     // });
 }
 
-TEST_F(NSGInterfaceTest, comparetest) {
+TEST_F(NSGInterfaceTest, compare_test) {
     milvus::knowhere::impl::DistanceL2 distanceL2;
     milvus::knowhere::impl::DistanceIP distanceIP;
 
@@ -130,6 +130,60 @@ TEST_F(NSGInterfaceTest, comparetest) {
         distanceIP.Compare(xb.data(), xq.data(), 256);
     }
     tc.RecordSection("IP");
+}
+
+TEST_F(NSGInterfaceTest, delete_test) {
+    assert(!xb.empty());
+
+    faiss::ConcurrentBitsetPtr bitset = std::make_shared<faiss::ConcurrentBitset>(nb);
+    auto random_seed = (unsigned)time(NULL);
+    printf("delete ids: \n");
+    for (int i = 0; i < nq; i++) {
+        auto tmp = rand_r(&random_seed) % nb;
+        printf("%ld\n", tmp);
+        //        std::cout << "before delete, test result: " << bitset->test(tmp) << std::endl;
+        bitset->set(tmp);
+        //        std::cout << "after delete, test result: " << bitset->test(tmp) << std::endl;
+        for (int j = 0; j < dim; j++) xq[dim * i + j] = xb[dim * tmp + j];
+    }
+    printf("\n");
+
+    // untrained index
+    {
+        ASSERT_ANY_THROW(index_->Query(query_dataset, search_conf));
+        ASSERT_ANY_THROW(index_->Serialize());
+    }
+
+    train_conf[milvus::knowhere::meta::DEVICEID] = DEVICEID;
+    index_->Train(base_dataset, train_conf);
+
+    printf("---------------search xq-------------\n");
+    {
+        auto result = index_->Query(query_dataset, search_conf);
+        const int64_t* I = result->Get<int64_t*>(milvus::knowhere::meta::IDS);
+        printf("I=\n");
+        for (int i = 0; i < nq; i++) {
+            for (int j = 0; j < k; j++) printf("%5ld ", I[i * k + j]);
+            printf("\n");
+        }
+    }
+
+    printf("----------------search xq with delete------------\n");
+    {  // search xq with delete
+        index_->SetBlacklist(bitset);
+        auto result = index_->Query(query_dataset, search_conf);
+        auto I = result->Get<int64_t*>(milvus::knowhere::meta::IDS);
+
+        printf("I=\n");
+        for (int i = 0; i < nq; i++) {
+            for (int j = 0; j < k; j++) printf("%5ld ", I[i * k + j]);
+            printf("\n");
+        }
+    }
+
+
+    ASSERT_EQ(index_->Count(), nb);
+    ASSERT_EQ(index_->Dim(), dim);
 }
 
 //#include <src/index/knowhere/knowhere/index/vector_index/nsg/OriNSG.h>
