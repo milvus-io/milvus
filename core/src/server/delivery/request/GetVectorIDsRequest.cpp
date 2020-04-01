@@ -28,51 +28,51 @@ namespace milvus {
 namespace server {
 
 GetVectorIDsRequest::GetVectorIDsRequest(const std::shared_ptr<milvus::server::Context>& context,
-                                         const std::string& table_name, const std::string& segment_name,
+                                         const std::string& collection_name, const std::string& segment_name,
                                          std::vector<int64_t>& vector_ids)
     : BaseRequest(context, BaseRequest::kGetVectorIDs),
-      table_name_(table_name),
+      collection_name_(collection_name),
       segment_name_(segment_name),
       vector_ids_(vector_ids) {
 }
 
 BaseRequestPtr
-GetVectorIDsRequest::Create(const std::shared_ptr<milvus::server::Context>& context, const std::string& table_name,
+GetVectorIDsRequest::Create(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name,
                             const std::string& segment_name, std::vector<int64_t>& vector_ids) {
-    return std::shared_ptr<BaseRequest>(new GetVectorIDsRequest(context, table_name, segment_name, vector_ids));
+    return std::shared_ptr<BaseRequest>(new GetVectorIDsRequest(context, collection_name, segment_name, vector_ids));
 }
 
 Status
 GetVectorIDsRequest::OnExecute() {
     try {
-        std::string hdr = "GetVectorIDsRequest(table=" + table_name_ + " segment=" + segment_name_ + ")";
+        std::string hdr = "GetVectorIDsRequest(collection=" + collection_name_ + " segment=" + segment_name_ + ")";
         TimeRecorderAuto rc(hdr);
 
         // step 1: check arguments
-        auto status = ValidationUtil::ValidateTableName(table_name_);
+        auto status = ValidationUtil::ValidateCollectionName(collection_name_);
         if (!status.ok()) {
             return status;
         }
 
-        // only process root table, ignore partition table
-        engine::meta::TableSchema table_schema;
-        table_schema.table_id_ = table_name_;
+        // only process root collection, ignore partition collection
+        engine::meta::CollectionSchema table_schema;
+        table_schema.collection_id_ = collection_name_;
         status = DBWrapper::DB()->DescribeTable(table_schema);
         if (!status.ok()) {
             if (status.code() == DB_NOT_FOUND) {
-                return Status(SERVER_TABLE_NOT_EXIST, TableNotExistMsg(table_name_));
+                return Status(SERVER_TABLE_NOT_EXIST, TableNotExistMsg(collection_name_));
             } else {
                 return status;
             }
         } else {
             if (!table_schema.owner_table_.empty()) {
-                return Status(SERVER_INVALID_TABLE_NAME, TableNotExistMsg(table_name_));
+                return Status(SERVER_INVALID_TABLE_NAME, TableNotExistMsg(collection_name_));
             }
         }
 
         // step 2: get vector data, now only support get one id
         vector_ids_.clear();
-        return DBWrapper::DB()->GetVectorIDs(table_name_, segment_name_, vector_ids_);
+        return DBWrapper::DB()->GetVectorIDs(collection_name_, segment_name_, vector_ids_);
     } catch (std::exception& ex) {
         return Status(SERVER_UNEXPECTED_ERROR, ex.what());
     }

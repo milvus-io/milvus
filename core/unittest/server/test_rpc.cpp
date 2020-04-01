@@ -103,7 +103,7 @@ class RpcHandlerTest : public testing::Test {
 
         milvus::server::DBWrapper::GetInstance().StartService();
 
-        // initialize handler, create table
+        // initialize handler, create collection
         handler = std::make_shared<milvus::server::grpc::GrpcRequestHandler>(opentracing::Tracer::Global());
         dummy_context = std::make_shared<milvus::server::Context>("dummy_request_id");
         opentracing::mocktracer::MockTracerOptions tracer_options;
@@ -261,41 +261,41 @@ TEST_F(RpcHandlerTest, INDEX_TEST) {
     fiu_disable("CreateIndexRequest.OnExecute.ip_meteric");
 #endif
 
-    ::milvus::grpc::TableName table_name;
+    ::milvus::grpc::TableName collection_name;
     ::milvus::grpc::IndexParam index_param;
-    handler->DescribeIndex(&context, &table_name, &index_param);
-    table_name.set_table_name("test4");
-    handler->DescribeIndex(&context, &table_name, &index_param);
-    table_name.set_table_name(TABLE_NAME);
-    handler->DescribeIndex(&context, &table_name, &index_param);
+    handler->DescribeIndex(&context, &collection_name, &index_param);
+    collection_name.set_table_name("test4");
+    handler->DescribeIndex(&context, &collection_name, &index_param);
+    collection_name.set_table_name(TABLE_NAME);
+    handler->DescribeIndex(&context, &collection_name, &index_param);
 
     fiu_init(0);
     fiu_enable("DescribeIndexRequest.OnExecute.throw_std_exception", 1, NULL, 0);
-    handler->DescribeIndex(&context, &table_name, &index_param);
+    handler->DescribeIndex(&context, &collection_name, &index_param);
     fiu_disable("DescribeIndexRequest.OnExecute.throw_std_exception");
 
     ::milvus::grpc::Status status;
-    table_name.Clear();
-    handler->DropIndex(&context, &table_name, &status);
-    table_name.set_table_name("test5");
-    handler->DropIndex(&context, &table_name, &status);
+    collection_name.Clear();
+    handler->DropIndex(&context, &collection_name, &status);
+    collection_name.set_table_name("test5");
+    handler->DropIndex(&context, &collection_name, &status);
 
-    table_name.set_table_name(TABLE_NAME);
+    collection_name.set_table_name(TABLE_NAME);
 
     fiu_init(0);
     fiu_enable("DropIndexRequest.OnExecute.table_not_exist", 1, NULL, 0);
-    handler->DropIndex(&context, &table_name, &status);
+    handler->DropIndex(&context, &collection_name, &status);
     fiu_disable("DropIndexRequest.OnExecute.table_not_exist");
 
     fiu_enable("DropIndexRequest.OnExecute.drop_index_fail", 1, NULL, 0);
-    handler->DropIndex(&context, &table_name, &status);
+    handler->DropIndex(&context, &collection_name, &status);
     fiu_disable("DropIndexRequest.OnExecute.drop_index_fail");
 
     fiu_enable("DropIndexRequest.OnExecute.throw_std_exception", 1, NULL, 0);
-    handler->DropIndex(&context, &table_name, &status);
+    handler->DropIndex(&context, &collection_name, &status);
     fiu_disable("DropIndexRequest.OnExecute.throw_std_exception");
 
-    handler->DropIndex(&context, &table_name, &status);
+    handler->DropIndex(&context, &collection_name, &status);
 }
 
 TEST_F(RpcHandlerTest, INSERT_TEST) {
@@ -376,10 +376,10 @@ TEST_F(RpcHandlerTest, SEARCH_TEST) {
     // test null input
     handler->Search(&context, nullptr, &response);
 
-    // test invalid table name
+    // test invalid collection name
     handler->Search(&context, &request, &response);
 
-    // test table not exist
+    // test collection not exist
     request.set_table_name("test3");
     handler->Search(&context, &request, &response);
 
@@ -644,12 +644,12 @@ TEST_F(RpcHandlerTest, TABLES_TEST) {
     ::milvus::grpc::Status response;
     std::string tablename = "tbl";
 
-    // create table test
+    // create collection test
     // test null input
     handler->CreateTable(&context, nullptr, &response);
-    // test invalid table name
+    // test invalid collection name
     handler->CreateTable(&context, &tableschema, &response);
-    // test invalid table dimension
+    // test invalid collection dimension
     tableschema.set_table_name(tablename);
     handler->CreateTable(&context, &tableschema, &response);
     // test invalid index file size
@@ -658,27 +658,27 @@ TEST_F(RpcHandlerTest, TABLES_TEST) {
     // test invalid index metric type
     tableschema.set_index_file_size(INDEX_FILE_SIZE);
     handler->CreateTable(&context, &tableschema, &response);
-    // test table already exist
+    // test collection already exist
     tableschema.set_metric_type(1);
     handler->CreateTable(&context, &tableschema, &response);
 
-    // describe table test
-    // test invalid table name
-    ::milvus::grpc::TableName table_name;
+    // describe collection test
+    // test invalid collection name
+    ::milvus::grpc::TableName collection_name;
     ::milvus::grpc::TableSchema table_schema;
-    handler->DescribeTable(&context, &table_name, &table_schema);
+    handler->DescribeTable(&context, &collection_name, &table_schema);
 
-    table_name.set_table_name(TABLE_NAME);
-    ::grpc::Status status = handler->DescribeTable(&context, &table_name, &table_schema);
+    collection_name.set_table_name(TABLE_NAME);
+    ::grpc::Status status = handler->DescribeTable(&context, &collection_name, &table_schema);
     ASSERT_EQ(status.error_code(), ::grpc::Status::OK.error_code());
 
     fiu_init(0);
     fiu_enable("DescribeTableRequest.OnExecute.describe_table_fail", 1, NULL, 0);
-    handler->DescribeTable(&context, &table_name, &table_schema);
+    handler->DescribeTable(&context, &collection_name, &table_schema);
     fiu_disable("DescribeTableRequest.OnExecute.describe_table_fail");
 
     fiu_enable("DescribeTableRequest.OnExecute.throw_std_exception", 1, NULL, 0);
-    handler->DescribeTable(&context, &table_name, &table_schema);
+    handler->DescribeTable(&context, &collection_name, &table_schema);
     fiu_disable("DescribeTableRequest.OnExecute.throw_std_exception");
 
     ::milvus::grpc::InsertParam request;
@@ -689,7 +689,7 @@ TEST_F(RpcHandlerTest, TABLES_TEST) {
         vector_ids.add_vector_id_array(i);
     }
     // Insert vectors
-    // test invalid table name
+    // test invalid collection name
     handler->Insert(&context, &request, &vector_ids);
     request.set_table_name(tablename);
     // test empty row record
@@ -722,9 +722,9 @@ TEST_F(RpcHandlerTest, TABLES_TEST) {
     status = handler->ShowTables(&context, &cmd, &table_name_list);
     ASSERT_EQ(status.error_code(), ::grpc::Status::OK.error_code());
 
-    // show table info
+    // show collection info
     ::milvus::grpc::TableInfo table_info;
-    status = handler->ShowTableInfo(&context, &table_name, &table_info);
+    status = handler->ShowTableInfo(&context, &collection_name, &table_info);
     ASSERT_EQ(status.error_code(), ::grpc::Status::OK.error_code());
 
     fiu_init(0);
@@ -732,40 +732,40 @@ TEST_F(RpcHandlerTest, TABLES_TEST) {
     handler->ShowTables(&context, &cmd, &table_name_list);
     fiu_disable("ShowTablesRequest.OnExecute.show_tables_fail");
 
-    // Count Table
+    // Count Collection
     ::milvus::grpc::TableRowCount count;
-    table_name.Clear();
-    status = handler->CountTable(&context, &table_name, &count);
-    table_name.set_table_name(tablename);
-    status = handler->CountTable(&context, &table_name, &count);
+    collection_name.Clear();
+    status = handler->CountTable(&context, &collection_name, &count);
+    collection_name.set_table_name(tablename);
+    status = handler->CountTable(&context, &collection_name, &count);
     ASSERT_EQ(status.error_code(), ::grpc::Status::OK.error_code());
     //    ASSERT_EQ(count.table_row_count(), vector_ids.vector_id_array_size());
     fiu_init(0);
     fiu_enable("CountTableRequest.OnExecute.db_not_found", 1, NULL, 0);
-    status = handler->CountTable(&context, &table_name, &count);
+    status = handler->CountTable(&context, &collection_name, &count);
     fiu_disable("CountTableRequest.OnExecute.db_not_found");
 
     fiu_enable("CountTableRequest.OnExecute.status_error", 1, NULL, 0);
-    status = handler->CountTable(&context, &table_name, &count);
+    status = handler->CountTable(&context, &collection_name, &count);
     fiu_disable("CountTableRequest.OnExecute.status_error");
 
     fiu_enable("CountTableRequest.OnExecute.throw_std_exception", 1, NULL, 0);
-    status = handler->CountTable(&context, &table_name, &count);
+    status = handler->CountTable(&context, &collection_name, &count);
     fiu_disable("CountTableRequest.OnExecute.throw_std_exception");
 
-    // Preload Table
-    table_name.Clear();
-    status = handler->PreloadTable(&context, &table_name, &response);
-    table_name.set_table_name(TABLE_NAME);
-    status = handler->PreloadTable(&context, &table_name, &response);
+    // Preload Collection
+    collection_name.Clear();
+    status = handler->PreloadTable(&context, &collection_name, &response);
+    collection_name.set_table_name(TABLE_NAME);
+    status = handler->PreloadTable(&context, &collection_name, &response);
     ASSERT_EQ(status.error_code(), ::grpc::Status::OK.error_code());
 
     fiu_enable("PreloadTableRequest.OnExecute.preload_table_fail", 1, NULL, 0);
-    handler->PreloadTable(&context, &table_name, &response);
+    handler->PreloadTable(&context, &collection_name, &response);
     fiu_disable("PreloadTableRequest.OnExecute.preload_table_fail");
 
     fiu_enable("PreloadTableRequest.OnExecute.throw_std_exception", 1, NULL, 0);
-    handler->PreloadTable(&context, &table_name, &response);
+    handler->PreloadTable(&context, &collection_name, &response);
     fiu_disable("PreloadTableRequest.OnExecute.throw_std_exception");
 
     fiu_init(0);
@@ -793,44 +793,44 @@ TEST_F(RpcHandlerTest, TABLES_TEST) {
     ASSERT_NE(response.error_code(), ::grpc::Status::OK.error_code());
     fiu_disable("CreateTableRequest.OnExecute.throw_std_exception");
 
-    // Drop table
-    table_name.set_table_name("");
-    // test invalid table name
-    ::grpc::Status grpc_status = handler->DropTable(&context, &table_name, &response);
-    table_name.set_table_name(tablename);
+    // Drop collection
+    collection_name.set_table_name("");
+    // test invalid collection name
+    ::grpc::Status grpc_status = handler->DropTable(&context, &collection_name, &response);
+    collection_name.set_table_name(tablename);
 
     fiu_enable("DropTableRequest.OnExecute.db_not_found", 1, NULL, 0);
-    handler->DropTable(&context, &table_name, &response);
+    handler->DropTable(&context, &collection_name, &response);
     ASSERT_NE(response.error_code(), ::grpc::Status::OK.error_code());
     fiu_disable("DropTableRequest.OnExecute.db_not_found");
 
     fiu_enable("DropTableRequest.OnExecute.describe_table_fail", 1, NULL, 0);
-    handler->DropTable(&context, &table_name, &response);
+    handler->DropTable(&context, &collection_name, &response);
     ASSERT_NE(response.error_code(), ::grpc::Status::OK.error_code());
     fiu_disable("DropTableRequest.OnExecute.describe_table_fail");
 
     fiu_enable("DropTableRequest.OnExecute.throw_std_exception", 1, NULL, 0);
-    handler->DropTable(&context, &table_name, &response);
+    handler->DropTable(&context, &collection_name, &response);
     ASSERT_NE(response.error_code(), ::grpc::Status::OK.error_code());
     fiu_disable("DropTableRequest.OnExecute.throw_std_exception");
 
-    grpc_status = handler->DropTable(&context, &table_name, &response);
+    grpc_status = handler->DropTable(&context, &collection_name, &response);
     ASSERT_EQ(grpc_status.error_code(), ::grpc::Status::OK.error_code());
     int error_code = response.error_code();
     ASSERT_EQ(error_code, ::milvus::grpc::ErrorCode::SUCCESS);
 
-    tableschema.set_table_name(table_name.table_name());
-    handler->DropTable(&context, &table_name, &response);
+    tableschema.set_table_name(collection_name.table_name());
+    handler->DropTable(&context, &collection_name, &response);
     sleep(1);
     handler->CreateTable(&context, &tableschema, &response);
     ASSERT_EQ(response.error_code(), ::grpc::Status::OK.error_code());
 
     fiu_enable("DropTableRequest.OnExecute.drop_table_fail", 1, NULL, 0);
-    handler->DropTable(&context, &table_name, &response);
+    handler->DropTable(&context, &collection_name, &response);
     ASSERT_NE(response.error_code(), ::grpc::Status::OK.error_code());
     fiu_disable("DropTableRequest.OnExecute.drop_table_fail");
 
-    handler->DropTable(&context, &table_name, &response);
+    handler->DropTable(&context, &collection_name, &response);
 }
 
 TEST_F(RpcHandlerTest, PARTITION_TEST) {
@@ -853,20 +853,20 @@ TEST_F(RpcHandlerTest, PARTITION_TEST) {
     handler->CreatePartition(&context, &partition_param, &response);
     ASSERT_EQ(response.error_code(), ::grpc::Status::OK.error_code());
 
-    ::milvus::grpc::TableName table_name;
-    table_name.set_table_name(str_table_name);
+    ::milvus::grpc::TableName collection_name;
+    collection_name.set_table_name(str_table_name);
     ::milvus::grpc::PartitionList partition_list;
-    handler->ShowPartitions(&context, &table_name, &partition_list);
+    handler->ShowPartitions(&context, &collection_name, &partition_list);
     ASSERT_EQ(response.error_code(), ::grpc::Status::OK.error_code());
     ASSERT_EQ(partition_list.partition_tag_array_size(), 2);
 
     fiu_init(0);
     fiu_enable("ShowPartitionsRequest.OnExecute.invalid_table_name", 1, NULL, 0);
-    handler->ShowPartitions(&context, &table_name, &partition_list);
+    handler->ShowPartitions(&context, &collection_name, &partition_list);
     fiu_disable("ShowPartitionsRequest.OnExecute.invalid_table_name");
 
     fiu_enable("ShowPartitionsRequest.OnExecute.show_partition_fail", 1, NULL, 0);
-    handler->ShowPartitions(&context, &table_name, &partition_list);
+    handler->ShowPartitions(&context, &collection_name, &partition_list);
     fiu_disable("ShowPartitionsRequest.OnExecute.show_partition_fail");
 
     fiu_init(0);

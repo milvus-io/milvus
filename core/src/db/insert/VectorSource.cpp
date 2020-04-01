@@ -28,7 +28,7 @@ VectorSource::VectorSource(VectorsData vectors) : vectors_(std::move(vectors)) {
 
 Status
 VectorSource::Add(/*const ExecutionEnginePtr& execution_engine,*/ const segment::SegmentWriterPtr& segment_writer_ptr,
-                  const meta::TableFileSchema& table_file_schema, const size_t& num_vectors_to_add,
+                  const meta::SegmentSchema& table_file_schema, const size_t& num_vectors_to_add,
                   size_t& num_vectors_added) {
     uint64_t n = vectors_.vector_count_;
     server::CollectAddMetrics metrics(n, table_file_schema.dimension_);

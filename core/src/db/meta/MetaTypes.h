@@ -40,14 +40,14 @@ struct EnvironmentSchema {
     uint64_t global_lsn_ = 0;
 };  // EnvironmentSchema
 
-struct TableSchema {
+struct CollectionSchema {
     typedef enum {
         NORMAL,
         TO_DELETE,
     } TABLE_STATE;
 
     size_t id_ = 0;
-    std::string table_id_;
+    std::string collection_id_;
     int32_t state_ = (int)NORMAL;
     uint16_t dimension_ = 0;
     int64_t created_on_ = 0;
@@ -60,9 +60,9 @@ struct TableSchema {
     std::string partition_tag_;
     std::string version_ = CURRENT_VERSION;
     uint64_t flush_lsn_ = 0;
-};  // TableSchema
+};  // CollectionSchema
 
-struct TableFileSchema {
+struct SegmentSchema {
     typedef enum {
         NEW,
         RAW,
@@ -75,7 +75,7 @@ struct TableFileSchema {
     } FILE_TYPE;
 
     size_t id_ = 0;
-    std::string table_id_;
+    std::string collection_id_;
     std::string segment_id_;
     std::string file_id_;
     int32_t file_type_ = NEW;
@@ -92,10 +92,10 @@ struct TableFileSchema {
     std::string index_params_;                   // not persist to meta
     int32_t metric_type_ = DEFAULT_METRIC_TYPE;  // not persist to meta
     uint64_t flush_lsn_ = 0;
-};  // TableFileSchema
+};  // SegmentSchema
 
-using TableFileSchemaPtr = std::shared_ptr<meta::TableFileSchema>;
-using TableFilesSchema = std::vector<TableFileSchema>;
+using SegmentSchemaPtr = std::shared_ptr<meta::SegmentSchema>;
+using SegmentsSchema = std::vector<SegmentSchema>;
 
 }  // namespace meta
 }  // namespace engine

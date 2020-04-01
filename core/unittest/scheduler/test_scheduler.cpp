@@ -194,7 +194,7 @@ class SchedulerTest2 : public testing::Test {
 // TEST_F(SchedulerTest2, SPECIFIED_RESOURCE_TEST) {
 //    const uint64_t NUM = 2;
 //    std::vector<std::shared_ptr<TestTask>> tasks;
-//    TableFileSchemaPtr dummy = std::make_shared<TableFileSchema>();
+//    SegmentSchemaPtr dummy = std::make_shared<SegmentSchema>();
 //    dummy->location_ = "location";
 //
 //    for (uint64_t i = 0; i < NUM; ++i) {

@@ -36,19 +36,19 @@ uint64_t index_file_counter = 0;
 std::mutex index_file_counter_mutex;
 
 static std::string
-ConstructParentFolder(const std::string& db_path, const meta::TableFileSchema& table_file) {
-    std::string table_path = db_path + TABLES_FOLDER + table_file.table_id_;
+ConstructParentFolder(const std::string& db_path, const meta::SegmentSchema& table_file) {
+    std::string table_path = db_path + TABLES_FOLDER + table_file.collection_id_;
     std::string partition_path = table_path + "/" + table_file.segment_id_;
     return partition_path;
 }
 
 static std::string
-GetTableFileParentFolder(const DBMetaOptions& options, const meta::TableFileSchema& table_file) {
+GetTableFileParentFolder(const DBMetaOptions& options, const meta::SegmentSchema& table_file) {
     uint64_t path_count = options.slave_paths_.size() + 1;
     std::string target_path = options.path_;
     uint64_t index = 0;
 
-    if (meta::TableFileSchema::NEW_INDEX == table_file.file_type_) {
+    if (meta::SegmentSchema::NEW_INDEX == table_file.file_type_) {
         // index file is large file and to be persisted permanently
         // we need to distribute index files to each db_path averagely
         // round robin according to a file counter
@@ -79,9 +79,9 @@ GetMicroSecTimeStamp() {
 }
 
 Status
-CreateTablePath(const DBMetaOptions& options, const std::string& table_id) {
+CreateTablePath(const DBMetaOptions& options, const std::string& collection_id) {
     std::string db_path = options.path_;
-    std::string table_path = db_path + TABLES_FOLDER + table_id;
+    std::string table_path = db_path + TABLES_FOLDER + collection_id;
     auto status = server::CommonUtil::CreateDirectory(table_path);
     if (!status.ok()) {
         ENGINE_LOG_ERROR << status.message();
@@ -89,7 +89,7 @@ CreateTablePath(const DBMetaOptions& options, const std::string& table_id) {
     }
 
     for (auto& path : options.slave_paths_) {
-        table_path = path + TABLES_FOLDER + table_id;
+        table_path = path + TABLES_FOLDER + collection_id;
         status = server::CommonUtil::CreateDirectory(table_path);
         fiu_do_on("CreateTablePath.creat_slave_path", status = Status(DB_INVALID_PATH, ""));
         if (!status.ok()) {
@@ -102,18 +102,18 @@ CreateTablePath(const DBMetaOptions& options, const std::string& table_id) {
 }
 
 Status
-DeleteTablePath(const DBMetaOptions& options, const std::string& table_id, bool force) {
+DeleteTablePath(const DBMetaOptions& options, const std::string& collection_id, bool force) {
     std::vector<std::string> paths = options.slave_paths_;
     paths.push_back(options.path_);
 
     for (auto& path : paths) {
-        std::string table_path = path + TABLES_FOLDER + table_id;
+        std::string table_path = path + TABLES_FOLDER + collection_id;
         if (force) {
             boost::filesystem::remove_all(table_path);
-            ENGINE_LOG_DEBUG << "Remove table folder: " << table_path;
+            ENGINE_LOG_DEBUG << "Remove collection folder: " << table_path;
         } else if (boost::filesystem::exists(table_path) && boost::filesystem::is_empty(table_path)) {
             boost::filesystem::remove_all(table_path);
-            ENGINE_LOG_DEBUG << "Remove table folder: " << table_path;
+            ENGINE_LOG_DEBUG << "Remove collection folder: " << table_path;
         }
     }
 
@@ -122,7 +122,7 @@ DeleteTablePath(const DBMetaOptions& options, const std::string& table_id, bool 
     config.GetStorageConfigS3Enable(s3_enable);
 
     if (s3_enable) {
-        std::string table_path = options.path_ + TABLES_FOLDER + table_id;
+        std::string table_path = options.path_ + TABLES_FOLDER + collection_id;
 
         auto& storage_inst = milvus::storage::S3ClientWrapper::GetInstance();
         Status stat = storage_inst.DeleteObjects(table_path);
@@ -135,7 +135,7 @@ DeleteTablePath(const DBMetaOptions& options, const std::string& table_id, bool 
 }
 
 Status
-CreateTableFilePath(const DBMetaOptions& options, meta::TableFileSchema& table_file) {
+CreateTableFilePath(const DBMetaOptions& options, meta::SegmentSchema& table_file) {
     std::string parent_path = GetTableFileParentFolder(options, table_file);
 
     auto status = server::CommonUtil::CreateDirectory(parent_path);
@@ -151,7 +151,7 @@ CreateTableFilePath(const DBMetaOptions& options, meta::TableFileSchema& table_f
 }
 
 Status
-GetTableFilePath(const DBMetaOptions& options, meta::TableFileSchema& table_file) {
+GetTableFilePath(const DBMetaOptions& options, meta::SegmentSchema& table_file) {
     std::string parent_path = ConstructParentFolder(options.path_, table_file);
     std::string file_path = parent_path + "/" + table_file.file_id_;
 
@@ -179,23 +179,23 @@ GetTableFilePath(const DBMetaOptions& options, meta::TableFileSchema& table_file
         }
     }
 
-    std::string msg = "Table file doesn't exist: " + file_path;
+    std::string msg = "Collection file doesn't exist: " + file_path;
     if (table_file.file_size_ > 0) {  // no need to pop error for empty file
-        ENGINE_LOG_ERROR << msg << " in path: " << options.path_ << " for table: " << table_file.table_id_;
+        ENGINE_LOG_ERROR << msg << " in path: " << options.path_ << " for collection: " << table_file.collection_id_;
     }
 
     return Status(DB_ERROR, msg);
 }
 
 Status
-DeleteTableFilePath(const DBMetaOptions& options, meta::TableFileSchema& table_file) {
+DeleteTableFilePath(const DBMetaOptions& options, meta::SegmentSchema& table_file) {
     utils::GetTableFilePath(options, table_file);
     boost::filesystem::remove(table_file.location_);
     return Status::OK();
 }
 
 Status
-DeleteSegment(const DBMetaOptions& options, meta::TableFileSchema& table_file) {
+DeleteSegment(const DBMetaOptions& options, meta::SegmentSchema& table_file) {
     utils::GetTableFilePath(options, table_file);
     std::string segment_dir;
     GetParentPath(table_file.location_, segment_dir);

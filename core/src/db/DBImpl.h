@@ -55,91 +55,92 @@ class DBImpl : public DB, public server::CacheConfigHandler, public server::Engi
     DropAll() override;
 
     Status
-    CreateTable(meta::TableSchema& table_schema) override;
+    CreateTable(meta::CollectionSchema& table_schema) override;
 
     Status
-    DropTable(const std::string& table_id) override;
+    DropTable(const std::string& collection_id) override;
 
     Status
-    DescribeTable(meta::TableSchema& table_schema) override;
+    DescribeTable(meta::CollectionSchema& table_schema) override;
 
     Status
-    HasTable(const std::string& table_id, bool& has_or_not) override;
+    HasTable(const std::string& collection_id, bool& has_or_not) override;
 
     Status
-    HasNativeTable(const std::string& table_id, bool& has_or_not_) override;
+    HasNativeTable(const std::string& collection_id, bool& has_or_not_) override;
 
     Status
-    AllTables(std::vector<meta::TableSchema>& table_schema_array) override;
+    AllTables(std::vector<meta::CollectionSchema>& table_schema_array) override;
 
     Status
-    GetTableInfo(const std::string& table_id, TableInfo& table_info) override;
+    GetTableInfo(const std::string& collection_id, TableInfo& table_info) override;
 
     Status
-    PreloadTable(const std::string& table_id) override;
+    PreloadTable(const std::string& collection_id) override;
 
     Status
-    UpdateTableFlag(const std::string& table_id, int64_t flag) override;
+    UpdateTableFlag(const std::string& collection_id, int64_t flag) override;
 
     Status
-    GetTableRowCount(const std::string& table_id, uint64_t& row_count) override;
+    GetTableRowCount(const std::string& collection_id, uint64_t& row_count) override;
 
     Status
-    CreatePartition(const std::string& table_id, const std::string& partition_name,
+    CreatePartition(const std::string& collection_id, const std::string& partition_name,
                     const std::string& partition_tag) override;
 
     Status
     DropPartition(const std::string& partition_name) override;
 
     Status
-    DropPartitionByTag(const std::string& table_id, const std::string& partition_tag) override;
+    DropPartitionByTag(const std::string& collection_id, const std::string& partition_tag) override;
 
     Status
-    ShowPartitions(const std::string& table_id, std::vector<meta::TableSchema>& partition_schema_array) override;
+    ShowPartitions(const std::string& collection_id,
+                   std::vector<meta::CollectionSchema>& partition_schema_array) override;
 
     Status
-    InsertVectors(const std::string& table_id, const std::string& partition_tag, VectorsData& vectors) override;
+    InsertVectors(const std::string& collection_id, const std::string& partition_tag, VectorsData& vectors) override;
 
     Status
-    DeleteVector(const std::string& table_id, IDNumber vector_id) override;
+    DeleteVector(const std::string& collection_id, IDNumber vector_id) override;
 
     Status
-    DeleteVectors(const std::string& table_id, IDNumbers vector_ids) override;
+    DeleteVectors(const std::string& collection_id, IDNumbers vector_ids) override;
 
     Status
-    Flush(const std::string& table_id) override;
+    Flush(const std::string& collection_id) override;
 
     Status
     Flush() override;
 
     Status
-    Compact(const std::string& table_id) override;
+    Compact(const std::string& collection_id) override;
 
     Status
-    GetVectorByID(const std::string& table_id, const IDNumber& vector_id, VectorsData& vector) override;
+    GetVectorByID(const std::string& collection_id, const IDNumber& vector_id, VectorsData& vector) override;
 
     Status
-    GetVectorIDs(const std::string& table_id, const std::string& segment_id, IDNumbers& vector_ids) override;
+    GetVectorIDs(const std::string& collection_id, const std::string& segment_id, IDNumbers& vector_ids) override;
 
     //    Status
     //    Merge(const std::set<std::string>& table_ids) override;
 
     Status
-    CreateIndex(const std::string& table_id, const TableIndex& index) override;
+    CreateIndex(const std::string& collection_id, const TableIndex& index) override;
 
     Status
-    DescribeIndex(const std::string& table_id, TableIndex& index) override;
+    DescribeIndex(const std::string& collection_id, TableIndex& index) override;
 
     Status
-    DropIndex(const std::string& table_id) override;
+    DropIndex(const std::string& collection_id) override;
 
     Status
-    QueryByID(const std::shared_ptr<server::Context>& context, const std::string& table_id,
+    QueryByID(const std::shared_ptr<server::Context>& context, const std::string& collection_id,
               const std::vector<std::string>& partition_tags, uint64_t k, const milvus::json& extra_params,
               IDNumber vector_id, ResultIds& result_ids, ResultDistances& result_distances) override;
 
     Status
-    Query(const std::shared_ptr<server::Context>& context, const std::string& table_id,
+    Query(const std::shared_ptr<server::Context>& context, const std::string& collection_id,
           const std::vector<std::string>& partition_tags, uint64_t k, const milvus::json& extra_params,
           const VectorsData& vectors, ResultIds& result_ids, ResultDistances& result_distances) override;
 
@@ -160,13 +161,13 @@ class DBImpl : public DB, public server::CacheConfigHandler, public server::Engi
 
  private:
     Status
-    QueryAsync(const std::shared_ptr<server::Context>& context, const meta::TableFilesSchema& files, uint64_t k,
+    QueryAsync(const std::shared_ptr<server::Context>& context, const meta::SegmentsSchema& files, uint64_t k,
                const milvus::json& extra_params, const VectorsData& vectors, ResultIds& result_ids,
                ResultDistances& result_distances);
 
     Status
-    GetVectorByIdHelper(const std::string& table_id, IDNumber vector_id, VectorsData& vector,
-                        const meta::TableFilesSchema& files);
+    GetVectorByIdHelper(const std::string& collection_id, IDNumber vector_id, VectorsData& vector,
+                        const meta::SegmentsSchema& files);
 
     void
     BackgroundTimerTask();
@@ -184,10 +185,10 @@ class DBImpl : public DB, public server::CacheConfigHandler, public server::Engi
     StartMergeTask();
 
     Status
-    MergeFiles(const std::string& table_id, const meta::TableFilesSchema& files);
+    MergeFiles(const std::string& collection_id, const meta::SegmentsSchema& files);
 
     Status
-    BackgroundMergeFiles(const std::string& table_id);
+    BackgroundMergeFiles(const std::string& collection_id);
 
     void
     BackgroundMerge(std::set<std::string> table_ids);
@@ -199,8 +200,8 @@ class DBImpl : public DB, public server::CacheConfigHandler, public server::Engi
     BackgroundBuildIndex();
 
     Status
-    CompactFile(const std::string& table_id, const meta::TableFileSchema& file,
-                meta::TableFilesSchema& files_to_update);
+    CompactFile(const std::string& collection_id, const meta::SegmentSchema& file,
+                meta::SegmentsSchema& files_to_update);
 
     /*
     Status
@@ -208,33 +209,33 @@ class DBImpl : public DB, public server::CacheConfigHandler, public server::Engi
     */
 
     Status
-    GetFilesToBuildIndex(const std::string& table_id, const std::vector<int>& file_types,
-                         meta::TableFilesSchema& files);
+    GetFilesToBuildIndex(const std::string& collection_id, const std::vector<int>& file_types,
+                         meta::SegmentsSchema& files);
 
     Status
-    GetFilesToSearch(const std::string& table_id, meta::TableFilesSchema& files);
+    GetFilesToSearch(const std::string& collection_id, meta::SegmentsSchema& files);
 
     Status
-    GetPartitionByTag(const std::string& table_id, const std::string& partition_tag, std::string& partition_name);
+    GetPartitionByTag(const std::string& collection_id, const std::string& partition_tag, std::string& partition_name);
 
     Status
-    GetPartitionsByTags(const std::string& table_id, const std::vector<std::string>& partition_tags,
+    GetPartitionsByTags(const std::string& collection_id, const std::vector<std::string>& partition_tags,
                         std::set<std::string>& partition_name_array);
 
     Status
-    DropTableRecursively(const std::string& table_id);
+    DropTableRecursively(const std::string& collection_id);
 
     Status
-    UpdateTableIndexRecursively(const std::string& table_id, const TableIndex& index);
+    UpdateTableIndexRecursively(const std::string& collection_id, const TableIndex& index);
 
     Status
-    WaitTableIndexRecursively(const std::string& table_id, const TableIndex& index);
+    WaitTableIndexRecursively(const std::string& collection_id, const TableIndex& index);
 
     Status
-    DropTableIndexRecursively(const std::string& table_id);
+    DropTableIndexRecursively(const std::string& collection_id);
 
     Status
-    GetTableRowCountRecursively(const std::string& table_id, uint64_t& row_count);
+    GetTableRowCountRecursively(const std::string& collection_id, uint64_t& row_count);
 
     Status
     ExecWalRecord(const wal::MXLogRecord& record);

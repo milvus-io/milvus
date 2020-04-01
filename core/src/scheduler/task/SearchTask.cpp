@@ -83,8 +83,8 @@ void
 CollectFileMetrics(int file_type, size_t file_size) {
     server::MetricsBase& inst = server::Metrics::GetInstance();
     switch (file_type) {
-        case TableFileSchema::RAW:
-        case TableFileSchema::TO_INDEX: {
+        case SegmentSchema::RAW:
+        case SegmentSchema::TO_INDEX: {
             inst.RawFileSizeHistogramObserve(file_size);
             inst.RawFileSizeTotalIncrement(file_size);
             inst.RawFileSizeGaugeSet(file_size);
@@ -99,7 +99,7 @@ CollectFileMetrics(int file_type, size_t file_size) {
     }
 }
 
-XSearchTask::XSearchTask(const std::shared_ptr<server::Context>& context, TableFileSchemaPtr file, TaskLabelPtr label)
+XSearchTask::XSearchTask(const std::shared_ptr<server::Context>& context, SegmentSchemaPtr file, TaskLabelPtr label)
     : Task(TaskType::SearchTask, std::move(label)), context_(context), file_(file) {
     if (file_) {
         // distance -- value 0 means two vectors equal, ascending reduce, L2/HAMMING/JACCARD/TONIMOTO ...
@@ -110,9 +110,9 @@ XSearchTask::XSearchTask(const std::shared_ptr<server::Context>& context, TableF
         }
 
         EngineType engine_type;
-        if (file->file_type_ == TableFileSchema::FILE_TYPE::RAW ||
-            file->file_type_ == TableFileSchema::FILE_TYPE::TO_INDEX ||
-            file->file_type_ == TableFileSchema::FILE_TYPE::BACKUP) {
+        if (file->file_type_ == SegmentSchema::FILE_TYPE::RAW ||
+            file->file_type_ == SegmentSchema::FILE_TYPE::TO_INDEX ||
+            file->file_type_ == SegmentSchema::FILE_TYPE::BACKUP) {
             engine_type = engine::utils::IsBinaryMetricType(file->metric_type_) ? EngineType::FAISS_BIN_IDMAP
                                                                                 : EngineType::FAISS_IDMAP;
         } else {

@@ -24,13 +24,13 @@ OngoingFileChecker::GetInstance() {
 }
 
 Status
-OngoingFileChecker::MarkOngoingFile(const meta::TableFileSchema& table_file) {
+OngoingFileChecker::MarkOngoingFile(const meta::SegmentSchema& table_file) {
     std::lock_guard<std::mutex> lck(mutex_);
     return MarkOngoingFileNoLock(table_file);
 }
 
 Status
-OngoingFileChecker::MarkOngoingFiles(const meta::TableFilesSchema& table_files) {
+OngoingFileChecker::MarkOngoingFiles(const meta::SegmentsSchema& table_files) {
     std::lock_guard<std::mutex> lck(mutex_);
 
     for (auto& table_file : table_files) {
@@ -41,13 +41,13 @@ OngoingFileChecker::MarkOngoingFiles(const meta::TableFilesSchema& table_files) 
 }
 
 Status
-OngoingFileChecker::UnmarkOngoingFile(const meta::TableFileSchema& table_file) {
+OngoingFileChecker::UnmarkOngoingFile(const meta::SegmentSchema& table_file) {
     std::lock_guard<std::mutex> lck(mutex_);
     return UnmarkOngoingFileNoLock(table_file);
 }
 
 Status
-OngoingFileChecker::UnmarkOngoingFiles(const meta::TableFilesSchema& table_files) {
+OngoingFileChecker::UnmarkOngoingFiles(const meta::SegmentsSchema& table_files) {
     std::lock_guard<std::mutex> lck(mutex_);
 
     for (auto& table_file : table_files) {
@@ -58,10 +58,10 @@ OngoingFileChecker::UnmarkOngoingFiles(const meta::TableFilesSchema& table_files
 }
 
 bool
-OngoingFileChecker::IsIgnored(const meta::TableFileSchema& schema) {
+OngoingFileChecker::IsIgnored(const meta::SegmentSchema& schema) {
     std::lock_guard<std::mutex> lck(mutex_);
 
-    auto iter = ongoing_files_.find(schema.table_id_);
+    auto iter = ongoing_files_.find(schema.collection_id_);
     if (iter == ongoing_files_.end()) {
         return false;
     } else {
@@ -75,16 +75,16 @@ OngoingFileChecker::IsIgnored(const meta::TableFileSchema& schema) {
 }
 
 Status
-OngoingFileChecker::MarkOngoingFileNoLock(const meta::TableFileSchema& table_file) {
-    if (table_file.table_id_.empty() || table_file.file_id_.empty()) {
-        return Status(DB_ERROR, "Invalid table files");
+OngoingFileChecker::MarkOngoingFileNoLock(const meta::SegmentSchema& table_file) {
+    if (table_file.collection_id_.empty() || table_file.file_id_.empty()) {
+        return Status(DB_ERROR, "Invalid collection files");
     }
 
-    auto iter = ongoing_files_.find(table_file.table_id_);
+    auto iter = ongoing_files_.find(table_file.collection_id_);
     if (iter == ongoing_files_.end()) {
         File2RefCount files_refcount;
         files_refcount.insert(std::make_pair(table_file.file_id_, 1));
-        ongoing_files_.insert(std::make_pair(table_file.table_id_, files_refcount));
+        ongoing_files_.insert(std::make_pair(table_file.collection_id_, files_refcount));
     } else {
         auto it_file = iter->second.find(table_file.file_id_);
         if (it_file == iter->second.end()) {
@@ -95,18 +95,18 @@ OngoingFileChecker::MarkOngoingFileNoLock(const meta::TableFileSchema& table_fil
     }
 
     ENGINE_LOG_DEBUG << "Mark ongoing file:" << table_file.file_id_
-                     << " refcount:" << ongoing_files_[table_file.table_id_][table_file.file_id_];
+                     << " refcount:" << ongoing_files_[table_file.collection_id_][table_file.file_id_];
 
     return Status::OK();
 }
 
 Status
-OngoingFileChecker::UnmarkOngoingFileNoLock(const meta::TableFileSchema& table_file) {
-    if (table_file.table_id_.empty() || table_file.file_id_.empty()) {
-        return Status(DB_ERROR, "Invalid table files");
+OngoingFileChecker::UnmarkOngoingFileNoLock(const meta::SegmentSchema& table_file) {
+    if (table_file.collection_id_.empty() || table_file.file_id_.empty()) {
+        return Status(DB_ERROR, "Invalid collection files");
     }
 
-    auto iter = ongoing_files_.find(table_file.table_id_);
+    auto iter = ongoing_files_.find(table_file.collection_id_);
     if (iter != ongoing_files_.end()) {
         auto it_file = iter->second.find(table_file.file_id_);
         if (it_file != iter->second.end()) {
@@ -117,7 +117,7 @@ OngoingFileChecker::UnmarkOngoingFileNoLock(const meta::TableFileSchema& table_f
             if (it_file->second <= 0) {
                 iter->second.erase(table_file.file_id_);
                 if (iter->second.empty()) {
-                    ongoing_files_.erase(table_file.table_id_);
+                    ongoing_files_.erase(table_file.collection_id_);
                 }
             }
         }

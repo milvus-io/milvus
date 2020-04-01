@@ -44,82 +44,82 @@ class DB {
     Stop() = 0;
 
     virtual Status
-    CreateTable(meta::TableSchema& table_schema_) = 0;
+    CreateTable(meta::CollectionSchema& table_schema_) = 0;
 
     virtual Status
-    DropTable(const std::string& table_id) = 0;
+    DropTable(const std::string& collection_id) = 0;
 
     virtual Status
-    DescribeTable(meta::TableSchema& table_schema_) = 0;
+    DescribeTable(meta::CollectionSchema& table_schema_) = 0;
 
     virtual Status
-    HasTable(const std::string& table_id, bool& has_or_not_) = 0;
+    HasTable(const std::string& collection_id, bool& has_or_not_) = 0;
 
     virtual Status
-    HasNativeTable(const std::string& table_id, bool& has_or_not_) = 0;
+    HasNativeTable(const std::string& collection_id, bool& has_or_not_) = 0;
 
     virtual Status
-    AllTables(std::vector<meta::TableSchema>& table_schema_array) = 0;
+    AllTables(std::vector<meta::CollectionSchema>& table_schema_array) = 0;
 
     virtual Status
-    GetTableInfo(const std::string& table_id, TableInfo& table_info) = 0;
+    GetTableInfo(const std::string& collection_id, TableInfo& table_info) = 0;
 
     virtual Status
-    GetTableRowCount(const std::string& table_id, uint64_t& row_count) = 0;
+    GetTableRowCount(const std::string& collection_id, uint64_t& row_count) = 0;
 
     virtual Status
-    PreloadTable(const std::string& table_id) = 0;
+    PreloadTable(const std::string& collection_id) = 0;
 
     virtual Status
-    UpdateTableFlag(const std::string& table_id, int64_t flag) = 0;
+    UpdateTableFlag(const std::string& collection_id, int64_t flag) = 0;
 
     virtual Status
-    CreatePartition(const std::string& table_id, const std::string& partition_name,
+    CreatePartition(const std::string& collection_id, const std::string& partition_name,
                     const std::string& partition_tag) = 0;
 
     virtual Status
     DropPartition(const std::string& partition_name) = 0;
 
     virtual Status
-    DropPartitionByTag(const std::string& table_id, const std::string& partition_tag) = 0;
+    DropPartitionByTag(const std::string& collection_id, const std::string& partition_tag) = 0;
 
     virtual Status
-    ShowPartitions(const std::string& table_id, std::vector<meta::TableSchema>& partition_schema_array) = 0;
+    ShowPartitions(const std::string& collection_id, std::vector<meta::CollectionSchema>& partition_schema_array) = 0;
 
     virtual Status
-    InsertVectors(const std::string& table_id, const std::string& partition_tag, VectorsData& vectors) = 0;
+    InsertVectors(const std::string& collection_id, const std::string& partition_tag, VectorsData& vectors) = 0;
 
     virtual Status
-    DeleteVector(const std::string& table_id, IDNumber vector_id) = 0;
+    DeleteVector(const std::string& collection_id, IDNumber vector_id) = 0;
 
     virtual Status
-    DeleteVectors(const std::string& table_id, IDNumbers vector_ids) = 0;
+    DeleteVectors(const std::string& collection_id, IDNumbers vector_ids) = 0;
 
     virtual Status
-    Flush(const std::string& table_id) = 0;
+    Flush(const std::string& collection_id) = 0;
 
     virtual Status
     Flush() = 0;
 
     virtual Status
-    Compact(const std::string& table_id) = 0;
+    Compact(const std::string& collection_id) = 0;
 
     virtual Status
-    GetVectorByID(const std::string& table_id, const IDNumber& vector_id, VectorsData& vector) = 0;
+    GetVectorByID(const std::string& collection_id, const IDNumber& vector_id, VectorsData& vector) = 0;
 
     virtual Status
-    GetVectorIDs(const std::string& table_id, const std::string& segment_id, IDNumbers& vector_ids) = 0;
+    GetVectorIDs(const std::string& collection_id, const std::string& segment_id, IDNumbers& vector_ids) = 0;
 
     //    virtual Status
     //    Merge(const std::set<std::string>& table_ids) = 0;
 
     virtual Status
-    QueryByID(const std::shared_ptr<server::Context>& context, const std::string& table_id,
+    QueryByID(const std::shared_ptr<server::Context>& context, const std::string& collection_id,
               const std::vector<std::string>& partition_tags, uint64_t k, const milvus::json& extra_params,
               IDNumber vector_id, ResultIds& result_ids, ResultDistances& result_distances) = 0;
 
     virtual Status
-    Query(const std::shared_ptr<server::Context>& context, const std::string& table_id,
+    Query(const std::shared_ptr<server::Context>& context, const std::string& collection_id,
           const std::vector<std::string>& partition_tags, uint64_t k, const milvus::json& extra_params,
           const VectorsData& vectors, ResultIds& result_ids, ResultDistances& result_distances) = 0;
 
@@ -132,13 +132,13 @@ class DB {
     Size(uint64_t& result) = 0;
 
     virtual Status
-    CreateIndex(const std::string& table_id, const TableIndex& index) = 0;
+    CreateIndex(const std::string& collection_id, const TableIndex& index) = 0;
 
     virtual Status
-    DescribeIndex(const std::string& table_id, TableIndex& index) = 0;
+    DescribeIndex(const std::string& collection_id, TableIndex& index) = 0;
 
     virtual Status
-    DropIndex(const std::string& table_id) = 0;
+    DropIndex(const std::string& collection_id) = 0;
 
     virtual Status
     DropAll() = 0;

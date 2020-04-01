@@ -29,18 +29,18 @@ namespace server {
 class GetVectorByIDRequest : public BaseRequest {
  public:
     static BaseRequestPtr
-    Create(const std::shared_ptr<milvus::server::Context>& context, const std::string& table_name,
+    Create(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name,
            const std::vector<int64_t>& ids, engine::VectorsData& vectors);
 
  protected:
-    GetVectorByIDRequest(const std::shared_ptr<milvus::server::Context>& context, const std::string& table_name,
+    GetVectorByIDRequest(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name,
                          const std::vector<int64_t>& ids, engine::VectorsData& vectors);
 
     Status
     OnExecute() override;
 
  private:
-    std::string table_name_;
+    std::string collection_name_;
     std::vector<int64_t> ids_;
     engine::VectorsData& vectors_;
 };

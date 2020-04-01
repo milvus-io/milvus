@@ -22,49 +22,49 @@ namespace milvus {
 namespace server {
 
 DescribeTableRequest::DescribeTableRequest(const std::shared_ptr<milvus::server::Context>& context,
-                                           const std::string& table_name, TableSchema& schema)
-    : BaseRequest(context, BaseRequest::kDescribeTable), table_name_(table_name), schema_(schema) {
+                                           const std::string& collection_name, CollectionSchema& schema)
+    : BaseRequest(context, BaseRequest::kDescribeTable), collection_name_(collection_name), schema_(schema) {
 }
 
 BaseRequestPtr
-DescribeTableRequest::Create(const std::shared_ptr<milvus::server::Context>& context, const std::string& table_name,
-                             TableSchema& schema) {
-    return std::shared_ptr<BaseRequest>(new DescribeTableRequest(context, table_name, schema));
+DescribeTableRequest::Create(const std::shared_ptr<milvus::server::Context>& context,
+                             const std::string& collection_name, CollectionSchema& schema) {
+    return std::shared_ptr<BaseRequest>(new DescribeTableRequest(context, collection_name, schema));
 }
 
 Status
 DescribeTableRequest::OnExecute() {
-    std::string hdr = "DescribeTableRequest(table=" + table_name_ + ")";
+    std::string hdr = "DescribeTableRequest(collection=" + collection_name_ + ")";
     TimeRecorderAuto rc(hdr);
 
     try {
         // step 1: check arguments
-        auto status = ValidationUtil::ValidateTableName(table_name_);
+        auto status = ValidationUtil::ValidateCollectionName(collection_name_);
         if (!status.ok()) {
             return status;
         }
 
-        // step 2: get table info
-        // only process root table, ignore partition table
-        engine::meta::TableSchema table_schema;
-        table_schema.table_id_ = table_name_;
+        // step 2: get collection info
+        // only process root collection, ignore partition collection
+        engine::meta::CollectionSchema table_schema;
+        table_schema.collection_id_ = collection_name_;
         status = DBWrapper::DB()->DescribeTable(table_schema);
         fiu_do_on("DescribeTableRequest.OnExecute.describe_table_fail",
                   status = Status(milvus::SERVER_UNEXPECTED_ERROR, ""));
         fiu_do_on("DescribeTableRequest.OnExecute.throw_std_exception", throw std::exception());
         if (!status.ok()) {
             if (status.code() == DB_NOT_FOUND) {
-                return Status(SERVER_TABLE_NOT_EXIST, TableNotExistMsg(table_name_));
+                return Status(SERVER_TABLE_NOT_EXIST, TableNotExistMsg(collection_name_));
             } else {
                 return status;
             }
         } else {
             if (!table_schema.owner_table_.empty()) {
-                return Status(SERVER_INVALID_TABLE_NAME, TableNotExistMsg(table_name_));
+                return Status(SERVER_INVALID_TABLE_NAME, TableNotExistMsg(collection_name_));
             }
         }
 
-        schema_.table_name_ = table_schema.table_id_;
+        schema_.collection_name_ = table_schema.collection_id_;
         schema_.dimension_ = static_cast<int64_t>(table_schema.dimension_);
         schema_.index_file_size_ = table_schema.index_file_size_;
         schema_.metric_type_ = table_schema.metric_type_;

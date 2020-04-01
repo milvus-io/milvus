@@ -30,7 +30,7 @@ class ValidationUtil {
 
  public:
     static Status
-    ValidateTableName(const std::string& table_name);
+    ValidateCollectionName(const std::string& collection_name);
 
     static Status
     ValidateTableDimension(int64_t dimension, int64_t metric_type);
@@ -39,15 +39,15 @@ class ValidationUtil {
     ValidateTableIndexType(int32_t index_type);
 
     static Status
-    ValidateIndexParams(const milvus::json& index_params, const engine::meta::TableSchema& table_schema,
+    ValidateIndexParams(const milvus::json& index_params, const engine::meta::CollectionSchema& table_schema,
                         int32_t index_type);
 
     static Status
-    ValidateSearchParams(const milvus::json& search_params, const engine::meta::TableSchema& table_schema,
+    ValidateSearchParams(const milvus::json& search_params, const engine::meta::CollectionSchema& table_schema,
                          int64_t topk);
 
     static Status
-    ValidateVectorData(const engine::VectorsData& vectors, const engine::meta::TableSchema& table_schema);
+    ValidateVectorData(const engine::VectorsData& vectors, const engine::meta::CollectionSchema& table_schema);
 
     static Status
     ValidateTableIndexFileSize(int64_t index_file_size);

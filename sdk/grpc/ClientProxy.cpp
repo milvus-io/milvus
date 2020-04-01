@@ -367,7 +367,7 @@ ClientProxy::DescribeCollection(const std::string& collection_name, CollectionPa
 
         Status status = client_ptr_->DescribeTable(collection_name, grpc_schema);
 
-        collection_param.collection_name = grpc_schema.table_name();
+        collection_param.collection_name = grpc_schema.collection_name();
         collection_param.dimension = grpc_schema.dimension();
         collection_param.index_file_size = grpc_schema.index_file_size();
         collection_param.metric_type = static_cast<MetricType>(grpc_schema.metric_type());
@@ -400,7 +400,7 @@ ClientProxy::ShowCollections(std::vector<std::string>& collection_array) {
 
         collection_array.resize(collection_name_list.table_names_size());
         for (uint64_t i = 0; i < collection_name_list.table_names_size(); ++i) {
-            collection_array[i] = collection_name_list.table_names(i);
+            collection_array[i] = collection_name_list.collection_names(i);
         }
         return status;
     } catch (std::exception& ex) {
