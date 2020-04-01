@@ -9,6 +9,7 @@ Please mark all change in change log and use the issue from GitHub
 
 ## Feature
 -   \#1655 GPU index support delete vectors
+-   \#1825 Add annoy index type in C++ sdk
 
 ## Improvement
 
