@@ -52,5 +52,7 @@ class S3IOReader : public IOReader {
     size_t pos_;
 };
 
+using S3IOReaderPtr = std::shared_ptr<S3IOReader>;
+
 }  // namespace storage
 }  // namespace milvus

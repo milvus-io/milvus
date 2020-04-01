@@ -49,5 +49,7 @@ class S3IOWriter : public IOWriter {
     std::string buffer_;
 };
 
+using S3IOWriterPtr = std::shared_ptr<S3IOWriter>;
+
 }  // namespace storage
 }  // namespace milvus

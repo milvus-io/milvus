@@ -27,11 +27,11 @@
 namespace milvus {
 namespace engine {
 
-extern milvus::Status
-write_index(knowhere::VecIndexPtr index, const std::string& location);
-
-extern knowhere::VecIndexPtr
-read_index(const std::string& location);
+//extern milvus::Status
+//write_index(knowhere::VecIndexPtr index, const std::string& location);
+//
+//extern knowhere::VecIndexPtr
+//read_index(const std::string& location);
 
 }  // namespace engine
 }  // namespace milvus

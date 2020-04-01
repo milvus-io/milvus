@@ -17,32 +17,42 @@
 
 #pragma once
 
-#include "codecs/Codec.h"
+#include <mutex>
+#include <string>
+
+#include "codecs/VectorIndexFormat.h"
 
 namespace milvus {
 namespace codec {
 
-class DefaultCodec : public Codec {
+class DefaultVectorIndexFormat : public VectorIndexFormat {
  public:
-    DefaultCodec();
+    DefaultVectorIndexFormat() = default;
 
-    VectorsFormatPtr
-    GetVectorsFormat() override;
+    void
+    read(const storage::FSHandlerPtr& fs_ptr, segment::VectorIndexPtr& vector_index) override;
 
-    VectorIndexFormatPtr
-    GetVectorIndexFormat() override;
+    void
+    write(const storage::FSHandlerPtr& fs_ptr, const std::string& location,
+          const segment::VectorIndexPtr& vector_index) override;
 
-    DeletedDocsFormatPtr
-    GetDeletedDocsFormat() override;
+    // No copy and move
+    DefaultVectorIndexFormat(const DefaultVectorIndexFormat&) = delete;
+    DefaultVectorIndexFormat(DefaultVectorIndexFormat&&) = delete;
 
-    IdBloomFilterFormatPtr
-    GetIdBloomFilterFormat() override;
+    DefaultVectorIndexFormat&
+    operator=(const DefaultVectorIndexFormat&) = delete;
+    DefaultVectorIndexFormat&
+    operator=(DefaultVectorIndexFormat&&) = delete;
 
  private:
-    VectorsFormatPtr vectors_format_ptr_;
-    VectorIndexFormatPtr vector_index_format_ptr_;
-    DeletedDocsFormatPtr deleted_docs_format_ptr_;
-    IdBloomFilterFormatPtr id_bloom_filter_format_ptr_;
+    knowhere::VecIndexPtr
+    read_internal(const std::string& path);
+
+ private:
+    std::mutex mutex_;
+
+    const std::string vector_index_extension_ = "";
 };
 
 }  // namespace codec

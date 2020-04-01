@@ -39,6 +39,8 @@
 #endif
 #include "knowhere/index/vector_index/helpers/IndexParameter.h"
 #include "metrics/Metrics.h"
+#include "segment/SegmentReader.h"
+#include "segment/SegmentWriter.h"
 #include "scheduler/Utils.h"
 #include "utils/CommonUtil.h"
 #include "utils/Error.h"
@@ -353,7 +355,12 @@ ExecutionEngineImpl::Size() const {
 
 Status
 ExecutionEngineImpl::Serialize() {
-    auto status = write_index(index_, location_);
+    Status status; // = write_index(index_, location_);
+    std::string segment_dir;
+    utils::GetParentPath(location_, segment_dir);
+    auto segment_writer_ptr = std::make_shared<segment::SegmentWriter>(segment_dir);
+    segment_writer_ptr->SetVectorIndex(index_);
+    segment_writer_ptr->WriteVectorIndex(location_);
 
     // here we reset index size by file size,
     // since some index type(such as SQ8) data size become smaller after serialized
@@ -436,7 +443,12 @@ ExecutionEngineImpl::Load(bool to_cache) {
             ENGINE_LOG_DEBUG << "Finished loading raw data from segment " << segment_dir;
         } else {
             try {
-                index_ = read_index(location_);
+                // index_ = read_index(location_);
+                segment::SegmentPtr segment_ptr;
+                segment_reader_ptr->GetSegment(segment_ptr);
+                segment::VectorIndexPtr vector_index = segment_ptr->vector_index_ptr_;
+                auto status = segment_reader_ptr->LoadVectorIndex(vector_index);
+                index_ = vector_index->GetVectorIndex();
 
                 if (index_ == nullptr) {
                     std::string msg = "Failed to load index from " + location_;

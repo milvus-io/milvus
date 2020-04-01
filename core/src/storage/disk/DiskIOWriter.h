@@ -50,5 +50,7 @@ class DiskIOWriter : public IOWriter {
     std::fstream fs_;
 };
 
+using DiskIOWriterPtr = std::shared_ptr<DiskIOWriter>;
+
 }  // namespace storage
 }  // namespace milvus

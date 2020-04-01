@@ -19,17 +19,37 @@
 
 #include <memory>
 
-#include "index/knowhere/knowhere/index/Index.h"
+#include "knowhere/index/vector_index/VecIndex.h"
 
 namespace milvus {
 namespace segment {
 
 class VectorIndex {
  public:
-    explicit VectorIndex(knowhere::IndexPtr index_ptr);
+    explicit VectorIndex(knowhere::VecIndexPtr index_ptr) : index_ptr_(index_ptr) {
+    }
+
+    VectorIndex() = default;
+
+    knowhere::VecIndexPtr
+    GetVectorIndex() const {
+        return index_ptr_;
+    }
 
     void
-    Get(knowhere::IndexPtr& index_ptr);
+    SetVectorIndex(const knowhere::VecIndexPtr& index_ptr) {
+        index_ptr_ = index_ptr;
+    }
+
+    void
+    SetName(const std::string& name) {
+        name_ = name;
+    }
+
+    const std::string&
+    GetName() const {
+        return name_;
+    }
 
     // No copy and move
     VectorIndex(const VectorIndex&) = delete;
@@ -41,7 +61,8 @@ class VectorIndex {
     operator=(VectorIndex&&) = delete;
 
  private:
-    knowhere::IndexPtr index_ptr_;
+    knowhere::VecIndexPtr index_ptr_ = nullptr;
+    std::string name_;
 };
 
 using VectorIndexPtr = std::shared_ptr<VectorIndex>;

@@ -19,17 +19,20 @@
 
 #include <memory>
 
+#include "knowhere/common/Typedef.h"
 #include "segment/DeletedDocs.h"
 #include "segment/IdBloomFilter.h"
 #include "segment/Vectors.h"
+#include "segment/VectorIndex.h"
 
 namespace milvus {
 namespace segment {
 
-typedef int64_t doc_id_t;
+using doc_id_t = knowhere::IDType;
 
 struct Segment {
     VectorsPtr vectors_ptr_ = std::make_shared<Vectors>();
+    VectorIndexPtr vector_index_ptr_ = std::make_shared<VectorIndex>();
     DeletedDocsPtr deleted_docs_ptr_ = nullptr;
     IdBloomFilterPtr id_bloom_filter_ptr_ = nullptr;
 };

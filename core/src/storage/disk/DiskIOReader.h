@@ -52,5 +52,7 @@ class DiskIOReader : public IOReader {
     std::fstream fs_;
 };
 
+using DiskIOReaderPtr = std::shared_ptr<DiskIOReader>;
+
 }  // namespace storage
 }  // namespace milvus
