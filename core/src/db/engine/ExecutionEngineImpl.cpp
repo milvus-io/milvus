@@ -22,7 +22,6 @@
 #include "cache/GpuCacheMgr.h"
 #include "config/Config.h"
 #include "db/Utils.h"
-#include "index/archive/VecIndex.h"
 #include "knowhere/common/Config.h"
 #include "knowhere/index/vector_index/ConfAdapter.h"
 #include "knowhere/index/vector_index/ConfAdapterMgr.h"
@@ -39,9 +38,9 @@
 #endif
 #include "knowhere/index/vector_index/helpers/IndexParameter.h"
 #include "metrics/Metrics.h"
+#include "scheduler/Utils.h"
 #include "segment/SegmentReader.h"
 #include "segment/SegmentWriter.h"
-#include "scheduler/Utils.h"
 #include "utils/CommonUtil.h"
 #include "utils/Error.h"
 #include "utils/Exception.h"
@@ -355,7 +354,6 @@ ExecutionEngineImpl::Size() const {
 
 Status
 ExecutionEngineImpl::Serialize() {
-    Status status; // = write_index(index_, location_);
     std::string segment_dir;
     utils::GetParentPath(location_, segment_dir);
     auto segment_writer_ptr = std::make_shared<segment::SegmentWriter>(segment_dir);
@@ -369,10 +367,10 @@ ExecutionEngineImpl::Serialize() {
 
     if (index_->Size() == 0) {
         std::string msg = "Failed to serialize file: " + location_ + " reason: out of disk space or memory";
-        status = Status(DB_ERROR, msg);
+        return Status(DB_ERROR, msg);
     }
 
-    return status;
+    return Status::OK();
 }
 
 Status
@@ -443,7 +441,6 @@ ExecutionEngineImpl::Load(bool to_cache) {
             ENGINE_LOG_DEBUG << "Finished loading raw data from segment " << segment_dir;
         } else {
             try {
-                // index_ = read_index(location_);
                 segment::SegmentPtr segment_ptr;
                 segment_reader_ptr->GetSegment(segment_ptr);
                 segment::VectorIndexPtr vector_index = segment_ptr->vector_index_ptr_;

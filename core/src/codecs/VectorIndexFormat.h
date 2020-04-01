@@ -34,7 +34,6 @@ class VectorIndexFormat {
     virtual void
     write(const storage::FSHandlerPtr& fs_ptr, const std::string& location,
           const segment::VectorIndexPtr& vector_index) = 0;
-
 };
 
 using VectorIndexFormatPtr = std::shared_ptr<VectorIndexFormat>;

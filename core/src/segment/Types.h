@@ -22,8 +22,8 @@
 #include "knowhere/common/Typedef.h"
 #include "segment/DeletedDocs.h"
 #include "segment/IdBloomFilter.h"
-#include "segment/Vectors.h"
 #include "segment/VectorIndex.h"
+#include "segment/Vectors.h"
 
 namespace milvus {
 namespace segment {

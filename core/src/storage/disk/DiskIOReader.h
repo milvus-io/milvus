@@ -12,6 +12,7 @@
 #pragma once
 
 #include <fstream>
+#include <memory>
 #include <string>
 #include "storage/IOReader.h"
 

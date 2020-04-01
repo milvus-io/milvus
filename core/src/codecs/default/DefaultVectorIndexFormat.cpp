@@ -16,6 +16,7 @@
 // under the License.
 
 #include <boost/filesystem.hpp>
+#include <memory>
 
 #include "codecs/default/DefaultVectorIndexFormat.h"
 #include "knowhere/common/BinarySet.h"
@@ -87,9 +88,9 @@ DefaultVectorIndexFormat::read_internal(const std::string& path) {
     double rate = length * 1000000.0 / span / 1024 / 1024;
     ENGINE_LOG_DEBUG << "read_index(" << path << ") rate " << rate << "MB/s";
 
-    knowhere::VecIndexFactory &vec_index_factory = knowhere::VecIndexFactory::GetInstance();
-    auto index = vec_index_factory.CreateVecIndex(knowhere::OldIndexTypeToStr(current_type),
-                                                  knowhere::IndexMode::MODE_CPU);
+    knowhere::VecIndexFactory& vec_index_factory = knowhere::VecIndexFactory::GetInstance();
+    auto index =
+        vec_index_factory.CreateVecIndex(knowhere::OldIndexTypeToStr(current_type), knowhere::IndexMode::MODE_CPU);
     if (index != nullptr) {
         index->Load(load_data_list);
         index->SetIndexSize(length);
@@ -119,9 +120,9 @@ DefaultVectorIndexFormat::read(const storage::FSHandlerPtr& fs_ptr, segment::Vec
     for (; it != it_end; ++it) {
         const auto& path = it->path();
 
-        //if (path.extension().string() == vector_index_extension_) {
+        // if (path.extension().string() == vector_index_extension_) {
         /* tmp solution, should be replaced when use .idx as index extension name */
-        const std::string &location = path.string();
+        const std::string& location = path.string();
         if (location.substr(location.length() - 3) == "000") {
             knowhere::VecIndexPtr index = read_internal(location);
             vector_index->SetVectorIndex(index);
@@ -139,7 +140,7 @@ DefaultVectorIndexFormat::write(const storage::FSHandlerPtr& fs_ptr, const std::
     std::string dir_path = fs_ptr->operation_ptr_->GetDirectory();
 
     const std::string index_file_path = location;
-    //const std::string index_file_path = dir_path + "/" + vector_index->GetName() + vector_index_extension_;
+    // const std::string index_file_path = dir_path + "/" + vector_index->GetName() + vector_index_extension_;
 
     milvus::TimeRecorder recorder("write_index");
 

@@ -50,7 +50,7 @@ SegmentWriter::AddVectors(const std::string& name, const std::vector<uint8_t>& d
 }
 
 Status
-SegmentWriter::SetVectorIndex(const milvus::knowhere::VecIndexPtr &index) {
+SegmentWriter::SetVectorIndex(const milvus::knowhere::VecIndexPtr& index) {
     segment_ptr_->vector_index_ptr_->SetVectorIndex(index);
     return Status::OK();
 }

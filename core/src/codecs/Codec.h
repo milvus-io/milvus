@@ -22,8 +22,8 @@
 #include "DeletedDocsFormat.h"
 #include "IdBloomFilterFormat.h"
 #include "IdIndexFormat.h"
-#include "VectorsFormat.h"
 #include "VectorIndexFormat.h"
+#include "VectorsFormat.h"
 
 namespace milvus {
 namespace codec {
