@@ -994,10 +994,10 @@ MySQLMetaImpl::UpdateTableFlushLSN(const std::string& collection_id, uint64_t fl
             updateTableFlagQuery << "UPDATE " << META_TABLES << " SET flush_lsn = " << flush_lsn
                                  << " WHERE table_id = " << mysqlpp::quote << collection_id << ";";
 
-            ENGINE_LOG_DEBUG << "MySQLMetaImpl::UpdateTableFlushLSN: " << statement.str();
+            ENGINE_LOG_DEBUG << "MySQLMetaImpl::UpdateTableFlushLSN: " << updateTableFlagQuery.str();
 
-            if (!statement.exec()) {
-                return HandleException("QUERY ERROR WHEN UPDATING TABLE FLUSH_LSN", statement.error());
+            if (!updateTableFlagQuery.exec()) {
+                return HandleException("QUERY ERROR WHEN UPDATING TABLE FLUSH_LSN", updateTableFlagQuery.error());
             }
         }  // Scoped Connection
 

@@ -721,7 +721,7 @@ SqliteMetaImpl::UpdateTableIndex(const std::string& collection_id, const TableIn
 
         columns(&CollectionSchema::id_, &CollectionSchema::state_, &CollectionSchema::dimension_, &CollectionSchema::created_on_,
                 &CollectionSchema::flag_, &CollectionSchema::index_file_size_, &CollectionSchema::owner_table_,
-                &CollectionSchema::partition_tag_, &CollectionSchema::version_),
+                &CollectionSchema::partition_tag_, &CollectionSchema::version_, &CollectionSchema::flush_lsn_),
         where(c(&CollectionSchema::collection_id_) == collection_id and c(&CollectionSchema::state_) != (int)CollectionSchema::TO_DELETE));
 
         if (tables.size() > 0) {
