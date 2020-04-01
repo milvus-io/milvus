@@ -83,8 +83,8 @@ SearchRequest::OnExecute() {
     try {
         uint64_t vector_count = vectors_data_.vector_count_;
         fiu_do_on("SearchRequest.OnExecute.throw_std_exception", throw std::exception());
-        std::string hdr = "SearchRequest execute(collection=" + collection_name_ + ", nq=" + std::to_string(vector_count) +
-                          ", k=" + std::to_string(topk_) + ")";
+        std::string hdr = "SearchRequest execute(collection=" + collection_name_ +
+                          ", nq=" + std::to_string(vector_count) + ", k=" + std::to_string(topk_) + ")";
         TimeRecorderAuto rc(hdr);
 
         // step 4: check table existence
