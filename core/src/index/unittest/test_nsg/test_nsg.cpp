@@ -182,7 +182,6 @@ TEST_F(NSGInterfaceTest, delete_test) {
             ASSERT_EQ(I_before[i * k + j], I_after[i * k + j - 1]);
         }
     }*/
-
 }
 
 //#include <src/index/knowhere/knowhere/index/vector_index/nsg/OriNSG.h>
