@@ -66,12 +66,12 @@ BuildVectors(uint64_t n, milvus::engine::VectorsData& vectors) {
 
 TEST_F(MemManagerTest, VECTOR_SOURCE_TEST) {
     milvus::engine::meta::CollectionSchema table_schema = BuildTableSchema();
-    auto status = impl_->CreateTable(table_schema);
+    auto status = impl_->CreateCollection(table_schema);
     ASSERT_TRUE(status.ok());
 
     milvus::engine::meta::SegmentSchema table_file_schema;
     table_file_schema.collection_id_ = GetTableName();
-    status = impl_->CreateTableFile(table_file_schema);
+    status = impl_->CreateCollectionFile(table_file_schema);
     ASSERT_TRUE(status.ok());
 
     int64_t n = 100;
@@ -114,7 +114,7 @@ TEST_F(MemManagerTest, MEM_TABLE_FILE_TEST) {
     fiu_init(0);
 
     milvus::engine::meta::CollectionSchema table_schema = BuildTableSchema();
-    auto status = impl_->CreateTable(table_schema);
+    auto status = impl_->CreateCollection(table_schema);
     ASSERT_TRUE(status.ok());
 
     milvus::engine::MemTableFile mem_table_file(GetTableName(), impl_, options);
@@ -151,9 +151,9 @@ TEST_F(MemManagerTest, MEM_TABLE_FILE_TEST) {
 
     {
         //test fail create collection file
-        FIU_ENABLE_FIU("SqliteMetaImpl.CreateTableFile.throw_exception");
+        FIU_ENABLE_FIU("SqliteMetaImpl.CreateCollectionFile.throw_exception");
         milvus::engine::MemTableFile mem_table_file_1(GetTableName(), impl_, options);
-        fiu_disable("SqliteMetaImpl.CreateTableFile.throw_exception");
+        fiu_disable("SqliteMetaImpl.CreateCollectionFile.throw_exception");
 
         status = mem_table_file_1.Add(source);
         ASSERT_FALSE(status.ok());
@@ -165,7 +165,7 @@ TEST_F(MemManagerTest, MEM_TABLE_FILE_TEST) {
         milvus::engine::meta::CollectionSchema table_schema = BuildTableSchema();
         table_schema.collection_id_ = "faiss_pq";
         table_schema.engine_type_ = (int)milvus::engine::EngineType::FAISS_PQ;
-        auto status = impl_->CreateTable(table_schema);
+        auto status = impl_->CreateCollection(table_schema);
         ASSERT_TRUE(status.ok());
 
         milvus::engine::MemTableFile mem_table_file_1("faiss_pq", impl_, options);
@@ -177,7 +177,7 @@ TEST_F(MemManagerTest, MEM_TABLE_TEST) {
     auto options = GetOptions();
 
     milvus::engine::meta::CollectionSchema table_schema = BuildTableSchema();
-    auto status = impl_->CreateTable(table_schema);
+    auto status = impl_->CreateCollection(table_schema);
     ASSERT_TRUE(status.ok());
 
     int64_t n_100 = 100;
@@ -246,11 +246,11 @@ TEST_F(MemManagerTest, MEM_TABLE_TEST) {
 
 TEST_F(MemManagerTest2, SERIAL_INSERT_SEARCH_TEST) {
     milvus::engine::meta::CollectionSchema table_info = BuildTableSchema();
-    auto stat = db_->CreateTable(table_info);
+    auto stat = db_->CreateCollection(table_info);
 
     milvus::engine::meta::CollectionSchema table_info_get;
     table_info_get.collection_id_ = GetTableName();
-    stat = db_->DescribeTable(table_info_get);
+    stat = db_->DescribeCollection(table_info_get);
     ASSERT_TRUE(stat.ok());
     ASSERT_EQ(table_info_get.dimension_, TABLE_DIM);
 
@@ -303,11 +303,11 @@ TEST_F(MemManagerTest2, SERIAL_INSERT_SEARCH_TEST) {
 
 TEST_F(MemManagerTest2, INSERT_TEST) {
     milvus::engine::meta::CollectionSchema table_info = BuildTableSchema();
-    auto stat = db_->CreateTable(table_info);
+    auto stat = db_->CreateCollection(table_info);
 
     milvus::engine::meta::CollectionSchema table_info_get;
     table_info_get.collection_id_ = GetTableName();
-    stat = db_->DescribeTable(table_info_get);
+    stat = db_->DescribeCollection(table_info_get);
     ASSERT_TRUE(stat.ok());
     ASSERT_EQ(table_info_get.dimension_, TABLE_DIM);
 
@@ -333,12 +333,12 @@ TEST_F(MemManagerTest2, INSERT_BINARY_TEST) {
     table_info.collection_id_ = GetTableName();
     table_info.engine_type_ = (int)milvus::engine::EngineType::FAISS_BIN_IDMAP;
     table_info.metric_type_ = (int32_t)milvus::engine::MetricType::JACCARD;
-    auto stat = db_->CreateTable(table_info);
+    auto stat = db_->CreateCollection(table_info);
     ASSERT_TRUE(stat.ok());
 
     milvus::engine::meta::CollectionSchema table_info_get;
     table_info_get.collection_id_ = GetTableName();
-    stat = db_->DescribeTable(table_info_get);
+    stat = db_->DescribeCollection(table_info_get);
     ASSERT_TRUE(stat.ok());
     ASSERT_EQ(table_info_get.dimension_, TABLE_DIM);
 
@@ -364,11 +364,11 @@ TEST_F(MemManagerTest2, INSERT_BINARY_TEST) {
 }
 // TEST_F(MemManagerTest2, CONCURRENT_INSERT_SEARCH_TEST) {
 //    milvus::engine::meta::CollectionSchema table_info = BuildTableSchema();
-//    auto stat = db_->CreateTable(table_info);
+//    auto stat = db_->CreateCollection(table_info);
 //
 //    milvus::engine::meta::CollectionSchema table_info_get;
 //    table_info_get.collection_id_ = GetTableName();
-//    stat = db_->DescribeTable(table_info_get);
+//    stat = db_->DescribeCollection(table_info_get);
 //    ASSERT_TRUE(stat.ok());
 //    ASSERT_EQ(table_info_get.dimension_, TABLE_DIM);
 //
@@ -440,11 +440,11 @@ TEST_F(MemManagerTest2, INSERT_BINARY_TEST) {
 
 TEST_F(MemManagerTest2, VECTOR_IDS_TEST) {
     milvus::engine::meta::CollectionSchema table_info = BuildTableSchema();
-    auto stat = db_->CreateTable(table_info);
+    auto stat = db_->CreateCollection(table_info);
 
     milvus::engine::meta::CollectionSchema table_info_get;
     table_info_get.collection_id_ = GetTableName();
-    stat = db_->DescribeTable(table_info_get);
+    stat = db_->DescribeCollection(table_info_get);
     ASSERT_TRUE(stat.ok());
     ASSERT_EQ(table_info_get.dimension_, TABLE_DIM);
 

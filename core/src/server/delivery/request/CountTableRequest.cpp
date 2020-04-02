@@ -48,7 +48,7 @@ CountTableRequest::OnExecute() {
         // only process root collection, ignore partition collection
         engine::meta::CollectionSchema table_schema;
         table_schema.collection_id_ = collection_name_;
-        status = DBWrapper::DB()->DescribeTable(table_schema);
+        status = DBWrapper::DB()->DescribeCollection(table_schema);
         if (!status.ok()) {
             if (status.code() == DB_NOT_FOUND) {
                 return Status(SERVER_TABLE_NOT_EXIST, TableNotExistMsg(collection_name_));
@@ -65,7 +65,7 @@ CountTableRequest::OnExecute() {
 
         // step 2: get row count
         uint64_t row_count = 0;
-        status = DBWrapper::DB()->GetTableRowCount(collection_name_, row_count);
+        status = DBWrapper::DB()->GetCollectionRowCount(collection_name_, row_count);
         fiu_do_on("CountTableRequest.OnExecute.db_not_found", status = Status(DB_NOT_FOUND, ""));
         fiu_do_on("CountTableRequest.OnExecute.status_error", status = Status(SERVER_UNEXPECTED_ERROR, ""));
         fiu_do_on("CountTableRequest.OnExecute.throw_std_exception", throw std::exception());

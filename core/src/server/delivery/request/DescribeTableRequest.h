@@ -19,14 +19,14 @@
 namespace milvus {
 namespace server {
 
-class DescribeTableRequest : public BaseRequest {
+class DescribeCollectionRequest : public BaseRequest {
  public:
     static BaseRequestPtr
     Create(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name,
            CollectionSchema& schema);
 
  protected:
-    DescribeTableRequest(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name,
+    DescribeCollectionRequest(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name,
                          CollectionSchema& schema);
 
     Status

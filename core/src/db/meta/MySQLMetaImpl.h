@@ -32,25 +32,25 @@ class MySQLMetaImpl : public Meta {
     ~MySQLMetaImpl();
 
     Status
-    CreateTable(CollectionSchema& table_schema) override;
+    CreateCollection(CollectionSchema& table_schema) override;
 
     Status
-    DescribeTable(CollectionSchema& table_schema) override;
+    DescribeCollection(CollectionSchema& table_schema) override;
 
     Status
     HasCollection(const std::string& collection_id, bool& has_or_not) override;
 
     Status
-    AllTables(std::vector<CollectionSchema>& table_schema_array) override;
+    AllCollections(std::vector<CollectionSchema>& table_schema_array) override;
 
     Status
-    DropTable(const std::string& collection_id) override;
+    DropCollection(const std::string& collection_id) override;
 
     Status
     DeleteTableFiles(const std::string& collection_id) override;
 
     Status
-    CreateTableFile(SegmentSchema& file_schema) override;
+    CreateCollectionFile(SegmentSchema& file_schema) override;
 
     Status
     GetTableFiles(const std::string& collection_id, const std::vector<size_t>& ids,
@@ -63,7 +63,7 @@ class MySQLMetaImpl : public Meta {
     UpdateTableIndex(const std::string& collection_id, const TableIndex& index) override;
 
     Status
-    UpdateTableFlag(const std::string& collection_id, int64_t flag) override;
+    UpdateCollectionFlag(const std::string& collection_id, int64_t flag) override;
 
     Status
     UpdateTableFlushLSN(const std::string& collection_id, uint64_t flush_lsn) override;
@@ -87,10 +87,10 @@ class MySQLMetaImpl : public Meta {
     UpdateTableFilesRowCount(SegmentsSchema& files) override;
 
     Status
-    DescribeTableIndex(const std::string& collection_id, TableIndex& index) override;
+    DescribeCollectionIndex(const std::string& collection_id, TableIndex& index) override;
 
     Status
-    DropTableIndex(const std::string& collection_id) override;
+    DropCollectionIndex(const std::string& collection_id) override;
 
     Status
     CreatePartition(const std::string& collection_id, const std::string& partition_name, const std::string& tag,

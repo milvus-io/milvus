@@ -69,7 +69,7 @@ ShowTableInfoRequest::OnExecute() {
     // only process root collection, ignore partition collection
     engine::meta::CollectionSchema table_schema;
     table_schema.collection_id_ = collection_name_;
-    status = DBWrapper::DB()->DescribeTable(table_schema);
+    status = DBWrapper::DB()->DescribeCollection(table_schema);
     if (!status.ok()) {
         if (status.code() == DB_NOT_FOUND) {
             return Status(SERVER_TABLE_NOT_EXIST, TableNotExistMsg(collection_name_));
@@ -84,7 +84,7 @@ ShowTableInfoRequest::OnExecute() {
 
     // step 3: get partitions
     engine::TableInfo table_info;
-    status = DBWrapper::DB()->GetTableInfo(collection_name_, table_info);
+    status = DBWrapper::DB()->GetCollectionInfo(collection_name_, table_info);
     if (!status.ok()) {
         return status;
     }

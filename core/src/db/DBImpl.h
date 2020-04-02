@@ -55,34 +55,34 @@ class DBImpl : public DB, public server::CacheConfigHandler, public server::Engi
     DropAll() override;
 
     Status
-    CreateTable(meta::CollectionSchema& collection_schema) override;
+    CreateCollection(meta::CollectionSchema& collection_schema) override;
 
     Status
-    DropTable(const std::string& collection_id) override;
+    DropCollection(const std::string& collection_id) override;
 
     Status
-    DescribeTable(meta::CollectionSchema& collection_schema) override;
+    DescribeCollection(meta::CollectionSchema& collection_schema) override;
 
     Status
     HasCollection(const std::string& collection_id, bool& has_or_not) override;
 
     Status
-    HasNativeTable(const std::string& collection_id, bool& has_or_not_) override;
+    HasNativeCollection(const std::string& collection_id, bool& has_or_not_) override;
 
     Status
-    AllTables(std::vector<meta::CollectionSchema>& collection_schema_array) override;
+    AllCollections(std::vector<meta::CollectionSchema>& collection_schema_array) override;
 
     Status
-    GetTableInfo(const std::string& collection_id, TableInfo& collection_info) override;
+    GetCollectionInfo(const std::string& collection_id, CollectionInfo& collection_info) override;
 
     Status
-    PreloadTable(const std::string& collection_id) override;
+    PreloadCollection(const std::string& collection_id) override;
 
     Status
-    UpdateTableFlag(const std::string& collection_id, int64_t flag) override;
+    UpdateCollectionFlag(const std::string& collection_id, int64_t flag) override;
 
     Status
-    GetTableRowCount(const std::string& collection_id, uint64_t& row_count) override;
+    GetCollectionRowCount(const std::string& collection_id, uint64_t& row_count) override;
 
     Status
     CreatePartition(const std::string& collection_id, const std::string& partition_name,
@@ -126,10 +126,10 @@ class DBImpl : public DB, public server::CacheConfigHandler, public server::Engi
     //    Merge(const std::set<std::string>& collection_ids) override;
 
     Status
-    CreateIndex(const std::string& collection_id, const TableIndex& index) override;
+    CreateIndex(const std::string& collection_id, const CollectionIndex& index) override;
 
     Status
-    DescribeIndex(const std::string& collection_id, TableIndex& index) override;
+    DescribeIndex(const std::string& collection_id, CollectionIndex& index) override;
 
     Status
     DropIndex(const std::string& collection_id) override;
@@ -223,19 +223,19 @@ class DBImpl : public DB, public server::CacheConfigHandler, public server::Engi
                         std::set<std::string>& partition_name_array);
 
     Status
-    DropTableRecursively(const std::string& collection_id);
+    DropCollectionRecursively(const std::string& collection_id);
 
     Status
-    UpdateTableIndexRecursively(const std::string& collection_id, const TableIndex& index);
+    UpdateCollectionIndexRecursively(const std::string& collection_id, const CollectionIndex& index);
 
     Status
-    WaitTableIndexRecursively(const std::string& collection_id, const TableIndex& index);
+    WaitCollectionIndexRecursively(const std::string& collection_id, const CollectionIndex& index);
 
     Status
-    DropTableIndexRecursively(const std::string& collection_id);
+    DropCollectionIndexRecursively(const std::string& collection_id);
 
     Status
-    GetTableRowCountRecursively(const std::string& collection_id, uint64_t& row_count);
+    GetCollectionRowCountRecursively(const std::string& collection_id, uint64_t& row_count);
 
     Status
     ExecWalRecord(const wal::MXLogRecord& record);

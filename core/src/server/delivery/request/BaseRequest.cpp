@@ -40,13 +40,13 @@ RequestGroup(BaseRequest::RequestType type) {
 
         // collection operations
         {BaseRequest::kShowTables, INFO_REQUEST_GROUP},
-        {BaseRequest::kCreateTable, DDL_DML_REQUEST_GROUP},
+        {BaseRequest::kCreateCollection, DDL_DML_REQUEST_GROUP},
         {BaseRequest::kHasCollection, INFO_REQUEST_GROUP},
-        {BaseRequest::kDescribeTable, INFO_REQUEST_GROUP},
+        {BaseRequest::kDescribeCollection, INFO_REQUEST_GROUP},
         {BaseRequest::kCountTable, INFO_REQUEST_GROUP},
         {BaseRequest::kShowTableInfo, INFO_REQUEST_GROUP},
-        {BaseRequest::kDropTable, DDL_DML_REQUEST_GROUP},
-        {BaseRequest::kPreloadTable, DQL_REQUEST_GROUP},
+        {BaseRequest::kDropCollection, DDL_DML_REQUEST_GROUP},
+        {BaseRequest::kPreloadCollection, DQL_REQUEST_GROUP},
 
         // partition operations
         {BaseRequest::kCreatePartition, DDL_DML_REQUEST_GROUP},

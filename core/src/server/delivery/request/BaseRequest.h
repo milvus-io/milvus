@@ -129,13 +129,13 @@ class BaseRequest {
 
         // collection operations
         kShowTables = 300,
-        kCreateTable,
+        kCreateCollection,
         kHasCollection,
-        kDescribeTable,
+        kDescribeCollection,
         kCountTable,
         kShowTableInfo,
-        kDropTable,
-        kPreloadTable,
+        kDropCollection,
+        kPreloadCollection,
 
         // partition operations
         kCreatePartition = 400,

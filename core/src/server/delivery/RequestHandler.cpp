@@ -20,19 +20,19 @@
 #include "server/delivery/request/CountTableRequest.h"
 #include "server/delivery/request/CreateIndexRequest.h"
 #include "server/delivery/request/CreatePartitionRequest.h"
-#include "server/delivery/request/CreateTableRequest.h"
+#include "server/delivery/request/CreateCollectionRequest.h"
 #include "server/delivery/request/DeleteByIDRequest.h"
 #include "server/delivery/request/DescribeIndexRequest.h"
-#include "server/delivery/request/DescribeTableRequest.h"
+#include "server/delivery/request/DescribeCollectionRequest.h"
 #include "server/delivery/request/DropIndexRequest.h"
 #include "server/delivery/request/DropPartitionRequest.h"
-#include "server/delivery/request/DropTableRequest.h"
+#include "server/delivery/request/DropCollectionRequest.h"
 #include "server/delivery/request/FlushRequest.h"
 #include "server/delivery/request/GetVectorByIDRequest.h"
 #include "server/delivery/request/GetVectorIDsRequest.h"
 #include "server/delivery/request/HasCollectionRequest.h"
 #include "server/delivery/request/InsertRequest.h"
-#include "server/delivery/request/PreloadTableRequest.h"
+#include "server/delivery/request/PreloadCollectionRequest.h"
 #include "server/delivery/request/SearchByIDRequest.h"
 #include "server/delivery/request/SearchRequest.h"
 #include "server/delivery/request/ShowPartitionsRequest.h"
@@ -43,10 +43,10 @@ namespace milvus {
 namespace server {
 
 Status
-RequestHandler::CreateTable(const std::shared_ptr<Context>& context, const std::string& collection_name,
+RequestHandler::CreateCollection(const std::shared_ptr<Context>& context, const std::string& collection_name,
                             int64_t dimension, int64_t index_file_size, int64_t metric_type) {
     BaseRequestPtr request_ptr =
-        CreateTableRequest::Create(context, collection_name, dimension, index_file_size, metric_type);
+        CreateCollectionRequest::Create(context, collection_name, dimension, index_file_size, metric_type);
     RequestScheduler::ExecRequest(request_ptr);
 
     return request_ptr->status();
@@ -61,8 +61,8 @@ RequestHandler::HasCollection(const std::shared_ptr<Context>& context, const std
 }
 
 Status
-RequestHandler::DropTable(const std::shared_ptr<Context>& context, const std::string& collection_name) {
-    BaseRequestPtr request_ptr = DropTableRequest::Create(context, collection_name);
+RequestHandler::DropCollection(const std::shared_ptr<Context>& context, const std::string& collection_name) {
+    BaseRequestPtr request_ptr = DropCollectionRequest::Create(context, collection_name);
     RequestScheduler::ExecRequest(request_ptr);
 
     return request_ptr->status();
@@ -145,9 +145,9 @@ RequestHandler::SearchByID(const std::shared_ptr<Context>& context, const std::s
 }
 
 Status
-RequestHandler::DescribeTable(const std::shared_ptr<Context>& context, const std::string& collection_name,
+RequestHandler::DescribeCollection(const std::shared_ptr<Context>& context, const std::string& collection_name,
                               CollectionSchema& table_schema) {
-    BaseRequestPtr request_ptr = DescribeTableRequest::Create(context, collection_name, table_schema);
+    BaseRequestPtr request_ptr = DescribeCollectionRequest::Create(context, collection_name, table_schema);
     RequestScheduler::ExecRequest(request_ptr);
 
     return request_ptr->status();
@@ -180,8 +180,8 @@ RequestHandler::DeleteByID(const std::shared_ptr<Context>& context, const std::s
 }
 
 Status
-RequestHandler::PreloadTable(const std::shared_ptr<Context>& context, const std::string& collection_name) {
-    BaseRequestPtr request_ptr = PreloadTableRequest::Create(context, collection_name);
+RequestHandler::PreloadCollection(const std::shared_ptr<Context>& context, const std::string& collection_name) {
+    BaseRequestPtr request_ptr = PreloadCollectionRequest::Create(context, collection_name);
     RequestScheduler::ExecRequest(request_ptr);
 
     return request_ptr->status();

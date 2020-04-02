@@ -45,14 +45,14 @@ HasCollectionRequest::OnExecute() {
         }
 
         // step 2: check table existence
-        status = DBWrapper::DB()->HasNativeTable(collection_name_, has_collection_);
+        status = DBWrapper::DB()->HasNativeCollection(collection_name_, has_collection_);
         fiu_do_on("HasCollectionRequest.OnExecute.throw_std_exception", throw std::exception());
 
         // only process root collection, ignore partition collection
         if (has_collection_) {
             engine::meta::CollectionSchema table_schema;
             table_schema.collection_id_ = collection_name_;
-            status = DBWrapper::DB()->DescribeTable(table_schema);
+            status = DBWrapper::DB()->DescribeCollection(table_schema);
             if (!table_schema.owner_table_.empty()) {
                 has_collection_ = false;
             }

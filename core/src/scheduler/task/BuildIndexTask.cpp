@@ -130,7 +130,7 @@ XBuildIndexTask::Execute() {
         table_file.file_type_ = engine::meta::SegmentSchema::NEW_INDEX;
 
         engine::meta::MetaPtr meta_ptr = build_index_job->meta();
-        Status status = meta_ptr->CreateTableFile(table_file);
+        Status status = meta_ptr->CreateCollectionFile(table_file);
         fiu_do_on("XBuildIndexTask.Execute.create_table_success", status = Status::OK());
         if (!status.ok()) {
             ENGINE_LOG_ERROR << "Failed to create collection file: " << status.ToString();

@@ -19,13 +19,13 @@
 namespace milvus {
 namespace server {
 
-class PreloadTableRequest : public BaseRequest {
+class PreloadCollectionRequest : public BaseRequest {
  public:
     static BaseRequestPtr
     Create(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name);
 
  protected:
-    PreloadTableRequest(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name);
+    PreloadCollectionRequest(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name);
 
     Status
     OnExecute() override;

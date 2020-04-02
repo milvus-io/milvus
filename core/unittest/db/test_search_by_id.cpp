@@ -65,11 +65,11 @@ BuildVectors(uint64_t n, milvus::engine::VectorsData& vectors) {
 
 TEST_F(SearchByIdTest, basic) {
     milvus::engine::meta::CollectionSchema table_info = BuildTableSchema();
-    auto stat = db_->CreateTable(table_info);
+    auto stat = db_->CreateCollection(table_info);
 
     milvus::engine::meta::CollectionSchema table_info_get;
     table_info_get.collection_id_ = table_info.collection_id_;
-    stat = db_->DescribeTable(table_info_get);
+    stat = db_->DescribeCollection(table_info_get);
     ASSERT_TRUE(stat.ok());
     ASSERT_EQ(table_info_get.dimension_, TABLE_DIM);
 
@@ -117,11 +117,11 @@ TEST_F(SearchByIdTest, basic) {
 
 TEST_F(SearchByIdTest, with_index) {
     milvus::engine::meta::CollectionSchema table_info = BuildTableSchema();
-    auto stat = db_->CreateTable(table_info);
+    auto stat = db_->CreateCollection(table_info);
 
     milvus::engine::meta::CollectionSchema table_info_get;
     table_info_get.collection_id_ = table_info.collection_id_;
-    stat = db_->DescribeTable(table_info_get);
+    stat = db_->DescribeCollection(table_info_get);
     ASSERT_TRUE(stat.ok());
     ASSERT_EQ(table_info_get.dimension_, TABLE_DIM);
 
@@ -175,11 +175,11 @@ TEST_F(SearchByIdTest, with_index) {
 
 TEST_F(SearchByIdTest, with_delete) {
     milvus::engine::meta::CollectionSchema table_info = BuildTableSchema();
-    auto stat = db_->CreateTable(table_info);
+    auto stat = db_->CreateCollection(table_info);
 
     milvus::engine::meta::CollectionSchema table_info_get;
     table_info_get.collection_id_ = table_info.collection_id_;
-    stat = db_->DescribeTable(table_info_get);
+    stat = db_->DescribeCollection(table_info_get);
     ASSERT_TRUE(stat.ok());
     ASSERT_EQ(table_info_get.dimension_, TABLE_DIM);
 
@@ -236,11 +236,11 @@ TEST_F(SearchByIdTest, with_delete) {
 
 TEST_F(GetVectorByIdTest, basic) {
     milvus::engine::meta::CollectionSchema table_info = BuildTableSchema();
-    auto stat = db_->CreateTable(table_info);
+    auto stat = db_->CreateCollection(table_info);
 
     milvus::engine::meta::CollectionSchema table_info_get;
     table_info_get.collection_id_ = table_info.collection_id_;
-    stat = db_->DescribeTable(table_info_get);
+    stat = db_->DescribeCollection(table_info_get);
     ASSERT_TRUE(stat.ok());
     ASSERT_EQ(table_info_get.dimension_, TABLE_DIM);
 
@@ -293,11 +293,11 @@ TEST_F(GetVectorByIdTest, basic) {
 
 TEST_F(GetVectorByIdTest, with_index) {
     milvus::engine::meta::CollectionSchema table_info = BuildTableSchema();
-    auto stat = db_->CreateTable(table_info);
+    auto stat = db_->CreateCollection(table_info);
 
     milvus::engine::meta::CollectionSchema table_info_get;
     table_info_get.collection_id_ = table_info.collection_id_;
-    stat = db_->DescribeTable(table_info_get);
+    stat = db_->DescribeCollection(table_info_get);
     ASSERT_TRUE(stat.ok());
     ASSERT_EQ(table_info_get.dimension_, TABLE_DIM);
 
@@ -355,11 +355,11 @@ TEST_F(GetVectorByIdTest, with_index) {
 
 TEST_F(GetVectorByIdTest, with_delete) {
     milvus::engine::meta::CollectionSchema table_info = BuildTableSchema();
-    auto stat = db_->CreateTable(table_info);
+    auto stat = db_->CreateCollection(table_info);
 
     milvus::engine::meta::CollectionSchema table_info_get;
     table_info_get.collection_id_ = table_info.collection_id_;
-    stat = db_->DescribeTable(table_info_get);
+    stat = db_->DescribeCollection(table_info_get);
     ASSERT_TRUE(stat.ok());
     ASSERT_EQ(table_info_get.dimension_, TABLE_DIM);
 
@@ -418,12 +418,12 @@ TEST_F(SearchByIdTest, BINARY) {
     table_info.collection_id_ = GetTableName();
     table_info.engine_type_ = (int)milvus::engine::EngineType::FAISS_BIN_IDMAP;
     table_info.metric_type_ = (int32_t)milvus::engine::MetricType::JACCARD;
-    auto stat = db_->CreateTable(table_info);
+    auto stat = db_->CreateCollection(table_info);
     ASSERT_TRUE(stat.ok());
 
     milvus::engine::meta::CollectionSchema table_info_get;
     table_info_get.collection_id_ = table_info.collection_id_;
-    stat = db_->DescribeTable(table_info_get);
+    stat = db_->DescribeCollection(table_info_get);
     ASSERT_TRUE(stat.ok());
     ASSERT_EQ(table_info_get.dimension_, TABLE_DIM);
 
@@ -468,7 +468,7 @@ TEST_F(SearchByIdTest, BINARY) {
     ASSERT_TRUE(stat.ok());
 
     uint64_t row_count;
-    stat = db_->GetTableRowCount(table_info.collection_id_, row_count);
+    stat = db_->GetCollectionRowCount(table_info.collection_id_, row_count);
     ASSERT_TRUE(stat.ok());
     ASSERT_EQ(row_count, nb * insert_loop);
 

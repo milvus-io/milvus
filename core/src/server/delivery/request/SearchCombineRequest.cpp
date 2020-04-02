@@ -243,7 +243,7 @@ SearchCombineRequest::OnExecute() {
         // only process root table, ignore partition table
         engine::meta::CollectionSchema table_schema;
         table_schema.collection_id_ = collection_name_;
-        auto status = DBWrapper::DB()->DescribeTable(table_schema);
+        auto status = DBWrapper::DB()->DescribeCollection(table_schema);
 
         if (!status.ok()) {
             if (status.code() == DB_NOT_FOUND) {

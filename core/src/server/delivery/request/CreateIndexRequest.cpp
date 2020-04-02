@@ -54,7 +54,7 @@ CreateIndexRequest::OnExecute() {
         // only process root collection, ignore partition collection
         engine::meta::CollectionSchema table_schema;
         table_schema.collection_id_ = collection_name_;
-        status = DBWrapper::DB()->DescribeTable(table_schema);
+        status = DBWrapper::DB()->DescribeCollection(table_schema);
         fiu_do_on("CreateIndexRequest.OnExecute.not_has_collection", status = Status(milvus::SERVER_UNEXPECTED_ERROR, ""));
         fiu_do_on("CreateIndexRequest.OnExecute.throw_std.exception", throw std::exception());
         if (!status.ok()) {
@@ -82,7 +82,7 @@ CreateIndexRequest::OnExecute() {
         // step 2: binary and float vector support different index/metric type, need to adapt here
         engine::meta::CollectionSchema table_info;
         table_info.collection_id_ = collection_name_;
-        status = DBWrapper::DB()->DescribeTable(table_info);
+        status = DBWrapper::DB()->DescribeCollection(table_info);
 
         int32_t adapter_index_type = index_type_;
         if (engine::utils::IsBinaryMetricType(table_info.metric_type_)) {  // binary vector not allow

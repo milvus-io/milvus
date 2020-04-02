@@ -9,7 +9,7 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
-#include "server/delivery/request/DropTableRequest.h"
+#include "server/delivery/request/DropCollectionRequest.h"
 #include "server/DBWrapper.h"
 #include "utils/Log.h"
 #include "utils/TimeRecorder.h"
@@ -22,20 +22,20 @@
 namespace milvus {
 namespace server {
 
-DropTableRequest::DropTableRequest(const std::shared_ptr<milvus::server::Context>& context,
+DropCollectionRequest::DropCollectionRequest(const std::shared_ptr<milvus::server::Context>& context,
                                    const std::string& collection_name)
-    : BaseRequest(context, BaseRequest::kDropTable), collection_name_(collection_name) {
+    : BaseRequest(context, BaseRequest::kDropCollection), collection_name_(collection_name) {
 }
 
 BaseRequestPtr
-DropTableRequest::Create(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name) {
-    return std::shared_ptr<BaseRequest>(new DropTableRequest(context, collection_name));
+DropCollectionRequest::Create(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name) {
+    return std::shared_ptr<BaseRequest>(new DropCollectionRequest(context, collection_name));
 }
 
 Status
-DropTableRequest::OnExecute() {
+DropCollectionRequest::OnExecute() {
     try {
-        std::string hdr = "DropTableRequest(collection=" + collection_name_ + ")";
+        std::string hdr = "DropCollectionRequest(collection=" + collection_name_ + ")";
         TimeRecorder rc(hdr);
 
         // step 1: check arguments
@@ -48,11 +48,11 @@ DropTableRequest::OnExecute() {
         // only process root collection, ignore partition collection
         engine::meta::CollectionSchema table_schema;
         table_schema.collection_id_ = collection_name_;
-        status = DBWrapper::DB()->DescribeTable(table_schema);
-        fiu_do_on("DropTableRequest.OnExecute.db_not_found", status = Status(milvus::DB_NOT_FOUND, ""));
-        fiu_do_on("DropTableRequest.OnExecute.describe_table_fail",
+        status = DBWrapper::DB()->DescribeCollection(table_schema);
+        fiu_do_on("DropCollectionRequest.OnExecute.db_not_found", status = Status(milvus::DB_NOT_FOUND, ""));
+        fiu_do_on("DropCollectionRequest.OnExecute.describe_table_fail",
                   status = Status(milvus::SERVER_UNEXPECTED_ERROR, ""));
-        fiu_do_on("DropTableRequest.OnExecute.throw_std_exception", throw std::exception());
+        fiu_do_on("DropCollectionRequest.OnExecute.throw_std_exception", throw std::exception());
         if (!status.ok()) {
             if (status.code() == DB_NOT_FOUND) {
                 return Status(SERVER_TABLE_NOT_EXIST, TableNotExistMsg(collection_name_));
@@ -68,8 +68,8 @@ DropTableRequest::OnExecute() {
         rc.RecordSection("check validation");
 
         // step 3: Drop collection
-        status = DBWrapper::DB()->DropTable(collection_name_);
-        fiu_do_on("DropTableRequest.OnExecute.drop_table_fail", status = Status(milvus::SERVER_UNEXPECTED_ERROR, ""));
+        status = DBWrapper::DB()->DropCollection(collection_name_);
+        fiu_do_on("DropCollectionRequest.OnExecute.drop_table_fail", status = Status(milvus::SERVER_UNEXPECTED_ERROR, ""));
         if (!status.ok()) {
             return status;
         }

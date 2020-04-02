@@ -164,7 +164,7 @@ WebRequestHandler::ParsePartitionStat(const milvus::server::PartitionStat& par_s
 Status
 WebRequestHandler::IsBinaryTable(const std::string& collection_name, bool& bin) {
     CollectionSchema schema;
-    auto status = request_handler_.DescribeTable(context_ptr_, collection_name, schema);
+    auto status = request_handler_.DescribeCollection(context_ptr_, collection_name, schema);
     if (status.ok()) {
         auto metric = engine::MetricType(schema.metric_type_);
         bin = engine::MetricType::HAMMING == metric || engine::MetricType::JACCARD == metric ||
@@ -210,7 +210,7 @@ WebRequestHandler::CopyRecordsFromJson(const nlohmann::json& json, engine::Vecto
 Status
 WebRequestHandler::GetTableMetaInfo(const std::string& collection_name, nlohmann::json& json_out) {
     CollectionSchema schema;
-    auto status = request_handler_.DescribeTable(context_ptr_, collection_name, schema);
+    auto status = request_handler_.DescribeCollection(context_ptr_, collection_name, schema);
     if (!status.ok()) {
         return status;
     }
@@ -923,7 +923,7 @@ WebRequestHandler::CreateTable(const TableRequestDto::ObjectWrapper& collection_
     }
 
     auto status =
-        request_handler_.CreateTable(context_ptr_, collection_schema->collection_name->std_str(),
+        request_handler_.CreateCollection(context_ptr_, collection_schema->collection_name->std_str(),
                                      collection_schema->dimension, collection_schema->index_file_size,
                                      static_cast<int64_t>(MetricNameMap.at(collection_schema->metric_type->std_str())));
 
@@ -1018,7 +1018,7 @@ WebRequestHandler::GetTable(const OString& collection_name, const OQueryParams& 
 
 StatusDto::ObjectWrapper
 WebRequestHandler::DropTable(const OString& collection_name) {
-    auto status = request_handler_.DropTable(context_ptr_, collection_name->std_str());
+    auto status = request_handler_.DropCollection(context_ptr_, collection_name->std_str());
 
     ASSIGN_RETURN_STATUS_DTO(status)
 }

@@ -164,11 +164,11 @@ TEST_F(DBTest, CONFIG_TEST) {
 
 TEST_F(DBTest, DB_TEST) {
     milvus::engine::meta::CollectionSchema table_info = BuildTableSchema();
-    auto stat = db_->CreateTable(table_info);
+    auto stat = db_->CreateCollection(table_info);
 
     milvus::engine::meta::CollectionSchema table_info_get;
     table_info_get.collection_id_ = TABLE_NAME;
-    stat = db_->DescribeTable(table_info_get);
+    stat = db_->DescribeCollection(table_info_get);
     ASSERT_TRUE(stat.ok());
     ASSERT_EQ(table_info_get.dimension_, TABLE_DIM);
 
@@ -242,7 +242,7 @@ TEST_F(DBTest, DB_TEST) {
     search.join();
 
     uint64_t count;
-    stat = db_->GetTableRowCount(TABLE_NAME, count);
+    stat = db_->GetCollectionRowCount(TABLE_NAME, count);
     ASSERT_TRUE(stat.ok());
     ASSERT_GT(count, 0);
 
@@ -268,11 +268,11 @@ TEST_F(DBTest, SEARCH_TEST) {
     milvus::Status s = config.LoadConfigFile(config_path);
 
     milvus::engine::meta::CollectionSchema table_info = BuildTableSchema();
-    auto stat = db_->CreateTable(table_info);
+    auto stat = db_->CreateCollection(table_info);
 
     milvus::engine::meta::CollectionSchema table_info_get;
     table_info_get.collection_id_ = TABLE_NAME;
-    stat = db_->DescribeTable(table_info_get);
+    stat = db_->DescribeCollection(table_info_get);
     ASSERT_TRUE(stat.ok());
     ASSERT_EQ(table_info_get.dimension_, TABLE_DIM);
 
@@ -438,11 +438,11 @@ TEST_F(DBTest, PRELOADTABLE_TEST) {
     fiu_init(0);
 
     milvus::engine::meta::CollectionSchema table_info = BuildTableSchema();
-    auto stat = db_->CreateTable(table_info);
+    auto stat = db_->CreateCollection(table_info);
 
     milvus::engine::meta::CollectionSchema table_info_get;
     table_info_get.collection_id_ = TABLE_NAME;
-    stat = db_->DescribeTable(table_info_get);
+    stat = db_->DescribeCollection(table_info_get);
     ASSERT_TRUE(stat.ok());
     ASSERT_EQ(table_info_get.dimension_, TABLE_DIM);
 
@@ -461,49 +461,49 @@ TEST_F(DBTest, PRELOADTABLE_TEST) {
     db_->CreateIndex(TABLE_NAME, index);  // wait until build index finish
 
     int64_t prev_cache_usage = milvus::cache::CpuCacheMgr::GetInstance()->CacheUsage();
-    stat = db_->PreloadTable(TABLE_NAME);
+    stat = db_->PreloadCollection(TABLE_NAME);
     ASSERT_TRUE(stat.ok());
     int64_t cur_cache_usage = milvus::cache::CpuCacheMgr::GetInstance()->CacheUsage();
     ASSERT_TRUE(prev_cache_usage < cur_cache_usage);
 
     FIU_ENABLE_FIU("SqliteMetaImpl.FilesToSearch.throw_exception");
-    stat = db_->PreloadTable(TABLE_NAME);
+    stat = db_->PreloadCollection(TABLE_NAME);
     ASSERT_FALSE(stat.ok());
     fiu_disable("SqliteMetaImpl.FilesToSearch.throw_exception");
 
     // create a partition
     stat = db_->CreatePartition(TABLE_NAME, "part0", "0");
     ASSERT_TRUE(stat.ok());
-    stat = db_->PreloadTable(TABLE_NAME);
+    stat = db_->PreloadCollection(TABLE_NAME);
     ASSERT_TRUE(stat.ok());
 
-    FIU_ENABLE_FIU("DBImpl.PreloadTable.null_engine");
-    stat = db_->PreloadTable(TABLE_NAME);
+    FIU_ENABLE_FIU("DBImpl.PreloadCollection.null_engine");
+    stat = db_->PreloadCollection(TABLE_NAME);
     ASSERT_FALSE(stat.ok());
-    fiu_disable("DBImpl.PreloadTable.null_engine");
+    fiu_disable("DBImpl.PreloadCollection.null_engine");
 
-    FIU_ENABLE_FIU("DBImpl.PreloadTable.exceed_cache");
-    stat = db_->PreloadTable(TABLE_NAME);
+    FIU_ENABLE_FIU("DBImpl.PreloadCollection.exceed_cache");
+    stat = db_->PreloadCollection(TABLE_NAME);
     ASSERT_FALSE(stat.ok());
-    fiu_disable("DBImpl.PreloadTable.exceed_cache");
+    fiu_disable("DBImpl.PreloadCollection.exceed_cache");
 
-    FIU_ENABLE_FIU("DBImpl.PreloadTable.engine_throw_exception");
-    stat = db_->PreloadTable(TABLE_NAME);
+    FIU_ENABLE_FIU("DBImpl.PreloadCollection.engine_throw_exception");
+    stat = db_->PreloadCollection(TABLE_NAME);
     ASSERT_FALSE(stat.ok());
-    fiu_disable("DBImpl.PreloadTable.engine_throw_exception");
+    fiu_disable("DBImpl.PreloadCollection.engine_throw_exception");
 }
 
 TEST_F(DBTest, SHUTDOWN_TEST) {
     db_->Stop();
 
     milvus::engine::meta::CollectionSchema table_info = BuildTableSchema();
-    auto stat = db_->CreateTable(table_info);
+    auto stat = db_->CreateCollection(table_info);
     ASSERT_FALSE(stat.ok());
 
-    stat = db_->DescribeTable(table_info);
+    stat = db_->DescribeCollection(table_info);
     ASSERT_FALSE(stat.ok());
 
-    stat = db_->UpdateTableFlag(TABLE_NAME, 0);
+    stat = db_->UpdateCollectionFlag(TABLE_NAME, 0);
     ASSERT_FALSE(stat.ok());
 
     stat = db_->CreatePartition(TABLE_NAME, "part0", "0");
@@ -520,7 +520,7 @@ TEST_F(DBTest, SHUTDOWN_TEST) {
     ASSERT_FALSE(stat.ok());
 
     std::vector<milvus::engine::meta::CollectionSchema> table_infos;
-    stat = db_->AllTables(table_infos);
+    stat = db_->AllCollections(table_infos);
     ASSERT_EQ(stat.code(), milvus::DB_ERROR);
 
     bool has_collection = false;
@@ -548,11 +548,11 @@ TEST_F(DBTest, SHUTDOWN_TEST) {
     stat = db_->GetVectorByID(table_info.collection_id_, 0, vector);
     ASSERT_FALSE(stat.ok());
 
-    stat = db_->PreloadTable(table_info.collection_id_);
+    stat = db_->PreloadCollection(table_info.collection_id_);
     ASSERT_FALSE(stat.ok());
 
     uint64_t row_count = 0;
-    stat = db_->GetTableRowCount(table_info.collection_id_, row_count);
+    stat = db_->GetCollectionRowCount(table_info.collection_id_, row_count);
     ASSERT_FALSE(stat.ok());
 
     milvus::engine::TableIndex index;
@@ -592,7 +592,7 @@ TEST_F(DBTest, SHUTDOWN_TEST) {
                       result_distances);
     ASSERT_FALSE(stat.ok());
 
-    stat = db_->DropTable(table_info.collection_id_);
+    stat = db_->DropCollection(table_info.collection_id_);
     ASSERT_FALSE(stat.ok());
 }
 
@@ -604,7 +604,7 @@ TEST_F(DBTest, BACK_TIMER_THREAD_1) {
     {
         FIU_ENABLE_FIU("DBImpl.StartMetricTask.InvalidTotalCache");
         FIU_ENABLE_FIU("SqliteMetaImpl.FilesToMerge.throw_exception");
-        stat = db_->CreateTable(table_info);
+        stat = db_->CreateCollection(table_info);
         ASSERT_TRUE(stat.ok());
 
         // insert some vector to create some tablefiles
@@ -635,7 +635,7 @@ TEST_F(DBTest, BACK_TIMER_THREAD_2) {
     milvus::Status stat;
     milvus::engine::meta::CollectionSchema table_info = BuildTableSchema();
 
-    stat = db_->CreateTable(table_info);
+    stat = db_->CreateCollection(table_info);
     ASSERT_TRUE(stat.ok());
 
     // insert some vector to create some tablefiles
@@ -648,10 +648,10 @@ TEST_F(DBTest, BACK_TIMER_THREAD_2) {
         ASSERT_EQ(xb.id_array_.size(), nb);
     }
 
-    FIU_ENABLE_FIU("SqliteMetaImpl.CreateTableFile.throw_exception");
+    FIU_ENABLE_FIU("SqliteMetaImpl.CreateCollectionFile.throw_exception");
     std::this_thread::sleep_for(std::chrono::seconds(2));
     db_->Stop();
-    fiu_disable("SqliteMetaImpl.CreateTableFile.throw_exception");
+    fiu_disable("SqliteMetaImpl.CreateCollectionFile.throw_exception");
 }
 
 TEST_F(DBTest, BACK_TIMER_THREAD_3) {
@@ -659,7 +659,7 @@ TEST_F(DBTest, BACK_TIMER_THREAD_3) {
     milvus::Status stat;
     milvus::engine::meta::CollectionSchema table_info = BuildTableSchema();
 
-    stat = db_->CreateTable(table_info);
+    stat = db_->CreateCollection(table_info);
     ASSERT_TRUE(stat.ok());
 
     // insert some vector to create some tablefiles
@@ -684,7 +684,7 @@ TEST_F(DBTest, BACK_TIMER_THREAD_4) {
     milvus::Status stat;
     milvus::engine::meta::CollectionSchema table_info = BuildTableSchema();
 
-    stat = db_->CreateTable(table_info);
+    stat = db_->CreateCollection(table_info);
     ASSERT_TRUE(stat.ok());
 
     // insert some vector to create some tablefiles
@@ -706,7 +706,7 @@ TEST_F(DBTest, BACK_TIMER_THREAD_4) {
 
 TEST_F(DBTest, INDEX_TEST) {
     milvus::engine::meta::CollectionSchema table_info = BuildTableSchema();
-    auto stat = db_->CreateTable(table_info);
+    auto stat = db_->CreateCollection(table_info);
 
     uint64_t nb = VECTOR_COUNT;
     milvus::engine::VectorsData xb;
@@ -726,10 +726,10 @@ TEST_F(DBTest, INDEX_TEST) {
     ASSERT_TRUE(stat.ok());
 
     fiu_init(0);
-    FIU_ENABLE_FIU("SqliteMetaImpl.DescribeTableIndex.throw_exception");
+    FIU_ENABLE_FIU("SqliteMetaImpl.DescribeCollectionIndex.throw_exception");
     stat = db_->CreateIndex(table_info.collection_id_, index);
     ASSERT_FALSE(stat.ok());
-    fiu_disable("SqliteMetaImpl.DescribeTableIndex.throw_exception");
+    fiu_disable("SqliteMetaImpl.DescribeCollectionIndex.throw_exception");
 
     index.engine_type_ = (int)milvus::engine::EngineType::FAISS_PQ;
     FIU_ENABLE_FIU("DBImpl.UpdateTableIndexRecursively.fail_update_table_index");
@@ -756,7 +756,7 @@ TEST_F(DBTest, INDEX_TEST) {
 
 TEST_F(DBTest, PARTITION_TEST) {
     milvus::engine::meta::CollectionSchema table_info = BuildTableSchema();
-    auto stat = db_->CreateTable(table_info);
+    auto stat = db_->CreateCollection(table_info);
     ASSERT_TRUE(stat.ok());
 
     // create partition and insert data
@@ -811,7 +811,7 @@ TEST_F(DBTest, PARTITION_TEST) {
     stat = db_->CreatePartition(collection_name, special_part, special_part);
     ASSERT_TRUE(stat.ok());
     bool has_collection = false;
-    stat = db_->HasNativeTable(special_part, has_collection);
+    stat = db_->HasNativeCollection(special_part, has_collection);
     ASSERT_FALSE(has_collection);
     stat = db_->HasCollection(special_part, has_collection);
     ASSERT_TRUE(has_collection);
@@ -835,19 +835,19 @@ TEST_F(DBTest, PARTITION_TEST) {
         fiu_disable("DBImpl.WaitTableIndexRecursively.not_empty_err_msg");
 
         uint64_t row_count = 0;
-        stat = db_->GetTableRowCount(TABLE_NAME, row_count);
+        stat = db_->GetCollectionRowCount(TABLE_NAME, row_count);
         ASSERT_TRUE(stat.ok());
         ASSERT_EQ(row_count, INSERT_BATCH * PARTITION_COUNT);
 
         FIU_ENABLE_FIU("SqliteMetaImpl.Count.throw_exception");
-        stat = db_->GetTableRowCount(TABLE_NAME, row_count);
+        stat = db_->GetCollectionRowCount(TABLE_NAME, row_count);
         ASSERT_FALSE(stat.ok());
         fiu_disable("SqliteMetaImpl.Count.throw_exception");
 
-        FIU_ENABLE_FIU("DBImpl.GetTableRowCountRecursively.fail_get_table_rowcount_for_partition");
-        stat = db_->GetTableRowCount(TABLE_NAME, row_count);
+        FIU_ENABLE_FIU("DBImpl.GetCollectionRowCountRecursively.fail_get_table_rowcount_for_partition");
+        stat = db_->GetCollectionRowCount(TABLE_NAME, row_count);
         ASSERT_FALSE(stat.ok());
-        fiu_disable("DBImpl.GetTableRowCountRecursively.fail_get_table_rowcount_for_partition");
+        fiu_disable("DBImpl.GetCollectionRowCountRecursively.fail_get_table_rowcount_for_partition");
     }
 
     {  // search
@@ -890,29 +890,29 @@ TEST_F(DBTest, PARTITION_TEST) {
     stat = db_->DropPartitionByTag(collection_name, "1");
     ASSERT_TRUE(stat.ok());
 
-    FIU_ENABLE_FIU("DBImpl.DropTableIndexRecursively.fail_drop_table_Index_for_partition");
+    FIU_ENABLE_FIU("DBImpl.DropCollectionIndexRecursively.fail_drop_table_Index_for_partition");
     stat = db_->DropIndex(table_info.collection_id_);
     ASSERT_FALSE(stat.ok());
-    fiu_disable("DBImpl.DropTableIndexRecursively.fail_drop_table_Index_for_partition");
+    fiu_disable("DBImpl.DropCollectionIndexRecursively.fail_drop_table_Index_for_partition");
 
-    FIU_ENABLE_FIU("DBImpl.DropTableIndexRecursively.fail_drop_table_Index_for_partition");
+    FIU_ENABLE_FIU("DBImpl.DropCollectionIndexRecursively.fail_drop_table_Index_for_partition");
     stat = db_->DropIndex(table_info.collection_id_);
     ASSERT_FALSE(stat.ok());
-    fiu_disable("DBImpl.DropTableIndexRecursively.fail_drop_table_Index_for_partition");
+    fiu_disable("DBImpl.DropCollectionIndexRecursively.fail_drop_table_Index_for_partition");
 
     stat = db_->DropIndex(collection_name);
     ASSERT_TRUE(stat.ok());
 
-    stat = db_->DropTable(collection_name);
+    stat = db_->DropCollection(collection_name);
     ASSERT_TRUE(stat.ok());
 }
 
 TEST_F(DBTest2, ARHIVE_DISK_CHECK) {
     milvus::engine::meta::CollectionSchema table_info = BuildTableSchema();
-    auto stat = db_->CreateTable(table_info);
+    auto stat = db_->CreateCollection(table_info);
 
     std::vector<milvus::engine::meta::CollectionSchema> table_schema_array;
-    stat = db_->AllTables(table_schema_array);
+    stat = db_->AllCollections(table_schema_array);
     ASSERT_TRUE(stat.ok());
     bool bfound = false;
     for (auto& schema : table_schema_array) {
@@ -925,7 +925,7 @@ TEST_F(DBTest2, ARHIVE_DISK_CHECK) {
 
     milvus::engine::meta::CollectionSchema table_info_get;
     table_info_get.collection_id_ = TABLE_NAME;
-    stat = db_->DescribeTable(table_info_get);
+    stat = db_->DescribeCollection(table_info_get);
     ASSERT_TRUE(stat.ok());
     ASSERT_EQ(table_info_get.dimension_, TABLE_DIM);
 
@@ -951,11 +951,11 @@ TEST_F(DBTest2, ARHIVE_DISK_CHECK) {
 
 TEST_F(DBTest2, DELETE_TEST) {
     milvus::engine::meta::CollectionSchema table_info = BuildTableSchema();
-    auto stat = db_->CreateTable(table_info);
+    auto stat = db_->CreateCollection(table_info);
 
     milvus::engine::meta::CollectionSchema table_info_get;
     table_info_get.collection_id_ = TABLE_NAME;
-    stat = db_->DescribeTable(table_info_get);
+    stat = db_->DescribeCollection(table_info_get);
     ASSERT_TRUE(stat.ok());
 
     bool has_collection = false;
@@ -980,12 +980,12 @@ TEST_F(DBTest2, DELETE_TEST) {
 
     // fail drop collection
     fiu_init(0);
-    FIU_ENABLE_FIU("DBImpl.DropTableRecursively.failed");
-    stat = db_->DropTable(TABLE_NAME);
+    FIU_ENABLE_FIU("DBImpl.DropCollectionRecursively.failed");
+    stat = db_->DropCollection(TABLE_NAME);
     ASSERT_FALSE(stat.ok());
-    fiu_disable("DBImpl.DropTableRecursively.failed");
+    fiu_disable("DBImpl.DropCollectionRecursively.failed");
 
-    stat = db_->DropTable(TABLE_NAME);
+    stat = db_->DropCollection(TABLE_NAME);
 
     std::this_thread::sleep_for(std::chrono::seconds(2));
     ASSERT_TRUE(stat.ok());
@@ -997,7 +997,7 @@ TEST_F(DBTest2, DELETE_TEST) {
 TEST_F(DBTest2, SHOW_TABLE_INFO_TEST) {
     std::string collection_name = TABLE_NAME;
     milvus::engine::meta::CollectionSchema table_schema = BuildTableSchema();
-    auto stat = db_->CreateTable(table_schema);
+    auto stat = db_->CreateCollection(table_schema);
 
     uint64_t nb = VECTOR_COUNT;
     milvus::engine::VectorsData xb;
@@ -1026,7 +1026,7 @@ TEST_F(DBTest2, SHOW_TABLE_INFO_TEST) {
 
     {
         milvus::engine::TableInfo table_info;
-        stat = db_->GetTableInfo(collection_name, table_info);
+        stat = db_->GetCollectionInfo(collection_name, table_info);
         ASSERT_TRUE(stat.ok());
         int64_t row_count = 0;
         for (auto& part : table_info.partitions_stat_) {
@@ -1047,7 +1047,7 @@ TEST_F(DBTest2, SHOW_TABLE_INFO_TEST) {
 
 TEST_F(DBTestWAL, DB_INSERT_TEST) {
     milvus::engine::meta::CollectionSchema table_info = BuildTableSchema();
-    auto stat = db_->CreateTable(table_info);
+    auto stat = db_->CreateCollection(table_info);
     ASSERT_TRUE(stat.ok());
 
     uint64_t qb = 100;
@@ -1070,13 +1070,13 @@ TEST_F(DBTestWAL, DB_INSERT_TEST) {
 
     db_->Flush(table_info.collection_id_);
 
-    stat = db_->DropTable(table_info.collection_id_);
+    stat = db_->DropCollection(table_info.collection_id_);
     ASSERT_TRUE(stat.ok());
 }
 
 TEST_F(DBTestWAL, DB_STOP_TEST) {
     milvus::engine::meta::CollectionSchema table_info = BuildTableSchema();
-    auto stat = db_->CreateTable(table_info);
+    auto stat = db_->CreateCollection(table_info);
     ASSERT_TRUE(stat.ok());
 
     uint64_t qb = 100;
@@ -1102,13 +1102,13 @@ TEST_F(DBTestWAL, DB_STOP_TEST) {
     ASSERT_TRUE(stat.ok());
     ASSERT_EQ(result_ids.size() / topk, qb);
 
-    stat = db_->DropTable(table_info.collection_id_);
+    stat = db_->DropCollection(table_info.collection_id_);
     ASSERT_TRUE(stat.ok());
 }
 
 TEST_F(DBTestWALRecovery, RECOVERY_WITH_NO_ERROR) {
     milvus::engine::meta::CollectionSchema table_info = BuildTableSchema();
-    auto stat = db_->CreateTable(table_info);
+    auto stat = db_->CreateCollection(table_info);
     ASSERT_TRUE(stat.ok());
 
     uint64_t qb = 100;
@@ -1157,7 +1157,7 @@ TEST_F(DBTestWALRecovery, RECOVERY_WITH_NO_ERROR) {
 
 TEST_F(DBTestWALRecovery_Error, RECOVERY_WITH_INVALID_LOG_FILE) {
     milvus::engine::meta::CollectionSchema table_info = BuildTableSchema();
-    auto stat = db_->CreateTable(table_info);
+    auto stat = db_->CreateCollection(table_info);
     ASSERT_TRUE(stat.ok());
 
     uint64_t qb = 100;
@@ -1191,7 +1191,7 @@ TEST_F(DBTest2, GET_VECTOR_NON_EXISTING_TABLE) {
 
 TEST_F(DBTest2, GET_VECTOR_BY_ID_TEST) {
     milvus::engine::meta::CollectionSchema table_info = BuildTableSchema();
-    auto stat = db_->CreateTable(table_info);
+    auto stat = db_->CreateCollection(table_info);
     ASSERT_TRUE(stat.ok());
 
     uint64_t qb = 1000;
@@ -1221,7 +1221,7 @@ TEST_F(DBTest2, GET_VECTOR_BY_ID_TEST) {
 
 TEST_F(DBTest2, GET_VECTOR_IDS_TEST) {
     milvus::engine::meta::CollectionSchema table_schema = BuildTableSchema();
-    auto stat = db_->CreateTable(table_schema);
+    auto stat = db_->CreateCollection(table_schema);
     ASSERT_TRUE(stat.ok());
 
     uint64_t BATCH_COUNT = 1000;
@@ -1243,7 +1243,7 @@ TEST_F(DBTest2, GET_VECTOR_IDS_TEST) {
     db_->Flush();
 
     milvus::engine::TableInfo table_info;
-    stat = db_->GetTableInfo(TABLE_NAME, table_info);
+    stat = db_->GetCollectionInfo(TABLE_NAME, table_info);
     ASSERT_TRUE(stat.ok());
     ASSERT_EQ(table_info.partitions_stat_.size(), 2UL);
 
@@ -1280,7 +1280,7 @@ TEST_F(DBTest2, INSERT_DUPLICATE_ID) {
     db_ = milvus::engine::DBFactory::Build(options);
 
     milvus::engine::meta::CollectionSchema table_schema = BuildTableSchema();
-    auto stat = db_->CreateTable(table_schema);
+    auto stat = db_->CreateCollection(table_schema);
     ASSERT_TRUE(stat.ok());
 
     uint64_t size = 20;
@@ -1302,7 +1302,7 @@ TEST_F(DBTest2, INSERT_DUPLICATE_ID) {
 TEST_F(DBTest2, SEARCH_WITH_DIFFERENT_INDEX) {
     milvus::engine::meta::CollectionSchema table_info = BuildTableSchema();
     // table_info.index_file_size_ = 1 * milvus::engine::M;
-    auto stat = db_->CreateTable(table_info);
+    auto stat = db_->CreateCollection(table_info);
 
     int loop = 10;
     uint64_t nb = 100000;
@@ -1332,7 +1332,7 @@ TEST_F(DBTest2, SEARCH_WITH_DIFFERENT_INDEX) {
     stat = db_->CreateIndex(table_info.collection_id_, index);
     ASSERT_TRUE(stat.ok());
 
-    stat = db_->PreloadTable(table_info.collection_id_);
+    stat = db_->PreloadCollection(table_info.collection_id_);
     ASSERT_TRUE(stat.ok());
 
     int topk = 10, nprobe = 10;
@@ -1357,7 +1357,7 @@ result_distances);
     stat = db_->CreateIndex(table_info.collection_id_, index);
     ASSERT_TRUE(stat.ok());
 
-    stat = db_->PreloadTable(table_info.collection_id_);
+    stat = db_->PreloadCollection(table_info.collection_id_);
     ASSERT_TRUE(stat.ok());
 
     for (auto id : ids_to_search) {

@@ -95,16 +95,16 @@ TEST(DBMiscTest, UTILS_TEST) {
     fiu_init(0);
     milvus::Status status;
     FIU_ENABLE_FIU("CommonUtil.CreateDirectory.create_parent_fail");
-    status = milvus::engine::utils::CreateTablePath(options, TABLE_NAME);
+    status = milvus::engine::utils::CreateCollectionPath(options, TABLE_NAME);
     ASSERT_FALSE(status.ok());
     fiu_disable("CommonUtil.CreateDirectory.create_parent_fail");
 
-    FIU_ENABLE_FIU("CreateTablePath.creat_slave_path");
-    status = milvus::engine::utils::CreateTablePath(options, TABLE_NAME);
+    FIU_ENABLE_FIU("CreateCollectionPath.creat_slave_path");
+    status = milvus::engine::utils::CreateCollectionPath(options, TABLE_NAME);
     ASSERT_FALSE(status.ok());
-    fiu_disable("CreateTablePath.creat_slave_path");
+    fiu_disable("CreateCollectionPath.creat_slave_path");
 
-    status = milvus::engine::utils::CreateTablePath(options, TABLE_NAME);
+    status = milvus::engine::utils::CreateCollectionPath(options, TABLE_NAME);
     ASSERT_TRUE(status.ok());
     ASSERT_TRUE(boost::filesystem::exists(options.path_));
     for (auto& path : options.slave_paths_) {
@@ -112,11 +112,11 @@ TEST(DBMiscTest, UTILS_TEST) {
     }
 
     //    options.slave_paths.push_back("/");
-    //    status =  engine::utils::CreateTablePath(options, TABLE_NAME);
+    //    status =  engine::utils::CreateCollectionPath(options, TABLE_NAME);
     //    ASSERT_FALSE(status.ok());
     //
     //    options.path = "/";
-    //    status =  engine::utils::CreateTablePath(options, TABLE_NAME);
+    //    status =  engine::utils::CreateCollectionPath(options, TABLE_NAME);
     //    ASSERT_FALSE(status.ok());
 
     milvus::engine::meta::SegmentSchema file;
@@ -134,13 +134,13 @@ TEST(DBMiscTest, UTILS_TEST) {
     status = milvus::engine::utils::DeleteTableFilePath(options, file);
     ASSERT_TRUE(status.ok());
 
-    status = milvus::engine::utils::CreateTableFilePath(options, file);
+    status = milvus::engine::utils::CreateCollectionFilePath(options, file);
     ASSERT_TRUE(status.ok());
 
-    FIU_ENABLE_FIU("CreateTableFilePath.fail_create");
-    status = milvus::engine::utils::CreateTableFilePath(options, file);
+    FIU_ENABLE_FIU("CreateCollectionFilePath.fail_create");
+    status = milvus::engine::utils::CreateCollectionFilePath(options, file);
     ASSERT_FALSE(status.ok());
-    fiu_disable("CreateTableFilePath.fail_create");
+    fiu_disable("CreateCollectionFilePath.fail_create");
 
     status = milvus::engine::utils::GetTableFilePath(options, file);
     ASSERT_FALSE(file.location_.empty());

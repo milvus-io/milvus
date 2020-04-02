@@ -43,19 +43,19 @@ class Meta {
     virtual ~Meta() = default;
 
     virtual Status
-    CreateTable(CollectionSchema& table_schema) = 0;
+    CreateCollection(CollectionSchema& table_schema) = 0;
 
     virtual Status
-    DescribeTable(CollectionSchema& table_schema) = 0;
+    DescribeCollection(CollectionSchema& table_schema) = 0;
 
     virtual Status
     HasCollection(const std::string& collection_id, bool& has_or_not) = 0;
 
     virtual Status
-    AllTables(std::vector<CollectionSchema>& table_schema_array) = 0;
+    AllCollections(std::vector<CollectionSchema>& table_schema_array) = 0;
 
     virtual Status
-    UpdateTableFlag(const std::string& collection_id, int64_t flag) = 0;
+    UpdateCollectionFlag(const std::string& collection_id, int64_t flag) = 0;
 
     virtual Status
     UpdateTableFlushLSN(const std::string& collection_id, uint64_t flush_lsn) = 0;
@@ -67,13 +67,13 @@ class Meta {
     GetTableFilesByFlushLSN(uint64_t flush_lsn, SegmentsSchema& table_files) = 0;
 
     virtual Status
-    DropTable(const std::string& collection_id) = 0;
+    DropCollection(const std::string& collection_id) = 0;
 
     virtual Status
     DeleteTableFiles(const std::string& collection_id) = 0;
 
     virtual Status
-    CreateTableFile(SegmentSchema& file_schema) = 0;
+    CreateCollectionFile(SegmentSchema& file_schema) = 0;
 
     virtual Status
     GetTableFiles(const std::string& collection_id, const std::vector<size_t>& ids, SegmentsSchema& table_files) = 0;
@@ -97,10 +97,10 @@ class Meta {
     UpdateTableFilesToIndex(const std::string& collection_id) = 0;
 
     virtual Status
-    DescribeTableIndex(const std::string& collection_id, TableIndex& index) = 0;
+    DescribeCollectionIndex(const std::string& collection_id, TableIndex& index) = 0;
 
     virtual Status
-    DropTableIndex(const std::string& collection_id) = 0;
+    DropCollectionIndex(const std::string& collection_id) = 0;
 
     virtual Status
     CreatePartition(const std::string& collection_name, const std::string& partition_name, const std::string& tag,

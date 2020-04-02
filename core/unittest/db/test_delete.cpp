@@ -65,11 +65,11 @@ BuildVectors(uint64_t n, milvus::engine::VectorsData& vectors) {
 
 TEST_F(DeleteTest, delete_in_mem) {
     milvus::engine::meta::CollectionSchema table_info = BuildTableSchema();
-    auto stat = db_->CreateTable(table_info);
+    auto stat = db_->CreateCollection(table_info);
 
     milvus::engine::meta::CollectionSchema table_info_get;
     table_info_get.collection_id_ = table_info.collection_id_;
-    stat = db_->DescribeTable(table_info_get);
+    stat = db_->DescribeCollection(table_info_get);
     ASSERT_TRUE(stat.ok());
     ASSERT_EQ(table_info_get.dimension_, TABLE_DIM);
 
@@ -113,7 +113,7 @@ TEST_F(DeleteTest, delete_in_mem) {
     ASSERT_TRUE(stat.ok());
 
     uint64_t row_count;
-    stat = db_->GetTableRowCount(table_info.collection_id_, row_count);
+    stat = db_->GetCollectionRowCount(table_info.collection_id_, row_count);
     ASSERT_TRUE(stat.ok());
     ASSERT_EQ(row_count, nb - search_vectors.size());
 
@@ -134,11 +134,11 @@ TEST_F(DeleteTest, delete_in_mem) {
 
 TEST_F(DeleteTest, delete_on_disk) {
     milvus::engine::meta::CollectionSchema table_info = BuildTableSchema();
-    auto stat = db_->CreateTable(table_info);
+    auto stat = db_->CreateCollection(table_info);
 
     milvus::engine::meta::CollectionSchema table_info_get;
     table_info_get.collection_id_ = table_info.collection_id_;
-    stat = db_->DescribeTable(table_info_get);
+    stat = db_->DescribeCollection(table_info_get);
     ASSERT_TRUE(stat.ok());
     ASSERT_EQ(table_info_get.dimension_, TABLE_DIM);
 
@@ -182,7 +182,7 @@ TEST_F(DeleteTest, delete_on_disk) {
     ASSERT_TRUE(stat.ok());
 
     uint64_t row_count;
-    stat = db_->GetTableRowCount(table_info.collection_id_, row_count);
+    stat = db_->GetCollectionRowCount(table_info.collection_id_, row_count);
     ASSERT_TRUE(stat.ok());
     ASSERT_EQ(row_count, nb - search_vectors.size());
 
@@ -203,11 +203,11 @@ TEST_F(DeleteTest, delete_on_disk) {
 
 TEST_F(DeleteTest, delete_multiple_times) {
     milvus::engine::meta::CollectionSchema table_info = BuildTableSchema();
-    auto stat = db_->CreateTable(table_info);
+    auto stat = db_->CreateCollection(table_info);
 
     milvus::engine::meta::CollectionSchema table_info_get;
     table_info_get.collection_id_ = table_info.collection_id_;
-    stat = db_->DescribeTable(table_info_get);
+    stat = db_->DescribeCollection(table_info_get);
     ASSERT_TRUE(stat.ok());
     ASSERT_EQ(table_info_get.dimension_, TABLE_DIM);
 
@@ -267,11 +267,11 @@ TEST_F(DeleteTest, delete_multiple_times) {
 TEST_F(DeleteTest, delete_before_create_index) {
     milvus::engine::meta::CollectionSchema table_info = BuildTableSchema();
     table_info.engine_type_ = (int32_t)milvus::engine::EngineType::FAISS_IVFFLAT;
-    auto stat = db_->CreateTable(table_info);
+    auto stat = db_->CreateCollection(table_info);
 
     milvus::engine::meta::CollectionSchema table_info_get;
     table_info_get.collection_id_ = table_info.collection_id_;
-    stat = db_->DescribeTable(table_info_get);
+    stat = db_->DescribeCollection(table_info_get);
     ASSERT_TRUE(stat.ok());
     ASSERT_EQ(table_info_get.dimension_, TABLE_DIM);
 
@@ -321,7 +321,7 @@ TEST_F(DeleteTest, delete_before_create_index) {
     ASSERT_TRUE(stat.ok());
 
     uint64_t row_count;
-    stat = db_->GetTableRowCount(table_info.collection_id_, row_count);
+    stat = db_->GetCollectionRowCount(table_info.collection_id_, row_count);
     ASSERT_TRUE(stat.ok());
     ASSERT_EQ(row_count, nb - ids_to_delete.size());
 
@@ -343,11 +343,11 @@ TEST_F(DeleteTest, delete_before_create_index) {
 TEST_F(DeleteTest, delete_with_index) {
     milvus::engine::meta::CollectionSchema table_info = BuildTableSchema();
     table_info.engine_type_ = (int32_t)milvus::engine::EngineType::FAISS_IVFFLAT;
-    auto stat = db_->CreateTable(table_info);
+    auto stat = db_->CreateCollection(table_info);
 
     milvus::engine::meta::CollectionSchema table_info_get;
     table_info_get.collection_id_ = table_info.collection_id_;
-    stat = db_->DescribeTable(table_info_get);
+    stat = db_->DescribeCollection(table_info_get);
     ASSERT_TRUE(stat.ok());
     ASSERT_EQ(table_info_get.dimension_, TABLE_DIM);
 
@@ -398,7 +398,7 @@ TEST_F(DeleteTest, delete_with_index) {
     ASSERT_TRUE(stat.ok());
 
     uint64_t row_count;
-    stat = db_->GetTableRowCount(table_info.collection_id_, row_count);
+    stat = db_->GetCollectionRowCount(table_info.collection_id_, row_count);
     ASSERT_TRUE(stat.ok());
     ASSERT_EQ(row_count, nb - ids_to_delete.size());
 
@@ -419,11 +419,11 @@ TEST_F(DeleteTest, delete_with_index) {
 
 TEST_F(DeleteTest, delete_multiple_times_with_index) {
     milvus::engine::meta::CollectionSchema table_info = BuildTableSchema();
-    auto stat = db_->CreateTable(table_info);
+    auto stat = db_->CreateCollection(table_info);
 
     milvus::engine::meta::CollectionSchema table_info_get;
     table_info_get.collection_id_ = table_info.collection_id_;
-    stat = db_->DescribeTable(table_info_get);
+    stat = db_->DescribeCollection(table_info_get);
     ASSERT_TRUE(stat.ok());
     ASSERT_EQ(table_info_get.dimension_, TABLE_DIM);
 
@@ -477,7 +477,7 @@ TEST_F(DeleteTest, delete_multiple_times_with_index) {
         ++deleted;
 
         uint64_t row_count;
-        stat = db_->GetTableRowCount(table_info.collection_id_, row_count);
+        stat = db_->GetCollectionRowCount(table_info.collection_id_, row_count);
         ASSERT_TRUE(stat.ok());
         ASSERT_EQ(row_count, nb - deleted);
 
@@ -497,11 +497,11 @@ TEST_F(DeleteTest, delete_multiple_times_with_index) {
 
 TEST_F(DeleteTest, delete_single_vector) {
     milvus::engine::meta::CollectionSchema table_info = BuildTableSchema();
-    auto stat = db_->CreateTable(table_info);
+    auto stat = db_->CreateCollection(table_info);
 
     milvus::engine::meta::CollectionSchema table_info_get;
     table_info_get.collection_id_ = table_info.collection_id_;
-    stat = db_->DescribeTable(table_info_get);
+    stat = db_->DescribeCollection(table_info_get);
     ASSERT_TRUE(stat.ok());
     ASSERT_EQ(table_info_get.dimension_, TABLE_DIM);
 
@@ -523,7 +523,7 @@ TEST_F(DeleteTest, delete_single_vector) {
     ASSERT_TRUE(stat.ok());
 
     uint64_t row_count;
-    stat = db_->GetTableRowCount(table_info.collection_id_, row_count);
+    stat = db_->GetCollectionRowCount(table_info.collection_id_, row_count);
     ASSERT_TRUE(stat.ok());
     ASSERT_EQ(row_count, 0);
 
@@ -544,11 +544,11 @@ TEST_F(DeleteTest, delete_single_vector) {
 
 TEST_F(DeleteTest, delete_add_create_index) {
     milvus::engine::meta::CollectionSchema table_info = BuildTableSchema();
-    auto stat = db_->CreateTable(table_info);
+    auto stat = db_->CreateCollection(table_info);
 
     milvus::engine::meta::CollectionSchema table_info_get;
     table_info_get.collection_id_ = table_info.collection_id_;
-    stat = db_->DescribeTable(table_info_get);
+    stat = db_->DescribeCollection(table_info_get);
     ASSERT_TRUE(stat.ok());
     ASSERT_EQ(table_info_get.dimension_, TABLE_DIM);
 
@@ -584,7 +584,7 @@ TEST_F(DeleteTest, delete_add_create_index) {
     ASSERT_TRUE(stat.ok());
 
     uint64_t row_count;
-    stat = db_->GetTableRowCount(table_info.collection_id_, row_count);
+    stat = db_->GetCollectionRowCount(table_info.collection_id_, row_count);
     ASSERT_TRUE(stat.ok());
     ASSERT_EQ(row_count, nb * 2 - 1);
 
@@ -614,11 +614,11 @@ TEST_F(DeleteTest, delete_add_create_index) {
 
 TEST_F(DeleteTest, delete_add_auto_flush) {
     milvus::engine::meta::CollectionSchema table_info = BuildTableSchema();
-    auto stat = db_->CreateTable(table_info);
+    auto stat = db_->CreateCollection(table_info);
 
     milvus::engine::meta::CollectionSchema table_info_get;
     table_info_get.collection_id_ = table_info.collection_id_;
-    stat = db_->DescribeTable(table_info_get);
+    stat = db_->DescribeCollection(table_info_get);
     ASSERT_TRUE(stat.ok());
     ASSERT_EQ(table_info_get.dimension_, TABLE_DIM);
 
@@ -656,7 +656,7 @@ TEST_F(DeleteTest, delete_add_auto_flush) {
     // ASSERT_TRUE(stat.ok());
 
     uint64_t row_count;
-    stat = db_->GetTableRowCount(table_info.collection_id_, row_count);
+    stat = db_->GetCollectionRowCount(table_info.collection_id_, row_count);
     ASSERT_TRUE(stat.ok());
     ASSERT_EQ(row_count, nb * 2 - 1);
 
@@ -687,11 +687,11 @@ TEST_F(DeleteTest, delete_add_auto_flush) {
 
 TEST_F(CompactTest, compact_basic) {
     milvus::engine::meta::CollectionSchema table_info = BuildTableSchema();
-    auto stat = db_->CreateTable(table_info);
+    auto stat = db_->CreateCollection(table_info);
 
     milvus::engine::meta::CollectionSchema table_info_get;
     table_info_get.collection_id_ = table_info.collection_id_;
-    stat = db_->DescribeTable(table_info_get);
+    stat = db_->DescribeCollection(table_info_get);
     ASSERT_TRUE(stat.ok());
     ASSERT_EQ(table_info_get.dimension_, TABLE_DIM);
 
@@ -715,7 +715,7 @@ TEST_F(CompactTest, compact_basic) {
     ASSERT_TRUE(stat.ok());
 
     uint64_t row_count;
-    stat = db_->GetTableRowCount(table_info.collection_id_, row_count);
+    stat = db_->GetCollectionRowCount(table_info.collection_id_, row_count);
     ASSERT_TRUE(stat.ok());
     ASSERT_EQ(row_count, nb - 2);
 
@@ -742,11 +742,11 @@ TEST_F(CompactTest, compact_with_index) {
     milvus::engine::meta::CollectionSchema table_info = BuildTableSchema();
     table_info.index_file_size_ = milvus::engine::ONE_KB;
     table_info.engine_type_ = (int32_t)milvus::engine::EngineType::FAISS_IVFSQ8;
-    auto stat = db_->CreateTable(table_info);
+    auto stat = db_->CreateCollection(table_info);
 
     milvus::engine::meta::CollectionSchema table_info_get;
     table_info_get.collection_id_ = table_info.collection_id_;
-    stat = db_->DescribeTable(table_info_get);
+    stat = db_->DescribeCollection(table_info_get);
     ASSERT_TRUE(stat.ok());
     ASSERT_EQ(table_info_get.dimension_, TABLE_DIM);
 
@@ -796,14 +796,14 @@ TEST_F(CompactTest, compact_with_index) {
     ASSERT_TRUE(stat.ok());
 
     uint64_t row_count;
-    stat = db_->GetTableRowCount(table_info.collection_id_, row_count);
+    stat = db_->GetCollectionRowCount(table_info.collection_id_, row_count);
     ASSERT_TRUE(stat.ok());
     ASSERT_EQ(row_count, nb - ids_to_delete.size());
 
     stat = db_->Compact(table_info.collection_id_);
     ASSERT_TRUE(stat.ok());
 
-    stat = db_->GetTableRowCount(table_info.collection_id_, row_count);
+    stat = db_->GetCollectionRowCount(table_info.collection_id_, row_count);
     ASSERT_TRUE(stat.ok());
     ASSERT_EQ(row_count, nb - ids_to_delete.size());
 

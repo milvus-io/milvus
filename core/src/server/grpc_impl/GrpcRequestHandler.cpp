@@ -242,7 +242,7 @@ GrpcRequestHandler::CreateTable(::grpc::ServerContext* context, const ::milvus::
                                 ::milvus::grpc::Status* response) {
     CHECK_NULLPTR_RETURN(request);
 
-    Status status = request_handler_.CreateTable(context_map_[context], request->table_name(), request->dimension(),
+    Status status = request_handler_.CreateCollection(context_map_[context], request->table_name(), request->dimension(),
                                                  request->index_file_size(), request->metric_type());
     SET_RESPONSE(response, status, context);
 
@@ -268,7 +268,7 @@ GrpcRequestHandler::DropTable(::grpc::ServerContext* context, const ::milvus::gr
                               ::milvus::grpc::Status* response) {
     CHECK_NULLPTR_RETURN(request);
 
-    Status status = request_handler_.DropTable(context_map_[context], request->table_name());
+    Status status = request_handler_.DropCollection(context_map_[context], request->table_name());
 
     SET_RESPONSE(response, status, context);
     return ::grpc::Status::OK;
@@ -482,7 +482,7 @@ GrpcRequestHandler::DescribeTable(::grpc::ServerContext* context, const ::milvus
     CHECK_NULLPTR_RETURN(request);
 
     CollectionSchema table_schema;
-    Status status = request_handler_.DescribeTable(context_map_[context], request->table_name(), table_schema);
+    Status status = request_handler_.DescribeCollection(context_map_[context], request->table_name(), table_schema);
     response->set_table_name(table_schema.collection_name_);
     response->set_dimension(table_schema.dimension_);
     response->set_index_file_size(table_schema.index_file_size_);

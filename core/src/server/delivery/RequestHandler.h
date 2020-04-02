@@ -27,14 +27,14 @@ class RequestHandler {
     RequestHandler() = default;
 
     Status
-    CreateTable(const std::shared_ptr<Context>& context, const std::string& collection_name, int64_t dimension,
+    CreateCollection(const std::shared_ptr<Context>& context, const std::string& collection_name, int64_t dimension,
                 int64_t index_file_size, int64_t metric_type);
 
     Status
     HasCollection(const std::shared_ptr<Context>& context, const std::string& collection_name, bool& has_collection);
 
     Status
-    DropTable(const std::shared_ptr<Context>& context, const std::string& collection_name);
+    DropCollection(const std::shared_ptr<Context>& context, const std::string& collection_name);
 
     Status
     CreateIndex(const std::shared_ptr<Context>& context, const std::string& collection_name, int64_t index_type,
@@ -70,7 +70,7 @@ class RequestHandler {
                TopKQueryResult& result);
 
     Status
-    DescribeTable(const std::shared_ptr<Context>& context, const std::string& collection_name,
+    DescribeCollection(const std::shared_ptr<Context>& context, const std::string& collection_name,
                   CollectionSchema& table_schema);
 
     Status
@@ -84,7 +84,7 @@ class RequestHandler {
                const std::vector<int64_t>& vector_ids);
 
     Status
-    PreloadTable(const std::shared_ptr<Context>& context, const std::string& collection_name);
+    PreloadCollection(const std::shared_ptr<Context>& context, const std::string& collection_name);
 
     Status
     DescribeIndex(const std::shared_ptr<Context>& context, const std::string& collection_name, IndexParam& param);

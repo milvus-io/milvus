@@ -9,7 +9,7 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
-#include "server/delivery/request/CreateTableRequest.h"
+#include "server/delivery/request/CreateCollectionRequest.h"
 #include "db/Utils.h"
 #include "server/DBWrapper.h"
 #include "server/delivery/request/BaseRequest.h"
@@ -24,10 +24,10 @@
 namespace milvus {
 namespace server {
 
-CreateTableRequest::CreateTableRequest(const std::shared_ptr<milvus::server::Context>& context,
+CreateCollectionRequest::CreateCollectionRequest(const std::shared_ptr<milvus::server::Context>& context,
                                        const std::string& collection_name, int64_t dimension, int64_t index_file_size,
                                        int64_t metric_type)
-    : BaseRequest(context, BaseRequest::kCreateTable),
+    : BaseRequest(context, BaseRequest::kCreateCollection),
       collection_name_(collection_name),
       dimension_(dimension),
       index_file_size_(index_file_size),
@@ -35,16 +35,16 @@ CreateTableRequest::CreateTableRequest(const std::shared_ptr<milvus::server::Con
 }
 
 BaseRequestPtr
-CreateTableRequest::Create(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name,
+CreateCollectionRequest::Create(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name,
                            int64_t dimension, int64_t index_file_size, int64_t metric_type) {
     return std::shared_ptr<BaseRequest>(
-        new CreateTableRequest(context, collection_name, dimension, index_file_size, metric_type));
+        new CreateCollectionRequest(context, collection_name, dimension, index_file_size, metric_type));
 }
 
 Status
-CreateTableRequest::OnExecute() {
+CreateCollectionRequest::OnExecute() {
     std::string hdr =
-        "CreateTableRequest(collection=" + collection_name_ + ", dimension=" + std::to_string(dimension_) + ")";
+        "CreateCollectionRequest(collection=" + collection_name_ + ", dimension=" + std::to_string(dimension_) + ")";
     TimeRecorderAuto rc(hdr);
 
     try {
@@ -60,7 +60,7 @@ CreateTableRequest::OnExecute() {
         }
 
         status = ValidationUtil::ValidateTableIndexFileSize(index_file_size_);
-        fiu_do_on("CreateTableRequest.OnExecute.invalid_index_file_size",
+        fiu_do_on("CreateCollectionRequest.OnExecute.invalid_index_file_size",
                   status = Status(milvus::SERVER_UNEXPECTED_ERROR, ""));
         if (!status.ok()) {
             return status;
@@ -90,11 +90,11 @@ CreateTableRequest::OnExecute() {
         }
 
         // step 3: create collection
-        status = DBWrapper::DB()->CreateTable(table_info);
-        fiu_do_on("CreateTableRequest.OnExecute.db_already_exist", status = Status(milvus::DB_ALREADY_EXIST, ""));
-        fiu_do_on("CreateTableRequest.OnExecute.create_table_fail",
+        status = DBWrapper::DB()->CreateCollection(table_info);
+        fiu_do_on("CreateCollectionRequest.OnExecute.db_already_exist", status = Status(milvus::DB_ALREADY_EXIST, ""));
+        fiu_do_on("CreateCollectionRequest.OnExecute.create_table_fail",
                   status = Status(milvus::SERVER_UNEXPECTED_ERROR, ""));
-        fiu_do_on("CreateTableRequest.OnExecute.throw_std_exception", throw std::exception());
+        fiu_do_on("CreateCollectionRequest.OnExecute.throw_std_exception", throw std::exception());
         if (!status.ok()) {
             // collection could exist
             if (status.code() == DB_ALREADY_EXIST) {
