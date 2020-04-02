@@ -137,16 +137,16 @@ TEST_F(NSGInterfaceTest, delete_test) {
 
     faiss::ConcurrentBitsetPtr bitset = std::make_shared<faiss::ConcurrentBitset>(nb);
     auto random_seed = (unsigned)time(NULL);
-    printf("delete ids: \n");
+    // printf("delete ids: \n");
     for (int i = 0; i < nq; i++) {
         auto tmp = rand_r(&random_seed) % nb;
-        printf("%ld\n", tmp);
+        // printf("%ld\n", tmp);
         //        std::cout << "before delete, test result: " << bitset->test(tmp) << std::endl;
         bitset->set(tmp);
         //        std::cout << "after delete, test result: " << bitset->test(tmp) << std::endl;
         for (int j = 0; j < dim; j++) xq[dim * i + j] = xb[dim * tmp + j];
     }
-    printf("\n");
+    // printf("\n");
 
     // untrained index
     {
@@ -157,27 +157,37 @@ TEST_F(NSGInterfaceTest, delete_test) {
     train_conf[milvus::knowhere::meta::DEVICEID] = DEVICEID;
     index_->Train(base_dataset, train_conf);
 
-    printf("---------------search xq-------------\n");
     {
-        auto result = index_->Query(query_dataset, search_conf);
-        const int64_t* I = result->Get<int64_t*>(milvus::knowhere::meta::IDS);
-        printf("I=\n");
+        // search xq without delete
+        auto result_before = index_->Query(query_dataset, search_conf);
+        const int64_t* I_before = result_before->Get<int64_t*>(milvus::knowhere::meta::IDS);
+        /*printf("I=\n");
         for (int i = 0; i < nq; i++) {
             for (int j = 0; j < k; j++) printf("%5ld ", I[i * k + j]);
             printf("\n");
-        }
-    }
+        }*/
 
-    printf("----------------search xq with delete------------\n");
-    {  // search xq with delete
+        // search xq with delete
         index_->SetBlacklist(bitset);
-        auto result = index_->Query(query_dataset, search_conf);
-        auto I = result->Get<int64_t*>(milvus::knowhere::meta::IDS);
+        auto result_after = index_->Query(query_dataset, search_conf);
+        auto I_after = result_after->Get<int64_t*>(milvus::knowhere::meta::IDS);
 
-        printf("I=\n");
+        /*printf("I=\n");
         for (int i = 0; i < nq; i++) {
             for (int j = 0; j < k; j++) printf("%5ld ", I[i * k + j]);
             printf("\n");
+        }*/
+
+        // First vector deleted
+        for (int i = 0; i < nq; i++) {
+            ASSERT_NE(I_before[i * k], I_after[i * k]);
+        }
+
+        // Other results are the same
+        for (int i = 0; i < nq; i++) {
+            for (int j = 1; j < k; j++) {
+                ASSERT_EQ(I_before[i * k + j], I_after[i * k + j - 1]);
+            }
         }
     }
 
