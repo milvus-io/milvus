@@ -62,7 +62,7 @@ class DB {
     AllCollections(std::vector<meta::CollectionSchema>& table_schema_array) = 0;
 
     virtual Status
-    GetCollectionInfo(const std::string& collection_id, CollectionInfo& table_info) = 0;
+    GetCollectionInfo(const std::string& collection_id, CollectionInfo& collection_info) = 0;
 
     virtual Status
     GetCollectionRowCount(const std::string& collection_id, uint64_t& row_count) = 0;

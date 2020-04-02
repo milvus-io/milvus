@@ -723,8 +723,8 @@ TEST_F(RpcHandlerTest, TABLES_TEST) {
     ASSERT_EQ(status.error_code(), ::grpc::Status::OK.error_code());
 
     // show collection info
-    ::milvus::grpc::TableInfo table_info;
-    status = handler->ShowTableInfo(&context, &collection_name, &table_info);
+    ::milvus::grpc::TableInfo collection_info;
+    status = handler->ShowTableInfo(&context, &collection_name, &collection_info);
     ASSERT_EQ(status.error_code(), ::grpc::Status::OK.error_code());
 
     fiu_init(0);

@@ -142,14 +142,14 @@ ConstructPartitionStat(const PartitionStat& partition_stat, ::milvus::grpc::Part
 }
 
 void
-ConstructTableInfo(const CollectionInfo& table_info, ::milvus::grpc::TableInfo* response) {
+ConstructTableInfo(const CollectionInfo& collection_info, ::milvus::grpc::TableInfo* response) {
     if (!response) {
         return;
     }
 
-    response->set_total_row_count(table_info.total_row_num_);
+    response->set_total_row_count(collection_info.total_row_num_);
 
-    for (auto& partition_stat : table_info.partitions_stat_) {
+    for (auto& partition_stat : collection_info.partitions_stat_) {
         ::milvus::grpc::PartitionStat* grpc_partiton_stat = response->mutable_partitions_stat()->Add();
         ConstructPartitionStat(partition_stat, grpc_partiton_stat);
     }
@@ -524,9 +524,9 @@ GrpcRequestHandler::ShowTableInfo(::grpc::ServerContext* context, const ::milvus
                                   ::milvus::grpc::TableInfo* response) {
     CHECK_NULLPTR_RETURN(request);
 
-    CollectionInfo table_info;
-    Status status = request_handler_.ShowCollectionInfo(context_map_[context], request->table_name(), table_info);
-    ConstructTableInfo(table_info, response);
+    CollectionInfo collection_info;
+    Status status = request_handler_.ShowCollectionInfo(context_map_[context], request->table_name(), collection_info);
+    ConstructTableInfo(collection_info, response);
     SET_RESPONSE(response->mutable_status(), status, context);
 
     return ::grpc::Status::OK;

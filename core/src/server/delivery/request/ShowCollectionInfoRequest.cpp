@@ -44,14 +44,14 @@ ConstructPartitionStat(const engine::PartitionStat& partition_stat, PartitionSta
 }
 
 ShowCollectionInfoRequest::ShowCollectionInfoRequest(const std::shared_ptr<milvus::server::Context>& context,
-                                           const std::string& collection_name, CollectionInfo& table_info)
-    : BaseRequest(context, BaseRequest::kShowCollectionInfo), collection_name_(collection_name), table_info_(table_info) {
+                                           const std::string& collection_name, CollectionInfo& collection_info)
+    : BaseRequest(context, BaseRequest::kShowCollectionInfo), collection_name_(collection_name), collection_info_(collection_info) {
 }
 
 BaseRequestPtr
 ShowCollectionInfoRequest::Create(const std::shared_ptr<milvus::server::Context>& context,
-                             const std::string& collection_name, CollectionInfo& table_info) {
-    return std::shared_ptr<BaseRequest>(new ShowCollectionInfoRequest(context, collection_name, table_info));
+                             const std::string& collection_name, CollectionInfo& collection_info) {
+    return std::shared_ptr<BaseRequest>(new ShowCollectionInfoRequest(context, collection_name, collection_info));
 }
 
 Status
@@ -83,23 +83,23 @@ ShowCollectionInfoRequest::OnExecute() {
     }
 
     // step 3: get partitions
-    engine::CollectionInfo table_info;
-    status = DBWrapper::DB()->GetCollectionInfo(collection_name_, table_info);
+    engine::CollectionInfo collection_info;
+    status = DBWrapper::DB()->GetCollectionInfo(collection_name_, collection_info);
     if (!status.ok()) {
         return status;
     }
 
     // step 4: construct partitions info
     int64_t total_row_count = 0;
-    table_info_.partitions_stat_.reserve(table_info.partitions_stat_.size());
-    for (auto& partition : table_info.partitions_stat_) {
+    collection_info_.partitions_stat_.reserve(collection_info.partitions_stat_.size());
+    for (auto& partition : collection_info.partitions_stat_) {
         PartitionStat partition_stat;
         ConstructPartitionStat(partition, partition_stat);
         total_row_count += partition_stat.total_row_num_;
-        table_info_.partitions_stat_.emplace_back(partition_stat);
+        collection_info_.partitions_stat_.emplace_back(partition_stat);
     }
 
-    table_info_.total_row_num_ = total_row_count;
+    collection_info_.total_row_num_ = total_row_count;
 
     return Status::OK();
 }

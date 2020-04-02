@@ -69,7 +69,7 @@ class GrpcClient {
     ShowTables(milvus::grpc::TableNameList& table_name_list);
 
     Status
-    ShowTableInfo(grpc::TableName& table_name, grpc::TableInfo& table_info);
+    ShowTableInfo(grpc::TableName& table_name, grpc::TableInfo& collection_info);
 
     Status
     Cmd(const std::string& cmd, std::string& result);

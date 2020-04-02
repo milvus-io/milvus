@@ -779,10 +779,10 @@ TEST_F(MySqlMetaTest, INDEX_TEST) {
     ASSERT_FALSE(status.ok());
     fiu_disable("MySQLMetaImpl.UpdateCollectionFlag.throw_exception");
 
-    milvus::engine::meta::CollectionSchema table_info;
-    table_info.collection_id_ = collection_id;
-    status = impl_->DescribeCollection(table_info);
-    ASSERT_EQ(table_info.flag_, flag);
+    milvus::engine::meta::CollectionSchema collection_info;
+    collection_info.collection_id_ = collection_id;
+    status = impl_->DescribeCollection(collection_info);
+    ASSERT_EQ(collection_info.flag_, flag);
 
     milvus::engine::CollectionIndex index_out;
     status = impl_->DescribeCollectionIndex(collection_id, index_out);

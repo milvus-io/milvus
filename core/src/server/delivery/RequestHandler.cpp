@@ -37,7 +37,7 @@
 #include "server/delivery/request/SearchRequest.h"
 #include "server/delivery/request/ShowPartitionsRequest.h"
 #include "server/delivery/request/ShowCollectionInfoRequest.h"
-#include "server/delivery/request/ShowTablesRequest.h"
+#include "server/delivery/request/ShowCollectionsRequest.h"
 
 namespace milvus {
 namespace server {
@@ -106,7 +106,7 @@ RequestHandler::GetVectorIDs(const std::shared_ptr<Context>& context, const std:
 
 Status
 RequestHandler::ShowTables(const std::shared_ptr<Context>& context, std::vector<std::string>& tables) {
-    BaseRequestPtr request_ptr = ShowTablesRequest::Create(context, tables);
+    BaseRequestPtr request_ptr = ShowCollectionsRequest::Create(context, tables);
     RequestScheduler::ExecRequest(request_ptr);
 
     return request_ptr->status();
@@ -114,8 +114,8 @@ RequestHandler::ShowTables(const std::shared_ptr<Context>& context, std::vector<
 
 Status
 RequestHandler::ShowCollectionInfo(const std::shared_ptr<Context>& context, const std::string& collection_name,
-                              CollectionInfo& table_info) {
-    BaseRequestPtr request_ptr = ShowCollectionInfoRequest::Create(context, collection_name, table_info);
+                              CollectionInfo& collection_info) {
+    BaseRequestPtr request_ptr = ShowCollectionInfoRequest::Create(context, collection_name, collection_info);
     RequestScheduler::ExecRequest(request_ptr);
 
     return request_ptr->status();

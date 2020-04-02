@@ -74,23 +74,23 @@ CreateCollectionRequest::OnExecute() {
         rc.RecordSection("check validation");
 
         // step 2: construct collection schema
-        engine::meta::CollectionSchema table_info;
-        table_info.collection_id_ = collection_name_;
-        table_info.dimension_ = static_cast<uint16_t>(dimension_);
-        table_info.index_file_size_ = index_file_size_;
-        table_info.metric_type_ = metric_type_;
+        engine::meta::CollectionSchema collection_info;
+        collection_info.collection_id_ = collection_name_;
+        collection_info.dimension_ = static_cast<uint16_t>(dimension_);
+        collection_info.index_file_size_ = index_file_size_;
+        collection_info.metric_type_ = metric_type_;
 
         // some metric type only support binary vector, adapt the index type
         if (engine::utils::IsBinaryMetricType(metric_type_)) {
-            if (table_info.engine_type_ == static_cast<int32_t>(engine::EngineType::FAISS_IDMAP)) {
-                table_info.engine_type_ = static_cast<int32_t>(engine::EngineType::FAISS_BIN_IDMAP);
-            } else if (table_info.engine_type_ == static_cast<int32_t>(engine::EngineType::FAISS_IVFFLAT)) {
-                table_info.engine_type_ = static_cast<int32_t>(engine::EngineType::FAISS_BIN_IVFFLAT);
+            if (collection_info.engine_type_ == static_cast<int32_t>(engine::EngineType::FAISS_IDMAP)) {
+                collection_info.engine_type_ = static_cast<int32_t>(engine::EngineType::FAISS_BIN_IDMAP);
+            } else if (collection_info.engine_type_ == static_cast<int32_t>(engine::EngineType::FAISS_IVFFLAT)) {
+                collection_info.engine_type_ = static_cast<int32_t>(engine::EngineType::FAISS_BIN_IVFFLAT);
             }
         }
 
         // step 3: create collection
-        status = DBWrapper::DB()->CreateCollection(table_info);
+        status = DBWrapper::DB()->CreateCollection(collection_info);
         fiu_do_on("CreateCollectionRequest.OnExecute.db_already_exist", status = Status(milvus::DB_ALREADY_EXIST, ""));
         fiu_do_on("CreateCollectionRequest.OnExecute.create_table_fail",
                   status = Status(milvus::SERVER_UNEXPECTED_ERROR, ""));

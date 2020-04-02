@@ -242,10 +242,10 @@ GrpcClient::ShowTables(milvus::grpc::TableNameList& table_name_list) {
 }
 
 Status
-GrpcClient::ShowTableInfo(grpc::TableName& collection_name, grpc::TableInfo& table_info) {
+GrpcClient::ShowTableInfo(grpc::TableName& collection_name, grpc::TableInfo& collection_info) {
     ClientContext context;
     ::milvus::grpc::Command command;
-    ::grpc::Status grpc_status = stub_->ShowTableInfo(&context, collection_name, &table_info);
+    ::grpc::Status grpc_status = stub_->ShowTableInfo(&context, collection_name, &collection_info);
 
     if (!grpc_status.ok()) {
         std::cerr << "ShowTableInfo gRPC failed!" << std::endl;
@@ -253,9 +253,9 @@ GrpcClient::ShowTableInfo(grpc::TableName& collection_name, grpc::TableInfo& tab
         return Status(StatusCode::RPCFailed, grpc_status.error_message());
     }
 
-    if (table_info.status().error_code() != grpc::SUCCESS) {
-        std::cerr << table_info.status().reason() << std::endl;
-        return Status(StatusCode::ServerFailed, table_info.status().reason());
+    if (collection_info.status().error_code() != grpc::SUCCESS) {
+        std::cerr << collection_info.status().reason() << std::endl;
+        return Status(StatusCode::ServerFailed, collection_info.status().reason());
     }
 
     return Status::OK();

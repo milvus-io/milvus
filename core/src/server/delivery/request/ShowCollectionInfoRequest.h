@@ -30,18 +30,18 @@ class ShowCollectionInfoRequest : public BaseRequest {
  public:
     static BaseRequestPtr
     Create(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name,
-           CollectionInfo& table_info);
+           CollectionInfo& collection_info);
 
  protected:
     ShowCollectionInfoRequest(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name,
-                         CollectionInfo& table_info);
+                         CollectionInfo& collection_info);
 
     Status
     OnExecute() override;
 
  private:
     const std::string collection_name_;
-    CollectionInfo& table_info_;
+    CollectionInfo& collection_info_;
 };
 
 }  // namespace server
