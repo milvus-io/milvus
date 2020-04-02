@@ -82,7 +82,7 @@ class SearchRequest : public BaseRequest {
 
  private:
     const std::string collection_name_;
-    const engine::VectorsData& vectors_data_;
+    const engine::VectorsData vectors_data_;
     int64_t topk_;
     milvus::json extra_params_;
     const std::vector<std::string> partition_list_;
