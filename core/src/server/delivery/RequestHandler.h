@@ -31,7 +31,7 @@ class RequestHandler {
                 int64_t index_file_size, int64_t metric_type);
 
     Status
-    HasCollection(const std::shared_ptr<Context>& context, const std::string& collection_name, bool& has_table);
+    HasCollection(const std::shared_ptr<Context>& context, const std::string& collection_name, bool& has_collection);
 
     Status
     DropTable(const std::shared_ptr<Context>& context, const std::string& collection_name);

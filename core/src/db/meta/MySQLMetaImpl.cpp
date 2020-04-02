@@ -1234,9 +1234,9 @@ MySQLMetaImpl::UpdateTableFiles(SegmentsSchema& files) {
 
             mysqlpp::Query updateTableFilesQuery = connectionPtr->query();
 
-            std::map<std::string, bool> has_tables;
+            std::map<std::string, bool> has_collections;
             for (auto& file_schema : files) {
-                if (has_tables.find(file_schema.collection_id_) != has_tables.end()) {
+                if (has_collections.find(file_schema.collection_id_) != has_collections.end()) {
                     continue;
                 }
 
@@ -1252,11 +1252,11 @@ MySQLMetaImpl::UpdateTableFiles(SegmentsSchema& files) {
                 mysqlpp::StoreQueryResult res = updateTableFilesQuery.store();
 
                 int check = res[0]["check"];
-                has_tables[file_schema.collection_id_] = (check == 1);
+                has_collections[file_schema.collection_id_] = (check == 1);
             }
 
             for (auto& file_schema : files) {
-                if (!has_tables[file_schema.collection_id_]) {
+                if (!has_collections[file_schema.collection_id_]) {
                     file_schema.file_type_ = SegmentSchema::TO_DELETE;
                 }
                 file_schema.updated_time_ = utils::GetMicroSecTimeStamp();

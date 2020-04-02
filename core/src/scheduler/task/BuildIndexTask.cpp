@@ -163,11 +163,11 @@ XBuildIndexTask::Execute() {
         }
 
         // step 4: if collection has been deleted, dont save index file
-        bool has_table = false;
-        meta_ptr->HasCollection(file_->collection_id_, has_table);
-        fiu_do_on("XBuildIndexTask.Execute.has_table", has_table = true);
+        bool has_collection = false;
+        meta_ptr->HasCollection(file_->collection_id_, has_collection);
+        fiu_do_on("XBuildIndexTask.Execute.has_collection", has_collection = true);
 
-        if (!has_table) {
+        if (!has_collection) {
             meta_ptr->DeleteTableFiles(file_->collection_id_);
 
             build_index_job->BuildIndexDone(to_index_id_);

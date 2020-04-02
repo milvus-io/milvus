@@ -578,12 +578,12 @@ DBImpl::Flush(const std::string& collection_id) {
     }
 
     Status status;
-    bool has_table;
-    status = HasCollection(collection_id, has_table);
+    bool has_collection;
+    status = HasCollection(collection_id, has_collection);
     if (!status.ok()) {
         return status;
     }
-    if (!has_table) {
+    if (!has_collection) {
         ENGINE_LOG_ERROR << "Collection to flush does not exist: " << collection_id;
         return Status(DB_NOT_FOUND, "Collection to flush does not exist");
     }
@@ -830,9 +830,9 @@ DBImpl::GetVectorByID(const std::string& collection_id, const IDNumber& vector_i
         return SHUTDOWN_ERROR;
     }
 
-    bool has_table;
-    auto status = HasCollection(collection_id, has_table);
-    if (!has_table) {
+    bool has_collection;
+    auto status = HasCollection(collection_id, has_collection);
+    if (!has_collection) {
         ENGINE_LOG_ERROR << "Collection " << collection_id << " does not exist: ";
         return Status(DB_NOT_FOUND, "Collection does not exist");
     }
@@ -889,9 +889,9 @@ DBImpl::GetVectorIDs(const std::string& collection_id, const std::string& segmen
     }
 
     // step 1: check collection existence
-    bool has_table;
-    auto status = HasCollection(collection_id, has_table);
-    if (!has_table) {
+    bool has_collection;
+    auto status = HasCollection(collection_id, has_collection);
+    if (!has_collection) {
         ENGINE_LOG_ERROR << "Collection " << collection_id << " does not exist: ";
         return Status(DB_NOT_FOUND, "Collection does not exist");
     }

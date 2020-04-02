@@ -86,22 +86,22 @@ TEST_F(MySqlMetaTest, TABLE_TEST) {
     ASSERT_FALSE(stat.ok());
     fiu_disable("MySQLMetaImpl.DescribeTable.throw_exception");
 
-    bool has_table = false;
-    stat = impl_->HasCollection(collection_id, has_table);
+    bool has_collection = false;
+    stat = impl_->HasCollection(collection_id, has_collection);
     ASSERT_TRUE(stat.ok());
-    ASSERT_TRUE(has_table);
+    ASSERT_TRUE(has_collection);
 
-    has_table = false;
+    has_collection = false;
     FIU_ENABLE_FIU("MySQLMetaImpl.HasCollection.null_connection");
-    stat = impl_->HasCollection(collection_id, has_table);
+    stat = impl_->HasCollection(collection_id, has_collection);
     ASSERT_FALSE(stat.ok());
-    ASSERT_FALSE(has_table);
+    ASSERT_FALSE(has_collection);
     fiu_disable("MySQLMetaImpl.HasCollection.null_connection");
 
     FIU_ENABLE_FIU("MySQLMetaImpl.HasCollection.throw_exception");
-    stat = impl_->HasCollection(collection_id, has_table);
+    stat = impl_->HasCollection(collection_id, has_collection);
     ASSERT_FALSE(stat.ok());
-    ASSERT_FALSE(has_table);
+    ASSERT_FALSE(has_collection);
     fiu_disable("MySQLMetaImpl.HasCollection.throw_exception");
 
     FIU_ENABLE_FIU("MySQLMetaImpl.DropTable.CLUSTER_WRITABLE_MODE");

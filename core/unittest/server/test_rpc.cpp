@@ -192,7 +192,7 @@ CurrentTmDate(int64_t offset_day = 0) {
 
 }  // namespace
 
-TEST_F(RpcHandlerTest, HAS_TABLE_TEST) {
+TEST_F(RpcHandlerTest, HAS_COLLECTION_TEST) {
     ::grpc::ServerContext context;
     handler->SetContext(&context, dummy_context);
     handler->RegisterRequestHandler(milvus::server::RequestHandler());
@@ -238,10 +238,10 @@ TEST_F(RpcHandlerTest, INDEX_TEST) {
     //    ASSERT_EQ(error_code, ::milvus::grpc::ErrorCode::SUCCESS);
 
     fiu_init(0);
-    fiu_enable("CreateIndexRequest.OnExecute.not_has_table", 1, NULL, 0);
+    fiu_enable("CreateIndexRequest.OnExecute.not_has_collection", 1, NULL, 0);
     grpc_status = handler->CreateIndex(&context, &request, &response);
     ASSERT_TRUE(grpc_status.ok());
-    fiu_disable("CreateIndexRequest.OnExecute.not_has_table");
+    fiu_disable("CreateIndexRequest.OnExecute.not_has_collection");
 
     fiu_enable("CreateIndexRequest.OnExecute.throw_std.exception", 1, NULL, 0);
     grpc_status = handler->CreateIndex(&context, &request, &response);

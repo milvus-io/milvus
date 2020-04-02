@@ -523,8 +523,8 @@ TEST_F(DBTest, SHUTDOWN_TEST) {
     stat = db_->AllTables(table_infos);
     ASSERT_EQ(stat.code(), milvus::DB_ERROR);
 
-    bool has_table = false;
-    stat = db_->HasCollection(table_info.collection_id_, has_table);
+    bool has_collection = false;
+    stat = db_->HasCollection(table_info.collection_id_, has_collection);
     ASSERT_FALSE(stat.ok());
 
     milvus::engine::VectorsData xb;
@@ -810,11 +810,11 @@ TEST_F(DBTest, PARTITION_TEST) {
     std::string special_part = "special";
     stat = db_->CreatePartition(collection_name, special_part, special_part);
     ASSERT_TRUE(stat.ok());
-    bool has_table = false;
-    stat = db_->HasNativeTable(special_part, has_table);
-    ASSERT_FALSE(has_table);
-    stat = db_->HasCollection(special_part, has_table);
-    ASSERT_TRUE(has_table);
+    bool has_collection = false;
+    stat = db_->HasNativeTable(special_part, has_collection);
+    ASSERT_FALSE(has_collection);
+    stat = db_->HasCollection(special_part, has_collection);
+    ASSERT_TRUE(has_collection);
 
     {  // build index
         milvus::engine::TableIndex index;
@@ -958,9 +958,9 @@ TEST_F(DBTest2, DELETE_TEST) {
     stat = db_->DescribeTable(table_info_get);
     ASSERT_TRUE(stat.ok());
 
-    bool has_table = false;
-    db_->HasCollection(TABLE_NAME, has_table);
-    ASSERT_TRUE(has_table);
+    bool has_collection = false;
+    db_->HasCollection(TABLE_NAME, has_collection);
+    ASSERT_TRUE(has_collection);
 
     uint64_t size;
     db_->Size(size);
@@ -990,8 +990,8 @@ TEST_F(DBTest2, DELETE_TEST) {
     std::this_thread::sleep_for(std::chrono::seconds(2));
     ASSERT_TRUE(stat.ok());
 
-    db_->HasCollection(TABLE_NAME, has_table);
-    ASSERT_FALSE(has_table);
+    db_->HasCollection(TABLE_NAME, has_collection);
+    ASSERT_FALSE(has_collection);
 }
 
 TEST_F(DBTest2, SHOW_TABLE_INFO_TEST) {

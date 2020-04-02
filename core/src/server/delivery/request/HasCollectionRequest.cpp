@@ -22,14 +22,14 @@ namespace milvus {
 namespace server {
 
 HasCollectionRequest::HasCollectionRequest(const std::shared_ptr<milvus::server::Context>& context,
-                                 const std::string& collection_name, bool& has_table)
-    : BaseRequest(context, BaseRequest::kHasCollection), collection_name_(collection_name), has_table_(has_table) {
+                                 const std::string& collection_name, bool& has_collection)
+    : BaseRequest(context, BaseRequest::kHasCollection), collection_name_(collection_name), has_collection_(has_collection) {
 }
 
 BaseRequestPtr
 HasCollectionRequest::Create(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name,
-                        bool& has_table) {
-    return std::shared_ptr<BaseRequest>(new HasCollectionRequest(context, collection_name, has_table));
+                        bool& has_collection) {
+    return std::shared_ptr<BaseRequest>(new HasCollectionRequest(context, collection_name, has_collection));
 }
 
 Status
@@ -45,16 +45,16 @@ HasCollectionRequest::OnExecute() {
         }
 
         // step 2: check table existence
-        status = DBWrapper::DB()->HasNativeTable(collection_name_, has_table_);
+        status = DBWrapper::DB()->HasNativeTable(collection_name_, has_collection_);
         fiu_do_on("HasCollectionRequest.OnExecute.throw_std_exception", throw std::exception());
 
         // only process root collection, ignore partition collection
-        if (has_table_) {
+        if (has_collection_) {
             engine::meta::CollectionSchema table_schema;
             table_schema.collection_id_ = collection_name_;
             status = DBWrapper::DB()->DescribeTable(table_schema);
             if (!table_schema.owner_table_.empty()) {
-                has_table_ = false;
+                has_collection_ = false;
             }
         }
     } catch (std::exception& ex) {

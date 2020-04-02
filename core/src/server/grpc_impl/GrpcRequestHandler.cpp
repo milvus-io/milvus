@@ -250,14 +250,14 @@ GrpcRequestHandler::CreateTable(::grpc::ServerContext* context, const ::milvus::
 }
 
 ::grpc::Status
-GrpcRequestHandler::HasCollection(::grpc::ServerContext* context, const ::milvus::grpc::TableName* request,
+GrpcRequestHandler::HasTable(::grpc::ServerContext* context, const ::milvus::grpc::TableName* request,
                              ::milvus::grpc::BoolReply* response) {
     CHECK_NULLPTR_RETURN(request);
 
-    bool has_table = false;
+    bool has_collection = false;
 
-    Status status = request_handler_.HasCollection(context_map_[context], request->table_name(), has_table);
-    response->set_bool_reply(has_table);
+    Status status = request_handler_.HasCollection(context_map_[context], request->table_name(), has_collection);
+    response->set_bool_reply(has_collection);
     SET_RESPONSE(response->mutable_status(), status, context);
 
     return ::grpc::Status::OK;

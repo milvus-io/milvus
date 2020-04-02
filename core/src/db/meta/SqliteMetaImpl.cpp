@@ -649,24 +649,24 @@ SqliteMetaImpl::UpdateTableFiles(SegmentsSchema& files) {
         // multi-threads call sqlite update may get exception('bad logic', etc), so we add a lock here
         std::lock_guard<std::mutex> meta_lock(meta_mutex_);
 
-        std::map<std::string, bool> has_tables;
+        std::map<std::string, bool> has_collections;
         for (auto& file : files) {
-            if (has_tables.find(file.collection_id_) != has_tables.end()) {
+            if (has_collections.find(file.collection_id_) != has_collections.end()) {
                 continue;
             }
             auto tables = ConnectorPtr->select(columns(&CollectionSchema::id_),
                                                where(c(&CollectionSchema::collection_id_) == file.collection_id_ and
                                                      c(&CollectionSchema::state_) != (int)CollectionSchema::TO_DELETE));
             if (tables.size() >= 1) {
-                has_tables[file.collection_id_] = true;
+                has_collections[file.collection_id_] = true;
             } else {
-                has_tables[file.collection_id_] = false;
+                has_collections[file.collection_id_] = false;
             }
         }
 
         auto commited = ConnectorPtr->transaction([&]() mutable {
             for (auto& file : files) {
-                if (!has_tables[file.collection_id_]) {
+                if (!has_collections[file.collection_id_]) {
                     file.file_type_ = SegmentSchema::TO_DELETE;
                 }
 

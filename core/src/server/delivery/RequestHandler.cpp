@@ -53,8 +53,8 @@ RequestHandler::CreateTable(const std::shared_ptr<Context>& context, const std::
 }
 
 Status
-RequestHandler::HasCollection(const std::shared_ptr<Context>& context, const std::string& collection_name, bool& has_table) {
-    BaseRequestPtr request_ptr = HasCollectionRequest::Create(context, collection_name, has_table);
+RequestHandler::HasCollection(const std::shared_ptr<Context>& context, const std::string& collection_name, bool& has_collection) {
+    BaseRequestPtr request_ptr = HasCollectionRequest::Create(context, collection_name, has_collection);
     RequestScheduler::ExecRequest(request_ptr);
 
     return request_ptr->status();

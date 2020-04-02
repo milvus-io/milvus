@@ -23,18 +23,18 @@ class HasCollectionRequest : public BaseRequest {
  public:
     static BaseRequestPtr
     Create(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name,
-           bool& has_table);
+           bool& has_collection);
 
  protected:
     HasCollectionRequest(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name,
-                    bool& has_table);
+                    bool& has_collection);
 
     Status
     OnExecute() override;
 
  private:
     std::string collection_name_;
-    bool& has_table_;
+    bool& has_collection_;
 };
 
 }  // namespace server
