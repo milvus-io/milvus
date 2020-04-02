@@ -23,6 +23,135 @@ using ::testing::Combine;
 using ::testing::TestWithParam;
 using ::testing::Values;
 
+
+class AnnoyTest : public DataGen, public TestWithParam<std::string> {
+ protected:
+    void
+    SetUp() override {
+        IndexType = GetParam();
+//        std::cout << "IndexType from GetParam() is: " << IndexType << std::endl;
+        Generate(128, 10000, 10);
+        index_ = std::make_shared<milvus::knowhere::IndexAnnoy>();
+        conf = milvus::knowhere::Config{
+            {milvus::knowhere::meta::DIM, dim},
+            {milvus::knowhere::meta::TOPK, 10},
+            {milvus::knowhere::IndexParams::n_trees, 4},
+            {milvus::knowhere::IndexParams::search_k, 100},
+            {milvus::knowhere::Metric::TYPE, milvus::knowhere::Metric::L2},
+        };
+
+//        Init_with_default();
+    }
+
+ protected:
+    milvus::knowhere::Config conf;
+    std::shared_ptr<milvus::knowhere::IndexAnnoy> index_ = nullptr;
+    std::string IndexType;
+};
+
+INSTANTIATE_TEST_CASE_P(AnnoyParameters, AnnoyTest, Values("Annoy"));
+
+TEST_P(AnnoyTest, annoy_basic) {
+    assert(!xb.empty());
+
+//    index_->Train(base_dataset, conf);
+    index_->BuildAll(base_dataset, conf);// Train + Add
+    EXPECT_EQ(index_->Count(), nb);
+    EXPECT_EQ(index_->Dim(), dim);
+
+    auto result = index_->Query(query_dataset, conf);
+    AssertAnns(result, nq, k);
+
+    /*
+     * output result to check by eyes
+    {
+        auto ids = result->Get<int64_t*>(milvus::knowhere::meta::IDS);
+        auto dist = result->Get<float*>(milvus::knowhere::meta::DISTANCE);
+
+        std::stringstream ss_id;
+        std::stringstream ss_dist;
+        for (auto i = 0; i < nq; i++) {
+            for (auto j = 0; j < k; ++j) {
+                // ss_id << *ids->data()->GetValues<int64_t>(1, i * k + j) << " ";
+                // ss_dist << *dists->data()->GetValues<float>(1, i * k + j) << " ";
+                ss_id << *((int64_t*)(ids) + i * k + j) << " ";
+                ss_dist << *((float*)(dist) + i * k + j) << " ";
+            }
+            ss_id << std::endl;
+            ss_dist << std::endl;
+        }
+        std::cout << "id\n" << ss_id.str() << std::endl;
+        std::cout << "dist\n" << ss_dist.str() << std::endl;
+    }
+    */
+}
+
+TEST_P(AnnoyTest, annoy_delete) {
+    assert(!xb.empty());
+
+    index_->BuildAll(base_dataset, conf);// Train + Add
+    EXPECT_EQ(index_->Count(), nb);
+    EXPECT_EQ(index_->Dim(), dim);
+
+    faiss::ConcurrentBitsetPtr bitset = std::make_shared<faiss::ConcurrentBitset>(nb);
+    for (auto i = 0; i < nq; ++ i) {
+        bitset->set(i);
+    }
+
+    auto result1 = index_->Query(query_dataset, conf);
+    AssertAnns(result1, nq, k);
+
+    index_->SetBlacklist(bitset);
+    auto result2 = index_->Query(query_dataset, conf);
+    AssertAnns(result2, nq, k, CheckMode::CHECK_NOT_EQUAL);
+
+    /*
+     * delete result checked by eyes
+    auto ids1 = result1->Get<int64_t*>(milvus::knowhere::meta::IDS);
+    auto ids2 = result2->Get<int64_t*>(milvus::knowhere::meta::IDS);
+    std::cout << std::endl;
+    for (int i = 0; i < nq; ++ i) {
+        std::cout << "ids1: ";
+        for (int j = 0; j < k; ++ j) {
+            std::cout << *(ids1 + i * k + j) << " ";
+        }
+        std::cout << " ids2: ";
+        for (int j = 0; j < k; ++ j) {
+            std::cout << *(ids2 + i * k + j) << " ";
+        }
+        std::cout << std::endl;
+        for (int j = 0; j < std::min(5, k>>1); ++ j) {
+            ASSERT_EQ(*(ids1 + i * k + j + 1), *(ids2 + i * k + j));
+        }
+    }
+    */
+    /*
+     * output result to check by eyes
+    {
+        auto ids = result->Get<int64_t*>(milvus::knowhere::meta::IDS);
+        auto dist = result->Get<float*>(milvus::knowhere::meta::DISTANCE);
+
+        std::stringstream ss_id;
+        std::stringstream ss_dist;
+        for (auto i = 0; i < nq; i++) {
+            for (auto j = 0; j < k; ++j) {
+                // ss_id << *ids->data()->GetValues<int64_t>(1, i * k + j) << " ";
+                // ss_dist << *dists->data()->GetValues<float>(1, i * k + j) << " ";
+                ss_id << *((int64_t*)(ids) + i * k + j) << " ";
+                ss_dist << *((float*)(dist) + i * k + j) << " ";
+            }
+            ss_id << std::endl;
+            ss_dist << std::endl;
+        }
+        std::cout << "id\n" << ss_id.str() << std::endl;
+        std::cout << "dist\n" << ss_dist.str() << std::endl;
+    }
+    */
+}
+
+/*
+ * faiss style test
+ * keep it
 int
 main() {
     int64_t d = 64;      // dimension
@@ -126,96 +255,5 @@ main() {
     delete[] ids;
 
     return 0;
-}
-
-/*
-class AnnoyTest : public DataGen, public TestWithParam<std::string> {
- protected:
-    void
-    SetUp() override {
-        IndexType = GetParam();
-        std::cout << "IndexType from GetParam() is: " << IndexType << std::endl;
-        Generate(128, 1000, 5);
-        index_ = std::make_shared<milvus::knowhere::IndexAnnoy>();
-        conf = milvus::knowhere::Config{
-            {milvus::knowhere::meta::DIM, dim},
-            {milvus::knowhere::meta::TOPK, 1},
-            {milvus::knowhere::IndexParams::n_trees, 4},
-            {milvus::knowhere::IndexParams::search_k, 100},
-            {milvus::knowhere::Metric::TYPE, milvus::knowhere::Metric::L2},
-        };
-
-//        Init_with_default();
-    }
-
- protected:
-    milvus::knowhere::Config conf;
-    std::shared_ptr<milvus::knowhere::IndexAnnoy> index_ = nullptr;
-    std::string IndexType;
-};
-
-INSTANTIATE_TEST_CASE_P(AnnoyParameters, AnnoyTest, Values(""));
-
-TEST_P(AnnoyTest, annoy_basic) {
-    assert(!xb.empty());
-
-//    index_->Train(base_dataset, conf);
-    index_->BuildAll(base_dataset, conf);
-    auto result = index_->Query(query_dataset, conf);
-    AssertAnns(result, nq, k);
-
-    {
-        auto ids = result->Get<int64_t*>(milvus::knowhere::meta::IDS);
-        auto dist = result->Get<float*>(milvus::knowhere::meta::DISTANCE);
-
-        std::stringstream ss_id;
-        std::stringstream ss_dist;
-        for (auto i = 0; i < nq; i++) {
-            for (auto j = 0; j < k; ++j) {
-                // ss_id << *ids->data()->GetValues<int64_t>(1, i * k + j) << " ";
-                // ss_dist << *dists->data()->GetValues<float>(1, i * k + j) << " ";
-                ss_id << *((int64_t*)(ids) + i * k + j) << " ";
-                ss_dist << *((float*)(dist) + i * k + j) << " ";
-            }
-            ss_id << std::endl;
-            ss_dist << std::endl;
-        }
-        std::cout << "id\n" << ss_id.str() << std::endl;
-        std::cout << "dist\n" << ss_dist.str() << std::endl;
-    }
-}
-
-TEST_P(AnnoyTest, annoy_delete) {
-    assert(!xb.empty());
-
-//    index_->Train(base_dataset, conf);
-    index_->BuildAll(base_dataset, conf);
-    // index_->Add(base_dataset, conf);
-    faiss::ConcurrentBitsetPtr bitset = std::make_shared<faiss::ConcurrentBitset>(nb);
-    for (auto i = 0; i < nq; ++ i) {
-        bitset->set(i);
-
-    auto result = index_->Query(query_dataset, conf);
-    AssertAnns(result, nq, k);
-
-    {
-        auto ids = result->Get<int64_t*>(milvus::knowhere::meta::IDS);
-        auto dist = result->Get<float*>(milvus::knowhere::meta::DISTANCE);
-
-        std::stringstream ss_id;
-        std::stringstream ss_dist;
-        for (auto i = 0; i < nq; i++) {
-            for (auto j = 0; j < k; ++j) {
-                // ss_id << *ids->data()->GetValues<int64_t>(1, i * k + j) << " ";
-                // ss_dist << *dists->data()->GetValues<float>(1, i * k + j) << " ";
-                ss_id << *((int64_t*)(ids) + i * k + j) << " ";
-                ss_dist << *((float*)(dist) + i * k + j) << " ";
-            }
-            ss_id << std::endl;
-            ss_dist << std::endl;
-        }
-        std::cout << "id\n" << ss_id.str() << std::endl;
-        std::cout << "dist\n" << ss_dist.str() << std::endl;
-    }   }
 }
 */
