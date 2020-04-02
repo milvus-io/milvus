@@ -11,34 +11,29 @@
 [![codebeat badge](https://codebeat.co/badges/e030a4f6-b126-4475-a938-4723d54ec3a7?style=plastic)](https://codebeat.co/projects/github-com-milvus-io-milvus-master)
 [![Codacy Badge](https://api.codacy.com/project/badge/Grade/c4bb2ccfb51b47f99e43bfd1705edd95)](https://app.codacy.com/gh/milvus-io/milvus?utm_source=github.com&utm_medium=referral&utm_content=milvus-io/milvus&utm_campaign=Badge_Grade_Dashboard)
 
+[English](README.md) | 中文版  
+
 # 欢迎来到 Milvus
 
 ## Milvus 是什么
 
+Milvus 是一款开源的特征向量相似度搜索引擎，具有使用方便、实用可靠、易于扩展、稳定高效和搜索迅速等特点，在全球范围内被上百家组织和机构所采用。Milvus 已经被广泛应用于多个领域，其中包括图像处理、机器视觉、自然语言处理、语音识别、推荐系统以及新药发现等。
 
-Milvus 是一款开源的特征向量相似性搜索引擎。基于异构众核计算框架设计，成本更低，性能更好。在有限的计算资源下，十亿向量搜索仅毫秒响应。
+Milvus 的架构如下：
 
-若要了解 Milvus 详细介绍和整体架构，请访问 [Milvus 简介](https://www.milvus.io/cn/docs/about_milvus/overview.md)。
+![arch](https://github.com/milvus-io/docs/raw/v0.7.1/assets/milvus_arch.png)
 
-通过 [版本发布说明](https://www.milvus.io/cn/docs/releases/release_notes.md) 获取最新版本的功能和更新。
+若要了解 Milvus 详细介绍和整体架构，请访问 [Milvus 简介](https://www.milvus.io/cn/docs/about_milvus/overview.md)。您可以通过 [版本发布说明](https://www.milvus.io/cn/docs/releases/release_notes.md) 获取最新版本的功能和更新。
 
-## 路线图
+## Milvus 快速上手
 
-您可以参考我们的[路线图](https://github.com/milvus-io/milvus/milestones)，了解 Milvus 即将实现的新特性。
+### 安装 Milvus
 
-路线图尚未完成，并且可能会存在合理改动。我们欢迎各种针对路线图的意见、需求和建议。
+请参阅 [Milvus 安装指南](https://www.milvus.io/cn/docs/guides/get_started/install_milvus/install_milvus.md) 使用 Docker 容器安装 Milvus。若要基于源码编译，请访问 [源码安装](INSTALL.md)。
 
-## 应用场景
+### 尝试示例代码
 
-Milvus 可以广泛应用于各类场景。下图展示了基于 Milvus 和 VGG 构建的以图搜图系统。
-
-[![image retrieval demo](https://raw.githubusercontent.com/milvus-io/docs/v0.7.0/assets/image_retrieval.png)](https://raw.githubusercontent.com/milvus-io/docs/v0.7.0/assets/image_retrieval.png)
-
-您可以访问我们的[训练营](https://github.com/milvus-io/bootcamp)探索更多解决方案和应用场景。
-
-## 测试报告
-
-关于 Milvus 性能基准的更多信息，请参考[测试报告](https://github.com/milvus-io/milvus/tree/master/docs)。
+您可以尝试用 [Python](https://www.milvus.io/cn/docs/guides/get_started/example_code.md)，[Java](https://github.com/milvus-io/milvus-sdk-java/tree/master/examples)，[Go](https://github.com/milvus-io/milvus-sdk-go/tree/master/examples)，或者 [C++](https://github.com/milvus-io/milvus/tree/master/sdk/examples) 运行 Milvus 示例代码。
 
 ## 支持的客户端
 
@@ -47,19 +42,21 @@ Milvus 可以广泛应用于各类场景。下图展示了基于 Milvus 和 VGG 
 -   [Java](https://github.com/milvus-io/milvus-sdk-java)
 -   [C++](https://github.com/milvus-io/milvus/tree/master/sdk)
 -   [RESTful API](https://github.com/milvus-io/milvus/tree/master/core/src/server/web_impl)
--   [GUI](https://www.milvus.io/gui)
 -   [Node.js](https://www.npmjs.com/package/@arkie-ai/milvus-client) (由 [arkie](https://www.arkie.cn/) 提供)
 
-## 开始使用 Milvus
+## 应用场景
 
-请参阅 [Milvus 安装指南](https://www.milvus.io/cn/docs/guides/get_started/install_milvus/install_milvus.md) 使用 Docker 容器安装 Milvus。若要基于源码编译，请访问 [源码安装](INSTALL.md)。
+Milvus 可以应用于多种 AI 场景。您可以访问 [Milvus 应用场景](https://milvus.io/scenarios) 体验在线场景展示。您也可以访问 [Milvus 训练营](https://github.com/milvus-io/bootcamp) 了解更详细的应用场景和解决方案。
 
-若要更改 Milvus 设置，请参阅 [Milvus 配置](https://www.milvus.io/cn/docs/reference/milvus_config.md)。
+## 性能基准测试
 
-### 开始您的第一个 Milvus 程序
+关于 Milvus 性能基准的更多信息，请参考[测试报告](https://github.com/milvus-io/milvus/tree/master/docs)。
 
-您可以尝试用 [Python](https://www.milvus.io/cn/docs/guides/get_started/example_code.md)，[Java](https://github.com/milvus-io/milvus-sdk-java/tree/master/examples)，[Go](https://github.com/milvus-io/milvus-sdk-go/tree/master/examples)，或者 [C++](https://github.com/milvus-io/milvus/tree/master/sdk/examples) 运行 Milvus 示例代码。
+## 路线图
 
+您可以参考我们的[路线图](https://github.com/milvus-io/milvus/milestones)，了解 Milvus 即将实现的新特性。
+
+路线图尚未完成，并且可能会存在合理改动。我们欢迎各种针对路线图的意见、需求和建议。
 
 ## 贡献者指南
 
@@ -79,10 +76,6 @@ Milvus 可以广泛应用于各类场景。下图展示了基于 Milvus 和 VGG 
 
 -   [Milvus.io](https://www.milvus.io)
 
--   [Milvus 在线训练营](https://github.com/milvus-io/bootcamp)
-
--   [Milvus 测试报告](https://github.com/milvus-io/milvus/tree/master/docs)
-
 -   [Milvus 常见问题](https://www.milvus.io/cn/docs/faq/operational_faq.md)
 
 -   [Milvus Medium](https://medium.com/@milvusio)
@@ -97,4 +90,4 @@ Milvus 可以广泛应用于各类场景。下图展示了基于 Milvus 和 VGG 
 
 ## 许可协议
 
-[Apache 许可协议2.0版](https://github.com/milvus-io/milvus/blob/master/LICENSE)
+[Apache 许可协议 2.0 版](https://github.com/milvus-io/milvus/blob/master/LICENSE)
