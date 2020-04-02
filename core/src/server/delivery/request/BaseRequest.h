@@ -128,11 +128,11 @@ class BaseRequest {
         kGetVectorIDs,
 
         // collection operations
-        kShowTables = 300,
+        kShowCollections = 300,
         kCreateCollection,
         kHasCollection,
         kDescribeCollection,
-        kCountTable,
+        kCountCollection,
         kShowCollectionInfo,
         kDropCollection,
         kPreloadCollection,
