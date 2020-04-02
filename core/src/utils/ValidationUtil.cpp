@@ -27,6 +27,7 @@
 #include <fiu-local.h>
 #include <algorithm>
 #include <cmath>
+#include <limits>
 #include <regex>
 #include <string>
 
@@ -265,6 +266,13 @@ ValidationUtil::ValidateIndexParams(const milvus::json& index_params,
             }
             break;
         }
+        case (int32_t)engine::EngineType::ANNOY: {
+            auto status = CheckParameterRange(index_params, knowhere::IndexParams::n_trees, 1, 1024);
+            if (!status.ok()) {
+                return status;
+            }
+            break;
+        }
     }
     return Status::OK();
 }
@@ -297,6 +305,14 @@ ValidationUtil::ValidateSearchParams(const milvus::json& search_params,
         }
         case (int32_t)engine::EngineType::HNSW: {
             auto status = CheckParameterRange(search_params, knowhere::IndexParams::ef, topk, 4096);
+            if (!status.ok()) {
+                return status;
+            }
+            break;
+        }
+        case (int32_t)engine::EngineType::ANNOY: {
+            auto status = CheckParameterRange(search_params, knowhere::IndexParams::search_k,
+                                              std::numeric_limits<int64_t>::min(), std::numeric_limits<int64_t>::max());
             if (!status.ok()) {
                 return status;
             }
