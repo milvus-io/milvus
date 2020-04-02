@@ -14,32 +14,29 @@
 #include <src/index/knowhere/knowhere/index/vector_index/helpers/IndexParameter.h>
 #include <iostream>
 #include <random>
-#include "unittest/utils.h"
 #include "knowhere/common/Exception.h"
+#include "unittest/utils.h"
 
 using ::testing::Combine;
 using ::testing::TestWithParam;
 using ::testing::Values;
 
-class HNSWTest : public DataGen, public  TestWithParam<std::string> {
-protected:
+class HNSWTest : public DataGen, public TestWithParam<std::string> {
+ protected:
     void
     SetUp() override {
         IndexType = GetParam();
         std::cout << "IndexType from GetParam() is: " << IndexType << std::endl;
-        Generate(64, 10000, 10);// dim = 64, nb = 10000, nq = 10
+        Generate(64, 10000, 10);  // dim = 64, nb = 10000, nq = 10
         index_ = std::make_shared<milvus::knowhere::IndexHNSW>();
         conf = milvus::knowhere::Config{
-            {milvus::knowhere::meta::DIM, 64},
-            {milvus::knowhere::meta::TOPK, 10},
-            {milvus::knowhere::IndexParams::M, 16},
-            {milvus::knowhere::IndexParams::efConstruction, 200},
-            {milvus::knowhere::IndexParams::ef, 200},
-            {milvus::knowhere::Metric::TYPE, milvus::knowhere::Metric::L2},
+            {milvus::knowhere::meta::DIM, 64},        {milvus::knowhere::meta::TOPK, 10},
+            {milvus::knowhere::IndexParams::M, 16},   {milvus::knowhere::IndexParams::efConstruction, 200},
+            {milvus::knowhere::IndexParams::ef, 200}, {milvus::knowhere::Metric::TYPE, milvus::knowhere::Metric::L2},
         };
     }
 
-protected:
+ protected:
     milvus::knowhere::Config conf;
     std::shared_ptr<milvus::knowhere::IndexHNSW> index_ = nullptr;
     std::string IndexType;
@@ -68,7 +65,7 @@ TEST_P(HNSWTest, HNSW_delete) {
     EXPECT_EQ(index_->Dim(), dim);
 
     faiss::ConcurrentBitsetPtr bitset = std::make_shared<faiss::ConcurrentBitset>(nb);
-    for (auto i = 0; i < nq; ++ i) {
+    for (auto i = 0; i < nq; ++i) {
         bitset->set(i);
     }
     auto result1 = index_->Query(query_dataset, conf);

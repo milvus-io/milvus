@@ -23,13 +23,12 @@ using ::testing::Combine;
 using ::testing::TestWithParam;
 using ::testing::Values;
 
-
 class AnnoyTest : public DataGen, public TestWithParam<std::string> {
  protected:
     void
     SetUp() override {
         IndexType = GetParam();
-//        std::cout << "IndexType from GetParam() is: " << IndexType << std::endl;
+        //        std::cout << "IndexType from GetParam() is: " << IndexType << std::endl;
         Generate(128, 10000, 10);
         index_ = std::make_shared<milvus::knowhere::IndexAnnoy>();
         conf = milvus::knowhere::Config{
@@ -40,7 +39,7 @@ class AnnoyTest : public DataGen, public TestWithParam<std::string> {
             {milvus::knowhere::Metric::TYPE, milvus::knowhere::Metric::L2},
         };
 
-//        Init_with_default();
+        //        Init_with_default();
     }
 
  protected:
@@ -54,8 +53,8 @@ INSTANTIATE_TEST_CASE_P(AnnoyParameters, AnnoyTest, Values("Annoy"));
 TEST_P(AnnoyTest, annoy_basic) {
     assert(!xb.empty());
 
-//    index_->Train(base_dataset, conf);
-    index_->BuildAll(base_dataset, conf);// Train + Add
+    //    index_->Train(base_dataset, conf);
+    index_->BuildAll(base_dataset, conf);  // Train + Add
     EXPECT_EQ(index_->Count(), nb);
     EXPECT_EQ(index_->Dim(), dim);
 
@@ -89,12 +88,12 @@ TEST_P(AnnoyTest, annoy_basic) {
 TEST_P(AnnoyTest, annoy_delete) {
     assert(!xb.empty());
 
-    index_->BuildAll(base_dataset, conf);// Train + Add
+    index_->BuildAll(base_dataset, conf);  // Train + Add
     EXPECT_EQ(index_->Count(), nb);
     EXPECT_EQ(index_->Dim(), dim);
 
     faiss::ConcurrentBitsetPtr bitset = std::make_shared<faiss::ConcurrentBitset>(nb);
-    for (auto i = 0; i < nq; ++ i) {
+    for (auto i = 0; i < nq; ++i) {
         bitset->set(i);
     }
 
