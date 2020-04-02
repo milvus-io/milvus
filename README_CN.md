@@ -44,27 +44,9 @@ Milvus 的架构如下：
 -   [RESTful API](https://github.com/milvus-io/milvus/tree/master/core/src/server/web_impl)
 -   [Node.js](https://www.npmjs.com/package/@arkie-ai/milvus-client) (由 [arkie](https://www.arkie.cn/) 提供)
 
-路线图尚未完成，并且可能会存在合理改动。我们欢迎各种针对路线图的意见、需求和建议。
-
 ## 应用场景
 
-Milvus 可以应用于多种 AI 场景。您可以访问 [Milvus 应用场景](https://milvus.io/scenarios) 体验在线场景展示。
-
-### 计算机视觉
-
-![cv](https://milvus.io/static/cv-159967bf4d72f481b7982de63fc4ae73.png)
-
-### 自然语言处理
-
-![nlp](https://milvus.io/static/nlp-58674a4e40fa44a8512a8d48b26a2522.png)
-
-### 传统向量计算
-
-![tvc](https://milvus.io/static/molsearch-67e29b54f64ef90aa163046324bb7b0d.png)
-
-### 音频数据处理
-
-![adp](https://milvus.io/static/audio-0c156653b3e3a7d2fd5af8e3021af304.png)
+Milvus 可以应用于多种 AI 场景。您可以访问 [Milvus 应用场景](https://milvus.io/scenarios) 体验在线场景展示。您也可以访问 [Milvus 训练营](https://github.com/milvus-io/bootcamp) 了解更详细的应用场景和解决方案。
 
 ## 性能基准测试
 
@@ -92,8 +74,6 @@ Milvus 可以应用于多种 AI 场景。您可以访问 [Milvus 应用场景](h
 
 -   [Milvus.io](https://www.milvus.io)
 
--   [Milvus 在线训练营](https://github.com/milvus-io/bootcamp)
-
 -   [Milvus 常见问题](https://www.milvus.io/cn/docs/faq/operational_faq.md)
 
 -   [Milvus Medium](https://medium.com/@milvusio)
@@ -108,4 +88,4 @@ Milvus 可以应用于多种 AI 场景。您可以访问 [Milvus 应用场景](h
 
 ## 许可协议
 
-[Apache 许可协议2.0版](https://github.com/milvus-io/milvus/blob/master/LICENSE)
+[Apache 许可协议 2.0 版](https://github.com/milvus-io/milvus/blob/master/LICENSE)
