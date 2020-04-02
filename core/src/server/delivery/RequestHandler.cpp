@@ -30,7 +30,7 @@
 #include "server/delivery/request/FlushRequest.h"
 #include "server/delivery/request/GetVectorByIDRequest.h"
 #include "server/delivery/request/GetVectorIDsRequest.h"
-#include "server/delivery/request/HasTableRequest.h"
+#include "server/delivery/request/HasCollectionRequest.h"
 #include "server/delivery/request/InsertRequest.h"
 #include "server/delivery/request/PreloadTableRequest.h"
 #include "server/delivery/request/SearchByIDRequest.h"
@@ -53,8 +53,8 @@ RequestHandler::CreateTable(const std::shared_ptr<Context>& context, const std::
 }
 
 Status
-RequestHandler::HasTable(const std::shared_ptr<Context>& context, const std::string& collection_name, bool& has_table) {
-    BaseRequestPtr request_ptr = HasTableRequest::Create(context, collection_name, has_table);
+RequestHandler::HasCollection(const std::shared_ptr<Context>& context, const std::string& collection_name, bool& has_table) {
+    BaseRequestPtr request_ptr = HasCollectionRequest::Create(context, collection_name, has_table);
     RequestScheduler::ExecRequest(request_ptr);
 
     return request_ptr->status();

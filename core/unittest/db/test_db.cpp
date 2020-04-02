@@ -524,7 +524,7 @@ TEST_F(DBTest, SHUTDOWN_TEST) {
     ASSERT_EQ(stat.code(), milvus::DB_ERROR);
 
     bool has_table = false;
-    stat = db_->HasTable(table_info.collection_id_, has_table);
+    stat = db_->HasCollection(table_info.collection_id_, has_table);
     ASSERT_FALSE(stat.ok());
 
     milvus::engine::VectorsData xb;
@@ -813,7 +813,7 @@ TEST_F(DBTest, PARTITION_TEST) {
     bool has_table = false;
     stat = db_->HasNativeTable(special_part, has_table);
     ASSERT_FALSE(has_table);
-    stat = db_->HasTable(special_part, has_table);
+    stat = db_->HasCollection(special_part, has_table);
     ASSERT_TRUE(has_table);
 
     {  // build index
@@ -959,7 +959,7 @@ TEST_F(DBTest2, DELETE_TEST) {
     ASSERT_TRUE(stat.ok());
 
     bool has_table = false;
-    db_->HasTable(TABLE_NAME, has_table);
+    db_->HasCollection(TABLE_NAME, has_table);
     ASSERT_TRUE(has_table);
 
     uint64_t size;
@@ -990,7 +990,7 @@ TEST_F(DBTest2, DELETE_TEST) {
     std::this_thread::sleep_for(std::chrono::seconds(2));
     ASSERT_TRUE(stat.ok());
 
-    db_->HasTable(TABLE_NAME, has_table);
+    db_->HasCollection(TABLE_NAME, has_table);
     ASSERT_FALSE(has_table);
 }
 

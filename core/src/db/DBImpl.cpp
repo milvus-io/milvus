@@ -217,12 +217,12 @@ DBImpl::DescribeTable(meta::CollectionSchema& table_schema) {
 }
 
 Status
-DBImpl::HasTable(const std::string& collection_id, bool& has_or_not) {
+DBImpl::HasCollection(const std::string& collection_id, bool& has_or_not) {
     if (!initialized_.load(std::memory_order_acquire)) {
         return SHUTDOWN_ERROR;
     }
 
-    return meta_ptr_->HasTable(collection_id, has_or_not);
+    return meta_ptr_->HasCollection(collection_id, has_or_not);
 }
 
 Status
@@ -579,7 +579,7 @@ DBImpl::Flush(const std::string& collection_id) {
 
     Status status;
     bool has_table;
-    status = HasTable(collection_id, has_table);
+    status = HasCollection(collection_id, has_table);
     if (!status.ok()) {
         return status;
     }
@@ -831,7 +831,7 @@ DBImpl::GetVectorByID(const std::string& collection_id, const IDNumber& vector_i
     }
 
     bool has_table;
-    auto status = HasTable(collection_id, has_table);
+    auto status = HasCollection(collection_id, has_table);
     if (!has_table) {
         ENGINE_LOG_ERROR << "Collection " << collection_id << " does not exist: ";
         return Status(DB_NOT_FOUND, "Collection does not exist");
@@ -890,7 +890,7 @@ DBImpl::GetVectorIDs(const std::string& collection_id, const std::string& segmen
 
     // step 1: check collection existence
     bool has_table;
-    auto status = HasTable(collection_id, has_table);
+    auto status = HasCollection(collection_id, has_table);
     if (!has_table) {
         ENGINE_LOG_ERROR << "Collection " << collection_id << " does not exist: ";
         return Status(DB_NOT_FOUND, "Collection does not exist");

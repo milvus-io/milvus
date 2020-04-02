@@ -54,13 +54,13 @@ GrpcClient::CreateTable(const ::milvus::grpc::TableSchema& table_schema) {
 }
 
 bool
-GrpcClient::HasTable(const ::milvus::grpc::TableName& collection_name, Status& status) {
+GrpcClient::HasCollection(const ::milvus::grpc::TableName& collection_name, Status& status) {
     ClientContext context;
     ::milvus::grpc::BoolReply response;
-    ::grpc::Status grpc_status = stub_->HasTable(&context, collection_name, &response);
+    ::grpc::Status grpc_status = stub_->HasCollection(&context, collection_name, &response);
 
     if (!grpc_status.ok()) {
-        std::cerr << "HasTable gRPC failed!" << std::endl;
+        std::cerr << "HasCollection gRPC failed!" << std::endl;
         status = Status(StatusCode::RPCFailed, grpc_status.error_message());
     }
     if (response.status().error_code() != grpc::SUCCESS) {

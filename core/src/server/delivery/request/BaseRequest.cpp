@@ -41,7 +41,7 @@ RequestGroup(BaseRequest::RequestType type) {
         // collection operations
         {BaseRequest::kShowTables, INFO_REQUEST_GROUP},
         {BaseRequest::kCreateTable, DDL_DML_REQUEST_GROUP},
-        {BaseRequest::kHasTable, INFO_REQUEST_GROUP},
+        {BaseRequest::kHasCollection, INFO_REQUEST_GROUP},
         {BaseRequest::kDescribeTable, INFO_REQUEST_GROUP},
         {BaseRequest::kCountTable, INFO_REQUEST_GROUP},
         {BaseRequest::kShowTableInfo, INFO_REQUEST_GROUP},

@@ -198,19 +198,19 @@ TEST_F(RpcHandlerTest, HAS_TABLE_TEST) {
     handler->RegisterRequestHandler(milvus::server::RequestHandler());
     ::milvus::grpc::TableName request;
     ::milvus::grpc::BoolReply reply;
-    ::grpc::Status status = handler->HasTable(&context, &request, &reply);
+    ::grpc::Status status = handler->HasCollection(&context, &request, &reply);
     request.set_table_name(TABLE_NAME);
-    status = handler->HasTable(&context, &request, &reply);
+    status = handler->HasCollection(&context, &request, &reply);
     ASSERT_TRUE(status.error_code() == ::grpc::Status::OK.error_code());
     int error_code = reply.status().error_code();
     ASSERT_EQ(error_code, ::milvus::grpc::ErrorCode::SUCCESS);
 
     fiu_init(0);
 
-    fiu_enable("HasTableRequest.OnExecute.throw_std_exception", 1, NULL, 0);
-    handler->HasTable(&context, &request, &reply);
+    fiu_enable("HasCollectionRequest.OnExecute.throw_std_exception", 1, NULL, 0);
+    handler->HasCollection(&context, &request, &reply);
     ASSERT_NE(reply.status().error_code(), ::milvus::grpc::ErrorCode::SUCCESS);
-    fiu_disable("HasTableRequest.OnExecute.throw_std_exception");
+    fiu_disable("HasCollectionRequest.OnExecute.throw_std_exception");
 }
 
 TEST_F(RpcHandlerTest, INDEX_TEST) {

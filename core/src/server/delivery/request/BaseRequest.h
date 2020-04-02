@@ -130,7 +130,7 @@ class BaseRequest {
         // collection operations
         kShowTables = 300,
         kCreateTable,
-        kHasTable,
+        kHasCollection,
         kDescribeTable,
         kCountTable,
         kShowTableInfo,

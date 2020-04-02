@@ -39,7 +39,7 @@ class GrpcClient {
     CreateTable(const grpc::TableSchema& table_schema);
 
     bool
-    HasTable(const grpc::TableName& table_name, Status& status);
+    HasCollection(const grpc::TableName& table_name, Status& status);
 
     Status
     DropTable(const grpc::TableName& table_name);

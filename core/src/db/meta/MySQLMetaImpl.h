@@ -38,7 +38,7 @@ class MySQLMetaImpl : public Meta {
     DescribeTable(CollectionSchema& table_schema) override;
 
     Status
-    HasTable(const std::string& collection_id, bool& has_or_not) override;
+    HasCollection(const std::string& collection_id, bool& has_or_not) override;
 
     Status
     AllTables(std::vector<CollectionSchema>& table_schema_array) override;

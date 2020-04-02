@@ -110,12 +110,12 @@ TEST_F(MetaTest, FALID_TEST) {
         fiu_disable("SqliteMetaImpl.DescribeTable.throw_exception");
     }
     {
-        FIU_ENABLE_FIU("SqliteMetaImpl.HasTable.throw_exception");
+        FIU_ENABLE_FIU("SqliteMetaImpl.HasCollection.throw_exception");
         bool has = false;
-        status = impl_->HasTable(collection.collection_id_, has);
+        status = impl_->HasCollection(collection.collection_id_, has);
         ASSERT_FALSE(status.ok());
         ASSERT_FALSE(has);
-        fiu_disable("SqliteMetaImpl.HasTable.throw_exception");
+        fiu_disable("SqliteMetaImpl.HasCollection.throw_exception");
     }
     {
         FIU_ENABLE_FIU("SqliteMetaImpl.AllTables.throw_exception");

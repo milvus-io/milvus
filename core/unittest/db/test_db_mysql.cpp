@@ -273,7 +273,7 @@ TEST_F(MySqlDBTest, DELETE_TEST) {
     ASSERT_TRUE(stat.ok());
 
     bool has_table = false;
-    db_->HasTable(TABLE_NAME, has_table);
+    db_->HasCollection(TABLE_NAME, has_table);
     ASSERT_TRUE(has_table);
 
     milvus::engine::IDNumbers vector_ids;
@@ -300,7 +300,7 @@ TEST_F(MySqlDBTest, DELETE_TEST) {
     ////    std::cout << "5 sec finish" << std::endl;
     ASSERT_TRUE(stat.ok());
     //
-    db_->HasTable(TABLE_NAME, has_table);
+    db_->HasCollection(TABLE_NAME, has_table);
     ASSERT_FALSE(has_table);
 }
 

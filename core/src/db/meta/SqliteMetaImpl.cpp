@@ -247,11 +247,11 @@ SqliteMetaImpl::DescribeTable(CollectionSchema& table_schema) {
 }
 
 Status
-SqliteMetaImpl::HasTable(const std::string& collection_id, bool& has_or_not) {
+SqliteMetaImpl::HasCollection(const std::string& collection_id, bool& has_or_not) {
     has_or_not = false;
 
     try {
-        fiu_do_on("SqliteMetaImpl.HasTable.throw_exception", throw std::exception());
+        fiu_do_on("SqliteMetaImpl.HasCollection.throw_exception", throw std::exception());
         server::MetricCollector metric;
         auto tables = ConnectorPtr->select(
             columns(&CollectionSchema::id_),

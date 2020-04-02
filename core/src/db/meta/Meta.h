@@ -49,7 +49,7 @@ class Meta {
     DescribeTable(CollectionSchema& table_schema) = 0;
 
     virtual Status
-    HasTable(const std::string& collection_id, bool& has_or_not) = 0;
+    HasCollection(const std::string& collection_id, bool& has_or_not) = 0;
 
     virtual Status
     AllTables(std::vector<CollectionSchema>& table_schema_array) = 0;

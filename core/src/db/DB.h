@@ -53,7 +53,7 @@ class DB {
     DescribeTable(meta::CollectionSchema& table_schema_) = 0;
 
     virtual Status
-    HasTable(const std::string& collection_id, bool& has_or_not_) = 0;
+    HasCollection(const std::string& collection_id, bool& has_or_not_) = 0;
 
     virtual Status
     HasNativeTable(const std::string& collection_id, bool& has_or_not_) = 0;

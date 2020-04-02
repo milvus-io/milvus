@@ -95,7 +95,7 @@ class GrpcRequestHandler final : public ::milvus::grpc::MilvusService::Service, 
     //
     // @return BoolReply
     ::grpc::Status
-    HasTable(::grpc::ServerContext* context, const ::milvus::grpc::TableName* request,
+    HasCollection(::grpc::ServerContext* context, const ::milvus::grpc::TableName* request,
              ::milvus::grpc::BoolReply* response) override;
     // *
     // @brief This method is used to get collection schema.

@@ -64,7 +64,7 @@ class DBImpl : public DB, public server::CacheConfigHandler, public server::Engi
     DescribeTable(meta::CollectionSchema& table_schema) override;
 
     Status
-    HasTable(const std::string& collection_id, bool& has_or_not) override;
+    HasCollection(const std::string& collection_id, bool& has_or_not) override;
 
     Status
     HasNativeTable(const std::string& collection_id, bool& has_or_not_) override;

@@ -509,7 +509,7 @@ MySQLMetaImpl::DescribeTable(CollectionSchema& table_schema) {
 }
 
 Status
-MySQLMetaImpl::HasTable(const std::string& collection_id, bool& has_or_not) {
+MySQLMetaImpl::HasCollection(const std::string& collection_id, bool& has_or_not) {
     try {
         server::MetricCollector metric;
         mysqlpp::StoreQueryResult res;
@@ -517,23 +517,23 @@ MySQLMetaImpl::HasTable(const std::string& collection_id, bool& has_or_not) {
             mysqlpp::ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab_);
 
             bool is_null_connection = (connectionPtr == nullptr);
-            fiu_do_on("MySQLMetaImpl.HasTable.null_connection", is_null_connection = true);
-            fiu_do_on("MySQLMetaImpl.HasTable.throw_exception", throw std::exception(););
+            fiu_do_on("MySQLMetaImpl.HasCollection.null_connection", is_null_connection = true);
+            fiu_do_on("MySQLMetaImpl.HasCollection.throw_exception", throw std::exception(););
             if (is_null_connection) {
                 return Status(DB_ERROR, "Failed to connect to meta server(mysql)");
             }
 
-            mysqlpp::Query hasTableQuery = connectionPtr->query();
+            mysqlpp::Query HasCollectionQuery = connectionPtr->query();
             // since collection_id is a unique column we just need to check whether it exists or not
-            hasTableQuery << "SELECT EXISTS"
+            HasCollectionQuery << "SELECT EXISTS"
                           << " (SELECT 1 FROM " << META_TABLES << " WHERE table_id = " << mysqlpp::quote
                           << collection_id << " AND state <> " << std::to_string(CollectionSchema::TO_DELETE) << ")"
                           << " AS " << mysqlpp::quote << "check"
                           << ";";
 
-            ENGINE_LOG_DEBUG << "MySQLMetaImpl::HasTable: " << hasTableQuery.str();
+            ENGINE_LOG_DEBUG << "MySQLMetaImpl::HasCollection: " << HasCollectionQuery.str();
 
-            res = hasTableQuery.store();
+            res = HasCollectionQuery.store();
         }  // Scoped Connection
 
         int check = res[0]["check"];
