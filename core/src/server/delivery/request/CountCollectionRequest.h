@@ -19,14 +19,14 @@
 namespace milvus {
 namespace server {
 
-class CountTableRequest : public BaseRequest {
+class CountCollectionRequest : public BaseRequest {
  public:
     static BaseRequestPtr
     Create(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name,
            int64_t& row_count);
 
  protected:
-    CountTableRequest(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name,
+    CountCollectionRequest(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name,
                       int64_t& row_count);
 
     Status

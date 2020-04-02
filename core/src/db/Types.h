@@ -64,7 +64,7 @@ struct PartitionStat {
     std::vector<SegmentStat> segments_stat_;
 };
 
-struct TableInfo {
+struct CollectionInfo {
     std::vector<PartitionStat> partitions_stat_;
 };
 

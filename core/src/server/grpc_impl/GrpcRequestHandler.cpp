@@ -142,7 +142,7 @@ ConstructPartitionStat(const PartitionStat& partition_stat, ::milvus::grpc::Part
 }
 
 void
-ConstructTableInfo(const TableInfo& table_info, ::milvus::grpc::TableInfo* response) {
+ConstructTableInfo(const CollectionInfo& table_info, ::milvus::grpc::TableInfo* response) {
     if (!response) {
         return;
     }
@@ -524,8 +524,8 @@ GrpcRequestHandler::ShowTableInfo(::grpc::ServerContext* context, const ::milvus
                                   ::milvus::grpc::TableInfo* response) {
     CHECK_NULLPTR_RETURN(request);
 
-    TableInfo table_info;
-    Status status = request_handler_.ShowTableInfo(context_map_[context], request->table_name(), table_info);
+    CollectionInfo table_info;
+    Status status = request_handler_.ShowCollectionInfo(context_map_[context], request->table_name(), table_info);
     ConstructTableInfo(table_info, response);
     SET_RESPONSE(response->mutable_status(), status, context);
 

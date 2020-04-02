@@ -240,8 +240,8 @@ WebRequestHandler::GetTableMetaInfo(const std::string& collection_name, nlohmann
 
 Status
 WebRequestHandler::GetTableStat(const std::string& collection_name, nlohmann::json& json_out) {
-    struct TableInfo collection_info;
-    auto status = request_handler_.ShowTableInfo(context_ptr_, collection_name, collection_info);
+    struct CollectionInfo collection_info;
+    auto status = request_handler_.ShowCollectionInfo(context_ptr_, collection_name, collection_info);
 
     if (status.ok()) {
         json_out["count"] = collection_info.total_row_num_;
@@ -1202,8 +1202,8 @@ WebRequestHandler::ShowSegments(const OString& collection_name, const OQueryPara
         tag = query_params.get("partition_tag")->std_str();
     }
 
-    TableInfo info;
-    status = request_handler_.ShowTableInfo(context_ptr_, collection_name->std_str(), info);
+    CollectionInfo info;
+    status = request_handler_.ShowCollectionInfo(context_ptr_, collection_name->std_str(), info);
     if (!status.ok()) {
         ASSIGN_RETURN_STATUS_DTO(status)
     }

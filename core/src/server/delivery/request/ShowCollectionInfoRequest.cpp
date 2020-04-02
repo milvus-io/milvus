@@ -15,7 +15,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#include "server/delivery/request/ShowTableInfoRequest.h"
+#include "server/delivery/request/ShowCollectionInfoRequest.h"
 #include "server/DBWrapper.h"
 #include "utils/Log.h"
 #include "utils/TimeRecorder.h"
@@ -43,20 +43,20 @@ ConstructPartitionStat(const engine::PartitionStat& partition_stat, PartitionSta
     req_partition_stat.total_row_num_ = row_count;
 }
 
-ShowTableInfoRequest::ShowTableInfoRequest(const std::shared_ptr<milvus::server::Context>& context,
-                                           const std::string& collection_name, TableInfo& table_info)
-    : BaseRequest(context, BaseRequest::kShowTableInfo), collection_name_(collection_name), table_info_(table_info) {
+ShowCollectionInfoRequest::ShowCollectionInfoRequest(const std::shared_ptr<milvus::server::Context>& context,
+                                           const std::string& collection_name, CollectionInfo& table_info)
+    : BaseRequest(context, BaseRequest::kShowCollectionInfo), collection_name_(collection_name), table_info_(table_info) {
 }
 
 BaseRequestPtr
-ShowTableInfoRequest::Create(const std::shared_ptr<milvus::server::Context>& context,
-                             const std::string& collection_name, TableInfo& table_info) {
-    return std::shared_ptr<BaseRequest>(new ShowTableInfoRequest(context, collection_name, table_info));
+ShowCollectionInfoRequest::Create(const std::shared_ptr<milvus::server::Context>& context,
+                             const std::string& collection_name, CollectionInfo& table_info) {
+    return std::shared_ptr<BaseRequest>(new ShowCollectionInfoRequest(context, collection_name, table_info));
 }
 
 Status
-ShowTableInfoRequest::OnExecute() {
-    std::string hdr = "ShowTableInfoRequest(collection=" + collection_name_ + ")";
+ShowCollectionInfoRequest::OnExecute() {
+    std::string hdr = "ShowCollectionInfoRequest(collection=" + collection_name_ + ")";
     TimeRecorderAuto rc(hdr);
 
     // step 1: check collection name
@@ -83,7 +83,7 @@ ShowTableInfoRequest::OnExecute() {
     }
 
     // step 3: get partitions
-    engine::TableInfo table_info;
+    engine::CollectionInfo table_info;
     status = DBWrapper::DB()->GetCollectionInfo(collection_name_, table_info);
     if (!status.ok()) {
         return status;

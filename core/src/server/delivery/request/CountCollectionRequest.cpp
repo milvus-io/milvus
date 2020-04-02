@@ -9,7 +9,7 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
-#include "server/delivery/request/CountTableRequest.h"
+#include "server/delivery/request/CountCollectionRequest.h"
 #include "BaseRequest.h"
 #include "server/DBWrapper.h"
 #include "utils/Log.h"
@@ -22,21 +22,21 @@
 namespace milvus {
 namespace server {
 
-CountTableRequest::CountTableRequest(const std::shared_ptr<milvus::server::Context>& context,
+CountCollectionRequest::CountCollectionRequest(const std::shared_ptr<milvus::server::Context>& context,
                                      const std::string& collection_name, int64_t& row_count)
     : BaseRequest(context, BaseRequest::kCountTable), collection_name_(collection_name), row_count_(row_count) {
 }
 
 BaseRequestPtr
-CountTableRequest::Create(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name,
+CountCollectionRequest::Create(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name,
                           int64_t& row_count) {
-    return std::shared_ptr<BaseRequest>(new CountTableRequest(context, collection_name, row_count));
+    return std::shared_ptr<BaseRequest>(new CountCollectionRequest(context, collection_name, row_count));
 }
 
 Status
-CountTableRequest::OnExecute() {
+CountCollectionRequest::OnExecute() {
     try {
-        std::string hdr = "CountTableRequest(collection=" + collection_name_ + ")";
+        std::string hdr = "CountCollectionRequest(collection=" + collection_name_ + ")";
         TimeRecorderAuto rc(hdr);
 
         // step 1: check arguments
@@ -66,9 +66,9 @@ CountTableRequest::OnExecute() {
         // step 2: get row count
         uint64_t row_count = 0;
         status = DBWrapper::DB()->GetCollectionRowCount(collection_name_, row_count);
-        fiu_do_on("CountTableRequest.OnExecute.db_not_found", status = Status(DB_NOT_FOUND, ""));
-        fiu_do_on("CountTableRequest.OnExecute.status_error", status = Status(SERVER_UNEXPECTED_ERROR, ""));
-        fiu_do_on("CountTableRequest.OnExecute.throw_std_exception", throw std::exception());
+        fiu_do_on("CountCollectionRequest.OnExecute.db_not_found", status = Status(DB_NOT_FOUND, ""));
+        fiu_do_on("CountCollectionRequest.OnExecute.status_error", status = Status(SERVER_UNEXPECTED_ERROR, ""));
+        fiu_do_on("CountCollectionRequest.OnExecute.throw_std_exception", throw std::exception());
         if (!status.ok()) {
             if (status.code() == DB_NOT_FOUND) {
                 return Status(SERVER_TABLE_NOT_EXIST, TableNotExistMsg(collection_name_));
