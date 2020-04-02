@@ -922,10 +922,10 @@ WebRequestHandler::CreateTable(const TableRequestDto::ObjectWrapper& collection_
         RETURN_STATUS_DTO(ILLEGAL_METRIC_TYPE, "metric_type is illegal")
     }
 
-    auto status =
-        request_handler_.CreateCollection(context_ptr_, collection_schema->collection_name->std_str(),
-                                     collection_schema->dimension, collection_schema->index_file_size,
-                                     static_cast<int64_t>(MetricNameMap.at(collection_schema->metric_type->std_str())));
+    auto status = request_handler_.CreateCollection(
+        context_ptr_, collection_schema->collection_name->std_str(), collection_schema->dimension,
+        collection_schema->index_file_size,
+        static_cast<int64_t>(MetricNameMap.at(collection_schema->metric_type->std_str())));
 
     ASSIGN_RETURN_STATUS_DTO(status)
 }

@@ -22,13 +22,15 @@ namespace milvus {
 namespace server {
 
 HasCollectionRequest::HasCollectionRequest(const std::shared_ptr<milvus::server::Context>& context,
-                                 const std::string& collection_name, bool& has_collection)
-    : BaseRequest(context, BaseRequest::kHasCollection), collection_name_(collection_name), has_collection_(has_collection) {
+                                           const std::string& collection_name, bool& has_collection)
+    : BaseRequest(context, BaseRequest::kHasCollection),
+      collection_name_(collection_name),
+      has_collection_(has_collection) {
 }
 
 BaseRequestPtr
-HasCollectionRequest::Create(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name,
-                        bool& has_collection) {
+HasCollectionRequest::Create(const std::shared_ptr<milvus::server::Context>& context,
+                             const std::string& collection_name, bool& has_collection) {
     return std::shared_ptr<BaseRequest>(new HasCollectionRequest(context, collection_name, has_collection));
 }
 

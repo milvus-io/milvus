@@ -22,13 +22,13 @@ namespace milvus {
 namespace server {
 
 DescribeCollectionRequest::DescribeCollectionRequest(const std::shared_ptr<milvus::server::Context>& context,
-                                           const std::string& collection_name, CollectionSchema& schema)
+                                                     const std::string& collection_name, CollectionSchema& schema)
     : BaseRequest(context, BaseRequest::kDescribeCollection), collection_name_(collection_name), schema_(schema) {
 }
 
 BaseRequestPtr
 DescribeCollectionRequest::Create(const std::shared_ptr<milvus::server::Context>& context,
-                             const std::string& collection_name, CollectionSchema& schema) {
+                                  const std::string& collection_name, CollectionSchema& schema) {
     return std::shared_ptr<BaseRequest>(new DescribeCollectionRequest(context, collection_name, schema));
 }
 

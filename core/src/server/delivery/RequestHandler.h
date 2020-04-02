@@ -28,7 +28,7 @@ class RequestHandler {
 
     Status
     CreateCollection(const std::shared_ptr<Context>& context, const std::string& collection_name, int64_t dimension,
-                int64_t index_file_size, int64_t metric_type);
+                     int64_t index_file_size, int64_t metric_type);
 
     Status
     HasCollection(const std::shared_ptr<Context>& context, const std::string& collection_name, bool& has_collection);
@@ -56,7 +56,8 @@ class RequestHandler {
     ShowCollections(const std::shared_ptr<Context>& context, std::vector<std::string>& collections);
 
     Status
-    ShowCollectionInfo(const std::shared_ptr<Context>& context, const std::string& collection_name, CollectionInfo& collection_info);
+    ShowCollectionInfo(const std::shared_ptr<Context>& context, const std::string& collection_name,
+                       CollectionInfo& collection_info);
 
     Status
     Search(const std::shared_ptr<Context>& context, const std::string& collection_name,
@@ -71,7 +72,7 @@ class RequestHandler {
 
     Status
     DescribeCollection(const std::shared_ptr<Context>& context, const std::string& collection_name,
-                  CollectionSchema& collection_schema);
+                       CollectionSchema& collection_schema);
 
     Status
     CountCollection(const std::shared_ptr<Context>& context, const std::string& collection_name, int64_t& count);

@@ -23,12 +23,13 @@ namespace milvus {
 namespace server {
 
 DropCollectionRequest::DropCollectionRequest(const std::shared_ptr<milvus::server::Context>& context,
-                                   const std::string& collection_name)
+                                             const std::string& collection_name)
     : BaseRequest(context, BaseRequest::kDropCollection), collection_name_(collection_name) {
 }
 
 BaseRequestPtr
-DropCollectionRequest::Create(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name) {
+DropCollectionRequest::Create(const std::shared_ptr<milvus::server::Context>& context,
+                              const std::string& collection_name) {
     return std::shared_ptr<BaseRequest>(new DropCollectionRequest(context, collection_name));
 }
 
@@ -69,7 +70,8 @@ DropCollectionRequest::OnExecute() {
 
         // step 3: Drop collection
         status = DBWrapper::DB()->DropCollection(collection_name_);
-        fiu_do_on("DropCollectionRequest.OnExecute.drop_table_fail", status = Status(milvus::SERVER_UNEXPECTED_ERROR, ""));
+        fiu_do_on("DropCollectionRequest.OnExecute.drop_table_fail",
+                  status = Status(milvus::SERVER_UNEXPECTED_ERROR, ""));
         if (!status.ok()) {
             return status;
         }

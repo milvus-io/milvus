@@ -606,8 +606,8 @@ TEST_F(DeleteTest, delete_add_create_index) {
 
     result_ids.clear();
     result_distances.clear();
-    stat = db_->QueryByID(dummy_context_, collection_info.collection_id_, tags, topk, json_params, ids_to_delete.front(),
-                          result_ids, result_distances);
+    stat = db_->QueryByID(dummy_context_, collection_info.collection_id_, tags, topk,
+                          json_params, ids_to_delete.front(), result_ids, result_distances);
     ASSERT_EQ(result_ids[0], -1);
     ASSERT_EQ(result_distances[0], std::numeric_limits<float>::max());
 }

@@ -25,8 +25,8 @@ namespace milvus {
 namespace server {
 
 CreateCollectionRequest::CreateCollectionRequest(const std::shared_ptr<milvus::server::Context>& context,
-                                       const std::string& collection_name, int64_t dimension, int64_t index_file_size,
-                                       int64_t metric_type)
+                                                 const std::string& collection_name, int64_t dimension,
+                                                 int64_t index_file_size, int64_t metric_type)
     : BaseRequest(context, BaseRequest::kCreateCollection),
       collection_name_(collection_name),
       dimension_(dimension),
@@ -35,8 +35,9 @@ CreateCollectionRequest::CreateCollectionRequest(const std::shared_ptr<milvus::s
 }
 
 BaseRequestPtr
-CreateCollectionRequest::Create(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name,
-                           int64_t dimension, int64_t index_file_size, int64_t metric_type) {
+CreateCollectionRequest::Create(const std::shared_ptr<milvus::server::Context>& context,
+                                const std::string& collection_name, int64_t dimension, int64_t index_file_size,
+                                int64_t metric_type) {
     return std::shared_ptr<BaseRequest>(
         new CreateCollectionRequest(context, collection_name, dimension, index_file_size, metric_type));
 }

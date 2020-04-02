@@ -403,7 +403,8 @@ MySQLMetaImpl::CreateCollection(CollectionSchema& table_schema) {
 
                 if (res.num_rows() == 1) {
                     int state = res[0]["state"];
-                    fiu_do_on("MySQLMetaImpl.CreateCollectionTable.schema_TO_DELETE", state = CollectionSchema::TO_DELETE);
+                    fiu_do_on("MySQLMetaImpl.CreateCollectionTable.schema_TO_DELETE",
+                              state = CollectionSchema::TO_DELETE);
                     if (CollectionSchema::TO_DELETE == state) {
                         return Status(DB_ERROR,
                                       "Collection already exists and it is in delete state, please wait a second");
@@ -526,10 +527,11 @@ MySQLMetaImpl::HasCollection(const std::string& collection_id, bool& has_or_not)
             mysqlpp::Query HasCollectionQuery = connectionPtr->query();
             // since collection_id is a unique column we just need to check whether it exists or not
             HasCollectionQuery << "SELECT EXISTS"
-                          << " (SELECT 1 FROM " << META_TABLES << " WHERE table_id = " << mysqlpp::quote
-                          << collection_id << " AND state <> " << std::to_string(CollectionSchema::TO_DELETE) << ")"
-                          << " AS " << mysqlpp::quote << "check"
-                          << ";";
+                               << " (SELECT 1 FROM " << META_TABLES << " WHERE table_id = " << mysqlpp::quote
+                               << collection_id << " AND state <> " << std::to_string(CollectionSchema::TO_DELETE)
+                               << ")"
+                               << " AS " << mysqlpp::quote << "check"
+                               << ";";
 
             ENGINE_LOG_DEBUG << "MySQLMetaImpl::HasCollection: " << HasCollectionQuery.str();
 
@@ -827,7 +829,7 @@ MySQLMetaImpl::GetTableFiles(const std::string& collection_id, const std::vector
 
 Status
 MySQLMetaImpl::GetCollectionFilesBySegmentId(const std::string& segment_id,
-                                        milvus::engine::meta::SegmentsSchema& table_files) {
+                                             milvus::engine::meta::SegmentsSchema& table_files) {
     try {
         mysqlpp::StoreQueryResult res;
         {
@@ -902,9 +904,9 @@ MySQLMetaImpl::UpdateCollectionIndex(const std::string& collection_id, const Col
 
             mysqlpp::Query updateCollectionIndexParamQuery = connectionPtr->query();
             updateCollectionIndexParamQuery << "SELECT id, state, dimension, created_on"
-                                       << " FROM " << META_TABLES << " WHERE table_id = " << mysqlpp::quote
-                                       << collection_id << " AND state <> "
-                                       << std::to_string(CollectionSchema::TO_DELETE) << ";";
+                                            << " FROM " << META_TABLES << " WHERE table_id = " << mysqlpp::quote
+                                            << collection_id << " AND state <> "
+                                            << std::to_string(CollectionSchema::TO_DELETE) << ";";
 
             ENGINE_LOG_DEBUG << "MySQLMetaImpl::UpdateCollectionIndex: " << updateCollectionIndexParamQuery.str();
 
@@ -918,12 +920,12 @@ MySQLMetaImpl::UpdateCollectionIndex(const std::string& collection_id, const Col
                 uint16_t dimension = resRow["dimension"];
                 int64_t created_on = resRow["created_on"];
 
-                updateCollectionIndexParamQuery << "UPDATE " << META_TABLES << " SET id = " << id << " ,state = " << state
-                                           << " ,dimension = " << dimension << " ,created_on = " << created_on
-                                           << " ,engine_type = " << index.engine_type_
-                                           << " ,index_params = " << mysqlpp::quote << index.extra_params_.dump()
-                                           << " ,metric_type = " << index.metric_type_
-                                           << " WHERE table_id = " << mysqlpp::quote << collection_id << ";";
+                updateCollectionIndexParamQuery
+                    << "UPDATE " << META_TABLES << " SET id = " << id << " ,state = " << state
+                    << " ,dimension = " << dimension << " ,created_on = " << created_on
+                    << " ,engine_type = " << index.engine_type_ << " ,index_params = " << mysqlpp::quote
+                    << index.extra_params_.dump() << " ,metric_type = " << index.metric_type_
+                    << " WHERE table_id = " << mysqlpp::quote << collection_id << ";";
 
                 ENGINE_LOG_DEBUG << "MySQLMetaImpl::UpdateCollectionIndex: " << updateCollectionIndexParamQuery.str();
 
@@ -1352,9 +1354,9 @@ MySQLMetaImpl::DescribeCollectionIndex(const std::string& collection_id, Collect
 
             mysqlpp::Query describeCollectionIndexQuery = connectionPtr->query();
             describeCollectionIndexQuery << "SELECT engine_type, index_params, index_file_size, metric_type"
-                                    << " FROM " << META_TABLES << " WHERE table_id = " << mysqlpp::quote
-                                    << collection_id << " AND state <> " << std::to_string(CollectionSchema::TO_DELETE)
-                                    << ";";
+                                         << " FROM " << META_TABLES << " WHERE table_id = " << mysqlpp::quote
+                                         << collection_id << " AND state <> "
+                                         << std::to_string(CollectionSchema::TO_DELETE) << ";";
 
             ENGINE_LOG_DEBUG << "MySQLMetaImpl::DescribeCollectionIndex: " << describeCollectionIndexQuery.str();
 
@@ -1398,10 +1400,10 @@ MySQLMetaImpl::DropCollectionIndex(const std::string& collection_id) {
 
             // soft delete index files
             dropCollectionIndexQuery << "UPDATE " << META_TABLEFILES
-                                << " SET file_type = " << std::to_string(SegmentSchema::TO_DELETE)
-                                << " ,updated_time = " << utils::GetMicroSecTimeStamp()
-                                << " WHERE table_id = " << mysqlpp::quote << collection_id
-                                << " AND file_type = " << std::to_string(SegmentSchema::INDEX) << ";";
+                                     << " SET file_type = " << std::to_string(SegmentSchema::TO_DELETE)
+                                     << " ,updated_time = " << utils::GetMicroSecTimeStamp()
+                                     << " WHERE table_id = " << mysqlpp::quote << collection_id
+                                     << " AND file_type = " << std::to_string(SegmentSchema::INDEX) << ";";
 
             ENGINE_LOG_DEBUG << "MySQLMetaImpl::DropCollectionIndex: " << dropCollectionIndexQuery.str();
 
@@ -1411,10 +1413,10 @@ MySQLMetaImpl::DropCollectionIndex(const std::string& collection_id) {
 
             // set all backup file to raw
             dropCollectionIndexQuery << "UPDATE " << META_TABLEFILES
-                                << " SET file_type = " << std::to_string(SegmentSchema::RAW)
-                                << " ,updated_time = " << utils::GetMicroSecTimeStamp()
-                                << " WHERE table_id = " << mysqlpp::quote << collection_id
-                                << " AND file_type = " << std::to_string(SegmentSchema::BACKUP) << ";";
+                                     << " SET file_type = " << std::to_string(SegmentSchema::RAW)
+                                     << " ,updated_time = " << utils::GetMicroSecTimeStamp()
+                                     << " WHERE table_id = " << mysqlpp::quote << collection_id
+                                     << " AND file_type = " << std::to_string(SegmentSchema::BACKUP) << ";";
 
             ENGINE_LOG_DEBUG << "MySQLMetaImpl::DropCollectionIndex: " << dropCollectionIndexQuery.str();
 
@@ -1424,13 +1426,13 @@ MySQLMetaImpl::DropCollectionIndex(const std::string& collection_id) {
 
             // set collection index type to raw
             dropCollectionIndexQuery << "UPDATE " << META_TABLES << " SET engine_type = "
-                                << " (CASE"
-                                << " WHEN metric_type in (" << (int32_t)MetricType::HAMMING << " ,"
-                                << (int32_t)MetricType::JACCARD << " ," << (int32_t)MetricType::TANIMOTO << ")"
-                                << " THEN " << (int32_t)EngineType::FAISS_BIN_IDMAP << " ELSE "
-                                << (int32_t)EngineType::FAISS_IDMAP << " END)"
-                                << " , index_params = '{}'"
-                                << " WHERE table_id = " << mysqlpp::quote << collection_id << ";";
+                                     << " (CASE"
+                                     << " WHEN metric_type in (" << (int32_t)MetricType::HAMMING << " ,"
+                                     << (int32_t)MetricType::JACCARD << " ," << (int32_t)MetricType::TANIMOTO << ")"
+                                     << " THEN " << (int32_t)EngineType::FAISS_BIN_IDMAP << " ELSE "
+                                     << (int32_t)EngineType::FAISS_IDMAP << " END)"
+                                     << " , index_params = '{}'"
+                                     << " WHERE table_id = " << mysqlpp::quote << collection_id << ";";
 
             ENGINE_LOG_DEBUG << "MySQLMetaImpl::DropCollectionIndex: " << dropCollectionIndexQuery.str();
 

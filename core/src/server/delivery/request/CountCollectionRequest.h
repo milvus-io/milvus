@@ -27,7 +27,7 @@ class CountCollectionRequest : public BaseRequest {
 
  protected:
     CountCollectionRequest(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name,
-                      int64_t& row_count);
+                           int64_t& row_count);
 
     Status
     OnExecute() override;

@@ -18,15 +18,15 @@
 #include "server/delivery/request/CmdRequest.h"
 #include "server/delivery/request/CompactRequest.h"
 #include "server/delivery/request/CountCollectionRequest.h"
+#include "server/delivery/request/CreateCollectionRequest.h"
 #include "server/delivery/request/CreateIndexRequest.h"
 #include "server/delivery/request/CreatePartitionRequest.h"
-#include "server/delivery/request/CreateCollectionRequest.h"
 #include "server/delivery/request/DeleteByIDRequest.h"
-#include "server/delivery/request/DescribeIndexRequest.h"
 #include "server/delivery/request/DescribeCollectionRequest.h"
+#include "server/delivery/request/DescribeIndexRequest.h"
+#include "server/delivery/request/DropCollectionRequest.h"
 #include "server/delivery/request/DropIndexRequest.h"
 #include "server/delivery/request/DropPartitionRequest.h"
-#include "server/delivery/request/DropCollectionRequest.h"
 #include "server/delivery/request/FlushRequest.h"
 #include "server/delivery/request/GetVectorByIDRequest.h"
 #include "server/delivery/request/GetVectorIDsRequest.h"
@@ -35,16 +35,16 @@
 #include "server/delivery/request/PreloadCollectionRequest.h"
 #include "server/delivery/request/SearchByIDRequest.h"
 #include "server/delivery/request/SearchRequest.h"
-#include "server/delivery/request/ShowPartitionsRequest.h"
 #include "server/delivery/request/ShowCollectionInfoRequest.h"
 #include "server/delivery/request/ShowCollectionsRequest.h"
+#include "server/delivery/request/ShowPartitionsRequest.h"
 
 namespace milvus {
 namespace server {
 
 Status
 RequestHandler::CreateCollection(const std::shared_ptr<Context>& context, const std::string& collection_name,
-                            int64_t dimension, int64_t index_file_size, int64_t metric_type) {
+                                 int64_t dimension, int64_t index_file_size, int64_t metric_type) {
     BaseRequestPtr request_ptr =
         CreateCollectionRequest::Create(context, collection_name, dimension, index_file_size, metric_type);
     RequestScheduler::ExecRequest(request_ptr);
@@ -53,7 +53,8 @@ RequestHandler::CreateCollection(const std::shared_ptr<Context>& context, const 
 }
 
 Status
-RequestHandler::HasCollection(const std::shared_ptr<Context>& context, const std::string& collection_name, bool& has_collection) {
+RequestHandler::HasCollection(const std::shared_ptr<Context>& context, const std::string& collection_name,
+                              bool& has_collection) {
     BaseRequestPtr request_ptr = HasCollectionRequest::Create(context, collection_name, has_collection);
     RequestScheduler::ExecRequest(request_ptr);
 
@@ -114,7 +115,7 @@ RequestHandler::ShowCollections(const std::shared_ptr<Context>& context, std::ve
 
 Status
 RequestHandler::ShowCollectionInfo(const std::shared_ptr<Context>& context, const std::string& collection_name,
-                              CollectionInfo& collection_info) {
+                                   CollectionInfo& collection_info) {
     BaseRequestPtr request_ptr = ShowCollectionInfoRequest::Create(context, collection_name, collection_info);
     RequestScheduler::ExecRequest(request_ptr);
 
@@ -146,7 +147,7 @@ RequestHandler::SearchByID(const std::shared_ptr<Context>& context, const std::s
 
 Status
 RequestHandler::DescribeCollection(const std::shared_ptr<Context>& context, const std::string& collection_name,
-                              CollectionSchema& collection_schema) {
+                                   CollectionSchema& collection_schema) {
     BaseRequestPtr request_ptr = DescribeCollectionRequest::Create(context, collection_name, collection_schema);
     RequestScheduler::ExecRequest(request_ptr);
 
@@ -155,7 +156,7 @@ RequestHandler::DescribeCollection(const std::shared_ptr<Context>& context, cons
 
 Status
 RequestHandler::CountCollection(const std::shared_ptr<Context>& context, const std::string& collection_name,
-                           int64_t& count) {
+                                int64_t& count) {
     BaseRequestPtr request_ptr = CountCollectionRequest::Create(context, collection_name, count);
     RequestScheduler::ExecRequest(request_ptr);
 

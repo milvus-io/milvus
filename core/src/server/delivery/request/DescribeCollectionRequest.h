@@ -26,8 +26,8 @@ class DescribeCollectionRequest : public BaseRequest {
            CollectionSchema& schema);
 
  protected:
-    DescribeCollectionRequest(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name,
-                         CollectionSchema& schema);
+    DescribeCollectionRequest(const std::shared_ptr<milvus::server::Context>& context,
+                              const std::string& collection_name, CollectionSchema& schema);
 
     Status
     OnExecute() override;

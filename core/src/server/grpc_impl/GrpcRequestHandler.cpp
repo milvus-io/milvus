@@ -242,8 +242,9 @@ GrpcRequestHandler::CreateTable(::grpc::ServerContext* context, const ::milvus::
                                 ::milvus::grpc::Status* response) {
     CHECK_NULLPTR_RETURN(request);
 
-    Status status = request_handler_.CreateCollection(context_map_[context], request->table_name(), request->dimension(),
-                                                 request->index_file_size(), request->metric_type());
+    Status status =
+        request_handler_.CreateCollection(context_map_[context], request->table_name(), request->dimension(),
+                                          request->index_file_size(), request->metric_type());
     SET_RESPONSE(response, status, context);
 
     return ::grpc::Status::OK;

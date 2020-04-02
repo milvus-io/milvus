@@ -1384,8 +1384,8 @@ DBImpl::MergeFiles(const std::string& collection_id, const meta::SegmentsSchema&
     // step 2: merge files
     /*
     ExecutionEnginePtr index =
-        EngineFactory::Build(collection_file.dimension_, collection_file.location_, (EngineType)collection_file.engine_type_,
-                             (MetricType)collection_file.metric_type_, collection_file.nlist_);
+        EngineFactory::Build(collection_file.dimension_, collection_file.location_,
+    (EngineType)collection_file.engine_type_, (MetricType)collection_file.metric_type_, collection_file.nlist_);
 */
     meta::SegmentsSchema updated;
 
@@ -1425,7 +1425,8 @@ DBImpl::MergeFiles(const std::string& collection_id, const meta::SegmentsSchema&
         // typical error: out of disk space, out of memory or permission denied
         collection_file.file_type_ = meta::SegmentSchema::TO_DELETE;
         status = meta_ptr_->UpdateCollectionFile(collection_file);
-        ENGINE_LOG_DEBUG << "Failed to update file to index, mark file: " << collection_file.file_id_ << " to to_delete";
+        ENGINE_LOG_DEBUG << "Failed to update file to index, mark file: " << collection_file.file_id_
+                         << " to to_delete";
 
         return status;
     }
@@ -1435,8 +1436,8 @@ DBImpl::MergeFiles(const std::string& collection_id, const meta::SegmentsSchema&
     // else set file type to RAW, no need to build index
     if (!utils::IsRawIndexType(collection_file.engine_type_)) {
         collection_file.file_type_ = (segment_writer_ptr->Size() >= collection_file.index_file_size_)
-                                    ? meta::SegmentSchema::TO_INDEX
-                                    : meta::SegmentSchema::RAW;
+                                         ? meta::SegmentSchema::TO_INDEX
+                                         : meta::SegmentSchema::RAW;
     } else {
         collection_file.file_type_ = meta::SegmentSchema::RAW;
     }
@@ -1444,8 +1445,8 @@ DBImpl::MergeFiles(const std::string& collection_id, const meta::SegmentsSchema&
     collection_file.row_count_ = segment_writer_ptr->VectorCount();
     updated.push_back(collection_file);
     status = meta_ptr_->UpdateCollectionFiles(updated);
-    ENGINE_LOG_DEBUG << "New merged segment " << collection_file.segment_id_ << " of size " << segment_writer_ptr->Size()
-                     << " bytes";
+    ENGINE_LOG_DEBUG << "New merged segment " << collection_file.segment_id_ << " of size "
+                     << segment_writer_ptr->Size() << " bytes";
 
     if (options_.insert_cache_immediately_) {
         segment_writer_ptr->Cache();
@@ -1687,8 +1688,8 @@ DBImpl::DropCollectionRecursively(const std::string& collection_id) {
         wal_mgr_->DropCollection(collection_id);
     }
 
-    status = mem_mgr_->EraseMemVector(collection_id);  // not allow insert
-    status = meta_ptr_->DropCollection(collection_id);      // soft delete collection
+    status = mem_mgr_->EraseMemVector(collection_id);   // not allow insert
+    status = meta_ptr_->DropCollection(collection_id);  // soft delete collection
     index_failed_checker_.CleanFailedIndexFileOfCollection(collection_id);
 
     // scheduler will determine when to delete collection files

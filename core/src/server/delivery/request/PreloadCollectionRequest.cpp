@@ -22,13 +22,13 @@ namespace milvus {
 namespace server {
 
 PreloadCollectionRequest::PreloadCollectionRequest(const std::shared_ptr<milvus::server::Context>& context,
-                                         const std::string& collection_name)
+                                                   const std::string& collection_name)
     : BaseRequest(context, BaseRequest::kPreloadCollection), collection_name_(collection_name) {
 }
 
 BaseRequestPtr
 PreloadCollectionRequest::Create(const std::shared_ptr<milvus::server::Context>& context,
-                            const std::string& collection_name) {
+                                 const std::string& collection_name) {
     return std::shared_ptr<BaseRequest>(new PreloadCollectionRequest(context, collection_name));
 }
 

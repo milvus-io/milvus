@@ -410,8 +410,8 @@ TEST(ValidationUtilTest, VALIDATE_DIMENSION_TEST) {
 }
 
 TEST(ValidationUtilTest, VALIDATE_INDEX_TEST) {
-    ASSERT_EQ(milvus::server::ValidationUtil::ValidateCollectionIndexType((int)milvus::engine::EngineType::INVALID).code(),
-              milvus::SERVER_INVALID_INDEX_TYPE);
+    ASSERT_EQ(milvus::server::ValidationUtil::ValidateCollectionIndexType(
+              (int)milvus::engine::EngineType::INVALID).code(), milvus::SERVER_INVALID_INDEX_TYPE);
     for (int i = 1; i <= (int)milvus::engine::EngineType::MAX_VALUE; i++) {
 #ifndef MILVUS_GPU_VERSION
         if (i == (int)milvus::engine::EngineType::FAISS_IVFSQ8H) {
@@ -423,8 +423,8 @@ TEST(ValidationUtilTest, VALIDATE_INDEX_TEST) {
     }
 
     ASSERT_EQ(
-        milvus::server::ValidationUtil::ValidateCollectionIndexType((int)milvus::engine::EngineType::MAX_VALUE + 1).code(),
-        milvus::SERVER_INVALID_INDEX_TYPE);
+        milvus::server::ValidationUtil::ValidateCollectionIndexType(
+               (int)milvus::engine::EngineType::MAX_VALUE + 1).code(), milvus::SERVER_INVALID_INDEX_TYPE);
 
     ASSERT_EQ(milvus::server::ValidationUtil::ValidateCollectionIndexFileSize(0).code(),
               milvus::SERVER_INVALID_INDEX_FILE_SIZE);

@@ -33,8 +33,8 @@ class ShowCollectionInfoRequest : public BaseRequest {
            CollectionInfo& collection_info);
 
  protected:
-    ShowCollectionInfoRequest(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name,
-                         CollectionInfo& collection_info);
+    ShowCollectionInfoRequest(const std::shared_ptr<milvus::server::Context>& context,
+                              const std::string& collection_name, CollectionInfo& collection_info);
 
     Status
     OnExecute() override;

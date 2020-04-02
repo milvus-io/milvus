@@ -27,7 +27,7 @@ class ShowCollectionsRequest : public BaseRequest {
 
  protected:
     ShowCollectionsRequest(const std::shared_ptr<milvus::server::Context>& context,
-                      std::vector<std::string>& table_name_list);
+                           std::vector<std::string>& table_name_list);
 
     Status
     OnExecute() override;

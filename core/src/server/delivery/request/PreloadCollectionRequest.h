@@ -25,7 +25,8 @@ class PreloadCollectionRequest : public BaseRequest {
     Create(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name);
 
  protected:
-    PreloadCollectionRequest(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name);
+    PreloadCollectionRequest(const std::shared_ptr<milvus::server::Context>& context,
+                             const std::string& collection_name);
 
     Status
     OnExecute() override;

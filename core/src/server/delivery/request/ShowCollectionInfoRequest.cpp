@@ -44,13 +44,16 @@ ConstructPartitionStat(const engine::PartitionStat& partition_stat, PartitionSta
 }
 
 ShowCollectionInfoRequest::ShowCollectionInfoRequest(const std::shared_ptr<milvus::server::Context>& context,
-                                           const std::string& collection_name, CollectionInfo& collection_info)
-    : BaseRequest(context, BaseRequest::kShowCollectionInfo), collection_name_(collection_name), collection_info_(collection_info) {
+                                                     const std::string& collection_name,
+                                                     CollectionInfo& collection_info)
+    : BaseRequest(context, BaseRequest::kShowCollectionInfo),
+      collection_name_(collection_name),
+      collection_info_(collection_info) {
 }
 
 BaseRequestPtr
 ShowCollectionInfoRequest::Create(const std::shared_ptr<milvus::server::Context>& context,
-                             const std::string& collection_name, CollectionInfo& collection_info) {
+                                  const std::string& collection_name, CollectionInfo& collection_info) {
     return std::shared_ptr<BaseRequest>(new ShowCollectionInfoRequest(context, collection_name, collection_info));
 }
 

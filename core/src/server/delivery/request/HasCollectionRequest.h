@@ -27,7 +27,7 @@ class HasCollectionRequest : public BaseRequest {
 
  protected:
     HasCollectionRequest(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name,
-                    bool& has_collection);
+                         bool& has_collection);
 
     Status
     OnExecute() override;
