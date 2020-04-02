@@ -12,6 +12,7 @@
 #pragma once
 
 #include <fstream>
+#include <memory>
 #include <string>
 #include "storage/IOWriter.h"
 
@@ -49,6 +50,8 @@ class DiskIOWriter : public IOWriter {
     size_t len_;
     std::fstream fs_;
 };
+
+using DiskIOWriterPtr = std::shared_ptr<DiskIOWriter>;
 
 }  // namespace storage
 }  // namespace milvus

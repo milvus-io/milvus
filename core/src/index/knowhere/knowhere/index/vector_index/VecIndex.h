@@ -21,7 +21,6 @@
 #include "knowhere/common/Typedef.h"
 #include "knowhere/index/Index.h"
 #include "knowhere/index/vector_index/IndexType.h"
-#include "segment/Types.h"
 
 namespace milvus {
 namespace knowhere {
@@ -88,13 +87,13 @@ class VecIndex : public Index {
         bitset_ = std::move(bitset_ptr);
     }
 
-    const std::vector<milvus::segment::doc_id_t>&
+    const std::vector<IDType>&
     GetUids() const {
         return uids_;
     }
 
     void
-    SetUids(std::vector<milvus::segment::doc_id_t>& uids) {
+    SetUids(std::vector<IDType>& uids) {
         uids_.clear();
         uids_.swap(uids);
     }
@@ -110,7 +109,7 @@ class VecIndex : public Index {
 
     size_t
     UidsSize() {
-        return uids_.size() * sizeof(segment::doc_id_t);
+        return uids_.size() * sizeof(IDType);
     }
 
     virtual int64_t
@@ -135,7 +134,7 @@ class VecIndex : public Index {
     IndexType index_type_ = "";
     IndexMode index_mode_ = IndexMode::MODE_CPU;
     faiss::ConcurrentBitsetPtr bitset_ = nullptr;
-    std::vector<segment::doc_id_t> uids_;
+    std::vector<IDType> uids_;
     int64_t index_size_ = -1;
 };
 

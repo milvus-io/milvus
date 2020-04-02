@@ -11,6 +11,7 @@
 
 #pragma once
 
+#include <memory>
 #include <string>
 #include "storage/IOReader.h"
 
@@ -51,6 +52,8 @@ class S3IOReader : public IOReader {
     std::string buffer_;
     size_t pos_;
 };
+
+using S3IOReaderPtr = std::shared_ptr<S3IOReader>;
 
 }  // namespace storage
 }  // namespace milvus
