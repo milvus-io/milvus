@@ -520,7 +520,7 @@ SqliteMetaImpl::UpdateTableFlushLSN(const std::string& collection_id, uint64_t f
 
         ConnectorPtr->update_all(set(c(&CollectionSchema::flush_lsn_) = flush_lsn),
                                  where(c(&CollectionSchema::collection_id_) == collection_id));
-        ENGINE_LOG_DEBUG << "Successfully update collection flush_lsn, collection id = " << collection_id;
+        ENGINE_LOG_DEBUG << "Successfully update collection flush_lsn, collection id = " << collection_id << " flush_lsn = " << flush_lsn;;
     } catch (std::exception& e) {
         std::string msg = "Encounter exception when update collection lsn: collection_id = " + collection_id;
         return HandleException(msg, e.what());
@@ -718,10 +718,11 @@ SqliteMetaImpl::UpdateTableIndex(const std::string& collection_id, const TableIn
         std::lock_guard<std::mutex> meta_lock(meta_mutex_);
 
         auto tables = ConnectorPtr->select(
-            columns(&CollectionSchema::id_, &CollectionSchema::state_, &CollectionSchema::dimension_, &CollectionSchema::created_on_,
-                    &CollectionSchema::flag_, &CollectionSchema::index_file_size_, &CollectionSchema::owner_table_,
-                    &CollectionSchema::partition_tag_, &CollectionSchema::version_),
-            where(c(&CollectionSchema::collection_id_) == collection_id and c(&CollectionSchema::state_) != (int)CollectionSchema::TO_DELETE));
+
+        columns(&CollectionSchema::id_, &CollectionSchema::state_, &CollectionSchema::dimension_, &CollectionSchema::created_on_,
+                &CollectionSchema::flag_, &CollectionSchema::index_file_size_, &CollectionSchema::owner_table_,
+                &CollectionSchema::partition_tag_, &CollectionSchema::version_, &CollectionSchema::flush_lsn_),
+        where(c(&CollectionSchema::collection_id_) == collection_id and c(&CollectionSchema::state_) != (int)CollectionSchema::TO_DELETE));
 
         if (tables.size() > 0) {
             meta::CollectionSchema table_schema;
@@ -735,6 +736,7 @@ SqliteMetaImpl::UpdateTableIndex(const std::string& collection_id, const TableIn
             table_schema.owner_table_ = std::get<6>(tables[0]);
             table_schema.partition_tag_ = std::get<7>(tables[0]);
             table_schema.version_ = std::get<8>(tables[0]);
+            table_schema.flush_lsn_ = std::get<9>(tables[0]);
             table_schema.engine_type_ = index.engine_type_;
             table_schema.index_params_ = index.extra_params_.dump();
             table_schema.metric_type_ = index.metric_type_;

@@ -151,7 +151,6 @@ class ServiceHandler(milvus_pb2_grpc.MilvusServiceServicer):
                     logger.error("Search fail {}".format(ret.status))
 
                 end = time.time()
-
                 all_topk_results.append(ret)
 
         with self.tracer.start_span('do_search', child_of=p_span) as span:
@@ -189,7 +188,7 @@ class ServiceHandler(milvus_pb2_grpc.MilvusServiceServicer):
                                      reason=_status.message)
 
         _status, _table_schema = unpacks
-        # if _status.error_code == 0:
+        # if _status.error_code != 0:
         #     logging.warning('[CreateTable] table schema error occurred: {}'.format(_status))
         #     return _status
 

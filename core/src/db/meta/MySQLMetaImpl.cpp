@@ -136,6 +136,11 @@ class MetaSchema {
     MetaFields fields_;
 };
 
+// Environment schema
+static const MetaSchema ENVIRONMENT_SCHEMA(META_ENVIRONMENT, {
+                                                                 MetaField("global_lsn", "BIGINT", "NOT NULL"),
+                                                             });
+
 // Tables schema
 static const MetaSchema TABLES_SCHEMA(META_TABLES, {
                                                        MetaField("id", "BIGINT", "PRIMARY KEY AUTO_INCREMENT"),
@@ -241,6 +246,11 @@ MySQLMetaImpl::ValidateMetaSchema() {
         return schema.IsEqual(exist_fields);
     };
 
+    // verify Environment
+    if (!validate_func(ENVIRONMENT_SCHEMA)) {
+        throw Exception(DB_INCOMPATIB_META, "Meta Environment schema is created by Milvus old version");
+    }
+
     // verify Tables
     if (!validate_func(TABLES_SCHEMA)) {
         throw Exception(DB_INCOMPATIB_META, "Meta Tables schema is created by Milvus old version");
@@ -345,6 +355,19 @@ MySQLMetaImpl::Initialize() {
     fiu_do_on("MySQLMetaImpl.Initialize.fail_create_table_files", initialize_query_exec = false);
     if (!initialize_query_exec) {
         std::string msg = "Failed to create meta collection 'TableFiles' in MySQL";
+        ENGINE_LOG_ERROR << msg;
+        throw Exception(DB_META_TRANSACTION_FAILED, msg);
+    }
+
+    // step 9: create meta table Environment
+    InitializeQuery << "CREATE TABLE IF NOT EXISTS " << ENVIRONMENT_SCHEMA.name() << " ("
+                    << ENVIRONMENT_SCHEMA.ToString() + ");";
+
+    ENGINE_LOG_DEBUG << "MySQLMetaImpl::Initialize: " << InitializeQuery.str();
+
+    initialize_query_exec = InitializeQuery.exec();
+    if (!initialize_query_exec) {
+        std::string msg = "Failed to create meta table 'Environment' in MySQL";
         ENGINE_LOG_ERROR << msg;
         throw Exception(DB_META_TRANSACTION_FAILED, msg);
     }
@@ -988,6 +1011,32 @@ MySQLMetaImpl::UpdateTableFlushLSN(const std::string& collection_id, uint64_t fl
 
 Status
 MySQLMetaImpl::GetTableFlushLSN(const std::string& collection_id, uint64_t& flush_lsn) {
+    try {
+        server::MetricCollector metric;
+
+        mysqlpp::StoreQueryResult res;
+        {
+            mysqlpp::ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab_);
+            if (connectionPtr == nullptr) {
+                return Status(DB_ERROR, "Failed to connect to meta server(mysql)");
+            }
+
+            mysqlpp::Query statement = connectionPtr->query();
+            statement << "SELECT flush_lsn FROM " << META_TABLES << " WHERE collection_id = " << mysqlpp::quote
+                      << collection_id << ";";
+
+            ENGINE_LOG_DEBUG << "MySQLMetaImpl::GetTableFlushLSN: " << statement.str();
+
+            res = statement.store();
+        }  // Scoped Connection
+
+        if (!res.empty()) {
+            flush_lsn = res[0]["flush_lsn"];
+        }
+    } catch (std::exception& e) {
+        return HandleException("GENERAL ERROR WHEN GET TABLE FLUSH_LSN", e.what());
+    }
+
     return Status::OK();
 }
 
@@ -2541,11 +2590,79 @@ MySQLMetaImpl::DiscardFiles(int64_t to_discard_size) {
 
 Status
 MySQLMetaImpl::SetGlobalLastLSN(uint64_t lsn) {
+    try {
+        server::MetricCollector metric;
+        {
+            mysqlpp::ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab_);
+            if (connectionPtr == nullptr) {
+                return Status(DB_ERROR, "Failed to connect to meta server(mysql)");
+            }
+
+            bool first_create = false;
+            {
+                mysqlpp::StoreQueryResult res;
+                mysqlpp::Query statement = connectionPtr->query();
+                statement << "SELECT global_lsn FROM " << META_ENVIRONMENT << ";";
+                res = statement.store();
+                if (res.num_rows() == 0) {
+                    first_create = true;
+                }
+            }
+
+            if (first_create) {  // first time to get global lsn
+                mysqlpp::Query statement = connectionPtr->query();
+                statement << "INSERT INTO " << META_ENVIRONMENT << " VALUES(" << lsn << ");";
+                ENGINE_LOG_DEBUG << "MySQLMetaImpl::SetGlobalLastLSN: " << statement.str();
+
+                if (!statement.exec()) {
+                    return HandleException("QUERY ERROR WHEN SET GLOBAL LSN", statement.error());
+                }
+            } else {
+                mysqlpp::Query statement = connectionPtr->query();
+                statement << "UPDATE " << META_ENVIRONMENT << " SET global_lsn = " << lsn << ";";
+                ENGINE_LOG_DEBUG << "MySQLMetaImpl::SetGlobalLastLSN: " << statement.str();
+
+                if (!statement.exec()) {
+                    return HandleException("QUERY ERROR WHEN SET GLOBAL LSN", statement.error());
+                }
+            }
+        }  // Scoped Connection
+
+        ENGINE_LOG_DEBUG << "Successfully update global_lsn = " << lsn;
+    } catch (std::exception& e) {
+        return HandleException("QUERY ERROR WHEN SET GLOBAL LSN", e.what());
+    }
+
     return Status::OK();
 }
 
 Status
 MySQLMetaImpl::GetGlobalLastLSN(uint64_t& lsn) {
+    try {
+        server::MetricCollector metric;
+
+        mysqlpp::StoreQueryResult res;
+        {
+            mysqlpp::ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab_);
+            if (connectionPtr == nullptr) {
+                return Status(DB_ERROR, "Failed to connect to meta server(mysql)");
+            }
+
+            mysqlpp::Query statement = connectionPtr->query();
+            statement << "SELECT global_lsn FROM " << META_ENVIRONMENT << ";";
+
+            ENGINE_LOG_DEBUG << "MySQLMetaImpl::GetGlobalLastLSN: " << statement.str();
+
+            res = statement.store();
+        }  // Scoped Connection
+
+        if (!res.empty()) {
+            lsn = res[0]["global_lsn"];
+        }
+    } catch (std::exception& e) {
+        return HandleException("GENERAL ERROR WHEN GET GLOBAL LSN", e.what());
+    }
+
     return Status::OK();
 }
 

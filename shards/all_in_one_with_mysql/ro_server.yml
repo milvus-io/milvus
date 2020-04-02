@@ -47,14 +47,9 @@ server_config:
 #                      | '*' means preload all existing tables (single-quote or     |            |                 |
 #                      | double-quote required).                                    |            |                 |
 #----------------------+------------------------------------------------------------+------------+-----------------+
-# auto_flush_interval  | The interval, in seconds, at which Milvus automatically    | Integer    | 1 (s)           |
-#                      | flushes data to disk.                                      |            |                 |
-#                      | 0 means disable the regular flush.                         |            |                 |
-#----------------------+------------------------------------------------------------+------------+-----------------+
 db_config:
   backend_url: mysql://root:milvusroot@milvus-mysql:3306/milvus
   preload_table:
-  auto_flush_interval: 1
 
 #----------------------+------------------------------------------------------------+------------+-----------------+
 # Storage Config       | Description                                                | Type       | Default         |
