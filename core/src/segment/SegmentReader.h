@@ -46,6 +46,9 @@ class SegmentReader {
     LoadUids(std::vector<doc_id_t>& uids);
 
     Status
+    LoadVectorIndex(segment::VectorIndexPtr& vector_index_ptr);
+
+    Status
     LoadBloomFilter(segment::IdBloomFilterPtr& id_bloom_filter_ptr);
 
     Status

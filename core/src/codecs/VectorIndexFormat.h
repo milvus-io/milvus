@@ -17,17 +17,25 @@
 
 #pragma once
 
+#include <memory>
+#include <string>
+
+#include "segment/VectorIndex.h"
+#include "storage/FSHandler.h"
+
 namespace milvus {
 namespace codec {
 
-class VectorsIndexFormat {
-    // public:
-    //    virtual VectorsIndex
-    //    read() = 0;
-    //
-    //    virtual void
-    //    write(VectorsIndex vectors_index) = 0;
+class VectorIndexFormat {
+ public:
+    virtual void
+    read(const storage::FSHandlerPtr& fs_ptr, segment::VectorIndexPtr& vector_index) = 0;
+
+    virtual void
+    write(const storage::FSHandlerPtr& fs_ptr, const segment::VectorIndexPtr& vector_index) = 0;
 };
+
+using VectorIndexFormatPtr = std::shared_ptr<VectorIndexFormat>;
 
 }  // namespace codec
 }  // namespace milvus

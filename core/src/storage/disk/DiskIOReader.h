@@ -12,6 +12,7 @@
 #pragma once
 
 #include <fstream>
+#include <memory>
 #include <string>
 #include "storage/IOReader.h"
 
@@ -51,6 +52,8 @@ class DiskIOReader : public IOReader {
     std::string name_;
     std::fstream fs_;
 };
+
+using DiskIOReaderPtr = std::shared_ptr<DiskIOReader>;
 
 }  // namespace storage
 }  // namespace milvus

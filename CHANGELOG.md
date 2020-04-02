@@ -17,6 +17,7 @@ Please mark all change in change log and use the issue from GitHub
 -   \#1849 NSG support deleted vectors searching
 
 ## Improvement
+-   \#1627 Move read/write index APIs into codec
 -   \#1784 Add Substructure and Superstructure in http module
 
 ## Task
