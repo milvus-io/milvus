@@ -44,7 +44,7 @@ Try an example program with Milvus using [Python](https://www.milvus.io/docs/gui
 
 ## Application scenarios
 
-You can use Milvus to build intelligent systems in a variety of AI application scenarios. Refer to [Milvus Scenarios](https://milvus.io/scenarios) for live demos. You can also refer to [Milvus Bootcamp] for detailed solutions and application scenarios.
+You can use Milvus to build intelligent systems in a variety of AI application scenarios. Refer to [Milvus Scenarios](https://milvus.io/scenarios) for live demos. You can also refer to [Milvus Bootcamp](https://github.com/milvus-io/bootcamp) for detailed solutions and application scenarios.
 
 ## Benchmark
 
