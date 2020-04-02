@@ -299,9 +299,9 @@ BinIVFConfAdapter::CheckTrain(Config& oricfg, const IndexMode mode) {
 
 bool
 ANNOYConfAdapter::CheckTrain(Config& oricfg, const IndexMode mode) {
-    static int64_t MIN_NTREES = 0;
+    static int64_t MIN_NTREES = 1;
     // too large of n_trees takes much time, if there is real requirement, change this threshold.
-    static int64_t MAX_NTREES = 16384;
+    static int64_t MAX_NTREES = 1024;
 
     CheckIntByRange(knowhere::IndexParams::n_trees, MIN_NTREES, MAX_NTREES);
 
