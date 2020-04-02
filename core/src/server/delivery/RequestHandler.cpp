@@ -105,8 +105,8 @@ RequestHandler::GetVectorIDs(const std::shared_ptr<Context>& context, const std:
 }
 
 Status
-RequestHandler::ShowTables(const std::shared_ptr<Context>& context, std::vector<std::string>& tables) {
-    BaseRequestPtr request_ptr = ShowCollectionsRequest::Create(context, tables);
+RequestHandler::ShowCollections(const std::shared_ptr<Context>& context, std::vector<std::string>& collections) {
+    BaseRequestPtr request_ptr = ShowCollectionsRequest::Create(context, collections);
     RequestScheduler::ExecRequest(request_ptr);
 
     return request_ptr->status();
@@ -146,15 +146,15 @@ RequestHandler::SearchByID(const std::shared_ptr<Context>& context, const std::s
 
 Status
 RequestHandler::DescribeCollection(const std::shared_ptr<Context>& context, const std::string& collection_name,
-                              CollectionSchema& table_schema) {
-    BaseRequestPtr request_ptr = DescribeCollectionRequest::Create(context, collection_name, table_schema);
+                              CollectionSchema& collection_schema) {
+    BaseRequestPtr request_ptr = DescribeCollectionRequest::Create(context, collection_name, collection_schema);
     RequestScheduler::ExecRequest(request_ptr);
 
     return request_ptr->status();
 }
 
 Status
-RequestHandler::CountTable(const std::shared_ptr<Context>& context, const std::string& collection_name,
+RequestHandler::CountCollection(const std::shared_ptr<Context>& context, const std::string& collection_name,
                            int64_t& count) {
     BaseRequestPtr request_ptr = CountCollectionRequest::Create(context, collection_name, count);
     RequestScheduler::ExecRequest(request_ptr);

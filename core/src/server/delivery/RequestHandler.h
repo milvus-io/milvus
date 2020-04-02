@@ -53,7 +53,7 @@ class RequestHandler {
                  const std::string& segment_name, std::vector<int64_t>& vector_ids);
 
     Status
-    ShowTables(const std::shared_ptr<Context>& context, std::vector<std::string>& tables);
+    ShowCollections(const std::shared_ptr<Context>& context, std::vector<std::string>& collections);
 
     Status
     ShowCollectionInfo(const std::shared_ptr<Context>& context, const std::string& collection_name, CollectionInfo& collection_info);
@@ -71,10 +71,10 @@ class RequestHandler {
 
     Status
     DescribeCollection(const std::shared_ptr<Context>& context, const std::string& collection_name,
-                  CollectionSchema& table_schema);
+                  CollectionSchema& collection_schema);
 
     Status
-    CountTable(const std::shared_ptr<Context>& context, const std::string& collection_name, int64_t& count);
+    CountCollection(const std::shared_ptr<Context>& context, const std::string& collection_name, int64_t& count);
 
     Status
     Cmd(const std::shared_ptr<Context>& context, const std::string& cmd, std::string& reply);

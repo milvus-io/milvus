@@ -568,7 +568,7 @@ GrpcRequestHandler::PreloadTable(::grpc::ServerContext* context, const ::milvus:
                                  ::milvus::grpc::Status* response) {
     CHECK_NULLPTR_RETURN(request);
 
-    Status status = request_handler_.PreloadTable(context_map_[context], request->table_name());
+    Status status = request_handler_.PreloadCollection(context_map_[context], request->table_name());
     SET_RESPONSE(response, status, context);
 
     return ::grpc::Status::OK;
