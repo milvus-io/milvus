@@ -27,6 +27,7 @@
 #include <fiu-local.h>
 #include <algorithm>
 #include <cmath>
+#include <limits>
 #include <regex>
 #include <string>
 
@@ -265,6 +266,13 @@ ValidationUtil::ValidateIndexParams(const milvus::json& index_params,
             }
             break;
         }
+        case (int32_t)engine::EngineType::ANNOY: {
+            auto status = CheckParameterRange(index_params, knowhere::IndexParams::n_trees, 1, 1024);
+            if (!status.ok()) {
+                return status;
+            }
+            break;
+        }
     }
     return Status::OK();
 }
@@ -302,6 +310,14 @@ ValidationUtil::ValidateSearchParams(const milvus::json& search_params,
             }
             break;
         }
+        case (int32_t)engine::EngineType::ANNOY: {
+            auto status = CheckParameterRange(search_params, knowhere::IndexParams::search_k,
+                                              std::numeric_limits<int64_t>::min(), std::numeric_limits<int64_t>::max());
+            if (!status.ok()) {
+                return status;
+            }
+            break;
+        }
     }
     return Status::OK();
 }
@@ -309,12 +325,12 @@ ValidationUtil::ValidateSearchParams(const milvus::json& search_params,
 Status
 ValidationUtil::ValidateVectorData(const engine::VectorsData& vectors,
                                    const engine::meta::CollectionSchema& table_schema) {
-    if (vectors.float_data_.empty() && vectors.binary_data_.empty()) {
+    uint64_t vector_count = vectors.vector_count_;
+    if ((vectors.float_data_.empty() && vectors.binary_data_.empty()) || vector_count == 0) {
         return Status(SERVER_INVALID_ROWRECORD_ARRAY,
                       "The vector array is empty. Make sure you have entered vector records.");
     }
 
-    uint64_t vector_count = vectors.vector_count_;
     if (engine::utils::IsBinaryMetricType(table_schema.metric_type_)) {
         // check prepared binary data
         if (vectors.binary_data_.size() % vector_count != 0) {

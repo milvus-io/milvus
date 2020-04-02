@@ -13,6 +13,7 @@ Please mark all change in change log and use the issue from GitHub
 
 ## Improvement
 -   \#1627 Move read/write index APIs into codec
+-   \#1784 Add Substructure and Superstructure in http module
 
 ## Task
 
@@ -35,7 +36,8 @@ Please mark all change in change log and use the issue from GitHub
 -   \#1735 Fix search out of memory with ivf_flat 
 -   \#1747 Expected error status if search with partition_tag not existed
 -   \#1756 Fix memory exhausted during searching 
--   \#1781 Fix search hang with SQ8H 
+-   \#1781 Fix search hang with SQ8H
+-   \#1818 Duplicate data generated after restart milvus server
 
 ## Feature
 -   \#261  Integrate ANNOY into Milvus
@@ -58,7 +60,7 @@ Please mark all change in change log and use the issue from GitHub
 -   \#1698 Upgrade mishards to v0.7.0
 -   \#1719 Improve Milvus log
 -   \#1754 Optimize behavior to get file ids from metadata in mishards
--   \#1784 Add Substructure and Superstructure in http module
+-   \#1799 Update docker images to 0.7.1 in mishards
 
 ## Task
 
@@ -120,6 +122,7 @@ Please mark all change in change log and use the issue from GitHub
 -   \#1598 Server down during mixed operations
 -   \#1601 External link bug in HTTP doc
 -   \#1609 Refine Compact function
+-   \#1808 Building index params check for Annoy
 
 ## Feature
 -   \#216 Add CLI to get server info
@@ -280,7 +283,7 @@ Please mark all change in change log and use the issue from GitHub
 ## Improvement
 -   \#204 improve grpc performance in search
 -   \#207 Add more unittest for config set/get
--   \#208 optimize unittest to support run single test more easily
+-   \#208 Optimize unittest to support run single test more easily
 -   \#284 Change C++ SDK to shared library
 -   \#260 C++ SDK README
 
@@ -677,7 +680,7 @@ Please mark all change in change log and use the issue from GitHub
 -   MS-6 Implement SDK interface part 1
 -   MS-16 Implement metrics without prometheus
 -   MS-21 Implement SDK interface part 2
--   MS-26 cmake. Add thirdparty packages
+-   MS-26 CMake. Add thirdparty packages
 -   MS-31 cmake: add prometheus
 -   MS-33 cmake: add -j4 to make third party packages build faster
 -   MS-27 support gpu config and disable license build config in cmake
