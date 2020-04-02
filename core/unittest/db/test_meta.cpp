@@ -737,7 +737,7 @@ TEST_F(MetaTest, LSN_TEST) {
     ASSERT_TRUE(status.ok());
 
     uint64_t temp_lsb = 0;
-    status = impl_->GetTableFlushLSN(collection_id, temp_lsb);
+    status = impl_->GetCollectionFlushLSN(collection_id, temp_lsb);
     ASSERT_EQ(temp_lsb, lsn);
 
     status = impl_->SetGlobalLastLSN(lsn);

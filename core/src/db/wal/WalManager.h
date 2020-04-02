@@ -78,7 +78,7 @@ class WalManager {
      * @param lsn: flushed lsn
      */
     void
-    TableFlushed(const std::string& collection_id, uint64_t lsn);
+    CollectionFlushed(const std::string& collection_id, uint64_t lsn);
 
     /*
      * Insert

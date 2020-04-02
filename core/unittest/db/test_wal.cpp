@@ -606,7 +606,7 @@ TEST(WalTest, MANAGER_TEST) {
         if (record.type == milvus::engine::wal::MXLogType::Flush) {
             ASSERT_EQ(record.collection_id, table_id_1);
             ASSERT_EQ(new_lsn, flush_lsn);
-            manager->TableFlushed(table_id_1, new_lsn);
+            manager->CollectionFlushed(table_id_1, new_lsn);
             break;
 
         } else {
@@ -627,7 +627,7 @@ TEST(WalTest, MANAGER_TEST) {
     ASSERT_EQ(manager->GetNextRecord(record), milvus::WAL_SUCCESS);
     ASSERT_EQ(record.type, milvus::engine::wal::MXLogType::Flush);
     ASSERT_EQ(record.collection_id, table_id_2);
-    manager->TableFlushed(table_id_2, flush_lsn);
+    manager->CollectionFlushed(table_id_2, flush_lsn);
     ASSERT_EQ(manager->Flush(table_id_2), 0);
 
     flush_lsn = manager->Flush();

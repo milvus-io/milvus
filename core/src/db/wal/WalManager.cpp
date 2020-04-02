@@ -217,7 +217,7 @@ WalManager::DropCollection(const std::string& collection_id) {
 }
 
 void
-WalManager::TableFlushed(const std::string& collection_id, uint64_t lsn) {
+WalManager::CollectionFlushed(const std::string& collection_id, uint64_t lsn) {
     std::unique_lock<std::mutex> lck(mutex_);
     auto it = tables_.find(collection_id);
     if (it != tables_.end()) {

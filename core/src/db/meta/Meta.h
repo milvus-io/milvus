@@ -61,7 +61,7 @@ class Meta {
     UpdateTableFlushLSN(const std::string& collection_id, uint64_t flush_lsn) = 0;
 
     virtual Status
-    GetTableFlushLSN(const std::string& collection_id, uint64_t& flush_lsn) = 0;
+    GetCollectionFlushLSN(const std::string& collection_id, uint64_t& flush_lsn) = 0;
 
     virtual Status
     GetTableFilesByFlushLSN(uint64_t flush_lsn, SegmentsSchema& table_files) = 0;

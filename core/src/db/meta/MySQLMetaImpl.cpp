@@ -1010,7 +1010,7 @@ MySQLMetaImpl::UpdateTableFlushLSN(const std::string& collection_id, uint64_t fl
 }
 
 Status
-MySQLMetaImpl::GetTableFlushLSN(const std::string& collection_id, uint64_t& flush_lsn) {
+MySQLMetaImpl::GetCollectionFlushLSN(const std::string& collection_id, uint64_t& flush_lsn) {
     try {
         server::MetricCollector metric;
 
@@ -1025,7 +1025,7 @@ MySQLMetaImpl::GetTableFlushLSN(const std::string& collection_id, uint64_t& flus
             statement << "SELECT flush_lsn FROM " << META_TABLES << " WHERE collection_id = " << mysqlpp::quote
                       << collection_id << ";";
 
-            ENGINE_LOG_DEBUG << "MySQLMetaImpl::GetTableFlushLSN: " << statement.str();
+            ENGINE_LOG_DEBUG << "MySQLMetaImpl::GetCollectionFlushLSN: " << statement.str();
 
             res = statement.store();
         }  // Scoped Connection

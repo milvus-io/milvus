@@ -28,7 +28,7 @@ class IndexFailedChecker {
     CleanFailedIndexFileOfCollection(const std::string& collection_id);
 
     Status
-    GetErrMsgForTable(const std::string& collection_id, std::string& err_msg);
+    GetErrMsgForCollection(const std::string& collection_id, std::string& err_msg);
 
     Status
     MarkFailedIndexFile(const meta::SegmentSchema& file, const std::string& err_msg);

@@ -530,7 +530,7 @@ SqliteMetaImpl::UpdateTableFlushLSN(const std::string& collection_id, uint64_t f
 }
 
 Status
-SqliteMetaImpl::GetTableFlushLSN(const std::string& collection_id, uint64_t& flush_lsn) {
+SqliteMetaImpl::GetCollectionFlushLSN(const std::string& collection_id, uint64_t& flush_lsn) {
     try {
         server::MetricCollector metric;
 

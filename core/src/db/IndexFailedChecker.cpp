@@ -28,7 +28,7 @@ IndexFailedChecker::CleanFailedIndexFileOfCollection(const std::string& collecti
 }
 
 Status
-IndexFailedChecker::GetErrMsgForTable(const std::string& collection_id, std::string& err_msg) {
+IndexFailedChecker::GetErrMsgForCollection(const std::string& collection_id, std::string& err_msg) {
     std::lock_guard<std::mutex> lck(mutex_);
     auto iter = index_failed_files_.find(collection_id);
     if (iter != index_failed_files_.end()) {

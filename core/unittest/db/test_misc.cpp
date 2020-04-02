@@ -190,7 +190,7 @@ TEST(DBMiscTest, CHECKER_TEST) {
         checker.MarkFailedIndexFile(schema, "5001 fail");
 
         std::string err_msg;
-        checker.GetErrMsgForTable("aaa", err_msg);
+        checker.GetErrMsgForCollection("aaa", err_msg);
         ASSERT_EQ(err_msg, "5000 fail");
 
         schema.collection_id_ = "bbb";
@@ -202,11 +202,11 @@ TEST(DBMiscTest, CHECKER_TEST) {
         checker.IgnoreFailedIndexFiles(table_files);
         ASSERT_TRUE(table_files.empty());
 
-        checker.GetErrMsgForTable("bbb", err_msg);
+        checker.GetErrMsgForCollection("bbb", err_msg);
         ASSERT_EQ(err_msg, "5001 fail");
 
         checker.MarkSucceedIndexFile(schema);
-        checker.GetErrMsgForTable("bbb", err_msg);
+        checker.GetErrMsgForCollection("bbb", err_msg);
         ASSERT_EQ(err_msg, "5001 fail");
     }
 

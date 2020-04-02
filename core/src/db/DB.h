@@ -68,7 +68,7 @@ class DB {
     GetCollectionRowCount(const std::string& collection_id, uint64_t& row_count) = 0;
 
     virtual Status
-    PreloadTable(const std::string& collection_id) = 0;
+    PreloadCollection(const std::string& collection_id) = 0;
 
     virtual Status
     UpdateCollectionFlag(const std::string& collection_id, int64_t flag) = 0;
