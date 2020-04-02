@@ -185,7 +185,7 @@ TEST_F(NSGInterfaceTest, delete_test) {
 
         // Other results are the same
         for (int i = 0; i < nq; i++) {
-            for (int j = 1; j < k; j++) {
+            for (int j = 1; j <= k / 2; j++) {
                 ASSERT_EQ(I_before[i * k + j], I_after[i * k + j - 1]);
             }
         }
