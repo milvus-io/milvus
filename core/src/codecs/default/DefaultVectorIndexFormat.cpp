@@ -23,8 +23,6 @@
 #include "knowhere/index/vector_index/VecIndex.h"
 #include "knowhere/index/vector_index/VecIndexFactory.h"
 #include "segment/VectorIndex.h"
-#include "storage/disk/DiskIOReader.h"
-#include "storage/disk/DiskIOWriter.h"
 #include "utils/Exception.h"
 #include "utils/Log.h"
 #include "utils/TimeRecorder.h"
@@ -33,56 +31,54 @@ namespace milvus {
 namespace codec {
 
 knowhere::VecIndexPtr
-DefaultVectorIndexFormat::read_internal(const std::string& path) {
+DefaultVectorIndexFormat::read_internal(const storage::FSHandlerPtr& fs_ptr, const std::string& path) {
     milvus::TimeRecorder recorder("read_index");
     knowhere::BinarySet load_data_list;
 
-    storage::DiskIOReaderPtr reader_ptr = std::make_shared<milvus::storage::DiskIOReader>();
-
     recorder.RecordSection("Start");
-    reader_ptr->open(path);
+    fs_ptr->reader_ptr_->open(path);
 
-    size_t length = reader_ptr->length();
+    size_t length = fs_ptr->reader_ptr_->length();
     if (length <= 0) {
         ENGINE_LOG_ERROR << "Invalid vector index length: " << path;
         return nullptr;
     }
 
     size_t rp = 0;
-    reader_ptr->seekg(0);
+    fs_ptr->reader_ptr_->seekg(0);
 
     int32_t current_type = 0;
-    reader_ptr->read(&current_type, sizeof(current_type));
+    fs_ptr->reader_ptr_->read(&current_type, sizeof(current_type));
     rp += sizeof(current_type);
-    reader_ptr->seekg(rp);
+    fs_ptr->reader_ptr_->seekg(rp);
 
     ENGINE_LOG_DEBUG << "Start to read_index(" << path << ") length: " << length << " bytes";
     while (rp < length) {
         size_t meta_length;
-        reader_ptr->read(&meta_length, sizeof(meta_length));
+        fs_ptr->reader_ptr_->read(&meta_length, sizeof(meta_length));
         rp += sizeof(meta_length);
-        reader_ptr->seekg(rp);
+        fs_ptr->reader_ptr_->seekg(rp);
 
         auto meta = new char[meta_length];
-        reader_ptr->read(meta, meta_length);
+        fs_ptr->reader_ptr_->read(meta, meta_length);
         rp += meta_length;
-        reader_ptr->seekg(rp);
+        fs_ptr->reader_ptr_->seekg(rp);
 
         size_t bin_length;
-        reader_ptr->read(&bin_length, sizeof(bin_length));
+        fs_ptr->reader_ptr_->read(&bin_length, sizeof(bin_length));
         rp += sizeof(bin_length);
-        reader_ptr->seekg(rp);
+        fs_ptr->reader_ptr_->seekg(rp);
 
         auto bin = new uint8_t[bin_length];
-        reader_ptr->read(bin, bin_length);
+        fs_ptr->reader_ptr_->read(bin, bin_length);
         rp += bin_length;
-        reader_ptr->seekg(rp);
+        fs_ptr->reader_ptr_->seekg(rp);
 
         std::shared_ptr<uint8_t[]> binptr(bin);
         load_data_list.Append(std::string(meta, meta_length), binptr, bin_length);
         delete[] meta;
     }
-    reader_ptr->close();
+    fs_ptr->reader_ptr_->close();
 
     double span = recorder.RecordSection("End");
     double rate = length * 1000000.0 / span / 1024 / 1024;
@@ -124,7 +120,7 @@ DefaultVectorIndexFormat::read(const storage::FSHandlerPtr& fs_ptr, segment::Vec
         /* tmp solution, should be replaced when use .idx as index extension name */
         const std::string& location = path.string();
         if (location.substr(location.length() - 3) == "000") {
-            knowhere::VecIndexPtr index = read_internal(location);
+            knowhere::VecIndexPtr index = read_internal(fs_ptr, location);
             vector_index->SetVectorIndex(index);
             vector_index->SetName(path.stem().string());
             return;
@@ -149,28 +145,26 @@ DefaultVectorIndexFormat::write(const storage::FSHandlerPtr& fs_ptr, const std::
     auto binaryset = index->Serialize(knowhere::Config());
     int32_t index_type = knowhere::StrToOldIndexType(index->index_type());
 
-    storage::DiskIOWriterPtr writer_ptr = std::make_shared<milvus::storage::DiskIOWriter>();
-
     recorder.RecordSection("Start");
-    writer_ptr->open(index_file_path);
+    fs_ptr->writer_ptr_->open(index_file_path);
 
-    writer_ptr->write(&index_type, sizeof(index_type));
+    fs_ptr->writer_ptr_->write(&index_type, sizeof(index_type));
 
     for (auto& iter : binaryset.binary_map_) {
         auto meta = iter.first.c_str();
         size_t meta_length = iter.first.length();
-        writer_ptr->write(&meta_length, sizeof(meta_length));
-        writer_ptr->write((void*)meta, meta_length);
+        fs_ptr->writer_ptr_->write(&meta_length, sizeof(meta_length));
+        fs_ptr->writer_ptr_->write((void*)meta, meta_length);
 
         auto binary = iter.second;
         int64_t binary_length = binary->size;
-        writer_ptr->write(&binary_length, sizeof(binary_length));
-        writer_ptr->write((void*)binary->data.get(), binary_length);
+        fs_ptr->writer_ptr_->write(&binary_length, sizeof(binary_length));
+        fs_ptr->writer_ptr_->write((void*)binary->data.get(), binary_length);
     }
-    writer_ptr->close();
+    fs_ptr->writer_ptr_->close();
 
     double span = recorder.RecordSection("End");
-    double rate = writer_ptr->length() * 1000000.0 / span / 1024 / 1024;
+    double rate = fs_ptr->writer_ptr_->length() * 1000000.0 / span / 1024 / 1024;
     ENGINE_LOG_DEBUG << "write_index(" << index_file_path << ") rate " << rate << "MB/s";
 }
 

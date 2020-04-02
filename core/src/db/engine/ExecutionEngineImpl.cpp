@@ -443,9 +443,8 @@ ExecutionEngineImpl::Load(bool to_cache) {
             try {
                 segment::SegmentPtr segment_ptr;
                 segment_reader_ptr->GetSegment(segment_ptr);
-                segment::VectorIndexPtr vector_index = segment_ptr->vector_index_ptr_;
-                auto status = segment_reader_ptr->LoadVectorIndex(vector_index);
-                index_ = vector_index->GetVectorIndex();
+                auto status = segment_reader_ptr->LoadVectorIndex(segment_ptr->vector_index_ptr_);
+                index_ = segment_ptr->vector_index_ptr_->GetVectorIndex();
 
                 if (index_ == nullptr) {
                     std::string msg = "Failed to load index from " + location_;

@@ -47,7 +47,7 @@ class DefaultVectorIndexFormat : public VectorIndexFormat {
 
  private:
     knowhere::VecIndexPtr
-    read_internal(const std::string& path);
+    read_internal(const storage::FSHandlerPtr& fs_ptr, const std::string& path);
 
  private:
     std::mutex mutex_;
