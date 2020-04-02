@@ -967,7 +967,7 @@ public:
       memcpy(_get(_n_nodes + (S)i), _get(_roots[i]), _s);
     _n_nodes += _roots.size();
 
-    if (_verbose) showUpdate("has %d nodes\n", _n_nodes);
+    if (_verbose) showUpdate("has %ld nodes\n", _n_nodes);
     
     if (_on_disk) {
       _nodes = remap_memory(_nodes, _fd, _s * _nodes_size, _s * _n_nodes);
@@ -1105,7 +1105,7 @@ public:
     _loaded = true;
     _built = true;
     _n_items = m;
-    if (_verbose) showUpdate("found %lu roots with degree %d\n", _roots.size(), m);
+    if (_verbose) showUpdate("found %lu roots with degree %ld\n", _roots.size(), m);
     return true;
   }
 
@@ -1144,7 +1144,7 @@ public:
     _loaded = true;
     _built = true;
     _n_items = m;
-    if (_verbose) showUpdate("found %lu roots with degree %d\n", _roots.size(), m);
+    if (_verbose) showUpdate("found %lu roots with degree %ld\n", _roots.size(), m);
     return true;
   }
 
@@ -1215,7 +1215,7 @@ protected:
       }
       
       _nodes_size = new_nodes_size;
-      if (_verbose) showUpdate("Reallocating to %d nodes: old_address=%p, new_address=%p\n", new_nodes_size, old, _nodes);
+      if (_verbose) showUpdate("Reallocating to %ld nodes: old_address=%p, new_address=%p\n", new_nodes_size, old, _nodes);
     }
   }
 
@@ -1266,7 +1266,7 @@ protected:
         bool side = D::side(m, n->v, _f, _random);
         children_indices[side].push_back(j);
       } else {
-        showUpdate("No node for index %d?\n", j);
+        showUpdate("No node for index %ld?\n", j);
       }
     }
 
@@ -1317,7 +1317,7 @@ protected:
     std::priority_queue<pair<T, S> > q;
 
     if (search_k <= 0) {
-      search_k = n * _roots.size();
+      search_k = std::max(n * _roots.size(), (size_t )_n_items * 5 / 100);
     }
 
     for (size_t i = 0; i < _roots.size(); i++) {
