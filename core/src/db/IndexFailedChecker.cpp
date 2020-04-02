@@ -20,7 +20,7 @@ namespace engine {
 constexpr uint64_t INDEX_FAILED_RETRY_TIME = 1;
 
 Status
-IndexFailedChecker::CleanFailedIndexFileOfTable(const std::string& collection_id) {
+IndexFailedChecker::CleanFailedIndexFileOfCollection(const std::string& collection_id) {
     std::lock_guard<std::mutex> lck(mutex_);
     index_failed_files_.erase(collection_id);  // rebuild failed index files for this collection
 

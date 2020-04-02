@@ -79,25 +79,25 @@ class Meta {
     GetTableFiles(const std::string& collection_id, const std::vector<size_t>& ids, SegmentsSchema& table_files) = 0;
 
     virtual Status
-    GetTableFilesBySegmentId(const std::string& segment_id, SegmentsSchema& table_files) = 0;
+    GetCollectionFilesBySegmentId(const std::string& segment_id, SegmentsSchema& table_files) = 0;
 
     virtual Status
-    UpdateTableFile(SegmentSchema& file_schema) = 0;
+    UpdateCollectionFile(SegmentSchema& file_schema) = 0;
 
     virtual Status
-    UpdateTableFiles(SegmentsSchema& files) = 0;
+    UpdateCollectionFiles(SegmentsSchema& files) = 0;
 
     virtual Status
-    UpdateTableFilesRowCount(SegmentsSchema& files) = 0;
+    UpdateCollectionFilesRowCount(SegmentsSchema& files) = 0;
 
     virtual Status
-    UpdateTableIndex(const std::string& collection_id, const TableIndex& index) = 0;
+    UpdateCollectionIndex(const std::string& collection_id, const CollectionIndex& index) = 0;
 
     virtual Status
-    UpdateTableFilesToIndex(const std::string& collection_id) = 0;
+    UpdateCollectionFilesToIndex(const std::string& collection_id) = 0;
 
     virtual Status
-    DescribeCollectionIndex(const std::string& collection_id, TableIndex& index) = 0;
+    DescribeCollectionIndex(const std::string& collection_id, CollectionIndex& index) = 0;
 
     virtual Status
     DropCollectionIndex(const std::string& collection_id) = 0;

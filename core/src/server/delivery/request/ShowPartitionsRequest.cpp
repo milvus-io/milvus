@@ -61,7 +61,7 @@ ShowPartitionsRequest::OnExecute() {
             return status;
         }
     } else {
-        if (!table_schema.owner_table_.empty()) {
+        if (!table_schema.owner_collection_.empty()) {
             return Status(SERVER_INVALID_TABLE_NAME, TableNotExistMsg(collection_name_));
         }
     }
@@ -78,7 +78,7 @@ ShowPartitionsRequest::OnExecute() {
     partition_list_.clear();
     partition_list_.emplace_back(collection_name_, milvus::engine::DEFAULT_PARTITON_TAG);
     for (auto& schema : schema_array) {
-        partition_list_.emplace_back(schema.owner_table_, schema.partition_tag_);
+        partition_list_.emplace_back(schema.owner_collection_, schema.partition_tag_);
     }
 
     return Status::OK();

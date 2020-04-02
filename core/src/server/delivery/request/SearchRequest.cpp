@@ -100,7 +100,7 @@ SearchRequest::OnExecute() {
                 return status;
             }
         } else {
-            if (!collection_schema_.owner_table_.empty()) {
+            if (!collection_schema_.owner_collection_.empty()) {
                 return Status(SERVER_INVALID_TABLE_NAME, TableNotExistMsg(collection_name_));
             }
         }

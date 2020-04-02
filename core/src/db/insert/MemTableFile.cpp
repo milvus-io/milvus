@@ -167,7 +167,7 @@ MemTableFile::Serialize(uint64_t wal_lsn) {
          * to write to or update the associated collection file in meta.
          *
         table_file_schema_.file_type_ = meta::SegmentSchema::TO_DELETE;
-        meta_->UpdateTableFile(table_file_schema_);
+        meta_->UpdateCollectionFile(table_file_schema_);
         ENGINE_LOG_DEBUG << "Failed to serialize segment, mark file: " << table_file_schema_.file_id_
                          << " to to_delete";
         */
@@ -196,7 +196,7 @@ MemTableFile::Serialize(uint64_t wal_lsn) {
     // GetTableFilesByFlushLSN() in meta.
     table_file_schema_.flush_lsn_ = wal_lsn;
 
-    status = meta_->UpdateTableFile(table_file_schema_);
+    status = meta_->UpdateCollectionFile(table_file_schema_);
 
     ENGINE_LOG_DEBUG << "New " << ((table_file_schema_.file_type_ == meta::SegmentSchema::RAW) ? "raw" : "to_index")
                      << " file " << table_file_schema_.file_id_ << " of size " << size << " bytes, lsn = " << wal_lsn;

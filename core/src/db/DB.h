@@ -132,10 +132,10 @@ class DB {
     Size(uint64_t& result) = 0;
 
     virtual Status
-    CreateIndex(const std::string& collection_id, const TableIndex& index) = 0;
+    CreateIndex(const std::string& collection_id, const CollectionIndex& index) = 0;
 
     virtual Status
-    DescribeIndex(const std::string& collection_id, TableIndex& index) = 0;
+    DescribeIndex(const std::string& collection_id, CollectionIndex& index) = 0;
 
     virtual Status
     DropIndex(const std::string& collection_id) = 0;

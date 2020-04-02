@@ -255,7 +255,7 @@ SearchCombineRequest::OnExecute() {
                 return status;
             }
         } else {
-            if (!table_schema.owner_table_.empty()) {
+            if (!table_schema.owner_collection_.empty()) {
                 status = Status(SERVER_INVALID_TABLE_NAME, TableNotExistMsg(collection_name_));
                 FreeRequests(status);
                 return status;

@@ -53,7 +53,7 @@ HasCollectionRequest::OnExecute() {
             engine::meta::CollectionSchema table_schema;
             table_schema.collection_id_ = collection_name_;
             status = DBWrapper::DB()->DescribeCollection(table_schema);
-            if (!table_schema.owner_table_.empty()) {
+            if (!table_schema.owner_collection_.empty()) {
                 has_collection_ = false;
             }
         }

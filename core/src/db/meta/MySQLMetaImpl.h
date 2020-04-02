@@ -57,10 +57,10 @@ class MySQLMetaImpl : public Meta {
                   SegmentsSchema& table_files) override;
 
     Status
-    GetTableFilesBySegmentId(const std::string& segment_id, SegmentsSchema& table_files) override;
+    GetCollectionFilesBySegmentId(const std::string& segment_id, SegmentsSchema& table_files) override;
 
     Status
-    UpdateTableIndex(const std::string& collection_id, const TableIndex& index) override;
+    UpdateCollectionIndex(const std::string& collection_id, const CollectionIndex& index) override;
 
     Status
     UpdateCollectionFlag(const std::string& collection_id, int64_t flag) override;
@@ -75,19 +75,19 @@ class MySQLMetaImpl : public Meta {
     GetTableFilesByFlushLSN(uint64_t flush_lsn, SegmentsSchema& table_files) override;
 
     Status
-    UpdateTableFile(SegmentSchema& file_schema) override;
+    UpdateCollectionFile(SegmentSchema& file_schema) override;
 
     Status
-    UpdateTableFilesToIndex(const std::string& collection_id) override;
+    UpdateCollectionFilesToIndex(const std::string& collection_id) override;
 
     Status
-    UpdateTableFiles(SegmentsSchema& files) override;
+    UpdateCollectionFiles(SegmentsSchema& files) override;
 
     Status
-    UpdateTableFilesRowCount(SegmentsSchema& files) override;
+    UpdateCollectionFilesRowCount(SegmentsSchema& files) override;
 
     Status
-    DescribeCollectionIndex(const std::string& collection_id, TableIndex& index) override;
+    DescribeCollectionIndex(const std::string& collection_id, CollectionIndex& index) override;
 
     Status
     DropCollectionIndex(const std::string& collection_id) override;

@@ -43,7 +43,7 @@ Status
 GetParentPath(const std::string& path, std::string& parent_path);
 
 bool
-IsSameIndex(const TableIndex& index1, const TableIndex& index2);
+IsSameIndex(const CollectionIndex& index1, const CollectionIndex& index2);
 
 bool
 IsRawIndexType(int32_t type);

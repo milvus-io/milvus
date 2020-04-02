@@ -314,7 +314,7 @@ TEST_F(DeleteTest, delete_before_create_index) {
     stat = db_->Flush();
     ASSERT_TRUE(stat.ok());
 
-    milvus::engine::TableIndex index;
+    milvus::engine::CollectionIndex index;
     index.engine_type_ = (int)milvus::engine::EngineType::FAISS_IVFSQ8;
     index.extra_params_ = {{"nlist", 100}};
     stat = db_->CreateIndex(table_info.collection_id_, index);
@@ -378,7 +378,7 @@ TEST_F(DeleteTest, delete_with_index) {
         search_vectors.insert(std::make_pair(xb.id_array_[index], search));
     }
 
-    milvus::engine::TableIndex index;
+    milvus::engine::CollectionIndex index;
     index.engine_type_ = (int)milvus::engine::EngineType::FAISS_IVFSQ8;
     index.extra_params_ = {{"nlist", 100}};
     stat = db_->CreateIndex(table_info.collection_id_, index);
@@ -458,7 +458,7 @@ TEST_F(DeleteTest, delete_multiple_times_with_index) {
     stat = db_->Flush();
     ASSERT_TRUE(stat.ok());
 
-    milvus::engine::TableIndex index;
+    milvus::engine::CollectionIndex index;
     index.engine_type_ = (int)milvus::engine::EngineType::FAISS_IVFFLAT;
     index.extra_params_ = {{"nlist", 1}};
     stat = db_->CreateIndex(table_info.collection_id_, index);
@@ -561,7 +561,7 @@ TEST_F(DeleteTest, delete_add_create_index) {
 
     // stat = db_->Flush();
     // ASSERT_TRUE(stat.ok());
-    milvus::engine::TableIndex index;
+    milvus::engine::CollectionIndex index;
     index.engine_type_ = (int)milvus::engine::EngineType::FAISS_IVFSQ8;
     index.extra_params_ = {{"nlist", 100}};
     stat = db_->CreateIndex(table_info.collection_id_, index);
@@ -633,7 +633,7 @@ TEST_F(DeleteTest, delete_add_auto_flush) {
 
     // stat = db_->Flush();
     // ASSERT_TRUE(stat.ok());
-    // milvus::engine::TableIndex index;
+    // milvus::engine::CollectionIndex index;
     // index.engine_type_ = (int)milvus::engine::EngineType::FAISS_IVFSQ8;
     // stat = db_->CreateIndex(table_info.collection_id_, index);
     // ASSERT_TRUE(stat.ok());
@@ -778,7 +778,7 @@ TEST_F(CompactTest, compact_with_index) {
         search_vectors.insert(std::make_pair(xb.id_array_[index], search));
     }
 
-    milvus::engine::TableIndex index;
+    milvus::engine::CollectionIndex index;
     index.engine_type_ = (int)milvus::engine::EngineType::FAISS_IVFSQ8;
     stat = db_->CreateIndex(table_info.collection_id_, index);
     ASSERT_TRUE(stat.ok());
@@ -807,7 +807,7 @@ TEST_F(CompactTest, compact_with_index) {
     ASSERT_TRUE(stat.ok());
     ASSERT_EQ(row_count, nb - ids_to_delete.size());
 
-    milvus::engine::TableIndex table_index;
+    milvus::engine::CollectionIndex table_index;
     stat = db_->DescribeIndex(table_info.collection_id_, table_index);
     ASSERT_TRUE(stat.ok());
     ASSERT_FLOAT_EQ(table_index.engine_type_, index.engine_type_);

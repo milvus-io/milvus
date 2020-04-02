@@ -151,7 +151,7 @@ TEST_F(SearchByIdTest, with_index) {
     stat = db_->Flush();
     ASSERT_TRUE(stat.ok());
 
-    milvus::engine::TableIndex index;
+    milvus::engine::CollectionIndex index;
     index.engine_type_ = (int)milvus::engine::EngineType::FAISS_IVFSQ8;
     index.extra_params_ = {{"nlist", 10}};
     stat = db_->CreateIndex(table_info.collection_id_, index);
@@ -327,7 +327,7 @@ TEST_F(GetVectorByIdTest, with_index) {
     stat = db_->Flush();
     ASSERT_TRUE(stat.ok());
 
-    milvus::engine::TableIndex index;
+    milvus::engine::CollectionIndex index;
     index.extra_params_ = {{"nlist", 10}};
     index.engine_type_ = (int)milvus::engine::EngineType::FAISS_IVFSQ8;
     stat = db_->CreateIndex(table_info.collection_id_, index);

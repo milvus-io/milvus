@@ -59,14 +59,14 @@ CreateCollectionRequest::OnExecute() {
             return status;
         }
 
-        status = ValidationUtil::ValidateTableIndexFileSize(index_file_size_);
+        status = ValidationUtil::ValidateCollectionIndexFileSize(index_file_size_);
         fiu_do_on("CreateCollectionRequest.OnExecute.invalid_index_file_size",
                   status = Status(milvus::SERVER_UNEXPECTED_ERROR, ""));
         if (!status.ok()) {
             return status;
         }
 
-        status = ValidationUtil::ValidateTableIndexMetricType(metric_type_);
+        status = ValidationUtil::ValidateCollectionIndexMetricType(metric_type_);
         if (!status.ok()) {
             return status;
         }

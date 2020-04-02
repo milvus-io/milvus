@@ -64,12 +64,12 @@ CreateIndexRequest::OnExecute() {
                 return status;
             }
         } else {
-            if (!table_schema.owner_table_.empty()) {
+            if (!table_schema.owner_collection_.empty()) {
                 return Status(SERVER_INVALID_TABLE_NAME, TableNotExistMsg(collection_name_));
             }
         }
 
-        status = ValidationUtil::ValidateTableIndexType(index_type_);
+        status = ValidationUtil::ValidateCollectionIndexType(index_type_);
         if (!status.ok()) {
             return status;
         }
@@ -112,7 +112,7 @@ CreateIndexRequest::OnExecute() {
         rc.RecordSection("check validation");
 
         // step 3: create index
-        engine::TableIndex index;
+        engine::CollectionIndex index;
         index.engine_type_ = adapter_index_type;
         index.extra_params_ = json_params_;
         status = DBWrapper::DB()->CreateIndex(collection_name_, index);
