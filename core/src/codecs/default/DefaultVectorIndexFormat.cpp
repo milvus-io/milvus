@@ -139,7 +139,6 @@ void
 DefaultVectorIndexFormat::write(const storage::FSHandlerPtr& fs_ptr, const segment::VectorIndexPtr& vector_index) {
     const std::lock_guard<std::mutex> lock(mutex_);
 
-
     std::string dir_path = fs_ptr->operation_ptr_->GetDirectory();
 
     const std::string index_file_path = dir_path + "/" + GenerateFileName();
