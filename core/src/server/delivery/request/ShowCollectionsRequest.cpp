@@ -24,7 +24,7 @@ namespace server {
 
 ShowCollectionsRequest::ShowCollectionsRequest(const std::shared_ptr<milvus::server::Context>& context,
                                      std::vector<std::string>& table_name_list)
-    : BaseRequest(context, BaseRequest::kShowTables), table_name_list_(table_name_list) {
+    : BaseRequest(context, BaseRequest::kShowCollections), table_name_list_(table_name_list) {
 }
 
 BaseRequestPtr

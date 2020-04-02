@@ -216,7 +216,7 @@ WebRequestHandler::GetTableMetaInfo(const std::string& collection_name, nlohmann
     }
 
     int64_t count;
-    status = request_handler_.CountTable(context_ptr_, collection_name, count);
+    status = request_handler_.CountCollection(context_ptr_, collection_name, count);
     if (!status.ok()) {
         return status;
     }
@@ -955,7 +955,7 @@ WebRequestHandler::ShowTables(const OQueryParams& query_params, OString& result)
     }
 
     std::vector<std::string> collections;
-    status = request_handler_.ShowTables(context_ptr_, collections);
+    status = request_handler_.ShowCollections(context_ptr_, collections);
     if (!status.ok()) {
         ASSIGN_RETURN_STATUS_DTO(status)
     }

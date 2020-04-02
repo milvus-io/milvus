@@ -498,7 +498,7 @@ GrpcRequestHandler::CountTable(::grpc::ServerContext* context, const ::milvus::g
     CHECK_NULLPTR_RETURN(request);
 
     int64_t row_count = 0;
-    Status status = request_handler_.CountTable(context_map_[context], request->table_name(), row_count);
+    Status status = request_handler_.CountCollection(context_map_[context], request->table_name(), row_count);
     response->set_table_row_count(row_count);
     SET_RESPONSE(response->mutable_status(), status, context);
     return ::grpc::Status::OK;
@@ -510,7 +510,7 @@ GrpcRequestHandler::ShowTables(::grpc::ServerContext* context, const ::milvus::g
     CHECK_NULLPTR_RETURN(request);
 
     std::vector<std::string> tables;
-    Status status = request_handler_.ShowTables(context_map_[context], tables);
+    Status status = request_handler_.ShowCollections(context_map_[context], tables);
     for (auto& collection : tables) {
         response->add_table_names(collection);
     }

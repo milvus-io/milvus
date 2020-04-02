@@ -39,11 +39,11 @@ RequestGroup(BaseRequest::RequestType type) {
         {BaseRequest::kGetVectorIDs, INFO_REQUEST_GROUP},
 
         // collection operations
-        {BaseRequest::kShowTables, INFO_REQUEST_GROUP},
+        {BaseRequest::kShowCollections, INFO_REQUEST_GROUP},
         {BaseRequest::kCreateCollection, DDL_DML_REQUEST_GROUP},
         {BaseRequest::kHasCollection, INFO_REQUEST_GROUP},
         {BaseRequest::kDescribeCollection, INFO_REQUEST_GROUP},
-        {BaseRequest::kCountTable, INFO_REQUEST_GROUP},
+        {BaseRequest::kCountCollection, INFO_REQUEST_GROUP},
         {BaseRequest::kShowCollectionInfo, INFO_REQUEST_GROUP},
         {BaseRequest::kDropCollection, DDL_DML_REQUEST_GROUP},
         {BaseRequest::kPreloadCollection, DQL_REQUEST_GROUP},
