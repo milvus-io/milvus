@@ -55,13 +55,13 @@ class DBImpl : public DB, public server::CacheConfigHandler, public server::Engi
     DropAll() override;
 
     Status
-    CreateTable(meta::CollectionSchema& table_schema) override;
+    CreateTable(meta::CollectionSchema& collection_schema) override;
 
     Status
     DropTable(const std::string& collection_id) override;
 
     Status
-    DescribeTable(meta::CollectionSchema& table_schema) override;
+    DescribeTable(meta::CollectionSchema& collection_schema) override;
 
     Status
     HasCollection(const std::string& collection_id, bool& has_or_not) override;
@@ -70,10 +70,10 @@ class DBImpl : public DB, public server::CacheConfigHandler, public server::Engi
     HasNativeTable(const std::string& collection_id, bool& has_or_not_) override;
 
     Status
-    AllTables(std::vector<meta::CollectionSchema>& table_schema_array) override;
+    AllTables(std::vector<meta::CollectionSchema>& collection_schema_array) override;
 
     Status
-    GetTableInfo(const std::string& collection_id, TableInfo& table_info) override;
+    GetTableInfo(const std::string& collection_id, TableInfo& collection_info) override;
 
     Status
     PreloadTable(const std::string& collection_id) override;
@@ -123,7 +123,7 @@ class DBImpl : public DB, public server::CacheConfigHandler, public server::Engi
     GetVectorIDs(const std::string& collection_id, const std::string& segment_id, IDNumbers& vector_ids) override;
 
     //    Status
-    //    Merge(const std::set<std::string>& table_ids) override;
+    //    Merge(const std::set<std::string>& collection_ids) override;
 
     Status
     CreateIndex(const std::string& collection_id, const TableIndex& index) override;
@@ -191,7 +191,7 @@ class DBImpl : public DB, public server::CacheConfigHandler, public server::Engi
     BackgroundMergeFiles(const std::string& collection_id);
 
     void
-    BackgroundMerge(std::set<std::string> table_ids);
+    BackgroundMerge(std::set<std::string> collection_ids);
 
     void
     StartBuildIndexTask(bool force = false);
@@ -205,7 +205,7 @@ class DBImpl : public DB, public server::CacheConfigHandler, public server::Engi
 
     /*
     Status
-    SyncMemData(std::set<std::string>& sync_table_ids);
+    SyncMemData(std::set<std::string>& sync_collection_ids);
     */
 
     Status
@@ -303,7 +303,7 @@ class DBImpl : public DB, public server::CacheConfigHandler, public server::Engi
     ThreadPool merge_thread_pool_;
     std::mutex merge_result_mutex_;
     std::list<std::future<void>> merge_thread_results_;
-    std::set<std::string> merge_table_ids_;
+    std::set<std::string> merge_collection_ids_;
 
     ThreadPool index_thread_pool_;
     std::mutex index_result_mutex_;
