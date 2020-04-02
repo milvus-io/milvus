@@ -79,7 +79,7 @@ class NsgIndex {
 
     void
     Search(const float* query, const unsigned& nq, const unsigned& dim, const unsigned& k, float* dist, int64_t* ids,
-           SearchParams& params);
+           SearchParams& params, faiss::ConcurrentBitsetPtr bitset = nullptr);
 
     // Not support yet.
     // virtual void Add() = 0;

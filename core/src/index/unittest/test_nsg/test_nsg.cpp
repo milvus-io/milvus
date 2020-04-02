@@ -39,12 +39,11 @@ class NSGInterfaceTest : public DataGen, public ::testing::Test {
  protected:
     void
     SetUp() override {
-// Init_with_default();
 #ifdef MILVUS_GPU_VERSION
         int64_t MB = 1024 * 1024;
         milvus::knowhere::FaissGpuResourceMgr::GetInstance().InitDevice(DEVICEID, MB * 200, MB * 600, 1);
 #endif
-        Generate(256, 1000000 / 100, 1);
+        Generate(256, 1000000 / 100, 10);
         index_ = std::make_shared<milvus::knowhere::NSG>();
 
         train_conf = milvus::knowhere::Config{{milvus::knowhere::meta::DIM, 256},
@@ -117,7 +116,7 @@ TEST_F(NSGInterfaceTest, basic_test) {
     // });
 }
 
-TEST_F(NSGInterfaceTest, comparetest) {
+TEST_F(NSGInterfaceTest, compare_test) {
     milvus::knowhere::impl::DistanceL2 distanceL2;
     milvus::knowhere::impl::DistanceIP distanceIP;
 
@@ -132,7 +131,58 @@ TEST_F(NSGInterfaceTest, comparetest) {
     tc.RecordSection("IP");
 }
 
-//#include <src/index/knowhere/knowhere/index/vector_index/nsg/OriNSG.h>
+TEST_F(NSGInterfaceTest, delete_test) {
+    assert(!xb.empty());
+
+    train_conf[milvus::knowhere::meta::DEVICEID] = DEVICEID;
+    index_->Train(base_dataset, train_conf);
+
+    auto result = index_->Query(query_dataset, search_conf);
+    AssertAnns(result, nq, k);
+
+    ASSERT_EQ(index_->Count(), nb);
+    ASSERT_EQ(index_->Dim(), dim);
+
+    faiss::ConcurrentBitsetPtr bitset = std::make_shared<faiss::ConcurrentBitset>(nb);
+    for (int i = 0; i < nq; i++) {
+        bitset->set(i);
+    }
+
+    auto I_before = result->Get<int64_t*>(milvus::knowhere::meta::IDS);
+    /*
+    printf("I=\n");
+    for (int i = 0; i < nq; i++) {
+        for (int j = 0; j < k; j++) printf("%5ld ", I_before[i * k + j]);
+        printf("\n");
+    }*/
+
+    // search xq with delete
+    index_->SetBlacklist(bitset);
+    auto result_after = index_->Query(query_dataset, search_conf);
+    AssertAnns(result_after, nq, k, CheckMode::CHECK_NOT_EQUAL);
+    auto I_after = result_after->Get<int64_t*>(milvus::knowhere::meta::IDS);
+
+    /*
+    printf("I=\n");
+    for (int i = 0; i < nq; i++) {
+        for (int j = 0; j < k; j++) printf("%5ld ", I_after[i * k + j]);
+        printf("\n");
+    }*/
+
+    // First vector deleted
+    for (int i = 0; i < nq; i++) {
+        ASSERT_NE(I_before[i * k], I_after[i * k]);
+    }
+
+    /*
+    // Other results are the same
+    for (int i = 0; i < nq; i++) {
+        for (int j = 1; j <= k / 2; j++) {
+            ASSERT_EQ(I_before[i * k + j], I_after[i * k + j - 1]);
+        }
+    }*/
+}
+
 // TEST(test, ori_nsg) {
 //    //    float* p_data = nullptr;
 //    size_t rows, dim;
