@@ -732,10 +732,10 @@ TEST_F(DBTest, INDEX_TEST) {
     fiu_disable("SqliteMetaImpl.DescribeCollectionIndex.throw_exception");
 
     index.engine_type_ = (int)milvus::engine::EngineType::FAISS_PQ;
-    FIU_ENABLE_FIU("DBImpl.UpdateCollectionIndexRecursively.fail_update_table_index");
+    FIU_ENABLE_FIU("DBImpl.UpdateCollectionIndexRecursively.fail_update_collection_index");
     stat = db_->CreateIndex(collection_info.collection_id_, index);
     ASSERT_FALSE(stat.ok());
-    fiu_disable("DBImpl.UpdateCollectionIndexRecursively.fail_update_table_index");
+    fiu_disable("DBImpl.UpdateCollectionIndexRecursively.fail_update_collection_index");
 
 #ifdef MILVUS_GPU_VERSION
     index.engine_type_ = (int)milvus::engine::EngineType::FAISS_IVFSQ8H;
@@ -824,10 +824,10 @@ TEST_F(DBTest, PARTITION_TEST) {
         ASSERT_TRUE(stat.ok());
 
         fiu_init(0);
-        FIU_ENABLE_FIU("DBImpl.WaitCollectionIndexRecursively.fail_build_table_Index_for_partition");
+        FIU_ENABLE_FIU("DBImpl.WaitCollectionIndexRecursively.fail_build_collection_Index_for_partition");
         stat = db_->CreateIndex(collection_info.collection_id_, index);
         ASSERT_FALSE(stat.ok());
-        fiu_disable("DBImpl.WaitCollectionIndexRecursively.fail_build_table_Index_for_partition");
+        fiu_disable("DBImpl.WaitCollectionIndexRecursively.fail_build_collection_Index_for_partition");
 
         FIU_ENABLE_FIU("DBImpl.WaitCollectionIndexRecursively.not_empty_err_msg");
         stat = db_->CreateIndex(collection_info.collection_id_, index);
@@ -844,10 +844,10 @@ TEST_F(DBTest, PARTITION_TEST) {
         ASSERT_FALSE(stat.ok());
         fiu_disable("SqliteMetaImpl.Count.throw_exception");
 
-        FIU_ENABLE_FIU("DBImpl.GetCollectionRowCountRecursively.fail_get_table_rowcount_for_partition");
+        FIU_ENABLE_FIU("DBImpl.GetCollectionRowCountRecursively.fail_get_collection_rowcount_for_partition");
         stat = db_->GetCollectionRowCount(TABLE_NAME, row_count);
         ASSERT_FALSE(stat.ok());
-        fiu_disable("DBImpl.GetCollectionRowCountRecursively.fail_get_table_rowcount_for_partition");
+        fiu_disable("DBImpl.GetCollectionRowCountRecursively.fail_get_collection_rowcount_for_partition");
     }
 
     {  // search
@@ -890,15 +890,15 @@ TEST_F(DBTest, PARTITION_TEST) {
     stat = db_->DropPartitionByTag(collection_name, "1");
     ASSERT_TRUE(stat.ok());
 
-    FIU_ENABLE_FIU("DBImpl.DropCollectionIndexRecursively.fail_drop_table_Index_for_partition");
+    FIU_ENABLE_FIU("DBImpl.DropCollectionIndexRecursively.fail_drop_collection_Index_for_partition");
     stat = db_->DropIndex(collection_info.collection_id_);
     ASSERT_FALSE(stat.ok());
-    fiu_disable("DBImpl.DropCollectionIndexRecursively.fail_drop_table_Index_for_partition");
+    fiu_disable("DBImpl.DropCollectionIndexRecursively.fail_drop_collection_Index_for_partition");
 
-    FIU_ENABLE_FIU("DBImpl.DropCollectionIndexRecursively.fail_drop_table_Index_for_partition");
+    FIU_ENABLE_FIU("DBImpl.DropCollectionIndexRecursively.fail_drop_collection_Index_for_partition");
     stat = db_->DropIndex(collection_info.collection_id_);
     ASSERT_FALSE(stat.ok());
-    fiu_disable("DBImpl.DropCollectionIndexRecursively.fail_drop_table_Index_for_partition");
+    fiu_disable("DBImpl.DropCollectionIndexRecursively.fail_drop_collection_Index_for_partition");
 
     stat = db_->DropIndex(collection_name);
     ASSERT_TRUE(stat.ok());
