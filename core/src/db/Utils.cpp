@@ -20,7 +20,7 @@
 #include <vector>
 
 #include "config/Config.h"
-#include "storage/s3/S3ClientWrapper.h"
+//#include "storage/s3/S3ClientWrapper.h"
 #include "utils/CommonUtil.h"
 #include "utils/Log.h"
 
@@ -117,19 +117,19 @@ DeleteTablePath(const DBMetaOptions& options, const std::string& collection_id, 
         }
     }
 
-    bool s3_enable = false;
-    server::Config& config = server::Config::GetInstance();
-    config.GetStorageConfigS3Enable(s3_enable);
+    // bool s3_enable = false;
+    // server::Config& config = server::Config::GetInstance();
+    // config.GetStorageConfigS3Enable(s3_enable);
 
-    if (s3_enable) {
-        std::string table_path = options.path_ + TABLES_FOLDER + collection_id;
+    // if (s3_enable) {
+    //     std::string table_path = options.path_ + TABLES_FOLDER + collection_id;
 
-        auto& storage_inst = milvus::storage::S3ClientWrapper::GetInstance();
-        Status stat = storage_inst.DeleteObjects(table_path);
-        if (!stat.ok()) {
-            return stat;
-        }
-    }
+    //     auto& storage_inst = milvus::storage::S3ClientWrapper::GetInstance();
+    //     Status stat = storage_inst.DeleteObjects(table_path);
+    //     if (!stat.ok()) {
+    //         return stat;
+    //     }
+    // }
 
     return Status::OK();
 }
