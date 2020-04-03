@@ -236,7 +236,7 @@ MemTable::ApplyDeletes() {
 
         auto& segment_id = table_file.segment_id_;
         meta::SegmentsSchema segment_files;
-        status = meta_->GetTableFilesBySegmentId(segment_id, segment_files);
+        status = meta_->GetCollectionFilesBySegmentId(segment_id, segment_files);
         if (!status.ok()) {
             break;
         }
@@ -368,7 +368,7 @@ MemTable::ApplyDeletes() {
 
     auto time7 = std::chrono::high_resolution_clock::now();
 
-    status = meta_->UpdateTableFilesRowCount(table_files_to_update);
+    status = meta_->UpdateCollectionFilesRowCount(table_files_to_update);
 
     if (!status.ok()) {
         std::string err_msg = "Failed to apply deletes: " + status.ToString();

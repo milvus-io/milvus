@@ -19,19 +19,22 @@
 namespace milvus {
 namespace server {
 
-class DropTableRequest : public BaseRequest {
+class CountCollectionRequest : public BaseRequest {
  public:
     static BaseRequestPtr
-    Create(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name);
+    Create(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name,
+           int64_t& row_count);
 
  protected:
-    DropTableRequest(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name);
+    CountCollectionRequest(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name,
+                           int64_t& row_count);
 
     Status
     OnExecute() override;
 
  private:
-    std::string collection_name_;
+    const std::string collection_name_;
+    int64_t& row_count_;
 };
 
 }  // namespace server

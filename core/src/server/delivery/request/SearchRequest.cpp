@@ -90,7 +90,7 @@ SearchRequest::OnExecute() {
         // step 4: check table existence
         // only process root table, ignore partition table
         collection_schema_.collection_id_ = collection_name_;
-        auto status = DBWrapper::DB()->DescribeTable(collection_schema_);
+        auto status = DBWrapper::DB()->DescribeCollection(collection_schema_);
 
         fiu_do_on("SearchRequest.OnExecute.describe_table_fail", status = Status(milvus::SERVER_UNEXPECTED_ERROR, ""));
         if (!status.ok()) {
@@ -100,7 +100,7 @@ SearchRequest::OnExecute() {
                 return status;
             }
         } else {
-            if (!collection_schema_.owner_table_.empty()) {
+            if (!collection_schema_.owner_collection_.empty()) {
                 return Status(SERVER_INVALID_TABLE_NAME, TableNotExistMsg(collection_name_));
             }
         }

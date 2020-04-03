@@ -410,30 +410,30 @@ TEST(ValidationUtilTest, VALIDATE_DIMENSION_TEST) {
 }
 
 TEST(ValidationUtilTest, VALIDATE_INDEX_TEST) {
-    ASSERT_EQ(milvus::server::ValidationUtil::ValidateTableIndexType((int)milvus::engine::EngineType::INVALID).code(),
-              milvus::SERVER_INVALID_INDEX_TYPE);
+    ASSERT_EQ(milvus::server::ValidationUtil::ValidateCollectionIndexType(
+              (int)milvus::engine::EngineType::INVALID).code(), milvus::SERVER_INVALID_INDEX_TYPE);
     for (int i = 1; i <= (int)milvus::engine::EngineType::MAX_VALUE; i++) {
 #ifndef MILVUS_GPU_VERSION
         if (i == (int)milvus::engine::EngineType::FAISS_IVFSQ8H) {
-            ASSERT_NE(milvus::server::ValidationUtil::ValidateTableIndexType(i).code(), milvus::SERVER_SUCCESS);
+            ASSERT_NE(milvus::server::ValidationUtil::ValidateCollectionIndexType(i).code(), milvus::SERVER_SUCCESS);
             continue;
         }
 #endif
-        ASSERT_EQ(milvus::server::ValidationUtil::ValidateTableIndexType(i).code(), milvus::SERVER_SUCCESS);
+        ASSERT_EQ(milvus::server::ValidationUtil::ValidateCollectionIndexType(i).code(), milvus::SERVER_SUCCESS);
     }
 
     ASSERT_EQ(
-        milvus::server::ValidationUtil::ValidateTableIndexType((int)milvus::engine::EngineType::MAX_VALUE + 1).code(),
-        milvus::SERVER_INVALID_INDEX_TYPE);
+        milvus::server::ValidationUtil::ValidateCollectionIndexType(
+               (int)milvus::engine::EngineType::MAX_VALUE + 1).code(), milvus::SERVER_INVALID_INDEX_TYPE);
 
-    ASSERT_EQ(milvus::server::ValidationUtil::ValidateTableIndexFileSize(0).code(),
+    ASSERT_EQ(milvus::server::ValidationUtil::ValidateCollectionIndexFileSize(0).code(),
               milvus::SERVER_INVALID_INDEX_FILE_SIZE);
-    ASSERT_EQ(milvus::server::ValidationUtil::ValidateTableIndexFileSize(100).code(), milvus::SERVER_SUCCESS);
+    ASSERT_EQ(milvus::server::ValidationUtil::ValidateCollectionIndexFileSize(100).code(), milvus::SERVER_SUCCESS);
 
-    ASSERT_EQ(milvus::server::ValidationUtil::ValidateTableIndexMetricType(0).code(),
+    ASSERT_EQ(milvus::server::ValidationUtil::ValidateCollectionIndexMetricType(0).code(),
               milvus::SERVER_INVALID_INDEX_METRIC_TYPE);
-    ASSERT_EQ(milvus::server::ValidationUtil::ValidateTableIndexMetricType(1).code(), milvus::SERVER_SUCCESS);
-    ASSERT_EQ(milvus::server::ValidationUtil::ValidateTableIndexMetricType(2).code(), milvus::SERVER_SUCCESS);
+    ASSERT_EQ(milvus::server::ValidationUtil::ValidateCollectionIndexMetricType(1).code(), milvus::SERVER_SUCCESS);
+    ASSERT_EQ(milvus::server::ValidationUtil::ValidateCollectionIndexMetricType(2).code(), milvus::SERVER_SUCCESS);
 }
 
 TEST(ValidationUtilTest, VALIDATE_INDEX_PARAMS_TEST) {

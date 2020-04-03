@@ -15,7 +15,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#include "server/delivery/request/ShowTableInfoRequest.h"
+#include "server/delivery/request/ShowCollectionInfoRequest.h"
 #include "server/DBWrapper.h"
 #include "utils/Log.h"
 #include "utils/TimeRecorder.h"
@@ -43,20 +43,23 @@ ConstructPartitionStat(const engine::PartitionStat& partition_stat, PartitionSta
     req_partition_stat.total_row_num_ = row_count;
 }
 
-ShowTableInfoRequest::ShowTableInfoRequest(const std::shared_ptr<milvus::server::Context>& context,
-                                           const std::string& collection_name, TableInfo& table_info)
-    : BaseRequest(context, BaseRequest::kShowTableInfo), collection_name_(collection_name), table_info_(table_info) {
+ShowCollectionInfoRequest::ShowCollectionInfoRequest(const std::shared_ptr<milvus::server::Context>& context,
+                                                     const std::string& collection_name,
+                                                     CollectionInfo& collection_info)
+    : BaseRequest(context, BaseRequest::kShowCollectionInfo),
+      collection_name_(collection_name),
+      collection_info_(collection_info) {
 }
 
 BaseRequestPtr
-ShowTableInfoRequest::Create(const std::shared_ptr<milvus::server::Context>& context,
-                             const std::string& collection_name, TableInfo& table_info) {
-    return std::shared_ptr<BaseRequest>(new ShowTableInfoRequest(context, collection_name, table_info));
+ShowCollectionInfoRequest::Create(const std::shared_ptr<milvus::server::Context>& context,
+                                  const std::string& collection_name, CollectionInfo& collection_info) {
+    return std::shared_ptr<BaseRequest>(new ShowCollectionInfoRequest(context, collection_name, collection_info));
 }
 
 Status
-ShowTableInfoRequest::OnExecute() {
-    std::string hdr = "ShowTableInfoRequest(collection=" + collection_name_ + ")";
+ShowCollectionInfoRequest::OnExecute() {
+    std::string hdr = "ShowCollectionInfoRequest(collection=" + collection_name_ + ")";
     TimeRecorderAuto rc(hdr);
 
     // step 1: check collection name
@@ -69,7 +72,7 @@ ShowTableInfoRequest::OnExecute() {
     // only process root collection, ignore partition collection
     engine::meta::CollectionSchema table_schema;
     table_schema.collection_id_ = collection_name_;
-    status = DBWrapper::DB()->DescribeTable(table_schema);
+    status = DBWrapper::DB()->DescribeCollection(table_schema);
     if (!status.ok()) {
         if (status.code() == DB_NOT_FOUND) {
             return Status(SERVER_TABLE_NOT_EXIST, TableNotExistMsg(collection_name_));
@@ -77,29 +80,29 @@ ShowTableInfoRequest::OnExecute() {
             return status;
         }
     } else {
-        if (!table_schema.owner_table_.empty()) {
+        if (!table_schema.owner_collection_.empty()) {
             return Status(SERVER_INVALID_TABLE_NAME, TableNotExistMsg(collection_name_));
         }
     }
 
     // step 3: get partitions
-    engine::TableInfo table_info;
-    status = DBWrapper::DB()->GetTableInfo(collection_name_, table_info);
+    engine::CollectionInfo collection_info;
+    status = DBWrapper::DB()->GetCollectionInfo(collection_name_, collection_info);
     if (!status.ok()) {
         return status;
     }
 
     // step 4: construct partitions info
     int64_t total_row_count = 0;
-    table_info_.partitions_stat_.reserve(table_info.partitions_stat_.size());
-    for (auto& partition : table_info.partitions_stat_) {
+    collection_info_.partitions_stat_.reserve(collection_info.partitions_stat_.size());
+    for (auto& partition : collection_info.partitions_stat_) {
         PartitionStat partition_stat;
         ConstructPartitionStat(partition, partition_stat);
         total_row_count += partition_stat.total_row_num_;
-        table_info_.partitions_stat_.emplace_back(partition_stat);
+        collection_info_.partitions_stat_.emplace_back(partition_stat);
     }
 
-    table_info_.total_row_num_ = total_row_count;
+    collection_info_.total_row_num_ = total_row_count;
 
     return Status::OK();
 }

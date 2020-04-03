@@ -9,7 +9,7 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
-#include "server/delivery/request/PreloadTableRequest.h"
+#include "server/delivery/request/DescribeCollectionRequest.h"
 #include "server/DBWrapper.h"
 #include "utils/Log.h"
 #include "utils/TimeRecorder.h"
@@ -21,33 +21,37 @@
 namespace milvus {
 namespace server {
 
-PreloadTableRequest::PreloadTableRequest(const std::shared_ptr<milvus::server::Context>& context,
-                                         const std::string& collection_name)
-    : BaseRequest(context, BaseRequest::kPreloadTable), collection_name_(collection_name) {
+DescribeCollectionRequest::DescribeCollectionRequest(const std::shared_ptr<milvus::server::Context>& context,
+                                                     const std::string& collection_name, CollectionSchema& schema)
+    : BaseRequest(context, BaseRequest::kDescribeCollection), collection_name_(collection_name), schema_(schema) {
 }
 
 BaseRequestPtr
-PreloadTableRequest::Create(const std::shared_ptr<milvus::server::Context>& context,
-                            const std::string& collection_name) {
-    return std::shared_ptr<BaseRequest>(new PreloadTableRequest(context, collection_name));
+DescribeCollectionRequest::Create(const std::shared_ptr<milvus::server::Context>& context,
+                                  const std::string& collection_name, CollectionSchema& schema) {
+    return std::shared_ptr<BaseRequest>(new DescribeCollectionRequest(context, collection_name, schema));
 }
 
 Status
-PreloadTableRequest::OnExecute() {
-    try {
-        std::string hdr = "PreloadTableRequest(collection=" + collection_name_ + ")";
-        TimeRecorderAuto rc(hdr);
+DescribeCollectionRequest::OnExecute() {
+    std::string hdr = "DescribeCollectionRequest(collection=" + collection_name_ + ")";
+    TimeRecorderAuto rc(hdr);
 
+    try {
         // step 1: check arguments
         auto status = ValidationUtil::ValidateCollectionName(collection_name_);
         if (!status.ok()) {
             return status;
         }
 
+        // step 2: get collection info
         // only process root collection, ignore partition collection
         engine::meta::CollectionSchema table_schema;
         table_schema.collection_id_ = collection_name_;
-        status = DBWrapper::DB()->DescribeTable(table_schema);
+        status = DBWrapper::DB()->DescribeCollection(table_schema);
+        fiu_do_on("DescribeCollectionRequest.OnExecute.describe_table_fail",
+                  status = Status(milvus::SERVER_UNEXPECTED_ERROR, ""));
+        fiu_do_on("DescribeCollectionRequest.OnExecute.throw_std_exception", throw std::exception());
         if (!status.ok()) {
             if (status.code() == DB_NOT_FOUND) {
                 return Status(SERVER_TABLE_NOT_EXIST, TableNotExistMsg(collection_name_));
@@ -55,19 +59,15 @@ PreloadTableRequest::OnExecute() {
                 return status;
             }
         } else {
-            if (!table_schema.owner_table_.empty()) {
+            if (!table_schema.owner_collection_.empty()) {
                 return Status(SERVER_INVALID_TABLE_NAME, TableNotExistMsg(collection_name_));
             }
         }
 
-        // step 2: check collection existence
-        status = DBWrapper::DB()->PreloadTable(collection_name_);
-        fiu_do_on("PreloadTableRequest.OnExecute.preload_table_fail",
-                  status = Status(milvus::SERVER_UNEXPECTED_ERROR, ""));
-        fiu_do_on("PreloadTableRequest.OnExecute.throw_std_exception", throw std::exception());
-        if (!status.ok()) {
-            return status;
-        }
+        schema_.collection_name_ = table_schema.collection_id_;
+        schema_.dimension_ = static_cast<int64_t>(table_schema.dimension_);
+        schema_.index_file_size_ = table_schema.index_file_size_;
+        schema_.metric_type_ = table_schema.metric_type_;
     } catch (std::exception& ex) {
         return Status(SERVER_UNEXPECTED_ERROR, ex.what());
     }

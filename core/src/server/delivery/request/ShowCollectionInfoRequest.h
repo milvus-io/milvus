@@ -26,22 +26,22 @@
 namespace milvus {
 namespace server {
 
-class ShowTableInfoRequest : public BaseRequest {
+class ShowCollectionInfoRequest : public BaseRequest {
  public:
     static BaseRequestPtr
     Create(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name,
-           TableInfo& table_info);
+           CollectionInfo& collection_info);
 
  protected:
-    ShowTableInfoRequest(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name,
-                         TableInfo& table_info);
+    ShowCollectionInfoRequest(const std::shared_ptr<milvus::server::Context>& context,
+                              const std::string& collection_name, CollectionInfo& collection_info);
 
     Status
     OnExecute() override;
 
  private:
     const std::string collection_name_;
-    TableInfo& table_info_;
+    CollectionInfo& collection_info_;
 };
 
 }  // namespace server
