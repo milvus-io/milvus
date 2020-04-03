@@ -34,6 +34,9 @@ class TestDeleteBase:
         if str(connect._cmd("mode")[1]) == "GPU":
             if request.param["index_type"] not in [IndexType.IVF_SQ8, IndexType.IVFLAT, IndexType.FLAT, IndexType.IVF_PQ, IndexType.IVF_SQ8H]:
                 pytest.skip("Only support index_type: idmap/ivf")
+        elif str(connect._cmd("mode")[1]) == "CPU":
+            if request.param["index_type"] in [IndexType.IVF_SQ8H]:
+                pytest.skip("CPU not support index_type: ivf_sq8h")
         return request.param
 
     def test_delete_vector_search(self, connect, collection, get_simple_index):
@@ -297,6 +300,9 @@ class TestDeleteIndexedVectors:
         if str(connect._cmd("mode")[1]) == "GPU":
             if request.param["index_type"] not in [IndexType.IVF_SQ8, IndexType.IVFLAT, IndexType.FLAT, IndexType.IVF_PQ, IndexType.IVF_SQ8H]:
                 pytest.skip("Only support index_type: idmap/ivf")
+        elif str(connect._cmd("mode")[1]) == "CPU":
+            if request.param["index_type"] in [IndexType.IVF_SQ8H]:
+                pytest.skip("CPU not support index_type: ivf_sq8h")
         return request.param
 
     def test_delete_vectors_after_index_created_search(self, connect, collection, get_simple_index):
