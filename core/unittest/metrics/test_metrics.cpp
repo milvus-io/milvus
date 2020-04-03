@@ -71,11 +71,11 @@ TEST_F(MetricTest, METRIC_TEST) {
     milvus::engine::meta::CollectionSchema group_info;
     group_info.dimension_ = group_dim;
     group_info.collection_id_ = group_name;
-    auto stat = db_->CreateTable(group_info);
+    auto stat = db_->CreateCollection(group_info);
 
     milvus::engine::meta::CollectionSchema group_info_get;
     group_info_get.collection_id_ = group_name;
-    stat = db_->DescribeTable(group_info_get);
+    stat = db_->DescribeCollection(group_info_get);
 
     int nb = 50;
     milvus::engine::VectorsData xb;

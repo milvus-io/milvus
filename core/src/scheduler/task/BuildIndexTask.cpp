@@ -130,7 +130,7 @@ XBuildIndexTask::Execute() {
         table_file.file_type_ = engine::meta::SegmentSchema::NEW_INDEX;
 
         engine::meta::MetaPtr meta_ptr = build_index_job->meta();
-        Status status = meta_ptr->CreateTableFile(table_file);
+        Status status = meta_ptr->CreateCollectionFile(table_file);
         fiu_do_on("XBuildIndexTask.Execute.create_table_success", status = Status::OK());
         if (!status.ok()) {
             ENGINE_LOG_ERROR << "Failed to create collection file: " << status.ToString();
@@ -153,7 +153,7 @@ XBuildIndexTask::Execute() {
             ENGINE_LOG_ERROR << msg;
 
             table_file.file_type_ = engine::meta::SegmentSchema::TO_DELETE;
-            status = meta_ptr->UpdateTableFile(table_file);
+            status = meta_ptr->UpdateCollectionFile(table_file);
             ENGINE_LOG_DEBUG << "Build index fail, mark file: " << table_file.file_id_ << " to to_delete";
 
             build_index_job->BuildIndexDone(to_index_id_);
@@ -163,11 +163,11 @@ XBuildIndexTask::Execute() {
         }
 
         // step 4: if collection has been deleted, dont save index file
-        bool has_table = false;
-        meta_ptr->HasTable(file_->collection_id_, has_table);
-        fiu_do_on("XBuildIndexTask.Execute.has_table", has_table = true);
+        bool has_collection = false;
+        meta_ptr->HasCollection(file_->collection_id_, has_collection);
+        fiu_do_on("XBuildIndexTask.Execute.has_collection", has_collection = true);
 
-        if (!has_table) {
+        if (!has_collection) {
             meta_ptr->DeleteTableFiles(file_->collection_id_);
 
             build_index_job->BuildIndexDone(to_index_id_);
@@ -194,7 +194,7 @@ XBuildIndexTask::Execute() {
             // if failed to serialize index file to disk
             // typical error: out of disk space, out of memory or permition denied
             table_file.file_type_ = engine::meta::SegmentSchema::TO_DELETE;
-            status = meta_ptr->UpdateTableFile(table_file);
+            status = meta_ptr->UpdateCollectionFile(table_file);
             ENGINE_LOG_DEBUG << "Failed to update file to index, mark file: " << table_file.file_id_ << " to to_delete";
 
             ENGINE_LOG_ERROR << "Failed to persist index file: " << table_file.location_
@@ -217,7 +217,7 @@ XBuildIndexTask::Execute() {
         engine::meta::SegmentsSchema update_files = {table_file, origin_file};
 
         if (status.ok()) {  // makesure index file is sucessfully serialized to disk
-            status = meta_ptr->UpdateTableFiles(update_files);
+            status = meta_ptr->UpdateCollectionFiles(update_files);
         }
 
         fiu_do_on("XBuildIndexTask.Execute.update_table_file_fail", status = Status(SERVER_UNEXPECTED_ERROR, ""));
@@ -231,11 +231,11 @@ XBuildIndexTask::Execute() {
         } else {
             // failed to update meta, mark the new file as to_delete, don't delete old file
             origin_file.file_type_ = engine::meta::SegmentSchema::TO_INDEX;
-            status = meta_ptr->UpdateTableFile(origin_file);
+            status = meta_ptr->UpdateCollectionFile(origin_file);
             ENGINE_LOG_DEBUG << "Failed to update file to index, mark file: " << origin_file.file_id_ << " to to_index";
 
             table_file.file_type_ = engine::meta::SegmentSchema::TO_DELETE;
-            status = meta_ptr->UpdateTableFile(table_file);
+            status = meta_ptr->UpdateCollectionFile(table_file);
             ENGINE_LOG_DEBUG << "Failed to up  date file to index, mark file: " << table_file.file_id_
                              << " to to_delete";
         }

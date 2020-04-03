@@ -9,7 +9,7 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
-#include "server/delivery/request/ShowTablesRequest.h"
+#include "server/delivery/request/ShowCollectionsRequest.h"
 #include "server/DBWrapper.h"
 #include "utils/Log.h"
 #include "utils/TimeRecorder.h"
@@ -22,24 +22,25 @@
 namespace milvus {
 namespace server {
 
-ShowTablesRequest::ShowTablesRequest(const std::shared_ptr<milvus::server::Context>& context,
-                                     std::vector<std::string>& table_name_list)
-    : BaseRequest(context, BaseRequest::kShowTables), table_name_list_(table_name_list) {
+ShowCollectionsRequest::ShowCollectionsRequest(const std::shared_ptr<milvus::server::Context>& context,
+                                               std::vector<std::string>& table_name_list)
+    : BaseRequest(context, BaseRequest::kShowCollections), table_name_list_(table_name_list) {
 }
 
 BaseRequestPtr
-ShowTablesRequest::Create(const std::shared_ptr<milvus::server::Context>& context,
-                          std::vector<std::string>& table_name_list) {
-    return std::shared_ptr<BaseRequest>(new ShowTablesRequest(context, table_name_list));
+ShowCollectionsRequest::Create(const std::shared_ptr<milvus::server::Context>& context,
+                               std::vector<std::string>& table_name_list) {
+    return std::shared_ptr<BaseRequest>(new ShowCollectionsRequest(context, table_name_list));
 }
 
 Status
-ShowTablesRequest::OnExecute() {
-    TimeRecorderAuto rc("ShowTablesRequest");
+ShowCollectionsRequest::OnExecute() {
+    TimeRecorderAuto rc("ShowCollectionsRequest");
 
     std::vector<engine::meta::CollectionSchema> schema_array;
-    auto status = DBWrapper::DB()->AllTables(schema_array);
-    fiu_do_on("ShowTablesRequest.OnExecute.show_tables_fail", status = Status(milvus::SERVER_UNEXPECTED_ERROR, ""));
+    auto status = DBWrapper::DB()->AllCollections(schema_array);
+    fiu_do_on("ShowCollectionsRequest.OnExecute.show_tables_fail",
+              status = Status(milvus::SERVER_UNEXPECTED_ERROR, ""));
     if (!status.ok()) {
         return status;
     }

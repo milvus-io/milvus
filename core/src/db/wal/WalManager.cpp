@@ -62,7 +62,7 @@ WalManager::Init(const meta::MetaPtr& meta) {
         meta->GetGlobalLastLSN(recovery_start);
 
         std::vector<meta::CollectionSchema> table_schema_array;
-        auto status = meta->AllTables(table_schema_array);
+        auto status = meta->AllCollections(table_schema_array);
         if (!status.ok()) {
             return WAL_META_ERROR;
         }
@@ -201,7 +201,7 @@ WalManager::GetNextRecord(MXLogRecord& record) {
 }
 
 uint64_t
-WalManager::CreateTable(const std::string& collection_id) {
+WalManager::CreateCollection(const std::string& collection_id) {
     WAL_LOG_INFO << "create collection " << collection_id << " " << last_applied_lsn_;
     std::lock_guard<std::mutex> lck(mutex_);
     uint64_t applied_lsn = last_applied_lsn_;
@@ -210,14 +210,14 @@ WalManager::CreateTable(const std::string& collection_id) {
 }
 
 void
-WalManager::DropTable(const std::string& collection_id) {
+WalManager::DropCollection(const std::string& collection_id) {
     WAL_LOG_INFO << "drop collection " << collection_id;
     std::lock_guard<std::mutex> lck(mutex_);
     tables_.erase(collection_id);
 }
 
 void
-WalManager::TableFlushed(const std::string& collection_id, uint64_t lsn) {
+WalManager::CollectionFlushed(const std::string& collection_id, uint64_t lsn) {
     std::unique_lock<std::mutex> lck(mutex_);
     auto it = tables_.find(collection_id);
     if (it != tables_.end()) {

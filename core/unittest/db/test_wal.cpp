@@ -53,13 +53,13 @@ class TestWalMeta : public SqliteMetaImpl {
     }
 
     Status
-    CreateTable(CollectionSchema& table_schema) override {
+    CreateCollection(CollectionSchema& table_schema) override {
         tables_.push_back(table_schema);
         return Status::OK();
     }
 
     Status
-    AllTables(std::vector<CollectionSchema>& table_schema_array) override {
+    AllCollections(std::vector<CollectionSchema>& table_schema_array) override {
         table_schema_array = tables_;
         return Status::OK();
     }
@@ -87,7 +87,7 @@ class TestWalMetaError : public SqliteMetaImpl {
     }
 
     Status
-    AllTables(std::vector<CollectionSchema>& table_schema_array) override {
+    AllCollections(std::vector<CollectionSchema>& table_schema_array) override {
         return Status(DB_ERROR, "error");
     }
 };
@@ -422,17 +422,17 @@ TEST(WalTest, MANAGER_INIT_TEST) {
     milvus::engine::meta::CollectionSchema table_schema_1;
     table_schema_1.collection_id_ = "table1";
     table_schema_1.flush_lsn_ = (uint64_t)1 << 32 | 60;
-    meta->CreateTable(table_schema_1);
+    meta->CreateCollection(table_schema_1);
 
     milvus::engine::meta::CollectionSchema table_schema_2;
     table_schema_2.collection_id_ = "table2";
     table_schema_2.flush_lsn_ = (uint64_t)1 << 32 | 20;
-    meta->CreateTable(table_schema_2);
+    meta->CreateCollection(table_schema_2);
 
     milvus::engine::meta::CollectionSchema table_schema_3;
     table_schema_3.collection_id_ = "table3";
     table_schema_3.flush_lsn_ = (uint64_t)2 << 32 | 40;
-    meta->CreateTable(table_schema_3);
+    meta->CreateCollection(table_schema_3);
 
     milvus::engine::wal::MXLogConfiguration wal_config;
     wal_config.mxlog_path = WAL_GTEST_PATH;
@@ -468,7 +468,7 @@ TEST(WalTest, MANAGER_APPEND_FAILED) {
     milvus::engine::meta::CollectionSchema schema;
     schema.collection_id_ = "table1";
     schema.flush_lsn_ = 0;
-    meta->CreateTable(schema);
+    meta->CreateCollection(schema);
 
     milvus::engine::wal::MXLogConfiguration wal_config;
     wal_config.mxlog_path = WAL_GTEST_PATH;
@@ -511,11 +511,11 @@ TEST(WalTest, MANAGER_RECOVERY_TEST) {
     milvus::engine::meta::CollectionSchema schema;
     schema.collection_id_ = "collection";
     schema.flush_lsn_ = 0;
-    meta->CreateTable(schema);
+    meta->CreateCollection(schema);
 
     std::vector<int64_t> ids(1024, 0);
     std::vector<float> data_float(1024 * 512, 0);
-    manager->CreateTable(schema.collection_id_);
+    manager->CreateCollection(schema.collection_id_);
     ASSERT_TRUE(manager->Insert(schema.collection_id_, "", ids, data_float));
 
     // recovery
@@ -578,12 +578,12 @@ TEST(WalTest, MANAGER_TEST) {
 
     // table1 create and insert
     std::string table_id_1 = "table1";
-    manager->CreateTable(table_id_1);
+    manager->CreateCollection(table_id_1);
     ASSERT_TRUE(manager->Insert(table_id_1, "", ids, data_float));
 
     // table2 create and insert
     std::string table_id_2 = "table2";
-    manager->CreateTable(table_id_2);
+    manager->CreateCollection(table_id_2);
     ASSERT_TRUE(manager->Insert(table_id_2, "", ids, data_byte));
 
     // table1 delete
@@ -591,7 +591,7 @@ TEST(WalTest, MANAGER_TEST) {
 
     // table3 create and insert
     std::string table_id_3 = "table3";
-    manager->CreateTable(table_id_3);
+    manager->CreateCollection(table_id_3);
     ASSERT_TRUE(manager->Insert(table_id_3, "", ids, data_float));
 
     // flush table1
@@ -606,7 +606,7 @@ TEST(WalTest, MANAGER_TEST) {
         if (record.type == milvus::engine::wal::MXLogType::Flush) {
             ASSERT_EQ(record.collection_id, table_id_1);
             ASSERT_EQ(new_lsn, flush_lsn);
-            manager->TableFlushed(table_id_1, new_lsn);
+            manager->CollectionFlushed(table_id_1, new_lsn);
             break;
 
         } else {
@@ -627,12 +627,12 @@ TEST(WalTest, MANAGER_TEST) {
     ASSERT_EQ(manager->GetNextRecord(record), milvus::WAL_SUCCESS);
     ASSERT_EQ(record.type, milvus::engine::wal::MXLogType::Flush);
     ASSERT_EQ(record.collection_id, table_id_2);
-    manager->TableFlushed(table_id_2, flush_lsn);
+    manager->CollectionFlushed(table_id_2, flush_lsn);
     ASSERT_EQ(manager->Flush(table_id_2), 0);
 
     flush_lsn = manager->Flush();
     ASSERT_NE(flush_lsn, 0);
-    manager->DropTable(table_id_3);
+    manager->DropCollection(table_id_3);
 
     ASSERT_EQ(manager->GetNextRecord(record), milvus::WAL_SUCCESS);
     ASSERT_EQ(record.type, milvus::engine::wal::MXLogType::Flush);
@@ -665,8 +665,8 @@ TEST(WalTest, MANAGER_SAME_NAME_TABLE) {
     std::vector<uint8_t> data_byte(1024 * 512, 0);
 
     // create 2 tables
-    manager->CreateTable(table_id_1);
-    manager->CreateTable(table_id_2);
+    manager->CreateCollection(table_id_1);
+    manager->CreateCollection(table_id_2);
 
     // command
     ASSERT_TRUE(manager->Insert(table_id_1, "", ids, data_byte));
@@ -675,8 +675,8 @@ TEST(WalTest, MANAGER_SAME_NAME_TABLE) {
     ASSERT_TRUE(manager->DeleteById(table_id_2, ids));
 
     // re-create collection
-    manager->DropTable(table_id_1);
-    manager->CreateTable(table_id_1);
+    manager->DropCollection(table_id_1);
+    manager->CreateCollection(table_id_1);
 
     milvus::engine::wal::MXLogRecord record;
     while (1) {

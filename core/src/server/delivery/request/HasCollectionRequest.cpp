@@ -9,7 +9,7 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
-#include "server/delivery/request/HasTableRequest.h"
+#include "server/delivery/request/HasCollectionRequest.h"
 #include "server/DBWrapper.h"
 #include "utils/Log.h"
 #include "utils/TimeRecorder.h"
@@ -21,21 +21,23 @@
 namespace milvus {
 namespace server {
 
-HasTableRequest::HasTableRequest(const std::shared_ptr<milvus::server::Context>& context,
-                                 const std::string& collection_name, bool& has_table)
-    : BaseRequest(context, BaseRequest::kHasTable), collection_name_(collection_name), has_table_(has_table) {
+HasCollectionRequest::HasCollectionRequest(const std::shared_ptr<milvus::server::Context>& context,
+                                           const std::string& collection_name, bool& has_collection)
+    : BaseRequest(context, BaseRequest::kHasCollection),
+      collection_name_(collection_name),
+      has_collection_(has_collection) {
 }
 
 BaseRequestPtr
-HasTableRequest::Create(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name,
-                        bool& has_table) {
-    return std::shared_ptr<BaseRequest>(new HasTableRequest(context, collection_name, has_table));
+HasCollectionRequest::Create(const std::shared_ptr<milvus::server::Context>& context,
+                             const std::string& collection_name, bool& has_collection) {
+    return std::shared_ptr<BaseRequest>(new HasCollectionRequest(context, collection_name, has_collection));
 }
 
 Status
-HasTableRequest::OnExecute() {
+HasCollectionRequest::OnExecute() {
     try {
-        std::string hdr = "HasTableRequest(collection=" + collection_name_ + ")";
+        std::string hdr = "HasCollectionRequest(collection=" + collection_name_ + ")";
         TimeRecorderAuto rc(hdr);
 
         // step 1: check arguments
@@ -45,16 +47,16 @@ HasTableRequest::OnExecute() {
         }
 
         // step 2: check table existence
-        status = DBWrapper::DB()->HasNativeTable(collection_name_, has_table_);
-        fiu_do_on("HasTableRequest.OnExecute.throw_std_exception", throw std::exception());
+        status = DBWrapper::DB()->HasNativeCollection(collection_name_, has_collection_);
+        fiu_do_on("HasCollectionRequest.OnExecute.throw_std_exception", throw std::exception());
 
         // only process root collection, ignore partition collection
-        if (has_table_) {
+        if (has_collection_) {
             engine::meta::CollectionSchema table_schema;
             table_schema.collection_id_ = collection_name_;
-            status = DBWrapper::DB()->DescribeTable(table_schema);
-            if (!table_schema.owner_table_.empty()) {
-                has_table_ = false;
+            status = DBWrapper::DB()->DescribeCollection(table_schema);
+            if (!table_schema.owner_collection_.empty()) {
+                has_collection_ = false;
             }
         }
     } catch (std::exception& ex) {
