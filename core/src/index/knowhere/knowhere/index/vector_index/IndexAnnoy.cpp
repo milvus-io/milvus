@@ -57,7 +57,7 @@ IndexAnnoy::Serialize(const Config& config) {
 void
 IndexAnnoy::Load(const BinarySet& index_binary) {
     auto metric_type = index_binary.GetByName("annoy_metric_type");
-    metric_type_.resize((size_t)metric_type->size + 1);
+    metric_type_.resize((size_t)metric_type->size);
     memcpy(metric_type_.data(), metric_type->data.get(), (size_t)metric_type->size);
 
     auto dim_data = index_binary.GetByName("annoy_dim");
@@ -74,7 +74,7 @@ IndexAnnoy::Load(const BinarySet& index_binary) {
 
     auto index_data = index_binary.GetByName("annoy_index_data");
     char* p = nullptr;
-    if (!index_->load_index(index_data->data.get(), index_data->size, &p)) {
+    if (!index_->load_index(reinterpret_cast<void*>(index_data->data.get()), index_data->size, &p)) {
         std::string error_msg(p);
         free(p);
         KNOWHERE_THROW_MSG(error_msg);

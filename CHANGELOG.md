@@ -125,6 +125,7 @@ Please mark all change in change log and use the issue from GitHub
 -   \#1601 External link bug in HTTP doc
 -   \#1609 Refine Compact function
 -   \#1808 Building index params check for Annoy
+-   \#1852 Search index type<Annoy> failed with reason `failed to load index file`
 
 ## Feature
 -   \#216 Add CLI to get server info
