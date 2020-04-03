@@ -817,7 +817,7 @@ class AnnoyIndexInterface {
   virtual bool save(const char* filename, bool prefault=false, char** error=NULL) = 0;
   virtual void unload() = 0;
   virtual bool load(const char* filename, bool prefault=false, char** error=NULL) = 0;
-  virtual bool load_index(const unsigned char* index_data, const int64_t& index_size, char** error = NULL) = 0;
+  virtual bool load_index(void* index_data, const int64_t& index_size, char** error = NULL) = 0;
   virtual T get_distance(S i, S j) const = 0;
   virtual void get_nns_by_item(S item, size_t n, int search_k, vector<S>* result, vector<T>* distances,
                                faiss::ConcurrentBitsetPtr bitset = nullptr) const = 0;
@@ -1109,7 +1109,7 @@ public:
     return true;
   }
 
-  bool load_index(const unsigned char* index_data, const int64_t& index_size, char** error) {
+  bool load_index(void* index_data, const int64_t& index_size, char** error) {
     if (index_size == -1) {
       set_error_from_errno(error, "Unable to get size");
       return false;
@@ -1123,7 +1123,8 @@ public:
     }
 
     _n_nodes = (S)(index_size / _s);
-    _nodes = (Node*)malloc(_s * _n_nodes);
+//    _nodes = (Node*)malloc(_s * _n_nodes);
+    _nodes = (Node*)malloc((size_t)index_size);
     memcpy(_nodes, index_data, (size_t)index_size);
 
     // Find the roots by scanning the end of the file and taking the nodes with most descendants
@@ -1177,7 +1178,7 @@ public:
   }
 
   int64_t get_index_length() const {
-     return (int64_t)_s * _nodes_size;
+     return (int64_t)_s * _n_nodes;
    }
 
   void* get_index() const {
