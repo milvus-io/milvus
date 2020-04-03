@@ -376,15 +376,15 @@ MySQLMetaImpl::Initialize() {
 }
 
 Status
-MySQLMetaImpl::CreateTable(CollectionSchema& table_schema) {
+MySQLMetaImpl::CreateCollection(CollectionSchema& table_schema) {
     try {
         server::MetricCollector metric;
         {
             mysqlpp::ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab_);
 
             bool is_null_connection = (connectionPtr == nullptr);
-            fiu_do_on("MySQLMetaImpl.CreateTable.null_connection", is_null_connection = true);
-            fiu_do_on("MySQLMetaImpl.CreateTable.throw_exception", throw std::exception(););
+            fiu_do_on("MySQLMetaImpl.CreateCollection.null_connection", is_null_connection = true);
+            fiu_do_on("MySQLMetaImpl.CreateCollection.throw_exception", throw std::exception(););
             if (is_null_connection) {
                 return Status(DB_ERROR, "Failed to connect to meta server(mysql)");
             }
@@ -397,13 +397,14 @@ MySQLMetaImpl::CreateTable(CollectionSchema& table_schema) {
                 createTableQuery << "SELECT state FROM " << META_TABLES << " WHERE table_id = " << mysqlpp::quote
                                  << table_schema.collection_id_ << ";";
 
-                ENGINE_LOG_DEBUG << "MySQLMetaImpl::CreateTable: " << createTableQuery.str();
+                ENGINE_LOG_DEBUG << "MySQLMetaImpl::CreateCollection: " << createTableQuery.str();
 
                 mysqlpp::StoreQueryResult res = createTableQuery.store();
 
                 if (res.num_rows() == 1) {
                     int state = res[0]["state"];
-                    fiu_do_on("MySQLMetaImpl.CreateTableTable.schema_TO_DELETE", state = CollectionSchema::TO_DELETE);
+                    fiu_do_on("MySQLMetaImpl.CreateCollectionTable.schema_TO_DELETE",
+                              state = CollectionSchema::TO_DELETE);
                     if (CollectionSchema::TO_DELETE == state) {
                         return Status(DB_ERROR,
                                       "Collection already exists and it is in delete state, please wait a second");
@@ -426,7 +427,7 @@ MySQLMetaImpl::CreateTable(CollectionSchema& table_schema) {
             std::string engine_type = std::to_string(table_schema.engine_type_);
             std::string& index_params = table_schema.index_params_;
             std::string metric_type = std::to_string(table_schema.metric_type_);
-            std::string& owner_table = table_schema.owner_table_;
+            std::string& owner_table = table_schema.owner_collection_;
             std::string& partition_tag = table_schema.partition_tag_;
             std::string& version = table_schema.version_;
             std::string flush_lsn = std::to_string(table_schema.flush_lsn_);
@@ -438,7 +439,7 @@ MySQLMetaImpl::CreateTable(CollectionSchema& table_schema) {
                              << mysqlpp::quote << partition_tag << ", " << mysqlpp::quote << version << ", "
                              << flush_lsn << ");";
 
-            ENGINE_LOG_DEBUG << "MySQLMetaImpl::CreateTable: " << createTableQuery.str();
+            ENGINE_LOG_DEBUG << "MySQLMetaImpl::CreateCollection: " << createTableQuery.str();
 
             if (mysqlpp::SimpleResult res = createTableQuery.execute()) {
                 table_schema.id_ = res.insert_id();  // Might need to use SELECT LAST_INSERT_ID()?
@@ -450,14 +451,14 @@ MySQLMetaImpl::CreateTable(CollectionSchema& table_schema) {
         }  // Scoped Connection
 
         ENGINE_LOG_DEBUG << "Successfully create collection: " << table_schema.collection_id_;
-        return utils::CreateTablePath(options_, table_schema.collection_id_);
+        return utils::CreateCollectionPath(options_, table_schema.collection_id_);
     } catch (std::exception& e) {
         return HandleException("GENERAL ERROR WHEN CREATING TABLE", e.what());
     }
 }
 
 Status
-MySQLMetaImpl::DescribeTable(CollectionSchema& table_schema) {
+MySQLMetaImpl::DescribeCollection(CollectionSchema& table_schema) {
     try {
         server::MetricCollector metric;
         mysqlpp::StoreQueryResult res;
@@ -465,8 +466,8 @@ MySQLMetaImpl::DescribeTable(CollectionSchema& table_schema) {
             mysqlpp::ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab_);
 
             bool is_null_connection = (connectionPtr == nullptr);
-            fiu_do_on("MySQLMetaImpl.DescribeTable.null_connection", is_null_connection = true);
-            fiu_do_on("MySQLMetaImpl.DescribeTable.throw_exception", throw std::exception(););
+            fiu_do_on("MySQLMetaImpl.DescribeCollection.null_connection", is_null_connection = true);
+            fiu_do_on("MySQLMetaImpl.DescribeCollection.throw_exception", throw std::exception(););
             if (is_null_connection) {
                 return Status(DB_ERROR, "Failed to connect to meta server(mysql)");
             }
@@ -478,7 +479,7 @@ MySQLMetaImpl::DescribeTable(CollectionSchema& table_schema) {
                 << " FROM " << META_TABLES << " WHERE table_id = " << mysqlpp::quote << table_schema.collection_id_
                 << " AND state <> " << std::to_string(CollectionSchema::TO_DELETE) << ";";
 
-            ENGINE_LOG_DEBUG << "MySQLMetaImpl::DescribeTable: " << describeTableQuery.str();
+            ENGINE_LOG_DEBUG << "MySQLMetaImpl::DescribeCollection: " << describeTableQuery.str();
 
             res = describeTableQuery.store();
         }  // Scoped Connection
@@ -494,7 +495,7 @@ MySQLMetaImpl::DescribeTable(CollectionSchema& table_schema) {
             table_schema.engine_type_ = resRow["engine_type"];
             resRow["index_params"].to_string(table_schema.index_params_);
             table_schema.metric_type_ = resRow["metric_type"];
-            resRow["owner_table"].to_string(table_schema.owner_table_);
+            resRow["owner_table"].to_string(table_schema.owner_collection_);
             resRow["partition_tag"].to_string(table_schema.partition_tag_);
             resRow["version"].to_string(table_schema.version_);
             table_schema.flush_lsn_ = resRow["flush_lsn"];
@@ -509,7 +510,7 @@ MySQLMetaImpl::DescribeTable(CollectionSchema& table_schema) {
 }
 
 Status
-MySQLMetaImpl::HasTable(const std::string& collection_id, bool& has_or_not) {
+MySQLMetaImpl::HasCollection(const std::string& collection_id, bool& has_or_not) {
     try {
         server::MetricCollector metric;
         mysqlpp::StoreQueryResult res;
@@ -517,23 +518,24 @@ MySQLMetaImpl::HasTable(const std::string& collection_id, bool& has_or_not) {
             mysqlpp::ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab_);
 
             bool is_null_connection = (connectionPtr == nullptr);
-            fiu_do_on("MySQLMetaImpl.HasTable.null_connection", is_null_connection = true);
-            fiu_do_on("MySQLMetaImpl.HasTable.throw_exception", throw std::exception(););
+            fiu_do_on("MySQLMetaImpl.HasCollection.null_connection", is_null_connection = true);
+            fiu_do_on("MySQLMetaImpl.HasCollection.throw_exception", throw std::exception(););
             if (is_null_connection) {
                 return Status(DB_ERROR, "Failed to connect to meta server(mysql)");
             }
 
-            mysqlpp::Query hasTableQuery = connectionPtr->query();
+            mysqlpp::Query HasCollectionQuery = connectionPtr->query();
             // since collection_id is a unique column we just need to check whether it exists or not
-            hasTableQuery << "SELECT EXISTS"
-                          << " (SELECT 1 FROM " << META_TABLES << " WHERE table_id = " << mysqlpp::quote
-                          << collection_id << " AND state <> " << std::to_string(CollectionSchema::TO_DELETE) << ")"
-                          << " AS " << mysqlpp::quote << "check"
-                          << ";";
+            HasCollectionQuery << "SELECT EXISTS"
+                               << " (SELECT 1 FROM " << META_TABLES << " WHERE table_id = " << mysqlpp::quote
+                               << collection_id << " AND state <> " << std::to_string(CollectionSchema::TO_DELETE)
+                               << ")"
+                               << " AS " << mysqlpp::quote << "check"
+                               << ";";
 
-            ENGINE_LOG_DEBUG << "MySQLMetaImpl::HasTable: " << hasTableQuery.str();
+            ENGINE_LOG_DEBUG << "MySQLMetaImpl::HasCollection: " << HasCollectionQuery.str();
 
-            res = hasTableQuery.store();
+            res = HasCollectionQuery.store();
         }  // Scoped Connection
 
         int check = res[0]["check"];
@@ -546,7 +548,7 @@ MySQLMetaImpl::HasTable(const std::string& collection_id, bool& has_or_not) {
 }
 
 Status
-MySQLMetaImpl::AllTables(std::vector<CollectionSchema>& table_schema_array) {
+MySQLMetaImpl::AllCollections(std::vector<CollectionSchema>& table_schema_array) {
     try {
         server::MetricCollector metric;
         mysqlpp::StoreQueryResult res;
@@ -566,7 +568,7 @@ MySQLMetaImpl::AllTables(std::vector<CollectionSchema>& table_schema_array) {
                            << " FROM " << META_TABLES << " WHERE state <> "
                            << std::to_string(CollectionSchema::TO_DELETE) << " AND owner_table = \"\";";
 
-            ENGINE_LOG_DEBUG << "MySQLMetaImpl::AllTables: " << allTablesQuery.str();
+            ENGINE_LOG_DEBUG << "MySQLMetaImpl::AllCollections: " << allTablesQuery.str();
 
             res = allTablesQuery.store();
         }  // Scoped Connection
@@ -580,7 +582,7 @@ MySQLMetaImpl::AllTables(std::vector<CollectionSchema>& table_schema_array) {
             table_schema.engine_type_ = resRow["engine_type"];
             resRow["index_params"].to_string(table_schema.index_params_);
             table_schema.metric_type_ = resRow["metric_type"];
-            resRow["owner_table"].to_string(table_schema.owner_table_);
+            resRow["owner_table"].to_string(table_schema.owner_collection_);
             resRow["partition_tag"].to_string(table_schema.partition_tag_);
             resRow["version"].to_string(table_schema.version_);
             table_schema.flush_lsn_ = resRow["flush_lsn"];
@@ -595,15 +597,15 @@ MySQLMetaImpl::AllTables(std::vector<CollectionSchema>& table_schema_array) {
 }
 
 Status
-MySQLMetaImpl::DropTable(const std::string& collection_id) {
+MySQLMetaImpl::DropCollection(const std::string& collection_id) {
     try {
         server::MetricCollector metric;
         {
             mysqlpp::ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab_);
 
             bool is_null_connection = (connectionPtr == nullptr);
-            fiu_do_on("MySQLMetaImpl.DropTable.null_connection", is_null_connection = true);
-            fiu_do_on("MySQLMetaImpl.DropTable.throw_exception", throw std::exception(););
+            fiu_do_on("MySQLMetaImpl.DropCollection.null_connection", is_null_connection = true);
+            fiu_do_on("MySQLMetaImpl.DropCollection.throw_exception", throw std::exception(););
 
             if (is_null_connection) {
                 return Status(DB_ERROR, "Failed to connect to meta server(mysql)");
@@ -624,7 +626,7 @@ MySQLMetaImpl::DropTable(const std::string& collection_id) {
         }  // Scoped Connection
 
         bool is_writable_mode{mode_ == DBOptions::MODE::CLUSTER_WRITABLE};
-        fiu_do_on("MySQLMetaImpl.DropTable.CLUSTER_WRITABLE_MODE", is_writable_mode = true);
+        fiu_do_on("MySQLMetaImpl.DropCollection.CLUSTER_WRITABLE_MODE", is_writable_mode = true);
         if (is_writable_mode) {
             DeleteTableFiles(collection_id);
         }
@@ -677,13 +679,13 @@ MySQLMetaImpl::DeleteTableFiles(const std::string& collection_id) {
 }
 
 Status
-MySQLMetaImpl::CreateTableFile(SegmentSchema& file_schema) {
+MySQLMetaImpl::CreateCollectionFile(SegmentSchema& file_schema) {
     if (file_schema.date_ == EmptyDate) {
         file_schema.date_ = utils::GetDate();
     }
     CollectionSchema table_schema;
     table_schema.collection_id_ = file_schema.collection_id_;
-    auto status = DescribeTable(table_schema);
+    auto status = DescribeCollection(table_schema);
     if (!status.ok()) {
         return status;
     }
@@ -722,8 +724,8 @@ MySQLMetaImpl::CreateTableFile(SegmentSchema& file_schema) {
             mysqlpp::ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab_);
 
             bool is_null_connection = (connectionPtr == nullptr);
-            fiu_do_on("MySQLMetaImpl.CreateTableFiles.null_connection", is_null_connection = true);
-            fiu_do_on("MySQLMetaImpl.CreateTableFiles.throw_exception", throw std::exception(););
+            fiu_do_on("MySQLMetaImpl.CreateCollectionFiles.null_connection", is_null_connection = true);
+            fiu_do_on("MySQLMetaImpl.CreateCollectionFiles.throw_exception", throw std::exception(););
             if (is_null_connection) {
                 return Status(DB_ERROR, "Failed to connect to meta server(mysql)");
             }
@@ -736,7 +738,7 @@ MySQLMetaImpl::CreateTableFile(SegmentSchema& file_schema) {
                                  << row_count << ", " << updated_time << ", " << created_on << ", " << date << ", "
                                  << flush_lsn << ");";
 
-            ENGINE_LOG_DEBUG << "MySQLMetaImpl::CreateTableFile: " << createTableFileQuery.str();
+            ENGINE_LOG_DEBUG << "MySQLMetaImpl::CreateCollectionFile: " << createTableFileQuery.str();
 
             if (mysqlpp::SimpleResult res = createTableFileQuery.execute()) {
                 file_schema.id_ = res.insert_id();  // Might need to use SELECT LAST_INSERT_ID()?
@@ -748,7 +750,7 @@ MySQLMetaImpl::CreateTableFile(SegmentSchema& file_schema) {
         }  // Scoped Connection
 
         ENGINE_LOG_DEBUG << "Successfully create collection file, file id = " << file_schema.file_id_;
-        return utils::CreateTableFilePath(options_, file_schema);
+        return utils::CreateCollectionFilePath(options_, file_schema);
     } catch (std::exception& e) {
         return HandleException("GENERAL ERROR WHEN CREATING TABLE FILE", e.what());
     }
@@ -794,7 +796,7 @@ MySQLMetaImpl::GetTableFiles(const std::string& collection_id, const std::vector
 
         CollectionSchema table_schema;
         table_schema.collection_id_ = collection_id;
-        DescribeTable(table_schema);
+        DescribeCollection(table_schema);
 
         Status ret;
         for (auto& resRow : res) {
@@ -826,8 +828,8 @@ MySQLMetaImpl::GetTableFiles(const std::string& collection_id, const std::vector
 }
 
 Status
-MySQLMetaImpl::GetTableFilesBySegmentId(const std::string& segment_id,
-                                        milvus::engine::meta::SegmentsSchema& table_files) {
+MySQLMetaImpl::GetCollectionFilesBySegmentId(const std::string& segment_id,
+                                             milvus::engine::meta::SegmentsSchema& table_files) {
     try {
         mysqlpp::StoreQueryResult res;
         {
@@ -843,7 +845,7 @@ MySQLMetaImpl::GetTableFilesBySegmentId(const std::string& segment_id,
                               << " FROM " << META_TABLEFILES << " WHERE segment_id = " << mysqlpp::quote << segment_id
                               << " AND file_type <> " << std::to_string(SegmentSchema::TO_DELETE) << ";";
 
-            ENGINE_LOG_DEBUG << "MySQLMetaImpl::GetTableFilesBySegmentId: " << getTableFileQuery.str();
+            ENGINE_LOG_DEBUG << "MySQLMetaImpl::GetCollectionFilesBySegmentId: " << getTableFileQuery.str();
 
             res = getTableFileQuery.store();
         }  // Scoped Connection
@@ -851,7 +853,7 @@ MySQLMetaImpl::GetTableFilesBySegmentId(const std::string& segment_id,
         if (!res.empty()) {
             CollectionSchema table_schema;
             res[0]["table_id"].to_string(table_schema.collection_id_);
-            auto status = DescribeTable(table_schema);
+            auto status = DescribeCollection(table_schema);
             if (!status.ok()) {
                 return status;
             }
@@ -886,7 +888,7 @@ MySQLMetaImpl::GetTableFilesBySegmentId(const std::string& segment_id,
 }
 
 Status
-MySQLMetaImpl::UpdateTableIndex(const std::string& collection_id, const TableIndex& index) {
+MySQLMetaImpl::UpdateCollectionIndex(const std::string& collection_id, const CollectionIndex& index) {
     try {
         server::MetricCollector metric;
 
@@ -894,21 +896,21 @@ MySQLMetaImpl::UpdateTableIndex(const std::string& collection_id, const TableInd
             mysqlpp::ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab_);
 
             bool is_null_connection = (connectionPtr == nullptr);
-            fiu_do_on("MySQLMetaImpl.UpdateTableIndex.null_connection", is_null_connection = true);
-            fiu_do_on("MySQLMetaImpl.UpdateTableIndex.throw_exception", throw std::exception(););
+            fiu_do_on("MySQLMetaImpl.UpdateCollectionIndex.null_connection", is_null_connection = true);
+            fiu_do_on("MySQLMetaImpl.UpdateCollectionIndex.throw_exception", throw std::exception(););
             if (is_null_connection) {
                 return Status(DB_ERROR, "Failed to connect to meta server(mysql)");
             }
 
-            mysqlpp::Query updateTableIndexParamQuery = connectionPtr->query();
-            updateTableIndexParamQuery << "SELECT id, state, dimension, created_on"
-                                       << " FROM " << META_TABLES << " WHERE table_id = " << mysqlpp::quote
-                                       << collection_id << " AND state <> "
-                                       << std::to_string(CollectionSchema::TO_DELETE) << ";";
+            mysqlpp::Query updateCollectionIndexParamQuery = connectionPtr->query();
+            updateCollectionIndexParamQuery << "SELECT id, state, dimension, created_on"
+                                            << " FROM " << META_TABLES << " WHERE table_id = " << mysqlpp::quote
+                                            << collection_id << " AND state <> "
+                                            << std::to_string(CollectionSchema::TO_DELETE) << ";";
 
-            ENGINE_LOG_DEBUG << "MySQLMetaImpl::UpdateTableIndex: " << updateTableIndexParamQuery.str();
+            ENGINE_LOG_DEBUG << "MySQLMetaImpl::UpdateCollectionIndex: " << updateCollectionIndexParamQuery.str();
 
-            mysqlpp::StoreQueryResult res = updateTableIndexParamQuery.store();
+            mysqlpp::StoreQueryResult res = updateCollectionIndexParamQuery.store();
 
             if (res.num_rows() == 1) {
                 const mysqlpp::Row& resRow = res[0];
@@ -918,18 +920,18 @@ MySQLMetaImpl::UpdateTableIndex(const std::string& collection_id, const TableInd
                 uint16_t dimension = resRow["dimension"];
                 int64_t created_on = resRow["created_on"];
 
-                updateTableIndexParamQuery << "UPDATE " << META_TABLES << " SET id = " << id << " ,state = " << state
-                                           << " ,dimension = " << dimension << " ,created_on = " << created_on
-                                           << " ,engine_type = " << index.engine_type_
-                                           << " ,index_params = " << mysqlpp::quote << index.extra_params_.dump()
-                                           << " ,metric_type = " << index.metric_type_
-                                           << " WHERE table_id = " << mysqlpp::quote << collection_id << ";";
+                updateCollectionIndexParamQuery
+                    << "UPDATE " << META_TABLES << " SET id = " << id << " ,state = " << state
+                    << " ,dimension = " << dimension << " ,created_on = " << created_on
+                    << " ,engine_type = " << index.engine_type_ << " ,index_params = " << mysqlpp::quote
+                    << index.extra_params_.dump() << " ,metric_type = " << index.metric_type_
+                    << " WHERE table_id = " << mysqlpp::quote << collection_id << ";";
 
-                ENGINE_LOG_DEBUG << "MySQLMetaImpl::UpdateTableIndex: " << updateTableIndexParamQuery.str();
+                ENGINE_LOG_DEBUG << "MySQLMetaImpl::UpdateCollectionIndex: " << updateCollectionIndexParamQuery.str();
 
-                if (!updateTableIndexParamQuery.exec()) {
+                if (!updateCollectionIndexParamQuery.exec()) {
                     return HandleException("QUERY ERROR WHEN UPDATING TABLE INDEX PARAM",
-                                           updateTableIndexParamQuery.error());
+                                           updateCollectionIndexParamQuery.error());
                 }
             } else {
                 return Status(DB_NOT_FOUND, "Collection " + collection_id + " not found");
@@ -945,7 +947,7 @@ MySQLMetaImpl::UpdateTableIndex(const std::string& collection_id, const TableInd
 }
 
 Status
-MySQLMetaImpl::UpdateTableFlag(const std::string& collection_id, int64_t flag) {
+MySQLMetaImpl::UpdateCollectionFlag(const std::string& collection_id, int64_t flag) {
     try {
         server::MetricCollector metric;
 
@@ -953,8 +955,8 @@ MySQLMetaImpl::UpdateTableFlag(const std::string& collection_id, int64_t flag) {
             mysqlpp::ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab_);
 
             bool is_null_connection = (connectionPtr == nullptr);
-            fiu_do_on("MySQLMetaImpl.UpdateTableFlag.null_connection", is_null_connection = true);
-            fiu_do_on("MySQLMetaImpl.UpdateTableFlag.throw_exception", throw std::exception(););
+            fiu_do_on("MySQLMetaImpl.UpdateCollectionFlag.null_connection", is_null_connection = true);
+            fiu_do_on("MySQLMetaImpl.UpdateCollectionFlag.throw_exception", throw std::exception(););
             if (is_null_connection) {
                 return Status(DB_ERROR, "Failed to connect to meta server(mysql)");
             }
@@ -963,7 +965,7 @@ MySQLMetaImpl::UpdateTableFlag(const std::string& collection_id, int64_t flag) {
             updateTableFlagQuery << "UPDATE " << META_TABLES << " SET flag = " << flag
                                  << " WHERE table_id = " << mysqlpp::quote << collection_id << ";";
 
-            ENGINE_LOG_DEBUG << "MySQLMetaImpl::UpdateTableFlag: " << updateTableFlagQuery.str();
+            ENGINE_LOG_DEBUG << "MySQLMetaImpl::UpdateCollectionFlag: " << updateTableFlagQuery.str();
 
             if (!updateTableFlagQuery.exec()) {
                 return HandleException("QUERY ERROR WHEN UPDATING TABLE FLAG", updateTableFlagQuery.error());
@@ -1010,7 +1012,7 @@ MySQLMetaImpl::UpdateTableFlushLSN(const std::string& collection_id, uint64_t fl
 }
 
 Status
-MySQLMetaImpl::GetTableFlushLSN(const std::string& collection_id, uint64_t& flush_lsn) {
+MySQLMetaImpl::GetCollectionFlushLSN(const std::string& collection_id, uint64_t& flush_lsn) {
     try {
         server::MetricCollector metric;
 
@@ -1025,7 +1027,7 @@ MySQLMetaImpl::GetTableFlushLSN(const std::string& collection_id, uint64_t& flus
             statement << "SELECT flush_lsn FROM " << META_TABLES << " WHERE collection_id = " << mysqlpp::quote
                       << collection_id << ";";
 
-            ENGINE_LOG_DEBUG << "MySQLMetaImpl::GetTableFlushLSN: " << statement.str();
+            ENGINE_LOG_DEBUG << "MySQLMetaImpl::GetCollectionFlushLSN: " << statement.str();
 
             res = statement.store();
         }  // Scoped Connection
@@ -1083,7 +1085,7 @@ MySQLMetaImpl::GetTableFilesByFlushLSN(uint64_t flush_lsn, SegmentsSchema& table
             if (groupItr == groups.end()) {
                 CollectionSchema table_schema;
                 table_schema.collection_id_ = table_file.collection_id_;
-                auto status = DescribeTable(table_schema);
+                auto status = DescribeCollection(table_schema);
                 if (!status.ok()) {
                     return status;
                 }
@@ -1113,7 +1115,7 @@ MySQLMetaImpl::GetTableFilesByFlushLSN(uint64_t flush_lsn, SegmentsSchema& table
 
 // ZR: this function assumes all fields in file_schema have value
 Status
-MySQLMetaImpl::UpdateTableFile(SegmentSchema& file_schema) {
+MySQLMetaImpl::UpdateCollectionFile(SegmentSchema& file_schema) {
     file_schema.updated_time_ = utils::GetMicroSecTimeStamp();
 
     try {
@@ -1122,8 +1124,8 @@ MySQLMetaImpl::UpdateTableFile(SegmentSchema& file_schema) {
             mysqlpp::ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab_);
 
             bool is_null_connection = (connectionPtr == nullptr);
-            fiu_do_on("MySQLMetaImpl.UpdateTableFile.null_connection", is_null_connection = true);
-            fiu_do_on("MySQLMetaImpl.UpdateTableFile.throw_exception", throw std::exception(););
+            fiu_do_on("MySQLMetaImpl.UpdateCollectionFile.null_connection", is_null_connection = true);
+            fiu_do_on("MySQLMetaImpl.UpdateCollectionFile.throw_exception", throw std::exception(););
             if (is_null_connection) {
                 return Status(DB_ERROR, "Failed to connect to meta server(mysql)");
             }
@@ -1135,7 +1137,7 @@ MySQLMetaImpl::UpdateTableFile(SegmentSchema& file_schema) {
             updateTableFileQuery << "SELECT state FROM " << META_TABLES << " WHERE table_id = " << mysqlpp::quote
                                  << file_schema.collection_id_ << ";";
 
-            ENGINE_LOG_DEBUG << "MySQLMetaImpl::UpdateTableFile: " << updateTableFileQuery.str();
+            ENGINE_LOG_DEBUG << "MySQLMetaImpl::UpdateCollectionFile: " << updateTableFileQuery.str();
 
             mysqlpp::StoreQueryResult res = updateTableFileQuery.store();
 
@@ -1166,7 +1168,7 @@ MySQLMetaImpl::UpdateTableFile(SegmentSchema& file_schema) {
                                  << " ,updated_time = " << updated_time << " ,created_on = " << created_on
                                  << " ,date = " << date << " WHERE id = " << id << ";";
 
-            ENGINE_LOG_DEBUG << "MySQLMetaImpl::UpdateTableFile: " << updateTableFileQuery.str();
+            ENGINE_LOG_DEBUG << "MySQLMetaImpl::UpdateCollectionFile: " << updateTableFileQuery.str();
 
             if (!updateTableFileQuery.exec()) {
                 ENGINE_LOG_DEBUG << "collection_id= " << file_schema.collection_id_
@@ -1184,13 +1186,13 @@ MySQLMetaImpl::UpdateTableFile(SegmentSchema& file_schema) {
 }
 
 Status
-MySQLMetaImpl::UpdateTableFilesToIndex(const std::string& collection_id) {
+MySQLMetaImpl::UpdateCollectionFilesToIndex(const std::string& collection_id) {
     try {
         mysqlpp::ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab_);
 
         bool is_null_connection = (connectionPtr == nullptr);
-        fiu_do_on("MySQLMetaImpl.UpdateTableFilesToIndex.null_connection", is_null_connection = true);
-        fiu_do_on("MySQLMetaImpl.UpdateTableFilesToIndex.throw_exception", throw std::exception(););
+        fiu_do_on("MySQLMetaImpl.UpdateCollectionFilesToIndex.null_connection", is_null_connection = true);
+        fiu_do_on("MySQLMetaImpl.UpdateCollectionFilesToIndex.throw_exception", throw std::exception(););
         if (is_null_connection) {
             return Status(DB_ERROR, "Failed to connect to meta server(mysql)");
         }
@@ -1203,7 +1205,7 @@ MySQLMetaImpl::UpdateTableFilesToIndex(const std::string& collection_id) {
                                      << " AND row_count >= " << std::to_string(meta::BUILD_INDEX_THRESHOLD)
                                      << " AND file_type = " << std::to_string(SegmentSchema::RAW) << ";";
 
-        ENGINE_LOG_DEBUG << "MySQLMetaImpl::UpdateTableFilesToIndex: " << updateTableFilesToIndexQuery.str();
+        ENGINE_LOG_DEBUG << "MySQLMetaImpl::UpdateCollectionFilesToIndex: " << updateTableFilesToIndexQuery.str();
 
         if (!updateTableFilesToIndexQuery.exec()) {
             return HandleException("QUERY ERROR WHEN UPDATING TABLE FILE TO INDEX",
@@ -1219,24 +1221,24 @@ MySQLMetaImpl::UpdateTableFilesToIndex(const std::string& collection_id) {
 }
 
 Status
-MySQLMetaImpl::UpdateTableFiles(SegmentsSchema& files) {
+MySQLMetaImpl::UpdateCollectionFiles(SegmentsSchema& files) {
     try {
         server::MetricCollector metric;
         {
             mysqlpp::ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab_);
 
             bool is_null_connection = (connectionPtr == nullptr);
-            fiu_do_on("MySQLMetaImpl.UpdateTableFiles.null_connection", is_null_connection = true);
-            fiu_do_on("MySQLMetaImpl.UpdateTableFiles.throw_exception", throw std::exception(););
+            fiu_do_on("MySQLMetaImpl.UpdateCollectionFiles.null_connection", is_null_connection = true);
+            fiu_do_on("MySQLMetaImpl.UpdateCollectionFiles.throw_exception", throw std::exception(););
             if (is_null_connection) {
                 return Status(DB_ERROR, "Failed to connect to meta server(mysql)");
             }
 
             mysqlpp::Query updateTableFilesQuery = connectionPtr->query();
 
-            std::map<std::string, bool> has_tables;
+            std::map<std::string, bool> has_collections;
             for (auto& file_schema : files) {
-                if (has_tables.find(file_schema.collection_id_) != has_tables.end()) {
+                if (has_collections.find(file_schema.collection_id_) != has_collections.end()) {
                     continue;
                 }
 
@@ -1247,16 +1249,16 @@ MySQLMetaImpl::UpdateTableFiles(SegmentsSchema& files) {
                                       << " AS " << mysqlpp::quote << "check"
                                       << ";";
 
-                ENGINE_LOG_DEBUG << "MySQLMetaImpl::UpdateTableFiles: " << updateTableFilesQuery.str();
+                ENGINE_LOG_DEBUG << "MySQLMetaImpl::UpdateCollectionFiles: " << updateTableFilesQuery.str();
 
                 mysqlpp::StoreQueryResult res = updateTableFilesQuery.store();
 
                 int check = res[0]["check"];
-                has_tables[file_schema.collection_id_] = (check == 1);
+                has_collections[file_schema.collection_id_] = (check == 1);
             }
 
             for (auto& file_schema : files) {
-                if (!has_tables[file_schema.collection_id_]) {
+                if (!has_collections[file_schema.collection_id_]) {
                     file_schema.file_type_ = SegmentSchema::TO_DELETE;
                 }
                 file_schema.updated_time_ = utils::GetMicroSecTimeStamp();
@@ -1279,7 +1281,7 @@ MySQLMetaImpl::UpdateTableFiles(SegmentsSchema& files) {
                                       << " ,updated_time = " << updated_time << " ,created_on = " << created_on
                                       << " ,date = " << date << " WHERE id = " << id << ";";
 
-                ENGINE_LOG_DEBUG << "MySQLMetaImpl::UpdateTableFiles: " << updateTableFilesQuery.str();
+                ENGINE_LOG_DEBUG << "MySQLMetaImpl::UpdateCollectionFiles: " << updateTableFilesQuery.str();
 
                 if (!updateTableFilesQuery.exec()) {
                     return HandleException("QUERY ERROR WHEN UPDATING TABLE FILES", updateTableFilesQuery.error());
@@ -1296,7 +1298,7 @@ MySQLMetaImpl::UpdateTableFiles(SegmentsSchema& files) {
 }
 
 Status
-MySQLMetaImpl::UpdateTableFilesRowCount(SegmentsSchema& files) {
+MySQLMetaImpl::UpdateCollectionFilesRowCount(SegmentsSchema& files) {
     try {
         server::MetricCollector metric;
         {
@@ -1317,7 +1319,7 @@ MySQLMetaImpl::UpdateTableFilesRowCount(SegmentsSchema& files) {
                                       << " , updated_time = " << updated_time << " WHERE file_id = " << file.file_id_
                                       << ";";
 
-                ENGINE_LOG_DEBUG << "MySQLMetaImpl::UpdateTableFilesRowCount: " << updateTableFilesQuery.str();
+                ENGINE_LOG_DEBUG << "MySQLMetaImpl::UpdateCollectionFilesRowCount: " << updateTableFilesQuery.str();
 
                 if (!updateTableFilesQuery.exec()) {
                     return HandleException("QUERY ERROR WHEN UPDATING TABLE FILES", updateTableFilesQuery.error());
@@ -1336,7 +1338,7 @@ MySQLMetaImpl::UpdateTableFilesRowCount(SegmentsSchema& files) {
 }
 
 Status
-MySQLMetaImpl::DescribeTableIndex(const std::string& collection_id, TableIndex& index) {
+MySQLMetaImpl::DescribeCollectionIndex(const std::string& collection_id, CollectionIndex& index) {
     try {
         server::MetricCollector metric;
 
@@ -1344,21 +1346,21 @@ MySQLMetaImpl::DescribeTableIndex(const std::string& collection_id, TableIndex& 
             mysqlpp::ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab_);
 
             bool is_null_connection = (connectionPtr == nullptr);
-            fiu_do_on("MySQLMetaImpl.DescribeTableIndex.null_connection", is_null_connection = true);
-            fiu_do_on("MySQLMetaImpl.DescribeTableIndex.throw_exception", throw std::exception(););
+            fiu_do_on("MySQLMetaImpl.DescribeCollectionIndex.null_connection", is_null_connection = true);
+            fiu_do_on("MySQLMetaImpl.DescribeCollectionIndex.throw_exception", throw std::exception(););
             if (is_null_connection) {
                 return Status(DB_ERROR, "Failed to connect to meta server(mysql)");
             }
 
-            mysqlpp::Query describeTableIndexQuery = connectionPtr->query();
-            describeTableIndexQuery << "SELECT engine_type, index_params, index_file_size, metric_type"
-                                    << " FROM " << META_TABLES << " WHERE table_id = " << mysqlpp::quote
-                                    << collection_id << " AND state <> " << std::to_string(CollectionSchema::TO_DELETE)
-                                    << ";";
+            mysqlpp::Query describeCollectionIndexQuery = connectionPtr->query();
+            describeCollectionIndexQuery << "SELECT engine_type, index_params, index_file_size, metric_type"
+                                         << " FROM " << META_TABLES << " WHERE table_id = " << mysqlpp::quote
+                                         << collection_id << " AND state <> "
+                                         << std::to_string(CollectionSchema::TO_DELETE) << ";";
 
-            ENGINE_LOG_DEBUG << "MySQLMetaImpl::DescribeTableIndex: " << describeTableIndexQuery.str();
+            ENGINE_LOG_DEBUG << "MySQLMetaImpl::DescribeCollectionIndex: " << describeCollectionIndexQuery.str();
 
-            mysqlpp::StoreQueryResult res = describeTableIndexQuery.store();
+            mysqlpp::StoreQueryResult res = describeCollectionIndexQuery.store();
 
             if (res.num_rows() == 1) {
                 const mysqlpp::Row& resRow = res[0];
@@ -1380,7 +1382,7 @@ MySQLMetaImpl::DescribeTableIndex(const std::string& collection_id, TableIndex& 
 }
 
 Status
-MySQLMetaImpl::DropTableIndex(const std::string& collection_id) {
+MySQLMetaImpl::DropCollectionIndex(const std::string& collection_id) {
     try {
         server::MetricCollector metric;
 
@@ -1388,54 +1390,54 @@ MySQLMetaImpl::DropTableIndex(const std::string& collection_id) {
             mysqlpp::ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab_);
 
             bool is_null_connection = (connectionPtr == nullptr);
-            fiu_do_on("MySQLMetaImpl.DropTableIndex.null_connection", is_null_connection = true);
-            fiu_do_on("MySQLMetaImpl.DropTableIndex.throw_exception", throw std::exception(););
+            fiu_do_on("MySQLMetaImpl.DropCollectionIndex.null_connection", is_null_connection = true);
+            fiu_do_on("MySQLMetaImpl.DropCollectionIndex.throw_exception", throw std::exception(););
             if (is_null_connection) {
                 return Status(DB_ERROR, "Failed to connect to meta server(mysql)");
             }
 
-            mysqlpp::Query dropTableIndexQuery = connectionPtr->query();
+            mysqlpp::Query dropCollectionIndexQuery = connectionPtr->query();
 
             // soft delete index files
-            dropTableIndexQuery << "UPDATE " << META_TABLEFILES
-                                << " SET file_type = " << std::to_string(SegmentSchema::TO_DELETE)
-                                << " ,updated_time = " << utils::GetMicroSecTimeStamp()
-                                << " WHERE table_id = " << mysqlpp::quote << collection_id
-                                << " AND file_type = " << std::to_string(SegmentSchema::INDEX) << ";";
+            dropCollectionIndexQuery << "UPDATE " << META_TABLEFILES
+                                     << " SET file_type = " << std::to_string(SegmentSchema::TO_DELETE)
+                                     << " ,updated_time = " << utils::GetMicroSecTimeStamp()
+                                     << " WHERE table_id = " << mysqlpp::quote << collection_id
+                                     << " AND file_type = " << std::to_string(SegmentSchema::INDEX) << ";";
 
-            ENGINE_LOG_DEBUG << "MySQLMetaImpl::DropTableIndex: " << dropTableIndexQuery.str();
+            ENGINE_LOG_DEBUG << "MySQLMetaImpl::DropCollectionIndex: " << dropCollectionIndexQuery.str();
 
-            if (!dropTableIndexQuery.exec()) {
-                return HandleException("QUERY ERROR WHEN DROPPING TABLE INDEX", dropTableIndexQuery.error());
+            if (!dropCollectionIndexQuery.exec()) {
+                return HandleException("QUERY ERROR WHEN DROPPING TABLE INDEX", dropCollectionIndexQuery.error());
             }
 
             // set all backup file to raw
-            dropTableIndexQuery << "UPDATE " << META_TABLEFILES
-                                << " SET file_type = " << std::to_string(SegmentSchema::RAW)
-                                << " ,updated_time = " << utils::GetMicroSecTimeStamp()
-                                << " WHERE table_id = " << mysqlpp::quote << collection_id
-                                << " AND file_type = " << std::to_string(SegmentSchema::BACKUP) << ";";
+            dropCollectionIndexQuery << "UPDATE " << META_TABLEFILES
+                                     << " SET file_type = " << std::to_string(SegmentSchema::RAW)
+                                     << " ,updated_time = " << utils::GetMicroSecTimeStamp()
+                                     << " WHERE table_id = " << mysqlpp::quote << collection_id
+                                     << " AND file_type = " << std::to_string(SegmentSchema::BACKUP) << ";";
 
-            ENGINE_LOG_DEBUG << "MySQLMetaImpl::DropTableIndex: " << dropTableIndexQuery.str();
+            ENGINE_LOG_DEBUG << "MySQLMetaImpl::DropCollectionIndex: " << dropCollectionIndexQuery.str();
 
-            if (!dropTableIndexQuery.exec()) {
-                return HandleException("QUERY ERROR WHEN DROPPING TABLE INDEX", dropTableIndexQuery.error());
+            if (!dropCollectionIndexQuery.exec()) {
+                return HandleException("QUERY ERROR WHEN DROPPING TABLE INDEX", dropCollectionIndexQuery.error());
             }
 
             // set collection index type to raw
-            dropTableIndexQuery << "UPDATE " << META_TABLES << " SET engine_type = "
-                                << " (CASE"
-                                << " WHEN metric_type in (" << (int32_t)MetricType::HAMMING << " ,"
-                                << (int32_t)MetricType::JACCARD << " ," << (int32_t)MetricType::TANIMOTO << ")"
-                                << " THEN " << (int32_t)EngineType::FAISS_BIN_IDMAP << " ELSE "
-                                << (int32_t)EngineType::FAISS_IDMAP << " END)"
-                                << " , index_params = '{}'"
-                                << " WHERE table_id = " << mysqlpp::quote << collection_id << ";";
+            dropCollectionIndexQuery << "UPDATE " << META_TABLES << " SET engine_type = "
+                                     << " (CASE"
+                                     << " WHEN metric_type in (" << (int32_t)MetricType::HAMMING << " ,"
+                                     << (int32_t)MetricType::JACCARD << " ," << (int32_t)MetricType::TANIMOTO << ")"
+                                     << " THEN " << (int32_t)EngineType::FAISS_BIN_IDMAP << " ELSE "
+                                     << (int32_t)EngineType::FAISS_IDMAP << " END)"
+                                     << " , index_params = '{}'"
+                                     << " WHERE table_id = " << mysqlpp::quote << collection_id << ";";
 
-            ENGINE_LOG_DEBUG << "MySQLMetaImpl::DropTableIndex: " << dropTableIndexQuery.str();
+            ENGINE_LOG_DEBUG << "MySQLMetaImpl::DropCollectionIndex: " << dropCollectionIndexQuery.str();
 
-            if (!dropTableIndexQuery.exec()) {
-                return HandleException("QUERY ERROR WHEN DROPPING TABLE INDEX", dropTableIndexQuery.error());
+            if (!dropCollectionIndexQuery.exec()) {
+                return HandleException("QUERY ERROR WHEN DROPPING TABLE INDEX", dropCollectionIndexQuery.error());
             }
         }  // Scoped Connection
 
@@ -1454,13 +1456,13 @@ MySQLMetaImpl::CreatePartition(const std::string& collection_id, const std::stri
 
     CollectionSchema table_schema;
     table_schema.collection_id_ = collection_id;
-    auto status = DescribeTable(table_schema);
+    auto status = DescribeCollection(table_schema);
     if (!status.ok()) {
         return status;
     }
 
     // not allow create partition under partition
-    if (!table_schema.owner_table_.empty()) {
+    if (!table_schema.owner_collection_.empty()) {
         return Status(DB_ERROR, "Nested partition is not allowed");
     }
 
@@ -1486,11 +1488,11 @@ MySQLMetaImpl::CreatePartition(const std::string& collection_id, const std::stri
     table_schema.id_ = -1;
     table_schema.flag_ = 0;
     table_schema.created_on_ = utils::GetMicroSecTimeStamp();
-    table_schema.owner_table_ = collection_id;
+    table_schema.owner_collection_ = collection_id;
     table_schema.partition_tag_ = valid_tag;
     table_schema.flush_lsn_ = lsn;
 
-    status = CreateTable(table_schema);
+    status = CreateCollection(table_schema);
     fiu_do_on("MySQLMetaImpl.CreatePartition.aleady_exist", status = Status(DB_ALREADY_EXIST, ""));
     if (status.code() == DB_ALREADY_EXIST) {
         return Status(DB_ALREADY_EXIST, "Partition already exists");
@@ -1501,7 +1503,7 @@ MySQLMetaImpl::CreatePartition(const std::string& collection_id, const std::stri
 
 Status
 MySQLMetaImpl::DropPartition(const std::string& partition_name) {
-    return DropTable(partition_name);
+    return DropCollection(partition_name);
 }
 
 Status
@@ -1526,7 +1528,7 @@ MySQLMetaImpl::ShowPartitions(const std::string& collection_id,
                                << " WHERE owner_table = " << mysqlpp::quote << collection_id << " AND state <> "
                                << std::to_string(CollectionSchema::TO_DELETE) << ";";
 
-            ENGINE_LOG_DEBUG << "MySQLMetaImpl::AllTables: " << allPartitionsQuery.str();
+            ENGINE_LOG_DEBUG << "MySQLMetaImpl::AllCollections: " << allPartitionsQuery.str();
 
             res = allPartitionsQuery.store();
         }  // Scoped Connection
@@ -1543,7 +1545,7 @@ MySQLMetaImpl::ShowPartitions(const std::string& collection_id,
             partition_schema.engine_type_ = resRow["engine_type"];
             resRow["index_params"].to_string(partition_schema.index_params_);
             partition_schema.metric_type_ = resRow["metric_type"];
-            partition_schema.owner_table_ = collection_id;
+            partition_schema.owner_collection_ = collection_id;
             resRow["partition_tag"].to_string(partition_schema.partition_tag_);
             resRow["version"].to_string(partition_schema.version_);
 
@@ -1582,7 +1584,7 @@ MySQLMetaImpl::GetPartitionName(const std::string& collection_id, const std::str
                                << collection_id << " AND partition_tag = " << mysqlpp::quote << valid_tag
                                << " AND state <> " << std::to_string(CollectionSchema::TO_DELETE) << ";";
 
-            ENGINE_LOG_DEBUG << "MySQLMetaImpl::AllTables: " << allPartitionsQuery.str();
+            ENGINE_LOG_DEBUG << "MySQLMetaImpl::AllCollections: " << allPartitionsQuery.str();
 
             res = allPartitionsQuery.store();
         }  // Scoped Connection
@@ -1635,7 +1637,7 @@ MySQLMetaImpl::FilesToSearch(const std::string& collection_id, SegmentsSchema& f
 
         CollectionSchema table_schema;
         table_schema.collection_id_ = collection_id;
-        auto status = DescribeTable(table_schema);
+        auto status = DescribeCollection(table_schema);
         if (!status.ok()) {
             return status;
         }
@@ -1684,7 +1686,7 @@ MySQLMetaImpl::FilesToMerge(const std::string& collection_id, SegmentsSchema& fi
         // check collection existence
         CollectionSchema table_schema;
         table_schema.collection_id_ = collection_id;
-        auto status = DescribeTable(table_schema);
+        auto status = DescribeCollection(table_schema);
         if (!status.ok()) {
             return status;
         }
@@ -1800,7 +1802,7 @@ MySQLMetaImpl::FilesToIndex(SegmentsSchema& files) {
             if (groupItr == groups.end()) {
                 CollectionSchema table_schema;
                 table_schema.collection_id_ = table_file.collection_id_;
-                auto status = DescribeTable(table_schema);
+                auto status = DescribeCollection(table_schema);
                 if (!status.ok()) {
                     return status;
                 }
@@ -1873,7 +1875,7 @@ MySQLMetaImpl::FilesByType(const std::string& collection_id, const std::vector<i
 
         CollectionSchema table_schema;
         table_schema.collection_id_ = collection_id;
-        auto status = DescribeTable(table_schema);
+        auto status = DescribeCollection(table_schema);
         if (!status.ok()) {
             return status;
         }
@@ -2034,7 +2036,7 @@ MySQLMetaImpl::FilesByID(const std::vector<size_t>& ids, SegmentsSchema& files) 
             if (tables.find(table_file.collection_id_) == tables.end()) {
                 CollectionSchema table_schema;
                 table_schema.collection_id_ = table_file.collection_id_;
-                auto status = DescribeTable(table_schema);
+                auto status = DescribeCollection(table_schema);
                 if (!status.ok()) {
                     return status;
                 }
@@ -2451,7 +2453,7 @@ MySQLMetaImpl::Count(const std::string& collection_id, uint64_t& result) {
 
         CollectionSchema table_schema;
         table_schema.collection_id_ = collection_id;
-        auto status = DescribeTable(table_schema);
+        auto status = DescribeCollection(table_schema);
 
         if (!status.ok()) {
             return status;

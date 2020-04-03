@@ -27,14 +27,14 @@ class RequestHandler {
     RequestHandler() = default;
 
     Status
-    CreateTable(const std::shared_ptr<Context>& context, const std::string& collection_name, int64_t dimension,
-                int64_t index_file_size, int64_t metric_type);
+    CreateCollection(const std::shared_ptr<Context>& context, const std::string& collection_name, int64_t dimension,
+                     int64_t index_file_size, int64_t metric_type);
 
     Status
-    HasTable(const std::shared_ptr<Context>& context, const std::string& collection_name, bool& has_table);
+    HasCollection(const std::shared_ptr<Context>& context, const std::string& collection_name, bool& has_collection);
 
     Status
-    DropTable(const std::shared_ptr<Context>& context, const std::string& collection_name);
+    DropCollection(const std::shared_ptr<Context>& context, const std::string& collection_name);
 
     Status
     CreateIndex(const std::shared_ptr<Context>& context, const std::string& collection_name, int64_t index_type,
@@ -53,10 +53,11 @@ class RequestHandler {
                  const std::string& segment_name, std::vector<int64_t>& vector_ids);
 
     Status
-    ShowTables(const std::shared_ptr<Context>& context, std::vector<std::string>& tables);
+    ShowCollections(const std::shared_ptr<Context>& context, std::vector<std::string>& collections);
 
     Status
-    ShowTableInfo(const std::shared_ptr<Context>& context, const std::string& collection_name, TableInfo& table_info);
+    ShowCollectionInfo(const std::shared_ptr<Context>& context, const std::string& collection_name,
+                       CollectionInfo& collection_info);
 
     Status
     Search(const std::shared_ptr<Context>& context, const std::string& collection_name,
@@ -70,11 +71,11 @@ class RequestHandler {
                TopKQueryResult& result);
 
     Status
-    DescribeTable(const std::shared_ptr<Context>& context, const std::string& collection_name,
-                  CollectionSchema& table_schema);
+    DescribeCollection(const std::shared_ptr<Context>& context, const std::string& collection_name,
+                       CollectionSchema& collection_schema);
 
     Status
-    CountTable(const std::shared_ptr<Context>& context, const std::string& collection_name, int64_t& count);
+    CountCollection(const std::shared_ptr<Context>& context, const std::string& collection_name, int64_t& count);
 
     Status
     Cmd(const std::shared_ptr<Context>& context, const std::string& cmd, std::string& reply);
@@ -84,7 +85,7 @@ class RequestHandler {
                const std::vector<int64_t>& vector_ids);
 
     Status
-    PreloadTable(const std::shared_ptr<Context>& context, const std::string& collection_name);
+    PreloadCollection(const std::shared_ptr<Context>& context, const std::string& collection_name);
 
     Status
     DescribeIndex(const std::shared_ptr<Context>& context, const std::string& collection_name, IndexParam& param);

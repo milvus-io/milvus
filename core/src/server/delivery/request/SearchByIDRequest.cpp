@@ -82,7 +82,7 @@ SearchByIDRequest::OnExecute() {
         // only process root collection, ignore partition collection
         engine::meta::CollectionSchema table_schema;
         table_schema.collection_id_ = collection_name_;
-        status = DBWrapper::DB()->DescribeTable(table_schema);
+        status = DBWrapper::DB()->DescribeCollection(table_schema);
         if (!status.ok()) {
             if (status.code() == DB_NOT_FOUND) {
                 return Status(SERVER_TABLE_NOT_EXIST, TableNotExistMsg(collection_name_));
@@ -90,7 +90,7 @@ SearchByIDRequest::OnExecute() {
                 return status;
             }
         } else {
-            if (!table_schema.owner_table_.empty()) {
+            if (!table_schema.owner_collection_.empty()) {
                 return Status(SERVER_INVALID_TABLE_NAME, TableNotExistMsg(collection_name_));
             }
         }

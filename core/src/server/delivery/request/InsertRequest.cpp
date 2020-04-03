@@ -75,7 +75,7 @@ InsertRequest::OnExecute() {
         // only process root collection, ignore partition collection
         engine::meta::CollectionSchema table_schema;
         table_schema.collection_id_ = collection_name_;
-        status = DBWrapper::DB()->DescribeTable(table_schema);
+        status = DBWrapper::DB()->DescribeCollection(table_schema);
         fiu_do_on("InsertRequest.OnExecute.db_not_found", status = Status(milvus::DB_NOT_FOUND, ""));
         fiu_do_on("InsertRequest.OnExecute.describe_table_fail", status = Status(milvus::SERVER_UNEXPECTED_ERROR, ""));
         if (!status.ok()) {
@@ -85,7 +85,7 @@ InsertRequest::OnExecute() {
                 return status;
             }
         } else {
-            if (!table_schema.owner_table_.empty()) {
+            if (!table_schema.owner_collection_.empty()) {
                 return Status(SERVER_INVALID_TABLE_NAME, TableNotExistMsg(collection_name_));
             }
         }
@@ -171,7 +171,7 @@ InsertRequest::OnExecute() {
         // step 6: update collection flag
         user_provide_ids ? table_schema.flag_ |= engine::meta::FLAG_MASK_HAS_USERID
                          : table_schema.flag_ |= engine::meta::FLAG_MASK_NO_USERID;
-        status = DBWrapper::DB()->UpdateTableFlag(collection_name_, table_schema.flag_);
+        status = DBWrapper::DB()->UpdateCollectionFlag(collection_name_, table_schema.flag_);
 
 #ifdef MILVUS_ENABLE_PROFILING
         ProfilerStop();

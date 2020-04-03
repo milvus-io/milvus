@@ -31,11 +31,11 @@ static constexpr int64_t INSERT_LOOP = 1000;
 
 milvus::engine::meta::CollectionSchema
 BuildTableSchema() {
-    milvus::engine::meta::CollectionSchema table_info;
-    table_info.dimension_ = TABLE_DIM;
-    table_info.collection_id_ = TABLE_NAME;
-    table_info.engine_type_ = (int)milvus::engine::EngineType::FAISS_IDMAP;
-    return table_info;
+    milvus::engine::meta::CollectionSchema collection_info;
+    collection_info.dimension_ = TABLE_DIM;
+    collection_info.collection_id_ = TABLE_NAME;
+    collection_info.engine_type_ = (int)milvus::engine::EngineType::FAISS_IDMAP;
+    return collection_info;
 }
 
 void
@@ -55,14 +55,14 @@ BuildVectors(uint64_t n, uint64_t batch_index, milvus::engine::VectorsData& vect
 }  // namespace
 
 TEST_F(MySqlDBTest, DB_TEST) {
-    milvus::engine::meta::CollectionSchema table_info = BuildTableSchema();
-    auto stat = db_->CreateTable(table_info);
+    milvus::engine::meta::CollectionSchema collection_info = BuildTableSchema();
+    auto stat = db_->CreateCollection(collection_info);
 
-    milvus::engine::meta::CollectionSchema table_info_get;
-    table_info_get.collection_id_ = TABLE_NAME;
-    stat = db_->DescribeTable(table_info_get);
+    milvus::engine::meta::CollectionSchema collection_info_get;
+    collection_info_get.collection_id_ = TABLE_NAME;
+    stat = db_->DescribeCollection(collection_info_get);
     ASSERT_TRUE(stat.ok());
-    ASSERT_EQ(table_info_get.dimension_, TABLE_DIM);
+    ASSERT_EQ(collection_info_get.dimension_, TABLE_DIM);
 
     uint64_t qb = 5;
     milvus::engine::VectorsData qxb;
@@ -134,20 +134,20 @@ TEST_F(MySqlDBTest, DB_TEST) {
     search.join();
 
     uint64_t count;
-    stat = db_->GetTableRowCount(TABLE_NAME, count);
+    stat = db_->GetCollectionRowCount(TABLE_NAME, count);
     ASSERT_TRUE(stat.ok());
     ASSERT_GT(count, 0);
 }
 
 TEST_F(MySqlDBTest, SEARCH_TEST) {
-    milvus::engine::meta::CollectionSchema table_info = BuildTableSchema();
-    auto stat = db_->CreateTable(table_info);
+    milvus::engine::meta::CollectionSchema collection_info = BuildTableSchema();
+    auto stat = db_->CreateCollection(collection_info);
 
-    milvus::engine::meta::CollectionSchema table_info_get;
-    table_info_get.collection_id_ = TABLE_NAME;
-    stat = db_->DescribeTable(table_info_get);
+    milvus::engine::meta::CollectionSchema collection_info_get;
+    collection_info_get.collection_id_ = TABLE_NAME;
+    stat = db_->DescribeCollection(collection_info_get);
     ASSERT_TRUE(stat.ok());
-    ASSERT_EQ(table_info_get.dimension_, TABLE_DIM);
+    ASSERT_EQ(collection_info_get.dimension_, TABLE_DIM);
 
     // prepare raw data
     size_t nb = VECTOR_COUNT;
@@ -196,11 +196,11 @@ TEST_F(MySqlDBTest, SEARCH_TEST) {
 }
 
 TEST_F(MySqlDBTest, ARHIVE_DISK_CHECK) {
-    milvus::engine::meta::CollectionSchema table_info = BuildTableSchema();
-    auto stat = db_->CreateTable(table_info);
+    milvus::engine::meta::CollectionSchema collection_info = BuildTableSchema();
+    auto stat = db_->CreateCollection(collection_info);
 
     std::vector<milvus::engine::meta::CollectionSchema> table_schema_array;
-    stat = db_->AllTables(table_schema_array);
+    stat = db_->AllCollections(table_schema_array);
     ASSERT_TRUE(stat.ok());
     bool bfound = false;
     for (auto& schema : table_schema_array) {
@@ -213,20 +213,20 @@ TEST_F(MySqlDBTest, ARHIVE_DISK_CHECK) {
 
     fiu_init(0);
     FIU_ENABLE_FIU("MySQLMetaImpl.AllTable.null_connection");
-    stat = db_->AllTables(table_schema_array);
+    stat = db_->AllCollections(table_schema_array);
     ASSERT_FALSE(stat.ok());
 
     FIU_ENABLE_FIU("MySQLMetaImpl.AllTable.throw_exception");
-    stat = db_->AllTables(table_schema_array);
+    stat = db_->AllCollections(table_schema_array);
     ASSERT_FALSE(stat.ok());
     fiu_disable("MySQLMetaImpl.AllTable.null_connection");
     fiu_disable("MySQLMetaImpl.AllTable.throw_exception");
 
-    milvus::engine::meta::CollectionSchema table_info_get;
-    table_info_get.collection_id_ = TABLE_NAME;
-    stat = db_->DescribeTable(table_info_get);
+    milvus::engine::meta::CollectionSchema collection_info_get;
+    collection_info_get.collection_id_ = TABLE_NAME;
+    stat = db_->DescribeCollection(collection_info_get);
     ASSERT_TRUE(stat.ok());
-    ASSERT_EQ(table_info_get.dimension_, TABLE_DIM);
+    ASSERT_EQ(collection_info_get.dimension_, TABLE_DIM);
 
     milvus::engine::IDNumbers vector_ids;
     milvus::engine::IDNumbers target_ids;
@@ -263,18 +263,18 @@ TEST_F(MySqlDBTest, ARHIVE_DISK_CHECK) {
 }
 
 TEST_F(MySqlDBTest, DELETE_TEST) {
-    milvus::engine::meta::CollectionSchema table_info = BuildTableSchema();
-    auto stat = db_->CreateTable(table_info);
+    milvus::engine::meta::CollectionSchema collection_info = BuildTableSchema();
+    auto stat = db_->CreateCollection(collection_info);
     //    std::cout << stat.ToString() << std::endl;
 
-    milvus::engine::meta::CollectionSchema table_info_get;
-    table_info_get.collection_id_ = TABLE_NAME;
-    stat = db_->DescribeTable(table_info_get);
+    milvus::engine::meta::CollectionSchema collection_info_get;
+    collection_info_get.collection_id_ = TABLE_NAME;
+    stat = db_->DescribeCollection(collection_info_get);
     ASSERT_TRUE(stat.ok());
 
-    bool has_table = false;
-    db_->HasTable(TABLE_NAME, has_table);
-    ASSERT_TRUE(has_table);
+    bool has_collection = false;
+    db_->HasCollection(TABLE_NAME, has_collection);
+    ASSERT_TRUE(has_collection);
 
     milvus::engine::IDNumbers vector_ids;
 
@@ -294,19 +294,19 @@ TEST_F(MySqlDBTest, DELETE_TEST) {
     stat = db_->Flush();
     ASSERT_TRUE(stat.ok());
 
-    stat = db_->DropTable(TABLE_NAME);
+    stat = db_->DropCollection(TABLE_NAME);
     ////    std::cout << "5 sec start" << std::endl;
     //    std::this_thread::sleep_for(std::chrono::seconds(5));
     ////    std::cout << "5 sec finish" << std::endl;
     ASSERT_TRUE(stat.ok());
     //
-    db_->HasTable(TABLE_NAME, has_table);
-    ASSERT_FALSE(has_table);
+    db_->HasCollection(TABLE_NAME, has_collection);
+    ASSERT_FALSE(has_collection);
 }
 
 TEST_F(MySqlDBTest, PARTITION_TEST) {
-    milvus::engine::meta::CollectionSchema table_info = BuildTableSchema();
-    auto stat = db_->CreateTable(table_info);
+    milvus::engine::meta::CollectionSchema collection_info = BuildTableSchema();
+    auto stat = db_->CreateCollection(collection_info);
     ASSERT_TRUE(stat.ok());
 
     // create partition and insert data
@@ -359,14 +359,14 @@ TEST_F(MySqlDBTest, PARTITION_TEST) {
     }
 
     {  // build index
-        milvus::engine::TableIndex index;
+        milvus::engine::CollectionIndex index;
         index.engine_type_ = (int)milvus::engine::EngineType::FAISS_IVFFLAT;
         index.metric_type_ = (int)milvus::engine::MetricType::L2;
-        stat = db_->CreateIndex(table_info.collection_id_, index);
+        stat = db_->CreateIndex(collection_info.collection_id_, index);
         ASSERT_TRUE(stat.ok());
 
         uint64_t row_count = 0;
-        stat = db_->GetTableRowCount(TABLE_NAME, row_count);
+        stat = db_->GetCollectionRowCount(TABLE_NAME, row_count);
         ASSERT_TRUE(stat.ok());
         ASSERT_EQ(row_count, INSERT_BATCH * PARTITION_COUNT);
     }
@@ -410,18 +410,18 @@ TEST_F(MySqlDBTest, PARTITION_TEST) {
         stat = db_->CreatePartition(collection_name, "", "6");
         ASSERT_TRUE(stat.ok());
 
-        // ensure DescribeTable failed
-        FIU_ENABLE_FIU("MySQLMetaImpl.DescribeTable.throw_exception");
+        // ensure DescribeCollection failed
+        FIU_ENABLE_FIU("MySQLMetaImpl.DescribeCollection.throw_exception");
         stat = db_->CreatePartition(collection_name, "", "7");
         ASSERT_FALSE(stat.ok());
-        fiu_disable("MySQLMetaImpl.DescribeTable.throw_exception");
+        fiu_disable("MySQLMetaImpl.DescribeCollection.throw_exception");
 
         //Drop partition will failed,since it firstly drop partition meta collection.
-        FIU_ENABLE_FIU("MySQLMetaImpl.DropTable.null_connection");
+        FIU_ENABLE_FIU("MySQLMetaImpl.DropCollection.null_connection");
         stat = db_->DropPartition(collection_name + "_5");
         //TODO(sjh): add assert expr, since DropPartion always return Status::OK() for now.
         //ASSERT_TRUE(stat.ok());
-        fiu_disable("MySQLMetaImpl.DropTable.null_connection");
+        fiu_disable("MySQLMetaImpl.DropCollection.null_connection");
 
         std::vector<milvus::engine::meta::CollectionSchema> partition_schema_array;
         stat = db_->ShowPartitions(collection_name, partition_schema_array);
@@ -436,9 +436,9 @@ TEST_F(MySqlDBTest, PARTITION_TEST) {
         stat = db_->ShowPartitions(collection_name, partition_schema_array);
         ASSERT_FALSE(stat.ok());
 
-        FIU_ENABLE_FIU("MySQLMetaImpl.DropTable.throw_exception");
+        FIU_ENABLE_FIU("MySQLMetaImpl.DropCollection.throw_exception");
         stat = db_->DropPartition(collection_name + "_4");
-        fiu_disable("MySQLMetaImpl.DropTable.throw_exception");
+        fiu_disable("MySQLMetaImpl.DropCollection.throw_exception");
 
         stat = db_->DropPartition(collection_name + "_0");
         ASSERT_TRUE(stat.ok());
@@ -469,15 +469,15 @@ TEST_F(MySqlDBTest, PARTITION_TEST) {
     }
 
     {
-        FIU_ENABLE_FIU("MySQLMetaImpl.DropTableIndex.null_connection");
+        FIU_ENABLE_FIU("MySQLMetaImpl.DropCollectionIndex.null_connection");
         stat = db_->DropIndex(collection_name);
         ASSERT_FALSE(stat.ok());
-        fiu_disable("MySQLMetaImpl.DropTableIndex.null_connection");
+        fiu_disable("MySQLMetaImpl.DropCollectionIndex.null_connection");
 
-        FIU_ENABLE_FIU("MySQLMetaImpl.DropTableIndex.throw_exception");
+        FIU_ENABLE_FIU("MySQLMetaImpl.DropCollectionIndex.throw_exception");
         stat = db_->DropIndex(collection_name);
         ASSERT_FALSE(stat.ok());
-        fiu_disable("MySQLMetaImpl.DropTableIndex.throw_exception");
+        fiu_disable("MySQLMetaImpl.DropCollectionIndex.throw_exception");
 
         stat = db_->DropIndex(collection_name);
         ASSERT_TRUE(stat.ok());

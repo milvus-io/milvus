@@ -13,27 +13,28 @@
 
 #include <memory>
 #include <string>
-#include <vector>
 
 #include "server/delivery/request/BaseRequest.h"
 
 namespace milvus {
 namespace server {
 
-class ShowTablesRequest : public BaseRequest {
+class DescribeCollectionRequest : public BaseRequest {
  public:
     static BaseRequestPtr
-    Create(const std::shared_ptr<milvus::server::Context>& context, std::vector<std::string>& table_name_list);
+    Create(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name,
+           CollectionSchema& schema);
 
  protected:
-    ShowTablesRequest(const std::shared_ptr<milvus::server::Context>& context,
-                      std::vector<std::string>& table_name_list);
+    DescribeCollectionRequest(const std::shared_ptr<milvus::server::Context>& context,
+                              const std::string& collection_name, CollectionSchema& schema);
 
     Status
     OnExecute() override;
 
  private:
-    std::vector<std::string>& table_name_list_;
+    const std::string collection_name_;
+    CollectionSchema& schema_;
 };
 
 }  // namespace server

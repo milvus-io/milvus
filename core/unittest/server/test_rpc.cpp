@@ -192,7 +192,7 @@ CurrentTmDate(int64_t offset_day = 0) {
 
 }  // namespace
 
-TEST_F(RpcHandlerTest, HAS_TABLE_TEST) {
+TEST_F(RpcHandlerTest, HAS_COLLECTION_TEST) {
     ::grpc::ServerContext context;
     handler->SetContext(&context, dummy_context);
     handler->RegisterRequestHandler(milvus::server::RequestHandler());
@@ -207,10 +207,10 @@ TEST_F(RpcHandlerTest, HAS_TABLE_TEST) {
 
     fiu_init(0);
 
-    fiu_enable("HasTableRequest.OnExecute.throw_std_exception", 1, NULL, 0);
+    fiu_enable("HasCollectionRequest.OnExecute.throw_std_exception", 1, NULL, 0);
     handler->HasTable(&context, &request, &reply);
     ASSERT_NE(reply.status().error_code(), ::milvus::grpc::ErrorCode::SUCCESS);
-    fiu_disable("HasTableRequest.OnExecute.throw_std_exception");
+    fiu_disable("HasCollectionRequest.OnExecute.throw_std_exception");
 }
 
 TEST_F(RpcHandlerTest, INDEX_TEST) {
@@ -238,10 +238,10 @@ TEST_F(RpcHandlerTest, INDEX_TEST) {
     //    ASSERT_EQ(error_code, ::milvus::grpc::ErrorCode::SUCCESS);
 
     fiu_init(0);
-    fiu_enable("CreateIndexRequest.OnExecute.not_has_table", 1, NULL, 0);
+    fiu_enable("CreateIndexRequest.OnExecute.not_has_collection", 1, NULL, 0);
     grpc_status = handler->CreateIndex(&context, &request, &response);
     ASSERT_TRUE(grpc_status.ok());
-    fiu_disable("CreateIndexRequest.OnExecute.not_has_table");
+    fiu_disable("CreateIndexRequest.OnExecute.not_has_collection");
 
     fiu_enable("CreateIndexRequest.OnExecute.throw_std.exception", 1, NULL, 0);
     grpc_status = handler->CreateIndex(&context, &request, &response);
@@ -673,13 +673,13 @@ TEST_F(RpcHandlerTest, TABLES_TEST) {
     ASSERT_EQ(status.error_code(), ::grpc::Status::OK.error_code());
 
     fiu_init(0);
-    fiu_enable("DescribeTableRequest.OnExecute.describe_table_fail", 1, NULL, 0);
+    fiu_enable("DescribeCollectionRequest.OnExecute.describe_table_fail", 1, NULL, 0);
     handler->DescribeTable(&context, &collection_name, &table_schema);
-    fiu_disable("DescribeTableRequest.OnExecute.describe_table_fail");
+    fiu_disable("DescribeCollectionRequest.OnExecute.describe_table_fail");
 
-    fiu_enable("DescribeTableRequest.OnExecute.throw_std_exception", 1, NULL, 0);
+    fiu_enable("DescribeCollectionRequest.OnExecute.throw_std_exception", 1, NULL, 0);
     handler->DescribeTable(&context, &collection_name, &table_schema);
-    fiu_disable("DescribeTableRequest.OnExecute.throw_std_exception");
+    fiu_disable("DescribeCollectionRequest.OnExecute.throw_std_exception");
 
     ::milvus::grpc::InsertParam request;
     std::vector<std::vector<float>> record_array;
@@ -723,14 +723,14 @@ TEST_F(RpcHandlerTest, TABLES_TEST) {
     ASSERT_EQ(status.error_code(), ::grpc::Status::OK.error_code());
 
     // show collection info
-    ::milvus::grpc::TableInfo table_info;
-    status = handler->ShowTableInfo(&context, &collection_name, &table_info);
+    ::milvus::grpc::TableInfo collection_info;
+    status = handler->ShowTableInfo(&context, &collection_name, &collection_info);
     ASSERT_EQ(status.error_code(), ::grpc::Status::OK.error_code());
 
     fiu_init(0);
-    fiu_enable("ShowTablesRequest.OnExecute.show_tables_fail", 1, NULL, 0);
+    fiu_enable("ShowCollectionsRequest.OnExecute.show_tables_fail", 1, NULL, 0);
     handler->ShowTables(&context, &cmd, &table_name_list);
-    fiu_disable("ShowTablesRequest.OnExecute.show_tables_fail");
+    fiu_disable("ShowCollectionsRequest.OnExecute.show_tables_fail");
 
     // Count Collection
     ::milvus::grpc::TableRowCount count;
@@ -741,17 +741,17 @@ TEST_F(RpcHandlerTest, TABLES_TEST) {
     ASSERT_EQ(status.error_code(), ::grpc::Status::OK.error_code());
     //    ASSERT_EQ(count.table_row_count(), vector_ids.vector_id_array_size());
     fiu_init(0);
-    fiu_enable("CountTableRequest.OnExecute.db_not_found", 1, NULL, 0);
+    fiu_enable("CountCollectionRequest.OnExecute.db_not_found", 1, NULL, 0);
     status = handler->CountTable(&context, &collection_name, &count);
-    fiu_disable("CountTableRequest.OnExecute.db_not_found");
+    fiu_disable("CountCollectionRequest.OnExecute.db_not_found");
 
-    fiu_enable("CountTableRequest.OnExecute.status_error", 1, NULL, 0);
+    fiu_enable("CountCollectionRequest.OnExecute.status_error", 1, NULL, 0);
     status = handler->CountTable(&context, &collection_name, &count);
-    fiu_disable("CountTableRequest.OnExecute.status_error");
+    fiu_disable("CountCollectionRequest.OnExecute.status_error");
 
-    fiu_enable("CountTableRequest.OnExecute.throw_std_exception", 1, NULL, 0);
+    fiu_enable("CountCollectionRequest.OnExecute.throw_std_exception", 1, NULL, 0);
     status = handler->CountTable(&context, &collection_name, &count);
-    fiu_disable("CountTableRequest.OnExecute.throw_std_exception");
+    fiu_disable("CountCollectionRequest.OnExecute.throw_std_exception");
 
     // Preload Collection
     collection_name.Clear();
@@ -760,38 +760,38 @@ TEST_F(RpcHandlerTest, TABLES_TEST) {
     status = handler->PreloadTable(&context, &collection_name, &response);
     ASSERT_EQ(status.error_code(), ::grpc::Status::OK.error_code());
 
-    fiu_enable("PreloadTableRequest.OnExecute.preload_table_fail", 1, NULL, 0);
+    fiu_enable("PreloadCollectionRequest.OnExecute.preload_table_fail", 1, NULL, 0);
     handler->PreloadTable(&context, &collection_name, &response);
-    fiu_disable("PreloadTableRequest.OnExecute.preload_table_fail");
+    fiu_disable("PreloadCollectionRequest.OnExecute.preload_table_fail");
 
-    fiu_enable("PreloadTableRequest.OnExecute.throw_std_exception", 1, NULL, 0);
+    fiu_enable("PreloadCollectionRequest.OnExecute.throw_std_exception", 1, NULL, 0);
     handler->PreloadTable(&context, &collection_name, &response);
-    fiu_disable("PreloadTableRequest.OnExecute.throw_std_exception");
+    fiu_disable("PreloadCollectionRequest.OnExecute.throw_std_exception");
 
     fiu_init(0);
-    fiu_enable("CreateTableRequest.OnExecute.invalid_index_file_size", 1, NULL, 0);
+    fiu_enable("CreateCollectionRequest.OnExecute.invalid_index_file_size", 1, NULL, 0);
     tableschema.set_table_name(tablename);
     handler->CreateTable(&context, &tableschema, &response);
     ASSERT_NE(response.error_code(), ::grpc::Status::OK.error_code());
-    fiu_disable("CreateTableRequest.OnExecute.invalid_index_file_size");
+    fiu_disable("CreateCollectionRequest.OnExecute.invalid_index_file_size");
 
-    fiu_enable("CreateTableRequest.OnExecute.db_already_exist", 1, NULL, 0);
+    fiu_enable("CreateCollectionRequest.OnExecute.db_already_exist", 1, NULL, 0);
     tableschema.set_table_name(tablename);
     handler->CreateTable(&context, &tableschema, &response);
     ASSERT_NE(response.error_code(), ::grpc::Status::OK.error_code());
-    fiu_disable("CreateTableRequest.OnExecute.db_already_exist");
+    fiu_disable("CreateCollectionRequest.OnExecute.db_already_exist");
 
-    fiu_enable("CreateTableRequest.OnExecute.create_table_fail", 1, NULL, 0);
+    fiu_enable("CreateCollectionRequest.OnExecute.create_table_fail", 1, NULL, 0);
     tableschema.set_table_name(tablename);
     handler->CreateTable(&context, &tableschema, &response);
     ASSERT_NE(response.error_code(), ::grpc::Status::OK.error_code());
-    fiu_disable("CreateTableRequest.OnExecute.create_table_fail");
+    fiu_disable("CreateCollectionRequest.OnExecute.create_table_fail");
 
-    fiu_enable("CreateTableRequest.OnExecute.throw_std_exception", 1, NULL, 0);
+    fiu_enable("CreateCollectionRequest.OnExecute.throw_std_exception", 1, NULL, 0);
     tableschema.set_table_name(tablename);
     handler->CreateTable(&context, &tableschema, &response);
     ASSERT_NE(response.error_code(), ::grpc::Status::OK.error_code());
-    fiu_disable("CreateTableRequest.OnExecute.throw_std_exception");
+    fiu_disable("CreateCollectionRequest.OnExecute.throw_std_exception");
 
     // Drop collection
     collection_name.set_table_name("");
@@ -799,20 +799,20 @@ TEST_F(RpcHandlerTest, TABLES_TEST) {
     ::grpc::Status grpc_status = handler->DropTable(&context, &collection_name, &response);
     collection_name.set_table_name(tablename);
 
-    fiu_enable("DropTableRequest.OnExecute.db_not_found", 1, NULL, 0);
+    fiu_enable("DropCollectionRequest.OnExecute.db_not_found", 1, NULL, 0);
     handler->DropTable(&context, &collection_name, &response);
     ASSERT_NE(response.error_code(), ::grpc::Status::OK.error_code());
-    fiu_disable("DropTableRequest.OnExecute.db_not_found");
+    fiu_disable("DropCollectionRequest.OnExecute.db_not_found");
 
-    fiu_enable("DropTableRequest.OnExecute.describe_table_fail", 1, NULL, 0);
+    fiu_enable("DropCollectionRequest.OnExecute.describe_table_fail", 1, NULL, 0);
     handler->DropTable(&context, &collection_name, &response);
     ASSERT_NE(response.error_code(), ::grpc::Status::OK.error_code());
-    fiu_disable("DropTableRequest.OnExecute.describe_table_fail");
+    fiu_disable("DropCollectionRequest.OnExecute.describe_table_fail");
 
-    fiu_enable("DropTableRequest.OnExecute.throw_std_exception", 1, NULL, 0);
+    fiu_enable("DropCollectionRequest.OnExecute.throw_std_exception", 1, NULL, 0);
     handler->DropTable(&context, &collection_name, &response);
     ASSERT_NE(response.error_code(), ::grpc::Status::OK.error_code());
-    fiu_disable("DropTableRequest.OnExecute.throw_std_exception");
+    fiu_disable("DropCollectionRequest.OnExecute.throw_std_exception");
 
     grpc_status = handler->DropTable(&context, &collection_name, &response);
     ASSERT_EQ(grpc_status.error_code(), ::grpc::Status::OK.error_code());
@@ -825,10 +825,10 @@ TEST_F(RpcHandlerTest, TABLES_TEST) {
     handler->CreateTable(&context, &tableschema, &response);
     ASSERT_EQ(response.error_code(), ::grpc::Status::OK.error_code());
 
-    fiu_enable("DropTableRequest.OnExecute.drop_table_fail", 1, NULL, 0);
+    fiu_enable("DropCollectionRequest.OnExecute.drop_table_fail", 1, NULL, 0);
     handler->DropTable(&context, &collection_name, &response);
     ASSERT_NE(response.error_code(), ::grpc::Status::OK.error_code());
-    fiu_disable("DropTableRequest.OnExecute.drop_table_fail");
+    fiu_disable("DropCollectionRequest.OnExecute.drop_table_fail");
 
     handler->DropTable(&context, &collection_name, &response);
 }

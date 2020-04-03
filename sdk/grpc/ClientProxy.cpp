@@ -198,7 +198,7 @@ ClientProxy::HasCollection(const std::string& collection_name) {
     Status status = Status::OK();
     ::milvus::grpc::TableName grpc_collection_name;
     grpc_collection_name.set_table_name(collection_name);
-    bool result = client_ptr_->HasTable(grpc_collection_name, status);
+    bool result = client_ptr_->HasCollection(grpc_collection_name, status);
     return result;
 }
 

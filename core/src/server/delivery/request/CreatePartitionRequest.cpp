@@ -61,7 +61,7 @@ CreatePartitionRequest::OnExecute() {
         // only process root collection, ignore partition collection
         engine::meta::CollectionSchema table_schema;
         table_schema.collection_id_ = collection_name_;
-        status = DBWrapper::DB()->DescribeTable(table_schema);
+        status = DBWrapper::DB()->DescribeCollection(table_schema);
         fiu_do_on("CreatePartitionRequest.OnExecute.invalid_partition_tags",
                   status = Status(milvus::SERVER_UNEXPECTED_ERROR, ""));
         if (!status.ok()) {
@@ -71,7 +71,7 @@ CreatePartitionRequest::OnExecute() {
                 return status;
             }
         } else {
-            if (!table_schema.owner_table_.empty()) {
+            if (!table_schema.owner_collection_.empty()) {
                 return Status(SERVER_INVALID_TABLE_NAME, TableNotExistMsg(collection_name_));
             }
         }

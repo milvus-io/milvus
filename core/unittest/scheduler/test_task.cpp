@@ -109,8 +109,8 @@ TEST(TaskTest, TEST_TASK) {
     build_index_task.Execute();
     fiu_disable("XBuildIndexTask.Execute.build_index_fail");
 
-    // always enable 'has_table'
-    fiu_enable("XBuildIndexTask.Execute.has_table", 1, NULL, 0);
+    // always enable 'has_collection'
+    fiu_enable("XBuildIndexTask.Execute.has_collection", 1, NULL, 0);
     build_index_task.to_index_engine_ =
         EngineFactory::Build(file->dimension_, file->location_, (EngineType)file->engine_type_,
                              (MetricType)file->metric_type_, json);
@@ -138,7 +138,7 @@ TEST(TaskTest, TEST_TASK) {
     fiu_disable("XBuildIndexTask.Execute.update_table_file_fail");
 
     fiu_disable("XBuildIndexTask.Execute.throw_std_exception");
-    fiu_disable("XBuildIndexTask.Execute.has_table");
+    fiu_disable("XBuildIndexTask.Execute.has_collection");
     fiu_disable("XBuildIndexTask.Execute.create_table_success");
     build_index_task.Execute();
 

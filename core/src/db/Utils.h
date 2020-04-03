@@ -26,12 +26,12 @@ int64_t
 GetMicroSecTimeStamp();
 
 Status
-CreateTablePath(const DBMetaOptions& options, const std::string& collection_id);
+CreateCollectionPath(const DBMetaOptions& options, const std::string& collection_id);
 Status
 DeleteTablePath(const DBMetaOptions& options, const std::string& collection_id, bool force = true);
 
 Status
-CreateTableFilePath(const DBMetaOptions& options, meta::SegmentSchema& table_file);
+CreateCollectionFilePath(const DBMetaOptions& options, meta::SegmentSchema& table_file);
 Status
 GetTableFilePath(const DBMetaOptions& options, meta::SegmentSchema& table_file);
 Status
@@ -43,7 +43,7 @@ Status
 GetParentPath(const std::string& path, std::string& parent_path);
 
 bool
-IsSameIndex(const TableIndex& index1, const TableIndex& index2);
+IsSameIndex(const CollectionIndex& index1, const CollectionIndex& index2);
 
 bool
 IsRawIndexType(int32_t type);

@@ -108,7 +108,7 @@ struct PartitionStat {
     std::vector<SegmentStat> segments_stat_;
 };
 
-struct TableInfo {
+struct CollectionInfo {
     int64_t total_row_num_ = 0;
     std::vector<PartitionStat> partitions_stat_;
 };
@@ -128,14 +128,14 @@ class BaseRequest {
         kGetVectorIDs,
 
         // collection operations
-        kShowTables = 300,
-        kCreateTable,
-        kHasTable,
-        kDescribeTable,
-        kCountTable,
-        kShowTableInfo,
-        kDropTable,
-        kPreloadTable,
+        kShowCollections = 300,
+        kCreateCollection,
+        kHasCollection,
+        kDescribeCollection,
+        kCountCollection,
+        kShowCollectionInfo,
+        kDropCollection,
+        kPreloadCollection,
 
         // partition operations
         kCreatePartition = 400,

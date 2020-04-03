@@ -62,7 +62,7 @@ class WalManager {
      * @retval lsn
      */
     uint64_t
-    CreateTable(const std::string& collection_id);
+    CreateCollection(const std::string& collection_id);
 
     /*
      * Drop collection
@@ -70,7 +70,7 @@ class WalManager {
      * @retval none
      */
     void
-    DropTable(const std::string& collection_id);
+    DropCollection(const std::string& collection_id);
 
     /*
      * Collection is flushed
@@ -78,7 +78,7 @@ class WalManager {
      * @param lsn: flushed lsn
      */
     void
-    TableFlushed(const std::string& collection_id, uint64_t lsn);
+    CollectionFlushed(const std::string& collection_id, uint64_t lsn);
 
     /*
      * Insert
