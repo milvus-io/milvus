@@ -159,7 +159,7 @@ ValidationUtil::ValidateTableDimension(int64_t dimension, int64_t metric_type) {
 }
 
 Status
-ValidationUtil::ValidateTableIndexType(int32_t index_type) {
+ValidationUtil::ValidateCollectionIndexType(int32_t index_type) {
     int engine_type = static_cast<int>(engine::EngineType(index_type));
     if (engine_type <= 0 || engine_type > static_cast<int>(engine::EngineType::MAX_VALUE)) {
         std::string msg = "Invalid index type: " + std::to_string(index_type) + ". " +
@@ -359,7 +359,7 @@ ValidationUtil::ValidateVectorData(const engine::VectorsData& vectors,
 }
 
 Status
-ValidationUtil::ValidateTableIndexFileSize(int64_t index_file_size) {
+ValidationUtil::ValidateCollectionIndexFileSize(int64_t index_file_size) {
     if (index_file_size <= 0 || index_file_size > INDEX_FILE_SIZE_LIMIT) {
         std::string msg = "Invalid index file size: " + std::to_string(index_file_size) + ". " +
                           "The index file size must be within the range of 1 ~ " +
@@ -372,7 +372,7 @@ ValidationUtil::ValidateTableIndexFileSize(int64_t index_file_size) {
 }
 
 Status
-ValidationUtil::ValidateTableIndexMetricType(int32_t metric_type) {
+ValidationUtil::ValidateCollectionIndexMetricType(int32_t metric_type) {
     if (metric_type <= 0 || metric_type > static_cast<int32_t>(engine::MetricType::MAX_VALUE)) {
         std::string msg = "Invalid index metric type: " + std::to_string(metric_type) + ". " +
                           "Make sure the metric type is in MetricType list.";

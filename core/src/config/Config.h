@@ -214,7 +214,7 @@ class Config {
     Status
     CheckDBConfigBackendUrl(const std::string& value);
     Status
-    CheckDBConfigPreloadTable(const std::string& value);
+    CheckDBConfigPreloadCollection(const std::string& value);
     Status
     CheckDBConfigArchiveDiskThreshold(const std::string& value);
     Status
@@ -329,7 +329,7 @@ class Config {
     Status
     GetDBConfigArchiveDaysThreshold(int64_t& value);
     Status
-    GetDBConfigPreloadTable(std::string& value);
+    GetDBConfigPreloadCollection(std::string& value);
     Status
     GetDBConfigAutoFlushInterval(int64_t& value);
 
@@ -428,7 +428,7 @@ class Config {
     Status
     SetDBConfigBackendUrl(const std::string& value);
     Status
-    SetDBConfigPreloadTable(const std::string& value);
+    SetDBConfigPreloadCollection(const std::string& value);
     Status
     SetDBConfigArchiveDiskThreshold(const std::string& value);
     Status

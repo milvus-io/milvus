@@ -56,7 +56,7 @@ struct CollectionSchema {
     int32_t engine_type_ = DEFAULT_ENGINE_TYPE;
     std::string index_params_ = "{}";
     int32_t metric_type_ = DEFAULT_METRIC_TYPE;
-    std::string owner_table_;
+    std::string owner_collection_;
     std::string partition_tag_;
     std::string version_ = CURRENT_VERSION;
     uint64_t flush_lsn_ = 0;

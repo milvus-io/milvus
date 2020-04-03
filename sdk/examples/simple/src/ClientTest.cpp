@@ -80,8 +80,8 @@ ClientTest::CreateCollection(const std::string& collection_name, int64_t dim, mi
     std::cout << "CreateCollection function call status: " << stat.message() << std::endl;
     milvus_sdk::Utils::PrintCollectionParam(collection_param);
 
-    bool has_table = conn_->HasCollection(collection_param.collection_name);
-    if (has_table) {
+    bool has_collection = conn_->HasCollection(collection_param.collection_name);
+    if (has_collection) {
         std::cout << "Collection is created" << std::endl;
     }
 }
