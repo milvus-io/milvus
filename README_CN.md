@@ -25,6 +25,8 @@ Milvus 的架构如下：
 
 若要了解 Milvus 详细介绍和整体架构，请访问 [Milvus 简介](https://www.milvus.io/cn/docs/about_milvus/overview.md)。您可以通过 [版本发布说明](https://www.milvus.io/cn/docs/releases/release_notes.md) 获取最新版本的功能和更新。
 
+Milvus是一个[LF AI基金会](https://lfai.foundation/)的孵化项目。获取更多，请访问[lfai.foundation](https://lfai.foundation/)。
+
 ## Milvus 快速上手
 
 ### 安装 Milvus
