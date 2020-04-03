@@ -188,8 +188,10 @@ DBTest::SetUp() {
 
 void
 DBTest::TearDown() {
-    db_->Stop();
-    db_->DropAll();
+    if (db_) {
+        db_->Stop();
+        db_->DropAll();
+    }
 
     milvus::scheduler::JobMgrInst::GetInstance()->Stop();
     milvus::scheduler::SchedInst::GetInstance()->Stop();
@@ -309,7 +311,9 @@ MySqlMetaTest::SetUp() {
 
 void
 MySqlMetaTest::TearDown() {
-    impl_->DropAll();
+    if (impl_) {
+        impl_->DropAll();
+    }
 
     BaseTest::TearDown();
 

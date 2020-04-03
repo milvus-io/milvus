@@ -562,7 +562,7 @@ TEST_F(DeleteTest, delete_add_create_index) {
     // stat = db_->Flush();
     // ASSERT_TRUE(stat.ok());
     milvus::engine::TableIndex index;
-    index.engine_type_ = (int)milvus::engine::EngineType::FAISS_IVFSQ8;
+    index.engine_type_ = (int)milvus::engine::EngineType::FAISS_IVFFLAT;
     index.extra_params_ = {{"nlist", 100}};
     stat = db_->CreateIndex(table_info.collection_id_, index);
     ASSERT_TRUE(stat.ok());
