@@ -19,6 +19,7 @@ add_interval_time = 2
 vectors = gen_vectors(6000, dim)
 vectors = sklearn.preprocessing.normalize(vectors, axis=1, norm='l2')
 vectors = vectors.tolist()
+top_k = 1
 nprobe = 1
 epsilon = 0.001
 tag = "1970-01-01"
@@ -1198,7 +1199,7 @@ class TestSearchParamsInvalid(object):
         scope="function",
         params=gen_invaild_search_params()
     )
-    def get_invalid_searh_param(self, request, connect):
+    def get_invalid_search_param(self, request, connect):
         if str(connect._cmd("mode")[1]) == "CPU":
             if request.param["index_type"] == IndexType.IVF_SQ8H:
                 pytest.skip("sq8h not support in CPU mode")
@@ -1207,25 +1208,17 @@ class TestSearchParamsInvalid(object):
                 pytest.skip("ivfpq not support in GPU mode")
         return request.param
 
-    def test_search_with_invalid_params(self, connect, collection, get_invalid_searh_param):
+    def test_search_with_invalid_params(self, connect, collection, get_invalid_search_param):
         '''
         target: test search fuction, with invalid search params
         method: search with params
         expected: search status not ok, and the connection is normal
         '''
-        index_type = get_invalid_searh_param["index_type"]
-        search_param = get_invalid_searh_param["search_param"]
-
-        if index_type in [IndexType.IVFLAT, IndexType.IVF_SQ8, IndexType.IVF_SQ8H]:
-            connect.create_index(collection, index_type, {"nlist": 16384})
-        if (index_type == IndexType.IVF_PQ):
-            connect.create_index(collection, index_type, {"nlist": 16384, "m": 16})
-        if(index_type == IndexType.HNSW):
-            connect.create_index(collection, index_type, {"M": 16, "efConstruction": 500})
-        if (index_type == IndexType.RNSG):
-            connect.create_index(collection, index_type, {"search_length": 60, "out_degree": 50, "candidate_pool_size": 300, "knng": 100})
-
-        top_k = 1
+        index_type = get_invalid_search_param["index_type"]
+        search_param = get_invalid_search_param["search_param"]
+        for index in gen_simple_index():
+            if index_type == index["index_type"]:
+                connect.create_index(collection, index_type, index["index_param"])
         query_vecs = gen_vectors(1, dim)
         status, result = connect.search_vectors(collection, top_k, query_vecs, params=search_param)
         assert not status.OK()
