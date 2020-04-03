@@ -11,6 +11,7 @@
 
 #pragma once
 
+#include <memory>
 #include <string>
 #include "storage/IOWriter.h"
 
@@ -48,6 +49,8 @@ class S3IOWriter : public IOWriter {
     size_t len_;
     std::string buffer_;
 };
+
+using S3IOWriterPtr = std::shared_ptr<S3IOWriter>;
 
 }  // namespace storage
 }  // namespace milvus

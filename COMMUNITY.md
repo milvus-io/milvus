@@ -25,8 +25,8 @@ To become a TSC member, a committer must be sponsored by a TSC member and the sp
 
 The TSC members are listed below:
 
--   [@cxie](https://github.com/cxie)
--   [@JinHai-CN](https://github.com/JinHai-CN)
+-   [cxie](https://github.com/cxie)
+-   [JinHai-CN](https://github.com/JinHai-CN)
 
 ## Committers
 
@@ -44,7 +44,7 @@ To become a committer, a reviewer must have contributed broadly throughout the M
 
 The committers are listed below:
 
--   [@JinHai-CN](https://github.com/JinHai-CN)
+-   [JinHai-CN](https://github.com/JinHai-CN)
 
 ## Reviewers
 
@@ -61,11 +61,11 @@ To become a reviewer, a contributor must have provided continued and quality con
 
 The reviewers are listed below:
 
--   [@XuPeng-SH](https://github.com/XuPeng-SH)
--   [@yhmo](https://github.com/yhmo)
--   [@scsven](https://github.com/scsven)
--   [@cydrain](https://github.com/cydrain)
--   [@shengjun1985](https://github.com/shengjun1985)
+-   [XuPeng-SH](https://github.com/XuPeng-SH)
+-   [yhmo](https://github.com/yhmo)
+-   [scsven](https://github.com/scsven)
+-   [cydrain](https://github.com/cydrain)
+-   [shengjun1985](https://github.com/shengjun1985)
 
 ## Contributors
 
@@ -73,27 +73,27 @@ Contributors can be anyone who has successfully submitted at least one PR to the
 
 The contributors are listed below:
 
--   [@ZhifengZhang-CN](https://github.com/ZhifengZhang-CN)
--   [@tinkerlin](https://github.com/tinkerlin)
--   [@youny626](https://github.com/youny626)
--   [@fishpenguin](https://github.com/fishpenguin)
--   [@BossZou](https://github.com/BossZou)
--   [@del-zhenwu](https://github.com/del-zhenwu)
--   [@jielinxu](https://github.com/jielinxu)
--   [@yamasite](https://github.com/yamasite)
--   [@Yukikaze-CZR](https://github.com/Yukikaze-CZR)
--   [@Heisenberg-Y](https://github.com/Heisenberg-Y)
--   [@sahuang](https://github.com/sahuang)
--   [@op-hunter](https://github.com/op-hunter)
--   [@GuanyunFeng](https://github.com/GuanyunFeng)
--   [@thywdy](https://github.com/thywdy)
--   [@erdustiggen](https://github.com/erdustiggen)
--   [@akihoni](https://github.com/akihoni)
--   [@shiyu22](https://github.com/shiyu22)
--   [@shengjh](https://github.com/shengjh)
--   [@dvzubarev](https://github.com/dvzubarev)
--   [@aaronjin2010](https://github.com/aaronjin2010)
--   [@ReigenAraka](https://github.com/ReigenAraka)
--   [@JackLCL](https://github.com/JackLCL)
--   [@Bennu-Li](https://github.com/Bennu-Li)
--   [@ABNER-1](https://github.com/ABNER-1)
+-   [ZhifengZhang-CN](https://github.com/ZhifengZhang-CN)
+-   [tinkerlin](https://github.com/tinkerlin)
+-   [youny626](https://github.com/youny626)
+-   [fishpenguin](https://github.com/fishpenguin)
+-   [BossZou](https://github.com/BossZou)
+-   [del-zhenwu](https://github.com/del-zhenwu)
+-   [jielinxu](https://github.com/jielinxu)
+-   [yamasite](https://github.com/yamasite)
+-   [Yukikaze-CZR](https://github.com/Yukikaze-CZR)
+-   [Heisenberg-Y](https://github.com/Heisenberg-Y)
+-   [sahuang](https://github.com/sahuang)
+-   [op-hunter](https://github.com/op-hunter)
+-   [GuanyunFeng](https://github.com/GuanyunFeng)
+-   [thywdy](https://github.com/thywdy)
+-   [erdustiggen](https://github.com/erdustiggen)
+-   [akihoni](https://github.com/akihoni)
+-   [shiyu22](https://github.com/shiyu22)
+-   [shengjh](https://github.com/shengjh)
+-   [dvzubarev](https://github.com/dvzubarev)
+-   [aaronjin2010](https://github.com/aaronjin2010)
+-   [ReigenAraka](https://github.com/ReigenAraka)
+-   [JackLCL](https://github.com/JackLCL)
+-   [Bennu-Li](https://github.com/Bennu-Li)
+-   [ABNER-1](https://github.com/ABNER-1)

@@ -50,6 +50,7 @@ SegmentReader::Load() {
     try {
         fs_ptr_->operation_ptr_->CreateDirectory();
         default_codec.GetVectorsFormat()->read(fs_ptr_, segment_ptr_->vectors_ptr_);
+        // default_codec.GetVectorIndexFormat()->read(fs_ptr_, segment_ptr_->vector_index_ptr_);
         default_codec.GetDeletedDocsFormat()->read(fs_ptr_, segment_ptr_->deleted_docs_ptr_);
     } catch (std::exception& e) {
         return Status(DB_ERROR, e.what());
@@ -88,6 +89,20 @@ SegmentReader::LoadUids(std::vector<doc_id_t>& uids) {
 Status
 SegmentReader::GetSegment(SegmentPtr& segment_ptr) {
     segment_ptr = segment_ptr_;
+    return Status::OK();
+}
+
+Status
+SegmentReader::LoadVectorIndex(segment::VectorIndexPtr& vector_index_ptr) {
+    codec::DefaultCodec default_codec;
+    try {
+        fs_ptr_->operation_ptr_->CreateDirectory();
+        default_codec.GetVectorIndexFormat()->read(fs_ptr_, vector_index_ptr);
+    } catch (std::exception& e) {
+        std::string err_msg = "Failed to load vector index: " + std::string(e.what());
+        ENGINE_LOG_ERROR << err_msg;
+        return Status(DB_ERROR, err_msg);
+    }
     return Status::OK();
 }
 

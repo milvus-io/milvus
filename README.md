@@ -23,6 +23,8 @@ Milvus has the following architecture:
 
 For more detailed introduction of Milvus and its architecture, see [Milvus overview](https://www.milvus.io/docs/about_milvus/overview.md). Keep up-to-date with newest releases and latest updates by reading Milvus [release notes](https://www.milvus.io/docs/releases/release_notes.md).
 
+Milvus is an [LF AI Foundation](https://lfai.foundation/) incubation project. Learn more at [lfai.foundation](https://lfai.foundation/).
+
 ## Get started
 
 ### Install Milvus

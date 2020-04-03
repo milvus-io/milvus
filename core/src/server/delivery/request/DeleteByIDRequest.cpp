@@ -68,15 +68,8 @@ DeleteByIDRequest::OnExecute() {
         }
 
         // Check collection's index type supports delete
-        if (table_schema.engine_type_ != (int32_t)engine::EngineType::FAISS_IDMAP &&
-            table_schema.engine_type_ != (int32_t)engine::EngineType::FAISS_BIN_IDMAP &&
-            table_schema.engine_type_ != (int32_t)engine::EngineType::HNSW &&
-            table_schema.engine_type_ != (int32_t)engine::EngineType::ANNOY &&
-            table_schema.engine_type_ != (int32_t)engine::EngineType::FAISS_IVFFLAT &&
-            table_schema.engine_type_ != (int32_t)engine::EngineType::FAISS_BIN_IVFFLAT &&
-            table_schema.engine_type_ != (int32_t)engine::EngineType::FAISS_IVFSQ8 &&
-            table_schema.engine_type_ != (int32_t)engine::EngineType::FAISS_PQ &&
-            table_schema.engine_type_ != (int32_t)engine::EngineType::FAISS_IVFSQ8H) {
+        if (table_schema.engine_type_ == (int32_t)engine::EngineType::SPTAG_BKT ||
+            table_schema.engine_type_ == (int32_t)engine::EngineType::SPTAG_KDT) {
             std::string err_msg =
                 "Index type " + std::to_string(table_schema.engine_type_) + " does not support delete operation";
             SERVER_LOG_ERROR << err_msg;

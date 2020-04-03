@@ -18,8 +18,6 @@
 #include <fiu-local.h>
 #include <fiu-control.h>
 
-#define private public
-
 #include "cache/CpuCacheMgr.h"
 #include "config/Config.h"
 #include "metrics/utils.h"

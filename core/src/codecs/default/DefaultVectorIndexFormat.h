@@ -17,55 +17,42 @@
 
 #pragma once
 
-#include <memory>
+#include <mutex>
 #include <string>
-#include "knowhere/index/vector_index/VecIndex.h"
+
+#include "codecs/VectorIndexFormat.h"
 
 namespace milvus {
-namespace segment {
+namespace codec {
 
-class VectorIndex {
+class DefaultVectorIndexFormat : public VectorIndexFormat {
  public:
-    explicit VectorIndex(knowhere::VecIndexPtr index_ptr) : index_ptr_(index_ptr) {
-    }
-
-    VectorIndex() = default;
-
-    knowhere::VecIndexPtr
-    GetVectorIndex() const {
-        return index_ptr_;
-    }
+    DefaultVectorIndexFormat() = default;
 
     void
-    SetVectorIndex(const knowhere::VecIndexPtr& index_ptr) {
-        index_ptr_ = index_ptr;
-    }
+    read(const storage::FSHandlerPtr& fs_ptr, segment::VectorIndexPtr& vector_index) override;
 
     void
-    SetName(const std::string& name) {
-        name_ = name;
-    }
-
-    const std::string&
-    GetName() const {
-        return name_;
-    }
+    write(const storage::FSHandlerPtr& fs_ptr, const segment::VectorIndexPtr& vector_index) override;
 
     // No copy and move
-    VectorIndex(const VectorIndex&) = delete;
-    VectorIndex(VectorIndex&&) = delete;
+    DefaultVectorIndexFormat(const DefaultVectorIndexFormat&) = delete;
+    DefaultVectorIndexFormat(DefaultVectorIndexFormat&&) = delete;
 
-    VectorIndex&
-    operator=(const VectorIndex&) = delete;
-    VectorIndex&
-    operator=(VectorIndex&&) = delete;
+    DefaultVectorIndexFormat&
+    operator=(const DefaultVectorIndexFormat&) = delete;
+    DefaultVectorIndexFormat&
+    operator=(DefaultVectorIndexFormat&&) = delete;
 
  private:
-    knowhere::VecIndexPtr index_ptr_ = nullptr;
-    std::string name_;
+    knowhere::VecIndexPtr
+    read_internal(const storage::FSHandlerPtr& fs_ptr, const std::string& path);
+
+ private:
+    std::mutex mutex_;
+
+    const std::string vector_index_extension_ = "";
 };
 
-using VectorIndexPtr = std::shared_ptr<VectorIndex>;
-
-}  // namespace segment
+}  // namespace codec
 }  // namespace milvus

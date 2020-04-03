@@ -329,7 +329,6 @@ NsgIndex::GetNeighbors(const float* query, std::vector<Neighbor>& resset, Graph&
         KNOWHERE_THROW_MSG("Build Error, search_length > ntotal");
     }
 
-    // std::vector<node_t> init_ids;
     std::vector<node_t> init_ids(buffer_size);
     resset.resize(buffer_size);
     boost::dynamic_bitset<> has_calculated_dist{ntotal, 0};
@@ -342,8 +341,6 @@ NsgIndex::GetNeighbors(const float* query, std::vector<Neighbor>& resset, Graph&
 
         // Get all neighbors
         for (size_t i = 0; i < init_ids.size() && i < graph[navigation_point].size(); ++i) {
-            // for (size_t i = 0; i < graph[navigation_point].size(); ++i) {
-            // init_ids.push_back(graph[navigation_point][i]);
             init_ids[i] = graph[navigation_point][i];
             has_calculated_dist[init_ids[i]] = true;
             ++count;
@@ -352,7 +349,6 @@ NsgIndex::GetNeighbors(const float* query, std::vector<Neighbor>& resset, Graph&
             node_t id = rand_r(&seed) % ntotal;
             if (has_calculated_dist[id])
                 continue;  // duplicate id
-            // init_ids.push_back(id);
             init_ids[count] = id;
             ++count;
             has_calculated_dist[id] = true;
@@ -832,7 +828,7 @@ NsgIndex::FindUnconnectedNode(boost::dynamic_bitset<>& has_linked, int64_t& root
 
 void
 NsgIndex::Search(const float* query, const unsigned& nq, const unsigned& dim, const unsigned& k, float* dist,
-                 int64_t* ids, SearchParams& params) {
+                 int64_t* ids, SearchParams& params, faiss::ConcurrentBitsetPtr bitset) {
     std::vector<std::vector<Neighbor>> resset(nq);
 
     TimeRecorder rc("NsgIndex::search", 1);
@@ -847,21 +843,20 @@ NsgIndex::Search(const float* query, const unsigned& nq, const unsigned& dim, co
     }
     rc.RecordSection("search");
     for (unsigned int i = 0; i < nq; ++i) {
-        int64_t var = resset[i].size() - k;
-        if (var >= 0) {
-            for (unsigned int j = 0; j < k; ++j) {
-                ids[i * k + j] = ids_[resset[i][j].id];
-                dist[i * k + j] = resset[i][j].distance;
+        unsigned int pos = 0;
+        for (unsigned int j = 0; j < resset[i].size(); ++j) {
+            if (pos >= k)
+                break;  // already top k
+            if (!bitset || !bitset->test((faiss::ConcurrentBitset::id_type_t)resset[i][j].id)) {
+                ids[i * k + pos] = ids_[resset[i][j].id];
+                dist[i * k + pos] = resset[i][j].distance;
+                ++pos;
             }
-        } else {
-            for (unsigned int j = 0; j < resset[i].size(); ++j) {
-                ids[i * k + j] = ids_[resset[i][j].id];
-                dist[i * k + j] = resset[i][j].distance;
-            }
-            for (unsigned int j = resset[i].size(); j < k; ++j) {
-                ids[i * k + j] = -1;
-                dist[i * k + j] = -1;
-            }
+        }
+        // fill with -1
+        for (unsigned int j = pos; j < k; ++j) {
+            ids[i * k + j] = -1;
+            dist[i * k + j] = -1;
         }
     }
     rc.RecordSection("merge");

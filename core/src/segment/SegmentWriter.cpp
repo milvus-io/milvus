@@ -50,6 +50,12 @@ SegmentWriter::AddVectors(const std::string& name, const std::vector<uint8_t>& d
 }
 
 Status
+SegmentWriter::SetVectorIndex(const milvus::knowhere::VecIndexPtr& index) {
+    segment_ptr_->vector_index_ptr_->SetVectorIndex(index);
+    return Status::OK();
+}
+
+Status
 SegmentWriter::Serialize() {
     auto start = std::chrono::high_resolution_clock::now();
 
@@ -93,6 +99,20 @@ SegmentWriter::WriteVectors() {
         default_codec.GetVectorsFormat()->write(fs_ptr_, segment_ptr_->vectors_ptr_);
     } catch (std::exception& e) {
         std::string err_msg = "Failed to write vectors: " + std::string(e.what());
+        ENGINE_LOG_ERROR << err_msg;
+        return Status(SERVER_WRITE_ERROR, err_msg);
+    }
+    return Status::OK();
+}
+
+Status
+SegmentWriter::WriteVectorIndex() {
+    codec::DefaultCodec default_codec;
+    try {
+        fs_ptr_->operation_ptr_->CreateDirectory();
+        default_codec.GetVectorIndexFormat()->write(fs_ptr_, segment_ptr_->vector_index_ptr_);
+    } catch (std::exception& e) {
+        std::string err_msg = "Failed to write vector index: " + std::string(e.what());
         ENGINE_LOG_ERROR << err_msg;
         return Status(SERVER_WRITE_ERROR, err_msg);
     }
