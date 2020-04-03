@@ -97,6 +97,39 @@ TEST_P(HNSWTest, HNSW_delete) {
     */
 }
 
+TEST_P(HNSWTest, HNSW_serialize) {
+    auto serialize = [](const std::string& filename, milvus::knowhere::BinaryPtr& bin, uint8_t* ret) {
+        {
+            FileIOWriter writer(filename);
+            writer(static_cast<void*>(bin->data.get()), bin->size);
+        }
+
+        FileIOReader reader(filename);
+        reader(ret, bin->size);
+    };
+
+    {
+        index_->Train(base_dataset, conf);
+        index_->Add(base_dataset, conf);
+        auto binaryset = index_->Serialize();
+        auto bin = binaryset.GetByName("HNSW");
+
+        std::string filename = "/tmp/HNSW_test_serialize.bin";
+        auto load_data = new uint8_t[bin->size];
+        serialize(filename, bin, load_data);
+
+        binaryset.clear();
+        std::shared_ptr<uint8_t[]> data(load_data);
+        binaryset.Append("HNSW", data, bin->size);
+
+        index_->Load(binaryset);
+        EXPECT_EQ(index_->Count(), nb);
+        EXPECT_EQ(index_->Dim(), dim);
+        auto result = index_->Query(query_dataset, conf);
+        AssertAnns(result, nq, conf[milvus::knowhere::meta::TOPK]);
+    }
+}
+
 /*
  * faiss style test
  * keep it

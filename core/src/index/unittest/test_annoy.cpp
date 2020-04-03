@@ -148,6 +148,56 @@ TEST_P(AnnoyTest, annoy_delete) {
     */
 }
 
+TEST_P(AnnoyTest, annoy_serialize) {
+    auto serialize = [](const std::string& filename, milvus::knowhere::BinaryPtr& bin, uint8_t* ret) {
+        {
+            // write and flush
+            FileIOWriter writer(filename);
+            writer(static_cast<void*>(bin->data.get()), bin->size);
+        }
+
+        FileIOReader reader(filename);
+        reader(ret, bin->size);
+    };
+
+    {
+        // serialize index
+        index_->BuildAll(base_dataset, conf);
+        auto binaryset = index_->Serialize();
+
+        auto bin_data = binaryset.GetByName("annoy_index_data");
+        std::string filename1 = "/tmp/annoy_test_data_serialize.bin";
+        auto load_data1 = new uint8_t[bin_data->size];
+        serialize(filename1, bin_data, load_data1);
+
+        auto bin_metric_type = binaryset.GetByName("annoy_metric_type");
+        std::string filename2 = "/tmp/annoy_test_metric_type_serialize.bin";
+        auto load_data2 = new uint8_t[bin_metric_type->size];
+        serialize(filename2, bin_metric_type, load_data2);
+
+        auto bin_dim = binaryset.GetByName("annoy_dim");
+        std::string filename3 = "/tmp/annoy_test_dim_serialize.bin";
+        auto load_data3 = new uint8_t[bin_dim->size];
+        serialize(filename3, bin_dim, load_data3);
+
+        binaryset.clear();
+        std::shared_ptr<uint8_t[]> index_data(load_data1);
+        binaryset.Append("annoy_index_data", index_data, bin_data->size);
+
+        std::shared_ptr<uint8_t[]> metric_data(load_data2);
+        binaryset.Append("annoy_metric_type", metric_data, bin_metric_type->size);
+
+        std::shared_ptr<uint8_t[]> dim_data(load_data3);
+        binaryset.Append("annoy_dim", dim_data, bin_dim->size);
+
+        index_->Load(binaryset);
+        EXPECT_EQ(index_->Count(), nb);
+        EXPECT_EQ(index_->Dim(), dim);
+        auto result = index_->Query(query_dataset, conf);
+        AssertAnns(result, nq, conf[milvus::knowhere::meta::TOPK]);
+    }
+}
+
 /*
  * faiss style test
  * keep it
