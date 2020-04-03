@@ -101,11 +101,11 @@ aux_source_directory(${MILVUS_ENGINE_SRC}/tracing tracing_files)
 
 aux_source_directory(${MILVUS_ENGINE_SRC}/storage storage_main_files)
 aux_source_directory(${MILVUS_ENGINE_SRC}/storage/disk storage_disk_files)
-aux_source_directory(${MILVUS_ENGINE_SRC}/storage/s3 storage_s3_files)
+#aux_source_directory(${MILVUS_ENGINE_SRC}/storage/s3 storage_s3_files)
 set(storage_files
         ${storage_main_files}
         ${storage_disk_files}
-        ${storage_s3_files}
+#        ${storage_s3_files}
         )
 
 aux_source_directory(${MILVUS_ENGINE_SRC}/codecs codecs_files)
@@ -163,21 +163,30 @@ set(unittest_libs
         opentracing
         opentracing_mocktracer
         fiu
+        )
+
+if (MILVUS_WITH_AWS)
+    set(s3_client_lib
         aws-cpp-sdk-s3
         aws-cpp-sdk-core
+        )
+    set(unittest_libs ${unittest_libs}
+        ${s3_client_lib}
         curl
         crypto
         )
+endif ()
+
 if (MILVUS_WITH_PROMETHEUS)
     set(prometheus_lib
-            prometheus-cpp-push
-            prometheus-cpp-pull
-            prometheus-cpp-core
-            curl
-            )
+        prometheus-cpp-push
+        prometheus-cpp-pull
+        prometheus-cpp-core
+        )
     set(unittest_libs ${unittest_libs}
-            ${prometheus_lib}
-            )
+        ${prometheus_lib}
+        curl
+        )
 endif ()
 set(unittest_libs ${unittest_libs}
     dl
@@ -199,4 +208,4 @@ add_subdirectory(metrics)
 add_subdirectory(scheduler)
 add_subdirectory(server)
 add_subdirectory(thirdparty)
-add_subdirectory(storage)
+#add_subdirectory(storage)
