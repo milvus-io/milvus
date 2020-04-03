@@ -109,11 +109,11 @@ set(web_server_files
 
 aux_source_directory(${MILVUS_ENGINE_SRC}/storage storage_main_files)
 aux_source_directory(${MILVUS_ENGINE_SRC}/storage/disk storage_disk_files)
-aux_source_directory(${MILVUS_ENGINE_SRC}/storage/s3 storage_s3_files)
+#aux_source_directory(${MILVUS_ENGINE_SRC}/storage/s3 storage_s3_files)
 set(storage_files
         ${storage_main_files}
         ${storage_disk_files}
-        ${storage_s3_files}
+#        ${storage_s3_files}
         )
 
 aux_source_directory(${MILVUS_ENGINE_SRC}/utils utils_files)
@@ -184,9 +184,6 @@ set(third_party_libs
         zlib
         fiu
         ${boost_lib}
-        ${s3_client_lib}
-        curl
-        crypto
         )
 
 if (MILVUS_GPU_VERSION)
@@ -216,6 +213,14 @@ endif ()
 if (MILVUS_WITH_PROMETHEUS)
     set(third_party_libs ${third_party_libs}
             ${prometheus_lib}
+            )
+endif ()
+
+if (MILVUS_WITH_AWS)
+    set(third_party_libs ${third_party_libs}
+            ${s3_client_lib}
+            curl
+            crypto
             )
 endif ()
 

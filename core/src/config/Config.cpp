@@ -154,7 +154,7 @@ Config::ValidateConfig() {
 
     bool storage_s3_enable;
     CONFIG_CHECK(GetStorageConfigS3Enable(storage_s3_enable));
-    std::cout << "S3 " << (storage_s3_enable ? "ENABLED !" : "DISABLED !") << std::endl;
+    // std::cout << "S3 " << (storage_s3_enable ? "ENABLED !" : "DISABLED !") << std::endl;
 
     std::string storage_s3_address;
     CONFIG_CHECK(GetStorageConfigS3Address(storage_s3_address));

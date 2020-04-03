@@ -23,7 +23,7 @@
 #include "server/grpc_impl/GrpcServer.h"
 #include "server/web_impl/WebServer.h"
 #include "src/version.h"
-#include "storage/s3/S3ClientWrapper.h"
+//#include "storage/s3/S3ClientWrapper.h"
 #include "tracing/TracerUtil.h"
 #include "utils/Log.h"
 #include "utils/LogUtil.h"
@@ -272,11 +272,11 @@ Server::StartService() {
     grpc::GrpcServer::GetInstance().Start();
     web::WebServer::GetInstance().Start();
 
-    stat = storage::S3ClientWrapper::GetInstance().StartService();
-    if (!stat.ok()) {
-        SERVER_LOG_ERROR << "S3Client start service fail: " << stat.message();
-        goto FAIL;
-    }
+    // stat = storage::S3ClientWrapper::GetInstance().StartService();
+    // if (!stat.ok()) {
+    //     SERVER_LOG_ERROR << "S3Client start service fail: " << stat.message();
+    //     goto FAIL;
+    // }
 
     return Status::OK();
 FAIL:
@@ -286,7 +286,7 @@ FAIL:
 
 void
 Server::StopService() {
-    storage::S3ClientWrapper::GetInstance().StopService();
+    // storage::S3ClientWrapper::GetInstance().StopService();
     web::WebServer::GetInstance().Stop();
     grpc::GrpcServer::GetInstance().Stop();
     DBWrapper::GetInstance().StopService();
