@@ -43,64 +43,64 @@ class Meta {
     virtual ~Meta() = default;
 
     virtual Status
-    CreateTable(CollectionSchema& table_schema) = 0;
+    CreateCollection(CollectionSchema& table_schema) = 0;
 
     virtual Status
-    DescribeTable(CollectionSchema& table_schema) = 0;
+    DescribeCollection(CollectionSchema& table_schema) = 0;
 
     virtual Status
-    HasTable(const std::string& collection_id, bool& has_or_not) = 0;
+    HasCollection(const std::string& collection_id, bool& has_or_not) = 0;
 
     virtual Status
-    AllTables(std::vector<CollectionSchema>& table_schema_array) = 0;
+    AllCollections(std::vector<CollectionSchema>& table_schema_array) = 0;
 
     virtual Status
-    UpdateTableFlag(const std::string& collection_id, int64_t flag) = 0;
+    UpdateCollectionFlag(const std::string& collection_id, int64_t flag) = 0;
 
     virtual Status
     UpdateTableFlushLSN(const std::string& collection_id, uint64_t flush_lsn) = 0;
 
     virtual Status
-    GetTableFlushLSN(const std::string& collection_id, uint64_t& flush_lsn) = 0;
+    GetCollectionFlushLSN(const std::string& collection_id, uint64_t& flush_lsn) = 0;
 
     virtual Status
     GetTableFilesByFlushLSN(uint64_t flush_lsn, SegmentsSchema& table_files) = 0;
 
     virtual Status
-    DropTable(const std::string& collection_id) = 0;
+    DropCollection(const std::string& collection_id) = 0;
 
     virtual Status
     DeleteTableFiles(const std::string& collection_id) = 0;
 
     virtual Status
-    CreateTableFile(SegmentSchema& file_schema) = 0;
+    CreateCollectionFile(SegmentSchema& file_schema) = 0;
 
     virtual Status
     GetTableFiles(const std::string& collection_id, const std::vector<size_t>& ids, SegmentsSchema& table_files) = 0;
 
     virtual Status
-    GetTableFilesBySegmentId(const std::string& segment_id, SegmentsSchema& table_files) = 0;
+    GetCollectionFilesBySegmentId(const std::string& segment_id, SegmentsSchema& table_files) = 0;
 
     virtual Status
-    UpdateTableFile(SegmentSchema& file_schema) = 0;
+    UpdateCollectionFile(SegmentSchema& file_schema) = 0;
 
     virtual Status
-    UpdateTableFiles(SegmentsSchema& files) = 0;
+    UpdateCollectionFiles(SegmentsSchema& files) = 0;
 
     virtual Status
-    UpdateTableFilesRowCount(SegmentsSchema& files) = 0;
+    UpdateCollectionFilesRowCount(SegmentsSchema& files) = 0;
 
     virtual Status
-    UpdateTableIndex(const std::string& collection_id, const TableIndex& index) = 0;
+    UpdateCollectionIndex(const std::string& collection_id, const CollectionIndex& index) = 0;
 
     virtual Status
-    UpdateTableFilesToIndex(const std::string& collection_id) = 0;
+    UpdateCollectionFilesToIndex(const std::string& collection_id) = 0;
 
     virtual Status
-    DescribeTableIndex(const std::string& collection_id, TableIndex& index) = 0;
+    DescribeCollectionIndex(const std::string& collection_id, CollectionIndex& index) = 0;
 
     virtual Status
-    DropTableIndex(const std::string& collection_id) = 0;
+    DropCollectionIndex(const std::string& collection_id) = 0;
 
     virtual Status
     CreatePartition(const std::string& collection_name, const std::string& partition_name, const std::string& tag,

@@ -48,7 +48,7 @@ DescribeIndexRequest::OnExecute() {
         // only process root collection, ignore partition collection
         engine::meta::CollectionSchema table_schema;
         table_schema.collection_id_ = collection_name_;
-        status = DBWrapper::DB()->DescribeTable(table_schema);
+        status = DBWrapper::DB()->DescribeCollection(table_schema);
         if (!status.ok()) {
             if (status.code() == DB_NOT_FOUND) {
                 return Status(SERVER_TABLE_NOT_EXIST, TableNotExistMsg(collection_name_));
@@ -56,13 +56,13 @@ DescribeIndexRequest::OnExecute() {
                 return status;
             }
         } else {
-            if (!table_schema.owner_table_.empty()) {
+            if (!table_schema.owner_collection_.empty()) {
                 return Status(SERVER_INVALID_TABLE_NAME, TableNotExistMsg(collection_name_));
             }
         }
 
         // step 2: check collection existence
-        engine::TableIndex index;
+        engine::CollectionIndex index;
         status = DBWrapper::DB()->DescribeIndex(collection_name_, index);
         if (!status.ok()) {
             return status;

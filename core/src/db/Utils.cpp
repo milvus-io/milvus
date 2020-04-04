@@ -79,7 +79,7 @@ GetMicroSecTimeStamp() {
 }
 
 Status
-CreateTablePath(const DBMetaOptions& options, const std::string& collection_id) {
+CreateCollectionPath(const DBMetaOptions& options, const std::string& collection_id) {
     std::string db_path = options.path_;
     std::string table_path = db_path + TABLES_FOLDER + collection_id;
     auto status = server::CommonUtil::CreateDirectory(table_path);
@@ -91,7 +91,7 @@ CreateTablePath(const DBMetaOptions& options, const std::string& collection_id) 
     for (auto& path : options.slave_paths_) {
         table_path = path + TABLES_FOLDER + collection_id;
         status = server::CommonUtil::CreateDirectory(table_path);
-        fiu_do_on("CreateTablePath.creat_slave_path", status = Status(DB_INVALID_PATH, ""));
+        fiu_do_on("CreateCollectionPath.creat_slave_path", status = Status(DB_INVALID_PATH, ""));
         if (!status.ok()) {
             ENGINE_LOG_ERROR << status.message();
             return status;
@@ -135,11 +135,11 @@ DeleteTablePath(const DBMetaOptions& options, const std::string& collection_id, 
 }
 
 Status
-CreateTableFilePath(const DBMetaOptions& options, meta::SegmentSchema& table_file) {
+CreateCollectionFilePath(const DBMetaOptions& options, meta::SegmentSchema& table_file) {
     std::string parent_path = GetTableFileParentFolder(options, table_file);
 
     auto status = server::CommonUtil::CreateDirectory(parent_path);
-    fiu_do_on("CreateTableFilePath.fail_create", status = Status(DB_INVALID_PATH, ""));
+    fiu_do_on("CreateCollectionFilePath.fail_create", status = Status(DB_INVALID_PATH, ""));
     if (!status.ok()) {
         ENGINE_LOG_ERROR << status.message();
         return status;
@@ -211,7 +211,7 @@ GetParentPath(const std::string& path, std::string& parent_path) {
 }
 
 bool
-IsSameIndex(const TableIndex& index1, const TableIndex& index2) {
+IsSameIndex(const CollectionIndex& index1, const CollectionIndex& index2) {
     return index1.engine_type_ == index2.engine_type_ && index1.extra_params_ == index2.extra_params_ &&
            index1.metric_type_ == index2.metric_type_;
 }

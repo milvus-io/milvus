@@ -39,14 +39,14 @@ RequestGroup(BaseRequest::RequestType type) {
         {BaseRequest::kGetVectorIDs, INFO_REQUEST_GROUP},
 
         // collection operations
-        {BaseRequest::kShowTables, INFO_REQUEST_GROUP},
-        {BaseRequest::kCreateTable, DDL_DML_REQUEST_GROUP},
-        {BaseRequest::kHasTable, INFO_REQUEST_GROUP},
-        {BaseRequest::kDescribeTable, INFO_REQUEST_GROUP},
-        {BaseRequest::kCountTable, INFO_REQUEST_GROUP},
-        {BaseRequest::kShowTableInfo, INFO_REQUEST_GROUP},
-        {BaseRequest::kDropTable, DDL_DML_REQUEST_GROUP},
-        {BaseRequest::kPreloadTable, DQL_REQUEST_GROUP},
+        {BaseRequest::kShowCollections, INFO_REQUEST_GROUP},
+        {BaseRequest::kCreateCollection, DDL_DML_REQUEST_GROUP},
+        {BaseRequest::kHasCollection, INFO_REQUEST_GROUP},
+        {BaseRequest::kDescribeCollection, INFO_REQUEST_GROUP},
+        {BaseRequest::kCountCollection, INFO_REQUEST_GROUP},
+        {BaseRequest::kShowCollectionInfo, INFO_REQUEST_GROUP},
+        {BaseRequest::kDropCollection, DDL_DML_REQUEST_GROUP},
+        {BaseRequest::kPreloadCollection, DQL_REQUEST_GROUP},
 
         // partition operations
         {BaseRequest::kCreatePartition, DDL_DML_REQUEST_GROUP},
@@ -132,7 +132,7 @@ BaseRequest::set_status(const Status& status) {
 std::string
 BaseRequest::TableNotExistMsg(const std::string& collection_name) {
     return "Collection " + collection_name +
-           " does not exist. Use milvus.has_table to verify whether the collection exists. "
+           " does not exist. Use milvus.has_collection to verify whether the collection exists. "
            "You also can check whether the collection name exists.";
 }
 

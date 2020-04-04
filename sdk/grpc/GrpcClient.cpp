@@ -54,13 +54,13 @@ GrpcClient::CreateTable(const ::milvus::grpc::TableSchema& table_schema) {
 }
 
 bool
-GrpcClient::HasTable(const ::milvus::grpc::TableName& collection_name, Status& status) {
+GrpcClient::HasCollection(const ::milvus::grpc::TableName& collection_name, Status& status) {
     ClientContext context;
     ::milvus::grpc::BoolReply response;
-    ::grpc::Status grpc_status = stub_->HasTable(&context, collection_name, &response);
+    ::grpc::Status grpc_status = stub_->HasCollection(&context, collection_name, &response);
 
     if (!grpc_status.ok()) {
-        std::cerr << "HasTable gRPC failed!" << std::endl;
+        std::cerr << "HasCollection gRPC failed!" << std::endl;
         status = Status(StatusCode::RPCFailed, grpc_status.error_message());
     }
     if (response.status().error_code() != grpc::SUCCESS) {
@@ -242,10 +242,10 @@ GrpcClient::ShowTables(milvus::grpc::TableNameList& table_name_list) {
 }
 
 Status
-GrpcClient::ShowTableInfo(grpc::TableName& collection_name, grpc::TableInfo& table_info) {
+GrpcClient::ShowTableInfo(grpc::TableName& collection_name, grpc::TableInfo& collection_info) {
     ClientContext context;
     ::milvus::grpc::Command command;
-    ::grpc::Status grpc_status = stub_->ShowTableInfo(&context, collection_name, &table_info);
+    ::grpc::Status grpc_status = stub_->ShowTableInfo(&context, collection_name, &collection_info);
 
     if (!grpc_status.ok()) {
         std::cerr << "ShowTableInfo gRPC failed!" << std::endl;
@@ -253,9 +253,9 @@ GrpcClient::ShowTableInfo(grpc::TableName& collection_name, grpc::TableInfo& tab
         return Status(StatusCode::RPCFailed, grpc_status.error_message());
     }
 
-    if (table_info.status().error_code() != grpc::SUCCESS) {
-        std::cerr << table_info.status().reason() << std::endl;
-        return Status(StatusCode::ServerFailed, table_info.status().reason());
+    if (collection_info.status().error_code() != grpc::SUCCESS) {
+        std::cerr << collection_info.status().reason() << std::endl;
+        return Status(StatusCode::ServerFailed, collection_info.status().reason());
     }
 
     return Status::OK();

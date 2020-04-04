@@ -142,14 +142,14 @@ ConstructPartitionStat(const PartitionStat& partition_stat, ::milvus::grpc::Part
 }
 
 void
-ConstructTableInfo(const TableInfo& table_info, ::milvus::grpc::TableInfo* response) {
+ConstructTableInfo(const CollectionInfo& collection_info, ::milvus::grpc::TableInfo* response) {
     if (!response) {
         return;
     }
 
-    response->set_total_row_count(table_info.total_row_num_);
+    response->set_total_row_count(collection_info.total_row_num_);
 
-    for (auto& partition_stat : table_info.partitions_stat_) {
+    for (auto& partition_stat : collection_info.partitions_stat_) {
         ::milvus::grpc::PartitionStat* grpc_partiton_stat = response->mutable_partitions_stat()->Add();
         ConstructPartitionStat(partition_stat, grpc_partiton_stat);
     }
@@ -242,8 +242,9 @@ GrpcRequestHandler::CreateTable(::grpc::ServerContext* context, const ::milvus::
                                 ::milvus::grpc::Status* response) {
     CHECK_NULLPTR_RETURN(request);
 
-    Status status = request_handler_.CreateTable(context_map_[context], request->table_name(), request->dimension(),
-                                                 request->index_file_size(), request->metric_type());
+    Status status =
+        request_handler_.CreateCollection(context_map_[context], request->table_name(), request->dimension(),
+                                          request->index_file_size(), request->metric_type());
     SET_RESPONSE(response, status, context);
 
     return ::grpc::Status::OK;
@@ -254,10 +255,10 @@ GrpcRequestHandler::HasTable(::grpc::ServerContext* context, const ::milvus::grp
                              ::milvus::grpc::BoolReply* response) {
     CHECK_NULLPTR_RETURN(request);
 
-    bool has_table = false;
+    bool has_collection = false;
 
-    Status status = request_handler_.HasTable(context_map_[context], request->table_name(), has_table);
-    response->set_bool_reply(has_table);
+    Status status = request_handler_.HasCollection(context_map_[context], request->table_name(), has_collection);
+    response->set_bool_reply(has_collection);
     SET_RESPONSE(response->mutable_status(), status, context);
 
     return ::grpc::Status::OK;
@@ -268,7 +269,7 @@ GrpcRequestHandler::DropTable(::grpc::ServerContext* context, const ::milvus::gr
                               ::milvus::grpc::Status* response) {
     CHECK_NULLPTR_RETURN(request);
 
-    Status status = request_handler_.DropTable(context_map_[context], request->table_name());
+    Status status = request_handler_.DropCollection(context_map_[context], request->table_name());
 
     SET_RESPONSE(response, status, context);
     return ::grpc::Status::OK;
@@ -482,7 +483,7 @@ GrpcRequestHandler::DescribeTable(::grpc::ServerContext* context, const ::milvus
     CHECK_NULLPTR_RETURN(request);
 
     CollectionSchema table_schema;
-    Status status = request_handler_.DescribeTable(context_map_[context], request->table_name(), table_schema);
+    Status status = request_handler_.DescribeCollection(context_map_[context], request->table_name(), table_schema);
     response->set_table_name(table_schema.collection_name_);
     response->set_dimension(table_schema.dimension_);
     response->set_index_file_size(table_schema.index_file_size_);
@@ -498,7 +499,7 @@ GrpcRequestHandler::CountTable(::grpc::ServerContext* context, const ::milvus::g
     CHECK_NULLPTR_RETURN(request);
 
     int64_t row_count = 0;
-    Status status = request_handler_.CountTable(context_map_[context], request->table_name(), row_count);
+    Status status = request_handler_.CountCollection(context_map_[context], request->table_name(), row_count);
     response->set_table_row_count(row_count);
     SET_RESPONSE(response->mutable_status(), status, context);
     return ::grpc::Status::OK;
@@ -510,7 +511,7 @@ GrpcRequestHandler::ShowTables(::grpc::ServerContext* context, const ::milvus::g
     CHECK_NULLPTR_RETURN(request);
 
     std::vector<std::string> tables;
-    Status status = request_handler_.ShowTables(context_map_[context], tables);
+    Status status = request_handler_.ShowCollections(context_map_[context], tables);
     for (auto& collection : tables) {
         response->add_table_names(collection);
     }
@@ -524,9 +525,9 @@ GrpcRequestHandler::ShowTableInfo(::grpc::ServerContext* context, const ::milvus
                                   ::milvus::grpc::TableInfo* response) {
     CHECK_NULLPTR_RETURN(request);
 
-    TableInfo table_info;
-    Status status = request_handler_.ShowTableInfo(context_map_[context], request->table_name(), table_info);
-    ConstructTableInfo(table_info, response);
+    CollectionInfo collection_info;
+    Status status = request_handler_.ShowCollectionInfo(context_map_[context], request->table_name(), collection_info);
+    ConstructTableInfo(collection_info, response);
     SET_RESPONSE(response->mutable_status(), status, context);
 
     return ::grpc::Status::OK;
@@ -568,7 +569,7 @@ GrpcRequestHandler::PreloadTable(::grpc::ServerContext* context, const ::milvus:
                                  ::milvus::grpc::Status* response) {
     CHECK_NULLPTR_RETURN(request);
 
-    Status status = request_handler_.PreloadTable(context_map_[context], request->table_name());
+    Status status = request_handler_.PreloadCollection(context_map_[context], request->table_name());
     SET_RESPONSE(response, status, context);
 
     return ::grpc::Status::OK;

@@ -44,34 +44,34 @@ class DB {
     Stop() = 0;
 
     virtual Status
-    CreateTable(meta::CollectionSchema& table_schema_) = 0;
+    CreateCollection(meta::CollectionSchema& table_schema_) = 0;
 
     virtual Status
-    DropTable(const std::string& collection_id) = 0;
+    DropCollection(const std::string& collection_id) = 0;
 
     virtual Status
-    DescribeTable(meta::CollectionSchema& table_schema_) = 0;
+    DescribeCollection(meta::CollectionSchema& table_schema_) = 0;
 
     virtual Status
-    HasTable(const std::string& collection_id, bool& has_or_not_) = 0;
+    HasCollection(const std::string& collection_id, bool& has_or_not_) = 0;
 
     virtual Status
-    HasNativeTable(const std::string& collection_id, bool& has_or_not_) = 0;
+    HasNativeCollection(const std::string& collection_id, bool& has_or_not_) = 0;
 
     virtual Status
-    AllTables(std::vector<meta::CollectionSchema>& table_schema_array) = 0;
+    AllCollections(std::vector<meta::CollectionSchema>& table_schema_array) = 0;
 
     virtual Status
-    GetTableInfo(const std::string& collection_id, TableInfo& table_info) = 0;
+    GetCollectionInfo(const std::string& collection_id, CollectionInfo& collection_info) = 0;
 
     virtual Status
-    GetTableRowCount(const std::string& collection_id, uint64_t& row_count) = 0;
+    GetCollectionRowCount(const std::string& collection_id, uint64_t& row_count) = 0;
 
     virtual Status
-    PreloadTable(const std::string& collection_id) = 0;
+    PreloadCollection(const std::string& collection_id) = 0;
 
     virtual Status
-    UpdateTableFlag(const std::string& collection_id, int64_t flag) = 0;
+    UpdateCollectionFlag(const std::string& collection_id, int64_t flag) = 0;
 
     virtual Status
     CreatePartition(const std::string& collection_id, const std::string& partition_name,
@@ -132,10 +132,10 @@ class DB {
     Size(uint64_t& result) = 0;
 
     virtual Status
-    CreateIndex(const std::string& collection_id, const TableIndex& index) = 0;
+    CreateIndex(const std::string& collection_id, const CollectionIndex& index) = 0;
 
     virtual Status
-    DescribeIndex(const std::string& collection_id, TableIndex& index) = 0;
+    DescribeIndex(const std::string& collection_id, CollectionIndex& index) = 0;
 
     virtual Status
     DropIndex(const std::string& collection_id) = 0;

@@ -63,7 +63,7 @@ class MemTableFile : public server::CacheConfigHandler {
 
  private:
     Status
-    CreateTableFile();
+    CreateCollectionFile();
 
  private:
     const std::string collection_id_;

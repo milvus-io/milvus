@@ -97,7 +97,7 @@ struct TaskTableItem : public interface::dumpable {
 
 class TaskTable : public interface::dumpable {
  public:
-    TaskTable() : collection_(1ULL << 16ULL) {
+    TaskTable() : table_(1ULL << 16ULL) {
     }
 
     TaskTable(const TaskTable&) = delete;
@@ -127,22 +127,22 @@ class TaskTable : public interface::dumpable {
 
  public:
     inline const TaskTableItemPtr& operator[](uint64_t index) {
-        return collection_[index];
+        return table_[index];
     }
 
     inline const TaskTableItemPtr&
     at(uint64_t index) {
-        return collection_[index];
+        return table_[index];
     }
 
     inline size_t
     capacity() {
-        return collection_.capacity();
+        return table_.capacity();
     }
 
     inline size_t
     size() {
-        return collection_.size();
+        return table_.size();
     }
 
  public:
@@ -156,7 +156,7 @@ class TaskTable : public interface::dumpable {
      */
     inline bool
     Load(uint64_t index) {
-        return collection_[index]->Load();
+        return table_[index]->Load();
     }
 
     /*
@@ -166,7 +166,7 @@ class TaskTable : public interface::dumpable {
      */
     inline bool
     Loaded(uint64_t index) {
-        return collection_[index]->Loaded();
+        return table_[index]->Loaded();
     }
 
     /*
@@ -176,7 +176,7 @@ class TaskTable : public interface::dumpable {
      */
     inline bool
     Execute(uint64_t index) {
-        return collection_[index]->Execute();
+        return table_[index]->Execute();
     }
 
     /*
@@ -186,7 +186,7 @@ class TaskTable : public interface::dumpable {
      */
     inline bool
     Executed(uint64_t index) {
-        return collection_[index]->Executed();
+        return table_[index]->Executed();
     }
 
     /*
@@ -197,7 +197,7 @@ class TaskTable : public interface::dumpable {
 
     inline bool
     Move(uint64_t index) {
-        return collection_[index]->Move();
+        return table_[index]->Move();
     }
 
     /*
@@ -207,12 +207,12 @@ class TaskTable : public interface::dumpable {
      */
     inline bool
     Moved(uint64_t index) {
-        return collection_[index]->Moved();
+        return table_[index]->Moved();
     }
 
  private:
     std::uint64_t id_ = 0;
-    CircleQueue<TaskTableItemPtr> collection_;
+    CircleQueue<TaskTableItemPtr> table_;
     std::function<void(void)> subscriber_ = nullptr;
 
     // cache last finish avoid Pick task from begin always

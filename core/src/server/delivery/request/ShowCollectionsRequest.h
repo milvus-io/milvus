@@ -11,27 +11,29 @@
 
 #pragma once
 
-#include "server/delivery/request/BaseRequest.h"
-
 #include <memory>
 #include <string>
+#include <vector>
+
+#include "server/delivery/request/BaseRequest.h"
 
 namespace milvus {
 namespace server {
 
-class PreloadTableRequest : public BaseRequest {
+class ShowCollectionsRequest : public BaseRequest {
  public:
     static BaseRequestPtr
-    Create(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name);
+    Create(const std::shared_ptr<milvus::server::Context>& context, std::vector<std::string>& table_name_list);
 
  protected:
-    PreloadTableRequest(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name);
+    ShowCollectionsRequest(const std::shared_ptr<milvus::server::Context>& context,
+                           std::vector<std::string>& table_name_list);
 
     Status
     OnExecute() override;
 
  private:
-    const std::string collection_name_;
+    std::vector<std::string>& table_name_list_;
 };
 
 }  // namespace server

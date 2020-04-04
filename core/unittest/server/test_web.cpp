@@ -294,7 +294,7 @@ TEST_F(WebHandlerTest, TABLE) {
     ASSERT_EQ(StatusCode::TABLE_NOT_EXISTS, status_dto->code->getValue());
 }
 
-TEST_F(WebHandlerTest, HAS_TABLE_TEST) {
+TEST_F(WebHandlerTest, HAS_COLLECTION_TEST) {
     handler->RegisterRequestHandler(milvus::server::RequestHandler());
     auto collection_name = milvus::server::web::OString(TABLE_NAME) + RandomName().c_str();
 

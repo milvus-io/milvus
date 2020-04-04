@@ -31,7 +31,7 @@ namespace engine {
 MemTableFile::MemTableFile(const std::string& collection_id, const meta::MetaPtr& meta, const DBOptions& options)
     : collection_id_(collection_id), meta_(meta), options_(options) {
     current_mem_ = 0;
-    auto status = CreateTableFile();
+    auto status = CreateCollectionFile();
     if (status.ok()) {
         /*execution_engine_ = EngineFactory::Build(
             table_file_schema_.dimension_, table_file_schema_.location_, (EngineType)table_file_schema_.engine_type_,
@@ -46,14 +46,14 @@ MemTableFile::MemTableFile(const std::string& collection_id, const meta::MetaPtr
 }
 
 Status
-MemTableFile::CreateTableFile() {
+MemTableFile::CreateCollectionFile() {
     meta::SegmentSchema table_file_schema;
     table_file_schema.collection_id_ = collection_id_;
-    auto status = meta_->CreateTableFile(table_file_schema);
+    auto status = meta_->CreateCollectionFile(table_file_schema);
     if (status.ok()) {
         table_file_schema_ = table_file_schema;
     } else {
-        std::string err_msg = "MemTableFile::CreateTableFile failed: " + status.ToString();
+        std::string err_msg = "MemTableFile::CreateCollectionFile failed: " + status.ToString();
         ENGINE_LOG_ERROR << err_msg;
     }
     return status;
@@ -167,7 +167,7 @@ MemTableFile::Serialize(uint64_t wal_lsn) {
          * to write to or update the associated collection file in meta.
          *
         table_file_schema_.file_type_ = meta::SegmentSchema::TO_DELETE;
-        meta_->UpdateTableFile(table_file_schema_);
+        meta_->UpdateCollectionFile(table_file_schema_);
         ENGINE_LOG_DEBUG << "Failed to serialize segment, mark file: " << table_file_schema_.file_id_
                          << " to to_delete";
         */
@@ -196,7 +196,7 @@ MemTableFile::Serialize(uint64_t wal_lsn) {
     // GetTableFilesByFlushLSN() in meta.
     table_file_schema_.flush_lsn_ = wal_lsn;
 
-    status = meta_->UpdateTableFile(table_file_schema_);
+    status = meta_->UpdateCollectionFile(table_file_schema_);
 
     ENGINE_LOG_DEBUG << "New " << ((table_file_schema_.file_type_ == meta::SegmentSchema::RAW) ? "raw" : "to_index")
                      << " file " << table_file_schema_.file_id_ << " of size " << size << " bytes, lsn = " << wal_lsn;
