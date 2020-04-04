@@ -170,7 +170,19 @@ class DBImpl : public DB, public server::CacheConfigHandler, public server::Engi
                         const meta::SegmentsSchema& files);
 
     void
-    BackgroundTimerTask();
+    InternalFlush(const std::string& collection_id = "");
+
+    void
+    BackgroundWalThread();
+
+    void
+    BackgroundFlushThread();
+
+    void
+    BackgroundMetricThread();
+
+    void
+    BackgroundIndexThread();
 
     void
     WaitMergeFileFinish();
@@ -194,7 +206,7 @@ class DBImpl : public DB, public server::CacheConfigHandler, public server::Engi
     BackgroundMerge(std::set<std::string> collection_ids);
 
     void
-    StartBuildIndexTask(bool force = false);
+    StartBuildIndexTask();
 
     void
     BackgroundBuildIndex();
@@ -240,21 +252,20 @@ class DBImpl : public DB, public server::CacheConfigHandler, public server::Engi
     Status
     ExecWalRecord(const wal::MXLogRecord& record);
 
-    void
-    BackgroundWalTask();
-
  private:
     DBOptions options_;
 
     std::atomic<bool> initialized_;
-
-    std::thread bg_timer_thread_;
 
     meta::MetaPtr meta_ptr_;
     MemManagerPtr mem_mgr_;
 
     std::shared_ptr<wal::WalManager> wal_mgr_;
     std::thread bg_wal_thread_;
+
+    std::thread bg_flush_thread_;
+    std::thread bg_metric_thread_;
+    std::thread bg_index_thread_;
 
     struct SimpleWaitNotify {
         bool notified_ = false;
@@ -297,8 +308,12 @@ class DBImpl : public DB, public server::CacheConfigHandler, public server::Engi
         }
     };
 
-    SimpleWaitNotify bg_task_swn_;
-    SimpleWaitNotify flush_task_swn_;
+    SimpleWaitNotify swn_wal_;
+    SimpleWaitNotify swn_flush_;
+    SimpleWaitNotify swn_metric_;
+    SimpleWaitNotify swn_index_;
+
+    SimpleWaitNotify flush_req_swn_;
 
     ThreadPool merge_thread_pool_;
     std::mutex merge_result_mutex_;

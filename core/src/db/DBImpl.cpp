@@ -53,10 +53,8 @@ namespace milvus {
 namespace engine {
 
 namespace {
-
-constexpr uint64_t METRIC_ACTION_INTERVAL = 1;
-constexpr uint64_t COMPACT_ACTION_INTERVAL = 1;
-constexpr uint64_t INDEX_ACTION_INTERVAL = 1;
+constexpr uint64_t BACKGROUND_METRIC_INTERVAL = 1;
+constexpr uint64_t BACKGROUND_INDEX_INTERVAL = 1;
 
 static const Status SHUTDOWN_ERROR = Status(DB_ERROR, "Milvus server is shutdown!");
 
@@ -125,17 +123,25 @@ DBImpl::Start() {
 
         // for distribute version, some nodes are read only
         if (options_.mode_ != DBOptions::MODE::CLUSTER_READONLY) {
-            // background thread
-            bg_wal_thread_ = std::thread(&DBImpl::BackgroundWalTask, this);
+            // background wal thread
+            bg_wal_thread_ = std::thread(&DBImpl::BackgroundWalThread, this);
         }
-
     } else {
         // for distribute version, some nodes are read only
         if (options_.mode_ != DBOptions::MODE::CLUSTER_READONLY) {
-            // ENGINE_LOG_TRACE << "StartTimerTasks";
-            bg_timer_thread_ = std::thread(&DBImpl::BackgroundTimerTask, this);
+            // background flush thread
+            bg_flush_thread_ = std::thread(&DBImpl::BackgroundFlushThread, this);
         }
     }
+
+    // for distribute version, some nodes are read only
+    if (options_.mode_ != DBOptions::MODE::CLUSTER_READONLY) {
+        // background build index thread
+        bg_index_thread_ = std::thread(&DBImpl::BackgroundIndexThread, this);
+    }
+
+    // background metric thread
+    bg_metric_thread_ = std::thread(&DBImpl::BackgroundMetricThread, this);
 
     return Status::OK();
 }
@@ -150,23 +156,29 @@ DBImpl::Stop() {
 
     if (options_.mode_ != DBOptions::MODE::CLUSTER_READONLY) {
         if (options_.wal_enable_) {
-            // wait flush merge/buildindex finish
-            bg_task_swn_.Notify();
+            // wait wal thread finish
+            swn_wal_.Notify();
             bg_wal_thread_.join();
-
         } else {
-            // flush all
+            // flush all without merge
             wal::MXLogRecord record;
             record.type = wal::MXLogType::Flush;
             ExecWalRecord(record);
 
-            // wait merge/buildindex finish
-            bg_task_swn_.Notify();
-            bg_timer_thread_.join();
+            // wait flush thread finish
+            swn_flush_.Notify();
+            bg_flush_thread_.join();
         }
+
+        swn_index_.Notify();
+        bg_index_thread_.join();
 
         meta_ptr_->CleanUpShadowFiles();
     }
+
+    // wait metric thread exit
+    swn_metric_.Notify();
+    bg_metric_thread_.join();
 
     // ENGINE_LOG_TRACE << "DB service stop";
     return Status::OK();
@@ -512,8 +524,7 @@ DBImpl::InsertVectors(const std::string& collection_id, const std::string& parti
         } else if (!vectors.binary_data_.empty()) {
             wal_mgr_->Insert(collection_id, partition_tag, vectors.id_array_, vectors.binary_data_);
         }
-        bg_task_swn_.Notify();
-
+        swn_wal_.Notify();
     } else {
         wal::MXLogRecord record;
         record.lsn = 0;  // need to get from meta ?
@@ -555,8 +566,7 @@ DBImpl::DeleteVectors(const std::string& collection_id, IDNumbers vector_ids) {
     Status status;
     if (options_.wal_enable_) {
         wal_mgr_->DeleteById(collection_id, vector_ids);
-        bg_task_swn_.Notify();
-
+        swn_wal_.Notify();
     } else {
         wal::MXLogRecord record;
         record.lsn = 0;  // need to get from meta ?
@@ -593,19 +603,14 @@ DBImpl::Flush(const std::string& collection_id) {
     if (options_.wal_enable_) {
         ENGINE_LOG_DEBUG << "WAL flush";
         auto lsn = wal_mgr_->Flush(collection_id);
-        ENGINE_LOG_DEBUG << "wal_mgr_->Flush";
         if (lsn != 0) {
-            bg_task_swn_.Notify();
-            flush_task_swn_.Wait();
-            ENGINE_LOG_DEBUG << "flush_task_swn_.Wait()";
+            swn_wal_.Notify();
+            flush_req_swn_.Wait();
         }
 
     } else {
         ENGINE_LOG_DEBUG << "MemTable flush";
-        wal::MXLogRecord record;
-        record.type = wal::MXLogType::Flush;
-        record.collection_id = collection_id;
-        status = ExecWalRecord(record);
+        InternalFlush(collection_id);
     }
 
     ENGINE_LOG_DEBUG << "End flush collection: " << collection_id;
@@ -626,14 +631,12 @@ DBImpl::Flush() {
         ENGINE_LOG_DEBUG << "WAL flush";
         auto lsn = wal_mgr_->Flush();
         if (lsn != 0) {
-            bg_task_swn_.Notify();
-            flush_task_swn_.Wait();
+            swn_wal_.Notify();
+            flush_req_swn_.Wait();
         }
     } else {
         ENGINE_LOG_DEBUG << "MemTable flush";
-        wal::MXLogRecord record;
-        record.type = wal::MXLogType::Flush;
-        status = ExecWalRecord(record);
+        InternalFlush();
     }
 
     ENGINE_LOG_DEBUG << "End flush all collections";
@@ -1236,7 +1239,7 @@ DBImpl::QueryAsync(const std::shared_ptr<server::Context>& context, const meta::
 }
 
 void
-DBImpl::BackgroundTimerTask() {
+DBImpl::BackgroundIndexThread() {
     server::SystemInfo::GetInstance().Init();
     while (true) {
         if (!initialized_.load(std::memory_order_acquire)) {
@@ -1247,14 +1250,9 @@ DBImpl::BackgroundTimerTask() {
             break;
         }
 
-        if (options_.auto_flush_interval_ > 0) {
-            bg_task_swn_.Wait_For(std::chrono::seconds(options_.auto_flush_interval_));
-        } else {
-            bg_task_swn_.Wait();
-        }
+        swn_index_.Wait_For(std::chrono::seconds(BACKGROUND_INDEX_INTERVAL));
 
-        StartMetricTask();
-        StartMergeTask();
+        WaitMergeFileFinish();
         StartBuildIndexTask();
     }
 }
@@ -1281,13 +1279,7 @@ DBImpl::WaitBuildIndexFinish() {
 
 void
 DBImpl::StartMetricTask() {
-    static uint64_t metric_clock_tick = 0;
-    ++metric_clock_tick;
-    if (metric_clock_tick % METRIC_ACTION_INTERVAL != 0) {
-        return;
-    }
-
-    server::Metrics::GetInstance().KeepingAliveCounterIncrement(METRIC_ACTION_INTERVAL);
+    server::Metrics::GetInstance().KeepingAliveCounterIncrement(BACKGROUND_METRIC_INTERVAL);
     int64_t cache_usage = cache::CpuCacheMgr::GetInstance()->CacheUsage();
     int64_t cache_total = cache::CpuCacheMgr::GetInstance()->CacheCapacity();
     fiu_do_on("DBImpl.StartMetricTask.InvalidTotalCache", cache_total = 0);
@@ -1317,16 +1309,6 @@ DBImpl::StartMetricTask() {
 
 void
 DBImpl::StartMergeTask() {
-    static uint64_t compact_clock_tick = 0;
-    ++compact_clock_tick;
-    if (compact_clock_tick % COMPACT_ACTION_INTERVAL != 0) {
-        return;
-    }
-
-    if (!options_.wal_enable_) {
-        Flush();
-    }
-
     // ENGINE_LOG_DEBUG << "Begin StartMergeTask";
     // merge task has been finished?
     {
@@ -1514,13 +1496,7 @@ DBImpl::BackgroundMerge(std::set<std::string> collection_ids) {
 }
 
 void
-DBImpl::StartBuildIndexTask(bool force) {
-    static uint64_t index_clock_tick = 0;
-    ++index_clock_tick;
-    if (!force && (index_clock_tick % INDEX_ACTION_INTERVAL != 0)) {
-        return;
-    }
-
+DBImpl::StartBuildIndexTask() {
     // build index has been finished?
     {
         std::lock_guard<std::mutex> lck(index_result_mutex_);
@@ -1992,7 +1968,17 @@ DBImpl::ExecWalRecord(const wal::MXLogRecord& record) {
 }
 
 void
-DBImpl::BackgroundWalTask() {
+DBImpl::InternalFlush(const std::string& collection_id) {
+    wal::MXLogRecord record;
+    record.type = wal::MXLogType::Flush;
+    record.collection_id = collection_id;
+    ExecWalRecord(record);
+
+    StartMergeTask();
+}
+
+void
+DBImpl::BackgroundWalThread() {
     server::SystemInfo::GetInstance().Init();
 
     std::chrono::system_clock::time_point next_auto_flush_time;
@@ -2003,26 +1989,15 @@ DBImpl::BackgroundWalTask() {
         next_auto_flush_time = get_next_auto_flush_time();
     }
 
-    wal::MXLogRecord record;
-
-    auto auto_flush = [&]() {
-        record.type = wal::MXLogType::Flush;
-        record.collection_id.clear();
-        ExecWalRecord(record);
-
-        StartMetricTask();
-        StartMergeTask();
-        StartBuildIndexTask();
-    };
-
     while (true) {
         if (options_.auto_flush_interval_ > 0) {
             if (std::chrono::system_clock::now() >= next_auto_flush_time) {
-                auto_flush();
+                InternalFlush();
                 next_auto_flush_time = get_next_auto_flush_time();
             }
         }
 
+        wal::MXLogRecord record;
         auto error_code = wal_mgr_->GetNextRecord(record);
         if (error_code != WAL_SUCCESS) {
             ENGINE_LOG_ERROR << "WAL background GetNextRecord error";
@@ -2032,8 +2007,8 @@ DBImpl::BackgroundWalTask() {
         if (record.type != wal::MXLogType::None) {
             ExecWalRecord(record);
             if (record.type == wal::MXLogType::Flush) {
-                // user req flush
-                flush_task_swn_.Notify();
+                // notify flush request to return
+                flush_req_swn_.Notify();
 
                 // if user flush all manually, update auto flush also
                 if (record.collection_id.empty() && options_.auto_flush_interval_ > 0) {
@@ -2043,7 +2018,8 @@ DBImpl::BackgroundWalTask() {
 
         } else {
             if (!initialized_.load(std::memory_order_acquire)) {
-                auto_flush();
+                InternalFlush();
+                flush_req_swn_.Notify();
                 WaitMergeFileFinish();
                 WaitBuildIndexFinish();
                 ENGINE_LOG_DEBUG << "WAL background thread exit";
@@ -2051,11 +2027,43 @@ DBImpl::BackgroundWalTask() {
             }
 
             if (options_.auto_flush_interval_ > 0) {
-                bg_task_swn_.Wait_Until(next_auto_flush_time);
+                swn_wal_.Wait_Until(next_auto_flush_time);
             } else {
-                bg_task_swn_.Wait();
+                swn_wal_.Wait();
             }
         }
+    }
+}
+
+void
+DBImpl::BackgroundFlushThread() {
+    server::SystemInfo::GetInstance().Init();
+    while (true) {
+        if (!initialized_.load(std::memory_order_acquire)) {
+            ENGINE_LOG_DEBUG << "DB background flush thread exit";
+            break;
+        }
+
+        InternalFlush();
+        if (options_.auto_flush_interval_ > 0) {
+            swn_flush_.Wait_For(std::chrono::seconds(options_.auto_flush_interval_));
+        } else {
+            swn_flush_.Wait();
+        }
+    }
+}
+
+void
+DBImpl::BackgroundMetricThread() {
+    server::SystemInfo::GetInstance().Init();
+    while (true) {
+        if (!initialized_.load(std::memory_order_acquire)) {
+            ENGINE_LOG_DEBUG << "DB background metric thread exit";
+            break;
+        }
+
+        swn_metric_.Wait_For(std::chrono::seconds(BACKGROUND_METRIC_INTERVAL));
+        StartMetricTask();
     }
 }
 
