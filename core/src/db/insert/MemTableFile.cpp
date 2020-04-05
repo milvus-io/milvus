@@ -192,10 +192,6 @@ MemTableFile::Serialize(uint64_t wal_lsn) {
         table_file_schema_.file_type_ = meta::SegmentSchema::RAW;
     }
 
-    // Set collection file's flush_lsn so WAL can roll back and delete garbage files which can be obtained from
-    // GetTableFilesByFlushLSN() in meta.
-    table_file_schema_.flush_lsn_ = wal_lsn;
-
     status = meta_->UpdateCollectionFile(table_file_schema_);
 
     ENGINE_LOG_DEBUG << "New " << ((table_file_schema_.file_type_ == meta::SegmentSchema::RAW) ? "raw" : "to_index")
