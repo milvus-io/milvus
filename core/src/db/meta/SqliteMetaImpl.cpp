@@ -551,66 +551,6 @@ SqliteMetaImpl::GetCollectionFlushLSN(const std::string& collection_id, uint64_t
 }
 
 Status
-SqliteMetaImpl::GetTableFilesByFlushLSN(uint64_t flush_lsn, SegmentsSchema& table_files) {
-    table_files.clear();
-
-    try {
-        server::MetricCollector metric;
-
-        auto selected = ConnectorPtr->select(
-            columns(&SegmentSchema::id_, &SegmentSchema::collection_id_, &SegmentSchema::segment_id_,
-                    &SegmentSchema::file_id_, &SegmentSchema::file_type_, &SegmentSchema::file_size_,
-                    &SegmentSchema::row_count_, &SegmentSchema::date_, &SegmentSchema::engine_type_,
-                    &SegmentSchema::created_on_),
-            where(c(&SegmentSchema::flush_lsn_) == flush_lsn));
-
-        std::map<std::string, CollectionSchema> groups;
-        SegmentSchema table_file;
-
-        Status ret;
-        for (auto& file : selected) {
-            table_file.id_ = std::get<0>(file);
-            table_file.collection_id_ = std::get<1>(file);
-            table_file.segment_id_ = std::get<2>(file);
-            table_file.file_id_ = std::get<3>(file);
-            table_file.file_type_ = std::get<4>(file);
-            table_file.file_size_ = std::get<5>(file);
-            table_file.row_count_ = std::get<6>(file);
-            table_file.date_ = std::get<7>(file);
-            table_file.engine_type_ = std::get<8>(file);
-            table_file.created_on_ = std::get<9>(file);
-
-            auto status = utils::GetTableFilePath(options_, table_file);
-            if (!status.ok()) {
-                ret = status;
-            }
-            auto groupItr = groups.find(table_file.collection_id_);
-            if (groupItr == groups.end()) {
-                CollectionSchema table_schema;
-                table_schema.collection_id_ = table_file.collection_id_;
-                auto status = DescribeCollection(table_schema);
-                if (!status.ok()) {
-                    return status;
-                }
-                groups[table_file.collection_id_] = table_schema;
-            }
-            table_file.dimension_ = groups[table_file.collection_id_].dimension_;
-            table_file.index_file_size_ = groups[table_file.collection_id_].index_file_size_;
-            table_file.index_params_ = groups[table_file.collection_id_].index_params_;
-            table_file.metric_type_ = groups[table_file.collection_id_].metric_type_;
-            table_files.push_back(table_file);
-        }
-
-        if (selected.size() > 0) {
-            ENGINE_LOG_DEBUG << "Collect " << selected.size() << " files with flush_lsn = " << flush_lsn;
-        }
-        return ret;
-    } catch (std::exception& e) {
-        return HandleException("Encounter exception when getting collection files by flush_lsn", e.what());
-    }
-}
-
-Status
 SqliteMetaImpl::UpdateCollectionFile(SegmentSchema& file_schema) {
     file_schema.updated_time_ = utils::GetMicroSecTimeStamp();
     try {

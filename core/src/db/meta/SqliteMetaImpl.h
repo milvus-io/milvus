@@ -71,9 +71,6 @@ class SqliteMetaImpl : public Meta {
     GetCollectionFlushLSN(const std::string& collection_id, uint64_t& flush_lsn) override;
 
     Status
-    GetTableFilesByFlushLSN(uint64_t flush_lsn, SegmentsSchema& table_files) override;
-
-    Status
     UpdateCollectionFile(SegmentSchema& file_schema) override;
 
     Status
