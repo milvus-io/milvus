@@ -358,7 +358,7 @@ ExecutionEngineImpl::Serialize() {
     utils::GetParentPath(location_, segment_dir);
     auto segment_writer_ptr = std::make_shared<segment::SegmentWriter>(segment_dir);
     segment_writer_ptr->SetVectorIndex(index_);
-    segment_writer_ptr->WriteVectorIndex();
+    segment_writer_ptr->WriteVectorIndex(location_);
 
     // here we reset index size by file size,
     // since some index type(such as SQ8) data size become smaller after serialized
@@ -443,7 +443,7 @@ ExecutionEngineImpl::Load(bool to_cache) {
             try {
                 segment::SegmentPtr segment_ptr;
                 segment_reader_ptr->GetSegment(segment_ptr);
-                auto status = segment_reader_ptr->LoadVectorIndex(segment_ptr->vector_index_ptr_);
+                auto status = segment_reader_ptr->LoadVectorIndex(location_, segment_ptr->vector_index_ptr_);
                 index_ = segment_ptr->vector_index_ptr_->GetVectorIndex();
 
                 if (index_ == nullptr) {

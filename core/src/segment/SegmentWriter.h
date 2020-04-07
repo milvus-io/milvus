@@ -63,7 +63,7 @@ class SegmentWriter {
     VectorCount();
 
     Status
-    WriteVectorIndex();
+    WriteVectorIndex(const std::string& location);
 
  private:
     Status
