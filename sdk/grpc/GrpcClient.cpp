@@ -57,7 +57,7 @@ bool
 GrpcClient::HasCollection(const ::milvus::grpc::TableName& collection_name, Status& status) {
     ClientContext context;
     ::milvus::grpc::BoolReply response;
-    ::grpc::Status grpc_status = stub_->HasCollection(&context, collection_name, &response);
+    ::grpc::Status grpc_status = stub_->HasTable(&context, collection_name, &response);
 
     if (!grpc_status.ok()) {
         std::cerr << "HasCollection gRPC failed!" << std::endl;
