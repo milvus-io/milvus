@@ -31,11 +31,12 @@ class TestDeleteBase:
         params=gen_simple_index()
     )
     def get_simple_index(self, request, connect):
-        if str(connect._cmd("mode")[1]) == "CPU":
-            if request.param["index_type"] not in [IndexType.IVF_SQ8, IndexType.IVFLAT, IndexType.FLAT, IndexType.IVF_PQ, IndexType.HNSW]:
-                pytest.skip("Only support index_type: flat/ivf_flat/ivf_sq8/hnsw/ivf_pq")
-        else:
-            pytest.skip("Only support CPU mode")
+        if str(connect._cmd("mode")[1]) == "GPU":
+            if request.param["index_type"] not in [IndexType.IVF_SQ8, IndexType.IVFLAT, IndexType.FLAT, IndexType.IVF_PQ, IndexType.IVF_SQ8H]:
+                pytest.skip("Only support index_type: idmap/ivf")
+        elif str(connect._cmd("mode")[1]) == "CPU":
+            if request.param["index_type"] in [IndexType.IVF_SQ8H]:
+                pytest.skip("CPU not support index_type: ivf_sq8h")
         return request.param
 
     def test_delete_vector_search(self, connect, collection, get_simple_index):
@@ -170,8 +171,6 @@ class TestDeleteBase:
         assert status.OK()
         status = connect.flush([collection])
         assert status.OK()
-        status = connect.flush([collection])
-        assert status.OK()
         delete_ids = [ids[0], ids[-1]]
         query_vecs = [vectors[0], vectors[1], vectors[-1]]
         status = connect.delete_by_id(collection, delete_ids)
@@ -298,11 +297,12 @@ class TestDeleteIndexedVectors:
         params=gen_simple_index()
     )
     def get_simple_index(self, request, connect):
-        if str(connect._cmd("mode")[1]) == "CPU":
-            if request.param["index_type"] not in [IndexType.IVF_SQ8, IndexType.IVFLAT, IndexType.FLAT, IndexType.IVF_PQ, IndexType.HNSW]:
-                pytest.skip("Only support index_type: flat/ivf_flat/ivf_sq8")
-        else:
-            pytest.skip("Only support CPU mode")
+        if str(connect._cmd("mode")[1]) == "GPU":
+            if request.param["index_type"] not in [IndexType.IVF_SQ8, IndexType.IVFLAT, IndexType.FLAT, IndexType.IVF_PQ, IndexType.IVF_SQ8H]:
+                pytest.skip("Only support index_type: idmap/ivf")
+        elif str(connect._cmd("mode")[1]) == "CPU":
+            if request.param["index_type"] in [IndexType.IVF_SQ8H]:
+                pytest.skip("CPU not support index_type: ivf_sq8h")
         return request.param
 
     def test_delete_vectors_after_index_created_search(self, connect, collection, get_simple_index):
