@@ -55,6 +55,7 @@ namespace engine {
 namespace {
 constexpr uint64_t BACKGROUND_METRIC_INTERVAL = 1;
 constexpr uint64_t BACKGROUND_INDEX_INTERVAL = 1;
+constexpr uint64_t WAIT_BUILD_INDEX_INTERVAL = 5;
 
 static const Status SHUTDOWN_ERROR = Status(DB_ERROR, "Milvus server is shutdown!");
 
@@ -1740,7 +1741,7 @@ DBImpl::WaitCollectionIndexRecursively(const std::string& collection_id, const C
             status = meta_ptr_->UpdateCollectionFilesToIndex(collection_id);
         }
 
-        std::this_thread::sleep_for(std::chrono::milliseconds(std::min(10 * 1000, times * 100)));
+        std::this_thread::sleep_for(std::chrono::seconds(WAIT_BUILD_INDEX_INTERVAL));
         GetFilesToBuildIndex(collection_id, file_types, collection_files);
         ++times;
 
