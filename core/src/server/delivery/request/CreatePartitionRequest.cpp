@@ -23,7 +23,7 @@
 namespace milvus {
 namespace server {
 
-constexpr uint64_t MAX_PARTITION_LIMIT = 5;
+constexpr uint64_t MAX_PARTITION_LIMIT = 5000;
 
 CreatePartitionRequest::CreatePartitionRequest(const std::shared_ptr<milvus::server::Context>& context,
                                                const std::string& collection_name, const std::string& tag)
