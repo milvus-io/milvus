@@ -1314,7 +1314,7 @@ Obtain a vector to by ID.
 ##### Request
 
 ```shell
-$ curl -X POST "http://127.0.0.1:19121/collections/test_collection/vectors?id=1578989029645098000" -H "accept: application/json" -H "Content-Type: application/json"
+$ curl -X GET "http://127.0.0.1:19121/collections/test_collection/vectors?id=1578989029645098000" -H "accept: application/json" -H "Content-Type: application/json"
 ```
 
 ##### Response
