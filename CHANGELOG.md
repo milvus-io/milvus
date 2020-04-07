@@ -44,6 +44,7 @@ Please mark all change in change log and use the issue from GitHub
 -   \#1747 Expected error status if search with partition_tag not existed
 -   \#1756 Fix memory exhausted during searching 
 -   \#1781 Fix search hang with SQ8H
+-   \#1812 Fix incorrect request method in search example in http readme
 -   \#1818 Duplicate data generated after restart milvus server
 
 ## Feature
