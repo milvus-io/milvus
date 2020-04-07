@@ -289,12 +289,14 @@ RequestHandler::InsertEntity(const std::shared_ptr<Context>& context,
 
 Status
 RequestHandler::HybridSearch(const std::shared_ptr<Context>& context,
-                                    const std::string& collection_name,
-                                    std::vector<std::string>& partition_list,
-                                    milvus::query::GeneralQueryPtr& general_query,
-                                    milvus::server::HybridQueryResult& result) {
+                             context::HybridSearchContextPtr hybrid_search_context,
+                             const std::string& collection_name,
+                             std::vector<std::string>& partition_list,
+                             milvus::query::GeneralQueryPtr& general_query,
+                             milvus::server::HybridQueryResult& result) {
+
     BaseRequestPtr request_ptr =
-        HybridSearchRequest::Create(context, collection_name, partition_list, general_query, result);
+        HybridSearchRequest::Create(context, hybrid_search_context, collection_name, partition_list, general_query, result);
     RequestScheduler::ExecRequest(request_ptr);
 
     return request_ptr->status();

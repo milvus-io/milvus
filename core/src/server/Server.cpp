@@ -30,6 +30,8 @@
 #include "utils/TimeRecorder.h"
 #include "wrapper/KnowhereResource.h"
 
+#include "search/TaskInst.h"
+
 namespace milvus {
 namespace server {
 
@@ -272,11 +274,14 @@ Server::StartService() {
     grpc::GrpcServer::GetInstance().Start();
     web::WebServer::GetInstance().Start();
 
+
     stat = storage::S3ClientWrapper::GetInstance().StartService();
     if (!stat.ok()) {
         SERVER_LOG_ERROR << "S3Client start service fail: " << stat.message();
         goto FAIL;
     }
+
+    search::TaskInst::GetInstance().Start();
 
     return Status::OK();
 FAIL:
@@ -286,6 +291,7 @@ FAIL:
 
 void
 Server::StopService() {
+    search::TaskInst::GetInstance().Stop();
     storage::S3ClientWrapper::GetInstance().StopService();
     web::WebServer::GetInstance().Stop();
     grpc::GrpcServer::GetInstance().Stop();

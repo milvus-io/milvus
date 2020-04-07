@@ -147,6 +147,7 @@ class DBImpl : public DB, public server::CacheConfigHandler {
     HybridQuery(const std::shared_ptr<server::Context>& context,
                 const std::string& collection_id,
                 const std::vector<std::string>& partition_tags,
+                context::HybridSearchContextPtr hybrid_search_context,
                 query::GeneralQueryPtr general_query,
                 std::unordered_map<std::string, engine::meta::hybrid::DataType>& attr_type,
                 ResultIds& result_ids,
@@ -184,10 +185,20 @@ class DBImpl : public DB, public server::CacheConfigHandler {
     HybridQueryAsync(const std::shared_ptr<server::Context>& context,
                      const std::string& table_id,
                      const meta::TableFilesSchema& files,
+                     context::HybridSearchContextPtr hybrid_search_context,
                      query::GeneralQueryPtr general_query,
                      std::unordered_map<std::string, engine::meta::hybrid::DataType>& attr_type,
                      ResultIds& result_ids,
                      ResultDistances& result_distances);
+
+    Status
+    HybridQueryNoSched(const std::shared_ptr<server::Context>& context,
+                       const std::string& table_id,
+                       const meta::TableFilesSchema& files,
+                       query::GeneralQueryPtr general_query,
+                       std::unordered_map<std::string, engine::meta::hybrid::DataType>& attr_type,
+                       ResultIds& result_ids,
+                       ResultDistances& result_distances);
 
     Status
     GetVectorByIdHelper(const std::string& table_id, IDNumber vector_id, VectorsData& vector,

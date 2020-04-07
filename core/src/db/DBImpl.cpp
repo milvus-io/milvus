@@ -24,6 +24,7 @@
 #include <set>
 #include <thread>
 #include <utility>
+#include <queue>
 
 #include "Utils.h"
 #include "cache/CpuCacheMgr.h"
@@ -47,6 +48,9 @@
 #include "utils/TimeRecorder.h"
 #include "utils/ValidationUtil.h"
 #include "wal/WalDefinations.h"
+
+#include "search/TaskInst.h"
+
 
 namespace milvus {
 namespace engine {
@@ -1277,6 +1281,7 @@ Status
 DBImpl::HybridQuery(const std::shared_ptr<server::Context>& context,
                     const std::string& collection_id,
                     const std::vector<std::string>& partition_tags,
+                    context::HybridSearchContextPtr hybrid_search_context,
                     query::GeneralQueryPtr general_query,
                     std::unordered_map<std::string, engine::meta::hybrid::DataType>& attr_type,
                     ResultIds& result_ids,
@@ -1323,7 +1328,7 @@ DBImpl::HybridQuery(const std::shared_ptr<server::Context>& context,
     }
 
     cache::CpuCacheMgr::GetInstance()->PrintInfo();  // print cache info before query
-    status = HybridQueryAsync(query_ctx, collection_id, files_array, general_query, attr_type, result_ids, result_distances);
+    status = HybridQueryAsync(query_ctx, collection_id, files_array, hybrid_search_context, general_query, attr_type, result_ids, result_distances);
     cache::CpuCacheMgr::GetInstance()->PrintInfo();  // print cache info after query
 
     query_ctx->GetTraceContext()->GetSpan()->Finish();
@@ -1479,12 +1484,29 @@ Status
 DBImpl::HybridQueryAsync(const std::shared_ptr<server::Context>& context,
                          const std::string& table_id,
                          const meta::TableFilesSchema& files,
+                         context::HybridSearchContextPtr hybrid_search_context,
                          query::GeneralQueryPtr general_query,
                          std::unordered_map<std::string, engine::meta::hybrid::DataType>& attr_type,
                          ResultIds& result_ids,
                          ResultDistances& result_distances) {
     auto query_async_ctx = context->Child("Query Async");
 
+    // Construct tasks
+    for (auto file : files) {
+        std::unordered_map<std::string, engine::DataType> types;
+        auto it = attr_type.begin();
+        for (; it != attr_type.end(); it++) {
+            types.insert(std::make_pair(it->first, (engine::DataType)it->second));
+        }
+
+        auto file_ptr = std::make_shared<meta::TableFileSchema>(file);
+        search::TaskPtr task = std::make_shared<search::Task>(context, file_ptr, general_query, types, hybrid_search_context);
+        search::TaskInst::GetInstance().load_queue().push(task);
+        search::TaskInst::GetInstance().load_cv().notify_one();
+//        hybrid_search_context->tasks_.emplace_back(task);
+    }
+
+#if 0
     TimeRecorder rc("");
 
     // step 1: construct search job
@@ -1514,8 +1536,78 @@ DBImpl::HybridQueryAsync(const std::shared_ptr<server::Context>& context,
     rc.ElapseFromBegin("Engine query totally cost");
 
     query_async_ctx->GetTraceContext()->GetSpan()->Finish();
+#endif
 
     return Status::OK();
+}
+
+Status
+DBImpl::HybridQueryNoSched(const std::shared_ptr<server::Context>& context,
+                                  const std::string& table_id,
+                                  const milvus::engine::meta::TableFilesSchema& files,
+                                  milvus::query::GeneralQueryPtr general_query,
+                                  std::unordered_map<std::string, engine::meta::hybrid::DataType>& attr_type,
+                                  milvus::engine::ResultIds& result_ids,
+                                  milvus::engine::ResultDistances& result_distances) {
+    auto query_async_ctx = context->Child("Query Async");
+
+    TimeRecorder rc("");
+
+    // step 1: construct search job
+    auto status = OngoingFileChecker::GetInstance().MarkOngoingFiles(files);
+
+    VectorsData vectors;
+
+    ENGINE_LOG_DEBUG << "Engine query begin, index file count: " << files.size();
+
+    for (auto file : files) {
+        // Call ExecutionEngine
+        ExecutionEnginePtr index_engine = nullptr;
+
+        bool ascending_reduce;
+        if (file.metric_type_ == static_cast<int>(MetricType::IP)
+            && file.engine_type_ != static_cast<int>(EngineType::FAISS_PQ)) {
+            ascending_reduce = false;
+        }
+
+        EngineType engine_type;
+        if (file.file_type_ == milvus::engine::meta::TableFileSchema::FILE_TYPE::RAW ||
+            file.file_type_ == milvus::engine::meta::TableFileSchema::FILE_TYPE::TO_INDEX ||
+            file.file_type_ == milvus::engine::meta::TableFileSchema::FILE_TYPE::BACKUP) {
+            engine_type = engine::utils::IsBinaryMetricType(file.metric_type_) ? EngineType::FAISS_BIN_IDMAP
+                                                                                : EngineType::FAISS_IDMAP;
+        } else {
+            engine_type = (EngineType)file.engine_type_;
+        }
+
+        milvus::json json_params;
+        if (!file.index_params_.empty()) {
+            json_params = milvus::json::parse(file.index_params_);
+        }
+        index_engine = EngineFactory::Build(file.dimension_, file.location_, engine_type,
+                                            (MetricType)file.metric_type_, json_params);
+
+        // Load: DiskToCPU
+        Status stat;
+        try {
+            stat = index_engine->Load();
+        } catch (std::exception& ex) {
+            std::string error_msg;
+            error_msg = "Failed to load index file: " + std::string(ex.what());
+            stat = Status(SERVER_UNEXPECTED_ERROR, error_msg);
+        }
+
+        // Query
+        if (general_query != nullptr) {
+            std::unordered_map<std::string, engine::DataType> types;
+            auto type_it = attr_type.begin();
+            for (; type_it != attr_type.end(); type_it++) {
+                types.insert(std::make_pair(type_it->first, (engine::DataType)(type_it->second)));
+            }
+            faiss::ConcurrentBitsetPtr bitset;
+            stat = index_engine->ExecBinaryQuery(general_query, bitset, types, result_distances, result_ids);
+        }
+    }
 }
 
 void

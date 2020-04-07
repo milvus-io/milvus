@@ -29,11 +29,13 @@ namespace milvus {
 namespace server {
 
 HybridSearchRequest::HybridSearchRequest(const std::shared_ptr<Context>& context,
+                                         context::HybridSearchContextPtr& hybrid_search_context,
                                          const std::string& collection_name,
                                          std::vector<std::string>& partition_list,
                                          milvus::query::GeneralQueryPtr& general_query,
                                          milvus::server::HybridQueryResult& result) :
     BaseRequest(context, DDL_DML_REQUEST_GROUP),
+    hybrid_search_contxt_(hybrid_search_context),
     collection_name_(collection_name),
     partition_list_(partition_list),
     general_query_(general_query),
@@ -42,11 +44,13 @@ HybridSearchRequest::HybridSearchRequest(const std::shared_ptr<Context>& context
 
 BaseRequestPtr
 HybridSearchRequest::Create(const std::shared_ptr<Context>& context,
+                            context::HybridSearchContextPtr& hybrid_search_context,
                             const std::string& collection_name,
                             std::vector<std::string>& partition_list,
                             milvus::query::GeneralQueryPtr& general_query,
                             milvus::server::HybridQueryResult& result) {
     return std::shared_ptr<BaseRequest>(new HybridSearchRequest(context,
+                                                                hybrid_search_context,
                                                                 collection_name,
                                                                 partition_list,
                                                                 general_query,
@@ -98,6 +102,7 @@ HybridSearchRequest::OnExecute() {
         status = DBWrapper::DB()->HybridQuery(context_,
                                               collection_name_,
                                               partition_list_,
+                                              hybrid_search_contxt_,
                                               general_query_,
                                               attr_type,
                                               result_ids,

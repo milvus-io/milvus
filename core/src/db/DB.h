@@ -18,6 +18,7 @@
 #include "Options.h"
 #include "Types.h"
 #include "meta/Meta.h"
+#include "context/HybridSearchContext.h"
 #include "query/GeneralQuery.h"
 #include "server/context/Context.h"
 #include "utils/Status.h"
@@ -159,6 +160,7 @@ class DB {
     HybridQuery(const std::shared_ptr<server::Context>& context,
                 const std::string& collection_id,
                 const std::vector<std::string>& partition_tags,
+                context::HybridSearchContextPtr hybrid_search_context,
                 query::GeneralQueryPtr general_query,
                 std::unordered_map<std::string, engine::meta::hybrid::DataType>& attr_type,
                 engine::ResultIds& result_ids,

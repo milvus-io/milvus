@@ -16,6 +16,7 @@
 #include <unordered_map>
 #include <vector>
 
+#include "context/HybridSearchContext.h"
 #include "query/BinaryQuery.h"
 #include "tracing/TextMapCarrier.h"
 #include "tracing/TracerUtil.h"
@@ -822,12 +823,17 @@ GrpcRequestHandler::HybridSearch(::grpc::ServerContext* context,
                                  ::milvus::grpc::TopKQueryResult* response) {
     CHECK_NULLPTR_RETURN(request);
 
+    context::HybridSearchContextPtr hybrid_search_context = std::make_shared<context::HybridSearchContext>();
+    hybrid_search_context->grpc_request_ = *request;
+
     query::BooleanQueryPtr boolean_query = std::make_shared<query::BooleanQuery>();
     DeSerialization(request->general_query(), boolean_query);
 
     query::GeneralQueryPtr general_query = std::make_shared<query::GeneralQuery>();
     general_query->bin = std::make_shared<query::BinaryQuery>();
     query::GenBinaryQuery(boolean_query, general_query->bin);
+
+    hybrid_search_context->general_query_ = general_query;
 
     std::vector<std::string> partition_list;
     partition_list.resize(request->partition_tag_array_size());
@@ -838,6 +844,7 @@ GrpcRequestHandler::HybridSearch(::grpc::ServerContext* context,
     HybridQueryResult result;
 
     Status status = request_handler_.HybridSearch(context_map_[context],
+                                                  hybrid_search_context,
                                                   request->collection_name(),
                                                   partition_list,
                                                   general_query,

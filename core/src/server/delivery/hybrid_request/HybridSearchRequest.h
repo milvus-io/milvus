@@ -16,6 +16,7 @@
 #include <memory>
 #include <string>
 #include <vector>
+#include <src/context/HybridSearchContext.h>
 
 namespace milvus {
 namespace server {
@@ -24,6 +25,7 @@ class HybridSearchRequest : public BaseRequest {
  public:
     static BaseRequestPtr
     Create(const std::shared_ptr<Context>& context,
+           context::HybridSearchContextPtr& hybrid_search_context,
            const std::string& collection_name,
            std::vector<std::string>& partition_list,
            milvus::query::GeneralQueryPtr& general_query,
@@ -31,6 +33,7 @@ class HybridSearchRequest : public BaseRequest {
 
  protected:
     HybridSearchRequest(const std::shared_ptr<Context>& context,
+                        context::HybridSearchContextPtr& hybrid_search_context,
                         const std::string& collection_name,
                         std::vector<std::string>& partition_list,
                         milvus::query::GeneralQueryPtr& general_query,
@@ -40,6 +43,7 @@ class HybridSearchRequest : public BaseRequest {
     OnExecute() override;
 
  private:
+    context::HybridSearchContextPtr hybrid_search_contxt_;
     const std::string collection_name_;
     std::vector<std::string>& partition_list_;
     milvus::query::GeneralQueryPtr& general_query_;

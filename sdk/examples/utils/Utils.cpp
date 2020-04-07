@@ -287,15 +287,15 @@ Utils::GenLeafQuery() {
     milvus::LeafQueryPtr lq1 = std::make_shared<milvus::LeafQuery>();
     milvus::LeafQueryPtr lq2 = std::make_shared<milvus::LeafQuery>();
     milvus::LeafQueryPtr lq3 = std::make_shared<milvus::LeafQuery>();
-    lq.emplace_back(lq1);
-    lq.emplace_back(lq2);
+//    lq.emplace_back(lq1);
+//    lq.emplace_back(lq2);
     lq.emplace_back(lq3);
-    lq1->term_query_ptr = tq;
-    lq2->range_query_ptr = rq;
+//    lq1->term_query_ptr = tq;
+//    lq2->range_query_ptr = rq;
     lq3->vector_query_ptr = vq;
 
-    lq1->query_boost = 1.0;
-    lq2->query_boost = 2.0;
+//    lq1->query_boost = 1.0;
+//    lq2->query_boost = 2.0;
     lq3->query_boost = 3.0;
     return lq;
 }

@@ -294,8 +294,8 @@ ClientTest::HybridSearch(std::string& collection_name) {
     //must
     auto must_clause = std::make_shared<milvus::BooleanQuery>(milvus::Occur::MUST);
     must_clause->AddLeafQuery(leaf_queries[0]);
-    must_clause->AddLeafQuery(leaf_queries[1]);
-    must_clause->AddLeafQuery(leaf_queries[2]);
+//    must_clause->AddLeafQuery(leaf_queries[1]);
+//    must_clause->AddLeafQuery(leaf_queries[2]);
 
     auto query_clause = std::make_shared<milvus::BooleanQuery>();
     query_clause->AddBooleanQuery(must_clause);

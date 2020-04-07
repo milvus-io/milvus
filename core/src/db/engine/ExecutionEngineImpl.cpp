@@ -1063,10 +1063,10 @@ ExecutionEngineImpl::ExecBinaryQuery(milvus::query::GeneralQueryPtr general_quer
             // Do search
             faiss::ConcurrentBitsetPtr list;
             Status status = std::static_pointer_cast<BFIndex>(index_)->GetBlacklist(list);
-            // Do and
+            // Do OR
             for (uint64_t i = 0; i < vector_count_; ++i) {
-                if (!list->test(i) || !bitset->test(i)) {
-                    bitset->clear(i);
+                if (list->test(i) || bitset->test(i)) {
+                    bitset->set(i);
                 }
             }
             status = std::static_pointer_cast<BFIndex>(index_)->SetBlacklist(bitset);
