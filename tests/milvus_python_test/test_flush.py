@@ -31,11 +31,9 @@ class TestFlushBase:
         params=gen_simple_index()
     )
     def get_simple_index(self, request, connect):
-        if str(connect._cmd("mode")[1]) == "CPU":
-            if request.param["index_type"] not in [IndexType.IVF_SQ8, IndexType.IVFLAT, IndexType.FLAT, IndexType.IVF_PQ, IndexType.HNSW]:
-                pytest.skip("Only support index_type: flat/ivf_flat/ivf_sq8")
-        else:
-            pytest.skip("Only support CPU mode")
+        if str(connect._cmd("mode")[1]) == "GPU":
+            if request.param["index_type"] not in [IndexType.IVF_SQ8, IndexType.IVFLAT, IndexType.FLAT, IndexType.IVF_PQ, IndexType.IVF_SQ8H]:
+                pytest.skip("Only support index_type: idmap/flat")
         return request.param
 
     def test_flush_collection_not_existed(self, connect, collection):

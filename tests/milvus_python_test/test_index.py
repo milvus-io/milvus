@@ -268,7 +268,7 @@ class TestIndexBase:
             p.join()
 
 
-# TODO: enable
+    # TODO: enable
     @pytest.mark.timeout(BUILD_TIMEOUT)
     @pytest.mark.level(2)
     def _test_create_index_multiprocessing(self, connect, collection, args):
