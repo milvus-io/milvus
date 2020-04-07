@@ -65,9 +65,6 @@ VecIndexFactory::CreateVecIndex(const IndexType& type, const IndexMode mode) {
         return std::make_shared<knowhere::IVFSQ>();
 #ifdef MILVUS_GPU_VERSION
     } else if (type == IndexEnum::INDEX_FAISS_IVFSQ8H) {
-        if (mode == IndexMode::MODE_CPU) {
-            return nullptr;
-        }
         return std::make_shared<knowhere::IVFSQHybrid>(gpu_device);
 #endif
     } else if (type == IndexEnum::INDEX_FAISS_BIN_IDMAP) {
