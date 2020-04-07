@@ -41,16 +41,6 @@ class VectorIndex {
         index_ptr_ = index_ptr;
     }
 
-    void
-    SetName(const std::string& name) {
-        name_ = name;
-    }
-
-    const std::string&
-    GetName() const {
-        return name_;
-    }
-
     // No copy and move
     VectorIndex(const VectorIndex&) = delete;
     VectorIndex(VectorIndex&&) = delete;
@@ -62,7 +52,6 @@ class VectorIndex {
 
  private:
     knowhere::VecIndexPtr index_ptr_ = nullptr;
-    std::string name_;
 };
 
 using VectorIndexPtr = std::shared_ptr<VectorIndex>;

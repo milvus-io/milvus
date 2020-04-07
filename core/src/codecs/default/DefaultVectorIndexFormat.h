@@ -30,10 +30,12 @@ class DefaultVectorIndexFormat : public VectorIndexFormat {
     DefaultVectorIndexFormat() = default;
 
     void
-    read(const storage::FSHandlerPtr& fs_ptr, segment::VectorIndexPtr& vector_index) override;
+    read(const storage::FSHandlerPtr& fs_ptr, const std::string& location,
+         segment::VectorIndexPtr& vector_index) override;
 
     void
-    write(const storage::FSHandlerPtr& fs_ptr, const segment::VectorIndexPtr& vector_index) override;
+    write(const storage::FSHandlerPtr& fs_ptr, const std::string& location,
+          const segment::VectorIndexPtr& vector_index) override;
 
     // No copy and move
     DefaultVectorIndexFormat(const DefaultVectorIndexFormat&) = delete;

@@ -106,11 +106,11 @@ SegmentWriter::WriteVectors() {
 }
 
 Status
-SegmentWriter::WriteVectorIndex() {
+SegmentWriter::WriteVectorIndex(const std::string& location) {
     codec::DefaultCodec default_codec;
     try {
         fs_ptr_->operation_ptr_->CreateDirectory();
-        default_codec.GetVectorIndexFormat()->write(fs_ptr_, segment_ptr_->vector_index_ptr_);
+        default_codec.GetVectorIndexFormat()->write(fs_ptr_, location, segment_ptr_->vector_index_ptr_);
     } catch (std::exception& e) {
         std::string err_msg = "Failed to write vector index: " + std::string(e.what());
         ENGINE_LOG_ERROR << err_msg;
