@@ -98,7 +98,8 @@ DefaultVectorIndexFormat::read_internal(const storage::FSHandlerPtr& fs_ptr, con
 }
 
 void
-DefaultVectorIndexFormat::read(const storage::FSHandlerPtr& fs_ptr, segment::VectorIndexPtr& vector_index) {
+DefaultVectorIndexFormat::read(const storage::FSHandlerPtr& fs_ptr, const std::string& location,
+                               segment::VectorIndexPtr& vector_index) {
     const std::lock_guard<std::mutex> lock(mutex_);
 
     std::string dir_path = fs_ptr->operation_ptr_->GetDirectory();
@@ -108,41 +109,16 @@ DefaultVectorIndexFormat::read(const storage::FSHandlerPtr& fs_ptr, segment::Vec
         throw Exception(SERVER_INVALID_ARGUMENT, err_msg);
     }
 
-    boost::filesystem::path target_path(dir_path);
-    typedef boost::filesystem::directory_iterator d_it;
-    d_it it_end;
-    d_it it(target_path);
-
-    for (; it != it_end; ++it) {
-        const auto& path = it->path();
-
-        // if (path.extension().string() == vector_index_extension_) {
-        /* tmp solution, should be replaced when use .idx as index extension name */
-        const std::string& location = path.string();
-        if (location.substr(location.length() - 3) == "000") {
-            knowhere::VecIndexPtr index = read_internal(fs_ptr, location);
-            vector_index->SetVectorIndex(index);
-            vector_index->SetName(path.stem().string());
-            return;
-        }
-    }
-}
-
-std::string
-GenerateFileName() {
-    auto now = std::chrono::system_clock::now();
-    auto micros = std::chrono::duration_cast<std::chrono::microseconds>(now.time_since_epoch()).count();
-    return std::to_string(micros * 1000);
+    knowhere::VecIndexPtr index = read_internal(fs_ptr, location);
+    vector_index->SetVectorIndex(index);
 }
 
 void
-DefaultVectorIndexFormat::write(const storage::FSHandlerPtr& fs_ptr, const segment::VectorIndexPtr& vector_index) {
+DefaultVectorIndexFormat::write(const storage::FSHandlerPtr& fs_ptr, const std::string& location,
+                                const segment::VectorIndexPtr& vector_index) {
     const std::lock_guard<std::mutex> lock(mutex_);
 
     std::string dir_path = fs_ptr->operation_ptr_->GetDirectory();
-
-    const std::string index_file_path = dir_path + "/" + GenerateFileName();
-    // const std::string index_file_path = dir_path + "/" + vector_index->GetName() + vector_index_extension_;
 
     milvus::TimeRecorder recorder("write_index");
 
@@ -152,7 +128,7 @@ DefaultVectorIndexFormat::write(const storage::FSHandlerPtr& fs_ptr, const segme
     int32_t index_type = knowhere::StrToOldIndexType(index->index_type());
 
     recorder.RecordSection("Start");
-    fs_ptr->writer_ptr_->open(index_file_path);
+    fs_ptr->writer_ptr_->open(location);
 
     fs_ptr->writer_ptr_->write(&index_type, sizeof(index_type));
 
@@ -171,7 +147,7 @@ DefaultVectorIndexFormat::write(const storage::FSHandlerPtr& fs_ptr, const segme
 
     double span = recorder.RecordSection("End");
     double rate = fs_ptr->writer_ptr_->length() * 1000000.0 / span / 1024 / 1024;
-    ENGINE_LOG_DEBUG << "write_index(" << index_file_path << ") rate " << rate << "MB/s";
+    ENGINE_LOG_DEBUG << "write_index(" << location << ") rate " << rate << "MB/s";
 }
 
 }  // namespace codec

@@ -25,7 +25,7 @@ AdapterMgr::GetAdapter(const IndexType type) {
     try {
         return collection_.at(type)();
     } catch (...) {
-        KNOWHERE_THROW_MSG("Can not find this type of confadapter");
+        KNOWHERE_THROW_MSG("Can not find confadapter: " + type);
     }
 }
 

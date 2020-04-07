@@ -93,11 +93,11 @@ SegmentReader::GetSegment(SegmentPtr& segment_ptr) {
 }
 
 Status
-SegmentReader::LoadVectorIndex(segment::VectorIndexPtr& vector_index_ptr) {
+SegmentReader::LoadVectorIndex(const std::string& location, segment::VectorIndexPtr& vector_index_ptr) {
     codec::DefaultCodec default_codec;
     try {
         fs_ptr_->operation_ptr_->CreateDirectory();
-        default_codec.GetVectorIndexFormat()->read(fs_ptr_, vector_index_ptr);
+        default_codec.GetVectorIndexFormat()->read(fs_ptr_, location, vector_index_ptr);
     } catch (std::exception& e) {
         std::string err_msg = "Failed to load vector index: " + std::string(e.what());
         ENGINE_LOG_ERROR << err_msg;
