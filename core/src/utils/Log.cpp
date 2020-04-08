@@ -18,7 +18,7 @@
 namespace milvus {
 
 std::string
-LogOut(const char * pattern, ...) {
+LogOut(const char* pattern, ...) {
     size_t len = strlen(pattern) + 256;
     auto str_p = std::make_unique<char[]>(len);
 
