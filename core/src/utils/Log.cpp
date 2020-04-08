@@ -19,10 +19,11 @@ namespace milvus {
 
 std::string
 LogOut(const std::string& pattern, ...) {
-    auto str_p = std::make_unique<char[]>(pattern.length() + 256);
+    size_t len = pattern.length() + 256;
+    auto str_p = std::make_unique<char[]>(len);
     va_list vl;
     va_start(vl, pattern.c_str());
-    vsprintf(str_p.get(), pattern.c_str(), vl);
+    vsnprintf(str_p.get(), len, pattern.c_str(), vl);
     va_end(vl);
     return std::string(str_p.get());
 }
