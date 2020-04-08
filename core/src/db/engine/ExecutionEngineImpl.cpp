@@ -766,7 +766,6 @@ ExecutionEngineImpl::Search(int64_t n, const float* data, int64_t k, const milvu
     TimeRecorder rc(LogOut("[%s][%ld] ExecutionEngineImpl::Search float", "search", 0));
 
     if (index_ == nullptr) {
-        //        ENGINE_LOG_ERROR << "ExecutionEngineImpl: index is null, failed to search";
         ENGINE_LOG_ERROR << LogOut("[%s][%ld] ExecutionEngineImpl: index is null, failed to search", "search", 0);
         return Status(DB_ERROR, "index is null");
     }
@@ -788,7 +787,6 @@ ExecutionEngineImpl::Search(int64_t n, const float* data, int64_t k, const milvu
     auto result = index_->Query(dataset, conf);
     rc.RecordSection("query done");
 
-    //    ENGINE_LOG_DEBUG << "get uids " << index_->GetUids().size() << " from index " << location_;
     ENGINE_LOG_DEBUG << LogOut("[%s][%ld] get %ld uids from index %s", "search", 0, index_->GetUids().size(),
                                location_.c_str());
     MapAndCopyResult(result, index_->GetUids(), n, k, distances, labels);
@@ -828,7 +826,6 @@ ExecutionEngineImpl::Search(int64_t n, const uint8_t* data, int64_t k, const mil
     auto result = index_->Query(dataset, conf);
     rc.RecordSection("query done");
 
-    //    ENGINE_LOG_DEBUG << "get uids " << index_->GetUids().size() << " from index " << location_;
     ENGINE_LOG_DEBUG << LogOut("[%s][%ld] get %ld uids from index %s", "search", 0, index_->GetUids().size(),
                                location_.c_str());
     MapAndCopyResult(result, index_->GetUids(), n, k, distances, labels);
@@ -909,7 +906,6 @@ ExecutionEngineImpl::Search(int64_t n, const std::vector<int64_t>& ids, int64_t 
         auto result = index_->QueryById(dataset, conf);
         rc.RecordSection("query by id done");
 
-        //        ENGINE_LOG_DEBUG << "get uids " << index_->GetUids().size() << " from index " << location_;
         ENGINE_LOG_DEBUG << LogOut("[%s][%ld] get %ld uids from index %s", "search", 0, index_->GetUids().size(),
                                    location_.c_str());
         MapAndCopyResult(result, uids, offsets.size(), k, distances, labels);

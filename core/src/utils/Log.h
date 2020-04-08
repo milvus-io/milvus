@@ -68,6 +68,6 @@ namespace milvus {
 
 /////////////////////////////////////////////////////////////////////////////////////////////////////
 std::string
-LogOut(const std::string& pattern, ...);
+LogOut(const char * pattern, ...);
 
 }  // namespace milvus
