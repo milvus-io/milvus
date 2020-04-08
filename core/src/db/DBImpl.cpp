@@ -1260,22 +1260,22 @@ DBImpl::BackgroundIndexThread() {
 
 void
 DBImpl::WaitMergeFileFinish() {
-//    ENGINE_LOG_DEBUG << "Begin WaitMergeFileFinish";
+    //    ENGINE_LOG_DEBUG << "Begin WaitMergeFileFinish";
     std::lock_guard<std::mutex> lck(merge_result_mutex_);
     for (auto& iter : merge_thread_results_) {
         iter.wait();
     }
-//    ENGINE_LOG_DEBUG << "End WaitMergeFileFinish";
+    //    ENGINE_LOG_DEBUG << "End WaitMergeFileFinish";
 }
 
 void
 DBImpl::WaitBuildIndexFinish() {
-//    ENGINE_LOG_DEBUG << "Begin WaitBuildIndexFinish";
+    //    ENGINE_LOG_DEBUG << "Begin WaitBuildIndexFinish";
     std::lock_guard<std::mutex> lck(index_result_mutex_);
     for (auto& iter : index_thread_results_) {
         iter.wait();
     }
-//    ENGINE_LOG_DEBUG << "End WaitBuildIndexFinish";
+    //    ENGINE_LOG_DEBUG << "End WaitBuildIndexFinish";
 }
 
 void
