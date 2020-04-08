@@ -63,6 +63,7 @@ IndexFactory(const milvus::knowhere::IndexType& type, const milvus::knowhere::In
         }
 #endif
     }
+    return nullptr;
 }
 
 class ParamGenerator {
@@ -109,6 +110,7 @@ class ParamGenerator {
         } else {
             std::cout << "Invalid index type " << type << std::endl;
         }
+        return milvus::knowhere::Config();
     }
 };
 

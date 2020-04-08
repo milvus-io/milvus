@@ -29,108 +29,81 @@ InitLog() {
 }
 
 void
-DataGen::Init_with_default() {
-    Generate(dim, nb, nq);
+DataGen::Init_with_default(const bool is_binary) {
+    Generate(dim, nb, nq, is_binary);
 }
 
 void
-BinaryDataGen::Init_with_binary_default() {
-    Generate(dim, nb, nq);
-}
-
-void
-DataGen::Generate(const int& dim, const int& nb, const int& nq) {
+DataGen::Generate(const int dim, const int nb, const int nq, const bool is_binary) {
+    this->dim = dim;
     this->nb = nb;
     this->nq = nq;
-    this->dim = dim;
 
-    GenAll(dim, nb, xb, ids, xids, nq, xq);
-    assert(xb.size() == (size_t)dim * nb);
-    assert(xq.size() == (size_t)dim * nq);
+    if (!is_binary) {
+        GenAll(dim, nb, xb, ids, xids, nq, xq);
+        assert(xb.size() == (size_t) dim * nb);
+        assert(xq.size() == (size_t) dim * nq);
 
-    base_dataset = milvus::knowhere::GenDatasetWithIds(nb, dim, xb.data(), ids.data());
-    query_dataset = milvus::knowhere::GenDataset(nq, dim, xq.data());
+        base_dataset = milvus::knowhere::GenDatasetWithIds(nb, dim, xb.data(), ids.data());
+        query_dataset = milvus::knowhere::GenDataset(nq, dim, xq.data());
+    } else {
+        int64_t dim_x = dim / 8;
+        GenAll(dim_x, nb, xb_bin, ids, xids, nq, xq_bin);
+        assert(xb_bin.size() == (size_t)dim_x * nb);
+        assert(xq_bin.size() == (size_t)dim_x * nq);
+
+        base_dataset = milvus::knowhere::GenDatasetWithIds(nb, dim, xb_bin.data(), ids.data());
+        query_dataset = milvus::knowhere::GenDataset(nq, dim, xq_bin.data());
+    }
+
     id_dataset = milvus::knowhere::GenDatasetWithIds(nq, dim, nullptr, ids.data());
     xid_dataset = milvus::knowhere::GenDatasetWithIds(nq, dim, nullptr, xids.data());
 }
 
 void
-BinaryDataGen::Generate(const int& dim, const int& nb, const int& nq) {
-    this->nb = nb;
-    this->nq = nq;
-    this->dim = dim;
-
-    int64_t dim_x = dim / 8;
-    GenBinaryAll(dim_x, nb, xb, ids, xids, nq, xq);
-    assert(xb.size() == (size_t)dim_x * nb);
-    assert(xq.size() == (size_t)dim_x * nq);
-
-    base_dataset = milvus::knowhere::GenDatasetWithIds(nb, dim, xb.data(), ids.data());
-    query_dataset = milvus::knowhere::GenDataset(nq, dim, xq.data());
-    id_dataset = milvus::knowhere::GenDatasetWithIds(nq, dim, nullptr, ids.data());
-    xid_dataset = milvus::knowhere::GenDatasetWithIds(nq, dim, nullptr, xids.data());
-}
-
-void
-GenAll(const int64_t dim, const int64_t& nb, std::vector<float>& xb, std::vector<int64_t>& ids,
-       std::vector<int64_t>& xids, const int64_t& nq, std::vector<float>& xq) {
+GenAll(const int64_t dim, const int64_t nb, std::vector<float>& xb, std::vector<int64_t>& ids,
+       std::vector<int64_t>& xids, const int64_t nq, std::vector<float>& xq) {
     xb.resize(nb * dim);
     xq.resize(nq * dim);
     ids.resize(nb);
     xids.resize(1);
-    GenAll(dim, nb, xb.data(), ids.data(), xids.data(), nq, xq.data());
+    GenBase(dim, nb, xb.data(), ids.data(), nq, xq.data(), xids.data(), false);
 }
 
 void
-GenAll(const int64_t& dim, const int64_t& nb, float* xb, int64_t* ids, int64_t* xids, const int64_t& nq, float* xq) {
-    GenBase(dim, nb, xb, ids);
-    for (int64_t i = 0; i < nq * dim; ++i) {
-        xq[i] = xb[i];
-    }
-    xids[0] = 3;  // pseudo random
-}
-
-void
-GenBinaryAll(const int64_t dim, const int64_t& nb, std::vector<uint8_t>& xb, std::vector<int64_t>& ids,
-             std::vector<int64_t>& xids, const int64_t& nq, std::vector<uint8_t>& xq) {
+GenAll(const int64_t dim, const int64_t nb, std::vector<uint8_t>& xb, std::vector<int64_t>& ids,
+       std::vector<int64_t>& xids, const int64_t nq, std::vector<uint8_t>& xq) {
     xb.resize(nb * dim);
     xq.resize(nq * dim);
     ids.resize(nb);
     xids.resize(1);
-    GenBinaryAll(dim, nb, xb.data(), ids.data(), xids.data(), nq, xq.data());
+    GenBase(dim, nb, xb.data(), ids.data(), nq, xq.data(), xids.data(), true);
 }
 
 void
-GenBinaryAll(const int64_t& dim, const int64_t& nb, uint8_t* xb, int64_t* ids, int64_t* xids, const int64_t& nq,
-             uint8_t* xq) {
-    GenBinaryBase(dim, nb, xb, ids);
+GenBase(const int64_t dim, const int64_t nb, const void* xb, int64_t* ids,  const int64_t nq, const void* xq,
+        int64_t* xids, bool is_binary) {
+    for (auto i = 0; i < nb; ++i) {
+        for (auto j = 0; j < dim; ++j) {
+            if (!is_binary) {
+                ((float*)xb)[i * dim + j] = drand48();
+            } else {
+                ((uint8_t*)xb)[i * dim + j] = (uint8_t)lrand48();
+            }
+        }
+        if (!is_binary) {
+            ((float*)xb)[dim * i] += i / 1000.;
+        }
+        ids[i] = i;
+    }
     for (int64_t i = 0; i < nq * dim; ++i) {
-        xq[i] = xb[i];
+        if (!is_binary) {
+            ((float*)xq)[i] = ((float*)xb)[i];
+        } else {
+            ((uint8_t*)xq)[i] = ((uint8_t*)xb)[i];
+        }
     }
     xids[0] = 3;  // pseudo random
-}
-
-void
-GenBase(const int64_t& dim, const int64_t& nb, float* xb, int64_t* ids) {
-    for (auto i = 0; i < nb; ++i) {
-        for (auto j = 0; j < dim; ++j) {
-            // p_data[i * d + j] = float(base + i);
-            xb[i * dim + j] = drand48();
-        }
-        xb[dim * i] += i / 1000.;
-        ids[i] = i;
-    }
-}
-
-void
-GenBinaryBase(const int64_t& dim, const int64_t& nb, uint8_t* xb, int64_t* ids) {
-    for (auto i = 0; i < nb; ++i) {
-        for (auto j = 0; j < dim; ++j) {
-            // p_data[i * d + j] = float(base + i);
-            xb[i * dim + j] = (uint8_t)lrand48();
-        }
-        ids[i] = i;
-    }
 }
 
 FileIOReader::FileIOReader(const std::string& fname) {

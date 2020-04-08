@@ -24,12 +24,12 @@ using ::testing::Combine;
 using ::testing::TestWithParam;
 using ::testing::Values;
 
-class BinaryIVFTest : public BinaryDataGen, public TestWithParam<std::string> {
+class BinaryIVFTest : public DataGen, public TestWithParam<std::string> {
  protected:
     void
     SetUp() override {
         std::string MetricType = GetParam();
-        Init_with_binary_default();
+        Init_with_default(true);
         //        nb = 1000000;
         //        nq = 1000;
         //        k = 1000;
@@ -58,7 +58,7 @@ INSTANTIATE_TEST_CASE_P(METRICParameters, BinaryIVFTest,
                         Values(std::string("JACCARD"), std::string("TANIMOTO"), std::string("HAMMING")));
 
 TEST_P(BinaryIVFTest, binaryivf_basic) {
-    assert(!xb.empty());
+    assert(!xb_bin.empty());
 
     //    auto preprocessor = index_->BuildPreprocessor(base_dataset, conf);
     //    index_->set_preprocessor(preprocessor);
