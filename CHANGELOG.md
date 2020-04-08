@@ -21,6 +21,7 @@ Please mark all change in change log and use the issue from GitHub
 -   \#1627 Move read/write index APIs into codec
 -   \#1784 Add Substructure and Superstructure in http module
 -   \#1858 Disable S3 build
+-   \#1885 Optimize knowhere unittest
 
 ## Task
 
