@@ -41,8 +41,8 @@ DataGen::Generate(const int dim, const int nb, const int nq, const bool is_binar
 
     if (!is_binary) {
         GenAll(dim, nb, xb, ids, xids, nq, xq);
-        assert(xb.size() == (size_t) dim * nb);
-        assert(xq.size() == (size_t) dim * nq);
+        assert(xb.size() == (size_t)dim * nb);
+        assert(xq.size() == (size_t)dim * nq);
 
         base_dataset = milvus::knowhere::GenDatasetWithIds(nb, dim, xb.data(), ids.data());
         query_dataset = milvus::knowhere::GenDataset(nq, dim, xq.data());
@@ -81,7 +81,7 @@ GenAll(const int64_t dim, const int64_t nb, std::vector<uint8_t>& xb, std::vecto
 }
 
 void
-GenBase(const int64_t dim, const int64_t nb, const void* xb, int64_t* ids,  const int64_t nq, const void* xq,
+GenBase(const int64_t dim, const int64_t nb, const void* xb, int64_t* ids, const int64_t nq, const void* xq,
         int64_t* xids, bool is_binary) {
     for (auto i = 0; i < nb; ++i) {
         for (auto j = 0; j < dim; ++j) {
