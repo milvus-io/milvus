@@ -41,7 +41,7 @@ CreatePartitionRequest::OnExecute() {
     try {
         // step 1: check arguments
         auto status = ValidationUtil::ValidateCollectionName(collection_name_);
-        fiu_do_on("CreatePartitionRequest.OnExecute.invalid_table_name",
+        fiu_do_on("CreatePartitionRequest.OnExecute.invalid_collection_name",
                   status = Status(milvus::SERVER_UNEXPECTED_ERROR, ""));
         if (!status.ok()) {
             return status;
@@ -59,9 +59,9 @@ CreatePartitionRequest::OnExecute() {
         }
 
         // only process root collection, ignore partition collection
-        engine::meta::CollectionSchema table_schema;
-        table_schema.collection_id_ = collection_name_;
-        status = DBWrapper::DB()->DescribeCollection(table_schema);
+        engine::meta::CollectionSchema collection_schema;
+        collection_schema.collection_id_ = collection_name_;
+        status = DBWrapper::DB()->DescribeCollection(collection_schema);
         fiu_do_on("CreatePartitionRequest.OnExecute.invalid_partition_tags",
                   status = Status(milvus::SERVER_UNEXPECTED_ERROR, ""));
         if (!status.ok()) {
@@ -71,7 +71,7 @@ CreatePartitionRequest::OnExecute() {
                 return status;
             }
         } else {
-            if (!table_schema.owner_collection_.empty()) {
+            if (!collection_schema.owner_collection_.empty()) {
                 return Status(SERVER_INVALID_TABLE_NAME, TableNotExistMsg(collection_name_));
             }
         }

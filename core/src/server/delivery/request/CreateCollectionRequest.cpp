@@ -93,7 +93,7 @@ CreateCollectionRequest::OnExecute() {
         // step 3: create collection
         status = DBWrapper::DB()->CreateCollection(collection_info);
         fiu_do_on("CreateCollectionRequest.OnExecute.db_already_exist", status = Status(milvus::DB_ALREADY_EXIST, ""));
-        fiu_do_on("CreateCollectionRequest.OnExecute.create_table_fail",
+        fiu_do_on("CreateCollectionRequest.OnExecute.create_collection_fail",
                   status = Status(milvus::SERVER_UNEXPECTED_ERROR, ""));
         fiu_do_on("CreateCollectionRequest.OnExecute.throw_std_exception", throw std::exception());
         if (!status.ok()) {

@@ -45,9 +45,9 @@ PreloadCollectionRequest::OnExecute() {
         }
 
         // only process root collection, ignore partition collection
-        engine::meta::CollectionSchema table_schema;
-        table_schema.collection_id_ = collection_name_;
-        status = DBWrapper::DB()->DescribeCollection(table_schema);
+        engine::meta::CollectionSchema collection_schema;
+        collection_schema.collection_id_ = collection_name_;
+        status = DBWrapper::DB()->DescribeCollection(collection_schema);
         if (!status.ok()) {
             if (status.code() == DB_NOT_FOUND) {
                 return Status(SERVER_TABLE_NOT_EXIST, TableNotExistMsg(collection_name_));
@@ -55,14 +55,14 @@ PreloadCollectionRequest::OnExecute() {
                 return status;
             }
         } else {
-            if (!table_schema.owner_collection_.empty()) {
+            if (!collection_schema.owner_collection_.empty()) {
                 return Status(SERVER_INVALID_TABLE_NAME, TableNotExistMsg(collection_name_));
             }
         }
 
         // step 2: check collection existence
         status = DBWrapper::DB()->PreloadCollection(collection_name_);
-        fiu_do_on("PreloadCollectionRequest.OnExecute.preload_table_fail",
+        fiu_do_on("PreloadCollectionRequest.OnExecute.preload_collection_fail",
                   status = Status(milvus::SERVER_UNEXPECTED_ERROR, ""));
         fiu_do_on("PreloadCollectionRequest.OnExecute.throw_std_exception", throw std::exception());
         if (!status.ok()) {

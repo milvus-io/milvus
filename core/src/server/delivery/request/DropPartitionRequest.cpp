@@ -43,7 +43,7 @@ DropPartitionRequest::OnExecute() {
 
     // step 1: check collection name
     auto status = ValidationUtil::ValidateCollectionName(collection_name);
-    fiu_do_on("DropPartitionRequest.OnExecute.invalid_table_name",
+    fiu_do_on("DropPartitionRequest.OnExecute.invalid_collection_name",
               status = Status(milvus::SERVER_UNEXPECTED_ERROR, ""));
     if (!status.ok()) {
         return status;
@@ -63,9 +63,9 @@ DropPartitionRequest::OnExecute() {
 
     // step 3: check collection
     // only process root collection, ignore partition collection
-    engine::meta::CollectionSchema table_schema;
-    table_schema.collection_id_ = collection_name_;
-    status = DBWrapper::DB()->DescribeCollection(table_schema);
+    engine::meta::CollectionSchema collection_schema;
+    collection_schema.collection_id_ = collection_name_;
+    status = DBWrapper::DB()->DescribeCollection(collection_schema);
     if (!status.ok()) {
         if (status.code() == DB_NOT_FOUND) {
             return Status(SERVER_TABLE_NOT_EXIST, TableNotExistMsg(collection_name_));
@@ -73,7 +73,7 @@ DropPartitionRequest::OnExecute() {
             return status;
         }
     } else {
-        if (!table_schema.owner_collection_.empty()) {
+        if (!collection_schema.owner_collection_.empty()) {
             return Status(SERVER_INVALID_TABLE_NAME, TableNotExistMsg(collection_name_));
         }
     }

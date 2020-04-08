@@ -56,7 +56,7 @@ SearchRequest::OnPreExecute() {
     TimeRecorderAuto rc(hdr);
 
     milvus::server::ContextChild tracer_pre(context_, "Pre Query");
-    // step 1: check table name
+    // step 1: check collection name
     auto status = ValidationUtil::ValidateCollectionName(collection_name_);
     if (!status.ok()) {
         return status;
@@ -87,12 +87,13 @@ SearchRequest::OnExecute() {
                           ", nq=" + std::to_string(vector_count) + ", k=" + std::to_string(topk_) + ")";
         TimeRecorderAuto rc(hdr);
 
-        // step 4: check table existence
-        // only process root table, ignore partition table
+        // step 4: check collection existence
+        // only process root collection, ignore partition collection
         collection_schema_.collection_id_ = collection_name_;
         auto status = DBWrapper::DB()->DescribeCollection(collection_schema_);
 
-        fiu_do_on("SearchRequest.OnExecute.describe_table_fail", status = Status(milvus::SERVER_UNEXPECTED_ERROR, ""));
+        fiu_do_on("SearchRequest.OnExecute.describe_collection_fail",
+                  status = Status(milvus::SERVER_UNEXPECTED_ERROR, ""));
         if (!status.ok()) {
             if (status.code() == DB_NOT_FOUND) {
                 return Status(SERVER_TABLE_NOT_EXIST, TableNotExistMsg(collection_name_));

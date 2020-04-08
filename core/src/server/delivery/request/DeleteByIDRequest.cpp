@@ -52,9 +52,9 @@ DeleteByIDRequest::OnExecute() {
         }
 
         // step 2: check collection existence
-        engine::meta::CollectionSchema table_schema;
-        table_schema.collection_id_ = collection_name_;
-        status = DBWrapper::DB()->DescribeCollection(table_schema);
+        engine::meta::CollectionSchema collection_schema;
+        collection_schema.collection_id_ = collection_name_;
+        status = DBWrapper::DB()->DescribeCollection(collection_schema);
         if (!status.ok()) {
             if (status.code() == DB_NOT_FOUND) {
                 return Status(SERVER_TABLE_NOT_EXIST, TableNotExistMsg(collection_name_));
@@ -62,16 +62,16 @@ DeleteByIDRequest::OnExecute() {
                 return status;
             }
         } else {
-            if (!table_schema.owner_collection_.empty()) {
+            if (!collection_schema.owner_collection_.empty()) {
                 return Status(SERVER_INVALID_TABLE_NAME, TableNotExistMsg(collection_name_));
             }
         }
 
         // Check collection's index type supports delete
-        if (table_schema.engine_type_ == (int32_t)engine::EngineType::SPTAG_BKT ||
-            table_schema.engine_type_ == (int32_t)engine::EngineType::SPTAG_KDT) {
+        if (collection_schema.engine_type_ == (int32_t)engine::EngineType::SPTAG_BKT ||
+            collection_schema.engine_type_ == (int32_t)engine::EngineType::SPTAG_KDT) {
             std::string err_msg =
-                "Index type " + std::to_string(table_schema.engine_type_) + " does not support delete operation";
+                "Index type " + std::to_string(collection_schema.engine_type_) + " does not support delete operation";
             SERVER_LOG_ERROR << err_msg;
             return Status(SERVER_UNSUPPORTED_ERROR, err_msg);
         }
