@@ -17,24 +17,32 @@
 
 #pragma once
 
+#include <algorithm>
+#include <chrono>
 #include <memory>
 #include <string>
 #include <vector>
 #include <cstring>
 
 #include "Attr.h"
+#include "utils/Log.h"
+#include "Vectors.h"
 
 namespace milvus {
 namespace segment {
 
-Attr::Attr(const std::vector<uint8_t>& data, size_t nbytes, std::vector<int64_t> uids, const std::string& name)
-    : data_(data), nbytes_(nbytes), uids_(uids), name_(name) {
+Attr::Attr(const std::vector<uint8_t>& data,
+           size_t nbytes,
+           const std::vector<int64_t> uids,
+           const std::string& name)
+    : data_(std::move(data)), nbytes_(nbytes), uids_(std::move(uids)), name_(name) {
 
 }
 
 void
-Attr::AddAttr(const void* data, size_t nbytes) {
-//    memcpy((void *)(static_cast<char *>(data_) + nbytes_), data, nbytes);
+Attr::AddAttr(const std::vector<uint8_t>& data, size_t nbytes) {
+    data_.reserve(data_.size() + data.size());
+    data_.insert(data_.end(), std::make_move_iterator(data.begin()), std::make_move_iterator(data.end()));
     nbytes_ += nbytes;
 }
 
@@ -81,7 +89,74 @@ Attr::GetCount() const {
 
 size_t
 Attr::GetCodeLength() const {
-    return uids_.empty() ? 0 : nbytes_ / uids_.size();
+    return uids_.size() == 0 ? 0 : nbytes_ / uids_.size();
+}
+
+void
+Attr::Erase(int32_t offset) {
+    auto code_length = GetCodeLength();
+    if (code_length != 0) {
+        auto step = offset * code_length;
+        data_.erase(data_.begin() + step, data_.begin() + step + code_length);
+        uids_.erase(uids_.begin() + offset, uids_.begin() + offset + 1);
+    }
+}
+
+void
+Attr::Erase(std::vector<int32_t>& offsets) {
+    if (offsets.empty()) {
+        return;
+    }
+
+    // Sort and remove duplicates
+    auto start = std::chrono::high_resolution_clock::now();
+
+    std::sort(offsets.begin(), offsets.end());
+
+    auto end = std::chrono::high_resolution_clock::now();
+    std::chrono::duration<double> diff = end - start;
+    ENGINE_LOG_DEBUG << "Sorting " << offsets.size() << " offsets to delete took " << diff.count() << " s";
+
+    ENGINE_LOG_DEBUG << "Attributes begin erasing...";
+
+    size_t new_size = uids_.size() - offsets.size();
+    std::vector<doc_id_t> new_uids(new_size);
+    auto code_length = GetCodeLength();
+    std::vector<uint8_t> new_data(new_size * code_length);
+
+    auto count = 0;
+    auto skip = offsets.cbegin();
+    auto loop_size = uids_.size();
+
+    for (size_t i = 0; i < loop_size;) {
+        while (i == *skip && skip != offsets.cend()) {
+            ++i;
+            ++skip;
+        }
+
+        if (i == loop_size) {
+            break;
+        }
+
+        new_uids[count] = uids_[i];
+
+        for (size_t j = 0; j < code_length; ++j) {
+            new_data[count * code_length + j] = data_[i * code_length + j];
+        }
+
+        ++count;
+        ++i;
+    }
+
+    data_.clear();
+    data_.swap(new_data);
+    data_.swap(new_data);
+    uids_.swap(new_uids);
+
+    end = std::chrono::high_resolution_clock::now();
+    diff = end - start;
+    ENGINE_LOG_DEBUG << "Erasing " << offsets.size() << " vectors out of " << loop_size << " vectors took "
+                     << diff.count() << " s";
 }
 
 }

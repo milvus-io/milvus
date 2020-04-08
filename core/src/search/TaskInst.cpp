@@ -23,22 +23,16 @@ namespace search{
 
 void
 TaskInst::Start() {
+    running_ = true;
     load_thread_ = std::make_shared<std::thread>(&TaskInst::StartLoadTask, this);
     exec_thread_ = std::make_shared<std::thread>(&TaskInst::StartExecuteTask, this);
 }
 
 void
 TaskInst::Stop() {
+    running_ = false;
     StopExecuteTask();
     StopLoadTask();
-    if (load_thread_->joinable()) {
-        load_thread_->join();
-        load_thread_ = nullptr;
-    }
-    if(exec_thread_->joinable()) {
-        exec_thread_->join();
-        exec_thread_ = nullptr;
-    }
 }
 
 std::queue<TaskPtr>&
@@ -63,7 +57,7 @@ TaskInst::exec_cv() {
 
 void
 TaskInst::StartLoadTask() {
-    while (true) {
+    while (running_) {
         std::unique_lock<std::mutex> lock(load_mutex_);
         load_cv_.wait(lock, [this] { return !load_queue_.empty(); });
         while (!load_queue_.empty()) {
@@ -78,7 +72,7 @@ TaskInst::StartLoadTask() {
 
 void
 TaskInst::StartExecuteTask() {
-    while (true) {
+    while (running_) {
         std::unique_lock<std::mutex> lock(exec_mutex_);
         exec_cv_.wait(lock, [this] {return !exec_queue_.empty(); });
         while (!exec_queue_.empty()) {
@@ -91,10 +85,28 @@ TaskInst::StartExecuteTask() {
 
 void
 TaskInst::StopLoadTask() {
+    {
+        std::lock_guard<std::mutex> lock(load_mutex_);
+        load_queue_.push(nullptr);
+        load_cv_.notify_one();
+        if (load_thread_->joinable()) {
+            load_thread_->join();
+        }
+        load_thread_ = nullptr;
+    }
 }
 
 void
 TaskInst::StopExecuteTask() {
+    {
+        std::lock_guard<std::mutex> lock(exec_mutex_);
+        exec_queue_.push(nullptr);
+        exec_cv_.notify_one();
+        if (exec_thread_->joinable()) {
+            exec_thread_->join();
+        }
+        exec_thread_ = nullptr;
+    }
 }
 
 } // namespace search

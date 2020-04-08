@@ -224,6 +224,9 @@ class DBImpl : public DB, public server::CacheConfigHandler {
     void
     BackgroundMerge(std::set<std::string> table_ids);
 
+    Status
+    MergeHybridFiles(const std::string& table_id, const meta::TableFilesSchema& files);
+
     void
     StartBuildIndexTask(bool force = false);
     void

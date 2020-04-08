@@ -156,31 +156,33 @@ DefaultAttrsFormat::write(const milvus::storage::FSHandlerPtr& fs_ptr, const mil
         return;
     }
 
-//    const std::string uid_file_path = dir_path + "/" + it->second->GetCollectionId() + user_id_extension_;
-//
-//    int uid_fd = open(uid_file_path.c_str(), O_WRONLY | O_TRUNC | O_CREAT, 00664);
-//    if (uid_fd == -1) {
-//        std::string err_msg = "Failed to open file: " + uid_file_path + ", error: " + std::strerror(errno);
-//        ENGINE_LOG_ERROR << err_msg;
-//        throw Exception(SERVER_CANNOT_CREATE_FILE, err_msg);
-//    }
-//    size_t uid_num_bytes = it->second->GetUids().size() * sizeof(int64_t);
-//    if (::write(uid_fd, &uid_num_bytes, sizeof(size_t)) == -1) {
-//        std::string err_msg = "Failed to write to file" + uid_file_path + ", error: " + std::strerror(errno);
-//        ENGINE_LOG_ERROR << err_msg;
-//        throw Exception(SERVER_WRITE_ERROR, err_msg);
-//    }
-//    if (::write(uid_fd, it->second->GetUids().data(), uid_num_bytes) == -1) {
-//        std::string err_msg = "Failed to write to file" + uid_file_path + ", error: " + std::strerror(errno);
-//        ENGINE_LOG_ERROR << err_msg;
-//        throw Exception(SERVER_WRITE_ERROR, err_msg);
-//    }
-//    if (::close(uid_fd) == -1) {
-//        std::string err_msg = "Failed to close file: " + uid_file_path + ", error: " + std::strerror(errno);
-//        ENGINE_LOG_ERROR << err_msg;
-//        throw Exception(SERVER_WRITE_ERROR, err_msg);
-//    }
-//    rc.RecordSection("write uids done");
+#if 0
+    const std::string uid_file_path = dir_path + "/" + it->second->GetCollectionId() + user_id_extension_;
+
+    int uid_fd = open(uid_file_path.c_str(), O_WRONLY | O_TRUNC | O_CREAT, 00664);
+    if (uid_fd == -1) {
+        std::string err_msg = "Failed to open file: " + uid_file_path + ", error: " + std::strerror(errno);
+        ENGINE_LOG_ERROR << err_msg;
+        throw Exception(SERVER_CANNOT_CREATE_FILE, err_msg);
+    }
+    size_t uid_num_bytes = it->second->GetUids().size() * sizeof(int64_t);
+    if (::write(uid_fd, &uid_num_bytes, sizeof(size_t)) == -1) {
+        std::string err_msg = "Failed to write to file" + uid_file_path + ", error: " + std::strerror(errno);
+        ENGINE_LOG_ERROR << err_msg;
+        throw Exception(SERVER_WRITE_ERROR, err_msg);
+    }
+    if (::write(uid_fd, it->second->GetUids().data(), uid_num_bytes) == -1) {
+        std::string err_msg = "Failed to write to file" + uid_file_path + ", error: " + std::strerror(errno);
+        ENGINE_LOG_ERROR << err_msg;
+        throw Exception(SERVER_WRITE_ERROR, err_msg);
+    }
+    if (::close(uid_fd) == -1) {
+        std::string err_msg = "Failed to close file: " + uid_file_path + ", error: " + std::strerror(errno);
+        ENGINE_LOG_ERROR << err_msg;
+        throw Exception(SERVER_WRITE_ERROR, err_msg);
+    }
+    rc.RecordSection("write uids done");
+#endif
 
     for (; it != attrs_ptr->attrs.end(); it++) {
         const std::string ra_file_path = dir_path + "/" + it->second->GetName() + raw_attr_extension_;

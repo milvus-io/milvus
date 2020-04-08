@@ -133,7 +133,8 @@ VectorSource::AddEntities(const milvus::segment::SegmentWriterPtr& segment_write
     Status status;
     status = segment_writer_ptr->AddAttrs(collection_file_schema.table_id_,
                                           attr_size_,
-                                          attr_data_);
+                                          attr_data_,
+                                          vector_ids_to_add);
 
     if (status.ok()) {
         current_num_attrs_added += num_entities_added;

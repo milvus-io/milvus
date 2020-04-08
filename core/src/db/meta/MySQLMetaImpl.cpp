@@ -2464,6 +2464,11 @@ MySQLMetaImpl::DescribeHybridCollection(TableSchema& collection_schema,
 
 }
 
+Status
+MySQLMetaImpl::CreateHybridCollectionFile(milvus::engine::meta::TableFileSchema& file_schema) {
+
+}
+
 }  // namespace meta
 }  // namespace engine
 }  // namespace milvus

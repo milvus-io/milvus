@@ -61,6 +61,8 @@ class TaskInst {
     StopExecuteTask();
 
  private:
+    bool running_;
+
     std::shared_ptr<std::thread> load_thread_;
     std::shared_ptr<std::thread> exec_thread_;
 

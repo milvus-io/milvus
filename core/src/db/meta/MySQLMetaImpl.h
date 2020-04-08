@@ -149,6 +149,9 @@ class MySQLMetaImpl : public Meta {
     DescribeHybridCollection(TableSchema& collection_schema,
                              hybrid::FieldsSchema& fields_schema) override;
 
+    Status
+    CreateHybridCollectionFile(TableFileSchema& file_schema) override;
+
  private:
     Status
     NextFileId(std::string& file_id);

@@ -1810,15 +1810,15 @@ SqliteMetaImpl::CreateHybridCollection(meta::TableSchema& collection_schema,
         ENGINE_LOG_DEBUG << "Successfully create collection table: " << collection_schema.table_id_;
 
         Status status = utils::CreateTablePath(options_, collection_schema.table_id_);
+        if (!status.ok()) {
+            return status;
+        }
 
         try {
             for (uint64_t i = 0; i < fields_schema.fields_schema_.size(); ++i) {
                 hybrid::FieldSchema schema = fields_schema.fields_schema_[i];
                 auto field_id = ConnectorPtr->insert(schema);
                 ENGINE_LOG_DEBUG << "Successfully create collection field table" << field_id;
-                if (!status.ok()) {
-                    return status;
-                }
             }
         } catch (std::exception& e) {
             return HandleException("Encounter exception when create collection field", e.what());
@@ -1832,7 +1832,8 @@ SqliteMetaImpl::CreateHybridCollection(meta::TableSchema& collection_schema,
 
 Status
 SqliteMetaImpl::DescribeHybridCollection(milvus::engine::meta::TableSchema& table_schema,
-                                                milvus::engine::meta::hybrid::FieldsSchema& fields_schema) {
+                                         milvus::engine::meta::hybrid::FieldsSchema& fields_schema) {
+
     try {
         server::MetricCollector metric;
         fiu_do_on("SqliteMetaImpl.DescriCollection.throw_exception", throw std::exception());
@@ -1883,6 +1884,57 @@ SqliteMetaImpl::DescribeHybridCollection(milvus::engine::meta::TableSchema& tabl
 
     } catch (std::exception& e) {
         return HandleException("Encounter exception when describe table", e.what());
+    }
+
+    return Status::OK();
+}
+
+Status
+SqliteMetaImpl::CreateHybridCollectionFile(TableFileSchema& file_schema) {
+
+    if (file_schema.date_ == EmptyDate) {
+        file_schema.date_ = utils::GetDate();
+    }
+    TableSchema table_schema;
+    hybrid::FieldsSchema fields_schema;
+    table_schema.table_id_ = file_schema.table_id_;
+    auto status = DescribeHybridCollection(table_schema, fields_schema);
+    if (!status.ok()) {
+        return status;
+    }
+
+    try {
+        fiu_do_on("SqliteMetaImpl.CreateTableFile.throw_exception", throw std::exception());
+        server::MetricCollector metric;
+
+        NextFileId(file_schema.file_id_);
+        if (file_schema.segment_id_.empty()) {
+            file_schema.segment_id_ = file_schema.file_id_;
+        }
+        file_schema.dimension_ = table_schema.dimension_;
+        file_schema.file_size_ = 0;
+        file_schema.row_count_ = 0;
+        file_schema.created_on_ = utils::GetMicroSecTimeStamp();
+        file_schema.updated_time_ = file_schema.created_on_;
+        file_schema.index_file_size_ = table_schema.index_file_size_;
+        file_schema.index_params_ = table_schema.index_params_;
+        file_schema.engine_type_ = table_schema.engine_type_;
+        file_schema.metric_type_ = table_schema.metric_type_;
+
+        // multi-threads call sqlite update may get exception('bad logic', etc), so we add a lock here
+        std::lock_guard<std::mutex> meta_lock(meta_mutex_);
+
+        auto id = ConnectorPtr->insert(file_schema);
+        file_schema.id_ = id;
+
+        for (auto field_schema : fields_schema.fields_schema_) {
+            ConnectorPtr->insert(field_schema);
+        }
+
+        ENGINE_LOG_DEBUG << "Successfully create collection file, file id = " << file_schema.file_id_;
+        return utils::CreateTableFilePath(options_, file_schema);
+    } catch (std::exception& e) {
+        return HandleException("Encounter exception when create table file", e.what());
     }
 
     return Status::OK();

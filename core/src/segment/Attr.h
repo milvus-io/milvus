@@ -24,12 +24,12 @@ namespace segment {
 
 class Attr {
  public:
-    Attr(const std::vector<uint8_t>& data, size_t nbytes, std::vector<int64_t> uids, const std::string& name);
+    Attr(const std::vector<uint8_t>& data, size_t nbytes, const std::vector<int64_t> uids, const std::string& name);
 
     Attr();
 
     void
-    AddAttr(const void* data, size_t nbytes);
+    AddAttr(const std::vector<uint8_t>& data, size_t nbytes);
 
     void
     AddUids(const std::vector<int64_t>& uids);
@@ -58,6 +58,12 @@ class Attr {
     size_t
     GetCodeLength() const;
 
+    void
+    Erase(int32_t offset);
+
+    void
+    Erase(std::vector<int32_t>& offsets);
+
     // No copy and move
     Attr(const Attr&) = delete;
     Attr(Attr&&) = delete;
@@ -68,7 +74,7 @@ class Attr {
     operator=(Attr&&) = delete;
 
  private:
-    const std::vector<uint8_t> data_;
+    std::vector<uint8_t> data_;
     size_t nbytes_;
     std::vector<int64_t> uids_;
     std::string name_;

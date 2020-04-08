@@ -1830,6 +1830,96 @@ DBImpl::MergeFiles(const std::string& table_id, const meta::TableFilesSchema& fi
 }
 
 Status
+DBImpl::MergeHybridFiles(const std::string& table_id, const milvus::engine::meta::TableFilesSchema& files) {
+    // const std::lock_guard<std::mutex> lock(flush_merge_compact_mutex_);
+
+    ENGINE_LOG_DEBUG << "Merge files for table: " << table_id;
+
+    // step 1: create table file
+    meta::TableFileSchema table_file;
+    table_file.table_id_ = table_id;
+    table_file.file_type_ = meta::TableFileSchema::NEW_MERGE;
+    Status status = meta_ptr_->CreateHybridCollectionFile(table_file);
+
+    if (!status.ok()) {
+        ENGINE_LOG_ERROR << "Failed to create table: " << status.ToString();
+        return status;
+    }
+
+    // step 2: merge files
+    /*
+    ExecutionEnginePtr index =
+        EngineFactory::Build(table_file.dimension_, table_file.location_, (EngineType)table_file.engine_type_,
+                             (MetricType)table_file.metric_type_, table_file.nlist_);
+*/
+    meta::TableFilesSchema updated;
+
+    std::string new_segment_dir;
+    utils::GetParentPath(table_file.location_, new_segment_dir);
+    auto segment_writer_ptr = std::make_shared<segment::SegmentWriter>(new_segment_dir);
+
+    for (auto& file : files) {
+        server::CollectMergeFilesMetrics metrics;
+        std::string segment_dir_to_merge;
+        utils::GetParentPath(file.location_, segment_dir_to_merge);
+        segment_writer_ptr->Merge(segment_dir_to_merge, table_file.file_id_);
+        auto file_schema = file;
+        file_schema.file_type_ = meta::TableFileSchema::TO_DELETE;
+        updated.push_back(file_schema);
+        auto size = segment_writer_ptr->Size();
+        if (size >= file_schema.index_file_size_) {
+            break;
+        }
+    }
+
+    // step 3: serialize to disk
+    try {
+        status = segment_writer_ptr->Serialize();
+        fiu_do_on("DBImpl.MergeFiles.Serialize_ThrowException", throw std::exception());
+        fiu_do_on("DBImpl.MergeFiles.Serialize_ErrorStatus", status = Status(DB_ERROR, ""));
+    } catch (std::exception& ex) {
+        std::string msg = "Serialize merged index encounter exception: " + std::string(ex.what());
+        ENGINE_LOG_ERROR << msg;
+        status = Status(DB_ERROR, msg);
+    }
+
+    if (!status.ok()) {
+        ENGINE_LOG_ERROR << "Failed to persist merged segment: " << new_segment_dir << ". Error: " << status.message();
+
+        // if failed to serialize merge file to disk
+        // typical error: out of disk space, out of memory or permission denied
+        table_file.file_type_ = meta::TableFileSchema::TO_DELETE;
+        status = meta_ptr_->UpdateTableFile(table_file);
+        ENGINE_LOG_DEBUG << "Failed to update file to index, mark file: " << table_file.file_id_ << " to to_delete";
+
+        return status;
+    }
+
+    // step 4: update table files state
+    // if index type isn't IDMAP, set file type to TO_INDEX if file size exceed index_file_size
+    // else set file type to RAW, no need to build index
+    if (!utils::IsRawIndexType(table_file.engine_type_)) {
+        table_file.file_type_ = (segment_writer_ptr->Size() >= table_file.index_file_size_)
+                                ? meta::TableFileSchema::TO_INDEX
+                                : meta::TableFileSchema::RAW;
+    } else {
+        table_file.file_type_ = meta::TableFileSchema::RAW;
+    }
+    table_file.file_size_ = segment_writer_ptr->Size();
+    table_file.row_count_ = segment_writer_ptr->VectorCount();
+    updated.push_back(table_file);
+    status = meta_ptr_->UpdateTableFiles(updated);
+    ENGINE_LOG_DEBUG << "New merged segment " << table_file.segment_id_ << " of size " << segment_writer_ptr->Size()
+                     << " bytes";
+
+    if (options_.insert_cache_immediately_) {
+        segment_writer_ptr->Cache();
+    }
+
+    return status;
+}
+
+Status
 DBImpl::BackgroundMergeFiles(const std::string& table_id) {
     const std::lock_guard<std::mutex> lock(flush_merge_compact_mutex_);
 

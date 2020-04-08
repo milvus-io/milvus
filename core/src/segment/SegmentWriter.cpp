@@ -52,16 +52,23 @@ SegmentWriter::AddVectors(const std::string& name, const std::vector<uint8_t>& d
 Status
 SegmentWriter::AddAttrs(const std::string& name,
                         const std::unordered_map<std::string, uint64_t>& attr_nbytes,
-                        const std::unordered_map<std::string, std::vector<uint8_t>>& attr_data) {
+                        const std::unordered_map<std::string, std::vector<uint8_t>>& attr_data,
+                        const std::vector<doc_id_t>& uids) {
     auto attr_data_it = attr_data.begin();
+    auto attrs = segment_ptr_->attrs_ptr_->attrs;
     for (; attr_data_it != attr_data.end(); ++attr_data_it) {
-        std::vector<int64_t> uids;
+        if (attrs.find(attr_data_it->first) != attrs.end()) {
+            segment_ptr_->attrs_ptr_->attrs.at(attr_data_it->first)->AddAttr(attr_data_it->second,
+                                                                             attr_nbytes.at(attr_data_it->first));
+            segment_ptr_->attrs_ptr_->attrs.at(attr_data_it->first)->AddUids(uids);
+        } else {
+            AttrPtr attr = std::make_shared<Attr>(attr_data_it->second,
+                                                  attr_nbytes.at(attr_data_it->first),
+                                                  uids,
+                                                  attr_data_it->first);
+            segment_ptr_->attrs_ptr_->attrs.insert(std::make_pair(attr_data_it->first, attr));
+        }
 
-        AttrPtr attr = std::make_shared<Attr>(attr_data_it->second,
-                                              attr_nbytes.at(attr_data_it->first),
-                                              uids,
-                                              attr_data_it->first);
-        segment_ptr_->attrs_ptr_->attrs.insert(std::make_pair(attr_data_it->first, attr));
     }
 
     return Status::OK();
@@ -97,7 +104,8 @@ SegmentWriter::Serialize() {
         return status;
     }
     end = std::chrono::high_resolution_clock::now();
-    ENGINE_LOG_DEBUG << "Writing attributes and uids took " << diff.count() << " s in total";
+    diff = end - start;
+    ENGINE_LOG_DEBUG << "Writing attributes took " << diff.count() << " s in total";
 
     start = std::chrono::high_resolution_clock::now();
 
@@ -278,6 +286,29 @@ SegmentWriter::Merge(const std::string& dir_to_merge, const std::string& name) {
     end = std::chrono::high_resolution_clock::now();
     diff = end - start;
     ENGINE_LOG_DEBUG << "Adding " << segment_to_merge->vectors_ptr_->GetCount() << " vectors and uids took "
+                     << diff.count() << " s";
+
+    start = std::chrono::high_resolution_clock::now();
+
+    std::unordered_map<std::string, uint64_t> attr_nbytes;
+    std::unordered_map<std::string, std::vector<uint8_t>> attr_data;
+    auto attr_it = segment_to_merge->attrs_ptr_->attrs.begin();
+    for (; attr_it != segment_to_merge->attrs_ptr_->attrs.end(); attr_it++) {
+        attr_nbytes.insert(std::make_pair(attr_it->first, attr_it->second->GetNbytes()));
+        attr_data.insert(std::make_pair(attr_it->first, attr_it->second->GetData()));
+
+        if (segment_to_merge->deleted_docs_ptr_ != nullptr) {
+            auto offsets_to_delete = segment_to_merge->deleted_docs_ptr_->GetDeletedDocs();
+
+            // Erase from field data
+            attr_it->second->Erase(offsets_to_delete);
+        }
+    }
+    AddAttrs(name, attr_nbytes, attr_data, segment_to_merge->vectors_ptr_->GetUids());
+
+    end = std::chrono::high_resolution_clock::now();
+    diff = end - start;
+    ENGINE_LOG_DEBUG << "Adding " << segment_to_merge->vectors_ptr_->GetCount() << " attributes took "
                      << diff.count() << " s";
 
     ENGINE_LOG_DEBUG << "Merging completed from " << dir_to_merge << " to " << fs_ptr_->operation_ptr_->GetDirectory();
