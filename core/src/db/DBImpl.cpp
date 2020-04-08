@@ -508,6 +508,7 @@ DBImpl::InsertVectors(const std::string& collection_id, const std::string& parti
         SafeIDGenerator& id_generator = SafeIDGenerator::GetInstance();
         Status status = id_generator.GetNextIDNumbers(vectors.vector_count_, vectors.id_array_);
         if (!status.ok()) {
+            ENGINE_LOG_ERROR << LogOut("[%s][%ld] Get next id number fail: %s", "insert", 0, status.message().c_str());
             return status;
         }
     }
@@ -517,6 +518,7 @@ DBImpl::InsertVectors(const std::string& collection_id, const std::string& parti
         std::string target_collection_name;
         status = GetPartitionByTag(collection_id, partition_tag, target_collection_name);
         if (!status.ok()) {
+            ENGINE_LOG_ERROR << LogOut("[%s][%ld] Get partition fail: %s", "insert", 0, status.message().c_str());
             return status;
         }
 
@@ -1215,7 +1217,7 @@ DBImpl::QueryAsync(const std::shared_ptr<server::Context>& context, const meta::
     // step 1: construct search job
     auto status = OngoingFileChecker::GetInstance().MarkOngoingFiles(files);
 
-    ENGINE_LOG_DEBUG << "Engine query begin, index file count: " << files.size();
+    ENGINE_LOG_DEBUG << LogOut("Engine query begin, index file count: %ld", files.size());
     scheduler::SearchJobPtr job = std::make_shared<scheduler::SearchJob>(tracer.Context(), k, extra_params, vectors);
     for (auto& file : files) {
         scheduler::SegmentSchemaPtr file_ptr = std::make_shared<meta::SegmentSchema>(file);
@@ -1856,6 +1858,7 @@ DBImpl::ExecWalRecord(const wal::MXLogRecord& record) {
             std::string target_collection_name;
             status = GetPartitionByTag(record.collection_id, record.partition_tag, target_collection_name);
             if (!status.ok()) {
+                WAL_LOG_ERROR << LogOut("[%s][%ld] ", "insert", 0) << "Get partition fail: " << status.message();
                 return status;
             }
 
@@ -1875,6 +1878,7 @@ DBImpl::ExecWalRecord(const wal::MXLogRecord& record) {
             std::string target_collection_name;
             status = GetPartitionByTag(record.collection_id, record.partition_tag, target_collection_name);
             if (!status.ok()) {
+                WAL_LOG_ERROR << LogOut("[%s][%ld] ", "insert", 0) << "Get partition fail: " << status.message();
                 return status;
             }
 

@@ -11,8 +11,8 @@
 
 #include "utils/LogUtil.h"
 
-#include <ctype.h>
 #include <libgen.h>
+#include <cctype>
 #include <string>
 
 #include <yaml-cpp/yaml.h>
