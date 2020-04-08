@@ -48,11 +48,10 @@ DataGen::Generate(const int& dim, const int& nb, const int& nq) {
     assert(xb.size() == (size_t)dim * nb);
     assert(xq.size() == (size_t)dim * nq);
 
-    base_dataset = generate_dataset(nb, dim, xb.data(), ids.data());
-    query_dataset = generate_query_dataset(nq, dim, xq.data());
-    id_dataset = generate_id_dataset(nq, ids.data());
-    xid_dataset = generate_id_dataset(nq, xids.data());
-    xid_dataset->Set(milvus::knowhere::meta::DIM, (int64_t)dim);
+    base_dataset = milvus::knowhere::GenDatasetWithIds(nb, dim, xb.data(), ids.data());
+    query_dataset = milvus::knowhere::GenDataset(nq, dim, xq.data());
+    id_dataset = milvus::knowhere::GenDatasetWithIds(nq, dim, nullptr, ids.data());
+    xid_dataset = milvus::knowhere::GenDatasetWithIds(nq, dim, nullptr, xids.data());
 }
 
 void
@@ -66,23 +65,11 @@ BinaryDataGen::Generate(const int& dim, const int& nb, const int& nq) {
     assert(xb.size() == (size_t)dim_x * nb);
     assert(xq.size() == (size_t)dim_x * nq);
 
-    base_dataset = generate_dataset(nb, dim, xb.data(), ids.data());
-    query_dataset = generate_query_dataset(nq, dim, xq.data());
-    id_dataset = generate_id_dataset(nq, ids.data());
-    xid_dataset = generate_id_dataset(nq, xids.data());
+    base_dataset = milvus::knowhere::GenDatasetWithIds(nb, dim, xb.data(), ids.data());
+    query_dataset = milvus::knowhere::GenDataset(nq, dim, xq.data());
+    id_dataset = milvus::knowhere::GenDatasetWithIds(nq, dim, nullptr, ids.data());
+    xid_dataset = milvus::knowhere::GenDatasetWithIds(nq, dim, nullptr, xids.data());
 }
-
-// not used
-#if 0
-knowhere::DatasetPtr
-DataGen::GenQuery(const int& nq) {
-    xq.resize(nq * dim);
-    for (int i = 0; i < nq * dim; ++i) {
-        xq[i] = xb[i];
-    }
-    return generate_query_dataset(nq, dim, xq.data());
-}
-#endif
 
 void
 GenAll(const int64_t dim, const int64_t& nb, std::vector<float>& xb, std::vector<int64_t>& ids,
@@ -174,33 +161,6 @@ size_t
 FileIOWriter::operator()(void* ptr, size_t size) {
     fs.write(reinterpret_cast<char*>(ptr), size);
     return size;
-}
-
-milvus::knowhere::DatasetPtr
-generate_dataset(int64_t nb, int64_t dim, const void* xb, const int64_t* ids) {
-    auto ret_ds = std::make_shared<milvus::knowhere::Dataset>();
-    ret_ds->Set(milvus::knowhere::meta::ROWS, nb);
-    ret_ds->Set(milvus::knowhere::meta::DIM, dim);
-    ret_ds->Set(milvus::knowhere::meta::TENSOR, xb);
-    ret_ds->Set(milvus::knowhere::meta::IDS, ids);
-    return ret_ds;
-}
-
-milvus::knowhere::DatasetPtr
-generate_query_dataset(int64_t nb, int64_t dim, const void* xb) {
-    auto ret_ds = std::make_shared<milvus::knowhere::Dataset>();
-    ret_ds->Set(milvus::knowhere::meta::ROWS, nb);
-    ret_ds->Set(milvus::knowhere::meta::DIM, dim);
-    ret_ds->Set(milvus::knowhere::meta::TENSOR, xb);
-    return ret_ds;
-}
-
-milvus::knowhere::DatasetPtr
-generate_id_dataset(int64_t nb, const int64_t* ids) {
-    auto ret_ds = std::make_shared<milvus::knowhere::Dataset>();
-    ret_ds->Set(milvus::knowhere::meta::ROWS, nb);
-    ret_ds->Set(milvus::knowhere::meta::IDS, ids);
-    return ret_ds;
 }
 
 void

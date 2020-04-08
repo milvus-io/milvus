@@ -28,6 +28,7 @@ set(basic_libs
 
 set(util_srcs
         ${MILVUS_THIRDPARTY_SRC}/easyloggingpp/easylogging++.cc
+        ${INDEX_SOURCE_DIR}/knowhere/knowhere/index/vector_index/adapter/VectorAdapter.cpp
         ${INDEX_SOURCE_DIR}/knowhere/knowhere/index/vector_index/helpers/FaissIO.cpp
         ${INDEX_SOURCE_DIR}/knowhere/knowhere/index/vector_index/helpers/IndexParameter.cpp
         ${INDEX_SOURCE_DIR}/knowhere/knowhere/index/vector_index/IndexType.cpp
