@@ -19,8 +19,9 @@ namespace milvus {
 
 std::string
 LogOut(const char* pattern, ...) {
-    size_t len = strlen(pattern) + 256;
+    size_t len = strnlen(pattern, 1024) + 256;
     auto str_p = std::make_unique<char[]>(len);
+    memset(str_p.get(), 0, len);
 
     va_list vl;
     va_start(vl, pattern);

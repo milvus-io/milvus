@@ -289,7 +289,6 @@ XSearchTask::Execute() {
             span = rc.RecordSection(hdr + ", reduce topk");
             //            search_job->AccumReduceCost(span);
         } catch (std::exception& ex) {
-            //            ENGINE_LOG_ERROR << "SearchTask encounter exception: " << ex.what();
             ENGINE_LOG_ERROR << LogOut("[%s][%ld] SearchTask encounter exception: %s", "search", 0, ex.what());
             //            search_job->IndexSearchDone(index_id_);//mark as done avoid dead lock, even search failed
         }
