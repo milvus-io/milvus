@@ -159,14 +159,12 @@ XBuildIndexTask::Execute() {
             index = to_index_engine_->BuildIndex(table_file.location_, (EngineType)table_file.engine_type_);
             fiu_do_on("XBuildIndexTask.Execute.build_index_fail", index = nullptr);
             if (index == nullptr) {
-                std::string
-                    log_msg = "Failed to build index " + table_file.file_id_ + ", reason: source index is null";
+                std::string log_msg = "Failed to build index " + table_file.file_id_ + ", reason: source index is null";
                 failed_build_index(log_msg, "source index is null");
                 return;
             }
         } catch (std::exception& ex) {
-            std::string
-                msg = "Failed to build index " + table_file.file_id_ + ", reason: " + std::string(ex.what());
+            std::string msg = "Failed to build index " + table_file.file_id_ + ", reason: " + std::string(ex.what());
             failed_build_index(msg, ex.what());
             return;
         }
@@ -177,8 +175,7 @@ XBuildIndexTask::Execute() {
         fiu_do_on("XBuildIndexTask.Execute.has_collection", has_collection = true);
 
         if (!has_collection) {
-            std::string
-                msg = "Failed to build index " + table_file.file_id_ + ", reason: collection has been deleted";
+            std::string msg = "Failed to build index " + table_file.file_id_ + ", reason: collection has been deleted";
             failed_build_index(msg, "Collection has been deleted");
             return;
         }
@@ -188,8 +185,8 @@ XBuildIndexTask::Execute() {
             fiu_do_on("XBuildIndexTask.Execute.throw_std_exception", throw std::exception());
             status = index->Serialize();
             if (!status.ok()) {
-                std::string
-                    msg = "Failed to persist index file: " + table_file.location_ + ", reason: " + status.message();
+                std::string msg =
+                    "Failed to persist index file: " + table_file.location_ + ", reason: " + status.message();
                 failed_build_index(msg, status.message());
                 return;
             }
