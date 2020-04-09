@@ -14,20 +14,21 @@
 namespace milvus {
 namespace storage {
 
-void
+bool
 DiskIOWriter::open(const std::string& name) {
     name_ = name;
     len_ = 0;
     fs_ = std::fstream(name_, std::ios::out | std::ios::binary);
+    return fs_.good();
 }
 
 void
-DiskIOWriter::write(void* ptr, size_t size) {
+DiskIOWriter::write(void* ptr, int64_t size) {
     fs_.write(reinterpret_cast<char*>(ptr), size);
     len_ += size;
 }
 
-size_t
+int64_t
 DiskIOWriter::length() {
     return len_;
 }
