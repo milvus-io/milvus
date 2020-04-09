@@ -31,10 +31,10 @@
 
 namespace {
 
-static constexpr int64_t TABLE_DIM = 256;
+static constexpr int64_t COLLECTION_DIM = 256;
 
 std::string
-GetTableName() {
+GetCollectionName() {
     auto now = std::chrono::system_clock::now();
     auto micros = std::chrono::duration_cast<std::chrono::microseconds>(now.time_since_epoch()).count();
     static std::string collection_name = std::to_string(micros);
@@ -42,10 +42,10 @@ GetTableName() {
 }
 
 milvus::engine::meta::CollectionSchema
-BuildTableSchema() {
+BuildCollectionSchema() {
     milvus::engine::meta::CollectionSchema collection_info;
-    collection_info.dimension_ = TABLE_DIM;
-    collection_info.collection_id_ = GetTableName();
+    collection_info.dimension_ = COLLECTION_DIM;
+    collection_info.collection_id_ = GetCollectionName();
     collection_info.metric_type_ = (int32_t)milvus::engine::MetricType::L2;
     collection_info.engine_type_ = (int)milvus::engine::EngineType::FAISS_IDMAP;
     return collection_info;
@@ -55,23 +55,23 @@ void
 BuildVectors(uint64_t n, milvus::engine::VectorsData& vectors) {
     vectors.vector_count_ = n;
     vectors.float_data_.clear();
-    vectors.float_data_.resize(n * TABLE_DIM);
+    vectors.float_data_.resize(n * COLLECTION_DIM);
     float* data = vectors.float_data_.data();
     for (int i = 0; i < n; i++) {
-        for (int j = 0; j < TABLE_DIM; j++) data[TABLE_DIM * i + j] = drand48();
+        for (int j = 0; j < COLLECTION_DIM; j++) data[COLLECTION_DIM * i + j] = drand48();
     }
 }
 }  // namespace
 
 TEST_F(DeleteTest, delete_in_mem) {
-    milvus::engine::meta::CollectionSchema collection_info = BuildTableSchema();
+    milvus::engine::meta::CollectionSchema collection_info = BuildCollectionSchema();
     auto stat = db_->CreateCollection(collection_info);
 
     milvus::engine::meta::CollectionSchema collection_info_get;
     collection_info_get.collection_id_ = collection_info.collection_id_;
     stat = db_->DescribeCollection(collection_info_get);
     ASSERT_TRUE(stat.ok());
-    ASSERT_EQ(collection_info_get.dimension_, TABLE_DIM);
+    ASSERT_EQ(collection_info_get.dimension_, COLLECTION_DIM);
 
     int64_t nb = 100000;
     milvus::engine::VectorsData xb;
@@ -94,8 +94,8 @@ TEST_F(DeleteTest, delete_in_mem) {
         int64_t index = dis(gen);
         milvus::engine::VectorsData search;
         search.vector_count_ = 1;
-        for (int64_t j = 0; j < TABLE_DIM; j++) {
-            search.float_data_.push_back(xb.float_data_[index * TABLE_DIM + j]);
+        for (int64_t j = 0; j < COLLECTION_DIM; j++) {
+            search.float_data_.push_back(xb.float_data_[index * COLLECTION_DIM + j]);
         }
         search_vectors.insert(std::make_pair(xb.id_array_[index], search));
     }
@@ -133,14 +133,14 @@ TEST_F(DeleteTest, delete_in_mem) {
 }
 
 TEST_F(DeleteTest, delete_on_disk) {
-    milvus::engine::meta::CollectionSchema collection_info = BuildTableSchema();
+    milvus::engine::meta::CollectionSchema collection_info = BuildCollectionSchema();
     auto stat = db_->CreateCollection(collection_info);
 
     milvus::engine::meta::CollectionSchema collection_info_get;
     collection_info_get.collection_id_ = collection_info.collection_id_;
     stat = db_->DescribeCollection(collection_info_get);
     ASSERT_TRUE(stat.ok());
-    ASSERT_EQ(collection_info_get.dimension_, TABLE_DIM);
+    ASSERT_EQ(collection_info_get.dimension_, COLLECTION_DIM);
 
     int64_t nb = 100000;
     milvus::engine::VectorsData xb;
@@ -163,8 +163,8 @@ TEST_F(DeleteTest, delete_on_disk) {
         int64_t index = dis(gen);
         milvus::engine::VectorsData search;
         search.vector_count_ = 1;
-        for (int64_t j = 0; j < TABLE_DIM; j++) {
-            search.float_data_.push_back(xb.float_data_[index * TABLE_DIM + j]);
+        for (int64_t j = 0; j < COLLECTION_DIM; j++) {
+            search.float_data_.push_back(xb.float_data_[index * COLLECTION_DIM + j]);
         }
         search_vectors.insert(std::make_pair(xb.id_array_[index], search));
     }
@@ -202,14 +202,14 @@ TEST_F(DeleteTest, delete_on_disk) {
 }
 
 TEST_F(DeleteTest, delete_multiple_times) {
-    milvus::engine::meta::CollectionSchema collection_info = BuildTableSchema();
+    milvus::engine::meta::CollectionSchema collection_info = BuildCollectionSchema();
     auto stat = db_->CreateCollection(collection_info);
 
     milvus::engine::meta::CollectionSchema collection_info_get;
     collection_info_get.collection_id_ = collection_info.collection_id_;
     stat = db_->DescribeCollection(collection_info_get);
     ASSERT_TRUE(stat.ok());
-    ASSERT_EQ(collection_info_get.dimension_, TABLE_DIM);
+    ASSERT_EQ(collection_info_get.dimension_, COLLECTION_DIM);
 
     int64_t nb = 100000;
     milvus::engine::VectorsData xb;
@@ -232,8 +232,8 @@ TEST_F(DeleteTest, delete_multiple_times) {
         int64_t index = dis(gen);
         milvus::engine::VectorsData search;
         search.vector_count_ = 1;
-        for (int64_t j = 0; j < TABLE_DIM; j++) {
-            search.float_data_.push_back(xb.float_data_[index * TABLE_DIM + j]);
+        for (int64_t j = 0; j < COLLECTION_DIM; j++) {
+            search.float_data_.push_back(xb.float_data_[index * COLLECTION_DIM + j]);
         }
         search_vectors.insert(std::make_pair(xb.id_array_[index], search));
     }
@@ -265,7 +265,7 @@ TEST_F(DeleteTest, delete_multiple_times) {
 }
 
 TEST_F(DeleteTest, delete_before_create_index) {
-    milvus::engine::meta::CollectionSchema collection_info = BuildTableSchema();
+    milvus::engine::meta::CollectionSchema collection_info = BuildCollectionSchema();
     collection_info.engine_type_ = (int32_t)milvus::engine::EngineType::FAISS_IVFFLAT;
     auto stat = db_->CreateCollection(collection_info);
 
@@ -273,7 +273,7 @@ TEST_F(DeleteTest, delete_before_create_index) {
     collection_info_get.collection_id_ = collection_info.collection_id_;
     stat = db_->DescribeCollection(collection_info_get);
     ASSERT_TRUE(stat.ok());
-    ASSERT_EQ(collection_info_get.dimension_, TABLE_DIM);
+    ASSERT_EQ(collection_info_get.dimension_, COLLECTION_DIM);
 
     int64_t nb = 10000;
     milvus::engine::VectorsData xb;
@@ -299,8 +299,8 @@ TEST_F(DeleteTest, delete_before_create_index) {
         int64_t index = dis(gen);
         milvus::engine::VectorsData search;
         search.vector_count_ = 1;
-        for (int64_t j = 0; j < TABLE_DIM; j++) {
-            search.float_data_.push_back(xb.float_data_[index * TABLE_DIM + j]);
+        for (int64_t j = 0; j < COLLECTION_DIM; j++) {
+            search.float_data_.push_back(xb.float_data_[index * COLLECTION_DIM + j]);
         }
         search_vectors.insert(std::make_pair(xb.id_array_[index], search));
     }
@@ -341,7 +341,7 @@ TEST_F(DeleteTest, delete_before_create_index) {
 }
 
 TEST_F(DeleteTest, delete_with_index) {
-    milvus::engine::meta::CollectionSchema collection_info = BuildTableSchema();
+    milvus::engine::meta::CollectionSchema collection_info = BuildCollectionSchema();
     collection_info.engine_type_ = (int32_t)milvus::engine::EngineType::FAISS_IVFFLAT;
     auto stat = db_->CreateCollection(collection_info);
 
@@ -349,7 +349,7 @@ TEST_F(DeleteTest, delete_with_index) {
     collection_info_get.collection_id_ = collection_info.collection_id_;
     stat = db_->DescribeCollection(collection_info_get);
     ASSERT_TRUE(stat.ok());
-    ASSERT_EQ(collection_info_get.dimension_, TABLE_DIM);
+    ASSERT_EQ(collection_info_get.dimension_, COLLECTION_DIM);
 
     int64_t nb = 10000;
     milvus::engine::VectorsData xb;
@@ -372,8 +372,8 @@ TEST_F(DeleteTest, delete_with_index) {
         int64_t index = dis(gen);
         milvus::engine::VectorsData search;
         search.vector_count_ = 1;
-        for (int64_t j = 0; j < TABLE_DIM; j++) {
-            search.float_data_.push_back(xb.float_data_[index * TABLE_DIM + j]);
+        for (int64_t j = 0; j < COLLECTION_DIM; j++) {
+            search.float_data_.push_back(xb.float_data_[index * COLLECTION_DIM + j]);
         }
         search_vectors.insert(std::make_pair(xb.id_array_[index], search));
     }
@@ -418,14 +418,14 @@ TEST_F(DeleteTest, delete_with_index) {
 }
 
 TEST_F(DeleteTest, delete_multiple_times_with_index) {
-    milvus::engine::meta::CollectionSchema collection_info = BuildTableSchema();
+    milvus::engine::meta::CollectionSchema collection_info = BuildCollectionSchema();
     auto stat = db_->CreateCollection(collection_info);
 
     milvus::engine::meta::CollectionSchema collection_info_get;
     collection_info_get.collection_id_ = collection_info.collection_id_;
     stat = db_->DescribeCollection(collection_info_get);
     ASSERT_TRUE(stat.ok());
-    ASSERT_EQ(collection_info_get.dimension_, TABLE_DIM);
+    ASSERT_EQ(collection_info_get.dimension_, COLLECTION_DIM);
 
     int64_t nb = 100000;
     milvus::engine::VectorsData xb;
@@ -448,8 +448,8 @@ TEST_F(DeleteTest, delete_multiple_times_with_index) {
         int64_t index = dis(gen);
         milvus::engine::VectorsData search;
         search.vector_count_ = 1;
-        for (int64_t j = 0; j < TABLE_DIM; j++) {
-            search.float_data_.push_back(xb.float_data_[index * TABLE_DIM + j]);
+        for (int64_t j = 0; j < COLLECTION_DIM; j++) {
+            search.float_data_.push_back(xb.float_data_[index * COLLECTION_DIM + j]);
         }
         search_vectors.insert(std::make_pair(xb.id_array_[index], search));
     }
@@ -496,14 +496,14 @@ TEST_F(DeleteTest, delete_multiple_times_with_index) {
 }
 
 TEST_F(DeleteTest, delete_single_vector) {
-    milvus::engine::meta::CollectionSchema collection_info = BuildTableSchema();
+    milvus::engine::meta::CollectionSchema collection_info = BuildCollectionSchema();
     auto stat = db_->CreateCollection(collection_info);
 
     milvus::engine::meta::CollectionSchema collection_info_get;
     collection_info_get.collection_id_ = collection_info.collection_id_;
     stat = db_->DescribeCollection(collection_info_get);
     ASSERT_TRUE(stat.ok());
-    ASSERT_EQ(collection_info_get.dimension_, TABLE_DIM);
+    ASSERT_EQ(collection_info_get.dimension_, COLLECTION_DIM);
 
     int64_t nb = 1;
     milvus::engine::VectorsData xb;
@@ -543,14 +543,14 @@ TEST_F(DeleteTest, delete_single_vector) {
 }
 
 TEST_F(DeleteTest, delete_add_create_index) {
-    milvus::engine::meta::CollectionSchema collection_info = BuildTableSchema();
+    milvus::engine::meta::CollectionSchema collection_info = BuildCollectionSchema();
     auto stat = db_->CreateCollection(collection_info);
 
     milvus::engine::meta::CollectionSchema collection_info_get;
     collection_info_get.collection_id_ = collection_info.collection_id_;
     stat = db_->DescribeCollection(collection_info_get);
     ASSERT_TRUE(stat.ok());
-    ASSERT_EQ(collection_info_get.dimension_, TABLE_DIM);
+    ASSERT_EQ(collection_info_get.dimension_, COLLECTION_DIM);
 
     int64_t nb = 3000;
     milvus::engine::VectorsData xb;
@@ -595,7 +595,7 @@ TEST_F(DeleteTest, delete_add_create_index) {
     milvus::engine::ResultIds result_ids;
     milvus::engine::ResultDistances result_distances;
     milvus::engine::VectorsData qb = xb;
-    qb.float_data_.resize(TABLE_DIM);
+    qb.float_data_.resize(COLLECTION_DIM);
     qb.vector_count_ = 1;
     qb.id_array_.clear();
     stat = db_->Query(dummy_context_,
@@ -613,14 +613,14 @@ TEST_F(DeleteTest, delete_add_create_index) {
 }
 
 TEST_F(DeleteTest, delete_add_auto_flush) {
-    milvus::engine::meta::CollectionSchema collection_info = BuildTableSchema();
+    milvus::engine::meta::CollectionSchema collection_info = BuildCollectionSchema();
     auto stat = db_->CreateCollection(collection_info);
 
     milvus::engine::meta::CollectionSchema collection_info_get;
     collection_info_get.collection_id_ = collection_info.collection_id_;
     stat = db_->DescribeCollection(collection_info_get);
     ASSERT_TRUE(stat.ok());
-    ASSERT_EQ(collection_info_get.dimension_, TABLE_DIM);
+    ASSERT_EQ(collection_info_get.dimension_, COLLECTION_DIM);
 
     int64_t nb = 3000;
     milvus::engine::VectorsData xb;
@@ -667,7 +667,7 @@ TEST_F(DeleteTest, delete_add_auto_flush) {
     milvus::engine::ResultIds result_ids;
     milvus::engine::ResultDistances result_distances;
     milvus::engine::VectorsData qb = xb;
-    qb.float_data_.resize(TABLE_DIM);
+    qb.float_data_.resize(COLLECTION_DIM);
     qb.vector_count_ = 1;
     qb.id_array_.clear();
     stat = db_->Query(dummy_context_,
@@ -686,14 +686,14 @@ TEST_F(DeleteTest, delete_add_auto_flush) {
 }
 
 TEST_F(CompactTest, compact_basic) {
-    milvus::engine::meta::CollectionSchema collection_info = BuildTableSchema();
+    milvus::engine::meta::CollectionSchema collection_info = BuildCollectionSchema();
     auto stat = db_->CreateCollection(collection_info);
 
     milvus::engine::meta::CollectionSchema collection_info_get;
     collection_info_get.collection_id_ = collection_info.collection_id_;
     stat = db_->DescribeCollection(collection_info_get);
     ASSERT_TRUE(stat.ok());
-    ASSERT_EQ(collection_info_get.dimension_, TABLE_DIM);
+    ASSERT_EQ(collection_info_get.dimension_, COLLECTION_DIM);
 
     int64_t nb = 100;
     milvus::engine::VectorsData xb;
@@ -739,7 +739,7 @@ TEST_F(CompactTest, compact_basic) {
 }
 
 TEST_F(CompactTest, compact_with_index) {
-    milvus::engine::meta::CollectionSchema collection_info = BuildTableSchema();
+    milvus::engine::meta::CollectionSchema collection_info = BuildCollectionSchema();
     collection_info.index_file_size_ = milvus::engine::ONE_KB;
     collection_info.engine_type_ = (int32_t)milvus::engine::EngineType::FAISS_IVFSQ8;
     auto stat = db_->CreateCollection(collection_info);
@@ -748,7 +748,7 @@ TEST_F(CompactTest, compact_with_index) {
     collection_info_get.collection_id_ = collection_info.collection_id_;
     stat = db_->DescribeCollection(collection_info_get);
     ASSERT_TRUE(stat.ok());
-    ASSERT_EQ(collection_info_get.dimension_, TABLE_DIM);
+    ASSERT_EQ(collection_info_get.dimension_, COLLECTION_DIM);
 
     int64_t nb = 3000;
     milvus::engine::VectorsData xb;
@@ -772,8 +772,8 @@ TEST_F(CompactTest, compact_with_index) {
         int64_t index = dis(gen);
         milvus::engine::VectorsData search;
         search.vector_count_ = 1;
-        for (int64_t j = 0; j < TABLE_DIM; j++) {
-            search.float_data_.push_back(xb.float_data_[index * TABLE_DIM + j]);
+        for (int64_t j = 0; j < COLLECTION_DIM; j++) {
+            search.float_data_.push_back(xb.float_data_[index * COLLECTION_DIM + j]);
         }
         search_vectors.insert(std::make_pair(xb.id_array_[index], search));
     }

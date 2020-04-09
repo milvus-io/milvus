@@ -99,7 +99,7 @@ CreateCollectionRequest::OnExecute() {
         if (!status.ok()) {
             // collection could exist
             if (status.code() == DB_ALREADY_EXIST) {
-                return Status(SERVER_INVALID_TABLE_NAME, status.message());
+                return Status(SERVER_INVALID_COLLECTION_NAME, status.message());
             }
             return status;
         }

@@ -122,7 +122,7 @@ MemTable::Serialize(uint64_t wal_lsn, bool apply_delete) {
     }
 
     // Update flush lsn
-    auto status = meta_->UpdateTableFlushLSN(collection_id_, wal_lsn);
+    auto status = meta_->UpdateCollectionFlushLSN(collection_id_, wal_lsn);
     if (!status.ok()) {
         std::string err_msg = "Failed to write flush lsn to meta: " + status.ToString();
         ENGINE_LOG_ERROR << err_msg;

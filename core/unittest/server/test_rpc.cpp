@@ -36,8 +36,8 @@
 
 namespace {
 
-static const char* TABLE_NAME = "test_grpc";
-static constexpr int64_t TABLE_DIM = 256;
+static const char* COLLECTION_NAME = "test_grpc";
+static constexpr int64_t COLLECTION_DIM = 256;
 static constexpr int64_t INDEX_FILE_SIZE = 1024;
 static constexpr int64_t VECTOR_COUNT = 1000;
 static constexpr int64_t INSERT_LOOP = 10;
@@ -116,8 +116,8 @@ class RpcHandlerTest : public testing::Test {
         handler->SetContext(&context, dummy_context);
         ::milvus::grpc::CollectionSchema request;
         ::milvus::grpc::Status status;
-        request.set_collection_name(TABLE_NAME);
-        request.set_dimension(TABLE_DIM);
+        request.set_collection_name(COLLECTION_NAME);
+        request.set_dimension(COLLECTION_DIM);
         request.set_index_file_size(INDEX_FILE_SIZE);
         request.set_metric_type(1);
         handler->SetContext(&context, dummy_context);
@@ -148,8 +148,8 @@ BuildVectors(int64_t from, int64_t to, std::vector<std::vector<float>>& vector_r
     vector_record_array.clear();
     for (int64_t k = from; k < to; k++) {
         std::vector<float> record;
-        record.resize(TABLE_DIM);
-        for (int64_t i = 0; i < TABLE_DIM; i++) {
+        record.resize(COLLECTION_DIM);
+        for (int64_t i = 0; i < COLLECTION_DIM; i++) {
             record[i] = (float)(i + k);
         }
 
@@ -166,8 +166,8 @@ BuildBinVectors(int64_t from, int64_t to, std::vector<std::vector<uint8_t>>& vec
     vector_record_array.clear();
     for (int64_t k = from; k < to; k++) {
         std::vector<uint8_t> record;
-        record.resize(TABLE_DIM / 8);
-        for (int64_t i = 0; i < TABLE_DIM / 8; i++) {
+        record.resize(COLLECTION_DIM / 8);
+        for (int64_t i = 0; i < COLLECTION_DIM / 8; i++) {
             record[i] = (i + k) % 256;
         }
 
@@ -199,7 +199,7 @@ TEST_F(RpcHandlerTest, HAS_COLLECTION_TEST) {
     ::milvus::grpc::CollectionName request;
     ::milvus::grpc::BoolReply reply;
     ::grpc::Status status = handler->HasCollection(&context, &request, &reply);
-    request.set_collection_name(TABLE_NAME);
+    request.set_collection_name(COLLECTION_NAME);
     status = handler->HasCollection(&context, &request, &reply);
     ASSERT_TRUE(status.error_code() == ::grpc::Status::OK.error_code());
     int error_code = reply.status().error_code();
@@ -223,7 +223,7 @@ TEST_F(RpcHandlerTest, INDEX_TEST) {
     request.set_collection_name("test1");
     handler->CreateIndex(&context, &request, &response);
 
-    request.set_collection_name(TABLE_NAME);
+    request.set_collection_name(COLLECTION_NAME);
     handler->CreateIndex(&context, &request, &response);
 
     request.set_index_type(1);
@@ -266,7 +266,7 @@ TEST_F(RpcHandlerTest, INDEX_TEST) {
     handler->DescribeIndex(&context, &collection_name, &index_param);
     collection_name.set_collection_name("test4");
     handler->DescribeIndex(&context, &collection_name, &index_param);
-    collection_name.set_collection_name(TABLE_NAME);
+    collection_name.set_collection_name(COLLECTION_NAME);
     handler->DescribeIndex(&context, &collection_name, &index_param);
 
     fiu_init(0);
@@ -280,7 +280,7 @@ TEST_F(RpcHandlerTest, INDEX_TEST) {
     collection_name.set_collection_name("test5");
     handler->DropIndex(&context, &collection_name, &status);
 
-    collection_name.set_collection_name(TABLE_NAME);
+    collection_name.set_collection_name(COLLECTION_NAME);
 
     fiu_init(0);
     fiu_enable("DropIndexRequest.OnExecute.collection_not_exist", 1, NULL, 0);
@@ -305,7 +305,7 @@ TEST_F(RpcHandlerTest, INSERT_TEST) {
     ::milvus::grpc::InsertParam request;
     ::milvus::grpc::Status response;
 
-    request.set_collection_name(TABLE_NAME);
+    request.set_collection_name(COLLECTION_NAME);
     std::vector<std::vector<float>> record_array;
     BuildVectors(0, VECTOR_COUNT, record_array);
     ::milvus::grpc::VectorIds vector_ids;
@@ -360,7 +360,7 @@ TEST_F(RpcHandlerTest, INSERT_TEST) {
     fiu_disable("InsertRequest.OnExecute.invalid_ids_size");
 
     // insert vectors with wrong dim
-    std::vector<float> record_wrong_dim(TABLE_DIM - 1, 0.5f);
+    std::vector<float> record_wrong_dim(COLLECTION_DIM - 1, 0.5f);
     ::milvus::grpc::RowRecord* grpc_record = request.add_row_record_array();
     CopyRowRecord(grpc_record, record_wrong_dim);
     handler->Insert(&context, &request, &vector_ids);
@@ -384,7 +384,7 @@ TEST_F(RpcHandlerTest, SEARCH_TEST) {
     handler->Search(&context, &request, &response);
 
     // test invalid topk
-    request.set_collection_name(TABLE_NAME);
+    request.set_collection_name(COLLECTION_NAME);
     handler->Search(&context, &request, &response);
 
     // test invalid nprobe
@@ -406,14 +406,14 @@ TEST_F(RpcHandlerTest, SEARCH_TEST) {
         CopyRowRecord(grpc_record, record);
     }
     // insert vectors
-    insert_param.set_collection_name(TABLE_NAME);
+    insert_param.set_collection_name(COLLECTION_NAME);
     ::milvus::grpc::VectorIds vector_ids;
     handler->Insert(&context, &insert_param, &vector_ids);
 
     // flush
     ::milvus::grpc::Status grpc_status;
     ::milvus::grpc::FlushParam flush_param;
-    flush_param.add_collection_name_array(TABLE_NAME);
+    flush_param.add_collection_name_array(COLLECTION_NAME);
     handler->Flush(&context, &flush_param, &grpc_status);
 
     // search
@@ -442,7 +442,7 @@ TEST_F(RpcHandlerTest, COMBINE_SEARCH_TEST) {
     std::string collection_name = "combine";
     ::milvus::grpc::CollectionSchema collection_schema;
     collection_schema.set_collection_name(collection_name);
-    collection_schema.set_dimension(TABLE_DIM);
+    collection_schema.set_dimension(COLLECTION_DIM);
     collection_schema.set_index_file_size(INDEX_FILE_SIZE);
     collection_schema.set_metric_type(1); // L2 metric
     ::milvus::grpc::Status status;
@@ -544,7 +544,7 @@ TEST_F(RpcHandlerTest, COMBINE_SEARCH_BINARY_TEST) {
     std::string collection_name = "combine_bin";
     ::milvus::grpc::CollectionSchema collection_schema;
     collection_schema.set_collection_name(collection_name);
-    collection_schema.set_dimension(TABLE_DIM);
+    collection_schema.set_dimension(COLLECTION_DIM);
     collection_schema.set_index_file_size(INDEX_FILE_SIZE);
     collection_schema.set_metric_type(5); // tanimoto metric
     ::milvus::grpc::Status status;
@@ -654,7 +654,7 @@ TEST_F(RpcHandlerTest, TABLES_TEST) {
         collection_schema.set_collection_name(collection_name);
         handler->CreateCollection(&context, &collection_schema, &response);
         // test invalid index file size
-        collection_schema.set_dimension(TABLE_DIM);
+        collection_schema.set_dimension(COLLECTION_DIM);
         //    handler->CreateCollection(&context, &collection_schema, &response);
         // test invalid index metric type
         collection_schema.set_index_file_size(INDEX_FILE_SIZE);
@@ -671,7 +671,7 @@ TEST_F(RpcHandlerTest, TABLES_TEST) {
         ::milvus::grpc::CollectionSchema collection_schema;
         handler->DescribeCollection(&context, &grpc_collection_name, &collection_schema);
 
-        grpc_collection_name.set_collection_name(TABLE_NAME);
+        grpc_collection_name.set_collection_name(COLLECTION_NAME);
         ::grpc::Status status = handler->DescribeCollection(&context, &grpc_collection_name, &collection_schema);
         ASSERT_EQ(status.error_code(), ::grpc::Status::OK.error_code());
 
@@ -767,7 +767,7 @@ TEST_F(RpcHandlerTest, TABLES_TEST) {
 
         grpc_collection_name.Clear();
         auto status = handler->PreloadCollection(&context, &grpc_collection_name, &response);
-        grpc_collection_name.set_collection_name(TABLE_NAME);
+        grpc_collection_name.set_collection_name(COLLECTION_NAME);
         status = handler->PreloadCollection(&context, &grpc_collection_name, &response);
         ASSERT_EQ(status.error_code(), ::grpc::Status::OK.error_code());
 
@@ -859,7 +859,7 @@ TEST_F(RpcHandlerTest, PARTITION_TEST) {
     ::milvus::grpc::Status response;
     std::string str_collection_name = "tbl_partition";
     collection_schema.set_collection_name(str_collection_name);
-    collection_schema.set_dimension(TABLE_DIM);
+    collection_schema.set_dimension(COLLECTION_DIM);
     collection_schema.set_index_file_size(INDEX_FILE_SIZE);
     collection_schema.set_metric_type(1);
     handler->CreateCollection(&context, &collection_schema, &response);

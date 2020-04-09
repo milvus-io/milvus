@@ -54,13 +54,13 @@ DescribeCollectionRequest::OnExecute() {
         fiu_do_on("DescribeCollectionRequest.OnExecute.throw_std_exception", throw std::exception());
         if (!status.ok()) {
             if (status.code() == DB_NOT_FOUND) {
-                return Status(SERVER_TABLE_NOT_EXIST, TableNotExistMsg(collection_name_));
+                return Status(SERVER_COLLECTION_NOT_EXIST, TableNotExistMsg(collection_name_));
             } else {
                 return status;
             }
         } else {
             if (!collection_schema.owner_collection_.empty()) {
-                return Status(SERVER_INVALID_TABLE_NAME, TableNotExistMsg(collection_name_));
+                return Status(SERVER_INVALID_COLLECTION_NAME, TableNotExistMsg(collection_name_));
             }
         }
 
