@@ -5,7 +5,7 @@ Please mark all change in change log and use the issue from GitHub
 # Milvus 0.8.0 (TBD)
 
 ## Bug
--   \#1762 Forbidden to create new partition which tag is `_default`
+-   \#1762 Server is not forbidden to create new partition which tag is `_default`
 -   \#1873 Fix index file serialize to incorrect path
 -   \#1881 Fix Annoy index search fail
 
