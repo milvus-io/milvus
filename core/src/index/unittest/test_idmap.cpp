@@ -40,7 +40,7 @@ class IDMAPTest : public DataGen, public TestWithParam<milvus::knowhere::IndexMo
         milvus::knowhere::FaissGpuResourceMgr::GetInstance().InitDevice(DEVICEID, PINMEM, TEMPMEM, RESNUM);
 #endif
         index_mode_ = GetParam();
-        Init_with_default(false);
+        Init_with_default();
         index_ = std::make_shared<milvus::knowhere::IDMAP>();
     }
 

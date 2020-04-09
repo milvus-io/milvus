@@ -60,12 +60,7 @@ INSTANTIATE_TEST_CASE_P(METRICParameters, BinaryIVFTest,
 TEST_P(BinaryIVFTest, binaryivf_basic) {
     assert(!xb_bin.empty());
 
-    //    auto preprocessor = index_->BuildPreprocessor(base_dataset, conf);
-    //    index_->set_preprocessor(preprocessor);
-
     index_->Train(base_dataset, conf);
-    //    index_->set_index_model(model);
-    //    index_->Add(base_dataset, conf);
     EXPECT_EQ(index_->Count(), nb);
     EXPECT_EQ(index_->Dim(), dim);
 

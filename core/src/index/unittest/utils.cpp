@@ -83,24 +83,31 @@ GenAll(const int64_t dim, const int64_t nb, std::vector<uint8_t>& xb, std::vecto
 void
 GenBase(const int64_t dim, const int64_t nb, const void* xb, int64_t* ids, const int64_t nq, const void* xq,
         int64_t* xids, bool is_binary) {
-    for (auto i = 0; i < nb; ++i) {
-        for (auto j = 0; j < dim; ++j) {
-            if (!is_binary) {
-                ((float*)xb)[i * dim + j] = drand48();
-            } else {
-                ((uint8_t*)xb)[i * dim + j] = (uint8_t)lrand48();
+    if (!is_binary) {
+        float* xb_f = (float*)xb;
+        float* xq_f = (float*)xq;
+        for (auto i = 0; i < nb; ++i) {
+            for (auto j = 0; j < dim; ++j) {
+                xb_f[i * dim + j] = drand48();
             }
+            xb_f[dim * i] += i / 1000.;
+            ids[i] = i;
         }
-        if (!is_binary) {
-            ((float*)xb)[dim * i] += i / 1000.;
+        for (int64_t i = 0; i < nq * dim; ++i) {
+            xq_f[i] = xb_f[i];
         }
-        ids[i] = i;
-    }
-    for (int64_t i = 0; i < nq * dim; ++i) {
-        if (!is_binary) {
-            ((float*)xq)[i] = ((float*)xb)[i];
-        } else {
-            ((uint8_t*)xq)[i] = ((uint8_t*)xb)[i];
+    } else {
+        uint8_t* xb_u = (uint8_t*)xb;
+        uint8_t* xq_u = (uint8_t*)xq;
+        for (auto i = 0; i < nb; ++i) {
+            for (auto j = 0; j < dim; ++j) {
+                xb_u[i * dim + j] = (uint8_t)lrand48();
+            }
+            xb_u[dim * i] += i / 1000.;
+            ids[i] = i;
+        }
+        for (int64_t i = 0; i < nq * dim; ++i) {
+            xq_u[i] = xb_u[i];
         }
     }
     xids[0] = 3;  // pseudo random

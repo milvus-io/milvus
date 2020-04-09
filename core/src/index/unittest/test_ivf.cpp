@@ -57,7 +57,7 @@ class IVFTest : public DataGen,
         //        nb = 1000000;
         //        nq = 1000;
         //        k = 1000;
-        Generate(DIM, NB, NQ, false);
+        Generate(DIM, NB, NQ);
         index_ = IndexFactory(index_type_, index_mode_);
         conf_ = ParamGenerator::GetInstance().Gen(index_type_);
         // conf_->Dump();

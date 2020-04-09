@@ -23,10 +23,10 @@
 class DataGen {
  protected:
     void
-    Init_with_default(const bool is_binary);
+    Init_with_default(const bool is_binary = false);
 
     void
-    Generate(const int dim, const int nb, const int nq, const bool is_binary);
+    Generate(const int dim, const int nb, const int nq, const bool is_binary = false);
 
  protected:
     int nb = 10000;
