@@ -132,7 +132,7 @@ void
 XSearchTask::Load(LoadType type, uint8_t device_id) {
     milvus::server::ContextFollower tracer(context_, "XSearchTask::Load " + std::to_string(file_->id_));
 
-    TimeRecorder rc("");
+    TimeRecorder rc(LogOut("[%s][%ld]", "search", 0));
     Status stat = Status::OK();
     std::string error_msg;
     std::string type_str;
@@ -159,6 +159,7 @@ XSearchTask::Load(LoadType type, uint8_t device_id) {
     } catch (std::exception& ex) {
         // typical error: out of disk space or permition denied
         error_msg = "Failed to load index file: " + std::string(ex.what());
+        ENGINE_LOG_ERROR << LogOut("[%s][%ld] Encounter execption: %s", "search", 0, error_msg.c_str());
         stat = Status(SERVER_UNEXPECTED_ERROR, error_msg);
     }
     fiu_do_on("XSearchTask.Load.out_of_memory", stat = Status(SERVER_UNEXPECTED_ERROR, "out of memory"));
@@ -211,7 +212,8 @@ XSearchTask::Execute() {
     //    ENGINE_LOG_DEBUG << "Searching in file id:" << index_id_ << " with "
     //                     << search_contexts_.size() << " tasks";
 
-    TimeRecorder rc("DoSearch file id:" + std::to_string(index_id_));
+    //    TimeRecorder rc("DoSearch file id:" + std::to_string(index_id_));
+    TimeRecorder rc(LogOut("[%s][%ld] DoSearch file id:%ld", "search", 0, index_id_));
 
     server::CollectDurationMetrics metrics(index_type_);
 
@@ -265,7 +267,8 @@ XSearchTask::Execute() {
             // step 3: pick up topk result
             auto spec_k = file_->row_count_ < topk ? file_->row_count_ : topk;
             if (spec_k == 0) {
-                ENGINE_LOG_WARNING << "Searching in an empty file. file location = " << file_->location_;
+                ENGINE_LOG_WARNING << LogOut("[%s][%ld] Searching in an empty file. file location = %s", "search", 0,
+                                             file_->location_.c_str());
             }
 
             {
@@ -286,7 +289,7 @@ XSearchTask::Execute() {
             span = rc.RecordSection(hdr + ", reduce topk");
             //            search_job->AccumReduceCost(span);
         } catch (std::exception& ex) {
-            ENGINE_LOG_ERROR << "SearchTask encounter exception: " << ex.what();
+            ENGINE_LOG_ERROR << LogOut("[%s][%ld] SearchTask encounter exception: %s", "search", 0, ex.what());
             //            search_job->IndexSearchDone(index_id_);//mark as done avoid dead lock, even search failed
         }
 
@@ -305,6 +308,7 @@ XSearchTask::MergeTopkToResultSet(const scheduler::ResultIds& src_ids, const sch
                                   size_t src_k, size_t nq, size_t topk, bool ascending, scheduler::ResultIds& tar_ids,
                                   scheduler::ResultDistances& tar_distances) {
     if (src_ids.empty()) {
+        ENGINE_LOG_DEBUG << LogOut("[%s][%d] Search result is empty.", "search", 0);
         return;
     }
 

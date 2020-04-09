@@ -314,9 +314,9 @@ Config::ResetDefaultConfig() {
 }
 
 void
-Config::GetConfigJsonStr(std::string& result) {
+Config::GetConfigJsonStr(std::string& result, int64_t indent) {
     nlohmann::json config_json(config_map_);
-    result = config_json.dump();
+    result = config_json.dump(indent);
 }
 
 Status

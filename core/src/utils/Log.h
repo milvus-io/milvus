@@ -11,6 +11,8 @@
 
 #pragma once
 
+#include <string>
+
 #include "easyloggingpp/easylogging++.h"
 
 namespace milvus {
@@ -63,5 +65,9 @@ namespace milvus {
 #define WAL_LOG_WARNING LOG(WARNING) << WAL_DOMAIN_NAME
 #define WAL_LOG_ERROR LOG(ERROR) << WAL_DOMAIN_NAME
 #define WAL_LOG_FATAL LOG(FATAL) << WAL_DOMAIN_NAME
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////
+std::string
+LogOut(const char* pattern, ...);
 
 }  // namespace milvus
