@@ -33,13 +33,13 @@ class DiskIOWriter : public IOWriter {
     DiskIOWriter&
     operator=(DiskIOWriter&&) = delete;
 
-    void
+    bool
     open(const std::string& name) override;
 
     void
-    write(void* ptr, size_t size) override;
+    write(void* ptr, int64_t size) override;
 
-    size_t
+    int64_t
     length() override;
 
     void
@@ -47,7 +47,7 @@ class DiskIOWriter : public IOWriter {
 
  public:
     std::string name_;
-    size_t len_;
+    int64_t len_;
     std::fstream fs_;
 };
 

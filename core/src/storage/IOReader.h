@@ -19,16 +19,16 @@ namespace storage {
 
 class IOReader {
  public:
-    virtual void
+    virtual bool
     open(const std::string& name) = 0;
 
     virtual void
-    read(void* ptr, size_t size) = 0;
+    read(void* ptr, int64_t size) = 0;
 
     virtual void
-    seekg(size_t pos) = 0;
+    seekg(int64_t pos) = 0;
 
-    virtual size_t
+    virtual int64_t
     length() = 0;
 
     virtual void
