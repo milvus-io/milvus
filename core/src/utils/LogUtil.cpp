@@ -107,7 +107,9 @@ LogConfigInMem() {
     auto& config = Config::GetInstance();
     std::string config_str;
     config.GetConfigJsonStr(config_str, 3);
-    SERVER_LOG_DEBUG << "\n\n" << std::string(15, '*') << "Config" << std::string(15, '*') << "\n\n" << config_str;
+    SERVER_LOG_DEBUG << "\n\n"
+                     << std::string(15, '*') << "Config in memory" << std::string(15, '*') << "\n\n"
+                     << config_str;
 }
 
 void
