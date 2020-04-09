@@ -24,9 +24,11 @@ Please mark all change in change log and use the issue from GitHub
 -   \#1784 Add Substructure and Superstructure in http module
 -   \#1858 Disable S3 build
 -   \#1882 Add index annoy into http module
+-   \#1885 Optimize knowhere unittest
 -   \#1886 Refactor log on search and insert request
 
 ## Task
+
 
 # Milvus 0.7.1 (2020-03-29)
 

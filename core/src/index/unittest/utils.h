@@ -23,13 +23,10 @@
 class DataGen {
  protected:
     void
-    Init_with_default();
+    Init_with_default(const bool is_binary = false);
 
     void
-    Generate(const int& dim, const int& nb, const int& nq);
-
-    milvus::knowhere::DatasetPtr
-    GenQuery(const int& nq);
+    Generate(const int dim, const int nb, const int nq, const bool is_binary = false);
 
  protected:
     int nb = 10000;
@@ -38,32 +35,8 @@ class DataGen {
     int k = 10;
     std::vector<float> xb;
     std::vector<float> xq;
-    std::vector<int64_t> ids;
-    std::vector<int64_t> xids;
-    milvus::knowhere::DatasetPtr base_dataset = nullptr;
-    milvus::knowhere::DatasetPtr query_dataset = nullptr;
-    milvus::knowhere::DatasetPtr id_dataset = nullptr;
-    milvus::knowhere::DatasetPtr xid_dataset = nullptr;
-};
-
-class BinaryDataGen {
- protected:
-    void
-    Init_with_binary_default();
-
-    void
-    Generate(const int& dim, const int& nb, const int& nq);
-
-    milvus::knowhere::DatasetPtr
-    GenQuery(const int& nq);
-
- protected:
-    int nb = 10000;
-    int nq = 10;
-    int dim = 512;
-    int k = 10;
-    std::vector<uint8_t> xb;
-    std::vector<uint8_t> xq;
+    std::vector<uint8_t> xb_bin;
+    std::vector<uint8_t> xq_bin;
     std::vector<int64_t> ids;
     std::vector<int64_t> xids;
     milvus::knowhere::DatasetPtr base_dataset = nullptr;
@@ -73,37 +46,19 @@ class BinaryDataGen {
 };
 
 extern void
-GenAll(const int64_t dim, const int64_t& nb, std::vector<float>& xb, std::vector<int64_t>& ids,
-       std::vector<int64_t>& xids, const int64_t& nq, std::vector<float>& xq);
+GenAll(const int64_t dim, const int64_t nb, std::vector<float>& xb, std::vector<int64_t>& ids,
+       std::vector<int64_t>& xids, const int64_t nq, std::vector<float>& xq);
 
 extern void
-GenAll(const int64_t& dim, const int64_t& nb, float* xb, int64_t* ids, int64_t* xids, const int64_t& nq, float* xq);
+GenAll(const int64_t dim, const int64_t nb, std::vector<uint8_t>& xb, std::vector<int64_t>& ids,
+       std::vector<int64_t>& xids, const int64_t nq, std::vector<uint8_t>& xq);
 
 extern void
-GenBinaryAll(const int64_t dim, const int64_t& nb, std::vector<uint8_t>& xb, std::vector<int64_t>& ids,
-             std::vector<int64_t>& xids, const int64_t& nq, std::vector<uint8_t>& xq);
-
-extern void
-GenBinaryAll(const int64_t& dim, const int64_t& nb, uint8_t* xb, int64_t* ids, int64_t* xids, const int64_t& nq,
-             uint8_t* xq);
-
-extern void
-GenBase(const int64_t& dim, const int64_t& nb, float* xb, int64_t* ids);
-
-extern void
-GenBinaryBase(const int64_t& dim, const int64_t& nb, uint8_t* xb, int64_t* ids);
+GenBase(const int64_t dim, const int64_t nb, const void* xb, int64_t* ids, const int64_t nq, const void* xq,
+        int64_t* xids, const bool is_binary);
 
 extern void
 InitLog();
-
-milvus::knowhere::DatasetPtr
-generate_dataset(int64_t nb, int64_t dim, const void* xb, const int64_t* ids);
-
-milvus::knowhere::DatasetPtr
-generate_query_dataset(int64_t nb, int64_t dim, const void* xb);
-
-milvus::knowhere::DatasetPtr
-generate_id_dataset(int64_t nb, const int64_t* ids);
 
 enum class CheckMode {
     CHECK_EQUAL = 0,
