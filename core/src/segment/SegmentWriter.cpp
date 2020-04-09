@@ -61,6 +61,7 @@ SegmentWriter::Serialize() {
 
     auto status = WriteBloomFilter();
     if (!status.ok()) {
+        ENGINE_LOG_ERROR << status.message();
         return status;
     }
 
@@ -70,8 +71,10 @@ SegmentWriter::Serialize() {
 
     start = std::chrono::high_resolution_clock::now();
 
+    ENGINE_LOG_DEBUG << "Write vectors";
     status = WriteVectors();
     if (!status.ok()) {
+        ENGINE_LOG_ERROR << "Write vectors fail: " << status.message();
         return status;
     }
 

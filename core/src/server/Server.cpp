@@ -193,6 +193,11 @@ Server::Start() {
 #else
         SERVER_LOG_INFO << "CPU edition";
 #endif
+        /* record config and hardware information into log */
+        LogConfigInFile(config_filename_);
+        LogCpuInfo();
+        LogConfigInMem();
+
         server::Metrics::GetInstance().Init();
         server::SystemInfo::GetInstance().Init();
 

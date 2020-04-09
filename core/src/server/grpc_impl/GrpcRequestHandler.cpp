@@ -19,6 +19,7 @@
 #include "tracing/TextMapCarrier.h"
 #include "tracing/TracerUtil.h"
 #include "utils/Log.h"
+#include "utils/LogUtil.h"
 #include "utils/TimeRecorder.h"
 
 namespace milvus {
@@ -300,6 +301,8 @@ GrpcRequestHandler::Insert(::grpc::ServerContext* context, const ::milvus::grpc:
                            ::milvus::grpc::VectorIds* response) {
     CHECK_NULLPTR_RETURN(request);
 
+    SERVER_LOG_INFO << LogOut("[%s][%d] Start insert.", "insert", 0);
+
     // step 1: copy vector data
     engine::VectorsData vectors;
     CopyRowRecords(request->row_record_array(), request->row_id_array(), vectors);
@@ -313,6 +316,7 @@ GrpcRequestHandler::Insert(::grpc::ServerContext* context, const ::milvus::grpc:
     memcpy(response->mutable_vector_id_array()->mutable_data(), vectors.id_array_.data(),
            vectors.id_array_.size() * sizeof(int64_t));
 
+    SERVER_LOG_INFO << LogOut("[%s][%d] Insert done.", "insert", 0);
     SET_RESPONSE(response->mutable_status(), status, context);
     return ::grpc::Status::OK;
 }
@@ -364,6 +368,7 @@ GrpcRequestHandler::Search(::grpc::ServerContext* context, const ::milvus::grpc:
                            ::milvus::grpc::TopKQueryResult* response) {
     CHECK_NULLPTR_RETURN(request);
 
+    SERVER_LOG_INFO << LogOut("[%s][%d] Search start in gRPC server", "search", 0);
     // step 1: copy vector data
     engine::VectorsData vectors;
     CopyRowRecords(request->query_record_array(), google::protobuf::RepeatedField<google::protobuf::int64>(), vectors);
@@ -392,6 +397,8 @@ GrpcRequestHandler::Search(::grpc::ServerContext* context, const ::milvus::grpc:
 
     // step 5: construct and return result
     ConstructResults(result, response);
+
+    SERVER_LOG_INFO << LogOut("[%s][%d] Search done.", "search", 0);
 
     SET_RESPONSE(response->mutable_status(), status, context);
 

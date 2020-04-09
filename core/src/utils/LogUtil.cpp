@@ -11,9 +11,14 @@
 
 #include "utils/LogUtil.h"
 
-#include <ctype.h>
 #include <libgen.h>
+#include <cctype>
 #include <string>
+
+#include <yaml-cpp/yaml.h>
+
+#include "config/Config.h"
+#include "utils/Log.h"
 
 namespace milvus {
 namespace server {
@@ -84,6 +89,50 @@ InitLog(const std::string& log_config_file) {
     el::Loggers::addFlag(el::LoggingFlag::DisableApplicationAbortOnFatalLog);
 
     return Status::OK();
+}
+
+void
+LogConfigInFile(const std::string& path) {
+    // TODO(yhz): Check if file exists
+    auto node = YAML::LoadFile(path);
+    YAML::Emitter out;
+    out << node;
+    SERVER_LOG_DEBUG << "\n\n"
+                     << std::string(15, '*') << "Config in file" << std::string(15, '*') << "\n\n"
+                     << out.c_str();
+}
+
+void
+LogConfigInMem() {
+    auto& config = Config::GetInstance();
+    std::string config_str;
+    config.GetConfigJsonStr(config_str, 3);
+    SERVER_LOG_DEBUG << "\n\n"
+                     << std::string(15, '*') << "Config in memory" << std::string(15, '*') << "\n\n"
+                     << config_str;
+}
+
+void
+LogCpuInfo() {
+    /*CPU information*/
+    std::fstream fcpu("/proc/cpuinfo", std::ios::in);
+    if (!fcpu.is_open()) {
+        SERVER_LOG_WARNING << "Cannot obtain CPU information. Open file /proc/cpuinfo fail: " << strerror(errno);
+        return;
+    }
+    std::stringstream cpu_info_ss;
+    cpu_info_ss << fcpu.rdbuf();
+    fcpu.close();
+    std::string cpu_info = cpu_info_ss.str();
+
+    auto processor_pos = cpu_info.rfind("processor");
+    if (std::string::npos == processor_pos) {
+        SERVER_LOG_WARNING << "Cannot obtain CPU information. No sub string \'processor\'";
+        return;
+    }
+
+    auto sub_str = cpu_info.substr(processor_pos);
+    SERVER_LOG_DEBUG << "\n\n" << std::string(15, '*') << "CPU" << std::string(15, '*') << "\n\n" << sub_str;
 }
 
 }  // namespace server
