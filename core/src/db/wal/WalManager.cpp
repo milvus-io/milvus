@@ -243,7 +243,7 @@ WalManager::Insert(const std::string& collection_id, const std::string& partitio
 
     size_t vector_num = vector_ids.size();
     if (vector_num == 0) {
-        WAL_LOG_ERROR << "The ids is empty.";
+        WAL_LOG_ERROR << LogOut("[%s][%ld] The ids is empty.", "insert", 0);
         return false;
     }
     size_t dim = vectors.size() / vector_num;
@@ -265,7 +265,8 @@ WalManager::Insert(const std::string& collection_id, const std::string& partitio
             max_rcd_num = (mxlog_config_.buffer_size - head_size) / unit_size;
         }
         if (max_rcd_num == 0) {
-            WAL_LOG_ERROR << "Wal buffer size is too small " << mxlog_config_.buffer_size << " unit " << unit_size;
+            WAL_LOG_ERROR << LogOut("[%s][%ld]", "insert", 0) << "Wal buffer size is too small "
+                          << mxlog_config_.buffer_size << " unit " << unit_size;
             return false;
         }
 
@@ -290,7 +291,8 @@ WalManager::Insert(const std::string& collection_id, const std::string& partitio
     }
     lck.unlock();
 
-    WAL_LOG_INFO << collection_id << " insert in part " << partition_tag << " with lsn " << new_lsn;
+    WAL_LOG_INFO << LogOut("[%s][%ld]", "insert", 0) << collection_id << " insert in part " << partition_tag
+                 << " with lsn " << new_lsn;
 
     return p_meta_handler_->SetMXLogInternalMeta(new_lsn);
 }

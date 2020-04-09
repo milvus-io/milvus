@@ -65,7 +65,7 @@ MemTableFile::Add(const VectorSourcePtr& source) {
         std::string err_msg =
             "MemTableFile::Add: table_file_schema dimension = " + std::to_string(table_file_schema_.dimension_) +
             ", collection_id = " + table_file_schema_.collection_id_;
-        ENGINE_LOG_ERROR << err_msg;
+        ENGINE_LOG_ERROR << LogOut("[%s][%ld]", "insert", 0) << err_msg;
         return Status(DB_ERROR, "Not able to create collection file");
     }
 

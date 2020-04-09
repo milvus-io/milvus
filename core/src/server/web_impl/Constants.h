@@ -40,6 +40,7 @@ static const char* NAME_ENGINE_TYPE_IVFSQ8H = "IVFSQ8H";
 static const char* NAME_ENGINE_TYPE_RNSG = "RNSG";
 static const char* NAME_ENGINE_TYPE_IVFPQ = "IVFPQ";
 static const char* NAME_ENGINE_TYPE_HNSW = "HNSW";
+static const char* NAME_ENGINE_TYPE_ANNOY = "ANNOY";
 
 static const char* NAME_METRIC_TYPE_L2 = "L2";
 static const char* NAME_METRIC_TYPE_IP = "IP";
