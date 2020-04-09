@@ -36,9 +36,12 @@ DefaultVectorIndexFormat::read_internal(const storage::FSHandlerPtr& fs_ptr, con
     knowhere::BinarySet load_data_list;
 
     recorder.RecordSection("Start");
-    fs_ptr->reader_ptr_->open(path);
+    if (!fs_ptr->reader_ptr_->open(path)) {
+        ENGINE_LOG_ERROR << "Fail to open vector index: " << path;
+        return nullptr;
+    }
 
-    size_t length = fs_ptr->reader_ptr_->length();
+    int64_t length = fs_ptr->reader_ptr_->length();
     if (length <= 0) {
         ENGINE_LOG_ERROR << "Invalid vector index length: " << path;
         return nullptr;
@@ -128,7 +131,10 @@ DefaultVectorIndexFormat::write(const storage::FSHandlerPtr& fs_ptr, const std::
     int32_t index_type = knowhere::StrToOldIndexType(index->index_type());
 
     recorder.RecordSection("Start");
-    fs_ptr->writer_ptr_->open(location);
+    if (!fs_ptr->writer_ptr_->open(location)) {
+        ENGINE_LOG_ERROR << "Fail to open vector index: " << location;
+        return;
+    }
 
     fs_ptr->writer_ptr_->write(&index_type, sizeof(index_type));
 
