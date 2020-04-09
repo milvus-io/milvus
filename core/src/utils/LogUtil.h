@@ -33,5 +33,14 @@ RolloutHandler(const char* filename, std::size_t size, el::Level level);
 #define LOCATION_INFO ""
 #endif
 
+void
+LogConfigFile(const std::string& path);
+
+void
+LogConfig();
+
+void
+LogHardware();
+
 }  // namespace server
 }  // namespace milvus
