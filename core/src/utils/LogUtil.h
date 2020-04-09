@@ -34,13 +34,13 @@ RolloutHandler(const char* filename, std::size_t size, el::Level level);
 #endif
 
 void
-LogConfigFile(const std::string& path);
+LogConfigInFile(const std::string& path);
 
 void
-LogConfig();
+LogConfigInMem();
 
 void
-LogHardware();
+LogCpuInfo();
 
 }  // namespace server
 }  // namespace milvus

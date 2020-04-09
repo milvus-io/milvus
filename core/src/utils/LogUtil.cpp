@@ -92,7 +92,7 @@ InitLog(const std::string& log_config_file) {
 }
 
 void
-LogConfigFile(const std::string& path) {
+LogConfigInFile(const std::string& path) {
     // TODO(yhz): Check if file exists
     auto node = YAML::LoadFile(path);
     YAML::Emitter out;
@@ -103,7 +103,7 @@ LogConfigFile(const std::string& path) {
 }
 
 void
-LogConfig() {
+LogConfigInMem() {
     auto& config = Config::GetInstance();
     std::string config_str;
     config.GetConfigJsonStr(config_str, 3);
@@ -111,7 +111,7 @@ LogConfig() {
 }
 
 void
-LogHardware() {
+LogCpuInfo() {
     /*CPU information*/
     std::fstream fcpu("/proc/cpuinfo", std::ios::in);
     if (!fcpu.is_open()) {

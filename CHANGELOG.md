@@ -17,6 +17,7 @@ Please mark all change in change log and use the issue from GitHub
 -   \#1661 HNSW support deleted vectors searching
 -   \#1825 Add annoy index type in C++ sdk
 -   \#1849 NSG support deleted vectors searching
+-   \#1893 Log config information and device information
 
 ## Improvement
 -   \#1627 Move read/write index APIs into codec
