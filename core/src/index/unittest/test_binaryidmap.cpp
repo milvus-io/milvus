@@ -21,11 +21,11 @@ using ::testing::Combine;
 using ::testing::TestWithParam;
 using ::testing::Values;
 
-class BinaryIDMAPTest : public BinaryDataGen, public TestWithParam<std::string> {
+class BinaryIDMAPTest : public DataGen, public TestWithParam<std::string> {
  protected:
     void
     SetUp() override {
-        Init_with_binary_default();
+        Init_with_default(true);
         index_ = std::make_shared<milvus::knowhere::BinaryIDMAP>();
     }
 
@@ -40,7 +40,7 @@ INSTANTIATE_TEST_CASE_P(METRICParameters, BinaryIDMAPTest,
                         Values(std::string("JACCARD"), std::string("TANIMOTO"), std::string("HAMMING")));
 
 TEST_P(BinaryIDMAPTest, binaryidmap_basic) {
-    ASSERT_TRUE(!xb.empty());
+    ASSERT_TRUE(!xb_bin.empty());
 
     std::string MetricType = GetParam();
     milvus::knowhere::Config conf{
