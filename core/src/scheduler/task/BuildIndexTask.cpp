@@ -52,7 +52,7 @@ XBuildIndexTask::XBuildIndexTask(SegmentSchemaPtr file, TaskLabelPtr label)
 
 void
 XBuildIndexTask::Load(milvus::scheduler::LoadType type, uint8_t device_id) {
-    TimeRecorder rc("XBuildIndexTask::Load" + std::to_string(file_->id_));
+    TimeRecorder rc("XBuildIndexTask::Load");
     Status stat = Status::OK();
     std::string error_msg;
     std::string type_str;
