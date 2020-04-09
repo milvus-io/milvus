@@ -15,20 +15,21 @@
 namespace milvus {
 namespace storage {
 
-void
+bool
 S3IOWriter::open(const std::string& name) {
     name_ = name;
     len_ = 0;
     buffer_ = "";
+    return true;
 }
 
 void
-S3IOWriter::write(void* ptr, size_t size) {
+S3IOWriter::write(void* ptr, int64_t size) {
     buffer_ += std::string(reinterpret_cast<char*>(ptr), size);
     len_ += size;
 }
 
-size_t
+int64_t
 S3IOWriter::length() {
     return len_;
 }
