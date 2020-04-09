@@ -293,7 +293,7 @@ RequestHandler::HybridSearch(const std::shared_ptr<Context>& context,
                              const std::string& collection_name,
                              std::vector<std::string>& partition_list,
                              milvus::query::GeneralQueryPtr& general_query,
-                             milvus::server::HybridQueryResult& result) {
+                             TopKQueryResult& result) {
 
     BaseRequestPtr request_ptr =
         HybridSearchRequest::Create(context, hybrid_search_context, collection_name, partition_list, general_query, result);

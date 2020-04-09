@@ -60,7 +60,7 @@ class BooleanQuery {
         return binary_query_;
     }
 
-    std::vector<LeafQueryPtr> getLeafQueries() {
+    std::vector<LeafQueryPtr>& getLeafQueries() {
         return leaf_queries_;
     }
 

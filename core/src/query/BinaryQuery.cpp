@@ -65,9 +65,15 @@ ConstructLeafBinTree(std::vector<LeafQueryPtr> leaf_queries, BinaryQueryPtr bina
 Status
 GenBinaryQuery(BooleanQueryPtr query, BinaryQueryPtr& binary_query) {
     if (query->getBooleanQuerys().size() == 0) {
-        // Judge leafquery
-        // Relation is ready
         if (binary_query->relation == QueryRelation::AND || binary_query->relation == QueryRelation::OR) {
+            // Put VectorQuery to the end of leafqueries
+            auto query_size = query->getLeafQueries().size();
+            for (uint64_t i = 0; i < query_size; ++i) {
+                if (query->getLeafQueries()[i]->vector_query != nullptr) {
+                    std::swap(query->getLeafQueries()[i], query->getLeafQueries()[query_size - 1]);
+                    break;
+                }
+            }
             return ConstructLeafBinTree(query->getLeafQueries(), binary_query, 0);
         } else {
             switch (query->getOccur()) {
@@ -185,6 +191,28 @@ GenBinaryQuery(BooleanQueryPtr query, BinaryQueryPtr& binary_query) {
     }
 
     return Status::OK();
+}
+
+uint64_t
+BinaryQueryHeight(BinaryQueryPtr& binary_query) {
+    if (binary_query == nullptr) {
+        return 1;
+    }
+    uint64_t left_height, right_height;
+    if (binary_query->left_query != nullptr) {
+        left_height = BinaryQueryHeight(binary_query->left_query->bin);
+    }
+    if (binary_query->right_query != nullptr) {
+        right_height = BinaryQueryHeight(binary_query->right_query->bin);
+    }
+    return left_height > right_height ? left_height + 1 : right_height + 1;
+}
+
+bool
+ValidateBinaryQuery(BinaryQueryPtr& binary_query) {
+    // Only for one layer BooleanQuery
+    uint64_t height = BinaryQueryHeight(binary_query);
+    return height > 1 && height < 4;
 }
 
 }  // namespace query

@@ -9,27 +9,21 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
-#pragma once
+#include <fiu-control.h>
+#include <fiu-local.h>
+#include <gtest/gtest.h>
 
-#include "BooleanQuery.h"
+#include <boost/filesystem.hpp>
+#include <random>
+#include <thread>
 
-namespace milvus {
-namespace query {
-
-BinaryQueryPtr
-ConstructBinTree(std::vector<BooleanQueryPtr> clauses, QueryRelation relation, uint64_t idx);
-
-Status
-ConstructLeafBinTree(std::vector<LeafQueryPtr> leaf_clauses, BinaryQueryPtr binary_query, uint64_t idx);
-
-Status
-GenBinaryQuery(BooleanQueryPtr clause, BinaryQueryPtr& binary_query);
-
-uint64_t
-BinaryQueryHeight(BinaryQueryPtr& binary_query);
-
-bool
-ValidateBinaryQuery(BinaryQueryPtr& binary_query);
-
-}  // namespace query
-}  // namespace milvus
+#include "cache/CpuCacheMgr.h"
+#include "config/Config.h"
+#include "db/Constants.h"
+#include "db/DB.h"
+#include "db/DBFactory.h"
+#include "db/DBImpl.h"
+#include "db/IDGenerator.h"
+#include "db/meta/MetaConsts.h"
+#include "db/utils.h"
+#include "utils/CommonUtil.h"

@@ -258,8 +258,8 @@ ClientTest::InsertHybridEntities(std::string& collection_name, int64_t row_num) 
     value1.resize(row_num);
     value2.resize(row_num);
     for (uint64_t i = 0; i < row_num; ++i) {
-        value1[i] = "111";
-        value2[i] = "222";
+        value1[i] = std::to_string(i);
+        value2[i] = std::to_string(i + row_num);
     }
     numerica_value.insert(std::make_pair("field_1", value1));
     numerica_value.insert(std::make_pair("field_2", value2));
@@ -294,8 +294,8 @@ ClientTest::HybridSearch(std::string& collection_name) {
     //must
     auto must_clause = std::make_shared<milvus::BooleanQuery>(milvus::Occur::MUST);
     must_clause->AddLeafQuery(leaf_queries[0]);
-//    must_clause->AddLeafQuery(leaf_queries[1]);
-//    must_clause->AddLeafQuery(leaf_queries[2]);
+    must_clause->AddLeafQuery(leaf_queries[1]);
+    must_clause->AddLeafQuery(leaf_queries[2]);
 
     auto query_clause = std::make_shared<milvus::BooleanQuery>();
     query_clause->AddBooleanQuery(must_clause);

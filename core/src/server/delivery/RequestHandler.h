@@ -136,7 +136,7 @@ class RequestHandler {
                  const std::string& collection_name,
                  std::vector<std::string>& partition_list,
                  query::GeneralQueryPtr& boolean_query,
-                 HybridQueryResult& result);
+                 TopKQueryResult& result);
 
 };
 

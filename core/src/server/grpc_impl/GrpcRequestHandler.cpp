@@ -768,8 +768,8 @@ DeSerialization(const ::milvus::grpc::GeneralQuery& general_query, query::Boolea
                     term_query->field_name = query.term_query().field_name();
                     term_query->boost = query.term_query().boost();
                     term_query->field_value.resize(query.term_query().values_size());
-                    for (uint64_t i = 0; i < query.term_query().values_size(); ++i) {
-                        term_query->field_value[i] = query.term_query().values(i);
+                    for (uint64_t j = 0; j < query.term_query().values_size(); ++j) {
+                        term_query->field_value[j] = query.term_query().values(j);
                     }
                     leaf_query->term_query = term_query;
                     boolean_clause->AddLeafQuery(leaf_query);
@@ -779,10 +779,10 @@ DeSerialization(const ::milvus::grpc::GeneralQuery& general_query, query::Boolea
                     range_query->field_name = query.range_query().field_name();
                     range_query->boost = query.range_query().boost();
                     range_query->compare_expr.resize(query.range_query().operand_size());
-                    for (uint64_t i = 0; i < query.range_query().operand_size(); ++i) {
-                        range_query->compare_expr[i].compare_operator =
-                            query::CompareOperator(query.range_query().operand(i).operator_());
-                        range_query->compare_expr[i].operand = query.range_query().operand(i).operand();
+                    for (uint64_t j = 0; j < query.range_query().operand_size(); ++j) {
+                        range_query->compare_expr[j].compare_operator =
+                            query::CompareOperator(query.range_query().operand(j).operator_());
+                        range_query->compare_expr[j].operand = query.range_query().operand(j).operand();
                     }
                     leaf_query->range_query = range_query;
                     boolean_clause->AddLeafQuery(leaf_query);
@@ -802,8 +802,8 @@ DeSerialization(const ::milvus::grpc::GeneralQuery& general_query, query::Boolea
                     vector_query->topk = query.vector_query().topk();
 
                     milvus::json json_params;
-                    for (int i = 0; i < query.vector_query().extra_params_size(); i++) {
-                        const ::milvus::grpc::KeyValuePair& extra = query.vector_query().extra_params(i);
+                    for (int j = 0; j < query.vector_query().extra_params_size(); j++) {
+                        const ::milvus::grpc::KeyValuePair& extra = query.vector_query().extra_params(j);
                         if (extra.key() == EXTRA_PARAM_KEY) {
                             json_params = json::parse(extra.value());
                         }
@@ -833,6 +833,14 @@ GrpcRequestHandler::HybridSearch(::grpc::ServerContext* context,
     general_query->bin = std::make_shared<query::BinaryQuery>();
     query::GenBinaryQuery(boolean_query, general_query->bin);
 
+    Status status;
+
+    if (query::BinaryQueryHeight(general_query->bin) == true) {
+        status = Status{SERVER_INVALID_BINARY_QUERY, "Generate wrong binary query tree"};
+        SET_RESPONSE(response->mutable_status(), status, context);
+        return ::grpc::Status::OK;
+    }
+
     hybrid_search_context->general_query_ = general_query;
 
     std::vector<std::string> partition_list;
@@ -841,18 +849,17 @@ GrpcRequestHandler::HybridSearch(::grpc::ServerContext* context,
         partition_list[i] = request->partition_tag_array(i);
     }
 
-    HybridQueryResult result;
+    TopKQueryResult result;
 
-    Status status = request_handler_.HybridSearch(context_map_[context],
-                                                  hybrid_search_context,
-                                                  request->collection_name(),
-                                                  partition_list,
-                                                  general_query,
-                                                  result);
+    status = request_handler_.HybridSearch(context_map_[context],
+                                           hybrid_search_context,
+                                           request->collection_name(),
+                                           partition_list,
+                                           general_query,
+                                           result);
 
     // step 6: construct and return result
-//    ConstructHybridResult
-//    ConstructResults(result, response);
+    ConstructResults(result, response);
 
     SET_RESPONSE(response->mutable_status(), status, context);
 

@@ -29,7 +29,7 @@ class HybridSearchRequest : public BaseRequest {
            const std::string& collection_name,
            std::vector<std::string>& partition_list,
            milvus::query::GeneralQueryPtr& general_query,
-           milvus::server::HybridQueryResult& result);
+           TopKQueryResult& result);
 
  protected:
     HybridSearchRequest(const std::shared_ptr<Context>& context,
@@ -37,7 +37,7 @@ class HybridSearchRequest : public BaseRequest {
                         const std::string& collection_name,
                         std::vector<std::string>& partition_list,
                         milvus::query::GeneralQueryPtr& general_query,
-                        milvus::server::HybridQueryResult& result);
+                        TopKQueryResult& result);
 
     Status
     OnExecute() override;
@@ -47,7 +47,7 @@ class HybridSearchRequest : public BaseRequest {
     const std::string collection_name_;
     std::vector<std::string>& partition_list_;
     milvus::query::GeneralQueryPtr& general_query_;
-    HybridQueryResult& result_;
+    TopKQueryResult result_;
 };
 
 }  // namespace server

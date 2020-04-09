@@ -29,6 +29,8 @@ aux_source_directory(${MILVUS_ENGINE_SRC}/db/engine db_engine_files)
 aux_source_directory(${MILVUS_ENGINE_SRC}/db/insert db_insert_files)
 aux_source_directory(${MILVUS_ENGINE_SRC}/db/meta db_meta_files)
 aux_source_directory(${MILVUS_ENGINE_SRC}/db/wal db_wal_files)
+aux_source_directory(${MILVUS_ENGINE_SRC}/search search_files)
+aux_source_directory(${MILVUS_ENGINE_SRC}/query query_files)
 
 set(grpc_service_files
         ${MILVUS_ENGINE_SRC}/grpc/gen-milvus/milvus.grpc.pb.cc
@@ -144,6 +146,8 @@ set(common_files
         ${codecs_files}
         ${codecs_default_files}
         ${segment_files}
+        ${search_files}
+        ${query_files}
         )
 
 set(unittest_libs

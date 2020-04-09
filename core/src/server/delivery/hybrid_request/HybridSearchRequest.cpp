@@ -33,7 +33,7 @@ HybridSearchRequest::HybridSearchRequest(const std::shared_ptr<Context>& context
                                          const std::string& collection_name,
                                          std::vector<std::string>& partition_list,
                                          milvus::query::GeneralQueryPtr& general_query,
-                                         milvus::server::HybridQueryResult& result) :
+                                         TopKQueryResult& result) :
     BaseRequest(context, DDL_DML_REQUEST_GROUP),
     hybrid_search_contxt_(hybrid_search_context),
     collection_name_(collection_name),
@@ -48,7 +48,7 @@ HybridSearchRequest::Create(const std::shared_ptr<Context>& context,
                             const std::string& collection_name,
                             std::vector<std::string>& partition_list,
                             milvus::query::GeneralQueryPtr& general_query,
-                            milvus::server::HybridQueryResult& result) {
+                            TopKQueryResult& result) {
     return std::shared_ptr<BaseRequest>(new HybridSearchRequest(context,
                                                                 hybrid_search_context,
                                                                 collection_name,
@@ -113,26 +113,26 @@ HybridSearchRequest::OnExecute() {
 #endif
 
         fiu_do_on("SearchRequest.OnExecute.query_fail", status = Status(milvus::SERVER_UNEXPECTED_ERROR, ""));
-//        if (!status.ok()) {
-//            return status;
-//        }
-//        fiu_do_on("SearchRequest.OnExecute.empty_result_ids", result_ids.clear());
-//        if (result_ids.empty()) {
-//            return Status::OK();  // empty table
-//        }
-//
-//        auto post_query_ctx = context_->Child("Constructing result");
-//
-//        // step 7: construct result array
-//        result_.row_num_ = vector_count;
-//        result_.distance_list_ = result_distances;
-//        result_.id_list_ = result_ids;
-//
-//        post_query_ctx->GetTraceContext()->GetSpan()->Finish();
-//
-//        // step 8: print time cost percent
-//        rc.RecordSection("construct result and send");
-//        rc.ElapseFromBegin("totally cost");
+        if (!status.ok()) {
+            return status;
+        }
+        fiu_do_on("SearchRequest.OnExecute.empty_result_ids", result_ids.clear());
+        if (result_ids.empty()) {
+            return Status::OK();  // empty table
+        }
+
+        auto post_query_ctx = context_->Child("Constructing result");
+
+        // step 7: construct result array
+        result_.row_num_ = result_ids.size();
+        result_.distance_list_ = result_distances;
+        result_.id_list_ = result_ids;
+
+        post_query_ctx->GetTraceContext()->GetSpan()->Finish();
+
+        // step 8: print time cost percent
+        rc.RecordSection("construct result and send");
+        rc.ElapseFromBegin("totally cost");
     } catch (std::exception& ex) {
         return Status(SERVER_UNEXPECTED_ERROR, ex.what());
     }
