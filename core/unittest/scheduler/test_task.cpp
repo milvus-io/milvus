@@ -123,13 +123,6 @@ TEST(TaskTest, TEST_TASK) {
     build_index_task.Execute();
     fiu_disable("XBuildIndexTask.Execute.throw_std_exception");
 
-    // always enable 'save_index_file_success'
-    fiu_enable("XBuildIndexTask.Execute.save_index_file_success", 1, NULL, 0);
-    build_index_task.to_index_engine_ =
-        EngineFactory::Build(file->dimension_, file->location_, (EngineType)file->engine_type_,
-                             (MetricType)file->metric_type_, json);
-    build_index_task.Execute();
-
     fiu_enable("XBuildIndexTask.Execute.update_table_file_fail", 1, NULL, 0);
     build_index_task.to_index_engine_ =
         EngineFactory::Build(file->dimension_, file->location_, (EngineType)file->engine_type_,
