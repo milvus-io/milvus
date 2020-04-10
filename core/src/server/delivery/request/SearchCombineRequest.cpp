@@ -239,15 +239,15 @@ SearchCombineRequest::OnExecute() {
 
         TimeRecorderAuto rc(hdr);
 
-        // step 1: check table existence
-        // only process root table, ignore partition table
-        engine::meta::CollectionSchema table_schema;
-        table_schema.collection_id_ = collection_name_;
-        auto status = DBWrapper::DB()->DescribeCollection(table_schema);
+        // step 1: check collection existence
+        // only process root collection, ignore partition collection
+        engine::meta::CollectionSchema collection_schema;
+        collection_schema.collection_id_ = collection_name_;
+        auto status = DBWrapper::DB()->DescribeCollection(collection_schema);
 
         if (!status.ok()) {
             if (status.code() == DB_NOT_FOUND) {
-                status = Status(SERVER_TABLE_NOT_EXIST, TableNotExistMsg(collection_name_));
+                status = Status(SERVER_COLLECTION_NOT_EXIST, CollectionNotExistMsg(collection_name_));
                 FreeRequests(status);
                 return status;
             } else {
@@ -255,8 +255,8 @@ SearchCombineRequest::OnExecute() {
                 return status;
             }
         } else {
-            if (!table_schema.owner_collection_.empty()) {
-                status = Status(SERVER_INVALID_TABLE_NAME, TableNotExistMsg(collection_name_));
+            if (!collection_schema.owner_collection_.empty()) {
+                status = Status(SERVER_INVALID_COLLECTION_NAME, CollectionNotExistMsg(collection_name_));
                 FreeRequests(status);
                 return status;
             }
@@ -275,7 +275,7 @@ SearchCombineRequest::OnExecute() {
                 continue;
             }
 
-            status = ValidationUtil::ValidateSearchParams(extra_params_, table_schema, request->TopK());
+            status = ValidationUtil::ValidateSearchParams(extra_params_, collection_schema, request->TopK());
             if (!status.ok()) {
                 // check failed, erase request and let it return error status
                 FreeRequest(request, status);
@@ -283,7 +283,7 @@ SearchCombineRequest::OnExecute() {
                 continue;
             }
 
-            status = ValidationUtil::ValidateVectorData(request->VectorsData(), table_schema);
+            status = ValidationUtil::ValidateVectorData(request->VectorsData(), collection_schema);
             if (!status.ok()) {
                 // check failed, erase request and let it return error status
                 FreeRequest(request, status);
@@ -325,7 +325,7 @@ SearchCombineRequest::OnExecute() {
         }
         vectors_data_.vector_count_ = total_count;
 
-        uint16_t dimension = table_schema.dimension_;
+        uint16_t dimension = collection_schema.dimension_;
         bool is_float = true;
         if (!first_request->VectorsData().float_data_.empty()) {
             vectors_data_.float_data_.resize(total_count * dimension);

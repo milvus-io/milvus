@@ -26,9 +26,9 @@
 #include <src/db/OngoingFileChecker.h>
 
 const char* FAILED_CONNECT_SQL_SERVER = "Failed to connect to meta server(mysql)";
-const char* TABLE_ALREADY_EXISTS = "Collection already exists and it is in delete state, please wait a second";
+const char* COLLECTION_ALREADY_EXISTS = "Collection already exists and it is in delete state, please wait a second";
 
-TEST_F(MySqlMetaTest, TABLE_TEST) {
+TEST_F(MySqlMetaTest, COLLECTION_TEST) {
     auto collection_id = "meta_test_table";
     fiu_init(0);
 
@@ -70,11 +70,11 @@ TEST_F(MySqlMetaTest, TABLE_TEST) {
 
     //ensure collection exists
     stat = impl_->CreateCollection(collection);
-    FIU_ENABLE_FIU("MySQLMetaImpl.CreateCollectionTable.schema_TO_DELETE");
+    FIU_ENABLE_FIU("MySQLMetaImpl.CreateCollection.schema_TO_DELETE");
     stat = impl_->CreateCollection(collection);
     ASSERT_FALSE(stat.ok());
-    ASSERT_EQ(stat.message(), TABLE_ALREADY_EXISTS);
-    fiu_disable("MySQLMetaImpl.CreateCollectionTable.schema_TO_DELETE");
+    ASSERT_EQ(stat.message(), COLLECTION_ALREADY_EXISTS);
+    fiu_disable("MySQLMetaImpl.CreateCollection.schema_TO_DELETE");
 
     FIU_ENABLE_FIU("MySQLMetaImpl.DescribeCollection.null_connection");
     stat = impl_->DescribeCollection(collection);
@@ -122,7 +122,7 @@ TEST_F(MySqlMetaTest, TABLE_TEST) {
     ASSERT_TRUE(status.ok());
 }
 
-TEST_F(MySqlMetaTest, TABLE_FILE_TEST) {
+TEST_F(MySqlMetaTest, COLLECTION_FILE_TEST) {
     auto collection_id = "meta_test_table";
     fiu_init(0);
 
@@ -232,21 +232,21 @@ TEST_F(MySqlMetaTest, TABLE_FILE_TEST) {
 
     std::vector<size_t> ids = {table_file.id_};
     milvus::engine::meta::SegmentsSchema files;
-    status = impl_->GetTableFiles(table_file.collection_id_, ids, files);
+    status = impl_->GetCollectionFiles(table_file.collection_id_, ids, files);
     ASSERT_EQ(files.size(), 0UL);
 
-    FIU_ENABLE_FIU("MySQLMetaImpl.GetTableFiles.null_connection");
-    status = impl_->GetTableFiles(table_file.collection_id_, ids, files);
+    FIU_ENABLE_FIU("MySQLMetaImpl.GetCollectionFiles.null_connection");
+    status = impl_->GetCollectionFiles(table_file.collection_id_, ids, files);
     ASSERT_FALSE(status.ok());
-    fiu_disable("MySQLMetaImpl.GetTableFiles.null_connection");
+    fiu_disable("MySQLMetaImpl.GetCollectionFiles.null_connection");
 
-    FIU_ENABLE_FIU("MySQLMetaImpl.GetTableFiles.throw_exception");
-    status = impl_->GetTableFiles(table_file.collection_id_, ids, files);
+    FIU_ENABLE_FIU("MySQLMetaImpl.GetCollectionFiles.throw_exception");
+    status = impl_->GetCollectionFiles(table_file.collection_id_, ids, files);
     ASSERT_FALSE(status.ok());
-    fiu_disable("MySQLMetaImpl.GetTableFiles.throw_exception");
+    fiu_disable("MySQLMetaImpl.GetCollectionFiles.throw_exception");
 
     ids.clear();
-    status = impl_->GetTableFiles(table_file.collection_id_, ids, files);
+    status = impl_->GetCollectionFiles(table_file.collection_id_, ids, files);
     ASSERT_TRUE(status.ok());
 
     table_file.collection_id_ = collection.collection_id_;
@@ -278,7 +278,7 @@ TEST_F(MySqlMetaTest, TABLE_FILE_TEST) {
     ASSERT_TRUE(status.ok());
 }
 
-TEST_F(MySqlMetaTest, TABLE_FILE_ROW_COUNT_TEST) {
+TEST_F(MySqlMetaTest, COLLECTION_FILE_ROW_COUNT_TEST) {
     auto collection_id = "row_count_test_table";
 
     milvus::engine::meta::CollectionSchema collection;
@@ -307,7 +307,7 @@ TEST_F(MySqlMetaTest, TABLE_FILE_ROW_COUNT_TEST) {
 
     std::vector<size_t> ids = {table_file.id_};
     milvus::engine::meta::SegmentsSchema schemas;
-    status = impl_->GetTableFiles(collection_id, ids, schemas);
+    status = impl_->GetCollectionFiles(collection_id, ids, schemas);
     ASSERT_EQ(schemas.size(), 1UL);
     ASSERT_EQ(table_file.row_count_, schemas[0].row_count_);
     ASSERT_EQ(table_file.file_id_, schemas[0].file_id_);
@@ -372,7 +372,7 @@ TEST_F(MySqlMetaTest, ARCHIVE_TEST_DAYS) {
     int i = 0;
 
     milvus::engine::meta::SegmentsSchema files_get;
-    status = impl.GetTableFiles(table_file.collection_id_, ids, files_get);
+    status = impl.GetCollectionFiles(table_file.collection_id_, ids, files_get);
     ASSERT_TRUE(status.ok());
 
     for (auto& file : files_get) {
@@ -464,7 +464,7 @@ TEST_F(MySqlMetaTest, ARCHIVE_TEST_DISK) {
     int i = 0;
 
     milvus::engine::meta::SegmentsSchema files_get;
-    status = impl.GetTableFiles(table_file.collection_id_, ids, files_get);
+    status = impl.GetCollectionFiles(table_file.collection_id_, ids, files_get);
     ASSERT_TRUE(status.ok());
 
     for (auto& file : files_get) {
@@ -505,14 +505,14 @@ TEST_F(MySqlMetaTest, INVALID_INITILIZE_TEST) {
         fiu_disable("MySQLMetaImpl.Initialize.is_thread_aware");
     }
     {
-        FIU_ENABLE_FIU("MySQLMetaImpl.Initialize.fail_create_table_scheme");
+        FIU_ENABLE_FIU("MySQLMetaImpl.Initialize.fail_create_collection_scheme");
         ASSERT_ANY_THROW(milvus::engine::meta::MySQLMetaImpl impl(GetOptions().meta_, GetOptions().mode_));
-        fiu_disable("MySQLMetaImpl.Initialize.fail_create_table_scheme");
+        fiu_disable("MySQLMetaImpl.Initialize.fail_create_collection_scheme");
     }
     {
-        FIU_ENABLE_FIU("MySQLMetaImpl.Initialize.fail_create_table_files");
+        FIU_ENABLE_FIU("MySQLMetaImpl.Initialize.fail_create_collection_files");
         ASSERT_ANY_THROW(milvus::engine::meta::MySQLMetaImpl impl(GetOptions().meta_, GetOptions().mode_));
-        fiu_disable("MySQLMetaImpl.Initialize.fail_create_table_files");
+        fiu_disable("MySQLMetaImpl.Initialize.fail_create_collection_files");
     }
     {
         FIU_ENABLE_FIU("MySQLConnectionPool.create.throw_exception");
@@ -526,7 +526,7 @@ TEST_F(MySqlMetaTest, INVALID_INITILIZE_TEST) {
     }
 }
 
-TEST_F(MySqlMetaTest, TABLE_FILES_TEST) {
+TEST_F(MySqlMetaTest, COLLECTION_FILES_TEST) {
     auto collection_id = "meta_test_group";
     fiu_init(0);
 
@@ -687,17 +687,17 @@ TEST_F(MySqlMetaTest, TABLE_FILES_TEST) {
                          to_index_files_cnt + index_files_cnt;
     ASSERT_EQ(table_files.size(), total_cnt);
 
-    FIU_ENABLE_FIU("MySQLMetaImpl.DeleteTableFiles.null_connection");
-    status = impl_->DeleteTableFiles(collection_id);
+    FIU_ENABLE_FIU("MySQLMetaImpl.DeleteCollectionFiles.null_connection");
+    status = impl_->DeleteCollectionFiles(collection_id);
     ASSERT_FALSE(status.ok());
-    fiu_disable("MySQLMetaImpl.DeleteTableFiles.null_connection");
+    fiu_disable("MySQLMetaImpl.DeleteCollectionFiles.null_connection");
 
-    FIU_ENABLE_FIU("MySQLMetaImpl.DeleteTableFiles.throw_exception");
-    status = impl_->DeleteTableFiles(collection_id);
+    FIU_ENABLE_FIU("MySQLMetaImpl.DeleteCollectionFiles.throw_exception");
+    status = impl_->DeleteCollectionFiles(collection_id);
     ASSERT_FALSE(status.ok());
-    fiu_disable("MySQLMetaImpl.DeleteTableFiles.throw_exception");
+    fiu_disable("MySQLMetaImpl.DeleteCollectionFiles.throw_exception");
 
-    status = impl_->DeleteTableFiles(collection_id);
+    status = impl_->DeleteCollectionFiles(collection_id);
     ASSERT_TRUE(status.ok());
 
     status = impl_->DropCollection(collection_id);
@@ -716,25 +716,25 @@ TEST_F(MySqlMetaTest, TABLE_FILES_TEST) {
     ASSERT_FALSE(status.ok());
     fiu_disable("MySQLMetaImpl.CleanUpFilesWithTTL.RomoveToDeleteFiles_ThrowException");
 
-    FIU_ENABLE_FIU("MySQLMetaImpl.CleanUpFilesWithTTL.RemoveToDeleteTables_NUllConnection");
+    FIU_ENABLE_FIU("MySQLMetaImpl.CleanUpFilesWithTTL.RemoveToDeleteCollections_NUllConnection");
     status = impl_->CleanUpFilesWithTTL(0UL);
     ASSERT_FALSE(status.ok());
-    fiu_disable("MySQLMetaImpl.CleanUpFilesWithTTL.RemoveToDeleteTables_NUllConnection");
+    fiu_disable("MySQLMetaImpl.CleanUpFilesWithTTL.RemoveToDeleteCollections_NUllConnection");
 
-    FIU_ENABLE_FIU("MySQLMetaImpl.CleanUpFilesWithTTL.RemoveToDeleteTables_ThrowException");
+    FIU_ENABLE_FIU("MySQLMetaImpl.CleanUpFilesWithTTL.RemoveToDeleteCollections_ThrowException");
     status = impl_->CleanUpFilesWithTTL(0UL);
     ASSERT_FALSE(status.ok());
-    fiu_disable("MySQLMetaImpl.CleanUpFilesWithTTL.RemoveToDeleteTables_ThrowException");
+    fiu_disable("MySQLMetaImpl.CleanUpFilesWithTTL.RemoveToDeleteCollections_ThrowException");
 
-    FIU_ENABLE_FIU("MySQLMetaImpl.CleanUpFilesWithTTL.RemoveDeletedTableFolder_NUllConnection");
+    FIU_ENABLE_FIU("MySQLMetaImpl.CleanUpFilesWithTTL.RemoveDeletedCollectionFolder_NUllConnection");
     status = impl_->CleanUpFilesWithTTL(0UL);
     ASSERT_FALSE(status.ok());
-    fiu_disable("MySQLMetaImpl.CleanUpFilesWithTTL.RemoveDeletedTableFolder_NUllConnection");
+    fiu_disable("MySQLMetaImpl.CleanUpFilesWithTTL.RemoveDeletedCollectionFolder_NUllConnection");
 
-    FIU_ENABLE_FIU("MySQLMetaImpl.CleanUpFilesWithTTL.RemoveDeletedTableFolder_ThrowException");
+    FIU_ENABLE_FIU("MySQLMetaImpl.CleanUpFilesWithTTL.RemoveDeletedCollectionFolder_ThrowException");
     status = impl_->CleanUpFilesWithTTL(0UL);
     ASSERT_FALSE(status.ok());
-    fiu_disable("MySQLMetaImpl.CleanUpFilesWithTTL.RemoveDeletedTableFolder_ThrowException");
+    fiu_disable("MySQLMetaImpl.CleanUpFilesWithTTL.RemoveDeletedCollectionFolder_ThrowException");
 }
 
 TEST_F(MySqlMetaTest, INDEX_TEST) {

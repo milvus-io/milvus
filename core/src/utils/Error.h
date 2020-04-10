@@ -64,9 +64,9 @@ constexpr ErrorCode SERVER_CANNOT_DELETE_FOLDER = ToServerErrorCode(10);
 constexpr ErrorCode SERVER_CANNOT_DELETE_FILE = ToServerErrorCode(11);
 constexpr ErrorCode SERVER_BUILD_INDEX_ERROR = ToServerErrorCode(12);
 
-constexpr ErrorCode SERVER_TABLE_NOT_EXIST = ToServerErrorCode(100);
-constexpr ErrorCode SERVER_INVALID_TABLE_NAME = ToServerErrorCode(101);
-constexpr ErrorCode SERVER_INVALID_TABLE_DIMENSION = ToServerErrorCode(102);
+constexpr ErrorCode SERVER_COLLECTION_NOT_EXIST = ToServerErrorCode(100);
+constexpr ErrorCode SERVER_INVALID_COLLECTION_NAME = ToServerErrorCode(101);
+constexpr ErrorCode SERVER_INVALID_COLLECTION_DIMENSION = ToServerErrorCode(102);
 constexpr ErrorCode SERVER_INVALID_VECTOR_DIMENSION = ToServerErrorCode(104);
 constexpr ErrorCode SERVER_INVALID_INDEX_TYPE = ToServerErrorCode(105);
 constexpr ErrorCode SERVER_INVALID_ROWRECORD = ToServerErrorCode(106);
@@ -91,7 +91,7 @@ constexpr ErrorCode DB_ALREADY_EXIST = ToDbErrorCode(4);
 constexpr ErrorCode DB_INVALID_PATH = ToDbErrorCode(5);
 constexpr ErrorCode DB_INCOMPATIB_META = ToDbErrorCode(6);
 constexpr ErrorCode DB_INVALID_META_URI = ToDbErrorCode(7);
-constexpr ErrorCode DB_EMPTY_TABLE = ToDbErrorCode(8);
+constexpr ErrorCode DB_EMPTY_COLLECTION = ToDbErrorCode(8);
 constexpr ErrorCode DB_BLOOM_FILTER_ERROR = ToDbErrorCode(9);
 constexpr ErrorCode PARTITION_NOT_FOUND = ToDbErrorCode(10);
 

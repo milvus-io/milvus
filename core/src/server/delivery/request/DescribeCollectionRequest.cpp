@@ -46,28 +46,28 @@ DescribeCollectionRequest::OnExecute() {
 
         // step 2: get collection info
         // only process root collection, ignore partition collection
-        engine::meta::CollectionSchema table_schema;
-        table_schema.collection_id_ = collection_name_;
-        status = DBWrapper::DB()->DescribeCollection(table_schema);
-        fiu_do_on("DescribeCollectionRequest.OnExecute.describe_table_fail",
+        engine::meta::CollectionSchema collection_schema;
+        collection_schema.collection_id_ = collection_name_;
+        status = DBWrapper::DB()->DescribeCollection(collection_schema);
+        fiu_do_on("DescribeCollectionRequest.OnExecute.describe_collection_fail",
                   status = Status(milvus::SERVER_UNEXPECTED_ERROR, ""));
         fiu_do_on("DescribeCollectionRequest.OnExecute.throw_std_exception", throw std::exception());
         if (!status.ok()) {
             if (status.code() == DB_NOT_FOUND) {
-                return Status(SERVER_TABLE_NOT_EXIST, TableNotExistMsg(collection_name_));
+                return Status(SERVER_COLLECTION_NOT_EXIST, CollectionNotExistMsg(collection_name_));
             } else {
                 return status;
             }
         } else {
-            if (!table_schema.owner_collection_.empty()) {
-                return Status(SERVER_INVALID_TABLE_NAME, TableNotExistMsg(collection_name_));
+            if (!collection_schema.owner_collection_.empty()) {
+                return Status(SERVER_INVALID_COLLECTION_NAME, CollectionNotExistMsg(collection_name_));
             }
         }
 
-        schema_.collection_name_ = table_schema.collection_id_;
-        schema_.dimension_ = static_cast<int64_t>(table_schema.dimension_);
-        schema_.index_file_size_ = table_schema.index_file_size_;
-        schema_.metric_type_ = table_schema.metric_type_;
+        schema_.collection_name_ = collection_schema.collection_id_;
+        schema_.dimension_ = static_cast<int64_t>(collection_schema.dimension_);
+        schema_.index_file_size_ = collection_schema.index_file_size_;
+        schema_.metric_type_ = collection_schema.metric_type_;
     } catch (std::exception& ex) {
         return Status(SERVER_UNEXPECTED_ERROR, ex.what());
     }

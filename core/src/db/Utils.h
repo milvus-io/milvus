@@ -28,14 +28,14 @@ GetMicroSecTimeStamp();
 Status
 CreateCollectionPath(const DBMetaOptions& options, const std::string& collection_id);
 Status
-DeleteTablePath(const DBMetaOptions& options, const std::string& collection_id, bool force = true);
+DeleteCollectionPath(const DBMetaOptions& options, const std::string& collection_id, bool force = true);
 
 Status
 CreateCollectionFilePath(const DBMetaOptions& options, meta::SegmentSchema& table_file);
 Status
-GetTableFilePath(const DBMetaOptions& options, meta::SegmentSchema& table_file);
+GetCollectionFilePath(const DBMetaOptions& options, meta::SegmentSchema& table_file);
 Status
-DeleteTableFilePath(const DBMetaOptions& options, meta::SegmentSchema& table_file);
+DeleteCollectionFilePath(const DBMetaOptions& options, meta::SegmentSchema& table_file);
 Status
 DeleteSegment(const DBMetaOptions& options, meta::SegmentSchema& table_file);
 
