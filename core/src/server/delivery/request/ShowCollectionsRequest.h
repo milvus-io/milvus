@@ -23,17 +23,17 @@ namespace server {
 class ShowCollectionsRequest : public BaseRequest {
  public:
     static BaseRequestPtr
-    Create(const std::shared_ptr<milvus::server::Context>& context, std::vector<std::string>& table_name_list);
+    Create(const std::shared_ptr<milvus::server::Context>& context, std::vector<std::string>& collection_name_list);
 
  protected:
     ShowCollectionsRequest(const std::shared_ptr<milvus::server::Context>& context,
-                           std::vector<std::string>& table_name_list);
+                           std::vector<std::string>& collection_name_list);
 
     Status
     OnExecute() override;
 
  private:
-    std::vector<std::string>& table_name_list_;
+    std::vector<std::string>& collection_name_list_;
 };
 
 }  // namespace server

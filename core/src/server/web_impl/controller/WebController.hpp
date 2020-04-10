@@ -286,7 +286,7 @@ class WebController : public oatpp::web::server::api::ApiController {
             case StatusCode::SUCCESS:
                 response = createResponse(Status::CODE_200, response_str);
                 break;
-            case StatusCode::TABLE_NOT_EXISTS:
+            case StatusCode::COLLECTION_NOT_EXISTS:
                 response = createDtoResponse(Status::CODE_404, status_dto);
                 break;
             default:
@@ -314,7 +314,7 @@ class WebController : public oatpp::web::server::api::ApiController {
             case StatusCode::SUCCESS:
                 response = createDtoResponse(Status::CODE_204, status_dto);
                 break;
-            case StatusCode::TABLE_NOT_EXISTS:
+            case StatusCode::COLLECTION_NOT_EXISTS:
                 response = createDtoResponse(Status::CODE_404, status_dto);
                 break;
             default:
@@ -349,7 +349,7 @@ class WebController : public oatpp::web::server::api::ApiController {
             case StatusCode::SUCCESS:
                 response = createDtoResponse(Status::CODE_201, status_dto);
                 break;
-            case StatusCode::TABLE_NOT_EXISTS:
+            case StatusCode::COLLECTION_NOT_EXISTS:
                 response = createDtoResponse(Status::CODE_404, status_dto);
                 break;
             default:
@@ -379,7 +379,7 @@ class WebController : public oatpp::web::server::api::ApiController {
             case StatusCode::SUCCESS:
                 response = createResponse(Status::CODE_200, result);
                 break;
-            case StatusCode::TABLE_NOT_EXISTS:
+            case StatusCode::COLLECTION_NOT_EXISTS:
                 response = createDtoResponse(Status::CODE_404, status_dto);
                 break;
             default:
@@ -407,7 +407,7 @@ class WebController : public oatpp::web::server::api::ApiController {
             case StatusCode::SUCCESS:
                 response = createDtoResponse(Status::CODE_204, status_dto);
                 break;
-            case StatusCode::TABLE_NOT_EXISTS:
+            case StatusCode::COLLECTION_NOT_EXISTS:
                 response = createDtoResponse(Status::CODE_404, status_dto);
                 break;
             default:
@@ -442,7 +442,7 @@ class WebController : public oatpp::web::server::api::ApiController {
             case StatusCode::SUCCESS:
                 response = createDtoResponse(Status::CODE_201, status_dto);
                 break;
-            case StatusCode::TABLE_NOT_EXISTS:
+            case StatusCode::COLLECTION_NOT_EXISTS:
                 response = createDtoResponse(Status::CODE_404, status_dto);
                 break;
             default:
@@ -474,7 +474,7 @@ class WebController : public oatpp::web::server::api::ApiController {
             case StatusCode::SUCCESS:
                 response = createDtoResponse(Status::CODE_200, partition_list_dto);
                 break;
-            case StatusCode::TABLE_NOT_EXISTS:
+            case StatusCode::COLLECTION_NOT_EXISTS:
                 response = createDtoResponse(Status::CODE_404, status_dto);
                 break;
             default:response = createDtoResponse(Status::CODE_400, status_dto);
@@ -502,7 +502,7 @@ class WebController : public oatpp::web::server::api::ApiController {
             case StatusCode::SUCCESS:
                 response = createDtoResponse(Status::CODE_204, status_dto);
                 break;
-            case StatusCode::TABLE_NOT_EXISTS:
+            case StatusCode::COLLECTION_NOT_EXISTS:
                 response = createDtoResponse(Status::CODE_404, status_dto);
                 break;
             default:
@@ -529,7 +529,7 @@ class WebController : public oatpp::web::server::api::ApiController {
         switch (status_dto->code->getValue()) {
             case StatusCode::SUCCESS:
                 return createResponse(Status::CODE_200, response);
-            case StatusCode::TABLE_NOT_EXISTS:
+            case StatusCode::COLLECTION_NOT_EXISTS:
                 return createDtoResponse(Status::CODE_404, status_dto);
             default:
                 return createDtoResponse(Status::CODE_400, status_dto);
@@ -553,7 +553,7 @@ class WebController : public oatpp::web::server::api::ApiController {
         switch (status_dto->code->getValue()) {
             case StatusCode::SUCCESS:
                 return createResponse(Status::CODE_200, response);
-            case StatusCode::TABLE_NOT_EXISTS:
+            case StatusCode::COLLECTION_NOT_EXISTS:
                 return createDtoResponse(Status::CODE_404, status_dto);
             default:
                 return createDtoResponse(Status::CODE_400, status_dto);
@@ -580,7 +580,7 @@ class WebController : public oatpp::web::server::api::ApiController {
         switch (status_dto->code->getValue()) {
             case StatusCode::SUCCESS:
                 return createResponse(Status::CODE_200, response);
-            case StatusCode::TABLE_NOT_EXISTS:
+            case StatusCode::COLLECTION_NOT_EXISTS:
                 return createDtoResponse(Status::CODE_404, status_dto);
             default:
                 return createDtoResponse(Status::CODE_400, status_dto);
@@ -603,7 +603,7 @@ class WebController : public oatpp::web::server::api::ApiController {
             case StatusCode::SUCCESS:
                 response = createDtoResponse(Status::CODE_201, ids_dto);
                 break;
-            case StatusCode::TABLE_NOT_EXISTS:
+            case StatusCode::COLLECTION_NOT_EXISTS:
                 response = createDtoResponse(Status::CODE_404, status_dto);
                 break;
             default:
@@ -632,7 +632,7 @@ class WebController : public oatpp::web::server::api::ApiController {
             case StatusCode::SUCCESS:
                 response = createResponse(Status::CODE_200, result);
                 break;
-            case StatusCode::TABLE_NOT_EXISTS:
+            case StatusCode::COLLECTION_NOT_EXISTS:
                 response = createDtoResponse(Status::CODE_404, status_dto);
                 break;
             default:

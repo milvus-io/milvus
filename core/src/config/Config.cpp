@@ -261,7 +261,7 @@ Config::ResetDefaultConfig() {
 
     /* db config */
     CONFIG_CHECK(SetDBConfigBackendUrl(CONFIG_DB_BACKEND_URL_DEFAULT));
-    CONFIG_CHECK(SetDBConfigPreloadCollection(CONFIG_DB_PRELOAD_TABLE_DEFAULT));
+    CONFIG_CHECK(SetDBConfigPreloadCollection(CONFIG_DB_PRELOAD_COLLECTION_DEFAULT));
     CONFIG_CHECK(SetDBConfigArchiveDiskThreshold(CONFIG_DB_ARCHIVE_DISK_THRESHOLD_DEFAULT));
     CONFIG_CHECK(SetDBConfigArchiveDaysThreshold(CONFIG_DB_ARCHIVE_DAYS_THRESHOLD_DEFAULT));
     CONFIG_CHECK(SetDBConfigAutoFlushInterval(CONFIG_DB_AUTO_FLUSH_INTERVAL_DEFAULT));
@@ -353,7 +353,7 @@ Config::SetConfigCli(const std::string& parent_key, const std::string& child_key
     } else if (parent_key == CONFIG_DB) {
         if (child_key == CONFIG_DB_BACKEND_URL) {
             status = SetDBConfigBackendUrl(value);
-        } else if (child_key == CONFIG_DB_PRELOAD_TABLE) {
+        } else if (child_key == CONFIG_DB_PRELOAD_COLLECTION) {
             status = SetDBConfigPreloadCollection(value);
         } else if (child_key == CONFIG_DB_AUTO_FLUSH_INTERVAL) {
             status = SetDBConfigAutoFlushInterval(value);
@@ -795,7 +795,7 @@ Config::CheckDBConfigPreloadCollection(const std::string& value) {
         bool exist = false;
         auto status = DBWrapper::DB()->HasNativeCollection(collection, exist);
         if (!(status.ok() && exist)) {
-            return Status(SERVER_TABLE_NOT_EXIST, "Collection " + collection + " not exist");
+            return Status(SERVER_COLLECTION_NOT_EXIST, "Collection " + collection + " not exist");
         }
         table_set.insert(collection);
     }
@@ -1503,7 +1503,7 @@ Config::GetDBConfigArchiveDaysThreshold(int64_t& value) {
 
 Status
 Config::GetDBConfigPreloadCollection(std::string& value) {
-    value = GetConfigStr(CONFIG_DB, CONFIG_DB_PRELOAD_TABLE);
+    value = GetConfigStr(CONFIG_DB, CONFIG_DB_PRELOAD_COLLECTION);
     return Status::OK();
 }
 
@@ -1856,7 +1856,7 @@ Status
 Config::SetDBConfigPreloadCollection(const std::string& value) {
     CONFIG_CHECK(CheckDBConfigPreloadCollection(value));
     std::string cor_value = value == "*" ? "\'*\'" : value;
-    return SetConfigValueInMem(CONFIG_DB, CONFIG_DB_PRELOAD_TABLE, cor_value);
+    return SetConfigValueInMem(CONFIG_DB, CONFIG_DB_PRELOAD_COLLECTION, cor_value);
 }
 
 Status

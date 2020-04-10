@@ -80,23 +80,23 @@ SearchByIDRequest::OnExecute() {
 
         // step 4: check collection existence
         // only process root collection, ignore partition collection
-        engine::meta::CollectionSchema table_schema;
-        table_schema.collection_id_ = collection_name_;
-        status = DBWrapper::DB()->DescribeCollection(table_schema);
+        engine::meta::CollectionSchema collection_schema;
+        collection_schema.collection_id_ = collection_name_;
+        status = DBWrapper::DB()->DescribeCollection(collection_schema);
         if (!status.ok()) {
             if (status.code() == DB_NOT_FOUND) {
-                return Status(SERVER_TABLE_NOT_EXIST, TableNotExistMsg(collection_name_));
+                return Status(SERVER_COLLECTION_NOT_EXIST, CollectionNotExistMsg(collection_name_));
             } else {
                 return status;
             }
         } else {
-            if (!table_schema.owner_collection_.empty()) {
-                return Status(SERVER_INVALID_TABLE_NAME, TableNotExistMsg(collection_name_));
+            if (!collection_schema.owner_collection_.empty()) {
+                return Status(SERVER_INVALID_COLLECTION_NAME, CollectionNotExistMsg(collection_name_));
             }
         }
 
         // step 5: check search parameters
-        status = ValidationUtil::ValidateSearchParams(extra_params_, table_schema, topk_);
+        status = ValidationUtil::ValidateSearchParams(extra_params_, collection_schema, topk_);
         if (!status.ok()) {
             return status;
         }
@@ -118,13 +118,13 @@ SearchByIDRequest::OnExecute() {
 #endif
 
         // step 7: check collection's index type supports search by id
-        if (table_schema.engine_type_ != (int32_t)engine::EngineType::FAISS_IDMAP &&
-            table_schema.engine_type_ != (int32_t)engine::EngineType::FAISS_BIN_IDMAP &&
-            table_schema.engine_type_ != (int32_t)engine::EngineType::FAISS_IVFFLAT &&
-            table_schema.engine_type_ != (int32_t)engine::EngineType::FAISS_BIN_IVFFLAT &&
-            table_schema.engine_type_ != (int32_t)engine::EngineType::FAISS_IVFSQ8) {
-            std::string err_msg =
-                "Index type " + std::to_string(table_schema.engine_type_) + " does not support SearchByID operation";
+        if (collection_schema.engine_type_ != (int32_t)engine::EngineType::FAISS_IDMAP &&
+            collection_schema.engine_type_ != (int32_t)engine::EngineType::FAISS_BIN_IDMAP &&
+            collection_schema.engine_type_ != (int32_t)engine::EngineType::FAISS_IVFFLAT &&
+            collection_schema.engine_type_ != (int32_t)engine::EngineType::FAISS_BIN_IVFFLAT &&
+            collection_schema.engine_type_ != (int32_t)engine::EngineType::FAISS_IVFSQ8) {
+            std::string err_msg = "Index type " + std::to_string(collection_schema.engine_type_) +
+                                  " does not support SearchByID operation";
             SERVER_LOG_ERROR << err_msg;
             return Status(SERVER_UNSUPPORTED_ERROR, err_msg);
         }

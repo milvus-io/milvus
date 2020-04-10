@@ -130,7 +130,7 @@ BaseRequest::set_status(const Status& status) {
 }
 
 std::string
-BaseRequest::TableNotExistMsg(const std::string& collection_name) {
+BaseRequest::CollectionNotExistMsg(const std::string& collection_name) {
     return "Collection " + collection_name +
            " does not exist. Use milvus.has_collection to verify whether the collection exists. "
            "You also can check whether the collection name exists.";
