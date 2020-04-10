@@ -18,9 +18,12 @@
 #include <fiu-local.h>
 #include <memory>
 #include <string>
+#include <vector>
 
 namespace milvus {
 namespace server {
+
+constexpr uint64_t MAX_PARTITION_LIMIT = 5000;
 
 CreatePartitionRequest::CreatePartitionRequest(const std::shared_ptr<milvus::server::Context>& context,
                                                const std::string& collection_name, const std::string& tag)
@@ -74,6 +77,13 @@ CreatePartitionRequest::OnExecute() {
             if (!collection_schema.owner_collection_.empty()) {
                 return Status(SERVER_INVALID_COLLECTION_NAME, CollectionNotExistMsg(collection_name_));
             }
+        }
+
+        // check partition total count
+        std::vector<engine::meta::CollectionSchema> schema_array;
+        status = DBWrapper::DB()->ShowPartitions(collection_name_, schema_array);
+        if (schema_array.size() >= MAX_PARTITION_LIMIT) {
+            return Status(SERVER_UNSUPPORTED_ERROR, "The number of partitions exceeds the upper limit(5000)");
         }
 
         rc.RecordSection("check validation");
