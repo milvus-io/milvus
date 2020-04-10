@@ -105,7 +105,7 @@ SearchRequest::OnExecute() {
             if (status.code() == DB_NOT_FOUND) {
                 SERVER_LOG_ERROR << LogOut("[%s][%d] Collection %s not found: %s", "search", 0,
                                            collection_name_.c_str(), status.message().c_str());
-                return Status(SERVER_COLLECTION_NOT_EXIST, TableNotExistMsg(collection_name_));
+                return Status(SERVER_COLLECTION_NOT_EXIST, CollectionNotExistMsg(collection_name_));
             } else {
                 SERVER_LOG_ERROR << LogOut("[%s][%d] Error occurred when describing collection %s: %s", "search", 0,
                                            collection_name_.c_str(), status.message().c_str());
@@ -113,8 +113,8 @@ SearchRequest::OnExecute() {
             }
         } else {
             if (!collection_schema_.owner_collection_.empty()) {
-                SERVER_LOG_ERROR << LogOut("[%s][%d] %s", "search", 0, TableNotExistMsg(collection_name_).c_str());
-                return Status(SERVER_INVALID_COLLECTION_NAME, TableNotExistMsg(collection_name_));
+                SERVER_LOG_ERROR << LogOut("[%s][%d] %s", "search", 0, CollectionNotExistMsg(collection_name_).c_str());
+                return Status(SERVER_INVALID_COLLECTION_NAME, CollectionNotExistMsg(collection_name_));
             }
         }
 

@@ -86,17 +86,17 @@ InsertRequest::OnExecute() {
         if (!status.ok()) {
             if (status.code() == DB_NOT_FOUND) {
                 SERVER_LOG_ERROR << LogOut("[%s][%ld] Collection %s not found", "insert", 0, collection_name_.c_str());
-                return Status(SERVER_COLLECTION_NOT_EXIST, TableNotExistMsg(collection_name_));
+                return Status(SERVER_COLLECTION_NOT_EXIST, CollectionNotExistMsg(collection_name_));
             } else {
                 SERVER_LOG_ERROR << LogOut("[%s][%ld] Describe collection %s fail: %s", "insert", 0,
                                            collection_name_.c_str(), status.message().c_str());
                 return status;
             }
         } else {
-            if (!table_schema.owner_collection_.empty()) {
+            if (!collection_schema.owner_collection_.empty()) {
                 SERVER_LOG_ERROR << LogOut("[%s][%ld] owner collection of %s is empty", "insert", 0,
                                            collection_name_.c_str());
-                return Status(SERVER_INVALID_COLLECTION_NAME, TableNotExistMsg(collection_name_));
+                return Status(SERVER_INVALID_COLLECTION_NAME, CollectionNotExistMsg(collection_name_));
             }
         }
 

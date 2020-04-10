@@ -247,7 +247,7 @@ SearchCombineRequest::OnExecute() {
 
         if (!status.ok()) {
             if (status.code() == DB_NOT_FOUND) {
-                status = Status(SERVER_COLLECTION_NOT_EXIST, TableNotExistMsg(collection_name_));
+                status = Status(SERVER_COLLECTION_NOT_EXIST, CollectionNotExistMsg(collection_name_));
                 FreeRequests(status);
                 return status;
             } else {
@@ -256,7 +256,7 @@ SearchCombineRequest::OnExecute() {
             }
         } else {
             if (!collection_schema.owner_collection_.empty()) {
-                status = Status(SERVER_INVALID_COLLECTION_NAME, TableNotExistMsg(collection_name_));
+                status = Status(SERVER_INVALID_COLLECTION_NAME, CollectionNotExistMsg(collection_name_));
                 FreeRequests(status);
                 return status;
             }
