@@ -28,7 +28,7 @@ using TableMetaPtr = std::shared_ptr<std::unordered_map<std::string, TableSchema
 #define UNIT_MB (1024 * 1024)
 #define LSN_OFFSET_MASK 0x00000000ffffffff
 
-enum class MXLogType { InsertBinary, InsertVector, Delete, Update, Flush, None };
+enum class MXLogType { InsertBinary, InsertVector, Delete, Update, Flush, None, Entity};
 
 struct MXLogRecord {
     uint64_t lsn;
@@ -39,6 +39,9 @@ struct MXLogRecord {
     const IDNumber* ids;
     uint32_t data_size;
     const void* data;
+    std::vector<uint64_t> entity_nbytes;
+    std::vector<uint64_t> entity_data_size;
+    std::vector<void*> entity_data;
 };
 
 struct MXLogConfiguration {

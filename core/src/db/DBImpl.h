@@ -130,6 +130,17 @@ class DBImpl : public DB, public server::CacheConfigHandler {
     DropIndex(const std::string& table_id) override;
 
     Status
+    CreateHybridCollection(meta::hybrid::CollectionSchema& collection_schema,
+                           meta::hybrid::FieldsSchema& fields_schema) override;
+
+    Status
+    DescribeHybridCollection(meta::hybrid::CollectionSchema& collection_schema,
+                             meta::hybrid::FieldsSchema& fields_schema) override;
+
+    Status
+    InsertEntities(std::string& collection_name, std::string& partition_tag, engine::Entities& entities) override;
+
+    Status
     QueryByID(const std::shared_ptr<server::Context>& context, const std::string& table_id,
               const std::vector<std::string>& partition_tags, uint64_t k, const milvus::json& extra_params,
               IDNumber vector_id, ResultIds& result_ids, ResultDistances& result_distances) override;

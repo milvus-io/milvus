@@ -88,8 +88,45 @@ StoragePrototype(const std::string& path) {
             make_column("flush_lsn", &TableFileSchema::flush_lsn_)));
 }
 
+inline auto
+CollectionPrototype(const std::string& path) {
+    return make_storage(
+        path,
+        make_table(META_ENVIRONMENT, make_column("global_lsn", &EnvironmentSchema::global_lsn_, default_value(0))),
+        make_table(META_COLLECTIONS, make_column("id", &hybrid::CollectionSchema::id_, primary_key()),
+                   make_column("collection_id", &hybrid::CollectionSchema::collection_id_, unique()),
+                   make_column("state", &hybrid::CollectionSchema::state_),
+                   make_column("field_num", &hybrid::CollectionSchema::field_num),
+                   make_column("created_on", &hybrid::CollectionSchema::created_on_),
+                   make_column("flag", &hybrid::CollectionSchema::flag_, default_value(0)),
+                   make_column("owner_collection", &hybrid::CollectionSchema::owner_collection_, default_value("")),
+                   make_column("partition_tag", &hybrid::CollectionSchema::partition_tag_, default_value("")),
+                   make_column("version", &hybrid::CollectionSchema::version_, default_value(CURRENT_VERSION)),
+                   make_column("flush_lsn", &hybrid::CollectionSchema::flush_lsn_)),
+        make_table(META_FIELDS, make_column("collection_id", &hybrid::FieldSchema::collection_id_),
+                   make_column("field_name", &hybrid::FieldSchema::field_name_, primary_key()),
+                   make_column("field_type", &hybrid::FieldSchema::field_type_),
+                   make_column("field_params", &hybrid::FieldSchema::field_params_)),
+        make_table(
+            META_COLLECTIONFILES,
+            make_column("id", &hybrid::CollectionFileSchema::id_, primary_key()),
+            make_column("collection_id", &hybrid::CollectionFileSchema::collection_id_),
+            make_column("segment_id", &hybrid::CollectionFileSchema::segment_id_, default_value("")),
+            make_column("file_id", &hybrid::CollectionFileSchema::file_id_),
+            make_column("file_type", &hybrid::CollectionFileSchema::file_type_),
+            make_column("file_size", &hybrid::CollectionFileSchema::file_size_, default_value(0)),
+            make_column("row_count", &hybrid::CollectionFileSchema::row_count_, default_value(0)),
+            make_column("updated_time", &hybrid::CollectionFileSchema::updated_time_),
+            make_column("created_on", &hybrid::CollectionFileSchema::created_on_),
+            make_column("date", &hybrid::CollectionFileSchema::date_),
+            make_column("flush_lsn", &hybrid::CollectionFileSchema::flush_lsn_)));
+}
+
 using ConnectorT = decltype(StoragePrototype(""));
 static std::unique_ptr<ConnectorT> ConnectorPtr;
+
+using CollectionConnectT = decltype(CollectionPrototype("collection"));
+static std::unique_ptr<CollectionConnectT> CollectionConnectPtr;
 
 SqliteMetaImpl::SqliteMetaImpl(const DBMetaOptions& options) : options_(options) {
     Initialize();
@@ -1688,6 +1725,123 @@ SqliteMetaImpl::GetGlobalLastLSN(uint64_t& lsn) {
         }
     } catch (std::exception& e) {
         return HandleException("Encounter exception when delete table folder", e.what());
+    }
+
+    return Status::OK();
+}
+
+Status
+SqliteMetaImpl::CreateHybridCollection(meta::hybrid::CollectionSchema& collection_schema,
+                                       meta::hybrid::FieldsSchema& fields_schema) {
+    try {
+        server::MetricCollector metric;
+
+        // multi-threads call sqlite update may get exception('bad logic', etc), so we add a lock here
+        std::lock_guard<std::mutex> meta_lock(meta_mutex_);
+
+        if (collection_schema.collection_id_ == "") {
+            NextTableId(collection_schema.collection_id_);
+        } else {
+            fiu_do_on("SqliteMetaImpl.CreateTable.throw_exception", throw std::exception());
+            auto collection = CollectionConnectPtr->select(columns(&hybrid::CollectionSchema::state_),
+                                                           where(c(&hybrid::CollectionSchema::collection_id_)
+                                                                 == collection_schema.collection_id_));
+            if (collection.size() == 1) {
+                if (hybrid::CollectionSchema::TO_DELETE == std::get<0>(collection[0])) {
+                    return Status(DB_ERROR, "Table already exists and it is in delete state, please wait a second");
+                } else {
+                    // Change from no error to already exist.
+                    return Status(DB_ALREADY_EXIST, "Table already exists");
+                }
+            }
+        }
+
+        collection_schema.id_ = -1;
+        collection_schema.created_on_ = utils::GetMicroSecTimeStamp();
+
+        try {
+            fiu_do_on("SqliteMetaImpl.CreateHybridCollection.insert_throw_exception", throw std::exception());
+            auto id = CollectionConnectPtr->insert(collection_schema);
+            collection_schema.id_ = id;
+        } catch (std::exception& e) {
+            return HandleException("Encounter exception when create collection", e.what());
+        }
+
+        ENGINE_LOG_DEBUG << "Successfully create collection table: " << collection_schema.collection_id_;
+
+        try {
+            for (auto field_schema : fields_schema.fields_schema_) {
+                auto field_id = CollectionConnectPtr->insert(field_schema);
+                ENGINE_LOG_DEBUG << "Successfully create collection field table" << field_id;
+                auto status = utils::CreateTablePath(options_, field_schema.field_name_);
+                if (!status.ok()) {
+                    return status;
+                }
+            }
+        } catch (std::exception& e) {
+            return HandleException("Encounter exception when create collection field", e.what());
+        }
+
+        return utils::CreateTablePath(options_, collection_schema.collection_id_);
+    } catch (std::exception& e) {
+        return HandleException("Encounter exception when create table", e.what());
+    }
+}
+
+Status
+SqliteMetaImpl::DescribeHybridCollection(milvus::engine::meta::hybrid::CollectionSchema& collection_schema,
+                                                milvus::engine::meta::hybrid::FieldsSchema& fields_schema) {
+    try {
+        server::MetricCollector metric;
+        fiu_do_on("SqliteMetaImpl.DescriCollection.throw_exception", throw std::exception());
+        auto groups = CollectionConnectPtr->select(
+            columns(&hybrid::CollectionSchema::id_,
+                    &hybrid::CollectionSchema::state_,
+                    &hybrid::CollectionSchema::field_num,
+                    &hybrid::CollectionSchema::created_on_,
+                    &hybrid::CollectionSchema::flag_,
+                    &hybrid::CollectionSchema::owner_collection_,
+                    &hybrid::CollectionSchema::partition_tag_,
+                    &hybrid::CollectionSchema::version_,
+                    &hybrid::CollectionSchema::flush_lsn_),
+            where(c(&hybrid::CollectionSchema::collection_id_) == collection_schema.collection_id_ and
+                  c(&hybrid::CollectionSchema::state_) != (int)hybrid::CollectionSchema::TO_DELETE));
+
+        if (groups.size() == 1) {
+            collection_schema.id_ = std::get<0>(groups[0]);
+            collection_schema.state_ = std::get<1>(groups[0]);
+            collection_schema.field_num = std::get<2>(groups[0]);
+            collection_schema.created_on_ = std::get<3>(groups[0]);
+            collection_schema.flag_ = std::get<4>(groups[0]);
+            collection_schema.owner_collection_ = std::get<5>(groups[0]);
+            collection_schema.partition_tag_ = std::get<6>(groups[0]);
+            collection_schema.version_ = std::get<7>(groups[0]);
+            collection_schema.flush_lsn_ = std::get<8>(groups[0]);
+        } else {
+            return Status(DB_NOT_FOUND, "Collection " + collection_schema.collection_id_ + " not found");
+        }
+
+        auto field_groups = CollectionConnectPtr->select(
+            columns(&hybrid::FieldSchema::collection_id_,
+                    &hybrid::FieldSchema::field_name_,
+                    &hybrid::FieldSchema::field_type_,
+                    &hybrid::FieldSchema::field_params_),
+            where(c(&hybrid::FieldSchema::collection_id_) == collection_schema.collection_id_));
+
+        if (field_groups.size() >= 1) {
+            fields_schema.fields_schema_.resize(field_groups.size());
+            for (uint64_t i = 0; i < field_groups.size(); ++i) {
+                fields_schema.fields_schema_[i].collection_id_ = std::get<0>(field_groups[i]);
+                fields_schema.fields_schema_[i].field_name_ = std::get<1>(field_groups[i]);
+                fields_schema.fields_schema_[i].field_type_ = std::get<2>(field_groups[i]);
+                fields_schema.fields_schema_[i].field_params_ = std::get<3>(field_groups[i]);
+            }
+        } else {
+            return Status(DB_NOT_FOUND, "Collection " + collection_schema.collection_id_ + " fields not found");
+        }
+
+    } catch (std::exception& e) {
+        return HandleException("Encounter exception when describe table", e.what());
     }
 
     return Status::OK();

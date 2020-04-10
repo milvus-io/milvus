@@ -74,10 +74,12 @@ set(thirdparty_files
 
 aux_source_directory(${MILVUS_ENGINE_SRC}/server server_service_files)
 aux_source_directory(${MILVUS_ENGINE_SRC}/server/delivery/request delivery_request_files)
+aux_source_directory(${MILVUS_ENGINE_SRC}/server/delivery/hybrid_request delivery_hybrid_request_files)
 aux_source_directory(${MILVUS_ENGINE_SRC}/server/delivery delivery_files)
 set(server_files
         ${server_service_files}
         ${delivery_request_files}
+        ${delivery_hybrid_request_files}
         ${delivery_files}
         )
 

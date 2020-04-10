@@ -29,6 +29,9 @@ class DefaultCodec : public Codec {
     VectorsFormatPtr
     GetVectorsFormat() override;
 
+    AttrsFormatPtr
+    GetAttrsFormat() override ;
+
     DeletedDocsFormatPtr
     GetDeletedDocsFormat() override;
 
@@ -37,6 +40,7 @@ class DefaultCodec : public Codec {
 
  private:
     VectorsFormatPtr vectors_format_ptr_;
+    AttrsFormatPtr attrs_format_ptr_;
     DeletedDocsFormatPtr deleted_docs_format_ptr_;
     IdBloomFilterFormatPtr id_bloom_filter_format_ptr_;
 };

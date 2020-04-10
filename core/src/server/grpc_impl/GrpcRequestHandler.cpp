@@ -666,6 +666,17 @@ GrpcRequestHandler::Compact(::grpc::ServerContext* context, const ::milvus::grpc
     return ::grpc::Status::OK;
 }
 
+/*******************************************New Interface*********************************************/
+
+::grpc::Status
+GrpcRequestHandler::CreateCollection(::grpc::ServerContext* context,
+                 const ::milvus::grpc::Mapping* request,
+                 ::milvus::grpc::Status* response) {
+    CHECK_NULLPTR_RETURN(request);
+
+//    Status status = request_handler_.
+}
+
 }  // namespace grpc
 }  // namespace server
 }  // namespace milvus

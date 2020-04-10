@@ -246,5 +246,17 @@ RequestHandler::Compact(const std::shared_ptr<Context>& context, const std::stri
     return request_ptr->status();
 }
 
+/*******************************************New Interface*********************************************/
+
+Status
+CreateCollection(std::string& collection_name, std::vector<std::pair<std::string, std::string>>& fields) {
+//    BaseRequestPtr request_ptr =
+}
+
+Status
+HasCollection(const std::shared_ptr<Context>& context, std::string& collection_name, bool& has_collection) {
+
+}
+
 }  // namespace server
 }  // namespace milvus

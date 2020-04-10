@@ -19,6 +19,7 @@
 
 #include <memory>
 
+#include "DefaultAttrsFormat.h"
 #include "DefaultDeletedDocsFormat.h"
 #include "DefaultIdBloomFilterFormat.h"
 #include "DefaultVectorsFormat.h"
@@ -28,6 +29,7 @@ namespace codec {
 
 DefaultCodec::DefaultCodec() {
     vectors_format_ptr_ = std::make_shared<DefaultVectorsFormat>();
+    attrs_format_ptr_ = std::make_shared<DefaultAttrsFormat>();
     deleted_docs_format_ptr_ = std::make_shared<DefaultDeletedDocsFormat>();
     id_bloom_filter_format_ptr_ = std::make_shared<DefaultIdBloomFilterFormat>();
 }
@@ -36,6 +38,12 @@ VectorsFormatPtr
 DefaultCodec::GetVectorsFormat() {
     return vectors_format_ptr_;
 }
+
+AttrsFormatPtr
+DefaultCodec::GetAttrsFormat() {
+    return attrs_format_ptr_;
+}
+
 
 DeletedDocsFormatPtr
 DefaultCodec::GetDeletedDocsFormat() {

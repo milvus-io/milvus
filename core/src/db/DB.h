@@ -139,6 +139,18 @@ class DB {
 
     virtual Status
     DropAll() = 0;
+
+    virtual Status
+    CreateHybridCollection(meta::hybrid::CollectionSchema& collection_schema,
+                           meta::hybrid::FieldsSchema& fields_schema) = 0;
+
+    virtual Status
+    DescribeHybridCollection(meta::hybrid::CollectionSchema& collection_schema,
+                             meta::hybrid::FieldsSchema& fields_schema) = 0;
+
+    virtual Status
+    InsertEntities(std::string& collection_id, std::string& partition_tag, Entities& entities) = 0;
+
 };  // DB
 
 using DBPtr = std::shared_ptr<DB>;

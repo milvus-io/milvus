@@ -24,7 +24,39 @@ namespace segment {
 
 class Attr {
  public:
-    Attr(void* data, size_t nbytes);
+    Attr(void* data, size_t nbytes, std::vector<int64_t> uids, const std::string& name);
+
+    Attr();
+
+    void
+    AddAttr(const void* data, size_t nbytes);
+
+    void
+    AddUids(const std::vector<int64_t>& uids);
+
+    void
+    SetName(const std::string& name);
+
+    const void*
+    GetData() const;
+
+    const std::string&
+    GetName() const;
+
+    const std::string&
+    GetCollectionId();
+
+    const size_t&
+    GetNbytes() const;
+
+    const std::vector<int64_t>&
+    GetUids() const;
+
+    size_t
+    GetCount() const;
+
+    size_t
+    GetCodeLength() const;
 
     // No copy and move
     Attr(const Attr&) = delete;
@@ -38,6 +70,9 @@ class Attr {
  private:
     void* data_;
     size_t nbytes_;
+    std::vector<int64_t> uids_;
+    std::string name_;
+    std::string collection_id_;
 };
 
 using AttrPtr = std::shared_ptr<Attr>;

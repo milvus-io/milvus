@@ -33,6 +33,9 @@ class Codec {
     virtual VectorsFormatPtr
     GetVectorsFormat() = 0;
 
+    virtual AttrsFormatPtr
+    GetAttrsFormat() = 0;
+
     virtual DeletedDocsFormatPtr
     GetDeletedDocsFormat() = 0;
 

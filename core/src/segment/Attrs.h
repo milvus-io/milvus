@@ -29,5 +29,7 @@ struct Attrs {
     std::unordered_map<std::string, AttrPtr> attrs;
 };
 
+using AttrsPtr = std::shared_ptr<Attrs>;
+
 }  // namespace segment
 }  // namespace milvus

@@ -32,6 +32,18 @@ class MemManager {
                   const uint8_t* vectors, uint64_t lsn, std::set<std::string>& flushed_tables) = 0;
 
     virtual Status
+    InsertEntities(const std::string& table_id,
+                   int64_t length,
+                   const IDNumber* vector_ids,
+                   int64_t dim,
+                   const float* vectors,
+                   const std::vector<uint64_t>& attr_nbytes,
+                   const std::vector<uint64_t>& attr_size,
+                   const std::vector<void*>& attr_data,
+                   uint64_t lsn,
+                   std::set<std::string>& flushed_tables) = 0;
+
+    virtual Status
     DeleteVector(const std::string& table_id, IDNumber vector_id, uint64_t lsn) = 0;
 
     virtual Status

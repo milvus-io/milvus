@@ -191,6 +191,33 @@ DBImpl::CreateTable(meta::TableSchema& table_schema) {
     return meta_ptr_->CreateTable(temp_schema);
 }
 
+
+Status
+DBImpl::CreateHybridCollection(meta::hybrid::CollectionSchema& collection_schema,
+                         meta::hybrid::FieldsSchema& fields_schema){
+    if (!initialized_.load(std::memory_order_acquire)) {
+        return SHUTDOWN_ERROR;
+    }
+
+    meta::hybrid::CollectionSchema temp_schema = collection_schema;
+    if (options_.wal_enable_) {
+        //TODO(yukun): wal_mgr_->CreateCollection()
+    }
+
+    return meta_ptr_->CreateHybridCollection(temp_schema, fields_schema);
+}
+
+Status
+DBImpl::DescribeHybridCollection(milvus::engine::meta::hybrid::CollectionSchema& collection_schema,
+                                 milvus::engine::meta::hybrid::FieldsSchema& fields_schema) {
+    if (!initialized_.load(std::memory_order_acquire)) {
+        return SHUTDOWN_ERROR;
+    }
+
+    auto stat = meta_ptr_->DescribeHybridCollection(collection_schema, fields_schema);
+    return stat;
+}
+
 Status
 DBImpl::DropTable(const std::string& table_id) {
     if (!initialized_.load(std::memory_order_acquire)) {
@@ -534,6 +561,51 @@ DBImpl::InsertVectors(const std::string& table_id, const std::string& partition_
         status = ExecWalRecord(record);
     }
 
+    return status;
+}
+
+
+Status
+DBImpl::InsertEntities(std::string& collection_id, std::string& partition_tag, Entities& entities) {
+    if (!initialized_.load(std::memory_order_acquire)) {
+        return SHUTDOWN_ERROR;
+    }
+
+    // Generate id
+    if (entities.id_array_.empty()) {
+        SafeIDGenerator& id_generator = SafeIDGenerator::GetInstance();
+        Status status = id_generator.GetNextIDNumbers(entities.entity_count_, entities.id_array_);
+        if (!status.ok()) {
+            return status;
+        }
+    }
+
+    Status status;
+    // insert entities: collection_name is field id
+    wal::MXLogRecord record;
+    record.lsn = 0;
+    record.table_id = collection_id;
+    record.partition_tag = partition_tag;
+    record.ids = entities.id_array_.data();
+    record.length = entities.entity_count_;
+
+    if (entities.vector_data_[0].binary_data_.empty()) {
+        record.type = wal::MXLogType::InsertVector;
+        record.data = entities.vector_data_[0].float_data_.data();
+        record.length = entities.vector_data_[0].float_data_.size() * sizeof(float);
+    } else {
+        record.type = wal::MXLogType::InsertBinary;
+        record.data = entities.vector_data_[0].binary_data_.data();
+        record.length = entities.vector_data_[0].binary_data_.size() * sizeof(uint8_t);
+    }
+
+    auto entity_size = entities.entity_data_.size();
+    for (uint64_t i = 0; i < entity_size; ++i) {
+        record.entity_data[i] = entities.entity_data_[i].field_value_.data();
+        record.entity_data_size[i] = entities.entity_data_[i].field_value_.size();
+    }
+
+    status = ExecWalRecord(record);
     return status;
 }
 
@@ -1879,6 +1951,25 @@ DBImpl::ExecWalRecord(const wal::MXLogRecord& record) {
     Status status;
 
     switch (record.type) {
+        case wal::MXLogType::Entity: {
+            std::string target_collection_name;
+            status = GetPartitionByTag(record.table_id, record.partition_tag, target_collection_name);
+            if (!status.ok()) {
+                return status;
+            }
+
+            std::set<std::string> flushed_tables;
+            status = mem_mgr_->InsertEntities(target_collection_name, record.length, record.ids,
+                                              (record.data_size / record.length / sizeof(float)),
+                                              (const float*)record.data,
+                                              record.entity_nbytes,
+                                              record.entity_data_size,
+                                              record.entity_data, record.lsn, flushed_tables);
+            tables_flushed(flushed_tables);
+
+            milvus::server::CollectInsertMetrics metrics(record.length, status);
+            break;
+        }
         case wal::MXLogType::InsertBinary: {
             std::string target_table_name;
             status = GetPartitionByTag(record.table_id, record.partition_tag, target_table_name);
@@ -2067,6 +2158,7 @@ void
 DBImpl::OnCacheInsertDataChanged(bool value) {
     options_.insert_cache_immediately_ = value;
 }
+
 
 }  // namespace engine
 }  // namespace milvus

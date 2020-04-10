@@ -47,6 +47,19 @@ struct VectorsData {
     IDNumbers id_array_;
 };
 
+struct Entity {
+    std::vector<std::string> field_value_;
+};
+
+struct Entities {
+    uint64_t entity_count_ = 0;
+    std::vector<std::string> entity_field_name_;
+    std::vector<Entity> entity_data_;
+    std::vector<std::string> vector_field_name_;
+    std::vector<VectorsData> vector_data_;
+    IDNumbers id_array_;
+};
+
 using File2ErrArray = std::map<std::string, std::vector<std::string>>;
 using Table2FileErr = std::map<std::string, File2ErrArray>;
 using File2RefCount = std::map<std::string, int64_t>;

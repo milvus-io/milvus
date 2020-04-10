@@ -28,15 +28,26 @@ class VectorSource {
  public:
     explicit VectorSource(VectorsData vectors);
 
+    VectorSource(VectorsData vectors, std::vector<uint64_t> attr_nbytes, std::vector<uint64_t> attr_size, std::vector<void*> attr_data);
+
     Status
     Add(/*const ExecutionEnginePtr& execution_engine,*/ const segment::SegmentWriterPtr& segment_writer_ptr,
         const meta::TableFileSchema& table_file_schema, const size_t& num_vectors_to_add, size_t& num_vectors_added);
+
+    Status
+    AddEntities(const segment::SegmentWriterPtr& segment_writer_ptr,
+                const meta::TableFileSchema& collection_file_schema,
+                const size_t& num_attrs_to_add,
+                size_t& num_attrs_added);
 
     size_t
     GetNumVectorsAdded();
 
     size_t
     SingleVectorSize(uint16_t dimension);
+
+    size_t
+    SingleEntitySize(uint16_t dimension);
 
     bool
     AllAdded();
@@ -47,8 +58,13 @@ class VectorSource {
  private:
     VectorsData vectors_;
     IDNumbers vector_ids_;
+    std::vector<std::string> field_name_;
+    std::vector<uint64_t> attr_nbytes_;
+    std::vector<uint64_t> attr_size_;
+    std::vector<void*> attr_data_;
 
     size_t current_num_vectors_added;
+    size_t current_num_attrs_added;
 };  // VectorSource
 
 using VectorSourcePtr = std::shared_ptr<VectorSource>;

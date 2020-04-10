@@ -50,6 +50,23 @@ SegmentWriter::AddVectors(const std::string& name, const std::vector<uint8_t>& d
 }
 
 Status
+SegmentWriter::AddAttrs(const std::string& name,
+                                 const std::vector<std::string>& field_name,
+                                 const std::vector<void*> data,
+                                 const std::vector<size_t> nbytes,
+                                 const std::vector<int64_t>& uids) {
+    for (uint64_t i = 0; i < data.size(); ++i) {
+        AttrPtr attr = std::make_shared<Attr>(data[i], nbytes[i], uids, field_name[i]);
+        segment_ptr_->attrs_ptr_->attrs.insert(std::make_pair(field_name[i], attr));
+//        segment_ptr_->attr_ptr_->AddAttr(data[i], nbytes[i]);
+//        segment_ptr_->attr_ptr_->SetName(field_name[i]);
+    }
+//    segment_ptr_->attr_ptr_->AddUids(uids);
+
+    return Status::OK();
+}
+
+Status
 SegmentWriter::Serialize() {
     auto start = std::chrono::high_resolution_clock::now();
 
@@ -74,6 +91,14 @@ SegmentWriter::Serialize() {
     ENGINE_LOG_DEBUG << "Writing vectors and uids took " << diff.count() << " s in total";
 
     start = std::chrono::high_resolution_clock::now();
+    status = WriteAttrs();
+    if (!status.ok()) {
+        return status;
+    }
+    end = std::chrono::high_resolution_clock::now();
+    ENGINE_LOG_DEBUG << "Writing attributes and uids took " << diff.count() << " s in total";
+
+    start = std::chrono::high_resolution_clock::now();
 
     // Write an empty deleted doc
     status = WriteDeletedDocs();
@@ -96,6 +121,21 @@ SegmentWriter::WriteVectors() {
         ENGINE_LOG_ERROR << err_msg;
         return Status(SERVER_WRITE_ERROR, err_msg);
     }
+    return Status::OK();
+}
+
+Status
+SegmentWriter::WriteAttrs() {
+    codec::DefaultCodec default_codec;
+    try {
+        fs_ptr_->operation_ptr_->CreateDirectory();
+        default_codec.GetAttrsFormat()->write(fs_ptr_, segment_ptr_->attrs_ptr_);
+    } catch (std::exception& e) {
+        std::string err_msg = "Failed to write vectors: " + std::string(e.what());
+        ENGINE_LOG_ERROR << err_msg;
+        return Status(SERVER_WRITE_ERROR, err_msg);
+    }
+
     return Status::OK();
 }
 

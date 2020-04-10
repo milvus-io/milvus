@@ -36,6 +36,13 @@ class SegmentWriter {
     AddVectors(const std::string& name, const std::vector<uint8_t>& data, const std::vector<doc_id_t>& uids);
 
     Status
+    AddAttrs(const std::string& name,
+               const std::vector<std::string>& field_name,
+               const std::vector<void*> data,
+               const std::vector<size_t> nbytes,
+               const std::vector<int64_t>& uids);
+
+    Status
     WriteBloomFilter(const IdBloomFilterPtr& bloom_filter_ptr);
 
     Status
@@ -62,6 +69,9 @@ class SegmentWriter {
  private:
     Status
     WriteVectors();
+
+    Status
+    WriteAttrs();
 
     Status
     WriteBloomFilter();

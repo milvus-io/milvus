@@ -16,6 +16,7 @@
 #include <utility>
 #include <vector>
 
+#include "query/BooleanQuery.h"
 #include "server/delivery/request/BaseRequest.h"
 #include "utils/Status.h"
 
@@ -105,6 +106,35 @@ class RequestHandler {
 
     Status
     Compact(const std::shared_ptr<Context>& context, const std::string& table_name);
+
+    /*******************************************New Interface*********************************************/
+
+    Status
+    CreateCollection(const std::shared_ptr<Context>& context,
+                     std::string& collection_name,
+                     std::vector<std::pair<std::string, std::string>>& field_types,
+                     std::vector<std::pair<std::string, uint64_t>>& vector_dimensions,
+                     std::vector<std::pair<std::string, std::string>>& field_extra_params);
+
+    Status
+    HasCollection(const std::shared_ptr<Context>& context, std::string& collection_name, bool& has_collection);
+
+    Status
+    DropCollection(const std::shared_ptr<Context>& context, std::string& collection_name);
+
+    Status
+    InsertEntity(const std::shared_ptr<Context>& context,
+                 std::string& collection_name,
+                 std::string& partition_tag,
+                 std::vector<std::string> field_name_array,
+                 std::vector<std::string>& field_values,
+                 std::vector<engine::VectorsData>& vector_data);
+
+    Status
+    HybridSearch(const std::shared_ptr<Context>& context,
+                 std::vector<std::string>& partition_tag_array,
+                 query::BooleanQueryPtr& boolean_query);
+
 };
 
 }  // namespace server
