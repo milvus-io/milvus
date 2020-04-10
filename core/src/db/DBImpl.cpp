@@ -171,6 +171,8 @@ DBImpl::Stop() {
             bg_flush_thread_.join();
         }
 
+        WaitMergeFileFinish();
+
         swn_index_.Notify();
         bg_index_thread_.join();
 
