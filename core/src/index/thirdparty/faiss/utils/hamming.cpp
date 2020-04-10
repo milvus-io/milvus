@@ -308,8 +308,7 @@ void hammings_knn_hc (
                     hamdis_t * val_ = value + thread_no * thread_hash_size + i * k;
                     int64_t * ids_ = labels + thread_no * thread_hash_size + i * k;
                     if (dis < val_[0]) {
-                        faiss::maxheap_pop<hamdis_t> (k, val_, ids_);
-                        faiss::maxheap_push<hamdis_t> (k, val_, ids_, dis, j);
+                        faiss::maxheap_swap_top<hamdis_t> (k, val_, ids_, dis, j);
                     }
                 }
             }
@@ -324,8 +323,7 @@ void hammings_knn_hc (
                 int64_t *labels_x_t = labels_x + t * thread_hash_size;
                 for (size_t j = 0; j < k; j++) {
                     if (value_x_t[j] < value_x[0]) {
-                        faiss::maxheap_pop<hamdis_t> (k, value_x, labels_x);
-                        faiss::maxheap_push<hamdis_t> (k, value_x, labels_x, value_x_t[j], labels_x_t[j]);
+                        faiss::maxheap_swap_top<hamdis_t> (k, value_x, labels_x, value_x_t[j], labels_x_t[j]);
                     }
                 }
             }
@@ -357,8 +355,7 @@ void hammings_knn_hc (
                     if(!bitset || !bitset->test(j)){
                         dis = hc.hamming (bs2_);
                         if (dis < bh_val_[0]) {
-                            faiss::maxheap_pop<hamdis_t> (k, bh_val_, bh_ids_);
-                            faiss::maxheap_push<hamdis_t> (k, bh_val_, bh_ids_, dis, j);
+                            faiss::maxheap_swap_top<hamdis_t> (k, bh_val_, bh_ids_, dis, j);
                         }
                     }
                 }
@@ -470,8 +467,7 @@ void hammings_knn_hc_1 (
                 hamdis_t * __restrict val_ = value + thread_no * k;
                 int64_t * __restrict ids_ = labels + thread_no * k;
                 if (dis < val_[0]) {
-                    faiss::maxheap_pop<hamdis_t> (k, val_, ids_);
-                    faiss::maxheap_push<hamdis_t> (k, val_, ids_, dis, j);
+                    faiss::maxheap_swap_top<hamdis_t> (k, val_, ids_, dis, j);
                 }
             }
         }
@@ -480,8 +476,7 @@ void hammings_knn_hc_1 (
         int64_t * __restrict bh_ids_ = ha->ids;
         for (int i = 0; i < all_hash_size; i++) {
             if (value[i] < bh_val_[0]) {
-                faiss::maxheap_pop<hamdis_t> (k, bh_val_, bh_ids_);
-                faiss::maxheap_push<hamdis_t> (k, bh_val_, bh_ids_, value[i], labels[i]);
+                faiss::maxheap_swap_top<hamdis_t> (k, bh_val_, bh_ids_, value[i], labels[i]);
             }
         }
 
@@ -502,8 +497,7 @@ void hammings_knn_hc_1 (
                 if(!bitset || !bitset->test(j)){
                     dis = popcount64 (bs1_ ^ *bs2_);
                     if (dis < bh_val_0) {
-                        faiss::maxheap_pop<hamdis_t> (k, bh_val_, bh_ids_);
-                        faiss::maxheap_push<hamdis_t> (k, bh_val_, bh_ids_, dis, j);
+                        faiss::maxheap_swap_top<hamdis_t> (k, bh_val_, bh_ids_, dis, j);
                         bh_val_0 = bh_val_[0];
                     }
                 }
@@ -849,8 +843,7 @@ static void hamming_dis_inner_loop (
         int ndiff = hc.hamming (cb);
         cb += code_size;
         if (ndiff < bh_val_[0]) {
-            maxheap_pop<hamdis_t> (k, bh_val_, bh_ids_);
-            maxheap_push<hamdis_t> (k, bh_val_, bh_ids_, ndiff, j);
+            maxheap_swap_top<hamdis_t> (k, bh_val_, bh_ids_, ndiff, j);
         }
     }
 }

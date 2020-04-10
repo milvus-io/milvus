@@ -805,8 +805,7 @@ struct KnnSearchResults {
             idx_t id = ids ? ids[j] : (key << 32 | j);
             if (bitset != nullptr && bitset->test((faiss::ConcurrentBitset::id_type_t)id))
                 return;
-            heap_pop<C> (k, heap_sim, heap_ids);
-            heap_push<C> (k, heap_sim, heap_ids, dis, id);
+            heap_swap_top<C> (k, heap_sim, heap_ids, dis, id);
             nup++;
         }
     }

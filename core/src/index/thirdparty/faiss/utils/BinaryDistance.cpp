@@ -61,8 +61,7 @@ void binary_distence_knn_hc(
                     float * val_ = value + thread_no * thread_hash_size + i * k;
                     int64_t * ids_ = labels + thread_no * thread_hash_size + i * k;
                     if (dis < val_[0]) {
-                        faiss::maxheap_pop<tadis_t> (k, val_, ids_);
-                        faiss::maxheap_push<tadis_t> (k, val_, ids_, dis, j);
+                        faiss::maxheap_swap_top<tadis_t> (k, val_, ids_, dis, j);
                     }
                 }
             }
@@ -77,8 +76,7 @@ void binary_distence_knn_hc(
                 int64_t *labels_x_t = labels_x + t * thread_hash_size;
                 for (size_t j = 0; j < k; j++) {
                     if (value_x_t[j] < value_x[0]) {
-                        faiss::maxheap_pop<tadis_t> (k, value_x, labels_x);
-                        faiss::maxheap_push<tadis_t> (k, value_x, labels_x, value_x_t[j], labels_x_t[j]);
+                        faiss::maxheap_swap_top<tadis_t> (k, value_x, labels_x, value_x_t[j], labels_x_t[j]);
                     }
                 }
             }
@@ -111,8 +109,7 @@ void binary_distence_knn_hc(
                     if(!bitset || !bitset->test(j)){
                         dis = hc.compute (bs2_);
                         if (dis < bh_val_[0]) {
-                            faiss::maxheap_pop<tadis_t> (k, bh_val_, bh_ids_);
-                            faiss::maxheap_push<tadis_t> (k, bh_val_, bh_ids_, dis, j);
+                            faiss::maxheap_swap_top<tadis_t> (k, bh_val_, bh_ids_, dis, j);
                         }
                     }
                 }

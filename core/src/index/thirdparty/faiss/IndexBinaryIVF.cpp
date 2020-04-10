@@ -420,9 +420,8 @@ struct IVFBinaryScannerL2: BinaryInvertedListScanner {
                 uint32_t dis = hc.hamming (codes);
 
                 if (dis < simi[0]) {
-                    heap_pop<C> (k, simi, idxi);
                     idx_t id = store_pairs ? (list_no << 32 | j) : ids[j];
-                    heap_push<C> (k, simi, idxi, dis, id);
+                    heap_swap_top<C> (k, simi, idxi, dis, id);
                     nup++;
                 }
             }
@@ -470,9 +469,8 @@ struct IVFBinaryScannerJaccard: BinaryInvertedListScanner {
                 float dis = hc.compute (codes);
 
                 if (dis < psimi[0]) {
-                    heap_pop<C> (k, psimi, idxi);
                     idx_t id = store_pairs ? (list_no << 32 | j) : ids[j];
-                    heap_push<C> (k, psimi, idxi, dis, id);
+                    heap_swap_top<C> (k, psimi, idxi, dis, id);
                     nup++;
                 }
             }

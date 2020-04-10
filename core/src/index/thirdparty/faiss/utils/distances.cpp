@@ -178,8 +178,7 @@ static void knn_inner_product_sse (const float * x,
                 float * val_ = value + thread_no * thread_hash_size + i * k;
                 int64_t * ids_ = labels + thread_no * thread_hash_size + i * k;
                 if (ip > val_[0]) {
-                    minheap_pop (k, val_, ids_);
-                    minheap_push (k, val_, ids_, ip, j);
+                    minheap_swap_top (k, val_, ids_, ip, j);
                 }
             }
         }
@@ -194,8 +193,7 @@ static void knn_inner_product_sse (const float * x,
             int64_t *labels_x_t = labels_x + t * thread_hash_size;
             for (size_t j = 0; j < k; j++) {
                 if (value_x_t[j] > value_x[0]) {
-                    minheap_pop (k, value_x, labels_x);
-                    minheap_push (k, value_x, labels_x, value_x_t[j], labels_x_t[j]);
+                    minheap_swap_top (k, value_x, labels_x, value_x_t[j], labels_x_t[j]);
                 }
             }
         }
@@ -285,8 +283,7 @@ static void knn_L2sqr_sse (
                 float * val_ = value + thread_no * thread_hash_size + i * k;
                 int64_t * ids_ = labels + thread_no * thread_hash_size + i * k;
                 if (disij < val_[0]) {
-                    maxheap_pop (k, val_, ids_);
-                    maxheap_push (k, val_, ids_, disij, j);
+                    maxheap_swap_top (k, val_, ids_, disij, j);
                 }
             }
         }
@@ -301,8 +298,7 @@ static void knn_L2sqr_sse (
             int64_t *labels_x_t = labels_x + t * thread_hash_size;
             for (size_t j = 0; j < k; j++) {
                 if (value_x_t[j] < value_x[0]) {
-                    maxheap_pop (k, value_x, labels_x);
-                    maxheap_push (k, value_x, labels_x, value_x_t[j], labels_x_t[j]);
+                    maxheap_swap_top (k, value_x, labels_x, value_x_t[j], labels_x_t[j]);
                 }
             }
         }
@@ -408,8 +404,7 @@ static void knn_inner_product_blas (
                         float dis = *ip_line;
 
                         if(dis > simi[0]){
-                            minheap_pop(k, simi, idxi);
-                            minheap_push(k, simi, idxi, dis, j);
+                            minheap_swap_top(k, simi, idxi, dis, j);
                         }
                     }
                     ip_line++;
@@ -486,8 +481,7 @@ static void knn_L2sqr_blas (const float * x,
                         dis = corr (dis, i, j);
 
                         if (dis < simi[0]) {
-                            maxheap_pop (k, simi, idxi);
-                            maxheap_push (k, simi, idxi, dis, j);
+                            maxheap_swap_top (k, simi, idxi, dis, j);
                         }
                     }
                     ip_line++;
@@ -563,8 +557,7 @@ static void knn_jaccard_blas (const float * x,
                         dis = corr (dis, i, j);
 
                         if (dis < simi[0]) {
-                            maxheap_pop (k, simi, idxi);
-                            maxheap_push (k, simi, idxi, dis, j);
+                            maxheap_swap_top (k, simi, idxi, dis, j);
                         }
                     }
                     ip_line++;
@@ -773,8 +766,7 @@ void knn_inner_products_by_idx (const float * x,
             float ip = fvec_inner_product (x_, y + d * idsi[j], d);
 
             if (ip > simi[0]) {
-                minheap_pop (k, simi, idxi);
-                minheap_push (k, simi, idxi, ip, idsi[j]);
+                minheap_swap_top (k, simi, idxi, ip, idsi[j]);
             }
         }
         minheap_reorder (k, simi, idxi);
@@ -801,8 +793,7 @@ void knn_L2sqr_by_idx (const float * x,
             float disij = fvec_L2sqr (x_, y + d * idsi[j], d);
 
             if (disij < simi[0]) {
-                maxheap_pop (k, simi, idxi);
-                maxheap_push (k, simi, idxi, disij, idsi[j]);
+                maxheap_swap_top (k, simi, idxi, disij, idsi[j]);
             }
         }
         maxheap_reorder (res->k, simi, idxi);
