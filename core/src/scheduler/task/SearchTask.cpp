@@ -188,10 +188,7 @@ XSearchTask::Load(LoadType type, uint8_t device_id) {
     std::string info = "Search task load file id:" + std::to_string(file_->id_) + " " + type_str +
                        " file type:" + std::to_string(file_->file_type_) + " size:" + std::to_string(file_size) +
                        " bytes from location: " + file_->location_ + " totally cost";
-    double span = rc.ElapseFromBegin(info);
-    //    for (auto &context : search_contexts_) {
-    //        context->AccumLoadCost(span);
-    //    }
+    rc.ElapseFromBegin(info);
 
     CollectFileMetrics(file_->file_type_, file_size);
 
@@ -204,10 +201,6 @@ XSearchTask::Load(LoadType type, uint8_t device_id) {
 void
 XSearchTask::Execute() {
     milvus::server::ContextFollower tracer(context_, "XSearchTask::Execute " + std::to_string(index_id_));
-
-    if (index_engine_ == nullptr) {
-        return;
-    }
 
     //    ENGINE_LOG_DEBUG << "Searching in file id:" << index_id_ << " with "
     //                     << search_contexts_.size() << " tasks";
@@ -222,6 +215,12 @@ XSearchTask::Execute() {
 
     if (auto job = job_.lock()) {
         auto search_job = std::static_pointer_cast<scheduler::SearchJob>(job);
+
+        if (index_engine_ == nullptr) {
+            search_job->SearchDone(index_id_);
+            return;
+        }
+
         // step 1: allocate memory
         uint64_t nq = search_job->nq();
         uint64_t topk = search_job->topk();
