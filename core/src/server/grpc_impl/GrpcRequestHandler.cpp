@@ -325,9 +325,8 @@ GrpcRequestHandler::CreateCollection(::grpc::ServerContext* context, const ::mil
                                      ::milvus::grpc::Status* response) {
     CHECK_NULLPTR_RETURN(request);
 
-    auto request_id = get_request_id(context);
     Status status =
-        request_handler_.CreateCollection(context_map_[request_id], request->collection_name(), request->dimension(),
+        request_handler_.CreateCollection(GetContext(context), request->collection_name(), request->dimension(),
                                           request->index_file_size(), request->metric_type());
     SET_RESPONSE(response, status, context);
 
@@ -341,9 +340,7 @@ GrpcRequestHandler::HasCollection(::grpc::ServerContext* context, const ::milvus
 
     bool has_collection = false;
 
-    auto request_id = get_request_id(context);
-    Status status =
-        request_handler_.HasCollection(context_map_[request_id], request->collection_name(), has_collection);
+    Status status = request_handler_.HasCollection(GetContext(context), request->collection_name(), has_collection);
     response->set_bool_reply(has_collection);
     SET_RESPONSE(response->mutable_status(), status, context);
 
@@ -355,8 +352,7 @@ GrpcRequestHandler::DropCollection(::grpc::ServerContext* context, const ::milvu
                                    ::milvus::grpc::Status* response) {
     CHECK_NULLPTR_RETURN(request);
 
-    auto request_id = get_request_id(context);
-    Status status = request_handler_.DropCollection(context_map_[request_id], request->collection_name());
+    Status status = request_handler_.DropCollection(GetContext(context), request->collection_name());
 
     SET_RESPONSE(response, status, context);
     return ::grpc::Status::OK;
@@ -375,9 +371,8 @@ GrpcRequestHandler::CreateIndex(::grpc::ServerContext* context, const ::milvus::
         }
     }
 
-    auto request_id = get_request_id(context);
-    Status status = request_handler_.CreateIndex(context_map_[request_id], request->collection_name(),
-                                                 request->index_type(), json_params);
+    Status status = request_handler_.CreateIndex(GetContext(context), request->collection_name(), request->index_type(),
+                                                 json_params);
 
     SET_RESPONSE(response, status, context);
     return ::grpc::Status::OK;
@@ -394,10 +389,9 @@ GrpcRequestHandler::Insert(::grpc::ServerContext* context, const ::milvus::grpc:
     engine::VectorsData vectors;
     CopyRowRecords(request->row_record_array(), request->row_id_array(), vectors);
 
-    auto request_id = get_request_id(context);
     // step 2: insert vectors
-    Status status = request_handler_.Insert(context_map_[request_id], request->collection_name(), vectors,
-                                            request->partition_tag());
+    Status status =
+        request_handler_.Insert(GetContext(context), request->collection_name(), vectors, request->partition_tag());
 
     // step 3: return id array
     response->mutable_vector_id_array()->Resize(static_cast<int>(vectors.id_array_.size()), 0);
@@ -416,9 +410,8 @@ GrpcRequestHandler::GetVectorByID(::grpc::ServerContext* context, const ::milvus
 
     std::vector<int64_t> vector_ids = {request->id()};
     engine::VectorsData vectors;
-    auto request_id = get_request_id(context);
     Status status =
-        request_handler_.GetVectorByID(context_map_[request_id], request->collection_name(), vector_ids, vectors);
+        request_handler_.GetVectorByID(GetContext(context), request->collection_name(), vector_ids, vectors);
 
     if (!vectors.float_data_.empty()) {
         response->mutable_vector_data()->mutable_float_data()->Resize(vectors.float_data_.size(), 0);
@@ -440,8 +433,7 @@ GrpcRequestHandler::GetVectorIDs(::grpc::ServerContext* context, const ::milvus:
     CHECK_NULLPTR_RETURN(request);
 
     std::vector<int64_t> vector_ids;
-    auto request_id = get_request_id(context);
-    Status status = request_handler_.GetVectorIDs(context_map_[request_id], request->collection_name(),
+    Status status = request_handler_.GetVectorIDs(GetContext(context), request->collection_name(),
                                                   request->segment_name(), vector_ids);
 
     if (!vector_ids.empty()) {
@@ -484,14 +476,8 @@ GrpcRequestHandler::Search(::grpc::ServerContext* context, const ::milvus::grpc:
     TopKQueryResult result;
     fiu_do_on("GrpcRequestHandler.Search.not_empty_file_ids", file_ids.emplace_back("test_file_id"));
 
-    auto request_id = get_request_id(context);
-    std::shared_ptr<Context> pcontext = nullptr;
-    {
-        std::lock_guard<std::mutex> lock(context_map_mutex_);
-        pcontext = context_map_[request_id];
-    }
-    Status status = request_handler_.Search(pcontext, request->collection_name(), vectors, request->topk(), json_params,
-                                            partitions, file_ids, result);
+    Status status = request_handler_.Search(GetContext(context), request->collection_name(), vectors, request->topk(),
+                                            json_params, partitions, file_ids, result);
 
     // step 5: construct and return result
     ConstructResults(result, response);
@@ -525,14 +511,8 @@ GrpcRequestHandler::SearchByID(::grpc::ServerContext* context, const ::milvus::g
 
     // step 3: search vectors
     TopKQueryResult result;
-    auto request_id = get_request_id(context);
-    std::shared_ptr<Context> pcontext = nullptr;
-    {
-        std::lock_guard<std::mutex> lock(context_map_mutex_);
-        pcontext = context_map_[request_id];
-    }
-    Status status = request_handler_.SearchByID(pcontext, request->collection_name(), request->id(), request->topk(),
-                                                json_params, partitions, result);
+    Status status = request_handler_.SearchByID(GetContext(context), request->collection_name(), request->id(),
+                                                request->topk(), json_params, partitions, result);
 
     // step 4: construct and return result
     ConstructResults(result, response);
@@ -577,13 +557,7 @@ GrpcRequestHandler::SearchInFiles(::grpc::ServerContext* context, const ::milvus
 
     // step 5: search vectors
     TopKQueryResult result;
-    auto request_id = get_request_id(context);
-    std::shared_ptr<Context> pcontext = nullptr;
-    {
-        std::lock_guard<std::mutex> lock(context_map_mutex_);
-        pcontext = context_map_[request_id];
-    }
-    Status status = request_handler_.Search(pcontext, search_request->collection_name(), vectors,
+    Status status = request_handler_.Search(GetContext(context), search_request->collection_name(), vectors,
                                             search_request->topk(), json_params, partitions, file_ids, result);
 
     // step 6: construct and return result
@@ -600,9 +574,8 @@ GrpcRequestHandler::DescribeCollection(::grpc::ServerContext* context, const ::m
     CHECK_NULLPTR_RETURN(request);
 
     CollectionSchema collection_schema;
-    auto request_id = get_request_id(context);
     Status status =
-        request_handler_.DescribeCollection(context_map_[request_id], request->collection_name(), collection_schema);
+        request_handler_.DescribeCollection(GetContext(context), request->collection_name(), collection_schema);
     response->set_collection_name(collection_schema.collection_name_);
     response->set_dimension(collection_schema.dimension_);
     response->set_index_file_size(collection_schema.index_file_size_);
@@ -618,8 +591,7 @@ GrpcRequestHandler::CountCollection(::grpc::ServerContext* context, const ::milv
     CHECK_NULLPTR_RETURN(request);
 
     int64_t row_count = 0;
-    auto request_id = get_request_id(context);
-    Status status = request_handler_.CountCollection(context_map_[request_id], request->collection_name(), row_count);
+    Status status = request_handler_.CountCollection(GetContext(context), request->collection_name(), row_count);
     response->set_collection_row_count(row_count);
     SET_RESPONSE(response->mutable_status(), status, context);
     return ::grpc::Status::OK;
@@ -631,8 +603,7 @@ GrpcRequestHandler::ShowCollections(::grpc::ServerContext* context, const ::milv
     CHECK_NULLPTR_RETURN(request);
 
     std::vector<std::string> collections;
-    auto request_id = get_request_id(context);
-    Status status = request_handler_.ShowCollections(context_map_[request_id], collections);
+    Status status = request_handler_.ShowCollections(GetContext(context), collections);
     for (auto& collection : collections) {
         response->add_collection_names(collection);
     }
@@ -647,9 +618,8 @@ GrpcRequestHandler::ShowCollectionInfo(::grpc::ServerContext* context, const ::m
     CHECK_NULLPTR_RETURN(request);
 
     CollectionInfo collection_info;
-    auto request_id = get_request_id(context);
     Status status =
-        request_handler_.ShowCollectionInfo(context_map_[request_id], request->collection_name(), collection_info);
+        request_handler_.ShowCollectionInfo(GetContext(context), request->collection_name(), collection_info);
     ConstructCollectionInfo(collection_info, response);
     SET_RESPONSE(response->mutable_status(), status, context);
 
@@ -662,8 +632,7 @@ GrpcRequestHandler::Cmd(::grpc::ServerContext* context, const ::milvus::grpc::Co
     CHECK_NULLPTR_RETURN(request);
 
     std::string reply;
-    auto request_id = get_request_id(context);
-    Status status = request_handler_.Cmd(context_map_[request_id], request->cmd(), reply);
+    Status status = request_handler_.Cmd(GetContext(context), request->cmd(), reply);
     response->set_string_reply(reply);
     SET_RESPONSE(response->mutable_status(), status, context);
 
@@ -682,8 +651,7 @@ GrpcRequestHandler::DeleteByID(::grpc::ServerContext* context, const ::milvus::g
     }
 
     // step 2: delete vector
-    auto request_id = get_request_id(context);
-    Status status = request_handler_.DeleteByID(context_map_[request_id], request->collection_name(), vector_ids);
+    Status status = request_handler_.DeleteByID(GetContext(context), request->collection_name(), vector_ids);
     SET_RESPONSE(response, status, context);
 
     return ::grpc::Status::OK;
@@ -694,8 +662,7 @@ GrpcRequestHandler::PreloadCollection(::grpc::ServerContext* context, const ::mi
                                       ::milvus::grpc::Status* response) {
     CHECK_NULLPTR_RETURN(request);
 
-    auto request_id = get_request_id(context);
-    Status status = request_handler_.PreloadCollection(context_map_[request_id], request->collection_name());
+    Status status = request_handler_.PreloadCollection(GetContext(context), request->collection_name());
     SET_RESPONSE(response, status, context);
 
     return ::grpc::Status::OK;
@@ -707,8 +674,7 @@ GrpcRequestHandler::DescribeIndex(::grpc::ServerContext* context, const ::milvus
     CHECK_NULLPTR_RETURN(request);
 
     IndexParam param;
-    auto request_id = get_request_id(context);
-    Status status = request_handler_.DescribeIndex(context_map_[request_id], request->collection_name(), param);
+    Status status = request_handler_.DescribeIndex(GetContext(context), request->collection_name(), param);
     response->set_collection_name(param.collection_name_);
     response->set_index_type(param.index_type_);
     ::milvus::grpc::KeyValuePair* kv = response->add_extra_params();
@@ -724,8 +690,7 @@ GrpcRequestHandler::DropIndex(::grpc::ServerContext* context, const ::milvus::gr
                               ::milvus::grpc::Status* response) {
     CHECK_NULLPTR_RETURN(request);
 
-    auto request_id = get_request_id(context);
-    Status status = request_handler_.DropIndex(context_map_[request_id], request->collection_name());
+    Status status = request_handler_.DropIndex(GetContext(context), request->collection_name());
     SET_RESPONSE(response, status, context);
 
     return ::grpc::Status::OK;
@@ -736,9 +701,7 @@ GrpcRequestHandler::CreatePartition(::grpc::ServerContext* context, const ::milv
                                     ::milvus::grpc::Status* response) {
     CHECK_NULLPTR_RETURN(request);
 
-    auto request_id = get_request_id(context);
-    Status status =
-        request_handler_.CreatePartition(context_map_[request_id], request->collection_name(), request->tag());
+    Status status = request_handler_.CreatePartition(GetContext(context), request->collection_name(), request->tag());
     SET_RESPONSE(response, status, context);
 
     return ::grpc::Status::OK;
@@ -750,8 +713,7 @@ GrpcRequestHandler::ShowPartitions(::grpc::ServerContext* context, const ::milvu
     CHECK_NULLPTR_RETURN(request);
 
     std::vector<PartitionParam> partitions;
-    auto request_id = get_request_id(context);
-    Status status = request_handler_.ShowPartitions(context_map_[request_id], request->collection_name(), partitions);
+    Status status = request_handler_.ShowPartitions(GetContext(context), request->collection_name(), partitions);
     for (auto& partition : partitions) {
         response->add_partition_tag_array(partition.tag_);
     }
@@ -766,9 +728,7 @@ GrpcRequestHandler::DropPartition(::grpc::ServerContext* context, const ::milvus
                                   ::milvus::grpc::Status* response) {
     CHECK_NULLPTR_RETURN(request);
 
-    auto request_id = get_request_id(context);
-    Status status =
-        request_handler_.DropPartition(context_map_[request_id], request->collection_name(), request->tag());
+    Status status = request_handler_.DropPartition(GetContext(context), request->collection_name(), request->tag());
     SET_RESPONSE(response, status, context);
 
     return ::grpc::Status::OK;
@@ -783,8 +743,7 @@ GrpcRequestHandler::Flush(::grpc::ServerContext* context, const ::milvus::grpc::
     for (int32_t i = 0; i < request->collection_name_array().size(); i++) {
         collection_names.push_back(request->collection_name_array(i));
     }
-    auto request_id = get_request_id(context);
-    Status status = request_handler_.Flush(context_map_[request_id], collection_names);
+    Status status = request_handler_.Flush(GetContext(context), collection_names);
     SET_RESPONSE(response, status, context);
 
     return ::grpc::Status::OK;
@@ -795,8 +754,7 @@ GrpcRequestHandler::Compact(::grpc::ServerContext* context, const ::milvus::grpc
                             ::milvus::grpc::Status* response) {
     CHECK_NULLPTR_RETURN(request);
 
-    auto request_id = get_request_id(context);
-    Status status = request_handler_.Compact(context_map_[request_id], request->collection_name());
+    Status status = request_handler_.Compact(GetContext(context), request->collection_name());
     SET_RESPONSE(response, status, context);
 
     return ::grpc::Status::OK;
