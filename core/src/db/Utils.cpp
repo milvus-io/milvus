@@ -43,7 +43,7 @@ ConstructParentFolder(const std::string& db_path, const meta::SegmentSchema& tab
 }
 
 static std::string
-GetTableFileParentFolder(const DBMetaOptions& options, const meta::SegmentSchema& table_file) {
+GetCollectionFileParentFolder(const DBMetaOptions& options, const meta::SegmentSchema& table_file) {
     uint64_t path_count = options.slave_paths_.size() + 1;
     std::string target_path = options.path_;
     uint64_t index = 0;
@@ -102,7 +102,7 @@ CreateCollectionPath(const DBMetaOptions& options, const std::string& collection
 }
 
 Status
-DeleteTablePath(const DBMetaOptions& options, const std::string& collection_id, bool force) {
+DeleteCollectionPath(const DBMetaOptions& options, const std::string& collection_id, bool force) {
     std::vector<std::string> paths = options.slave_paths_;
     paths.push_back(options.path_);
 
@@ -136,7 +136,7 @@ DeleteTablePath(const DBMetaOptions& options, const std::string& collection_id, 
 
 Status
 CreateCollectionFilePath(const DBMetaOptions& options, meta::SegmentSchema& table_file) {
-    std::string parent_path = GetTableFileParentFolder(options, table_file);
+    std::string parent_path = GetCollectionFileParentFolder(options, table_file);
 
     auto status = server::CommonUtil::CreateDirectory(parent_path);
     fiu_do_on("CreateCollectionFilePath.fail_create", status = Status(DB_INVALID_PATH, ""));
@@ -151,14 +151,14 @@ CreateCollectionFilePath(const DBMetaOptions& options, meta::SegmentSchema& tabl
 }
 
 Status
-GetTableFilePath(const DBMetaOptions& options, meta::SegmentSchema& table_file) {
+GetCollectionFilePath(const DBMetaOptions& options, meta::SegmentSchema& table_file) {
     std::string parent_path = ConstructParentFolder(options.path_, table_file);
     std::string file_path = parent_path + "/" + table_file.file_id_;
 
     bool s3_enable = false;
     server::Config& config = server::Config::GetInstance();
     config.GetStorageConfigS3Enable(s3_enable);
-    fiu_do_on("GetTableFilePath.enable_s3", s3_enable = true);
+    fiu_do_on("GetCollectionFilePath.enable_s3", s3_enable = true);
     if (s3_enable) {
         /* need not check file existence */
         table_file.location_ = file_path;
@@ -188,15 +188,15 @@ GetTableFilePath(const DBMetaOptions& options, meta::SegmentSchema& table_file) 
 }
 
 Status
-DeleteTableFilePath(const DBMetaOptions& options, meta::SegmentSchema& table_file) {
-    utils::GetTableFilePath(options, table_file);
+DeleteCollectionFilePath(const DBMetaOptions& options, meta::SegmentSchema& table_file) {
+    utils::GetCollectionFilePath(options, table_file);
     boost::filesystem::remove(table_file.location_);
     return Status::OK();
 }
 
 Status
 DeleteSegment(const DBMetaOptions& options, meta::SegmentSchema& table_file) {
-    utils::GetTableFilePath(options, table_file);
+    utils::GetCollectionFilePath(options, table_file);
     std::string segment_dir;
     GetParentPath(table_file.location_, segment_dir);
     boost::filesystem::remove_all(segment_dir);

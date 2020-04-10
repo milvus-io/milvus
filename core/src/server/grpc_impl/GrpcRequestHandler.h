@@ -82,12 +82,12 @@ class GrpcRequestHandler final : public ::milvus::grpc::MilvusService::Service, 
     // *
     // @brief This method is used to create collection
     //
-    // @param TableSchema, use to provide collection information to be created.
+    // @param CollectionSchema, use to provide collection information to be created.
     //
     // @return Status
     ::grpc::Status
-    CreateTable(::grpc::ServerContext* context, const ::milvus::grpc::TableSchema* request,
-                ::milvus::grpc::Status* response) override;
+    CreateCollection(::grpc::ServerContext* context, const ::milvus::grpc::CollectionSchema* request,
+                     ::milvus::grpc::Status* response) override;
     // *
     // @brief This method is used to test collection existence.
     //
@@ -95,44 +95,44 @@ class GrpcRequestHandler final : public ::milvus::grpc::MilvusService::Service, 
     //
     // @return BoolReply
     ::grpc::Status
-    HasTable(::grpc::ServerContext* context, const ::milvus::grpc::TableName* request,
-             ::milvus::grpc::BoolReply* response) override;
+    HasCollection(::grpc::ServerContext* context, const ::milvus::grpc::CollectionName* request,
+                  ::milvus::grpc::BoolReply* response) override;
     // *
     // @brief This method is used to get collection schema.
     //
     // @param CollectionName, target collection name.
     //
-    // @return TableSchema
+    // @return CollectionSchema
     ::grpc::Status
-    DescribeTable(::grpc::ServerContext* context, const ::milvus::grpc::TableName* request,
-                  ::milvus::grpc::TableSchema* response) override;
+    DescribeCollection(::grpc::ServerContext* context, const ::milvus::grpc::CollectionName* request,
+                       ::milvus::grpc::CollectionSchema* response) override;
     // *
     // @brief This method is used to get collection schema.
     //
     // @param CollectionName, target collection name.
     //
-    // @return TableRowCount
+    // @return CollectionRowCount
     ::grpc::Status
-    CountTable(::grpc::ServerContext* context, const ::milvus::grpc::TableName* request,
-               ::milvus::grpc::TableRowCount* response) override;
+    CountCollection(::grpc::ServerContext* context, const ::milvus::grpc::CollectionName* request,
+                    ::milvus::grpc::CollectionRowCount* response) override;
     // *
-    // @brief This method is used to list all tables.
+    // @brief This method is used to list all collections.
     //
     // @param Command, dummy parameter.
     //
     // @return CollectionNameList
     ::grpc::Status
-    ShowTables(::grpc::ServerContext* context, const ::milvus::grpc::Command* request,
-               ::milvus::grpc::TableNameList* response) override;
+    ShowCollections(::grpc::ServerContext* context, const ::milvus::grpc::Command* request,
+                    ::milvus::grpc::CollectionNameList* response) override;
     // *
     // @brief This method is used to get collection detail information.
     //
     // @param CollectionName, target collection name.
     //
-    // @return TableInfo
+    // @return CollectionInfo
     ::grpc::Status
-    ShowTableInfo(::grpc::ServerContext* context, const ::milvus::grpc::TableName* request,
-                  ::milvus::grpc::TableInfo* response);
+    ShowCollectionInfo(::grpc::ServerContext* context, const ::milvus::grpc::CollectionName* request,
+                       ::milvus::grpc::CollectionInfo* response);
 
     // *
     // @brief This method is used to delete collection.
@@ -141,8 +141,8 @@ class GrpcRequestHandler final : public ::milvus::grpc::MilvusService::Service, 
     //
     // @return CollectionNameList
     ::grpc::Status
-    DropTable(::grpc::ServerContext* context, const ::milvus::grpc::TableName* request,
-              ::milvus::grpc::Status* response) override;
+    DropCollection(::grpc::ServerContext* context, const ::milvus::grpc::CollectionName* request,
+                   ::milvus::grpc::Status* response) override;
     // *
     // @brief This method is used to build index by collection in sync mode.
     //
@@ -159,7 +159,7 @@ class GrpcRequestHandler final : public ::milvus::grpc::MilvusService::Service, 
     //
     // @return IndexParam
     ::grpc::Status
-    DescribeIndex(::grpc::ServerContext* context, const ::milvus::grpc::TableName* request,
+    DescribeIndex(::grpc::ServerContext* context, const ::milvus::grpc::CollectionName* request,
                   ::milvus::grpc::IndexParam* response) override;
     // *
     // @brief This method is used to drop index
@@ -168,7 +168,7 @@ class GrpcRequestHandler final : public ::milvus::grpc::MilvusService::Service, 
     //
     // @return Status
     ::grpc::Status
-    DropIndex(::grpc::ServerContext* context, const ::milvus::grpc::TableName* request,
+    DropIndex(::grpc::ServerContext* context, const ::milvus::grpc::CollectionName* request,
               ::milvus::grpc::Status* response) override;
     // *
     // @brief This method is used to create partition
@@ -186,7 +186,7 @@ class GrpcRequestHandler final : public ::milvus::grpc::MilvusService::Service, 
     //
     // @return PartitionList
     ::grpc::Status
-    ShowPartitions(::grpc::ServerContext* context, const ::milvus::grpc::TableName* request,
+    ShowPartitions(::grpc::ServerContext* context, const ::milvus::grpc::CollectionName* request,
                    ::milvus::grpc::PartitionList* response) override;
     // *
     // @brief This method is used to drop partition
@@ -281,8 +281,8 @@ class GrpcRequestHandler final : public ::milvus::grpc::MilvusService::Service, 
     //
     // @return Status
     ::grpc::Status
-    PreloadTable(::grpc::ServerContext* context, const ::milvus::grpc::TableName* request,
-                 ::milvus::grpc::Status* response) override;
+    PreloadCollection(::grpc::ServerContext* context, const ::milvus::grpc::CollectionName* request,
+                      ::milvus::grpc::Status* response) override;
 
     // *
     // @brief This method is used to flush buffer into storage.
@@ -300,7 +300,8 @@ class GrpcRequestHandler final : public ::milvus::grpc::MilvusService::Service, 
     //
     // @return Status
     ::grpc::Status
-    Compact(::grpc::ServerContext* context, const ::milvus::grpc::TableName* request, ::milvus::grpc::Status* response);
+    Compact(::grpc::ServerContext* context, const ::milvus::grpc::CollectionName* request,
+            ::milvus::grpc::Status* response);
 
     GrpcRequestHandler&
     RegisterRequestHandler(const RequestHandler& handler) {

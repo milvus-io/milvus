@@ -43,8 +43,8 @@
 #include "version.h"
 
 
-static const char* TABLE_NAME = "test_web";
-static constexpr int64_t TABLE_DIM = 256;
+static const char* COLLECTION_NAME = "test_web";
+static constexpr int64_t COLLECTION_DIM = 256;
 static constexpr int64_t INDEX_FILE_SIZE = 1024;
 static constexpr int64_t VECTOR_COUNT = 1000;
 static constexpr int64_t INSERT_LOOP = 10;
@@ -255,11 +255,11 @@ class WebHandlerTest : public testing::Test {
 
 TEST_F(WebHandlerTest, TABLE) {
     handler->RegisterRequestHandler(milvus::server::RequestHandler());
-    auto collection_name = milvus::server::web::OString(TABLE_NAME) + RandomName().c_str();
+    auto collection_name = milvus::server::web::OString(COLLECTION_NAME) + RandomName().c_str();
 
     auto collection_dto = milvus::server::web::TableRequestDto::createShared();
     collection_dto->collection_name = collection_name;
-    collection_dto->dimension = TABLE_DIM + 100000;
+    collection_dto->dimension = COLLECTION_DIM + 100000;
     collection_dto->index_file_size = INDEX_FILE_SIZE;
     collection_dto->metric_type = "L2";
 
@@ -268,7 +268,7 @@ TEST_F(WebHandlerTest, TABLE) {
     ASSERT_EQ(StatusCode::ILLEGAL_DIMENSION, status_dto->code->getValue());
 
     // invalid index file size
-    collection_dto->dimension = TABLE_DIM;
+    collection_dto->dimension = COLLECTION_DIM;
     collection_dto->index_file_size = -1;
     status_dto = handler->CreateTable(collection_dto);
     ASSERT_EQ(StatusCode::ILLEGAL_ARGUMENT, status_dto->code->getValue());
@@ -291,12 +291,12 @@ TEST_F(WebHandlerTest, TABLE) {
 
     // drop collection which not exists.
     status_dto = handler->DropTable(collection_name + "57575yfhfdhfhdh436gdsgpppdgsgv3233");
-    ASSERT_EQ(StatusCode::TABLE_NOT_EXISTS, status_dto->code->getValue());
+    ASSERT_EQ(StatusCode::COLLECTION_NOT_EXISTS, status_dto->code->getValue());
 }
 
 TEST_F(WebHandlerTest, HAS_COLLECTION_TEST) {
     handler->RegisterRequestHandler(milvus::server::RequestHandler());
-    auto collection_name = milvus::server::web::OString(TABLE_NAME) + RandomName().c_str();
+    auto collection_name = milvus::server::web::OString(COLLECTION_NAME) + RandomName().c_str();
 
     GenTable(collection_name->std_str(), 10, 10, "L2");
 
@@ -306,10 +306,10 @@ TEST_F(WebHandlerTest, HAS_COLLECTION_TEST) {
     ASSERT_EQ(0, status_dto->code->getValue());
 }
 
-TEST_F(WebHandlerTest, GET_TABLE) {
+TEST_F(WebHandlerTest, GET_COLLECTION) {
     handler->RegisterRequestHandler(milvus::server::RequestHandler());
 
-    auto collection_name = milvus::server::web::OString(TABLE_NAME) + RandomName().c_str();
+    auto collection_name = milvus::server::web::OString(COLLECTION_NAME) + RandomName().c_str();
     GenTable(collection_name->std_str(), 10, 10, "L2");
 
     milvus::server::web::OQueryParams query_params;
@@ -326,7 +326,7 @@ TEST_F(WebHandlerTest, GET_TABLE) {
 TEST_F(WebHandlerTest, INSERT_COUNT) {
     handler->RegisterRequestHandler(milvus::server::RequestHandler());
 
-    auto collection_name = milvus::server::web::OString(TABLE_NAME) + RandomName().c_str();
+    auto collection_name = milvus::server::web::OString(COLLECTION_NAME) + RandomName().c_str();
     GenTable(collection_name->std_str(), 16, 10, "L2");
 
     nlohmann::json body_json;
@@ -351,7 +351,7 @@ TEST_F(WebHandlerTest, INSERT_COUNT) {
 TEST_F(WebHandlerTest, INDEX) {
     handler->RegisterRequestHandler(milvus::server::RequestHandler());
 
-    auto collection_name = milvus::server::web::OString(TABLE_NAME) + RandomName().c_str();
+    auto collection_name = milvus::server::web::OString(COLLECTION_NAME) + RandomName().c_str();
     GenTable(collection_name->std_str(), 16, 10, "L2");
 
     nlohmann::json index_json;
@@ -386,7 +386,7 @@ TEST_F(WebHandlerTest, INDEX) {
 TEST_F(WebHandlerTest, PARTITION) {
     handler->RegisterRequestHandler(milvus::server::RequestHandler());
 
-    auto collection_name = milvus::server::web::OString(TABLE_NAME) + RandomName().c_str();
+    auto collection_name = milvus::server::web::OString(COLLECTION_NAME) + RandomName().c_str();
     GenTable(collection_name->std_str(), 16, 10, "L2");
 
     auto partition_dto = milvus::server::web::PartitionRequestDto::createShared();
@@ -418,17 +418,17 @@ TEST_F(WebHandlerTest, PARTITION) {
 TEST_F(WebHandlerTest, SEARCH) {
     handler->RegisterRequestHandler(milvus::server::RequestHandler());
 
-    auto collection_name = milvus::server::web::OString(TABLE_NAME) + RandomName().c_str();
-    GenTable(collection_name->std_str(), TABLE_DIM, 10, "L2");
+    auto collection_name = milvus::server::web::OString(COLLECTION_NAME) + RandomName().c_str();
+    GenTable(collection_name->std_str(), COLLECTION_DIM, 10, "L2");
 
     nlohmann::json insert_json;
-    insert_json["vectors"] = RandomRecordsJson(TABLE_DIM, 1000);
+    insert_json["vectors"] = RandomRecordsJson(COLLECTION_DIM, 1000);
     auto ids_dto = milvus::server::web::VectorIdsDto::createShared();
     auto status_dto = handler->Insert(collection_name, insert_json.dump().c_str(), ids_dto);
     ASSERT_EQ(milvus::server::web::SUCCESS, status_dto->code->getValue());
 
     nlohmann::json search_pram_json;
-    search_pram_json["vectors"] = RandomRecordsJson(TABLE_DIM, 10);
+    search_pram_json["vectors"] = RandomRecordsJson(COLLECTION_DIM, 10);
     search_pram_json["topk"] = 1;
     search_pram_json["params"] = nlohmann::json::parse("{\"nprobe\": 10}");
 
@@ -459,7 +459,7 @@ TEST_F(WebHandlerTest, SYSTEM_INFO) {
 TEST_F(WebHandlerTest, FLUSH) {
     handler->RegisterRequestHandler(milvus::server::RequestHandler());
 
-    auto collection_name = milvus::server::web::OString(TABLE_NAME) + RandomName().c_str();
+    auto collection_name = milvus::server::web::OString(COLLECTION_NAME) + RandomName().c_str();
     GenTable(collection_name->std_str(), 16, 10, "L2");
 
     nlohmann::json body_json;
@@ -478,7 +478,7 @@ TEST_F(WebHandlerTest, FLUSH) {
 TEST_F(WebHandlerTest, COMPACT) {
     handler->RegisterRequestHandler(milvus::server::RequestHandler());
 
-    auto collection_name = milvus::server::web::OString(TABLE_NAME) + RandomName().c_str();
+    auto collection_name = milvus::server::web::OString(COLLECTION_NAME) + RandomName().c_str();
     GenTable(collection_name->std_str(), 16, 10, "L2");
 
     nlohmann::json body_json;
@@ -600,7 +600,7 @@ static const char* CONTROLLER_TEST_VALID_CONFIG_STR =
     "";
 }  // namespace
 
-static const char* CONTROLLER_TEST_TABLE_NAME = "controller_unit_test";
+static const char* CONTROLLER_TEST_COLLECTION_NAME = "controller_unit_test";
 static const char* CONTROLLER_TEST_CONFIG_DIR = "/tmp/milvus_web_controller_test/";
 static const char* CONTROLLER_TEST_CONFIG_FILE = "config.yaml";
 
@@ -937,7 +937,7 @@ TEST_F(WebControllerTest, OPTIONS) {
     ASSERT_EQ(OStatus::CODE_204.code, response->getStatusCode());
 }
 
-TEST_F(WebControllerTest, CREATE_TABLE) {
+TEST_F(WebControllerTest, CREATE_COLLECTION) {
     auto collection_dto = milvus::server::web::TableRequestDto::createShared();
     auto response = client_ptr->createTable(collection_dto, conncetion_ptr);
     ASSERT_EQ(OStatus::CODE_400.code, response->getStatusCode());
@@ -967,7 +967,7 @@ TEST_F(WebControllerTest, CREATE_TABLE) {
     ASSERT_EQ(OStatus::CODE_400.code, response->getStatusCode());
 }
 
-TEST_F(WebControllerTest, GET_TABLE_META) {
+TEST_F(WebControllerTest, GET_COLLECTION_META) {
     OString collection_name = "web_test_create_collection" + OString(RandomName().c_str());
     GenTable(client_ptr, conncetion_ptr, collection_name, 10, 10, "L2");
 
@@ -987,14 +987,14 @@ TEST_F(WebControllerTest, GET_TABLE_META) {
     response = client_ptr->getTable(collection_name, "", conncetion_ptr);
     ASSERT_EQ(OStatus::CODE_400.code, response->getStatusCode());
     auto status_sto = response->readBodyToDto<milvus::server::web::StatusDto>(object_mapper.get());
-    ASSERT_EQ(milvus::server::web::StatusCode::ILLEGAL_TABLE_NAME, status_sto->code->getValue());
+    ASSERT_EQ(milvus::server::web::StatusCode::ILLEGAL_COLLECTION_NAME, status_sto->code->getValue());
 
     collection_name = "test_collection_not_found_000000000111010101002020203020aaaaa3030435";
     response = client_ptr->getTable(collection_name, "", conncetion_ptr);
     ASSERT_EQ(OStatus::CODE_404.code, response->getStatusCode());
 }
 
-TEST_F(WebControllerTest, GET_TABLE_STAT) {
+TEST_F(WebControllerTest, GET_COLLECTION_STAT) {
     OString collection_name = "web_test_get_collection_stat" + OString(RandomName().c_str());
     GenTable(client_ptr, conncetion_ptr, collection_name, 128, 5, "L2");
 
@@ -1025,7 +1025,7 @@ TEST_F(WebControllerTest, GET_TABLE_STAT) {
     ASSERT_TRUE(seg0_stat.contains("size"));
 }
 
-TEST_F(WebControllerTest, SHOW_TABLES) {
+TEST_F(WebControllerTest, SHOW_COLLECTIONS) {
     // test query collection limit 1
     auto response = client_ptr->showTables("1", "1", conncetion_ptr);
     ASSERT_EQ(OStatus::CODE_200.code, response->getStatusCode());
@@ -1053,7 +1053,7 @@ TEST_F(WebControllerTest, SHOW_TABLES) {
     ASSERT_EQ(OStatus::CODE_400.code, response->getStatusCode());
 }
 
-TEST_F(WebControllerTest, DROP_TABLE) {
+TEST_F(WebControllerTest, DROP_COLLECTION) {
     auto collection_name = "collection_drop_test" + OString(RandomName().c_str());
     GenTable(client_ptr, conncetion_ptr, collection_name, 128, 100, "L2");
     sleep(1);
@@ -1065,7 +1065,7 @@ TEST_F(WebControllerTest, DROP_TABLE) {
     response = client_ptr->dropTable(collection_name, conncetion_ptr);
     ASSERT_EQ(OStatus::CODE_404.code, response->getStatusCode());
     auto error_dto = response->readBodyToDto<milvus::server::web::StatusDto>(object_mapper.get());
-    ASSERT_EQ(milvus::server::web::StatusCode::TABLE_NOT_EXISTS, error_dto->code->getValue());
+    ASSERT_EQ(milvus::server::web::StatusCode::COLLECTION_NOT_EXISTS, error_dto->code->getValue());
 }
 
 TEST_F(WebControllerTest, INSERT) {
@@ -1202,7 +1202,7 @@ TEST_F(WebControllerTest, INDEX) {
     response = client_ptr->getIndex(collection_name + "dfaedXXXdfdfet4t343aa4", conncetion_ptr);
     ASSERT_EQ(OStatus::CODE_404.code, response->getStatusCode());
     auto error_dto = response->readBodyToDto<milvus::server::web::StatusDto>(object_mapper.get());
-    ASSERT_EQ(milvus::server::web::StatusCode::TABLE_NOT_EXISTS, error_dto->code->getValue());
+    ASSERT_EQ(milvus::server::web::StatusCode::COLLECTION_NOT_EXISTS, error_dto->code->getValue());
 }
 
 TEST_F(WebControllerTest, PARTITION) {
@@ -1229,7 +1229,7 @@ TEST_F(WebControllerTest, PARTITION) {
     response = client_ptr->createPartition(collection_name + "afafanotgitdiexists", par_param);
     ASSERT_EQ(OStatus::CODE_404.code, response->getStatusCode());
     error_dto = response->readBodyToDto<milvus::server::web::StatusDto>(object_mapper.get());
-    ASSERT_EQ(milvus::server::web::StatusCode::TABLE_NOT_EXISTS, error_dto->code);
+    ASSERT_EQ(milvus::server::web::StatusCode::COLLECTION_NOT_EXISTS, error_dto->code);
 
     // insert 200 vectors into collection with tag = 'tag01'
     auto status = InsertData(client_ptr, conncetion_ptr, collection_name, 64, 200, "tag01");
@@ -1255,7 +1255,7 @@ TEST_F(WebControllerTest, PARTITION) {
     response = client_ptr->showPartitions(collection_name + "dfafaefaluanqibazao990099", "0", "10", conncetion_ptr);
     ASSERT_EQ(OStatus::CODE_404.code, response->getStatusCode());
     error_dto = response->readBodyToDto<milvus::server::web::StatusDto>(object_mapper.get());
-    ASSERT_EQ(milvus::server::web::StatusCode::TABLE_NOT_EXISTS, error_dto->code->getValue());
+    ASSERT_EQ(milvus::server::web::StatusCode::COLLECTION_NOT_EXISTS, error_dto->code->getValue());
 
     response = client_ptr->dropPartition(collection_name, "{\"partition_tag\": \"tag01\"}", conncetion_ptr);
     ASSERT_EQ(OStatus::CODE_204.code, response->getStatusCode());
@@ -1428,7 +1428,7 @@ TEST_F(WebControllerTest, SEARCH) {
     response = client_ptr->vectorsOp(collection_name + "999piyanning", search_json.dump().c_str(), conncetion_ptr);
     ASSERT_EQ(OStatus::CODE_404.code, response->getStatusCode());
     error_dto = response->readBodyToDto<milvus::server::web::StatusDto>(object_mapper.get());
-    ASSERT_EQ(milvus::server::web::StatusCode::TABLE_NOT_EXISTS, error_dto->code->getValue());
+    ASSERT_EQ(milvus::server::web::StatusCode::COLLECTION_NOT_EXISTS, error_dto->code->getValue());
 }
 
 TEST_F(WebControllerTest, SEARCH_BIN) {
@@ -1794,7 +1794,7 @@ TEST_F(WebControllerTest, DEVICES_CONFIG) {
 }
 
 TEST_F(WebControllerTest, FLUSH) {
-    auto collection_name = milvus::server::web::OString(TABLE_NAME) + RandomName().c_str();
+    auto collection_name = milvus::server::web::OString(COLLECTION_NAME) + RandomName().c_str();
     GenTable(client_ptr, conncetion_ptr, collection_name, 16, 10, "L2");
 
     auto status = InsertData(client_ptr, conncetion_ptr, collection_name, 16, 1000);

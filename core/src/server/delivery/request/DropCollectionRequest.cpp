@@ -47,22 +47,22 @@ DropCollectionRequest::OnExecute() {
 
         // step 2: check collection existence
         // only process root collection, ignore partition collection
-        engine::meta::CollectionSchema table_schema;
-        table_schema.collection_id_ = collection_name_;
-        status = DBWrapper::DB()->DescribeCollection(table_schema);
+        engine::meta::CollectionSchema collection_schema;
+        collection_schema.collection_id_ = collection_name_;
+        status = DBWrapper::DB()->DescribeCollection(collection_schema);
         fiu_do_on("DropCollectionRequest.OnExecute.db_not_found", status = Status(milvus::DB_NOT_FOUND, ""));
-        fiu_do_on("DropCollectionRequest.OnExecute.describe_table_fail",
+        fiu_do_on("DropCollectionRequest.OnExecute.describe_collection_fail",
                   status = Status(milvus::SERVER_UNEXPECTED_ERROR, ""));
         fiu_do_on("DropCollectionRequest.OnExecute.throw_std_exception", throw std::exception());
         if (!status.ok()) {
             if (status.code() == DB_NOT_FOUND) {
-                return Status(SERVER_TABLE_NOT_EXIST, TableNotExistMsg(collection_name_));
+                return Status(SERVER_COLLECTION_NOT_EXIST, CollectionNotExistMsg(collection_name_));
             } else {
                 return status;
             }
         } else {
-            if (!table_schema.owner_collection_.empty()) {
-                return Status(SERVER_INVALID_TABLE_NAME, TableNotExistMsg(collection_name_));
+            if (!collection_schema.owner_collection_.empty()) {
+                return Status(SERVER_INVALID_COLLECTION_NAME, CollectionNotExistMsg(collection_name_));
             }
         }
 
@@ -70,7 +70,7 @@ DropCollectionRequest::OnExecute() {
 
         // step 3: Drop collection
         status = DBWrapper::DB()->DropCollection(collection_name_);
-        fiu_do_on("DropCollectionRequest.OnExecute.drop_table_fail",
+        fiu_do_on("DropCollectionRequest.OnExecute.drop_collection_fail",
                   status = Status(milvus::SERVER_UNEXPECTED_ERROR, ""));
         if (!status.ok()) {
             return status;
