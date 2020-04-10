@@ -24,7 +24,7 @@
 #include <boost/filesystem/operations.hpp>
 #include "src/db/OngoingFileChecker.h"
 
-TEST_F(MetaTest, TABLE_TEST) {
+TEST_F(MetaTest, COLLECTION_TEST) {
     auto collection_id = "meta_test_table";
 
     milvus::engine::meta::CollectionSchema collection;
@@ -143,22 +143,22 @@ TEST_F(MetaTest, FALID_TEST) {
         fiu_disable("SqliteMetaImpl.CreateCollectionFile.throw_exception");
     }
     {
-        FIU_ENABLE_FIU("SqliteMetaImpl.DeleteTableFiles.throw_exception");
-        status = impl_->DeleteTableFiles(collection.collection_id_);
+        FIU_ENABLE_FIU("SqliteMetaImpl.DeleteCollectionFiles.throw_exception");
+        status = impl_->DeleteCollectionFiles(collection.collection_id_);
         ASSERT_FALSE(status.ok());
-        fiu_disable("SqliteMetaImpl.DeleteTableFiles.throw_exception");
+        fiu_disable("SqliteMetaImpl.DeleteCollectionFiles.throw_exception");
     }
     {
         milvus::engine::meta::SegmentsSchema schemas;
         std::vector<size_t> ids;
-        status = impl_->GetTableFiles("notexist", ids, schemas);
+        status = impl_->GetCollectionFiles("notexist", ids, schemas);
         ASSERT_FALSE(status.ok());
 
-        FIU_ENABLE_FIU("SqliteMetaImpl.GetTableFiles.throw_exception");
-        status = impl_->GetTableFiles(collection_id, ids, schemas);
+        FIU_ENABLE_FIU("SqliteMetaImpl.GetCollectionFiles.throw_exception");
+        status = impl_->GetCollectionFiles(collection_id, ids, schemas);
         ASSERT_FALSE(status.ok());
         ASSERT_EQ(status.code(), milvus::DB_META_TRANSACTION_FAILED);
-        fiu_disable("SqliteMetaImpl.GetTableFiles.throw_exception");
+        fiu_disable("SqliteMetaImpl.GetCollectionFiles.throw_exception");
     }
     {
         FIU_ENABLE_FIU("SqliteMetaImpl.UpdateCollectionFlag.throw_exception");
@@ -278,10 +278,10 @@ TEST_F(MetaTest, FALID_TEST) {
         impl_->UpdateCollectionFile(file);
 
         milvus::engine::meta::SegmentsSchema files;
-        FIU_ENABLE_FIU("SqliteMetaImpl_FilesToIndex_TableNotFound");
+        FIU_ENABLE_FIU("SqliteMetaImpl_FilesToIndex_CollectionNotFound");
         status = impl_->FilesToIndex(files);
         ASSERT_EQ(status.code(), milvus::DB_NOT_FOUND);
-        fiu_disable("SqliteMetaImpl_FilesToIndex_TableNotFound");
+        fiu_disable("SqliteMetaImpl_FilesToIndex_CollectionNotFound");
 
         FIU_ENABLE_FIU("SqliteMetaImpl.FilesToIndex.throw_exception");
         status = impl_->FilesToIndex(files);
@@ -336,24 +336,24 @@ TEST_F(MetaTest, FALID_TEST) {
         ASSERT_EQ(status.code(), milvus::DB_META_TRANSACTION_FAILED);
         fiu_disable("SqliteMetaImpl.CleanUpFilesWithTTL.RemoveFile_FailCommited");
 
-        FIU_ENABLE_FIU("SqliteMetaImpl.CleanUpFilesWithTTL.RemoveTable_Failcommited");
+        FIU_ENABLE_FIU("SqliteMetaImpl.CleanUpFilesWithTTL.RemoveCollection_Failcommited");
         status = impl_->CleanUpFilesWithTTL(1);
         ASSERT_EQ(status.code(), milvus::DB_META_TRANSACTION_FAILED);
-        fiu_disable("SqliteMetaImpl.CleanUpFilesWithTTL.RemoveTable_Failcommited");
+        fiu_disable("SqliteMetaImpl.CleanUpFilesWithTTL.RemoveCollection_Failcommited");
 
-        FIU_ENABLE_FIU("SqliteMetaImpl.CleanUpFilesWithTTL.RemoveTable_ThrowException");
+        FIU_ENABLE_FIU("SqliteMetaImpl.CleanUpFilesWithTTL.RemoveCollection_ThrowException");
         status = impl_->CleanUpFilesWithTTL(1);
         ASSERT_EQ(status.code(), milvus::DB_META_TRANSACTION_FAILED);
-        fiu_disable("SqliteMetaImpl.CleanUpFilesWithTTL.RemoveTable_ThrowException");
+        fiu_disable("SqliteMetaImpl.CleanUpFilesWithTTL.RemoveCollection_ThrowException");
 
-        FIU_ENABLE_FIU("SqliteMetaImpl.CleanUpFilesWithTTL.RemoveTableFolder_ThrowException");
+        FIU_ENABLE_FIU("SqliteMetaImpl.CleanUpFilesWithTTL.RemoveCollectionFolder_ThrowException");
         status = impl_->CleanUpFilesWithTTL(1);
         ASSERT_EQ(status.code(), milvus::DB_META_TRANSACTION_FAILED);
-        fiu_disable("SqliteMetaImpl.CleanUpFilesWithTTL.RemoveTableFolder_ThrowException");
+        fiu_disable("SqliteMetaImpl.CleanUpFilesWithTTL.RemoveCollectionFolder_ThrowException");
     }
 }
 
-TEST_F(MetaTest, TABLE_FILE_TEST) {
+TEST_F(MetaTest, COLLECTION_FILE_TEST) {
     auto collection_id = "meta_test_table";
 
     milvus::engine::meta::CollectionSchema collection;
@@ -382,7 +382,7 @@ TEST_F(MetaTest, TABLE_FILE_TEST) {
     ASSERT_EQ(table_file.file_type_, new_file_type);
 }
 
-TEST_F(MetaTest, TABLE_FILE_ROW_COUNT_TEST) {
+TEST_F(MetaTest, COLLECTION_FILE_ROW_COUNT_TEST) {
     auto collection_id = "row_count_test_table";
 
     milvus::engine::meta::CollectionSchema collection;
@@ -411,7 +411,7 @@ TEST_F(MetaTest, TABLE_FILE_ROW_COUNT_TEST) {
 
     std::vector<size_t> ids = {table_file.id_};
     milvus::engine::meta::SegmentsSchema schemas;
-    status = impl_->GetTableFiles(collection_id, ids, schemas);
+    status = impl_->GetCollectionFiles(collection_id, ids, schemas);
     ASSERT_EQ(schemas.size(), 1UL);
     ASSERT_EQ(table_file.row_count_, schemas[0].row_count_);
     ASSERT_EQ(table_file.file_id_, schemas[0].file_id_);
@@ -471,7 +471,7 @@ TEST_F(MetaTest, ARCHIVE_TEST_DAYS) {
     int i = 0;
 
     milvus::engine::meta::SegmentsSchema files_get;
-    status = impl.GetTableFiles(table_file.collection_id_, ids, files_get);
+    status = impl.GetCollectionFiles(table_file.collection_id_, ids, files_get);
     ASSERT_TRUE(status.ok());
 
     for (auto& file : files_get) {
@@ -527,7 +527,7 @@ TEST_F(MetaTest, ARCHIVE_TEST_DISK) {
     int i = 0;
 
     milvus::engine::meta::SegmentsSchema files_get;
-    status = impl.GetTableFiles(table_file.collection_id_, ids, files_get);
+    status = impl.GetCollectionFiles(table_file.collection_id_, ids, files_get);
     ASSERT_TRUE(status.ok());
 
     for (auto& file : files_get) {
@@ -540,7 +540,7 @@ TEST_F(MetaTest, ARCHIVE_TEST_DISK) {
     impl.DropAll();
 }
 
-TEST_F(MetaTest, TABLE_FILES_TEST) {
+TEST_F(MetaTest, COLLECTION_FILES_TEST) {
     auto collection_id = "meta_test_group";
 
     milvus::engine::meta::CollectionSchema collection;
@@ -656,7 +656,7 @@ TEST_F(MetaTest, TABLE_FILES_TEST) {
                          to_index_files_cnt + index_files_cnt;
     ASSERT_EQ(table_files.size(), total_cnt);
 
-    status = impl_->DeleteTableFiles(collection_id);
+    status = impl_->DeleteCollectionFiles(collection_id);
     ASSERT_TRUE(status.ok());
 
     status = impl_->CreateCollectionFile(table_file);
@@ -733,7 +733,7 @@ TEST_F(MetaTest, LSN_TEST) {
     collection.collection_id_ = collection_id;
     auto status = impl_->CreateCollection(collection);
 
-    status = impl_->UpdateTableFlushLSN(collection_id, lsn);
+    status = impl_->UpdateCollectionFlushLSN(collection_id, lsn);
     ASSERT_TRUE(status.ok());
 
     uint64_t temp_lsb = 0;

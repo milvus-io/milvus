@@ -41,7 +41,7 @@ CreatePartitionRequest::OnExecute() {
     try {
         // step 1: check arguments
         auto status = ValidationUtil::ValidateCollectionName(collection_name_);
-        fiu_do_on("CreatePartitionRequest.OnExecute.invalid_table_name",
+        fiu_do_on("CreatePartitionRequest.OnExecute.invalid_collection_name",
                   status = Status(milvus::SERVER_UNEXPECTED_ERROR, ""));
         if (!status.ok()) {
             return status;
@@ -59,20 +59,20 @@ CreatePartitionRequest::OnExecute() {
         }
 
         // only process root collection, ignore partition collection
-        engine::meta::CollectionSchema table_schema;
-        table_schema.collection_id_ = collection_name_;
-        status = DBWrapper::DB()->DescribeCollection(table_schema);
+        engine::meta::CollectionSchema collection_schema;
+        collection_schema.collection_id_ = collection_name_;
+        status = DBWrapper::DB()->DescribeCollection(collection_schema);
         fiu_do_on("CreatePartitionRequest.OnExecute.invalid_partition_tags",
                   status = Status(milvus::SERVER_UNEXPECTED_ERROR, ""));
         if (!status.ok()) {
             if (status.code() == DB_NOT_FOUND) {
-                return Status(SERVER_TABLE_NOT_EXIST, TableNotExistMsg(collection_name_));
+                return Status(SERVER_COLLECTION_NOT_EXIST, CollectionNotExistMsg(collection_name_));
             } else {
                 return status;
             }
         } else {
-            if (!table_schema.owner_collection_.empty()) {
-                return Status(SERVER_INVALID_TABLE_NAME, TableNotExistMsg(collection_name_));
+            if (!collection_schema.owner_collection_.empty()) {
+                return Status(SERVER_INVALID_COLLECTION_NAME, CollectionNotExistMsg(collection_name_));
             }
         }
 
@@ -87,7 +87,7 @@ CreatePartitionRequest::OnExecute() {
         if (!status.ok()) {
             // partition could exist
             if (status.code() == DB_ALREADY_EXIST) {
-                return Status(SERVER_INVALID_TABLE_NAME, status.message());
+                return Status(SERVER_INVALID_COLLECTION_NAME, status.message());
             }
             return status;
         }

@@ -209,7 +209,7 @@ class BaseRequest {
     OnPostExecute();
 
     std::string
-    TableNotExistMsg(const std::string& collection_name);
+    CollectionNotExistMsg(const std::string& collection_name);
 
  protected:
     const std::shared_ptr<milvus::server::Context> context_;

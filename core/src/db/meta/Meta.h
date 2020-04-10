@@ -58,7 +58,7 @@ class Meta {
     UpdateCollectionFlag(const std::string& collection_id, int64_t flag) = 0;
 
     virtual Status
-    UpdateTableFlushLSN(const std::string& collection_id, uint64_t flush_lsn) = 0;
+    UpdateCollectionFlushLSN(const std::string& collection_id, uint64_t flush_lsn) = 0;
 
     virtual Status
     GetCollectionFlushLSN(const std::string& collection_id, uint64_t& flush_lsn) = 0;
@@ -67,13 +67,14 @@ class Meta {
     DropCollection(const std::string& collection_id) = 0;
 
     virtual Status
-    DeleteTableFiles(const std::string& collection_id) = 0;
+    DeleteCollectionFiles(const std::string& collection_id) = 0;
 
     virtual Status
     CreateCollectionFile(SegmentSchema& file_schema) = 0;
 
     virtual Status
-    GetTableFiles(const std::string& collection_id, const std::vector<size_t>& ids, SegmentsSchema& table_files) = 0;
+    GetCollectionFiles(const std::string& collection_id, const std::vector<size_t>& ids,
+                       SegmentsSchema& table_files) = 0;
 
     virtual Status
     GetCollectionFilesBySegmentId(const std::string& segment_id, SegmentsSchema& table_files) = 0;

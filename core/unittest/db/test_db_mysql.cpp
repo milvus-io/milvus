@@ -24,16 +24,16 @@
 
 namespace {
 
-static const char* TABLE_NAME = "test_group";
-static constexpr int64_t TABLE_DIM = 256;
+static const char* COLLECTION_NAME = "test_group";
+static constexpr int64_t COLLECTION_DIM = 256;
 static constexpr int64_t VECTOR_COUNT = 25000;
 static constexpr int64_t INSERT_LOOP = 1000;
 
 milvus::engine::meta::CollectionSchema
-BuildTableSchema() {
+BuildCollectionSchema() {
     milvus::engine::meta::CollectionSchema collection_info;
-    collection_info.dimension_ = TABLE_DIM;
-    collection_info.collection_id_ = TABLE_NAME;
+    collection_info.dimension_ = COLLECTION_DIM;
+    collection_info.collection_id_ = COLLECTION_NAME;
     collection_info.engine_type_ = (int)milvus::engine::EngineType::FAISS_IDMAP;
     return collection_info;
 }
@@ -42,11 +42,11 @@ void
 BuildVectors(uint64_t n, uint64_t batch_index, milvus::engine::VectorsData& vectors) {
     vectors.vector_count_ = n;
     vectors.float_data_.clear();
-    vectors.float_data_.resize(n * TABLE_DIM);
+    vectors.float_data_.resize(n * COLLECTION_DIM);
     float* data = vectors.float_data_.data();
     for (uint64_t i = 0; i < n; i++) {
-        for (int64_t j = 0; j < TABLE_DIM; j++) data[TABLE_DIM * i + j] = drand48();
-        data[TABLE_DIM * i] += i / 2000.;
+        for (int64_t j = 0; j < COLLECTION_DIM; j++) data[COLLECTION_DIM * i + j] = drand48();
+        data[COLLECTION_DIM * i] += i / 2000.;
 
         vectors.id_array_.push_back(n * batch_index + i);
     }
@@ -55,14 +55,14 @@ BuildVectors(uint64_t n, uint64_t batch_index, milvus::engine::VectorsData& vect
 }  // namespace
 
 TEST_F(MySqlDBTest, DB_TEST) {
-    milvus::engine::meta::CollectionSchema collection_info = BuildTableSchema();
+    milvus::engine::meta::CollectionSchema collection_info = BuildCollectionSchema();
     auto stat = db_->CreateCollection(collection_info);
 
     milvus::engine::meta::CollectionSchema collection_info_get;
-    collection_info_get.collection_id_ = TABLE_NAME;
+    collection_info_get.collection_id_ = COLLECTION_NAME;
     stat = db_->DescribeCollection(collection_info_get);
     ASSERT_TRUE(stat.ok());
-    ASSERT_EQ(collection_info_get.dimension_, TABLE_DIM);
+    ASSERT_EQ(collection_info_get.dimension_, COLLECTION_DIM);
 
     uint64_t qb = 5;
     milvus::engine::VectorsData qxb;
@@ -91,7 +91,7 @@ TEST_F(MySqlDBTest, DB_TEST) {
             START_TIMER;
 
             std::vector<std::string> tags;
-            stat = db_->Query(dummy_context_, TABLE_NAME, tags, k, json_params, qxb, result_ids, result_distances);
+            stat = db_->Query(dummy_context_, COLLECTION_NAME, tags, k, json_params, qxb, result_ids, result_distances);
             ss << "Search " << j << " With Size " << count / milvus::engine::M << " M";
             STOP_TIMER(ss.str());
 
@@ -114,14 +114,14 @@ TEST_F(MySqlDBTest, DB_TEST) {
 
     for (auto i = 0; i < loop; ++i) {
         if (i == 40) {
-            db_->InsertVectors(TABLE_NAME, "", qxb);
+            db_->InsertVectors(COLLECTION_NAME, "", qxb);
             ASSERT_EQ(qxb.id_array_.size(), qb);
         } else {
             uint64_t nb = 50;
             milvus::engine::VectorsData xb;
             BuildVectors(nb, i, xb);
 
-            db_->InsertVectors(TABLE_NAME, "", xb);
+            db_->InsertVectors(COLLECTION_NAME, "", xb);
             ASSERT_EQ(xb.id_array_.size(), nb);
         }
 
@@ -134,20 +134,20 @@ TEST_F(MySqlDBTest, DB_TEST) {
     search.join();
 
     uint64_t count;
-    stat = db_->GetCollectionRowCount(TABLE_NAME, count);
+    stat = db_->GetCollectionRowCount(COLLECTION_NAME, count);
     ASSERT_TRUE(stat.ok());
     ASSERT_GT(count, 0);
 }
 
 TEST_F(MySqlDBTest, SEARCH_TEST) {
-    milvus::engine::meta::CollectionSchema collection_info = BuildTableSchema();
+    milvus::engine::meta::CollectionSchema collection_info = BuildCollectionSchema();
     auto stat = db_->CreateCollection(collection_info);
 
     milvus::engine::meta::CollectionSchema collection_info_get;
-    collection_info_get.collection_id_ = TABLE_NAME;
+    collection_info_get.collection_id_ = COLLECTION_NAME;
     stat = db_->DescribeCollection(collection_info_get);
     ASSERT_TRUE(stat.ok());
-    ASSERT_EQ(collection_info_get.dimension_, TABLE_DIM);
+    ASSERT_EQ(collection_info_get.dimension_, COLLECTION_DIM);
 
     // prepare raw data
     size_t nb = VECTOR_COUNT;
@@ -155,21 +155,21 @@ TEST_F(MySqlDBTest, SEARCH_TEST) {
     size_t k = 5;
     milvus::engine::VectorsData xb, xq;
     xb.vector_count_ = nb;
-    xb.float_data_.resize(nb * TABLE_DIM);
+    xb.float_data_.resize(nb * COLLECTION_DIM);
     xq.vector_count_ = nq;
-    xq.float_data_.resize(nq * TABLE_DIM);
+    xq.float_data_.resize(nq * COLLECTION_DIM);
     xb.id_array_.resize(nb);
 
     std::random_device rd;
     std::mt19937 gen(rd());
     std::uniform_real_distribution<> dis_xt(-1.0, 1.0);
-    for (size_t i = 0; i < nb * TABLE_DIM; i++) {
+    for (size_t i = 0; i < nb * COLLECTION_DIM; i++) {
         xb.float_data_[i] = dis_xt(gen);
         if (i < nb) {
             xb.id_array_[i] = i;
         }
     }
-    for (size_t i = 0; i < nq * TABLE_DIM; i++) {
+    for (size_t i = 0; i < nq * COLLECTION_DIM; i++) {
         xq.float_data_[i] = dis_xt(gen);
     }
 
@@ -180,7 +180,7 @@ TEST_F(MySqlDBTest, SEARCH_TEST) {
     std::vector<float> dis(k * nq);
 
     // insert data
-    stat = db_->InsertVectors(TABLE_NAME, "", xb);
+    stat = db_->InsertVectors(COLLECTION_NAME, "", xb);
     ASSERT_TRUE(stat.ok());
 
     //    sleep(2);  // wait until build index finish
@@ -191,12 +191,12 @@ TEST_F(MySqlDBTest, SEARCH_TEST) {
     milvus::engine::ResultIds result_ids;
     milvus::engine::ResultDistances result_distances;
     milvus::json json_params = {{"nprobe", 10}};
-    stat = db_->Query(dummy_context_, TABLE_NAME, tags, k, json_params, xq, result_ids, result_distances);
+    stat = db_->Query(dummy_context_, COLLECTION_NAME, tags, k, json_params, xq, result_ids, result_distances);
     ASSERT_TRUE(stat.ok());
 }
 
 TEST_F(MySqlDBTest, ARHIVE_DISK_CHECK) {
-    milvus::engine::meta::CollectionSchema collection_info = BuildTableSchema();
+    milvus::engine::meta::CollectionSchema collection_info = BuildCollectionSchema();
     auto stat = db_->CreateCollection(collection_info);
 
     std::vector<milvus::engine::meta::CollectionSchema> table_schema_array;
@@ -204,7 +204,7 @@ TEST_F(MySqlDBTest, ARHIVE_DISK_CHECK) {
     ASSERT_TRUE(stat.ok());
     bool bfound = false;
     for (auto& schema : table_schema_array) {
-        if (schema.collection_id_ == TABLE_NAME) {
+        if (schema.collection_id_ == COLLECTION_NAME) {
             bfound = true;
             break;
         }
@@ -212,21 +212,21 @@ TEST_F(MySqlDBTest, ARHIVE_DISK_CHECK) {
     ASSERT_TRUE(bfound);
 
     fiu_init(0);
-    FIU_ENABLE_FIU("MySQLMetaImpl.AllTable.null_connection");
+    FIU_ENABLE_FIU("MySQLMetaImpl.AllCollection.null_connection");
     stat = db_->AllCollections(table_schema_array);
     ASSERT_FALSE(stat.ok());
 
-    FIU_ENABLE_FIU("MySQLMetaImpl.AllTable.throw_exception");
+    FIU_ENABLE_FIU("MySQLMetaImpl.AllCollection.throw_exception");
     stat = db_->AllCollections(table_schema_array);
     ASSERT_FALSE(stat.ok());
-    fiu_disable("MySQLMetaImpl.AllTable.null_connection");
-    fiu_disable("MySQLMetaImpl.AllTable.throw_exception");
+    fiu_disable("MySQLMetaImpl.AllCollection.null_connection");
+    fiu_disable("MySQLMetaImpl.AllCollection.throw_exception");
 
     milvus::engine::meta::CollectionSchema collection_info_get;
-    collection_info_get.collection_id_ = TABLE_NAME;
+    collection_info_get.collection_id_ = COLLECTION_NAME;
     stat = db_->DescribeCollection(collection_info_get);
     ASSERT_TRUE(stat.ok());
-    ASSERT_EQ(collection_info_get.dimension_, TABLE_DIM);
+    ASSERT_EQ(collection_info_get.dimension_, COLLECTION_DIM);
 
     milvus::engine::IDNumbers vector_ids;
     milvus::engine::IDNumbers target_ids;
@@ -240,7 +240,7 @@ TEST_F(MySqlDBTest, ARHIVE_DISK_CHECK) {
     for (auto i = 0; i < loop; ++i) {
         milvus::engine::VectorsData xb;
         BuildVectors(nb, i, xb);
-        db_->InsertVectors(TABLE_NAME, "", xb);
+        db_->InsertVectors(COLLECTION_NAME, "", xb);
         std::this_thread::sleep_for(std::chrono::microseconds(1));
     }
 
@@ -263,17 +263,17 @@ TEST_F(MySqlDBTest, ARHIVE_DISK_CHECK) {
 }
 
 TEST_F(MySqlDBTest, DELETE_TEST) {
-    milvus::engine::meta::CollectionSchema collection_info = BuildTableSchema();
+    milvus::engine::meta::CollectionSchema collection_info = BuildCollectionSchema();
     auto stat = db_->CreateCollection(collection_info);
     //    std::cout << stat.ToString() << std::endl;
 
     milvus::engine::meta::CollectionSchema collection_info_get;
-    collection_info_get.collection_id_ = TABLE_NAME;
+    collection_info_get.collection_id_ = COLLECTION_NAME;
     stat = db_->DescribeCollection(collection_info_get);
     ASSERT_TRUE(stat.ok());
 
     bool has_collection = false;
-    db_->HasCollection(TABLE_NAME, has_collection);
+    db_->HasCollection(COLLECTION_NAME, has_collection);
     ASSERT_TRUE(has_collection);
 
     milvus::engine::IDNumbers vector_ids;
@@ -287,32 +287,32 @@ TEST_F(MySqlDBTest, DELETE_TEST) {
     for (auto i = 0; i < loop; ++i) {
         milvus::engine::VectorsData xb;
         BuildVectors(nb, i, xb);
-        db_->InsertVectors(TABLE_NAME, "", xb);
+        db_->InsertVectors(COLLECTION_NAME, "", xb);
         std::this_thread::sleep_for(std::chrono::microseconds(1));
     }
 
     stat = db_->Flush();
     ASSERT_TRUE(stat.ok());
 
-    stat = db_->DropCollection(TABLE_NAME);
+    stat = db_->DropCollection(COLLECTION_NAME);
     ////    std::cout << "5 sec start" << std::endl;
     //    std::this_thread::sleep_for(std::chrono::seconds(5));
     ////    std::cout << "5 sec finish" << std::endl;
     ASSERT_TRUE(stat.ok());
     //
-    db_->HasCollection(TABLE_NAME, has_collection);
+    db_->HasCollection(COLLECTION_NAME, has_collection);
     ASSERT_FALSE(has_collection);
 }
 
 TEST_F(MySqlDBTest, PARTITION_TEST) {
-    milvus::engine::meta::CollectionSchema collection_info = BuildTableSchema();
+    milvus::engine::meta::CollectionSchema collection_info = BuildCollectionSchema();
     auto stat = db_->CreateCollection(collection_info);
     ASSERT_TRUE(stat.ok());
 
     // create partition and insert data
     const int64_t PARTITION_COUNT = 5;
     const int64_t INSERT_BATCH = 2000;
-    std::string collection_name = TABLE_NAME;
+    std::string collection_name = COLLECTION_NAME;
     for (int64_t i = 0; i < PARTITION_COUNT; i++) {
         std::string partition_tag = std::to_string(i);
         std::string partition_name = collection_name + "_" + partition_tag;
@@ -366,7 +366,7 @@ TEST_F(MySqlDBTest, PARTITION_TEST) {
         ASSERT_TRUE(stat.ok());
 
         uint64_t row_count = 0;
-        stat = db_->GetCollectionRowCount(TABLE_NAME, row_count);
+        stat = db_->GetCollectionRowCount(COLLECTION_NAME, row_count);
         ASSERT_TRUE(stat.ok());
         ASSERT_EQ(row_count, INSERT_BATCH * PARTITION_COUNT);
     }
@@ -383,7 +383,7 @@ TEST_F(MySqlDBTest, PARTITION_TEST) {
         milvus::engine::ResultIds result_ids;
         milvus::engine::ResultDistances result_distances;
         milvus::json json_params = {{"nprobe", nprobe}};
-        stat = db_->Query(dummy_context_, TABLE_NAME, tags, topk, json_params, xq, result_ids, result_distances);
+        stat = db_->Query(dummy_context_, COLLECTION_NAME, tags, topk, json_params, xq, result_ids, result_distances);
         ASSERT_TRUE(stat.ok());
         ASSERT_EQ(result_ids.size() / topk, nq);
 
@@ -391,7 +391,7 @@ TEST_F(MySqlDBTest, PARTITION_TEST) {
         tags.clear();
         result_ids.clear();
         result_distances.clear();
-        stat = db_->Query(dummy_context_, TABLE_NAME, tags, topk, json_params, xq, result_ids, result_distances);
+        stat = db_->Query(dummy_context_, COLLECTION_NAME, tags, topk, json_params, xq, result_ids, result_distances);
         ASSERT_TRUE(stat.ok());
         ASSERT_EQ(result_ids.size() / topk, nq);
 
@@ -399,7 +399,7 @@ TEST_F(MySqlDBTest, PARTITION_TEST) {
         tags.push_back("\\d");
         result_ids.clear();
         result_distances.clear();
-        stat = db_->Query(dummy_context_, TABLE_NAME, tags, topk, json_params, xq, result_ids, result_distances);
+        stat = db_->Query(dummy_context_, COLLECTION_NAME, tags, topk, json_params, xq, result_ids, result_distances);
         ASSERT_TRUE(stat.ok());
         ASSERT_EQ(result_ids.size() / topk, nq);
     }
@@ -459,13 +459,13 @@ TEST_F(MySqlDBTest, PARTITION_TEST) {
         ASSERT_TRUE(stat.ok());
 
         stat = db_->CreatePartition(collection_name, collection_name + "_1", "1");
-        FIU_ENABLE_FIU("MySQLMetaImpl.DeleteTableFiles.null_connection");
+        FIU_ENABLE_FIU("MySQLMetaImpl.DeleteCollectionFiles.null_connection");
         stat = db_->DropPartition(collection_name + "_1");
-        fiu_disable("MySQLMetaImpl.DeleteTableFiles.null_connection");
+        fiu_disable("MySQLMetaImpl.DeleteCollectionFiles.null_connection");
 
-        FIU_ENABLE_FIU("MySQLMetaImpl.DeleteTableFiles.throw_exception");
+        FIU_ENABLE_FIU("MySQLMetaImpl.DeleteCollectionFiles.throw_exception");
         stat = db_->DropPartition(collection_name + "_1");
-        fiu_disable("MySQLMetaImpl.DeleteTableFiles.throw_exception");
+        fiu_disable("MySQLMetaImpl.DeleteCollectionFiles.throw_exception");
     }
 
     {

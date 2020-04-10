@@ -187,7 +187,7 @@ MySQLMetaImpl::~MySQLMetaImpl() {
 }
 
 Status
-MySQLMetaImpl::NextTableId(std::string& collection_id) {
+MySQLMetaImpl::NextCollectionId(std::string& collection_id) {
     std::lock_guard<std::mutex> lock(genid_mutex_);  // avoid duplicated id
     std::stringstream ss;
     SafeIDGenerator& id_generator = SafeIDGenerator::GetInstance();
@@ -335,10 +335,10 @@ MySQLMetaImpl::Initialize() {
 
     InitializeQuery << "CREATE TABLE IF NOT EXISTS " << TABLES_SCHEMA.name() << " (" << TABLES_SCHEMA.ToString() + ");";
 
-    ENGINE_LOG_DEBUG << "MySQLMetaImpl::Initialize: " << InitializeQuery.str();
+    ENGINE_LOG_DEBUG << "Initialize: " << InitializeQuery.str();
 
     bool initialize_query_exec = InitializeQuery.exec();
-    fiu_do_on("MySQLMetaImpl.Initialize.fail_create_table_scheme", initialize_query_exec = false);
+    fiu_do_on("MySQLMetaImpl.Initialize.fail_create_collection_scheme", initialize_query_exec = false);
     if (!initialize_query_exec) {
         std::string msg = "Failed to create meta collection 'Tables' in MySQL";
         ENGINE_LOG_ERROR << msg;
@@ -349,10 +349,10 @@ MySQLMetaImpl::Initialize() {
     InitializeQuery << "CREATE TABLE IF NOT EXISTS " << TABLEFILES_SCHEMA.name() << " ("
                     << TABLEFILES_SCHEMA.ToString() + ");";
 
-    ENGINE_LOG_DEBUG << "MySQLMetaImpl::Initialize: " << InitializeQuery.str();
+    ENGINE_LOG_DEBUG << "Initialize: " << InitializeQuery.str();
 
     initialize_query_exec = InitializeQuery.exec();
-    fiu_do_on("MySQLMetaImpl.Initialize.fail_create_table_files", initialize_query_exec = false);
+    fiu_do_on("MySQLMetaImpl.Initialize.fail_create_collection_files", initialize_query_exec = false);
     if (!initialize_query_exec) {
         std::string msg = "Failed to create meta collection 'TableFiles' in MySQL";
         ENGINE_LOG_ERROR << msg;
@@ -363,7 +363,7 @@ MySQLMetaImpl::Initialize() {
     InitializeQuery << "CREATE TABLE IF NOT EXISTS " << ENVIRONMENT_SCHEMA.name() << " ("
                     << ENVIRONMENT_SCHEMA.ToString() + ");";
 
-    ENGINE_LOG_DEBUG << "MySQLMetaImpl::Initialize: " << InitializeQuery.str();
+    ENGINE_LOG_DEBUG << "Initialize: " << InitializeQuery.str();
 
     initialize_query_exec = InitializeQuery.exec();
     if (!initialize_query_exec) {
@@ -376,7 +376,7 @@ MySQLMetaImpl::Initialize() {
 }
 
 Status
-MySQLMetaImpl::CreateCollection(CollectionSchema& table_schema) {
+MySQLMetaImpl::CreateCollection(CollectionSchema& collection_schema) {
     try {
         server::MetricCollector metric;
         {
@@ -389,22 +389,21 @@ MySQLMetaImpl::CreateCollection(CollectionSchema& table_schema) {
                 return Status(DB_ERROR, "Failed to connect to meta server(mysql)");
             }
 
-            mysqlpp::Query createTableQuery = connectionPtr->query();
+            mysqlpp::Query statement = connectionPtr->query();
 
-            if (table_schema.collection_id_.empty()) {
-                NextTableId(table_schema.collection_id_);
+            if (collection_schema.collection_id_.empty()) {
+                NextCollectionId(collection_schema.collection_id_);
             } else {
-                createTableQuery << "SELECT state FROM " << META_TABLES << " WHERE table_id = " << mysqlpp::quote
-                                 << table_schema.collection_id_ << ";";
+                statement << "SELECT state FROM " << META_TABLES << " WHERE table_id = " << mysqlpp::quote
+                          << collection_schema.collection_id_ << ";";
 
-                ENGINE_LOG_DEBUG << "MySQLMetaImpl::CreateCollection: " << createTableQuery.str();
+                ENGINE_LOG_DEBUG << "CreateCollection: " << statement.str();
 
-                mysqlpp::StoreQueryResult res = createTableQuery.store();
+                mysqlpp::StoreQueryResult res = statement.store();
 
                 if (res.num_rows() == 1) {
                     int state = res[0]["state"];
-                    fiu_do_on("MySQLMetaImpl.CreateCollectionTable.schema_TO_DELETE",
-                              state = CollectionSchema::TO_DELETE);
+                    fiu_do_on("MySQLMetaImpl.CreateCollection.schema_TO_DELETE", state = CollectionSchema::TO_DELETE);
                     if (CollectionSchema::TO_DELETE == state) {
                         return Status(DB_ERROR,
                                       "Collection already exists and it is in delete state, please wait a second");
@@ -414,51 +413,50 @@ MySQLMetaImpl::CreateCollection(CollectionSchema& table_schema) {
                 }
             }
 
-            table_schema.id_ = -1;
-            table_schema.created_on_ = utils::GetMicroSecTimeStamp();
+            collection_schema.id_ = -1;
+            collection_schema.created_on_ = utils::GetMicroSecTimeStamp();
 
             std::string id = "NULL";  // auto-increment
-            std::string& collection_id = table_schema.collection_id_;
-            std::string state = std::to_string(table_schema.state_);
-            std::string dimension = std::to_string(table_schema.dimension_);
-            std::string created_on = std::to_string(table_schema.created_on_);
-            std::string flag = std::to_string(table_schema.flag_);
-            std::string index_file_size = std::to_string(table_schema.index_file_size_);
-            std::string engine_type = std::to_string(table_schema.engine_type_);
-            std::string& index_params = table_schema.index_params_;
-            std::string metric_type = std::to_string(table_schema.metric_type_);
-            std::string& owner_table = table_schema.owner_collection_;
-            std::string& partition_tag = table_schema.partition_tag_;
-            std::string& version = table_schema.version_;
-            std::string flush_lsn = std::to_string(table_schema.flush_lsn_);
+            std::string& collection_id = collection_schema.collection_id_;
+            std::string state = std::to_string(collection_schema.state_);
+            std::string dimension = std::to_string(collection_schema.dimension_);
+            std::string created_on = std::to_string(collection_schema.created_on_);
+            std::string flag = std::to_string(collection_schema.flag_);
+            std::string index_file_size = std::to_string(collection_schema.index_file_size_);
+            std::string engine_type = std::to_string(collection_schema.engine_type_);
+            std::string& index_params = collection_schema.index_params_;
+            std::string metric_type = std::to_string(collection_schema.metric_type_);
+            std::string& owner_collection = collection_schema.owner_collection_;
+            std::string& partition_tag = collection_schema.partition_tag_;
+            std::string& version = collection_schema.version_;
+            std::string flush_lsn = std::to_string(collection_schema.flush_lsn_);
 
-            createTableQuery << "INSERT INTO " << META_TABLES << " VALUES(" << id << ", " << mysqlpp::quote
-                             << collection_id << ", " << state << ", " << dimension << ", " << created_on << ", "
-                             << flag << ", " << index_file_size << ", " << engine_type << ", " << mysqlpp::quote
-                             << index_params << ", " << metric_type << ", " << mysqlpp::quote << owner_table << ", "
-                             << mysqlpp::quote << partition_tag << ", " << mysqlpp::quote << version << ", "
-                             << flush_lsn << ");";
+            statement << "INSERT INTO " << META_TABLES << " VALUES(" << id << ", " << mysqlpp::quote << collection_id
+                      << ", " << state << ", " << dimension << ", " << created_on << ", " << flag << ", "
+                      << index_file_size << ", " << engine_type << ", " << mysqlpp::quote << index_params << ", "
+                      << metric_type << ", " << mysqlpp::quote << owner_collection << ", " << mysqlpp::quote
+                      << partition_tag << ", " << mysqlpp::quote << version << ", " << flush_lsn << ");";
 
-            ENGINE_LOG_DEBUG << "MySQLMetaImpl::CreateCollection: " << createTableQuery.str();
+            ENGINE_LOG_DEBUG << "CreateCollection: " << statement.str();
 
-            if (mysqlpp::SimpleResult res = createTableQuery.execute()) {
-                table_schema.id_ = res.insert_id();  // Might need to use SELECT LAST_INSERT_ID()?
+            if (mysqlpp::SimpleResult res = statement.execute()) {
+                collection_schema.id_ = res.insert_id();  // Might need to use SELECT LAST_INSERT_ID()?
 
                 // Consume all results to avoid "Commands out of sync" error
             } else {
-                return HandleException("Add Collection Error", createTableQuery.error());
+                return HandleException("Failed to create collection", statement.error());
             }
         }  // Scoped Connection
 
-        ENGINE_LOG_DEBUG << "Successfully create collection: " << table_schema.collection_id_;
-        return utils::CreateCollectionPath(options_, table_schema.collection_id_);
+        ENGINE_LOG_DEBUG << "Successfully create collection: " << collection_schema.collection_id_;
+        return utils::CreateCollectionPath(options_, collection_schema.collection_id_);
     } catch (std::exception& e) {
-        return HandleException("GENERAL ERROR WHEN CREATING TABLE", e.what());
+        return HandleException("Failed to create collection", e.what());
     }
 }
 
 Status
-MySQLMetaImpl::DescribeCollection(CollectionSchema& table_schema) {
+MySQLMetaImpl::DescribeCollection(CollectionSchema& collection_schema) {
     try {
         server::MetricCollector metric;
         mysqlpp::StoreQueryResult res;
@@ -472,38 +470,38 @@ MySQLMetaImpl::DescribeCollection(CollectionSchema& table_schema) {
                 return Status(DB_ERROR, "Failed to connect to meta server(mysql)");
             }
 
-            mysqlpp::Query describeTableQuery = connectionPtr->query();
-            describeTableQuery
-                << "SELECT id, state, dimension, created_on, flag, index_file_size, engine_type, index_params"
-                << " , metric_type ,owner_table, partition_tag, version, flush_lsn"
-                << " FROM " << META_TABLES << " WHERE table_id = " << mysqlpp::quote << table_schema.collection_id_
-                << " AND state <> " << std::to_string(CollectionSchema::TO_DELETE) << ";";
+            mysqlpp::Query statement = connectionPtr->query();
+            statement << "SELECT id, state, dimension, created_on, flag, index_file_size, engine_type, index_params"
+                      << " , metric_type ,owner_table, partition_tag, version, flush_lsn"
+                      << " FROM " << META_TABLES << " WHERE table_id = " << mysqlpp::quote
+                      << collection_schema.collection_id_ << " AND state <> "
+                      << std::to_string(CollectionSchema::TO_DELETE) << ";";
 
-            ENGINE_LOG_DEBUG << "MySQLMetaImpl::DescribeCollection: " << describeTableQuery.str();
+            ENGINE_LOG_DEBUG << "DescribeCollection: " << statement.str();
 
-            res = describeTableQuery.store();
+            res = statement.store();
         }  // Scoped Connection
 
         if (res.num_rows() == 1) {
             const mysqlpp::Row& resRow = res[0];
-            table_schema.id_ = resRow["id"];  // implicit conversion
-            table_schema.state_ = resRow["state"];
-            table_schema.dimension_ = resRow["dimension"];
-            table_schema.created_on_ = resRow["created_on"];
-            table_schema.flag_ = resRow["flag"];
-            table_schema.index_file_size_ = resRow["index_file_size"];
-            table_schema.engine_type_ = resRow["engine_type"];
-            resRow["index_params"].to_string(table_schema.index_params_);
-            table_schema.metric_type_ = resRow["metric_type"];
-            resRow["owner_table"].to_string(table_schema.owner_collection_);
-            resRow["partition_tag"].to_string(table_schema.partition_tag_);
-            resRow["version"].to_string(table_schema.version_);
-            table_schema.flush_lsn_ = resRow["flush_lsn"];
+            collection_schema.id_ = resRow["id"];  // implicit conversion
+            collection_schema.state_ = resRow["state"];
+            collection_schema.dimension_ = resRow["dimension"];
+            collection_schema.created_on_ = resRow["created_on"];
+            collection_schema.flag_ = resRow["flag"];
+            collection_schema.index_file_size_ = resRow["index_file_size"];
+            collection_schema.engine_type_ = resRow["engine_type"];
+            resRow["index_params"].to_string(collection_schema.index_params_);
+            collection_schema.metric_type_ = resRow["metric_type"];
+            resRow["owner_table"].to_string(collection_schema.owner_collection_);
+            resRow["partition_tag"].to_string(collection_schema.partition_tag_);
+            resRow["version"].to_string(collection_schema.version_);
+            collection_schema.flush_lsn_ = resRow["flush_lsn"];
         } else {
-            return Status(DB_NOT_FOUND, "Collection " + table_schema.collection_id_ + " not found");
+            return Status(DB_NOT_FOUND, "Collection " + collection_schema.collection_id_ + " not found");
         }
     } catch (std::exception& e) {
-        return HandleException("GENERAL ERROR WHEN DESCRIBING TABLE", e.what());
+        return HandleException("Failed to describe collection", e.what());
     }
 
     return Status::OK();
@@ -533,7 +531,7 @@ MySQLMetaImpl::HasCollection(const std::string& collection_id, bool& has_or_not)
                                << " AS " << mysqlpp::quote << "check"
                                << ";";
 
-            ENGINE_LOG_DEBUG << "MySQLMetaImpl::HasCollection: " << HasCollectionQuery.str();
+            ENGINE_LOG_DEBUG << "HasCollection: " << HasCollectionQuery.str();
 
             res = HasCollectionQuery.store();
         }  // Scoped Connection
@@ -541,14 +539,14 @@ MySQLMetaImpl::HasCollection(const std::string& collection_id, bool& has_or_not)
         int check = res[0]["check"];
         has_or_not = (check == 1);
     } catch (std::exception& e) {
-        return HandleException("GENERAL ERROR WHEN CHECKING IF TABLE EXISTS", e.what());
+        return HandleException("Failed to check collection existence", e.what());
     }
 
     return Status::OK();
 }
 
 Status
-MySQLMetaImpl::AllCollections(std::vector<CollectionSchema>& table_schema_array) {
+MySQLMetaImpl::AllCollections(std::vector<CollectionSchema>& collection_schema_array) {
     try {
         server::MetricCollector metric;
         mysqlpp::StoreQueryResult res;
@@ -556,41 +554,41 @@ MySQLMetaImpl::AllCollections(std::vector<CollectionSchema>& table_schema_array)
             mysqlpp::ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab_);
 
             bool is_null_connection = (connectionPtr == nullptr);
-            fiu_do_on("MySQLMetaImpl.AllTable.null_connection", is_null_connection = true);
-            fiu_do_on("MySQLMetaImpl.AllTable.throw_exception", throw std::exception(););
+            fiu_do_on("MySQLMetaImpl.AllCollection.null_connection", is_null_connection = true);
+            fiu_do_on("MySQLMetaImpl.AllCollection.throw_exception", throw std::exception(););
             if (is_null_connection) {
                 return Status(DB_ERROR, "Failed to connect to meta server(mysql)");
             }
 
-            mysqlpp::Query allTablesQuery = connectionPtr->query();
-            allTablesQuery << "SELECT id, table_id, dimension, engine_type, index_params, index_file_size, metric_type"
-                           << " ,owner_table, partition_tag, version, flush_lsn"
-                           << " FROM " << META_TABLES << " WHERE state <> "
-                           << std::to_string(CollectionSchema::TO_DELETE) << " AND owner_table = \"\";";
+            mysqlpp::Query statement = connectionPtr->query();
+            statement << "SELECT id, table_id, dimension, engine_type, index_params, index_file_size, metric_type"
+                      << " ,owner_table, partition_tag, version, flush_lsn"
+                      << " FROM " << META_TABLES << " WHERE state <> " << std::to_string(CollectionSchema::TO_DELETE)
+                      << " AND owner_table = \"\";";
 
-            ENGINE_LOG_DEBUG << "MySQLMetaImpl::AllCollections: " << allTablesQuery.str();
+            ENGINE_LOG_DEBUG << "AllCollections: " << statement.str();
 
-            res = allTablesQuery.store();
+            res = statement.store();
         }  // Scoped Connection
 
         for (auto& resRow : res) {
-            CollectionSchema table_schema;
-            table_schema.id_ = resRow["id"];  // implicit conversion
-            resRow["table_id"].to_string(table_schema.collection_id_);
-            table_schema.dimension_ = resRow["dimension"];
-            table_schema.index_file_size_ = resRow["index_file_size"];
-            table_schema.engine_type_ = resRow["engine_type"];
-            resRow["index_params"].to_string(table_schema.index_params_);
-            table_schema.metric_type_ = resRow["metric_type"];
-            resRow["owner_table"].to_string(table_schema.owner_collection_);
-            resRow["partition_tag"].to_string(table_schema.partition_tag_);
-            resRow["version"].to_string(table_schema.version_);
-            table_schema.flush_lsn_ = resRow["flush_lsn"];
+            CollectionSchema collection_schema;
+            collection_schema.id_ = resRow["id"];  // implicit conversion
+            resRow["table_id"].to_string(collection_schema.collection_id_);
+            collection_schema.dimension_ = resRow["dimension"];
+            collection_schema.index_file_size_ = resRow["index_file_size"];
+            collection_schema.engine_type_ = resRow["engine_type"];
+            resRow["index_params"].to_string(collection_schema.index_params_);
+            collection_schema.metric_type_ = resRow["metric_type"];
+            resRow["owner_table"].to_string(collection_schema.owner_collection_);
+            resRow["partition_tag"].to_string(collection_schema.partition_tag_);
+            resRow["version"].to_string(collection_schema.version_);
+            collection_schema.flush_lsn_ = resRow["flush_lsn"];
 
-            table_schema_array.emplace_back(table_schema);
+            collection_schema_array.emplace_back(collection_schema);
         }
     } catch (std::exception& e) {
-        return HandleException("GENERAL ERROR WHEN DESCRIBING ALL TABLES", e.what());
+        return HandleException("Failed to get all collections", e.what());
     }
 
     return Status::OK();
@@ -612,67 +610,65 @@ MySQLMetaImpl::DropCollection(const std::string& collection_id) {
             }
 
             // soft delete collection
-            mysqlpp::Query deleteTableQuery = connectionPtr->query();
+            mysqlpp::Query statement = connectionPtr->query();
             //
-            deleteTableQuery << "UPDATE " << META_TABLES
-                             << " SET state = " << std::to_string(CollectionSchema::TO_DELETE)
-                             << " WHERE table_id = " << mysqlpp::quote << collection_id << ";";
+            statement << "UPDATE " << META_TABLES << " SET state = " << std::to_string(CollectionSchema::TO_DELETE)
+                      << " WHERE table_id = " << mysqlpp::quote << collection_id << ";";
 
-            ENGINE_LOG_DEBUG << "MySQLMetaImpl::DeleteTable: " << deleteTableQuery.str();
+            ENGINE_LOG_DEBUG << "DeleteCollection: " << statement.str();
 
-            if (!deleteTableQuery.exec()) {
-                return HandleException("QUERY ERROR WHEN DELETING TABLE", deleteTableQuery.error());
+            if (!statement.exec()) {
+                return HandleException("Failed to drop collection", statement.error());
             }
         }  // Scoped Connection
 
         bool is_writable_mode{mode_ == DBOptions::MODE::CLUSTER_WRITABLE};
         fiu_do_on("MySQLMetaImpl.DropCollection.CLUSTER_WRITABLE_MODE", is_writable_mode = true);
         if (is_writable_mode) {
-            DeleteTableFiles(collection_id);
+            DeleteCollectionFiles(collection_id);
         }
 
-        ENGINE_LOG_DEBUG << "Successfully delete collection, collection id = " << collection_id;
+        ENGINE_LOG_DEBUG << "Successfully delete collection: " << collection_id;
     } catch (std::exception& e) {
-        return HandleException("GENERAL ERROR WHEN DELETING TABLE", e.what());
+        return HandleException("Failed to drop collection", e.what());
     }
 
     return Status::OK();
 }
 
 Status
-MySQLMetaImpl::DeleteTableFiles(const std::string& collection_id) {
+MySQLMetaImpl::DeleteCollectionFiles(const std::string& collection_id) {
     try {
         server::MetricCollector metric;
         {
             mysqlpp::ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab_);
 
             bool is_null_connection = (connectionPtr == nullptr);
-            fiu_do_on("MySQLMetaImpl.DeleteTableFiles.null_connection", is_null_connection = true);
-            fiu_do_on("MySQLMetaImpl.DeleteTableFiles.throw_exception", throw std::exception(););
+            fiu_do_on("MySQLMetaImpl.DeleteCollectionFiles.null_connection", is_null_connection = true);
+            fiu_do_on("MySQLMetaImpl.DeleteCollectionFiles.throw_exception", throw std::exception(););
 
             if (is_null_connection) {
                 return Status(DB_ERROR, "Failed to connect to meta server(mysql)");
             }
 
             // soft delete collection files
-            mysqlpp::Query deleteTableFilesQuery = connectionPtr->query();
+            mysqlpp::Query statement = connectionPtr->query();
             //
-            deleteTableFilesQuery << "UPDATE " << META_TABLEFILES
-                                  << " SET file_type = " << std::to_string(SegmentSchema::TO_DELETE)
-                                  << " ,updated_time = " << std::to_string(utils::GetMicroSecTimeStamp())
-                                  << " WHERE table_id = " << mysqlpp::quote << collection_id << " AND file_type <> "
-                                  << std::to_string(SegmentSchema::TO_DELETE) << ";";
+            statement << "UPDATE " << META_TABLEFILES << " SET file_type = " << std::to_string(SegmentSchema::TO_DELETE)
+                      << " ,updated_time = " << std::to_string(utils::GetMicroSecTimeStamp())
+                      << " WHERE table_id = " << mysqlpp::quote << collection_id << " AND file_type <> "
+                      << std::to_string(SegmentSchema::TO_DELETE) << ";";
 
-            ENGINE_LOG_DEBUG << "MySQLMetaImpl::DeleteTableFiles: " << deleteTableFilesQuery.str();
+            ENGINE_LOG_DEBUG << "DeleteCollectionFiles: " << statement.str();
 
-            if (!deleteTableFilesQuery.exec()) {
-                return HandleException("QUERY ERROR WHEN DELETING TABLE FILES", deleteTableFilesQuery.error());
+            if (!statement.exec()) {
+                return HandleException("Failed to delete colletion files", statement.error());
             }
         }  // Scoped Connection
 
-        ENGINE_LOG_DEBUG << "Successfully delete collection files, collection id = " << collection_id;
+        ENGINE_LOG_DEBUG << "Successfully delete collection files from " << collection_id;
     } catch (std::exception& e) {
-        return HandleException("GENERAL ERROR WHEN DELETING TABLE FILES", e.what());
+        return HandleException("Failed to delete colletion files", e.what());
     }
 
     return Status::OK();
@@ -683,9 +679,9 @@ MySQLMetaImpl::CreateCollectionFile(SegmentSchema& file_schema) {
     if (file_schema.date_ == EmptyDate) {
         file_schema.date_ = utils::GetDate();
     }
-    CollectionSchema table_schema;
-    table_schema.collection_id_ = file_schema.collection_id_;
-    auto status = DescribeCollection(table_schema);
+    CollectionSchema collection_schema;
+    collection_schema.collection_id_ = file_schema.collection_id_;
+    auto status = DescribeCollection(collection_schema);
     if (!status.ok()) {
         return status;
     }
@@ -697,15 +693,15 @@ MySQLMetaImpl::CreateCollectionFile(SegmentSchema& file_schema) {
         if (file_schema.segment_id_.empty()) {
             file_schema.segment_id_ = file_schema.file_id_;
         }
-        file_schema.dimension_ = table_schema.dimension_;
+        file_schema.dimension_ = collection_schema.dimension_;
         file_schema.file_size_ = 0;
         file_schema.row_count_ = 0;
         file_schema.created_on_ = utils::GetMicroSecTimeStamp();
         file_schema.updated_time_ = file_schema.created_on_;
-        file_schema.index_file_size_ = table_schema.index_file_size_;
-        file_schema.index_params_ = table_schema.index_params_;
-        file_schema.engine_type_ = table_schema.engine_type_;
-        file_schema.metric_type_ = table_schema.metric_type_;
+        file_schema.index_file_size_ = collection_schema.index_file_size_;
+        file_schema.index_params_ = collection_schema.index_params_;
+        file_schema.engine_type_ = collection_schema.engine_type_;
+        file_schema.metric_type_ = collection_schema.metric_type_;
 
         std::string id = "NULL";  // auto-increment
         std::string collection_id = file_schema.collection_id_;
@@ -730,35 +726,34 @@ MySQLMetaImpl::CreateCollectionFile(SegmentSchema& file_schema) {
                 return Status(DB_ERROR, "Failed to connect to meta server(mysql)");
             }
 
-            mysqlpp::Query createTableFileQuery = connectionPtr->query();
+            mysqlpp::Query statement = connectionPtr->query();
 
-            createTableFileQuery << "INSERT INTO " << META_TABLEFILES << " VALUES(" << id << ", " << mysqlpp::quote
-                                 << collection_id << ", " << mysqlpp::quote << segment_id << ", " << engine_type << ", "
-                                 << mysqlpp::quote << file_id << ", " << file_type << ", " << file_size << ", "
-                                 << row_count << ", " << updated_time << ", " << created_on << ", " << date << ", "
-                                 << flush_lsn << ");";
+            statement << "INSERT INTO " << META_TABLEFILES << " VALUES(" << id << ", " << mysqlpp::quote
+                      << collection_id << ", " << mysqlpp::quote << segment_id << ", " << engine_type << ", "
+                      << mysqlpp::quote << file_id << ", " << file_type << ", " << file_size << ", " << row_count
+                      << ", " << updated_time << ", " << created_on << ", " << date << ", " << flush_lsn << ");";
 
-            ENGINE_LOG_DEBUG << "MySQLMetaImpl::CreateCollectionFile: " << createTableFileQuery.str();
+            ENGINE_LOG_DEBUG << "CreateCollectionFile: " << statement.str();
 
-            if (mysqlpp::SimpleResult res = createTableFileQuery.execute()) {
+            if (mysqlpp::SimpleResult res = statement.execute()) {
                 file_schema.id_ = res.insert_id();  // Might need to use SELECT LAST_INSERT_ID()?
 
                 // Consume all results to avoid "Commands out of sync" error
             } else {
-                return HandleException("QUERY ERROR WHEN CREATING TABLE FILE", createTableFileQuery.error());
+                return HandleException("Failed to create collection file", statement.error());
             }
         }  // Scoped Connection
 
         ENGINE_LOG_DEBUG << "Successfully create collection file, file id = " << file_schema.file_id_;
         return utils::CreateCollectionFilePath(options_, file_schema);
     } catch (std::exception& e) {
-        return HandleException("GENERAL ERROR WHEN CREATING TABLE FILE", e.what());
+        return HandleException("Failed to create collection file", e.what());
     }
 }
 
 Status
-MySQLMetaImpl::GetTableFiles(const std::string& collection_id, const std::vector<size_t>& ids,
-                             SegmentsSchema& table_files) {
+MySQLMetaImpl::GetCollectionFiles(const std::string& collection_id, const std::vector<size_t>& ids,
+                                  SegmentsSchema& collection_files) {
     if (ids.empty()) {
         return Status::OK();
     }
@@ -776,27 +771,27 @@ MySQLMetaImpl::GetTableFiles(const std::string& collection_id, const std::vector
             mysqlpp::ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab_);
 
             bool is_null_connection = (connectionPtr == nullptr);
-            fiu_do_on("MySQLMetaImpl.GetTableFiles.null_connection", is_null_connection = true);
-            fiu_do_on("MySQLMetaImpl.GetTableFiles.throw_exception", throw std::exception(););
+            fiu_do_on("MySQLMetaImpl.GetCollectionFiles.null_connection", is_null_connection = true);
+            fiu_do_on("MySQLMetaImpl.GetCollectionFiles.throw_exception", throw std::exception(););
             if (is_null_connection) {
                 return Status(DB_ERROR, "Failed to connect to meta server(mysql)");
             }
 
-            mysqlpp::Query getTableFileQuery = connectionPtr->query();
-            getTableFileQuery
+            mysqlpp::Query statement = connectionPtr->query();
+            statement
                 << "SELECT id, segment_id, engine_type, file_id, file_type, file_size, row_count, date, created_on"
                 << " FROM " << META_TABLEFILES << " WHERE table_id = " << mysqlpp::quote << collection_id << " AND ("
                 << idStr << ")"
                 << " AND file_type <> " << std::to_string(SegmentSchema::TO_DELETE) << ";";
 
-            ENGINE_LOG_DEBUG << "MySQLMetaImpl::GetTableFiles: " << getTableFileQuery.str();
+            ENGINE_LOG_DEBUG << "GetCollectionFiles: " << statement.str();
 
-            res = getTableFileQuery.store();
+            res = statement.store();
         }  // Scoped Connection
 
-        CollectionSchema table_schema;
-        table_schema.collection_id_ = collection_id;
-        DescribeCollection(table_schema);
+        CollectionSchema collection_schema;
+        collection_schema.collection_id_ = collection_id;
+        DescribeCollection(collection_schema);
 
         Status ret;
         for (auto& resRow : res) {
@@ -804,32 +799,32 @@ MySQLMetaImpl::GetTableFiles(const std::string& collection_id, const std::vector
             file_schema.id_ = resRow["id"];
             file_schema.collection_id_ = collection_id;
             resRow["segment_id"].to_string(file_schema.segment_id_);
-            file_schema.index_file_size_ = table_schema.index_file_size_;
+            file_schema.index_file_size_ = collection_schema.index_file_size_;
             file_schema.engine_type_ = resRow["engine_type"];
-            file_schema.index_params_ = table_schema.index_params_;
-            file_schema.metric_type_ = table_schema.metric_type_;
+            file_schema.index_params_ = collection_schema.index_params_;
+            file_schema.metric_type_ = collection_schema.metric_type_;
             resRow["file_id"].to_string(file_schema.file_id_);
             file_schema.file_type_ = resRow["file_type"];
             file_schema.file_size_ = resRow["file_size"];
             file_schema.row_count_ = resRow["row_count"];
             file_schema.date_ = resRow["date"];
             file_schema.created_on_ = resRow["created_on"];
-            file_schema.dimension_ = table_schema.dimension_;
+            file_schema.dimension_ = collection_schema.dimension_;
 
-            utils::GetTableFilePath(options_, file_schema);
-            table_files.emplace_back(file_schema);
+            utils::GetCollectionFilePath(options_, file_schema);
+            collection_files.emplace_back(file_schema);
         }
 
         ENGINE_LOG_DEBUG << "Get collection files by id";
         return ret;
     } catch (std::exception& e) {
-        return HandleException("GENERAL ERROR WHEN RETRIEVING TABLE FILES", e.what());
+        return HandleException("Failed to get collection files", e.what());
     }
 }
 
 Status
 MySQLMetaImpl::GetCollectionFilesBySegmentId(const std::string& segment_id,
-                                             milvus::engine::meta::SegmentsSchema& table_files) {
+                                             milvus::engine::meta::SegmentsSchema& collection_files) {
     try {
         mysqlpp::StoreQueryResult res;
         {
@@ -839,21 +834,21 @@ MySQLMetaImpl::GetCollectionFilesBySegmentId(const std::string& segment_id,
                 return Status(DB_ERROR, "Failed to connect to meta server(mysql)");
             }
 
-            mysqlpp::Query getTableFileQuery = connectionPtr->query();
-            getTableFileQuery << "SELECT id, table_id, segment_id, engine_type, file_id, file_type, file_size, "
-                              << "row_count, date, created_on"
-                              << " FROM " << META_TABLEFILES << " WHERE segment_id = " << mysqlpp::quote << segment_id
-                              << " AND file_type <> " << std::to_string(SegmentSchema::TO_DELETE) << ";";
+            mysqlpp::Query statement = connectionPtr->query();
+            statement << "SELECT id, table_id, segment_id, engine_type, file_id, file_type, file_size, "
+                      << "row_count, date, created_on"
+                      << " FROM " << META_TABLEFILES << " WHERE segment_id = " << mysqlpp::quote << segment_id
+                      << " AND file_type <> " << std::to_string(SegmentSchema::TO_DELETE) << ";";
 
-            ENGINE_LOG_DEBUG << "MySQLMetaImpl::GetCollectionFilesBySegmentId: " << getTableFileQuery.str();
+            ENGINE_LOG_DEBUG << "GetCollectionFilesBySegmentId: " << statement.str();
 
-            res = getTableFileQuery.store();
+            res = statement.store();
         }  // Scoped Connection
 
         if (!res.empty()) {
-            CollectionSchema table_schema;
-            res[0]["table_id"].to_string(table_schema.collection_id_);
-            auto status = DescribeCollection(table_schema);
+            CollectionSchema collection_schema;
+            res[0]["table_id"].to_string(collection_schema.collection_id_);
+            auto status = DescribeCollection(collection_schema);
             if (!status.ok()) {
                 return status;
             }
@@ -861,29 +856,29 @@ MySQLMetaImpl::GetCollectionFilesBySegmentId(const std::string& segment_id,
             for (auto& resRow : res) {
                 SegmentSchema file_schema;
                 file_schema.id_ = resRow["id"];
-                file_schema.collection_id_ = table_schema.collection_id_;
+                file_schema.collection_id_ = collection_schema.collection_id_;
                 resRow["segment_id"].to_string(file_schema.segment_id_);
-                file_schema.index_file_size_ = table_schema.index_file_size_;
+                file_schema.index_file_size_ = collection_schema.index_file_size_;
                 file_schema.engine_type_ = resRow["engine_type"];
-                file_schema.index_params_ = table_schema.index_params_;
-                file_schema.metric_type_ = table_schema.metric_type_;
+                file_schema.index_params_ = collection_schema.index_params_;
+                file_schema.metric_type_ = collection_schema.metric_type_;
                 resRow["file_id"].to_string(file_schema.file_id_);
                 file_schema.file_type_ = resRow["file_type"];
                 file_schema.file_size_ = resRow["file_size"];
                 file_schema.row_count_ = resRow["row_count"];
                 file_schema.date_ = resRow["date"];
                 file_schema.created_on_ = resRow["created_on"];
-                file_schema.dimension_ = table_schema.dimension_;
+                file_schema.dimension_ = collection_schema.dimension_;
 
-                utils::GetTableFilePath(options_, file_schema);
-                table_files.emplace_back(file_schema);
+                utils::GetCollectionFilePath(options_, file_schema);
+                collection_files.emplace_back(file_schema);
             }
         }
 
         ENGINE_LOG_DEBUG << "Get collection files by segment id";
         return Status::OK();
     } catch (std::exception& e) {
-        return HandleException("GENERAL ERROR WHEN RETRIEVING TABLE FILES BY SEGMENT ID", e.what());
+        return HandleException("Failed to get collection files by segment id", e.what());
     }
 }
 
@@ -908,7 +903,7 @@ MySQLMetaImpl::UpdateCollectionIndex(const std::string& collection_id, const Col
                                             << collection_id << " AND state <> "
                                             << std::to_string(CollectionSchema::TO_DELETE) << ";";
 
-            ENGINE_LOG_DEBUG << "MySQLMetaImpl::UpdateCollectionIndex: " << updateCollectionIndexParamQuery.str();
+            ENGINE_LOG_DEBUG << "UpdateCollectionIndex: " << updateCollectionIndexParamQuery.str();
 
             mysqlpp::StoreQueryResult res = updateCollectionIndexParamQuery.store();
 
@@ -927,10 +922,10 @@ MySQLMetaImpl::UpdateCollectionIndex(const std::string& collection_id, const Col
                     << index.extra_params_.dump() << " ,metric_type = " << index.metric_type_
                     << " WHERE table_id = " << mysqlpp::quote << collection_id << ";";
 
-                ENGINE_LOG_DEBUG << "MySQLMetaImpl::UpdateCollectionIndex: " << updateCollectionIndexParamQuery.str();
+                ENGINE_LOG_DEBUG << "UpdateCollectionIndex: " << updateCollectionIndexParamQuery.str();
 
                 if (!updateCollectionIndexParamQuery.exec()) {
-                    return HandleException("QUERY ERROR WHEN UPDATING TABLE INDEX PARAM",
+                    return HandleException("Failed to update collection index",
                                            updateCollectionIndexParamQuery.error());
                 }
             } else {
@@ -938,9 +933,9 @@ MySQLMetaImpl::UpdateCollectionIndex(const std::string& collection_id, const Col
             }
         }  // Scoped Connection
 
-        ENGINE_LOG_DEBUG << "Successfully update collection index, collection id = " << collection_id;
+        ENGINE_LOG_DEBUG << "Successfully update collection index for " << collection_id;
     } catch (std::exception& e) {
-        return HandleException("GENERAL ERROR WHEN UPDATING TABLE INDEX PARAM", e.what());
+        return HandleException("Failed to update collection index", e.what());
     }
 
     return Status::OK();
@@ -961,27 +956,27 @@ MySQLMetaImpl::UpdateCollectionFlag(const std::string& collection_id, int64_t fl
                 return Status(DB_ERROR, "Failed to connect to meta server(mysql)");
             }
 
-            mysqlpp::Query updateTableFlagQuery = connectionPtr->query();
-            updateTableFlagQuery << "UPDATE " << META_TABLES << " SET flag = " << flag
-                                 << " WHERE table_id = " << mysqlpp::quote << collection_id << ";";
+            mysqlpp::Query statement = connectionPtr->query();
+            statement << "UPDATE " << META_TABLES << " SET flag = " << flag << " WHERE table_id = " << mysqlpp::quote
+                      << collection_id << ";";
 
-            ENGINE_LOG_DEBUG << "MySQLMetaImpl::UpdateCollectionFlag: " << updateTableFlagQuery.str();
+            ENGINE_LOG_DEBUG << "UpdateCollectionFlag: " << statement.str();
 
-            if (!updateTableFlagQuery.exec()) {
-                return HandleException("QUERY ERROR WHEN UPDATING TABLE FLAG", updateTableFlagQuery.error());
+            if (!statement.exec()) {
+                return HandleException("Failed to update collection flag", statement.error());
             }
         }  // Scoped Connection
 
-        ENGINE_LOG_DEBUG << "Successfully update collection flag, collection id = " << collection_id;
+        ENGINE_LOG_DEBUG << "Successfully update collection flag for " << collection_id;
     } catch (std::exception& e) {
-        return HandleException("GENERAL ERROR WHEN UPDATING TABLE FLAG", e.what());
+        return HandleException("Failed to update collection flag", e.what());
     }
 
     return Status::OK();
 }
 
 Status
-MySQLMetaImpl::UpdateTableFlushLSN(const std::string& collection_id, uint64_t flush_lsn) {
+MySQLMetaImpl::UpdateCollectionFlushLSN(const std::string& collection_id, uint64_t flush_lsn) {
     try {
         server::MetricCollector metric;
 
@@ -992,20 +987,20 @@ MySQLMetaImpl::UpdateTableFlushLSN(const std::string& collection_id, uint64_t fl
                 return Status(DB_ERROR, "Failed to connect to meta server(mysql)");
             }
 
-            mysqlpp::Query updateTableFlagQuery = connectionPtr->query();
-            updateTableFlagQuery << "UPDATE " << META_TABLES << " SET flush_lsn = " << flush_lsn
-                                 << " WHERE table_id = " << mysqlpp::quote << collection_id << ";";
+            mysqlpp::Query statement = connectionPtr->query();
+            statement << "UPDATE " << META_TABLES << " SET flush_lsn = " << flush_lsn
+                      << " WHERE table_id = " << mysqlpp::quote << collection_id << ";";
 
-            ENGINE_LOG_DEBUG << "MySQLMetaImpl::UpdateTableFlushLSN: " << updateTableFlagQuery.str();
+            ENGINE_LOG_DEBUG << "UpdateCollectionFlushLSN: " << statement.str();
 
-            if (!updateTableFlagQuery.exec()) {
-                return HandleException("QUERY ERROR WHEN UPDATING TABLE FLUSH_LSN", updateTableFlagQuery.error());
+            if (!statement.exec()) {
+                return HandleException("Failed to update collection lsn", statement.error());
             }
         }  // Scoped Connection
 
-        ENGINE_LOG_DEBUG << "Successfully update collection flush_lsn, collection id = " << collection_id;
+        ENGINE_LOG_DEBUG << "Successfully update collection flush_lsn for " << collection_id;
     } catch (std::exception& e) {
-        return HandleException("GENERAL ERROR WHEN UPDATING TABLE FLUSH_LSN", e.what());
+        return HandleException("Failed to update collection lsn", e.what());
     }
 
     return Status::OK();
@@ -1027,7 +1022,7 @@ MySQLMetaImpl::GetCollectionFlushLSN(const std::string& collection_id, uint64_t&
             statement << "SELECT flush_lsn FROM " << META_TABLES << " WHERE collection_id = " << mysqlpp::quote
                       << collection_id << ";";
 
-            ENGINE_LOG_DEBUG << "MySQLMetaImpl::GetCollectionFlushLSN: " << statement.str();
+            ENGINE_LOG_DEBUG << "GetCollectionFlushLSN: " << statement.str();
 
             res = statement.store();
         }  // Scoped Connection
@@ -1036,7 +1031,7 @@ MySQLMetaImpl::GetCollectionFlushLSN(const std::string& collection_id, uint64_t&
             flush_lsn = res[0]["flush_lsn"];
         }
     } catch (std::exception& e) {
-        return HandleException("GENERAL ERROR WHEN GET TABLE FLUSH_LSN", e.what());
+        return HandleException("Failed to get collection lsn", e.what());
     }
 
     return Status::OK();
@@ -1059,16 +1054,16 @@ MySQLMetaImpl::UpdateCollectionFile(SegmentSchema& file_schema) {
                 return Status(DB_ERROR, "Failed to connect to meta server(mysql)");
             }
 
-            mysqlpp::Query updateTableFileQuery = connectionPtr->query();
+            mysqlpp::Query statement = connectionPtr->query();
 
             // if the collection has been deleted, just mark the collection file as TO_DELETE
             // clean thread will delete the file later
-            updateTableFileQuery << "SELECT state FROM " << META_TABLES << " WHERE table_id = " << mysqlpp::quote
-                                 << file_schema.collection_id_ << ";";
+            statement << "SELECT state FROM " << META_TABLES << " WHERE table_id = " << mysqlpp::quote
+                      << file_schema.collection_id_ << ";";
 
-            ENGINE_LOG_DEBUG << "MySQLMetaImpl::UpdateCollectionFile: " << updateTableFileQuery.str();
+            ENGINE_LOG_DEBUG << "UpdateCollectionFile: " << statement.str();
 
-            mysqlpp::StoreQueryResult res = updateTableFileQuery.store();
+            mysqlpp::StoreQueryResult res = statement.store();
 
             if (res.num_rows() == 1) {
                 int state = res[0]["state"];
@@ -1090,25 +1085,24 @@ MySQLMetaImpl::UpdateCollectionFile(SegmentSchema& file_schema) {
             std::string created_on = std::to_string(file_schema.created_on_);
             std::string date = std::to_string(file_schema.date_);
 
-            updateTableFileQuery << "UPDATE " << META_TABLEFILES << " SET table_id = " << mysqlpp::quote
-                                 << collection_id << " ,engine_type = " << engine_type
-                                 << " ,file_id = " << mysqlpp::quote << file_id << " ,file_type = " << file_type
-                                 << " ,file_size = " << file_size << " ,row_count = " << row_count
-                                 << " ,updated_time = " << updated_time << " ,created_on = " << created_on
-                                 << " ,date = " << date << " WHERE id = " << id << ";";
+            statement << "UPDATE " << META_TABLEFILES << " SET table_id = " << mysqlpp::quote << collection_id
+                      << " ,engine_type = " << engine_type << " ,file_id = " << mysqlpp::quote << file_id
+                      << " ,file_type = " << file_type << " ,file_size = " << file_size << " ,row_count = " << row_count
+                      << " ,updated_time = " << updated_time << " ,created_on = " << created_on << " ,date = " << date
+                      << " WHERE id = " << id << ";";
 
-            ENGINE_LOG_DEBUG << "MySQLMetaImpl::UpdateCollectionFile: " << updateTableFileQuery.str();
+            ENGINE_LOG_DEBUG << "UpdateCollectionFile: " << statement.str();
 
-            if (!updateTableFileQuery.exec()) {
+            if (!statement.exec()) {
                 ENGINE_LOG_DEBUG << "collection_id= " << file_schema.collection_id_
                                  << " file_id=" << file_schema.file_id_;
-                return HandleException("QUERY ERROR WHEN UPDATING TABLE FILE", updateTableFileQuery.error());
+                return HandleException("Failed to update collection file", statement.error());
             }
         }  // Scoped Connection
 
-        ENGINE_LOG_DEBUG << "Update single collection file, file id = " << file_schema.file_id_;
+        ENGINE_LOG_DEBUG << "Update single collection file, file id: " << file_schema.file_id_;
     } catch (std::exception& e) {
-        return HandleException("GENERAL ERROR WHEN UPDATING TABLE FILE", e.what());
+        return HandleException("Failed to update collection file", e.what());
     }
 
     return Status::OK();
@@ -1126,24 +1120,22 @@ MySQLMetaImpl::UpdateCollectionFilesToIndex(const std::string& collection_id) {
             return Status(DB_ERROR, "Failed to connect to meta server(mysql)");
         }
 
-        mysqlpp::Query updateTableFilesToIndexQuery = connectionPtr->query();
+        mysqlpp::Query statement = connectionPtr->query();
 
-        updateTableFilesToIndexQuery << "UPDATE " << META_TABLEFILES
-                                     << " SET file_type = " << std::to_string(SegmentSchema::TO_INDEX)
-                                     << " WHERE table_id = " << mysqlpp::quote << collection_id
-                                     << " AND row_count >= " << std::to_string(meta::BUILD_INDEX_THRESHOLD)
-                                     << " AND file_type = " << std::to_string(SegmentSchema::RAW) << ";";
+        statement << "UPDATE " << META_TABLEFILES << " SET file_type = " << std::to_string(SegmentSchema::TO_INDEX)
+                  << " WHERE table_id = " << mysqlpp::quote << collection_id
+                  << " AND row_count >= " << std::to_string(meta::BUILD_INDEX_THRESHOLD)
+                  << " AND file_type = " << std::to_string(SegmentSchema::RAW) << ";";
 
-        ENGINE_LOG_DEBUG << "MySQLMetaImpl::UpdateCollectionFilesToIndex: " << updateTableFilesToIndexQuery.str();
+        ENGINE_LOG_DEBUG << "UpdateCollectionFilesToIndex: " << statement.str();
 
-        if (!updateTableFilesToIndexQuery.exec()) {
-            return HandleException("QUERY ERROR WHEN UPDATING TABLE FILE TO INDEX",
-                                   updateTableFilesToIndexQuery.error());
+        if (!statement.exec()) {
+            return HandleException("Failed to update collection files to index", statement.error());
         }
 
-        ENGINE_LOG_DEBUG << "Update files to to_index, collection id = " << collection_id;
+        ENGINE_LOG_DEBUG << "Update files to to_index for " << collection_id;
     } catch (std::exception& e) {
-        return HandleException("GENERAL ERROR WHEN UPDATING TABLE FILES TO INDEX", e.what());
+        return HandleException("Failed to update collection files to index", e.what());
     }
 
     return Status::OK();
@@ -1163,7 +1155,7 @@ MySQLMetaImpl::UpdateCollectionFiles(SegmentsSchema& files) {
                 return Status(DB_ERROR, "Failed to connect to meta server(mysql)");
             }
 
-            mysqlpp::Query updateTableFilesQuery = connectionPtr->query();
+            mysqlpp::Query statement = connectionPtr->query();
 
             std::map<std::string, bool> has_collections;
             for (auto& file_schema : files) {
@@ -1171,16 +1163,16 @@ MySQLMetaImpl::UpdateCollectionFiles(SegmentsSchema& files) {
                     continue;
                 }
 
-                updateTableFilesQuery << "SELECT EXISTS"
-                                      << " (SELECT 1 FROM " << META_TABLES << " WHERE table_id = " << mysqlpp::quote
-                                      << file_schema.collection_id_ << " AND state <> "
-                                      << std::to_string(CollectionSchema::TO_DELETE) << ")"
-                                      << " AS " << mysqlpp::quote << "check"
-                                      << ";";
+                statement << "SELECT EXISTS"
+                          << " (SELECT 1 FROM " << META_TABLES << " WHERE table_id = " << mysqlpp::quote
+                          << file_schema.collection_id_ << " AND state <> "
+                          << std::to_string(CollectionSchema::TO_DELETE) << ")"
+                          << " AS " << mysqlpp::quote << "check"
+                          << ";";
 
-                ENGINE_LOG_DEBUG << "MySQLMetaImpl::UpdateCollectionFiles: " << updateTableFilesQuery.str();
+                ENGINE_LOG_DEBUG << "UpdateCollectionFiles: " << statement.str();
 
-                mysqlpp::StoreQueryResult res = updateTableFilesQuery.store();
+                mysqlpp::StoreQueryResult res = statement.store();
 
                 int check = res[0]["check"];
                 has_collections[file_schema.collection_id_] = (check == 1);
@@ -1203,24 +1195,23 @@ MySQLMetaImpl::UpdateCollectionFiles(SegmentsSchema& files) {
                 std::string created_on = std::to_string(file_schema.created_on_);
                 std::string date = std::to_string(file_schema.date_);
 
-                updateTableFilesQuery << "UPDATE " << META_TABLEFILES << " SET table_id = " << mysqlpp::quote
-                                      << collection_id << " ,engine_type = " << engine_type
-                                      << " ,file_id = " << mysqlpp::quote << file_id << " ,file_type = " << file_type
-                                      << " ,file_size = " << file_size << " ,row_count = " << row_count
-                                      << " ,updated_time = " << updated_time << " ,created_on = " << created_on
-                                      << " ,date = " << date << " WHERE id = " << id << ";";
+                statement << "UPDATE " << META_TABLEFILES << " SET table_id = " << mysqlpp::quote << collection_id
+                          << " ,engine_type = " << engine_type << " ,file_id = " << mysqlpp::quote << file_id
+                          << " ,file_type = " << file_type << " ,file_size = " << file_size
+                          << " ,row_count = " << row_count << " ,updated_time = " << updated_time
+                          << " ,created_on = " << created_on << " ,date = " << date << " WHERE id = " << id << ";";
 
-                ENGINE_LOG_DEBUG << "MySQLMetaImpl::UpdateCollectionFiles: " << updateTableFilesQuery.str();
+                ENGINE_LOG_DEBUG << "UpdateCollectionFiles: " << statement.str();
 
-                if (!updateTableFilesQuery.exec()) {
-                    return HandleException("QUERY ERROR WHEN UPDATING TABLE FILES", updateTableFilesQuery.error());
+                if (!statement.exec()) {
+                    return HandleException("Failed to update collection files", statement.error());
                 }
             }
         }  // Scoped Connection
 
         ENGINE_LOG_DEBUG << "Update " << files.size() << " collection files";
     } catch (std::exception& e) {
-        return HandleException("GENERAL ERROR WHEN UPDATING TABLE FILES", e.what());
+        return HandleException("Failed to update collection files", e.what());
     }
 
     return Status::OK();
@@ -1238,20 +1229,19 @@ MySQLMetaImpl::UpdateCollectionFilesRowCount(SegmentsSchema& files) {
                 return Status(DB_ERROR, "Failed to connect to meta server(mysql)");
             }
 
-            mysqlpp::Query updateTableFilesQuery = connectionPtr->query();
+            mysqlpp::Query statement = connectionPtr->query();
 
             for (auto& file : files) {
                 std::string row_count = std::to_string(file.row_count_);
                 std::string updated_time = std::to_string(utils::GetMicroSecTimeStamp());
 
-                updateTableFilesQuery << "UPDATE " << META_TABLEFILES << " SET row_count = " << row_count
-                                      << " , updated_time = " << updated_time << " WHERE file_id = " << file.file_id_
-                                      << ";";
+                statement << "UPDATE " << META_TABLEFILES << " SET row_count = " << row_count
+                          << " , updated_time = " << updated_time << " WHERE file_id = " << file.file_id_ << ";";
 
-                ENGINE_LOG_DEBUG << "MySQLMetaImpl::UpdateCollectionFilesRowCount: " << updateTableFilesQuery.str();
+                ENGINE_LOG_DEBUG << "UpdateCollectionFilesRowCount: " << statement.str();
 
-                if (!updateTableFilesQuery.exec()) {
-                    return HandleException("QUERY ERROR WHEN UPDATING TABLE FILES", updateTableFilesQuery.error());
+                if (!statement.exec()) {
+                    return HandleException("Failed to update collection files row count", statement.error());
                 }
 
                 ENGINE_LOG_DEBUG << "Update file " << file.file_id_ << " row count to " << file.row_count_;
@@ -1260,7 +1250,7 @@ MySQLMetaImpl::UpdateCollectionFilesRowCount(SegmentsSchema& files) {
 
         ENGINE_LOG_DEBUG << "Update " << files.size() << " collection files";
     } catch (std::exception& e) {
-        return HandleException("GENERAL ERROR WHEN UPDATING TABLE FILES ROW COUNT", e.what());
+        return HandleException("Failed to update collection files row count", e.what());
     }
 
     return Status::OK();
@@ -1281,15 +1271,14 @@ MySQLMetaImpl::DescribeCollectionIndex(const std::string& collection_id, Collect
                 return Status(DB_ERROR, "Failed to connect to meta server(mysql)");
             }
 
-            mysqlpp::Query describeCollectionIndexQuery = connectionPtr->query();
-            describeCollectionIndexQuery << "SELECT engine_type, index_params, index_file_size, metric_type"
-                                         << " FROM " << META_TABLES << " WHERE table_id = " << mysqlpp::quote
-                                         << collection_id << " AND state <> "
-                                         << std::to_string(CollectionSchema::TO_DELETE) << ";";
+            mysqlpp::Query statement = connectionPtr->query();
+            statement << "SELECT engine_type, index_params, index_file_size, metric_type"
+                      << " FROM " << META_TABLES << " WHERE table_id = " << mysqlpp::quote << collection_id
+                      << " AND state <> " << std::to_string(CollectionSchema::TO_DELETE) << ";";
 
-            ENGINE_LOG_DEBUG << "MySQLMetaImpl::DescribeCollectionIndex: " << describeCollectionIndexQuery.str();
+            ENGINE_LOG_DEBUG << "DescribeCollectionIndex: " << statement.str();
 
-            mysqlpp::StoreQueryResult res = describeCollectionIndexQuery.store();
+            mysqlpp::StoreQueryResult res = statement.store();
 
             if (res.num_rows() == 1) {
                 const mysqlpp::Row& resRow = res[0];
@@ -1304,7 +1293,7 @@ MySQLMetaImpl::DescribeCollectionIndex(const std::string& collection_id, Collect
             }
         }  // Scoped Connection
     } catch (std::exception& e) {
-        return HandleException("GENERAL ERROR WHEN UPDATING TABLE FLAG", e.what());
+        return HandleException("Failed to describe collection index", e.what());
     }
 
     return Status::OK();
@@ -1325,54 +1314,50 @@ MySQLMetaImpl::DropCollectionIndex(const std::string& collection_id) {
                 return Status(DB_ERROR, "Failed to connect to meta server(mysql)");
             }
 
-            mysqlpp::Query dropCollectionIndexQuery = connectionPtr->query();
+            mysqlpp::Query statement = connectionPtr->query();
 
             // soft delete index files
-            dropCollectionIndexQuery << "UPDATE " << META_TABLEFILES
-                                     << " SET file_type = " << std::to_string(SegmentSchema::TO_DELETE)
-                                     << " ,updated_time = " << utils::GetMicroSecTimeStamp()
-                                     << " WHERE table_id = " << mysqlpp::quote << collection_id
-                                     << " AND file_type = " << std::to_string(SegmentSchema::INDEX) << ";";
+            statement << "UPDATE " << META_TABLEFILES << " SET file_type = " << std::to_string(SegmentSchema::TO_DELETE)
+                      << " ,updated_time = " << utils::GetMicroSecTimeStamp() << " WHERE table_id = " << mysqlpp::quote
+                      << collection_id << " AND file_type = " << std::to_string(SegmentSchema::INDEX) << ";";
 
-            ENGINE_LOG_DEBUG << "MySQLMetaImpl::DropCollectionIndex: " << dropCollectionIndexQuery.str();
+            ENGINE_LOG_DEBUG << "DropCollectionIndex: " << statement.str();
 
-            if (!dropCollectionIndexQuery.exec()) {
-                return HandleException("QUERY ERROR WHEN DROPPING TABLE INDEX", dropCollectionIndexQuery.error());
+            if (!statement.exec()) {
+                return HandleException("Failed to drop collection index", statement.error());
             }
 
             // set all backup file to raw
-            dropCollectionIndexQuery << "UPDATE " << META_TABLEFILES
-                                     << " SET file_type = " << std::to_string(SegmentSchema::RAW)
-                                     << " ,updated_time = " << utils::GetMicroSecTimeStamp()
-                                     << " WHERE table_id = " << mysqlpp::quote << collection_id
-                                     << " AND file_type = " << std::to_string(SegmentSchema::BACKUP) << ";";
+            statement << "UPDATE " << META_TABLEFILES << " SET file_type = " << std::to_string(SegmentSchema::RAW)
+                      << " ,updated_time = " << utils::GetMicroSecTimeStamp() << " WHERE table_id = " << mysqlpp::quote
+                      << collection_id << " AND file_type = " << std::to_string(SegmentSchema::BACKUP) << ";";
 
-            ENGINE_LOG_DEBUG << "MySQLMetaImpl::DropCollectionIndex: " << dropCollectionIndexQuery.str();
+            ENGINE_LOG_DEBUG << "DropCollectionIndex: " << statement.str();
 
-            if (!dropCollectionIndexQuery.exec()) {
-                return HandleException("QUERY ERROR WHEN DROPPING TABLE INDEX", dropCollectionIndexQuery.error());
+            if (!statement.exec()) {
+                return HandleException("Failed to drop collection index", statement.error());
             }
 
             // set collection index type to raw
-            dropCollectionIndexQuery << "UPDATE " << META_TABLES << " SET engine_type = "
-                                     << " (CASE"
-                                     << " WHEN metric_type in (" << (int32_t)MetricType::HAMMING << " ,"
-                                     << (int32_t)MetricType::JACCARD << " ," << (int32_t)MetricType::TANIMOTO << ")"
-                                     << " THEN " << (int32_t)EngineType::FAISS_BIN_IDMAP << " ELSE "
-                                     << (int32_t)EngineType::FAISS_IDMAP << " END)"
-                                     << " , index_params = '{}'"
-                                     << " WHERE table_id = " << mysqlpp::quote << collection_id << ";";
+            statement << "UPDATE " << META_TABLES << " SET engine_type = "
+                      << " (CASE"
+                      << " WHEN metric_type in (" << (int32_t)MetricType::HAMMING << " ,"
+                      << (int32_t)MetricType::JACCARD << " ," << (int32_t)MetricType::TANIMOTO << ")"
+                      << " THEN " << (int32_t)EngineType::FAISS_BIN_IDMAP << " ELSE "
+                      << (int32_t)EngineType::FAISS_IDMAP << " END)"
+                      << " , index_params = '{}'"
+                      << " WHERE table_id = " << mysqlpp::quote << collection_id << ";";
 
-            ENGINE_LOG_DEBUG << "MySQLMetaImpl::DropCollectionIndex: " << dropCollectionIndexQuery.str();
+            ENGINE_LOG_DEBUG << "DropCollectionIndex: " << statement.str();
 
-            if (!dropCollectionIndexQuery.exec()) {
-                return HandleException("QUERY ERROR WHEN DROPPING TABLE INDEX", dropCollectionIndexQuery.error());
+            if (!statement.exec()) {
+                return HandleException("Failed to drop collection index", statement.error());
             }
         }  // Scoped Connection
 
-        ENGINE_LOG_DEBUG << "Successfully drop collection index, collection id = " << collection_id;
+        ENGINE_LOG_DEBUG << "Successfully drop collection index for " << collection_id;
     } catch (std::exception& e) {
-        return HandleException("GENERAL ERROR WHEN DROPPING TABLE INDEX", e.what());
+        return HandleException("Failed to drop collection index", e.what());
     }
 
     return Status::OK();
@@ -1383,15 +1368,15 @@ MySQLMetaImpl::CreatePartition(const std::string& collection_id, const std::stri
                                const std::string& tag, uint64_t lsn) {
     server::MetricCollector metric;
 
-    CollectionSchema table_schema;
-    table_schema.collection_id_ = collection_id;
-    auto status = DescribeCollection(table_schema);
+    CollectionSchema collection_schema;
+    collection_schema.collection_id_ = collection_id;
+    auto status = DescribeCollection(collection_schema);
     if (!status.ok()) {
         return status;
     }
 
     // not allow create partition under partition
-    if (!table_schema.owner_collection_.empty()) {
+    if (!collection_schema.owner_collection_.empty()) {
         return Status(DB_ERROR, "Nested partition is not allowed");
     }
 
@@ -1409,19 +1394,19 @@ MySQLMetaImpl::CreatePartition(const std::string& collection_id, const std::stri
 
     if (partition_name == "") {
         // generate unique partition name
-        NextTableId(table_schema.collection_id_);
+        NextCollectionId(collection_schema.collection_id_);
     } else {
-        table_schema.collection_id_ = partition_name;
+        collection_schema.collection_id_ = partition_name;
     }
 
-    table_schema.id_ = -1;
-    table_schema.flag_ = 0;
-    table_schema.created_on_ = utils::GetMicroSecTimeStamp();
-    table_schema.owner_collection_ = collection_id;
-    table_schema.partition_tag_ = valid_tag;
-    table_schema.flush_lsn_ = lsn;
+    collection_schema.id_ = -1;
+    collection_schema.flag_ = 0;
+    collection_schema.created_on_ = utils::GetMicroSecTimeStamp();
+    collection_schema.owner_collection_ = collection_id;
+    collection_schema.partition_tag_ = valid_tag;
+    collection_schema.flush_lsn_ = lsn;
 
-    status = CreateCollection(table_schema);
+    status = CreateCollection(collection_schema);
     fiu_do_on("MySQLMetaImpl.CreatePartition.aleady_exist", status = Status(DB_ALREADY_EXIST, ""));
     if (status.code() == DB_ALREADY_EXIST) {
         return Status(DB_ALREADY_EXIST, "Partition already exists");
@@ -1451,15 +1436,15 @@ MySQLMetaImpl::ShowPartitions(const std::string& collection_id,
                 return Status(DB_ERROR, "Failed to connect to meta server(mysql)");
             }
 
-            mysqlpp::Query allPartitionsQuery = connectionPtr->query();
-            allPartitionsQuery << "SELECT table_id, id, state, dimension, created_on, flag, index_file_size,"
-                               << " engine_type, index_params, metric_type, partition_tag, version FROM " << META_TABLES
-                               << " WHERE owner_table = " << mysqlpp::quote << collection_id << " AND state <> "
-                               << std::to_string(CollectionSchema::TO_DELETE) << ";";
+            mysqlpp::Query statement = connectionPtr->query();
+            statement << "SELECT table_id, id, state, dimension, created_on, flag, index_file_size,"
+                      << " engine_type, index_params, metric_type, partition_tag, version FROM " << META_TABLES
+                      << " WHERE owner_table = " << mysqlpp::quote << collection_id << " AND state <> "
+                      << std::to_string(CollectionSchema::TO_DELETE) << ";";
 
-            ENGINE_LOG_DEBUG << "MySQLMetaImpl::AllCollections: " << allPartitionsQuery.str();
+            ENGINE_LOG_DEBUG << "AllCollections: " << statement.str();
 
-            res = allPartitionsQuery.store();
+            res = statement.store();
         }  // Scoped Connection
 
         for (auto& resRow : res) {
@@ -1481,7 +1466,7 @@ MySQLMetaImpl::ShowPartitions(const std::string& collection_id,
             partition_schema_array.emplace_back(partition_schema);
         }
     } catch (std::exception& e) {
-        return HandleException("GENERAL ERROR WHEN SHOW PARTITIONS", e.what());
+        return HandleException("Failed to show partitions", e.what());
     }
 
     return Status::OK();
@@ -1508,14 +1493,14 @@ MySQLMetaImpl::GetPartitionName(const std::string& collection_id, const std::str
                 return Status(DB_ERROR, "Failed to connect to meta server(mysql)");
             }
 
-            mysqlpp::Query allPartitionsQuery = connectionPtr->query();
-            allPartitionsQuery << "SELECT table_id FROM " << META_TABLES << " WHERE owner_table = " << mysqlpp::quote
-                               << collection_id << " AND partition_tag = " << mysqlpp::quote << valid_tag
-                               << " AND state <> " << std::to_string(CollectionSchema::TO_DELETE) << ";";
+            mysqlpp::Query statement = connectionPtr->query();
+            statement << "SELECT table_id FROM " << META_TABLES << " WHERE owner_table = " << mysqlpp::quote
+                      << collection_id << " AND partition_tag = " << mysqlpp::quote << valid_tag << " AND state <> "
+                      << std::to_string(CollectionSchema::TO_DELETE) << ";";
 
-            ENGINE_LOG_DEBUG << "MySQLMetaImpl::AllCollections: " << allPartitionsQuery.str();
+            ENGINE_LOG_DEBUG << "AllCollections: " << statement.str();
 
-            res = allPartitionsQuery.store();
+            res = statement.store();
         }  // Scoped Connection
 
         if (res.num_rows() > 0) {
@@ -1525,7 +1510,7 @@ MySQLMetaImpl::GetPartitionName(const std::string& collection_id, const std::str
             return Status(DB_NOT_FOUND, "Partition " + valid_tag + " of collection " + collection_id + " not found");
         }
     } catch (std::exception& e) {
-        return HandleException("GENERAL ERROR WHEN GET PARTITION NAME", e.what());
+        return HandleException("Failed to get partition name", e.what());
     }
 
     return Status::OK();
@@ -1548,52 +1533,51 @@ MySQLMetaImpl::FilesToSearch(const std::string& collection_id, SegmentsSchema& f
                 return Status(DB_ERROR, "Failed to connect to meta server(mysql)");
             }
 
-            mysqlpp::Query filesToSearchQuery = connectionPtr->query();
-            filesToSearchQuery
-                << "SELECT id, table_id, segment_id, engine_type, file_id, file_type, file_size, row_count, date"
-                << " FROM " << META_TABLEFILES << " WHERE table_id = " << mysqlpp::quote << collection_id;
+            mysqlpp::Query statement = connectionPtr->query();
+            statement << "SELECT id, table_id, segment_id, engine_type, file_id, file_type, file_size, row_count, date"
+                      << " FROM " << META_TABLEFILES << " WHERE table_id = " << mysqlpp::quote << collection_id;
 
             // End
-            filesToSearchQuery << " AND"
-                               << " (file_type = " << std::to_string(SegmentSchema::RAW)
-                               << " OR file_type = " << std::to_string(SegmentSchema::TO_INDEX)
-                               << " OR file_type = " << std::to_string(SegmentSchema::INDEX) << ");";
+            statement << " AND"
+                      << " (file_type = " << std::to_string(SegmentSchema::RAW)
+                      << " OR file_type = " << std::to_string(SegmentSchema::TO_INDEX)
+                      << " OR file_type = " << std::to_string(SegmentSchema::INDEX) << ");";
 
-            ENGINE_LOG_DEBUG << "MySQLMetaImpl::FilesToSearch: " << filesToSearchQuery.str();
+            ENGINE_LOG_DEBUG << "FilesToSearch: " << statement.str();
 
-            res = filesToSearchQuery.store();
+            res = statement.store();
         }  // Scoped Connection
 
-        CollectionSchema table_schema;
-        table_schema.collection_id_ = collection_id;
-        auto status = DescribeCollection(table_schema);
+        CollectionSchema collection_schema;
+        collection_schema.collection_id_ = collection_id;
+        auto status = DescribeCollection(collection_schema);
         if (!status.ok()) {
             return status;
         }
 
         Status ret;
         for (auto& resRow : res) {
-            SegmentSchema table_file;
-            table_file.id_ = resRow["id"];  // implicit conversion
-            resRow["table_id"].to_string(table_file.collection_id_);
-            resRow["segment_id"].to_string(table_file.segment_id_);
-            table_file.index_file_size_ = table_schema.index_file_size_;
-            table_file.engine_type_ = resRow["engine_type"];
-            table_file.index_params_ = table_schema.index_params_;
-            table_file.metric_type_ = table_schema.metric_type_;
-            resRow["file_id"].to_string(table_file.file_id_);
-            table_file.file_type_ = resRow["file_type"];
-            table_file.file_size_ = resRow["file_size"];
-            table_file.row_count_ = resRow["row_count"];
-            table_file.date_ = resRow["date"];
-            table_file.dimension_ = table_schema.dimension_;
+            SegmentSchema collection_file;
+            collection_file.id_ = resRow["id"];  // implicit conversion
+            resRow["table_id"].to_string(collection_file.collection_id_);
+            resRow["segment_id"].to_string(collection_file.segment_id_);
+            collection_file.index_file_size_ = collection_schema.index_file_size_;
+            collection_file.engine_type_ = resRow["engine_type"];
+            collection_file.index_params_ = collection_schema.index_params_;
+            collection_file.metric_type_ = collection_schema.metric_type_;
+            resRow["file_id"].to_string(collection_file.file_id_);
+            collection_file.file_type_ = resRow["file_type"];
+            collection_file.file_size_ = resRow["file_size"];
+            collection_file.row_count_ = resRow["row_count"];
+            collection_file.date_ = resRow["date"];
+            collection_file.dimension_ = collection_schema.dimension_;
 
-            auto status = utils::GetTableFilePath(options_, table_file);
+            auto status = utils::GetCollectionFilePath(options_, collection_file);
             if (!status.ok()) {
                 ret = status;
             }
 
-            files.emplace_back(table_file);
+            files.emplace_back(collection_file);
         }
 
         if (res.size() > 0) {
@@ -1601,7 +1585,7 @@ MySQLMetaImpl::FilesToSearch(const std::string& collection_id, SegmentsSchema& f
         }
         return ret;
     } catch (std::exception& e) {
-        return HandleException("GENERAL ERROR WHEN FINDING TABLE FILES TO SEARCH", e.what());
+        return HandleException("Failed to get files to search", e.what());
     }
 }
 
@@ -1613,9 +1597,9 @@ MySQLMetaImpl::FilesToMerge(const std::string& collection_id, SegmentsSchema& fi
         server::MetricCollector metric;
 
         // check collection existence
-        CollectionSchema table_schema;
-        table_schema.collection_id_ = collection_id;
-        auto status = DescribeCollection(table_schema);
+        CollectionSchema collection_schema;
+        collection_schema.collection_id_ = collection_id;
+        auto status = DescribeCollection(collection_schema);
         if (!status.ok()) {
             return status;
         }
@@ -1631,47 +1615,46 @@ MySQLMetaImpl::FilesToMerge(const std::string& collection_id, SegmentsSchema& fi
                 return Status(DB_ERROR, "Failed to connect to meta server(mysql)");
             }
 
-            mysqlpp::Query filesToMergeQuery = connectionPtr->query();
-            filesToMergeQuery << "SELECT id, table_id, segment_id, file_id, file_type, file_size, row_count, date, "
-                                 "engine_type, created_on"
-                              << " FROM " << META_TABLEFILES << " WHERE table_id = " << mysqlpp::quote << collection_id
-                              << " AND file_type = " << std::to_string(SegmentSchema::RAW)
-                              << " ORDER BY row_count DESC;";
+            mysqlpp::Query statement = connectionPtr->query();
+            statement << "SELECT id, table_id, segment_id, file_id, file_type, file_size, row_count, date, "
+                         "engine_type, created_on"
+                      << " FROM " << META_TABLEFILES << " WHERE table_id = " << mysqlpp::quote << collection_id
+                      << " AND file_type = " << std::to_string(SegmentSchema::RAW) << " ORDER BY row_count DESC;";
 
-            ENGINE_LOG_DEBUG << "MySQLMetaImpl::FilesToMerge: " << filesToMergeQuery.str();
+            ENGINE_LOG_DEBUG << "FilesToMerge: " << statement.str();
 
-            res = filesToMergeQuery.store();
+            res = statement.store();
         }  // Scoped Connection
 
         Status ret;
         int64_t to_merge_files = 0;
         for (auto& resRow : res) {
-            SegmentSchema table_file;
-            table_file.file_size_ = resRow["file_size"];
-            if (table_file.file_size_ >= table_schema.index_file_size_) {
+            SegmentSchema collection_file;
+            collection_file.file_size_ = resRow["file_size"];
+            if (collection_file.file_size_ >= collection_schema.index_file_size_) {
                 continue;  // skip large file
             }
 
-            table_file.id_ = resRow["id"];  // implicit conversion
-            resRow["table_id"].to_string(table_file.collection_id_);
-            resRow["segment_id"].to_string(table_file.segment_id_);
-            resRow["file_id"].to_string(table_file.file_id_);
-            table_file.file_type_ = resRow["file_type"];
-            table_file.row_count_ = resRow["row_count"];
-            table_file.date_ = resRow["date"];
-            table_file.index_file_size_ = table_schema.index_file_size_;
-            table_file.engine_type_ = resRow["engine_type"];
-            table_file.index_params_ = table_schema.index_params_;
-            table_file.metric_type_ = table_schema.metric_type_;
-            table_file.created_on_ = resRow["created_on"];
-            table_file.dimension_ = table_schema.dimension_;
+            collection_file.id_ = resRow["id"];  // implicit conversion
+            resRow["table_id"].to_string(collection_file.collection_id_);
+            resRow["segment_id"].to_string(collection_file.segment_id_);
+            resRow["file_id"].to_string(collection_file.file_id_);
+            collection_file.file_type_ = resRow["file_type"];
+            collection_file.row_count_ = resRow["row_count"];
+            collection_file.date_ = resRow["date"];
+            collection_file.index_file_size_ = collection_schema.index_file_size_;
+            collection_file.engine_type_ = resRow["engine_type"];
+            collection_file.index_params_ = collection_schema.index_params_;
+            collection_file.metric_type_ = collection_schema.metric_type_;
+            collection_file.created_on_ = resRow["created_on"];
+            collection_file.dimension_ = collection_schema.dimension_;
 
-            auto status = utils::GetTableFilePath(options_, table_file);
+            auto status = utils::GetCollectionFilePath(options_, collection_file);
             if (!status.ok()) {
                 ret = status;
             }
 
-            files.emplace_back(table_file);
+            files.emplace_back(collection_file);
             ++to_merge_files;
         }
 
@@ -1680,7 +1663,7 @@ MySQLMetaImpl::FilesToMerge(const std::string& collection_id, SegmentsSchema& fi
         }
         return ret;
     } catch (std::exception& e) {
-        return HandleException("GENERAL ERROR WHEN FINDING TABLE FILES TO MERGE", e.what());
+        return HandleException("Failed to get files to merge", e.what());
     }
 }
 
@@ -1701,53 +1684,53 @@ MySQLMetaImpl::FilesToIndex(SegmentsSchema& files) {
                 return Status(DB_ERROR, "Failed to connect to meta server(mysql)");
             }
 
-            mysqlpp::Query filesToIndexQuery = connectionPtr->query();
-            filesToIndexQuery << "SELECT id, table_id, segment_id, engine_type, file_id, file_type, file_size, "
-                                 "row_count, date, created_on"
-                              << " FROM " << META_TABLEFILES
-                              << " WHERE file_type = " << std::to_string(SegmentSchema::TO_INDEX) << ";";
+            mysqlpp::Query statement = connectionPtr->query();
+            statement << "SELECT id, table_id, segment_id, engine_type, file_id, file_type, file_size, "
+                         "row_count, date, created_on"
+                      << " FROM " << META_TABLEFILES << " WHERE file_type = " << std::to_string(SegmentSchema::TO_INDEX)
+                      << ";";
 
-            ENGINE_LOG_DEBUG << "MySQLMetaImpl::FilesToIndex: " << filesToIndexQuery.str();
+            ENGINE_LOG_DEBUG << "FilesToIndex: " << statement.str();
 
-            res = filesToIndexQuery.store();
+            res = statement.store();
         }  // Scoped Connection
 
         Status ret;
         std::map<std::string, CollectionSchema> groups;
-        SegmentSchema table_file;
+        SegmentSchema collection_file;
         for (auto& resRow : res) {
-            table_file.id_ = resRow["id"];  // implicit conversion
-            resRow["table_id"].to_string(table_file.collection_id_);
-            resRow["segment_id"].to_string(table_file.segment_id_);
-            table_file.engine_type_ = resRow["engine_type"];
-            resRow["file_id"].to_string(table_file.file_id_);
-            table_file.file_type_ = resRow["file_type"];
-            table_file.file_size_ = resRow["file_size"];
-            table_file.row_count_ = resRow["row_count"];
-            table_file.date_ = resRow["date"];
-            table_file.created_on_ = resRow["created_on"];
+            collection_file.id_ = resRow["id"];  // implicit conversion
+            resRow["table_id"].to_string(collection_file.collection_id_);
+            resRow["segment_id"].to_string(collection_file.segment_id_);
+            collection_file.engine_type_ = resRow["engine_type"];
+            resRow["file_id"].to_string(collection_file.file_id_);
+            collection_file.file_type_ = resRow["file_type"];
+            collection_file.file_size_ = resRow["file_size"];
+            collection_file.row_count_ = resRow["row_count"];
+            collection_file.date_ = resRow["date"];
+            collection_file.created_on_ = resRow["created_on"];
 
-            auto groupItr = groups.find(table_file.collection_id_);
+            auto groupItr = groups.find(collection_file.collection_id_);
             if (groupItr == groups.end()) {
-                CollectionSchema table_schema;
-                table_schema.collection_id_ = table_file.collection_id_;
-                auto status = DescribeCollection(table_schema);
+                CollectionSchema collection_schema;
+                collection_schema.collection_id_ = collection_file.collection_id_;
+                auto status = DescribeCollection(collection_schema);
                 if (!status.ok()) {
                     return status;
                 }
-                groups[table_file.collection_id_] = table_schema;
+                groups[collection_file.collection_id_] = collection_schema;
             }
-            table_file.dimension_ = groups[table_file.collection_id_].dimension_;
-            table_file.index_file_size_ = groups[table_file.collection_id_].index_file_size_;
-            table_file.index_params_ = groups[table_file.collection_id_].index_params_;
-            table_file.metric_type_ = groups[table_file.collection_id_].metric_type_;
+            collection_file.dimension_ = groups[collection_file.collection_id_].dimension_;
+            collection_file.index_file_size_ = groups[collection_file.collection_id_].index_file_size_;
+            collection_file.index_params_ = groups[collection_file.collection_id_].index_params_;
+            collection_file.metric_type_ = groups[collection_file.collection_id_].metric_type_;
 
-            auto status = utils::GetTableFilePath(options_, table_file);
+            auto status = utils::GetCollectionFilePath(options_, collection_file);
             if (!status.ok()) {
                 ret = status;
             }
 
-            files.push_back(table_file);
+            files.push_back(collection_file);
         }
 
         if (res.size() > 0) {
@@ -1755,7 +1738,7 @@ MySQLMetaImpl::FilesToIndex(SegmentsSchema& files) {
         }
         return ret;
     } catch (std::exception& e) {
-        return HandleException("GENERAL ERROR WHEN FINDING TABLE FILES TO INDEX", e.what());
+        return HandleException("Failed to get files to index", e.what());
     }
 }
 
@@ -1797,14 +1780,14 @@ MySQLMetaImpl::FilesByType(const std::string& collection_id, const std::vector<i
                 << " FROM " << META_TABLEFILES << " WHERE table_id = " << mysqlpp::quote << collection_id
                 << " AND file_type in (" << types << ");";
 
-            ENGINE_LOG_DEBUG << "MySQLMetaImpl::FilesByType: " << hasNonIndexFilesQuery.str();
+            ENGINE_LOG_DEBUG << "FilesByType: " << hasNonIndexFilesQuery.str();
 
             res = hasNonIndexFilesQuery.store();
         }  // Scoped Connection
 
-        CollectionSchema table_schema;
-        table_schema.collection_id_ = collection_id;
-        auto status = DescribeCollection(table_schema);
+        CollectionSchema collection_schema;
+        collection_schema.collection_id_ = collection_id;
+        auto status = DescribeCollection(collection_schema);
         if (!status.ok()) {
             return status;
         }
@@ -1825,12 +1808,12 @@ MySQLMetaImpl::FilesByType(const std::string& collection_id, const std::vector<i
                 file_schema.date_ = resRow["date"];
                 file_schema.created_on_ = resRow["created_on"];
 
-                file_schema.index_file_size_ = table_schema.index_file_size_;
-                file_schema.index_params_ = table_schema.index_params_;
-                file_schema.metric_type_ = table_schema.metric_type_;
-                file_schema.dimension_ = table_schema.dimension_;
+                file_schema.index_file_size_ = collection_schema.index_file_size_;
+                file_schema.index_params_ = collection_schema.index_params_;
+                file_schema.metric_type_ = collection_schema.metric_type_;
+                file_schema.dimension_ = collection_schema.dimension_;
 
-                auto status = utils::GetTableFilePath(options_, file_schema);
+                auto status = utils::GetCollectionFilePath(options_, file_schema);
                 if (!status.ok()) {
                     ret = status;
                 }
@@ -1896,7 +1879,7 @@ MySQLMetaImpl::FilesByType(const std::string& collection_id, const std::vector<i
             ENGINE_LOG_DEBUG << msg;
         }
     } catch (std::exception& e) {
-        return HandleException("GENERAL ERROR WHEN GET FILE BY TYPE", e.what());
+        return HandleException("Failed to get files by type", e.what());
     }
 
     return ret;
@@ -1923,10 +1906,9 @@ MySQLMetaImpl::FilesByID(const std::vector<size_t>& ids, SegmentsSchema& files) 
                 return Status(DB_ERROR, "Failed to connect to meta server(mysql)");
             }
 
-            mysqlpp::Query filesToSearchQuery = connectionPtr->query();
-            filesToSearchQuery
-                << "SELECT id, table_id, segment_id, engine_type, file_id, file_type, file_size, row_count, date"
-                << " FROM " << META_TABLEFILES;
+            mysqlpp::Query statement = connectionPtr->query();
+            statement << "SELECT id, table_id, segment_id, engine_type, file_id, file_type, file_size, row_count, date"
+                      << " FROM " << META_TABLEFILES;
 
             std::stringstream idSS;
             for (auto& id : ids) {
@@ -1935,57 +1917,57 @@ MySQLMetaImpl::FilesByID(const std::vector<size_t>& ids, SegmentsSchema& files) 
             std::string idStr = idSS.str();
             idStr = idStr.substr(0, idStr.size() - 4);  // remove the last " OR "
 
-            filesToSearchQuery << " WHERE (" << idStr << ")";
+            statement << " WHERE (" << idStr << ")";
 
             // End
-            filesToSearchQuery << " AND"
-                               << " (file_type = " << std::to_string(SegmentSchema::RAW)
-                               << " OR file_type = " << std::to_string(SegmentSchema::TO_INDEX)
-                               << " OR file_type = " << std::to_string(SegmentSchema::INDEX) << ");";
+            statement << " AND"
+                      << " (file_type = " << std::to_string(SegmentSchema::RAW)
+                      << " OR file_type = " << std::to_string(SegmentSchema::TO_INDEX)
+                      << " OR file_type = " << std::to_string(SegmentSchema::INDEX) << ");";
 
-            ENGINE_LOG_DEBUG << "MySQLMetaImpl::FilesToSearch: " << filesToSearchQuery.str();
+            ENGINE_LOG_DEBUG << "FilesToSearch: " << statement.str();
 
-            res = filesToSearchQuery.store();
+            res = statement.store();
         }  // Scoped Connection
 
-        std::map<std::string, meta::CollectionSchema> tables;
+        std::map<std::string, meta::CollectionSchema> collections;
         Status ret;
         for (auto& resRow : res) {
-            SegmentSchema table_file;
-            table_file.id_ = resRow["id"];  // implicit conversion
-            resRow["table_id"].to_string(table_file.collection_id_);
-            resRow["segment_id"].to_string(table_file.segment_id_);
-            table_file.engine_type_ = resRow["engine_type"];
-            resRow["file_id"].to_string(table_file.file_id_);
-            table_file.file_type_ = resRow["file_type"];
-            table_file.file_size_ = resRow["file_size"];
-            table_file.row_count_ = resRow["row_count"];
-            table_file.date_ = resRow["date"];
+            SegmentSchema collection_file;
+            collection_file.id_ = resRow["id"];  // implicit conversion
+            resRow["table_id"].to_string(collection_file.collection_id_);
+            resRow["segment_id"].to_string(collection_file.segment_id_);
+            collection_file.engine_type_ = resRow["engine_type"];
+            resRow["file_id"].to_string(collection_file.file_id_);
+            collection_file.file_type_ = resRow["file_type"];
+            collection_file.file_size_ = resRow["file_size"];
+            collection_file.row_count_ = resRow["row_count"];
+            collection_file.date_ = resRow["date"];
 
-            if (tables.find(table_file.collection_id_) == tables.end()) {
-                CollectionSchema table_schema;
-                table_schema.collection_id_ = table_file.collection_id_;
-                auto status = DescribeCollection(table_schema);
+            if (collections.find(collection_file.collection_id_) == collections.end()) {
+                CollectionSchema collection_schema;
+                collection_schema.collection_id_ = collection_file.collection_id_;
+                auto status = DescribeCollection(collection_schema);
                 if (!status.ok()) {
                     return status;
                 }
-                tables.insert(std::make_pair(table_file.collection_id_, table_schema));
+                collections.insert(std::make_pair(collection_file.collection_id_, collection_schema));
             }
 
-            auto status = utils::GetTableFilePath(options_, table_file);
+            auto status = utils::GetCollectionFilePath(options_, collection_file);
             if (!status.ok()) {
                 ret = status;
             }
 
-            files.emplace_back(table_file);
+            files.emplace_back(collection_file);
         }
 
-        for (auto& table_file : files) {
-            CollectionSchema& table_schema = tables[table_file.collection_id_];
-            table_file.dimension_ = table_schema.dimension_;
-            table_file.index_file_size_ = table_schema.index_file_size_;
-            table_file.index_params_ = table_schema.index_params_;
-            table_file.metric_type_ = table_schema.metric_type_;
+        for (auto& collection_file : files) {
+            CollectionSchema& collection_schema = collections[collection_file.collection_id_];
+            collection_file.dimension_ = collection_schema.dimension_;
+            collection_file.index_file_size_ = collection_schema.index_file_size_;
+            collection_file.index_params_ = collection_schema.index_params_;
+            collection_file.metric_type_ = collection_schema.metric_type_;
         }
 
         if (files.empty()) {
@@ -1996,7 +1978,7 @@ MySQLMetaImpl::FilesByID(const std::vector<size_t>& ids, SegmentsSchema& files) 
 
         return ret;
     } catch (std::exception& e) {
-        return HandleException("GENERAL ERROR WHEN FINDING TABLE FILES BY ID", e.what());
+        return HandleException("Failed to get files by id", e.what());
     }
 }
 
@@ -2025,21 +2007,21 @@ MySQLMetaImpl::Archive() {
                     return Status(DB_ERROR, "Failed to connect to meta server(mysql)");
                 }
 
-                mysqlpp::Query archiveQuery = connectionPtr->query();
-                archiveQuery << "UPDATE " << META_TABLEFILES
-                             << " SET file_type = " << std::to_string(SegmentSchema::TO_DELETE)
-                             << " WHERE created_on < " << std::to_string(now - usecs) << " AND file_type <> "
-                             << std::to_string(SegmentSchema::TO_DELETE) << ";";
+                mysqlpp::Query statement = connectionPtr->query();
+                statement << "UPDATE " << META_TABLEFILES
+                          << " SET file_type = " << std::to_string(SegmentSchema::TO_DELETE) << " WHERE created_on < "
+                          << std::to_string(now - usecs) << " AND file_type <> "
+                          << std::to_string(SegmentSchema::TO_DELETE) << ";";
 
-                ENGINE_LOG_DEBUG << "MySQLMetaImpl::Archive: " << archiveQuery.str();
+                ENGINE_LOG_DEBUG << "Archive: " << statement.str();
 
-                if (!archiveQuery.exec()) {
-                    return HandleException("QUERY ERROR DURING ARCHIVE", archiveQuery.error());
+                if (!statement.exec()) {
+                    return HandleException("Failed to archive", statement.error());
                 }
 
                 ENGINE_LOG_DEBUG << "Archive old files";
             } catch (std::exception& e) {
-                return HandleException("GENERAL ERROR WHEN DURING ARCHIVE", e.what());
+                return HandleException("Failed to archive", e.what());
             }
         }
         if (criteria == engine::ARCHIVE_CONF_DISK) {
@@ -2072,14 +2054,14 @@ MySQLMetaImpl::Size(uint64_t& result) {
                 return Status(DB_ERROR, "Failed to connect to meta server(mysql)");
             }
 
-            mysqlpp::Query getSizeQuery = connectionPtr->query();
-            getSizeQuery << "SELECT IFNULL(SUM(file_size),0) AS sum"
-                         << " FROM " << META_TABLEFILES << " WHERE file_type <> "
-                         << std::to_string(SegmentSchema::TO_DELETE) << ";";
+            mysqlpp::Query statement = connectionPtr->query();
+            statement << "SELECT IFNULL(SUM(file_size),0) AS sum"
+                      << " FROM " << META_TABLEFILES << " WHERE file_type <> "
+                      << std::to_string(SegmentSchema::TO_DELETE) << ";";
 
-            ENGINE_LOG_DEBUG << "MySQLMetaImpl::Size: " << getSizeQuery.str();
+            ENGINE_LOG_DEBUG << "Size: " << statement.str();
 
-            res = getSizeQuery.store();
+            res = statement.store();
         }  // Scoped Connection
 
         if (res.empty()) {
@@ -2088,7 +2070,7 @@ MySQLMetaImpl::Size(uint64_t& result) {
             result = res[0]["sum"];
         }
     } catch (std::exception& e) {
-        return HandleException("GENERAL ERROR WHEN RETRIEVING SIZE", e.what());
+        return HandleException("Failed to get total files size", e.what());
     }
 
     return Status::OK();
@@ -2106,26 +2088,26 @@ MySQLMetaImpl::CleanUpShadowFiles() {
             return Status(DB_ERROR, "Failed to connect to meta server(mysql)");
         }
 
-        mysqlpp::Query cleanUpQuery = connectionPtr->query();
-        cleanUpQuery << "SELECT table_name"
-                     << " FROM information_schema.tables"
-                     << " WHERE table_schema = " << mysqlpp::quote << mysql_connection_pool_->getDB()
-                     << " AND table_name = " << mysqlpp::quote << META_TABLEFILES << ";";
+        mysqlpp::Query statement = connectionPtr->query();
+        statement << "SELECT table_name"
+                  << " FROM information_schema.tables"
+                  << " WHERE table_schema = " << mysqlpp::quote << mysql_connection_pool_->getDB()
+                  << " AND table_name = " << mysqlpp::quote << META_TABLEFILES << ";";
 
-        ENGINE_LOG_DEBUG << "MySQLMetaImpl::CleanUp: " << cleanUpQuery.str();
+        ENGINE_LOG_DEBUG << "CleanUp: " << statement.str();
 
-        mysqlpp::StoreQueryResult res = cleanUpQuery.store();
+        mysqlpp::StoreQueryResult res = statement.store();
 
         if (!res.empty()) {
             ENGINE_LOG_DEBUG << "Remove collection file type as NEW";
-            cleanUpQuery << "DELETE FROM " << META_TABLEFILES << " WHERE file_type IN ("
-                         << std::to_string(SegmentSchema::NEW) << "," << std::to_string(SegmentSchema::NEW_MERGE) << ","
-                         << std::to_string(SegmentSchema::NEW_INDEX) << ");";
+            statement << "DELETE FROM " << META_TABLEFILES << " WHERE file_type IN ("
+                      << std::to_string(SegmentSchema::NEW) << "," << std::to_string(SegmentSchema::NEW_MERGE) << ","
+                      << std::to_string(SegmentSchema::NEW_INDEX) << ");";
 
-            ENGINE_LOG_DEBUG << "MySQLMetaImpl::CleanUp: " << cleanUpQuery.str();
+            ENGINE_LOG_DEBUG << "CleanUp: " << statement.str();
 
-            if (!cleanUpQuery.exec()) {
-                return HandleException("QUERY ERROR WHEN CLEANING UP FILES", cleanUpQuery.error());
+            if (!statement.exec()) {
+                return HandleException("Failed to clean shadow files", statement.error());
             }
         }
 
@@ -2133,7 +2115,7 @@ MySQLMetaImpl::CleanUpShadowFiles() {
             ENGINE_LOG_DEBUG << "Clean " << res.size() << " files";
         }
     } catch (std::exception& e) {
-        return HandleException("GENERAL ERROR WHEN CLEANING UP FILES", e.what());
+        return HandleException("Failed to clean shadow files", e.what());
     }
 
     return Status::OK();
@@ -2142,7 +2124,7 @@ MySQLMetaImpl::CleanUpShadowFiles() {
 Status
 MySQLMetaImpl::CleanUpFilesWithTTL(uint64_t seconds /*, CleanUpFilter* filter*/) {
     auto now = utils::GetMicroSecTimeStamp();
-    std::set<std::string> table_ids;
+    std::set<std::string> collection_ids;
     std::map<std::string, SegmentSchema> segment_ids;
 
     // remove to_delete files
@@ -2160,49 +2142,50 @@ MySQLMetaImpl::CleanUpFilesWithTTL(uint64_t seconds /*, CleanUpFilter* filter*/)
                 return Status(DB_ERROR, "Failed to connect to meta server(mysql)");
             }
 
-            mysqlpp::Query query = connectionPtr->query();
-            query << "SELECT id, table_id, segment_id, engine_type, file_id, file_type, date"
-                  << " FROM " << META_TABLEFILES << " WHERE file_type IN (" << std::to_string(SegmentSchema::TO_DELETE)
-                  << "," << std::to_string(SegmentSchema::BACKUP) << ")"
-                  << " AND updated_time < " << std::to_string(now - seconds * US_PS) << ";";
+            mysqlpp::Query statement = connectionPtr->query();
+            statement << "SELECT id, table_id, segment_id, engine_type, file_id, file_type, date"
+                      << " FROM " << META_TABLEFILES << " WHERE file_type IN ("
+                      << std::to_string(SegmentSchema::TO_DELETE) << "," << std::to_string(SegmentSchema::BACKUP) << ")"
+                      << " AND updated_time < " << std::to_string(now - seconds * US_PS) << ";";
 
-            ENGINE_LOG_DEBUG << "MySQLMetaImpl::CleanUpFilesWithTTL: " << query.str();
+            ENGINE_LOG_DEBUG << "CleanUpFilesWithTTL: " << statement.str();
 
-            mysqlpp::StoreQueryResult res = query.store();
+            mysqlpp::StoreQueryResult res = statement.store();
 
-            SegmentSchema table_file;
+            SegmentSchema collection_file;
             std::vector<std::string> delete_ids;
 
             int64_t clean_files = 0;
             for (auto& resRow : res) {
-                table_file.id_ = resRow["id"];  // implicit conversion
-                resRow["table_id"].to_string(table_file.collection_id_);
-                resRow["segment_id"].to_string(table_file.segment_id_);
-                table_file.engine_type_ = resRow["engine_type"];
-                resRow["file_id"].to_string(table_file.file_id_);
-                table_file.date_ = resRow["date"];
-                table_file.file_type_ = resRow["file_type"];
+                collection_file.id_ = resRow["id"];  // implicit conversion
+                resRow["table_id"].to_string(collection_file.collection_id_);
+                resRow["segment_id"].to_string(collection_file.segment_id_);
+                collection_file.engine_type_ = resRow["engine_type"];
+                resRow["file_id"].to_string(collection_file.file_id_);
+                collection_file.date_ = resRow["date"];
+                collection_file.file_type_ = resRow["file_type"];
 
                 // check if the file can be deleted
-                if (OngoingFileChecker::GetInstance().IsIgnored(table_file)) {
-                    ENGINE_LOG_DEBUG << "File:" << table_file.file_id_
+                if (OngoingFileChecker::GetInstance().IsIgnored(collection_file)) {
+                    ENGINE_LOG_DEBUG << "File:" << collection_file.file_id_
                                      << " currently is in use, not able to delete now";
                     continue;  // ignore this file, don't delete it
                 }
 
                 // erase file data from cache
-                // because GetTableFilePath won't able to generate file path after the file is deleted
-                utils::GetTableFilePath(options_, table_file);
-                server::CommonUtil::EraseFromCache(table_file.location_);
+                // because GetCollectionFilePath won't able to generate file path after the file is deleted
+                utils::GetCollectionFilePath(options_, collection_file);
+                server::CommonUtil::EraseFromCache(collection_file.location_);
 
-                if (table_file.file_type_ == (int)SegmentSchema::TO_DELETE) {
+                if (collection_file.file_type_ == (int)SegmentSchema::TO_DELETE) {
                     // delete file from disk storage
-                    utils::DeleteTableFilePath(options_, table_file);
-                    ENGINE_LOG_DEBUG << "Remove file id:" << table_file.id_ << " location:" << table_file.location_;
+                    utils::DeleteCollectionFilePath(options_, collection_file);
+                    ENGINE_LOG_DEBUG << "Remove file id:" << collection_file.id_
+                                     << " location:" << collection_file.location_;
 
-                    delete_ids.emplace_back(std::to_string(table_file.id_));
-                    table_ids.insert(table_file.collection_id_);
-                    segment_ids.insert(std::make_pair(table_file.segment_id_, table_file));
+                    delete_ids.emplace_back(std::to_string(collection_file.id_));
+                    collection_ids.insert(collection_file.collection_id_);
+                    segment_ids.insert(std::make_pair(collection_file.segment_id_, collection_file));
 
                     clean_files++;
                 }
@@ -2217,12 +2200,12 @@ MySQLMetaImpl::CleanUpFilesWithTTL(uint64_t seconds /*, CleanUpFilter* filter*/)
 
                 std::string idsToDeleteStr = idsToDeleteSS.str();
                 idsToDeleteStr = idsToDeleteStr.substr(0, idsToDeleteStr.size() - 4);  // remove the last " OR "
-                query << "DELETE FROM " << META_TABLEFILES << " WHERE " << idsToDeleteStr << ";";
+                statement << "DELETE FROM " << META_TABLEFILES << " WHERE " << idsToDeleteStr << ";";
 
-                ENGINE_LOG_DEBUG << "MySQLMetaImpl::CleanUpFilesWithTTL: " << query.str();
+                ENGINE_LOG_DEBUG << "CleanUpFilesWithTTL: " << statement.str();
 
-                if (!query.exec()) {
-                    return HandleException("QUERY ERROR WHEN CLEANING UP FILES WITH TTL", query.error());
+                if (!statement.exec()) {
+                    return HandleException("Failed to clean up with ttl", statement.error());
                 }
             }
 
@@ -2231,10 +2214,10 @@ MySQLMetaImpl::CleanUpFilesWithTTL(uint64_t seconds /*, CleanUpFilter* filter*/)
             }
         }  // Scoped Connection
     } catch (std::exception& e) {
-        return HandleException("GENERAL ERROR WHEN CLEANING UP FILES WITH TTL", e.what());
+        return HandleException("Failed to clean up with ttl", e.what());
     }
 
-    // remove to_delete tables
+    // remove to_delete collections
     try {
         server::MetricCollector metric;
 
@@ -2242,22 +2225,24 @@ MySQLMetaImpl::CleanUpFilesWithTTL(uint64_t seconds /*, CleanUpFilter* filter*/)
             mysqlpp::ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab_);
 
             bool is_null_connection = (connectionPtr == nullptr);
-            fiu_do_on("MySQLMetaImpl.CleanUpFilesWithTTL.RemoveToDeleteTables_NUllConnection",
+            fiu_do_on("MySQLMetaImpl.CleanUpFilesWithTTL.RemoveToDeleteCollections_NUllConnection",
                       is_null_connection = true);
-            fiu_do_on("MySQLMetaImpl.CleanUpFilesWithTTL.RemoveToDeleteTables_ThrowException", throw std::exception(););
+            fiu_do_on("MySQLMetaImpl.CleanUpFilesWithTTL.RemoveToDeleteCollections_ThrowException",
+                      throw std::exception(););
             if (is_null_connection) {
                 return Status(DB_ERROR, "Failed to connect to meta server(mysql)");
             }
 
-            mysqlpp::Query query = connectionPtr->query();
-            query << "SELECT id, table_id"
-                  << " FROM " << META_TABLES << " WHERE state = " << std::to_string(CollectionSchema::TO_DELETE) << ";";
+            mysqlpp::Query statement = connectionPtr->query();
+            statement << "SELECT id, table_id"
+                      << " FROM " << META_TABLES << " WHERE state = " << std::to_string(CollectionSchema::TO_DELETE)
+                      << ";";
 
-            ENGINE_LOG_DEBUG << "MySQLMetaImpl::CleanUpFilesWithTTL: " << query.str();
+            ENGINE_LOG_DEBUG << "CleanUpFilesWithTTL: " << statement.str();
 
-            mysqlpp::StoreQueryResult res = query.store();
+            mysqlpp::StoreQueryResult res = statement.store();
 
-            int64_t remove_tables = 0;
+            int64_t remove_collections = 0;
             if (!res.empty()) {
                 std::stringstream idsToDeleteSS;
                 for (auto& resRow : res) {
@@ -2265,27 +2250,27 @@ MySQLMetaImpl::CleanUpFilesWithTTL(uint64_t seconds /*, CleanUpFilter* filter*/)
                     std::string collection_id;
                     resRow["table_id"].to_string(collection_id);
 
-                    utils::DeleteTablePath(options_, collection_id, false);  // only delete empty folder
-                    ++remove_tables;
+                    utils::DeleteCollectionPath(options_, collection_id, false);  // only delete empty folder
+                    ++remove_collections;
                     idsToDeleteSS << "id = " << std::to_string(id) << " OR ";
                 }
                 std::string idsToDeleteStr = idsToDeleteSS.str();
                 idsToDeleteStr = idsToDeleteStr.substr(0, idsToDeleteStr.size() - 4);  // remove the last " OR "
-                query << "DELETE FROM " << META_TABLES << " WHERE " << idsToDeleteStr << ";";
+                statement << "DELETE FROM " << META_TABLES << " WHERE " << idsToDeleteStr << ";";
 
-                ENGINE_LOG_DEBUG << "MySQLMetaImpl::CleanUpFilesWithTTL: " << query.str();
+                ENGINE_LOG_DEBUG << "CleanUpFilesWithTTL: " << statement.str();
 
-                if (!query.exec()) {
-                    return HandleException("QUERY ERROR WHEN CLEANING UP TABLES WITH TTL", query.error());
+                if (!statement.exec()) {
+                    return HandleException("Failed to clean up with ttl", statement.error());
                 }
             }
 
-            if (remove_tables > 0) {
-                ENGINE_LOG_DEBUG << "Remove " << remove_tables << " tables from meta";
+            if (remove_collections > 0) {
+                ENGINE_LOG_DEBUG << "Remove " << remove_collections << " collections from meta";
             }
         }  // Scoped Connection
     } catch (std::exception& e) {
-        return HandleException("GENERAL ERROR WHEN CLEANING UP TABLES WITH TTL", e.what());
+        return HandleException("Failed to clean up with ttl", e.what());
     }
 
     // remove deleted collection folder
@@ -2297,38 +2282,39 @@ MySQLMetaImpl::CleanUpFilesWithTTL(uint64_t seconds /*, CleanUpFilter* filter*/)
             mysqlpp::ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab_);
 
             bool is_null_connection = (connectionPtr == nullptr);
-            fiu_do_on("MySQLMetaImpl.CleanUpFilesWithTTL.RemoveDeletedTableFolder_NUllConnection",
+            fiu_do_on("MySQLMetaImpl.CleanUpFilesWithTTL.RemoveDeletedCollectionFolder_NUllConnection",
                       is_null_connection = true);
-            fiu_do_on("MySQLMetaImpl.CleanUpFilesWithTTL.RemoveDeletedTableFolder_ThrowException",
+            fiu_do_on("MySQLMetaImpl.CleanUpFilesWithTTL.RemoveDeletedCollectionFolder_ThrowException",
                       throw std::exception(););
             if (is_null_connection) {
                 return Status(DB_ERROR, "Failed to connect to meta server(mysql)");
             }
 
-            for (auto& collection_id : table_ids) {
-                mysqlpp::Query query = connectionPtr->query();
-                query << "SELECT file_id"
-                      << " FROM " << META_TABLEFILES << " WHERE table_id = " << mysqlpp::quote << collection_id << ";";
+            for (auto& collection_id : collection_ids) {
+                mysqlpp::Query statement = connectionPtr->query();
+                statement << "SELECT file_id"
+                          << " FROM " << META_TABLEFILES << " WHERE table_id = " << mysqlpp::quote << collection_id
+                          << ";";
 
-                ENGINE_LOG_DEBUG << "MySQLMetaImpl::CleanUpFilesWithTTL: " << query.str();
+                ENGINE_LOG_DEBUG << "CleanUpFilesWithTTL: " << statement.str();
 
-                mysqlpp::StoreQueryResult res = query.store();
+                mysqlpp::StoreQueryResult res = statement.store();
 
                 if (res.empty()) {
-                    utils::DeleteTablePath(options_, collection_id);
+                    utils::DeleteCollectionPath(options_, collection_id);
                 }
             }
 
-            if (table_ids.size() > 0) {
-                ENGINE_LOG_DEBUG << "Remove " << table_ids.size() << " tables folder";
+            if (collection_ids.size() > 0) {
+                ENGINE_LOG_DEBUG << "Remove " << collection_ids.size() << " collections folder";
             }
         }
     } catch (std::exception& e) {
-        return HandleException("GENERAL ERROR WHEN CLEANING UP TABLES WITH TTL", e.what());
+        return HandleException("Failed to clean up with ttl", e.what());
     }
 
     // remove deleted segment folder
-    // don't remove segment folder until all its tablefiles has been deleted
+    // don't remove segment folder until all its files has been deleted
     try {
         server::MetricCollector metric;
 
@@ -2346,14 +2332,14 @@ MySQLMetaImpl::CleanUpFilesWithTTL(uint64_t seconds /*, CleanUpFilter* filter*/)
 
             int64_t remove_segments = 0;
             for (auto& segment_id : segment_ids) {
-                mysqlpp::Query query = connectionPtr->query();
-                query << "SELECT id"
-                      << " FROM " << META_TABLEFILES << " WHERE segment_id = " << mysqlpp::quote << segment_id.first
-                      << ";";
+                mysqlpp::Query statement = connectionPtr->query();
+                statement << "SELECT id"
+                          << " FROM " << META_TABLEFILES << " WHERE segment_id = " << mysqlpp::quote << segment_id.first
+                          << ";";
 
-                ENGINE_LOG_DEBUG << "MySQLMetaImpl::CleanUpFilesWithTTL: " << query.str();
+                ENGINE_LOG_DEBUG << "CleanUpFilesWithTTL: " << statement.str();
 
-                mysqlpp::StoreQueryResult res = query.store();
+                mysqlpp::StoreQueryResult res = statement.store();
 
                 if (res.empty()) {
                     utils::DeleteSegment(options_, segment_id.second);
@@ -2369,7 +2355,7 @@ MySQLMetaImpl::CleanUpFilesWithTTL(uint64_t seconds /*, CleanUpFilter* filter*/)
             }
         }
     } catch (std::exception& e) {
-        return HandleException("GENERAL ERROR WHEN CLEANING UP TABLES WITH TTL", e.what());
+        return HandleException("Failed to clean up with ttl", e.what());
     }
 
     return Status::OK();
@@ -2380,9 +2366,9 @@ MySQLMetaImpl::Count(const std::string& collection_id, uint64_t& result) {
     try {
         server::MetricCollector metric;
 
-        CollectionSchema table_schema;
-        table_schema.collection_id_ = collection_id;
-        auto status = DescribeCollection(table_schema);
+        CollectionSchema collection_schema;
+        collection_schema.collection_id_ = collection_id;
+        auto status = DescribeCollection(collection_schema);
 
         if (!status.ok()) {
             return status;
@@ -2399,16 +2385,16 @@ MySQLMetaImpl::Count(const std::string& collection_id, uint64_t& result) {
                 return Status(DB_ERROR, "Failed to connect to meta server(mysql)");
             }
 
-            mysqlpp::Query countQuery = connectionPtr->query();
-            countQuery << "SELECT row_count"
-                       << " FROM " << META_TABLEFILES << " WHERE table_id = " << mysqlpp::quote << collection_id
-                       << " AND (file_type = " << std::to_string(SegmentSchema::RAW)
-                       << " OR file_type = " << std::to_string(SegmentSchema::TO_INDEX)
-                       << " OR file_type = " << std::to_string(SegmentSchema::INDEX) << ");";
+            mysqlpp::Query statement = connectionPtr->query();
+            statement << "SELECT row_count"
+                      << " FROM " << META_TABLEFILES << " WHERE table_id = " << mysqlpp::quote << collection_id
+                      << " AND (file_type = " << std::to_string(SegmentSchema::RAW)
+                      << " OR file_type = " << std::to_string(SegmentSchema::TO_INDEX)
+                      << " OR file_type = " << std::to_string(SegmentSchema::INDEX) << ");";
 
-            ENGINE_LOG_DEBUG << "MySQLMetaImpl::Count: " << countQuery.str();
+            ENGINE_LOG_DEBUG << "Count: " << statement.str();
 
-            res = countQuery.store();
+            res = statement.store();
         }  // Scoped Connection
 
         result = 0;
@@ -2417,7 +2403,7 @@ MySQLMetaImpl::Count(const std::string& collection_id, uint64_t& result) {
             result += size;
         }
     } catch (std::exception& e) {
-        return HandleException("GENERAL ERROR WHEN RETRIEVING COUNT", e.what());
+        return HandleException("Failed to clean up with ttl", e.what());
     }
 
     return Status::OK();
@@ -2436,17 +2422,17 @@ MySQLMetaImpl::DropAll() {
             return Status(DB_ERROR, "Failed to connect to meta server(mysql)");
         }
 
-        mysqlpp::Query dropTableQuery = connectionPtr->query();
-        dropTableQuery << "DROP TABLE IF EXISTS " << TABLES_SCHEMA.name() << ", " << TABLEFILES_SCHEMA.name() << ";";
+        mysqlpp::Query statement = connectionPtr->query();
+        statement << "DROP TABLE IF EXISTS " << TABLES_SCHEMA.name() << ", " << TABLEFILES_SCHEMA.name() << ";";
 
-        ENGINE_LOG_DEBUG << "MySQLMetaImpl::DropAll: " << dropTableQuery.str();
+        ENGINE_LOG_DEBUG << "DropAll: " << statement.str();
 
-        if (dropTableQuery.exec()) {
+        if (statement.exec()) {
             return Status::OK();
         }
-        return HandleException("QUERY ERROR WHEN DROPPING ALL", dropTableQuery.error());
+        return HandleException("Failed to drop all", statement.error());
     } catch (std::exception& e) {
-        return HandleException("GENERAL ERROR WHEN DROPPING ALL", e.what());
+        return HandleException("Failed to drop all", e.what());
     }
 }
 
@@ -2470,52 +2456,51 @@ MySQLMetaImpl::DiscardFiles(int64_t to_discard_size) {
                 return Status(DB_ERROR, "Failed to connect to meta server(mysql)");
             }
 
-            mysqlpp::Query discardFilesQuery = connectionPtr->query();
-            discardFilesQuery << "SELECT id, file_size"
-                              << " FROM " << META_TABLEFILES << " WHERE file_type <> "
-                              << std::to_string(SegmentSchema::TO_DELETE) << " ORDER BY id ASC "
-                              << " LIMIT 10;";
+            mysqlpp::Query statement = connectionPtr->query();
+            statement << "SELECT id, file_size"
+                      << " FROM " << META_TABLEFILES << " WHERE file_type <> "
+                      << std::to_string(SegmentSchema::TO_DELETE) << " ORDER BY id ASC "
+                      << " LIMIT 10;";
 
-            ENGINE_LOG_DEBUG << "MySQLMetaImpl::DiscardFiles: " << discardFilesQuery.str();
+            ENGINE_LOG_DEBUG << "DiscardFiles: " << statement.str();
 
-            mysqlpp::StoreQueryResult res = discardFilesQuery.store();
+            mysqlpp::StoreQueryResult res = statement.store();
             if (res.num_rows() == 0) {
                 return Status::OK();
             }
 
-            SegmentSchema table_file;
+            SegmentSchema collection_file;
             std::stringstream idsToDiscardSS;
             for (auto& resRow : res) {
                 if (to_discard_size <= 0) {
                     break;
                 }
-                table_file.id_ = resRow["id"];
-                table_file.file_size_ = resRow["file_size"];
-                idsToDiscardSS << "id = " << std::to_string(table_file.id_) << " OR ";
-                ENGINE_LOG_DEBUG << "Discard table_file.id=" << table_file.file_id_
-                                 << " table_file.size=" << table_file.file_size_;
-                to_discard_size -= table_file.file_size_;
+                collection_file.id_ = resRow["id"];
+                collection_file.file_size_ = resRow["file_size"];
+                idsToDiscardSS << "id = " << std::to_string(collection_file.id_) << " OR ";
+                ENGINE_LOG_DEBUG << "Discard file id=" << collection_file.file_id_
+                                 << " file size=" << collection_file.file_size_;
+                to_discard_size -= collection_file.file_size_;
             }
 
             std::string idsToDiscardStr = idsToDiscardSS.str();
             idsToDiscardStr = idsToDiscardStr.substr(0, idsToDiscardStr.size() - 4);  // remove the last " OR "
 
-            discardFilesQuery << "UPDATE " << META_TABLEFILES
-                              << " SET file_type = " << std::to_string(SegmentSchema::TO_DELETE)
-                              << " ,updated_time = " << std::to_string(utils::GetMicroSecTimeStamp()) << " WHERE "
-                              << idsToDiscardStr << ";";
+            statement << "UPDATE " << META_TABLEFILES << " SET file_type = " << std::to_string(SegmentSchema::TO_DELETE)
+                      << " ,updated_time = " << std::to_string(utils::GetMicroSecTimeStamp()) << " WHERE "
+                      << idsToDiscardStr << ";";
 
-            ENGINE_LOG_DEBUG << "MySQLMetaImpl::DiscardFiles: " << discardFilesQuery.str();
+            ENGINE_LOG_DEBUG << "DiscardFiles: " << statement.str();
 
-            status = discardFilesQuery.exec();
+            status = statement.exec();
             if (!status) {
-                return HandleException("QUERY ERROR WHEN DISCARDING FILES", discardFilesQuery.error());
+                return HandleException("Failed to discard files", statement.error());
             }
         }  // Scoped Connection
 
         return DiscardFiles(to_discard_size);
     } catch (std::exception& e) {
-        return HandleException("GENERAL ERROR WHEN DISCARDING FILES", e.what());
+        return HandleException("Failed to discard files", e.what());
     }
 }
 
@@ -2543,7 +2528,7 @@ MySQLMetaImpl::SetGlobalLastLSN(uint64_t lsn) {
             if (first_create) {  // first time to get global lsn
                 mysqlpp::Query statement = connectionPtr->query();
                 statement << "INSERT INTO " << META_ENVIRONMENT << " VALUES(" << lsn << ");";
-                ENGINE_LOG_DEBUG << "MySQLMetaImpl::SetGlobalLastLSN: " << statement.str();
+                ENGINE_LOG_DEBUG << "SetGlobalLastLSN: " << statement.str();
 
                 if (!statement.exec()) {
                     return HandleException("QUERY ERROR WHEN SET GLOBAL LSN", statement.error());
@@ -2551,17 +2536,17 @@ MySQLMetaImpl::SetGlobalLastLSN(uint64_t lsn) {
             } else {
                 mysqlpp::Query statement = connectionPtr->query();
                 statement << "UPDATE " << META_ENVIRONMENT << " SET global_lsn = " << lsn << ";";
-                ENGINE_LOG_DEBUG << "MySQLMetaImpl::SetGlobalLastLSN: " << statement.str();
+                ENGINE_LOG_DEBUG << "SetGlobalLastLSN: " << statement.str();
 
                 if (!statement.exec()) {
-                    return HandleException("QUERY ERROR WHEN SET GLOBAL LSN", statement.error());
+                    return HandleException("Failed to set global lsn", statement.error());
                 }
             }
         }  // Scoped Connection
 
-        ENGINE_LOG_DEBUG << "Successfully update global_lsn = " << lsn;
+        ENGINE_LOG_DEBUG << "Successfully update global_lsn: " << lsn;
     } catch (std::exception& e) {
-        return HandleException("QUERY ERROR WHEN SET GLOBAL LSN", e.what());
+        return HandleException("Failed to set global lsn", e.what());
     }
 
     return Status::OK();
@@ -2582,7 +2567,7 @@ MySQLMetaImpl::GetGlobalLastLSN(uint64_t& lsn) {
             mysqlpp::Query statement = connectionPtr->query();
             statement << "SELECT global_lsn FROM " << META_ENVIRONMENT << ";";
 
-            ENGINE_LOG_DEBUG << "MySQLMetaImpl::GetGlobalLastLSN: " << statement.str();
+            ENGINE_LOG_DEBUG << "GetGlobalLastLSN: " << statement.str();
 
             res = statement.store();
         }  // Scoped Connection
@@ -2591,7 +2576,7 @@ MySQLMetaImpl::GetGlobalLastLSN(uint64_t& lsn) {
             lsn = res[0]["global_lsn"];
         }
     } catch (std::exception& e) {
-        return HandleException("GENERAL ERROR WHEN GET GLOBAL LSN", e.what());
+        return HandleException("Failed to update global lsn", e.what());
     }
 
     return Status::OK();
