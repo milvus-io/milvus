@@ -119,6 +119,7 @@ set(entry_file
 set(helper_files
         ${MILVUS_ENGINE_SRC}/config/Config.cpp
         ${MILVUS_ENGINE_SRC}/utils/CommonUtil.cpp
+        ${MILVUS_ENGINE_SRC}/utils/Log.cpp
         ${MILVUS_ENGINE_SRC}/utils/TimeRecorder.cpp
         ${MILVUS_ENGINE_SRC}/utils/Status.cpp
         ${MILVUS_ENGINE_SRC}/utils/StringHelpFunctions.cpp

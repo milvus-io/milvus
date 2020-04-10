@@ -81,6 +81,7 @@ static const std::unordered_map<engine::EngineType, std::string> IndexMap = {
     {engine::EngineType::NSG_MIX, NAME_ENGINE_TYPE_RNSG},
     {engine::EngineType::FAISS_PQ, NAME_ENGINE_TYPE_IVFPQ},
     {engine::EngineType::HNSW, NAME_ENGINE_TYPE_HNSW},
+    {engine::EngineType::ANNOY, NAME_ENGINE_TYPE_ANNOY},
 };
 
 static const std::unordered_map<std::string, engine::EngineType> IndexNameMap = {
@@ -91,6 +92,7 @@ static const std::unordered_map<std::string, engine::EngineType> IndexNameMap = 
     {NAME_ENGINE_TYPE_RNSG, engine::EngineType::NSG_MIX},
     {NAME_ENGINE_TYPE_IVFPQ, engine::EngineType::FAISS_PQ},
     {NAME_ENGINE_TYPE_HNSW, engine::EngineType::HNSW},
+    {NAME_ENGINE_TYPE_ANNOY, engine::EngineType::ANNOY},
 };
 
 static const std::unordered_map<engine::MetricType, std::string> MetricMap = {

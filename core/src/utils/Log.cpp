@@ -8,39 +8,27 @@
 // Unless required by applicable law or agreed to in writing, software distributed under the License
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
+#include "utils/Log.h"
 
-#pragma once
-
-#include "easyloggingpp/easylogging++.h"
-#include "utils/Status.h"
-
-#include <sstream>
+#include <cstdarg>
+#include <cstdio>
+#include <memory>
 #include <string>
 
 namespace milvus {
-namespace server {
 
-Status
-InitLog(const std::string& log_config_file);
+std::string
+LogOut(const char* pattern, ...) {
+    size_t len = strnlen(pattern, 1024) + 256;
+    auto str_p = std::make_unique<char[]>(len);
+    memset(str_p.get(), 0, len);
 
-void
-RolloutHandler(const char* filename, std::size_t size, el::Level level);
+    va_list vl;
+    va_start(vl, pattern);
+    vsnprintf(str_p.get(), len, pattern, vl);
+    va_end(vl);
 
-#define SHOW_LOCATION
-#ifdef SHOW_LOCATION
-#define LOCATION_INFO "[" << sql::server::GetFileName(__FILE__) << ":" << __LINE__ << "] "
-#else
-#define LOCATION_INFO ""
-#endif
+    return std::string(str_p.get());
+}
 
-void
-LogConfigInFile(const std::string& path);
-
-void
-LogConfigInMem();
-
-void
-LogCpuInfo();
-
-}  // namespace server
 }  // namespace milvus

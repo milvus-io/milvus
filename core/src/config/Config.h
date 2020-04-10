@@ -161,7 +161,7 @@ class Config {
     Status
     ResetDefaultConfig();
     void
-    GetConfigJsonStr(std::string& result);
+    GetConfigJsonStr(std::string& result, int64_t indent = -1);
     Status
     ProcessConfigCli(std::string& result, const std::string& cmd);
 

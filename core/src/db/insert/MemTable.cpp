@@ -53,7 +53,7 @@ MemTable::Add(const VectorSourcePtr& source) {
 
         if (!status.ok()) {
             std::string err_msg = "Insert failed: " + status.ToString();
-            ENGINE_LOG_ERROR << err_msg;
+            ENGINE_LOG_ERROR << LogOut("[%s][%ld] ", "insert", 0) << err_msg;
             return Status(DB_ERROR, err_msg);
         }
     }
