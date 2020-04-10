@@ -281,12 +281,12 @@ void hammings_knn_hc (
 
     if ((bytes_per_code + k * (sizeof(hamdis_t) + sizeof(int64_t))) * ha->nh < size_1M) {
         int thread_max_num = omp_get_max_threads();
-        // init hash
-        size_t thread_hash_size = ha->nh * k;
-        size_t all_hash_size = thread_hash_size * thread_max_num;
-        hamdis_t *value = new hamdis_t[all_hash_size];
-        int64_t *labels = new int64_t[all_hash_size];
-        for (int i = 0; i < all_hash_size; i++) {
+        // init heap
+        size_t thread_heap_size = ha->nh * k;
+        size_t all_heap_size = thread_heap_size * thread_max_num;
+        hamdis_t *value = new hamdis_t[all_heap_size];
+        int64_t *labels = new int64_t[all_heap_size];
+        for (int i = 0; i < all_heap_size; i++) {
             value[i] = 0x7fffffff;
             labels[i] = -1;
         }
@@ -305,8 +305,8 @@ void hammings_knn_hc (
                 for (size_t i = 0; i < ha->nh; i++) {
                     hamdis_t dis = hc[i].hamming (bs2_);
 
-                    hamdis_t * val_ = value + thread_no * thread_hash_size + i * k;
-                    int64_t * ids_ = labels + thread_no * thread_hash_size + i * k;
+                    hamdis_t * val_ = value + thread_no * thread_heap_size + i * k;
+                    int64_t * ids_ = labels + thread_no * thread_heap_size + i * k;
                     if (dis < val_[0]) {
                         faiss::maxheap_swap_top<hamdis_t> (k, val_, ids_, dis, j);
                     }
@@ -315,12 +315,12 @@ void hammings_knn_hc (
         }
 
         for (size_t t = 1; t < thread_max_num; t++) {
-            // merge hash
+            // merge heap
             for (size_t i = 0; i < ha->nh; i++) {
                 hamdis_t * __restrict value_x = value + i * k;
                 int64_t * __restrict labels_x = labels + i * k;
-                hamdis_t *value_x_t = value_x + t * thread_hash_size;
-                int64_t *labels_x_t = labels_x + t * thread_hash_size;
+                hamdis_t *value_x_t = value_x + t * thread_heap_size;
+                int64_t *labels_x_t = labels_x + t * thread_heap_size;
                 for (size_t j = 0; j < k; j++) {
                     if (value_x_t[j] < value_x[0]) {
                         faiss::maxheap_swap_top<hamdis_t> (k, value_x, labels_x, value_x_t[j], labels_x_t[j]);
@@ -330,8 +330,8 @@ void hammings_knn_hc (
         }
 
         // copy result
-        memcpy(ha->val, value, thread_hash_size * sizeof(hamdis_t));
-        memcpy(ha->ids, labels, thread_hash_size * sizeof(int64_t));
+        memcpy(ha->val, value, thread_heap_size * sizeof(hamdis_t));
+        memcpy(ha->ids, labels, thread_heap_size * sizeof(int64_t));
 
         delete[] hc;
         delete[] value;
@@ -449,12 +449,12 @@ void hammings_knn_hc_1 (
     int thread_max_num = omp_get_max_threads();
     if (ha->nh == 1) {
         // omp for n2
-        int all_hash_size = thread_max_num * k;
-        hamdis_t *value = new hamdis_t[all_hash_size];
-        int64_t *labels = new int64_t[all_hash_size];
+        int all_heap_size = thread_max_num * k;
+        hamdis_t *value = new hamdis_t[all_heap_size];
+        int64_t *labels = new int64_t[all_heap_size];
 
-        // init hash
-        for (int i = 0; i < all_hash_size; i++) {
+        // init heap
+        for (int i = 0; i < all_heap_size; i++) {
             value[i] = 0x7fffffff;
         }
         const uint64_t bs1_ = bs1[0];
@@ -471,10 +471,10 @@ void hammings_knn_hc_1 (
                 }
             }
         }
-        // merge hash
+        // merge heap
         hamdis_t * __restrict bh_val_ = ha->val;
         int64_t * __restrict bh_ids_ = ha->ids;
-        for (int i = 0; i < all_hash_size; i++) {
+        for (int i = 0; i < all_heap_size; i++) {
             if (value[i] < bh_val_[0]) {
                 faiss::maxheap_swap_top<hamdis_t> (k, bh_val_, bh_ids_, value[i], labels[i]);
             }

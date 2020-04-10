@@ -7,11 +7,10 @@ Please mark all change in change log and use the issue from GitHub
 ## Bug
 -   \#1762 Server is not forbidden to create new partition which tag is `_default`
 -   \#1873 Fix index file serialize to incorrect path
--   \#1881 Fix Annoy index search fail
+-   \#1881 Fix bad alloc when index files lost
 
 ## Feature
 -   \#261  Integrate ANNOY into Milvus
--   \#1603 BinaryFlat add 2 Metric: Substructure and Superstructure
 -   \#1655 GPU index support delete vectors
 -   \#1660 IVF PQ CPU support deleted vectors searching
 -   \#1661 HNSW support deleted vectors searching
@@ -26,6 +25,7 @@ Please mark all change in change log and use the issue from GitHub
 -   \#1882 Add index annoy into http module
 -   \#1885 Optimize knowhere unittest
 -   \#1886 Refactor log on search and insert request
+-   \#1897 Heap pop and push can be realized by heap_swap_top
 
 ## Task
 

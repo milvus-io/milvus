@@ -155,13 +155,13 @@ static void knn_inner_product_sse (const float * x,
 
     size_t thread_max_num = omp_get_max_threads();
     
-    size_t thread_hash_size = nx * k;
-    size_t all_hash_size = thread_hash_size * thread_max_num;
-    float *value = new float[all_hash_size];
-    int64_t *labels = new int64_t[all_hash_size];
+    size_t thread_heap_size = nx * k;
+    size_t all_heap_size = thread_heap_size * thread_max_num;
+    float *value = new float[all_heap_size];
+    int64_t *labels = new int64_t[all_heap_size];
 
-    // init hash
-    for (size_t i = 0; i < all_hash_size; i++) {
+    // init heap
+    for (size_t i = 0; i < all_heap_size; i++) {
         value[i] = -1.0 / 0.0;
         labels[i] = -1;
     }
@@ -175,8 +175,8 @@ static void knn_inner_product_sse (const float * x,
                 const float *x_i = x + i * d;
                 float ip = fvec_inner_product (x_i, y_j, d);
 
-                float * val_ = value + thread_no * thread_hash_size + i * k;
-                int64_t * ids_ = labels + thread_no * thread_hash_size + i * k;
+                float * val_ = value + thread_no * thread_heap_size + i * k;
+                int64_t * ids_ = labels + thread_no * thread_heap_size + i * k;
                 if (ip > val_[0]) {
                     minheap_swap_top (k, val_, ids_, ip, j);
                 }
@@ -185,12 +185,12 @@ static void knn_inner_product_sse (const float * x,
     }
 
     for (size_t t = 1; t < thread_max_num; t++) {
-        // merge hash
+        // merge heap
         for (size_t i = 0; i < nx; i++) {
             float * __restrict value_x = value + i * k;
             int64_t * __restrict labels_x = labels + i * k;
-            float *value_x_t = value_x + t * thread_hash_size;
-            int64_t *labels_x_t = labels_x + t * thread_hash_size;
+            float *value_x_t = value_x + t * thread_heap_size;
+            int64_t *labels_x_t = labels_x + t * thread_heap_size;
             for (size_t j = 0; j < k; j++) {
                 if (value_x_t[j] > value_x[0]) {
                     minheap_swap_top (k, value_x, labels_x, value_x_t[j], labels_x_t[j]);
@@ -206,8 +206,8 @@ static void knn_inner_product_sse (const float * x,
     }
 
     // copy result
-    memcpy(res->val, value, thread_hash_size * sizeof(float));
-    memcpy(res->ids, labels, thread_hash_size * sizeof(int64_t));
+    memcpy(res->val, value, thread_heap_size * sizeof(float));
+    memcpy(res->ids, labels, thread_heap_size * sizeof(int64_t));
 
     delete[] value;
     delete[] labels;
@@ -260,13 +260,13 @@ static void knn_L2sqr_sse (
 
     size_t thread_max_num = omp_get_max_threads();
 
-    size_t thread_hash_size = nx * k;
-    size_t all_hash_size = thread_hash_size * thread_max_num;
-    float *value = new float[all_hash_size];
-    int64_t *labels = new int64_t[all_hash_size];
+    size_t thread_heap_size = nx * k;
+    size_t all_heap_size = thread_heap_size * thread_max_num;
+    float *value = new float[all_heap_size];
+    int64_t *labels = new int64_t[all_heap_size];
 
-    // init hash
-    for (size_t i = 0; i < all_hash_size; i++) {
+    // init heap
+    for (size_t i = 0; i < all_heap_size; i++) {
         value[i] = 1.0 / 0.0;
         labels[i] = -1;
     }
@@ -280,8 +280,8 @@ static void knn_L2sqr_sse (
                 const float *x_i = x + i * d;
                 float disij = fvec_L2sqr (x_i, y_j, d);
 
-                float * val_ = value + thread_no * thread_hash_size + i * k;
-                int64_t * ids_ = labels + thread_no * thread_hash_size + i * k;
+                float * val_ = value + thread_no * thread_heap_size + i * k;
+                int64_t * ids_ = labels + thread_no * thread_heap_size + i * k;
                 if (disij < val_[0]) {
                     maxheap_swap_top (k, val_, ids_, disij, j);
                 }
@@ -290,12 +290,12 @@ static void knn_L2sqr_sse (
     }
 
     for (size_t t = 1; t < thread_max_num; t++) {
-        // merge hash
+        // merge heap
         for (size_t i = 0; i < nx; i++) {
             float * __restrict value_x = value + i * k;
             int64_t * __restrict labels_x = labels + i * k;
-            float *value_x_t = value_x + t * thread_hash_size;
-            int64_t *labels_x_t = labels_x + t * thread_hash_size;
+            float *value_x_t = value_x + t * thread_heap_size;
+            int64_t *labels_x_t = labels_x + t * thread_heap_size;
             for (size_t j = 0; j < k; j++) {
                 if (value_x_t[j] < value_x[0]) {
                     maxheap_swap_top (k, value_x, labels_x, value_x_t[j], labels_x_t[j]);
@@ -311,8 +311,8 @@ static void knn_L2sqr_sse (
     }
 
     // copy result
-    memcpy(res->val, value, thread_hash_size * sizeof(float));
-    memcpy(res->ids, labels, thread_hash_size * sizeof(int64_t));
+    memcpy(res->val, value, thread_heap_size * sizeof(float));
+    memcpy(res->ids, labels, thread_heap_size * sizeof(int64_t));
 
     delete[] value;
     delete[] labels;
@@ -628,20 +628,6 @@ void knn_jaccard (const float * x,
     } else {
         NopDistanceCorrection nop;
         knn_jaccard_blas (x, y, d, nx, ny, res, nop, bitset);
-    }
-}
-
-void knn_jaccard (const float * x,
-                  const float * y,
-                  size_t d, size_t nx, size_t ny,
-                  float_maxheap_array_t * res)
-{
-    if (d % 4 == 0 && nx < distance_compute_blas_threshold) {
-//        knn_jaccard_sse (x, y, d, nx, ny, res);
-        printf("sse_not implemented!\n");
-    } else {
-        NopDistanceCorrection nop;
-        knn_jaccard_blas (x, y, d, nx, ny, res, nop);
     }
 }
 
