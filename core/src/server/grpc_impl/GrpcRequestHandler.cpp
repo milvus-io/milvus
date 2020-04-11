@@ -234,7 +234,6 @@ GrpcRequestHandler::OnPostRecvInitialMetaData(
     auto span = tracer_->StartSpan(server_rpc_info->method(), {opentracing::ChildOf(span_context_maybe->get())});
 
     auto server_context = server_rpc_info->server_context();
-    auto server_metadata = server_context->server_metadata();
     auto client_metadata = server_context->client_metadata();
 
     // if client provide request_id in metadata, milvus just use it,
