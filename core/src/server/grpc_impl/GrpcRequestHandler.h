@@ -11,6 +11,7 @@
 
 #pragma once
 
+#include <grpcpp/server_context.h>
 #include <server/context/Context.h>
 
 #include <cstdint>
@@ -311,7 +312,8 @@ class GrpcRequestHandler final : public ::milvus::grpc::MilvusService::Service, 
  private:
     RequestHandler request_handler_;
 
-    std::unordered_map<::grpc::ServerContext*, std::shared_ptr<Context>> context_map_;
+    // std::unordered_map<::grpc::ServerContext*, std::shared_ptr<Context>> context_map_;
+    std::unordered_map<std::string, std::shared_ptr<Context>> context_map_;
     std::shared_ptr<opentracing::Tracer> tracer_;
     //    std::unordered_map<::grpc::ServerContext*, std::unique_ptr<opentracing::Span>> span_map_;
 
