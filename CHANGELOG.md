@@ -11,6 +11,7 @@ Please mark all change in change log and use the issue from GitHub
 -   \#1832 Fix crash in tracing module
 -   \#1873 Fix index file serialize to incorrect path
 -   \#1881 Fix bad alloc when index files lost
+-   \#1910 C++ SDK GetIDsInSegment could not work for large dataset
 
 ## Feature
 -   \#261  Integrate ANNOY into Milvus
