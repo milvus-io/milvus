@@ -5,6 +5,7 @@ Please mark all change in change log and use the issue from GitHub
 # Milvus 0.8.0 (TBD)
 
 ## Bug
+-   \#1276 SQLite throw exception after create 50000+ partitions in a table
 -   \#1762 Server is not forbidden to create new partition which tag is `_default`
 -   \#1873 Fix index file serialize to incorrect path
 -   \#1881 Fix bad alloc when index files lost
@@ -680,7 +681,7 @@ Please mark all change in change log and use the issue from GitHub
 -   MS-67 Fix license check bug
 -   MS-76 Fix pipeline crash bug
 -   MS-100 cmake: fix AWS build issue
--   MS-101 change AWS build type to Release
+-   MS-101 Change AWS build type to Release
 
 ## Improvement
 

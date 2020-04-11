@@ -32,32 +32,32 @@ class MySQLMetaImpl : public Meta {
     ~MySQLMetaImpl();
 
     Status
-    CreateCollection(CollectionSchema& table_schema) override;
+    CreateCollection(CollectionSchema& collection_schema) override;
 
     Status
-    DescribeCollection(CollectionSchema& table_schema) override;
+    DescribeCollection(CollectionSchema& collection_schema) override;
 
     Status
     HasCollection(const std::string& collection_id, bool& has_or_not) override;
 
     Status
-    AllCollections(std::vector<CollectionSchema>& table_schema_array) override;
+    AllCollections(std::vector<CollectionSchema>& collection_schema_array) override;
 
     Status
     DropCollection(const std::string& collection_id) override;
 
     Status
-    DeleteTableFiles(const std::string& collection_id) override;
+    DeleteCollectionFiles(const std::string& collection_id) override;
 
     Status
     CreateCollectionFile(SegmentSchema& file_schema) override;
 
     Status
-    GetTableFiles(const std::string& collection_id, const std::vector<size_t>& ids,
-                  SegmentsSchema& table_files) override;
+    GetCollectionFiles(const std::string& collection_id, const std::vector<size_t>& ids,
+                       SegmentsSchema& collection_files) override;
 
     Status
-    GetCollectionFilesBySegmentId(const std::string& segment_id, SegmentsSchema& table_files) override;
+    GetCollectionFilesBySegmentId(const std::string& segment_id, SegmentsSchema& collection_files) override;
 
     Status
     UpdateCollectionIndex(const std::string& collection_id, const CollectionIndex& index) override;
@@ -66,7 +66,7 @@ class MySQLMetaImpl : public Meta {
     UpdateCollectionFlag(const std::string& collection_id, int64_t flag) override;
 
     Status
-    UpdateTableFlushLSN(const std::string& collection_id, uint64_t flush_lsn) override;
+    UpdateCollectionFlushLSN(const std::string& collection_id, uint64_t flush_lsn) override;
 
     Status
     GetCollectionFlushLSN(const std::string& collection_id, uint64_t& flush_lsn) override;
@@ -116,7 +116,7 @@ class MySQLMetaImpl : public Meta {
     FilesByType(const std::string& collection_id, const std::vector<int>& file_types, SegmentsSchema& files) override;
 
     Status
-    FilesByID(const std::vector<size_t>& ids, SegmentsSchema& table_files) override;
+    FilesByID(const std::vector<size_t>& ids, SegmentsSchema& collection_files) override;
 
     Status
     Archive() override;
@@ -146,7 +146,7 @@ class MySQLMetaImpl : public Meta {
     Status
     NextFileId(std::string& file_id);
     Status
-    NextTableId(std::string& collection_id);
+    NextCollectionId(std::string& collection_id);
     Status
     DiscardFiles(int64_t to_discard_size);
 

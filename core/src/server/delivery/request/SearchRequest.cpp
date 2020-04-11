@@ -59,7 +59,7 @@ SearchRequest::OnPreExecute() {
     TimeRecorderAuto rc(LogOut("[%s][%ld] %s", "search", 0, hdr.c_str()));
 
     milvus::server::ContextChild tracer_pre(context_, "Pre Query");
-    // step 1: check table name
+    // step 1: check collection name
     auto status = ValidationUtil::ValidateCollectionName(collection_name_);
     if (!status.ok()) {
         SERVER_LOG_ERROR << LogOut("[%s][%d] %s", "search", 0, status.message().c_str());
@@ -94,17 +94,18 @@ SearchRequest::OnExecute() {
                           ", nq=" + std::to_string(vector_count) + ", k=" + std::to_string(topk_) + ")";
         TimeRecorderAuto rc(LogOut("[%s][%d] %s", "search", 0, hdr.c_str()));
 
-        // step 4: check table existence
-        // only process root table, ignore partition table
+        // step 4: check collection existence
+        // only process root collection, ignore partition collection
         collection_schema_.collection_id_ = collection_name_;
         auto status = DBWrapper::DB()->DescribeCollection(collection_schema_);
 
-        fiu_do_on("SearchRequest.OnExecute.describe_table_fail", status = Status(milvus::SERVER_UNEXPECTED_ERROR, ""));
+        fiu_do_on("SearchRequest.OnExecute.describe_collection_fail",
+                  status = Status(milvus::SERVER_UNEXPECTED_ERROR, ""));
         if (!status.ok()) {
             if (status.code() == DB_NOT_FOUND) {
                 SERVER_LOG_ERROR << LogOut("[%s][%d] Collection %s not found: %s", "search", 0,
                                            collection_name_.c_str(), status.message().c_str());
-                return Status(SERVER_TABLE_NOT_EXIST, TableNotExistMsg(collection_name_));
+                return Status(SERVER_COLLECTION_NOT_EXIST, CollectionNotExistMsg(collection_name_));
             } else {
                 SERVER_LOG_ERROR << LogOut("[%s][%d] Error occurred when describing collection %s: %s", "search", 0,
                                            collection_name_.c_str(), status.message().c_str());
@@ -112,8 +113,8 @@ SearchRequest::OnExecute() {
             }
         } else {
             if (!collection_schema_.owner_collection_.empty()) {
-                SERVER_LOG_ERROR << LogOut("[%s][%d] %s", "search", 0, TableNotExistMsg(collection_name_).c_str());
-                return Status(SERVER_INVALID_TABLE_NAME, TableNotExistMsg(collection_name_));
+                SERVER_LOG_ERROR << LogOut("[%s][%d] %s", "search", 0, CollectionNotExistMsg(collection_name_).c_str());
+                return Status(SERVER_INVALID_COLLECTION_NAME, CollectionNotExistMsg(collection_name_));
             }
         }
 

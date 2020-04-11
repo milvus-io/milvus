@@ -18,9 +18,12 @@
 #include <fiu-local.h>
 #include <memory>
 #include <string>
+#include <vector>
 
 namespace milvus {
 namespace server {
+
+constexpr uint64_t MAX_PARTITION_LIMIT = 5000;
 
 CreatePartitionRequest::CreatePartitionRequest(const std::shared_ptr<milvus::server::Context>& context,
                                                const std::string& collection_name, const std::string& tag)
@@ -41,7 +44,7 @@ CreatePartitionRequest::OnExecute() {
     try {
         // step 1: check arguments
         auto status = ValidationUtil::ValidateCollectionName(collection_name_);
-        fiu_do_on("CreatePartitionRequest.OnExecute.invalid_table_name",
+        fiu_do_on("CreatePartitionRequest.OnExecute.invalid_collection_name",
                   status = Status(milvus::SERVER_UNEXPECTED_ERROR, ""));
         if (!status.ok()) {
             return status;
@@ -59,21 +62,28 @@ CreatePartitionRequest::OnExecute() {
         }
 
         // only process root collection, ignore partition collection
-        engine::meta::CollectionSchema table_schema;
-        table_schema.collection_id_ = collection_name_;
-        status = DBWrapper::DB()->DescribeCollection(table_schema);
+        engine::meta::CollectionSchema collection_schema;
+        collection_schema.collection_id_ = collection_name_;
+        status = DBWrapper::DB()->DescribeCollection(collection_schema);
         fiu_do_on("CreatePartitionRequest.OnExecute.invalid_partition_tags",
                   status = Status(milvus::SERVER_UNEXPECTED_ERROR, ""));
         if (!status.ok()) {
             if (status.code() == DB_NOT_FOUND) {
-                return Status(SERVER_TABLE_NOT_EXIST, TableNotExistMsg(collection_name_));
+                return Status(SERVER_COLLECTION_NOT_EXIST, CollectionNotExistMsg(collection_name_));
             } else {
                 return status;
             }
         } else {
-            if (!table_schema.owner_collection_.empty()) {
-                return Status(SERVER_INVALID_TABLE_NAME, TableNotExistMsg(collection_name_));
+            if (!collection_schema.owner_collection_.empty()) {
+                return Status(SERVER_INVALID_COLLECTION_NAME, CollectionNotExistMsg(collection_name_));
             }
+        }
+
+        // check partition total count
+        std::vector<engine::meta::CollectionSchema> schema_array;
+        status = DBWrapper::DB()->ShowPartitions(collection_name_, schema_array);
+        if (schema_array.size() >= MAX_PARTITION_LIMIT) {
+            return Status(SERVER_UNSUPPORTED_ERROR, "The number of partitions exceeds the upper limit(5000)");
         }
 
         rc.RecordSection("check validation");
@@ -87,7 +97,7 @@ CreatePartitionRequest::OnExecute() {
         if (!status.ok()) {
             // partition could exist
             if (status.code() == DB_ALREADY_EXIST) {
-                return Status(SERVER_INVALID_TABLE_NAME, status.message());
+                return Status(SERVER_INVALID_COLLECTION_NAME, status.message());
             }
             return status;
         }

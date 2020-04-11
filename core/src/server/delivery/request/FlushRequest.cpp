@@ -39,7 +39,7 @@ FlushRequest::Create(const std::shared_ptr<milvus::server::Context>& context,
 
 Status
 FlushRequest::OnExecute() {
-    std::string hdr = "FlushRequest flush tables: ";
+    std::string hdr = "FlushRequest flush collections: ";
     for (auto& name : collection_names_) {
         hdr += name;
         hdr += ", ";
@@ -51,18 +51,18 @@ FlushRequest::OnExecute() {
 
     for (auto& name : collection_names_) {
         // only process root collection, ignore partition collection
-        engine::meta::CollectionSchema table_schema;
-        table_schema.collection_id_ = name;
-        status = DBWrapper::DB()->DescribeCollection(table_schema);
+        engine::meta::CollectionSchema collection_schema;
+        collection_schema.collection_id_ = name;
+        status = DBWrapper::DB()->DescribeCollection(collection_schema);
         if (!status.ok()) {
             if (status.code() == DB_NOT_FOUND) {
-                return Status(SERVER_TABLE_NOT_EXIST, TableNotExistMsg(name));
+                return Status(SERVER_COLLECTION_NOT_EXIST, CollectionNotExistMsg(name));
             } else {
                 return status;
             }
         } else {
-            if (!table_schema.owner_collection_.empty()) {
-                return Status(SERVER_INVALID_TABLE_NAME, TableNotExistMsg(name));
+            if (!collection_schema.owner_collection_.empty()) {
+                return Status(SERVER_INVALID_COLLECTION_NAME, CollectionNotExistMsg(name));
             }
         }
 

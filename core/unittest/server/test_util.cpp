@@ -319,18 +319,18 @@ TEST(UtilTest, STATUS_TEST) {
     ASSERT_EQ(status_move.ToString(), status_ref.ToString());
 }
 
-TEST(ValidationUtilTest, VALIDATE_TABLENAME_TEST) {
+TEST(ValidationUtilTest, VALIDATE_COLLECTION_NAME_TEST) {
     std::string collection_name = "Normal123_";
     auto status = milvus::server::ValidationUtil::ValidateCollectionName(collection_name);
     ASSERT_TRUE(status.ok());
 
     collection_name = "12sds";
     status = milvus::server::ValidationUtil::ValidateCollectionName(collection_name);
-    ASSERT_EQ(status.code(), milvus::SERVER_INVALID_TABLE_NAME);
+    ASSERT_EQ(status.code(), milvus::SERVER_INVALID_COLLECTION_NAME);
 
     collection_name = "";
     status = milvus::server::ValidationUtil::ValidateCollectionName(collection_name);
-    ASSERT_EQ(status.code(), milvus::SERVER_INVALID_TABLE_NAME);
+    ASSERT_EQ(status.code(), milvus::SERVER_INVALID_COLLECTION_NAME);
 
     collection_name = "_asdasd";
     status = milvus::server::ValidationUtil::ValidateCollectionName(collection_name);
@@ -338,23 +338,23 @@ TEST(ValidationUtilTest, VALIDATE_TABLENAME_TEST) {
 
     collection_name = "!@#!@";
     status = milvus::server::ValidationUtil::ValidateCollectionName(collection_name);
-    ASSERT_EQ(status.code(), milvus::SERVER_INVALID_TABLE_NAME);
+    ASSERT_EQ(status.code(), milvus::SERVER_INVALID_COLLECTION_NAME);
 
     collection_name = "_!@#!@";
     status = milvus::server::ValidationUtil::ValidateCollectionName(collection_name);
-    ASSERT_EQ(status.code(), milvus::SERVER_INVALID_TABLE_NAME);
+    ASSERT_EQ(status.code(), milvus::SERVER_INVALID_COLLECTION_NAME);
 
     collection_name = "中文";
     status = milvus::server::ValidationUtil::ValidateCollectionName(collection_name);
-    ASSERT_EQ(status.code(), milvus::SERVER_INVALID_TABLE_NAME);
+    ASSERT_EQ(status.code(), milvus::SERVER_INVALID_COLLECTION_NAME);
 
     collection_name = std::string(10000, 'a');
     status = milvus::server::ValidationUtil::ValidateCollectionName(collection_name);
-    ASSERT_EQ(status.code(), milvus::SERVER_INVALID_TABLE_NAME);
+    ASSERT_EQ(status.code(), milvus::SERVER_INVALID_COLLECTION_NAME);
 
     collection_name = "";
     status = milvus::server::ValidationUtil::ValidatePartitionName(collection_name);
-    ASSERT_EQ(status.code(), milvus::SERVER_INVALID_TABLE_NAME);
+    ASSERT_EQ(status.code(), milvus::SERVER_INVALID_COLLECTION_NAME);
 }
 
 TEST(ValidationUtilTest, VALIDATE_DIMENSION_TEST) {

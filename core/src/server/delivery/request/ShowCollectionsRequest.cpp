@@ -23,14 +23,14 @@ namespace milvus {
 namespace server {
 
 ShowCollectionsRequest::ShowCollectionsRequest(const std::shared_ptr<milvus::server::Context>& context,
-                                               std::vector<std::string>& table_name_list)
-    : BaseRequest(context, BaseRequest::kShowCollections), table_name_list_(table_name_list) {
+                                               std::vector<std::string>& collection_name_list)
+    : BaseRequest(context, BaseRequest::kShowCollections), collection_name_list_(collection_name_list) {
 }
 
 BaseRequestPtr
 ShowCollectionsRequest::Create(const std::shared_ptr<milvus::server::Context>& context,
-                               std::vector<std::string>& table_name_list) {
-    return std::shared_ptr<BaseRequest>(new ShowCollectionsRequest(context, table_name_list));
+                               std::vector<std::string>& collection_name_list) {
+    return std::shared_ptr<BaseRequest>(new ShowCollectionsRequest(context, collection_name_list));
 }
 
 Status
@@ -39,14 +39,14 @@ ShowCollectionsRequest::OnExecute() {
 
     std::vector<engine::meta::CollectionSchema> schema_array;
     auto status = DBWrapper::DB()->AllCollections(schema_array);
-    fiu_do_on("ShowCollectionsRequest.OnExecute.show_tables_fail",
+    fiu_do_on("ShowCollectionsRequest.OnExecute.show_collections_fail",
               status = Status(milvus::SERVER_UNEXPECTED_ERROR, ""));
     if (!status.ok()) {
         return status;
     }
 
     for (auto& schema : schema_array) {
-        table_name_list_.push_back(schema.collection_id_);
+        collection_name_list_.push_back(schema.collection_id_);
     }
     return Status::OK();
 }

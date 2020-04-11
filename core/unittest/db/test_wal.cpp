@@ -639,7 +639,7 @@ TEST(WalTest, MANAGER_TEST) {
     ASSERT_TRUE(record.collection_id.empty());
 }
 
-TEST(WalTest, MANAGER_SAME_NAME_TABLE) {
+TEST(WalTest, MANAGER_SAME_NAME_COLLECTION) {
     MakeEmptyTestPath();
 
     milvus::engine::DBMetaOptions opt = {WAL_GTEST_PATH};
