@@ -330,8 +330,7 @@ static size_t polysemous_inner_loop (
             }
 
             if (dis < heap_dis[0]) {
-                maxheap_pop (k, heap_dis, heap_ids);
-                maxheap_push (k, heap_dis, heap_ids, dis, bi);
+                maxheap_swap_top (k, heap_dis, heap_ids, dis, bi);
             }
         }
         b_code += code_size;

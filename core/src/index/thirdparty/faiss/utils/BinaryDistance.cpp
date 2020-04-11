@@ -34,12 +34,12 @@ void binary_distence_knn_hc(
 
     if ((bytes_per_code + k * (sizeof(float) + sizeof(int64_t))) * ha->nh < size_1M) {
         int thread_max_num = omp_get_max_threads();
-        // init hash
-        size_t thread_hash_size = ha->nh * k;
-        size_t all_hash_size = thread_hash_size * thread_max_num;
-        float *value = new float[all_hash_size];
-        int64_t *labels = new int64_t[all_hash_size];
-        for (int i = 0; i < all_hash_size; i++) {
+        // init heap
+        size_t thread_heap_size = ha->nh * k;
+        size_t all_heap_size = thread_heap_size * thread_max_num;
+        float *value = new float[all_heap_size];
+        int64_t *labels = new int64_t[all_heap_size];
+        for (int i = 0; i < all_heap_size; i++) {
             value[i] = 1.0 / 0.0;
             labels[i] = -1;
         }
@@ -58,35 +58,33 @@ void binary_distence_knn_hc(
                 for (size_t i = 0; i < ha->nh; i++) {
                     tadis_t dis = hc[i].compute (bs2_);
 
-                    float * val_ = value + thread_no * thread_hash_size + i * k;
-                    int64_t * ids_ = labels + thread_no * thread_hash_size + i * k;
+                    float * val_ = value + thread_no * thread_heap_size + i * k;
+                    int64_t * ids_ = labels + thread_no * thread_heap_size + i * k;
                     if (dis < val_[0]) {
-                        faiss::maxheap_pop<tadis_t> (k, val_, ids_);
-                        faiss::maxheap_push<tadis_t> (k, val_, ids_, dis, j);
+                        faiss::maxheap_swap_top<tadis_t> (k, val_, ids_, dis, j);
                     }
                 }
             }
         }
 
         for (size_t t = 1; t < thread_max_num; t++) {
-            // merge hash
+            // merge heap
             for (size_t i = 0; i < ha->nh; i++) {
                 float * __restrict value_x = value + i * k;
                 int64_t * __restrict labels_x = labels + i * k;
-                float *value_x_t = value_x + t * thread_hash_size;
-                int64_t *labels_x_t = labels_x + t * thread_hash_size;
+                float *value_x_t = value_x + t * thread_heap_size;
+                int64_t *labels_x_t = labels_x + t * thread_heap_size;
                 for (size_t j = 0; j < k; j++) {
                     if (value_x_t[j] < value_x[0]) {
-                        faiss::maxheap_pop<tadis_t> (k, value_x, labels_x);
-                        faiss::maxheap_push<tadis_t> (k, value_x, labels_x, value_x_t[j], labels_x_t[j]);
+                        faiss::maxheap_swap_top<tadis_t> (k, value_x, labels_x, value_x_t[j], labels_x_t[j]);
                     }
                 }
             }
         }
 
         // copy result
-        memcpy(ha->val, value, thread_hash_size * sizeof(float));
-        memcpy(ha->ids, labels, thread_hash_size * sizeof(int64_t));
+        memcpy(ha->val, value, thread_heap_size * sizeof(float));
+        memcpy(ha->ids, labels, thread_heap_size * sizeof(int64_t));
 
         delete[] hc;
         delete[] value;
@@ -111,8 +109,7 @@ void binary_distence_knn_hc(
                     if(!bitset || !bitset->test(j)){
                         dis = hc.compute (bs2_);
                         if (dis < bh_val_[0]) {
-                            faiss::maxheap_pop<tadis_t> (k, bh_val_, bh_ids_);
-                            faiss::maxheap_push<tadis_t> (k, bh_val_, bh_ids_, dis, j);
+                            faiss::maxheap_swap_top<tadis_t> (k, bh_val_, bh_ids_, dis, j);
                         }
                     }
                 }
