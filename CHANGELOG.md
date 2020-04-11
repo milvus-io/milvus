@@ -659,7 +659,7 @@ Please mark all change in change log and use the issue from GitHub
 -   MS-65 Implement GetTableRowCount interface
 -   MS-45 Implement DeleteTable interface
 -   MS-75 cmake: change faiss version to 1.5.2; add CUDA gencode
--   MS-81 fix faiss ptx issue; change cuda gencode
+-   MS-81 Fix faiss ptx issue; change cuda gencode
 -   MS-84 cmake: add arrow, jemalloc and jsoncons third party; default build option OFF
 -   MS-85 add NetIO metric
 -   MS-96 add new query interface for specified files
@@ -698,7 +698,7 @@ Please mark all change in change log and use the issue from GitHub
 -   MS-26 CMake. Add thirdparty packages
 -   MS-31 cmake: add prometheus
 -   MS-33 cmake: add -j4 to make third party packages build faster
--   MS-27 support gpu config and disable license build config in cmake
+-   MS-27 Support gpu config and disable license build config in cmake
 -   MS-47 Add query vps metrics
 -   MS-37 Add query, cache usage, disk write speed and file data size metrics
 -   MS-30 Use faiss v1.5.2

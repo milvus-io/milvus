@@ -39,9 +39,8 @@ namespace server {
 
 constexpr int64_t GB = 1UL << 30;
 
-static const std::unordered_map<std::string, std::string> milvus_config_version_map({{"0.6.0", "0.1"},
-                                                                                     {"0.7.0", "0.2"},
-                                                                                     {"0.7.1", "0.2"}});
+static const std::unordered_map<std::string, std::string> milvus_config_version_map(
+    {{"0.6.0", "0.1"}, {"0.7.0", "0.2"}, {"0.7.1", "0.2"}, {"0.8.0", "0.3"}});
 
 /////////////////////////////////////////////////////////////
 Config::Config() {
@@ -133,8 +132,8 @@ Config::ValidateConfig() {
     std::string db_backend_url;
     CONFIG_CHECK(GetDBConfigBackendUrl(db_backend_url));
 
-    std::string db_preload_table;
-    CONFIG_CHECK(GetDBConfigPreloadCollection(db_preload_table));
+    std::string db_preload_collection;
+    CONFIG_CHECK(GetDBConfigPreloadCollection(db_preload_collection));
 
     int64_t db_archive_disk_threshold;
     CONFIG_CHECK(GetDBConfigArchiveDiskThreshold(db_archive_disk_threshold));
@@ -777,7 +776,7 @@ Config::CheckDBConfigBackendUrl(const std::string& value) {
 
 Status
 Config::CheckDBConfigPreloadCollection(const std::string& value) {
-    fiu_return_on("check_config_preload_table_fail", Status(SERVER_INVALID_ARGUMENT, ""));
+    fiu_return_on("check_config_preload_collection_fail", Status(SERVER_INVALID_ARGUMENT, ""));
 
     if (value.empty() || value == "*") {
         return Status::OK();
@@ -803,7 +802,7 @@ Config::CheckDBConfigPreloadCollection(const std::string& value) {
     if (table_set.size() != tables.size()) {
         std::string msg =
             "Invalid preload tables. "
-            "Possible reason: db_config.preload_table contains duplicate collection.";
+            "Possible reason: db_config.preload_collection contains duplicate collection.";
         return Status(SERVER_INVALID_ARGUMENT, msg);
     }
 

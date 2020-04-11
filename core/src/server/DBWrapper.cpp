@@ -205,16 +205,16 @@ DBWrapper::StartService() {
     db_->Start();
 
     // preload collection
-    std::string preload_tables;
-    s = config.GetDBConfigPreloadCollection(preload_tables);
+    std::string preload_collections;
+    s = config.GetDBConfigPreloadCollection(preload_collections);
     if (!s.ok()) {
         std::cerr << s.ToString() << std::endl;
         return s;
     }
 
-    s = PreloadCollections(preload_tables);
+    s = PreloadCollections(preload_collections);
     if (!s.ok()) {
-        std::cerr << "ERROR! Failed to preload tables: " << preload_tables << std::endl;
+        std::cerr << "ERROR! Failed to preload tables: " << preload_collections << std::endl;
         std::cerr << s.ToString() << std::endl;
         kill(0, SIGUSR1);
     }
@@ -232,10 +232,10 @@ DBWrapper::StopService() {
 }
 
 Status
-DBWrapper::PreloadCollections(const std::string& preload_tables) {
-    if (preload_tables.empty()) {
+DBWrapper::PreloadCollections(const std::string& preload_collections) {
+    if (preload_collections.empty()) {
         // do nothing
-    } else if (preload_tables == "*") {
+    } else if (preload_collections == "*") {
         // load all tables
         std::vector<engine::meta::CollectionSchema> table_schema_array;
         db_->AllCollections(table_schema_array);
@@ -248,7 +248,7 @@ DBWrapper::PreloadCollections(const std::string& preload_tables) {
         }
     } else {
         std::vector<std::string> collection_names;
-        StringHelpFunctions::SplitStringByDelimeter(preload_tables, ",", collection_names);
+        StringHelpFunctions::SplitStringByDelimeter(preload_collections, ",", collection_names);
         for (auto& name : collection_names) {
             auto status = db_->PreloadCollection(name);
             if (!status.ok()) {

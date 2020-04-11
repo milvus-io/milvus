@@ -10,7 +10,7 @@ db_config:
   backend_url: sqlite://:@:/    
   insert_buffer_size: 4               
   build_index_gpu: 0  
-  preload_table:             
+  preload_collection:
 
 metric_config:
   enable_monitor: false             
