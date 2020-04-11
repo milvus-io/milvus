@@ -964,10 +964,10 @@ TEST_F(ConfigTest, SERVER_CONFIG_RESET_DEFAULT_CONFIG_FAIL_TEST) {
     ASSERT_FALSE(s.ok());
     fiu_disable("check_config_backend_url_fail");
 
-    fiu_enable("check_config_preload_table_fail", 1, NULL, 0);
+    fiu_enable("check_config_preload_collection_fail", 1, NULL, 0);
     s = config.ResetDefaultConfig();
     ASSERT_FALSE(s.ok());
-    fiu_disable("check_config_preload_table_fail");
+    fiu_disable("check_config_preload_collection_fail");
 
     fiu_enable("check_config_archive_disk_threshold_fail", 1, NULL, 0);
     s = config.ResetDefaultConfig();

@@ -9,7 +9,7 @@
 # is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 # or implied. See the License for the specific language governing permissions and limitations under the License.
 
-version: 0.2
+version: 0.3
 
 #----------------------+------------------------------------------------------------+------------+-----------------+
 # Server Config        | Description                                                | Type       | Default         |
@@ -42,8 +42,8 @@ server_config:
 #                      | Keep 'dialect://:@:/', 'dialect' can be either 'sqlite' or |            |                 |
 #                      | 'mysql', replace other texts with real values.             |            |                 |
 #----------------------+------------------------------------------------------------+------------+-----------------+
-# preload_table        | A comma-separated list of table names that need to be pre- | StringList |                 |
-#                      | loaded when Milvus server starts up.                       |            |                 |
+# preload_collection   | A comma-separated list of collection names that need to    | StringList |                 |
+#                      | be pre-loaded when Milvus server starts up.                |            |                 |
 #                      | '*' means preload all existing tables (single-quote or     |            |                 |
 #                      | double-quote required).                                    |            |                 |
 #----------------------+------------------------------------------------------------+------------+-----------------+
@@ -53,7 +53,7 @@ server_config:
 #----------------------+------------------------------------------------------------+------------+-----------------+
 db_config:
   backend_url: sqlite://:@:/
-  preload_table:
+  preload_collection:
   auto_flush_interval: 1
 
 #----------------------+------------------------------------------------------------+------------+-----------------+
