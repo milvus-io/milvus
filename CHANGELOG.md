@@ -659,7 +659,7 @@ Please mark all change in change log and use the issue from GitHub
 -   MS-65 Implement GetTableRowCount interface
 -   MS-45 Implement DeleteTable interface
 -   MS-75 cmake: change faiss version to 1.5.2; add CUDA gencode
--   MS-81 fix faiss ptx issue; change cuda gencode
+-   MS-81 Fix faiss ptx issue; change cuda gencode
 -   MS-84 cmake: add arrow, jemalloc and jsoncons third party; default build option OFF
 -   MS-85 add NetIO metric
 -   MS-96 add new query interface for specified files
