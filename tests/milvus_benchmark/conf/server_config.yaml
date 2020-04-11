@@ -9,7 +9,7 @@ db_config:
   secondary_path:                   
   backend_url: sqlite://:@:/      
   insert_buffer_size: 4             
-  preload_table:        
+  preload_collection:
 
 metric_config:
   enable_monitor: true            

@@ -48,7 +48,7 @@ class DBWrapper {
 
  private:
     Status
-    PreloadCollections(const std::string& preload_tables);
+    PreloadCollections(const std::string& preload_collections);
 
  private:
     engine::DBPtr db_;
