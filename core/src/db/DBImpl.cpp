@@ -36,6 +36,7 @@
 #include "meta/MetaFactory.h"
 #include "meta/SqliteMetaImpl.h"
 #include "metrics/Metrics.h"
+#include "scheduler/Definition.h"
 #include "scheduler/SchedInst.h"
 #include "scheduler/job/BuildIndexJob.h"
 #include "scheduler/job/DeleteJob.h"
@@ -170,6 +171,8 @@ DBImpl::Stop() {
             swn_flush_.Notify();
             bg_flush_thread_.join();
         }
+
+        WaitMergeFileFinish();
 
         swn_index_.Notify();
         bg_index_thread_.join();
@@ -1211,6 +1214,13 @@ DBImpl::QueryAsync(const std::shared_ptr<server::Context>& context, const meta::
                    ResultDistances& result_distances) {
     milvus::server::ContextChild tracer(context, "Query Async");
     server::CollectQueryMetrics metrics(vectors.vector_count_);
+
+    if (files.size() > milvus::scheduler::TASK_TABLE_MAX_COUNT) {
+        std::string msg =
+            "Search files count exceed scheduler limit: " + std::to_string(milvus::scheduler::TASK_TABLE_MAX_COUNT);
+        ENGINE_LOG_ERROR << msg;
+        return Status(DB_ERROR, msg);
+    }
 
     TimeRecorder rc("");
 

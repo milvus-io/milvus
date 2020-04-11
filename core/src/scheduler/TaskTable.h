@@ -97,7 +97,7 @@ struct TaskTableItem : public interface::dumpable {
 
 class TaskTable : public interface::dumpable {
  public:
-    TaskTable() : table_(1ULL << 16ULL) {
+    TaskTable() : table_(TASK_TABLE_MAX_COUNT) {
     }
 
     TaskTable(const TaskTable&) = delete;
