@@ -18,7 +18,7 @@
 namespace milvus {
 
 /////////////////////////////////////////////////////////////////////////////////////////////////
-#define SERVER_DOMAIN_NAME "[SERVER] "
+#define SERVER_DOMAIN_NAME "[SERVER]"
 
 #define SERVER_LOG_TRACE LOG(TRACE) << SERVER_DOMAIN_NAME
 #define SERVER_LOG_DEBUG LOG(DEBUG) << SERVER_DOMAIN_NAME
@@ -28,7 +28,7 @@ namespace milvus {
 #define SERVER_LOG_FATAL LOG(FATAL) << SERVER_DOMAIN_NAME
 
 /////////////////////////////////////////////////////////////////////////////////////////////////
-#define ENGINE_DOMAIN_NAME "[ENGINE] "
+#define ENGINE_DOMAIN_NAME "[ENGINE]"
 
 #define ENGINE_LOG_TRACE LOG(TRACE) << ENGINE_DOMAIN_NAME
 #define ENGINE_LOG_DEBUG LOG(DEBUG) << ENGINE_DOMAIN_NAME
@@ -38,7 +38,7 @@ namespace milvus {
 #define ENGINE_LOG_FATAL LOG(FATAL) << ENGINE_DOMAIN_NAME
 
 /////////////////////////////////////////////////////////////////////////////////////////////////
-#define WRAPPER_DOMAIN_NAME "[WRAPPER] "
+#define WRAPPER_DOMAIN_NAME "[WRAPPER]"
 
 #define WRAPPER_LOG_TRACE LOG(TRACE) << WRAPPER_DOMAIN_NAME
 #define WRAPPER_LOG_DEBUG LOG(DEBUG) << WRAPPER_DOMAIN_NAME
@@ -48,7 +48,7 @@ namespace milvus {
 #define WRAPPER_LOG_FATAL LOG(FATAL) << WRAPPER_DOMAIN_NAME
 
 /////////////////////////////////////////////////////////////////////////////////////////////////
-#define STORAGE_DOMAIN_NAME "[STORAGE] "
+#define STORAGE_DOMAIN_NAME "[STORAGE]"
 
 #define STORAGE_LOG_TRACE LOG(TRACE) << STORAGE_DOMAIN_NAME
 #define STORAGE_LOG_DEBUG LOG(DEBUG) << STORAGE_DOMAIN_NAME
@@ -57,7 +57,7 @@ namespace milvus {
 #define STORAGE_LOG_ERROR LOG(ERROR) << STORAGE_DOMAIN_NAME
 #define STORAGE_LOG_FATAL LOG(FATAL) << STORAGE_DOMAIN_NAME
 
-#define WAL_DOMAIN_NAME "[WAL] "
+#define WAL_DOMAIN_NAME "[WAL]"
 
 #define WAL_LOG_TRACE LOG(TRACE) << WAL_DOMAIN_NAME
 #define WAL_LOG_DEBUG LOG(DEBUG) << WAL_DOMAIN_NAME
