@@ -150,6 +150,7 @@ class DBImpl : public DB, public server::CacheConfigHandler {
                 context::HybridSearchContextPtr hybrid_search_context,
                 query::GeneralQueryPtr general_query,
                 std::unordered_map<std::string, engine::meta::hybrid::DataType>& attr_type,
+                uint64_t& nq,
                 ResultIds& result_ids,
                 ResultDistances& result_distances) override;
 
@@ -188,17 +189,9 @@ class DBImpl : public DB, public server::CacheConfigHandler {
                      context::HybridSearchContextPtr hybrid_search_context,
                      query::GeneralQueryPtr general_query,
                      std::unordered_map<std::string, engine::meta::hybrid::DataType>& attr_type,
+                     uint64_t& nq,
                      ResultIds& result_ids,
                      ResultDistances& result_distances);
-
-    Status
-    HybridQueryNoSched(const std::shared_ptr<server::Context>& context,
-                       const std::string& table_id,
-                       const meta::TableFilesSchema& files,
-                       query::GeneralQueryPtr general_query,
-                       std::unordered_map<std::string, engine::meta::hybrid::DataType>& attr_type,
-                       ResultIds& result_ids,
-                       ResultDistances& result_distances);
 
     Status
     GetVectorByIdHelper(const std::string& table_id, IDNumber vector_id, VectorsData& vector,

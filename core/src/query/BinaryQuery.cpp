@@ -70,7 +70,7 @@ GenBinaryQuery(BooleanQueryPtr query, BinaryQueryPtr& binary_query) {
             auto query_size = query->getLeafQueries().size();
             for (uint64_t i = 0; i < query_size; ++i) {
                 if (query->getLeafQueries()[i]->vector_query != nullptr) {
-                    std::swap(query->getLeafQueries()[i], query->getLeafQueries()[query_size - 1]);
+                    std::swap(query->getLeafQueries()[i], query->getLeafQueries()[0]);
                     break;
                 }
             }

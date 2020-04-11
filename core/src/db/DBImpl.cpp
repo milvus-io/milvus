@@ -205,7 +205,7 @@ DBImpl::CreateHybridCollection(meta::TableSchema& collection_schema,
 
     meta::TableSchema temp_schema = collection_schema;
     if (options_.wal_enable_) {
-        //TODO(yukun): wal_mgr_->CreateCollection()
+        //TODO(yukun): wal_mgr_->CreateHybridCollection()
     }
 
     return meta_ptr_->CreateHybridCollection(temp_schema, fields_schema);
@@ -1284,6 +1284,7 @@ DBImpl::HybridQuery(const std::shared_ptr<server::Context>& context,
                     context::HybridSearchContextPtr hybrid_search_context,
                     query::GeneralQueryPtr general_query,
                     std::unordered_map<std::string, engine::meta::hybrid::DataType>& attr_type,
+                    uint64_t& nq,
                     ResultIds& result_ids,
                     ResultDistances& result_distances) {
     auto query_ctx = context->Child("Query");
@@ -1328,7 +1329,15 @@ DBImpl::HybridQuery(const std::shared_ptr<server::Context>& context,
     }
 
     cache::CpuCacheMgr::GetInstance()->PrintInfo();  // print cache info before query
-    status = HybridQueryAsync(query_ctx, collection_id, files_array, hybrid_search_context, general_query, attr_type, result_ids, result_distances);
+    status = HybridQueryAsync(query_ctx,
+                              collection_id,
+                              files_array,
+                              hybrid_search_context,
+                              general_query,
+                              attr_type,
+                              nq,
+                              result_ids,
+                              result_distances);
     cache::CpuCacheMgr::GetInstance()->PrintInfo();  // print cache info after query
 
     query_ctx->GetTraceContext()->GetSpan()->Finish();
@@ -1487,10 +1496,12 @@ DBImpl::HybridQueryAsync(const std::shared_ptr<server::Context>& context,
                          context::HybridSearchContextPtr hybrid_search_context,
                          query::GeneralQueryPtr general_query,
                          std::unordered_map<std::string, engine::meta::hybrid::DataType>& attr_type,
+                         uint64_t& nq,
                          ResultIds& result_ids,
                          ResultDistances& result_distances) {
     auto query_async_ctx = context->Child("Query Async");
 
+#if 0
     // Construct tasks
     for (auto file : files) {
         std::unordered_map<std::string, engine::DataType> types;
@@ -1503,10 +1514,12 @@ DBImpl::HybridQueryAsync(const std::shared_ptr<server::Context>& context,
         search::TaskPtr task = std::make_shared<search::Task>(context, file_ptr, general_query, types, hybrid_search_context);
         search::TaskInst::GetInstance().load_queue().push(task);
         search::TaskInst::GetInstance().load_cv().notify_one();
-//        hybrid_search_context->tasks_.emplace_back(task);
+        hybrid_search_context->tasks_.emplace_back(task);
     }
 
-#if 0
+#endif
+
+//#if 0
     TimeRecorder rc("");
 
     // step 1: construct search job
@@ -1531,83 +1544,15 @@ DBImpl::HybridQueryAsync(const std::shared_ptr<server::Context>& context,
     }
 
     // step 3: construct results
+    nq = job->vector_count();
     result_ids = job->GetResultIds();
     result_distances = job->GetResultDistances();
     rc.ElapseFromBegin("Engine query totally cost");
 
     query_async_ctx->GetTraceContext()->GetSpan()->Finish();
-#endif
+//#endif
 
     return Status::OK();
-}
-
-Status
-DBImpl::HybridQueryNoSched(const std::shared_ptr<server::Context>& context,
-                                  const std::string& table_id,
-                                  const milvus::engine::meta::TableFilesSchema& files,
-                                  milvus::query::GeneralQueryPtr general_query,
-                                  std::unordered_map<std::string, engine::meta::hybrid::DataType>& attr_type,
-                                  milvus::engine::ResultIds& result_ids,
-                                  milvus::engine::ResultDistances& result_distances) {
-    auto query_async_ctx = context->Child("Query Async");
-
-    TimeRecorder rc("");
-
-    // step 1: construct search job
-    auto status = OngoingFileChecker::GetInstance().MarkOngoingFiles(files);
-
-    VectorsData vectors;
-
-    ENGINE_LOG_DEBUG << "Engine query begin, index file count: " << files.size();
-
-    for (auto file : files) {
-        // Call ExecutionEngine
-        ExecutionEnginePtr index_engine = nullptr;
-
-        bool ascending_reduce;
-        if (file.metric_type_ == static_cast<int>(MetricType::IP)
-            && file.engine_type_ != static_cast<int>(EngineType::FAISS_PQ)) {
-            ascending_reduce = false;
-        }
-
-        EngineType engine_type;
-        if (file.file_type_ == milvus::engine::meta::TableFileSchema::FILE_TYPE::RAW ||
-            file.file_type_ == milvus::engine::meta::TableFileSchema::FILE_TYPE::TO_INDEX ||
-            file.file_type_ == milvus::engine::meta::TableFileSchema::FILE_TYPE::BACKUP) {
-            engine_type = engine::utils::IsBinaryMetricType(file.metric_type_) ? EngineType::FAISS_BIN_IDMAP
-                                                                                : EngineType::FAISS_IDMAP;
-        } else {
-            engine_type = (EngineType)file.engine_type_;
-        }
-
-        milvus::json json_params;
-        if (!file.index_params_.empty()) {
-            json_params = milvus::json::parse(file.index_params_);
-        }
-        index_engine = EngineFactory::Build(file.dimension_, file.location_, engine_type,
-                                            (MetricType)file.metric_type_, json_params);
-
-        // Load: DiskToCPU
-        Status stat;
-        try {
-            stat = index_engine->Load();
-        } catch (std::exception& ex) {
-            std::string error_msg;
-            error_msg = "Failed to load index file: " + std::string(ex.what());
-            stat = Status(SERVER_UNEXPECTED_ERROR, error_msg);
-        }
-
-        // Query
-        if (general_query != nullptr) {
-            std::unordered_map<std::string, engine::DataType> types;
-            auto type_it = attr_type.begin();
-            for (; type_it != attr_type.end(); type_it++) {
-                types.insert(std::make_pair(type_it->first, (engine::DataType)(type_it->second)));
-            }
-            faiss::ConcurrentBitsetPtr bitset;
-            stat = index_engine->ExecBinaryQuery(general_query, bitset, types, result_distances, result_ids);
-        }
-    }
 }
 
 void

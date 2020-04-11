@@ -268,7 +268,7 @@ XSearchTask::Execute() {
                     types.insert(std::make_pair(type_it->first, (engine::DataType)(type_it->second)));
                 }
                 faiss::ConcurrentBitsetPtr bitset;
-                s = index_engine_->ExecBinaryQuery(general_query, bitset, types, output_distance, output_ids);
+                s = index_engine_->ExecBinaryQuery(general_query, bitset, types, nq, topk, output_distance, output_ids);
 
                 if (!s.ok()) {
                     search_job->GetStatus() = s;
@@ -276,8 +276,6 @@ XSearchTask::Execute() {
                     return;
                 }
 
-                nq = 10;
-                topk = 100;
                 auto spec_k = file_->row_count_ < topk ? file_->row_count_ : topk;
                 if (spec_k == 0) {
                     ENGINE_LOG_WARNING << "Searching in an empty file. file location = " << file_->location_;
@@ -294,6 +292,7 @@ XSearchTask::Execute() {
                         }
                     }
 
+                    search_job->vector_count() = nq;
                     XSearchTask::MergeTopkToResultSet(output_ids, output_distance, spec_k, nq, topk, ascending_reduce,
                                                       search_job->GetResultIds(), search_job->GetResultDistances());
 

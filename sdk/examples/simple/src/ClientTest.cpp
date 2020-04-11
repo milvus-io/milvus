@@ -349,7 +349,7 @@ void
 ClientTest::TestHybrid() {
     std::string collection_name = "HYBRID_TEST";
     CreateHybridCollection(collection_name);
-    InsertHybridEntities(collection_name, 100);
+    InsertHybridEntities(collection_name, 1000);
     Flush(collection_name);
 //    SearchEntities(collection_name, )
     HybridSearch(collection_name);

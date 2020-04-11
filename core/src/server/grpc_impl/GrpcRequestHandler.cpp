@@ -835,7 +835,7 @@ GrpcRequestHandler::HybridSearch(::grpc::ServerContext* context,
 
     Status status;
 
-    if (query::BinaryQueryHeight(general_query->bin) == true) {
+    if (query::ValidateBinaryQuery(general_query->bin)) {
         status = Status{SERVER_INVALID_BINARY_QUERY, "Generate wrong binary query tree"};
         SET_RESPONSE(response->mutable_status(), status, context);
         return ::grpc::Status::OK;

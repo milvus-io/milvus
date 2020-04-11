@@ -163,6 +163,7 @@ class DB {
                 context::HybridSearchContextPtr hybrid_search_context,
                 query::GeneralQueryPtr general_query,
                 std::unordered_map<std::string, engine::meta::hybrid::DataType>& attr_type,
+                uint64_t& nq,
                 engine::ResultIds& result_ids,
                 engine::ResultDistances& result_distances) = 0;
 

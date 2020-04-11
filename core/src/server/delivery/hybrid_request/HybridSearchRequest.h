@@ -47,7 +47,7 @@ class HybridSearchRequest : public BaseRequest {
     const std::string collection_name_;
     std::vector<std::string>& partition_list_;
     milvus::query::GeneralQueryPtr& general_query_;
-    TopKQueryResult result_;
+    TopKQueryResult& result_;
 };
 
 }  // namespace server

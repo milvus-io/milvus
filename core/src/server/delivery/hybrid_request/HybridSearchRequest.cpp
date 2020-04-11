@@ -98,6 +98,7 @@ HybridSearchRequest::OnExecute() {
 
         engine::ResultIds result_ids;
         engine::ResultDistances result_distances;
+        uint64_t nq;
 
         status = DBWrapper::DB()->HybridQuery(context_,
                                               collection_name_,
@@ -105,6 +106,7 @@ HybridSearchRequest::OnExecute() {
                                               hybrid_search_contxt_,
                                               general_query_,
                                               attr_type,
+                                              nq,
                                               result_ids,
                                               result_distances);
 
@@ -124,7 +126,7 @@ HybridSearchRequest::OnExecute() {
         auto post_query_ctx = context_->Child("Constructing result");
 
         // step 7: construct result array
-        result_.row_num_ = result_ids.size();
+        result_.row_num_ = nq;
         result_.distance_list_ = result_distances;
         result_.id_list_ = result_ids;
 

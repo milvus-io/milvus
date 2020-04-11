@@ -108,14 +108,19 @@ Task::Execute() {
         Status s;
         if (general_query_ != nullptr) {
             faiss::ConcurrentBitsetPtr bitset;
-            s = index_engine_->ExecBinaryQuery(general_query_, bitset, attr_type_, output_distance, output_ids);
+            uint64_t nq, topk;
+            s = index_engine_->ExecBinaryQuery(general_query_,
+                                               bitset,
+                                               attr_type_,
+                                               nq,
+                                               topk,
+                                               output_distance,
+                                               output_ids);
 
             if (!s.ok()) {
                 return;
             }
 
-            uint64_t nq = 10;
-            uint64_t topk = 100;
             auto spec_k = file_->row_count_ < topk ? file_->row_count_ : topk;
             if (spec_k == 0) {
                 ENGINE_LOG_WARNING << "Searching in an empty file. file location = " << file_->location_;

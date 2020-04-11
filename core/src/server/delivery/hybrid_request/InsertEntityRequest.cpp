@@ -106,7 +106,7 @@ InsertEntityRequest::OnExecute() {
         // all user provide id, or all internal id
         bool user_provide_ids = !vector_datas_it->second.id_array_.empty();
         fiu_do_on("InsertEntityRequest.OnExecute.illegal_vector_id", user_provide_ids = false;
-            table_schema.flag_ = engine::meta::FLAG_MASK_HAS_USERID);
+            collection_schema.flag_ = engine::meta::FLAG_MASK_HAS_USERID);
         // user already provided id before, all insert action require user id
         if ((collection_schema.flag_ & engine::meta::FLAG_MASK_HAS_USERID) != 0 && !user_provide_ids) {
             return Status(SERVER_ILLEGAL_VECTOR_ID,

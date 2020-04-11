@@ -258,13 +258,17 @@ void ConstructVector(uint64_t nq, uint64_t dimension, std::vector<milvus::Entity
 std::vector<milvus::LeafQueryPtr>
 Utils::GenLeafQuery() {
     //Construct TermQuery
-    std::vector<std::string> field_value{"10", "20", "30"};
+    std::vector<std::string> field_value;
+    field_value.resize(1000);
+    for (uint64_t i = 0; i < 1000; ++i) {
+        field_value[i] = std::to_string(i);
+    }
     milvus::TermQueryPtr tq = std::make_shared<milvus::TermQuery>();
     tq->field_name = "field_1";
     tq->field_value = field_value;
 
     //Construct RangeQuery
-    milvus::CompareExpr ce1 = {milvus::CompareOperator::LTE, "20"}, ce2 = {milvus::CompareOperator::GTE, "10"};
+    milvus::CompareExpr ce1 = {milvus::CompareOperator::LTE, "10000"}, ce2 = {milvus::CompareOperator::GTE, "1"};
     std::vector<milvus::CompareExpr> ces{ce1, ce2};
     milvus::RangeQueryPtr rq = std::make_shared<milvus::RangeQuery>();
     rq->field_name = "field_2";
@@ -278,7 +282,7 @@ Utils::GenLeafQuery() {
     ConstructVector(NQ, DIMENSION, vq->query_vector);
     std::string vector_query_param = "vector_query_param";
     vq->field_name = "field_3";
-    vq->topk = 100;
+    vq->topk = 10;
     JSON json_params = {{"nprobe", NPROBE}};
     vq->extra_params = json_params.dump();
 
@@ -287,15 +291,15 @@ Utils::GenLeafQuery() {
     milvus::LeafQueryPtr lq1 = std::make_shared<milvus::LeafQuery>();
     milvus::LeafQueryPtr lq2 = std::make_shared<milvus::LeafQuery>();
     milvus::LeafQueryPtr lq3 = std::make_shared<milvus::LeafQuery>();
-//    lq.emplace_back(lq1);
-//    lq.emplace_back(lq2);
+    lq.emplace_back(lq1);
+    lq.emplace_back(lq2);
     lq.emplace_back(lq3);
-//    lq1->term_query_ptr = tq;
-//    lq2->range_query_ptr = rq;
+    lq1->term_query_ptr = tq;
+    lq2->range_query_ptr = rq;
     lq3->vector_query_ptr = vq;
 
-//    lq1->query_boost = 1.0;
-//    lq2->query_boost = 2.0;
+    lq1->query_boost = 1.0;
+    lq2->query_boost = 2.0;
     lq3->query_boost = 3.0;
     return lq;
 }

@@ -116,6 +116,11 @@ class SearchJob : public Job {
         return attr_type_;
     }
 
+    uint64_t&
+    vector_count() {
+        return vector_count_;
+    }
+
  private:
     const std::shared_ptr<server::Context> context_;
 
@@ -132,6 +137,7 @@ class SearchJob : public Job {
 
     query::GeneralQueryPtr general_query_;
     std::unordered_map<std::string, engine::meta::hybrid::DataType> attr_type_;
+    uint64_t vector_count_;
 
     std::mutex mutex_;
     std::condition_variable cv_;

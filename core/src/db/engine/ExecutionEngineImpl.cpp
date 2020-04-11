@@ -869,6 +869,8 @@ Status
 ExecutionEngineImpl::ExecBinaryQuery(milvus::query::GeneralQueryPtr general_query,
                                      faiss::ConcurrentBitsetPtr bitset,
                                      std::unordered_map<std::string, DataType>& attr_type,
+                                     uint64_t& nq,
+                                     uint64_t& topk,
                                      std::vector<float>& distances,
                                      std::vector<int64_t>& labels) {
 
@@ -879,10 +881,10 @@ ExecutionEngineImpl::ExecBinaryQuery(milvus::query::GeneralQueryPtr general_quer
     if (general_query->leaf == nullptr) {
         Status status;
         if (general_query->bin->left_query != nullptr) {
-            status = ExecBinaryQuery(general_query->bin->left_query, bitset, attr_type, distances, labels);
+            status = ExecBinaryQuery(general_query->bin->left_query, bitset, attr_type, nq, topk, distances, labels);
         }
         if (general_query->bin->right_query != nullptr) {
-            status = ExecBinaryQuery(general_query->bin->right_query, bitset, attr_type, distances, labels);
+            status = ExecBinaryQuery(general_query->bin->right_query, bitset, attr_type, nq, topk, distances, labels);
         }
         return status;
     } else {
@@ -896,13 +898,18 @@ ExecutionEngineImpl::ExecBinaryQuery(milvus::query::GeneralQueryPtr general_quer
                     std::vector<int8_t> data;
                     data.resize(size / sizeof(int8_t));
                     memcpy(data.data(), attr_data_.at(field_name).data(), size);
-                    for (auto term_value : general_query->leaf->term_query->field_value) {
-                        int8_t query_value = atoi(term_value.c_str());
-                        for (uint64_t i = 0; i < data.size(); ++i) {
-                            if (data[i] != query_value) {
-                                if (!bitset->test(i)) {
-                                    bitset->set(i);
-                                }
+                    for (uint64_t i = 0; i < data.size(); ++i) {
+                        bool value_in_term = false;
+                        for (auto term_value : general_query->leaf->term_query->field_value) {
+                            int8_t query_value = atoi(term_value.c_str());
+                            if (data[i] == query_value) {
+                                value_in_term = true;
+                                break;
+                            }
+                        }
+                        if (!value_in_term) {
+                            if (!bitset->test(i)) {
+                                bitset->set(i);
                             }
                         }
                     }
@@ -912,13 +919,18 @@ ExecutionEngineImpl::ExecBinaryQuery(milvus::query::GeneralQueryPtr general_quer
                     std::vector<int16_t> data;
                     data.resize(size / sizeof(int16_t));
                     memcpy(data.data(), attr_data_.at(field_name).data(), size);
-                    for (auto term_value : general_query->leaf->term_query->field_value) {
-                        int16_t query_value = atoi(term_value.c_str());
-                        for (uint64_t i = 0; i < data.size(); ++i) {
-                            if (data[i] != query_value) {
-                                if (!bitset->test(i)) {
-                                    bitset->set(i);
-                                }
+                    for (uint64_t i = 0; i < data.size(); ++i) {
+                        bool value_in_term = false;
+                        for (auto term_value : general_query->leaf->term_query->field_value) {
+                            int16_t query_value = atoi(term_value.c_str());
+                            if (data[i] == query_value) {
+                                value_in_term = true;
+                                break;
+                            }
+                        }
+                        if (!value_in_term) {
+                            if (!bitset->test(i)) {
+                                bitset->set(i);
                             }
                         }
                     }
@@ -928,13 +940,18 @@ ExecutionEngineImpl::ExecBinaryQuery(milvus::query::GeneralQueryPtr general_quer
                     std::vector<int32_t> data;
                     data.resize(size / sizeof(int32_t));
                     memcpy(data.data(), attr_data_.at(field_name).data(), size);
-                    for (auto term_value : general_query->leaf->term_query->field_value) {
-                        int32_t query_value = atoi(term_value.c_str());
-                        for (uint64_t i = 0; i < data.size(); ++i) {
-                            if (data[i] != query_value) {
-                                if (!bitset->test(i)) {
-                                    bitset->set(i);
-                                }
+                    for (uint64_t i = 0; i < data.size(); ++i) {
+                        bool value_in_term = false;
+                        for (auto term_value : general_query->leaf->term_query->field_value) {
+                            int32_t query_value = atoi(term_value.c_str());
+                            if (data[i] == query_value) {
+                                value_in_term = true;
+                                break;
+                            }
+                        }
+                        if (!value_in_term) {
+                            if (!bitset->test(i)) {
+                                bitset->set(i);
                             }
                         }
                     }
@@ -944,13 +961,18 @@ ExecutionEngineImpl::ExecBinaryQuery(milvus::query::GeneralQueryPtr general_quer
                     std::vector<int64_t> data;
                     data.resize(size / sizeof(int64_t));
                     memcpy(data.data(), attr_data_.at(field_name).data(), size);
-                    for (auto term_value : general_query->leaf->term_query->field_value) {
-                        int64_t query_value = atoi(term_value.c_str());
-                        for (uint64_t i = 0; i < data.size(); ++i) {
-                            if (data[i] != query_value) {
-                                if (!bitset->test(i)) {
-                                    bitset->set(i);
-                                }
+                    for (uint64_t i = 0; i < data.size(); ++i) {
+                        bool value_in_term = false;
+                        for (auto term_value : general_query->leaf->term_query->field_value) {
+                            int64_t query_value = atoi(term_value.c_str());
+                            if (data[i] == query_value) {
+                                value_in_term = true;
+                                break;
+                            }
+                        }
+                        if (!value_in_term) {
+                            if (!bitset->test(i)) {
+                                bitset->set(i);
                             }
                         }
                     }
@@ -960,15 +982,20 @@ ExecutionEngineImpl::ExecBinaryQuery(milvus::query::GeneralQueryPtr general_quer
                     std::vector<float> data;
                     data.resize(size / sizeof(float));
                     memcpy(data.data(), attr_data_.at(field_name).data(), size);
-                    for (auto term_value : general_query->leaf->term_query->field_value) {
-                        std::istringstream iss(term_value);
-                        float query_value;
-                        iss >> query_value;
-                        for (uint64_t i = 0; i < data.size(); ++i) {
-                            if (data[i] != query_value) {
-                                if (!bitset->test(i)) {
-                                    bitset->set(i);
-                                }
+                    for (uint64_t i = 0; i < data.size(); ++i) {
+                        bool value_in_term = false;
+                        for (auto term_value : general_query->leaf->term_query->field_value) {
+                            std::istringstream iss(term_value);
+                            float query_value;
+                            iss >> query_value;
+                            if (data[i] == query_value) {
+                                value_in_term = true;
+                                break;
+                            }
+                        }
+                        if (!value_in_term) {
+                            if (!bitset->test(i)) {
+                                bitset->set(i);
                             }
                         }
                     }
@@ -978,15 +1005,20 @@ ExecutionEngineImpl::ExecBinaryQuery(milvus::query::GeneralQueryPtr general_quer
                     std::vector<double> data;
                     data.resize(size / sizeof(double));
                     memcpy(data.data(), attr_data_.at(field_name).data(), size);
-                    for (auto term_value : general_query->leaf->term_query->field_value) {
-                        std::istringstream iss(term_value);
-                        double query_value;
-                        iss >> query_value;
-                        for (uint64_t i = 0; i < data.size(); ++i) {
-                            if (data[i] != query_value) {
-                                if (!bitset->test(i)) {
-                                    bitset->set(i);
-                                }
+                    for (uint64_t i = 0; i < data.size(); ++i) {
+                        bool value_in_term = false;
+                        for (auto term_value : general_query->leaf->term_query->field_value) {
+                            std::istringstream iss(term_value);
+                            double query_value;
+                            iss >> query_value;
+                            if (data[i] == query_value) {
+                                value_in_term = true;
+                                break;
+                            }
+                        }
+                        if (!value_in_term) {
+                            if (!bitset->test(i)) {
+                                bitset->set(i);
                             }
                         }
                     }
@@ -1071,15 +1103,15 @@ ExecutionEngineImpl::ExecBinaryQuery(milvus::query::GeneralQueryPtr general_quer
             }
             status = std::static_pointer_cast<BFIndex>(index_)->SetBlacklist(bitset);
             auto vector_query = general_query->leaf->vector_query;
-            int64_t topk = vector_query->topk;
-            int64_t nq = vector_query->query_vector.float_data.size() / dim_;
+            topk = vector_query->topk;
+            nq = vector_query->query_vector.float_data.size() / dim_;
 
             distances.resize(nq * topk);
             labels.resize(nq * topk);
 
             return Search(nq,
                           vector_query->query_vector.float_data.data(),
-                          vector_query->topk,
+                          topk,
                           vector_query->extra_params,
                           distances.data(),
                           labels.data());
