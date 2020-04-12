@@ -1036,8 +1036,7 @@ DBImpl::GetVectorByIdHelper(const std::string& collection_id, IDNumber vector_id
 
     if (vector.binary_data_.empty() && vector.float_data_.empty()) {
         std::string msg = "Vector with id " + std::to_string(vector_id) + " not found in collection " + collection_id;
-        ENGINE_LOG_ERROR << msg;
-        return Status(DB_NOT_FOUND, msg);
+        ENGINE_LOG_DEBUG << msg;
     }
 
     return Status::OK();
