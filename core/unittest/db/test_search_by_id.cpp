@@ -406,7 +406,7 @@ TEST_F(GetVectorByIdTest, with_delete) {
 
         milvus::engine::VectorsData vector;
         stat = db_->GetVectorByID(collection_info.collection_id_, id, vector);
-        ASSERT_TRUE(stat.ok());
+        ASSERT_FALSE(stat.ok());
         ASSERT_TRUE(vector.float_data_.empty());
         ASSERT_EQ(vector.vector_count_, 0);
     }
