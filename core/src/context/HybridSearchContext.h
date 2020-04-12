@@ -13,8 +13,8 @@
 
 #include <iostream>
 #include <memory>
-#include <vector>
 #include <string>
+#include <vector>
 
 #include "grpc/gen-milvus/milvus.pb.h"
 #include "query/BinaryQuery.h"
@@ -25,7 +25,7 @@ namespace search {
 class Task;
 
 using TaskPtr = std::shared_ptr<Task>;
-}
+}  // namespace search
 
 namespace context {
 

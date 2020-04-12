@@ -30,7 +30,7 @@ class DefaultCodec : public Codec {
     GetVectorsFormat() override;
 
     AttrsFormatPtr
-    GetAttrsFormat() override ;
+    GetAttrsFormat() override;
 
     VectorIndexFormatPtr
     GetVectorIndexFormat() override;

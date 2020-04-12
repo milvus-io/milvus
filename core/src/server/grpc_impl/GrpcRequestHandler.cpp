@@ -15,6 +15,7 @@
 #include <memory>
 #include <string>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 #include "context/HybridSearchContext.h"
@@ -764,10 +765,8 @@ GrpcRequestHandler::Compact(::grpc::ServerContext* context, const ::milvus::grpc
 /*******************************************New Interface*********************************************/
 
 ::grpc::Status
-GrpcRequestHandler::CreateHybridCollection(::grpc::ServerContext* context,
-                                           const ::milvus::grpc::Mapping* request,
+GrpcRequestHandler::CreateHybridCollection(::grpc::ServerContext* context, const ::milvus::grpc::Mapping* request,
                                            ::milvus::grpc::Status* response) {
-
     CHECK_NULLPTR_RETURN(request);
 
     std::vector<std::pair<std::string, engine::meta::hybrid::DataType>> field_types;
@@ -788,11 +787,8 @@ GrpcRequestHandler::CreateHybridCollection(::grpc::ServerContext* context,
         field_params.emplace_back(extra_params);
     }
 
-    Status status = request_handler_.CreateHybridCollection(GetContext(context),
-                                                            request->collection_name(),
-                                                            field_types,
-                                                            vector_dimensions,
-                                                            field_params);
+    Status status = request_handler_.CreateHybridCollection(GetContext(context), request->collection_name(),
+                                                            field_types, vector_dimensions, field_params);
 
     SET_RESPONSE(response, status, context);
 
@@ -800,8 +796,7 @@ GrpcRequestHandler::CreateHybridCollection(::grpc::ServerContext* context,
 }
 
 ::grpc::Status
-GrpcRequestHandler::InsertEntity(::grpc::ServerContext* context,
-                                 const ::milvus::grpc::HInsertParam* request,
+GrpcRequestHandler::InsertEntity(::grpc::ServerContext* context, const ::milvus::grpc::HInsertParam* request,
                                  ::milvus::grpc::HEntityIDs* response) {
     CHECK_NULLPTR_RETURN(request);
 
@@ -823,17 +818,15 @@ GrpcRequestHandler::InsertEntity(::grpc::ServerContext* context,
     auto vector_size = request->entities().result_values_size();
     for (uint64_t i = 0; i < vector_size; ++i) {
         engine::VectorsData vectors;
-        CopyRowRecords(request->entities().result_values(i).vector_value().value(), request->entity_id_array(), vectors);
+        CopyRowRecords(request->entities().result_values(i).vector_value().value(), request->entity_id_array(),
+                       vectors);
         vector_datas.insert(std::make_pair(request->entities().field_names(attr_size + i), vectors));
     }
 
     std::string collection_name = request->collection_name();
     std::string partition_tag = request->partition_tag();
-    Status status = request_handler_.InsertEntity(GetContext(context),
-                                                  collection_name,
-                                                  partition_tag,
-                                                  attr_values,
-                                                  vector_datas);
+    Status status =
+        request_handler_.InsertEntity(GetContext(context), collection_name, partition_tag, attr_values, vector_datas);
 
     response->mutable_entity_id_array()->Resize(static_cast<int>(vector_datas.begin()->second.id_array_.size()), 0);
     memcpy(response->mutable_entity_id_array()->mutable_data(), vector_datas.begin()->second.id_array_.data(),
@@ -846,7 +839,7 @@ GrpcRequestHandler::InsertEntity(::grpc::ServerContext* context,
 void
 DeSerialization(const ::milvus::grpc::GeneralQuery& general_query, query::BooleanQueryPtr boolean_clause) {
     if (general_query.has_boolean_query()) {
-//        boolean_clause->SetOccur((query::Occur)general_query.boolean_query().occur());
+        //        boolean_clause->SetOccur((query::Occur)general_query.boolean_query().occur());
 
         for (uint64_t i = 0; i < general_query.boolean_query().general_query_size(); ++i) {
             if (general_query.boolean_query().general_query(i).has_boolean_query()) {
@@ -885,8 +878,8 @@ DeSerialization(const ::milvus::grpc::GeneralQuery& general_query, query::Boolea
                     query::VectorQueryPtr vector_query = std::make_shared<query::VectorQuery>();
 
                     engine::VectorsData vectors;
-                    CopyRowRecords(query.vector_query().records(), google::protobuf::RepeatedField<google::protobuf::int64>(),
-                                   vectors);
+                    CopyRowRecords(query.vector_query().records(),
+                                   google::protobuf::RepeatedField<google::protobuf::int64>(), vectors);
 
                     vector_query->query_vector.float_data = vectors.float_data_;
                     vector_query->query_vector.binary_data = vectors.binary_data_;
@@ -912,8 +905,7 @@ DeSerialization(const ::milvus::grpc::GeneralQuery& general_query, query::Boolea
 }
 
 ::grpc::Status
-GrpcRequestHandler::HybridSearch(::grpc::ServerContext* context,
-                                 const ::milvus::grpc::HSearchParam* request,
+GrpcRequestHandler::HybridSearch(::grpc::ServerContext* context, const ::milvus::grpc::HSearchParam* request,
                                  ::milvus::grpc::TopKQueryResult* response) {
     CHECK_NULLPTR_RETURN(request);
 
@@ -945,12 +937,8 @@ GrpcRequestHandler::HybridSearch(::grpc::ServerContext* context,
 
     TopKQueryResult result;
 
-    status = request_handler_.HybridSearch(GetContext(context),
-                                           hybrid_search_context,
-                                           request->collection_name(),
-                                           partition_list,
-                                           general_query,
-                                           result);
+    status = request_handler_.HybridSearch(GetContext(context), hybrid_search_context, request->collection_name(),
+                                           partition_list, general_query, result);
 
     // step 6: construct and return result
     ConstructResults(result, response);

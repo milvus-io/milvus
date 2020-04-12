@@ -15,6 +15,7 @@
 
 #include <memory>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 namespace milvus {
@@ -23,15 +24,12 @@ namespace server {
 class InsertEntityRequest : public BaseRequest {
  public:
     static BaseRequestPtr
-    Create(const std::shared_ptr<milvus::server::Context>& context,
-           const std::string& collection_name,
-           const std::string& partition_tag,
-           std::unordered_map<std::string, std::vector<std::string>>& field_values,
+    Create(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name,
+           const std::string& partition_tag, std::unordered_map<std::string, std::vector<std::string>>& field_values,
            std::unordered_map<std::string, engine::VectorsData>& vector_datas);
 
  protected:
-    InsertEntityRequest(const std::shared_ptr<milvus::server::Context>& context,
-                        const std::string& collection_name,
+    InsertEntityRequest(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name,
                         const std::string& partition_tag,
                         std::unordered_map<std::string, std::vector<std::string>>& field_values,
                         std::unordered_map<std::string, engine::VectorsData>& vector_datas);

@@ -13,10 +13,10 @@
 
 #include "server/delivery/request/BaseRequest.h"
 
+#include <src/context/HybridSearchContext.h>
 #include <memory>
 #include <string>
 #include <vector>
-#include <src/context/HybridSearchContext.h>
 
 namespace milvus {
 namespace server {
@@ -25,18 +25,14 @@ class HybridSearchRequest : public BaseRequest {
  public:
     static BaseRequestPtr
     Create(const std::shared_ptr<milvus::server::Context>& context,
-           context::HybridSearchContextPtr& hybrid_search_context,
-           const std::string& collection_name,
-           std::vector<std::string>& partition_list,
-           milvus::query::GeneralQueryPtr& general_query,
+           context::HybridSearchContextPtr& hybrid_search_context, const std::string& collection_name,
+           std::vector<std::string>& partition_list, milvus::query::GeneralQueryPtr& general_query,
            TopKQueryResult& result);
 
  protected:
     HybridSearchRequest(const std::shared_ptr<milvus::server::Context>& context,
-                        context::HybridSearchContextPtr& hybrid_search_context,
-                        const std::string& collection_name,
-                        std::vector<std::string>& partition_list,
-                        milvus::query::GeneralQueryPtr& general_query,
+                        context::HybridSearchContextPtr& hybrid_search_context, const std::string& collection_name,
+                        std::vector<std::string>& partition_list, milvus::query::GeneralQueryPtr& general_query,
                         TopKQueryResult& result);
 
     Status

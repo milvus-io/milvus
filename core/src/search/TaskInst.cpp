@@ -13,13 +13,13 @@
 
 #include <iostream>
 #include <memory>
-#include <vector>
 #include <string>
+#include <vector>
 
-#include "TaskInst.h"
+#include "search/TaskInst.h"
 
 namespace milvus {
-namespace search{
+namespace search {
 
 void
 TaskInst::Start() {
@@ -66,7 +66,7 @@ TaskInst::StartLoadTask() {
             load_queue_.pop();
             exec_queue_.push(task);
             exec_cv_.notify_one();
-        };
+        }
     }
 }
 
@@ -74,13 +74,13 @@ void
 TaskInst::StartExecuteTask() {
     while (running_) {
         std::unique_lock<std::mutex> lock(exec_mutex_);
-        exec_cv_.wait(lock, [this] {return !exec_queue_.empty(); });
+        exec_cv_.wait(lock, [this] { return !exec_queue_.empty(); });
         while (!exec_queue_.empty()) {
             auto task = exec_queue_.front();
             task->Execute();
             exec_queue_.pop();
         }
-    };
+    }
 }
 
 void
@@ -109,5 +109,5 @@ TaskInst::StopExecuteTask() {
     }
 }
 
-} // namespace search
-} // namespace milvus
+}  // namespace search
+}  // namespace milvus

@@ -30,11 +30,7 @@ VectorSource::VectorSource(milvus::engine::VectorsData vectors,
                            const std::unordered_map<std::string, uint64_t>& attr_nbytes,
                            const std::unordered_map<std::string, uint64_t>& attr_size,
                            const std::unordered_map<std::string, std::vector<uint8_t>>& attr_data)
-    : vectors_(std::move(vectors)),
-      attr_nbytes_(attr_nbytes),
-      attr_size_(attr_size),
-      attr_data_(attr_data) {
-
+    : vectors_(std::move(vectors)), attr_nbytes_(attr_nbytes), attr_size_(attr_size), attr_data_(attr_data) {
     current_num_vectors_added = 0;
     current_num_attrs_added = 0;
 }
@@ -112,9 +108,7 @@ VectorSource::Add(/*const ExecutionEnginePtr& execution_engine,*/ const segment:
 Status
 VectorSource::AddEntities(const milvus::segment::SegmentWriterPtr& segment_writer_ptr,
                           const milvus::engine::meta::SegmentSchema& collection_file_schema,
-                          const size_t& num_entities_to_add,
-                          size_t& num_entities_added) {
-
+                          const size_t& num_entities_to_add, size_t& num_entities_added) {
     // TODO: n = vectors_.vector_count_;???
     uint64_t n = vectors_.vector_count_;
     num_entities_added =
@@ -134,10 +128,8 @@ VectorSource::AddEntities(const milvus::segment::SegmentWriterPtr& segment_write
     }
 
     Status status;
-    status = segment_writer_ptr->AddAttrs(collection_file_schema.collection_id_,
-                                          attr_size_,
-                                          attr_data_,
-                                          vector_ids_to_add);
+    status =
+        segment_writer_ptr->AddAttrs(collection_file_schema.collection_id_, attr_size_, attr_data_, vector_ids_to_add);
 
     if (status.ok()) {
         current_num_attrs_added += num_entities_added;

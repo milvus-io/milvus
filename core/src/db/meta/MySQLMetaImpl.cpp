@@ -2583,19 +2583,15 @@ MySQLMetaImpl::GetGlobalLastLSN(uint64_t& lsn) {
 }
 
 Status
-MySQLMetaImpl::CreateHybridCollection(CollectionSchema& collection_schema,
-                                      hybrid::FieldsSchema& fields_schema) {
+MySQLMetaImpl::CreateHybridCollection(CollectionSchema& collection_schema, hybrid::FieldsSchema& fields_schema) {
 }
 
 Status
-MySQLMetaImpl::DescribeHybridCollection(CollectionSchema& collection_schema,
-                                        hybrid::FieldsSchema& fields_schema) {
-
+MySQLMetaImpl::DescribeHybridCollection(CollectionSchema& collection_schema, hybrid::FieldsSchema& fields_schema) {
 }
 
 Status
 MySQLMetaImpl::CreateHybridCollectionFile(milvus::engine::meta::SegmentSchema& file_schema) {
-
 }
 
 }  // namespace meta

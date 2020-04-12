@@ -166,9 +166,9 @@ struct FieldSchema {
 
         VECTOR = 100,
         UNKNOWN = 9999,
-    }FIELD_TYPE;
+    } FIELD_TYPE;
 
-    //TODO(yukun): need field_id?
+    // TODO(yukun): need field_id?
     std::string collection_id_;
     std::string field_name_;
     int32_t field_type_ = (int)INT8;
@@ -185,7 +185,7 @@ struct VectorFileSchema {
     std::string field_name_;
     int64_t index_file_size_ = DEFAULT_INDEX_FILE_SIZE;  // not persist to meta
     int32_t engine_type_ = DEFAULT_ENGINE_TYPE;
-    std::string index_params_ = "{}";                   // not persist to meta
+    std::string index_params_ = "{}";            // not persist to meta
     int32_t metric_type_ = DEFAULT_METRIC_TYPE;  // not persist to meta
 };
 
@@ -218,7 +218,7 @@ struct CollectionFileSchema {
 };
 
 using CollectionFileSchemaPtr = std::shared_ptr<CollectionFileSchema>;
-} // hybrid
+}  // namespace hybrid
 
 }  // namespace meta
 }  // namespace engine

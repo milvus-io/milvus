@@ -11,17 +11,19 @@
 
 #pragma once
 
+#include <memory>
 #include <string>
+#include <utility>
 #include <vector>
 
-#include "BinaryQuery.h"
+#include "query/BinaryQuery.h"
 
 namespace milvus {
 namespace query {
 
 BinaryQueryPtr
 ConstructBinTree(std::vector<BooleanQueryPtr> queries, QueryRelation relation, uint64_t idx) {
-    if(idx == queries.size()) {
+    if (idx == queries.size()) {
         return nullptr;
     } else if (idx == queries.size() - 1) {
         return queries[idx]->getBinaryQuery();
@@ -137,7 +139,7 @@ GenBinaryQuery(BooleanQueryPtr query, BinaryQueryPtr& binary_query) {
     }
 
     if (should_queries.size() > 1) {
-        //Construct a should binary tree
+        // Construct a should binary tree
         should_bquery = ConstructBinTree(should_queries, QueryRelation::R2, 0);
         ++bquery_num;
     } else if (should_queries.size() == 1) {

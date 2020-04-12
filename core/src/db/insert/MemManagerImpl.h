@@ -17,6 +17,7 @@
 #include <mutex>
 #include <set>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 #include "config/Config.h"
@@ -49,15 +50,10 @@ class MemManagerImpl : public MemManager, public server::CacheConfigHandler {
                   const uint8_t* vectors, uint64_t lsn, std::set<std::string>& flushed_tables) override;
 
     Status
-    InsertEntities(const std::string& table_id,
-                   int64_t length,
-                   const IDNumber* vector_ids,
-                   int64_t dim,
-                   const float* vectors,
-                   const std::unordered_map<std::string, uint64_t>& attr_nbytes,
+    InsertEntities(const std::string& table_id, int64_t length, const IDNumber* vector_ids, int64_t dim,
+                   const float* vectors, const std::unordered_map<std::string, uint64_t>& attr_nbytes,
                    const std::unordered_map<std::string, uint64_t>& attr_size,
-                   const std::unordered_map<std::string, std::vector<uint8_t>>& attr_data,
-                   uint64_t lsn,
+                   const std::unordered_map<std::string, std::vector<uint8_t>>& attr_data, uint64_t lsn,
                    std::set<std::string>& flushed_tables) override;
 
     Status

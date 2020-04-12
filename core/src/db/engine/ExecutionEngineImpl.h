@@ -16,6 +16,7 @@
 
 #include <memory>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 #include "ExecutionEngine.h"
@@ -31,7 +32,6 @@ class ExecutionEngineImpl : public ExecutionEngine {
 
     ExecutionEngineImpl(knowhere::VecIndexPtr index, const std::string& location, EngineType index_type,
                         MetricType metric_type, const milvus::json& index_params);
-
 
     Status
     AddWithIds(int64_t n, const float* xdata, const int64_t* xids) override;
@@ -70,13 +70,9 @@ class ExecutionEngineImpl : public ExecutionEngine {
     GetVectorByID(const int64_t& id, uint8_t* vector, bool hybrid) override;
 
     Status
-    ExecBinaryQuery(query::GeneralQueryPtr general_query,
-                    faiss::ConcurrentBitsetPtr bitset,
-                    std::unordered_map<std::string, DataType>& attr_type,
-                    uint64_t& nq,
-                    uint64_t& topk,
-                    std::vector<float>& distances,
-                    std::vector<int64_t>& labels) override ;
+    ExecBinaryQuery(query::GeneralQueryPtr general_query, faiss::ConcurrentBitsetPtr bitset,
+                    std::unordered_map<std::string, DataType>& attr_type, uint64_t& nq, uint64_t& topk,
+                    std::vector<float>& distances, std::vector<int64_t>& labels) override;
 
     Status
     Search(int64_t n, const float* data, int64_t k, const milvus::json& extra_params, float* distances, int64_t* labels,

@@ -20,6 +20,7 @@
 #include <set>
 #include <string>
 #include <thread>
+#include <unordered_map>
 #include <vector>
 
 #include "config/handler/CacheConfigHandler.h"
@@ -143,21 +144,15 @@ class DBImpl : public DB, public server::CacheConfigHandler, public server::Engi
                              meta::hybrid::FieldsSchema& fields_schema) override;
 
     Status
-    InsertEntities(const std::string& collection_name,
-                   const std::string& partition_tag,
-                   engine::Entity& entity,
+    InsertEntities(const std::string& collection_name, const std::string& partition_tag, engine::Entity& entity,
                    std::unordered_map<std::string, meta::hybrid::DataType>& field_types) override;
 
     Status
-    HybridQuery(const std::shared_ptr<server::Context>& context,
-                const std::string& collection_id,
-                const std::vector<std::string>& partition_tags,
-                context::HybridSearchContextPtr hybrid_search_context,
+    HybridQuery(const std::shared_ptr<server::Context>& context, const std::string& collection_id,
+                const std::vector<std::string>& partition_tags, context::HybridSearchContextPtr hybrid_search_context,
                 query::GeneralQueryPtr general_query,
-                std::unordered_map<std::string, engine::meta::hybrid::DataType>& attr_type,
-                uint64_t& nq,
-                ResultIds& result_ids,
-                ResultDistances& result_distances) override;
+                std::unordered_map<std::string, engine::meta::hybrid::DataType>& attr_type, uint64_t& nq,
+                ResultIds& result_ids, ResultDistances& result_distances) override;
 
     Status
     QueryByID(const std::shared_ptr<server::Context>& context, const std::string& collection_id,
@@ -191,15 +186,11 @@ class DBImpl : public DB, public server::CacheConfigHandler, public server::Engi
                ResultDistances& result_distances);
 
     Status
-    HybridQueryAsync(const std::shared_ptr<server::Context>& context,
-                     const std::string& table_id,
-                     const meta::SegmentsSchema& files,
-                     context::HybridSearchContextPtr hybrid_search_context,
+    HybridQueryAsync(const std::shared_ptr<server::Context>& context, const std::string& table_id,
+                     const meta::SegmentsSchema& files, context::HybridSearchContextPtr hybrid_search_context,
                      query::GeneralQueryPtr general_query,
-                     std::unordered_map<std::string, engine::meta::hybrid::DataType>& attr_type,
-                     uint64_t& nq,
-                     ResultIds& result_ids,
-                     ResultDistances& result_distances);
+                     std::unordered_map<std::string, engine::meta::hybrid::DataType>& attr_type, uint64_t& nq,
+                     ResultIds& result_ids, ResultDistances& result_distances);
 
     Status
     GetVectorByIdHelper(const std::string& collection_id, IDNumber vector_id, VectorsData& vector,

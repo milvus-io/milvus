@@ -16,10 +16,10 @@
 #include "grpc/gen-milvus/milvus.grpc.pb.h"
 #include "grpc/gen-status/status.grpc.pb.h"
 #include "grpc/gen-status/status.pb.h"
+#include "query/GeneralQuery.h"
 #include "server/context/Context.h"
 #include "utils/Json.h"
 #include "utils/Status.h"
-#include "query/GeneralQuery.h"
 
 #include <condition_variable>
 //#include <gperftools/profiler.h>
@@ -71,7 +71,7 @@ struct TopKQueryResult {
 
 struct HybridQueryResult {
     int64_t row_num_;
-    engine::ResultIds  id_list_;
+    engine::ResultIds id_list_;
     engine::ResultDistances distance_list_;
     engine::Entity entities_;
 };

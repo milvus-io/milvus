@@ -11,10 +11,11 @@
 
 #pragma once
 
-#pragma once
+#include <memory>
+#include <vector>
 
-#include "utils/Status.h"
 #include "GeneralQuery.h"
+#include "utils/Status.h"
 
 namespace milvus {
 namespace query {
@@ -28,39 +29,49 @@ enum class Occur {
 
 class BooleanQuery {
  public:
-    BooleanQuery() {}
+    BooleanQuery() {
+    }
 
-    BooleanQuery(Occur occur) : occur_(occur) {}
+    explicit BooleanQuery(Occur occur) : occur_(occur) {
+    }
 
-    Occur getOccur() {
+    Occur
+    getOccur() {
         return occur_;
     }
 
-    void SetOccur(Occur occur) {
+    void
+    SetOccur(Occur occur) {
         occur_ = occur;
     }
 
-    void AddBooleanQuery(std::shared_ptr<BooleanQuery> boolean_clause) {
+    void
+    AddBooleanQuery(std::shared_ptr<BooleanQuery> boolean_clause) {
         boolean_clauses_.emplace_back(boolean_clause);
     }
 
-    void AddLeafQuery(LeafQueryPtr leaf_query) {
+    void
+    AddLeafQuery(LeafQueryPtr leaf_query) {
         leaf_queries_.emplace_back(leaf_query);
     }
 
-    void SetLeafQuery(std::vector<LeafQueryPtr> leaf_queries) {
+    void
+    SetLeafQuery(std::vector<LeafQueryPtr> leaf_queries) {
         leaf_queries_ = leaf_queries;
     }
 
-    std::vector<std::shared_ptr<BooleanQuery> > getBooleanQuerys() {
+    std::vector<std::shared_ptr<BooleanQuery>>
+    getBooleanQuerys() {
         return boolean_clauses_;
     }
 
-    BinaryQueryPtr& getBinaryQuery() {
+    BinaryQueryPtr&
+    getBinaryQuery() {
         return binary_query_;
     }
 
-    std::vector<LeafQueryPtr>& getLeafQueries() {
+    std::vector<LeafQueryPtr>&
+    getLeafQueries() {
         return leaf_queries_;
     }
 
@@ -69,8 +80,7 @@ class BooleanQuery {
     std::vector<std::shared_ptr<BooleanQuery>> boolean_clauses_;
     std::vector<LeafQueryPtr> leaf_queries_;
     BinaryQueryPtr binary_query_ = std::make_shared<BinaryQuery>();
-};
-using BooleanQueryPtr = std::shared_ptr<BooleanQuery>;
+} using BooleanQueryPtr = std::shared_ptr<BooleanQuery>;
 
 }  // namespace query
 }  // namespace milvus

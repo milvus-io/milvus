@@ -20,6 +20,7 @@
 #include <fcntl.h>
 #include <unistd.h>
 #include <algorithm>
+#include <memory>
 
 #include <boost/filesystem.hpp>
 
@@ -31,12 +32,8 @@ namespace milvus {
 namespace codec {
 
 void
-DefaultAttrsFormat::read_attrs_internal(const std::string& file_path,
-                                        off_t offset,
-                                        size_t num,
-                                        std::vector<uint8_t>& raw_attrs,
-                                        size_t& nbytes) {
-
+DefaultAttrsFormat::read_attrs_internal(const std::string& file_path, off_t offset, size_t num,
+                                        std::vector<uint8_t>& raw_attrs, size_t& nbytes) {
     int ra_fd = open(file_path.c_str(), O_RDONLY, 00664);
     if (ra_fd == -1) {
         std::string err_msg = "Failed to open file: " + file_path + ", error: " + std::strerror(errno);
@@ -128,17 +125,17 @@ DefaultAttrsFormat::read(const milvus::storage::FSHandlerPtr& fs_ptr, milvus::se
         if (path.extension().string() == raw_attr_extension_) {
             auto file_name = path.filename().string();
             auto field_name = file_name.substr(0, file_name.size() - 3);
-//            void* attr_list;
+            //            void* attr_list;
             std::vector<uint8_t> attr_list;
             size_t nbytes;
             read_attrs_internal(path.string(), 0, INT64_MAX, attr_list, nbytes);
             std::vector<int64_t> uids;
-            milvus::segment::AttrPtr
-                attr = std::make_shared<milvus::segment::Attr>(attr_list, nbytes, uids, field_name);
+            milvus::segment::AttrPtr attr =
+                std::make_shared<milvus::segment::Attr>(attr_list, nbytes, uids, field_name);
             attrs_read->attrs.insert(std::pair(field_name, attr));
         }
     }
-    //TODO process uids
+    // TODO process uids
 }
 
 void
@@ -213,8 +210,6 @@ DefaultAttrsFormat::write(const milvus::storage::FSHandlerPtr& fs_ptr, const mil
 
         rc.RecordSection("write rv done");
     }
-
-
 }
 
 void
@@ -241,5 +236,5 @@ DefaultAttrsFormat::read_uids(const milvus::storage::FSHandlerPtr& fs_ptr, std::
     }
 }
 
-}
-}
+}  // namespace codec
+}  // namespace milvus

@@ -45,8 +45,7 @@ class SearchJob : public Job {
     SearchJob(const std::shared_ptr<server::Context>& context, uint64_t topk, const milvus::json& extra_params,
               const engine::VectorsData& vectors);
 
-    SearchJob(const std::shared_ptr<server::Context>& context,
-              query::GeneralQueryPtr general_query,
+    SearchJob(const std::shared_ptr<server::Context>& context, query::GeneralQueryPtr general_query,
               std::unordered_map<std::string, engine::meta::hybrid::DataType>& attr_type,
               const engine::VectorsData& vectorsData);
 

@@ -14,6 +14,7 @@
 #include <memory>
 #include <string>
 #include <unordered_map>
+#include <vector>
 
 #include "db/Types.h"
 #include "db/meta/MetaTypes.h"
@@ -23,12 +24,12 @@ namespace engine {
 namespace wal {
 
 using TableSchemaPtr = std::shared_ptr<milvus::engine::meta::CollectionSchema>;
-using TableMetaPtr = std::shared_ptr<std::unordered_map<std::string, TableSchemaPtr> >;
+using TableMetaPtr = std::shared_ptr<std::unordered_map<std::string, TableSchemaPtr>>;
 
 #define UNIT_MB (1024 * 1024)
 #define LSN_OFFSET_MASK 0x00000000ffffffff
 
-enum class MXLogType { InsertBinary, InsertVector, Delete, Update, Flush, None, Entity};
+enum class MXLogType { InsertBinary, InsertVector, Delete, Update, Flush, None, Entity };
 
 struct MXLogRecord {
     uint64_t lsn;

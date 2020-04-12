@@ -13,8 +13,8 @@
 
 #include <iostream>
 #include <memory>
-#include <vector>
 #include <string>
+#include <vector>
 #include "utils/Json.h"
 
 namespace milvus {

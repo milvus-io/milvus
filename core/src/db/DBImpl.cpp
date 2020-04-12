@@ -21,10 +21,11 @@
 #include <functional>
 #include <iostream>
 #include <limits>
+#include <queue>
 #include <set>
 #include <thread>
+#include <unordered_map>
 #include <utility>
-#include <queue>
 
 #include "Utils.h"
 #include "cache/CpuCacheMgr.h"
@@ -52,7 +53,6 @@
 #include "wal/WalDefinations.h"
 
 #include "search/TaskInst.h"
-
 
 namespace milvus {
 namespace engine {
@@ -212,17 +212,15 @@ DBImpl::CreateCollection(meta::CollectionSchema& collection_schema) {
     return meta_ptr_->CreateCollection(temp_schema);
 }
 
-
 Status
-DBImpl::CreateHybridCollection(meta::CollectionSchema& collection_schema,
-                         meta::hybrid::FieldsSchema& fields_schema){
+DBImpl::CreateHybridCollection(meta::CollectionSchema& collection_schema, meta::hybrid::FieldsSchema& fields_schema) {
     if (!initialized_.load(std::memory_order_acquire)) {
         return SHUTDOWN_ERROR;
     }
 
     meta::CollectionSchema temp_schema = collection_schema;
     if (options_.wal_enable_) {
-        //TODO(yukun): wal_mgr_->CreateHybridCollection()
+        // TODO(yukun): wal_mgr_->CreateHybridCollection()
     }
 
     return meta_ptr_->CreateHybridCollection(temp_schema, fields_schema);
@@ -588,11 +586,8 @@ DBImpl::InsertVectors(const std::string& collection_id, const std::string& parti
 }
 
 Status
-DBImpl::InsertEntities(const std::string& collection_id,
-                       const std::string& partition_tag,
-                       Entity& entity,
+DBImpl::InsertEntities(const std::string& collection_id, const std::string& partition_tag, Entity& entity,
                        std::unordered_map<std::string, meta::hybrid::DataType>& attr_types) {
-
     if (!initialized_.load(std::memory_order_acquire)) {
         return SHUTDOWN_ERROR;
     }
@@ -621,9 +616,9 @@ DBImpl::InsertEntities(const std::string& collection_id,
         record.data = vector_it->second.float_data_.data();
         record.data_size = vector_it->second.float_data_.size() * sizeof(float);
     } else {
-//        record.type = wal::MXLogType::InsertBinary;
-//        record.data = entities.vector_data_[0].binary_data_.data();
-//        record.length = entities.vector_data_[0].binary_data_.size() * sizeof(uint8_t);
+        //        record.type = wal::MXLogType::InsertBinary;
+        //        record.data = entities.vector_data_[0].binary_data_.data();
+        //        record.length = entities.vector_data_[0].binary_data_.size() * sizeof(uint8_t);
     }
 
     auto attr_data_it = entity.attr_data_.begin();
@@ -641,8 +636,8 @@ DBImpl::InsertEntities(const std::string& collection_id,
                 record.attr_data.insert(std::make_pair(attr_data_it->first, data));
 
                 record.attr_nbytes.insert(std::make_pair(attr_data_it->first, sizeof(int8_t)));
-                record.attr_data_size.insert(std::make_pair(attr_data_it->first,
-                                                            entity.entity_count_ * sizeof(int8_t)));
+                record.attr_data_size.insert(
+                    std::make_pair(attr_data_it->first, entity.entity_count_ * sizeof(int8_t)));
                 break;
             }
             case meta::hybrid::DataType::INT16: {
@@ -657,8 +652,8 @@ DBImpl::InsertEntities(const std::string& collection_id,
                 record.attr_data.insert(std::make_pair(attr_data_it->first, data));
 
                 record.attr_nbytes.insert(std::make_pair(attr_data_it->first, sizeof(int16_t)));
-                record.attr_data_size.insert(std::make_pair(attr_data_it->first,
-                                                            entity.entity_count_ * sizeof(int16_t)));
+                record.attr_data_size.insert(
+                    std::make_pair(attr_data_it->first, entity.entity_count_ * sizeof(int16_t)));
                 break;
             }
             case meta::hybrid::DataType::INT32: {
@@ -673,8 +668,8 @@ DBImpl::InsertEntities(const std::string& collection_id,
                 record.attr_data.insert(std::make_pair(attr_data_it->first, data));
 
                 record.attr_nbytes.insert(std::make_pair(attr_data_it->first, sizeof(int32_t)));
-                record.attr_data_size.insert(std::make_pair(attr_data_it->first,
-                                                            entity.entity_count_ * sizeof(int32_t)));
+                record.attr_data_size.insert(
+                    std::make_pair(attr_data_it->first, entity.entity_count_ * sizeof(int32_t)));
                 break;
             }
             case meta::hybrid::DataType::INT64: {
@@ -689,8 +684,8 @@ DBImpl::InsertEntities(const std::string& collection_id,
                 record.attr_data.insert(std::make_pair(attr_data_it->first, data));
 
                 record.attr_nbytes.insert(std::make_pair(attr_data_it->first, sizeof(int64_t)));
-                record.attr_data_size.insert(std::make_pair(attr_data_it->first,
-                                                            entity.entity_count_ * sizeof(int64_t)));
+                record.attr_data_size.insert(
+                    std::make_pair(attr_data_it->first, entity.entity_count_ * sizeof(int64_t)));
 
                 break;
             }
@@ -706,13 +701,12 @@ DBImpl::InsertEntities(const std::string& collection_id,
                 record.attr_data.insert(std::make_pair(attr_data_it->first, data));
 
                 record.attr_nbytes.insert(std::make_pair(attr_data_it->first, sizeof(float)));
-                record.attr_data_size.insert(std::make_pair(attr_data_it->first,
-                                                            entity.entity_count_ * sizeof(float)));
+                record.attr_data_size.insert(std::make_pair(attr_data_it->first, entity.entity_count_ * sizeof(float)));
 
                 break;
             }
             case meta::hybrid::DataType::DOUBLE: {
-                std::vector<double > entity_data;
+                std::vector<double> entity_data;
                 entity_data.resize(entity.entity_count_);
                 for (uint64_t j = 0; j < entity.entity_count_; ++j) {
                     entity_data[j] = atof(attr_data_it->second[j].c_str());
@@ -723,13 +717,12 @@ DBImpl::InsertEntities(const std::string& collection_id,
                 record.attr_data.insert(std::make_pair(attr_data_it->first, data));
 
                 record.attr_nbytes.insert(std::make_pair(attr_data_it->first, sizeof(double)));
-                record.attr_data_size.insert(std::make_pair(attr_data_it->first,
-                                                            entity.entity_count_ * sizeof(double)));
+                record.attr_data_size.insert(
+                    std::make_pair(attr_data_it->first, entity.entity_count_ * sizeof(double)));
                 break;
             }
         }
     }
-
 
     status = ExecWalRecord(record);
     return status;
@@ -1287,15 +1280,11 @@ DBImpl::QueryByID(const std::shared_ptr<server::Context>& context, const std::st
 }
 
 Status
-DBImpl::HybridQuery(const std::shared_ptr<server::Context>& context,
-                    const std::string& collection_id,
+DBImpl::HybridQuery(const std::shared_ptr<server::Context>& context, const std::string& collection_id,
                     const std::vector<std::string>& partition_tags,
-                    context::HybridSearchContextPtr hybrid_search_context,
-                    query::GeneralQueryPtr general_query,
-                    std::unordered_map<std::string, engine::meta::hybrid::DataType>& attr_type,
-                    uint64_t& nq,
-                    ResultIds& result_ids,
-                    ResultDistances& result_distances) {
+                    context::HybridSearchContextPtr hybrid_search_context, query::GeneralQueryPtr general_query,
+                    std::unordered_map<std::string, engine::meta::hybrid::DataType>& attr_type, uint64_t& nq,
+                    ResultIds& result_ids, ResultDistances& result_distances) {
     auto query_ctx = context->Child("Query");
 
     if (!initialized_.load(std::memory_order_acquire)) {
@@ -1338,15 +1327,8 @@ DBImpl::HybridQuery(const std::shared_ptr<server::Context>& context,
     }
 
     cache::CpuCacheMgr::GetInstance()->PrintInfo();  // print cache info before query
-    status = HybridQueryAsync(query_ctx,
-                              collection_id,
-                              files_array,
-                              hybrid_search_context,
-                              general_query,
-                              attr_type,
-                              nq,
-                              result_ids,
-                              result_distances);
+    status = HybridQueryAsync(query_ctx, collection_id, files_array, hybrid_search_context, general_query, attr_type,
+                              nq, result_ids, result_distances);
     cache::CpuCacheMgr::GetInstance()->PrintInfo();  // print cache info after query
 
     query_ctx->GetTraceContext()->GetSpan()->Finish();
@@ -1499,15 +1481,11 @@ DBImpl::QueryAsync(const std::shared_ptr<server::Context>& context, const meta::
 }
 
 Status
-DBImpl::HybridQueryAsync(const std::shared_ptr<server::Context>& context,
-                         const std::string& table_id,
-                         const meta::SegmentsSchema& files,
-                         context::HybridSearchContextPtr hybrid_search_context,
+DBImpl::HybridQueryAsync(const std::shared_ptr<server::Context>& context, const std::string& table_id,
+                         const meta::SegmentsSchema& files, context::HybridSearchContextPtr hybrid_search_context,
                          query::GeneralQueryPtr general_query,
-                         std::unordered_map<std::string, engine::meta::hybrid::DataType>& attr_type,
-                         uint64_t& nq,
-                         ResultIds& result_ids,
-                         ResultDistances& result_distances) {
+                         std::unordered_map<std::string, engine::meta::hybrid::DataType>& attr_type, uint64_t& nq,
+                         ResultIds& result_ids, ResultDistances& result_distances) {
     auto query_async_ctx = context->Child("Query Async");
 
 #if 0
@@ -1520,7 +1498,8 @@ DBImpl::HybridQueryAsync(const std::shared_ptr<server::Context>& context,
         }
 
         auto file_ptr = std::make_shared<meta::TableFileSchema>(file);
-        search::TaskPtr task = std::make_shared<search::Task>(context, file_ptr, general_query, types, hybrid_search_context);
+        search::TaskPtr
+            task = std::make_shared<search::Task>(context, file_ptr, general_query, types, hybrid_search_context);
         search::TaskInst::GetInstance().load_queue().push(task);
         search::TaskInst::GetInstance().load_cv().notify_one();
         hybrid_search_context->tasks_.emplace_back(task);
@@ -1528,7 +1507,7 @@ DBImpl::HybridQueryAsync(const std::shared_ptr<server::Context>& context,
 
 #endif
 
-//#if 0
+    //#if 0
     TimeRecorder rc("");
 
     // step 1: construct search job
@@ -1537,7 +1516,8 @@ DBImpl::HybridQueryAsync(const std::shared_ptr<server::Context>& context,
     VectorsData vectors;
 
     ENGINE_LOG_DEBUG << "Engine query begin, index file count: " << files.size();
-    scheduler::SearchJobPtr job = std::make_shared<scheduler::SearchJob>(query_async_ctx, general_query, attr_type, vectors);
+    scheduler::SearchJobPtr job =
+        std::make_shared<scheduler::SearchJob>(query_async_ctx, general_query, attr_type, vectors);
     for (auto& file : files) {
         scheduler::SegmentSchemaPtr file_ptr = std::make_shared<meta::SegmentSchema>(file);
         job->AddIndexFile(file_ptr);
@@ -1559,7 +1539,7 @@ DBImpl::HybridQueryAsync(const std::shared_ptr<server::Context>& context,
     rc.ElapseFromBegin("Engine query totally cost");
 
     query_async_ctx->GetTraceContext()->GetSpan()->Finish();
-//#endif
+    //#endif
 
     return Status::OK();
 }
@@ -1834,8 +1814,8 @@ DBImpl::MergeHybridFiles(const std::string& table_id, const milvus::engine::meta
     // else set file type to RAW, no need to build index
     if (!utils::IsRawIndexType(table_file.engine_type_)) {
         table_file.file_type_ = (segment_writer_ptr->Size() >= table_file.index_file_size_)
-                                ? meta::SegmentSchema::TO_INDEX
-                                : meta::SegmentSchema::RAW;
+                                    ? meta::SegmentSchema::TO_INDEX
+                                    : meta::SegmentSchema::RAW;
     } else {
         table_file.file_type_ = meta::SegmentSchema::RAW;
     }
@@ -2277,11 +2257,8 @@ DBImpl::ExecWalRecord(const wal::MXLogRecord& record) {
             std::set<std::string> flushed_tables;
             status = mem_mgr_->InsertEntities(target_collection_name, record.length, record.ids,
                                               (record.data_size / record.length / sizeof(float)),
-                                              (const float*)record.data,
-                                              record.attr_nbytes,
-                                              record.attr_data_size,
-                                              record.attr_data,
-                                              record.lsn, flushed_tables);
+                                              (const float*)record.data, record.attr_nbytes, record.attr_data_size,
+                                              record.attr_data, record.lsn, flushed_tables);
             collections_flushed(flushed_tables);
 
             milvus::server::CollectInsertMetrics metrics(record.length, status);

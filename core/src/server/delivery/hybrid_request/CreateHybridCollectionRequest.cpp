@@ -20,15 +20,17 @@
 #include <fiu-local.h>
 #include <memory>
 #include <string>
+#include <utility>
+#include <vector>
 
 namespace milvus {
 namespace server {
 
-CreateHybridCollectionRequest::CreateHybridCollectionRequest(const std::shared_ptr<milvus::server::Context>& context,
-                                                 const std::string& collection_name,
-                                                 std::vector<std::pair<std::string, engine::meta::hybrid::DataType>>& field_types,
-                                                 std::vector<std::pair<std::string, uint64_t>>& vector_dimensions,
-                                                 std::vector<std::pair<std::string, std::string>>& field_params)
+CreateHybridCollectionRequest::CreateHybridCollectionRequest(
+    const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name,
+    std::vector<std::pair<std::string, engine::meta::hybrid::DataType>>& field_types,
+    std::vector<std::pair<std::string, uint64_t>>& vector_dimensions,
+    std::vector<std::pair<std::string, std::string>>& field_params)
     : BaseRequest(context, BaseRequest::kCreateHybridCollection),
       collection_name_(collection_name),
       field_types_(field_types),
@@ -38,10 +40,10 @@ CreateHybridCollectionRequest::CreateHybridCollectionRequest(const std::shared_p
 
 BaseRequestPtr
 CreateHybridCollectionRequest::Create(const std::shared_ptr<milvus::server::Context>& context,
-                                const std::string& collection_name,
-                                std::vector<std::pair<std::string, engine::meta::hybrid::DataType>>& field_types,
-                                std::vector<std::pair<std::string, uint64_t>>& vector_dimensions,
-                                std::vector<std::pair<std::string, std::string>>& field_params) {
+                                      const std::string& collection_name,
+                                      std::vector<std::pair<std::string, engine::meta::hybrid::DataType>>& field_types,
+                                      std::vector<std::pair<std::string, uint64_t>>& vector_dimensions,
+                                      std::vector<std::pair<std::string, std::string>>& field_params) {
     return std::shared_ptr<BaseRequest>(
         new CreateHybridCollectionRequest(context, collection_name, field_types, vector_dimensions, field_params));
 }
@@ -69,7 +71,7 @@ CreateHybridCollectionRequest::OnExecute() {
         fields_schema.fields_schema_.resize(size + 1);
         for (uint64_t i = 0; i < size; ++i) {
             fields_schema.fields_schema_[i].collection_id_ = collection_name_;
-            fields_schema.fields_schema_[i].field_name_ =  field_types_[i].first;
+            fields_schema.fields_schema_[i].field_name_ = field_types_[i].first;
             fields_schema.fields_schema_[i].field_type_ = (int32_t)field_types_[i].second;
             fields_schema.fields_schema_[i].field_params_ = field_params_[i].second;
         }

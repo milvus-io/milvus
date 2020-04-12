@@ -19,11 +19,11 @@
 
 #include <memory>
 
+#include "segment/Attrs.h"
 #include "segment/DeletedDocs.h"
 #include "segment/IdBloomFilter.h"
 #include "segment/VectorIndex.h"
 #include "segment/Vectors.h"
-#include "segment/Attrs.h"
 
 namespace milvus {
 namespace segment {

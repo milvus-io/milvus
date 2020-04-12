@@ -37,12 +37,11 @@ static constexpr int64_t NQ = 10;
 static constexpr int64_t TOPK = 100;
 
 void
-BuildTableSchema(milvus::engine::meta::TableSchema& table_schema,
+BuildTableSchema(milvus::engine::meta::CollectionSchema& table_schema,
                  milvus::engine::meta::hybrid::FieldsSchema& fields_schema,
                  std::unordered_map<std::string, milvus::engine::meta::hybrid::DataType>& attr_type) {
-
     table_schema.dimension_ = TABLE_DIM;
-    table_schema.table_id_ = TABLE_NAME;
+    table_schema.collection_id_ = TABLE_NAME;
 
     std::vector<milvus::engine::meta::hybrid::FieldSchema> fields;
     fields.resize(FIELD_NUM);
@@ -113,7 +112,6 @@ ConstructGeneralQuery(milvus::query::GeneralQueryPtr& general_query) {
     auto right = general_query->bin->right_query;
     left->bin->relation = milvus::query::QueryRelation::AND;
 
-
     auto term_query = std::make_shared<milvus::query::TermQuery>();
     term_query->field_name = "field_0";
     term_query->field_value = {"10", "20", "30", "40", "50"};
@@ -143,7 +141,6 @@ ConstructGeneralQuery(milvus::query::GeneralQueryPtr& general_query) {
     }
     vector_query->query_vector = record;
 
-
     left->bin->left_query = std::make_shared<milvus::query::GeneralQuery>();
     left->bin->right_query = std::make_shared<milvus::query::GeneralQuery>();
     left->bin->left_query->leaf = std::make_shared<milvus::query::LeafQuery>();
@@ -154,18 +151,19 @@ ConstructGeneralQuery(milvus::query::GeneralQueryPtr& general_query) {
     right->leaf = std::make_shared<milvus::query::LeafQuery>();
     right->leaf->vector_query = vector_query;
 }
+}  // namespace
 
 TEST_F(DBTest, HYBRID_DB_TEST) {
-    milvus::engine::meta::TableSchema table_info;
+    milvus::engine::meta::CollectionSchema table_info;
     milvus::engine::meta::hybrid::FieldsSchema fields_info;
     std::unordered_map<std::string, milvus::engine::meta::hybrid::DataType> attr_type;
     BuildTableSchema(table_info, fields_info, attr_type);
 
     auto stat = db_->CreateHybridCollection(table_info, fields_info);
     ASSERT_TRUE(stat.ok());
-    milvus::engine::meta::TableSchema table_info_get;
+    milvus::engine::meta::CollectionSchema table_info_get;
     milvus::engine::meta::hybrid::FieldsSchema fields_info_get;
-    table_info_get.table_id_ = TABLE_NAME;
+    table_info_get.collection_id_ = TABLE_NAME;
     stat = db_->DescribeHybridCollection(table_info_get, fields_info_get);
     ASSERT_TRUE(stat.ok());
     ASSERT_EQ(table_info_get.dimension_, TABLE_DIM);
@@ -181,7 +179,7 @@ TEST_F(DBTest, HYBRID_DB_TEST) {
     ASSERT_TRUE(stat.ok());
 
     milvus::json json_params = {{"nprobe", 10}};
-    milvus::engine::TableIndex index;
+    milvus::engine::CollectionIndex index;
     index.engine_type_ = (int)milvus::engine::EngineType::FAISS_IDMAP;
     index.extra_params_ = {{"nlist", 16384}};
 
@@ -190,16 +188,16 @@ TEST_F(DBTest, HYBRID_DB_TEST) {
 }
 
 TEST_F(DBTest, HYBRID_SEARCH_TEST) {
-    milvus::engine::meta::TableSchema table_info;
+    milvus::engine::meta::CollectionSchema table_info;
     milvus::engine::meta::hybrid::FieldsSchema fields_info;
     std::unordered_map<std::string, milvus::engine::meta::hybrid::DataType> attr_type;
     BuildTableSchema(table_info, fields_info, attr_type);
 
     auto stat = db_->CreateHybridCollection(table_info, fields_info);
     ASSERT_TRUE(stat.ok());
-    milvus::engine::meta::TableSchema table_info_get;
+    milvus::engine::meta::CollectionSchema table_info_get;
     milvus::engine::meta::hybrid::FieldsSchema fields_info_get;
-    table_info_get.table_id_ = TABLE_NAME;
+    table_info_get.collection_id_ = TABLE_NAME;
     stat = db_->DescribeHybridCollection(table_info_get, fields_info_get);
     ASSERT_TRUE(stat.ok());
     ASSERT_EQ(table_info_get.dimension_, TABLE_DIM);
@@ -222,15 +220,8 @@ TEST_F(DBTest, HYBRID_SEARCH_TEST) {
     milvus::context::HybridSearchContextPtr hybrid_context = std::make_shared<milvus::context::HybridSearchContext>();
     milvus::engine::ResultIds result_ids;
     milvus::engine::ResultDistances result_distances;
-    stat = db_->HybridQuery(dummy_context_,
-                            TABLE_NAME,
-                            tags,
-                            hybrid_context,
-                            general_query,
-                            attr_type,
-                            result_ids,
+    uint64_t nq;
+    stat = db_->HybridQuery(dummy_context_, TABLE_NAME, tags, hybrid_context, general_query, attr_type, nq, result_ids,
                             result_distances);
-
-}
-
+    ASSERT_TRUE(stat.ok());
 }

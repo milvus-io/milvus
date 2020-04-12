@@ -86,15 +86,10 @@ MemManagerImpl::InsertVectors(const std::string& collection_id, int64_t length, 
 }
 
 Status
-MemManagerImpl::InsertEntities(const std::string& table_id,
-                               int64_t length,
-                               const IDNumber* vector_ids,
-                               int64_t dim,
-                               const float* vectors,
-                               const std::unordered_map<std::string, uint64_t>& attr_nbytes,
+MemManagerImpl::InsertEntities(const std::string& table_id, int64_t length, const IDNumber* vector_ids, int64_t dim,
+                               const float* vectors, const std::unordered_map<std::string, uint64_t>& attr_nbytes,
                                const std::unordered_map<std::string, uint64_t>& attr_size,
-                               const std::unordered_map<std::string, std::vector<uint8_t>>& attr_data,
-                               uint64_t lsn,
+                               const std::unordered_map<std::string, std::vector<uint8_t>>& attr_data, uint64_t lsn,
                                std::set<std::string>& flushed_tables) {
     flushed_tables.clear();
     if (GetCurrentMem() > options_.insert_buffer_size_) {
@@ -128,9 +123,9 @@ MemManagerImpl::InsertVectorsNoLock(const std::string& collection_id, const Vect
     return status;
 }
 
-Status MemManagerImpl::InsertEntitiesNoLock(const std::string& collection_id,
-                                            const milvus::engine::VectorSourcePtr& source,
-                                            uint64_t lsn) {
+Status
+MemManagerImpl::InsertEntitiesNoLock(const std::string& collection_id, const milvus::engine::VectorSourcePtr& source,
+                                     uint64_t lsn) {
     MemTablePtr mem = GetMemByTable(collection_id);
     mem->SetLSN(lsn);
 

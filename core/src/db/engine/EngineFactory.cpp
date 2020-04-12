@@ -34,8 +34,8 @@ EngineFactory::Build(uint16_t dimension, const std::string& location, EngineType
     return execution_engine_ptr;
 }
 
-//ExecutionEnginePtr
-//EngineFactory::Build(uint16_t dimension,
+// ExecutionEnginePtr
+// EngineFactory::Build(uint16_t dimension,
 //                     const std::string& location,
 //                     EngineType index_type,
 //                     MetricType metric_type,

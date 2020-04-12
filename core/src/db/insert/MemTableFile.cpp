@@ -101,8 +101,8 @@ MemTableFile::AddEntities(const VectorSourcePtr& source) {
         size_t num_entities_to_add = std::ceil(mem_left / single_entity_mem_size);
         size_t num_entities_added;
 
-        auto status = source->AddEntities(segment_writer_ptr_, table_file_schema_, num_entities_added,
-                                          num_entities_to_add);
+        auto status =
+            source->AddEntities(segment_writer_ptr_, table_file_schema_, num_entities_added, num_entities_to_add);
 
         if (status.ok()) {
             current_mem_ += (num_entities_added * single_entity_mem_size);

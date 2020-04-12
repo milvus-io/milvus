@@ -36,7 +36,6 @@ class AttrsFormat {
 
     virtual void
     read_uids(const storage::FSHandlerPtr& fs_ptr, std::vector<int64_t>& uids) = 0;
-
 };
 
 using AttrsFormatPtr = std::shared_ptr<AttrsFormat>;

@@ -13,6 +13,8 @@
 
 #include <memory>
 #include <string>
+#include <utility>
+#include <vector>
 
 #include "server/delivery/request/BaseRequest.h"
 
@@ -22,18 +24,17 @@ namespace server {
 class CreateHybridCollectionRequest : public BaseRequest {
  public:
     static BaseRequestPtr
-    Create(const std::shared_ptr<milvus::server::Context>& context,
-           const std::string& collection_name,
+    Create(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name,
            std::vector<std::pair<std::string, engine::meta::hybrid::DataType>>& field_types,
            std::vector<std::pair<std::string, uint64_t>>& vector_dimensions,
            std::vector<std::pair<std::string, std::string>>& field_params);
 
  protected:
     CreateHybridCollectionRequest(const std::shared_ptr<milvus::server::Context>& context,
-                            const std::string& collection_name,
-                            std::vector<std::pair<std::string, engine::meta::hybrid::DataType>>& field_types,
-                            std::vector<std::pair<std::string, uint64_t>>& vector_dimensions,
-                            std::vector<std::pair<std::string, std::string>>& field_arams);
+                                  const std::string& collection_name,
+                                  std::vector<std::pair<std::string, engine::meta::hybrid::DataType>>& field_types,
+                                  std::vector<std::pair<std::string, uint64_t>>& vector_dimensions,
+                                  std::vector<std::pair<std::string, std::string>>& field_arams);
 
     Status
     OnExecute() override;

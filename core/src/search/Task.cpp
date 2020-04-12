@@ -11,31 +11,30 @@
 
 #pragma once
 
+#include <algorithm>
 #include <iostream>
 #include <memory>
-#include <vector>
 #include <string>
+#include <unordered_map>
+#include <vector>
 
-#include "db/engine/EngineFactory.h"
 #include "db/Utils.h"
-#include "Task.h"
-#include "utils/TimeRecorder.h"
+#include "db/engine/EngineFactory.h"
+#include "search/Task.h"
 #include "utils/Log.h"
+#include "utils/TimeRecorder.h"
 
 namespace milvus {
-namespace search{
+namespace search {
 
-Task::Task(const std::shared_ptr<server::Context>& context,
-           SegmentSchemaPtr& file,
-           milvus::query::GeneralQueryPtr general_query,
-           std::unordered_map<std::string, engine::DataType>& attr_type,
+Task::Task(const std::shared_ptr<server::Context>& context, SegmentSchemaPtr& file,
+           milvus::query::GeneralQueryPtr general_query, std::unordered_map<std::string, engine::DataType>& attr_type,
            context::HybridSearchContextPtr hybrid_search_context)
     : context_(context),
       file_(file),
       general_query_(general_query),
       attr_type_(attr_type),
       hybrid_search_context_(hybrid_search_context) {
-
     if (file_) {
         // distance -- value 0 means two vectors equal, ascending reduce, L2/HAMMING/JACCARD/TONIMOTO ...
         // similarity -- infinity value means two vectors equal, descending reduce, IP
@@ -48,9 +47,8 @@ Task::Task(const std::shared_ptr<server::Context>& context,
         if (file->file_type_ == engine::meta::SegmentSchema::FILE_TYPE::RAW ||
             file->file_type_ == engine::meta::SegmentSchema::FILE_TYPE::TO_INDEX ||
             file->file_type_ == engine::meta::SegmentSchema::FILE_TYPE::BACKUP) {
-            engine_type =
-                engine::utils::IsBinaryMetricType(file->metric_type_) ? engine::EngineType::FAISS_BIN_IDMAP
-                                                                      : engine::EngineType::FAISS_IDMAP;
+            engine_type = engine::utils::IsBinaryMetricType(file->metric_type_) ? engine::EngineType::FAISS_BIN_IDMAP
+                                                                                : engine::EngineType::FAISS_IDMAP;
         } else {
             engine_type = (engine::EngineType)file->engine_type_;
         }
@@ -95,7 +93,6 @@ Task::Execute() {
         return;
     }
 
-
     TimeRecorder rc("DoSearch file id:" + std::to_string(index_id_));
 
     std::vector<int64_t> output_ids;
@@ -109,12 +106,7 @@ Task::Execute() {
         if (general_query_ != nullptr) {
             faiss::ConcurrentBitsetPtr bitset;
             uint64_t nq, topk;
-            s = index_engine_->ExecBinaryQuery(general_query_,
-                                               bitset,
-                                               attr_type_,
-                                               nq,
-                                               topk,
-                                               output_distance,
+            s = index_engine_->ExecBinaryQuery(general_query_, bitset, attr_type_, nq, topk, output_distance,
                                                output_ids);
 
             if (!s.ok()) {
@@ -133,9 +125,8 @@ Task::Execute() {
                         result_distances_.resize(spec_k * nq);
                     }
                 }
-                Task::MergeTopkToResultSet(output_ids, output_distance, spec_k, nq, topk, ascending_reduce,
-                                           result_ids_, result_distances_);
-
+                Task::MergeTopkToResultSet(output_ids, output_distance, spec_k, nq, topk, ascending_reduce, result_ids_,
+                                           result_distances_);
             }
             index_engine_ = nullptr;
             execute_ctx->GetTraceContext()->GetSpan()->Finish();
@@ -145,12 +136,10 @@ Task::Execute() {
         if (!s.ok()) {
             return;
         }
-
     } catch (std::exception& ex) {
         ENGINE_LOG_ERROR << "SearchTask encounter exception: " << ex.what();
         //            search_job->IndexSearchDone(index_id_);//mark as done avoid dead lock, even search failed
     }
-
 
     rc.ElapseFromBegin("totally cost");
 
@@ -162,13 +151,9 @@ Task::Execute() {
 
 void
 Task::MergeTopkToResultSet(const milvus::search::ResultIds& src_ids,
-                                const milvus::search::ResultDistances& src_distances,
-                                size_t src_k,
-                                size_t nq,
-                                size_t topk,
-                                bool ascending,
-                                milvus::search::ResultIds& tar_ids,
-                                milvus::search::ResultDistances& tar_distances) {
+                           const milvus::search::ResultDistances& src_distances, size_t src_k, size_t nq, size_t topk,
+                           bool ascending, milvus::search::ResultIds& tar_ids,
+                           milvus::search::ResultDistances& tar_distances) {
     if (src_ids.empty()) {
         return;
     }
@@ -232,5 +217,5 @@ Task::MergeTopkToResultSet(const milvus::search::ResultIds& src_ids,
     tar_distances.swap(buf_distances);
 }
 
-} // namespace search
-} // namespace milvus
+}  // namespace search
+}  // namespace milvus

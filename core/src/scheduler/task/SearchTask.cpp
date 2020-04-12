@@ -17,6 +17,7 @@
 #include <memory>
 #include <string>
 #include <thread>
+#include <unordered_map>
 #include <utility>
 
 #include "db/Utils.h"
@@ -123,21 +124,21 @@ XSearchTask::XSearchTask(const std::shared_ptr<server::Context>& context, Segmen
         if (!file_->index_params_.empty()) {
             json_params = milvus::json::parse(file_->index_params_);
         }
-//        if (auto job = job_.lock()) {
-//            auto search_job = std::static_pointer_cast<scheduler::SearchJob>(job);
-//            query::GeneralQueryPtr general_query = search_job->general_query();
-//            if (general_query != nullptr) {
-//                std::unordered_map<std::string, engine::DataType> types;
-//                auto attr_type = search_job->attr_type();
-//                auto type_it = attr_type.begin();
-//                for (; type_it != attr_type.end(); type_it++) {
-//                    types.insert(std::make_pair(type_it->first, (engine::DataType)(type_it->second)));
-//                }
-//                index_engine_ =
-//                    EngineFactory::Build(file_->dimension_, file_->location_, engine_type,
-//                                         (MetricType)file_->metric_type_, types, json_params);
-//            }
-//        }
+        //        if (auto job = job_.lock()) {
+        //            auto search_job = std::static_pointer_cast<scheduler::SearchJob>(job);
+        //            query::GeneralQueryPtr general_query = search_job->general_query();
+        //            if (general_query != nullptr) {
+        //                std::unordered_map<std::string, engine::DataType> types;
+        //                auto attr_type = search_job->attr_type();
+        //                auto type_it = attr_type.begin();
+        //                for (; type_it != attr_type.end(); type_it++) {
+        //                    types.insert(std::make_pair(type_it->first, (engine::DataType)(type_it->second)));
+        //                }
+        //                index_engine_ =
+        //                    EngineFactory::Build(file_->dimension_, file_->location_, engine_type,
+        //                                         (MetricType)file_->metric_type_, types, json_params);
+        //            }
+        //        }
         index_engine_ = EngineFactory::Build(file_->dimension_, file_->location_, engine_type,
                                              (MetricType)file_->metric_type_, json_params);
     }
@@ -294,7 +295,6 @@ XSearchTask::Execute() {
                     search_job->vector_count() = nq;
                     XSearchTask::MergeTopkToResultSet(output_ids, output_distance, spec_k, nq, topk, ascending_reduce,
                                                       search_job->GetResultIds(), search_job->GetResultDistances());
-
                 }
                 search_job->SearchDone(index_id_);
                 index_engine_ = nullptr;

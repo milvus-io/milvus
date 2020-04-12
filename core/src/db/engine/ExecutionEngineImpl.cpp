@@ -15,6 +15,7 @@
 #include <fiu-local.h>
 
 #include <stdexcept>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -720,7 +721,8 @@ MapAndCopyResult(const knowhere::DatasetPtr& dataset, const std::vector<milvus::
 
 template <typename T>
 void
-ProcessRangeQuery(std::vector<T> data, T value, query::CompareOperator type, uint64_t j, faiss::ConcurrentBitsetPtr& bitset) {
+ProcessRangeQuery(std::vector<T> data, T value, query::CompareOperator type, uint64_t j,
+                  faiss::ConcurrentBitsetPtr& bitset) {
     switch (type) {
         case query::CompareOperator::LT: {
             for (uint64_t i = 0; i < data.size(); ++i) {
@@ -752,7 +754,7 @@ ProcessRangeQuery(std::vector<T> data, T value, query::CompareOperator type, uin
             }
             break;
         }
-        case  query::CompareOperator::GTE: {
+        case query::CompareOperator::GTE: {
             for (uint64_t i = 0; i < data.size(); ++i) {
                 if (data[i] < value) {
                     if (!bitset->test(i)) {
@@ -785,14 +787,9 @@ ProcessRangeQuery(std::vector<T> data, T value, query::CompareOperator type, uin
 }
 
 Status
-ExecutionEngineImpl::ExecBinaryQuery(milvus::query::GeneralQueryPtr general_query,
-                                     faiss::ConcurrentBitsetPtr bitset,
-                                     std::unordered_map<std::string, DataType>& attr_type,
-                                     uint64_t& nq,
-                                     uint64_t& topk,
-                                     std::vector<float>& distances,
-                                     std::vector<int64_t>& labels) {
-
+ExecutionEngineImpl::ExecBinaryQuery(milvus::query::GeneralQueryPtr general_query, faiss::ConcurrentBitsetPtr bitset,
+                                     std::unordered_map<std::string, DataType>& attr_type, uint64_t& nq, uint64_t& topk,
+                                     std::vector<float>& distances, std::vector<int64_t>& labels) {
     if (bitset == nullptr) {
         bitset = std::make_shared<faiss::ConcurrentBitset>(vector_count_);
     }
@@ -1028,12 +1025,8 @@ ExecutionEngineImpl::ExecBinaryQuery(milvus::query::GeneralQueryPtr general_quer
             distances.resize(nq * topk);
             labels.resize(nq * topk);
 
-            return Search(nq,
-                          vector_query->query_vector.float_data.data(),
-                          topk,
-                          vector_query->extra_params,
-                          distances.data(),
-                          labels.data());
+            return Search(nq, vector_query->query_vector.float_data.data(), topk, vector_query->extra_params,
+                          distances.data(), labels.data());
         }
     }
 }

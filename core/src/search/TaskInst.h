@@ -11,18 +11,18 @@
 
 #pragma once
 
+#include <condition_variable>
 #include <iostream>
 #include <memory>
-#include <vector>
+#include <queue>
 #include <string>
 #include <thread>
-#include <queue>
-#include <condition_variable>
+#include <vector>
 
 #include "Task.h"
 
 namespace milvus {
-namespace search{
+namespace search {
 
 class TaskInst {
  public:
@@ -75,5 +75,5 @@ class TaskInst {
     std::mutex load_mutex_;
 };
 
-} // namespace search
-} // namespace milvus
+}  // namespace search
+}  // namespace milvus

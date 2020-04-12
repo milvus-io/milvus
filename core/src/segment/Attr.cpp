@@ -19,24 +19,21 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cstring>
 #include <memory>
 #include <string>
+#include <utility>
 #include <vector>
-#include <cstring>
 
-#include "Attr.h"
-#include "utils/Log.h"
 #include "Vectors.h"
+#include "segment/Attr.h"
+#include "utils/Log.h"
 
 namespace milvus {
 namespace segment {
 
-Attr::Attr(const std::vector<uint8_t>& data,
-           size_t nbytes,
-           const std::vector<int64_t> uids,
-           const std::string& name)
+Attr::Attr(const std::vector<uint8_t>& data, size_t nbytes, const std::vector<int64_t> uids, const std::string& name)
     : data_(std::move(data)), nbytes_(nbytes), uids_(std::move(uids)), name_(name) {
-
 }
 
 void
@@ -72,8 +69,8 @@ Attr::GetCollectionId() {
     return collection_id_;
 }
 
-const
-size_t& Attr::GetNbytes() const {
+const size_t&
+Attr::GetNbytes() const {
     return nbytes_;
 }
 
@@ -159,5 +156,5 @@ Attr::Erase(std::vector<int32_t>& offsets) {
                      << diff.count() << " s";
 }
 
-}
-}
+}  // namespace segment
+}  // namespace milvus

@@ -20,6 +20,8 @@
 #include <fiu-local.h>
 #include <memory>
 #include <string>
+#include <unordered_map>
+#include <utility>
 #include <vector>
 #ifdef MILVUS_ENABLE_PROFILING
 #include <gperftools/profiler.h>
@@ -29,37 +31,31 @@ namespace milvus {
 namespace server {
 
 InsertEntityRequest::InsertEntityRequest(const std::shared_ptr<milvus::server::Context>& context,
-                                         const std::string& collection_name,
-                                         const std::string& partition_tag,
+                                         const std::string& collection_name, const std::string& partition_tag,
                                          std::unordered_map<std::string, std::vector<std::string>>& field_values,
                                          std::unordered_map<std::string, engine::VectorsData>& vector_datas)
     : BaseRequest(context, BaseRequest::kInsertEntity),
       collection_name_(collection_name),
       partition_tag_(partition_tag),
       field_values_(field_values),
-      vector_datas_(vector_datas){
+      vector_datas_(vector_datas) {
 }
 
 BaseRequestPtr
-InsertEntityRequest::Create(const std::shared_ptr<milvus::server::Context>& context,
-                            const std::string& collection_name,
+InsertEntityRequest::Create(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name,
                             const std::string& partition_tag,
                             std::unordered_map<std::string, std::vector<std::string>>& field_values,
                             std::unordered_map<std::string, engine::VectorsData>& vector_datas) {
-    return std::shared_ptr<BaseRequest>(new InsertEntityRequest(context,
-                                                                collection_name,
-                                                                partition_tag,
-                                                                field_values,
-                                                                vector_datas));
+    return std::shared_ptr<BaseRequest>(
+        new InsertEntityRequest(context, collection_name, partition_tag, field_values, vector_datas));
 }
 
 Status
 InsertEntityRequest::OnExecute() {
     try {
         fiu_do_on("InsertEntityRequest.OnExecute.throw_std_exception", throw std::exception());
-        std::string
-            hdr = "InsertEntityRequest(table=" + collection_name_ + ", n=" + field_values_.begin()->first +
-                  ", partition_tag=" + partition_tag_ + ")";
+        std::string hdr = "InsertEntityRequest(table=" + collection_name_ + ", n=" + field_values_.begin()->first +
+                          ", partition_tag=" + partition_tag_ + ")";
         TimeRecorder rc(hdr);
 
         // step 1: check arguments
@@ -98,15 +94,16 @@ InsertEntityRequest::OnExecute() {
             if (fields_schema.fields_schema_[i].field_type_ == (int32_t)engine::meta::hybrid::DataType::VECTOR) {
                 continue;
             }
-            field_types.insert(std::make_pair(fields_schema.fields_schema_[i].field_name_,
-                                              (engine::meta::hybrid::DataType)fields_schema.fields_schema_[i].field_type_));
+            field_types.insert(
+                std::make_pair(fields_schema.fields_schema_[i].field_name_,
+                               (engine::meta::hybrid::DataType)fields_schema.fields_schema_[i].field_type_));
         }
 
         // step 3: check table flag
         // all user provide id, or all internal id
         bool user_provide_ids = !vector_datas_it->second.id_array_.empty();
         fiu_do_on("InsertEntityRequest.OnExecute.illegal_vector_id", user_provide_ids = false;
-            collection_schema.flag_ = engine::meta::FLAG_MASK_HAS_USERID);
+                  collection_schema.flag_ = engine::meta::FLAG_MASK_HAS_USERID);
         // user already provided id before, all insert action require user id
         if ((collection_schema.flag_ & engine::meta::FLAG_MASK_HAS_USERID) != 0 && !user_provide_ids) {
             return Status(SERVER_ILLEGAL_VECTOR_ID,
@@ -114,14 +111,13 @@ InsertEntityRequest::OnExecute() {
         }
 
         fiu_do_on("InsertRequest.OnExecute.illegal_vector_id2", user_provide_ids = true;
-            collection_schema.flag_ = engine::meta::FLAG_MASK_NO_USERID);
+                  collection_schema.flag_ = engine::meta::FLAG_MASK_NO_USERID);
         // user didn't provided id before, no need to provide user id
         if ((collection_schema.flag_ & engine::meta::FLAG_MASK_NO_USERID) != 0 && user_provide_ids) {
             return Status(
                 SERVER_ILLEGAL_VECTOR_ID,
                 "Table vector IDs are auto-generated. All vectors of this table must use auto-generated IDs.");
         }
-
 
         rc.RecordSection("check validation");
 
@@ -131,31 +127,35 @@ InsertEntityRequest::OnExecute() {
 #endif
         // step 4: some metric type doesn't support float vectors
 
-        //TODO(yukun): check dimension and metric_type
-//        for (uint64_t i = 0; i <entities_.vector_data_.size(); ++i) {
-//            if (!entities_.vector_data_[i].float_data_.empty()) {  // insert float vectors
-//                if (engine::utils::IsBinaryMetricType(vector_fields.vector_fields_[i].metric_type_)) {
-//                    return Status(SERVER_INVALID_ROWRECORD_ARRAY, "Table metric type doesn't support float vectors.");
-//                }
-//
-//                // check prepared float data
-//                fiu_do_on("InsertRequest.OnExecute.invalid_dim", table_schema.dimension_ = -1);
-//                if (entities_.vector_data_[i].float_data_.size() / entities_.vector_data_[i].vector_count_ != vector_fields.vector_fields_[i].dimension_) {
-//                    return Status(SERVER_INVALID_VECTOR_DIMENSION,
-//                                  "The vector dimension must be equal to the table dimension.");
-//                }
-//            } else if (!entities_.vector_data_[i].binary_data_.empty()) {  // insert binary vectors
-//                if (!engine::utils::IsBinaryMetricType(vector_fields.vector_fields_[i].metric_type_)) {
-//                    return Status(SERVER_INVALID_ROWRECORD_ARRAY, "Table metric type doesn't support binary vectors.");
-//                }
-//
-//                // check prepared binary data
-//                if (entities_.vector_data_[i].binary_data_.size() * 8 / entities_.vector_data_[i].vector_count_ != vector_fields.vector_fields_[i].dimension_) {
-//                    return Status(SERVER_INVALID_VECTOR_DIMENSION,
-//                                  "The vector dimension must be equal to the table dimension.");
-//                }
-//            }
-//        }
+        // TODO(yukun): check dimension and metric_type
+        //        for (uint64_t i = 0; i <entities_.vector_data_.size(); ++i) {
+        //            if (!entities_.vector_data_[i].float_data_.empty()) {  // insert float vectors
+        //                if (engine::utils::IsBinaryMetricType(vector_fields.vector_fields_[i].metric_type_)) {
+        //                    return Status(SERVER_INVALID_ROWRECORD_ARRAY, "Table metric type doesn't support float
+        //                    vectors.");
+        //                }
+        //
+        //                // check prepared float data
+        //                fiu_do_on("InsertRequest.OnExecute.invalid_dim", table_schema.dimension_ = -1);
+        //                if (entities_.vector_data_[i].float_data_.size() / entities_.vector_data_[i].vector_count_ !=
+        //                vector_fields.vector_fields_[i].dimension_) {
+        //                    return Status(SERVER_INVALID_VECTOR_DIMENSION,
+        //                                  "The vector dimension must be equal to the table dimension.");
+        //                }
+        //            } else if (!entities_.vector_data_[i].binary_data_.empty()) {  // insert binary vectors
+        //                if (!engine::utils::IsBinaryMetricType(vector_fields.vector_fields_[i].metric_type_)) {
+        //                    return Status(SERVER_INVALID_ROWRECORD_ARRAY, "Table metric type doesn't support binary
+        //                    vectors.");
+        //                }
+        //
+        //                // check prepared binary data
+        //                if (entities_.vector_data_[i].binary_data_.size() * 8 /
+        //                entities_.vector_data_[i].vector_count_ != vector_fields.vector_fields_[i].dimension_) {
+        //                    return Status(SERVER_INVALID_VECTOR_DIMENSION,
+        //                                  "The vector dimension must be equal to the table dimension.");
+        //                }
+        //            }
+        //        }
 
         // step 5: insert entities
         auto vec_count = static_cast<uint64_t>(vector_datas_it->second.vector_count_);
@@ -174,13 +174,14 @@ InsertEntityRequest::OnExecute() {
         }
         vector_datas_it->second.id_array_ = entity.id_array_;
 
-//        auto ids_size = vectors_data_.id_array_.size();
-//        fiu_do_on("InsertRequest.OnExecute.invalid_ids_size", ids_size = vec_count - 1);
-//        if (ids_size != vec_count) {
-//            std::string msg =
-//                "Add " + std::to_string(vec_count) + " vectors but only return " + std::to_string(ids_size) + " id";
-//            return Status(SERVER_ILLEGAL_VECTOR_ID, msg);
-//        }
+        //        auto ids_size = vectors_data_.id_array_.size();
+        //        fiu_do_on("InsertRequest.OnExecute.invalid_ids_size", ids_size = vec_count - 1);
+        //        if (ids_size != vec_count) {
+        //            std::string msg =
+        //                "Add " + std::to_string(vec_count) + " vectors but only return " + std::to_string(ids_size) +
+        //                " id";
+        //            return Status(SERVER_ILLEGAL_VECTOR_ID, msg);
+        //        }
 
         // step 6: update table flag
         user_provide_ids ? collection_schema.flag_ |= engine::meta::FLAG_MASK_HAS_USERID

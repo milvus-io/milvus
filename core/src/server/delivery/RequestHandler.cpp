@@ -40,8 +40,8 @@
 #include "server/delivery/request/ShowPartitionsRequest.h"
 
 #include "server/delivery/hybrid_request/CreateHybridCollectionRequest.h"
-#include "server/delivery/hybrid_request/InsertEntityRequest.h"
 #include "server/delivery/hybrid_request/HybridSearchRequest.h"
+#include "server/delivery/hybrid_request/InsertEntityRequest.h"
 
 namespace milvus {
 namespace server {
@@ -255,36 +255,29 @@ RequestHandler::Compact(const std::shared_ptr<Context>& context, const std::stri
 /*******************************************New Interface*********************************************/
 
 Status
-RequestHandler::CreateHybridCollection(const std::shared_ptr<Context>& context,
-                                       const std::string& collection_name,
+RequestHandler::CreateHybridCollection(const std::shared_ptr<Context>& context, const std::string& collection_name,
                                        std::vector<std::pair<std::string, engine::meta::hybrid::DataType>>& field_types,
                                        std::vector<std::pair<std::string, uint64_t>>& vector_dimensions,
                                        std::vector<std::pair<std::string, std::string>>& field_extra_params) {
-
-    BaseRequestPtr request_ptr =
-        CreateHybridCollectionRequest::Create(context, collection_name, field_types, vector_dimensions, field_extra_params);
+    BaseRequestPtr request_ptr = CreateHybridCollectionRequest::Create(context, collection_name, field_types,
+                                                                       vector_dimensions, field_extra_params);
 
     RequestScheduler::ExecRequest(request_ptr);
     return request_ptr->status();
 }
 
 Status
-RequestHandler::HasHybridCollection(const std::shared_ptr<Context>& context, std::string& collection_name, bool& has_collection) {
-
+RequestHandler::HasHybridCollection(const std::shared_ptr<Context>& context, std::string& collection_name,
+                                    bool& has_collection) {
 }
 
 Status
-RequestHandler::InsertEntity(const std::shared_ptr<Context>& context,
-                             const std::string& collection_name,
+RequestHandler::InsertEntity(const std::shared_ptr<Context>& context, const std::string& collection_name,
                              const std::string& partition_tag,
                              std::unordered_map<std::string, std::vector<std::string>>& field_values,
                              std::unordered_map<std::string, engine::VectorsData>& vector_datas) {
     BaseRequestPtr request_ptr =
-        InsertEntityRequest::Create(context,
-                                    collection_name,
-                                    partition_tag,
-                                    field_values,
-                                    vector_datas);
+        InsertEntityRequest::Create(context, collection_name, partition_tag, field_values, vector_datas);
 
     RequestScheduler::ExecRequest(request_ptr);
     return request_ptr->status();
@@ -292,14 +285,11 @@ RequestHandler::InsertEntity(const std::shared_ptr<Context>& context,
 
 Status
 RequestHandler::HybridSearch(const std::shared_ptr<Context>& context,
-                             context::HybridSearchContextPtr hybrid_search_context,
-                             const std::string& collection_name,
-                             std::vector<std::string>& partition_list,
-                             milvus::query::GeneralQueryPtr& general_query,
+                             context::HybridSearchContextPtr hybrid_search_context, const std::string& collection_name,
+                             std::vector<std::string>& partition_list, milvus::query::GeneralQueryPtr& general_query,
                              TopKQueryResult& result) {
-
-    BaseRequestPtr request_ptr =
-        HybridSearchRequest::Create(context, hybrid_search_context, collection_name, partition_list, general_query, result);
+    BaseRequestPtr request_ptr = HybridSearchRequest::Create(context, hybrid_search_context, collection_name,
+                                                             partition_list, general_query, result);
     RequestScheduler::ExecRequest(request_ptr);
 
     return request_ptr->status();

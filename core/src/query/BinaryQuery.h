@@ -11,6 +11,9 @@
 
 #pragma once
 
+#include <memory>
+#include <vector>
+
 #include "BooleanQuery.h"
 
 namespace milvus {

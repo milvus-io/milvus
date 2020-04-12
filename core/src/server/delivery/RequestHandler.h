@@ -13,6 +13,7 @@
 
 #include <memory>
 #include <string>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -115,11 +116,10 @@ class RequestHandler {
     /*******************************************New Interface*********************************************/
 
     Status
-    CreateHybridCollection(const std::shared_ptr<Context>& context,
-                     const std::string& collection_name,
-                     std::vector<std::pair<std::string, engine::meta::hybrid::DataType>>& field_types,
-                     std::vector<std::pair<std::string, uint64_t>>& vector_dimensions,
-                     std::vector<std::pair<std::string, std::string>>& field_extra_params);
+    CreateHybridCollection(const std::shared_ptr<Context>& context, const std::string& collection_name,
+                           std::vector<std::pair<std::string, engine::meta::hybrid::DataType>>& field_types,
+                           std::vector<std::pair<std::string, uint64_t>>& vector_dimensions,
+                           std::vector<std::pair<std::string, std::string>>& field_extra_params);
 
     Status
     HasHybridCollection(const std::shared_ptr<Context>& context, std::string& collection_name, bool& has_collection);
@@ -128,20 +128,15 @@ class RequestHandler {
     DropHybridCollection(const std::shared_ptr<Context>& context, std::string& collection_name);
 
     Status
-    InsertEntity(const std::shared_ptr<Context>& context,
-                 const std::string& collection_name,
+    InsertEntity(const std::shared_ptr<Context>& context, const std::string& collection_name,
                  const std::string& partition_tag,
                  std::unordered_map<std::string, std::vector<std::string>>& field_values,
                  std::unordered_map<std::string, engine::VectorsData>& vector_datas);
 
     Status
-    HybridSearch(const std::shared_ptr<Context>& context,
-                 context::HybridSearchContextPtr hybrid_search_context,
-                 const std::string& collection_name,
-                 std::vector<std::string>& partition_list,
-                 query::GeneralQueryPtr& boolean_query,
-                 TopKQueryResult& result);
-
+    HybridSearch(const std::shared_ptr<Context>& context, context::HybridSearchContextPtr hybrid_search_context,
+                 const std::string& collection_name, std::vector<std::string>& partition_list,
+                 query::GeneralQueryPtr& boolean_query, TopKQueryResult& result);
 };
 
 }  // namespace server

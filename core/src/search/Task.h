@@ -13,14 +13,15 @@
 
 #include <iostream>
 #include <memory>
-#include <vector>
 #include <string>
+#include <unordered_map>
+#include <vector>
 
-#include "db/Types.h"
-#include "db/meta/MetaTypes.h"
 #include "context/HybridSearchContext.h"
-#include "server/context/Context.h"
+#include "db/Types.h"
 #include "db/engine/ExecutionEngine.h"
+#include "db/meta/MetaTypes.h"
+#include "server/context/Context.h"
 #include "utils/Status.h"
 
 namespace milvus {
@@ -28,9 +29,9 @@ namespace milvus {
 namespace context {
 struct HybridSearchContext;
 using HybridSearchContextPtr = std::shared_ptr<HybridSearchContext>;
-}
+}  // namespace context
 
-namespace search{
+namespace search {
 
 using SegmentSchemaPtr = engine::meta::SegmentSchemaPtr;
 
@@ -41,10 +42,8 @@ using ResultDistances = engine::ResultDistances;
 
 class Task {
  public:
-    explicit Task(const std::shared_ptr<server::Context>& context,
-                  SegmentSchemaPtr& file,
-                  query::GeneralQueryPtr general_query,
-                  std::unordered_map<std::string, engine::DataType>& attr_type,
+    explicit Task(const std::shared_ptr<server::Context>& context, SegmentSchemaPtr& file,
+                  query::GeneralQueryPtr general_query, std::unordered_map<std::string, engine::DataType>& attr_type,
                   context::HybridSearchContextPtr hybrid_search_context);
 
     void
@@ -55,9 +54,8 @@ class Task {
 
  public:
     static void
-    MergeTopkToResultSet(const ResultIds& src_ids, const ResultDistances& src_distances,
-                         size_t src_k, size_t nq, size_t topk, bool ascending, ResultIds& tar_ids,
-                         ResultDistances& tar_distances);
+    MergeTopkToResultSet(const ResultIds& src_ids, const ResultDistances& src_distances, size_t src_k, size_t nq,
+                         size_t topk, bool ascending, ResultIds& tar_ids, ResultDistances& tar_distances);
 
     const std::string&
     GetLocation() const;
@@ -88,5 +86,5 @@ class Task {
 
 using TaskPtr = std::shared_ptr<Task>;
 
-} // namespace search
-} // namespace milvus
+}  // namespace search
+}  // namespace milvus
