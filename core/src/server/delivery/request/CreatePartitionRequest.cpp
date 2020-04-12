@@ -23,7 +23,7 @@
 namespace milvus {
 namespace server {
 
-constexpr uint64_t MAX_PARTITION_LIMIT = 5000;
+constexpr uint64_t MAX_PARTITION_LIMIT = 4096;
 
 CreatePartitionRequest::CreatePartitionRequest(const std::shared_ptr<milvus::server::Context>& context,
                                                const std::string& collection_name, const std::string& tag)
@@ -83,7 +83,7 @@ CreatePartitionRequest::OnExecute() {
         std::vector<engine::meta::CollectionSchema> schema_array;
         status = DBWrapper::DB()->ShowPartitions(collection_name_, schema_array);
         if (schema_array.size() >= MAX_PARTITION_LIMIT) {
-            return Status(SERVER_UNSUPPORTED_ERROR, "The number of partitions exceeds the upper limit(5000)");
+            return Status(SERVER_UNSUPPORTED_ERROR, "The number of partitions exceeds the upper limit(4096)");
         }
 
         rc.RecordSection("check validation");
