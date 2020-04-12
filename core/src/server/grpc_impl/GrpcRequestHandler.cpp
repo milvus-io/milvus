@@ -765,8 +765,8 @@ GrpcRequestHandler::Compact(::grpc::ServerContext* context, const ::milvus::grpc
 
 ::grpc::Status
 GrpcRequestHandler::CreateHybridCollection(::grpc::ServerContext* context,
-                                     const ::milvus::grpc::Mapping* request,
-                                     ::milvus::grpc::Status* response) {
+                                           const ::milvus::grpc::Mapping* request,
+                                           ::milvus::grpc::Status* response) {
 
     CHECK_NULLPTR_RETURN(request);
 
@@ -774,8 +774,9 @@ GrpcRequestHandler::CreateHybridCollection(::grpc::ServerContext* context,
     std::vector<std::pair<std::string, uint64_t>> vector_dimensions;
     std::vector<std::pair<std::string, std::string>> field_params;
     for (uint64_t i = 0; i < request->fields_size(); ++i) {
-        if(request->fields(i).type().has_vector_param()){
-            auto vector_dimension = std::make_pair(request->fields(i).name(), request->fields(i).type().vector_param().dimension());
+        if (request->fields(i).type().has_vector_param()) {
+            auto vector_dimension =
+                std::make_pair(request->fields(i).name(), request->fields(i).type().vector_param().dimension());
             vector_dimensions.emplace_back(vector_dimension);
         } else {
             auto type = std::make_pair(request->fields(i).name(),
@@ -787,11 +788,11 @@ GrpcRequestHandler::CreateHybridCollection(::grpc::ServerContext* context,
         field_params.emplace_back(extra_params);
     }
 
-    Status status = request_handler_.CreateCollection(GetContext(context),
-                                                      request->collection_name(),
-                                                      field_types,
-                                                      vector_dimensions,
-                                                      field_params);
+    Status status = request_handler_.CreateHybridCollection(GetContext(context),
+                                                            request->collection_name(),
+                                                            field_types,
+                                                            vector_dimensions,
+                                                            field_params);
 
     SET_RESPONSE(response, status, context);
 

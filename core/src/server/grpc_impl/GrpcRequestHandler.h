@@ -308,8 +308,8 @@ class GrpcRequestHandler final : public ::milvus::grpc::MilvusService::Service, 
 
     ::grpc::Status
     CreateHybridCollection(::grpc::ServerContext* context,
-                     const ::milvus::grpc::Mapping* request,
-                     ::milvus::grpc::Status* response) override;
+                           const ::milvus::grpc::Mapping* request,
+                           ::milvus::grpc::Status* response) override;
 
 //    ::grpc::Status
 //    HasCollection(::grpc::ServerContext* context,

@@ -115,14 +115,14 @@ class RequestHandler {
     /*******************************************New Interface*********************************************/
 
     Status
-    CreateCollection(const std::shared_ptr<Context>& context,
+    CreateHybridCollection(const std::shared_ptr<Context>& context,
                      const std::string& collection_name,
                      std::vector<std::pair<std::string, engine::meta::hybrid::DataType>>& field_types,
                      std::vector<std::pair<std::string, uint64_t>>& vector_dimensions,
                      std::vector<std::pair<std::string, std::string>>& field_extra_params);
 
     Status
-    HasCollection(const std::shared_ptr<Context>& context, std::string& collection_name, bool& has_collection);
+    HasHybridCollection(const std::shared_ptr<Context>& context, std::string& collection_name, bool& has_collection);
 
     Status
     DropHybridCollection(const std::shared_ptr<Context>& context, std::string& collection_name);

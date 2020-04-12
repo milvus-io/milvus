@@ -28,13 +28,13 @@
 namespace milvus {
 namespace server {
 
-HybridSearchRequest::HybridSearchRequest(const std::shared_ptr<Context>& context,
+HybridSearchRequest::HybridSearchRequest(const std::shared_ptr<milvus::server::Context>& context,
                                          context::HybridSearchContextPtr& hybrid_search_context,
                                          const std::string& collection_name,
                                          std::vector<std::string>& partition_list,
                                          milvus::query::GeneralQueryPtr& general_query,
                                          TopKQueryResult& result) :
-    BaseRequest(context, DDL_DML_REQUEST_GROUP),
+    BaseRequest(context, BaseRequest::kHybridSearch),
     hybrid_search_contxt_(hybrid_search_context),
     collection_name_(collection_name),
     partition_list_(partition_list),
@@ -43,7 +43,7 @@ HybridSearchRequest::HybridSearchRequest(const std::shared_ptr<Context>& context
 }
 
 BaseRequestPtr
-HybridSearchRequest::Create(const std::shared_ptr<Context>& context,
+HybridSearchRequest::Create(const std::shared_ptr<milvus::server::Context>& context,
                             context::HybridSearchContextPtr& hybrid_search_context,
                             const std::string& collection_name,
                             std::vector<std::string>& partition_list,
@@ -66,27 +66,27 @@ HybridSearchRequest::OnExecute() {
         TimeRecorder rc(hdr);
 
         // step 1: check table name
-        auto status = ValidationUtil::ValidateTableName(collection_name_);
+        auto status = ValidationUtil::ValidateCollectionName(collection_name_);
         if (!status.ok()) {
             return status;
         }
 
         // step 2: check table existence
         // only process root table, ignore partition table
-        engine::meta::TableSchema collection_schema;
+        engine::meta::CollectionSchema collection_schema;
         engine::meta::hybrid::FieldsSchema fields_schema;
-        collection_schema.table_id_ = collection_name_;
+        collection_schema.collection_id_ = collection_name_;
         status = DBWrapper::DB()->DescribeHybridCollection(collection_schema,fields_schema);
         fiu_do_on("SearchRequest.OnExecute.describe_table_fail", status = Status(milvus::SERVER_UNEXPECTED_ERROR, ""));
         if (!status.ok()) {
             if (status.code() == DB_NOT_FOUND) {
-                return Status(SERVER_TABLE_NOT_EXIST, TableNotExistMsg(collection_name_));
+                return Status(SERVER_COLLECTION_NOT_EXIST, CollectionNotExistMsg(collection_name_));
             } else {
                 return status;
             }
         } else {
-            if (!collection_schema.owner_table_.empty()) {
-                return Status(SERVER_INVALID_TABLE_NAME, TableNotExistMsg(collection_name_));
+            if (!collection_schema.owner_collection_.empty()) {
+                return Status(SERVER_INVALID_COLLECTION_NAME, CollectionNotExistMsg(collection_name_));
             }
         }
 

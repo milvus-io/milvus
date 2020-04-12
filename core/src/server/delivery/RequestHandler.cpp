@@ -39,7 +39,7 @@
 #include "server/delivery/request/ShowCollectionsRequest.h"
 #include "server/delivery/request/ShowPartitionsRequest.h"
 
-#include "server/delivery/hybrid_request/CreateCollectionRequest.h"
+#include "server/delivery/hybrid_request/CreateHybridCollectionRequest.h"
 #include "server/delivery/hybrid_request/InsertEntityRequest.h"
 #include "server/delivery/hybrid_request/HybridSearchRequest.h"
 
@@ -255,20 +255,21 @@ RequestHandler::Compact(const std::shared_ptr<Context>& context, const std::stri
 /*******************************************New Interface*********************************************/
 
 Status
-RequestHandler::CreateCollection(const std::shared_ptr<Context>& context,
-                 const std::string& collection_name,
-                 std::vector<std::pair<std::string, engine::meta::hybrid::DataType>>& field_types,
-                 std::vector<std::pair<std::string, uint64_t>>& vector_dimensions,
-                 std::vector<std::pair<std::string, std::string>>& field_extra_params) {
+RequestHandler::CreateHybridCollection(const std::shared_ptr<Context>& context,
+                                       const std::string& collection_name,
+                                       std::vector<std::pair<std::string, engine::meta::hybrid::DataType>>& field_types,
+                                       std::vector<std::pair<std::string, uint64_t>>& vector_dimensions,
+                                       std::vector<std::pair<std::string, std::string>>& field_extra_params) {
+
     BaseRequestPtr request_ptr =
-        CreateCollectionRequest::Create(context, collection_name, field_types, vector_dimensions, field_extra_params);
+        CreateHybridCollectionRequest::Create(context, collection_name, field_types, vector_dimensions, field_extra_params);
 
     RequestScheduler::ExecRequest(request_ptr);
     return request_ptr->status();
 }
 
 Status
-RequestHandler::HasCollection(const std::shared_ptr<Context>& context, std::string& collection_name, bool& has_collection) {
+RequestHandler::HasHybridCollection(const std::shared_ptr<Context>& context, std::string& collection_name, bool& has_collection) {
 
 }
 

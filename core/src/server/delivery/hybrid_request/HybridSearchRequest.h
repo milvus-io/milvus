@@ -24,7 +24,7 @@ namespace server {
 class HybridSearchRequest : public BaseRequest {
  public:
     static BaseRequestPtr
-    Create(const std::shared_ptr<Context>& context,
+    Create(const std::shared_ptr<milvus::server::Context>& context,
            context::HybridSearchContextPtr& hybrid_search_context,
            const std::string& collection_name,
            std::vector<std::string>& partition_list,
@@ -32,7 +32,7 @@ class HybridSearchRequest : public BaseRequest {
            TopKQueryResult& result);
 
  protected:
-    HybridSearchRequest(const std::shared_ptr<Context>& context,
+    HybridSearchRequest(const std::shared_ptr<milvus::server::Context>& context,
                         context::HybridSearchContextPtr& hybrid_search_context,
                         const std::string& collection_name,
                         std::vector<std::string>& partition_list,

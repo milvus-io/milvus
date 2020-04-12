@@ -28,12 +28,12 @@
 namespace milvus {
 namespace server {
 
-InsertEntityRequest::InsertEntityRequest(const std::shared_ptr<Context>& context,
+InsertEntityRequest::InsertEntityRequest(const std::shared_ptr<milvus::server::Context>& context,
                                          const std::string& collection_name,
                                          const std::string& partition_tag,
                                          std::unordered_map<std::string, std::vector<std::string>>& field_values,
                                          std::unordered_map<std::string, engine::VectorsData>& vector_datas)
-    : BaseRequest(context, DDL_DML_REQUEST_GROUP),
+    : BaseRequest(context, BaseRequest::kInsertEntity),
       collection_name_(collection_name),
       partition_tag_(partition_tag),
       field_values_(field_values),
@@ -41,7 +41,7 @@ InsertEntityRequest::InsertEntityRequest(const std::shared_ptr<Context>& context
 }
 
 BaseRequestPtr
-InsertEntityRequest::Create(const std::shared_ptr<Context>& context,
+InsertEntityRequest::Create(const std::shared_ptr<milvus::server::Context>& context,
                             const std::string& collection_name,
                             const std::string& partition_tag,
                             std::unordered_map<std::string, std::vector<std::string>>& field_values,
@@ -63,7 +63,7 @@ InsertEntityRequest::OnExecute() {
         TimeRecorder rc(hdr);
 
         // step 1: check arguments
-        auto status = ValidationUtil::ValidateTableName(collection_name_);
+        auto status = ValidationUtil::ValidateCollectionName(collection_name_);
         if (!status.ok()) {
             return status;
         }
@@ -76,19 +76,19 @@ InsertEntityRequest::OnExecute() {
 
         // step 2: check table existence
         // only process root table, ignore partition table
-        engine::meta::TableSchema collection_schema;
+        engine::meta::CollectionSchema collection_schema;
         engine::meta::hybrid::FieldsSchema fields_schema;
-        collection_schema.table_id_ = collection_name_;
+        collection_schema.collection_id_ = collection_name_;
         status = DBWrapper::DB()->DescribeHybridCollection(collection_schema, fields_schema);
         if (!status.ok()) {
             if (status.code() == DB_NOT_FOUND) {
-                return Status(SERVER_TABLE_NOT_EXIST, TableNotExistMsg(collection_name_));
+                return Status(SERVER_COLLECTION_NOT_EXIST, CollectionNotExistMsg(collection_name_));
             } else {
                 return status;
             }
         } else {
-            if (!collection_schema.owner_table_.empty()) {
-                return Status(SERVER_INVALID_TABLE_NAME, TableNotExistMsg(collection_name_));
+            if (!collection_schema.owner_collection_.empty()) {
+                return Status(SERVER_INVALID_COLLECTION_NAME, CollectionNotExistMsg(collection_name_));
             }
         }
 
@@ -185,7 +185,7 @@ InsertEntityRequest::OnExecute() {
         // step 6: update table flag
         user_provide_ids ? collection_schema.flag_ |= engine::meta::FLAG_MASK_HAS_USERID
                          : collection_schema.flag_ |= engine::meta::FLAG_MASK_NO_USERID;
-        status = DBWrapper::DB()->UpdateTableFlag(collection_name_, collection_schema.flag_);
+        status = DBWrapper::DB()->UpdateCollectionFlag(collection_name_, collection_schema.flag_);
 
 #ifdef MILVUS_ENABLE_PROFILING
         ProfilerStop();

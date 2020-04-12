@@ -9,7 +9,7 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
-#include "server/delivery/hybrid_request/CreateCollectionRequest.h"
+#include "server/delivery/hybrid_request/CreateHybridCollectionRequest.h"
 #include "db/Utils.h"
 #include "server/DBWrapper.h"
 #include "server/delivery/request/BaseRequest.h"
@@ -29,7 +29,7 @@ CreateHybridCollectionRequest::CreateHybridCollectionRequest(const std::shared_p
                                                  std::vector<std::pair<std::string, engine::meta::hybrid::DataType>>& field_types,
                                                  std::vector<std::pair<std::string, uint64_t>>& vector_dimensions,
                                                  std::vector<std::pair<std::string, std::string>>& field_params)
-    : BaseRequest(context, DDL_DML_REQUEST_GROUP),
+    : BaseRequest(context, BaseRequest::kCreateHybridCollection),
       collection_name_(collection_name),
       field_types_(field_types),
       vector_dimensions_(vector_dimensions),
@@ -65,7 +65,7 @@ CreateHybridCollectionRequest::OnExecute() {
         engine::meta::hybrid::FieldsSchema fields_schema;
 
         auto size = field_types_.size();
-        table_info.table_id_ = collection_name_;
+        table_info.collection_id_ = collection_name_;
         fields_schema.fields_schema_.resize(size + 1);
         for (uint64_t i = 0; i < size; ++i) {
             fields_schema.fields_schema_[i].collection_id_ = collection_name_;
@@ -85,7 +85,7 @@ CreateHybridCollectionRequest::OnExecute() {
         if (!status.ok()) {
             // collection could exist
             if (status.code() == DB_ALREADY_EXIST) {
-                return Status(SERVER_INVALID_TABLE_NAME, status.message());
+                return Status(SERVER_INVALID_COLLECTION_NAME, status.message());
             }
             return status;
         }
