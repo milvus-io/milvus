@@ -41,5 +41,41 @@ class Context {
     std::shared_ptr<tracing::TraceContext> trace_context_;
 };
 
+using ContextPtr = std::shared_ptr<milvus::server::Context>;
+
+class ContextChild {
+ public:
+    explicit ContextChild(const ContextPtr& context, const std::string& operation_name);
+    ~ContextChild();
+
+    ContextPtr
+    Context() {
+        return context_;
+    }
+
+    void
+    Finish();
+
+ private:
+    ContextPtr context_;
+};
+
+class ContextFollower {
+ public:
+    explicit ContextFollower(const ContextPtr& context, const std::string& operation_name);
+    ~ContextFollower();
+
+    ContextPtr
+    Context() {
+        return context_;
+    }
+
+    void
+    Finish();
+
+ private:
+    ContextPtr context_;
+};
+
 }  // namespace server
 }  // namespace milvus

@@ -20,17 +20,17 @@ namespace engine {
 constexpr uint64_t INDEX_FAILED_RETRY_TIME = 1;
 
 Status
-IndexFailedChecker::CleanFailedIndexFileOfTable(const std::string& table_id) {
+IndexFailedChecker::CleanFailedIndexFileOfCollection(const std::string& collection_id) {
     std::lock_guard<std::mutex> lck(mutex_);
-    index_failed_files_.erase(table_id);  // rebuild failed index files for this table
+    index_failed_files_.erase(collection_id);  // rebuild failed index files for this collection
 
     return Status::OK();
 }
 
 Status
-IndexFailedChecker::GetErrMsgForTable(const std::string& table_id, std::string& err_msg) {
+IndexFailedChecker::GetErrMsgForCollection(const std::string& collection_id, std::string& err_msg) {
     std::lock_guard<std::mutex> lck(mutex_);
-    auto iter = index_failed_files_.find(table_id);
+    auto iter = index_failed_files_.find(collection_id);
     if (iter != index_failed_files_.end()) {
         err_msg = iter->second.begin()->second[0];
     }
@@ -39,14 +39,14 @@ IndexFailedChecker::GetErrMsgForTable(const std::string& table_id, std::string& 
 }
 
 Status
-IndexFailedChecker::MarkFailedIndexFile(const meta::TableFileSchema& file, const std::string& err_msg) {
+IndexFailedChecker::MarkFailedIndexFile(const meta::SegmentSchema& file, const std::string& err_msg) {
     std::lock_guard<std::mutex> lck(mutex_);
 
-    auto iter = index_failed_files_.find(file.table_id_);
+    auto iter = index_failed_files_.find(file.collection_id_);
     if (iter == index_failed_files_.end()) {
         File2ErrArray failed_files;
         failed_files.insert(std::make_pair(file.file_id_, std::vector<std::string>(1, err_msg)));
-        index_failed_files_.insert(std::make_pair(file.table_id_, failed_files));
+        index_failed_files_.insert(std::make_pair(file.collection_id_, failed_files));
     } else {
         auto it_failed_files = iter->second.find(file.file_id_);
         if (it_failed_files != iter->second.end()) {
@@ -60,14 +60,14 @@ IndexFailedChecker::MarkFailedIndexFile(const meta::TableFileSchema& file, const
 }
 
 Status
-IndexFailedChecker::MarkSucceedIndexFile(const meta::TableFileSchema& file) {
+IndexFailedChecker::MarkSucceedIndexFile(const meta::SegmentSchema& file) {
     std::lock_guard<std::mutex> lck(mutex_);
 
-    auto iter = index_failed_files_.find(file.table_id_);
+    auto iter = index_failed_files_.find(file.collection_id_);
     if (iter != index_failed_files_.end()) {
         iter->second.erase(file.file_id_);
         if (iter->second.empty()) {
-            index_failed_files_.erase(file.table_id_);
+            index_failed_files_.erase(file.collection_id_);
         }
     }
 
@@ -75,14 +75,14 @@ IndexFailedChecker::MarkSucceedIndexFile(const meta::TableFileSchema& file) {
 }
 
 Status
-IndexFailedChecker::IgnoreFailedIndexFiles(meta::TableFilesSchema& table_files) {
+IndexFailedChecker::IgnoreFailedIndexFiles(meta::SegmentsSchema& table_files) {
     std::lock_guard<std::mutex> lck(mutex_);
 
-    // there could be some failed files belong to different table.
+    // there could be some failed files belong to different collection.
     // some files may has failed for several times, no need to build index for these files.
     // thus we can avoid dead circle for build index operation
     for (auto it_file = table_files.begin(); it_file != table_files.end();) {
-        auto it_failed_files = index_failed_files_.find((*it_file).table_id_);
+        auto it_failed_files = index_failed_files_.find((*it_file).collection_id_);
         if (it_failed_files != index_failed_files_.end()) {
             auto it_failed_file = it_failed_files->second.find((*it_file).file_id_);
             if (it_failed_file != it_failed_files->second.end()) {

@@ -22,17 +22,18 @@ namespace server {
 class DescribeIndexRequest : public BaseRequest {
  public:
     static BaseRequestPtr
-    Create(const std::shared_ptr<Context>& context, const std::string& table_name, IndexParam& index_param);
+    Create(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name,
+           IndexParam& index_param);
 
  protected:
-    DescribeIndexRequest(const std::shared_ptr<Context>& context, const std::string& table_name,
+    DescribeIndexRequest(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name,
                          IndexParam& index_param);
 
     Status
     OnExecute() override;
 
  private:
-    const std::string table_name_;
+    const std::string collection_name_;
     IndexParam& index_param_;
 };
 

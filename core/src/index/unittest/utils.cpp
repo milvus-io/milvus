@@ -10,7 +10,7 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
 #include "unittest/utils.h"
-#include "knowhere/adapter/VectorAdapter.h"
+#include "knowhere/index/vector_index/adapter/VectorAdapter.h"
 
 #include <gtest/gtest.h>
 #include <math.h>
@@ -29,121 +29,88 @@ InitLog() {
 }
 
 void
-DataGen::Init_with_default() {
-    Generate(dim, nb, nq);
+DataGen::Init_with_default(const bool is_binary) {
+    Generate(dim, nb, nq, is_binary);
 }
 
 void
-BinaryDataGen::Init_with_binary_default() {
-    Generate(dim, nb, nq);
-}
-
-void
-DataGen::Generate(const int& dim, const int& nb, const int& nq) {
+DataGen::Generate(const int dim, const int nb, const int nq, const bool is_binary) {
+    this->dim = dim;
     this->nb = nb;
     this->nq = nq;
-    this->dim = dim;
 
-    GenAll(dim, nb, xb, ids, xids, nq, xq);
-    assert(xb.size() == (size_t)dim * nb);
-    assert(xq.size() == (size_t)dim * nq);
+    if (!is_binary) {
+        GenAll(dim, nb, xb, ids, xids, nq, xq);
+        assert(xb.size() == (size_t)dim * nb);
+        assert(xq.size() == (size_t)dim * nq);
 
-    base_dataset = generate_dataset(nb, dim, xb.data(), ids.data());
-    query_dataset = generate_query_dataset(nq, dim, xq.data());
-    id_dataset = generate_id_dataset(nq, ids.data());
-    xid_dataset = generate_id_dataset(nq, xids.data());
-    xid_dataset->Set(knowhere::meta::DIM, (int64_t)dim);
-}
+        base_dataset = milvus::knowhere::GenDatasetWithIds(nb, dim, xb.data(), ids.data());
+        query_dataset = milvus::knowhere::GenDataset(nq, dim, xq.data());
+    } else {
+        int64_t dim_x = dim / 8;
+        GenAll(dim_x, nb, xb_bin, ids, xids, nq, xq_bin);
+        assert(xb_bin.size() == (size_t)dim_x * nb);
+        assert(xq_bin.size() == (size_t)dim_x * nq);
 
-void
-BinaryDataGen::Generate(const int& dim, const int& nb, const int& nq) {
-    this->nb = nb;
-    this->nq = nq;
-    this->dim = dim;
-
-    int64_t dim_x = dim / 8;
-    GenBinaryAll(dim_x, nb, xb, ids, xids, nq, xq);
-    assert(xb.size() == (size_t)dim_x * nb);
-    assert(xq.size() == (size_t)dim_x * nq);
-
-    base_dataset = generate_binary_dataset(nb, dim, xb.data(), ids.data());
-    query_dataset = generate_binary_query_dataset(nq, dim, xq.data());
-    id_dataset = generate_id_dataset(nq, ids.data());
-    xid_dataset = generate_id_dataset(nq, xids.data());
-}
-
-// not used
-#if 0
-knowhere::DatasetPtr
-DataGen::GenQuery(const int& nq) {
-    xq.resize(nq * dim);
-    for (int i = 0; i < nq * dim; ++i) {
-        xq[i] = xb[i];
+        base_dataset = milvus::knowhere::GenDatasetWithIds(nb, dim, xb_bin.data(), ids.data());
+        query_dataset = milvus::knowhere::GenDataset(nq, dim, xq_bin.data());
     }
-    return generate_query_dataset(nq, dim, xq.data());
+
+    id_dataset = milvus::knowhere::GenDatasetWithIds(nq, dim, nullptr, ids.data());
+    xid_dataset = milvus::knowhere::GenDatasetWithIds(nq, dim, nullptr, xids.data());
 }
-#endif
 
 void
-GenAll(const int64_t dim, const int64_t& nb, std::vector<float>& xb, std::vector<int64_t>& ids,
-       std::vector<int64_t>& xids, const int64_t& nq, std::vector<float>& xq) {
+GenAll(const int64_t dim, const int64_t nb, std::vector<float>& xb, std::vector<int64_t>& ids,
+       std::vector<int64_t>& xids, const int64_t nq, std::vector<float>& xq) {
     xb.resize(nb * dim);
     xq.resize(nq * dim);
     ids.resize(nb);
     xids.resize(1);
-    GenAll(dim, nb, xb.data(), ids.data(), xids.data(), nq, xq.data());
+    GenBase(dim, nb, xb.data(), ids.data(), nq, xq.data(), xids.data(), false);
 }
 
 void
-GenAll(const int64_t& dim, const int64_t& nb, float* xb, int64_t* ids, int64_t* xids, const int64_t& nq, float* xq) {
-    GenBase(dim, nb, xb, ids);
-    for (int64_t i = 0; i < nq * dim; ++i) {
-        xq[i] = xb[i];
-    }
-    xids[0] = 3;  // pseudo random
-}
-
-void
-GenBinaryAll(const int64_t dim, const int64_t& nb, std::vector<uint8_t>& xb, std::vector<int64_t>& ids,
-             std::vector<int64_t>& xids, const int64_t& nq, std::vector<uint8_t>& xq) {
+GenAll(const int64_t dim, const int64_t nb, std::vector<uint8_t>& xb, std::vector<int64_t>& ids,
+       std::vector<int64_t>& xids, const int64_t nq, std::vector<uint8_t>& xq) {
     xb.resize(nb * dim);
     xq.resize(nq * dim);
     ids.resize(nb);
     xids.resize(1);
-    GenBinaryAll(dim, nb, xb.data(), ids.data(), xids.data(), nq, xq.data());
+    GenBase(dim, nb, xb.data(), ids.data(), nq, xq.data(), xids.data(), true);
 }
 
 void
-GenBinaryAll(const int64_t& dim, const int64_t& nb, uint8_t* xb, int64_t* ids, int64_t* xids, const int64_t& nq,
-             uint8_t* xq) {
-    GenBinaryBase(dim, nb, xb, ids);
-    for (int64_t i = 0; i < nq * dim; ++i) {
-        xq[i] = xb[i];
+GenBase(const int64_t dim, const int64_t nb, const void* xb, int64_t* ids, const int64_t nq, const void* xq,
+        int64_t* xids, bool is_binary) {
+    if (!is_binary) {
+        float* xb_f = (float*)xb;
+        float* xq_f = (float*)xq;
+        for (auto i = 0; i < nb; ++i) {
+            for (auto j = 0; j < dim; ++j) {
+                xb_f[i * dim + j] = drand48();
+            }
+            xb_f[dim * i] += i / 1000.;
+            ids[i] = i;
+        }
+        for (int64_t i = 0; i < nq * dim; ++i) {
+            xq_f[i] = xb_f[i];
+        }
+    } else {
+        uint8_t* xb_u = (uint8_t*)xb;
+        uint8_t* xq_u = (uint8_t*)xq;
+        for (auto i = 0; i < nb; ++i) {
+            for (auto j = 0; j < dim; ++j) {
+                xb_u[i * dim + j] = (uint8_t)lrand48();
+            }
+            xb_u[dim * i] += i / 1000.;
+            ids[i] = i;
+        }
+        for (int64_t i = 0; i < nq * dim; ++i) {
+            xq_u[i] = xb_u[i];
+        }
     }
     xids[0] = 3;  // pseudo random
-}
-
-void
-GenBase(const int64_t& dim, const int64_t& nb, float* xb, int64_t* ids) {
-    for (auto i = 0; i < nb; ++i) {
-        for (auto j = 0; j < dim; ++j) {
-            // p_data[i * d + j] = float(base + i);
-            xb[i * dim + j] = drand48();
-        }
-        xb[dim * i] += i / 1000.;
-        ids[i] = i;
-    }
-}
-
-void
-GenBinaryBase(const int64_t& dim, const int64_t& nb, uint8_t* xb, int64_t* ids) {
-    for (auto i = 0; i < nb; ++i) {
-        for (auto j = 0; j < dim; ++j) {
-            // p_data[i * d + j] = float(base + i);
-            xb[i * dim + j] = (uint8_t)lrand48();
-        }
-        ids[i] = i;
-    }
 }
 
 FileIOReader::FileIOReader(const std::string& fname) {
@@ -176,55 +143,9 @@ FileIOWriter::operator()(void* ptr, size_t size) {
     return size;
 }
 
-knowhere::DatasetPtr
-generate_dataset(int64_t nb, int64_t dim, const float* xb, const int64_t* ids) {
-    auto ret_ds = std::make_shared<knowhere::Dataset>();
-    ret_ds->Set(knowhere::meta::ROWS, nb);
-    ret_ds->Set(knowhere::meta::DIM, dim);
-    ret_ds->Set(knowhere::meta::TENSOR, xb);
-    ret_ds->Set(knowhere::meta::IDS, ids);
-    return ret_ds;
-}
-
-knowhere::DatasetPtr
-generate_binary_dataset(int64_t nb, int64_t dim, const uint8_t* xb, const int64_t* ids) {
-    auto ret_ds = std::make_shared<knowhere::Dataset>();
-    ret_ds->Set(knowhere::meta::ROWS, nb);
-    ret_ds->Set(knowhere::meta::DIM, dim);
-    ret_ds->Set(knowhere::meta::TENSOR, xb);
-    ret_ds->Set(knowhere::meta::IDS, ids);
-    return ret_ds;
-}
-
-knowhere::DatasetPtr
-generate_query_dataset(int64_t nb, int64_t dim, const float* xb) {
-    auto ret_ds = std::make_shared<knowhere::Dataset>();
-    ret_ds->Set(knowhere::meta::ROWS, nb);
-    ret_ds->Set(knowhere::meta::DIM, dim);
-    ret_ds->Set(knowhere::meta::TENSOR, xb);
-    return ret_ds;
-}
-
-knowhere::DatasetPtr
-generate_id_dataset(int64_t nb, const int64_t* ids) {
-    auto ret_ds = std::make_shared<knowhere::Dataset>();
-    ret_ds->Set(knowhere::meta::ROWS, nb);
-    ret_ds->Set(knowhere::meta::IDS, ids);
-    return ret_ds;
-}
-
-knowhere::DatasetPtr
-generate_binary_query_dataset(int64_t nb, int64_t dim, const uint8_t* xb) {
-    auto ret_ds = std::make_shared<knowhere::Dataset>();
-    ret_ds->Set(knowhere::meta::ROWS, nb);
-    ret_ds->Set(knowhere::meta::DIM, dim);
-    ret_ds->Set(knowhere::meta::TENSOR, xb);
-    return ret_ds;
-}
-
 void
-AssertAnns(const knowhere::DatasetPtr& result, const int nq, const int k, const CheckMode check_mode) {
-    auto ids = result->Get<int64_t*>(knowhere::meta::IDS);
+AssertAnns(const milvus::knowhere::DatasetPtr& result, const int nq, const int k, const CheckMode check_mode) {
+    auto ids = result->Get<int64_t*>(milvus::knowhere::meta::IDS);
     for (auto i = 0; i < nq; i++) {
         switch (check_mode) {
             case CheckMode::CHECK_EQUAL:
@@ -241,11 +162,11 @@ AssertAnns(const knowhere::DatasetPtr& result, const int nq, const int k, const 
 }
 
 void
-AssertVec(const knowhere::DatasetPtr& result, const knowhere::DatasetPtr& base_dataset,
-          const knowhere::DatasetPtr& id_dataset, const int n, const int dim, const CheckMode check_mode) {
-    auto base = base_dataset->Get<const float*>(knowhere::meta::TENSOR);
-    auto ids = id_dataset->Get<const int64_t*>(knowhere::meta::IDS);
-    auto x = result->Get<float*>(knowhere::meta::TENSOR);
+AssertVec(const milvus::knowhere::DatasetPtr& result, const milvus::knowhere::DatasetPtr& base_dataset,
+          const milvus::knowhere::DatasetPtr& id_dataset, const int n, const int dim, const CheckMode check_mode) {
+    float* base = (float*)base_dataset->Get<const void*>(milvus::knowhere::meta::TENSOR);
+    auto ids = id_dataset->Get<const int64_t*>(milvus::knowhere::meta::IDS);
+    auto x = result->Get<float*>(milvus::knowhere::meta::TENSOR);
     for (auto i = 0; i < n; i++) {
         auto id = ids[i];
         for (auto j = 0; j < dim; j++) {
@@ -273,11 +194,11 @@ AssertVec(const knowhere::DatasetPtr& result, const knowhere::DatasetPtr& base_d
 }
 
 void
-AssertBinVeceq(const knowhere::DatasetPtr& result, const knowhere::DatasetPtr& base_dataset,
-               const knowhere::DatasetPtr& id_dataset, const int n, const int dim) {
-    auto base = base_dataset->Get<const uint8_t*>(knowhere::meta::TENSOR);
-    auto ids = id_dataset->Get<const int64_t*>(knowhere::meta::IDS);
-    auto x = result->Get<uint8_t*>(knowhere::meta::TENSOR);
+AssertBinVeceq(const milvus::knowhere::DatasetPtr& result, const milvus::knowhere::DatasetPtr& base_dataset,
+               const milvus::knowhere::DatasetPtr& id_dataset, const int n, const int dim) {
+    auto base = base_dataset->Get<const uint8_t*>(milvus::knowhere::meta::TENSOR);
+    auto ids = id_dataset->Get<const int64_t*>(milvus::knowhere::meta::IDS);
+    auto x = result->Get<uint8_t*>(milvus::knowhere::meta::TENSOR);
     for (auto i = 0; i < 1; i++) {
         auto id = ids[i];
         for (auto j = 0; j < dim; j++) {
@@ -287,9 +208,9 @@ AssertBinVeceq(const knowhere::DatasetPtr& result, const knowhere::DatasetPtr& b
 }
 
 void
-PrintResult(const knowhere::DatasetPtr& result, const int& nq, const int& k) {
-    auto ids = result->Get<int64_t*>(knowhere::meta::IDS);
-    auto dist = result->Get<float*>(knowhere::meta::DISTANCE);
+PrintResult(const milvus::knowhere::DatasetPtr& result, const int& nq, const int& k) {
+    auto ids = result->Get<int64_t*>(milvus::knowhere::meta::IDS);
+    auto dist = result->Get<float*>(milvus::knowhere::meta::DISTANCE);
 
     std::stringstream ss_id;
     std::stringstream ss_dist;

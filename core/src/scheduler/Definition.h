@@ -8,6 +8,7 @@
 // Unless required by applicable law or agreed to in writing, software distributed under the License
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
+#pragma once
 
 #include <condition_variable>
 #include <deque>
@@ -27,13 +28,15 @@
 namespace milvus {
 namespace scheduler {
 
-using TableFileSchemaPtr = engine::meta::TableFileSchemaPtr;
-using TableFileSchema = engine::meta::TableFileSchema;
+using SegmentSchemaPtr = engine::meta::SegmentSchemaPtr;
+using SegmentSchema = engine::meta::SegmentSchema;
 
 using ExecutionEnginePtr = engine::ExecutionEnginePtr;
 using EngineFactory = engine::EngineFactory;
 using EngineType = engine::EngineType;
 using MetricType = engine::MetricType;
+
+constexpr uint64_t TASK_TABLE_MAX_COUNT = 1ULL << 16ULL;
 
 }  // namespace scheduler
 }  // namespace milvus

@@ -14,6 +14,7 @@
 #include <faiss/Index.h>
 #include <string>
 
+namespace milvus {
 namespace knowhere {
 
 namespace meta {
@@ -43,6 +44,10 @@ constexpr const char* candidate = "candidate_pool_size";
 constexpr const char* efConstruction = "efConstruction";
 constexpr const char* M = "M";
 constexpr const char* ef = "ef";
+
+// Annoy Params
+constexpr const char* n_trees = "n_trees";
+constexpr const char* search_k = "search_k";
 }  // namespace IndexParams
 
 namespace Metric {
@@ -52,9 +57,12 @@ constexpr const char* L2 = "L2";
 constexpr const char* HAMMING = "HAMMING";
 constexpr const char* JACCARD = "JACCARD";
 constexpr const char* TANIMOTO = "TANIMOTO";
+constexpr const char* SUBSTRUCTURE = "SUBSTRUCTURE";
+constexpr const char* SUPERSTRUCTURE = "SUPERSTRUCTURE";
 }  // namespace Metric
 
 extern faiss::MetricType
 GetMetricType(const std::string& type);
 
 }  // namespace knowhere
+}  // namespace milvus

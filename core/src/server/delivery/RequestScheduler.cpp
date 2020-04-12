@@ -36,10 +36,6 @@ RequestScheduler::ExecRequest(BaseRequestPtr& request_ptr) {
 
     RequestScheduler& scheduler = RequestScheduler::GetInstance();
     scheduler.ExecuteRequest(request_ptr);
-
-    if (!request_ptr->IsAsync()) {
-        request_ptr->WaitToFinish();
-    }
 }
 
 void
@@ -84,18 +80,31 @@ RequestScheduler::ExecuteRequest(const BaseRequestPtr& request_ptr) {
         return Status::OK();
     }
 
-    auto status = PutToQueue(request_ptr);
+    auto status = request_ptr->PreExecute();
+    if (!status.ok()) {
+        request_ptr->Done();
+        return status;
+    }
+
+    status = PutToQueue(request_ptr);
     fiu_do_on("RequestScheduler.ExecuteRequest.push_queue_fail", status = Status(SERVER_INVALID_ARGUMENT, ""));
 
     if (!status.ok()) {
         SERVER_LOG_ERROR << "Put request to queue failed with code: " << status.ToString();
+        request_ptr->Done();
         return status;
     }
 
     if (request_ptr->IsAsync()) {
         return Status::OK();  // async execution, caller need to call WaitToFinish at somewhere
     }
-    return request_ptr->WaitToFinish();  // sync execution
+
+    status = request_ptr->WaitToFinish();  // sync execution
+    if (!status.ok()) {
+        return status;
+    }
+
+    return request_ptr->PostExecute();
 }
 
 void
@@ -105,7 +114,7 @@ RequestScheduler::TakeToExecute(RequestQueuePtr request_queue) {
     }
 
     while (true) {
-        BaseRequestPtr request = request_queue->Take();
+        BaseRequestPtr request = request_queue->TakeRequest();
         if (request == nullptr) {
             SERVER_LOG_ERROR << "Take null from request queue, stop thread";
             break;  // stop the thread
@@ -131,10 +140,10 @@ RequestScheduler::PutToQueue(const BaseRequestPtr& request_ptr) {
 
     std::string group_name = request_ptr->RequestGroup();
     if (request_groups_.count(group_name) > 0) {
-        request_groups_[group_name]->Put(request_ptr);
+        request_groups_[group_name]->PutRequest(request_ptr);
     } else {
         RequestQueuePtr queue = std::make_shared<RequestQueue>();
-        queue->Put(request_ptr);
+        queue->PutRequest(request_ptr);
         request_groups_.insert(std::make_pair(group_name, queue));
         fiu_do_on("RequestScheduler.PutToQueue.null_queue", queue = nullptr);
 

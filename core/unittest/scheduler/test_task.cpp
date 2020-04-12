@@ -35,7 +35,7 @@ TEST(TaskTest, INVALID_INDEX) {
     auto trace_context = std::make_shared<milvus::tracing::TraceContext>(mock_span);
     dummy_context->SetTraceContext(trace_context);
 
-    TableFileSchemaPtr dummy_file = std::make_shared<engine::meta::TableFileSchema>();
+    SegmentSchemaPtr dummy_file = std::make_shared<engine::meta::SegmentSchema>();
     dummy_file->index_params_ = "{ \"nlist\": 16384 }";
     dummy_file->dimension_ = 64;
     auto search_task =
@@ -51,7 +51,7 @@ TEST(TaskTest, INVALID_INDEX) {
 TEST(TaskTest, TEST_TASK) {
     auto dummy_context = std::make_shared<milvus::server::Context>("dummy_request_id");
 
-    auto file = std::make_shared<TableFileSchema>();
+    auto file = std::make_shared<SegmentSchema>();
     file->index_params_ = "{ \"nlist\": 16384 }";
     file->dimension_ = 64;
     auto label = std::make_shared<BroadcastLabel>();
@@ -74,7 +74,7 @@ TEST(TaskTest, TEST_TASK) {
     options.insert_cache_immediately_ = true;
     auto meta_ptr = std::make_shared<milvus::engine::meta::SqliteMetaImpl>(options.meta_);
 
-    file->table_id_ = "111";
+    file->collection_id_ = "111";
     file->location_ = "/tmp/milvus_test/index_file1.txt";
     auto build_index_job = std::make_shared<BuildIndexJob>(meta_ptr, options);
     XBuildIndexTask build_index_task(file, label);
@@ -109,8 +109,8 @@ TEST(TaskTest, TEST_TASK) {
     build_index_task.Execute();
     fiu_disable("XBuildIndexTask.Execute.build_index_fail");
 
-    // always enable 'has_table'
-    fiu_enable("XBuildIndexTask.Execute.has_table", 1, NULL, 0);
+    // always enable 'has_collection'
+    fiu_enable("XBuildIndexTask.Execute.has_collection", 1, NULL, 0);
     build_index_task.to_index_engine_ =
         EngineFactory::Build(file->dimension_, file->location_, (EngineType)file->engine_type_,
                              (MetricType)file->metric_type_, json);
@@ -123,13 +123,6 @@ TEST(TaskTest, TEST_TASK) {
     build_index_task.Execute();
     fiu_disable("XBuildIndexTask.Execute.throw_std_exception");
 
-    // always enable 'save_index_file_success'
-    fiu_enable("XBuildIndexTask.Execute.save_index_file_success", 1, NULL, 0);
-    build_index_task.to_index_engine_ =
-        EngineFactory::Build(file->dimension_, file->location_, (EngineType)file->engine_type_,
-                             (MetricType)file->metric_type_, json);
-    build_index_task.Execute();
-
     fiu_enable("XBuildIndexTask.Execute.update_table_file_fail", 1, NULL, 0);
     build_index_task.to_index_engine_ =
         EngineFactory::Build(file->dimension_, file->location_, (EngineType)file->engine_type_,
@@ -138,7 +131,7 @@ TEST(TaskTest, TEST_TASK) {
     fiu_disable("XBuildIndexTask.Execute.update_table_file_fail");
 
     fiu_disable("XBuildIndexTask.Execute.throw_std_exception");
-    fiu_disable("XBuildIndexTask.Execute.has_table");
+    fiu_disable("XBuildIndexTask.Execute.has_collection");
     fiu_disable("XBuildIndexTask.Execute.create_table_success");
     build_index_task.Execute();
 

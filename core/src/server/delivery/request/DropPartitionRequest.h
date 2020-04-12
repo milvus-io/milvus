@@ -21,17 +21,18 @@ namespace server {
 class DropPartitionRequest : public BaseRequest {
  public:
     static BaseRequestPtr
-    Create(const std::shared_ptr<Context>& context, const std::string& table_name, const std::string& tag);
+    Create(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name,
+           const std::string& tag);
 
  protected:
-    DropPartitionRequest(const std::shared_ptr<Context>& context, const std::string& table_name,
+    DropPartitionRequest(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name,
                          const std::string& tag);
 
     Status
     OnExecute() override;
 
  private:
-    const std::string table_name_;
+    const std::string collection_name_;
     const std::string tag_;
 };
 

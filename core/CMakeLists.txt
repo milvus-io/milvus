@@ -90,7 +90,7 @@ if (MILVUS_VERSION_MAJOR STREQUAL ""
         OR MILVUS_VERSION_MINOR STREQUAL ""
         OR MILVUS_VERSION_PATCH STREQUAL "")
     message(WARNING "Failed to determine Milvus version from git branch name")
-    set(MILVUS_VERSION "0.7.0")
+    set(MILVUS_VERSION "0.7.1")
 endif ()
 
 message(STATUS "Build version = ${MILVUS_VERSION}")
@@ -153,10 +153,6 @@ if (MILVUS_USE_CCACHE)
     endif (CCACHE_FOUND)
 endif ()
 
-if (CUSTOMIZATION)
-    add_compile_definitions(CUSTOMIZATION)
-endif ()
-
 if (MILVUS_GPU_VERSION)
     message(STATUS "Building Milvus GPU version")
     add_compile_definitions("MILVUS_GPU_VERSION")
@@ -199,6 +195,7 @@ if (BUILD_UNIT_TEST STREQUAL "ON")
     if (BUILD_COVERAGE STREQUAL "ON")
         set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fprofile-arcs -ftest-coverage")
     endif ()
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DELPP_DISABLE_LOGS")
     add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/unittest)
 endif ()
 

@@ -41,7 +41,7 @@ VectorSource::VectorSource(milvus::engine::VectorsData vectors,
 
 Status
 VectorSource::Add(/*const ExecutionEnginePtr& execution_engine,*/ const segment::SegmentWriterPtr& segment_writer_ptr,
-                  const meta::TableFileSchema& table_file_schema, const size_t& num_vectors_to_add,
+                  const meta::SegmentSchema& table_file_schema, const size_t& num_vectors_to_add,
                   size_t& num_vectors_added) {
     uint64_t n = vectors_.vector_count_;
     server::CollectAddMetrics metrics(n, table_file_schema.dimension_);
@@ -53,6 +53,7 @@ VectorSource::Add(/*const ExecutionEnginePtr& execution_engine,*/ const segment:
         SafeIDGenerator& id_generator = SafeIDGenerator::GetInstance();
         Status status = id_generator.GetNextIDNumbers(num_vectors_added, vector_ids_to_add);
         if (!status.ok()) {
+            ENGINE_LOG_ERROR << LogOut("[%s][%ld]", "insert", 0) << "Generate ids fail: " << status.message();
             return status;
         }
     } else {
@@ -74,6 +75,7 @@ VectorSource::Add(/*const ExecutionEnginePtr& execution_engine,*/ const segment:
         vectors.resize(size);
         memcpy(vectors.data(), vectors_.float_data_.data() + current_num_vectors_added * table_file_schema.dimension_,
                size);
+        ENGINE_LOG_DEBUG << LogOut("[%s][%ld]", "insert", 0) << "Insert into segment";
         status = segment_writer_ptr->AddVectors(table_file_schema.file_id_, vectors, vector_ids_to_add);
 
     } else if (!vectors_.binary_data_.empty()) {
@@ -90,6 +92,7 @@ VectorSource::Add(/*const ExecutionEnginePtr& execution_engine,*/ const segment:
             vectors.data(),
             vectors_.binary_data_.data() + current_num_vectors_added * SingleVectorSize(table_file_schema.dimension_),
             size);
+        ENGINE_LOG_DEBUG << LogOut("[%s][%ld]", "insert", 0) << "Insert into segment";
         status = segment_writer_ptr->AddVectors(table_file_schema.file_id_, vectors, vector_ids_to_add);
     }
 
@@ -100,7 +103,7 @@ VectorSource::Add(/*const ExecutionEnginePtr& execution_engine,*/ const segment:
         vector_ids_.insert(vector_ids_.end(), std::make_move_iterator(vector_ids_to_add.begin()),
                            std::make_move_iterator(vector_ids_to_add.end()));
     } else {
-        ENGINE_LOG_ERROR << "VectorSource::Add failed: " + status.ToString();
+        ENGINE_LOG_ERROR << LogOut("[%s][%ld]", "insert", 0) << "VectorSource::Add failed: " + status.ToString();
     }
 
     return status;
@@ -108,7 +111,7 @@ VectorSource::Add(/*const ExecutionEnginePtr& execution_engine,*/ const segment:
 
 Status
 VectorSource::AddEntities(const milvus::segment::SegmentWriterPtr& segment_writer_ptr,
-                          const milvus::engine::meta::TableFileSchema& collection_file_schema,
+                          const milvus::engine::meta::SegmentSchema& collection_file_schema,
                           const size_t& num_entities_to_add,
                           size_t& num_entities_added) {
 
@@ -131,7 +134,7 @@ VectorSource::AddEntities(const milvus::segment::SegmentWriterPtr& segment_write
     }
 
     Status status;
-    status = segment_writer_ptr->AddAttrs(collection_file_schema.table_id_,
+    status = segment_writer_ptr->AddAttrs(collection_file_schema.collection_id_,
                                           attr_size_,
                                           attr_data_,
                                           vector_ids_to_add);

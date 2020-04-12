@@ -38,16 +38,19 @@ enum class EngineType {
     FAISS_BIN_IDMAP,
     FAISS_BIN_IVFFLAT,
     HNSW,
-    MAX_VALUE = HNSW,
+    ANNOY,
+    MAX_VALUE = ANNOY,
 };
 
 enum class MetricType {
-    L2 = 1,        // Euclidean Distance
-    IP = 2,        // Cosine Similarity
-    HAMMING = 3,   // Hamming Distance
-    JACCARD = 4,   // Jaccard Distance
-    TANIMOTO = 5,  // Tanimoto Distance
-    MAX_VALUE = TANIMOTO,
+    L2 = 1,              // Euclidean Distance
+    IP = 2,              // Cosine Similarity
+    HAMMING = 3,         // Hamming Distance
+    JACCARD = 4,         // Jaccard Distance
+    TANIMOTO = 5,        // Tanimoto Distance
+    SUBSTRUCTURE = 6,    // Substructure Distance
+    SUPERSTRUCTURE = 7,  // Superstructure Distance
+    MAX_VALUE = SUPERSTRUCTURE
 };
 
 enum class DataType  {
@@ -79,13 +82,10 @@ class ExecutionEngine {
     Count() const = 0;
 
     virtual size_t
-    Size() const = 0;
-
-    virtual size_t
     Dimension() const = 0;
 
     virtual size_t
-    PhysicalSize() const = 0;
+    Size() const = 0;
 
     virtual Status
     Serialize() = 0;
@@ -140,9 +140,6 @@ class ExecutionEngine {
 
     virtual Status
     Cache() = 0;
-
-    virtual Status
-    GpuCache(uint64_t gpu_id) = 0;
 
     virtual Status
     Init() = 0;

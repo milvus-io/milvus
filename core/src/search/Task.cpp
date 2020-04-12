@@ -26,7 +26,7 @@ namespace milvus {
 namespace search{
 
 Task::Task(const std::shared_ptr<server::Context>& context,
-           TableFileSchemaPtr& file,
+           SegmentSchemaPtr& file,
            milvus::query::GeneralQueryPtr general_query,
            std::unordered_map<std::string, engine::DataType>& attr_type,
            context::HybridSearchContextPtr hybrid_search_context)
@@ -45,9 +45,9 @@ Task::Task(const std::shared_ptr<server::Context>& context,
         }
 
         engine::EngineType engine_type;
-        if (file->file_type_ == engine::meta::TableFileSchema::FILE_TYPE::RAW ||
-            file->file_type_ == engine::meta::TableFileSchema::FILE_TYPE::TO_INDEX ||
-            file->file_type_ == engine::meta::TableFileSchema::FILE_TYPE::BACKUP) {
+        if (file->file_type_ == engine::meta::SegmentSchema::FILE_TYPE::RAW ||
+            file->file_type_ == engine::meta::SegmentSchema::FILE_TYPE::TO_INDEX ||
+            file->file_type_ == engine::meta::SegmentSchema::FILE_TYPE::BACKUP) {
             engine_type =
                 engine::utils::IsBinaryMetricType(file->metric_type_) ? engine::EngineType::FAISS_BIN_IDMAP
                                                                       : engine::EngineType::FAISS_IDMAP;

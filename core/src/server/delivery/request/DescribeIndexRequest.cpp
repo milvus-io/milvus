@@ -21,49 +21,49 @@
 namespace milvus {
 namespace server {
 
-DescribeIndexRequest::DescribeIndexRequest(const std::shared_ptr<Context>& context, const std::string& table_name,
-                                           IndexParam& index_param)
-    : BaseRequest(context, INFO_REQUEST_GROUP), table_name_(table_name), index_param_(index_param) {
+DescribeIndexRequest::DescribeIndexRequest(const std::shared_ptr<milvus::server::Context>& context,
+                                           const std::string& collection_name, IndexParam& index_param)
+    : BaseRequest(context, BaseRequest::kDescribeIndex), collection_name_(collection_name), index_param_(index_param) {
 }
 
 BaseRequestPtr
-DescribeIndexRequest::Create(const std::shared_ptr<Context>& context, const std::string& table_name,
-                             IndexParam& index_param) {
-    return std::shared_ptr<BaseRequest>(new DescribeIndexRequest(context, table_name, index_param));
+DescribeIndexRequest::Create(const std::shared_ptr<milvus::server::Context>& context,
+                             const std::string& collection_name, IndexParam& index_param) {
+    return std::shared_ptr<BaseRequest>(new DescribeIndexRequest(context, collection_name, index_param));
 }
 
 Status
 DescribeIndexRequest::OnExecute() {
     try {
         fiu_do_on("DescribeIndexRequest.OnExecute.throw_std_exception", throw std::exception());
-        std::string hdr = "DescribeIndexRequest(table=" + table_name_ + ")";
+        std::string hdr = "DescribeIndexRequest(collection=" + collection_name_ + ")";
         TimeRecorderAuto rc(hdr);
 
         // step 1: check arguments
-        auto status = ValidationUtil::ValidateTableName(table_name_);
+        auto status = ValidationUtil::ValidateCollectionName(collection_name_);
         if (!status.ok()) {
             return status;
         }
 
-        // only process root table, ignore partition table
-        engine::meta::TableSchema table_schema;
-        table_schema.table_id_ = table_name_;
-        status = DBWrapper::DB()->DescribeTable(table_schema);
+        // only process root collection, ignore partition collection
+        engine::meta::CollectionSchema collection_schema;
+        collection_schema.collection_id_ = collection_name_;
+        status = DBWrapper::DB()->DescribeCollection(collection_schema);
         if (!status.ok()) {
             if (status.code() == DB_NOT_FOUND) {
-                return Status(SERVER_TABLE_NOT_EXIST, TableNotExistMsg(table_name_));
+                return Status(SERVER_COLLECTION_NOT_EXIST, CollectionNotExistMsg(collection_name_));
             } else {
                 return status;
             }
         } else {
-            if (!table_schema.owner_table_.empty()) {
-                return Status(SERVER_INVALID_TABLE_NAME, TableNotExistMsg(table_name_));
+            if (!collection_schema.owner_collection_.empty()) {
+                return Status(SERVER_INVALID_COLLECTION_NAME, CollectionNotExistMsg(collection_name_));
             }
         }
 
-        // step 2: check table existence
-        engine::TableIndex index;
-        status = DBWrapper::DB()->DescribeIndex(table_name_, index);
+        // step 2: check collection existence
+        engine::CollectionIndex index;
+        status = DBWrapper::DB()->DescribeIndex(collection_name_, index);
         if (!status.ok()) {
             return status;
         }
@@ -76,7 +76,7 @@ DescribeIndexRequest::OnExecute() {
             index.engine_type_ = (int32_t)engine::EngineType::FAISS_IVFFLAT;
         }
 
-        index_param_.table_name_ = table_name_;
+        index_param_.collection_name_ = collection_name_;
         index_param_.index_type_ = index.engine_type_;
         index_param_.extra_params_ = index.extra_params_.dump();
     } catch (std::exception& ex) {

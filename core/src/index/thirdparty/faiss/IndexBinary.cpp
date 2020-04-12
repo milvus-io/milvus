@@ -21,7 +21,8 @@ void IndexBinary::train(idx_t, const uint8_t *) {
 }
 
 void IndexBinary::range_search(idx_t, const uint8_t *, int,
-                               RangeSearchResult *) const {
+                               RangeSearchResult *,
+                               ConcurrentBitsetPtr) const {
   FAISS_THROW_MSG("range search not implemented");
 }
 

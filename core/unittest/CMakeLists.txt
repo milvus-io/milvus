@@ -91,21 +91,23 @@ set(web_server_files
 
 aux_source_directory(${MILVUS_ENGINE_SRC}/server/delivery server_delivery_impl_files)
 aux_source_directory(${MILVUS_ENGINE_SRC}/server/delivery/request server_delivery_request_files)
+aux_source_directory(${MILVUS_ENGINE_SRC}/server/delivery/strategy server_delivery_strategy_files)
 set(server_delivery_files
         ${server_delivery_impl_files}
-        ${server_delivery_request_files})
+        ${server_delivery_request_files}
+        ${server_delivery_strategy_files})
 
 aux_source_directory(${MILVUS_ENGINE_SRC}/utils utils_files)
-aux_source_directory(${MILVUS_ENGINE_SRC}/wrapper wrapper_files)
+aux_source_directory(${MILVUS_ENGINE_SRC}/index/archive wrapper_files)
 aux_source_directory(${MILVUS_ENGINE_SRC}/tracing tracing_files)
 
 aux_source_directory(${MILVUS_ENGINE_SRC}/storage storage_main_files)
 aux_source_directory(${MILVUS_ENGINE_SRC}/storage/disk storage_disk_files)
-aux_source_directory(${MILVUS_ENGINE_SRC}/storage/s3 storage_s3_files)
+#aux_source_directory(${MILVUS_ENGINE_SRC}/storage/s3 storage_s3_files)
 set(storage_files
         ${storage_main_files}
         ${storage_disk_files}
-        ${storage_s3_files}
+#        ${storage_s3_files}
         )
 
 aux_source_directory(${MILVUS_ENGINE_SRC}/codecs codecs_files)
@@ -119,6 +121,7 @@ set(entry_file
 set(helper_files
         ${MILVUS_ENGINE_SRC}/config/Config.cpp
         ${MILVUS_ENGINE_SRC}/utils/CommonUtil.cpp
+        ${MILVUS_ENGINE_SRC}/utils/Log.cpp
         ${MILVUS_ENGINE_SRC}/utils/TimeRecorder.cpp
         ${MILVUS_ENGINE_SRC}/utils/Status.cpp
         ${MILVUS_ENGINE_SRC}/utils/StringHelpFunctions.cpp
@@ -165,21 +168,30 @@ set(unittest_libs
         opentracing
         opentracing_mocktracer
         fiu
+        )
+
+if (MILVUS_WITH_AWS)
+    set(s3_client_lib
         aws-cpp-sdk-s3
         aws-cpp-sdk-core
+        )
+    set(unittest_libs ${unittest_libs}
+        ${s3_client_lib}
         curl
         crypto
         )
+endif ()
+
 if (MILVUS_WITH_PROMETHEUS)
     set(prometheus_lib
-            prometheus-cpp-push
-            prometheus-cpp-pull
-            prometheus-cpp-core
-            curl
-            )
+        prometheus-cpp-push
+        prometheus-cpp-pull
+        prometheus-cpp-core
+        )
     set(unittest_libs ${unittest_libs}
-            ${prometheus_lib}
-            )
+        ${prometheus_lib}
+        curl
+        )
 endif ()
 set(unittest_libs ${unittest_libs}
     dl
@@ -194,14 +206,9 @@ if (MILVUS_GPU_VERSION)
             cudart
             cublas
             )
-    aux_source_directory(${MILVUS_ENGINE_SRC}/wrapper/gpu wrapper_gpu_files)
-    set(common_files ${common_files}
-            ${wrapper_gpu_files}
-            )
 endif ()
 
 add_subdirectory(db)
-add_subdirectory(wrapper)
 add_subdirectory(metrics)
 add_subdirectory(scheduler)
 add_subdirectory(server)

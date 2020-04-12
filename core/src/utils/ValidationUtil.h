@@ -11,6 +11,7 @@
 
 #pragma once
 
+#include "db/Types.h"
 #include "db/meta/MetaTypes.h"
 #include "utils/Json.h"
 #include "utils/Status.h"
@@ -21,36 +22,41 @@
 namespace milvus {
 namespace server {
 
+constexpr int64_t QUERY_MAX_TOPK = 2048;
+
 class ValidationUtil {
  private:
     ValidationUtil() = default;
 
  public:
     static Status
-    ValidateTableName(const std::string& table_name);
+    ValidateCollectionName(const std::string& collection_name);
 
     static Status
-    ValidateTableDimension(int64_t dimension);
+    ValidateTableDimension(int64_t dimension, int64_t metric_type);
 
     static Status
-    ValidateTableIndexType(int32_t index_type);
+    ValidateCollectionIndexType(int32_t index_type);
 
     static Status
-    ValidateIndexParams(const milvus::json& index_params, const engine::meta::TableSchema& table_schema,
+    ValidateIndexParams(const milvus::json& index_params, const engine::meta::CollectionSchema& table_schema,
                         int32_t index_type);
 
     static Status
-    ValidateSearchParams(const milvus::json& search_params, const engine::meta::TableSchema& table_schema,
+    ValidateSearchParams(const milvus::json& search_params, const engine::meta::CollectionSchema& table_schema,
                          int64_t topk);
 
     static Status
-    ValidateTableIndexFileSize(int64_t index_file_size);
+    ValidateVectorData(const engine::VectorsData& vectors, const engine::meta::CollectionSchema& table_schema);
 
     static Status
-    ValidateTableIndexMetricType(int32_t metric_type);
+    ValidateCollectionIndexFileSize(int64_t index_file_size);
 
     static Status
-    ValidateSearchTopk(int64_t top_k, const engine::meta::TableSchema& table_schema);
+    ValidateCollectionIndexMetricType(int32_t metric_type);
+
+    static Status
+    ValidateSearchTopk(int64_t top_k);
 
     static Status
     ValidatePartitionName(const std::string& partition_name);

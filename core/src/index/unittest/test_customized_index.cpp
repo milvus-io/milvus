@@ -13,12 +13,11 @@
 #include <fiu-local.h>
 #include <gtest/gtest.h>
 #include <thread>
-#include "knowhere/index/vector_index/helpers/Cloner.h"
-
-#include "unittest/Helper.h"
-#include "unittest/utils.h"
 
 #include "knowhere/common/Timer.h"
+#include "knowhere/index/vector_index/IndexType.h"
+#include "unittest/Helper.h"
+#include "unittest/utils.h"
 
 class SingleIndexTest : public DataGen, public TestGpuIndexBase {
  protected:
@@ -38,38 +37,38 @@ class SingleIndexTest : public DataGen, public TestGpuIndexBase {
     }
 
  protected:
-    std::string index_type;
-    knowhere::IVFIndexPtr index_ = nullptr;
+    milvus::knowhere::IndexType index_type_;
+    milvus::knowhere::IndexMode index_mode_;
+    milvus::knowhere::IVFPtr index_ = nullptr;
 };
 
-#ifdef CUSTOMIZATION
+#ifdef MILVUS_GPU_VERSION
 TEST_F(SingleIndexTest, IVFSQHybrid) {
     assert(!xb.empty());
 
-    index_type = "IVFSQHybrid";
-    index_ = IndexFactory(index_type);
-    auto conf = ParamGenerator::GetInstance().Gen(ParameterType::ivfsq);
-    auto preprocessor = index_->BuildPreprocessor(base_dataset, conf);
-    index_->set_preprocessor(preprocessor);
+    index_type_ = milvus::knowhere::IndexEnum::INDEX_FAISS_IVFSQ8H;
+    index_mode_ = milvus::knowhere::IndexMode::MODE_GPU;
+    index_ = IndexFactory(index_type_, index_mode_);
+
+    auto conf = ParamGenerator::GetInstance().Gen(index_type_);
 
     fiu_init(0);
-    auto model = index_->Train(base_dataset, conf);
-    index_->set_index_model(model);
+    index_->Train(base_dataset, conf);
     index_->Add(base_dataset, conf);
     EXPECT_EQ(index_->Count(), nb);
-    EXPECT_EQ(index_->Dimension(), dim);
+    EXPECT_EQ(index_->Dim(), dim);
 
     auto binaryset = index_->Serialize();
     {
         // copy cpu to gpu
-        auto cpu_idx = std::make_shared<knowhere::IVFSQHybrid>(DEVICEID);
+        auto cpu_idx = std::make_shared<milvus::knowhere::IVFSQHybrid>(DEVICEID);
         cpu_idx->Load(binaryset);
 
         {
             for (int i = 0; i < 3; ++i) {
                 auto gpu_idx = cpu_idx->CopyCpuToGpu(DEVICEID, conf);
-                auto result = gpu_idx->Search(query_dataset, conf);
-                AssertAnns(result, nq, conf[knowhere::meta::TOPK]);
+                auto result = gpu_idx->Query(query_dataset, conf);
+                AssertAnns(result, nq, conf[milvus::knowhere::meta::TOPK]);
                 // PrintResult(result, nq, k);
             }
         }
@@ -77,7 +76,7 @@ TEST_F(SingleIndexTest, IVFSQHybrid) {
 
     {
         // quantization already in gpu, only copy data
-        auto cpu_idx = std::make_shared<knowhere::IVFSQHybrid>(DEVICEID);
+        auto cpu_idx = std::make_shared<milvus::knowhere::IVFSQHybrid>(DEVICEID);
         cpu_idx->Load(binaryset);
 
         ASSERT_ANY_THROW(cpu_idx->CopyCpuToGpuWithQuantizer(-1, conf));
@@ -85,36 +84,36 @@ TEST_F(SingleIndexTest, IVFSQHybrid) {
         auto gpu_idx = pair.first;
         auto quantization = pair.second;
 
-        auto result = gpu_idx->Search(query_dataset, conf);
-        AssertAnns(result, nq, conf[knowhere::meta::TOPK]);
+        auto result = gpu_idx->Query(query_dataset, conf);
+        AssertAnns(result, nq, conf[milvus::knowhere::meta::TOPK]);
         //        PrintResult(result, nq, k);
 
-        milvus::json quantizer_conf{{knowhere::meta::DEVICEID, DEVICEID}, {"mode", 2}};
+        milvus::json quantizer_conf{{milvus::knowhere::meta::DEVICEID, DEVICEID}, {"mode", 2}};
         for (int i = 0; i < 2; ++i) {
-            auto hybrid_idx = std::make_shared<knowhere::IVFSQHybrid>(DEVICEID);
+            auto hybrid_idx = std::make_shared<milvus::knowhere::IVFSQHybrid>(DEVICEID);
             hybrid_idx->Load(binaryset);
             auto new_idx = hybrid_idx->LoadData(quantization, quantizer_conf);
-            auto result = new_idx->Search(query_dataset, conf);
-            AssertAnns(result, nq, conf[knowhere::meta::TOPK]);
+            auto result = new_idx->Query(query_dataset, conf);
+            AssertAnns(result, nq, conf[milvus::knowhere::meta::TOPK]);
             //            PrintResult(result, nq, k);
         }
     }
 
     {
         // quantization already in gpu, only set quantization
-        auto cpu_idx = std::make_shared<knowhere::IVFSQHybrid>(DEVICEID);
+        auto cpu_idx = std::make_shared<milvus::knowhere::IVFSQHybrid>(DEVICEID);
         cpu_idx->Load(binaryset);
 
         auto pair = cpu_idx->CopyCpuToGpuWithQuantizer(DEVICEID, conf);
         auto quantization = pair.second;
 
         for (int i = 0; i < 2; ++i) {
-            auto hybrid_idx = std::make_shared<knowhere::IVFSQHybrid>(DEVICEID);
+            auto hybrid_idx = std::make_shared<milvus::knowhere::IVFSQHybrid>(DEVICEID);
             hybrid_idx->Load(binaryset);
 
             hybrid_idx->SetQuantizer(quantization);
-            auto result = hybrid_idx->Search(query_dataset, conf);
-            AssertAnns(result, nq, conf[knowhere::meta::TOPK]);
+            auto result = hybrid_idx->Query(query_dataset, conf);
+            AssertAnns(result, nq, conf[milvus::knowhere::meta::TOPK]);
             //            PrintResult(result, nq, k);
             hybrid_idx->UnsetQuantizer();
         }
@@ -127,7 +126,7 @@ TEST_F(SingleIndexTest, IVFSQHybrid) {
 //    index_type = "IVFSQHybrid";
 //    index_ = IndexFactory(index_type);
 //    auto base = ParamGenerator::GetInstance().Gen(ParameterType::ivfsq);
-//    auto conf = std::dynamic_pointer_cast<knowhere::IVFSQCfg>(base);
+//    auto conf = std::dynamic_pointer_cast<milvus::knowhere::IVFSQCfg>(base);
 //    conf->nlist = 16384;
 //    conf->k = k;
 //    conf->nprobe = 10;
@@ -145,12 +144,12 @@ TEST_F(SingleIndexTest, IVFSQHybrid) {
 //
 //
 //
-//    auto cpu_idx = std::make_shared<knowhere::IVFSQHybrid>(DEVICEID);
+//    auto cpu_idx = std::make_shared<milvus::knowhere::IVFSQHybrid>(DEVICEID);
 //    cpu_idx->Load(binaryset);
 //    auto pair = cpu_idx->CopyCpuToGpuWithQuantizer(DEVICEID, conf);
 //    auto quantizer = pair.second;
 //
-//    auto quantizer_conf = std::make_shared<knowhere::QuantizerCfg>();
+//    auto quantizer_conf = std::make_shared<milvus::knowhere::QuantizerCfg>();
 //    quantizer_conf->mode = 2;  // only copy data
 //    quantizer_conf->gpu_id = DEVICEID;
 //
@@ -164,7 +163,7 @@ TEST_F(SingleIndexTest, IVFSQHybrid) {
 //        }
 //    };
 //
-//    auto hybrid_qt_idx = std::make_shared<knowhere::IVFSQHybrid>(DEVICEID);
+//    auto hybrid_qt_idx = std::make_shared<milvus::knowhere::IVFSQHybrid>(DEVICEID);
 //    hybrid_qt_idx->Load(binaryset);
 //    auto SetQuantizerDoSearch = [&](int64_t search_count) {
 //        for (int i = 0; i < search_count; ++i) {
@@ -176,7 +175,7 @@ TEST_F(SingleIndexTest, IVFSQHybrid) {
 //        }
 //    };
 //
-//    auto hybrid_data_idx = std::make_shared<knowhere::IVFSQHybrid>(DEVICEID);
+//    auto hybrid_data_idx = std::make_shared<milvus::knowhere::IVFSQHybrid>(DEVICEID);
 //    hybrid_data_idx->Load(binaryset);
 //    auto LoadDataDoSearch = [&](int64_t search_count, bool do_search = false) {
 //        for (int i = 0; i < search_count; ++i) {
@@ -188,7 +187,7 @@ TEST_F(SingleIndexTest, IVFSQHybrid) {
 //        }
 //    };
 //
-//    knowhere::TimeRecorder tc("");
+//    milvus::knowhere::TimeRecorder tc("");
 //    CopyAllToGpu(2000/2, false);
 //    tc.RecordSection("CopyAllToGpu witout search");
 //    CopyAllToGpu(400/2, true);

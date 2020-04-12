@@ -33,9 +33,9 @@
 namespace milvus {
 namespace scheduler {
 
-using engine::meta::TableFileSchemaPtr;
+using engine::meta::SegmentSchemaPtr;
 
-using Id2IndexMap = std::unordered_map<size_t, TableFileSchemaPtr>;
+using Id2IndexMap = std::unordered_map<size_t, SegmentSchemaPtr>;
 
 using ResultIds = engine::ResultIds;
 using ResultDistances = engine::ResultDistances;
@@ -52,7 +52,7 @@ class SearchJob : public Job {
 
  public:
     bool
-    AddIndexFile(const TableFileSchemaPtr& index_file);
+    AddIndexFile(const SegmentSchemaPtr& index_file);
 
     void
     WaitResult();

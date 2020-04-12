@@ -18,8 +18,6 @@
 #include <fiu-local.h>
 #include <fiu-control.h>
 
-#define private public
-
 #include "cache/CpuCacheMgr.h"
 #include "config/Config.h"
 #include "metrics/utils.h"
@@ -28,17 +26,17 @@
 #include "metrics/Metrics.h"
 
 namespace {
-static constexpr int64_t TABLE_DIM = 256;
+static constexpr int64_t COLLECTION_DIM = 256;
 
 void
 BuildVectors(uint64_t n, milvus::engine::VectorsData& vectors) {
     vectors.vector_count_ = n;
     vectors.float_data_.clear();
-    vectors.float_data_.resize(n * TABLE_DIM);
+    vectors.float_data_.resize(n * COLLECTION_DIM);
     float* data = vectors.float_data_.data();
     for (uint64_t i = 0; i < n; i++) {
-        for (int64_t j = 0; j < TABLE_DIM; j++) data[TABLE_DIM * i + j] = drand48();
-        data[TABLE_DIM * i] += i / 2000.;
+        for (int64_t j = 0; j < COLLECTION_DIM; j++) data[COLLECTION_DIM * i + j] = drand48();
+        data[COLLECTION_DIM * i] += i / 2000.;
     }
 }
 } // namespace
@@ -70,14 +68,14 @@ TEST_F(MetricTest, METRIC_TEST) {
     static const char* group_name = "test_group";
     static const int group_dim = 256;
 
-    milvus::engine::meta::TableSchema group_info;
+    milvus::engine::meta::CollectionSchema group_info;
     group_info.dimension_ = group_dim;
-    group_info.table_id_ = group_name;
-    auto stat = db_->CreateTable(group_info);
+    group_info.collection_id_ = group_name;
+    auto stat = db_->CreateCollection(group_info);
 
-    milvus::engine::meta::TableSchema group_info_get;
-    group_info_get.table_id_ = group_name;
-    stat = db_->DescribeTable(group_info_get);
+    milvus::engine::meta::CollectionSchema group_info_get;
+    group_info_get.collection_id_ = group_name;
+    stat = db_->DescribeCollection(group_info_get);
 
     int nb = 50;
     milvus::engine::VectorsData xb;
@@ -157,13 +155,13 @@ TEST_F(MetricTest, COLLECTOR_METRICS_TEST) {
 
     milvus::server::CollectAddMetrics add_metrics(10, 128);
 
-    milvus::server::CollectDurationMetrics duration_metrics_raw(milvus::engine::meta::TableFileSchema::RAW);
-    milvus::server::CollectDurationMetrics duration_metrics_index(milvus::engine::meta::TableFileSchema::TO_INDEX);
-    milvus::server::CollectDurationMetrics duration_metrics_delete(milvus::engine::meta::TableFileSchema::TO_DELETE);
+    milvus::server::CollectDurationMetrics duration_metrics_raw(milvus::engine::meta::SegmentSchema::RAW);
+    milvus::server::CollectDurationMetrics duration_metrics_index(milvus::engine::meta::SegmentSchema::TO_INDEX);
+    milvus::server::CollectDurationMetrics duration_metrics_delete(milvus::engine::meta::SegmentSchema::TO_DELETE);
 
-    milvus::server::CollectSearchTaskMetrics search_metrics_raw(milvus::engine::meta::TableFileSchema::RAW);
-    milvus::server::CollectSearchTaskMetrics search_metrics_index(milvus::engine::meta::TableFileSchema::TO_INDEX);
-    milvus::server::CollectSearchTaskMetrics search_metrics_delete(milvus::engine::meta::TableFileSchema::TO_DELETE);
+    milvus::server::CollectSearchTaskMetrics search_metrics_raw(milvus::engine::meta::SegmentSchema::RAW);
+    milvus::server::CollectSearchTaskMetrics search_metrics_index(milvus::engine::meta::SegmentSchema::TO_INDEX);
+    milvus::server::CollectSearchTaskMetrics search_metrics_delete(milvus::engine::meta::SegmentSchema::TO_DELETE);
 
     milvus::server::MetricCollector metric_collector();
 }

@@ -25,3 +25,9 @@ RUN ln -s /usr/lib/x86_64-linux-gnu/libmysqlclient.so \
   /usr/lib/x86_64-linux-gnu/libmysqlclient_r.so
 
 RUN sh -c 'echo export LD_LIBRARY_PATH=/opt/intel/compilers_and_libraries_2019.5.281/linux/mkl/lib/intel64:\$LD_LIBRARY_PATH > /etc/profile.d/mkl.sh'
+
+# use login shell to activate environment un the RUN commands
+SHELL [ "/bin/bash", "-c", "-l" ]
+
+# use login shell when running the container
+ENTRYPOINT [ "/bin/bash", "-c", "-l" ]

@@ -57,57 +57,57 @@ class WalManager {
     GetNextRecord(MXLogRecord& record);
 
     /*
-     * Create table
-     * @param table_id: table id
+     * Create collection
+     * @param collection_id: collection id
      * @retval lsn
      */
     uint64_t
-    CreateTable(const std::string& table_id);
+    CreateCollection(const std::string& collection_id);
 
     /*
-     * Drop table
-     * @param table_id: table id
+     * Drop collection
+     * @param collection_id: collection id
      * @retval none
      */
     void
-    DropTable(const std::string& table_id);
+    DropCollection(const std::string& collection_id);
 
     /*
-     * Table is flushed
-     * @param table_id: table id
+     * Collection is flushed
+     * @param collection_id: collection id
      * @param lsn: flushed lsn
      */
     void
-    TableFlushed(const std::string& table_id, uint64_t lsn);
+    CollectionFlushed(const std::string& collection_id, uint64_t lsn);
 
     /*
      * Insert
-     * @param table_id: table id
-     * @param table_id: partition tag
+     * @param collection_id: collection id
+     * @param collection_id: partition tag
      * @param vector_ids: vector ids
      * @param vectors: vectors
      */
     template <typename T>
     bool
-    Insert(const std::string& table_id, const std::string& partition_tag, const IDNumbers& vector_ids,
+    Insert(const std::string& collection_id, const std::string& partition_tag, const IDNumbers& vector_ids,
            const std::vector<T>& vectors);
 
     /*
      * Insert
-     * @param table_id: table id
+     * @param collection_id: collection id
      * @param vector_ids: vector ids
      */
     bool
-    DeleteById(const std::string& table_id, const IDNumbers& vector_ids);
+    DeleteById(const std::string& collection_id, const IDNumbers& vector_ids);
 
     /*
      * Get flush lsn
-     * @param table_id: table id (empty means all tables)
+     * @param collection_id: collection id (empty means all tables)
      * @retval if there is something not flushed, return lsn;
      *         else, return 0
      */
     uint64_t
-    Flush(const std::string& table_id = "");
+    Flush(const std::string& collection_id = "");
 
     void
     RemoveOldFiles(uint64_t flushed_lsn);
@@ -131,7 +131,7 @@ class WalManager {
 
     // if multi-thread call Flush(), use list
     struct FlushInfo {
-        std::string table_id_;
+        std::string collection_id_;
         uint64_t lsn_ = 0;
 
         bool
@@ -147,12 +147,12 @@ class WalManager {
 };
 
 extern template bool
-WalManager::Insert<float>(const std::string& table_id, const std::string& partition_tag, const IDNumbers& vector_ids,
-                          const std::vector<float>& vectors);
+WalManager::Insert<float>(const std::string& collection_id, const std::string& partition_tag,
+                          const IDNumbers& vector_ids, const std::vector<float>& vectors);
 
 extern template bool
-WalManager::Insert<uint8_t>(const std::string& table_id, const std::string& partition_tag, const IDNumbers& vector_ids,
-                            const std::vector<uint8_t>& vectors);
+WalManager::Insert<uint8_t>(const std::string& collection_id, const std::string& partition_tag,
+                            const IDNumbers& vector_ids, const std::vector<uint8_t>& vectors);
 
 }  // namespace wal
 }  // namespace engine

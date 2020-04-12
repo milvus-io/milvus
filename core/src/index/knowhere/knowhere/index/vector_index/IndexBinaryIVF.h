@@ -16,71 +16,80 @@
 #include <utility>
 #include <vector>
 
-#include <faiss/utils/ConcurrentBitset.h>
-#include "FaissBaseBinaryIndex.h"
-#include "VectorIndex.h"
-#include "faiss/IndexIVF.h"
+#include <faiss/IndexIVF.h>
 
+#include "knowhere/common/Exception.h"
+#include "knowhere/index/vector_index/FaissBaseBinaryIndex.h"
+#include "knowhere/index/vector_index/VecIndex.h"
+
+namespace milvus {
 namespace knowhere {
 
-class BinaryIVF : public VectorIndex, public FaissBaseBinaryIndex {
+class BinaryIVF : public VecIndex, public FaissBaseBinaryIndex {
  public:
     BinaryIVF() : FaissBaseBinaryIndex(nullptr) {
+        index_type_ = IndexEnum::INDEX_FAISS_BIN_IVFFLAT;
     }
 
     explicit BinaryIVF(std::shared_ptr<faiss::IndexBinary> index) : FaissBaseBinaryIndex(std::move(index)) {
+        index_type_ = IndexEnum::INDEX_FAISS_BIN_IVFFLAT;
     }
 
     BinarySet
-    Serialize() override;
+    Serialize(const Config& config = Config()) override;
+
+    void
+    BuildAll(const DatasetPtr& dataset_ptr, const Config& config) override {
+        Train(dataset_ptr, config);
+    }
 
     void
     Load(const BinarySet& index_binary) override;
 
+    void
+    Train(const DatasetPtr& dataset_ptr, const Config& config) override;
+
+    void
+    Add(const DatasetPtr& dataset_ptr, const Config& config) override {
+        KNOWHERE_THROW_MSG("not support yet");
+    }
+
+    void
+    AddWithoutIds(const DatasetPtr&, const Config&) override {
+        KNOWHERE_THROW_MSG("AddWithoutIds is not supported");
+    }
+
     DatasetPtr
-    Search(const DatasetPtr& dataset, const Config& config) override;
+    Query(const DatasetPtr& dataset_ptr, const Config& config) override;
 
-    void
-    Add(const DatasetPtr& dataset, const Config& config) override;
-
-    void
-    Seal() override;
-
-    IndexModelPtr
-    Train(const DatasetPtr& dataset, const Config& config) override;
+    DatasetPtr
+    QueryById(const DatasetPtr& dataset_ptr, const Config& config) override;
 
     int64_t
-    Count() override;
+    Count() override {
+        return index_->ntotal;
+    }
 
     int64_t
-    Dimension() override;
+    Dim() override {
+        return index_->d;
+    }
 
     DatasetPtr
-    GetVectorById(const DatasetPtr& dataset, const Config& config);
-
-    DatasetPtr
-    SearchById(const DatasetPtr& dataset, const Config& config);
-
-    void
-    SetBlacklist(faiss::ConcurrentBitsetPtr list);
-
-    void
-    GetBlacklist(faiss::ConcurrentBitsetPtr& list);
+    GetVectorById(const DatasetPtr& dataset_ptr, const Config& config);
 
  protected:
     virtual std::shared_ptr<faiss::IVFSearchParameters>
     GenParams(const Config& config);
 
     virtual void
-    search_impl(int64_t n, const uint8_t* data, int64_t k, float* distances, int64_t* labels, const Config& cfg);
+    QueryImpl(int64_t n, const uint8_t* data, int64_t k, float* distances, int64_t* labels, const Config& config);
 
  protected:
     std::mutex mutex_;
-
- private:
-    faiss::ConcurrentBitsetPtr bitset_ = nullptr;
 };
 
 using BinaryIVFIndexPtr = std::shared_ptr<BinaryIVF>;
 
 }  // namespace knowhere
+}  // namespace milvus

@@ -38,6 +38,7 @@ enum class IndexType {
     SPTAGKDT = 7,
     SPTAGBKT = 8,
     HNSW = 11,
+    ANNOY = 12,
 };
 
 enum class MetricType {
@@ -46,6 +47,8 @@ enum class MetricType {
     HAMMING = 3,   // Hamming Distance
     JACCARD = 4,   // Jaccard Distance
     TANIMOTO = 5,  // Tanimoto Distance
+    SUBSTRUCTURE = 6,   // Substructure Distance
+    SUPERSTRUCTURE = 7,  // Superstructure Distance
 };
 
 /**

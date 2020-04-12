@@ -231,9 +231,8 @@ struct IVFSQScannerIP: InvertedListScanner {
                 float accu = accu0 + dc.query_to_code (codes);
 
                 if (accu > simi [0]) {
-                    minheap_pop (k, simi, idxi);
                     int64_t id = store_pairs ? (list_no << 32 | j) : ids[j];
-                    minheap_push (k, simi, idxi, accu, id);
+                    minheap_swap_top (k, simi, idxi, accu, id);
                     nup++;
                 }
             }
@@ -246,7 +245,8 @@ struct IVFSQScannerIP: InvertedListScanner {
                            const uint8_t *codes,
                            const idx_t *ids,
                            float radius,
-                           RangeQueryResult & res) const override
+                           RangeQueryResult & res,
+                           ConcurrentBitsetPtr bitset = nullptr) const override
     {
         for (size_t j = 0; j < list_size; j++) {
             float accu = accu0 + dc.query_to_code (codes);
@@ -318,9 +318,8 @@ struct IVFSQScannerL2: InvertedListScanner {
                 float dis = dc.query_to_code (codes);
 
                 if (dis < simi [0]) {
-                    maxheap_pop (k, simi, idxi);
                     int64_t id = store_pairs ? (list_no << 32 | j) : ids[j];
-                    maxheap_push (k, simi, idxi, dis, id);
+                    maxheap_swap_top (k, simi, idxi, dis, id);
                     nup++;
                 }
             }
@@ -333,7 +332,8 @@ struct IVFSQScannerL2: InvertedListScanner {
                            const uint8_t *codes,
                            const idx_t *ids,
                            float radius,
-                           RangeQueryResult & res) const override
+                           RangeQueryResult & res,
+                           ConcurrentBitsetPtr bitset = nullptr) const override
     {
         for (size_t j = 0; j < list_size; j++) {
             float dis = dc.query_to_code (codes);

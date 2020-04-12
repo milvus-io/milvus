@@ -159,9 +159,8 @@ struct IVFFlatScanner: InvertedListScanner {
                 float dis = metric == METRIC_INNER_PRODUCT ?
                             fvec_inner_product (xi, yj, d) : fvec_L2sqr (xi, yj, d);
                 if (C::cmp (simi[0], dis)) {
-                    heap_pop<C> (k, simi, idxi);
                     int64_t id = store_pairs ? (list_no << 32 | j) : ids[j];
-                    heap_push<C> (k, simi, idxi, dis, id);
+                    heap_swap_top<C> (k, simi, idxi, dis, id);
                     nup++;
                 }
             }
@@ -173,7 +172,8 @@ struct IVFFlatScanner: InvertedListScanner {
                            const uint8_t *codes,
                            const idx_t *ids,
                            float radius,
-                           RangeQueryResult & res) const override
+                           RangeQueryResult & res,
+                           ConcurrentBitsetPtr bitset = nullptr) const override
     {
         const float *list_vecs = (const float*)codes;
         for (size_t j = 0; j < list_size; j++) {
@@ -483,7 +483,8 @@ void IndexIVFFlatDedup::range_search(
         idx_t ,
         const float* ,
         float ,
-        RangeSearchResult* ) const
+        RangeSearchResult* ,
+        ConcurrentBitsetPtr) const
 {
     FAISS_THROW_MSG ("not implemented");
 }

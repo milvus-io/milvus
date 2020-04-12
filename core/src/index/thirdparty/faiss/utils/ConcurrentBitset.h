@@ -19,7 +19,7 @@
 
 #include <atomic>
 #include <memory>
-#include <deque>
+#include <vector>
 
 namespace faiss {
 
@@ -42,9 +42,19 @@ class ConcurrentBitset {
     void
     clear(id_type_t id);
 
+    size_t
+    capacity();
+
+    size_t
+    size();
+
+    const uint8_t*
+    data();
+
  private:
-    std::deque<std::atomic<unsigned char>> bitset_;
-    id_type_t size_;
+    size_t capacity_;
+    std::vector<std::atomic<uint8_t>> bitset_;
+
 };
 
 using ConcurrentBitsetPtr = std::shared_ptr<ConcurrentBitset>;

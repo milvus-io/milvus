@@ -25,23 +25,23 @@ namespace engine {
 class IndexFailedChecker {
  public:
     Status
-    CleanFailedIndexFileOfTable(const std::string& table_id);
+    CleanFailedIndexFileOfCollection(const std::string& collection_id);
 
     Status
-    GetErrMsgForTable(const std::string& table_id, std::string& err_msg);
+    GetErrMsgForCollection(const std::string& collection_id, std::string& err_msg);
 
     Status
-    MarkFailedIndexFile(const meta::TableFileSchema& file, const std::string& err_msg);
+    MarkFailedIndexFile(const meta::SegmentSchema& file, const std::string& err_msg);
 
     Status
-    MarkSucceedIndexFile(const meta::TableFileSchema& file);
+    MarkSucceedIndexFile(const meta::SegmentSchema& file);
 
     Status
-    IgnoreFailedIndexFiles(meta::TableFilesSchema& table_files);
+    IgnoreFailedIndexFiles(meta::SegmentsSchema& table_files);
 
  private:
     std::mutex mutex_;
-    Table2FileErr index_failed_files_;  // table id mapping to (file id mapping to failed times)
+    Table2FileErr index_failed_files_;  // collection id mapping to (file id mapping to failed times)
 };
 
 }  // namespace engine

@@ -57,8 +57,8 @@ static const char* CONFIG_DB_ARCHIVE_DISK_THRESHOLD = "archive_disk_threshold";
 static const char* CONFIG_DB_ARCHIVE_DISK_THRESHOLD_DEFAULT = "0";
 static const char* CONFIG_DB_ARCHIVE_DAYS_THRESHOLD = "archive_days_threshold";
 static const char* CONFIG_DB_ARCHIVE_DAYS_THRESHOLD_DEFAULT = "0";
-static const char* CONFIG_DB_PRELOAD_TABLE = "preload_table";
-static const char* CONFIG_DB_PRELOAD_TABLE_DEFAULT = "";
+static const char* CONFIG_DB_PRELOAD_COLLECTION = "preload_table";
+static const char* CONFIG_DB_PRELOAD_COLLECTION_DEFAULT = "";
 static const char* CONFIG_DB_AUTO_FLUSH_INTERVAL = "auto_flush_interval";
 static const char* CONFIG_DB_AUTO_FLUSH_INTERVAL_DEFAULT = "1";
 
@@ -86,7 +86,7 @@ static const char* CONFIG_CACHE = "cache_config";
 static const char* CONFIG_CACHE_CPU_CACHE_CAPACITY = "cpu_cache_capacity";
 static const char* CONFIG_CACHE_CPU_CACHE_CAPACITY_DEFAULT = "4";
 static const char* CONFIG_CACHE_CPU_CACHE_THRESHOLD = "cpu_cache_threshold";
-static const char* CONFIG_CACHE_CPU_CACHE_THRESHOLD_DEFAULT = "0.85";
+static const char* CONFIG_CACHE_CPU_CACHE_THRESHOLD_DEFAULT = "0.7";
 static const char* CONFIG_CACHE_INSERT_BUFFER_SIZE = "insert_buffer_size";
 static const char* CONFIG_CACHE_INSERT_BUFFER_SIZE_DEFAULT = "1";
 static const char* CONFIG_CACHE_CACHE_INSERT_DATA = "cache_insert_data";
@@ -123,7 +123,7 @@ static const char* CONFIG_GPU_RESOURCE_ENABLE_DEFAULT = "false";
 static const char* CONFIG_GPU_RESOURCE_CACHE_CAPACITY = "cache_capacity";
 static const char* CONFIG_GPU_RESOURCE_CACHE_CAPACITY_DEFAULT = "1";
 static const char* CONFIG_GPU_RESOURCE_CACHE_THRESHOLD = "cache_threshold";
-static const char* CONFIG_GPU_RESOURCE_CACHE_THRESHOLD_DEFAULT = "0.85";
+static const char* CONFIG_GPU_RESOURCE_CACHE_THRESHOLD_DEFAULT = "0.7";
 static const char* CONFIG_GPU_RESOURCE_DELIMITER = ",";
 static const char* CONFIG_GPU_RESOURCE_SEARCH_RESOURCES = "search_resources";
 static const char* CONFIG_GPU_RESOURCE_SEARCH_RESOURCES_DEFAULT = "gpu0";
@@ -161,7 +161,7 @@ class Config {
     Status
     ResetDefaultConfig();
     void
-    GetConfigJsonStr(std::string& result);
+    GetConfigJsonStr(std::string& result, int64_t indent = -1);
     Status
     ProcessConfigCli(std::string& result, const std::string& cmd);
 
@@ -214,7 +214,7 @@ class Config {
     Status
     CheckDBConfigBackendUrl(const std::string& value);
     Status
-    CheckDBConfigPreloadTable(const std::string& value);
+    CheckDBConfigPreloadCollection(const std::string& value);
     Status
     CheckDBConfigArchiveDiskThreshold(const std::string& value);
     Status
@@ -329,7 +329,7 @@ class Config {
     Status
     GetDBConfigArchiveDaysThreshold(int64_t& value);
     Status
-    GetDBConfigPreloadTable(std::string& value);
+    GetDBConfigPreloadCollection(std::string& value);
     Status
     GetDBConfigAutoFlushInterval(int64_t& value);
 
@@ -428,7 +428,7 @@ class Config {
     Status
     SetDBConfigBackendUrl(const std::string& value);
     Status
-    SetDBConfigPreloadTable(const std::string& value);
+    SetDBConfigPreloadCollection(const std::string& value);
     Status
     SetDBConfigArchiveDiskThreshold(const std::string& value);
     Status

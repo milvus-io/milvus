@@ -2,8 +2,10 @@ import os
 import logging
 import pytest
 import grpc
+import mock
 import tempfile
 import shutil
+import time
 from mishards import settings, db, create_app
 
 logger = logging.getLogger(__name__)
@@ -18,6 +20,9 @@ settings.TestingConfig.SQLALCHEMY_DATABASE_URI = 'sqlite:///{}?check_same_thread
 
 @pytest.fixture
 def app(request):
+    from mishards.connections import ConnectionGroup
+    ConnectionGroup.on_pre_add = mock.MagicMock(return_value=(True,))
+    time.sleep(0.1)
     app = create_app(settings.TestingConfig)
     db.drop_all()
     db.create_all()

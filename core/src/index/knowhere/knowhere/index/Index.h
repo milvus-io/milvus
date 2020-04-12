@@ -7,56 +7,44 @@
 //
 // Unless required by applicable law or agreed to in writing, software distributed under the License
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
-// or implied. See the License for the specific language governing permissions and limitations under the License.
+// or implied. See the License for the specific language governing permissions and limitations under the License
 
 #pragma once
 
 #include <memory>
 
-#include "IndexModel.h"
-#include "IndexType.h"
+#include "cache/DataObj.h"
 #include "knowhere/common/BinarySet.h"
 #include "knowhere/common/Config.h"
-#include "knowhere/common/Dataset.h"
-#include "knowhere/index/preprocessor/Preprocessor.h"
 
+namespace milvus {
 namespace knowhere {
 
-class Index {
+class Index : public milvus::cache::DataObj {
  public:
     virtual BinarySet
-    Serialize() = 0;
+    Serialize(const Config& config = Config()) = 0;
 
     virtual void
-    Load(const BinarySet& index_binary) = 0;
-
-    // @throw
-    virtual DatasetPtr
-    Search(const DatasetPtr& dataset, const Config& config) = 0;
-
- public:
-    IndexType
-    idx_type() const {
-        return idx_type_;
-    }
-
-    void
-    set_idx_type(IndexType idx_type) {
-        idx_type_ = idx_type;
-    }
-
-    virtual void
-    set_preprocessor(PreprocessorPtr preprocessor) {
-    }
-
-    virtual void
-    set_index_model(IndexModelPtr model) {
-    }
-
- private:
-    IndexType idx_type_;
+    Load(const BinarySet&) = 0;
 };
 
 using IndexPtr = std::shared_ptr<Index>;
 
+// todo: remove from knowhere
+class ToIndexData : public milvus::cache::DataObj {
+ public:
+    explicit ToIndexData(int64_t size) : size_(size) {
+    }
+
+    int64_t
+    Size() override {
+        return size_;
+    }
+
+ private:
+    int64_t size_ = 0;
+};
+
 }  // namespace knowhere
+}  // namespace milvus

@@ -11,81 +11,81 @@
 
 #pragma once
 
-#include <faiss/utils/ConcurrentBitset.h>
 #include <memory>
 #include <mutex>
 #include <utility>
 #include <vector>
 
-#include "FaissBaseBinaryIndex.h"
-#include "VectorIndex.h"
+#include "knowhere/index/vector_index/FaissBaseBinaryIndex.h"
+#include "knowhere/index/vector_index/VecIndex.h"
 
+namespace milvus {
 namespace knowhere {
 
-class BinaryIDMAP : public VectorIndex, public FaissBaseBinaryIndex {
+class BinaryIDMAP : public VecIndex, public FaissBaseBinaryIndex {
  public:
     BinaryIDMAP() : FaissBaseBinaryIndex(nullptr) {
+        index_type_ = IndexEnum::INDEX_FAISS_BIN_IDMAP;
     }
 
     explicit BinaryIDMAP(std::shared_ptr<faiss::IndexBinary> index) : FaissBaseBinaryIndex(std::move(index)) {
+        index_type_ = IndexEnum::INDEX_FAISS_BIN_IDMAP;
     }
 
     BinarySet
-    Serialize() override;
+    Serialize(const Config& config = Config()) override;
 
     void
     Load(const BinarySet& index_binary) override;
 
+    void
+    Train(const DatasetPtr&, const Config&) override;
+
+    void
+    Add(const DatasetPtr&, const Config&) override;
+
+    void
+    AddWithoutIds(const DatasetPtr&, const Config&) override;
+
     DatasetPtr
-    Search(const DatasetPtr& dataset, const Config& config) override;
+    Query(const DatasetPtr&, const Config&) override;
 
-    void
-    Add(const DatasetPtr& dataset, const Config& config) override;
-
-    void
-    AddWithoutId(const DatasetPtr& dataset, const Config& config);
-
-    void
-    Train(const Config& config);
+    DatasetPtr
+    QueryById(const DatasetPtr& dataset_ptr, const Config& config) override;
 
     int64_t
-    Count() override;
+    Count() override {
+        return index_->ntotal;
+    }
 
     int64_t
-    Dimension() override;
+    Dim() override {
+        return index_->d;
+    }
 
-    void
-    Seal() override;
+    int64_t
+    IndexSize() override {
+        return Count() * Dim() / 8;
+    }
 
-    const uint8_t*
+    DatasetPtr
+    GetVectorById(const DatasetPtr& dataset_ptr, const Config& config) override;
+
+    virtual const uint8_t*
     GetRawVectors();
 
-    const int64_t*
+    virtual const int64_t*
     GetRawIds();
-
-    DatasetPtr
-    GetVectorById(const DatasetPtr& dataset, const Config& config) override;
-
-    DatasetPtr
-    SearchById(const DatasetPtr& dataset, const Config& config) override;
-
-    void
-    SetBlacklist(faiss::ConcurrentBitsetPtr list);
-
-    void
-    GetBlacklist(faiss::ConcurrentBitsetPtr& list);
 
  protected:
     virtual void
-    search_impl(int64_t n, const uint8_t* data, int64_t k, float* distances, int64_t* labels, const Config& cfg);
+    QueryImpl(int64_t n, const uint8_t* data, int64_t k, float* distances, int64_t* labels, const Config& config);
 
  protected:
     std::mutex mutex_;
-
- private:
-    faiss::ConcurrentBitsetPtr bitset_ = nullptr;
 };
 
 using BinaryIDMAPPtr = std::shared_ptr<BinaryIDMAP>;
 
 }  // namespace knowhere
+}  // namespace milvus

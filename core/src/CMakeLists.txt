@@ -79,11 +79,13 @@ set(thirdparty_files
 aux_source_directory(${MILVUS_ENGINE_SRC}/server server_service_files)
 aux_source_directory(${MILVUS_ENGINE_SRC}/server/delivery/request delivery_request_files)
 aux_source_directory(${MILVUS_ENGINE_SRC}/server/delivery/hybrid_request delivery_hybrid_request_files)
+aux_source_directory(${MILVUS_ENGINE_SRC}/server/delivery/strategy delivery_strategy_files)
 aux_source_directory(${MILVUS_ENGINE_SRC}/server/delivery delivery_files)
 set(server_files
         ${server_service_files}
         ${delivery_request_files}
         ${delivery_hybrid_request_files}
+        ${delivery_strategy_files}
         ${delivery_files}
         )
 
@@ -113,16 +115,16 @@ set(web_server_files
 
 aux_source_directory(${MILVUS_ENGINE_SRC}/storage storage_main_files)
 aux_source_directory(${MILVUS_ENGINE_SRC}/storage/disk storage_disk_files)
-aux_source_directory(${MILVUS_ENGINE_SRC}/storage/s3 storage_s3_files)
+#aux_source_directory(${MILVUS_ENGINE_SRC}/storage/s3 storage_s3_files)
 set(storage_files
         ${storage_main_files}
         ${storage_disk_files}
-        ${storage_s3_files}
+#        ${storage_s3_files}
         )
 
 aux_source_directory(${MILVUS_ENGINE_SRC}/utils utils_files)
 
-aux_source_directory(${MILVUS_ENGINE_SRC}/wrapper wrapper_files)
+aux_source_directory(${MILVUS_ENGINE_SRC}/index/archive wrapper_files)
 
 aux_source_directory(${MILVUS_ENGINE_SRC}/tracing tracing_files)
 
@@ -188,9 +190,6 @@ set(third_party_libs
         zlib
         fiu
         ${boost_lib}
-        ${s3_client_lib}
-        curl
-        crypto
         )
 
 if (MILVUS_GPU_VERSION)
@@ -220,6 +219,14 @@ endif ()
 if (MILVUS_WITH_PROMETHEUS)
     set(third_party_libs ${third_party_libs}
             ${prometheus_lib}
+            )
+endif ()
+
+if (MILVUS_WITH_AWS)
+    set(third_party_libs ${third_party_libs}
+            ${s3_client_lib}
+            curl
+            crypto
             )
 endif ()
 

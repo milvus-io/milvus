@@ -9,15 +9,17 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
-#include <faiss/utils/distances.h>
+#include "server/DBWrapper.h"
+
 #include <omp.h>
 #include <cmath>
 #include <string>
 #include <vector>
 
+#include <faiss/utils/distances.h>
+
 #include "config/Config.h"
 #include "db/DBFactory.h"
-#include "server/DBWrapper.h"
 #include "utils/CommonUtil.h"
 #include "utils/Log.h"
 #include "utils/StringHelpFunctions.h"
@@ -145,19 +147,7 @@ DBWrapper::StartService() {
         std::cerr << s.ToString() << std::endl;
         return s;
     }
-
     faiss::distance_compute_blas_threshold = use_blas_threshold;
-    server::ConfigCallBackF lambda = [](const std::string& value) -> Status {
-        Config& config = Config::GetInstance();
-        int64_t blas_threshold;
-        auto status = config.GetEngineConfigUseBlasThreshold(blas_threshold);
-        if (status.ok()) {
-            faiss::distance_compute_blas_threshold = blas_threshold;
-        }
-
-        return status;
-    };
-    config.RegisterCallBack(server::CONFIG_ENGINE, server::CONFIG_ENGINE_USE_BLAS_THRESHOLD, "DBWrapper", lambda);
 
     // set archive config
     engine::ArchiveConf::CriteriaT criterial;
@@ -214,15 +204,15 @@ DBWrapper::StartService() {
 
     db_->Start();
 
-    // preload table
+    // preload collection
     std::string preload_tables;
-    s = config.GetDBConfigPreloadTable(preload_tables);
+    s = config.GetDBConfigPreloadCollection(preload_tables);
     if (!s.ok()) {
         std::cerr << s.ToString() << std::endl;
         return s;
     }
 
-    s = PreloadTables(preload_tables);
+    s = PreloadCollections(preload_tables);
     if (!s.ok()) {
         std::cerr << "ERROR! Failed to preload tables: " << preload_tables << std::endl;
         std::cerr << s.ToString() << std::endl;
@@ -242,25 +232,25 @@ DBWrapper::StopService() {
 }
 
 Status
-DBWrapper::PreloadTables(const std::string& preload_tables) {
+DBWrapper::PreloadCollections(const std::string& preload_tables) {
     if (preload_tables.empty()) {
         // do nothing
     } else if (preload_tables == "*") {
         // load all tables
-        std::vector<engine::meta::TableSchema> table_schema_array;
-        db_->AllTables(table_schema_array);
+        std::vector<engine::meta::CollectionSchema> table_schema_array;
+        db_->AllCollections(table_schema_array);
 
         for (auto& schema : table_schema_array) {
-            auto status = db_->PreloadTable(schema.table_id_);
+            auto status = db_->PreloadCollection(schema.collection_id_);
             if (!status.ok()) {
                 return status;
             }
         }
     } else {
-        std::vector<std::string> table_names;
-        StringHelpFunctions::SplitStringByDelimeter(preload_tables, ",", table_names);
-        for (auto& name : table_names) {
-            auto status = db_->PreloadTable(name);
+        std::vector<std::string> collection_names;
+        StringHelpFunctions::SplitStringByDelimeter(preload_tables, ",", collection_names);
+        for (auto& name : collection_names) {
+            auto status = db_->PreloadCollection(name);
             if (!status.ok()) {
                 return status;
             }

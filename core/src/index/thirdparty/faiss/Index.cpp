@@ -30,7 +30,8 @@ void Index::train(idx_t /*n*/, const float* /*x*/) {
 
 
 void Index::range_search (idx_t , const float *, float,
-                          RangeSearchResult *) const
+                          RangeSearchResult *,
+                          ConcurrentBitsetPtr) const
 {
   FAISS_THROW_MSG ("range search not implemented");
 }

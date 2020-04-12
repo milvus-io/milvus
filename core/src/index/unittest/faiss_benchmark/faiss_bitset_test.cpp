@@ -29,20 +29,15 @@
 #include <faiss/AutoTune.h>
 #include <faiss/Index.h>
 #include <faiss/IndexIVF.h>
-#include <faiss/gpu/GpuIndexFlat.h>
-#include <faiss/gpu/StandardGpuResources.h>
-#include <faiss/index_io.h>
-
 #include <faiss/gpu/GpuCloner.h>
+#include <faiss/gpu/GpuIndexFlat.h>
+#include <faiss/gpu/GpuIndexIVF.h>
+#include <faiss/gpu/GpuIndexIVFSQHybrid.h>
+#include <faiss/gpu/StandardGpuResources.h>
 #include <faiss/index_factory.h>
+#include <faiss/index_io.h>
 #include <faiss/utils/ConcurrentBitset.h>
 #include <faiss/utils/distances.h>
-
-#ifdef CUSTOMIZATION
-#include <faiss/gpu/GpuIndexIVFSQHybrid.h>
-#else
-#include <faiss/gpu/GpuIndexIVF.h>
-#endif
 
 /*****************************************************
  * To run this test, please download the HDF5 from
@@ -284,12 +279,10 @@ load_base_data(faiss::Index*& index, const std::string& ann_test_name, const std
         cpu_index = faiss::gpu::index_gpu_to_cpu(gpu_index);
         delete gpu_index;
 
-#ifdef CUSTOMIZATION
         faiss::IndexIVF* cpu_ivf_index = dynamic_cast<faiss::IndexIVF*>(cpu_index);
         if (cpu_ivf_index != nullptr) {
             cpu_ivf_index->to_readonly();
         }
-#endif
 
         printf("[%.3f s] Writing index file: %s\n", elapsed() - t0, index_file_name.c_str());
         faiss::write_index(cpu_index, index_file_name.c_str());
@@ -381,15 +374,12 @@ test_with_nprobes(const std::string& ann_test_name, const std::string& index_key
     faiss::Index *gpu_index, *index;
     if (query_mode != MODE_CPU) {
         faiss::gpu::GpuClonerOptions option;
-#ifdef CUSTOMIZATION
         option.allInGpu = true;
 
         faiss::IndexComposition index_composition;
         index_composition.index = cpu_index;
         index_composition.quantizer = nullptr;
-#endif
         switch (query_mode) {
-#ifdef CUSTOMIZATION
             case MODE_MIX: {
                 index_composition.mode = 1;  // 0: all data, 1: copy quantizer, 2: copy data
 
@@ -412,9 +402,8 @@ test_with_nprobes(const std::string& ann_test_name, const std::string& index_key
                 index = cpu_index;
                 break;
             }
-#endif
             case MODE_GPU:
-#ifdef CUSTOMIZATION
+#if 1
                 index_composition.mode = 0;  // 0: all data, 1: copy quantizer, 2: copy data
 
                 // warm up the transmission

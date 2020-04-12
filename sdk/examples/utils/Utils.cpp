@@ -77,6 +77,8 @@ Utils::MetricTypeName(const milvus::MetricType& metric_type) {
         case milvus::MetricType::HAMMING:return "Hamming distance";
         case milvus::MetricType::JACCARD:return "Jaccard distance";
         case milvus::MetricType::TANIMOTO:return "Tanimoto distance";
+        case milvus::MetricType::SUBSTRUCTURE:return "Substructure distance";
+        case milvus::MetricType::SUPERSTRUCTURE:return "Superstructure distance";
         default:return "Unknown metric type";
     }
 }
@@ -92,6 +94,8 @@ Utils::IndexTypeName(const milvus::IndexType& index_type) {
         case milvus::IndexType::IVFPQ:return "IVFPQ";
         case milvus::IndexType::SPTAGKDT:return "SPTAGKDT";
         case milvus::IndexType::SPTAGBKT:return "SPTAGBKT";
+        case milvus::IndexType::HNSW:return "HNSW";
+        case milvus::IndexType::ANNOY:return "ANNOY";
         default:return "Unknown index type";
     }
 }

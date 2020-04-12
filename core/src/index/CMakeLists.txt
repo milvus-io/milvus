@@ -66,11 +66,6 @@ include(ExternalProject)
 include(DefineOptionsCore)
 include(BuildUtilsCore)
 
-if (CUSTOMIZATION)
-    add_compile_definitions(CUSTOMIZATION)
-endif ()
-
-set(KNOWHERE_CPU_VERSION false)
 if (MILVUS_GPU_VERSION OR KNOWHERE_GPU_VERSION)
     message(STATUS "Building Knowhere GPU version")
     add_compile_definitions("MILVUS_GPU_VERSION")
@@ -79,8 +74,6 @@ if (MILVUS_GPU_VERSION OR KNOWHERE_GPU_VERSION)
     set(CUDA_NVCC_FLAGS "${CUDA_NVCC_FLAGS} -Xcompiler -fPIC -std=c++11 -D_FORCE_INLINES --expt-extended-lambda")
 else ()
     message(STATUS "Building Knowhere CPU version")
-    set(KNOWHERE_CPU_VERSION true)
-    add_compile_definitions("MILVUS_CPU_VERSION")
 endif ()
 
 include(ThirdPartyPackagesCore)
@@ -106,6 +99,7 @@ endif ()
 set(INDEX_INCLUDE_DIRS ${INDEX_INCLUDE_DIRS} PARENT_SCOPE)
 
 if (KNOWHERE_BUILD_TESTS)
+	set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DELPP_DISABLE_LOGS")
     add_subdirectory(unittest)
 endif ()
 

@@ -70,7 +70,12 @@ SegmentWriter::AddAttrs(const std::string& name,
         }
 
     }
+    return Status::OK();
+}
 
+Status
+SegmentWriter::SetVectorIndex(const milvus::knowhere::VecIndexPtr& index) {
+    segment_ptr_->vector_index_ptr_->SetVectorIndex(index);
     return Status::OK();
 }
 
@@ -80,6 +85,7 @@ SegmentWriter::Serialize() {
 
     auto status = WriteBloomFilter();
     if (!status.ok()) {
+        ENGINE_LOG_ERROR << status.message();
         return status;
     }
 
@@ -89,8 +95,10 @@ SegmentWriter::Serialize() {
 
     start = std::chrono::high_resolution_clock::now();
 
+    ENGINE_LOG_DEBUG << "Write vectors";
     status = WriteVectors();
     if (!status.ok()) {
+        ENGINE_LOG_ERROR << "Write vectors fail: " << status.message();
         return status;
     }
 
@@ -144,7 +152,20 @@ SegmentWriter::WriteAttrs() {
         ENGINE_LOG_ERROR << err_msg;
         return Status(SERVER_WRITE_ERROR, err_msg);
     }
+    return Status::OK();
+}
 
+Status
+SegmentWriter::WriteVectorIndex(const std::string& location) {
+    codec::DefaultCodec default_codec;
+    try {
+        fs_ptr_->operation_ptr_->CreateDirectory();
+        default_codec.GetVectorIndexFormat()->write(fs_ptr_, location, segment_ptr_->vector_index_ptr_);
+    } catch (std::exception& e) {
+        std::string err_msg = "Failed to write vector index: " + std::string(e.what());
+        ENGINE_LOG_ERROR << err_msg;
+        return Status(SERVER_WRITE_ERROR, err_msg);
+    }
     return Status::OK();
 }
 
@@ -319,13 +340,14 @@ SegmentWriter::Merge(const std::string& dir_to_merge, const std::string& name) {
 size_t
 SegmentWriter::Size() {
     // TODO(zhiru): switch to actual directory size
-    size_t ret = segment_ptr_->vectors_ptr_->Size();
+    size_t vectors_size = segment_ptr_->vectors_ptr_->VectorsSize();
+    size_t uids_size = segment_ptr_->vectors_ptr_->UidsSize();
     /*
     if (segment_ptr_->id_bloom_filter_ptr_) {
         ret += segment_ptr_->id_bloom_filter_ptr_->Size();
     }
      */
-    return ret;
+    return (vectors_size * sizeof(uint8_t) + uids_size * sizeof(doc_id_t));
 }
 
 size_t

@@ -12,6 +12,7 @@
 #pragma once
 
 #include <fstream>
+#include <memory>
 #include <string>
 #include "storage/IOReader.h"
 
@@ -32,16 +33,16 @@ class DiskIOReader : public IOReader {
     DiskIOReader&
     operator=(DiskIOReader&&) = delete;
 
-    void
+    bool
     open(const std::string& name) override;
 
     void
-    read(void* ptr, size_t size) override;
+    read(void* ptr, int64_t size) override;
 
     void
-    seekg(size_t pos) override;
+    seekg(int64_t pos) override;
 
-    size_t
+    int64_t
     length() override;
 
     void
@@ -51,6 +52,8 @@ class DiskIOReader : public IOReader {
     std::string name_;
     std::fstream fs_;
 };
+
+using DiskIOReaderPtr = std::shared_ptr<DiskIOReader>;
 
 }  // namespace storage
 }  // namespace milvus

@@ -39,12 +39,12 @@ enum StatusCode : int {
     UNEXPECTED_ERROR = 1,
     CONNECT_FAILED = 2,  // reserved.
     PERMISSION_DENIED = 3,
-    TABLE_NOT_EXISTS = 4,  // DB_NOT_FOUND || TABLE_NOT_EXISTS
+    COLLECTION_NOT_EXISTS = 4,  // DB_NOT_FOUND || COLLECTION_NOT_EXISTS
     ILLEGAL_ARGUMENT = 5,
     ILLEGAL_RANGE = 6,
     ILLEGAL_DIMENSION = 7,
     ILLEGAL_INDEX_TYPE = 8,
-    ILLEGAL_TABLE_NAME = 9,
+    ILLEGAL_COLLECTION_NAME = 9,
     ILLEGAL_TOPK = 10,
     ILLEGAL_ROWRECORD = 11,
     ILLEGAL_VECTOR_ID = 12,
@@ -81,6 +81,7 @@ static const std::unordered_map<engine::EngineType, std::string> IndexMap = {
     {engine::EngineType::NSG_MIX, NAME_ENGINE_TYPE_RNSG},
     {engine::EngineType::FAISS_PQ, NAME_ENGINE_TYPE_IVFPQ},
     {engine::EngineType::HNSW, NAME_ENGINE_TYPE_HNSW},
+    {engine::EngineType::ANNOY, NAME_ENGINE_TYPE_ANNOY},
 };
 
 static const std::unordered_map<std::string, engine::EngineType> IndexNameMap = {
@@ -91,6 +92,7 @@ static const std::unordered_map<std::string, engine::EngineType> IndexNameMap = 
     {NAME_ENGINE_TYPE_RNSG, engine::EngineType::NSG_MIX},
     {NAME_ENGINE_TYPE_IVFPQ, engine::EngineType::FAISS_PQ},
     {NAME_ENGINE_TYPE_HNSW, engine::EngineType::HNSW},
+    {NAME_ENGINE_TYPE_ANNOY, engine::EngineType::ANNOY},
 };
 
 static const std::unordered_map<engine::MetricType, std::string> MetricMap = {
@@ -99,6 +101,8 @@ static const std::unordered_map<engine::MetricType, std::string> MetricMap = {
     {engine::MetricType::HAMMING, NAME_METRIC_TYPE_HAMMING},
     {engine::MetricType::JACCARD, NAME_METRIC_TYPE_JACCARD},
     {engine::MetricType::TANIMOTO, NAME_METRIC_TYPE_TANIMOTO},
+    {engine::MetricType::SUBSTRUCTURE, NAME_METRIC_TYPE_SUBSTRUCTURE},
+    {engine::MetricType::SUPERSTRUCTURE, NAME_METRIC_TYPE_SUPERSTRUCTURE},
 };
 
 static const std::unordered_map<std::string, engine::MetricType> MetricNameMap = {
@@ -107,6 +111,8 @@ static const std::unordered_map<std::string, engine::MetricType> MetricNameMap =
     {NAME_METRIC_TYPE_HAMMING, engine::MetricType::HAMMING},
     {NAME_METRIC_TYPE_JACCARD, engine::MetricType::JACCARD},
     {NAME_METRIC_TYPE_TANIMOTO, engine::MetricType::TANIMOTO},
+    {NAME_METRIC_TYPE_SUBSTRUCTURE, engine::MetricType::SUBSTRUCTURE},
+    {NAME_METRIC_TYPE_SUPERSTRUCTURE, engine::MetricType::SUPERSTRUCTURE},
 };
 
 }  // namespace web

@@ -29,15 +29,15 @@
 namespace milvus {
 namespace server {
 
-DeleteByIDRequest::DeleteByIDRequest(const std::shared_ptr<Context>& context, const std::string& table_name,
-                                     const std::vector<int64_t>& vector_ids)
-    : BaseRequest(context, DDL_DML_REQUEST_GROUP), table_name_(table_name), vector_ids_(vector_ids) {
+DeleteByIDRequest::DeleteByIDRequest(const std::shared_ptr<milvus::server::Context>& context,
+                                     const std::string& collection_name, const std::vector<int64_t>& vector_ids)
+    : BaseRequest(context, BaseRequest::kDeleteByID), collection_name_(collection_name), vector_ids_(vector_ids) {
 }
 
 BaseRequestPtr
-DeleteByIDRequest::Create(const std::shared_ptr<Context>& context, const std::string& table_name,
+DeleteByIDRequest::Create(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name,
                           const std::vector<int64_t>& vector_ids) {
-    return std::shared_ptr<BaseRequest>(new DeleteByIDRequest(context, table_name, vector_ids));
+    return std::shared_ptr<BaseRequest>(new DeleteByIDRequest(context, collection_name, vector_ids));
 }
 
 Status
@@ -46,42 +46,39 @@ DeleteByIDRequest::OnExecute() {
         TimeRecorderAuto rc("DeleteByIDRequest");
 
         // step 1: check arguments
-        auto status = ValidationUtil::ValidateTableName(table_name_);
+        auto status = ValidationUtil::ValidateCollectionName(collection_name_);
         if (!status.ok()) {
             return status;
         }
 
-        // step 2: check table existence
-        engine::meta::TableSchema table_schema;
-        table_schema.table_id_ = table_name_;
-        status = DBWrapper::DB()->DescribeTable(table_schema);
+        // step 2: check collection existence
+        engine::meta::CollectionSchema collection_schema;
+        collection_schema.collection_id_ = collection_name_;
+        status = DBWrapper::DB()->DescribeCollection(collection_schema);
         if (!status.ok()) {
             if (status.code() == DB_NOT_FOUND) {
-                return Status(SERVER_TABLE_NOT_EXIST, TableNotExistMsg(table_name_));
+                return Status(SERVER_COLLECTION_NOT_EXIST, CollectionNotExistMsg(collection_name_));
             } else {
                 return status;
             }
         } else {
-            if (!table_schema.owner_table_.empty()) {
-                return Status(SERVER_INVALID_TABLE_NAME, TableNotExistMsg(table_name_));
+            if (!collection_schema.owner_collection_.empty()) {
+                return Status(SERVER_INVALID_COLLECTION_NAME, CollectionNotExistMsg(collection_name_));
             }
         }
 
-        // Check table's index type supports delete
-        if (table_schema.engine_type_ != (int32_t)engine::EngineType::FAISS_IDMAP &&
-            table_schema.engine_type_ != (int32_t)engine::EngineType::FAISS_BIN_IDMAP &&
-            table_schema.engine_type_ != (int32_t)engine::EngineType::FAISS_IVFFLAT &&
-            table_schema.engine_type_ != (int32_t)engine::EngineType::FAISS_BIN_IVFFLAT &&
-            table_schema.engine_type_ != (int32_t)engine::EngineType::FAISS_IVFSQ8) {
+        // Check collection's index type supports delete
+        if (collection_schema.engine_type_ == (int32_t)engine::EngineType::SPTAG_BKT ||
+            collection_schema.engine_type_ == (int32_t)engine::EngineType::SPTAG_KDT) {
             std::string err_msg =
-                "Index type " + std::to_string(table_schema.engine_type_) + " does not support delete operation";
+                "Index type " + std::to_string(collection_schema.engine_type_) + " does not support delete operation";
             SERVER_LOG_ERROR << err_msg;
             return Status(SERVER_UNSUPPORTED_ERROR, err_msg);
         }
 
         rc.RecordSection("check validation");
 
-        status = DBWrapper::DB()->DeleteVectors(table_name_, vector_ids_);
+        status = DBWrapper::DB()->DeleteVectors(collection_name_, vector_ids_);
         if (!status.ok()) {
             return status;
         }

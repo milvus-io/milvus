@@ -36,8 +36,8 @@
 
 namespace {
 
-static const char* TABLE_NAME = "test_grpc";
-static constexpr int64_t TABLE_DIM = 256;
+static const char* COLLECTION_NAME = "test_grpc";
+static constexpr int64_t COLLECTION_DIM = 256;
 static constexpr int64_t INDEX_FILE_SIZE = 1024;
 static constexpr int64_t VECTOR_COUNT = 1000;
 static constexpr int64_t INSERT_LOOP = 10;
@@ -48,6 +48,21 @@ CopyRowRecord(::milvus::grpc::RowRecord* target, const std::vector<float>& src) 
     auto vector_data = target->mutable_float_data();
     vector_data->Resize(static_cast<int>(src.size()), 0.0);
     memcpy(vector_data->mutable_data(), src.data(), src.size() * sizeof(float));
+}
+
+void
+CopyBinRowRecord(::milvus::grpc::RowRecord* target, const std::vector<uint8_t>& src) {
+    auto vector_data = target->mutable_binary_data();
+    vector_data->resize(static_cast<int>(src.size()));
+    memcpy(vector_data->data(), src.data(), src.size());
+}
+
+void
+SearchFunc(std::shared_ptr<milvus::server::grpc::GrpcRequestHandler> handler,
+           ::grpc::ServerContext* context,
+           std::shared_ptr<::milvus::grpc::SearchParam> request,
+           std::shared_ptr<::milvus::grpc::TopKQueryResult> result) {
+    handler->Search(context, request.get(), result.get());
 }
 
 class RpcHandlerTest : public testing::Test {
@@ -88,7 +103,7 @@ class RpcHandlerTest : public testing::Test {
 
         milvus::server::DBWrapper::GetInstance().StartService();
 
-        // initialize handler, create table
+        // initialize handler, create collection
         handler = std::make_shared<milvus::server::grpc::GrpcRequestHandler>(opentracing::Tracer::Global());
         dummy_context = std::make_shared<milvus::server::Context>("dummy_request_id");
         opentracing::mocktracer::MockTracerOptions tracer_options;
@@ -99,15 +114,15 @@ class RpcHandlerTest : public testing::Test {
         dummy_context->SetTraceContext(trace_context);
         ::grpc::ServerContext context;
         handler->SetContext(&context, dummy_context);
-        ::milvus::grpc::TableSchema request;
+        ::milvus::grpc::CollectionSchema request;
         ::milvus::grpc::Status status;
-        request.set_table_name(TABLE_NAME);
-        request.set_dimension(TABLE_DIM);
+        request.set_collection_name(COLLECTION_NAME);
+        request.set_dimension(COLLECTION_DIM);
         request.set_index_file_size(INDEX_FILE_SIZE);
         request.set_metric_type(1);
         handler->SetContext(&context, dummy_context);
         handler->random_id();
-        ::grpc::Status grpc_status = handler->CreateTable(&context, &request, &status);
+        ::grpc::Status grpc_status = handler->CreateCollection(&context, &request, &status);
     }
 
     void
@@ -133,9 +148,27 @@ BuildVectors(int64_t from, int64_t to, std::vector<std::vector<float>>& vector_r
     vector_record_array.clear();
     for (int64_t k = from; k < to; k++) {
         std::vector<float> record;
-        record.resize(TABLE_DIM);
-        for (int64_t i = 0; i < TABLE_DIM; i++) {
-            record[i] = (float)(k % (i + 1));
+        record.resize(COLLECTION_DIM);
+        for (int64_t i = 0; i < COLLECTION_DIM; i++) {
+            record[i] = (float)(i + k);
+        }
+
+        vector_record_array.emplace_back(record);
+    }
+}
+
+void
+BuildBinVectors(int64_t from, int64_t to, std::vector<std::vector<uint8_t>>& vector_record_array) {
+    if (to <= from) {
+        return;
+    }
+
+    vector_record_array.clear();
+    for (int64_t k = from; k < to; k++) {
+        std::vector<uint8_t> record;
+        record.resize(COLLECTION_DIM / 8);
+        for (int64_t i = 0; i < COLLECTION_DIM / 8; i++) {
+            record[i] = (i + k) % 256;
         }
 
         vector_record_array.emplace_back(record);
@@ -159,29 +192,25 @@ CurrentTmDate(int64_t offset_day = 0) {
 
 }  // namespace
 
-TEST_F(RpcHandlerTest, HAS_TABLE_TEST) {
+TEST_F(RpcHandlerTest, HAS_COLLECTION_TEST) {
     ::grpc::ServerContext context;
     handler->SetContext(&context, dummy_context);
     handler->RegisterRequestHandler(milvus::server::RequestHandler());
-    ::milvus::grpc::TableName request;
+    ::milvus::grpc::CollectionName request;
     ::milvus::grpc::BoolReply reply;
-    ::grpc::Status status = handler->HasTable(&context, &request, &reply);
-    request.set_table_name(TABLE_NAME);
-    status = handler->HasTable(&context, &request, &reply);
+    ::grpc::Status status = handler->HasCollection(&context, &request, &reply);
+    request.set_collection_name(COLLECTION_NAME);
+    status = handler->HasCollection(&context, &request, &reply);
     ASSERT_TRUE(status.error_code() == ::grpc::Status::OK.error_code());
     int error_code = reply.status().error_code();
     ASSERT_EQ(error_code, ::milvus::grpc::ErrorCode::SUCCESS);
 
     fiu_init(0);
-    fiu_enable("HasTableRequest.OnExecute.table_not_exist", 1, NULL, 0);
-    handler->HasTable(&context, &request, &reply);
-    ASSERT_NE(reply.status().error_code(), ::milvus::grpc::ErrorCode::SUCCESS);
-    fiu_disable("HasTableRequest.OnExecute.table_not_exist");
 
-    fiu_enable("HasTableRequest.OnExecute.throw_std_exception", 1, NULL, 0);
-    handler->HasTable(&context, &request, &reply);
+    fiu_enable("HasCollectionRequest.OnExecute.throw_std_exception", 1, NULL, 0);
+    handler->HasCollection(&context, &request, &reply);
     ASSERT_NE(reply.status().error_code(), ::milvus::grpc::ErrorCode::SUCCESS);
-    fiu_disable("HasTableRequest.OnExecute.throw_std_exception");
+    fiu_disable("HasCollectionRequest.OnExecute.throw_std_exception");
 }
 
 TEST_F(RpcHandlerTest, INDEX_TEST) {
@@ -191,10 +220,10 @@ TEST_F(RpcHandlerTest, INDEX_TEST) {
     ::milvus::grpc::IndexParam request;
     ::milvus::grpc::Status response;
     ::grpc::Status grpc_status = handler->CreateIndex(&context, &request, &response);
-    request.set_table_name("test1");
+    request.set_collection_name("test1");
     handler->CreateIndex(&context, &request, &response);
 
-    request.set_table_name(TABLE_NAME);
+    request.set_collection_name(COLLECTION_NAME);
     handler->CreateIndex(&context, &request, &response);
 
     request.set_index_type(1);
@@ -209,10 +238,10 @@ TEST_F(RpcHandlerTest, INDEX_TEST) {
     //    ASSERT_EQ(error_code, ::milvus::grpc::ErrorCode::SUCCESS);
 
     fiu_init(0);
-    fiu_enable("CreateIndexRequest.OnExecute.not_has_table", 1, NULL, 0);
+    fiu_enable("CreateIndexRequest.OnExecute.not_has_collection", 1, NULL, 0);
     grpc_status = handler->CreateIndex(&context, &request, &response);
     ASSERT_TRUE(grpc_status.ok());
-    fiu_disable("CreateIndexRequest.OnExecute.not_has_table");
+    fiu_disable("CreateIndexRequest.OnExecute.not_has_collection");
 
     fiu_enable("CreateIndexRequest.OnExecute.throw_std.exception", 1, NULL, 0);
     grpc_status = handler->CreateIndex(&context, &request, &response);
@@ -232,41 +261,41 @@ TEST_F(RpcHandlerTest, INDEX_TEST) {
     fiu_disable("CreateIndexRequest.OnExecute.ip_meteric");
 #endif
 
-    ::milvus::grpc::TableName table_name;
+    ::milvus::grpc::CollectionName collection_name;
     ::milvus::grpc::IndexParam index_param;
-    handler->DescribeIndex(&context, &table_name, &index_param);
-    table_name.set_table_name("test4");
-    handler->DescribeIndex(&context, &table_name, &index_param);
-    table_name.set_table_name(TABLE_NAME);
-    handler->DescribeIndex(&context, &table_name, &index_param);
+    handler->DescribeIndex(&context, &collection_name, &index_param);
+    collection_name.set_collection_name("test4");
+    handler->DescribeIndex(&context, &collection_name, &index_param);
+    collection_name.set_collection_name(COLLECTION_NAME);
+    handler->DescribeIndex(&context, &collection_name, &index_param);
 
     fiu_init(0);
     fiu_enable("DescribeIndexRequest.OnExecute.throw_std_exception", 1, NULL, 0);
-    handler->DescribeIndex(&context, &table_name, &index_param);
+    handler->DescribeIndex(&context, &collection_name, &index_param);
     fiu_disable("DescribeIndexRequest.OnExecute.throw_std_exception");
 
     ::milvus::grpc::Status status;
-    table_name.Clear();
-    handler->DropIndex(&context, &table_name, &status);
-    table_name.set_table_name("test5");
-    handler->DropIndex(&context, &table_name, &status);
+    collection_name.Clear();
+    handler->DropIndex(&context, &collection_name, &status);
+    collection_name.set_collection_name("test5");
+    handler->DropIndex(&context, &collection_name, &status);
 
-    table_name.set_table_name(TABLE_NAME);
+    collection_name.set_collection_name(COLLECTION_NAME);
 
     fiu_init(0);
-    fiu_enable("DropIndexRequest.OnExecute.table_not_exist", 1, NULL, 0);
-    handler->DropIndex(&context, &table_name, &status);
-    fiu_disable("DropIndexRequest.OnExecute.table_not_exist");
+    fiu_enable("DropIndexRequest.OnExecute.collection_not_exist", 1, NULL, 0);
+    handler->DropIndex(&context, &collection_name, &status);
+    fiu_disable("DropIndexRequest.OnExecute.collection_not_exist");
 
     fiu_enable("DropIndexRequest.OnExecute.drop_index_fail", 1, NULL, 0);
-    handler->DropIndex(&context, &table_name, &status);
+    handler->DropIndex(&context, &collection_name, &status);
     fiu_disable("DropIndexRequest.OnExecute.drop_index_fail");
 
     fiu_enable("DropIndexRequest.OnExecute.throw_std_exception", 1, NULL, 0);
-    handler->DropIndex(&context, &table_name, &status);
+    handler->DropIndex(&context, &collection_name, &status);
     fiu_disable("DropIndexRequest.OnExecute.throw_std_exception");
 
-    handler->DropIndex(&context, &table_name, &status);
+    handler->DropIndex(&context, &collection_name, &status);
 }
 
 TEST_F(RpcHandlerTest, INSERT_TEST) {
@@ -276,7 +305,7 @@ TEST_F(RpcHandlerTest, INSERT_TEST) {
     ::milvus::grpc::InsertParam request;
     ::milvus::grpc::Status response;
 
-    request.set_table_name(TABLE_NAME);
+    request.set_collection_name(COLLECTION_NAME);
     std::vector<std::vector<float>> record_array;
     BuildVectors(0, VECTOR_COUNT, record_array);
     ::milvus::grpc::VectorIds vector_ids;
@@ -297,10 +326,10 @@ TEST_F(RpcHandlerTest, INSERT_TEST) {
     ASSERT_NE(vector_ids.vector_id_array_size(), VECTOR_COUNT);
     fiu_disable("InsertRequest.OnExecute.db_not_found");
 
-    fiu_enable("InsertRequest.OnExecute.describe_table_fail", 1, NULL, 0);
+    fiu_enable("InsertRequest.OnExecute.describe_collection_fail", 1, NULL, 0);
     handler->Insert(&context, &request, &vector_ids);
     ASSERT_NE(vector_ids.vector_id_array_size(), VECTOR_COUNT);
-    fiu_disable("InsertRequest.OnExecute.describe_table_fail");
+    fiu_disable("InsertRequest.OnExecute.describe_collection_fail");
 
     fiu_enable("InsertRequest.OnExecute.illegal_vector_id", 1, NULL, 0);
     handler->Insert(&context, &request, &vector_ids);
@@ -331,7 +360,7 @@ TEST_F(RpcHandlerTest, INSERT_TEST) {
     fiu_disable("InsertRequest.OnExecute.invalid_ids_size");
 
     // insert vectors with wrong dim
-    std::vector<float> record_wrong_dim(TABLE_DIM - 1, 0.5f);
+    std::vector<float> record_wrong_dim(COLLECTION_DIM - 1, 0.5f);
     ::milvus::grpc::RowRecord* grpc_record = request.add_row_record_array();
     CopyRowRecord(grpc_record, record_wrong_dim);
     handler->Insert(&context, &request, &vector_ids);
@@ -347,15 +376,15 @@ TEST_F(RpcHandlerTest, SEARCH_TEST) {
     // test null input
     handler->Search(&context, nullptr, &response);
 
-    // test invalid table name
+    // test invalid collection name
     handler->Search(&context, &request, &response);
 
-    // test table not exist
-    request.set_table_name("test3");
+    // test collection not exist
+    request.set_collection_name("test3");
     handler->Search(&context, &request, &response);
 
     // test invalid topk
-    request.set_table_name(TABLE_NAME);
+    request.set_collection_name(COLLECTION_NAME);
     handler->Search(&context, &request, &response);
 
     // test invalid nprobe
@@ -367,6 +396,7 @@ TEST_F(RpcHandlerTest, SEARCH_TEST) {
     kv->set_key(milvus::server::grpc::EXTRA_PARAM_KEY);
     kv->set_value("{ \"nprobe\": 32 }");
     handler->Search(&context, &request, &response);
+    ASSERT_EQ(response.ids_size(), 0UL);
 
     std::vector<std::vector<float>> record_array;
     BuildVectors(0, VECTOR_COUNT, record_array);
@@ -376,67 +406,284 @@ TEST_F(RpcHandlerTest, SEARCH_TEST) {
         CopyRowRecord(grpc_record, record);
     }
     // insert vectors
-    insert_param.set_table_name(TABLE_NAME);
+    insert_param.set_collection_name(COLLECTION_NAME);
     ::milvus::grpc::VectorIds vector_ids;
     handler->Insert(&context, &insert_param, &vector_ids);
 
+    // flush
+    ::milvus::grpc::Status grpc_status;
+    ::milvus::grpc::FlushParam flush_param;
+    flush_param.add_collection_name_array(COLLECTION_NAME);
+    handler->Flush(&context, &flush_param, &grpc_status);
+
+    // search
     BuildVectors(0, 10, record_array);
     for (auto& record : record_array) {
         ::milvus::grpc::RowRecord* row_record = request.add_query_record_array();
         CopyRowRecord(row_record, record);
     }
     handler->Search(&context, &request, &response);
+    ASSERT_NE(response.ids_size(), 0UL);
 
+    // wrong file id
     ::milvus::grpc::SearchInFilesParam search_in_files_param;
     std::string* file_id = search_in_files_param.add_file_id_array();
     *file_id = "test_tbl";
     handler->SearchInFiles(&context, &search_in_files_param, &response);
+    ASSERT_EQ(response.ids_size(), 0UL);
+}
+
+TEST_F(RpcHandlerTest, COMBINE_SEARCH_TEST) {
+    ::grpc::ServerContext context;
+    handler->SetContext(&context, dummy_context);
+    handler->RegisterRequestHandler(milvus::server::RequestHandler());
+
+    // create collection
+    std::string collection_name = "combine";
+    ::milvus::grpc::CollectionSchema collection_schema;
+    collection_schema.set_collection_name(collection_name);
+    collection_schema.set_dimension(COLLECTION_DIM);
+    collection_schema.set_index_file_size(INDEX_FILE_SIZE);
+    collection_schema.set_metric_type(1); // L2 metric
+    ::milvus::grpc::Status status;
+    handler->CreateCollection(&context, &collection_schema, &status);
+    ASSERT_EQ(status.error_code(), 0);
+
+    // insert vectors
+    std::vector<std::vector<float>> record_array;
+    BuildVectors(0, VECTOR_COUNT, record_array);
+    ::milvus::grpc::InsertParam insert_param;
+    int64_t vec_id = 0;
+    for (auto& record : record_array) {
+        ::milvus::grpc::RowRecord* grpc_record = insert_param.add_row_record_array();
+        CopyRowRecord(grpc_record, record);
+        insert_param.add_row_id_array(++vec_id);
+    }
+
+    insert_param.set_collection_name(collection_name);
+    ::milvus::grpc::VectorIds vector_ids;
+    handler->Insert(&context, &insert_param, &vector_ids);
+
+    // flush
+    ::milvus::grpc::Status grpc_status;
+    ::milvus::grpc::FlushParam flush_param;
+    flush_param.add_collection_name_array(collection_name);
+    handler->Flush(&context, &flush_param, &grpc_status);
+
+    // multi thread search requests will be combined
+    int QUERY_COUNT = 10;
+    int64_t NQ = 2;
+    int64_t TOPK = 5;
+    using RequestPtr = std::shared_ptr<::milvus::grpc::SearchParam>;
+    std::vector<RequestPtr> request_array;
+    for (int i = 0; i < QUERY_COUNT; i++) {
+        RequestPtr request = std::make_shared<::milvus::grpc::SearchParam>();
+        request->set_collection_name(collection_name);
+        request->set_topk(TOPK);
+        milvus::grpc::KeyValuePair* kv = request->add_extra_params();
+        kv->set_key(milvus::server::grpc::EXTRA_PARAM_KEY);
+        kv->set_value("{}");
+
+        BuildVectors(i * NQ, (i + 1) * NQ, record_array);
+        for (auto& record : record_array) {
+            ::milvus::grpc::RowRecord* row_record = request->add_query_record_array();
+            CopyRowRecord(row_record, record);
+        }
+        request_array.emplace_back(request);
+    }
+
+    using ResultPtr = std::shared_ptr<::milvus::grpc::TopKQueryResult>;
+    std::vector<ResultPtr> result_array;
+    using ThreadPtr = std::shared_ptr<std::thread>;
+    std::vector<ThreadPtr> thread_list;
+    for (int i = 0; i < QUERY_COUNT; i++) {
+        ResultPtr result_ptr = std::make_shared<::milvus::grpc::TopKQueryResult>();
+        result_array.push_back(result_ptr);
+        ThreadPtr
+            thread = std::make_shared<std::thread>(SearchFunc, handler, &context, request_array[i], result_ptr);
+        thread_list.emplace_back(thread);
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+
+    // wait search finish
+    for (auto& iter : thread_list) {
+        iter->join();
+    }
+
+    // check result
+    int64_t index = 0;
+    for (auto& result_ptr : result_array) {
+        ASSERT_NE(result_ptr->ids_size(), 0);
+        ASSERT_NE(result_ptr->row_num(), 0);
+        std::string msg = "Result no." + std::to_string(index) + ": \n";
+        for (int64_t i = 0; i < NQ; i++) {
+            for (int64_t k = 0; k < TOPK; k++) {
+                msg += "[";
+                msg += std::to_string(result_ptr->ids(i * TOPK + k));
+                msg += ", ";
+                msg += std::to_string(result_ptr->distances(i * TOPK + k));
+                msg += "]";
+                msg += ", ";
+            }
+            msg += "\n";
+
+            ASSERT_NE(result_ptr->ids(i * TOPK), 0);
+            ASSERT_LT(result_ptr->distances(i * TOPK), 0.00001);
+        }
+        std::cout << msg << std::endl;
+        index++;
+    }
+}
+
+TEST_F(RpcHandlerTest, COMBINE_SEARCH_BINARY_TEST) {
+    ::grpc::ServerContext context;
+    handler->SetContext(&context, dummy_context);
+    handler->RegisterRequestHandler(milvus::server::RequestHandler());
+
+    // create collection
+    std::string collection_name = "combine_bin";
+    ::milvus::grpc::CollectionSchema collection_schema;
+    collection_schema.set_collection_name(collection_name);
+    collection_schema.set_dimension(COLLECTION_DIM);
+    collection_schema.set_index_file_size(INDEX_FILE_SIZE);
+    collection_schema.set_metric_type(5); // tanimoto metric
+    ::milvus::grpc::Status status;
+    handler->CreateCollection(&context, &collection_schema, &status);
+    ASSERT_EQ(status.error_code(), 0);
+
+    // insert vectors
+    std::vector<std::vector<uint8_t>> record_array;
+    BuildBinVectors(0, VECTOR_COUNT, record_array);
+    ::milvus::grpc::InsertParam insert_param;
+    int64_t vec_id = 0;
+    for (auto& record : record_array) {
+        ::milvus::grpc::RowRecord* grpc_record = insert_param.add_row_record_array();
+        CopyBinRowRecord(grpc_record, record);
+        insert_param.add_row_id_array(++vec_id);
+    }
+
+    insert_param.set_collection_name(collection_name);
+    ::milvus::grpc::VectorIds vector_ids;
+    handler->Insert(&context, &insert_param, &vector_ids);
+
+    // flush
+    ::milvus::grpc::Status grpc_status;
+    ::milvus::grpc::FlushParam flush_param;
+    flush_param.add_collection_name_array(collection_name);
+    handler->Flush(&context, &flush_param, &grpc_status);
+
+    // multi thread search requests will be combined
+    int QUERY_COUNT = 10;
+    int64_t NQ = 2;
+    int64_t TOPK = 5;
+    using RequestPtr = std::shared_ptr<::milvus::grpc::SearchParam>;
+    std::vector<RequestPtr> request_array;
+    for (int i = 0; i < QUERY_COUNT; i++) {
+        RequestPtr request = std::make_shared<::milvus::grpc::SearchParam>();
+        request->set_collection_name(collection_name);
+        request->set_topk(TOPK);
+        milvus::grpc::KeyValuePair* kv = request->add_extra_params();
+        kv->set_key(milvus::server::grpc::EXTRA_PARAM_KEY);
+        kv->set_value("{}");
+
+        BuildBinVectors(i * NQ, (i + 1) * NQ, record_array);
+        for (auto& record : record_array) {
+            ::milvus::grpc::RowRecord* row_record = request->add_query_record_array();
+            CopyBinRowRecord(row_record, record);
+        }
+        request_array.emplace_back(request);
+    }
+
+    using ResultPtr = std::shared_ptr<::milvus::grpc::TopKQueryResult>;
+    std::vector<ResultPtr> result_array;
+    using ThreadPtr = std::shared_ptr<std::thread>;
+    std::vector<ThreadPtr> thread_list;
+    for (int i = 0; i < QUERY_COUNT; i++) {
+        ResultPtr result_ptr = std::make_shared<::milvus::grpc::TopKQueryResult>();
+        result_array.push_back(result_ptr);
+        ThreadPtr
+            thread = std::make_shared<std::thread>(SearchFunc, handler, &context, request_array[i], result_ptr);
+        thread_list.emplace_back(thread);
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+
+    // wait search finish
+    for (auto& iter : thread_list) {
+        iter->join();
+    }
+
+    // check result
+    int64_t index = 0;
+    for (auto& result_ptr : result_array) {
+        ASSERT_NE(result_ptr->ids_size(), 0);
+        ASSERT_NE(result_ptr->row_num(), 0);
+        std::string msg = "Result no." + std::to_string(++index) + ": \n";
+        for (int64_t i = 0; i < NQ; i++) {
+            for (int64_t k = 0; k < TOPK; k++) {
+                msg += "[";
+                msg += std::to_string(result_ptr->ids(i * TOPK + k));
+                msg += ", ";
+                msg += std::to_string(result_ptr->distances(i * TOPK + k));
+                msg += "]";
+                msg += ", ";
+            }
+            msg += "\n";
+
+            ASSERT_NE(result_ptr->ids(i * TOPK), 0);
+            ASSERT_LT(result_ptr->distances(i * TOPK), 0.00001);
+        }
+        std::cout << msg << std::endl;
+    }
 }
 
 TEST_F(RpcHandlerTest, TABLES_TEST) {
     ::grpc::ServerContext context;
     handler->SetContext(&context, dummy_context);
     handler->RegisterRequestHandler(milvus::server::RequestHandler());
-    ::milvus::grpc::TableSchema tableschema;
+
     ::milvus::grpc::Status response;
-    std::string tablename = "tbl";
+    std::string collection_name = "tbl";
+    {
+        ::milvus::grpc::CollectionSchema collection_schema;
+        // create collection test
+        // test null input
+        handler->CreateCollection(&context, nullptr, &response);
+        // test invalid collection name
+        handler->CreateCollection(&context, &collection_schema, &response);
+        // test invalid collection dimension
+        collection_schema.set_collection_name(collection_name);
+        handler->CreateCollection(&context, &collection_schema, &response);
+        // test invalid index file size
+        collection_schema.set_dimension(COLLECTION_DIM);
+        //    handler->CreateCollection(&context, &collection_schema, &response);
+        // test invalid index metric type
+        collection_schema.set_index_file_size(INDEX_FILE_SIZE);
+        handler->CreateCollection(&context, &collection_schema, &response);
+        // test collection already exist
+        collection_schema.set_metric_type(1);
+        handler->CreateCollection(&context, &collection_schema, &response);
+    }
 
-    // create table test
-    // test null input
-    handler->CreateTable(&context, nullptr, &response);
-    // test invalid table name
-    handler->CreateTable(&context, &tableschema, &response);
-    // test invalid table dimension
-    tableschema.set_table_name(tablename);
-    handler->CreateTable(&context, &tableschema, &response);
-    // test invalid index file size
-    tableschema.set_dimension(TABLE_DIM);
-    //    handler->CreateTable(&context, &tableschema, &response);
-    // test invalid index metric type
-    tableschema.set_index_file_size(INDEX_FILE_SIZE);
-    handler->CreateTable(&context, &tableschema, &response);
-    // test table already exist
-    tableschema.set_metric_type(1);
-    handler->CreateTable(&context, &tableschema, &response);
+    // describe collection test
+    // test invalid collection name
+    ::milvus::grpc::CollectionName grpc_collection_name;
+    {
+        ::milvus::grpc::CollectionSchema collection_schema;
+        handler->DescribeCollection(&context, &grpc_collection_name, &collection_schema);
 
-    // describe table test
-    // test invalid table name
-    ::milvus::grpc::TableName table_name;
-    ::milvus::grpc::TableSchema table_schema;
-    handler->DescribeTable(&context, &table_name, &table_schema);
+        grpc_collection_name.set_collection_name(COLLECTION_NAME);
+        ::grpc::Status status = handler->DescribeCollection(&context, &grpc_collection_name, &collection_schema);
+        ASSERT_EQ(status.error_code(), ::grpc::Status::OK.error_code());
 
-    table_name.set_table_name(TABLE_NAME);
-    ::grpc::Status status = handler->DescribeTable(&context, &table_name, &table_schema);
-    ASSERT_EQ(status.error_code(), ::grpc::Status::OK.error_code());
+        fiu_init(0);
+        fiu_enable("DescribeCollectionRequest.OnExecute.describe_collection_fail", 1, NULL, 0);
+        handler->DescribeCollection(&context, &grpc_collection_name, &collection_schema);
+        fiu_disable("DescribeCollectionRequest.OnExecute.describe_collection_fail");
 
-    fiu_init(0);
-    fiu_enable("DescribeTableRequest.OnExecute.describe_table_fail", 1, NULL, 0);
-    handler->DescribeTable(&context, &table_name, &table_schema);
-    fiu_disable("DescribeTableRequest.OnExecute.describe_table_fail");
-
-    fiu_enable("DescribeTableRequest.OnExecute.throw_std_exception", 1, NULL, 0);
-    handler->DescribeTable(&context, &table_name, &table_schema);
-    fiu_disable("DescribeTableRequest.OnExecute.throw_std_exception");
+        fiu_enable("DescribeCollectionRequest.OnExecute.throw_std_exception", 1, NULL, 0);
+        handler->DescribeCollection(&context, &grpc_collection_name, &collection_schema);
+        fiu_disable("DescribeCollectionRequest.OnExecute.throw_std_exception");
+    }
 
     ::milvus::grpc::InsertParam request;
     std::vector<std::vector<float>> record_array;
@@ -446,9 +693,9 @@ TEST_F(RpcHandlerTest, TABLES_TEST) {
         vector_ids.add_vector_id_array(i);
     }
     // Insert vectors
-    // test invalid table name
+    // test invalid collection name
     handler->Insert(&context, &request, &vector_ids);
-    request.set_table_name(tablename);
+    request.set_collection_name(collection_name);
     // test empty row record
     handler->Insert(&context, &request, &vector_ids);
 
@@ -473,164 +720,178 @@ TEST_F(RpcHandlerTest, TABLES_TEST) {
     }
     handler->Insert(&context, &request, &vector_ids);
 
-    // show tables
-    ::milvus::grpc::Command cmd;
-    ::milvus::grpc::TableNameList table_name_list;
-    status = handler->ShowTables(&context, &cmd, &table_name_list);
-    ASSERT_EQ(status.error_code(), ::grpc::Status::OK.error_code());
+    // show collections
+    {
+        ::milvus::grpc::Command cmd;
+        ::milvus::grpc::CollectionNameList collection_name_list;
+        auto status = handler->ShowCollections(&context, &cmd, &collection_name_list);
+        ASSERT_EQ(status.error_code(), ::grpc::Status::OK.error_code());
 
-    // show table info
-    ::milvus::grpc::TableInfo table_info;
-    status = handler->ShowTableInfo(&context, &table_name, &table_info);
-    ASSERT_EQ(status.error_code(), ::grpc::Status::OK.error_code());
+        // show collection info
+        ::milvus::grpc::CollectionInfo collection_info;
+        status = handler->ShowCollectionInfo(&context, &grpc_collection_name, &collection_info);
+        ASSERT_EQ(status.error_code(), ::grpc::Status::OK.error_code());
 
-    fiu_init(0);
-    fiu_enable("ShowTablesRequest.OnExecute.show_tables_fail", 1, NULL, 0);
-    handler->ShowTables(&context, &cmd, &table_name_list);
-    fiu_disable("ShowTablesRequest.OnExecute.show_tables_fail");
+        fiu_init(0);
+        fiu_enable("ShowCollectionsRequest.OnExecute.show_collections_fail", 1, NULL, 0);
+        handler->ShowCollections(&context, &cmd, &collection_name_list);
+        fiu_disable("ShowCollectionsRequest.OnExecute.show_collections_fail");
+    }
 
-    // Count Table
-    ::milvus::grpc::TableRowCount count;
-    table_name.Clear();
-    status = handler->CountTable(&context, &table_name, &count);
-    table_name.set_table_name(tablename);
-    status = handler->CountTable(&context, &table_name, &count);
-    ASSERT_EQ(status.error_code(), ::grpc::Status::OK.error_code());
-    //    ASSERT_EQ(count.table_row_count(), vector_ids.vector_id_array_size());
-    fiu_init(0);
-    fiu_enable("CountTableRequest.OnExecute.db_not_found", 1, NULL, 0);
-    status = handler->CountTable(&context, &table_name, &count);
-    fiu_disable("CountTableRequest.OnExecute.db_not_found");
+    // Count Collection
+    {
+        ::milvus::grpc::CollectionRowCount count;
+        grpc_collection_name.Clear();
+        auto status = handler->CountCollection(&context, &grpc_collection_name, &count);
+        grpc_collection_name.set_collection_name(collection_name);
+        status = handler->CountCollection(&context, &grpc_collection_name, &count);
+        ASSERT_EQ(status.error_code(), ::grpc::Status::OK.error_code());
+        //    ASSERT_EQ(count.collection_row_count(), vector_ids.vector_id_array_size());
+        fiu_init(0);
+        fiu_enable("CountCollectionRequest.OnExecute.db_not_found", 1, NULL, 0);
+        status = handler->CountCollection(&context, &grpc_collection_name, &count);
+        fiu_disable("CountCollectionRequest.OnExecute.db_not_found");
 
-    fiu_enable("CountTableRequest.OnExecute.status_error", 1, NULL, 0);
-    status = handler->CountTable(&context, &table_name, &count);
-    fiu_disable("CountTableRequest.OnExecute.status_error");
+        fiu_enable("CountCollectionRequest.OnExecute.status_error", 1, NULL, 0);
+        status = handler->CountCollection(&context, &grpc_collection_name, &count);
+        fiu_disable("CountCollectionRequest.OnExecute.status_error");
 
-    fiu_enable("CountTableRequest.OnExecute.throw_std_exception", 1, NULL, 0);
-    status = handler->CountTable(&context, &table_name, &count);
-    fiu_disable("CountTableRequest.OnExecute.throw_std_exception");
+        fiu_enable("CountCollectionRequest.OnExecute.throw_std_exception", 1, NULL, 0);
+        status = handler->CountCollection(&context, &grpc_collection_name, &count);
+        fiu_disable("CountCollectionRequest.OnExecute.throw_std_exception");
+    }
 
-    // Preload Table
-    table_name.Clear();
-    status = handler->PreloadTable(&context, &table_name, &response);
-    table_name.set_table_name(TABLE_NAME);
-    status = handler->PreloadTable(&context, &table_name, &response);
-    ASSERT_EQ(status.error_code(), ::grpc::Status::OK.error_code());
+    // Preload Collection
+    {
+        ::milvus::grpc::CollectionSchema collection_schema;
 
-    fiu_enable("PreloadTableRequest.OnExecute.preload_table_fail", 1, NULL, 0);
-    handler->PreloadTable(&context, &table_name, &response);
-    fiu_disable("PreloadTableRequest.OnExecute.preload_table_fail");
+        grpc_collection_name.Clear();
+        auto status = handler->PreloadCollection(&context, &grpc_collection_name, &response);
+        grpc_collection_name.set_collection_name(COLLECTION_NAME);
+        status = handler->PreloadCollection(&context, &grpc_collection_name, &response);
+        ASSERT_EQ(status.error_code(), ::grpc::Status::OK.error_code());
 
-    fiu_enable("PreloadTableRequest.OnExecute.throw_std_exception", 1, NULL, 0);
-    handler->PreloadTable(&context, &table_name, &response);
-    fiu_disable("PreloadTableRequest.OnExecute.throw_std_exception");
+        fiu_enable("PreloadCollectionRequest.OnExecute.preload_collection_fail", 1, NULL, 0);
+        handler->PreloadCollection(&context, &grpc_collection_name, &response);
+        fiu_disable("PreloadCollectionRequest.OnExecute.preload_collection_fail");
 
-    fiu_init(0);
-    fiu_enable("CreateTableRequest.OnExecute.invalid_index_file_size", 1, NULL, 0);
-    tableschema.set_table_name(tablename);
-    handler->CreateTable(&context, &tableschema, &response);
-    ASSERT_NE(response.error_code(), ::grpc::Status::OK.error_code());
-    fiu_disable("CreateTableRequest.OnExecute.invalid_index_file_size");
+        fiu_enable("PreloadCollectionRequest.OnExecute.throw_std_exception", 1, NULL, 0);
+        handler->PreloadCollection(&context, &grpc_collection_name, &response);
+        fiu_disable("PreloadCollectionRequest.OnExecute.throw_std_exception");
 
-    fiu_enable("CreateTableRequest.OnExecute.db_already_exist", 1, NULL, 0);
-    tableschema.set_table_name(tablename);
-    handler->CreateTable(&context, &tableschema, &response);
-    ASSERT_NE(response.error_code(), ::grpc::Status::OK.error_code());
-    fiu_disable("CreateTableRequest.OnExecute.db_already_exist");
+        fiu_init(0);
+        fiu_enable("CreateCollectionRequest.OnExecute.invalid_index_file_size", 1, NULL, 0);
+        collection_schema.set_collection_name(collection_name);
+        handler->CreateCollection(&context, &collection_schema, &response);
+        ASSERT_NE(response.error_code(), ::grpc::Status::OK.error_code());
+        fiu_disable("CreateCollectionRequest.OnExecute.invalid_index_file_size");
 
-    fiu_enable("CreateTableRequest.OnExecute.create_table_fail", 1, NULL, 0);
-    tableschema.set_table_name(tablename);
-    handler->CreateTable(&context, &tableschema, &response);
-    ASSERT_NE(response.error_code(), ::grpc::Status::OK.error_code());
-    fiu_disable("CreateTableRequest.OnExecute.create_table_fail");
+        fiu_enable("CreateCollectionRequest.OnExecute.db_already_exist", 1, NULL, 0);
+        collection_schema.set_collection_name(collection_name);
+        handler->CreateCollection(&context, &collection_schema, &response);
+        ASSERT_NE(response.error_code(), ::grpc::Status::OK.error_code());
+        fiu_disable("CreateCollectionRequest.OnExecute.db_already_exist");
 
-    fiu_enable("CreateTableRequest.OnExecute.throw_std_exception", 1, NULL, 0);
-    tableschema.set_table_name(tablename);
-    handler->CreateTable(&context, &tableschema, &response);
-    ASSERT_NE(response.error_code(), ::grpc::Status::OK.error_code());
-    fiu_disable("CreateTableRequest.OnExecute.throw_std_exception");
+        fiu_enable("CreateCollectionRequest.OnExecute.create_collection_fail", 1, NULL, 0);
+        collection_schema.set_collection_name(collection_name);
+        handler->CreateCollection(&context, &collection_schema, &response);
+        ASSERT_NE(response.error_code(), ::grpc::Status::OK.error_code());
+        fiu_disable("CreateCollectionRequest.OnExecute.create_collection_fail");
 
-    // Drop table
-    table_name.set_table_name("");
-    // test invalid table name
-    ::grpc::Status grpc_status = handler->DropTable(&context, &table_name, &response);
-    table_name.set_table_name(tablename);
+        fiu_enable("CreateCollectionRequest.OnExecute.throw_std_exception", 1, NULL, 0);
+        collection_schema.set_collection_name(collection_name);
+        handler->CreateCollection(&context, &collection_schema, &response);
+        ASSERT_NE(response.error_code(), ::grpc::Status::OK.error_code());
+        fiu_disable("CreateCollectionRequest.OnExecute.throw_std_exception");
+    }
 
-    fiu_enable("DropTableRequest.OnExecute.db_not_found", 1, NULL, 0);
-    handler->DropTable(&context, &table_name, &response);
-    ASSERT_NE(response.error_code(), ::grpc::Status::OK.error_code());
-    fiu_disable("DropTableRequest.OnExecute.db_not_found");
+    // Drop collection
+    {
+        ::milvus::grpc::CollectionSchema collection_schema;
+        collection_schema.set_dimension(128);
+        collection_schema.set_index_file_size(1024);
+        collection_schema.set_metric_type(1);
+        grpc_collection_name.set_collection_name("");
+        // test invalid collection name
+        ::grpc::Status grpc_status = handler->DropCollection(&context, &grpc_collection_name, &response);
+        grpc_collection_name.set_collection_name(collection_name);
 
-    fiu_enable("DropTableRequest.OnExecute.describe_table_fail", 1, NULL, 0);
-    handler->DropTable(&context, &table_name, &response);
-    ASSERT_NE(response.error_code(), ::grpc::Status::OK.error_code());
-    fiu_disable("DropTableRequest.OnExecute.describe_table_fail");
+        fiu_enable("DropCollectionRequest.OnExecute.db_not_found", 1, NULL, 0);
+        handler->DropCollection(&context, &grpc_collection_name, &response);
+        ASSERT_NE(response.error_code(), ::grpc::Status::OK.error_code());
+        fiu_disable("DropCollectionRequest.OnExecute.db_not_found");
 
-    fiu_enable("DropTableRequest.OnExecute.throw_std_exception", 1, NULL, 0);
-    handler->DropTable(&context, &table_name, &response);
-    ASSERT_NE(response.error_code(), ::grpc::Status::OK.error_code());
-    fiu_disable("DropTableRequest.OnExecute.throw_std_exception");
+        fiu_enable("DropCollectionRequest.OnExecute.describe_collection_fail", 1, NULL, 0);
+        handler->DropCollection(&context, &grpc_collection_name, &response);
+        ASSERT_NE(response.error_code(), ::grpc::Status::OK.error_code());
+        fiu_disable("DropCollectionRequest.OnExecute.describe_collection_fail");
 
-    grpc_status = handler->DropTable(&context, &table_name, &response);
-    ASSERT_EQ(grpc_status.error_code(), ::grpc::Status::OK.error_code());
-    int error_code = response.error_code();
-    ASSERT_EQ(error_code, ::milvus::grpc::ErrorCode::SUCCESS);
+        fiu_enable("DropCollectionRequest.OnExecute.throw_std_exception", 1, NULL, 0);
+        handler->DropCollection(&context, &grpc_collection_name, &response);
+        ASSERT_NE(response.error_code(), ::grpc::Status::OK.error_code());
+        fiu_disable("DropCollectionRequest.OnExecute.throw_std_exception");
 
-    tableschema.set_table_name(table_name.table_name());
-    handler->DropTable(&context, &table_name, &response);
-    sleep(1);
-    handler->CreateTable(&context, &tableschema, &response);
-    ASSERT_EQ(response.error_code(), ::grpc::Status::OK.error_code());
+        grpc_status = handler->DropCollection(&context, &grpc_collection_name, &response);
+        ASSERT_EQ(grpc_status.error_code(), ::grpc::Status::OK.error_code());
+        int error_code = response.error_code();
+        ASSERT_EQ(error_code, ::milvus::grpc::ErrorCode::SUCCESS);
 
-    fiu_enable("DropTableRequest.OnExecute.drop_table_fail", 1, NULL, 0);
-    handler->DropTable(&context, &table_name, &response);
-    ASSERT_NE(response.error_code(), ::grpc::Status::OK.error_code());
-    fiu_disable("DropTableRequest.OnExecute.drop_table_fail");
+        collection_schema.set_collection_name(grpc_collection_name.collection_name());
+        handler->DropCollection(&context, &grpc_collection_name, &response);
+        sleep(1);
+        handler->CreateCollection(&context, &collection_schema, &response);
+        ASSERT_EQ(response.error_code(), ::grpc::Status::OK.error_code());
 
-    handler->DropTable(&context, &table_name, &response);
+        fiu_enable("DropCollectionRequest.OnExecute.drop_collection_fail", 1, NULL, 0);
+        handler->DropCollection(&context, &grpc_collection_name, &response);
+        ASSERT_NE(response.error_code(), ::grpc::Status::OK.error_code());
+        fiu_disable("DropCollectionRequest.OnExecute.drop_collection_fail");
+
+        handler->DropCollection(&context, &grpc_collection_name, &response);
+    }
 }
 
 TEST_F(RpcHandlerTest, PARTITION_TEST) {
     ::grpc::ServerContext context;
     handler->SetContext(&context, dummy_context);
     handler->RegisterRequestHandler(milvus::server::RequestHandler());
-    ::milvus::grpc::TableSchema table_schema;
+    ::milvus::grpc::CollectionSchema collection_schema;
     ::milvus::grpc::Status response;
-    std::string str_table_name = "tbl_partition";
-    table_schema.set_table_name(str_table_name);
-    table_schema.set_dimension(TABLE_DIM);
-    table_schema.set_index_file_size(INDEX_FILE_SIZE);
-    table_schema.set_metric_type(1);
-    handler->CreateTable(&context, &table_schema, &response);
+    std::string str_collection_name = "tbl_partition";
+    collection_schema.set_collection_name(str_collection_name);
+    collection_schema.set_dimension(COLLECTION_DIM);
+    collection_schema.set_index_file_size(INDEX_FILE_SIZE);
+    collection_schema.set_metric_type(1);
+    handler->CreateCollection(&context, &collection_schema, &response);
 
     ::milvus::grpc::PartitionParam partition_param;
-    partition_param.set_table_name(str_table_name);
+    partition_param.set_collection_name(str_collection_name);
     std::string partition_tag = "0";
     partition_param.set_tag(partition_tag);
     handler->CreatePartition(&context, &partition_param, &response);
     ASSERT_EQ(response.error_code(), ::grpc::Status::OK.error_code());
 
-    ::milvus::grpc::TableName table_name;
-    table_name.set_table_name(str_table_name);
+    ::milvus::grpc::CollectionName collection_name;
+    collection_name.set_collection_name(str_collection_name);
     ::milvus::grpc::PartitionList partition_list;
-    handler->ShowPartitions(&context, &table_name, &partition_list);
+    handler->ShowPartitions(&context, &collection_name, &partition_list);
     ASSERT_EQ(response.error_code(), ::grpc::Status::OK.error_code());
     ASSERT_EQ(partition_list.partition_tag_array_size(), 2);
 
     fiu_init(0);
-    fiu_enable("ShowPartitionsRequest.OnExecute.invalid_table_name", 1, NULL, 0);
-    handler->ShowPartitions(&context, &table_name, &partition_list);
-    fiu_disable("ShowPartitionsRequest.OnExecute.invalid_table_name");
+    fiu_enable("ShowPartitionsRequest.OnExecute.invalid_collection_name", 1, NULL, 0);
+    handler->ShowPartitions(&context, &collection_name, &partition_list);
+    fiu_disable("ShowPartitionsRequest.OnExecute.invalid_collection_name");
 
     fiu_enable("ShowPartitionsRequest.OnExecute.show_partition_fail", 1, NULL, 0);
-    handler->ShowPartitions(&context, &table_name, &partition_list);
+    handler->ShowPartitions(&context, &collection_name, &partition_list);
     fiu_disable("ShowPartitionsRequest.OnExecute.show_partition_fail");
 
     fiu_init(0);
-    fiu_enable("CreatePartitionRequest.OnExecute.invalid_table_name", 1, NULL, 0);
+    fiu_enable("CreatePartitionRequest.OnExecute.invalid_collection_name", 1, NULL, 0);
     handler->CreatePartition(&context, &partition_param, &response);
     ASSERT_NE(response.error_code(), ::grpc::Status::OK.error_code());
-    fiu_disable("CreatePartitionRequest.OnExecute.invalid_table_name");
+    fiu_disable("CreatePartitionRequest.OnExecute.invalid_collection_name");
 
     fiu_enable("CreatePartitionRequest.OnExecute.invalid_partition_name", 1, NULL, 0);
     handler->CreatePartition(&context, &partition_param, &response);
@@ -658,13 +919,13 @@ TEST_F(RpcHandlerTest, PARTITION_TEST) {
     fiu_disable("CreatePartitionRequest.OnExecute.throw_std_exception");
 
     ::milvus::grpc::PartitionParam partition_parm;
-    partition_parm.set_table_name(str_table_name);
+    partition_parm.set_collection_name(str_collection_name);
     partition_parm.set_tag(partition_tag);
 
-    fiu_enable("DropPartitionRequest.OnExecute.invalid_table_name", 1, NULL, 0);
+    fiu_enable("DropPartitionRequest.OnExecute.invalid_collection_name", 1, NULL, 0);
     handler->DropPartition(&context, &partition_parm, &response);
     ASSERT_NE(response.error_code(), ::grpc::Status::OK.error_code());
-    fiu_disable("DropPartitionRequest.OnExecute.invalid_table_name");
+    fiu_disable("DropPartitionRequest.OnExecute.invalid_collection_name");
 
     handler->DropPartition(&context, &partition_parm, &response);
     ASSERT_EQ(response.error_code(), ::grpc::Status::OK.error_code());
@@ -709,13 +970,14 @@ class DummyRequest : public milvus::server::BaseRequest {
     }
 
     static milvus::server::BaseRequestPtr
-    Create(std::string& dummy) {
-        return std::shared_ptr<milvus::server::BaseRequest>(new DummyRequest(dummy));
+    Create() {
+        return std::shared_ptr<milvus::server::BaseRequest>(new DummyRequest());
     }
 
  public:
-    explicit DummyRequest(std::string& dummy)
-        : BaseRequest(std::make_shared<milvus::server::Context>("dummy_request_id"), dummy) {
+    DummyRequest()
+        : BaseRequest(std::make_shared<milvus::server::Context>("dummy_request_id"),
+                      milvus::server::BaseRequest::kCmd) {
     }
 };
 
@@ -723,8 +985,7 @@ class RpcSchedulerTest : public testing::Test {
  protected:
     void
     SetUp() override {
-        std::string dummy = "dql";
-        request_ptr = std::make_shared<DummyRequest>(dummy);
+        request_ptr = std::make_shared<DummyRequest>();
     }
 
     std::shared_ptr<DummyRequest> request_ptr;
@@ -738,17 +999,15 @@ class AsyncDummyRequest : public milvus::server::BaseRequest {
     }
 
     static milvus::server::BaseRequestPtr
-    Create(std::string& dummy) {
-        return std::shared_ptr<milvus::server::BaseRequest>(new DummyRequest(dummy));
-    }
-
-    void TestSetStatus() {
-        SetStatus(milvus::SERVER_INVALID_ARGUMENT, "");
+    Create() {
+        return std::shared_ptr<milvus::server::BaseRequest>(new DummyRequest());
     }
 
  public:
-    explicit AsyncDummyRequest(std::string& dummy)
-        : BaseRequest(std::make_shared<milvus::server::Context>("dummy_request_id2"), dummy, true) {
+    AsyncDummyRequest()
+        : BaseRequest(std::make_shared<milvus::server::Context>("dummy_request_id2"),
+                      milvus::server::BaseRequest::kCmd,
+                      true) {
     }
 };
 }  // namespace
@@ -761,8 +1020,7 @@ TEST_F(RpcSchedulerTest, BASE_TASK_TEST) {
 //    milvus::server::RequestScheduler::GetInstance().Stop();
 //    milvus::server::RequestScheduler::GetInstance().Start();
 
-    std::string dummy = "dql";
-    milvus::server::BaseRequestPtr base_task_ptr = DummyRequest::Create(dummy);
+    milvus::server::BaseRequestPtr base_task_ptr = DummyRequest::Create();
     milvus::server::RequestScheduler::ExecRequest(base_task_ptr);
 
     milvus::server::RequestScheduler::GetInstance().ExecuteRequest(request_ptr);
@@ -778,20 +1036,17 @@ TEST_F(RpcSchedulerTest, BASE_TASK_TEST) {
 //    milvus::server::RequestScheduler::GetInstance().ExecuteRequest(base_task_ptr2);
 //    fiu_disable("RequestScheduler.PutToQueue.null_queue");
 
-    std::string dummy3 = "dql3";
-    milvus::server::BaseRequestPtr base_task_ptr3 = DummyRequest::Create(dummy3);
+    milvus::server::BaseRequestPtr base_task_ptr3 = DummyRequest::Create();
     fiu_enable("RequestScheduler.TakeToExecute.throw_std_exception", 1, NULL, 0);
     milvus::server::RequestScheduler::GetInstance().ExecuteRequest(base_task_ptr3);
     fiu_disable("RequestScheduler.TakeToExecute.throw_std_exception");
 
-    std::string dummy4 = "dql4";
-    milvus::server::BaseRequestPtr base_task_ptr4 = DummyRequest::Create(dummy4);
+    milvus::server::BaseRequestPtr base_task_ptr4 = DummyRequest::Create();
     fiu_enable("RequestScheduler.TakeToExecute.execute_fail", 1, NULL, 0);
     milvus::server::RequestScheduler::GetInstance().ExecuteRequest(base_task_ptr4);
     fiu_disable("RequestScheduler.TakeToExecute.execute_fail");
 
-    std::string dummy5 = "dql5";
-    milvus::server::BaseRequestPtr base_task_ptr5 = DummyRequest::Create(dummy5);
+    milvus::server::BaseRequestPtr base_task_ptr5 = DummyRequest::Create();
     fiu_enable("RequestScheduler.PutToQueue.push_null_thread", 1, NULL, 0);
     milvus::server::RequestScheduler::GetInstance().ExecuteRequest(base_task_ptr5);
     fiu_disable("RequestScheduler.PutToQueue.push_null_thread");
@@ -802,11 +1057,10 @@ TEST_F(RpcSchedulerTest, BASE_TASK_TEST) {
     milvus::server::BaseRequestPtr null_ptr = nullptr;
     milvus::server::RequestScheduler::ExecRequest(null_ptr);
 
-    std::string async_dummy = "AsyncDummyRequest";
-    auto async_ptr = std::make_shared<AsyncDummyRequest>(async_dummy);
+    auto async_ptr = std::make_shared<AsyncDummyRequest>();
     auto base_ptr = std::static_pointer_cast<milvus::server::BaseRequest>(async_ptr);
     milvus::server::RequestScheduler::ExecRequest(base_ptr);
-    async_ptr->TestSetStatus();
+    async_ptr->set_status(milvus::Status(milvus::SERVER_INVALID_ARGUMENT, ""));
 
     milvus::server::RequestScheduler::GetInstance().Stop();
     milvus::server::RequestScheduler::GetInstance().Start();

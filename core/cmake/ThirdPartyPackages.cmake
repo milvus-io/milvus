@@ -301,6 +301,7 @@ if (DEFINED ENV{MILVUS_GRPC_URL})
     set(GRPC_SOURCE_URL "$ENV{MILVUS_GRPC_URL}")
 else ()
     set(GRPC_SOURCE_URL
+            "https://github.com/milvus-io/grpc-milvus/archive/${GRPC_VERSION}.zip"
             "https://github.com/youny626/grpc-milvus/archive/${GRPC_VERSION}.zip"
             "https://gitee.com/quicksilver/grpc-milvus/repository/archive/${GRPC_VERSION}.zip")
 endif ()
@@ -331,7 +332,7 @@ endif ()
 if (DEFINED ENV{MILVUS_OATPP_URL})
     set(MILVUS_OATPP_URL "$ENV{MILVUS_OATPP_URL}")
 else ()
-#    set(OATPP_SOURCE_URL "https://github.com/oatpp/oatpp/archive/${OATPP_VERSION}.tar.gz")
+    # set(OATPP_SOURCE_URL "https://github.com/oatpp/oatpp/archive/${OATPP_VERSION}.tar.gz")
     set(OATPP_SOURCE_URL "https://github.com/BossZou/oatpp/archive/master.zip")
 endif ()
 

@@ -19,17 +19,17 @@
 namespace milvus {
 namespace server {
 
-class CreateCollectionRequest : public BaseRequest {
+class CreateHybridCollectionRequest : public BaseRequest {
  public:
     static BaseRequestPtr
-    Create(const std::shared_ptr<Context>& context,
+    Create(const std::shared_ptr<milvus::server::Context>& context,
            const std::string& collection_name,
            std::vector<std::pair<std::string, engine::meta::hybrid::DataType>>& field_types,
            std::vector<std::pair<std::string, uint64_t>>& vector_dimensions,
            std::vector<std::pair<std::string, std::string>>& field_params);
 
  protected:
-    CreateCollectionRequest(const std::shared_ptr<Context>& context,
+    CreateHybridCollectionRequest(const std::shared_ptr<milvus::server::Context>& context,
                             const std::string& collection_name,
                             std::vector<std::pair<std::string, engine::meta::hybrid::DataType>>& field_types,
                             std::vector<std::pair<std::string, uint64_t>>& vector_dimensions,

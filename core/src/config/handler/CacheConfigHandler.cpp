@@ -28,85 +28,68 @@ CacheConfigHandler::~CacheConfigHandler() {
     RemoveCacheInsertDataListener();
 }
 
-void
-CacheConfigHandler::OnCpuCacheCapacityChanged(int64_t value) {
-    cpu_cache_capacity_ = value;
-}
-
-void
-CacheConfigHandler::OnInsertBufferSizeChanged(int64_t value) {
-    insert_buffer_size_ = value;
-}
-
-void
-CacheConfigHandler::OnCacheInsertDataChanged(bool value) {
-    cache_insert_data_ = value;
-}
-
+//////////////////////////// Listener methods //////////////////////////////////
 void
 CacheConfigHandler::AddCpuCacheCapacityListener() {
-    server::ConfigCallBackF lambda = [this](const std::string& value) -> Status {
-        server::Config& config = server::Config::GetInstance();
-        int64_t capacity;
-        auto status = config.GetCacheConfigCpuCacheCapacity(capacity);
+    ConfigCallBackF lambda = [this](const std::string& value) -> Status {
+        auto& config = Config::GetInstance();
+        auto status = config.GetCacheConfigCpuCacheCapacity(cpu_cache_capacity_);
         if (status.ok()) {
-            OnCpuCacheCapacityChanged(capacity);
+            OnCpuCacheCapacityChanged(cpu_cache_capacity_);
         }
 
         return status;
     };
 
-    auto& config = server::Config::GetInstance();
-    config.RegisterCallBack(server::CONFIG_CACHE, server::CONFIG_CACHE_CPU_CACHE_CAPACITY, identity_, lambda);
+    auto& config = Config::GetInstance();
+    config.RegisterCallBack(CONFIG_CACHE, CONFIG_CACHE_CPU_CACHE_CAPACITY, identity_, lambda);
 }
 
 void
 CacheConfigHandler::AddInsertBufferSizeListener() {
-    server::ConfigCallBackF lambda = [this](const std::string& value) -> Status {
-        server::Config& config = server::Config::GetInstance();
-        int64_t size;
-        auto status = config.GetCacheConfigInsertBufferSize(size);
+    ConfigCallBackF lambda = [this](const std::string& value) -> Status {
+        auto& config = Config::GetInstance();
+        auto status = config.GetCacheConfigInsertBufferSize(insert_buffer_size_);
         if (status.ok()) {
-            OnInsertBufferSizeChanged(size);
+            OnInsertBufferSizeChanged(insert_buffer_size_);
         }
         return status;
     };
 
-    auto& config = server::Config::GetInstance();
-    config.RegisterCallBack(server::CONFIG_CACHE, server::CONFIG_CACHE_INSERT_BUFFER_SIZE, identity_, lambda);
+    auto& config = Config::GetInstance();
+    config.RegisterCallBack(CONFIG_CACHE, CONFIG_CACHE_INSERT_BUFFER_SIZE, identity_, lambda);
 }
 
 void
 CacheConfigHandler::AddCacheInsertDataListener() {
     server::ConfigCallBackF lambda = [this](const std::string& value) -> Status {
-        auto& config = server::Config::GetInstance();
-        bool ok;
-        auto status = config.GetCacheConfigCacheInsertData(ok);
+        auto& config = Config::GetInstance();
+        auto status = config.GetCacheConfigCacheInsertData(cache_insert_data_);
         if (status.ok()) {
-            OnCacheInsertDataChanged(ok);
+            OnCacheInsertDataChanged(cache_insert_data_);
         }
         return status;
     };
 
-    auto& config = server::Config::GetInstance();
-    config.RegisterCallBack(server::CONFIG_CACHE, server::CONFIG_CACHE_CACHE_INSERT_DATA, identity_, lambda);
+    auto& config = Config::GetInstance();
+    config.RegisterCallBack(CONFIG_CACHE, CONFIG_CACHE_CACHE_INSERT_DATA, identity_, lambda);
 }
 
 void
 CacheConfigHandler::RemoveCpuCacheCapacityListener() {
-    auto& config = server::Config::GetInstance();
-    config.CancelCallBack(server::CONFIG_CACHE, server::CONFIG_CACHE_CPU_CACHE_CAPACITY, identity_);
+    auto& config = Config::GetInstance();
+    config.CancelCallBack(CONFIG_CACHE, CONFIG_CACHE_CPU_CACHE_CAPACITY, identity_);
 }
 
 void
 CacheConfigHandler::RemoveInsertBufferSizeListener() {
-    auto& config = server::Config::GetInstance();
-    config.CancelCallBack(server::CONFIG_CACHE, server::CONFIG_CACHE_INSERT_BUFFER_SIZE, identity_);
+    auto& config = Config::GetInstance();
+    config.CancelCallBack(CONFIG_CACHE, CONFIG_CACHE_INSERT_BUFFER_SIZE, identity_);
 }
 
 void
 CacheConfigHandler::RemoveCacheInsertDataListener() {
-    auto& config = server::Config::GetInstance();
+    auto& config = Config::GetInstance();
     config.CancelCallBack(server::CONFIG_CACHE, server::CONFIG_CACHE_CACHE_INSERT_DATA, identity_);
 }
 }  // namespace server

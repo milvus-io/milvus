@@ -22,6 +22,7 @@
 #include "DefaultAttrsFormat.h"
 #include "DefaultDeletedDocsFormat.h"
 #include "DefaultIdBloomFilterFormat.h"
+#include "DefaultVectorIndexFormat.h"
 #include "DefaultVectorsFormat.h"
 
 namespace milvus {
@@ -30,6 +31,7 @@ namespace codec {
 DefaultCodec::DefaultCodec() {
     vectors_format_ptr_ = std::make_shared<DefaultVectorsFormat>();
     attrs_format_ptr_ = std::make_shared<DefaultAttrsFormat>();
+    vector_index_format_ptr_ = std::make_shared<DefaultVectorIndexFormat>();
     deleted_docs_format_ptr_ = std::make_shared<DefaultDeletedDocsFormat>();
     id_bloom_filter_format_ptr_ = std::make_shared<DefaultIdBloomFilterFormat>();
 }
@@ -44,6 +46,10 @@ DefaultCodec::GetAttrsFormat() {
     return attrs_format_ptr_;
 }
 
+VectorIndexFormatPtr
+DefaultCodec::GetVectorIndexFormat() {
+    return vector_index_format_ptr_;
+}
 
 DeletedDocsFormatPtr
 DefaultCodec::GetDeletedDocsFormat() {

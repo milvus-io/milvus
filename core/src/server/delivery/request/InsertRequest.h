@@ -23,18 +23,18 @@ namespace server {
 class InsertRequest : public BaseRequest {
  public:
     static BaseRequestPtr
-    Create(const std::shared_ptr<Context>& context, const std::string& table_name, engine::VectorsData& vectors,
-           const std::string& partition_tag);
+    Create(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name,
+           engine::VectorsData& vectors, const std::string& partition_tag);
 
  protected:
-    InsertRequest(const std::shared_ptr<Context>& context, const std::string& table_name, engine::VectorsData& vectors,
-                  const std::string& partition_tag);
+    InsertRequest(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name,
+                  engine::VectorsData& vectors, const std::string& partition_tag);
 
     Status
     OnExecute() override;
 
  private:
-    const std::string table_name_;
+    const std::string collection_name_;
     engine::VectorsData& vectors_data_;
     const std::string partition_tag_;
 };

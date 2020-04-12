@@ -16,9 +16,9 @@
 namespace milvus {
 namespace scheduler {
 
-DeleteJob::DeleteJob(std::string table_id, engine::meta::MetaPtr meta_ptr, uint64_t num_resource)
+DeleteJob::DeleteJob(std::string collection_id, engine::meta::MetaPtr meta_ptr, uint64_t num_resource)
     : Job(JobType::DELETE),
-      table_id_(std::move(table_id)),
+      collection_id_(std::move(collection_id)),
       meta_ptr_(std::move(meta_ptr)),
       num_resource_(num_resource) {
 }
@@ -27,7 +27,7 @@ void
 DeleteJob::WaitAndDelete() {
     std::unique_lock<std::mutex> lock(mutex_);
     cv_.wait(lock, [&] { return done_resource == num_resource_; });
-    meta_ptr_->DeleteTableFiles(table_id_);
+    meta_ptr_->DeleteCollectionFiles(collection_id_);
 }
 
 void
@@ -42,7 +42,7 @@ DeleteJob::ResourceDone() {
 json
 DeleteJob::Dump() const {
     json ret{
-        {"table_id", table_id_},
+        {"collection_id", collection_id_},
         {"number_of_resource", num_resource_},
         {"number_of_done", done_resource},
     };

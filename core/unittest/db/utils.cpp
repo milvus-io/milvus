@@ -133,7 +133,7 @@ BaseTest::SetUp() {
     auto trace_context = std::make_shared<milvus::tracing::TraceContext>(mock_span);
     dummy_context_->SetTraceContext(trace_context);
 #ifdef MILVUS_GPU_VERSION
-    knowhere::FaissGpuResourceMgr::GetInstance().InitDevice(0, 1024 * 1024 * 200, 1024 * 1024 * 300, 2);
+    milvus::knowhere::FaissGpuResourceMgr::GetInstance().InitDevice(0, 1024 * 1024 * 200, 1024 * 1024 * 300, 2);
 #endif
 }
 
@@ -142,7 +142,7 @@ BaseTest::TearDown() {
     milvus::cache::CpuCacheMgr::GetInstance()->ClearCache();
 #ifdef MILVUS_GPU_VERSION
     milvus::cache::GpuCacheMgr::GetInstance(0)->ClearCache();
-    knowhere::FaissGpuResourceMgr::GetInstance().Free();
+    milvus::knowhere::FaissGpuResourceMgr::GetInstance().Free();
 #endif
 }
 
@@ -188,8 +188,10 @@ DBTest::SetUp() {
 
 void
 DBTest::TearDown() {
-    db_->Stop();
-    db_->DropAll();
+    if (db_) {
+        db_->Stop();
+        db_->DropAll();
+    }
 
     milvus::scheduler::JobMgrInst::GetInstance()->Stop();
     milvus::scheduler::SchedInst::GetInstance()->Stop();
@@ -309,7 +311,9 @@ MySqlMetaTest::SetUp() {
 
 void
 MySqlMetaTest::TearDown() {
-    impl_->DropAll();
+    if (impl_) {
+        impl_->DropAll();
+    }
 
     BaseTest::TearDown();
 

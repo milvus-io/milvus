@@ -22,8 +22,8 @@
 #include "DeletedDocsFormat.h"
 #include "IdBloomFilterFormat.h"
 #include "IdIndexFormat.h"
+#include "VectorIndexFormat.h"
 #include "VectorsFormat.h"
-#include "VectorsIndexFormat.h"
 
 namespace milvus {
 namespace codec {
@@ -36,6 +36,9 @@ class Codec {
     virtual AttrsFormatPtr
     GetAttrsFormat() = 0;
 
+    virtual VectorIndexFormatPtr
+    GetVectorIndexFormat() = 0;
+
     virtual DeletedDocsFormatPtr
     GetDeletedDocsFormat() = 0;
 
@@ -46,9 +49,6 @@ class Codec {
     /*
     virtual AttrsFormat
     GetAttrsFormat() = 0;
-
-    virtual VectorsIndexFormat
-    GetVectorsIndexFormat() = 0;
 
     virtual AttrsIndexFormat
     GetAttrsIndexFormat() = 0;

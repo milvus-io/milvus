@@ -7,12 +7,13 @@
 //
 // Unless required by applicable law or agreed to in writing, software distributed under the License
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
-// or implied. See the License for the specific language governing permissions and limitations under the License.
+// or implied. See the License for the specific language governing permissions and limitations under the License
 
 #pragma once
 
 #include <faiss/impl/io.h>
 
+namespace milvus {
 namespace knowhere {
 
 struct MemoryIOWriter : public faiss::IOWriter {
@@ -26,7 +27,7 @@ struct MemoryIOWriter : public faiss::IOWriter {
     template <typename T>
     size_t
     write(T* ptr, size_t size, size_t nitems = 1) {
-        operator()((const void*)ptr, size, nitems);
+        return operator()((const void*)ptr, size, nitems);
     }
 };
 
@@ -41,8 +42,9 @@ struct MemoryIOReader : public faiss::IOReader {
     template <typename T>
     size_t
     read(T* ptr, size_t size, size_t nitems = 1) {
-        operator()((void*)ptr, size, nitems);
+        return operator()((void*)ptr, size, nitems);
     }
 };
 
 }  // namespace knowhere
+}  // namespace milvus

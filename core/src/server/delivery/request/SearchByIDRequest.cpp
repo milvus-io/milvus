@@ -33,11 +33,12 @@
 namespace milvus {
 namespace server {
 
-SearchByIDRequest::SearchByIDRequest(const std::shared_ptr<Context>& context, const std::string& table_name,
-                                     int64_t vector_id, int64_t topk, const milvus::json& extra_params,
-                                     const std::vector<std::string>& partition_list, TopKQueryResult& result)
-    : BaseRequest(context, DQL_REQUEST_GROUP),
-      table_name_(table_name),
+SearchByIDRequest::SearchByIDRequest(const std::shared_ptr<milvus::server::Context>& context,
+                                     const std::string& collection_name, int64_t vector_id, int64_t topk,
+                                     const milvus::json& extra_params, const std::vector<std::string>& partition_list,
+                                     TopKQueryResult& result)
+    : BaseRequest(context, BaseRequest::kSearchByID),
+      collection_name_(collection_name),
       vector_id_(vector_id),
       topk_(topk),
       extra_params_(extra_params),
@@ -46,11 +47,11 @@ SearchByIDRequest::SearchByIDRequest(const std::shared_ptr<Context>& context, co
 }
 
 BaseRequestPtr
-SearchByIDRequest::Create(const std::shared_ptr<Context>& context, const std::string& table_name, int64_t vector_id,
-                          int64_t topk, const milvus::json& extra_params,
+SearchByIDRequest::Create(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name,
+                          int64_t vector_id, int64_t topk, const milvus::json& extra_params,
                           const std::vector<std::string>& partition_list, TopKQueryResult& result) {
     return std::shared_ptr<BaseRequest>(
-        new SearchByIDRequest(context, table_name, vector_id, topk, extra_params, partition_list, result));
+        new SearchByIDRequest(context, collection_name, vector_id, topk, extra_params, partition_list, result));
 }
 
 Status
@@ -58,42 +59,49 @@ SearchByIDRequest::OnExecute() {
     try {
         auto pre_query_ctx = context_->Child("Pre query");
 
-        std::string hdr = "SearchByIDRequest(table=" + table_name_ + ", id=" + std::to_string(vector_id_) +
+        std::string hdr = "SearchByIDRequest(collection=" + collection_name_ + ", id=" + std::to_string(vector_id_) +
                           ", k=" + std::to_string(topk_) + ", extra_params=" + extra_params_.dump() + ")";
 
         TimeRecorder rc(hdr);
 
         // step 1: check empty id
 
-        // step 2: check table name
-        auto status = ValidationUtil::ValidateTableName(table_name_);
+        // step 2: check collection name
+        auto status = ValidationUtil::ValidateCollectionName(collection_name_);
         if (!status.ok()) {
             return status;
         }
 
-        // step 3: check table existence
-        // only process root table, ignore partition table
-        engine::meta::TableSchema table_schema;
-        table_schema.table_id_ = table_name_;
-        status = DBWrapper::DB()->DescribeTable(table_schema);
+        // step 3: check search topk
+        status = ValidationUtil::ValidateSearchTopk(topk_);
+        if (!status.ok()) {
+            return status;
+        }
+
+        // step 4: check collection existence
+        // only process root collection, ignore partition collection
+        engine::meta::CollectionSchema collection_schema;
+        collection_schema.collection_id_ = collection_name_;
+        status = DBWrapper::DB()->DescribeCollection(collection_schema);
         if (!status.ok()) {
             if (status.code() == DB_NOT_FOUND) {
-                return Status(SERVER_TABLE_NOT_EXIST, TableNotExistMsg(table_name_));
+                return Status(SERVER_COLLECTION_NOT_EXIST, CollectionNotExistMsg(collection_name_));
             } else {
                 return status;
             }
         } else {
-            if (!table_schema.owner_table_.empty()) {
-                return Status(SERVER_INVALID_TABLE_NAME, TableNotExistMsg(table_name_));
+            if (!collection_schema.owner_collection_.empty()) {
+                return Status(SERVER_INVALID_COLLECTION_NAME, CollectionNotExistMsg(collection_name_));
             }
         }
 
-        status = ValidationUtil::ValidateSearchParams(extra_params_, table_schema, topk_);
+        // step 5: check search parameters
+        status = ValidationUtil::ValidateSearchParams(extra_params_, collection_schema, topk_);
         if (!status.ok()) {
             return status;
         }
 
-        // Check whether GPU search resource is enabled
+        // step 6: check whether GPU search resource is enabled
 #ifdef MILVUS_GPU_VERSION
         Config& config = Config::GetInstance();
         bool gpu_enable;
@@ -109,27 +117,21 @@ SearchByIDRequest::OnExecute() {
         }
 #endif
 
-        // Check table's index type supports search by id
-        if (table_schema.engine_type_ != (int32_t)engine::EngineType::FAISS_IDMAP &&
-            table_schema.engine_type_ != (int32_t)engine::EngineType::FAISS_BIN_IDMAP &&
-            table_schema.engine_type_ != (int32_t)engine::EngineType::FAISS_IVFFLAT &&
-            table_schema.engine_type_ != (int32_t)engine::EngineType::FAISS_BIN_IVFFLAT &&
-            table_schema.engine_type_ != (int32_t)engine::EngineType::FAISS_IVFSQ8) {
-            std::string err_msg =
-                "Index type " + std::to_string(table_schema.engine_type_) + " does not support SearchByID operation";
+        // step 7: check collection's index type supports search by id
+        if (collection_schema.engine_type_ != (int32_t)engine::EngineType::FAISS_IDMAP &&
+            collection_schema.engine_type_ != (int32_t)engine::EngineType::FAISS_BIN_IDMAP &&
+            collection_schema.engine_type_ != (int32_t)engine::EngineType::FAISS_IVFFLAT &&
+            collection_schema.engine_type_ != (int32_t)engine::EngineType::FAISS_BIN_IVFFLAT &&
+            collection_schema.engine_type_ != (int32_t)engine::EngineType::FAISS_IVFSQ8) {
+            std::string err_msg = "Index type " + std::to_string(collection_schema.engine_type_) +
+                                  " does not support SearchByID operation";
             SERVER_LOG_ERROR << err_msg;
             return Status(SERVER_UNSUPPORTED_ERROR, err_msg);
         }
 
-        // step 4: check search parameter
-        status = ValidationUtil::ValidateSearchTopk(topk_, table_schema);
-        if (!status.ok()) {
-            return status;
-        }
-
         rc.RecordSection("check validation");
 
-        // step 5: search vectors
+        // step 8: search vectors
         engine::ResultIds result_ids;
         engine::ResultDistances result_distances;
 
@@ -140,7 +142,7 @@ SearchByIDRequest::OnExecute() {
 
         pre_query_ctx->GetTraceContext()->GetSpan()->Finish();
 
-        status = DBWrapper::DB()->QueryByID(context_, table_name_, partition_list_, (size_t)topk_, extra_params_,
+        status = DBWrapper::DB()->QueryByID(context_, collection_name_, partition_list_, (size_t)topk_, extra_params_,
                                             vector_id_, result_ids, result_distances);
 
 #ifdef MILVUS_ENABLE_PROFILING
@@ -153,19 +155,18 @@ SearchByIDRequest::OnExecute() {
         }
 
         if (result_ids.empty()) {
-            return Status::OK();  // empty table
+            return Status::OK();  // empty collection
         }
 
         auto post_query_ctx = context_->Child("Constructing result");
 
-        // step 7: construct result array
+        // step 9: construct result array
         result_.row_num_ = 1;
         result_.distance_list_ = result_distances;
         result_.id_list_ = result_ids;
 
         post_query_ctx->GetTraceContext()->GetSpan()->Finish();
 
-        // step 8: print time cost percent
         rc.RecordSection("construct result and send");
         rc.ElapseFromBegin("totally cost");
     } catch (std::exception& ex) {

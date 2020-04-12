@@ -32,7 +32,7 @@ TEST(JobTest, TestJob) {
     TestJob test_job;
     test_job.Dump();
 
-    auto delete_ptr = std::make_shared<DeleteJob>("table_id", nullptr, 1);
+    auto delete_ptr = std::make_shared<DeleteJob>("collection_id", nullptr, 1);
     delete_ptr->Dump();
 
     engine::VectorsData vectors;

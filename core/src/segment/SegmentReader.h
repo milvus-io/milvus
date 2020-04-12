@@ -46,6 +46,9 @@ class SegmentReader {
     LoadUids(std::vector<doc_id_t>& uids);
 
     Status
+    LoadVectorIndex(const std::string& location, segment::VectorIndexPtr& vector_index_ptr);
+
+    Status
     LoadBloomFilter(segment::IdBloomFilterPtr& id_bloom_filter_ptr);
 
     Status
@@ -53,6 +56,9 @@ class SegmentReader {
 
     Status
     GetSegment(SegmentPtr& segment_ptr);
+
+    Status
+    ReadDeletedDocsSize(size_t& size);
 
  private:
     storage::FSHandlerPtr fs_ptr_;

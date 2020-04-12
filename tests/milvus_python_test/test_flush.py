@@ -31,11 +31,9 @@ class TestFlushBase:
         params=gen_simple_index()
     )
     def get_simple_index(self, request, connect):
-        if str(connect._cmd("mode")[1]) == "CPU":
-            if request.param["index_type"] != IndexType.IVF_SQ8 or request.param["index_type"] != IndexType.IVFLAT or request.param["index_type"] != IndexType.FLAT:
-                pytest.skip("Only support index_type: flat/ivf_flat/ivf_sq8")
-        else:
-            pytest.skip("Only support CPU mode")
+        if str(connect._cmd("mode")[1]) == "GPU":
+            if request.param["index_type"] not in [IndexType.IVF_SQ8, IndexType.IVFLAT, IndexType.FLAT, IndexType.IVF_PQ, IndexType.IVF_SQ8H]:
+                pytest.skip("Only support index_type: idmap/flat")
         return request.param
 
     def test_flush_collection_not_existed(self, connect, collection):
@@ -210,13 +208,13 @@ class TestFlushBase:
                  'dimension': dim,
                  'index_file_size': index_file_size,
                  'metric_type': MetricType.L2}
-        milvus = get_milvus()
+        milvus = get_milvus(args["handler"])
         milvus.connect(uri=uri)
         milvus.create_collection(param)
         vectors = gen_vector(nb, dim)
         status, ids = milvus.add_vectors(collection, vectors, ids=[i for i in range(nb)])
         def flush(collection_name):
-            milvus = get_milvus()
+            milvus = get_milvus(args["handler"])
             milvus.connect(uri=uri)
             status = milvus.delete_by_id(collection_name, [i for i in range(nb)])
             assert status.OK()

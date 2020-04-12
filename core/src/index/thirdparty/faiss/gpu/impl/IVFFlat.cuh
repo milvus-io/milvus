@@ -46,9 +46,11 @@ class IVFFlat : public IVFBase {
   int classifyAndAddVectors(Tensor<float, 2, true>& vecs,
                             Tensor<long, 1, true>& indices);
 
+
   /// Find the approximate k nearest neigbors for `queries` against
   /// our database
   void query(Tensor<float, 2, true>& queries,
+             Tensor<uint8_t, 1, true>& bitset,
              int nprobe,
              int k,
              Tensor<float, 2, true>& outDistances,

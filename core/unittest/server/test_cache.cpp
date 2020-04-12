@@ -12,11 +12,11 @@
 #include <gtest/gtest.h>
 #include <fiu-control.h>
 #include <fiu-local.h>
-#include "utils/Error.h"
-#include "wrapper/VecIndex.h"
 
 #include "cache/CpuCacheMgr.h"
 #include "cache/GpuCacheMgr.h"
+#include "knowhere/index/vector_index/VecIndex.h"
+#include "utils/Error.h"
 
 namespace {
 
@@ -33,57 +33,39 @@ class LessItemCacheMgr : public milvus::cache::CacheMgr<milvus::cache::DataObjPt
     }
 };
 
-class MockVecIndex : public milvus::engine::VecIndex {
+class MockVecIndex : public milvus::knowhere::VecIndex {
  public:
-    MockVecIndex(int64_t dim, int64_t total) : dimension_(dim), ntotal_(total) {
+    MockVecIndex(int64_t dim, int64_t total) : dim_(dim), ntotal_(total) {
+        int64_t data_size = Dim() * Count() * sizeof(float);
+        SetIndexSize(data_size);
     }
 
-    virtual milvus::Status
-    BuildAll(const int64_t& nb, const float* xb, const int64_t* ids, const milvus::engine::Config& cfg,
-             const int64_t& nt = 0, const float* xt = nullptr) {
-        return milvus::Status();
+    virtual void
+    BuildAll(const milvus::knowhere::DatasetPtr& dataset_ptr, const milvus::knowhere::Config& cfg) {
     }
 
-//    milvus::engine::VecIndexPtr
-//    Clone() override {
-//        return milvus::engine::VecIndexPtr();
-//    }
-
-    int64_t
-    GetDeviceId() override {
-        return 0;
+    virtual void
+    Train(const milvus::knowhere::DatasetPtr& dataset_ptr, const milvus::knowhere::Config& cfg) {
     }
 
-    milvus::engine::IndexType
-    GetType() const override {
-        return milvus::engine::IndexType::INVALID;
+    virtual void
+    Add(const milvus::knowhere::DatasetPtr& dataset, const milvus::knowhere::Config& cfg = milvus::knowhere::Config()) {
     }
 
-    virtual milvus::Status
-    Add(const int64_t& nb, const float* xb, const int64_t* ids,
-        const milvus::engine::Config& cfg = milvus::engine::Config()) {
-        return milvus::Status();
+    virtual void
+    AddWithoutIds(const milvus::knowhere::DatasetPtr& dataset,
+                  const milvus::knowhere::Config& cfg = milvus::knowhere::Config()) {
     }
 
-    virtual milvus::Status
-    Search(const int64_t& nq, const float* xq, float* dist, int64_t* ids,
-           const milvus::engine::Config& cfg = milvus::engine::Config()) {
-        return milvus::Status();
-    }
-
-    milvus::engine::VecIndexPtr
-    CopyToGpu(const int64_t& device_id, const milvus::engine::Config& cfg) override {
-        return nullptr;
-    }
-
-    milvus::engine::VecIndexPtr
-    CopyToCpu(const milvus::engine::Config& cfg) override {
+    virtual milvus::knowhere::DatasetPtr
+    Query(const milvus::knowhere::DatasetPtr& dataset,
+          const milvus::knowhere::Config& cfg = milvus::knowhere::Config()) {
         return nullptr;
     }
 
     virtual int64_t
-    Dimension() {
-        return dimension_;
+    Dim() {
+        return dim_;
     }
 
     virtual int64_t
@@ -91,40 +73,41 @@ class MockVecIndex : public milvus::engine::VecIndex {
         return ntotal_;
     }
 
-    virtual knowhere::BinarySet
-    Serialize() {
-        knowhere::BinarySet binset;
+    milvus::knowhere::IndexType
+    index_type() const override {
+        return milvus::knowhere::IndexEnum::INVALID;
+    }
+
+    milvus::knowhere::BinarySet
+    Serialize(const milvus::knowhere::Config& config = milvus::knowhere::Config()) override {
+        milvus::knowhere::BinarySet binset;
         return binset;
     }
 
-    virtual milvus::Status
-    Load(const knowhere::BinarySet& index_binary) {
-        return milvus::Status();
+    virtual void
+    Load(const milvus::knowhere::BinarySet& index_binary) {
     }
 
  public:
-    int64_t dimension_ = 256;
+    int64_t dim_ = 256;
     int64_t ntotal_ = 0;
 };
 
 }  // namespace
 
 TEST(CacheTest, DUMMY_TEST) {
-    milvus::engine::Config cfg;
+    milvus::knowhere::Config cfg;
+    milvus::knowhere::DatasetPtr dataset;
     MockVecIndex mock_index(256, 1000);
-    mock_index.Dimension();
+    mock_index.Dim();
     mock_index.Count();
-    mock_index.Add(1, nullptr, nullptr);
-    mock_index.BuildAll(1, nullptr, nullptr, cfg);
-    mock_index.Search(1, nullptr, nullptr, nullptr, cfg);
-//    mock_index.Clone();
-    mock_index.CopyToCpu(cfg);
-    mock_index.CopyToGpu(1, cfg);
-    mock_index.GetDeviceId();
-    mock_index.GetType();
-    knowhere::BinarySet index_binary;
+    mock_index.Add(dataset, cfg);
+    mock_index.BuildAll(dataset, cfg);
+    mock_index.Query(dataset, cfg);
+    mock_index.index_type();
+    milvus::knowhere::BinarySet index_binary;
     mock_index.Load(index_binary);
-    mock_index.Serialize();
+    mock_index.Serialize(cfg);
 }
 
 TEST(CacheTest, CPU_CACHE_TEST) {
@@ -139,7 +122,7 @@ TEST(CacheTest, CPU_CACHE_TEST) {
     uint64_t item_count = 20;
     for (uint64_t i = 0; i < item_count + 1; i++) {
         // each vector is 1k byte, total size less than 1G
-        milvus::engine::VecIndexPtr mock_index = std::make_shared<MockVecIndex>(256, 1000000);
+        milvus::knowhere::VecIndexPtr mock_index = std::make_shared<MockVecIndex>(256, 1000000);
         milvus::cache::DataObjPtr data_obj = std::static_pointer_cast<milvus::cache::DataObj>(mock_index);
         cpu_mgr->InsertItem("index_" + std::to_string(i), data_obj);
     }
@@ -167,7 +150,7 @@ TEST(CacheTest, CPU_CACHE_TEST) {
         cpu_mgr->SetCapacity(g_num * gbyte);
 
         // each vector is 1k byte, total size less than 6G
-        milvus::engine::VecIndexPtr mock_index = std::make_shared<MockVecIndex>(256, 6000000);
+        milvus::knowhere::VecIndexPtr mock_index = std::make_shared<MockVecIndex>(256, 6000000);
         milvus::cache::DataObjPtr data_obj = std::static_pointer_cast<milvus::cache::DataObj>(mock_index);
         cpu_mgr->InsertItem("index_6g", data_obj);
         ASSERT_TRUE(cpu_mgr->ItemExists("index_6g"));
@@ -193,7 +176,7 @@ TEST(CacheTest, GPU_CACHE_TEST) {
 
     for (int i = 0; i < 20; i++) {
         // each vector is 1k byte
-        milvus::engine::VecIndexPtr mock_index = std::make_shared<MockVecIndex>(256, 1000);
+        milvus::knowhere::VecIndexPtr mock_index = std::make_shared<MockVecIndex>(256, 1000);
         milvus::cache::DataObjPtr data_obj = std::static_pointer_cast<milvus::cache::DataObj>(mock_index);
         gpu_mgr->InsertItem("index_" + std::to_string(i), data_obj);
     }
@@ -206,7 +189,7 @@ TEST(CacheTest, GPU_CACHE_TEST) {
     for (auto i = 0; i < 3; i++) {
         // TODO(myh): use gpu index to mock
         // each vector is 1k byte, total size less than 2G
-        milvus::engine::VecIndexPtr mock_index = std::make_shared<MockVecIndex>(256, 2000000);
+        milvus::knowhere::VecIndexPtr mock_index = std::make_shared<MockVecIndex>(256, 2000000);
         milvus::cache::DataObjPtr data_obj = std::static_pointer_cast<milvus::cache::DataObj>(mock_index);
         std::cout << data_obj->Size() << std::endl;
         gpu_mgr->InsertItem("index_" + std::to_string(i), data_obj);
@@ -243,7 +226,7 @@ TEST(CacheTest, INVALID_TEST) {
         LessItemCacheMgr mgr;
         for (int i = 0; i < 20; i++) {
             // each vector is 1k byte
-            milvus::engine::VecIndexPtr mock_index = std::make_shared<MockVecIndex>(256, 2);
+            milvus::knowhere::VecIndexPtr mock_index = std::make_shared<MockVecIndex>(256, 2);
             milvus::cache::DataObjPtr data_obj = std::static_pointer_cast<milvus::cache::DataObj>(mock_index);
             mgr.InsertItem("index_" + std::to_string(i), data_obj);
         }

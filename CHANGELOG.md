@@ -2,23 +2,81 @@
 
 Please mark all change in change log and use the issue from GitHub
 
-# Milvus 0.7.1 (TBD)
+# Milvus 0.8.0 (TBD)
+
+## Bug
+-   \#1276 SQLite throw exception after create 50000+ partitions in a table
+-   \#1762 Server is not forbidden to create new partition which tag is `_default`
+-   \#1789 Fix multi-client search cause server crash
+-   \#1832 Fix crash in tracing module
+-   \#1873 Fix index file serialize to incorrect path
+-   \#1881 Fix bad alloc when index files lost
+
+## Feature
+-   \#261  Integrate ANNOY into Milvus
+-   \#1655 GPU index support delete vectors
+-   \#1660 IVF PQ CPU support deleted vectors searching
+-   \#1661 HNSW support deleted vectors searching
+-   \#1825 Add annoy index type in C++ sdk
+-   \#1849 NSG support deleted vectors searching
+-   \#1893 Log config information and device information
+
+## Improvement
+-   \#1627 Move read/write index APIs into codec
+-   \#1784 Add Substructure and Superstructure in http module
+-   \#1858 Disable S3 build
+-   \#1882 Add index annoy into http module
+-   \#1885 Optimize knowhere unittest
+-   \#1886 Refactor log on search and insert request
+-   \#1897 Heap pop and push can be realized by heap_swap_top
+
+## Task
+
+
+# Milvus 0.7.1 (2020-03-29)
 
 ## Bug
 -   \#1301 Data in WAL may be accidentally inserted into a new table with the same name.
 -   \#1634 Fix search demo bug in HTTP doc
 -   \#1635 Vectors can be returned by searching after vectors deleted if `cache_insert_data` set true
+-   \#1648 The cache cannot be used all when the vector type is binary
+-   \#1651 Check validity of dimension when collection metric type is binary one
+-   \#1663 PQ index parameter 'm' validation
+-   \#1686 API search_in_files cannot work correctly when vectors is stored in certain non-default partition
+-   \#1689 Fix SQ8H search fail on SIFT-1B dataset
+-   \#1667 Create index failed with type: rnsg if metric_type is IP
+-   \#1708 NSG search crashed
+-   \#1724 Remove unused unittests
+-   \#1728 Optimize request handler to combine similar query
+-   \#1734 Opentracing for combined search request
+-   \#1735 Fix search out of memory with ivf_flat 
+-   \#1747 Expected error status if search with partition_tag not existed
+-   \#1756 Fix memory exhausted during searching 
+-   \#1781 Fix search hang with SQ8H
+-   \#1812 Fix incorrect request method in search example in http readme
+-   \#1818 Duplicate data generated after restart milvus server
 
 ## Feature
+-   \#1603 BinaryFlat add 2 Metric: Substructure and Superstructure
 
 ## Improvement
+-   \#267 Improve search performance: reduce delay
+-   \#342 Knowhere and Wrapper refactor
 -   \#1537 Optimize raw vector and uids read/write
 -   \#1546 Move Config.cpp to config directory
 -   \#1547 Rename storage/file to storage/disk and rename classes
 -   \#1548 Move store/Directory to storage/Operation and add FSHandler
+-   \#1572 Optimize config cpu/gpu cache_capacity setter
+-   \#1619 Improve compact performance
+-   \#1649 Fix Milvus crash on old CPU 
+-   \#1653 IndexFlat (SSE) and IndexBinaryFlat performance improvement for small NQ
+-   \#1678 Remove CUSTOMIZATION macro 
+-   \#1698 Upgrade mishards to v0.7.0
+-   \#1719 Improve Milvus log
+-   \#1754 Optimize behavior to get file ids from metadata in mishards
+-   \#1799 Update docker images to 0.7.1 in mishards
 
 ## Task
-
 
 # Milvus 0.7.0 (2020-03-11)
 
@@ -33,8 +91,8 @@ Please mark all change in change log and use the issue from GitHub
 -   \#995 Table count set to 0 if no tables found
 -   \#1010 Improve error message when offset or page_size is equal 0
 -   \#1022 Check if partition name is valid
--   \#1028 check if table exists when show partitions
--   \#1029 check if table exists when try to delete partition
+-   \#1028 Check if table exists when show partitions
+-   \#1029 Check if table exists when try to delete partition
 -   \#1066 Optimize http insert and search speed
 -   \#1022 Check if partition name is legal
 -   \#1028 Check if table exists when show partitions
@@ -78,6 +136,8 @@ Please mark all change in change log and use the issue from GitHub
 -   \#1598 Server down during mixed operations
 -   \#1601 External link bug in HTTP doc
 -   \#1609 Refine Compact function
+-   \#1808 Building index params check for Annoy
+-   \#1852 Search index type<Annoy> failed with reason `failed to load index file`
 
 ## Feature
 -   \#216 Add CLI to get server info
@@ -136,7 +196,7 @@ Please mark all change in change log and use the issue from GitHub
 # Milvus 0.6.0 (2019-12-07)
 
 ## Bug
--   \#228 memory usage increased slowly during searching vectors
+-   \#228 Memory usage increased slowly during searching vectors
 -   \#246 Exclude src/external folder from code coverage for jenkin ci
 -   \#248 Reside src/external in thirdparty
 -   \#316 Some files not merged after vectors added
@@ -163,7 +223,7 @@ Please mark all change in change log and use the issue from GitHub
 -   \#523 Erase file data from cache once the file is marked as deleted
 -   \#527 faiss benchmark not compatible with faiss 1.6.0
 -   \#530 BuildIndex stop when do build index and search simultaneously
--   \#532 assigin value to `table_name` from confest shell
+-   \#532 Assigin value to `table_name` from confest shell
 -   \#533 NSG build failed with MetricType Inner Product
 -   \#543 client raise exception in shards when search results is empty
 -   \#545 Avoid dead circle of build index thread when error occurs
@@ -238,7 +298,7 @@ Please mark all change in change log and use the issue from GitHub
 ## Improvement
 -   \#204 improve grpc performance in search
 -   \#207 Add more unittest for config set/get
--   \#208 optimize unittest to support run single test more easily
+-   \#208 Optimize unittest to support run single test more easily
 -   \#284 Change C++ SDK to shared library
 -   \#260 C++ SDK README
 
@@ -623,7 +683,7 @@ Please mark all change in change log and use the issue from GitHub
 -   MS-67 Fix license check bug
 -   MS-76 Fix pipeline crash bug
 -   MS-100 cmake: fix AWS build issue
--   MS-101 change AWS build type to Release
+-   MS-101 Change AWS build type to Release
 
 ## Improvement
 
@@ -635,7 +695,7 @@ Please mark all change in change log and use the issue from GitHub
 -   MS-6 Implement SDK interface part 1
 -   MS-16 Implement metrics without prometheus
 -   MS-21 Implement SDK interface part 2
--   MS-26 cmake. Add thirdparty packages
+-   MS-26 CMake. Add thirdparty packages
 -   MS-31 cmake: add prometheus
 -   MS-33 cmake: add -j4 to make third party packages build faster
 -   MS-27 support gpu config and disable license build config in cmake

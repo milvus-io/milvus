@@ -26,6 +26,8 @@ class JaegerFactory:
             tracer,
             log_payloads=plugin_config.TRACING_LOG_PAYLOAD,
             span_decorator=span_decorator)
+        jaeger_logger = logging.getLogger('jaeger_tracing')
+        jaeger_logger.setLevel(logging.ERROR)
 
         return Tracer(tracer, tracer_interceptor, intercept_server)
 

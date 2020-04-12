@@ -11,17 +11,85 @@
 
 #include "server/delivery/request/BaseRequest.h"
 #include "utils/CommonUtil.h"
+#include "utils/Exception.h"
 #include "utils/Log.h"
+
+#include <map>
 
 namespace milvus {
 namespace server {
 
-BaseRequest::BaseRequest(const std::shared_ptr<Context>& context, const std::string& request_group, bool async)
-    : context_(context), request_group_(request_group), async_(async), done_(false) {
+static const char* DQL_REQUEST_GROUP = "dql";
+static const char* DDL_DML_REQUEST_GROUP = "ddl_dml";
+static const char* INFO_REQUEST_GROUP = "info";
+
+namespace {
+std::string
+RequestGroup(BaseRequest::RequestType type) {
+    static std::map<BaseRequest::RequestType, std::string> s_map_type_group = {
+        // general operations
+        {BaseRequest::kCmd, INFO_REQUEST_GROUP},
+
+        // data operations
+        {BaseRequest::kInsert, DDL_DML_REQUEST_GROUP},
+        {BaseRequest::kCompact, DDL_DML_REQUEST_GROUP},
+        {BaseRequest::kFlush, DDL_DML_REQUEST_GROUP},
+        {BaseRequest::kDeleteByID, DDL_DML_REQUEST_GROUP},
+        {BaseRequest::kGetVectorByID, INFO_REQUEST_GROUP},
+        {BaseRequest::kGetVectorIDs, INFO_REQUEST_GROUP},
+
+        // collection operations
+        {BaseRequest::kShowCollections, INFO_REQUEST_GROUP},
+        {BaseRequest::kCreateCollection, DDL_DML_REQUEST_GROUP},
+        {BaseRequest::kHasCollection, INFO_REQUEST_GROUP},
+        {BaseRequest::kDescribeCollection, INFO_REQUEST_GROUP},
+        {BaseRequest::kCountCollection, INFO_REQUEST_GROUP},
+        {BaseRequest::kShowCollectionInfo, INFO_REQUEST_GROUP},
+        {BaseRequest::kDropCollection, DDL_DML_REQUEST_GROUP},
+        {BaseRequest::kPreloadCollection, DQL_REQUEST_GROUP},
+
+        // partition operations
+        {BaseRequest::kCreatePartition, DDL_DML_REQUEST_GROUP},
+        {BaseRequest::kShowPartitions, INFO_REQUEST_GROUP},
+        {BaseRequest::kDropPartition, DDL_DML_REQUEST_GROUP},
+
+        // index operations
+        {BaseRequest::kCreateIndex, DDL_DML_REQUEST_GROUP},
+        {BaseRequest::kDescribeIndex, INFO_REQUEST_GROUP},
+        {BaseRequest::kDropIndex, DDL_DML_REQUEST_GROUP},
+
+        // search operations
+        {BaseRequest::kSearchByID, DQL_REQUEST_GROUP},
+        {BaseRequest::kSearch, DQL_REQUEST_GROUP},
+        {BaseRequest::kSearchCombine, DQL_REQUEST_GROUP},
+    };
+
+    auto iter = s_map_type_group.find(type);
+    if (iter == s_map_type_group.end()) {
+        SERVER_LOG_ERROR << "Unsupported request type: " << type;
+        throw Exception(SERVER_NOT_IMPLEMENT, "request group undefined");
+    }
+    return iter->second;
+}
+}  // namespace
+
+BaseRequest::BaseRequest(const std::shared_ptr<milvus::server::Context>& context, BaseRequest::RequestType type,
+                         bool async)
+    : context_(context), type_(type), async_(async), done_(false) {
+    request_group_ = milvus::server::RequestGroup(type);
 }
 
 BaseRequest::~BaseRequest() {
     WaitToFinish();
+}
+
+Status
+BaseRequest::PreExecute() {
+    status_ = OnPreExecute();
+    if (!status_.ok()) {
+        Done();
+    }
+    return status_;
 }
 
 Status
@@ -31,31 +99,47 @@ BaseRequest::Execute() {
     return status_;
 }
 
+Status
+BaseRequest::PostExecute() {
+    status_ = OnPostExecute();
+    return status_;
+}
+
+Status
+BaseRequest::OnPreExecute() {
+    return Status::OK();
+}
+
+Status
+BaseRequest::OnPostExecute() {
+    return Status::OK();
+}
+
 void
 BaseRequest::Done() {
     done_ = true;
     finish_cond_.notify_all();
 }
 
-Status
-BaseRequest::SetStatus(ErrorCode error_code, const std::string& error_msg) {
-    status_ = Status(error_code, error_msg);
-    SERVER_LOG_ERROR << error_msg;
-    return status_;
+void
+BaseRequest::set_status(const Status& status) {
+    status_ = status;
+    if (!status_.ok()) {
+        SERVER_LOG_ERROR << status_.message();
+    }
 }
 
 std::string
-BaseRequest::TableNotExistMsg(const std::string& table_name) {
-    return "Table " + table_name +
-           " does not exist. Use milvus.has_table to verify whether the table exists. "
-           "You also can check whether the table name exists.";
+BaseRequest::CollectionNotExistMsg(const std::string& collection_name) {
+    return "Collection " + collection_name +
+           " does not exist. Use milvus.has_collection to verify whether the collection exists. "
+           "You also can check whether the collection name exists.";
 }
 
 Status
 BaseRequest::WaitToFinish() {
     std::unique_lock<std::mutex> lock(finish_mtx_);
     finish_cond_.wait(lock, [this] { return done_; });
-
     return status_;
 }
 

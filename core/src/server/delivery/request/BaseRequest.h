@@ -32,24 +32,21 @@
 namespace milvus {
 namespace server {
 
-static const char* DQL_REQUEST_GROUP = "dql";
-static const char* DDL_DML_REQUEST_GROUP = "ddl_dml";
-static const char* INFO_REQUEST_GROUP = "info";
-
-struct TableSchema {
-    std::string table_name_;
+struct CollectionSchema {
+    std::string collection_name_;
     int64_t dimension_;
     int64_t index_file_size_;
     int64_t metric_type_;
 
-    TableSchema() {
+    CollectionSchema() {
         dimension_ = 0;
         index_file_size_ = 0;
         metric_type_ = 0;
     }
 
-    TableSchema(const std::string& table_name, int64_t dimension, int64_t index_file_size, int64_t metric_type) {
-        table_name_ = table_name;
+    CollectionSchema(const std::string& collection_name, int64_t dimension, int64_t index_file_size,
+                     int64_t metric_type) {
+        collection_name_ = collection_name;
         dimension_ = dimension;
         index_file_size_ = index_file_size;
         metric_type_ = metric_type;
@@ -80,7 +77,7 @@ struct HybridQueryResult {
 };
 
 struct IndexParam {
-    std::string table_name_;
+    std::string collection_name_;
     int64_t index_type_;
     std::string extra_params_;
 
@@ -88,20 +85,20 @@ struct IndexParam {
         index_type_ = 0;
     }
 
-    IndexParam(const std::string& table_name, int64_t index_type) {
-        table_name_ = table_name;
+    IndexParam(const std::string& collection_name, int64_t index_type) {
+        collection_name_ = collection_name;
         index_type_ = index_type;
     }
 };
 
 struct PartitionParam {
-    std::string table_name_;
+    std::string collection_name_;
     std::string tag_;
 
     PartitionParam() = default;
 
-    PartitionParam(const std::string& table_name, const std::string& tag) {
-        table_name_ = table_name;
+    PartitionParam(const std::string& collection_name, const std::string& tag) {
+        collection_name_ = collection_name;
         tag_ = tag;
     }
 };
@@ -119,26 +116,77 @@ struct PartitionStat {
     std::vector<SegmentStat> segments_stat_;
 };
 
-struct TableInfo {
+struct CollectionInfo {
     int64_t total_row_num_ = 0;
     std::vector<PartitionStat> partitions_stat_;
 };
 
 class BaseRequest {
+ public:
+    enum RequestType {
+        // general operations
+        kCmd = 100,
+
+        // data operations
+        kInsert = 200,
+        kCompact,
+        kFlush,
+        kDeleteByID,
+        kGetVectorByID,
+        kGetVectorIDs,
+
+        // collection operations
+        kShowCollections = 300,
+        kCreateCollection,
+        kHasCollection,
+        kDescribeCollection,
+        kCountCollection,
+        kShowCollectionInfo,
+        kDropCollection,
+        kPreloadCollection,
+
+        // partition operations
+        kCreatePartition = 400,
+        kShowPartitions,
+        kDropPartition,
+
+        // index operations
+        kCreateIndex = 500,
+        kDescribeIndex,
+        kDropIndex,
+
+        // search operations
+        kSearchByID = 600,
+        kSearch,
+        kSearchCombine,
+    };
+
  protected:
-    BaseRequest(const std::shared_ptr<Context>& context, const std::string& request_group, bool async = false);
+    BaseRequest(const std::shared_ptr<milvus::server::Context>& context, BaseRequest::RequestType type,
+                bool async = false);
 
     virtual ~BaseRequest();
 
  public:
     Status
+    PreExecute();
+
+    Status
     Execute();
+
+    Status
+    PostExecute();
 
     void
     Done();
 
     Status
     WaitToFinish();
+
+    RequestType
+    GetRequestType() const {
+        return type_;
+    }
 
     std::string
     RequestGroup() const {
@@ -150,6 +198,9 @@ class BaseRequest {
         return status_;
     }
 
+    void
+    set_status(const Status& status);
+
     bool
     IsAsync() const {
         return async_;
@@ -157,24 +208,34 @@ class BaseRequest {
 
  protected:
     virtual Status
+    OnPreExecute();
+
+    virtual Status
     OnExecute() = 0;
 
-    Status
-    SetStatus(ErrorCode error_code, const std::string& error_msg);
+    virtual Status
+    OnPostExecute();
 
     std::string
-    TableNotExistMsg(const std::string& table_name);
+    CollectionNotExistMsg(const std::string& collection_name);
 
  protected:
-    const std::shared_ptr<Context>& context_;
+    const std::shared_ptr<milvus::server::Context> context_;
 
     mutable std::mutex finish_mtx_;
     std::condition_variable finish_cond_;
 
+    RequestType type_;
     std::string request_group_;
     bool async_;
     bool done_;
     Status status_;
+
+ public:
+    const std::shared_ptr<milvus::server::Context>&
+    Context() const {
+        return context_;
+    }
 };
 
 using BaseRequestPtr = std::shared_ptr<BaseRequest>;

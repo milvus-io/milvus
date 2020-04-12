@@ -36,13 +36,13 @@ class GrpcClient {
     virtual ~GrpcClient();
 
     Status
-    CreateTable(const grpc::TableSchema& table_schema);
+    CreateCollection(const grpc::CollectionSchema& collection_schema);
 
     bool
-    HasTable(const grpc::TableName& table_name, Status& status);
+    HasCollection(const grpc::CollectionName& collection_name, Status& status);
 
     Status
-    DropTable(const grpc::TableName& table_name);
+    DropCollection(const grpc::CollectionName& collection_name);
 
     Status
     CreateIndex(const grpc::IndexParam& index_param);
@@ -60,16 +60,16 @@ class GrpcClient {
     Search(const grpc::SearchParam& search_param, ::milvus::grpc::TopKQueryResult& topk_query_result);
 
     Status
-    DescribeTable(const std::string& table_name, grpc::TableSchema& grpc_schema);
+    DescribeCollection(const std::string& collection_name, grpc::CollectionSchema& grpc_schema);
 
     int64_t
-    CountTable(grpc::TableName& table_name, Status& status);
+    CountCollection(grpc::CollectionName& collection_name, Status& status);
 
     Status
-    ShowTables(milvus::grpc::TableNameList& table_name_list);
+    ShowCollections(milvus::grpc::CollectionNameList& collection_name_list);
 
     Status
-    ShowTableInfo(grpc::TableName& table_name, grpc::TableInfo& table_info);
+    ShowCollectionInfo(grpc::CollectionName& collection_name, grpc::CollectionInfo& collection_info);
 
     Status
     Cmd(const std::string& cmd, std::string& result);
@@ -78,28 +78,28 @@ class GrpcClient {
     DeleteByID(grpc::DeleteByIDParam& delete_by_id_param);
 
     Status
-    PreloadTable(grpc::TableName& table_name);
+    PreloadCollection(grpc::CollectionName& collection_name);
 
     Status
-    DescribeIndex(grpc::TableName& table_name, grpc::IndexParam& index_param);
+    DescribeIndex(grpc::CollectionName& collection_name, grpc::IndexParam& index_param);
 
     Status
-    DropIndex(grpc::TableName& table_name);
+    DropIndex(grpc::CollectionName& collection_name);
 
     Status
     CreatePartition(const grpc::PartitionParam& partition_param);
 
     Status
-    ShowPartitions(const grpc::TableName& table_name, grpc::PartitionList& partition_array) const;
+    ShowPartitions(const grpc::CollectionName& collection_name, grpc::PartitionList& partition_array) const;
 
     Status
     DropPartition(const ::milvus::grpc::PartitionParam& partition_param);
 
     Status
-    Flush(const std::string& table_name);
+    Flush(const std::string& collection_name);
 
     Status
-    Compact(milvus::grpc::TableName& table_name);
+    Compact(milvus::grpc::CollectionName& collection_name);
 
     Status
     Disconnect();

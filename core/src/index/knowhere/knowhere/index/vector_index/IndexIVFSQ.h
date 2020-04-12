@@ -7,33 +7,36 @@
 //
 // Unless required by applicable law or agreed to in writing, software distributed under the License
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
-// or implied. See the License for the specific language governing permissions and limitations under the License.
+// or implied. See the License for the specific language governing permissions and limitations under the License
 
 #pragma once
 
 #include <memory>
 #include <utility>
 
-#include "IndexIVF.h"
+#include "knowhere/index/vector_index/IndexIVF.h"
 
+namespace milvus {
 namespace knowhere {
 
 class IVFSQ : public IVF {
  public:
-    explicit IVFSQ(std::shared_ptr<faiss::Index> index) : IVF(std::move(index)) {
+    IVFSQ() : IVF() {
+        index_type_ = IndexEnum::INDEX_FAISS_IVFSQ8;
     }
 
-    IVFSQ() = default;
+    explicit IVFSQ(std::shared_ptr<faiss::Index> index) : IVF(std::move(index)) {
+        index_type_ = IndexEnum::INDEX_FAISS_IVFSQ8;
+    }
 
-    IndexModelPtr
-    Train(const DatasetPtr& dataset, const Config& config) override;
+    void
+    Train(const DatasetPtr&, const Config&) override;
 
-    VectorIndexPtr
-    CopyCpuToGpu(const int64_t& device_id, const Config& config) override;
-
- protected:
-    //    VectorIndexPtr
-    //    Clone_impl(const std::shared_ptr<faiss::Index>& index) override;
+    VecIndexPtr
+    CopyCpuToGpu(const int64_t, const Config&) override;
 };
 
+using IVFSQPtr = std::shared_ptr<IVFSQ>;
+
 }  // namespace knowhere
+}  // namespace milvus

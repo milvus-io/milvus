@@ -24,7 +24,7 @@
 namespace milvus {
 namespace server {
 
-CreateCollectionRequest::CreateCollectionRequest(const std::shared_ptr<Context>& context,
+CreateHybridCollectionRequest::CreateHybridCollectionRequest(const std::shared_ptr<milvus::server::Context>& context,
                                                  const std::string& collection_name,
                                                  std::vector<std::pair<std::string, engine::meta::hybrid::DataType>>& field_types,
                                                  std::vector<std::pair<std::string, uint64_t>>& vector_dimensions,
@@ -37,23 +37,23 @@ CreateCollectionRequest::CreateCollectionRequest(const std::shared_ptr<Context>&
 }
 
 BaseRequestPtr
-CreateCollectionRequest::Create(const std::shared_ptr<Context>& context,
+CreateHybridCollectionRequest::Create(const std::shared_ptr<milvus::server::Context>& context,
                                 const std::string& collection_name,
                                 std::vector<std::pair<std::string, engine::meta::hybrid::DataType>>& field_types,
                                 std::vector<std::pair<std::string, uint64_t>>& vector_dimensions,
                                 std::vector<std::pair<std::string, std::string>>& field_params) {
     return std::shared_ptr<BaseRequest>(
-        new CreateCollectionRequest(context, collection_name, field_types, vector_dimensions, field_params));
+        new CreateHybridCollectionRequest(context, collection_name, field_types, vector_dimensions, field_params));
 }
 
 Status
-CreateCollectionRequest::OnExecute() {
+CreateHybridCollectionRequest::OnExecute() {
     std::string hdr = "CreateCollectionRequest(collection=" + collection_name_ + ")";
     TimeRecorderAuto rc(hdr);
 
     try {
         // step 1: check arguments
-        auto status = ValidationUtil::ValidateTableName(collection_name_);
+        auto status = ValidationUtil::ValidateCollectionName(collection_name_);
         if (!status.ok()) {
             return status;
         }
@@ -61,7 +61,7 @@ CreateCollectionRequest::OnExecute() {
         rc.RecordSection("check validation");
 
         // step 2: construct collection schema and vector schema
-        engine::meta::TableSchema table_info;
+        engine::meta::CollectionSchema table_info;
         engine::meta::hybrid::FieldsSchema fields_schema;
 
         auto size = field_types_.size();

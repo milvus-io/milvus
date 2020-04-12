@@ -35,11 +35,11 @@ class VectorSource {
 
     Status
     Add(/*const ExecutionEnginePtr& execution_engine,*/ const segment::SegmentWriterPtr& segment_writer_ptr,
-        const meta::TableFileSchema& table_file_schema, const size_t& num_vectors_to_add, size_t& num_vectors_added);
+        const meta::SegmentSchema& table_file_schema, const size_t& num_vectors_to_add, size_t& num_vectors_added);
 
     Status
     AddEntities(const segment::SegmentWriterPtr& segment_writer_ptr,
-                const meta::TableFileSchema& collection_file_schema,
+                const meta::SegmentSchema& collection_file_schema,
                 const size_t& num_attrs_to_add,
                 size_t& num_attrs_added);
 

@@ -52,6 +52,8 @@ enum MetricType {
     METRIC_Jaccard,
     METRIC_Tanimoto,
     METRIC_Hamming,
+    METRIC_Substructure,       ///< Tversky case alpha = 0, beta = 1
+    METRIC_Superstructure,     ///< Tversky case alpha = 1, beta = 0
 
     /// some additional metrics defined in scipy.spatial.distance
     METRIC_Canberra = 20,
@@ -174,7 +176,8 @@ struct Index {
      * @param result      result table
      */
     virtual void range_search (idx_t n, const float *x, float radius,
-                               RangeSearchResult *result) const;
+                               RangeSearchResult *result,
+                               ConcurrentBitsetPtr bitset = nullptr) const;
 
     /** return the indexes of the k vectors closest to the query x.
      *

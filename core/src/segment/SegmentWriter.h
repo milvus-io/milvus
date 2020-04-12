@@ -42,6 +42,9 @@ class SegmentWriter {
              const std::vector<doc_id_t>& uids);
 
     Status
+    SetVectorIndex(const knowhere::VecIndexPtr& index);
+
+    Status
     WriteBloomFilter(const IdBloomFilterPtr& bloom_filter_ptr);
 
     Status
@@ -64,6 +67,9 @@ class SegmentWriter {
 
     size_t
     VectorCount();
+
+    Status
+    WriteVectorIndex(const std::string& location);
 
  private:
     Status

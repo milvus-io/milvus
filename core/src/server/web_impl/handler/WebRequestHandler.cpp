@@ -45,9 +45,9 @@ WebErrorMap(ErrorCode code) {
         {SERVER_CANNOT_CREATE_FILE, StatusCode::CANNOT_CREATE_FILE},
         {SERVER_CANNOT_DELETE_FOLDER, StatusCode::CANNOT_DELETE_FOLDER},
         {SERVER_CANNOT_DELETE_FILE, StatusCode::CANNOT_DELETE_FILE},
-        {SERVER_TABLE_NOT_EXIST, StatusCode::TABLE_NOT_EXISTS},
-        {SERVER_INVALID_TABLE_NAME, StatusCode::ILLEGAL_TABLE_NAME},
-        {SERVER_INVALID_TABLE_DIMENSION, StatusCode::ILLEGAL_DIMENSION},
+        {SERVER_COLLECTION_NOT_EXIST, StatusCode::COLLECTION_NOT_EXISTS},
+        {SERVER_INVALID_COLLECTION_NAME, StatusCode::ILLEGAL_COLLECTION_NAME},
+        {SERVER_INVALID_COLLECTION_DIMENSION, StatusCode::ILLEGAL_DIMENSION},
         {SERVER_INVALID_VECTOR_DIMENSION, StatusCode::ILLEGAL_DIMENSION},
 
         {SERVER_INVALID_INDEX_TYPE, StatusCode::ILLEGAL_INDEX_TYPE},
@@ -64,7 +64,7 @@ WebErrorMap(ErrorCode code) {
         {SERVER_BUILD_INDEX_ERROR, StatusCode::BUILD_INDEX_ERROR},
         {SERVER_OUT_OF_MEMORY, StatusCode::OUT_OF_MEMORY},
 
-        {DB_NOT_FOUND, StatusCode::TABLE_NOT_EXISTS},
+        {DB_NOT_FOUND, StatusCode::COLLECTION_NOT_EXISTS},
         {DB_META_TRANSACTION_FAILED, StatusCode::META_FAILED},
     };
     if (code < StatusCode::MAX) {
@@ -163,12 +163,13 @@ WebRequestHandler::ParsePartitionStat(const milvus::server::PartitionStat& par_s
 
 Status
 WebRequestHandler::IsBinaryTable(const std::string& collection_name, bool& bin) {
-    TableSchema schema;
-    auto status = request_handler_.DescribeTable(context_ptr_, collection_name, schema);
+    CollectionSchema schema;
+    auto status = request_handler_.DescribeCollection(context_ptr_, collection_name, schema);
     if (status.ok()) {
         auto metric = engine::MetricType(schema.metric_type_);
         bin = engine::MetricType::HAMMING == metric || engine::MetricType::JACCARD == metric ||
-              engine::MetricType::TANIMOTO == metric;
+              engine::MetricType::TANIMOTO == metric || engine::MetricType::SUPERSTRUCTURE == metric ||
+              engine::MetricType::SUBSTRUCTURE == metric;
     }
 
     return status;
@@ -208,14 +209,14 @@ WebRequestHandler::CopyRecordsFromJson(const nlohmann::json& json, engine::Vecto
 ///////////////////////// WebRequestHandler methods ///////////////////////////////////////
 Status
 WebRequestHandler::GetTableMetaInfo(const std::string& collection_name, nlohmann::json& json_out) {
-    TableSchema schema;
-    auto status = request_handler_.DescribeTable(context_ptr_, collection_name, schema);
+    CollectionSchema schema;
+    auto status = request_handler_.DescribeCollection(context_ptr_, collection_name, schema);
     if (!status.ok()) {
         return status;
     }
 
     int64_t count;
-    status = request_handler_.CountTable(context_ptr_, collection_name, count);
+    status = request_handler_.CountCollection(context_ptr_, collection_name, count);
     if (!status.ok()) {
         return status;
     }
@@ -226,7 +227,7 @@ WebRequestHandler::GetTableMetaInfo(const std::string& collection_name, nlohmann
         return status;
     }
 
-    json_out["collection_name"] = schema.table_name_;
+    json_out["collection_name"] = schema.collection_name_;
     json_out["dimension"] = schema.dimension_;
     json_out["index_file_size"] = schema.index_file_size_;
     json_out["index"] = IndexMap.at(engine::EngineType(index_param.index_type_));
@@ -239,8 +240,8 @@ WebRequestHandler::GetTableMetaInfo(const std::string& collection_name, nlohmann
 
 Status
 WebRequestHandler::GetTableStat(const std::string& collection_name, nlohmann::json& json_out) {
-    struct TableInfo collection_info;
-    auto status = request_handler_.ShowTableInfo(context_ptr_, collection_name, collection_info);
+    struct CollectionInfo collection_info;
+    auto status = request_handler_.ShowCollectionInfo(context_ptr_, collection_name, collection_info);
 
     if (status.ok()) {
         json_out["count"] = collection_info.total_row_num_;
@@ -335,7 +336,7 @@ WebRequestHandler::PreLoadTable(const nlohmann::json& json, std::string& result_
     }
 
     auto collection_name = json["collection_name"];
-    auto status = request_handler_.PreloadTable(context_ptr_, collection_name.get<std::string>());
+    auto status = request_handler_.PreloadCollection(context_ptr_, collection_name.get<std::string>());
     if (status.ok()) {
         nlohmann::json result;
         AddStatusToJson(result, status.code(), status.message());
@@ -897,7 +898,7 @@ WebRequestHandler::SetGpuConfig(const GPUConfigDto::ObjectWrapper& gpu_config_dt
 
 /*************
  *
- * Table {
+ * Collection {
  */
 StatusDto::ObjectWrapper
 WebRequestHandler::CreateTable(const TableRequestDto::ObjectWrapper& collection_schema) {
@@ -921,10 +922,10 @@ WebRequestHandler::CreateTable(const TableRequestDto::ObjectWrapper& collection_
         RETURN_STATUS_DTO(ILLEGAL_METRIC_TYPE, "metric_type is illegal")
     }
 
-    auto status =
-        request_handler_.CreateTable(context_ptr_, collection_schema->collection_name->std_str(),
-                                     collection_schema->dimension, collection_schema->index_file_size,
-                                     static_cast<int64_t>(MetricNameMap.at(collection_schema->metric_type->std_str())));
+    auto status = request_handler_.CreateCollection(
+        context_ptr_, collection_schema->collection_name->std_str(), collection_schema->dimension,
+        collection_schema->index_file_size,
+        static_cast<int64_t>(MetricNameMap.at(collection_schema->metric_type->std_str())));
 
     ASSIGN_RETURN_STATUS_DTO(status)
 }
@@ -954,7 +955,7 @@ WebRequestHandler::ShowTables(const OQueryParams& query_params, OString& result)
     }
 
     std::vector<std::string> collections;
-    status = request_handler_.ShowTables(context_ptr_, collections);
+    status = request_handler_.ShowCollections(context_ptr_, collections);
     if (!status.ok()) {
         ASSIGN_RETURN_STATUS_DTO(status)
     }
@@ -1017,7 +1018,7 @@ WebRequestHandler::GetTable(const OString& collection_name, const OQueryParams& 
 
 StatusDto::ObjectWrapper
 WebRequestHandler::DropTable(const OString& collection_name) {
-    auto status = request_handler_.DropTable(context_ptr_, collection_name->std_str());
+    auto status = request_handler_.DropCollection(context_ptr_, collection_name->std_str());
 
     ASSIGN_RETURN_STATUS_DTO(status)
 }
@@ -1028,7 +1029,7 @@ WebRequestHandler::DropTable(const OString& collection_name) {
  */
 
 StatusDto::ObjectWrapper
-WebRequestHandler::CreateIndex(const OString& table_name, const OString& body) {
+WebRequestHandler::CreateIndex(const OString& collection_name, const OString& body) {
     try {
         auto request_json = nlohmann::json::parse(body->std_str());
         if (!request_json.contains("index_type")) {
@@ -1043,7 +1044,8 @@ WebRequestHandler::CreateIndex(const OString& table_name, const OString& body) {
         if (!request_json.contains("params")) {
             RETURN_STATUS_DTO(BODY_FIELD_LOSS, "Field \'params\' is required")
         }
-        auto status = request_handler_.CreateIndex(context_ptr_, table_name->std_str(), index, request_json["params"]);
+        auto status =
+            request_handler_.CreateIndex(context_ptr_, collection_name->std_str(), index, request_json["params"]);
         ASSIGN_RETURN_STATUS_DTO(status);
     } catch (nlohmann::detail::parse_error& e) {
         RETURN_STATUS_DTO(BODY_PARSE_FAIL, e.what())
@@ -1077,10 +1079,6 @@ WebRequestHandler::DropIndex(const OString& collection_name) {
     ASSIGN_RETURN_STATUS_DTO(status)
 }
 
-/***********
- *
- * Partition {
- */
 StatusDto::ObjectWrapper
 WebRequestHandler::CreatePartition(const OString& collection_name, const PartitionRequestDto::ObjectWrapper& param) {
     if (nullptr == param->partition_tag.get()) {
@@ -1204,8 +1202,8 @@ WebRequestHandler::ShowSegments(const OString& collection_name, const OQueryPara
         tag = query_params.get("partition_tag")->std_str();
     }
 
-    TableInfo info;
-    status = request_handler_.ShowTableInfo(context_ptr_, collection_name->std_str(), info);
+    CollectionInfo info;
+    status = request_handler_.ShowCollectionInfo(context_ptr_, collection_name->std_str(), info);
     if (!status.ok()) {
         ASSIGN_RETURN_STATUS_DTO(status)
     }

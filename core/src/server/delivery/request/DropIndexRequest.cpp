@@ -21,49 +21,51 @@
 namespace milvus {
 namespace server {
 
-DropIndexRequest::DropIndexRequest(const std::shared_ptr<Context>& context, const std::string& table_name)
-    : BaseRequest(context, DDL_DML_REQUEST_GROUP), table_name_(table_name) {
+DropIndexRequest::DropIndexRequest(const std::shared_ptr<milvus::server::Context>& context,
+                                   const std::string& collection_name)
+    : BaseRequest(context, BaseRequest::kDropIndex), collection_name_(collection_name) {
 }
 
 BaseRequestPtr
-DropIndexRequest::Create(const std::shared_ptr<Context>& context, const std::string& table_name) {
-    return std::shared_ptr<BaseRequest>(new DropIndexRequest(context, table_name));
+DropIndexRequest::Create(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name) {
+    return std::shared_ptr<BaseRequest>(new DropIndexRequest(context, collection_name));
 }
 
 Status
 DropIndexRequest::OnExecute() {
     try {
         fiu_do_on("DropIndexRequest.OnExecute.throw_std_exception", throw std::exception());
-        std::string hdr = "DropIndexRequest(table=" + table_name_ + ")";
+        std::string hdr = "DropIndexRequest(collection=" + collection_name_ + ")";
         TimeRecorderAuto rc(hdr);
 
         // step 1: check arguments
-        auto status = ValidationUtil::ValidateTableName(table_name_);
+        auto status = ValidationUtil::ValidateCollectionName(collection_name_);
         if (!status.ok()) {
             return status;
         }
 
-        // only process root table, ignore partition table
-        engine::meta::TableSchema table_schema;
-        table_schema.table_id_ = table_name_;
-        status = DBWrapper::DB()->DescribeTable(table_schema);
-        fiu_do_on("DropIndexRequest.OnExecute.table_not_exist", status = Status(milvus::SERVER_UNEXPECTED_ERROR, ""));
+        // only process root collection, ignore partition collection
+        engine::meta::CollectionSchema collection_schema;
+        collection_schema.collection_id_ = collection_name_;
+        status = DBWrapper::DB()->DescribeCollection(collection_schema);
+        fiu_do_on("DropIndexRequest.OnExecute.collection_not_exist",
+                  status = Status(milvus::SERVER_UNEXPECTED_ERROR, ""));
         if (!status.ok()) {
             if (status.code() == DB_NOT_FOUND) {
-                return Status(SERVER_TABLE_NOT_EXIST, TableNotExistMsg(table_name_));
+                return Status(SERVER_COLLECTION_NOT_EXIST, CollectionNotExistMsg(collection_name_));
             } else {
                 return status;
             }
         } else {
-            if (!table_schema.owner_table_.empty()) {
-                return Status(SERVER_INVALID_TABLE_NAME, TableNotExistMsg(table_name_));
+            if (!collection_schema.owner_collection_.empty()) {
+                return Status(SERVER_INVALID_COLLECTION_NAME, CollectionNotExistMsg(collection_name_));
             }
         }
 
         rc.RecordSection("check validation");
 
         // step 2: drop index
-        status = DBWrapper::DB()->DropIndex(table_name_);
+        status = DBWrapper::DB()->DropIndex(collection_name_);
         fiu_do_on("DropIndexRequest.OnExecute.drop_index_fail", status = Status(milvus::SERVER_UNEXPECTED_ERROR, ""));
         if (!status.ok()) {
             return status;

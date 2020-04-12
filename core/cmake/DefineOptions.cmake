@@ -45,8 +45,6 @@ set_option_category("Milvus Build Option")
 
 define_option(MILVUS_GPU_VERSION "Build GPU version" OFF)
 
-define_option(CUSTOMIZATION "Build with customized FAISS library" ON)
-
 #----------------------------------------------------------------------
 set_option_category("Thirdparty")
 
@@ -89,7 +87,7 @@ define_option(MILVUS_WITH_OPENTRACING "Build with Opentracing" ON)
 
 define_option(MILVUS_WITH_FIU "Build with fiu" OFF)
 
-define_option(MILVUS_WITH_AWS "Build with aws" ON)
+define_option(MILVUS_WITH_AWS "Build with aws" OFF)
 
 define_option(MILVUS_WITH_OATPP "Build with oatpp" ON)
 

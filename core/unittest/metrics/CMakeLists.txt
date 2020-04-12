@@ -22,6 +22,7 @@ if (MILVUS_WITH_PROMETHEUS)
             test_prometheus.cpp)
 endif ()
 
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fno-access-control")
 add_executable(test_metrics
         ${common_files}
         ${test_files}

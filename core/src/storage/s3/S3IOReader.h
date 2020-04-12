@@ -11,6 +11,7 @@
 
 #pragma once
 
+#include <memory>
 #include <string>
 #include "storage/IOReader.h"
 
@@ -31,16 +32,16 @@ class S3IOReader : public IOReader {
     S3IOReader&
     operator=(S3IOReader&&) = delete;
 
-    void
+    bool
     open(const std::string& name) override;
 
     void
-    read(void* ptr, size_t size) override;
+    read(void* ptr, int64_t size) override;
 
     void
-    seekg(size_t pos) override;
+    seekg(int64_t pos) override;
 
-    size_t
+    int64_t
     length() override;
 
     void
@@ -49,8 +50,10 @@ class S3IOReader : public IOReader {
  public:
     std::string name_;
     std::string buffer_;
-    size_t pos_;
+    int64_t pos_;
 };
+
+using S3IOReaderPtr = std::shared_ptr<S3IOReader>;
 
 }  // namespace storage
 }  // namespace milvus

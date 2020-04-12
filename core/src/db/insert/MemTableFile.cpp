@@ -28,10 +28,10 @@
 namespace milvus {
 namespace engine {
 
-MemTableFile::MemTableFile(const std::string& table_id, const meta::MetaPtr& meta, const DBOptions& options)
-    : table_id_(table_id), meta_(meta), options_(options) {
+MemTableFile::MemTableFile(const std::string& collection_id, const meta::MetaPtr& meta, const DBOptions& options)
+    : collection_id_(collection_id), meta_(meta), options_(options) {
     current_mem_ = 0;
-    auto status = CreateTableFile();
+    auto status = CreateCollectionFile();
     if (status.ok()) {
         /*execution_engine_ = EngineFactory::Build(
             table_file_schema_.dimension_, table_file_schema_.location_, (EngineType)table_file_schema_.engine_type_,
@@ -45,19 +45,15 @@ MemTableFile::MemTableFile(const std::string& table_id, const meta::MetaPtr& met
     AddCacheInsertDataListener();
 }
 
-MemTableFile::~MemTableFile() {
-    RemoveCacheInsertDataListener();
-}
-
 Status
-MemTableFile::CreateTableFile() {
-    meta::TableFileSchema table_file_schema;
-    table_file_schema.table_id_ = table_id_;
-    auto status = meta_->CreateTableFile(table_file_schema);
+MemTableFile::CreateCollectionFile() {
+    meta::SegmentSchema table_file_schema;
+    table_file_schema.collection_id_ = collection_id_;
+    auto status = meta_->CreateCollectionFile(table_file_schema);
     if (status.ok()) {
         table_file_schema_ = table_file_schema;
     } else {
-        std::string err_msg = "MemTableFile::CreateTableFile failed: " + status.ToString();
+        std::string err_msg = "MemTableFile::CreateCollectionFile failed: " + status.ToString();
         ENGINE_LOG_ERROR << err_msg;
     }
     return status;
@@ -68,9 +64,9 @@ MemTableFile::Add(const VectorSourcePtr& source) {
     if (table_file_schema_.dimension_ <= 0) {
         std::string err_msg =
             "MemTableFile::Add: table_file_schema dimension = " + std::to_string(table_file_schema_.dimension_) +
-            ", table_id = " + table_file_schema_.table_id_;
-        ENGINE_LOG_ERROR << err_msg;
-        return Status(DB_ERROR, "Not able to create table file");
+            ", collection_id = " + table_file_schema_.collection_id_;
+        ENGINE_LOG_ERROR << LogOut("[%s][%ld]", "insert", 0) << err_msg;
+        return Status(DB_ERROR, "Not able to create collection file");
     }
 
     size_t single_vector_mem_size = source->SingleVectorSize(table_file_schema_.dimension_);
@@ -94,7 +90,7 @@ MemTableFile::AddEntities(const VectorSourcePtr& source) {
     if (table_file_schema_.dimension_ <= 0) {
         std::string err_msg =
             "MemTableFile::Add: table_file_schema dimension = " + std::to_string(table_file_schema_.dimension_) +
-            ", table_id = " + table_file_schema_.table_id_;
+            ", table_id = " + table_file_schema_.collection_id_;
         ENGINE_LOG_ERROR << err_msg;
         return Status(DB_ERROR, "Not able to create table file");
     }
@@ -193,12 +189,12 @@ MemTableFile::Serialize(uint64_t wal_lsn) {
     if (!status.ok()) {
         ENGINE_LOG_ERROR << "Failed to serialize segment: " << table_file_schema_.segment_id_;
 
-        /* Can't mark it as to_delete because data is stored in this mem table file. Any further flush
-         * will try to serialize the same mem table file and it won't be able to find the directory
-         * to write to or update the associated table file in meta.
+        /* Can't mark it as to_delete because data is stored in this mem collection file. Any further flush
+         * will try to serialize the same mem collection file and it won't be able to find the directory
+         * to write to or update the associated collection file in meta.
          *
-        table_file_schema_.file_type_ = meta::TableFileSchema::TO_DELETE;
-        meta_->UpdateTableFile(table_file_schema_);
+        table_file_schema_.file_type_ = meta::SegmentSchema::TO_DELETE;
+        meta_->UpdateCollectionFile(table_file_schema_);
         ENGINE_LOG_DEBUG << "Failed to serialize segment, mark file: " << table_file_schema_.file_id_
                          << " to to_delete";
         */
@@ -217,19 +213,15 @@ MemTableFile::Serialize(uint64_t wal_lsn) {
     // else set file type to RAW, no need to build index
     if (table_file_schema_.engine_type_ != (int)EngineType::FAISS_IDMAP &&
         table_file_schema_.engine_type_ != (int)EngineType::FAISS_BIN_IDMAP) {
-        table_file_schema_.file_type_ = (size >= table_file_schema_.index_file_size_) ? meta::TableFileSchema::TO_INDEX
-                                                                                      : meta::TableFileSchema::RAW;
+        table_file_schema_.file_type_ =
+            (size >= table_file_schema_.index_file_size_) ? meta::SegmentSchema::TO_INDEX : meta::SegmentSchema::RAW;
     } else {
-        table_file_schema_.file_type_ = meta::TableFileSchema::RAW;
+        table_file_schema_.file_type_ = meta::SegmentSchema::RAW;
     }
 
-    // Set table file's flush_lsn so WAL can roll back and delete garbage files which can be obtained from
-    // GetTableFilesByFlushLSN() in meta.
-    table_file_schema_.flush_lsn_ = wal_lsn;
+    status = meta_->UpdateCollectionFile(table_file_schema_);
 
-    status = meta_->UpdateTableFile(table_file_schema_);
-
-    ENGINE_LOG_DEBUG << "New " << ((table_file_schema_.file_type_ == meta::TableFileSchema::RAW) ? "raw" : "to_index")
+    ENGINE_LOG_DEBUG << "New " << ((table_file_schema_.file_type_ == meta::SegmentSchema::RAW) ? "raw" : "to_index")
                      << " file " << table_file_schema_.file_id_ << " of size " << size << " bytes, lsn = " << wal_lsn;
 
     // TODO(zhiru): cache

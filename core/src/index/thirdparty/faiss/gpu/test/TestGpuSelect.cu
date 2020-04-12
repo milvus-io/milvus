@@ -29,6 +29,8 @@ void testForSize(int rows, int cols, int k, bool dir, bool warp) {
     }
   }
 
+  faiss::gpu::DeviceTensor<uint8_t, 1, true> bitset(nullptr, {0});
+
   // row -> (val -> idx)
   std::unordered_map<int, std::vector<std::pair<int, float>>> hostOutValAndInd;
   for (int r = 0; r < rows; ++r) {
@@ -59,7 +61,8 @@ void testForSize(int rows, int cols, int k, bool dir, bool warp) {
   if (warp) {
     faiss::gpu::runWarpSelect(gpuVal, gpuOutVal, gpuOutInd, dir, k, 0);
   } else {
-    faiss::gpu::runBlockSelect(gpuVal, gpuOutVal, gpuOutInd, dir, k, 0);
+
+    faiss::gpu::runBlockSelect(gpuVal, bitset, gpuOutVal, gpuOutInd, dir, k, 0);
   }
 
   // Copy back to CPU

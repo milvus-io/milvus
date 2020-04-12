@@ -32,9 +32,9 @@ using HybridSearchContextPtr = std::shared_ptr<HybridSearchContext>;
 
 namespace search{
 
-using TableFileSchemaPtr = engine::meta::TableFileSchemaPtr;
+using SegmentSchemaPtr = engine::meta::SegmentSchemaPtr;
 
-using Id2IndexMap = std::unordered_map<size_t, TableFileSchemaPtr>;
+using Id2IndexMap = std::unordered_map<size_t, SegmentSchemaPtr>;
 
 using ResultIds = engine::ResultIds;
 using ResultDistances = engine::ResultDistances;
@@ -42,7 +42,7 @@ using ResultDistances = engine::ResultDistances;
 class Task {
  public:
     explicit Task(const std::shared_ptr<server::Context>& context,
-                  TableFileSchemaPtr& file,
+                  SegmentSchemaPtr& file,
                   query::GeneralQueryPtr general_query,
                   std::unordered_map<std::string, engine::DataType>& attr_type,
                   context::HybridSearchContextPtr hybrid_search_context);
@@ -68,7 +68,7 @@ class Task {
  public:
     const std::shared_ptr<server::Context> context_;
 
-    TableFileSchemaPtr file_;
+    SegmentSchemaPtr file_;
 
     size_t index_id_ = 0;
     int index_type_ = 0;

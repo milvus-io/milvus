@@ -90,21 +90,21 @@ TEST(DBMiscTest, UTILS_TEST) {
     options.slave_paths_.push_back("/tmp/milvus_test/slave_1");
     options.slave_paths_.push_back("/tmp/milvus_test/slave_2");
 
-    const std::string TABLE_NAME = "test_tbl";
+    const std::string COLLECTION_NAME = "test_tbl";
 
     fiu_init(0);
     milvus::Status status;
     FIU_ENABLE_FIU("CommonUtil.CreateDirectory.create_parent_fail");
-    status = milvus::engine::utils::CreateTablePath(options, TABLE_NAME);
+    status = milvus::engine::utils::CreateCollectionPath(options, COLLECTION_NAME);
     ASSERT_FALSE(status.ok());
     fiu_disable("CommonUtil.CreateDirectory.create_parent_fail");
 
-    FIU_ENABLE_FIU("CreateTablePath.creat_slave_path");
-    status = milvus::engine::utils::CreateTablePath(options, TABLE_NAME);
+    FIU_ENABLE_FIU("CreateCollectionPath.creat_slave_path");
+    status = milvus::engine::utils::CreateCollectionPath(options, COLLECTION_NAME);
     ASSERT_FALSE(status.ok());
-    fiu_disable("CreateTablePath.creat_slave_path");
+    fiu_disable("CreateCollectionPath.creat_slave_path");
 
-    status = milvus::engine::utils::CreateTablePath(options, TABLE_NAME);
+    status = milvus::engine::utils::CreateCollectionPath(options, COLLECTION_NAME);
     ASSERT_TRUE(status.ok());
     ASSERT_TRUE(boost::filesystem::exists(options.path_));
     for (auto& path : options.slave_paths_) {
@@ -112,50 +112,50 @@ TEST(DBMiscTest, UTILS_TEST) {
     }
 
     //    options.slave_paths.push_back("/");
-    //    status =  engine::utils::CreateTablePath(options, TABLE_NAME);
+    //    status =  engine::utils::CreateCollectionPath(options, COLLECTION_NAME);
     //    ASSERT_FALSE(status.ok());
     //
     //    options.path = "/";
-    //    status =  engine::utils::CreateTablePath(options, TABLE_NAME);
+    //    status =  engine::utils::CreateCollectionPath(options, COLLECTION_NAME);
     //    ASSERT_FALSE(status.ok());
 
-    milvus::engine::meta::TableFileSchema file;
+    milvus::engine::meta::SegmentSchema file;
     file.id_ = 50;
-    file.table_id_ = TABLE_NAME;
+    file.collection_id_ = COLLECTION_NAME;
     file.file_type_ = 3;
     file.date_ = 155000;
-    status = milvus::engine::utils::GetTableFilePath(options, file);
+    status = milvus::engine::utils::GetCollectionFilePath(options, file);
     ASSERT_TRUE(status.ok());
     ASSERT_FALSE(file.location_.empty());
 
-    status = milvus::engine::utils::DeleteTablePath(options, TABLE_NAME);
+    status = milvus::engine::utils::DeleteCollectionPath(options, COLLECTION_NAME);
     ASSERT_TRUE(status.ok());
 
-    status = milvus::engine::utils::DeleteTableFilePath(options, file);
+    status = milvus::engine::utils::DeleteCollectionFilePath(options, file);
     ASSERT_TRUE(status.ok());
 
-    status = milvus::engine::utils::CreateTableFilePath(options, file);
+    status = milvus::engine::utils::CreateCollectionFilePath(options, file);
     ASSERT_TRUE(status.ok());
 
-    FIU_ENABLE_FIU("CreateTableFilePath.fail_create");
-    status = milvus::engine::utils::CreateTableFilePath(options, file);
+    FIU_ENABLE_FIU("CreateCollectionFilePath.fail_create");
+    status = milvus::engine::utils::CreateCollectionFilePath(options, file);
     ASSERT_FALSE(status.ok());
-    fiu_disable("CreateTableFilePath.fail_create");
+    fiu_disable("CreateCollectionFilePath.fail_create");
 
-    status = milvus::engine::utils::GetTableFilePath(options, file);
+    status = milvus::engine::utils::GetCollectionFilePath(options, file);
     ASSERT_FALSE(file.location_.empty());
 
     FIU_ENABLE_FIU("CommonUtil.CreateDirectory.create_parent_fail");
-    status = milvus::engine::utils::GetTableFilePath(options, file);
+    status = milvus::engine::utils::GetCollectionFilePath(options, file);
     ASSERT_FALSE(file.location_.empty());
     fiu_disable("CommonUtil.CreateDirectory.create_parent_fail");
 
-    FIU_ENABLE_FIU("GetTableFilePath.enable_s3");
-    status = milvus::engine::utils::GetTableFilePath(options, file);
+    FIU_ENABLE_FIU("GetCollectionFilePath.enable_s3");
+    status = milvus::engine::utils::GetCollectionFilePath(options, file);
     ASSERT_FALSE(file.location_.empty());
-    fiu_disable("GetTableFilePath.enable_s3");
+    fiu_disable("GetCollectionFilePath.enable_s3");
 
-    status = milvus::engine::utils::DeleteTableFilePath(options, file);
+    status = milvus::engine::utils::DeleteCollectionFilePath(options, file);
 
     ASSERT_TRUE(status.ok());
 
@@ -181,47 +181,47 @@ TEST(DBMiscTest, SAFE_ID_GENERATOR_TEST) {
 TEST(DBMiscTest, CHECKER_TEST) {
     {
         milvus::engine::IndexFailedChecker checker;
-        milvus::engine::meta::TableFileSchema schema;
-        schema.table_id_ = "aaa";
+        milvus::engine::meta::SegmentSchema schema;
+        schema.collection_id_ = "aaa";
         schema.file_id_ = "5000";
         checker.MarkFailedIndexFile(schema, "5000 fail");
-        schema.table_id_ = "bbb";
+        schema.collection_id_ = "bbb";
         schema.file_id_ = "5001";
         checker.MarkFailedIndexFile(schema, "5001 fail");
 
         std::string err_msg;
-        checker.GetErrMsgForTable("aaa", err_msg);
+        checker.GetErrMsgForCollection("aaa", err_msg);
         ASSERT_EQ(err_msg, "5000 fail");
 
-        schema.table_id_ = "bbb";
+        schema.collection_id_ = "bbb";
         schema.file_id_ = "5002";
         checker.MarkFailedIndexFile(schema, "5002 fail");
         checker.MarkFailedIndexFile(schema, "5002 fail");
 
-        milvus::engine::meta::TableFilesSchema table_files = {schema};
+        milvus::engine::meta::SegmentsSchema table_files = {schema};
         checker.IgnoreFailedIndexFiles(table_files);
         ASSERT_TRUE(table_files.empty());
 
-        checker.GetErrMsgForTable("bbb", err_msg);
+        checker.GetErrMsgForCollection("bbb", err_msg);
         ASSERT_EQ(err_msg, "5001 fail");
 
         checker.MarkSucceedIndexFile(schema);
-        checker.GetErrMsgForTable("bbb", err_msg);
+        checker.GetErrMsgForCollection("bbb", err_msg);
         ASSERT_EQ(err_msg, "5001 fail");
     }
 
     {
         milvus::engine::OngoingFileChecker& checker = milvus::engine::OngoingFileChecker::GetInstance();
-        milvus::engine::meta::TableFileSchema schema;
-        schema.table_id_ = "aaa";
+        milvus::engine::meta::SegmentSchema schema;
+        schema.collection_id_ = "aaa";
         schema.file_id_ = "5000";
         checker.MarkOngoingFile(schema);
 
         ASSERT_TRUE(checker.IsIgnored(schema));
 
-        schema.table_id_ = "bbb";
+        schema.collection_id_ = "bbb";
         schema.file_id_ = "5001";
-        milvus::engine::meta::TableFilesSchema table_files = {schema};
+        milvus::engine::meta::SegmentsSchema table_files = {schema};
         checker.MarkOngoingFiles(table_files);
 
         ASSERT_TRUE(checker.IsIgnored(schema));
@@ -229,7 +229,7 @@ TEST(DBMiscTest, CHECKER_TEST) {
         checker.UnmarkOngoingFile(schema);
         ASSERT_FALSE(checker.IsIgnored(schema));
 
-        schema.table_id_ = "aaa";
+        schema.collection_id_ = "aaa";
         schema.file_id_ = "5000";
         checker.UnmarkOngoingFile(schema);
         ASSERT_FALSE(checker.IsIgnored(schema));

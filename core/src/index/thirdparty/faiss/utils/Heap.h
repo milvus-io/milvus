@@ -87,6 +87,42 @@ struct CMax {
  * bh_ids[0..k-1].  on output the element at k-1 is undefined.
  */
 template <class C> inline
+void heap_swap_top (size_t k,
+                     typename C::T * bh_val, typename C::TI * bh_ids,
+                     typename C::T val, typename C::TI ids)
+{
+    bh_val--; /* Use 1-based indexing for easier node->child translation */
+    bh_ids--;
+    size_t i = 1, i1, i2;
+    while (1) {
+        i1 = i << 1;
+        i2 = i1 + 1;
+        if (i1 > k)
+            break;
+        if (i2 == k + 1 || C::cmp(bh_val[i1], bh_val[i2])) {
+            if (C::cmp(val, bh_val[i1]))
+                break;
+            bh_val[i] = bh_val[i1];
+            bh_ids[i] = bh_ids[i1];
+            i = i1;
+        }
+        else {
+            if (C::cmp(val, bh_val[i2]))
+                break;
+            bh_val[i] = bh_val[i2];
+            bh_ids[i] = bh_ids[i2];
+            i = i2;
+        }
+    }
+    bh_val[i] = val;
+    bh_ids[i] = ids;
+}
+
+
+/** Pops the top element from the heap defined by bh_val[0..k-1] and
+ * bh_ids[0..k-1].  on output the element at k-1 is undefined.
+ */
+template <class C> inline
 void heap_pop (size_t k, typename C::T * bh_val, typename C::TI * bh_ids)
 {
     bh_val--; /* Use 1-based indexing for easier node->child translation */
@@ -147,6 +183,13 @@ void heap_push (size_t k,
 /* Partial instanciation for heaps with TI = int64_t */
 
 template <typename T> inline
+void minheap_swap_top (size_t k, T * bh_val, int64_t * bh_ids, T val, int64_t ids)
+{
+    heap_swap_top<CMin<T, int64_t> > (k, bh_val, bh_ids, val, ids);
+}
+
+
+template <typename T> inline
 void minheap_pop (size_t k, T * bh_val, int64_t * bh_ids)
 {
     heap_pop<CMin<T, int64_t> > (k, bh_val, bh_ids);
@@ -157,6 +200,13 @@ template <typename T> inline
 void minheap_push (size_t k, T * bh_val, int64_t * bh_ids, T val, int64_t ids)
 {
     heap_push<CMin<T, int64_t> > (k, bh_val, bh_ids, val, ids);
+}
+
+
+template <typename T> inline
+void maxheap_swap_top (size_t k, T * bh_val, int64_t * bh_ids, T val, int64_t ids)
+{
+    heap_swap_top<CMax<T, int64_t> > (k, bh_val, bh_ids, val, ids);
 }
 
 
@@ -251,15 +301,13 @@ void heap_addn (size_t k,
     if (ids)
         for (i = 0; i < n; i++) {
             if (C::cmp (bh_val[0], x[i])) {
-                heap_pop<C> (k, bh_val, bh_ids);
-                heap_push<C> (k, bh_val, bh_ids, x[i], ids[i]);
+                heap_swap_top<C> (k, bh_val, bh_ids, x[i], ids[i]);
             }
         }
     else
         for (i = 0; i < n; i++) {
             if (C::cmp (bh_val[0], x[i])) {
-                heap_pop<C> (k, bh_val, bh_ids);
-                heap_push<C> (k, bh_val, bh_ids, x[i], i);
+                heap_swap_top<C> (k, bh_val, bh_ids, x[i], i);
             }
         }
 }
