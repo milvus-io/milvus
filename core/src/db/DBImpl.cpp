@@ -1000,6 +1000,7 @@ DBImpl::GetVectorByIdHelper(const std::string& collection_id, IDNumber vector_id
                 segment::DeletedDocsPtr deleted_docs_ptr;
                 status = segment_reader.LoadDeletedDocs(deleted_docs_ptr);
                 if (!status.ok()) {
+                    ENGINE_LOG_ERROR << status.message();
                     return status;
                 }
                 auto& deleted_docs = deleted_docs_ptr->GetDeletedDocs();
@@ -1012,6 +1013,7 @@ DBImpl::GetVectorByIdHelper(const std::string& collection_id, IDNumber vector_id
                     std::vector<uint8_t> raw_vector;
                     status = segment_reader.LoadVectors(offset * single_vector_bytes, single_vector_bytes, raw_vector);
                     if (!status.ok()) {
+                        ENGINE_LOG_ERROR << status.message();
                         return status;
                     }
 
@@ -1033,8 +1035,8 @@ DBImpl::GetVectorByIdHelper(const std::string& collection_id, IDNumber vector_id
     }
 
     if (vector.binary_data_.empty() && vector.float_data_.empty()) {
-        std::string msg = "Vector with id " + std::to_string(vector_id) + " not found";
-        SERVER_LOG_ERROR << msg;
+        std::string msg = "Vector with id " + std::to_string(vector_id) + " not found in collection " + collection_id;
+        ENGINE_LOG_ERROR << msg;
         return Status(DB_NOT_FOUND, msg);
     }
 
