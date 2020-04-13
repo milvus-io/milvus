@@ -1019,7 +1019,7 @@ MySQLMetaImpl::GetCollectionFlushLSN(const std::string& collection_id, uint64_t&
             }
 
             mysqlpp::Query statement = connectionPtr->query();
-            statement << "SELECT flush_lsn FROM " << META_TABLES << " WHERE collection_id = " << mysqlpp::quote
+            statement << "SELECT flush_lsn FROM " << META_TABLES << " WHERE table_id = " << mysqlpp::quote
                       << collection_id << ";";
 
             ENGINE_LOG_DEBUG << "GetCollectionFlushLSN: " << statement.str();
@@ -1442,7 +1442,7 @@ MySQLMetaImpl::ShowPartitions(const std::string& collection_id,
                       << " WHERE owner_table = " << mysqlpp::quote << collection_id << " AND state <> "
                       << std::to_string(CollectionSchema::TO_DELETE) << ";";
 
-            ENGINE_LOG_DEBUG << "AllCollections: " << statement.str();
+            ENGINE_LOG_DEBUG << "ShowPartitions: " << statement.str();
 
             res = statement.store();
         }  // Scoped Connection
@@ -1498,7 +1498,7 @@ MySQLMetaImpl::GetPartitionName(const std::string& collection_id, const std::str
                       << collection_id << " AND partition_tag = " << mysqlpp::quote << valid_tag << " AND state <> "
                       << std::to_string(CollectionSchema::TO_DELETE) << ";";
 
-            ENGINE_LOG_DEBUG << "AllCollections: " << statement.str();
+            ENGINE_LOG_DEBUG << "GetPartitionName: " << statement.str();
 
             res = statement.store();
         }  // Scoped Connection
