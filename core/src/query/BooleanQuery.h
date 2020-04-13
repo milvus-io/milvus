@@ -80,7 +80,8 @@ class BooleanQuery {
     std::vector<std::shared_ptr<BooleanQuery>> boolean_clauses_;
     std::vector<LeafQueryPtr> leaf_queries_;
     BinaryQueryPtr binary_query_ = std::make_shared<BinaryQuery>();
-} using BooleanQueryPtr = std::shared_ptr<BooleanQuery>;
+};
+using BooleanQueryPtr = std::shared_ptr<BooleanQuery>;
 
 }  // namespace query
 }  // namespace milvus

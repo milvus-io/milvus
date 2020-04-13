@@ -17,6 +17,16 @@ set(test_files
         utils.cpp
         )
 
+include_directories(${MILVUS_ENGINE_SRC}/grpc/gen-status)
+include_directories(${MILVUS_ENGINE_SRC}/grpc/gen-milvus)
+
+set(grpc_service_files
+        ${MILVUS_ENGINE_SRC}/grpc/gen-milvus/milvus.grpc.pb.cc
+        ${MILVUS_ENGINE_SRC}/grpc/gen-milvus/milvus.pb.cc
+        ${MILVUS_ENGINE_SRC}/grpc/gen-status/status.grpc.pb.cc
+        ${MILVUS_ENGINE_SRC}/grpc/gen-status/status.pb.cc
+        )
+
 if (MILVUS_WITH_PROMETHEUS)
     set(test_files ${test_files}
             test_prometheus.cpp)
@@ -26,11 +36,21 @@ set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fno-access-control")
 add_executable(test_metrics
         ${common_files}
         ${test_files}
+        ${grpc_service_files}
+        )
+
+set(grpc_lib
+        grpcpp_channelz
+        grpc++
+        grpc
+        grpc_protobuf
+        grpc_protoc
         )
 
 target_link_libraries(test_metrics
         knowhere
         metrics
-        ${unittest_libs})
+        ${unittest_libs}
+        ${grpc_lib})
 
 install(TARGETS test_metrics DESTINATION unittest)
