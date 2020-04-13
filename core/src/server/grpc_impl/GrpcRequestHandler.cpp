@@ -909,7 +909,6 @@ GrpcRequestHandler::HybridSearch(::grpc::ServerContext* context, const ::milvus:
     CHECK_NULLPTR_RETURN(request);
 
     context::HybridSearchContextPtr hybrid_search_context = std::make_shared<context::HybridSearchContext>();
-    hybrid_search_context->grpc_request_ = *request;
 
     query::BooleanQueryPtr boolean_query = std::make_shared<query::BooleanQuery>();
     DeSerialization(request->general_query(), boolean_query);

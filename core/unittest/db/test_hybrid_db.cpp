@@ -189,6 +189,7 @@ TEST_F(DBTest, HYBRID_DB_TEST) {
 }
 
 TEST_F(DBTest, HYBRID_SEARCH_TEST) {
+#ifndef MILVUS_GPU_VERSION
     milvus::engine::meta::CollectionSchema collection_info;
     milvus::engine::meta::hybrid::FieldsSchema fields_info;
     std::unordered_map<std::string, milvus::engine::meta::hybrid::DataType> attr_type;
@@ -225,6 +226,7 @@ TEST_F(DBTest, HYBRID_SEARCH_TEST) {
     stat = db_->HybridQuery(dummy_context_, TABLE_NAME, tags, hybrid_context, general_query, attr_type, nq, result_ids,
                             result_distances);
     ASSERT_TRUE(stat.ok());
+#endif
 }
 
 TEST_F(DBTest, COMPACT_TEST) {

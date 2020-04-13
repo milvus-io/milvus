@@ -11,16 +11,6 @@
 # or implied. See the License for the specific language governing permissions and limitations under the License.
 #-------------------------------------------------------------------------------
 
-include_directories(${MILVUS_ENGINE_SRC}/grpc/gen-status)
-include_directories(${MILVUS_ENGINE_SRC}/grpc/gen-milvus)
-
-set(grpc_service_files
-        ${MILVUS_ENGINE_SRC}/grpc/gen-milvus/milvus.grpc.pb.cc
-        ${MILVUS_ENGINE_SRC}/grpc/gen-milvus/milvus.pb.cc
-        ${MILVUS_ENGINE_SRC}/grpc/gen-status/status.grpc.pb.cc
-        ${MILVUS_ENGINE_SRC}/grpc/gen-status/status.pb.cc
-        )
-
 set(test_files
         ${CMAKE_CURRENT_SOURCE_DIR}/test_algorithm.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/test_event.cpp
@@ -38,22 +28,12 @@ add_executable(test_scheduler
         ${common_files}
         ${entry_file}
         ${test_files}
-        ${grpc_service_files}
-        )
-
-set(grpc_lib
-        grpcpp_channelz
-        grpc++
-        grpc
-        grpc_protobuf
-        grpc_protoc
         )
 
 target_link_libraries(test_scheduler
         knowhere
         metrics
-        ${unittest_libs}
-        ${grpc_lib})
+        ${unittest_libs})
 
 install(TARGETS test_scheduler DESTINATION unittest)
 

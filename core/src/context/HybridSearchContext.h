@@ -16,7 +16,6 @@
 #include <string>
 #include <vector>
 
-#include "grpc/gen-milvus/milvus.pb.h"
 #include "query/BinaryQuery.h"
 #include "search/Task.h"
 
@@ -30,7 +29,6 @@ using TaskPtr = std::shared_ptr<Task>;
 namespace context {
 
 struct HybridSearchContext {
-    milvus::grpc::HSearchParam grpc_request_;
     query::GeneralQueryPtr general_query_;
     std::vector<::milvus::search::TaskPtr> tasks_;
 };

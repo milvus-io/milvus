@@ -20,16 +20,6 @@ set(test_files
 include_directories("${CUDA_TOOLKIT_ROOT_DIR}/include")
 link_directories("${CUDA_TOOLKIT_ROOT_DIR}/lib64")
 
-include_directories(${MILVUS_ENGINE_SRC}/grpc/gen-status)
-include_directories(${MILVUS_ENGINE_SRC}/grpc/gen-milvus)
-
-set(grpc_service_files
-        ${MILVUS_ENGINE_SRC}/grpc/gen-milvus/milvus.grpc.pb.cc
-        ${MILVUS_ENGINE_SRC}/grpc/gen-milvus/milvus.pb.cc
-        ${MILVUS_ENGINE_SRC}/grpc/gen-status/status.grpc.pb.cc
-        ${MILVUS_ENGINE_SRC}/grpc/gen-status/status.pb.cc
-        )
-
 set(util_files
         ${MILVUS_THIRDPARTY_SRC}/easyloggingpp/easylogging++.cc
         ${MILVUS_ENGINE_SRC}/utils/Status.cpp)
@@ -38,15 +28,6 @@ add_executable(test_storage
         ${test_files}
         ${util_files}
         ${common_files}
-        ${grpc_service_files}
-        )
-
-set(grpc_lib
-        grpcpp_channelz
-        grpc++
-        grpc
-        grpc_protobuf
-        grpc_protoc
         )
 
 target_link_libraries(test_storage
@@ -54,7 +35,6 @@ target_link_libraries(test_storage
         knowhere
         metrics
         ${unittest_libs}
-        ${grpc_lib}
         )
 
 install(TARGETS test_storage DESTINATION unittest)
