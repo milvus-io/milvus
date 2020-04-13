@@ -60,7 +60,7 @@ class DefaultAttrsFormat : public AttrsFormat {
     std::mutex mutex_;
 
     const std::string raw_attr_extension_ = ".ra";
-    const std::string user_id_extension_ = ".auid";
+    const std::string user_id_extension_ = ".uid";
 };
 
 }  // namespace codec

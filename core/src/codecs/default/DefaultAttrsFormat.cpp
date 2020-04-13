@@ -118,8 +118,17 @@ DefaultAttrsFormat::read(const milvus::storage::FSHandlerPtr& fs_ptr, milvus::se
     boost::filesystem::path target_path(dir_path);
     typedef boost::filesystem::directory_iterator d_it;
     d_it it_end;
+    d_it uid_it(target_path);
+    std::vector<int64_t> uids;
+    for (; uid_it != it_end; ++uid_it) {
+        const auto& path = uid_it->path();
+        if (path.extension().string() == user_id_extension_) {
+            read_uids_internal(path.string(), uids);
+            break;
+        }
+    }
+
     d_it it(target_path);
-    //    for (auto& it : boost::filesystem::directory_iterator(dir_path)) {
     for (; it != it_end; ++it) {
         const auto& path = it->path();
         if (path.extension().string() == raw_attr_extension_) {
@@ -129,13 +138,11 @@ DefaultAttrsFormat::read(const milvus::storage::FSHandlerPtr& fs_ptr, milvus::se
             std::vector<uint8_t> attr_list;
             size_t nbytes;
             read_attrs_internal(path.string(), 0, INT64_MAX, attr_list, nbytes);
-            std::vector<int64_t> uids;
             milvus::segment::AttrPtr attr =
                 std::make_shared<milvus::segment::Attr>(attr_list, nbytes, uids, field_name);
             attrs_read->attrs.insert(std::pair(field_name, attr));
         }
     }
-    // TODO process uids
 }
 
 void

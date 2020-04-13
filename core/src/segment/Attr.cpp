@@ -114,6 +114,14 @@ Attr::Erase(std::vector<int32_t>& offsets) {
     std::chrono::duration<double> diff = end - start;
     ENGINE_LOG_DEBUG << "Sorting " << offsets.size() << " offsets to delete took " << diff.count() << " s";
 
+    start = std::chrono::high_resolution_clock::now();
+
+    offsets.erase(std::unique(offsets.begin(), offsets.end()), offsets.end());
+
+    end = std::chrono::high_resolution_clock::now();
+    diff = end - start;
+    ENGINE_LOG_DEBUG << "Deduplicating " << offsets.size() << " offsets to delete took " << diff.count() << " s";
+
     ENGINE_LOG_DEBUG << "Attributes begin erasing...";
 
     size_t new_size = uids_.size() - offsets.size();
@@ -146,7 +154,7 @@ Attr::Erase(std::vector<int32_t>& offsets) {
     }
 
     data_.clear();
-    data_.swap(new_data);
+    uids_.clear();
     data_.swap(new_data);
     uids_.swap(new_uids);
 
