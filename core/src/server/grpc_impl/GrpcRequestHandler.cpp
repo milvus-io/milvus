@@ -803,7 +803,6 @@ GrpcRequestHandler::InsertEntity(::grpc::ServerContext* context, const ::milvus:
     std::unordered_map<std::string, std::vector<std::string>> attr_values;
     std::unordered_map<std::string, engine::VectorsData> vector_datas;
 
-    auto size = request->entities().field_names_size();
     auto attr_size = request->entities().attr_records_size();
     for (uint64_t i = 0; i < attr_size; ++i) {
         std::vector<std::string> values;

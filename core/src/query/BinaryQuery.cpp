@@ -48,13 +48,11 @@ ConstructLeafBinTree(std::vector<LeafQueryPtr> leaf_queries, BinaryQueryPtr bina
     binary_query->right_query = std::make_shared<GeneralQuery>();
     if (leaf_queries.size() == leaf_queries.size() - 1) {
         binary_query->left_query->leaf = leaf_queries[idx];
-        ++idx;
         return Status::OK();
     } else if (idx == leaf_queries.size() - 2) {
         binary_query->left_query->leaf = leaf_queries[idx];
         ++idx;
         binary_query->right_query->leaf = leaf_queries[idx];
-        ++idx;
         return Status::OK();
     } else {
         binary_query->left_query->bin->relation = binary_query->relation;
@@ -114,9 +112,9 @@ GenBinaryQuery(BooleanQueryPtr query, BinaryQueryPtr& binary_query) {
     std::vector<BooleanQueryPtr> must_queries;
     std::vector<BooleanQueryPtr> must_not_queries;
     std::vector<BooleanQueryPtr> should_queries;
-    Status s;
+    Status status;
     for (auto& _query : query->getBooleanQuerys()) {
-        s = GenBinaryQuery(_query, _query->getBinaryQuery());
+        status = GenBinaryQuery(_query, _query->getBinaryQuery());
         if (_query->getOccur() == Occur::MUST) {
             must_queries.emplace_back(_query);
         } else if (_query->getOccur() == Occur::MUST_NOT) {
@@ -200,7 +198,7 @@ BinaryQueryHeight(BinaryQueryPtr& binary_query) {
     if (binary_query == nullptr) {
         return 1;
     }
-    uint64_t left_height, right_height;
+    uint64_t left_height = 0, right_height = 0;
     if (binary_query->left_query != nullptr) {
         left_height = BinaryQueryHeight(binary_query->left_query->bin);
     }

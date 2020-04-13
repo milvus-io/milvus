@@ -284,7 +284,6 @@ Utils::GenLeafQuery() {
     uint64_t NPROBE = 32;
     milvus::VectorQueryPtr vq = std::make_shared<milvus::VectorQuery>();
     ConstructVector(NQ, DIMENSION, vq->query_vector);
-    std::string vector_query_param = "vector_query_param";
     vq->field_name = "field_3";
     vq->topk = 10;
     JSON json_params = {{"nprobe", NPROBE}};

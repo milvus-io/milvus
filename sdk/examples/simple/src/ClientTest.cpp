@@ -268,7 +268,7 @@ ClientTest::InsertHybridEntities(std::string& collection_name, int64_t row_num) 
     std::unordered_map<std::string, std::vector<milvus::Entity>> vector_value;
     std::vector<milvus::Entity> entity_array;
     std::vector<int64_t> record_ids;
-    int64_t begin_index = 0;
+    uint64_t begin_index = 0;
     {  // generate vectors
         milvus_sdk::Utils::BuildEntities(begin_index,
                                          begin_index + row_num,
@@ -289,7 +289,6 @@ ClientTest::HybridSearch(std::string& collection_name) {
     std::vector<std::string> partition_tags;
     milvus::TopKQueryResult topk_query_result;
 
-    auto boolean_clause = std::make_shared<milvus::BooleanQuery>();
     auto leaf_queries = milvus_sdk::Utils::GenLeafQuery();
 
     //must

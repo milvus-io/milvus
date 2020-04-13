@@ -132,6 +132,8 @@ ConstructGeneralQuery(milvus::query::GeneralQueryPtr& general_query) {
     vector_query->field_name = "field_3";
     vector_query->topk = 100;
     vector_query->boost = 3;
+    milvus::json json_params = {{"nprobe", 10}};
+    vector_query->extra_params = json_params;
     milvus::query::VectorRecord record;
     record.float_data.resize(NQ * TABLE_DIM);
     float* data = record.float_data.data();
@@ -178,7 +180,6 @@ TEST_F(DBTest, HYBRID_DB_TEST) {
     stat = db_->Flush();
     ASSERT_TRUE(stat.ok());
 
-    milvus::json json_params = {{"nprobe", 10}};
     milvus::engine::CollectionIndex index;
     index.engine_type_ = (int)milvus::engine::EngineType::FAISS_IDMAP;
     index.extra_params_ = {{"nlist", 16384}};
