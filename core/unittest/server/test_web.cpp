@@ -523,7 +523,7 @@ static const char* CONTROLLER_TEST_VALID_CONFIG_STR =
     "-+\n"
     "db_config:\n"
     "  backend_url: sqlite://:@:/\n"
-    "  preload_table:\n"
+    "  preload_collection:\n"
     "\n"
     "#----------------------+------------------------------------------------------------+------------+----------------"
     "-+\n"
@@ -1660,11 +1660,11 @@ TEST_F(WebControllerTest, CONFIG) {
     OString collection_name_s = "milvus_test_webcontroller_test_preload_collection_s";
     GenTable(client_ptr, conncetion_ptr, collection_name_s, 16, 10, "L2");
 
-    OString body_str = "{\"db_config\": {\"preload_table\": \"" + collection_name + "\"}}";
+    OString body_str = "{\"db_config\": {\"preload_collection\": \"" + collection_name + "\"}}";
     response = client_ptr->op("config", body_str, conncetion_ptr);
     ASSERT_EQ(OStatus::CODE_200.code, response->getStatusCode()) << response->readBodyToString()->c_str();
 
-    body_str = "{\"db_config\": {\"preload_table\": \"" + collection_name + "," + collection_name_s + "\"}}";
+    body_str = "{\"db_config\": {\"preload_collection\": \"" + collection_name + "," + collection_name_s + "\"}}";
     response = client_ptr->op("config", body_str, conncetion_ptr);
     ASSERT_EQ(OStatus::CODE_200.code, response->getStatusCode()) << response->readBodyToString()->c_str();
     auto set_result_json = nlohmann::json::parse(response->readBodyToString()->c_str());
