@@ -1278,25 +1278,25 @@ class TestDBConfig:
         assert status.OK()
 
     @pytest.mark.level(2)
-    def test_get_preload_table_invalid_child_key(self, connect, collection):
+    def test_get_preload_collection_invalid_child_key(self, connect, collection):
         '''
         target: get invalid child key
-        method: call get_config without child_key: preload_table
+        method: call get_config without child_key: preload_collection
         expected: status not ok
         '''
-        invalid_configs = ["preloadtable", "preload_table "]
+        invalid_configs = ["preloadtable", "preload_collection "]
         for config in invalid_configs:
             status, config_value = connect.get_config("db_config", config)
             assert not status.OK()
 
     @pytest.mark.timeout(CONFIG_TIMEOUT)
-    def test_get_preload_table_valid(self, connect, collection):
+    def test_get_preload_collection_valid(self, connect, collection):
         '''
-        target: get preload_table
+        target: get preload_collection
         method: call get_config correctly
         expected: status ok
         '''
-        status, config_value = connect.get_config("db_config", "preload_table")
+        status, config_value = connect.get_config("db_config", "preload_collection")
         assert status.OK()
 
     @pytest.mark.level(2)
@@ -1350,15 +1350,15 @@ class TestDBConfig:
         assert status.OK()
         assert config_value == 'sqlite://:@:/'
 
-    def test_set_preload_table_valid(self, connect, collection):
+    def test_set_preload_collection_valid(self, connect, collection):
         '''
-        target: set preload_table
+        target: set preload_collection
         method: call set_config correctly
         expected: status ok, set successfully
         '''
-        status, reply = connect.set_config("db_config", "preload_table", "")
+        status, reply = connect.set_config("db_config", "preload_collection", "")
         assert status.OK()
-        status, config_value = connect.get_config("db_config", "preload_table")
+        status, config_value = connect.get_config("db_config", "preload_collection")
         assert status.OK()
         assert config_value == ""
 

@@ -22,7 +22,7 @@ namespace {
 static const char* VALID_CONFIG_STR =
     "# Default values are used when you make no changes to the following parameters.\n"
     "\n"
-    "version: 0.2"
+    "version: 0.3"
     "\n"
     "server_config:\n"
     "  address: 0.0.0.0                  # milvus server ip address (IPv4)\n"
@@ -32,7 +32,7 @@ static const char* VALID_CONFIG_STR =
     "\n"
     "db_config:\n"
     "  backend_url: sqlite://:@:/        \n"
-    "  preload_table:                    \n"
+    "  preload_collection:                    \n"
     "\n"
     "storage_config:\n"
     "  primary_path: /tmp/milvus         # path used to store data and meta\n"
