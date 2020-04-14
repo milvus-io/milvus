@@ -968,7 +968,7 @@ DBImpl::GetVectorIDs(const std::string& collection_id, const std::string& segmen
 Status
 DBImpl::GetVectorByIdHelper(const std::string& collection_id, IDNumber vector_id, VectorsData& vector,
                             const meta::SegmentsSchema& files) {
-    ENGINE_LOG_DEBUG << "Getting vector by id in " << files.size() << " files";
+    ENGINE_LOG_DEBUG << "Getting vector by id in " << files.size() << " files, id = " << vector_id;
 
     vector.vector_count_ = 0;
     vector.float_data_.clear();
