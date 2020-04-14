@@ -115,6 +115,9 @@ GenBinaryQuery(BooleanQueryPtr query, BinaryQueryPtr& binary_query) {
     Status status;
     for (auto& _query : query->getBooleanQuerys()) {
         status = GenBinaryQuery(_query, _query->getBinaryQuery());
+        if (!status.ok()) {
+            return status;
+        }
         if (_query->getOccur() == Occur::MUST) {
             must_queries.emplace_back(_query);
         } else if (_query->getOccur() == Occur::MUST_NOT) {

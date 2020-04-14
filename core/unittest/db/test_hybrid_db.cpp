@@ -276,6 +276,7 @@ TEST_F(DBTest, COMPACT_TEST) {
     for (auto& id : ids_to_delete) {
         stat = db_->QueryByID(dummy_context_, collection_info.collection_id_, tags, topk, json_params, id, result_ids,
                               result_distances);
+        ASSERT_TRUE(stat.ok());
         ASSERT_EQ(result_ids[0], -1);
         ASSERT_EQ(result_distances[0], std::numeric_limits<float>::max());
     }

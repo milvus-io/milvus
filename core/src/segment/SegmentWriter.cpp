@@ -278,8 +278,6 @@ SegmentWriter::Merge(const std::string& dir_to_merge, const std::string& name) {
     auto rows = segment_to_merge->vectors_ptr_->GetCount();
     recorder.RecordSection("Adding " + std::to_string(rows) + " vectors and uids");
 
-    start = std::chrono::high_resolution_clock::now();
-
     std::unordered_map<std::string, uint64_t> attr_nbytes;
     std::unordered_map<std::string, std::vector<uint8_t>> attr_data;
     auto attr_it = segment_to_merge->attrs_ptr_->attrs.begin();
@@ -295,11 +293,6 @@ SegmentWriter::Merge(const std::string& dir_to_merge, const std::string& name) {
         }
     }
     AddAttrs(name, attr_nbytes, attr_data, segment_to_merge->vectors_ptr_->GetUids());
-
-    end = std::chrono::high_resolution_clock::now();
-    diff = end - start;
-    ENGINE_LOG_DEBUG << "Adding " << segment_to_merge->vectors_ptr_->GetCount() << " attributes took " << diff.count()
-                     << " s";
 
     ENGINE_LOG_DEBUG << "Merging completed from " << dir_to_merge << " to " << fs_ptr_->operation_ptr_->GetDirectory();
 

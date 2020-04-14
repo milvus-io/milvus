@@ -1335,6 +1335,9 @@ DBImpl::HybridQuery(const std::shared_ptr<server::Context>& context, const std::
     cache::CpuCacheMgr::GetInstance()->PrintInfo();  // print cache info before query
     status = HybridQueryAsync(query_ctx, collection_id, files_array, hybrid_search_context, general_query, attr_type,
                               nq, result_ids, result_distances);
+    if (!status.ok()) {
+        return status;
+    }
     cache::CpuCacheMgr::GetInstance()->PrintInfo();  // print cache info after query
 
     query_ctx->GetTraceContext()->GetSpan()->Finish();
