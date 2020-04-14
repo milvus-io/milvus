@@ -109,6 +109,7 @@ RequestScheduler::ExecuteRequest(const BaseRequestPtr& request_ptr) {
 
 void
 RequestScheduler::TakeToExecute(RequestQueuePtr request_queue) {
+    SetThreadName("reqsched_thread");
     if (request_queue == nullptr) {
         return;
     }

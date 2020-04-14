@@ -237,6 +237,7 @@ ResourceMgr::post_event(const EventPtr& event) {
 
 void
 ResourceMgr::event_process() {
+    SetThreadName("resevt_thread");
     while (running_) {
         std::unique_lock<std::mutex> lock(event_mutex_);
         event_cv_.wait(lock, [this] { return !queue_.empty(); });

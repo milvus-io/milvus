@@ -68,6 +68,7 @@ JobMgr::Put(const JobPtr& job) {
 
 void
 JobMgr::worker_function() {
+    SetThreadName("jobmgr_thread");
     while (running_) {
         std::unique_lock<std::mutex> lock(mutex_);
         cv_.wait(lock, [this] { return !queue_.empty(); });

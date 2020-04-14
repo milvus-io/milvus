@@ -1994,6 +1994,7 @@ DBImpl::InternalFlush(const std::string& collection_id) {
 
 void
 DBImpl::BackgroundWalThread() {
+    SetThreadName("wal_thread");
     server::SystemInfo::GetInstance().Init();
 
     std::chrono::system_clock::time_point next_auto_flush_time;
@@ -2052,6 +2053,7 @@ DBImpl::BackgroundWalThread() {
 
 void
 DBImpl::BackgroundFlushThread() {
+    SetThreadName("flush_thread");
     server::SystemInfo::GetInstance().Init();
     while (true) {
         if (!initialized_.load(std::memory_order_acquire)) {
