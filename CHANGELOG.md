@@ -2,6 +2,17 @@
 
 Please mark all change in change log and use the issue from GitHub
 
+# Milvus 0.9.0 (TBD)
+
+## Bug
+
+## Feature
+
+## Improvement
+-   \#221 Refactor LOG macro
+
+## Task
+
 # Milvus 0.8.0 (TBD)
 
 ## Bug
