@@ -28,8 +28,6 @@ using doc_id_t = int64_t;
 
 class Vectors {
  public:
-    Vectors(std::vector<uint8_t> data, std::vector<doc_id_t> uids, const std::string& name);
-
     Vectors() = default;
 
     void
@@ -40,6 +38,12 @@ class Vectors {
 
     void
     SetName(const std::string& name);
+
+    std::vector<uint8_t>&
+    GetMutableData();
+
+    std::vector<doc_id_t>&
+    GetMutableUids();
 
     const std::vector<uint8_t>&
     GetData() const;
