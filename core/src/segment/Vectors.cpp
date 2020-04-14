@@ -28,10 +28,6 @@
 namespace milvus {
 namespace segment {
 
-Vectors::Vectors(std::vector<uint8_t> data, std::vector<doc_id_t> uids, const std::string& name)
-    : data_(std::move(data)), uids_(std::move(uids)), name_(name) {
-}
-
 void
 Vectors::AddData(const std::vector<uint8_t>& data) {
     data_.reserve(data_.size() + data.size());
@@ -118,6 +114,16 @@ Vectors::Erase(std::vector<int32_t>& offsets) {
     diff = end - start;
     ENGINE_LOG_DEBUG << "Erasing " << offsets.size() << " vectors out of " << loop_size << " vectors took "
                      << diff.count() << " s";
+}
+
+std::vector<uint8_t>&
+Vectors::GetMutableData() {
+    return data_;
+}
+
+std::vector<doc_id_t>&
+Vectors::GetMutableUids() {
+    return uids_;
 }
 
 const std::vector<uint8_t>&

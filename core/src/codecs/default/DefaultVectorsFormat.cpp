@@ -120,15 +120,12 @@ DefaultVectorsFormat::read(const storage::FSHandlerPtr& fs_ptr, segment::Vectors
     for (; it != it_end; ++it) {
         const auto& path = it->path();
         if (path.extension().string() == raw_vector_extension_) {
-            std::vector<uint8_t> vector_list;
+            auto& vector_list = vectors_read->GetMutableData();
             read_vectors_internal(path.string(), 0, INT64_MAX, vector_list);
-            vectors_read->AddData(vector_list);
             vectors_read->SetName(path.stem().string());
-        }
-        if (path.extension().string() == user_id_extension_) {
-            std::vector<segment::doc_id_t> uids;
+        } else if (path.extension().string() == user_id_extension_) {
+            auto& uids = vectors_read->GetMutableUids();
             read_uids_internal(path.string(), uids);
-            vectors_read->AddUids(uids);
         }
     }
 }
