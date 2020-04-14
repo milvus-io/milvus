@@ -37,7 +37,7 @@ MySQLConnectionPool::release(const mysqlpp::Connection* pc) {
     mysqlpp::ConnectionPool::release(pc);
     if (conns_in_use_ <= 0) {
         LOG_ENGINE_WARNING_ << "MySQLConnetionPool::release: conns_in_use_ is less than zero.  conns_in_use_ = "
-                           << conns_in_use_;
+                            << conns_in_use_;
     } else {
         --conns_in_use_;
     }
@@ -71,7 +71,7 @@ MySQLConnectionPool::create() {
         return conn;
     } catch (const mysqlpp::ConnectionFailed& er) {
         LOG_ENGINE_ERROR_ << "Failed to connect to database server"
-                         << ": " << er.what();
+                          << ": " << er.what();
         return nullptr;
     }
 }

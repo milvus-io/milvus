@@ -59,12 +59,12 @@ FaissIVFSQ8HPass::Run(const TaskPtr& task) {
     }
     if (search_job->nq() < threshold_) {
         LOG_SERVER_DEBUG_ << LogOut("[%s][%d] FaissIVFSQ8HPass: nq < gpu_search_threshold, specify cpu to search!",
-                                   "search", 0);
+                                    "search", 0);
         res_ptr = ResMgrInst::GetInstance()->GetResource("cpu");
     } else {
         auto best_device_id = count_ % search_gpus_.size();
         LOG_SERVER_DEBUG_ << LogOut("[%s][%d] FaissIVFSQ8HPass: nq > gpu_search_threshold, specify gpu %d to search!",
-                                   "search", 0, best_device_id);
+                                    "search", 0, best_device_id);
         ++count_;
         res_ptr = ResMgrInst::GetInstance()->GetResource(ResourceType::GPU, search_gpus_[best_device_id]);
     }

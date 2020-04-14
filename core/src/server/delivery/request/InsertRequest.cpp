@@ -89,13 +89,13 @@ InsertRequest::OnExecute() {
                 return Status(SERVER_COLLECTION_NOT_EXIST, CollectionNotExistMsg(collection_name_));
             } else {
                 LOG_SERVER_ERROR_ << LogOut("[%s][%ld] Describe collection %s fail: %s", "insert", 0,
-                                           collection_name_.c_str(), status.message().c_str());
+                                            collection_name_.c_str(), status.message().c_str());
                 return status;
             }
         } else {
             if (!collection_schema.owner_collection_.empty()) {
                 LOG_SERVER_ERROR_ << LogOut("[%s][%ld] owner collection of %s is empty", "insert", 0,
-                                           collection_name_.c_str());
+                                            collection_name_.c_str());
                 return Status(SERVER_INVALID_COLLECTION_NAME, CollectionNotExistMsg(collection_name_));
             }
         }

@@ -95,7 +95,7 @@ OngoingFileChecker::MarkOngoingFileNoLock(const meta::SegmentSchema& table_file)
     }
 
     LOG_ENGINE_DEBUG_ << "Mark ongoing file:" << table_file.file_id_
-                     << " refcount:" << ongoing_files_[table_file.collection_id_][table_file.file_id_];
+                      << " refcount:" << ongoing_files_[table_file.collection_id_][table_file.file_id_];
 
     return Status::OK();
 }

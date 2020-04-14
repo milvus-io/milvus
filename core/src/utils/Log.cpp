@@ -32,7 +32,7 @@ LogOut(const char* pattern, ...) {
 }
 
 void
-SetThreadName(const std::string &name) {
+SetThreadName(const std::string& name) {
     pthread_setname_np(pthread_self(), name.c_str());
 }
 

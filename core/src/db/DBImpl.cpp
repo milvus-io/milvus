@@ -376,7 +376,7 @@ DBImpl::PreloadCollection(const std::string& collection_id) {
 
     // step 3: load file one by one
     LOG_ENGINE_DEBUG_ << "Begin pre-load collection:" + collection_id + ", totally " << files_array.size()
-                     << " files need to be pre-loaded";
+                      << " files need to be pre-loaded";
     TimeRecorderAuto rc("Pre-load collection:" + collection_id);
     for (auto& file : files_array) {
         EngineType engine_type;
@@ -720,7 +720,7 @@ DBImpl::Compact(const std::string& collection_id) {
 
             if (!compact_status.ok()) {
                 LOG_ENGINE_ERROR_ << "Compact failed for segment " << file.segment_id_ << ": "
-                                 << compact_status.message();
+                                  << compact_status.message();
                 OngoingFileChecker::GetInstance().UnmarkOngoingFile(file);
                 continue;  // skip this file and try compact next one
             }
@@ -823,8 +823,8 @@ DBImpl::CompactFile(const std::string& collection_id, const meta::SegmentSchema&
     }
 
     LOG_ENGINE_DEBUG_ << "Compacted segment " << compacted_file.segment_id_ << " from "
-                     << std::to_string(file.file_size_) << " bytes to " << std::to_string(compacted_file.file_size_)
-                     << " bytes";
+                      << std::to_string(file.file_size_) << " bytes to " << std::to_string(compacted_file.file_size_)
+                      << " bytes";
 
     if (options_.insert_cache_immediately_) {
         segment_writer_ptr->Cache();
@@ -1421,7 +1421,7 @@ DBImpl::MergeFiles(const std::string& collection_id, const meta::SegmentsSchema&
         collection_file.file_type_ = meta::SegmentSchema::TO_DELETE;
         status = meta_ptr_->UpdateCollectionFile(collection_file);
         LOG_ENGINE_DEBUG_ << "Failed to update file to index, mark file: " << collection_file.file_id_
-                         << " to to_delete";
+                          << " to to_delete";
 
         return status;
     }
@@ -1441,7 +1441,7 @@ DBImpl::MergeFiles(const std::string& collection_id, const meta::SegmentsSchema&
     updated.push_back(collection_file);
     status = meta_ptr_->UpdateCollectionFiles(updated);
     LOG_ENGINE_DEBUG_ << "New merged segment " << collection_file.segment_id_ << " of size "
-                     << segment_writer_ptr->Size() << " bytes";
+                      << segment_writer_ptr->Size() << " bytes";
 
     if (options_.insert_cache_immediately_) {
         segment_writer_ptr->Cache();

@@ -104,16 +104,17 @@ SearchRequest::OnExecute() {
         if (!status.ok()) {
             if (status.code() == DB_NOT_FOUND) {
                 LOG_SERVER_ERROR_ << LogOut("[%s][%d] Collection %s not found: %s", "search", 0,
-                                           collection_name_.c_str(), status.message().c_str());
+                                            collection_name_.c_str(), status.message().c_str());
                 return Status(SERVER_COLLECTION_NOT_EXIST, CollectionNotExistMsg(collection_name_));
             } else {
                 LOG_SERVER_ERROR_ << LogOut("[%s][%d] Error occurred when describing collection %s: %s", "search", 0,
-                                           collection_name_.c_str(), status.message().c_str());
+                                            collection_name_.c_str(), status.message().c_str());
                 return status;
             }
         } else {
             if (!collection_schema_.owner_collection_.empty()) {
-                LOG_SERVER_ERROR_ << LogOut("[%s][%d] %s", "search", 0, CollectionNotExistMsg(collection_name_).c_str());
+                LOG_SERVER_ERROR_ << LogOut("[%s][%d] %s", "search", 0,
+                                            CollectionNotExistMsg(collection_name_).c_str());
                 return Status(SERVER_INVALID_COLLECTION_NAME, CollectionNotExistMsg(collection_name_));
             }
         }

@@ -149,7 +149,7 @@ WalManager::GetNextRecovery(MXLogRecord& record) {
     }
 
     LOG_WAL_INFO_ << "record type " << (int32_t)record.type << " record lsn " << record.lsn << " error code  "
-                 << error_code;
+                  << error_code;
 
     return error_code;
 }
@@ -196,7 +196,7 @@ WalManager::GetNextRecord(MXLogRecord& record) {
     }
 
     LOG_WAL_INFO_ << "record type " << (int32_t)record.type << " collection " << record.collection_id << " lsn "
-                 << record.lsn;
+                  << record.lsn;
     return error_code;
 }
 
@@ -266,7 +266,7 @@ WalManager::Insert(const std::string& collection_id, const std::string& partitio
         }
         if (max_rcd_num == 0) {
             LOG_WAL_ERROR_ << LogOut("[%s][%ld]", "insert", 0) << "Wal buffer size is too small "
-                          << mxlog_config_.buffer_size << " unit " << unit_size;
+                           << mxlog_config_.buffer_size << " unit " << unit_size;
             return false;
         }
 
@@ -292,7 +292,7 @@ WalManager::Insert(const std::string& collection_id, const std::string& partitio
     lck.unlock();
 
     LOG_WAL_INFO_ << LogOut("[%s][%ld]", "insert", 0) << collection_id << " insert in part " << partition_tag
-                 << " with lsn " << new_lsn;
+                  << " with lsn " << new_lsn;
 
     return p_meta_handler_->SetMXLogInternalMeta(new_lsn);
 }

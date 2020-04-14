@@ -32,7 +32,7 @@ BuildIndexJob::AddToIndexFiles(const engine::meta::SegmentSchemaPtr& to_index_fi
     }
 
     LOG_SERVER_DEBUG_ << "BuildIndexJob " << id() << " add to_index file: " << to_index_file->id_
-                     << ", location: " << to_index_file->location_;
+                      << ", location: " << to_index_file->location_;
 
     to_index_files_[to_index_file->id_] = to_index_file;
     return true;

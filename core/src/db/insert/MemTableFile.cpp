@@ -195,7 +195,7 @@ MemTableFile::Serialize(uint64_t wal_lsn) {
     status = meta_->UpdateCollectionFile(table_file_schema_);
 
     LOG_ENGINE_DEBUG_ << "New " << ((table_file_schema_.file_type_ == meta::SegmentSchema::RAW) ? "raw" : "to_index")
-                     << " file " << table_file_schema_.file_id_ << " of size " << size << " bytes, lsn = " << wal_lsn;
+                      << " file " << table_file_schema_.file_id_ << " of size " << size << " bytes, lsn = " << wal_lsn;
 
     // TODO(zhiru): cache
     /*

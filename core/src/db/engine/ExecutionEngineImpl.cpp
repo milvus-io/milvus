@@ -788,7 +788,7 @@ ExecutionEngineImpl::Search(int64_t n, const float* data, int64_t k, const milvu
     rc.RecordSection("query done");
 
     LOG_ENGINE_DEBUG_ << LogOut("[%s][%ld] get %ld uids from index %s", "search", 0, index_->GetUids().size(),
-                               location_.c_str());
+                                location_.c_str());
     MapAndCopyResult(result, index_->GetUids(), n, k, distances, labels);
     rc.RecordSection("map uids " + std::to_string(n * k));
 
@@ -827,7 +827,7 @@ ExecutionEngineImpl::Search(int64_t n, const uint8_t* data, int64_t k, const mil
     rc.RecordSection("query done");
 
     LOG_ENGINE_DEBUG_ << LogOut("[%s][%ld] get %ld uids from index %s", "search", 0, index_->GetUids().size(),
-                               location_.c_str());
+                                location_.c_str());
     MapAndCopyResult(result, index_->GetUids(), n, k, distances, labels);
     rc.RecordSection("map uids " + std::to_string(n * k));
 
@@ -907,7 +907,7 @@ ExecutionEngineImpl::Search(int64_t n, const std::vector<int64_t>& ids, int64_t 
         rc.RecordSection("query by id done");
 
         LOG_ENGINE_DEBUG_ << LogOut("[%s][%ld] get %ld uids from index %s", "search", 0, index_->GetUids().size(),
-                                   location_.c_str());
+                                    location_.c_str());
         MapAndCopyResult(result, uids, offsets.size(), k, distances, labels);
         rc.RecordSection("map uids " + std::to_string(offsets.size() * k));
     }

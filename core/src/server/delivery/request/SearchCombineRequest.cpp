@@ -234,7 +234,7 @@ SearchCombineRequest::OnExecute() {
     try {
         size_t combined_request = request_list_.size();
         LOG_SERVER_DEBUG_ << "SearchCombineRequest execute, request count=" << combined_request
-                         << ", extra_params=" << extra_params_.dump();
+                          << ", extra_params=" << extra_params_.dump();
         std::string hdr = "SearchCombineRequest(collection=" + collection_name_ + ")";
 
         TimeRecorderAuto rc(hdr);

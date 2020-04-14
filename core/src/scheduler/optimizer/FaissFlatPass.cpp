@@ -58,12 +58,12 @@ FaissFlatPass::Run(const TaskPtr& task) {
         res_ptr = ResMgrInst::GetInstance()->GetResource("cpu");
     } else if (search_job->nq() < threshold_) {
         LOG_SERVER_DEBUG_ << LogOut("[%s][%d] FaissFlatPass: nq < gpu_search_threshold, specify cpu to search!",
-                                   "search", 0);
+                                    "search", 0);
         res_ptr = ResMgrInst::GetInstance()->GetResource("cpu");
     } else {
         auto best_device_id = count_ % search_gpus_.size();
         LOG_SERVER_DEBUG_ << LogOut("[%s][%d] FaissFlatPass: nq > gpu_search_threshold, specify gpu %d to search!",
-                                   best_device_id, "search", 0);
+                                    best_device_id, "search", 0);
         ++count_;
         res_ptr = ResMgrInst::GetInstance()->GetResource(ResourceType::GPU, search_gpus_[best_device_id]);
     }

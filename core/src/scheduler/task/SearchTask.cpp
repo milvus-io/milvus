@@ -267,7 +267,7 @@ XSearchTask::Execute() {
             auto spec_k = file_->row_count_ < topk ? file_->row_count_ : topk;
             if (spec_k == 0) {
                 LOG_ENGINE_WARNING_ << LogOut("[%s][%ld] Searching in an empty file. file location = %s", "search", 0,
-                                             file_->location_.c_str());
+                                              file_->location_.c_str());
             }
 
             {

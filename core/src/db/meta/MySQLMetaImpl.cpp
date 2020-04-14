@@ -1095,7 +1095,7 @@ MySQLMetaImpl::UpdateCollectionFile(SegmentSchema& file_schema) {
 
             if (!statement.exec()) {
                 LOG_ENGINE_DEBUG_ << "collection_id= " << file_schema.collection_id_
-                                 << " file_id=" << file_schema.file_id_;
+                                  << " file_id=" << file_schema.file_id_;
                 return HandleException("Failed to update collection file", statement.error());
             }
         }  // Scoped Connection
@@ -2168,7 +2168,7 @@ MySQLMetaImpl::CleanUpFilesWithTTL(uint64_t seconds /*, CleanUpFilter* filter*/)
                 // check if the file can be deleted
                 if (OngoingFileChecker::GetInstance().IsIgnored(collection_file)) {
                     LOG_ENGINE_DEBUG_ << "File:" << collection_file.file_id_
-                                     << " currently is in use, not able to delete now";
+                                      << " currently is in use, not able to delete now";
                     continue;  // ignore this file, don't delete it
                 }
 
@@ -2181,7 +2181,7 @@ MySQLMetaImpl::CleanUpFilesWithTTL(uint64_t seconds /*, CleanUpFilter* filter*/)
                     // delete file from disk storage
                     utils::DeleteCollectionFilePath(options_, collection_file);
                     LOG_ENGINE_DEBUG_ << "Remove file id:" << collection_file.id_
-                                     << " location:" << collection_file.location_;
+                                      << " location:" << collection_file.location_;
 
                     delete_ids.emplace_back(std::to_string(collection_file.id_));
                     collection_ids.insert(collection_file.collection_id_);
@@ -2479,7 +2479,7 @@ MySQLMetaImpl::DiscardFiles(int64_t to_discard_size) {
                 collection_file.file_size_ = resRow["file_size"];
                 idsToDiscardSS << "id = " << std::to_string(collection_file.id_) << " OR ";
                 LOG_ENGINE_DEBUG_ << "Discard file id=" << collection_file.file_id_
-                                 << " file size=" << collection_file.file_size_;
+                                  << " file size=" << collection_file.file_size_;
                 to_discard_size -= collection_file.file_size_;
             }
 

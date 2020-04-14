@@ -63,7 +63,7 @@ MemManagerImpl::InsertVectors(const std::string& collection_id, int64_t length, 
     flushed_tables.clear();
     if (GetCurrentMem() > options_.insert_buffer_size_) {
         LOG_ENGINE_DEBUG_ << LogOut("[%s][%ld] ", "insert", 0)
-                         << "Insert buffer size exceeds limit. Performing force flush";
+                          << "Insert buffer size exceeds limit. Performing force flush";
         // TODO(zhiru): Don't apply delete here in order to avoid possible concurrency issues with Merge
         auto status = Flush(flushed_tables, false);
         if (!status.ok()) {

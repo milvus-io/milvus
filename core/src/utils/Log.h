@@ -18,13 +18,14 @@
 namespace milvus {
 
 /*
- * Please use LOG_MODULE_LEVEL_C macro in member function of class 
+ * Please use LOG_MODULE_LEVEL_C macro in member function of class
  * and LOG_MODULE_LEVEL_ macro in other functions.
  */
 
 /////////////////////////////////////////////////////////////////////////////////////////////////
 #define SERVER_MODULE_NAME "SERVER"
-#define SERVER_MODULE_CLASS_FUNCTION LogOut("[%s][%s::%s][%s] ", SERVER_MODULE_NAME, (typeid(*this).name()), __FUNCTION__, GetThreadName().c_str())
+#define SERVER_MODULE_CLASS_FUNCTION \
+    LogOut("[%s][%s::%s][%s] ", SERVER_MODULE_NAME, (typeid(*this).name()), __FUNCTION__, GetThreadName().c_str())
 #define SERVER_MODULE_FUNCTION LogOut("[%s][%s][%s] ", SERVER_MODULE_NAME, __FUNCTION__, GetThreadName().c_str())
 
 #define LOG_SERVER_TRACE_C LOG(TRACE) << SERVER_MODULE_CLASS_FUNCTION
@@ -43,7 +44,8 @@ namespace milvus {
 
 /////////////////////////////////////////////////////////////////////////////////////////////////
 #define ENGINE_MODULE_NAME "ENGINE"
-#define ENGINE_MODULE_CLASS_FUNCTION LogOut("[%s][%s::%s][%s] ", ENGINE_MODULE_NAME, (typeid(*this).name()), __FUNCTION__, GetThreadName().c_str())
+#define ENGINE_MODULE_CLASS_FUNCTION \
+    LogOut("[%s][%s::%s][%s] ", ENGINE_MODULE_NAME, (typeid(*this).name()), __FUNCTION__, GetThreadName().c_str())
 #define ENGINE_MODULE_FUNCTION LogOut("[%s][%s][%s] ", ENGINE_MODULE_NAME, __FUNCTION__, GetThreadName().c_str())
 
 #define LOG_ENGINE_TRACE_C LOG(TRACE) << ENGINE_MODULE_CLASS_FUNCTION
@@ -62,7 +64,8 @@ namespace milvus {
 
 /////////////////////////////////////////////////////////////////////////////////////////////////
 #define WRAPPER_MODULE_NAME "WRAPPER"
-#define WRAPPER_MODULE_CLASS_FUNCTION LogOut("[%s][%s::%s][%s] ", WRAPPER_MODULE_NAME, (typeid(*this).name()), __FUNCTION__, GetThreadName().c_str())
+#define WRAPPER_MODULE_CLASS_FUNCTION \
+    LogOut("[%s][%s::%s][%s] ", WRAPPER_MODULE_NAME, (typeid(*this).name()), __FUNCTION__, GetThreadName().c_str())
 #define WRAPPER_MODULE_FUNCTION LogOut("[%s][%s][%s] ", WRAPPER_MODULE_NAME, __FUNCTION__, GetThreadName().c_str())
 
 #define LOG_WRAPPER_TRACE_C LOG(TRACE) << WRAPPER_MODULE_CLASS_FUNCTION
@@ -81,7 +84,8 @@ namespace milvus {
 
 /////////////////////////////////////////////////////////////////////////////////////////////////
 #define STORAGE_MODULE_NAME "STORAGE"
-#define STORAGE_MODULE_CLASS_FUNCTION LogOut("[%s][%s::%s][%s] ", STORAGE_MODULE_NAME, (typeid(*this).name()), __FUNCTION__, GetThreadName().c_str())
+#define STORAGE_MODULE_CLASS_FUNCTION \
+    LogOut("[%s][%s::%s][%s] ", STORAGE_MODULE_NAME, (typeid(*this).name()), __FUNCTION__, GetThreadName().c_str())
 #define STORAGE_MODULE_FUNCTION LogOut("[%s][%s][%s] ", STORAGE_MODULE_NAME, __FUNCTION__, GetThreadName().c_str())
 
 #define LOG_STORAGE_TRACE_C LOG(TRACE) << STORAGE_MODULE_CLASS_FUNCTION
@@ -100,7 +104,8 @@ namespace milvus {
 
 /////////////////////////////////////////////////////////////////////////////////////////////////
 #define WAL_MODULE_NAME "WAL"
-#define WAL_MODULE_CLASS_FUNCTION LogOut("[%s][%s::%s][%s] ", WAL_MODULE_NAME, (typeid(*this).name()), __FUNCTION__, GetThreadName().c_str())
+#define WAL_MODULE_CLASS_FUNCTION \
+    LogOut("[%s][%s::%s][%s] ", WAL_MODULE_NAME, (typeid(*this).name()), __FUNCTION__, GetThreadName().c_str())
 #define WAL_MODULE_FUNCTION LogOut("[%s][%s][%s] ", WAL_MODULE_NAME, __FUNCTION__, GetThreadName().c_str())
 
 #define LOG_WAL_TRACE_C LOG(TRACE) << WAL_MODULE_CLASS_FUNCTION
@@ -116,7 +121,6 @@ namespace milvus {
 #define LOG_WAL_WARNING_ LOG(WARNING) << WAL_MODULE_FUNCTION
 #define LOG_WAL_ERROR_ LOG(ERROR) << WAL_MODULE_FUNCTION
 #define LOG_WAL_FATAL_ LOG(FATAL) << WAL_MODULE_FUNCTION
-
 
 /*
  * Deprecated
@@ -176,7 +180,7 @@ std::string
 LogOut(const char* pattern, ...);
 
 void
-SetThreadName(const std::string &name);
+SetThreadName(const std::string& name);
 
 std::string
 GetThreadName();
