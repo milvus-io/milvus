@@ -285,7 +285,7 @@ Server::StartService() {
     //     goto FAIL;
     // }
 
-    search::TaskInst::GetInstance().Start();
+    //    search::TaskInst::GetInstance().Start();
 
     return Status::OK();
 FAIL:
@@ -295,7 +295,7 @@ FAIL:
 
 void
 Server::StopService() {
-    search::TaskInst::GetInstance().Stop();
+    //    search::TaskInst::GetInstance().Stop();
     // storage::S3ClientWrapper::GetInstance().StopService();
     web::WebServer::GetInstance().Stop();
     grpc::GrpcServer::GetInstance().Stop();

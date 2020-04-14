@@ -1305,6 +1305,9 @@ DBImpl::HybridQuery(const std::shared_ptr<server::Context>& context, const std::
 
         std::vector<meta::CollectionSchema> partition_array;
         status = meta_ptr_->ShowPartitions(collection_id, partition_array);
+        if (!status.ok()) {
+            return status;
+        }
         for (auto& schema : partition_array) {
             status = GetFilesToSearch(schema.collection_id_, files_array);
             if (!status.ok()) {
