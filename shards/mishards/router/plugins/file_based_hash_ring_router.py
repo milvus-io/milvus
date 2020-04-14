@@ -62,7 +62,7 @@ class Factory(RouterMixin):
             logger.warning("Collection file is empty. {}".format(collection_list))
         #     logger.error("Cannot find collection file id {} / {} in metadata".format(collection_name, partition_tags))
         #     raise exceptions.CollectionNotFoundError('Collection file id not found. {}:{}'.format(collection_name, partition_tags),
-        #                                         metadata=metadata)
+        #                                              metadata=metadata)
 
         db.remove_session()
 
