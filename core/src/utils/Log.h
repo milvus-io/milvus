@@ -175,6 +175,9 @@ namespace milvus {
 std::string
 LogOut(const char* pattern, ...);
 
+void
+SetThreadName(const std::string &name);
+
 std::string
 GetThreadName();
 

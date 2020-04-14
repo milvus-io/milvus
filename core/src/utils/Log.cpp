@@ -31,6 +31,11 @@ LogOut(const char* pattern, ...) {
     return std::string(str_p.get());
 }
 
+void
+SetThreadName(const std::string &name) {
+    pthread_setname_np(pthread_self(), name.c_str());
+}
+
 std::string
 GetThreadName() {
     std::string thread_name = "unamed";
