@@ -56,7 +56,7 @@ DefaultVectorsFormat::read_vectors_internal(const storage::FSHandlerPtr& fs_ptr,
 void
 DefaultVectorsFormat::read_uids_internal(const storage::FSHandlerPtr& fs_ptr, const std::string& file_path,
                                          std::vector<segment::doc_id_t>& uids) {
-    if (fs_ptr->reader_ptr_->open(file_path.c_str())) {
+    if (!fs_ptr->reader_ptr_->open(file_path.c_str())) {
         std::string err_msg = "Failed to open file: " + file_path + ", error: " + std::strerror(errno);
         ENGINE_LOG_ERROR << err_msg;
         throw Exception(SERVER_CANNOT_OPEN_FILE, err_msg);
