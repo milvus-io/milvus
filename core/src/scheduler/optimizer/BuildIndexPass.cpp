@@ -39,19 +39,19 @@ BuildIndexPass::Run(const TaskPtr& task) {
 
     ResourcePtr res_ptr;
     if (!gpu_enable_) {
-        SERVER_LOG_DEBUG << "Gpu disabled, specify cpu to build index!";
+        LOG_SERVER_DEBUG_ << "Gpu disabled, specify cpu to build index!";
         res_ptr = ResMgrInst::GetInstance()->GetResource("cpu");
     } else {
         fiu_do_on("BuildIndexPass.Run.empty_gpu_ids", build_gpus_.clear());
         if (build_gpus_.empty()) {
-            SERVER_LOG_WARNING << "BuildIndexPass cannot get build index gpu!";
+            LOG_SERVER_WARNING_ << "BuildIndexPass cannot get build index gpu!";
             return false;
         }
 
         if (specified_gpu_id_ >= build_gpus_.size()) {
             specified_gpu_id_ = specified_gpu_id_ % build_gpus_.size();
         }
-        SERVER_LOG_DEBUG << "Specify gpu" << specified_gpu_id_ << " to build index!";
+        LOG_SERVER_DEBUG_ << "Specify gpu" << specified_gpu_id_ << " to build index!";
         res_ptr = ResMgrInst::GetInstance()->GetResource(ResourceType::GPU, build_gpus_[specified_gpu_id_]);
         specified_gpu_id_ = (specified_gpu_id_ + 1) % build_gpus_.size();
     }

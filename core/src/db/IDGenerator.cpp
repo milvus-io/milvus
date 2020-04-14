@@ -100,7 +100,7 @@ Status
 SafeIDGenerator::NextIDNumbers(size_t n, IDNumbers& ids) {
     if (n <= 0 || n > MAX_IDS_PER_MICRO) {
         std::string msg = "Invalid ID number: " + std::to_string(n);
-        ENGINE_LOG_ERROR << msg;
+        LOG_ENGINE_ERROR_ << msg;
         return Status(SERVER_UNEXPECTED_ERROR, msg);
     }
 

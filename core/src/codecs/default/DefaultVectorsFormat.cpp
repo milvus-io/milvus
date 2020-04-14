@@ -36,14 +36,14 @@ DefaultVectorsFormat::read_vectors_internal(const std::string& file_path, off_t 
     int rv_fd = open(file_path.c_str(), O_RDONLY, 00664);
     if (rv_fd == -1) {
         std::string err_msg = "Failed to open file: " + file_path + ", error: " + std::strerror(errno);
-        ENGINE_LOG_ERROR << err_msg;
+        LOG_ENGINE_ERROR_ << err_msg;
         throw Exception(SERVER_CANNOT_CREATE_FILE, err_msg);
     }
 
     size_t num_bytes;
     if (::read(rv_fd, &num_bytes, sizeof(size_t)) == -1) {
         std::string err_msg = "Failed to read from file: " + file_path + ", error: " + std::strerror(errno);
-        ENGINE_LOG_ERROR << err_msg;
+        LOG_ENGINE_ERROR_ << err_msg;
         throw Exception(SERVER_WRITE_ERROR, err_msg);
     }
 
@@ -53,20 +53,20 @@ DefaultVectorsFormat::read_vectors_internal(const std::string& file_path, off_t 
     int off = lseek(rv_fd, offset, SEEK_SET);
     if (off == -1) {
         std::string err_msg = "Failed to seek file: " + file_path + ", error: " + std::strerror(errno);
-        ENGINE_LOG_ERROR << err_msg;
+        LOG_ENGINE_ERROR_ << err_msg;
         throw Exception(SERVER_WRITE_ERROR, err_msg);
     }
 
     raw_vectors.resize(num / sizeof(uint8_t));
     if (::read(rv_fd, raw_vectors.data(), num) == -1) {
         std::string err_msg = "Failed to read from file: " + file_path + ", error: " + std::strerror(errno);
-        ENGINE_LOG_ERROR << err_msg;
+        LOG_ENGINE_ERROR_ << err_msg;
         throw Exception(SERVER_WRITE_ERROR, err_msg);
     }
 
     if (::close(rv_fd) == -1) {
         std::string err_msg = "Failed to close file: " + file_path + ", error: " + std::strerror(errno);
-        ENGINE_LOG_ERROR << err_msg;
+        LOG_ENGINE_ERROR_ << err_msg;
         throw Exception(SERVER_WRITE_ERROR, err_msg);
     }
 }
@@ -76,27 +76,27 @@ DefaultVectorsFormat::read_uids_internal(const std::string& file_path, std::vect
     int uid_fd = open(file_path.c_str(), O_RDONLY, 00664);
     if (uid_fd == -1) {
         std::string err_msg = "Failed to open file: " + file_path + ", error: " + std::strerror(errno);
-        ENGINE_LOG_ERROR << err_msg;
+        LOG_ENGINE_ERROR_ << err_msg;
         throw Exception(SERVER_CANNOT_CREATE_FILE, err_msg);
     }
 
     size_t num_bytes;
     if (::read(uid_fd, &num_bytes, sizeof(size_t)) == -1) {
         std::string err_msg = "Failed to read from file: " + file_path + ", error: " + std::strerror(errno);
-        ENGINE_LOG_ERROR << err_msg;
+        LOG_ENGINE_ERROR_ << err_msg;
         throw Exception(SERVER_WRITE_ERROR, err_msg);
     }
 
     uids.resize(num_bytes / sizeof(segment::doc_id_t));
     if (::read(uid_fd, uids.data(), num_bytes) == -1) {
         std::string err_msg = "Failed to read from file: " + file_path + ", error: " + std::strerror(errno);
-        ENGINE_LOG_ERROR << err_msg;
+        LOG_ENGINE_ERROR_ << err_msg;
         throw Exception(SERVER_WRITE_ERROR, err_msg);
     }
 
     if (::close(uid_fd) == -1) {
         std::string err_msg = "Failed to close file: " + file_path + ", error: " + std::strerror(errno);
-        ENGINE_LOG_ERROR << err_msg;
+        LOG_ENGINE_ERROR_ << err_msg;
         throw Exception(SERVER_WRITE_ERROR, err_msg);
     }
 }
@@ -108,7 +108,7 @@ DefaultVectorsFormat::read(const storage::FSHandlerPtr& fs_ptr, segment::Vectors
     std::string dir_path = fs_ptr->operation_ptr_->GetDirectory();
     if (!boost::filesystem::is_directory(dir_path)) {
         std::string err_msg = "Directory: " + dir_path + "does not exist";
-        ENGINE_LOG_ERROR << err_msg;
+        LOG_ENGINE_ERROR_ << err_msg;
         throw Exception(SERVER_INVALID_ARGUMENT, err_msg);
     }
 
@@ -147,24 +147,24 @@ DefaultVectorsFormat::write(const storage::FSHandlerPtr& fs_ptr, const segment::
     int rv_fd = open(rv_file_path.c_str(), O_WRONLY | O_TRUNC | O_CREAT, 00664);
     if (rv_fd == -1) {
         std::string err_msg = "Failed to open file: " + rv_file_path + ", error: " + std::strerror(errno);
-        ENGINE_LOG_ERROR << err_msg;
+        LOG_ENGINE_ERROR_ << err_msg;
         throw Exception(SERVER_CANNOT_CREATE_FILE, err_msg);
     }
 
     size_t rv_num_bytes = vectors->GetData().size() * sizeof(uint8_t);
     if (::write(rv_fd, &rv_num_bytes, sizeof(size_t)) == -1) {
         std::string err_msg = "Failed to write to file: " + rv_file_path + ", error: " + std::strerror(errno);
-        ENGINE_LOG_ERROR << err_msg;
+        LOG_ENGINE_ERROR_ << err_msg;
         throw Exception(SERVER_WRITE_ERROR, err_msg);
     }
     if (::write(rv_fd, vectors->GetData().data(), rv_num_bytes) == -1) {
         std::string err_msg = "Failed to write to file: " + rv_file_path + ", error: " + std::strerror(errno);
-        ENGINE_LOG_ERROR << err_msg;
+        LOG_ENGINE_ERROR_ << err_msg;
         throw Exception(SERVER_WRITE_ERROR, err_msg);
     }
     if (::close(rv_fd) == -1) {
         std::string err_msg = "Failed to close file: " + rv_file_path + ", error: " + std::strerror(errno);
-        ENGINE_LOG_ERROR << err_msg;
+        LOG_ENGINE_ERROR_ << err_msg;
         throw Exception(SERVER_WRITE_ERROR, err_msg);
     }
 
@@ -173,23 +173,23 @@ DefaultVectorsFormat::write(const storage::FSHandlerPtr& fs_ptr, const segment::
     int uid_fd = open(uid_file_path.c_str(), O_WRONLY | O_TRUNC | O_CREAT, 00664);
     if (uid_fd == -1) {
         std::string err_msg = "Failed to open file: " + uid_file_path + ", error: " + std::strerror(errno);
-        ENGINE_LOG_ERROR << err_msg;
+        LOG_ENGINE_ERROR_ << err_msg;
         throw Exception(SERVER_CANNOT_CREATE_FILE, err_msg);
     }
     size_t uid_num_bytes = vectors->GetUids().size() * sizeof(segment::doc_id_t);
     if (::write(uid_fd, &uid_num_bytes, sizeof(size_t)) == -1) {
         std::string err_msg = "Failed to write to file" + rv_file_path + ", error: " + std::strerror(errno);
-        ENGINE_LOG_ERROR << err_msg;
+        LOG_ENGINE_ERROR_ << err_msg;
         throw Exception(SERVER_WRITE_ERROR, err_msg);
     }
     if (::write(uid_fd, vectors->GetUids().data(), uid_num_bytes) == -1) {
         std::string err_msg = "Failed to write to file" + uid_file_path + ", error: " + std::strerror(errno);
-        ENGINE_LOG_ERROR << err_msg;
+        LOG_ENGINE_ERROR_ << err_msg;
         throw Exception(SERVER_WRITE_ERROR, err_msg);
     }
     if (::close(uid_fd) == -1) {
         std::string err_msg = "Failed to close file: " + uid_file_path + ", error: " + std::strerror(errno);
-        ENGINE_LOG_ERROR << err_msg;
+        LOG_ENGINE_ERROR_ << err_msg;
         throw Exception(SERVER_WRITE_ERROR, err_msg);
     }
 
@@ -203,7 +203,7 @@ DefaultVectorsFormat::read_uids(const storage::FSHandlerPtr& fs_ptr, std::vector
     std::string dir_path = fs_ptr->operation_ptr_->GetDirectory();
     if (!boost::filesystem::is_directory(dir_path)) {
         std::string err_msg = "Directory: " + dir_path + "does not exist";
-        ENGINE_LOG_ERROR << err_msg;
+        LOG_ENGINE_ERROR_ << err_msg;
         throw Exception(SERVER_INVALID_ARGUMENT, err_msg);
     }
 
@@ -228,7 +228,7 @@ DefaultVectorsFormat::read_vectors(const storage::FSHandlerPtr& fs_ptr, off_t of
     std::string dir_path = fs_ptr->operation_ptr_->GetDirectory();
     if (!boost::filesystem::is_directory(dir_path)) {
         std::string err_msg = "Directory: " + dir_path + "does not exist";
-        ENGINE_LOG_ERROR << err_msg;
+        LOG_ENGINE_ERROR_ << err_msg;
         throw Exception(SERVER_INVALID_ARGUMENT, err_msg);
     }
 

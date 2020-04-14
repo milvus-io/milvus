@@ -165,7 +165,7 @@ Resource::loader_function() {
             }
             if (task_item->task->Type() == TaskType::BuildIndexTask && name() == "cpu") {
                 BuildMgrInst::GetInstance()->Take();
-                SERVER_LOG_DEBUG << name() << " load BuildIndexTask";
+                LOG_SERVER_DEBUG_ << name() << " load BuildIndexTask";
             }
             LoadFile(task_item->task);
             task_item->Loaded();

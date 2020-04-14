@@ -47,7 +47,7 @@ FlushRequest::OnExecute() {
 
     TimeRecorderAuto rc(hdr);
     Status status = Status::OK();
-    SERVER_LOG_DEBUG << hdr;
+    LOG_SERVER_DEBUG_ << hdr;
 
     for (auto& name : collection_names_) {
         // only process root collection, ignore partition collection

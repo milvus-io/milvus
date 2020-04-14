@@ -27,7 +27,7 @@ FallbackPass::Run(const TaskPtr& task) {
         return false;
     }
     // NEVER be empty
-    SERVER_LOG_DEBUG << "FallbackPass!";
+    LOG_SERVER_DEBUG_ << "FallbackPass!";
     auto cpu = ResMgrInst::GetInstance()->GetCpuResources()[0];
     auto label = std::make_shared<SpecResLabel>(cpu);
     task->label() = label;

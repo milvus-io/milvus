@@ -22,11 +22,11 @@ ExecutionEnginePtr
 EngineFactory::Build(uint16_t dimension, const std::string& location, EngineType index_type, MetricType metric_type,
                      const milvus::json& index_params) {
     if (index_type == EngineType::INVALID) {
-        ENGINE_LOG_ERROR << "Unsupported engine type";
+        LOG_ENGINE_ERROR_ << "Unsupported engine type";
         return nullptr;
     }
 
-    ENGINE_LOG_DEBUG << "EngineFactory index type: " << (int)index_type;
+    LOG_ENGINE_DEBUG_ << "EngineFactory index type: " << (int)index_type;
     ExecutionEnginePtr execution_engine_ptr =
         std::make_shared<ExecutionEngineImpl>(dimension, location, index_type, metric_type, index_params);
 

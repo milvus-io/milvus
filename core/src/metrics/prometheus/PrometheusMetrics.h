@@ -293,7 +293,7 @@ class PrometheusMetrics : public MetricsBase {
     PushToGateway() override {
         if (startup_) {
             if (gateway_->Push() != 200) {
-                ENGINE_LOG_WARNING << "Metrics pushgateway failed";
+                LOG_ENGINE_WARNING_ << "Metrics pushgateway failed";
             }
         }
     }
