@@ -32,6 +32,7 @@ Please mark all change in change log and use the issue from GitHub
 -   \#1885 Optimize knowhere unittest
 -   \#1886 Refactor log on search and insert request
 -   \#1897 Heap pop and push can be realized by heap_swap_top
+-   \#1930 Upgrade mishards to 0.8.0
 
 ## Task
 

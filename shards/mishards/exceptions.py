@@ -22,8 +22,8 @@ class DBError(BaseException):
     code = codes.DB_ERROR_CODE
 
 
-class TableNotFoundError(BaseException):
-    code = codes.TABLE_NOT_FOUND_CODE
+class CollectionNotFoundError(BaseException):
+    code = codes.COLLECTION_NOT_FOUND_CODE
 
 
 class InvalidTopKError(BaseException):

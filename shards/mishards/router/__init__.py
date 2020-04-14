@@ -6,7 +6,7 @@ class RouterMixin:
         self.writable_topo = writable_topo
         self.readonly_topo = readonly_topo
 
-    def routing(self, table_name, metadata=None, **kwargs):
+    def routing(self, collection_name, metadata=None, **kwargs):
         raise NotImplemented()
 
     def connection(self, metadata=None):
