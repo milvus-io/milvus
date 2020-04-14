@@ -268,10 +268,9 @@ ClientTest::InsertHybridEntities(std::string& collection_name, int64_t row_num) 
     std::unordered_map<std::string, std::vector<milvus::Entity>> vector_value;
     std::vector<milvus::Entity> entity_array;
     std::vector<int64_t> record_ids;
-    int64_t begin_index = 0;
     {  // generate vectors
-        milvus_sdk::Utils::BuildEntities(begin_index,
-                                         begin_index + row_num,
+        milvus_sdk::Utils::BuildEntities(0,
+                                         row_num,
                                          entity_array,
                                          record_ids,
                                          128);

@@ -180,16 +180,16 @@ TEST_F(DBTest, HYBRID_DB_TEST) {
     stat = db_->Flush();
     ASSERT_TRUE(stat.ok());
 
-    milvus::engine::CollectionIndex index;
-    index.engine_type_ = (int)milvus::engine::EngineType::FAISS_IDMAP;
-    index.extra_params_ = {{"nlist", 16384}};
-
-    stat = db_->CreateIndex(TABLE_NAME, index);
-    ASSERT_TRUE(stat.ok());
+//    milvus::engine::CollectionIndex index;
+//    index.engine_type_ = (int)milvus::engine::EngineType::FAISS_IDMAP;
+//    index.extra_params_ = {{"nlist", 16384}};
+//
+//    stat = db_->CreateIndex(TABLE_NAME, index);
+//    ASSERT_TRUE(stat.ok());
 }
 
 TEST_F(DBTest, HYBRID_SEARCH_TEST) {
-#ifndef MILVUS_GPU_VERSION
+//#ifndef MILVUS_GPU_VERSION
     milvus::engine::meta::CollectionSchema collection_info;
     milvus::engine::meta::hybrid::FieldsSchema fields_info;
     std::unordered_map<std::string, milvus::engine::meta::hybrid::DataType> attr_type;
@@ -226,7 +226,7 @@ TEST_F(DBTest, HYBRID_SEARCH_TEST) {
     stat = db_->HybridQuery(dummy_context_, TABLE_NAME, tags, hybrid_context, general_query, attr_type, nq, result_ids,
                             result_distances);
     ASSERT_TRUE(stat.ok());
-#endif
+//#endif
 }
 
 TEST_F(DBTest, COMPACT_TEST) {

@@ -91,7 +91,7 @@ MemTableFile::AddEntities(const VectorSourcePtr& source) {
         std::string err_msg =
             "MemTableFile::Add: table_file_schema dimension = " + std::to_string(table_file_schema_.dimension_) +
             ", table_id = " + table_file_schema_.collection_id_;
-        ENGINE_LOG_ERROR << err_msg;
+        ENGINE_LOG_ERROR << LogOut("[%s][%ld]", "insert", 0) << err_msg;
         return Status(DB_ERROR, "Not able to create table file");
     }
 
@@ -102,7 +102,7 @@ MemTableFile::AddEntities(const VectorSourcePtr& source) {
         size_t num_entities_added;
 
         auto status =
-            source->AddEntities(segment_writer_ptr_, table_file_schema_, num_entities_added, num_entities_to_add);
+            source->AddEntities(segment_writer_ptr_, table_file_schema_, num_entities_to_add, num_entities_added);
 
         if (status.ok()) {
             current_mem_ += (num_entities_added * single_entity_mem_size);
