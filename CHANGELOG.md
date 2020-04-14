@@ -2,7 +2,7 @@
 
 Please mark all change in change log and use the issue from GitHub
 
-# Milvus 0.8.0 (TBD)
+# Milvus 0.8.0 (2020-04-14)
 
 ## Bug
 -   \#1276 SQLite throw exception after create 50000+ partitions in a table
@@ -11,6 +11,7 @@ Please mark all change in change log and use the issue from GitHub
 -   \#1832 Fix crash in tracing module
 -   \#1873 Fix index file serialize to incorrect path
 -   \#1881 Fix bad alloc when index files lost
+-   \#1883 Fix inserted vectors becomes all zero when index_file_size >= 2GB
 -   \#1901 Search failed with flat index
 -   \#1903 Fix invalid annoy result
 -   \#1910 C++ SDK GetIDsInSegment could not work for large dataset
@@ -35,7 +36,6 @@ Please mark all change in change log and use the issue from GitHub
 -   \#1930 Upgrade mishards to 0.8.0
 
 ## Task
-
 
 # Milvus 0.7.1 (2020-03-29)
 
@@ -707,7 +707,7 @@ Please mark all change in change log and use the issue from GitHub
 -   MS-37 Add query, cache usage, disk write speed and file data size metrics
 -   MS-30 Use faiss v1.5.2
 -   MS-54 cmake: Change Thrift third party URL to github.com
--   MS-69 prometheus: add all proposed metrics
+-   MS-69 Prometheus: add all proposed metrics
 
 ## Task
 
