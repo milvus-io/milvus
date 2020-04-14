@@ -31,4 +31,17 @@ LogOut(const char* pattern, ...) {
     return std::string(str_p.get());
 }
 
+std::string
+GetThreadName() {
+    std::string thread_name = "unamed";
+    char name[16];
+    size_t len = 16;
+    auto err = pthread_getname_np(pthread_self(), name, len);
+    if (not err) {
+        thread_name = name;
+    }
+
+    return thread_name;
+}
+
 }  // namespace milvus
