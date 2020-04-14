@@ -20,25 +20,25 @@ class GrpcArgsParser(object):
 
     @classmethod
     @error_status
-    def parse_proto_TableSchema(cls, param):
-        _table_schema = {
-            'collection_name': param.table_name,
+    def parse_proto_CollectionSchema(cls, param):
+        _collection_schema = {
+            'collection_name': param.collection_name,
             'dimension': param.dimension,
             'index_file_size': param.index_file_size,
             'metric_type': param.metric_type
         }
 
-        return param.status, _table_schema
+        return param.status, _collection_schema
 
     @classmethod
     @error_status
-    def parse_proto_TableName(cls, param):
-        return param.table_name
+    def parse_proto_CollectionName(cls, param):
+        return param.collection_name
 
     @classmethod
     @error_status
     def parse_proto_FlushParam(cls, param):
-        return list(param.table_name_array)
+        return list(param.collection_name_array)
 
     @classmethod
     @error_status
@@ -53,7 +53,7 @@ class GrpcArgsParser(object):
     @classmethod
     @error_status
     def parse_proto_IndexParam(cls, param):
-        _table_name = param.table_name
+        _collection_name = param.collection_name
         _index_type = param.index_type
         _index_param = {}
 
@@ -61,7 +61,7 @@ class GrpcArgsParser(object):
             if params.key == 'params':
                 _index_param = ujson.loads(str(params.value))
 
-        return _table_name, _index_type, _index_param
+        return _collection_name, _index_type, _index_param
 
     @classmethod
     @error_status
@@ -77,15 +77,15 @@ class GrpcArgsParser(object):
 
     @classmethod
     def parse_proto_PartitionParam(cls, param):
-        _table_name = param.table_name
+        _collection_name = param.collection_name
         _tag = param.tag
 
-        return _table_name, _tag
+        return _collection_name, _tag
 
     @classmethod
     @error_status
     def parse_proto_SearchParam(cls, param):
-        _table_name = param.table_name
+        _collection_name = param.collection_name
         _topk = param.topk
 
         if len(param.extra_params) == 0:
@@ -102,28 +102,28 @@ class GrpcArgsParser(object):
         else:
             raise Exception("Search argument parse error: record array is empty")
 
-        return _table_name, _query_record_array, _topk, _params
+        return _collection_name, _query_record_array, _topk, _params
 
     @classmethod
     @error_status
     def parse_proto_DeleteByIDParam(cls, param):
-        _table_name = param.table_name
+        _collection_name = param.collection_name
         _id_array = list(param.id_array)
 
-        return _table_name, _id_array
+        return _collection_name, _id_array
 
     @classmethod
     @error_status
     def parse_proto_VectorIdentity(cls, param):
-        _table_name = param.table_name
+        _collection_name = param.collection_name
         _id = param.id
 
-        return _table_name, _id
+        return _collection_name, _id
 
     @classmethod
     @error_status
     def parse_proto_GetVectorIDsParam(cls, param):
-        _table__name = param.table_name
+        _collection__name = param.collection_name
         _segment_name = param.segment_name
 
-        return _table__name, _segment_name
+        return _collection__name, _segment_name
