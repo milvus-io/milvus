@@ -31,74 +31,44 @@ namespace milvus {
 namespace codec {
 
 void
-DefaultVectorsFormat::read_vectors_internal(const std::string& file_path, off_t offset, size_t num,
-                                            std::vector<uint8_t>& raw_vectors) {
-    int rv_fd = open(file_path.c_str(), O_RDONLY, 00664);
-    if (rv_fd == -1) {
+DefaultVectorsFormat::read_vectors_internal(const storage::FSHandlerPtr& fs_ptr, const std::string& file_path,
+                                            off_t offset, size_t num, std::vector<uint8_t>& raw_vectors) {
+    if (!fs_ptr->reader_ptr_->open(file_path.c_str())) {
         std::string err_msg = "Failed to open file: " + file_path + ", error: " + std::strerror(errno);
         LOG_ENGINE_ERROR_ << err_msg;
-        throw Exception(SERVER_CANNOT_CREATE_FILE, err_msg);
+        throw Exception(SERVER_CANNOT_OPEN_FILE, err_msg);
     }
 
     size_t num_bytes;
-    if (::read(rv_fd, &num_bytes, sizeof(size_t)) == -1) {
-        std::string err_msg = "Failed to read from file: " + file_path + ", error: " + std::strerror(errno);
-        LOG_ENGINE_ERROR_ << err_msg;
-        throw Exception(SERVER_WRITE_ERROR, err_msg);
-    }
+    fs_ptr->reader_ptr_->read(&num_bytes, sizeof(size_t));
 
     num = std::min(num, num_bytes - offset);
 
     offset += sizeof(size_t);  // Beginning of file is num_bytes
-    int off = lseek(rv_fd, offset, SEEK_SET);
-    if (off == -1) {
-        std::string err_msg = "Failed to seek file: " + file_path + ", error: " + std::strerror(errno);
-        LOG_ENGINE_ERROR_ << err_msg;
-        throw Exception(SERVER_WRITE_ERROR, err_msg);
-    }
+    fs_ptr->reader_ptr_->seekg(offset);
 
     raw_vectors.resize(num / sizeof(uint8_t));
-    if (::read(rv_fd, raw_vectors.data(), num) == -1) {
-        std::string err_msg = "Failed to read from file: " + file_path + ", error: " + std::strerror(errno);
-        LOG_ENGINE_ERROR_ << err_msg;
-        throw Exception(SERVER_WRITE_ERROR, err_msg);
-    }
+    fs_ptr->reader_ptr_->read(raw_vectors.data(), num);
 
-    if (::close(rv_fd) == -1) {
-        std::string err_msg = "Failed to close file: " + file_path + ", error: " + std::strerror(errno);
-        LOG_ENGINE_ERROR_ << err_msg;
-        throw Exception(SERVER_WRITE_ERROR, err_msg);
-    }
+    fs_ptr->reader_ptr_->close();
 }
 
 void
-DefaultVectorsFormat::read_uids_internal(const std::string& file_path, std::vector<segment::doc_id_t>& uids) {
-    int uid_fd = open(file_path.c_str(), O_RDONLY, 00664);
-    if (uid_fd == -1) {
+DefaultVectorsFormat::read_uids_internal(const storage::FSHandlerPtr& fs_ptr, const std::string& file_path,
+                                         std::vector<segment::doc_id_t>& uids) {
+    if (!fs_ptr->reader_ptr_->open(file_path.c_str())) {
         std::string err_msg = "Failed to open file: " + file_path + ", error: " + std::strerror(errno);
         LOG_ENGINE_ERROR_ << err_msg;
-        throw Exception(SERVER_CANNOT_CREATE_FILE, err_msg);
+        throw Exception(SERVER_CANNOT_OPEN_FILE, err_msg);
     }
 
     size_t num_bytes;
-    if (::read(uid_fd, &num_bytes, sizeof(size_t)) == -1) {
-        std::string err_msg = "Failed to read from file: " + file_path + ", error: " + std::strerror(errno);
-        LOG_ENGINE_ERROR_ << err_msg;
-        throw Exception(SERVER_WRITE_ERROR, err_msg);
-    }
+    fs_ptr->reader_ptr_->read(&num_bytes, sizeof(size_t));
 
     uids.resize(num_bytes / sizeof(segment::doc_id_t));
-    if (::read(uid_fd, uids.data(), num_bytes) == -1) {
-        std::string err_msg = "Failed to read from file: " + file_path + ", error: " + std::strerror(errno);
-        LOG_ENGINE_ERROR_ << err_msg;
-        throw Exception(SERVER_WRITE_ERROR, err_msg);
-    }
+    fs_ptr->reader_ptr_->read(uids.data(), num_bytes);
 
-    if (::close(uid_fd) == -1) {
-        std::string err_msg = "Failed to close file: " + file_path + ", error: " + std::strerror(errno);
-        LOG_ENGINE_ERROR_ << err_msg;
-        throw Exception(SERVER_WRITE_ERROR, err_msg);
-    }
+    fs_ptr->reader_ptr_->close();
 }
 
 void
@@ -120,15 +90,12 @@ DefaultVectorsFormat::read(const storage::FSHandlerPtr& fs_ptr, segment::Vectors
     for (; it != it_end; ++it) {
         const auto& path = it->path();
         if (path.extension().string() == raw_vector_extension_) {
-            std::vector<uint8_t> vector_list;
-            read_vectors_internal(path.string(), 0, INT64_MAX, vector_list);
-            vectors_read->AddData(vector_list);
+            auto& vector_list = vectors_read->GetMutableData();
+            read_vectors_internal(fs_ptr, path.string(), 0, INT64_MAX, vector_list);
             vectors_read->SetName(path.stem().string());
-        }
-        if (path.extension().string() == user_id_extension_) {
-            std::vector<segment::doc_id_t> uids;
-            read_uids_internal(path.string(), uids);
-            vectors_read->AddUids(uids);
+        } else if (path.extension().string() == user_id_extension_) {
+            auto& uids = vectors_read->GetMutableUids();
+            read_uids_internal(fs_ptr, path.string(), uids);
         }
     }
 }
@@ -144,54 +111,28 @@ DefaultVectorsFormat::write(const storage::FSHandlerPtr& fs_ptr, const segment::
 
     TimeRecorder rc("write vectors");
 
-    int rv_fd = open(rv_file_path.c_str(), O_WRONLY | O_TRUNC | O_CREAT, 00664);
-    if (rv_fd == -1) {
+    if (!fs_ptr->writer_ptr_->open(rv_file_path.c_str())) {
         std::string err_msg = "Failed to open file: " + rv_file_path + ", error: " + std::strerror(errno);
         LOG_ENGINE_ERROR_ << err_msg;
         throw Exception(SERVER_CANNOT_CREATE_FILE, err_msg);
     }
 
     size_t rv_num_bytes = vectors->GetData().size() * sizeof(uint8_t);
-    if (::write(rv_fd, &rv_num_bytes, sizeof(size_t)) == -1) {
-        std::string err_msg = "Failed to write to file: " + rv_file_path + ", error: " + std::strerror(errno);
-        LOG_ENGINE_ERROR_ << err_msg;
-        throw Exception(SERVER_WRITE_ERROR, err_msg);
-    }
-    if (::write(rv_fd, vectors->GetData().data(), rv_num_bytes) == -1) {
-        std::string err_msg = "Failed to write to file: " + rv_file_path + ", error: " + std::strerror(errno);
-        LOG_ENGINE_ERROR_ << err_msg;
-        throw Exception(SERVER_WRITE_ERROR, err_msg);
-    }
-    if (::close(rv_fd) == -1) {
-        std::string err_msg = "Failed to close file: " + rv_file_path + ", error: " + std::strerror(errno);
-        LOG_ENGINE_ERROR_ << err_msg;
-        throw Exception(SERVER_WRITE_ERROR, err_msg);
-    }
+    fs_ptr->writer_ptr_->write(&rv_num_bytes, sizeof(size_t));
+    fs_ptr->writer_ptr_->write((void*)vectors->GetData().data(), rv_num_bytes);
+    fs_ptr->writer_ptr_->close();
 
     rc.RecordSection("write rv done");
 
-    int uid_fd = open(uid_file_path.c_str(), O_WRONLY | O_TRUNC | O_CREAT, 00664);
-    if (uid_fd == -1) {
+    if (!fs_ptr->writer_ptr_->open(uid_file_path.c_str())) {
         std::string err_msg = "Failed to open file: " + uid_file_path + ", error: " + std::strerror(errno);
         LOG_ENGINE_ERROR_ << err_msg;
         throw Exception(SERVER_CANNOT_CREATE_FILE, err_msg);
     }
     size_t uid_num_bytes = vectors->GetUids().size() * sizeof(segment::doc_id_t);
-    if (::write(uid_fd, &uid_num_bytes, sizeof(size_t)) == -1) {
-        std::string err_msg = "Failed to write to file" + rv_file_path + ", error: " + std::strerror(errno);
-        LOG_ENGINE_ERROR_ << err_msg;
-        throw Exception(SERVER_WRITE_ERROR, err_msg);
-    }
-    if (::write(uid_fd, vectors->GetUids().data(), uid_num_bytes) == -1) {
-        std::string err_msg = "Failed to write to file" + uid_file_path + ", error: " + std::strerror(errno);
-        LOG_ENGINE_ERROR_ << err_msg;
-        throw Exception(SERVER_WRITE_ERROR, err_msg);
-    }
-    if (::close(uid_fd) == -1) {
-        std::string err_msg = "Failed to close file: " + uid_file_path + ", error: " + std::strerror(errno);
-        LOG_ENGINE_ERROR_ << err_msg;
-        throw Exception(SERVER_WRITE_ERROR, err_msg);
-    }
+    fs_ptr->writer_ptr_->write(&uid_num_bytes, sizeof(size_t));
+    fs_ptr->writer_ptr_->write((void*)vectors->GetUids().data(), uid_num_bytes);
+    fs_ptr->writer_ptr_->close();
 
     rc.RecordSection("write uids done");
 }
@@ -215,7 +156,7 @@ DefaultVectorsFormat::read_uids(const storage::FSHandlerPtr& fs_ptr, std::vector
     for (; it != it_end; ++it) {
         const auto& path = it->path();
         if (path.extension().string() == user_id_extension_) {
-            read_uids_internal(path.string(), uids);
+            read_uids_internal(fs_ptr, path.string(), uids);
         }
     }
 }
@@ -240,7 +181,7 @@ DefaultVectorsFormat::read_vectors(const storage::FSHandlerPtr& fs_ptr, off_t of
     for (; it != it_end; ++it) {
         const auto& path = it->path();
         if (path.extension().string() == raw_vector_extension_) {
-            read_vectors_internal(path.string(), offset, num_bytes, raw_vectors);
+            read_vectors_internal(fs_ptr, path.string(), offset, num_bytes, raw_vectors);
         }
     }
 }

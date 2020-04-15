@@ -16,53 +16,53 @@ class Factory(RouterMixin):
         super(Factory, self).__init__(writable_topo=writable_topo,
                                       readonly_topo=readonly_topo)
 
-    def routing(self, table_name, partition_tags=None, metadata=None, **kwargs):
+    def routing(self, collection_name, partition_tags=None, metadata=None, **kwargs):
         range_array = kwargs.pop('range_array', None)
-        return self._route(table_name, range_array, partition_tags, metadata, **kwargs)
+        return self._route(collection_name, range_array, partition_tags, metadata, **kwargs)
 
-    def _route(self, table_name, range_array, partition_tags=None, metadata=None, **kwargs):
+    def _route(self, collection_name, range_array, partition_tags=None, metadata=None, **kwargs):
         # PXU TODO: Implement Thread-local Context
         # PXU TODO: Session life mgt
 
         if not partition_tags:
             cond = and_(
-                or_(Tables.table_id == table_name, Tables.owner_table == table_name),
+                or_(Tables.table_id == collection_name, Tables.owner_table == collection_name),
                 Tables.state != Tables.TO_DELETE)
         else:
             # TODO: collection default partition is '_default'
             cond = and_(Tables.state != Tables.TO_DELETE,
-                        Tables.owner_table == table_name,
+                        Tables.owner_table == collection_name,
                         Tables.partition_tag.in_(partition_tags))
             if '_default' in partition_tags:
-                default_par_cond = and_(Tables.table_id == table_name, Tables.state != Tables.TO_DELETE)
+                default_par_cond = and_(Tables.table_id == collection_name, Tables.state != Tables.TO_DELETE)
                 cond = or_(cond, default_par_cond)
         try:
-            tables = db.Session.query(Tables).filter(cond).all()
+            collections = db.Session.query(Tables).filter(cond).all()
         except sqlalchemy_exc.SQLAlchemyError as e:
             raise exceptions.DBError(message=str(e), metadata=metadata)
 
-        if not tables:
-            logger.error("Cannot find table {} / {} in metadata".format(table_name, partition_tags))
-            raise exceptions.TableNotFoundError('{}:{}'.format(table_name, partition_tags), metadata=metadata)
+        if not collections:
+            logger.error("Cannot find collection {} / {} in metadata".format(collection_name, partition_tags))
+            raise exceptions.CollectionNotFoundError('{}:{}'.format(collection_name, partition_tags), metadata=metadata)
 
-        table_list = [str(table.table_id) for table in tables]
+        collection_list = [str(collection.table_id) for collection in collections]
 
         file_type_cond = or_(
             TableFiles.file_type == TableFiles.FILE_TYPE_RAW,
             TableFiles.file_type == TableFiles.FILE_TYPE_TO_INDEX,
             TableFiles.file_type == TableFiles.FILE_TYPE_INDEX,
         )
-        file_cond = and_(file_type_cond, TableFiles.table_id.in_(table_list))
+        file_cond = and_(file_type_cond, TableFiles.table_id.in_(collection_list))
         try:
             files = db.Session.query(TableFiles).filter(file_cond).all()
         except sqlalchemy_exc.SQLAlchemyError as e:
             raise exceptions.DBError(message=str(e), metadata=metadata)
 
         if not files:
-            logger.warning("Table file is empty. {}".format(table_list))
-        #     logger.error("Cannot find table file id {} / {} in metadata".format(table_name, partition_tags))
-        #     raise exceptions.TableNotFoundError('Table file id not found. {}:{}'.format(table_name, partition_tags),
-        #                                         metadata=metadata)
+            logger.warning("Collection file is empty. {}".format(collection_list))
+        #     logger.error("Cannot find collection file id {} / {} in metadata".format(collection_name, partition_tags))
+        #     raise exceptions.CollectionNotFoundError('Collection file id not found. {}:{}'.format(collection_name, partition_tags),
+        #                                              metadata=metadata)
 
         db.remove_session()
 

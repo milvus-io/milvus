@@ -30,23 +30,23 @@ def resp_handler(err, error_code):
                           ids=[],
                           distances=[])
 
-    if resp_class == milvus_pb2.TableRowCount:
-        return resp_class(status=status, table_row_count=-1)
+    if resp_class == milvus_pb2.CollectionRowCount:
+        return resp_class(status=status, collection_row_count=-1)
 
-    if resp_class == milvus_pb2.TableName:
-        return resp_class(status=status, table_name=[])
+    if resp_class == milvus_pb2.CollectionName:
+        return resp_class(status=status, collection_name=[])
 
     if resp_class == milvus_pb2.StringReply:
         return resp_class(status=status, string_reply='')
 
-    if resp_class == milvus_pb2.TableSchema:
-        return milvus_pb2.TableSchema(
+    if resp_class == milvus_pb2.CollectionSchema:
+        return milvus_pb2.CollectionSchema(
             status=status
         )
 
     if resp_class == milvus_pb2.IndexParam:
         return milvus_pb2.IndexParam(
-            table_name=milvus_pb2.TableName(
+            collection_name=milvus_pb2.CollectionName(
                 status=status
             )
         )
@@ -55,10 +55,10 @@ def resp_handler(err, error_code):
     return status
 
 
-@server.errorhandler(exceptions.TableNotFoundError)
-def TableNotFoundErrorHandler(err):
+@server.errorhandler(exceptions.CollectionNotFoundError)
+def CollectionNotFoundErrorHandler(err):
     logger.error(err)
-    return resp_handler(err, status_pb2.TABLE_NOT_EXISTS)
+    return resp_handler(err, status_pb2.COLLECTION_NOT_EXISTS)
 
 
 @server.errorhandler(exceptions.InvalidTopKError)

@@ -422,12 +422,21 @@ Creates a collection.
 
 ##### Body Parameters
 
-| Parameter         | Description                                                                                                                                                                                                                                                 | Required? |
-| ----------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------- |
-| `collection_name` | The name of the collection to create, which must be unique within its database.                                                                                                                                                                             | Yes       |
-| `dimension`       | The dimension of the vectors that are to be inserted into the created collection.                                                                                                                                                                           | Yes       |
-| `index_file_size` | Threshold value that triggers index building for raw data files. The default is 1024.                                                                                                                                                                       | No        |
-| `metric_type`     | The method vector distances are compared in Milvus. The default is L2. Currently supported metrics include `L2` (Euclidean distance), `IP` (Inner Product), `HAMMING` (Hamming distance), `JACCARD` (Jaccard distance), and `TANIMOTO` (Tanomoto distance). | No        |
+| Parameter         | Description                                                                               | Required? |
+| ----------------- | ----------------------------------------------------------------------------------------- | --------- |
+| `collection_name` | The name of the collection to create, which must be unique within its database.           | Yes       |
+| `dimension`       | The dimension of the vectors that are to be inserted into the created collection.         | Yes       |
+| `index_file_size` | Threshold value that triggers index building for raw data files. The default is 1024.     | No        |
+| `metric_type`     | The method vector distances are compared in Milvus. The default is L2.                    | No        |
+
+* Currently supported metrics include:
+    - `L2` (Euclidean distance),
+    - `IP` (Inner Product)
+    - `HAMMING` (Hamming distance)
+    - `JACCARD` (Jaccard distance)
+    - `TANIMOTO` (Tanomoto distance)
+    - `SUBSTRUCTURE` (Sub structure distance)
+    - `SUPERSTRUCTURE` (Super structure distance)
 
 #### Response
 
@@ -1540,6 +1549,11 @@ For each index type, the RESTful API has specific index parameters and search pa
  <td> HNSW</td>
  <td><pre><code>{"M": $int, "efConstruction": $int}</code></pre></td>
  <td><pre><code>{"ef": $int}</code></pre></td>
+</tr>
+<tr>
+ <td> ANNOY</td>
+ <td><pre><code>{"n_trees": $int}</code></pre></td>
+ <td><pre><code>{"search_k": $int}</code></pre></td>
 </tr>
 </table>
 

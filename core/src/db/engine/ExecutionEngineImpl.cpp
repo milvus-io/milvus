@@ -375,8 +375,6 @@ ExecutionEngineImpl::Serialize() {
 
 Status
 ExecutionEngineImpl::Load(bool to_cache) {
-    // TODO(zhiru): refactor
-
     index_ = std::static_pointer_cast<knowhere::VecIndex>(cache::CpuCacheMgr::GetInstance()->GetIndex(location_));
     bool already_in_cache = (index_ != nullptr);
     if (!already_in_cache) {
@@ -411,21 +409,19 @@ ExecutionEngineImpl::Load(bool to_cache) {
             auto& vectors = segment_ptr->vectors_ptr_;
             auto& deleted_docs = segment_ptr->deleted_docs_ptr_->GetDeletedDocs();
 
-            auto vectors_uids = vectors->GetUids();
+            auto& vectors_uids = vectors->GetMutableUids();
+            auto count = vectors_uids.size();
             index_->SetUids(vectors_uids);
             LOG_ENGINE_DEBUG_ << "set uids " << index_->GetUids().size() << " for index " << location_;
 
-            auto vectors_data = vectors->GetData();
+            auto& vectors_data = vectors->GetData();
 
-            faiss::ConcurrentBitsetPtr concurrent_bitset_ptr =
-                std::make_shared<faiss::ConcurrentBitset>(vectors->GetCount());
+            faiss::ConcurrentBitsetPtr concurrent_bitset_ptr = std::make_shared<faiss::ConcurrentBitset>(count);
             for (auto& offset : deleted_docs) {
-                if (!concurrent_bitset_ptr->test(offset)) {
-                    concurrent_bitset_ptr->set(offset);
-                }
+                concurrent_bitset_ptr->set(offset);
             }
 
-            auto dataset = knowhere::GenDataset(vectors->GetCount(), this->dim_, vectors_data.data());
+            auto dataset = knowhere::GenDataset(count, this->dim_, vectors_data.data());
             if (index_type_ == EngineType::FAISS_IDMAP) {
                 auto bf_index = std::static_pointer_cast<knowhere::IDMAP>(index_);
                 bf_index->Train(knowhere::DatasetPtr(), conf);
