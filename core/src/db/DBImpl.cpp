@@ -96,7 +96,7 @@ DBImpl::Start() {
         return Status::OK();
     }
 
-    // ENGINE_LOG_TRACE << "DB service start";
+    // LOG_ENGINE_TRACE_ << "DB service start";
     initialized_.store(true, std::memory_order_release);
 
     // wal
@@ -184,7 +184,7 @@ DBImpl::Stop() {
     swn_metric_.Notify();
     bg_metric_thread_.join();
 
-    // ENGINE_LOG_TRACE << "DB service stop";
+    // LOG_ENGINE_TRACE_ << "DB service stop";
     return Status::OK();
 }
 
@@ -321,7 +321,7 @@ DBImpl::GetCollectionInfo(const std::string& collection_id, CollectionInfo& coll
         status = meta_ptr_->FilesByType(name_tag.first, file_types, collection_files);
         if (!status.ok()) {
             std::string err_msg = "Failed to get collection info: " + status.ToString();
-            ENGINE_LOG_ERROR << err_msg;
+            LOG_ENGINE_ERROR_ << err_msg;
             return Status(DB_ERROR, err_msg);
         }
 
@@ -375,8 +375,8 @@ DBImpl::PreloadCollection(const std::string& collection_id) {
     int64_t available_size = cache_total - cache_usage;
 
     // step 3: load file one by one
-    ENGINE_LOG_DEBUG << "Begin pre-load collection:" + collection_id + ", totally " << files_array.size()
-                     << " files need to be pre-loaded";
+    LOG_ENGINE_DEBUG_ << "Begin pre-load collection:" + collection_id + ", totally " << files_array.size()
+                      << " files need to be pre-loaded";
     TimeRecorderAuto rc("Pre-load collection:" + collection_id);
     for (auto& file : files_array) {
         EngineType engine_type;
@@ -394,7 +394,7 @@ DBImpl::PreloadCollection(const std::string& collection_id) {
             EngineFactory::Build(file.dimension_, file.location_, engine_type, (MetricType)file.metric_type_, json);
         fiu_do_on("DBImpl.PreloadCollection.null_engine", engine = nullptr);
         if (engine == nullptr) {
-            ENGINE_LOG_ERROR << "Invalid engine type";
+            LOG_ENGINE_ERROR_ << "Invalid engine type";
             return Status(DB_ERROR, "Invalid engine type");
         }
 
@@ -408,12 +408,12 @@ DBImpl::PreloadCollection(const std::string& collection_id) {
 
             size += engine->Size();
             if (size > available_size) {
-                ENGINE_LOG_DEBUG << "Pre-load cancelled since cache is almost full";
+                LOG_ENGINE_DEBUG_ << "Pre-load cancelled since cache is almost full";
                 return Status(SERVER_CACHE_FULL, "Cache is full");
             }
         } catch (std::exception& ex) {
             std::string msg = "Pre-load collection encounter exception: " + std::string(ex.what());
-            ENGINE_LOG_ERROR << msg;
+            LOG_ENGINE_ERROR_ << msg;
             return Status(DB_ERROR, msg);
         }
     }
@@ -460,7 +460,7 @@ DBImpl::DropPartition(const std::string& partition_name) {
     mem_mgr_->EraseMemVector(partition_name);                // not allow insert
     auto status = meta_ptr_->DropPartition(partition_name);  // soft delete collection
     if (!status.ok()) {
-        ENGINE_LOG_ERROR << status.message();
+        LOG_ENGINE_ERROR_ << status.message();
         return status;
     }
 
@@ -482,7 +482,7 @@ DBImpl::DropPartitionByTag(const std::string& collection_id, const std::string& 
     std::string partition_name;
     auto status = meta_ptr_->GetPartitionName(collection_id, partition_tag, partition_name);
     if (!status.ok()) {
-        ENGINE_LOG_ERROR << status.message();
+        LOG_ENGINE_ERROR_ << status.message();
         return status;
     }
 
@@ -500,7 +500,7 @@ DBImpl::ShowPartitions(const std::string& collection_id, std::vector<meta::Colle
 
 Status
 DBImpl::InsertVectors(const std::string& collection_id, const std::string& partition_tag, VectorsData& vectors) {
-    //    ENGINE_LOG_DEBUG << "Insert " << n << " vectors to cache";
+    //    LOG_ENGINE_DEBUG_ << "Insert " << n << " vectors to cache";
     if (!initialized_.load(std::memory_order_acquire)) {
         return SHUTDOWN_ERROR;
     }
@@ -511,7 +511,7 @@ DBImpl::InsertVectors(const std::string& collection_id, const std::string& parti
         SafeIDGenerator& id_generator = SafeIDGenerator::GetInstance();
         Status status = id_generator.GetNextIDNumbers(vectors.vector_count_, vectors.id_array_);
         if (!status.ok()) {
-            ENGINE_LOG_ERROR << LogOut("[%s][%ld] Get next id number fail: %s", "insert", 0, status.message().c_str());
+            LOG_ENGINE_ERROR_ << LogOut("[%s][%ld] Get next id number fail: %s", "insert", 0, status.message().c_str());
             return status;
         }
     }
@@ -521,7 +521,7 @@ DBImpl::InsertVectors(const std::string& collection_id, const std::string& parti
         std::string target_collection_name;
         status = GetPartitionByTag(collection_id, partition_tag, target_collection_name);
         if (!status.ok()) {
-            ENGINE_LOG_ERROR << LogOut("[%s][%ld] Get partition fail: %s", "insert", 0, status.message().c_str());
+            LOG_ENGINE_ERROR_ << LogOut("[%s][%ld] Get partition fail: %s", "insert", 0, status.message().c_str());
             return status;
         }
 
@@ -600,14 +600,14 @@ DBImpl::Flush(const std::string& collection_id) {
         return status;
     }
     if (!has_collection) {
-        ENGINE_LOG_ERROR << "Collection to flush does not exist: " << collection_id;
+        LOG_ENGINE_ERROR_ << "Collection to flush does not exist: " << collection_id;
         return Status(DB_NOT_FOUND, "Collection to flush does not exist");
     }
 
-    ENGINE_LOG_DEBUG << "Begin flush collection: " << collection_id;
+    LOG_ENGINE_DEBUG_ << "Begin flush collection: " << collection_id;
 
     if (options_.wal_enable_) {
-        ENGINE_LOG_DEBUG << "WAL flush";
+        LOG_ENGINE_DEBUG_ << "WAL flush";
         auto lsn = wal_mgr_->Flush(collection_id);
         if (lsn != 0) {
             swn_wal_.Notify();
@@ -615,11 +615,11 @@ DBImpl::Flush(const std::string& collection_id) {
         }
 
     } else {
-        ENGINE_LOG_DEBUG << "MemTable flush";
+        LOG_ENGINE_DEBUG_ << "MemTable flush";
         InternalFlush(collection_id);
     }
 
-    ENGINE_LOG_DEBUG << "End flush collection: " << collection_id;
+    LOG_ENGINE_DEBUG_ << "End flush collection: " << collection_id;
 
     return status;
 }
@@ -630,22 +630,22 @@ DBImpl::Flush() {
         return SHUTDOWN_ERROR;
     }
 
-    ENGINE_LOG_DEBUG << "Begin flush all collections";
+    LOG_ENGINE_DEBUG_ << "Begin flush all collections";
 
     Status status;
     if (options_.wal_enable_) {
-        ENGINE_LOG_DEBUG << "WAL flush";
+        LOG_ENGINE_DEBUG_ << "WAL flush";
         auto lsn = wal_mgr_->Flush();
         if (lsn != 0) {
             swn_wal_.Notify();
             flush_req_swn_.Wait();
         }
     } else {
-        ENGINE_LOG_DEBUG << "MemTable flush";
+        LOG_ENGINE_DEBUG_ << "MemTable flush";
         InternalFlush();
     }
 
-    ENGINE_LOG_DEBUG << "End flush all collections";
+    LOG_ENGINE_DEBUG_ << "End flush all collections";
 
     return status;
 }
@@ -661,26 +661,26 @@ DBImpl::Compact(const std::string& collection_id) {
     auto status = DescribeCollection(collection_schema);
     if (!status.ok()) {
         if (status.code() == DB_NOT_FOUND) {
-            ENGINE_LOG_ERROR << "Collection to compact does not exist: " << collection_id;
+            LOG_ENGINE_ERROR_ << "Collection to compact does not exist: " << collection_id;
             return Status(DB_NOT_FOUND, "Collection to compact does not exist");
         } else {
             return status;
         }
     } else {
         if (!collection_schema.owner_collection_.empty()) {
-            ENGINE_LOG_ERROR << "Collection to compact does not exist: " << collection_id;
+            LOG_ENGINE_ERROR_ << "Collection to compact does not exist: " << collection_id;
             return Status(DB_NOT_FOUND, "Collection to compact does not exist");
         }
     }
 
-    ENGINE_LOG_DEBUG << "Before compacting, wait for build index thread to finish...";
+    LOG_ENGINE_DEBUG_ << "Before compacting, wait for build index thread to finish...";
 
     // WaitBuildIndexFinish();
 
     const std::lock_guard<std::mutex> index_lock(build_index_mutex_);
     const std::lock_guard<std::mutex> merge_lock(flush_merge_compact_mutex_);
 
-    ENGINE_LOG_DEBUG << "Compacting collection: " << collection_id;
+    LOG_ENGINE_DEBUG_ << "Compacting collection: " << collection_id;
 
     // Get files to compact from meta.
     std::vector<int> file_types{meta::SegmentSchema::FILE_TYPE::RAW, meta::SegmentSchema::FILE_TYPE::TO_INDEX,
@@ -689,11 +689,11 @@ DBImpl::Compact(const std::string& collection_id) {
     status = meta_ptr_->FilesByType(collection_id, file_types, files_to_compact);
     if (!status.ok()) {
         std::string err_msg = "Failed to get files to compact: " + status.message();
-        ENGINE_LOG_ERROR << err_msg;
+        LOG_ENGINE_ERROR_ << err_msg;
         return Status(DB_ERROR, err_msg);
     }
 
-    ENGINE_LOG_DEBUG << "Found " << files_to_compact.size() << " segment to compact";
+    LOG_ENGINE_DEBUG_ << "Found " << files_to_compact.size() << " segment to compact";
 
     OngoingFileChecker::GetInstance().MarkOngoingFiles(files_to_compact);
 
@@ -719,18 +719,18 @@ DBImpl::Compact(const std::string& collection_id) {
             compact_status = CompactFile(collection_id, file, files_to_update);
 
             if (!compact_status.ok()) {
-                ENGINE_LOG_ERROR << "Compact failed for segment " << file.segment_id_ << ": "
-                                 << compact_status.message();
+                LOG_ENGINE_ERROR_ << "Compact failed for segment " << file.segment_id_ << ": "
+                                  << compact_status.message();
                 OngoingFileChecker::GetInstance().UnmarkOngoingFile(file);
                 continue;  // skip this file and try compact next one
             }
         } else {
             OngoingFileChecker::GetInstance().UnmarkOngoingFile(file);
-            ENGINE_LOG_DEBUG << "Segment " << file.segment_id_ << " has no deleted data. No need to compact";
+            LOG_ENGINE_DEBUG_ << "Segment " << file.segment_id_ << " has no deleted data. No need to compact";
             continue;  // skip this file and try compact next one
         }
 
-        ENGINE_LOG_DEBUG << "Updating meta after compaction...";
+        LOG_ENGINE_DEBUG_ << "Updating meta after compaction...";
         status = meta_ptr_->UpdateCollectionFiles(files_to_update);
         OngoingFileChecker::GetInstance().UnmarkOngoingFile(file);
         if (!status.ok()) {
@@ -742,7 +742,7 @@ DBImpl::Compact(const std::string& collection_id) {
     OngoingFileChecker::GetInstance().UnmarkOngoingFiles(files_to_compact);
 
     if (compact_status.ok()) {
-        ENGINE_LOG_DEBUG << "Finished compacting collection: " << collection_id;
+        LOG_ENGINE_DEBUG_ << "Finished compacting collection: " << collection_id;
     }
 
     return compact_status;
@@ -751,7 +751,7 @@ DBImpl::Compact(const std::string& collection_id) {
 Status
 DBImpl::CompactFile(const std::string& collection_id, const meta::SegmentSchema& file,
                     meta::SegmentsSchema& files_to_update) {
-    ENGINE_LOG_DEBUG << "Compacting segment " << file.segment_id_ << " for collection: " << collection_id;
+    LOG_ENGINE_DEBUG_ << "Compacting segment " << file.segment_id_ << " for collection: " << collection_id;
 
     // Create new collection file
     meta::SegmentSchema compacted_file;
@@ -761,7 +761,7 @@ DBImpl::CompactFile(const std::string& collection_id, const meta::SegmentSchema&
     Status status = meta_ptr_->CreateCollectionFile(compacted_file);
 
     if (!status.ok()) {
-        ENGINE_LOG_ERROR << "Failed to create collection file: " << status.message();
+        LOG_ENGINE_ERROR_ << "Failed to create collection file: " << status.message();
         return status;
     }
 
@@ -774,18 +774,18 @@ DBImpl::CompactFile(const std::string& collection_id, const meta::SegmentSchema&
     std::string segment_dir_to_merge;
     utils::GetParentPath(file.location_, segment_dir_to_merge);
 
-    ENGINE_LOG_DEBUG << "Compacting begin...";
+    LOG_ENGINE_DEBUG_ << "Compacting begin...";
     segment_writer_ptr->Merge(segment_dir_to_merge, compacted_file.file_id_);
 
     // Serialize
-    ENGINE_LOG_DEBUG << "Serializing compacted segment...";
+    LOG_ENGINE_DEBUG_ << "Serializing compacted segment...";
     status = segment_writer_ptr->Serialize();
     if (!status.ok()) {
-        ENGINE_LOG_ERROR << "Failed to serialize compacted segment: " << status.message();
+        LOG_ENGINE_ERROR_ << "Failed to serialize compacted segment: " << status.message();
         compacted_file.file_type_ = meta::SegmentSchema::TO_DELETE;
         auto mark_status = meta_ptr_->UpdateCollectionFile(compacted_file);
         if (mark_status.ok()) {
-            ENGINE_LOG_DEBUG << "Mark file: " << compacted_file.file_id_ << " to to_delete";
+            LOG_ENGINE_DEBUG_ << "Mark file: " << compacted_file.file_id_ << " to to_delete";
         }
         return status;
     }
@@ -804,7 +804,7 @@ DBImpl::CompactFile(const std::string& collection_id, const meta::SegmentSchema&
     compacted_file.row_count_ = segment_writer_ptr->VectorCount();
 
     if (compacted_file.row_count_ == 0) {
-        ENGINE_LOG_DEBUG << "Compacted segment is empty. Mark it as TO_DELETE";
+        LOG_ENGINE_DEBUG_ << "Compacted segment is empty. Mark it as TO_DELETE";
         compacted_file.file_type_ = meta::SegmentSchema::TO_DELETE;
     }
 
@@ -822,9 +822,9 @@ DBImpl::CompactFile(const std::string& collection_id, const meta::SegmentSchema&
         files_to_update.emplace_back(f);
     }
 
-    ENGINE_LOG_DEBUG << "Compacted segment " << compacted_file.segment_id_ << " from "
-                     << std::to_string(file.file_size_) << " bytes to " << std::to_string(compacted_file.file_size_)
-                     << " bytes";
+    LOG_ENGINE_DEBUG_ << "Compacted segment " << compacted_file.segment_id_ << " from "
+                      << std::to_string(file.file_size_) << " bytes to " << std::to_string(compacted_file.file_size_)
+                      << " bytes";
 
     if (options_.insert_cache_immediately_) {
         segment_writer_ptr->Cache();
@@ -842,7 +842,7 @@ DBImpl::GetVectorByID(const std::string& collection_id, const IDNumber& vector_i
     bool has_collection;
     auto status = HasCollection(collection_id, has_collection);
     if (!has_collection) {
-        ENGINE_LOG_ERROR << "Collection " << collection_id << " does not exist: ";
+        LOG_ENGINE_ERROR_ << "Collection " << collection_id << " does not exist: ";
         return Status(DB_NOT_FOUND, "Collection does not exist");
     }
     if (!status.ok()) {
@@ -857,7 +857,7 @@ DBImpl::GetVectorByID(const std::string& collection_id, const IDNumber& vector_i
     status = meta_ptr_->FilesByType(collection_id, file_types, files_to_query);
     if (!status.ok()) {
         std::string err_msg = "Failed to get files for GetVectorByID: " + status.message();
-        ENGINE_LOG_ERROR << err_msg;
+        LOG_ENGINE_ERROR_ << err_msg;
         return status;
     }
 
@@ -868,7 +868,7 @@ DBImpl::GetVectorByID(const std::string& collection_id, const IDNumber& vector_i
         status = meta_ptr_->FilesByType(schema.collection_id_, file_types, files);
         if (!status.ok()) {
             std::string err_msg = "Failed to get files for GetVectorByID: " + status.message();
-            ENGINE_LOG_ERROR << err_msg;
+            LOG_ENGINE_ERROR_ << err_msg;
             return status;
         }
         files_to_query.insert(files_to_query.end(), std::make_move_iterator(files.begin()),
@@ -876,7 +876,7 @@ DBImpl::GetVectorByID(const std::string& collection_id, const IDNumber& vector_i
     }
 
     if (files_to_query.empty()) {
-        ENGINE_LOG_DEBUG << "No files to get vector by id from";
+        LOG_ENGINE_DEBUG_ << "No files to get vector by id from";
         return Status::OK();
     }
 
@@ -901,7 +901,7 @@ DBImpl::GetVectorIDs(const std::string& collection_id, const std::string& segmen
     bool has_collection;
     auto status = HasCollection(collection_id, has_collection);
     if (!has_collection) {
-        ENGINE_LOG_ERROR << "Collection " << collection_id << " does not exist: ";
+        LOG_ENGINE_ERROR_ << "Collection " << collection_id << " does not exist: ";
         return Status(DB_NOT_FOUND, "Collection does not exist");
     }
     if (!status.ok()) {
@@ -965,7 +965,7 @@ DBImpl::GetVectorIDs(const std::string& collection_id, const std::string& segmen
 Status
 DBImpl::GetVectorByIdHelper(const std::string& collection_id, IDNumber vector_id, VectorsData& vector,
                             const meta::SegmentsSchema& files) {
-    ENGINE_LOG_DEBUG << "Getting vector by id in " << files.size() << " files";
+    LOG_ENGINE_DEBUG_ << "Getting vector by id in " << files.size() << " files";
 
     for (auto& file : files) {
         // Load bloom filter
@@ -1046,7 +1046,7 @@ DBImpl::CreateIndex(const std::string& collection_id, const CollectionIndex& ind
         CollectionIndex old_index;
         status = DescribeIndex(collection_id, old_index);
         if (!status.ok()) {
-            ENGINE_LOG_ERROR << "Failed to get collection index info for collection: " << collection_id;
+            LOG_ENGINE_ERROR_ << "Failed to get collection index info for collection: " << collection_id;
             return status;
         }
 
@@ -1087,7 +1087,7 @@ DBImpl::DropIndex(const std::string& collection_id) {
         return SHUTDOWN_ERROR;
     }
 
-    ENGINE_LOG_DEBUG << "Drop index for collection: " << collection_id;
+    LOG_ENGINE_DEBUG_ << "Drop index for collection: " << collection_id;
     return DropCollectionIndexRecursively(collection_id);
 }
 
@@ -1218,7 +1218,7 @@ DBImpl::QueryAsync(const std::shared_ptr<server::Context>& context, const meta::
     if (files.size() > milvus::scheduler::TASK_TABLE_MAX_COUNT) {
         std::string msg =
             "Search files count exceed scheduler limit: " + std::to_string(milvus::scheduler::TASK_TABLE_MAX_COUNT);
-        ENGINE_LOG_ERROR << msg;
+        LOG_ENGINE_ERROR_ << msg;
         return Status(DB_ERROR, msg);
     }
 
@@ -1227,7 +1227,7 @@ DBImpl::QueryAsync(const std::shared_ptr<server::Context>& context, const meta::
     // step 1: construct search job
     auto status = OngoingFileChecker::GetInstance().MarkOngoingFiles(files);
 
-    ENGINE_LOG_DEBUG << LogOut("Engine query begin, index file count: %ld", files.size());
+    LOG_ENGINE_DEBUG_ << LogOut("Engine query begin, index file count: %ld", files.size());
     scheduler::SearchJobPtr job = std::make_shared<scheduler::SearchJob>(tracer.Context(), k, extra_params, vectors);
     for (auto& file : files) {
         scheduler::SegmentSchemaPtr file_ptr = std::make_shared<meta::SegmentSchema>(file);
@@ -1259,7 +1259,7 @@ DBImpl::BackgroundIndexThread() {
             WaitMergeFileFinish();
             WaitBuildIndexFinish();
 
-            ENGINE_LOG_DEBUG << "DB background thread exit";
+            LOG_ENGINE_DEBUG_ << "DB background thread exit";
             break;
         }
 
@@ -1272,22 +1272,22 @@ DBImpl::BackgroundIndexThread() {
 
 void
 DBImpl::WaitMergeFileFinish() {
-    //    ENGINE_LOG_DEBUG << "Begin WaitMergeFileFinish";
+    //    LOG_ENGINE_DEBUG_ << "Begin WaitMergeFileFinish";
     std::lock_guard<std::mutex> lck(merge_result_mutex_);
     for (auto& iter : merge_thread_results_) {
         iter.wait();
     }
-    //    ENGINE_LOG_DEBUG << "End WaitMergeFileFinish";
+    //    LOG_ENGINE_DEBUG_ << "End WaitMergeFileFinish";
 }
 
 void
 DBImpl::WaitBuildIndexFinish() {
-    //    ENGINE_LOG_DEBUG << "Begin WaitBuildIndexFinish";
+    //    LOG_ENGINE_DEBUG_ << "Begin WaitBuildIndexFinish";
     std::lock_guard<std::mutex> lck(index_result_mutex_);
     for (auto& iter : index_thread_results_) {
         iter.wait();
     }
-    //    ENGINE_LOG_DEBUG << "End WaitBuildIndexFinish";
+    //    LOG_ENGINE_DEBUG_ << "End WaitBuildIndexFinish";
 }
 
 void
@@ -1322,7 +1322,7 @@ DBImpl::StartMetricTask() {
 
 void
 DBImpl::StartMergeTask() {
-    // ENGINE_LOG_DEBUG << "Begin StartMergeTask";
+    // LOG_ENGINE_DEBUG_ << "Begin StartMergeTask";
     // merge task has been finished?
     {
         std::lock_guard<std::mutex> lck(merge_result_mutex_);
@@ -1356,14 +1356,14 @@ DBImpl::StartMergeTask() {
         }
     }
 
-    // ENGINE_LOG_DEBUG << "End StartMergeTask";
+    // LOG_ENGINE_DEBUG_ << "End StartMergeTask";
 }
 
 Status
 DBImpl::MergeFiles(const std::string& collection_id, const meta::SegmentsSchema& files) {
     // const std::lock_guard<std::mutex> lock(flush_merge_compact_mutex_);
 
-    ENGINE_LOG_DEBUG << "Merge files for collection: " << collection_id;
+    LOG_ENGINE_DEBUG_ << "Merge files for collection: " << collection_id;
 
     // step 1: create collection file
     meta::SegmentSchema collection_file;
@@ -1372,7 +1372,7 @@ DBImpl::MergeFiles(const std::string& collection_id, const meta::SegmentsSchema&
     Status status = meta_ptr_->CreateCollectionFile(collection_file);
 
     if (!status.ok()) {
-        ENGINE_LOG_ERROR << "Failed to create collection: " << status.ToString();
+        LOG_ENGINE_ERROR_ << "Failed to create collection: " << status.ToString();
         return status;
     }
 
@@ -1409,19 +1409,19 @@ DBImpl::MergeFiles(const std::string& collection_id, const meta::SegmentsSchema&
         fiu_do_on("DBImpl.MergeFiles.Serialize_ErrorStatus", status = Status(DB_ERROR, ""));
     } catch (std::exception& ex) {
         std::string msg = "Serialize merged index encounter exception: " + std::string(ex.what());
-        ENGINE_LOG_ERROR << msg;
+        LOG_ENGINE_ERROR_ << msg;
         status = Status(DB_ERROR, msg);
     }
 
     if (!status.ok()) {
-        ENGINE_LOG_ERROR << "Failed to persist merged segment: " << new_segment_dir << ". Error: " << status.message();
+        LOG_ENGINE_ERROR_ << "Failed to persist merged segment: " << new_segment_dir << ". Error: " << status.message();
 
         // if failed to serialize merge file to disk
         // typical error: out of disk space, out of memory or permission denied
         collection_file.file_type_ = meta::SegmentSchema::TO_DELETE;
         status = meta_ptr_->UpdateCollectionFile(collection_file);
-        ENGINE_LOG_DEBUG << "Failed to update file to index, mark file: " << collection_file.file_id_
-                         << " to to_delete";
+        LOG_ENGINE_DEBUG_ << "Failed to update file to index, mark file: " << collection_file.file_id_
+                          << " to to_delete";
 
         return status;
     }
@@ -1440,8 +1440,8 @@ DBImpl::MergeFiles(const std::string& collection_id, const meta::SegmentsSchema&
     collection_file.row_count_ = segment_writer_ptr->VectorCount();
     updated.push_back(collection_file);
     status = meta_ptr_->UpdateCollectionFiles(updated);
-    ENGINE_LOG_DEBUG << "New merged segment " << collection_file.segment_id_ << " of size "
-                     << segment_writer_ptr->Size() << " bytes";
+    LOG_ENGINE_DEBUG_ << "New merged segment " << collection_file.segment_id_ << " of size "
+                      << segment_writer_ptr->Size() << " bytes";
 
     if (options_.insert_cache_immediately_) {
         segment_writer_ptr->Cache();
@@ -1457,12 +1457,12 @@ DBImpl::BackgroundMergeFiles(const std::string& collection_id) {
     meta::SegmentsSchema raw_files;
     auto status = meta_ptr_->FilesToMerge(collection_id, raw_files);
     if (!status.ok()) {
-        ENGINE_LOG_ERROR << "Failed to get merge files for collection: " << collection_id;
+        LOG_ENGINE_ERROR_ << "Failed to get merge files for collection: " << collection_id;
         return status;
     }
 
     if (raw_files.size() < options_.merge_trigger_number_) {
-        ENGINE_LOG_TRACE << "Files number not greater equal than merge trigger number, skip merge action";
+        LOG_ENGINE_TRACE_ << "Files number not greater equal than merge trigger number, skip merge action";
         return Status::OK();
     }
 
@@ -1471,7 +1471,7 @@ DBImpl::BackgroundMergeFiles(const std::string& collection_id) {
     status = OngoingFileChecker::GetInstance().UnmarkOngoingFiles(raw_files);
 
     if (!initialized_.load(std::memory_order_acquire)) {
-        ENGINE_LOG_DEBUG << "Server will shutdown, skip merge action for collection: " << collection_id;
+        LOG_ENGINE_DEBUG_ << "Server will shutdown, skip merge action for collection: " << collection_id;
     }
 
     return Status::OK();
@@ -1479,17 +1479,17 @@ DBImpl::BackgroundMergeFiles(const std::string& collection_id) {
 
 void
 DBImpl::BackgroundMerge(std::set<std::string> collection_ids) {
-    // ENGINE_LOG_TRACE << " Background merge thread start";
+    // LOG_ENGINE_TRACE_ << " Background merge thread start";
 
     Status status;
     for (auto& collection_id : collection_ids) {
         status = BackgroundMergeFiles(collection_id);
         if (!status.ok()) {
-            ENGINE_LOG_ERROR << "Merge files for collection " << collection_id << " failed: " << status.ToString();
+            LOG_ENGINE_ERROR_ << "Merge files for collection " << collection_id << " failed: " << status.ToString();
         }
 
         if (!initialized_.load(std::memory_order_acquire)) {
-            ENGINE_LOG_DEBUG << "Server will shutdown, skip merge action";
+            LOG_ENGINE_DEBUG_ << "Server will shutdown, skip merge action";
             break;
         }
     }
@@ -1505,7 +1505,7 @@ DBImpl::BackgroundMerge(std::set<std::string> collection_ids) {
         meta_ptr_->CleanUpFilesWithTTL(ttl);
     }
 
-    // ENGINE_LOG_TRACE << " Background merge thread exit";
+    // LOG_ENGINE_TRACE_ << " Background merge thread exit";
 }
 
 void
@@ -1538,7 +1538,7 @@ DBImpl::BackgroundBuildIndex() {
     Status status = index_failed_checker_.IgnoreFailedIndexFiles(to_index_files);
 
     if (!to_index_files.empty()) {
-        ENGINE_LOG_DEBUG << "Background build index thread begin";
+        LOG_ENGINE_DEBUG_ << "Background build index thread begin";
         status = OngoingFileChecker::GetInstance().MarkOngoingFiles(to_index_files);
 
         // step 2: put build index task to scheduler
@@ -1558,18 +1558,18 @@ DBImpl::BackgroundBuildIndex() {
             job->WaitBuildIndexFinish();
             if (!job->GetStatus().ok()) {
                 Status status = job->GetStatus();
-                ENGINE_LOG_ERROR << "Building index job " << job->id() << " failed: " << status.ToString();
+                LOG_ENGINE_ERROR_ << "Building index job " << job->id() << " failed: " << status.ToString();
 
                 index_failed_checker_.MarkFailedIndexFile(file_schema, status.message());
             } else {
-                ENGINE_LOG_DEBUG << "Building index job " << job->id() << " succeed.";
+                LOG_ENGINE_DEBUG_ << "Building index job " << job->id() << " succeed.";
 
                 index_failed_checker_.MarkSucceedIndexFile(file_schema);
             }
             status = OngoingFileChecker::GetInstance().UnmarkOngoingFile(file_schema);
         }
 
-        ENGINE_LOG_DEBUG << "Background build index thread finished";
+        LOG_ENGINE_DEBUG_ << "Background build index thread finished";
     }
 }
 
@@ -1594,7 +1594,7 @@ DBImpl::GetFilesToBuildIndex(const std::string& collection_id, const std::vector
 
 Status
 DBImpl::GetFilesToSearch(const std::string& collection_id, meta::SegmentsSchema& files) {
-    ENGINE_LOG_DEBUG << "Collect files from collection: " << collection_id;
+    LOG_ENGINE_DEBUG_ << "Collect files from collection: " << collection_id;
 
     meta::SegmentsSchema search_files;
     auto status = meta_ptr_->FilesToSearch(collection_id, search_files);
@@ -1629,7 +1629,7 @@ DBImpl::GetPartitionByTag(const std::string& collection_id, const std::string& p
 
         status = meta_ptr_->GetPartitionName(collection_id, partition_tag, partition_name);
         if (!status.ok()) {
-            ENGINE_LOG_ERROR << status.message();
+            LOG_ENGINE_ERROR_ << status.message();
         }
     }
 
@@ -1670,7 +1670,7 @@ DBImpl::GetPartitionsByTags(const std::string& collection_id, const std::vector<
 Status
 DBImpl::DropCollectionRecursively(const std::string& collection_id) {
     // dates partly delete files of the collection but currently we don't support
-    ENGINE_LOG_DEBUG << "Prepare to delete collection " << collection_id;
+    LOG_ENGINE_DEBUG_ << "Prepare to delete collection " << collection_id;
 
     Status status;
     if (options_.wal_enable_) {
@@ -1708,7 +1708,7 @@ DBImpl::UpdateCollectionIndexRecursively(const std::string& collection_id, const
     fiu_do_on("DBImpl.UpdateCollectionIndexRecursively.fail_update_collection_index",
               status = Status(DB_META_TRANSACTION_FAILED, ""));
     if (!status.ok()) {
-        ENGINE_LOG_ERROR << "Failed to update collection index info for collection: " << collection_id;
+        LOG_ENGINE_ERROR_ << "Failed to update collection index info for collection: " << collection_id;
         return status;
     }
 
@@ -1748,7 +1748,7 @@ DBImpl::WaitCollectionIndexRecursively(const std::string& collection_id, const C
     int times = 1;
 
     while (!collection_files.empty()) {
-        ENGINE_LOG_DEBUG << "Non index files detected! Will build index " << times;
+        LOG_ENGINE_DEBUG_ << "Non index files detected! Will build index " << times;
         if (!utils::IsRawIndexType(index.engine_type_)) {
             status = meta_ptr_->UpdateCollectionFilesToIndex(collection_id);
         }
@@ -1785,7 +1785,7 @@ DBImpl::WaitCollectionIndexRecursively(const std::string& collection_id, const C
 
 Status
 DBImpl::DropCollectionIndexRecursively(const std::string& collection_id) {
-    ENGINE_LOG_DEBUG << "Drop index for collection: " << collection_id;
+    LOG_ENGINE_DEBUG_ << "Drop index for collection: " << collection_id;
     index_failed_checker_.CleanFailedIndexFileOfCollection(collection_id);
     auto status = meta_ptr_->DropCollectionIndex(collection_id);
     if (!status.ok()) {
@@ -1868,7 +1868,7 @@ DBImpl::ExecWalRecord(const wal::MXLogRecord& record) {
             std::string target_collection_name;
             status = GetPartitionByTag(record.collection_id, record.partition_tag, target_collection_name);
             if (!status.ok()) {
-                WAL_LOG_ERROR << LogOut("[%s][%ld] ", "insert", 0) << "Get partition fail: " << status.message();
+                LOG_WAL_ERROR_ << LogOut("[%s][%ld] ", "insert", 0) << "Get partition fail: " << status.message();
                 return status;
             }
 
@@ -1888,7 +1888,7 @@ DBImpl::ExecWalRecord(const wal::MXLogRecord& record) {
             std::string target_collection_name;
             status = GetPartitionByTag(record.collection_id, record.partition_tag, target_collection_name);
             if (!status.ok()) {
-                WAL_LOG_ERROR << LogOut("[%s][%ld] ", "insert", 0) << "Get partition fail: " << status.message();
+                LOG_WAL_ERROR_ << LogOut("[%s][%ld] ", "insert", 0) << "Get partition fail: " << status.message();
                 return status;
             }
 
@@ -1994,6 +1994,7 @@ DBImpl::InternalFlush(const std::string& collection_id) {
 
 void
 DBImpl::BackgroundWalThread() {
+    SetThreadName("wal_thread");
     server::SystemInfo::GetInstance().Init();
 
     std::chrono::system_clock::time_point next_auto_flush_time;
@@ -2015,7 +2016,7 @@ DBImpl::BackgroundWalThread() {
         wal::MXLogRecord record;
         auto error_code = wal_mgr_->GetNextRecord(record);
         if (error_code != WAL_SUCCESS) {
-            ENGINE_LOG_ERROR << "WAL background GetNextRecord error";
+            LOG_ENGINE_ERROR_ << "WAL background GetNextRecord error";
             break;
         }
 
@@ -2037,7 +2038,7 @@ DBImpl::BackgroundWalThread() {
                 flush_req_swn_.Notify();
                 WaitMergeFileFinish();
                 WaitBuildIndexFinish();
-                ENGINE_LOG_DEBUG << "WAL background thread exit";
+                LOG_ENGINE_DEBUG_ << "WAL background thread exit";
                 break;
             }
 
@@ -2052,10 +2053,11 @@ DBImpl::BackgroundWalThread() {
 
 void
 DBImpl::BackgroundFlushThread() {
+    SetThreadName("flush_thread");
     server::SystemInfo::GetInstance().Init();
     while (true) {
         if (!initialized_.load(std::memory_order_acquire)) {
-            ENGINE_LOG_DEBUG << "DB background flush thread exit";
+            LOG_ENGINE_DEBUG_ << "DB background flush thread exit";
             break;
         }
 
@@ -2073,7 +2075,7 @@ DBImpl::BackgroundMetricThread() {
     server::SystemInfo::GetInstance().Init();
     while (true) {
         if (!initialized_.load(std::memory_order_acquire)) {
-            ENGINE_LOG_DEBUG << "DB background metric thread exit";
+            LOG_ENGINE_DEBUG_ << "DB background metric thread exit";
             break;
         }
 

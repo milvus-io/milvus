@@ -62,7 +62,7 @@ SegmentWriter::Serialize() {
 
     auto status = WriteBloomFilter();
     if (!status.ok()) {
-        ENGINE_LOG_ERROR << status.message();
+        LOG_ENGINE_ERROR_ << status.message();
         return status;
     }
 
@@ -70,7 +70,7 @@ SegmentWriter::Serialize() {
 
     status = WriteVectors();
     if (!status.ok()) {
-        ENGINE_LOG_ERROR << "Write vectors fail: " << status.message();
+        LOG_ENGINE_ERROR_ << "Write vectors fail: " << status.message();
         return status;
     }
 
@@ -92,7 +92,7 @@ SegmentWriter::WriteVectors() {
         default_codec.GetVectorsFormat()->write(fs_ptr_, segment_ptr_->vectors_ptr_);
     } catch (std::exception& e) {
         std::string err_msg = "Failed to write vectors: " + std::string(e.what());
-        ENGINE_LOG_ERROR << err_msg;
+        LOG_ENGINE_ERROR_ << err_msg;
         return Status(SERVER_WRITE_ERROR, err_msg);
     }
     return Status::OK();
@@ -106,7 +106,7 @@ SegmentWriter::WriteVectorIndex(const std::string& location) {
         default_codec.GetVectorIndexFormat()->write(fs_ptr_, location, segment_ptr_->vector_index_ptr_);
     } catch (std::exception& e) {
         std::string err_msg = "Failed to write vector index: " + std::string(e.what());
-        ENGINE_LOG_ERROR << err_msg;
+        LOG_ENGINE_ERROR_ << err_msg;
         return Status(SERVER_WRITE_ERROR, err_msg);
     }
     return Status::OK();
@@ -136,7 +136,7 @@ SegmentWriter::WriteBloomFilter() {
         recorder.RecordSection("Writing bloom filter");
     } catch (std::exception& e) {
         std::string err_msg = "Failed to write vectors: " + std::string(e.what());
-        ENGINE_LOG_ERROR << err_msg;
+        LOG_ENGINE_ERROR_ << err_msg;
         return Status(SERVER_WRITE_ERROR, err_msg);
     }
     return Status::OK();
@@ -151,7 +151,7 @@ SegmentWriter::WriteDeletedDocs() {
         default_codec.GetDeletedDocsFormat()->write(fs_ptr_, deleted_docs_ptr);
     } catch (std::exception& e) {
         std::string err_msg = "Failed to write deleted docs: " + std::string(e.what());
-        ENGINE_LOG_ERROR << err_msg;
+        LOG_ENGINE_ERROR_ << err_msg;
         return Status(SERVER_WRITE_ERROR, err_msg);
     }
     return Status::OK();
@@ -165,7 +165,7 @@ SegmentWriter::WriteDeletedDocs(const DeletedDocsPtr& deleted_docs) {
         default_codec.GetDeletedDocsFormat()->write(fs_ptr_, deleted_docs);
     } catch (std::exception& e) {
         std::string err_msg = "Failed to write deleted docs: " + std::string(e.what());
-        ENGINE_LOG_ERROR << err_msg;
+        LOG_ENGINE_ERROR_ << err_msg;
         return Status(SERVER_WRITE_ERROR, err_msg);
     }
     return Status::OK();
@@ -179,7 +179,7 @@ SegmentWriter::WriteBloomFilter(const IdBloomFilterPtr& id_bloom_filter_ptr) {
         default_codec.GetIdBloomFilterFormat()->write(fs_ptr_, id_bloom_filter_ptr);
     } catch (std::exception& e) {
         std::string err_msg = "Failed to write bloom filter: " + std::string(e.what());
-        ENGINE_LOG_ERROR << err_msg;
+        LOG_ENGINE_ERROR_ << err_msg;
         return Status(SERVER_WRITE_ERROR, err_msg);
     }
     return Status::OK();
@@ -203,7 +203,7 @@ SegmentWriter::Merge(const std::string& dir_to_merge, const std::string& name) {
         return Status(DB_ERROR, "Cannot Merge Self");
     }
 
-    ENGINE_LOG_DEBUG << "Merging from " << dir_to_merge << " to " << fs_ptr_->operation_ptr_->GetDirectory();
+    LOG_ENGINE_DEBUG_ << "Merging from " << dir_to_merge << " to " << fs_ptr_->operation_ptr_->GetDirectory();
 
     TimeRecorder recorder("SegmentWriter::Merge");
 
@@ -214,7 +214,7 @@ SegmentWriter::Merge(const std::string& dir_to_merge, const std::string& name) {
         status = segment_reader_to_merge.Load();
         if (!status.ok()) {
             std::string msg = "Failed to load segment from " + dir_to_merge;
-            ENGINE_LOG_ERROR << msg;
+            LOG_ENGINE_ERROR_ << msg;
             return Status(DB_ERROR, msg);
         }
     }
@@ -238,7 +238,7 @@ SegmentWriter::Merge(const std::string& dir_to_merge, const std::string& name) {
     auto rows = segment_to_merge->vectors_ptr_->GetCount();
     recorder.RecordSection("Adding " + std::to_string(rows) + " vectors and uids");
 
-    ENGINE_LOG_DEBUG << "Merging completed from " << dir_to_merge << " to " << fs_ptr_->operation_ptr_->GetDirectory();
+    LOG_ENGINE_DEBUG_ << "Merging completed from " << dir_to_merge << " to " << fs_ptr_->operation_ptr_->GetDirectory();
 
     return Status::OK();
 }

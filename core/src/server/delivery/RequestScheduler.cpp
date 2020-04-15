@@ -53,7 +53,7 @@ RequestScheduler::Stop() {
         return;
     }
 
-    SERVER_LOG_INFO << "Scheduler gonna stop...";
+    LOG_SERVER_INFO_ << "Scheduler gonna stop...";
     {
         std::lock_guard<std::mutex> lock(queue_mtx_);
         for (auto& iter : request_groups_) {
@@ -71,7 +71,7 @@ RequestScheduler::Stop() {
     request_groups_.clear();
     execute_threads_.clear();
     stopped_ = true;
-    SERVER_LOG_INFO << "Scheduler stopped";
+    LOG_SERVER_INFO_ << "Scheduler stopped";
 }
 
 Status
@@ -90,7 +90,7 @@ RequestScheduler::ExecuteRequest(const BaseRequestPtr& request_ptr) {
     fiu_do_on("RequestScheduler.ExecuteRequest.push_queue_fail", status = Status(SERVER_INVALID_ARGUMENT, ""));
 
     if (!status.ok()) {
-        SERVER_LOG_ERROR << "Put request to queue failed with code: " << status.ToString();
+        LOG_SERVER_ERROR_ << "Put request to queue failed with code: " << status.ToString();
         request_ptr->Done();
         return status;
     }
@@ -109,6 +109,7 @@ RequestScheduler::ExecuteRequest(const BaseRequestPtr& request_ptr) {
 
 void
 RequestScheduler::TakeToExecute(RequestQueuePtr request_queue) {
+    SetThreadName("reqsched_thread");
     if (request_queue == nullptr) {
         return;
     }
@@ -116,7 +117,7 @@ RequestScheduler::TakeToExecute(RequestQueuePtr request_queue) {
     while (true) {
         BaseRequestPtr request = request_queue->TakeRequest();
         if (request == nullptr) {
-            SERVER_LOG_ERROR << "Take null from request queue, stop thread";
+            LOG_SERVER_ERROR_ << "Take null from request queue, stop thread";
             break;  // stop the thread
         }
 
@@ -126,10 +127,10 @@ RequestScheduler::TakeToExecute(RequestQueuePtr request_queue) {
             fiu_do_on("RequestScheduler.TakeToExecute.throw_std_exception", throw std::exception());
             fiu_do_on("RequestScheduler.TakeToExecute.execute_fail", status = Status(SERVER_INVALID_ARGUMENT, ""));
             if (!status.ok()) {
-                SERVER_LOG_ERROR << "Request failed with code: " << status.ToString();
+                LOG_SERVER_ERROR_ << "Request failed with code: " << status.ToString();
             }
         } catch (std::exception& ex) {
-            SERVER_LOG_ERROR << "Request failed to execute: " << ex.what();
+            LOG_SERVER_ERROR_ << "Request failed to execute: " << ex.what();
         }
     }
 }
@@ -152,7 +153,7 @@ RequestScheduler::PutToQueue(const BaseRequestPtr& request_ptr) {
 
         fiu_do_on("RequestScheduler.PutToQueue.push_null_thread", execute_threads_.push_back(nullptr));
         execute_threads_.push_back(thread);
-        SERVER_LOG_INFO << "Create new thread for request group: " << group_name;
+        LOG_SERVER_INFO_ << "Create new thread for request group: " << group_name;
     }
 
     return Status::OK();

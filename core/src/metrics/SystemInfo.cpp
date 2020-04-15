@@ -63,13 +63,13 @@ SystemInfo::Init() {
     nvmlresult = nvmlInit();
     fiu_do_on("SystemInfo.Init.nvmInit_fail", nvmlresult = NVML_ERROR_NOT_FOUND);
     if (NVML_SUCCESS != nvmlresult) {
-        SERVER_LOG_ERROR << "System information initilization failed";
+        LOG_SERVER_ERROR_ << "System information initilization failed";
         return;
     }
     nvmlresult = nvmlDeviceGetCount(&num_device_);
     fiu_do_on("SystemInfo.Init.nvm_getDevice_fail", nvmlresult = NVML_ERROR_NOT_FOUND);
     if (NVML_SUCCESS != nvmlresult) {
-        SERVER_LOG_ERROR << "Unable to get devidce number";
+        LOG_SERVER_ERROR_ << "Unable to get devidce number";
         return;
     }
 #endif
@@ -158,7 +158,7 @@ SystemInfo::getTotalCpuTime(std::vector<uint64_t>& work_time_array) {
     FILE* file = fopen("/proc/stat", "r");
     fiu_do_on("SystemInfo.getTotalCpuTime.open_proc", file = NULL);
     if (file == NULL) {
-        SERVER_LOG_ERROR << "Could not open stat file";
+        LOG_SERVER_ERROR_ << "Could not open stat file";
         return total_time_array;
     }
 
@@ -170,7 +170,7 @@ SystemInfo::getTotalCpuTime(std::vector<uint64_t>& work_time_array) {
         char* ret = fgets(buffer, sizeof(buffer) - 1, file);
         fiu_do_on("SystemInfo.getTotalCpuTime.read_proc", ret = NULL);
         if (ret == NULL) {
-            SERVER_LOG_ERROR << "Could not read stat file";
+            LOG_SERVER_ERROR_ << "Could not read stat file";
             fclose(file);
             return total_time_array;
         }
@@ -265,7 +265,7 @@ SystemInfo::CPUTemperature() {
     dir = opendir(path.c_str());
     fiu_do_on("SystemInfo.CPUTemperature.opendir", dir = NULL);
     if (!dir) {
-        SERVER_LOG_ERROR << "Could not open hwmon directory";
+        LOG_SERVER_ERROR_ << "Could not open hwmon directory";
         return result;
     }
 
@@ -283,7 +283,7 @@ SystemInfo::CPUTemperature() {
                 FILE* file = fopen(object.c_str(), "r");
                 fiu_do_on("SystemInfo.CPUTemperature.openfile", file = NULL);
                 if (file == nullptr) {
-                    SERVER_LOG_ERROR << "Could not open temperature file";
+                    LOG_SERVER_ERROR_ << "Could not open temperature file";
                     return result;
                 }
                 float temp;

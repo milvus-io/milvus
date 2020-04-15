@@ -84,7 +84,7 @@ CreateCollectionPath(const DBMetaOptions& options, const std::string& collection
     std::string table_path = db_path + TABLES_FOLDER + collection_id;
     auto status = server::CommonUtil::CreateDirectory(table_path);
     if (!status.ok()) {
-        ENGINE_LOG_ERROR << status.message();
+        LOG_ENGINE_ERROR_ << status.message();
         return status;
     }
 
@@ -93,7 +93,7 @@ CreateCollectionPath(const DBMetaOptions& options, const std::string& collection
         status = server::CommonUtil::CreateDirectory(table_path);
         fiu_do_on("CreateCollectionPath.creat_slave_path", status = Status(DB_INVALID_PATH, ""));
         if (!status.ok()) {
-            ENGINE_LOG_ERROR << status.message();
+            LOG_ENGINE_ERROR_ << status.message();
             return status;
         }
     }
@@ -110,10 +110,10 @@ DeleteCollectionPath(const DBMetaOptions& options, const std::string& collection
         std::string table_path = path + TABLES_FOLDER + collection_id;
         if (force) {
             boost::filesystem::remove_all(table_path);
-            ENGINE_LOG_DEBUG << "Remove collection folder: " << table_path;
+            LOG_ENGINE_DEBUG_ << "Remove collection folder: " << table_path;
         } else if (boost::filesystem::exists(table_path) && boost::filesystem::is_empty(table_path)) {
             boost::filesystem::remove_all(table_path);
-            ENGINE_LOG_DEBUG << "Remove collection folder: " << table_path;
+            LOG_ENGINE_DEBUG_ << "Remove collection folder: " << table_path;
         }
     }
 
@@ -141,7 +141,7 @@ CreateCollectionFilePath(const DBMetaOptions& options, meta::SegmentSchema& tabl
     auto status = server::CommonUtil::CreateDirectory(parent_path);
     fiu_do_on("CreateCollectionFilePath.fail_create", status = Status(DB_INVALID_PATH, ""));
     if (!status.ok()) {
-        ENGINE_LOG_ERROR << status.message();
+        LOG_ENGINE_ERROR_ << status.message();
         return status;
     }
 
@@ -181,7 +181,7 @@ GetCollectionFilePath(const DBMetaOptions& options, meta::SegmentSchema& table_f
 
     std::string msg = "Collection file doesn't exist: " + file_path;
     if (table_file.file_size_ > 0) {  // no need to pop error for empty file
-        ENGINE_LOG_ERROR << msg << " in path: " << options.path_ << " for collection: " << table_file.collection_id_;
+        LOG_ENGINE_ERROR_ << msg << " in path: " << options.path_ << " for collection: " << table_file.collection_id_;
     }
 
     return Status(DB_ERROR, msg);

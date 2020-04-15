@@ -247,7 +247,7 @@ CommonUtil::GetCurrentTimeStr() {
 void
 CommonUtil::EraseFromCache(const std::string& item_key) {
     if (item_key.empty()) {
-        SERVER_LOG_ERROR << "Empty key cannot be erased from cache";
+        LOG_SERVER_ERROR_ << "Empty key cannot be erased from cache";
         return;
     }
 

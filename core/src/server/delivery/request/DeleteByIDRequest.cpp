@@ -72,7 +72,7 @@ DeleteByIDRequest::OnExecute() {
             collection_schema.engine_type_ == (int32_t)engine::EngineType::SPTAG_KDT) {
             std::string err_msg =
                 "Index type " + std::to_string(collection_schema.engine_type_) + " does not support delete operation";
-            SERVER_LOG_ERROR << err_msg;
+            LOG_SERVER_ERROR_ << err_msg;
             return Status(SERVER_UNSUPPORTED_ERROR, err_msg);
         }
 

@@ -54,7 +54,7 @@ MemTableFile::CreateCollectionFile() {
         table_file_schema_ = table_file_schema;
     } else {
         std::string err_msg = "MemTableFile::CreateCollectionFile failed: " + status.ToString();
-        ENGINE_LOG_ERROR << err_msg;
+        LOG_ENGINE_ERROR_ << err_msg;
     }
     return status;
 }
@@ -65,7 +65,7 @@ MemTableFile::Add(const VectorSourcePtr& source) {
         std::string err_msg =
             "MemTableFile::Add: table_file_schema dimension = " + std::to_string(table_file_schema_.dimension_) +
             ", collection_id = " + table_file_schema_.collection_id_;
-        ENGINE_LOG_ERROR << LogOut("[%s][%ld]", "insert", 0) << err_msg;
+        LOG_ENGINE_ERROR_ << LogOut("[%s][%ld]", "insert", 0) << err_msg;
         return Status(DB_ERROR, "Not able to create collection file");
     }
 
@@ -160,7 +160,7 @@ MemTableFile::Serialize(uint64_t wal_lsn) {
 
     auto status = segment_writer_ptr_->Serialize();
     if (!status.ok()) {
-        ENGINE_LOG_ERROR << "Failed to serialize segment: " << table_file_schema_.segment_id_;
+        LOG_ENGINE_ERROR_ << "Failed to serialize segment: " << table_file_schema_.segment_id_;
 
         /* Can't mark it as to_delete because data is stored in this mem collection file. Any further flush
          * will try to serialize the same mem collection file and it won't be able to find the directory
@@ -168,7 +168,7 @@ MemTableFile::Serialize(uint64_t wal_lsn) {
          *
         table_file_schema_.file_type_ = meta::SegmentSchema::TO_DELETE;
         meta_->UpdateCollectionFile(table_file_schema_);
-        ENGINE_LOG_DEBUG << "Failed to serialize segment, mark file: " << table_file_schema_.file_id_
+        LOG_ENGINE_DEBUG_ << "Failed to serialize segment, mark file: " << table_file_schema_.file_id_
                          << " to to_delete";
         */
         return status;
@@ -194,8 +194,8 @@ MemTableFile::Serialize(uint64_t wal_lsn) {
 
     status = meta_->UpdateCollectionFile(table_file_schema_);
 
-    ENGINE_LOG_DEBUG << "New " << ((table_file_schema_.file_type_ == meta::SegmentSchema::RAW) ? "raw" : "to_index")
-                     << " file " << table_file_schema_.file_id_ << " of size " << size << " bytes, lsn = " << wal_lsn;
+    LOG_ENGINE_DEBUG_ << "New " << ((table_file_schema_.file_type_ == meta::SegmentSchema::RAW) ? "raw" : "to_index")
+                      << " file " << table_file_schema_.file_id_ << " of size " << size << " bytes, lsn = " << wal_lsn;
 
     // TODO(zhiru): cache
     /*

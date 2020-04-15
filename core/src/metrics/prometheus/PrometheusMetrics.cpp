@@ -49,7 +49,7 @@ PrometheusMetrics::Init() {
         // Pushgateway Registry
         gateway_->RegisterCollectable(registry_);
     } catch (std::exception& ex) {
-        SERVER_LOG_ERROR << "Failed to connect prometheus server: " << std::string(ex.what());
+        LOG_SERVER_ERROR_ << "Failed to connect prometheus server: " << std::string(ex.what());
         return Status(SERVER_UNEXPECTED_ERROR, ex.what());
     }
 

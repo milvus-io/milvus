@@ -37,13 +37,13 @@ DefaultVectorIndexFormat::read_internal(const storage::FSHandlerPtr& fs_ptr, con
 
     recorder.RecordSection("Start");
     if (!fs_ptr->reader_ptr_->open(path)) {
-        ENGINE_LOG_ERROR << "Fail to open vector index: " << path;
+        LOG_ENGINE_ERROR_ << "Fail to open vector index: " << path;
         return nullptr;
     }
 
     int64_t length = fs_ptr->reader_ptr_->length();
     if (length <= 0) {
-        ENGINE_LOG_ERROR << "Invalid vector index length: " << path;
+        LOG_ENGINE_ERROR_ << "Invalid vector index length: " << path;
         return nullptr;
     }
 
@@ -55,7 +55,7 @@ DefaultVectorIndexFormat::read_internal(const storage::FSHandlerPtr& fs_ptr, con
     rp += sizeof(current_type);
     fs_ptr->reader_ptr_->seekg(rp);
 
-    ENGINE_LOG_DEBUG << "Start to read_index(" << path << ") length: " << length << " bytes";
+    LOG_ENGINE_DEBUG_ << "Start to read_index(" << path << ") length: " << length << " bytes";
     while (rp < length) {
         size_t meta_length;
         fs_ptr->reader_ptr_->read(&meta_length, sizeof(meta_length));
@@ -85,7 +85,7 @@ DefaultVectorIndexFormat::read_internal(const storage::FSHandlerPtr& fs_ptr, con
 
     double span = recorder.RecordSection("End");
     double rate = length * 1000000.0 / span / 1024 / 1024;
-    ENGINE_LOG_DEBUG << "read_index(" << path << ") rate " << rate << "MB/s";
+    LOG_ENGINE_DEBUG_ << "read_index(" << path << ") rate " << rate << "MB/s";
 
     knowhere::VecIndexFactory& vec_index_factory = knowhere::VecIndexFactory::GetInstance();
     auto index =
@@ -94,7 +94,7 @@ DefaultVectorIndexFormat::read_internal(const storage::FSHandlerPtr& fs_ptr, con
         index->Load(load_data_list);
         index->SetIndexSize(length);
     } else {
-        ENGINE_LOG_ERROR << "Fail to create vector index: " << path;
+        LOG_ENGINE_ERROR_ << "Fail to create vector index: " << path;
     }
 
     return index;
@@ -108,7 +108,7 @@ DefaultVectorIndexFormat::read(const storage::FSHandlerPtr& fs_ptr, const std::s
     std::string dir_path = fs_ptr->operation_ptr_->GetDirectory();
     if (!boost::filesystem::is_directory(dir_path)) {
         std::string err_msg = "Directory: " + dir_path + "does not exist";
-        ENGINE_LOG_ERROR << err_msg;
+        LOG_ENGINE_ERROR_ << err_msg;
         throw Exception(SERVER_INVALID_ARGUMENT, err_msg);
     }
 
@@ -132,7 +132,7 @@ DefaultVectorIndexFormat::write(const storage::FSHandlerPtr& fs_ptr, const std::
 
     recorder.RecordSection("Start");
     if (!fs_ptr->writer_ptr_->open(location)) {
-        ENGINE_LOG_ERROR << "Fail to open vector index: " << location;
+        LOG_ENGINE_ERROR_ << "Fail to open vector index: " << location;
         return;
     }
 
@@ -153,7 +153,7 @@ DefaultVectorIndexFormat::write(const storage::FSHandlerPtr& fs_ptr, const std::
 
     double span = recorder.RecordSection("End");
     double rate = fs_ptr->writer_ptr_->length() * 1000000.0 / span / 1024 / 1024;
-    ENGINE_LOG_DEBUG << "write_index(" << location << ") rate " << rate << "MB/s";
+    LOG_ENGINE_DEBUG_ << "write_index(" << location << ") rate " << rate << "MB/s";
 }
 
 }  // namespace codec

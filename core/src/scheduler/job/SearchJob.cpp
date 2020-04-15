@@ -28,7 +28,7 @@ SearchJob::AddIndexFile(const SegmentSchemaPtr& index_file) {
         return false;
     }
 
-    SERVER_LOG_DEBUG << LogOut("[%s][%ld] SearchJob %ld add index file: %ld", "search", 0, id(), index_file->id_);
+    LOG_SERVER_DEBUG_ << LogOut("[%s][%ld] SearchJob %ld add index file: %ld", "search", 0, id(), index_file->id_);
 
     index_files_[index_file->id_] = index_file;
     return true;
@@ -38,7 +38,7 @@ void
 SearchJob::WaitResult() {
     std::unique_lock<std::mutex> lock(mutex_);
     cv_.wait(lock, [this] { return index_files_.empty(); });
-    SERVER_LOG_DEBUG << LogOut("[%s][%ld] SearchJob %ld all done", "search", 0, id());
+    LOG_SERVER_DEBUG_ << LogOut("[%s][%ld] SearchJob %ld all done", "search", 0, id());
 }
 
 void
@@ -49,7 +49,7 @@ SearchJob::SearchDone(size_t index_id) {
         cv_.notify_all();
     }
 
-    SERVER_LOG_DEBUG << LogOut("[%s][%ld] SearchJob %ld finish index file: %ld", "search", 0, id(), index_id);
+    LOG_SERVER_DEBUG_ << LogOut("[%s][%ld] SearchJob %ld finish index file: %ld", "search", 0, id(), index_id);
 }
 
 ResultIds&

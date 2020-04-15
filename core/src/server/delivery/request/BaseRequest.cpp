@@ -66,7 +66,7 @@ RequestGroup(BaseRequest::RequestType type) {
 
     auto iter = s_map_type_group.find(type);
     if (iter == s_map_type_group.end()) {
-        SERVER_LOG_ERROR << "Unsupported request type: " << type;
+        LOG_SERVER_ERROR_ << "Unsupported request type: " << type;
         throw Exception(SERVER_NOT_IMPLEMENT, "request group undefined");
     }
     return iter->second;
@@ -125,7 +125,7 @@ void
 BaseRequest::set_status(const Status& status) {
     status_ = status;
     if (!status_.ok()) {
-        SERVER_LOG_ERROR << status_.message();
+        LOG_SERVER_ERROR_ << status_.message();
     }
 }
 
