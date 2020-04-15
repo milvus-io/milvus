@@ -1018,6 +1018,49 @@ TEST_F(RpcHandlerTest, HYBRID_TEST) {
     ASSERT_EQ(entity_ids.entity_id_array_size(), row_num);
 
     // TODO(yukun): Hybrid Search
+    uint64_t nq = 10;
+    uint64_t topk = 10;
+    milvus::grpc::HSearchParam search_param;
+    auto general_query = search_param.mutable_general_query();
+    auto boolean_query_1 = general_query->mutable_boolean_query();
+    boolean_query_1->set_occur(milvus::grpc::Occur::MUST);
+    auto general_query_1 = boolean_query_1->add_general_query();
+    auto boolean_query_2 = general_query_1->mutable_boolean_query();
+    auto term_query = boolean_query_2->add_general_query()->mutable_term_query();
+    term_query->set_field_name("field_0");
+    for (uint64_t i = 0; i < nq; ++i) {
+        auto value = std::to_string(i + nq);
+        auto term = term_query->add_values();
+        *term = value;
+    }
+    auto vector_query = boolean_query_2->add_general_query()->mutable_vector_query();
+    vector_query->set_field_name("field_1");
+    vector_query->set_topk(topk);
+    vector_query->set_query_boost(2);
+    std::vector<std::vector<float>> query_vector;
+    query_vector.resize(nq);
+    for (uint64_t i = 0; i < nq; ++i) {
+        query_vector[i].resize(dimension);
+        for (uint64_t j = 0; j < dimension; ++j) {
+            query_vector[i][j] = (float)((j + 1) / (i + dimension));
+        }
+    }
+    for (auto record : query_vector) {
+        auto row_record = vector_query->add_records();
+        CopyRowRecord(row_record, record);
+    }
+    auto extra_param = vector_query->add_extra_params();
+    extra_param->set_key("params");
+    milvus::json param = {{"nprobe", 16}};
+    extra_param->set_value(param.dump());
+
+    search_param.set_collection_name("test_hybrid");
+    auto search_extra_param = search_param.add_extra_params();
+    search_extra_param->set_key("params");
+    search_extra_param->set_value("");
+
+    milvus::grpc::TopKQueryResult topk_query_result;
+    handler->HybridSearch(&context, &search_param, &topk_query_result);
 }
 
 //////////////////////////////////////////////////////////////////////
