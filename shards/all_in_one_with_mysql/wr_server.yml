@@ -42,8 +42,8 @@ server_config:
 #                      | Keep 'dialect://:@:/', 'dialect' can be either 'sqlite' or |            |                 |
 #                      | 'mysql', replace other texts with real values.             |            |                 |
 #----------------------+------------------------------------------------------------+------------+-----------------+
-# preload_table        | A comma-separated list of table names that need to be pre- | StringList |                 |
-#                      | loaded when Milvus server starts up.                       |            |                 |
+# preload_collection   | A comma-separated list of collection names that need to    | StringList |                 |
+#                      | be pre-loaded when Milvus server starts up.                |            |                 |
 #                      | '*' means preload all existing tables (single-quote or     |            |                 |
 #                      | double-quote required).                                    |            |                 |
 #----------------------+------------------------------------------------------------+------------+-----------------+
@@ -53,7 +53,7 @@ server_config:
 #----------------------+------------------------------------------------------------+------------+-----------------+
 db_config:
   backend_url: mysql://root:milvusroot@milvus-mysql:3306/milvus
-  preload_table:
+  preload_collection:
   auto_flush_interval: 1
 
 #----------------------+------------------------------------------------------------+------------+-----------------+

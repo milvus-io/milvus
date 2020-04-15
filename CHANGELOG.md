@@ -2,7 +2,7 @@
 
 Please mark all change in change log and use the issue from GitHub
 
-# Milvus 0.8.0 (2020-04-14)
+# Milvus 0.8.0 (2020-04-15)
 
 ## Bug
 -   \#1276 SQLite throw exception after create 50000+ partitions in a table
