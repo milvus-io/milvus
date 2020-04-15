@@ -783,8 +783,13 @@ GrpcRequestHandler::CreateHybridCollection(::grpc::ServerContext* context, const
             field_types.emplace_back(type);
         }
         // Currently only one extra_param
-        auto extra_params = std::make_pair(request->fields(i).name(), request->fields(i).extra_params(0).value());
-        field_params.emplace_back(extra_params);
+        if (request->fields(i).extra_params_size() != 0) {
+            auto extra_params = std::make_pair(request->fields(i).name(), request->fields(i).extra_params(0).value());
+            field_params.emplace_back(extra_params);
+        } else {
+            auto extra_params = std::make_pair(request->fields(i).name(), "");
+            field_params.emplace_back(extra_params);
+        }
     }
 
     Status status = request_handler_.CreateHybridCollection(GetContext(context), request->collection_name(),

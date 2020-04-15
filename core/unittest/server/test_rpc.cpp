@@ -17,10 +17,10 @@
 
 #include "config/Config.h"
 #include "server/Server.h"
-#include "server/grpc_impl/GrpcRequestHandler.h"
+#include "server/delivery/RequestHandler.h"
 #include "server/delivery/RequestScheduler.h"
 #include "server/delivery/request/BaseRequest.h"
-#include "server/delivery/RequestHandler.h"
+#include "server/grpc_impl/GrpcRequestHandler.h"
 #include "src/version.h"
 
 #include "grpc/gen-milvus/milvus.grpc.pb.h"
@@ -28,11 +28,11 @@
 #include "scheduler/ResourceFactory.h"
 #include "scheduler/SchedInst.h"
 #include "server/DBWrapper.h"
-#include "utils/CommonUtil.h"
 #include "server/grpc_impl/GrpcServer.h"
+#include "utils/CommonUtil.h"
 
-#include <fiu-local.h>
 #include <fiu-control.h>
+#include <fiu-local.h>
 
 namespace {
 
@@ -58,8 +58,7 @@ CopyBinRowRecord(::milvus::grpc::RowRecord* target, const std::vector<uint8_t>& 
 }
 
 void
-SearchFunc(std::shared_ptr<milvus::server::grpc::GrpcRequestHandler> handler,
-           ::grpc::ServerContext* context,
+SearchFunc(std::shared_ptr<milvus::server::grpc::GrpcRequestHandler> handler, ::grpc::ServerContext* context,
            std::shared_ptr<::milvus::grpc::SearchParam> request,
            std::shared_ptr<::milvus::grpc::TopKQueryResult> result) {
     handler->Search(context, request.get(), result.get());
@@ -444,7 +443,7 @@ TEST_F(RpcHandlerTest, COMBINE_SEARCH_TEST) {
     collection_schema.set_collection_name(collection_name);
     collection_schema.set_dimension(COLLECTION_DIM);
     collection_schema.set_index_file_size(INDEX_FILE_SIZE);
-    collection_schema.set_metric_type(1); // L2 metric
+    collection_schema.set_metric_type(1);  // L2 metric
     ::milvus::grpc::Status status;
     handler->CreateCollection(&context, &collection_schema, &status);
     ASSERT_EQ(status.error_code(), 0);
@@ -499,8 +498,7 @@ TEST_F(RpcHandlerTest, COMBINE_SEARCH_TEST) {
     for (int i = 0; i < QUERY_COUNT; i++) {
         ResultPtr result_ptr = std::make_shared<::milvus::grpc::TopKQueryResult>();
         result_array.push_back(result_ptr);
-        ThreadPtr
-            thread = std::make_shared<std::thread>(SearchFunc, handler, &context, request_array[i], result_ptr);
+        ThreadPtr thread = std::make_shared<std::thread>(SearchFunc, handler, &context, request_array[i], result_ptr);
         thread_list.emplace_back(thread);
         std::this_thread::sleep_for(std::chrono::milliseconds(5));
     }
@@ -546,7 +544,7 @@ TEST_F(RpcHandlerTest, COMBINE_SEARCH_BINARY_TEST) {
     collection_schema.set_collection_name(collection_name);
     collection_schema.set_dimension(COLLECTION_DIM);
     collection_schema.set_index_file_size(INDEX_FILE_SIZE);
-    collection_schema.set_metric_type(5); // tanimoto metric
+    collection_schema.set_metric_type(5);  // tanimoto metric
     ::milvus::grpc::Status status;
     handler->CreateCollection(&context, &collection_schema, &status);
     ASSERT_EQ(status.error_code(), 0);
@@ -601,8 +599,7 @@ TEST_F(RpcHandlerTest, COMBINE_SEARCH_BINARY_TEST) {
     for (int i = 0; i < QUERY_COUNT; i++) {
         ResultPtr result_ptr = std::make_shared<::milvus::grpc::TopKQueryResult>();
         result_array.push_back(result_ptr);
-        ThreadPtr
-            thread = std::make_shared<std::thread>(SearchFunc, handler, &context, request_array[i], result_ptr);
+        ThreadPtr thread = std::make_shared<std::thread>(SearchFunc, handler, &context, request_array[i], result_ptr);
         thread_list.emplace_back(thread);
         std::this_thread::sleep_for(std::chrono::milliseconds(5));
     }
@@ -960,6 +957,69 @@ TEST_F(RpcHandlerTest, CMD_TEST) {
     handler->Cmd(&context, &command, &reply);
 }
 
+TEST_F(RpcHandlerTest, HYBRID_TEST) {
+    ::grpc::ServerContext context;
+    milvus::grpc::Mapping mapping;
+    milvus::grpc::Status response;
+
+    uint64_t row_num = 1000;
+    uint64_t dimension = 128;
+
+    // Create Hybrid Collection
+    mapping.set_collection_name("test_hybrid");
+    auto field_0 = mapping.add_fields();
+    field_0->set_name("field_0");
+    field_0->mutable_type()->set_data_type(::milvus::grpc::DataType::INT64);
+
+    auto field_1 = mapping.add_fields();
+    field_1->mutable_type()->mutable_vector_param()->set_dimension(128);
+    field_1->set_name("field_1");
+
+    handler->CreateHybridCollection(&context, &mapping, &response);
+
+    // Insert Entities
+    milvus::grpc::HInsertParam insert_param;
+    milvus::grpc::HEntityIDs entity_ids;
+    insert_param.set_collection_name("test_hybrid");
+
+    std::vector<std::string> numerica_value;
+    numerica_value.resize(row_num);
+    for (uint64_t i = 0; i < row_num; i++) {
+        numerica_value[i] = std::to_string(i);
+    }
+    auto entity = insert_param.mutable_entities();
+    auto field_name_0 = entity->add_field_names();
+    *field_name_0 = "field_0";
+    auto field_name_1 = entity->add_field_names();
+    *field_name_1 = "field_1";
+
+    auto records_0 = entity->add_attr_records();
+    for (auto value : numerica_value) {
+        auto record = records_0->add_value();
+        *record = value;
+    }
+
+    std::vector<std::vector<float>> vector_field;
+    vector_field.resize(row_num);
+    for (uint64_t i = 0; i < row_num; ++i) {
+        vector_field[i].resize(dimension);
+        for (uint64_t j = 0; j < dimension; ++j) {
+            vector_field[i][j] = (float)((i + 10) / (j + 20));
+        }
+    }
+    auto vector_record = entity->add_result_values();
+    for (uint64_t i = 0; i < row_num; ++i) {
+        auto record = vector_record->mutable_vector_value()->add_value();
+        auto vector_data = record->mutable_float_data();
+        vector_data->Resize(static_cast<int>(vector_field[i].size()), 0.0);
+        memcpy(vector_data->mutable_data(), vector_field[i].data(), vector_field[i].size() * sizeof(float));
+    }
+    handler->InsertEntity(&context, &insert_param, &entity_ids);
+    ASSERT_EQ(entity_ids.entity_id_array_size(), row_num);
+
+    // TODO(yukun): Hybrid Search
+}
+
 //////////////////////////////////////////////////////////////////////
 namespace {
 class DummyRequest : public milvus::server::BaseRequest {
@@ -1005,8 +1065,7 @@ class AsyncDummyRequest : public milvus::server::BaseRequest {
 
  public:
     AsyncDummyRequest()
-        : BaseRequest(std::make_shared<milvus::server::Context>("dummy_request_id2"),
-                      milvus::server::BaseRequest::kCmd,
+        : BaseRequest(std::make_shared<milvus::server::Context>("dummy_request_id2"), milvus::server::BaseRequest::kCmd,
                       true) {
     }
 };
@@ -1017,8 +1076,8 @@ TEST_F(RpcSchedulerTest, BASE_TASK_TEST) {
     ASSERT_TRUE(status.ok());
 
     milvus::server::RequestScheduler::GetInstance().Start();
-//    milvus::server::RequestScheduler::GetInstance().Stop();
-//    milvus::server::RequestScheduler::GetInstance().Start();
+    //    milvus::server::RequestScheduler::GetInstance().Stop();
+    //    milvus::server::RequestScheduler::GetInstance().Start();
 
     milvus::server::BaseRequestPtr base_task_ptr = DummyRequest::Create();
     milvus::server::RequestScheduler::ExecRequest(base_task_ptr);
@@ -1030,11 +1089,11 @@ TEST_F(RpcSchedulerTest, BASE_TASK_TEST) {
     milvus::server::RequestScheduler::GetInstance().ExecuteRequest(request_ptr);
     fiu_disable("RequestScheduler.ExecuteRequest.push_queue_fail");
 
-//    std::string dummy2 = "dql2";
-//    milvus::server::BaseRequestPtr base_task_ptr2 = DummyRequest::Create(dummy2);
-//    fiu_enable("RequestScheduler.PutToQueue.null_queue", 1, NULL, 0);
-//    milvus::server::RequestScheduler::GetInstance().ExecuteRequest(base_task_ptr2);
-//    fiu_disable("RequestScheduler.PutToQueue.null_queue");
+    //    std::string dummy2 = "dql2";
+    //    milvus::server::BaseRequestPtr base_task_ptr2 = DummyRequest::Create(dummy2);
+    //    fiu_enable("RequestScheduler.PutToQueue.null_queue", 1, NULL, 0);
+    //    milvus::server::RequestScheduler::GetInstance().ExecuteRequest(base_task_ptr2);
+    //    fiu_disable("RequestScheduler.PutToQueue.null_queue");
 
     milvus::server::BaseRequestPtr base_task_ptr3 = DummyRequest::Create();
     fiu_enable("RequestScheduler.TakeToExecute.throw_std_exception", 1, NULL, 0);
@@ -1068,7 +1127,7 @@ TEST_F(RpcSchedulerTest, BASE_TASK_TEST) {
 }
 
 TEST(RpcTest, RPC_SERVER_TEST) {
-    using GrpcServer =  milvus::server::grpc::GrpcServer;
+    using GrpcServer = milvus::server::grpc::GrpcServer;
     GrpcServer& server = GrpcServer::GetInstance();
 
     fiu_init(0);
