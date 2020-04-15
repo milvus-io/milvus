@@ -50,7 +50,7 @@ MXLogBuffer::~MXLogBuffer() {
  */
 bool
 MXLogBuffer::Init(uint64_t start_lsn, uint64_t end_lsn) {
-    WAL_LOG_DEBUG << "start_lsn " << start_lsn << " end_lsn " << end_lsn;
+    LOG_WAL_DEBUG_ << "start_lsn " << start_lsn << " end_lsn " << end_lsn;
 
     ParserLsn(start_lsn, mxlog_buffer_reader_.file_no, mxlog_buffer_reader_.buf_offset);
     ParserLsn(end_lsn, mxlog_buffer_writer_.file_no, mxlog_buffer_writer_.buf_offset);
@@ -72,7 +72,7 @@ MXLogBuffer::Init(uint64_t start_lsn, uint64_t end_lsn) {
             file_handler.SetFileName(ToFileName(i));
             auto file_size = file_handler.GetFileSize();
             if (file_size == 0) {
-                WAL_LOG_ERROR << "bad wal file " << i;
+                LOG_WAL_ERROR_ << "bad wal file " << i;
                 return false;
             }
             if (file_size > buffer_size_need) {
@@ -85,7 +85,7 @@ MXLogBuffer::Init(uint64_t start_lsn, uint64_t end_lsn) {
 
         if (buffer_size_need > mxlog_buffer_size_) {
             mxlog_buffer_size_ = buffer_size_need;
-            WAL_LOG_INFO << "recovery will need more buffer, buffer size changed " << mxlog_buffer_size_;
+            LOG_WAL_INFO_ << "recovery will need more buffer, buffer size changed " << mxlog_buffer_size_;
         }
     }
 
@@ -104,14 +104,14 @@ MXLogBuffer::Init(uint64_t start_lsn, uint64_t end_lsn) {
         } else {
             mxlog_writer_.SetFileOpenMode("r+");
             if (!mxlog_writer_.FileExists()) {
-                WAL_LOG_ERROR << "wal file not exist " << mxlog_buffer_writer_.file_no;
+                LOG_WAL_ERROR_ << "wal file not exist " << mxlog_buffer_writer_.file_no;
                 return false;
             }
 
             auto read_offset = mxlog_buffer_reader_.buf_offset;
             auto read_size = mxlog_buffer_writer_.buf_offset - mxlog_buffer_reader_.buf_offset;
             if (!mxlog_writer_.Load(buf_[0].get() + read_offset, read_offset, read_size)) {
-                WAL_LOG_ERROR << "load wal file error " << read_offset << " " << read_size;
+                LOG_WAL_ERROR_ << "load wal file error " << read_offset << " " << read_size;
                 return false;
             }
         }
@@ -135,11 +135,11 @@ MXLogBuffer::Init(uint64_t start_lsn, uint64_t end_lsn) {
         mxlog_writer_.SetFileName(ToFileName(mxlog_buffer_writer_.file_no));
         mxlog_writer_.SetFileOpenMode("r+");
         if (!mxlog_writer_.FileExists()) {
-            WAL_LOG_ERROR << "wal file not exist " << mxlog_buffer_writer_.file_no;
+            LOG_WAL_ERROR_ << "wal file not exist " << mxlog_buffer_writer_.file_no;
             return false;
         }
         if (!mxlog_writer_.Load(buf_[1].get(), 0, mxlog_buffer_writer_.buf_offset)) {
-            WAL_LOG_ERROR << "load wal file error " << mxlog_buffer_writer_.file_no;
+            LOG_WAL_ERROR_ << "load wal file error " << mxlog_buffer_writer_.file_no;
             return false;
         }
     }
@@ -151,7 +151,7 @@ MXLogBuffer::Init(uint64_t start_lsn, uint64_t end_lsn) {
 
 void
 MXLogBuffer::Reset(uint64_t lsn) {
-    WAL_LOG_DEBUG << "reset lsn " << lsn;
+    LOG_WAL_DEBUG_ << "reset lsn " << lsn;
 
     buf_[0] = BufferPtr(new char[mxlog_buffer_size_]);
     buf_[1] = BufferPtr(new char[mxlog_buffer_size_]);
@@ -206,7 +206,7 @@ MXLogBuffer::Append(MXLogRecord& record) {
 
         // Reborn means close old wal file and open new wal file
         if (!mxlog_writer_.ReBorn(ToFileName(mxlog_buffer_writer_.file_no), "w")) {
-            WAL_LOG_ERROR << "ReBorn wal file error " << mxlog_buffer_writer_.file_no;
+            LOG_WAL_ERROR_ << "ReBorn wal file error " << mxlog_buffer_writer_.file_no;
             return WAL_FILE_ERROR;
         }
     }
@@ -247,7 +247,7 @@ MXLogBuffer::Append(MXLogRecord& record) {
 
     bool write_rst = mxlog_writer_.Write(current_write_buf + mxlog_buffer_writer_.buf_offset, record_size);
     if (!write_rst) {
-        WAL_LOG_ERROR << "write wal file error";
+        LOG_WAL_ERROR_ << "write wal file error";
         return WAL_FILE_ERROR;
     }
 
@@ -289,7 +289,7 @@ MXLogBuffer::Next(const uint64_t last_applied_lsn, MXLogRecord& record) {
         mxlog_reader.SetFileOpenMode("r");
         uint32_t file_size = mxlog_reader.Load(buf_[mxlog_buffer_reader_.buf_idx].get(), 0);
         if (file_size == 0) {
-            WAL_LOG_ERROR << "load wal file error " << mxlog_buffer_reader_.file_no;
+            LOG_WAL_ERROR_ << "load wal file error " << mxlog_buffer_reader_.file_no;
             return WAL_FILE_ERROR;
         }
         mxlog_buffer_reader_.max_offset = file_size;
@@ -346,29 +346,29 @@ MXLogBuffer::GetReadLsn() {
 
 bool
 MXLogBuffer::ResetWriteLsn(uint64_t lsn) {
-    WAL_LOG_INFO << "reset write lsn " << lsn;
+    LOG_WAL_INFO_ << "reset write lsn " << lsn;
 
     int32_t old_file_no = mxlog_buffer_writer_.file_no;
     ParserLsn(lsn, mxlog_buffer_writer_.file_no, mxlog_buffer_writer_.buf_offset);
     if (old_file_no == mxlog_buffer_writer_.file_no) {
-        WAL_LOG_DEBUG << "file No. is not changed";
+        LOG_WAL_DEBUG_ << "file No. is not changed";
         return true;
     }
 
     std::unique_lock<std::mutex> lck(mutex_);
     if (mxlog_buffer_writer_.file_no == mxlog_buffer_reader_.file_no) {
         mxlog_buffer_writer_.buf_idx = mxlog_buffer_reader_.buf_idx;
-        WAL_LOG_DEBUG << "file No. is the same as reader";
+        LOG_WAL_DEBUG_ << "file No. is the same as reader";
         return true;
     }
     lck.unlock();
 
     if (!mxlog_writer_.ReBorn(ToFileName(mxlog_buffer_writer_.file_no), "r+")) {
-        WAL_LOG_ERROR << "reborn file error " << mxlog_buffer_writer_.file_no;
+        LOG_WAL_ERROR_ << "reborn file error " << mxlog_buffer_writer_.file_no;
         return false;
     }
     if (!mxlog_writer_.Load(buf_[mxlog_buffer_writer_.buf_idx].get(), 0, mxlog_buffer_writer_.buf_offset)) {
-        WAL_LOG_ERROR << "load file error";
+        LOG_WAL_ERROR_ << "load file error";
         return false;
     }
 
@@ -387,7 +387,7 @@ MXLogBuffer::SetFileNoFrom(uint32_t file_no) {
             if (!file_handler.FileExists()) {
                 break;
             }
-            WAL_LOG_INFO << "Delete wal file " << file_no;
+            LOG_WAL_INFO_ << "Delete wal file " << file_no;
             file_handler.DeleteFile();
         } while (file_no > 0);
     }
@@ -402,7 +402,7 @@ MXLogBuffer::RemoveOldFiles(uint64_t flushed_lsn) {
         MXLogFileHandler file_handler(mxlog_writer_.GetFilePath());
         do {
             file_handler.SetFileName(ToFileName(file_no_from_));
-            WAL_LOG_INFO << "Delete wal file " << file_no_from_;
+            LOG_WAL_INFO_ << "Delete wal file " << file_no_from_;
             file_handler.DeleteFile();
         } while (++file_no_from_ < file_no);
     }

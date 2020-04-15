@@ -110,14 +110,14 @@ class OptimizerInst {
                     for (auto build_id : build_gpus) {
                         build_msg.append(" gpu" + std::to_string(build_id));
                     }
-                    SERVER_LOG_DEBUG << LogOut("[%s][%d] %s", "search", 0, build_msg.c_str());
+                    LOG_SERVER_DEBUG_ << LogOut("[%s][%d] %s", "search", 0, build_msg.c_str());
 
                     std::string search_msg = "Search gpu:";
                     for (auto search_id : search_gpus) {
                         search_msg.append(" gpu" + std::to_string(search_id));
                     }
                     search_msg.append(". gpu_search_threshold:" + std::to_string(gpu_search_threshold));
-                    SERVER_LOG_DEBUG << LogOut("[%s][%d] %s", "search", 0, build_msg.c_str());
+                    LOG_SERVER_DEBUG_ << LogOut("[%s][%d] %s", "search", 0, build_msg.c_str());
 
                     pass_list.push_back(std::make_shared<BuildIndexPass>());
                     pass_list.push_back(std::make_shared<FaissFlatPass>());

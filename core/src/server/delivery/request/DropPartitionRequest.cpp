@@ -52,7 +52,7 @@ DropPartitionRequest::OnExecute() {
     // step 2: check partition tag
     if (partition_tag == milvus::engine::DEFAULT_PARTITON_TAG) {
         std::string msg = "Default partition cannot be dropped.";
-        SERVER_LOG_ERROR << msg;
+        LOG_SERVER_ERROR_ << msg;
         return Status(SERVER_INVALID_COLLECTION_NAME, msg);
     }
 

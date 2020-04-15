@@ -73,6 +73,7 @@ GrpcServer::Stop() {
 
 Status
 GrpcServer::StartService() {
+    SetThreadName("grpcserv_thread");
     Config& config = Config::GetInstance();
     std::string address, port;
 

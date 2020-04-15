@@ -18,12 +18,12 @@
 #include "segment/Vectors.h"
 
 #include <algorithm>
-#include <chrono>
 #include <iostream>
 #include <utility>
 #include <vector>
 
 #include "utils/Log.h"
+#include "utils/TimeRecorder.h"
 
 namespace milvus {
 namespace segment {
@@ -57,24 +57,18 @@ Vectors::Erase(std::vector<int32_t>& offsets) {
     }
 
     // Sort and remove duplicates
-    auto start = std::chrono::high_resolution_clock::now();
+    TimeRecorder recorder("Vectors::Erase");
 
     std::sort(offsets.begin(), offsets.end());
 
-    auto end = std::chrono::high_resolution_clock::now();
-    std::chrono::duration<double> diff = end - start;
-    ENGINE_LOG_DEBUG << "Sorting " << offsets.size() << " offsets to delete took " << diff.count() << " s";
-
-    start = std::chrono::high_resolution_clock::now();
+    recorder.RecordSection("Sorting " + std::to_string(offsets.size()) + " offsets to delete");
 
     offsets.erase(std::unique(offsets.begin(), offsets.end()), offsets.end());
 
-    end = std::chrono::high_resolution_clock::now();
-    diff = end - start;
-    ENGINE_LOG_DEBUG << "Deduplicating " << offsets.size() << " offsets to delete took " << diff.count() << " s";
+    recorder.RecordSection("Deduplicating " + std::to_string(offsets.size()) + " offsets to delete");
 
     // Reconstruct raw vectors and uids
-    ENGINE_LOG_DEBUG << "Begin erasing...";
+    LOG_ENGINE_DEBUG_ << "Begin erasing...";
 
     size_t new_size = uids_.size() - offsets.size();
     std::vector<doc_id_t> new_uids(new_size);
@@ -110,10 +104,9 @@ Vectors::Erase(std::vector<int32_t>& offsets) {
     data_.swap(new_data);
     uids_.swap(new_uids);
 
-    end = std::chrono::high_resolution_clock::now();
-    diff = end - start;
-    ENGINE_LOG_DEBUG << "Erasing " << offsets.size() << " vectors out of " << loop_size << " vectors took "
-                     << diff.count() << " s";
+    std::string msg =
+        "Erasing " + std::to_string(offsets.size()) + " vectors out of " + std::to_string(loop_size) + " vectors";
+    recorder.RecordSection(msg);
 }
 
 std::vector<uint8_t>&

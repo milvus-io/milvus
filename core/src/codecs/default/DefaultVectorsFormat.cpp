@@ -35,7 +35,7 @@ DefaultVectorsFormat::read_vectors_internal(const storage::FSHandlerPtr& fs_ptr,
                                             off_t offset, size_t num, std::vector<uint8_t>& raw_vectors) {
     if (!fs_ptr->reader_ptr_->open(file_path.c_str())) {
         std::string err_msg = "Failed to open file: " + file_path + ", error: " + std::strerror(errno);
-        ENGINE_LOG_ERROR << err_msg;
+        LOG_ENGINE_ERROR_ << err_msg;
         throw Exception(SERVER_CANNOT_OPEN_FILE, err_msg);
     }
 
@@ -58,7 +58,7 @@ DefaultVectorsFormat::read_uids_internal(const storage::FSHandlerPtr& fs_ptr, co
                                          std::vector<segment::doc_id_t>& uids) {
     if (!fs_ptr->reader_ptr_->open(file_path.c_str())) {
         std::string err_msg = "Failed to open file: " + file_path + ", error: " + std::strerror(errno);
-        ENGINE_LOG_ERROR << err_msg;
+        LOG_ENGINE_ERROR_ << err_msg;
         throw Exception(SERVER_CANNOT_OPEN_FILE, err_msg);
     }
 
@@ -78,7 +78,7 @@ DefaultVectorsFormat::read(const storage::FSHandlerPtr& fs_ptr, segment::Vectors
     std::string dir_path = fs_ptr->operation_ptr_->GetDirectory();
     if (!boost::filesystem::is_directory(dir_path)) {
         std::string err_msg = "Directory: " + dir_path + "does not exist";
-        ENGINE_LOG_ERROR << err_msg;
+        LOG_ENGINE_ERROR_ << err_msg;
         throw Exception(SERVER_INVALID_ARGUMENT, err_msg);
     }
 
@@ -113,7 +113,7 @@ DefaultVectorsFormat::write(const storage::FSHandlerPtr& fs_ptr, const segment::
 
     if (!fs_ptr->writer_ptr_->open(rv_file_path.c_str())) {
         std::string err_msg = "Failed to open file: " + rv_file_path + ", error: " + std::strerror(errno);
-        ENGINE_LOG_ERROR << err_msg;
+        LOG_ENGINE_ERROR_ << err_msg;
         throw Exception(SERVER_CANNOT_CREATE_FILE, err_msg);
     }
 
@@ -126,7 +126,7 @@ DefaultVectorsFormat::write(const storage::FSHandlerPtr& fs_ptr, const segment::
 
     if (!fs_ptr->writer_ptr_->open(uid_file_path.c_str())) {
         std::string err_msg = "Failed to open file: " + uid_file_path + ", error: " + std::strerror(errno);
-        ENGINE_LOG_ERROR << err_msg;
+        LOG_ENGINE_ERROR_ << err_msg;
         throw Exception(SERVER_CANNOT_CREATE_FILE, err_msg);
     }
     size_t uid_num_bytes = vectors->GetUids().size() * sizeof(segment::doc_id_t);
@@ -144,7 +144,7 @@ DefaultVectorsFormat::read_uids(const storage::FSHandlerPtr& fs_ptr, std::vector
     std::string dir_path = fs_ptr->operation_ptr_->GetDirectory();
     if (!boost::filesystem::is_directory(dir_path)) {
         std::string err_msg = "Directory: " + dir_path + "does not exist";
-        ENGINE_LOG_ERROR << err_msg;
+        LOG_ENGINE_ERROR_ << err_msg;
         throw Exception(SERVER_INVALID_ARGUMENT, err_msg);
     }
 
@@ -169,7 +169,7 @@ DefaultVectorsFormat::read_vectors(const storage::FSHandlerPtr& fs_ptr, off_t of
     std::string dir_path = fs_ptr->operation_ptr_->GetDirectory();
     if (!boost::filesystem::is_directory(dir_path)) {
         std::string err_msg = "Directory: " + dir_path + "does not exist";
-        ENGINE_LOG_ERROR << err_msg;
+        LOG_ENGINE_ERROR_ << err_msg;
         throw Exception(SERVER_INVALID_ARGUMENT, err_msg);
     }
 
