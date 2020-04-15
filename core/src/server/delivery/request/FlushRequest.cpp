@@ -49,6 +49,13 @@ FlushRequest::OnExecute() {
     Status status = Status::OK();
     SERVER_LOG_DEBUG << hdr;
 
+    // flush all collections
+    if (collection_names_.empty()) {
+        status = DBWrapper::DB()->Flush();
+        return status;
+    }
+
+    // flush specified collections
     for (auto& name : collection_names_) {
         // only process root collection, ignore partition collection
         engine::meta::CollectionSchema collection_schema;
