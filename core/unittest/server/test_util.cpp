@@ -638,8 +638,8 @@ TEST(ValidationUtilTest, VALIDATE_VECTOR_DATA_TEST) {
     status = milvus::server::ValidationUtil::ValidateVectorData(vectors, collection_schema);
     ASSERT_TRUE(status.ok());
 
-    vectors.float_data_.resize(150 * 1024 * 1024);
-    status = milvus::server::ValidationUtil::ValidateVectorData(vectors, collection_schema);
+    vectors.float_data_.resize(150 * 1024 * 1024); // 600MB
+    status = milvus::server::ValidationUtil::ValidateVectorDataSize(vectors, collection_schema);
     ASSERT_FALSE(status.ok());
 
     collection_schema.metric_type_ = (int32_t)milvus::engine::MetricType::HAMMING;
@@ -652,8 +652,8 @@ TEST(ValidationUtilTest, VALIDATE_VECTOR_DATA_TEST) {
     status = milvus::server::ValidationUtil::ValidateVectorData(vectors, collection_schema);
     ASSERT_TRUE(status.ok());
 
-    vectors.binary_data_.resize(600 * 1024 * 1024);
-    status = milvus::server::ValidationUtil::ValidateVectorData(vectors, collection_schema);
+    vectors.binary_data_.resize(600 * 1024 * 1024); // 600MB
+    status = milvus::server::ValidationUtil::ValidateVectorDataSize(vectors, collection_schema);
     ASSERT_FALSE(status.ok());
 }
 
