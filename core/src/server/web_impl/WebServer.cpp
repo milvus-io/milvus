@@ -39,6 +39,7 @@ WebServer::Stop() {
 
 Status
 WebServer::StartService() {
+    SetThreadName("webserv_thread");
     oatpp::base::Environment::init();
 
     Config& config = Config::GetInstance();

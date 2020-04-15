@@ -40,7 +40,7 @@ DefaultIdBloomFilterFormat::read(const storage::FSHandlerPtr& fs_ptr, segment::I
     if (bloom_filter == nullptr) {
         std::string err_msg =
             "Failed to read bloom filter from file: " + bloom_filter_file_path + ". " + std::strerror(errno);
-        ENGINE_LOG_ERROR << err_msg;
+        LOG_ENGINE_ERROR_ << err_msg;
         throw Exception(SERVER_UNEXPECTED_ERROR, err_msg);
     }
     id_bloom_filter_ptr = std::make_shared<segment::IdBloomFilter>(bloom_filter);
@@ -56,7 +56,7 @@ DefaultIdBloomFilterFormat::write(const storage::FSHandlerPtr& fs_ptr,
     if (scaling_bloom_flush(id_bloom_filter_ptr->GetBloomFilter()) == -1) {
         std::string err_msg =
             "Failed to write bloom filter to file: " + bloom_filter_file_path + ". " + std::strerror(errno);
-        ENGINE_LOG_ERROR << err_msg;
+        LOG_ENGINE_ERROR_ << err_msg;
         throw Exception(SERVER_UNEXPECTED_ERROR, err_msg);
     }
 }
@@ -71,7 +71,7 @@ DefaultIdBloomFilterFormat::create(const storage::FSHandlerPtr& fs_ptr,
     if (bloom_filter == nullptr) {
         std::string err_msg =
             "Failed to read bloom filter from file: " + bloom_filter_file_path + ". " + std::strerror(errno);
-        ENGINE_LOG_ERROR << err_msg;
+        LOG_ENGINE_ERROR_ << err_msg;
         throw Exception(SERVER_UNEXPECTED_ERROR, err_msg);
     }
     id_bloom_filter_ptr = std::make_shared<segment::IdBloomFilter>(bloom_filter);

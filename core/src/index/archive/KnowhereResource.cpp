@@ -40,7 +40,7 @@ KnowhereResource::Initialize() {
     faiss::faiss_use_avx512 = use_avx512;
     std::string cpu_flag;
     if (faiss::hook_init(cpu_flag)) {
-        ENGINE_LOG_DEBUG << "FAISS hook " << cpu_flag;
+        LOG_ENGINE_DEBUG_ << "FAISS hook " << cpu_flag;
     } else {
         return Status(KNOWHERE_UNEXPECTED_ERROR, "FAISS hook fail, CPU not supported!");
     }

@@ -31,8 +31,8 @@ BuildIndexJob::AddToIndexFiles(const engine::meta::SegmentSchemaPtr& to_index_fi
         return false;
     }
 
-    SERVER_LOG_DEBUG << "BuildIndexJob " << id() << " add to_index file: " << to_index_file->id_
-                     << ", location: " << to_index_file->location_;
+    LOG_SERVER_DEBUG_ << "BuildIndexJob " << id() << " add to_index file: " << to_index_file->id_
+                      << ", location: " << to_index_file->location_;
 
     to_index_files_[to_index_file->id_] = to_index_file;
     return true;
@@ -42,7 +42,7 @@ void
 BuildIndexJob::WaitBuildIndexFinish() {
     std::unique_lock<std::mutex> lock(mutex_);
     cv_.wait(lock, [this] { return to_index_files_.empty(); });
-    SERVER_LOG_DEBUG << "BuildIndexJob " << id() << " all done";
+    LOG_SERVER_DEBUG_ << "BuildIndexJob " << id() << " all done";
 }
 
 void
@@ -50,7 +50,7 @@ BuildIndexJob::BuildIndexDone(size_t to_index_id) {
     std::unique_lock<std::mutex> lock(mutex_);
     to_index_files_.erase(to_index_id);
     cv_.notify_all();
-    SERVER_LOG_DEBUG << "BuildIndexJob " << id() << " finish index file: " << to_index_id;
+    LOG_SERVER_DEBUG_ << "BuildIndexJob " << id() << " finish index file: " << to_index_id;
 }
 
 json

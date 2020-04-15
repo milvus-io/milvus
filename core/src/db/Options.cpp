@@ -54,11 +54,11 @@ ArchiveConf::ParseCritirias(const std::string& criterias) {
         std::vector<std::string> kv;
         boost::algorithm::split(kv, token, boost::is_any_of(":"));
         if (kv.size() != 2) {
-            ENGINE_LOG_WARNING << "Invalid ArchiveConf Criterias: " << token << " Ignore!";
+            LOG_ENGINE_WARNING_ << "Invalid ArchiveConf Criterias: " << token << " Ignore!";
             continue;
         }
         if (kv[0] != "disk" && kv[0] != "days") {
-            ENGINE_LOG_WARNING << "Invalid ArchiveConf Criterias: " << token << " Ignore!";
+            LOG_ENGINE_WARNING_ << "Invalid ArchiveConf Criterias: " << token << " Ignore!";
             continue;
         }
         try {
@@ -68,11 +68,11 @@ ArchiveConf::ParseCritirias(const std::string& criterias) {
             criterias_[kv[0]] = value;
         } catch (std::out_of_range&) {
             std::string msg = "Out of range: '" + kv[1] + "'";
-            ENGINE_LOG_ERROR << msg;
+            LOG_ENGINE_ERROR_ << msg;
             throw InvalidArgumentException(msg);
         } catch (...) {
             std::string msg = "Invalid argument: '" + kv[1] + "'";
-            ENGINE_LOG_ERROR << msg;
+            LOG_ENGINE_ERROR_ << msg;
             throw InvalidArgumentException(msg);
         }
     }
