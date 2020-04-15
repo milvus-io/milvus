@@ -53,7 +53,7 @@ MemTable::Add(const VectorSourcePtr& source) {
 
         if (!status.ok()) {
             std::string err_msg = "Insert failed: " + status.ToString();
-            ENGINE_LOG_ERROR << LogOut("[%s][%ld] ", "insert", 0) << err_msg;
+            LOG_ENGINE_ERROR_ << LogOut("[%s][%ld] ", "insert", 0) << err_msg;
             return Status(DB_ERROR, err_msg);
         }
     }
@@ -113,7 +113,7 @@ MemTable::Serialize(uint64_t wal_lsn, bool apply_delete) {
             return status;
         }
 
-        ENGINE_LOG_DEBUG << "Flushed segment " << (*mem_table_file)->GetSegmentId();
+        LOG_ENGINE_DEBUG_ << "Flushed segment " << (*mem_table_file)->GetSegmentId();
 
         {
             std::lock_guard<std::mutex> lock(mutex_);
@@ -125,13 +125,13 @@ MemTable::Serialize(uint64_t wal_lsn, bool apply_delete) {
     auto status = meta_->UpdateCollectionFlushLSN(collection_id_, wal_lsn);
     if (!status.ok()) {
         std::string err_msg = "Failed to write flush lsn to meta: " + status.ToString();
-        ENGINE_LOG_ERROR << err_msg;
+        LOG_ENGINE_ERROR_ << err_msg;
         return Status(DB_ERROR, err_msg);
     }
 
     auto end = std::chrono::high_resolution_clock::now();
     std::chrono::duration<double> diff = end - start;
-    ENGINE_LOG_DEBUG << "Finished flushing for collection " << collection_id_ << " in " << diff.count() << " s";
+    LOG_ENGINE_DEBUG_ << "Finished flushing for collection " << collection_id_ << " in " << diff.count() << " s";
 
     return Status::OK();
 }
@@ -173,7 +173,7 @@ MemTable::ApplyDeletes() {
     //     Serialize segment's deletedDoc TODO(zhiru): append directly to previous file for now, may have duplicates
     //     Serialize bloom filter
 
-    ENGINE_LOG_DEBUG << "Applying " << doc_ids_to_delete_.size() << " deletes in collection: " << collection_id_;
+    LOG_ENGINE_DEBUG_ << "Applying " << doc_ids_to_delete_.size() << " deletes in collection: " << collection_id_;
 
     auto start_total = std::chrono::high_resolution_clock::now();
 
@@ -185,7 +185,7 @@ MemTable::ApplyDeletes() {
     auto status = meta_->FilesByType(collection_id_, file_types, table_files);
     if (!status.ok()) {
         std::string err_msg = "Failed to apply deletes: " + status.ToString();
-        ENGINE_LOG_ERROR << err_msg;
+        LOG_ENGINE_ERROR_ << err_msg;
         return Status(DB_ERROR, err_msg);
     }
 
@@ -220,13 +220,14 @@ MemTable::ApplyDeletes() {
 
     auto time0 = std::chrono::high_resolution_clock::now();
     std::chrono::duration<double> diff0 = time0 - start_total;
-    ENGINE_LOG_DEBUG << "Found " << ids_to_check_map.size() << " segment to apply deletes in " << diff0.count() << " s";
+    LOG_ENGINE_DEBUG_ << "Found " << ids_to_check_map.size() << " segment to apply deletes in " << diff0.count()
+                      << " s";
 
     meta::SegmentsSchema table_files_to_update;
 
     for (auto& kv : ids_to_check_map) {
         auto& table_file = table_files[kv.first];
-        ENGINE_LOG_DEBUG << "Applying deletes in segment: " << table_file.segment_id_;
+        LOG_ENGINE_DEBUG_ << "Applying deletes in segment: " << table_file.segment_id_;
 
         auto time1 = std::chrono::high_resolution_clock::now();
 
@@ -273,13 +274,13 @@ MemTable::ApplyDeletes() {
 
         auto time2 = std::chrono::high_resolution_clock::now();
         std::chrono::duration<double> diff1 = time2 - time1;
-        ENGINE_LOG_DEBUG << "Loading uids and deleted docs took " << diff1.count() << " s";
+        LOG_ENGINE_DEBUG_ << "Loading uids and deleted docs took " << diff1.count() << " s";
 
         std::sort(ids_to_check.begin(), ids_to_check.end());
 
         auto time3 = std::chrono::high_resolution_clock::now();
         std::chrono::duration<double> diff2 = time3 - time2;
-        ENGINE_LOG_DEBUG << "Sorting " << ids_to_check.size() << " ids took " << diff2.count() << " s";
+        LOG_ENGINE_DEBUG_ << "Sorting " << ids_to_check.size() << " ids took " << diff2.count() << " s";
 
         size_t delete_count = 0;
         auto find_diff = std::chrono::duration<double>::zero();
@@ -315,9 +316,9 @@ MemTable::ApplyDeletes() {
             }
         }
 
-        ENGINE_LOG_DEBUG << "Finding " << ids_to_check.size() << " uids in " << uids.size() << " uids took "
-                         << find_diff.count() << " s in total";
-        ENGINE_LOG_DEBUG << "Setting deleted docs and bloom filter took " << set_diff.count() << " s in total";
+        LOG_ENGINE_DEBUG_ << "Finding " << ids_to_check.size() << " uids in " << uids.size() << " uids took "
+                          << find_diff.count() << " s in total";
+        LOG_ENGINE_DEBUG_ << "Setting deleted docs and bloom filter took " << set_diff.count() << " s in total";
 
         auto time4 = std::chrono::high_resolution_clock::now();
 
@@ -336,9 +337,9 @@ MemTable::ApplyDeletes() {
 
         auto time5 = std::chrono::high_resolution_clock::now();
         std::chrono::duration<double> diff4 = time5 - time4;
-        ENGINE_LOG_DEBUG << "Appended " << deleted_docs->GetSize()
-                         << " offsets to deleted docs in segment: " << table_file.segment_id_ << " in " << diff4.count()
-                         << " s";
+        LOG_ENGINE_DEBUG_ << "Appended " << deleted_docs->GetSize()
+                          << " offsets to deleted docs in segment: " << table_file.segment_id_ << " in "
+                          << diff4.count() << " s";
 
         //        start = std::chrono::high_resolution_clock::now();
 
@@ -348,8 +349,8 @@ MemTable::ApplyDeletes() {
         }
         auto time6 = std::chrono::high_resolution_clock::now();
         std::chrono::duration<double> diff5 = time6 - time5;
-        ENGINE_LOG_DEBUG << "Updated bloom filter in segment: " << table_file.segment_id_ << " in " << diff5.count()
-                         << " s";
+        LOG_ENGINE_DEBUG_ << "Updated bloom filter in segment: " << table_file.segment_id_ << " in " << diff5.count()
+                          << " s";
 
         // Update collection file row count
         for (auto& file : segment_files) {
@@ -362,8 +363,8 @@ MemTable::ApplyDeletes() {
         auto time7 = std::chrono::high_resolution_clock::now();
         std::chrono::duration<double> diff6 = time7 - time6;
         diff6 = time6 - time5;
-        ENGINE_LOG_DEBUG << "Update collection file row count in vector of segment: " << table_file.segment_id_
-                         << " in " << diff6.count() << " s";
+        LOG_ENGINE_DEBUG_ << "Update collection file row count in vector of segment: " << table_file.segment_id_
+                          << " in " << diff6.count() << " s";
     }
 
     auto time7 = std::chrono::high_resolution_clock::now();
@@ -372,7 +373,7 @@ MemTable::ApplyDeletes() {
 
     if (!status.ok()) {
         std::string err_msg = "Failed to apply deletes: " + status.ToString();
-        ENGINE_LOG_ERROR << err_msg;
+        LOG_ENGINE_ERROR_ << err_msg;
         return Status(DB_ERROR, err_msg);
     }
 
@@ -380,9 +381,9 @@ MemTable::ApplyDeletes() {
 
     auto end_total = std::chrono::high_resolution_clock::now();
     std::chrono::duration<double> diff7 = end_total - time7;
-    ENGINE_LOG_DEBUG << "Update deletes to meta in collection " << collection_id_ << " in " << diff7.count() << " s";
+    LOG_ENGINE_DEBUG_ << "Update deletes to meta in collection " << collection_id_ << " in " << diff7.count() << " s";
     std::chrono::duration<double> diff_total = end_total - start_total;
-    ENGINE_LOG_DEBUG << "Finished deletes in collection " << collection_id_ << " in " << diff_total.count() << " s";
+    LOG_ENGINE_DEBUG_ << "Finished deletes in collection " << collection_id_ << " in " << diff_total.count() << " s";
 
     OngoingFileChecker::GetInstance().UnmarkOngoingFiles(files_to_check);
 

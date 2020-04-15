@@ -136,7 +136,7 @@ XBuildIndexTask::Execute() {
 
         fiu_do_on("XBuildIndexTask.Execute.create_table_success", status = Status::OK());
         if (!status.ok()) {
-            ENGINE_LOG_ERROR << "Failed to create collection file: " << status.ToString();
+            LOG_ENGINE_ERROR_ << "Failed to create collection file: " << status.ToString();
             build_index_job->BuildIndexDone(to_index_id_);
             build_index_job->GetStatus() = status;
             to_index_engine_ = nullptr;
@@ -146,7 +146,7 @@ XBuildIndexTask::Execute() {
         auto failed_build_index = [&](std::string log_msg, std::string err_msg) {
             table_file.file_type_ = engine::meta::SegmentSchema::TO_DELETE;
             status = meta_ptr->UpdateCollectionFile(table_file);
-            ENGINE_LOG_ERROR << log_msg;
+            LOG_ENGINE_ERROR_ << log_msg;
 
             build_index_job->BuildIndexDone(to_index_id_);
             build_index_job->GetStatus() = Status(DB_ERROR, err_msg);
@@ -155,7 +155,7 @@ XBuildIndexTask::Execute() {
 
         // step 2: build index
         try {
-            ENGINE_LOG_DEBUG << "Begin build index for file:" + table_file.location_;
+            LOG_ENGINE_DEBUG_ << "Begin build index for file:" + table_file.location_;
             index = to_index_engine_->BuildIndex(table_file.location_, (EngineType)table_file.engine_type_);
             fiu_do_on("XBuildIndexTask.Execute.build_index_fail", index = nullptr);
             if (index == nullptr) {
@@ -215,9 +215,9 @@ XBuildIndexTask::Execute() {
 
         fiu_do_on("XBuildIndexTask.Execute.update_table_file_fail", status = Status(SERVER_UNEXPECTED_ERROR, ""));
         if (status.ok()) {
-            ENGINE_LOG_DEBUG << "New index file " << table_file.file_id_ << " of size " << table_file.file_size_
-                             << " bytes"
-                             << " from file " << origin_file.file_id_;
+            LOG_ENGINE_DEBUG_ << "New index file " << table_file.file_id_ << " of size " << table_file.file_size_
+                              << " bytes"
+                              << " from file " << origin_file.file_id_;
             if (build_index_job->options().insert_cache_immediately_) {
                 index->Cache();
             }
@@ -225,12 +225,13 @@ XBuildIndexTask::Execute() {
             // failed to update meta, mark the new file as to_delete, don't delete old file
             origin_file.file_type_ = engine::meta::SegmentSchema::TO_INDEX;
             status = meta_ptr->UpdateCollectionFile(origin_file);
-            ENGINE_LOG_DEBUG << "Failed to update file to index, mark file: " << origin_file.file_id_ << " to to_index";
+            LOG_ENGINE_DEBUG_ << "Failed to update file to index, mark file: " << origin_file.file_id_
+                              << " to to_index";
 
             table_file.file_type_ = engine::meta::SegmentSchema::TO_DELETE;
             status = meta_ptr->UpdateCollectionFile(table_file);
-            ENGINE_LOG_DEBUG << "Failed to up  date file to index, mark file: " << table_file.file_id_
-                             << " to to_delete";
+            LOG_ENGINE_DEBUG_ << "Failed to up  date file to index, mark file: " << table_file.file_id_
+                              << " to to_delete";
         }
 
         build_index_job->BuildIndexDone(to_index_id_);

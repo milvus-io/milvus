@@ -111,7 +111,7 @@ SearchByIDRequest::OnExecute() {
             config.GetGpuResourceConfigSearchResources(search_resources);
             if (!search_resources.empty()) {
                 std::string err_msg = "SearchByID cannot be executed on GPU";
-                SERVER_LOG_ERROR << err_msg;
+                LOG_SERVER_ERROR_ << err_msg;
                 return Status(SERVER_UNSUPPORTED_ERROR, err_msg);
             }
         }
@@ -125,7 +125,7 @@ SearchByIDRequest::OnExecute() {
             collection_schema.engine_type_ != (int32_t)engine::EngineType::FAISS_IVFSQ8) {
             std::string err_msg = "Index type " + std::to_string(collection_schema.engine_type_) +
                                   " does not support SearchByID operation";
-            SERVER_LOG_ERROR << err_msg;
+            LOG_SERVER_ERROR_ << err_msg;
             return Status(SERVER_UNSUPPORTED_ERROR, err_msg);
         }
 

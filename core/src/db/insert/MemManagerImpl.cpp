@@ -36,7 +36,7 @@ MemManagerImpl::InsertVectors(const std::string& collection_id, int64_t length, 
                               const float* vectors, uint64_t lsn, std::set<std::string>& flushed_tables) {
     flushed_tables.clear();
     if (GetCurrentMem() > options_.insert_buffer_size_) {
-        ENGINE_LOG_DEBUG << "Insert buffer size exceeds limit. Performing force flush";
+        LOG_ENGINE_DEBUG_ << "Insert buffer size exceeds limit. Performing force flush";
         // TODO(zhiru): Don't apply delete here in order to avoid possible concurrency issues with Merge
         auto status = Flush(flushed_tables, false);
         if (!status.ok()) {
@@ -62,12 +62,12 @@ MemManagerImpl::InsertVectors(const std::string& collection_id, int64_t length, 
                               const uint8_t* vectors, uint64_t lsn, std::set<std::string>& flushed_tables) {
     flushed_tables.clear();
     if (GetCurrentMem() > options_.insert_buffer_size_) {
-        ENGINE_LOG_DEBUG << LogOut("[%s][%ld] ", "insert", 0)
-                         << "Insert buffer size exceeds limit. Performing force flush";
+        LOG_ENGINE_DEBUG_ << LogOut("[%s][%ld] ", "insert", 0)
+                          << "Insert buffer size exceeds limit. Performing force flush";
         // TODO(zhiru): Don't apply delete here in order to avoid possible concurrency issues with Merge
         auto status = Flush(flushed_tables, false);
         if (!status.ok()) {
-            ENGINE_LOG_DEBUG << LogOut("[%s][%ld] ", "insert", 0) << "Flush fail: " << status.message();
+            LOG_ENGINE_DEBUG_ << LogOut("[%s][%ld] ", "insert", 0) << "Flush fail: " << status.message();
             return status;
         }
     }
@@ -143,13 +143,13 @@ MemManagerImpl::Flush(const std::string& collection_id, bool apply_delete) {
     std::unique_lock<std::mutex> lock(serialization_mtx_);
     auto max_lsn = GetMaxLSN(temp_immutable_list);
     for (auto& mem : temp_immutable_list) {
-        ENGINE_LOG_DEBUG << "Flushing collection: " << mem->GetTableId();
+        LOG_ENGINE_DEBUG_ << "Flushing collection: " << mem->GetTableId();
         auto status = mem->Serialize(max_lsn, apply_delete);
         if (!status.ok()) {
-            ENGINE_LOG_ERROR << "Flush collection " << mem->GetTableId() << " failed";
+            LOG_ENGINE_ERROR_ << "Flush collection " << mem->GetTableId() << " failed";
             return status;
         }
-        ENGINE_LOG_DEBUG << "Flushed collection: " << mem->GetTableId();
+        LOG_ENGINE_DEBUG_ << "Flushed collection: " << mem->GetTableId();
     }
 
     return Status::OK();
@@ -169,14 +169,14 @@ MemManagerImpl::Flush(std::set<std::string>& table_ids, bool apply_delete) {
     table_ids.clear();
     auto max_lsn = GetMaxLSN(temp_immutable_list);
     for (auto& mem : temp_immutable_list) {
-        ENGINE_LOG_DEBUG << "Flushing collection: " << mem->GetTableId();
+        LOG_ENGINE_DEBUG_ << "Flushing collection: " << mem->GetTableId();
         auto status = mem->Serialize(max_lsn, apply_delete);
         if (!status.ok()) {
-            ENGINE_LOG_ERROR << "Flush collection " << mem->GetTableId() << " failed";
+            LOG_ENGINE_ERROR_ << "Flush collection " << mem->GetTableId() << " failed";
             return status;
         }
         table_ids.insert(mem->GetTableId());
-        ENGINE_LOG_DEBUG << "Flushed collection: " << mem->GetTableId();
+        LOG_ENGINE_DEBUG_ << "Flushed collection: " << mem->GetTableId();
     }
 
     meta_->SetGlobalLastLSN(max_lsn);
@@ -194,7 +194,7 @@ MemManagerImpl::ToImmutable(const std::string& collection_id) {
             mem_id_map_.erase(memIt);
         }
         //        std::string err_msg = "Could not find collection = " + collection_id + " to flush";
-        //        ENGINE_LOG_ERROR << err_msg;
+        //        LOG_ENGINE_ERROR_ << err_msg;
         //        return Status(DB_NOT_FOUND, err_msg);
     }
 

@@ -131,7 +131,7 @@ DBWrapper::StartService() {
 
     if (omp_thread > 0) {
         omp_set_num_threads(omp_thread);
-        SERVER_LOG_DEBUG << "Specify openmp thread number: " << omp_thread;
+        LOG_SERVER_DEBUG_ << "Specify openmp thread number: " << omp_thread;
     } else {
         int64_t sys_thread_cnt = 8;
         if (CommonUtil::GetSystemAvailableThreads(sys_thread_cnt)) {

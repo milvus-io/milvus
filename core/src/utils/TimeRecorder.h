@@ -24,7 +24,7 @@ print_timestamp(const std::string& message) {
     micros %= 1000000;
     double millisecond = (double)micros / 1000.0;
 
-    SERVER_LOG_DEBUG << std::fixed << " " << millisecond << "(ms) [timestamp]" << message;
+    LOG_SERVER_DEBUG_ << std::fixed << " " << millisecond << "(ms) [timestamp]" << message;
 }
 
 class TimeRecorder {

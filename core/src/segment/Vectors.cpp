@@ -72,7 +72,7 @@ Vectors::Erase(std::vector<int32_t>& offsets) {
     recorder.RecordSection("Deduplicating " + std::to_string(offsets.size()) + " offsets to delete");
 
     // Reconstruct raw vectors and uids
-    ENGINE_LOG_DEBUG << "Begin erasing...";
+    LOG_ENGINE_DEBUG_ << "Begin erasing...";
 
     size_t new_size = uids_.size() - offsets.size();
     std::vector<doc_id_t> new_uids(new_size);

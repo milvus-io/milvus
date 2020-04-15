@@ -76,7 +76,7 @@ bool
 Cache<ItemObj>::reserve(const int64_t item_size) {
     std::lock_guard<std::mutex> lock(mutex_);
     if (item_size > capacity_) {
-        SERVER_LOG_ERROR << header_ << " item size " << (item_size >> 20) << "MB too big to insert into cache capacity"
+        LOG_SERVER_ERROR_ << header_ << " item size " << (item_size >> 20) << "MB too big to insert into cache capacity"
                          << (capacity_ >> 20) << "MB";
         return false;
     }
@@ -92,7 +92,7 @@ Cache<ItemObj>::clear() {
     std::lock_guard<std::mutex> lock(mutex_);
     lru_.clear();
     usage_ = 0;
-    SERVER_LOG_DEBUG << header_ << " Clear cache !";
+    LOG_SERVER_DEBUG_ << header_ << " Clear cache !";
 }
 
 
@@ -102,9 +102,9 @@ Cache<ItemObj>::print() {
     std::lock_guard<std::mutex> lock(mutex_);
     size_t cache_count = lru_.size();
     // for (auto it = lru_.begin(); it != lru_.end(); ++it) {
-    //     SERVER_LOG_DEBUG << it->first;
+    //     LOG_SERVER_DEBUG_ << it->first;
     // }
-    SERVER_LOG_DEBUG << header_ << " [item count]: " << cache_count << ", [usage] " << (usage_ >> 20)
+    LOG_SERVER_DEBUG_ << header_ << " [item count]: " << cache_count << ", [usage] " << (usage_ >> 20)
                      << "MB, [capacity] " << (capacity_ >> 20) << "MB";
 }
 
@@ -128,15 +128,15 @@ Cache<ItemObj>::insert_internal(const std::string& key, const ItemObj& item) {
 
     // if usage exceed capacity, free some items
     if (usage_ > capacity_) {
-        SERVER_LOG_DEBUG << header_ << " Current usage " << (usage_ >> 20) << "MB is too high for capacity "
+        LOG_SERVER_DEBUG_ << header_ << " Current usage " << (usage_ >> 20) << "MB is too high for capacity "
                          << (capacity_ >> 20) << "MB, start free memory";
         free_memory_internal(capacity_);
     }
 
     // insert new item
     lru_.put(key, item);
-    SERVER_LOG_DEBUG << header_ << " Insert " << key << " size: " << (item_size >> 20) << "MB into cache";
-    SERVER_LOG_DEBUG << header_ << " Count: " << lru_.size() << ", Usage: " << (usage_ >> 20) << "MB, Capacity: "
+    LOG_SERVER_DEBUG_ << header_ << " Insert " << key << " size: " << (item_size >> 20) << "MB into cache";
+    LOG_SERVER_DEBUG_ << header_ << " Count: " << lru_.size() << ", Usage: " << (usage_ >> 20) << "MB, Capacity: "
                      << (capacity_ >> 20) << "MB";
 }
 
@@ -153,8 +153,8 @@ Cache<ItemObj>::erase_internal(const std::string& key) {
     lru_.erase(key);
 
     usage_ -= item_size;
-    SERVER_LOG_DEBUG << header_ << " Erase " << key << " size: " << (item_size >> 20) << "MB from cache";
-    SERVER_LOG_DEBUG << header_ << " Count: " << lru_.size() << ", Usage: " << (usage_ >> 20) << "MB, Capacity: "
+    LOG_SERVER_DEBUG_ << header_ << " Erase " << key << " size: " << (item_size >> 20) << "MB from cache";
+    LOG_SERVER_DEBUG_ << header_ << " Count: " << lru_.size() << ", Usage: " << (usage_ >> 20) << "MB, Capacity: "
                      << (capacity_ >> 20) << "MB";
 }
 
@@ -180,7 +180,7 @@ Cache<ItemObj>::free_memory_internal(const int64_t target_size) {
         ++it;
     }
 
-    SERVER_LOG_DEBUG << header_ << " To be released memory size: " << (released_size >> 20) << "MB";
+    LOG_SERVER_DEBUG_ << header_ << " To be released memory size: " << (released_size >> 20) << "MB";
 
     for (auto& key : key_array) {
         erase_internal(key);
