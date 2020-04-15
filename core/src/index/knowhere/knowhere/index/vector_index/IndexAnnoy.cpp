@@ -128,8 +128,15 @@ IndexAnnoy::Query(const DatasetPtr& dataset_ptr, const Config& config) {
         distances.reserve(k);
         index_->get_nns_by_vector((const float*)p_data + i * dim, k, search_k, &result, &distances, blacklist);
 
-        memcpy(p_id + k * i, result.data(), k * sizeof(int64_t));
-        memcpy(p_dist + k * i, distances.data(), k * sizeof(float));
+        size_t result_num = result.size();
+        auto local_p_id = p_id + k * i;
+        auto local_p_dist = p_dist + k * i;
+        memcpy(local_p_id, result.data(), result_num * sizeof(int64_t));
+        memcpy(local_p_dist, distances.data(), result_num * sizeof(float));
+        for (; result_num < k; result_num++) {
+            local_p_id[result_num] = -1;
+            local_p_dist[result_num] = 1.0 / 0.0;
+        }
     }
 
     auto ret_ds = std::make_shared<Dataset>();

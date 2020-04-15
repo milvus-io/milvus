@@ -9,7 +9,7 @@
 # is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 # or implied. See the License for the specific language governing permissions and limitations under the License.
 
-version: 0.2
+version: 0.3
 
 #----------------------+------------------------------------------------------------+------------+-----------------+
 # Server Config        | Description                                                | Type       | Default         |
@@ -42,14 +42,19 @@ server_config:
 #                      | Keep 'dialect://:@:/', 'dialect' can be either 'sqlite' or |            |                 |
 #                      | 'mysql', replace other texts with real values.             |            |                 |
 #----------------------+------------------------------------------------------------+------------+-----------------+
-# preload_table        | A comma-separated list of table names that need to be pre- | StringList |                 |
-#                      | loaded when Milvus server starts up.                       |            |                 |
+# preload_collection   | A comma-separated list of collection names that need to    | StringList |                 |
+#                      | be pre-loaded when Milvus server starts up.                |            |                 |
 #                      | '*' means preload all existing tables (single-quote or     |            |                 |
 #                      | double-quote required).                                    |            |                 |
 #----------------------+------------------------------------------------------------+------------+-----------------+
+# auto_flush_interval  | The interval, in seconds, at which Milvus automatically    | Integer    | 1 (s)           |
+#                      | flushes data to disk.                                      |            |                 |
+#                      | 0 means disable the regular flush.                         |            |                 |
+#----------------------+------------------------------------------------------------+------------+-----------------+
 db_config:
   backend_url: mysql://root:milvusroot@milvus-mysql:3306/milvus
-  preload_table:
+  preload_collection:
+  auto_flush_interval: 1
 
 #----------------------+------------------------------------------------------------+------------+-----------------+
 # Storage Config       | Description                                                | Type       | Default         |
