@@ -40,7 +40,7 @@ VectorSource::Add(/*const ExecutionEnginePtr& execution_engine,*/ const segment:
         SafeIDGenerator& id_generator = SafeIDGenerator::GetInstance();
         Status status = id_generator.GetNextIDNumbers(num_vectors_added, vector_ids_to_add);
         if (!status.ok()) {
-            ENGINE_LOG_ERROR << LogOut("[%s][%ld]", "insert", 0) << "Generate ids fail: " << status.message();
+            LOG_ENGINE_ERROR_ << LogOut("[%s][%ld]", "insert", 0) << "Generate ids fail: " << status.message();
             return status;
         }
     } else {
@@ -62,7 +62,7 @@ VectorSource::Add(/*const ExecutionEnginePtr& execution_engine,*/ const segment:
         vectors.resize(size);
         memcpy(vectors.data(), vectors_.float_data_.data() + current_num_vectors_added * table_file_schema.dimension_,
                size);
-        ENGINE_LOG_DEBUG << LogOut("[%s][%ld]", "insert", 0) << "Insert into segment";
+        LOG_ENGINE_DEBUG_ << LogOut("[%s][%ld]", "insert", 0) << "Insert into segment";
         status = segment_writer_ptr->AddVectors(table_file_schema.file_id_, vectors, vector_ids_to_add);
 
     } else if (!vectors_.binary_data_.empty()) {
@@ -79,7 +79,7 @@ VectorSource::Add(/*const ExecutionEnginePtr& execution_engine,*/ const segment:
             vectors.data(),
             vectors_.binary_data_.data() + current_num_vectors_added * SingleVectorSize(table_file_schema.dimension_),
             size);
-        ENGINE_LOG_DEBUG << LogOut("[%s][%ld]", "insert", 0) << "Insert into segment";
+        LOG_ENGINE_DEBUG_ << LogOut("[%s][%ld]", "insert", 0) << "Insert into segment";
         status = segment_writer_ptr->AddVectors(table_file_schema.file_id_, vectors, vector_ids_to_add);
     }
 
@@ -90,7 +90,7 @@ VectorSource::Add(/*const ExecutionEnginePtr& execution_engine,*/ const segment:
         vector_ids_.insert(vector_ids_.end(), std::make_move_iterator(vector_ids_to_add.begin()),
                            std::make_move_iterator(vector_ids_to_add.end()));
     } else {
-        ENGINE_LOG_ERROR << LogOut("[%s][%ld]", "insert", 0) << "VectorSource::Add failed: " + status.ToString();
+        LOG_ENGINE_ERROR_ << LogOut("[%s][%ld]", "insert", 0) << "VectorSource::Add failed: " + status.ToString();
     }
 
     return status;

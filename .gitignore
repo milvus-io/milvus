@@ -32,3 +32,4 @@ cov_html/
 # temp
 shards/all_in_one_with_mysql/metadata/
 shards/mishards/.env
+*.swp

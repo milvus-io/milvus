@@ -97,7 +97,7 @@ LogConfigInFile(const std::string& path) {
     auto node = YAML::LoadFile(path);
     YAML::Emitter out;
     out << node;
-    SERVER_LOG_DEBUG << "\n\n"
+    LOG_SERVER_INFO_ << "\n\n"
                      << std::string(15, '*') << "Config in file" << std::string(15, '*') << "\n\n"
                      << out.c_str();
 }
@@ -107,7 +107,7 @@ LogConfigInMem() {
     auto& config = Config::GetInstance();
     std::string config_str;
     config.GetConfigJsonStr(config_str, 3);
-    SERVER_LOG_DEBUG << "\n\n"
+    LOG_SERVER_INFO_ << "\n\n"
                      << std::string(15, '*') << "Config in memory" << std::string(15, '*') << "\n\n"
                      << config_str;
 }
@@ -117,7 +117,7 @@ LogCpuInfo() {
     /*CPU information*/
     std::fstream fcpu("/proc/cpuinfo", std::ios::in);
     if (!fcpu.is_open()) {
-        SERVER_LOG_WARNING << "Cannot obtain CPU information. Open file /proc/cpuinfo fail: " << strerror(errno);
+        LOG_SERVER_WARNING_ << "Cannot obtain CPU information. Open file /proc/cpuinfo fail: " << strerror(errno);
         return;
     }
     std::stringstream cpu_info_ss;
@@ -127,12 +127,12 @@ LogCpuInfo() {
 
     auto processor_pos = cpu_info.rfind("processor");
     if (std::string::npos == processor_pos) {
-        SERVER_LOG_WARNING << "Cannot obtain CPU information. No sub string \'processor\'";
+        LOG_SERVER_WARNING_ << "Cannot obtain CPU information. No sub string \'processor\'";
         return;
     }
 
     auto sub_str = cpu_info.substr(processor_pos);
-    SERVER_LOG_DEBUG << "\n\n" << std::string(15, '*') << "CPU" << std::string(15, '*') << "\n\n" << sub_str;
+    LOG_SERVER_INFO_ << "\n\n" << std::string(15, '*') << "CPU" << std::string(15, '*') << "\n\n" << sub_str;
 }
 
 }  // namespace server

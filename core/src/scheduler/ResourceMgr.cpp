@@ -19,8 +19,8 @@ namespace scheduler {
 void
 ResourceMgr::Start() {
     if (not check_resource_valid()) {
-        ENGINE_LOG_ERROR << "Resources invalid, cannot start ResourceMgr.";
-        ENGINE_LOG_ERROR << Dump();
+        LOG_ENGINE_ERROR_ << "Resources invalid, cannot start ResourceMgr.";
+        LOG_ENGINE_ERROR_ << Dump();
         return;
     }
 
@@ -54,7 +54,7 @@ ResourceMgr::Add(ResourcePtr&& resource) {
 
     std::lock_guard<std::mutex> lck(resources_mutex_);
     if (running_) {
-        ENGINE_LOG_ERROR << "ResourceMgr is running, not allow to add resource";
+        LOG_ENGINE_ERROR_ << "ResourceMgr is running, not allow to add resource";
         return ret;
     }
 
@@ -97,7 +97,7 @@ void
 ResourceMgr::Clear() {
     std::lock_guard<std::mutex> lck(resources_mutex_);
     if (running_) {
-        ENGINE_LOG_ERROR << "ResourceMgr is running, cannot clear.";
+        LOG_ENGINE_ERROR_ << "ResourceMgr is running, cannot clear.";
         return;
     }
     disk_resources_.clear();
@@ -237,6 +237,7 @@ ResourceMgr::post_event(const EventPtr& event) {
 
 void
 ResourceMgr::event_process() {
+    SetThreadName("resevt_thread");
     while (running_) {
         std::unique_lock<std::mutex> lock(event_mutex_);
         event_cv_.wait(lock, [this] { return !queue_.empty(); });

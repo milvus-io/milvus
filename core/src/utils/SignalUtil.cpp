@@ -25,7 +25,7 @@ SignalUtil::HandleSignal(int signum) {
     switch (signum) {
         case SIGINT:
         case SIGUSR2: {
-            SERVER_LOG_INFO << "Server received signal: " << signum;
+            LOG_SERVER_INFO_ << "Server received signal: " << signum;
 
             server::Server& server = server::Server::GetInstance();
             server.Stop();
@@ -33,7 +33,7 @@ SignalUtil::HandleSignal(int signum) {
             exit(0);
         }
         default: {
-            SERVER_LOG_INFO << "Server received critical signal: " << signum;
+            LOG_SERVER_INFO_ << "Server received critical signal: " << signum;
             SignalUtil::PrintStacktrace();
 
             server::Server& server = server::Server::GetInstance();
@@ -46,7 +46,7 @@ SignalUtil::HandleSignal(int signum) {
 
 void
 SignalUtil::PrintStacktrace() {
-    SERVER_LOG_INFO << "Call stack:";
+    LOG_SERVER_INFO_ << "Call stack:";
 
     const int size = 32;
     void* array[size];
@@ -54,7 +54,7 @@ SignalUtil::PrintStacktrace() {
     char** stacktrace = backtrace_symbols(array, stack_num);
     for (int i = 0; i < stack_num; ++i) {
         std::string info = stacktrace[i];
-        SERVER_LOG_INFO << info;
+        LOG_SERVER_INFO_ << info;
     }
     free(stacktrace);
 }

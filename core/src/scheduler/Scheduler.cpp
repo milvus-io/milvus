@@ -79,6 +79,7 @@ Scheduler::process(const EventPtr& event) {
 
 void
 Scheduler::worker_function() {
+    SetThreadName("schedevt_thread");
     while (running_) {
         std::unique_lock<std::mutex> lock(event_mutex_);
         event_cv_.wait(lock, [this] { return !event_queue_.empty(); });

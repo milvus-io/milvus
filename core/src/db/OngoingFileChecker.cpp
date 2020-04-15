@@ -94,8 +94,8 @@ OngoingFileChecker::MarkOngoingFileNoLock(const meta::SegmentSchema& table_file)
         }
     }
 
-    ENGINE_LOG_DEBUG << "Mark ongoing file:" << table_file.file_id_
-                     << " refcount:" << ongoing_files_[table_file.collection_id_][table_file.file_id_];
+    LOG_ENGINE_DEBUG_ << "Mark ongoing file:" << table_file.file_id_
+                      << " refcount:" << ongoing_files_[table_file.collection_id_][table_file.file_id_];
 
     return Status::OK();
 }
@@ -112,7 +112,7 @@ OngoingFileChecker::UnmarkOngoingFileNoLock(const meta::SegmentSchema& table_fil
         if (it_file != iter->second.end()) {
             it_file->second--;
 
-            ENGINE_LOG_DEBUG << "Unmark ongoing file:" << table_file.file_id_ << " refcount:" << it_file->second;
+            LOG_ENGINE_DEBUG_ << "Unmark ongoing file:" << table_file.file_id_ << " refcount:" << it_file->second;
 
             if (it_file->second <= 0) {
                 iter->second.erase(table_file.file_id_);

@@ -153,6 +153,7 @@ Resource::pick_task_execute() {
 
 void
 Resource::loader_function() {
+    SetThreadName("taskloader_th");
     while (running_) {
         std::unique_lock<std::mutex> lock(load_mutex_);
         load_cv_.wait(lock, [&] { return load_flag_; });
@@ -165,7 +166,7 @@ Resource::loader_function() {
             }
             if (task_item->task->Type() == TaskType::BuildIndexTask && name() == "cpu") {
                 BuildMgrInst::GetInstance()->Take();
-                SERVER_LOG_DEBUG << name() << " load BuildIndexTask";
+                LOG_SERVER_DEBUG_ << name() << " load BuildIndexTask";
             }
             LoadFile(task_item->task);
             task_item->Loaded();
@@ -183,6 +184,7 @@ Resource::loader_function() {
 
 void
 Resource::executor_function() {
+    SetThreadName("taskexector_th");
     if (subscriber_) {
         auto event = std::make_shared<StartUpEvent>(shared_from_this());
         subscriber_(std::static_pointer_cast<Event>(event));
