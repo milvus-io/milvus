@@ -2130,7 +2130,7 @@ MySQLMetaImpl::CleanUpShadowFiles() {
         mysqlpp::Query statement = connectionPtr->query();
         statement << "SELECT table_name"
                   << " FROM information_schema.tables"
-                  << " WHERE table_schema = " << mysqlpp::quote << mysql_connection_pool_->getDB()
+                  << " WHERE table_schema = " << mysqlpp::quote << mysql_connection_pool_->db_name()
                   << " AND table_name = " << mysqlpp::quote << META_TABLEFILES << ";";
 
         LOG_ENGINE_DEBUG_ << "CleanUp: " << statement.str();

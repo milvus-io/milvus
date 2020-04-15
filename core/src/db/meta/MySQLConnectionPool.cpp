@@ -51,11 +51,6 @@ MySQLConnectionPool::release(const mysqlpp::Connection* pc) {
 //        max_idle_time_ = max_idle;
 //    }
 
-std::string
-MySQLConnectionPool::getDB() {
-    return db_;
-}
-
 // Superclass overrides
 mysqlpp::Connection*
 MySQLConnectionPool::create() {

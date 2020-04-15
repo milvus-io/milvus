@@ -121,8 +121,6 @@ DefaultVectorIndexFormat::write(const storage::FSHandlerPtr& fs_ptr, const std::
                                 const segment::VectorIndexPtr& vector_index) {
     const std::lock_guard<std::mutex> lock(mutex_);
 
-    std::string dir_path = fs_ptr->operation_ptr_->GetDirectory();
-
     milvus::TimeRecorder recorder("write_index");
 
     knowhere::VecIndexPtr index = vector_index->GetVectorIndex();
