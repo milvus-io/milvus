@@ -177,7 +177,7 @@ void
 set_request_id(::grpc::ServerContext* context, const std::string& request_id) {
     if (not context) {
         // error
-        SERVER_LOG_ERROR << "set_request_id: grpc::ServerContext is nullptr" << std::endl;
+        LOG_SERVER_ERROR_ << "set_request_id: grpc::ServerContext is nullptr" << std::endl;
         return;
     }
 
@@ -188,7 +188,7 @@ std::string
 get_request_id(::grpc::ServerContext* context) {
     if (not context) {
         // error
-        SERVER_LOG_ERROR << "get_request_id: grpc::ServerContext is nullptr" << std::endl;
+        LOG_SERVER_ERROR_ << "get_request_id: grpc::ServerContext is nullptr" << std::endl;
         return "INVALID_ID";
     }
 
@@ -197,7 +197,7 @@ get_request_id(::grpc::ServerContext* context) {
     auto request_id_kv = server_metadata.find(REQ_ID);
     if (request_id_kv == server_metadata.end()) {
         // error
-        SERVER_LOG_ERROR << std::string(REQ_ID) << " not found in grpc.server_metadata" << std::endl;
+        LOG_SERVER_ERROR_ << std::string(REQ_ID) << " not found in grpc.server_metadata" << std::endl;
         return "INVALID_ID";
     }
 
@@ -245,7 +245,7 @@ GrpcRequestHandler::OnPostRecvInitialMetaData(
     auto request_id_kv = client_metadata.find("request_id");
     if (request_id_kv != client_metadata.end()) {
         request_id = request_id_kv->second.data();
-        SERVER_LOG_DEBUG << "client provide request_id: " << request_id;
+        LOG_SERVER_DEBUG_ << "client provide request_id: " << request_id;
 
         // if request_id is being used by another request,
         // convert it to request_id_n.
@@ -268,7 +268,7 @@ GrpcRequestHandler::OnPostRecvInitialMetaData(
     } else {
         request_id = std::to_string(get_sequential_id());
         set_request_id(server_context, request_id);
-        SERVER_LOG_DEBUG << "milvus generate request_id: " << request_id;
+        LOG_SERVER_DEBUG_ << "milvus generate request_id: " << request_id;
     }
 
     auto trace_context = std::make_shared<tracing::TraceContext>(span);
@@ -285,7 +285,7 @@ GrpcRequestHandler::OnPreSendMessage(::grpc::experimental::ServerRpcInfo* server
 
     if (context_map_.find(request_id) == context_map_.end()) {
         // error
-        SERVER_LOG_ERROR << "request_id " << request_id << " not found in context_map_";
+        LOG_SERVER_ERROR_ << "request_id " << request_id << " not found in context_map_";
         return;
     }
     context_map_[request_id]->GetTraceContext()->GetSpan()->Finish();
@@ -297,7 +297,7 @@ GrpcRequestHandler::GetContext(::grpc::ServerContext* server_context) {
     std::lock_guard<std::mutex> lock(context_map_mutex_);
     auto request_id = get_request_id(server_context);
     if (context_map_.find(request_id) == context_map_.end()) {
-        SERVER_LOG_ERROR << "GetContext: request_id " << request_id << " not found in context_map_";
+        LOG_SERVER_ERROR_ << "GetContext: request_id " << request_id << " not found in context_map_";
         return nullptr;
     }
     return context_map_[request_id];
@@ -385,7 +385,7 @@ GrpcRequestHandler::Insert(::grpc::ServerContext* context, const ::milvus::grpc:
                            ::milvus::grpc::VectorIds* response) {
     CHECK_NULLPTR_RETURN(request);
 
-    SERVER_LOG_INFO << LogOut("[%s][%d] Start insert.", "insert", 0);
+    LOG_SERVER_INFO_ << LogOut("[%s][%d] Start insert.", "insert", 0);
 
     // step 1: copy vector data
     engine::VectorsData vectors;
@@ -400,7 +400,7 @@ GrpcRequestHandler::Insert(::grpc::ServerContext* context, const ::milvus::grpc:
     memcpy(response->mutable_vector_id_array()->mutable_data(), vectors.id_array_.data(),
            vectors.id_array_.size() * sizeof(int64_t));
 
-    SERVER_LOG_INFO << LogOut("[%s][%d] Insert done.", "insert", 0);
+    LOG_SERVER_INFO_ << LogOut("[%s][%d] Insert done.", "insert", 0);
     SET_RESPONSE(response->mutable_status(), status, context);
     return ::grpc::Status::OK;
 }
@@ -453,7 +453,7 @@ GrpcRequestHandler::Search(::grpc::ServerContext* context, const ::milvus::grpc:
                            ::milvus::grpc::TopKQueryResult* response) {
     CHECK_NULLPTR_RETURN(request);
 
-    SERVER_LOG_INFO << LogOut("[%s][%d] Search start in gRPC server", "search", 0);
+    LOG_SERVER_INFO_ << LogOut("[%s][%d] Search start in gRPC server", "search", 0);
     // step 1: copy vector data
     engine::VectorsData vectors;
     CopyRowRecords(request->query_record_array(), google::protobuf::RepeatedField<google::protobuf::int64>(), vectors);
@@ -484,7 +484,7 @@ GrpcRequestHandler::Search(::grpc::ServerContext* context, const ::milvus::grpc:
     // step 5: construct and return result
     ConstructResults(result, response);
 
-    SERVER_LOG_INFO << LogOut("[%s][%d] Search done.", "search", 0);
+    LOG_SERVER_INFO_ << LogOut("[%s][%d] Search done.", "search", 0);
 
     SET_RESPONSE(response->mutable_status(), status, context);
 

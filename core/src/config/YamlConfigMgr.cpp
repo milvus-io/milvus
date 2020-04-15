@@ -30,7 +30,7 @@ YamlConfigMgr::LoadConfigFile(const std::string& filename) {
 
 void
 YamlConfigMgr::Print() const {
-    SERVER_LOG_INFO << "System config content:";
+    LOG_SERVER_INFO_ << "System config content:";
     config_.PrintAll();
 }
 

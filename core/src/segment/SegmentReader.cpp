@@ -67,7 +67,7 @@ SegmentReader::LoadVectors(off_t offset, size_t num_bytes, std::vector<uint8_t>&
         default_codec.GetVectorsFormat()->read_vectors(fs_ptr_, offset, num_bytes, raw_vectors);
     } catch (std::exception& e) {
         std::string err_msg = "Failed to load raw vectors: " + std::string(e.what());
-        ENGINE_LOG_ERROR << err_msg;
+        LOG_ENGINE_ERROR_ << err_msg;
         return Status(DB_ERROR, err_msg);
     }
     return Status::OK();
@@ -81,7 +81,7 @@ SegmentReader::LoadUids(std::vector<doc_id_t>& uids) {
         default_codec.GetVectorsFormat()->read_uids(fs_ptr_, uids);
     } catch (std::exception& e) {
         std::string err_msg = "Failed to load uids: " + std::string(e.what());
-        ENGINE_LOG_ERROR << err_msg;
+        LOG_ENGINE_ERROR_ << err_msg;
         return Status(DB_ERROR, err_msg);
     }
     return Status::OK();
@@ -101,7 +101,7 @@ SegmentReader::LoadVectorIndex(const std::string& location, segment::VectorIndex
         default_codec.GetVectorIndexFormat()->read(fs_ptr_, location, vector_index_ptr);
     } catch (std::exception& e) {
         std::string err_msg = "Failed to load vector index: " + std::string(e.what());
-        ENGINE_LOG_ERROR << err_msg;
+        LOG_ENGINE_ERROR_ << err_msg;
         return Status(DB_ERROR, err_msg);
     }
     return Status::OK();
@@ -115,7 +115,7 @@ SegmentReader::LoadBloomFilter(segment::IdBloomFilterPtr& id_bloom_filter_ptr) {
         default_codec.GetIdBloomFilterFormat()->read(fs_ptr_, id_bloom_filter_ptr);
     } catch (std::exception& e) {
         std::string err_msg = "Failed to load bloom filter: " + std::string(e.what());
-        ENGINE_LOG_ERROR << err_msg;
+        LOG_ENGINE_ERROR_ << err_msg;
         return Status(DB_ERROR, err_msg);
     }
     return Status::OK();
@@ -129,7 +129,7 @@ SegmentReader::LoadDeletedDocs(segment::DeletedDocsPtr& deleted_docs_ptr) {
         default_codec.GetDeletedDocsFormat()->read(fs_ptr_, deleted_docs_ptr);
     } catch (std::exception& e) {
         std::string err_msg = "Failed to load deleted docs: " + std::string(e.what());
-        ENGINE_LOG_ERROR << err_msg;
+        LOG_ENGINE_ERROR_ << err_msg;
         return Status(DB_ERROR, err_msg);
     }
     return Status::OK();
@@ -143,7 +143,7 @@ SegmentReader::ReadDeletedDocsSize(size_t& size) {
         default_codec.GetDeletedDocsFormat()->readSize(fs_ptr_, size);
     } catch (std::exception& e) {
         std::string err_msg = "Failed to read deleted docs size: " + std::string(e.what());
-        ENGINE_LOG_ERROR << err_msg;
+        LOG_ENGINE_ERROR_ << err_msg;
         return Status(DB_ERROR, err_msg);
     }
     return Status::OK();

@@ -40,31 +40,31 @@ TimeRecorder::PrintTimeRecord(const std::string& msg, double span) {
 
     switch (log_level_) {
         case 0: {
-            SERVER_LOG_TRACE << str_log;
+            LOG_SERVER_TRACE_ << str_log;
             break;
         }
         case 1: {
-            SERVER_LOG_DEBUG << str_log;
+            LOG_SERVER_DEBUG_ << str_log;
             break;
         }
         case 2: {
-            SERVER_LOG_INFO << str_log;
+            LOG_SERVER_INFO_ << str_log;
             break;
         }
         case 3: {
-            SERVER_LOG_WARNING << str_log;
+            LOG_SERVER_WARNING_ << str_log;
             break;
         }
         case 4: {
-            SERVER_LOG_ERROR << str_log;
+            LOG_SERVER_ERROR_ << str_log;
             break;
         }
         case 5: {
-            SERVER_LOG_FATAL << str_log;
+            LOG_SERVER_FATAL_ << str_log;
             break;
         }
         default: {
-            SERVER_LOG_INFO << str_log;
+            LOG_SERVER_INFO_ << str_log;
             break;
         }
     }

@@ -33,7 +33,7 @@ DiskOperation::CreateDirectory() {
         auto ret = boost::filesystem::create_directory(dir_path_);
         if (!ret) {
             std::string err_msg = "Failed to create directory: " + dir_path_;
-            ENGINE_LOG_ERROR << err_msg;
+            LOG_ENGINE_ERROR_ << err_msg;
             throw Exception(SERVER_CANNOT_CREATE_FOLDER, err_msg);
         }
     }

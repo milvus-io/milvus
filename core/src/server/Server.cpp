@@ -60,7 +60,7 @@ Server::Daemonize() {
 
     //    std::string log_path(GetLogDirFullPath());
     //    log_path += "zdb_server.(INFO/WARNNING/ERROR/CRITICAL)";
-    //    SERVER_LOG_INFO << "Log will be exported to: " + log_path);
+    //    LOG_SERVER_INFO_ << "Log will be exported to: " + log_path);
 
     pid_t pid = 0;
 
@@ -189,11 +189,11 @@ Server::Start() {
         InitLog(log_config_file_);
 
         // print version information
-        SERVER_LOG_INFO << "Milvus " << BUILD_TYPE << " version: v" << MILVUS_VERSION << ", built at " << BUILD_TIME;
+        LOG_SERVER_INFO_ << "Milvus " << BUILD_TYPE << " version: v" << MILVUS_VERSION << ", built at " << BUILD_TIME;
 #ifdef MILVUS_GPU_VERSION
-        SERVER_LOG_INFO << "GPU edition";
+        LOG_SERVER_INFO_ << "GPU edition";
 #else
-        SERVER_LOG_INFO << "CPU edition";
+        LOG_SERVER_INFO_ << "CPU edition";
 #endif
         /* record config and hardware information into log */
         LogConfigInFile(config_filename_);
@@ -264,7 +264,7 @@ Server::StartService() {
     Status stat;
     stat = engine::KnowhereResource::Initialize();
     if (!stat.ok()) {
-        SERVER_LOG_ERROR << "KnowhereResource initialize fail: " << stat.message();
+        LOG_SERVER_ERROR_ << "KnowhereResource initialize fail: " << stat.message();
         goto FAIL;
     }
 
@@ -272,7 +272,7 @@ Server::StartService() {
 
     stat = DBWrapper::GetInstance().StartService();
     if (!stat.ok()) {
-        SERVER_LOG_ERROR << "DBWrapper start service fail: " << stat.message();
+        LOG_SERVER_ERROR_ << "DBWrapper start service fail: " << stat.message();
         goto FAIL;
     }
 
@@ -281,7 +281,7 @@ Server::StartService() {
 
     // stat = storage::S3ClientWrapper::GetInstance().StartService();
     // if (!stat.ok()) {
-    //     SERVER_LOG_ERROR << "S3Client start service fail: " << stat.message();
+    //     LOG_SERVER_ERROR_ << "S3Client start service fail: " << stat.message();
     //     goto FAIL;
     // }
 
