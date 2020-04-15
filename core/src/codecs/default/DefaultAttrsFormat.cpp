@@ -37,14 +37,14 @@ DefaultAttrsFormat::read_attrs_internal(const std::string& file_path, off_t offs
     int ra_fd = open(file_path.c_str(), O_RDONLY, 00664);
     if (ra_fd == -1) {
         std::string err_msg = "Failed to open file: " + file_path + ", error: " + std::strerror(errno);
-        ENGINE_LOG_ERROR << err_msg;
+        LOG_ENGINE_ERROR_ << err_msg;
         throw Exception(SERVER_CANNOT_CREATE_FILE, err_msg);
     }
 
     size_t num_bytes;
     if (::read(ra_fd, &num_bytes, sizeof(size_t)) == -1) {
         std::string err_msg = "Failed to read from file: " + file_path + ", error: " + std::strerror(errno);
-        ENGINE_LOG_ERROR << err_msg;
+        LOG_ENGINE_ERROR_ << err_msg;
         throw Exception(SERVER_WRITE_ERROR, err_msg);
     }
 
@@ -54,14 +54,14 @@ DefaultAttrsFormat::read_attrs_internal(const std::string& file_path, off_t offs
     int off = lseek(ra_fd, offset, SEEK_SET);
     if (off == -1) {
         std::string err_msg = "Failed to seek file: " + file_path + ", error: " + std::strerror(errno);
-        ENGINE_LOG_ERROR << err_msg;
+        LOG_ENGINE_ERROR_ << err_msg;
         throw Exception(SERVER_WRITE_ERROR, err_msg);
     }
 
     raw_attrs.resize(num / sizeof(uint8_t));
     if (::read(ra_fd, raw_attrs.data(), num) == -1) {
         std::string err_msg = "Failed to read from file: " + file_path + ", error: " + std::strerror(errno);
-        ENGINE_LOG_ERROR << err_msg;
+        LOG_ENGINE_ERROR_ << err_msg;
         throw Exception(SERVER_WRITE_ERROR, err_msg);
     }
 
@@ -69,7 +69,7 @@ DefaultAttrsFormat::read_attrs_internal(const std::string& file_path, off_t offs
 
     if (::close(ra_fd) == -1) {
         std::string err_msg = "Failed to close file: " + file_path + ", error: " + std::strerror(errno);
-        ENGINE_LOG_ERROR << err_msg;
+        LOG_ENGINE_ERROR_ << err_msg;
         throw Exception(SERVER_WRITE_ERROR, err_msg);
     }
 }
@@ -79,27 +79,27 @@ DefaultAttrsFormat::read_uids_internal(const std::string& file_path, std::vector
     int uid_fd = open(file_path.c_str(), O_RDONLY, 00664);
     if (uid_fd == -1) {
         std::string err_msg = "Failed to open file: " + file_path + ", error: " + std::strerror(errno);
-        ENGINE_LOG_ERROR << err_msg;
+        LOG_ENGINE_ERROR_ << err_msg;
         throw Exception(SERVER_CANNOT_CREATE_FILE, err_msg);
     }
 
     size_t num_bytes;
     if (::read(uid_fd, &num_bytes, sizeof(size_t)) == -1) {
         std::string err_msg = "Failed to read from file: " + file_path + ", error: " + std::strerror(errno);
-        ENGINE_LOG_ERROR << err_msg;
+        LOG_ENGINE_ERROR_ << err_msg;
         throw Exception(SERVER_WRITE_ERROR, err_msg);
     }
 
     uids.resize(num_bytes / sizeof(int64_t));
     if (::read(uid_fd, uids.data(), num_bytes) == -1) {
         std::string err_msg = "Failed to read from file: " + file_path + ", error: " + std::strerror(errno);
-        ENGINE_LOG_ERROR << err_msg;
+        LOG_ENGINE_ERROR_ << err_msg;
         throw Exception(SERVER_WRITE_ERROR, err_msg);
     }
 
     if (::close(uid_fd) == -1) {
         std::string err_msg = "Failed to close file: " + file_path + ", error: " + std::strerror(errno);
-        ENGINE_LOG_ERROR << err_msg;
+        LOG_ENGINE_ERROR_ << err_msg;
         throw Exception(SERVER_WRITE_ERROR, err_msg);
     }
 }
@@ -111,7 +111,7 @@ DefaultAttrsFormat::read(const milvus::storage::FSHandlerPtr& fs_ptr, milvus::se
     std::string dir_path = fs_ptr->operation_ptr_->GetDirectory();
     if (!boost::filesystem::is_directory(dir_path)) {
         std::string err_msg = "Directory: " + dir_path + "does not exist";
-        ENGINE_LOG_ERROR << err_msg;
+        LOG_ENGINE_ERROR_ << err_msg;
         throw Exception(SERVER_INVALID_ARGUMENT, err_msg);
     }
 
@@ -156,7 +156,7 @@ DefaultAttrsFormat::write(const milvus::storage::FSHandlerPtr& fs_ptr, const mil
     auto it = attrs_ptr->attrs.begin();
     if (it == attrs_ptr->attrs.end()) {
         std::string err_msg = "Attributes is null";
-        ENGINE_LOG_ERROR << err_msg;
+        LOG_ENGINE_ERROR_ << err_msg;
         return;
     }
 
@@ -194,24 +194,24 @@ DefaultAttrsFormat::write(const milvus::storage::FSHandlerPtr& fs_ptr, const mil
         int ra_fd = open(ra_file_path.c_str(), O_WRONLY | O_TRUNC | O_CREAT, 00664);
         if (ra_fd == -1) {
             std::string err_msg = "Failed to open file: " + ra_file_path + ", error: " + std::strerror(errno);
-            ENGINE_LOG_ERROR << err_msg;
+            LOG_ENGINE_ERROR_ << err_msg;
             throw Exception(SERVER_CANNOT_CREATE_FILE, err_msg);
         }
 
         size_t ra_num_bytes = it->second->GetNbytes();
         if (::write(ra_fd, &ra_num_bytes, sizeof(size_t)) == -1) {
             std::string err_msg = "Failed to write to file: " + ra_file_path + ", error: " + std::strerror(errno);
-            ENGINE_LOG_ERROR << err_msg;
+            LOG_ENGINE_ERROR_ << err_msg;
             throw Exception(SERVER_WRITE_ERROR, err_msg);
         }
         if (::write(ra_fd, it->second->GetData().data(), ra_num_bytes) == -1) {
             std::string err_msg = "Failed to write to file: " + ra_file_path + ", error: " + std::strerror(errno);
-            ENGINE_LOG_ERROR << err_msg;
+            LOG_ENGINE_ERROR_ << err_msg;
             throw Exception(SERVER_WRITE_ERROR, err_msg);
         }
         if (::close(ra_fd) == -1) {
             std::string err_msg = "Failed to close file: " + ra_file_path + ", error: " + std::strerror(errno);
-            ENGINE_LOG_ERROR << err_msg;
+            LOG_ENGINE_ERROR_ << err_msg;
             throw Exception(SERVER_WRITE_ERROR, err_msg);
         }
 
@@ -226,7 +226,7 @@ DefaultAttrsFormat::read_uids(const milvus::storage::FSHandlerPtr& fs_ptr, std::
     std::string dir_path = fs_ptr->operation_ptr_->GetDirectory();
     if (!boost::filesystem::is_directory(dir_path)) {
         std::string err_msg = "Directory: " + dir_path + "does not exist";
-        ENGINE_LOG_ERROR << err_msg;
+        LOG_ENGINE_ERROR_ << err_msg;
         throw Exception(SERVER_INVALID_ARGUMENT, err_msg);
     }
 

@@ -1527,7 +1527,7 @@ DBImpl::HybridQueryAsync(const std::shared_ptr<server::Context>& context, const 
 
     VectorsData vectors;
 
-    ENGINE_LOG_DEBUG << "Engine query begin, index file count: " << files.size();
+    LOG_ENGINE_DEBUG_ << LogOut("Engine query begin, index file count: %ld", files.size());
     scheduler::SearchJobPtr job =
         std::make_shared<scheduler::SearchJob>(query_async_ctx, general_query, attr_type, vectors);
     for (auto& file : files) {
@@ -1756,19 +1756,19 @@ DBImpl::MergeFiles(const std::string& collection_id, const meta::SegmentsSchema&
 }
 
 Status
-DBImpl::MergeHybridFiles(const std::string& table_id, const milvus::engine::meta::SegmentsSchema& files) {
+DBImpl::MergeHybridFiles(const std::string& collection_id, const milvus::engine::meta::SegmentsSchema& files) {
     // const std::lock_guard<std::mutex> lock(flush_merge_compact_mutex_);
 
-    ENGINE_LOG_DEBUG << "Merge files for table: " << table_id;
+    LOG_ENGINE_DEBUG_ << "Merge files for collection: " << collection_id;
 
     // step 1: create table file
     meta::SegmentSchema table_file;
-    table_file.collection_id_ = table_id;
+    table_file.collection_id_ = collection_id;
     table_file.file_type_ = meta::SegmentSchema::NEW_MERGE;
     Status status = meta_ptr_->CreateHybridCollectionFile(table_file);
 
     if (!status.ok()) {
-        ENGINE_LOG_ERROR << "Failed to create table: " << status.ToString();
+        LOG_ENGINE_ERROR_ << "Failed to create collection: " << status.ToString();
         return status;
     }
 
@@ -1805,18 +1805,18 @@ DBImpl::MergeHybridFiles(const std::string& table_id, const milvus::engine::meta
         fiu_do_on("DBImpl.MergeFiles.Serialize_ErrorStatus", status = Status(DB_ERROR, ""));
     } catch (std::exception& ex) {
         std::string msg = "Serialize merged index encounter exception: " + std::string(ex.what());
-        ENGINE_LOG_ERROR << msg;
+        LOG_ENGINE_ERROR_ << msg;
         status = Status(DB_ERROR, msg);
     }
 
     if (!status.ok()) {
-        ENGINE_LOG_ERROR << "Failed to persist merged segment: " << new_segment_dir << ". Error: " << status.message();
+        LOG_ENGINE_ERROR_ << "Failed to persist merged segment: " << new_segment_dir << ". Error: " << status.message();
 
         // if failed to serialize merge file to disk
         // typical error: out of disk space, out of memory or permission denied
         table_file.file_type_ = meta::SegmentSchema::TO_DELETE;
         status = meta_ptr_->UpdateCollectionFile(table_file);
-        ENGINE_LOG_DEBUG << "Failed to update file to index, mark file: " << table_file.file_id_ << " to to_delete";
+        LOG_ENGINE_DEBUG_ << "Failed to update file to index, mark file: " << table_file.file_id_ << " to to_delete";
 
         return status;
     }
@@ -1835,8 +1835,8 @@ DBImpl::MergeHybridFiles(const std::string& table_id, const milvus::engine::meta
     table_file.row_count_ = segment_writer_ptr->VectorCount();
     updated.push_back(table_file);
     status = meta_ptr_->UpdateCollectionFiles(updated);
-    ENGINE_LOG_DEBUG << "New merged segment " << table_file.segment_id_ << " of size " << segment_writer_ptr->Size()
-                     << " bytes";
+    LOG_ENGINE_DEBUG_ << "New merged segment " << table_file.segment_id_ << " of size " << segment_writer_ptr->Size()
+                      << " bytes";
 
     if (options_.insert_cache_immediately_) {
         segment_writer_ptr->Cache();

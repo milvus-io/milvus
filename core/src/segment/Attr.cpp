@@ -112,7 +112,7 @@ Attr::Erase(std::vector<int32_t>& offsets) {
 
     auto end = std::chrono::high_resolution_clock::now();
     std::chrono::duration<double> diff = end - start;
-    ENGINE_LOG_DEBUG << "Sorting " << offsets.size() << " offsets to delete took " << diff.count() << " s";
+    LOG_ENGINE_DEBUG_ << "Sorting " << offsets.size() << " offsets to delete took " << diff.count() << " s";
 
     start = std::chrono::high_resolution_clock::now();
 
@@ -120,9 +120,9 @@ Attr::Erase(std::vector<int32_t>& offsets) {
 
     end = std::chrono::high_resolution_clock::now();
     diff = end - start;
-    ENGINE_LOG_DEBUG << "Deduplicating " << offsets.size() << " offsets to delete took " << diff.count() << " s";
+    LOG_ENGINE_DEBUG_ << "Deduplicating " << offsets.size() << " offsets to delete took " << diff.count() << " s";
 
-    ENGINE_LOG_DEBUG << "Attributes begin erasing...";
+    LOG_ENGINE_DEBUG_ << "Attributes begin erasing...";
 
     size_t new_size = uids_.size() - offsets.size();
     std::vector<doc_id_t> new_uids(new_size);
@@ -160,8 +160,8 @@ Attr::Erase(std::vector<int32_t>& offsets) {
 
     end = std::chrono::high_resolution_clock::now();
     diff = end - start;
-    ENGINE_LOG_DEBUG << "Erasing " << offsets.size() << " vectors out of " << loop_size << " vectors took "
-                     << diff.count() << " s";
+    LOG_ENGINE_DEBUG_ << "Erasing " << offsets.size() << " vectors out of " << loop_size << " vectors took "
+                      << diff.count() << " s";
 }
 
 }  // namespace segment

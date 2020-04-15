@@ -1826,7 +1826,7 @@ SqliteMetaImpl::CreateHybridCollection(meta::CollectionSchema& collection_schema
             return HandleException("Encounter exception when create collection", e.what());
         }
 
-        ENGINE_LOG_DEBUG << "Successfully create collection collection: " << collection_schema.collection_id_;
+        LOG_ENGINE_DEBUG_ << "Successfully create collection collection: " << collection_schema.collection_id_;
 
         Status status = utils::CreateCollectionPath(options_, collection_schema.collection_id_);
         if (!status.ok()) {
@@ -1837,7 +1837,7 @@ SqliteMetaImpl::CreateHybridCollection(meta::CollectionSchema& collection_schema
             for (uint64_t i = 0; i < fields_schema.fields_schema_.size(); ++i) {
                 hybrid::FieldSchema schema = fields_schema.fields_schema_[i];
                 auto field_id = ConnectorPtr->insert(schema);
-                ENGINE_LOG_DEBUG << "Successfully create collection field" << field_id;
+                LOG_ENGINE_DEBUG_ << "Successfully create collection field" << field_id;
             }
         } catch (std::exception& e) {
             return HandleException("Encounter exception when create collection field", e.what());
@@ -1950,7 +1950,7 @@ SqliteMetaImpl::CreateHybridCollectionFile(SegmentSchema& file_schema) {
             ConnectorPtr->insert(field_schema);
         }
 
-        ENGINE_LOG_DEBUG << "Successfully create collection file, file id = " << file_schema.file_id_;
+        LOG_ENGINE_DEBUG_ << "Successfully create collection file, file id = " << file_schema.file_id_;
         return utils::CreateCollectionFilePath(options_, file_schema);
     } catch (std::exception& e) {
         return HandleException("Encounter exception when create collection file", e.what());

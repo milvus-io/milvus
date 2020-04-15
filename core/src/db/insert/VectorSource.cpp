@@ -134,7 +134,7 @@ VectorSource::AddEntities(const milvus::segment::SegmentWriterPtr& segment_write
     if (status.ok()) {
         current_num_attrs_added += num_entities_added;
     } else {
-        ENGINE_LOG_ERROR << LogOut("[%s][%ld]", "insert", 0) << "Generate ids fail: " << status.message();
+        LOG_ENGINE_ERROR_ << LogOut("[%s][%ld]", "insert", 0) << "Generate ids fail: " << status.message();
         return status;
     }
 
@@ -143,7 +143,7 @@ VectorSource::AddEntities(const milvus::segment::SegmentWriterPtr& segment_write
     vectors.resize(size);
     memcpy(vectors.data(), vectors_.float_data_.data() + current_num_vectors_added * collection_file_schema.dimension_,
            size);
-    ENGINE_LOG_DEBUG << LogOut("[%s][%ld]", "insert", 0) << "Insert into segment";
+    LOG_ENGINE_DEBUG_ << LogOut("[%s][%ld]", "insert", 0) << "Insert into segment";
     status = segment_writer_ptr->AddVectors(collection_file_schema.file_id_, vectors, vector_ids_to_add);
     if (status.ok()) {
         current_num_vectors_added += num_entities_added;
@@ -153,7 +153,7 @@ VectorSource::AddEntities(const milvus::segment::SegmentWriterPtr& segment_write
 
     // don't need to add current_num_attrs_added again
     if (!status.ok()) {
-        ENGINE_LOG_ERROR << "VectorSource::Add Vectors failed: " + status.ToString();
+        LOG_ENGINE_ERROR_ << LogOut("[%s][%ld]", "insert", 0) << "VectorSource::Add failed: " + status.ToString();
         return status;
     }
 

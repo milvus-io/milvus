@@ -132,7 +132,7 @@ SegmentWriter::WriteAttrs() {
         default_codec.GetAttrsFormat()->write(fs_ptr_, segment_ptr_->attrs_ptr_);
     } catch (std::exception& e) {
         std::string err_msg = "Failed to write vectors: " + std::string(e.what());
-        ENGINE_LOG_ERROR << err_msg;
+        LOG_ENGINE_ERROR_ << err_msg;
         return Status(SERVER_WRITE_ERROR, err_msg);
     }
     return Status::OK();

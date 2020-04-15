@@ -81,7 +81,7 @@ MemTable::AddEntities(const milvus::engine::VectorSourcePtr& source) {
 
         if (!status.ok()) {
             std::string err_msg = "Insert failed: " + status.ToString();
-            ENGINE_LOG_ERROR << err_msg;
+            LOG_ENGINE_ERROR_ << LogOut("[%s][%ld] ", "insert", 0) << err_msg;
             return Status(DB_ERROR, err_msg);
         }
     }
