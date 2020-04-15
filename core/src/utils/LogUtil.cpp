@@ -97,9 +97,9 @@ LogConfigInFile(const std::string& path) {
     auto node = YAML::LoadFile(path);
     YAML::Emitter out;
     out << node;
-    LOG_SERVER_DEBUG_ << "\n\n"
-                      << std::string(15, '*') << "Config in file" << std::string(15, '*') << "\n\n"
-                      << out.c_str();
+    LOG_SERVER_INFO_ << "\n\n"
+                     << std::string(15, '*') << "Config in file" << std::string(15, '*') << "\n\n"
+                     << out.c_str();
 }
 
 void
@@ -107,9 +107,9 @@ LogConfigInMem() {
     auto& config = Config::GetInstance();
     std::string config_str;
     config.GetConfigJsonStr(config_str, 3);
-    LOG_SERVER_DEBUG_ << "\n\n"
-                      << std::string(15, '*') << "Config in memory" << std::string(15, '*') << "\n\n"
-                      << config_str;
+    LOG_SERVER_INFO_ << "\n\n"
+                     << std::string(15, '*') << "Config in memory" << std::string(15, '*') << "\n\n"
+                     << config_str;
 }
 
 void
@@ -132,7 +132,7 @@ LogCpuInfo() {
     }
 
     auto sub_str = cpu_info.substr(processor_pos);
-    LOG_SERVER_DEBUG_ << "\n\n" << std::string(15, '*') << "CPU" << std::string(15, '*') << "\n\n" << sub_str;
+    LOG_SERVER_INFO_ << "\n\n" << std::string(15, '*') << "CPU" << std::string(15, '*') << "\n\n" << sub_str;
 }
 
 }  // namespace server
