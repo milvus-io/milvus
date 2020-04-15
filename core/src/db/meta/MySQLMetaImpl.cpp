@@ -651,6 +651,9 @@ MySQLMetaImpl::DeleteCollectionFiles(const std::string& collection_id) {
                 return Status(DB_ERROR, "Failed to connect to meta server(mysql)");
             }
 
+            // to ensure UpdateCollectionFiles to be a atomic operation
+            std::lock_guard<std::mutex> meta_lock(meta_mutex_);
+
             // soft delete collection files
             mysqlpp::Query statement = connectionPtr->query();
             //
@@ -726,6 +729,9 @@ MySQLMetaImpl::CreateCollectionFile(SegmentSchema& file_schema) {
                 return Status(DB_ERROR, "Failed to connect to meta server(mysql)");
             }
 
+            // to ensure UpdateCollectionFiles to be a atomic operation
+            std::lock_guard<std::mutex> meta_lock(meta_mutex_);
+
             mysqlpp::Query statement = connectionPtr->query();
 
             statement << "INSERT INTO " << META_TABLEFILES << " VALUES(" << id << ", " << mysqlpp::quote
@@ -776,6 +782,9 @@ MySQLMetaImpl::GetCollectionFiles(const std::string& collection_id, const std::v
             if (is_null_connection) {
                 return Status(DB_ERROR, "Failed to connect to meta server(mysql)");
             }
+
+            // to ensure UpdateCollectionFiles to be a atomic operation
+            std::lock_guard<std::mutex> meta_lock(meta_mutex_);
 
             mysqlpp::Query statement = connectionPtr->query();
             statement
@@ -833,6 +842,9 @@ MySQLMetaImpl::GetCollectionFilesBySegmentId(const std::string& segment_id,
             if (connectionPtr == nullptr) {
                 return Status(DB_ERROR, "Failed to connect to meta server(mysql)");
             }
+
+            // to ensure UpdateCollectionFiles to be a atomic operation
+            std::lock_guard<std::mutex> meta_lock(meta_mutex_);
 
             mysqlpp::Query statement = connectionPtr->query();
             statement << "SELECT id, table_id, segment_id, engine_type, file_id, file_type, file_size, "
@@ -897,15 +909,14 @@ MySQLMetaImpl::UpdateCollectionIndex(const std::string& collection_id, const Col
                 return Status(DB_ERROR, "Failed to connect to meta server(mysql)");
             }
 
-            mysqlpp::Query updateCollectionIndexParamQuery = connectionPtr->query();
-            updateCollectionIndexParamQuery << "SELECT id, state, dimension, created_on"
-                                            << " FROM " << META_TABLES << " WHERE table_id = " << mysqlpp::quote
-                                            << collection_id << " AND state <> "
-                                            << std::to_string(CollectionSchema::TO_DELETE) << ";";
+            mysqlpp::Query statement = connectionPtr->query();
+            statement << "SELECT id, state, dimension, created_on"
+                      << " FROM " << META_TABLES << " WHERE table_id = " << mysqlpp::quote << collection_id
+                      << " AND state <> " << std::to_string(CollectionSchema::TO_DELETE) << ";";
 
-            LOG_ENGINE_DEBUG_ << "UpdateCollectionIndex: " << updateCollectionIndexParamQuery.str();
+            LOG_ENGINE_DEBUG_ << "UpdateCollectionIndex: " << statement.str();
 
-            mysqlpp::StoreQueryResult res = updateCollectionIndexParamQuery.store();
+            mysqlpp::StoreQueryResult res = statement.store();
 
             if (res.num_rows() == 1) {
                 const mysqlpp::Row& resRow = res[0];
@@ -915,18 +926,16 @@ MySQLMetaImpl::UpdateCollectionIndex(const std::string& collection_id, const Col
                 uint16_t dimension = resRow["dimension"];
                 int64_t created_on = resRow["created_on"];
 
-                updateCollectionIndexParamQuery
-                    << "UPDATE " << META_TABLES << " SET id = " << id << " ,state = " << state
-                    << " ,dimension = " << dimension << " ,created_on = " << created_on
-                    << " ,engine_type = " << index.engine_type_ << " ,index_params = " << mysqlpp::quote
-                    << index.extra_params_.dump() << " ,metric_type = " << index.metric_type_
-                    << " WHERE table_id = " << mysqlpp::quote << collection_id << ";";
+                statement << "UPDATE " << META_TABLES << " SET id = " << id << " ,state = " << state
+                          << " ,dimension = " << dimension << " ,created_on = " << created_on
+                          << " ,engine_type = " << index.engine_type_ << " ,index_params = " << mysqlpp::quote
+                          << index.extra_params_.dump() << " ,metric_type = " << index.metric_type_
+                          << " WHERE table_id = " << mysqlpp::quote << collection_id << ";";
 
-                LOG_ENGINE_DEBUG_ << "UpdateCollectionIndex: " << updateCollectionIndexParamQuery.str();
+                LOG_ENGINE_DEBUG_ << "UpdateCollectionIndex: " << statement.str();
 
-                if (!updateCollectionIndexParamQuery.exec()) {
-                    return HandleException("Failed to update collection index",
-                                           updateCollectionIndexParamQuery.error());
+                if (!statement.exec()) {
+                    return HandleException("Failed to update collection index", statement.error());
                 }
             } else {
                 return Status(DB_NOT_FOUND, "Collection " + collection_id + " not found");
@@ -1019,7 +1028,7 @@ MySQLMetaImpl::GetCollectionFlushLSN(const std::string& collection_id, uint64_t&
             }
 
             mysqlpp::Query statement = connectionPtr->query();
-            statement << "SELECT flush_lsn FROM " << META_TABLES << " WHERE collection_id = " << mysqlpp::quote
+            statement << "SELECT flush_lsn FROM " << META_TABLES << " WHERE table_id = " << mysqlpp::quote
                       << collection_id << ";";
 
             LOG_ENGINE_DEBUG_ << "GetCollectionFlushLSN: " << statement.str();
@@ -1053,6 +1062,9 @@ MySQLMetaImpl::UpdateCollectionFile(SegmentSchema& file_schema) {
             if (is_null_connection) {
                 return Status(DB_ERROR, "Failed to connect to meta server(mysql)");
             }
+
+            // to ensure UpdateCollectionFiles to be a atomic operation
+            std::lock_guard<std::mutex> meta_lock(meta_mutex_);
 
             mysqlpp::Query statement = connectionPtr->query();
 
@@ -1120,6 +1132,9 @@ MySQLMetaImpl::UpdateCollectionFilesToIndex(const std::string& collection_id) {
             return Status(DB_ERROR, "Failed to connect to meta server(mysql)");
         }
 
+        // to ensure UpdateCollectionFiles to be a atomic operation
+        std::lock_guard<std::mutex> meta_lock(meta_mutex_);
+
         mysqlpp::Query statement = connectionPtr->query();
 
         statement << "UPDATE " << META_TABLEFILES << " SET file_type = " << std::to_string(SegmentSchema::TO_INDEX)
@@ -1154,6 +1169,9 @@ MySQLMetaImpl::UpdateCollectionFiles(SegmentsSchema& files) {
             if (is_null_connection) {
                 return Status(DB_ERROR, "Failed to connect to meta server(mysql)");
             }
+
+            // to ensure UpdateCollectionFiles to be a atomic operation
+            std::lock_guard<std::mutex> meta_lock(meta_mutex_);
 
             mysqlpp::Query statement = connectionPtr->query();
 
@@ -1228,6 +1246,9 @@ MySQLMetaImpl::UpdateCollectionFilesRowCount(SegmentsSchema& files) {
             if (is_null_connection) {
                 return Status(DB_ERROR, "Failed to connect to meta server(mysql)");
             }
+
+            // to ensure UpdateCollectionFiles to be a atomic operation
+            std::lock_guard<std::mutex> meta_lock(meta_mutex_);
 
             mysqlpp::Query statement = connectionPtr->query();
 
@@ -1442,7 +1463,7 @@ MySQLMetaImpl::ShowPartitions(const std::string& collection_id,
                       << " WHERE owner_table = " << mysqlpp::quote << collection_id << " AND state <> "
                       << std::to_string(CollectionSchema::TO_DELETE) << ";";
 
-            LOG_ENGINE_DEBUG_ << "AllCollections: " << statement.str();
+            LOG_ENGINE_DEBUG_ << "ShowPartitions: " << statement.str();
 
             res = statement.store();
         }  // Scoped Connection
@@ -1498,7 +1519,7 @@ MySQLMetaImpl::GetPartitionName(const std::string& collection_id, const std::str
                       << collection_id << " AND partition_tag = " << mysqlpp::quote << valid_tag << " AND state <> "
                       << std::to_string(CollectionSchema::TO_DELETE) << ";";
 
-            LOG_ENGINE_DEBUG_ << "AllCollections: " << statement.str();
+            LOG_ENGINE_DEBUG_ << "GetPartitionName: " << statement.str();
 
             res = statement.store();
         }  // Scoped Connection
@@ -1532,6 +1553,9 @@ MySQLMetaImpl::FilesToSearch(const std::string& collection_id, SegmentsSchema& f
             if (is_null_connection) {
                 return Status(DB_ERROR, "Failed to connect to meta server(mysql)");
             }
+
+            // to ensure UpdateCollectionFiles to be a atomic operation
+            std::lock_guard<std::mutex> meta_lock(meta_mutex_);
 
             mysqlpp::Query statement = connectionPtr->query();
             statement << "SELECT id, table_id, segment_id, engine_type, file_id, file_type, file_size, row_count, date"
@@ -1615,6 +1639,9 @@ MySQLMetaImpl::FilesToMerge(const std::string& collection_id, SegmentsSchema& fi
                 return Status(DB_ERROR, "Failed to connect to meta server(mysql)");
             }
 
+            // to ensure UpdateCollectionFiles to be a atomic operation
+            std::lock_guard<std::mutex> meta_lock(meta_mutex_);
+
             mysqlpp::Query statement = connectionPtr->query();
             statement << "SELECT id, table_id, segment_id, file_id, file_type, file_size, row_count, date, "
                          "engine_type, created_on"
@@ -1683,6 +1710,9 @@ MySQLMetaImpl::FilesToIndex(SegmentsSchema& files) {
             if (is_null_connection) {
                 return Status(DB_ERROR, "Failed to connect to meta server(mysql)");
             }
+
+            // to ensure UpdateCollectionFiles to be a atomic operation
+            std::lock_guard<std::mutex> meta_lock(meta_mutex_);
 
             mysqlpp::Query statement = connectionPtr->query();
             statement << "SELECT id, table_id, segment_id, engine_type, file_id, file_type, file_size, "
@@ -1773,16 +1803,19 @@ MySQLMetaImpl::FilesByType(const std::string& collection_id, const std::vector<i
                 types += std::to_string(type);
             }
 
-            mysqlpp::Query hasNonIndexFilesQuery = connectionPtr->query();
+            // to ensure UpdateCollectionFiles to be a atomic operation
+            std::lock_guard<std::mutex> meta_lock(meta_mutex_);
+
+            mysqlpp::Query statement = connectionPtr->query();
             // since collection_id is a unique column we just need to check whether it exists or not
-            hasNonIndexFilesQuery
+            statement
                 << "SELECT id, segment_id, engine_type, file_id, file_type, file_size, row_count, date, created_on"
                 << " FROM " << META_TABLEFILES << " WHERE table_id = " << mysqlpp::quote << collection_id
                 << " AND file_type in (" << types << ");";
 
-            LOG_ENGINE_DEBUG_ << "FilesByType: " << hasNonIndexFilesQuery.str();
+            LOG_ENGINE_DEBUG_ << "FilesByType: " << statement.str();
 
-            res = hasNonIndexFilesQuery.store();
+            res = statement.store();
         }  // Scoped Connection
 
         CollectionSchema collection_schema;
@@ -1905,6 +1938,9 @@ MySQLMetaImpl::FilesByID(const std::vector<size_t>& ids, SegmentsSchema& files) 
             if (is_null_connection) {
                 return Status(DB_ERROR, "Failed to connect to meta server(mysql)");
             }
+
+            // to ensure UpdateCollectionFiles to be a atomic operation
+            std::lock_guard<std::mutex> meta_lock(meta_mutex_);
 
             mysqlpp::Query statement = connectionPtr->query();
             statement << "SELECT id, table_id, segment_id, engine_type, file_id, file_type, file_size, row_count, date"
@@ -2054,6 +2090,9 @@ MySQLMetaImpl::Size(uint64_t& result) {
                 return Status(DB_ERROR, "Failed to connect to meta server(mysql)");
             }
 
+            // to ensure UpdateCollectionFiles to be a atomic operation
+            std::lock_guard<std::mutex> meta_lock(meta_mutex_);
+
             mysqlpp::Query statement = connectionPtr->query();
             statement << "SELECT IFNULL(SUM(file_size),0) AS sum"
                       << " FROM " << META_TABLEFILES << " WHERE file_type <> "
@@ -2143,14 +2182,21 @@ MySQLMetaImpl::CleanUpFilesWithTTL(uint64_t seconds /*, CleanUpFilter* filter*/)
             }
 
             mysqlpp::Query statement = connectionPtr->query();
-            statement << "SELECT id, table_id, segment_id, engine_type, file_id, file_type, date"
-                      << " FROM " << META_TABLEFILES << " WHERE file_type IN ("
-                      << std::to_string(SegmentSchema::TO_DELETE) << "," << std::to_string(SegmentSchema::BACKUP) << ")"
-                      << " AND updated_time < " << std::to_string(now - seconds * US_PS) << ";";
+            mysqlpp::StoreQueryResult res;
+            {
+                // to ensure UpdateCollectionFiles to be a atomic operation
+                std::lock_guard<std::mutex> meta_lock(meta_mutex_);
 
-            LOG_ENGINE_DEBUG_ << "CleanUpFilesWithTTL: " << statement.str();
+                statement << "SELECT id, table_id, segment_id, engine_type, file_id, file_type, date"
+                          << " FROM " << META_TABLEFILES << " WHERE file_type IN ("
+                          << std::to_string(SegmentSchema::TO_DELETE) << "," << std::to_string(SegmentSchema::BACKUP)
+                          << ")"
+                          << " AND updated_time < " << std::to_string(now - seconds * US_PS) << ";";
 
-            mysqlpp::StoreQueryResult res = statement.store();
+                LOG_ENGINE_DEBUG_ << "CleanUpFilesWithTTL: " << statement.str();
+
+                res = statement.store();
+            }
 
             SegmentSchema collection_file;
             std::vector<std::string> delete_ids;
@@ -2384,6 +2430,9 @@ MySQLMetaImpl::Count(const std::string& collection_id, uint64_t& result) {
             if (is_null_connection) {
                 return Status(DB_ERROR, "Failed to connect to meta server(mysql)");
             }
+
+            // to ensure UpdateCollectionFiles to be a atomic operation
+            std::lock_guard<std::mutex> meta_lock(meta_mutex_);
 
             mysqlpp::Query statement = connectionPtr->query();
             statement << "SELECT row_count"

@@ -13,7 +13,7 @@ Please mark all change in change log and use the issue from GitHub
 
 ## Task
 
-# Milvus 0.8.0 (TBD)
+# Milvus 0.8.0 (2020-04-15)
 
 ## Bug
 -   \#1276 SQLite throw exception after create 50000+ partitions in a table
@@ -22,6 +22,10 @@ Please mark all change in change log and use the issue from GitHub
 -   \#1832 Fix crash in tracing module
 -   \#1873 Fix index file serialize to incorrect path
 -   \#1881 Fix bad alloc when index files lost
+-   \#1883 Fix inserted vectors becomes all zero when index_file_size >= 2GB
+-   \#1901 Search failed with flat index
+-   \#1903 Fix invalid annoy result
+-   \#1910 C++ SDK GetIDsInSegment could not work for large dataset
 
 ## Feature
 -   \#261  Integrate ANNOY into Milvus
@@ -41,9 +45,10 @@ Please mark all change in change log and use the issue from GitHub
 -   \#1886 Refactor log on search and insert request
 -   \#1897 Heap pop and push can be realized by heap_swap_top
 -   \#1921 Use TimeRecorder instead of chrono
+-   \#1928 Fix too many data and uid copies when loading files
+-   \#1930 Upgrade mishards to v0.8.0
 
 ## Task
-
 
 # Milvus 0.7.1 (2020-03-29)
 
@@ -708,14 +713,14 @@ Please mark all change in change log and use the issue from GitHub
 -   MS-16 Implement metrics without prometheus
 -   MS-21 Implement SDK interface part 2
 -   MS-26 CMake. Add thirdparty packages
--   MS-31 cmake: add prometheus
+-   MS-31 CMake: add prometheus
 -   MS-33 cmake: add -j4 to make third party packages build faster
 -   MS-27 Support gpu config and disable license build config in cmake
 -   MS-47 Add query vps metrics
 -   MS-37 Add query, cache usage, disk write speed and file data size metrics
 -   MS-30 Use faiss v1.5.2
 -   MS-54 cmake: Change Thrift third party URL to github.com
--   MS-69 prometheus: add all proposed metrics
+-   MS-69 Prometheus: add all proposed metrics
 
 ## Task
 

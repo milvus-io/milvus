@@ -1033,6 +1033,8 @@ DBImpl::GetVectorByID(const std::string& collection_id, const IDNumber& vector_i
         return status;
     }
 
+    OngoingFileChecker::GetInstance().MarkOngoingFiles(files_to_query);
+
     std::vector<meta::CollectionSchema> partition_array;
     status = meta_ptr_->ShowPartitions(collection_id, partition_array);
     for (auto& schema : partition_array) {
@@ -1043,17 +1045,18 @@ DBImpl::GetVectorByID(const std::string& collection_id, const IDNumber& vector_i
             LOG_ENGINE_ERROR_ << err_msg;
             return status;
         }
+
+        OngoingFileChecker::GetInstance().MarkOngoingFiles(files);
         files_to_query.insert(files_to_query.end(), std::make_move_iterator(files.begin()),
                               std::make_move_iterator(files.end()));
     }
 
     if (files_to_query.empty()) {
         LOG_ENGINE_DEBUG_ << "No files to get vector by id from";
-        return Status::OK();
+        return Status(DB_NOT_FOUND, "Collection is empty");
     }
 
     cache::CpuCacheMgr::GetInstance()->PrintInfo();
-    OngoingFileChecker::GetInstance().MarkOngoingFiles(files_to_query);
 
     status = GetVectorByIdHelper(collection_id, vector_id, vector, files_to_query);
 
@@ -1137,7 +1140,11 @@ DBImpl::GetVectorIDs(const std::string& collection_id, const std::string& segmen
 Status
 DBImpl::GetVectorByIdHelper(const std::string& collection_id, IDNumber vector_id, VectorsData& vector,
                             const meta::SegmentsSchema& files) {
-    LOG_ENGINE_DEBUG_ << "Getting vector by id in " << files.size() << " files";
+    LOG_ENGINE_DEBUG_ << "Getting vector by id in " << files.size() << " files, id = " << vector_id;
+
+    vector.vector_count_ = 0;
+    vector.float_data_.clear();
+    vector.binary_data_.clear();
 
     for (auto& file : files) {
         // Load bloom filter
@@ -1165,6 +1172,7 @@ DBImpl::GetVectorByIdHelper(const std::string& collection_id, IDNumber vector_id
                 segment::DeletedDocsPtr deleted_docs_ptr;
                 status = segment_reader.LoadDeletedDocs(deleted_docs_ptr);
                 if (!status.ok()) {
+                    LOG_ENGINE_ERROR_ << status.message();
                     return status;
                 }
                 auto& deleted_docs = deleted_docs_ptr->GetDeletedDocs();
@@ -1177,6 +1185,7 @@ DBImpl::GetVectorByIdHelper(const std::string& collection_id, IDNumber vector_id
                     std::vector<uint8_t> raw_vector;
                     status = segment_reader.LoadVectors(offset * single_vector_bytes, single_vector_bytes, raw_vector);
                     if (!status.ok()) {
+                        LOG_ENGINE_ERROR_ << status.message();
                         return status;
                     }
 
@@ -1195,6 +1204,11 @@ DBImpl::GetVectorByIdHelper(const std::string& collection_id, IDNumber vector_id
         } else {
             continue;
         }
+    }
+
+    if (vector.binary_data_.empty() && vector.float_data_.empty()) {
+        std::string msg = "Vector with id " + std::to_string(vector_id) + " not found in collection " + collection_id;
+        LOG_ENGINE_DEBUG_ << msg;
     }
 
     return Status::OK();
