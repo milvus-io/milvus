@@ -21,7 +21,9 @@
 #include <arpa/inet.h>
 
 #ifdef MILVUS_GPU_VERSION
+
 #include <cuda_runtime.h>
+
 #endif
 
 #include <fiu-local.h>
@@ -38,6 +40,8 @@ namespace {
 constexpr size_t COLLECTION_NAME_SIZE_LIMIT = 255;
 constexpr int64_t COLLECTION_DIMENSION_LIMIT = 32768;
 constexpr int32_t INDEX_FILE_SIZE_LIMIT = 4096;  // index trigger size max = 4096 MB
+constexpr int64_t M_BYTE = 1024 * 1024;
+constexpr int64_t MAX_INSERT_DATA_SIZE = 256 * M_BYTE;
 
 Status
 CheckParameterRange(const milvus::json& json_params, const std::string& param_name, int64_t min, int64_t max,
@@ -352,6 +356,25 @@ ValidationUtil::ValidateVectorData(const engine::VectorsData& vectors,
         if (vectors.float_data_.size() / vector_count != table_schema.dimension_) {
             return Status(SERVER_INVALID_VECTOR_DIMENSION,
                           "The vector dimension must be equal to the collection dimension.");
+        }
+    }
+
+    return Status::OK();
+}
+
+Status
+ValidationUtil::ValidateVectorDataSize(const engine::VectorsData& vectors,
+                                       const engine::meta::CollectionSchema& table_schema) {
+    std::string msg =
+        "The amount of data inserted each time cannot exceed " + std::to_string(MAX_INSERT_DATA_SIZE / M_BYTE) + " MB";
+    if (engine::utils::IsBinaryMetricType(table_schema.metric_type_)) {
+        if (vectors.binary_data_.size() > MAX_INSERT_DATA_SIZE) {
+            return Status(SERVER_INVALID_ROWRECORD_ARRAY, msg);
+        }
+
+    } else {
+        if (vectors.float_data_.size() * sizeof(float) > MAX_INSERT_DATA_SIZE) {
+            return Status(SERVER_INVALID_ROWRECORD_ARRAY, msg);
         }
     }
 

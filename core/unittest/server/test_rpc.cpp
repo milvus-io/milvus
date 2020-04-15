@@ -346,11 +346,6 @@ TEST_F(RpcHandlerTest, INSERT_TEST) {
     ASSERT_NE(vector_ids.vector_id_array_size(), VECTOR_COUNT);
     fiu_disable("InsertRequest.OnExecute.throw_std_exception");
 
-    fiu_enable("InsertRequest.OnExecute.invalid_dim", 1, NULL, 0);
-    handler->Insert(&context, &request, &vector_ids);
-    ASSERT_NE(vector_ids.vector_id_array_size(), VECTOR_COUNT);
-    fiu_disable("InsertRequest.OnExecute.invalid_dim");
-
     fiu_enable("InsertRequest.OnExecute.insert_fail", 1, NULL, 0);
     handler->Insert(&context, &request, &vector_ids);
     fiu_disable("InsertRequest.OnExecute.insert_fail");
