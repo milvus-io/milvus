@@ -5,7 +5,7 @@ Please mark all change in change log and use the issue from GitHub
 # Milvus 0.9.0 (TBD)
 
 ## Bug
--   \#1925 To flush all collections, flush() doesn't work
+-   \#1925 To flush all collections, flush() cannot work
 
 ## Feature
 
