@@ -25,7 +25,7 @@ class ServiceHandler(milvus_pb2_grpc.MilvusServiceServicer):
     MAX_TOPK = 2048
 
     def __init__(self, tracer, router, max_workers=multiprocessing.cpu_count(), **kwargs):
-        self.table_meta = {}
+        self.collection_meta = {}
         self.error_handlers = {}
         self.tracer = tracer
         self.router = router
@@ -106,8 +106,8 @@ class ServiceHandler(milvus_pb2_grpc.MilvusServiceServicer):
 
     def _do_query(self,
                   context,
-                  table_id,
-                  table_meta,
+                  collection_id,
+                  collection_meta,
                   vectors,
                   topk,
                   search_params,
@@ -119,7 +119,7 @@ class ServiceHandler(milvus_pb2_grpc.MilvusServiceServicer):
         p_span = None if self.tracer.empty else context.get_active_span(
         ).context
         with self.tracer.start_span('get_routing', child_of=p_span):
-            routing = self.router.routing(table_id,
+            routing = self.router.routing(collection_id,
                                           partition_tags=partition_tags,
                                           metadata=metadata)
         logger.info('Routing: {}'.format(routing))
@@ -129,10 +129,10 @@ class ServiceHandler(milvus_pb2_grpc.MilvusServiceServicer):
         rs = []
         all_topk_results = []
 
-        def search(addr, table_id, file_ids, vectors, topk, params, **kwargs):
+        def search(addr, collection_id, file_ids, vectors, topk, params, **kwargs):
             logger.info(
-                'Send Search Request: addr={};table_id={};ids={};nq={};topk={};params={}'
-                    .format(addr, table_id, file_ids, len(vectors), topk, params))
+                'Send Search Request: addr={};collection_id={};ids={};nq={};topk={};params={}'
+                    .format(addr, collection_id, file_ids, len(vectors), topk, params))
 
             conn = self.router.query_conn(addr, metadata=metadata)
             start = time.time()
@@ -142,7 +142,7 @@ class ServiceHandler(milvus_pb2_grpc.MilvusServiceServicer):
 
             with self.tracer.start_span('search_{}'.format(addr),
                                         child_of=span):
-                ret = conn.conn.search_vectors_in_files(collection_name=table_id,
+                ret = conn.conn.search_vectors_in_files(collection_name=collection_id,
                                                         file_ids=file_ids,
                                                         query_records=vectors,
                                                         top_k=topk,
@@ -158,7 +158,7 @@ class ServiceHandler(milvus_pb2_grpc.MilvusServiceServicer):
                 for addr, file_ids in routing.items():
                     res = pool.submit(search,
                                       addr,
-                                      table_id,
+                                      collection_id,
                                       file_ids,
                                       vectors,
                                       topk,
@@ -169,51 +169,51 @@ class ServiceHandler(milvus_pb2_grpc.MilvusServiceServicer):
                 for res in rs:
                     res.result()
 
-        reverse = table_meta.metric_type == Types.MetricType.IP
+        reverse = collection_meta.metric_type == Types.MetricType.IP
         with self.tracer.start_span('do_merge', child_of=p_span):
             return self._do_merge(all_topk_results,
                                   topk,
                                   reverse=reverse,
                                   metadata=metadata)
 
-    def _create_table(self, table_schema):
-        return self.router.connection().create_collection(table_schema)
+    def _create_collection(self, collection_schema):
+        return self.router.connection().create_collection(collection_schema)
 
     @mark_grpc_method
-    def CreateTable(self, request, context):
-        _status, unpacks = Parser.parse_proto_TableSchema(request)
+    def CreateCollection(self, request, context):
+        _status, unpacks = Parser.parse_proto_CollectionSchema(request)
 
         if not _status.OK():
             return status_pb2.Status(error_code=_status.code,
                                      reason=_status.message)
 
-        _status, _table_schema = unpacks
+        _status, _collection_schema = unpacks
         # if _status.error_code != 0:
-        #     logging.warning('[CreateTable] table schema error occurred: {}'.format(_status))
+        #     logging.warning('[CreateCollection] collection schema error occurred: {}'.format(_status))
         #     return _status
 
-        logger.info('CreateTable {}'.format(_table_schema['collection_name']))
+        logger.info('CreateCollection {}'.format(_collection_schema['collection_name']))
 
-        _status = self._create_table(_table_schema)
+        _status = self._create_collection(_collection_schema)
 
         return status_pb2.Status(error_code=_status.code,
                                  reason=_status.message)
 
-    def _has_table(self, table_name, metadata=None):
-        return self.router.connection(metadata=metadata).has_collection(table_name)
+    def _has_collection(self, collection_name, metadata=None):
+        return self.router.connection(metadata=metadata).has_collection(collection_name)
 
     @mark_grpc_method
-    def HasTable(self, request, context):
-        _status, _table_name = Parser.parse_proto_TableName(request)
+    def HasCollection(self, request, context):
+        _status, _collection_name = Parser.parse_proto_CollectionName(request)
 
         if not _status.OK():
             return milvus_pb2.BoolReply(status=status_pb2.Status(
                 error_code=_status.code, reason=_status.message),
                 bool_reply=False)
 
-        logger.info('HasTable {}'.format(_table_name))
+        logger.info('HasCollection {}'.format(_collection_name))
 
-        _status, _bool = self._has_table(_table_name,
+        _status, _bool = self._has_collection(_collection_name,
                                          metadata={'resp_class': milvus_pb2.BoolReply})
 
         return milvus_pb2.BoolReply(status=status_pb2.Status(
@@ -222,55 +222,55 @@ class ServiceHandler(milvus_pb2_grpc.MilvusServiceServicer):
 
     @mark_grpc_method
     def CreatePartition(self, request, context):
-        _table_name, _tag = Parser.parse_proto_PartitionParam(request)
-        _status = self.router.connection().create_partition(_table_name, _tag)
+        _collection_name, _tag = Parser.parse_proto_PartitionParam(request)
+        _status = self.router.connection().create_partition(_collection_name, _tag)
         return status_pb2.Status(error_code=_status.code,
                                  reason=_status.message)
 
     @mark_grpc_method
     def DropPartition(self, request, context):
-        _table_name, _tag = Parser.parse_proto_PartitionParam(request)
+        _collection_name, _tag = Parser.parse_proto_PartitionParam(request)
 
-        _status = self.router.connection().drop_partition(_table_name, _tag)
+        _status = self.router.connection().drop_partition(_collection_name, _tag)
         return status_pb2.Status(error_code=_status.code,
                                  reason=_status.message)
 
     @mark_grpc_method
     def ShowPartitions(self, request, context):
-        _status, _table_name = Parser.parse_proto_TableName(request)
+        _status, _collection_name = Parser.parse_proto_CollectionName(request)
         if not _status.OK():
             return milvus_pb2.PartitionList(status=status_pb2.Status(
                 error_code=_status.code, reason=_status.message),
                 partition_array=[])
 
-        logger.info('ShowPartitions {}'.format(_table_name))
+        logger.info('ShowPartitions {}'.format(_collection_name))
 
-        _status, partition_array = self.router.connection().show_partitions(_table_name)
+        _status, partition_array = self.router.connection().show_partitions(_collection_name)
 
         return milvus_pb2.PartitionList(status=status_pb2.Status(
             error_code=_status.code, reason=_status.message),
             partition_tag_array=[param.tag for param in partition_array])
 
-    def _delete_table(self, table_name):
-        return self.router.connection().drop_collection(table_name)
+    def _drop_collection(self, collection_name):
+        return self.router.connection().drop_collection(collection_name)
 
     @mark_grpc_method
-    def DropTable(self, request, context):
-        _status, _table_name = Parser.parse_proto_TableName(request)
+    def DropCollection(self, request, context):
+        _status, _collection_name = Parser.parse_proto_CollectionName(request)
 
         if not _status.OK():
             return status_pb2.Status(error_code=_status.code,
                                      reason=_status.message)
 
-        logger.info('DropTable {}'.format(_table_name))
+        logger.info('DropCollection {}'.format(_collection_name))
 
-        _status = self._delete_table(_table_name)
+        _status = self._drop_collection(_collection_name)
 
         return status_pb2.Status(error_code=_status.code,
                                  reason=_status.message)
 
-    def _create_index(self, table_name, index_type, param):
-        return self.router.connection().create_index(table_name, index_type, param)
+    def _create_index(self, collection_name, index_type, param):
+        return self.router.connection().create_index(collection_name, index_type, param)
 
     @mark_grpc_method
     def CreateIndex(self, request, context):
@@ -280,12 +280,12 @@ class ServiceHandler(milvus_pb2_grpc.MilvusServiceServicer):
             return status_pb2.Status(error_code=_status.code,
                                      reason=_status.message)
 
-        _table_name, _index_type, _index_param = unpacks
+        _collection_name, _index_type, _index_param = unpacks
 
-        logger.info('CreateIndex {}'.format(_table_name))
+        logger.info('CreateIndex {}'.format(_collection_name))
 
-        # TODO: interface create_table incompleted
-        _status = self._create_index(_table_name, _index_type, _index_param)
+        # TODO: interface create_collection incompleted
+        _status = self._create_index(_collection_name, _index_type, _index_param)
 
         return status_pb2.Status(error_code=_status.code,
                                  reason=_status.message)
@@ -309,7 +309,7 @@ class ServiceHandler(milvus_pb2_grpc.MilvusServiceServicer):
 
         metadata = {'resp_class': milvus_pb2.TopKQueryResult}
 
-        table_name = request.table_name
+        collection_name = request.collection_name
 
         topk = request.topk
 
@@ -318,7 +318,7 @@ class ServiceHandler(milvus_pb2_grpc.MilvusServiceServicer):
         params = ujson.loads(str(request.extra_params[0].value))
 
         logger.info('Search {}: topk={} params={}'.format(
-            table_name, topk, params))
+            collection_name, topk, params))
 
         # if nprobe > self.MAX_NPROBE or nprobe <= 0:
         #     raise exceptions.InvalidArgumentError(
@@ -328,22 +328,22 @@ class ServiceHandler(milvus_pb2_grpc.MilvusServiceServicer):
             raise exceptions.InvalidTopKError(
                 message='Invalid topk: {}'.format(topk), metadata=metadata)
 
-        table_meta = self.table_meta.get(table_name, None)
+        collection_meta = self.collection_meta.get(collection_name, None)
 
-        if not table_meta:
+        if not collection_meta:
             status, info = self.router.connection(
-                metadata=metadata).describe_collection(table_name)
+                metadata=metadata).describe_collection(collection_name)
             if not status.OK():
-                raise exceptions.TableNotFoundError(table_name,
+                raise exceptions.CollectionNotFoundError(collection_name,
                                                     metadata=metadata)
 
-            self.table_meta[table_name] = info
-            table_meta = info
+            self.collection_meta[collection_name] = info
+            collection_meta = info
 
         start = time.time()
 
         query_record_array = []
-        if int(table_meta.metric_type) >= MetricType.HAMMING.value:
+        if int(collection_meta.metric_type) >= MetricType.HAMMING.value:
             for query_record in request.query_record_array:
                 query_record_array.append(bytes(query_record.binary_data))
         else:
@@ -351,8 +351,8 @@ class ServiceHandler(milvus_pb2_grpc.MilvusServiceServicer):
                 query_record_array.append(list(query_record.float_data))
 
         status, id_results, dis_results = self._do_query(context,
-                                                         table_name,
-                                                         table_meta,
+                                                         collection_name,
+                                                         collection_meta,
                                                          query_record_array,
                                                          topk,
                                                          params,
@@ -374,57 +374,57 @@ class ServiceHandler(milvus_pb2_grpc.MilvusServiceServicer):
     def SearchInFiles(self, request, context):
         raise NotImplemented()
 
-    def _describe_table(self, table_name, metadata=None):
-        return self.router.connection(metadata=metadata).describe_collection(table_name)
+    def _describe_collection(self, collection_name, metadata=None):
+        return self.router.connection(metadata=metadata).describe_collection(collection_name)
 
     @mark_grpc_method
-    def DescribeTable(self, request, context):
-        _status, _table_name = Parser.parse_proto_TableName(request)
+    def DescribeCollection(self, request, context):
+        _status, _collection_name = Parser.parse_proto_CollectionName(request)
 
         if not _status.OK():
-            return milvus_pb2.TableSchema(status=status_pb2.Status(
+            return milvus_pb2.CollectionSchema(status=status_pb2.Status(
                 error_code=_status.code, reason=_status.message), )
 
-        metadata = {'resp_class': milvus_pb2.TableSchema}
+        metadata = {'resp_class': milvus_pb2.CollectionSchema}
 
-        logger.info('DescribeTable {}'.format(_table_name))
-        _status, _table = self._describe_table(metadata=metadata,
-                                               table_name=_table_name)
+        logger.info('DescribeCollection {}'.format(_collection_name))
+        _status, _collection = self._describe_collection(metadata=metadata,
+                                               collection_name=_collection_name)
 
         if _status.OK():
-            return milvus_pb2.TableSchema(
-                table_name=_table_name,
-                index_file_size=_table.index_file_size,
-                dimension=_table.dimension,
-                metric_type=_table.metric_type,
+            return milvus_pb2.CollectionSchema(
+                collection_name=_collection_name,
+                index_file_size=_collection.index_file_size,
+                dimension=_collection.dimension,
+                metric_type=_collection.metric_type,
                 status=status_pb2.Status(error_code=_status.code,
                                          reason=_status.message),
             )
 
-        return milvus_pb2.TableSchema(
-            table_name=_table_name,
+        return milvus_pb2.CollectionSchema(
+            collection_name=_collection_name,
             status=status_pb2.Status(error_code=_status.code,
                                      reason=_status.message),
         )
 
-    def _table_info(self, table_name, metadata=None):
-        return self.router.connection(metadata=metadata).collection_info(table_name)
+    def _collection_info(self, collection_name, metadata=None):
+        return self.router.connection(metadata=metadata).collection_info(collection_name)
 
     @mark_grpc_method
-    def ShowTableInfo(self, request, context):
-        _status, _table_name = Parser.parse_proto_TableName(request)
+    def ShowCollectionInfo(self, request, context):
+        _status, _collection_name = Parser.parse_proto_CollectionName(request)
 
         if not _status.OK():
-            return milvus_pb2.TableInfo(status=status_pb2.Status(
+            return milvus_pb2.CollectionInfo(status=status_pb2.Status(
                 error_code=_status.code, reason=_status.message), )
 
-        metadata = {'resp_class': milvus_pb2.TableInfo}
+        metadata = {'resp_class': milvus_pb2.CollectionInfo}
 
-        logger.info('ShowTableInfo {}'.format(_table_name))
-        _status, _info = self._table_info(metadata=metadata, table_name=_table_name)
+        logger.info('ShowCollectionInfo {}'.format(_collection_name))
+        _status, _info = self._collection_info(metadata=metadata, collection_name=_collection_name)
 
         if _status.OK():
-            _table_info = milvus_pb2.TableInfo(
+            _collection_info = milvus_pb2.CollectionInfo(
                 status=status_pb2.Status(error_code=_status.code,
                                          reason=_status.message),
                 total_row_count=_info.count
@@ -443,37 +443,37 @@ class ServiceHandler(milvus_pb2_grpc.MilvusServiceServicer):
                         data_size=seg_stat.data_size,
                     )
 
-                _table_info.partitions_stat.append(_par)
-            return _table_info
+                _collection_info.partitions_stat.append(_par)
+            return _collection_info
 
-        return milvus_pb2.TableInfo(
+        return milvus_pb2.CollectionInfo(
             status=status_pb2.Status(error_code=_status.code,
                                      reason=_status.message),
         )
 
-    def _count_table(self, table_name, metadata=None):
+    def _count_collection(self, collection_name, metadata=None):
         return self.router.connection(
-            metadata=metadata).count_collection(table_name)
+            metadata=metadata).count_collection(collection_name)
 
     @mark_grpc_method
-    def CountTable(self, request, context):
-        _status, _table_name = Parser.parse_proto_TableName(request)
+    def CountCollection(self, request, context):
+        _status, _collection_name = Parser.parse_proto_CollectionName(request)
 
         if not _status.OK():
             status = status_pb2.Status(error_code=_status.code,
                                        reason=_status.message)
 
-            return milvus_pb2.TableRowCount(status=status)
+            return milvus_pb2.CollectionRowCount(status=status)
 
-        logger.info('CountTable {}'.format(_table_name))
+        logger.info('CountCollection {}'.format(_collection_name))
 
-        metadata = {'resp_class': milvus_pb2.TableRowCount}
-        _status, _count = self._count_table(_table_name, metadata=metadata)
+        metadata = {'resp_class': milvus_pb2.CollectionRowCount}
+        _status, _count = self._count_collection(_collection_name, metadata=metadata)
 
-        return milvus_pb2.TableRowCount(
+        return milvus_pb2.CollectionRowCount(
             status=status_pb2.Status(error_code=_status.code,
                                      reason=_status.message),
-            table_row_count=_count if isinstance(_count, int) else -1)
+            collection_row_count=_count if isinstance(_count, int) else -1)
 
     def _get_server_version(self, metadata=None):
         return self.router.connection(metadata=metadata).server_version()
@@ -509,41 +509,41 @@ class ServiceHandler(milvus_pb2_grpc.MilvusServiceServicer):
             error_code=_status.code, reason=_status.message),
             string_reply=_reply)
 
-    def _show_tables(self, metadata=None):
+    def _show_collections(self, metadata=None):
         return self.router.connection(metadata=metadata).show_collections()
 
     @mark_grpc_method
-    def ShowTables(self, request, context):
-        logger.info('ShowTables')
-        metadata = {'resp_class': milvus_pb2.TableName}
-        _status, _results = self._show_tables(metadata=metadata)
+    def ShowCollections(self, request, context):
+        logger.info('ShowCollections')
+        metadata = {'resp_class': milvus_pb2.CollectionName}
+        _status, _results = self._show_collections(metadata=metadata)
 
-        return milvus_pb2.TableNameList(status=status_pb2.Status(
+        return milvus_pb2.CollectionNameList(status=status_pb2.Status(
             error_code=_status.code, reason=_status.message),
-            table_names=_results)
+            collection_names=_results)
 
-    def _preload_table(self, table_name):
-        return self.router.connection().preload_collection(table_name)
+    def _preload_collection(self, collection_name):
+        return self.router.connection().preload_collection(collection_name)
 
     @mark_grpc_method
-    def PreloadTable(self, request, context):
-        _status, _table_name = Parser.parse_proto_TableName(request)
+    def PreloadCollection(self, request, context):
+        _status, _collection_name = Parser.parse_proto_CollectionName(request)
 
         if not _status.OK():
             return status_pb2.Status(error_code=_status.code,
                                      reason=_status.message)
 
-        logger.info('PreloadTable {}'.format(_table_name))
-        _status = self._preload_table(_table_name)
+        logger.info('PreloadCollection {}'.format(_collection_name))
+        _status = self._preload_collection(_collection_name)
         return status_pb2.Status(error_code=_status.code,
                                  reason=_status.message)
 
-    def _describe_index(self, table_name, metadata=None):
-        return self.router.connection(metadata=metadata).describe_index(table_name)
+    def _describe_index(self, collection_name, metadata=None):
+        return self.router.connection(metadata=metadata).describe_index(collection_name)
 
     @mark_grpc_method
     def DescribeIndex(self, request, context):
-        _status, _table_name = Parser.parse_proto_TableName(request)
+        _status, _collection_name = Parser.parse_proto_CollectionName(request)
 
         if not _status.OK():
             return milvus_pb2.IndexParam(status=status_pb2.Status(
@@ -551,8 +551,8 @@ class ServiceHandler(milvus_pb2_grpc.MilvusServiceServicer):
 
         metadata = {'resp_class': milvus_pb2.IndexParam}
 
-        logger.info('DescribeIndex {}'.format(_table_name))
-        _status, _index_param = self._describe_index(table_name=_table_name,
+        logger.info('DescribeIndex {}'.format(_collection_name))
+        _status, _index_param = self._describe_index(collection_name=_collection_name,
                                                      metadata=metadata)
 
         if not _index_param:
@@ -563,13 +563,13 @@ class ServiceHandler(milvus_pb2_grpc.MilvusServiceServicer):
 
         grpc_index = milvus_pb2.IndexParam(status=status_pb2.Status(
             error_code=_status.code, reason=_status.message),
-            table_name=_table_name, index_type=_index_type)
+            collection_name=_collection_name, index_type=_index_type)
 
         grpc_index.extra_params.add(key='params', value=ujson.dumps(_index_param._params))
         return grpc_index
 
-    def _get_vector_by_id(self, table_name, vec_id, metadata):
-        return self.router.connection(metadata=metadata).get_vector_by_id(table_name, vec_id)
+    def _get_vector_by_id(self, collection_name, vec_id, metadata):
+        return self.router.connection(metadata=metadata).get_vector_by_id(collection_name, vec_id)
 
     @mark_grpc_method
     def GetVectorByID(self, request, context):
@@ -580,9 +580,9 @@ class ServiceHandler(milvus_pb2_grpc.MilvusServiceServicer):
 
         metadata = {'resp_class': milvus_pb2.VectorData}
 
-        _table_name, _id = unpacks
-        logger.info('GetVectorByID {}'.format(_table_name))
-        _status, vector = self._get_vector_by_id(_table_name, _id, metadata)
+        _collection_name, _id = unpacks
+        logger.info('GetVectorByID {}'.format(_collection_name))
+        _status, vector = self._get_vector_by_id(_collection_name, _id, metadata)
 
         if not vector:
             return milvus_pb2.VectorData(status=status_pb2.Status(
@@ -598,8 +598,8 @@ class ServiceHandler(milvus_pb2_grpc.MilvusServiceServicer):
             vector_data=records
         )
 
-    def _get_vector_ids(self, table_name, segment_name, metadata):
-        return self.router.connection(metadata=metadata).get_vector_ids(table_name, segment_name)
+    def _get_vector_ids(self, collection_name, segment_name, metadata):
+        return self.router.connection(metadata=metadata).get_vector_ids(collection_name, segment_name)
 
     @mark_grpc_method
     def GetVectorIDs(self, request, context):
@@ -611,9 +611,9 @@ class ServiceHandler(milvus_pb2_grpc.MilvusServiceServicer):
 
         metadata = {'resp_class': milvus_pb2.VectorIds}
 
-        _table_name, _segment_name = unpacks
-        logger.info('GetVectorIDs {}'.format(_table_name))
-        _status, ids = self._get_vector_ids(_table_name, _segment_name, metadata)
+        _collection_name, _segment_name = unpacks
+        logger.info('GetVectorIDs {}'.format(_collection_name))
+        _status, ids = self._get_vector_ids(_collection_name, _segment_name, metadata)
 
         if not ids:
             return milvus_pb2.VectorIds(status=status_pb2.Status(
@@ -624,8 +624,8 @@ class ServiceHandler(milvus_pb2_grpc.MilvusServiceServicer):
             vector_id_array=ids
         )
 
-    def _delete_by_id(self, table_name, id_array):
-        return self.router.connection().delete_by_id(table_name, id_array)
+    def _delete_by_id(self, collection_name, id_array):
+        return self.router.connection().delete_by_id(collection_name, id_array)
 
     @mark_grpc_method
     def DeleteByID(self, request, context):
@@ -636,57 +636,57 @@ class ServiceHandler(milvus_pb2_grpc.MilvusServiceServicer):
             return status_pb2.Status(error_code=_status.code,
                                      reason=_status.message)
 
-        _table_name, _ids = unpacks
-        logger.info('DeleteByID {}'.format(_table_name))
-        _status = self._delete_by_id(_table_name, _ids)
+        _collection_name, _ids = unpacks
+        logger.info('DeleteByID {}'.format(_collection_name))
+        _status = self._delete_by_id(_collection_name, _ids)
 
         return status_pb2.Status(error_code=_status.code,
                                  reason=_status.message)
 
-    def _drop_index(self, table_name):
-        return self.router.connection().drop_index(table_name)
+    def _drop_index(self, collection_name):
+        return self.router.connection().drop_index(collection_name)
 
     @mark_grpc_method
     def DropIndex(self, request, context):
-        _status, _table_name = Parser.parse_proto_TableName(request)
+        _status, _collection_name = Parser.parse_proto_CollectionName(request)
 
         if not _status.OK():
             return status_pb2.Status(error_code=_status.code,
                                      reason=_status.message)
 
-        logger.info('DropIndex {}'.format(_table_name))
-        _status = self._drop_index(_table_name)
+        logger.info('DropIndex {}'.format(_collection_name))
+        _status = self._drop_index(_collection_name)
         return status_pb2.Status(error_code=_status.code,
                                  reason=_status.message)
 
-    def _flush(self, table_names):
-        return self.router.connection().flush(table_names)
+    def _flush(self, collection_names):
+        return self.router.connection().flush(collection_names)
 
     @mark_grpc_method
     def Flush(self, request, context):
-        _status, _table_names = Parser.parse_proto_FlushParam(request)
+        _status, _collection_names = Parser.parse_proto_FlushParam(request)
 
         if not _status.OK():
             return status_pb2.Status(error_code=_status.code,
                                      reason=_status.message)
 
-        logger.info('Flush {}'.format(_table_names))
-        _status = self._flush(_table_names)
+        logger.info('Flush {}'.format(_collection_names))
+        _status = self._flush(_collection_names)
         return status_pb2.Status(error_code=_status.code,
                                  reason=_status.message)
 
-    def _compact(self, table_name):
-        return self.router.connection().compact(table_name)
+    def _compact(self, collection_name):
+        return self.router.connection().compact(collection_name)
 
     @mark_grpc_method
     def Compact(self, request, context):
-        _status, _table_name = Parser.parse_proto_TableName(request)
+        _status, _collection_name = Parser.parse_proto_CollectionName(request)
 
         if not _status.OK():
             return status_pb2.Status(error_code=_status.code,
                                      reason=_status.message)
 
-        logger.info('Compact {}'.format(_table_name))
-        _status = self._compact(_table_name)
+        logger.info('Compact {}'.format(_collection_name))
+        _status = self._compact(_collection_name)
         return status_pb2.Status(error_code=_status.code,
                                  reason=_status.message)
