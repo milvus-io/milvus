@@ -136,7 +136,7 @@ class K8SEventListener(threading.Thread, K8SMixin):
 
 
 class EventHandler(threading.Thread):
-    PENDING_THRESHOLD = 2
+    PENDING_THRESHOLD = 3
     def __init__(self, mgr, message_queue, namespace, pod_patt, **kwargs):
         threading.Thread.__init__(self)
         self.mgr = mgr
@@ -159,7 +159,7 @@ class EventHandler(threading.Thread):
     def record_pending_delete(self, pod, true_cb=None):
         self.pending_delete[pod] += 1
         self.pending_add.pop(pod, None)
-        if self.pending_delete[pod] >= self.PENDING_THRESHOLD:
+        if self.pending_delete[pod] >= 1:
             true_cb and true_cb()
             return True
 
@@ -195,18 +195,15 @@ class EventHandler(threading.Thread):
             logger.warning('NoPodIPFoundError')
             return
 
-        logger.info('Register POD {} with IP {}'.format(
-            pod.metadata.name, pod.status.pod_ip))
         self.record_pending_add(pod.metadata.name,
                 true_cb=partial(self.mgr.add_pod, pod.metadata.name, pod.status.pod_ip))
 
     def on_pod_killing(self, event, **kwargs):
-        logger.info('Unregister POD {}'.format(event['pod']))
         self.record_pending_delete(event['pod'],
                 true_cb=partial(self.mgr.delete_pod, event['pod']))
 
     def on_pod_heartbeat(self, event, **kwargs):
-        names = self.mgr.readonly_topo.group_names
+        names = set(copy.deepcopy(list(self.mgr.readonly_topo.group_names)))
 
         pods_with_event = set()
         for each_event in event['events']:
@@ -223,7 +220,15 @@ class EventHandler(threading.Thread):
             self.record_pending_delete(name,
                     true_cb=partial(self.mgr.delete_pod, name))
 
-        logger.info(self.mgr.readonly_topo.group_names)
+        latest = self.mgr.readonly_topo.group_names
+        deleted = names - latest
+        added = latest - names
+        if deleted:
+            logger.info('Deleted Pods: {}'.format(list(deleted)))
+        if added:
+            logger.info('Added Pods: {}'.format(list(added)))
+
+        logger.debug('All Pods: {}'.format(list(latest)))
 
     def handle_event(self, event):
         if event['eType'] == EventType.PodHeartBeat:
@@ -309,6 +314,8 @@ class KubernetesProvider(object):
                                           **kwargs)
 
     def add_pod(self, name, ip):
+        logger.debug('Register POD {} with IP {}'.format(
+            name, ip))
         ok = True
         status = StatusType.OK
         try:
@@ -320,8 +327,8 @@ class KubernetesProvider(object):
             ok = False
             logger.error('Connection error to: {}'.format(addr))
 
-        if ok and status == StatusType.OK:
-            logger.info('KubernetesProvider Add Group \"{}\" Of 1 Address: {}'.format(name, uri))
+        # if ok and status == StatusType.OK:
+        #     logger.info('KubernetesProvider Add Group \"{}\" Of 1 Address: {}'.format(name, uri))
         return ok
 
     def delete_pod(self, name):
