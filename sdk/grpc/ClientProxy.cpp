@@ -79,7 +79,10 @@ Status
 ClientProxy::Connect(const ConnectParam& param) {
     std::string uri = param.ip_address + ":" + param.port;
 
-    channel_ = ::grpc::CreateChannel(uri, ::grpc::InsecureChannelCredentials());
+    ::grpc::ChannelArguments args;
+    args.SetMaxSendMessageSize(-1);
+    args.SetMaxReceiveMessageSize(-1);
+    channel_ = ::grpc::CreateCustomChannel(uri, ::grpc::InsecureChannelCredentials(), args);
     if (channel_ != nullptr) {
         connected_ = true;
         client_ptr_ = std::make_shared<GrpcClient>(channel_);

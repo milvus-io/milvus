@@ -162,6 +162,7 @@ class MySQLMetaImpl : public Meta {
     std::shared_ptr<MySQLConnectionPool> mysql_connection_pool_;
     bool safe_grab_ = false;
 
+    std::mutex meta_mutex_;
     std::mutex genid_mutex_;
     //        std::mutex connectionMutex_;
 };  // DBMetaImpl

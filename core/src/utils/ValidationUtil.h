@@ -50,6 +50,9 @@ class ValidationUtil {
     ValidateVectorData(const engine::VectorsData& vectors, const engine::meta::CollectionSchema& table_schema);
 
     static Status
+    ValidateVectorDataSize(const engine::VectorsData& vectors, const engine::meta::CollectionSchema& table_schema);
+
+    static Status
     ValidateCollectionIndexFileSize(int64_t index_file_size);
 
     static Status

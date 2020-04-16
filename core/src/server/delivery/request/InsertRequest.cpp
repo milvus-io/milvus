@@ -118,6 +118,7 @@ InsertRequest::OnExecute() {
         if ((collection_schema.flag_ & engine::meta::FLAG_MASK_NO_USERID) != 0 && user_provide_ids) {
             std::string msg =
                 "Entities IDs are auto-generated. All vectors of this collection must use auto-generated IDs.";
+            LOG_SERVER_ERROR_ << LogOut("[%s][%ld] %s", "insert", 0, msg.c_str());
             return Status(SERVER_ILLEGAL_VECTOR_ID, msg);
         }
 
@@ -128,48 +129,20 @@ InsertRequest::OnExecute() {
         ProfilerStart(fname.c_str());
 #endif
         // step 4: some metric type doesn't support float vectors
-        if (!vectors_data_.float_data_.empty()) {  // insert float vectors
-            if (engine::utils::IsBinaryMetricType(collection_schema.metric_type_)) {
-                std::string msg = "Collection metric type doesn't support float vectors.";
-                LOG_SERVER_ERROR_ << LogOut("[%s][%ld] %s", "insert", 0, msg.c_str());
-                return Status(SERVER_INVALID_ROWRECORD_ARRAY, msg);
-            }
-
-            // check prepared float data
-            if (vectors_data_.float_data_.size() % vector_count != 0) {
-                std::string msg = "The vector dimension must be equal to the collection dimension.";
-                LOG_SERVER_ERROR_ << LogOut("[%s][%ld] %s", "insert", 0, msg.c_str());
-                return Status(SERVER_INVALID_ROWRECORD_ARRAY, msg);
-            }
-
-            fiu_do_on("InsertRequest.OnExecute.invalid_dim", collection_schema.dimension_ = -1);
-            if (vectors_data_.float_data_.size() / vector_count != collection_schema.dimension_) {
-                std::string msg = "The vector dimension must be equal to the collection dimension.";
-                LOG_SERVER_ERROR_ << LogOut("[%s][%ld] %s", "insert", 0, msg.c_str());
-                return Status(SERVER_INVALID_VECTOR_DIMENSION, msg);
-            }
-        } else if (!vectors_data_.binary_data_.empty()) {  // insert binary vectors
-            if (!engine::utils::IsBinaryMetricType(collection_schema.metric_type_)) {
-                std::string msg = "Collection metric type doesn't support binary vectors.";
-                LOG_SERVER_ERROR_ << LogOut("[%s][%ld] %s", "insert", 0, msg.c_str());
-                return Status(SERVER_INVALID_ROWRECORD_ARRAY, msg);
-            }
-
-            // check prepared binary data
-            if (vectors_data_.binary_data_.size() % vector_count != 0) {
-                std::string msg = "The vector dimension must be equal to the collection dimension.";
-                LOG_SERVER_ERROR_ << LogOut("[%s][%ld] %s", "insert", 0, msg.c_str());
-                return Status(SERVER_INVALID_ROWRECORD_ARRAY, msg);
-            }
-
-            if (vectors_data_.binary_data_.size() * 8 / vector_count != collection_schema.dimension_) {
-                std::string msg = "The vector dimension must be equal to the collection dimension.";
-                LOG_SERVER_ERROR_ << LogOut("[%s][%ld] %s", "insert", 0, msg.c_str());
-                return Status(SERVER_INVALID_VECTOR_DIMENSION, msg);
-            }
+        status = ValidationUtil::ValidateVectorData(vectors_data_, collection_schema);
+        if (!status.ok()) {
+            LOG_SERVER_ERROR_ << LogOut("[%s][%d] Invalid vector data: %s", "insert", 0, status.message().c_str());
+            return status;
         }
 
-        // step 5: insert vectors
+        // step 5: check insert data limitation
+        status = ValidationUtil::ValidateVectorDataSize(vectors_data_, collection_schema);
+        if (!status.ok()) {
+            LOG_SERVER_ERROR_ << LogOut("[%s][%d] Invalid vector data: %s", "insert", 0, status.message().c_str());
+            return status;
+        }
+
+        // step 6: insert vectors
         auto vec_count = static_cast<uint64_t>(vector_count);
 
         rc.RecordSection("prepare vectors data");
@@ -189,7 +162,7 @@ InsertRequest::OnExecute() {
             return Status(SERVER_ILLEGAL_VECTOR_ID, msg);
         }
 
-        // step 6: update collection flag
+        // step 7: update collection flag
         user_provide_ids ? collection_schema.flag_ |= engine::meta::FLAG_MASK_HAS_USERID
                          : collection_schema.flag_ |= engine::meta::FLAG_MASK_NO_USERID;
         status = DBWrapper::DB()->UpdateCollectionFlag(collection_name_, collection_schema.flag_);
