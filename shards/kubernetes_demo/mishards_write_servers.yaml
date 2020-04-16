@@ -54,6 +54,9 @@ spec:
         - name: mishards-woserver-configmap
           mountPath: /var/lib/milvus/conf/log_config.conf
           subPath: log.conf
+        - name: mishards-log-disk
+          mountPath: /var/lib/milvus/logs
+          subPath: wslog
       # imagePullSecrets:
         # - name: regcred
       # tolerations:
@@ -68,3 +71,6 @@ spec:
       - name: mishards-db-disk
         persistentVolumeClaim:
             claimName: mishards-db-disk
+      - name: mishards-log-disk
+        persistentVolumeClaim:
+            claimName: mishards-log-disk
