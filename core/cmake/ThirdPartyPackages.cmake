@@ -302,8 +302,9 @@ if (DEFINED ENV{MILVUS_GRPC_URL})
 else ()
     set(GRPC_SOURCE_URL
             "https://github.com/milvus-io/grpc-milvus/archive/${GRPC_VERSION}.zip"
-            "https://github.com/youny626/grpc-milvus/archive/${GRPC_VERSION}.zip"
-            "https://gitee.com/quicksilver/grpc-milvus/repository/archive/${GRPC_VERSION}.zip")
+            #"https://github.com/youny626/grpc-milvus/archive/${GRPC_VERSION}.zip"
+            #"https://gitee.com/quicksilver/grpc-milvus/repository/archive/${GRPC_VERSION}.zip"
+            )
 endif ()
 set(GRPC_MD5 "0362ba219f59432c530070b5f5c3df73")
 
