@@ -31,7 +31,8 @@ class MySQLConnectionPool : public mysqlpp::ConnectionPool {
           password_(passWord),
           server_(serverIp),
           port_(port),
-          max_pool_size_(maxPoolSize) {}
+          max_pool_size_(maxPoolSize) {
+    }
 
     // The destructor.  We _must_ call ConnectionPool::clear() here,
     // because our superclass can't do it for us.
@@ -72,7 +73,7 @@ class MySQLConnectionPool : public mysqlpp::ConnectionPool {
 
     int max_pool_size_;
 
-    unsigned int max_idle_time_ = 0; // 10 seconds
+    unsigned int max_idle_time_ = 0;  // 10 seconds
 };
 
 }  // namespace meta
