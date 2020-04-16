@@ -28,6 +28,9 @@ namespace meta {
 static const char* META_ENVIRONMENT = "Environment";
 static const char* META_TABLES = "Tables";
 static const char* META_TABLEFILES = "TableFiles";
+static const char* META_COLLECTIONS = "Collections";
+static const char* META_FIELDS = "Fields";
+static const char* META_COLLECTIONFILES = "CollectionFiles";
 
 class Meta {
     /*
@@ -151,6 +154,15 @@ class Meta {
 
     virtual Status
     GetGlobalLastLSN(uint64_t& lsn) = 0;
+
+    virtual Status
+    CreateHybridCollection(CollectionSchema& collection_schema, hybrid::FieldsSchema& fields_schema) = 0;
+
+    virtual Status
+    DescribeHybridCollection(CollectionSchema& collection_schema, hybrid::FieldsSchema& fields_schema) = 0;
+
+    virtual Status
+    CreateHybridCollectionFile(SegmentSchema& file_schema) = 0;
 };  // MetaData
 
 using MetaPtr = std::shared_ptr<Meta>;

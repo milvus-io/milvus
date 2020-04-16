@@ -29,6 +29,8 @@ aux_source_directory(${MILVUS_ENGINE_SRC}/db/engine db_engine_files)
 aux_source_directory(${MILVUS_ENGINE_SRC}/db/insert db_insert_files)
 aux_source_directory(${MILVUS_ENGINE_SRC}/db/meta db_meta_files)
 aux_source_directory(${MILVUS_ENGINE_SRC}/db/wal db_wal_files)
+aux_source_directory(${MILVUS_ENGINE_SRC}/search search_files)
+aux_source_directory(${MILVUS_ENGINE_SRC}/query query_files)
 
 set(grpc_service_files
         ${MILVUS_ENGINE_SRC}/grpc/gen-milvus/milvus.grpc.pb.cc
@@ -89,10 +91,12 @@ set(web_server_files
 
 aux_source_directory(${MILVUS_ENGINE_SRC}/server/delivery server_delivery_impl_files)
 aux_source_directory(${MILVUS_ENGINE_SRC}/server/delivery/request server_delivery_request_files)
+aux_source_directory(${MILVUS_ENGINE_SRC}/server/delivery/hybrid_request server_delivery_hybrid_request_files)
 aux_source_directory(${MILVUS_ENGINE_SRC}/server/delivery/strategy server_delivery_strategy_files)
 set(server_delivery_files
         ${server_delivery_impl_files}
         ${server_delivery_request_files}
+        ${server_delivery_hybrid_request_files}
         ${server_delivery_strategy_files})
 
 aux_source_directory(${MILVUS_ENGINE_SRC}/utils utils_files)
@@ -147,6 +151,8 @@ set(common_files
         ${codecs_files}
         ${codecs_default_files}
         ${segment_files}
+        ${search_files}
+        ${query_files}
         )
 
 set(unittest_libs

@@ -26,6 +26,9 @@ class ClientTest {
     void
     Test();
 
+    void
+    TestHybrid();
+
  private:
     void
     ShowServerVersion();
@@ -77,6 +80,17 @@ class ClientTest {
 
     void
     DropCollection(const std::string&);
+
+    /*******************************New Interface**********************************/
+
+    void
+    CreateHybridCollection(const std::string& collection_name);
+
+    void
+    InsertHybridEntities(std::string&, int64_t);
+
+    void
+    HybridSearch(std::string&);
 
  private:
     std::shared_ptr<milvus::Connection> conn_;

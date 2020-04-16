@@ -61,6 +61,34 @@ MemTable::Add(const VectorSourcePtr& source) {
 }
 
 Status
+MemTable::AddEntities(const milvus::engine::VectorSourcePtr& source) {
+    while (!source->AllAdded()) {
+        MemTableFilePtr current_mem_table_file;
+        if (!mem_table_file_list_.empty()) {
+            current_mem_table_file = mem_table_file_list_.back();
+        }
+
+        Status status;
+        if (mem_table_file_list_.empty() || current_mem_table_file->IsFull()) {
+            MemTableFilePtr new_mem_table_file = std::make_shared<MemTableFile>(collection_id_, meta_, options_);
+            status = new_mem_table_file->AddEntities(source);
+            if (status.ok()) {
+                mem_table_file_list_.emplace_back(new_mem_table_file);
+            }
+        } else {
+            status = current_mem_table_file->AddEntities(source);
+        }
+
+        if (!status.ok()) {
+            std::string err_msg = "Insert failed: " + status.ToString();
+            LOG_ENGINE_ERROR_ << LogOut("[%s][%ld] ", "insert", 0) << err_msg;
+            return Status(DB_ERROR, err_msg);
+        }
+    }
+    return Status::OK();
+}
+
+Status
 MemTable::Delete(segment::doc_id_t doc_id) {
     // Locate which collection file the doc id lands in
     for (auto& table_file : mem_table_file_list_) {

@@ -17,17 +17,28 @@
 
 #pragma once
 
+#include <memory>
+#include <vector>
+
+#include "segment/Attrs.h"
+#include "storage/FSHandler.h"
+
 namespace milvus {
 namespace codec {
 
 class AttrsFormat {
-    // public:
-    //    virtual Attrs
-    //    read() = 0;
-    //
-    //    virtual void
-    //    write(Attrs attrs) = 0;
+ public:
+    virtual void
+    read(const storage::FSHandlerPtr& fs_ptr, segment::AttrsPtr& attrs_read) = 0;
+
+    virtual void
+    write(const storage::FSHandlerPtr& fs_ptr, const segment::AttrsPtr& attr) = 0;
+
+    virtual void
+    read_uids(const storage::FSHandlerPtr& fs_ptr, std::vector<int64_t>& uids) = 0;
 };
+
+using AttrsFormatPtr = std::shared_ptr<AttrsFormat>;
 
 }  // namespace codec
 }  // namespace milvus

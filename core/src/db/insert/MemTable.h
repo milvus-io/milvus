@@ -36,6 +36,9 @@ class MemTable : public server::CacheConfigHandler {
     Add(const VectorSourcePtr& source);
 
     Status
+    AddEntities(const VectorSourcePtr& source);
+
+    Status
     Delete(segment::doc_id_t doc_id);
 
     Status
