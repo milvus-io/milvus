@@ -1,12 +1,12 @@
 kind: Service
 apiVersion: v1
 metadata:
-  name: milvus-wo-servers
-  namespace: milvus
+  name: mishards-wo-servers
+  namespace: mishards
 spec:
   type: ClusterIP
   selector:
-    app: milvus
+    app: mishards
     tier: wo-servers
   ports:
   - protocol: TCP
@@ -18,42 +18,45 @@ spec:
 apiVersion: apps/v1beta1
 kind: Deployment
 metadata:
-  name: milvus-wo-servers
-  namespace: milvus
+  name: mishards-wo-servers
+  namespace: mishards
 spec:
   selector:
     matchLabels:
-      app: milvus
+      app: mishards
       tier: wo-servers
   replicas: 1
   template:
     metadata:
       labels:
-        app: milvus
+        app: mishards
         tier: wo-servers
     spec:
       containers:
-      - name: milvus-wo-server
-        image: milvusdb/milvus:0.5.0-d102119-ede20b
+      - name: mishards-wo-server
+        image: milvusdb/milvus:0.8.0-gpu-d041520-464400
         imagePullPolicy: Always
         ports:
           - containerPort: 19530
         resources:
           limits:
-            memory: "5Gi"
-            cpu: "1.0"
+            memory: "4Gi"
+            cpu: "2.0"
           requests:
             memory: "4Gi"
         volumeMounts:
-        - name: milvus-db-disk
+        - name: mishards-db-disk
           mountPath: /var/milvus
           subPath: dbdata
-        - name: milvus-woserver-configmap
-          mountPath: /opt/milvus/conf/server_config.yaml
+        - name: mishards-woserver-configmap
+          mountPath: /var/lib/milvus/conf/server_config.yaml
           subPath: config.yml
-        - name: milvus-woserver-configmap
-          mountPath: /opt/milvus/conf/log_config.conf
+        - name: mishards-woserver-configmap
+          mountPath: /var/lib/milvus/conf/log_config.conf
           subPath: log.conf
+        - name: mishards-log-disk
+          mountPath: /var/lib/milvus/logs
+          subPath: wslog
       # imagePullSecrets:
         # - name: regcred
       # tolerations:
@@ -62,9 +65,12 @@ spec:
       #     value: "performance"
       #     effect: "NoSchedule"
       volumes:
-      - name: milvus-woserver-configmap
+      - name: mishards-woserver-configmap
         configMap:
-            name: milvus-woserver-configmap
-      - name: milvus-db-disk
+            name: mishards-woserver-configmap
+      - name: mishards-db-disk
         persistentVolumeClaim:
-            claimName: milvus-db-disk
+            claimName: mishards-db-disk
+      - name: mishards-log-disk
+        persistentVolumeClaim:
+            claimName: mishards-log-disk
