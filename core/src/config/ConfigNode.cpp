@@ -142,7 +142,7 @@ ConfigNode::GetChild(const std::string& type_name) {
 void
 ConfigNode::GetChildren(ConfigNodeArr& arr) const {
     arr.clear();
-    arr.reserve(children_.size);
+    arr.reserve(children_.size());
     transform(children_.begin(), children_.end(), back_inserter(arr), [](auto& ref) { return ref.second; });
 }
 
