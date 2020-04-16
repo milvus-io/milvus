@@ -16,6 +16,7 @@
 
 #include <memory>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 #include "ExecutionEngine.h"
@@ -67,6 +68,11 @@ class ExecutionEngineImpl : public ExecutionEngine {
 
     Status
     GetVectorByID(const int64_t& id, uint8_t* vector, bool hybrid) override;
+
+    Status
+    ExecBinaryQuery(query::GeneralQueryPtr general_query, faiss::ConcurrentBitsetPtr bitset,
+                    std::unordered_map<std::string, DataType>& attr_type, uint64_t& nq, uint64_t& topk,
+                    std::vector<float>& distances, std::vector<int64_t>& labels) override;
 
     Status
     Search(int64_t n, const float* data, int64_t k, const milvus::json& extra_params, float* distances, int64_t* labels,
@@ -121,6 +127,12 @@ class ExecutionEngineImpl : public ExecutionEngine {
     knowhere::VecIndexPtr index_ = nullptr;
     EngineType index_type_;
     MetricType metric_type_;
+
+    std::unordered_map<std::string, DataType> attr_types_;
+    std::unordered_map<std::string, std::vector<uint8_t>> attr_data_;
+    std::unordered_map<std::string, size_t> attr_size_;
+    query::BinaryQueryPtr binary_query_;
+    int64_t vector_count_;
 
     int64_t dim_;
     std::string location_;

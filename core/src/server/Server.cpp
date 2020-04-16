@@ -30,6 +30,8 @@
 #include "utils/SignalUtil.h"
 #include "utils/TimeRecorder.h"
 
+#include "search/TaskInst.h"
+
 namespace milvus {
 namespace server {
 
@@ -283,6 +285,8 @@ Server::StartService() {
     //     goto FAIL;
     // }
 
+    //    search::TaskInst::GetInstance().Start();
+
     return Status::OK();
 FAIL:
     std::cerr << "Milvus initializes fail: " << stat.message() << std::endl;
@@ -291,6 +295,7 @@ FAIL:
 
 void
 Server::StopService() {
+    //    search::TaskInst::GetInstance().Stop();
     // storage::S3ClientWrapper::GetInstance().StopService();
     web::WebServer::GetInstance().Stop();
     grpc::GrpcServer::GetInstance().Stop();

@@ -13,11 +13,14 @@
 
 #include <memory>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 #include "Options.h"
 #include "Types.h"
+#include "context/HybridSearchContext.h"
 #include "meta/Meta.h"
+#include "query/GeneralQuery.h"
 #include "server/context/Context.h"
 #include "utils/Status.h"
 
@@ -142,6 +145,23 @@ class DB {
 
     virtual Status
     DropAll() = 0;
+
+    virtual Status
+    CreateHybridCollection(meta::CollectionSchema& collection_schema, meta::hybrid::FieldsSchema& fields_schema) = 0;
+
+    virtual Status
+    DescribeHybridCollection(meta::CollectionSchema& collection_schema, meta::hybrid::FieldsSchema& fields_schema) = 0;
+
+    virtual Status
+    InsertEntities(const std::string& collection_id, const std::string& partition_tag, Entity& entity,
+                   std::unordered_map<std::string, meta::hybrid::DataType>& field_types) = 0;
+
+    virtual Status
+    HybridQuery(const std::shared_ptr<server::Context>& context, const std::string& collection_id,
+                const std::vector<std::string>& partition_tags, context::HybridSearchContextPtr hybrid_search_context,
+                query::GeneralQueryPtr general_query,
+                std::unordered_map<std::string, engine::meta::hybrid::DataType>& attr_type, uint64_t& nq,
+                engine::ResultIds& result_ids, engine::ResultDistances& result_distances) = 0;
 };  // DB
 
 using DBPtr = std::shared_ptr<DB>;

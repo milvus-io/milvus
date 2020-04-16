@@ -20,6 +20,7 @@
 #include <set>
 #include <string>
 #include <thread>
+#include <unordered_map>
 #include <vector>
 
 #include "config/handler/CacheConfigHandler.h"
@@ -135,6 +136,25 @@ class DBImpl : public DB, public server::CacheConfigHandler, public server::Engi
     DropIndex(const std::string& collection_id) override;
 
     Status
+    CreateHybridCollection(meta::CollectionSchema& collection_schema,
+                           meta::hybrid::FieldsSchema& fields_schema) override;
+
+    Status
+    DescribeHybridCollection(meta::CollectionSchema& collection_schema,
+                             meta::hybrid::FieldsSchema& fields_schema) override;
+
+    Status
+    InsertEntities(const std::string& collection_name, const std::string& partition_tag, engine::Entity& entity,
+                   std::unordered_map<std::string, meta::hybrid::DataType>& field_types) override;
+
+    Status
+    HybridQuery(const std::shared_ptr<server::Context>& context, const std::string& collection_id,
+                const std::vector<std::string>& partition_tags, context::HybridSearchContextPtr hybrid_search_context,
+                query::GeneralQueryPtr general_query,
+                std::unordered_map<std::string, engine::meta::hybrid::DataType>& attr_type, uint64_t& nq,
+                ResultIds& result_ids, ResultDistances& result_distances) override;
+
+    Status
     QueryByID(const std::shared_ptr<server::Context>& context, const std::string& collection_id,
               const std::vector<std::string>& partition_tags, uint64_t k, const milvus::json& extra_params,
               IDNumber vector_id, ResultIds& result_ids, ResultDistances& result_distances) override;
@@ -164,6 +184,13 @@ class DBImpl : public DB, public server::CacheConfigHandler, public server::Engi
     QueryAsync(const std::shared_ptr<server::Context>& context, const meta::SegmentsSchema& files, uint64_t k,
                const milvus::json& extra_params, const VectorsData& vectors, ResultIds& result_ids,
                ResultDistances& result_distances);
+
+    Status
+    HybridQueryAsync(const std::shared_ptr<server::Context>& context, const std::string& table_id,
+                     const meta::SegmentsSchema& files, context::HybridSearchContextPtr hybrid_search_context,
+                     query::GeneralQueryPtr general_query,
+                     std::unordered_map<std::string, engine::meta::hybrid::DataType>& attr_type, uint64_t& nq,
+                     ResultIds& result_ids, ResultDistances& result_distances);
 
     Status
     GetVectorByIdHelper(const std::string& collection_id, IDNumber vector_id, VectorsData& vector,
@@ -204,6 +231,9 @@ class DBImpl : public DB, public server::CacheConfigHandler, public server::Engi
 
     void
     BackgroundMerge(std::set<std::string> collection_ids);
+
+    Status
+    MergeHybridFiles(const std::string& table_id, const meta::SegmentsSchema& files);
 
     void
     StartBuildIndexTask();

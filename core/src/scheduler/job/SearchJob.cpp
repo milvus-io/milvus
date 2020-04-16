@@ -21,6 +21,12 @@ SearchJob::SearchJob(const std::shared_ptr<server::Context>& context, uint64_t t
     : Job(JobType::SEARCH), context_(context), topk_(topk), extra_params_(extra_params), vectors_(vectors) {
 }
 
+SearchJob::SearchJob(const std::shared_ptr<server::Context>& context, milvus::query::GeneralQueryPtr general_query,
+                     std::unordered_map<std::string, engine::meta::hybrid::DataType>& attr_type,
+                     const engine::VectorsData& vectors)
+    : Job(JobType::SEARCH), context_(context), general_query_(general_query), attr_type_(attr_type), vectors_(vectors) {
+}
+
 bool
 SearchJob::AddIndexFile(const SegmentSchemaPtr& index_file) {
     std::unique_lock<std::mutex> lock(mutex_);

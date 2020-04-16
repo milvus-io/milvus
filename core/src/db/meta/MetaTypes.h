@@ -97,6 +97,129 @@ struct SegmentSchema {
 using SegmentSchemaPtr = std::shared_ptr<meta::SegmentSchema>;
 using SegmentsSchema = std::vector<SegmentSchema>;
 
+namespace hybrid {
+
+enum class DataType {
+    INT8 = 1,
+    INT16 = 2,
+    INT32 = 3,
+    INT64 = 4,
+
+    STRING = 20,
+
+    BOOL = 30,
+
+    FLOAT = 40,
+    DOUBLE = 41,
+
+    VECTOR = 100,
+    UNKNOWN = 9999,
+};
+
+struct VectorFieldSchema {
+    std::string vector_id_;
+    int64_t dimension;
+    int64_t index_file_size_ = DEFAULT_INDEX_FILE_SIZE;
+    int32_t engine_type_ = DEFAULT_ENGINE_TYPE;
+    std::string index_params_ = "{}";
+    int32_t metric_type_ = DEFAULT_METRIC_TYPE;
+};
+
+struct VectorFieldsSchema {
+    std::vector<VectorFieldSchema> vector_fields_;
+};
+using VectorFieldSchemaPtr = std::shared_ptr<VectorFieldSchema>;
+
+struct CollectionSchema {
+    typedef enum {
+        NORMAL,
+        TO_DELETE,
+    } COLLETION_STATE;
+
+    size_t id_ = 0;
+    std::string collection_id_;
+    int32_t state_ = (int)NORMAL;
+    int64_t field_num = 0;
+    int64_t created_on_ = 0;
+    int64_t flag_ = 0;
+    std::string owner_collection_;
+    std::string partition_tag_;
+    std::string version_ = CURRENT_VERSION;
+    uint64_t flush_lsn_ = 0;
+};
+
+using CollectionSchemaPtr = std::shared_ptr<CollectionSchema>;
+
+struct FieldSchema {
+    typedef enum {
+        INT8 = 1,
+        INT16 = 2,
+        INT32 = 3,
+        INT64 = 4,
+
+        STRING = 20,
+
+        BOOL = 30,
+
+        FLOAT = 40,
+        DOUBLE = 41,
+
+        VECTOR = 100,
+        UNKNOWN = 9999,
+    } FIELD_TYPE;
+
+    // TODO(yukun): need field_id?
+    std::string collection_id_;
+    std::string field_name_;
+    int32_t field_type_ = (int)INT8;
+    std::string field_params_;
+};
+
+struct FieldsSchema {
+    std::vector<FieldSchema> fields_schema_;
+};
+
+using FieldSchemaPtr = std::shared_ptr<FieldSchema>;
+
+struct VectorFileSchema {
+    std::string field_name_;
+    int64_t index_file_size_ = DEFAULT_INDEX_FILE_SIZE;  // not persist to meta
+    int32_t engine_type_ = DEFAULT_ENGINE_TYPE;
+    std::string index_params_ = "{}";            // not persist to meta
+    int32_t metric_type_ = DEFAULT_METRIC_TYPE;  // not persist to meta
+};
+
+using VectorFileSchemaPtr = std::shared_ptr<VectorFileSchema>;
+
+struct CollectionFileSchema {
+    typedef enum {
+        NEW,
+        RAW,
+        TO_INDEX,
+        INDEX,
+        TO_DELETE,
+        NEW_MERGE,
+        NEW_INDEX,
+        BACKUP,
+    } FILE_TYPE;
+
+    size_t id_ = 0;
+    std::string collection_id_;
+    std::string segment_id_;
+    std::string file_id_;
+    int32_t file_type_ = NEW;
+    size_t file_size_ = 0;
+    size_t row_count_ = 0;
+    DateT date_ = EmptyDate;
+    std::string location_;
+    int64_t updated_time_ = 0;
+    int64_t created_on_ = 0;
+    uint64_t flush_lsn_ = 0;
+};
+
+using CollectionFileSchemaPtr = std::shared_ptr<CollectionFileSchema>;
+}  // namespace hybrid
+
 }  // namespace meta
 }  // namespace engine
 }  // namespace milvus
