@@ -38,10 +38,10 @@ spec:
           - containerPort: 19530
         resources:
           limits:
-            memory: "16Gi"
-            cpu: "8.0"
+            memory: "8Gi"
+            cpu: "6.0"
           requests:
-            memory: "14Gi"
+            memory: "8Gi"
         volumeMounts:
         - name: mishards-db-disk
           mountPath: /var/milvus

@@ -76,7 +76,7 @@ data:
       enable_monitor: false
 
     cache_config:
-      cpu_cache_capacity: 12   # memory pool to hold index data, unit: GB
+      cpu_cache_capacity: 6   # memory pool to hold index data, unit: GB
       insert_buffer_size: 1
       cache_insert_data: false
 
@@ -151,7 +151,7 @@ data:
       enable_monitor: false
 
     cache_config:
-      cpu_cache_capacity: 3   # memory pool to hold index data, unit: GB
+      cpu_cache_capacity: 2   # memory pool to hold index data, unit: GB
       insert_buffer_size: 2
       cache_insert_data: false
 

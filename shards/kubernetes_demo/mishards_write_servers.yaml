@@ -40,8 +40,8 @@ spec:
           - containerPort: 19530
         resources:
           limits:
-            memory: "5Gi"
-            cpu: "1.0"
+            memory: "4Gi"
+            cpu: "2.0"
           requests:
             memory: "4Gi"
         volumeMounts:

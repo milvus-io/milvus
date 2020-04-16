@@ -40,8 +40,8 @@ spec:
         command: ["python", "mishards/main.py"]
         resources:
           limits:
-            memory: "3Gi"
-            cpu: "4"
+            memory: "2Gi"
+            cpu: "2"
           requests:
             memory: "2Gi"
         ports:
