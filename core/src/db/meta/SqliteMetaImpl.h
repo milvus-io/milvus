@@ -25,6 +25,9 @@ namespace meta {
 auto
 StoragePrototype(const std::string& path);
 
+auto
+CollectionPrototype(const std::string& path);
+
 class SqliteMetaImpl : public Meta {
  public:
     explicit SqliteMetaImpl(const DBMetaOptions& options);
@@ -141,6 +144,15 @@ class SqliteMetaImpl : public Meta {
     Status
     GetGlobalLastLSN(uint64_t& lsn) override;
 
+    Status
+    CreateHybridCollection(CollectionSchema& collection_schema, hybrid::FieldsSchema& fields_schema) override;
+
+    Status
+    DescribeHybridCollection(CollectionSchema& collection_schema, hybrid::FieldsSchema& fields_schema) override;
+
+    Status
+    CreateHybridCollectionFile(SegmentSchema& file_schema) override;
+
  private:
     Status
     NextFileId(std::string& file_id);
@@ -151,6 +163,8 @@ class SqliteMetaImpl : public Meta {
 
     void
     ValidateMetaSchema();
+    void
+    ValidateCollectionMetaSchema();
     Status
     Initialize();
 

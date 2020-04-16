@@ -26,6 +26,8 @@
 #include "db/Types.h"
 #include "db/meta/MetaTypes.h"
 
+#include "query/GeneralQuery.h"
+
 #include "server/context/Context.h"
 
 namespace milvus {
@@ -42,6 +44,10 @@ class SearchJob : public Job {
  public:
     SearchJob(const std::shared_ptr<server::Context>& context, uint64_t topk, const milvus::json& extra_params,
               const engine::VectorsData& vectors);
+
+    SearchJob(const std::shared_ptr<server::Context>& context, query::GeneralQueryPtr general_query,
+              std::unordered_map<std::string, engine::meta::hybrid::DataType>& attr_type,
+              const engine::VectorsData& vectorsData);
 
  public:
     bool
@@ -99,6 +105,21 @@ class SearchJob : public Job {
         return mutex_;
     }
 
+    query::GeneralQueryPtr
+    general_query() {
+        return general_query_;
+    }
+
+    std::unordered_map<std::string, engine::meta::hybrid::DataType>&
+    attr_type() {
+        return attr_type_;
+    }
+
+    uint64_t&
+    vector_count() {
+        return vector_count_;
+    }
+
  private:
     const std::shared_ptr<server::Context> context_;
 
@@ -112,6 +133,10 @@ class SearchJob : public Job {
     ResultIds result_ids_;
     ResultDistances result_distances_;
     Status status_;
+
+    query::GeneralQueryPtr general_query_;
+    std::unordered_map<std::string, engine::meta::hybrid::DataType> attr_type_;
+    uint64_t vector_count_;
 
     std::mutex mutex_;
     std::condition_variable cv_;

@@ -17,6 +17,7 @@
 #include <map>
 #include <set>
 #include <string>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -44,6 +45,13 @@ struct VectorsData {
     uint64_t vector_count_ = 0;
     std::vector<float> float_data_;
     std::vector<uint8_t> binary_data_;
+    IDNumbers id_array_;
+};
+
+struct Entity {
+    uint64_t entity_count_ = 0;
+    std::unordered_map<std::string, std::vector<std::string>> attr_data_;
+    std::unordered_map<std::string, VectorsData> vector_data_;
     IDNumbers id_array_;
 };
 

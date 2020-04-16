@@ -83,6 +83,7 @@ constexpr ErrorCode SERVER_INVALID_INDEX_METRIC_TYPE = ToServerErrorCode(115);
 constexpr ErrorCode SERVER_INVALID_INDEX_FILE_SIZE = ToServerErrorCode(116);
 constexpr ErrorCode SERVER_OUT_OF_MEMORY = ToServerErrorCode(117);
 constexpr ErrorCode SERVER_INVALID_PARTITION_TAG = ToServerErrorCode(118);
+constexpr ErrorCode SERVER_INVALID_BINARY_QUERY = ToServerErrorCode(119);
 
 // db error code
 constexpr ErrorCode DB_META_TRANSACTION_FAILED = ToDbErrorCode(1);

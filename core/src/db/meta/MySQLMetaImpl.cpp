@@ -2631,6 +2631,18 @@ MySQLMetaImpl::GetGlobalLastLSN(uint64_t& lsn) {
     return Status::OK();
 }
 
+Status
+MySQLMetaImpl::CreateHybridCollection(CollectionSchema& collection_schema, hybrid::FieldsSchema& fields_schema) {
+}
+
+Status
+MySQLMetaImpl::DescribeHybridCollection(CollectionSchema& collection_schema, hybrid::FieldsSchema& fields_schema) {
+}
+
+Status
+MySQLMetaImpl::CreateHybridCollectionFile(milvus::engine::meta::SegmentSchema& file_schema) {
+}
+
 }  // namespace meta
 }  // namespace engine
 }  // namespace milvus

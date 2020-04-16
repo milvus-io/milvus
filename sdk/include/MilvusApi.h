@@ -14,7 +14,10 @@
 #include <memory>
 #include <string>
 #include <vector>
+#include <unordered_map>
 
+#include "BooleanQuery.h"
+#include "Field.h"
 #include "Status.h"
 
 /** \brief Milvus SDK namespace
@@ -64,14 +67,6 @@ struct CollectionParam {
     int64_t dimension = 0;                    ///< Vector dimension, must be a positive value
     int64_t index_file_size = 1024;           ///< Index file size, must be a positive value, unit: MB
     MetricType metric_type = MetricType::L2;  ///< Index metric type
-};
-
-/**
- * @brief Entity inserted, currently each entity represent a vector
- */
-struct Entity {
-    std::vector<float> float_data;     ///< Vector raw float data
-    std::vector<uint8_t> binary_data;  ///< Vector raw binary data
 };
 
 /**
@@ -143,6 +138,22 @@ struct CollectionInfo {
     int64_t total_row_count;                      ///< Collection total entity count
     std::vector<PartitionStat> partitions_stat;   ///< Collection's partitions statistics
 };
+
+
+
+struct HMapping {
+    std::string collection_name;
+    std::vector<FieldPtr> numerica_fields;
+    std::vector<VectorFieldPtr> vector_fields;
+};
+
+struct HEntity {
+    std::unordered_map<std::string, std::vector<std::string>> numerica_value;
+    std::unordered_map<std::string, std::vector<Entity>> vector_value;
+};
+
+
+
 
 /**
  * @brief SDK main class
@@ -575,6 +586,24 @@ class Connection {
      */
     virtual Status
     CompactCollection(const std::string& collection_name) = 0;
+
+    /*******************************New Interface**********************************/
+
+    virtual Status
+    CreateHybridCollection(const HMapping& mapping) = 0;
+
+    virtual Status
+    InsertEntity(const std::string& collection_name,
+                 const std::string& partition_tag,
+                 HEntity& entities,
+                 std::vector<uint64_t>& id_array) = 0;
+
+    virtual Status
+    HybridSearch(const std::string& collection_name,
+                 const std::vector<std::string>& partition_list,
+                 BooleanQueryPtr& boolean_query,
+                 const std::string& extra_params,
+                 TopKQueryResult& topk_query_result) = 0;
 };
 
 }  // namespace milvus

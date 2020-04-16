@@ -12,6 +12,7 @@
 #pragma once
 
 #include "MilvusApi.h"
+#include "BooleanQuery.h"
 #include "thirdparty/nlohmann/json.hpp"
 
 #include <memory>
@@ -72,6 +73,9 @@ class Utils {
 
     static void
     PrintCollectionInfo(const milvus::CollectionInfo& collection_info);
+
+    static std::vector<milvus::LeafQueryPtr>
+    GenLeafQuery();
 };
 
 }  // namespace milvus_sdk

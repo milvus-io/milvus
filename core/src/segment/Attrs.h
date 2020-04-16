@@ -17,6 +17,7 @@
 
 #pragma once
 
+#include <memory>
 #include <string>
 #include <unordered_map>
 
@@ -26,8 +27,12 @@ namespace milvus {
 namespace segment {
 
 struct Attrs {
+    //    Attrs() = default;
+
     std::unordered_map<std::string, AttrPtr> attrs;
 };
+
+using AttrsPtr = std::shared_ptr<Attrs>;
 
 }  // namespace segment
 }  // namespace milvus

@@ -13,8 +13,12 @@
 
 #include <memory>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
+#include <faiss/utils/ConcurrentBitset.h>
+
+#include "query/GeneralQuery.h"
 #include "utils/Json.h"
 #include "utils/Status.h"
 
@@ -48,6 +52,23 @@ enum class MetricType {
     SUBSTRUCTURE = 6,    // Substructure Distance
     SUPERSTRUCTURE = 7,  // Superstructure Distance
     MAX_VALUE = SUPERSTRUCTURE
+};
+
+enum class DataType {
+    INT8 = 1,
+    INT16 = 2,
+    INT32 = 3,
+    INT64 = 4,
+
+    STRING = 20,
+
+    BOOL = 30,
+
+    FLOAT = 40,
+    DOUBLE = 41,
+
+    VECTOR = 100,
+    UNKNOWN = 9999,
 };
 
 class ExecutionEngine {
@@ -93,6 +114,11 @@ class ExecutionEngine {
 
     virtual Status
     GetVectorByID(const int64_t& id, uint8_t* vector, bool hybrid) = 0;
+
+    virtual Status
+    ExecBinaryQuery(query::GeneralQueryPtr general_query, faiss::ConcurrentBitsetPtr bitset,
+                    std::unordered_map<std::string, DataType>& attr_type, uint64_t& nq, uint64_t& topk,
+                    std::vector<float>& distances, std::vector<int64_t>& labels) = 0;
 
     virtual Status
     Search(int64_t n, const float* data, int64_t k, const milvus::json& extra_params, float* distances, int64_t* labels,
