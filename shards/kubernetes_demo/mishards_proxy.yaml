@@ -1,12 +1,12 @@
 kind: Service
 apiVersion: v1
 metadata:
-  name: milvus-proxy-servers
-  namespace: milvus
+  name: mishards-proxy-servers
+  namespace: mishards
 spec:
   type: LoadBalancer
   selector:
-    app: milvus
+    app: mishards
     tier: proxy
   ports:
   - name: tcp
@@ -19,29 +19,29 @@ spec:
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: milvus-proxy
-  namespace: milvus
+  name: mishards-proxy
+  namespace: mishards
 spec:
   selector:
     matchLabels:
-      app: milvus
+      app: mishards
       tier: proxy
   replicas: 1
   template:
     metadata:
       labels:
-        app: milvus
+        app: mishards
         tier: proxy
     spec:
       containers:
-      - name: milvus-proxy
-        image: milvusdb/mishards:0.1.0-rc0
+      - name: mishards-proxy
+        image: milvusdb/mishards
         imagePullPolicy: Always
         command: ["python", "mishards/main.py"]
         resources:
           limits:
-            memory: "3Gi"
-            cpu: "4"
+            memory: "2Gi"
+            cpu: "2"
           requests:
             memory: "2Gi"
         ports:
@@ -71,18 +71,18 @@ spec:
           - name: SD_ROSERVER_POD_PATT
             value: ".*-ro-servers-.*"
         volumeMounts:
-        - name: milvus-proxy-configmap
+        - name: mishards-proxy-configmap
           mountPath: /source/mishards/.env
-          subPath: milvus_proxy_config.yml
-        - name: milvus-log-disk
+          subPath: mishards_proxy_config.yml
+        - name: mishards-log-disk
           mountPath: /var/log/milvus
           subPath: proxylog
       # imagePullSecrets:
       #   - name: regcred
       volumes:
-      - name: milvus-proxy-configmap
+      - name: mishards-proxy-configmap
         configMap:
-            name: milvus-proxy-configmap
-      - name: milvus-log-disk
+            name: mishards-proxy-configmap
+      - name: mishards-log-disk
         persistentVolumeClaim:
-            claimName: milvus-log-disk
+            claimName: mishards-log-disk
