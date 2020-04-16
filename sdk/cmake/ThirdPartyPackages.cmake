@@ -187,14 +187,12 @@ else ()
     set(GRPC_SOURCE_URL
             "https://github.com/youny626/grpc-milvus/archive/master.zip")
 endif ()
-set(GRPC_MD5 "0362ba219f59432c530070b5f5c3df73")
 
 if (DEFINED ENV{MILVUS_ZLIB_URL})
     set(ZLIB_SOURCE_URL "$ENV{MILVUS_ZLIB_URL}")
 else ()
     set(ZLIB_SOURCE_URL "https://github.com/madler/zlib/archive/v1.2.11.tar.gz")
 endif ()
-set(ZLIB_MD5 "0095d2d2d1f3442ce1318336637b695f")
 
 # ----------------------------------------------------------------------
 # GRPC
