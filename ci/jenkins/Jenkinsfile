@@ -148,6 +148,7 @@ pipeline {
                             FROMAT_SEMVER = "${env.SEMVER}".replaceAll("\\.", "-").replaceAll("_", "-")
                             FORMAT_OS_NAME = "${OS_NAME}".replaceAll("\\.", "-").replaceAll("_", "-")
                             HELM_RELEASE_NAME = "${env.PIPELINE_NAME}-${env.FROMAT_SEMVER}-${env.BUILD_NUMBER}-single-${FORMAT_OS_NAME}-${BINARY_VERSION}".toLowerCase()
+                            SHARDS_HELM_RELEASE_NAME = "${env.PIPELINE_NAME}-${env.FROMAT_SEMVER}-${env.BUILD_NUMBER}-shards-${FORMAT_OS_NAME}-${BINARY_VERSION}".toLowerCase()
                         }
 
                         agent {
@@ -166,6 +167,7 @@ pipeline {
                                             boolean isNightlyTest = isTimeTriggeredBuild()
                                             if (isNightlyTest) {
                                                 load "${env.WORKSPACE}/ci/jenkins/step/singleDevNightlyTest.groovy"
+                                                load "${env.WORKSPACE}/ci/jenkins/step/shardsDevNightlyTest.groovy"
                                             } else {
                                                 load "${env.WORKSPACE}/ci/jenkins/step/singleDevTest.groovy"
                                             }
@@ -180,6 +182,10 @@ pipeline {
                                 container('milvus-test-env') {
                                     script {
                                         load "${env.WORKSPACE}/ci/jenkins/step/cleanupSingleDev.groovy"
+                                        boolean isNightlyTest = isTimeTriggeredBuild()
+                                        if (isNightlyTest) {
+                                            load "${env.WORKSPACE}/ci/jenkins/step/cleanupShardsDev.groovy"
+                                        }
                                     }
                                 }
                             }
