@@ -18,13 +18,53 @@
 #pragma once
 
 #include <memory>
+#include <string>
+#include <vector>
 
 namespace milvus {
 namespace segment {
 
 class Attr {
  public:
-    Attr(void* data, size_t nbytes);
+    Attr(const std::vector<uint8_t>& data, size_t nbytes, const std::vector<int64_t> uids, const std::string& name);
+
+    Attr();
+
+    void
+    AddAttr(const std::vector<uint8_t>& data, size_t nbytes);
+
+    void
+    AddUids(const std::vector<int64_t>& uids);
+
+    void
+    SetName(const std::string& name);
+
+    const std::vector<uint8_t>&
+    GetData() const;
+
+    const std::string&
+    GetName() const;
+
+    const std::string&
+    GetCollectionId();
+
+    const size_t&
+    GetNbytes() const;
+
+    const std::vector<int64_t>&
+    GetUids() const;
+
+    size_t
+    GetCount() const;
+
+    size_t
+    GetCodeLength() const;
+
+    void
+    Erase(int32_t offset);
+
+    void
+    Erase(std::vector<int32_t>& offsets);
 
     // No copy and move
     Attr(const Attr&) = delete;
@@ -36,8 +76,11 @@ class Attr {
     operator=(Attr&&) = delete;
 
  private:
-    void* data_;
+    std::vector<uint8_t> data_;
     size_t nbytes_;
+    std::vector<int64_t> uids_;
+    std::string name_;
+    std::string collection_id_;
 };
 
 using AttrPtr = std::shared_ptr<Attr>;

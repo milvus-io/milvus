@@ -232,6 +232,208 @@ message GetVectorIDsParam {
     string segment_name = 2;
 }
 
+
+/********************************************************************************************************************/
+
+enum DataType {
+    NULL = 0;
+    INT8 = 1;
+    INT16 = 2;
+    INT32 = 3;
+    INT64 = 4;
+
+    STRING = 20;
+
+    BOOL = 30;
+
+    FLOAT = 40;
+    DOUBLE = 41;
+
+    VECTOR = 100;
+    UNKNOWN = 9999;
+}
+
+///////////////////////////////////////////////////////////////////
+
+message VectorFieldParam {
+    int64 dimension = 1;
+}
+
+message FieldType {
+    oneof value {
+        DataType data_type = 1;
+        VectorFieldParam vector_param = 2;
+    }
+}
+
+message FieldParam {
+    uint64 id = 1;
+    string name = 2;
+    FieldType type = 3;
+    repeated KeyValuePair extra_params = 4;
+}
+
+message VectorFieldValue {
+    repeated RowRecord value = 1;
+}
+
+message FieldValue {
+    oneof value {
+        int32 int32_value = 1;
+        int64 int64_value = 2;
+        float float_value = 3;
+        double double_value = 4;
+        string string_value = 5;
+        bool  bool_value = 6;
+        VectorFieldValue vector_value = 7;
+    }
+}
+
+///////////////////////////////////////////////////////////////////
+
+message Mapping {
+    Status status = 1;
+    uint64 collection_id = 2;
+    string collection_name = 3;
+    repeated FieldParam fields = 4;
+}
+
+message MappingList {
+    Status status = 1;
+    repeated Mapping mapping_list = 2;
+}
+
+///////////////////////////////////////////////////////////////////
+
+message TermQuery {
+    string field_name = 1;
+    repeated string values = 2;
+    float boost = 3;
+    repeated KeyValuePair extra_params = 4;
+}
+
+enum CompareOperator {
+    LT = 0;
+    LTE = 1;
+    EQ = 2;
+    GT = 3;
+    GTE = 4;
+    NE = 5;
+}
+
+message CompareExpr {
+    CompareOperator operator = 1;
+    string operand = 2;
+}
+
+message RangeQuery {
+    string field_name = 1;
+    repeated CompareExpr operand = 2;
+    float boost = 3;
+    repeated KeyValuePair extra_params = 4;
+}
+
+message VectorQuery {
+    string field_name = 1;
+    float query_boost = 2;
+    repeated RowRecord records = 3;
+    int64 topk = 4;
+    repeated KeyValuePair extra_params = 5;
+}
+
+enum Occur {
+    INVALID = 0;
+    MUST = 1;
+    SHOULD = 2;
+    MUST_NOT = 3;
+}
+
+message BooleanQuery {
+    Occur occur = 1;
+    repeated GeneralQuery general_query = 2;
+}
+
+message GeneralQuery {
+    oneof query {
+        BooleanQuery boolean_query = 1;
+        TermQuery term_query = 2;
+        RangeQuery range_query = 3;
+        VectorQuery vector_query = 4;
+    }
+}
+
+message HSearchParam {
+    string collection_name = 1;
+    repeated string partition_tag_array = 2;
+    GeneralQuery general_query = 3;
+    repeated KeyValuePair extra_params = 4;
+}
+
+message HSearchInSegmentsParam {
+    repeated string segment_id_array = 1;
+    HSearchParam search_param = 2;
+}
+
+///////////////////////////////////////////////////////////////////
+
+message AttrRecord {
+    repeated string value = 1;
+}
+
+message HEntity {
+    Status status = 1;
+    int64 entity_id = 2;
+    repeated string field_names = 3;
+    repeated AttrRecord attr_records = 4;
+    repeated FieldValue result_values = 5;
+}
+
+message HQueryResult {
+    Status status = 1;
+    repeated HEntity entities = 2;
+    int64 row_num = 3;
+    repeated float score = 4;
+    repeated float distance = 5;
+}
+
+message HInsertParam {
+    string collection_name = 1;
+    string partition_tag = 2;
+    HEntity entities = 3;
+    repeated int64 entity_id_array = 4;
+    repeated KeyValuePair extra_params = 5;
+}
+
+message HEntityIdentity {
+    string collection_name = 1;
+    int64 id = 2;
+}
+
+message HEntityIDs {
+    Status status = 1;
+    repeated int64 entity_id_array = 2;
+}
+
+message HGetEntityIDsParam {
+    string collection_name = 1;
+    string segment_name = 2;
+}
+
+message HDeleteByIDParam {
+    string collection_name = 1;
+    repeated int64 id_array = 2;
+}
+
+///////////////////////////////////////////////////////////////////
+
+message HIndexParam {
+    Status status = 1;
+    string collection_name = 2;
+    int32 index_type = 3;
+    repeated KeyValuePair extra_params = 4;
+}
+
+
 service MilvusService {
     /**
      * @brief This method is used to create collection
@@ -448,4 +650,47 @@ service MilvusService {
      * @return Status
      */
     rpc Compact(CollectionName) returns (Status) {}
+
+    /********************************New Interface********************************************/
+
+    rpc CreateHybridCollection(Mapping) returns (Status) {}
+
+    rpc HasHybridCollection(CollectionName) returns (BoolReply) {}
+
+    rpc DropHybridCollection(CollectionName) returns (Status) {}
+
+    rpc DescribeHybridCollection(CollectionName) returns (Mapping) {}
+
+    rpc CountHybridCollection(CollectionName) returns (CollectionRowCount) {}
+
+    rpc ShowHybridCollections(Command) returns (MappingList) {}
+
+    rpc ShowHybridCollectionInfo (CollectionName) returns (CollectionInfo) {}
+
+    rpc PreloadHybridCollection(CollectionName) returns (Status) {}
+
+    ///////////////////////////////////////////////////////////////////
+
+//    rpc CreateIndex(IndexParam) returns (Status) {}
+//
+//    rpc DescribeIndex(CollectionName) returns (IndexParam) {}
+//
+//    rpc DropIndex(CollectionName) returns (Status) {}
+
+    ///////////////////////////////////////////////////////////////////
+
+    rpc InsertEntity(HInsertParam) returns (HEntityIDs) {}
+
+    // TODO(yukun): will change to HQueryResult
+    rpc HybridSearch(HSearchParam) returns (TopKQueryResult) {}
+
+    rpc HybridSearchInSegments(HSearchInSegmentsParam) returns (TopKQueryResult) {}
+
+    rpc GetEntityByID(HEntityIdentity) returns (HEntity) {}
+
+    rpc GetEntityIDs(HGetEntityIDsParam) returns (HEntityIDs) {}
+
+    rpc DeleteEntitiesByID(HDeleteByIDParam) returns (Status) {}
+
+    ///////////////////////////////////////////////////////////////////
 }

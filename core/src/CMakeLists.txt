@@ -46,6 +46,10 @@ set(grpc_service_files
         ${MILVUS_ENGINE_SRC}/grpc/gen-status/status.pb.cc
         )
 
+aux_source_directory(${MILVUS_ENGINE_SRC}/query query_files)
+aux_source_directory(${MILVUS_ENGINE_SRC}/context context_files)
+aux_source_directory(${MILVUS_ENGINE_SRC}/search search_files)
+
 aux_source_directory(${MILVUS_ENGINE_SRC}/scheduler scheduler_main_files)
 aux_source_directory(${MILVUS_ENGINE_SRC}/scheduler/action scheduler_action_files)
 aux_source_directory(${MILVUS_ENGINE_SRC}/scheduler/event scheduler_event_files)
@@ -74,11 +78,13 @@ set(thirdparty_files
 
 aux_source_directory(${MILVUS_ENGINE_SRC}/server server_service_files)
 aux_source_directory(${MILVUS_ENGINE_SRC}/server/delivery/request delivery_request_files)
+aux_source_directory(${MILVUS_ENGINE_SRC}/server/delivery/hybrid_request delivery_hybrid_request_files)
 aux_source_directory(${MILVUS_ENGINE_SRC}/server/delivery/strategy delivery_strategy_files)
 aux_source_directory(${MILVUS_ENGINE_SRC}/server/delivery delivery_files)
 set(server_files
         ${server_service_files}
         ${delivery_request_files}
+        ${delivery_hybrid_request_files}
         ${delivery_strategy_files}
         ${delivery_files}
         )
@@ -284,6 +290,9 @@ add_executable(milvus_server
         ${config_files}
         ${config_handler_files}
         ${metrics_files}
+        ${query_files}
+        ${search_files}
+        ${context_files}
         ${scheduler_files}
         ${server_files}
         ${grpc_server_files}

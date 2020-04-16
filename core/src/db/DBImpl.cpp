@@ -21,8 +21,10 @@
 #include <functional>
 #include <iostream>
 #include <limits>
+#include <queue>
 #include <set>
 #include <thread>
+#include <unordered_map>
 #include <utility>
 
 #include "Utils.h"
@@ -49,6 +51,8 @@
 #include "utils/TimeRecorder.h"
 #include "utils/ValidationUtil.h"
 #include "wal/WalDefinations.h"
+
+#include "search/TaskInst.h"
 
 namespace milvus {
 namespace engine {
@@ -206,6 +210,31 @@ DBImpl::CreateCollection(meta::CollectionSchema& collection_schema) {
     }
 
     return meta_ptr_->CreateCollection(temp_schema);
+}
+
+Status
+DBImpl::CreateHybridCollection(meta::CollectionSchema& collection_schema, meta::hybrid::FieldsSchema& fields_schema) {
+    if (!initialized_.load(std::memory_order_acquire)) {
+        return SHUTDOWN_ERROR;
+    }
+
+    meta::CollectionSchema temp_schema = collection_schema;
+    if (options_.wal_enable_) {
+        // TODO(yukun): wal_mgr_->CreateHybridCollection()
+    }
+
+    return meta_ptr_->CreateHybridCollection(temp_schema, fields_schema);
+}
+
+Status
+DBImpl::DescribeHybridCollection(meta::CollectionSchema& collection_schema,
+                                 milvus::engine::meta::hybrid::FieldsSchema& fields_schema) {
+    if (!initialized_.load(std::memory_order_acquire)) {
+        return SHUTDOWN_ERROR;
+    }
+
+    auto stat = meta_ptr_->DescribeHybridCollection(collection_schema, fields_schema);
+    return stat;
 }
 
 Status
@@ -553,6 +582,149 @@ DBImpl::InsertVectors(const std::string& collection_id, const std::string& parti
         status = ExecWalRecord(record);
     }
 
+    return status;
+}
+
+Status
+DBImpl::InsertEntities(const std::string& collection_id, const std::string& partition_tag, Entity& entity,
+                       std::unordered_map<std::string, meta::hybrid::DataType>& attr_types) {
+    if (!initialized_.load(std::memory_order_acquire)) {
+        return SHUTDOWN_ERROR;
+    }
+
+    // Generate id
+    if (entity.id_array_.empty()) {
+        SafeIDGenerator& id_generator = SafeIDGenerator::GetInstance();
+        Status status = id_generator.GetNextIDNumbers(entity.entity_count_, entity.id_array_);
+        if (!status.ok()) {
+            return status;
+        }
+    }
+
+    Status status;
+    // insert entities: collection_name is field id
+    wal::MXLogRecord record;
+    record.lsn = 0;
+    record.collection_id = collection_id;
+    record.partition_tag = partition_tag;
+    record.ids = entity.id_array_.data();
+    record.length = entity.entity_count_;
+
+    auto vector_it = entity.vector_data_.begin();
+    if (vector_it->second.binary_data_.empty()) {
+        record.type = wal::MXLogType::Entity;
+        record.data = vector_it->second.float_data_.data();
+        record.data_size = vector_it->second.float_data_.size() * sizeof(float);
+    } else {
+        //        record.type = wal::MXLogType::InsertBinary;
+        //        record.data = entities.vector_data_[0].binary_data_.data();
+        //        record.length = entities.vector_data_[0].binary_data_.size() * sizeof(uint8_t);
+    }
+
+    auto attr_data_it = entity.attr_data_.begin();
+    for (; attr_data_it != entity.attr_data_.end(); ++attr_data_it) {
+        switch (attr_types.at(attr_data_it->first)) {
+            case meta::hybrid::DataType::INT8: {
+                std::vector<int8_t> entity_data;
+                entity_data.resize(entity.entity_count_);
+                for (uint64_t j = 0; j < entity.entity_count_; ++j) {
+                    entity_data[j] = atoi(attr_data_it->second[j].c_str());
+                }
+                std::vector<uint8_t> data;
+                data.resize(entity.entity_count_ * sizeof(int8_t));
+                memcpy(data.data(), entity_data.data(), entity.entity_count_ * sizeof(int8_t));
+                record.attr_data.insert(std::make_pair(attr_data_it->first, data));
+
+                record.attr_nbytes.insert(std::make_pair(attr_data_it->first, sizeof(int8_t)));
+                record.attr_data_size.insert(
+                    std::make_pair(attr_data_it->first, entity.entity_count_ * sizeof(int8_t)));
+                break;
+            }
+            case meta::hybrid::DataType::INT16: {
+                std::vector<int16_t> entity_data;
+                entity_data.resize(entity.entity_count_);
+                for (uint64_t j = 0; j < entity.entity_count_; ++j) {
+                    entity_data[j] = atoi(attr_data_it->second[j].c_str());
+                }
+                std::vector<uint8_t> data;
+                data.resize(entity.entity_count_ * sizeof(int16_t));
+                memcpy(data.data(), entity_data.data(), entity.entity_count_ * sizeof(int16_t));
+                record.attr_data.insert(std::make_pair(attr_data_it->first, data));
+
+                record.attr_nbytes.insert(std::make_pair(attr_data_it->first, sizeof(int16_t)));
+                record.attr_data_size.insert(
+                    std::make_pair(attr_data_it->first, entity.entity_count_ * sizeof(int16_t)));
+                break;
+            }
+            case meta::hybrid::DataType::INT32: {
+                std::vector<int32_t> entity_data;
+                entity_data.resize(entity.entity_count_);
+                for (uint64_t j = 0; j < entity.entity_count_; ++j) {
+                    entity_data[j] = atoi(attr_data_it->second[j].c_str());
+                }
+                std::vector<uint8_t> data;
+                data.resize(entity.entity_count_ * sizeof(int32_t));
+                memcpy(data.data(), entity_data.data(), entity.entity_count_ * sizeof(int32_t));
+                record.attr_data.insert(std::make_pair(attr_data_it->first, data));
+
+                record.attr_nbytes.insert(std::make_pair(attr_data_it->first, sizeof(int32_t)));
+                record.attr_data_size.insert(
+                    std::make_pair(attr_data_it->first, entity.entity_count_ * sizeof(int32_t)));
+                break;
+            }
+            case meta::hybrid::DataType::INT64: {
+                std::vector<int64_t> entity_data;
+                entity_data.resize(entity.entity_count_);
+                for (uint64_t j = 0; j < entity.entity_count_; ++j) {
+                    entity_data[j] = atoi(attr_data_it->second[j].c_str());
+                }
+                std::vector<uint8_t> data;
+                data.resize(entity.entity_count_ * sizeof(int64_t));
+                memcpy(data.data(), entity_data.data(), entity.entity_count_ * sizeof(int64_t));
+                record.attr_data.insert(std::make_pair(attr_data_it->first, data));
+
+                record.attr_nbytes.insert(std::make_pair(attr_data_it->first, sizeof(int64_t)));
+                record.attr_data_size.insert(
+                    std::make_pair(attr_data_it->first, entity.entity_count_ * sizeof(int64_t)));
+
+                break;
+            }
+            case meta::hybrid::DataType::FLOAT: {
+                std::vector<float> entity_data;
+                entity_data.resize(entity.entity_count_);
+                for (uint64_t j = 0; j < entity.entity_count_; ++j) {
+                    entity_data[j] = atof(attr_data_it->second[j].c_str());
+                }
+                std::vector<uint8_t> data;
+                data.resize(entity.entity_count_ * sizeof(float));
+                memcpy(data.data(), entity_data.data(), entity.entity_count_ * sizeof(float));
+                record.attr_data.insert(std::make_pair(attr_data_it->first, data));
+
+                record.attr_nbytes.insert(std::make_pair(attr_data_it->first, sizeof(float)));
+                record.attr_data_size.insert(std::make_pair(attr_data_it->first, entity.entity_count_ * sizeof(float)));
+
+                break;
+            }
+            case meta::hybrid::DataType::DOUBLE: {
+                std::vector<double> entity_data;
+                entity_data.resize(entity.entity_count_);
+                for (uint64_t j = 0; j < entity.entity_count_; ++j) {
+                    entity_data[j] = atof(attr_data_it->second[j].c_str());
+                }
+                std::vector<uint8_t> data;
+                data.resize(entity.entity_count_ * sizeof(double));
+                memcpy(data.data(), entity_data.data(), entity.entity_count_ * sizeof(double));
+                record.attr_data.insert(std::make_pair(attr_data_it->first, data));
+
+                record.attr_nbytes.insert(std::make_pair(attr_data_it->first, sizeof(double)));
+                record.attr_data_size.insert(
+                    std::make_pair(attr_data_it->first, entity.entity_count_ * sizeof(double)));
+                break;
+            }
+        }
+    }
+
+    status = ExecWalRecord(record);
     return status;
 }
 
@@ -1122,6 +1294,75 @@ DBImpl::QueryByID(const std::shared_ptr<server::Context>& context, const std::st
 }
 
 Status
+DBImpl::HybridQuery(const std::shared_ptr<server::Context>& context, const std::string& collection_id,
+                    const std::vector<std::string>& partition_tags,
+                    context::HybridSearchContextPtr hybrid_search_context, query::GeneralQueryPtr general_query,
+                    std::unordered_map<std::string, engine::meta::hybrid::DataType>& attr_type, uint64_t& nq,
+                    ResultIds& result_ids, ResultDistances& result_distances) {
+    auto query_ctx = context->Child("Query");
+
+    if (!initialized_.load(std::memory_order_acquire)) {
+        return SHUTDOWN_ERROR;
+    }
+
+    Status status;
+    std::vector<size_t> ids;
+    meta::SegmentsSchema files_array;
+
+    if (partition_tags.empty()) {
+        // no partition tag specified, means search in whole table
+        // get all table files from parent table
+        status = GetFilesToSearch(collection_id, files_array);
+        if (!status.ok()) {
+            return status;
+        }
+
+        std::vector<meta::CollectionSchema> partition_array;
+        status = meta_ptr_->ShowPartitions(collection_id, partition_array);
+        if (!status.ok()) {
+            return status;
+        }
+        for (auto& schema : partition_array) {
+            status = GetFilesToSearch(schema.collection_id_, files_array);
+            if (!status.ok()) {
+                return Status(DB_ERROR, "GetFilesToSearch failed in HybridQuery");
+            }
+        }
+
+        if (files_array.empty()) {
+            return Status::OK();
+        }
+    } else {
+        // get files from specified partitions
+        std::set<std::string> partition_name_array;
+        GetPartitionsByTags(collection_id, partition_tags, partition_name_array);
+
+        for (auto& partition_name : partition_name_array) {
+            status = GetFilesToSearch(partition_name, files_array);
+            if (!status.ok()) {
+                return Status(DB_ERROR, "GetFilesToSearch failed in HybridQuery");
+            }
+        }
+
+        if (files_array.empty()) {
+            return Status::OK();
+        }
+    }
+
+    cache::CpuCacheMgr::GetInstance()->PrintInfo();  // print cache info before query
+    status = HybridQueryAsync(query_ctx, collection_id, files_array, hybrid_search_context, general_query, attr_type,
+                              nq, result_ids, result_distances);
+    if (!status.ok()) {
+        return status;
+    }
+    cache::CpuCacheMgr::GetInstance()->PrintInfo();  // print cache info after query
+
+    query_ctx->GetTraceContext()->GetSpan()->Finish();
+
+    return status;
+}
+
+Status
 DBImpl::Query(const std::shared_ptr<server::Context>& context, const std::string& collection_id,
               const std::vector<std::string>& partition_tags, uint64_t k, const milvus::json& extra_params,
               const VectorsData& vectors, ResultIds& result_ids, ResultDistances& result_distances) {
@@ -1261,6 +1502,70 @@ DBImpl::QueryAsync(const std::shared_ptr<server::Context>& context, const meta::
     result_ids = job->GetResultIds();
     result_distances = job->GetResultDistances();
     rc.ElapseFromBegin("Engine query totally cost");
+
+    return Status::OK();
+}
+
+Status
+DBImpl::HybridQueryAsync(const std::shared_ptr<server::Context>& context, const std::string& table_id,
+                         const meta::SegmentsSchema& files, context::HybridSearchContextPtr hybrid_search_context,
+                         query::GeneralQueryPtr general_query,
+                         std::unordered_map<std::string, engine::meta::hybrid::DataType>& attr_type, uint64_t& nq,
+                         ResultIds& result_ids, ResultDistances& result_distances) {
+    auto query_async_ctx = context->Child("Query Async");
+
+#if 0
+    // Construct tasks
+    for (auto file : files) {
+        std::unordered_map<std::string, engine::DataType> types;
+        auto it = attr_type.begin();
+        for (; it != attr_type.end(); it++) {
+            types.insert(std::make_pair(it->first, (engine::DataType)it->second));
+        }
+
+        auto file_ptr = std::make_shared<meta::TableFileSchema>(file);
+        search::TaskPtr
+            task = std::make_shared<search::Task>(context, file_ptr, general_query, types, hybrid_search_context);
+        search::TaskInst::GetInstance().load_queue().push(task);
+        search::TaskInst::GetInstance().load_cv().notify_one();
+        hybrid_search_context->tasks_.emplace_back(task);
+    }
+
+#endif
+
+    //#if 0
+    TimeRecorder rc("");
+
+    // step 1: construct search job
+    auto status = OngoingFileChecker::GetInstance().MarkOngoingFiles(files);
+
+    VectorsData vectors;
+
+    LOG_ENGINE_DEBUG_ << LogOut("Engine query begin, index file count: %ld", files.size());
+    scheduler::SearchJobPtr job =
+        std::make_shared<scheduler::SearchJob>(query_async_ctx, general_query, attr_type, vectors);
+    for (auto& file : files) {
+        scheduler::SegmentSchemaPtr file_ptr = std::make_shared<meta::SegmentSchema>(file);
+        job->AddIndexFile(file_ptr);
+    }
+
+    // step 2: put search job to scheduler and wait result
+    scheduler::JobMgrInst::GetInstance()->Put(job);
+    job->WaitResult();
+
+    status = OngoingFileChecker::GetInstance().UnmarkOngoingFiles(files);
+    if (!job->GetStatus().ok()) {
+        return job->GetStatus();
+    }
+
+    // step 3: construct results
+    nq = job->vector_count();
+    result_ids = job->GetResultIds();
+    result_distances = job->GetResultDistances();
+    rc.ElapseFromBegin("Engine query totally cost");
+
+    query_async_ctx->GetTraceContext()->GetSpan()->Finish();
+    //#endif
 
     return Status::OK();
 }
@@ -1456,6 +1761,96 @@ DBImpl::MergeFiles(const std::string& collection_id, const meta::SegmentsSchema&
     status = meta_ptr_->UpdateCollectionFiles(updated);
     LOG_ENGINE_DEBUG_ << "New merged segment " << collection_file.segment_id_ << " of size "
                       << segment_writer_ptr->Size() << " bytes";
+
+    if (options_.insert_cache_immediately_) {
+        segment_writer_ptr->Cache();
+    }
+
+    return status;
+}
+
+Status
+DBImpl::MergeHybridFiles(const std::string& collection_id, const milvus::engine::meta::SegmentsSchema& files) {
+    // const std::lock_guard<std::mutex> lock(flush_merge_compact_mutex_);
+
+    LOG_ENGINE_DEBUG_ << "Merge files for collection: " << collection_id;
+
+    // step 1: create table file
+    meta::SegmentSchema table_file;
+    table_file.collection_id_ = collection_id;
+    table_file.file_type_ = meta::SegmentSchema::NEW_MERGE;
+    Status status = meta_ptr_->CreateHybridCollectionFile(table_file);
+
+    if (!status.ok()) {
+        LOG_ENGINE_ERROR_ << "Failed to create collection: " << status.ToString();
+        return status;
+    }
+
+    // step 2: merge files
+    /*
+    ExecutionEnginePtr index =
+        EngineFactory::Build(table_file.dimension_, table_file.location_, (EngineType)table_file.engine_type_,
+                             (MetricType)table_file.metric_type_, table_file.nlist_);
+*/
+    meta::SegmentsSchema updated;
+
+    std::string new_segment_dir;
+    utils::GetParentPath(table_file.location_, new_segment_dir);
+    auto segment_writer_ptr = std::make_shared<segment::SegmentWriter>(new_segment_dir);
+
+    for (auto& file : files) {
+        server::CollectMergeFilesMetrics metrics;
+        std::string segment_dir_to_merge;
+        utils::GetParentPath(file.location_, segment_dir_to_merge);
+        segment_writer_ptr->Merge(segment_dir_to_merge, table_file.file_id_);
+        auto file_schema = file;
+        file_schema.file_type_ = meta::SegmentSchema::TO_DELETE;
+        updated.push_back(file_schema);
+        auto size = segment_writer_ptr->Size();
+        if (size >= file_schema.index_file_size_) {
+            break;
+        }
+    }
+
+    // step 3: serialize to disk
+    try {
+        status = segment_writer_ptr->Serialize();
+        fiu_do_on("DBImpl.MergeFiles.Serialize_ThrowException", throw std::exception());
+        fiu_do_on("DBImpl.MergeFiles.Serialize_ErrorStatus", status = Status(DB_ERROR, ""));
+    } catch (std::exception& ex) {
+        std::string msg = "Serialize merged index encounter exception: " + std::string(ex.what());
+        LOG_ENGINE_ERROR_ << msg;
+        status = Status(DB_ERROR, msg);
+    }
+
+    if (!status.ok()) {
+        LOG_ENGINE_ERROR_ << "Failed to persist merged segment: " << new_segment_dir << ". Error: " << status.message();
+
+        // if failed to serialize merge file to disk
+        // typical error: out of disk space, out of memory or permission denied
+        table_file.file_type_ = meta::SegmentSchema::TO_DELETE;
+        status = meta_ptr_->UpdateCollectionFile(table_file);
+        LOG_ENGINE_DEBUG_ << "Failed to update file to index, mark file: " << table_file.file_id_ << " to to_delete";
+
+        return status;
+    }
+
+    // step 4: update table files state
+    // if index type isn't IDMAP, set file type to TO_INDEX if file size exceed index_file_size
+    // else set file type to RAW, no need to build index
+    if (!utils::IsRawIndexType(table_file.engine_type_)) {
+        table_file.file_type_ = (segment_writer_ptr->Size() >= table_file.index_file_size_)
+                                    ? meta::SegmentSchema::TO_INDEX
+                                    : meta::SegmentSchema::RAW;
+    } else {
+        table_file.file_type_ = meta::SegmentSchema::RAW;
+    }
+    table_file.file_size_ = segment_writer_ptr->Size();
+    table_file.row_count_ = segment_writer_ptr->VectorCount();
+    updated.push_back(table_file);
+    status = meta_ptr_->UpdateCollectionFiles(updated);
+    LOG_ENGINE_DEBUG_ << "New merged segment " << table_file.segment_id_ << " of size " << segment_writer_ptr->Size()
+                      << " bytes";
 
     if (options_.insert_cache_immediately_) {
         segment_writer_ptr->Cache();
@@ -1878,6 +2273,23 @@ DBImpl::ExecWalRecord(const wal::MXLogRecord& record) {
     Status status;
 
     switch (record.type) {
+        case wal::MXLogType::Entity: {
+            std::string target_collection_name;
+            status = GetPartitionByTag(record.collection_id, record.partition_tag, target_collection_name);
+            if (!status.ok()) {
+                return status;
+            }
+
+            std::set<std::string> flushed_tables;
+            status = mem_mgr_->InsertEntities(target_collection_name, record.length, record.ids,
+                                              (record.data_size / record.length / sizeof(float)),
+                                              (const float*)record.data, record.attr_nbytes, record.attr_data_size,
+                                              record.attr_data, record.lsn, flushed_tables);
+            collections_flushed(flushed_tables);
+
+            milvus::server::CollectInsertMetrics metrics(record.length, status);
+            break;
+        }
         case wal::MXLogType::InsertBinary: {
             std::string target_collection_name;
             status = GetPartitionByTag(record.collection_id, record.partition_tag, target_collection_name);

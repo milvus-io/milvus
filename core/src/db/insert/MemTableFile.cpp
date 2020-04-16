@@ -86,6 +86,33 @@ MemTableFile::Add(const VectorSourcePtr& source) {
 }
 
 Status
+MemTableFile::AddEntities(const VectorSourcePtr& source) {
+    if (table_file_schema_.dimension_ <= 0) {
+        std::string err_msg =
+            "MemTableFile::Add: table_file_schema dimension = " + std::to_string(table_file_schema_.dimension_) +
+            ", table_id = " + table_file_schema_.collection_id_;
+        LOG_ENGINE_ERROR_ << LogOut("[%s][%ld]", "insert", 0) << err_msg;
+        return Status(DB_ERROR, "Not able to create table file");
+    }
+
+    size_t single_entity_mem_size = source->SingleEntitySize(table_file_schema_.dimension_);
+    size_t mem_left = GetMemLeft();
+    if (mem_left >= single_entity_mem_size) {
+        size_t num_entities_to_add = std::ceil(mem_left / single_entity_mem_size);
+        size_t num_entities_added;
+
+        auto status =
+            source->AddEntities(segment_writer_ptr_, table_file_schema_, num_entities_to_add, num_entities_added);
+
+        if (status.ok()) {
+            current_mem_ += (num_entities_added * single_entity_mem_size);
+        }
+        return status;
+    }
+    return Status::OK();
+}
+
+Status
 MemTableFile::Delete(segment::doc_id_t doc_id) {
     segment::SegmentPtr segment_ptr;
     segment_writer_ptr_->GetSegment(segment_ptr);

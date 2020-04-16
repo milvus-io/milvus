@@ -13,6 +13,7 @@
 
 set(test_files
         ${CMAKE_CURRENT_SOURCE_DIR}/test_db.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/test_hybrid_db.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/test_db_mysql.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/test_wal.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/test_engine.cpp

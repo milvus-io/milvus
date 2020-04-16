@@ -14,6 +14,8 @@
 #include <memory>
 #include <set>
 #include <string>
+#include <unordered_map>
+#include <vector>
 
 #include "db/Types.h"
 #include "utils/Status.h"
@@ -30,6 +32,13 @@ class MemManager {
     virtual Status
     InsertVectors(const std::string& collection_id, int64_t length, const IDNumber* vector_ids, int64_t dim,
                   const uint8_t* vectors, uint64_t lsn, std::set<std::string>& flushed_tables) = 0;
+
+    virtual Status
+    InsertEntities(const std::string& table_id, int64_t length, const IDNumber* vector_ids, int64_t dim,
+                   const float* vectors, const std::unordered_map<std::string, uint64_t>& attr_nbytes,
+                   const std::unordered_map<std::string, uint64_t>& attr_size,
+                   const std::unordered_map<std::string, std::vector<uint8_t>>& attr_data, uint64_t lsn,
+                   std::set<std::string>& flushed_tables) = 0;
 
     virtual Status
     DeleteVector(const std::string& collection_id, IDNumber vector_id, uint64_t lsn) = 0;

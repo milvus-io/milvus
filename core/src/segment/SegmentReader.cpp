@@ -50,6 +50,7 @@ SegmentReader::Load() {
     try {
         fs_ptr_->operation_ptr_->CreateDirectory();
         default_codec.GetVectorsFormat()->read(fs_ptr_, segment_ptr_->vectors_ptr_);
+        default_codec.GetAttrsFormat()->read(fs_ptr_, segment_ptr_->attrs_ptr_);
         // default_codec.GetVectorIndexFormat()->read(fs_ptr_, segment_ptr_->vector_index_ptr_);
         default_codec.GetDeletedDocsFormat()->read(fs_ptr_, segment_ptr_->deleted_docs_ptr_);
     } catch (std::exception& e) {

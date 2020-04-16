@@ -17,6 +17,7 @@
 #include <mutex>
 #include <set>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 #include "config/Config.h"
@@ -47,6 +48,13 @@ class MemManagerImpl : public MemManager, public server::CacheConfigHandler {
     Status
     InsertVectors(const std::string& collection_id, int64_t length, const IDNumber* vector_ids, int64_t dim,
                   const uint8_t* vectors, uint64_t lsn, std::set<std::string>& flushed_tables) override;
+
+    Status
+    InsertEntities(const std::string& table_id, int64_t length, const IDNumber* vector_ids, int64_t dim,
+                   const float* vectors, const std::unordered_map<std::string, uint64_t>& attr_nbytes,
+                   const std::unordered_map<std::string, uint64_t>& attr_size,
+                   const std::unordered_map<std::string, std::vector<uint8_t>>& attr_data, uint64_t lsn,
+                   std::set<std::string>& flushed_tables) override;
 
     Status
     DeleteVector(const std::string& collection_id, IDNumber vector_id, uint64_t lsn) override;
@@ -85,6 +93,9 @@ class MemManagerImpl : public MemManager, public server::CacheConfigHandler {
 
     Status
     InsertVectorsNoLock(const std::string& collection_id, const VectorSourcePtr& source, uint64_t lsn);
+
+    Status
+    InsertEntitiesNoLock(const std::string& collection_id, const VectorSourcePtr& source, uint64_t lsn);
 
     Status
     ToImmutable();
