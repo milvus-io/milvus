@@ -11,6 +11,8 @@ import copy
 import threading
 import queue
 import enum
+from functools import partial
+from collections import defaultdict
 from kubernetes import client, config as kconfig, watch
 from mishards.topology import StatusType
 
@@ -134,6 +136,7 @@ class K8SEventListener(threading.Thread, K8SMixin):
 
 
 class EventHandler(threading.Thread):
+    PENDING_THRESHOLD = 2
     def __init__(self, mgr, message_queue, namespace, pod_patt, **kwargs):
         threading.Thread.__init__(self)
         self.mgr = mgr
@@ -142,6 +145,25 @@ class EventHandler(threading.Thread):
         self.terminate = False
         self.pod_patt = re.compile(pod_patt)
         self.namespace = namespace
+        self.pending_add = defaultdict(int)
+        self.pending_delete = defaultdict(int)
+
+    def record_pending_add(self, pod, true_cb=None):
+        self.pending_add[pod] += 1
+        self.pending_delete.pop(pod, None)
+        if self.pending_add[pod] >= self.PENDING_THRESHOLD:
+            true_cb and true_cb()
+            return True
+        return False
+
+    def record_pending_delete(self, pod, true_cb=None):
+        self.pending_delete[pod] += 1
+        self.pending_add.pop(pod, None)
+        if self.pending_delete[pod] >= self.PENDING_THRESHOLD:
+            true_cb and true_cb()
+            return True
+
+        return False
 
     def stop(self):
         self.terminate = True
@@ -166,7 +188,7 @@ class EventHandler(threading.Thread):
 
         if try_cnt <= 0 and not pod:
             if not event['start_up']:
-                logger.error('Pod {} is started but cannot read pod'.format(
+                logger.warning('Pod {} is started but cannot read pod'.format(
                     event['pod']))
             return
         elif try_cnt <= 0 and not pod.status.pod_ip:
@@ -175,26 +197,31 @@ class EventHandler(threading.Thread):
 
         logger.info('Register POD {} with IP {}'.format(
             pod.metadata.name, pod.status.pod_ip))
-        self.mgr.add_pod(name=pod.metadata.name, ip=pod.status.pod_ip)
+        self.record_pending_add(pod.metadata.name,
+                true_cb=partial(self.mgr.add_pod, pod.metadata.name, pod.status.pod_ip))
 
     def on_pod_killing(self, event, **kwargs):
         logger.info('Unregister POD {}'.format(event['pod']))
-        self.mgr.delete_pod(name=event['pod'])
+        self.record_pending_delete(event['pod'],
+                true_cb=partial(self.mgr.delete_pod, event['pod']))
 
     def on_pod_heartbeat(self, event, **kwargs):
         names = self.mgr.readonly_topo.group_names
 
-        running_names = set()
+        pods_with_event = set()
         for each_event in event['events']:
+            pods_with_event.add(each_event['pod'])
             if each_event['ready']:
-                self.mgr.add_pod(name=each_event['pod'], ip=each_event['ip'])
-                running_names.add(each_event['pod'])
+                self.record_pending_add(each_event['pod'],
+                    true_cb=partial(self.mgr.add_pod, each_event['pod'], each_event['ip']))
             else:
-                self.mgr.delete_pod(name=each_event['pod'])
+                self.record_pending_delete(each_event['pod'],
+                    true_cb=partial(self.mgr.delete_pod, each_event['pod']))
 
-        to_delete = names - running_names
-        for name in to_delete:
-            self.mgr.delete_pod(name)
+        pods_no_event = names - pods_with_event
+        for name in pods_no_event:
+            self.record_pending_delete(name,
+                    true_cb=partial(self.mgr.delete_pod, name))
 
         logger.info(self.mgr.readonly_topo.group_names)
 
