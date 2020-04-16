@@ -132,7 +132,7 @@ class Topology:
     def delete_group(self, group):
         self.on_pre_delete_group(group)
         with self.cv:
-            deleted_group = self._delete_group_lock(group)
+            deleted_group = self._delete_group_no_lock(group)
         if not deleted_group:
             return self.on_delete_not_existed_group(group)
         return self.on_post_delete_group(group)

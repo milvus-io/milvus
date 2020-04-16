@@ -11,7 +11,8 @@ import copy
 import threading
 import queue
 import enum
-from kubernetes import client, config, watch
+from kubernetes import client, config as kconfig, watch
+from mishards.topology import StatusType
 
 logger = logging.getLogger(__name__)
 
@@ -33,8 +34,8 @@ class K8SMixin:
             self.namespace = open(INCLUSTER_NAMESPACE_PATH).read()
 
         if not self.v1:
-            config.load_incluster_config(
-            ) if self.in_cluster else config.load_kube_config()
+            kconfig.load_incluster_config(
+            ) if self.in_cluster else kconfig.load_kube_config()
             self.v1 = client.CoreV1Api()
 
 
@@ -237,15 +238,15 @@ class KubernetesProviderSettings:
 class KubernetesProvider(object):
     name = 'kubernetes'
 
-    def __init__(self, plugin_config, readonly_topo, **kwargs):
-        self.namespace = plugin_config.DISCOVERY_KUBERNETES_NAMESPACE
-        self.pod_patt = plugin_config.DISCOVERY_KUBERNETES_POD_PATT
-        self.label_selector = plugin_config.DISCOVERY_KUBERNETES_LABEL_SELECTOR
-        self.in_cluster = plugin_config.DISCOVERY_KUBERNETES_IN_CLUSTER.lower()
+    def __init__(self, config, readonly_topo, **kwargs):
+        self.namespace = config.DISCOVERY_KUBERNETES_NAMESPACE
+        self.pod_patt = config.DISCOVERY_KUBERNETES_POD_PATT
+        self.label_selector = config.DISCOVERY_KUBERNETES_LABEL_SELECTOR
+        self.in_cluster = config.DISCOVERY_KUBERNETES_IN_CLUSTER.lower()
         self.in_cluster = self.in_cluster == 'true'
-        self.poll_interval = plugin_config.DISCOVERY_KUBERNETES_POLL_INTERVAL
+        self.poll_interval = config.DISCOVERY_KUBERNETES_POLL_INTERVAL
         self.poll_interval = int(self.poll_interval) if self.poll_interval else 5
-        self.port = plugin_config.DISCOVERY_KUBERNETES_PORT
+        self.port = config.DISCOVERY_KUBERNETES_PORT
         self.port = int(self.port) if self.port else 19530
         self.kwargs = kwargs
         self.queue = queue.Queue()
@@ -255,8 +256,8 @@ class KubernetesProvider(object):
         if not self.namespace:
             self.namespace = open(incluster_namespace_path).read()
 
-        config.load_incluster_config(
-        ) if self.in_cluster else config.load_kube_config()
+        kconfig.load_incluster_config(
+        ) if self.in_cluster else kconfig.load_kube_config()
         self.v1 = client.CoreV1Api()
 
         self.listener = K8SEventListener(message_queue=self.queue,
@@ -306,6 +307,7 @@ class KubernetesProvider(object):
         self.event_handler.start()
 
         self.pod_heartbeater.start()
+        return True
 
     def stop(self):
         self.listener.stop()

@@ -1,12 +1,12 @@
 kind: Service
 apiVersion: v1
 metadata:
-  name: milvus-ro-servers
-  namespace: milvus
+  name: mishards-ro-servers
+  namespace: mishards
 spec:
   type: ClusterIP
   selector:
-    app: milvus
+    app: mishards
     tier: ro-servers
   ports:
   - protocol: TCP
@@ -18,21 +18,21 @@ spec:
 apiVersion: apps/v1beta1
 kind: StatefulSet
 metadata:
-  name: milvus-ro-servers
-  namespace: milvus
+  name: mishards-ro-servers
+  namespace: mishards
 spec:
-  serviceName: "milvus-ro-servers"
+  serviceName: "mishards-ro-servers"
   replicas: 1
   template:
     metadata:
       labels:
-        app: milvus
+        app: mishards
         tier: ro-servers
     spec:
       terminationGracePeriodSeconds: 11
       containers:
-      - name: milvus-ro-server
-        image: milvusdb/milvus:0.5.0-d102119-ede20b
+      - name: mishards-ro-server
+        image: milvusdb/milvus:0.8.0-gpu-d041520-464400
         imagePullPolicy: Always
         ports:
           - containerPort: 19530
@@ -43,14 +43,14 @@ spec:
           requests:
             memory: "14Gi"
         volumeMounts:
-        - name: milvus-db-disk
+        - name: mishards-db-disk
           mountPath: /var/milvus
           subPath: dbdata
-        - name: milvus-roserver-configmap
-          mountPath: /opt/milvus/conf/server_config.yaml
+        - name: mishards-roserver-configmap
+          mountPath: /var/lib/milvus/conf/server_config.yaml
           subPath: config.yml
-        - name: milvus-roserver-configmap
-          mountPath: /opt/milvus/conf/log_config.conf
+        - name: mishards-roserver-configmap
+          mountPath: /var/lib/milvus/conf/log_config.conf
           subPath: log.conf
       # imagePullSecrets:
       #   - name: regcred
@@ -60,9 +60,9 @@ spec:
       #     value: "performance"
       #     effect: "NoSchedule"
       volumes:
-      - name: milvus-roserver-configmap
+      - name: mishards-roserver-configmap
         configMap:
-            name: milvus-roserver-configmap
-      - name: milvus-db-disk
+            name: mishards-roserver-configmap
+      - name: mishards-db-disk
         persistentVolumeClaim:
-            claimName: milvus-db-disk
+            claimName: mishards-db-disk
