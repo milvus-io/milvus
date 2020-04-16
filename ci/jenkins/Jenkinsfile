@@ -182,6 +182,10 @@ pipeline {
                                 container('milvus-test-env') {
                                     script {
                                         load "${env.WORKSPACE}/ci/jenkins/step/cleanupSingleDev.groovy"
+                                        boolean isNightlyTest = isTimeTriggeredBuild()
+                                        if (isNightlyTest) {
+                                            load "${env.WORKSPACE}/ci/jenkins/step/cleanupShardsDev.groovy"
+                                        }
                                     }
                                 }
                             }
