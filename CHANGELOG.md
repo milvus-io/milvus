@@ -715,7 +715,7 @@ Please mark all change in change log and use the issue from GitHub
 -   MS-21 Implement SDK interface part 2
 -   MS-26 CMake. Add thirdparty packages
 -   MS-31 CMake: add prometheus
--   MS-33 cmake: add -j4 to make third party packages build faster
+-   MS-33 CMake: add -j4 to make third party packages build faster
 -   MS-27 Support gpu config and disable license build config in cmake
 -   MS-47 Add query vps metrics
 -   MS-37 Add query, cache usage, disk write speed and file data size metrics
