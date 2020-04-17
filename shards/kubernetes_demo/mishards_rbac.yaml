@@ -16,7 +16,7 @@ metadata:
 subjects:
 - kind: ServiceAccount
   name: default
-  namespace: milvus
+  namespace: mishards
 roleRef:
   kind: ClusterRole
   name: pods-list

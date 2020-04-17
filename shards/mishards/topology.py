@@ -35,7 +35,8 @@ class TopoGroup:
         self.cv = threading.Condition()
 
     def on_duplicate(self, topo_object):
-        logger.warning('Duplicated topo_object \"{}\" into group \"{}\"'.format(topo_object, self.name))
+        pass
+        # logger.warning('Duplicated topo_object \"{}\" into group \"{}\"'.format(topo_object, self.name))
 
     def on_added(self, topo_object):
         return True
@@ -85,15 +86,15 @@ class Topology:
         self.cv = threading.Condition()
 
     def on_duplicated_group(self, group):
-        logger.warning('Duplicated group \"{}\" found!'.format(group))
+        # logger.warning('Duplicated group \"{}\" found!'.format(group))
         return StatusType.DUPLICATED
 
     def on_pre_add_group(self, group):
-        logger.debug('Pre add group \"{}\"'.format(group))
+        # logger.debug('Pre add group \"{}\"'.format(group))
         return StatusType.OK
 
     def on_post_add_group(self, group):
-        logger.debug('Post add group \"{}\"'.format(group))
+        # logger.debug('Post add group \"{}\"'.format(group))
         return StatusType.OK
 
     def get_group(self, name):
@@ -116,13 +117,16 @@ class Topology:
         return self.on_post_add_group(group)
 
     def on_delete_not_existed_group(self, group):
-        logger.warning('Deleting non-existed group \"{}\"'.format(group))
+        # logger.warning('Deleting non-existed group \"{}\"'.format(group))
+        pass
 
     def on_pre_delete_group(self, group):
-        logger.debug('Pre delete group \"{}\"'.format(group))
+        pass
+        # logger.debug('Pre delete group \"{}\"'.format(group))
 
     def on_post_delete_group(self, group):
-        logger.debug('Post delete group \"{}\"'.format(group))
+        pass
+        # logger.debug('Post delete group \"{}\"'.format(group))
 
     def _delete_group_no_lock(self, group):
         logger.info('Deleting group \"{}\"'.format(group))
@@ -132,7 +136,7 @@ class Topology:
     def delete_group(self, group):
         self.on_pre_delete_group(group)
         with self.cv:
-            deleted_group = self._delete_group_lock(group)
+            deleted_group = self._delete_group_no_lock(group)
         if not deleted_group:
             return self.on_delete_not_existed_group(group)
         return self.on_post_delete_group(group)

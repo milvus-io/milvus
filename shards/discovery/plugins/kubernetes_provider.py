@@ -11,7 +11,10 @@ import copy
 import threading
 import queue
 import enum
-from kubernetes import client, config, watch
+from functools import partial
+from collections import defaultdict
+from kubernetes import client, config as kconfig, watch
+from mishards.topology import StatusType
 
 logger = logging.getLogger(__name__)
 
@@ -33,8 +36,8 @@ class K8SMixin:
             self.namespace = open(INCLUSTER_NAMESPACE_PATH).read()
 
         if not self.v1:
-            config.load_incluster_config(
-            ) if self.in_cluster else config.load_kube_config()
+            kconfig.load_incluster_config(
+            ) if self.in_cluster else kconfig.load_kube_config()
             self.v1 = client.CoreV1Api()
 
 
@@ -133,6 +136,7 @@ class K8SEventListener(threading.Thread, K8SMixin):
 
 
 class EventHandler(threading.Thread):
+    PENDING_THRESHOLD = 3
     def __init__(self, mgr, message_queue, namespace, pod_patt, **kwargs):
         threading.Thread.__init__(self)
         self.mgr = mgr
@@ -141,6 +145,25 @@ class EventHandler(threading.Thread):
         self.terminate = False
         self.pod_patt = re.compile(pod_patt)
         self.namespace = namespace
+        self.pending_add = defaultdict(int)
+        self.pending_delete = defaultdict(int)
+
+    def record_pending_add(self, pod, true_cb=None):
+        self.pending_add[pod] += 1
+        self.pending_delete.pop(pod, None)
+        if self.pending_add[pod] >= self.PENDING_THRESHOLD:
+            true_cb and true_cb()
+            return True
+        return False
+
+    def record_pending_delete(self, pod, true_cb=None):
+        self.pending_delete[pod] += 1
+        self.pending_add.pop(pod, None)
+        if self.pending_delete[pod] >= 1:
+            true_cb and true_cb()
+            return True
+
+        return False
 
     def stop(self):
         self.terminate = True
@@ -165,37 +188,47 @@ class EventHandler(threading.Thread):
 
         if try_cnt <= 0 and not pod:
             if not event['start_up']:
-                logger.error('Pod {} is started but cannot read pod'.format(
+                logger.warning('Pod {} is started but cannot read pod'.format(
                     event['pod']))
             return
         elif try_cnt <= 0 and not pod.status.pod_ip:
             logger.warning('NoPodIPFoundError')
             return
 
-        logger.info('Register POD {} with IP {}'.format(
-            pod.metadata.name, pod.status.pod_ip))
-        self.mgr.add_pod(name=pod.metadata.name, ip=pod.status.pod_ip)
+        self.record_pending_add(pod.metadata.name,
+                true_cb=partial(self.mgr.add_pod, pod.metadata.name, pod.status.pod_ip))
 
     def on_pod_killing(self, event, **kwargs):
-        logger.info('Unregister POD {}'.format(event['pod']))
-        self.mgr.delete_pod(name=event['pod'])
+        self.record_pending_delete(event['pod'],
+                true_cb=partial(self.mgr.delete_pod, event['pod']))
 
     def on_pod_heartbeat(self, event, **kwargs):
-        names = self.mgr.readonly_topo.group_names
+        names = set(copy.deepcopy(list(self.mgr.readonly_topo.group_names)))
 
-        running_names = set()
+        pods_with_event = set()
         for each_event in event['events']:
+            pods_with_event.add(each_event['pod'])
             if each_event['ready']:
-                self.mgr.add_pod(name=each_event['pod'], ip=each_event['ip'])
-                running_names.add(each_event['pod'])
+                self.record_pending_add(each_event['pod'],
+                    true_cb=partial(self.mgr.add_pod, each_event['pod'], each_event['ip']))
             else:
-                self.mgr.delete_pod(name=each_event['pod'])
+                self.record_pending_delete(each_event['pod'],
+                    true_cb=partial(self.mgr.delete_pod, each_event['pod']))
 
-        to_delete = names - running_names
-        for name in to_delete:
-            self.mgr.delete_pod(name)
+        pods_no_event = names - pods_with_event
+        for name in pods_no_event:
+            self.record_pending_delete(name,
+                    true_cb=partial(self.mgr.delete_pod, name))
 
-        logger.info(self.mgr.readonly_topo.group_names)
+        latest = self.mgr.readonly_topo.group_names
+        deleted = names - latest
+        added = latest - names
+        if deleted:
+            logger.info('Deleted Pods: {}'.format(list(deleted)))
+        if added:
+            logger.info('Added Pods: {}'.format(list(added)))
+
+        logger.debug('All Pods: {}'.format(list(latest)))
 
     def handle_event(self, event):
         if event['eType'] == EventType.PodHeartBeat:
@@ -237,15 +270,15 @@ class KubernetesProviderSettings:
 class KubernetesProvider(object):
     name = 'kubernetes'
 
-    def __init__(self, plugin_config, readonly_topo, **kwargs):
-        self.namespace = plugin_config.DISCOVERY_KUBERNETES_NAMESPACE
-        self.pod_patt = plugin_config.DISCOVERY_KUBERNETES_POD_PATT
-        self.label_selector = plugin_config.DISCOVERY_KUBERNETES_LABEL_SELECTOR
-        self.in_cluster = plugin_config.DISCOVERY_KUBERNETES_IN_CLUSTER.lower()
+    def __init__(self, config, readonly_topo, **kwargs):
+        self.namespace = config.DISCOVERY_KUBERNETES_NAMESPACE
+        self.pod_patt = config.DISCOVERY_KUBERNETES_POD_PATT
+        self.label_selector = config.DISCOVERY_KUBERNETES_LABEL_SELECTOR
+        self.in_cluster = config.DISCOVERY_KUBERNETES_IN_CLUSTER.lower()
         self.in_cluster = self.in_cluster == 'true'
-        self.poll_interval = plugin_config.DISCOVERY_KUBERNETES_POLL_INTERVAL
+        self.poll_interval = config.DISCOVERY_KUBERNETES_POLL_INTERVAL
         self.poll_interval = int(self.poll_interval) if self.poll_interval else 5
-        self.port = plugin_config.DISCOVERY_KUBERNETES_PORT
+        self.port = config.DISCOVERY_KUBERNETES_PORT
         self.port = int(self.port) if self.port else 19530
         self.kwargs = kwargs
         self.queue = queue.Queue()
@@ -255,8 +288,8 @@ class KubernetesProvider(object):
         if not self.namespace:
             self.namespace = open(incluster_namespace_path).read()
 
-        config.load_incluster_config(
-        ) if self.in_cluster else config.load_kube_config()
+        kconfig.load_incluster_config(
+        ) if self.in_cluster else kconfig.load_kube_config()
         self.v1 = client.CoreV1Api()
 
         self.listener = K8SEventListener(message_queue=self.queue,
@@ -281,6 +314,8 @@ class KubernetesProvider(object):
                                           **kwargs)
 
     def add_pod(self, name, ip):
+        logger.debug('Register POD {} with IP {}'.format(
+            name, ip))
         ok = True
         status = StatusType.OK
         try:
@@ -292,8 +327,8 @@ class KubernetesProvider(object):
             ok = False
             logger.error('Connection error to: {}'.format(addr))
 
-        if ok and status == StatusType.OK:
-            logger.info('KubernetesProvider Add Group \"{}\" Of 1 Address: {}'.format(name, uri))
+        # if ok and status == StatusType.OK:
+        #     logger.info('KubernetesProvider Add Group \"{}\" Of 1 Address: {}'.format(name, uri))
         return ok
 
     def delete_pod(self, name):
@@ -306,6 +341,7 @@ class KubernetesProvider(object):
         self.event_handler.start()
 
         self.pod_heartbeater.start()
+        return True
 
     def stop(self):
         self.listener.stop()
