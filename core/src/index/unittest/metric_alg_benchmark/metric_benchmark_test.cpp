@@ -54,7 +54,6 @@ CheckResult(const float* result1, const float* result2, const size_t size) {
 ///////////////////////////////////////////////////////////////////////////////
 /* from faiss/utils/distances_simd.cpp */
 namespace FAISS {
-
 // reads 0 <= d < 4 floats as __m128
 static inline __m128 masked_read (int d, const float *x)
 {
@@ -150,13 +149,11 @@ float fvec_L2sqr_avx (const float * x, const float * y, size_t d) {
     msum2 = _mm_hadd_ps (msum2, msum2);
     return  _mm_cvtss_f32 (msum2);
 }
-
 }  // namespace FAISS
 
 ///////////////////////////////////////////////////////////////////////////////
 /* from knowhere/index/vector_index/impl/nsg/Distance.cpp */
 namespace NSG {
-
 float
 DistanceL2_Compare(const float* a, const float* b, size_t size) {
     float result = 0;
@@ -231,9 +228,62 @@ DistanceIP_Compare(const float* a, const float* b, size_t size) {
 
     return result;
 }
-
 }  // namespace NSG
 
+///////////////////////////////////////////////////////////////////////////////
+/* from index/thirdparty/annoy/src/annoylib.h */
+namespace ANNOY {
+inline float hsum256_ps_avx(__m256 v) {
+    const __m128 x128 = _mm_add_ps(_mm256_extractf128_ps(v, 1), _mm256_castps256_ps128(v));
+    const __m128 x64 = _mm_add_ps(x128, _mm_movehl_ps(x128, x128));
+    const __m128 x32 = _mm_add_ss(x64, _mm_shuffle_ps(x64, x64, 0x55));
+    return _mm_cvtss_f32(x32);
+}
+
+inline float euclidean_distance(const float* x, const float* y, size_t f) {
+  float result=0;
+  if (f > 7) {
+    __m256 d = _mm256_setzero_ps();
+    for (; f > 7; f -= 8) {
+      const __m256 diff = _mm256_sub_ps(_mm256_loadu_ps(x), _mm256_loadu_ps(y));
+      d = _mm256_add_ps(d, _mm256_mul_ps(diff, diff)); // no support for fmadd in AVX...
+      x += 8;
+      y += 8;
+    }
+    // Sum all floats in dot register.
+    result = hsum256_ps_avx(d);
+  }
+  // Don't forget the remaining values.
+  for (; f > 0; f--) {
+    float tmp = *x - *y;
+    result += tmp * tmp;
+    x++;
+    y++;
+  }
+  return result;
+}
+
+inline float dot(const float* x, const float *y, size_t f) {
+  float result = 0;
+  if (f > 7) {
+    __m256 d = _mm256_setzero_ps();
+    for (; f > 7; f -= 8) {
+      d = _mm256_add_ps(d, _mm256_mul_ps(_mm256_loadu_ps(x), _mm256_loadu_ps(y)));
+      x += 8;
+      y += 8;
+    }
+    // Sum all floats in dot register.
+    result += hsum256_ps_avx(d);
+  }
+  // Don't forget the remaining values.
+  for (; f > 0; f--) {
+    result += *x * *y;
+    x++;
+    y++;
+  }
+  return result;
+}
+}  // namespace ANNOY
 
 TEST(METRICTEST, BENCHMARK) {
     std::vector<float> xb(NB * DIM);
@@ -243,12 +293,23 @@ TEST(METRICTEST, BENCHMARK) {
 
     std::vector<float> distance_faiss(NB * NQ);
     std::vector<float> distance_nsg(NB * NQ);
+    std::vector<float> distance_annoy(NB * NQ);
 
+    std::cout << "==========" << std::endl;
     TestMetricAlg("FAISS::L2", FAISS::fvec_L2sqr_avx, distance_faiss.data(), NB, xb.data(), NQ, xq.data(), DIM);
+
     TestMetricAlg("NSG::L2", NSG::DistanceL2_Compare, distance_nsg.data(), NB, xb.data(), NQ, xq.data(), DIM);
     CheckResult(distance_faiss.data(), distance_nsg.data(), NB * NQ);
 
+    TestMetricAlg("ANNOY::L2", ANNOY::euclidean_distance, distance_annoy.data(), NB, xb.data(), NQ, xq.data(), DIM);
+    CheckResult(distance_faiss.data(), distance_annoy.data(), NB * NQ);
+
+    std::cout << "==========" << std::endl;
     TestMetricAlg("FAISS::IP", FAISS::fvec_inner_product_avx, distance_faiss.data(), NB, xb.data(), NQ, xq.data(), DIM);
+
     TestMetricAlg("NSG::IP", NSG::DistanceIP_Compare, distance_nsg.data(), NB, xb.data(), NQ, xq.data(), DIM);
     CheckResult(distance_faiss.data(), distance_nsg.data(), NB * NQ);
+
+    TestMetricAlg("ANNOY::IP", ANNOY::dot, distance_annoy.data(), NB, xb.data(), NQ, xq.data(), DIM);
+    CheckResult(distance_faiss.data(), distance_annoy.data(), NB * NQ);
 }
