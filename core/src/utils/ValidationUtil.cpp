@@ -651,5 +651,10 @@ ValidationUtil::ValidateStoragePath(const std::string& path) {
     return std::regex_match(path, regex) ? Status::OK() : Status(SERVER_INVALID_ARGUMENT, "Invalid file path");
 }
 
+bool
+ValidationUtil::IsNumber(const std::string& s) {
+    return !s.empty() && std::all_of(s.begin(), s.end(), ::isdigit);
+}
+
 }  // namespace server
 }  // namespace milvus
