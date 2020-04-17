@@ -31,30 +31,44 @@ namespace milvus {
 namespace server {
 
 InsertEntityRequest::InsertEntityRequest(const std::shared_ptr<milvus::server::Context>& context,
-                                         const std::string& collection_name, const std::string& partition_tag,
-                                         std::unordered_map<std::string, std::vector<std::string>>& field_values,
+                                         const std::string& collection_name,
+                                         const std::string& partition_tag,
+                                         uint64_t& row_num,
+                                         std::vector<std::string>& field_names,
+                                         std::vector<uint8_t>& attr_values,
                                          std::unordered_map<std::string, engine::VectorsData>& vector_datas)
     : BaseRequest(context, BaseRequest::kInsertEntity),
       collection_name_(collection_name),
       partition_tag_(partition_tag),
-      field_values_(field_values),
+      row_num_(row_num),
+      field_names_(field_names),
+      attr_values_(attr_values),
       vector_datas_(vector_datas) {
 }
 
 BaseRequestPtr
-InsertEntityRequest::Create(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name,
+InsertEntityRequest::Create(const std::shared_ptr<milvus::server::Context>& context,
+                            const std::string& collection_name,
                             const std::string& partition_tag,
-                            std::unordered_map<std::string, std::vector<std::string>>& field_values,
+                            uint64_t& row_num,
+                            std::vector<std::string>& field_names,
+                            std::vector<uint8_t>& attr_values,
                             std::unordered_map<std::string, engine::VectorsData>& vector_datas) {
     return std::shared_ptr<BaseRequest>(
-        new InsertEntityRequest(context, collection_name, partition_tag, field_values, vector_datas));
+        new InsertEntityRequest(context,
+                                collection_name,
+                                partition_tag,
+                                row_num,
+                                field_names,
+                                attr_values,
+                                vector_datas));
 }
 
 Status
 InsertEntityRequest::OnExecute() {
     try {
         fiu_do_on("InsertEntityRequest.OnExecute.throw_std_exception", throw std::exception());
-        std::string hdr = "InsertEntityRequest(table=" + collection_name_ + ", n=" + field_values_.begin()->first +
+        std::string hdr = "InsertEntityRequest(table=" + collection_name_ +
                           ", partition_tag=" + partition_tag_ + ")";
         TimeRecorder rc(hdr);
 
@@ -161,13 +175,13 @@ InsertEntityRequest::OnExecute() {
         auto vec_count = static_cast<uint64_t>(vector_datas_it->second.vector_count_);
 
         engine::Entity entity;
-        entity.entity_count_ = vector_datas_it->second.vector_count_;
+        entity.entity_count_ = row_num_;
 
-        entity.attr_data_ = field_values_;
+        entity.attr_value_ = attr_values_;
         entity.vector_data_.insert(std::make_pair(vector_datas_it->first, vector_datas_it->second));
 
         rc.RecordSection("prepare vectors data");
-        status = DBWrapper::DB()->InsertEntities(collection_name_, partition_tag_, entity, field_types);
+        status = DBWrapper::DB()->InsertEntities(collection_name_, partition_tag_, field_names_, entity, field_types);
         fiu_do_on("InsertRequest.OnExecute.insert_fail", status = Status(milvus::SERVER_UNEXPECTED_ERROR, ""));
         if (!status.ok()) {
             return status;

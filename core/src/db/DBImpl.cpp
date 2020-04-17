@@ -586,8 +586,12 @@ DBImpl::InsertVectors(const std::string& collection_id, const std::string& parti
 }
 
 Status
-DBImpl::InsertEntities(const std::string& collection_id, const std::string& partition_tag, Entity& entity,
+DBImpl::InsertEntities(const std::string& collection_id,
+                       const std::string& partition_tag,
+                       const std::vector<std::string>& field_names,
+                       Entity& entity,
                        std::unordered_map<std::string, meta::hybrid::DataType>& attr_types) {
+
     if (!initialized_.load(std::memory_order_acquire)) {
         return SHUTDOWN_ERROR;
     }
@@ -621,104 +625,80 @@ DBImpl::InsertEntities(const std::string& collection_id, const std::string& part
         //        record.length = entities.vector_data_[0].binary_data_.size() * sizeof(uint8_t);
     }
 
-    auto attr_data_it = entity.attr_data_.begin();
-    for (; attr_data_it != entity.attr_data_.end(); ++attr_data_it) {
-        switch (attr_types.at(attr_data_it->first)) {
+    uint64_t offset = 0;
+    for (auto field_name : field_names) {
+        switch (attr_types.at(field_name)) {
             case meta::hybrid::DataType::INT8: {
-                std::vector<int8_t> entity_data;
-                entity_data.resize(entity.entity_count_);
-                for (uint64_t j = 0; j < entity.entity_count_; ++j) {
-                    entity_data[j] = atoi(attr_data_it->second[j].c_str());
-                }
                 std::vector<uint8_t> data;
                 data.resize(entity.entity_count_ * sizeof(int8_t));
-                memcpy(data.data(), entity_data.data(), entity.entity_count_ * sizeof(int8_t));
-                record.attr_data.insert(std::make_pair(attr_data_it->first, data));
+                memcpy(data.data(), entity.attr_data_.at(field_name).data() + offset, entity.entity_count_ * sizeof(int8_t));
+                record.attr_data.insert(std::make_pair(field_name, data));
 
-                record.attr_nbytes.insert(std::make_pair(attr_data_it->first, sizeof(int8_t)));
+                record.attr_nbytes.insert(std::make_pair(field_name, sizeof(int8_t)));
                 record.attr_data_size.insert(
-                    std::make_pair(attr_data_it->first, entity.entity_count_ * sizeof(int8_t)));
+                    std::make_pair(field_name, entity.entity_count_ * sizeof(int8_t)));
+                offset += entity.entity_count_ * sizeof(int8_t);
                 break;
             }
             case meta::hybrid::DataType::INT16: {
-                std::vector<int16_t> entity_data;
-                entity_data.resize(entity.entity_count_);
-                for (uint64_t j = 0; j < entity.entity_count_; ++j) {
-                    entity_data[j] = atoi(attr_data_it->second[j].c_str());
-                }
                 std::vector<uint8_t> data;
                 data.resize(entity.entity_count_ * sizeof(int16_t));
-                memcpy(data.data(), entity_data.data(), entity.entity_count_ * sizeof(int16_t));
-                record.attr_data.insert(std::make_pair(attr_data_it->first, data));
+                memcpy(data.data(), entity.attr_data_.at(field_name).data() + offset, entity.entity_count_ * sizeof(int16_t));
+                record.attr_data.insert(std::make_pair(field_name, data));
 
-                record.attr_nbytes.insert(std::make_pair(attr_data_it->first, sizeof(int16_t)));
+                record.attr_nbytes.insert(std::make_pair(field_name, sizeof(int16_t)));
                 record.attr_data_size.insert(
-                    std::make_pair(attr_data_it->first, entity.entity_count_ * sizeof(int16_t)));
+                    std::make_pair(field_name, entity.entity_count_ * sizeof(int16_t)));
+                offset += entity.entity_count_ * sizeof(int16_t);
                 break;
             }
             case meta::hybrid::DataType::INT32: {
-                std::vector<int32_t> entity_data;
-                entity_data.resize(entity.entity_count_);
-                for (uint64_t j = 0; j < entity.entity_count_; ++j) {
-                    entity_data[j] = atoi(attr_data_it->second[j].c_str());
-                }
                 std::vector<uint8_t> data;
                 data.resize(entity.entity_count_ * sizeof(int32_t));
-                memcpy(data.data(), entity_data.data(), entity.entity_count_ * sizeof(int32_t));
-                record.attr_data.insert(std::make_pair(attr_data_it->first, data));
+                memcpy(data.data(), entity.attr_data_.at(field_name).data() + offset, entity.entity_count_ * sizeof(int32_t));
+                record.attr_data.insert(std::make_pair(field_name, data));
 
-                record.attr_nbytes.insert(std::make_pair(attr_data_it->first, sizeof(int32_t)));
+                record.attr_nbytes.insert(std::make_pair(field_name, sizeof(int32_t)));
                 record.attr_data_size.insert(
-                    std::make_pair(attr_data_it->first, entity.entity_count_ * sizeof(int32_t)));
+                    std::make_pair(field_name, entity.entity_count_ * sizeof(int32_t)));
+                offset += entity.entity_count_ * sizeof(int32_t);
                 break;
             }
             case meta::hybrid::DataType::INT64: {
-                std::vector<int64_t> entity_data;
-                entity_data.resize(entity.entity_count_);
-                for (uint64_t j = 0; j < entity.entity_count_; ++j) {
-                    entity_data[j] = atoi(attr_data_it->second[j].c_str());
-                }
                 std::vector<uint8_t> data;
                 data.resize(entity.entity_count_ * sizeof(int64_t));
-                memcpy(data.data(), entity_data.data(), entity.entity_count_ * sizeof(int64_t));
-                record.attr_data.insert(std::make_pair(attr_data_it->first, data));
+                memcpy(data.data(), entity.attr_data_.at(field_name).data() + offset, entity.entity_count_ * sizeof(int64_t));
+                record.attr_data.insert(std::make_pair(field_name, data));
 
-                record.attr_nbytes.insert(std::make_pair(attr_data_it->first, sizeof(int64_t)));
+                record.attr_nbytes.insert(std::make_pair(field_name, sizeof(int64_t)));
                 record.attr_data_size.insert(
-                    std::make_pair(attr_data_it->first, entity.entity_count_ * sizeof(int64_t)));
-
+                    std::make_pair(field_name, entity.entity_count_ * sizeof(int64_t)));
+                offset += entity.entity_count_ * sizeof(int64_t);
                 break;
             }
             case meta::hybrid::DataType::FLOAT: {
-                std::vector<float> entity_data;
-                entity_data.resize(entity.entity_count_);
-                for (uint64_t j = 0; j < entity.entity_count_; ++j) {
-                    entity_data[j] = atof(attr_data_it->second[j].c_str());
-                }
                 std::vector<uint8_t> data;
                 data.resize(entity.entity_count_ * sizeof(float));
-                memcpy(data.data(), entity_data.data(), entity.entity_count_ * sizeof(float));
-                record.attr_data.insert(std::make_pair(attr_data_it->first, data));
+                memcpy(data.data(), entity.attr_data_.at(field_name).data() + offset, entity.entity_count_ * sizeof(float));
+                record.attr_data.insert(std::make_pair(field_name, data));
 
-                record.attr_nbytes.insert(std::make_pair(attr_data_it->first, sizeof(float)));
-                record.attr_data_size.insert(std::make_pair(attr_data_it->first, entity.entity_count_ * sizeof(float)));
+                record.attr_nbytes.insert(std::make_pair(field_name, sizeof(float)));
+                record.attr_data_size.insert(
+                    std::make_pair(field_name, entity.entity_count_ * sizeof(float)));
+                offset += entity.entity_count_ * sizeof(float);
 
                 break;
             }
             case meta::hybrid::DataType::DOUBLE: {
-                std::vector<double> entity_data;
-                entity_data.resize(entity.entity_count_);
-                for (uint64_t j = 0; j < entity.entity_count_; ++j) {
-                    entity_data[j] = atof(attr_data_it->second[j].c_str());
-                }
                 std::vector<uint8_t> data;
                 data.resize(entity.entity_count_ * sizeof(double));
-                memcpy(data.data(), entity_data.data(), entity.entity_count_ * sizeof(double));
-                record.attr_data.insert(std::make_pair(attr_data_it->first, data));
+                memcpy(data.data(), entity.attr_data_.at(field_name).data() + offset, entity.entity_count_ * sizeof(double));
+                record.attr_data.insert(std::make_pair(field_name, data));
 
-                record.attr_nbytes.insert(std::make_pair(attr_data_it->first, sizeof(double)));
+                record.attr_nbytes.insert(std::make_pair(field_name, sizeof(double)));
                 record.attr_data_size.insert(
-                    std::make_pair(attr_data_it->first, entity.entity_count_ * sizeof(double)));
+                    std::make_pair(field_name, entity.entity_count_ * sizeof(double)));
+                offset += entity.entity_count_ * sizeof(double);
                 break;
             }
         }
