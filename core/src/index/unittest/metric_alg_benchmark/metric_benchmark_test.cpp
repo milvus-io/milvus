@@ -19,7 +19,7 @@ typedef float (*metric_func_ptr)(const float*, const float*, size_t);
 
 constexpr int64_t DIM = 512;
 constexpr int64_t NB = 10000;
-constexpr int64_t NQ = 1;
+constexpr int64_t NQ = 5;
 
 void
 GenerateData(const int64_t dim, const int64_t n, float* x) {
@@ -285,6 +285,80 @@ inline float dot(const float* x, const float *y, size_t f) {
 }
 }  // namespace ANNOY
 
+namespace HNSW {
+#define PORTABLE_ALIGN32 __attribute__((aligned(32)))
+
+static float
+L2SqrSIMD16Ext(const float* pVect1v, const float* pVect2v, size_t qty) {
+    float *pVect1 = (float *) pVect1v;
+    float *pVect2 = (float *) pVect2v;
+    // size_t qty = *((size_t *) qty_ptr);
+    float PORTABLE_ALIGN32 TmpRes[8];
+    size_t qty16 = qty >> 4;
+
+    const float *pEnd1 = pVect1 + (qty16 << 4);
+
+    __m256 diff, v1, v2;
+    __m256 sum = _mm256_set1_ps(0);
+
+    while (pVect1 < pEnd1) {
+        v1 = _mm256_loadu_ps(pVect1);
+        pVect1 += 8;
+        v2 = _mm256_loadu_ps(pVect2);
+        pVect2 += 8;
+        diff = _mm256_sub_ps(v1, v2);
+        sum = _mm256_add_ps(sum, _mm256_mul_ps(diff, diff));
+
+        v1 = _mm256_loadu_ps(pVect1);
+        pVect1 += 8;
+        v2 = _mm256_loadu_ps(pVect2);
+        pVect2 += 8;
+        diff = _mm256_sub_ps(v1, v2);
+        sum = _mm256_add_ps(sum, _mm256_mul_ps(diff, diff));
+    }
+
+    _mm256_store_ps(TmpRes, sum);
+    float res = TmpRes[0] + TmpRes[1] + TmpRes[2] + TmpRes[3] + TmpRes[4] + TmpRes[5] + TmpRes[6] + TmpRes[7];
+
+    return (res);
+}
+
+static float
+InnerProductSIMD16Ext(const float*pVect1v, const float*pVect2v, size_t qty) {
+    float PORTABLE_ALIGN32 TmpRes[8];
+    float *pVect1 = (float *) pVect1v;
+    float *pVect2 = (float *) pVect2v;
+    // size_t qty = *((size_t *) qty_ptr);
+
+    size_t qty16 = qty / 16;
+
+    const float *pEnd1 = pVect1 + 16 * qty16;
+
+    __m256 sum256 = _mm256_set1_ps(0);
+
+    while (pVect1 < pEnd1) {
+        //_mm_prefetch((char*)(pVect2 + 16), _MM_HINT_T0);
+
+        __m256 v1 = _mm256_loadu_ps(pVect1);
+        pVect1 += 8;
+        __m256 v2 = _mm256_loadu_ps(pVect2);
+        pVect2 += 8;
+        sum256 = _mm256_add_ps(sum256, _mm256_mul_ps(v1, v2));
+
+        v1 = _mm256_loadu_ps(pVect1);
+        pVect1 += 8;
+        v2 = _mm256_loadu_ps(pVect2);
+        pVect2 += 8;
+        sum256 = _mm256_add_ps(sum256, _mm256_mul_ps(v1, v2));
+    }
+
+    _mm256_store_ps(TmpRes, sum256);
+    float sum = TmpRes[0] + TmpRes[1] + TmpRes[2] + TmpRes[3] + TmpRes[4] + TmpRes[5] + TmpRes[6] + TmpRes[7];
+
+    return sum;
+}
+}  // namespace HNSW
+
 TEST(METRICTEST, BENCHMARK) {
     std::vector<float> xb(NB * DIM);
     std::vector<float> xq(NQ * DIM);
@@ -294,9 +368,13 @@ TEST(METRICTEST, BENCHMARK) {
     std::vector<float> distance_faiss(NB * NQ);
     std::vector<float> distance_nsg(NB * NQ);
     std::vector<float> distance_annoy(NB * NQ);
+    std::vector<float> distance_hnsw(NB * NQ);
 
     std::cout << "==========" << std::endl;
     TestMetricAlg("FAISS::L2", FAISS::fvec_L2sqr_avx, distance_faiss.data(), NB, xb.data(), NQ, xq.data(), DIM);
+
+    TestMetricAlg("HNSW::L2", HNSW::L2SqrSIMD16Ext, distance_hnsw.data(), NB, xb.data(), NQ, xq.data(), DIM);
+    CheckResult(distance_faiss.data(), distance_hnsw.data(), NB * NQ);
 
     TestMetricAlg("NSG::L2", NSG::DistanceL2_Compare, distance_nsg.data(), NB, xb.data(), NQ, xq.data(), DIM);
     CheckResult(distance_faiss.data(), distance_nsg.data(), NB * NQ);
@@ -306,6 +384,9 @@ TEST(METRICTEST, BENCHMARK) {
 
     std::cout << "==========" << std::endl;
     TestMetricAlg("FAISS::IP", FAISS::fvec_inner_product_avx, distance_faiss.data(), NB, xb.data(), NQ, xq.data(), DIM);
+
+    TestMetricAlg("HNSW::IP", HNSW::InnerProductSIMD16Ext, distance_hnsw.data(), NB, xb.data(), NQ, xq.data(), DIM);
+    CheckResult(distance_faiss.data(), distance_hnsw.data(), NB * NQ);
 
     TestMetricAlg("NSG::IP", NSG::DistanceIP_Compare, distance_nsg.data(), NB, xb.data(), NQ, xq.data(), DIM);
     CheckResult(distance_faiss.data(), distance_nsg.data(), NB * NQ);
