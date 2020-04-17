@@ -739,7 +739,7 @@ Config::CheckServerConfigTimeZone(const std::string& value) {
         if (value.substr(0, 3) != "UTC") {
             return Status(SERVER_INVALID_ARGUMENT, "Invalid server_config.time_zone: " + value);
         } else {
-            if (!ValidationUtil::IsNumber(value.substr(3))) {
+            if (!ValidationUtil::IsNumber(value.substr(4))) {
                 return Status(SERVER_INVALID_ARGUMENT, "Invalid server_config.time_zone: " + value);
             }
         }
