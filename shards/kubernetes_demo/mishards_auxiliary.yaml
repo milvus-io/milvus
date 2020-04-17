@@ -1,12 +1,12 @@
 kind: Service
 apiVersion: v1
 metadata:
-  name: milvus-mysql
-  namespace: milvus
+  name: mishards-mysql
+  namespace: mishards
 spec:
   type: ClusterIP
   selector:
-    app: milvus
+    app: mishards
     tier: mysql
   ports:
   - protocol: TCP
@@ -19,22 +19,22 @@ spec:
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: milvus-mysql
-  namespace: milvus
+  name: mishards-mysql
+  namespace: mishards
 spec:
   selector:
     matchLabels:
-      app: milvus
+      app: mishards
       tier: mysql
   replicas: 1
   template:
     metadata:
       labels:
-        app: milvus
+        app: mishards
         tier: mysql
     spec:
       containers:
-      - name: milvus-mysql
+      - name: mishards-mysql
         image: mysql:5.7
         imagePullPolicy: IfNotPresent
         # lifecycle:
@@ -51,17 +51,17 @@ spec:
           - name: mysql-port
             containerPort: 3306
         volumeMounts:
-        - name: milvus-mysql-disk
+        - name: mishards-mysql-disk
           mountPath: /data
           subPath: mysql
-        - name: milvus-mysql-configmap
+        - name: mishards-mysql-configmap
           mountPath: /etc/mysql/mysql.conf.d/mysqld.cnf
-          subPath: milvus_mysql_config.yml
+          subPath: mishards_mysql_config.yml
 
       volumes:
-      - name: milvus-mysql-disk
+      - name: mishards-mysql-disk
         persistentVolumeClaim:
-            claimName: milvus-mysql-disk
-      - name: milvus-mysql-configmap
+            claimName: mishards-mysql-disk
+      - name: mishards-mysql-configmap
         configMap:
-            name: milvus-mysql-configmap
+            name: mishards-mysql-configmap

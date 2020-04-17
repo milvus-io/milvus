@@ -27,7 +27,7 @@ cluster_status:
 	kubectl get pods -n milvus -o wide
 probe_cluster:
 	@echo
-	$(shell kubectl get service -n milvus | grep milvus-proxy-servers | awk {'print $$4,$$5'} | awk -F"[: ]" {'print "docker run --rm --name probe --net=host milvusdb/mishards /bin/bash -c \"python all_in_one/probe_test.py --port="$$2" --host="$$1"\""'})
+	$(shell kubectl get service -n mishards | grep mishards-proxy-servers | awk {'print $$4,$$5'} | awk -F"[: ]" {'print "docker run --rm --name probe --net=host milvusdb/mishards /bin/bash -c \"python all_in_one/probe_test.py --port="$$2" --host="$$1"\""'})
 probe:
 	docker run --rm --name probe --net=host milvusdb/mishards /bin/bash -c "python all_in_one/probe_test.py --port=${PORT} --host=${HOST}"
 clean_coverage:

@@ -1,8 +1,8 @@
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
-  name: milvus-db-disk
-  namespace: milvus
+  name: mishards-db-disk
+  namespace: mishards
 spec:
   accessModes:
   - ReadWriteMany
@@ -16,8 +16,8 @@ spec:
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
-  name: milvus-log-disk
-  namespace: milvus
+  name: mishards-log-disk
+  namespace: mishards
 spec:
   accessModes:
   - ReadWriteMany
@@ -31,8 +31,8 @@ spec:
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
-  name: milvus-mysql-disk
-  namespace: milvus
+  name: mishards-mysql-disk
+  namespace: mishards
 spec:
   accessModes:
   - ReadWriteMany
@@ -46,8 +46,8 @@ spec:
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
-  name: milvus-redis-disk
-  namespace: milvus
+  name: mishards-redis-disk
+  namespace: mishards
 spec:
   accessModes:
   - ReadWriteOnce

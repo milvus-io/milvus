@@ -42,29 +42,29 @@ function PrintPodStatusMessage() {
 timeout=60
 
 function setUpMysql () {
-    mysqlUserName=$(kubectl describe configmap -n milvus milvus-roserver-configmap |
+    mysqlUserName=$(kubectl describe configmap -n mishards mishards-roserver-configmap |
                     grep backend_url |
                     awk '{print $2}' |
                     awk '{split($0, level1, ":");
                     split(level1[2], level2, "/");
                     print level2[3]}')
-    mysqlPassword=$(kubectl describe configmap -n milvus milvus-roserver-configmap |
+    mysqlPassword=$(kubectl describe configmap -n mishards mishards-roserver-configmap |
                     grep backend_url |
                     awk '{print $2}' |
                     awk '{split($0, level1, ":");
                     split(level1[3], level3, "@");
                     print level3[1]}')
-    mysqlDBName=$(kubectl describe configmap -n milvus milvus-roserver-configmap |
+    mysqlDBName=$(kubectl describe configmap -n mishards mishards-roserver-configmap |
                   grep backend_url |
                   awk '{print $2}' |
                   awk '{split($0, level1, ":");
                   split(level1[4], level4, "/");
                   print level4[2]}')
-    mysqlContainer=$(kubectl get pods -n milvus | grep milvus-mysql | awk '{print $1}')
+    mysqlContainer=$(kubectl get pods -n mishards | grep mishards-mysql | awk '{print $1}')
 
-    kubectl exec -n milvus $mysqlContainer -- mysql -h milvus-mysql -u$mysqlUserName -p$mysqlPassword -e "CREATE DATABASE IF NOT EXISTS $mysqlDBName;"
+    kubectl exec -n mishards $mysqlContainer -- mysql -h mishards-mysql -u$mysqlUserName -p$mysqlPassword -e "CREATE DATABASE IF NOT EXISTS $mysqlDBName;"
 
-    checkDBExists=$(kubectl exec -n milvus $mysqlContainer -- mysql -h milvus-mysql -u$mysqlUserName -p$mysqlPassword -e "SELECT schema_name FROM information_schema.schemata WHERE schema_name = '$mysqlDBName';" | grep -o $mysqlDBName | wc -l)
+    checkDBExists=$(kubectl exec -n mishards $mysqlContainer -- mysql -h mishards-mysql -u$mysqlUserName -p$mysqlPassword -e "SELECT schema_name FROM information_schema.schemata WHERE schema_name = '$mysqlDBName';" | grep -o $mysqlDBName | wc -l)
     counter=0
     while [ $checkDBExists -lt 1 ]; do
         sleep 1
@@ -73,12 +73,12 @@ function setUpMysql () {
             echo "Creating MySQL database $mysqlDBName timeout"
             return 1
         fi
-        checkDBExists=$(kubectl exec -n milvus $mysqlContainer -- mysql -h milvus-mysql -u$mysqlUserName -p$mysqlPassword -e "SELECT schema_name FROM information_schema.schemata WHERE schema_name = '$mysqlDBName';" | grep -o $mysqlDBName | wc -l)
+        checkDBExists=$(kubectl exec -n mishards $mysqlContainer -- mysql -h mishards-mysql -u$mysqlUserName -p$mysqlPassword -e "SELECT schema_name FROM information_schema.schemata WHERE schema_name = '$mysqlDBName';" | grep -o $mysqlDBName | wc -l)
     done;
 
-    kubectl exec -n milvus $mysqlContainer -- mysql -h milvus-mysql -u$mysqlUserName -p$mysqlPassword -e "GRANT ALL PRIVILEGES ON $mysqlDBName.* TO '$mysqlUserName'@'%';"
-    kubectl exec -n milvus $mysqlContainer -- mysql -h milvus-mysql -u$mysqlUserName -p$mysqlPassword -e "FLUSH PRIVILEGES;"
-    checkGrant=$(kubectl exec -n milvus $mysqlContainer -- mysql -h milvus-mysql -u$mysqlUserName -p$mysqlPassword -e "SHOW GRANTS for $mysqlUserName;" | grep -o "GRANT ALL PRIVILEGES ON \`$mysqlDBName\`\.\*" | wc -l)
+    kubectl exec -n mishards $mysqlContainer -- mysql -h mishards-mysql -u$mysqlUserName -p$mysqlPassword -e "GRANT ALL PRIVILEGES ON $mysqlDBName.* TO '$mysqlUserName'@'%';"
+    kubectl exec -n mishards $mysqlContainer -- mysql -h mishards-mysql -u$mysqlUserName -p$mysqlPassword -e "FLUSH PRIVILEGES;"
+    checkGrant=$(kubectl exec -n mishards $mysqlContainer -- mysql -h mishards-mysql -u$mysqlUserName -p$mysqlPassword -e "SHOW GRANTS for $mysqlUserName;" | grep -o "GRANT ALL PRIVILEGES ON \`$mysqlDBName\`\.\*" | wc -l)
     counter=0
     while [ $checkGrant -lt 1 ]; do
         sleep 1
@@ -87,17 +87,17 @@ function setUpMysql () {
             echo "Granting all privileges on $mysqlDBName to $mysqlUserName timeout"
             return 1
         fi
-        checkGrant=$(kubectl exec -n milvus $mysqlContainer -- mysql -h milvus-mysql -u$mysqlUserName -p$mysqlPassword -e "SHOW GRANTS for $mysqlUserName;" | grep -o "GRANT ALL PRIVILEGES ON \`$mysqlDBName\`\.\*" | wc -l)
+        checkGrant=$(kubectl exec -n mishards $mysqlContainer -- mysql -h mishards-mysql -u$mysqlUserName -p$mysqlPassword -e "SHOW GRANTS for $mysqlUserName;" | grep -o "GRANT ALL PRIVILEGES ON \`$mysqlDBName\`\.\*" | wc -l)
     done;
 }
 
 function checkStatefulSevers() {
-    stateful_replicas=$(kubectl describe statefulset -n milvus milvus-ro-servers | grep "Replicas:" | awk '{print $2}')
-    stateful_running_pods=$(kubectl describe statefulset -n milvus milvus-ro-servers | grep "Pods Status:" | awk '{print $3}')
+    stateful_replicas=$(kubectl describe statefulset -n mishards mishards-ro-servers | grep "Replicas:" | awk '{print $3}')
+    stateful_running_pods=$(kubectl describe statefulset -n mishards mishards-ro-servers | grep "Pods Status:" | awk '{print $3}')
 
     counter=0
     prev=$stateful_running_pods
-    PrintPodStatusMessage "Running milvus-ro-servers Pods: $stateful_running_pods/$stateful_replicas"
+    PrintPodStatusMessage "Running mishards-ro-servers Pods: $stateful_running_pods/$stateful_replicas"
     while [ $stateful_replicas != $stateful_running_pods ]; do
         echo -e "${YELLOW}Wait another 1 sec --- ${counter}${ENDC}"
         sleep 1;
@@ -107,9 +107,9 @@ function checkStatefulSevers() {
             return 1;
         fi
 
-        stateful_running_pods=$(kubectl describe statefulset -n milvus milvus-ro-servers | grep "Pods Status:" | awk '{print $3}')
+        stateful_running_pods=$(kubectl describe statefulset -n mishards mishards-ro-servers | grep "Pods Status:" | awk '{print $3}')
         if [ $stateful_running_pods -ne $prev ]; then
-            PrintPodStatusMessage "Running milvus-ro-servers Pods: $stateful_running_pods/$stateful_replicas"
+            PrintPodStatusMessage "Running mishards-ro-servers Pods: $stateful_running_pods/$stateful_replicas"
         fi
         prev=$stateful_running_pods
     done;
@@ -118,8 +118,8 @@ function checkStatefulSevers() {
 
 function checkDeployment() {
     deployment_name=$1
-    replicas=$(kubectl describe deployment -n milvus $deployment_name | grep "Replicas:" | awk '{print $2}')
-    running=$(kubectl get pods -n milvus | grep $deployment_name | grep Running | wc -l)
+    replicas=$(kubectl describe deployment -n mishards $deployment_name | grep "Replicas:" | awk '{print $2}')
+    running=$(kubectl get pods -n mishards | grep $deployment_name | grep Running | wc -l)
 
     counter=0
     prev=$running
@@ -133,7 +133,7 @@ function checkDeployment() {
             return 1
         fi
 
-        running=$(kubectl get pods -n milvus | grep "$deployment_name" | grep Running | wc -l)
+        running=$(kubectl get pods -n mishards | grep "$deployment_name" | grep Running | wc -l)
         if [ $running -ne $prev ]; then
             PrintPodStatusMessage "Running $deployment_name Pods: $running/$replicas"
         fi
@@ -143,12 +143,12 @@ function checkDeployment() {
 
 
 function startDependencies() {
-    kubectl apply -f milvus_data_pvc.yaml
-    kubectl apply -f milvus_configmap.yaml
-    kubectl apply -f milvus_auxiliary.yaml
+    kubectl apply -f mishards_data_pvc.yaml
+    kubectl apply -f mishards_configmap.yaml
+    kubectl apply -f mishards_auxiliary.yaml
 
     counter=0
-    while [ $(kubectl get pvc -n milvus | grep Bound | wc -l) != 4 ]; do
+    while [ $(kubectl get pvc -n mishards | grep Bound | wc -l) != 4 ]; do
         sleep 1;
         let counter=counter+1
         if [ $counter == $timeout ]; then
@@ -156,7 +156,7 @@ function startDependencies() {
             return 1
         fi
     done
-    checkDeployment "milvus-mysql"
+    checkDeployment "mishards-mysql"
 }
 
 function startApps() {
@@ -165,19 +165,19 @@ function startApps() {
     echo -e "${GREEN}${BOLD}Checking required resouces...${NORMAL}${ENDC}"
     while [ $counter -lt $timeout ]; do
         sleep 1;
-        if [ $(kubectl get pvc -n milvus 2>/dev/null | grep Bound | wc -l) != 4 ]; then
+        if [ $(kubectl get pvc -n mishards 2>/dev/null | grep Bound | wc -l) != 4 ]; then
             echo -e "${YELLOW}No pvc. Wait another sec... $counter${ENDC}";
             errmsg='No pvc';
             let counter=counter+1;
             continue
         fi
-        if [ $(kubectl get configmap -n milvus 2>/dev/null | grep milvus | wc -l) != 4 ]; then
+        if [ $(kubectl get configmap -n mishards 2>/dev/null | grep mishards | wc -l) != 4 ]; then
             echo -e "${YELLOW}No configmap. Wait another sec... $counter${ENDC}";
             errmsg='No configmap';
             let counter=counter+1;
             continue
         fi
-        if [ $(kubectl get ep -n milvus 2>/dev/null | grep milvus-mysql | awk '{print $2}') == "<none>" ]; then
+        if [ $(kubectl get ep -n mishards 2>/dev/null | grep mishards-mysql | awk '{print $2}') == "<none>" ]; then
             echo -e "${YELLOW}No mysql. Wait another sec... $counter${ENDC}";
             errmsg='No mysql';
             let counter=counter+1;
@@ -205,30 +205,30 @@ function startApps() {
     fi
 
     echo -e "${GREEN}${BOLD}Start servers ...${NORMAL}${ENDC}"
-    kubectl apply -f milvus_stateful_servers.yaml
-    kubectl apply -f milvus_write_servers.yaml
+    kubectl apply -f mishards_stateful_servers.yaml
+    kubectl apply -f mishards_write_servers.yaml
 
     checkStatefulSevers
     if [ $? -ne 0 ]; then
-        echo -e "${RED}${BOLD}Starting milvus-ro-servers timeout${NORMAL}${ENDC}"
+        echo -e "${RED}${BOLD}Starting mishards-ro-servers timeout${NORMAL}${ENDC}"
         exit 1
     fi
 
-    checkDeployment "milvus-wo-servers"
+    checkDeployment "mishards-wo-servers"
     if [ $? -ne 0 ]; then
-        echo -e "${RED}${BOLD}Starting milvus-wo-servers timeout${NORMAL}${ENDC}"
+        echo -e "${RED}${BOLD}Starting mishards-wo-servers timeout${NORMAL}${ENDC}"
         exit 1
     fi
 
     echo -e "${GREEN}${BOLD}Start rolebinding ...${NORMAL}${ENDC}"
-    kubectl apply -f milvus_rbac.yaml
+    kubectl apply -f mishards_rbac.yaml
 
     echo -e "${GREEN}${BOLD}Start proxies ...${NORMAL}${ENDC}"
-    kubectl apply -f milvus_proxy.yaml
+    kubectl apply -f mishards_proxy.yaml
 
-    checkDeployment "milvus-proxy"
+    checkDeployment "mishards-proxy"
     if [ $? -ne 0 ]; then
-        echo -e "${RED}${BOLD}Starting milvus-proxy timeout${NORMAL}${ENDC}"
+        echo -e "${RED}${BOLD}Starting mishards-proxy timeout${NORMAL}${ENDC}"
         exit 1
     fi
 
@@ -244,10 +244,10 @@ function startApps() {
 
 function removeApps () {
     # kubectl delete -f milvus_flower.yaml 2>/dev/null
-    kubectl delete -f milvus_proxy.yaml 2>/dev/null
-    kubectl delete -f milvus_stateful_servers.yaml 2>/dev/null
-    kubectl delete -f milvus_write_servers.yaml 2>/dev/null
-    kubectl delete -f milvus_rbac.yaml 2>/dev/null
+    kubectl delete -f mishards_proxy.yaml 2>/dev/null
+    kubectl delete -f mishards_stateful_servers.yaml 2>/dev/null
+    kubectl delete -f mishards_write_servers.yaml 2>/dev/null
+    kubectl delete -f mishards_rbac.yaml 2>/dev/null
     # kubectl delete -f milvus_monitor.yaml 2>/dev/null
 }
 
@@ -263,9 +263,9 @@ function scaleDeployment() {
         ;;
     esac
 
-    cur=$(kubectl get deployment -n milvus $deployment_name |grep $deployment_name |awk '{split($2, status, "/"); print status[2];}')
+    cur=$(kubectl get deployment -n mishards $deployment_name |grep $deployment_name |awk '{split($2, status, "/"); print status[2];}')
     echo -e "${GREEN}Current Running ${BOLD}$cur ${GREEN}${deployment_name}, Scaling to ${BOLD}$des ...${ENDC}";
-    scalecmd="kubectl scale deployment -n milvus ${deployment_name} --replicas=${des}"
+    scalecmd="kubectl scale deployment -n mishards ${deployment_name} --replicas=${des}"
     ${scalecmd}
     if [ $? -ne 0 ]; then
         echo -e "${RED}${BOLD}Scale Error: ${GREEN}${scalecmd}${ENDC}"
@@ -276,7 +276,7 @@ function scaleDeployment() {
 
     if [ $? -ne 0 ]; then
         echo -e "${RED}${BOLD}Scale ${deployment_name} timeout${NORMAL}${ENDC}"
-        scalecmd="kubectl scale deployment -n milvus ${deployment_name} --replicas=${cur}"
+        scalecmd="kubectl scale deployment -n mishards ${deployment_name} --replicas=${cur}"
         ${scalecmd}
         if [ $? -ne 0 ]; then
             echo -e "${RED}${BOLD}Scale Rollback Error: ${GREEN}${scalecmd}${ENDC}"
@@ -298,9 +298,9 @@ function scaleROServers() {
         ;;
     esac
 
-    cur=$(kubectl get statefulset -n milvus milvus-ro-servers |tail -n 1 |awk '{split($2, status, "/"); print status[2];}')
+    cur=$(kubectl get statefulset -n mishards mishards-ro-servers |tail -n 1 |awk '{split($2, status, "/"); print status[2];}')
     echo -e "${GREEN}Current Running ${BOLD}$cur ${GREEN}Readonly Servers, Scaling to ${BOLD}$des ...${ENDC}";
-    scalecmd="kubectl scale sts milvus-ro-servers -n milvus --replicas=${des}"
+    scalecmd="kubectl scale sts mishards-ro-servers -n mishards --replicas=${des}"
     ${scalecmd}
     if [ $? -ne 0 ]; then
         echo -e "${RED}${BOLD}Scale Error: ${GREEN}${scalecmd}${ENDC}"
@@ -309,8 +309,8 @@ function scaleROServers() {
 
     checkStatefulSevers
     if [ $? -ne 0 ]; then
-        echo -e "${RED}${BOLD}Scale milvus-ro-servers timeout${NORMAL}${ENDC}"
-        scalecmd="kubectl scale sts milvus-ro-servers -n milvus --replicas=${cur}"
+        echo -e "${RED}${BOLD}Scale mishards-ro-servers timeout${NORMAL}${ENDC}"
+        scalecmd="kubectl scale sts mishards-ro-servers -n mishards --replicas=${cur}"
         ${scalecmd}
         if [ $? -ne 0 ]; then
             echo -e "${RED}${BOLD}Scale Rollback Error: ${GREEN}${scalecmd}${ENDC}"
@@ -358,7 +358,7 @@ scale-ro-server)
     ;;
 
 scale-proxy)
-    scaleDeployment "milvus-proxy" $1 $2
+    scaleDeployment "mishards-proxy" $1 $2
     ;;
 
 -h|--help|*)
