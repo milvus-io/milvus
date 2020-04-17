@@ -44,6 +44,14 @@ TestMetricAlg(const std::string& header, metric_func_ptr func_ptr, float* distan
     std::cout << header << " takes " << diff << "ms" << std::endl;
 }
 
+void
+CheckResult(const float* result1, const float* result2, const size_t size) {
+    for (size_t i = 0; i < size; i++) {
+        ASSERT_FLOAT_EQ(result1[i], result2[i]);
+    }
+}
+
+///////////////////////////////////////////////////////////////////////////////
 /* from faiss/utils/distances_simd.cpp */
 namespace FAISS {
 
@@ -145,14 +153,102 @@ float fvec_L2sqr_avx (const float * x, const float * y, size_t d) {
 
 }  // namespace FAISS
 
+///////////////////////////////////////////////////////////////////////////////
+/* from knowhere/index/vector_index/impl/nsg/Distance.cpp */
+namespace NSG {
+
+float
+DistanceL2_Compare(const float* a, const float* b, size_t size) {
+    float result = 0;
+
+#define AVX_L2SQR(addr1, addr2, dest, tmp1, tmp2) \
+    tmp1 = _mm256_loadu_ps(addr1);                \
+    tmp2 = _mm256_loadu_ps(addr2);                \
+    tmp1 = _mm256_sub_ps(tmp1, tmp2);             \
+    tmp1 = _mm256_mul_ps(tmp1, tmp1);             \
+    dest = _mm256_add_ps(dest, tmp1);
+
+    __m256 sum;
+    __m256 l0, l1;
+    __m256 r0, r1;
+    unsigned D = (size + 7) & ~7U;
+    unsigned DR = D % 16;
+    unsigned DD = D - DR;
+    const float* l = a;
+    const float* r = b;
+    const float* e_l = l + DD;
+    const float* e_r = r + DD;
+    float unpack[8] __attribute__((aligned(32))) = {0, 0, 0, 0, 0, 0, 0, 0};
+
+    sum = _mm256_loadu_ps(unpack);
+    if (DR) {
+        AVX_L2SQR(e_l, e_r, sum, l0, r0);
+    }
+
+    for (unsigned i = 0; i < DD; i += 16, l += 16, r += 16) {
+        AVX_L2SQR(l, r, sum, l0, r0);
+        AVX_L2SQR(l + 8, r + 8, sum, l1, r1);
+    }
+    _mm256_storeu_ps(unpack, sum);
+    result = unpack[0] + unpack[1] + unpack[2] + unpack[3] + unpack[4] + unpack[5] + unpack[6] + unpack[7];
+
+    return result;
+}
+
+float
+DistanceIP_Compare(const float* a, const float* b, size_t size) {
+    float result = 0;
+
+#define AVX_DOT(addr1, addr2, dest, tmp1, tmp2) \
+    tmp1 = _mm256_loadu_ps(addr1);              \
+    tmp2 = _mm256_loadu_ps(addr2);              \
+    tmp1 = _mm256_mul_ps(tmp1, tmp2);           \
+    dest = _mm256_add_ps(dest, tmp1);
+
+    __m256 sum;
+    __m256 l0, l1;
+    __m256 r0, r1;
+    unsigned D = (size + 7) & ~7U;
+    unsigned DR = D % 16;
+    unsigned DD = D - DR;
+    const float* l = a;
+    const float* r = b;
+    const float* e_l = l + DD;
+    const float* e_r = r + DD;
+    float unpack[8] __attribute__((aligned(32))) = {0, 0, 0, 0, 0, 0, 0, 0};
+
+    sum = _mm256_loadu_ps(unpack);
+    if (DR) {
+        AVX_DOT(e_l, e_r, sum, l0, r0);
+    }
+
+    for (unsigned i = 0; i < DD; i += 16, l += 16, r += 16) {
+        AVX_DOT(l, r, sum, l0, r0);
+        AVX_DOT(l + 8, r + 8, sum, l1, r1);
+    }
+    _mm256_storeu_ps(unpack, sum);
+    result = unpack[0] + unpack[1] + unpack[2] + unpack[3] + unpack[4] + unpack[5] + unpack[6] + unpack[7];
+
+    return result;
+}
+
+}  // namespace NSG
+
+
 TEST(METRICTEST, BENCHMARK) {
     std::vector<float> xb(NB * DIM);
     std::vector<float> xq(NQ * DIM);
     GenerateData(DIM, NB, xb.data());
     GenerateData(DIM, NQ, xq.data());
 
-    std::vector<float> distance(NB * NQ);
+    std::vector<float> distance_faiss(NB * NQ);
+    std::vector<float> distance_nsg(NB * NQ);
 
-    TestMetricAlg("FAISS::L2", FAISS::fvec_L2sqr_avx, distance.data(), NB, xb.data(), NQ, xq.data(), DIM);
-    TestMetricAlg("FAISS::IP", FAISS::fvec_inner_product_avx, distance.data(), NB, xb.data(), NQ, xq.data(), DIM);
+    TestMetricAlg("FAISS::L2", FAISS::fvec_L2sqr_avx, distance_faiss.data(), NB, xb.data(), NQ, xq.data(), DIM);
+    TestMetricAlg("NSG::L2", NSG::DistanceL2_Compare, distance_nsg.data(), NB, xb.data(), NQ, xq.data(), DIM);
+    CheckResult(distance_faiss.data(), distance_nsg.data(), NB * NQ);
+
+    TestMetricAlg("FAISS::IP", FAISS::fvec_inner_product_avx, distance_faiss.data(), NB, xb.data(), NQ, xq.data(), DIM);
+    TestMetricAlg("NSG::IP", NSG::DistanceIP_Compare, distance_nsg.data(), NB, xb.data(), NQ, xq.data(), DIM);
+    CheckResult(distance_faiss.data(), distance_nsg.data(), NB * NQ);
 }
