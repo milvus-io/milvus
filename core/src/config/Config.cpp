@@ -39,6 +39,9 @@ namespace server {
 
 constexpr int64_t GB = 1UL << 30;
 
+constexpr int32_t PORT_NUMBER_MIN = 1024;
+constexpr int32_t PORT_NUMBER_MAX = 65535;
+
 static const std::unordered_map<std::string, std::string> milvus_config_version_map(
     {{"0.6.0", "0.1"}, {"0.7.0", "0.2"}, {"0.7.1", "0.2"}, {"0.8.0", "0.3"}});
 
@@ -698,11 +701,15 @@ Config::CheckServerConfigPort(const std::string& value) {
         std::string msg = "Invalid server port: " + value + ". Possible reason: server_config.port is not a number.";
         return Status(SERVER_INVALID_ARGUMENT, msg);
     } else {
-        int32_t port = std::stoi(value);
-        if (!(port > 1024 && port < 65535)) {
-            std::string msg = "Invalid server port: " + value +
-                              ". Possible reason: server_config.port is not in range (1024, 65535).";
-            return Status(SERVER_INVALID_ARGUMENT, msg);
+        try {
+            int32_t port = std::stoi(value);
+            if (!(port > PORT_NUMBER_MIN && port < PORT_NUMBER_MAX)) {
+                std::string msg = "Invalid server port: " + value +
+                                  ". Possible reason: server_config.port is not in range (1024, 65535).";
+                return Status(SERVER_INVALID_ARGUMENT, msg);
+            }
+        } catch (...) {
+            return Status(SERVER_INVALID_ARGUMENT, "Invalid server_config.port: " + value);
         }
     }
     return Status::OK();
@@ -732,9 +739,7 @@ Config::CheckServerConfigTimeZone(const std::string& value) {
         if (value.substr(0, 3) != "UTC") {
             return Status(SERVER_INVALID_ARGUMENT, "Invalid server_config.time_zone: " + value);
         } else {
-            try {
-                stoi(value.substr(3));
-            } catch (...) {
+            if (!ValidationUtil::IsNumber(value.substr(4))) {
                 return Status(SERVER_INVALID_ARGUMENT, "Invalid server_config.time_zone: " + value);
             }
         }
@@ -749,11 +754,15 @@ Config::CheckServerConfigWebPort(const std::string& value) {
             "Invalid web server port: " + value + ". Possible reason: server_config.web_port is not a number.";
         return Status(SERVER_INVALID_ARGUMENT, msg);
     } else {
-        int32_t port = std::stoi(value);
-        if (!(port > 1024 && port < 65535)) {
-            std::string msg = "Invalid web server port: " + value +
-                              ". Possible reason: server_config.web_port is not in range [1025, 65534].";
-            return Status(SERVER_INVALID_ARGUMENT, msg);
+        try {
+            int32_t port = std::stoi(value);
+            if (!(port > PORT_NUMBER_MIN && port < PORT_NUMBER_MAX)) {
+                std::string msg = "Invalid web server port: " + value +
+                                  ". Possible reason: server_config.web_port is not in range (1024, 65535).";
+                return Status(SERVER_INVALID_ARGUMENT, msg);
+            }
+        } catch (...) {
+            return Status(SERVER_INVALID_ARGUMENT, "Invalid server_config.web_port: " + value);
         }
     }
     return Status::OK();
@@ -915,11 +924,15 @@ Config::CheckStorageConfigS3Port(const std::string& value) {
         std::string msg = "Invalid s3 port: " + value + ". Possible reason: storage_config.s3_port is not a number.";
         return Status(SERVER_INVALID_ARGUMENT, msg);
     } else {
-        int32_t port = std::stoi(value);
-        if (!(port > 1024 && port < 65535)) {
-            std::string msg = "Invalid s3 port: " + value +
-                              ". Possible reason: storage_config.s3_port is not in range (1024, 65535).";
-            return Status(SERVER_INVALID_ARGUMENT, msg);
+        try {
+            int32_t port = std::stoi(value);
+            if (!(port > PORT_NUMBER_MIN && port < PORT_NUMBER_MAX)) {
+                std::string msg = "Invalid s3 port: " + value +
+                                  ". Possible reason: storage_config.s3_port is not in range (1024, 65535).";
+                return Status(SERVER_INVALID_ARGUMENT, msg);
+            }
+        } catch (...) {
+            return Status(SERVER_INVALID_ARGUMENT, "Invalid storage_config.s3_port: " + value);
         }
     }
     return Status::OK();
@@ -978,11 +991,15 @@ Config::CheckMetricConfigPort(const std::string& value) {
         std::string msg = "Invalid metric port: " + value + ". Possible reason: metric_config.port is not a number.";
         return Status(SERVER_INVALID_ARGUMENT, msg);
     } else {
-        int32_t port = std::stoi(value);
-        if (!(port > 1024 && port < 65535)) {
-            std::string msg = "Invalid metric port: " + value +
-                              ". Possible reason: metric_config.port is not in range (1024, 65535).";
-            return Status(SERVER_INVALID_ARGUMENT, msg);
+        try {
+            int32_t port = std::stoi(value);
+            if (!(port > PORT_NUMBER_MIN && port < PORT_NUMBER_MAX)) {
+                std::string msg = "Invalid metric port: " + value +
+                                  ". Possible reason: metric_config.port is not in range (1024, 65535).";
+                return Status(SERVER_INVALID_ARGUMENT, msg);
+            }
+        } catch (...) {
+            return Status(SERVER_INVALID_ARGUMENT, "Invalid metric_config.port: " + value);
         }
     }
     return Status::OK();
@@ -1224,11 +1241,15 @@ CheckGpuResource(const std::string& value) {
     }
 
     if (s.compare(0, 3, "gpu") == 0) {
-        int32_t gpu_index = std::stoi(s.substr(3));
-        if (!ValidationUtil::ValidateGpuIndex(gpu_index).ok()) {
-            std::string msg = "Invalid gpu resource: " + value +
-                              ". Possible reason: gpu_resource_config does not match with the hardware.";
-            return Status(SERVER_INVALID_ARGUMENT, msg);
+        try {
+            int32_t gpu_index = std::stoi(s.substr(3));
+            if (!ValidationUtil::ValidateGpuIndex(gpu_index).ok()) {
+                std::string msg = "Invalid gpu resource: " + value +
+                                  ". Possible reason: gpu_resource_config does not match with the hardware.";
+                return Status(SERVER_INVALID_ARGUMENT, msg);
+            }
+        } catch (...) {
+            return Status(SERVER_INVALID_ARGUMENT, "Invalid gpu_resource_config: " + value);
         }
     }
 

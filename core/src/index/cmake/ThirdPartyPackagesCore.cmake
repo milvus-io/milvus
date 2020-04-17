@@ -216,7 +216,6 @@ else ()
     set(GTEST_SOURCE_URL
             "https://github.com/google/googletest/archive/release-${GTEST_VERSION}.tar.gz")
 endif ()
-set(GTEST_MD5 "2e6fbeb6a91310a16efe181886c59596")
 
 # ----------------------------------------------------------------------
 # ARROW

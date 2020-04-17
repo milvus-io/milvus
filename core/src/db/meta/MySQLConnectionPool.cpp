@@ -51,11 +51,6 @@ MySQLConnectionPool::release(const mysqlpp::Connection* pc) {
 //        max_idle_time_ = max_idle;
 //    }
 
-std::string
-MySQLConnectionPool::getDB() {
-    return db_;
-}
-
 // Superclass overrides
 mysqlpp::Connection*
 MySQLConnectionPool::create() {
@@ -66,7 +61,7 @@ MySQLConnectionPool::create() {
         // creation.
         auto conn = new mysqlpp::Connection();
         conn->set_option(new mysqlpp::ReconnectOption(true));
-        conn->connect(db_.empty() ? 0 : db_.c_str(), server_.empty() ? 0 : server_.c_str(),
+        conn->connect(db_name_.empty() ? 0 : db_name_.c_str(), server_.empty() ? 0 : server_.c_str(),
                       user_.empty() ? 0 : user_.c_str(), password_.empty() ? 0 : password_.c_str(), port_);
         return conn;
     } catch (const mysqlpp::ConnectionFailed& er) {
