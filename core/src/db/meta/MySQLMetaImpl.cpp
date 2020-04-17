@@ -87,6 +87,8 @@ class MetaField {
         if (!type_split.empty()) {
             type_len_min = type_split[0].length() > type_len_min ? type_len_min : type_split[0].length();
         }
+
+        // field name must be equal, ignore type width
         return strncasecmp(field.name_.c_str(), name_.c_str(), name_len_min) == 0 &&
                strncasecmp(field.type_.c_str(), type_.c_str(), type_len_min) == 0;
     }
