@@ -284,7 +284,7 @@ Please mark all change in change log and use the issue from GitHub
 ## Improvement
 -   \#255 Add ivfsq8 test report detailed version
 -   \#260 C++ SDK README
--   \#266 Rpc request source code refactor
+-   \#266 RPC request source code refactor
 -   \#274 Logger the time cost during preloading data
 -   \#275 Rename C++ SDK IndexType
 -   \#284 Change C++ SDK to shared library

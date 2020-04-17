@@ -240,14 +240,12 @@ else ()
             "https://github.com/google/googletest/archive/release-${GTEST_VERSION}.tar.gz"
             "https://gitee.com/quicksilver/googletest/repository/archive/release-${GTEST_VERSION}.zip")
 endif ()
-set(GTEST_MD5 "2e6fbeb6a91310a16efe181886c59596")
 
 if (DEFINED ENV{MILVUS_MYSQLPP_URL})
     set(MYSQLPP_SOURCE_URL "$ENV{MILVUS_MYSQLPP_URL}")
 else ()
     set(MYSQLPP_SOURCE_URL "https://tangentsoft.com/mysqlpp/releases/mysql++-${MYSQLPP_VERSION}.tar.gz")
 endif ()
-set(MYSQLPP_MD5 "cda38b5ecc0117de91f7c42292dd1e79")
 
 if (DEFINED ENV{MILVUS_PROMETHEUS_URL})
     set(PROMETHEUS_SOURCE_URL "$ENV{PROMETHEUS_OPENBLAS_URL}")
@@ -262,7 +260,6 @@ else ()
     set(SQLITE_SOURCE_URL
             "https://www.sqlite.org/2019/sqlite-autoconf-${SQLITE_VERSION}.tar.gz")
 endif ()
-set(SQLITE_MD5 "3c68eb400f8354605736cd55400e1572")
 
 if (DEFINED ENV{MILVUS_SQLITE_ORM_URL})
     set(SQLITE_ORM_SOURCE_URLS "$ENV{MILVUS_SQLITE_ORM_URL}")
@@ -271,7 +268,6 @@ else ()
             "https://github.com/fnc12/sqlite_orm/archive/${SQLITE_ORM_VERSION}.zip"
             "https://gitee.com/quicksilver/sqlite_orm/repository/archive/${SQLITE_ORM_VERSION}.zip")
 endif ()
-set(SQLITE_ORM_MD5 "ba9a405a8a1421c093aa8ce988ff8598")
 
 if (DEFINED ENV{MILVUS_YAMLCPP_URL})
     set(YAMLCPP_SOURCE_URL "$ENV{MILVUS_YAMLCPP_URL}")
@@ -279,7 +275,6 @@ else ()
     set(YAMLCPP_SOURCE_URL "https://github.com/jbeder/yaml-cpp/archive/yaml-cpp-${YAMLCPP_VERSION}.tar.gz"
                            "https://gitee.com/quicksilver/yaml-cpp/repository/archive/yaml-cpp-${YAMLCPP_VERSION}.zip")
 endif ()
-set(YAMLCPP_MD5 "5b943e9af0060d0811148b037449ef82")
 
 if (DEFINED ENV{MILVUS_LIBUNWIND_URL})
     set(LIBUNWIND_SOURCE_URL "$ENV{MILVUS_LIBUNWIND_URL}")
@@ -287,7 +282,6 @@ else ()
     set(LIBUNWIND_SOURCE_URL
             "https://github.com/libunwind/libunwind/releases/download/v${LIBUNWIND_VERSION}/libunwind-${LIBUNWIND_VERSION}.tar.gz")
 endif ()
-set(LIBUNWIND_MD5 "a04f69d66d8e16f8bf3ab72a69112cd6")
 
 if (DEFINED ENV{MILVUS_GPERFTOOLS_URL})
     set(GPERFTOOLS_SOURCE_URL "$ENV{MILVUS_GPERFTOOLS_URL}")
@@ -295,17 +289,16 @@ else ()
     set(GPERFTOOLS_SOURCE_URL
             "https://github.com/gperftools/gperftools/releases/download/gperftools-${GPERFTOOLS_VERSION}/gperftools-${GPERFTOOLS_VERSION}.tar.gz")
 endif ()
-set(GPERFTOOLS_MD5 "c6a852a817e9160c79bdb2d3101b4601")
 
 if (DEFINED ENV{MILVUS_GRPC_URL})
     set(GRPC_SOURCE_URL "$ENV{MILVUS_GRPC_URL}")
 else ()
     set(GRPC_SOURCE_URL
             "https://github.com/milvus-io/grpc-milvus/archive/${GRPC_VERSION}.zip"
-            "https://github.com/youny626/grpc-milvus/archive/${GRPC_VERSION}.zip"
-            "https://gitee.com/quicksilver/grpc-milvus/repository/archive/${GRPC_VERSION}.zip")
+            #"https://github.com/youny626/grpc-milvus/archive/${GRPC_VERSION}.zip"
+            #"https://gitee.com/quicksilver/grpc-milvus/repository/archive/${GRPC_VERSION}.zip"
+            )
 endif ()
-set(GRPC_MD5 "0362ba219f59432c530070b5f5c3df73")
 
 if (DEFINED ENV{MILVUS_ZLIB_URL})
     set(ZLIB_SOURCE_URL "$ENV{MILVUS_ZLIB_URL}")
@@ -313,7 +306,6 @@ else ()
     set(ZLIB_SOURCE_URL "https://github.com/madler/zlib/archive/${ZLIB_VERSION}.tar.gz"
                         "https://gitee.com/quicksilver/zlib/repository/archive/${ZLIB_VERSION}.zip")
 endif ()
-set(ZLIB_MD5 "0095d2d2d1f3442ce1318336637b695f")
 
 if (DEFINED ENV{MILVUS_OPENTRACING_URL})
     set(OPENTRACING_SOURCE_URL "$ENV{MILVUS_OPENTRACING_URL}")

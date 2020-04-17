@@ -92,6 +92,9 @@ class ValidationUtil {
 
     static Status
     ValidateStoragePath(const std::string& path);
+
+    static bool
+    IsNumber(const std::string& s);
 };
 
 }  // namespace server
