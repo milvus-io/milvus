@@ -197,9 +197,7 @@ class TestSearchBase:
         logging.getLogger().info(get_simple_index)
         vectors, ids = self.init_data(connect, collection)
         status = connect.create_index(collection, index_type, index_param)
-        query_vec = []
-        for i in range (1200):
-            query_vec.append(vectors[i])
+        query_vec = vectors[:1000]
         top_k = 10
         search_param = get_search_param(index_type)
         status, result = connect.search_vectors(collection, top_k, query_vec, params=search_param)
@@ -833,6 +831,7 @@ class TestSearchBase:
         for th in threads:
             th.join()
 
+    @pytest.mark.level(2)
     @pytest.mark.timeout(30)
     def test_search_concurrent_multithreads(self, args):
         '''

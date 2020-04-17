@@ -259,6 +259,7 @@ class TestDropBase:
         status = connect.drop_partition(new_collection, tag)
         assert not status.OK()
 
+    @pytest.mark.level(2)
     def test_drop_partition_repeatedly(self, connect, collection):
         '''
         target: test drop partition twice, check status and partition if existed
