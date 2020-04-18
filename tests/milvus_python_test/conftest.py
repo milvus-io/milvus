@@ -38,18 +38,10 @@ def connect(request):
     port = request.config.getoption("--port")
     http_port = request.config.getoption("--http-port")
     handler = request.config.getoption("--handler")
-    milvus = get_milvus(handler=handler)
+    if handler == "HTTP":
+        port = http_port
     try:
-        if handler == "HTTP":
-            port = http_port
-        status = milvus.connect(host=ip, port=port)
-        logging.getLogger().info(status)
-        if not status.OK():
-            # try again
-            logging.getLogger().info("------------------------------------")
-            logging.getLogger().info("Try to connect again")
-            logging.getLogger().info("------------------------------------")
-            res = milvus.connect(host=ip, port=port)
+        milvus = get_milvus(host=ip, port=port, handler=handler)
     except Exception as e:
         logging.getLogger().error(str(e))
         pytest.exit("Milvus server can not connected, exit pytest ...")
@@ -68,7 +60,10 @@ def dis_connect(request):
     port = request.config.getoption("--port")
     http_port = request.config.getoption("--http-port")
     handler = request.config.getoption("--handler")
-    milvus = get_milvus(handler=handler)
+    if handler == "HTTP":
+        port = http_port
+    milvus = get_milvus(host=ip, port=port, handler=handler)
+    milvus.disconnect()
     return milvus
 
 
@@ -86,8 +81,13 @@ def args(request):
 
 @pytest.fixture(scope="module")
 def milvus(request):
+    ip = request.config.getoption("--ip")
+    port = request.config.getoption("--port")
+    http_port = request.config.getoption("--http-port")
     handler = request.config.getoption("--handler")
-    return get_milvus(handler=handler)
+    if handler == "HTTP":
+        port = http_port
+    return get_milvus(host=ip, port=port, handler=handler)
 
 
 @pytest.fixture(scope="function")

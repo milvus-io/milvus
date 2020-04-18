@@ -852,8 +852,7 @@ class TestSearchBase:
                  'index_type': IndexType.FLAT,
                  'store_raw_vector': False}
         # create collection
-        milvus = get_milvus(args["handler"])
-        milvus.connect(uri=uri, timeout=5)
+        milvus = get_milvus(args["ip"], args["port"], handler=args["handler"])
         milvus.create_collection(param)
         vectors, ids = self.init_data(milvus, collection, nb=nb)
         query_vecs = vectors[nb//2:nb]
@@ -865,8 +864,7 @@ class TestSearchBase:
                 assert result[i][0].distance == 0.0
 
         for i in range(threads_num):
-            milvus = get_milvus(args["handler"])
-            milvus.connect(uri=uri, timeout=5)
+            milvus = get_milvus(args["ip"], args["port"], handler=args["handler"])
             t = threading.Thread(target=search, args=(milvus, ))
             threads.append(t)
             t.start()
@@ -893,8 +891,7 @@ class TestSearchBase:
              'index_type': IndexType.FLAT,
              'store_raw_vector': False}
         # create collection
-        milvus = get_milvus(args["handler"])
-        milvus.connect(uri=uri)
+        milvus = get_milvus(args["ip"], args["port"], handler=args["handler"])
         milvus.create_collection(param)
         vectors, ids = self.init_data(milvus, collection, nb=nb)
         query_vecs = vectors[nb//2:nb]
@@ -906,8 +903,7 @@ class TestSearchBase:
                 assert result[i][0].distance == 0.0
 
         for i in range(process_num):
-            milvus = get_milvus(args["handler"])
-            milvus.connect(uri=uri)
+            milvus = get_milvus(args["ip"], args["port"], handler=args["handler"])
             p = Process(target=search, args=(milvus, ))
             processes.append(p)
             p.start()
@@ -933,8 +929,7 @@ class TestSearchBase:
                      'index_file_size': 10,
                      'metric_type': MetricType.L2}
             # create collection
-            milvus = get_milvus(args["handler"])
-            milvus.connect(uri=uri, timeout=5)
+            milvus = get_milvus(args["ip"], args["port"], handler=args["handler"])
             milvus.create_collection(param)
             status, ids = milvus.add_vectors(collection, vectors)
             assert status.OK()
@@ -974,8 +969,7 @@ class TestSearchBase:
                      'index_file_size': 10,
                      'metric_type': MetricType.L2}
             # create collection
-            milvus = get_milvus(args["handler"])
-            milvus.connect(uri=uri, timeout=5)
+            milvus = get_milvus(args["ip"], args["port"], handler=args["handler"])
             milvus.create_collection(param)
             status, ids = milvus.add_vectors(collection, vectors)
             assert status.OK()
