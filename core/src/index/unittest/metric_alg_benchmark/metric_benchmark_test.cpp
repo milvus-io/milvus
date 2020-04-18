@@ -21,6 +21,7 @@ typedef float (*metric_func_ptr)(const float*, const float*, size_t);
 constexpr int64_t DIM = 512;
 constexpr int64_t NB = 10000;
 constexpr int64_t NQ = 5;
+constexpr int64_t LOOP = 5;
 
 void
 GenerateData(const int64_t dim, const int64_t n, float* x) {
@@ -31,19 +32,22 @@ GenerateData(const int64_t dim, const int64_t n, float* x) {
     }
 }
 
-int64_t
-TestMetricAlg(std::unordered_map<std::string, metric_func_ptr>& func_map, const std::string& key, float* distance,
-              const int64_t nb, const float* xb, const int64_t nq, const float* xq, const int64_t dim) {
-    auto t0 = std::chrono::system_clock::now();
-    for (int64_t i = 0; i < nb; i++) {
-        for (int64_t j = 0; j < nq; j++) {
-            distance[i * NQ + j] = func_map[key](xb + i * dim, xq + j * dim, dim);
+void
+TestMetricAlg(std::unordered_map<std::string, metric_func_ptr>& func_map, const std::string& key, int64_t loop,
+              float* distance, const int64_t nb, const float* xb, const int64_t nq, const float* xq,
+              const int64_t dim) {
+    int64_t diff = 0;
+    for (int64_t i = 0; i < loop; i++) {
+        auto t0 = std::chrono::system_clock::now();
+        for (int64_t i = 0; i < nb; i++) {
+            for (int64_t j = 0; j < nq; j++) {
+                distance[i * NQ + j] = func_map[key](xb + i * dim, xq + j * dim, dim);
+            }
         }
+        auto t1 = std::chrono::system_clock::now();
+        diff += std::chrono::duration_cast<std::chrono::microseconds>(t1 - t0).count();
     }
-    auto t1 = std::chrono::system_clock::now();
-    int64_t diff = std::chrono::duration_cast<std::chrono::microseconds>(t1 - t0).count();
-    std::cout << key << " takes " << diff << "ms" << std::endl;
-    return diff;
+    std::cout << key << " takes average " << diff / loop << "ms" << std::endl;
 }
 
 void
@@ -398,26 +402,14 @@ TEST(METRICTEST, BENCHMARK) {
     std::vector<float> distance_hnsw(NB * NQ);
 
     std::cout << "==========" << std::endl;
-    TestMetricAlg(func_map, "FAISS::L2", distance_faiss.data(), NB, xb.data(), NQ, xq.data(), DIM);
+    TestMetricAlg(func_map, "FAISS::L2", LOOP, distance_faiss.data(), NB, xb.data(), NQ, xq.data(), DIM);
 
-    TestMetricAlg(func_map, "HNSW::L2", distance_hnsw.data(), NB, xb.data(), NQ, xq.data(), DIM);
-    CheckResult(distance_faiss.data(), distance_hnsw.data(), NB * NQ);
-
-    TestMetricAlg(func_map, "NSG::L2", distance_nsg.data(), NB, xb.data(), NQ, xq.data(), DIM);
-    CheckResult(distance_faiss.data(), distance_nsg.data(), NB * NQ);
-
-    TestMetricAlg(func_map, "ANNOY::L2", distance_annoy.data(), NB, xb.data(), NQ, xq.data(), DIM);
+    TestMetricAlg(func_map, "ANNOY::L2", LOOP, distance_annoy.data(), NB, xb.data(), NQ, xq.data(), DIM);
     CheckResult(distance_faiss.data(), distance_annoy.data(), NB * NQ);
 
     std::cout << "==========" << std::endl;
-    TestMetricAlg(func_map, "FAISS::IP", distance_faiss.data(), NB, xb.data(), NQ, xq.data(), DIM);
+    TestMetricAlg(func_map, "FAISS::IP", LOOP, distance_faiss.data(), NB, xb.data(), NQ, xq.data(), DIM);
 
-    TestMetricAlg(func_map, "HNSW::IP", distance_hnsw.data(), NB, xb.data(), NQ, xq.data(), DIM);
-    CheckResult(distance_faiss.data(), distance_hnsw.data(), NB * NQ);
-
-    TestMetricAlg(func_map, "NSG::IP", distance_nsg.data(), NB, xb.data(), NQ, xq.data(), DIM);
-    CheckResult(distance_faiss.data(), distance_nsg.data(), NB * NQ);
-
-    TestMetricAlg(func_map, "ANNOY::IP", distance_annoy.data(), NB, xb.data(), NQ, xq.data(), DIM);
+    TestMetricAlg(func_map, "ANNOY::IP", LOOP, distance_annoy.data(), NB, xb.data(), NQ, xq.data(), DIM);
     CheckResult(distance_faiss.data(), distance_annoy.data(), NB * NQ);
 }
