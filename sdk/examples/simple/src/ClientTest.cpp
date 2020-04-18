@@ -254,16 +254,23 @@ ClientTest::CreateHybridCollection(const std::string& collection_name) {
 
 void
 ClientTest::InsertHybridEntities(std::string& collection_name, int64_t row_num) {
-    std::unordered_map<std::string, std::vector<std::string>> numerica_value;
-    std::vector<std::string> value1, value2;
+    std::unordered_map<std::string, std::vector<int8_t>> numerica_value;
+    std::vector<int64_t> value1;
+    std::vector<float> value2;
     value1.resize(row_num);
     value2.resize(row_num);
     for (uint64_t i = 0; i < row_num; ++i) {
-        value1[i] = std::to_string(i);
-        value2[i] = std::to_string(i + row_num);
+        value1[i] = i;
+        value2[i] = i + row_num;
     }
-    numerica_value.insert(std::make_pair("field_1", value1));
-    numerica_value.insert(std::make_pair("field_2", value2));
+
+    std::vector<int8_t> numerica1(row_num * sizeof(int64_t), 0);
+    std::vector<int8_t> numerica2(row_num * sizeof(float), 0);
+    memcpy(numerica1.data(), value1.data(), row_num * sizeof(int64_t));
+    memcpy(numerica2.data(), value2.data(), row_num * sizeof(float));
+
+    numerica_value.insert(std::make_pair("field_1", numerica1));
+    numerica_value.insert(std::make_pair("field_2", numerica2));
 
     std::unordered_map<std::string, std::vector<milvus::Entity>> vector_value;
     std::vector<milvus::Entity> entity_array;
@@ -277,7 +284,7 @@ ClientTest::InsertHybridEntities(std::string& collection_name, int64_t row_num) 
     }
 
     vector_value.insert(std::make_pair("field_3", entity_array));
-    milvus::HEntity entity = {numerica_value, vector_value};
+    milvus::HEntity entity = {row_num, numerica_value, vector_value};
     std::vector<uint64_t> id_array;
     milvus::Status status = conn_->InsertEntity(collection_name, "", entity, id_array);
     std::cout << "InsertHybridEntities function call status: " << status.message() << std::endl;

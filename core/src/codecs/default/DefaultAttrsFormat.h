@@ -51,7 +51,8 @@ class DefaultAttrsFormat : public AttrsFormat {
 
  private:
     void
-    read_attrs_internal(const storage::FSHandlerPtr& fs_ptr, const std::string&, off_t, size_t, std::vector<uint8_t>&, size_t&);
+    read_attrs_internal(const storage::FSHandlerPtr& fs_ptr, const std::string&, off_t, size_t, std::vector<uint8_t>&,
+                        size_t&);
 
     void
     read_uids_internal(const storage::FSHandlerPtr& fs_ptr, const std::string&, std::vector<int64_t>&);

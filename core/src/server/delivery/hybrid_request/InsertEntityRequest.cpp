@@ -31,10 +31,8 @@ namespace milvus {
 namespace server {
 
 InsertEntityRequest::InsertEntityRequest(const std::shared_ptr<milvus::server::Context>& context,
-                                         const std::string& collection_name,
-                                         const std::string& partition_tag,
-                                         uint64_t& row_num,
-                                         std::vector<std::string>& field_names,
+                                         const std::string& collection_name, const std::string& partition_tag,
+                                         uint64_t& row_num, std::vector<std::string>& field_names,
                                          std::vector<uint8_t>& attr_values,
                                          std::unordered_map<std::string, engine::VectorsData>& vector_datas)
     : BaseRequest(context, BaseRequest::kInsertEntity),
@@ -47,29 +45,19 @@ InsertEntityRequest::InsertEntityRequest(const std::shared_ptr<milvus::server::C
 }
 
 BaseRequestPtr
-InsertEntityRequest::Create(const std::shared_ptr<milvus::server::Context>& context,
-                            const std::string& collection_name,
-                            const std::string& partition_tag,
-                            uint64_t& row_num,
-                            std::vector<std::string>& field_names,
+InsertEntityRequest::Create(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name,
+                            const std::string& partition_tag, uint64_t& row_num, std::vector<std::string>& field_names,
                             std::vector<uint8_t>& attr_values,
                             std::unordered_map<std::string, engine::VectorsData>& vector_datas) {
-    return std::shared_ptr<BaseRequest>(
-        new InsertEntityRequest(context,
-                                collection_name,
-                                partition_tag,
-                                row_num,
-                                field_names,
-                                attr_values,
-                                vector_datas));
+    return std::shared_ptr<BaseRequest>(new InsertEntityRequest(context, collection_name, partition_tag, row_num,
+                                                                field_names, attr_values, vector_datas));
 }
 
 Status
 InsertEntityRequest::OnExecute() {
     try {
         fiu_do_on("InsertEntityRequest.OnExecute.throw_std_exception", throw std::exception());
-        std::string hdr = "InsertEntityRequest(table=" + collection_name_ +
-                          ", partition_tag=" + partition_tag_ + ")";
+        std::string hdr = "InsertEntityRequest(table=" + collection_name_ + ", partition_tag=" + partition_tag_ + ")";
         TimeRecorder rc(hdr);
 
         // step 1: check arguments
@@ -104,13 +92,13 @@ InsertEntityRequest::OnExecute() {
 
         std::unordered_map<std::string, engine::meta::hybrid::DataType> field_types;
         auto size = fields_schema.fields_schema_.size();
-        for (uint64_t i = 0; i < size; ++i) {
-            if (fields_schema.fields_schema_[i].field_type_ == (int32_t)engine::meta::hybrid::DataType::VECTOR) {
-                continue;
+        for (auto field_name : field_names_) {
+            for (uint64_t i = 0; i < size; ++i) {
+                if (fields_schema.fields_schema_[i].field_name_ == field_name) {
+                    field_types.insert(std::make_pair(
+                        field_name, (engine::meta::hybrid::DataType)fields_schema.fields_schema_[i].field_type_));
+                }
             }
-            field_types.insert(
-                std::make_pair(fields_schema.fields_schema_[i].field_name_,
-                               (engine::meta::hybrid::DataType)fields_schema.fields_schema_[i].field_type_));
         }
 
         // step 3: check table flag

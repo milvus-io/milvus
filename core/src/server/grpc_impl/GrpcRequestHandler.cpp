@@ -811,10 +811,15 @@ GrpcRequestHandler::InsertEntity(::grpc::ServerContext* context, const ::milvus:
 
     memcpy(attr_values.data(), request->entities().attr_records().data(), attr_size);
 
+    std::vector<int64_t> aaa;
+    aaa.resize(1000);
+    memcpy(aaa.data(), attr_values.data(), 1000 * sizeof(int64_t));
+
     uint64_t row_num = request->entities().row_num();
 
     std::vector<std::string> field_names;
     auto field_size = request->entities().field_names_size();
+    field_names.resize(field_size - 1);
     for (uint64_t i = 0; i < field_size - 1; ++i) {
         field_names[i] = request->entities().field_names(i);
     }
@@ -829,8 +834,8 @@ GrpcRequestHandler::InsertEntity(::grpc::ServerContext* context, const ::milvus:
 
     std::string collection_name = request->collection_name();
     std::string partition_tag = request->partition_tag();
-    Status status =
-        request_handler_.InsertEntity(GetContext(context), collection_name, partition_tag, row_num, field_names, attr_values, vector_datas);
+    Status status = request_handler_.InsertEntity(GetContext(context), collection_name, partition_tag, row_num,
+                                                  field_names, attr_values, vector_datas);
 
     response->mutable_entity_id_array()->Resize(static_cast<int>(vector_datas.begin()->second.id_array_.size()), 0);
     memcpy(response->mutable_entity_id_array()->mutable_data(), vector_datas.begin()->second.id_array_.data(),

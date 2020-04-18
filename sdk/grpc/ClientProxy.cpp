@@ -629,16 +629,27 @@ ClientProxy::InsertEntity(const std::string& collection_name,
         grpc_param.set_collection_name(collection_name);
         grpc_param.set_partition_tag(partition_tag);
 
+        std::vector<std::vector<int8_t>> numerica_data;
+        auto numerica_size = 0;
+
         auto numerica_it = entities.numerica_value.begin();
+        auto grpc_entity = grpc_param.mutable_entities();
+        grpc_entity->set_row_num(entities.row_num);
         for (; numerica_it != entities.numerica_value.end(); numerica_it++) {
-            auto name = grpc_param.mutable_entities()->add_field_names();
+            auto name = grpc_entity->add_field_names();
             *name = numerica_it->first;
-            auto records = grpc_param.mutable_entities()->add_attr_records();
-            for (auto value : numerica_it->second) {
-                auto attr = records->add_value();
-                *attr = value;
-            }
+            auto size = numerica_it->second.size();
+            numerica_size += size;
+            numerica_data.emplace_back(numerica_it->second);
         }
+
+        std::vector<int8_t> attr_data(numerica_size, 0);
+        size_t offset = 0;
+        for (auto data : numerica_data) {
+            memcpy(attr_data.data() + offset, data.data(), data.size());
+            offset += data.size();
+        }
+        grpc_entity->set_attr_records(attr_data.data(), numerica_size);
 
         auto vector_it = entities.vector_value.begin();
         for (; vector_it != entities.vector_value.end(); vector_it++) {
@@ -684,10 +695,8 @@ WriteQueryToProto(::milvus::grpc::GeneralQuery* general_query, BooleanQueryPtr b
                 auto term_query = grpc_query->mutable_term_query();
                 term_query->set_field_name(leaf_query->term_query_ptr->field_name);
                 term_query->set_boost(leaf_query->query_boost);
-                for (auto field_value : leaf_query->term_query_ptr->field_value) {
-                    auto value = term_query->add_values();
-                    *value = field_value;
-                }
+                term_query->set_values(leaf_query->term_query_ptr->field_value.data(),
+                                       leaf_query->term_query_ptr->field_value.size());
             }
             if (leaf_query->range_query_ptr != nullptr) {
                 auto range_query = grpc_query->mutable_range_query();

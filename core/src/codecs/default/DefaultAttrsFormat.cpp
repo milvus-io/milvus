@@ -32,18 +32,17 @@ namespace milvus {
 namespace codec {
 
 void
-DefaultAttrsFormat::read_attrs_internal(const storage::FSHandlerPtr& fs_ptr, const std::string& file_path, off_t offset, size_t num,
-                                        std::vector<uint8_t>& raw_attrs, size_t& nbytes) {
+DefaultAttrsFormat::read_attrs_internal(const storage::FSHandlerPtr& fs_ptr, const std::string& file_path, off_t offset,
+                                        size_t num, std::vector<uint8_t>& raw_attrs, size_t& nbytes) {
     if (!fs_ptr->reader_ptr_->open(file_path.c_str())) {
         std::string err_msg = "Failed to open file: " + file_path + ", error: " + std::strerror(errno);
         LOG_ENGINE_ERROR_ << err_msg;
         throw Exception(SERVER_CANNOT_CREATE_FILE, err_msg);
     }
 
-    size_t num_bytes;
-    fs_ptr->reader_ptr_->read(&num_bytes, sizeof(size_t));
+    fs_ptr->reader_ptr_->read(&nbytes, sizeof(size_t));
 
-    num = std::min(num, num_bytes - offset);
+    num = std::min(num, nbytes - offset);
 
     offset += sizeof(size_t);
     fs_ptr->reader_ptr_->seekg(offset);
@@ -55,7 +54,8 @@ DefaultAttrsFormat::read_attrs_internal(const storage::FSHandlerPtr& fs_ptr, con
 }
 
 void
-DefaultAttrsFormat::read_uids_internal(const storage::FSHandlerPtr& fs_ptr, const std::string& file_path, std::vector<int64_t>& uids) {
+DefaultAttrsFormat::read_uids_internal(const storage::FSHandlerPtr& fs_ptr, const std::string& file_path,
+                                       std::vector<int64_t>& uids) {
     if (!fs_ptr->reader_ptr_->open(file_path.c_str())) {
         std::string err_msg = "Failed to open file: " + file_path + ", error: " + std::strerror(errno);
         LOG_ENGINE_ERROR_ << err_msg;

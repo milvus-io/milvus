@@ -586,12 +586,9 @@ DBImpl::InsertVectors(const std::string& collection_id, const std::string& parti
 }
 
 Status
-DBImpl::InsertEntities(const std::string& collection_id,
-                       const std::string& partition_tag,
-                       const std::vector<std::string>& field_names,
-                       Entity& entity,
+DBImpl::InsertEntities(const std::string& collection_id, const std::string& partition_tag,
+                       const std::vector<std::string>& field_names, Entity& entity,
                        std::unordered_map<std::string, meta::hybrid::DataType>& attr_types) {
-
     if (!initialized_.load(std::memory_order_acquire)) {
         return SHUTDOWN_ERROR;
     }
@@ -631,60 +628,82 @@ DBImpl::InsertEntities(const std::string& collection_id,
             case meta::hybrid::DataType::INT8: {
                 std::vector<uint8_t> data;
                 data.resize(entity.entity_count_ * sizeof(int8_t));
-                memcpy(data.data(), entity.attr_data_.at(field_name).data() + offset, entity.entity_count_ * sizeof(int8_t));
+
+                std::vector<int64_t> attr_value(entity.entity_count_, 0);
+                memcpy(attr_value.data(), entity.attr_value_.data() + offset, entity.entity_count_ * sizeof(int64_t));
+                offset += entity.entity_count_ * sizeof(int64_t);
+
+                std::vector<int8_t> raw_value(entity.entity_count_, 0);
+                for (uint64_t i = 0; i < entity.entity_count_; ++i) {
+                    raw_value[i] = attr_value[i];
+                }
+
+                memcpy(data.data(), raw_value.data(), entity.entity_count_ * sizeof(int8_t));
                 record.attr_data.insert(std::make_pair(field_name, data));
 
                 record.attr_nbytes.insert(std::make_pair(field_name, sizeof(int8_t)));
-                record.attr_data_size.insert(
-                    std::make_pair(field_name, entity.entity_count_ * sizeof(int8_t)));
-                offset += entity.entity_count_ * sizeof(int8_t);
+                record.attr_data_size.insert(std::make_pair(field_name, entity.entity_count_ * sizeof(int8_t)));
                 break;
             }
             case meta::hybrid::DataType::INT16: {
                 std::vector<uint8_t> data;
                 data.resize(entity.entity_count_ * sizeof(int16_t));
-                memcpy(data.data(), entity.attr_data_.at(field_name).data() + offset, entity.entity_count_ * sizeof(int16_t));
+
+                std::vector<int64_t> attr_value(entity.entity_count_, 0);
+                memcpy(attr_value.data(), entity.attr_value_.data() + offset, entity.entity_count_ * sizeof(int64_t));
+                offset += entity.entity_count_ * sizeof(int64_t);
+
+                std::vector<int16_t> raw_value(entity.entity_count_, 0);
+                for (uint64_t i = 0; i < entity.entity_count_; ++i) {
+                    raw_value[i] = attr_value[i];
+                }
+
+                memcpy(data.data(), raw_value.data(), entity.entity_count_ * sizeof(int16_t));
                 record.attr_data.insert(std::make_pair(field_name, data));
 
                 record.attr_nbytes.insert(std::make_pair(field_name, sizeof(int16_t)));
-                record.attr_data_size.insert(
-                    std::make_pair(field_name, entity.entity_count_ * sizeof(int16_t)));
-                offset += entity.entity_count_ * sizeof(int16_t);
+                record.attr_data_size.insert(std::make_pair(field_name, entity.entity_count_ * sizeof(int16_t)));
                 break;
             }
             case meta::hybrid::DataType::INT32: {
                 std::vector<uint8_t> data;
                 data.resize(entity.entity_count_ * sizeof(int32_t));
-                memcpy(data.data(), entity.attr_data_.at(field_name).data() + offset, entity.entity_count_ * sizeof(int32_t));
+
+                std::vector<int64_t> attr_value(entity.entity_count_, 0);
+                memcpy(attr_value.data(), entity.attr_value_.data() + offset, entity.entity_count_ * sizeof(int64_t));
+                offset += entity.entity_count_ * sizeof(int64_t);
+
+                std::vector<int32_t> raw_value(entity.entity_count_, 0);
+                for (uint64_t i = 0; i < entity.entity_count_; ++i) {
+                    raw_value[i] = attr_value[i];
+                }
+
+                memcpy(data.data(), raw_value.data(), entity.entity_count_ * sizeof(int32_t));
                 record.attr_data.insert(std::make_pair(field_name, data));
 
                 record.attr_nbytes.insert(std::make_pair(field_name, sizeof(int32_t)));
-                record.attr_data_size.insert(
-                    std::make_pair(field_name, entity.entity_count_ * sizeof(int32_t)));
-                offset += entity.entity_count_ * sizeof(int32_t);
+                record.attr_data_size.insert(std::make_pair(field_name, entity.entity_count_ * sizeof(int32_t)));
                 break;
             }
             case meta::hybrid::DataType::INT64: {
                 std::vector<uint8_t> data;
                 data.resize(entity.entity_count_ * sizeof(int64_t));
-                memcpy(data.data(), entity.attr_data_.at(field_name).data() + offset, entity.entity_count_ * sizeof(int64_t));
+                memcpy(data.data(), entity.attr_value_.data() + offset, entity.entity_count_ * sizeof(int64_t));
                 record.attr_data.insert(std::make_pair(field_name, data));
 
                 record.attr_nbytes.insert(std::make_pair(field_name, sizeof(int64_t)));
-                record.attr_data_size.insert(
-                    std::make_pair(field_name, entity.entity_count_ * sizeof(int64_t)));
+                record.attr_data_size.insert(std::make_pair(field_name, entity.entity_count_ * sizeof(int64_t)));
                 offset += entity.entity_count_ * sizeof(int64_t);
                 break;
             }
             case meta::hybrid::DataType::FLOAT: {
                 std::vector<uint8_t> data;
                 data.resize(entity.entity_count_ * sizeof(float));
-                memcpy(data.data(), entity.attr_data_.at(field_name).data() + offset, entity.entity_count_ * sizeof(float));
+                memcpy(data.data(), entity.attr_value_.data() + offset, entity.entity_count_ * sizeof(float));
                 record.attr_data.insert(std::make_pair(field_name, data));
 
                 record.attr_nbytes.insert(std::make_pair(field_name, sizeof(float)));
-                record.attr_data_size.insert(
-                    std::make_pair(field_name, entity.entity_count_ * sizeof(float)));
+                record.attr_data_size.insert(std::make_pair(field_name, entity.entity_count_ * sizeof(float)));
                 offset += entity.entity_count_ * sizeof(float);
 
                 break;
@@ -692,15 +711,16 @@ DBImpl::InsertEntities(const std::string& collection_id,
             case meta::hybrid::DataType::DOUBLE: {
                 std::vector<uint8_t> data;
                 data.resize(entity.entity_count_ * sizeof(double));
-                memcpy(data.data(), entity.attr_data_.at(field_name).data() + offset, entity.entity_count_ * sizeof(double));
+                memcpy(data.data(), entity.attr_value_.data() + offset, entity.entity_count_ * sizeof(double));
                 record.attr_data.insert(std::make_pair(field_name, data));
 
                 record.attr_nbytes.insert(std::make_pair(field_name, sizeof(double)));
-                record.attr_data_size.insert(
-                    std::make_pair(field_name, entity.entity_count_ * sizeof(double)));
+                record.attr_data_size.insert(std::make_pair(field_name, entity.entity_count_ * sizeof(double)));
                 offset += entity.entity_count_ * sizeof(double);
                 break;
             }
+            default:
+                break;
         }
     }
 
