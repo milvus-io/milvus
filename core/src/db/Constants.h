@@ -22,7 +22,6 @@ constexpr int64_t GB = 1LL << 30;
 constexpr int64_t TB = 1LL << 40;
 
 constexpr int64_t MAX_TABLE_FILE_MEM = 128 * MB;
-
 constexpr int FLOAT_TYPE_SIZE = sizeof(float);
 
 }  // namespace engine
