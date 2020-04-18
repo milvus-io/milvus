@@ -148,8 +148,11 @@ WalManager::GetNextRecovery(MXLogRecord& record) {
         }
     }
 
-    LOG_WAL_INFO_ << "record type " << (int32_t)record.type << " record lsn " << record.lsn << " error code  "
-                  << error_code;
+    // print the log only when record.type != MXLogType::None
+    if (record.type != MXLogType::None) {
+        LOG_WAL_INFO_ << "record type " << (int32_t)record.type << " record lsn " << record.lsn << " error code  "
+                      << error_code;
+    }
 
     return error_code;
 }
