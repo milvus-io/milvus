@@ -80,6 +80,15 @@ class MetaField {
     IsEqual(const MetaField& field) const {
         size_t name_len_min = field.name_.length() > name_.length() ? name_.length() : field.name_.length();
         size_t type_len_min = field.type_.length() > type_.length() ? type_.length() : field.type_.length();
+
+        // only check field type, don't check field width, for example: VARCHAR(255) and VARCHAR(100) is equal
+        std::vector<std::string> type_split;
+        milvus::server::StringHelpFunctions::SplitStringByDelimeter(type_, "(", type_split);
+        if (!type_split.empty()) {
+            type_len_min = type_split[0].length() > type_len_min ? type_len_min : type_split[0].length();
+        }
+
+        // field name must be equal, ignore type width
         return strncasecmp(field.name_.c_str(), name_.c_str(), name_len_min) == 0 &&
                strncasecmp(field.type_.c_str(), type_.c_str(), type_len_min) == 0;
     }
