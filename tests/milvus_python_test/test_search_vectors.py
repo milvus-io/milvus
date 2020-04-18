@@ -136,7 +136,7 @@ class TestSearchBase:
     """
     @pytest.fixture(
         scope="function",
-        params=[1, 99, 1024, 2048, 2049]
+        params=[1, 99, 1024, 2049]
     )
     def get_top_k(self, request):
         yield request.param
@@ -166,20 +166,21 @@ class TestSearchBase:
         method: search with the given vectors, check the result
         expected: search status ok, and the length of the result is top_k
         '''
+        top_k = 10
         index_param = get_simple_index["index_param"]
         index_type = get_simple_index["index_type"]
         logging.getLogger().info(get_simple_index)
+        if index_type == IndexType.IVF_PQ:
+            pytest.skip("Skip PQ")
+
         vectors, ids = self.init_data(connect, collection)
         status = connect.create_index(collection, index_type, index_param)
         query_vec = [vectors[0]]
-        top_k = 10
         search_param = get_search_param(index_type)
         status, result = connect.search_vectors(collection, top_k, query_vec, params=search_param)
         logging.getLogger().info(result)
         if top_k <= 1024:
             assert status.OK()
-            if index_type == IndexType.IVF_PQ:
-                return
             assert len(result[0]) == min(len(vectors), top_k)
             assert check_result(result[0], ids[0])
             assert result[0][0].distance <= epsilon
@@ -192,19 +193,20 @@ class TestSearchBase:
         method: search with the given vectors, check the result
         expected: search status ok, and the length of the result is top_k
         '''
+        top_k = 10
         index_param = get_simple_index["index_param"]
         index_type = get_simple_index["index_type"]
         logging.getLogger().info(get_simple_index)
+        if index_type == IndexType.IVF_PQ:
+            pytest.skip("Skip PQ")
+
         vectors, ids = self.init_data(connect, collection)
         status = connect.create_index(collection, index_type, index_param)
         query_vec = vectors[:1000]
-        top_k = 10
         search_param = get_search_param(index_type)
         status, result = connect.search_vectors(collection, top_k, query_vec, params=search_param)
         logging.getLogger().info(result)
         assert status.OK()
-        if index_type == IndexType.IVF_PQ:
-            return
         assert len(result[0]) == min(len(vectors), top_k)
         assert check_result(result[0], ids[0])
         assert result[0][0].distance <= epsilon
@@ -215,22 +217,23 @@ class TestSearchBase:
         method: add vectors into collection, search with the given vectors, check the result
         expected: search status ok, and the length of the result is top_k, search collection with partition tag return empty
         '''
+        top_k = 10
         index_param = get_simple_index["index_param"]
         index_type = get_simple_index["index_type"]
         logging.getLogger().info(get_simple_index)
+        if index_type == IndexType.IVF_PQ:
+            pytest.skip("Skip PQ")
         status = connect.create_partition(collection, tag)
         vectors, ids = self.init_data(connect, collection)
         status = connect.create_index(collection, index_type, index_param)
         query_vec = [vectors[0]]
-        top_k = 10
         search_param = get_search_param(index_type)
         status, result = connect.search_vectors(collection, top_k, query_vec, params=search_param)
         logging.getLogger().info(result)
         assert status.OK()
-        if(index_type != IndexType.IVF_PQ):
-            assert len(result[0]) == min(len(vectors), top_k)
-            assert check_result(result[0], ids[0])
-            assert result[0][0].distance <= epsilon
+        assert len(result[0]) == min(len(vectors), top_k)
+        assert check_result(result[0], ids[0])
+        assert result[0][0].distance <= epsilon
         status, result = connect.search_vectors(collection, top_k, query_vec, partition_tags=[tag], params=search_param)
         logging.getLogger().info(result)
         assert status.OK()
@@ -242,14 +245,17 @@ class TestSearchBase:
         method: search partition with the given vectors, check the result
         expected: search status ok, and the length of the result is 0
         '''
+        top_k = 10
         index_param = get_simple_index["index_param"]
         index_type = get_simple_index["index_type"]
         logging.getLogger().info(get_simple_index)
+        if index_type == IndexType.IVF_PQ:
+            pytest.skip("Skip PQ")
+
         status = connect.create_partition(collection, tag)
         vectors, ids = self.init_data(connect, collection)
         status = connect.create_index(collection, index_type, index_param)
         query_vec = [vectors[0]]
-        top_k = 10
         search_param = get_search_param(index_type)
         status, result = connect.search_vectors(collection, top_k, query_vec, partition_tags=[tag], params=search_param)
         logging.getLogger().info(result)
@@ -262,29 +268,29 @@ class TestSearchBase:
         method: search with the given vectors, check the result
         expected: search status ok, and the length of the result is top_k
         '''
+        top_k = 10
         index_param = get_simple_index["index_param"]
         index_type = get_simple_index["index_type"]
         logging.getLogger().info(get_simple_index)
+        if index_type == IndexType.IVF_PQ:
+            pytest.skip("Skip PQ")
         status = connect.create_partition(collection, tag)
         vectors, ids = self.init_data(connect, collection, partition_tags=tag)
         status = connect.create_index(collection, index_type, index_param)
         query_vec = [vectors[0]]
-        top_k = 10
         search_param = get_search_param(index_type)
         status, result = connect.search_vectors(collection, top_k, query_vec, params=search_param)
         logging.getLogger().info(result)
         assert status.OK()
-        if(index_type != IndexType.IVF_PQ):
-            assert len(result[0]) == min(len(vectors), top_k)
-            assert check_result(result[0], ids[0])
-            assert result[0][0].distance <= epsilon
+        assert len(result[0]) == min(len(vectors), top_k)
+        assert check_result(result[0], ids[0])
+        assert result[0][0].distance <= epsilon
         status, result = connect.search_vectors(collection, top_k, query_vec, partition_tags=[tag], params=search_param)
         logging.getLogger().info(result)
         assert status.OK()
-        if(index_type != IndexType.IVF_PQ):
-            assert len(result[0]) == min(len(vectors), top_k)
-            assert check_result(result[0], ids[0])
-            assert result[0][0].distance <= epsilon
+        assert len(result[0]) == min(len(vectors), top_k)
+        assert check_result(result[0], ids[0])
+        assert result[0][0].distance <= epsilon
 
     def test_search_l2_index_params_partition_C(self, connect, collection, get_simple_index):
         '''
@@ -295,6 +301,8 @@ class TestSearchBase:
         index_param = get_simple_index["index_param"]
         index_type = get_simple_index["index_type"]
         logging.getLogger().info(get_simple_index)
+        if index_type == IndexType.IVF_PQ:
+            pytest.skip("Skip PQ")
         status = connect.create_partition(collection, tag)
         vectors, ids = self.init_data(connect, collection, partition_tags=tag)
         status = connect.create_index(collection, index_type, index_param)
@@ -304,10 +312,9 @@ class TestSearchBase:
         status, result = connect.search_vectors(collection, top_k, query_vec, partition_tags=[tag, "new_tag"], params=search_param)
         logging.getLogger().info(result)
         assert status.OK()
-        if(index_type != IndexType.IVF_PQ):
-            assert len(result[0]) == min(len(vectors), top_k)
-            assert check_result(result[0], ids[0])
-            assert result[0][0].distance <= epsilon
+        assert len(result[0]) == min(len(vectors), top_k)
+        assert check_result(result[0], ids[0])
+        assert result[0][0].distance <= epsilon
 
     def test_search_l2_index_params_partition_D(self, connect, collection, get_simple_index):
         '''
@@ -334,9 +341,12 @@ class TestSearchBase:
         method: search collection with the given vectors and tags, check the result
         expected: search status ok, and the length of the result is top_k
         '''
+        top_k = 10
         new_tag = "new_tag"
-        index_param = get_simple_index["index_param"]
         index_type = get_simple_index["index_type"]
+        index_param = get_simple_index["index_param"]
+        if index_type == IndexType.IVF_PQ:
+            pytest.skip("Skip PQ")
         logging.getLogger().info(get_simple_index)
         status = connect.create_partition(collection, tag)
         status = connect.create_partition(collection, new_tag)
@@ -344,24 +354,21 @@ class TestSearchBase:
         new_vectors, new_ids = self.init_data(connect, collection, nb=6001, partition_tags=new_tag)
         status = connect.create_index(collection, index_type, index_param)
         query_vec = [vectors[0], new_vectors[0]]
-        top_k = 10
         search_param = get_search_param(index_type)
         status, result = connect.search_vectors(collection, top_k, query_vec, partition_tags=[tag, new_tag], params=search_param)
         logging.getLogger().info(result)
         assert status.OK()
-        if(index_type != IndexType.IVF_PQ):
-            assert len(result[0]) == min(len(vectors), top_k)
-            assert check_result(result[0], ids[0])
-            assert check_result(result[1], new_ids[0])
-            assert result[0][0].distance <= epsilon
-            assert result[1][0].distance <= epsilon
+        assert len(result[0]) == min(len(vectors), top_k)
+        assert check_result(result[0], ids[0])
+        assert check_result(result[1], new_ids[0])
+        assert result[0][0].distance <= epsilon
+        assert result[1][0].distance <= epsilon
         status, result = connect.search_vectors(collection, top_k, query_vec, partition_tags=[new_tag], params=search_param)
         logging.getLogger().info(result)
         assert status.OK()
-        if(index_type != IndexType.IVF_PQ):
-            assert len(result[0]) == min(len(vectors), top_k)
-            assert check_result(result[1], new_ids[0])
-            assert result[1][0].distance <= epsilon
+        assert len(result[0]) == min(len(vectors), top_k)
+        assert check_result(result[1], new_ids[0])
+        assert result[1][0].distance <= epsilon
 
     def test_search_l2_index_params_partition_F(self, connect, collection, get_simple_index):
         '''
@@ -374,6 +381,8 @@ class TestSearchBase:
         index_param = get_simple_index["index_param"]
         index_type = get_simple_index["index_type"]
         logging.getLogger().info(get_simple_index)
+        if index_type == IndexType.IVF_PQ:
+            pytest.skip("Skip PQ")
         status = connect.create_partition(collection, tag)
         status = connect.create_partition(collection, new_tag)
         vectors, ids = self.init_data(connect, collection, partition_tags=tag)
@@ -385,15 +394,13 @@ class TestSearchBase:
         status, result = connect.search_vectors(collection, top_k, query_vec, partition_tags=["new(.*)"], params=search_param)
         logging.getLogger().info(result)
         assert status.OK()
-        if(index_type != IndexType.IVF_PQ):
-            assert result[0][0].distance > epsilon
-            assert result[1][0].distance <= epsilon
+        assert result[0][0].distance > epsilon
+        assert result[1][0].distance <= epsilon
         status, result = connect.search_vectors(collection, top_k, query_vec, partition_tags=["(.*)tag"], params=search_param)
         logging.getLogger().info(result)
         assert status.OK()
-        if(index_type != IndexType.IVF_PQ):
-            assert result[0][0].distance <= epsilon
-            assert result[1][0].distance <= epsilon
+        assert result[0][0].distance <= epsilon
+        assert result[1][0].distance <= epsilon
 
     def test_search_ip_index_params(self, connect, ip_collection, get_simple_index):
         '''
@@ -401,27 +408,23 @@ class TestSearchBase:
         method: search with the given vectors, check the result
         expected: search status ok, and the length of the result is top_k
         '''
+        top_k = 10
         index_param = get_simple_index["index_param"]
         index_type = get_simple_index["index_type"]
         logging.getLogger().info(get_simple_index)
-        if index_type == IndexType.RNSG:
-            pytest.skip("rnsg not support in ip")
+        if index_type in [IndexType.RNSG, IndexType.IVF_PQ]:
+            pytest.skip("rnsg not support in ip, skip pq")
+
         vectors, ids = self.init_data(connect, ip_collection)
         status = connect.create_index(ip_collection, index_type, index_param)
         query_vec = [vectors[0]]
-        top_k = 10
         search_param = get_search_param(index_type)
         status, result = connect.search_vectors(ip_collection, top_k, query_vec, params=search_param)
         logging.getLogger().info(result)
-
-        if top_k <= 1024:
-            assert status.OK()
-            if(index_type != IndexType.IVF_PQ):
-                assert len(result[0]) == min(len(vectors), top_k)
-                assert check_result(result[0], ids[0])
-                assert result[0][0].distance >= 1 - gen_inaccuracy(result[0][0].distance)
-        else:
-            assert not status.OK()
+        assert status.OK()
+        assert len(result[0]) == min(len(vectors), top_k)
+        assert check_result(result[0], ids[0])
+        assert result[0][0].distance >= 1 - gen_inaccuracy(result[0][0].distance)
 
     def test_search_ip_large_nq_index_params(self, connect, ip_collection, get_simple_index):
         '''
@@ -432,8 +435,8 @@ class TestSearchBase:
         index_param = get_simple_index["index_param"]
         index_type = get_simple_index["index_type"]
         logging.getLogger().info(get_simple_index)
-        if index_type == IndexType.RNSG:
-            pytest.skip("rnsg not support in ip")
+        if index_type in [IndexType.RNSG, IndexType.IVF_PQ]:
+            pytest.skip("rnsg not support in ip, skip pq")
         vectors, ids = self.init_data(connect, ip_collection)
         status = connect.create_index(ip_collection, index_type, index_param)
         query_vec = []
@@ -444,10 +447,9 @@ class TestSearchBase:
         status, result = connect.search_vectors(ip_collection, top_k, query_vec, params=search_param)
         logging.getLogger().info(result)
         assert status.OK()
-        if(index_type != IndexType.IVF_PQ):
-            assert len(result[0]) == min(len(vectors), top_k)
-            assert check_result(result[0], ids[0])
-            assert result[0][0].distance >= 1 - gen_inaccuracy(result[0][0].distance)
+        assert len(result[0]) == min(len(vectors), top_k)
+        assert check_result(result[0], ids[0])
+        assert result[0][0].distance >= 1 - gen_inaccuracy(result[0][0].distance)
 
     def test_search_ip_index_params_partition(self, connect, ip_collection, get_simple_index):
         '''
@@ -455,24 +457,24 @@ class TestSearchBase:
         method: search with the given vectors, check the result
         expected: search status ok, and the length of the result is top_k
         '''
+        top_k = 10
         index_param = get_simple_index["index_param"]
         index_type = get_simple_index["index_type"]
         logging.getLogger().info(index_param)
-        if index_type == IndexType.RNSG:
-            pytest.skip("rnsg not support in ip")
+        if index_type in [IndexType.RNSG, IndexType.IVF_PQ]:
+            pytest.skip("rnsg not support in ip, skip pq")
+
         status = connect.create_partition(ip_collection, tag)
         vectors, ids = self.init_data(connect, ip_collection)
         status = connect.create_index(ip_collection, index_type, index_param)
         query_vec = [vectors[0]]
-        top_k = 10
         search_param = get_search_param(index_type)
         status, result = connect.search_vectors(ip_collection, top_k, query_vec, params=search_param)
         logging.getLogger().info(result)
         assert status.OK()
-        if(index_type != IndexType.IVF_PQ):
-            assert len(result[0]) == min(len(vectors), top_k)
-            assert check_result(result[0], ids[0])
-            assert result[0][0].distance >= 1 - gen_inaccuracy(result[0][0].distance)
+        assert len(result[0]) == min(len(vectors), top_k)
+        assert check_result(result[0], ids[0])
+        assert result[0][0].distance >= 1 - gen_inaccuracy(result[0][0].distance)
         status, result = connect.search_vectors(ip_collection, top_k, query_vec, partition_tags=[tag], params=search_param)
         logging.getLogger().info(result)
         assert status.OK()
@@ -484,24 +486,24 @@ class TestSearchBase:
         method: search with the given vectors and tag, check the result
         expected: search status ok, and the length of the result is top_k
         '''
+        top_k = 10
         index_param = get_simple_index["index_param"]
         index_type = get_simple_index["index_type"]
         logging.getLogger().info(index_param)
-        if index_type == IndexType.RNSG:
-            pytest.skip("rnsg not support in ip")
+        if index_type in [IndexType.RNSG, IndexType.IVF_PQ]:
+            pytest.skip("rnsg not support in ip, skip pq")
+
         status = connect.create_partition(ip_collection, tag)
         vectors, ids = self.init_data(connect, ip_collection, partition_tags=tag)
         status = connect.create_index(ip_collection, index_type, index_param)
         query_vec = [vectors[0]]
-        top_k = 10
         search_param = get_search_param(index_type)
         status, result = connect.search_vectors(ip_collection, top_k, query_vec, partition_tags=[tag], params=search_param)
         logging.getLogger().info(result)
         assert status.OK()
-        if(index_type != IndexType.IVF_PQ):
-            assert len(result[0]) == min(len(vectors), top_k)
-            assert check_result(result[0], ids[0])
-            assert result[0][0].distance >= 1 - gen_inaccuracy(result[0][0].distance)
+        assert len(result[0]) == min(len(vectors), top_k)
+        assert check_result(result[0], ids[0])
+        assert result[0][0].distance >= 1 - gen_inaccuracy(result[0][0].distance)
 
     @pytest.mark.level(2)
     def test_search_vectors_without_connect(self, dis_connect, collection):
