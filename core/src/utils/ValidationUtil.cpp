@@ -186,7 +186,7 @@ ValidationUtil::ValidateCollectionIndexType(int32_t index_type) {
 
 Status
 ValidationUtil::ValidateIndexParams(const milvus::json& index_params,
-                                    const engine::meta::CollectionSchema& table_schema, int32_t index_type) {
+                                    const engine::meta::CollectionSchema& collection_schema, int32_t index_type) {
     switch (index_type) {
         case (int32_t)engine::EngineType::FAISS_IDMAP:
         case (int32_t)engine::EngineType::FAISS_BIN_IDMAP: {
@@ -215,7 +215,7 @@ ValidationUtil::ValidateIndexParams(const milvus::json& index_params,
 
             // special check for 'm' parameter
             std::vector<int64_t> resset;
-            milvus::knowhere::IVFPQConfAdapter::GetValidMList(table_schema.dimension_, resset);
+            milvus::knowhere::IVFPQConfAdapter::GetValidMList(collection_schema.dimension_, resset);
             int64_t m_value = index_params[index_params, knowhere::IndexParams::m];
             if (resset.empty()) {
                 std::string msg = "Invalid collection dimension, unable to get reasonable values for 'm'";
@@ -283,8 +283,8 @@ ValidationUtil::ValidateIndexParams(const milvus::json& index_params,
 
 Status
 ValidationUtil::ValidateSearchParams(const milvus::json& search_params,
-                                     const engine::meta::CollectionSchema& table_schema, int64_t topk) {
-    switch (table_schema.engine_type_) {
+                                     const engine::meta::CollectionSchema& collection_schema, int64_t topk) {
+    switch (collection_schema.engine_type_) {
         case (int32_t)engine::EngineType::FAISS_IDMAP:
         case (int32_t)engine::EngineType::FAISS_BIN_IDMAP: {
             break;
@@ -328,21 +328,21 @@ ValidationUtil::ValidateSearchParams(const milvus::json& search_params,
 
 Status
 ValidationUtil::ValidateVectorData(const engine::VectorsData& vectors,
-                                   const engine::meta::CollectionSchema& table_schema) {
+                                   const engine::meta::CollectionSchema& collection_schema) {
     uint64_t vector_count = vectors.vector_count_;
     if ((vectors.float_data_.empty() && vectors.binary_data_.empty()) || vector_count == 0) {
         return Status(SERVER_INVALID_ROWRECORD_ARRAY,
                       "The vector array is empty. Make sure you have entered vector records.");
     }
 
-    if (engine::utils::IsBinaryMetricType(table_schema.metric_type_)) {
+    if (engine::utils::IsBinaryMetricType(collection_schema.metric_type_)) {
         // check prepared binary data
         if (vectors.binary_data_.size() % vector_count != 0) {
             return Status(SERVER_INVALID_ROWRECORD_ARRAY,
                           "The vector dimension must be equal to the collection dimension.");
         }
 
-        if (vectors.binary_data_.size() * 8 / vector_count != table_schema.dimension_) {
+        if (vectors.binary_data_.size() * 8 / vector_count != collection_schema.dimension_) {
             return Status(SERVER_INVALID_VECTOR_DIMENSION,
                           "The vector dimension must be equal to the collection dimension.");
         }
@@ -353,7 +353,7 @@ ValidationUtil::ValidateVectorData(const engine::VectorsData& vectors,
             return Status(SERVER_INVALID_ROWRECORD_ARRAY,
                           "The vector dimension must be equal to the collection dimension.");
         }
-        if (vectors.float_data_.size() / vector_count != table_schema.dimension_) {
+        if (vectors.float_data_.size() / vector_count != collection_schema.dimension_) {
             return Status(SERVER_INVALID_VECTOR_DIMENSION,
                           "The vector dimension must be equal to the collection dimension.");
         }
@@ -364,10 +364,10 @@ ValidationUtil::ValidateVectorData(const engine::VectorsData& vectors,
 
 Status
 ValidationUtil::ValidateVectorDataSize(const engine::VectorsData& vectors,
-                                       const engine::meta::CollectionSchema& table_schema) {
+                                       const engine::meta::CollectionSchema& collection_schema) {
     std::string msg =
         "The amount of data inserted each time cannot exceed " + std::to_string(MAX_INSERT_DATA_SIZE / M_BYTE) + " MB";
-    if (engine::utils::IsBinaryMetricType(table_schema.metric_type_)) {
+    if (engine::utils::IsBinaryMetricType(collection_schema.metric_type_)) {
         if (vectors.binary_data_.size() > MAX_INSERT_DATA_SIZE) {
             return Status(SERVER_INVALID_ROWRECORD_ARRAY, msg);
         }
@@ -649,6 +649,11 @@ ValidationUtil::ValidateStoragePath(const std::string& path) {
     std::regex regex(path_pattern);
 
     return std::regex_match(path, regex) ? Status::OK() : Status(SERVER_INVALID_ARGUMENT, "Invalid file path");
+}
+
+bool
+ValidationUtil::IsNumber(const std::string& s) {
+    return !s.empty() && std::all_of(s.begin(), s.end(), ::isdigit);
 }
 
 }  // namespace server

@@ -72,9 +72,7 @@ S3ClientWrapper::StartService() {
 
 void
 S3ClientWrapper::StopService() {
-    if (client_ptr_ != nullptr) {
-        client_ptr_ = nullptr;
-    }
+    client_ptr_ = nullptr;
     Aws::ShutdownAPI(options_);
 }
 

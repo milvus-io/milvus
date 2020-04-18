@@ -39,18 +39,18 @@ class ValidationUtil {
     ValidateCollectionIndexType(int32_t index_type);
 
     static Status
-    ValidateIndexParams(const milvus::json& index_params, const engine::meta::CollectionSchema& table_schema,
+    ValidateIndexParams(const milvus::json& index_params, const engine::meta::CollectionSchema& collection_schema,
                         int32_t index_type);
 
     static Status
-    ValidateSearchParams(const milvus::json& search_params, const engine::meta::CollectionSchema& table_schema,
+    ValidateSearchParams(const milvus::json& search_params, const engine::meta::CollectionSchema& collection_schema,
                          int64_t topk);
 
     static Status
-    ValidateVectorData(const engine::VectorsData& vectors, const engine::meta::CollectionSchema& table_schema);
+    ValidateVectorData(const engine::VectorsData& vectors, const engine::meta::CollectionSchema& collection_schema);
 
     static Status
-    ValidateVectorDataSize(const engine::VectorsData& vectors, const engine::meta::CollectionSchema& table_schema);
+    ValidateVectorDataSize(const engine::VectorsData& vectors, const engine::meta::CollectionSchema& collection_schema);
 
     static Status
     ValidateCollectionIndexFileSize(int64_t index_file_size);
@@ -92,6 +92,9 @@ class ValidationUtil {
 
     static Status
     ValidateStoragePath(const std::string& path);
+
+    static bool
+    IsNumber(const std::string& s);
 };
 
 }  // namespace server
