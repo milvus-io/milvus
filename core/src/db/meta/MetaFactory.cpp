@@ -44,8 +44,8 @@ MetaFactory::BuildOption(const std::string& path) {
 }
 
 meta::MetaPtr
-MetaFactory::Build(const DBMetaOptions& metaOptions, const int& mode) {
-    std::string uri = metaOptions.backend_uri_;
+MetaFactory::Build(const DBMetaOptions& meta_options, const int& mode) {
+    std::string uri = meta_options.backend_uri_;
 
     utils::MetaUriInfo uri_info;
     auto status = utils::ParseMetaUri(uri, uri_info);
@@ -56,10 +56,10 @@ MetaFactory::Build(const DBMetaOptions& metaOptions, const int& mode) {
 
     if (strcasecmp(uri_info.dialect_.c_str(), "mysql") == 0) {
         LOG_ENGINE_INFO_ << "Using MySQL";
-        return std::make_shared<meta::MySQLMetaImpl>(metaOptions, mode);
+        return std::make_shared<meta::MySQLMetaImpl>(meta_options, mode);
     } else if (strcasecmp(uri_info.dialect_.c_str(), "sqlite") == 0) {
         LOG_ENGINE_INFO_ << "Using SQLite";
-        return std::make_shared<meta::SqliteMetaImpl>(metaOptions);
+        return std::make_shared<meta::SqliteMetaImpl>(meta_options);
     } else {
         LOG_ENGINE_ERROR_ << "Invalid dialect in URI: dialect = " << uri_info.dialect_;
         throw InvalidArgumentException("URI dialect is not mysql / sqlite");
