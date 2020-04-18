@@ -2073,7 +2073,7 @@ MySQLMetaImpl::Archive() {
             uint64_t sum = 0;
             Size(sum);
 
-            auto to_delete = (sum - limit * G);
+            auto to_delete = (sum - limit * GB);
             DiscardFiles(to_delete);
 
             LOG_ENGINE_DEBUG_ << "Archive files to free disk";

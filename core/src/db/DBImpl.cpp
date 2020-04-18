@@ -204,7 +204,7 @@ DBImpl::CreateCollection(meta::CollectionSchema& collection_schema) {
     }
 
     meta::CollectionSchema temp_schema = collection_schema;
-    temp_schema.index_file_size_ *= ONE_MB;  // store as MB
+    temp_schema.index_file_size_ *= MB;  // store as MB
     if (options_.wal_enable_) {
         temp_schema.flush_lsn_ = wal_mgr_->CreateCollection(collection_schema.collection_id_);
     }
@@ -257,7 +257,7 @@ DBImpl::DescribeCollection(meta::CollectionSchema& collection_schema) {
     }
 
     auto stat = meta_ptr_->DescribeCollection(collection_schema);
-    collection_schema.index_file_size_ /= ONE_MB;  // return as MB
+    collection_schema.index_file_size_ /= MB;  // return as MB
     return stat;
 }
 

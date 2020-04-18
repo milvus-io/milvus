@@ -68,7 +68,7 @@ struct DBOptions {
     DBMetaOptions meta_;
     int mode_ = MODE::SINGLE;
 
-    size_t insert_buffer_size_ = 4 * ONE_GB;
+    size_t insert_buffer_size_ = 4 * GB;
     bool insert_cache_immediately_ = false;
 
     int64_t auto_flush_interval_ = 1;

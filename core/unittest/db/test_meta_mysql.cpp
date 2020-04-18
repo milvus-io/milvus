@@ -446,7 +446,7 @@ TEST_F(MySqlMetaTest, ARCHIVE_TEST_DISK) {
     for (auto i = 0; i < cnt; ++i) {
         status = impl.CreateCollectionFile(table_file);
         table_file.file_type_ = milvus::engine::meta::SegmentSchema::NEW;
-        table_file.file_size_ = each_size * milvus::engine::G;
+        table_file.file_size_ = each_size * milvus::engine::GB;
         status = impl.UpdateCollectionFile(table_file);
         files.push_back(table_file);
         ids.push_back(table_file.id_);
@@ -618,7 +618,7 @@ TEST_F(MySqlMetaTest, COLLECTION_FILES_TEST) {
     ASSERT_EQ(status.code(), milvus::DB_NOT_FOUND);
 
     table_file.file_type_ = milvus::engine::meta::SegmentSchema::RAW;
-    table_file.file_size_ = milvus::engine::ONE_GB + 1;
+    table_file.file_size_ = milvus::engine::GB + 1;
     status = impl_->UpdateCollectionFile(table_file);
     ASSERT_TRUE(status.ok());
 #if 0
