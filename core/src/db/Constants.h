@@ -16,18 +16,14 @@
 namespace milvus {
 namespace engine {
 
-constexpr uint64_t K = 1024UL;
-constexpr uint64_t M = K * K;
-constexpr uint64_t G = K * M;
-constexpr uint64_t T = K * G;
+constexpr int64_t KB = 1LL << 10;
+constexpr int64_t MB = 1LL << 20;
+constexpr int64_t GB = 1LL << 30;
+constexpr int64_t TB = 1LL << 40;
 
-constexpr uint64_t MAX_TABLE_FILE_MEM = 128 * M;
+constexpr int64_t MAX_TABLE_FILE_MEM = 128 * MB;
 
 constexpr int FLOAT_TYPE_SIZE = sizeof(float);
-
-static constexpr uint64_t ONE_KB = K;
-static constexpr uint64_t ONE_MB = ONE_KB * ONE_KB;
-static constexpr uint64_t ONE_GB = ONE_KB * ONE_MB;
 
 }  // namespace engine
 }  // namespace milvus

@@ -506,7 +506,7 @@ TEST_F(MetaTest, ARCHIVE_TEST_DISK) {
     for (auto i = 0; i < cnt; ++i) {
         status = impl.CreateCollectionFile(table_file);
         table_file.file_type_ = milvus::engine::meta::SegmentSchema::NEW;
-        table_file.file_size_ = each_size * milvus::engine::G;
+        table_file.file_size_ = each_size * milvus::engine::GB;
         status = impl.UpdateCollectionFile(table_file);
         files.push_back(table_file);
         ids.push_back(table_file.id_);
