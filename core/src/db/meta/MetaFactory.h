@@ -25,7 +25,7 @@ class MetaFactory {
     BuildOption(const std::string& path = "");
 
     static meta::MetaPtr
-    Build(const DBMetaOptions& metaOptions, const int& mode);
+    Build(const DBMetaOptions& meta_options, const int& mode);
 };
 
 }  // namespace engine
