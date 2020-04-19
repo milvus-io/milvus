@@ -1,0 +1,20 @@
+pull_request_rules:
+    - name: Automatic merge on approval
+      conditions:
+        - "label=automerge"
+        - "#approved-reviews-by>=1"
+        - "#review-requested=0"
+        - "#changes-requested-reviews-by=0"
+        - "#commented-reviews-by=0"
+        - "status-success=DCO"
+        - "status-success=continuous-integration/jenkins/pr-merge"
+      actions:
+        merge:
+          method: squash
+
+    - name: Ask to resolve conflict
+      conditions:
+        - conflict
+      actions:
+        comment:
+          message: This pull request is now in conflicts. Could you fix it? 🙏

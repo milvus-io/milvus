@@ -89,8 +89,6 @@ namespace hnswlib {
         virtual ~AlgorithmInterface(){
         }
     };
-
-
 }
 
 #include "space_l2.h"
