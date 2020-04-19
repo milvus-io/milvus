@@ -699,13 +699,21 @@ DBImpl::InsertEntities(const std::string& collection_id, const std::string& part
             case meta::hybrid::DataType::FLOAT: {
                 std::vector<uint8_t> data;
                 data.resize(entity.entity_count_ * sizeof(float));
-                memcpy(data.data(), entity.attr_value_.data() + offset, entity.entity_count_ * sizeof(float));
+
+                std::vector<double> attr_value(entity.entity_count_, 0);
+                memcpy(attr_value.data(), entity.attr_value_.data() + offset, entity.entity_count_ * sizeof(double));
+                offset += entity.entity_count_ * sizeof(double);
+
+                std::vector<float> raw_value(entity.entity_count_, 0);
+                for (uint64_t i = 0; i < entity.entity_count_; ++i) {
+                    raw_value[i] = attr_value[i];
+                }
+
+                memcpy(data.data(), raw_value.data(), entity.entity_count_ * sizeof(float));
                 record.attr_data.insert(std::make_pair(field_name, data));
 
                 record.attr_nbytes.insert(std::make_pair(field_name, sizeof(float)));
                 record.attr_data_size.insert(std::make_pair(field_name, entity.entity_count_ * sizeof(float)));
-                offset += entity.entity_count_ * sizeof(float);
-
                 break;
             }
             case meta::hybrid::DataType::DOUBLE: {

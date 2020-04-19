@@ -256,7 +256,7 @@ void
 ClientTest::InsertHybridEntities(std::string& collection_name, int64_t row_num) {
     std::unordered_map<std::string, std::vector<int8_t>> numerica_value;
     std::vector<int64_t> value1;
-    std::vector<float> value2;
+    std::vector<double > value2;
     value1.resize(row_num);
     value2.resize(row_num);
     for (uint64_t i = 0; i < row_num; ++i) {
@@ -265,9 +265,9 @@ ClientTest::InsertHybridEntities(std::string& collection_name, int64_t row_num) 
     }
 
     std::vector<int8_t> numerica1(row_num * sizeof(int64_t), 0);
-    std::vector<int8_t> numerica2(row_num * sizeof(float), 0);
+    std::vector<int8_t> numerica2(row_num * sizeof(double), 0);
     memcpy(numerica1.data(), value1.data(), row_num * sizeof(int64_t));
-    memcpy(numerica2.data(), value2.data(), row_num * sizeof(float));
+    memcpy(numerica2.data(), value2.data(), row_num * sizeof(double));
 
     numerica_value.insert(std::make_pair("field_1", numerica1));
     numerica_value.insert(std::make_pair("field_2", numerica2));
