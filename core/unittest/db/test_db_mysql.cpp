@@ -92,7 +92,7 @@ TEST_F(MySqlDBTest, DB_TEST) {
 
             std::vector<std::string> tags;
             stat = db_->Query(dummy_context_, COLLECTION_NAME, tags, k, json_params, qxb, result_ids, result_distances);
-            ss << "Search " << j << " With Size " << count / milvus::engine::M << " M";
+            ss << "Search " << j << " With Size " << count / milvus::engine::MB << " MB";
             STOP_TIMER(ss.str());
 
             ASSERT_TRUE(stat.ok());
@@ -250,7 +250,7 @@ TEST_F(MySqlDBTest, ARHIVE_DISK_CHECK) {
 
     db_->Size(size);
     LOG(DEBUG) << "size=" << size;
-    ASSERT_LE(size, 1 * milvus::engine::G);
+    ASSERT_LE(size, 1 * milvus::engine::GB);
 
     FIU_ENABLE_FIU("MySQLMetaImpl.Size.null_connection");
     stat = db_->Size(size);
