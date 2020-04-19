@@ -740,7 +740,7 @@ TEST_F(CompactTest, compact_basic) {
 
 TEST_F(CompactTest, compact_with_index) {
     milvus::engine::meta::CollectionSchema collection_info = BuildCollectionSchema();
-    collection_info.index_file_size_ = milvus::engine::ONE_KB;
+    collection_info.index_file_size_ = milvus::engine::KB;
     collection_info.engine_type_ = (int32_t)milvus::engine::EngineType::FAISS_IVFSQ8;
     auto stat = db_->CreateCollection(collection_info);
 
