@@ -61,7 +61,7 @@ class CollectInsertMetrics : CollectMetricsBase {
         if (n_ > 0) {
             auto total_time = TimeFromBegine();
             double avg_time = total_time / n_;
-            for (int i = 0; i < n_; ++i) {
+            for (size_t i = 0; i < n_; ++i) {
                 Metrics::GetInstance().AddVectorsDurationHistogramOberve(avg_time);
             }
 
@@ -90,7 +90,7 @@ class CollectQueryMetrics : CollectMetricsBase {
     ~CollectQueryMetrics() {
         if (nq_ > 0) {
             auto total_time = TimeFromBegine();
-            for (int i = 0; i < nq_; ++i) {
+            for (size_t i = 0; i < nq_; ++i) {
                 server::Metrics::GetInstance().QueryResponseSummaryObserve(total_time);
             }
             auto average_time = total_time / nq_;
