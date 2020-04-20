@@ -48,8 +48,8 @@ def connect(request):
     def fin():
         try:
             milvus.disconnect()
-        except:
-            pass
+        except Exception as e:
+            logging.getLogger().info(str(e))
     request.addfinalizer(fin)
     return milvus
 
@@ -99,8 +99,10 @@ def collection(request, connect):
              'dimension': dim,
              'index_file_size': index_file_size,
              'metric_type': MetricType.L2}
-    status = connect.create_collection(param, timeout=timeout)
-    logging.getLogger().info(status)
+    result = connect.create_collection(param, timeout=timeout)
+    status = result
+    if isinstance(result, tuple):
+        status = result[0]
     if not status.OK():
         pytest.exit("collection can not be created, exit pytest ...")
 
@@ -123,8 +125,10 @@ def ip_collection(request, connect):
              'dimension': dim,
              'index_file_size': index_file_size,
              'metric_type': MetricType.IP}
-    status = connect.create_collection(param, timeout=timeout)
-    logging.getLogger().info(status)
+    result = connect.create_collection(param, timeout=timeout)
+    status = result
+    if isinstance(result, tuple):
+        status = result[0]
     if not status.OK():
         pytest.exit("collection can not be created, exit pytest ...")
 
@@ -147,8 +151,10 @@ def jac_collection(request, connect):
              'dimension': dim,
              'index_file_size': index_file_size,
              'metric_type': MetricType.JACCARD}
-    status = connect.create_collection(param)
-    # logging.getLogger().info(status)
+    result = connect.create_collection(param, timeout=timeout)
+    status = result
+    if isinstance(result, tuple):
+        status = result[0]
     if not status.OK():
         pytest.exit("collection can not be created, exit pytest ...")
 
@@ -170,8 +176,10 @@ def ham_collection(request, connect):
              'dimension': dim,
              'index_file_size': index_file_size,
              'metric_type': MetricType.HAMMING}
-    status = connect.create_collection(param, timeout=timeout)
-    # logging.getLogger().info(status)
+    result = connect.create_collection(param, timeout=timeout)
+    status = result
+    if isinstance(result, tuple):
+        status = result[0]
     if not status.OK():
         pytest.exit("collection can not be created, exit pytest ...")
 
@@ -193,8 +201,10 @@ def tanimoto_collection(request, connect):
              'dimension': dim,
              'index_file_size': index_file_size,
              'metric_type': MetricType.TANIMOTO}
-    status = connect.create_collection(param, timeout=timeout)
-    # logging.getLogger().info(status)
+    result = connect.create_collection(param, timeout=timeout)
+    status = result
+    if isinstance(result, tuple):
+        status = result[0]
     if not status.OK():
         pytest.exit("collection can not be created, exit pytest ...")
 
@@ -215,8 +225,10 @@ def substructure_collection(request, connect):
              'dimension': dim,
              'index_file_size': index_file_size,
              'metric_type': MetricType.SUBSTRUCTURE}
-    status = connect.create_collection(param, timeout=timeout)
-    # logging.getLogger().info(status)
+    result = connect.create_collection(param, timeout=timeout)
+    status = result
+    if isinstance(result, tuple):
+        status = result[0]
     if not status.OK():
         pytest.exit("collection can not be created, exit pytest ...")
 
@@ -237,8 +249,10 @@ def superstructure_collection(request, connect):
              'dimension': dim,
              'index_file_size': index_file_size,
              'metric_type': MetricType.SUPERSTRUCTURE}
-    status = connect.create_collection(param, timeout=timeout)
-    # logging.getLogger().info(status)
+    result = connect.create_collection(param, timeout=timeout)
+    status = result
+    if isinstance(result, tuple):
+        status = result[0]
     if not status.OK():
         pytest.exit("collection can not be created, exit pytest ...")
 

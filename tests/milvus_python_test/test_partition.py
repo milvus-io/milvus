@@ -33,7 +33,7 @@ class TestCreateBase:
         status = connect.create_partition(collection, tag)
         assert status.OK()
 
-    def test_create_partition_limit(self, connect, collection):
+    def _test_create_partition_limit(self, connect, collection):
         '''
         target: test create partitions, check status returned
         method: call function: create_partition for 4097 times
