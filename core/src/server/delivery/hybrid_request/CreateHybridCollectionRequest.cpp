@@ -10,6 +10,7 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
 #include "server/delivery/hybrid_request/CreateHybridCollectionRequest.h"
+#include "server/web_impl/Constants.h"
 #include "db/Utils.h"
 #include "server/DBWrapper.h"
 #include "server/delivery/request/BaseRequest.h"
@@ -78,8 +79,31 @@ CreateHybridCollectionRequest::OnExecute() {
         fields_schema.fields_schema_[size].collection_id_ = collection_name_;
         fields_schema.fields_schema_[size].field_name_ = vector_dimensions_[0].first;
         fields_schema.fields_schema_[size].field_type_ = (int32_t)engine::meta::hybrid::DataType::VECTOR;
+        auto vector_param = field_params_[size].second;
+        fields_schema.fields_schema_[size].field_params_ = vector_param;
 
         table_info.dimension_ = vector_dimensions_[0].second;
+
+        if (vector_param != "") {
+            auto json_param = nlohmann::json::parse(vector_param);
+            if(json_param.contains("metric_type")) {
+                std::string metric_type = json_param["metric_type"];
+                if (metric_type == milvus::server::web::NAME_METRIC_TYPE_L2) {
+                    table_info.metric_type_ = (int32_t)engine::MetricType::L2;
+                } else if (metric_type == milvus::server::web::NAME_METRIC_TYPE_IP) {
+                    table_info.metric_type_ = (int32_t)engine::MetricType::IP;
+                } else if (metric_type == milvus::server::web::NAME_METRIC_TYPE_JACCARD) {
+                    table_info.metric_type_ = (int32_t)engine::MetricType::JACCARD;
+                } else if (metric_type == milvus::server::web::NAME_METRIC_TYPE_TANIMOTO) {
+                    table_info.metric_type_ = (int32_t)engine::MetricType::TANIMOTO;
+                } else if (metric_type == milvus::server::web::NAME_METRIC_TYPE_SUPERSTRUCTURE) {
+                    table_info.metric_type_ = (int32_t)engine::MetricType::SUPERSTRUCTURE;
+                } else if (metric_type == milvus::server::web::NAME_METRIC_TYPE_SUBSTRUCTURE) {
+                    table_info.metric_type_ = (int32_t)engine::MetricType::SUBSTRUCTURE;
+                }
+            }
+        }
+
         // TODO(yukun): check dimension, metric_type, and assign engine_type
 
         // step 3: create collection

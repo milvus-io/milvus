@@ -9,12 +9,13 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
-#include "include/MilvusApi.h"
-#include "include/BooleanQuery.h"
+#include "examples/hybrid/src/ClientTest.h"
 #include "examples/utils/TimeRecorder.h"
 #include "examples/utils/Utils.h"
-#include "examples/hybrid/src/ClientTest.h"
+#include "include/BooleanQuery.h"
+#include "include/MilvusApi.h"
 
+#include <unistd.h>
 #include <iostream>
 #include <memory>
 #include <utility>
@@ -86,7 +87,7 @@ void
 ClientTest::InsertHybridEntities(std::string& collection_name, int64_t row_num) {
     std::unordered_map<std::string, std::vector<int8_t>> numerica_value;
     std::vector<int64_t> value1;
-    std::vector<double > value2;
+    std::vector<double> value2;
     value1.resize(row_num);
     value2.resize(row_num);
     for (uint64_t i = 0; i < row_num; ++i) {
@@ -106,11 +107,7 @@ ClientTest::InsertHybridEntities(std::string& collection_name, int64_t row_num) 
     std::vector<milvus::Entity> entity_array;
     std::vector<int64_t> record_ids;
     {  // generate vectors
-        milvus_sdk::Utils::BuildEntities(0,
-                                         row_num,
-                                         entity_array,
-                                         record_ids,
-                                         128);
+        milvus_sdk::Utils::BuildEntities(0, row_num, entity_array, record_ids, 128);
     }
 
     vector_value.insert(std::make_pair("field_3", entity_array));
@@ -127,7 +124,7 @@ ClientTest::HybridSearch(std::string& collection_name) {
 
     auto leaf_queries = milvus_sdk::Utils::GenLeafQuery();
 
-    //must
+    // must
     auto must_clause = std::make_shared<milvus::BooleanQuery>(milvus::Occur::MUST);
     must_clause->AddLeafQuery(leaf_queries[0]);
     must_clause->AddLeafQuery(leaf_queries[1]);
@@ -137,8 +134,8 @@ ClientTest::HybridSearch(std::string& collection_name) {
     query_clause->AddBooleanQuery(must_clause);
 
     std::string extra_params;
-    milvus::Status
-        status = conn_->HybridSearch(collection_name, partition_tags, query_clause, extra_params, topk_query_result);
+    milvus::Status status =
+        conn_->HybridSearch(collection_name, partition_tags, query_clause, extra_params, topk_query_result);
     for (uint64_t i = 0; i < topk_query_result.size(); ++i) {
         std::cout << topk_query_result[i].ids[0] << "  ---------  " << topk_query_result[i].distances[0] << std::endl;
     }
@@ -151,6 +148,6 @@ ClientTest::TestHybrid() {
     CreateHybridCollection(collection_name);
     InsertHybridEntities(collection_name, 1000);
     Flush(collection_name);
-//    SearchEntities(collection_name, )
+    sleep(2);
     HybridSearch(collection_name);
 }
