@@ -701,7 +701,7 @@ Please mark all change in change log and use the issue from GitHub
 -   MS-34 Fix prometheus-cpp thirdparty
 -   MS-67 Fix license check bug
 -   MS-76 Fix pipeline crash bug
--   MS-100 cmake: fix AWS build issue
+-   MS-100 CMake: fix AWS build issue
 -   MS-101 Change AWS build type to Release
 
 ## Improvement
