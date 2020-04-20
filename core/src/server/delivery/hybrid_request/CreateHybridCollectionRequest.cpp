@@ -10,10 +10,10 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
 #include "server/delivery/hybrid_request/CreateHybridCollectionRequest.h"
-#include "server/web_impl/Constants.h"
 #include "db/Utils.h"
 #include "server/DBWrapper.h"
 #include "server/delivery/request/BaseRequest.h"
+#include "server/web_impl/Constants.h"
 #include "utils/Log.h"
 #include "utils/TimeRecorder.h"
 #include "utils/ValidationUtil.h"
@@ -86,7 +86,7 @@ CreateHybridCollectionRequest::OnExecute() {
 
         if (vector_param != "") {
             auto json_param = nlohmann::json::parse(vector_param);
-            if(json_param.contains("metric_type")) {
+            if (json_param.contains("metric_type")) {
                 std::string metric_type = json_param["metric_type"];
                 if (metric_type == milvus::server::web::NAME_METRIC_TYPE_L2) {
                     table_info.metric_type_ = (int32_t)engine::MetricType::L2;
@@ -103,7 +103,6 @@ CreateHybridCollectionRequest::OnExecute() {
                 }
             }
         }
-
         // TODO(yukun): check dimension, metric_type, and assign engine_type
 
         // step 3: create collection
