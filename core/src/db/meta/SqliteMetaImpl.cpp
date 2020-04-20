@@ -1461,7 +1461,7 @@ SqliteMetaImpl::Archive() {
             uint64_t sum = 0;
             Size(sum);
 
-            int64_t to_delete = (int64_t)sum - limit * G;
+            int64_t to_delete = (int64_t)sum - limit * GB;
             DiscardFiles(to_delete);
 
             LOG_ENGINE_DEBUG_ << "Archive files to free disk";

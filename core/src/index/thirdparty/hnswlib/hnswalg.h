@@ -16,8 +16,7 @@ typedef unsigned int linklistsizeint;
 
 template<typename dist_t>
 class HierarchicalNSW : public AlgorithmInterface<dist_t> {
-
-public:
+ public:
     HierarchicalNSW(SpaceInterface<dist_t> *s) {
     }
 
