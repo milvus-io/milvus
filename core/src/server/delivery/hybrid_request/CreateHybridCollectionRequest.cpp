@@ -87,20 +87,12 @@ CreateHybridCollectionRequest::OnExecute() {
         if (vector_param != "") {
             auto json_param = nlohmann::json::parse(vector_param);
             if (json_param.contains("metric_type")) {
-                std::string metric_type = json_param["metric_type"];
-                if (metric_type == milvus::server::web::NAME_METRIC_TYPE_L2) {
-                    table_info.metric_type_ = (int32_t)engine::MetricType::L2;
-                } else if (metric_type == milvus::server::web::NAME_METRIC_TYPE_IP) {
-                    table_info.metric_type_ = (int32_t)engine::MetricType::IP;
-                } else if (metric_type == milvus::server::web::NAME_METRIC_TYPE_JACCARD) {
-                    table_info.metric_type_ = (int32_t)engine::MetricType::JACCARD;
-                } else if (metric_type == milvus::server::web::NAME_METRIC_TYPE_TANIMOTO) {
-                    table_info.metric_type_ = (int32_t)engine::MetricType::TANIMOTO;
-                } else if (metric_type == milvus::server::web::NAME_METRIC_TYPE_SUPERSTRUCTURE) {
-                    table_info.metric_type_ = (int32_t)engine::MetricType::SUPERSTRUCTURE;
-                } else if (metric_type == milvus::server::web::NAME_METRIC_TYPE_SUBSTRUCTURE) {
-                    table_info.metric_type_ = (int32_t)engine::MetricType::SUBSTRUCTURE;
-                }
+                int32_t metric_type = json_param["metric_type"];
+                table_info.metric_type_ = metric_type;
+            }
+            if (json_param.contains("engine_type")) {
+                int32_t engine_type = json_param["engine_type"];
+                table_info.engine_type_ = engine_type;
             }
         }
         // TODO(yukun): check dimension, metric_type, and assign engine_type
