@@ -33,119 +33,119 @@ using ConfigCallBackF = std::function<Status(const std::string&)>;
         }                  \
     } while (false)
 
-static const char* CONFIG_NODE_DELIMITER = ".";
-static const char* CONFIG_VERSION = "version";
+extern const char* CONFIG_NODE_DELIMITER;
+extern const char* CONFIG_VERSION;
 
 /* server config */
-static const char* CONFIG_SERVER = "server_config";
-static const char* CONFIG_SERVER_ADDRESS = "address";
-static const char* CONFIG_SERVER_ADDRESS_DEFAULT = "127.0.0.1";
-static const char* CONFIG_SERVER_PORT = "port";
-static const char* CONFIG_SERVER_PORT_DEFAULT = "19530";
-static const char* CONFIG_SERVER_DEPLOY_MODE = "deploy_mode";
-static const char* CONFIG_SERVER_DEPLOY_MODE_DEFAULT = "single";
-static const char* CONFIG_SERVER_TIME_ZONE = "time_zone";
-static const char* CONFIG_SERVER_TIME_ZONE_DEFAULT = "UTC+8";
-static const char* CONFIG_SERVER_WEB_PORT = "web_port";
-static const char* CONFIG_SERVER_WEB_PORT_DEFAULT = "19121";
+extern const char* CONFIG_SERVER;
+extern const char* CONFIG_SERVER_ADDRESS;
+extern const char* CONFIG_SERVER_ADDRESS_DEFAULT;
+extern const char* CONFIG_SERVER_PORT;
+extern const char* CONFIG_SERVER_PORT_DEFAULT;
+extern const char* CONFIG_SERVER_DEPLOY_MODE;
+extern const char* CONFIG_SERVER_DEPLOY_MODE_DEFAULT;
+extern const char* CONFIG_SERVER_TIME_ZONE;
+extern const char* CONFIG_SERVER_TIME_ZONE_DEFAULT;
+extern const char* CONFIG_SERVER_WEB_PORT;
+extern const char* CONFIG_SERVER_WEB_PORT_DEFAULT;
 
 /* db config */
-static const char* CONFIG_DB = "db_config";
-static const char* CONFIG_DB_BACKEND_URL = "backend_url";
-static const char* CONFIG_DB_BACKEND_URL_DEFAULT = "sqlite://:@:/";
-static const char* CONFIG_DB_ARCHIVE_DISK_THRESHOLD = "archive_disk_threshold";
-static const char* CONFIG_DB_ARCHIVE_DISK_THRESHOLD_DEFAULT = "0";
-static const char* CONFIG_DB_ARCHIVE_DAYS_THRESHOLD = "archive_days_threshold";
-static const char* CONFIG_DB_ARCHIVE_DAYS_THRESHOLD_DEFAULT = "0";
-static const char* CONFIG_DB_PRELOAD_COLLECTION = "preload_collection";
-static const char* CONFIG_DB_PRELOAD_COLLECTION_DEFAULT = "";
-static const char* CONFIG_DB_AUTO_FLUSH_INTERVAL = "auto_flush_interval";
-static const char* CONFIG_DB_AUTO_FLUSH_INTERVAL_DEFAULT = "1";
+extern const char* CONFIG_DB;
+extern const char* CONFIG_DB_BACKEND_URL;
+extern const char* CONFIG_DB_BACKEND_URL_DEFAULT;
+extern const char* CONFIG_DB_ARCHIVE_DISK_THRESHOLD;
+extern const char* CONFIG_DB_ARCHIVE_DISK_THRESHOLD_DEFAULT;
+extern const char* CONFIG_DB_ARCHIVE_DAYS_THRESHOLD;
+extern const char* CONFIG_DB_ARCHIVE_DAYS_THRESHOLD_DEFAULT;
+extern const char* CONFIG_DB_PRELOAD_COLLECTION;
+extern const char* CONFIG_DB_PRELOAD_COLLECTION_DEFAULT;
+extern const char* CONFIG_DB_AUTO_FLUSH_INTERVAL;
+extern const char* CONFIG_DB_AUTO_FLUSH_INTERVAL_DEFAULT;
 
 /* storage config */
-static const char* CONFIG_STORAGE = "storage_config";
-static const char* CONFIG_STORAGE_PRIMARY_PATH = "primary_path";
-static const char* CONFIG_STORAGE_PRIMARY_PATH_DEFAULT = "/tmp/milvus";
-static const char* CONFIG_STORAGE_SECONDARY_PATH = "secondary_path";
-static const char* CONFIG_STORAGE_SECONDARY_PATH_DEFAULT = "";
-static const char* CONFIG_STORAGE_S3_ENABLE = "s3_enable";
-static const char* CONFIG_STORAGE_S3_ENABLE_DEFAULT = "false";
-static const char* CONFIG_STORAGE_S3_ADDRESS = "s3_address";
-static const char* CONFIG_STORAGE_S3_ADDRESS_DEFAULT = "127.0.0.1";
-static const char* CONFIG_STORAGE_S3_PORT = "s3_port";
-static const char* CONFIG_STORAGE_S3_PORT_DEFAULT = "9000";
-static const char* CONFIG_STORAGE_S3_ACCESS_KEY = "s3_access_key";
-static const char* CONFIG_STORAGE_S3_ACCESS_KEY_DEFAULT = "minioadmin";
-static const char* CONFIG_STORAGE_S3_SECRET_KEY = "s3_secret_key";
-static const char* CONFIG_STORAGE_S3_SECRET_KEY_DEFAULT = "minioadmin";
-static const char* CONFIG_STORAGE_S3_BUCKET = "s3_bucket";
-static const char* CONFIG_STORAGE_S3_BUCKET_DEFAULT = "milvus-bucket";
+extern const char* CONFIG_STORAGE;
+extern const char* CONFIG_STORAGE_PRIMARY_PATH;
+extern const char* CONFIG_STORAGE_PRIMARY_PATH_DEFAULT;
+extern const char* CONFIG_STORAGE_SECONDARY_PATH;
+extern const char* CONFIG_STORAGE_SECONDARY_PATH_DEFAULT;
+extern const char* CONFIG_STORAGE_S3_ENABLE;
+extern const char* CONFIG_STORAGE_S3_ENABLE_DEFAULT;
+extern const char* CONFIG_STORAGE_S3_ADDRESS;
+extern const char* CONFIG_STORAGE_S3_ADDRESS_DEFAULT;
+extern const char* CONFIG_STORAGE_S3_PORT;
+extern const char* CONFIG_STORAGE_S3_PORT_DEFAULT;
+extern const char* CONFIG_STORAGE_S3_ACCESS_KEY;
+extern const char* CONFIG_STORAGE_S3_ACCESS_KEY_DEFAULT;
+extern const char* CONFIG_STORAGE_S3_SECRET_KEY;
+extern const char* CONFIG_STORAGE_S3_SECRET_KEY_DEFAULT;
+extern const char* CONFIG_STORAGE_S3_BUCKET;
+extern const char* CONFIG_STORAGE_S3_BUCKET_DEFAULT;
 
 /* cache config */
-static const char* CONFIG_CACHE = "cache_config";
-static const char* CONFIG_CACHE_CPU_CACHE_CAPACITY = "cpu_cache_capacity";
-static const char* CONFIG_CACHE_CPU_CACHE_CAPACITY_DEFAULT = "4";
-static const char* CONFIG_CACHE_CPU_CACHE_THRESHOLD = "cpu_cache_threshold";
-static const char* CONFIG_CACHE_CPU_CACHE_THRESHOLD_DEFAULT = "0.7";
-static const char* CONFIG_CACHE_INSERT_BUFFER_SIZE = "insert_buffer_size";
-static const char* CONFIG_CACHE_INSERT_BUFFER_SIZE_DEFAULT = "1";
-static const char* CONFIG_CACHE_CACHE_INSERT_DATA = "cache_insert_data";
-static const char* CONFIG_CACHE_CACHE_INSERT_DATA_DEFAULT = "false";
+extern const char* CONFIG_CACHE;
+extern const char* CONFIG_CACHE_CPU_CACHE_CAPACITY;
+extern const char* CONFIG_CACHE_CPU_CACHE_CAPACITY_DEFAULT;
+extern const char* CONFIG_CACHE_CPU_CACHE_THRESHOLD;
+extern const char* CONFIG_CACHE_CPU_CACHE_THRESHOLD_DEFAULT;
+extern const char* CONFIG_CACHE_INSERT_BUFFER_SIZE;
+extern const char* CONFIG_CACHE_INSERT_BUFFER_SIZE_DEFAULT;
+extern const char* CONFIG_CACHE_CACHE_INSERT_DATA;
+extern const char* CONFIG_CACHE_CACHE_INSERT_DATA_DEFAULT;
 
 /* metric config */
-static const char* CONFIG_METRIC = "metric_config";
-static const char* CONFIG_METRIC_ENABLE_MONITOR = "enable_monitor";
-static const char* CONFIG_METRIC_ENABLE_MONITOR_DEFAULT = "false";
-static const char* CONFIG_METRIC_ADDRESS = "address";
-static const char* CONFIG_METRIC_ADDRESS_DEFAULT = "127.0.0.1";
-static const char* CONFIG_METRIC_PORT = "port";
-static const char* CONFIG_METRIC_PORT_DEFAULT = "9091";
+extern const char* CONFIG_METRIC;
+extern const char* CONFIG_METRIC_ENABLE_MONITOR;
+extern const char* CONFIG_METRIC_ENABLE_MONITOR_DEFAULT;
+extern const char* CONFIG_METRIC_ADDRESS;
+extern const char* CONFIG_METRIC_ADDRESS_DEFAULT;
+extern const char* CONFIG_METRIC_PORT;
+extern const char* CONFIG_METRIC_PORT_DEFAULT;
 
 /* engine config */
-static const char* CONFIG_ENGINE = "engine_config";
-static const char* CONFIG_ENGINE_USE_BLAS_THRESHOLD = "use_blas_threshold";
-static const char* CONFIG_ENGINE_USE_BLAS_THRESHOLD_DEFAULT = "1100";
-static const char* CONFIG_ENGINE_OMP_THREAD_NUM = "omp_thread_num";
-static const char* CONFIG_ENGINE_OMP_THREAD_NUM_DEFAULT = "0";
-static const char* CONFIG_ENGINE_USE_AVX512 = "use_avx512";
-static const char* CONFIG_ENGINE_USE_AVX512_DEFAULT = "true";
-static const char* CONFIG_ENGINE_GPU_SEARCH_THRESHOLD = "gpu_search_threshold";
-static const char* CONFIG_ENGINE_GPU_SEARCH_THRESHOLD_DEFAULT = "1000";
+extern const char* CONFIG_ENGINE;
+extern const char* CONFIG_ENGINE_USE_BLAS_THRESHOLD;
+extern const char* CONFIG_ENGINE_USE_BLAS_THRESHOLD_DEFAULT;
+extern const char* CONFIG_ENGINE_OMP_THREAD_NUM;
+extern const char* CONFIG_ENGINE_OMP_THREAD_NUM_DEFAULT;
+extern const char* CONFIG_ENGINE_USE_AVX512;
+extern const char* CONFIG_ENGINE_USE_AVX512_DEFAULT;
+extern const char* CONFIG_ENGINE_GPU_SEARCH_THRESHOLD;
+extern const char* CONFIG_ENGINE_GPU_SEARCH_THRESHOLD_DEFAULT;
 
 /* gpu resource config */
-static const char* CONFIG_GPU_RESOURCE = "gpu_resource_config";
-static const char* CONFIG_GPU_RESOURCE_ENABLE = "enable";
+extern const char* CONFIG_GPU_RESOURCE;
+extern const char* CONFIG_GPU_RESOURCE_ENABLE;
 #ifdef MILVUS_GPU_VERSION
-static const char* CONFIG_GPU_RESOURCE_ENABLE_DEFAULT = "true";
+extern const char* CONFIG_GPU_RESOURCE_ENABLE_DEFAULT;
 #else
-static const char* CONFIG_GPU_RESOURCE_ENABLE_DEFAULT = "false";
+extern const char* CONFIG_GPU_RESOURCE_ENABLE_DEFAULT;
 #endif
-static const char* CONFIG_GPU_RESOURCE_CACHE_CAPACITY = "cache_capacity";
-static const char* CONFIG_GPU_RESOURCE_CACHE_CAPACITY_DEFAULT = "1";
-static const char* CONFIG_GPU_RESOURCE_CACHE_THRESHOLD = "cache_threshold";
-static const char* CONFIG_GPU_RESOURCE_CACHE_THRESHOLD_DEFAULT = "0.7";
-static const char* CONFIG_GPU_RESOURCE_DELIMITER = ",";
-static const char* CONFIG_GPU_RESOURCE_SEARCH_RESOURCES = "search_resources";
-static const char* CONFIG_GPU_RESOURCE_SEARCH_RESOURCES_DEFAULT = "gpu0";
-static const char* CONFIG_GPU_RESOURCE_BUILD_INDEX_RESOURCES = "build_index_resources";
-static const char* CONFIG_GPU_RESOURCE_BUILD_INDEX_RESOURCES_DEFAULT = "gpu0";
+extern const char* CONFIG_GPU_RESOURCE_CACHE_CAPACITY;
+extern const char* CONFIG_GPU_RESOURCE_CACHE_CAPACITY_DEFAULT;
+extern const char* CONFIG_GPU_RESOURCE_CACHE_THRESHOLD;
+extern const char* CONFIG_GPU_RESOURCE_CACHE_THRESHOLD_DEFAULT;
+extern const char* CONFIG_GPU_RESOURCE_DELIMITER;
+extern const char* CONFIG_GPU_RESOURCE_SEARCH_RESOURCES;
+extern const char* CONFIG_GPU_RESOURCE_SEARCH_RESOURCES_DEFAULT;
+extern const char* CONFIG_GPU_RESOURCE_BUILD_INDEX_RESOURCES;
+extern const char* CONFIG_GPU_RESOURCE_BUILD_INDEX_RESOURCES_DEFAULT;
 
 /* tracing config */
-static const char* CONFIG_TRACING = "tracing_config";
-static const char* CONFIG_TRACING_JSON_CONFIG_PATH = "json_config_path";
+extern const char* CONFIG_TRACING;
+extern const char* CONFIG_TRACING_JSON_CONFIG_PATH;
 
 /* wal config */
-static const char* CONFIG_WAL = "wal_config";
-static const char* CONFIG_WAL_ENABLE = "enable";
-static const char* CONFIG_WAL_ENABLE_DEFAULT = "true";
-static const char* CONFIG_WAL_RECOVERY_ERROR_IGNORE = "recovery_error_ignore";
-static const char* CONFIG_WAL_RECOVERY_ERROR_IGNORE_DEFAULT = "true";
-static const char* CONFIG_WAL_BUFFER_SIZE = "buffer_size";
-static const char* CONFIG_WAL_BUFFER_SIZE_DEFAULT = "256";
-static const int64_t CONFIG_WAL_BUFFER_SIZE_MAX = 4096;
-static const int64_t CONFIG_WAL_BUFFER_SIZE_MIN = 64;
-static const char* CONFIG_WAL_WAL_PATH = "wal_path";
-static const char* CONFIG_WAL_WAL_PATH_DEFAULT = "/tmp/milvus/wal";
+extern const char* CONFIG_WAL;
+extern const char* CONFIG_WAL_ENABLE;
+extern const char* CONFIG_WAL_ENABLE_DEFAULT;
+extern const char* CONFIG_WAL_RECOVERY_ERROR_IGNORE;
+extern const char* CONFIG_WAL_RECOVERY_ERROR_IGNORE_DEFAULT;
+extern const char* CONFIG_WAL_BUFFER_SIZE;
+extern const char* CONFIG_WAL_BUFFER_SIZE_DEFAULT;
+extern const int64_t CONFIG_WAL_BUFFER_SIZE_MAX;
+extern const int64_t CONFIG_WAL_BUFFER_SIZE_MIN;
+extern const char* CONFIG_WAL_WAL_PATH;
+extern const char* CONFIG_WAL_WAL_PATH_DEFAULT;
 
 class Config {
  private:
