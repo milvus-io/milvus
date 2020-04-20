@@ -381,14 +381,6 @@ message AttrRecord {
     repeated string value = 1;
 }
 
-//message HEntity {
-//    Status status = 1;
-//    int64 entity_id = 2;
-//    repeated string field_names = 3;
-//    repeated AttrRecord attr_records = 4;
-//    repeated FieldValue result_values = 5;
-//}
-
 message HEntity {
     Status status = 1;
     int64 entity_id = 2;
