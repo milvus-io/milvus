@@ -1979,7 +1979,7 @@ DBImpl::BackgroundBuildIndex() {
         }
 
         LOG_ENGINE_DEBUG_ << "Background build index thread finished";
-        index_req_swn_.Notify(); // notify CreateIndex check circle
+        index_req_swn_.Notify();  // notify CreateIndex check circle
     }
 }
 
