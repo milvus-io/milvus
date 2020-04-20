@@ -9,6 +9,7 @@ Please mark all change in change log and use the issue from GitHub
 -   \#1929 Skip MySQL meta schema field width check
 
 ## Feature
+-   \#1965 FAISS/NSG/HNSW/ANNOY use unified distance calculation algorithm
 
 ## Improvement
 -   \#221 Refactor LOG macro
