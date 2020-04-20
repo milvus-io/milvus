@@ -95,7 +95,6 @@ CreateHybridCollectionRequest::OnExecute() {
                 table_info.engine_type_ = engine_type;
             }
         }
-        // TODO(yukun): check dimension, metric_type, and assign engine_type
 
         // step 3: create collection
         status = DBWrapper::DB()->CreateHybridCollection(table_info, fields_schema);
