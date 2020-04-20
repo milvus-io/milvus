@@ -2163,7 +2163,7 @@ DBImpl::WaitCollectionIndexRecursively(const std::string& collection_id, const C
             status = meta_ptr_->UpdateCollectionFilesToIndex(collection_id);
         }
 
-        flush_req_swn_.Wait_For(std::chrono::seconds(WAIT_BUILD_INDEX_INTERVAL));
+        index_req_swn_.Wait_For(std::chrono::seconds(WAIT_BUILD_INDEX_INTERVAL));
         GetFilesToBuildIndex(collection_id, file_types, collection_files);
         ++times;
 
