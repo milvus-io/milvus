@@ -125,6 +125,7 @@ inline void set_error_from_string(char **error, const char* msg) {
 #endif
 #endif
 
+#include <faiss/FaissHook.h>
 
 using std::vector;
 using std::pair;
@@ -184,7 +185,7 @@ inline T euclidean_distance(const T* x, const T* y, int f) {
   return d;
 }
 
-#ifdef USE_AVX
+//#ifdef USE_AVX
 // Horizontal single sum of 256bit vector.
 inline float hsum256_ps_avx(__m256 v) {
   const __m128 x128 = _mm_add_ps(_mm256_extractf128_ps(v, 1), _mm256_castps256_ps128(v));
@@ -195,6 +196,7 @@ inline float hsum256_ps_avx(__m256 v) {
 
 template<>
 inline float dot<float>(const float* x, const float *y, int f) {
+#if 0 /* use FAISS distance calculation algorithm instead */
   float result = 0;
   if (f > 7) {
     __m256 d = _mm256_setzero_ps();
@@ -213,10 +215,14 @@ inline float dot<float>(const float* x, const float *y, int f) {
     y++;
   }
   return result;
+#else
+  return faiss::fvec_inner_product(x, y, (size_t)f);
+#endif
 }
 
 template<>
 inline float manhattan_distance<float>(const float* x, const float* y, int f) {
+#if 0 /* use FAISS distance calculation algorithm instead */
   float result = 0;
   int i = f;
   if (f > 7) {
@@ -239,10 +245,14 @@ inline float manhattan_distance<float>(const float* x, const float* y, int f) {
     y++;
   }
   return result;
+#else
+  return faiss::fvec_L1(x, y, (size_t)f);
+#endif
 }
 
 template<>
 inline float euclidean_distance<float>(const float* x, const float* y, int f) {
+#if 0 /* use FAISS distance calculation algorithm instead */
   float result=0;
   if (f > 7) {
     __m256 d = _mm256_setzero_ps();
@@ -263,10 +273,14 @@ inline float euclidean_distance<float>(const float* x, const float* y, int f) {
     y++;
   }
   return result;
+#else
+  return faiss::fvec_L2sqr(x, y, (size_t)f);
+#endif
 }
 
-#endif
+//#endif
 
+#if 0 /* use FAISS distance calculation algorithm instead */
 #ifdef USE_AVX512
 template<>
 inline float dot<float>(const float* x, const float *y, int f) {
@@ -339,6 +353,7 @@ inline float euclidean_distance<float>(const float* x, const float* y, int f) {
   return result;
 }
 
+#endif
 #endif
 
  

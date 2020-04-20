@@ -128,7 +128,7 @@ IndexAnnoy::Query(const DatasetPtr& dataset_ptr, const Config& config) {
         distances.reserve(k);
         index_->get_nns_by_vector((const float*)p_data + i * dim, k, search_k, &result, &distances, blacklist);
 
-        size_t result_num = result.size();
+        int64_t result_num = result.size();
         auto local_p_id = p_id + k * i;
         auto local_p_dist = p_dist + k * i;
         memcpy(local_p_id, result.data(), result_num * sizeof(int64_t));
