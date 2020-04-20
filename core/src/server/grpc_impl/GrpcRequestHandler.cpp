@@ -846,14 +846,12 @@ GrpcRequestHandler::InsertEntity(::grpc::ServerContext* context, const ::milvus:
 }
 
 void
-DeSerialization(const ::milvus::grpc::GeneralQuery& general_query, query::BooleanQueryPtr boolean_clause) {
+DeSerialization(const ::milvus::grpc::GeneralQuery& general_query, query::BooleanQueryPtr& boolean_clause) {
     if (general_query.has_boolean_query()) {
-        //        boolean_clause->SetOccur((query::Occur)general_query.boolean_query().occur());
-
+        boolean_clause->SetOccur((query::Occur)general_query.boolean_query().occur());
         for (uint64_t i = 0; i < general_query.boolean_query().general_query_size(); ++i) {
             if (general_query.boolean_query().general_query(i).has_boolean_query()) {
-                query::BooleanQueryPtr query =
-                    std::make_shared<query::BooleanQuery>((query::Occur)(general_query.boolean_query().occur()));
+                query::BooleanQueryPtr query = std::make_shared<query::BooleanQuery>();
                 DeSerialization(general_query.boolean_query().general_query(i), query);
                 boolean_clause->AddBooleanQuery(query);
             } else {

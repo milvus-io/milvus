@@ -685,41 +685,44 @@ WriteQueryToProto(::milvus::grpc::GeneralQuery* general_query, BooleanQueryPtr b
         for (auto query : boolean_query->GetBooleanQueries()) {
             auto grpc_boolean_query = general_query->mutable_boolean_query();
             grpc_boolean_query->set_occur((::milvus::grpc::Occur)query->GetOccur());
-            ::milvus::grpc::GeneralQuery* next_query = grpc_boolean_query->add_general_query();
-            WriteQueryToProto(next_query, query);
-        }
-    } else {
-        for (auto leaf_query : boolean_query->GetLeafQueries()) {
-            ::milvus::grpc::GeneralQuery* grpc_query = general_query->mutable_boolean_query()->add_general_query();
-            if (leaf_query->term_query_ptr != nullptr) {
-                auto term_query = grpc_query->mutable_term_query();
-                term_query->set_field_name(leaf_query->term_query_ptr->field_name);
-                term_query->set_boost(leaf_query->query_boost);
-                term_query->set_values(leaf_query->term_query_ptr->field_value.data(),
-                                       leaf_query->term_query_ptr->field_value.size());
-            }
-            if (leaf_query->range_query_ptr != nullptr) {
-                auto range_query = grpc_query->mutable_range_query();
-                range_query->set_boost(leaf_query->query_boost);
-                range_query->set_field_name(leaf_query->range_query_ptr->field_name);
-                for (auto com_expr : leaf_query->range_query_ptr->compare_expr) {
-                    auto grpc_com_expr = range_query->add_operand();
-                    grpc_com_expr->set_operand(com_expr.operand);
-                    grpc_com_expr->set_operator_((milvus::grpc::CompareOperator)com_expr.compare_operator);
+
+            for (auto leaf_query : query->GetLeafQueries()) {
+                auto grpc_query = grpc_boolean_query->add_general_query();
+                if (leaf_query->term_query_ptr != nullptr) {
+                    auto term_query = grpc_query->mutable_term_query();
+                    term_query->set_field_name(leaf_query->term_query_ptr->field_name);
+                    term_query->set_boost(leaf_query->query_boost);
+                    term_query->set_values(leaf_query->term_query_ptr->field_value.data(),
+                                           leaf_query->term_query_ptr->field_value.size());
+                }
+                if (leaf_query->range_query_ptr != nullptr) {
+                    auto range_query = grpc_query->mutable_range_query();
+                    range_query->set_boost(leaf_query->query_boost);
+                    range_query->set_field_name(leaf_query->range_query_ptr->field_name);
+                    for (auto com_expr : leaf_query->range_query_ptr->compare_expr) {
+                        auto grpc_com_expr = range_query->add_operand();
+                        grpc_com_expr->set_operand(com_expr.operand);
+                        grpc_com_expr->set_operator_((milvus::grpc::CompareOperator)com_expr.compare_operator);
+                    }
+                }
+                if (leaf_query->vector_query_ptr != nullptr) {
+                    auto vector_query = grpc_query->mutable_vector_query();
+                    vector_query->set_field_name(leaf_query->vector_query_ptr->field_name);
+                    vector_query->set_query_boost(leaf_query->query_boost);
+                    vector_query->set_topk(leaf_query->vector_query_ptr->topk);
+                    for (auto record : leaf_query->vector_query_ptr->query_vector) {
+                        ::milvus::grpc::RowRecord* row_record = vector_query->add_records();
+                        CopyRowRecord(row_record, record);
+                    }
+                    auto extra_param = vector_query->add_extra_params();
+                    extra_param->set_key(EXTRA_PARAM_KEY);
+                    extra_param->set_value(leaf_query->vector_query_ptr->extra_params);
                 }
             }
-            if (leaf_query->vector_query_ptr != nullptr) {
-                auto vector_query = grpc_query->mutable_vector_query();
-                vector_query->set_field_name(leaf_query->vector_query_ptr->field_name);
-                vector_query->set_query_boost(leaf_query->query_boost);
-                vector_query->set_topk(leaf_query->vector_query_ptr->topk);
-                for (auto record : leaf_query->vector_query_ptr->query_vector) {
-                    ::milvus::grpc::RowRecord* row_record = vector_query->add_records();
-                    CopyRowRecord(row_record, record);
-                }
-                auto extra_param = vector_query->add_extra_params();
-                extra_param->set_key(EXTRA_PARAM_KEY);
-                extra_param->set_value(leaf_query->vector_query_ptr->extra_params);
+
+            if (!query->GetBooleanQueries().empty()) {
+                ::milvus::grpc::GeneralQuery* next_query = grpc_boolean_query->add_general_query();
+                WriteQueryToProto(next_query, query);
             }
         }
     }
