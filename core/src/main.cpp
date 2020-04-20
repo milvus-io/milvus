@@ -132,8 +132,7 @@ main(int argc, char* argv[]) {
 
     server.Init(start_daemonized, pid_filename, config_filename, log_config_file);
 
-    milvus::Status s = server.Start();
-    if (s.ok()) {
+    if (server.Start().ok()) {
         std::cout << "Milvus server started successfully!" << std::endl;
     } else {
         goto FAIL;
