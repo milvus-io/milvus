@@ -1,24 +1,18 @@
-// Licensed to the Apache Software Foundation (ASF) under one
-// or more contributor license agreements.  See the NOTICE file
-// distributed with this work for additional information
-// regarding copyright ownership.  The ASF licenses this file
-// to you under the Apache License, Version 2.0 (the
-// "License"); you may not use this file except in compliance
-// with the License.  You may obtain a copy of the License at
+// Copyright (C) 2019-2020 Zilliz. All rights reserved.
 //
-//   http://www.apache.org/licenses/LICENSE-2.0
+// Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance
+// with the License. You may obtain a copy of the License at
 //
-// Unless required by applicable law or agreed to in writing,
-// software distributed under the License is distributed on an
-// "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
-// KIND, either express or implied.  See the License for the
-// specific language governing permissions and limitations
-// under the License.
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software distributed under the License
+// is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
+// or implied. See the License for the specific language governing permissions and limitations under the License.
 
 #include <gtest/gtest.h>
+
 #include "scheduler/TaskTable.h"
 #include "scheduler/task/TestTask.h"
-#include "scheduler/tasklabel/DefaultLabel.h"
 
 /************ TaskTableBaseTest ************/
 
@@ -160,11 +154,12 @@ class TaskTableBaseTest : public ::testing::Test {
  protected:
     void
     SetUp() override {
-        milvus::scheduler::TableFileSchemaPtr dummy = nullptr;
+        milvus::scheduler::SegmentSchemaPtr dummy = nullptr;
         invalid_task_ = nullptr;
-        auto label = std::make_shared<milvus::scheduler::DefaultLabel>();
-        task1_ = std::make_shared<milvus::scheduler::TestTask>(dummy, label);
-        task2_ = std::make_shared<milvus::scheduler::TestTask>(dummy, label);
+        task1_ = std::make_shared<milvus::scheduler::TestTask>(
+            std::make_shared<milvus::server::Context>("dummy_request_id"), dummy, nullptr);
+        task2_ = std::make_shared<milvus::scheduler::TestTask>(
+            std::make_shared<milvus::server::Context>("dummy_request_id"), dummy, nullptr);
     }
 
     milvus::scheduler::TaskPtr invalid_task_;
@@ -318,10 +313,10 @@ class TaskTableAdvanceTest : public ::testing::Test {
  protected:
     void
     SetUp() override {
-        milvus::scheduler::TableFileSchemaPtr dummy = nullptr;
+        milvus::scheduler::SegmentSchemaPtr dummy = nullptr;
         for (uint64_t i = 0; i < 8; ++i) {
-            auto label = std::make_shared<milvus::scheduler::DefaultLabel>();
-            auto task = std::make_shared<milvus::scheduler::TestTask>(dummy, label);
+            auto task = std::make_shared<milvus::scheduler::TestTask>(
+                std::make_shared<milvus::server::Context>("dummy_request_id"), dummy, nullptr);
             table1_.Put(task);
         }
 

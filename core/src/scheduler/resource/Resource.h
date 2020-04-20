@@ -1,19 +1,13 @@
-// Licensed to the Apache Software Foundation (ASF) under one
-// or more contributor license agreements.  See the NOTICE file
-// distributed with this work for additional information
-// regarding copyright ownership.  The ASF licenses this file
-// to you under the Apache License, Version 2.0 (the
-// "License"); you may not use this file except in compliance
-// with the License.  You may obtain a copy of the License at
+// Copyright (C) 2019-2020 Zilliz. All rights reserved.
 //
-//   http://www.apache.org/licenses/LICENSE-2.0
+// Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance
+// with the License. You may obtain a copy of the License at
 //
-// Unless required by applicable law or agreed to in writing,
-// software distributed under the License is distributed on an
-// "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
-// KIND, either express or implied.  See the License for the
-// specific language governing permissions and limitations
-// under the License.
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software distributed under the License
+// is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
+// or implied. See the License for the specific language governing permissions and limitations under the License.
 
 #pragma once
 
@@ -103,11 +97,6 @@ class Resource : public Node, public std::enable_shared_from_this<Resource> {
 
  public:
     inline bool
-    HasLoader() const {
-        return enable_loader_;
-    }
-
-    inline bool
     HasExecutor() const {
         return enable_executor_;
     }
@@ -134,7 +123,7 @@ class Resource : public Node, public std::enable_shared_from_this<Resource> {
     operator<<(std::ostream& out, const Resource& resource);
 
  protected:
-    Resource(std::string name, ResourceType type, uint64_t device_id, bool enable_loader, bool enable_executor);
+    Resource(std::string name, ResourceType type, uint64_t device_id, bool enable_executor);
 
     /*
      * Implementation by inherit class;
@@ -193,7 +182,6 @@ class Resource : public Node, public std::enable_shared_from_this<Resource> {
     std::function<void(EventPtr)> subscriber_ = nullptr;
 
     bool running_ = false;
-    bool enable_loader_ = true;
     bool enable_executor_ = true;
     std::thread loader_thread_;
     std::thread executor_thread_;

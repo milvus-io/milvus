@@ -1,197 +1,95 @@
-![Milvuslogo](https://raw.githubusercontent.com/milvus-io/docs/master/assets/milvus_logo.png)
+![Milvuslogo](https://github.com/milvus-io/docs/blob/master/assets/milvus_logo.png)
 
-![LICENSE](https://img.shields.io/badge/license-Apache--2.0-brightgreen)
-![Language](https://img.shields.io/badge/language-C%2B%2B-blue)
-[![codebeat badge](https://codebeat.co/badges/e030a4f6-b126-4475-a938-4723d54ec3a7?style=plastic)](https://codebeat.co/projects/github-com-jinhai-cn-milvus-master)
+[![Slack](https://img.shields.io/badge/Join-Slack-orange)](https://join.slack.com/t/milvusio/shared_invite/enQtNzY1OTQ0NDI3NjMzLWNmYmM1NmNjOTQ5MGI5NDhhYmRhMGU5M2NhNzhhMDMzY2MzNDdlYjM5ODQ5MmE3ODFlYzU3YjJkNmVlNDQ2ZTk)
 
-![Release](https://img.shields.io/badge/release-v0.5.0-orange)
-![Release_date](https://img.shields.io/badge/release_date-October-yellowgreen)
+![GitHub](https://img.shields.io/github/license/milvus-io/milvus)
+![Docker pulls](https://img.shields.io/docker/pulls/milvusdb/milvus)
 
-- [Slack 频道](https://join.slack.com/t/milvusio/shared_invite/enQtNzY1OTQ0NDI3NjMzLWNmYmM1NmNjOTQ5MGI5NDhhYmRhMGU5M2NhNzhhMDMzY2MzNDdlYjM5ODQ5MmE3ODFlYzU3YjJkNmVlNDQ2ZTk)
-- [Twitter](https://twitter.com/milvusio)
-- [Facebook](https://www.facebook.com/io.milvus.5)
-- [博客](https://www.milvus.io/blog/)
-- [CSDN](https://zilliz.blog.csdn.net/)
-- [中文官网](https://www.milvus.io/zh-CN/)
+[![Build Status](http://internal.zilliz.com:18080/jenkins/job/milvus-ci/job/master/badge/icon)](http://internal.zilliz.com:18080/jenkins/job/milvus-ci/job/master/)
+[![CII Best Practices](https://bestpractices.coreinfrastructure.org/projects/3563/badge)](https://bestpractices.coreinfrastructure.org/projects/3563)
+[![codecov](https://codecov.io/gh/milvus-io/milvus/branch/master/graph/badge.svg)](https://codecov.io/gh/milvus-io/milvus)
+[![codebeat badge](https://codebeat.co/badges/e030a4f6-b126-4475-a938-4723d54ec3a7?style=plastic)](https://codebeat.co/projects/github-com-milvus-io-milvus-master)
+[![Codacy Badge](https://api.codacy.com/project/badge/Grade/c4bb2ccfb51b47f99e43bfd1705edd95)](https://app.codacy.com/gh/milvus-io/milvus?utm_source=github.com&utm_medium=referral&utm_content=milvus-io/milvus&utm_campaign=Badge_Grade_Dashboard)
+
+[English](README.md) | 中文版  
 
 # 欢迎来到 Milvus
 
 ## Milvus 是什么
 
-Milvus 是一款开源的、针对海量特征向量的相似性搜索引擎。基于异构众核计算框架设计，成本更低，性能更好。在有限的计算资源下，十亿向量搜索仅毫秒响应。
+Milvus 是一款开源的特征向量相似度搜索引擎，具有使用方便、实用可靠、易于扩展、稳定高效和搜索迅速等特点，在全球范围内被上百家组织和机构所采用。Milvus 已经被广泛应用于多个领域，其中包括图像处理、机器视觉、自然语言处理、语音识别、推荐系统以及新药发现等。
 
-Milvus 提供稳定的 Python、Java 以及 C++ 的 API 接口。
+Milvus 的架构如下：
 
-通过 [版本发布说明](https://milvus.io/docs/zh-CN/release/v0.5.0/) 获取最新发行版本的 Milvus。
+![arch](https://github.com/milvus-io/docs/raw/v0.7.1/assets/milvus_arch.png)
 
-- 异构众核
+若要了解 Milvus 详细介绍和整体架构，请访问 [Milvus 简介](https://www.milvus.io/cn/docs/about_milvus/overview.md)。您可以通过 [版本发布说明](https://www.milvus.io/cn/docs/releases/release_notes.md) 获取最新版本的功能和更新。
 
-  Milvus 基于异构众核计算框架设计，成本更低，性能更好。
+Milvus是一个[LF AI基金会](https://lfai.foundation/)的孵化项目。获取更多，请访问[lfai.foundation](https://lfai.foundation/)。
 
-- 多元化索引
+## Milvus 快速上手
 
-  Milvus 支持多种索引方式，使用量化索引、基于树的索引和图索引等算法。
+### 安装 Milvus
 
-- 资源智能管理
+请参阅 [Milvus 安装指南](https://www.milvus.io/cn/docs/guides/get_started/install_milvus/install_milvus.md) 使用 Docker 容器安装 Milvus。若要基于源码编译，请访问 [源码安装](INSTALL.md)。
 
-  Milvus 根据实际数据规模和可利用资源，智能调节优化查询计算和索引构建过程。
+### 尝试示例代码
 
-- 水平扩容
+您可以尝试用 [Python](https://www.milvus.io/cn/docs/guides/get_started/example_code.md)，[Java](https://github.com/milvus-io/milvus-sdk-java/tree/master/examples)，[Go](https://github.com/milvus-io/milvus-sdk-go/tree/master/examples)，或者 [C++](https://github.com/milvus-io/milvus/tree/master/sdk/examples) 运行 Milvus 示例代码。
 
-  Milvus 支持在线 / 离线扩容，仅需执行简单命令，便可弹性伸缩计算节点和存储节点。
+## 支持的客户端
 
-- 高可用性
+-   [Go](https://github.com/milvus-io/milvus-sdk-go)
+-   [Python](https://github.com/milvus-io/pymilvus)
+-   [Java](https://github.com/milvus-io/milvus-sdk-java)
+-   [C++](https://github.com/milvus-io/milvus/tree/master/sdk)
+-   [RESTful API](https://github.com/milvus-io/milvus/tree/master/core/src/server/web_impl)
+-   [Node.js](https://www.npmjs.com/package/@arkie-ai/milvus-client) (由 [arkie](https://www.arkie.cn/) 提供)
 
-  Milvus 集成了 Kubernetes 框架，能有效避免单点障碍情况的发生。
+## 应用场景
 
-- 简单易用
+Milvus 可以应用于多种 AI 场景。您可以访问 [Milvus 应用场景](https://milvus.io/scenarios) 体验在线场景展示。您也可以访问 [Milvus 训练营](https://github.com/milvus-io/bootcamp) 了解更详细的应用场景和解决方案。
 
-  Milvus 安装简单，使用方便，并可使您专注于特征向量。
+## 性能基准测试
 
-- 可视化监控
+关于 Milvus 性能基准的更多信息，请参考[测试报告](https://github.com/milvus-io/milvus/tree/master/docs)。
 
-  您可以使用基于 Prometheus 的图形化监控，以便实时跟踪系统性能。
+## 路线图
 
-## 整体架构
+您可以参考我们的[路线图](https://github.com/milvus-io/milvus/milestones)，了解 Milvus 即将实现的新特性。
 
-![Milvus_arch](https://github.com/milvus-io/docs/blob/master/assets/milvus_arch.png)
-
-## 开始使用 Milvus
-
-### 硬件要求
-
-| 硬件设备 | 推荐配置                              |
-| -------- | ------------------------------------- |
-| CPU      | Intel CPU Haswell 及以上              |
-| GPU      | NVIDIA Pascal 系列及以上              |
-| 内存     | 8 GB 或以上（取决于具体向量数据规模） |
-| 硬盘     | SATA 3.0 SSD 及以上                   |
-
-### 使用 Docker
-
-您可以方便地使用 Docker 安装 Milvus。具体请查看 [Milvus 安装指南](https://milvus.io/docs/zh-CN/userguide/install_milvus/)。
-
-### 从源代码编译
-
-#### 软件要求
-
-- Ubuntu 18.04 及以上
-- CMake 3.14 及以上
-- CUDA 10.0 及以上
-- NVIDIA driver 418 及以上
-
-#### 编译
-
-##### 第一步 安装依赖项
-
-```shell
-$ cd [Milvus sourcecode path]/core
-$ ./ubuntu_build_deps.sh
-```
-
-##### 第二步 编译
-
-```shell
-$ cd [Milvus sourcecode path]/core
-$ ./build.sh -t Debug
-or 
-$ ./build.sh -t Release
-```
-
-当您成功编译后，所有 Milvus 必需组件将安装在`[Milvus root path]/core/milvus`路径下。
-
-##### 启动 Milvus 服务
-
-```shell
-$ cd [Milvus root path]/core/milvus
-```
-
-在 `LD_LIBRARY_PATH` 中添加 `lib/` 目录：
-
-```shell
-$ export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/path/to/milvus/lib
-```
-
-启动 Milvus 服务：
-
-```shell
-$ cd scripts
-$ ./start_server.sh
-```
-
-若要停止 Milvus 服务，请使用如下命令：
-
-```shell
-$ ./stop_server.sh
-```
-
-若需要修改 Milvus 配置文件 `conf/server_config.yaml` 和`conf/log_config.conf`，请查看 [Milvus 配置](https://milvus.io/docs/zh-CN/reference/milvus_config/)。
-
-### 开始您的第一个 Milvus 程序
-
-#### 运行 Python 示例代码
-
-请确保系统的 Python 版本为 [Python 3.5](https://www.python.org/downloads/) 或以上。
-
-安装 Milvus Python SDK。
-
-```shell
-# Install Milvus Python SDK
-$ pip install pymilvus==0.2.3
-```
-
-创建 `example.py` 文件，并向文件中加入 [Python 示例代码](https://github.com/milvus-io/pymilvus/blob/master/examples/advanced_example.py)。
-
-运行示例代码
-
-```shell
-# Run Milvus Python example
-$ python3 example.py
-```
-
-#### 运行 C++ 示例代码
-
-```shell
- # Run Milvus C++ example
- $ cd [Milvus root path]/core/milvus/bin
- $ ./sdk_simple
-```
-
-#### 运行 Java 示例代码
-
-请确保系统的 Java 版本为 Java 8 或以上。
-
-请从[此处](https://github.com/milvus-io/milvus-sdk-java/tree/master/examples)获取 Java 示例代码。
+路线图尚未完成，并且可能会存在合理改动。我们欢迎各种针对路线图的意见、需求和建议。
 
 ## 贡献者指南
 
-我们由衷欢迎您推送贡献。关于贡献流程的详细信息，请参阅 [贡献者指南](https://github.com/milvus-io/milvus/blob/master/CONTRIBUTING.md)。本项目遵循 Milvus [行为准则](https://github.com/milvus-io/milvus/blob/master/CODE_OF_CONDUCT.md)。如果您希望参与本项目，请遵守该准则的内容。
+我们由衷欢迎您推送贡献。关于贡献流程的详细信息，请参阅[贡献者指南](https://github.com/milvus-io/milvus/blob/master/CONTRIBUTING.md)。本项目遵循 Milvus [行为准则](https://github.com/milvus-io/milvus/blob/master/CODE_OF_CONDUCT.md)。如果您希望参与本项目，请遵守该准则的内容。
 
-我们使用 [GitHub issues](https://github.com/milvus-io/milvus/issues/new/choose) 追踪问题和补丁。若您希望提出问题或进行讨论，请加入我们的社区。
+我们使用 [GitHub issues](https://github.com/milvus-io/milvus/issues) 追踪问题和补丁。若您希望提出问题或进行讨论，请加入我们的社区。
 
 ## 加入 Milvus 社区
 
-欢迎加入我们的 [Slack 频道](https://join.slack.com/t/milvusio/shared_invite/enQtNzY1OTQ0NDI3NjMzLWNmYmM1NmNjOTQ5MGI5NDhhYmRhMGU5M2NhNzhhMDMzY2MzNDdlYjM5ODQ5MmE3ODFlYzU3YjJkNmVlNDQ2ZTk) 以便与其他用户和贡献者进行交流。
+欢迎加入我们的 [Slack 频道](https://join.slack.com/t/milvusio/shared_invite/enQtNzY1OTQ0NDI3NjMzLWNmYmM1NmNjOTQ5MGI5NDhhYmRhMGU5M2NhNzhhMDMzY2MzNDdlYjM5ODQ5MmE3ODFlYzU3YjJkNmVlNDQ2ZTk)以便与其他用户和贡献者进行交流。
 
-## Milvus 路线图
+## 加入 Milvus 技术交流微信群
 
-请阅读我们的[路线图](https://milvus.io/docs/zh-CN/roadmap/)以获得更多即将开发的新功能。
+![qrcode](https://github.com/milvus-io/docs/blob/v0.7.0/assets/qrcode.png)
 
 ## 相关链接
 
-[Milvus 官方网站](https://www.milvus.io/)
+-   [Milvus.io](https://www.milvus.io)
 
-[Milvus 文档](https://www.milvus.io/docs/en/userguide/install_milvus/)
+-   [Milvus 常见问题](https://www.milvus.io/cn/docs/faq/operational_faq.md)
 
-[Milvus 在线训练营](https://github.com/milvus-io/bootcamp)
+-   [Milvus Medium](https://medium.com/@milvusio)
 
-[Milvus 博客](https://www.milvus.io/blog/)
+-   [Milvus CSDN](https://zilliz.blog.csdn.net/)
 
-[Milvus CSDN](https://zilliz.blog.csdn.net/)
+-   [Milvus Twitter](https://twitter.com/milvusio)
 
-[Milvus 路线图](https://milvus.io/docs/en/roadmap/)
+-   [Milvus Facebook](https://www.facebook.com/io.milvus.5)
+
+-   [Milvus 设计文档](DESIGN.md)
 
 ## 许可协议
 
-[Apache 许可协议2.0版](https://github.com/milvus-io/milvus/blob/master/LICENSE)
-
+[Apache 许可协议 2.0 版](https://github.com/milvus-io/milvus/blob/master/LICENSE)

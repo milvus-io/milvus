@@ -1,0 +1,86 @@
+[
+    {
+        "job_name": "milvus-apollo",
+        "build_params": {
+            "SUITE": "cpu_accuracy_ann.yaml",
+            "IMAGE_TYPE": "cpu",
+            "IMAGE_VERSION": "master",
+            "SERVER_HOST": "apollo"
+        }
+    },
+    {
+        "job_name": "milvus-apollo",
+        "build_params": {
+            "SUITE": "cpu_stability_sift50m.yaml",
+            "IMAGE_TYPE": "cpu",
+            "IMAGE_VERSION": "master",
+            "SERVER_HOST": "apollo"
+        }
+    },
+
+    {
+        "job_name": "milvus-eros",
+        "build_params": {
+            "SUITE": "gpu_accuracy_ann.yaml",
+            "IMAGE_TYPE": "gpu",
+            "IMAGE_VERSION": "master",
+            "SERVER_HOST": "eros"
+        }
+    },
+    {
+        "job_name": "milvus-eros",
+        "build_params": {
+            "SUITE": "gpu_search_stability.yaml",
+            "IMAGE_TYPE": "gpu",
+            "IMAGE_VERSION": "master",
+            "SERVER_HOST": "eros"
+        }
+    },
+    {
+        "job_name": "milvus-eros",
+        "build_params": {
+            "SUITE": "gpu_build_performance.yaml",
+            "IMAGE_TYPE": "gpu",
+            "IMAGE_VERSION": "master",
+            "SERVER_HOST": "eros"
+        }
+    },
+
+    {
+        "job_name": "milvus-poseidon",
+        "build_params": {
+            "SUITE": "gpu_search_performance.yaml",
+            "IMAGE_TYPE": "gpu",
+            "IMAGE_VERSION": "master",
+            "SERVER_HOST": "poseidon"
+        }
+    },
+    {
+        "job_name": "milvus-poseidon",
+        "build_params": {
+            "SUITE": "cpu_search_performance.yaml",
+            "IMAGE_TYPE": "cpu",
+            "IMAGE_VERSION": "master",
+            "SERVER_HOST": "poseidon"
+        }
+    },
+    {
+        "job_name": "milvus-poseidon",
+        "build_params": {
+            "SUITE": "insert_performance.yaml",
+            "IMAGE_TYPE": "gpu",
+            "IMAGE_VERSION": "master",
+            "SERVER_HOST": "poseidon"
+        }
+    },
+    {
+        "job_name": "milvus-poseidon",
+        "build_params": {
+            "SUITE": "gpu_accuracy.yaml",
+            "IMAGE_TYPE": "gpu",
+            "IMAGE_VERSION": "master",
+            "SERVER_HOST": "poseidon"
+        }
+    }
+
+]

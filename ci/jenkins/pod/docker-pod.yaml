@@ -13,6 +13,13 @@ spec:
     command:
     - cat
     tty: true
+    resources:
+      limits:
+        memory: "8Gi"
+        cpu: "2"
+      requests:
+        memory: "2Gi"
+        cpu: "1"
     volumeMounts:
     - name: docker-sock
       mountPath: /var/run/docker.sock
@@ -20,4 +27,8 @@ spec:
   - name: docker-sock
     hostPath:
       path: /var/run/docker.sock
-
+  tolerations:
+  - key: dedicated
+    operator: Equal
+    value: milvus
+    effect: NoSchedule

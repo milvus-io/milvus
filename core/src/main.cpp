@@ -1,32 +1,23 @@
-// Licensed to the Apache Software Foundation (ASF) under one
-// or more contributor license agreements.  See the NOTICE file
-// distributed with this work for additional information
-// regarding copyright ownership.  The ASF licenses this file
-// to you under the Apache License, Version 2.0 (the
-// "License"); you may not use this file except in compliance
-// with the License.  You may obtain a copy of the License at
+// Copyright (C) 2019-2020 Zilliz. All rights reserved.
 //
-//   http://www.apache.org/licenses/LICENSE-2.0
+// Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance
+// with the License. You may obtain a copy of the License at
 //
-// Unless required by applicable law or agreed to in writing,
-// software distributed under the License is distributed on an
-// "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
-// KIND, either express or implied.  See the License for the
-// specific language governing permissions and limitations
-// under the License.
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software distributed under the License
+// is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
+// or implied. See the License for the specific language governing permissions and limitations under the License.
 
 #include <getopt.h>
-#include <libgen.h>
-#include <signal.h>
 #include <unistd.h>
+#include <csignal>
 #include <cstring>
 #include <string>
 
-#include "external/easyloggingpp/easylogging++.h"
-#include "metrics/Metrics.h"
+#include "easyloggingpp/easylogging++.h"
 #include "server/Server.h"
 #include "src/version.h"
-#include "utils/CommonUtil.h"
 #include "utils/SignalUtil.h"
 
 INITIALIZE_EASYLOGGINGPP
@@ -35,10 +26,10 @@ void
 print_help(const std::string& app_name) {
     std::cout << std::endl << "Usage: " << app_name << " [OPTIONS]" << std::endl << std::endl;
     std::cout << "  Options:" << std::endl;
-    std::cout << "   -h --help                 Print this help" << std::endl;
-    std::cout << "   -c --conf_file filename   Read configuration from the file" << std::endl;
-    std::cout << "   -d --daemon               Daemonize this application" << std::endl;
-    std::cout << "   -p --pid_file  filename   PID file used by daemonized app" << std::endl;
+    std::cout << "   -h --help                 Print this help." << std::endl;
+    std::cout << "   -c --conf_file filename   Read configuration from the file." << std::endl;
+    std::cout << "   -d --daemon               Daemonize this application." << std::endl;
+    std::cout << "   -p --pid_file  filename   PID file used by daemonized app." << std::endl;
     std::cout << std::endl;
 }
 
@@ -50,8 +41,20 @@ print_banner() {
     std::cout << "  / /|_/ // // /_| |/ / /_/ /\\ \\    " << std::endl;
     std::cout << " /_/  /_/___/____/___/\\____/___/     " << std::endl;
     std::cout << std::endl;
-    std::cout << "Welcome to Milvus!" << std::endl;
-    std::cout << "Milvus " << BUILD_TYPE << " version: v" << MILVUS_VERSION << ", built at " << BUILD_TIME << std::endl;
+    std::cout << "Welcome to use Milvus!" << std::endl;
+    std::cout << "Milvus " << BUILD_TYPE << " version: v" << MILVUS_VERSION << ", built at " << BUILD_TIME << ", with "
+#ifdef WITH_MKL
+              << "MKL"
+#else
+              << "OpenBLAS"
+#endif
+              << " library." << std::endl;
+#ifdef MILVUS_GPU_VERSION
+    std::cout << "You are using Milvus GPU edition" << std::endl;
+#else
+    std::cout << "You are using Milvus CPU edition" << std::endl;
+#endif
+    std::cout << "Last commit id: " << LAST_COMMIT_ID << std::endl;
     std::cout << std::endl;
 }
 
@@ -95,7 +98,7 @@ main(int argc, char* argv[]) {
                 char* log_filename_ptr = strdup(optarg);
                 log_config_file = log_filename_ptr;
                 free(log_filename_ptr);
-                std::cout << "Initial log config from: " << log_config_file << std::endl;
+                std::cout << "Initializing log config from: " << log_config_file << std::endl;
                 break;
             }
             case 'p': {
@@ -132,7 +135,7 @@ main(int argc, char* argv[]) {
 
     s = server.Start();
     if (s.ok()) {
-        std::cout << "Milvus server start successfully." << std::endl;
+        std::cout << "Milvus server started successfully!" << std::endl;
     } else {
         goto FAIL;
     }

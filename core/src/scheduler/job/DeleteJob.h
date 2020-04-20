@@ -1,19 +1,13 @@
-// Licensed to the Apache Software Foundation (ASF) under one
-// or more contributor license agreements.  See the NOTICE file
-// distributed with this work for additional information
-// regarding copyright ownership.  The ASF licenses this file
-// to you under the Apache License, Version 2.0 (the
-// "License"); you may not use this file except in compliance
-// with the License.  You may obtain a copy of the License at
+// Copyright (C) 2019-2020 Zilliz. All rights reserved.
 //
-//   http://www.apache.org/licenses/LICENSE-2.0
+// Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance
+// with the License. You may obtain a copy of the License at
 //
-// Unless required by applicable law or agreed to in writing,
-// software distributed under the License is distributed on an
-// "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
-// KIND, either express or implied.  See the License for the
-// specific language governing permissions and limitations
-// under the License.
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software distributed under the License
+// is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
+// or implied. See the License for the specific language governing permissions and limitations under the License.
 #pragma once
 
 #include <condition_variable>
@@ -35,7 +29,7 @@ namespace scheduler {
 
 class DeleteJob : public Job {
  public:
-    DeleteJob(std::string table_id, engine::meta::MetaPtr meta_ptr, uint64_t num_resource);
+    DeleteJob(std::string collection_id, engine::meta::MetaPtr meta_ptr, uint64_t num_resource);
 
  public:
     void
@@ -49,8 +43,8 @@ class DeleteJob : public Job {
 
  public:
     std::string
-    table_id() const {
-        return table_id_;
+    collection_id() const {
+        return collection_id_;
     }
 
     engine::meta::MetaPtr
@@ -59,7 +53,7 @@ class DeleteJob : public Job {
     }
 
  private:
-    std::string table_id_;
+    std::string collection_id_;
     engine::meta::MetaPtr meta_ptr_;
 
     uint64_t num_resource_ = 0;

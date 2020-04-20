@@ -1,19 +1,13 @@
-// Licensed to the Apache Software Foundation (ASF) under one
-// or more contributor license agreements.  See the NOTICE file
-// distributed with this work for additional information
-// regarding copyright ownership.  The ASF licenses this file
-// to you under the Apache License, Version 2.0 (the
-// "License"); you may not use this file except in compliance
-// with the License.  You may obtain a copy of the License at
+// Copyright (C) 2019-2020 Zilliz. All rights reserved.
 //
-//   http://www.apache.org/licenses/LICENSE-2.0
+// Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance
+// with the License. You may obtain a copy of the License at
 //
-// Unless required by applicable law or agreed to in writing,
-// software distributed under the License is distributed on an
-// "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
-// KIND, either express or implied.  See the License for the
-// specific language governing permissions and limitations
-// under the License.
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software distributed under the License
+// is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
+// or implied. See the License for the specific language governing permissions and limitations under the License.
 
 #include "scheduler/resource/Resource.h"
 #include "scheduler/SchedInst.h"
@@ -48,12 +42,8 @@ ToString(ResourceType type) {
     }
 }
 
-Resource::Resource(std::string name, ResourceType type, uint64_t device_id, bool enable_loader, bool enable_executor)
-    : name_(std::move(name)),
-      type_(type),
-      device_id_(device_id),
-      enable_loader_(enable_loader),
-      enable_executor_(enable_executor) {
+Resource::Resource(std::string name, ResourceType type, uint64_t device_id, bool enable_executor)
+    : name_(std::move(name)), type_(type), device_id_(device_id), enable_executor_(enable_executor) {
     // register subscriber in tasktable
     task_table_.RegisterSubscriber([&] {
         if (subscriber_) {
@@ -66,9 +56,7 @@ Resource::Resource(std::string name, ResourceType type, uint64_t device_id, bool
 void
 Resource::Start() {
     running_ = true;
-    if (enable_loader_) {
-        loader_thread_ = std::thread(&Resource::loader_function, this);
-    }
+    loader_thread_ = std::thread(&Resource::loader_function, this);
     if (enable_executor_) {
         executor_thread_ = std::thread(&Resource::executor_function, this);
     }
@@ -77,10 +65,8 @@ Resource::Start() {
 void
 Resource::Stop() {
     running_ = false;
-    if (enable_loader_) {
-        WakeupLoader();
-        loader_thread_.join();
-    }
+    WakeupLoader();
+    loader_thread_.join();
     if (enable_executor_) {
         WakeupExecutor();
         executor_thread_.join();
@@ -115,7 +101,6 @@ Resource::Dump() const {
         {"task_total_cost", total_cost_},
         {"total_tasks", total_task_},
         {"running", running_},
-        {"enable_loader", enable_loader_},
         {"enable_executor", enable_executor_},
     };
     return ret;
@@ -168,6 +153,7 @@ Resource::pick_task_execute() {
 
 void
 Resource::loader_function() {
+    SetThreadName("taskloader_th");
     while (running_) {
         std::unique_lock<std::mutex> lock(load_mutex_);
         load_cv_.wait(lock, [&] { return load_flag_; });
@@ -177,6 +163,10 @@ Resource::loader_function() {
             auto task_item = pick_task_load();
             if (task_item == nullptr) {
                 break;
+            }
+            if (task_item->task->Type() == TaskType::BuildIndexTask && name() == "cpu") {
+                BuildMgrInst::GetInstance()->Take();
+                LOG_SERVER_DEBUG_ << name() << " load BuildIndexTask";
             }
             LoadFile(task_item->task);
             task_item->Loaded();
@@ -194,6 +184,7 @@ Resource::loader_function() {
 
 void
 Resource::executor_function() {
+    SetThreadName("taskexector_th");
     if (subscriber_) {
         auto event = std::make_shared<StartUpEvent>(shared_from_this());
         subscriber_(std::static_pointer_cast<Event>(event));
@@ -208,7 +199,6 @@ Resource::executor_function() {
             if (task_item == nullptr) {
                 break;
             }
-
             auto start = get_current_timestamp();
             Process(task_item->task);
             auto finish = get_current_timestamp();

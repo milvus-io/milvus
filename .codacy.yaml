@@ -1,0 +1,7 @@
+exclude_paths:
+  - 'core/src/index/thirdparty/**'
+  - 'sdk/build-support/**'
+  - 'core/build-support/**'
+  - 'core/src/grpc/gen-milvus/**'
+  - 'core/src/grpc/gen-status/**'
+  - 'sdk/grpc-gen/**'

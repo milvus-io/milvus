@@ -1,6 +1,3 @@
-include_directories(${CMAKE_CUDA_TOOLKIT_INCLUDE_DIRECTORIES})
-link_directories(${CUDA_TOOLKIT_ROOT_DIR}/lib64)
-
 include_directories(${INDEX_SOURCE_DIR}/knowhere)
 include_directories(${INDEX_SOURCE_DIR}/thirdparty)
 include_directories(${INDEX_SOURCE_DIR}/thirdparty/SPTAG/AnnService)
@@ -19,62 +16,95 @@ file(GLOB SRC_FILES
         ${SPTAG_SOURCE_DIR}/AnnService/src/Core/KDT/*.cpp
         ${SPTAG_SOURCE_DIR}/AnnService/src/Helper/*.cpp)
 
-if(NOT TARGET SPTAGLibStatic)
+if (NOT TARGET SPTAGLibStatic)
     add_library(SPTAGLibStatic STATIC ${SRC_FILES} ${HDR_FILES})
-endif()
+endif ()
 
 set(external_srcs
-        knowhere/adapter/SptagAdapter.cpp
-        knowhere/adapter/Structure.cpp
-        knowhere/adapter/ArrowAdapter.cpp
         knowhere/common/Exception.cpp
         knowhere/common/Timer.cpp
         )
 
 set(index_srcs
-        knowhere/index/preprocessor/Normalize.cpp
-        knowhere/index/vector_index/IndexKDT.cpp
-        knowhere/index/vector_index/IndexIDMAP.cpp
-        knowhere/index/vector_index/IndexIVF.cpp
-        knowhere/index/vector_index/IndexGPUIVF.cpp
-        knowhere/index/vector_index/helpers/KDTParameterMgr.cpp
-        knowhere/index/vector_index/IndexNSG.cpp
-        knowhere/index/vector_index/nsg/NSG.cpp
-        knowhere/index/vector_index/nsg/NSGIO.cpp
-        knowhere/index/vector_index/nsg/NSGHelper.cpp
-        knowhere/index/vector_index/helpers/Cloner.cpp
-        knowhere/index/vector_index/helpers/FaissGpuResourceMgr.cpp
-        knowhere/index/vector_index/IndexIVFSQ.cpp
-        knowhere/index/vector_index/IndexGPUIVFSQ.cpp
-        knowhere/index/vector_index/IndexIVFSQHybrid.cpp
-        knowhere/index/vector_index/IndexIVFPQ.cpp
-        knowhere/index/vector_index/IndexGPUIVFPQ.cpp
-        knowhere/index/vector_index/FaissBaseIndex.cpp
+        knowhere/index/vector_index/adapter/SptagAdapter.cpp
+        knowhere/index/vector_index/adapter/VectorAdapter.cpp
         knowhere/index/vector_index/helpers/FaissIO.cpp
         knowhere/index/vector_index/helpers/IndexParameter.cpp
+        knowhere/index/vector_index/helpers/SPTAGParameterMgr.cpp
+        knowhere/index/vector_index/impl/nsg/Distance.cpp
+        knowhere/index/vector_index/impl/nsg/NSG.cpp
+        knowhere/index/vector_index/impl/nsg/NSGHelper.cpp
+        knowhere/index/vector_index/impl/nsg/NSGIO.cpp
+        knowhere/index/vector_index/ConfAdapter.cpp
+        knowhere/index/vector_index/ConfAdapterMgr.cpp
+        knowhere/index/vector_index/FaissBaseBinaryIndex.cpp
+        knowhere/index/vector_index/FaissBaseIndex.cpp
+        knowhere/index/vector_index/IndexBinaryIDMAP.cpp
+        knowhere/index/vector_index/IndexBinaryIVF.cpp
+        knowhere/index/vector_index/IndexHNSW.cpp
+        knowhere/index/vector_index/IndexIDMAP.cpp
+        knowhere/index/vector_index/IndexIVF.cpp
+        knowhere/index/vector_index/IndexIVFPQ.cpp
+        knowhere/index/vector_index/IndexIVFSQ.cpp
+        knowhere/index/vector_index/IndexNSG.cpp
+        knowhere/index/vector_index/IndexSPTAG.cpp
+        knowhere/index/vector_index/IndexType.cpp
+        knowhere/index/vector_index/VecIndexFactory.cpp
+        knowhere/index/vector_index/IndexAnnoy.cpp
         )
 
 set(depend_libs
         SPTAGLibStatic
         faiss
-        openblas
-        lapack
-        arrow
-        ${ARROW_PREFIX}/lib/libjemalloc_pic.a
-        cudart
-        cublas
         gomp
         gfortran
         pthread
         )
+if (FAISS_WITH_MKL)
+    set(depend_libs ${depend_libs}
+            "-Wl,--start-group \
+            ${MKL_LIB_PATH}/libmkl_intel_ilp64.a \
+            ${MKL_LIB_PATH}/libmkl_gnu_thread.a \
+            ${MKL_LIB_PATH}/libmkl_core.a \
+            -Wl,--end-group -lgomp -lpthread -lm -ldl"
+            )
+else ()
+    set(depend_libs ${depend_libs}
+            ${BLAS_LIBRARIES}
+            ${LAPACK_LIBRARIES}
+            )
+endif ()
 
-if(NOT TARGET knowhere)
+if (KNOWHERE_GPU_VERSION)
+    include_directories(${CUDA_INCLUDE_DIRS})
+    link_directories("${CUDA_TOOLKIT_ROOT_DIR}/lib64")
+    set(cuda_lib
+            cudart
+            cublas
+            )
+    set(depend_libs ${depend_libs}
+            ${cuda_lib}
+            )
+
+    set(index_srcs ${index_srcs}
+            knowhere/index/vector_index/gpu/IndexGPUIDMAP.cpp
+            knowhere/index/vector_index/gpu/IndexGPUIVF.cpp
+            knowhere/index/vector_index/gpu/IndexGPUIVFPQ.cpp
+            knowhere/index/vector_index/gpu/IndexGPUIVFSQ.cpp
+            knowhere/index/vector_index/gpu/IndexIVFSQHybrid.cpp
+            knowhere/index/vector_index/helpers/Cloner.cpp
+            knowhere/index/vector_index/helpers/FaissGpuResourceMgr.cpp
+            )
+
+endif ()
+
+if (NOT TARGET knowhere)
     add_library(
             knowhere STATIC
             ${external_srcs}
             ${index_srcs}
     )
-endif()
+endif ()
 
 target_link_libraries(
         knowhere
@@ -85,7 +115,7 @@ set(INDEX_INCLUDE_DIRS
         ${INDEX_SOURCE_DIR}/knowhere
         ${INDEX_SOURCE_DIR}/thirdparty
         ${INDEX_SOURCE_DIR}/thirdparty/SPTAG/AnnService
-        ${ARROW_INCLUDE_DIR}
+#        ${ARROW_INCLUDE_DIR}
         ${FAISS_INCLUDE_DIR}
         ${OPENBLAS_INCLUDE_DIR}
         ${LAPACK_INCLUDE_DIR}

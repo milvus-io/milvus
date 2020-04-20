@@ -1,24 +1,15 @@
-timeout(time: 60, unit: 'MINUTES') {
-    dir ("tests/milvus_python_test") {
-        sh 'python3 -m pip install -r requirements.txt'
-        sh "pytest . --alluredir=\"test_out/dev/single/sqlite\" --level=1 --ip ${env.PIPELINE_NAME}-${env.BUILD_NUMBER}-single-gpu-milvus-gpu-engine.milvus.svc.cluster.local"
+dir ('milvus-helm') {
+    sh 'helm version'
+    sh 'helm repo add stable https://kubernetes.oss-cn-hangzhou.aliyuncs.com/charts'
+    sh 'helm repo update'
+    checkout([$class: 'GitSCM', branches: [[name: "master"]], userRemoteConfigs: [[url: "https://github.com/milvus-io/milvus-helm.git", name: 'origin', refspec: "+refs/heads/master:refs/remotes/origin/master"]]])
+    retry(3) {
+        sh "helm install --wait --timeout 600s --set image.repository=registry.zilliz.com/milvus/engine --set image.tag=${DOCKER_VERSION} --set image.pullPolicy=Always --set service.type=ClusterIP -f ci/db_backend/mysql_${BINARY_VERSION}_values.yaml -f ci/filebeat/values.yaml --namespace milvus ${env.HELM_RELEASE_NAME} ."
     }
-    // mysql database backend test
-    // load "${env.WORKSPACE}/ci/jenkins/jenkinsfile/cleanupSingleDev.groovy"
+}
 
-    // Remove mysql-version tests: 10-28
-
-    // if (!fileExists('milvus-helm')) {
-    //     dir ("milvus-helm") {
-    //         checkout([$class: 'GitSCM', branches: [[name: "0.5.0"]], userRemoteConfigs: [[url: "https://github.com/milvus-io/milvus-helm.git", name: 'origin', refspec: "+refs/heads/0.5.0:refs/remotes/origin/0.5.0"]]])
-    //     }
-    // }
-    // dir ("milvus-helm") {
-    //     dir ("milvus-gpu") {
-    //         sh "helm install --wait --timeout 300 --set engine.image.tag=${DOCKER_VERSION} --set expose.type=clusterIP --name ${env.PIPELINE_NAME}-${env.BUILD_NUMBER}-single-gpu -f ci/db_backend/mysql_values.yaml -f ci/filebeat/values.yaml --namespace milvus ."
-    //     }
-    // }
-    // dir ("tests/milvus_python_test") {
-    //     sh "pytest . --alluredir=\"test_out/dev/single/mysql\" --level=1 --ip ${env.PIPELINE_NAME}-${env.BUILD_NUMBER}-single-gpu-milvus-gpu-engine.milvus.svc.cluster.local"
-    // }
+dir ("tests/milvus_python_test") {
+    // sh 'python3 -m pip install -r requirements.txt -i http://pypi.douban.com/simple --trusted-host pypi.douban.com'
+    sh 'python3 -m pip install -r requirements.txt'
+    sh "pytest . --alluredir=\"test_out/dev/single/mysql\" --level=1 --ip ${env.HELM_RELEASE_NAME}.milvus.svc.cluster.local"
 }

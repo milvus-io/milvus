@@ -1,29 +1,21 @@
-// Licensed to the Apache Software Foundation (ASF) under one
-// or more contributor license agreements.  See the NOTICE file
-// distributed with this work for additional information
-// regarding copyright ownership.  The ASF licenses this file
-// to you under the Apache License, Version 2.0 (the
-// "License"); you may not use this file except in compliance
-// with the License.  You may obtain a copy of the License at
+// Copyright (C) 2019-2020 Zilliz. All rights reserved.
 //
-//   http://www.apache.org/licenses/LICENSE-2.0
+// Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance
+// with the License. You may obtain a copy of the License at
 //
-// Unless required by applicable law or agreed to in writing,
-// software distributed under the License is distributed on an
-// "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
-// KIND, either express or implied.  See the License for the
-// specific language governing permissions and limitations
-// under the License.
-
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software distributed under the License
+// is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
+// or implied. See the License for the specific language governing permissions and limitations under the License.
 
 #include <gtest/gtest.h>
 
-#include "scheduler/resource/Resource.h"
+#include "scheduler/Algorithm.h"
+#include "scheduler/ResourceFactory.h"
 #include "scheduler/ResourceMgr.h"
 #include "scheduler/resource/CpuResource.h"
-#include "scheduler/ResourceFactory.h"
-#include "scheduler/Algorithm.h"
-
+#include "scheduler/resource/Resource.h"
 
 namespace milvus {
 namespace scheduler {
@@ -32,8 +24,8 @@ class AlgorithmTest : public testing::Test {
  protected:
     void
     SetUp() override {
-        ResourcePtr disk = ResourceFactory::Create("disk", "DISK", 0, true, false);
-        ResourcePtr cpu0 = ResourceFactory::Create("cpu0", "CPU", 0, true, true);
+        ResourcePtr disk = ResourceFactory::Create("disk", "DISK", 0, false);
+        ResourcePtr cpu0 = ResourceFactory::Create("cpu0", "CPU", 0);
         ResourcePtr cpu1 = ResourceFactory::Create("cpu1", "CPU", 1);
         ResourcePtr cpu2 = ResourceFactory::Create("cpu2", "CPU", 2);
         ResourcePtr gpu0 = ResourceFactory::Create("gpu0", "GPU", 0);
@@ -103,6 +95,5 @@ TEST_F(AlgorithmTest, SHORTESTPATH_TEST) {
     }
 }
 
-} // namespace scheduler
-} // namespace milvus
-
+}  // namespace scheduler
+}  // namespace milvus

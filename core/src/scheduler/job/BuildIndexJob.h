@@ -1,19 +1,13 @@
-// Licensed to the Apache Software Foundation (ASF) under one
-// or more contributor license agreements.  See the NOTICE file
-// distributed with this work for additional information
-// regarding copyright ownership.  The ASF licenses this file
-// to you under the Apache License, Version 2.0 (the
-// "License"); you may not use this file except in compliance
-// with the License.  You may obtain a copy of the License at
+// Copyright (C) 2019-2020 Zilliz. All rights reserved.
 //
-//   http://www.apache.org/licenses/LICENSE-2.0
+// Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance
+// with the License. You may obtain a copy of the License at
 //
-// Unless required by applicable law or agreed to in writing,
-// software distributed under the License is distributed on an
-// "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
-// KIND, either express or implied.  See the License for the
-// specific language governing permissions and limitations
-// under the License.
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software distributed under the License
+// is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
+// or implied. See the License for the specific language governing permissions and limitations under the License.
 #pragma once
 
 #include <condition_variable>
@@ -27,27 +21,30 @@
 #include <unordered_map>
 #include <vector>
 
-#include "Job.h"
+#include "config/handler/CacheConfigHandler.h"
 #include "db/meta/Meta.h"
 #include "scheduler/Definition.h"
+#include "scheduler/job/Job.h"
 
 namespace milvus {
 namespace scheduler {
 
-using engine::meta::TableFileSchemaPtr;
+using engine::meta::SegmentSchemaPtr;
 
-using Id2ToIndexMap = std::unordered_map<size_t, TableFileSchemaPtr>;
-using Id2ToTableFileMap = std::unordered_map<size_t, TableFileSchema>;
+using Id2ToIndexMap = std::unordered_map<size_t, SegmentSchemaPtr>;
+using Id2ToTableFileMap = std::unordered_map<size_t, SegmentSchema>;
 
-class BuildIndexJob : public Job {
+class BuildIndexJob : public Job, public server::CacheConfigHandler {
  public:
     explicit BuildIndexJob(engine::meta::MetaPtr meta_ptr, engine::DBOptions options);
 
+    ~BuildIndexJob() = default;
+
  public:
     bool
-    AddToIndexFiles(const TableFileSchemaPtr& to_index_file);
+    AddToIndexFiles(const SegmentSchemaPtr& to_index_file);
 
-    Status&
+    void
     WaitBuildIndexFinish();
 
     void
@@ -76,6 +73,10 @@ class BuildIndexJob : public Job {
     options() const {
         return options_;
     }
+
+ protected:
+    void
+    OnCacheInsertDataChanged(bool value) override;
 
  private:
     Id2ToIndexMap to_index_files_;

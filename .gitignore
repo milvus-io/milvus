@@ -12,7 +12,6 @@ __pycache__
 # vscode generated files
 .vscode
 
-.env
 build
 cmake-build-debug
 cmake-build-release
@@ -26,3 +25,11 @@ cmake_build
 *.lo
 *.tar.gz
 *.log
+.coverage
+*.pyc
+cov_html/
+
+# temp
+shards/all_in_one_with_mysql/metadata/
+shards/mishards/.env
+*.swp

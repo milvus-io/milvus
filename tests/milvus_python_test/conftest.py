@@ -5,6 +5,7 @@ import logging
 import pytest
 from utils import gen_unique_str
 from milvus import Milvus, IndexType, MetricType
+from utils import *
 
 index_file_size = 10
 
@@ -12,12 +13,14 @@ index_file_size = 10
 def pytest_addoption(parser):
     parser.addoption("--ip", action="store", default="localhost")
     parser.addoption("--port", action="store", default=19530)
-    parser.addoption("--internal", action="store", default=False)
+    parser.addoption("--http-port", action="store", default=19121)
+    parser.addoption("--handler", action="store", default="GRPC")
 
 
 def check_server_connection(request):
     ip = request.config.getoption("--ip")
     port = request.config.getoption("--port")
+
     connected = True
     if ip and (ip not in ['localhost', '127.0.0.1']):
         try:
@@ -28,30 +31,32 @@ def check_server_connection(request):
     return connected
 
 
-def get_args(request):
-    args = {
-        "ip": request.config.getoption("--ip"),
-        "port": request.config.getoption("--port")
-    }
-    return args
-
-
 @pytest.fixture(scope="module")
 def connect(request):
     ip = request.config.getoption("--ip")
     port = request.config.getoption("--port")
-    milvus = Milvus()
+    http_port = request.config.getoption("--http-port")
+    handler = request.config.getoption("--handler")
+    milvus = get_milvus(handler=handler)
     try:
-        milvus.connect(host=ip, port=port)
-    except:
+        if handler == "HTTP":
+            port = http_port
+        status = milvus.connect(host=ip, port=port)
+        logging.getLogger().info(status)
+        if not status.OK():
+            # try again
+            logging.getLogger().info("------------------------------------")
+            logging.getLogger().info("Try to connect again")
+            logging.getLogger().info("------------------------------------")
+            res = milvus.connect(host=ip, port=port)
+    except Exception as e:
+        logging.getLogger().error(str(e))
         pytest.exit("Milvus server can not connected, exit pytest ...")
-
     def fin():
         try:
             milvus.disconnect()
         except:
             pass
-
     request.addfinalizer(fin)
     return milvus
 
@@ -60,16 +65,9 @@ def connect(request):
 def dis_connect(request):
     ip = request.config.getoption("--ip")
     port = request.config.getoption("--port")
-    milvus = Milvus()
-    milvus.connect(host=ip, port=port)
-    milvus.disconnect()
-    def fin():
-        try:
-            milvus.disconnect()
-        except:
-            pass
-
-    request.addfinalizer(fin)
+    http_port = request.config.getoption("--http-port")
+    handler = request.config.getoption("--handler")
+    milvus = get_milvus(handler=handler)
     return milvus
 
 
@@ -77,56 +75,176 @@ def dis_connect(request):
 def args(request):
     ip = request.config.getoption("--ip")
     port = request.config.getoption("--port")
-    internal = request.config.getoption("--internal")
-    args = {"ip": ip, "port": port}
-    if internal:
-        args = {"ip": ip, "port": port, "internal": internal}
+    http_port = request.config.getoption("--http-port")
+    handler = request.config.getoption("--handler")
+    if handler == "HTTP":
+        port = http_port
+    args = {"ip": ip, "port": port, "handler": handler}
     return args
 
 
+@pytest.fixture(scope="module")
+def milvus(request):
+    handler = request.config.getoption("--handler")
+    return get_milvus(handler=handler)
+
+
 @pytest.fixture(scope="function")
-def table(request, connect):
-    ori_table_name = getattr(request.module, "table_id", "test")
-    table_name = gen_unique_str(ori_table_name)
+def collection(request, connect):
+    ori_collection_name = getattr(request.module, "collection_id", "test")
+    collection_name = gen_unique_str(ori_collection_name)
     dim = getattr(request.module, "dim", "128")
-    param = {'table_name': table_name,
+    param = {'collection_name': collection_name,
              'dimension': dim,
              'index_file_size': index_file_size,
              'metric_type': MetricType.L2}
-    status = connect.create_table(param)
+    status = connect.create_collection(param)
     # logging.getLogger().info(status)
     if not status.OK():
-        pytest.exit("Table can not be created, exit pytest ...")
+        pytest.exit("collection can not be created, exit pytest ...")
 
     def teardown():
-        status, table_names = connect.show_tables()
-        for table_name in table_names:
-            connect.delete_table(table_name)
+        status, collection_names = connect.show_collections()
+        for collection_name in collection_names:
+            connect.drop_collection(collection_name)
 
     request.addfinalizer(teardown)
 
-    return table_name
+    return collection_name
 
 
 @pytest.fixture(scope="function")
-def ip_table(request, connect):
-    ori_table_name = getattr(request.module, "table_id", "test")
-    table_name = gen_unique_str(ori_table_name)
+def ip_collection(request, connect):
+    ori_collection_name = getattr(request.module, "collection_id", "test")
+    collection_name = gen_unique_str(ori_collection_name)
     dim = getattr(request.module, "dim", "128")
-    param = {'table_name': table_name,
+    param = {'collection_name': collection_name,
              'dimension': dim,
              'index_file_size': index_file_size,
              'metric_type': MetricType.IP}
-    status = connect.create_table(param)
+    status = connect.create_collection(param)
     # logging.getLogger().info(status)
     if not status.OK():
-        pytest.exit("Table can not be created, exit pytest ...")
+        pytest.exit("collection can not be created, exit pytest ...")
 
     def teardown():
-        status, table_names = connect.show_tables()
-        for table_name in table_names:
-            connect.delete_table(table_name)
+        status, collection_names = connect.show_collections()
+        for collection_name in collection_names:
+            connect.drop_collection(collection_name)
 
     request.addfinalizer(teardown)
 
-    return table_name
+    return collection_name
+
+
+@pytest.fixture(scope="function")
+def jac_collection(request, connect):
+    ori_collection_name = getattr(request.module, "collection_id", "test")
+    collection_name = gen_unique_str(ori_collection_name)
+    dim = getattr(request.module, "dim", "128")
+    param = {'collection_name': collection_name,
+             'dimension': dim,
+             'index_file_size': index_file_size,
+             'metric_type': MetricType.JACCARD}
+    status = connect.create_collection(param)
+    # logging.getLogger().info(status)
+    if not status.OK():
+        pytest.exit("collection can not be created, exit pytest ...")
+
+    def teardown():
+        status, collection_names = connect.show_collections()
+        for collection_name in collection_names:
+            connect.drop_collection(collection_name)
+
+    request.addfinalizer(teardown)
+
+    return collection_name
+
+@pytest.fixture(scope="function")
+def ham_collection(request, connect):
+    ori_collection_name = getattr(request.module, "collection_id", "test")
+    collection_name = gen_unique_str(ori_collection_name)
+    dim = getattr(request.module, "dim", "128")
+    param = {'collection_name': collection_name,
+             'dimension': dim,
+             'index_file_size': index_file_size,
+             'metric_type': MetricType.HAMMING}
+    status = connect.create_collection(param)
+    # logging.getLogger().info(status)
+    if not status.OK():
+        pytest.exit("collection can not be created, exit pytest ...")
+
+    def teardown():
+        status, collection_names = connect.show_collections()
+        for collection_name in collection_names:
+            connect.drop_collection(collection_name)
+
+    request.addfinalizer(teardown)
+
+    return collection_name
+
+@pytest.fixture(scope="function")
+def tanimoto_collection(request, connect):
+    ori_collection_name = getattr(request.module, "collection_id", "test")
+    collection_name = gen_unique_str(ori_collection_name)
+    dim = getattr(request.module, "dim", "128")
+    param = {'collection_name': collection_name,
+             'dimension': dim,
+             'index_file_size': index_file_size,
+             'metric_type': MetricType.TANIMOTO}
+    status = connect.create_collection(param)
+    # logging.getLogger().info(status)
+    if not status.OK():
+        pytest.exit("collection can not be created, exit pytest ...")
+
+    def teardown():
+        status, collection_names = connect.show_collections()
+        for collection_name in collection_names:
+            connect.drop_collection(collection_name)
+
+    request.addfinalizer(teardown)
+    return collection_name
+
+@pytest.fixture(scope="function")
+def substructure_collection(request, connect):
+    ori_collection_name = getattr(request.module, "collection_id", "test")
+    collection_name = gen_unique_str(ori_collection_name)
+    dim = getattr(request.module, "dim", "128")
+    param = {'collection_name': collection_name,
+             'dimension': dim,
+             'index_file_size': index_file_size,
+             'metric_type': MetricType.SUBSTRUCTURE}
+    status = connect.create_collection(param)
+    # logging.getLogger().info(status)
+    if not status.OK():
+        pytest.exit("collection can not be created, exit pytest ...")
+
+    def teardown():
+        status, collection_names = connect.show_collections()
+        for collection_name in collection_names:
+            connect.drop_collection(collection_name)
+
+    request.addfinalizer(teardown)
+    return collection_name
+
+@pytest.fixture(scope="function")
+def superstructure_collection(request, connect):
+    ori_collection_name = getattr(request.module, "collection_id", "test")
+    collection_name = gen_unique_str(ori_collection_name)
+    dim = getattr(request.module, "dim", "128")
+    param = {'collection_name': collection_name,
+             'dimension': dim,
+             'index_file_size': index_file_size,
+             'metric_type': MetricType.SUPERSTRUCTURE}
+    status = connect.create_collection(param)
+    # logging.getLogger().info(status)
+    if not status.OK():
+        pytest.exit("collection can not be created, exit pytest ...")
+
+    def teardown():
+        status, collection_names = connect.show_collections()
+        for collection_name in collection_names:
+            connect.drop_collection(collection_name)
+
+    request.addfinalizer(teardown)
+    return collection_name

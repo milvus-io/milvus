@@ -1,7 +1,7 @@
 ---
 name: "\U0001F680 Feature request"
 about: Suggest an idea for Milvus
-title: "[FEATURE]"
+title: ''
 labels: ''
 assignees: ''
 

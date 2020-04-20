@@ -1,19 +1,13 @@
-// Licensed to the Apache Software Foundation (ASF) under one
-// or more contributor license agreements.  See the NOTICE file
-// distributed with this work for additional information
-// regarding copyright ownership.  The ASF licenses this file
-// to you under the Apache License, Version 2.0 (the
-// "License"); you may not use this file except in compliance
-// with the License.  You may obtain a copy of the License at
+// Copyright (C) 2019-2020 Zilliz. All rights reserved.
 //
-//   http://www.apache.org/licenses/LICENSE-2.0
+// Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance
+// with the License. You may obtain a copy of the License at
 //
-// Unless required by applicable law or agreed to in writing,
-// software distributed under the License is distributed on an
-// "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
-// KIND, either express or implied.  See the License for the
-// specific language governing permissions and limitations
-// under the License.
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software distributed under the License
+// is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
+// or implied. See the License for the specific language governing permissions and limitations under the License.
 
 #include "scheduler/TaskTable.h"
 #include "Utils.h"
@@ -155,7 +149,7 @@ TaskTableItem::Dump() const {
 std::vector<uint64_t>
 TaskTable::PickToLoad(uint64_t limit) {
 #if 1
-    TimeRecorder rc("");
+    // TimeRecorder rc("");
     std::vector<uint64_t> indexes;
     bool cross = false;
 
@@ -178,7 +172,8 @@ TaskTable::PickToLoad(uint64_t limit) {
 
             // if task is a build index task, limit it
             if (task->Type() == TaskType::BuildIndexTask && task->path().Current() == "cpu") {
-                if (not BuildMgrInst::GetInstance()->Take()) {
+                if (BuildMgrInst::GetInstance()->NumOfAvailable() < 1) {
+                    LOG_SERVER_WARNING_ << "BuildMgr doesnot have available place for building index";
                     continue;
                 }
             }
@@ -187,13 +182,13 @@ TaskTable::PickToLoad(uint64_t limit) {
             ++pick_count;
         }
     }
-    rc.ElapseFromBegin("PickToLoad ");
+    // rc.ElapseFromBegin("PickToLoad ");
     return indexes;
 #else
     size_t count = 0;
     for (uint64_t j = last_finish_ + 1; j < table_.size(); ++j) {
         if (not table_[j]) {
-            SERVER_LOG_WARNING << "table[" << j << "] is nullptr";
+            LOG_SERVER_WARNING_ << "collection[" << j << "] is nullptr";
         }
 
         if (table_[j]->task->path().Current() == "cpu") {
@@ -238,7 +233,7 @@ TaskTable::PickToLoad(uint64_t limit) {
 
 std::vector<uint64_t>
 TaskTable::PickToExecute(uint64_t limit) {
-    TimeRecorder rc("");
+    // TimeRecorder rc("");
     std::vector<uint64_t> indexes;
     bool cross = false;
     uint64_t available_begin = table_.front() + 1;
@@ -259,7 +254,7 @@ TaskTable::PickToExecute(uint64_t limit) {
             ++pick_count;
         }
     }
-    rc.ElapseFromBegin("PickToExecute ");
+    // rc.ElapseFromBegin("PickToExecute ");
     return indexes;
 }
 
@@ -282,7 +277,7 @@ TaskTable::TaskToExecute() {
     auto begin = table_.front() + 1;
     for (size_t i = 0; i < table_.size(); ++i) {
         auto index = begin + i;
-        if (table_[index]->state == TaskTableItemState::LOADED) {
+        if (table_[index] && table_[index]->state == TaskTableItemState::LOADED) {
             ++count;
         }
     }

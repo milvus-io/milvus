@@ -1,19 +1,13 @@
-// Licensed to the Apache Software Foundation (ASF) under one
-// or more contributor license agreements.  See the NOTICE file
-// distributed with this work for additional information
-// regarding copyright ownership.  The ASF licenses this file
-// to you under the Apache License, Version 2.0 (the
-// "License"); you may not use this file except in compliance
-// with the License.  You may obtain a copy of the License at
+// Copyright (C) 2019-2020 Zilliz. All rights reserved.
 //
-//   http://www.apache.org/licenses/LICENSE-2.0
+// Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance
+// with the License. You may obtain a copy of the License at
 //
-// Unless required by applicable law or agreed to in writing,
-// software distributed under the License is distributed on an
-// "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
-// KIND, either express or implied.  See the License for the
-// specific language governing permissions and limitations
-// under the License.
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software distributed under the License
+// is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
+// or implied. See the License for the specific language governing permissions and limitations under the License.
 
 #include "utils/TimeRecorder.h"
 #include "utils/Log.h"
@@ -24,8 +18,7 @@ TimeRecorder::TimeRecorder(const std::string& header, int64_t log_level) : heade
     start_ = last_ = stdclock::now();
 }
 
-TimeRecorder::~TimeRecorder() {
-}
+TimeRecorder::~TimeRecorder() = default;
 
 std::string
 TimeRecorder::GetTimeSpanStr(double span) {
@@ -47,31 +40,31 @@ TimeRecorder::PrintTimeRecord(const std::string& msg, double span) {
 
     switch (log_level_) {
         case 0: {
-            SERVER_LOG_TRACE << str_log;
+            LOG_SERVER_TRACE_ << str_log;
             break;
         }
         case 1: {
-            SERVER_LOG_DEBUG << str_log;
+            LOG_SERVER_DEBUG_ << str_log;
             break;
         }
         case 2: {
-            SERVER_LOG_INFO << str_log;
+            LOG_SERVER_INFO_ << str_log;
             break;
         }
         case 3: {
-            SERVER_LOG_WARNING << str_log;
+            LOG_SERVER_WARNING_ << str_log;
             break;
         }
         case 4: {
-            SERVER_LOG_ERROR << str_log;
+            LOG_SERVER_ERROR_ << str_log;
             break;
         }
         case 5: {
-            SERVER_LOG_FATAL << str_log;
+            LOG_SERVER_FATAL_ << str_log;
             break;
         }
         default: {
-            SERVER_LOG_INFO << str_log;
+            LOG_SERVER_INFO_ << str_log;
             break;
         }
     }
@@ -94,6 +87,13 @@ TimeRecorder::ElapseFromBegin(const std::string& msg) {
 
     PrintTimeRecord(msg, span);
     return span;
+}
+
+TimeRecorderAuto::TimeRecorderAuto(const std::string& header, int64_t log_level) : TimeRecorder(header, log_level) {
+}
+
+TimeRecorderAuto::~TimeRecorderAuto() {
+    ElapseFromBegin("totally cost");
 }
 
 }  // namespace milvus

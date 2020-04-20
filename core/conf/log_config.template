@@ -1,5 +1,5 @@
 * GLOBAL:
-    FORMAT                  =   "%datetime | %level | %logger | %msg"
+    FORMAT                  =   "[%datetime][%level]%msg"
     FILENAME                =   "@MILVUS_DB_PATH@/logs/milvus-%datetime{%y-%M-%d-%H:%m}-global.log"
     ENABLED                 =   true
     TO_FILE                 =   true

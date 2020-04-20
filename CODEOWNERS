@@ -1,0 +1,9 @@
+# Each line is a component followed by one or more owners. 
+
+*                        @JinHai-CN
+/sdk                     @scsven
+/shards                  @XuPeng-SH
+/core/                   @scsven
+/core/src/db/meta        @yhmo
+/core/src/index/knowhere @cydrain
+/core/src/index/         @shengjun1985

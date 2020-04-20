@@ -1,64 +1,79 @@
-// Licensed to the Apache Software Foundation (ASF) under one
-// or more contributor license agreements.  See the NOTICE file
-// distributed with this work for additional information
-// regarding copyright ownership.  The ASF licenses this file
-// to you under the Apache License, Version 2.0 (the
-// "License"); you may not use this file except in compliance
-// with the License.  You may obtain a copy of the License at
+// Copyright (C) 2019-2020 Zilliz. All rights reserved.
 //
-//   http://www.apache.org/licenses/LICENSE-2.0
+// Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance
+// with the License. You may obtain a copy of the License at
 //
-// Unless required by applicable law or agreed to in writing,
-// software distributed under the License is distributed on an
-// "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
-// KIND, either express or implied.  See the License for the
-// specific language governing permissions and limitations
-// under the License.
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software distributed under the License
+// is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
+// or implied. See the License for the specific language governing permissions and limitations under the License
 
 #pragma once
 
 #include <memory>
 #include <vector>
 
-#include "VectorIndex.h"
+#include "knowhere/common/Exception.h"
+#include "knowhere/common/Log.h"
+#include "knowhere/index/vector_index/VecIndex.h"
 
+namespace milvus {
 namespace knowhere {
 
-namespace algo {
+namespace impl {
 class NsgIndex;
 }
 
-class NSG : public VectorIndex {
+class NSG : public VecIndex {
  public:
-    explicit NSG(const int64_t& gpu_num) : gpu_(gpu_num) {
+    explicit NSG(const int64_t& gpu_num = -1) : gpu_(gpu_num) {
+        if (gpu_ >= 0) {
+            index_mode_ = IndexMode::MODE_GPU;
+        }
+        index_type_ = IndexEnum::INDEX_NSG;
     }
 
-    NSG() = default;
-
-    IndexModelPtr
-    Train(const DatasetPtr& dataset, const Config& config) override;
-    DatasetPtr
-    Search(const DatasetPtr& dataset, const Config& config) override;
-    void
-    Add(const DatasetPtr& dataset, const Config& config) override;
     BinarySet
-    Serialize() override;
+    Serialize(const Config& config = Config()) override;
+
     void
-    Load(const BinarySet& index_binary) override;
+    Load(const BinarySet&) override;
+
+    void
+    BuildAll(const DatasetPtr& dataset_ptr, const Config& config) override {
+        Train(dataset_ptr, config);
+    }
+
+    void
+    Train(const DatasetPtr&, const Config&) override;
+
+    void
+    Add(const DatasetPtr&, const Config&) override {
+        KNOWHERE_THROW_MSG("Incremental index is not supported");
+    }
+
+    void
+    AddWithoutIds(const DatasetPtr&, const Config&) override {
+        KNOWHERE_THROW_MSG("Addwithoutids is not supported");
+    }
+
+    DatasetPtr
+    Query(const DatasetPtr&, const Config&) override;
+
     int64_t
     Count() override;
+
     int64_t
-    Dimension() override;
-    VectorIndexPtr
-    Clone() override;
-    void
-    Seal() override;
+    Dim() override;
 
  private:
-    std::shared_ptr<algo::NsgIndex> index_;
+    std::mutex mutex_;
     int64_t gpu_;
+    std::shared_ptr<impl::NsgIndex> index_;
 };
 
 using NSGIndexPtr = std::shared_ptr<NSG>();
 
 }  // namespace knowhere
+}  // namespace milvus

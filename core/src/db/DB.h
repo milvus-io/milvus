@@ -1,30 +1,28 @@
-// Licensed to the Apache Software Foundation (ASF) under one
-// or more contributor license agreements.  See the NOTICE file
-// distributed with this work for additional information
-// regarding copyright ownership.  The ASF licenses this file
-// to you under the Apache License, Version 2.0 (the
-// "License"); you may not use this file except in compliance
-// with the License.  You may obtain a copy of the License at
+// Copyright (C) 2019-2020 Zilliz. All rights reserved.
 //
-//   http://www.apache.org/licenses/LICENSE-2.0
+// Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance
+// with the License. You may obtain a copy of the License at
 //
-// Unless required by applicable law or agreed to in writing,
-// software distributed under the License is distributed on an
-// "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
-// KIND, either express or implied.  See the License for the
-// specific language governing permissions and limitations
-// under the License.
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software distributed under the License
+// is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
+// or implied. See the License for the specific language governing permissions and limitations under the License.
 
 #pragma once
 
-#include "Options.h"
-#include "Types.h"
-#include "meta/Meta.h"
-#include "utils/Status.h"
-
 #include <memory>
 #include <string>
+#include <unordered_map>
 #include <vector>
+
+#include "Options.h"
+#include "Types.h"
+#include "context/HybridSearchContext.h"
+#include "meta/Meta.h"
+#include "query/GeneralQuery.h"
+#include "server/context/Context.h"
+#include "utils/Status.h"
 
 namespace milvus {
 namespace engine {
@@ -34,7 +32,9 @@ class Env;
 class DB {
  public:
     DB() = default;
+
     DB(const DB&) = delete;
+
     DB&
     operator=(const DB&) = delete;
 
@@ -42,54 +42,126 @@ class DB {
 
     virtual Status
     Start() = 0;
+
     virtual Status
     Stop() = 0;
 
     virtual Status
-    CreateTable(meta::TableSchema& table_schema_) = 0;
-    virtual Status
-    DeleteTable(const std::string& table_id, const meta::DatesT& dates) = 0;
-    virtual Status
-    DescribeTable(meta::TableSchema& table_schema_) = 0;
-    virtual Status
-    HasTable(const std::string& table_id, bool& has_or_not_) = 0;
-    virtual Status
-    AllTables(std::vector<meta::TableSchema>& table_schema_array) = 0;
-    virtual Status
-    GetTableRowCount(const std::string& table_id, uint64_t& row_count) = 0;
-    virtual Status
-    PreloadTable(const std::string& table_id) = 0;
-    virtual Status
-    UpdateTableFlag(const std::string& table_id, int64_t flag) = 0;
+    CreateCollection(meta::CollectionSchema& table_schema_) = 0;
 
     virtual Status
-    InsertVectors(const std::string& table_id_, uint64_t n, const float* vectors, IDNumbers& vector_ids_) = 0;
+    DropCollection(const std::string& collection_id) = 0;
 
     virtual Status
-    Query(const std::string& table_id, uint64_t k, uint64_t nq, uint64_t nprobe, const float* vectors,
-          ResultIds& result_ids, ResultDistances& result_distances) = 0;
+    DescribeCollection(meta::CollectionSchema& table_schema_) = 0;
 
     virtual Status
-    Query(const std::string& table_id, uint64_t k, uint64_t nq, uint64_t nprobe, const float* vectors,
-          const meta::DatesT& dates, ResultIds& result_ids, ResultDistances& result_distances) = 0;
+    HasCollection(const std::string& collection_id, bool& has_or_not_) = 0;
 
     virtual Status
-    Query(const std::string& table_id, const std::vector<std::string>& file_ids, uint64_t k, uint64_t nq,
-          uint64_t nprobe, const float* vectors, const meta::DatesT& dates, ResultIds& result_ids,
-          ResultDistances& result_distances) = 0;
+    HasNativeCollection(const std::string& collection_id, bool& has_or_not_) = 0;
+
+    virtual Status
+    AllCollections(std::vector<meta::CollectionSchema>& table_schema_array) = 0;
+
+    virtual Status
+    GetCollectionInfo(const std::string& collection_id, CollectionInfo& collection_info) = 0;
+
+    virtual Status
+    GetCollectionRowCount(const std::string& collection_id, uint64_t& row_count) = 0;
+
+    virtual Status
+    PreloadCollection(const std::string& collection_id) = 0;
+
+    virtual Status
+    UpdateCollectionFlag(const std::string& collection_id, int64_t flag) = 0;
+
+    virtual Status
+    CreatePartition(const std::string& collection_id, const std::string& partition_name,
+                    const std::string& partition_tag) = 0;
+
+    virtual Status
+    DropPartition(const std::string& partition_name) = 0;
+
+    virtual Status
+    DropPartitionByTag(const std::string& collection_id, const std::string& partition_tag) = 0;
+
+    virtual Status
+    ShowPartitions(const std::string& collection_id, std::vector<meta::CollectionSchema>& partition_schema_array) = 0;
+
+    virtual Status
+    InsertVectors(const std::string& collection_id, const std::string& partition_tag, VectorsData& vectors) = 0;
+
+    virtual Status
+    DeleteVector(const std::string& collection_id, IDNumber vector_id) = 0;
+
+    virtual Status
+    DeleteVectors(const std::string& collection_id, IDNumbers vector_ids) = 0;
+
+    virtual Status
+    Flush(const std::string& collection_id) = 0;
+
+    virtual Status
+    Flush() = 0;
+
+    virtual Status
+    Compact(const std::string& collection_id) = 0;
+
+    virtual Status
+    GetVectorByID(const std::string& collection_id, const IDNumber& vector_id, VectorsData& vector) = 0;
+
+    virtual Status
+    GetVectorIDs(const std::string& collection_id, const std::string& segment_id, IDNumbers& vector_ids) = 0;
+
+    //    virtual Status
+    //    Merge(const std::set<std::string>& table_ids) = 0;
+
+    virtual Status
+    QueryByID(const std::shared_ptr<server::Context>& context, const std::string& collection_id,
+              const std::vector<std::string>& partition_tags, uint64_t k, const milvus::json& extra_params,
+              IDNumber vector_id, ResultIds& result_ids, ResultDistances& result_distances) = 0;
+
+    virtual Status
+    Query(const std::shared_ptr<server::Context>& context, const std::string& collection_id,
+          const std::vector<std::string>& partition_tags, uint64_t k, const milvus::json& extra_params,
+          const VectorsData& vectors, ResultIds& result_ids, ResultDistances& result_distances) = 0;
+
+    virtual Status
+    QueryByFileID(const std::shared_ptr<server::Context>& context, const std::vector<std::string>& file_ids, uint64_t k,
+                  const milvus::json& extra_params, const VectorsData& vectors, ResultIds& result_ids,
+                  ResultDistances& result_distances) = 0;
 
     virtual Status
     Size(uint64_t& result) = 0;
 
     virtual Status
-    CreateIndex(const std::string& table_id, const TableIndex& index) = 0;
+    CreateIndex(const std::string& collection_id, const CollectionIndex& index) = 0;
+
     virtual Status
-    DescribeIndex(const std::string& table_id, TableIndex& index) = 0;
+    DescribeIndex(const std::string& collection_id, CollectionIndex& index) = 0;
+
     virtual Status
-    DropIndex(const std::string& table_id) = 0;
+    DropIndex(const std::string& collection_id) = 0;
 
     virtual Status
     DropAll() = 0;
+
+    virtual Status
+    CreateHybridCollection(meta::CollectionSchema& collection_schema, meta::hybrid::FieldsSchema& fields_schema) = 0;
+
+    virtual Status
+    DescribeHybridCollection(meta::CollectionSchema& collection_schema, meta::hybrid::FieldsSchema& fields_schema) = 0;
+
+    virtual Status
+    InsertEntities(const std::string& collection_id, const std::string& partition_tag, Entity& entity,
+                   std::unordered_map<std::string, meta::hybrid::DataType>& field_types) = 0;
+
+    virtual Status
+    HybridQuery(const std::shared_ptr<server::Context>& context, const std::string& collection_id,
+                const std::vector<std::string>& partition_tags, context::HybridSearchContextPtr hybrid_search_context,
+                query::GeneralQueryPtr general_query,
+                std::unordered_map<std::string, engine::meta::hybrid::DataType>& attr_type, uint64_t& nq,
+                engine::ResultIds& result_ids, engine::ResultDistances& result_distances) = 0;
 };  // DB
 
 using DBPtr = std::shared_ptr<DB>;

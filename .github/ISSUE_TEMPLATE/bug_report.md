@@ -1,7 +1,7 @@
 ---
 name: "\U0001F41B Bug report"
 about: Create a bug report to help us improve Milvus
-title: "[BUG]"
+title: ''
 labels: ''
 assignees: ''
 

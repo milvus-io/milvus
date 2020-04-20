@@ -1,33 +1,30 @@
-// Licensed to the Apache Software Foundation (ASF) under one
-// or more contributor license agreements.  See the NOTICE file
-// distributed with this work for additional information
-// regarding copyright ownership.  The ASF licenses this file
-// to you under the Apache License, Version 2.0 (the
-// "License"); you may not use this file except in compliance
-// with the License.  You may obtain a copy of the License at
+// Copyright (C) 2019-2020 Zilliz. All rights reserved.
 //
-//   http://www.apache.org/licenses/LICENSE-2.0
+// Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance
+// with the License. You may obtain a copy of the License at
 //
-// Unless required by applicable law or agreed to in writing,
-// software distributed under the License is distributed on an
-// "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
-// KIND, either express or implied.  See the License for the
-// specific language governing permissions and limitations
-// under the License.
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software distributed under the License
+// is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
+// or implied. See the License for the specific language governing permissions and limitations under the License.
 
 #include "metrics/SystemInfo.h"
+#include "thirdparty/nlohmann/json.hpp"
 #include "utils/Log.h"
 
 #include <dirent.h>
-#include <nvml.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <sys/types.h>
+#include <fiu-local.h>
+#include <sys/sysinfo.h>
+#include <sys/times.h>
 #include <unistd.h>
-#include <fstream>
-#include <iostream>
-#include <string>
-#include <utility>
+#include <map>
+
+#ifdef MILVUS_GPU_VERSION
+
+#include <nvml.h>
+
+#endif
 
 namespace milvus {
 namespace server {
@@ -60,18 +57,22 @@ SystemInfo::Init() {
     total_ram_ = GetPhysicalMemory();
     fclose(file);
 
+#ifdef MILVUS_GPU_VERSION
     // initialize GPU information
     nvmlReturn_t nvmlresult;
     nvmlresult = nvmlInit();
+    fiu_do_on("SystemInfo.Init.nvmInit_fail", nvmlresult = NVML_ERROR_NOT_FOUND);
     if (NVML_SUCCESS != nvmlresult) {
-        SERVER_LOG_ERROR << "System information initilization failed";
+        LOG_SERVER_ERROR_ << "System information initilization failed";
         return;
     }
     nvmlresult = nvmlDeviceGetCount(&num_device_);
+    fiu_do_on("SystemInfo.Init.nvm_getDevice_fail", nvmlresult = NVML_ERROR_NOT_FOUND);
     if (NVML_SUCCESS != nvmlresult) {
-        SERVER_LOG_ERROR << "Unable to get devidce number";
+        LOG_SERVER_ERROR_ << "Unable to get devidce number";
         return;
     }
+#endif
 
     // initialize network traffic information
     std::pair<uint64_t, uint64_t> in_and_out_octets = Octets();
@@ -125,6 +126,7 @@ SystemInfo::GetProcessUsedMemory() {
 
 double
 SystemInfo::MemoryPercent() {
+    fiu_do_on("SystemInfo.MemoryPercent.mock", initialized_ = false);
     if (!initialized_) {
         Init();
     }
@@ -142,7 +144,7 @@ SystemInfo::CPUCorePercent() {
     std::vector<uint64_t> cur_total_time_array = getTotalCpuTime(cur_work_time_array);
 
     std::vector<double> cpu_core_percent;
-    for (int i = 1; i < num_processors_; i++) {
+    for (int i = 0; i < cur_total_time_array.size(); i++) {
         double total_cpu_time = cur_total_time_array[i] - prev_total_time_array[i];
         double cpu_work_time = cur_work_time_array[i] - prev_work_time_array[i];
         cpu_core_percent.push_back((cpu_work_time / total_cpu_time) * 100);
@@ -154,8 +156,9 @@ std::vector<uint64_t>
 SystemInfo::getTotalCpuTime(std::vector<uint64_t>& work_time_array) {
     std::vector<uint64_t> total_time_array;
     FILE* file = fopen("/proc/stat", "r");
+    fiu_do_on("SystemInfo.getTotalCpuTime.open_proc", file = NULL);
     if (file == NULL) {
-        SERVER_LOG_ERROR << "Could not open stat file";
+        LOG_SERVER_ERROR_ << "Could not open stat file";
         return total_time_array;
     }
 
@@ -165,8 +168,9 @@ SystemInfo::getTotalCpuTime(std::vector<uint64_t>& work_time_array) {
     for (int i = 0; i < num_processors_; i++) {
         char buffer[1024];
         char* ret = fgets(buffer, sizeof(buffer) - 1, file);
+        fiu_do_on("SystemInfo.getTotalCpuTime.read_proc", ret = NULL);
         if (ret == NULL) {
-            SERVER_LOG_ERROR << "Could not read stat file";
+            LOG_SERVER_ERROR_ << "Could not read stat file";
             fclose(file);
             return total_time_array;
         }
@@ -184,6 +188,7 @@ SystemInfo::getTotalCpuTime(std::vector<uint64_t>& work_time_array) {
 
 double
 SystemInfo::CPUPercent() {
+    fiu_do_on("SystemInfo.CPUPercent.mock", initialized_ = false);
     if (!initialized_) {
         Init();
     }
@@ -210,9 +215,13 @@ SystemInfo::CPUPercent() {
 std::vector<uint64_t>
 SystemInfo::GPUMemoryTotal() {
     // get GPU usage percent
+    fiu_do_on("SystemInfo.GPUMemoryTotal.mock", initialized_ = false);
     if (!initialized_)
         Init();
     std::vector<uint64_t> result;
+
+#ifdef MILVUS_GPU_VERSION
+
     nvmlMemory_t nvmlMemory;
     for (int i = 0; i < num_device_; ++i) {
         nvmlDevice_t device;
@@ -220,14 +229,20 @@ SystemInfo::GPUMemoryTotal() {
         nvmlDeviceGetMemoryInfo(device, &nvmlMemory);
         result.push_back(nvmlMemory.total);
     }
+#endif
+
     return result;
 }
 
 std::vector<uint64_t>
 SystemInfo::GPUTemperature() {
+    fiu_do_on("SystemInfo.GPUTemperature.mock", initialized_ = false);
     if (!initialized_)
         Init();
     std::vector<uint64_t> result;
+
+#ifdef MILVUS_GPU_VERSION
+
     for (int i = 0; i < num_device_; i++) {
         nvmlDevice_t device;
         nvmlDeviceGetHandleByIndex(i, &device);
@@ -235,6 +250,9 @@ SystemInfo::GPUTemperature() {
         nvmlDeviceGetTemperature(device, NVML_TEMPERATURE_GPU, &temp);
         result.push_back(temp);
     }
+
+#endif
+
     return result;
 }
 
@@ -245,8 +263,9 @@ SystemInfo::CPUTemperature() {
 
     DIR* dir = NULL;
     dir = opendir(path.c_str());
+    fiu_do_on("SystemInfo.CPUTemperature.opendir", dir = NULL);
     if (!dir) {
-        SERVER_LOG_ERROR << "Could not open hwmon directory";
+        LOG_SERVER_ERROR_ << "Could not open hwmon directory";
         return result;
     }
 
@@ -262,8 +281,9 @@ SystemInfo::CPUTemperature() {
                 std::string object = filename;
                 object += "/temp1_input";
                 FILE* file = fopen(object.c_str(), "r");
+                fiu_do_on("SystemInfo.CPUTemperature.openfile", file = NULL);
                 if (file == nullptr) {
-                    SERVER_LOG_ERROR << "Could not open temperature file";
+                    LOG_SERVER_ERROR_ << "Could not open temperature file";
                     return result;
                 }
                 float temp;
@@ -279,10 +299,14 @@ SystemInfo::CPUTemperature() {
 std::vector<uint64_t>
 SystemInfo::GPUMemoryUsed() {
     // get GPU memory used
+    fiu_do_on("SystemInfo.GPUMemoryUsed.mock", initialized_ = false);
     if (!initialized_)
         Init();
 
     std::vector<uint64_t> result;
+
+#ifdef MILVUS_GPU_VERSION
+
     nvmlMemory_t nvmlMemory;
     for (int i = 0; i < num_device_; ++i) {
         nvmlDevice_t device;
@@ -290,6 +314,9 @@ SystemInfo::GPUMemoryUsed() {
         nvmlDeviceGetMemoryInfo(device, &nvmlMemory);
         result.push_back(nvmlMemory.used);
     }
+
+#endif
+
     return result;
 }
 
@@ -326,6 +353,26 @@ SystemInfo::Octets() {
     uint64_t outoctets_bytes = std::stoull(outoctets);
     std::pair<uint64_t, uint64_t> res(inoctets_bytes, outoctets_bytes);
     return res;
+}
+
+void
+SystemInfo::GetSysInfoJsonStr(std::string& result) {
+    std::map<std::string, std::string> sys_info_map;
+
+    sys_info_map["memory_total"] = std::to_string(GetPhysicalMemory());
+    sys_info_map["memory_used"] = std::to_string(GetProcessUsedMemory());
+
+    std::vector<uint64_t> gpu_mem_total = GPUMemoryTotal();
+    std::vector<uint64_t> gpu_mem_used = GPUMemoryUsed();
+    for (size_t i = 0; i < gpu_mem_total.size(); i++) {
+        std::string key_total = "gpu" + std::to_string(i) + "_memory_total";
+        std::string key_used = "gpu" + std::to_string(i) + "_memory_used";
+        sys_info_map[key_total] = std::to_string(gpu_mem_total[i]);
+        sys_info_map[key_used] = std::to_string(gpu_mem_used[i]);
+    }
+
+    nlohmann::json sys_info_json(sys_info_map);
+    result = sys_info_json.dump();
 }
 
 }  // namespace server

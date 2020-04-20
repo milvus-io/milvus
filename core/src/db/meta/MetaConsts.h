@@ -1,19 +1,13 @@
-// Licensed to the Apache Software Foundation (ASF) under one
-// or more contributor license agreements.  See the NOTICE file
-// distributed with this work for additional information
-// regarding copyright ownership.  The ASF licenses this file
-// to you under the Apache License, Version 2.0 (the
-// "License"); you may not use this file except in compliance
-// with the License.  You may obtain a copy of the License at
+// Copyright (C) 2019-2020 Zilliz. All rights reserved.
 //
-//   http://www.apache.org/licenses/LICENSE-2.0
+// Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance
+// with the License. You may obtain a copy of the License at
 //
-// Unless required by applicable law or agreed to in writing,
-// software distributed under the License is distributed on an
-// "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
-// KIND, either express or implied.  See the License for the
-// specific language governing permissions and limitations
-// under the License.
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software distributed under the License
+// is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
+// or implied. See the License for the specific language governing permissions and limitations under the License.
 
 #pragma once
 
@@ -27,10 +21,17 @@ const size_t US_PS = 1000 * MS_PS;
 const size_t NS_PS = 1000 * US_PS;
 
 const size_t SECOND = 1UL;
-const size_t M_SEC = 60 * SECOND;
-const size_t H_SEC = 60 * M_SEC;
-const size_t D_SEC = 24 * H_SEC;
-const size_t W_SEC = 7 * D_SEC;
+const size_t MINUTE = 60 * SECOND;
+const size_t HOUR = 60 * MINUTE;
+const size_t DAY = 24 * HOUR;
+const size_t WEEK = 7 * DAY;
+
+// This value is to ignore small raw files when building index.
+// The reason is:
+// 1. The performance of brute-search for small raw files could be better than small index file.
+// 2. And small raw files can be merged to larger files, thus reduce fragmented files count.
+// We decide the value based on a testing for small size raw/index files.
+const size_t BUILD_INDEX_THRESHOLD = 5000;
 
 }  // namespace meta
 }  // namespace engine

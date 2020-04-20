@@ -1,0 +1,38 @@
+// Copyright (C) 2019-2020 Zilliz. All rights reserved.
+//
+// Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance
+// with the License. You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software distributed under the License
+// is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
+// or implied. See the License for the specific language governing permissions and limitations under the License.
+
+#pragma once
+
+#include <memory>
+#include <vector>
+
+#include "BooleanQuery.h"
+
+namespace milvus {
+namespace query {
+
+BinaryQueryPtr
+ConstructBinTree(std::vector<BooleanQueryPtr> clauses, QueryRelation relation, uint64_t idx);
+
+Status
+ConstructLeafBinTree(std::vector<LeafQueryPtr> leaf_clauses, BinaryQueryPtr binary_query, uint64_t idx);
+
+Status
+GenBinaryQuery(BooleanQueryPtr clause, BinaryQueryPtr& binary_query);
+
+uint64_t
+BinaryQueryHeight(BinaryQueryPtr& binary_query);
+
+bool
+ValidateBinaryQuery(BinaryQueryPtr& binary_query);
+
+}  // namespace query
+}  // namespace milvus

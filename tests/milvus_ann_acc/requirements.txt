@@ -1,4 +1,0 @@
-numpy==1.16.3
-pymilvus>=0.2.0
-scikit-learn==0.19.1
-h5py==2.7.1

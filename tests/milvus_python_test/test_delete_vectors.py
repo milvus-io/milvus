@@ -1,425 +1,561 @@
-# import time
-# import random
-# import pdb
-# import logging
-# import threading
-# from builtins import Exception
-# from multiprocessing import Pool, Process
-# import pytest
-
-# from milvus import Milvus, IndexType
-# from utils import *
+import time
+import random
+import pdb
+import threading
+import logging
+from multiprocessing import Pool, Process
+import pytest
+from milvus import IndexType, MetricType
+from utils import *
 
 
-# dim = 128
-# index_file_size = 10
-# table_id = "test_delete"
-# DELETE_TIMEOUT = 60
-# vectors = gen_vectors(100, dim)
+dim = 128
+index_file_size = 10
+collection_id = "test_delete"
+DELETE_TIMEOUT = 60
+nprobe = 1
+epsilon = 0.001
+tag = "1970-01-01"
+top_k = 1
+nb = 6000
 
-# class TestDeleteVectorsBase:
-#     """
-#     generate invalid query range params
-#     """
-#     @pytest.fixture(
-#         scope="function",
-#         params=[
-#             (get_current_day(), get_current_day()),
-#             (get_last_day(1), get_last_day(1)),
-#             (get_next_day(1), get_next_day(1))
-#         ]
-#     )
-#     def get_invalid_range(self, request):
-#         yield request.param
+class TestDeleteBase:
+    """
+    ******************************************************************
+      The following cases are used to test `delete_by_id` function
+    ******************************************************************
+    """
 
-#     @pytest.mark.timeout(DELETE_TIMEOUT)
-#     def test_delete_vectors_invalid_range(self, connect, table, get_invalid_range):
-#         '''
-#         target: test delete vectors, no index created
-#         method: call `delete_vectors_by_range`, with invalid date params
-#         expected: return code 0
-#         '''
-#         start_date = get_invalid_range[0]
-#         end_date = get_invalid_range[1]
-#         status, ids = connect.add_vectors(table, vectors)
-#         status = connect.delete_vectors_by_range(table, start_date, end_date)
-#         assert not status.OK()
+    @pytest.fixture(
+        scope="function",
+        params=gen_simple_index()
+    )
+    def get_simple_index(self, request, connect):
+        if str(connect._cmd("mode")[1]) == "GPU":
+            if request.param["index_type"] not in [IndexType.IVF_SQ8, IndexType.IVFLAT, IndexType.FLAT, IndexType.IVF_PQ, IndexType.IVF_SQ8H]:
+                pytest.skip("Only support index_type: idmap/ivf")
+        elif str(connect._cmd("mode")[1]) == "CPU":
+            if request.param["index_type"] in [IndexType.IVF_SQ8H]:
+                pytest.skip("CPU not support index_type: ivf_sq8h")
+        return request.param
 
-#     """
-#     generate valid query range params, no search result
-#     """
-#     @pytest.fixture(
-#         scope="function",
-#         params=[
-#             (get_last_day(2), get_last_day(1)),
-#             (get_last_day(2), get_current_day()),
-#             (get_next_day(1), get_next_day(2))
-#         ]
-#     )
-#     def get_valid_range_no_result(self, request):
-#         yield request.param
+    def test_delete_vector_search(self, connect, collection, get_simple_index):
+        '''
+        target: test delete vector
+        method: add vector and delete
+        expected: status ok, vector deleted
+        '''
+        index_param = get_simple_index["index_param"]
+        index_type = get_simple_index["index_type"]
+        vector = gen_single_vector(dim)
+        status, ids = connect.add_vectors(collection, vector)
+        assert status.OK()
+        status = connect.flush([collection])
+        assert status.OK()
+        status = connect.delete_by_id(collection, ids)
+        assert status.OK()
+        status = connect.flush([collection])
+        search_param = get_search_param(index_type)
+        status = connect.flush([collection])
+        search_param = get_search_param(index_type)
+        status, res = connect.search_vectors(collection, top_k, vector, params=search_param)
+        logging.getLogger().info(res)
+        assert status.OK()
+        assert len(res) == 0
 
-#     @pytest.mark.timeout(DELETE_TIMEOUT)
-#     def test_delete_vectors_valid_range_no_result(self, connect, table, get_valid_range_no_result):
-#         '''
-#         target: test delete vectors, no index created
-#         method: call `delete_vectors_by_range`, with valid date params
-#         expected: return code 0
-#         '''
-#         start_date = get_valid_range_no_result[0]
-#         end_date = get_valid_range_no_result[1]
-#         status, ids = connect.add_vectors(table, vectors)
-#         time.sleep(2)
-#         status = connect.delete_vectors_by_range(table, start_date, end_date)
-#         assert status.OK()
-#         status, result = connect.get_table_row_count(table)
-#         assert result == 100
+    def test_delete_vector_multi_same_ids(self, connect, collection, get_simple_index):
+        '''
+        target: test delete vector, with some same ids
+        method: add vector and delete
+        expected: status ok, vector deleted
+        '''
+        index_param = get_simple_index["index_param"]
+        index_type = get_simple_index["index_type"]
+        vectors = gen_vectors(nb, dim)
+        connect.add_vectors(collection, vectors, ids=[1 for i in range(nb)])
+        status = connect.flush([collection])
+        # Bloom filter error
+        assert status.OK()
+        status = connect.delete_by_id(collection, [1])
+        assert status.OK()
+        status = connect.flush([collection])
+        search_param = get_search_param(index_type)
+        status, res = connect.search_vectors(collection, top_k, [vectors[0]], params=search_param)
+        logging.getLogger().info(res)
+        assert status.OK()
+        assert len(res) == 0
 
-#     """
-#     generate valid query range params, no search result
-#     """
-#     @pytest.fixture(
-#         scope="function",
-#         params=[
-#             (get_last_day(2), get_next_day(2)),
-#             (get_current_day(), get_next_day(2)),
-#         ]
-#     )
-#     def get_valid_range(self, request):
-#         yield request.param
+    def test_delete_vector_collection_count(self, connect, collection):
+        '''
+        target: test delete vector
+        method: add vector and delete
+        expected: status ok, vector deleted
+        '''
+        vector = gen_single_vector(dim)
+        status, ids = connect.add_vectors(collection, vector)
+        assert status.OK()
+        status = connect.flush([collection])
+        assert status.OK()
+        status = connect.delete_by_id(collection, ids)
+        assert status.OK()
+        status = connect.flush([collection])
+        status, res = connect.count_collection(collection)
+        assert status.OK()
+        assert res == 0
 
-#     @pytest.mark.timeout(DELETE_TIMEOUT)
-#     def test_delete_vectors_valid_range(self, connect, table, get_valid_range):
-#         '''
-#         target: test delete vectors, no index created
-#         method: call `delete_vectors_by_range`, with valid date params
-#         expected: return code 0
-#         '''
-#         start_date = get_valid_range[0]
-#         end_date = get_valid_range[1]
-#         status, ids = connect.add_vectors(table, vectors)
-#         time.sleep(2)
-#         status = connect.delete_vectors_by_range(table, start_date, end_date)
-#         assert status.OK()
-#         status, result = connect.get_table_row_count(table)
-#         assert result == 0
+    def test_delete_vector_collection_count_no_flush(self, connect, collection):
+        '''
+        target: test delete vector
+        method: add vector and delete, no flush(using auto flush)
+        expected: status ok, vector deleted
+        '''
+        vector = gen_single_vector(dim)
+        status, ids = connect.add_vectors(collection, vector)
+        assert status.OK()
+        status = connect.flush([collection])
+        assert status.OK()
+        status = connect.flush([collection])
+        assert status.OK()
+        status = connect.delete_by_id(collection, ids)
+        assert status.OK()
+        time.sleep(2)
+        status, res = connect.count_collection(collection)
+        assert status.OK()
+        assert res == 0
 
-#     @pytest.fixture(
-#         scope="function",
-#         params=gen_index_params()
-#     )
-#     def get_index_params(self, request, args):
-#         if "internal" not in args:
-#             if request.param["index_type"] == IndexType.IVF_SQ8H:
-#                 pytest.skip("sq8h not support in open source")
-#         return request.param
+    def test_delete_vector_id_not_exised(self, connect, collection, get_simple_index):
+        '''
+        target: test delete vector, params vector_id not existed
+        method: add vector and delete
+        expected: status ok, search with vector have result
+        '''
+        index_param = get_simple_index["index_param"]
+        index_type = get_simple_index["index_type"]
+        vector = gen_single_vector(dim)
+        status, ids = connect.add_vectors(collection, vector)
+        assert status.OK()
+        status = connect.flush([collection])
+        assert status.OK()
+        status = connect.delete_by_id(collection, [0])
+        assert status.OK()
+        status = connect.flush([collection])
+        search_param = get_search_param(index_type)
+        status, res = connect.search_vectors(collection, top_k, vector, params=search_param)
+        assert status.OK()
+        assert res[0][0].id == ids[0]
 
-#     @pytest.mark.timeout(DELETE_TIMEOUT)
-#     def test_delete_vectors_valid_range_index_created(self, connect, table, get_index_params):
-#         '''
-#         target: test delete vectors, no index created
-#         method: call `delete_vectors_by_range`, with valid date params
-#         expected: return code 0
-#         '''
-#         start_date = get_current_day()
-#         end_date = get_next_day(2)
-#         index_params = get_index_params
-#         logging.getLogger().info(index_params)
-#         status, ids = connect.add_vectors(table, vectors)
-#         status = connect.create_index(table, index_params)
-#         logging.getLogger().info(status)
-#         logging.getLogger().info("Start delete vectors by range: %s:%s" % (start_date, end_date))
-#         status = connect.delete_vectors_by_range(table, start_date, end_date)
-#         assert status.OK()
-#         status, result = connect.get_table_row_count(table)
-#         assert result == 0
+    def test_delete_vector_collection_not_existed(self, connect, collection):
+        '''
+        target: test delete vector, params collection_name not existed
+        method: add vector and delete
+        expected: status not ok
+        '''
+        vector = gen_single_vector(dim)
+        status, ids = connect.add_vectors(collection, vector)
+        assert status.OK()
+        status = connect.flush([collection])
+        assert status.OK()
+        collection_new = gen_unique_str()
+        status = connect.delete_by_id(collection_new, [0])
+        assert not status.OK()
 
-#     @pytest.mark.timeout(DELETE_TIMEOUT)
-#     def test_delete_vectors_no_data(self, connect, table):
-#         '''
-#         target: test delete vectors, no index created
-#         method: call `delete_vectors_by_range`, with valid date params, and no data in db
-#         expected: return code 0
-#         '''
-#         start_date = get_current_day()
-#         end_date = get_next_day(2)
-#         # status, ids = connect.add_vectors(table, vectors)
-#         status = connect.delete_vectors_by_range(table, start_date, end_date)
-#         assert status.OK()
+    def test_add_vectors_delete_vector(self, connect, collection, get_simple_index):
+        '''
+        method: add vectors and delete
+        expected: status ok, vectors deleted
+        '''
+        index_param = get_simple_index["index_param"]
+        index_type = get_simple_index["index_type"]
+        vectors = gen_vector(nb, dim)
+        status, ids = connect.add_vectors(collection, vectors)
+        assert status.OK()
+        status = connect.flush([collection])
+        assert status.OK()
+        delete_ids = [ids[0], ids[-1]]
+        query_vecs = [vectors[0], vectors[1], vectors[-1]]
+        status = connect.delete_by_id(collection, delete_ids)
+        assert status.OK()
+        status = connect.flush([collection])
+        search_param = get_search_param(index_type)
+        status, res = connect.search_vectors(collection, top_k, query_vecs, params=search_param)
+        assert status.OK()
+        logging.getLogger().info(res)
+        assert res[0][0].distance > epsilon
+        assert res[1][0].distance < epsilon
+        assert res[1][0].id == ids[1]
+        assert res[2][0].distance > epsilon
 
-#     @pytest.mark.timeout(DELETE_TIMEOUT)
-#     def test_delete_vectors_table_not_existed(self, connect):
-#         '''
-#         target: test delete vectors, table not existed in db
-#         method: call `delete_vectors_by_range`, with table not existed
-#         expected: return code not 0
-#         '''
-#         start_date = get_current_day()
-#         end_date = get_next_day(2)
-#         table_name = gen_unique_str("not_existed_table")
-#         status = connect.delete_vectors_by_range(table_name, start_date, end_date)
-#         assert not status.OK()
+    def test_create_index_after_delete(self, connect, collection, get_simple_index):
+        '''
+        method: add vectors and delete, then create index
+        expected: status ok, vectors deleted, index created
+        '''
+        index_param = get_simple_index["index_param"]
+        index_type = get_simple_index["index_type"]
+        vectors = gen_vector(nb, dim)
+        status, ids = connect.add_vectors(collection, vectors)
+        assert status.OK()
+        status = connect.flush([collection])
+        assert status.OK()
+        delete_ids = [ids[0], ids[-1]]
+        query_vecs = [vectors[0], vectors[1], vectors[-1]]
+        status = connect.delete_by_id(collection, delete_ids)
+        assert status.OK()
+        status = connect.flush([collection])
+        status = connect.create_index(collection, index_type, index_param)
+        assert status.OK()
+        search_param = get_search_param(index_type)
+        status, res = connect.search_vectors(collection, top_k, query_vecs, params=search_param)
+        assert status.OK()
+        logging.getLogger().info(res)
+        logging.getLogger().info(ids[0])
+        logging.getLogger().info(ids[1])
+        logging.getLogger().info(ids[-1])
+        assert res[0][0].id != ids[0]
+        assert res[1][0].id == ids[1]
+        assert res[2][0].id != ids[-1]
 
-#     @pytest.mark.timeout(DELETE_TIMEOUT)
-#     def test_delete_vectors_table_None(self, connect, table):
-#         '''
-#         target: test delete vectors, table set Nope
-#         method: call `delete_vectors_by_range`, with table value is None
-#         expected: return code not 0
-#         '''
-#         start_date = get_current_day()
-#         end_date = get_next_day(2)
-#         table_name = None
-#         with pytest.raises(Exception) as e:
-#             status = connect.delete_vectors_by_range(table_name, start_date, end_date)
+    def test_add_vector_after_delete(self, connect, collection, get_simple_index):
+        '''
+        method: add vectors and delete, then add vector
+        expected: status ok, vectors deleted, vector added
+        '''
+        index_param = get_simple_index["index_param"]
+        index_type = get_simple_index["index_type"]
+        vectors = gen_vector(nb, dim)
+        status, ids = connect.add_vectors(collection, vectors)
+        assert status.OK()
+        status = connect.flush([collection])
+        assert status.OK()
+        status = connect.flush([collection])
+        assert status.OK()
+        delete_ids = [ids[0], ids[-1]]
+        query_vecs = [vectors[0], vectors[1], vectors[-1]]
+        status = connect.delete_by_id(collection, delete_ids)
+        assert status.OK()
+        status = connect.flush([collection])
+        status, tmp_ids = connect.add_vectors(collection, [vectors[0], vectors[-1]])
+        assert status.OK()
+        status = connect.flush([collection])
+        search_param = get_search_param(index_type)
+        status, res = connect.search_vectors(collection, top_k, query_vecs, params=search_param)
+        assert status.OK()
+        logging.getLogger().info(res)
+        assert res[0][0].id == tmp_ids[0]
+        assert res[0][0].distance < epsilon
+        assert res[1][0].distance < epsilon
+        assert res[2][0].id == tmp_ids[-1]
+        assert res[2][0].distance < epsilon
 
-#     @pytest.mark.timeout(DELETE_TIMEOUT)
-#     def test_delete_vectors_valid_range_multi_tables(self, connect, get_valid_range):
-#         '''
-#         target: test delete vectors is correct or not with multiple tables of L2
-#         method: create 50 tables and add vectors into them , then delete vectors
-#                 in valid range
-#         expected: return code 0
-#         '''
-#         nq = 100
-#         vectors = gen_vectors(nq, dim)
-#         table_list = []
-#         for i in range(50):
-#             table_name = gen_unique_str('test_delete_vectors_valid_range_multi_tables')
-#             table_list.append(table_name)
-#             param = {'table_name': table_name,
-#                      'dimension': dim,
-#                      'index_file_size': index_file_size,
-#                      'metric_type': MetricType.L2}
-#             connect.create_table(param)
-#             status, ids = connect.add_vectors(table_name=table_name, records=vectors)
-#         time.sleep(2)
-#         start_date = get_valid_range[0]
-#         end_date = get_valid_range[1]
-#         for i in range(50):
-#             status = connect.delete_vectors_by_range(table_list[i], start_date, end_date)
-#             assert status.OK()
-#             status, result = connect.get_table_row_count(table_list[i])
-#             assert result == 0
+    def test_delete_multiable_times(self, connect, collection):
+        '''
+        method: add vectors and delete id serveral times
+        expected: status ok, vectors deleted, and status ok for next delete operation
+        '''
+        vectors = gen_vector(nb, dim)
+        status, ids = connect.add_vectors(collection, vectors)
+        assert status.OK()
+        status = connect.flush([collection])
+        assert status.OK()
+        delete_ids = [ids[0], ids[-1]]
+        query_vecs = [vectors[0], vectors[1], vectors[-1]]
+        status = connect.delete_by_id(collection, delete_ids)
+        assert status.OK()
+        status = connect.flush([collection])
+        for i in range(10):
+            status = connect.delete_by_id(collection, delete_ids)
+            assert status.OK()
+
+    def test_delete_no_flush_multiable_times(self, connect, collection):
+        '''
+        method: add vectors and delete id serveral times
+        expected: status ok, vectors deleted, and status ok for next delete operation
+        '''
+        vectors = gen_vector(nb, dim)
+        status, ids = connect.add_vectors(collection, vectors)
+        assert status.OK()
+        status = connect.flush([collection])
+        assert status.OK()
+        delete_ids = [ids[0], ids[-1]]
+        query_vecs = [vectors[0], vectors[1], vectors[-1]]
+        status = connect.delete_by_id(collection, delete_ids)
+        assert status.OK()
+        for i in range(10):
+            status = connect.delete_by_id(collection, delete_ids)
+            assert status.OK()
+            assert status.OK()
 
 
-# class TestDeleteVectorsIP:
-#     """
-#     generate invalid query range params
-#     """
-#     @pytest.fixture(
-#         scope="function",
-#         params=[
-#             (get_current_day(), get_current_day()),
-#             (get_last_day(1), get_last_day(1)),
-#             (get_next_day(1), get_next_day(1))
-#         ]
-#     )
-#     def get_invalid_range(self, request):
-#         yield request.param
+class TestDeleteIndexedVectors:
+    """
+    ******************************************************************
+      The following cases are used to test `delete_by_id` function
+    ******************************************************************
+    """
+    @pytest.fixture(
+        scope="function",
+        params=gen_simple_index()
+    )
+    def get_simple_index(self, request, connect):
+        if str(connect._cmd("mode")[1]) == "GPU":
+            if request.param["index_type"] not in [IndexType.IVF_SQ8, IndexType.IVFLAT, IndexType.FLAT, IndexType.IVF_PQ, IndexType.IVF_SQ8H]:
+                pytest.skip("Only support index_type: idmap/ivf")
+        elif str(connect._cmd("mode")[1]) == "CPU":
+            if request.param["index_type"] in [IndexType.IVF_SQ8H]:
+                pytest.skip("CPU not support index_type: ivf_sq8h")
+        return request.param
 
-#     @pytest.mark.timeout(DELETE_TIMEOUT)
-#     def test_delete_vectors_invalid_range(self, connect, ip_table, get_invalid_range):
-#         '''
-#         target: test delete vectors, no index created
-#         method: call `delete_vectors_by_range`, with invalid date params
-#         expected: return code 0
-#         '''
-#         start_date = get_invalid_range[0]
-#         end_date = get_invalid_range[1]
-#         status, ids = connect.add_vectors(ip_table, vectors)
-#         status = connect.delete_vectors_by_range(ip_table, start_date, end_date)
-#         assert not status.OK()
+    def test_delete_vectors_after_index_created_search(self, connect, collection, get_simple_index):
+        '''
+        target: test delete vector after index created
+        method: add vector, create index and delete vector
+        expected: status ok, vector deleted
+        '''
+        index_param = get_simple_index["index_param"]
+        index_type = get_simple_index["index_type"]
+        vector = gen_single_vector(dim)
+        status, ids = connect.add_vectors(collection, vector)
+        assert status.OK()
+        status = connect.flush([collection])
+        assert status.OK()
+        status = connect.create_index(collection, index_type, index_param)
+        assert status.OK()
+        status = connect.delete_by_id(collection, ids)
+        assert status.OK()
+        status = connect.flush([collection])
+        search_param = get_search_param(index_type)
+        status, res = connect.search_vectors(collection, top_k, vector, params=search_param)
+        logging.getLogger().info(res)
+        assert status.OK()
+        assert len(res) == 0
 
-#     """
-#     generate valid query range params, no search result
-#     """
-#     @pytest.fixture(
-#         scope="function",
-#         params=[
-#             (get_last_day(2), get_last_day(1)),
-#             (get_last_day(2), get_current_day()),
-#             (get_next_day(1), get_next_day(2))
-#         ]
-#     )
-#     def get_valid_range_no_result(self, request):
-#         yield request.param
+    def test_add_vectors_delete_vector(self, connect, collection, get_simple_index):
+        '''
+        method: add vectors and delete
+        expected: status ok, vectors deleted
+        '''
+        index_param = get_simple_index["index_param"]
+        index_type = get_simple_index["index_type"]
+        vectors = gen_vector(nb, dim)
+        status, ids = connect.add_vectors(collection, vectors)
+        assert status.OK()
+        status = connect.flush([collection])
+        assert status.OK()
+        status = connect.flush([collection])
+        assert status.OK()
+        status = connect.create_index(collection, index_type, index_param)
+        assert status.OK()
+        delete_ids = [ids[0], ids[-1]]
+        query_vecs = [vectors[0], vectors[1], vectors[-1]]
+        status = connect.delete_by_id(collection, delete_ids)
+        assert status.OK()
+        status = connect.flush([collection])
+        search_param = get_search_param(index_type)
+        status, res = connect.search_vectors(collection, top_k, query_vecs, params=search_param)
+        assert status.OK()
+        logging.getLogger().info(ids[0])
+        logging.getLogger().info(ids[1])
+        logging.getLogger().info(ids[-1])
+        logging.getLogger().info(res)
+        assert res[0][0].id != ids[0]
+        assert res[1][0].id == ids[1]
+        assert res[2][0].id != ids[-1]
 
-#     @pytest.mark.timeout(DELETE_TIMEOUT)
-#     def test_delete_vectors_valid_range_no_result(self, connect, ip_table, get_valid_range_no_result):
-#         '''
-#         target: test delete vectors, no index created
-#         method: call `delete_vectors_by_range`, with valid date params
-#         expected: return code 0
-#         '''
-#         start_date = get_valid_range_no_result[0]
-#         end_date = get_valid_range_no_result[1]
-#         status, ids = connect.add_vectors(ip_table, vectors)
-#         time.sleep(2)
-#         status = connect.delete_vectors_by_range(ip_table, start_date, end_date)
-#         assert status.OK()
-#         status, result = connect.get_table_row_count(ip_table)
-#         assert result == 100
 
-#     """
-#     generate valid query range params, no search result
-#     """
-#     @pytest.fixture(
-#         scope="function",
-#         params=[
-#             (get_last_day(2), get_next_day(2)),
-#             (get_current_day(), get_next_day(2)),
-#         ]
-#     )
-#     def get_valid_range(self, request):
-#         yield request.param
+class TestDeleteBinary:
+    """
+    ******************************************************************
+      The following cases are used to test `delete_by_id` function
+    ******************************************************************
+    """
+    @pytest.fixture(
+        scope="function",
+        params=gen_simple_index()
+    )
+    def get_simple_index(self, request, connect):
+        logging.getLogger().info(request.param)
+        if request.param["index_type"] == IndexType.IVFLAT or request.param["index_type"] == IndexType.FLAT:
+            return request.param
+        else:
+            pytest.skip("Skip index Temporary")
 
-#     @pytest.mark.timeout(DELETE_TIMEOUT)
-#     def test_delete_vectors_valid_range(self, connect, ip_table, get_valid_range):
-#         '''
-#         target: test delete vectors, no index created
-#         method: call `delete_vectors_by_range`, with valid date params
-#         expected: return code 0
-#         '''
-#         start_date = get_valid_range[0]
-#         end_date = get_valid_range[1]
-#         status, ids = connect.add_vectors(ip_table, vectors)
-#         time.sleep(2)
-#         status = connect.delete_vectors_by_range(ip_table, start_date, end_date)
-#         assert status.OK()
-#         status, result = connect.get_table_row_count(ip_table)
-#         assert result == 0
+    def test_delete_vector_search(self, connect, jac_collection, get_simple_index):
+        '''
+        target: test delete vector
+        method: add vector and delete
+        expected: status ok, vector deleted
+        '''
+        index_param = get_simple_index["index_param"]
+        index_type = get_simple_index["index_type"]
+        tmp, vector = gen_binary_vectors(1, dim)
+        status, ids = connect.add_vectors(jac_collection, vector)
+        assert status.OK()
+        status = connect.flush([jac_collection])
+        assert status.OK()
+        status = connect.delete_by_id(jac_collection, ids)
+        assert status.OK()
+        status = connect.flush([jac_collection])
+        search_param = get_search_param(index_type)
+        status, res = connect.search_vectors(jac_collection, top_k, vector, params=search_param)
+        logging.getLogger().info(res)
+        assert status.OK()
+        assert len(res) == 0
+        assert status.OK()
+        assert len(res) == 0
 
-#     @pytest.fixture(
-#         scope="function",
-#         params=gen_index_params()
-#     )
-#     def get_index_params(self, request, args):
-#         if "internal" not in args:
-#             if request.param["index_type"] == IndexType.IVF_SQ8H:
-#                 pytest.skip("sq8h not support in open source")
-#         return request.param
+    # TODO: soft delete
+    def test_delete_vector_collection_count(self, connect, jac_collection):
+        '''
+        target: test delete vector
+        method: add vector and delete
+        expected: status ok, vector deleted
+        '''
+        tmp, vector = gen_binary_vectors(1, dim)
+        status, ids = connect.add_vectors(jac_collection, vector)
+        assert status.OK()
+        status = connect.flush([jac_collection])
+        assert status.OK()
+        status = connect.delete_by_id(jac_collection, ids)
+        assert status.OK()
+        status = connect.flush([jac_collection])
+        status, res = connect.count_collection(jac_collection)
+        assert status.OK()
+        assert res == 0
 
-#     @pytest.mark.timeout(DELETE_TIMEOUT)
-#     def test_delete_vectors_valid_range_index_created(self, connect, ip_table, get_index_params):
-#         '''
-#         target: test delete vectors, no index created
-#         method: call `delete_vectors_by_range`, with valid date params
-#         expected: return code 0
-#         '''
-#         start_date = get_current_day()
-#         end_date = get_next_day(2)
-#         index_params = get_index_params
-#         logging.getLogger().info(index_params)
-#         status, ids = connect.add_vectors(ip_table, vectors)
-#         status = connect.create_index(ip_table, index_params)
-#         logging.getLogger().info(status)
-#         logging.getLogger().info("Start delete vectors by range: %s:%s" % (start_date, end_date))
-#         status = connect.delete_vectors_by_range(ip_table, start_date, end_date)
-#         assert status.OK()
-#         status, result = connect.get_table_row_count(ip_table)
-#         assert result == 0
+    def test_delete_vector_id_not_exised(self, connect, jac_collection, get_simple_index):
+        '''
+        target: test delete vector, params vector_id not existed
+        method: add vector and delete
+        expected: status ok, search with vector have result
+        '''
+        index_param = get_simple_index["index_param"]
+        index_type = get_simple_index["index_type"]
+        tmp, vector = gen_binary_vectors(1, dim)
+        status, ids = connect.add_vectors(jac_collection, vector)
+        assert status.OK()
+        status = connect.flush([jac_collection])
+        assert status.OK()
+        status = connect.delete_by_id(jac_collection, [0])
+        assert status.OK()
+        status = connect.flush([jac_collection])
+        status = connect.flush([jac_collection])
+        search_param = get_search_param(index_type)
+        status, res = connect.search_vectors(jac_collection, top_k, vector, params=search_param)
+        assert status.OK()
+        assert res[0][0].id == ids[0]
 
-#     @pytest.mark.timeout(DELETE_TIMEOUT)
-#     def test_delete_vectors_no_data(self, connect, ip_table):
-#         '''
-#         target: test delete vectors, no index created
-#         method: call `delete_vectors_by_range`, with valid date params, and no data in db
-#         expected: return code 0
-#         '''
-#         start_date = get_current_day()
-#         end_date = get_next_day(2)
-#         # status, ids = connect.add_vectors(table, vectors)
-#         status = connect.delete_vectors_by_range(ip_table, start_date, end_date)
-#         assert status.OK()
+    def test_delete_vector_collection_not_existed(self, connect, jac_collection):
+        '''
+        target: test delete vector, params collection_name not existed
+        method: add vector and delete
+        expected: status not ok
+        '''
+        tmp, vector = gen_binary_vectors(1, dim)
+        status, ids = connect.add_vectors(jac_collection, vector)
+        assert status.OK()
+        status = connect.flush([jac_collection])
+        assert status.OK()
+        collection_new = gen_unique_str()
+        status = connect.delete_by_id(collection_new, [0])
+        collection_new = gen_unique_str()
+        status = connect.delete_by_id(collection_new, [0])
+        assert not status.OK()
 
-#     @pytest.mark.timeout(DELETE_TIMEOUT)
-#     def test_delete_vectors_table_None(self, connect, ip_table):
-#         '''
-#         target: test delete vectors, table set Nope
-#         method: call `delete_vectors_by_range`, with table value is None
-#         expected: return code not 0
-#         '''
-#         start_date = get_current_day()
-#         end_date = get_next_day(2)
-#         table_name = None
-#         with pytest.raises(Exception) as e:
-#             status = connect.delete_vectors_by_range(table_name, start_date, end_date)
+    def test_add_vectors_delete_vector(self, connect, jac_collection, get_simple_index):
+        '''
+        method: add vectors and delete
+        expected: status ok, vectors deleted
+        '''
+        index_param = get_simple_index["index_param"]
+        index_type = get_simple_index["index_type"]
+        tmp, vectors = gen_binary_vectors(nb, dim)
+        status, ids = connect.add_vectors(jac_collection, vectors)
+        assert status.OK()
+        status = connect.flush([jac_collection])
+        assert status.OK()
+        delete_ids = [ids[0], ids[-1]]
+        query_vecs = [vectors[0], vectors[1], vectors[-1]]
+        status = connect.delete_by_id(jac_collection, delete_ids)
+        assert status.OK()
+        status = connect.flush([jac_collection])
+        search_param = get_search_param(index_type)
+        status, res = connect.search_vectors(jac_collection, top_k, query_vecs, params=search_param)
+        assert status.OK()
+        logging.getLogger().info(res)
+        assert res[0][0].id != ids[0]
+        assert res[1][0].id == ids[1]
+        assert res[2][0].id != ids[-1]
 
-#     @pytest.mark.timeout(DELETE_TIMEOUT)
-#     def test_delete_vectors_valid_range_multi_tables(self, connect, get_valid_range):
-#         '''
-#         target: test delete vectors is correct or not with multiple tables of IP
-#         method: create 50 tables and add vectors into them , then delete vectors
-#                 in valid range
-#         expected: return code 0
-#         '''
-#         nq = 100
-#         vectors = gen_vectors(nq, dim)
-#         table_list = []
-#         for i in range(50):
-#             table_name = gen_unique_str('test_delete_vectors_valid_range_multi_tables')
-#             table_list.append(table_name)
-#             param = {'table_name': table_name,
-#                      'dimension': dim,
-#                      'index_file_size': index_file_size,
-#                      'metric_type': MetricType.IP}
-#             connect.create_table(param)
-#             status, ids = connect.add_vectors(table_name=table_name, records=vectors)
-#         time.sleep(2)
-#         start_date = get_valid_range[0]
-#         end_date = get_valid_range[1]
-#         for i in range(50):
-#             status = connect.delete_vectors_by_range(table_list[i], start_date, end_date)
-#             assert status.OK()
-#             status, result = connect.get_table_row_count(table_list[i])
-#             assert result == 0
+    def test_add_after_delete_vector(self, connect, jac_collection, get_simple_index):
+        '''
+        method: add vectors and delete, add
+        expected: status ok, vectors added
+        '''
+        index_param = get_simple_index["index_param"]
+        index_type = get_simple_index["index_type"]
+        tmp, vectors = gen_binary_vectors(nb, dim)
+        status, ids = connect.add_vectors(jac_collection, vectors)
+        assert status.OK()
+        status = connect.flush([jac_collection])
+        assert status.OK()
+        delete_ids = [ids[0], ids[-1]]
+        query_vecs = [vectors[0], vectors[1], vectors[-1]]
+        status = connect.delete_by_id(jac_collection, delete_ids)
+        assert status.OK()
+        status = connect.flush([jac_collection])
+        status, tmp_ids = connect.add_vectors(jac_collection, [vectors[0], vectors[-1]])
+        assert status.OK()
+        status = connect.flush([jac_collection])
+        search_param = get_search_param(index_type)
+        status, res = connect.search_vectors(jac_collection, top_k, query_vecs, params=search_param)
+        assert status.OK()
+        logging.getLogger().info(res)
+        assert res[0][0].id == tmp_ids[0]
+        assert res[1][0].id == ids[1]
+        assert res[2][0].id == tmp_ids[-1]
+        assert res[2][0].id == tmp_ids[-1]
 
-# class TestDeleteVectorsParamsInvalid:
 
-#     """
-#     Test search table with invalid table names
-#     """
-#     @pytest.fixture(
-#         scope="function",
-#         params=gen_invalid_table_names()
-#     )
-#     def get_table_name(self, request):
-#         yield request.param
+class TestDeleteIdsIngalid(object):
+    single_vector = gen_single_vector(dim)
 
-#     @pytest.mark.level(2)
-#     def test_delete_vectors_table_invalid_name(self, connect, get_table_name):
-#         '''
-#         '''
-#         start_date = get_current_day()
-#         end_date = get_next_day(2)
-#         table_name = get_table_name
-#         logging.getLogger().info(table_name)
-#         top_k = 1
-#         nprobe = 1 
-#         status = connect.delete_vectors_by_range(table_name, start_date, end_date)
-#         assert not status.OK()
+    """
+    Test adding vectors with invalid vectors
+    """
+    @pytest.fixture(
+        scope="function",
+        params=gen_invalid_vector_ids()
+    )
+    def gen_invalid_id(self, request):
+        yield request.param
 
-#     """
-#     Test search table with invalid query ranges
-#     """
-#     @pytest.fixture(
-#         scope="function",
-#         params=gen_invalid_query_ranges()
-#     )
-#     def get_query_ranges(self, request):
-#         yield request.param
+    @pytest.mark.level(1)
+    def test_delete_vector_id_invalid(self, connect, collection, gen_invalid_id):
+        invalid_id = gen_invalid_id
+        with pytest.raises(Exception) as e:
+            status = connect.delete_by_id(collection, [invalid_id])
 
-#     @pytest.mark.timeout(DELETE_TIMEOUT)
-#     def test_delete_vectors_range_invalid(self, connect, table, get_query_ranges):
-#         '''
-#         target: test search fuction, with the wrong query_range
-#         method: search with query_range
-#         expected: raise an error, and the connection is normal
-#         '''
-#         start_date = get_query_ranges[0][0]
-#         end_date = get_query_ranges[0][1]
-#         status, ids = connect.add_vectors(table, vectors)
-#         logging.getLogger().info(get_query_ranges)
-#         with pytest.raises(Exception) as e:
-#             status = connect.delete_vectors_by_range(table, start_date, end_date)
+    @pytest.mark.level(2)
+    def test_delete_vector_ids_invalid(self, connect, collection, gen_invalid_id):
+        invalid_id = gen_invalid_id
+        with pytest.raises(Exception) as e:
+            status = connect.delete_by_id(collection, [1, invalid_id])
+
+
+class TestCollectionNameInvalid(object):
+    """
+    Test adding vectors with invalid collection names
+    """
+    @pytest.fixture(
+        scope="function",
+        params=gen_invalid_collection_names()
+    )
+    def get_collection_name(self, request):
+        yield request.param
+
+    @pytest.mark.level(2)
+    def test_delete_vectors_with_invalid_collection_name(self, connect, get_collection_name):
+        collection_name = get_collection_name
+        status = connect.delete_by_id(collection_name, [1])
+        assert not status.OK()
+

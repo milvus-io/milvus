@@ -1,32 +1,25 @@
-// Licensed to the Apache Software Foundation (ASF) under one
-// or more contributor license agreements.  See the NOTICE file
-// distributed with this work for additional information
-// regarding copyright ownership.  The ASF licenses this file
-// to you under the Apache License, Version 2.0 (the
-// "License"); you may not use this file except in compliance
-// with the License.  You may obtain a copy of the License at
+// Copyright (C) 2019-2020 Zilliz. All rights reserved.
 //
-//   http://www.apache.org/licenses/LICENSE-2.0
+// Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance
+// with the License. You may obtain a copy of the License at
 //
-// Unless required by applicable law or agreed to in writing,
-// software distributed under the License is distributed on an
-// "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
-// KIND, either express or implied.  See the License for the
-// specific language governing permissions and limitations
-// under the License.
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software distributed under the License
+// is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
+// or implied. See the License for the specific language governing permissions and limitations under the License.
 
+#include <gtest/gtest.h>
 
-#include "scheduler/resource/Resource.h"
-#include "scheduler/resource/DiskResource.h"
+#include "scheduler/ResourceFactory.h"
 #include "scheduler/resource/CpuResource.h"
+#include "scheduler/resource/DiskResource.h"
 #include "scheduler/resource/GpuResource.h"
+#include "scheduler/resource/Resource.h"
 #include "scheduler/resource/TestResource.h"
 #include "scheduler/task/Task.h"
 #include "scheduler/task/TestTask.h"
-#include "scheduler/tasklabel/DefaultLabel.h"
-#include "scheduler/ResourceFactory.h"
-#include <gtest/gtest.h>
-
+#include "scheduler/tasklabel/SpecResLabel.h"
 
 namespace milvus {
 namespace scheduler {
@@ -38,69 +31,44 @@ class ResourceBaseTest : public testing::Test {
  protected:
     void
     SetUp() override {
-        only_loader_ = std::make_shared<DiskResource>(name1, id1, true, false);
-        only_executor_ = std::make_shared<CpuResource>(name2, id2, false, true);
-        both_enable_ = std::make_shared<GpuResource>(name3, id3, true, true);
-        both_disable_ = std::make_shared<TestResource>(name4, id4, false, false);
+        enable_executor_ = std::make_shared<CpuResource>(name1, id1, true);
+        disable_executor_ = std::make_shared<GpuResource>(name2, id2, false);
     }
 
-    const std::string name1 = "only_loader_";
-    const std::string name2 = "only_executor_";
-    const std::string name3 = "both_enable_";
-    const std::string name4 = "both_disable_";
+    const std::string name1 = "enable_executor_";
+    const std::string name2 = "disable_executor_";
 
     const uint64_t id1 = 1;
     const uint64_t id2 = 2;
-    const uint64_t id3 = 3;
-    const uint64_t id4 = 4;
 
-    ResourcePtr only_loader_ = nullptr;
-    ResourcePtr only_executor_ = nullptr;
-    ResourcePtr both_enable_ = nullptr;
-    ResourcePtr both_disable_ = nullptr;
+    ResourcePtr enable_executor_ = nullptr;
+    ResourcePtr disable_executor_ = nullptr;
 };
 
 TEST_F(ResourceBaseTest, NAME) {
-    ASSERT_EQ(only_loader_->name(), name1);
-    ASSERT_EQ(only_executor_->name(), name2);
-    ASSERT_EQ(both_enable_->name(), name3);
-    ASSERT_EQ(both_disable_->name(), name4);
+    ASSERT_EQ(enable_executor_->name(), name1);
+    ASSERT_EQ(disable_executor_->name(), name2);
 }
 
 TEST_F(ResourceBaseTest, TYPE) {
-    ASSERT_EQ(only_loader_->type(), ResourceType::DISK);
-    ASSERT_EQ(only_executor_->type(), ResourceType::CPU);
-    ASSERT_EQ(both_enable_->type(), ResourceType::GPU);
-    ASSERT_EQ(both_disable_->type(), ResourceType::TEST);
+    ASSERT_EQ(enable_executor_->type(), ResourceType::CPU);
+    ASSERT_EQ(disable_executor_->type(), ResourceType::GPU);
 }
 
 TEST_F(ResourceBaseTest, DEVICE_ID) {
-    ASSERT_EQ(only_loader_->device_id(), id1);
-    ASSERT_EQ(only_executor_->device_id(), id2);
-    ASSERT_EQ(both_enable_->device_id(), id3);
-    ASSERT_EQ(both_disable_->device_id(), id4);
-}
-
-TEST_F(ResourceBaseTest, HAS_LOADER) {
-    ASSERT_TRUE(only_loader_->HasLoader());
-    ASSERT_FALSE(only_executor_->HasLoader());
-    ASSERT_TRUE(both_enable_->HasLoader());
-    ASSERT_FALSE(both_disable_->HasLoader());
+    ASSERT_EQ(enable_executor_->device_id(), id1);
+    ASSERT_EQ(disable_executor_->device_id(), id2);
 }
 
 TEST_F(ResourceBaseTest, HAS_EXECUTOR) {
-    ASSERT_FALSE(only_loader_->HasExecutor());
-    ASSERT_TRUE(only_executor_->HasExecutor());
-    ASSERT_TRUE(both_enable_->HasExecutor());
-    ASSERT_FALSE(both_disable_->HasExecutor());
+    ASSERT_TRUE(enable_executor_->HasExecutor());
+    ASSERT_FALSE(disable_executor_->HasExecutor());
 }
 
 TEST_F(ResourceBaseTest, DUMP) {
-    ASSERT_FALSE(only_loader_->Dump().empty());
-    ASSERT_FALSE(only_executor_->Dump().empty());
-    ASSERT_FALSE(both_enable_->Dump().empty());
-    ASSERT_FALSE(both_disable_->Dump().empty());
-    std::cout << *only_loader_ << *only_executor_ << *both_enable_ << *both_disable_;
+    ASSERT_FALSE(enable_executor_->Dump().empty());
+    ASSERT_FALSE(disable_executor_->Dump().empty());
+    std::cout << *enable_executor_ << *disable_executor_;
 }
 
 /************ ResourceAdvanceTest ************/
@@ -112,7 +80,7 @@ class ResourceAdvanceTest : public testing::Test {
         disk_resource_ = ResourceFactory::Create("ssd", "DISK", 0);
         cpu_resource_ = ResourceFactory::Create("cpu", "CPU", 0);
         gpu_resource_ = ResourceFactory::Create("gpu", "GPU", 0);
-        test_resource_ = std::make_shared<TestResource>("test", 0, true, true);
+        test_resource_ = std::make_shared<TestResource>("test", 0, true);
         resources_.push_back(disk_resource_);
         resources_.push_back(cpu_resource_);
         resources_.push_back(gpu_resource_);
@@ -186,10 +154,12 @@ class ResourceAdvanceTest : public testing::Test {
 TEST_F(ResourceAdvanceTest, DISK_RESOURCE_TEST) {
     const uint64_t NUM = max_once_load;
     std::vector<std::shared_ptr<TestTask>> tasks;
-    TableFileSchemaPtr dummy = nullptr;
+    SegmentSchemaPtr dummy = nullptr;
     for (uint64_t i = 0; i < NUM; ++i) {
-        auto label = std::make_shared<DefaultLabel>();
-        auto task = std::make_shared<TestTask>(dummy, label);
+        auto label = std::make_shared<SpecResLabel>(disk_resource_);
+        auto task = std::make_shared<TestTask>(std::make_shared<server::Context>("dummy_request_id"), dummy, label);
+        std::vector<std::string> path{disk_resource_->name()};
+        task->path() = Path(path, 0);
         tasks.push_back(task);
         disk_resource_->task_table().Put(task);
     }
@@ -212,10 +182,12 @@ TEST_F(ResourceAdvanceTest, DISK_RESOURCE_TEST) {
 TEST_F(ResourceAdvanceTest, CPU_RESOURCE_TEST) {
     const uint64_t NUM = max_once_load;
     std::vector<std::shared_ptr<TestTask>> tasks;
-    TableFileSchemaPtr dummy = nullptr;
+    SegmentSchemaPtr dummy = nullptr;
     for (uint64_t i = 0; i < NUM; ++i) {
-        auto label = std::make_shared<DefaultLabel>();
-        auto task = std::make_shared<TestTask>(dummy, label);
+        auto label = std::make_shared<SpecResLabel>(cpu_resource_);
+        auto task = std::make_shared<TestTask>(std::make_shared<server::Context>("dummy_request_id"), dummy, label);
+        std::vector<std::string> path{cpu_resource_->name()};
+        task->path() = Path(path, 0);
         tasks.push_back(task);
         cpu_resource_->task_table().Put(task);
     }
@@ -233,15 +205,23 @@ TEST_F(ResourceAdvanceTest, CPU_RESOURCE_TEST) {
     for (uint64_t i = 0; i < NUM; ++i) {
         ASSERT_EQ(tasks[i]->exec_count_, 1);
     }
+
+    std::stringstream out;
+    out << *std::static_pointer_cast<CpuResource>(cpu_resource_);
+    out << *std::static_pointer_cast<GpuResource>(gpu_resource_);
+    out << *std::static_pointer_cast<DiskResource>(disk_resource_);
+    out << *std::static_pointer_cast<TestResource>(test_resource_);
 }
 
 TEST_F(ResourceAdvanceTest, GPU_RESOURCE_TEST) {
     const uint64_t NUM = max_once_load;
     std::vector<std::shared_ptr<TestTask>> tasks;
-    TableFileSchemaPtr dummy = nullptr;
+    SegmentSchemaPtr dummy = nullptr;
     for (uint64_t i = 0; i < NUM; ++i) {
-        auto label = std::make_shared<DefaultLabel>();
-        auto task = std::make_shared<TestTask>(dummy, label);
+        auto label = std::make_shared<SpecResLabel>(gpu_resource_);
+        auto task = std::make_shared<TestTask>(std::make_shared<server::Context>("dummy_request_id"), dummy, label);
+        std::vector<std::string> path{gpu_resource_->name()};
+        task->path() = Path(path, 0);
         tasks.push_back(task);
         gpu_resource_->task_table().Put(task);
     }
@@ -264,10 +244,12 @@ TEST_F(ResourceAdvanceTest, GPU_RESOURCE_TEST) {
 TEST_F(ResourceAdvanceTest, TEST_RESOURCE_TEST) {
     const uint64_t NUM = max_once_load;
     std::vector<std::shared_ptr<TestTask>> tasks;
-    TableFileSchemaPtr dummy = nullptr;
+    SegmentSchemaPtr dummy = nullptr;
     for (uint64_t i = 0; i < NUM; ++i) {
-        auto label = std::make_shared<DefaultLabel>();
-        auto task = std::make_shared<TestTask>(dummy, label);
+        auto label = std::make_shared<SpecResLabel>(test_resource_);
+        auto task = std::make_shared<TestTask>(std::make_shared<server::Context>("dummy_request_id"), dummy, label);
+        std::vector<std::string> path{test_resource_->name()};
+        task->path() = Path(path, 0);
         tasks.push_back(task);
         test_resource_->task_table().Put(task);
     }
@@ -285,8 +267,21 @@ TEST_F(ResourceAdvanceTest, TEST_RESOURCE_TEST) {
     for (uint64_t i = 0; i < NUM; ++i) {
         ASSERT_EQ(tasks[i]->exec_count_, 1);
     }
+
+    test_resource_->TaskAvgCost();
+    std::cout << test_resource_->Dump() << "  " << test_resource_->NumOfTaskToExec() << std::endl;
+    auto null_resource = ResourceFactory::Create("invalid", "invalid", 0);
+    ASSERT_EQ(null_resource, nullptr);
 }
 
-} // namespace scheduler
-} // namespace milvus
+TEST(Connection_Test, CONNECTION_TEST) {
+    std::string connection_name = "cpu";
+    uint64_t speed = 982;
+    Connection connection(connection_name, speed);
+    ASSERT_EQ(connection_name, connection.name());
+    ASSERT_EQ(speed, connection.speed());
+    std::cout << connection.Dump() << std::endl;
+}
 
+}  // namespace scheduler
+}  // namespace milvus

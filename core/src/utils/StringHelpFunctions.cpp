@@ -1,23 +1,22 @@
-// Licensed to the Apache Software Foundation (ASF) under one
-// or more contributor license agreements.  See the NOTICE file
-// distributed with this work for additional information
-// regarding copyright ownership.  The ASF licenses this file
-// to you under the Apache License, Version 2.0 (the
-// "License"); you may not use this file except in compliance
-// with the License.  You may obtain a copy of the License at
+// Copyright (C) 2019-2020 Zilliz. All rights reserved.
 //
-//   http://www.apache.org/licenses/LICENSE-2.0
+// Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance
+// with the License. You may obtain a copy of the License at
 //
-// Unless required by applicable law or agreed to in writing,
-// software distributed under the License is distributed on an
-// "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
-// KIND, either express or implied.  See the License for the
-// specific language governing permissions and limitations
-// under the License.
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software distributed under the License
+// is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
+// or implied. See the License for the specific language governing permissions and limitations under the License.
 
 #include "utils/StringHelpFunctions.h"
 
+#include <fiu-local.h>
+#include <algorithm>
+#include <regex>
 #include <string>
+
+#include "utils/ValidationUtil.h"
 
 namespace milvus {
 namespace server {
@@ -39,39 +38,53 @@ StringHelpFunctions::TrimStringQuote(std::string& string, const std::string& qou
     }
 }
 
-Status
+void
 StringHelpFunctions::SplitStringByDelimeter(const std::string& str, const std::string& delimeter,
                                             std::vector<std::string>& result) {
     if (str.empty()) {
-        return Status::OK();
+        return;
     }
 
-    size_t last = 0;
-    size_t index = str.find_first_of(delimeter, last);
-    while (index != std::string::npos) {
-        result.emplace_back(str.substr(last, index - last));
-        last = index + 1;
-        index = str.find_first_of(delimeter, last);
+    size_t prev = 0, pos = 0;
+    while (true) {
+        pos = str.find_first_of(delimeter, prev);
+        if (pos == std::string::npos) {
+            result.emplace_back(str.substr(prev));
+            break;
+        } else {
+            result.emplace_back(str.substr(prev, pos - prev));
+            prev = pos + 1;
+        }
     }
-    if (index - last > 0) {
-        std::string temp = str.substr(last);
-        result.emplace_back(temp);
+}
+
+void
+StringHelpFunctions::MergeStringWithDelimeter(const std::vector<std::string>& strs, const std::string& delimeter,
+                                              std::string& result) {
+    if (strs.empty()) {
+        result = "";
+        return;
     }
 
-    return Status::OK();
+    result = strs[0];
+    for (size_t i = 1; i < strs.size(); i++) {
+        result = result + delimeter + strs[i];
+    }
 }
 
 Status
 StringHelpFunctions::SplitStringByQuote(const std::string& str, const std::string& delimeter, const std::string& quote,
                                         std::vector<std::string>& result) {
     if (quote.empty()) {
-        return SplitStringByDelimeter(str, delimeter, result);
+        SplitStringByDelimeter(str, delimeter, result);
+        return Status::OK();
     }
 
     size_t last = 0;
     size_t index = str.find_first_of(quote, last);
     if (index == std::string::npos) {
-        return SplitStringByDelimeter(str, delimeter, result);
+        SplitStringByDelimeter(str, delimeter, result);
+        return Status::OK();
     }
 
     std::string process_str = str;
@@ -89,6 +102,8 @@ StringHelpFunctions::SplitStringByQuote(const std::string& str, const std::strin
         last = index + 1;
         std::string postfix = process_str.substr(last);
         index = postfix.find_first_of(quote, 0);
+        fiu_do_on("StringHelpFunctions.SplitStringByQuote.invalid_index", index = std::string::npos);
+
         if (index == std::string::npos) {
             return Status(SERVER_UNEXPECTED_ERROR, "");
         }
@@ -97,6 +112,9 @@ StringHelpFunctions::SplitStringByQuote(const std::string& str, const std::strin
 
         last = index + 1;
         index = postfix.find_first_of(delimeter, last);
+        fiu_do_on("StringHelpFunctions.SplitStringByQuote.index_gt_last", last = 0);
+        fiu_do_on("StringHelpFunctions.SplitStringByQuote.invalid_index2", index = std::string::npos);
+
         if (index != std::string::npos) {
             if (index > last) {
                 append_prefix += postfix.substr(last, index - last);
@@ -105,6 +123,7 @@ StringHelpFunctions::SplitStringByQuote(const std::string& str, const std::strin
             append_prefix += postfix.substr(last);
         }
         result.emplace_back(append_prefix);
+        fiu_do_on("StringHelpFunctions.SplitStringByQuote.last_is_end", last = postfix.length());
 
         if (last == postfix.length()) {
             return Status::OK();
@@ -116,8 +135,35 @@ StringHelpFunctions::SplitStringByQuote(const std::string& str, const std::strin
     }
 
     if (!process_str.empty()) {
-        return SplitStringByDelimeter(process_str, delimeter, result);
+        SplitStringByDelimeter(process_str, delimeter, result);
     }
+
+    return Status::OK();
+}
+
+bool
+StringHelpFunctions::IsRegexMatch(const std::string& target_str, const std::string& pattern_str) {
+    // if target_str equals pattern_str, return true
+    if (target_str == pattern_str) {
+        return true;
+    }
+
+    // regex match
+    std::regex pattern(pattern_str);
+    std::smatch results;
+    return std::regex_match(target_str, results, pattern);
+}
+
+Status
+StringHelpFunctions::ConvertToBoolean(const std::string& str, bool& value) {
+    auto status = ValidationUtil::ValidateStringIsBool(str);
+    if (!status.ok()) {
+        return status;
+    }
+
+    std::string s = str;
+    std::transform(s.begin(), s.end(), s.begin(), ::tolower);
+    value = s == "true" || s == "on" || s == "yes" || s == "1";
 
     return Status::OK();
 }

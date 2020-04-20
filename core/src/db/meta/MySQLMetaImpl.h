@@ -1,31 +1,26 @@
-// Licensed to the Apache Software Foundation (ASF) under one
-// or more contributor license agreements.  See the NOTICE file
-// distributed with this work for additional information
-// regarding copyright ownership.  The ASF licenses this file
-// to you under the Apache License, Version 2.0 (the
-// "License"); you may not use this file except in compliance
-// with the License.  You may obtain a copy of the License at
+// Copyright (C) 2019-2020 Zilliz. All rights reserved.
 //
-//   http://www.apache.org/licenses/LICENSE-2.0
+// Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance
+// with the License. You may obtain a copy of the License at
 //
-// Unless required by applicable law or agreed to in writing,
-// software distributed under the License is distributed on an
-// "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
-// KIND, either express or implied.  See the License for the
-// specific language governing permissions and limitations
-// under the License.
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software distributed under the License
+// is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
+// or implied. See the License for the specific language governing permissions and limitations under the License.
 
 #pragma once
 
-#include "Meta.h"
-#include "MySQLConnectionPool.h"
-#include "db/Options.h"
-
 #include <mysql++/mysql++.h>
+
 #include <memory>
 #include <mutex>
 #include <string>
 #include <vector>
+
+#include "Meta.h"
+#include "MySQLConnectionPool.h"
+#include "db/Options.h"
 
 namespace milvus {
 namespace engine {
@@ -37,66 +32,91 @@ class MySQLMetaImpl : public Meta {
     ~MySQLMetaImpl();
 
     Status
-    CreateTable(TableSchema& table_schema) override;
+    CreateCollection(CollectionSchema& collection_schema) override;
 
     Status
-    DescribeTable(TableSchema& table_schema) override;
+    DescribeCollection(CollectionSchema& collection_schema) override;
 
     Status
-    HasTable(const std::string& table_id, bool& has_or_not) override;
+    HasCollection(const std::string& collection_id, bool& has_or_not) override;
 
     Status
-    AllTables(std::vector<TableSchema>& table_schema_array) override;
+    AllCollections(std::vector<CollectionSchema>& collection_schema_array) override;
 
     Status
-    DeleteTable(const std::string& table_id) override;
+    DropCollection(const std::string& collection_id) override;
 
     Status
-    DeleteTableFiles(const std::string& table_id) override;
+    DeleteCollectionFiles(const std::string& collection_id) override;
 
     Status
-    CreateTableFile(TableFileSchema& file_schema) override;
+    CreateCollectionFile(SegmentSchema& file_schema) override;
 
     Status
-    DropPartitionsByDates(const std::string& table_id, const DatesT& dates) override;
+    GetCollectionFiles(const std::string& collection_id, const std::vector<size_t>& ids,
+                       SegmentsSchema& collection_files) override;
 
     Status
-    GetTableFiles(const std::string& table_id, const std::vector<size_t>& ids, TableFilesSchema& table_files) override;
+    GetCollectionFilesBySegmentId(const std::string& segment_id, SegmentsSchema& collection_files) override;
 
     Status
-    FilesByType(const std::string& table_id, const std::vector<int>& file_types,
-                std::vector<std::string>& file_ids) override;
+    UpdateCollectionIndex(const std::string& collection_id, const CollectionIndex& index) override;
 
     Status
-    UpdateTableIndex(const std::string& table_id, const TableIndex& index) override;
+    UpdateCollectionFlag(const std::string& collection_id, int64_t flag) override;
 
     Status
-    UpdateTableFlag(const std::string& table_id, int64_t flag) override;
+    UpdateCollectionFlushLSN(const std::string& collection_id, uint64_t flush_lsn) override;
 
     Status
-    DescribeTableIndex(const std::string& table_id, TableIndex& index) override;
+    GetCollectionFlushLSN(const std::string& collection_id, uint64_t& flush_lsn) override;
 
     Status
-    DropTableIndex(const std::string& table_id) override;
+    UpdateCollectionFile(SegmentSchema& file_schema) override;
 
     Status
-    UpdateTableFile(TableFileSchema& file_schema) override;
+    UpdateCollectionFilesToIndex(const std::string& collection_id) override;
 
     Status
-    UpdateTableFilesToIndex(const std::string& table_id) override;
+    UpdateCollectionFiles(SegmentsSchema& files) override;
 
     Status
-    UpdateTableFiles(TableFilesSchema& files) override;
+    UpdateCollectionFilesRowCount(SegmentsSchema& files) override;
 
     Status
-    FilesToSearch(const std::string& table_id, const std::vector<size_t>& ids, const DatesT& dates,
-                  DatePartionedTableFilesSchema& files) override;
+    DescribeCollectionIndex(const std::string& collection_id, CollectionIndex& index) override;
 
     Status
-    FilesToMerge(const std::string& table_id, DatePartionedTableFilesSchema& files) override;
+    DropCollectionIndex(const std::string& collection_id) override;
 
     Status
-    FilesToIndex(TableFilesSchema&) override;
+    CreatePartition(const std::string& collection_id, const std::string& partition_name, const std::string& tag,
+                    uint64_t lsn) override;
+
+    Status
+    DropPartition(const std::string& partition_name) override;
+
+    Status
+    ShowPartitions(const std::string& collection_id,
+                   std::vector<meta::CollectionSchema>& partition_schema_array) override;
+
+    Status
+    GetPartitionName(const std::string& collection_id, const std::string& tag, std::string& partition_name) override;
+
+    Status
+    FilesToSearch(const std::string& collection_id, SegmentsSchema& files) override;
+
+    Status
+    FilesToMerge(const std::string& collection_id, SegmentsSchema& files) override;
+
+    Status
+    FilesToIndex(SegmentsSchema&) override;
+
+    Status
+    FilesByType(const std::string& collection_id, const std::vector<int>& file_types, SegmentsSchema& files) override;
+
+    Status
+    FilesByID(const std::vector<size_t>& ids, SegmentsSchema& collection_files) override;
 
     Status
     Archive() override;
@@ -105,22 +125,37 @@ class MySQLMetaImpl : public Meta {
     Size(uint64_t& result) override;
 
     Status
-    CleanUp() override;
+    CleanUpShadowFiles() override;
 
     Status
-    CleanUpFilesWithTTL(uint16_t seconds) override;
+    CleanUpFilesWithTTL(uint64_t seconds /*, CleanUpFilter* filter = nullptr*/) override;
 
     Status
     DropAll() override;
 
     Status
-    Count(const std::string& table_id, uint64_t& result) override;
+    Count(const std::string& collection_id, uint64_t& result) override;
+
+    Status
+    SetGlobalLastLSN(uint64_t lsn) override;
+
+    Status
+    GetGlobalLastLSN(uint64_t& lsn) override;
+
+    Status
+    CreateHybridCollection(CollectionSchema& collection_schema, hybrid::FieldsSchema& fields_schema) override;
+
+    Status
+    DescribeHybridCollection(CollectionSchema& collection_schema, hybrid::FieldsSchema& fields_schema) override;
+
+    Status
+    CreateHybridCollectionFile(SegmentSchema& file_schema) override;
 
  private:
     Status
     NextFileId(std::string& file_id);
     Status
-    NextTableId(std::string& table_id);
+    NextCollectionId(std::string& collection_id);
     Status
     DiscardFiles(int64_t to_discard_size);
 
@@ -136,6 +171,8 @@ class MySQLMetaImpl : public Meta {
     std::shared_ptr<MySQLConnectionPool> mysql_connection_pool_;
     bool safe_grab_ = false;
 
+    std::mutex meta_mutex_;
+    std::mutex genid_mutex_;
     //        std::mutex connectionMutex_;
 };  // DBMetaImpl
 

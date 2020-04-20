@@ -1,0 +1,78 @@
+{
+  "files": [
+    "README.md"
+  ],
+  "imageSize": 100,
+  "commit": false,
+  "contributors": [
+    {
+      "login": "zerowe-seven",
+      "name": "zerowe-seven",
+      "avatar_url": "https://avatars0.githubusercontent.com/u/57790060?v=4",
+      "profile": "https://github.com/zerowe-seven",
+      "contributions": [
+        "code"
+      ]
+    },
+    {
+      "login": "erdustiggen",
+      "name": "erdustiggen",
+      "avatar_url": "https://avatars1.githubusercontent.com/u/25433850?v=4",
+      "profile": "https://github.com/erdustiggen",
+      "contributions": [
+        "code"
+      ]
+    },
+    {
+      "login": "gaolizhou",
+      "name": "gaolizhou",
+      "avatar_url": "https://avatars2.githubusercontent.com/u/2884044?v=4",
+      "profile": "https://github.com/gaolizhou",
+      "contributions": [
+        "code"
+      ]
+    },
+    {
+      "login": "akihoni",
+      "name": "Sijie Zhang",
+      "avatar_url": "https://avatars0.githubusercontent.com/u/36330442?v=4",
+      "profile": "https://github.com/akihoni",
+      "contributions": [
+        "doc"
+      ]
+    },
+    {
+      "login": "PizzaL",
+      "name": "PizzaL",
+      "avatar_url": "https://avatars0.githubusercontent.com/u/5666666?v=4",
+      "profile": "https://github.com/PizzaL",
+      "contributions": [
+        "code"
+      ]
+    },
+    {
+      "login": "levylll",
+      "name": "levylll",
+      "avatar_url": "https://avatars2.githubusercontent.com/u/5645285?v=4",
+      "profile": "https://github.com/levylll",
+      "contributions": [
+        "code"
+      ]
+    },
+    {
+      "login": "aaronjin2010",
+      "name": "aaronjin2010",
+      "avatar_url": "https://avatars1.githubusercontent.com/u/48044391?v=4",
+      "profile": "https://github.com/aaronjin2010",
+      "contributions": [
+        "code"
+      ]
+    }
+  ],
+  "contributorsPerLine": 7,
+  "projectName": "milvus",
+  "projectOwner": "milvus-io",
+  "repoType": "github",
+  "repoHost": "https://github.com",
+  "skipCi": true
+}

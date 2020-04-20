@@ -5,53 +5,74 @@ import "status.proto";
 package milvus.grpc;
 
 /**
- * @brief Table Name
+ * @brief general usage
  */
-message TableName {
-    string table_name = 1;
+message KeyValuePair {
+    string key = 1;
+    string value = 2;
 }
 
 /**
- * @brief Table Name List
+ * @brief Collection name
  */
-message TableNameList {
-    Status status = 1;
-    repeated string table_names = 2;
+message CollectionName {
+    string collection_name = 1;
 }
 
 /**
- * @brief Table Schema
+ * @brief Collection name list
  */
-message TableSchema {
+message CollectionNameList {
     Status status = 1;
-    string table_name = 2;
+    repeated string collection_names = 2;
+}
+
+/**
+ * @brief Collection schema
+ * metric_type: 1-L2, 2-IP
+ */
+message CollectionSchema {
+    Status status = 1;
+    string collection_name = 2;
     int64 dimension = 3;
     int64 index_file_size = 4;
     int32 metric_type = 5;
+    repeated KeyValuePair extra_params = 6;
 }
 
 /**
- * @brief Range Schema
+ * @brief Params of partition
  */
-message Range {
-    string start_value = 1;
-    string end_value = 2;
+message PartitionParam {
+    string collection_name = 1;
+    string tag = 2;
+}
+
+/**
+ * @brief Partition list
+ */
+message PartitionList {
+    Status status = 1;
+    repeated string partition_tag_array = 2;
 }
 
 /**
  * @brief Record inserted
  */
 message RowRecord {
-    repeated float vector_data = 1;             //binary vector data
+    repeated float float_data = 1;             //float vector data
+    bytes binary_data = 2;                      //binary vector data
 }
 
 /**
- * @brief params to be inserted
+ * @brief Params to be inserted
  */
 message InsertParam {
-    string table_name = 1;
+    string collection_name = 1;
     repeated RowRecord row_record_array = 2;
     repeated int64 row_id_array = 3;            //optional
+    string partition_tag = 4;
+    repeated KeyValuePair extra_params = 5;
 }
 
 /**
@@ -63,18 +84,18 @@ message VectorIds {
 }
 
 /**
- * @brief params for searching vector
+ * @brief Params for searching vector
  */
 message SearchParam {
-    string table_name = 1;
-    repeated RowRecord query_record_array = 2;
-    repeated Range query_range_array = 3;
+    string collection_name = 1;
+    repeated string partition_tag_array = 2;
+    repeated RowRecord query_record_array = 3;
     int64 topk = 4;
-    int64 nprobe = 5;
+    repeated KeyValuePair extra_params = 5;
 }
 
 /**
- * @brief params for searching vector in files
+ * @brief Params for searching vector in files
  */
 message SearchInFilesParam {
     repeated string file_id_array = 1;
@@ -82,30 +103,28 @@ message SearchInFilesParam {
 }
 
 /**
+ * @brief Params for searching vector by ID
+ */
+message SearchByIDParam {
+    string collection_name = 1;
+    repeated string partition_tag_array = 2;
+    int64 id = 3;
+    int64 topk = 4;
+    repeated KeyValuePair extra_params = 5;
+}
+
+/**
  * @brief Query result params
  */
-message QueryResult {
-    int64 id = 1;
-    double distance = 2;
-}
-
-/**
- * @brief TopK query result
- */
 message TopKQueryResult {
-    repeated QueryResult query_result_arrays = 1;
-}
-
-/**
- * @brief List of topK query result
- */
-message TopKQueryResultList {
     Status status = 1;
-    repeated TopKQueryResult topk_query_result = 2;
+    int64 row_num = 2;
+    repeated int64 ids = 3;
+    repeated float distances = 4;
 }
 
 /**
- * @brief Server String Reply
+ * @brief Server string Reply
  */
 message StringReply {
     Status status = 1;
@@ -121,203 +140,557 @@ message BoolReply {
 }
 
 /**
- * @brief Return table row count
+ * @brief Return collection row count
  */
-message TableRowCount {
+message CollectionRowCount {
     Status status = 1;
-    int64 table_row_count = 2;
+    int64 collection_row_count = 2;
 }
 
 /**
- * @brief Give Server Command
+ * @brief Give server Command
  */
 message Command {
     string cmd = 1;
 }
 
 /**
- * @brief Index
- * @index_type: 0-invalid, 1-idmap, 2-ivflat, 3-ivfsq8, 4-nsgmix
- * @metric_type: 1-L2, 2-IP
- */
-message Index {
-    int32 index_type = 1;
-    int32 nlist = 2;
-}
-
-/**
  * @brief Index params
+ * @index_type: 0-invalid, 1-idmap, 2-ivflat, 3-ivfsq8, 4-nsgmix
  */
 message IndexParam {
     Status status = 1;
-    string table_name = 2;
-    Index index = 3;
+    string collection_name = 2;
+    int32 index_type = 3;
+    repeated KeyValuePair extra_params = 4;
 }
 
 /**
- * @brief table name and range for DeleteByRange
+ * @brief Flush params
  */
-message DeleteByRangeParam {
-    Range range = 1;
-    string table_name = 2;
+message FlushParam {
+    repeated string collection_name_array = 1;
 }
+
+/**
+ * @brief Flush params
+ */
+message DeleteByIDParam {
+    string collection_name = 1;
+    repeated int64 id_array = 2;
+}
+
+/**
+ * @brief segment statistics
+ */
+message SegmentStat {
+    string segment_name = 1;
+    int64 row_count = 2;
+    string index_name = 3;
+    int64 data_size = 4;
+}
+
+/**
+ * @brief collection statistics
+ */
+message PartitionStat {
+    string tag = 1;
+    int64 total_row_count = 2;
+    repeated SegmentStat segments_stat = 3;
+}
+
+/**
+ * @brief collection information
+ */
+message CollectionInfo {
+    Status status = 1;
+    int64 total_row_count = 2;
+    repeated PartitionStat partitions_stat = 3;
+}
+
+/**
+ * @brief vector identity
+ */
+message VectorIdentity {
+    string collection_name = 1;
+    int64 id = 2;
+}
+
+/**
+ * @brief vector data
+ */
+message VectorData {
+    Status status = 1;
+    RowRecord vector_data = 2;
+}
+
+/**
+ * @brief get vector ids from a segment parameters
+ */
+message GetVectorIDsParam {
+    string collection_name = 1;
+    string segment_name = 2;
+}
+
+
+/********************************************************************************************************************/
+
+enum DataType {
+    NULL = 0;
+    INT8 = 1;
+    INT16 = 2;
+    INT32 = 3;
+    INT64 = 4;
+
+    STRING = 20;
+
+    BOOL = 30;
+
+    FLOAT = 40;
+    DOUBLE = 41;
+
+    VECTOR = 100;
+    UNKNOWN = 9999;
+}
+
+///////////////////////////////////////////////////////////////////
+
+message VectorFieldParam {
+    int64 dimension = 1;
+}
+
+message FieldType {
+    oneof value {
+        DataType data_type = 1;
+        VectorFieldParam vector_param = 2;
+    }
+}
+
+message FieldParam {
+    uint64 id = 1;
+    string name = 2;
+    FieldType type = 3;
+    repeated KeyValuePair extra_params = 4;
+}
+
+message VectorFieldValue {
+    repeated RowRecord value = 1;
+}
+
+message FieldValue {
+    oneof value {
+        int32 int32_value = 1;
+        int64 int64_value = 2;
+        float float_value = 3;
+        double double_value = 4;
+        string string_value = 5;
+        bool  bool_value = 6;
+        VectorFieldValue vector_value = 7;
+    }
+}
+
+///////////////////////////////////////////////////////////////////
+
+message Mapping {
+    Status status = 1;
+    uint64 collection_id = 2;
+    string collection_name = 3;
+    repeated FieldParam fields = 4;
+}
+
+message MappingList {
+    Status status = 1;
+    repeated Mapping mapping_list = 2;
+}
+
+///////////////////////////////////////////////////////////////////
+
+message TermQuery {
+    string field_name = 1;
+    repeated string values = 2;
+    float boost = 3;
+    repeated KeyValuePair extra_params = 4;
+}
+
+enum CompareOperator {
+    LT = 0;
+    LTE = 1;
+    EQ = 2;
+    GT = 3;
+    GTE = 4;
+    NE = 5;
+}
+
+message CompareExpr {
+    CompareOperator operator = 1;
+    string operand = 2;
+}
+
+message RangeQuery {
+    string field_name = 1;
+    repeated CompareExpr operand = 2;
+    float boost = 3;
+    repeated KeyValuePair extra_params = 4;
+}
+
+message VectorQuery {
+    string field_name = 1;
+    float query_boost = 2;
+    repeated RowRecord records = 3;
+    int64 topk = 4;
+    repeated KeyValuePair extra_params = 5;
+}
+
+enum Occur {
+    INVALID = 0;
+    MUST = 1;
+    SHOULD = 2;
+    MUST_NOT = 3;
+}
+
+message BooleanQuery {
+    Occur occur = 1;
+    repeated GeneralQuery general_query = 2;
+}
+
+message GeneralQuery {
+    oneof query {
+        BooleanQuery boolean_query = 1;
+        TermQuery term_query = 2;
+        RangeQuery range_query = 3;
+        VectorQuery vector_query = 4;
+    }
+}
+
+message HSearchParam {
+    string collection_name = 1;
+    repeated string partition_tag_array = 2;
+    GeneralQuery general_query = 3;
+    repeated KeyValuePair extra_params = 4;
+}
+
+message HSearchInSegmentsParam {
+    repeated string segment_id_array = 1;
+    HSearchParam search_param = 2;
+}
+
+///////////////////////////////////////////////////////////////////
+
+message AttrRecord {
+    repeated string value = 1;
+}
+
+message HEntity {
+    Status status = 1;
+    int64 entity_id = 2;
+    repeated string field_names = 3;
+    repeated AttrRecord attr_records = 4;
+    repeated FieldValue result_values = 5;
+}
+
+message HQueryResult {
+    Status status = 1;
+    repeated HEntity entities = 2;
+    int64 row_num = 3;
+    repeated float score = 4;
+    repeated float distance = 5;
+}
+
+message HInsertParam {
+    string collection_name = 1;
+    string partition_tag = 2;
+    HEntity entities = 3;
+    repeated int64 entity_id_array = 4;
+    repeated KeyValuePair extra_params = 5;
+}
+
+message HEntityIdentity {
+    string collection_name = 1;
+    int64 id = 2;
+}
+
+message HEntityIDs {
+    Status status = 1;
+    repeated int64 entity_id_array = 2;
+}
+
+message HGetEntityIDsParam {
+    string collection_name = 1;
+    string segment_name = 2;
+}
+
+message HDeleteByIDParam {
+    string collection_name = 1;
+    repeated int64 id_array = 2;
+}
+
+///////////////////////////////////////////////////////////////////
+
+message HIndexParam {
+    Status status = 1;
+    string collection_name = 2;
+    int32 index_type = 3;
+    repeated KeyValuePair extra_params = 4;
+}
+
 
 service MilvusService {
     /**
-     * @brief Create table method
+     * @brief This method is used to create collection
      *
-     * This method is used to create table
+     * @param CollectionSchema, use to provide collection information to be created.
      *
-     * @param param, use to provide table information to be created.
-     *
+     * @return Status
      */
-    rpc CreateTable(TableSchema) returns (Status){}
+    rpc CreateCollection(CollectionSchema) returns (Status){}
 
     /**
-     * @brief Test table existence method
+     * @brief This method is used to test collection existence.
      *
-     * This method is used to test table existence.
+     * @param CollectionName, collection name is going to be tested.
      *
-     * @param table_name, table name is going to be tested.
-     *
+     * @return BoolReply
      */
-    rpc HasTable(TableName) returns (BoolReply) {}
+    rpc HasCollection(CollectionName) returns (BoolReply) {}
 
     /**
-     * @brief Delete table method
+     * @brief This method is used to get collection schema.
      *
-     * This method is used to delete table.
+     * @param CollectionName, target collection name.
      *
-     * @param table_name, table name is going to be deleted.
-     *
+     * @return CollectionSchema
      */
-    rpc DropTable(TableName) returns (Status) {}
+    rpc DescribeCollection(CollectionName) returns (CollectionSchema) {}
 
     /**
-     * @brief Build index by table method
+     * @brief This method is used to get collection schema.
      *
-     * This method is used to build index by table in sync mode.
+     * @param CollectionName, target collection name.
      *
-     * @param table_name, table is going to be built index.
+     * @return CollectionRowCount
+     */
+    rpc CountCollection(CollectionName) returns (CollectionRowCount) {}
+
+    /**
+     * @brief This method is used to list all collections.
      *
+     * @param Command, dummy parameter.
+     *
+     * @return CollectionNameList
+     */
+    rpc ShowCollections(Command) returns (CollectionNameList) {}
+
+    /**
+     * @brief This method is used to get collection detail information.
+     *
+     * @param CollectionName, target collection name.
+     *
+     * @return CollectionInfo
+     */
+    rpc ShowCollectionInfo(CollectionName) returns (CollectionInfo) {}
+
+    /**
+     * @brief This method is used to delete collection.
+     *
+     * @param CollectionName, collection name is going to be deleted.
+     *
+     * @return CollectionNameList
+     */
+    rpc DropCollection(CollectionName) returns (Status) {}
+
+    /**
+     * @brief This method is used to build index by collection in sync mode.
+     *
+     * @param IndexParam, index paramters.
+     *
+     * @return Status
      */
     rpc CreateIndex(IndexParam) returns (Status) {}
 
     /**
-     * @brief Add vector array to table
+     * @brief This method is used to describe index
      *
-     * This method is used to add vector array to table.
+     * @param CollectionName, target collection name.
      *
-     * @param table_name, table_name is inserted.
-     * @param record_array, vector array is inserted.
+     * @return IndexParam
+     */
+    rpc DescribeIndex(CollectionName) returns (IndexParam) {}
+
+    /**
+     * @brief This method is used to drop index
      *
-     * @return vector id array
+     * @param CollectionName, target collection name.
+     *
+     * @return Status
+     */
+    rpc DropIndex(CollectionName) returns (Status) {}
+
+    /**
+     * @brief This method is used to create partition
+     *
+     * @param PartitionParam, partition parameters.
+     *
+     * @return Status
+     */
+    rpc CreatePartition(PartitionParam) returns (Status) {}
+
+    /**
+     * @brief This method is used to show partition information
+     *
+     * @param CollectionName, target collection name.
+     *
+     * @return PartitionList
+     */
+    rpc ShowPartitions(CollectionName) returns (PartitionList) {}
+
+    /**
+     * @brief This method is used to drop partition
+     *
+     * @param PartitionParam, target partition.
+     *
+     * @return Status
+     */
+    rpc DropPartition(PartitionParam) returns (Status) {}
+
+    /**
+     * @brief This method is used to add vector array to collection.
+     *
+     * @param InsertParam, insert parameters.
+     *
+     * @return VectorIds
      */
     rpc Insert(InsertParam) returns (VectorIds) {}
 
     /**
-     * @brief Query vector
+     * @brief This method is used to get vector data by id.
      *
-     * This method is used to query vector in table.
+     * @param VectorIdentity, target vector id.
      *
-     * @param table_name, table_name is queried.
-     * @param query_record_array, all vector are going to be queried.
-     * @param query_range_array, optional ranges for conditional search. If not specified, search whole table
-     * @param topk, how many similarity vectors will be searched.
-     *
-     * @return query result array.
+     * @return VectorData
      */
-    rpc Search(SearchParam) returns (TopKQueryResultList) {}
+    rpc GetVectorByID(VectorIdentity) returns (VectorData) {}
 
     /**
-     * @brief Internal use query interface
+     * @brief This method is used to get vector ids from a segment
      *
-     * This method is used to query vector in specified files.
+     * @param GetVectorIDsParam, target collection and segment
      *
-     * @param file_id_array, specified files id array, queried.
-     * @param query_record_array, all vector are going to be queried.
-     * @param query_range_array, optional ranges for conditional search. If not specified, search whole table
-     * @param topk, how many similarity vectors will be searched.
-     *
-     * @return query result array.
+     * @return VectorIds
      */
-    rpc SearchInFiles(SearchInFilesParam) returns (TopKQueryResultList) {}
+    rpc GetVectorIDs(GetVectorIDsParam) returns (VectorIds) {}
 
     /**
-     * @brief Get table schema
+     * @brief This method is used to query vector in collection.
      *
-     * This method is used to get table schema.
+     * @param SearchParam, search parameters.
      *
-     * @param table_name, target table name.
-     *
-     * @return table schema
+     * @return TopKQueryResult
      */
-    rpc DescribeTable(TableName) returns (TableSchema) {}
+    rpc Search(SearchParam) returns (TopKQueryResult) {}
 
     /**
-     * @brief Get table schema
+     * @brief This method is used to query vector by id.
      *
-     * This method is used to get table schema.
+     * @param SearchByIDParam, search parameters.
      *
-     * @param table_name, target table name.
-     *
-     * @return table schema
+     * @return TopKQueryResult
      */
-    rpc CountTable(TableName) returns (TableRowCount) {}
+    rpc SearchByID(SearchByIDParam) returns (TopKQueryResult) {}
 
     /**
-     * @brief List all tables in database
+     * @brief This method is used to query vector in specified files.
      *
-     * This method is used to list all tables.
+     * @param SearchInFilesParam, search in files paremeters.
      *
-     *
-     * @return table names.
+     * @return TopKQueryResult
      */
-    rpc ShowTables(Command) returns (TableNameList) {}
+    rpc SearchInFiles(SearchInFilesParam) returns (TopKQueryResult) {}
 
     /**
-     * @brief Give the server status
+     * @brief This method is used to give the server status.
      *
-     * This method is used to give the server status.
+     * @param Command, command string
      *
-     * @return Server status.
+     * @return StringReply
      */
     rpc Cmd(Command) returns (StringReply) {}
 
-     /**
-     * @brief delete table by range
+    /**
+     * @brief This method is used to delete vector by id
      *
-     * This method is used to delete vector by range
+     * @param DeleteByIDParam, delete parameters.
      *
-     * @return rpc status.
+     * @return status
      */
-     rpc DeleteByRange(DeleteByRangeParam) returns (Status) {}
+    rpc DeleteByID(DeleteByIDParam) returns (Status) {}
 
-     /**
-      * @brief preload table
-      *
-      * This method is used to preload table
-      *
-      * @return Status.
-      */
-     rpc PreloadTable(TableName) returns (Status) {}
+    /**
+     * @brief This method is used to preload collection
+     *
+     * @param CollectionName, target collection name.
+     *
+     * @return Status
+     */
+    rpc PreloadCollection(CollectionName) returns (Status) {}
 
-     /**
-      * @brief describe index
-      *
-      * This method is used to describe index
-      *
-      * @return Status.
-      */
-     rpc DescribeIndex(TableName) returns (IndexParam) {}
+    /**
+     * @brief This method is used to flush buffer into storage.
+     *
+     * @param FlushParam, flush parameters
+     *
+     * @return Status
+     */
+    rpc Flush(FlushParam) returns (Status) {}
 
-     /**
-      * @brief drop index
-      *
-      * This method is used to drop index
-      *
-      * @return Status.
-      */
-     rpc DropIndex(TableName) returns (Status) {}
+    /**
+     * @brief This method is used to compact collection
+     *
+     * @param CollectionName, target collection name.
+     *
+     * @return Status
+     */
+    rpc Compact(CollectionName) returns (Status) {}
 
+    /********************************New Interface********************************************/
+
+    rpc CreateHybridCollection(Mapping) returns (Status) {}
+
+    rpc HasHybridCollection(CollectionName) returns (BoolReply) {}
+
+    rpc DropHybridCollection(CollectionName) returns (Status) {}
+
+    rpc DescribeHybridCollection(CollectionName) returns (Mapping) {}
+
+    rpc CountHybridCollection(CollectionName) returns (CollectionRowCount) {}
+
+    rpc ShowHybridCollections(Command) returns (MappingList) {}
+
+    rpc ShowHybridCollectionInfo (CollectionName) returns (CollectionInfo) {}
+
+    rpc PreloadHybridCollection(CollectionName) returns (Status) {}
+
+    ///////////////////////////////////////////////////////////////////
+
+//    rpc CreateIndex(IndexParam) returns (Status) {}
+//
+//    rpc DescribeIndex(CollectionName) returns (IndexParam) {}
+//
+//    rpc DropIndex(CollectionName) returns (Status) {}
+
+    ///////////////////////////////////////////////////////////////////
+
+    rpc InsertEntity(HInsertParam) returns (HEntityIDs) {}
+
+    // TODO(yukun): will change to HQueryResult
+    rpc HybridSearch(HSearchParam) returns (TopKQueryResult) {}
+
+    rpc HybridSearchInSegments(HSearchInSegmentsParam) returns (TopKQueryResult) {}
+
+    rpc GetEntityByID(HEntityIdentity) returns (HEntity) {}
+
+    rpc GetEntityIDs(HGetEntityIDsParam) returns (HEntityIDs) {}
+
+    rpc DeleteEntitiesByID(HDeleteByIDParam) returns (Status) {}
+
+    ///////////////////////////////////////////////////////////////////
 }

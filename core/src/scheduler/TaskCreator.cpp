@@ -1,24 +1,17 @@
-// Licensed to the Apache Software Foundation (ASF) under one
-// or more contributor license agreements.  See the NOTICE file
-// distributed with this work for additional information
-// regarding copyright ownership.  The ASF licenses this file
-// to you under the Apache License, Version 2.0 (the
-// "License"); you may not use this file except in compliance
-// with the License.  You may obtain a copy of the License at
+// Copyright (C) 2019-2020 Zilliz. All rights reserved.
 //
-//   http://www.apache.org/licenses/LICENSE-2.0
+// Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance
+// with the License. You may obtain a copy of the License at
 //
-// Unless required by applicable law or agreed to in writing,
-// software distributed under the License is distributed on an
-// "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
-// KIND, either express or implied.  See the License for the
-// specific language governing permissions and limitations
-// under the License.
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software distributed under the License
+// is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
+// or implied. See the License for the specific language governing permissions and limitations under the License.
 
 #include "scheduler/TaskCreator.h"
 #include "SchedInst.h"
 #include "tasklabel/BroadcastLabel.h"
-#include "tasklabel/DefaultLabel.h"
 #include "tasklabel/SpecResLabel.h"
 
 namespace milvus {
@@ -47,8 +40,7 @@ std::vector<TaskPtr>
 TaskCreator::Create(const SearchJobPtr& job) {
     std::vector<TaskPtr> tasks;
     for (auto& index_file : job->index_files()) {
-        auto label = std::make_shared<DefaultLabel>();
-        auto task = std::make_shared<XSearchTask>(index_file.second, label);
+        auto task = std::make_shared<XSearchTask>(job->GetContext(), index_file.second, nullptr);
         task->job_ = job;
         tasks.emplace_back(task);
     }
@@ -70,19 +62,8 @@ TaskCreator::Create(const DeleteJobPtr& job) {
 std::vector<TaskPtr>
 TaskCreator::Create(const BuildIndexJobPtr& job) {
     std::vector<TaskPtr> tasks;
-    server::Config& config = server::Config::GetInstance();
-    int32_t build_index_id;
-    Status stat = config.GetResourceConfigIndexBuildDevice(build_index_id);
-    ResourcePtr res_ptr;
-    if (build_index_id == server::CPU_DEVICE_ID) {
-        res_ptr = ResMgrInst::GetInstance()->GetResource("cpu");
-    } else {
-        res_ptr = ResMgrInst::GetInstance()->GetResource(ResourceType::GPU, build_index_id);
-    }
-
     for (auto& to_index_file : job->to_index_files()) {
-        auto label = std::make_shared<SpecResLabel>(std::weak_ptr<Resource>(res_ptr));
-        auto task = std::make_shared<XBuildIndexTask>(to_index_file.second, label);
+        auto task = std::make_shared<XBuildIndexTask>(to_index_file.second, nullptr);
         task->job_ = job;
         tasks.emplace_back(task);
     }

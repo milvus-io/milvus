@@ -5,10 +5,9 @@ BUILD_UNITTEST="OFF"
 INSTALL_PREFIX=$(pwd)/cmake_build
 MAKE_CLEAN="OFF"
 PROFILING="OFF"
-BUILD_FAISS_WITH_MKL="OFF"
-USE_JFROG_CACHE="OFF"
+FAISS_WITH_MKL="OFF"
 
-while getopts "p:d:t:uhrcgmj" arg
+while getopts "p:d:t:uhrcgm" arg
 do
         case $arg in
              t)
@@ -31,10 +30,7 @@ do
                 PROFILING="ON"
                 ;;
              m)
-                BUILD_FAISS_WITH_MKL="ON"
-                ;;
-             j)
-                USE_JFROG_CACHE="ON"
+                FAISS_WITH_MKL="ON"
                 ;;
              h) # help
                 echo "
@@ -74,8 +70,7 @@ if [[ ${MAKE_CLEAN} == "ON" ]]; then
     -DCMAKE_BUILD_TYPE=${BUILD_TYPE} \
     -DCMAKE_CUDA_COMPILER=${CUDA_COMPILER} \
     -DMILVUS_ENABLE_PROFILING=${PROFILING} \
-    -DBUILD_FAISS_WITH_MKL=${BUILD_FAISS_WITH_MKL} \
-    -DUSE_JFROG_CACHE=${USE_JFROG_CACHE} \
+    -DFAISS_WITH_MKL=${FAISS_WITH_MKL} \
     ../"
     echo ${CMAKE_CMD}
 

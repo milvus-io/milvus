@@ -1,5 +1,4 @@
 import pytest
-from milvus import Milvus
 import pdb
 import threading
 from multiprocessing import Process
@@ -37,9 +36,9 @@ class TestConnect:
         expected: raise an error after disconnected
         '''
         if not connect.connected():
-            milvus = Milvus()
+            milvus = get_milvus(args["handler"])
             uri_value = "tcp://%s:%s" % (args["ip"], args["port"])
-            milvus.connect(uri=uri_value)
+            milvus.connect(uri=uri_value, timeout=5)
             res = milvus.disconnect()
             with pytest.raises(Exception) as e:
                 res = milvus.disconnect()
@@ -54,7 +53,7 @@ class TestConnect:
         method: set correct ip and port
         expected: connected is True        
         '''
-        milvus = Milvus()
+        milvus = get_milvus(args["handler"])
         milvus.connect(host=args["ip"], port=args["port"])
         assert milvus.connected()
 
@@ -64,7 +63,7 @@ class TestConnect:
         method: set correct ip and port
         expected: connected is False        
         '''
-        milvus = Milvus()
+        milvus = get_milvus(args["handler"])
         milvus.connect(host=args["ip"], port=args["port"])
         milvus.disconnect()
         assert not milvus.connected()
@@ -76,7 +75,7 @@ class TestConnect:
         method: set host localhost
         expected: connected is True
         '''
-        milvus = Milvus()
+        milvus = get_milvus(args["handler"])
         milvus.connect(host='localhost', port=args["port"])
         assert milvus.connected()
 
@@ -87,7 +86,7 @@ class TestConnect:
         method: set host null
         expected: not use default ip, connected is False
         '''
-        milvus = Milvus()
+        milvus = get_milvus(args["handler"])
         ip = ""
         with pytest.raises(Exception) as e:
             milvus.connect(host=ip, port=args["port"], timeout=1)
@@ -99,7 +98,7 @@ class TestConnect:
         method: uri format and value are both correct
         expected: connected is True        
         '''
-        milvus = Milvus()
+        milvus = get_milvus(args["handler"])
         uri_value = "tcp://%s:%s" % (args["ip"], args["port"])
         milvus.connect(uri=uri_value)
         assert milvus.connected()
@@ -110,7 +109,7 @@ class TestConnect:
         method: uri set null
         expected: connected is True        
         '''
-        milvus = Milvus()
+        milvus = get_milvus(args["handler"])
         uri_value = ""
         
         if self.local_ip(args):
@@ -129,7 +128,7 @@ class TestConnect:
         method: set uri port null
         expected: connected is True        
         '''
-        milvus = Milvus()
+        milvus = get_milvus(args["handler"])
         uri_value = "tcp://%s:" % args["ip"]
         with pytest.raises(Exception) as e:
             milvus.connect(uri=uri_value, timeout=1)
@@ -142,14 +141,14 @@ class TestConnect:
         method: set uri ip null
         expected: connected is True        
         '''
-        milvus = Milvus()
+        milvus = get_milvus(args["handler"])
         uri_value = "tcp://:%s" % args["port"]
         
         with pytest.raises(Exception) as e:
             milvus.connect(uri=uri_value, timeout=1)
         assert not milvus.connected()
 
-    # TODO: enable
+    # disable
     def _test_connect_with_multiprocess(self, args):
         '''
         target: test uri connect with multiprocess
@@ -157,7 +156,7 @@ class TestConnect:
         expected: all connection is connected        
         '''
         uri_value = "tcp://%s:%s" % (args["ip"], args["port"])
-        process_num = 4
+        process_num = 10
         processes = []
 
         def connect(milvus):
@@ -167,7 +166,7 @@ class TestConnect:
             assert milvus.connected()
 
         for i in range(process_num):
-            milvus = Milvus()
+            milvus = get_milvus(args["handler"])
             p = Process(target=connect, args=(milvus, ))
             processes.append(p)
             p.start()
@@ -180,11 +179,10 @@ class TestConnect:
         method: connect again
         expected: status.code is 0, and status.message shows have connected already
         '''
-        milvus = Milvus()
+        milvus = get_milvus(args["handler"])
         uri_value = "tcp://%s:%s" % (args["ip"], args["port"])
-        milvus.connect(uri=uri_value)
-        
-        milvus.connect(uri=uri_value)
+        milvus.connect(uri=uri_value, timeout=5)
+        milvus.connect(uri=uri_value, timeout=5)
         assert milvus.connected()
 
     def test_connect_disconnect_repeatedly_once(self, args):
@@ -193,7 +191,7 @@ class TestConnect:
         method: disconnect, and then connect, assert connect status
         expected: status.code is 0
         '''
-        milvus = Milvus()
+        milvus = get_milvus(args["handler"])
         uri_value = "tcp://%s:%s" % (args["ip"], args["port"])
         milvus.connect(uri=uri_value)
         
@@ -208,12 +206,12 @@ class TestConnect:
         expected: status.code is 0
         '''
         times = 10
-        milvus = Milvus()
+        milvus = get_milvus(args["handler"])
         uri_value = "tcp://%s:%s" % (args["ip"], args["port"])
-        milvus.connect(uri=uri_value)
+        milvus.connect(uri=uri_value, timeout=5)
         for i in range(times):
             milvus.disconnect()
-            milvus.connect(uri=uri_value)
+            milvus.connect(uri=uri_value, timeout=5)
         assert milvus.connected()
 
     # TODO: enable
@@ -234,7 +232,7 @@ class TestConnect:
             assert milvus.connected()
 
         for i in range(process_num):
-            milvus = Milvus()
+            milvus = get_milvus(args["handler"])
             p = Process(target=connect, args=(milvus, ))
             processes.append(p)
             p.start()
@@ -247,10 +245,10 @@ class TestConnect:
         method: port set "", check if wrong uri connection is ok
         expected: connect raise an exception and connected is false
         '''
-        milvus = Milvus()
-        uri_value = "tcp://%s:19540" % args["ip"]
-        milvus.connect(host=args["ip"], port="", uri=uri_value)
-        assert milvus.connected()
+        milvus = get_milvus(args["handler"])
+        uri_value = "tcp://%s:39540" % args["ip"]
+        with pytest.raises(Exception) as e:
+            milvus.connect(host=args["ip"], port="", uri=uri_value)
 
     def test_connect_param_priority_uri(self, args):
         '''
@@ -258,23 +256,25 @@ class TestConnect:
         method: host set "", check if correct uri connection is ok
         expected: connected is False
         '''
-        milvus = Milvus()
+        milvus = get_milvus(args["handler"])
         uri_value = "tcp://%s:%s" % (args["ip"], args["port"])
         with pytest.raises(Exception) as e:
             milvus.connect(host="", port=args["port"], uri=uri_value, timeout=1)
         assert not milvus.connected()
 
-    def test_connect_param_priority_both_hostip_uri(self, args):
+    # Disable, (issue: https://github.com/milvus-io/milvus/issues/288)
+    def _test_connect_param_priority_both_hostip_uri(self, args):
         '''
         target: both host_ip_port / uri are both given, and not null, use the uri params
         method: check if wrong uri connection is ok
         expected: connect raise an exception and connected is false
         '''
-        milvus = Milvus()
+        milvus = get_milvus(args["handler"])
         uri_value = "tcp://%s:%s" % (args["ip"], args["port"])
         with pytest.raises(Exception) as e:
-            milvus.connect(host=args["ip"], port=19540, uri=uri_value, timeout=1)
-        assert not milvus.connected()
+            res = milvus.connect(host=args["ip"], port=39540, uri=uri_value, timeout=1)
+            logging.getLogger().info(res)
+        # assert not milvus.connected()
 
     def _test_add_vector_and_disconnect_concurrently(self):
         '''
@@ -284,7 +284,7 @@ class TestConnect:
             b. data_set not too large incase disconnection happens when data is underd-preparing
             c. data_set not too small incase disconnection happens when data has already been transferred
             d. make sure disconnection happens when data is in-transport
-        Expected: Failure, get_table_row_count == 0
+        Expected: Failure, count_collection == 0
 
         '''
         pass
@@ -325,7 +325,7 @@ class TestConnectIPInvalid(object):
     @pytest.mark.level(2)
     @pytest.mark.timeout(CONNECT_TIMEOUT)
     def test_connect_with_invalid_ip(self, args, get_invalid_ip):
-        milvus = Milvus()
+        milvus = get_milvus(args["handler"])
         ip = get_invalid_ip
         with pytest.raises(Exception) as e:
             milvus.connect(host=ip, port=args["port"], timeout=1)
@@ -352,7 +352,7 @@ class TestConnectPortInvalid(object):
         method: set port in gen_invalid_ports
         expected: connected is False        
         '''
-        milvus = Milvus()
+        milvus = get_milvus(args["handler"])
         port = get_invalid_port
         with pytest.raises(Exception) as e:
             milvus.connect(host=args["ip"], port=port, timeout=1)
@@ -372,13 +372,13 @@ class TestConnectURIInvalid(object):
 
     @pytest.mark.level(2)
     @pytest.mark.timeout(CONNECT_TIMEOUT)
-    def test_connect_with_invalid_uri(self, get_invalid_uri):
+    def test_connect_with_invalid_uri(self, get_invalid_uri, args):
         '''
         target: test uri connect with invalid uri value
         method: set port in gen_invalid_uris
         expected: connected is False        
         '''
-        milvus = Milvus()
+        milvus = get_milvus(args["handler"])
         uri_value = get_invalid_uri
         with pytest.raises(Exception) as e:
             milvus.connect(uri=uri_value, timeout=1)

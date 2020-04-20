@@ -1,19 +1,13 @@
-// Licensed to the Apache Software Foundation (ASF) under one
-// or more contributor license agreements.  See the NOTICE file
-// distributed with this work for additional information
-// regarding copyright ownership.  The ASF licenses this file
-// to you under the Apache License, Version 2.0 (the
-// "License"); you may not use this file except in compliance
-// with the License.  You may obtain a copy of the License at
+// Copyright (C) 2019-2020 Zilliz. All rights reserved.
 //
-//   http://www.apache.org/licenses/LICENSE-2.0
+// Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance
+// with the License. You may obtain a copy of the License at
 //
-// Unless required by applicable law or agreed to in writing,
-// software distributed under the License is distributed on an
-// "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
-// KIND, either express or implied.  See the License for the
-// specific language governing permissions and limitations
-// under the License.
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software distributed under the License
+// is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
+// or implied. See the License for the specific language governing permissions and limitations under the License.
 
 #include "scheduler/Scheduler.h"
 #include "Algorithm.h"
@@ -78,7 +72,14 @@ Scheduler::Dump() const {
 }
 
 void
+Scheduler::process(const EventPtr& event) {
+    auto process_event = event_register_.at(static_cast<int>(event->Type()));
+    process_event(event);
+}
+
+void
 Scheduler::worker_function() {
+    SetThreadName("schedevt_thread");
     while (running_) {
         std::unique_lock<std::mutex> lock(event_mutex_);
         event_cv_.wait(lock, [this] { return !event_queue_.empty(); });
@@ -88,14 +89,8 @@ Scheduler::worker_function() {
             break;
         }
 
-        Process(event);
+        process(event);
     }
-}
-
-void
-Scheduler::Process(const EventPtr& event) {
-    auto process_event = event_register_.at(static_cast<int>(event->Type()));
-    process_event(event);
 }
 
 // TODO(wxyu): refactor the function
@@ -108,10 +103,6 @@ Scheduler::OnLoadCompleted(const EventPtr& event) {
 
     auto task_table_type = load_completed_event->task_table_item_->task->label()->Type();
     switch (task_table_type) {
-        case TaskLabelType::DEFAULT: {
-            Action::DefaultLabelTaskScheduler(res_mgr_, resource, load_completed_event);
-            break;
-        }
         case TaskLabelType::SPECIFIED_RESOURCE: {
             Action::SpecifiedResourceLabelTaskScheduler(res_mgr_, resource, load_completed_event);
             break;

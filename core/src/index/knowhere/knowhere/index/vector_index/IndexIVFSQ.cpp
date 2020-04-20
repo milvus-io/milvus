@@ -1,59 +1,53 @@
-// Licensed to the Apache Software Foundation (ASF) under one
-// or more contributor license agreements.  See the NOTICE file
-// distributed with this work for additional information
-// regarding copyright ownership.  The ASF licenses this file
-// to you under the Apache License, Version 2.0 (the
-// "License"); you may not use this file except in compliance
-// with the License.  You may obtain a copy of the License at
+// Copyright (C) 2019-2020 Zilliz. All rights reserved.
 //
-//   http://www.apache.org/licenses/LICENSE-2.0
+// Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance
+// with the License. You may obtain a copy of the License at
 //
-// Unless required by applicable law or agreed to in writing,
-// software distributed under the License is distributed on an
-// "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
-// KIND, either express or implied.  See the License for the
-// specific language governing permissions and limitations
-// under the License.
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software distributed under the License
+// is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
+// or implied. See the License for the specific language governing permissions and limitations under the License
 
-#include <faiss/gpu/GpuCloner.h>
-#include <faiss/index_factory.h>
 #include <memory>
+#include <string>
 
-#include "knowhere/adapter/VectorAdapter.h"
+#ifdef MILVUS_GPU_VERSION
+#include <faiss/gpu/GpuAutoTune.h>
+#include <faiss/gpu/GpuCloner.h>
+#endif
+#include <faiss/clone_index.h>
+#include <faiss/index_factory.h>
+
 #include "knowhere/common/Exception.h"
-#include "knowhere/index/vector_index/IndexGPUIVFSQ.h"
 #include "knowhere/index/vector_index/IndexIVFSQ.h"
+#include "knowhere/index/vector_index/adapter/VectorAdapter.h"
+#include "knowhere/index/vector_index/helpers/IndexParameter.h"
+#ifdef MILVUS_GPU_VERSION
+#include "knowhere/index/vector_index/gpu/IndexGPUIVFSQ.h"
 #include "knowhere/index/vector_index/helpers/FaissGpuResourceMgr.h"
+#endif
 
+namespace milvus {
 namespace knowhere {
 
-IndexModelPtr
-IVFSQ::Train(const DatasetPtr& dataset, const Config& config) {
-    auto build_cfg = std::dynamic_pointer_cast<IVFSQCfg>(config);
-    if (build_cfg != nullptr) {
-        build_cfg->CheckValid();  // throw exception
-    }
-
-    GETTENSOR(dataset)
+void
+IVFSQ::Train(const DatasetPtr& dataset_ptr, const Config& config) {
+    GETTENSOR(dataset_ptr)
 
     std::stringstream index_type;
-    index_type << "IVF" << build_cfg->nlist << ","
-               << "SQ" << build_cfg->nbits;
-    auto build_index = faiss::index_factory(dim, index_type.str().c_str(), GetMetricType(build_cfg->metric_type));
+    index_type << "IVF" << config[IndexParams::nlist] << ","
+               << "SQ" << config[IndexParams::nbits];
+    auto build_index =
+        faiss::index_factory(dim, index_type.str().c_str(), GetMetricType(config[Metric::TYPE].get<std::string>()));
     build_index->train(rows, (float*)p_data);
 
-    std::shared_ptr<faiss::Index> ret_index;
-    ret_index.reset(build_index);
-    return std::make_shared<IVFIndexModel>(ret_index);
+    index_.reset(faiss::clone_index(build_index));
 }
 
-VectorIndexPtr
-IVFSQ::Clone_impl(const std::shared_ptr<faiss::Index>& index) {
-    return std::make_shared<IVFSQ>(index);
-}
-
-VectorIndexPtr
-IVFSQ::CopyCpuToGpu(const int64_t& device_id, const Config& config) {
+VecIndexPtr
+IVFSQ::CopyCpuToGpu(const int64_t device_id, const Config& config) {
+#ifdef MILVUS_GPU_VERSION
     if (auto res = FaissGpuResourceMgr::GetInstance().GetRes(device_id)) {
         ResScope rs(res, device_id, false);
 
@@ -65,6 +59,10 @@ IVFSQ::CopyCpuToGpu(const int64_t& device_id, const Config& config) {
     } else {
         KNOWHERE_THROW_MSG("CopyCpuToGpu Error, can't get gpu_resource");
     }
+#else
+    KNOWHERE_THROW_MSG("Calling IVFSQ::CopyCpuToGpu when we are using CPU version");
+#endif
 }
 
 }  // namespace knowhere
+}  // namespace milvus

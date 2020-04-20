@@ -1,29 +1,25 @@
-// Licensed to the Apache Software Foundation (ASF) under one
-// or more contributor license agreements.  See the NOTICE file
-// distributed with this work for additional information
-// regarding copyright ownership.  The ASF licenses this file
-// to you under the Apache License, Version 2.0 (the
-// "License"); you may not use this file except in compliance
-// with the License.  You may obtain a copy of the License at
+// Copyright (C) 2019-2020 Zilliz. All rights reserved.
 //
-//   http://www.apache.org/licenses/LICENSE-2.0
+// Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance
+// with the License. You may obtain a copy of the License at
 //
-// Unless required by applicable law or agreed to in writing,
-// software distributed under the License is distributed on an
-// "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
-// KIND, either express or implied.  See the License for the
-// specific language governing permissions and limitations
-// under the License.
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software distributed under the License
+// is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
+// or implied. See the License for the specific language governing permissions and limitations under the License.
 
-#include <faiss/utils/distances.h>
+#include "server/DBWrapper.h"
+
 #include <omp.h>
 #include <cmath>
 #include <string>
 #include <vector>
 
+#include <faiss/utils/distances.h>
+
+#include "config/Config.h"
 #include "db/DBFactory.h"
-#include "server/Config.h"
-#include "server/DBWrapper.h"
 #include "utils/CommonUtil.h"
 #include "utils/Log.h"
 #include "utils/StringHelpFunctions.h"
@@ -44,8 +40,14 @@ DBWrapper::StartService() {
         return s;
     }
 
+    s = config.GetDBConfigAutoFlushInterval(opt.auto_flush_interval_);
+    if (!s.ok()) {
+        std::cerr << s.ToString() << std::endl;
+        return s;
+    }
+
     std::string path;
-    s = config.GetDBConfigPrimaryPath(path);
+    s = config.GetStorageConfigPrimaryPath(path);
     if (!s.ok()) {
         std::cerr << s.ToString() << std::endl;
         return s;
@@ -54,7 +56,7 @@ DBWrapper::StartService() {
     opt.meta_.path_ = path + "/db";
 
     std::string db_slave_path;
-    s = config.GetDBConfigSecondaryPath(db_slave_path);
+    s = config.GetStorageConfigSecondaryPath(db_slave_path);
     if (!s.ok()) {
         std::cerr << s.ToString() << std::endl;
         return s;
@@ -88,8 +90,39 @@ DBWrapper::StartService() {
         kill(0, SIGUSR1);
     }
 
+    // get wal configurations
+    s = config.GetWalConfigEnable(opt.wal_enable_);
+    if (!s.ok()) {
+        std::cerr << "ERROR! Failed to get wal_enable configuration." << std::endl;
+        std::cerr << s.ToString() << std::endl;
+        kill(0, SIGUSR1);
+    }
+
+    if (opt.wal_enable_) {
+        s = config.GetWalConfigRecoveryErrorIgnore(opt.recovery_error_ignore_);
+        if (!s.ok()) {
+            std::cerr << "ERROR! Failed to get recovery_error_ignore configuration." << std::endl;
+            std::cerr << s.ToString() << std::endl;
+            kill(0, SIGUSR1);
+        }
+
+        s = config.GetWalConfigBufferSize(opt.buffer_size_);
+        if (!s.ok()) {
+            std::cerr << "ERROR! Failed to get buffer_size configuration." << std::endl;
+            std::cerr << s.ToString() << std::endl;
+            kill(0, SIGUSR1);
+        }
+
+        s = config.GetWalConfigWalPath(opt.mxlog_path_);
+        if (!s.ok()) {
+            std::cerr << "ERROR! Failed to get mxlog_path configuration." << std::endl;
+            std::cerr << s.ToString() << std::endl;
+            kill(0, SIGUSR1);
+        }
+    }
+
     // engine config
-    int32_t omp_thread;
+    int64_t omp_thread;
     s = config.GetEngineConfigOmpThreadNum(omp_thread);
     if (!s.ok()) {
         std::cerr << s.ToString() << std::endl;
@@ -98,9 +131,9 @@ DBWrapper::StartService() {
 
     if (omp_thread > 0) {
         omp_set_num_threads(omp_thread);
-        SERVER_LOG_DEBUG << "Specify openmp thread number: " << omp_thread;
+        LOG_SERVER_DEBUG_ << "Specify openmp thread number: " << omp_thread;
     } else {
-        uint32_t sys_thread_cnt = 8;
+        int64_t sys_thread_cnt = 8;
         if (CommonUtil::GetSystemAvailableThreads(sys_thread_cnt)) {
             omp_thread = static_cast<int32_t>(ceil(sys_thread_cnt * 0.5));
             omp_set_num_threads(omp_thread);
@@ -108,18 +141,17 @@ DBWrapper::StartService() {
     }
 
     // init faiss global variable
-    int32_t use_blas_threshold;
+    int64_t use_blas_threshold;
     s = config.GetEngineConfigUseBlasThreshold(use_blas_threshold);
     if (!s.ok()) {
         std::cerr << s.ToString() << std::endl;
         return s;
     }
-
     faiss::distance_compute_blas_threshold = use_blas_threshold;
 
     // set archive config
     engine::ArchiveConf::CriteriaT criterial;
-    int32_t disk, days;
+    int64_t disk, days;
     s = config.GetDBConfigArchiveDiskThreshold(disk);
     if (!s.ok()) {
         std::cerr << s.ToString() << std::endl;
@@ -165,23 +197,24 @@ DBWrapper::StartService() {
         db_ = engine::DBFactory::Build(opt);
     } catch (std::exception& ex) {
         std::cerr << "Error: failed to open database: " << ex.what()
-                  << ". Possible reason: the meta system does not work." << std::endl;
+                  << ". Possible reason: Meta Tables schema is damaged "
+                  << "or created by in-compatible Milvus version." << std::endl;
         kill(0, SIGUSR1);
     }
 
     db_->Start();
 
-    // preload table
-    std::string preload_tables;
-    s = config.GetDBConfigPreloadTable(preload_tables);
+    // preload collection
+    std::string preload_collections;
+    s = config.GetDBConfigPreloadCollection(preload_collections);
     if (!s.ok()) {
         std::cerr << s.ToString() << std::endl;
         return s;
     }
 
-    s = PreloadTables(preload_tables);
+    s = PreloadCollections(preload_collections);
     if (!s.ok()) {
-        std::cerr << "ERROR! Failed to preload tables: " << preload_tables << std::endl;
+        std::cerr << "ERROR! Failed to preload tables: " << preload_collections << std::endl;
         std::cerr << s.ToString() << std::endl;
         kill(0, SIGUSR1);
     }
@@ -199,25 +232,25 @@ DBWrapper::StopService() {
 }
 
 Status
-DBWrapper::PreloadTables(const std::string& preload_tables) {
-    if (preload_tables.empty()) {
+DBWrapper::PreloadCollections(const std::string& preload_collections) {
+    if (preload_collections.empty()) {
         // do nothing
-    } else if (preload_tables == "*") {
+    } else if (preload_collections == "*") {
         // load all tables
-        std::vector<engine::meta::TableSchema> table_schema_array;
-        db_->AllTables(table_schema_array);
+        std::vector<engine::meta::CollectionSchema> table_schema_array;
+        db_->AllCollections(table_schema_array);
 
         for (auto& schema : table_schema_array) {
-            auto status = db_->PreloadTable(schema.table_id_);
+            auto status = db_->PreloadCollection(schema.collection_id_);
             if (!status.ok()) {
                 return status;
             }
         }
     } else {
-        std::vector<std::string> table_names;
-        StringHelpFunctions::SplitStringByDelimeter(preload_tables, ",", table_names);
-        for (auto& name : table_names) {
-            auto status = db_->PreloadTable(name);
+        std::vector<std::string> collection_names;
+        StringHelpFunctions::SplitStringByDelimeter(preload_collections, ",", collection_names);
+        for (auto& name : collection_names) {
+            auto status = db_->PreloadCollection(name);
             if (!status.ok()) {
                 return status;
             }

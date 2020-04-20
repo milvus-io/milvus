@@ -1,27 +1,26 @@
-// Licensed to the Apache Software Foundation (ASF) under one
-// or more contributor license agreements.  See the NOTICE file
-// distributed with this work for additional information
-// regarding copyright ownership.  The ASF licenses this file
-// to you under the Apache License, Version 2.0 (the
-// "License"); you may not use this file except in compliance
-// with the License.  You may obtain a copy of the License at
+// Copyright (C) 2019-2020 Zilliz. All rights reserved.
 //
-//   http://www.apache.org/licenses/LICENSE-2.0
+// Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance
+// with the License. You may obtain a copy of the License at
 //
-// Unless required by applicable law or agreed to in writing,
-// software distributed under the License is distributed on an
-// "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
-// KIND, either express or implied.  See the License for the
-// specific language governing permissions and limitations
-// under the License.
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software distributed under the License
+// is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
+// or implied. See the License for the specific language governing permissions and limitations under the License.
 
 #pragma once
 
-#include "ExecutionEngine.h"
-#include "wrapper/VecIndex.h"
+#include "segment/SegmentReader.h"
+#include "utils/Json.h"
 
 #include <memory>
 #include <string>
+#include <unordered_map>
+#include <vector>
+
+#include "ExecutionEngine.h"
+#include "knowhere/index/vector_index/VecIndex.h"
 
 namespace milvus {
 namespace engine {
@@ -29,25 +28,25 @@ namespace engine {
 class ExecutionEngineImpl : public ExecutionEngine {
  public:
     ExecutionEngineImpl(uint16_t dimension, const std::string& location, EngineType index_type, MetricType metric_type,
-                        int32_t nlist);
+                        const milvus::json& index_params);
 
-    ExecutionEngineImpl(VecIndexPtr index, const std::string& location, EngineType index_type, MetricType metric_type,
-                        int32_t nlist);
+    ExecutionEngineImpl(knowhere::VecIndexPtr index, const std::string& location, EngineType index_type,
+                        MetricType metric_type, const milvus::json& index_params);
 
     Status
     AddWithIds(int64_t n, const float* xdata, const int64_t* xids) override;
+
+    Status
+    AddWithIds(int64_t n, const uint8_t* xdata, const int64_t* xids) override;
 
     size_t
     Count() const override;
 
     size_t
-    Size() const override;
-
-    size_t
     Dimension() const override;
 
     size_t
-    PhysicalSize() const override;
+    Size() const override;
 
     Status
     Serialize() override;
@@ -64,24 +63,34 @@ class ExecutionEngineImpl : public ExecutionEngine {
     Status
     CopyToCpu() override;
 
-    ExecutionEnginePtr
-    Clone() override;
+    Status
+    GetVectorByID(const int64_t& id, float* vector, bool hybrid) override;
 
     Status
-    Merge(const std::string& location) override;
+    GetVectorByID(const int64_t& id, uint8_t* vector, bool hybrid) override;
 
     Status
-    Search(int64_t n, const float* data, int64_t k, int64_t nprobe, float* distances, int64_t* labels,
+    ExecBinaryQuery(query::GeneralQueryPtr general_query, faiss::ConcurrentBitsetPtr bitset,
+                    std::unordered_map<std::string, DataType>& attr_type, uint64_t& nq, uint64_t& topk,
+                    std::vector<float>& distances, std::vector<int64_t>& labels) override;
+
+    Status
+    Search(int64_t n, const float* data, int64_t k, const milvus::json& extra_params, float* distances, int64_t* labels,
            bool hybrid = false) override;
+
+    Status
+    Search(int64_t n, const uint8_t* data, int64_t k, const milvus::json& extra_params, float* distances,
+           int64_t* labels, bool hybrid = false) override;
+
+    Status
+    Search(int64_t n, const std::vector<int64_t>& ids, int64_t k, const milvus::json& extra_params, float* distances,
+           int64_t* labels, bool hybrid) override;
 
     ExecutionEnginePtr
     BuildIndex(const std::string& location, EngineType engine_type) override;
 
     Status
     Cache() override;
-
-    Status
-    GpuCache(uint64_t gpu_id) override;
 
     Status
     Init() override;
@@ -102,10 +111,10 @@ class ExecutionEngineImpl : public ExecutionEngine {
     }
 
  private:
-    VecIndexPtr
+    knowhere::VecIndexPtr
     CreatetVecIndex(EngineType type);
 
-    VecIndexPtr
+    knowhere::VecIndexPtr
     Load(const std::string& location);
 
     void
@@ -115,15 +124,21 @@ class ExecutionEngineImpl : public ExecutionEngine {
     HybridUnset() const;
 
  protected:
-    VecIndexPtr index_ = nullptr;
+    knowhere::VecIndexPtr index_ = nullptr;
     EngineType index_type_;
     MetricType metric_type_;
+
+    std::unordered_map<std::string, DataType> attr_types_;
+    std::unordered_map<std::string, std::vector<uint8_t>> attr_data_;
+    std::unordered_map<std::string, size_t> attr_size_;
+    query::BinaryQueryPtr binary_query_;
+    int64_t vector_count_;
 
     int64_t dim_;
     std::string location_;
 
-    int32_t nlist_ = 0;
-    int32_t gpu_num_ = 0;
+    milvus::json index_params_;
+    int64_t gpu_num_ = 0;
 };
 
 }  // namespace engine

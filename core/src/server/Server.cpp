@@ -1,36 +1,36 @@
-// Licensed to the Apache Software Foundation (ASF) under one
-// or more contributor license agreements.  See the NOTICE file
-// distributed with this work for additional information
-// regarding copyright ownership.  The ASF licenses this file
-// to you under the Apache License, Version 2.0 (the
-// "License"); you may not use this file except in compliance
-// with the License.  You may obtain a copy of the License at
+// Copyright (C) 2019-2020 Zilliz. All rights reserved.
 //
-//   http://www.apache.org/licenses/LICENSE-2.0
+// Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance
+// with the License. You may obtain a copy of the License at
 //
-// Unless required by applicable law or agreed to in writing,
-// software distributed under the License is distributed on an
-// "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
-// KIND, either express or implied.  See the License for the
-// specific language governing permissions and limitations
-// under the License.
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software distributed under the License
+// is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
+// or implied. See the License for the specific language governing permissions and limitations under the License.
+
+#include "server/Server.h"
 
 #include <fcntl.h>
 #include <string.h>
 #include <unistd.h>
 
+#include "config/Config.h"
+#include "index/archive/KnowhereResource.h"
 #include "metrics/Metrics.h"
 #include "scheduler/SchedInst.h"
-#include "server/Config.h"
 #include "server/DBWrapper.h"
-#include "server/Server.h"
 #include "server/grpc_impl/GrpcServer.h"
+#include "server/web_impl/WebServer.h"
 #include "src/version.h"
+//#include "storage/s3/S3ClientWrapper.h"
+#include "tracing/TracerUtil.h"
 #include "utils/Log.h"
 #include "utils/LogUtil.h"
 #include "utils/SignalUtil.h"
 #include "utils/TimeRecorder.h"
-#include "wrapper/KnowhereResource.h"
+
+#include "search/TaskInst.h"
 
 namespace milvus {
 namespace server {
@@ -60,7 +60,7 @@ Server::Daemonize() {
 
     //    std::string log_path(GetLogDirFullPath());
     //    log_path += "zdb_server.(INFO/WARNNING/ERROR/CRITICAL)";
-    //    SERVER_LOG_INFO << "Log will be exported to: " + log_path);
+    //    LOG_SERVER_INFO_ << "Log will be exported to: " + log_path);
 
     pid_t pid = 0;
 
@@ -152,8 +152,15 @@ Server::Start() {
             return s;
         }
 
-        /* log path is defined in Config file, so InitLog must be called after LoadConfig */
         Config& config = Config::GetInstance();
+
+        /* Init opentracing tracer from config */
+        std::string tracing_config_path;
+        s = config.GetTracingConfigJsonConfigPath(tracing_config_path);
+        tracing_config_path.empty() ? tracing::TracerUtil::InitGlobal()
+                                    : tracing::TracerUtil::InitGlobal(tracing_config_path);
+
+        /* log path is defined in Config file, so InitLog must be called after LoadConfig */
         std::string time_zone;
         s = config.GetServerConfigTimeZone(time_zone);
         if (!s.ok()) {
@@ -182,13 +189,21 @@ Server::Start() {
         InitLog(log_config_file_);
 
         // print version information
-        SERVER_LOG_INFO << "Milvus " << BUILD_TYPE << " version: v" << MILVUS_VERSION << ", built at " << BUILD_TIME;
+        LOG_SERVER_INFO_ << "Milvus " << BUILD_TYPE << " version: v" << MILVUS_VERSION << ", built at " << BUILD_TIME;
+#ifdef MILVUS_GPU_VERSION
+        LOG_SERVER_INFO_ << "GPU edition";
+#else
+        LOG_SERVER_INFO_ << "CPU edition";
+#endif
+        /* record config and hardware information into log */
+        LogConfigInFile(config_filename_);
+        LogCpuInfo();
+        LogConfigInMem();
 
         server::Metrics::GetInstance().Init();
         server::SystemInfo::GetInstance().Init();
 
-        StartService();
-        return Status::OK();
+        return StartService();
     } catch (std::exception& ex) {
         std::string str = "Milvus server encounter exception: " + std::string(ex.what());
         return Status(SERVER_UNEXPECTED_ERROR, str);
@@ -244,16 +259,45 @@ Server::LoadConfig() {
     return milvus::Status::OK();
 }
 
-void
+Status
 Server::StartService() {
-    engine::KnowhereResource::Initialize();
+    Status stat;
+    stat = engine::KnowhereResource::Initialize();
+    if (!stat.ok()) {
+        LOG_SERVER_ERROR_ << "KnowhereResource initialize fail: " << stat.message();
+        goto FAIL;
+    }
+
     scheduler::StartSchedulerService();
-    DBWrapper::GetInstance().StartService();
+
+    stat = DBWrapper::GetInstance().StartService();
+    if (!stat.ok()) {
+        LOG_SERVER_ERROR_ << "DBWrapper start service fail: " << stat.message();
+        goto FAIL;
+    }
+
     grpc::GrpcServer::GetInstance().Start();
+    web::WebServer::GetInstance().Start();
+
+    // stat = storage::S3ClientWrapper::GetInstance().StartService();
+    // if (!stat.ok()) {
+    //     LOG_SERVER_ERROR_ << "S3Client start service fail: " << stat.message();
+    //     goto FAIL;
+    // }
+
+    //    search::TaskInst::GetInstance().Start();
+
+    return Status::OK();
+FAIL:
+    std::cerr << "Milvus initializes fail: " << stat.message() << std::endl;
+    return stat;
 }
 
 void
 Server::StopService() {
+    //    search::TaskInst::GetInstance().Stop();
+    // storage::S3ClientWrapper::GetInstance().StopService();
+    web::WebServer::GetInstance().Stop();
     grpc::GrpcServer::GetInstance().Stop();
     DBWrapper::GetInstance().StopService();
     scheduler::StopSchedulerService();

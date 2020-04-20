@@ -1,50 +1,50 @@
 # Define a function that check last file modification
 function(Check_Last_Modify cache_check_lists_file_path working_dir last_modified_commit_id)
-    if(EXISTS "${working_dir}")
-        if(EXISTS "${cache_check_lists_file_path}")
+    if (EXISTS "${working_dir}")
+        if (EXISTS "${cache_check_lists_file_path}")
             set(GIT_LOG_SKIP_NUM 0)
             set(_MATCH_ALL ON CACHE BOOL "Match all")
             set(_LOOP_STATUS ON CACHE BOOL "Whether out of loop")
             file(STRINGS ${cache_check_lists_file_path} CACHE_IGNORE_TXT)
-            while(_LOOP_STATUS)
-                foreach(_IGNORE_ENTRY ${CACHE_IGNORE_TXT})
-                    if(NOT _IGNORE_ENTRY MATCHES "^[^#]+")
+            while (_LOOP_STATUS)
+                foreach (_IGNORE_ENTRY ${CACHE_IGNORE_TXT})
+                    if (NOT _IGNORE_ENTRY MATCHES "^[^#]+")
                         continue()
-                    endif()
+                    endif ()
 
                     set(_MATCH_ALL OFF)
                     execute_process(COMMAND git log --no-merges -1 --skip=${GIT_LOG_SKIP_NUM} --name-status --pretty= WORKING_DIRECTORY ${working_dir} OUTPUT_VARIABLE CHANGE_FILES)
-                    if(NOT CHANGE_FILES STREQUAL "")
+                    if (NOT CHANGE_FILES STREQUAL "")
                         string(REPLACE "\n" ";" _CHANGE_FILES ${CHANGE_FILES})
-                        foreach(_FILE_ENTRY ${_CHANGE_FILES})
+                        foreach (_FILE_ENTRY ${_CHANGE_FILES})
                             string(REGEX MATCH "[^ \t]+$" _FILE_NAME ${_FILE_ENTRY})
                             execute_process(COMMAND sh -c "echo ${_FILE_NAME} | grep ${_IGNORE_ENTRY}" RESULT_VARIABLE return_code)
                             if (return_code EQUAL 0)
                                 execute_process(COMMAND git log --no-merges -1 --skip=${GIT_LOG_SKIP_NUM} --pretty=%H WORKING_DIRECTORY ${working_dir} OUTPUT_VARIABLE LAST_MODIFIED_COMMIT_ID)
-                                set (${last_modified_commit_id} ${LAST_MODIFIED_COMMIT_ID} PARENT_SCOPE)
+                                set(${last_modified_commit_id} ${LAST_MODIFIED_COMMIT_ID} PARENT_SCOPE)
                                 set(_LOOP_STATUS OFF)
-                            endif()
-                        endforeach()
-                    else()
+                            endif ()
+                        endforeach ()
+                    else ()
                         set(_LOOP_STATUS OFF)
-                    endif()
-                endforeach()
+                    endif ()
+                endforeach ()
 
-                if(_MATCH_ALL)
+                if (_MATCH_ALL)
                     execute_process(COMMAND git log --no-merges -1 --skip=${GIT_LOG_SKIP_NUM} --pretty=%H WORKING_DIRECTORY ${working_dir} OUTPUT_VARIABLE LAST_MODIFIED_COMMIT_ID)
-                    set (${last_modified_commit_id} ${LAST_MODIFIED_COMMIT_ID} PARENT_SCOPE)
+                    set(${last_modified_commit_id} ${LAST_MODIFIED_COMMIT_ID} PARENT_SCOPE)
                     set(_LOOP_STATUS OFF)
-                endif()
+                endif ()
 
                 math(EXPR GIT_LOG_SKIP_NUM "${GIT_LOG_SKIP_NUM} + 1")
-            endwhile(_LOOP_STATUS)
-        else()
+            endwhile (_LOOP_STATUS)
+        else ()
             execute_process(COMMAND git log --no-merges -1 --skip=${GIT_LOG_SKIP_NUM} --pretty=%H WORKING_DIRECTORY ${working_dir} OUTPUT_VARIABLE LAST_MODIFIED_COMMIT_ID)
-            set (${last_modified_commit_id} ${LAST_MODIFIED_COMMIT_ID} PARENT_SCOPE)
-        endif()
-    else()
+            set(${last_modified_commit_id} ${LAST_MODIFIED_COMMIT_ID} PARENT_SCOPE)
+        endif ()
+    else ()
         message(FATAL_ERROR "The directory ${working_dir} does not exist")
-    endif()
+    endif ()
 endfunction()
 
 # Define a function that extracts a cached package
@@ -74,7 +74,7 @@ function(ExternalProject_Use_Cache project_name package_file install_path)
             ${CMAKE_COMMAND} -E echo
             "Extracting ${package_file} to ${install_path}"
             COMMAND
-            ${CMAKE_COMMAND} -E tar xzvf ${package_file} ${install_path}
+            ${CMAKE_COMMAND} -E tar xzf ${package_file} ${install_path}
             WORKING_DIRECTORY ${INDEX_BINARY_DIR}
             )
 
@@ -83,15 +83,15 @@ endfunction()
 
 # Define a function that to create a new cached package
 function(ExternalProject_Create_Cache project_name package_file install_path cache_username cache_password cache_path)
-    if(EXISTS ${package_file})
+    if (EXISTS ${package_file})
         message(STATUS "Removing existing package file: ${package_file}")
         file(REMOVE ${package_file})
-    endif()
+    endif ()
 
     string(REGEX REPLACE "(.+)/.+$" "\\1" package_dir ${package_file})
-    if(NOT EXISTS ${package_dir})
+    if (NOT EXISTS ${package_dir})
         file(MAKE_DIRECTORY ${package_dir})
-    endif()
+    endif ()
 
     message(STATUS "Will create cached package file: ${package_file}")
 
@@ -116,89 +116,89 @@ function(ADD_THIRDPARTY_LIB LIB_NAME)
             "${one_value_args}"
             "${multi_value_args}"
             ${ARGN})
-    if(ARG_UNPARSED_ARGUMENTS)
+    if (ARG_UNPARSED_ARGUMENTS)
         message(SEND_ERROR "Error: unrecognized arguments: ${ARG_UNPARSED_ARGUMENTS}")
-    endif()
+    endif ()
 
-    if(ARG_STATIC_LIB AND ARG_SHARED_LIB)
-        if(NOT ARG_STATIC_LIB)
+    if (ARG_STATIC_LIB AND ARG_SHARED_LIB)
+        if (NOT ARG_STATIC_LIB)
             message(FATAL_ERROR "No static or shared library provided for ${LIB_NAME}")
-        endif()
+        endif ()
 
         set(AUG_LIB_NAME "${LIB_NAME}_static")
         add_library(${AUG_LIB_NAME} STATIC IMPORTED)
         set_target_properties(${AUG_LIB_NAME}
                 PROPERTIES IMPORTED_LOCATION "${ARG_STATIC_LIB}")
-        if(ARG_DEPS)
+        if (ARG_DEPS)
             set_target_properties(${AUG_LIB_NAME}
                     PROPERTIES INTERFACE_LINK_LIBRARIES "${ARG_DEPS}")
-        endif()
+        endif ()
         message(STATUS "Added static library dependency ${AUG_LIB_NAME}: ${ARG_STATIC_LIB}")
-        if(ARG_INCLUDE_DIRECTORIES)
+        if (ARG_INCLUDE_DIRECTORIES)
             set_target_properties(${AUG_LIB_NAME}
                     PROPERTIES INTERFACE_INCLUDE_DIRECTORIES
                     "${ARG_INCLUDE_DIRECTORIES}")
-        endif()
+        endif ()
 
         set(AUG_LIB_NAME "${LIB_NAME}_shared")
         add_library(${AUG_LIB_NAME} SHARED IMPORTED)
 
-        if(WIN32)
+        if (WIN32)
             # Mark the ".lib" location as part of a Windows DLL
             set_target_properties(${AUG_LIB_NAME}
                     PROPERTIES IMPORTED_IMPLIB "${ARG_SHARED_LIB}")
-        else()
+        else ()
             set_target_properties(${AUG_LIB_NAME}
                     PROPERTIES IMPORTED_LOCATION "${ARG_SHARED_LIB}")
-        endif()
-        if(ARG_DEPS)
+        endif ()
+        if (ARG_DEPS)
             set_target_properties(${AUG_LIB_NAME}
                     PROPERTIES INTERFACE_LINK_LIBRARIES "${ARG_DEPS}")
-        endif()
+        endif ()
         message(STATUS "Added shared library dependency ${AUG_LIB_NAME}: ${ARG_SHARED_LIB}")
-        if(ARG_INCLUDE_DIRECTORIES)
+        if (ARG_INCLUDE_DIRECTORIES)
             set_target_properties(${AUG_LIB_NAME}
                     PROPERTIES INTERFACE_INCLUDE_DIRECTORIES
                     "${ARG_INCLUDE_DIRECTORIES}")
-        endif()
-    elseif(ARG_STATIC_LIB)
+        endif ()
+    elseif (ARG_STATIC_LIB)
         set(AUG_LIB_NAME "${LIB_NAME}_static")
         add_library(${AUG_LIB_NAME} STATIC IMPORTED)
         set_target_properties(${AUG_LIB_NAME}
                 PROPERTIES IMPORTED_LOCATION "${ARG_STATIC_LIB}")
-        if(ARG_DEPS)
+        if (ARG_DEPS)
             set_target_properties(${AUG_LIB_NAME}
                     PROPERTIES INTERFACE_LINK_LIBRARIES "${ARG_DEPS}")
-        endif()
+        endif ()
         message(STATUS "Added static library dependency ${AUG_LIB_NAME}: ${ARG_STATIC_LIB}")
-        if(ARG_INCLUDE_DIRECTORIES)
+        if (ARG_INCLUDE_DIRECTORIES)
             set_target_properties(${AUG_LIB_NAME}
                     PROPERTIES INTERFACE_INCLUDE_DIRECTORIES
                     "${ARG_INCLUDE_DIRECTORIES}")
-        endif()
-    elseif(ARG_SHARED_LIB)
+        endif ()
+    elseif (ARG_SHARED_LIB)
         set(AUG_LIB_NAME "${LIB_NAME}_shared")
         add_library(${AUG_LIB_NAME} SHARED IMPORTED)
 
-        if(WIN32)
+        if (WIN32)
             # Mark the ".lib" location as part of a Windows DLL
             set_target_properties(${AUG_LIB_NAME}
                     PROPERTIES IMPORTED_IMPLIB "${ARG_SHARED_LIB}")
-        else()
+        else ()
             set_target_properties(${AUG_LIB_NAME}
                     PROPERTIES IMPORTED_LOCATION "${ARG_SHARED_LIB}")
-        endif()
+        endif ()
         message(STATUS "Added shared library dependency ${AUG_LIB_NAME}: ${ARG_SHARED_LIB}")
-        if(ARG_DEPS)
+        if (ARG_DEPS)
             set_target_properties(${AUG_LIB_NAME}
                     PROPERTIES INTERFACE_LINK_LIBRARIES "${ARG_DEPS}")
-        endif()
-        if(ARG_INCLUDE_DIRECTORIES)
+        endif ()
+        if (ARG_INCLUDE_DIRECTORIES)
             set_target_properties(${AUG_LIB_NAME}
                     PROPERTIES INTERFACE_INCLUDE_DIRECTORIES
                     "${ARG_INCLUDE_DIRECTORIES}")
-        endif()
-    else()
+        endif ()
+    else ()
         message(FATAL_ERROR "No static or shared library provided for ${LIB_NAME}")
-    endif()
+    endif ()
 endfunction()

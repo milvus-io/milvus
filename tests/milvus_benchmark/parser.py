@@ -4,9 +4,12 @@ import logging
 logger = logging.getLogger("milvus_benchmark.parser")
 
 
-def operations_parser(operations, run_type="performance"):
-    definitions = operations[run_type]
-    return definitions
+def operations_parser(operations):
+    if not operations:
+        raise Exception("No operations in suite defined")
+    for run_type, run_params in operations.items():
+        logger.debug(run_type)
+        return (run_type, run_params)
 
 
 def table_parser(table_name):
@@ -24,6 +27,23 @@ def table_parser(table_name):
     dimension = int(tmp[3])
     metric_type = str(tmp[4])
     return (data_type, table_size, index_file_size, dimension, metric_type)
+
+
+def parse_ann_table_name(table_name):
+    data_type = table_name.split("_")[0]
+    dimension = int(table_name.split("_")[1])
+    metric = table_name.split("_")[-1]
+    # metric = table_name.attrs['distance']
+    # dimension = len(table_name["train"][0])
+    if metric == "euclidean":
+        metric_type = "l2"
+    elif metric  == "angular":
+        metric_type = "ip"
+    elif metric  == "jaccard":
+        metric_type = "jaccard"
+    elif metric == "hamming":
+        metric_type = "hamming"
+    return ("ann_"+data_type, dimension, metric_type)
 
 
 def search_params_parser(param):

@@ -1,31 +1,27 @@
 #-------------------------------------------------------------------------------
-# Licensed to the Apache Software Foundation (ASF) under one
-# or more contributor license agreements.  See the NOTICE file
-# distributed with this work for additional information
-# regarding copyright ownership.  The ASF licenses this file
-# to you under the Apache License, Version 2.0 (the
-# "License"); you may not use this file except in compliance
-# with the License.  You may obtain a copy of the License at
+# Copyright (C) 2019-2020 Zilliz. All rights reserved.
 #
-#   http:#www.apache.org/licenses/LICENSE-2.0
+# Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance
+# with the License. You may obtain a copy of the License at
 #
-# Unless required by applicable law or agreed to in writing,
-# software distributed under the License is distributed on an
-# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
-# KIND, either express or implied.  See the License for the
-# specific language governing permissions and limitations
-# under the License.
+# http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software distributed under the License
+# is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
+# or implied. See the License for the specific language governing permissions and limitations under the License.
 #-------------------------------------------------------------------------------
 
 include_directories(${MILVUS_SOURCE_DIR})
 include_directories(${MILVUS_ENGINE_SRC})
+include_directories(${MILVUS_THIRDPARTY_SRC})
 
-include_directories(${CUDA_TOOLKIT_ROOT_DIR}/include)
 include_directories(${MILVUS_ENGINE_SRC}/grpc/gen-status)
 include_directories(${MILVUS_ENGINE_SRC}/grpc/gen-milvus)
 
-#this statement must put here, since the INDEX_INCLUDE_DIRS is defined in code/CMakeList.txt
 add_subdirectory(index)
+if (FAISS_WITH_MKL)
+    add_compile_definitions("WITH_MKL")
+endif ()
 
 set(INDEX_INCLUDE_DIRS ${INDEX_INCLUDE_DIRS} PARENT_SCOPE)
 foreach (dir ${INDEX_INCLUDE_DIRS})
@@ -34,11 +30,14 @@ endforeach ()
 
 aux_source_directory(${MILVUS_ENGINE_SRC}/cache cache_files)
 aux_source_directory(${MILVUS_ENGINE_SRC}/config config_files)
+aux_source_directory(${MILVUS_ENGINE_SRC}/config/handler config_handler_files)
 aux_source_directory(${MILVUS_ENGINE_SRC}/metrics metrics_files)
+aux_source_directory(${MILVUS_ENGINE_SRC}/metrics/prometheus metrics_prometheus_files)
 aux_source_directory(${MILVUS_ENGINE_SRC}/db db_main_files)
 aux_source_directory(${MILVUS_ENGINE_SRC}/db/engine db_engine_files)
 aux_source_directory(${MILVUS_ENGINE_SRC}/db/insert db_insert_files)
 aux_source_directory(${MILVUS_ENGINE_SRC}/db/meta db_meta_files)
+aux_source_directory(${MILVUS_ENGINE_SRC}/db/wal db_wal_files)
 
 set(grpc_service_files
         ${MILVUS_ENGINE_SRC}/grpc/gen-milvus/milvus.grpc.pb.cc
@@ -46,6 +45,10 @@ set(grpc_service_files
         ${MILVUS_ENGINE_SRC}/grpc/gen-status/status.grpc.pb.cc
         ${MILVUS_ENGINE_SRC}/grpc/gen-status/status.pb.cc
         )
+
+aux_source_directory(${MILVUS_ENGINE_SRC}/query query_files)
+aux_source_directory(${MILVUS_ENGINE_SRC}/context context_files)
+aux_source_directory(${MILVUS_ENGINE_SRC}/search search_files)
 
 aux_source_directory(${MILVUS_ENGINE_SRC}/scheduler scheduler_main_files)
 aux_source_directory(${MILVUS_ENGINE_SRC}/scheduler/action scheduler_action_files)
@@ -64,17 +67,71 @@ set(scheduler_files
         ${scheduler_task_files}
         )
 
-aux_source_directory(${MILVUS_ENGINE_SRC}/external/easyloggingpp external_easyloggingpp_files)
-aux_source_directory(${MILVUS_ENGINE_SRC}/external/nlohmann external_nlohmann_files)
-set(external_files
-        ${external_easyloggingpp_files}
-        ${external_nlohmann_files}
+aux_source_directory(${MILVUS_THIRDPARTY_SRC}/easyloggingpp thirdparty_easyloggingpp_files)
+aux_source_directory(${MILVUS_THIRDPARTY_SRC}/nlohmann thirdparty_nlohmann_files)
+aux_source_directory(${MILVUS_THIRDPARTY_SRC}/dablooms thirdparty_dablooms_files)
+set(thirdparty_files
+        ${thirdparty_easyloggingpp_files}
+        ${thirdparty_nlohmann_files}
+        ${thirdparty_dablooms_files}
         )
 
-aux_source_directory(${MILVUS_ENGINE_SRC}/server server_files)
-aux_source_directory(${MILVUS_ENGINE_SRC}/server/grpc_impl grpc_server_files)
+aux_source_directory(${MILVUS_ENGINE_SRC}/server server_service_files)
+aux_source_directory(${MILVUS_ENGINE_SRC}/server/delivery/request delivery_request_files)
+aux_source_directory(${MILVUS_ENGINE_SRC}/server/delivery/hybrid_request delivery_hybrid_request_files)
+aux_source_directory(${MILVUS_ENGINE_SRC}/server/delivery/strategy delivery_strategy_files)
+aux_source_directory(${MILVUS_ENGINE_SRC}/server/delivery delivery_files)
+set(server_files
+        ${server_service_files}
+        ${delivery_request_files}
+        ${delivery_hybrid_request_files}
+        ${delivery_strategy_files}
+        ${delivery_files}
+        )
+
+aux_source_directory(${MILVUS_ENGINE_SRC}/server/grpc_impl grpc_impl_files)
+aux_source_directory(${MILVUS_ENGINE_SRC}/server/grpc_impl/interceptor grpc_interceptor_files)
+aux_source_directory(${MILVUS_ENGINE_SRC}/server/context server_context_files)
+set(grpc_server_files
+        ${grpc_request_files}
+        ${grpc_impl_files}
+        ${grpc_interceptor_files}
+        )
+
+aux_source_directory(${MILVUS_ENGINE_SRC}/server/web_impl/handler web_handler_files)
+aux_source_directory(${MILVUS_ENGINE_SRC}/server/web_impl/component web_conponent_files)
+aux_source_directory(${MILVUS_ENGINE_SRC}/server/web_impl/controller web_controller_files)
+aux_source_directory(${MILVUS_ENGINE_SRC}/server/web_impl/dto web_dto_files)
+aux_source_directory(${MILVUS_ENGINE_SRC}/server/web_impl/utils web_utils_files)
+aux_source_directory(${MILVUS_ENGINE_SRC}/server/web_impl web_impl_files)
+set(web_server_files
+        ${web_handler_files}
+        ${web_conponent_files}
+        ${web_controller_files}
+        ${web_dto_files}
+        ${web_utils_files}
+        ${web_impl_files}
+        )
+
+aux_source_directory(${MILVUS_ENGINE_SRC}/storage storage_main_files)
+aux_source_directory(${MILVUS_ENGINE_SRC}/storage/disk storage_disk_files)
+#aux_source_directory(${MILVUS_ENGINE_SRC}/storage/s3 storage_s3_files)
+set(storage_files
+        ${storage_main_files}
+        ${storage_disk_files}
+#        ${storage_s3_files}
+        )
+
 aux_source_directory(${MILVUS_ENGINE_SRC}/utils utils_files)
-aux_source_directory(${MILVUS_ENGINE_SRC}/wrapper wrapper_files)
+
+aux_source_directory(${MILVUS_ENGINE_SRC}/index/archive wrapper_files)
+
+aux_source_directory(${MILVUS_ENGINE_SRC}/tracing tracing_files)
+
+aux_source_directory(${MILVUS_ENGINE_SRC}/codecs codecs_files)
+aux_source_directory(${MILVUS_ENGINE_SRC}/codecs/default codecs_default_files)
+
+aux_source_directory(${MILVUS_ENGINE_SRC}/segment segment_files)
 
 set(engine_files
         ${CMAKE_CURRENT_SOURCE_DIR}/main.cpp
@@ -83,13 +140,23 @@ set(engine_files
         ${db_engine_files}
         ${db_insert_files}
         ${db_meta_files}
+        ${db_wal_files}
         ${metrics_files}
-        ${external_files}
+        ${storage_files}
+        ${thirdparty_files}
         ${utils_files}
         ${wrapper_files}
+        ${codecs_files}
+        ${codecs_default_files}
+        ${segment_files}
         )
 
-set(client_grpc_lib
+if (MILVUS_WITH_PROMETHEUS)
+    set(engine_files ${engine_files}
+            ${metrics_prometheus_files})
+endif ()
+
+set(grpc_lib
         grpcpp_channelz
         grpc++
         grpc
@@ -101,6 +168,7 @@ set(prometheus_lib
         prometheus-cpp-push
         prometheus-cpp-pull
         prometheus-cpp-core
+        curl
         )
 
 set(boost_lib
@@ -109,35 +177,64 @@ set(boost_lib
         libboost_serialization.a
         )
 
-set(cuda_lib
-        ${CUDA_TOOLKIT_ROOT_DIR}/lib64/stubs/libnvidia-ml.so
-        cudart
-        cublas
+set(s3_client_lib
+        aws-cpp-sdk-s3
+        aws-cpp-sdk-core
         )
 
 set(third_party_libs
         sqlite
-        ${client_grpc_lib}
+        ${grpc_lib}
         yaml-cpp
-        ${prometheus_lib}
-        ${cuda_lib}
         mysqlpp
         zlib
+        fiu
         ${boost_lib}
         )
 
-if (MILVUS_ENABLE_PROFILING STREQUAL "ON")
+if (MILVUS_GPU_VERSION)
+    include_directories(${CUDA_INCLUDE_DIRS})
+    link_directories("${CUDA_TOOLKIT_ROOT_DIR}/lib64")
+    set(cuda_lib
+            ${CUDA_TOOLKIT_ROOT_DIR}/lib64/stubs/libnvidia-ml.so
+            cudart
+            cublas
+            )
     set(third_party_libs ${third_party_libs}
-        gperftools
-        libunwind
-        )
+            ${cuda_lib}
+            )
+    aux_source_directory(${MILVUS_ENGINE_SRC}/wrapper/gpu wrapper_gpu_files)
+    set(engine_files ${engine_files}
+            ${wrapper_gpu_files}
+            )
 endif ()
 
-link_directories("${CUDA_TOOLKIT_ROOT_DIR}/lib64")
+if (MILVUS_ENABLE_PROFILING)
+    set(third_party_libs ${third_party_libs}
+            gperftools
+            libunwind
+            )
+endif ()
+
+if (MILVUS_WITH_PROMETHEUS)
+    set(third_party_libs ${third_party_libs}
+            ${prometheus_lib}
+            )
+endif ()
+
+if (MILVUS_WITH_AWS)
+    set(third_party_libs ${third_party_libs}
+            ${s3_client_lib}
+            curl
+            crypto
+            )
+endif ()
+
 set(engine_libs
         pthread
         libgomp.a
         libgfortran.a
+        dl
         )
 
 if (NOT ${CMAKE_SYSTEM_PROCESSOR} MATCHES "aarch64")
@@ -147,37 +244,63 @@ if (NOT ${CMAKE_SYSTEM_PROCESSOR} MATCHES "aarch64")
             )
 endif ()
 
-cuda_add_library(milvus_engine STATIC ${engine_files})
+add_library(milvus_engine STATIC ${engine_files})
 target_link_libraries(milvus_engine
         knowhere
-        ${engine_libs}
         ${third_party_libs}
+        ${engine_libs}
         )
 
-add_library(metrics STATIC ${metrics_files})
+if (MILVUS_WITH_PROMETHEUS)
+    add_library(metrics STATIC ${metrics_files} ${metrics_prometheus_files})
+else ()
+    add_library(metrics STATIC ${metrics_files})
+endif ()
 
 set(metrics_lib
         yaml-cpp
-        ${prometheus_lib}
         )
+
+if (MILVUS_WITH_PROMETHEUS)
+    set(metrics_lib ${metrics_lib}
+            ${prometheus_lib}
+            )
+endif ()
 
 target_link_libraries(metrics ${metrics_lib})
 
+add_library(tracing STATIC ${tracing_files} ${thirdparty_files})
+set(tracing_lib
+        opentracing
+        opentracing_mocktracer
+        ${grpc_lib}
+        pthread
+        z
+        )
+target_link_libraries(tracing ${tracing_lib})
+
 set(server_libs
         milvus_engine
-        pthread
-        dl
         metrics
+        tracing
+        oatpp
         )
 
 add_executable(milvus_server
         ${config_files}
+        ${config_handler_files}
         ${metrics_files}
+        ${query_files}
+        ${search_files}
+        ${context_files}
         ${scheduler_files}
         ${server_files}
         ${grpc_server_files}
         ${grpc_service_files}
+        ${web_server_files}
+        ${server_context_files}
         ${utils_files}
+        ${tracing_files}
         )
 
 target_link_libraries(milvus_server
@@ -190,6 +313,7 @@ install(FILES
         ${CMAKE_BINARY_DIR}/mysqlpp_ep-prefix/src/mysqlpp_ep/lib/${CMAKE_SHARED_LIBRARY_PREFIX}mysqlpp${CMAKE_SHARED_LIBRARY_SUFFIX}
         ${CMAKE_BINARY_DIR}/mysqlpp_ep-prefix/src/mysqlpp_ep/lib/${CMAKE_SHARED_LIBRARY_PREFIX}mysqlpp${CMAKE_SHARED_LIBRARY_SUFFIX}.3
         ${CMAKE_BINARY_DIR}/mysqlpp_ep-prefix/src/mysqlpp_ep/lib/${CMAKE_SHARED_LIBRARY_PREFIX}mysqlpp${CMAKE_SHARED_LIBRARY_SUFFIX}.3.2.4
+        ${CMAKE_BINARY_DIR}/fiu_ep-prefix/src/fiu_ep/lib/${CMAKE_SHARED_LIBRARY_PREFIX}fiu${CMAKE_SHARED_LIBRARY_SUFFIX}
+        ${CMAKE_BINARY_DIR}/fiu_ep-prefix/src/fiu_ep/lib/${CMAKE_SHARED_LIBRARY_PREFIX}fiu${CMAKE_SHARED_LIBRARY_SUFFIX}.0
+        ${CMAKE_BINARY_DIR}/fiu_ep-prefix/src/fiu_ep/lib/${CMAKE_SHARED_LIBRARY_PREFIX}fiu${CMAKE_SHARED_LIBRARY_SUFFIX}.1.00
         DESTINATION lib)
-
-add_subdirectory(sdk)
