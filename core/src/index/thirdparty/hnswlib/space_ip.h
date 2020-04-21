@@ -14,7 +14,7 @@ InnerProduct(const void *pVect1, const void *pVect2, const void *qty_ptr) {
     }
     return (1.0f - res);
 #else
-    return faiss::fvec_inner_product((const float*)pVect1, (const float*)pVect2, *((size_t*)qty_ptr));
+    return (1.0f - faiss::fvec_inner_product((const float*)pVect1, (const float*)pVect2, *((size_t*)qty_ptr)));
 #endif
 }
 
