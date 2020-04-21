@@ -513,7 +513,6 @@ class TestSearchBase:
         expected: raise exception
         '''
         query_vectors = [vectors[0]]
-        top_k = 1
         nprobe = 1
         with pytest.raises(Exception) as e:
             status, ids = dis_connect.search_vectors(collection, top_k, query_vectors)
@@ -525,7 +524,6 @@ class TestSearchBase:
         expected: status not ok
         '''
         collection_name = gen_unique_str("not_existed_collection")
-        top_k = 1
         nprobe = 1
         query_vecs = [vectors[0]]
         status, result = connect.search_vectors(collection_name, top_k, query_vecs)
@@ -538,7 +536,6 @@ class TestSearchBase:
         expected: status not ok
         '''
         collection_name = None
-        top_k = 1
         nprobe = 1
         query_vecs = [vectors[0]]
         with pytest.raises(Exception) as e: 
@@ -567,7 +564,6 @@ class TestSearchBase:
         expected: the return distance equals to the computed value
         '''
         nb = 2
-        top_k = 1
         vectors, ids = self.init_data(connect, collection, nb=nb)
         query_vecs = [[0.50 for i in range(dim)]]
         distance_0 = numpy.linalg.norm(numpy.array(query_vecs[0]) - numpy.array(vectors[0]))
@@ -582,7 +578,6 @@ class TestSearchBase:
         expected: the return distance equals to the computed value
         '''
         nb = 2
-        top_k = 1
         nprobe = 1
         vectors, ids = self.init_data(connect, ip_collection, nb=nb)
         index_type = IndexType.FLAT
@@ -605,7 +600,6 @@ class TestSearchBase:
         expected: the return distance equals to the computed value
         '''
         # from scipy.spatial import distance
-        top_k = 1
         nprobe = 512
         int_vectors, vectors, ids = self.init_binary_data(connect, jac_collection, nb=2)
         index_type = IndexType.FLAT
@@ -631,7 +625,6 @@ class TestSearchBase:
         expected: the return distance equals to the computed value
         '''
         # from scipy.spatial import distance
-        top_k = 1
         nprobe = 512
         int_vectors, vectors, ids = self.init_binary_data(connect, ham_collection, nb=2)
         index_type = IndexType.FLAT
@@ -657,7 +650,6 @@ class TestSearchBase:
         expected: the return distance equals to the computed value
         '''
         # from scipy.spatial import distance
-        top_k = 1
         nprobe = 512
         int_vectors, vectors, ids = self.init_binary_data(connect, substructure_collection, nb=2)
         index_type = IndexType.FLAT
@@ -712,7 +704,6 @@ class TestSearchBase:
         expected: the return distance equals to the computed value
         '''
         # from scipy.spatial import distance
-        top_k = 1
         nprobe = 512
         int_vectors, vectors, ids = self.init_binary_data(connect, superstructure_collection, nb=2)
         index_type = IndexType.FLAT
@@ -767,7 +758,6 @@ class TestSearchBase:
         expected: the return distance equals to the computed value
         '''
         # from scipy.spatial import distance
-        top_k = 1
         nprobe = 512
         int_vectors, vectors, ids = self.init_binary_data(connect, tanimoto_collection, nb=2)
         index_type = IndexType.FLAT
@@ -938,7 +928,7 @@ class TestSearchBase:
             idx.append(ids[0])
             idx.append(ids[10])
             idx.append(ids[20])
-        time.sleep(6)
+            milvus.flush([collection])
         query_vecs = [vectors[0], vectors[10], vectors[20]]
         # start query from random collection
         for i in range(num):
@@ -978,7 +968,7 @@ class TestSearchBase:
             idx.append(ids[0])
             idx.append(ids[10])
             idx.append(ids[20])
-        time.sleep(6)
+            milvus.flush([collection])
         query_vecs = [vectors[0], vectors[10], vectors[20]]
         # start query from random collection
         for i in range(num):
@@ -1030,7 +1020,6 @@ class TestSearchParamsInvalid(object):
     def test_search_with_invalid_collectionname(self, connect, get_collection_name):
         collection_name = get_collection_name
         logging.getLogger().info(collection_name)
-        top_k = 1
         nprobe = 1 
         query_vecs = gen_vectors(1, dim)
         status, result = connect.search_vectors(collection_name, top_k, query_vecs)
@@ -1038,7 +1027,6 @@ class TestSearchParamsInvalid(object):
 
     @pytest.mark.level(1)
     def test_search_with_invalid_tag_format(self, connect, collection):
-        top_k = 1
         nprobe = 1 
         query_vecs = gen_vectors(1, dim)
         with pytest.raises(Exception) as e:
@@ -1047,7 +1035,6 @@ class TestSearchParamsInvalid(object):
 
     @pytest.mark.level(1)
     def test_search_with_tag_not_existed(self, connect, collection):
-        top_k = 1
         nprobe = 1
         query_vecs = gen_vectors(1, dim)
         status, result = connect.search_vectors(collection, top_k, query_vecs, partition_tags=["tag"])
@@ -1119,8 +1106,6 @@ class TestSearchParamsInvalid(object):
         index_type = IndexType.IVF_SQ8
         index_param = {"nlist": 16384}
         connect.create_index(collection, index_type, index_param)
-
-        top_k = 1
         nprobe = get_nprobes
         search_param = {"nprobe": nprobe}
         logging.getLogger().info(nprobe)
@@ -1142,8 +1127,6 @@ class TestSearchParamsInvalid(object):
         index_type = IndexType.IVF_SQ8
         index_param = {"nlist": 16384}
         connect.create_index(ip_collection, index_type, index_param)
-
-        top_k = 1
         nprobe = get_nprobes
         search_param = {"nprobe": nprobe}
         logging.getLogger().info(nprobe)
@@ -1180,8 +1163,6 @@ class TestSearchParamsInvalid(object):
         index_type = get_simple_index["index_type"]
         index_param = get_simple_index["index_param"]
         connect.create_index(collection, index_type, index_param)
-
-        top_k = 1
         query_vecs = gen_vectors(1, dim)
         status, result = connect.search_vectors(collection, top_k, query_vecs, params={})
 
