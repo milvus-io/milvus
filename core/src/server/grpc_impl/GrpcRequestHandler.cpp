@@ -292,7 +292,7 @@ GrpcRequestHandler::OnPreSendMessage(::grpc::experimental::ServerRpcInfo* server
     context_map_.erase(request_id);
 }
 
-const std::shared_ptr<Context>&
+std::shared_ptr<Context>
 GrpcRequestHandler::GetContext(::grpc::ServerContext* server_context) {
     std::lock_guard<std::mutex> lock(context_map_mutex_);
     auto request_id = get_request_id(server_context);

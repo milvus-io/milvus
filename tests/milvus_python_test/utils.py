@@ -24,10 +24,14 @@ all_index_types = [
 ]
 
 
-def get_milvus(handler=None):
+def get_milvus(host, port, uri=None, handler=None):
     if handler is None:
         handler = "GRPC"
-    return Milvus(handler=handler)
+    if uri is not None:
+        milvus = Milvus(uri=uri, handler=handler)
+    else:
+        milvus = Milvus(host=host, port=port, handler=handler)
+    return milvus
 
 
 def gen_inaccuracy(num):

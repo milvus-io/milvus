@@ -33,6 +33,19 @@ class TestCreateBase:
         status = connect.create_partition(collection, tag)
         assert status.OK()
 
+    def _test_create_partition_limit(self, connect, collection):
+        '''
+        target: test create partitions, check status returned
+        method: call function: create_partition for 4097 times
+        expected: status not ok
+        '''
+        for i in range(4096):
+            tag_tmp = gen_unique_str()
+            status = connect.create_partition(collection, tag_tmp)
+            assert status.OK()
+        status = connect.create_partition(collection, tag)
+        assert not status.OK()
+
     def test_create_partition_repeat(self, connect, collection):
         '''
         target: test create partition, check status returned
@@ -259,6 +272,7 @@ class TestDropBase:
         status = connect.drop_partition(new_collection, tag)
         assert not status.OK()
 
+    @pytest.mark.level(2)
     def test_drop_partition_repeatedly(self, connect, collection):
         '''
         target: test drop partition twice, check status and partition if existed
