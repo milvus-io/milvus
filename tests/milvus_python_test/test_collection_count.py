@@ -23,7 +23,7 @@ class TestCollectionCount:
         params=[
             1,
             5000,
-            100000,
+            20000,
         ],
     )
     def add_vectors_nb(self, request):
@@ -239,7 +239,7 @@ class TestCollectionCountIP:
         params=[
             1,
             5000,
-            100000,
+            20000,
         ],
     )
     def add_vectors_nb(self, request):
@@ -384,7 +384,7 @@ class TestCollectionCountJAC:
         params=[
             1,
             5000,
-            100000,
+            20000,
         ],
     )
     def add_vectors_nb(self, request):
@@ -495,7 +495,7 @@ class TestCollectionCountBinary:
         params=[
             1,
             5000,
-            100000,
+            20000,
         ],
     )
     def add_vectors_nb(self, request):
@@ -689,7 +689,7 @@ class TestCollectionCountTANIMOTO:
         params=[
             1,
             5000,
-            100000,
+            20000,
         ],
     )
     def add_vectors_nb(self, request):
