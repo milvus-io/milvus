@@ -130,34 +130,6 @@ InsertEntityRequest::OnExecute() {
         // step 4: some metric type doesn't support float vectors
 
         // TODO(yukun): check dimension and metric_type
-        //        for (uint64_t i = 0; i <entities_.vector_data_.size(); ++i) {
-        //            if (!entities_.vector_data_[i].float_data_.empty()) {  // insert float vectors
-        //                if (engine::utils::IsBinaryMetricType(vector_fields.vector_fields_[i].metric_type_)) {
-        //                    return Status(SERVER_INVALID_ROWRECORD_ARRAY, "Table metric type doesn't support float
-        //                    vectors.");
-        //                }
-        //
-        //                // check prepared float data
-        //                fiu_do_on("InsertRequest.OnExecute.invalid_dim", table_schema.dimension_ = -1);
-        //                if (entities_.vector_data_[i].float_data_.size() / entities_.vector_data_[i].vector_count_ !=
-        //                vector_fields.vector_fields_[i].dimension_) {
-        //                    return Status(SERVER_INVALID_VECTOR_DIMENSION,
-        //                                  "The vector dimension must be equal to the table dimension.");
-        //                }
-        //            } else if (!entities_.vector_data_[i].binary_data_.empty()) {  // insert binary vectors
-        //                if (!engine::utils::IsBinaryMetricType(vector_fields.vector_fields_[i].metric_type_)) {
-        //                    return Status(SERVER_INVALID_ROWRECORD_ARRAY, "Table metric type doesn't support binary
-        //                    vectors.");
-        //                }
-        //
-        //                // check prepared binary data
-        //                if (entities_.vector_data_[i].binary_data_.size() * 8 /
-        //                entities_.vector_data_[i].vector_count_ != vector_fields.vector_fields_[i].dimension_) {
-        //                    return Status(SERVER_INVALID_VECTOR_DIMENSION,
-        //                                  "The vector dimension must be equal to the table dimension.");
-        //                }
-        //            }
-        //        }
 
         // step 5: insert entities
         auto vec_count = static_cast<uint64_t>(vector_datas_it->second.vector_count_);
