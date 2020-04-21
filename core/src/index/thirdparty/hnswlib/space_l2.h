@@ -1,10 +1,12 @@
 #pragma once
 #include "hnswlib.h"
+#include <faiss/FaissHook.h>
 
 namespace hnswlib {
 
 static float
 L2Sqr(const void *pVect1, const void *pVect2, const void *qty_ptr) {
+#if 0 /* use FAISS distance calculation algorithm instead */
     //return *((float *)pVect2);
     size_t qty = *((size_t *) qty_ptr);
     float res = 0;
@@ -13,8 +15,12 @@ L2Sqr(const void *pVect1, const void *pVect2, const void *qty_ptr) {
         res += t * t;
     }
     return (res);
+#else
+    return faiss::fvec_L2sqr((const float*)pVect1, (const float*)pVect2, *((size_t*)qty_ptr));
+#endif
 }
 
+#if 0 /* use FAISS distance calculation algorithm instead */
 #if defined(USE_AVX)
 
 // Favor using AVX if available.
@@ -140,6 +146,7 @@ L2SqrSIMD4Ext(const void *pVect1v, const void *pVect2v, const void *qty_ptr) {
     return (res);
 }
 #endif
+#endif
 
 class L2Space : public SpaceInterface<float> {
     DISTFUNC<float> fstdistfunc_;
@@ -148,6 +155,7 @@ class L2Space : public SpaceInterface<float> {
  public:
     L2Space(size_t dim) {
         fstdistfunc_ = L2Sqr;
+#if 0 /* use FAISS distance calculation algorithm instead */
 #if defined(USE_SSE) || defined(USE_AVX)
         if (dim % 4 == 0)
             fstdistfunc_ = L2SqrSIMD4Ext;
@@ -156,6 +164,7 @@ class L2Space : public SpaceInterface<float> {
         /*else{
             throw runtime_error("Data type not supported!");
         }*/
+#endif
 #endif
         dim_ = dim;
         data_size_ = dim * sizeof(float);

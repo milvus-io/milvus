@@ -344,6 +344,7 @@ class DBImpl : public DB, public server::CacheConfigHandler, public server::Engi
     SimpleWaitNotify swn_index_;
 
     SimpleWaitNotify flush_req_swn_;
+    SimpleWaitNotify index_req_swn_;
 
     ThreadPool merge_thread_pool_;
     std::mutex merge_result_mutex_;

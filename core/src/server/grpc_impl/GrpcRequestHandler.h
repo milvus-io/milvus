@@ -71,7 +71,7 @@ class GrpcRequestHandler final : public ::milvus::grpc::MilvusService::Service, 
     OnPreSendMessage(::grpc::experimental::ServerRpcInfo* server_rpc_info,
                      ::grpc::experimental::InterceptorBatchMethods* interceptor_batch_methods) override;
 
-    const std::shared_ptr<Context>&
+    std::shared_ptr<Context>
     GetContext(::grpc::ServerContext* server_context);
 
     void

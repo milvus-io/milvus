@@ -465,7 +465,7 @@ class TestCollection:
             assert the value returned by delete method
         expected: create ok and delete ok
         '''
-        loops = 5
+        loops = 2 
         for i in range(loops):
             collection_name = "test_collection"
             param = {'collection_name': collection_name,
@@ -474,7 +474,7 @@ class TestCollection:
                  'metric_type': MetricType.L2}
             connect.create_collection(param)
             status = connect.drop_collection(collection_name)
-            time.sleep(2)
+            time.sleep(1)
             assert status.OK()
 
     def test_delete_create_collection_repeatedly_ip(self, connect):
@@ -484,7 +484,7 @@ class TestCollection:
             assert the value returned by delete method
         expected: create ok and delete ok
         '''
-        loops = 5
+        loops = 2 
         for i in range(loops):
             collection_name = "test_collection"
             param = {'collection_name': collection_name,
@@ -493,7 +493,7 @@ class TestCollection:
                  'metric_type': MetricType.IP}
             connect.create_collection(param)
             status = connect.drop_collection(collection_name)
-            time.sleep(2)
+            time.sleep(1)
             assert status.OK()
 
     # TODO: enable
@@ -760,6 +760,7 @@ class TestCollection:
         with pytest.raises(Exception) as e:
             status = dis_connect.show_collections()
 
+    @pytest.mark.level(2)
     def test_show_collections_no_collection(self, connect):
         '''
         target: test show collections is correct or not, if no collection in db
@@ -1078,7 +1079,6 @@ def gen_sequence():
         yield x
 
 class TestCollectionLogic(object):
-
     @pytest.mark.parametrize("logic_seq", gen_sequence())
     @pytest.mark.level(2)
     def test_logic(self, connect, logic_seq, args):
