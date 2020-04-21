@@ -1,19 +1,24 @@
 #pragma once
 #include "hnswlib.h"
+#include <faiss/FaissHook.h>
 
 namespace hnswlib {
 
 static float
 InnerProduct(const void *pVect1, const void *pVect2, const void *qty_ptr) {
+#if 0 /* use FAISS distance calculation algorithm instead */
     size_t qty = *((size_t *) qty_ptr);
     float res = 0;
     for (unsigned i = 0; i < qty; i++) {
         res += ((float *) pVect1)[i] * ((float *) pVect2)[i];
     }
     return (1.0f - res);
-
+#else
+    return (1.0f - faiss::fvec_inner_product((const float*)pVect1, (const float*)pVect2, *((size_t*)qty_ptr)));
+#endif
 }
 
+#if 0 /* use FAISS distance calculation algorithm instead */
 #if defined(USE_AVX)
 
 // Favor using AVX if available.
@@ -210,6 +215,7 @@ InnerProductSIMD16Ext(const void *pVect1v, const void *pVect2v, const void *qty_
 }
 
 #endif
+#endif
 
 class InnerProductSpace : public SpaceInterface<float> {
     DISTFUNC<float> fstdistfunc_;
@@ -218,11 +224,13 @@ class InnerProductSpace : public SpaceInterface<float> {
  public:
     InnerProductSpace(size_t dim) {
         fstdistfunc_ = InnerProduct;
+#if 0 /* use FAISS distance calculation algorithm instead */
 #if defined(USE_AVX) || defined(USE_SSE)
         if (dim % 4 == 0)
             fstdistfunc_ = InnerProductSIMD4Ext;
         if (dim % 16 == 0)
             fstdistfunc_ = InnerProductSIMD16Ext;
+#endif
 #endif
         dim_ = dim;
         data_size_ = dim * sizeof(float);
