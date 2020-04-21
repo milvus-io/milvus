@@ -45,7 +45,7 @@ __global__ void l2SelectMin1(Tensor<T, 2, true> productDistances,
   // FIXME: if we have exact multiples, don't need this
   bool endRow = (blockIdx.x == gridDim.x - 1);
 
-  bool bitsetIsEmpty = (bitset.getSize(0) == 0);
+  bool bitsetEmpty = (bitset.getSize(0) == 0);
 
   if (endRow) {
     if (productDistances.getSize(0) % kRowsPerBlock == 0) {
@@ -57,7 +57,7 @@ __global__ void l2SelectMin1(Tensor<T, 2, true> productDistances,
     for (int row = rowStart; row < productDistances.getSize(0); ++row) {
       for (int col = threadIdx.x; col < productDistances.getSize(1);
            col += blockDim.x) {
-        if (bitsetIsEmpty || (!(bitset[col >> 3] & (0x1 << (col & 0x7))))) {
+        if (bitsetEmpty || (!(bitset[col >> 3] & (0x1 << (col & 0x7))))) {
           distance[0] = Math<T>::add(centroidDistances[col],
                                     productDistances[row][col]);
         } else {
@@ -149,11 +149,11 @@ __global__ void l2SelectMinK(Tensor<T, 2, true> productDistances,
   int limit = utils::roundDown(productDistances.getSize(1), kWarpSize);
   int i = threadIdx.x;
 
-  bool bitsetIsEmpty = (bitset.getSize(0) == 0);
+  bool bitsetEmpty = (bitset.getSize(0) == 0);
   T v;
 
   for (; i < limit; i += blockDim.x) {
-    if (bitsetIsEmpty || (!(bitset[i >> 3] & (0x1 << (i & 0x7))))) {
+    if (bitsetEmpty || (!(bitset[i >> 3] & (0x1 << (i & 0x7))))) {
       v = Math<T>::add(centroidDistances[i],
                         productDistances[row][i]);
     } else {
@@ -164,7 +164,7 @@ __global__ void l2SelectMinK(Tensor<T, 2, true> productDistances,
   }
 
   if (i < productDistances.getSize(1)) {
-    if (bitsetIsEmpty || (!(bitset[i >> 3] & (0x1 << (i & 0x7))))) {
+    if (bitsetEmpty || (!(bitset[i >> 3] & (0x1 << (i & 0x7))))) {
       v = Math<T>::add(centroidDistances[i],
                         productDistances[row][i]);
     } else {
