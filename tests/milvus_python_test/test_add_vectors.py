@@ -1198,12 +1198,8 @@ class TestAddAdvance:
         scope="function",
         params=[
             1,
-            10,
-            100,
             1000,
-            pytest.param(5000 - 1, marks=pytest.mark.xfail),
-            pytest.param(5000, marks=pytest.mark.xfail),
-            pytest.param(5000 + 1, marks=pytest.mark.xfail),
+            6000
         ],
     )
     def insert_count(self, request):

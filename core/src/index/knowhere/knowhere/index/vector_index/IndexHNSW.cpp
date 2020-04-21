@@ -28,13 +28,13 @@
 namespace milvus {
 namespace knowhere {
 
-void
-normalize_vector(float* data, float* norm_array, size_t dim) {
-    float norm = 0.0f;
-    for (int i = 0; i < dim; i++) norm += data[i] * data[i];
-    norm = 1.0f / (sqrtf(norm) + 1e-30f);
-    for (int i = 0; i < dim; i++) norm_array[i] = data[i] * norm;
-}
+// void
+// normalize_vector(float* data, float* norm_array, size_t dim) {
+//     float norm = 0.0f;
+//     for (int i = 0; i < dim; i++) norm += data[i] * data[i];
+//     norm = 1.0f / (sqrtf(norm) + 1e-30f);
+//     for (int i = 0; i < dim; i++) norm_array[i] = data[i] * norm;
+// }
 
 BinarySet
 IndexHNSW::Serialize(const Config& config) {

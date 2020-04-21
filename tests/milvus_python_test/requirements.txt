@@ -6,5 +6,6 @@ pytest-repeat==0.8.0
 allure-pytest==2.7.0
 pytest-print==0.1.2
 pytest-level==0.1.1
+pytest-xdist==1.23.2
 scikit-learn>=0.19.1
 pymilvus-test>=0.2.0

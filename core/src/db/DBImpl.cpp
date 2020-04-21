@@ -1987,6 +1987,7 @@ DBImpl::BackgroundBuildIndex() {
         }
 
         LOG_ENGINE_DEBUG_ << "Background build index thread finished";
+        index_req_swn_.Notify();  // notify CreateIndex check circle
     }
 }
 
@@ -2170,7 +2171,7 @@ DBImpl::WaitCollectionIndexRecursively(const std::string& collection_id, const C
             status = meta_ptr_->UpdateCollectionFilesToIndex(collection_id);
         }
 
-        std::this_thread::sleep_for(std::chrono::seconds(WAIT_BUILD_INDEX_INTERVAL));
+        index_req_swn_.Wait_For(std::chrono::seconds(WAIT_BUILD_INDEX_INTERVAL));
         GetFilesToBuildIndex(collection_id, file_types, collection_files);
         ++times;
 

@@ -64,11 +64,11 @@ CreateHybridCollectionRequest::OnExecute() {
         rc.RecordSection("check validation");
 
         // step 2: construct collection schema and vector schema
-        engine::meta::CollectionSchema table_info;
+        engine::meta::CollectionSchema collection_info;
         engine::meta::hybrid::FieldsSchema fields_schema;
 
         auto size = field_types_.size();
-        table_info.collection_id_ = collection_name_;
+        collection_info.collection_id_ = collection_name_;
         fields_schema.fields_schema_.resize(size + 1);
         for (uint64_t i = 0; i < size; ++i) {
             fields_schema.fields_schema_[i].collection_id_ = collection_name_;
@@ -82,22 +82,22 @@ CreateHybridCollectionRequest::OnExecute() {
         auto vector_param = field_params_[size].second;
         fields_schema.fields_schema_[size].field_params_ = vector_param;
 
-        table_info.dimension_ = vector_dimensions_[0].second;
+        collection_info.dimension_ = vector_dimensions_[0].second;
 
         if (vector_param != "") {
             auto json_param = nlohmann::json::parse(vector_param);
             if (json_param.contains("metric_type")) {
                 int32_t metric_type = json_param["metric_type"];
-                table_info.metric_type_ = metric_type;
+                collection_info.metric_type_ = metric_type;
             }
             if (json_param.contains("engine_type")) {
                 int32_t engine_type = json_param["engine_type"];
-                table_info.engine_type_ = engine_type;
+                collection_info.engine_type_ = engine_type;
             }
         }
 
         // step 3: create collection
-        status = DBWrapper::DB()->CreateHybridCollection(table_info, fields_schema);
+        status = DBWrapper::DB()->CreateHybridCollection(collection_info, fields_schema);
         if (!status.ok()) {
             // collection could exist
             if (status.code() == DB_ALREADY_EXIST) {

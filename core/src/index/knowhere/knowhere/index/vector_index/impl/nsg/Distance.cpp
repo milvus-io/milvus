@@ -9,6 +9,7 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
+#include <faiss/FaissHook.h>
 #include <immintrin.h>
 
 #include "knowhere/index/vector_index/impl/nsg/Distance.h"
@@ -16,6 +17,8 @@
 namespace milvus {
 namespace knowhere {
 namespace impl {
+
+#if 0 /* use FAISS distance calculation algorithm instead */
 
 float
 DistanceL2::Compare(const float* a, const float* b, unsigned size) const {
@@ -225,16 +228,19 @@ DistanceIP::Compare(const float* a, const float* b, unsigned size) const {
     return result;
 }
 
-//#include <faiss/utils/distances.h>
-// float
-// DistanceL2::Compare(const float* a, const float* b, unsigned size) const {
-//    return faiss::fvec_L2sqr(a,b,size);
-//}
-//
-// float
-// DistanceIP::Compare(const float* a, const float* b, unsigned size) const {
-//    return faiss::fvec_inner_product(a,b,size);
-//}
+#else
+
+float
+DistanceL2::Compare(const float* a, const float* b, unsigned size) const {
+    return faiss::fvec_L2sqr(a, b, (size_t)size);
+}
+
+float
+DistanceIP::Compare(const float* a, const float* b, unsigned size) const {
+    return faiss::fvec_inner_product(a, b, (size_t)size);
+}
+
+#endif
 
 }  // namespace impl
 }  // namespace knowhere
