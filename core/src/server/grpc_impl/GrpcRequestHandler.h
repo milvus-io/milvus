@@ -12,7 +12,6 @@
 #pragma once
 
 #include <grpcpp/server_context.h>
-#include <server/context/Context.h>
 
 #include <cstdint>
 #include <map>
@@ -24,6 +23,7 @@
 #include "grpc/gen-milvus/milvus.grpc.pb.h"
 #include "grpc/gen-status/status.pb.h"
 #include "opentracing/tracer.h"
+#include "server/context/Context.h"
 #include "server/delivery/RequestHandler.h"
 #include "server/grpc_impl/interceptor/GrpcInterceptorHookHandler.h"
 #include "src/utils/Status.h"
