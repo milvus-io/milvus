@@ -65,8 +65,8 @@ BuildVectors(uint64_t n, milvus::engine::VectorsData& vectors) {
 }  // namespace
 
 TEST_F(MemManagerTest, VECTOR_SOURCE_TEST) {
-    milvus::engine::meta::CollectionSchema table_schema = BuildCollectionSchema();
-    auto status = impl_->CreateCollection(table_schema);
+    milvus::engine::meta::CollectionSchema collection_schema = BuildCollectionSchema();
+    auto status = impl_->CreateCollection(collection_schema);
     ASSERT_TRUE(status.ok());
 
     milvus::engine::meta::SegmentSchema table_file_schema;
@@ -85,7 +85,7 @@ TEST_F(MemManagerTest, VECTOR_SOURCE_TEST) {
     //    milvus::engine::ExecutionEnginePtr execution_engine_ = milvus::engine::EngineFactory::Build(
     //        table_file_schema.dimension_, table_file_schema.location_,
     //        (milvus::engine::EngineType)table_file_schema.engine_type_,
-    //        (milvus::engine::MetricType)table_file_schema.metric_type_, table_schema.nlist_);
+    //        (milvus::engine::MetricType)table_file_schema.metric_type_, collection_schema.nlist_);
     std::string directory;
     milvus::engine::utils::GetParentPath(table_file_schema.location_, directory);
     auto segment_writer_ptr = std::make_shared<milvus::segment::SegmentWriter>(directory);
@@ -113,8 +113,8 @@ TEST_F(MemManagerTest, MEM_TABLE_FILE_TEST) {
     auto options = GetOptions();
     fiu_init(0);
 
-    milvus::engine::meta::CollectionSchema table_schema = BuildCollectionSchema();
-    auto status = impl_->CreateCollection(table_schema);
+    milvus::engine::meta::CollectionSchema collection_schema = BuildCollectionSchema();
+    auto status = impl_->CreateCollection(collection_schema);
     ASSERT_TRUE(status.ok());
 
     milvus::engine::MemTableFile mem_table_file(GetCollectionName(), impl_, options);
@@ -162,10 +162,10 @@ TEST_F(MemManagerTest, MEM_TABLE_FILE_TEST) {
 
     {
         options.insert_cache_immediately_ = true;
-        milvus::engine::meta::CollectionSchema table_schema = BuildCollectionSchema();
-        table_schema.collection_id_ = "faiss_pq";
-        table_schema.engine_type_ = (int)milvus::engine::EngineType::FAISS_PQ;
-        auto status = impl_->CreateCollection(table_schema);
+        milvus::engine::meta::CollectionSchema collection_schema = BuildCollectionSchema();
+        collection_schema.collection_id_ = "faiss_pq";
+        collection_schema.engine_type_ = (int)milvus::engine::EngineType::FAISS_PQ;
+        auto status = impl_->CreateCollection(collection_schema);
         ASSERT_TRUE(status.ok());
 
         milvus::engine::MemTableFile mem_table_file_1("faiss_pq", impl_, options);
@@ -176,8 +176,8 @@ TEST_F(MemManagerTest, MEM_TABLE_FILE_TEST) {
 TEST_F(MemManagerTest, MEM_TABLE_TEST) {
     auto options = GetOptions();
 
-    milvus::engine::meta::CollectionSchema table_schema = BuildCollectionSchema();
-    auto status = impl_->CreateCollection(table_schema);
+    milvus::engine::meta::CollectionSchema collection_schema = BuildCollectionSchema();
+    auto status = impl_->CreateCollection(collection_schema);
     ASSERT_TRUE(status.ok());
 
     int64_t n_100 = 100;
