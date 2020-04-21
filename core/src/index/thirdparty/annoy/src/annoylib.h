@@ -1140,6 +1140,10 @@ public:
     _n_nodes = (S)(index_size / _s);
 //    _nodes = (Node*)malloc(_s * _n_nodes);
     _nodes = (Node*)malloc((size_t)index_size);
+    if (_nodes == nullptr) {
+        set_error_from_errno(error, "alloc failed when load_index 4 annoy");
+        return false;
+    }
     memcpy(_nodes, index_data, (size_t)index_size);
 
     // Find the roots by scanning the end of the file and taking the nodes with most descendants
