@@ -24,59 +24,20 @@ class ClientTest {
     ~ClientTest();
 
     void
-    Test();
+    TestHybrid();
 
  private:
     void
-    ShowServerVersion();
-
-    void
-    ShowSdkVersion();
-
-    void
-    ShowCollections(std::vector<std::string>&);
-
-    void
-    CreateCollection(const std::string&, int64_t, milvus::MetricType);
-
-    void
-    DescribeCollection(const std::string&);
-
-    void
-    InsertEntities(const std::string&, int64_t);
-
-    void
-    BuildSearchEntities(int64_t, int64_t);
+    CreateHybridCollection(const std::string& collection_name);
 
     void
     Flush(const std::string&);
 
     void
-    ShowCollectionInfo(const std::string&);
+    InsertHybridEntities(std::string&, int64_t);
 
     void
-    GetEntityById(const std::string&, int64_t);
-
-    void
-    SearchEntities(const std::string&, int64_t, int64_t);
-
-    void
-    CreateIndex(const std::string&, milvus::IndexType, int64_t);
-
-    void
-    PreloadCollection(const std::string&);
-
-    void
-    CompactCollection(const std::string&);
-
-    void
-    DeleteByIds(const std::string&, const std::vector<int64_t>& id_array);
-
-    void
-    DropIndex(const std::string&);
-
-    void
-    DropCollection(const std::string&);
+    HybridSearch(std::string&);
 
  private:
     std::shared_ptr<milvus::Connection> conn_;

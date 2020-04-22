@@ -11,39 +11,34 @@
 
 #pragma once
 
-#include "server/delivery/request/BaseRequest.h"
-
 #include <memory>
 #include <string>
 #include <unordered_map>
+#include <utility>
 #include <vector>
+
+#include "server/delivery/request/BaseRequest.h"
 
 namespace milvus {
 namespace server {
 
-class InsertEntityRequest : public BaseRequest {
+class DescribeHybridCollectionRequest : public BaseRequest {
  public:
     static BaseRequestPtr
     Create(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name,
-           const std::string& partition_tag, uint64_t& row_num, std::vector<std::string>& field_names,
-           std::vector<uint8_t>& attr_values, std::unordered_map<std::string, engine::VectorsData>& vector_datas);
+           std::unordered_map<std::string, engine::meta::hybrid::DataType>& field_types);
 
  protected:
-    InsertEntityRequest(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name,
-                        const std::string& partition_tag, uint64_t& row_num, std::vector<std::string>& field_names,
-                        std::vector<uint8_t>& attr_values,
-                        std::unordered_map<std::string, engine::VectorsData>& vector_datas);
+    DescribeHybridCollectionRequest(const std::shared_ptr<milvus::server::Context>& context,
+                                    const std::string& collection_name,
+                                    std::unordered_map<std::string, engine::meta::hybrid::DataType>& field_types);
 
     Status
     OnExecute() override;
 
  private:
     const std::string collection_name_;
-    const std::string partition_tag_;
-    uint64_t row_num_;
-    std::vector<std::string>& field_names_;
-    std::vector<uint8_t>& attr_values_;
-    std::unordered_map<std::string, engine::VectorsData>& vector_datas_;
+    std::unordered_map<std::string, engine::meta::hybrid::DataType>& field_types_;
 };
 
 }  // namespace server

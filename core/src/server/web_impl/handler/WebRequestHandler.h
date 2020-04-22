@@ -231,7 +231,7 @@ class WebRequestHandler {
     SystemOp(const OString& op, const OString& body_str, OString& response_str);
 
  public:
-    WebRequestHandler&
+    void
     RegisterRequestHandler(const RequestHandler& handler) {
         request_handler_ = handler;
     }

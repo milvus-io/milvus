@@ -21,7 +21,7 @@
 #include "kissrandom.h"
 
 #if LUA_VERSION_NUM == 501
-#define compat_setfuncs(L, funcs) luaL_register(L, NULL, funcs)
+#define compat_setfuncs(L, funcs) luaL_register(L, nullptr, funcs)
 #define compat_rawlen lua_objlen
 #else
 #define compat_setfuncs(L, funcs) luaL_setfuncs(L, funcs, 0)
@@ -203,7 +203,7 @@ public:
     Searcher s(L);
     int item = getItemIndex(L, 2, s.self->get_n_items());
     s.self->get_nns_by_item(item, s.n, s.search_k, &s.result,
-        s.include_distances ? &s.distances : NULL);
+        s.include_distances ? &s.distances : nullptr);
     return s.pushResults(L);
   }
 
@@ -213,7 +213,7 @@ public:
     AnnoyT* vec = &(_vec[0]);
     toVector(L, 2, s.self->get_f(), vec);
     s.self->get_nns_by_vector(vec, s.n, s.search_k, &s.result,
-        s.include_distances ? &s.distances : NULL);
+        s.include_distances ? &s.distances : nullptr);
     return s.pushResults(L);
   }
 
@@ -246,7 +246,7 @@ public:
     static const luaL_Reg funcs[] = {
       {"__gc", &ThisClass::gc},
       {"__tostring", &ThisClass::tostring},
-      {NULL, NULL},
+      {nullptr, nullptr},
     };
     return funcs;
   }
@@ -264,7 +264,7 @@ public:
       {"get_distance", &ThisClass::get_distance},
       {"get_n_items", &ThisClass::get_n_items},
       {"on_disk_build", &ThisClass::on_disk_build},
-      {NULL, NULL},
+      {nullptr, nullptr},
     };
     return funcs;
   }
@@ -304,7 +304,7 @@ static int lua_an_make(lua_State* L) {
 
 static const luaL_Reg LUA_ANNOY_FUNCS[] = {
   {"AnnoyIndex", lua_an_make},
-  {NULL, NULL},
+  {nullptr, nullptr},
 };
 
 extern "C" {

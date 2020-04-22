@@ -13,7 +13,6 @@ pipeline {
 
     options {
         timestamps()
-        timeout(time: 3, unit: 'HOURS')
     }
 
     parameters{

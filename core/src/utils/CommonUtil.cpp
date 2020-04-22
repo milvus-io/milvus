@@ -182,7 +182,7 @@ std::string
 CommonUtil::GetExePath() {
     const size_t buf_len = 1024;
     char buf[buf_len];
-    size_t cnt = readlink("/proc/self/exe", buf, buf_len);
+    ssize_t cnt = readlink("/proc/self/exe", buf, buf_len);
     fiu_do_on("CommonUtil.GetExePath.readlink_fail", cnt = -1);
     if (cnt < 0 || cnt >= buf_len) {
         return "";

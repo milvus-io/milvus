@@ -145,7 +145,8 @@ class DBImpl : public DB, public server::CacheConfigHandler, public server::Engi
                              meta::hybrid::FieldsSchema& fields_schema) override;
 
     Status
-    InsertEntities(const std::string& collection_name, const std::string& partition_tag, engine::Entity& entity,
+    InsertEntities(const std::string& collection_name, const std::string& partition_tag,
+                   const std::vector<std::string>& field_names, engine::Entity& entity,
                    std::unordered_map<std::string, meta::hybrid::DataType>& field_types) override;
 
     Status
@@ -345,6 +346,7 @@ class DBImpl : public DB, public server::CacheConfigHandler, public server::Engi
     SimpleWaitNotify swn_index_;
 
     SimpleWaitNotify flush_req_swn_;
+    SimpleWaitNotify index_req_swn_;
 
     ThreadPool merge_thread_pool_;
     std::mutex merge_result_mutex_;

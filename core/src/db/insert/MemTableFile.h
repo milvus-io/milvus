@@ -11,8 +11,6 @@
 
 #pragma once
 
-#include <segment/SegmentWriter.h>
-
 #include <memory>
 #include <string>
 #include <vector>
@@ -21,6 +19,7 @@
 #include "db/engine/ExecutionEngine.h"
 #include "db/insert/VectorSource.h"
 #include "db/meta/Meta.h"
+#include "segment/SegmentWriter.h"
 #include "utils/Status.h"
 
 namespace milvus {

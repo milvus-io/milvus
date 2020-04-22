@@ -84,12 +84,6 @@ if [[ ${RUN_CPPLINT} == "ON" ]]; then
 #    fi
 #    echo "clang-tidy check passed!"
 else
-
-  # strip binary symbol
-  if [[ ${BUILD_TYPE} != "Debug" ]]; then
-    strip src/milvus_server
-  fi
-
   # compile and build
   make -j 8  || exit 1
 fi

@@ -186,6 +186,7 @@ class TestIndexBase:
         assert len(result[0]) == top_k
         assert result[0][0].distance == 0.0
 
+    @pytest.mark.level(2)
     @pytest.mark.timeout(BUILD_TIMEOUT)
     def test_create_index_multithread_multicollection(self, connect, args):
         '''
@@ -399,6 +400,7 @@ class TestIndexBase:
         status, ids = connect.add_vectors(collection, vectors)
         assert status.OK()
 
+    @pytest.mark.level(2)
     @pytest.mark.timeout(BUILD_TIMEOUT)
     def test_create_same_index_repeatedly(self, connect, collection, get_simple_index):
         '''
@@ -412,6 +414,7 @@ class TestIndexBase:
         status = connect.create_index(collection, index_type, index_param)
         assert status.OK()
 
+    @pytest.mark.level(2)
     @pytest.mark.timeout(BUILD_TIMEOUT)
     def test_create_different_index_repeatedly(self, connect, collection):
         '''
@@ -568,6 +571,7 @@ class TestIndexBase:
         assert result._collection_name == collection
         assert result._index_type == IndexType.FLAT
 
+    @pytest.mark.level(2)
     def test_drop_index_repeatly(self, connect, collection, get_simple_index):
         '''
         target: test drop index repeatly
@@ -635,6 +639,7 @@ class TestIndexBase:
         logging.getLogger().info(status)
         assert status.OK()
 
+    @pytest.mark.level(2)
     def test_create_drop_index_repeatly(self, connect, collection, get_simple_index):
         '''
         target: test create / drop index repeatly, use the same index params
@@ -760,7 +765,7 @@ class TestIndexIP:
     def test_create_index_search_with_query_vectors(self, connect, ip_collection, get_simple_index):
         '''
         target: test create index interface, search with more query vectors
-        method: create collection and add vectors in it, create index
+        method: create collection and add vectors in it, create index, with no manual flush 
         expected: return code equals to 0, and search success
         '''
         index_param = get_simple_index["index_param"]
@@ -991,8 +996,8 @@ class TestIndexIP:
         logging.getLogger().info(get_simple_index)
         status = connect.create_partition(ip_collection, tag)
         status = connect.create_partition(ip_collection, new_tag)
-        status, ids = connect.add_vectors(ip_collection, vectors, partition_tag=tag)
-        status, ids = connect.add_vectors(ip_collection, vectors, partition_tag=new_tag)
+        # status, ids = connect.add_vectors(ip_collection, vectors, partition_tag=tag)
+        # status, ids = connect.add_vectors(ip_collection, vectors, partition_tag=new_tag)
         status = connect.create_index(ip_collection, index_type, index_param)
         status, result = connect.describe_index(ip_collection)
         logging.getLogger().info(result)
@@ -1135,6 +1140,7 @@ class TestIndexIP:
         assert result._collection_name == ip_collection
         assert result._index_type == IndexType.FLAT
 
+    @pytest.mark.level(2)
     def test_drop_index_repeatly(self, connect, ip_collection, get_simple_index):
         '''
         target: test drop index repeatly
@@ -1190,6 +1196,7 @@ class TestIndexIP:
         logging.getLogger().info(status)
         assert status.OK()
 
+    @pytest.mark.level(2)
     def test_create_drop_index_repeatly(self, connect, ip_collection, get_simple_index):
         '''
         target: test create / drop index repeatly, use the same index params
@@ -1821,4 +1828,3 @@ class TestCreateIndexParamsInvalid(object):
         logging.getLogger().info(result)
         assert result._collection_name == collection
         assert result._index_type == IndexType.FLAT
-

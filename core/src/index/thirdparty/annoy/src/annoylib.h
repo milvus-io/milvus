@@ -125,6 +125,7 @@ inline void set_error_from_string(char **error, const char* msg) {
 #endif
 #endif
 
+#include <faiss/FaissHook.h>
 
 using std::vector;
 using std::pair;
@@ -184,7 +185,7 @@ inline T euclidean_distance(const T* x, const T* y, int f) {
   return d;
 }
 
-#ifdef USE_AVX
+//#ifdef USE_AVX
 // Horizontal single sum of 256bit vector.
 inline float hsum256_ps_avx(__m256 v) {
   const __m128 x128 = _mm_add_ps(_mm256_extractf128_ps(v, 1), _mm256_castps256_ps128(v));
@@ -195,6 +196,7 @@ inline float hsum256_ps_avx(__m256 v) {
 
 template<>
 inline float dot<float>(const float* x, const float *y, int f) {
+#if 0 /* use FAISS distance calculation algorithm instead */
   float result = 0;
   if (f > 7) {
     __m256 d = _mm256_setzero_ps();
@@ -213,10 +215,14 @@ inline float dot<float>(const float* x, const float *y, int f) {
     y++;
   }
   return result;
+#else
+  return faiss::fvec_inner_product(x, y, (size_t)f);
+#endif
 }
 
 template<>
 inline float manhattan_distance<float>(const float* x, const float* y, int f) {
+#if 0 /* use FAISS distance calculation algorithm instead */
   float result = 0;
   int i = f;
   if (f > 7) {
@@ -239,10 +245,14 @@ inline float manhattan_distance<float>(const float* x, const float* y, int f) {
     y++;
   }
   return result;
+#else
+  return faiss::fvec_L1(x, y, (size_t)f);
+#endif
 }
 
 template<>
 inline float euclidean_distance<float>(const float* x, const float* y, int f) {
+#if 0 /* use FAISS distance calculation algorithm instead */
   float result=0;
   if (f > 7) {
     __m256 d = _mm256_setzero_ps();
@@ -263,10 +273,14 @@ inline float euclidean_distance<float>(const float* x, const float* y, int f) {
     y++;
   }
   return result;
+#else
+  return faiss::fvec_L2sqr(x, y, (size_t)f);
+#endif
 }
 
-#endif
+//#endif
 
+#if 0 /* use FAISS distance calculation algorithm instead */
 #ifdef USE_AVX512
 template<>
 inline float dot<float>(const float* x, const float *y, int f) {
@@ -339,6 +353,7 @@ inline float euclidean_distance<float>(const float* x, const float* y, int f) {
   return result;
 }
 
+#endif
 #endif
 
  
@@ -809,20 +824,20 @@ struct Manhattan : Minkowski {
 template<typename S, typename T>
 class AnnoyIndexInterface {
  public:
-  // Note that the methods with an **error argument will allocate memory and write the pointer to that string if error is non-NULL
+  // Note that the methods with an **error argument will allocate memory and write the pointer to that string if error is non-nullptr
   virtual ~AnnoyIndexInterface() {};
-  virtual bool add_item(S item, const T* w, char** error=NULL) = 0;
-  virtual bool build(int q, char** error=NULL) = 0;
-  virtual bool unbuild(char** error=NULL) = 0;
-  virtual bool save(const char* filename, bool prefault=false, char** error=NULL) = 0;
+  virtual bool add_item(S item, const T* w, char** error=nullptr) = 0;
+  virtual bool build(int q, char** error=nullptr) = 0;
+  virtual bool unbuild(char** error=nullptr) = 0;
+  virtual bool save(const char* filename, bool prefault=false, char** error=nullptr) = 0;
   virtual void unload() = 0;
-  virtual bool load(const char* filename, bool prefault=false, char** error=NULL) = 0;
-  virtual bool load_index(void* index_data, const int64_t& index_size, char** error = NULL) = 0;
+  virtual bool load(const char* filename, bool prefault=false, char** error=nullptr) = 0;
+  virtual bool load_index(void* index_data, const int64_t& index_size, char** error = nullptr) = 0;
   virtual T get_distance(S i, S j) const = 0;
   virtual void get_nns_by_item(S item, size_t n, int search_k, vector<S>* result, vector<T>* distances,
-                               faiss::ConcurrentBitsetPtr bitset = nullptr) const = 0;
+                               faiss::ConcurrentBitsetPtr& bitset = nullptr) const = 0;
   virtual void get_nns_by_vector(const T* w, size_t n, int search_k, vector<S>* result, vector<T>* distances,
-                               faiss::ConcurrentBitsetPtr bitset = nullptr) const = 0;
+                               faiss::ConcurrentBitsetPtr& bitset = nullptr) const = 0;
   virtual S get_n_items() const = 0;
   virtual S get_dim() const = 0;
   virtual S get_n_trees() const = 0;
@@ -831,7 +846,7 @@ class AnnoyIndexInterface {
   virtual void verbose(bool v) = 0;
   virtual void get_item(S item, T* v) const = 0;
   virtual void set_seed(int q) = 0;
-  virtual bool on_disk_build(const char* filename, char** error=NULL) = 0;
+  virtual bool on_disk_build(const char* filename, char** error=nullptr) = 0;
 };
 
 template<typename S, typename T, typename Distance, typename Random>
@@ -879,12 +894,12 @@ public:
     return _f;
   }
 
-  bool add_item(S item, const T* w, char** error=NULL) {
+  bool add_item(S item, const T* w, char** error=nullptr) {
     return add_item_impl(item, w, error);
   }
 
   template<typename W>
-  bool add_item_impl(S item, const W& w, char** error=NULL) {
+  bool add_item_impl(S item, const W& w, char** error=nullptr) {
     if (_loaded) {
       set_error_from_string(error, "You can't add an item to a loaded index");
       return false;
@@ -909,7 +924,7 @@ public:
     return true;
   }
     
-  bool on_disk_build(const char* file, char** error=NULL) {
+  bool on_disk_build(const char* file, char** error=nullptr) {
     _on_disk = true;
     _fd = open(file, O_RDWR | O_CREAT | O_TRUNC, (int) 0600);
     if (_fd == -1) {
@@ -930,7 +945,7 @@ public:
     return true;
   }
     
-  bool build(int q, char** error=NULL) {
+  bool build(int q, char** error=nullptr) {
     if (_loaded) {
       set_error_from_string(error, "You can't build a loaded index");
       return false;
@@ -982,7 +997,7 @@ public:
     return true;
   }
   
-  bool unbuild(char** error=NULL) {
+  bool unbuild(char** error=nullptr) {
     if (_loaded) {
       set_error_from_string(error, "You can't unbuild a loaded index");
       return false;
@@ -995,7 +1010,7 @@ public:
     return true;
   }
 
-  bool save(const char* filename, bool prefault=false, char** error=NULL) {
+  bool save(const char* filename, bool prefault=false, char** error=nullptr) {
     if (!_built) {
       set_error_from_string(error, "You can't save an index that hasn't been built");
       return false;
@@ -1007,7 +1022,7 @@ public:
       unlink(filename);
 
       FILE *f = fopen(filename, "wb");
-      if (f == NULL) {
+      if (f == nullptr) {
         set_error_from_errno(error, "Unable to open");
         return false;
       }
@@ -1029,7 +1044,7 @@ public:
 
   void reinitialize() {
     _fd = 0;
-    _nodes = NULL;
+    _nodes = nullptr;
     _loaded = false;
     _n_items = 0;
     _n_nodes = 0;
@@ -1056,7 +1071,7 @@ public:
     if (_verbose) showUpdate("unloaded\n");
   }
 
-  bool load(const char* filename, bool prefault=false, char** error=NULL) {
+  bool load(const char* filename, bool prefault=false, char** error=nullptr) {
     _fd = open(filename, O_RDONLY, (int)0400);
     if (_fd == -1) {
       set_error_from_errno(error, "Unable to open");
@@ -1125,6 +1140,10 @@ public:
     _n_nodes = (S)(index_size / _s);
 //    _nodes = (Node*)malloc(_s * _n_nodes);
     _nodes = (Node*)malloc((size_t)index_size);
+    if (_nodes == nullptr) {
+        set_error_from_errno(error, "alloc failed when load_index 4 annoy");
+        return false;
+    }
     memcpy(_nodes, index_data, (size_t)index_size);
 
     // Find the roots by scanning the end of the file and taking the nodes with most descendants
@@ -1154,14 +1173,14 @@ public:
   }
 
   void get_nns_by_item(S item, size_t n, int search_k, vector<S>* result, vector<T>* distances,
-                       faiss::ConcurrentBitsetPtr bitset) const {
+                       faiss::ConcurrentBitsetPtr& bitset) const {
     // TODO: handle OOB
     const Node* m = _get(item);
     _get_all_nns(m->v, n, search_k, result, distances, bitset);
   }
 
   void get_nns_by_vector(const T* w, size_t n, int search_k, vector<S>* result, vector<T>* distances,
-                         faiss::ConcurrentBitsetPtr bitset) const {
+                         faiss::ConcurrentBitsetPtr& bitset) const {
     _get_all_nns(w, n, search_k, result, distances, bitset);
   }
 
@@ -1309,7 +1328,7 @@ protected:
   }
 
   void _get_all_nns(const T* v, size_t n, int search_k, vector<S>* result, vector<T>* distances,
-                    faiss::ConcurrentBitsetPtr bitset) const {
+                    faiss::ConcurrentBitsetPtr& bitset) const {
     Node* v_node = (Node *)alloca(_s);
     D::template zero_value<Node>(v_node);
     memcpy(v_node->v, v, sizeof(T) * _f);

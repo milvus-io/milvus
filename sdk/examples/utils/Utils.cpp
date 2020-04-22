@@ -262,14 +262,17 @@ void ConstructVector(uint64_t nq, uint64_t dimension, std::vector<milvus::Entity
 std::vector<milvus::LeafQueryPtr>
 Utils::GenLeafQuery() {
     //Construct TermQuery
-    std::vector<std::string> field_value;
-    field_value.resize(1000);
-    for (uint64_t i = 0; i < 1000; ++i) {
-        field_value[i] = std::to_string(i);
+    uint64_t row_num = 1000;
+    std::vector<int64_t> field_value;
+    field_value.resize(row_num);
+    for (uint64_t i = 0; i < row_num; ++i) {
+        field_value[i] = i;
     }
+    std::vector<int8_t> term_value(row_num * sizeof(int64_t));
+    memcpy(term_value.data(), field_value.data(), row_num * sizeof(int64_t));
     milvus::TermQueryPtr tq = std::make_shared<milvus::TermQuery>();
     tq->field_name = "field_1";
-    tq->field_value = field_value;
+    tq->field_value = term_value;
 
     //Construct RangeQuery
     milvus::CompareExpr ce1 = {milvus::CompareOperator::LTE, "10000"}, ce2 = {milvus::CompareOperator::GTE, "1"};
