@@ -112,34 +112,6 @@ struct PartitionParam {
 
 using PartitionTagList = std::vector<std::string>;
 
-/**
- * @brief segment statistics
- */
-struct SegmentStat {
-    std::string segment_name;    ///< Segment name
-    int64_t row_count;           ///< Segment row count
-    std::string index_name;      ///< Segment index name
-    int64_t data_size;           ///< Segment data size
-};
-
-/**
- * @brief partition statistics
- */
-struct PartitionStat {
-    std::string tag;                          ///< Partition tag
-    int64_t row_count;                        ///< Partition row count
-    std::vector<SegmentStat> segments_stat;   ///< Partition's segments statistics
-};
-
-/**
- * @brief collection info
- */
-struct CollectionInfo {
-    int64_t total_row_count;                      ///< Collection total entity count
-    std::vector<PartitionStat> partitions_stat;   ///< Collection's partitions statistics
-};
-
-
 
 struct HMapping {
     std::string collection_name;
@@ -152,7 +124,6 @@ struct HEntity {
     std::unordered_map<std::string, std::vector<int8_t>> numerica_value;
     std::unordered_map<std::string, std::vector<Entity>> vector_value;
 };
-
 
 /**
  * @brief SDK main class
@@ -371,6 +342,23 @@ class Connection {
     GetEntityByID(const std::string& collection_name, int64_t entity_id, Entity& entity_data) = 0;
 
     /**
+     * @brief Get entity data by id
+     *
+     * This method is used to get entities data by id array from a collection.
+     * Return the first found entity if there are entities with duplicated id
+     *
+     * @param collection_name, target collection's name.
+     * @param id_array, target entities id array.
+     * @param entities_data, returned entities data.
+     *
+     * @return Indicate if the operation is succeed.
+     */
+    virtual Status
+    GetEntitiesByID(const std::string& collection_name,
+                    const std::vector<int64_t>& id_array,
+                    std::vector<Entity>& entities_data) = 0;
+
+    /**
      * @brief Get entity ids from a segment
      *
      * This method is used to get entity ids from a segment
@@ -413,6 +401,33 @@ class Connection {
     Search(const std::string& collection_name, const PartitionTagList& partition_tag_array,
            const std::vector<Entity>& entity_array, int64_t topk,
            const std::string& extra_params, TopKQueryResult& topk_query_result) = 0;
+
+    /**
+     * @brief Search entities in a collection by id
+     *
+     * This method is used to query entity in collection by id.
+     *
+     * @param collection_name, target collection's name.
+     * @param partition_tag_array, target partitions, keep empty if no partition specified.
+     * @param id_array, vectors id array to be queried.
+     * @param topk, how many similarity entities will be returned.
+     * @param extra_params, extra search parameters according to different index type, must be json format.
+     * Note: extra_params is extra parameters list, it must be json format, for example:
+     *       For different index type, parameter list is different accordingly
+     *       FLAT/IVFLAT/SQ8/IVFPQ:  {nprobe: 32}
+     *           ///< nprobe range:[1,999999]
+     *       NSG:  {search_length:100}
+     *           ///< search_length range:[10, 300]
+     *       HNSW  {ef: 64}
+     *           ///< ef range:[topk, 4096]
+     * @param topk_query_result, result array.
+     *
+     * @return Indicate if query is successful.
+     */
+    virtual Status
+    SearchByID(const std::string& collection_name, const PartitionTagList& partition_tag_array,
+               const std::vector<int64_t>& id_array, int64_t topk,
+               const std::string& extra_params, TopKQueryResult& topk_query_result) = 0;
 
     /**
      * @brief Show collection description
@@ -458,12 +473,12 @@ class Connection {
      * This method is used to get detail information of a collection.
      *
      * @param collection_name, target collection's name.
-     * @param collection_info, target collection's information
+     * @param collection_info, target collection's information in json format
      *
      * @return Indicate if this operation is successful.
      */
     virtual Status
-    ShowCollectionInfo(const std::string& collection_name, CollectionInfo& collection_info) = 0;
+    ShowCollectionInfo(const std::string& collection_name, std::string& collection_info) = 0;
 
     /**
      * @brief Delete entity by id

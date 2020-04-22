@@ -69,9 +69,9 @@ void
 ShowCollectionInfo(std::shared_ptr<milvus::Connection>& conn) {
     CountCollection(conn);
 
-    milvus::CollectionInfo collection_info;
+    std::string collection_info;
     auto stat = conn->ShowCollectionInfo(COLLECTION_NAME, collection_info);
-    milvus_sdk::Utils::PrintCollectionInfo(collection_info);
+    std::cout << collection_info << std::endl;
     std::cout << "ShowCollectionInfo function call status: " << stat.message() << std::endl;
 }
 

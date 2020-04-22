@@ -37,6 +37,17 @@ constexpr milvus::IndexType INDEX_TYPE = milvus::IndexType::IVFSQ8;
 constexpr int32_t NLIST = 16384;
 constexpr uint64_t FIELD_NUM = 3;
 
+void PrintEntity(const std::string& tag, const milvus::Entity& entity) {
+    std::cout << tag << "\t[";
+    for (size_t i = 0; i < entity.float_data.size(); i++) {
+        if (i != 0) {
+            std::cout << ", ";
+        }
+        std::cout << entity.float_data[i];
+    }
+    std::cout << "]" << std::endl;
+}
+
 }  // namespace
 
 ClientTest::ClientTest(const std::string& address, const std::string& port) {
@@ -142,17 +153,19 @@ ClientTest::Flush(const std::string& collection_name) {
 
 void
 ClientTest::ShowCollectionInfo(const std::string& collection_name) {
-    milvus::CollectionInfo collection_info;
+    std::string collection_info;
     milvus::Status stat = conn_->ShowCollectionInfo(collection_name, collection_info);
-    milvus_sdk::Utils::PrintCollectionInfo(collection_info);
+    std::cout << collection_info << std::endl;
     std::cout << "ShowCollectionInfo function call status: " << stat.message() << std::endl;
 }
 
 void
-ClientTest::GetEntityById(const std::string& collection_name, int64_t id) {
-    milvus::Entity entity;
-    milvus::Status stat = conn_->GetEntityByID(collection_name, id, entity);
-    std::cout << "The entity " << id << " has " << entity.float_data.size() << " float elements" << std::endl;
+ClientTest::GetEntitiesByID(const std::string& collection_name,  const std::vector<int64_t>& id_array) {
+    std::vector<milvus::Entity> entities;
+    milvus::Status stat = conn_->GetEntitiesByID(collection_name, id_array, entities);
+    for (size_t i = 0; i < entities.size(); i++) {
+        PrintEntity("No." + std::to_string(i), entities[i]);
+    }
     std::cout << "GetEntityById function call status: " << stat.message() << std::endl;
 }
 
@@ -248,7 +261,7 @@ ClientTest::Test() {
     Flush(collection_name);
     ShowCollectionInfo(collection_name);
 
-    GetEntityById(collection_name, search_id_array_[0]);
+    GetEntitiesByID(collection_name, search_id_array_);
     SearchEntities(collection_name, TOP_K, NPROBE);
 
     CreateIndex(collection_name, INDEX_TYPE, NLIST);

@@ -93,4 +93,4 @@ struct LeafQuery {
 };
 using LeafQueryPtr = std::shared_ptr<LeafQuery>;
 
-}
+} // namespace milvus
