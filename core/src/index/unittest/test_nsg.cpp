@@ -109,11 +109,6 @@ TEST_F(NSGInterfaceTest, basic_test) {
 
     ASSERT_EQ(index_->Count(), nb);
     ASSERT_EQ(index_->Dim(), dim);
-    //    ASSERT_THROW({ index_->Clone(); }, milvus::knowhere::KnowhereException);
-    // ASSERT_NO_THROW({
-    //     index_->Add(base_dataset, milvus::knowhere::Config());
-    //     index_->Seal();
-    // });
 }
 
 TEST_F(NSGInterfaceTest, compare_test) {
