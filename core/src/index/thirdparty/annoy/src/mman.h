@@ -135,9 +135,9 @@ inline void* mmap(void *addr, size_t len, int prot, int flags, int fildes, off_t
         return MAP_FAILED;
     }
 
-    fm = CreateFileMapping(h, nullptr, protect, dwMaxSizeHigh, dwMaxSizeLow, nullptr);
+    fm = CreateFileMapping(h, NULL, protect, dwMaxSizeHigh, dwMaxSizeLow, NULL);
 
-    if (fm == nullptr)
+    if (fm == NULL)
     {
         errno = __map_mman_error(GetLastError(), EPERM);
         return MAP_FAILED;
@@ -147,7 +147,7 @@ inline void* mmap(void *addr, size_t len, int prot, int flags, int fildes, off_t
 
     CloseHandle(fm);
   
-    if (map == nullptr)
+    if (map == NULL)
     {
         errno = __map_mman_error(GetLastError(), EPERM);
         return MAP_FAILED;
@@ -217,8 +217,8 @@ inline int ftruncate(int fd, unsigned int size) {
     }
 
     HANDLE h = (HANDLE)_get_osfhandle(fd);
-    unsigned int cur = SetFilePointer(h, 0, nullptr, FILE_CURRENT);
-    if (cur == ~0 || SetFilePointer(h, size, nullptr, FILE_BEGIN) == ~0 || !SetEndOfFile(h)) {
+    unsigned int cur = SetFilePointer(h, 0, NULL, FILE_CURRENT);
+    if (cur == ~0 || SetFilePointer(h, size, NULL, FILE_BEGIN) == ~0 || !SetEndOfFile(h)) {
         int error = GetLastError();
         switch (GetLastError()) {
             case ERROR_INVALID_HANDLE:

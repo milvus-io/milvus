@@ -94,7 +94,7 @@ hdf5_read(const std::string& file_name, const std::string& dataset_name, H5T_cla
     assert(t_class == dataset_class || !"Illegal dataset class type");
 
     dataspace = H5Dget_space(dataset); /* dataspace handle */
-    H5Sget_simple_extent_dims(dataspace, dims_out, NULL);
+    H5Sget_simple_extent_dims(dataspace, dims_out, nullptr);
     n_out = dims_out[0];
     d_out = dims_out[1];
 
@@ -102,20 +102,20 @@ hdf5_read(const std::string& file_name, const std::string& dataset_name, H5T_cla
     offset[0] = offset[1] = 0;
     count[0] = dims_out[0];
     count[1] = dims_out[1];
-    H5Sselect_hyperslab(dataspace, H5S_SELECT_SET, offset, NULL, count, NULL);
+    H5Sselect_hyperslab(dataspace, H5S_SELECT_SET, offset, nullptr, count, nullptr);
 
     /* Define the memory dataspace. */
     dimsm[0] = dims_out[0];
     dimsm[1] = dims_out[1];
     dimsm[2] = 1;
-    memspace = H5Screate_simple(3, dimsm, NULL);
+    memspace = H5Screate_simple(3, dimsm, nullptr);
 
     /* Define memory hyperslab. */
     offset_out[0] = offset_out[1] = offset_out[2] = 0;
     count_out[0] = dims_out[0];
     count_out[1] = dims_out[1];
     count_out[2] = 1;
-    H5Sselect_hyperslab(memspace, H5S_SELECT_SET, offset_out, NULL, count_out, NULL);
+    H5Sselect_hyperslab(memspace, H5S_SELECT_SET, offset_out, nullptr, count_out, nullptr);
 
     /* Read data from hyperslab in the file into the hyperslab in memory and display. */
     switch (t_class) {

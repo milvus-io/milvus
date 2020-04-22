@@ -115,35 +115,35 @@ TEST_P(KnowhereWrapperTest, BASE_TEST) {
         index_->GetDeviceId();
 
         fiu_init(0);
-        fiu_enable("VecIndexImpl.BuildAll.throw_knowhere_exception", 1, NULL, 0);
-        fiu_enable("BFIndex.BuildAll.throw_knowhere_exception", 1, NULL, 0);
-        fiu_enable("IVFMixIndex.BuildAll.throw_knowhere_exception", 1, NULL, 0);
+        fiu_enable("VecIndexImpl.BuildAll.throw_knowhere_exception", 1, nullptr, 0);
+        fiu_enable("BFIndex.BuildAll.throw_knowhere_exception", 1, nullptr, 0);
+        fiu_enable("IVFMixIndex.BuildAll.throw_knowhere_exception", 1, nullptr, 0);
         auto s = index_->BuildAll(nb, xb.data(), ids.data(), conf);
         fiu_disable("IVFMixIndex.BuildAll.throw_knowhere_exception");
         fiu_disable("BFIndex.BuildAll.throw_knowhere_exception");
         fiu_disable("VecIndexImpl.BuildAll.throw_knowhere_exception");
 
-        fiu_enable("VecIndexImpl.BuildAll.throw_std_exception", 1, NULL, 0);
-        fiu_enable("BFIndex.BuildAll.throw_std_exception", 1, NULL, 0);
-        fiu_enable("IVFMixIndex.BuildAll.throw_std_exception", 1, NULL, 0);
+        fiu_enable("VecIndexImpl.BuildAll.throw_std_exception", 1, nullptr, 0);
+        fiu_enable("BFIndex.BuildAll.throw_std_exception", 1, nullptr, 0);
+        fiu_enable("IVFMixIndex.BuildAll.throw_std_exception", 1, nullptr, 0);
         s = index_->BuildAll(nb, xb.data(), ids.data(), conf);
         fiu_disable("IVFMixIndex.BuildAll.throw_std_exception");
         fiu_disable("BFIndex.BuildAll.throw_std_exception");
         fiu_disable("VecIndexImpl.BuildAll.throw_std_exception");
 
-        fiu_enable("VecIndexImpl.Add.throw_knowhere_exception", 1, NULL, 0);
+        fiu_enable("VecIndexImpl.Add.throw_knowhere_exception", 1, nullptr, 0);
         s = index_->Add(nb, xb.data(), ids.data());
         fiu_disable("VecIndexImpl.Add.throw_knowhere_exception");
 
-        fiu_enable("VecIndexImpl.Add.throw_std_exception", 1, NULL, 0);
+        fiu_enable("VecIndexImpl.Add.throw_std_exception", 1, nullptr, 0);
         s = index_->Add(nb, xb.data(), ids.data());
         fiu_disable("VecIndexImpl.Add.throw_std_exception");
 
-        fiu_enable("VecIndexImpl.Search.throw_knowhere_exception", 1, NULL, 0);
+        fiu_enable("VecIndexImpl.Search.throw_knowhere_exception", 1, nullptr, 0);
         s = index_->Search(nq, xq.data(), res_dis.data(), res_ids.data(), searchconf);
         fiu_disable("VecIndexImpl.Search.throw_knowhere_exception");
 
-        fiu_enable("VecIndexImpl.Search.throw_std_exception", 1, NULL, 0);
+        fiu_enable("VecIndexImpl.Search.throw_std_exception", 1, nullptr, 0);
         s = index_->Search(nq, xq.data(), res_dis.data(), res_ids.data(), searchconf);
         fiu_disable("VecIndexImpl.Search.throw_std_exception");
     }
@@ -229,17 +229,17 @@ TEST_P(KnowhereWrapperTest, SERIALIZE_TEST) {
     {
         std::string file_location = "/tmp/knowhere_gpu_file";
         fiu_init(0);
-        fiu_enable("VecIndex.write_index.throw_knowhere_exception", 1, NULL, 0);
+        fiu_enable("VecIndex.write_index.throw_knowhere_exception", 1, nullptr, 0);
         auto s = write_index(index_, file_location);
         ASSERT_FALSE(s.ok());
         fiu_disable("VecIndex.write_index.throw_knowhere_exception");
 
-        fiu_enable("VecIndex.write_index.throw_std_exception", 1, NULL, 0);
+        fiu_enable("VecIndex.write_index.throw_std_exception", 1, nullptr, 0);
         s = write_index(index_, file_location);
         ASSERT_FALSE(s.ok());
         fiu_disable("VecIndex.write_index.throw_std_exception");
 
-        fiu_enable("VecIndex.write_index.throw_no_space_exception", 1, NULL, 0);
+        fiu_enable("VecIndex.write_index.throw_no_space_exception", 1, nullptr, 0);
         s = write_index(index_, file_location);
         ASSERT_FALSE(s.ok());
         fiu_disable("VecIndex.write_index.throw_no_space_exception");
@@ -294,7 +294,7 @@ TEST_P(KnowhereWrapperTest, SERIALIZE_TEST) {
 
 //     conf.metric_type = knowhere::METRICTYPE::L2;
 //     fiu_init(0);
-//     fiu_enable("IVFPQConfAdapter.Match.empty_resset", 1, NULL, 0);
+//     fiu_enable("IVFPQConfAdapter.Match.empty_resset", 1, nullptr, 0);
 //     try {
 //         ivf_pq_conf->Match(conf);
 //     } catch (std::exception& e) {
@@ -319,12 +319,12 @@ TEST(BFIndex, test_bf_index_fail) {
     milvus::engine::Config config;
 
     fiu_init(0);
-    fiu_enable("BFIndex.Build.throw_knowhere_exception", 1, NULL, 0);
+    fiu_enable("BFIndex.Build.throw_knowhere_exception", 1, nullptr, 0);
     auto err_code = bf_ptr->Build(config);
     ASSERT_EQ(err_code, milvus::KNOWHERE_UNEXPECTED_ERROR);
     fiu_disable("BFIndex.Build.throw_knowhere_exception");
 
-    fiu_enable("BFIndex.Build.throw_std_exception", 1, NULL, 0);
+    fiu_enable("BFIndex.Build.throw_std_exception", 1, nullptr, 0);
     err_code = bf_ptr->Build(config);
     ASSERT_EQ(err_code, milvus::KNOWHERE_ERROR);
     fiu_disable("BFIndex.Build.throw_std_exception");
