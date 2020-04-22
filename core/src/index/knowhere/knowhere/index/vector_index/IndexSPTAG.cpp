@@ -121,11 +121,6 @@ CPUSPTAGRNG::Train(const DatasetPtr& origin, const Config& train_config) {
 
     DatasetPtr dataset = origin;
 
-    // if (index_ptr_->GetDistCalcMethod() == SPTAG::DistCalcMethod::Cosine
-    //    && preprocessor_) {
-    //    preprocessor_->Preprocess(dataset);
-    //}
-
     auto vectorset = ConvertToVectorSet(dataset);
     auto metaset = ConvertToMetadataSet(dataset);
     index_ptr_->BuildIndex(vectorset, metaset);
