@@ -144,7 +144,8 @@ class DBImpl : public DB, public server::CacheConfigHandler, public server::Engi
                              meta::hybrid::FieldsSchema& fields_schema) override;
 
     Status
-    InsertEntities(const std::string& collection_name, const std::string& partition_tag, engine::Entity& entity,
+    InsertEntities(const std::string& collection_name, const std::string& partition_tag,
+                   const std::vector<std::string>& field_names, engine::Entity& entity,
                    std::unordered_map<std::string, meta::hybrid::DataType>& field_types) override;
 
     Status

@@ -11,10 +11,17 @@
 # or implied. See the License for the specific language governing permissions and limitations under the License.
 #-------------------------------------------------------------------------------
 
-aux_source_directory(${CMAKE_CURRENT_SOURCE_DIR}/utils util_files)
+aux_source_directory(src src_files)
 
-add_subdirectory(simple)
-add_subdirectory(partition)
-add_subdirectory(binary_vector)
-add_subdirectory(qps)
-add_subdirectory(hybrid)
+add_executable(sdk_hybrid
+        main.cpp
+        ${src_files}
+        ${util_files}
+        )
+
+target_link_libraries(sdk_hybrid
+        milvus_sdk
+        pthread
+        )
+
+install(TARGETS sdk_hybrid DESTINATION bin)

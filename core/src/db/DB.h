@@ -153,7 +153,8 @@ class DB {
     DescribeHybridCollection(meta::CollectionSchema& collection_schema, meta::hybrid::FieldsSchema& fields_schema) = 0;
 
     virtual Status
-    InsertEntities(const std::string& collection_id, const std::string& partition_tag, Entity& entity,
+    InsertEntities(const std::string& collection_id, const std::string& partition_tag,
+                   const std::vector<std::string>& field_names, Entity& entity,
                    std::unordered_map<std::string, meta::hybrid::DataType>& field_types) = 0;
 
     virtual Status

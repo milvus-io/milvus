@@ -307,9 +307,10 @@ message MappingList {
 
 message TermQuery {
     string field_name = 1;
-    repeated string values = 2;
-    float boost = 3;
-    repeated KeyValuePair extra_params = 4;
+    bytes values = 2;
+    int64 value_num = 3;
+    float boost = 4;
+    repeated KeyValuePair extra_params = 5;
 }
 
 enum CompareOperator {
@@ -384,8 +385,9 @@ message HEntity {
     Status status = 1;
     int64 entity_id = 2;
     repeated string field_names = 3;
-    repeated AttrRecord attr_records = 4;
-    repeated FieldValue result_values = 5;
+    bytes attr_records = 4;
+    int64 row_num = 5;
+    repeated FieldValue result_values = 6;
 }
 
 message HQueryResult {
