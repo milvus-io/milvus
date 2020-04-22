@@ -27,7 +27,7 @@ namespace {
 static const char* COLLECTION_NAME = "test_group";
 static constexpr int64_t COLLECTION_DIM = 256;
 static constexpr int64_t VECTOR_COUNT = 25000;
-static constexpr int64_t INSERT_LOOP = 1000;
+static constexpr int64_t INSERT_LOOP = 100;
 
 milvus::engine::meta::CollectionSchema
 BuildCollectionSchema() {

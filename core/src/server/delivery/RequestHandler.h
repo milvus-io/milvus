@@ -48,8 +48,8 @@ class RequestHandler {
            const std::string& partition_tag);
 
     Status
-    GetVectorByID(const std::shared_ptr<Context>& context, const std::string& collection_name,
-                  const std::vector<int64_t>& ids, engine::VectorsData& vectors);
+    GetVectorsByID(const std::shared_ptr<Context>& context, const std::string& collection_name,
+                   const std::vector<int64_t>& ids, std::vector<engine::VectorsData>& vectors);
 
     Status
     GetVectorIDs(const std::shared_ptr<Context>& context, const std::string& collection_name,
@@ -60,7 +60,7 @@ class RequestHandler {
 
     Status
     ShowCollectionInfo(const std::shared_ptr<Context>& context, const std::string& collection_name,
-                       CollectionInfo& collection_info);
+                       std::string& collection_info);
 
     Status
     Search(const std::shared_ptr<Context>& context, const std::string& collection_name,
@@ -69,9 +69,9 @@ class RequestHandler {
            TopKQueryResult& result);
 
     Status
-    SearchByID(const std::shared_ptr<Context>& context, const std::string& collection_name, int64_t vector_id,
-               int64_t topk, const milvus::json& extra_params, const std::vector<std::string>& partition_list,
-               TopKQueryResult& result);
+    SearchByID(const std::shared_ptr<Context>& context, const std::string& collection_name,
+               const std::vector<int64_t>& id_array, int64_t topk, const milvus::json& extra_params,
+               const std::vector<std::string>& partition_list, TopKQueryResult& result);
 
     Status
     DescribeCollection(const std::shared_ptr<Context>& context, const std::string& collection_name,
@@ -99,6 +99,10 @@ class RequestHandler {
     Status
     CreatePartition(const std::shared_ptr<Context>& context, const std::string& collection_name,
                     const std::string& tag);
+
+    Status
+    HasPartition(const std::shared_ptr<Context>& context, const std::string& collection_name, const std::string& tag,
+                 bool& has_partition);
 
     Status
     ShowPartitions(const std::shared_ptr<Context>& context, const std::string& collection_name,

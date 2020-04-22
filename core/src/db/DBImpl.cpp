@@ -62,6 +62,14 @@ constexpr uint64_t BACKGROUND_METRIC_INTERVAL = 1;
 constexpr uint64_t BACKGROUND_INDEX_INTERVAL = 1;
 constexpr uint64_t WAIT_BUILD_INDEX_INTERVAL = 5;
 
+constexpr const char* JSON_ROW_COUNT = "row_count";
+constexpr const char* JSON_PARTITIONS = "partitions";
+constexpr const char* JSON_PARTITION_TAG = "tag";
+constexpr const char* JSON_SEGMENTS = "segments";
+constexpr const char* JSON_SEGMENT_NAME = "name";
+constexpr const char* JSON_INDEX_NAME = "index_name";
+constexpr const char* JSON_DATA_SIZE = "data_size";
+
 static const Status SHUTDOWN_ERROR = Status(DB_ERROR, "Milvus server is shutdown!");
 
 }  // namespace
@@ -314,66 +322,74 @@ DBImpl::AllCollections(std::vector<meta::CollectionSchema>& collection_schema_ar
 }
 
 Status
-DBImpl::GetCollectionInfo(const std::string& collection_id, CollectionInfo& collection_info) {
+DBImpl::GetCollectionInfo(const std::string& collection_id, std::string& collection_info) {
     if (!initialized_.load(std::memory_order_acquire)) {
         return SHUTDOWN_ERROR;
     }
 
     // step1: get all partition ids
-    std::vector<std::pair<std::string, std::string>> name2tag = {{collection_id, milvus::engine::DEFAULT_PARTITON_TAG}};
     std::vector<meta::CollectionSchema> partition_array;
     auto status = meta_ptr_->ShowPartitions(collection_id, partition_array);
-    for (auto& schema : partition_array) {
-        name2tag.push_back(std::make_pair(schema.collection_id_, schema.partition_tag_));
-    }
 
-    // step2: get native collection info
     std::vector<int> file_types{meta::SegmentSchema::FILE_TYPE::RAW, meta::SegmentSchema::FILE_TYPE::TO_INDEX,
                                 meta::SegmentSchema::FILE_TYPE::INDEX};
 
-    static std::map<int32_t, std::string> index_type_name = {
-        {(int32_t)engine::EngineType::FAISS_IDMAP, "IDMAP"},
-        {(int32_t)engine::EngineType::FAISS_IVFFLAT, "IVFFLAT"},
-        {(int32_t)engine::EngineType::FAISS_IVFSQ8, "IVFSQ8"},
-        {(int32_t)engine::EngineType::NSG_MIX, "NSG"},
-        {(int32_t)engine::EngineType::ANNOY, "ANNOY"},
-        {(int32_t)engine::EngineType::FAISS_IVFSQ8H, "IVFSQ8H"},
-        {(int32_t)engine::EngineType::FAISS_PQ, "PQ"},
-        {(int32_t)engine::EngineType::SPTAG_KDT, "KDT"},
-        {(int32_t)engine::EngineType::SPTAG_BKT, "BKT"},
-        {(int32_t)engine::EngineType::FAISS_BIN_IDMAP, "IDMAP"},
-        {(int32_t)engine::EngineType::FAISS_BIN_IVFFLAT, "IVFFLAT"},
-    };
+    milvus::json json_info;
+    milvus::json json_partitions;
+    size_t total_row_count = 0;
 
-    for (auto& name_tag : name2tag) {
+    auto get_info = [&](const std::string& col_id, const std::string& tag) {
         meta::SegmentsSchema collection_files;
-        status = meta_ptr_->FilesByType(name_tag.first, file_types, collection_files);
+        status = meta_ptr_->FilesByType(col_id, file_types, collection_files);
         if (!status.ok()) {
             std::string err_msg = "Failed to get collection info: " + status.ToString();
             LOG_ENGINE_ERROR_ << err_msg;
             return Status(DB_ERROR, err_msg);
         }
 
-        std::vector<SegmentStat> segments_stat;
+        milvus::json json_partition;
+        json_partition[JSON_PARTITION_TAG] = tag;
+
+        milvus::json json_segments;
+        size_t row_count = 0;
         for (auto& file : collection_files) {
-            SegmentStat seg_stat;
-            seg_stat.name_ = file.segment_id_;
-            seg_stat.row_count_ = (int64_t)file.row_count_;
-            seg_stat.index_name_ = index_type_name[file.engine_type_];
-            seg_stat.data_size_ = (int64_t)file.file_size_;
-            segments_stat.emplace_back(seg_stat);
+            milvus::json json_segment;
+            json_segment[JSON_SEGMENT_NAME] = file.segment_id_;
+            json_segment[JSON_ROW_COUNT] = file.row_count_;
+            json_segment[JSON_INDEX_NAME] = utils::GetIndexName(file.engine_type_);
+            json_segment[JSON_DATA_SIZE] = (int64_t)file.file_size_;
+            json_segments.push_back(json_segment);
+
+            row_count += file.row_count_;
+            total_row_count += file.row_count_;
         }
 
-        PartitionStat partition_stat;
-        if (name_tag.first == collection_id) {
-            partition_stat.tag_ = milvus::engine::DEFAULT_PARTITON_TAG;
-        } else {
-            partition_stat.tag_ = name_tag.second;
-        }
+        json_partition[JSON_ROW_COUNT] = row_count;
+        json_partition[JSON_SEGMENTS] = json_segments;
 
-        partition_stat.segments_stat_.swap(segments_stat);
-        collection_info.partitions_stat_.emplace_back(partition_stat);
+        json_partitions.push_back(json_partition);
+
+        return Status::OK();
+    };
+
+    // step2: get default partition info
+    status = get_info(collection_id, milvus::engine::DEFAULT_PARTITON_TAG);
+    if (!status.ok()) {
+        return status;
     }
+
+    // step3: get partitions info
+    for (auto& schema : partition_array) {
+        status = get_info(schema.collection_id_, schema.partition_tag_);
+        if (!status.ok()) {
+            return status;
+        }
+    }
+
+    json_info[JSON_ROW_COUNT] = total_row_count;
+    json_info[JSON_PARTITIONS] = json_partitions;
+
+    collection_info = json_info.dump();
 
     return Status::OK();
 }
@@ -1006,7 +1022,8 @@ DBImpl::CompactFile(const std::string& collection_id, const meta::SegmentSchema&
 }
 
 Status
-DBImpl::GetVectorByID(const std::string& collection_id, const IDNumber& vector_id, VectorsData& vector) {
+DBImpl::GetVectorsByID(const std::string& collection_id, const IDNumbers& id_array,
+                       std::vector<engine::VectorsData>& vectors) {
     if (!initialized_.load(std::memory_order_acquire)) {
         return SHUTDOWN_ERROR;
     }
@@ -1022,13 +1039,12 @@ DBImpl::GetVectorByID(const std::string& collection_id, const IDNumber& vector_i
     }
 
     meta::SegmentsSchema files_to_query;
-
     std::vector<int> file_types{meta::SegmentSchema::FILE_TYPE::RAW, meta::SegmentSchema::FILE_TYPE::TO_INDEX,
                                 meta::SegmentSchema::FILE_TYPE::BACKUP};
-    meta::SegmentsSchema collection_files;
+
     status = meta_ptr_->FilesByType(collection_id, file_types, files_to_query);
     if (!status.ok()) {
-        std::string err_msg = "Failed to get files for GetVectorByID: " + status.message();
+        std::string err_msg = "Failed to get files for GetVectorsByID: " + status.message();
         LOG_ENGINE_ERROR_ << err_msg;
         return status;
     }
@@ -1041,6 +1057,7 @@ DBImpl::GetVectorByID(const std::string& collection_id, const IDNumber& vector_i
         meta::SegmentsSchema files;
         status = meta_ptr_->FilesByType(schema.collection_id_, file_types, files);
         if (!status.ok()) {
+            OngoingFileChecker::GetInstance().UnmarkOngoingFiles(files_to_query);
             std::string err_msg = "Failed to get files for GetVectorByID: " + status.message();
             LOG_ENGINE_ERROR_ << err_msg;
             return status;
@@ -1052,13 +1069,14 @@ DBImpl::GetVectorByID(const std::string& collection_id, const IDNumber& vector_i
     }
 
     if (files_to_query.empty()) {
+        OngoingFileChecker::GetInstance().UnmarkOngoingFiles(files_to_query);
         LOG_ENGINE_DEBUG_ << "No files to get vector by id from";
         return Status(DB_NOT_FOUND, "Collection is empty");
     }
 
     cache::CpuCacheMgr::GetInstance()->PrintInfo();
 
-    status = GetVectorByIdHelper(collection_id, vector_id, vector, files_to_query);
+    status = GetVectorsByIdHelper(collection_id, id_array, vectors, files_to_query);
 
     OngoingFileChecker::GetInstance().UnmarkOngoingFiles(files_to_query);
     cache::CpuCacheMgr::GetInstance()->PrintInfo();
@@ -1138,14 +1156,21 @@ DBImpl::GetVectorIDs(const std::string& collection_id, const std::string& segmen
 }
 
 Status
-DBImpl::GetVectorByIdHelper(const std::string& collection_id, IDNumber vector_id, VectorsData& vector,
-                            const meta::SegmentsSchema& files) {
-    LOG_ENGINE_DEBUG_ << "Getting vector by id in " << files.size() << " files, id = " << vector_id;
+DBImpl::GetVectorsByIdHelper(const std::string& collection_id, const IDNumbers& id_array,
+                             std::vector<engine::VectorsData>& vectors, const meta::SegmentsSchema& files) {
+    LOG_ENGINE_DEBUG_ << "Getting vector by id in " << files.size() << " files, id count = " << id_array.size();
 
-    vector.vector_count_ = 0;
-    vector.float_data_.clear();
-    vector.binary_data_.clear();
+    // sometimes not all of id_array can be found, we need to return empty vector for id not found
+    // for example:
+    // id_array = [1, -1, 2, -1, 3]
+    // vectors should return [valid_vector, empty_vector, valid_vector, empty_vector, valid_vector]
+    // the ID2RAW is to ensure returned vector sequence is consist with id_array
+    using ID2VECTOR = std::map<int64_t, VectorsData>;
+    ID2VECTOR map_id2vector;
 
+    vectors.clear();
+
+    IDNumbers temp_ids = id_array;
     for (auto& file : files) {
         // Load bloom filter
         std::string segment_dir;
@@ -1154,60 +1179,82 @@ DBImpl::GetVectorByIdHelper(const std::string& collection_id, IDNumber vector_id
         segment::IdBloomFilterPtr id_bloom_filter_ptr;
         segment_reader.LoadBloomFilter(id_bloom_filter_ptr);
 
-        // Check if the id is present in bloom filter.
-        if (id_bloom_filter_ptr->Check(vector_id)) {
-            // Load uids and check if the id is indeed present. If yes, find its offset.
-            std::vector<int64_t> offsets;
-            std::vector<segment::doc_id_t> uids;
-            auto status = segment_reader.LoadUids(uids);
-            if (!status.ok()) {
-                return status;
-            }
+        for (IDNumbers::iterator it = temp_ids.begin(); it != temp_ids.end();) {
+            int64_t vector_id = *it;
 
-            auto found = std::find(uids.begin(), uids.end(), vector_id);
-            if (found != uids.end()) {
-                auto offset = std::distance(uids.begin(), found);
+            // each id must has a VectorsData
+            // if vector not found for an id, its VectorsData's vector_count = 0, else 1
+            VectorsData& vector_ref = map_id2vector[vector_id];
 
-                // Check whether the id has been deleted
-                segment::DeletedDocsPtr deleted_docs_ptr;
-                status = segment_reader.LoadDeletedDocs(deleted_docs_ptr);
+            // Check if the id is present in bloom filter.
+            if (id_bloom_filter_ptr->Check(vector_id)) {
+                // Load uids and check if the id is indeed present. If yes, find its offset.
+                std::vector<int64_t> offsets;
+                std::vector<segment::doc_id_t> uids;
+                auto status = segment_reader.LoadUids(uids);
                 if (!status.ok()) {
-                    LOG_ENGINE_ERROR_ << status.message();
                     return status;
                 }
-                auto& deleted_docs = deleted_docs_ptr->GetDeletedDocs();
 
-                auto deleted = std::find(deleted_docs.begin(), deleted_docs.end(), offset);
-                if (deleted == deleted_docs.end()) {
-                    // Load raw vector
-                    bool is_binary = utils::IsBinaryMetricType(file.metric_type_);
-                    size_t single_vector_bytes = is_binary ? file.dimension_ / 8 : file.dimension_ * sizeof(float);
-                    std::vector<uint8_t> raw_vector;
-                    status = segment_reader.LoadVectors(offset * single_vector_bytes, single_vector_bytes, raw_vector);
+                auto found = std::find(uids.begin(), uids.end(), vector_id);
+                if (found != uids.end()) {
+                    auto offset = std::distance(uids.begin(), found);
+
+                    // Check whether the id has been deleted
+                    segment::DeletedDocsPtr deleted_docs_ptr;
+                    status = segment_reader.LoadDeletedDocs(deleted_docs_ptr);
                     if (!status.ok()) {
                         LOG_ENGINE_ERROR_ << status.message();
                         return status;
                     }
+                    auto& deleted_docs = deleted_docs_ptr->GetDeletedDocs();
 
-                    vector.vector_count_ = 1;
-                    if (is_binary) {
-                        vector.binary_data_ = std::move(raw_vector);
-                    } else {
-                        std::vector<float> float_vector;
-                        float_vector.resize(file.dimension_);
-                        memcpy(float_vector.data(), raw_vector.data(), single_vector_bytes);
-                        vector.float_data_ = std::move(float_vector);
+                    auto deleted = std::find(deleted_docs.begin(), deleted_docs.end(), offset);
+                    if (deleted == deleted_docs.end()) {
+                        // Load raw vector
+                        bool is_binary = utils::IsBinaryMetricType(file.metric_type_);
+                        size_t single_vector_bytes = is_binary ? file.dimension_ / 8 : file.dimension_ * sizeof(float);
+                        std::vector<uint8_t> raw_vector;
+                        status =
+                            segment_reader.LoadVectors(offset * single_vector_bytes, single_vector_bytes, raw_vector);
+                        if (!status.ok()) {
+                            LOG_ENGINE_ERROR_ << status.message();
+                            return status;
+                        }
+
+                        vector_ref.vector_count_ = 1;
+                        if (is_binary) {
+                            vector_ref.binary_data_.swap(raw_vector);
+                        } else {
+                            std::vector<float> float_vector;
+                            float_vector.resize(file.dimension_);
+                            memcpy(float_vector.data(), raw_vector.data(), single_vector_bytes);
+                            vector_ref.float_data_.swap(float_vector);
+                        }
+                        temp_ids.erase(it);
+                        continue;
                     }
-                    return Status::OK();
                 }
             }
-        } else {
-            continue;
+
+            it++;
         }
     }
 
-    if (vector.binary_data_.empty() && vector.float_data_.empty()) {
-        std::string msg = "Vector with id " + std::to_string(vector_id) + " not found in collection " + collection_id;
+    for (auto id : id_array) {
+        VectorsData& vector_ref = map_id2vector[id];
+
+        VectorsData data;
+        data.vector_count_ = vector_ref.vector_count_;
+        if (data.vector_count_ > 0) {
+            data.float_data_.swap(vector_ref.float_data_);
+            data.binary_data_.swap(vector_ref.binary_data_);
+        }
+        vectors.emplace_back(data);
+    }
+
+    if (vectors.empty()) {
+        std::string msg = "Vectors not found in collection " + collection_id;
         LOG_ENGINE_DEBUG_ << msg;
     }
 
@@ -1278,16 +1325,16 @@ DBImpl::DropIndex(const std::string& collection_id) {
 }
 
 Status
-DBImpl::QueryByID(const std::shared_ptr<server::Context>& context, const std::string& collection_id,
-                  const std::vector<std::string>& partition_tags, uint64_t k, const milvus::json& extra_params,
-                  IDNumber vector_id, ResultIds& result_ids, ResultDistances& result_distances) {
+DBImpl::QueryByIDs(const std::shared_ptr<server::Context>& context, const std::string& collection_id,
+                   const std::vector<std::string>& partition_tags, uint64_t k, const milvus::json& extra_params,
+                   const IDNumbers& id_array, ResultIds& result_ids, ResultDistances& result_distances) {
     if (!initialized_.load(std::memory_order_acquire)) {
         return SHUTDOWN_ERROR;
     }
 
     VectorsData vectors_data = VectorsData();
-    vectors_data.id_array_.emplace_back(vector_id);
-    vectors_data.vector_count_ = 1;
+    vectors_data.id_array_ = id_array;
+    vectors_data.vector_count_ = id_array.size();
     Status result =
         Query(context, collection_id, partition_tags, k, extra_params, vectors_data, result_ids, result_distances);
     return result;

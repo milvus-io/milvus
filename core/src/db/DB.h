@@ -65,7 +65,7 @@ class DB {
     AllCollections(std::vector<meta::CollectionSchema>& table_schema_array) = 0;
 
     virtual Status
-    GetCollectionInfo(const std::string& collection_id, CollectionInfo& collection_info) = 0;
+    GetCollectionInfo(const std::string& collection_id, std::string& collection_info) = 0;
 
     virtual Status
     GetCollectionRowCount(const std::string& collection_id, uint64_t& row_count) = 0;
@@ -108,7 +108,8 @@ class DB {
     Compact(const std::string& collection_id) = 0;
 
     virtual Status
-    GetVectorByID(const std::string& collection_id, const IDNumber& vector_id, VectorsData& vector) = 0;
+    GetVectorsByID(const std::string& collection_id, const IDNumbers& id_array,
+                   std::vector<engine::VectorsData>& vectors) = 0;
 
     virtual Status
     GetVectorIDs(const std::string& collection_id, const std::string& segment_id, IDNumbers& vector_ids) = 0;
@@ -117,9 +118,9 @@ class DB {
     //    Merge(const std::set<std::string>& table_ids) = 0;
 
     virtual Status
-    QueryByID(const std::shared_ptr<server::Context>& context, const std::string& collection_id,
-              const std::vector<std::string>& partition_tags, uint64_t k, const milvus::json& extra_params,
-              IDNumber vector_id, ResultIds& result_ids, ResultDistances& result_distances) = 0;
+    QueryByIDs(const std::shared_ptr<server::Context>& context, const std::string& collection_id,
+               const std::vector<std::string>& partition_tags, uint64_t k, const milvus::json& extra_params,
+               const IDNumbers& id_array, ResultIds& result_ids, ResultDistances& result_distances) = 0;
 
     virtual Status
     Query(const std::shared_ptr<server::Context>& context, const std::string& collection_id,
