@@ -824,15 +824,15 @@ struct Manhattan : Minkowski {
 template<typename S, typename T>
 class AnnoyIndexInterface {
  public:
-  // Note that the methods with an **error argument will allocate memory and write the pointer to that string if error is non-NULL
+  // Note that the methods with an **error argument will allocate memory and write the pointer to that string if error is non-nullptr
   virtual ~AnnoyIndexInterface() {};
-  virtual bool add_item(S item, const T* w, char** error=NULL) = 0;
-  virtual bool build(int q, char** error=NULL) = 0;
-  virtual bool unbuild(char** error=NULL) = 0;
-  virtual bool save(const char* filename, bool prefault=false, char** error=NULL) = 0;
+  virtual bool add_item(S item, const T* w, char** error=nullptr) = 0;
+  virtual bool build(int q, char** error=nullptr) = 0;
+  virtual bool unbuild(char** error=nullptr) = 0;
+  virtual bool save(const char* filename, bool prefault=false, char** error=nullptr) = 0;
   virtual void unload() = 0;
-  virtual bool load(const char* filename, bool prefault=false, char** error=NULL) = 0;
-  virtual bool load_index(void* index_data, const int64_t& index_size, char** error = NULL) = 0;
+  virtual bool load(const char* filename, bool prefault=false, char** error=nullptr) = 0;
+  virtual bool load_index(void* index_data, const int64_t& index_size, char** error = nullptr) = 0;
   virtual T get_distance(S i, S j) const = 0;
   virtual void get_nns_by_item(S item, size_t n, int search_k, vector<S>* result, vector<T>* distances,
                                faiss::ConcurrentBitsetPtr& bitset = nullptr) const = 0;
@@ -846,7 +846,7 @@ class AnnoyIndexInterface {
   virtual void verbose(bool v) = 0;
   virtual void get_item(S item, T* v) const = 0;
   virtual void set_seed(int q) = 0;
-  virtual bool on_disk_build(const char* filename, char** error=NULL) = 0;
+  virtual bool on_disk_build(const char* filename, char** error=nullptr) = 0;
 };
 
 template<typename S, typename T, typename Distance, typename Random>
@@ -894,12 +894,12 @@ public:
     return _f;
   }
 
-  bool add_item(S item, const T* w, char** error=NULL) {
+  bool add_item(S item, const T* w, char** error=nullptr) {
     return add_item_impl(item, w, error);
   }
 
   template<typename W>
-  bool add_item_impl(S item, const W& w, char** error=NULL) {
+  bool add_item_impl(S item, const W& w, char** error=nullptr) {
     if (_loaded) {
       set_error_from_string(error, "You can't add an item to a loaded index");
       return false;
@@ -924,7 +924,7 @@ public:
     return true;
   }
     
-  bool on_disk_build(const char* file, char** error=NULL) {
+  bool on_disk_build(const char* file, char** error=nullptr) {
     _on_disk = true;
     _fd = open(file, O_RDWR | O_CREAT | O_TRUNC, (int) 0600);
     if (_fd == -1) {
@@ -945,7 +945,7 @@ public:
     return true;
   }
     
-  bool build(int q, char** error=NULL) {
+  bool build(int q, char** error=nullptr) {
     if (_loaded) {
       set_error_from_string(error, "You can't build a loaded index");
       return false;
@@ -997,7 +997,7 @@ public:
     return true;
   }
   
-  bool unbuild(char** error=NULL) {
+  bool unbuild(char** error=nullptr) {
     if (_loaded) {
       set_error_from_string(error, "You can't unbuild a loaded index");
       return false;
@@ -1010,7 +1010,7 @@ public:
     return true;
   }
 
-  bool save(const char* filename, bool prefault=false, char** error=NULL) {
+  bool save(const char* filename, bool prefault=false, char** error=nullptr) {
     if (!_built) {
       set_error_from_string(error, "You can't save an index that hasn't been built");
       return false;
@@ -1022,7 +1022,7 @@ public:
       unlink(filename);
 
       FILE *f = fopen(filename, "wb");
-      if (f == NULL) {
+      if (f == nullptr) {
         set_error_from_errno(error, "Unable to open");
         return false;
       }
@@ -1044,7 +1044,7 @@ public:
 
   void reinitialize() {
     _fd = 0;
-    _nodes = NULL;
+    _nodes = nullptr;
     _loaded = false;
     _n_items = 0;
     _n_nodes = 0;
@@ -1071,7 +1071,7 @@ public:
     if (_verbose) showUpdate("unloaded\n");
   }
 
-  bool load(const char* filename, bool prefault=false, char** error=NULL) {
+  bool load(const char* filename, bool prefault=false, char** error=nullptr) {
     _fd = open(filename, O_RDONLY, (int)0400);
     if (_fd == -1) {
       set_error_from_errno(error, "Unable to open");
