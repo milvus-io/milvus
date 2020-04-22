@@ -811,10 +811,6 @@ GrpcRequestHandler::InsertEntity(::grpc::ServerContext* context, const ::milvus:
 
     memcpy(attr_values.data(), request->entities().attr_records().data(), attr_size);
 
-    std::vector<int64_t> aaa;
-    aaa.resize(1000);
-    memcpy(aaa.data(), attr_values.data(), 1000 * sizeof(int64_t));
-
     uint64_t row_num = request->entities().row_num();
 
     std::vector<std::string> field_names;
