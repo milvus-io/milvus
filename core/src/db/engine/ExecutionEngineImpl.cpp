@@ -810,10 +810,17 @@ ExecutionEngineImpl::ExecBinaryQuery(milvus::query::GeneralQueryPtr general_quer
                     std::vector<int8_t> data;
                     data.resize(size / sizeof(int8_t));
                     memcpy(data.data(), attr_data_.at(field_name).data(), size);
+
+                    std::vector<int8_t> term_value;
+                    auto term_size =
+                        general_query->leaf->term_query->field_value.size() * (sizeof(int8_t)) / sizeof(int8_t);
+                    term_value.resize(term_size);
+                    memcpy(term_value.data(), general_query->leaf->term_query->field_value.data(),
+                           term_size * sizeof(int8_t));
+
                     for (uint64_t i = 0; i < data.size(); ++i) {
                         bool value_in_term = false;
-                        for (auto term_value : general_query->leaf->term_query->field_value) {
-                            int8_t query_value = atoi(term_value.c_str());
+                        for (auto query_value : term_value) {
                             if (data[i] == query_value) {
                                 value_in_term = true;
                                 break;
@@ -831,10 +838,16 @@ ExecutionEngineImpl::ExecBinaryQuery(milvus::query::GeneralQueryPtr general_quer
                     std::vector<int16_t> data;
                     data.resize(size / sizeof(int16_t));
                     memcpy(data.data(), attr_data_.at(field_name).data(), size);
+                    std::vector<int16_t> term_value;
+                    auto term_size =
+                        general_query->leaf->term_query->field_value.size() * (sizeof(int8_t)) / sizeof(int16_t);
+                    term_value.resize(term_size);
+                    memcpy(term_value.data(), general_query->leaf->term_query->field_value.data(),
+                           term_size * sizeof(int16_t));
+
                     for (uint64_t i = 0; i < data.size(); ++i) {
                         bool value_in_term = false;
-                        for (auto term_value : general_query->leaf->term_query->field_value) {
-                            int16_t query_value = atoi(term_value.c_str());
+                        for (auto query_value : term_value) {
                             if (data[i] == query_value) {
                                 value_in_term = true;
                                 break;
@@ -852,10 +865,17 @@ ExecutionEngineImpl::ExecBinaryQuery(milvus::query::GeneralQueryPtr general_quer
                     std::vector<int32_t> data;
                     data.resize(size / sizeof(int32_t));
                     memcpy(data.data(), attr_data_.at(field_name).data(), size);
+
+                    std::vector<int32_t> term_value;
+                    auto term_size =
+                        general_query->leaf->term_query->field_value.size() * (sizeof(int8_t)) / sizeof(int32_t);
+                    term_value.resize(term_size);
+                    memcpy(term_value.data(), general_query->leaf->term_query->field_value.data(),
+                           term_size * sizeof(int32_t));
+
                     for (uint64_t i = 0; i < data.size(); ++i) {
                         bool value_in_term = false;
-                        for (auto term_value : general_query->leaf->term_query->field_value) {
-                            int32_t query_value = atoi(term_value.c_str());
+                        for (auto query_value : term_value) {
                             if (data[i] == query_value) {
                                 value_in_term = true;
                                 break;
@@ -873,10 +893,17 @@ ExecutionEngineImpl::ExecBinaryQuery(milvus::query::GeneralQueryPtr general_quer
                     std::vector<int64_t> data;
                     data.resize(size / sizeof(int64_t));
                     memcpy(data.data(), attr_data_.at(field_name).data(), size);
+
+                    std::vector<int64_t> term_value;
+                    auto term_size =
+                        general_query->leaf->term_query->field_value.size() * (sizeof(int8_t)) / sizeof(int64_t);
+                    term_value.resize(term_size);
+                    memcpy(term_value.data(), general_query->leaf->term_query->field_value.data(),
+                           term_size * sizeof(int64_t));
+
                     for (uint64_t i = 0; i < data.size(); ++i) {
                         bool value_in_term = false;
-                        for (auto term_value : general_query->leaf->term_query->field_value) {
-                            int64_t query_value = atoi(term_value.c_str());
+                        for (auto query_value : term_value) {
                             if (data[i] == query_value) {
                                 value_in_term = true;
                                 break;
@@ -894,12 +921,17 @@ ExecutionEngineImpl::ExecBinaryQuery(milvus::query::GeneralQueryPtr general_quer
                     std::vector<float> data;
                     data.resize(size / sizeof(float));
                     memcpy(data.data(), attr_data_.at(field_name).data(), size);
+
+                    std::vector<float> term_value;
+                    auto term_size =
+                        general_query->leaf->term_query->field_value.size() * (sizeof(int8_t)) / sizeof(float);
+                    term_value.resize(term_size);
+                    memcpy(term_value.data(), general_query->leaf->term_query->field_value.data(),
+                           term_size * sizeof(int64_t));
+
                     for (uint64_t i = 0; i < data.size(); ++i) {
                         bool value_in_term = false;
-                        for (auto term_value : general_query->leaf->term_query->field_value) {
-                            std::istringstream iss(term_value);
-                            float query_value;
-                            iss >> query_value;
+                        for (auto query_value : term_value) {
                             if (data[i] == query_value) {
                                 value_in_term = true;
                                 break;
@@ -917,12 +949,17 @@ ExecutionEngineImpl::ExecBinaryQuery(milvus::query::GeneralQueryPtr general_quer
                     std::vector<double> data;
                     data.resize(size / sizeof(double));
                     memcpy(data.data(), attr_data_.at(field_name).data(), size);
+
+                    std::vector<double> term_value;
+                    auto term_size =
+                        general_query->leaf->term_query->field_value.size() * (sizeof(int8_t)) / sizeof(double);
+                    term_value.resize(term_size);
+                    memcpy(term_value.data(), general_query->leaf->term_query->field_value.data(),
+                           term_size * sizeof(double));
+
                     for (uint64_t i = 0; i < data.size(); ++i) {
                         bool value_in_term = false;
-                        for (auto term_value : general_query->leaf->term_query->field_value) {
-                            std::istringstream iss(term_value);
-                            double query_value;
-                            iss >> query_value;
+                        for (auto query_value : term_value) {
                             if (data[i] == query_value) {
                                 value_in_term = true;
                                 break;

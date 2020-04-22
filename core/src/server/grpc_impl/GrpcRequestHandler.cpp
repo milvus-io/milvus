@@ -805,18 +805,19 @@ GrpcRequestHandler::InsertEntity(::grpc::ServerContext* context, const ::milvus:
                                  ::milvus::grpc::HEntityIDs* response) {
     CHECK_NULLPTR_RETURN(request);
 
-    std::unordered_map<std::string, std::vector<std::string>> attr_values;
+    auto attr_size = request->entities().attr_records().size();
+    std::vector<uint8_t> attr_values(attr_size, 0);
     std::unordered_map<std::string, engine::VectorsData> vector_datas;
 
-    auto attr_size = request->entities().attr_records_size();
-    for (uint64_t i = 0; i < attr_size; ++i) {
-        std::vector<std::string> values;
-        auto record_size = request->entities().attr_records(i).value_size();
-        values.resize(record_size);
-        for (uint64_t j = 0; j < record_size; ++j) {
-            values[j] = request->entities().attr_records(i).value(j);
-        }
-        attr_values.insert(std::make_pair(request->entities().field_names(i), values));
+    memcpy(attr_values.data(), request->entities().attr_records().data(), attr_size);
+
+    uint64_t row_num = request->entities().row_num();
+
+    std::vector<std::string> field_names;
+    auto field_size = request->entities().field_names_size();
+    field_names.resize(field_size - 1);
+    for (uint64_t i = 0; i < field_size - 1; ++i) {
+        field_names[i] = request->entities().field_names(i);
     }
 
     auto vector_size = request->entities().result_values_size();
@@ -824,13 +825,13 @@ GrpcRequestHandler::InsertEntity(::grpc::ServerContext* context, const ::milvus:
         engine::VectorsData vectors;
         CopyRowRecords(request->entities().result_values(i).vector_value().value(), request->entity_id_array(),
                        vectors);
-        vector_datas.insert(std::make_pair(request->entities().field_names(attr_size + i), vectors));
+        vector_datas.insert(std::make_pair(request->entities().field_names(field_size - 1), vectors));
     }
 
     std::string collection_name = request->collection_name();
     std::string partition_tag = request->partition_tag();
-    Status status =
-        request_handler_.InsertEntity(GetContext(context), collection_name, partition_tag, attr_values, vector_datas);
+    Status status = request_handler_.InsertEntity(GetContext(context), collection_name, partition_tag, row_num,
+                                                  field_names, attr_values, vector_datas);
 
     response->mutable_entity_id_array()->Resize(static_cast<int>(vector_datas.begin()->second.id_array_.size()), 0);
     memcpy(response->mutable_entity_id_array()->mutable_data(), vector_datas.begin()->second.id_array_.data(),
@@ -841,14 +842,12 @@ GrpcRequestHandler::InsertEntity(::grpc::ServerContext* context, const ::milvus:
 }
 
 void
-DeSerialization(const ::milvus::grpc::GeneralQuery& general_query, query::BooleanQueryPtr boolean_clause) {
+DeSerialization(const ::milvus::grpc::GeneralQuery& general_query, query::BooleanQueryPtr& boolean_clause) {
     if (general_query.has_boolean_query()) {
-        //        boolean_clause->SetOccur((query::Occur)general_query.boolean_query().occur());
-
+        boolean_clause->SetOccur((query::Occur)general_query.boolean_query().occur());
         for (uint64_t i = 0; i < general_query.boolean_query().general_query_size(); ++i) {
             if (general_query.boolean_query().general_query(i).has_boolean_query()) {
-                query::BooleanQueryPtr query =
-                    std::make_shared<query::BooleanQuery>((query::Occur)(general_query.boolean_query().occur()));
+                query::BooleanQueryPtr query = std::make_shared<query::BooleanQuery>();
                 DeSerialization(general_query.boolean_query().general_query(i), query);
                 boolean_clause->AddBooleanQuery(query);
             } else {
@@ -858,10 +857,9 @@ DeSerialization(const ::milvus::grpc::GeneralQuery& general_query, query::Boolea
                     query::TermQueryPtr term_query = std::make_shared<query::TermQuery>();
                     term_query->field_name = query.term_query().field_name();
                     term_query->boost = query.term_query().boost();
-                    term_query->field_value.resize(query.term_query().values_size());
-                    for (uint64_t j = 0; j < query.term_query().values_size(); ++j) {
-                        term_query->field_value[j] = query.term_query().values(j);
-                    }
+                    auto size = query.term_query().values().size();
+                    term_query->field_value.resize(size);
+                    memcpy(term_query->field_value.data(), query.term_query().values().data(), size);
                     leaf_query->term_query = term_query;
                     boolean_clause->AddLeafQuery(leaf_query);
                 }

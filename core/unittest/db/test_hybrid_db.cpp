@@ -88,19 +88,28 @@ BuildEntity(uint64_t n, uint64_t batch_index, milvus::engine::Entity& entity) {
         vectors.id_array_.push_back(n * batch_index + i);
     }
     entity.vector_data_.insert(std::make_pair("field_3", vectors));
-    std::vector<std::string> value_0, value_1, value_2;
+    std::vector<int32_t> value_0;
+    std::vector<int64_t> value_1;
+    std::vector<float> value_2;
     value_0.resize(n);
     value_1.resize(n);
     value_2.resize(n);
     for (uint64_t i = 0; i < n; ++i) {
-        value_0[i] = std::to_string(i);
-        value_1[i] = std::to_string(i + n);
-        value_2[i] = std::to_string((i + 100) / (n + 1));
+        value_0[i] = i;
+        value_1[i] = i + n;
+        value_2[i] = (float)((i + 100) / (n + 1));
     }
     entity.entity_count_ = n;
-    entity.attr_data_.insert(std::make_pair("field_0", value_0));
-    entity.attr_data_.insert(std::make_pair("field_1", value_1));
-    entity.attr_data_.insert(std::make_pair("field_2", value_2));
+    size_t attr_size = n * (sizeof(int32_t) + sizeof(float) + sizeof(int64_t));
+    std::vector<uint8_t> attr_value(attr_size, 0);
+    size_t offset = 0;
+    memcpy(attr_value.data(), value_0.data(), n * sizeof(int32_t));
+    offset += n * sizeof(int32_t);
+    memcpy(attr_value.data() + offset, value_1.data(), n * sizeof(int64_t));
+    offset += n * sizeof(int64_t);
+    memcpy(attr_value.data() + offset, value_2.data(), n * sizeof(float));
+
+    entity.attr_value_ = attr_value;
 }
 
 void
@@ -113,8 +122,12 @@ ConstructGeneralQuery(milvus::query::GeneralQueryPtr& general_query) {
     left->bin->relation = milvus::query::QueryRelation::AND;
 
     auto term_query = std::make_shared<milvus::query::TermQuery>();
+    std::vector<int64_t> field_value = {10, 20, 30, 40, 50};
+    std::vector<uint8_t> term_value;
+    term_value.resize(5 * sizeof(int64_t));
+    memcpy(term_value.data(), field_value.data(), 5 * sizeof(int64_t));
     term_query->field_name = "field_0";
-    term_query->field_value = {"10", "20", "30", "40", "50"};
+    term_query->field_value = term_value;
     term_query->boost = 1;
 
     auto range_query = std::make_shared<milvus::query::RangeQuery>();
@@ -174,22 +187,24 @@ TEST_F(DBTest, HYBRID_DB_TEST) {
     milvus::engine::Entity entity;
     BuildEntity(qb, 0, entity);
 
-    stat = db_->InsertEntities(TABLE_NAME, "", entity, attr_type);
+    std::vector<std::string> field_names = {"field_0", "field_1", "field_2"};
+
+    stat = db_->InsertEntities(TABLE_NAME, "", field_names, entity, attr_type);
     ASSERT_TRUE(stat.ok());
 
     stat = db_->Flush();
     ASSERT_TRUE(stat.ok());
 
-//    milvus::engine::CollectionIndex index;
-//    index.engine_type_ = (int)milvus::engine::EngineType::FAISS_IDMAP;
-//    index.extra_params_ = {{"nlist", 16384}};
-//
-//    stat = db_->CreateIndex(TABLE_NAME, index);
-//    ASSERT_TRUE(stat.ok());
+    //    milvus::engine::CollectionIndex index;
+    //    index.engine_type_ = (int)milvus::engine::EngineType::FAISS_IDMAP;
+    //    index.extra_params_ = {{"nlist", 16384}};
+    //
+    //    stat = db_->CreateIndex(TABLE_NAME, index);
+    //    ASSERT_TRUE(stat.ok());
 }
 
 TEST_F(DBTest, HYBRID_SEARCH_TEST) {
-//#ifndef MILVUS_GPU_VERSION
+    //#ifndef MILVUS_GPU_VERSION
     milvus::engine::meta::CollectionSchema collection_info;
     milvus::engine::meta::hybrid::FieldsSchema fields_info;
     std::unordered_map<std::string, milvus::engine::meta::hybrid::DataType> attr_type;
@@ -208,7 +223,9 @@ TEST_F(DBTest, HYBRID_SEARCH_TEST) {
     milvus::engine::Entity entity;
     BuildEntity(qb, 0, entity);
 
-    stat = db_->InsertEntities(TABLE_NAME, "", entity, attr_type);
+    std::vector<std::string> field_names = {"field_0", "field_1", "field_2"};
+
+    stat = db_->InsertEntities(TABLE_NAME, "", field_names, entity, attr_type);
     ASSERT_TRUE(stat.ok());
 
     stat = db_->Flush();
@@ -226,7 +243,7 @@ TEST_F(DBTest, HYBRID_SEARCH_TEST) {
     stat = db_->HybridQuery(dummy_context_, TABLE_NAME, tags, hybrid_context, general_query, attr_type, nq, result_ids,
                             result_distances);
     ASSERT_TRUE(stat.ok());
-//#endif
+    //#endif
 }
 
 TEST_F(DBTest, COMPACT_TEST) {
@@ -248,7 +265,9 @@ TEST_F(DBTest, COMPACT_TEST) {
     milvus::engine::Entity entity;
     BuildEntity(vector_count, 0, entity);
 
-    stat = db_->InsertEntities(TABLE_NAME, "", entity, attr_type);
+    std::vector<std::string> field_names = {"field_0", "field_1", "field_2"};
+
+    stat = db_->InsertEntities(TABLE_NAME, "", field_names, entity, attr_type);
     ASSERT_TRUE(stat.ok());
 
     stat = db_->Flush();

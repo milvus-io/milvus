@@ -46,7 +46,7 @@ struct QueryColumn {
 
 struct TermQuery {
     std::string field_name;
-    std::vector<std::string> field_value;
+    std::vector<uint8_t> field_value;
     float boost;
 };
 using TermQueryPtr = std::shared_ptr<TermQuery>;
