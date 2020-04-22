@@ -48,9 +48,6 @@ IsSameIndex(const CollectionIndex& index1, const CollectionIndex& index2);
 bool
 IsRawIndexType(int32_t type);
 
-static bool
-IsBinaryIndexType(int32_t index_type);
-
 bool
 IsBinaryMetricType(int32_t metric_type);
 
