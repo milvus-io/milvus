@@ -175,7 +175,7 @@ TEST_P(IDMAPTest, idmap_serialize) {
 }
 
 #ifdef MILVUS_GPU_VERSION
-TEST_P(IDMAPTest, copy_test) {
+TEST_P(IDMAPTest, idmap_copy) {
     ASSERT_TRUE(!xb.empty());
 
     milvus::knowhere::Config conf{{milvus::knowhere::meta::DIM, dim},
