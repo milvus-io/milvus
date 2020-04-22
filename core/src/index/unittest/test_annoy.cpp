@@ -219,8 +219,8 @@ main() {
     }
     printf("gen xb and ids done! \n");
 
-    //    srand((unsigned)time(NULL));
-    auto random_seed = (unsigned)time(NULL);
+    //    srand((unsigned)time(nullptr));
+    auto random_seed = (unsigned)time(nullptr);
     printf("delete ids: \n");
     for (int i = 0; i < nq; i++) {
         auto tmp = rand_r(&random_seed) % nb;
