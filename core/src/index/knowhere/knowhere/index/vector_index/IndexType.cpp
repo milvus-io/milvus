@@ -55,6 +55,23 @@ static std::unordered_map<std::string, int32_t> str_old_index_type_map = {
     {IndexEnum::INDEX_FAISS_BIN_IVFFLAT, (int32_t)OldIndexType::FAISS_BIN_IVFLAT_CPU},
 };
 
+/* used in 0.8.0 */
+namespace IndexEnum {
+const char* INVALID = "";
+const char* INDEX_FAISS_IDMAP = "IDMAP";
+const char* INDEX_FAISS_IVFFLAT = "IVF_FLAT";
+const char* INDEX_FAISS_IVFPQ = "IVF_PQ";
+const char* INDEX_FAISS_IVFSQ8 = "IVF_SQ8";
+const char* INDEX_FAISS_IVFSQ8H = "IVF_SQ8_HYBRID";
+const char* INDEX_FAISS_BIN_IDMAP = "BIN_IDMAP";
+const char* INDEX_FAISS_BIN_IVFFLAT = "BIN_IVF_FLAT";
+const char* INDEX_NSG = "NSG";
+const char* INDEX_SPTAG_KDT_RNT = "SPTAG_KDT_RNT";
+const char* INDEX_SPTAG_BKT_RNT = "SPTAG_BKT_RNT";
+const char* INDEX_HNSW = "HNSW";
+const char* INDEX_ANNOY = "ANNOY";
+}  // namespace IndexEnum
+
 std::string
 OldIndexTypeToStr(const int32_t type) {
     try {
