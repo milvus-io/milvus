@@ -222,12 +222,6 @@ IsRawIndexType(int32_t type) {
 }
 
 bool
-IsBinaryIndexType(int32_t index_type) {
-    return (index_type == (int32_t)engine::EngineType::FAISS_BIN_IDMAP) ||
-           (index_type == (int32_t)engine::EngineType::FAISS_BIN_IVFFLAT);
-}
-
-bool
 IsBinaryMetricType(int32_t metric_type) {
     return (metric_type == (int32_t)engine::MetricType::HAMMING) ||
            (metric_type == (int32_t)engine::MetricType::JACCARD) ||
