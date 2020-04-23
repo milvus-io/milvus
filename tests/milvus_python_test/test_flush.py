@@ -203,19 +203,16 @@ class TestFlushBase:
         expected: status ok
         '''
         collection = gen_unique_str() 
-        uri = "tcp://%s:%s" % (args["ip"], args["port"])
         param = {'collection_name': collection,
                  'dimension': dim,
                  'index_file_size': index_file_size,
                  'metric_type': MetricType.L2}
-        milvus = get_milvus(args["handler"])
-        milvus.connect(uri=uri)
+        milvus = get_milvus(args["ip"], args["port"], handler=args["handler"])
         milvus.create_collection(param)
         vectors = gen_vector(nb, dim)
         status, ids = milvus.add_vectors(collection, vectors, ids=[i for i in range(nb)])
         def flush(collection_name):
-            milvus = get_milvus(args["handler"])
-            milvus.connect(uri=uri)
+            milvus = get_milvus(args["ip"], args["port"], handler=args["handler"])
             status = milvus.delete_by_id(collection_name, [i for i in range(nb)])
             assert status.OK()
             status = milvus.flush([collection_name])

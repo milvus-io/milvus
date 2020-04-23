@@ -589,20 +589,18 @@ class TestAddBase:
         expected: status ok and result length is equal to the length off added vectors
         '''
         collection = gen_unique_str()
-        uri = "tcp://%s:%s" % (args["ip"], args["port"])
         param = {'collection_name': collection,
                  'dimension': dim,
                  'index_file_size': index_file_size,
                  'metric_type': MetricType.L2}
-        milvus = get_milvus(args["handler"])
-        milvus.connect(uri=uri)
+        milvus = get_milvus(host=args["ip"], port=args["port"], handler=args["handler"])
         milvus.create_collection(param)
         vector = gen_single_vector(dim)
         process_num = 4
         loop_num = 5
         processes = []
         def add():
-            milvus = get_milvus(args["handler"])
+            milvus = get_milvus(host=args["ip"], port=args["port"], handler=args["handler"])
             milvus.connect(uri=uri)
             i = 0
             while i < loop_num:
@@ -634,19 +632,16 @@ class TestAddBase:
         thread_num = 8
         threads = []
         collection = gen_unique_str()
-        uri = "tcp://%s:%s" % (args["ip"], args["port"])
         param = {'collection_name': collection,
                  'dimension': dim,
                  'index_file_size': index_file_size,
                  'metric_type': MetricType.L2}
-        milvus = get_milvus(args["handler"])
-        milvus.connect(uri=uri)
+        milvus = get_milvus(host=args["ip"], port=args["port"], handler=args["handler"])
         milvus.create_collection(param)
         vectors = gen_vectors(nb, dim)
         def add(thread_i):
             logging.getLogger().info("In thread-%d" % thread_i)
-            milvus = get_milvus(args["handler"])
-            milvus.connect(uri=uri)
+            milvus = get_milvus(host=args["ip"], port=args["port"], handler=args["handler"])
             status, result = milvus.add_vectors(collection, records=vectors)
             assert status.OK()
             status = milvus.flush([collection])
