@@ -12,6 +12,7 @@
 #include "server/grpc_impl/GrpcRequestHandler.h"
 
 #include <fiu-local.h>
+#include <algorithm>
 #include <memory>
 #include <string>
 #include <unordered_map>
@@ -460,9 +461,8 @@ GrpcRequestHandler::Search(::grpc::ServerContext* context, const ::milvus::grpc:
 
     // step 2: partition tags
     std::vector<std::string> partitions;
-    for (auto& partition : request->partition_tag_array()) {
-        partitions.emplace_back(partition);
-    }
+    std::copy(request->partition_tag_array().begin(), request->partition_tag_array().end(),
+              std::back_inserter(partitions));
 
     // step 3: parse extra parameters
     milvus::json json_params;
