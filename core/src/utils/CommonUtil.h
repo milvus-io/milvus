@@ -51,8 +51,10 @@ class CommonUtil {
     static void
     ConvertTime(tm time_struct, time_t& time_integer);
 
+#ifdef MILVUS_ENABLE_PROFILING
     static std::string
     GetCurrentTimeStr();
+#endif
 
     static void
     EraseFromCache(const std::string& item_key);
