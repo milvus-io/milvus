@@ -166,11 +166,8 @@ class TestIndexBase:
 
         threads_num = 8
         threads = []
-        uri = "tcp://%s:%s" % (args["ip"], args["port"])
-
         for i in range(threads_num):
-            m = get_milvus(args["handler"])
-            m.connect(uri=uri)
+            m = get_milvus(host=args["ip"], port=args["port"], handler=args["handler"])
             t = threading.Thread(target=build, args=(m,))
             threads.append(t)
             t.start()
@@ -197,7 +194,6 @@ class TestIndexBase:
         threads_num = 8
         loop_num = 8
         threads = []
-
         collection = []
         j = 0
         while j < (threads_num*loop_num):
@@ -215,7 +211,6 @@ class TestIndexBase:
             while i < loop_num:
                 # assert connect.has_collection(collection[ids*process_num+i])
                 status, ids = connect.add_vectors(collection[ids*threads_num+i], vectors)
-
                 status = connect.create_index(collection[ids*threads_num+i], IndexType.IVFLAT, {"nlist": NLIST})
                 assert status.OK()
                 query_vec = [vectors[0]]
@@ -226,14 +221,10 @@ class TestIndexBase:
                 assert len(result[0]) == top_k
                 assert result[0][0].distance == 0.0
                 i = i + 1
-
-        uri = "tcp://%s:%s" % (args["ip"], args["port"])
-
         for i in range(threads_num):
-            m = get_milvus(args["handler"])
-            m.connect(uri=uri)
+            m = get_milvus(host=args["ip"], port=args["port"], handler=args["handler"])
             ids = i
-            t = threading.Thread(target=create_index, args=(m,ids))
+            t = threading.Thread(target=create_index, args=(m, ids))
             threads.append(t)
             t.start()
             time.sleep(0.2)
@@ -256,8 +247,7 @@ class TestIndexBase:
         threads = []
         uri = "tcp://%s:%s" % (args["ip"], args["port"])
         for i in range(threads_num):
-            m = get_milvus(args["handler"])
-            m.connect(uri=uri)
+            m = get_milvus(host=args["ip"], port=args["port"], handler=args["handler"])
             if(i % 2 == 0):
                 p = threading.Thread(target=build, args=(m,))
             else:
@@ -286,11 +276,8 @@ class TestIndexBase:
 
         process_num = 8
         processes = []
-        uri = "tcp://%s:%s" % (args["ip"], args["port"])
-
         for i in range(process_num):
-            m = get_milvus(args["handler"])
-            m.connect(uri=uri)
+            m = get_milvus(host=args["ip"], port=args["port"], handler=args["handler"])
             p = Process(target=build, args=(m,))
             processes.append(p)
             p.start()
@@ -347,11 +334,8 @@ class TestIndexBase:
                 assert result[0][0].distance == 0.0
                 i = i + 1
 
-        uri = "tcp://%s:%s" % (args["ip"], args["port"])
-
         for i in range(process_num):
-            m = get_milvus(args["handler"])
-            m.connect(uri=uri)
+            m = get_milvus(host=args["ip"], port=args["port"], handler=args["handler"])
             ids = i
             p = Process(target=create_index, args=(m,ids))
             processes.append(p)
@@ -792,18 +776,15 @@ class TestIndexIP:
         expected: return code equals to 0, and search success
         '''
         status, ids = connect.add_vectors(ip_collection, vectors)
-
         def build(connect):
             status = connect.create_index(ip_collection, IndexType.IVFLAT, {"nlist": NLIST})
             assert status.OK()
 
         process_num = 8
         processes = []
-        uri = "tcp://%s:%s" % (args["ip"], args["port"])
 
         for i in range(process_num):
-            m = get_milvus(args["handler"])
-            m.connect(uri=uri)
+            m = get_milvus(args["ip"], args["port"], handler=args["handler"])
             p = Process(target=build, args=(m,))
             processes.append(p)
             p.start()
@@ -858,11 +839,8 @@ class TestIndexIP:
                 assert result[0][0].distance == 0.0
                 i = i + 1
 
-        uri = "tcp://%s:%s" % (args["ip"], args["port"])
-
         for i in range(process_num):
-            m = get_milvus(args["handler"])
-            m.connect(uri=uri)
+            m = get_milvus(args["ip"], args["port"], handler=args["handler"])
             ids = i
             p = Process(target=create_index, args=(m,ids))
             processes.append(p)

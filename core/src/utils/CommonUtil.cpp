@@ -256,7 +256,7 @@ CommonUtil::EraseFromCache(const std::string& item_key) {
 #ifdef MILVUS_GPU_VERSION
     server::Config& config = server::Config::GetInstance();
     std::vector<int64_t> gpus;
-    Status s = config.GetGpuResourceConfigSearchResources(gpus);
+    config.GetGpuResourceConfigSearchResources(gpus);
     for (auto& gpu : gpus) {
         cache::GpuCacheMgr::GetInstance(gpu)->EraseItem(item_key);
     }
