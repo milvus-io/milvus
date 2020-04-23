@@ -181,7 +181,6 @@ class TestCollectionCount:
         expected: the count is equal to the length of vectors
         '''
         nq = 2
-        uri = "tcp://%s:%s" % (args["ip"], args["port"])
         vectors = gen_vectors(nq, dim)
         res = connect.add_vectors(collection_name=collection, records=vectors)
         time.sleep(add_time_interval)
@@ -194,8 +193,7 @@ class TestCollectionCount:
         process_num = 8
         processes = []
         for i in range(process_num):
-            milvus = get_milvus(args["handler"])
-            milvus.connect(uri=uri)
+            milvus = get_milvus(args["ip"], args["port"], handler=args["handler"])
             p = Process(target=rows_count, args=(milvus, ))
             processes.append(p)
             p.start()
@@ -326,7 +324,6 @@ class TestCollectionCountIP:
         expected: the count is equal to the length of vectors
         '''
         nq = 2
-        uri = "tcp://%s:%s" % (args["ip"], args["port"])
         vectors = gen_vectors(nq, dim)
         res = connect.add_vectors(collection_name=ip_collection, records=vectors)
         time.sleep(add_time_interval)
@@ -339,8 +336,7 @@ class TestCollectionCountIP:
         process_num = 8
         processes = []
         for i in range(process_num):
-            milvus = get_milvus(args["handler"])
-            milvus.connect(uri=uri)
+            milvus = get_milvus(args["ip"], args["port"], handler=args["handler"])
             p = Process(target=rows_count, args=(milvus,))
             processes.append(p)
             p.start()
