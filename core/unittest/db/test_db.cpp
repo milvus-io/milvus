@@ -1207,12 +1207,16 @@ TEST_F(DBTest2, GET_VECTOR_BY_ID_TEST) {
     stat = db_->CreatePartition(collection_info.collection_id_, partition_name, partition_tag);
     ASSERT_TRUE(stat.ok());
 
+    std::vector<milvus::engine::VectorsData> vectors;
+    std::vector<int64_t> empty_array;
+    stat = db_->GetVectorsByID(COLLECTION_NAME, empty_array, vectors);
+    ASSERT_FALSE(stat.ok());
+
     stat = db_->InsertVectors(collection_info.collection_id_, partition_tag, qxb);
     ASSERT_TRUE(stat.ok());
 
     db_->Flush(collection_info.collection_id_);
 
-    std::vector<milvus::engine::VectorsData> vectors;
     stat = db_->GetVectorsByID(COLLECTION_NAME, qxb.id_array_, vectors);
     ASSERT_TRUE(stat.ok());
     ASSERT_EQ(vectors.size(), qxb.id_array_.size());
@@ -1220,6 +1224,15 @@ TEST_F(DBTest2, GET_VECTOR_BY_ID_TEST) {
 
     for (int64_t i = 0; i < COLLECTION_DIM; i++) {
         ASSERT_FLOAT_EQ(vectors[0].float_data_[i], qxb.float_data_[i]);
+    }
+
+    std::vector<int64_t> invalid_array = {-1, -1};
+    stat = db_->GetVectorsByID(COLLECTION_NAME, empty_array, vectors);
+    ASSERT_TRUE(stat.ok());
+    for (auto& vector : vectors) {
+        ASSERT_EQ(vector.vector_count_, 0);
+        ASSERT_TRUE(vector.float_data_.empty());
+        ASSERT_TRUE(vector.binary_data_.empty());
     }
 }
 

@@ -129,6 +129,33 @@ TEST_F(SearchByIdTest, basic) {
                            result_distances);
 
     CheckQueryResult(ids_to_search, topk, result_ids, result_distances);
+
+    // invalid id search
+    ids_to_search.clear();
+    for (int64_t i = 0; i < num_query; ++i) {
+        int64_t index = (i % 2 == 0) ? -1 : dis(gen);
+        ids_to_search.emplace_back(index);
+    }
+    stat = db_->QueryByIDs(dummy_context_,
+                           collection_info.collection_id_,
+                           tags,
+                           topk,
+                           json_params,
+                           ids_to_search,
+                           result_ids,
+                           result_distances);
+    ASSERT_EQ(result_ids.size(), ids_to_search.size() * topk);
+    ASSERT_EQ(result_distances.size(), ids_to_search.size() * topk);
+
+    for (size_t i = 0; i < ids_to_search.size(); i++) {
+        if (i % 2 == 0) {
+            ASSERT_EQ(result_ids[topk * i], -1);
+            ASSERT_FLOAT_EQ(result_distances[topk * i], std::numeric_limits<float>::max());
+        } else {
+            ASSERT_EQ(result_ids[topk * i], ids_to_search[i]);
+            ASSERT_LT(result_distances[topk * i], 1e-3);
+        }
+    }
 }
 
 TEST_F(SearchByIdTest, with_index) {
@@ -525,4 +552,31 @@ TEST_F(SearchByIdTest, BINARY) {
     ASSERT_TRUE(stat.ok());
 
     CheckQueryResult(ids_to_search, topk, result_ids, result_distances);
+
+    // invalid id search
+    ids_to_search.clear();
+    for (int64_t i = 0; i < num_query; ++i) {
+        int64_t index = (i % 2 == 0) ? -1 : dis(gen);
+        ids_to_search.emplace_back(index);
+    }
+    stat = db_->QueryByIDs(dummy_context_,
+                           collection_info.collection_id_,
+                           tags,
+                           topk,
+                           json_params,
+                           ids_to_search,
+                           result_ids,
+                           result_distances);
+    ASSERT_EQ(result_ids.size(), ids_to_search.size() * topk);
+    ASSERT_EQ(result_distances.size(), ids_to_search.size() * topk);
+
+    for (size_t i = 0; i < ids_to_search.size(); i++) {
+        if (i % 2 == 0) {
+            ASSERT_EQ(result_ids[topk * i], -1);
+            ASSERT_FLOAT_EQ(result_distances[topk * i], std::numeric_limits<float>::max());
+        } else {
+            ASSERT_EQ(result_ids[topk * i], ids_to_search[i]);
+            ASSERT_LT(result_distances[topk * i], 1e-3);
+        }
+    }
 }

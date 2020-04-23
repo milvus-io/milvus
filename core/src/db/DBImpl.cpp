@@ -1344,6 +1344,8 @@ DBImpl::QueryByIDs(const std::shared_ptr<server::Context>& context, const std::s
         return Status(DB_ERROR, "Empty id array during query by id");
     }
 
+    TimeRecorder rc("Query by id in collection:" + collection_id);
+
     // get collection schema
     engine::meta::CollectionSchema collection_schema;
     collection_schema.collection_id_ = collection_id;
@@ -1364,6 +1366,8 @@ DBImpl::QueryByIDs(const std::shared_ptr<server::Context>& context, const std::s
         }
     }
 
+    rc.RecordSection("get collection schema");
+
     // get target vectors data
     std::vector<milvus::engine::VectorsData> vectors;
     status = GetVectorsByID(collection_id, id_array, vectors);
@@ -1377,38 +1381,82 @@ DBImpl::QueryByIDs(const std::shared_ptr<server::Context>& context, const std::s
     uint64_t valid_count = 0;
     bool is_binary = utils::IsBinaryMetricType(collection_schema.metric_type_);
     for (auto& vector : vectors) {
-        if (vector.vector_count_ == 1) {
+        if (vector.vector_count_ > 0) {
             valid_count++;
         }
     }
 
-    // copy valid vectors data to search
-    VectorsData vectors_data;
-    vectors_data.vector_count_ = valid_count;
+    // copy valid vectors data for search input
+    uint64_t dimension = collection_schema.dimension_;
+    VectorsData valid_vectors;
+    valid_vectors.vector_count_ = valid_count;
     if (is_binary) {
-        vectors_data.binary_data_.resize(valid_count * collection_schema.dimension_ / 8);
+        valid_vectors.binary_data_.resize(valid_count * dimension / 8);
     } else {
-        vectors_data.float_data_.resize(valid_count * collection_schema.dimension_ * sizeof(float));
+        valid_vectors.float_data_.resize(valid_count * dimension * sizeof(float));
     }
 
+    int64_t valid_index = 0;
     for (size_t i = 0; i < vectors.size(); i++) {
+        if (vectors[i].vector_count_ == 0) {
+            continue;
+        }
         if (is_binary) {
-            memcpy(vectors_data.binary_data_.data() + i * collection_schema.dimension_ / 8,
-                   vectors[i].binary_data_.data(), vectors[i].binary_data_.size());
+            memcpy(valid_vectors.binary_data_.data() + valid_index * dimension / 8, vectors[i].binary_data_.data(),
+                   vectors[i].binary_data_.size());
         } else {
-            memcpy(vectors_data.float_data_.data() + i * collection_schema.dimension_, vectors[i].float_data_.data(),
+            memcpy(valid_vectors.float_data_.data() + valid_index * dimension, vectors[i].float_data_.data(),
                    vectors[i].float_data_.size() * sizeof(float));
+        }
+        valid_index++;
+    }
+
+    rc.RecordSection("construct query input");
+
+    // search valid vectors
+    ResultIds valid_result_ids;
+    ResultDistances valid_result_distances;
+    status = Query(context, collection_id, partition_tags, k, extra_params, valid_vectors, valid_result_ids,
+                   valid_result_distances);
+    if (!status.ok()) {
+        std::string msg = "Failed to query by id in collection " + collection_id + ", error: " + status.message();
+        LOG_ENGINE_ERROR_ << msg;
+        return status;
+    }
+
+    if (valid_result_ids.size() != valid_count * k || valid_result_distances.size() != valid_count * k) {
+        std::string msg = "Failed to query by id in collection " + collection_id + ", result doesn't match id count";
+        return Status(DB_ERROR, msg);
+    }
+
+    rc.RecordSection("query vealid vectors");
+
+    // construct result
+    if (valid_count == id_array.size()) {
+        result_ids.swap(valid_result_ids);
+        result_distances.swap(valid_result_distances);
+    } else {
+        result_ids.resize(vectors.size() * k);
+        result_distances.resize(vectors.size() * k);
+        int64_t valid_index = 0;
+        for (uint64_t i = 0; i < vectors.size(); i++) {
+            if (vectors[i].vector_count_ > 0) {
+                memcpy(result_ids.data() + i * k, valid_result_ids.data() + valid_index * k, k * sizeof(int64_t));
+                memcpy(result_distances.data() + i * k, valid_result_distances.data() + valid_index * k,
+                       k * sizeof(float));
+                valid_index++;
+            } else {
+                memset(result_ids.data() + i * k, -1, k * sizeof(int64_t));
+                for (uint64_t j = i * k; j < i * k + k; j++) {
+                    result_distances[j] = std::numeric_limits<float>::max();
+                }
+            }
         }
     }
 
-    ResultIds valid_result_ids;
-    ResultDistances valid_result_distances;
-    Status result = Query(context, collection_id, partition_tags, k, extra_params, vectors_data, valid_result_ids,
-                          valid_result_distances);
+    rc.RecordSection("construct result");
 
-    // construct result
-
-    return result;
+    return status;
 }
 
 Status
