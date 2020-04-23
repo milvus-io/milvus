@@ -10,6 +10,7 @@ Please mark all change in change log and use the issue from GitHub
 
 ## Feature
 -   \#1965 FAISS/NSG/HNSW/ANNOY use unified distance calculation algorithm
+-   \#2059 Add lock file avoid multiple instances modifying data at the same time
 
 ## Improvement
 -   \#221 Refactor LOG macro

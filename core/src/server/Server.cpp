@@ -10,6 +10,7 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
 #include "server/Server.h"
+#include "server/init/InstanceLockCheck.h"
 
 #include <fcntl.h>
 #include <string.h>
@@ -187,6 +188,38 @@ Server::Start() {
         tzset();
 
         InitLog(log_config_file_);
+
+        std::string deploy_mode;
+        s = config.GetServerConfigDeployMode(deploy_mode);
+        if (!s.ok()) {
+            return s;
+        }
+
+        if (deploy_mode == "single" || deploy_mode == "cluster_writable") {
+            std::string db_path;
+            s = config.GetStorageConfigPrimaryPath(db_path);
+            if (!s.ok()) {
+                return s;
+            }
+
+            s = InstanceLockCheck::Check(db_path);
+            if (!s.ok()) {
+                std::cerr << "deploy_mode: " << deploy_mode << " instance lock db path failed." << std::endl;
+                return s;
+            }
+
+            std::string wal_path;
+            s = config.GetWalConfigWalPath(wal_path);
+            if (!s.ok()) {
+                return s;
+            }
+
+            s = InstanceLockCheck::Check(wal_path);
+            if (!s.ok()) {
+                std::cerr << "deploy_mode: " << deploy_mode << " instance lock wal path failed." << std::endl;
+                return s;
+            }
+        }
 
         // print version information
         LOG_SERVER_INFO_ << "Milvus " << BUILD_TYPE << " version: v" << MILVUS_VERSION << ", built at " << BUILD_TIME;
