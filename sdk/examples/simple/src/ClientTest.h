@@ -61,6 +61,9 @@ class ClientTest {
     SearchEntities(const std::string&, int64_t, int64_t);
 
     void
+    SearchEntitiesByID(const std::string&, int64_t, int64_t);
+
+    void
     CreateIndex(const std::string&, milvus::IndexType, int64_t);
 
     void

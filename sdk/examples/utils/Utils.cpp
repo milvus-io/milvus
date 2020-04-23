@@ -213,7 +213,7 @@ Utils::DoSearch(std::shared_ptr<milvus::Connection> conn, const std::string& col
     {
         BLOCK_SPLITER
         JSON json_params = {{"nprobe", nprobe}};
-        milvus_sdk::TimeRecorder rc("search");
+        milvus_sdk::TimeRecorder rc("Search");
         milvus::Status stat =
             conn->Search(collection_name,
                          partition_tags,
