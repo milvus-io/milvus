@@ -76,7 +76,7 @@ CheckQueryResult(const std::vector<int64_t>& target_ids, int64_t topk, milvus::e
 
 }  // namespace
 
-TEST_F(SearchByIdTest, basic) {
+TEST_F(SearchByIdTest, BASIC_TEST) {
     milvus::engine::meta::CollectionSchema collection_info = BuildCollectionSchema();
     auto stat = db_->CreateCollection(collection_info);
 
@@ -158,7 +158,7 @@ TEST_F(SearchByIdTest, basic) {
     }
 }
 
-TEST_F(SearchByIdTest, with_index) {
+TEST_F(SearchByIdTest, WITH_INDEX_TEST) {
     milvus::engine::meta::CollectionSchema collection_info = BuildCollectionSchema();
     auto stat = db_->CreateCollection(collection_info);
 
@@ -219,7 +219,7 @@ TEST_F(SearchByIdTest, with_index) {
     CheckQueryResult(ids_to_search, topk, result_ids, result_distances);
 }
 
-TEST_F(SearchByIdTest, with_delete) {
+TEST_F(SearchByIdTest, WITH_DELETE_TEST) {
     milvus::engine::meta::CollectionSchema collection_info = BuildCollectionSchema();
     auto stat = db_->CreateCollection(collection_info);
 
@@ -288,7 +288,7 @@ TEST_F(SearchByIdTest, with_delete) {
     }
 }
 
-TEST_F(GetVectorByIdTest, basic) {
+TEST_F(GetVectorByIdTest, BASIC_TEST) {
     milvus::engine::meta::CollectionSchema collection_info = BuildCollectionSchema();
     auto stat = db_->CreateCollection(collection_info);
 
@@ -342,7 +342,7 @@ TEST_F(GetVectorByIdTest, basic) {
     ASSERT_LT(result_distances[0], 1e-4);
 }
 
-TEST_F(GetVectorByIdTest, with_index) {
+TEST_F(GetVectorByIdTest, WITH_INDEX_TEST) {
     milvus::engine::meta::CollectionSchema collection_info = BuildCollectionSchema();
     auto stat = db_->CreateCollection(collection_info);
 
@@ -402,7 +402,7 @@ TEST_F(GetVectorByIdTest, with_index) {
     ASSERT_LT(result_distances[0], 1e-3);
 }
 
-TEST_F(GetVectorByIdTest, with_delete) {
+TEST_F(GetVectorByIdTest, WITH_DELETE_TEST) {
     milvus::engine::meta::CollectionSchema collection_info = BuildCollectionSchema();
     auto stat = db_->CreateCollection(collection_info);
 
@@ -459,7 +459,7 @@ TEST_F(GetVectorByIdTest, with_delete) {
     }
 }
 
-TEST_F(SearchByIdTest, BINARY) {
+TEST_F(SearchByIdTest, BINARY_TEST) {
     milvus::engine::meta::CollectionSchema collection_info;
     collection_info.dimension_ = COLLECTION_DIM;
     collection_info.collection_id_ = GetCollectionName();
