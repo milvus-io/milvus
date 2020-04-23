@@ -5,7 +5,7 @@ import random
 import threading
 
 from milvus import Milvus
-from mishards.connections import (ConnectionMgr, Connection,
+from mishards.connections import (Connection,
         ConnectionPool, ConnectionTopology, ConnectionGroup)
 from mishards.topology import StatusType
 from mishards import exceptions
@@ -15,31 +15,6 @@ logger = logging.getLogger(__name__)
 
 @pytest.mark.usefixtures('app')
 class TestConnection:
-    @pytest.mark.skip
-    def test_manager(self):
-        mgr = ConnectionMgr()
-
-        mgr.register('pod1', '111')
-        mgr.register('pod2', '222')
-        mgr.register('pod2', '222')
-        mgr.register('pod2', '2222')
-        assert len(mgr.conn_names) == 2
-
-        mgr.unregister('pod1')
-        assert len(mgr.conn_names) == 1
-
-        mgr.unregister('pod2')
-        assert len(mgr.conn_names) == 0
-
-        mgr.register('WOSERVER', 'xxxx')
-        assert len(mgr.conn_names) == 0
-
-        assert not mgr.conn('XXXX', None)
-        with pytest.raises(exceptions.ConnectionNotFoundError):
-            mgr.conn('XXXX', None, True)
-
-        mgr.conn('WOSERVER', None)
-
     def test_connection(self):
         class Conn:
             def __init__(self, state):
