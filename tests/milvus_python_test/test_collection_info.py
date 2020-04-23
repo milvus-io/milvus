@@ -41,8 +41,8 @@ class TestCollectionInfoBase:
         expected: status not ok
         '''
         collection_name = None
-        status, info = connect.collection_info(collection_name)
-        assert not status.OK()
+        with pytest.raises(Exception) as e:
+            status, info = connect.collection_info(collection_name)
 
     @pytest.mark.timeout(INFO_TIMEOUT)
     def test_get_collection_info_name_not_existed(self, connect, collection):
@@ -87,7 +87,7 @@ class TestCollectionInfoBase:
         assert status.OK()
         status, info = connect.collection_info(collection)
         assert status.OK()
-        assert info.count == nb
+        assert info["row_count"] == nb
         # delete a few vectors
         delete_ids = [ids[0], ids[-1]]
         status = connect.delete_by_id(collection, delete_ids)
@@ -96,7 +96,7 @@ class TestCollectionInfoBase:
         assert status.OK()
         status, info = connect.collection_info(collection)
         assert status.OK()
-        assert info.count == nb - 2
+        assert info["row_count"] == nb - 2
 
     @pytest.mark.timeout(INFO_TIMEOUT)
     def test_get_collection_info_partition_stats_A(self, connect, collection):
@@ -113,9 +113,9 @@ class TestCollectionInfoBase:
         status, info = connect.collection_info(collection)
         assert status.OK()
         logging.getLogger().info(info)
-        assert len(info.partitions_stat) == 1
-        assert info.partitions_stat[0].tag == "_default"
-        assert info.partitions_stat[0].count == nb
+        assert len(info["partitions"]) == 1
+        assert info["partitions"][0]["tag"] == "_default"
+        assert info["partitions"][0]["row_count"] == nb
 
 
     @pytest.mark.timeout(INFO_TIMEOUT)
@@ -134,9 +134,9 @@ class TestCollectionInfoBase:
         status, info = connect.collection_info(collection)
         assert status.OK()
         logging.getLogger().info(info)
-        assert len(info.partitions_stat) == 2
-        assert info.partitions_stat[1].tag == tag
-        assert info.partitions_stat[1].count == nb
+        assert len(info["partitions"]) == 2
+        assert info["partitions"][1]["tag"] == tag
+        assert info["partitions"][1]["row_count"] == nb
 
     @pytest.mark.timeout(INFO_TIMEOUT)
     def test_get_collection_info_partition_stats_C(self, connect, collection):
@@ -158,11 +158,11 @@ class TestCollectionInfoBase:
         status, info = connect.collection_info(collection)
         assert status.OK()
         logging.getLogger().info(info)
-        for partition in info.partitions_stat:
-            if partition.tag == tag:
-                assert partition.count == nb
+        for partition in info["partitions"]:
+            if partition["tag"] == tag:
+                assert partition["row_count"] == nb
             else:
-                assert partition.count == 0
+                assert partition["row_count"] == 0
 
     @pytest.mark.timeout(INFO_TIMEOUT)
     def test_get_collection_info_partition_stats_D(self, connect, collection):
@@ -185,12 +185,12 @@ class TestCollectionInfoBase:
         assert status.OK()
         status, info = connect.collection_info(collection)
         assert status.OK()
-        assert info.count == nb * 2
-        for partition in info.partitions_stat:
-            if partition.tag == tag:
-                assert partition.count == nb
-            elif partition.tag == new_tag:
-                assert partition.count == nb
+        assert info["row_count"] == nb * 2
+        for partition in info["partitions"]:
+            if partition["tag"] == tag:
+                assert partition["row_count"] == nb
+            elif partition["tag"] == new_tag:
+                assert partition["row_count"] == nb
 
     @pytest.fixture(
         scope="function",
@@ -209,7 +209,7 @@ class TestCollectionInfoBase:
         '''
         target: test collection info after index created
         method: create collection, add vectors, create index and call collection_info 
-        expected: status ok, index created and shown in segments_stat
+        expected: status ok, index created and shown in segments
         '''
         index_param = get_simple_index["index_param"]
         index_type = get_simple_index["index_type"]
@@ -225,17 +225,17 @@ class TestCollectionInfoBase:
         status, info = connect.collection_info(collection)
         assert status.OK()
         logging.getLogger().info(info)
-        index_string = info.partitions_stat[0].segments_stat[0].index_name
+        index_string = info["partitions"][0]["segments"][0]["index_name"]
         match = self.index_string_convert(index_string, index_type)
         assert match
-        assert nb == info.partitions_stat[0].segments_stat[0].count
+        assert nb == info["partitions"][0]["segments"][0]["row_count"]
 
     @pytest.mark.timeout(INFO_TIMEOUT)
     def test_get_collection_info_after_create_same_index_repeatedly(self, connect, collection, get_simple_index):
         '''
         target: test collection info after index created repeatedly
         method: create collection, add vectors, create index and call collection_info multiple times 
-        expected: status ok, index info shown in segments_stat
+        expected: status ok, index info shown in segments
         '''
         index_param = get_simple_index["index_param"]
         index_type = get_simple_index["index_type"]
@@ -251,17 +251,17 @@ class TestCollectionInfoBase:
         status, info = connect.collection_info(collection)
         assert status.OK()
         logging.getLogger().info(info)
-        index_string = info.partitions_stat[0].segments_stat[0].index_name
+        index_string = info["partitions"][0]["segments"][0]["index_name"]
         match = self.index_string_convert(index_string, index_type)
         assert match
-        assert nb == info.partitions_stat[0].segments_stat[0].count
+        assert nb == info["partitions"][0]["segments"][0]["row_count"]
 
     @pytest.mark.timeout(INFO_TIMEOUT)
     def test_get_collection_info_after_create_different_index_repeatedly(self, connect, collection, get_simple_index):
         '''
         target: test collection info after index created repeatedly
         method: create collection, add vectors, create index and call collection_info multiple times 
-        expected: status ok, index info shown in segments_stat
+        expected: status ok, index info shown in segments
         '''
         vectors = gen_vector(nb, dim)
         status, ids = connect.add_vectors(collection, vectors)
@@ -275,7 +275,7 @@ class TestCollectionInfoBase:
             status, info = connect.collection_info(collection)
             assert status.OK()
             logging.getLogger().info(info)
-            index_string = info.partitions_stat[0].segments_stat[0].index_name
+            index_string = info["partitions"][0]["segments"][0]["index_name"]
             match = self.index_string_convert(index_string, index_type)
             assert match
-            assert nb == info.partitions_stat[0].segments_stat[0].count
+            assert nb == info["partitions"][0]["segments"][0]["row_count"]
