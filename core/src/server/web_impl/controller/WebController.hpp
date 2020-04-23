@@ -23,7 +23,6 @@
 #include "utils/TimeRecorder.h"
 
 #include "server/web_impl/Constants.h"
-#include "server/web_impl/dto/CmdDto.hpp"
 #include "server/web_impl/dto/ConfigDto.hpp"
 #include "server/web_impl/dto/IndexDto.hpp"
 #include "server/web_impl/dto/PartitionDto.hpp"
