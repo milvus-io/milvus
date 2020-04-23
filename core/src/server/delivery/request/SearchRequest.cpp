@@ -62,14 +62,14 @@ SearchRequest::OnPreExecute() {
     // step 1: check collection name
     auto status = ValidationUtil::ValidateCollectionName(collection_name_);
     if (!status.ok()) {
-        LOG_SERVER_ERROR_ << LogOut("[%s][%d] %s", "search", 0, status.message().c_str());
+        LOG_SERVER_ERROR_ << LogOut("[%s][%ld] %s", "search", 0, status.message().c_str());
         return status;
     }
 
     // step 2: check search topk
     status = ValidationUtil::ValidateSearchTopk(topk_);
     if (!status.ok()) {
-        LOG_SERVER_ERROR_ << LogOut("[%s][%d] %s", "search", 0, status.message().c_str());
+        LOG_SERVER_ERROR_ << LogOut("[%s][%ld] %s", "search", 0, status.message().c_str());
         return status;
     }
 
@@ -77,7 +77,7 @@ SearchRequest::OnPreExecute() {
     status = ValidationUtil::ValidatePartitionTags(partition_list_);
     fiu_do_on("SearchRequest.OnExecute.invalid_partition_tags", status = Status(milvus::SERVER_UNEXPECTED_ERROR, ""));
     if (!status.ok()) {
-        LOG_SERVER_ERROR_ << LogOut("[%s][%d] %s", "search", 0, status.message().c_str());
+        LOG_SERVER_ERROR_ << LogOut("[%s][%ld] %s", "search", 0, status.message().c_str());
         return status;
     }
 
@@ -92,7 +92,7 @@ SearchRequest::OnExecute() {
         fiu_do_on("SearchRequest.OnExecute.throw_std_exception", throw std::exception());
         std::string hdr = "SearchRequest execute(collection=" + collection_name_ +
                           ", nq=" + std::to_string(vector_count) + ", k=" + std::to_string(topk_) + ")";
-        TimeRecorderAuto rc(LogOut("[%s][%d] %s", "search", 0, hdr.c_str()));
+        TimeRecorderAuto rc(LogOut("[%s][%ld] %s", "search", 0, hdr.c_str()));
 
         // step 4: check collection existence
         // only process root collection, ignore partition collection
@@ -103,17 +103,17 @@ SearchRequest::OnExecute() {
                   status = Status(milvus::SERVER_UNEXPECTED_ERROR, ""));
         if (!status.ok()) {
             if (status.code() == DB_NOT_FOUND) {
-                LOG_SERVER_ERROR_ << LogOut("[%s][%d] Collection %s not found: %s", "search", 0,
+                LOG_SERVER_ERROR_ << LogOut("[%s][%ld] Collection %s not found: %s", "search", 0,
                                             collection_name_.c_str(), status.message().c_str());
                 return Status(SERVER_COLLECTION_NOT_EXIST, CollectionNotExistMsg(collection_name_));
             } else {
-                LOG_SERVER_ERROR_ << LogOut("[%s][%d] Error occurred when describing collection %s: %s", "search", 0,
+                LOG_SERVER_ERROR_ << LogOut("[%s][%ld] Error occurred when describing collection %s: %s", "search", 0,
                                             collection_name_.c_str(), status.message().c_str());
                 return status;
             }
         } else {
             if (!collection_schema_.owner_collection_.empty()) {
-                LOG_SERVER_ERROR_ << LogOut("[%s][%d] %s", "search", 0,
+                LOG_SERVER_ERROR_ << LogOut("[%s][%ld] %s", "search", 0,
                                             CollectionNotExistMsg(collection_name_).c_str());
                 return Status(SERVER_INVALID_COLLECTION_NAME, CollectionNotExistMsg(collection_name_));
             }
@@ -122,14 +122,14 @@ SearchRequest::OnExecute() {
         // step 5: check search parameters
         status = ValidationUtil::ValidateSearchParams(extra_params_, collection_schema_, topk_);
         if (!status.ok()) {
-            LOG_SERVER_ERROR_ << LogOut("[%s][%d] Invalid search params: %s", "search", 0, status.message().c_str());
+            LOG_SERVER_ERROR_ << LogOut("[%s][%ld] Invalid search params: %s", "search", 0, status.message().c_str());
             return status;
         }
 
         // step 6: check vector data according to metric type
         status = ValidationUtil::ValidateVectorData(vectors_data_, collection_schema_);
         if (!status.ok()) {
-            LOG_SERVER_ERROR_ << LogOut("[%s][%d] Invalid vector data: %s", "search", 0, status.message().c_str());
+            LOG_SERVER_ERROR_ << LogOut("[%s][%ld] Invalid vector data: %s", "search", 0, status.message().c_str());
             return status;
         }
 
@@ -159,7 +159,7 @@ SearchRequest::OnExecute() {
 #endif
         fiu_do_on("SearchRequest.OnExecute.query_fail", status = Status(milvus::SERVER_UNEXPECTED_ERROR, ""));
         if (!status.ok()) {
-            LOG_SERVER_ERROR_ << LogOut("[%s][%d] Query fail: %s", "search", 0, status.message().c_str());
+            LOG_SERVER_ERROR_ << LogOut("[%s][%ld] Query fail: %s", "search", 0, status.message().c_str());
             return status;
         }
         fiu_do_on("SearchRequest.OnExecute.empty_result_ids", result_ids.clear());
@@ -174,7 +174,7 @@ SearchRequest::OnExecute() {
         result_.distance_list_.swap(result_distances);
         rc.RecordSection("construct result");
     } catch (std::exception& ex) {
-        LOG_SERVER_ERROR_ << LogOut("[%s][%d] Encounter exception: %s", "search", 0, ex.what());
+        LOG_SERVER_ERROR_ << LogOut("[%s][%ld] Encounter exception: %s", "search", 0, ex.what());
         return Status(SERVER_UNEXPECTED_ERROR, ex.what());
     }
 

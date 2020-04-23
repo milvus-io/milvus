@@ -15,7 +15,7 @@ def create_app(testing_config=None):
                pool_recycle=config.SQL_POOL_RECYCLE, pool_timeout=config.SQL_POOL_TIMEOUT,
                pool_pre_ping=config.SQL_POOL_PRE_PING, max_overflow=config.SQL_MAX_OVERFLOW)
 
-    from mishards.connections import ConnectionMgr, ConnectionTopology
+    from mishards.connections import ConnectionTopology
 
     readonly_topo = ConnectionTopology()
     writable_topo = ConnectionTopology()
