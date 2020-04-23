@@ -2289,12 +2289,12 @@ DBImpl::ExecWalRecord(const wal::MXLogRecord& record) {
                 return status;
             }
 
-            std::set<std::string> flushed_tables;
+            std::set<std::string> flushed_collections;
             status = mem_mgr_->InsertEntities(target_collection_name, record.length, record.ids,
                                               (record.data_size / record.length / sizeof(float)),
                                               (const float*)record.data, record.attr_nbytes, record.attr_data_size,
-                                              record.attr_data, record.lsn, flushed_tables);
-            collections_flushed(flushed_tables);
+                                              record.attr_data, record.lsn, flushed_collections);
+            collections_flushed(flushed_collections);
 
             milvus::server::CollectInsertMetrics metrics(record.length, status);
             break;
