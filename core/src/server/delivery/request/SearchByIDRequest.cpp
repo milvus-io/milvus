@@ -64,7 +64,10 @@ SearchByIDRequest::OnExecute() {
 
         TimeRecorder rc(hdr);
 
-        // step 1: check empty id
+        // step 1: check empty id array
+        if (id_array_.empty()) {
+            return Status(SERVER_INVALID_ARGUMENT, "No vector id specified");
+        }
 
         // step 2: check collection name
         auto status = ValidationUtil::ValidateCollectionName(collection_name_);

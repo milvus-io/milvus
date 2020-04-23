@@ -1340,11 +1340,74 @@ DBImpl::QueryByIDs(const std::shared_ptr<server::Context>& context, const std::s
         return SHUTDOWN_ERROR;
     }
 
-    VectorsData vectors_data = VectorsData();
-    vectors_data.id_array_ = id_array;
-    vectors_data.vector_count_ = id_array.size();
-    Status result =
-        Query(context, collection_id, partition_tags, k, extra_params, vectors_data, result_ids, result_distances);
+    if (id_array.empty()) {
+        return Status(DB_ERROR, "Empty id array during query by id");
+    }
+
+    // get collection schema
+    engine::meta::CollectionSchema collection_schema;
+    collection_schema.collection_id_ = collection_id;
+    auto status = DescribeCollection(collection_schema);
+    if (!status.ok()) {
+        if (status.code() == DB_NOT_FOUND) {
+            std::string msg = "Collection to search does not exist: " + collection_id;
+            LOG_ENGINE_ERROR_ << msg;
+            return Status(DB_NOT_FOUND, msg);
+        } else {
+            return status;
+        }
+    } else {
+        if (!collection_schema.owner_collection_.empty()) {
+            std::string msg = "Collection to search does not exist: " + collection_id;
+            LOG_ENGINE_ERROR_ << msg;
+            return Status(DB_NOT_FOUND, msg);
+        }
+    }
+
+    // get target vectors data
+    std::vector<milvus::engine::VectorsData> vectors;
+    status = GetVectorsByID(collection_id, id_array, vectors);
+    if (!status.ok()) {
+        std::string msg = "Failed to get vector data for collection: " + collection_id;
+        LOG_ENGINE_ERROR_ << msg;
+        return status;
+    }
+
+    // some vectors could not be found, no need to search them
+    uint64_t valid_count = 0;
+    bool is_binary = utils::IsBinaryMetricType(collection_schema.metric_type_);
+    for (auto& vector : vectors) {
+        if (vector.vector_count_ == 1) {
+            valid_count++;
+        }
+    }
+
+    // copy valid vectors data to search
+    VectorsData vectors_data;
+    vectors_data.vector_count_ = valid_count;
+    if (is_binary) {
+        vectors_data.binary_data_.resize(valid_count * collection_schema.dimension_ / 8);
+    } else {
+        vectors_data.float_data_.resize(valid_count * collection_schema.dimension_ * sizeof(float));
+    }
+
+    for (size_t i = 0; i < vectors.size(); i++) {
+        if (is_binary) {
+            memcpy(vectors_data.binary_data_.data() + i * collection_schema.dimension_ / 8,
+                   vectors[i].binary_data_.data(), vectors[i].binary_data_.size());
+        } else {
+            memcpy(vectors_data.float_data_.data() + i * collection_schema.dimension_, vectors[i].float_data_.data(),
+                   vectors[i].float_data_.size() * sizeof(float));
+        }
+    }
+
+    ResultIds valid_result_ids;
+    ResultDistances valid_result_distances;
+    Status result = Query(context, collection_id, partition_tags, k, extra_params, vectors_data, valid_result_ids,
+                          valid_result_distances);
+
+    // construct result
+
     return result;
 }
 
