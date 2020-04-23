@@ -47,9 +47,10 @@ bool
 CommonUtil::GetSystemMemInfo(uint64_t& total_mem, uint64_t& free_mem) {
     struct sysinfo info;
     int ret = sysinfo(&info);
-    total_mem = info.totalram;
-    free_mem = info.freeram;
-
+    if (ret == 0) {
+        total_mem = info.totalram;
+        free_mem = info.freeram;
+    }
     return ret == 0;  // succeed 0, failed -1
 }
 
