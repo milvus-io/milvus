@@ -14,7 +14,7 @@ from mishards.service_handler import ServiceHandler
 from mishards.grpc_utils.grpc_args_parser import GrpcArgsParser as Parser
 from mishards.factories import TableFilesFactory, TablesFactory, TableFiles, Tables
 from mishards.router import RouterMixin
-from mishards.connections import (ConnectionMgr, Connection,
+from mishards.connections import (Connection,
         ConnectionPool, ConnectionTopology, ConnectionGroup)
 
 logger = logging.getLogger(__name__)

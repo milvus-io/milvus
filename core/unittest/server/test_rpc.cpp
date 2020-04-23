@@ -935,19 +935,25 @@ TEST_F(RpcHandlerTest, CMD_TEST) {
 
     command.set_cmd("tasktable");
     handler->Cmd(&context, &command, &reply);
+    ASSERT_EQ(reply.status().error_code(), ::grpc::Status::OK.error_code());
     command.set_cmd("test");
     handler->Cmd(&context, &command, &reply);
+    ASSERT_EQ(reply.status().error_code(), ::grpc::Status::OK.error_code());
 
     command.set_cmd("status");
     handler->Cmd(&context, &command, &reply);
+    ASSERT_EQ(reply.status().error_code(), ::grpc::Status::OK.error_code());
     command.set_cmd("mode");
     handler->Cmd(&context, &command, &reply);
+    ASSERT_EQ(reply.status().error_code(), ::grpc::Status::OK.error_code());
 
     command.set_cmd("build_commit_id");
     handler->Cmd(&context, &command, &reply);
+    ASSERT_EQ(reply.status().error_code(), ::grpc::Status::OK.error_code());
 
     command.set_cmd("set_config");
     handler->Cmd(&context, &command, &reply);
+
     command.set_cmd("get_config");
     handler->Cmd(&context, &command, &reply);
 }
