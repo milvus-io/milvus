@@ -29,56 +29,15 @@ Status
 CopyBinRowRecords(const OList<OList<OInt64>::ObjectWrapper>::ObjectWrapper& records, std::vector<uint8_t>& vectors);
 
 Status
-WebRequestHandler::ParseQueryInteger(const OQueryParams& query_params, const std::string& key, int64_t& value,
-                                     bool nullable) {
-    auto query = query_params.get(key.c_str());
-    if (nullptr != query.get() && query->getSize() > 0) {
-        std::string value_str = query->std_str();
-        if (!ValidationUtil::ValidateStringIsNumber(value_str).ok()) {
-            return Status(ILLEGAL_QUERY_PARAM,
-                          "Query param \'offset\' is illegal, only non-negative integer supported");
-        }
-
-        value = std::stol(value_str);
-    } else if (!nullable) {
-        return Status(QUERY_PARAM_LOSS, "Query param \"" + key + "\" is required");
-    }
-
-    return Status::OK();
-}
+ParseQueryInteger(const OQueryParams& query_params, const std::string& key, int64_t& value, bool nullable = true);
 
 Status
-WebRequestHandler::ParseQueryStr(const OQueryParams& query_params, const std::string& key, std::string& value,
-                                 bool nullable) {
-    auto query = query_params.get(key.c_str());
-    if (nullptr != query.get() && query->getSize() > 0) {
-        value = query->std_str();
-    } else if (!nullable) {
-        return Status(QUERY_PARAM_LOSS, "Query param \"" + key + "\" is required");
-    }
-
-    return Status::OK();
-}
+ParseQueryStr(const OQueryParams& query_params, const std::string& key, std::string& value, bool nullable = true);
 
 Status
-WebRequestHandler::ParseQueryBool(const OQueryParams& query_params, const std::string& key, bool& value,
-                                  bool nullable) {
-    auto query = query_params.get(key.c_str());
-    if (nullptr != query.get() && query->getSize() > 0) {
-        std::string value_str = query->std_str();
-        if (!ValidationUtil::ValidateStringIsBool(value_str).ok()) {
-            return Status(ILLEGAL_QUERY_PARAM, "Query param \'all_required\' must be a bool");
-        }
-        value = value_str == "True" || value_str == "true";
-        return Status::OK();
-    }
+ParseQueryBool(const OQueryParams& query_params, const std::string& key, bool& value, bool nullable = true);
 
-    if (!nullable) {
-        return Status(QUERY_PARAM_LOSS, "Query param \"" + key + "\" is required");
-    }
 
-    return Status::OK();
-}
 
 }  // namespace web
 }  // namespace server
