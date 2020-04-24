@@ -27,7 +27,7 @@ InstanceLockCheck::Check(const std::string& path) {
         std::string msg;
         if (errno == EROFS) {
             // Not using lockingg for read-only lock file
-            msg += "Lock file is read-only. ";
+            msg += "Lock file is read-only.";
         }
         msg += "Could not open lock file.";
         return Status(SERVER_UNEXPECTED_ERROR, msg);
@@ -43,7 +43,7 @@ InstanceLockCheck::Check(const std::string& path) {
     if (fcntl(fd, F_SETLK, &fl) == -1) {
         std::string msg;
         if (errno == EACCES || errno == EAGAIN) {
-            msg += "Lock file ";
+            msg += "Permission denied. ";
         } else if (errno == ENOLCK) {
             // Not using locking for nfs mounted lock file
         }
