@@ -8,6 +8,8 @@ Please mark all change in change log and use the issue from GitHub
 -   \#1705 Limit the insert data batch size
 -   \#1929 Skip MySQL meta schema field width check
 
+-   \#2076 CheckMetricConfigAddress error message
+
 ## Feature
 -   \#1965 FAISS/NSG/HNSW/ANNOY use unified distance calculation algorithm
 -   \#2064 Warn when use SQLite as metadata management
