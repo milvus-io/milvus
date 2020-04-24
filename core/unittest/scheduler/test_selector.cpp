@@ -14,15 +14,15 @@
 
 #include "scheduler/task/BuildIndexTask.h"
 #include "scheduler/task/SearchTask.h"
-#include "scheduler/optimizer/FaissIVFFlatPass.h"
 #include "scheduler/SchedInst.h"
 #include "scheduler/resource/CpuResource.h"
-#include "scheduler/optimizer/BuildIndexPass.h"
-#include "scheduler/optimizer/FaissFlatPass.h"
-#include "scheduler/optimizer/FaissIVFPQPass.h"
-#include "scheduler/optimizer/FaissIVFSQ8HPass.h"
-#include "scheduler/optimizer/FaissIVFSQ8Pass.h"
-#include "scheduler/optimizer/FallbackPass.h"
+#include "scheduler/selector/BuildIndexPass.h"
+#include "scheduler/selector/FaissFlatPass.h"
+#include "scheduler/selector/FaissIVFFlatPass.h"
+#include "scheduler/selector/FaissIVFPQPass.h"
+#include "scheduler/selector/FaissIVFSQ8HPass.h"
+#include "scheduler/selector/FaissIVFSQ8Pass.h"
+#include "scheduler/selector/FallbackPass.h"
 
 namespace milvus {
 namespace scheduler {
