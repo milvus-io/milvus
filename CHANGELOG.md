@@ -10,6 +10,7 @@ Please mark all change in change log and use the issue from GitHub
 
 ## Feature
 -   \#1965 FAISS/NSG/HNSW/ANNOY use unified distance calculation algorithm
+-   \#2064 Warn when use SQLite as metadata management
 
 ## Improvement
 -   \#221 Refactor LOG macro
