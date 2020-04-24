@@ -9,6 +9,9 @@ Please mark all change in change log and use the issue from GitHub
 -   \#1929 Skip MySQL meta schema field width check
 
 ## Feature
+-   \#1751 Add api SearchByID
+-   \#1752 Add api GetVectorsByID
+-   \#1962 Add api HasPartition
 -   \#1965 FAISS/NSG/HNSW/ANNOY use unified distance calculation algorithm
 
 ## Improvement
