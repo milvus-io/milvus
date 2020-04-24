@@ -23,7 +23,11 @@
 #include "scheduler/SchedInst.h"
 #include "server/DBWrapper.h"
 #include "server/grpc_impl/GrpcServer.h"
+<<<<<<< HEAD
 #include "server/init/CpuChecker.h"
+=======
+#include "server/init/GpuChecker.h"
+>>>>>>> add GpuCheck class
 #include "server/web_impl/WebServer.h"
 #include "src/version.h"
 //#include "storage/s3/S3ClientWrapper.h"
@@ -237,6 +241,13 @@ Server::Start() {
         if (!s.ok()) {
             return s;
         }
+
+#ifdef MILVUS_GPU_VERSION
+        s = GpuChecker::CheckGpuEnvironment();
+        if (!s.ok()) {
+            return s;
+        }
+#endif
         /* record config and hardware information into log */
         LogConfigInFile(config_filename_);
         LogCpuInfo();
