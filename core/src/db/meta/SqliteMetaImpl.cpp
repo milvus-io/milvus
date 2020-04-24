@@ -35,6 +35,9 @@
 #include "utils/StringHelpFunctions.h"
 #include "utils/ValidationUtil.h"
 
+#define USING_SQLITE_WARNING LOG_ENGINE_WARNING_ << \
+    "You are using SQLite as the meta data management, which can't be used in production. Please change it to MySQL!";
+
 namespace milvus {
 namespace engine {
 namespace meta {
@@ -242,6 +245,7 @@ SqliteMetaImpl::Initialize() {
 
 Status
 SqliteMetaImpl::CreateCollection(CollectionSchema& collection_schema) {
+    USING_SQLITE_WARNING
     try {
         server::MetricCollector metric;
 
@@ -436,6 +440,7 @@ SqliteMetaImpl::DeleteCollectionFiles(const std::string& collection_id) {
 
 Status
 SqliteMetaImpl::CreateCollectionFile(SegmentSchema& file_schema) {
+    USING_SQLITE_WARNING
     if (file_schema.date_ == EmptyDate) {
         file_schema.date_ = utils::GetDate();
     }
@@ -899,6 +904,7 @@ SqliteMetaImpl::DropCollectionIndex(const std::string& collection_id) {
 Status
 SqliteMetaImpl::CreatePartition(const std::string& collection_id, const std::string& partition_name, const std::string& tag,
                                 uint64_t lsn) {
+    USING_SQLITE_WARNING
     server::MetricCollector metric;
 
     CollectionSchema collection_schema;
@@ -1852,6 +1858,7 @@ SqliteMetaImpl::GetGlobalLastLSN(uint64_t& lsn) {
 Status
 SqliteMetaImpl::CreateHybridCollection(meta::CollectionSchema& collection_schema,
                                        meta::hybrid::FieldsSchema& fields_schema) {
+    USING_SQLITE_WARNING
     try {
         server::MetricCollector metric;
 
@@ -1912,7 +1919,6 @@ SqliteMetaImpl::CreateHybridCollection(meta::CollectionSchema& collection_schema
 Status
 SqliteMetaImpl::DescribeHybridCollection(milvus::engine::meta::CollectionSchema& collection_schema,
                                          milvus::engine::meta::hybrid::FieldsSchema& fields_schema) {
-
     try {
         server::MetricCollector metric;
         fiu_do_on("SqliteMetaImpl.DescriCollection.throw_exception", throw std::exception());
@@ -1970,7 +1976,7 @@ SqliteMetaImpl::DescribeHybridCollection(milvus::engine::meta::CollectionSchema&
 
 Status
 SqliteMetaImpl::CreateHybridCollectionFile(SegmentSchema& file_schema) {
-
+    USING_SQLITE_WARNING
     if (file_schema.date_ == EmptyDate) {
         file_schema.date_ = utils::GetDate();
     }
