@@ -22,11 +22,7 @@ namespace milvus {
 namespace server {
 namespace web {
 
-Status
-CopyRowRecords(const OList<OList<OFloat32>::ObjectWrapper>::ObjectWrapper& records, std::vector<float>& vectors);
 
-Status
-CopyBinRowRecords(const OList<OList<OInt64>::ObjectWrapper>::ObjectWrapper& records, std::vector<uint8_t>& vectors);
 
 }  // namespace web
 }  // namespace server
