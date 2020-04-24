@@ -22,7 +22,10 @@ namespace web {
 
 void
 WebServer::Start() {
-    if (nullptr == thread_ptr_) {
+    auto& config = Config::GetInstance();
+    bool enable = true;
+    config.GetServerConfigWebEnable(enable);
+    if (enable && nullptr == thread_ptr_) {
         thread_ptr_ = std::make_shared<std::thread>(&WebServer::StartService, this);
     }
 }
