@@ -11,7 +11,6 @@
 
 #include "server/delivery/RequestHandler.h"
 
-#include <src/server/delivery/hybrid_request/DescribeHybridCollectionRequest.h>
 #include <set>
 
 #include "server/delivery/RequestScheduler.h"
@@ -41,6 +40,7 @@
 #include "server/delivery/request/ShowPartitionsRequest.h"
 
 #include "server/delivery/hybrid_request/CreateHybridCollectionRequest.h"
+#include "server/delivery/hybrid_request/DescribeHybridCollectionRequest.h"
 #include "server/delivery/hybrid_request/HybridSearchRequest.h"
 #include "server/delivery/hybrid_request/InsertEntityRequest.h"
 
