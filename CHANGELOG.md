@@ -12,7 +12,8 @@ Please mark all change in change log and use the issue from GitHub
 -   \#1965 FAISS/NSG/HNSW/ANNOY use unified distance calculation algorithm
 
 ## Improvement
--   \#221 Refactor LOG macro
+-   \#221  Refactor LOG macro
+-   \#2062 Enable Wall compilation option
 
 ## Task
 
