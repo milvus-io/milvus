@@ -12,7 +12,7 @@
 
 #include "scheduler/SchedInst.h"
 #include "scheduler/Utils.h"
-#include "scheduler/optimizer/BuildIndexPass.h"
+#include "scheduler/selector/BuildIndexPass.h"
 #include "scheduler/tasklabel/SpecResLabel.h"
 #ifdef MILVUS_GPU_VERSION
 namespace milvus {
