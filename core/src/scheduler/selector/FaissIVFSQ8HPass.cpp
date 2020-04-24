@@ -10,11 +10,11 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
 #ifdef MILVUS_GPU_VERSION
+#include "scheduler/selector/FaissIVFSQ8HPass.h"
 #include "cache/GpuCacheMgr.h"
 #include "config/Config.h"
 #include "scheduler/SchedInst.h"
 #include "scheduler/Utils.h"
-#include "scheduler/selector/FaissIVFSQ8HPass.h"
 #include "scheduler/task/SearchTask.h"
 #include "scheduler/tasklabel/SpecResLabel.h"
 #include "utils/Log.h"
