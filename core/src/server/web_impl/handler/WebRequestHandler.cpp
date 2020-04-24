@@ -15,6 +15,7 @@
 #include <cmath>
 #include <ctime>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 #include "config/Config.h"
@@ -568,8 +569,7 @@ WebRequestHandler::Search(const std::string& collection_name, const nlohmann::js
 }
 
 Status
-WebRequestHandler::ProcessLeafQueryJson(const nlohmann::json& json,
-                                        milvus::query::BooleanQueryPtr& query) {
+WebRequestHandler::ProcessLeafQueryJson(const nlohmann::json& json, milvus::query::BooleanQueryPtr& query) {
     if (json.contains("term")) {
         auto leaf_query = std::make_shared<query::LeafQuery>();
         auto term_json = json["term"];
@@ -679,6 +679,7 @@ WebRequestHandler::ProcessLeafQueryJson(const nlohmann::json& json,
         leaf_query->vector_query = vector_query;
         query->AddLeafQuery(leaf_query);
     }
+    return Status::OK();
 }
 
 Status
@@ -700,6 +701,7 @@ WebRequestHandler::ProcessBoolQueryJson(const nlohmann::json& query_json, query:
                 ProcessLeafQueryJson(json, boolean_query);
             }
         }
+        return Status::OK();
     } else if (query_json.contains("should")) {
         boolean_query->SetOccur(query::Occur::SHOULD);
         auto should_json = query_json["should"];
@@ -717,6 +719,7 @@ WebRequestHandler::ProcessBoolQueryJson(const nlohmann::json& query_json, query:
                 ProcessLeafQueryJson(json, boolean_query);
             }
         }
+        return Status::OK();
     } else if (query_json.contains("must_not")) {
         boolean_query->SetOccur(query::Occur::MUST_NOT);
         auto should_json = query_json["must_not"];
@@ -734,6 +737,7 @@ WebRequestHandler::ProcessBoolQueryJson(const nlohmann::json& query_json, query:
                 ProcessLeafQueryJson(json, boolean_query);
             }
         }
+        return Status::OK();
     } else {
         std::string msg = "Must json string doesnot include right query";
         return Status{BODY_PARSE_FAIL, msg};
@@ -743,7 +747,7 @@ WebRequestHandler::ProcessBoolQueryJson(const nlohmann::json& query_json, query:
 Status
 WebRequestHandler::HybridSearch(const std::string& collection_name, const nlohmann::json& json,
                                 std::string& result_str) {
-    auto status = Status::OK();
+    Status status;
 
     status = request_handler_.DescribeHybridCollection(context_ptr_, collection_name, field_type_);
     if (!status.ok()) {
@@ -772,12 +776,8 @@ WebRequestHandler::HybridSearch(const std::string& collection_name, const nlohma
 
         context::HybridSearchContextPtr hybrid_search_context = std::make_shared<context::HybridSearchContext>();
         TopKQueryResult result;
-        status = request_handler_.HybridSearch(context_ptr_,
-                                               hybrid_search_context,
-                                               collection_name,
-                                               partition_tags,
-                                               general_query,
-                                               result);
+        status = request_handler_.HybridSearch(context_ptr_, hybrid_search_context, collection_name, partition_tags,
+                                               general_query, result);
 
         if (!status.ok()) {
             return status;
@@ -1192,14 +1192,13 @@ WebRequestHandler::CreateHybridCollection(const milvus::server::web::OString& bo
             field_types.emplace_back(std::make_pair(field_name, engine::meta::hybrid::DataType::INT16));
         } else if (field_type == "int32") {
             field_types.emplace_back(std::make_pair(field_name, engine::meta::hybrid::DataType::INT32));
-        } else if(field_type == "int64") {
+        } else if (field_type == "int64") {
             field_types.emplace_back(std::make_pair(field_name, engine::meta::hybrid::DataType::INT64));
         } else if (field_type == "float") {
             field_types.emplace_back(std::make_pair(field_name, engine::meta::hybrid::DataType::FLOAT));
         } else if (field_type == "double") {
             field_types.emplace_back(std::make_pair(field_name, engine::meta::hybrid::DataType::DOUBLE));
         } else if (field_type == "vector") {
-
         } else {
             std::string msg = field_name + " has wrong field_type";
             RETURN_STATUS_DTO(BODY_PARSE_FAIL, msg.c_str());

@@ -321,9 +321,8 @@ class GrpcRequestHandler final : public ::milvus::grpc::MilvusService::Service, 
     //                   ::milvus::grpc::Status* response) override;
     //
     ::grpc::Status
-    DescribeHybridCollection(::grpc::ServerContext* context,
-                       const ::milvus::grpc::CollectionName* request,
-                       ::milvus::grpc::Mapping* response) override;
+    DescribeHybridCollection(::grpc::ServerContext* context, const ::milvus::grpc::CollectionName* request,
+                             ::milvus::grpc::Mapping* response) override;
     //
     //    ::grpc::Status
     //    CountCollection(::grpc::ServerContext* context,

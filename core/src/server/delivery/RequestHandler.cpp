@@ -11,8 +11,8 @@
 
 #include "server/delivery/RequestHandler.h"
 
-#include <set>
 #include <src/server/delivery/hybrid_request/DescribeHybridCollectionRequest.h>
+#include <set>
 
 #include "server/delivery/RequestScheduler.h"
 #include "server/delivery/request/BaseRequest.h"
@@ -268,11 +268,9 @@ RequestHandler::CreateHybridCollection(const std::shared_ptr<Context>& context, 
 }
 
 Status
-RequestHandler::DescribeHybridCollection(const std::shared_ptr<Context>& context,
-                                         const std::string& collection_name,
+RequestHandler::DescribeHybridCollection(const std::shared_ptr<Context>& context, const std::string& collection_name,
                                          std::unordered_map<std::string, engine::meta::hybrid::DataType>& field_types) {
-    BaseRequestPtr
-        request_ptr = DescribeHybridCollectionRequest::Create(context, collection_name, field_types);
+    BaseRequestPtr request_ptr = DescribeHybridCollectionRequest::Create(context, collection_name, field_types);
 
     RequestScheduler::ExecRequest(request_ptr);
     return request_ptr->status();

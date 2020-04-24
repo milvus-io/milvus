@@ -156,6 +156,17 @@ RandomBinRecordsJson(int64_t dim, int64_t num) {
     return json;
 }
 
+nlohmann::json
+RandomAttrRecordsJson(int64_t row_num) {
+    nlohmann::json json;
+    std::default_random_engine e;
+    std::uniform_int_distribution<unsigned> u(0, 1000);
+    for (size_t i = 0; i < row_num; i++) {
+        json.push_back(u(e));
+    }
+    return json;
+}
+
 std::string
 RandomName() {
     unsigned seed = std::chrono::system_clock::now().time_since_epoch().count();
@@ -697,6 +708,12 @@ class TestClient : public oatpp::web::client::ApiClient {
 
     API_CALL("PUT", "/system/{op}", op, PATH(String, cmd_str, "op"), BODY_STRING(String, body))
 
+    API_CALL("POST", "/hybrid_collections", createHybridCollection, BODY_STRING(String, body_str))
+
+    API_CALL("POST", "/hybrid_collections/{collection_name}/entities", InsertEntity, PATH(String, collection_name), BODY_STRING(String, body))
+
+//    API_CALL("POST", "/hybrid_collections/{collection_name}/vectors", HybridSearch, PATH(String, collection_name), BODY_STRING(String, body))
+
 #include OATPP_CODEGEN_END(ApiClient)
 };
 
@@ -965,6 +982,92 @@ TEST_F(WebControllerTest, CREATE_COLLECTION) {
     collection_dto->collection_name = "9090&*&()";
     response = client_ptr->createTable(collection_dto, conncetion_ptr);
     ASSERT_EQ(OStatus::CODE_400.code, response->getStatusCode());
+}
+
+TEST_F(WebControllerTest, HYBRID_TEST) {
+    nlohmann::json create_json;
+    create_json["collection_name"] = "test_hybrid";
+    nlohmann::json field_json_0, field_json_1;
+    field_json_0["field_name"] = "field_0";
+    field_json_0["field_type"] = "int64";
+    field_json_0["extra_params"] = "";
+
+    field_json_1["field_name"] = "field_1";
+    field_json_1["field_type"] = "vector";
+    nlohmann::json extra_params;
+    extra_params["dimension"] = 128;
+    field_json_1["extra_params"] = extra_params;
+
+    create_json["fields"].push_back(field_json_0);
+    create_json["fields"].push_back(field_json_1);
+
+    auto response = client_ptr->createHybridCollection(create_json.dump().c_str());
+    ASSERT_EQ(OStatus::CODE_201.code, response->getStatusCode());
+    auto result_dto = response->readBodyToDto<milvus::server::web::StatusDto>(object_mapper.get());
+    ASSERT_EQ(milvus::server::web::StatusCode::SUCCESS, result_dto->code->getValue()) << result_dto->message->std_str();
+
+    int64_t dimension = 128;
+    int64_t row_num = 1000;
+    nlohmann::json insert_json;
+    insert_json["partition_tag"] = "";
+    nlohmann::json entity_0, entity_1;
+    entity_0["field_name"] = "field_0";
+    entity_0["field_value"] = RandomAttrRecordsJson(row_num);
+    entity_1["field_name"] = "field_1";
+    entity_1["field_value"] = RandomRecordsJson(dimension, row_num);
+
+    insert_json["entity"].push_back(entity_0);
+    insert_json["entity"].push_back(entity_1);
+    insert_json["row_num"] = row_num;
+
+    OString collection_name = "test_hybrid";
+    response = client_ptr->InsertEntity(collection_name, insert_json.dump().c_str(), conncetion_ptr);
+    ASSERT_EQ(OStatus::CODE_201.code, response->getStatusCode());
+    auto vector_dto = response->readBodyToDto<milvus::server::web::VectorIdsDto>(object_mapper.get());
+    ASSERT_EQ(row_num, vector_dto->ids->count());
+
+    auto status = FlushTable(client_ptr, conncetion_ptr, collection_name);
+    ASSERT_TRUE(status.ok()) << status.message();
+
+    // TODO(yukun): when hybrid operation is added to wal, the sleep() can be deleted
+    sleep(2);
+
+    int64_t nq = 10;
+    int64_t topk = 100;
+    nlohmann::json query_json, bool_json, term_json, range_json, vector_json;
+    term_json["term"]["field_name"] = "field_0";
+    term_json["term"]["values"] = RandomAttrRecordsJson(nq);
+    bool_json["must"].push_back(term_json);
+
+    range_json["range"]["field_name"] = "field_0";
+    nlohmann::json comp_json;
+    comp_json["gte"] = "0";
+    comp_json["lte"] = "100000";
+    range_json["range"]["values"] = comp_json;
+    bool_json["must"].push_back(range_json);
+
+    vector_json["vector"]["field_name"] = "field_1";
+    vector_json["vector"]["topk"] = topk;
+    vector_json["vector"]["nq"] = nq;
+    vector_json["vector"]["values"] = RandomRecordsJson(128, nq);
+    bool_json["must"].push_back(vector_json);
+
+    query_json["query"]["bool"] = bool_json;
+
+    response = client_ptr->vectorsOp(collection_name, query_json.dump().c_str(), conncetion_ptr);
+    ASSERT_EQ(OStatus::CODE_200.code, response->getStatusCode());
+
+    auto result_json = nlohmann::json::parse(response->readBodyToString()->std_str());
+    ASSERT_TRUE(result_json.contains("num"));
+    ASSERT_TRUE(result_json["num"].is_number());
+    ASSERT_EQ(nq, result_json["num"].get<int64_t>());
+
+    ASSERT_TRUE(result_json.contains("result"));
+    ASSERT_TRUE(result_json["result"].is_array());
+
+    auto result0_json = result_json["result"][0];
+    ASSERT_TRUE(result0_json.is_array());
+    ASSERT_EQ(topk, result0_json.size());
 }
 
 TEST_F(WebControllerTest, GET_COLLECTION_META) {

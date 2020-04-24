@@ -682,21 +682,6 @@ class WebController : public oatpp::web::server::api::ApiController {
         return response;
     }
 
-    ADD_CORS(HybridSearch)
-
-    ENDPOINT("PUT", "/hybrid_collections/{collection_name}/entities", HybridSearch, PATH(String, collection_name),
-             BODY_STRING(String, body)) {
-        TimeRecorder tr(std::string(WEB_LOG_PREFIX) + "PUT \'/hybrid_collections/" + collection_name->std_str() +
-                        "/entities\'");
-        tr.RecordSection("Received request.");
-
-        WebRequestHandler handler = WebRequestHandler();
-
-        OString result;
-        std::shared_ptr<OutgoingResponse> response;
-
-    }
-
     ADD_CORS(SystemOptions)
 
     ENDPOINT("OPTIONS", "/system/{info}", SystemOptions) {
