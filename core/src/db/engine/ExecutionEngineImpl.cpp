@@ -717,7 +717,7 @@ MapAndCopyResult(const knowhere::DatasetPtr& dataset, const std::vector<milvus::
 
 template <typename T>
 void
-ProcessRangeQuery(std::vector<T> data, T value, query::CompareOperator type, uint64_t j,
+ProcessRangeQuery(std::vector<T> data, T value, query::CompareOperator type,
                   faiss::ConcurrentBitsetPtr& bitset) {
     switch (type) {
         case query::CompareOperator::LT: {
