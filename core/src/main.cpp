@@ -19,6 +19,7 @@
 #include "server/Server.h"
 #include "src/version.h"
 #include "utils/SignalUtil.h"
+#include "utils/Status.h"
 
 INITIALIZE_EASYLOGGINGPP
 
