@@ -2284,6 +2284,7 @@ DBImpl::ExecWalRecord(const wal::MXLogRecord& record) {
             std::string target_collection_name;
             status = GetPartitionByTag(record.collection_id, record.partition_tag, target_collection_name);
             if (!status.ok()) {
+                LOG_WAL_ERROR_ << LogOut("[%s][%ld] ", "insert", 0) << "Get partition fail: " << status.message();
                 return status;
             }
 
