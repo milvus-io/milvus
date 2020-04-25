@@ -307,6 +307,10 @@ Server::Start() {
             return s;
         }
 
+        s = CpuChecker::CheckCpuInstructionSet();
+        if (!s.ok()) {
+            return s;
+        }
         /* record config and hardware information into log */
         LogConfigInFile(config_filename_);
         LogCpuInfo();
