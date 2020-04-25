@@ -57,8 +57,7 @@ CopyBinRowRecords(const OList<OList<OInt64>::ObjectWrapper>::ObjectWrapper& reco
 }
 
 Status
-ParseQueryInteger(const OQueryParams& query_params, const std::string& key, int64_t& value,
-                                     bool nullable) {
+ParseQueryInteger(const OQueryParams& query_params, const std::string& key, int64_t& value, bool nullable) {
     auto query = query_params.get(key.c_str());
     if (nullptr != query.get() && query->getSize() > 0) {
         std::string value_str = query->std_str();
@@ -76,8 +75,7 @@ ParseQueryInteger(const OQueryParams& query_params, const std::string& key, int6
 }
 
 Status
-ParseQueryStr(const OQueryParams& query_params, const std::string& key, std::string& value,
-                                 bool nullable) {
+ParseQueryStr(const OQueryParams& query_params, const std::string& key, std::string& value, bool nullable) {
     auto query = query_params.get(key.c_str());
     if (nullptr != query.get() && query->getSize() > 0) {
         value = query->std_str();
@@ -89,8 +87,7 @@ ParseQueryStr(const OQueryParams& query_params, const std::string& key, std::str
 }
 
 Status
-ParseQueryBool(const OQueryParams& query_params, const std::string& key, bool& value,
-                                  bool nullable) {
+ParseQueryBool(const OQueryParams& query_params, const std::string& key, bool& value, bool nullable) {
     auto query = query_params.get(key.c_str());
     if (nullptr != query.get() && query->getSize() > 0) {
         std::string value_str = query->std_str();

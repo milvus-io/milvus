@@ -37,8 +37,6 @@ ParseQueryStr(const OQueryParams& query_params, const std::string& key, std::str
 Status
 ParseQueryBool(const OQueryParams& query_params, const std::string& key, bool& value, bool nullable = true);
 
-
-
 }  // namespace web
 }  // namespace server
 }  // namespace milvus
