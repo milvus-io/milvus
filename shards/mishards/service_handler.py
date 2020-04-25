@@ -2,7 +2,6 @@ import logging
 import time
 import datetime
 import json
-from collections import defaultdict
 import ujson
 
 import multiprocessing
