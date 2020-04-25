@@ -9,6 +9,11 @@ class BaseException(Exception):
         self.message = self.__class__.__name__ if not message else message
         self.metadata = metadata
 
+    def __repr__(self):
+        return self.message
+
+    __str__ = __repr__
+
 
 class ConnectionConnectError(BaseException):
     code = codes.CONNECT_ERROR_CODE

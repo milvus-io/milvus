@@ -19,10 +19,9 @@
 
 #include "SchedInst.h"
 #include "TaskCreator.h"
-#include "optimizer/Optimizer.h"
 #include "scheduler/Algorithm.h"
-#include "scheduler/optimizer/Optimizer.h"
 #include "scheduler/tasklabel/SpecResLabel.h"
+#include "selector/Optimizer.h"
 #include "task/Task.h"
 
 namespace milvus {

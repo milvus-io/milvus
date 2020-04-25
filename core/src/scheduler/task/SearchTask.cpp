@@ -306,9 +306,6 @@ XSearchTask::Execute() {
             } else if (!vectors.binary_data_.empty()) {
                 s = index_engine_->Search(nq, vectors.binary_data_.data(), topk, extra_params, output_distance.data(),
                                           output_ids.data(), hybrid);
-            } else if (!vectors.id_array_.empty()) {
-                s = index_engine_->Search(nq, vectors.id_array_, topk, extra_params, output_distance.data(),
-                                          output_ids.data(), hybrid);
             }
 
             fiu_do_on("XSearchTask.Execute.search_fail", s = Status(SERVER_UNEXPECTED_ERROR, ""));

@@ -8,44 +8,31 @@
 // Unless required by applicable law or agreed to in writing, software distributed under the License
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
-#ifdef MILVUS_GPU_VERSION
-#pragma once
 
-#include <condition_variable>
-#include <deque>
-#include <limits>
-#include <list>
-#include <memory>
-#include <mutex>
-#include <queue>
-#include <string>
-#include <thread>
-#include <unordered_map>
-#include <vector>
-
-#include "config/handler/GpuResourceConfigHandler.h"
-#include "scheduler/optimizer/Pass.h"
+#include "scheduler/selector/FallbackPass.h"
+#include "scheduler/SchedInst.h"
+#include "scheduler/tasklabel/SpecResLabel.h"
 
 namespace milvus {
 namespace scheduler {
 
-class FaissIVFSQ8HPass : public Pass, public server::GpuResourceConfigHandler {
- public:
-    FaissIVFSQ8HPass() = default;
+void
+FallbackPass::Init() {
+}
 
- public:
-    void
-    Init() override;
-
-    bool
-    Run(const TaskPtr& task) override;
-
- private:
-    int64_t count_ = 0;
-};
-
-using FaissIVFSQ8HPassPtr = std::shared_ptr<FaissIVFSQ8HPass>;
+bool
+FallbackPass::Run(const TaskPtr& task) {
+    auto task_type = task->Type();
+    if (task_type != TaskType::SearchTask && task_type != TaskType::BuildIndexTask) {
+        return false;
+    }
+    // NEVER be empty
+    LOG_SERVER_DEBUG_ << "FallbackPass!";
+    auto cpu = ResMgrInst::GetInstance()->GetCpuResources()[0];
+    auto label = std::make_shared<SpecResLabel>(cpu);
+    task->label() = label;
+    return true;
+}
 
 }  // namespace scheduler
 }  // namespace milvus
-#endif

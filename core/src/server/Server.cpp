@@ -13,8 +13,8 @@
 #include "server/init/InstanceLockCheck.h"
 
 #include <fcntl.h>
-#include <string.h>
 #include <unistd.h>
+#include <cstring>
 
 #include "config/Config.h"
 #include "index/archive/KnowhereResource.h"
@@ -22,6 +22,7 @@
 #include "scheduler/SchedInst.h"
 #include "server/DBWrapper.h"
 #include "server/grpc_impl/GrpcServer.h"
+#include "server/init/CpuChecker.h"
 #include "server/web_impl/WebServer.h"
 #include "src/version.h"
 //#include "storage/s3/S3ClientWrapper.h"
@@ -228,6 +229,10 @@ Server::Start() {
 #else
         LOG_SERVER_INFO_ << "CPU edition";
 #endif
+        s = CpuChecker::CheckCpuInstructionSet();
+        if (!s.ok()) {
+            return s;
+        }
         /* record config and hardware information into log */
         LogConfigInFile(config_filename_);
         LogCpuInfo();

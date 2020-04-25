@@ -16,14 +16,14 @@
 #include "ResourceMgr.h"
 #include "Scheduler.h"
 #include "Utils.h"
-#include "optimizer/BuildIndexPass.h"
-#include "optimizer/FaissFlatPass.h"
-#include "optimizer/FaissIVFFlatPass.h"
-#include "optimizer/FaissIVFPQPass.h"
-#include "optimizer/FaissIVFSQ8HPass.h"
-#include "optimizer/FaissIVFSQ8Pass.h"
-#include "optimizer/FallbackPass.h"
-#include "optimizer/Optimizer.h"
+#include "selector/BuildIndexPass.h"
+#include "selector/FaissFlatPass.h"
+#include "selector/FaissIVFFlatPass.h"
+#include "selector/FaissIVFPQPass.h"
+#include "selector/FaissIVFSQ8HPass.h"
+#include "selector/FaissIVFSQ8Pass.h"
+#include "selector/FallbackPass.h"
+#include "selector/Optimizer.h"
 
 #include <memory>
 #include <mutex>

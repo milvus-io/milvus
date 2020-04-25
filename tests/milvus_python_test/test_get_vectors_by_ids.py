@@ -11,7 +11,7 @@ from utils import *
 
 dim = 128
 index_file_size = 10
-collection_id = "test_get_vector_by_id"
+collection_id = "get_vectors_by_ids"
 DELETE_TIMEOUT = 60
 nprobe = 1
 tag = "1970-01-01"
@@ -22,12 +22,12 @@ tag = "tag"
 class TestGetBase:
     """
     ******************************************************************
-      The following cases are used to test `get_vector_by_id` function
+      The following cases are used to test .get_vectors_by_ids` function
     ******************************************************************
     """
     def test_get_vector_A(self, connect, collection):
         '''
-        target: test get_vector_by_id
+        target: test.get_vectors_by_ids
         method: add vector, and get
         expected: status ok, vector returned
         '''
@@ -36,13 +36,13 @@ class TestGetBase:
         assert status.OK()
         status = connect.flush([collection])
         assert status.OK()
-        status, res = connect.get_vector_by_id(collection, ids[0]) 
+        status, res = connect.get_vectors_by_ids(collection, ids) 
         assert status.OK()
-        assert_equal_vector(res, vector[0])
+        assert_equal_vector(res[0], vector[0])
 
     def test_get_vector_B(self, connect, collection):
         '''
-        target: test get_vector_by_id
+        target: test.get_vectors_by_ids
         method: add vector, and get
         expected: status ok, vector returned
         '''
@@ -51,13 +51,29 @@ class TestGetBase:
         assert status.OK()
         status = connect.flush([collection])
         assert status.OK()
-        status, res = connect.get_vector_by_id(collection, ids[0])
+        length = 100
+        status, res = connect.get_vectors_by_ids(collection, ids[:length])
         assert status.OK()
-        assert_equal_vector(res, vectors[0])
+        for i in range(length):
+            assert_equal_vector(res[i], vectors[i])
+
+    def test_get_vector_C_limit(self, connect, collection):
+        '''
+        target: test.get_vectors_by_ids
+        method: add vector, and get, limit > 1000
+        expected: status ok, vector returned
+        '''
+        vectors = gen_vectors(nb, dim)
+        status, ids = connect.add_vectors(collection, vectors)
+        assert status.OK()
+        status = connect.flush([collection])
+        assert status.OK()
+        status, res = connect.get_vectors_by_ids(collection, ids)
+        assert not status.OK()
 
     def test_get_vector_partition(self, connect, collection):
         '''
-        target: test get_vector_by_id
+        target: test.get_vectors_by_ids
         method: add vector, and get
         expected: status ok, vector returned
         '''
@@ -68,13 +84,15 @@ class TestGetBase:
         assert status.OK()
         status = connect.flush([collection])
         assert status.OK()
-        status, res = connect.get_vector_by_id(collection, ids[0])
+        length = 100
+        status, res = connect.get_vectors_by_ids(collection, ids[:length])
         assert status.OK()
-        assert_equal_vector(res, vectors[0])
+        for i in range(length):
+            assert_equal_vector(res[i], vectors[i])
 
     def test_get_vector_multi_same_ids(self, connect, collection):
         '''
-        target: test get_vector_by_id
+        target: test.get_vectors_by_ids
         method: add vectors, with the same id, get vector by the given id
         expected: status ok, get one vector 
         '''
@@ -84,9 +102,9 @@ class TestGetBase:
         status, ids = connect.add_vectors(collection, vectors, ids=ids)
         status = connect.flush([collection])
         assert status.OK()
-        status, res = connect.get_vector_by_id(collection, 0) 
+        status, res = connect.get_vectors_by_ids(collection, [0]) 
         assert status.OK()
-        assert_equal_vector(res, vectors[0])
+        assert_equal_vector(res[0], vectors[0])
 
     @pytest.fixture(
         scope="function",
@@ -103,7 +121,7 @@ class TestGetBase:
 
     def test_get_vector_after_delete(self, connect, collection, get_id):
         '''
-        target: test get_vector_by_id
+        target: test.get_vectors_by_ids
         method: add vectors, and delete, get vector by the given id
         expected: status ok, get one vector
         '''
@@ -117,13 +135,13 @@ class TestGetBase:
         assert status.OK()
         status = connect.flush([collection])
         assert status.OK()
-        status, res = connect.get_vector_by_id(collection, ids[id])
+        status, res = connect.get_vectors_by_ids(collection, [ids[id]])
         assert status.OK()
-        assert not res 
+        assert not len(res[0])
 
     def test_get_vector_after_delete_with_partition(self, connect, collection, get_id):
         '''
-        target: test get_vector_by_id
+        target: test.get_vectors_by_ids
         method: add vectors into partition, and delete, get vector by the given id
         expected: status ok, get one vector
         '''
@@ -138,9 +156,9 @@ class TestGetBase:
         assert status.OK()
         status = connect.flush([collection])
         assert status.OK()
-        status, res = connect.get_vector_by_id(collection, ids[id])
+        status, res = connect.get_vectors_by_ids(collection, [ids[id]])
         assert status.OK()
-        assert not res
+        assert not len(res[0])
 
     def test_get_vector_id_not_exised(self, connect, collection):
         '''
@@ -153,9 +171,9 @@ class TestGetBase:
         assert status.OK()
         status = connect.flush([collection])
         assert status.OK()
-        status, res = connect.get_vector_by_id(collection, 1) 
+        status, res = connect.get_vectors_by_ids(collection, [1]) 
         assert status.OK()
-        assert not res 
+        assert not len(res[0])
 
     def test_get_vector_collection_not_existed(self, connect, collection):
         '''
@@ -169,14 +187,14 @@ class TestGetBase:
         status = connect.flush([collection])
         assert status.OK()
         collection_new = gen_unique_str()
-        status, res = connect.get_vector_by_id(collection_new, 1) 
+        status, res = connect.get_vectors_by_ids(collection_new, [1]) 
         assert not status.OK()
 
 
 class TestGetIndexedVectors:
     """
     ******************************************************************
-      The following cases are used to test `get_vector_by_id` function
+      The following cases are used to test .get_vectors_by_ids` function
     ******************************************************************
     """
     @pytest.fixture(
@@ -184,12 +202,13 @@ class TestGetIndexedVectors:
         params=gen_simple_index()
     )
     def get_simple_index(self, request, connect):
-        if str(connect._cmd("mode")[1]) == "CPU":
-            if request.param["index_type"] not in [IndexType.IVF_SQ8, IndexType.IVFLAT, IndexType.FLAT]:
-                logging.getLogger().info(request.param["index_type"])
-                pytest.skip("Only support index_type: flat/ivf_flat/ivf_sq8")
-        else:
-            pytest.skip("Only support CPU mode")
+        if str(connect._cmd("mode")[1]) == "GPU":
+            if request.param["index_type"] not in [IndexType.IVF_SQ8, IndexType.IVFLAT, IndexType.FLAT, IndexType.IVF_PQ, IndexType.IVF_SQ8H]:
+                pytest.skip("Only support index_type: idmap/ivf")
+        elif str(connect._cmd("mode")[1]) == "CPU":
+            if request.param["index_type"] in [IndexType.IVF_SQ8H]:
+                pytest.skip("CPU not support index_type: ivf_sq8h")
+
         return request.param
 
     @pytest.fixture(
@@ -221,15 +240,15 @@ class TestGetIndexedVectors:
         status = connect.create_index(collection, index_type, index_param)
         assert status.OK()
         id = get_id
-        status, res = connect.get_vector_by_id(collection, ids[id])
+        status, res = connect.get_vectors_by_ids(collection, [ids[id]])
         assert status.OK()
         logging.getLogger().info(res)
         assert status.OK()
-        assert_equal_vector(res, vectors[id])
+        assert_equal_vector(res[0], vectors[id])
 
     def test_get_vector_after_delete(self, connect, collection, get_simple_index, get_id):
         '''
-        target: test get_vector_by_id
+        target: test.get_vectors_by_ids
         method: add vectors, and delete, get vector by the given id
         expected: status ok, get one vector
         '''
@@ -247,13 +266,13 @@ class TestGetIndexedVectors:
         assert status.OK()
         status = connect.flush([collection])
         assert status.OK()
-        status, res = connect.get_vector_by_id(collection, ids[id])
+        status, res = connect.get_vectors_by_ids(collection, [ids[id]])
         assert status.OK()
-        assert not res
+        assert not len(res[0])
 
     def test_get_vector_partition(self, connect, collection, get_simple_index, get_id):
         '''
-        target: test get_vector_by_id
+        target: test.get_vectors_by_ids
         method: add vector, and get
         expected: status ok, vector returned
         '''
@@ -269,20 +288,20 @@ class TestGetIndexedVectors:
         status = connect.create_index(collection, index_type, index_param)
         assert status.OK()
         id = get_id
-        status, res = connect.get_vector_by_id(collection, ids[id])
+        status, res = connect.get_vectors_by_ids(collection, [ids[id]])
         assert status.OK()
-        assert_equal_vector(res, vectors[id])
+        assert_equal_vector(res[0], vectors[id])
 
 
 class TestGetBinary:
     """
     ******************************************************************
-      The following cases are used to test `get_vector_by_id` function
+      The following cases are used to test .get_vectors_by_ids` function
     ******************************************************************
     """
     def test_get_vector_A(self, connect, jac_collection):
         '''
-        target: test get_vector_by_id
+        target: test.get_vectors_by_ids
         method: add vector, and get
         expected: status ok, vector returned
         '''
@@ -291,13 +310,13 @@ class TestGetBinary:
         assert status.OK()
         status = connect.flush([jac_collection])
         assert status.OK()
-        status, res = connect.get_vector_by_id(jac_collection, ids[0]) 
+        status, res = connect.get_vectors_by_ids(jac_collection, [ids[0]]) 
         assert status.OK()
-        assert res == vector[0]
+        assert_equal_vector(res[0], vector[0])
 
     def test_get_vector_B(self, connect, jac_collection):
         '''
-        target: test get_vector_by_id
+        target: test.get_vectors_by_ids
         method: add vector, and get
         expected: status ok, vector returned
         '''
@@ -306,13 +325,13 @@ class TestGetBinary:
         assert status.OK()
         status = connect.flush([jac_collection])
         assert status.OK()
-        status, res = connect.get_vector_by_id(jac_collection, ids[0])
+        status, res = connect.get_vectors_by_ids(jac_collection, [ids[0]])
         assert status.OK()
-        assert res == vectors[0]
+        assert_equal_vector(res[0], vectors[0])
 
     def test_get_vector_multi_same_ids(self, connect, jac_collection):
         '''
-        target: test get_vector_by_id
+        target: test.get_vectors_by_ids
         method: add vectors, with the same id, get vector by the given id
         expected: status ok, get one vector 
         '''
@@ -322,9 +341,9 @@ class TestGetBinary:
         status, ids = connect.add_vectors(jac_collection, vectors, ids=ids)
         status = connect.flush([jac_collection])
         assert status.OK()
-        status, res = connect.get_vector_by_id(jac_collection, 0) 
+        status, res = connect.get_vectors_by_ids(jac_collection, [0]) 
         assert status.OK()
-        assert res == vectors[0] 
+        assert_equal_vector(res[0], vectors[0])
 
     def test_get_vector_id_not_exised(self, connect, jac_collection):
         '''
@@ -337,9 +356,9 @@ class TestGetBinary:
         assert status.OK()
         status = connect.flush([jac_collection])
         assert status.OK()
-        status, res = connect.get_vector_by_id(jac_collection, 1) 
+        status, res = connect.get_vectors_by_ids(jac_collection, [1]) 
         assert status.OK()
-        assert not res 
+        assert not len(res[0])
 
     def test_get_vector_collection_not_existed(self, connect, jac_collection):
         '''
@@ -353,12 +372,12 @@ class TestGetBinary:
         status = connect.flush([jac_collection])
         assert status.OK()
         collection_new = gen_unique_str()
-        status, res = connect.get_vector_by_id(collection_new, 1) 
+        status, res = connect.get_vectors_by_ids(collection_new, [1]) 
         assert not status.OK()
 
     def test_get_vector_partition(self, connect, jac_collection):
         '''
-        target: test get_vector_by_id
+        target: test.get_vectors_by_ids
         method: add vector, and get
         expected: status ok, vector returned
         '''
@@ -368,9 +387,9 @@ class TestGetBinary:
         assert status.OK()
         status = connect.flush([jac_collection])
         assert status.OK()
-        status, res = connect.get_vector_by_id(jac_collection, ids[0])
+        status, res = connect.get_vectors_by_ids(jac_collection, [ids[0]])
         assert status.OK()
-        assert res == vectors[0]
+        assert_equal_vector(res[0], vectors[0])
 
 
 class TestGetVectorIdIngalid(object):
@@ -390,7 +409,7 @@ class TestGetVectorIdIngalid(object):
     def test_get_vector_id_invalid(self, connect, collection, gen_invalid_id):
         invalid_id = gen_invalid_id
         with pytest.raises(Exception) as e:
-            status = connect.get_vector_by_id(collection, invalid_id)
+            status = connect.get_vectors_by_ids(collection, [invalid_id])
 
 
 class TestCollectionNameInvalid(object):
@@ -408,5 +427,5 @@ class TestCollectionNameInvalid(object):
     def test_get_vectors_with_invalid_collection_name(self, connect, get_collection_name):
         collection_name = get_collection_name
         vectors = gen_vectors(1, dim)
-        status, result = connect.get_vector_by_id(collection_name, 1)
+        status, result = connect.get_vectors_by_ids(collection_name, [1])
         assert not status.OK()

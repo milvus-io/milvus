@@ -55,10 +55,13 @@ class ClientTest {
     ShowCollectionInfo(const std::string&);
 
     void
-    GetEntityById(const std::string&, int64_t);
+    GetEntitiesByID(const std::string&, const std::vector<int64_t>&);
 
     void
     SearchEntities(const std::string&, int64_t, int64_t);
+
+    void
+    SearchEntitiesByID(const std::string&, int64_t, int64_t);
 
     void
     CreateIndex(const std::string&, milvus::IndexType, int64_t);

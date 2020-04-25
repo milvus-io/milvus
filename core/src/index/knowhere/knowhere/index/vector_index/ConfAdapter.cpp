@@ -242,7 +242,7 @@ NSGConfAdapter::CheckSearch(Config& oricfg, const IndexType type, const IndexMod
 bool
 HNSWConfAdapter::CheckTrain(Config& oricfg, const IndexMode mode) {
     static int64_t MIN_EFCONSTRUCTION = 100;
-    static int64_t MAX_EFCONSTRUCTION = 500;
+    static int64_t MAX_EFCONSTRUCTION = 800;
     static int64_t MIN_M = 5;
     static int64_t MAX_M = 48;
 
