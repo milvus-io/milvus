@@ -6,7 +6,6 @@ import ujson
 import multiprocessing
 from concurrent.futures import ThreadPoolExecutor
 from milvus.grpc_gen import milvus_pb2, milvus_pb2_grpc, status_pb2
-from milvus.grpc_gen.milvus_pb2 import TopKQueryResult
 from milvus.client import types as Types
 from milvus import MetricType
 
