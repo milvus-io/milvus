@@ -15,7 +15,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#include "server/delivery/request/GetVectorByIDRequest.h"
+#include "server/delivery/request/GetVectorsByIDRequest.h"
 #include "server/DBWrapper.h"
 #include "utils/Log.h"
 #include "utils/TimeRecorder.h"
@@ -27,9 +27,11 @@
 namespace milvus {
 namespace server {
 
-GetVectorByIDRequest::GetVectorByIDRequest(const std::shared_ptr<milvus::server::Context>& context,
-                                           const std::string& collection_name, const std::vector<int64_t>& ids,
-                                           engine::VectorsData& vectors)
+constexpr uint64_t MAX_COUNT_RETURNED = 1000;
+
+GetVectorsByIDRequest::GetVectorsByIDRequest(const std::shared_ptr<milvus::server::Context>& context,
+                                             const std::string& collection_name, const std::vector<int64_t>& ids,
+                                             std::vector<engine::VectorsData>& vectors)
     : BaseRequest(context, BaseRequest::kGetVectorByID),
       collection_name_(collection_name),
       ids_(ids),
@@ -37,26 +39,31 @@ GetVectorByIDRequest::GetVectorByIDRequest(const std::shared_ptr<milvus::server:
 }
 
 BaseRequestPtr
-GetVectorByIDRequest::Create(const std::shared_ptr<milvus::server::Context>& context,
-                             const std::string& collection_name, const std::vector<int64_t>& ids,
-                             engine::VectorsData& vectors) {
-    return std::shared_ptr<BaseRequest>(new GetVectorByIDRequest(context, collection_name, ids, vectors));
+GetVectorsByIDRequest::Create(const std::shared_ptr<milvus::server::Context>& context,
+                              const std::string& collection_name, const std::vector<int64_t>& ids,
+                              std::vector<engine::VectorsData>& vectors) {
+    return std::shared_ptr<BaseRequest>(new GetVectorsByIDRequest(context, collection_name, ids, vectors));
 }
 
 Status
-GetVectorByIDRequest::OnExecute() {
+GetVectorsByIDRequest::OnExecute() {
     try {
-        std::string hdr = "GetVectorByIDRequest(collection=" + collection_name_ + ")";
+        std::string hdr = "GetVectorsByIDRequest(collection=" + collection_name_ + ")";
         TimeRecorderAuto rc(hdr);
 
         // step 1: check arguments
+        if (ids_.empty()) {
+            return Status(SERVER_INVALID_ARGUMENT, "No vector id specified");
+        }
+
+        if (ids_.size() > MAX_COUNT_RETURNED) {
+            std::string msg = "Input id array size cannot exceed: " + std::to_string(MAX_COUNT_RETURNED);
+            return Status(SERVER_INVALID_ARGUMENT, msg);
+        }
+
         auto status = ValidationUtil::ValidateCollectionName(collection_name_);
         if (!status.ok()) {
             return status;
-        }
-
-        if (ids_.empty()) {
-            return Status(SERVER_INVALID_ARGUMENT, "No vector id specified");
         }
 
         // only process root collection, ignore partition collection
@@ -76,7 +83,7 @@ GetVectorByIDRequest::OnExecute() {
         }
 
         // step 2: get vector data, now only support get one id
-        return DBWrapper::DB()->GetVectorByID(collection_name_, ids_[0], vectors_);
+        return DBWrapper::DB()->GetVectorsByID(collection_name_, ids_, vectors_);
     } catch (std::exception& ex) {
         return Status(SERVER_UNEXPECTED_ERROR, ex.what());
     }

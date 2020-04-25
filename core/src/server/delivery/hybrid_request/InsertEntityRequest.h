@@ -25,13 +25,13 @@ class InsertEntityRequest : public BaseRequest {
  public:
     static BaseRequestPtr
     Create(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name,
-           const std::string& partition_tag, std::unordered_map<std::string, std::vector<std::string>>& field_values,
-           std::unordered_map<std::string, engine::VectorsData>& vector_datas);
+           const std::string& partition_tag, uint64_t& row_num, std::vector<std::string>& field_names,
+           std::vector<uint8_t>& attr_values, std::unordered_map<std::string, engine::VectorsData>& vector_datas);
 
  protected:
     InsertEntityRequest(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name,
-                        const std::string& partition_tag,
-                        std::unordered_map<std::string, std::vector<std::string>>& field_values,
+                        const std::string& partition_tag, uint64_t& row_num, std::vector<std::string>& field_names,
+                        std::vector<uint8_t>& attr_values,
                         std::unordered_map<std::string, engine::VectorsData>& vector_datas);
 
     Status
@@ -40,7 +40,9 @@ class InsertEntityRequest : public BaseRequest {
  private:
     const std::string collection_name_;
     const std::string partition_tag_;
-    std::unordered_map<std::string, std::vector<std::string>> field_values_;
+    uint64_t row_num_;
+    std::vector<std::string>& field_names_;
+    std::vector<uint8_t>& attr_values_;
     std::unordered_map<std::string, engine::VectorsData>& vector_datas_;
 };
 

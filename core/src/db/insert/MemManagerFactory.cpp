@@ -9,25 +9,26 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
-#pragma once
+#include "db/insert/MemManagerFactory.h"
+#include "MemManagerImpl.h"
+#include "utils/Exception.h"
+#include "utils/Log.h"
 
-#include "server/web_impl/dto/Dto.h"
+#include <stdlib.h>
+#include <time.h>
+#include <cstdlib>
+#include <memory>
+#include <regex>
+#include <sstream>
+#include <string>
 
 namespace milvus {
-namespace server {
-namespace web {
+namespace engine {
 
-#include OATPP_CODEGEN_BEGIN(DTO)
+MemManagerPtr
+MemManagerFactory::Build(const std::shared_ptr<meta::Meta>& meta, const DBOptions& options) {
+    return std::make_shared<MemManagerImpl>(meta, options);
+}
 
-class CommandDto: public oatpp::data::mapping::type::Object {
-
-    DTO_INIT(CommandDto, Object)
-
-    DTO_FIELD(String, reply, "reply");
-};
-
-#include OATPP_CODEGEN_END(DTO)
-
-} // namespace web
-} // namespace server
-} // namespace milvus
+}  // namespace engine
+}  // namespace milvus

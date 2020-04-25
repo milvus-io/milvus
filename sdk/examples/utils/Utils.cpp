@@ -213,7 +213,7 @@ Utils::DoSearch(std::shared_ptr<milvus::Connection> conn, const std::string& col
     {
         BLOCK_SPLITER
         JSON json_params = {{"nprobe", nprobe}};
-        milvus_sdk::TimeRecorder rc("search");
+        milvus_sdk::TimeRecorder rc("Search");
         milvus::Status stat =
             conn->Search(collection_name,
                          partition_tags,
@@ -229,26 +229,6 @@ Utils::DoSearch(std::shared_ptr<milvus::Connection> conn, const std::string& col
     CheckSearchResult(entity_array, topk_query_result);
 }
 
-void
-PrintPartitionStat(const milvus::PartitionStat& partition_stat) {
-    std::cout << "\tPartition " << partition_stat.tag << " entity count: " << partition_stat.row_count << std::endl;
-    for (auto& seg_stat : partition_stat.segments_stat) {
-        std::cout << "\t\tsegment " << seg_stat.segment_name << " entity count: " << seg_stat.row_count
-                  << " index: " << seg_stat.index_name << " data size: " << seg_stat.data_size << std::endl;
-    }
-}
-
-void
-Utils::PrintCollectionInfo(const milvus::CollectionInfo& info) {
-    BLOCK_SPLITER
-    std::cout << "Collection " << " total entity count: " << info.total_row_count << std::endl;
-    for (const milvus::PartitionStat& partition_stat : info.partitions_stat) {
-        PrintPartitionStat(partition_stat);
-    }
-
-    BLOCK_SPLITER
-}
-
 void ConstructVector(uint64_t nq, uint64_t dimension, std::vector<milvus::Entity>& query_vector) {
     query_vector.resize(nq);
     for (uint64_t i = 0; i < nq; ++i) {
@@ -262,14 +242,17 @@ void ConstructVector(uint64_t nq, uint64_t dimension, std::vector<milvus::Entity
 std::vector<milvus::LeafQueryPtr>
 Utils::GenLeafQuery() {
     //Construct TermQuery
-    std::vector<std::string> field_value;
-    field_value.resize(1000);
-    for (uint64_t i = 0; i < 1000; ++i) {
-        field_value[i] = std::to_string(i);
+    uint64_t row_num = 1000;
+    std::vector<int64_t> field_value;
+    field_value.resize(row_num);
+    for (uint64_t i = 0; i < row_num; ++i) {
+        field_value[i] = i;
     }
+    std::vector<int8_t> term_value(row_num * sizeof(int64_t));
+    memcpy(term_value.data(), field_value.data(), row_num * sizeof(int64_t));
     milvus::TermQueryPtr tq = std::make_shared<milvus::TermQuery>();
     tq->field_name = "field_1";
-    tq->field_value = field_value;
+    tq->field_value = term_value;
 
     //Construct RangeQuery
     milvus::CompareExpr ce1 = {milvus::CompareOperator::LTE, "10000"}, ce2 = {milvus::CompareOperator::GTE, "1"};

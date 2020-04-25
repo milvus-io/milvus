@@ -13,6 +13,7 @@
 
 #include <condition_variable>
 #include <deque>
+#include <limits>
 #include <list>
 #include <memory>
 #include <mutex>
@@ -23,14 +24,14 @@
 #include <vector>
 
 #include "config/handler/GpuResourceConfigHandler.h"
-#include "scheduler/optimizer/Pass.h"
+#include "scheduler/selector/Pass.h"
 
 namespace milvus {
 namespace scheduler {
 
-class BuildIndexPass : public Pass, public server::GpuResourceConfigHandler {
+class FaissIVFSQ8HPass : public Pass, public server::GpuResourceConfigHandler {
  public:
-    BuildIndexPass() = default;
+    FaissIVFSQ8HPass() = default;
 
  public:
     void
@@ -40,10 +41,10 @@ class BuildIndexPass : public Pass, public server::GpuResourceConfigHandler {
     Run(const TaskPtr& task) override;
 
  private:
-    uint64_t specified_gpu_id_ = 0;
+    int64_t count_ = 0;
 };
 
-using BuildIndexPassPtr = std::shared_ptr<BuildIndexPass>;
+using FaissIVFSQ8HPassPtr = std::shared_ptr<FaissIVFSQ8HPass>;
 
 }  // namespace scheduler
 }  // namespace milvus

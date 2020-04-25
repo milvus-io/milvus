@@ -935,19 +935,25 @@ TEST_F(RpcHandlerTest, CMD_TEST) {
 
     command.set_cmd("tasktable");
     handler->Cmd(&context, &command, &reply);
+    ASSERT_EQ(reply.status().error_code(), ::grpc::Status::OK.error_code());
     command.set_cmd("test");
     handler->Cmd(&context, &command, &reply);
+    ASSERT_EQ(reply.status().error_code(), ::grpc::Status::OK.error_code());
 
     command.set_cmd("status");
     handler->Cmd(&context, &command, &reply);
+    ASSERT_EQ(reply.status().error_code(), ::grpc::Status::OK.error_code());
     command.set_cmd("mode");
     handler->Cmd(&context, &command, &reply);
+    ASSERT_EQ(reply.status().error_code(), ::grpc::Status::OK.error_code());
 
     command.set_cmd("build_commit_id");
     handler->Cmd(&context, &command, &reply);
+    ASSERT_EQ(reply.status().error_code(), ::grpc::Status::OK.error_code());
 
     command.set_cmd("set_config");
     handler->Cmd(&context, &command, &reply);
+
     command.set_cmd("get_config");
     handler->Cmd(&context, &command, &reply);
 }
@@ -977,22 +983,18 @@ TEST_F(RpcHandlerTest, HYBRID_TEST) {
     milvus::grpc::HEntityIDs entity_ids;
     insert_param.set_collection_name("test_hybrid");
 
-    std::vector<std::string> numerica_value;
-    numerica_value.resize(row_num);
-    for (uint64_t i = 0; i < row_num; i++) {
-        numerica_value[i] = std::to_string(i);
-    }
     auto entity = insert_param.mutable_entities();
     auto field_name_0 = entity->add_field_names();
     *field_name_0 = "field_0";
     auto field_name_1 = entity->add_field_names();
     *field_name_1 = "field_1";
 
-    auto records_0 = entity->add_attr_records();
-    for (auto value : numerica_value) {
-        auto record = records_0->add_value();
-        *record = value;
+    entity->set_row_num(row_num);
+    std::vector<int64_t> field_value(row_num, 0);
+    for (uint64_t i = 0; i < row_num; i++) {
+        field_value[i] = i;
     }
+    entity->set_attr_records(field_value.data(), row_num * sizeof(int64_t));
 
     std::vector<std::vector<float>> vector_field;
     vector_field.resize(row_num);
@@ -1012,7 +1014,6 @@ TEST_F(RpcHandlerTest, HYBRID_TEST) {
     handler->InsertEntity(&context, &insert_param, &entity_ids);
     ASSERT_EQ(entity_ids.entity_id_array_size(), row_num);
 
-    // TODO(yukun): Hybrid Search
     uint64_t nq = 10;
     uint64_t topk = 10;
     milvus::grpc::HSearchParam search_param;
@@ -1023,11 +1024,13 @@ TEST_F(RpcHandlerTest, HYBRID_TEST) {
     auto boolean_query_2 = general_query_1->mutable_boolean_query();
     auto term_query = boolean_query_2->add_general_query()->mutable_term_query();
     term_query->set_field_name("field_0");
+    std::vector<int64_t> term_value(nq, 0);
     for (uint64_t i = 0; i < nq; ++i) {
-        auto value = std::to_string(i + nq);
-        auto term = term_query->add_values();
-        *term = value;
+        term_value[i] = i + nq;
     }
+    term_query->set_value_num(nq);
+    term_query->set_values(term_value.data(), nq * sizeof(int64_t));
+
     auto vector_query = boolean_query_2->add_general_query()->mutable_vector_query();
     vector_query->set_field_name("field_1");
     vector_query->set_topk(topk);

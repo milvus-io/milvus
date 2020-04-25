@@ -44,10 +44,10 @@ class AnnoyIndex {
     ptr->get_nns_by_vector(w, n, search_k, result, distances);
   };
   void getNnsByItem(int item, int n, int search_k, vector<int32_t>* result) {
-    ptr->get_nns_by_item(item, n, search_k, result, NULL);
+    ptr->get_nns_by_item(item, n, search_k, result, nullptr);
   };
   void getNnsByVector(const float* w, int n, int search_k, vector<int32_t>* result) {
-    ptr->get_nns_by_vector(w, n, search_k, result, NULL);
+    ptr->get_nns_by_vector(w, n, search_k, result, nullptr);
   };
 
   int getNItems() {

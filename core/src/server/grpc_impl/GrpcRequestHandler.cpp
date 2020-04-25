@@ -12,6 +12,7 @@
 #include "server/grpc_impl/GrpcRequestHandler.h"
 
 #include <fiu-local.h>
+#include <algorithm>
 #include <memory>
 #include <string>
 #include <unordered_map>
@@ -126,38 +127,6 @@ ConstructResults(const TopKQueryResult& result, ::milvus::grpc::TopKQueryResult*
     response->mutable_distances()->Resize(static_cast<int>(result.distance_list_.size()), 0.0);
     memcpy(response->mutable_distances()->mutable_data(), result.distance_list_.data(),
            result.distance_list_.size() * sizeof(float));
-}
-
-void
-ConstructPartitionStat(const PartitionStat& partition_stat, ::milvus::grpc::PartitionStat* grpc_partition_stat) {
-    if (!grpc_partition_stat) {
-        return;
-    }
-
-    grpc_partition_stat->set_total_row_count(partition_stat.total_row_num_);
-    grpc_partition_stat->set_tag(partition_stat.tag_);
-
-    for (auto& seg_stat : partition_stat.segments_stat_) {
-        ::milvus::grpc::SegmentStat* grpc_seg_stat = grpc_partition_stat->mutable_segments_stat()->Add();
-        grpc_seg_stat->set_row_count(seg_stat.row_num_);
-        grpc_seg_stat->set_segment_name(seg_stat.name_);
-        grpc_seg_stat->set_index_name(seg_stat.index_name_);
-        grpc_seg_stat->set_data_size(seg_stat.data_size_);
-    }
-}
-
-void
-ConstructCollectionInfo(const CollectionInfo& collection_info, ::milvus::grpc::CollectionInfo* response) {
-    if (!response) {
-        return;
-    }
-
-    response->set_total_row_count(collection_info.total_row_num_);
-
-    for (auto& partition_stat : collection_info.partitions_stat_) {
-        ::milvus::grpc::PartitionStat* grpc_partiton_stat = response->mutable_partitions_stat()->Add();
-        ConstructPartitionStat(partition_stat, grpc_partiton_stat);
-    }
 }
 
 }  // namespace
@@ -406,24 +375,33 @@ GrpcRequestHandler::Insert(::grpc::ServerContext* context, const ::milvus::grpc:
 }
 
 ::grpc::Status
-GrpcRequestHandler::GetVectorByID(::grpc::ServerContext* context, const ::milvus::grpc::VectorIdentity* request,
-                                  ::milvus::grpc::VectorData* response) {
+GrpcRequestHandler::GetVectorsByID(::grpc::ServerContext* context, const ::milvus::grpc::VectorsIdentity* request,
+                                   ::milvus::grpc::VectorsData* response) {
     CHECK_NULLPTR_RETURN(request);
 
-    std::vector<int64_t> vector_ids = {request->id()};
-    engine::VectorsData vectors;
-    Status status =
-        request_handler_.GetVectorByID(GetContext(context), request->collection_name(), vector_ids, vectors);
-
-    if (!vectors.float_data_.empty()) {
-        response->mutable_vector_data()->mutable_float_data()->Resize(vectors.float_data_.size(), 0);
-        memcpy(response->mutable_vector_data()->mutable_float_data()->mutable_data(), vectors.float_data_.data(),
-               vectors.float_data_.size() * sizeof(float));
-    } else if (!vectors.binary_data_.empty()) {
-        response->mutable_vector_data()->mutable_binary_data()->resize(vectors.binary_data_.size());
-        memcpy(response->mutable_vector_data()->mutable_binary_data()->data(), vectors.binary_data_.data(),
-               vectors.binary_data_.size() * sizeof(uint8_t));
+    std::vector<int64_t> vector_ids;
+    vector_ids.reserve(request->id_array_size());
+    for (int i = 0; i < request->id_array_size(); i++) {
+        vector_ids.push_back(request->id_array(i));
     }
+
+    std::vector<engine::VectorsData> vectors;
+    Status status =
+        request_handler_.GetVectorsByID(GetContext(context), request->collection_name(), vector_ids, vectors);
+
+    for (auto& vector : vectors) {
+        auto grpc_data = response->add_vectors_data();
+        if (!vector.float_data_.empty()) {
+            grpc_data->mutable_float_data()->Resize(vector.float_data_.size(), 0);
+            memcpy(grpc_data->mutable_float_data()->mutable_data(), vector.float_data_.data(),
+                   vector.float_data_.size() * sizeof(float));
+        } else if (!vector.binary_data_.empty()) {
+            grpc_data->mutable_binary_data()->resize(vector.binary_data_.size());
+            memcpy(grpc_data->mutable_binary_data()->data(), vector.binary_data_.data(),
+                   vector.binary_data_.size() * sizeof(uint8_t));
+        }
+    }
+
     SET_RESPONSE(response->mutable_status(), status, context);
 
     return ::grpc::Status::OK;
@@ -460,9 +438,8 @@ GrpcRequestHandler::Search(::grpc::ServerContext* context, const ::milvus::grpc:
 
     // step 2: partition tags
     std::vector<std::string> partitions;
-    for (auto& partition : request->partition_tag_array()) {
-        partitions.emplace_back(partition);
-    }
+    std::copy(request->partition_tag_array().begin(), request->partition_tag_array().end(),
+              std::back_inserter(partitions));
 
     // step 3: parse extra parameters
     milvus::json json_params;
@@ -498,11 +475,16 @@ GrpcRequestHandler::SearchByID(::grpc::ServerContext* context, const ::milvus::g
 
     // step 1: partition tags
     std::vector<std::string> partitions;
-    for (auto& partition : request->partition_tag_array()) {
-        partitions.emplace_back(partition);
+    std::copy(request->partition_tag_array().begin(), request->partition_tag_array().end(),
+              std::back_inserter(partitions));
+
+    // step 2: partition tags
+    std::vector<int64_t> id_array;
+    for (int i = 0; i < request->id_array_size(); i++) {
+        id_array.push_back(request->id_array(i));
     }
 
-    // step 2: parse extra parameters
+    // step 3: parse extra parameters
     milvus::json json_params;
     for (int i = 0; i < request->extra_params_size(); i++) {
         const ::milvus::grpc::KeyValuePair& extra = request->extra_params(i);
@@ -511,12 +493,12 @@ GrpcRequestHandler::SearchByID(::grpc::ServerContext* context, const ::milvus::g
         }
     }
 
-    // step 3: search vectors
+    // step 4: search vectors
     TopKQueryResult result;
-    Status status = request_handler_.SearchByID(GetContext(context), request->collection_name(), request->id(),
+    Status status = request_handler_.SearchByID(GetContext(context), request->collection_name(), id_array,
                                                 request->topk(), json_params, partitions, result);
 
-    // step 4: construct and return result
+    // step 5: construct and return result
     ConstructResults(result, response);
 
     SET_RESPONSE(response->mutable_status(), status, context);
@@ -538,15 +520,12 @@ GrpcRequestHandler::SearchInFiles(::grpc::ServerContext* context, const ::milvus
 
     // step 2: copy file id array
     std::vector<std::string> file_ids;
-    for (auto& file_id : request->file_id_array()) {
-        file_ids.emplace_back(file_id);
-    }
+    std::copy(request->file_id_array().begin(), request->file_id_array().end(), std::back_inserter(file_ids));
 
     // step 3: partition tags
     std::vector<std::string> partitions;
-    for (auto& partition : search_request->partition_tag_array()) {
-        partitions.emplace_back(partition);
-    }
+    std::copy(search_request->partition_tag_array().begin(), search_request->partition_tag_array().end(),
+              std::back_inserter(partitions));
 
     // step 4: parse extra parameters
     milvus::json json_params;
@@ -619,10 +598,10 @@ GrpcRequestHandler::ShowCollectionInfo(::grpc::ServerContext* context, const ::m
                                        ::milvus::grpc::CollectionInfo* response) {
     CHECK_NULLPTR_RETURN(request);
 
-    CollectionInfo collection_info;
+    std::string collection_info;
     Status status =
         request_handler_.ShowCollectionInfo(GetContext(context), request->collection_name(), collection_info);
-    ConstructCollectionInfo(collection_info, response);
+    response->set_json_info(collection_info);
     SET_RESPONSE(response->mutable_status(), status, context);
 
     return ::grpc::Status::OK;
@@ -705,6 +684,21 @@ GrpcRequestHandler::CreatePartition(::grpc::ServerContext* context, const ::milv
 
     Status status = request_handler_.CreatePartition(GetContext(context), request->collection_name(), request->tag());
     SET_RESPONSE(response, status, context);
+
+    return ::grpc::Status::OK;
+}
+
+::grpc::Status
+GrpcRequestHandler::HasPartition(::grpc::ServerContext* context, const ::milvus::grpc::PartitionParam* request,
+                                 ::milvus::grpc::BoolReply* response) {
+    CHECK_NULLPTR_RETURN(request);
+
+    bool has_collection = false;
+
+    Status status =
+        request_handler_.HasPartition(GetContext(context), request->collection_name(), request->tag(), has_collection);
+    response->set_bool_reply(has_collection);
+    SET_RESPONSE(response->mutable_status(), status, context);
 
     return ::grpc::Status::OK;
 }
@@ -801,22 +795,30 @@ GrpcRequestHandler::CreateHybridCollection(::grpc::ServerContext* context, const
 }
 
 ::grpc::Status
+GrpcRequestHandler::DescribeHybridCollection(::grpc::ServerContext* context,
+                                             const ::milvus::grpc::CollectionName* request,
+                                             ::milvus::grpc::Mapping* response) {
+    CHECK_NULLPTR_RETURN(request);
+}
+
+::grpc::Status
 GrpcRequestHandler::InsertEntity(::grpc::ServerContext* context, const ::milvus::grpc::HInsertParam* request,
                                  ::milvus::grpc::HEntityIDs* response) {
     CHECK_NULLPTR_RETURN(request);
 
-    std::unordered_map<std::string, std::vector<std::string>> attr_values;
+    auto attr_size = request->entities().attr_records().size();
+    std::vector<uint8_t> attr_values(attr_size, 0);
     std::unordered_map<std::string, engine::VectorsData> vector_datas;
 
-    auto attr_size = request->entities().attr_records_size();
-    for (uint64_t i = 0; i < attr_size; ++i) {
-        std::vector<std::string> values;
-        auto record_size = request->entities().attr_records(i).value_size();
-        values.resize(record_size);
-        for (uint64_t j = 0; j < record_size; ++j) {
-            values[j] = request->entities().attr_records(i).value(j);
-        }
-        attr_values.insert(std::make_pair(request->entities().field_names(i), values));
+    memcpy(attr_values.data(), request->entities().attr_records().data(), attr_size);
+
+    uint64_t row_num = request->entities().row_num();
+
+    std::vector<std::string> field_names;
+    auto field_size = request->entities().field_names_size();
+    field_names.resize(field_size - 1);
+    for (uint64_t i = 0; i < field_size - 1; ++i) {
+        field_names[i] = request->entities().field_names(i);
     }
 
     auto vector_size = request->entities().result_values_size();
@@ -824,13 +826,13 @@ GrpcRequestHandler::InsertEntity(::grpc::ServerContext* context, const ::milvus:
         engine::VectorsData vectors;
         CopyRowRecords(request->entities().result_values(i).vector_value().value(), request->entity_id_array(),
                        vectors);
-        vector_datas.insert(std::make_pair(request->entities().field_names(attr_size + i), vectors));
+        vector_datas.insert(std::make_pair(request->entities().field_names(field_size - 1), vectors));
     }
 
     std::string collection_name = request->collection_name();
     std::string partition_tag = request->partition_tag();
-    Status status =
-        request_handler_.InsertEntity(GetContext(context), collection_name, partition_tag, attr_values, vector_datas);
+    Status status = request_handler_.InsertEntity(GetContext(context), collection_name, partition_tag, row_num,
+                                                  field_names, attr_values, vector_datas);
 
     response->mutable_entity_id_array()->Resize(static_cast<int>(vector_datas.begin()->second.id_array_.size()), 0);
     memcpy(response->mutable_entity_id_array()->mutable_data(), vector_datas.begin()->second.id_array_.data(),
@@ -841,14 +843,12 @@ GrpcRequestHandler::InsertEntity(::grpc::ServerContext* context, const ::milvus:
 }
 
 void
-DeSerialization(const ::milvus::grpc::GeneralQuery& general_query, query::BooleanQueryPtr boolean_clause) {
+DeSerialization(const ::milvus::grpc::GeneralQuery& general_query, query::BooleanQueryPtr& boolean_clause) {
     if (general_query.has_boolean_query()) {
-        //        boolean_clause->SetOccur((query::Occur)general_query.boolean_query().occur());
-
+        boolean_clause->SetOccur((query::Occur)general_query.boolean_query().occur());
         for (uint64_t i = 0; i < general_query.boolean_query().general_query_size(); ++i) {
             if (general_query.boolean_query().general_query(i).has_boolean_query()) {
-                query::BooleanQueryPtr query =
-                    std::make_shared<query::BooleanQuery>((query::Occur)(general_query.boolean_query().occur()));
+                query::BooleanQueryPtr query = std::make_shared<query::BooleanQuery>();
                 DeSerialization(general_query.boolean_query().general_query(i), query);
                 boolean_clause->AddBooleanQuery(query);
             } else {
@@ -858,10 +858,9 @@ DeSerialization(const ::milvus::grpc::GeneralQuery& general_query, query::Boolea
                     query::TermQueryPtr term_query = std::make_shared<query::TermQuery>();
                     term_query->field_name = query.term_query().field_name();
                     term_query->boost = query.term_query().boost();
-                    term_query->field_value.resize(query.term_query().values_size());
-                    for (uint64_t j = 0; j < query.term_query().values_size(); ++j) {
-                        term_query->field_value[j] = query.term_query().values(j);
-                    }
+                    auto size = query.term_query().values().size();
+                    term_query->field_value.resize(size);
+                    memcpy(term_query->field_value.data(), query.term_query().values().data(), size);
                     leaf_query->term_query = term_query;
                     boolean_clause->AddLeafQuery(leaf_query);
                 }
@@ -919,7 +918,6 @@ GrpcRequestHandler::HybridSearch(::grpc::ServerContext* context, const ::milvus:
     DeSerialization(request->general_query(), boolean_query);
 
     query::GeneralQueryPtr general_query = std::make_shared<query::GeneralQuery>();
-    general_query->bin = std::make_shared<query::BinaryQuery>();
     query::GenBinaryQuery(boolean_query, general_query->bin);
 
     Status status;

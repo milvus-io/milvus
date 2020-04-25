@@ -26,9 +26,6 @@ class ClientTest {
     void
     Test();
 
-    void
-    TestHybrid();
-
  private:
     void
     ShowServerVersion();
@@ -58,10 +55,13 @@ class ClientTest {
     ShowCollectionInfo(const std::string&);
 
     void
-    GetEntityById(const std::string&, int64_t);
+    GetEntitiesByID(const std::string&, const std::vector<int64_t>&);
 
     void
     SearchEntities(const std::string&, int64_t, int64_t);
+
+    void
+    SearchEntitiesByID(const std::string&, int64_t, int64_t);
 
     void
     CreateIndex(const std::string&, milvus::IndexType, int64_t);
@@ -80,17 +80,6 @@ class ClientTest {
 
     void
     DropCollection(const std::string&);
-
-    /*******************************New Interface**********************************/
-
-    void
-    CreateHybridCollection(const std::string& collection_name);
-
-    void
-    InsertHybridEntities(std::string&, int64_t);
-
-    void
-    HybridSearch(std::string&);
 
  private:
     std::shared_ptr<milvus::Connection> conn_;

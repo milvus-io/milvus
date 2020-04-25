@@ -72,6 +72,11 @@ class ClientProxy : public Connection {
     GetEntityByID(const std::string& collection_name, int64_t entity_id, Entity& entity_data) override;
 
     Status
+    GetEntitiesByID(const std::string& collection_name,
+                    const std::vector<int64_t>& id_array,
+                    std::vector<Entity>& entities_data) override;
+
+    Status
     GetIDsInSegment(const std::string& collection_name, const std::string& segment_name,
                     std::vector<int64_t>& id_array) override;
 
@@ -79,6 +84,11 @@ class ClientProxy : public Connection {
     Search(const std::string& collection_name, const std::vector<std::string>& partition_tag_array,
            const std::vector<Entity>& entity_array, int64_t topk,
            const std::string& extra_params, TopKQueryResult& topk_query_result) override;
+
+    Status
+    SearchByID(const std::string& collection_name, const PartitionTagList& partition_tag_array,
+               const std::vector<int64_t>& id_array, int64_t topk,
+               const std::string& extra_params, TopKQueryResult& topk_query_result) override;
 
     Status
     DescribeCollection(const std::string& collection_name, CollectionParam& collection_schema) override;
@@ -90,7 +100,7 @@ class ClientProxy : public Connection {
     ShowCollections(std::vector<std::string>& collection_array) override;
 
     Status
-    ShowCollectionInfo(const std::string& collection_name, CollectionInfo& collection_info) override;
+    ShowCollectionInfo(const std::string& collection_name, std::string& collection_info) override;
 
     Status
     DeleteByID(const std::string& collection_name, const std::vector<int64_t>& id_array) override;
