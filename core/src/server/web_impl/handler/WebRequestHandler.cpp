@@ -771,6 +771,9 @@ WebRequestHandler::HybridSearch(const std::string& collection_name, const nlohma
         query::BooleanQueryPtr boolean_query = std::make_shared<query::BooleanQuery>();
 
         status = ProcessBoolQueryJson(boolean_query_json, boolean_query);
+        if (!status.ok()) {
+            return status;
+        }
         query::GeneralQueryPtr general_query = std::make_shared<query::GeneralQuery>();
         query::GenBinaryQuery(boolean_query, general_query->bin);
 
