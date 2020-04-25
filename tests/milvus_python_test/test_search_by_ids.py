@@ -31,7 +31,7 @@ raw_vectors, binary_vectors = gen_binary_vectors(6000, dim)
 class TestSearchBase:
     @pytest.fixture(scope="function", autouse=True)
     def skip_check(self, connect):
-        if str(connect._cmd("mode")[1]) == "CPU":
+        if str(connect._cmd("mode")[1]) == "CPU" or str(connect._cmd("mode")[1]) == "GPU":
             reason = "GPU mode not support"
             logging.getLogger().info(reason)
             pytest.skip(reason)
