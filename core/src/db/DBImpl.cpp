@@ -33,7 +33,7 @@
 #include "db/IDGenerator.h"
 #include "engine/EngineFactory.h"
 #include "index/thirdparty/faiss/utils/distances.h"
-#include "insert/MemMenagerFactory.h"
+#include "insert/MemManagerFactory.h"
 #include "meta/MetaConsts.h"
 #include "meta/MetaFactory.h"
 #include "meta/SqliteMetaImpl.h"
