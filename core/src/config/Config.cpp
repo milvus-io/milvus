@@ -891,7 +891,7 @@ Config::CheckDBConfigBackendUrl(const std::string& value) {
         std::string msg =
             "Invalid backend url: " + value + ". Possible reason: db_config.db_backend_url is invalid. " +
             "The correct format should be like sqlite://:@:/ or mysql://root:123456@127.0.0.1:3306/milvus.";
-        return Status(SERVER_INVALID_ARGUMENT, "invalid db_backend_url: " + value);
+        return Status(SERVER_INVALID_ARGUMENT, msg);
     }
     return Status::OK();
 }

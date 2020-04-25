@@ -7,6 +7,7 @@ Please mark all change in change log and use the issue from GitHub
 ## Bug
 -   \#1705 Limit the insert data batch size
 -   \#1929 Skip MySQL meta schema field width check
+-   \#2073 Fix CheckDBConfigBackendUrl error message
 
 ## Feature
 -   \#1965 FAISS/NSG/HNSW/ANNOY use unified distance calculation algorithm
