@@ -1,21 +1,17 @@
 import logging
 import time
-import datetime
 import json
-from collections import defaultdict
 import ujson
 
 import multiprocessing
 from concurrent.futures import ThreadPoolExecutor
 from milvus.grpc_gen import milvus_pb2, milvus_pb2_grpc, status_pb2
-from milvus.grpc_gen.milvus_pb2 import TopKQueryResult
 from milvus.client import types as Types
 from milvus import MetricType
 
-from mishards import (db, settings, exceptions)
+from mishards import (db, exceptions)
 from mishards.grpc_utils import mark_grpc_method
 from mishards.grpc_utils.grpc_args_parser import GrpcArgsParser as Parser
-from mishards import utilities
 
 logger = logging.getLogger(__name__)
 

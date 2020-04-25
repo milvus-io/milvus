@@ -33,7 +33,7 @@
 #include "db/IDGenerator.h"
 #include "engine/EngineFactory.h"
 #include "index/thirdparty/faiss/utils/distances.h"
-#include "insert/MemMenagerFactory.h"
+#include "insert/MemManagerFactory.h"
 #include "meta/MetaConsts.h"
 #include "meta/MetaFactory.h"
 #include "meta/SqliteMetaImpl.h"
@@ -1468,7 +1468,6 @@ DBImpl::HybridQuery(const std::shared_ptr<server::Context>& context, const std::
     }
 
     Status status;
-    std::vector<size_t> ids;
     meta::SegmentsSchema files_array;
 
     if (partition_tags.empty()) {
