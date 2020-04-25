@@ -475,9 +475,8 @@ GrpcRequestHandler::SearchByID(::grpc::ServerContext* context, const ::milvus::g
 
     // step 1: partition tags
     std::vector<std::string> partitions;
-    for (auto& partition : request->partition_tag_array()) {
-        partitions.emplace_back(partition);
-    }
+    std::copy(request->partition_tag_array().begin(), request->partition_tag_array().end(),
+              std::back_inserter(partitions));
 
     // step 2: partition tags
     std::vector<int64_t> id_array;
