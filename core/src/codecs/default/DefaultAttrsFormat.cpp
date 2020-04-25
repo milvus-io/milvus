@@ -32,76 +32,43 @@ namespace milvus {
 namespace codec {
 
 void
-DefaultAttrsFormat::read_attrs_internal(const std::string& file_path, off_t offset, size_t num,
-                                        std::vector<uint8_t>& raw_attrs, size_t& nbytes) {
-    int ra_fd = open(file_path.c_str(), O_RDONLY, 00664);
-    if (ra_fd == -1) {
+DefaultAttrsFormat::read_attrs_internal(const storage::FSHandlerPtr& fs_ptr, const std::string& file_path, off_t offset,
+                                        size_t num, std::vector<uint8_t>& raw_attrs, size_t& nbytes) {
+    if (!fs_ptr->reader_ptr_->open(file_path.c_str())) {
         std::string err_msg = "Failed to open file: " + file_path + ", error: " + std::strerror(errno);
         LOG_ENGINE_ERROR_ << err_msg;
         throw Exception(SERVER_CANNOT_CREATE_FILE, err_msg);
     }
 
-    size_t num_bytes;
-    if (::read(ra_fd, &num_bytes, sizeof(size_t)) == -1) {
-        std::string err_msg = "Failed to read from file: " + file_path + ", error: " + std::strerror(errno);
-        LOG_ENGINE_ERROR_ << err_msg;
-        throw Exception(SERVER_WRITE_ERROR, err_msg);
-    }
+    fs_ptr->reader_ptr_->read(&nbytes, sizeof(size_t));
 
-    num = std::min(num, num_bytes - offset);
+    num = std::min(num, nbytes - offset);
 
     offset += sizeof(size_t);
-    int off = lseek(ra_fd, offset, SEEK_SET);
-    if (off == -1) {
-        std::string err_msg = "Failed to seek file: " + file_path + ", error: " + std::strerror(errno);
-        LOG_ENGINE_ERROR_ << err_msg;
-        throw Exception(SERVER_WRITE_ERROR, err_msg);
-    }
+    fs_ptr->reader_ptr_->seekg(offset);
 
     raw_attrs.resize(num / sizeof(uint8_t));
-    if (::read(ra_fd, raw_attrs.data(), num) == -1) {
-        std::string err_msg = "Failed to read from file: " + file_path + ", error: " + std::strerror(errno);
-        LOG_ENGINE_ERROR_ << err_msg;
-        throw Exception(SERVER_WRITE_ERROR, err_msg);
-    }
+    fs_ptr->reader_ptr_->read(raw_attrs.data(), num);
 
-    nbytes = num;
-
-    if (::close(ra_fd) == -1) {
-        std::string err_msg = "Failed to close file: " + file_path + ", error: " + std::strerror(errno);
-        LOG_ENGINE_ERROR_ << err_msg;
-        throw Exception(SERVER_WRITE_ERROR, err_msg);
-    }
+    fs_ptr->reader_ptr_->close();
 }
 
 void
-DefaultAttrsFormat::read_uids_internal(const std::string& file_path, std::vector<int64_t>& uids) {
-    int uid_fd = open(file_path.c_str(), O_RDONLY, 00664);
-    if (uid_fd == -1) {
+DefaultAttrsFormat::read_uids_internal(const storage::FSHandlerPtr& fs_ptr, const std::string& file_path,
+                                       std::vector<int64_t>& uids) {
+    if (!fs_ptr->reader_ptr_->open(file_path.c_str())) {
         std::string err_msg = "Failed to open file: " + file_path + ", error: " + std::strerror(errno);
         LOG_ENGINE_ERROR_ << err_msg;
         throw Exception(SERVER_CANNOT_CREATE_FILE, err_msg);
     }
 
     size_t num_bytes;
-    if (::read(uid_fd, &num_bytes, sizeof(size_t)) == -1) {
-        std::string err_msg = "Failed to read from file: " + file_path + ", error: " + std::strerror(errno);
-        LOG_ENGINE_ERROR_ << err_msg;
-        throw Exception(SERVER_WRITE_ERROR, err_msg);
-    }
+    fs_ptr->reader_ptr_->read(&num_bytes, sizeof(size_t));
 
     uids.resize(num_bytes / sizeof(int64_t));
-    if (::read(uid_fd, uids.data(), num_bytes) == -1) {
-        std::string err_msg = "Failed to read from file: " + file_path + ", error: " + std::strerror(errno);
-        LOG_ENGINE_ERROR_ << err_msg;
-        throw Exception(SERVER_WRITE_ERROR, err_msg);
-    }
+    fs_ptr->reader_ptr_->read(uids.data(), num_bytes);
 
-    if (::close(uid_fd) == -1) {
-        std::string err_msg = "Failed to close file: " + file_path + ", error: " + std::strerror(errno);
-        LOG_ENGINE_ERROR_ << err_msg;
-        throw Exception(SERVER_WRITE_ERROR, err_msg);
-    }
+    fs_ptr->reader_ptr_->read(uids.data(), num_bytes);
 }
 
 void
@@ -123,7 +90,7 @@ DefaultAttrsFormat::read(const milvus::storage::FSHandlerPtr& fs_ptr, milvus::se
     for (; uid_it != it_end; ++uid_it) {
         const auto& path = uid_it->path();
         if (path.extension().string() == user_id_extension_) {
-            read_uids_internal(path.string(), uids);
+            read_uids_internal(fs_ptr, path.string(), uids);
             break;
         }
     }
@@ -134,10 +101,9 @@ DefaultAttrsFormat::read(const milvus::storage::FSHandlerPtr& fs_ptr, milvus::se
         if (path.extension().string() == raw_attr_extension_) {
             auto file_name = path.filename().string();
             auto field_name = file_name.substr(0, file_name.size() - 3);
-            //            void* attr_list;
             std::vector<uint8_t> attr_list;
             size_t nbytes;
-            read_attrs_internal(path.string(), 0, INT64_MAX, attr_list, nbytes);
+            read_attrs_internal(fs_ptr, path.string(), 0, INT64_MAX, attr_list, nbytes);
             milvus::segment::AttrPtr attr =
                 std::make_shared<milvus::segment::Attr>(attr_list, nbytes, uids, field_name);
             attrs_read->attrs.insert(std::pair(field_name, attr));
@@ -238,7 +204,7 @@ DefaultAttrsFormat::read_uids(const milvus::storage::FSHandlerPtr& fs_ptr, std::
     for (; it != it_end; ++it) {
         const auto& path = it->path();
         if (path.extension().string() == user_id_extension_) {
-            read_uids_internal(path.string(), uids);
+            read_uids_internal(fs_ptr, path.string(), uids);
         }
     }
 }

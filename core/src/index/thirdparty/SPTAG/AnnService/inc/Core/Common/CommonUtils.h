@@ -63,13 +63,13 @@ namespace SPTAG
 
             static double GetVector(char* cstr, const char* sep, std::vector<float>& arr, DimensionType& NumDim) {
                 char* current;
-                char* context = NULL;
+                char* context = nullptr;
 
                 DimensionType i = 0;
                 double sum = 0;
                 arr.clear();
                 current = strtok_s(cstr, sep, &context);
-                while (current != NULL && (i < NumDim || NumDim < 0)) {
+                while (current != nullptr && (i < NumDim || NumDim < 0)) {
                     try {
                         float val = (float)atof(current);
                         arr.push_back(val);
@@ -80,7 +80,7 @@ namespace SPTAG
                     }
 
                     sum += arr[i] * arr[i];
-                    current = strtok_s(NULL, sep, &context);
+                    current = strtok_s(nullptr, sep, &context);
                     i++;
                 }
 

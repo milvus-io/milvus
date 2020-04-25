@@ -13,6 +13,7 @@
 #include "db/Utils.h"
 #include "server/DBWrapper.h"
 #include "server/delivery/request/BaseRequest.h"
+#include "server/web_impl/Constants.h"
 #include "utils/Log.h"
 #include "utils/TimeRecorder.h"
 #include "utils/ValidationUtil.h"
@@ -78,9 +79,22 @@ CreateHybridCollectionRequest::OnExecute() {
         fields_schema.fields_schema_[size].collection_id_ = collection_name_;
         fields_schema.fields_schema_[size].field_name_ = vector_dimensions_[0].first;
         fields_schema.fields_schema_[size].field_type_ = (int32_t)engine::meta::hybrid::DataType::VECTOR;
+        auto vector_param = field_params_[size].second;
+        fields_schema.fields_schema_[size].field_params_ = vector_param;
 
         collection_info.dimension_ = vector_dimensions_[0].second;
-        // TODO(yukun): check dimension, metric_type, and assign engine_type
+
+        if (vector_param != "") {
+            auto json_param = nlohmann::json::parse(vector_param);
+            if (json_param.contains("metric_type")) {
+                int32_t metric_type = json_param["metric_type"];
+                collection_info.metric_type_ = metric_type;
+            }
+            if (json_param.contains("engine_type")) {
+                int32_t engine_type = json_param["engine_type"];
+                collection_info.engine_type_ = engine_type;
+            }
+        }
 
         // step 3: create collection
         status = DBWrapper::DB()->CreateHybridCollection(collection_info, fields_schema);

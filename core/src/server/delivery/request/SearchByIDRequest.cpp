@@ -34,12 +34,12 @@ namespace milvus {
 namespace server {
 
 SearchByIDRequest::SearchByIDRequest(const std::shared_ptr<milvus::server::Context>& context,
-                                     const std::string& collection_name, int64_t vector_id, int64_t topk,
-                                     const milvus::json& extra_params, const std::vector<std::string>& partition_list,
-                                     TopKQueryResult& result)
+                                     const std::string& collection_name, const std::vector<int64_t>& id_array,
+                                     int64_t topk, const milvus::json& extra_params,
+                                     const std::vector<std::string>& partition_list, TopKQueryResult& result)
     : BaseRequest(context, BaseRequest::kSearchByID),
       collection_name_(collection_name),
-      vector_id_(vector_id),
+      id_array_(id_array),
       topk_(topk),
       extra_params_(extra_params),
       partition_list_(partition_list),
@@ -48,23 +48,26 @@ SearchByIDRequest::SearchByIDRequest(const std::shared_ptr<milvus::server::Conte
 
 BaseRequestPtr
 SearchByIDRequest::Create(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name,
-                          int64_t vector_id, int64_t topk, const milvus::json& extra_params,
+                          const std::vector<int64_t>& id_array, int64_t topk, const milvus::json& extra_params,
                           const std::vector<std::string>& partition_list, TopKQueryResult& result) {
     return std::shared_ptr<BaseRequest>(
-        new SearchByIDRequest(context, collection_name, vector_id, topk, extra_params, partition_list, result));
+        new SearchByIDRequest(context, collection_name, id_array, topk, extra_params, partition_list, result));
 }
 
 Status
 SearchByIDRequest::OnExecute() {
     try {
-        auto pre_query_ctx = context_->Child("Pre query");
+        milvus::server::ContextChild pre_tracer(context_, "Pre query");
 
-        std::string hdr = "SearchByIDRequest(collection=" + collection_name_ + ", id=" + std::to_string(vector_id_) +
-                          ", k=" + std::to_string(topk_) + ", extra_params=" + extra_params_.dump() + ")";
+        std::string hdr = "SearchByIDRequest(collection=" + collection_name_ + ", k=" + std::to_string(topk_) +
+                          ", extra_params=" + extra_params_.dump() + ")";
 
         TimeRecorder rc(hdr);
 
-        // step 1: check empty id
+        // step 1: check empty id array
+        if (id_array_.empty()) {
+            return Status(SERVER_INVALID_ARGUMENT, "No vector id specified");
+        }
 
         // step 2: check collection name
         auto status = ValidationUtil::ValidateCollectionName(collection_name_);
@@ -140,10 +143,10 @@ SearchByIDRequest::OnExecute() {
         ProfilerStart(fname.c_str());
 #endif
 
-        pre_query_ctx->GetTraceContext()->GetSpan()->Finish();
+        pre_tracer.Finish();
 
-        status = DBWrapper::DB()->QueryByID(context_, collection_name_, partition_list_, (size_t)topk_, extra_params_,
-                                            vector_id_, result_ids, result_distances);
+        status = DBWrapper::DB()->QueryByIDs(context_, collection_name_, partition_list_, (size_t)topk_, extra_params_,
+                                             id_array_, result_ids, result_distances);
 
 #ifdef MILVUS_ENABLE_PROFILING
         ProfilerStop();
@@ -158,14 +161,11 @@ SearchByIDRequest::OnExecute() {
             return Status::OK();  // empty collection
         }
 
-        auto post_query_ctx = context_->Child("Constructing result");
-
         // step 9: construct result array
-        result_.row_num_ = 1;
-        result_.distance_list_ = result_distances;
-        result_.id_list_ = result_ids;
-
-        post_query_ctx->GetTraceContext()->GetSpan()->Finish();
+        milvus::server::ContextChild tracer(context_, "Constructing result");
+        result_.row_num_ = id_array_.size();
+        result_.distance_list_.swap(result_distances);
+        result_.id_list_.swap(result_ids);
 
         rc.RecordSection("construct result and send");
         rc.ElapseFromBegin("totally cost");

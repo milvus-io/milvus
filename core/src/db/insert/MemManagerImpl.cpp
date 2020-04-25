@@ -97,6 +97,7 @@ MemManagerImpl::InsertEntities(const std::string& table_id, int64_t length, cons
                           << "Insert buffer size exceeds limit. Performing force flush";
         auto status = Flush(flushed_tables, false);
         if (!status.ok()) {
+            LOG_ENGINE_DEBUG_ << LogOut("[%s][%ld] ", "insert", 0) << "Flush fail: " << status.message();
             return status;
         }
     }

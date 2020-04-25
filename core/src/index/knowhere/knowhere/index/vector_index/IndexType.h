@@ -43,19 +43,19 @@ using IndexType = std::string;
 
 /* used in 0.8.0 */
 namespace IndexEnum {
-constexpr const char* INVALID = "";
-constexpr const char* INDEX_FAISS_IDMAP = "IDMAP";
-constexpr const char* INDEX_FAISS_IVFFLAT = "IVF_FLAT";
-constexpr const char* INDEX_FAISS_IVFPQ = "IVF_PQ";
-constexpr const char* INDEX_FAISS_IVFSQ8 = "IVF_SQ8";
-constexpr const char* INDEX_FAISS_IVFSQ8H = "IVF_SQ8_HYBRID";
-constexpr const char* INDEX_FAISS_BIN_IDMAP = "BIN_IDMAP";
-constexpr const char* INDEX_FAISS_BIN_IVFFLAT = "BIN_IVF_FLAT";
-constexpr const char* INDEX_NSG = "NSG";
-constexpr const char* INDEX_SPTAG_KDT_RNT = "SPTAG_KDT_RNT";
-constexpr const char* INDEX_SPTAG_BKT_RNT = "SPTAG_BKT_RNT";
-constexpr const char* INDEX_HNSW = "HNSW";
-constexpr const char* INDEX_ANNOY = "ANNOY";
+extern const char* INVALID;
+extern const char* INDEX_FAISS_IDMAP;
+extern const char* INDEX_FAISS_IVFFLAT;
+extern const char* INDEX_FAISS_IVFPQ;
+extern const char* INDEX_FAISS_IVFSQ8;
+extern const char* INDEX_FAISS_IVFSQ8H;
+extern const char* INDEX_FAISS_BIN_IDMAP;
+extern const char* INDEX_FAISS_BIN_IVFFLAT;
+extern const char* INDEX_NSG;
+extern const char* INDEX_SPTAG_KDT_RNT;
+extern const char* INDEX_SPTAG_BKT_RNT;
+extern const char* INDEX_HNSW;
+extern const char* INDEX_ANNOY;
 }  // namespace IndexEnum
 
 enum class IndexMode { MODE_CPU = 0, MODE_GPU = 1 };

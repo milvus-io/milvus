@@ -37,6 +37,17 @@ constexpr milvus::IndexType INDEX_TYPE = milvus::IndexType::IVFSQ8;
 constexpr int32_t NLIST = 16384;
 constexpr uint64_t FIELD_NUM = 3;
 
+void PrintEntity(const std::string& tag, const milvus::Entity& entity) {
+    std::cout << tag << "\t[";
+    for (size_t i = 0; i < entity.float_data.size(); i++) {
+        if (i != 0) {
+            std::cout << ", ";
+        }
+        std::cout << entity.float_data[i];
+    }
+    std::cout << "]" << std::endl;
+}
+
 }  // namespace
 
 ClientTest::ClientTest(const std::string& address, const std::string& port) {
@@ -142,18 +153,25 @@ ClientTest::Flush(const std::string& collection_name) {
 
 void
 ClientTest::ShowCollectionInfo(const std::string& collection_name) {
-    milvus::CollectionInfo collection_info;
+    std::string collection_info;
     milvus::Status stat = conn_->ShowCollectionInfo(collection_name, collection_info);
-    milvus_sdk::Utils::PrintCollectionInfo(collection_info);
+    std::cout << "Collection info: " << collection_info << std::endl;
     std::cout << "ShowCollectionInfo function call status: " << stat.message() << std::endl;
 }
 
 void
-ClientTest::GetEntityById(const std::string& collection_name, int64_t id) {
-    milvus::Entity entity;
-    milvus::Status stat = conn_->GetEntityByID(collection_name, id, entity);
-    std::cout << "The entity " << id << " has " << entity.float_data.size() << " float elements" << std::endl;
-    std::cout << "GetEntityById function call status: " << stat.message() << std::endl;
+ClientTest::GetEntitiesByID(const std::string& collection_name,  const std::vector<int64_t>& id_array) {
+    std::vector<milvus::Entity> entities;
+    {
+        milvus_sdk::TimeRecorder rc("GetEntitiesByID");
+        milvus::Status stat = conn_->GetEntitiesByID(collection_name, id_array, entities);
+        std::cout << "GetEntitiesByID function call status: " << stat.message() << std::endl;
+    }
+
+    for (size_t i = 0; i < entities.size(); i++) {
+        std::string prefix = "No." + std::to_string(i) + " id:" + std::to_string(id_array[i]);
+        PrintEntity(prefix, entities[i]);
+    }
 }
 
 void
@@ -162,6 +180,42 @@ ClientTest::SearchEntities(const std::string& collection_name, int64_t topk, int
     milvus::TopKQueryResult topk_query_result;
     milvus_sdk::Utils::DoSearch(conn_, collection_name, partition_tags, topk, nprobe, search_entity_array_,
                                 topk_query_result);
+}
+
+void
+ClientTest::SearchEntitiesByID(const std::string& collection_name, int64_t topk, int64_t nprobe) {
+    std::vector<std::string> partition_tags;
+    milvus::TopKQueryResult topk_query_result;
+
+    topk_query_result.clear();
+
+    std::vector<int64_t> id_array;
+    for (auto& pair : search_entity_array_) {
+        id_array.push_back(pair.first);
+    }
+
+    JSON json_params = {{"nprobe", nprobe}};
+    milvus_sdk::TimeRecorder rc("SearchByID");
+    milvus::Status stat = conn_->SearchByID(collection_name,
+                                            partition_tags,
+                                            id_array,
+                                            topk,
+                                            json_params.dump(),
+                                            topk_query_result);
+    std::cout << "SearchByID function call status: " << stat.message() << std::endl;
+
+    if (topk_query_result.size() != id_array.size()) {
+        std::cout << "ERROR! wrong result for query by id" << std::endl;
+        return;
+    }
+
+    for (size_t i = 0; i < id_array.size(); i++) {
+        std::cout << "Entity " << id_array[i] << " top " << topk << " search result:" << std::endl;
+        const milvus::QueryResult& one_result = topk_query_result[i];
+        for (size_t j = 0; j < one_result.ids.size(); j++) {
+            std::cout << "\t" << one_result.ids[j] << "\t" << one_result.distances[j] << std::endl;
+        }
+    }
 }
 
 void
@@ -229,86 +283,6 @@ ClientTest::DropCollection(const std::string& collection_name) {
 }
 
 void
-ClientTest::CreateHybridCollection(const std::string& collection_name) {
-    milvus::FieldPtr field_ptr1 = std::make_shared<milvus::Field>();
-    milvus::FieldPtr field_ptr2 = std::make_shared<milvus::Field>();
-    milvus::VectorFieldPtr vec_field_ptr = std::make_shared<milvus::VectorField>();
-    field_ptr1->field_type = milvus::DataType::INT64;
-    field_ptr1->field_name = "field_1";
-    field_ptr2->field_type = milvus::DataType::FLOAT;
-    field_ptr2->field_name = "field_2";
-    vec_field_ptr->field_type = milvus::DataType::VECTOR;
-    vec_field_ptr->field_name = "field_3";
-    vec_field_ptr->dimension = 128;
-
-    std::vector<milvus::FieldPtr> numerica_fields;
-    std::vector<milvus::VectorFieldPtr> vector_fields;
-    numerica_fields.emplace_back(field_ptr1);
-    numerica_fields.emplace_back(field_ptr2);
-    vector_fields.emplace_back(vec_field_ptr);
-
-    milvus::HMapping mapping = {collection_name, numerica_fields, vector_fields};
-    milvus::Status stat = conn_->CreateHybridCollection(mapping);
-    std::cout << "CreateHybridCollection function call status: " << stat.message() << std::endl;
-}
-
-void
-ClientTest::InsertHybridEntities(std::string& collection_name, int64_t row_num) {
-    std::unordered_map<std::string, std::vector<std::string>> numerica_value;
-    std::vector<std::string> value1, value2;
-    value1.resize(row_num);
-    value2.resize(row_num);
-    for (uint64_t i = 0; i < row_num; ++i) {
-        value1[i] = std::to_string(i);
-        value2[i] = std::to_string(i + row_num);
-    }
-    numerica_value.insert(std::make_pair("field_1", value1));
-    numerica_value.insert(std::make_pair("field_2", value2));
-
-    std::unordered_map<std::string, std::vector<milvus::Entity>> vector_value;
-    std::vector<milvus::Entity> entity_array;
-    std::vector<int64_t> record_ids;
-    {  // generate vectors
-        milvus_sdk::Utils::BuildEntities(0,
-                                         row_num,
-                                         entity_array,
-                                         record_ids,
-                                         128);
-    }
-
-    vector_value.insert(std::make_pair("field_3", entity_array));
-    milvus::HEntity entity = {numerica_value, vector_value};
-    std::vector<uint64_t> id_array;
-    milvus::Status status = conn_->InsertEntity(collection_name, "", entity, id_array);
-    std::cout << "InsertHybridEntities function call status: " << status.message() << std::endl;
-}
-
-void
-ClientTest::HybridSearch(std::string& collection_name) {
-    std::vector<std::string> partition_tags;
-    milvus::TopKQueryResult topk_query_result;
-
-    auto leaf_queries = milvus_sdk::Utils::GenLeafQuery();
-
-    //must
-    auto must_clause = std::make_shared<milvus::BooleanQuery>(milvus::Occur::MUST);
-    must_clause->AddLeafQuery(leaf_queries[0]);
-    must_clause->AddLeafQuery(leaf_queries[1]);
-    must_clause->AddLeafQuery(leaf_queries[2]);
-
-    auto query_clause = std::make_shared<milvus::BooleanQuery>();
-    query_clause->AddBooleanQuery(must_clause);
-
-    std::string extra_params;
-    milvus::Status
-        status = conn_->HybridSearch(collection_name, partition_tags, query_clause, extra_params, topk_query_result);
-    for (uint64_t i = 0; i < topk_query_result.size(); ++i) {
-        std::cout << topk_query_result[i].ids[0] << "  ---------  " << topk_query_result[i].distances[0] << std::endl;
-    }
-    std::cout << "HybridSearch function call status: " << status.message() << std::endl;
-}
-
-void
 ClientTest::Test() {
     std::string collection_name = COLLECTION_NAME;
     int64_t dim = COLLECTION_DIMENSION;
@@ -328,8 +302,9 @@ ClientTest::Test() {
     Flush(collection_name);
     ShowCollectionInfo(collection_name);
 
-    GetEntityById(collection_name, search_id_array_[0]);
-    SearchEntities(collection_name, TOP_K, NPROBE);
+    GetEntitiesByID(collection_name, search_id_array_);
+//    SearchEntities(collection_name, TOP_K, NPROBE);
+    SearchEntitiesByID(collection_name, TOP_K, NPROBE);
 
     CreateIndex(collection_name, INDEX_TYPE, NLIST);
     ShowCollectionInfo(collection_name);
@@ -343,14 +318,4 @@ ClientTest::Test() {
 
     DropIndex(collection_name);
     DropCollection(collection_name);
-}
-
-void
-ClientTest::TestHybrid() {
-    std::string collection_name = "HYBRID_TEST";
-    CreateHybridCollection(collection_name);
-    InsertHybridEntities(collection_name, 1000);
-    Flush(collection_name);
-//    SearchEntities(collection_name, )
-    HybridSearch(collection_name);
 }

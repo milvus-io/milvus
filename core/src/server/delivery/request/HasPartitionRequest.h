@@ -8,44 +8,35 @@
 // Unless required by applicable law or agreed to in writing, software distributed under the License
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
-#ifdef MILVUS_GPU_VERSION
+
 #pragma once
 
-#include <condition_variable>
-#include <deque>
-#include <limits>
-#include <list>
-#include <memory>
-#include <mutex>
-#include <queue>
-#include <string>
-#include <thread>
-#include <unordered_map>
-#include <vector>
+#include "server/delivery/request/BaseRequest.h"
 
-#include "config/handler/GpuResourceConfigHandler.h"
-#include "scheduler/optimizer/Pass.h"
+#include <memory>
+#include <string>
 
 namespace milvus {
-namespace scheduler {
+namespace server {
 
-class FaissIVFSQ8Pass : public Pass, public server::GpuResourceConfigHandler {
+class HasPartitionRequest : public BaseRequest {
  public:
-    FaissIVFSQ8Pass() = default;
+    static BaseRequestPtr
+    Create(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name,
+           const std::string& tag, bool& has_partition);
 
- public:
-    void
-    Init() override;
+ protected:
+    HasPartitionRequest(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name,
+                        const std::string& tag, bool& has_partition);
 
-    bool
-    Run(const TaskPtr& task) override;
+    Status
+    OnExecute() override;
 
  private:
-    int64_t count_ = 0;
+    std::string collection_name_;
+    std::string partition_tag_;
+    bool& has_partition_;
 };
 
-using FaissIVFSQ8PassPtr = std::shared_ptr<FaissIVFSQ8Pass>;
-
-}  // namespace scheduler
+}  // namespace server
 }  // namespace milvus
-#endif

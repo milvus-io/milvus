@@ -54,27 +54,31 @@ RolloutHandler(const char* filename, std::size_t size, el::Level level) {
     int ret;
     std::string m(std::string(dir) + "/" + s);
     s = m;
-    if (level == el::Level::Global) {
-        s.append("." + std::to_string(++global_idx));
-        ret = rename(m.c_str(), s.c_str());
-    } else if (level == el::Level::Debug) {
-        s.append("." + std::to_string(++debug_idx));
-        ret = rename(m.c_str(), s.c_str());
-    } else if (level == el::Level::Warning) {
-        s.append("." + std::to_string(++warning_idx));
-        ret = rename(m.c_str(), s.c_str());
-    } else if (level == el::Level::Trace) {
-        s.append("." + std::to_string(++trace_idx));
-        ret = rename(m.c_str(), s.c_str());
-    } else if (level == el::Level::Error) {
-        s.append("." + std::to_string(++error_idx));
-        ret = rename(m.c_str(), s.c_str());
-    } else if (level == el::Level::Fatal) {
-        s.append("." + std::to_string(++fatal_idx));
-        ret = rename(m.c_str(), s.c_str());
-    } else {
-        s.append("." + std::to_string(++global_idx));
-        ret = rename(m.c_str(), s.c_str());
+    switch (level) {
+        case el::Level::Debug:
+            s.append("." + std::to_string(++debug_idx));
+            ret = rename(m.c_str(), s.c_str());
+            break;
+        case el::Level::Warning:
+            s.append("." + std::to_string(++warning_idx));
+            ret = rename(m.c_str(), s.c_str());
+            break;
+        case el::Level::Trace:
+            s.append("." + std::to_string(++trace_idx));
+            ret = rename(m.c_str(), s.c_str());
+            break;
+        case el::Level::Error:
+            s.append("." + std::to_string(++error_idx));
+            ret = rename(m.c_str(), s.c_str());
+            break;
+        case el::Level::Fatal:
+            s.append("." + std::to_string(++fatal_idx));
+            ret = rename(m.c_str(), s.c_str());
+            break;
+        default:
+            s.append("." + std::to_string(++global_idx));
+            ret = rename(m.c_str(), s.c_str());
+            break;
     }
 }
 

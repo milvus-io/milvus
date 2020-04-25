@@ -810,10 +810,17 @@ ExecutionEngineImpl::ExecBinaryQuery(milvus::query::GeneralQueryPtr general_quer
                     std::vector<int8_t> data;
                     data.resize(size / sizeof(int8_t));
                     memcpy(data.data(), attr_data_.at(field_name).data(), size);
+
+                    std::vector<int8_t> term_value;
+                    auto term_size =
+                        general_query->leaf->term_query->field_value.size() * (sizeof(int8_t)) / sizeof(int8_t);
+                    term_value.resize(term_size);
+                    memcpy(term_value.data(), general_query->leaf->term_query->field_value.data(),
+                           term_size * sizeof(int8_t));
+
                     for (uint64_t i = 0; i < data.size(); ++i) {
                         bool value_in_term = false;
-                        for (auto term_value : general_query->leaf->term_query->field_value) {
-                            int8_t query_value = atoi(term_value.c_str());
+                        for (auto query_value : term_value) {
                             if (data[i] == query_value) {
                                 value_in_term = true;
                                 break;
@@ -831,10 +838,16 @@ ExecutionEngineImpl::ExecBinaryQuery(milvus::query::GeneralQueryPtr general_quer
                     std::vector<int16_t> data;
                     data.resize(size / sizeof(int16_t));
                     memcpy(data.data(), attr_data_.at(field_name).data(), size);
+                    std::vector<int16_t> term_value;
+                    auto term_size =
+                        general_query->leaf->term_query->field_value.size() * (sizeof(int8_t)) / sizeof(int16_t);
+                    term_value.resize(term_size);
+                    memcpy(term_value.data(), general_query->leaf->term_query->field_value.data(),
+                           term_size * sizeof(int16_t));
+
                     for (uint64_t i = 0; i < data.size(); ++i) {
                         bool value_in_term = false;
-                        for (auto term_value : general_query->leaf->term_query->field_value) {
-                            int16_t query_value = atoi(term_value.c_str());
+                        for (auto query_value : term_value) {
                             if (data[i] == query_value) {
                                 value_in_term = true;
                                 break;
@@ -852,10 +865,17 @@ ExecutionEngineImpl::ExecBinaryQuery(milvus::query::GeneralQueryPtr general_quer
                     std::vector<int32_t> data;
                     data.resize(size / sizeof(int32_t));
                     memcpy(data.data(), attr_data_.at(field_name).data(), size);
+
+                    std::vector<int32_t> term_value;
+                    auto term_size =
+                        general_query->leaf->term_query->field_value.size() * (sizeof(int8_t)) / sizeof(int32_t);
+                    term_value.resize(term_size);
+                    memcpy(term_value.data(), general_query->leaf->term_query->field_value.data(),
+                           term_size * sizeof(int32_t));
+
                     for (uint64_t i = 0; i < data.size(); ++i) {
                         bool value_in_term = false;
-                        for (auto term_value : general_query->leaf->term_query->field_value) {
-                            int32_t query_value = atoi(term_value.c_str());
+                        for (auto query_value : term_value) {
                             if (data[i] == query_value) {
                                 value_in_term = true;
                                 break;
@@ -873,10 +893,17 @@ ExecutionEngineImpl::ExecBinaryQuery(milvus::query::GeneralQueryPtr general_quer
                     std::vector<int64_t> data;
                     data.resize(size / sizeof(int64_t));
                     memcpy(data.data(), attr_data_.at(field_name).data(), size);
+
+                    std::vector<int64_t> term_value;
+                    auto term_size =
+                        general_query->leaf->term_query->field_value.size() * (sizeof(int8_t)) / sizeof(int64_t);
+                    term_value.resize(term_size);
+                    memcpy(term_value.data(), general_query->leaf->term_query->field_value.data(),
+                           term_size * sizeof(int64_t));
+
                     for (uint64_t i = 0; i < data.size(); ++i) {
                         bool value_in_term = false;
-                        for (auto term_value : general_query->leaf->term_query->field_value) {
-                            int64_t query_value = atoi(term_value.c_str());
+                        for (auto query_value : term_value) {
                             if (data[i] == query_value) {
                                 value_in_term = true;
                                 break;
@@ -894,12 +921,17 @@ ExecutionEngineImpl::ExecBinaryQuery(milvus::query::GeneralQueryPtr general_quer
                     std::vector<float> data;
                     data.resize(size / sizeof(float));
                     memcpy(data.data(), attr_data_.at(field_name).data(), size);
+
+                    std::vector<float> term_value;
+                    auto term_size =
+                        general_query->leaf->term_query->field_value.size() * (sizeof(int8_t)) / sizeof(float);
+                    term_value.resize(term_size);
+                    memcpy(term_value.data(), general_query->leaf->term_query->field_value.data(),
+                           term_size * sizeof(int64_t));
+
                     for (uint64_t i = 0; i < data.size(); ++i) {
                         bool value_in_term = false;
-                        for (auto term_value : general_query->leaf->term_query->field_value) {
-                            std::istringstream iss(term_value);
-                            float query_value;
-                            iss >> query_value;
+                        for (auto query_value : term_value) {
                             if (data[i] == query_value) {
                                 value_in_term = true;
                                 break;
@@ -917,12 +949,17 @@ ExecutionEngineImpl::ExecBinaryQuery(milvus::query::GeneralQueryPtr general_quer
                     std::vector<double> data;
                     data.resize(size / sizeof(double));
                     memcpy(data.data(), attr_data_.at(field_name).data(), size);
+
+                    std::vector<double> term_value;
+                    auto term_size =
+                        general_query->leaf->term_query->field_value.size() * (sizeof(int8_t)) / sizeof(double);
+                    term_value.resize(term_size);
+                    memcpy(term_value.data(), general_query->leaf->term_query->field_value.data(),
+                           term_size * sizeof(double));
+
                     for (uint64_t i = 0; i < data.size(); ++i) {
                         bool value_in_term = false;
-                        for (auto term_value : general_query->leaf->term_query->field_value) {
-                            std::istringstream iss(term_value);
-                            double query_value;
-                            iss >> query_value;
+                        for (auto query_value : term_value) {
                             if (data[i] == query_value) {
                                 value_in_term = true;
                                 break;
@@ -1149,87 +1186,6 @@ ExecutionEngineImpl::Search(int64_t n, const uint8_t* data, int64_t k, const mil
                                 location_.c_str());
     MapAndCopyResult(result, index_->GetUids(), n, k, distances, labels);
     rc.RecordSection("map uids " + std::to_string(n * k));
-
-    if (hybrid) {
-        HybridUnset();
-    }
-
-    return Status::OK();
-}
-
-Status
-ExecutionEngineImpl::Search(int64_t n, const std::vector<int64_t>& ids, int64_t k, const milvus::json& extra_params,
-                            float* distances, int64_t* labels, bool hybrid) {
-    TimeRecorder rc(LogOut("[%s][%ld] ExecutionEngineImpl::Search vector of ids", "search", 0));
-
-    if (index_ == nullptr) {
-        LOG_ENGINE_ERROR_ << LogOut("[%s][%ld] ExecutionEngineImpl: index is null, failed to search", "search", 0);
-        return Status(DB_ERROR, "index is null");
-    }
-
-    milvus::json conf = extra_params;
-    conf[knowhere::meta::TOPK] = k;
-    auto adapter = knowhere::AdapterMgr::GetInstance().GetAdapter(index_->index_type());
-    if (!adapter->CheckSearch(conf, index_->index_type(), index_->index_mode())) {
-        LOG_ENGINE_ERROR_ << LogOut("[%s][%ld] Illegal search params", "search", 0);
-        throw Exception(DB_ERROR, "Illegal search params");
-    }
-
-    if (hybrid) {
-        HybridLoad();
-    }
-
-    rc.RecordSection("search prepare");
-
-    // std::string segment_dir;
-    // utils::GetParentPath(location_, segment_dir);
-    // segment::SegmentReader segment_reader(segment_dir);
-    //    segment::IdBloomFilterPtr id_bloom_filter_ptr;
-    //    segment_reader.LoadBloomFilter(id_bloom_filter_ptr);
-
-    // Check if the id is present. If so, find its offset
-    const std::vector<segment::doc_id_t>& uids = index_->GetUids();
-
-    std::vector<int64_t> offsets;
-    /*
-    std::vector<segment::doc_id_t> uids;
-    auto status = segment_reader.LoadUids(uids);
-    if (!status.ok()) {
-        return status;
-    }
-     */
-
-    // There is only one id in ids
-    for (auto& id : ids) {
-        //        if (id_bloom_filter_ptr->Check(id)) {
-        //            if (uids.empty()) {
-        //                segment_reader.LoadUids(uids);
-        //            }
-        //            auto found = std::find(uids.begin(), uids.end(), id);
-        //            if (found != uids.end()) {
-        //                auto offset = std::distance(uids.begin(), found);
-        //                offsets.emplace_back(offset);
-        //            }
-        //        }
-        auto found = std::find(uids.begin(), uids.end(), id);
-        if (found != uids.end()) {
-            auto offset = std::distance(uids.begin(), found);
-            offsets.emplace_back(offset);
-        }
-    }
-
-    rc.RecordSection("get offset");
-
-    if (!offsets.empty()) {
-        auto dataset = knowhere::GenDatasetWithIds(offsets.size(), index_->Dim(), nullptr, offsets.data());
-        auto result = index_->QueryById(dataset, conf);
-        rc.RecordSection("query by id done");
-
-        LOG_ENGINE_DEBUG_ << LogOut("[%s][%ld] get %ld uids from index %s", "search", 0, index_->GetUids().size(),
-                                    location_.c_str());
-        MapAndCopyResult(result, uids, offsets.size(), k, distances, labels);
-        rc.RecordSection("map uids " + std::to_string(offsets.size() * k));
-    }
 
     if (hybrid) {
         HybridUnset();
