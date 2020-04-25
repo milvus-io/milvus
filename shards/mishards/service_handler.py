@@ -15,7 +15,6 @@ from milvus import MetricType
 from mishards import (db, settings, exceptions)
 from mishards.grpc_utils import mark_grpc_method
 from mishards.grpc_utils.grpc_args_parser import GrpcArgsParser as Parser
-from mishards import utilities
 
 logger = logging.getLogger(__name__)
 
