@@ -66,6 +66,7 @@ set(thirdparty_files
         )
 
 aux_source_directory(${MILVUS_ENGINE_SRC}/server server_files)
+aux_source_directory(${MILVUS_ENGINE_SRC}/server/init server_init_files)
 aux_source_directory(${MILVUS_ENGINE_SRC}/server/grpc_impl grpc_impl_files)
 aux_source_directory(${MILVUS_ENGINE_SRC}/server/grpc_impl/interceptor grpc_interceptor_files)
 aux_source_directory(${MILVUS_ENGINE_SRC}/server/context server_context_files)
@@ -146,6 +147,7 @@ set(common_files
         ${wrapper_files}
         ${storage_files}
         ${helper_files}
+        ${server_init_files}
         ${server_context_files}
         ${tracing_files}
         ${codecs_files}
