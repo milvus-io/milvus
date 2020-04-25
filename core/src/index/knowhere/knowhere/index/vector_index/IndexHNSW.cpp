@@ -158,7 +158,7 @@ IndexHNSW::Query(const DatasetPtr& dataset_ptr, const Config& config) {
         ret = index_->searchKnn((float*)single_query, k, compare, blacklist);
 
         while (ret.size() < k) {
-            ret.push_back(std::make_pair(-1, -1));
+            ret.emplace_back(std::make_pair(-1, -1));
         }
         std::vector<float> dist;
         std::vector<int64_t> ids;
