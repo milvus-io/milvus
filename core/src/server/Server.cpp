@@ -311,6 +311,12 @@ Server::Start() {
         if (!s.ok()) {
             return s;
         }
+        s = StorageChecker::CheckStoragePermission();
+        if (!s.ok()) {
+            std::cerr << "ERROR: Milvus server fail to check storage permission" << std::endl;
+            return s;
+        }
+
         /* record config and hardware information into log */
         LogConfigInFile(config_filename_);
         LogCpuInfo();
