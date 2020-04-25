@@ -108,7 +108,7 @@ message SearchInFilesParam {
 message SearchByIDParam {
     string collection_name = 1;
     repeated string partition_tag_array = 2;
-    int64 id = 3;
+    repeated int64 id_array = 3;
     int64 topk = 4;
     repeated KeyValuePair extra_params = 5;
 }
@@ -181,47 +181,27 @@ message DeleteByIDParam {
 }
 
 /**
- * @brief segment statistics
- */
-message SegmentStat {
-    string segment_name = 1;
-    int64 row_count = 2;
-    string index_name = 3;
-    int64 data_size = 4;
-}
-
-/**
- * @brief collection statistics
- */
-message PartitionStat {
-    string tag = 1;
-    int64 total_row_count = 2;
-    repeated SegmentStat segments_stat = 3;
-}
-
-/**
  * @brief collection information
  */
 message CollectionInfo {
     Status status = 1;
-    int64 total_row_count = 2;
-    repeated PartitionStat partitions_stat = 3;
+    string json_info = 2;
 }
 
 /**
- * @brief vector identity
+ * @brief vectors identity
  */
-message VectorIdentity {
+message VectorsIdentity {
     string collection_name = 1;
-    int64 id = 2;
+    repeated int64 id_array = 2;
 }
 
 /**
  * @brief vector data
  */
-message VectorData {
+message VectorsData {
     Status status = 1;
-    RowRecord vector_data = 2;
+    repeated RowRecord vectors_data = 2;
 }
 
 /**
@@ -537,6 +517,15 @@ service MilvusService {
     rpc CreatePartition(PartitionParam) returns (Status) {}
 
     /**
+     * @brief This method is used to test partition existence.
+     *
+     * @param PartitionParam, target partition.
+     *
+     * @return BoolReply
+     */
+    rpc HasPartition(PartitionParam) returns (BoolReply) {}
+
+    /**
      * @brief This method is used to show partition information
      *
      * @param CollectionName, target collection name.
@@ -564,13 +553,13 @@ service MilvusService {
     rpc Insert(InsertParam) returns (VectorIds) {}
 
     /**
-     * @brief This method is used to get vector data by id.
+     * @brief This method is used to get vectors data by id array.
      *
-     * @param VectorIdentity, target vector id.
+     * @param VectorsIdentity, target vector id array.
      *
-     * @return VectorData
+     * @return VectorsData
      */
-    rpc GetVectorByID(VectorIdentity) returns (VectorData) {}
+    rpc GetVectorsByID(VectorsIdentity) returns (VectorsData) {}
 
     /**
      * @brief This method is used to get vector ids from a segment

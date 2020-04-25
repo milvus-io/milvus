@@ -128,10 +128,6 @@ class ExecutionEngine {
     Search(int64_t n, const uint8_t* data, int64_t k, const milvus::json& extra_params, float* distances,
            int64_t* labels, bool hybrid) = 0;
 
-    virtual Status
-    Search(int64_t n, const std::vector<int64_t>& ids, int64_t k, const milvus::json& extra_params, float* distances,
-           int64_t* labels, bool hybrid) = 0;
-
     virtual std::shared_ptr<ExecutionEngine>
     BuildIndex(const std::string& location, EngineType engine_type) = 0;
 

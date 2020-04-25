@@ -28,9 +28,10 @@
 #include "server/delivery/request/DropIndexRequest.h"
 #include "server/delivery/request/DropPartitionRequest.h"
 #include "server/delivery/request/FlushRequest.h"
-#include "server/delivery/request/GetVectorByIDRequest.h"
 #include "server/delivery/request/GetVectorIDsRequest.h"
+#include "server/delivery/request/GetVectorsByIDRequest.h"
 #include "server/delivery/request/HasCollectionRequest.h"
+#include "server/delivery/request/HasPartitionRequest.h"
 #include "server/delivery/request/InsertRequest.h"
 #include "server/delivery/request/PreloadCollectionRequest.h"
 #include "server/delivery/request/SearchByIDRequest.h"
@@ -93,9 +94,9 @@ RequestHandler::Insert(const std::shared_ptr<Context>& context, const std::strin
 }
 
 Status
-RequestHandler::GetVectorByID(const std::shared_ptr<Context>& context, const std::string& collection_name,
-                              const std::vector<int64_t>& ids, engine::VectorsData& vectors) {
-    BaseRequestPtr request_ptr = GetVectorByIDRequest::Create(context, collection_name, ids, vectors);
+RequestHandler::GetVectorsByID(const std::shared_ptr<Context>& context, const std::string& collection_name,
+                               const std::vector<int64_t>& ids, std::vector<engine::VectorsData>& vectors) {
+    BaseRequestPtr request_ptr = GetVectorsByIDRequest::Create(context, collection_name, ids, vectors);
     RequestScheduler::ExecRequest(request_ptr);
 
     return request_ptr->status();
@@ -120,7 +121,7 @@ RequestHandler::ShowCollections(const std::shared_ptr<Context>& context, std::ve
 
 Status
 RequestHandler::ShowCollectionInfo(const std::shared_ptr<Context>& context, const std::string& collection_name,
-                                   CollectionInfo& collection_info) {
+                                   std::string& collection_info) {
     BaseRequestPtr request_ptr = ShowCollectionInfoRequest::Create(context, collection_name, collection_info);
     RequestScheduler::ExecRequest(request_ptr);
 
@@ -141,10 +142,10 @@ RequestHandler::Search(const std::shared_ptr<Context>& context, const std::strin
 
 Status
 RequestHandler::SearchByID(const std::shared_ptr<Context>& context, const std::string& collection_name,
-                           int64_t vector_id, int64_t topk, const milvus::json& extra_params,
+                           const std::vector<int64_t>& id_array, int64_t topk, const milvus::json& extra_params,
                            const std::vector<std::string>& partition_list, TopKQueryResult& result) {
     BaseRequestPtr request_ptr =
-        SearchByIDRequest::Create(context, collection_name, vector_id, topk, extra_params, partition_list, result);
+        SearchByIDRequest::Create(context, collection_name, id_array, topk, extra_params, partition_list, result);
     RequestScheduler::ExecRequest(request_ptr);
 
     return request_ptr->status();
@@ -214,6 +215,15 @@ Status
 RequestHandler::CreatePartition(const std::shared_ptr<Context>& context, const std::string& collection_name,
                                 const std::string& tag) {
     BaseRequestPtr request_ptr = CreatePartitionRequest::Create(context, collection_name, tag);
+    RequestScheduler::ExecRequest(request_ptr);
+
+    return request_ptr->status();
+}
+
+Status
+RequestHandler::HasPartition(const std::shared_ptr<Context>& context, const std::string& collection_name,
+                             const std::string& tag, bool& has_partition) {
+    BaseRequestPtr request_ptr = HasPartitionRequest::Create(context, collection_name, tag, has_partition);
     RequestScheduler::ExecRequest(request_ptr);
 
     return request_ptr->status();

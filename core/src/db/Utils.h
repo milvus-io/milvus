@@ -70,6 +70,9 @@ struct MetaUriInfo {
 Status
 ParseMetaUri(const std::string& uri, MetaUriInfo& info);
 
+std::string
+GetIndexName(int32_t index_type);
+
 }  // namespace utils
 }  // namespace engine
 }  // namespace milvus
