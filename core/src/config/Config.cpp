@@ -1093,7 +1093,7 @@ Status
 Config::CheckMetricConfigAddress(const std::string& value) {
     if (!ValidationUtil::ValidateIpAddress(value).ok()) {
         std::string msg = "Invalid metric ip: " + value + ". Possible reason: metric_config.ip is invalid.";
-        return Status(SERVER_INVALID_ARGUMENT, "Invalid metric config ip: " + value);
+        return Status(SERVER_INVALID_ARGUMENT, msg);
     }
     return Status::OK();
 }

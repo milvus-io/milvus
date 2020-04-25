@@ -9,6 +9,8 @@ Please mark all change in change log and use the issue from GitHub
 -   \#1929 Skip MySQL meta schema field width check
 -   \#2073 Fix CheckDBConfigBackendUrl error message
 
+-   \#2076 CheckMetricConfigAddress error message
+
 ## Feature
 -   \#1965 FAISS/NSG/HNSW/ANNOY use unified distance calculation algorithm
 -   \#2064 Warn when use SQLite as metadata management
