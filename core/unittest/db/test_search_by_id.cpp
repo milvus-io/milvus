@@ -37,7 +37,7 @@ std::string
 GetCollectionName() {
     auto now = std::chrono::system_clock::now();
     auto micros = std::chrono::duration_cast<std::chrono::microseconds>(now.time_since_epoch()).count();
-    static std::string collection_name = std::to_string(micros);
+    std::string collection_name = std::to_string(micros);
     return collection_name;
 }
 
@@ -460,9 +460,7 @@ TEST_F(GetVectorByIdTest, WITH_DELETE_TEST) {
 }
 
 TEST_F(SearchByIdTest, BINARY_TEST) {
-    milvus::engine::meta::CollectionSchema collection_info;
-    collection_info.dimension_ = COLLECTION_DIM;
-    collection_info.collection_id_ = GetCollectionName();
+    milvus::engine::meta::CollectionSchema collection_info = BuildCollectionSchema();
     collection_info.engine_type_ = (int)milvus::engine::EngineType::FAISS_BIN_IDMAP;
     collection_info.metric_type_ = (int32_t)milvus::engine::MetricType::JACCARD;
     auto stat = db_->CreateCollection(collection_info);
@@ -474,7 +472,7 @@ TEST_F(SearchByIdTest, BINARY_TEST) {
     ASSERT_TRUE(stat.ok());
     ASSERT_EQ(collection_info_get.dimension_, COLLECTION_DIM);
 
-    int insert_loop = 10;
+    int insert_loop = 100;
     int64_t nb = 1000;
 
     for (int k = 0; k < insert_loop; ++k) {
