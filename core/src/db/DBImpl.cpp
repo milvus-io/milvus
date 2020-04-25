@@ -1312,7 +1312,6 @@ DBImpl::HybridQuery(const std::shared_ptr<server::Context>& context, const std::
     }
 
     Status status;
-    std::vector<size_t> ids;
     meta::SegmentsSchema files_array;
 
     if (partition_tags.empty()) {
