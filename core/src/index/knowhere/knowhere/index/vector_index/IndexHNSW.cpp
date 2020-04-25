@@ -68,7 +68,7 @@ IndexHNSW::Load(const BinarySet& index_binary) {
         index_ = std::make_shared<hnswlib::HierarchicalNSW<float>>(space);
         index_->loadIndex(reader);
 
-        normalize = index_->metric_type_ == 1 ? true : false;  // 1 == InnerProduct
+        normalize = index_->metric_type_ == 1;  // 1 == InnerProduct
     } catch (std::exception& e) {
         KNOWHERE_THROW_MSG(e.what());
     }
