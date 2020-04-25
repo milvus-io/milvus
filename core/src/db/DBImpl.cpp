@@ -986,18 +986,16 @@ DBImpl::CompactFile(const std::string& collection_id, const meta::SegmentSchema&
         return status;
     }
 
-    // Update collection files state
-    // if index type isn't IDMAP, set file type to TO_INDEX if file size exceed index_file_size
-    // else set file type to RAW, no need to build index
-    if (!utils::IsRawIndexType(compacted_file.engine_type_)) {
-        compacted_file.file_type_ = (segment_writer_ptr->Size() >= compacted_file.index_file_size_)
-                                        ? meta::SegmentSchema::TO_INDEX
-                                        : meta::SegmentSchema::RAW;
+    // Update compacted file state, if origin file is backup or to_index, set compected file to to_index
+    compacted_file.file_size_ = segment_writer_ptr->Size();
+    compacted_file.row_count_ = segment_writer_ptr->VectorCount();
+    if ((file.file_type_ == (int32_t)meta::SegmentSchema::BACKUP ||
+         file.file_type_ == (int32_t)meta::SegmentSchema::TO_INDEX) &&
+        (compacted_file.row_count_ > meta::BUILD_INDEX_THRESHOLD)) {
+        compacted_file.file_type_ = meta::SegmentSchema::TO_INDEX;
     } else {
         compacted_file.file_type_ = meta::SegmentSchema::RAW;
     }
-    compacted_file.file_size_ = segment_writer_ptr->Size();
-    compacted_file.row_count_ = segment_writer_ptr->VectorCount();
 
     if (compacted_file.row_count_ == 0) {
         LOG_ENGINE_DEBUG_ << "Compacted segment is empty. Mark it as TO_DELETE";
