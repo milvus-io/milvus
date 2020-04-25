@@ -61,4 +61,4 @@ struct VectorField : Field {
 };
 using VectorFieldPtr = std::shared_ptr<VectorField>;
 
-}
+} // namespace milvus

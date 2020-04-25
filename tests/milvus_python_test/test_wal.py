@@ -35,10 +35,10 @@ class TestWalBase:
         status, res = connect.count_collection(collection)
         assert status.OK()
         assert res == nb
-        status, res = connect.get_vector_by_id(collection, ids[0]) 
+        status, res = connect.get_vectors_by_ids(collection, [ids[0]]) 
         logging.getLogger().info(res)
         assert status.OK()
-        assert_equal_vector(res, vectors[0])
+        assert_equal_vector(res[0], vectors[0])
 
     @pytest.mark.timeout(WAL_TIMEOUT)
     def test_wal_delete_vectors(self, connect, collection):
@@ -123,7 +123,7 @@ class TestWalBase:
         status, res = connect.count_collection(collection)
         assert status.OK()
         assert res == 1
-        status, res = connect.get_vector_by_id(collection, ids[0]) 
+        status, res = connect.get_vectors_by_ids(collection, [ids[0]]) 
         logging.getLogger().info(res)
         assert status.OK()
-        assert_equal_vector(res, vector[0])
+        assert_equal_vector(res[0], vector[0])

@@ -31,7 +31,7 @@ class BooleanQuery {
  public:
     BooleanQuery() {}
 
-    BooleanQuery(Occur occur) : occur_(occur) {}
+    explicit BooleanQuery(Occur occur) : occur_(occur) {}
 
     void
     AddLeafQuery(LeafQueryPtr leaf_query) {
@@ -65,4 +65,4 @@ class BooleanQuery {
 };
 using BooleanQueryPtr = std::shared_ptr<BooleanQuery>;
 
-}
+} // namespace milvus

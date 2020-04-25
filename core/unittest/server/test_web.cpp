@@ -1107,25 +1107,27 @@ TEST_F(WebControllerTest, GET_COLLECTION_STAT) {
 
     auto response = client_ptr->getTable(collection_name, "stat", conncetion_ptr);
     ASSERT_EQ(OStatus::CODE_200.code, response->getStatusCode());
-    auto result_json = nlohmann::json::parse(response->readBodyToString()->c_str());
-    ASSERT_TRUE(result_json.contains("count"));
-    ASSERT_EQ(5 * 1000, result_json["count"].get<int64_t>());
 
-    ASSERT_TRUE(result_json.contains("partitions_stat"));
+    std::string json_str = response->readBodyToString()->c_str();
+    auto result_json = nlohmann::json::parse(json_str);
+    ASSERT_TRUE(result_json.contains("row_count"));
+    ASSERT_EQ(5 * 1000, result_json["row_count"].get<uint64_t>());
 
-    auto partitions_stat_json = result_json["partitions_stat"];
+    ASSERT_TRUE(result_json.contains("partitions"));
+
+    auto partitions_stat_json = result_json["partitions"];
     ASSERT_TRUE(partitions_stat_json.is_array());
 
     auto partition0_json = partitions_stat_json[0];
-    ASSERT_TRUE(partition0_json.contains("segments_stat"));
-    ASSERT_TRUE(partition0_json.contains("count"));
-    ASSERT_TRUE(partition0_json.contains("partition_tag"));
+    ASSERT_TRUE(partition0_json.contains("segments"));
+    ASSERT_TRUE(partition0_json.contains("row_count"));
+    ASSERT_TRUE(partition0_json.contains("tag"));
 
-    auto seg0_stat = partition0_json["segments_stat"][0];
-    ASSERT_TRUE(seg0_stat.contains("segment_name"));
-    ASSERT_TRUE(seg0_stat.contains("index"));
-    ASSERT_TRUE(seg0_stat.contains("count"));
-    ASSERT_TRUE(seg0_stat.contains("size"));
+    auto seg0_stat = partition0_json["segments"][0];
+    ASSERT_TRUE(seg0_stat.contains("name"));
+    ASSERT_TRUE(seg0_stat.contains("index_name"));
+    ASSERT_TRUE(seg0_stat.contains("row_count"));
+    ASSERT_TRUE(seg0_stat.contains("data_size"));
 }
 
 TEST_F(WebControllerTest, SHOW_COLLECTIONS) {
@@ -1381,12 +1383,13 @@ TEST_F(WebControllerTest, SHOW_SEGMENTS) {
     ASSERT_EQ(OStatus::CODE_200.code, response->getStatusCode()) << response->readBodyToString()->c_str();
 
     // validate result
-    auto result_json = nlohmann::json::parse(response->readBodyToString()->c_str());
+    std::string json_str = response->readBodyToString()->c_str();
+    auto result_json = nlohmann::json::parse(json_str);
 
-    ASSERT_TRUE(result_json.contains("count"));
+    ASSERT_TRUE(result_json.contains("row_count"));
 
-    ASSERT_TRUE(result_json.contains("segments"));
-    auto segments_json = result_json["segments"];
+    ASSERT_TRUE(result_json.contains("partitions"));
+    auto segments_json = result_json["partitions"];
     ASSERT_TRUE(segments_json.is_array());
 //    ASSERT_EQ(10, segments_json.size());
 }
@@ -1403,17 +1406,18 @@ TEST_F(WebControllerTest, GET_SEGMENT_INFO) {
     ASSERT_EQ(OStatus::CODE_200.code, response->getStatusCode()) << response->readBodyToString()->c_str();
 
     // validate result
-    auto result_json = nlohmann::json::parse(response->readBodyToString()->c_str());
+    std::string json_str = response->readBodyToString()->c_str();
+    auto result_json = nlohmann::json::parse(json_str);
 
-    auto segment0_json = result_json["segments"][0];
-    std::string segment_name = segment0_json["segment_name"];
-
+    auto segment0_json = result_json["partitions"][0]["segments"][0];
+    std::string segment_name = segment0_json["name"];
 
     // get segment ids
     response = client_ptr->getSegmentInfo(collection_name, segment_name.c_str(), "ids", "0", "10");
     ASSERT_EQ(OStatus::CODE_200.code, response->getStatusCode()) << response->readBodyToString()->c_str();
 
-    auto ids_result_json = nlohmann::json::parse(response->readBodyToString()->c_str());
+    json_str = response->readBodyToString()->c_str();
+    auto ids_result_json = nlohmann::json::parse(json_str);
     ASSERT_TRUE(ids_result_json.contains("ids"));
     auto ids_json = ids_result_json["ids"];
     ASSERT_TRUE(ids_json.is_array());
@@ -1423,7 +1427,8 @@ TEST_F(WebControllerTest, GET_SEGMENT_INFO) {
     response = client_ptr->getSegmentInfo(collection_name, segment_name.c_str(), "vectors", "0", "10");
     ASSERT_EQ(OStatus::CODE_200.code, response->getStatusCode()) << response->readBodyToString()->c_str();
 
-    auto vecs_result_json = nlohmann::json::parse(response->readBodyToString()->c_str());
+    json_str = response->readBodyToString()->c_str();
+    auto vecs_result_json = nlohmann::json::parse(json_str);
     ASSERT_TRUE(vecs_result_json.contains("vectors"));
     auto vecs_json = vecs_result_json["vectors"];
     ASSERT_TRUE(vecs_json.is_array());
@@ -1457,16 +1462,17 @@ TEST_F(WebControllerTest, SEGMENT_FILTER) {
     auto response = client_ptr->showSegments(collection_name, "0", "10", "_default", conncetion_ptr);
     ASSERT_EQ(OStatus::CODE_200.code, response->getStatusCode()) << response->readBodyToString()->c_str();
 
-    auto result_json = nlohmann::json::parse(response->readBodyToString()->c_str());
-    ASSERT_TRUE(result_json.contains("count"));
+    std::string json_str = response->readBodyToString()->c_str();
+    auto result_json = nlohmann::json::parse(json_str);
+    ASSERT_TRUE(result_json.contains("row_count"));
 
-    ASSERT_TRUE(result_json.contains("segments"));
-    auto segments_json = result_json["segments"];
-    ASSERT_TRUE(segments_json.is_array());
-    for (auto& s : segments_json) {
-        ASSERT_TRUE(s.contains("partition_tag"));
-        ASSERT_EQ("_default", s["partition_tag"].get<std::string>());
+    ASSERT_TRUE(result_json.contains("partitions"));
+    auto partitions_json = result_json["partitions"];
+    ASSERT_TRUE(partitions_json.is_array());
+    for (auto& part : partitions_json) {
+        ASSERT_TRUE(part.contains("tag"));
     }
+    ASSERT_EQ("_default", partitions_json[0]["tag"].get<std::string>());
 }
 
 TEST_F(WebControllerTest, SEARCH) {

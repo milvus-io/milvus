@@ -137,32 +137,6 @@ WebRequestHandler::AddStatusToJson(nlohmann::json& json, int64_t code, const std
 }
 
 Status
-WebRequestHandler::ParseSegmentStat(const milvus::server::SegmentStat& seg_stat, nlohmann::json& json) {
-    json["segment_name"] = seg_stat.name_;
-    json["index"] = seg_stat.index_name_;
-    json["count"] = seg_stat.row_num_;
-    json["size"] = seg_stat.data_size_;
-
-    return Status::OK();
-}
-
-Status
-WebRequestHandler::ParsePartitionStat(const milvus::server::PartitionStat& par_stat, nlohmann::json& json) {
-    json["partition_tag"] = par_stat.tag_;
-    json["count"] = par_stat.total_row_num_;
-
-    std::vector<nlohmann::json> seg_stat_json;
-    for (auto& seg : par_stat.segments_stat_) {
-        nlohmann::json seg_json;
-        ParseSegmentStat(seg, seg_json);
-        seg_stat_json.push_back(seg_json);
-    }
-    json["segments_stat"] = seg_stat_json;
-
-    return Status::OK();
-}
-
-Status
 WebRequestHandler::IsBinaryTable(const std::string& collection_name, bool& bin) {
     CollectionSchema schema;
     auto status = request_handler_.DescribeCollection(context_ptr_, collection_name, schema);
@@ -241,19 +215,14 @@ WebRequestHandler::GetTableMetaInfo(const std::string& collection_name, nlohmann
 
 Status
 WebRequestHandler::GetTableStat(const std::string& collection_name, nlohmann::json& json_out) {
-    struct CollectionInfo collection_info;
+    std::string collection_info;
     auto status = request_handler_.ShowCollectionInfo(context_ptr_, collection_name, collection_info);
 
     if (status.ok()) {
-        json_out["count"] = collection_info.total_row_num_;
-
-        std::vector<nlohmann::json> par_stat_json;
-        for (auto& par : collection_info.partitions_stat_) {
-            nlohmann::json par_json;
-            ParsePartitionStat(par, par_json);
-            par_stat_json.push_back(par_json);
+        try {
+            json_out = nlohmann::json::parse(collection_info);
+        } catch (std::exception& e) {
         }
-        json_out["partitions_stat"] = par_stat_json;
     }
 
     return status;
@@ -846,18 +815,13 @@ Status
 WebRequestHandler::GetVectorsByIDs(const std::string& collection_name, const std::vector<int64_t>& ids,
                                    nlohmann::json& json_out) {
     std::vector<engine::VectorsData> vector_batch;
-    for (size_t i = 0; i < ids.size(); i++) {
-        auto vec_ids = std::vector<int64_t>(ids.begin() + i, ids.begin() + i + 1);
-        engine::VectorsData vectors_data;
-        auto status = request_handler_.GetVectorByID(context_ptr_, collection_name, vec_ids, vectors_data);
-        if (!status.ok()) {
-            return status;
-        }
-        vector_batch.push_back(vectors_data);
+    auto status = request_handler_.GetVectorsByID(context_ptr_, collection_name, ids, vector_batch);
+    if (!status.ok()) {
+        return status;
     }
 
     bool bin;
-    auto status = IsBinaryTable(collection_name, bin);
+    status = IsBinaryTable(collection_name, bin);
     if (!status.ok()) {
         return status;
     }
@@ -1492,52 +1456,14 @@ WebRequestHandler::ShowSegments(const OString& collection_name, const OQueryPara
         tag = query_params.get("partition_tag")->std_str();
     }
 
-    CollectionInfo info;
+    std::string info;
     status = request_handler_.ShowCollectionInfo(context_ptr_, collection_name->std_str(), info);
     if (!status.ok()) {
         ASSIGN_RETURN_STATUS_DTO(status)
     }
 
-    typedef std::pair<std::string, SegmentStat> Pair;
-    std::vector<Pair> segments;
-    for (auto& par_stat : info.partitions_stat_) {
-        if (!(all_required || tag.empty() || tag == par_stat.tag_)) {
-            continue;
-        }
-        for (auto& seg_stat : par_stat.segments_stat_) {
-            auto segment_stat = std::pair<std::string, SegmentStat>(par_stat.tag_, seg_stat);
-            segments.push_back(segment_stat);
-        }
-    }
-
-    auto compare = [](Pair& a, Pair& b) -> bool { return a.second.name_ >= b.second.name_; };
-    std::sort(segments.begin(), segments.end(), compare);
-
-    int64_t size = segments.size();
-    int64_t iter_begin = 0;
-    int64_t iter_end = size;
-    if (!all_required) {
-        iter_begin = std::min(size, offset);
-        iter_end = std::min(size, offset + page_size);
-    }
-
-    nlohmann::json result_json;
-    if (segments.empty()) {
-        result_json["segments"] = std::vector<int64_t>();
-    } else {
-        nlohmann::json segs_json;
-        for (auto iter = iter_begin; iter < iter_end; iter++) {
-            nlohmann::json seg_json;
-            ParseSegmentStat(segments.at(iter).second, seg_json);
-            seg_json["partition_tag"] = segments.at(iter).first;
-            segs_json.push_back(seg_json);
-        }
-        result_json["segments"] = segs_json;
-    }
-
-    result_json["count"] = size;
+    nlohmann::json result_json = nlohmann::json::parse(info);
     AddStatusToJson(result_json, status.code(), status.message());
-
     response = result_json.dump().c_str();
 
     ASSIGN_RETURN_STATUS_DTO(status)

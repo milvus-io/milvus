@@ -180,6 +180,17 @@ class GrpcRequestHandler final : public ::milvus::grpc::MilvusService::Service, 
     ::grpc::Status
     CreatePartition(::grpc::ServerContext* context, const ::milvus::grpc::PartitionParam* request,
                     ::milvus::grpc::Status* response) override;
+
+    // *
+    // @brief This method is used to test partition existence.
+    //
+    // @param PartitionParam, target partition.
+    //
+    // @return BoolReply
+    ::grpc::Status
+    HasPartition(::grpc::ServerContext* context, const ::milvus::grpc::PartitionParam* request,
+                 ::milvus::grpc::BoolReply* response);
+
     // *
     // @brief This method is used to show partition information
     //
@@ -208,14 +219,15 @@ class GrpcRequestHandler final : public ::milvus::grpc::MilvusService::Service, 
     Insert(::grpc::ServerContext* context, const ::milvus::grpc::InsertParam* request,
            ::milvus::grpc::VectorIds* response) override;
     // *
-    // @brief This method is used to get vector data by id.
+    // @brief This method is used to get vectors data by id array.
     //
-    // @param VectorIdentity, target vector id.
+    // @param VectorsIdentity, target vector id array.
     //
-    // @return VectorData
+    // @return VectorsData
     ::grpc::Status
-    GetVectorByID(::grpc::ServerContext* context, const ::milvus::grpc::VectorIdentity* request,
-                  ::milvus::grpc::VectorData* response);
+    GetVectorsByID(::grpc::ServerContext* context, const ::milvus::grpc::VectorsIdentity* request,
+                   ::milvus::grpc::VectorsData* response);
+
     // *
     // @brief This method is used to get vector ids from a segment
     //

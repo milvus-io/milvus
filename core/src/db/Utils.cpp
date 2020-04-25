@@ -24,6 +24,8 @@
 #include "utils/CommonUtil.h"
 #include "utils/Log.h"
 
+#include <map>
+
 namespace milvus {
 namespace engine {
 namespace utils {
@@ -291,6 +293,29 @@ ParseMetaUri(const std::string& uri, MetaUriInfo& info) {
     }
 
     return Status::OK();
+}
+
+std::string
+GetIndexName(int32_t index_type) {
+    static std::map<int32_t, std::string> index_type_name = {
+        {(int32_t)engine::EngineType::FAISS_IDMAP, "IDMAP"},
+        {(int32_t)engine::EngineType::FAISS_IVFFLAT, "IVFFLAT"},
+        {(int32_t)engine::EngineType::FAISS_IVFSQ8, "IVFSQ8"},
+        {(int32_t)engine::EngineType::NSG_MIX, "NSG"},
+        {(int32_t)engine::EngineType::ANNOY, "ANNOY"},
+        {(int32_t)engine::EngineType::FAISS_IVFSQ8H, "IVFSQ8H"},
+        {(int32_t)engine::EngineType::FAISS_PQ, "PQ"},
+        {(int32_t)engine::EngineType::SPTAG_KDT, "KDT"},
+        {(int32_t)engine::EngineType::SPTAG_BKT, "BKT"},
+        {(int32_t)engine::EngineType::FAISS_BIN_IDMAP, "IDMAP"},
+        {(int32_t)engine::EngineType::FAISS_BIN_IVFFLAT, "IVFFLAT"},
+    };
+
+    if (index_type_name.find(index_type) == index_type_name.end()) {
+        return "Unknow";
+    }
+
+    return index_type_name[index_type];
 }
 
 }  // namespace utils

@@ -19,7 +19,7 @@ nb = 6000
 
 
 class TestGetVectorIdsBase:
-    def get_valid_segment_name(self, connect, collection):
+    def get_valid_name(self, connect, collection):
         vectors = gen_vector(nb, dim)
         status, ids = connect.add_vectors(collection, vectors)
         assert status.OK()
@@ -27,8 +27,7 @@ class TestGetVectorIdsBase:
         assert status.OK()
         status, info = connect.collection_info(collection)
         assert status.OK()
-        logging.getLogger().info(info.partitions_stat[0].segments_stat[0].segment_name)
-        return info.partitions_stat[0].segments_stat[0].segment_name
+        return info["partitions"][0]["segments"][0]["name"]
         
     """
     ******************************************************************
@@ -43,9 +42,9 @@ class TestGetVectorIdsBase:
         expected: exception raised
         '''
         collection_name = None
-        segment_name = self.get_valid_segment_name(connect, collection)
+        name = self.get_valid_name(connect, collection)
         with pytest.raises(Exception) as e:
-            status, vector_ids = connect.get_vector_ids(collection_name, segment_name)
+            status, vector_ids = connect.get_vector_ids(collection_name, name)
 
     @pytest.mark.timeout(GET_TIMEOUT)
     def test_get_vector_ids_collection_name_not_existed(self, connect, collection):
@@ -55,8 +54,8 @@ class TestGetVectorIdsBase:
         expected: status not ok
         '''
         collection_name = gen_unique_str("not_existed_collection")
-        segment_name = self.get_valid_segment_name(connect, collection)
-        status, vector_ids = connect.get_vector_ids(collection_name, segment_name)
+        name = self.get_valid_name(connect, collection)
+        status, vector_ids = connect.get_vector_ids(collection_name, name)
         assert not status.OK()
     
     @pytest.fixture(
@@ -74,30 +73,30 @@ class TestGetVectorIdsBase:
         expected: status not ok
         '''
         collection_name = get_collection_name
-        segment_name = self.get_valid_segment_name(connect, collection)
-        status, vector_ids = connect.get_vector_ids(collection_name, segment_name)
+        name = self.get_valid_name(connect, collection)
+        status, vector_ids = connect.get_vector_ids(collection_name, name)
         assert not status.OK()
 
     @pytest.mark.timeout(GET_TIMEOUT)
-    def test_get_vector_ids_segment_name_None(self, connect, collection):
+    def test_get_vector_ids_name_None(self, connect, collection):
         '''
         target: get vector ids where segment name is None
-        method: call get_vector_ids with the segment_name: None
+        method: call get_vector_ids with the name: None
         expected: exception raised
         '''
-        valid_segment_name = self.get_valid_segment_name(connect, collection)
+        valid_name = self.get_valid_name(connect, collection)
         segment = None
         with pytest.raises(Exception) as e:
             status, vector_ids = connect.get_vector_ids(collection, segment)
 
     @pytest.mark.timeout(GET_TIMEOUT)
-    def test_get_vector_ids_segment_name_not_existed(self, connect, collection):
+    def test_get_vector_ids_name_not_existed(self, connect, collection):
         '''
         target: get vector ids where segment name does not exist
         method: call get_vector_ids with a random segment name
         expected: status not ok
         '''
-        valid_segment_name = self.get_valid_segment_name(connect, collection)
+        valid_name = self.get_valid_name(connect, collection)
         segment = gen_unique_str("not_existed_segment")
         status, vector_ids = connect.get_vector_ids(collection, segment)
         logging.getLogger().info(vector_ids)
@@ -117,7 +116,7 @@ class TestGetVectorIdsBase:
         assert status.OK()
         status, info = connect.collection_info(collection)
         assert status.OK()
-        status, vector_ids = connect.get_vector_ids(collection, info.partitions_stat[0].segments_stat[0].segment_name)
+        status, vector_ids = connect.get_vector_ids(collection, info["partitions"][0]["segments"][0]["name"])
         # vector_ids should match ids
         assert len(vector_ids) == 10
         for i in range(10):
@@ -140,8 +139,8 @@ class TestGetVectorIdsBase:
         assert status.OK()
         status, info = connect.collection_info(collection)
         assert status.OK()
-        assert info.partitions_stat[1].tag == tag
-        status, vector_ids = connect.get_vector_ids(collection, info.partitions_stat[1].segments_stat[0].segment_name)
+        assert info["partitions"][1]["tag"] == tag
+        status, vector_ids = connect.get_vector_ids(collection, info["partitions"][1]["segments"][0]["name"])
         # vector_ids should match ids
         assert len(vector_ids) == 10
         for i in range(10):
@@ -177,7 +176,7 @@ class TestGetVectorIdsBase:
         assert status.OK()
         status, info = connect.collection_info(collection)
         assert status.OK()
-        status, vector_ids = connect.get_vector_ids(collection, info.partitions_stat[0].segments_stat[0].segment_name)
+        status, vector_ids = connect.get_vector_ids(collection, info["partitions"][0]["segments"][0]["name"])
         # vector_ids should match ids
         assert len(vector_ids) == 10
         for i in range(10):
@@ -203,8 +202,8 @@ class TestGetVectorIdsBase:
         assert status.OK()
         status, info = connect.collection_info(collection)
         assert status.OK()
-        assert info.partitions_stat[1].tag == tag
-        status, vector_ids = connect.get_vector_ids(collection, info.partitions_stat[1].segments_stat[0].segment_name)
+        assert info["partitions"][1]["tag"] == tag
+        status, vector_ids = connect.get_vector_ids(collection, info["partitions"][1]["segments"][0]["name"])
         # vector_ids should match ids
         assert len(vector_ids) == 10
         for i in range(10):
@@ -226,7 +225,7 @@ class TestGetVectorIdsBase:
         assert status.OK()
         status, info = connect.collection_info(collection)
         assert status.OK()
-        status, vector_ids = connect.get_vector_ids(collection, info.partitions_stat[0].segments_stat[0].segment_name)
+        status, vector_ids = connect.get_vector_ids(collection, info["partitions"][0]["segments"][0]["name"])
         assert len(vector_ids) == 1
         assert vector_ids[0] == ids[1]
 
@@ -251,7 +250,7 @@ class TestGetVectorIdsIP:
         assert status.OK()
         status, info = connect.collection_info(ip_collection)
         assert status.OK()
-        status, vector_ids = connect.get_vector_ids(ip_collection, info.partitions_stat[0].segments_stat[0].segment_name)
+        status, vector_ids = connect.get_vector_ids(ip_collection, info["partitions"][0]["segments"][0]["name"])
         # vector_ids should match ids
         assert len(vector_ids) == 10
         for i in range(10):
@@ -274,8 +273,8 @@ class TestGetVectorIdsIP:
         assert status.OK()
         status, info = connect.collection_info(ip_collection)
         assert status.OK()
-        assert info.partitions_stat[1].tag == tag
-        status, vector_ids = connect.get_vector_ids(ip_collection, info.partitions_stat[1].segments_stat[0].segment_name)
+        assert info["partitions"][1]["tag"] == tag
+        status, vector_ids = connect.get_vector_ids(ip_collection, info["partitions"][1]["segments"][0]["name"])
         # vector_ids should match ids
         assert len(vector_ids) == 10
         for i in range(10):
@@ -311,7 +310,7 @@ class TestGetVectorIdsIP:
         assert status.OK()
         status, info = connect.collection_info(ip_collection)
         assert status.OK()
-        status, vector_ids = connect.get_vector_ids(ip_collection, info.partitions_stat[0].segments_stat[0].segment_name)
+        status, vector_ids = connect.get_vector_ids(ip_collection, info["partitions"][0]["segments"][0]["name"])
         # vector_ids should match ids
         assert len(vector_ids) == 10
         for i in range(10):
@@ -337,8 +336,8 @@ class TestGetVectorIdsIP:
         assert status.OK()
         status, info = connect.collection_info(ip_collection)
         assert status.OK()
-        assert info.partitions_stat[1].tag == tag
-        status, vector_ids = connect.get_vector_ids(ip_collection, info.partitions_stat[1].segments_stat[0].segment_name)
+        assert info["partitions"][1]["tag"] == tag
+        status, vector_ids = connect.get_vector_ids(ip_collection, info["partitions"][1]["segments"][0]["name"])
         # vector_ids should match ids
         assert len(vector_ids) == 10
         for i in range(10):
@@ -360,7 +359,7 @@ class TestGetVectorIdsIP:
         assert status.OK()
         status, info = connect.collection_info(ip_collection)
         assert status.OK()
-        status, vector_ids = connect.get_vector_ids(ip_collection, info.partitions_stat[0].segments_stat[0].segment_name)
+        status, vector_ids = connect.get_vector_ids(ip_collection, info["partitions"][0]["segments"][0]["name"])
         assert len(vector_ids) == 1
         assert vector_ids[0] == ids[1]
 
@@ -385,12 +384,11 @@ class TestGetVectorIdsJAC:
         assert status.OK()
         status, info = connect.collection_info(jac_collection)
         assert status.OK()
-        status, vector_ids = connect.get_vector_ids(jac_collection, info.partitions_stat[0].segments_stat[0].segment_name)
+        status, vector_ids = connect.get_vector_ids(jac_collection, info["partitions"][0]["segments"][0]["name"])
         # vector_ids should match ids
         assert len(vector_ids) == 10
         for i in range(10):
             assert vector_ids[i] == ids[i]
-
 
     @pytest.mark.timeout(GET_TIMEOUT)
     def test_get_vector_ids_without_index_B(self, connect, jac_collection):
@@ -408,8 +406,8 @@ class TestGetVectorIdsJAC:
         assert status.OK()
         status, info = connect.collection_info(jac_collection)
         assert status.OK()
-        assert info.partitions_stat[1].tag == tag
-        status, vector_ids = connect.get_vector_ids(jac_collection, info.partitions_stat[1].segments_stat[0].segment_name)
+        assert info["partitions"][1]["tag"] == tag
+        status, vector_ids = connect.get_vector_ids(jac_collection, info["partitions"][1]["segments"][0]["name"])
         # vector_ids should match ids
         assert len(vector_ids) == 10
         for i in range(10):
@@ -444,7 +442,7 @@ class TestGetVectorIdsJAC:
         assert status.OK()
         status, info = connect.collection_info(jac_collection)
         assert status.OK()
-        status, vector_ids = connect.get_vector_ids(jac_collection, info.partitions_stat[0].segments_stat[0].segment_name)
+        status, vector_ids = connect.get_vector_ids(jac_collection, info["partitions"][0]["segments"][0]["name"])
         # vector_ids should match ids
         assert len(vector_ids) == 10
         for i in range(10):
@@ -470,8 +468,8 @@ class TestGetVectorIdsJAC:
         assert status.OK()
         status, info = connect.collection_info(jac_collection)
         assert status.OK()
-        assert info.partitions_stat[1].tag == tag
-        status, vector_ids = connect.get_vector_ids(jac_collection, info.partitions_stat[1].segments_stat[0].segment_name)
+        assert info["partitions"][1]["tag"] == tag
+        status, vector_ids = connect.get_vector_ids(jac_collection, info["partitions"][1]["segments"][0]["name"])
         # vector_ids should match ids
         assert len(vector_ids) == 10
         for i in range(10):
@@ -493,6 +491,6 @@ class TestGetVectorIdsJAC:
         assert status.OK()
         status, info = connect.collection_info(jac_collection)
         assert status.OK()
-        status, vector_ids = connect.get_vector_ids(jac_collection, info.partitions_stat[0].segments_stat[0].segment_name)
+        status, vector_ids = connect.get_vector_ids(jac_collection, info["partitions"][0]["segments"][0]["name"])
         assert len(vector_ids) == 1
         assert vector_ids[0] == ids[1]

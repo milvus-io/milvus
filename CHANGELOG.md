@@ -12,6 +12,9 @@ Please mark all change in change log and use the issue from GitHub
 -   \#2076 CheckMetricConfigAddress error message
 
 ## Feature
+-   \#1751 Add api SearchByID
+-   \#1752 Add api GetVectorsByID
+-   \#1962 Add api HasPartition
 -   \#1965 FAISS/NSG/HNSW/ANNOY use unified distance calculation algorithm
 -   \#2064 Warn when use SQLite as metadata management
 

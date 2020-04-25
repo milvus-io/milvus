@@ -92,12 +92,6 @@ class WebRequestHandler {
     AddStatusToJson(nlohmann::json& json, int64_t code, const std::string& msg);
 
     Status
-    ParseSegmentStat(const SegmentStat& seg_stat, nlohmann::json& json);
-
-    Status
-    ParsePartitionStat(const PartitionStat& par_stat, nlohmann::json& json);
-
-    Status
     IsBinaryTable(const std::string& collection_name, bool& bin);
 
     Status
