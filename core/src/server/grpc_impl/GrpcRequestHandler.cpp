@@ -527,9 +527,8 @@ GrpcRequestHandler::SearchInFiles(::grpc::ServerContext* context, const ::milvus
 
     // step 3: partition tags
     std::vector<std::string> partitions;
-    for (auto& partition : search_request->partition_tag_array()) {
-        partitions.emplace_back(partition);
-    }
+    std::copy(search_request->partition_tag_array().begin(), search_request->partition_tag_array().end(),
+              std::back_inserter(partitions));
 
     // step 4: parse extra parameters
     milvus::json json_params;
@@ -799,6 +798,13 @@ GrpcRequestHandler::CreateHybridCollection(::grpc::ServerContext* context, const
 }
 
 ::grpc::Status
+GrpcRequestHandler::DescribeHybridCollection(::grpc::ServerContext* context,
+                                             const ::milvus::grpc::CollectionName* request,
+                                             ::milvus::grpc::Mapping* response) {
+    CHECK_NULLPTR_RETURN(request);
+}
+
+::grpc::Status
 GrpcRequestHandler::InsertEntity(::grpc::ServerContext* context, const ::milvus::grpc::HInsertParam* request,
                                  ::milvus::grpc::HEntityIDs* response) {
     CHECK_NULLPTR_RETURN(request);
@@ -915,7 +921,6 @@ GrpcRequestHandler::HybridSearch(::grpc::ServerContext* context, const ::milvus:
     DeSerialization(request->general_query(), boolean_query);
 
     query::GeneralQueryPtr general_query = std::make_shared<query::GeneralQuery>();
-    general_query->bin = std::make_shared<query::BinaryQuery>();
     query::GenBinaryQuery(boolean_query, general_query->bin);
 
     Status status;

@@ -1189,7 +1189,6 @@ DBImpl::GetVectorsByIdHelper(const std::string& collection_id, const IDNumbers& 
 
         for (IDNumbers::iterator it = temp_ids.begin(); it != temp_ids.end();) {
             int64_t vector_id = *it;
-
             // each id must has a VectorsData
             // if vector not found for an id, its VectorsData's vector_count = 0, else 1
             VectorsData& vector_ref = map_id2vector[vector_id];
@@ -1197,7 +1196,6 @@ DBImpl::GetVectorsByIdHelper(const std::string& collection_id, const IDNumbers& 
             // Check if the id is present in bloom filter.
             if (id_bloom_filter_ptr->Check(vector_id)) {
                 // Load uids and check if the id is indeed present. If yes, find its offset.
-                std::vector<int64_t> offsets;
                 std::vector<segment::doc_id_t> uids;
                 auto status = segment_reader.LoadUids(uids);
                 if (!status.ok()) {
@@ -2444,6 +2442,7 @@ DBImpl::ExecWalRecord(const wal::MXLogRecord& record) {
             std::string target_collection_name;
             status = GetPartitionByTag(record.collection_id, record.partition_tag, target_collection_name);
             if (!status.ok()) {
+                LOG_WAL_ERROR_ << LogOut("[%s][%ld] ", "insert", 0) << "Get partition fail: " << status.message();
                 return status;
             }
 
