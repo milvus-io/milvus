@@ -1165,7 +1165,6 @@ DBImpl::GetVectorByIdHelper(const std::string& collection_id, IDNumber vector_id
         // Check if the id is present in bloom filter.
         if (id_bloom_filter_ptr->Check(vector_id)) {
             // Load uids and check if the id is indeed present. If yes, find its offset.
-            std::vector<int64_t> offsets;
             std::vector<segment::doc_id_t> uids;
             auto status = segment_reader.LoadUids(uids);
             if (!status.ok()) {
