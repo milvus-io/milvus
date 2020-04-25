@@ -538,9 +538,7 @@ GrpcRequestHandler::SearchInFiles(::grpc::ServerContext* context, const ::milvus
 
     // step 2: copy file id array
     std::vector<std::string> file_ids;
-    for (auto& file_id : request->file_id_array()) {
-        file_ids.emplace_back(file_id);
-    }
+    std::copy(request->file_id_array().begin(), request->file_id_array().end(), std::back_inserter(file_ids));
 
     // step 3: partition tags
     std::vector<std::string> partitions;
