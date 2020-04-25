@@ -52,7 +52,7 @@ InstanceLockCheck::Check(const std::string& path) {
         return Status(SERVER_UNEXPECTED_ERROR, msg);
     }
 
-    LOG_SERVER_INFO_ << "InstanceLockCheck passed";
+    LOG_SERVER_INFO_ << "InstanceLockCheck passed.";
 
     return Status::OK();
 }
