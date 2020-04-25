@@ -498,9 +498,8 @@ GrpcRequestHandler::SearchByID(::grpc::ServerContext* context, const ::milvus::g
 
     // step 1: partition tags
     std::vector<std::string> partitions;
-    for (auto& partition : request->partition_tag_array()) {
-        partitions.emplace_back(partition);
-    }
+    std::copy(request->partition_tag_array().begin(), request->partition_tag_array().end(),
+              std::back_inserter(partitions));
 
     // step 2: parse extra parameters
     milvus::json json_params;
@@ -538,9 +537,7 @@ GrpcRequestHandler::SearchInFiles(::grpc::ServerContext* context, const ::milvus
 
     // step 2: copy file id array
     std::vector<std::string> file_ids;
-    for (auto& file_id : request->file_id_array()) {
-        file_ids.emplace_back(file_id);
-    }
+    std::copy(request->file_id_array().begin(), request->file_id_array().end(), std::back_inserter(file_ids));
 
     // step 3: partition tags
     std::vector<std::string> partitions;
