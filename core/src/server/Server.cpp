@@ -35,6 +35,7 @@
 #include "utils/TimeRecorder.h"
 
 #include "search/TaskInst.h"
+#include "server/init/StorageChecker.h"
 
 namespace milvus {
 namespace server {
@@ -300,6 +301,12 @@ Server::Start() {
             return s;
         }
 #endif
+        s = StorageChecker::CheckStoragePermission();
+        if (!s.ok()) {
+            std::cerr << "ERROR: Milvus server fail to check storage permission" << std::endl;
+            return s;
+        }
+
         /* record config and hardware information into log */
         LogConfigInFile(config_filename_);
         LogCpuInfo();

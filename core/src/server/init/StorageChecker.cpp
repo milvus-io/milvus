@@ -11,16 +11,68 @@
 
 #include "server/init/StorageChecker.h"
 
+#include <unistd.h>
+#include <string>
+#include <vector>
+
 #include "config/Config.h"
+#include "utils/Log.h"
+#include "utils/StringHelpFunctions.h"
 
 namespace milvus {
 namespace server {
 
 Status
 StorageChecker::CheckStoragePermission() {
+    auto& config = Config::GetInstance();
     /* Check log file write permission */
     /* Check db directory write permission */
+    std::string primary_path;
+    auto status = config.GetStorageConfigPrimaryPath(primary_path);
+    if (!status.ok()) {
+        return status;
+    }
+
+    int ret = access(primary_path.c_str(), F_OK | R_OK | W_OK);
+    if (0 != ret) {
+        std::string err_msg = " Check DB storage primary path " + primary_path + " fail. " + strerror(errno) +
+                              "(code: " + std::to_string(errno) + ")";
+        return Status(SERVER_UNEXPECTED_ERROR, err_msg);
+    }
+
+    std::string secondary_paths;
+    status = config.GetStorageConfigSecondaryPath(secondary_paths);
+    if (!status.ok()) {
+        return status;
+    }
+
+    if (!secondary_paths.empty()) {
+        std::vector<std::string> secondary_path_vector;
+        StringHelpFunctions::SplitStringByDelimeter(secondary_paths, ",", secondary_path_vector);
+        for (auto& path : secondary_path_vector) {
+            ret = access(path.c_str(), F_OK | R_OK | W_OK);
+            if (0 != ret) {
+                std::string err_msg = " Check DB storage secondary path " + path + " fail. " + strerror(errno) +
+                                      "(code: " + std::to_string(errno) + ")";
+                return Status(SERVER_UNEXPECTED_ERROR, err_msg);
+            }
+        }
+    }
+
     /* Check wal directory write permission */
+    std::string wal_path;
+    status = config.GetWalConfigWalPath(wal_path);
+    if (!status.ok()) {
+        return status;
+    }
+    ret = access(wal_path.c_str(), F_OK | R_OK | W_OK);
+    if (0 != ret) {
+        std::string err_msg = " Check WAL storage path " + wal_path + " fail. " + strerror(errno) +
+                              "(code: " + std::to_string(errno) + ")";
+        return Status(SERVER_UNEXPECTED_ERROR, err_msg);
+    }
+
+    return Status::OK();
 }
 
 }  // namespace server
