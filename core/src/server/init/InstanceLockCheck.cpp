@@ -46,6 +46,7 @@ InstanceLockCheck::Check(const std::string& path) {
             msg += "Permission denied. ";
         } else if (errno == ENOLCK) {
             // Not using locking for nfs mounted lock file
+            msg += "Using nfs. ";
         }
         close(fd);
         msg += "Could not get lock.";
