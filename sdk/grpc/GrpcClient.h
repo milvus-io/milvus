@@ -51,13 +51,16 @@ class GrpcClient {
     Insert(const grpc::InsertParam& insert_param, grpc::VectorIds& vector_ids);
 
     Status
-    GetVectorByID(const grpc::VectorIdentity& vector_identity, ::milvus::grpc::VectorData& vector_data);
+    GetVectorsByID(const grpc::VectorsIdentity& vectors_identity, ::milvus::grpc::VectorsData& vectors_data);
 
     Status
     GetIDsInSegment(const grpc::GetVectorIDsParam& param, grpc::VectorIds& vector_ids);
 
     Status
     Search(const grpc::SearchParam& search_param, ::milvus::grpc::TopKQueryResult& topk_query_result);
+
+    Status
+    SearchByID(const grpc::SearchByIDParam& search_param, ::milvus::grpc::TopKQueryResult& topk_query_result);
 
     Status
     DescribeCollection(const std::string& collection_name, grpc::CollectionSchema& grpc_schema);

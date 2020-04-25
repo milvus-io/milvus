@@ -129,38 +129,6 @@ ConstructResults(const TopKQueryResult& result, ::milvus::grpc::TopKQueryResult*
            result.distance_list_.size() * sizeof(float));
 }
 
-void
-ConstructPartitionStat(const PartitionStat& partition_stat, ::milvus::grpc::PartitionStat* grpc_partition_stat) {
-    if (!grpc_partition_stat) {
-        return;
-    }
-
-    grpc_partition_stat->set_total_row_count(partition_stat.total_row_num_);
-    grpc_partition_stat->set_tag(partition_stat.tag_);
-
-    for (auto& seg_stat : partition_stat.segments_stat_) {
-        ::milvus::grpc::SegmentStat* grpc_seg_stat = grpc_partition_stat->mutable_segments_stat()->Add();
-        grpc_seg_stat->set_row_count(seg_stat.row_num_);
-        grpc_seg_stat->set_segment_name(seg_stat.name_);
-        grpc_seg_stat->set_index_name(seg_stat.index_name_);
-        grpc_seg_stat->set_data_size(seg_stat.data_size_);
-    }
-}
-
-void
-ConstructCollectionInfo(const CollectionInfo& collection_info, ::milvus::grpc::CollectionInfo* response) {
-    if (!response) {
-        return;
-    }
-
-    response->set_total_row_count(collection_info.total_row_num_);
-
-    for (auto& partition_stat : collection_info.partitions_stat_) {
-        ::milvus::grpc::PartitionStat* grpc_partiton_stat = response->mutable_partitions_stat()->Add();
-        ConstructPartitionStat(partition_stat, grpc_partiton_stat);
-    }
-}
-
 }  // namespace
 
 namespace {
@@ -407,24 +375,33 @@ GrpcRequestHandler::Insert(::grpc::ServerContext* context, const ::milvus::grpc:
 }
 
 ::grpc::Status
-GrpcRequestHandler::GetVectorByID(::grpc::ServerContext* context, const ::milvus::grpc::VectorIdentity* request,
-                                  ::milvus::grpc::VectorData* response) {
+GrpcRequestHandler::GetVectorsByID(::grpc::ServerContext* context, const ::milvus::grpc::VectorsIdentity* request,
+                                   ::milvus::grpc::VectorsData* response) {
     CHECK_NULLPTR_RETURN(request);
 
-    std::vector<int64_t> vector_ids = {request->id()};
-    engine::VectorsData vectors;
-    Status status =
-        request_handler_.GetVectorByID(GetContext(context), request->collection_name(), vector_ids, vectors);
-
-    if (!vectors.float_data_.empty()) {
-        response->mutable_vector_data()->mutable_float_data()->Resize(vectors.float_data_.size(), 0);
-        memcpy(response->mutable_vector_data()->mutable_float_data()->mutable_data(), vectors.float_data_.data(),
-               vectors.float_data_.size() * sizeof(float));
-    } else if (!vectors.binary_data_.empty()) {
-        response->mutable_vector_data()->mutable_binary_data()->resize(vectors.binary_data_.size());
-        memcpy(response->mutable_vector_data()->mutable_binary_data()->data(), vectors.binary_data_.data(),
-               vectors.binary_data_.size() * sizeof(uint8_t));
+    std::vector<int64_t> vector_ids;
+    vector_ids.reserve(request->id_array_size());
+    for (int i = 0; i < request->id_array_size(); i++) {
+        vector_ids.push_back(request->id_array(i));
     }
+
+    std::vector<engine::VectorsData> vectors;
+    Status status =
+        request_handler_.GetVectorsByID(GetContext(context), request->collection_name(), vector_ids, vectors);
+
+    for (auto& vector : vectors) {
+        auto grpc_data = response->add_vectors_data();
+        if (!vector.float_data_.empty()) {
+            grpc_data->mutable_float_data()->Resize(vector.float_data_.size(), 0);
+            memcpy(grpc_data->mutable_float_data()->mutable_data(), vector.float_data_.data(),
+                   vector.float_data_.size() * sizeof(float));
+        } else if (!vector.binary_data_.empty()) {
+            grpc_data->mutable_binary_data()->resize(vector.binary_data_.size());
+            memcpy(grpc_data->mutable_binary_data()->data(), vector.binary_data_.data(),
+                   vector.binary_data_.size() * sizeof(uint8_t));
+        }
+    }
+
     SET_RESPONSE(response->mutable_status(), status, context);
 
     return ::grpc::Status::OK;
@@ -502,7 +479,13 @@ GrpcRequestHandler::SearchByID(::grpc::ServerContext* context, const ::milvus::g
         partitions.emplace_back(partition);
     }
 
-    // step 2: parse extra parameters
+    // step 2: partition tags
+    std::vector<int64_t> id_array;
+    for (int i = 0; i < request->id_array_size(); i++) {
+        id_array.push_back(request->id_array(i));
+    }
+
+    // step 3: parse extra parameters
     milvus::json json_params;
     for (int i = 0; i < request->extra_params_size(); i++) {
         const ::milvus::grpc::KeyValuePair& extra = request->extra_params(i);
@@ -511,12 +494,12 @@ GrpcRequestHandler::SearchByID(::grpc::ServerContext* context, const ::milvus::g
         }
     }
 
-    // step 3: search vectors
+    // step 4: search vectors
     TopKQueryResult result;
-    Status status = request_handler_.SearchByID(GetContext(context), request->collection_name(), request->id(),
+    Status status = request_handler_.SearchByID(GetContext(context), request->collection_name(), id_array,
                                                 request->topk(), json_params, partitions, result);
 
-    // step 4: construct and return result
+    // step 5: construct and return result
     ConstructResults(result, response);
 
     SET_RESPONSE(response->mutable_status(), status, context);
@@ -618,10 +601,10 @@ GrpcRequestHandler::ShowCollectionInfo(::grpc::ServerContext* context, const ::m
                                        ::milvus::grpc::CollectionInfo* response) {
     CHECK_NULLPTR_RETURN(request);
 
-    CollectionInfo collection_info;
+    std::string collection_info;
     Status status =
         request_handler_.ShowCollectionInfo(GetContext(context), request->collection_name(), collection_info);
-    ConstructCollectionInfo(collection_info, response);
+    response->set_json_info(collection_info);
     SET_RESPONSE(response->mutable_status(), status, context);
 
     return ::grpc::Status::OK;
@@ -704,6 +687,21 @@ GrpcRequestHandler::CreatePartition(::grpc::ServerContext* context, const ::milv
 
     Status status = request_handler_.CreatePartition(GetContext(context), request->collection_name(), request->tag());
     SET_RESPONSE(response, status, context);
+
+    return ::grpc::Status::OK;
+}
+
+::grpc::Status
+GrpcRequestHandler::HasPartition(::grpc::ServerContext* context, const ::milvus::grpc::PartitionParam* request,
+                                 ::milvus::grpc::BoolReply* response) {
+    CHECK_NULLPTR_RETURN(request);
+
+    bool has_collection = false;
+
+    Status status =
+        request_handler_.HasPartition(GetContext(context), request->collection_name(), request->tag(), has_collection);
+    response->set_bool_reply(has_collection);
+    SET_RESPONSE(response->mutable_status(), status, context);
 
     return ::grpc::Status::OK;
 }

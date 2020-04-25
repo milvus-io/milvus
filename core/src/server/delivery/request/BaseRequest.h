@@ -103,24 +103,6 @@ struct PartitionParam {
     }
 };
 
-struct SegmentStat {
-    std::string name_;
-    int64_t row_num_ = 0;
-    std::string index_name_;
-    int64_t data_size_ = 0;
-};
-
-struct PartitionStat {
-    std::string tag_;
-    int64_t total_row_num_ = 0;
-    std::vector<SegmentStat> segments_stat_;
-};
-
-struct CollectionInfo {
-    int64_t total_row_num_ = 0;
-    std::vector<PartitionStat> partitions_stat_;
-};
-
 class BaseRequest {
  public:
     enum RequestType {
