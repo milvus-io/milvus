@@ -76,17 +76,21 @@ IndexHNSW::Load(const BinarySet& index_binary) {
 
 void
 IndexHNSW::Train(const DatasetPtr& dataset_ptr, const Config& config) {
-    GETTENSOR(dataset_ptr)
+    try {
+        GETTENSOR(dataset_ptr)
 
-    hnswlib::SpaceInterface<float>* space;
-    if (config[Metric::TYPE] == Metric::L2) {
-        space = new hnswlib::L2Space(dim);
-    } else if (config[Metric::TYPE] == Metric::IP) {
-        space = new hnswlib::InnerProductSpace(dim);
-        normalize = true;
+        hnswlib::SpaceInterface<float>* space;
+        if (config[Metric::TYPE] == Metric::L2) {
+            space = new hnswlib::L2Space(dim);
+        } else if (config[Metric::TYPE] == Metric::IP) {
+            space = new hnswlib::InnerProductSpace(dim);
+            normalize = true;
+        }
+        index_ = std::make_shared<hnswlib::HierarchicalNSW<float>>(space, rows, config[IndexParams::M].get<int64_t>(),
+                                                                   config[IndexParams::efConstruction].get<int64_t>());
+    } catch (std::exception& e) {
+        KNOWHERE_THROW_MSG(e.what());
     }
-    index_ = std::make_shared<hnswlib::HierarchicalNSW<float>>(space, rows, config[IndexParams::M].get<int64_t>(),
-                                                               config[IndexParams::efConstruction].get<int64_t>());
 }
 
 void
