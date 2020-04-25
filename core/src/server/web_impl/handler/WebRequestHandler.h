@@ -14,6 +14,7 @@
 #include <map>
 #include <memory>
 #include <string>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -142,6 +143,15 @@ class WebRequestHandler {
     Search(const std::string& collection_name, const nlohmann::json& json, std::string& result_str);
 
     Status
+    ProcessLeafQueryJson(const nlohmann::json& json, query::BooleanQueryPtr& boolean_query);
+
+    Status
+    ProcessBoolQueryJson(const nlohmann::json& query_json, query::BooleanQueryPtr& boolean_query);
+
+    Status
+    HybridSearch(const std::string& collection_name, const nlohmann::json& json, std::string& result_str);
+
+    Status
     DeleteByIDs(const std::string& collection_name, const nlohmann::json& json, std::string& result_str);
 
     Status
@@ -175,6 +185,9 @@ class WebRequestHandler {
     CreateTable(const TableRequestDto::ObjectWrapper& table_schema);
     StatusDto::ObjectWrapper
     ShowTables(const OQueryParams& query_params, OString& result);
+
+    StatusDto::ObjectWrapper
+    CreateHybridCollection(const OString& body);
 
     StatusDto::ObjectWrapper
     GetTable(const OString& collection_name, const OQueryParams& query_params, OString& result);
@@ -220,6 +233,9 @@ class WebRequestHandler {
     Insert(const OString& collection_name, const OString& body, VectorIdsDto::ObjectWrapper& ids_dto);
 
     StatusDto::ObjectWrapper
+    InsertEntity(const OString& collection_name, const OString& body, VectorIdsDto::ObjectWrapper& ids_dto);
+
+    StatusDto::ObjectWrapper
     GetVector(const OString& collection_name, const OQueryParams& query_params, OString& response);
 
     StatusDto::ObjectWrapper
@@ -244,6 +260,7 @@ class WebRequestHandler {
  private:
     std::shared_ptr<Context> context_ptr_;
     RequestHandler request_handler_;
+    std::unordered_map<std::string, engine::meta::hybrid::DataType> field_type_;
 };
 
 }  // namespace web

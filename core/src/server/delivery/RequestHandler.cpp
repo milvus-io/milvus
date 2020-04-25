@@ -40,6 +40,7 @@
 #include "server/delivery/request/ShowPartitionsRequest.h"
 
 #include "server/delivery/hybrid_request/CreateHybridCollectionRequest.h"
+#include "server/delivery/hybrid_request/DescribeHybridCollectionRequest.h"
 #include "server/delivery/hybrid_request/HybridSearchRequest.h"
 #include "server/delivery/hybrid_request/InsertEntityRequest.h"
 
@@ -261,6 +262,15 @@ RequestHandler::CreateHybridCollection(const std::shared_ptr<Context>& context, 
                                        std::vector<std::pair<std::string, std::string>>& field_extra_params) {
     BaseRequestPtr request_ptr = CreateHybridCollectionRequest::Create(context, collection_name, field_types,
                                                                        vector_dimensions, field_extra_params);
+
+    RequestScheduler::ExecRequest(request_ptr);
+    return request_ptr->status();
+}
+
+Status
+RequestHandler::DescribeHybridCollection(const std::shared_ptr<Context>& context, const std::string& collection_name,
+                                         std::unordered_map<std::string, engine::meta::hybrid::DataType>& field_types) {
+    BaseRequestPtr request_ptr = DescribeHybridCollectionRequest::Create(context, collection_name, field_types);
 
     RequestScheduler::ExecRequest(request_ptr);
     return request_ptr->status();

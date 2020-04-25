@@ -122,6 +122,10 @@ class RequestHandler {
                            std::vector<std::pair<std::string, std::string>>& field_extra_params);
 
     Status
+    DescribeHybridCollection(const std::shared_ptr<Context>& context, const std::string& collection_name,
+                             std::unordered_map<std::string, engine::meta::hybrid::DataType>& field_types);
+
+    Status
     HasHybridCollection(const std::shared_ptr<Context>& context, std::string& collection_name, bool& has_collection);
 
     Status
