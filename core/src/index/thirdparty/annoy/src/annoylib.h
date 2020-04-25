@@ -1337,7 +1337,7 @@ protected:
     std::priority_queue<pair<T, S> > q;
 
     if (search_k <= 0) {
-      search_k = std::max(n * _roots.size(), (size_t )_n_items * 5 / 100);
+      search_k = std::max(int(n * _roots.size()), int(_n_items * 5 / 100));
     }
 
     for (size_t i = 0; i < _roots.size(); i++) {
