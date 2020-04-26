@@ -12,6 +12,7 @@
 #include "server/Server.h"
 #include "server/init/InstanceLockCheck.h"
 
+#include <boost/filesystem.hpp>
 #include <fcntl.h>
 #include <string.h>
 #include <unistd.h>
@@ -214,6 +215,9 @@ Server::Start() {
                 return s;
             }
 
+            if (not boost::filesystem::create_directories(wal_path)) {
+                return Status(SERVER_UNEXPECTED_ERROR, "Cannot create wal dir");
+            }
             s = InstanceLockCheck::Check(wal_path);
             if (!s.ok()) {
                 std::cerr << "deploy_mode: " << deploy_mode << " instance lock wal path failed." << std::endl;
