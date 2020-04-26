@@ -432,9 +432,9 @@ TEST_F(MySqlMetaTest, ARCHIVE_TEST_DISK) {
     collection.collection_id_ = collection_id;
     auto status = impl.CreateCollection(collection);
 
-    milvus::engine::meta::CollectionSchema table_schema;
-    table_schema.collection_id_ = "";
-    status = impl.CreateCollection(table_schema);
+    milvus::engine::meta::CollectionSchema collection_schema;
+    collection_schema.collection_id_ = "";
+    status = impl.CreateCollection(collection_schema);
 
     milvus::engine::meta::SegmentsSchema files;
     milvus::engine::meta::SegmentSchema table_file;
