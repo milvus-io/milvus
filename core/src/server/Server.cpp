@@ -12,9 +12,9 @@
 #include "server/Server.h"
 #include "server/init/InstanceLockCheck.h"
 
-#include <boost/filesystem.hpp>
 #include <fcntl.h>
 #include <unistd.h>
+#include <boost/filesystem.hpp>
 #include <cstring>
 
 #include "config/Config.h"
