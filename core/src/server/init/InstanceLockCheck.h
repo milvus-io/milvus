@@ -9,26 +9,19 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
-#include "db/insert/MemMenagerFactory.h"
-#include "MemManagerImpl.h"
-#include "utils/Exception.h"
-#include "utils/Log.h"
+#pragma once
 
-#include <stdlib.h>
-#include <time.h>
-#include <cstdlib>
-#include <memory>
-#include <regex>
-#include <sstream>
 #include <string>
+#include "utils/Status.h"
 
 namespace milvus {
-namespace engine {
+namespace server {
 
-MemManagerPtr
-MemManagerFactory::Build(const std::shared_ptr<meta::Meta>& meta, const DBOptions& options) {
-    return std::make_shared<MemManagerImpl>(meta, options);
-}
+class InstanceLockCheck {
+ public:
+    static Status
+    Check(const std::string& path);
+};  // InstanceLockCheck
 
-}  // namespace engine
+}  // namespace server
 }  // namespace milvus

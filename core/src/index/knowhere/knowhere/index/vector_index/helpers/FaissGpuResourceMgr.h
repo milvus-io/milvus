@@ -58,7 +58,7 @@ class FaissGpuResourceMgr {
     Free();
 
     void
-    AllocateTempMem(ResPtr& resource, const int64_t& device_id, const int64_t& size);
+    AllocateTempMem(ResPtr& resource, const int64_t device_id, const int64_t size);
 
     void
     InitDevice(int64_t device_id, int64_t pin_mem_size = 0, int64_t temp_mem_size = 0, int64_t res_num = 2);
@@ -68,10 +68,10 @@ class FaissGpuResourceMgr {
 
     // allocate gpu memory invoke by build or copy_to_gpu
     ResPtr
-    GetRes(const int64_t& device_id, const int64_t& alloc_size = 0);
+    GetRes(const int64_t device_id, const int64_t alloc_size = 0);
 
     void
-    MoveToIdle(const int64_t& device_id, const ResPtr& res);
+    MoveToIdle(const int64_t device_id, const ResPtr& res);
 
     void
     Dump();

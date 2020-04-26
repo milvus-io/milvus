@@ -35,7 +35,6 @@ constexpr int64_t SEARCH_TARGET = BATCH_ENTITY_COUNT / 2;  // change this value,
 constexpr int64_t ADD_ENTITY_LOOP = 5;
 constexpr milvus::IndexType INDEX_TYPE = milvus::IndexType::IVFSQ8;
 constexpr int32_t NLIST = 16384;
-constexpr uint64_t FIELD_NUM = 3;
 
 void PrintEntity(const std::string& tag, const milvus::Entity& entity) {
     std::cout << tag << "\t[";
@@ -298,10 +297,10 @@ ClientTest::Test() {
     DescribeCollection(collection_name);
 
     InsertEntities(collection_name, dim);
-    BuildSearchEntities(NQ, dim);
     Flush(collection_name);
     ShowCollectionInfo(collection_name);
 
+    BuildSearchEntities(NQ, dim);
     GetEntitiesByID(collection_name, search_id_array_);
 //    SearchEntities(collection_name, TOP_K, NPROBE);
     SearchEntitiesByID(collection_name, TOP_K, NPROBE);
@@ -309,11 +308,11 @@ ClientTest::Test() {
     CreateIndex(collection_name, INDEX_TYPE, NLIST);
     ShowCollectionInfo(collection_name);
 
-    PreloadCollection(collection_name);
-
     std::vector<int64_t> delete_ids = {search_id_array_[0], search_id_array_[1]};
     DeleteByIds(collection_name, delete_ids);
     CompactCollection(collection_name);
+
+    PreloadCollection(collection_name);
     SearchEntities(collection_name, TOP_K, NPROBE); // this line get two search error since we delete two entities
 
     DropIndex(collection_name);
