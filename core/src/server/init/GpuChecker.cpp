@@ -16,6 +16,8 @@
 #include <set>
 #include <vector>
 
+#include <fiu-local.h>
+
 #include "config/Config.h"
 #include "utils/Log.h"
 
@@ -122,6 +124,7 @@ GpuChecker::CheckGpuEnvironment() {
     gpu_sets.insert(search_gpus.begin(), search_gpus.end());
 
     nvmlReturn_t nvmlresult = nvmlInit();
+    fiu_do_on("GpuChecker.CheckGpuEnvironment.nvml_init_fail", nvmlresult = NVML_ERROR_UNKNOWN);
     if (NVML_SUCCESS != nvmlresult) {
         err_msg = "nvml initialize failed. " + NvmlErrorString(nvmlresult);
         LOG_SERVER_FATAL_ << err_msg;
@@ -132,14 +135,17 @@ GpuChecker::CheckGpuEnvironment() {
     /* Check nvidia driver version */
     std::string nvidia_version;
     status = GetGpuNvidiaDriverVersion(nvidia_version);
+    fiu_do_on("GpuChecker.CheckGpuEnvironment.get_nvidia_driver_fail", status = Status(SERVER_UNEXPECTED_ERROR, ""));
     if (!status.ok()) {
         err_msg = " Check nvidia driver failed. " + status.message();
         LOG_SERVER_FATAL_ << err_msg;
         return Status(SERVER_UNEXPECTED_ERROR, err_msg);
     }
 
+    fiu_do_on("GpuChecker.CheckGpuEnvironment.nvidia_driver_too_slow",
+              nvidia_version = std::to_string(std::stof(NVIDIA_MIN_DRIVER_VERSION) - 1));
     if (nvidia_version.compare(NVIDIA_MIN_DRIVER_VERSION) < 0) {
-        err_msg = "Nvidia driver version " + std::string(NVIDIA_MIN_DRIVER_VERSION) + " is slower than " +
+        err_msg = "Nvidia driver version " + std::string(nvidia_version) + " is slower than " +
                   std::string(NVIDIA_MIN_DRIVER_VERSION);
         LOG_SERVER_FATAL_ << err_msg;
         std::cerr << err_msg << std::endl;
@@ -149,6 +155,13 @@ GpuChecker::CheckGpuEnvironment() {
     /* Check Cuda version */
     int cuda_driver_version = 0;
     status = GetGpuCudaDriverVersion(cuda_driver_version);
+    fiu_do_on("GpuChecker.CheckGpuEnvironment.cuda_driver_fail", status = Status(SERVER_UNEXPECTED_ERROR, ""));
+    if (!status.ok()) {
+        err_msg = " Check Cuda driver failed. " + status.message();
+        LOG_SERVER_FATAL_ << err_msg;
+        return Status(SERVER_UNEXPECTED_ERROR, err_msg);
+    }
+    fiu_do_on("GpuChecker.CheckGpuEnvironment.cuda_driver_too_slow", cuda_driver_version = CUDA_MIN_VERSION - 1);
     if (cuda_driver_version < CUDA_MIN_VERSION) {
         err_msg = "Cuda driver version is " + ConvertCudaVersion(cuda_driver_version) +
                   ", slower than minimum required version " + ConvertCudaVersion(CUDA_MIN_VERSION);
@@ -159,8 +172,17 @@ GpuChecker::CheckGpuEnvironment() {
 
     int cuda_runtime_version = 0;
     status = GetGpuCudaRuntimeVersion(cuda_runtime_version);
+    fiu_do_on("GpuChecker.CheckGpuEnvironment.cuda_runtime_driver_fail", status = Status(SERVER_UNEXPECTED_ERROR, ""));
+    if (!status.ok()) {
+        err_msg = " Check Cuda runtime driver failed. " + status.message();
+        LOG_SERVER_FATAL_ << err_msg;
+        return Status(SERVER_UNEXPECTED_ERROR, err_msg);
+    }
+    fiu_do_on("GpuChecker.CheckGpuEnvironment.cuda_runtime_driver_too_slow",
+              cuda_runtime_version = CUDA_MIN_VERSION - 1);
     if (cuda_runtime_version < CUDA_MIN_VERSION) {
-        err_msg = "Cuda runtime version is slow than minimum required version " + std::to_string(CUDA_MIN_VERSION);
+        err_msg = "Cuda runtime version is " + ConvertCudaVersion(cuda_runtime_version) +
+                  ", slow than minimum required version " + ConvertCudaVersion(CUDA_MIN_VERSION);
         LOG_SERVER_FATAL_ << err_msg;
         std::cerr << err_msg << std::endl;
         return Status(SERVER_UNEXPECTED_ERROR, err_msg);
@@ -169,8 +191,16 @@ GpuChecker::CheckGpuEnvironment() {
     /* Compute capacity */
     uint32_t device_count = 0;
     nvmlresult = nvmlDeviceGetCount(&device_count);
+    fiu_do_on("GpuChecker.CheckGpuEnvironment.nvml_get_device_count_fail", nvmlresult = NVML_ERROR_UNKNOWN);
     if (NVML_SUCCESS != nvmlresult) {
         err_msg = "Obtain GPU count failed. " + NvmlErrorString(nvmlresult);
+        LOG_SERVER_FATAL_ << err_msg;
+        return Status(SERVER_UNEXPECTED_ERROR, err_msg);
+    }
+
+    fiu_do_on("GpuChecker.CheckGpuEnvironment.nvml_device_count_zero", device_count = 0);
+    if (device_count == 0) {
+        err_msg = "GPU count is zero. Make sure there are available GPUs in host machine";
         LOG_SERVER_FATAL_ << err_msg;
         return Status(SERVER_UNEXPECTED_ERROR, err_msg);
     }
@@ -184,6 +214,7 @@ GpuChecker::CheckGpuEnvironment() {
 
         nvmlDevice_t device;
         nvmlresult = nvmlDeviceGetHandleByIndex(i, &device);
+        fiu_do_on("GpuChecker.CheckGpuEnvironment.nvml_get_device_handle_fail", nvmlresult = NVML_ERROR_UNKNOWN);
         if (NVML_SUCCESS != nvmlresult) {
             err_msg = "Obtain GPU " + std::to_string(i) + " handle failed. " + NvmlErrorString(nvmlresult);
             LOG_SERVER_FATAL_ << err_msg;
@@ -191,6 +222,7 @@ GpuChecker::CheckGpuEnvironment() {
         }
         memset(device_name, 0, NVML_DEVICE_NAME_BUFFER_SIZE);
         nvmlresult = nvmlDeviceGetName(device, device_name, NVML_DEVICE_NAME_BUFFER_SIZE);
+        fiu_do_on("GpuChecker.CheckGpuEnvironment.nvml_get_device_name_fail", nvmlresult = NVML_ERROR_UNKNOWN);
         if (NVML_SUCCESS != nvmlresult) {
             err_msg = "Obtain GPU " + std::to_string(i) + " name failed. " + NvmlErrorString(nvmlresult);
             LOG_SERVER_FATAL_ << err_msg;
@@ -200,6 +232,8 @@ GpuChecker::CheckGpuEnvironment() {
         major = 0;
         minor = 0;
         status = GetGpuComputeCapacity(device, major, minor);
+        fiu_do_on("GpuChecker.CheckGpuEnvironment.device_compute_capacity_fail",
+                  status = Status(SERVER_UNEXPECTED_ERROR, ""));
         if (!status.ok()) {
             err_msg = "Obtain GPU " + std::to_string(i) + " compute capacity failed. " + status.message();
             LOG_SERVER_FATAL_ << err_msg;
@@ -207,9 +241,10 @@ GpuChecker::CheckGpuEnvironment() {
             return Status(SERVER_UNEXPECTED_ERROR, err_msg);
         }
         float cc = major + minor / 1.0f;
+        fiu_do_on("GpuChecker.CheckGpuEnvironment.device_compute_capacity_too_weak", cc = GPU_MIN_COMPUTE_CAPACITY - 1);
         if (cc < GPU_MIN_COMPUTE_CAPACITY) {
-            err_msg = "GPU " + std::to_string(i) +
-                      " compute capability is too weak. Required least GPU compute capability is " +
+            err_msg = "GPU " + std::to_string(i) + " compute capability " + std::to_string(cc) +
+                      " is too weak. Required least GPU compute capability is " +
                       std::to_string(GPU_MIN_COMPUTE_CAPACITY);
             LOG_SERVER_FATAL_ << err_msg;
             std::cerr << err_msg << std::endl;
@@ -220,6 +255,7 @@ GpuChecker::CheckGpuEnvironment() {
     }
 
     nvmlresult = nvmlShutdown();
+    fiu_do_on("GpuChecker.CheckGpuEnvironment.nvml_shutdown_fail", nvmlresult = NVML_ERROR_UNKNOWN);
     if (NVML_SUCCESS != nvmlresult) {
         err_msg = "nvml shutdown handle failed. " + NvmlErrorString(nvmlresult);
         LOG_SERVER_FATAL_ << err_msg;
