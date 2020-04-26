@@ -14,9 +14,9 @@
 
 #include <omp.h>
 
-#ifdef __SSE__
-#include <immintrin.h>
-#endif
+//#ifdef __SSE__
+//#include <immintrin.h>
+//#endif
 
 #include <faiss/FaissHook.h>
 #include <faiss/utils/utils.h>
