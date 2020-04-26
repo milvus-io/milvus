@@ -74,8 +74,8 @@ NsgIndex::Build_with_ids(size_t nb, const float* data, const int64_t* ids, const
     for (size_t i = 0; i < ntotal; ++i) {
         total_degree += nsg[i].size();
     }
-    KNOWHERE_LOG_DEBUG << "Graph physical size: " << total_degree * sizeof(node_t) / 1024 / 1024 << "m";
-    KNOWHERE_LOG_DEBUG << "Average degree: " << total_degree / ntotal;
+    LOG_KNOWHERE_DEBUG_ << "Graph physical size: " << total_degree * sizeof(node_t) / 1024 / 1024 << "m";
+    LOG_KNOWHERE_DEBUG_ << "Average degree: " << total_degree / ntotal;
 
     // Debug code
     // for (size_t i = 0; i < ntotal; i++) {

@@ -297,9 +297,9 @@ IVF::QueryImpl(int64_t n, const float* data, int64_t k, float* distances, int64_
     ivf_index->search(n, (float*)data, k, distances, labels, bitset_);
     stdclock::time_point after = stdclock::now();
     double search_cost = (std::chrono::duration<double, std::micro>(after - before)).count();
-    KNOWHERE_LOG_DEBUG << "IVF search cost: " << search_cost
-                       << ", quantization cost: " << faiss::indexIVF_stats.quantization_time
-                       << ", data search cost: " << faiss::indexIVF_stats.search_time;
+    LOG_KNOWHERE_DEBUG_ << "IVF search cost: " << search_cost
+                        << ", quantization cost: " << faiss::indexIVF_stats.quantization_time
+                        << ", data search cost: " << faiss::indexIVF_stats.search_time;
     faiss::indexIVF_stats.quantization_time = 0;
     faiss::indexIVF_stats.search_time = 0;
 }
@@ -311,7 +311,7 @@ IVF::SealImpl() {
     auto idx = dynamic_cast<faiss::IndexIVF*>(index);
     if (idx != nullptr) {
         // To be deleted
-        KNOWHERE_LOG_DEBUG << "Test before to_readonly: IVF READONLY " << std::boolalpha << idx->is_readonly();
+        LOG_KNOWHERE_DEBUG_ << "Test before to_readonly: IVF READONLY " << std::boolalpha << idx->is_readonly();
         idx->to_readonly();
     }
 #endif
