@@ -76,7 +76,7 @@ IndexHNSW::Load(const BinarySet& index_binary) {
 
 void
 IndexHNSW::Train(const DatasetPtr& dataset_ptr, const Config& config) {
-    try {    
+    try {
         GETTENSOR(dataset_ptr)
 
         hnswlib::SpaceInterface<float>* space;
@@ -87,7 +87,7 @@ IndexHNSW::Train(const DatasetPtr& dataset_ptr, const Config& config) {
             normalize = true;
         }
         index_ = std::make_shared<hnswlib::HierarchicalNSW<float>>(space, rows, config[IndexParams::M].get<int64_t>(),
-                                                                config[IndexParams::efConstruction].get<int64_t>());
+                                                                   config[IndexParams::efConstruction].get<int64_t>());
     } catch (std::exception& e) {
         KNOWHERE_THROW_MSG(e.what());
     }
