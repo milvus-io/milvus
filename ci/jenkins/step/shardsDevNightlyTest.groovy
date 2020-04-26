@@ -5,7 +5,17 @@ timeout(time: 180, unit: 'MINUTES') {
         sh 'helm repo update'
         checkout([$class: 'GitSCM', branches: [[name: "nightly"]], userRemoteConfigs: [[url: "https://github.com/milvus-io/milvus-helm.git", name: 'origin', refspec: "+refs/heads/nightly:refs/remotes/origin/nightly"]]])
         retry(3) {
-            sh "helm install --wait --timeout 300s --set mishards.enabled=true --set persistence.enabled=true --set image.repository=registry.zilliz.com/milvus/engine --set image.tag=${DOCKER_VERSION} --set image.pullPolicy=Always --set service.type=ClusterIP -f ci/db_backend/mysql_${BINARY_VERSION}_values.yaml --namespace milvus ${env.SHARDS_HELM_RELEASE_NAME} ."
+            try {
+                sh "helm install --wait --timeout 300s --set mishards.enabled=true --set persistence.enabled=true --set image.repository=registry.zilliz.com/milvus/engine --set image.tag=${DOCKER_VERSION} --set image.pullPolicy=Always --set service.type=ClusterIP -f ci/db_backend/mysql_${BINARY_VERSION}_values.yaml --namespace milvus ${env.SHARDS_HELM_RELEASE_NAME} ."
+            } catch (exc) {
+                sh "helm get manifest --namespace milvus ${env.SHARDS_HELM_RELEASE_NAME} | kubectl describe -n milvus -f - && \
+                    kubectl logs --namespace milvus -l \"app=milvus,release=${env.SHARDS_HELM_RELEASE_NAME}\" -c milvus"
+                def helmResult = sh script: "helm status -n milvus ${env.SHARDS_HELM_RELEASE_NAME}", returnStatus: true
+                if (!helmResult) {
+                    sh "helm uninstall -n milvus ${env.SHARDS_HELM_RELEASE_NAME}"
+                }
+                throw exc
+            }
         }
     }
     
