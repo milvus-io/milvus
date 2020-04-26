@@ -166,6 +166,7 @@ GpuChecker::CheckGpuEnvironment() {
         return Status(SERVER_UNEXPECTED_ERROR, err_msg);
     }
 
+    /* Compute capacity */
     uint32_t device_count = 0;
     nvmlresult = nvmlDeviceGetCount(&device_count);
     if (NVML_SUCCESS != nvmlresult) {
@@ -196,14 +197,13 @@ GpuChecker::CheckGpuEnvironment() {
             return Status(SERVER_UNEXPECTED_ERROR, err_msg);
         }
 
-        /* Compute capacity */
         major = 0;
         minor = 0;
         status = GetGpuComputeCapacity(device, major, minor);
         if (!status.ok()) {
             err_msg = "Obtain GPU " + std::to_string(i) + " compute capacity failed. " + status.message();
             LOG_SERVER_FATAL_ << err_msg;
-            std::cout << err_msg << std::endl;
+            std::cerr << err_msg << std::endl;
             return Status(SERVER_UNEXPECTED_ERROR, err_msg);
         }
         float cc = major + minor / 1.0f;
@@ -217,6 +217,13 @@ GpuChecker::CheckGpuEnvironment() {
         }
 
         LOG_SERVER_INFO_ << "GPU" << i << ": name=" << device_name << ", compute capacity=" << cc;
+    }
+
+    nvmlresult = nvmlShutdown();
+    if (NVML_SUCCESS != nvmlresult) {
+        err_msg = "nvml shutdown handle failed. " + NvmlErrorString(nvmlresult);
+        LOG_SERVER_FATAL_ << err_msg;
+        return Status(SERVER_UNEXPECTED_ERROR, err_msg);
     }
 
     std::cout << "Nvidia driver version: " << nvidia_version << "\n"
