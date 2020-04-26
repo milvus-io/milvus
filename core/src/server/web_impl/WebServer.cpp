@@ -56,8 +56,6 @@ WebServer::StartService() {
     status = config.GetServerConfigWebPort(port);
 
     {
-        AppComponent components = AppComponent(std::stoi(port));
-
         auto user_controller = WebController::createShared();
 
         /* create ApiControllers and add endpoints to router */
