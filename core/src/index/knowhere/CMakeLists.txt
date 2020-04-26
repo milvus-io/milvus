@@ -22,6 +22,7 @@ endif ()
 
 set(external_srcs
         knowhere/common/Exception.cpp
+        knowhere/common/Log.cpp
         knowhere/common/Timer.cpp
         )
 
