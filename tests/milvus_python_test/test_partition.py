@@ -228,6 +228,78 @@ class TestShowBase:
         assert status.OK()
 
 
+class TestHasBase:
+
+    """
+    ******************************************************************
+      The following cases are used to test `has_partition` function
+    ******************************************************************
+    """
+    @pytest.fixture(
+        scope="function",
+        params=gen_invalid_collection_names()
+    )
+    def get_tag_name(self, request):
+        yield request.param
+
+    def test_has_partition(self, connect, collection):
+        '''
+        target: test has_partition, check status and result
+        method: create partition first, then call function: show_partition
+        expected: status ok, result true
+        '''
+        status = connect.create_partition(collection, tag)
+        status, res = connect.has_partition(collection, tag)
+        assert status.OK()
+        logging.getLogger().info(res)
+        assert res
+
+    def test_has_partition_multi_partitions(self, connect, collection):
+        '''
+        target: test has_partition, check status and result
+        method: create partition first, then call function: show_partition
+        expected: status ok, result true
+        '''
+        for tag_name in [tag, "tag_new", "tag_new_new"]:
+            status = connect.create_partition(collection, tag_name)
+        for tag_name in [tag, "tag_new", "tag_new_new"]:
+            status, res = connect.has_partition(collection, tag_name)
+            assert status.OK()
+            assert res
+
+    def test_has_partition_tag_not_existed(self, connect, collection):
+        '''
+        target: test has_partition, check status and result
+        method: then call function: show_partition, with tag not existed
+        expected: status ok, result true
+        '''
+        status, res = connect.has_partition(collection, tag)
+        assert status.OK()
+        logging.getLogger().info(res)
+        assert not res
+
+    def test_has_partition_collection_not_existed(self, connect, collection):
+        '''
+        target: test has_partition, check status and result
+        method: then call function: show_partition, with collection not existed
+        expected: status ok, result true
+        '''
+        status, res = connect.has_partition("not_existed_collection", tag)
+        assert not status.OK()
+
+    # TODO: enable
+    def _test_has_partition_with_invalid_tag_name(self, connect, collection, get_tag_name):
+        '''
+        target: test drop partition, with invalid tag name, check status returned
+        method: call function: drop_partition
+        expected: status not ok
+        '''
+        tag_name = get_tag_name
+        status = connect.create_partition(collection, tag)
+        status, res = connect.has_partition(collection, tag_name)
+        assert not status.OK()
+
+
 class TestDropBase:
 
     """
