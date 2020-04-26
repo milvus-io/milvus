@@ -74,7 +74,7 @@ class DBImpl : public DB, public server::CacheConfigHandler, public server::Engi
     AllCollections(std::vector<meta::CollectionSchema>& collection_schema_array) override;
 
     Status
-    GetCollectionInfo(const std::string& collection_id, CollectionInfo& collection_info) override;
+    GetCollectionInfo(const std::string& collection_id, std::string& collection_info) override;
 
     Status
     PreloadCollection(const std::string& collection_id) override;
@@ -118,7 +118,8 @@ class DBImpl : public DB, public server::CacheConfigHandler, public server::Engi
     Compact(const std::string& collection_id) override;
 
     Status
-    GetVectorByID(const std::string& collection_id, const IDNumber& vector_id, VectorsData& vector) override;
+    GetVectorsByID(const std::string& collection_id, const IDNumbers& id_array,
+                   std::vector<engine::VectorsData>& vectors) override;
 
     Status
     GetVectorIDs(const std::string& collection_id, const std::string& segment_id, IDNumbers& vector_ids) override;
@@ -156,9 +157,9 @@ class DBImpl : public DB, public server::CacheConfigHandler, public server::Engi
                 ResultIds& result_ids, ResultDistances& result_distances) override;
 
     Status
-    QueryByID(const std::shared_ptr<server::Context>& context, const std::string& collection_id,
-              const std::vector<std::string>& partition_tags, uint64_t k, const milvus::json& extra_params,
-              IDNumber vector_id, ResultIds& result_ids, ResultDistances& result_distances) override;
+    QueryByIDs(const std::shared_ptr<server::Context>& context, const std::string& collection_id,
+               const std::vector<std::string>& partition_tags, uint64_t k, const milvus::json& extra_params,
+               const IDNumbers& id_array, ResultIds& result_ids, ResultDistances& result_distances) override;
 
     Status
     Query(const std::shared_ptr<server::Context>& context, const std::string& collection_id,
@@ -194,8 +195,8 @@ class DBImpl : public DB, public server::CacheConfigHandler, public server::Engi
                      ResultIds& result_ids, ResultDistances& result_distances);
 
     Status
-    GetVectorByIdHelper(const std::string& collection_id, IDNumber vector_id, VectorsData& vector,
-                        const meta::SegmentsSchema& files);
+    GetVectorsByIdHelper(const std::string& collection_id, const IDNumbers& id_array,
+                         std::vector<engine::VectorsData>& vectors, const meta::SegmentsSchema& files);
 
     void
     InternalFlush(const std::string& collection_id = "");

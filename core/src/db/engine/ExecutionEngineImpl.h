@@ -82,10 +82,6 @@ class ExecutionEngineImpl : public ExecutionEngine {
     Search(int64_t n, const uint8_t* data, int64_t k, const milvus::json& extra_params, float* distances,
            int64_t* labels, bool hybrid = false) override;
 
-    Status
-    Search(int64_t n, const std::vector<int64_t>& ids, int64_t k, const milvus::json& extra_params, float* distances,
-           int64_t* labels, bool hybrid) override;
-
     ExecutionEnginePtr
     BuildIndex(const std::string& location, EngineType engine_type) override;
 

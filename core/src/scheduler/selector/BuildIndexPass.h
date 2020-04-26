@@ -8,27 +8,43 @@
 // Unless required by applicable law or agreed to in writing, software distributed under the License
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
+#ifdef MILVUS_GPU_VERSION
+#pragma once
 
-#include "db/insert/MemMenagerFactory.h"
-#include "MemManagerImpl.h"
-#include "utils/Exception.h"
-#include "utils/Log.h"
-
-#include <stdlib.h>
-#include <time.h>
-#include <cstdlib>
+#include <condition_variable>
+#include <deque>
+#include <list>
 #include <memory>
-#include <regex>
-#include <sstream>
+#include <mutex>
+#include <queue>
 #include <string>
+#include <thread>
+#include <unordered_map>
+#include <vector>
+
+#include "config/handler/GpuResourceConfigHandler.h"
+#include "scheduler/selector/Pass.h"
 
 namespace milvus {
-namespace engine {
+namespace scheduler {
 
-MemManagerPtr
-MemManagerFactory::Build(const std::shared_ptr<meta::Meta>& meta, const DBOptions& options) {
-    return std::make_shared<MemManagerImpl>(meta, options);
-}
+class BuildIndexPass : public Pass, public server::GpuResourceConfigHandler {
+ public:
+    BuildIndexPass() = default;
 
-}  // namespace engine
+ public:
+    void
+    Init() override;
+
+    bool
+    Run(const TaskPtr& task) override;
+
+ private:
+    uint64_t specified_gpu_id_ = 0;
+};
+
+using BuildIndexPassPtr = std::shared_ptr<BuildIndexPass>;
+
+}  // namespace scheduler
 }  // namespace milvus
+#endif

@@ -8,44 +8,27 @@
 // Unless required by applicable law or agreed to in writing, software distributed under the License
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
-#ifdef MILVUS_GPU_VERSION
-#pragma once
 
-#include <condition_variable>
-#include <deque>
-#include <limits>
-#include <list>
+#include "db/insert/MemManagerFactory.h"
+#include "MemManagerImpl.h"
+#include "utils/Exception.h"
+#include "utils/Log.h"
+
+#include <stdlib.h>
+#include <time.h>
+#include <cstdlib>
 #include <memory>
-#include <mutex>
-#include <queue>
+#include <regex>
+#include <sstream>
 #include <string>
-#include <thread>
-#include <unordered_map>
-#include <vector>
-
-#include "config/handler/GpuResourceConfigHandler.h"
-#include "scheduler/optimizer/Pass.h"
 
 namespace milvus {
-namespace scheduler {
+namespace engine {
 
-class FaissIVFPQPass : public Pass, public server::GpuResourceConfigHandler {
- public:
-    FaissIVFPQPass() = default;
+MemManagerPtr
+MemManagerFactory::Build(const std::shared_ptr<meta::Meta>& meta, const DBOptions& options) {
+    return std::make_shared<MemManagerImpl>(meta, options);
+}
 
- public:
-    void
-    Init() override;
-
-    bool
-    Run(const TaskPtr& task) override;
-
- private:
-    int64_t count_ = 0;
-};
-
-using FaissIVFPQPassPtr = std::shared_ptr<FaissIVFPQPass>;
-
-}  // namespace scheduler
+}  // namespace engine
 }  // namespace milvus
-#endif

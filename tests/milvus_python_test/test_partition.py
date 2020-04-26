@@ -74,8 +74,8 @@ class TestCreateBase:
         expected: status ok
         '''
         tag_name = None
-        status = connect.create_partition(collection, tag_name)
-        assert not status.OK()
+        with pytest.raises(Exception) as e:
+            status = connect.create_partition(collection, tag_name)
 
     def test_create_different_partition_tags(self, connect, collection):
         '''

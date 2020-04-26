@@ -108,16 +108,40 @@ ConnectionImpl::GetEntityByID(const std::string& collection_name, int64_t entity
 }
 
 Status
+ConnectionImpl::GetEntitiesByID(const std::string& collection_name,
+                                const std::vector<int64_t>& id_array,
+                                std::vector<Entity>& entities_data) {
+    return client_proxy_->GetEntitiesByID(collection_name, id_array, entities_data);
+}
+
+Status
 ConnectionImpl::GetIDsInSegment(const std::string& collection_name, const std::string& segment_name,
                                 std::vector<int64_t>& id_array) {
     return client_proxy_->GetIDsInSegment(collection_name, segment_name, id_array);
 }
 
 Status
-ConnectionImpl::Search(const std::string& collection_name, const std::vector<std::string>& partition_tags,
+ConnectionImpl::Search(const std::string& collection_name, const PartitionTagList& partition_tag_array,
                        const std::vector<Entity>& entity_array, int64_t topk, const std::string& extra_params,
                        TopKQueryResult& topk_query_result) {
-    return client_proxy_->Search(collection_name, partition_tags, entity_array, topk, extra_params, topk_query_result);
+    return client_proxy_->Search(collection_name,
+                                 partition_tag_array,
+                                 entity_array,
+                                 topk,
+                                 extra_params,
+                                 topk_query_result);
+}
+
+Status
+ConnectionImpl::SearchByID(const std::string& collection_name, const PartitionTagList& partition_tag_array,
+                           const std::vector<int64_t>& id_array, int64_t topk,
+                           const std::string& extra_params, TopKQueryResult& topk_query_result) {
+    return client_proxy_->SearchByID(collection_name,
+                                     partition_tag_array,
+                                     id_array,
+                                     topk,
+                                     extra_params,
+                                     topk_query_result);
 }
 
 Status
@@ -136,7 +160,7 @@ ConnectionImpl::ShowCollections(std::vector<std::string>& collection_array) {
 }
 
 Status
-ConnectionImpl::ShowCollectionInfo(const std::string& collection_name, CollectionInfo& collection_info) {
+ConnectionImpl::ShowCollectionInfo(const std::string& collection_name, std::string& collection_info) {
     return client_proxy_->ShowCollectionInfo(collection_name, collection_info);
 }
 

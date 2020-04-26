@@ -30,12 +30,12 @@ class SearchByIDRequest : public BaseRequest {
  public:
     static BaseRequestPtr
     Create(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name,
-           int64_t vector_id, int64_t topk, const milvus::json& extra_params,
+           const std::vector<int64_t>& id_array, int64_t topk, const milvus::json& extra_params,
            const std::vector<std::string>& partition_list, TopKQueryResult& result);
 
  protected:
     SearchByIDRequest(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name,
-                      int64_t vector_id, int64_t topk, const milvus::json& extra_params,
+                      const std::vector<int64_t>& id_array, int64_t topk, const milvus::json& extra_params,
                       const std::vector<std::string>& partition_list, TopKQueryResult& result);
 
     Status
@@ -43,7 +43,7 @@ class SearchByIDRequest : public BaseRequest {
 
  private:
     const std::string collection_name_;
-    const int64_t vector_id_;
+    std::vector<int64_t> id_array_;
     int64_t topk_;
     milvus::json extra_params_;
     const std::vector<std::string> partition_list_;
