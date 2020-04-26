@@ -58,7 +58,7 @@ struct Entity {
 
 using File2ErrArray = std::map<std::string, std::vector<std::string>>;
 using Table2FileErr = std::map<std::string, File2ErrArray>;
-using File2RefCount = std::map<std::string, int64_t>;
+using File2RefCount = std::map<uint64_t, int64_t>;
 using Table2FileRef = std::map<std::string, File2RefCount>;
 
 static const char* DEFAULT_PARTITON_TAG = "_default";

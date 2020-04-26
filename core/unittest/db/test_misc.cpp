@@ -17,7 +17,6 @@
 
 #include "db/IDGenerator.h"
 #include "db/IndexFailedChecker.h"
-#include "db/OngoingFileChecker.h"
 #include "db/Options.h"
 #include "db/Utils.h"
 #include "db/engine/EngineFactory.h"
@@ -208,31 +207,6 @@ TEST(DBMiscTest, CHECKER_TEST) {
         checker.MarkSucceedIndexFile(schema);
         checker.GetErrMsgForCollection("bbb", err_msg);
         ASSERT_EQ(err_msg, "5001 fail");
-    }
-
-    {
-        milvus::engine::OngoingFileChecker& checker = milvus::engine::OngoingFileChecker::GetInstance();
-        milvus::engine::meta::SegmentSchema schema;
-        schema.collection_id_ = "aaa";
-        schema.file_id_ = "5000";
-        checker.MarkOngoingFile(schema);
-
-        ASSERT_TRUE(checker.IsIgnored(schema));
-
-        schema.collection_id_ = "bbb";
-        schema.file_id_ = "5001";
-        milvus::engine::meta::SegmentsSchema table_files = {schema};
-        checker.MarkOngoingFiles(table_files);
-
-        ASSERT_TRUE(checker.IsIgnored(schema));
-
-        checker.UnmarkOngoingFile(schema);
-        ASSERT_FALSE(checker.IsIgnored(schema));
-
-        schema.collection_id_ = "aaa";
-        schema.file_id_ = "5000";
-        checker.UnmarkOngoingFile(schema);
-        ASSERT_FALSE(checker.IsIgnored(schema));
     }
 }
 

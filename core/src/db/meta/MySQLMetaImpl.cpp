@@ -31,7 +31,6 @@
 
 #include "MetaConsts.h"
 #include "db/IDGenerator.h"
-#include "db/OngoingFileChecker.h"
 #include "db/Utils.h"
 #include "metrics/Metrics.h"
 #include "utils/CommonUtil.h"
@@ -768,7 +767,7 @@ MySQLMetaImpl::CreateCollectionFile(SegmentSchema& file_schema) {
 
 Status
 MySQLMetaImpl::GetCollectionFiles(const std::string& collection_id, const std::vector<size_t>& ids,
-                                  SegmentsSchema& collection_files) {
+                                  FilesHolder& files_holder) {
     if (ids.empty()) {
         return Status::OK();
     }
@@ -830,10 +829,11 @@ MySQLMetaImpl::GetCollectionFiles(const std::string& collection_id, const std::v
             file_schema.dimension_ = collection_schema.dimension_;
 
             utils::GetCollectionFilePath(options_, file_schema);
-            collection_files.emplace_back(file_schema);
+            files_holder.MarkFile(file_schema);
         }
 
-        LOG_ENGINE_DEBUG_ << "Get collection files by id";
+        LOG_ENGINE_DEBUG_ << "Get " << files_holder.HoldFiles().size() << " files by id from collection "
+                          << collection_id;
         return ret;
     } catch (std::exception& e) {
         return HandleException("Failed to get collection files", e.what());
@@ -841,8 +841,7 @@ MySQLMetaImpl::GetCollectionFiles(const std::string& collection_id, const std::v
 }
 
 Status
-MySQLMetaImpl::GetCollectionFilesBySegmentId(const std::string& segment_id,
-                                             milvus::engine::meta::SegmentsSchema& collection_files) {
+MySQLMetaImpl::GetCollectionFilesBySegmentId(const std::string& segment_id, FilesHolder& files_holder) {
     try {
         mysqlpp::StoreQueryResult res;
         {
@@ -892,11 +891,11 @@ MySQLMetaImpl::GetCollectionFilesBySegmentId(const std::string& segment_id,
                 file_schema.dimension_ = collection_schema.dimension_;
 
                 utils::GetCollectionFilePath(options_, file_schema);
-                collection_files.emplace_back(file_schema);
+                files_holder.MarkFile(file_schema);
             }
         }
 
-        LOG_ENGINE_DEBUG_ << "Get collection files by segment id";
+        LOG_ENGINE_DEBUG_ << "Get " << files_holder.HoldFiles().size() << " files by segment id";
         return Status::OK();
     } catch (std::exception& e) {
         return HandleException("Failed to get collection files by segment id", e.what());
@@ -1547,9 +1546,7 @@ MySQLMetaImpl::GetPartitionName(const std::string& collection_id, const std::str
 }
 
 Status
-MySQLMetaImpl::FilesToSearch(const std::string& collection_id, SegmentsSchema& files) {
-    files.clear();
-
+MySQLMetaImpl::FilesToSearch(const std::string& collection_id, FilesHolder& files_holder) {
     try {
         server::MetricCollector metric;
         mysqlpp::StoreQueryResult res;
@@ -1608,13 +1605,14 @@ MySQLMetaImpl::FilesToSearch(const std::string& collection_id, SegmentsSchema& f
             auto status = utils::GetCollectionFilePath(options_, collection_file);
             if (!status.ok()) {
                 ret = status;
+                continue;
             }
 
-            files.emplace_back(collection_file);
+            files_holder.MarkFile(collection_file);
         }
 
-        if (res.size() > 0) {
-            LOG_ENGINE_DEBUG_ << "Collect " << res.size() << " to-search files";
+        if (files_holder.HoldFiles().size() > 0) {
+            LOG_ENGINE_DEBUG_ << "Collect " << files_holder.HoldFiles().size() << " to-search files";
         }
         return ret;
     } catch (std::exception& e) {
@@ -1623,9 +1621,7 @@ MySQLMetaImpl::FilesToSearch(const std::string& collection_id, SegmentsSchema& f
 }
 
 Status
-MySQLMetaImpl::FilesToMerge(const std::string& collection_id, SegmentsSchema& files) {
-    files.clear();
-
+MySQLMetaImpl::FilesToMerge(const std::string& collection_id, FilesHolder& files_holder) {
     try {
         server::MetricCollector metric;
 
@@ -1663,7 +1659,6 @@ MySQLMetaImpl::FilesToMerge(const std::string& collection_id, SegmentsSchema& fi
         }  // Scoped Connection
 
         Status ret;
-        int64_t to_merge_files = 0;
         for (auto& resRow : res) {
             SegmentSchema collection_file;
             collection_file.file_size_ = resRow["file_size"];
@@ -1688,14 +1683,14 @@ MySQLMetaImpl::FilesToMerge(const std::string& collection_id, SegmentsSchema& fi
             auto status = utils::GetCollectionFilePath(options_, collection_file);
             if (!status.ok()) {
                 ret = status;
+                continue;
             }
 
-            files.emplace_back(collection_file);
-            ++to_merge_files;
+            files_holder.MarkFile(collection_file);
         }
 
-        if (to_merge_files > 0) {
-            LOG_ENGINE_TRACE_ << "Collect " << to_merge_files << " to-merge files";
+        if (files_holder.HoldFiles().size() > 0) {
+            LOG_ENGINE_TRACE_ << "Collect " << files_holder.HoldFiles().size() << " to-merge files";
         }
         return ret;
     } catch (std::exception& e) {
@@ -1704,9 +1699,7 @@ MySQLMetaImpl::FilesToMerge(const std::string& collection_id, SegmentsSchema& fi
 }
 
 Status
-MySQLMetaImpl::FilesToIndex(SegmentsSchema& files) {
-    files.clear();
-
+MySQLMetaImpl::FilesToIndex(FilesHolder& files_holder) {
     try {
         server::MetricCollector metric;
         mysqlpp::StoreQueryResult res;
@@ -1769,11 +1762,11 @@ MySQLMetaImpl::FilesToIndex(SegmentsSchema& files) {
                 ret = status;
             }
 
-            files.push_back(collection_file);
+            files_holder.MarkFile(collection_file);
         }
 
-        if (res.size() > 0) {
-            LOG_ENGINE_DEBUG_ << "Collect " << res.size() << " to-index files";
+        if (files_holder.HoldFiles().size() > 0) {
+            LOG_ENGINE_DEBUG_ << "Collect " << files_holder.HoldFiles().size() << " to-index files";
         }
         return ret;
     } catch (std::exception& e) {
@@ -1783,16 +1776,13 @@ MySQLMetaImpl::FilesToIndex(SegmentsSchema& files) {
 
 Status
 MySQLMetaImpl::FilesByType(const std::string& collection_id, const std::vector<int>& file_types,
-                           SegmentsSchema& files) {
+                           FilesHolder& files_holder) {
     if (file_types.empty()) {
         return Status(DB_ERROR, "file types array is empty");
     }
 
     Status ret = Status::OK();
-
     try {
-        files.clear();
-
         mysqlpp::StoreQueryResult res;
         {
             mysqlpp::ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab_);
@@ -1860,7 +1850,7 @@ MySQLMetaImpl::FilesByType(const std::string& collection_id, const std::vector<i
                     ret = status;
                 }
 
-                files.emplace_back(file_schema);
+                files_holder.MarkFile(file_schema);
 
                 int32_t file_type = resRow["file_type"];
                 switch (file_type) {
@@ -1928,9 +1918,7 @@ MySQLMetaImpl::FilesByType(const std::string& collection_id, const std::vector<i
 }
 
 Status
-MySQLMetaImpl::FilesByID(const std::vector<size_t>& ids, SegmentsSchema& files) {
-    files.clear();
-
+MySQLMetaImpl::FilesByID(const std::vector<size_t>& ids, FilesHolder& files_holder) {
     if (ids.empty()) {
         return Status::OK();
     }
@@ -2002,11 +1990,13 @@ MySQLMetaImpl::FilesByID(const std::vector<size_t>& ids, SegmentsSchema& files) 
             auto status = utils::GetCollectionFilePath(options_, collection_file);
             if (!status.ok()) {
                 ret = status;
+                continue;
             }
 
-            files.emplace_back(collection_file);
+            files_holder.MarkFile(collection_file);
         }
 
+        milvus::engine::meta::SegmentsSchema& files = files_holder.HoldFiles();
         for (auto& collection_file : files) {
             CollectionSchema& collection_schema = collections[collection_file.collection_id_];
             collection_file.dimension_ = collection_schema.dimension_;
@@ -2221,7 +2211,7 @@ MySQLMetaImpl::CleanUpFilesWithTTL(uint64_t seconds /*, CleanUpFilter* filter*/)
                 collection_file.file_type_ = resRow["file_type"];
 
                 // check if the file can be deleted
-                if (OngoingFileChecker::GetInstance().IsIgnored(collection_file)) {
+                if (!FilesHolder::CanBeDeleted(collection_file)) {
                     LOG_ENGINE_DEBUG_ << "File:" << collection_file.file_id_
                                       << " currently is in use, not able to delete now";
                     continue;  // ignore this file, don't delete it
