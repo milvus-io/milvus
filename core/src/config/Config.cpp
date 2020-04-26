@@ -50,7 +50,7 @@ const char* CONFIG_SERVER_DEPLOY_MODE = "deploy_mode";
 const char* CONFIG_SERVER_DEPLOY_MODE_DEFAULT = "single";
 const char* CONFIG_SERVER_TIME_ZONE = "time_zone";
 const char* CONFIG_SERVER_TIME_ZONE_DEFAULT = "UTC+8";
-const char* CONFIG_SERVER_WEB_ENABLE = "enable_web";
+const char* CONFIG_SERVER_WEB_ENABLE = "web_enable";
 const char* CONFIG_SERVER_WEB_ENABLE_DEFAULT = "true";
 const char* CONFIG_SERVER_WEB_PORT = "web_port";
 const char* CONFIG_SERVER_WEB_PORT_DEFAULT = "19121";
@@ -867,7 +867,7 @@ Config::CheckServerConfigTimeZone(const std::string& value) {
 }
 
 Status
-Config::CheckServerConfigWebEnable(const std::string &value) {
+Config::CheckServerConfigWebEnable(const std::string& value) {
     return ValidationUtil::ValidateStringIsBool(value);
 }
 
@@ -1991,7 +1991,7 @@ Config::SetServerConfigTimeZone(const std::string& value) {
 }
 
 Status
-Config::SetServerConfigWebEnable(const std::string &value) {
+Config::SetServerConfigWebEnable(const std::string& value) {
     CONFIG_CHECK(CheckServerConfigWebEnable(value));
     return SetConfigValueInMem(CONFIG_SERVER, CONFIG_SERVER_WEB_ENABLE, value);
 }

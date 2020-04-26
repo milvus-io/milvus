@@ -23,7 +23,7 @@ version: 0.3
 #----------------------+------------------------------------------------------------+------------+-----------------+
 # time_zone            | Use UTC-x or UTC+x to specify a time zone.                 | Timezone   | UTC+8           |
 #----------------------+------------------------------------------------------------+------------+-----------------+
-# web_enable           | Enable web function or not.                                | Timezone   | UTC+8           |
+# web_enable           | Enable web server or not.                                  | Boolean    | true            |
 #----------------------+------------------------------------------------------------+------------+-----------------+
 # web_port             | Port that Milvus web server monitors.                      | Integer    | 19121           |
 #                      | Port range (1024, 65535)                                   |            |                 |
