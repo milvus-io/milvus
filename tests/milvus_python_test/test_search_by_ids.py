@@ -31,10 +31,12 @@ raw_vectors, binary_vectors = gen_binary_vectors(6000, dim)
 class TestSearchBase:
     @pytest.fixture(scope="function", autouse=True)
     def skip_check(self, connect):
-        if str(connect._cmd("mode")[1]) == "CPU" or str(connect._cmd("mode")[1]) == "GPU":
-            reason = "GPU mode not support"
-            logging.getLogger().info(reason)
-            pytest.skip(reason)
+        if str(connect._cmd("mode")[1]) == "CPU":
+            if request.param["index_type"] == IndexType.IVF_SQ8H:
+                pytest.skip("sq8h not support in CPU mode")
+        if str(connect._cmd("mode")[1]) == "GPU":
+            if request.param["index_type"] == IndexType.IVF_PQ:
+                pytest.skip("ivfpq not support in GPU mode")
 
     def init_data(self, connect, collection, nb=6000):
         '''
@@ -178,6 +180,22 @@ class TestSearchBase:
         assert len(result[0]) == min(len(vectors), top_k)
         assert result[0][0].distance <= epsilon
         assert check_result(result[0], ids[0])
+
+    def test_search_flat_same_ids(self, connect, collection):
+        '''
+        target: test basic search fuction, all the search params is corrent, change top-k value
+        method: search with the given vector id, check the result
+        expected: search status ok, and the length of the result is top_k
+        '''
+        vectors, ids = self.init_data(connect, collection)
+        query_ids = [ids[0], ids[0]]
+        status, result = connect.search_by_ids(collection, query_ids, top_k, params={})
+        assert status.OK()
+        assert len(result[0]) == min(len(vectors), top_k)
+        assert result[0][0].distance <= epsilon
+        assert result[1][0].distance <= epsilon
+        assert check_result(result[0], ids[0])
+        assert check_result(result[1], ids[0])
 
     def test_search_flat_max_topk(self, connect, collection):
         '''
