@@ -26,7 +26,7 @@ InstanceLockCheck::Check(const std::string& path) {
     if (fd < 0) {
         std::string msg;
         if (errno == EROFS) {
-            // Not using lockingg for read-only lock file
+            // Not using locking for read-only lock file
             msg += "Lock file is read-only.";
         }
         msg += "Could not open lock file.";
