@@ -33,6 +33,7 @@ set(util_srcs
         ${INDEX_SOURCE_DIR}/knowhere/knowhere/index/vector_index/helpers/IndexParameter.cpp
         ${INDEX_SOURCE_DIR}/knowhere/knowhere/index/vector_index/IndexType.cpp
         ${INDEX_SOURCE_DIR}/knowhere/knowhere/common/Exception.cpp
+        ${INDEX_SOURCE_DIR}/knowhere/knowhere/common/Log.cpp
         ${INDEX_SOURCE_DIR}/knowhere/knowhere/common/Timer.cpp
         ${INDEX_SOURCE_DIR}/unittest/utils.cpp
         )
