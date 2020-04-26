@@ -78,58 +78,6 @@ WebErrorMap(ErrorCode code) {
 }
 
 /////////////////////////////////// Private methods ///////////////////////////////////////
-Status
-WebRequestHandler::ParseQueryInteger(const OQueryParams& query_params, const std::string& key, int64_t& value,
-                                     bool nullable) {
-    auto query = query_params.get(key.c_str());
-    if (nullptr != query.get() && query->getSize() > 0) {
-        std::string value_str = query->std_str();
-        if (!ValidationUtil::ValidateStringIsNumber(value_str).ok()) {
-            return Status(ILLEGAL_QUERY_PARAM,
-                          "Query param \'offset\' is illegal, only non-negative integer supported");
-        }
-
-        value = std::stol(value_str);
-    } else if (!nullable) {
-        return Status(QUERY_PARAM_LOSS, "Query param \"" + key + "\" is required");
-    }
-
-    return Status::OK();
-}
-
-Status
-WebRequestHandler::ParseQueryStr(const OQueryParams& query_params, const std::string& key, std::string& value,
-                                 bool nullable) {
-    auto query = query_params.get(key.c_str());
-    if (nullptr != query.get() && query->getSize() > 0) {
-        value = query->std_str();
-    } else if (!nullable) {
-        return Status(QUERY_PARAM_LOSS, "Query param \"" + key + "\" is required");
-    }
-
-    return Status::OK();
-}
-
-Status
-WebRequestHandler::ParseQueryBool(const OQueryParams& query_params, const std::string& key, bool& value,
-                                  bool nullable) {
-    auto query = query_params.get(key.c_str());
-    if (nullptr != query.get() && query->getSize() > 0) {
-        std::string value_str = query->std_str();
-        if (!ValidationUtil::ValidateStringIsBool(value_str).ok()) {
-            return Status(ILLEGAL_QUERY_PARAM, "Query param \'all_required\' must be a bool");
-        }
-        value = value_str == "True" || value_str == "true";
-        return Status::OK();
-    }
-
-    if (!nullable) {
-        return Status(QUERY_PARAM_LOSS, "Query param \"" + key + "\" is required");
-    }
-
-    return Status::OK();
-}
-
 void
 WebRequestHandler::AddStatusToJson(nlohmann::json& json, int64_t code, const std::string& msg) {
     json["code"] = (int64_t)code;

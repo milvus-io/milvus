@@ -104,23 +104,7 @@ SearchByIDRequest::OnExecute() {
             return status;
         }
 
-        // step 6: check whether GPU search resource is enabled
-#ifdef MILVUS_GPU_VERSION
-        Config& config = Config::GetInstance();
-        bool gpu_enable;
-        config.GetGpuResourceConfigEnable(gpu_enable);
-        if (gpu_enable) {
-            std::vector<int64_t> search_resources;
-            config.GetGpuResourceConfigSearchResources(search_resources);
-            if (!search_resources.empty()) {
-                std::string err_msg = "SearchByID cannot be executed on GPU";
-                LOG_SERVER_ERROR_ << err_msg;
-                return Status(SERVER_UNSUPPORTED_ERROR, err_msg);
-            }
-        }
-#endif
-
-        // step 7: check collection's index type supports search by id
+        // step 6: check collection's index type supports search by id
         if (collection_schema.engine_type_ != (int32_t)engine::EngineType::FAISS_IDMAP &&
             collection_schema.engine_type_ != (int32_t)engine::EngineType::FAISS_BIN_IDMAP &&
             collection_schema.engine_type_ != (int32_t)engine::EngineType::FAISS_IVFFLAT &&
@@ -134,7 +118,7 @@ SearchByIDRequest::OnExecute() {
 
         rc.RecordSection("check validation");
 
-        // step 8: search vectors
+        // step 7: search vectors
         engine::ResultIds result_ids;
         engine::ResultDistances result_distances;
 
@@ -161,7 +145,7 @@ SearchByIDRequest::OnExecute() {
             return Status::OK();  // empty collection
         }
 
-        // step 9: construct result array
+        // step 8: construct result array
         milvus::server::ContextChild tracer(context_, "Constructing result");
         result_.row_num_ = id_array_.size();
         result_.distance_list_.swap(result_distances);
