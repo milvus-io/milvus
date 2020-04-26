@@ -7,6 +7,9 @@
     SUBSECOND_PRECISION     =   3
     PERFORMANCE_TRACKING    =   false
     MAX_LOG_FILE_SIZE       =   209715200 ## Throw log files away after 200MB
+* INFO:
+    FILENAME                =   "@MILVUS_DB_PATH@/logs/milvus-%datetime{%y-%M-%d-%H:%m}-info.log"
+    ENABLED                 =   true
 * DEBUG:
     FILENAME                =   "@MILVUS_DB_PATH@/logs/milvus-%datetime{%y-%M-%d-%H:%m}-debug.log"
     ENABLED                 =   true

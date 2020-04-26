@@ -85,6 +85,7 @@ aux_source_directory(${MILVUS_ENGINE_SRC}/server/delivery delivery_files)
 set(server_files
         ${server_init_files}
         ${server_service_files}
+        ${server_init_files}
         ${delivery_request_files}
         ${delivery_hybrid_request_files}
         ${delivery_strategy_files}
