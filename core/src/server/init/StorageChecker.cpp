@@ -37,6 +37,8 @@ StorageChecker::CheckStoragePermission() {
     if (0 != ret) {
         std::string err_msg = " Check DB storage primary path " + primary_path + " fail. " + strerror(errno) +
                               "(code: " + std::to_string(errno) + ")";
+        LOG_SERVER_FATAL_ << err_msg;
+        std::cerr << err_msg << std::endl;
         return Status(SERVER_UNEXPECTED_ERROR, err_msg);
     }
 
@@ -54,6 +56,7 @@ StorageChecker::CheckStoragePermission() {
             if (0 != ret) {
                 std::string err_msg = " Check DB storage secondary path " + path + " fail. " + strerror(errno) +
                                       "(code: " + std::to_string(errno) + ")";
+                LOG_SERVER_FATAL_ << err_msg;
                 return Status(SERVER_UNEXPECTED_ERROR, err_msg);
             }
         }
@@ -69,6 +72,7 @@ StorageChecker::CheckStoragePermission() {
     if (0 != ret) {
         std::string err_msg = " Check WAL storage path " + wal_path + " fail. " + strerror(errno) +
                               "(code: " + std::to_string(errno) + ")";
+        LOG_SERVER_FATAL_ << err_msg;
         return Status(SERVER_UNEXPECTED_ERROR, err_msg);
     }
 

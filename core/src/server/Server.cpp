@@ -313,7 +313,6 @@ Server::Start() {
         }
         s = StorageChecker::CheckStoragePermission();
         if (!s.ok()) {
-            std::cerr << "ERROR: Milvus server fail to check storage permission" << std::endl;
             return s;
         }
 
