@@ -21,7 +21,8 @@ Please mark all change in change log and use the issue from GitHub
 -   \#2064 Warn when use SQLite as metadata management
 
 ## Improvement
--   \#221 Refactor LOG macro
+-   \#221  Refactor LOG macro
+-   \#2039 Support Milvus run on SSE CPUs
 
 ## Task
 
