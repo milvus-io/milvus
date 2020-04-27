@@ -48,15 +48,15 @@ TimeRecorder::PrintTimeRecord(const std::string& msg, double span) {
             break;
         }
         case 1: {
-            KNOWHERE_LOG_DEBUG << str_log;
+            LOG_KNOWHERE_DEBUG_ << str_log;
             break;
         }
             // case 2: {
-            //     KNOWHERE_LOG_TRACE << str_log;
+            //     LOG_KNOWHERE_TRACE_ << str_log;
             //     break;
             // }
             // case 3: {
-            //     KNOWHERE_LOG_WARNING << str_log;
+            //     LOG_KNOWHERE_WARNING_ << str_log;
             //     break;
             // }
     }

@@ -35,7 +35,6 @@ constexpr int64_t SEARCH_TARGET = BATCH_ENTITY_COUNT / 2;  // change this value,
 constexpr int64_t ADD_ENTITY_LOOP = 5;
 constexpr milvus::IndexType INDEX_TYPE = milvus::IndexType::IVFSQ8;
 constexpr int32_t NLIST = 16384;
-constexpr uint64_t FIELD_NUM = 3;
 
 void PrintEntity(const std::string& tag, const milvus::Entity& entity) {
     std::cout << tag << "\t[";
