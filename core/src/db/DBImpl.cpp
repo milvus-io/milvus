@@ -2667,6 +2667,7 @@ DBImpl::BackgroundMetricThread() {
 
         swn_metric_.Wait_For(std::chrono::seconds(BACKGROUND_METRIC_INTERVAL));
         StartMetricTask();
+        //        meta::FilesHolder::PrintInfo();
     }
 }
 

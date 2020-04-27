@@ -56,6 +56,9 @@ class FilesHolder {
     static bool
     CanBeDeleted(const meta::SegmentSchema& file);
 
+    static void
+    PrintInfo();
+
  private:
     class OngoingFileChecker {
      public:
@@ -76,6 +79,9 @@ class FilesHolder {
 
         bool
         CanBeDeleted(const meta::SegmentSchema& file);
+
+        void
+        PrintInfo();
 
      private:
         Status

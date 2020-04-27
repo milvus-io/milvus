@@ -76,6 +76,17 @@ FilesHolder::OngoingFileChecker::CanBeDeleted(const meta::SegmentSchema& schema)
     }
 }
 
+void
+FilesHolder::OngoingFileChecker::PrintInfo() {
+    std::lock_guard<std::mutex> lck(mutex_);
+    if (!ongoing_files_.empty()) {
+        LOG_ENGINE_DEBUG_ << "File reference information:";
+        for (meta::Table2FileRef::iterator iter = ongoing_files_.begin(); iter != ongoing_files_.end(); ++iter) {
+            LOG_ENGINE_DEBUG_ << "\t" << iter->first << ": " << iter->second.size() << " files in use";
+        }
+    }
+}
+
 Status
 FilesHolder::OngoingFileChecker::MarkOngoingFileNoLock(const meta::SegmentSchema& table_file) {
     if (table_file.collection_id_.empty() || table_file.file_id_.empty()) {
@@ -179,6 +190,11 @@ FilesHolder::ReleaseFiles() {
 bool
 FilesHolder::CanBeDeleted(const meta::SegmentSchema& file) {
     return OngoingFileChecker::GetInstance().CanBeDeleted(file);
+}
+
+void
+FilesHolder::PrintInfo() {
+    return OngoingFileChecker::GetInstance().PrintInfo();
 }
 
 Status
