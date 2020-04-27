@@ -61,15 +61,12 @@ pipeline {
                 }
 
                 stages {
-                    stage("SkipCheck") {
-                        steps {
-                            script {
-                                if ("${OS_NAME}" == "ubuntu18.04" && !isTimeTriggeredBuild()) {
-                                    currentBuild.result = 'SUCCESS'
-                                    return
-                                }
-                            }
-                        }
+                    stage("Skip Check") {
+                        define is_skip = "${OS_NAME}" == "ubuntu18.04" && !isTimeTriggeredBuild()
+                    }
+                    if (is_skip) {
+                        currentBuild.result = 'SUCCESS'
+                        return
                     }
                   
                     stage("Milvus Build and Unittest") {
