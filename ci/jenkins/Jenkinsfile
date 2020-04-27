@@ -65,6 +65,7 @@ pipeline {
                         steps {
                             script {
                                 if ("${OS_NAME}" == "ubuntu18.04" && !isTimeTriggeredBuild()) {
+                                    currentBuild.result = 'SUCCESS'
                                     return
                                 }
                             }
