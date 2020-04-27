@@ -59,13 +59,6 @@ pipeline {
                     ]);
                     DOCKER_VERSION = "${SEMVER}-${BINARY_VERSION}-${OS_NAME}-${LOWER_BUILD_TYPE}"
                 }
-                script {
-                    boolean is_skip = "${OS_NAME}" == "ubuntu18.04" && !isTimeTriggeredBuild()
-                    if (is_skip) {
-                        currentBuild.result = 'SUCCESS'
-                        return
-                    }
-                }
 
                 stages {
                     stage("SkipCheck") {
