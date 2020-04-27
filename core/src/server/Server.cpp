@@ -218,7 +218,7 @@ Server::Start() {
             }
 
             bool wal_enable = false;
-            s = conf.GetWalConfigEnable(wal_enable);
+            s = config.GetWalConfigEnable(wal_enable);
             if (!s.ok()) {
                 return s;
             }
