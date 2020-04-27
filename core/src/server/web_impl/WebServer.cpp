@@ -47,23 +47,21 @@ WebServer::StartService() {
 
     Config& config = Config::GetInstance();
     std::string port;
-
     CONFIG_CHECK(config.GetServerConfigWebPort(port));
 
     {
         AppComponent components = AppComponent(std::stoi(port));
 
-        auto user_controller = WebController::createShared();
-
         /* create ApiControllers and add endpoints to router */
-        OATPP_COMPONENT(std::shared_ptr<oatpp::web::server::HttpRouter>, router);
+        auto user_controller = WebController::createShared();
+        auto router = components.http_router_.getObject();
         user_controller->addEndpointsToRouter(router);
 
         /* Get connection handler component */
-        OATPP_COMPONENT(std::shared_ptr<oatpp::network::server::ConnectionHandler>, connection_handler);
+        auto connection_handler = components.server_connection_handler_.getObject();
 
         /* Get connection provider component */
-        OATPP_COMPONENT(std::shared_ptr<oatpp::network::ServerConnectionProvider>, connection_provider);
+        auto connection_provider = components.server_connection_provider_.getObject();
 
         /* create server */
         auto server = oatpp::network::server::Server(connection_provider, connection_handler);
@@ -80,12 +78,9 @@ WebServer::StartService() {
 
         // start synchronously
         server.run();
-
         connection_handler->stop();
-
         stop_thread.join();
     }
-
     oatpp::base::Environment::destroy();
 
     return Status::OK();

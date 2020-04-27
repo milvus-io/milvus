@@ -42,7 +42,8 @@ class AppComponent {
             return oatpp::network::server::SimpleTCPConnectionProvider::createShared(this->port_);
         } catch (std::exception& e) {
             std::string error_msg = "Cannot bind http port " + std::to_string(this->port_) +
-                                    ": " + e.what();
+                                    ": " + e.what() +
+                                    " (errno:" + std::to_string(errno) + "details: " + strerror(errno) + ").";
             std::cout << error_msg << std::endl;
             throw std::runtime_error(error_msg);
         }
