@@ -64,7 +64,7 @@ pipeline {
                     stage("SkipCheck") {
                         steps {
                             script {
-                                if (${OS_NAME} == "ubuntu18.04" && !isTimeTriggeredBuild()) {
+                                if ("${OS_NAME}" == "ubuntu18.04" && !isTimeTriggeredBuild()) {
                                     return
                                 }
                             }
