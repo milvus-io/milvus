@@ -717,8 +717,7 @@ MapAndCopyResult(const knowhere::DatasetPtr& dataset, const std::vector<milvus::
 
 template <typename T>
 void
-ProcessRangeQuery(std::vector<T> data, T value, query::CompareOperator type, uint64_t j,
-                  faiss::ConcurrentBitsetPtr& bitset) {
+ProcessRangeQuery(std::vector<T> data, T value, query::CompareOperator type, faiss::ConcurrentBitsetPtr& bitset) {
     switch (type) {
         case query::CompareOperator::LT: {
             for (uint64_t i = 0; i < data.size(); ++i) {
@@ -989,7 +988,7 @@ ExecutionEngineImpl::ExecBinaryQuery(milvus::query::GeneralQueryPtr general_quer
                         data.resize(size / sizeof(int8_t));
                         memcpy(data.data(), attr_data_.at(field_name).data(), size);
                         int8_t value = atoi(operand.c_str());
-                        ProcessRangeQuery<int8_t>(data, value, com_expr[j].compare_operator, j, bitset);
+                        ProcessRangeQuery<int8_t>(data, value, com_expr[j].compare_operator, bitset);
                         break;
                     }
                     case DataType::INT16: {
@@ -997,7 +996,7 @@ ExecutionEngineImpl::ExecBinaryQuery(milvus::query::GeneralQueryPtr general_quer
                         data.resize(size / sizeof(int16_t));
                         memcpy(data.data(), attr_data_.at(field_name).data(), size);
                         int16_t value = atoi(operand.c_str());
-                        ProcessRangeQuery<int16_t>(data, value, com_expr[j].compare_operator, j, bitset);
+                        ProcessRangeQuery<int16_t>(data, value, com_expr[j].compare_operator, bitset);
                         break;
                     }
                     case DataType::INT32: {
@@ -1005,7 +1004,7 @@ ExecutionEngineImpl::ExecBinaryQuery(milvus::query::GeneralQueryPtr general_quer
                         data.resize(size / sizeof(int32_t));
                         memcpy(data.data(), attr_data_.at(field_name).data(), size);
                         int32_t value = atoi(operand.c_str());
-                        ProcessRangeQuery<int32_t>(data, value, com_expr[j].compare_operator, j, bitset);
+                        ProcessRangeQuery<int32_t>(data, value, com_expr[j].compare_operator, bitset);
                         break;
                     }
                     case DataType::INT64: {
@@ -1013,7 +1012,7 @@ ExecutionEngineImpl::ExecBinaryQuery(milvus::query::GeneralQueryPtr general_quer
                         data.resize(size / sizeof(int64_t));
                         memcpy(data.data(), attr_data_.at(field_name).data(), size);
                         int64_t value = atoi(operand.c_str());
-                        ProcessRangeQuery<int64_t>(data, value, com_expr[j].compare_operator, j, bitset);
+                        ProcessRangeQuery<int64_t>(data, value, com_expr[j].compare_operator, bitset);
                         break;
                     }
                     case DataType::FLOAT: {
@@ -1023,7 +1022,7 @@ ExecutionEngineImpl::ExecBinaryQuery(milvus::query::GeneralQueryPtr general_quer
                         std::istringstream iss(operand);
                         double value;
                         iss >> value;
-                        ProcessRangeQuery<float>(data, value, com_expr[j].compare_operator, j, bitset);
+                        ProcessRangeQuery<float>(data, value, com_expr[j].compare_operator, bitset);
                         break;
                     }
                     case DataType::DOUBLE: {
@@ -1033,7 +1032,7 @@ ExecutionEngineImpl::ExecBinaryQuery(milvus::query::GeneralQueryPtr general_quer
                         std::istringstream iss(operand);
                         double value;
                         iss >> value;
-                        ProcessRangeQuery<double>(data, value, com_expr[j].compare_operator, j, bitset);
+                        ProcessRangeQuery<double>(data, value, com_expr[j].compare_operator, bitset);
                         break;
                     }
                 }
