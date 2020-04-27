@@ -11,6 +11,4 @@ We use GitHub for tracking bugs and feature requests. If you need any support fo
 [Slack](https://join.slack.com/t/milvusio/shared_invite/enQtNzY1OTQ0NDI3NjMzLWNmYmM1NmNjOTQ5MGI5NDhhYmRhMGU5M2NhNzhhMDMzY2MzNDdlYjM5ODQ5MmE3ODFlYzU3YjJkNmVlNDQ2ZTk): The #general channel is the place where people offer support.
 
 ## Other
-
-
 [Bootcamp](https://github.com/milvus-io/bootcamp): It provides more scenario-based applications and demos of Milvus.
