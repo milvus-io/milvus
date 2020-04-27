@@ -23,12 +23,6 @@ namespace server {
 namespace web {
 
 Status
-CopyRowRecords(const OList<OList<OFloat32>::ObjectWrapper>::ObjectWrapper& records, std::vector<float>& vectors);
-
-Status
-CopyBinRowRecords(const OList<OList<OInt64>::ObjectWrapper>::ObjectWrapper& records, std::vector<uint8_t>& vectors);
-
-Status
 ParseQueryInteger(const OQueryParams& query_params, const std::string& key, int64_t& value, bool nullable = true);
 
 Status
