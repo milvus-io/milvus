@@ -204,6 +204,13 @@ Server::Start() {
                 return s;
             }
 
+            try {
+                // True if a new directory was created, otherwise false.
+                boost::filesystem::create_directories(db_path);
+            } catch (...) {
+                return Status(SERVER_UNEXPECTED_ERROR, "Cannot create db dir");
+            }
+
             s = InstanceLockCheck::Check(db_path);
             if (!s.ok()) {
                 std::cerr << "deploy_mode: " << deploy_mode << " instance lock db path failed." << std::endl;
@@ -216,7 +223,10 @@ Server::Start() {
                 return s;
             }
 
-            if (not boost::filesystem::create_directories(wal_path)) {
+            try {
+                // True if a new directory was created, otherwise false.
+                boost::filesystem::create_directories(wal_path);
+            } catch (...) {
                 return Status(SERVER_UNEXPECTED_ERROR, "Cannot create wal dir");
             }
             s = InstanceLockCheck::Check(wal_path);
