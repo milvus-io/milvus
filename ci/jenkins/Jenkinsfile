@@ -59,16 +59,17 @@ pipeline {
                     ]);
                     DOCKER_VERSION = "${SEMVER}-${BINARY_VERSION}-${OS_NAME}-${LOWER_BUILD_TYPE}"
                 }
+                steps {
+                    script {
+                        boolean is_skip = "${OS_NAME}" == "ubuntu18.04" && !isTimeTriggeredBuild()
+                        if (is_skip) {
+                            currentBuild.result = 'SUCCESS'
+                            return
+                        }
+                    }
+                }
 
                 stages {
-                    stage("Skip Check") {
-                        define is_skip = "${OS_NAME}" == "ubuntu18.04" && !isTimeTriggeredBuild()
-                    }
-                    if (is_skip) {
-                        currentBuild.result = 'SUCCESS'
-                        return
-                    }
-                  
                     stage("Milvus Build and Unittest") {
                         agent {
                             kubernetes {
