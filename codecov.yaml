@@ -3,9 +3,6 @@ coverage:
   notify:
     require_ci_to_pass: yes
 
-
-
-
   precision: 2
   round: down
   range: "70...100"
