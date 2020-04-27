@@ -226,7 +226,6 @@ else ()
     set(OPENBLAS_SOURCE_URL
             "https://github.com/xianyi/OpenBLAS/archive/v${OPENBLAS_VERSION}.tar.gz")
 endif ()
-set(OPENBLAS_MD5 "8a110a25b819a4b94e8a9580702b6495")
 
 # ----------------------------------------------------------------------
 # ARROW
