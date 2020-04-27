@@ -208,7 +208,7 @@ Server::Start() {
                 // True if a new directory was created, otherwise false.
                 boost::filesystem::create_directories(db_path);
             } catch (...) {
-                return Status(SERVER_UNEXPECTED_ERROR, "Cannot create db dir");
+                return Status(SERVER_UNEXPECTED_ERROR, "Cannot create db directory");
             }
 
             s = InstanceLockCheck::Check(db_path);
@@ -217,22 +217,30 @@ Server::Start() {
                 return s;
             }
 
-            std::string wal_path;
-            s = config.GetWalConfigWalPath(wal_path);
+            bool wal_enable = false;
+            s = conf.GetWalConfigEnable(wal_enable);
             if (!s.ok()) {
                 return s;
             }
 
-            try {
-                // True if a new directory was created, otherwise false.
-                boost::filesystem::create_directories(wal_path);
-            } catch (...) {
-                return Status(SERVER_UNEXPECTED_ERROR, "Cannot create wal dir");
-            }
-            s = InstanceLockCheck::Check(wal_path);
-            if (!s.ok()) {
-                std::cerr << "deploy_mode: " << deploy_mode << " instance lock wal path failed." << std::endl;
-                return s;
+            if (wal_enable) {
+                std::string wal_path;
+                s = config.GetWalConfigWalPath(wal_path);
+                if (!s.ok()) {
+                    return s;
+                }
+
+                try {
+                    // True if a new directory was created, otherwise false.
+                    boost::filesystem::create_directories(wal_path);
+                } catch (...) {
+                    return Status(SERVER_UNEXPECTED_ERROR, "Cannot create wal directory");
+                }
+                s = InstanceLockCheck::Check(wal_path);
+                if (!s.ok()) {
+                    std::cerr << "deploy_mode: " << deploy_mode << " instance lock wal path failed." << std::endl;
+                    return s;
+                }
             }
         }
 
