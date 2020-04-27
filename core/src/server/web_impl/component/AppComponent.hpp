@@ -19,8 +19,6 @@
 #include <oatpp/parser/json/mapping/ObjectMapper.hpp>
 #include <oatpp/core/macro/component.hpp>
 
-#include "server/web_impl/handler/WebRequestHandler.h"
-
 namespace milvus {
 namespace server {
 namespace web {
@@ -41,9 +39,8 @@ class AppComponent {
         try {
             return oatpp::network::server::SimpleTCPConnectionProvider::createShared(this->port_);
         } catch (std::exception& e) {
-            std::string error_msg = "Cannot bind http port " + std::to_string(this->port_) +
-                                    ": " + e.what() +
-                                    " (errno:" + std::to_string(errno) + "details: " + strerror(errno) + ").";
+            std::string error_msg = "Cannot bind http port " + std::to_string(this->port_) + ". " + e.what() +
+                "(errno: " + std::to_string(errno) + ", details: " + strerror(errno) + ")";
             std::cout << error_msg << std::endl;
             throw std::runtime_error(error_msg);
         }
@@ -67,8 +64,7 @@ class AppComponent {
         auto serializerConfig = oatpp::parser::json::mapping::Serializer::Config::createShared();
         auto deserializerConfig = oatpp::parser::json::mapping::Deserializer::Config::createShared();
         deserializerConfig->allowUnknownFields = false;
-        return oatpp::parser::json::mapping::ObjectMapper::createShared(serializerConfig,
-                                                                        deserializerConfig);
+        return oatpp::parser::json::mapping::ObjectMapper::createShared(serializerConfig, deserializerConfig);
     }());
 };
 
