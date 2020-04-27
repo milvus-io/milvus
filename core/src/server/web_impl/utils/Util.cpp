@@ -18,45 +18,6 @@ namespace server {
 namespace web {
 
 Status
-CopyRowRecords(const OList<OList<OFloat32>::ObjectWrapper>::ObjectWrapper& records, std::vector<float>& vectors) {
-    size_t tal_size = 0;
-    records->forEach([&tal_size](const OList<OFloat32>::ObjectWrapper& row_item) { tal_size += row_item->count(); });
-
-    vectors.resize(tal_size);
-    size_t index_offset = 0;
-    records->forEach([&vectors, &index_offset](const OList<OFloat32>::ObjectWrapper& row_item) {
-        row_item->forEach(
-            [&vectors, &index_offset](const OFloat32& item) { vectors[index_offset++] = item->getValue(); });
-    });
-
-    return Status::OK();
-}
-
-Status
-CopyBinRowRecords(const OList<OList<OInt64>::ObjectWrapper>::ObjectWrapper& records, std::vector<uint8_t>& vectors) {
-    size_t tal_size = 0;
-    records->forEach([&tal_size](const OList<OInt64>::ObjectWrapper& item) { tal_size += item->count(); });
-
-    vectors.resize(tal_size);
-    size_t index_offset = 0;
-    bool oor = false;
-    records->forEach([&vectors, &index_offset, &oor](const OList<OInt64>::ObjectWrapper& row_item) {
-        row_item->forEach([&vectors, &index_offset, &oor](const OInt64& item) {
-            if (!oor) {
-                int64_t value = item->getValue();
-                if (0 > value || value > 255) {
-                    oor = true;
-                } else {
-                    vectors[index_offset++] = static_cast<uint8_t>(value);
-                }
-            }
-        });
-    });
-
-    return Status::OK();
-}
-
-Status
 ParseQueryInteger(const OQueryParams& query_params, const std::string& key, int64_t& value, bool nullable) {
     auto query = query_params.get(key.c_str());
     if (nullptr != query.get() && query->getSize() > 0) {
