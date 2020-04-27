@@ -12,51 +12,9 @@
 
 namespace faiss {
 
-#ifdef __AVX__
-#define USE_AVX
-#endif
-
-
 /*******************************************************************
  * ScalarQuantizer Distance Computer
  ********************************************************************/
-
-/* AVX */
-SQDistanceComputer *
-sq_get_distance_computer_L2_avx (QuantizerType qtype, size_t dim, const std::vector<float>& trained) {
-#ifdef USE_AVX
-    if (dim % 8 == 0) {
-        return select_distance_computer<SimilarityL2<8>> (qtype, dim, trained);
-    } else
-#endif
-    {
-        return select_distance_computer<SimilarityL2<1>> (qtype, dim, trained);
-    }
-}
-
-SQDistanceComputer *
-sq_get_distance_computer_IP_avx (QuantizerType qtype, size_t dim, const std::vector<float>& trained) {
-#ifdef USE_AVX
-    if (dim % 8 == 0) {
-        return select_distance_computer<SimilarityIP<8>> (qtype, dim, trained);
-    } else
-#endif
-    {
-        return select_distance_computer<SimilarityIP<1>> (qtype, dim, trained);
-    }
-}
-
-Quantizer *
-sq_select_quantizer_avx (QuantizerType qtype, size_t dim, const std::vector<float>& trained) {
-#ifdef USE_AVX
-    if (dim % 8 == 0) {
-        return select_quantizer_1<8> (qtype, dim, trained);
-    } else
-#endif
-    {
-        return select_quantizer_1<1> (qtype, dim, trained);
-    }
-}
 
 /* SSE */
 SQDistanceComputer *
