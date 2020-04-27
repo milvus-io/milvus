@@ -10,6 +10,7 @@ Please mark all change in change log and use the issue from GitHub
 -   \#1997 Index file missed after compact
 -   \#2073 Fix CheckDBConfigBackendUrl error message
 -   \#2076 CheckMetricConfigAddress error message
+-   \#2141 Fix server start failed if wal directory exist
 
 ## Feature
 -   \#1751 Add api SearchByID
