@@ -62,7 +62,6 @@ pipeline {
 
                 stages {
                     if (${OS_NAME} == "ubuntu18.04" && !isTimeTriggeredBuild()) {
-                        echo "Skip ${OS_NAME} in regression..."
                         return
                     }
                   
