@@ -22,6 +22,7 @@ Please mark all change in change log and use the issue from GitHub
 
 ## Improvement
 -   \#221 Refactor LOG macro
+-   \#2039 Support Milvus run on SSE CPUs
 
 ## Task
 

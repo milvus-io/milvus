@@ -13,24 +13,13 @@
 
 namespace faiss {
 
+SQDistanceComputer *
+sq_get_distance_computer_L2_sse(QuantizerType qtype, size_t dim, const std::vector<float>& trained);
 
 SQDistanceComputer *
-sq_get_distance_computer_L2_avx (QuantizerType qtype, size_t dim, const std::vector<float>& trained);
-
-SQDistanceComputer *
-sq_get_distance_computer_IP_avx (QuantizerType qtype, size_t dim, const std::vector<float>& trained);
+sq_get_distance_computer_IP_sse(QuantizerType qtype, size_t dim, const std::vector<float>& trained);
 
 Quantizer *
-sq_select_quantizer_avx (QuantizerType qtype, size_t dim, const std::vector<float>& trained);
-
-
-SQDistanceComputer *
-sq_get_distance_computer_L2_sse (QuantizerType qtype, size_t dim, const std::vector<float>& trained);
-
-SQDistanceComputer *
-sq_get_distance_computer_IP_sse (QuantizerType qtype, size_t dim, const std::vector<float>& trained);
-
-Quantizer *
-sq_select_quantizer_sse (QuantizerType qtype, size_t dim, const std::vector<float>& trained);
+sq_select_quantizer_sse(QuantizerType qtype, size_t dim, const std::vector<float>& trained);
 
 } // namespace faiss
