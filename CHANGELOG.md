@@ -10,6 +10,7 @@ Please mark all change in change log and use the issue from GitHub
 -   \#1997 Index file missed after compact
 -   \#2073 Fix CheckDBConfigBackendUrl error message
 -   \#2076 CheckMetricConfigAddress error message
+-   \#1796 Too much low performance of building index on ubuntu-mysql-version
 
 ## Feature
 -   \#1751 Add api SearchByID
