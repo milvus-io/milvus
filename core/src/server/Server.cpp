@@ -190,7 +190,7 @@ Server::Start() {
         }
         tzset();
 
-        InitLog(log_config_file_);
+        InitLog("/tmp/milvus/logs/");
 
         std::string deploy_mode;
         s = config.GetServerConfigDeployMode(deploy_mode);
