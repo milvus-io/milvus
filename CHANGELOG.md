@@ -28,6 +28,7 @@ Please mark all change in change log and use the issue from GitHub
 -   \#221 Refactor LOG macro
 -   \#2039 Support Milvus run on SSE CPUs
 -   \#2149 Merge server_cpu_config.template and server_gpu_config.template
+-   \#2167 Merge config file
 
 ## Task
 
