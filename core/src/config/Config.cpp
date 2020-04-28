@@ -379,6 +379,28 @@ Config::ValidateConfig() {
     std::string wal_path;
     CONFIG_CHECK(GetWalConfigWalPath(wal_path));
 
+    /* logs config */
+    bool trace_enable;
+    CONFIG_CHECK(GetLogsTraceEnable(trace_enable));
+
+    bool debug_enable;
+    CONFIG_CHECK(GetLogsDebugEnable(trace_enable));
+
+    bool info_enable;
+    CONFIG_CHECK(GetLogsInfoEnable(trace_enable));
+
+    bool warning_enable;
+    CONFIG_CHECK(GetLogsWarningEnable(trace_enable));
+
+    bool error_enable;
+    CONFIG_CHECK(GetLogsErrorEnable(trace_enable));
+
+    bool fatal_enable;
+    CONFIG_CHECK(GetLogsFatalEnable(trace_enable));
+
+    std::string logs_path;
+    CONFIG_CHECK(GetLogsPath(logs_path));
+
     return Status::OK();
 }
 
@@ -429,6 +451,16 @@ Config::ResetDefaultConfig() {
     CONFIG_CHECK(SetWalConfigRecoveryErrorIgnore(CONFIG_WAL_RECOVERY_ERROR_IGNORE_DEFAULT));
     CONFIG_CHECK(SetWalConfigBufferSize(CONFIG_WAL_BUFFER_SIZE_DEFAULT));
     CONFIG_CHECK(SetWalConfigWalPath(CONFIG_WAL_WAL_PATH_DEFAULT));
+
+    /* logs config */
+    CONFIG_CHECK(SetLogsTraceEnable(CONFIG_LOGS_TRACE_ENABLE_DEFAULT));
+    CONFIG_CHECK(SetLogsDebugEnable(CONFIG_LOGS_DEBUG_ENABLE_DEFAULT));
+    CONFIG_CHECK(SetLogsInfoEnable(CONFIG_LOGS_INFO_ENABLE_DEFAULT));
+    CONFIG_CHECK(SetLogsWarningEnable(CONFIG_LOGS_WARNING_ENABLE_DEFAULT));
+    CONFIG_CHECK(SetLogsErrorEnable(CONFIG_LOGS_ERROR_ENABLE_DEFAULT));
+    CONFIG_CHECK(SetLogsFatalEnable(CONFIG_LOGS_FATAL_ENABLE_DEFAULT));
+    CONFIG_CHECK(SetLogsPath(CONFIG_LOGS_PATH_DEFAULT));
+
 #ifdef MILVUS_GPU_VERSION
     CONFIG_CHECK(SetEngineConfigGpuSearchThreshold(CONFIG_ENGINE_GPU_SEARCH_THRESHOLD_DEFAULT));
 #endif
