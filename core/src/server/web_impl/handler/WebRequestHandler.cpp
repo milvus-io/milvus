@@ -464,7 +464,6 @@ WebRequestHandler::Search(const std::string& collection_name, const nlohmann::js
             return status;
         }
 
-        TopKQueryResult result;
         status = request_handler_.Search(context_ptr_, collection_name, vectors_data, topk, json["params"],
                                          partition_tags, file_id_vec, result);
     }
@@ -1625,7 +1624,8 @@ WebRequestHandler::InsertEntity(const OString& collection_name, const milvus::se
 }
 
 StatusDto::ObjectWrapper
-WebRequestHandler::GetVector(const OString& collection_name, const OString& body, const OQueryParams& query_params, OString& response) {
+WebRequestHandler::GetVector(const OString& collection_name, const OString& body, const OQueryParams& query_params,
+                             OString& response) {
     auto status = Status::OK();
     try {
         auto body_json = nlohmann::json::parse(body->c_str());
