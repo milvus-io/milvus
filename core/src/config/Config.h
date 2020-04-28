@@ -46,6 +46,8 @@ extern const char* CONFIG_SERVER_DEPLOY_MODE;
 extern const char* CONFIG_SERVER_DEPLOY_MODE_DEFAULT;
 extern const char* CONFIG_SERVER_TIME_ZONE;
 extern const char* CONFIG_SERVER_TIME_ZONE_DEFAULT;
+extern const char* CONFIG_SERVER_WEB_ENABLE;
+extern const char* CONFIG_SERVER_WEB_ENABLE_DEFAULT;
 extern const char* CONFIG_SERVER_WEB_PORT;
 extern const char* CONFIG_SERVER_WEB_PORT_DEFAULT;
 
@@ -208,6 +210,8 @@ class Config {
     Status
     CheckServerConfigTimeZone(const std::string& value);
     Status
+    CheckServerConfigWebEnable(const std::string& value);
+    Status
     CheckServerConfigWebPort(const std::string& value);
 
     /* db config */
@@ -319,6 +323,8 @@ class Config {
     Status
     GetServerConfigTimeZone(std::string& value);
     Status
+    GetServerConfigWebEnable(bool& value);
+    Status
     GetServerConfigWebPort(std::string& value);
 
     /* db config */
@@ -421,6 +427,8 @@ class Config {
     SetServerConfigDeployMode(const std::string& value);
     Status
     SetServerConfigTimeZone(const std::string& value);
+    Status
+    SetServerConfigWebEnable(const std::string& value);
     Status
     SetServerConfigWebPort(const std::string& value);
 
