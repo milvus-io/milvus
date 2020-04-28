@@ -191,5 +191,5 @@ logs:
   warning.enable: true
   error.enable: true
   fatal.enable: true
-  path: @MILVUS_LOG_PATH@
+  path: @MILVUS_DB_PATH@/logs
 
