@@ -6,11 +6,13 @@ Please mark all change in change log and use the issue from GitHub
 
 ## Bug
 -   \#1705 Limit the insert data batch size
+-   \#1796 Too much low performance of building index on ubuntu-mysql-version
 -   \#1929 Skip MySQL meta schema field width check
 -   \#1997 Index file missed after compact
 -   \#2073 Fix CheckDBConfigBackendUrl error message
 -   \#2076 CheckMetricConfigAddress error message
--   \#1796 Too much low performance of building index on ubuntu-mysql-version
+-   \#2128 Check has_partition params
+-   \#2131 Distance/ID returned is not correct if searching with duplicate ids
 -   \#2141 Fix server start failed if wal directory exist
 
 ## Feature
