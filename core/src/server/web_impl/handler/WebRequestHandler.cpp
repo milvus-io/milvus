@@ -85,7 +85,7 @@ WebRequestHandler::AddStatusToJson(nlohmann::json& json, int64_t code, const std
 }
 
 Status
-WebRequestHandler::IsBinaryTable(const std::string& collection_name, bool& bin) {
+WebRequestHandler::IsBinaryCollection(const std::string& collection_name, bool& bin) {
     CollectionSchema schema;
     auto status = request_handler_.DescribeCollection(context_ptr_, collection_name, schema);
     if (status.ok()) {
@@ -131,7 +131,7 @@ WebRequestHandler::CopyRecordsFromJson(const nlohmann::json& json, engine::Vecto
 
 ///////////////////////// WebRequestHandler methods ///////////////////////////////////////
 Status
-WebRequestHandler::GetTableMetaInfo(const std::string& collection_name, nlohmann::json& json_out) {
+WebRequestHandler::GetCollectionMetaInfo(const std::string& collection_name, nlohmann::json& json_out) {
     CollectionSchema schema;
     auto status = request_handler_.DescribeCollection(context_ptr_, collection_name, schema);
     if (!status.ok()) {
@@ -162,7 +162,7 @@ WebRequestHandler::GetTableMetaInfo(const std::string& collection_name, nlohmann
 }
 
 Status
-WebRequestHandler::GetTableStat(const std::string& collection_name, nlohmann::json& json_out) {
+WebRequestHandler::GetCollectionStat(const std::string& collection_name, nlohmann::json& json_out) {
     std::string collection_info;
     auto status = request_handler_.ShowCollectionInfo(context_ptr_, collection_name, collection_info);
 
@@ -248,7 +248,7 @@ WebRequestHandler::Cmd(const std::string& cmd, std::string& result_str) {
 }
 
 Status
-WebRequestHandler::PreLoadTable(const nlohmann::json& json, std::string& result_str) {
+WebRequestHandler::PreLoadCollection(const nlohmann::json& json, std::string& result_str) {
     if (!json.contains("collection_name")) {
         return Status(BODY_FIELD_LOSS, "Field \"load\" must contains collection_name");
     }
@@ -436,7 +436,7 @@ WebRequestHandler::Search(const std::string& collection_name, const nlohmann::js
     }
 
     bool bin_flag = false;
-    auto status = IsBinaryTable(collection_name, bin_flag);
+    auto status = IsBinaryCollection(collection_name, bin_flag);
     if (!status.ok()) {
         return status;
     }
@@ -769,7 +769,7 @@ WebRequestHandler::GetVectorsByIDs(const std::string& collection_name, const std
     }
 
     bool bin;
-    status = IsBinaryTable(collection_name, bin);
+    status = IsBinaryCollection(collection_name, bin);
     if (!status.ok()) {
         return status;
     }
@@ -1059,7 +1059,7 @@ WebRequestHandler::SetGpuConfig(const GPUConfigDto::ObjectWrapper& gpu_config_dt
  * Collection {
  */
 StatusDto::ObjectWrapper
-WebRequestHandler::CreateTable(const TableRequestDto::ObjectWrapper& collection_schema) {
+WebRequestHandler::CreateCollection(const CollectionRequestDto::ObjectWrapper& collection_schema) {
     if (nullptr == collection_schema->collection_name.get()) {
         RETURN_STATUS_DTO(BODY_FIELD_LOSS, "Field \'collection_name\' is missing")
     }
@@ -1133,7 +1133,7 @@ WebRequestHandler::CreateHybridCollection(const milvus::server::web::OString& bo
 }
 
 StatusDto::ObjectWrapper
-WebRequestHandler::ShowTables(const OQueryParams& query_params, OString& result) {
+WebRequestHandler::ShowCollections(const OQueryParams& query_params, OString& result) {
     int64_t offset = 0;
     auto status = ParseQueryInteger(query_params, "offset", offset);
     if (!status.ok()) {
@@ -1173,7 +1173,7 @@ WebRequestHandler::ShowTables(const OQueryParams& query_params, OString& result)
     nlohmann::json collections_json;
     for (int64_t i = offset; i < page_size + offset; i++) {
         nlohmann::json collection_json;
-        status = GetTableMetaInfo(collections.at(i), collection_json);
+        status = GetCollectionMetaInfo(collections.at(i), collection_json);
         if (!status.ok()) {
             ASSIGN_RETURN_STATUS_DTO(status)
         }
@@ -1194,7 +1194,7 @@ WebRequestHandler::ShowTables(const OQueryParams& query_params, OString& result)
 }
 
 StatusDto::ObjectWrapper
-WebRequestHandler::GetTable(const OString& collection_name, const OQueryParams& query_params, OString& result) {
+WebRequestHandler::GetCollection(const OString& collection_name, const OQueryParams& query_params, OString& result) {
     if (nullptr == collection_name.get()) {
         RETURN_STATUS_DTO(PATH_PARAM_LOSS, "Path param \'collection_name\' is required!");
     }
@@ -1207,11 +1207,11 @@ WebRequestHandler::GetTable(const OString& collection_name, const OQueryParams& 
 
     if (!stat.empty() && stat == "stat") {
         nlohmann::json json;
-        status = GetTableStat(collection_name->std_str(), json);
+        status = GetCollectionStat(collection_name->std_str(), json);
         result = status.ok() ? json.dump().c_str() : "NULL";
     } else {
         nlohmann::json json;
-        status = GetTableMetaInfo(collection_name->std_str(), json);
+        status = GetCollectionMetaInfo(collection_name->std_str(), json);
         result = status.ok() ? json.dump().c_str() : "NULL";
     }
 
@@ -1219,7 +1219,7 @@ WebRequestHandler::GetTable(const OString& collection_name, const OQueryParams& 
 }
 
 StatusDto::ObjectWrapper
-WebRequestHandler::DropTable(const OString& collection_name) {
+WebRequestHandler::DropCollection(const OString& collection_name) {
     auto status = request_handler_.DropCollection(context_ptr_, collection_name->std_str());
 
     ASSIGN_RETURN_STATUS_DTO(status)
@@ -1465,7 +1465,7 @@ WebRequestHandler::Insert(const OString& collection_name, const OString& body, V
 
     // step 1: copy vectors
     bool bin_flag;
-    auto status = IsBinaryTable(collection_name->std_str(), bin_flag);
+    auto status = IsBinaryCollection(collection_name->std_str(), bin_flag);
     if (!status.ok()) {
         ASSIGN_RETURN_STATUS_DTO(status)
     }
@@ -1578,7 +1578,7 @@ WebRequestHandler::InsertEntity(const OString& collection_name, const milvus::se
             }
             case engine::meta::hybrid::DataType::VECTOR: {
                 bool bin_flag;
-                status = IsBinaryTable(collection_name->c_str(), bin_flag);
+                status = IsBinaryCollection(collection_name->c_str(), bin_flag);
                 if (!status.ok()) {
                     ASSIGN_RETURN_STATUS_DTO(status)
                 }
@@ -1718,7 +1718,7 @@ WebRequestHandler::SystemOp(const OString& op, const OString& body_str, OString&
         nlohmann::json j = nlohmann::json::parse(body_str->c_str());
         if (op->equals("task")) {
             if (j.contains("load")) {
-                status = PreLoadTable(j["load"], result_str);
+                status = PreLoadCollection(j["load"], result_str);
             } else if (j.contains("flush")) {
                 status = Flush(j["flush"], result_str);
             }

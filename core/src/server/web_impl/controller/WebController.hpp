@@ -26,7 +26,7 @@
 #include "server/web_impl/dto/ConfigDto.hpp"
 #include "server/web_impl/dto/IndexDto.hpp"
 #include "server/web_impl/dto/PartitionDto.hpp"
-#include "server/web_impl/dto/TableDto.hpp"
+#include "server/web_impl/dto/CollectionDto.hpp"
 #include "server/web_impl/dto/VectorDto.hpp"
 #include "server/web_impl/handler/WebRequestHandler.h"
 
@@ -206,22 +206,22 @@ class WebController : public oatpp::web::server::api::ApiController {
 
 #endif
 
-    ADD_CORS(TablesOptions)
+    ADD_CORS(CollectionsOptions)
 
-    ENDPOINT("OPTIONS", "/collections", TablesOptions) {
+    ENDPOINT("OPTIONS", "/collections", CollectionsOptions) {
         return createResponse(Status::CODE_204, "No Content");
     }
 
-    ADD_CORS(CreateTable)
+    ADD_CORS(CreateCollection)
 
-    ENDPOINT("POST", "/collections", CreateTable, BODY_DTO(TableRequestDto::ObjectWrapper, body)) {
+    ENDPOINT("POST", "/collections", CreateCollection, BODY_DTO(CollectionRequestDto::ObjectWrapper, body)) {
         TimeRecorder tr(std::string(WEB_LOG_PREFIX) + "POST \'/collections\'");
         tr.RecordSection("Received request.");
 
         WebRequestHandler handler = WebRequestHandler();
 
         std::shared_ptr<OutgoingResponse> response;
-        auto status_dto = handler.CreateTable(body);
+        auto status_dto = handler.CreateCollection(body);
         switch (status_dto->code->getValue()) {
             case StatusCode::SUCCESS:
                 response = createDtoResponse(Status::CODE_201, status_dto);
@@ -236,16 +236,16 @@ class WebController : public oatpp::web::server::api::ApiController {
         return response;
     }
 
-    ADD_CORS(ShowTables)
+    ADD_CORS(ShowCollections)
 
-    ENDPOINT("GET", "/collections", ShowTables, QUERIES(const QueryParams&, query_params)) {
+    ENDPOINT("GET", "/collections", ShowCollections, QUERIES(const QueryParams&, query_params)) {
         TimeRecorder tr(std::string(WEB_LOG_PREFIX) + "GET \'/collections\'");
         tr.RecordSection("Received request.");
 
         WebRequestHandler handler = WebRequestHandler();
 
         String result;
-        auto status_dto = handler.ShowTables(query_params, result);
+        auto status_dto = handler.ShowCollections(query_params, result);
         std::shared_ptr<OutgoingResponse> response;
         switch (status_dto->code->getValue()) {
             case StatusCode::SUCCESS:
@@ -262,15 +262,15 @@ class WebController : public oatpp::web::server::api::ApiController {
         return response;
     }
 
-    ADD_CORS(TableOptions)
+    ADD_CORS(CollectionOptions)
 
-    ENDPOINT("OPTIONS", "/collections/{collection_name}", TableOptions) {
+    ENDPOINT("OPTIONS", "/collections/{collection_name}", CollectionOptions) {
         return createResponse(Status::CODE_204, "No Content");
     }
 
-    ADD_CORS(GetTable)
+    ADD_CORS(GetCollection)
 
-    ENDPOINT("GET", "/collections/{collection_name}", GetTable, PATH(String, collection_name),
+    ENDPOINT("GET", "/collections/{collection_name}", GetCollection, PATH(String, collection_name),
              QUERIES(const QueryParams&, query_params)) {
         TimeRecorder tr(std::string(WEB_LOG_PREFIX) + "GET \'/collections/" + collection_name->std_str() + "\'");
         tr.RecordSection("Received request.");
@@ -278,7 +278,7 @@ class WebController : public oatpp::web::server::api::ApiController {
         WebRequestHandler handler = WebRequestHandler();
 
         String response_str;
-        auto status_dto = handler.GetTable(collection_name, query_params, response_str);
+        auto status_dto = handler.GetCollection(collection_name, query_params, response_str);
 
         std::shared_ptr<OutgoingResponse> response;
         switch (status_dto->code->getValue()) {
@@ -299,16 +299,16 @@ class WebController : public oatpp::web::server::api::ApiController {
         return response;
     }
 
-    ADD_CORS(DropTable)
+    ADD_CORS(DropCollection)
 
-    ENDPOINT("DELETE", "/collections/{collection_name}", DropTable, PATH(String, collection_name)) {
+    ENDPOINT("DELETE", "/collections/{collection_name}", DropCollection, PATH(String, collection_name)) {
         TimeRecorder tr(std::string(WEB_LOG_PREFIX) + "DELETE \'/collections/" + collection_name->std_str() + "\'");
         tr.RecordSection("Received request.");
 
         WebRequestHandler handler = WebRequestHandler();
 
         std::shared_ptr<OutgoingResponse> response;
-        auto status_dto = handler.DropTable(collection_name);
+        auto status_dto = handler.DropCollection(collection_name);
         switch (status_dto->code->getValue()) {
             case StatusCode::SUCCESS:
                 response = createDtoResponse(Status::CODE_204, status_dto);

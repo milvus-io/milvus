@@ -52,11 +52,11 @@ static const char* NAME_METRIC_TYPE_SUPERSTRUCTURE = "SUPERSTRUCTURE";
 
 ////////////////////////////////////////////////////
 
-static const char* KEY_TABLE_TABLE_NAME = "table_name";
-static const char* KEY_TABLE_DIMENSION = "dimension";
-static const char* KEY_TABLE_INDEX_FILE_SIZE = "index_file_size";
-static const char* KEY_TABLE_INDEX_METRIC_TYPE = "metric_type";
-static const char* KEY_TABLE_COUNT = "count";
+static const char* KEY_COLLECTION_TABLE_NAME = "table_name";
+static const char* KEY_COLLECTION_DIMENSION = "dimension";
+static const char* KEY_COLLECTION_INDEX_FILE_SIZE = "index_file_size";
+static const char* KEY_COLLECTION_INDEX_METRIC_TYPE = "metric_type";
+static const char* KEY_COLLECTION_COUNT = "count";
 
 static const char* KEY_INDEX_INDEX_TYPE = "index_type";
 static const char* KEY_INDEX_NLIST = "nlist";
@@ -66,8 +66,8 @@ static const char* KEY_PARTITION_TAG = "partition_tag";
 
 ////////////////////////////////////////////////////
 
-static const int64_t VALUE_TABLE_INDEX_FILE_SIZE_DEFAULT = 1024;
-static const char* VALUE_TABLE_METRIC_TYPE_DEFAULT = "L2";
+static const int64_t VALUE_COLLECTION_INDEX_FILE_SIZE_DEFAULT = 1024;
+static const char* VALUE_COLLECTION_METRIC_TYPE_DEFAULT = "L2";
 
 static const char* VALUE_PARTITION_TAG_DEFAULT = "";
 
