@@ -35,7 +35,17 @@ constexpr int64_t SEARCH_TARGET = BATCH_ENTITY_COUNT / 2;  // change this value,
 constexpr int64_t ADD_ENTITY_LOOP = 5;
 constexpr milvus::IndexType INDEX_TYPE = milvus::IndexType::IVFSQ8;
 constexpr int32_t NLIST = 16384;
-constexpr uint64_t FIELD_NUM = 3;
+
+void PrintEntity(const std::string& tag, const milvus::Entity& entity) {
+    std::cout << tag << "\t[";
+    for (size_t i = 0; i < entity.float_data.size(); i++) {
+        if (i != 0) {
+            std::cout << ", ";
+        }
+        std::cout << entity.float_data[i];
+    }
+    std::cout << "]" << std::endl;
+}
 
 }  // namespace
 
@@ -142,18 +152,25 @@ ClientTest::Flush(const std::string& collection_name) {
 
 void
 ClientTest::ShowCollectionInfo(const std::string& collection_name) {
-    milvus::CollectionInfo collection_info;
+    std::string collection_info;
     milvus::Status stat = conn_->ShowCollectionInfo(collection_name, collection_info);
-    milvus_sdk::Utils::PrintCollectionInfo(collection_info);
+    std::cout << "Collection info: " << collection_info << std::endl;
     std::cout << "ShowCollectionInfo function call status: " << stat.message() << std::endl;
 }
 
 void
-ClientTest::GetEntityById(const std::string& collection_name, int64_t id) {
-    milvus::Entity entity;
-    milvus::Status stat = conn_->GetEntityByID(collection_name, id, entity);
-    std::cout << "The entity " << id << " has " << entity.float_data.size() << " float elements" << std::endl;
-    std::cout << "GetEntityById function call status: " << stat.message() << std::endl;
+ClientTest::GetEntitiesByID(const std::string& collection_name,  const std::vector<int64_t>& id_array) {
+    std::vector<milvus::Entity> entities;
+    {
+        milvus_sdk::TimeRecorder rc("GetEntitiesByID");
+        milvus::Status stat = conn_->GetEntitiesByID(collection_name, id_array, entities);
+        std::cout << "GetEntitiesByID function call status: " << stat.message() << std::endl;
+    }
+
+    for (size_t i = 0; i < entities.size(); i++) {
+        std::string prefix = "No." + std::to_string(i) + " id:" + std::to_string(id_array[i]);
+        PrintEntity(prefix, entities[i]);
+    }
 }
 
 void
@@ -162,6 +179,42 @@ ClientTest::SearchEntities(const std::string& collection_name, int64_t topk, int
     milvus::TopKQueryResult topk_query_result;
     milvus_sdk::Utils::DoSearch(conn_, collection_name, partition_tags, topk, nprobe, search_entity_array_,
                                 topk_query_result);
+}
+
+void
+ClientTest::SearchEntitiesByID(const std::string& collection_name, int64_t topk, int64_t nprobe) {
+    std::vector<std::string> partition_tags;
+    milvus::TopKQueryResult topk_query_result;
+
+    topk_query_result.clear();
+
+    std::vector<int64_t> id_array;
+    for (auto& pair : search_entity_array_) {
+        id_array.push_back(pair.first);
+    }
+
+    JSON json_params = {{"nprobe", nprobe}};
+    milvus_sdk::TimeRecorder rc("SearchByID");
+    milvus::Status stat = conn_->SearchByID(collection_name,
+                                            partition_tags,
+                                            id_array,
+                                            topk,
+                                            json_params.dump(),
+                                            topk_query_result);
+    std::cout << "SearchByID function call status: " << stat.message() << std::endl;
+
+    if (topk_query_result.size() != id_array.size()) {
+        std::cout << "ERROR! wrong result for query by id" << std::endl;
+        return;
+    }
+
+    for (size_t i = 0; i < id_array.size(); i++) {
+        std::cout << "Entity " << id_array[i] << " top " << topk << " search result:" << std::endl;
+        const milvus::QueryResult& one_result = topk_query_result[i];
+        for (size_t j = 0; j < one_result.ids.size(); j++) {
+            std::cout << "\t" << one_result.ids[j] << "\t" << one_result.distances[j] << std::endl;
+        }
+    }
 }
 
 void
@@ -244,21 +297,22 @@ ClientTest::Test() {
     DescribeCollection(collection_name);
 
     InsertEntities(collection_name, dim);
-    BuildSearchEntities(NQ, dim);
     Flush(collection_name);
     ShowCollectionInfo(collection_name);
 
-    GetEntityById(collection_name, search_id_array_[0]);
-    SearchEntities(collection_name, TOP_K, NPROBE);
+    BuildSearchEntities(NQ, dim);
+    GetEntitiesByID(collection_name, search_id_array_);
+//    SearchEntities(collection_name, TOP_K, NPROBE);
+    SearchEntitiesByID(collection_name, TOP_K, NPROBE);
 
     CreateIndex(collection_name, INDEX_TYPE, NLIST);
     ShowCollectionInfo(collection_name);
 
-    PreloadCollection(collection_name);
-
     std::vector<int64_t> delete_ids = {search_id_array_[0], search_id_array_[1]};
     DeleteByIds(collection_name, delete_ids);
     CompactCollection(collection_name);
+
+    PreloadCollection(collection_name);
     SearchEntities(collection_name, TOP_K, NPROBE); // this line get two search error since we delete two entities
 
     DropIndex(collection_name);

@@ -2,7 +2,6 @@
 // -*- c++ -*-
 
 #include <faiss/utils/distances_avx512.h>
-#include <faiss/utils/distances.h>
 #include <faiss/impl/FaissAssert.h>
 
 #include <cstdio>
@@ -34,10 +33,8 @@ static inline __m128 masked_read (int d, const float *x) {
 
 #if (defined(__AVX512F__) && defined(__AVX512DQ__))
 
-float fvec_inner_product_avx512 (const float * x,
-                          const float * y,
-                          size_t d)
-{
+float
+fvec_inner_product_avx512(const float* x, const float* y, size_t d) {
     __m512 msum0 = _mm512_setzero_ps();
 
     while (d >= 16) {
@@ -78,10 +75,8 @@ float fvec_inner_product_avx512 (const float * x,
     return  _mm_cvtss_f32 (msum2);
 }
 
-float fvec_L2sqr_avx512 (const float * x,
-                  const float * y,
-                  size_t d)
-{
+float
+fvec_L2sqr_avx512(const float* x, const float* y, size_t d) {
     __m512 msum0 = _mm512_setzero_ps();
 
     while (d >= 16) {
@@ -126,8 +121,8 @@ float fvec_L2sqr_avx512 (const float * x,
     return  _mm_cvtss_f32 (msum2);
 }
 
-float fvec_L1_avx512 (const float * x, const float * y, size_t d)
-{
+float
+fvec_L1_avx512(const float* x, const float* y, size_t d) {
     __m512 msum0 = _mm512_setzero_ps();
     __m512 signmask0 = __m512(_mm512_set1_epi32 (0x7fffffffUL));
 
@@ -175,8 +170,8 @@ float fvec_L1_avx512 (const float * x, const float * y, size_t d)
     return  _mm_cvtss_f32 (msum2);
 }
 
-float fvec_Linf_avx512 (const float * x, const float * y, size_t d)
-{
+float
+fvec_Linf_avx512(const float* x, const float* y, size_t d) {
     __m512 msum0 = _mm512_setzero_ps();
     __m512 signmask0 = __m512(_mm512_set1_epi32 (0x7fffffffUL));
 
@@ -226,30 +221,26 @@ float fvec_Linf_avx512 (const float * x, const float * y, size_t d)
 
 #else
 
-float fvec_inner_product_avx512 (const float * x,
-                          const float * y,
-                          size_t d)
-{
+float
+fvec_inner_product_avx512(const float* x, const float* y, size_t d) {
     FAISS_ASSERT(false);
     return 0.0;
 }
 
-float fvec_L2sqr_avx512 (const float * x,
-                  const float * y,
-                  size_t d)
-{
+float
+fvec_L2sqr_avx512(const float* x, const float* y, size_t d) {
     FAISS_ASSERT(false);
     return 0.0;
 }
 
-float fvec_L1_avx512 (const float * x, const float * y, size_t d)
-{
+float
+fvec_L1_avx512(const float* x, const float* y, size_t d) {
     FAISS_ASSERT(false);
     return 0.0;
 }
 
-float fvec_Linf_avx512 (const float * x, const float * y, size_t d)
-{
+float
+fvec_Linf_avx512(const float* x, const float* y, size_t d) {
     FAISS_ASSERT(false);
     return 0.0;
 }

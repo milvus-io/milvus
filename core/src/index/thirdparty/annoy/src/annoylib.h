@@ -187,12 +187,14 @@ inline T euclidean_distance(const T* x, const T* y, int f) {
 
 //#ifdef USE_AVX
 // Horizontal single sum of 256bit vector.
+#if 0 /* use FAISS distance calculation algorithm instead */
 inline float hsum256_ps_avx(__m256 v) {
   const __m128 x128 = _mm_add_ps(_mm256_extractf128_ps(v, 1), _mm256_castps256_ps128(v));
   const __m128 x64 = _mm_add_ps(x128, _mm_movehl_ps(x128, x128));
   const __m128 x32 = _mm_add_ss(x64, _mm_shuffle_ps(x64, x64, 0x55));
   return _mm_cvtss_f32(x32);
 }
+#endif
 
 template<>
 inline float dot<float>(const float* x, const float *y, int f) {
@@ -834,9 +836,9 @@ class AnnoyIndexInterface {
   virtual bool load(const char* filename, bool prefault=false, char** error=nullptr) = 0;
   virtual bool load_index(void* index_data, const int64_t& index_size, char** error = nullptr) = 0;
   virtual T get_distance(S i, S j) const = 0;
-  virtual void get_nns_by_item(S item, size_t n, int search_k, vector<S>* result, vector<T>* distances,
+  virtual void get_nns_by_item(S item, size_t n, int64_t search_k, vector<S>* result, vector<T>* distances,
                                faiss::ConcurrentBitsetPtr& bitset = nullptr) const = 0;
-  virtual void get_nns_by_vector(const T* w, size_t n, int search_k, vector<S>* result, vector<T>* distances,
+  virtual void get_nns_by_vector(const T* w, size_t n, int64_t search_k, vector<S>* result, vector<T>* distances,
                                faiss::ConcurrentBitsetPtr& bitset = nullptr) const = 0;
   virtual S get_n_items() const = 0;
   virtual S get_dim() const = 0;
@@ -1172,14 +1174,14 @@ public:
     return D::normalized_distance(D::distance(_get(i), _get(j), _f));
   }
 
-  void get_nns_by_item(S item, size_t n, int search_k, vector<S>* result, vector<T>* distances,
+  void get_nns_by_item(S item, size_t n, int64_t search_k, vector<S>* result, vector<T>* distances,
                        faiss::ConcurrentBitsetPtr& bitset) const {
     // TODO: handle OOB
     const Node* m = _get(item);
     _get_all_nns(m->v, n, search_k, result, distances, bitset);
   }
 
-  void get_nns_by_vector(const T* w, size_t n, int search_k, vector<S>* result, vector<T>* distances,
+  void get_nns_by_vector(const T* w, size_t n, int64_t search_k, vector<S>* result, vector<T>* distances,
                          faiss::ConcurrentBitsetPtr& bitset) const {
     _get_all_nns(w, n, search_k, result, distances, bitset);
   }
@@ -1327,7 +1329,7 @@ protected:
     return item;
   }
 
-  void _get_all_nns(const T* v, size_t n, int search_k, vector<S>* result, vector<T>* distances,
+  void _get_all_nns(const T* v, size_t n, int64_t search_k, vector<S>* result, vector<T>* distances,
                     faiss::ConcurrentBitsetPtr& bitset) const {
     Node* v_node = (Node *)alloca(_s);
     D::template zero_value<Node>(v_node);
@@ -1337,7 +1339,7 @@ protected:
     std::priority_queue<pair<T, S> > q;
 
     if (search_k <= 0) {
-      search_k = std::max(n * _roots.size(), (size_t )_n_items * 5 / 100);
+      search_k = std::max(int64_t(n * _roots.size()), int64_t(_n_items * 5 / 100));
     }
 
     for (size_t i = 0; i < _roots.size(); i++) {

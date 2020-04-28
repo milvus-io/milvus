@@ -11,19 +11,18 @@
 
 #pragma once
 
-#include <string>
 #include <iostream>
+#include <string>
 
-#include <oatpp/web/server/api/ApiController.hpp>
-#include <oatpp/parser/json/mapping/ObjectMapper.hpp>
 #include <oatpp/core/macro/codegen.hpp>
 #include <oatpp/core/macro/component.hpp>
+#include <oatpp/parser/json/mapping/ObjectMapper.hpp>
+#include <oatpp/web/server/api/ApiController.hpp>
 
 #include "utils/Log.h"
 #include "utils/TimeRecorder.h"
 
 #include "server/web_impl/Constants.h"
-#include "server/web_impl/dto/CmdDto.hpp"
 #include "server/web_impl/dto/ConfigDto.hpp"
 #include "server/web_impl/dto/IndexDto.hpp"
 #include "server/web_impl/dto/PartitionDto.hpp"
@@ -38,11 +37,12 @@ namespace web {
 class WebController : public oatpp::web::server::api::ApiController {
  public:
     WebController(const std::shared_ptr<ObjectMapper>& objectMapper)
-        : oatpp::web::server::api::ApiController(objectMapper) {}
+        : oatpp::web::server::api::ApiController(objectMapper) {
+    }
 
  public:
-    static std::shared_ptr<WebController> createShared(
-        OATPP_COMPONENT(std::shared_ptr<ObjectMapper>, objectMapper)) {
+    static std::shared_ptr<WebController>
+    createShared(OATPP_COMPONENT(std::shared_ptr<ObjectMapper>, objectMapper)) {
         return std::make_shared<WebController>(objectMapper);
     }
 
@@ -85,8 +85,8 @@ class WebController : public oatpp::web::server::api::ApiController {
                 response = createDtoResponse(Status::CODE_400, status_dto);
         }
 
-        tr.ElapseFromBegin("Done. Status: code = " + std::to_string(status_dto->code->getValue())
-                           + ", reason = " + status_dto->message->std_str() + ". Total cost");
+        tr.ElapseFromBegin("Done. Status: code = " + std::to_string(status_dto->code->getValue()) +
+                           ", reason = " + status_dto->message->std_str() + ". Total cost");
 
         return response;
     }
@@ -116,8 +116,8 @@ class WebController : public oatpp::web::server::api::ApiController {
                 response = createDtoResponse(Status::CODE_400, status_dto);
         }
 
-        tr.ElapseFromBegin("Done. Status: code = " + std::to_string(status_dto->code->getValue())
-                           + ", reason = " + status_dto->message->std_str() + ". Total cost");
+        tr.ElapseFromBegin("Done. Status: code = " + std::to_string(status_dto->code->getValue()) +
+                           ", reason = " + status_dto->message->std_str() + ". Total cost");
 
         return response;
     }
@@ -140,8 +140,8 @@ class WebController : public oatpp::web::server::api::ApiController {
                 response = createDtoResponse(Status::CODE_400, status_dto);
         }
 
-        tr.ElapseFromBegin("Done. Status: code = " + std::to_string(status_dto->code->getValue())
-                           + ", reason = " + status_dto->message->std_str() + ". Total cost");
+        tr.ElapseFromBegin("Done. Status: code = " + std::to_string(status_dto->code->getValue()) +
+                           ", reason = " + status_dto->message->std_str() + ". Total cost");
 
         return response;
     }
@@ -173,8 +173,8 @@ class WebController : public oatpp::web::server::api::ApiController {
                 response = createDtoResponse(Status::CODE_400, status_dto);
         }
 
-        std::string ttr = "Done. Status: code = " + std::to_string(status_dto->code->getValue())
-                          + ", reason = " + status_dto->message->std_str() + ". Total cost";
+        std::string ttr = "Done. Status: code = " + std::to_string(status_dto->code->getValue()) +
+                          ", reason = " + status_dto->message->std_str() + ". Total cost";
         tr.ElapseFromBegin(ttr);
 
         return response;
@@ -198,8 +198,8 @@ class WebController : public oatpp::web::server::api::ApiController {
                 response = createDtoResponse(Status::CODE_400, status_dto);
         }
 
-        std::string ttr = "Done. Status: code = " + std::to_string(status_dto->code->getValue())
-                   + ", reason = " + status_dto->message->std_str() + ". Total cost";
+        std::string ttr = "Done. Status: code = " + std::to_string(status_dto->code->getValue()) +
+                          ", reason = " + status_dto->message->std_str() + ". Total cost";
         tr.ElapseFromBegin(ttr);
         return response;
     }
@@ -230,8 +230,8 @@ class WebController : public oatpp::web::server::api::ApiController {
                 response = createDtoResponse(Status::CODE_400, status_dto);
         }
 
-        std::string ttr = "Done. Status: code = " + std::to_string(status_dto->code->getValue())
-                          + ", reason = " + status_dto->message->std_str() + ". Total cost";
+        std::string ttr = "Done. Status: code = " + std::to_string(status_dto->code->getValue()) +
+                          ", reason = " + status_dto->message->std_str() + ". Total cost";
         tr.ElapseFromBegin(ttr);
         return response;
     }
@@ -244,7 +244,6 @@ class WebController : public oatpp::web::server::api::ApiController {
 
         WebRequestHandler handler = WebRequestHandler();
 
-
         String result;
         auto status_dto = handler.ShowTables(query_params, result);
         std::shared_ptr<OutgoingResponse> response;
@@ -256,8 +255,8 @@ class WebController : public oatpp::web::server::api::ApiController {
                 response = createDtoResponse(Status::CODE_400, status_dto);
         }
 
-        std::string ttr = "Done. Status: code = " + std::to_string(status_dto->code->getValue())
-                          + ", reason = " + status_dto->message->std_str() + ". Total cost";
+        std::string ttr = "Done. Status: code = " + std::to_string(status_dto->code->getValue()) +
+                          ", reason = " + status_dto->message->std_str() + ". Total cost";
         tr.ElapseFromBegin(ttr);
 
         return response;
@@ -271,8 +270,8 @@ class WebController : public oatpp::web::server::api::ApiController {
 
     ADD_CORS(GetTable)
 
-    ENDPOINT("GET", "/collections/{collection_name}", GetTable,
-        PATH(String, collection_name), QUERIES(const QueryParams&, query_params)) {
+    ENDPOINT("GET", "/collections/{collection_name}", GetTable, PATH(String, collection_name),
+             QUERIES(const QueryParams&, query_params)) {
         TimeRecorder tr(std::string(WEB_LOG_PREFIX) + "GET \'/collections/" + collection_name->std_str() + "\'");
         tr.RecordSection("Received request.");
 
@@ -293,8 +292,8 @@ class WebController : public oatpp::web::server::api::ApiController {
                 response = createDtoResponse(Status::CODE_400, status_dto);
         }
 
-        std::string ttr = "Done. Status: code = " + std::to_string(status_dto->code->getValue())
-                          + ", reason = " + status_dto->message->std_str() + ". Total cost";
+        std::string ttr = "Done. Status: code = " + std::to_string(status_dto->code->getValue()) +
+                          ", reason = " + status_dto->message->std_str() + ". Total cost";
         tr.ElapseFromBegin(ttr);
 
         return response;
@@ -321,8 +320,8 @@ class WebController : public oatpp::web::server::api::ApiController {
                 response = createDtoResponse(Status::CODE_400, status_dto);
         }
 
-        std::string ttr = "Done. Status: code = " + std::to_string(status_dto->code->getValue())
-                          + ", reason = " + status_dto->message->std_str() + ". Total cost";
+        std::string ttr = "Done. Status: code = " + std::to_string(status_dto->code->getValue()) +
+                          ", reason = " + status_dto->message->std_str() + ". Total cost";
         tr.ElapseFromBegin(ttr);
 
         return response;
@@ -336,8 +335,8 @@ class WebController : public oatpp::web::server::api::ApiController {
 
     ADD_CORS(CreateIndex)
 
-    ENDPOINT("POST", "/collections/{collection_name}/indexes", CreateIndex,
-             PATH(String, collection_name), BODY_STRING(String, body)) {
+    ENDPOINT("POST", "/collections/{collection_name}/indexes", CreateIndex, PATH(String, collection_name),
+             BODY_STRING(String, body)) {
         TimeRecorder tr(std::string(WEB_LOG_PREFIX) + "POST \'/tables/" + collection_name->std_str() + "/indexes\'");
         tr.RecordSection("Received request.");
 
@@ -356,8 +355,8 @@ class WebController : public oatpp::web::server::api::ApiController {
                 response = createDtoResponse(Status::CODE_400, status_dto);
         }
 
-        std::string ttr = "Done. Status: code = " + std::to_string(status_dto->code->getValue())
-                          + ", reason = " + status_dto->message->std_str() + ". Total cost";
+        std::string ttr = "Done. Status: code = " + std::to_string(status_dto->code->getValue()) +
+                          ", reason = " + status_dto->message->std_str() + ". Total cost";
         tr.ElapseFromBegin(ttr);
 
         return response;
@@ -366,7 +365,8 @@ class WebController : public oatpp::web::server::api::ApiController {
     ADD_CORS(GetIndex)
 
     ENDPOINT("GET", "/collections/{collection_name}/indexes", GetIndex, PATH(String, collection_name)) {
-        TimeRecorder tr(std::string(WEB_LOG_PREFIX) + "GET \'/collections/" + collection_name->std_str() + "/indexes\'");
+        TimeRecorder tr(std::string(WEB_LOG_PREFIX) + "GET \'/collections/" + collection_name->std_str() +
+                        "/indexes\'");
         tr.RecordSection("Received request.");
 
         auto handler = WebRequestHandler();
@@ -386,8 +386,8 @@ class WebController : public oatpp::web::server::api::ApiController {
                 response = createDtoResponse(Status::CODE_400, status_dto);
         }
 
-        std::string ttr = "Done. Status: code = " + std::to_string(status_dto->code->getValue())
-                          + ", reason = " + status_dto->message->std_str() + ". Total cost";
+        std::string ttr = "Done. Status: code = " + std::to_string(status_dto->code->getValue()) +
+                          ", reason = " + status_dto->message->std_str() + ". Total cost";
         tr.ElapseFromBegin(ttr);
 
         return response;
@@ -396,7 +396,8 @@ class WebController : public oatpp::web::server::api::ApiController {
     ADD_CORS(DropIndex)
 
     ENDPOINT("DELETE", "/collections/{collection_name}/indexes", DropIndex, PATH(String, collection_name)) {
-        TimeRecorder tr(std::string(WEB_LOG_PREFIX) + "DELETE \'/collections/" + collection_name->std_str() + "/indexes\'");
+        TimeRecorder tr(std::string(WEB_LOG_PREFIX) + "DELETE \'/collections/" + collection_name->std_str() +
+                        "/indexes\'");
         tr.RecordSection("Received request.");
 
         auto handler = WebRequestHandler();
@@ -414,8 +415,8 @@ class WebController : public oatpp::web::server::api::ApiController {
                 response = createDtoResponse(Status::CODE_400, status_dto);
         }
 
-        std::string ttr = "Done. Status: code = " + std::to_string(status_dto->code->getValue())
-                          + ", reason = " + status_dto->message->std_str() + ". Total cost";
+        std::string ttr = "Done. Status: code = " + std::to_string(status_dto->code->getValue()) +
+                          ", reason = " + status_dto->message->std_str() + ". Total cost";
         tr.ElapseFromBegin(ttr);
 
         return response;
@@ -429,9 +430,10 @@ class WebController : public oatpp::web::server::api::ApiController {
 
     ADD_CORS(CreatePartition)
 
-    ENDPOINT("POST", "/collections/{collection_name}/partitions",
-             CreatePartition, PATH(String, collection_name), BODY_DTO(PartitionRequestDto::ObjectWrapper, body)) {
-        TimeRecorder tr(std::string(WEB_LOG_PREFIX) + "POST \'/collections/" + collection_name->std_str() + "/partitions\'");
+    ENDPOINT("POST", "/collections/{collection_name}/partitions", CreatePartition, PATH(String, collection_name),
+             BODY_DTO(PartitionRequestDto::ObjectWrapper, body)) {
+        TimeRecorder tr(std::string(WEB_LOG_PREFIX) + "POST \'/collections/" + collection_name->std_str() +
+                        "/partitions\'");
         tr.RecordSection("Received request.");
 
         auto handler = WebRequestHandler();
@@ -449,17 +451,18 @@ class WebController : public oatpp::web::server::api::ApiController {
                 response = createDtoResponse(Status::CODE_400, status_dto);
         }
 
-        tr.ElapseFromBegin("Done. Status: code = " + std::to_string(status_dto->code->getValue())
-                           + ", reason = " + status_dto->message->std_str() + ". Total cost");
+        tr.ElapseFromBegin("Done. Status: code = " + std::to_string(status_dto->code->getValue()) +
+                           ", reason = " + status_dto->message->std_str() + ". Total cost");
 
         return response;
     }
 
     ADD_CORS(ShowPartitions)
 
-    ENDPOINT("GET", "/collections/{collection_name}/partitions", ShowPartitions,
-             PATH(String, collection_name), QUERIES(const QueryParams&, query_params)) {
-        TimeRecorder tr(std::string(WEB_LOG_PREFIX) + "GET \'/collections/" + collection_name->std_str() + "/partitions\'");
+    ENDPOINT("GET", "/collections/{collection_name}/partitions", ShowPartitions, PATH(String, collection_name),
+             QUERIES(const QueryParams&, query_params)) {
+        TimeRecorder tr(std::string(WEB_LOG_PREFIX) + "GET \'/collections/" + collection_name->std_str() +
+                        "/partitions\'");
         tr.RecordSection("Received request.");
 
         auto offset = query_params.get("offset");
@@ -477,21 +480,22 @@ class WebController : public oatpp::web::server::api::ApiController {
             case StatusCode::COLLECTION_NOT_EXISTS:
                 response = createDtoResponse(Status::CODE_404, status_dto);
                 break;
-            default:response = createDtoResponse(Status::CODE_400, status_dto);
+            default:
+                response = createDtoResponse(Status::CODE_400, status_dto);
         }
 
-        tr.ElapseFromBegin("Done. Status: code = " + std::to_string(status_dto->code->getValue())
-                           + ", reason = " + status_dto->message->std_str() + ". Total cost");
+        tr.ElapseFromBegin("Done. Status: code = " + std::to_string(status_dto->code->getValue()) +
+                           ", reason = " + status_dto->message->std_str() + ". Total cost");
 
         return response;
     }
 
     ADD_CORS(DropPartition)
 
-    ENDPOINT("DELETE", "/collections/{collection_name}/partitions", DropPartition,
-             PATH(String, collection_name), BODY_STRING(String, body)) {
-        TimeRecorder tr(std::string(WEB_LOG_PREFIX) +
-                        "DELETE \'/collections/" + collection_name->std_str() + "/partitions\'");
+    ENDPOINT("DELETE", "/collections/{collection_name}/partitions", DropPartition, PATH(String, collection_name),
+             BODY_STRING(String, body)) {
+        TimeRecorder tr(std::string(WEB_LOG_PREFIX) + "DELETE \'/collections/" + collection_name->std_str() +
+                        "/partitions\'");
         tr.RecordSection("Received request.");
 
         auto handler = WebRequestHandler();
@@ -509,16 +513,16 @@ class WebController : public oatpp::web::server::api::ApiController {
                 response = createDtoResponse(Status::CODE_400, status_dto);
         }
 
-        tr.ElapseFromBegin("Done. Status: code = " + std::to_string(status_dto->code->getValue())
-                           + ", reason = " + status_dto->message->std_str() + ". Total cost");
+        tr.ElapseFromBegin("Done. Status: code = " + std::to_string(status_dto->code->getValue()) +
+                           ", reason = " + status_dto->message->std_str() + ". Total cost");
 
         return response;
     }
 
     ADD_CORS(ShowSegments)
 
-    ENDPOINT("GET", "/collections/{collection_name}/segments", ShowSegments,
-             PATH(String, collection_name), QUERIES(const QueryParams&, query_params)) {
+    ENDPOINT("GET", "/collections/{collection_name}/segments", ShowSegments, PATH(String, collection_name),
+             QUERIES(const QueryParams&, query_params)) {
         auto offset = query_params.get("offset");
         auto page_size = query_params.get("page_size");
 
@@ -542,7 +546,8 @@ class WebController : public oatpp::web::server::api::ApiController {
      * GetSegmentVector
      */
     ENDPOINT("GET", "/collections/{collection_name}/segments/{segment_name}/{info}", GetSegmentInfo,
-             PATH(String, collection_name), PATH(String, segment_name), PATH(String, info), QUERIES(const QueryParams&, query_params)) {
+             PATH(String, collection_name), PATH(String, segment_name), PATH(String, info),
+             QUERIES(const QueryParams&, query_params)) {
         auto offset = query_params.get("offset");
         auto page_size = query_params.get("page_size");
 
@@ -571,8 +576,8 @@ class WebController : public oatpp::web::server::api::ApiController {
      *
      * GetVectorByID ?id=
      */
-    ENDPOINT("GET", "/collections/{collection_name}/vectors", GetVectors,
-             PATH(String, collection_name), QUERIES(const QueryParams&, query_params)) {
+    ENDPOINT("GET", "/collections/{collection_name}/vectors", GetVectors, PATH(String, collection_name),
+             QUERIES(const QueryParams&, query_params)) {
         auto handler = WebRequestHandler();
         String response;
         auto status_dto = handler.GetVector(collection_name, query_params, response);
@@ -589,9 +594,10 @@ class WebController : public oatpp::web::server::api::ApiController {
 
     ADD_CORS(Insert)
 
-    ENDPOINT("POST", "/collections/{collection_name}/vectors", Insert,
-             PATH(String, collection_name), BODY_STRING(String, body)) {
-        TimeRecorder tr(std::string(WEB_LOG_PREFIX) + "POST \'/collections/" + collection_name->std_str() + "/vectors\'");
+    ENDPOINT("POST", "/collections/{collection_name}/vectors", Insert, PATH(String, collection_name),
+             BODY_STRING(String, body)) {
+        TimeRecorder tr(std::string(WEB_LOG_PREFIX) + "POST \'/collections/" + collection_name->std_str() +
+                        "/vectors\'");
         tr.RecordSection("Received request.");
 
         auto ids_dto = VectorIdsDto::createShared();
@@ -610,17 +616,48 @@ class WebController : public oatpp::web::server::api::ApiController {
                 response = createDtoResponse(Status::CODE_400, status_dto);
         }
 
-        tr.ElapseFromBegin("Done. Status: code = " + std::to_string(status_dto->code->getValue())
-                           + ", reason = " + status_dto->message->std_str() + ". Total cost");
+        tr.ElapseFromBegin("Done. Status: code = " + std::to_string(status_dto->code->getValue()) +
+                           ", reason = " + status_dto->message->std_str() + ". Total cost");
+
+        return response;
+    }
+
+    ADD_CORS(InsertEntity)
+
+    ENDPOINT("POST", "/hybrid_collections/{collection_name}/entities", InsertEntity, PATH(String, collection_name),
+             BODY_STRING(String, body)) {
+        TimeRecorder tr(std::string(WEB_LOG_PREFIX) + "POST \'/hybrid_collections/" + collection_name->std_str() +
+                        "/entities\'");
+        tr.RecordSection("Received request.");
+
+        auto ids_dto = VectorIdsDto::createShared();
+        WebRequestHandler handler = WebRequestHandler();
+
+        std::shared_ptr<OutgoingResponse> response;
+        auto status_dto = handler.InsertEntity(collection_name, body, ids_dto);
+        switch (status_dto->code->getValue()) {
+            case StatusCode::SUCCESS:
+                response = createDtoResponse(Status::CODE_201, ids_dto);
+                break;
+            case StatusCode::COLLECTION_NOT_EXISTS:
+                response = createDtoResponse(Status::CODE_404, status_dto);
+                break;
+            default:
+                response = createDtoResponse(Status::CODE_400, status_dto);
+        }
+
+        tr.ElapseFromBegin("Done. Status: code = " + std::to_string(status_dto->code->getValue()) +
+                           ", reason = " + status_dto->message->std_str() + ". Total cost");
 
         return response;
     }
 
     ADD_CORS(VectorsOp)
 
-    ENDPOINT("PUT", "/collections/{collection_name}/vectors", VectorsOp,
-             PATH(String, collection_name), BODY_STRING(String, body)) {
-        TimeRecorder tr(std::string(WEB_LOG_PREFIX) + "PUT \'/collections/" + collection_name->std_str() + "/vectors\'");
+    ENDPOINT("PUT", "/collections/{collection_name}/vectors", VectorsOp, PATH(String, collection_name),
+             BODY_STRING(String, body)) {
+        TimeRecorder tr(std::string(WEB_LOG_PREFIX) + "PUT \'/collections/" + collection_name->std_str() +
+                        "/vectors\'");
         tr.RecordSection("Received request.");
 
         WebRequestHandler handler = WebRequestHandler();
@@ -639,8 +676,8 @@ class WebController : public oatpp::web::server::api::ApiController {
                 response = createDtoResponse(Status::CODE_400, status_dto);
         }
 
-        tr.ElapseFromBegin("Done. Status: code = " + std::to_string(status_dto->code->getValue())
-                           + ", reason = " + status_dto->message->std_str() + ". Total cost");
+        tr.ElapseFromBegin("Done. Status: code = " + std::to_string(status_dto->code->getValue()) +
+                           ", reason = " + status_dto->message->std_str() + ". Total cost");
 
         return response;
     }
@@ -669,8 +706,8 @@ class WebController : public oatpp::web::server::api::ApiController {
                 response = createDtoResponse(Status::CODE_400, status_dto);
         }
 
-        tr.ElapseFromBegin("Done. Status: code = " + std::to_string(status_dto->code->getValue())
-                           + ", reason = " + status_dto->message->std_str() + ". Total cost");
+        tr.ElapseFromBegin("Done. Status: code = " + std::to_string(status_dto->code->getValue()) +
+                           ", reason = " + status_dto->message->std_str() + ". Total cost");
 
         return response;
     }
@@ -695,9 +732,32 @@ class WebController : public oatpp::web::server::api::ApiController {
             default:
                 response = createDtoResponse(Status::CODE_400, status_dto);
         }
-        tr.ElapseFromBegin("Done. Status: code = " + std::to_string(status_dto->code->getValue())
-                           + ", reason = " + status_dto->message->std_str() + ". Total cost");
+        tr.ElapseFromBegin("Done. Status: code = " + std::to_string(status_dto->code->getValue()) +
+                           ", reason = " + status_dto->message->std_str() + ". Total cost");
 
+        return response;
+    }
+
+    ADD_CORS(CreateHybridCollection)
+
+    ENDPOINT("POST", "/hybrid_collections", CreateHybridCollection, BODY_STRING(String, body_str)) {
+        TimeRecorder tr(std::string(WEB_LOG_PREFIX) + "POST \'/hybrid_collections\'");
+        tr.RecordSection("Received request.");
+        WebRequestHandler handler = WebRequestHandler();
+
+        std::shared_ptr<OutgoingResponse> response;
+        auto status_dto = handler.CreateHybridCollection(body_str);
+        switch (status_dto->code->getValue()) {
+            case StatusCode::SUCCESS:
+                response = createDtoResponse(Status::CODE_201, status_dto);
+                break;
+            default:
+                response = createDtoResponse(Status::CODE_400, status_dto);
+        }
+
+        std::string ttr = "Done. Status: code = " + std::to_string(status_dto->code->getValue()) +
+                          ", reason = " + status_dto->message->std_str() + ". Total cost";
+        tr.ElapseFromBegin(ttr);
         return response;
     }
 
@@ -705,9 +765,8 @@ class WebController : public oatpp::web::server::api::ApiController {
  *  Finish ENDPOINTs generation ('ApiController' codegen)
  */
 #include OATPP_CODEGEN_END(ApiController)
-
 };
 
-} // namespace web
-} // namespace server
-} // namespace milvus
+}  // namespace web
+}  // namespace server
+}  // namespace milvus

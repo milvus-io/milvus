@@ -85,6 +85,7 @@ void
 IndexAnnoy::BuildAll(const DatasetPtr& dataset_ptr, const Config& config) {
     if (index_) {
         // it is builded all
+        LOG_KNOWHERE_DEBUG_ << "IndexAnnoy::BuildAll: index_ has been built!";
         return;
     }
 

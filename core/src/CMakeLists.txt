@@ -54,7 +54,7 @@ aux_source_directory(${MILVUS_ENGINE_SRC}/scheduler scheduler_main_files)
 aux_source_directory(${MILVUS_ENGINE_SRC}/scheduler/action scheduler_action_files)
 aux_source_directory(${MILVUS_ENGINE_SRC}/scheduler/event scheduler_event_files)
 aux_source_directory(${MILVUS_ENGINE_SRC}/scheduler/job scheduler_job_files)
-aux_source_directory(${MILVUS_ENGINE_SRC}/scheduler/optimizer scheduler_optimizer_files)
+aux_source_directory(${MILVUS_ENGINE_SRC}/scheduler/selector scheduler_selector_files)
 aux_source_directory(${MILVUS_ENGINE_SRC}/scheduler/resource scheduler_resource_files)
 aux_source_directory(${MILVUS_ENGINE_SRC}/scheduler/task scheduler_task_files)
 set(scheduler_files
@@ -62,7 +62,7 @@ set(scheduler_files
         ${scheduler_action_files}
         ${scheduler_event_files}
         ${scheduler_job_files}
-        ${scheduler_optimizer_files}
+        ${scheduler_selector_files}
         ${scheduler_resource_files}
         ${scheduler_task_files}
         )
@@ -77,12 +77,15 @@ set(thirdparty_files
         )
 
 aux_source_directory(${MILVUS_ENGINE_SRC}/server server_service_files)
+aux_source_directory(${MILVUS_ENGINE_SRC}/server/init server_init_files)
 aux_source_directory(${MILVUS_ENGINE_SRC}/server/delivery/request delivery_request_files)
 aux_source_directory(${MILVUS_ENGINE_SRC}/server/delivery/hybrid_request delivery_hybrid_request_files)
 aux_source_directory(${MILVUS_ENGINE_SRC}/server/delivery/strategy delivery_strategy_files)
 aux_source_directory(${MILVUS_ENGINE_SRC}/server/delivery delivery_files)
 set(server_files
+        ${server_init_files}
         ${server_service_files}
+        ${server_init_files}
         ${delivery_request_files}
         ${delivery_hybrid_request_files}
         ${delivery_strategy_files}
@@ -317,3 +320,19 @@ install(FILES
         ${CMAKE_BINARY_DIR}/fiu_ep-prefix/src/fiu_ep/lib/${CMAKE_SHARED_LIBRARY_PREFIX}fiu${CMAKE_SHARED_LIBRARY_SUFFIX}.0
         ${CMAKE_BINARY_DIR}/fiu_ep-prefix/src/fiu_ep/lib/${CMAKE_SHARED_LIBRARY_PREFIX}fiu${CMAKE_SHARED_LIBRARY_SUFFIX}.1.00
         DESTINATION lib)
+
+if (CMAKE_BUILD_TYPE STREQUAL "Release")
+    install(FILES
+            ${CMAKE_BINARY_DIR}/src/index/openblas_ep-prefix/src/openblas_ep/lib/${CMAKE_SHARED_LIBRARY_PREFIX}openblas${CMAKE_SHARED_LIBRARY_SUFFIX}
+            ${CMAKE_BINARY_DIR}/src/index/openblas_ep-prefix/src/openblas_ep/lib/${CMAKE_SHARED_LIBRARY_PREFIX}openblas${CMAKE_SHARED_LIBRARY_SUFFIX}.0
+            ${CMAKE_BINARY_DIR}/src/index/openblas_ep-prefix/src/openblas_ep/lib/${CMAKE_SHARED_LIBRARY_PREFIX}openblas${CMAKE_SHARED_LIBRARY_SUFFIX}.0.3
+            DESTINATION lib)
+elseif(CMAKE_BUILD_TYPE STREQUAL "Debug")
+    install(FILES
+            ${CMAKE_BINARY_DIR}/src/index/openblas_ep-prefix/src/openblas_ep/lib/${CMAKE_SHARED_LIBRARY_PREFIX}openblas_d${CMAKE_SHARED_LIBRARY_SUFFIX}
+            ${CMAKE_BINARY_DIR}/src/index/openblas_ep-prefix/src/openblas_ep/lib/${CMAKE_SHARED_LIBRARY_PREFIX}openblas_d${CMAKE_SHARED_LIBRARY_SUFFIX}.0
+            ${CMAKE_BINARY_DIR}/src/index/openblas_ep-prefix/src/openblas_ep/lib/${CMAKE_SHARED_LIBRARY_PREFIX}openblas_d${CMAKE_SHARED_LIBRARY_SUFFIX}.0.3
+            DESTINATION lib)
+else()
+    message("unknown CMAKE_BUILD_TYPE")
+endif()

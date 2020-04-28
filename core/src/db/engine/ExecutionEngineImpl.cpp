@@ -717,8 +717,7 @@ MapAndCopyResult(const knowhere::DatasetPtr& dataset, const std::vector<milvus::
 
 template <typename T>
 void
-ProcessRangeQuery(std::vector<T> data, T value, query::CompareOperator type, uint64_t j,
-                  faiss::ConcurrentBitsetPtr& bitset) {
+ProcessRangeQuery(std::vector<T> data, T value, query::CompareOperator type, faiss::ConcurrentBitsetPtr& bitset) {
     switch (type) {
         case query::CompareOperator::LT: {
             for (uint64_t i = 0; i < data.size(); ++i) {
@@ -989,7 +988,7 @@ ExecutionEngineImpl::ExecBinaryQuery(milvus::query::GeneralQueryPtr general_quer
                         data.resize(size / sizeof(int8_t));
                         memcpy(data.data(), attr_data_.at(field_name).data(), size);
                         int8_t value = atoi(operand.c_str());
-                        ProcessRangeQuery<int8_t>(data, value, com_expr[j].compare_operator, j, bitset);
+                        ProcessRangeQuery<int8_t>(data, value, com_expr[j].compare_operator, bitset);
                         break;
                     }
                     case DataType::INT16: {
@@ -997,7 +996,7 @@ ExecutionEngineImpl::ExecBinaryQuery(milvus::query::GeneralQueryPtr general_quer
                         data.resize(size / sizeof(int16_t));
                         memcpy(data.data(), attr_data_.at(field_name).data(), size);
                         int16_t value = atoi(operand.c_str());
-                        ProcessRangeQuery<int16_t>(data, value, com_expr[j].compare_operator, j, bitset);
+                        ProcessRangeQuery<int16_t>(data, value, com_expr[j].compare_operator, bitset);
                         break;
                     }
                     case DataType::INT32: {
@@ -1005,7 +1004,7 @@ ExecutionEngineImpl::ExecBinaryQuery(milvus::query::GeneralQueryPtr general_quer
                         data.resize(size / sizeof(int32_t));
                         memcpy(data.data(), attr_data_.at(field_name).data(), size);
                         int32_t value = atoi(operand.c_str());
-                        ProcessRangeQuery<int32_t>(data, value, com_expr[j].compare_operator, j, bitset);
+                        ProcessRangeQuery<int32_t>(data, value, com_expr[j].compare_operator, bitset);
                         break;
                     }
                     case DataType::INT64: {
@@ -1013,7 +1012,7 @@ ExecutionEngineImpl::ExecBinaryQuery(milvus::query::GeneralQueryPtr general_quer
                         data.resize(size / sizeof(int64_t));
                         memcpy(data.data(), attr_data_.at(field_name).data(), size);
                         int64_t value = atoi(operand.c_str());
-                        ProcessRangeQuery<int64_t>(data, value, com_expr[j].compare_operator, j, bitset);
+                        ProcessRangeQuery<int64_t>(data, value, com_expr[j].compare_operator, bitset);
                         break;
                     }
                     case DataType::FLOAT: {
@@ -1023,7 +1022,7 @@ ExecutionEngineImpl::ExecBinaryQuery(milvus::query::GeneralQueryPtr general_quer
                         std::istringstream iss(operand);
                         double value;
                         iss >> value;
-                        ProcessRangeQuery<float>(data, value, com_expr[j].compare_operator, j, bitset);
+                        ProcessRangeQuery<float>(data, value, com_expr[j].compare_operator, bitset);
                         break;
                     }
                     case DataType::DOUBLE: {
@@ -1033,7 +1032,7 @@ ExecutionEngineImpl::ExecBinaryQuery(milvus::query::GeneralQueryPtr general_quer
                         std::istringstream iss(operand);
                         double value;
                         iss >> value;
-                        ProcessRangeQuery<double>(data, value, com_expr[j].compare_operator, j, bitset);
+                        ProcessRangeQuery<double>(data, value, com_expr[j].compare_operator, bitset);
                         break;
                     }
                 }
@@ -1186,87 +1185,6 @@ ExecutionEngineImpl::Search(int64_t n, const uint8_t* data, int64_t k, const mil
                                 location_.c_str());
     MapAndCopyResult(result, index_->GetUids(), n, k, distances, labels);
     rc.RecordSection("map uids " + std::to_string(n * k));
-
-    if (hybrid) {
-        HybridUnset();
-    }
-
-    return Status::OK();
-}
-
-Status
-ExecutionEngineImpl::Search(int64_t n, const std::vector<int64_t>& ids, int64_t k, const milvus::json& extra_params,
-                            float* distances, int64_t* labels, bool hybrid) {
-    TimeRecorder rc(LogOut("[%s][%ld] ExecutionEngineImpl::Search vector of ids", "search", 0));
-
-    if (index_ == nullptr) {
-        LOG_ENGINE_ERROR_ << LogOut("[%s][%ld] ExecutionEngineImpl: index is null, failed to search", "search", 0);
-        return Status(DB_ERROR, "index is null");
-    }
-
-    milvus::json conf = extra_params;
-    conf[knowhere::meta::TOPK] = k;
-    auto adapter = knowhere::AdapterMgr::GetInstance().GetAdapter(index_->index_type());
-    if (!adapter->CheckSearch(conf, index_->index_type(), index_->index_mode())) {
-        LOG_ENGINE_ERROR_ << LogOut("[%s][%ld] Illegal search params", "search", 0);
-        throw Exception(DB_ERROR, "Illegal search params");
-    }
-
-    if (hybrid) {
-        HybridLoad();
-    }
-
-    rc.RecordSection("search prepare");
-
-    // std::string segment_dir;
-    // utils::GetParentPath(location_, segment_dir);
-    // segment::SegmentReader segment_reader(segment_dir);
-    //    segment::IdBloomFilterPtr id_bloom_filter_ptr;
-    //    segment_reader.LoadBloomFilter(id_bloom_filter_ptr);
-
-    // Check if the id is present. If so, find its offset
-    const std::vector<segment::doc_id_t>& uids = index_->GetUids();
-
-    std::vector<int64_t> offsets;
-    /*
-    std::vector<segment::doc_id_t> uids;
-    auto status = segment_reader.LoadUids(uids);
-    if (!status.ok()) {
-        return status;
-    }
-     */
-
-    // There is only one id in ids
-    for (auto& id : ids) {
-        //        if (id_bloom_filter_ptr->Check(id)) {
-        //            if (uids.empty()) {
-        //                segment_reader.LoadUids(uids);
-        //            }
-        //            auto found = std::find(uids.begin(), uids.end(), id);
-        //            if (found != uids.end()) {
-        //                auto offset = std::distance(uids.begin(), found);
-        //                offsets.emplace_back(offset);
-        //            }
-        //        }
-        auto found = std::find(uids.begin(), uids.end(), id);
-        if (found != uids.end()) {
-            auto offset = std::distance(uids.begin(), found);
-            offsets.emplace_back(offset);
-        }
-    }
-
-    rc.RecordSection("get offset");
-
-    if (!offsets.empty()) {
-        auto dataset = knowhere::GenDatasetWithIds(offsets.size(), index_->Dim(), nullptr, offsets.data());
-        auto result = index_->QueryById(dataset, conf);
-        rc.RecordSection("query by id done");
-
-        LOG_ENGINE_DEBUG_ << LogOut("[%s][%ld] get %ld uids from index %s", "search", 0, index_->GetUids().size(),
-                                    location_.c_str());
-        MapAndCopyResult(result, uids, offsets.size(), k, distances, labels);
-        rc.RecordSection("map uids " + std::to_string(offsets.size() * k));
-    }
 
     if (hybrid) {
         HybridUnset();

@@ -322,7 +322,6 @@ class TestCollection:
         expected: collection_name equals with the collection name created
         '''
         collection_name = gen_unique_str("test_collection")
-        uri = "tcp://%s:%s" % (args["ip"], args["port"])
         param = {'collection_name': collection_name,
                  'dimension': dim,
                  'index_file_size': index_file_size, 
@@ -336,8 +335,7 @@ class TestCollection:
         process_num = 4
         processes = []
         for i in range(process_num):
-            milvus = get_milvus(args["handler"])
-            milvus.connect(uri=uri)
+            milvus = get_milvus(args["ip"], args["port"], handler=args["handler"])
             p = Process(target=describecollection, args=(milvus,))
             processes.append(p)
             p.start()
@@ -507,8 +505,6 @@ class TestCollection:
         '''
         process_num = 6
         processes = []
-        uri = "tcp://%s:%s" % (args["ip"], args["port"])
-
         def deletecollection(milvus):
             status = milvus.drop_collection(collection)
             # assert not status.code==0
@@ -516,8 +512,7 @@ class TestCollection:
             assert status.OK()
 
         for i in range(process_num):
-            milvus = get_milvus(args["handler"])
-            milvus.connect(uri=uri)
+            milvus = get_milvus(args["ip"], args["port"], handler=args["handler"])
             p = Process(target=deletecollection, args=(milvus,))
             processes.append(p)
             p.start()
@@ -786,13 +781,11 @@ class TestCollection:
         expected: collection_name in show collections
         '''
         collection_name = gen_unique_str("test_collection")
-        uri = "tcp://%s:%s" % (args["ip"], args["port"])
         param = {'collection_name': collection_name,
                  'dimension': dim,
                  'index_file_size': index_file_size,
                  'metric_type': MetricType.L2}
         connect.create_collection(param)
-
         def showcollections(milvus):
             status, result = milvus.show_collections()
             assert status.OK()
@@ -802,8 +795,7 @@ class TestCollection:
         processes = []
 
         for i in range(process_num):
-            milvus = get_milvus(args["handler"])
-            milvus.connect(uri=uri)
+            milvus = get_milvus(args["ip"], args["port"], handler=args["handler"])
             p = Process(target=showcollections, args=(milvus,))
             processes.append(p)
             p.start()

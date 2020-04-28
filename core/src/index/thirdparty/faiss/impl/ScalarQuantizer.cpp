@@ -11,12 +11,7 @@
 
 #include <cstdio>
 #include <algorithm>
-
 #include <omp.h>
-
-#ifdef __SSE__
-#include <immintrin.h>
-#endif
 
 #include <faiss/FaissHook.h>
 #include <faiss/utils/utils.h>
@@ -40,9 +35,6 @@ namespace faiss {
  * that hides the template mess.
  ********************************************************************/
 
-#ifdef __AVX__
-#define USE_AVX
-#endif
 
 
 /*******************************************************************
@@ -444,14 +436,10 @@ InvertedListScanner* ScalarQuantizer::select_InvertedListScanner
     if (d % 16 == 0 && support_avx512()) {
         return sel0_InvertedListScanner<16>
                 (mt, this, quantizer, store_pairs, by_residual);
-    }
-#ifdef USE_AVX
-    if (d % 8 == 0) {
+    } if (d % 8 == 0) {
         return sel0_InvertedListScanner<8>
             (mt, this, quantizer, store_pairs, by_residual);
-    } else
-#endif
-    {
+    } else {
         return sel0_InvertedListScanner<1>
             (mt, this, quantizer, store_pairs, by_residual);
     }

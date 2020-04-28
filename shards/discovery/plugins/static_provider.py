@@ -29,7 +29,7 @@ class StaticDiscovery(object):
 
     def __init__(self, config, readonly_topo, **kwargs):
         self.readonly_topo = readonly_topo
-        hosts = env.list('DISCOVERY_STATIC_HOSTS', [])
+        hosts = map(str.strip, env.list('DISCOVERY_STATIC_HOSTS', []))
         self.port = env.int('DISCOVERY_STATIC_PORT', 19530)
         self.hosts = [resolve_address(host, self.port) for host in hosts]
 

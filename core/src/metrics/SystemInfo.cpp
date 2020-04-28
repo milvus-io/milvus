@@ -11,6 +11,7 @@
 
 #include "metrics/SystemInfo.h"
 #include "thirdparty/nlohmann/json.hpp"
+#include "utils/Exception.h"
 #include "utils/Log.h"
 
 #include <dirent.h>
@@ -38,24 +39,32 @@ SystemInfo::Init() {
     initialized_ = true;
 
     // initialize CPU information
-    FILE* file;
-    struct tms time_sample;
-    char line[128];
-    last_cpu_ = times(&time_sample);
-    last_sys_cpu_ = time_sample.tms_stime;
-    last_user_cpu_ = time_sample.tms_utime;
-    file = fopen("/proc/cpuinfo", "r");
-    num_processors_ = 0;
-    while (fgets(line, 128, file) != nullptr) {
-        if (strncmp(line, "processor", 9) == 0) {
-            num_processors_++;
+    try {
+        struct tms time_sample;
+        char line[128];
+        last_cpu_ = times(&time_sample);
+        last_sys_cpu_ = time_sample.tms_stime;
+        last_user_cpu_ = time_sample.tms_utime;
+        num_processors_ = 0;
+        FILE* file = fopen("/proc/cpuinfo", "r");
+        if (file) {
+            while (fgets(line, 128, file) != nullptr) {
+                if (strncmp(line, "processor", 9) == 0) {
+                    num_processors_++;
+                }
+                if (strncmp(line, "physical", 8) == 0) {
+                    num_physical_processors_ = ParseLine(line);
+                }
+            }
+            fclose(file);
+        } else {
+            LOG_SERVER_ERROR_ << "Failed to read /proc/cpuinfo";
         }
-        if (strncmp(line, "physical", 8) == 0) {
-            num_physical_processors_ = ParseLine(line);
-        }
+        total_ram_ = GetPhysicalMemory();
+    } catch (std::exception& ex) {
+        std::string msg = "Failed to read /proc/cpuinfo, reason: " + std::string(ex.what());
+        LOG_SERVER_ERROR_ << msg;
     }
-    total_ram_ = GetPhysicalMemory();
-    fclose(file);
 
 #ifdef MILVUS_GPU_VERSION
     // initialize GPU information
@@ -75,10 +84,15 @@ SystemInfo::Init() {
 #endif
 
     // initialize network traffic information
-    std::pair<uint64_t, uint64_t> in_and_out_octets = Octets();
-    in_octets_ = in_and_out_octets.first;
-    out_octets_ = in_and_out_octets.second;
-    net_time_ = std::chrono::system_clock::now();
+    try {
+        std::pair<uint64_t, uint64_t> in_and_out_octets = Octets();
+        in_octets_ = in_and_out_octets.first;
+        out_octets_ = in_and_out_octets.second;
+        net_time_ = std::chrono::system_clock::now();
+    } catch (std::exception& ex) {
+        std::string msg = "Failed to initialize network traffic information, reason: " + std::string(ex.what());
+        LOG_SERVER_ERROR_ << msg;
+    }
 }
 
 uint64_t
@@ -101,27 +115,39 @@ SystemInfo::GetPhysicalMemory() {
     uint64_t totalPhysMem = memInfo.totalram;
     // Multiply in next statement to avoid int overflow on right hand side...
     totalPhysMem *= memInfo.mem_unit;
+
     return totalPhysMem;
 }
 
 uint64_t
 SystemInfo::GetProcessUsedMemory() {
-    // Note: this value is in KB!
-    FILE* file = fopen("/proc/self/status", "r");
-    constexpr uint64_t line_length = 128;
-    uint64_t result = -1;
-    constexpr uint64_t KB_SIZE = 1024;
-    char line[line_length];
+    try {
+        // Note: this value is in KB!
+        FILE* file = fopen("/proc/self/status", "r");
+        uint64_t result = 0;
+        constexpr uint64_t KB_SIZE = 1024;
+        if (file) {
+            constexpr uint64_t line_length = 128;
+            char line[line_length];
 
-    while (fgets(line, line_length, file) != nullptr) {
-        if (strncmp(line, "VmRSS:", 6) == 0) {
-            result = ParseLine(line);
-            break;
+            while (fgets(line, line_length, file) != nullptr) {
+                if (strncmp(line, "VmRSS:", 6) == 0) {
+                    result = ParseLine(line);
+                    break;
+                }
+            }
+            fclose(file);
+        } else {
+            LOG_SERVER_ERROR_ << "Failed to read /proc/self/status";
         }
+
+        // return value in Byte
+        return (result * KB_SIZE);
+    } catch (std::exception& ex) {
+        std::string msg = "Failed to read /proc/self/status, reason: " + std::string(ex.what());
+        LOG_SERVER_ERROR_ << msg;
+        return 0;
     }
-    fclose(file);
-    // return value in Byte
-    return (result * KB_SIZE);
 }
 
 double
@@ -155,34 +181,40 @@ SystemInfo::CPUCorePercent() {
 std::vector<uint64_t>
 SystemInfo::getTotalCpuTime(std::vector<uint64_t>& work_time_array) {
     std::vector<uint64_t> total_time_array;
-    FILE* file = fopen("/proc/stat", "r");
-    fiu_do_on("SystemInfo.getTotalCpuTime.open_proc", file = NULL);
-    if (file == NULL) {
-        LOG_SERVER_ERROR_ << "Could not open stat file";
-        return total_time_array;
-    }
-
-    uint64_t user = 0, nice = 0, system = 0, idle = 0;
-    uint64_t iowait = 0, irq = 0, softirq = 0, steal = 0, guest = 0, guestnice = 0;
-
-    for (int i = 0; i < num_processors_; i++) {
-        char buffer[1024];
-        char* ret = fgets(buffer, sizeof(buffer) - 1, file);
-        fiu_do_on("SystemInfo.getTotalCpuTime.read_proc", ret = NULL);
-        if (ret == NULL) {
-            LOG_SERVER_ERROR_ << "Could not read stat file";
-            fclose(file);
+    try {
+        FILE* file = fopen("/proc/stat", "r");
+        fiu_do_on("SystemInfo.getTotalCpuTime.open_proc", file = NULL);
+        if (file == NULL) {
+            LOG_SERVER_ERROR_ << "Failed to read /proc/stat";
             return total_time_array;
         }
 
-        sscanf(buffer, "cpu  %16lu %16lu %16lu %16lu %16lu %16lu %16lu %16lu %16lu %16lu", &user, &nice, &system, &idle,
-               &iowait, &irq, &softirq, &steal, &guest, &guestnice);
+        uint64_t user = 0, nice = 0, system = 0, idle = 0;
+        uint64_t iowait = 0, irq = 0, softirq = 0, steal = 0, guest = 0, guestnice = 0;
 
-        work_time_array.push_back(user + nice + system);
-        total_time_array.push_back(user + nice + system + idle + iowait + irq + softirq + steal);
+        for (int i = 0; i < num_processors_; i++) {
+            char buffer[1024];
+            char* ret = fgets(buffer, sizeof(buffer) - 1, file);
+            fiu_do_on("SystemInfo.getTotalCpuTime.read_proc", ret = NULL);
+            if (ret == NULL) {
+                LOG_SERVER_ERROR_ << "Could not read stat file";
+                fclose(file);
+                return total_time_array;
+            }
+
+            sscanf(buffer, "cpu  %16lu %16lu %16lu %16lu %16lu %16lu %16lu %16lu %16lu %16lu", &user, &nice, &system,
+                   &idle, &iowait, &irq, &softirq, &steal, &guest, &guestnice);
+
+            work_time_array.push_back(user + nice + system);
+            total_time_array.push_back(user + nice + system + idle + iowait + irq + softirq + steal);
+        }
+
+        fclose(file);
+    } catch (std::exception& ex) {
+        std::string msg = "Failed to read /proc/stat, reason: " + std::string(ex.what());
+        LOG_SERVER_ERROR_ << msg;
     }
 
-    fclose(file);
     return total_time_array;
 }
 
@@ -260,39 +292,43 @@ std::vector<float>
 SystemInfo::CPUTemperature() {
     std::vector<float> result;
     std::string path = "/sys/class/hwmon/";
+    try {
+        DIR* dir = opendir(path.c_str());
+        fiu_do_on("SystemInfo.CPUTemperature.opendir", dir = NULL);
+        if (!dir) {
+            LOG_SERVER_ERROR_ << "Could not open hwmon directory";
+            return result;
+        }
 
-    DIR* dir = NULL;
-    dir = opendir(path.c_str());
-    fiu_do_on("SystemInfo.CPUTemperature.opendir", dir = NULL);
-    if (!dir) {
-        LOG_SERVER_ERROR_ << "Could not open hwmon directory";
-        return result;
-    }
+        struct dirent* ptr = NULL;
+        while ((ptr = readdir(dir)) != NULL) {
+            std::string filename(path);
+            filename.append(ptr->d_name);
 
-    struct dirent* ptr = NULL;
-    while ((ptr = readdir(dir)) != NULL) {
-        std::string filename(path);
-        filename.append(ptr->d_name);
-
-        char buf[100];
-        if (readlink(filename.c_str(), buf, 100) != -1) {
-            std::string m(buf);
-            if (m.find("coretemp") != std::string::npos) {
-                std::string object = filename;
-                object += "/temp1_input";
-                FILE* file = fopen(object.c_str(), "r");
-                fiu_do_on("SystemInfo.CPUTemperature.openfile", file = NULL);
-                if (file == nullptr) {
-                    LOG_SERVER_ERROR_ << "Could not open temperature file";
-                    return result;
+            char buf[100];
+            if (readlink(filename.c_str(), buf, 100) != -1) {
+                std::string m(buf);
+                if (m.find("coretemp") != std::string::npos) {
+                    std::string object = filename;
+                    object += "/temp1_input";
+                    FILE* file = fopen(object.c_str(), "r");
+                    fiu_do_on("SystemInfo.CPUTemperature.openfile", file = NULL);
+                    if (file == nullptr) {
+                        LOG_SERVER_ERROR_ << "Could not open temperature file";
+                        return result;
+                    }
+                    float temp;
+                    fscanf(file, "%f", &temp);
+                    result.push_back(temp / 1000);
                 }
-                float temp;
-                fscanf(file, "%f", &temp);
-                result.push_back(temp / 1000);
             }
         }
+        closedir(dir);
+    } catch (std::exception& ex) {
+        std::string msg = "Failed to get cpu temperature, reason: " + std::string(ex.what());
+        LOG_SERVER_ERROR_ << msg;
     }
-    closedir(dir);
+
     return result;
 }
 
