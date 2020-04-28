@@ -563,8 +563,7 @@ SqliteMetaImpl::GetCollectionFiles(const std::string& collection_id, const std::
             files_holder.MarkFile(file_schema);
         }
 
-        LOG_ENGINE_DEBUG_ << "Get " << files_holder.HoldFiles().size() << " files by id from collection "
-                          << collection_id;
+        LOG_ENGINE_DEBUG_ << "Get " << selected.size() << " files by id from collection " << collection_id;
         return result;
     } catch (std::exception& e) {
         return HandleException("Encounter exception when lookup collection files", e.what());
@@ -618,7 +617,7 @@ SqliteMetaImpl::GetCollectionFilesBySegmentId(const std::string& segment_id,
             }
         }
 
-        LOG_ENGINE_DEBUG_ << "Get " << files_holder.HoldFiles().size() << " files by segment id";
+        LOG_ENGINE_DEBUG_ << "Get " << selected.size() << " files by segment id" << segment_id;
         return Status::OK();
     } catch (std::exception& e) {
         return HandleException("Encounter exception when lookup collection files by segment id", e.what());
@@ -1114,6 +1113,7 @@ SqliteMetaImpl::FilesToSearch(const std::string& collection_id, FilesHolder& fil
         }
 
         Status ret;
+        int64_t files_count = 0;
         for (auto& file : selected) {
             SegmentSchema collection_file;
             collection_file.id_ = std::get<0>(file);
@@ -1137,11 +1137,12 @@ SqliteMetaImpl::FilesToSearch(const std::string& collection_id, FilesHolder& fil
             }
 
             files_holder.MarkFile(collection_file);
+            files_count++;
         }
-        if (files_holder.HoldFiles().empty()) {
-            LOG_ENGINE_ERROR_ << "No file to search for collection: " << collection_id;
+        if (files_count == 0) {
+            LOG_ENGINE_DEBUG_ << "No file to search for collection: " << collection_id;
         } else {
-            LOG_ENGINE_DEBUG_ << "Collect " << files_holder.HoldFiles().size() << " to-search files";
+            LOG_ENGINE_DEBUG_ << "Collect " << files_count << " to-search files in collection " << collection_id;
         }
         return ret;
     } catch (std::exception& e) {
@@ -1179,6 +1180,7 @@ SqliteMetaImpl::FilesToMerge(const std::string& collection_id, FilesHolder& file
         }
 
         Status result;
+        int64_t files_count = 0;
         for (auto& file : selected) {
             SegmentSchema collection_file;
             collection_file.file_size_ = std::get<5>(file);
@@ -1205,10 +1207,11 @@ SqliteMetaImpl::FilesToMerge(const std::string& collection_id, FilesHolder& file
             }
 
             files_holder.MarkFile(collection_file);
+            files_count++;
         }
 
-        if (files_holder.HoldFiles().size() > 0) {
-            LOG_ENGINE_TRACE_ << "Collect " << files_holder.HoldFiles().size() << " to-merge files";
+        if (files_count > 0) {
+            LOG_ENGINE_DEBUG_ << "Collect " << files_count << " to-merge files in collection " << collection_id;
         }
         return result;
     } catch (std::exception& e) {
@@ -1235,11 +1238,11 @@ SqliteMetaImpl::FilesToIndex(FilesHolder& files_holder) {
                                             where(c(&SegmentSchema::file_type_) == (int)SegmentSchema::TO_INDEX));
         }
 
-        std::map<std::string, CollectionSchema> groups;
-        SegmentSchema collection_file;
-
         Status ret;
+        int64_t files_count = 0;
+        std::map<std::string, CollectionSchema> groups;
         for (auto& file : selected) {
+            SegmentSchema collection_file;
             collection_file.id_ = std::get<0>(file);
             collection_file.collection_id_ = std::get<1>(file);
             collection_file.segment_id_ = std::get<2>(file);
@@ -1272,10 +1275,12 @@ SqliteMetaImpl::FilesToIndex(FilesHolder& files_holder) {
             collection_file.index_params_ = groups[collection_file.collection_id_].index_params_;
             collection_file.metric_type_ = groups[collection_file.collection_id_].metric_type_;
             files_holder.MarkFile(collection_file);
+
+            files_count++;
         }
 
-        if (files_holder.HoldFiles().size() > 0) {
-            LOG_ENGINE_DEBUG_ << "Collect " << files_holder.HoldFiles().size() << " to-index files";
+        if (files_count > 0) {
+            LOG_ENGINE_DEBUG_ << "Collect " << files_count << " to-index files";
         }
         return ret;
     } catch (std::exception& e) {
@@ -1432,6 +1437,7 @@ SqliteMetaImpl::FilesByID(const std::vector<size_t>& ids, FilesHolder& files_hol
 
         std::map<std::string, meta::CollectionSchema> collections;
         Status ret;
+        int64_t files_count = 0;
         for (auto& file : selected) {
             SegmentSchema collection_file;
             collection_file.id_ = std::get<0>(file);
@@ -1460,6 +1466,7 @@ SqliteMetaImpl::FilesByID(const std::vector<size_t>& ids, FilesHolder& files_hol
             }
 
             files_holder.MarkFile(collection_file);
+            files_count++;
         }
 
         milvus::engine::meta::SegmentsSchema& files = files_holder.HoldFiles();
@@ -1471,10 +1478,10 @@ SqliteMetaImpl::FilesByID(const std::vector<size_t>& ids, FilesHolder& files_hol
             collection_file.metric_type_ = collection_schema.metric_type_;
         }
 
-        if (files.empty()) {
+        if (files_count == 0) {
             LOG_ENGINE_ERROR_ << "No file to search in file id list";
         } else {
-            LOG_ENGINE_DEBUG_ << "Collect " << files.size() << " files by id";
+            LOG_ENGINE_DEBUG_ << "Collect " << files_count << " files by id";
         }
 
         return ret;
