@@ -313,6 +313,22 @@ class Config {
     Status
     CheckWalConfigWalPath(const std::string& value);
 
+    /* logs config */
+    Status
+    CheckLogsTraceEnable(const std::string& value);
+    Status
+    CheckLogsDebugEnable(const std::string& value);
+    Status
+    CheckLogsInfoEnable(const std::string& value);
+    Status
+    CheckLogsWarningEnable(const std::string& value);
+    Status
+    CheckLogsErrorEnable(const std::string& value);
+    Status
+    CheckLogsFatalEnable(const std::string& value);
+    Status
+    CheckLogsPathEnable(const std::string& value);
+
     std::string
     GetConfigStr(const std::string& parent_key, const std::string& child_key, const std::string& default_value = "");
     std::string

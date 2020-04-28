@@ -1498,6 +1498,95 @@ Config::CheckWalConfigWalPath(const std::string& value) {
     return ValidationUtil::ValidateStoragePath(value);
 }
 
+/* logs config */
+Status
+Config::CheckLogsTraceEnable(const std::string& value) {
+    auto exist_error = !ValidationUtil::ValidateStringIsBool(value).ok();
+    fiu_do_on("check_logs_trace_enable_fail", exist_error = true);
+
+    if (exist_error) {
+        std::string msg =
+            "Invalid logs config: " + value + ". Possible reason: logs.trace.enable is not a boolean.";
+        return Status(SERVER_INVALID_ARGUMENT, msg);
+    }
+    return Status::OK();
+}
+
+Status
+Config::CheckLogsDebugEnable(const std::string& value) {
+    auto exist_error = !ValidationUtil::ValidateStringIsBool(value).ok();
+    fiu_do_on("check_logs_debug_enable_fail", exist_error = true);
+
+    if (exist_error) {
+        std::string msg =
+            "Invalid logs config: " + value + ". Possible reason: logs.debug.enable is not a boolean.";
+        return Status(SERVER_INVALID_ARGUMENT, msg);
+    }
+    return Status::OK();
+}
+
+Status
+Config::CheckLogsInfoEnable(const std::string& value) {
+    auto exist_error = !ValidationUtil::ValidateStringIsBool(value).ok();
+    fiu_do_on("check_logs_info_enable_fail", exist_error = true);
+
+    if (exist_error) {
+        std::string msg =
+            "Invalid logs config: " + value + ". Possible reason: logs.info.enable is not a boolean.";
+        return Status(SERVER_INVALID_ARGUMENT, msg);
+    }
+    return Status::OK();
+}
+
+Status
+Config::CheckLogsWarningEnable(const std::string& value) {
+    auto exist_error = !ValidationUtil::ValidateStringIsBool(value).ok();
+    fiu_do_on("check_logs_warning_enable_fail", exist_error = true);
+
+    if (exist_error) {
+        std::string msg =
+            "Invalid logs config: " + value + ". Possible reason: logs.warning.enable is not a boolean.";
+        return Status(SERVER_INVALID_ARGUMENT, msg);
+    }
+    return Status::OK();
+}
+
+Status
+Config::CheckLogsErrorEnable(const std::string& value) {
+    auto exist_error = !ValidationUtil::ValidateStringIsBool(value).ok();
+    fiu_do_on("check_logs_error_enable_fail", exist_error = true);
+
+    if (exist_error) {
+        std::string msg =
+            "Invalid logs config: " + value + ". Possible reason: logs.error.enable is not a boolean.";
+        return Status(SERVER_INVALID_ARGUMENT, msg);
+    }
+    return Status::OK();
+}
+
+Status
+Config::CheckLogsFatalEnable(const std::string& value) {
+    auto exist_error = !ValidationUtil::ValidateStringIsBool(value).ok();
+    fiu_do_on("check_logs_fatal_enable_fail", exist_error = true);
+
+    if (exist_error) {
+        std::string msg =
+            "Invalid logs config: " + value + ". Possible reason: logs.fatal.enable is not a boolean.";
+        return Status(SERVER_INVALID_ARGUMENT, msg);
+    }
+    return Status::OK();
+}
+
+Status
+Config::CheckLogsPathEnable(const std::string& value) {
+    fiu_return_on("check_logs_path_fail", Status(SERVER_INVALID_ARGUMENT, ""));
+    if (value.empty()) {
+        return Status(SERVER_INVALID_ARGUMENT, "logs.path is empty!");
+    }
+
+    return ValidationUtil::ValidateStoragePath(value);
+}
+
 ////////////////////////////////////////////////////////////////////////////////
 ConfigNode&
 Config::GetConfigRoot() {
