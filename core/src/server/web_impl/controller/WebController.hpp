@@ -577,10 +577,10 @@ class WebController : public oatpp::web::server::api::ApiController {
      * GetVectorByID ?id=
      */
     ENDPOINT("GET", "/collections/{collection_name}/vectors", GetVectors, PATH(String, collection_name),
-             QUERIES(const QueryParams&, query_params)) {
+             BODY_STRING(String, body), QUERIES(const QueryParams&, query_params)) {
         auto handler = WebRequestHandler();
         String response;
-        auto status_dto = handler.GetVector(collection_name, query_params, response);
+        auto status_dto = handler.GetVector(collection_name, body, query_params, response);
 
         switch (status_dto->code->getValue()) {
             case StatusCode::SUCCESS:

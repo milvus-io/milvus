@@ -170,6 +170,8 @@ WebRequestHandler::GetCollectionStat(const std::string& collection_name, nlohman
         try {
             json_out = nlohmann::json::parse(collection_info);
         } catch (std::exception& e) {
+            return Status(SERVER_UNEXPECTED_ERROR,
+                          "Error occurred when parsing collection stat information: " + std::string(e.what()));
         }
     }
 
@@ -432,9 +434,9 @@ WebRequestHandler::Search(const std::string& collection_name, const nlohmann::js
             return Status(BODY_PARSE_FAIL, "Field \"ids\" must be ad array");
         }
         std::vector<int64_t> id_array(vec_ids.begin(), vec_ids.end());
-        status = request_handler_.SearchByID(context_ptr_, collection_name, id_array, topk, json["params"], partition_tags, result);
+        status = request_handler_.SearchByID(context_ptr_, collection_name, id_array, topk, json["params"],
+                                             partition_tags, result);
     } else {
-
         std::vector<std::string> file_id_vec;
         if (json.contains("file_ids")) {
             auto ids = json["file_ids"];
@@ -463,9 +465,8 @@ WebRequestHandler::Search(const std::string& collection_name, const nlohmann::js
         }
 
         TopKQueryResult result;
-        status =
-            request_handler_.Search(context_ptr_, collection_name, vectors_data, topk, json["params"], partition_tags,
-                                    file_id_vec, result);
+        status = request_handler_.Search(context_ptr_, collection_name, vectors_data, topk, json["params"],
+                                         partition_tags, file_id_vec, result);
     }
     if (!status.ok()) {
         return status;
@@ -1624,33 +1625,43 @@ WebRequestHandler::InsertEntity(const OString& collection_name, const milvus::se
 }
 
 StatusDto::ObjectWrapper
-WebRequestHandler::GetVector(const OString& collection_name, const OQueryParams& query_params, OString& response) {
-    int64_t id = 0;
-    auto status = ParseQueryInteger(query_params, "id", id, false);
-    if (!status.ok()) {
-        RETURN_STATUS_DTO(status.code(), status.message().c_str());
+WebRequestHandler::GetVector(const OString& collection_name, const OString& body, const OQueryParams& query_params, OString& response) {
+    auto status = Status::OK();
+    try {
+        auto body_json = nlohmann::json::parse(body->c_str());
+        if (!body_json.contains("ids")) {
+            RETURN_STATUS_DTO(BODY_FIELD_LOSS, "Field \'ids\' is required.")
+        }
+        auto ids = body_json["ids"];
+        if (!ids.is_array()) {
+            RETURN_STATUS_DTO(BODY_PARSE_FAIL, "Field \'ids\' must be a array.")
+        }
+
+        std::vector<int64_t> vector_ids;
+        for (auto& id : ids) {
+            vector_ids.push_back(std::stol(id.get<std::string>()));
+        }
+        engine::VectorsData vectors;
+        nlohmann::json vectors_json;
+        status = GetVectorsByIDs(collection_name->std_str(), vector_ids, vectors_json);
+        if (!status.ok()) {
+            response = "NULL";
+            ASSIGN_RETURN_STATUS_DTO(status)
+        }
+
+        nlohmann::json json;
+        AddStatusToJson(json, status.code(), status.message());
+        if (vectors_json.empty()) {
+            json["vectors"] = std::vector<int64_t>();
+        } else {
+            json["vectors"] = vectors_json;
+        }
+        response = json.dump().c_str();
+    } catch (std::exception& e) {
+        RETURN_STATUS_DTO(SERVER_UNEXPECTED_ERROR, e.what());
     }
 
-    std::vector<int64_t> ids = {id};
-    engine::VectorsData vectors;
-    nlohmann::json vectors_json;
-    status = GetVectorsByIDs(collection_name->std_str(), ids, vectors_json);
-    if (!status.ok()) {
-        response = "NULL";
-        ASSIGN_RETURN_STATUS_DTO(status)
-    }
-
-    nlohmann::json json;
-    AddStatusToJson(json, status.code(), status.message());
-    if (vectors_json.empty()) {
-        json["vectors"] = std::vector<int64_t>();
-    } else {
-        json["vectors"] = vectors_json;
-    }
-
-    response = json.dump().c_str();
-
-    ASSIGN_RETURN_STATUS_DTO(status)
+    ASSIGN_RETURN_STATUS_DTO(status);
 }
 
 StatusDto::ObjectWrapper

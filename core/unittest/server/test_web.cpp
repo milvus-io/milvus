@@ -697,7 +697,7 @@ class TestClient : public oatpp::web::client::ApiClient {
              PATH(String, collection_name, "collection_name"))
 
     API_CALL("GET", "/collections/{collection_name}/vectors", getVectors,
-             PATH(String, collection_name, "collection_name"), QUERY(String, id))
+             PATH(String, collection_name, "collection_name"), BODY_STRING(String, body))
 
     API_CALL("POST", "/collections/{collection_name}/vectors", insert,
              PATH(String, collection_name, "collection_name"), BODY_STRING(String, body))
@@ -1658,8 +1658,13 @@ TEST_F(WebControllerTest, GET_VECTOR_BY_ID) {
     ASSERT_TRUE(status.ok()) << status.message();
 
     /* test task load */
-    auto id_str = std::to_string(ids.at(0));
-    auto response = client_ptr->getVectors(collection_name, id_str.c_str(), conncetion_ptr);
+    std::vector<std::string> vector_ids;
+    for (size_t i = 0; i < 10; i++) {
+        vector_ids.emplace_back(std::to_string(ids.at(i)));
+    }
+    auto body = nlohmann::json();
+    body["ids"] = vector_ids;
+    auto response = client_ptr->getVectors(collection_name, body.dump().c_str(), conncetion_ptr);
     ASSERT_EQ(OStatus::CODE_200.code, response->getStatusCode()) << response->readBodyToString()->c_str();
 
     // validate result
@@ -1684,7 +1689,7 @@ TEST_F(WebControllerTest, GET_VECTOR_BY_ID) {
     ASSERT_EQ(64, vec.size());
 
     // non-existent collection
-    response = client_ptr->getVectors(collection_name + "_non_existent", id_str.c_str(), conncetion_ptr);
+    response = client_ptr->getVectors(collection_name + "_non_existent", body.dump().c_str(), conncetion_ptr);
     ASSERT_EQ(OStatus::CODE_404.code, response->getStatusCode()) << response->readBodyToString()->c_str();
 }
 

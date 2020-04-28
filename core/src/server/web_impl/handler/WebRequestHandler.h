@@ -27,11 +27,11 @@
 #include "server/context/Context.h"
 #include "server/delivery/RequestHandler.h"
 #include "server/web_impl/Types.h"
+#include "server/web_impl/dto/CollectionDto.hpp"
 #include "server/web_impl/dto/ConfigDto.hpp"
 #include "server/web_impl/dto/DevicesDto.hpp"
 #include "server/web_impl/dto/IndexDto.hpp"
 #include "server/web_impl/dto/PartitionDto.hpp"
-#include "server/web_impl/dto/CollectionDto.hpp"
 #include "server/web_impl/dto/VectorDto.hpp"
 #include "thirdparty/nlohmann/json.hpp"
 #include "utils/Status.h"
@@ -220,7 +220,7 @@ class WebRequestHandler {
     InsertEntity(const OString& collection_name, const OString& body, VectorIdsDto::ObjectWrapper& ids_dto);
 
     StatusDto::ObjectWrapper
-    GetVector(const OString& collection_name, const OQueryParams& query_params, OString& response);
+    GetVector(const OString& collection_name, const OString& body, const OQueryParams& query_params, OString& response);
 
     StatusDto::ObjectWrapper
     VectorsOp(const OString& collection_name, const OString& payload, OString& response);
