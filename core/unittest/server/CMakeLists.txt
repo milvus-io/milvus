@@ -13,6 +13,7 @@
 
 set(test_files
         ${CMAKE_CURRENT_SOURCE_DIR}/test_cache.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/test_check.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/test_config.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/test_rpc.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/test_web.cpp

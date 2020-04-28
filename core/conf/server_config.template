@@ -138,7 +138,7 @@ engine_config:
 #                      | Must be in format gpux.                                    |            |                 |
 #----------------------+------------------------------------------------------------+------------+-----------------+
 gpu_resource_config:
-  enable: false
+  enable: @GPU_ENABLE@
   cache_capacity: 1
   search_resources:
     - gpu0

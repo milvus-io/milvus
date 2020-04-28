@@ -2271,6 +2271,9 @@ DBImpl::UpdateCollectionIndexRecursively(const std::string& collection_id, const
 
     std::vector<meta::CollectionSchema> partition_array;
     status = meta_ptr_->ShowPartitions(collection_id, partition_array);
+    if (!status.ok()) {
+        return status;
+    }
     for (auto& schema : partition_array) {
         status = UpdateCollectionIndexRecursively(schema.collection_id_, index);
         if (!status.ok()) {
