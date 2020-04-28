@@ -1257,12 +1257,10 @@ Config::CheckEngineConfigOmpThreadNum(const std::string& value) {
 Status
 Config::CheckEngineConfigSimdType(const std::string& value) {
     fiu_return_on("check_config_simd_type_fail",
-                  Status(SERVER_INVALID_ARGUMENT,
-                         "engine_config.simd_type is not one of avx512, avx2, sse and auto."));
+                  Status(SERVER_INVALID_ARGUMENT, "engine_config.simd_type is not one of avx512, avx2, sse and auto."));
 
     if (value != "avx512" && value != "avx2" && value != "sse" && value != "auto") {
-        return Status(SERVER_INVALID_ARGUMENT,
-                      "engine_config.simd_type is not one of avx512, avx2, sse and auto.");
+        return Status(SERVER_INVALID_ARGUMENT, "engine_config.simd_type is not one of avx512, avx2, sse and auto.");
     }
     return Status::OK();
 }
