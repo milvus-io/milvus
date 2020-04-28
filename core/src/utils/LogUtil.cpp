@@ -83,13 +83,8 @@ RolloutHandler(const char* filename, std::size_t size, el::Level level) {
 }
 
 Status
-InitLog(bool trace_enable,
-        bool debug_enable,
-        bool info_enable,
-        bool warning_enable,
-        bool error_enable,
-        bool fatal_enable,
-        const std::string& logs_path) {
+InitLog(bool trace_enable, bool debug_enable, bool info_enable, bool warning_enable, bool error_enable,
+        bool fatal_enable, const std::string& logs_path) {
     el::Configurations defaultConf;
     defaultConf.setToDefault();
     defaultConf.setGlobally(el::ConfigurationType::Format, "[%datetime][%level]%msg");
@@ -97,7 +92,7 @@ InitLog(bool trace_enable,
     defaultConf.setGlobally(el::ConfigurationType::ToStandardOutput, "false");
     defaultConf.setGlobally(el::ConfigurationType::SubsecondPrecision, "3");
     defaultConf.setGlobally(el::ConfigurationType::PerformanceTracking, "false");
-    defaultConf.setGlobally(el::ConfigurationType::MaxLogFileSize,"209715200");
+    defaultConf.setGlobally(el::ConfigurationType::MaxLogFileSize, "209715200");
 
     std::string global_log_path = logs_path + "milvus-%datetime{%y-%M-%d-%H:%m}-global.log";
     defaultConf.set(el::Level::Global, el::ConfigurationType::Filename, global_log_path.c_str());

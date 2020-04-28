@@ -1537,8 +1537,7 @@ Config::CheckLogsTraceEnable(const std::string& value) {
     fiu_do_on("check_logs_trace_enable_fail", exist_error = true);
 
     if (exist_error) {
-        std::string msg =
-            "Invalid logs config: " + value + ". Possible reason: logs.trace.enable is not a boolean.";
+        std::string msg = "Invalid logs config: " + value + ". Possible reason: logs.trace.enable is not a boolean.";
         return Status(SERVER_INVALID_ARGUMENT, msg);
     }
     return Status::OK();
@@ -1550,8 +1549,7 @@ Config::CheckLogsDebugEnable(const std::string& value) {
     fiu_do_on("check_logs_debug_enable_fail", exist_error = true);
 
     if (exist_error) {
-        std::string msg =
-            "Invalid logs config: " + value + ". Possible reason: logs.debug.enable is not a boolean.";
+        std::string msg = "Invalid logs config: " + value + ". Possible reason: logs.debug.enable is not a boolean.";
         return Status(SERVER_INVALID_ARGUMENT, msg);
     }
     return Status::OK();
@@ -1563,8 +1561,7 @@ Config::CheckLogsInfoEnable(const std::string& value) {
     fiu_do_on("check_logs_info_enable_fail", exist_error = true);
 
     if (exist_error) {
-        std::string msg =
-            "Invalid logs config: " + value + ". Possible reason: logs.info.enable is not a boolean.";
+        std::string msg = "Invalid logs config: " + value + ". Possible reason: logs.info.enable is not a boolean.";
         return Status(SERVER_INVALID_ARGUMENT, msg);
     }
     return Status::OK();
@@ -1576,8 +1573,7 @@ Config::CheckLogsWarningEnable(const std::string& value) {
     fiu_do_on("check_logs_warning_enable_fail", exist_error = true);
 
     if (exist_error) {
-        std::string msg =
-            "Invalid logs config: " + value + ". Possible reason: logs.warning.enable is not a boolean.";
+        std::string msg = "Invalid logs config: " + value + ". Possible reason: logs.warning.enable is not a boolean.";
         return Status(SERVER_INVALID_ARGUMENT, msg);
     }
     return Status::OK();
@@ -1589,8 +1585,7 @@ Config::CheckLogsErrorEnable(const std::string& value) {
     fiu_do_on("check_logs_error_enable_fail", exist_error = true);
 
     if (exist_error) {
-        std::string msg =
-            "Invalid logs config: " + value + ". Possible reason: logs.error.enable is not a boolean.";
+        std::string msg = "Invalid logs config: " + value + ". Possible reason: logs.error.enable is not a boolean.";
         return Status(SERVER_INVALID_ARGUMENT, msg);
     }
     return Status::OK();
@@ -1602,8 +1597,7 @@ Config::CheckLogsFatalEnable(const std::string& value) {
     fiu_do_on("check_logs_fatal_enable_fail", exist_error = true);
 
     if (exist_error) {
-        std::string msg =
-            "Invalid logs config: " + value + ". Possible reason: logs.fatal.enable is not a boolean.";
+        std::string msg = "Invalid logs config: " + value + ". Possible reason: logs.fatal.enable is not a boolean.";
         return Status(SERVER_INVALID_ARGUMENT, msg);
     }
     return Status::OK();
@@ -2096,7 +2090,7 @@ Config::GetLogsDebugEnable(bool& value) {
 }
 
 Status
-Config::GetLogsInfoEnable(bool& value){
+Config::GetLogsInfoEnable(bool& value) {
     std::string str = GetConfigStr(CONFIG_LOGS, CONFIG_LOGS_INFO_ENABLE, CONFIG_LOGS_INFO_ENABLE_DEFAULT);
     CONFIG_CHECK(CheckLogsInfoEnable(str));
     CONFIG_CHECK(StringHelpFunctions::ConvertToBoolean(str, value));
