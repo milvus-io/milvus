@@ -11,13 +11,16 @@
 
 #pragma once
 
-#include <oatpp/parser/json/mapping/Serializer.hpp>
-#include <oatpp/parser/json/mapping/Deserializer.hpp>
-#include <oatpp/web/server/HttpRouter.hpp>
+#include <iostream>
+
+#include <oatpp/core/macro/component.hpp>
 #include <oatpp/network/client/SimpleTCPConnectionProvider.hpp>
 #include <oatpp/network/server/SimpleTCPConnectionProvider.hpp>
+#include <oatpp/parser/json/mapping/Deserializer.hpp>
+#include <oatpp/parser/json/mapping/Serializer.hpp>
 #include <oatpp/parser/json/mapping/ObjectMapper.hpp>
-#include <oatpp/core/macro/component.hpp>
+#include <oatpp/web/server/HttpConnectionHandler.hpp>
+#include <oatpp/web/server/HttpRouter.hpp>
 
 namespace milvus {
 namespace server {
@@ -41,7 +44,7 @@ class AppComponent {
         } catch (std::exception& e) {
             std::string error_msg = "Cannot bind http port " + std::to_string(this->port_) + ". " + e.what() +
                 "(errno: " + std::to_string(errno) + ", details: " + strerror(errno) + ")";
-            std::cout << error_msg << std::endl;
+            std::cerr << error_msg << std::endl;
             throw std::runtime_error(error_msg);
         }
     }());
