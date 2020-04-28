@@ -1248,8 +1248,8 @@ DBImpl::GetVectorsByIdHelper(const std::string& collection_id, const IDNumbers& 
         VectorsData data;
         data.vector_count_ = vector_ref.vector_count_;
         if (data.vector_count_ > 0) {
-            data.float_data_.swap(vector_ref.float_data_);
-            data.binary_data_.swap(vector_ref.binary_data_);
+            data.float_data_ = vector_ref.float_data_;    // copy data since there could be duplicated id
+            data.binary_data_ = vector_ref.binary_data_;  // copy data since there could be duplicated id
         }
         vectors.emplace_back(data);
     }
