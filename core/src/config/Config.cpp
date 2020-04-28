@@ -151,6 +151,23 @@ const int64_t CONFIG_WAL_BUFFER_SIZE_MIN = 64;
 const char* CONFIG_WAL_WAL_PATH = "wal_path";
 const char* CONFIG_WAL_WAL_PATH_DEFAULT = "/tmp/milvus/wal";
 
+/* logs config */
+const char* CONFIG_LOGS = "logs";
+const char* CONFIG_LOGS_TRACE_ENABLE = "trace.enable";
+const char* CONFIG_LOGS_TRACE_ENABLE_DEFAULT = "true";
+const char* CONFIG_LOGS_DEBUG_ENABLE = "debug.enable";
+const char* CONFIG_LOGS_DEBUG_ENABLE_DEFAULT = "true";
+const char* CONFIG_LOGS_INFO_ENABLE = "info.enable";
+const char* CONFIG_LOGS_INFO_ENABLE_DEFAULT = "true";
+const char* CONFIG_LOGS_WARNING_ENABLE = "warning.enable";
+const char* CONFIG_LOGS_WARNING_ENABLE_DEFAULT = "true";
+const char* CONFIG_LOGS_ERROR_ENABLE = "error.enable";
+const char* CONFIG_LOGS_ERROR_ENABLE_DEFAULT = "true";
+const char* CONFIG_LOGS_FATAL_ENABLE = "fatal.enable";
+const char* CONFIG_LOGS_FATAL_ENABLE_DEFAULT = "true";
+const char* CONFIG_LOGS_PATH = "path";
+const char* CONFIG_LOGS_PATH_DEFAULT = "/tmp/milvus/logs";
+
 constexpr int64_t GB = 1UL << 30;
 constexpr int32_t PORT_NUMBER_MIN = 1024;
 constexpr int32_t PORT_NUMBER_MAX = 65535;

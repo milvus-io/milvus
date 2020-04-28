@@ -184,7 +184,7 @@ wal_config:
   buffer_size: 256
   wal_path: @MILVUS_DB_PATH@/wal
 
-log:
+logs:
   trace.enable: true
   debug.enable: true
   info.enable: true

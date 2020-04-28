@@ -147,6 +147,22 @@ extern const int64_t CONFIG_WAL_BUFFER_SIZE_MIN;
 extern const char* CONFIG_WAL_WAL_PATH;
 extern const char* CONFIG_WAL_WAL_PATH_DEFAULT;
 
+/* logs config */
+extern const char* CONFIG_LOGS;
+extern const char* CONFIG_LOGS_TRACE_ENABLE;
+extern const char* CONFIG_LOGS_TRACE_ENABLE_DEFAULT;
+extern const char* CONFIG_LOGS_DEBUG_ENABLE;
+extern const char* CONFIG_LOGS_DEBUG_ENABLE_DEFAULT;
+extern const char* CONFIG_LOGS_INFO_ENABLE;
+extern const char* CONFIG_LOGS_INFO_ENABLE_DEFAULT;
+extern const char* CONFIG_LOGS_WARNING_ENABLE;
+extern const char* CONFIG_LOGS_WARNING_ENABLE_DEFAULT;
+extern const char* CONFIG_LOGS_ERROR_ENABLE;
+extern const char* CONFIG_LOGS_ERROR_ENABLE_DEFAULT;
+extern const char* CONFIG_LOGS_FATAL_ENABLE;
+extern const char* CONFIG_LOGS_FATAL_ENABLE_DEFAULT;
+extern const char* CONFIG_LOGS_PATH;
+
 class Config {
  private:
     Config();
