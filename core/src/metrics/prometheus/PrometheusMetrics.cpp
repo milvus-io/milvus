@@ -158,26 +158,32 @@ PrometheusMetrics::OctetsSet() {
         return;
     }
 
-    // get old stats and reset them
-    uint64_t old_inoctets = SystemInfo::GetInstance().get_inoctets();
-    uint64_t old_outoctets = SystemInfo::GetInstance().get_octets();
-    auto old_time = SystemInfo::GetInstance().get_nettime();
-    std::pair<uint64_t, uint64_t> in_and_out_octets = SystemInfo::GetInstance().Octets();
-    SystemInfo::GetInstance().set_inoctets(in_and_out_octets.first);
-    SystemInfo::GetInstance().set_outoctets(in_and_out_octets.second);
-    SystemInfo::GetInstance().set_nettime();
+    try {
+        // get old stats and reset them
+        uint64_t old_inoctets = SystemInfo::GetInstance().get_inoctets();
+        uint64_t old_outoctets = SystemInfo::GetInstance().get_octets();
+        auto old_time = SystemInfo::GetInstance().get_nettime();
 
-    //
-    constexpr double micro_to_second = 1e-6;
-    auto now_time = std::chrono::system_clock::now();
-    auto total_microsecond = METRICS_MICROSECONDS(old_time, now_time);
-    auto total_second = total_microsecond * micro_to_second;
-    if (total_second == 0) {
-        return;
+        std::pair<uint64_t, uint64_t> in_and_out_octets = SystemInfo::GetInstance().Octets();
+        SystemInfo::GetInstance().set_inoctets(in_and_out_octets.first);
+        SystemInfo::GetInstance().set_outoctets(in_and_out_octets.second);
+        SystemInfo::GetInstance().set_nettime();
+
+        //
+        constexpr double micro_to_second = 1e-6;
+        auto now_time = std::chrono::system_clock::now();
+        auto total_microsecond = METRICS_MICROSECONDS(old_time, now_time);
+        auto total_second = total_microsecond * micro_to_second;
+        if (total_second == 0) {
+            return;
+        }
+
+        inoctets_gauge_.Set((in_and_out_octets.first - old_inoctets) / total_second);
+        outoctets_gauge_.Set((in_and_out_octets.second - old_outoctets) / total_second);
+    } catch (std::exception& ex) {
+        std::string msg = "Failed to set in/out octets, reason: " + std::string(ex.what());
+        LOG_SERVER_ERROR_ << msg;
     }
-
-    inoctets_gauge_.Set((in_and_out_octets.first - old_inoctets) / total_second);
-    outoctets_gauge_.Set((in_and_out_octets.second - old_outoctets) / total_second);
 }
 
 void
