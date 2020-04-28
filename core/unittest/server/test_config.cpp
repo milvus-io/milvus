@@ -287,10 +287,10 @@ TEST_F(ConfigTest, SERVER_CONFIG_VALID_TEST) {
     ASSERT_TRUE(config.GetEngineConfigOmpThreadNum(int64_val).ok());
     ASSERT_TRUE(int64_val == engine_omp_thread_num);
 
-    bool engine_use_avx512 = false;
-    ASSERT_TRUE(config.SetEngineConfigUseAVX512(std::to_string(engine_use_avx512)).ok());
-    ASSERT_TRUE(config.GetEngineConfigUseAVX512(bool_val).ok());
-    ASSERT_TRUE(bool_val == engine_use_avx512);
+    std::string engine_simd_type = "sse";
+    ASSERT_TRUE(config.SetEngineConfigSimdType(engine_simd_type).ok());
+    ASSERT_TRUE(config.GetEngineConfigSimdType(str_val).ok());
+    ASSERT_TRUE(str_val == engine_simd_type);
 
 #ifdef MILVUS_GPU_VERSION
     int64_t engine_gpu_search_threshold = 800;
@@ -481,14 +481,14 @@ TEST_F(ConfigTest, SERVER_CONFIG_CLI_TEST) {
     ASSERT_TRUE(s.ok());
     ASSERT_TRUE(result == engine_omp_thread_num);
 
-    std::string engine_use_avx512 = "true";
-    get_cmd = gen_get_command(ms::CONFIG_ENGINE, ms::CONFIG_ENGINE_USE_AVX512);
-    set_cmd = gen_set_command(ms::CONFIG_ENGINE, ms::CONFIG_ENGINE_USE_AVX512, engine_use_avx512);
+    std::string engine_simd_type = "sse";
+    get_cmd = gen_get_command(ms::CONFIG_ENGINE, ms::CONFIG_ENGINE_SIMD_TYPE);
+    set_cmd = gen_set_command(ms::CONFIG_ENGINE, ms::CONFIG_ENGINE_SIMD_TYPE, engine_simd_type);
     s = config.ProcessConfigCli(dummy, set_cmd);
     ASSERT_TRUE(s.ok());
     s = config.ProcessConfigCli(result, get_cmd);
     ASSERT_TRUE(s.ok());
-    ASSERT_TRUE(result == engine_use_avx512);
+    ASSERT_TRUE(result == engine_simd_type);
 
 #ifdef MILVUS_GPU_VERSION
     std::string engine_gpu_search_threshold = "800";
@@ -643,7 +643,7 @@ TEST_F(ConfigTest, SERVER_CONFIG_INVALID_TEST) {
     ASSERT_FALSE(config.SetEngineConfigOmpThreadNum("10000").ok());
     ASSERT_FALSE(config.SetEngineConfigOmpThreadNum("-10").ok());
 
-    ASSERT_FALSE(config.SetEngineConfigUseAVX512("N").ok());
+    ASSERT_FALSE(config.SetEngineConfigSimdType("None").ok());
 
 #ifdef MILVUS_GPU_VERSION
     ASSERT_FALSE(config.SetEngineConfigGpuSearchThreshold("-1").ok());
@@ -789,6 +789,11 @@ TEST_F(ConfigTest, SERVER_CONFIG_VALID_FAIL_TEST) {
     s = config.ValidateConfig();
     ASSERT_FALSE(s.ok());
     fiu_disable("check_config_omp_thread_num_fail");
+
+    fiu_enable("check_config_simd_type_fail", 1, NULL, 0);
+    s = config.ValidateConfig();
+    ASSERT_FALSE(s.ok());
+    fiu_disable("check_config_simd_type_fail");
 
 #ifdef MILVUS_GPU_VERSION
     fiu_enable("check_config_gpu_search_threshold_fail", 1, NULL, 0);
@@ -1022,6 +1027,11 @@ TEST_F(ConfigTest, SERVER_CONFIG_RESET_DEFAULT_CONFIG_FAIL_TEST) {
     s = config.ResetDefaultConfig();
     ASSERT_FALSE(s.ok());
     fiu_disable("check_config_omp_thread_num_fail");
+
+    fiu_enable("check_config_simd_type_fail", 1, NULL, 0);
+    s = config.ResetDefaultConfig();
+    ASSERT_FALSE(s.ok());
+    fiu_disable("check_config_simd_type_fail");
 
 #ifdef MILVUS_GPU_VERSION
     fiu_enable("check_config_gpu_search_threshold_fail", 1, NULL, 0);
