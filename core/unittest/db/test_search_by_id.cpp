@@ -108,7 +108,6 @@ TEST_F(SearchByIdTest, BASIC_TEST) {
         ids_to_search.emplace_back(index);
     }
 
-    //    std::this_thread::sleep_for(std::chrono::seconds(3));  // ensure raw data write to disk
     stat = db_->Flush();
     ASSERT_TRUE(stat.ok());
 
@@ -156,6 +155,24 @@ TEST_F(SearchByIdTest, BASIC_TEST) {
             ASSERT_LT(result_distances[topk * i], 1e-3);
         }
     }
+
+    // duplicate id search
+    ids_to_search.clear();
+    ids_to_search.push_back(1);
+    ids_to_search.push_back(1);
+
+    stat = db_->QueryByIDs(dummy_context_,
+                           collection_info.collection_id_,
+                           tags,
+                           topk,
+                           json_params,
+                           ids_to_search,
+                           result_ids,
+                           result_distances);
+    ASSERT_EQ(result_ids.size(), ids_to_search.size() * topk);
+    ASSERT_EQ(result_distances.size(), ids_to_search.size() * topk);
+
+    CheckQueryResult(ids_to_search, topk, result_ids, result_distances);
 }
 
 TEST_F(SearchByIdTest, WITH_INDEX_TEST) {
@@ -508,7 +525,6 @@ TEST_F(SearchByIdTest, BINARY_TEST) {
         ids_to_search.emplace_back(index);
     }
 
-    //    std::this_thread::sleep_for(std::chrono::seconds(3));  // ensure raw data write to disk
     stat = db_->Flush();
     ASSERT_TRUE(stat.ok());
 
@@ -577,4 +593,22 @@ TEST_F(SearchByIdTest, BINARY_TEST) {
             ASSERT_LT(result_distances[topk * i], 1e-3);
         }
     }
+
+    // duplicate id search
+    ids_to_search.clear();
+    ids_to_search.push_back(1);
+    ids_to_search.push_back(1);
+
+    stat = db_->QueryByIDs(dummy_context_,
+                           collection_info.collection_id_,
+                           tags,
+                           topk,
+                           json_params,
+                           ids_to_search,
+                           result_ids,
+                           result_distances);
+    ASSERT_EQ(result_ids.size(), ids_to_search.size() * topk);
+    ASSERT_EQ(result_distances.size(), ids_to_search.size() * topk);
+
+    CheckQueryResult(ids_to_search, topk, result_ids, result_distances);
 }

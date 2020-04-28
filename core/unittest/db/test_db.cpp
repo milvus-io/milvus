@@ -377,12 +377,6 @@ TEST_F(DBTest, SEARCH_TEST) {
                                   result_ids,
                                   result_distances);
         ASSERT_TRUE(stat.ok());
-
-//        FIU_ENABLE_FIU("DBImpl.QueryByFileID.empty_files_array");
-//        stat =
-//            db_->QueryByFileID(dummy_context_, file_ids, k, json_params, xq, result_ids, result_distances);
-//        ASSERT_FALSE(stat.ok());
-//        fiu_disable("DBImpl.QueryByFileID.empty_files_array");
     }
 
     // TODO(zhiru): PQ build takes forever
