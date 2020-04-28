@@ -12,8 +12,11 @@
 #include "server/init/StorageChecker.h"
 
 #include <unistd.h>
+
 #include <string>
 #include <vector>
+
+#include <fiu-local.h>
 
 #include "config/Config.h"
 #include "utils/Log.h"
@@ -26,16 +29,32 @@ Status
 StorageChecker::CheckStoragePermission() {
     auto& config = Config::GetInstance();
     /* Check log file write permission */
+    std::string logs_path;
+    auto status = config.GetLogsPath(logs_path);
+    if (!status.ok()) {
+        return status;
+    }
+    int ret = access(logs_path.c_str(), F_OK | R_OK | W_OK);
+    fiu_do_on("StorageChecker.CheckStoragePermission.logs_path_access_fail", ret = -1);
+    if (0 != ret) {
+        std::string err_msg =
+            " Access log path " + logs_path + " fail. " + strerror(errno) + "(code: " + std::to_string(errno) + ")";
+        LOG_SERVER_FATAL_ << err_msg;
+        std::cerr << err_msg << std::endl;
+        return Status(SERVER_UNEXPECTED_ERROR, err_msg);
+    }
+
     /* Check db directory write permission */
     std::string primary_path;
-    auto status = config.GetStorageConfigPrimaryPath(primary_path);
+    status = config.GetStorageConfigPrimaryPath(primary_path);
     if (!status.ok()) {
         return status;
     }
 
-    int ret = access(primary_path.c_str(), F_OK | R_OK | W_OK);
+    ret = access(primary_path.c_str(), F_OK | R_OK | W_OK);
+    fiu_do_on("StorageChecker.CheckStoragePermission.db_primary_path_access_fail", ret = -1);
     if (0 != ret) {
-        std::string err_msg = " Check DB storage primary path " + primary_path + " fail. " + strerror(errno) +
+        std::string err_msg = " Access DB storage primary path " + primary_path + " fail. " + strerror(errno) +
                               "(code: " + std::to_string(errno) + ")";
         LOG_SERVER_FATAL_ << err_msg;
         std::cerr << err_msg << std::endl;
@@ -53,10 +72,12 @@ StorageChecker::CheckStoragePermission() {
         StringHelpFunctions::SplitStringByDelimeter(secondary_paths, ",", secondary_path_vector);
         for (auto& path : secondary_path_vector) {
             ret = access(path.c_str(), F_OK | R_OK | W_OK);
+            fiu_do_on("StorageChecker.CheckStoragePermission.db_secondary_path_access_fail", ret = -1);
             if (0 != ret) {
-                std::string err_msg = " Check DB storage secondary path " + path + " fail. " + strerror(errno) +
+                std::string err_msg = " Access DB storage secondary path " + path + " fail. " + strerror(errno) +
                                       "(code: " + std::to_string(errno) + ")";
                 LOG_SERVER_FATAL_ << err_msg;
+                std::cerr << err_msg << std::endl;
                 return Status(SERVER_UNEXPECTED_ERROR, err_msg);
             }
         }
@@ -69,10 +90,12 @@ StorageChecker::CheckStoragePermission() {
         return status;
     }
     ret = access(wal_path.c_str(), F_OK | R_OK | W_OK);
+    fiu_do_on("StorageChecker.CheckStoragePermission.wal_path_access_fail", ret = -1);
     if (0 != ret) {
         std::string err_msg = " Check WAL storage path " + wal_path + " fail. " + strerror(errno) +
                               "(code: " + std::to_string(errno) + ")";
         LOG_SERVER_FATAL_ << err_msg;
+        std::cerr << err_msg << std::endl;
         return Status(SERVER_UNEXPECTED_ERROR, err_msg);
     }
 
