@@ -15,6 +15,8 @@
 #include <string>
 #include <vector>
 
+#include <fiu-local.h>
+
 #include "faiss/FaissHook.h"
 #include "faiss/utils/instruction_set.h"
 #include "utils/Log.h"
@@ -28,16 +30,26 @@ CpuChecker::CheckCpuInstructionSet() {
     std::vector<std::string> instruction_sets;
 
     auto& instruction_set_inst = faiss::InstructionSet::GetInstance();
-    if (faiss::support_avx512()) {
+
+    bool support_avx512 = faiss::support_avx512();
+    fiu_do_on("CpuChecker.CheckCpuInstructionSet.not_support_avx512", support_avx512 = false);
+    if (support_avx512) {
         instruction_sets.emplace_back("avx512");
     }
-    if (instruction_set_inst.AVX2()) {
+
+    bool support_axv2 = instruction_set_inst.AVX2();
+    fiu_do_on("CpuChecker.CheckCpuInstructionSet.not_support_avx2", support_axv2 = false);
+    if (support_axv2) {
         instruction_sets.emplace_back("avx2");
     }
-    if (instruction_set_inst.SSE42()) {
+
+    bool support_sse4_2 = instruction_set_inst.SSE42();
+    fiu_do_on("CpuChecker.CheckCpuInstructionSet.not_support_sse4_2", support_sse4_2 = false);
+    if (support_sse4_2) {
         instruction_sets.emplace_back("sse4_2");
     }
 
+    fiu_do_on("CpuChecker.CheckCpuInstructionSet.instruction_sets_empty", instruction_sets.clear());
     if (instruction_sets.empty()) {
         std::string msg =
             "CPU instruction sets are not supported. Ensure the CPU supports at least one of the following instruction "

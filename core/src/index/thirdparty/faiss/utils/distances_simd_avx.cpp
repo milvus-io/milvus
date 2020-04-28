@@ -1,7 +1,7 @@
 
 // -*- c++ -*-
 
-#include <faiss/utils/distances_avx512.h>
+#include <faiss/utils/distances_avx.h>
 #include <faiss/impl/FaissAssert.h>
 
 #include <cstdio>
@@ -31,23 +31,27 @@ static inline __m128 masked_read (int d, const float *x) {
 }
 #endif
 
-#if (defined(__AVX512F__) && defined(__AVX512DQ__))
+#ifdef __AVX__
 
-float
-fvec_inner_product_avx512(const float* x, const float* y, size_t d) {
-    __m512 msum0 = _mm512_setzero_ps();
-
-    while (d >= 16) {
-        __m512 mx = _mm512_loadu_ps (x); x += 16;
-        __m512 my = _mm512_loadu_ps (y); y += 16;
-        msum0 = _mm512_add_ps (msum0, _mm512_mul_ps (mx, my));
-        d -= 16;
+// reads 0 <= d < 8 floats as __m256
+static inline __m256 masked_read_8 (int d, const float* x) {
+    assert (0 <= d && d < 8);
+    if (d < 4) {
+        __m256 res = _mm256_setzero_ps ();
+        res = _mm256_insertf128_ps (res, masked_read (d, x), 0);
+        return res;
+    } else {
+        __m256 res = _mm256_setzero_ps ();
+        res = _mm256_insertf128_ps (res, _mm_loadu_ps (x), 0);
+        res = _mm256_insertf128_ps (res, masked_read (d - 4, x + 4), 1);
+        return res;
     }
+}
 
-    __m256 msum1 = _mm512_extractf32x8_ps(msum0, 1);
-    msum1 +=       _mm512_extractf32x8_ps(msum0, 0);
+float fvec_inner_product_avx (const float* x, const float* y, size_t d) {
+    __m256 msum1 = _mm256_setzero_ps();
 
-    if (d >= 8) {
+    while (d >= 8) {
         __m256 mx = _mm256_loadu_ps (x); x += 8;
         __m256 my = _mm256_loadu_ps (y); y += 8;
         msum1 = _mm256_add_ps (msum1, _mm256_mul_ps (mx, my));
@@ -75,22 +79,10 @@ fvec_inner_product_avx512(const float* x, const float* y, size_t d) {
     return  _mm_cvtss_f32 (msum2);
 }
 
-float
-fvec_L2sqr_avx512(const float* x, const float* y, size_t d) {
-    __m512 msum0 = _mm512_setzero_ps();
+float fvec_L2sqr_avx (const float* x, const float* y, size_t d) {
+    __m256 msum1 = _mm256_setzero_ps();
 
-    while (d >= 16) {
-        __m512 mx = _mm512_loadu_ps (x); x += 16;
-        __m512 my = _mm512_loadu_ps (y); y += 16;
-        const __m512 a_m_b1 = mx - my;
-        msum0 += a_m_b1 * a_m_b1;
-        d -= 16;
-    }
-
-    __m256 msum1 = _mm512_extractf32x8_ps(msum0, 1);
-    msum1 +=       _mm512_extractf32x8_ps(msum0, 0);
-
-    if (d >= 8) {
+    while (d >= 8) {
         __m256 mx = _mm256_loadu_ps (x); x += 8;
         __m256 my = _mm256_loadu_ps (y); y += 8;
         const __m256 a_m_b1 = mx - my;
@@ -121,28 +113,16 @@ fvec_L2sqr_avx512(const float* x, const float* y, size_t d) {
     return  _mm_cvtss_f32 (msum2);
 }
 
-float
-fvec_L1_avx512(const float* x, const float* y, size_t d) {
-    __m512 msum0 = _mm512_setzero_ps();
-    __m512 signmask0 = __m512(_mm512_set1_epi32 (0x7fffffffUL));
+float fvec_L1_avx (const float * x, const float * y, size_t d)
+{
+    __m256 msum1 = _mm256_setzero_ps();
+    __m256 signmask = __m256(_mm256_set1_epi32 (0x7fffffffUL));
 
-    while (d >= 16) {
-        __m512 mx = _mm512_loadu_ps (x); x += 16;
-        __m512 my = _mm512_loadu_ps (y); y += 16;
-        const __m512 a_m_b = mx - my;
-        msum0 += _mm512_and_ps(signmask0, a_m_b);
-        d -= 16;
-    }
-
-    __m256 msum1 = _mm512_extractf32x8_ps(msum0, 1);
-    msum1 +=       _mm512_extractf32x8_ps(msum0, 0);
-    __m256 signmask1 = __m256(_mm256_set1_epi32 (0x7fffffffUL));
-
-    if (d >= 8) {
+    while (d >= 8) {
         __m256 mx = _mm256_loadu_ps (x); x += 8;
         __m256 my = _mm256_loadu_ps (y); y += 8;
         const __m256 a_m_b = mx - my;
-        msum1 += _mm256_and_ps(signmask1, a_m_b);
+        msum1 += _mm256_and_ps(signmask, a_m_b);
         d -= 8;
     }
 
@@ -170,28 +150,15 @@ fvec_L1_avx512(const float* x, const float* y, size_t d) {
     return  _mm_cvtss_f32 (msum2);
 }
 
-float
-fvec_Linf_avx512(const float* x, const float* y, size_t d) {
-    __m512 msum0 = _mm512_setzero_ps();
-    __m512 signmask0 = __m512(_mm512_set1_epi32 (0x7fffffffUL));
+float fvec_Linf_avx (const float* x, const float* y, size_t d) {
+    __m256 msum1 = _mm256_setzero_ps();
+    __m256 signmask = __m256(_mm256_set1_epi32 (0x7fffffffUL));
 
-    while (d >= 16) {
-        __m512 mx = _mm512_loadu_ps (x); x += 16;
-        __m512 my = _mm512_loadu_ps (y); y += 16;
-        const __m512 a_m_b = mx - my;
-        msum0 = _mm512_max_ps(msum0, _mm512_and_ps(signmask0, a_m_b));
-        d -= 16;
-    }
-
-    __m256 msum1 = _mm512_extractf32x8_ps(msum0, 1);
-    msum1 = _mm256_max_ps (msum1, _mm512_extractf32x8_ps(msum0, 0));
-    __m256 signmask1 = __m256(_mm256_set1_epi32 (0x7fffffffUL));
-
-    if (d >= 8) {
+    while (d >= 8) {
         __m256 mx = _mm256_loadu_ps (x); x += 8;
         __m256 my = _mm256_loadu_ps (y); y += 8;
         const __m256 a_m_b = mx - my;
-        msum1 = _mm256_max_ps(msum1, _mm256_and_ps(signmask1, a_m_b));
+        msum1 = _mm256_max_ps(msum1, _mm256_and_ps(signmask, a_m_b));
         d -= 8;
     }
 
@@ -221,26 +188,22 @@ fvec_Linf_avx512(const float* x, const float* y, size_t d) {
 
 #else
 
-float
-fvec_inner_product_avx512(const float* x, const float* y, size_t d) {
+float fvec_inner_product_avx(const float* x, const float* y, size_t d) {
     FAISS_ASSERT(false);
     return 0.0;
 }
 
-float
-fvec_L2sqr_avx512(const float* x, const float* y, size_t d) {
+float fvec_L2sqr_avx(const float* x, const float* y, size_t d) {
     FAISS_ASSERT(false);
     return 0.0;
 }
 
-float
-fvec_L1_avx512(const float* x, const float* y, size_t d) {
+float fvec_L1_avx(const float* x, const float* y, size_t d) {
     FAISS_ASSERT(false);
     return 0.0;
 }
 
-float
-fvec_Linf_avx512(const float* x, const float* y, size_t d) {
+float fvec_Linf_avx (const float* x, const float* y, size_t d) {
     FAISS_ASSERT(false);
     return 0.0;
 }

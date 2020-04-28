@@ -13,6 +13,7 @@ timeout(time: 120, unit: 'MINUTES') {
                 def helmResult = sh script: "helm status -n milvus ${env.HELM_RELEASE_NAME}", returnStatus: true
                 if (!helmResult) {
                     sh "helm uninstall -n milvus ${env.HELM_RELEASE_NAME}"
+                    sleep 30
                 }
                 throw exc
             }

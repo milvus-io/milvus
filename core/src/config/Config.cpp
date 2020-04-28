@@ -50,6 +50,8 @@ const char* CONFIG_SERVER_DEPLOY_MODE = "deploy_mode";
 const char* CONFIG_SERVER_DEPLOY_MODE_DEFAULT = "single";
 const char* CONFIG_SERVER_TIME_ZONE = "time_zone";
 const char* CONFIG_SERVER_TIME_ZONE_DEFAULT = "UTC+8";
+const char* CONFIG_SERVER_WEB_ENABLE = "web_enable";
+const char* CONFIG_SERVER_WEB_ENABLE_DEFAULT = "true";
 const char* CONFIG_SERVER_WEB_PORT = "web_port";
 const char* CONFIG_SERVER_WEB_PORT_DEFAULT = "19121";
 
@@ -241,6 +243,9 @@ Config::ValidateConfig() {
     std::string server_time_zone;
     CONFIG_CHECK(GetServerConfigTimeZone(server_time_zone));
 
+    bool server_web_enable;
+    CONFIG_CHECK(GetServerConfigWebEnable(server_web_enable));
+
     std::string server_web_port;
     CONFIG_CHECK(GetServerConfigWebPort(server_web_port));
 
@@ -372,6 +377,7 @@ Config::ResetDefaultConfig() {
     CONFIG_CHECK(SetServerConfigPort(CONFIG_SERVER_PORT_DEFAULT));
     CONFIG_CHECK(SetServerConfigDeployMode(CONFIG_SERVER_DEPLOY_MODE_DEFAULT));
     CONFIG_CHECK(SetServerConfigTimeZone(CONFIG_SERVER_TIME_ZONE_DEFAULT));
+    CONFIG_CHECK(SetServerConfigWebEnable(CONFIG_SERVER_WEB_ENABLE_DEFAULT));
     CONFIG_CHECK(SetServerConfigWebPort(CONFIG_SERVER_WEB_PORT_DEFAULT));
 
     /* db config */
@@ -858,6 +864,11 @@ Config::CheckServerConfigTimeZone(const std::string& value) {
         }
     }
     return Status::OK();
+}
+
+Status
+Config::CheckServerConfigWebEnable(const std::string& value) {
+    return ValidationUtil::ValidateStringIsBool(value);
 }
 
 Status
@@ -1604,6 +1615,13 @@ Config::GetServerConfigTimeZone(std::string& value) {
 }
 
 Status
+Config::GetServerConfigWebEnable(bool& value) {
+    std::string str = GetConfigStr(CONFIG_SERVER, CONFIG_SERVER_WEB_ENABLE, CONFIG_SERVER_WEB_ENABLE_DEFAULT);
+    CONFIG_CHECK(CheckServerConfigWebEnable(str));
+    return StringHelpFunctions::ConvertToBoolean(str, value);
+}
+
+Status
 Config::GetServerConfigWebPort(std::string& value) {
     value = GetConfigStr(CONFIG_SERVER, CONFIG_SERVER_WEB_PORT, CONFIG_SERVER_WEB_PORT_DEFAULT);
     return CheckServerConfigWebPort(value);
@@ -1970,6 +1988,12 @@ Status
 Config::SetServerConfigTimeZone(const std::string& value) {
     CONFIG_CHECK(CheckServerConfigTimeZone(value));
     return SetConfigValueInMem(CONFIG_SERVER, CONFIG_SERVER_TIME_ZONE, value);
+}
+
+Status
+Config::SetServerConfigWebEnable(const std::string& value) {
+    CONFIG_CHECK(CheckServerConfigWebEnable(value));
+    return SetConfigValueInMem(CONFIG_SERVER, CONFIG_SERVER_WEB_ENABLE, value);
 }
 
 Status

@@ -206,9 +206,15 @@ if ("${MILVUS_DB_PATH}" STREQUAL "")
 endif ()
 
 if (MILVUS_GPU_VERSION)
-    configure_file(${CMAKE_CURRENT_SOURCE_DIR}/conf/server_gpu_config.template ${CMAKE_CURRENT_SOURCE_DIR}/conf/server_config.yaml)
+    set(GPU_ENABLE "true")
+    configure_file(${CMAKE_CURRENT_SOURCE_DIR}/conf/server_config.template 
+        ${CMAKE_CURRENT_SOURCE_DIR}/conf/server_config.yaml
+        @ONLY)
 else ()
-    configure_file(${CMAKE_CURRENT_SOURCE_DIR}/conf/server_cpu_config.template ${CMAKE_CURRENT_SOURCE_DIR}/conf/server_config.yaml)
+    set(GPU_ENABLE "false")
+    configure_file(${CMAKE_CURRENT_SOURCE_DIR}/conf/server_config.template 
+        ${CMAKE_CURRENT_SOURCE_DIR}/conf/server_config.yaml
+        @ONLY)
 endif ()
 
 configure_file(${CMAKE_CURRENT_SOURCE_DIR}/conf/log_config.template ${CMAKE_CURRENT_SOURCE_DIR}/conf/log_config.conf)

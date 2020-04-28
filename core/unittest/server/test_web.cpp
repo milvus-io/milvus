@@ -524,6 +524,7 @@ static const char* CONTROLLER_TEST_VALID_CONFIG_STR =
     "  port: 19530\n"
     "  deploy_mode: single\n"
     "  time_zone: UTC+8\n"
+    "  web_enable: true\n"
     "  web_port: 19121\n"
     "\n"
     "#----------------------+------------------------------------------------------------+------------+----------------"
