@@ -2152,12 +2152,15 @@ DBImpl::GetFilesToBuildIndex(const std::string& collection_id, const std::vector
     files_holder.ReleaseFiles();
     auto status = meta_ptr_->FilesByType(collection_id, file_types, files_holder);
 
-    // only build index for files that row count greater than certain threshold
     // attention: here is a copy, not reference, since files_holder.UnmarkFile will change the array internal
     milvus::engine::meta::SegmentsSchema files = files_holder.HoldFiles();
     for (const milvus::engine::meta::SegmentSchema& file : files) {
         if (file.file_type_ == static_cast<int>(meta::SegmentSchema::RAW) &&
             file.row_count_ < meta::BUILD_INDEX_THRESHOLD) {
+            // skip build index for files that row count less than certain threshold
+            files_holder.UnmarkFile(file);
+        } else if (index_failed_checker_.IsFailedIndexFile(file)) {
+            // skip build index for files that failed before
             files_holder.UnmarkFile(file);
         }
     }
@@ -2318,14 +2321,6 @@ DBImpl::WaitCollectionIndexRecursively(const std::string& collection_id, const C
             index_req_swn_.Wait_For(std::chrono::seconds(WAIT_BUILD_INDEX_INTERVAL));
             GetFilesToBuildIndex(collection_id, file_types, files_holder);
             ++times;
-
-            // attention: here is a copy, not a reference, since files_holder.UnmarkFile will change the array internal
-            milvus::engine::meta::SegmentsSchema temp_files = files_holder.HoldFiles();
-            for (auto& file : temp_files) {
-                if (index_failed_checker_.IsFailedIndexFile(file)) {
-                    files_holder.UnmarkFile(file);
-                }
-            }
         }
     }
 
