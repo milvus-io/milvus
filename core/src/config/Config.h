@@ -327,7 +327,7 @@ class Config {
     Status
     CheckLogsFatalEnable(const std::string& value);
     Status
-    CheckLogsPathEnable(const std::string& value);
+    CheckLogsPath(const std::string& value);
 
     std::string
     GetConfigStr(const std::string& parent_key, const std::string& child_key, const std::string& default_value = "");
@@ -541,6 +541,22 @@ class Config {
     SetWalConfigBufferSize(const std::string& value);
     Status
     SetWalConfigWalPath(const std::string& value);
+
+    /* logs config */
+    Status
+    SetLogsTraceEnable(const std::string& value);
+    Status
+    SetLogsDebugEnable(const std::string& value);
+    Status
+    SetLogsInfoEnable(const std::string& value);
+    Status
+    SetLogsWarningEnable(const std::string& value);
+    Status
+    SetLogsErrorEnable(const std::string& value);
+    Status
+    SetLogsFatalEnable(const std::string& value);
+    Status
+    SetLogsPath(const std::string& value);
 
 #ifdef MILVUS_GPU_VERSION
     Status

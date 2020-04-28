@@ -1578,7 +1578,7 @@ Config::CheckLogsFatalEnable(const std::string& value) {
 }
 
 Status
-Config::CheckLogsPathEnable(const std::string& value) {
+Config::CheckLogsPath(const std::string& value) {
     fiu_return_on("check_logs_path_fail", Status(SERVER_INVALID_ARGUMENT, ""));
     if (value.empty()) {
         return Status(SERVER_INVALID_ARGUMENT, "logs.path is empty!");
@@ -2318,6 +2318,49 @@ Status
 Config::SetWalConfigWalPath(const std::string& value) {
     CONFIG_CHECK(CheckWalConfigWalPath(value));
     return SetConfigValueInMem(CONFIG_WAL, CONFIG_WAL_WAL_PATH, value);
+}
+
+/* logs config */
+Status
+Config::SetLogsTraceEnable(const std::string& value) {
+    CONFIG_CHECK(CheckLogsTraceEnable(value));
+    return SetConfigValueInMem(CONFIG_LOGS, CONFIG_LOGS_TRACE_ENABLE, value);
+}
+
+Status
+Config::SetLogsDebugEnable(const std::string& value) {
+    CONFIG_CHECK(CheckLogsDebugEnable(value));
+    return SetConfigValueInMem(CONFIG_LOGS, CONFIG_LOGS_DEBUG_ENABLE, value);
+}
+
+Status
+Config::SetLogsInfoEnable(const std::string& value) {
+    CONFIG_CHECK(CheckLogsInfoEnable(value));
+    return SetConfigValueInMem(CONFIG_LOGS, CONFIG_LOGS_INFO_ENABLE, value);
+}
+
+Status
+Config::SetLogsWarningEnable(const std::string& value) {
+    CONFIG_CHECK(CheckLogsWarningEnable(value));
+    return SetConfigValueInMem(CONFIG_LOGS, CONFIG_LOGS_WARNING_ENABLE, value);
+}
+
+Status
+Config::SetLogsErrorEnable(const std::string& value) {
+    CONFIG_CHECK(CheckLogsErrorEnable(value));
+    return SetConfigValueInMem(CONFIG_LOGS, CONFIG_LOGS_ERROR_ENABLE, value);
+}
+
+Status
+Config::SetLogsFatalEnable(const std::string& value) {
+    CONFIG_CHECK(CheckLogsFatalEnable(value));
+    return SetConfigValueInMem(CONFIG_LOGS, CONFIG_LOGS_FATAL_ENABLE, value);
+}
+
+Status
+Config::SetLogsPath(const std::string& value) {
+    CONFIG_CHECK(CheckLogsPath(value));
+    return SetConfigValueInMem(CONFIG_LOGS, CONFIG_LOGS_PATH, value);
 }
 
 #ifdef MILVUS_GPU_VERSION
