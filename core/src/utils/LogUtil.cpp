@@ -120,7 +120,8 @@ LogCpuInfo() {
     /*CPU information*/
     std::fstream fcpu("/proc/cpuinfo", std::ios::in);
     if (!fcpu.is_open()) {
-        LOG_SERVER_WARNING_ << "Cannot obtain CPU information. Open file /proc/cpuinfo fail: " << strerror(errno);
+        LOG_SERVER_WARNING_ << "Cannot obtain CPU information. Open file /proc/cpuinfo fail: " << strerror(errno)
+                            << "(errno: " << errno << ")";
         return;
     }
     std::stringstream cpu_info_ss;

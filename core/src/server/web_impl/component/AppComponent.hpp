@@ -42,7 +42,8 @@ class AppComponent {
             return oatpp::network::server::SimpleTCPConnectionProvider::createShared(this->port_);
         } catch (std::exception& e) {
             std::string error_msg = "Cannot bind http port " + std::to_string(this->port_) +
-                                    ". Check if the port is already used";
+                                    ": " + e.what() +
+                                    " (errno:" + std::to_string(errno) + "details: " + strerror(errno) + ").";
             std::cout << error_msg << std::endl;
             throw std::runtime_error(error_msg);
         }
@@ -58,7 +59,7 @@ class AppComponent {
     }());
 
     OATPP_CREATE_COMPONENT(std::shared_ptr<oatpp::network::server::ConnectionHandler>, server_connection_handler_)([] {
-        OATPP_COMPONENT(std::shared_ptr<oatpp::web::server::HttpRouter>, router); // get Router component
+        OATPP_COMPONENT(std::shared_ptr<oatpp::web::server::HttpRouter>, router);
         return oatpp::web::server::HttpConnectionHandler::createShared(router);
     }());
 
