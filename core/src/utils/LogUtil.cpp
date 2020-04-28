@@ -83,9 +83,70 @@ RolloutHandler(const char* filename, std::size_t size, el::Level level) {
 }
 
 Status
-InitLog(const std::string& log_config_file) {
-    el::Configurations conf(log_config_file);
-    el::Loggers::reconfigureAllLoggers(conf);
+InitLog(bool trace_enable, bool debug_enable, bool info_enable, bool warning_enable, bool error_enable,
+        bool fatal_enable, const std::string& logs_path) {
+    el::Configurations defaultConf;
+    defaultConf.setToDefault();
+    defaultConf.setGlobally(el::ConfigurationType::Format, "[%datetime][%level]%msg");
+    defaultConf.setGlobally(el::ConfigurationType::ToFile, "true");
+    defaultConf.setGlobally(el::ConfigurationType::ToStandardOutput, "false");
+    defaultConf.setGlobally(el::ConfigurationType::SubsecondPrecision, "3");
+    defaultConf.setGlobally(el::ConfigurationType::PerformanceTracking, "false");
+    defaultConf.setGlobally(el::ConfigurationType::MaxLogFileSize, "209715200");
+
+    std::string global_log_path = logs_path + "milvus-%datetime{%y-%M-%d-%H:%m}-global.log";
+    defaultConf.set(el::Level::Global, el::ConfigurationType::Filename, global_log_path.c_str());
+    defaultConf.set(el::Level::Global, el::ConfigurationType::Enabled, "true");
+
+    std::string info_log_path = logs_path + "milvus-%datetime{%y-%M-%d-%H:%m}-info.log";
+    defaultConf.set(el::Level::Info, el::ConfigurationType::Filename, info_log_path.c_str());
+    if (info_enable) {
+        defaultConf.set(el::Level::Info, el::ConfigurationType::Enabled, "true");
+    } else {
+        defaultConf.set(el::Level::Info, el::ConfigurationType::Enabled, "false");
+    }
+
+    std::string debug_log_path = logs_path + "milvus-%datetime{%y-%M-%d-%H:%m}-debug.log";
+    defaultConf.set(el::Level::Debug, el::ConfigurationType::Filename, debug_log_path.c_str());
+    if (debug_enable) {
+        defaultConf.set(el::Level::Debug, el::ConfigurationType::Enabled, "true");
+    } else {
+        defaultConf.set(el::Level::Debug, el::ConfigurationType::Enabled, "false");
+    }
+
+    std::string warning_log_path = logs_path + "milvus-%datetime{%y-%M-%d-%H:%m}-warning.log";
+    defaultConf.set(el::Level::Warning, el::ConfigurationType::Filename, warning_log_path.c_str());
+    if (warning_enable) {
+        defaultConf.set(el::Level::Warning, el::ConfigurationType::Enabled, "true");
+    } else {
+        defaultConf.set(el::Level::Warning, el::ConfigurationType::Enabled, "false");
+    }
+
+    std::string trace_log_path = logs_path + "milvus-%datetime{%y-%M-%d-%H:%m}-trace.log";
+    defaultConf.set(el::Level::Trace, el::ConfigurationType::Filename, trace_log_path.c_str());
+    if (trace_enable) {
+        defaultConf.set(el::Level::Trace, el::ConfigurationType::Enabled, "true");
+    } else {
+        defaultConf.set(el::Level::Trace, el::ConfigurationType::Enabled, "false");
+    }
+
+    std::string error_log_path = logs_path + "milvus-%datetime{%y-%M-%d-%H:%m}-error.log";
+    defaultConf.set(el::Level::Error, el::ConfigurationType::Filename, error_log_path.c_str());
+    if (error_enable) {
+        defaultConf.set(el::Level::Error, el::ConfigurationType::Enabled, "true");
+    } else {
+        defaultConf.set(el::Level::Error, el::ConfigurationType::Enabled, "false");
+    }
+
+    std::string fatal_log_path = logs_path + "milvus-%datetime{%y-%M-%d-%H:%m}-fatal.log";
+    defaultConf.set(el::Level::Fatal, el::ConfigurationType::Filename, fatal_log_path.c_str());
+    if (fatal_enable) {
+        defaultConf.set(el::Level::Fatal, el::ConfigurationType::Enabled, "true");
+    } else {
+        defaultConf.set(el::Level::Fatal, el::ConfigurationType::Enabled, "false");
+    }
+
+    el::Loggers::reconfigureLogger("default", defaultConf);
 
     el::Loggers::addFlag(el::LoggingFlag::StrictLogFileSizeCheck);
     el::Helpers::installPreRollOutCallback(RolloutHandler);
