@@ -21,7 +21,8 @@ namespace milvus {
 namespace server {
 
 Status
-InitLog(const std::string& log_config_file);
+InitLog(bool trace_enable, bool debug_enable, bool info_enable, bool warning_enable, bool error_enable,
+        bool fatal_enable, const std::string& logs_path);
 
 void
 RolloutHandler(const char* filename, std::size_t size, el::Level level);

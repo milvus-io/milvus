@@ -46,6 +46,8 @@ extern const char* CONFIG_SERVER_DEPLOY_MODE;
 extern const char* CONFIG_SERVER_DEPLOY_MODE_DEFAULT;
 extern const char* CONFIG_SERVER_TIME_ZONE;
 extern const char* CONFIG_SERVER_TIME_ZONE_DEFAULT;
+extern const char* CONFIG_SERVER_WEB_ENABLE;
+extern const char* CONFIG_SERVER_WEB_ENABLE_DEFAULT;
 extern const char* CONFIG_SERVER_WEB_PORT;
 extern const char* CONFIG_SERVER_WEB_PORT_DEFAULT;
 
@@ -147,6 +149,22 @@ extern const int64_t CONFIG_WAL_BUFFER_SIZE_MIN;
 extern const char* CONFIG_WAL_WAL_PATH;
 extern const char* CONFIG_WAL_WAL_PATH_DEFAULT;
 
+/* logs config */
+extern const char* CONFIG_LOGS;
+extern const char* CONFIG_LOGS_TRACE_ENABLE;
+extern const char* CONFIG_LOGS_TRACE_ENABLE_DEFAULT;
+extern const char* CONFIG_LOGS_DEBUG_ENABLE;
+extern const char* CONFIG_LOGS_DEBUG_ENABLE_DEFAULT;
+extern const char* CONFIG_LOGS_INFO_ENABLE;
+extern const char* CONFIG_LOGS_INFO_ENABLE_DEFAULT;
+extern const char* CONFIG_LOGS_WARNING_ENABLE;
+extern const char* CONFIG_LOGS_WARNING_ENABLE_DEFAULT;
+extern const char* CONFIG_LOGS_ERROR_ENABLE;
+extern const char* CONFIG_LOGS_ERROR_ENABLE_DEFAULT;
+extern const char* CONFIG_LOGS_FATAL_ENABLE;
+extern const char* CONFIG_LOGS_FATAL_ENABLE_DEFAULT;
+extern const char* CONFIG_LOGS_PATH;
+
 class Config {
  private:
     Config();
@@ -207,6 +225,8 @@ class Config {
     CheckServerConfigDeployMode(const std::string& value);
     Status
     CheckServerConfigTimeZone(const std::string& value);
+    Status
+    CheckServerConfigWebEnable(const std::string& value);
     Status
     CheckServerConfigWebPort(const std::string& value);
 
@@ -297,6 +317,22 @@ class Config {
     Status
     CheckWalConfigWalPath(const std::string& value);
 
+    /* logs config */
+    Status
+    CheckLogsTraceEnable(const std::string& value);
+    Status
+    CheckLogsDebugEnable(const std::string& value);
+    Status
+    CheckLogsInfoEnable(const std::string& value);
+    Status
+    CheckLogsWarningEnable(const std::string& value);
+    Status
+    CheckLogsErrorEnable(const std::string& value);
+    Status
+    CheckLogsFatalEnable(const std::string& value);
+    Status
+    CheckLogsPath(const std::string& value);
+
     std::string
     GetConfigStr(const std::string& parent_key, const std::string& child_key, const std::string& default_value = "");
     std::string
@@ -318,6 +354,8 @@ class Config {
     GetServerConfigDeployMode(std::string& value);
     Status
     GetServerConfigTimeZone(std::string& value);
+    Status
+    GetServerConfigWebEnable(bool& value);
     Status
     GetServerConfigWebPort(std::string& value);
 
@@ -408,6 +446,22 @@ class Config {
     Status
     GetWalConfigWalPath(std::string& value);
 
+    /* logs config */
+    Status
+    GetLogsTraceEnable(bool& value);
+    Status
+    GetLogsDebugEnable(bool& value);
+    Status
+    GetLogsInfoEnable(bool& value);
+    Status
+    GetLogsWarningEnable(bool& value);
+    Status
+    GetLogsErrorEnable(bool& value);
+    Status
+    GetLogsFatalEnable(bool& value);
+    Status
+    GetLogsPath(std::string& value);
+
     Status
     GetServerRestartRequired(bool& required);
 
@@ -421,6 +475,8 @@ class Config {
     SetServerConfigDeployMode(const std::string& value);
     Status
     SetServerConfigTimeZone(const std::string& value);
+    Status
+    SetServerConfigWebEnable(const std::string& value);
     Status
     SetServerConfigWebPort(const std::string& value);
 
@@ -493,6 +549,22 @@ class Config {
     SetWalConfigBufferSize(const std::string& value);
     Status
     SetWalConfigWalPath(const std::string& value);
+
+    /* logs config */
+    Status
+    SetLogsTraceEnable(const std::string& value);
+    Status
+    SetLogsDebugEnable(const std::string& value);
+    Status
+    SetLogsInfoEnable(const std::string& value);
+    Status
+    SetLogsWarningEnable(const std::string& value);
+    Status
+    SetLogsErrorEnable(const std::string& value);
+    Status
+    SetLogsFatalEnable(const std::string& value);
+    Status
+    SetLogsPath(const std::string& value);
 
 #ifdef MILVUS_GPU_VERSION
     Status

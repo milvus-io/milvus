@@ -6,11 +6,13 @@ Please mark all change in change log and use the issue from GitHub
 
 ## Bug
 -   \#1705 Limit the insert data batch size
+-   \#1796 Too much low performance of building index on ubuntu-mysql-version
 -   \#1929 Skip MySQL meta schema field width check
 -   \#1997 Index file missed after compact
 -   \#2073 Fix CheckDBConfigBackendUrl error message
 -   \#2076 CheckMetricConfigAddress error message
--   \#1796 Too much low performance of building index on ubuntu-mysql-version
+-   \#2128 Check has_partition params
+-   \#2131 Distance/ID returned is not correct if searching with duplicate ids
 -   \#2141 Fix server start failed if wal directory exist
 
 ## Feature
@@ -19,6 +21,7 @@ Please mark all change in change log and use the issue from GitHub
 -   \#1962 Add api HasPartition
 -   \#1965 FAISS/NSG/HNSW/ANNOY use unified distance calculation algorithm
 -   \#2054 Check if CPU instruction sets are illegal
+-   \#2057 Add a config parameter to switch off http server
 -   \#2059 Add lock file avoid multiple instances modifying data at the same time
 -   \#2064 Warn when use SQLite as metadata management
 -   \#2111 Check GPU environment before start server
@@ -27,6 +30,7 @@ Please mark all change in change log and use the issue from GitHub
 -   \#221 Refactor LOG macro
 -   \#2039 Support Milvus run on SSE CPUs
 -   \#2149 Merge server_cpu_config.template and server_gpu_config.template
+-   \#2167 Merge config file
 
 ## Task
 

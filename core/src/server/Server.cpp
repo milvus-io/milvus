@@ -190,7 +190,44 @@ Server::Start() {
         }
         tzset();
 
-        InitLog(log_config_file_);
+        {
+            bool trace_enable = false;
+            bool debug_enable = false;
+            bool info_enable = false;
+            bool warning_enable = false;
+            bool error_enable = false;
+            bool fatal_enable = false;
+            std::string logs_path;
+            s = config.GetLogsTraceEnable(trace_enable);
+            if (!s.ok()) {
+                return s;
+            }
+            s = config.GetLogsDebugEnable(debug_enable);
+            if (!s.ok()) {
+                return s;
+            }
+            s = config.GetLogsInfoEnable(info_enable);
+            if (!s.ok()) {
+                return s;
+            }
+            s = config.GetLogsWarningEnable(warning_enable);
+            if (!s.ok()) {
+                return s;
+            }
+            s = config.GetLogsErrorEnable(error_enable);
+            if (!s.ok()) {
+                return s;
+            }
+            s = config.GetLogsFatalEnable(fatal_enable);
+            if (!s.ok()) {
+                return s;
+            }
+            s = config.GetLogsPath(logs_path);
+            if (!s.ok()) {
+                return s;
+            }
+            InitLog(trace_enable, debug_enable, info_enable, warning_enable, error_enable, fatal_enable, logs_path);
+        }
 
         std::string deploy_mode;
         s = config.GetServerConfigDeployMode(deploy_mode);
