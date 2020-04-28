@@ -2046,6 +2046,62 @@ Config::GetWalConfigWalPath(std::string& wal_path) {
     return Status::OK();
 }
 
+/* logs config */
+Status
+Config::GetLogsTraceEnable(bool& value) {
+    std::string str = GetConfigStr(CONFIG_LOGS, CONFIG_LOGS_TRACE_ENABLE, CONFIG_LOGS_TRACE_ENABLE_DEFAULT);
+    CONFIG_CHECK(CheckLogsTraceEnable(str));
+    CONFIG_CHECK(StringHelpFunctions::ConvertToBoolean(str, value));
+    return Status::OK();
+}
+
+Status
+Config::GetLogsDebugEnable(bool& value) {
+    std::string str = GetConfigStr(CONFIG_LOGS, CONFIG_LOGS_DEBUG_ENABLE, CONFIG_LOGS_DEBUG_ENABLE_DEFAULT);
+    CONFIG_CHECK(CheckLogsDebugEnable(str));
+    CONFIG_CHECK(StringHelpFunctions::ConvertToBoolean(str, value));
+    return Status::OK();
+}
+
+Status
+Config::GetLogsInfoEnable(bool& value){
+    std::string str = GetConfigStr(CONFIG_LOGS, CONFIG_LOGS_INFO_ENABLE, CONFIG_LOGS_INFO_ENABLE_DEFAULT);
+    CONFIG_CHECK(CheckLogsInfoEnable(str));
+    CONFIG_CHECK(StringHelpFunctions::ConvertToBoolean(str, value));
+    return Status::OK();
+}
+
+Status
+Config::GetLogsWarningEnable(bool& value) {
+    std::string str = GetConfigStr(CONFIG_LOGS, CONFIG_LOGS_WARNING_ENABLE, CONFIG_LOGS_WARNING_ENABLE_DEFAULT);
+    CONFIG_CHECK(CheckLogsWarningEnable(str));
+    CONFIG_CHECK(StringHelpFunctions::ConvertToBoolean(str, value));
+    return Status::OK();
+}
+
+Status
+Config::GetLogsErrorEnable(bool& value) {
+    std::string str = GetConfigStr(CONFIG_LOGS, CONFIG_LOGS_ERROR_ENABLE, CONFIG_LOGS_ERROR_ENABLE_DEFAULT);
+    CONFIG_CHECK(CheckLogsErrorEnable(str));
+    CONFIG_CHECK(StringHelpFunctions::ConvertToBoolean(str, value));
+    return Status::OK();
+}
+
+Status
+Config::GetLogsFatalEnable(bool& value) {
+    std::string str = GetConfigStr(CONFIG_LOGS, CONFIG_LOGS_FATAL_ENABLE, CONFIG_LOGS_FATAL_ENABLE_DEFAULT);
+    CONFIG_CHECK(CheckLogsFatalEnable(str));
+    CONFIG_CHECK(StringHelpFunctions::ConvertToBoolean(str, value));
+    return Status::OK();
+}
+
+Status
+Config::GetLogsPath(std::string& value) {
+    value = GetConfigStr(CONFIG_LOGS, CONFIG_LOGS_PATH, CONFIG_LOGS_PATH_DEFAULT);
+    CONFIG_CHECK(CheckWalConfigWalPath(value));
+    return Status::OK();
+}
+
 Status
 Config::GetServerRestartRequired(bool& required) {
     required = restart_required_;

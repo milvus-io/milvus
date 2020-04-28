@@ -440,6 +440,22 @@ class Config {
     Status
     GetWalConfigWalPath(std::string& value);
 
+    /* logs config */
+    Status
+    GetLogsTraceEnable(bool& value);
+    Status
+    GetLogsDebugEnable(bool& value);
+    Status
+    GetLogsInfoEnable(bool& value);
+    Status
+    GetLogsWarningEnable(bool& value);
+    Status
+    GetLogsErrorEnable(bool& value);
+    Status
+    GetLogsFatalEnable(bool& value);
+    Status
+    GetLogsPath(std::string& value);
+
     Status
     GetServerRestartRequired(bool& required);
 
