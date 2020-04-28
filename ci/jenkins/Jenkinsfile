@@ -53,6 +53,13 @@ pipeline {
                         values 'gpu', 'cpu'
                     }
                 }
+                 
+                when {
+                    not {
+                        experession {return OS_NAME == "ubuntu18.04" && !isTimeTriggeredBuild()}
+                    }
+                }
+
                 environment {
                     PACKAGE_VERSION = VersionNumber([
                         versionNumberString : '${SEMVER}-${BINARY_VERSION}-${OS_NAME}-${CPU_ARCH}-${LOWER_BUILD_TYPE}-${BUILD_DATE_FORMATTED, "yyyyMMdd"}-${BUILDS_TODAY}'
@@ -61,17 +68,17 @@ pipeline {
                 }
 
                 stages {
-                    stage("SkipCheck") {
-                        steps {
-                            script {
-                                boolean is_skip = "${OS_NAME}" == "ubuntu18.04" && !isTimeTriggeredBuild()
-                                if (is_skip) {
-                                    currentBuild.result = 'SUCCESS'
-                                    throw new Exception("Skip pipeline...") 
-                                }
-                            }
-                        }
-                    }
+                    // stage("SkipCheck") {
+                    //     steps {
+                    //         script {
+                    //             boolean is_skip = "${OS_NAME}" == "ubuntu18.04" && !isTimeTriggeredBuild()
+                    //             if (is_skip) {
+                    //                 currentBuild.result = 'SUCCESS'
+                    //                 throw new Exception("Skip pipeline...") 
+                    //             }
+                    //         }
+                    //     }
+                    // }
 
                     stage("Milvus Build and Unittest") {
                         agent {
