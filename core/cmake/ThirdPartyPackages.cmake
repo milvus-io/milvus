@@ -315,17 +315,17 @@ else ()
 endif ()
 
 if (DEFINED ENV{MILVUS_FIU_URL})
-    set(MILVUS_FIU_URL "$ENV{MILVUS_FIU_URL}")
+    set(FIU_SOURCE_URL "$ENV{MILVUS_FIU_URL}")
 else ()
     set(FIU_SOURCE_URL "https://github.com/albertito/libfiu/archive/${FIU_VERSION}.tar.gz"
                        "https://gitee.com/quicksilver/libfiu/repository/archive/${FIU_VERSION}.zip")
 endif ()
 
 if (DEFINED ENV{MILVUS_OATPP_URL})
-    set(MILVUS_OATPP_URL "$ENV{MILVUS_OATPP_URL}")
+    set(OATPP_SOURCE_URL "$ENV{MILVUS_OATPP_URL}")
 else ()
     # set(OATPP_SOURCE_URL "https://github.com/oatpp/oatpp/archive/${OATPP_VERSION}.tar.gz")
-    set(OATPP_SOURCE_URL "https://github.com/BossZou/oatpp/archive/master.zip")
+    set(OATPP_SOURCE_URL "https://github.com/BossZou/oatpp/archive/${OATPP_VERSION}.zip")
 endif ()
 
 if (DEFINED ENV{MILVUS_AWS_URL})
@@ -1021,10 +1021,14 @@ macro(build_oatpp)
     set(OATPP_DIR_LIB "${OATPP_PREFIX}/lib")
 
     set(OATPP_CMAKE_ARGS
+            ${EP_COMMON_CMAKE_ARGS}
             "-DCMAKE_INSTALL_PREFIX=${OATPP_PREFIX}"
             -DCMAKE_INSTALL_LIBDIR=lib
             -DBUILD_SHARED_LIBS=OFF
             -DOATPP_BUILD_TESTS=OFF
+            -DOATPP_DISABLE_LOGV=ON
+            -DOATPP_DISABLE_LOGD=ON
+            -DOATPP_DISABLE_LOGI=ON
             )
 
 

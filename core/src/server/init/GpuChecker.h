@@ -9,28 +9,50 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
+#ifdef MILVUS_GPU_VERSION
+
 #pragma once
 
 #include <string>
-#include <vector>
 
-#include "db/Types.h"
-#include "server/web_impl/Types.h"
+#include <cuda_runtime.h>
+#include <nvml.h>
+
 #include "utils/Status.h"
 
 namespace milvus {
 namespace server {
-namespace web {
 
-Status
-ParseQueryInteger(const OQueryParams& query_params, const std::string& key, int64_t& value, bool nullable = true);
+extern const int CUDA_MIN_VERSION;
+extern const float GPU_MIN_COMPUTE_CAPACITY;
+extern const char* NVIDIA_MIN_DRIVER_VERSION;
 
-Status
-ParseQueryStr(const OQueryParams& query_params, const std::string& key, std::string& value, bool nullable = true);
+class GpuChecker {
+ private:
+    static std::string
+    NvmlErrorString(nvmlReturn_t error_no);
 
-Status
-ParseQueryBool(const OQueryParams& query_params, const std::string& key, bool& value, bool nullable = true);
+    static std::string
+    CudaErrorString(cudaError_t error_no);
 
-}  // namespace web
+ private:
+    static Status
+    GetGpuComputeCapacity(nvmlDevice_t device, int& major, int& minor);
+
+    static Status
+    GetGpuNvidiaDriverVersion(std::string& version);
+
+    static Status
+    GetGpuCudaDriverVersion(int& version);
+
+    static Status
+    GetGpuCudaRuntimeVersion(int& version);
+
+ public:
+    static Status
+    CheckGpuEnvironment();
+};
+
 }  // namespace server
 }  // namespace milvus
+#endif

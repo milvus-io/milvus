@@ -50,6 +50,8 @@ const char* CONFIG_SERVER_DEPLOY_MODE = "deploy_mode";
 const char* CONFIG_SERVER_DEPLOY_MODE_DEFAULT = "single";
 const char* CONFIG_SERVER_TIME_ZONE = "time_zone";
 const char* CONFIG_SERVER_TIME_ZONE_DEFAULT = "UTC+8";
+const char* CONFIG_SERVER_WEB_ENABLE = "web_enable";
+const char* CONFIG_SERVER_WEB_ENABLE_DEFAULT = "true";
 const char* CONFIG_SERVER_WEB_PORT = "web_port";
 const char* CONFIG_SERVER_WEB_PORT_DEFAULT = "19121";
 
@@ -151,6 +153,23 @@ const int64_t CONFIG_WAL_BUFFER_SIZE_MIN = 64;
 const char* CONFIG_WAL_WAL_PATH = "wal_path";
 const char* CONFIG_WAL_WAL_PATH_DEFAULT = "/tmp/milvus/wal";
 
+/* logs config */
+const char* CONFIG_LOGS = "logs";
+const char* CONFIG_LOGS_TRACE_ENABLE = "trace.enable";
+const char* CONFIG_LOGS_TRACE_ENABLE_DEFAULT = "true";
+const char* CONFIG_LOGS_DEBUG_ENABLE = "debug.enable";
+const char* CONFIG_LOGS_DEBUG_ENABLE_DEFAULT = "true";
+const char* CONFIG_LOGS_INFO_ENABLE = "info.enable";
+const char* CONFIG_LOGS_INFO_ENABLE_DEFAULT = "true";
+const char* CONFIG_LOGS_WARNING_ENABLE = "warning.enable";
+const char* CONFIG_LOGS_WARNING_ENABLE_DEFAULT = "true";
+const char* CONFIG_LOGS_ERROR_ENABLE = "error.enable";
+const char* CONFIG_LOGS_ERROR_ENABLE_DEFAULT = "true";
+const char* CONFIG_LOGS_FATAL_ENABLE = "fatal.enable";
+const char* CONFIG_LOGS_FATAL_ENABLE_DEFAULT = "true";
+const char* CONFIG_LOGS_PATH = "path";
+const char* CONFIG_LOGS_PATH_DEFAULT = "/tmp/milvus/logs";
+
 constexpr int64_t GB = 1UL << 30;
 constexpr int32_t PORT_NUMBER_MIN = 1024;
 constexpr int32_t PORT_NUMBER_MAX = 65535;
@@ -240,6 +259,9 @@ Config::ValidateConfig() {
 
     std::string server_time_zone;
     CONFIG_CHECK(GetServerConfigTimeZone(server_time_zone));
+
+    bool server_web_enable;
+    CONFIG_CHECK(GetServerConfigWebEnable(server_web_enable));
 
     std::string server_web_port;
     CONFIG_CHECK(GetServerConfigWebPort(server_web_port));
@@ -362,6 +384,28 @@ Config::ValidateConfig() {
     std::string wal_path;
     CONFIG_CHECK(GetWalConfigWalPath(wal_path));
 
+    /* logs config */
+    bool trace_enable;
+    CONFIG_CHECK(GetLogsTraceEnable(trace_enable));
+
+    bool debug_enable;
+    CONFIG_CHECK(GetLogsDebugEnable(trace_enable));
+
+    bool info_enable;
+    CONFIG_CHECK(GetLogsInfoEnable(trace_enable));
+
+    bool warning_enable;
+    CONFIG_CHECK(GetLogsWarningEnable(trace_enable));
+
+    bool error_enable;
+    CONFIG_CHECK(GetLogsErrorEnable(trace_enable));
+
+    bool fatal_enable;
+    CONFIG_CHECK(GetLogsFatalEnable(trace_enable));
+
+    std::string logs_path;
+    CONFIG_CHECK(GetLogsPath(logs_path));
+
     return Status::OK();
 }
 
@@ -372,6 +416,7 @@ Config::ResetDefaultConfig() {
     CONFIG_CHECK(SetServerConfigPort(CONFIG_SERVER_PORT_DEFAULT));
     CONFIG_CHECK(SetServerConfigDeployMode(CONFIG_SERVER_DEPLOY_MODE_DEFAULT));
     CONFIG_CHECK(SetServerConfigTimeZone(CONFIG_SERVER_TIME_ZONE_DEFAULT));
+    CONFIG_CHECK(SetServerConfigWebEnable(CONFIG_SERVER_WEB_ENABLE_DEFAULT));
     CONFIG_CHECK(SetServerConfigWebPort(CONFIG_SERVER_WEB_PORT_DEFAULT));
 
     /* db config */
@@ -412,6 +457,16 @@ Config::ResetDefaultConfig() {
     CONFIG_CHECK(SetWalConfigRecoveryErrorIgnore(CONFIG_WAL_RECOVERY_ERROR_IGNORE_DEFAULT));
     CONFIG_CHECK(SetWalConfigBufferSize(CONFIG_WAL_BUFFER_SIZE_DEFAULT));
     CONFIG_CHECK(SetWalConfigWalPath(CONFIG_WAL_WAL_PATH_DEFAULT));
+
+    /* logs config */
+    CONFIG_CHECK(SetLogsTraceEnable(CONFIG_LOGS_TRACE_ENABLE_DEFAULT));
+    CONFIG_CHECK(SetLogsDebugEnable(CONFIG_LOGS_DEBUG_ENABLE_DEFAULT));
+    CONFIG_CHECK(SetLogsInfoEnable(CONFIG_LOGS_INFO_ENABLE_DEFAULT));
+    CONFIG_CHECK(SetLogsWarningEnable(CONFIG_LOGS_WARNING_ENABLE_DEFAULT));
+    CONFIG_CHECK(SetLogsErrorEnable(CONFIG_LOGS_ERROR_ENABLE_DEFAULT));
+    CONFIG_CHECK(SetLogsFatalEnable(CONFIG_LOGS_FATAL_ENABLE_DEFAULT));
+    CONFIG_CHECK(SetLogsPath(CONFIG_LOGS_PATH_DEFAULT));
+
 #ifdef MILVUS_GPU_VERSION
     CONFIG_CHECK(SetEngineConfigGpuSearchThreshold(CONFIG_ENGINE_GPU_SEARCH_THRESHOLD_DEFAULT));
 #endif
@@ -858,6 +913,11 @@ Config::CheckServerConfigTimeZone(const std::string& value) {
         }
     }
     return Status::OK();
+}
+
+Status
+Config::CheckServerConfigWebEnable(const std::string& value) {
+    return ValidationUtil::ValidateStringIsBool(value);
 }
 
 Status
@@ -1481,6 +1541,89 @@ Config::CheckWalConfigWalPath(const std::string& value) {
     return ValidationUtil::ValidateStoragePath(value);
 }
 
+/* logs config */
+Status
+Config::CheckLogsTraceEnable(const std::string& value) {
+    auto exist_error = !ValidationUtil::ValidateStringIsBool(value).ok();
+    fiu_do_on("check_logs_trace_enable_fail", exist_error = true);
+
+    if (exist_error) {
+        std::string msg = "Invalid logs config: " + value + ". Possible reason: logs.trace.enable is not a boolean.";
+        return Status(SERVER_INVALID_ARGUMENT, msg);
+    }
+    return Status::OK();
+}
+
+Status
+Config::CheckLogsDebugEnable(const std::string& value) {
+    auto exist_error = !ValidationUtil::ValidateStringIsBool(value).ok();
+    fiu_do_on("check_logs_debug_enable_fail", exist_error = true);
+
+    if (exist_error) {
+        std::string msg = "Invalid logs config: " + value + ". Possible reason: logs.debug.enable is not a boolean.";
+        return Status(SERVER_INVALID_ARGUMENT, msg);
+    }
+    return Status::OK();
+}
+
+Status
+Config::CheckLogsInfoEnable(const std::string& value) {
+    auto exist_error = !ValidationUtil::ValidateStringIsBool(value).ok();
+    fiu_do_on("check_logs_info_enable_fail", exist_error = true);
+
+    if (exist_error) {
+        std::string msg = "Invalid logs config: " + value + ". Possible reason: logs.info.enable is not a boolean.";
+        return Status(SERVER_INVALID_ARGUMENT, msg);
+    }
+    return Status::OK();
+}
+
+Status
+Config::CheckLogsWarningEnable(const std::string& value) {
+    auto exist_error = !ValidationUtil::ValidateStringIsBool(value).ok();
+    fiu_do_on("check_logs_warning_enable_fail", exist_error = true);
+
+    if (exist_error) {
+        std::string msg = "Invalid logs config: " + value + ". Possible reason: logs.warning.enable is not a boolean.";
+        return Status(SERVER_INVALID_ARGUMENT, msg);
+    }
+    return Status::OK();
+}
+
+Status
+Config::CheckLogsErrorEnable(const std::string& value) {
+    auto exist_error = !ValidationUtil::ValidateStringIsBool(value).ok();
+    fiu_do_on("check_logs_error_enable_fail", exist_error = true);
+
+    if (exist_error) {
+        std::string msg = "Invalid logs config: " + value + ". Possible reason: logs.error.enable is not a boolean.";
+        return Status(SERVER_INVALID_ARGUMENT, msg);
+    }
+    return Status::OK();
+}
+
+Status
+Config::CheckLogsFatalEnable(const std::string& value) {
+    auto exist_error = !ValidationUtil::ValidateStringIsBool(value).ok();
+    fiu_do_on("check_logs_fatal_enable_fail", exist_error = true);
+
+    if (exist_error) {
+        std::string msg = "Invalid logs config: " + value + ". Possible reason: logs.fatal.enable is not a boolean.";
+        return Status(SERVER_INVALID_ARGUMENT, msg);
+    }
+    return Status::OK();
+}
+
+Status
+Config::CheckLogsPath(const std::string& value) {
+    fiu_return_on("check_logs_path_fail", Status(SERVER_INVALID_ARGUMENT, ""));
+    if (value.empty()) {
+        return Status(SERVER_INVALID_ARGUMENT, "logs.path is empty!");
+    }
+
+    return ValidationUtil::ValidateStoragePath(value);
+}
+
 ////////////////////////////////////////////////////////////////////////////////
 ConfigNode&
 Config::GetConfigRoot() {
@@ -1601,6 +1744,13 @@ Status
 Config::GetServerConfigTimeZone(std::string& value) {
     value = GetConfigStr(CONFIG_SERVER, CONFIG_SERVER_TIME_ZONE, CONFIG_SERVER_TIME_ZONE_DEFAULT);
     return CheckServerConfigTimeZone(value);
+}
+
+Status
+Config::GetServerConfigWebEnable(bool& value) {
+    std::string str = GetConfigStr(CONFIG_SERVER, CONFIG_SERVER_WEB_ENABLE, CONFIG_SERVER_WEB_ENABLE_DEFAULT);
+    CONFIG_CHECK(CheckServerConfigWebEnable(str));
+    return StringHelpFunctions::ConvertToBoolean(str, value);
 }
 
 Status
@@ -1940,6 +2090,62 @@ Config::GetWalConfigWalPath(std::string& wal_path) {
     return Status::OK();
 }
 
+/* logs config */
+Status
+Config::GetLogsTraceEnable(bool& value) {
+    std::string str = GetConfigStr(CONFIG_LOGS, CONFIG_LOGS_TRACE_ENABLE, CONFIG_LOGS_TRACE_ENABLE_DEFAULT);
+    CONFIG_CHECK(CheckLogsTraceEnable(str));
+    CONFIG_CHECK(StringHelpFunctions::ConvertToBoolean(str, value));
+    return Status::OK();
+}
+
+Status
+Config::GetLogsDebugEnable(bool& value) {
+    std::string str = GetConfigStr(CONFIG_LOGS, CONFIG_LOGS_DEBUG_ENABLE, CONFIG_LOGS_DEBUG_ENABLE_DEFAULT);
+    CONFIG_CHECK(CheckLogsDebugEnable(str));
+    CONFIG_CHECK(StringHelpFunctions::ConvertToBoolean(str, value));
+    return Status::OK();
+}
+
+Status
+Config::GetLogsInfoEnable(bool& value) {
+    std::string str = GetConfigStr(CONFIG_LOGS, CONFIG_LOGS_INFO_ENABLE, CONFIG_LOGS_INFO_ENABLE_DEFAULT);
+    CONFIG_CHECK(CheckLogsInfoEnable(str));
+    CONFIG_CHECK(StringHelpFunctions::ConvertToBoolean(str, value));
+    return Status::OK();
+}
+
+Status
+Config::GetLogsWarningEnable(bool& value) {
+    std::string str = GetConfigStr(CONFIG_LOGS, CONFIG_LOGS_WARNING_ENABLE, CONFIG_LOGS_WARNING_ENABLE_DEFAULT);
+    CONFIG_CHECK(CheckLogsWarningEnable(str));
+    CONFIG_CHECK(StringHelpFunctions::ConvertToBoolean(str, value));
+    return Status::OK();
+}
+
+Status
+Config::GetLogsErrorEnable(bool& value) {
+    std::string str = GetConfigStr(CONFIG_LOGS, CONFIG_LOGS_ERROR_ENABLE, CONFIG_LOGS_ERROR_ENABLE_DEFAULT);
+    CONFIG_CHECK(CheckLogsErrorEnable(str));
+    CONFIG_CHECK(StringHelpFunctions::ConvertToBoolean(str, value));
+    return Status::OK();
+}
+
+Status
+Config::GetLogsFatalEnable(bool& value) {
+    std::string str = GetConfigStr(CONFIG_LOGS, CONFIG_LOGS_FATAL_ENABLE, CONFIG_LOGS_FATAL_ENABLE_DEFAULT);
+    CONFIG_CHECK(CheckLogsFatalEnable(str));
+    CONFIG_CHECK(StringHelpFunctions::ConvertToBoolean(str, value));
+    return Status::OK();
+}
+
+Status
+Config::GetLogsPath(std::string& value) {
+    value = GetConfigStr(CONFIG_LOGS, CONFIG_LOGS_PATH, CONFIG_LOGS_PATH_DEFAULT);
+    CONFIG_CHECK(CheckWalConfigWalPath(value));
+    return Status::OK();
+}
+
 Status
 Config::GetServerRestartRequired(bool& required) {
     required = restart_required_;
@@ -1970,6 +2176,12 @@ Status
 Config::SetServerConfigTimeZone(const std::string& value) {
     CONFIG_CHECK(CheckServerConfigTimeZone(value));
     return SetConfigValueInMem(CONFIG_SERVER, CONFIG_SERVER_TIME_ZONE, value);
+}
+
+Status
+Config::SetServerConfigWebEnable(const std::string& value) {
+    CONFIG_CHECK(CheckServerConfigWebEnable(value));
+    return SetConfigValueInMem(CONFIG_SERVER, CONFIG_SERVER_WEB_ENABLE, value);
 }
 
 Status
@@ -2156,6 +2368,49 @@ Status
 Config::SetWalConfigWalPath(const std::string& value) {
     CONFIG_CHECK(CheckWalConfigWalPath(value));
     return SetConfigValueInMem(CONFIG_WAL, CONFIG_WAL_WAL_PATH, value);
+}
+
+/* logs config */
+Status
+Config::SetLogsTraceEnable(const std::string& value) {
+    CONFIG_CHECK(CheckLogsTraceEnable(value));
+    return SetConfigValueInMem(CONFIG_LOGS, CONFIG_LOGS_TRACE_ENABLE, value);
+}
+
+Status
+Config::SetLogsDebugEnable(const std::string& value) {
+    CONFIG_CHECK(CheckLogsDebugEnable(value));
+    return SetConfigValueInMem(CONFIG_LOGS, CONFIG_LOGS_DEBUG_ENABLE, value);
+}
+
+Status
+Config::SetLogsInfoEnable(const std::string& value) {
+    CONFIG_CHECK(CheckLogsInfoEnable(value));
+    return SetConfigValueInMem(CONFIG_LOGS, CONFIG_LOGS_INFO_ENABLE, value);
+}
+
+Status
+Config::SetLogsWarningEnable(const std::string& value) {
+    CONFIG_CHECK(CheckLogsWarningEnable(value));
+    return SetConfigValueInMem(CONFIG_LOGS, CONFIG_LOGS_WARNING_ENABLE, value);
+}
+
+Status
+Config::SetLogsErrorEnable(const std::string& value) {
+    CONFIG_CHECK(CheckLogsErrorEnable(value));
+    return SetConfigValueInMem(CONFIG_LOGS, CONFIG_LOGS_ERROR_ENABLE, value);
+}
+
+Status
+Config::SetLogsFatalEnable(const std::string& value) {
+    CONFIG_CHECK(CheckLogsFatalEnable(value));
+    return SetConfigValueInMem(CONFIG_LOGS, CONFIG_LOGS_FATAL_ENABLE, value);
+}
+
+Status
+Config::SetLogsPath(const std::string& value) {
+    CONFIG_CHECK(CheckLogsPath(value));
+    return SetConfigValueInMem(CONFIG_LOGS, CONFIG_LOGS_PATH, value);
 }
 
 #ifdef MILVUS_GPU_VERSION

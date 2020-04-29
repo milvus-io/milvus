@@ -36,6 +36,9 @@ class IndexFailedChecker {
     Status
     MarkSucceedIndexFile(const meta::SegmentSchema& file);
 
+    bool
+    IsFailedIndexFile(const meta::SegmentSchema& file);
+
     Status
     IgnoreFailedIndexFiles(meta::SegmentsSchema& table_files);
 

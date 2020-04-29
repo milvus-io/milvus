@@ -97,6 +97,9 @@ struct SegmentSchema {
 using SegmentSchemaPtr = std::shared_ptr<meta::SegmentSchema>;
 using SegmentsSchema = std::vector<SegmentSchema>;
 
+using File2RefCount = std::map<uint64_t, int64_t>;
+using Table2FileRef = std::map<std::string, File2RefCount>;
+
 namespace hybrid {
 
 enum class DataType {
