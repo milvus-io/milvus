@@ -17,6 +17,8 @@ typedef Quantizer* (*sq_sel_func_ptr)(QuantizerType, size_t, const std::vector<f
 
 
 extern bool faiss_use_avx512;
+extern bool faiss_use_avx2;
+extern bool faiss_use_sse;
 
 extern fvec_func_ptr fvec_inner_product;
 extern fvec_func_ptr fvec_L2sqr;
@@ -28,6 +30,8 @@ extern sq_get_func_ptr sq_get_distance_computer_IP;
 extern sq_sel_func_ptr sq_sel_quantizer;
 
 extern bool support_avx512();
+extern bool support_avx2();
+extern bool support_sse();
 
 extern bool hook_init(std::string& cpu_flag);
 
