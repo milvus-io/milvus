@@ -368,15 +368,15 @@ class TestSearchBase:
                 assert result[i][0].distance <= epsilon
                 assert check_result(result[i], ids[i])
 
-    def test_search_by_ids_without_connect(self, dis_connect, collection):
-        '''
-        target: test search vectors without connection
-        method: use dis connected instance, call search method and check if search successfully
-        expected: raise exception
-        '''
-        query_ids = [1]
-        with pytest.raises(Exception) as e:
-            status, ids = dis_connect.search_by_ids(collection, query_ids, top_k, params={})
+    # def test_search_by_ids_without_connect(self, dis_connect, collection):
+    #     '''
+    #     target: test search vectors without connection
+    #     method: use dis connected instance, call search method and check if search successfully
+    #     expected: raise exception
+    #     '''
+    #     query_ids = [1]
+    #     with pytest.raises(Exception) as e:
+    #         status, ids = dis_connect.search_by_ids(collection, query_ids, top_k, params={})
 
     def test_search_collection_name_not_existed(self, connect, collection):
         '''

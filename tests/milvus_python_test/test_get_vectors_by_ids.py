@@ -242,8 +242,6 @@ class TestGetIndexedVectors:
         id = get_id
         status, res = connect.get_vectors_by_ids(collection, [ids[id]])
         assert status.OK()
-        logging.getLogger().info(res)
-        assert status.OK()
         assert_equal_vector(res[0], vectors[id])
 
     def test_get_vector_after_delete(self, connect, collection, get_simple_index, get_id):
