@@ -34,7 +34,7 @@ class TestMixBase:
         uri = "tcp://%s:%s" % (args["ip"], args["port"])
         id_0 = 0; id_1 = 0
         milvus_instance = get_milvus(args["handler"])
-        milvus_instance.connect(uri=uri)
+        # milvus_instance.connect(uri=uri)
         milvus_instance.create_collection({'collection_name': collection,
              'dimension': dim,
              'index_file_size': index_file_size,
@@ -62,11 +62,11 @@ class TestMixBase:
                 assert result[0][0].id == id_0
                 assert result[1][0].id == id_1
         milvus_instance = get_milvus(args["handler"])
-        milvus_instance.connect(uri=uri)
+        # milvus_instance.connect(uri=uri)
         p_search = Process(target=search, args=(milvus_instance, ))
         p_search.start()
         milvus_instance = get_milvus(args["handler"])
-        milvus_instance.connect(uri=uri)
+        # milvus_instance.connect(uri=uri)
         p_create = Process(target=add_vectors, args=(milvus_instance, ))
         p_create.start()
         p_create.join()
