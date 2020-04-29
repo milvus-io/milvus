@@ -95,7 +95,7 @@ if (KNOWHERE_GPU_VERSION)
             knowhere/index/vector_index/gpu/IndexIVFSQHybrid.cpp
             knowhere/index/vector_index/helpers/Cloner.cpp
             knowhere/index/vector_index/helpers/FaissGpuResourceMgr.cpp
-            )
+            knowhere/index/vector_index/helpers/BuilderSuspend.cpp)
 
 endif ()
 
