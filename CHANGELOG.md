@@ -33,6 +33,7 @@ Please mark all change in change log and use the issue from GitHub
 -   \#2149 Merge server_cpu_config.template and server_gpu_config.template
 -   \#2153 Upgrade thirdparty oatpp to v1.0.0
 -   \#2167 Merge log_config.conf with server_config.yaml
+-   \#2173 Check storage permission
 -   \#2178 Using elkan K-Means to improve IVF
 
 ## Task

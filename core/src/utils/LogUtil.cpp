@@ -94,11 +94,12 @@ InitLog(bool trace_enable, bool debug_enable, bool info_enable, bool warning_ena
     defaultConf.setGlobally(el::ConfigurationType::PerformanceTracking, "false");
     defaultConf.setGlobally(el::ConfigurationType::MaxLogFileSize, "209715200");
 
-    std::string global_log_path = logs_path + "milvus-%datetime{%y-%M-%d-%H:%m}-global.log";
+    std::string logs_reg_path = logs_path.rfind('/') == logs_path.length() - 1 ? logs_path : logs_path + "/";
+    std::string global_log_path = logs_reg_path + "milvus-%datetime{%y-%M-%d-%H:%m}-global.log";
     defaultConf.set(el::Level::Global, el::ConfigurationType::Filename, global_log_path.c_str());
     defaultConf.set(el::Level::Global, el::ConfigurationType::Enabled, "true");
 
-    std::string info_log_path = logs_path + "milvus-%datetime{%y-%M-%d-%H:%m}-info.log";
+    std::string info_log_path = logs_reg_path + "milvus-%datetime{%y-%M-%d-%H:%m}-info.log";
     defaultConf.set(el::Level::Info, el::ConfigurationType::Filename, info_log_path.c_str());
     if (info_enable) {
         defaultConf.set(el::Level::Info, el::ConfigurationType::Enabled, "true");
@@ -106,7 +107,7 @@ InitLog(bool trace_enable, bool debug_enable, bool info_enable, bool warning_ena
         defaultConf.set(el::Level::Info, el::ConfigurationType::Enabled, "false");
     }
 
-    std::string debug_log_path = logs_path + "milvus-%datetime{%y-%M-%d-%H:%m}-debug.log";
+    std::string debug_log_path = logs_reg_path + "milvus-%datetime{%y-%M-%d-%H:%m}-debug.log";
     defaultConf.set(el::Level::Debug, el::ConfigurationType::Filename, debug_log_path.c_str());
     if (debug_enable) {
         defaultConf.set(el::Level::Debug, el::ConfigurationType::Enabled, "true");
@@ -114,7 +115,7 @@ InitLog(bool trace_enable, bool debug_enable, bool info_enable, bool warning_ena
         defaultConf.set(el::Level::Debug, el::ConfigurationType::Enabled, "false");
     }
 
-    std::string warning_log_path = logs_path + "milvus-%datetime{%y-%M-%d-%H:%m}-warning.log";
+    std::string warning_log_path = logs_reg_path + "milvus-%datetime{%y-%M-%d-%H:%m}-warning.log";
     defaultConf.set(el::Level::Warning, el::ConfigurationType::Filename, warning_log_path.c_str());
     if (warning_enable) {
         defaultConf.set(el::Level::Warning, el::ConfigurationType::Enabled, "true");
@@ -122,7 +123,7 @@ InitLog(bool trace_enable, bool debug_enable, bool info_enable, bool warning_ena
         defaultConf.set(el::Level::Warning, el::ConfigurationType::Enabled, "false");
     }
 
-    std::string trace_log_path = logs_path + "milvus-%datetime{%y-%M-%d-%H:%m}-trace.log";
+    std::string trace_log_path = logs_reg_path + "milvus-%datetime{%y-%M-%d-%H:%m}-trace.log";
     defaultConf.set(el::Level::Trace, el::ConfigurationType::Filename, trace_log_path.c_str());
     if (trace_enable) {
         defaultConf.set(el::Level::Trace, el::ConfigurationType::Enabled, "true");
@@ -130,7 +131,7 @@ InitLog(bool trace_enable, bool debug_enable, bool info_enable, bool warning_ena
         defaultConf.set(el::Level::Trace, el::ConfigurationType::Enabled, "false");
     }
 
-    std::string error_log_path = logs_path + "milvus-%datetime{%y-%M-%d-%H:%m}-error.log";
+    std::string error_log_path = logs_reg_path + "milvus-%datetime{%y-%M-%d-%H:%m}-error.log";
     defaultConf.set(el::Level::Error, el::ConfigurationType::Filename, error_log_path.c_str());
     if (error_enable) {
         defaultConf.set(el::Level::Error, el::ConfigurationType::Enabled, "true");
@@ -138,7 +139,7 @@ InitLog(bool trace_enable, bool debug_enable, bool info_enable, bool warning_ena
         defaultConf.set(el::Level::Error, el::ConfigurationType::Enabled, "false");
     }
 
-    std::string fatal_log_path = logs_path + "milvus-%datetime{%y-%M-%d-%H:%m}-fatal.log";
+    std::string fatal_log_path = logs_reg_path + "milvus-%datetime{%y-%M-%d-%H:%m}-fatal.log";
     defaultConf.set(el::Level::Fatal, el::ConfigurationType::Filename, fatal_log_path.c_str());
     if (fatal_enable) {
         defaultConf.set(el::Level::Fatal, el::ConfigurationType::Enabled, "true");
