@@ -37,13 +37,13 @@ CpuChecker::CheckCpuInstructionSet() {
         instruction_sets.emplace_back("avx512");
     }
 
-    bool support_axv2 = instruction_set_inst.AVX2();
+    bool support_axv2 = faiss::support_avx2();
     fiu_do_on("CpuChecker.CheckCpuInstructionSet.not_support_avx2", support_axv2 = false);
     if (support_axv2) {
         instruction_sets.emplace_back("avx2");
     }
 
-    bool support_sse4_2 = instruction_set_inst.SSE42();
+    bool support_sse4_2 = faiss::support_sse();
     fiu_do_on("CpuChecker.CheckCpuInstructionSet.not_support_sse4_2", support_sse4_2 = false);
     if (support_sse4_2) {
         instruction_sets.emplace_back("sse4_2");

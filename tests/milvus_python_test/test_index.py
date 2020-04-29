@@ -116,18 +116,18 @@ class TestIndexBase:
         status = connect.create_index(collection, index_type, index_param)
         assert status.OK()
 
-    @pytest.mark.level(2)
-    def test_create_index_without_connect(self, dis_connect, collection):
-        '''
-        target: test create index without connection
-        method: create collection and add vectors in it, check if added successfully
-        expected: raise exception
-        '''
-        nlist = NLIST
-        index_type = IndexType.IVF_SQ8
-        index_param = {"nlist": nlist}
-        with pytest.raises(Exception) as e:
-            status = dis_connect.create_index(collection, index_type, index_param)
+    # @pytest.mark.level(2)
+    # def test_create_index_without_connect(self, dis_connect, collection):
+    #     '''
+    #     target: test create index without connection
+    #     method: create collection and add vectors in it, check if added successfully
+    #     expected: raise exception
+    #     '''
+    #     nlist = NLIST
+    #     index_type = IndexType.IVF_SQ8
+    #     index_param = {"nlist": nlist}
+    #     with pytest.raises(Exception) as e:
+    #         status = dis_connect.create_index(collection, index_type, index_param)
 
     @pytest.mark.timeout(BUILD_TIMEOUT)
     def test_create_index_search_with_query_vectors(self, connect, collection, get_simple_index):
@@ -483,15 +483,15 @@ class TestIndexBase:
             assert result._collection_name == collection_list[i]
             assert result._index_type == IndexType.FLAT
 
-    @pytest.mark.level(2)
-    def test_describe_index_without_connect(self, dis_connect, collection):
-        '''
-        target: test describe index without connection
-        method: describe index, and check if describe successfully
-        expected: raise exception
-        '''
-        with pytest.raises(Exception) as e:
-            status = dis_connect.describe_index(collection)
+    # @pytest.mark.level(2)
+    # def test_describe_index_without_connect(self, dis_connect, collection):
+    #     '''
+    #     target: test describe index without connection
+    #     method: describe index, and check if describe successfully
+    #     expected: raise exception
+    #     '''
+    #     with pytest.raises(Exception) as e:
+    #         status = dis_connect.describe_index(collection)
 
     def test_describe_index_collection_not_existed(self, connect):
         '''
@@ -578,15 +578,15 @@ class TestIndexBase:
         assert result._collection_name == collection
         assert result._index_type == IndexType.FLAT
 
-    @pytest.mark.level(2)
-    def test_drop_index_without_connect(self, dis_connect, collection):
-        '''
-        target: test drop index without connection
-        method: drop index, and check if drop successfully
-        expected: raise exception
-        '''
-        with pytest.raises(Exception) as e:
-            status = dis_connect.drop_index(collection)
+    # @pytest.mark.level(2)
+    # def test_drop_index_without_connect(self, dis_connect, collection):
+    #     '''
+    #     target: test drop index without connection
+    #     method: drop index, and check if drop successfully
+    #     expected: raise exception
+    #     '''
+    #     with pytest.raises(Exception) as e:
+    #         status = dis_connect.drop_index(collection)
 
     def test_drop_index_collection_not_existed(self, connect):
         '''
@@ -732,18 +732,18 @@ class TestIndexIP:
         status = connect.create_index(ip_collection, index_type, index_param)
         assert status.OK()
 
-    @pytest.mark.level(2)
-    def test_create_index_without_connect(self, dis_connect, ip_collection):
-        '''
-        target: test create index without connection
-        method: create collection and add vectors in it, check if added successfully
-        expected: raise exception
-        '''
-        nlist = NLIST
-        index_type = IndexType.IVF_SQ8
-        index_param = {"nlist": nlist}
-        with pytest.raises(Exception) as e:
-            status = dis_connect.create_index(ip_collection, index_type, index_param)
+    # @pytest.mark.level(2)
+    # def test_create_index_without_connect(self, dis_connect, ip_collection):
+    #     '''
+    #     target: test create index without connection
+    #     method: create collection and add vectors in it, check if added successfully
+    #     expected: raise exception
+    #     '''
+    #     nlist = NLIST
+    #     index_type = IndexType.IVF_SQ8
+    #     index_param = {"nlist": nlist}
+    #     with pytest.raises(Exception) as e:
+    #         status = dis_connect.create_index(ip_collection, index_type, index_param)
 
     @pytest.mark.timeout(BUILD_TIMEOUT)
     def test_create_index_search_with_query_vectors(self, connect, ip_collection, get_simple_index):
@@ -1020,15 +1020,15 @@ class TestIndexIP:
             assert result._collection_name == collection_list[i]
             assert result._index_type == IndexType.FLAT
 
-    @pytest.mark.level(2)
-    def test_describe_index_without_connect(self, dis_connect, ip_collection):
-        '''
-        target: test describe index without connection
-        method: describe index, and check if describe successfully
-        expected: raise exception
-        '''
-        with pytest.raises(Exception) as e:
-            status = dis_connect.describe_index(ip_collection)
+    # @pytest.mark.level(2)
+    # def test_describe_index_without_connect(self, dis_connect, ip_collection):
+    #     '''
+    #     target: test describe index without connection
+    #     method: describe index, and check if describe successfully
+    #     expected: raise exception
+    #     '''
+    #     with pytest.raises(Exception) as e:
+    #         status = dis_connect.describe_index(ip_collection)
 
     def test_describe_index_not_create(self, connect, ip_collection):
         '''
@@ -1147,18 +1147,18 @@ class TestIndexIP:
         assert result._collection_name == ip_collection
         assert result._index_type == IndexType.FLAT
 
-    @pytest.mark.level(2)
-    def test_drop_index_without_connect(self, dis_connect, ip_collection):
-        '''
-        target: test drop index without connection
-        method: drop index, and check if drop successfully
-        expected: raise exception
-        '''
-        nlist = NLIST
-        index_type = IndexType.IVFLAT
-        index_param = {"nlist": nlist}
-        with pytest.raises(Exception) as e:
-            status = dis_connect.drop_index(ip_collection, index_type, index_param)
+    # @pytest.mark.level(2)
+    # def test_drop_index_without_connect(self, dis_connect, ip_collection):
+    #     '''
+    #     target: test drop index without connection
+    #     method: drop index, and check if drop successfully
+    #     expected: raise exception
+    #     '''
+    #     nlist = NLIST
+    #     index_type = IndexType.IVFLAT
+    #     index_param = {"nlist": nlist}
+    #     with pytest.raises(Exception) as e:
+    #         status = dis_connect.drop_index(ip_collection, index_type, index_param)
 
     def test_drop_index_collection_not_create(self, connect, ip_collection):
         '''
@@ -1299,17 +1299,17 @@ class TestIndexJAC:
         status = connect.create_index(jac_collection, index_type, index_param)
         assert status.OK()
 
-    @pytest.mark.level(2)
-    def test_create_index_without_connect(self, dis_connect, jac_collection):
-        '''
-        target: test create index without connection
-        method: create collection and add vectors in it, check if added successfully
-        expected: raise exception
-        '''
-        nlist = NLIST
-        index_param = {"nlist": nlist}
-        with pytest.raises(Exception) as e:
-            status = dis_connect.create_index(jac_collection, IndexType.IVF_SQ8, index_param)
+    # @pytest.mark.level(2)
+    # def test_create_index_without_connect(self, dis_connect, jac_collection):
+    #     '''
+    #     target: test create index without connection
+    #     method: create collection and add vectors in it, check if added successfully
+    #     expected: raise exception
+    #     '''
+    #     nlist = NLIST
+    #     index_param = {"nlist": nlist}
+    #     with pytest.raises(Exception) as e:
+    #         status = dis_connect.create_index(jac_collection, IndexType.IVF_SQ8, index_param)
 
     @pytest.mark.timeout(BUILD_TIMEOUT)
     def test_create_index_search_with_query_vectors(self, connect, jac_collection, get_jaccard_index):
@@ -1539,17 +1539,17 @@ class TestIndexBinary:
         status, res = connect.count_collection(substructure_collection,)
         assert res == len(self.vectors)
 
-    @pytest.mark.level(2)
-    def test_create_index_without_connect(self, dis_connect, ham_collection):
-        '''
-        target: test create index without connection
-        method: create collection and add vectors in it, check if added successfully
-        expected: raise exception
-        '''
-        nlist = NLIST
-        index_param = {"nlist": nlist}
-        with pytest.raises(Exception) as e:
-            status = dis_connect.create_index(ham_collection, IndexType.IVF_SQ8, index_param)
+    # @pytest.mark.level(2)
+    # def test_create_index_without_connect(self, dis_connect, ham_collection):
+    #     '''
+    #     target: test create index without connection
+    #     method: create collection and add vectors in it, check if added successfully
+    #     expected: raise exception
+    #     '''
+    #     nlist = NLIST
+    #     index_param = {"nlist": nlist}
+    #     with pytest.raises(Exception) as e:
+    #         status = dis_connect.create_index(ham_collection, IndexType.IVF_SQ8, index_param)
 
     @pytest.mark.timeout(BUILD_TIMEOUT)
     def test_create_index_search_with_query_vectors(self, connect, ham_collection, get_hamming_index):
