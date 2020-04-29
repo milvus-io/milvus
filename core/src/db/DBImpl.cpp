@@ -983,6 +983,7 @@ DBImpl::CompactFile(const std::string& collection_id, const meta::SegmentSchema&
         if (mark_status.ok()) {
             LOG_ENGINE_DEBUG_ << "Mark file: " << compacted_file.file_id_ << " to to_delete";
         }
+        utils::ExitOnWriteError(status);
         return status;
     }
 
@@ -1899,7 +1900,7 @@ DBImpl::MergeFiles(const std::string& collection_id, meta::FilesHolder& files_ho
         status = meta_ptr_->UpdateCollectionFile(collection_file);
         LOG_ENGINE_DEBUG_ << "Failed to update file to index, mark file: " << collection_file.file_id_
                           << " to to_delete";
-
+        utils::ExitOnWriteError(status);
         return status;
     }
 
@@ -1994,7 +1995,7 @@ DBImpl::MergeHybridFiles(const std::string& collection_id, meta::FilesHolder& fi
         table_file.file_type_ = meta::SegmentSchema::TO_DELETE;
         status = meta_ptr_->UpdateCollectionFile(table_file);
         LOG_ENGINE_DEBUG_ << "Failed to update file to index, mark file: " << table_file.file_id_ << " to to_delete";
-
+        utils::ExitOnWriteError(status);
         return status;
     }
 
