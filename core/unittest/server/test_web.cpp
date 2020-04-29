@@ -488,7 +488,7 @@ InsertData(const TestClientP& client_ptr, const TestConnP& connection_ptr,
 
 milvus::Status
 InsertData(const TestClientP& client_ptr, const TestConnP& connection_ptr, const OString& collection_name,
-           int64_t dim, int64_t count, const std::vector<int64_t>& ids, std::string tag = "", bool bin = false) {
+           int64_t dim, int64_t count, const std::vector<std::string>& ids, std::string tag = "", bool bin = false) {
     nlohmann::json insert_json;
 
     if (bin)
@@ -844,9 +844,9 @@ TEST_F(WebControllerTest, INSERT_IDS) {
     const int64_t dim = 64;
     GenCollection(client_ptr, conncetion_ptr, collection_name, dim, 100, "L2");
 
-    std::vector<int64_t> ids;
+    std::vector<std::string> ids;
     for (size_t i = 0; i < 20; i++) {
-        ids.emplace_back(i);
+        ids.emplace_back(std::to_string(i));
     }
 
     nlohmann::json insert_json;
@@ -1228,9 +1228,9 @@ TEST_F(WebControllerTest, SEARCH_BY_IDS) {
     GenCollection(client_ptr, conncetion_ptr, collection_name, 64, 100, "L2");
 
     // Insert 100 vectors into collection
-    std::vector<int64_t> ids;
+    std::vector<std::string> ids;
     for (size_t i = 0; i < 100; i++) {
-        ids.emplace_back(i);
+        ids.emplace_back(std::to_string(i));
     }
 
     auto status = InsertData(client_ptr, conncetion_ptr, collection_name, 64, 100, ids);
@@ -1238,7 +1238,7 @@ TEST_F(WebControllerTest, SEARCH_BY_IDS) {
 
     nlohmann::json search_json;
     search_json["search"]["topk"] = 1;
-    search_json["search"]["ids"] = std::vector<std::int64_t>(ids.begin(), ids.begin() + 10);
+    search_json["search"]["ids"] = std::vector<std::string>(ids.begin(), ids.begin() + 10);
     search_json["search"]["params"] = "{\"nprobe\": 1}";
 
     auto response = client_ptr->vectorsOp(collection_name, search_json.dump().c_str(), conncetion_ptr);
@@ -1264,14 +1264,14 @@ TEST_F(WebControllerTest, SEARCH_BY_IDS) {
 //    }
 }
 
-TEST_F(WebControllerTest, GET_VECTOR_BY_ID) {
+TEST_F(WebControllerTest, GET_VECTORS_BY_IDS) {
     const OString collection_name = "test_milvus_web_get_vector_by_id_test_" + OString(RandomName().c_str());
     GenCollection(client_ptr, conncetion_ptr, collection_name, 64, 100, "L2");
 
     // Insert 100 vectors into collection
-    std::vector<int64_t> ids;
+    std::vector<std::string> ids;
     for (size_t i = 0; i < 100; i++) {
-        ids.emplace_back(i);
+        ids.emplace_back(std::to_string(i));
     }
 
     auto status = InsertData(client_ptr, conncetion_ptr, collection_name, 64, 100, ids);
@@ -1280,7 +1280,7 @@ TEST_F(WebControllerTest, GET_VECTOR_BY_ID) {
     /* test task load */
     std::vector<std::string> vector_ids;
     for (size_t i = 0; i < 10; i++) {
-        vector_ids.emplace_back(std::to_string(ids.at(i)));
+        vector_ids.emplace_back(ids.at(i));
     }
     auto body = nlohmann::json();
     body["ids"] = vector_ids;
@@ -1296,7 +1296,7 @@ TEST_F(WebControllerTest, GET_VECTOR_BY_ID) {
 
     auto vector_json = vectors_json[0];
     ASSERT_TRUE(vector_json.contains("id"));
-    ASSERT_EQ(std::to_string(ids[0]), vector_json["id"].get<std::string>());
+    ASSERT_EQ(ids[0], vector_json["id"].get<std::string>());
     ASSERT_TRUE(vector_json.contains("vector"));
 
     auto vec_json = vector_json["vector"];

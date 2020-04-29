@@ -433,7 +433,12 @@ WebRequestHandler::Search(const std::string& collection_name, const nlohmann::js
         if (!vec_ids.is_array()) {
             return Status(BODY_PARSE_FAIL, "Field \"ids\" must be ad array");
         }
-        std::vector<int64_t> id_array(vec_ids.begin(), vec_ids.end());
+
+        std::vector<int64_t> id_array;
+        for (auto& id_str : vec_ids) {
+            id_array.emplace_back(std::stol(id_str.get<std::string>()));
+        }
+        //        std::vector<int64_t> id_array(vec_ids.begin(), vec_ids.end());
         status = request_handler_.SearchByID(context_ptr_, collection_name, id_array, topk, json["params"],
                                              partition_tags, result);
     } else {
@@ -1500,8 +1505,9 @@ WebRequestHandler::Insert(const OString& collection_name, const OString& body, V
         }
         auto& id_array = vectors.id_array_;
         id_array.clear();
-        for (auto& id : ids_json) {
-            id_array.emplace_back(id.get<int64_t>());
+        for (auto& id_str : ids_json) {
+            int64_t id = std::stol(id_str.get<std::string>());
+            id_array.emplace_back(id);
         }
     }
 
