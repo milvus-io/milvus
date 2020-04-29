@@ -53,25 +53,25 @@ class TestPing:
         assert connect.connected()
 
 
-class TestPingDisconnect:
-    def test_server_version(self, dis_connect):
-        '''
-        target: test get the server version, after disconnect
-        method: call the server_version method after connected
-        expected: version should not be the pymilvus version
-        '''
-        res = None
-        with pytest.raises(Exception) as e:
-            status, res = connect.server_version()
-        assert res is None
-
-    def test_server_status(self, dis_connect):
-        '''
-        target: test get the server status, after disconnect
-        method: call the server_status method after connected
-        expected: status returned should be not ok
-        '''
-        status = None
-        with pytest.raises(Exception) as e:
-            status, msg = connect.server_status()
-        assert status is None
+# class TestPingDisconnect:
+#     def test_server_version(self, dis_connect):
+#         '''
+#         target: test get the server version, after disconnect
+#         method: call the server_version method after connected
+#         expected: version should not be the pymilvus version
+#         '''
+#         res = None
+#         with pytest.raises(Exception) as e:
+#             status, res = connect.server_version()
+#         assert res is None
+# 
+#     def test_server_status(self, dis_connect):
+#         '''
+#         target: test get the server status, after disconnect
+#         method: call the server_status method after connected
+#         expected: status returned should be not ok
+#         '''
+#         status = None
+#         with pytest.raises(Exception) as e:
+#             status, msg = connect.server_status()
+#         assert status is None
