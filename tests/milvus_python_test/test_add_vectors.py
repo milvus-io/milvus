@@ -734,7 +734,7 @@ class TestAddAsync:
         '''
         nb = insert_count
         insert_vec_list = gen_vectors(nb, dim)
-        future = connect.add_vectors(collection, insert_vec_list, _async=True, callback=self.check_status)
+        future = connect.add_vectors(collection, insert_vec_list, _async=True, _callback=self.check_status)
         future.done()
 
     @pytest.mark.level(2)
@@ -746,12 +746,11 @@ class TestAddAsync:
         '''
         nb = 50000
         insert_vec_list = gen_vectors(nb, dim)
-        future = connect.add_vectors(collection, insert_vec_list, _async=True, callback=self.check_status)
+        future = connect.add_vectors(collection, insert_vec_list, _async=True, _callback=self.check_status)
+        connect.flush([collection])
         status, result = future.result()
-        future.done()
         assert status.OK()
         assert len(result) == nb 
-        connect.flush([collection])
         status, count = connect.count_collection(collection)
         assert status.OK()
         logging.getLogger().info(status)
@@ -766,7 +765,7 @@ class TestAddAsync:
         '''
         nb = 100000
         insert_vec_list = gen_vectors(nb, dim)
-        future = connect.add_vectors(collection, insert_vec_list, _async=True, callback=self.check_status, timeout=1)
+        future = connect.add_vectors(collection, insert_vec_list, _async=True, _callback=self.check_status, timeout=1)
         future.done()
 
     def test_insert_async_invalid_params(self, connect, collection):
@@ -778,7 +777,6 @@ class TestAddAsync:
         insert_vec_list = gen_vectors(nb, dim)
         collection_new = gen_unique_str()
         future = connect.add_vectors(collection_new, insert_vec_list, _async=True)
-        future.done()
         status, result = future.result()
         assert not status.OK()
 

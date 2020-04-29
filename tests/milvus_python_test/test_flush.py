@@ -264,7 +264,7 @@ class TestFlushAsync:
         vectors = gen_vectors(nb, dim)
         connect.add_vectors(collection, vectors)
         logging.getLogger().info("before")
-        future = connect.flush([collection], _async=True, callback=self.check_status)
+        future = connect.flush([collection], _async=True, _callback=self.check_status)
         logging.getLogger().info("after")
         future.done()
         status = future.result()

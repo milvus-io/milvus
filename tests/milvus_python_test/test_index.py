@@ -1864,8 +1864,16 @@ class TestIndexAsync:
         vectors = gen_vectors(nb, dim)
         status, ids = connect.add_vectors(collection, vectors)
         logging.getLogger().info("start index")
-        # future = connect.create_index(collection, index_type, index_param, _async=True, callback=self.check_status) 
+        # future = connect.create_index(collection, index_type, index_param, _async=True, _callback=self.check_status) 
         future = connect.create_index(collection, index_type, index_param, _async=True) 
         logging.getLogger().info("before result")
         status = future.result()
         assert status.OK()
+
+    def test_create_index_with_invalid_collectionname(self, connect):
+        collection_name = " "
+        nlist = NLIST
+        index_param = {"nlist": nlist}
+        future = connect.create_index(collection_name, IndexType.IVF_SQ8, index_param, _async=True)
+        status = future.result()
+        assert not status.OK()
