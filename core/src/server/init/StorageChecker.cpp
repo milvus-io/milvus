@@ -92,7 +92,7 @@ StorageChecker::CheckStoragePermission() {
     ret = access(wal_path.c_str(), F_OK | R_OK | W_OK);
     fiu_do_on("StorageChecker.CheckStoragePermission.wal_path_access_fail", ret = -1);
     if (0 != ret) {
-        std::string err_msg = " Check WAL storage path " + wal_path + " fail. " + strerror(errno) +
+        std::string err_msg = " Access WAL storage path " + wal_path + " fail. " + strerror(errno) +
                               "(code: " + std::to_string(errno) + ")";
         LOG_SERVER_FATAL_ << err_msg;
         std::cerr << err_msg << std::endl;
