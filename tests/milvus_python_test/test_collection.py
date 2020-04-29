@@ -105,20 +105,20 @@ class TestCollection:
         status = connect.create_collection(param)
         assert status.OK()
 
-    @pytest.mark.level(2)
-    def test_create_collection_without_connection(self, dis_connect):
-        '''
-        target: test create collection, without connection
-        method: create collection with correct params, with a disconnected instance
-        expected: create raise exception
-        '''
-        collection_name = gen_unique_str("test_collection")
-        param = {'collection_name': collection_name,
-                 'dimension': dim,
-                 'index_file_size': index_file_size, 
-                 'metric_type': MetricType.L2}
-        with pytest.raises(Exception) as e:
-            status = dis_connect.create_collection(param)
+    # @pytest.mark.level(2)
+    # def test_create_collection_without_connection(self, dis_connect):
+    #     '''
+    #     target: test create collection, without connection
+    #     method: create collection with correct params, with a disconnected instance
+    #     expected: create raise exception
+    #     '''
+    #     collection_name = gen_unique_str("test_collection")
+    #     param = {'collection_name': collection_name,
+    #              'dimension': dim,
+    #              'index_file_size': index_file_size, 
+    #              'metric_type': MetricType.L2}
+    #     with pytest.raises(Exception) as e:
+    #         status = dis_connect.create_collection(param)
 
     def test_create_collection_existed(self, connect):
         '''
@@ -342,15 +342,15 @@ class TestCollection:
         for p in processes:
             p.join()
     
-    @pytest.mark.level(2)
-    def test_collection_describe_without_connection(self, collection, dis_connect):
-        '''
-        target: test describe collection, without connection
-        method: describe collection with correct params, with a disconnected instance
-        expected: describe raise exception
-        '''
-        with pytest.raises(Exception) as e:
-            status = dis_connect.describe_collection(collection)
+    # @pytest.mark.level(2)
+    # def test_collection_describe_without_connection(self, collection, dis_connect):
+    #     '''
+    #     target: test describe collection, without connection
+    #     method: describe collection with correct params, with a disconnected instance
+    #     expected: describe raise exception
+    #     '''
+    #     with pytest.raises(Exception) as e:
+    #         status = dis_connect.describe_collection(collection)
 
     def test_collection_describe_dimension(self, connect):
         '''
@@ -416,15 +416,15 @@ class TestCollection:
         status = connect.drop_collection(ham_collection)
         assert not assert_has_collection(connect, ham_collection)
 
-    @pytest.mark.level(2)
-    def test_collection_delete_without_connection(self, collection, dis_connect):
-        '''
-        target: test describe collection, without connection
-        method: describe collection with correct params, with a disconnected instance
-        expected: describe raise exception
-        '''
-        with pytest.raises(Exception) as e:
-            status = dis_connect.drop_collection(collection)
+    # @pytest.mark.level(2)
+    # def test_collection_delete_without_connection(self, collection, dis_connect):
+    #     '''
+    #     target: test describe collection, without connection
+    #     method: describe collection with correct params, with a disconnected instance
+    #     expected: describe raise exception
+    #     '''
+    #     with pytest.raises(Exception) as e:
+    #         status = dis_connect.drop_collection(collection)
 
     def test_drop_collection_not_existed(self, connect):
         '''
@@ -623,15 +623,15 @@ class TestCollection:
         connect.create_collection(param)
         assert assert_has_collection(connect, collection_name)
 
-    @pytest.mark.level(2)
-    def test_has_collection_without_connection(self, collection, dis_connect):
-        '''
-        target: test has collection, without connection
-        method: calling has collection with correct params, with a disconnected instance
-        expected: has collection raise exception
-        '''
-        with pytest.raises(Exception) as e:
-            assert_has_collection(dis_connect, collection)
+    # @pytest.mark.level(2)
+    # def test_has_collection_without_connection(self, collection, dis_connect):
+    #     '''
+    #     target: test has collection, without connection
+    #     method: calling has collection with correct params, with a disconnected instance
+    #     expected: has collection raise exception
+    #     '''
+    #     with pytest.raises(Exception) as e:
+    #         assert_has_collection(dis_connect, collection)
 
     def test_has_collection_not_existed(self, connect):
         '''
@@ -745,15 +745,15 @@ class TestCollection:
         assert status.OK()
         assert collection_name in result
 
-    @pytest.mark.level(2)
-    def test_show_collections_without_connection(self, dis_connect):
-        '''
-        target: test show_collections, without connection
-        method: calling show_collections with correct params, with a disconnected instance
-        expected: show_collections raise exception
-        '''
-        with pytest.raises(Exception) as e:
-            status = dis_connect.show_collections()
+    # @pytest.mark.level(2)
+    # def test_show_collections_without_connection(self, dis_connect):
+    #     '''
+    #     target: test show_collections, without connection
+    #     method: calling show_collections with correct params, with a disconnected instance
+    #     expected: show_collections raise exception
+    #     '''
+    #     with pytest.raises(Exception) as e:
+    #         status = dis_connect.show_collections()
 
     @pytest.mark.level(2)
     def test_show_collections_no_collection(self, connect):

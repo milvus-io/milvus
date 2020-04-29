@@ -18,30 +18,30 @@ class TestConnect:
         else:
             return False
 
-    def test_disconnect(self, connect):
-        '''
-        target: test disconnect
-        method: disconnect a connected client
-        expected: connect failed after disconnected
-        '''
-        res = connect.disconnect()
-        assert res.OK()
-        with pytest.raises(Exception) as e:
-            res = connect.server_version()
+    # def test_disconnect(self, connect):
+    #     '''
+    #     target: test disconnect
+    #     method: disconnect a connected client
+    #     expected: connect failed after disconnected
+    #     '''
+    #     res = connect.disconnect()
+    #     assert res.OK()
+    #     with pytest.raises(Exception) as e:
+    #         res = connect.server_version()
 
-    def test_disconnect_repeatedly(self, connect, args):
-        '''
-        target: test disconnect repeatedly
-        method: disconnect a connected client, disconnect again
-        expected: raise an error after disconnected
-        '''
-        if not connect.connected():
-            with pytest.raises(Exception) as e:
-                connect.disconnect()
-        else:
-            connect.disconnect()
-            with pytest.raises(Exception) as e:
-                connect.disconnect()
+    # def test_disconnect_repeatedly(self, connect, args):
+    #     '''
+    #     target: test disconnect repeatedly
+    #     method: disconnect a connected client, disconnect again
+    #     expected: raise an error after disconnected
+    #     '''
+    #     if not connect.connected():
+    #         with pytest.raises(Exception) as e:
+    #             connect.disconnect()
+    #     else:
+    #         connect.disconnect()
+    #         with pytest.raises(Exception) as e:
+    #             connect.disconnect()
 
     def test_connect_correct_ip_port(self, args):
         '''
@@ -147,17 +147,17 @@ class TestConnect:
         milvus.connect(uri=uri_value, timeout=5)
         assert milvus.connected()
 
-    def test_connect_disconnect_repeatedly_times(self, args):
-        '''
-        target: test connect and disconnect for 10 times repeatedly
-        method: disconnect, and then connect, assert connect status
-        expected: status.code is 0
-        '''
-        times = 10
-        for i in range(times):
-            milvus = get_milvus(args["ip"], args["port"], handler=args["handler"])
-            milvus.disconnect()
-            assert not milvus.connected()
+    # def test_connect_disconnect_repeatedly_times(self, args):
+    #     '''
+    #     target: test connect and disconnect for 10 times repeatedly
+    #     method: disconnect, and then connect, assert connect status
+    #     expected: status.code is 0
+    #     '''
+    #     times = 10
+    #     for i in range(times):
+    #         milvus = get_milvus(args["ip"], args["port"], handler=args["handler"])
+    #         milvus.disconnect()
+    #         assert not milvus.connected()
 
     # TODO: enable
     def _test_connect_disconnect_with_multiprocess(self, args):
