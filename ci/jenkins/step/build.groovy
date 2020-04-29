@@ -1,4 +1,4 @@
-timeout(time: 90, unit: 'MINUTES') {
+timeout(time: 120, unit: 'MINUTES') {
     dir ("ci/scripts") {
         withCredentials([usernamePassword(credentialsId: "${params.JFROG_CREDENTIALS_ID}", usernameVariable: 'USERNAME', passwordVariable: 'PASSWORD')]) {
             def checkResult = sh(script: "./check_ccache.sh -l ${params.JFROG_ARTFACTORY_URL}/ccache", returnStatus: true)

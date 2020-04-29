@@ -437,25 +437,6 @@ class TestCollection:
         status = connect.drop_collection(collection_name)
         assert not status.OK()
 
-    def test_drop_collection_repeatedly(self, connect):
-        '''
-        target: test delete collection created with correct params 
-        method: create collection and delete new collection repeatedly, 
-            assert the value returned by delete method
-        expected: create ok and delete ok
-        '''
-        loops = 1
-        for i in range(loops):
-            collection_name = gen_unique_str("test_collection")
-            param = {'collection_name': collection_name,
-                 'dimension': dim,
-                 'index_file_size': index_file_size,
-                 'metric_type': MetricType.L2}
-            connect.create_collection(param)
-            status = connect.drop_collection(collection_name)
-            time.sleep(1)
-            assert not assert_has_collection(connect, collection_name)
-
     def test_delete_create_collection_repeatedly(self, connect):
         '''
         target: test delete and create the same collection repeatedly
@@ -464,6 +445,7 @@ class TestCollection:
         expected: create ok and delete ok
         '''
         loops = 2 
+        timeout = 5
         for i in range(loops):
             collection_name = "test_collection"
             param = {'collection_name': collection_name,
@@ -471,28 +453,15 @@ class TestCollection:
                  'index_file_size': index_file_size,
                  'metric_type': MetricType.L2}
             connect.create_collection(param)
-            status = connect.drop_collection(collection_name)
-            time.sleep(1)
-            assert status.OK()
-
-    def test_delete_create_collection_repeatedly_ip(self, connect):
-        '''
-        target: test delete and create the same collection repeatedly
-        method: try to create the same collection and delete repeatedly,
-            assert the value returned by delete method
-        expected: create ok and delete ok
-        '''
-        loops = 2 
-        for i in range(loops):
-            collection_name = "test_collection"
-            param = {'collection_name': collection_name,
-                 'dimension': dim,
-                 'index_file_size': index_file_size,
-                 'metric_type': MetricType.IP}
-            connect.create_collection(param)
-            status = connect.drop_collection(collection_name)
-            time.sleep(1)
-            assert status.OK()
+            status = None
+            while i < timeout:
+                status = connect.drop_collection(collection_name)
+                time.sleep(1)
+                i += 1
+                if status.OK():
+                    break
+            if i > timeout:
+                assert False
 
     # TODO: enable
     @pytest.mark.level(2)

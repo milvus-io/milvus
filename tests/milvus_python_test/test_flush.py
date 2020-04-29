@@ -136,6 +136,7 @@ class TestFlushBase:
         status, res = connect.search_vectors(collection, top_k, query_records=query_vecs)
         assert status.OK()
 
+    # TODO: stable case
     def test_add_flush_auto(self, connect, collection):
         '''
         method: add vectors
@@ -145,10 +146,16 @@ class TestFlushBase:
         ids = [i for i in range(nb)]
         status, ids = connect.add_vectors(collection, vectors, ids)
         assert status.OK()
-        time.sleep(2)
-        status, res = connect.count_collection(collection)
-        assert status.OK()
-        assert res == nb 
+        timeout = 10
+        start_time = time.time()
+        while (time.time()-start_time < timeout):
+            time.sleep(1)
+            status, res = connect.count_collection(collection)
+            if res == nb:
+                assert status.OK()
+                break
+        if time.time()-start_time > timeout:
+            assert False
 
     @pytest.fixture(
         scope="function",
@@ -160,7 +167,6 @@ class TestFlushBase:
     def same_ids(self, request):
         yield request.param
 
-    # both autoflush / flush
     def test_add_flush_same_ids(self, connect, collection, same_ids):
         '''
         method: add vectors, with same ids, count(same ids) < 15, > 15
@@ -172,7 +178,6 @@ class TestFlushBase:
             if item <= same_ids:
                 ids[i] = 0
         status, ids = connect.add_vectors(collection, vectors, ids)
-        time.sleep(2)
         status = connect.flush([collection])
         assert status.OK()
         status, res = connect.count_collection(collection)
