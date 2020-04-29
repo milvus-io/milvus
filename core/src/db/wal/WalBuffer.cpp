@@ -189,6 +189,22 @@ MXLogBuffer::RecordSize(const MXLogRecord& record) {
            record.length * (uint32_t)sizeof(IDNumber) + record.data_size;
 }
 
+uint32_t
+MXLogBuffer::EntityRecordSize(const milvus::engine::wal::MXLogRecord& record, std::vector<uint32_t>& field_name_size) {
+    uint32_t name_sizes = 0;
+    for (auto field_name : record.field_names) {
+        field_name_size.emplace_back(field_name.size());
+        name_sizes += field_name.size();
+    }
+
+    uint32_t attrs_size = 0;
+    for (auto attr_size : record.attrs_size) {
+        attrs_size += attr_size;
+    }
+
+    return RecordSize(record) + name_sizes + attrs_size;
+}
+
 ErrorCode
 MXLogBuffer::Append(MXLogRecord& record) {
     uint32_t record_size = RecordSize(record);
@@ -243,6 +259,101 @@ MXLogBuffer::Append(MXLogRecord& record) {
     if (record.data != nullptr && record.data_size > 0) {
         memcpy(current_write_buf + current_write_offset, record.data, record.data_size);
         current_write_offset += record.data_size;
+    }
+
+    bool write_rst = mxlog_writer_.Write(current_write_buf + mxlog_buffer_writer_.buf_offset, record_size);
+    if (!write_rst) {
+        LOG_WAL_ERROR_ << "write wal file error";
+        return WAL_FILE_ERROR;
+    }
+
+    mxlog_buffer_writer_.buf_offset = current_write_offset;
+
+    record.lsn = head.mxl_lsn;
+    return WAL_SUCCESS;
+}
+
+ErrorCode
+MXLogBuffer::AppendEntity(milvus::engine::wal::MXLogRecord& record) {
+    std::vector<uint32_t> field_name_size;
+    uint32_t record_size = EntityRecordSize(record, field_name_size);
+    if (SurplusSpace() < record_size) {
+        // writer buffer has no space, switch wal file and write to a new buffer
+        std::unique_lock<std::mutex> lck(mutex_);
+        if (mxlog_buffer_writer_.buf_idx == mxlog_buffer_reader_.buf_idx) {
+            // swith writer buffer
+            mxlog_buffer_reader_.max_offset = mxlog_buffer_writer_.buf_offset;
+            mxlog_buffer_writer_.buf_idx ^= 1;
+        }
+        mxlog_buffer_writer_.file_no++;
+        mxlog_buffer_writer_.buf_offset = 0;
+        lck.unlock();
+
+        // Reborn means close old wal file and open new wal file
+        if (!mxlog_writer_.ReBorn(ToFileName(mxlog_buffer_writer_.file_no), "w")) {
+            LOG_WAL_ERROR_ << "ReBorn wal file error " << mxlog_buffer_writer_.file_no;
+            return WAL_FILE_ERROR;
+        }
+    }
+
+    // point to the offset of current record in wal file
+    char* current_write_buf = buf_[mxlog_buffer_writer_.buf_idx].get();
+    uint32_t current_write_offset = mxlog_buffer_writer_.buf_offset;
+
+    hybrid::MXLogRecordHeader head;
+    BuildLsn(mxlog_buffer_writer_.file_no, mxlog_buffer_writer_.buf_offset + (uint32_t)record_size, head.mxl_lsn);
+    head.mxl_type = (uint8_t)record.type;
+    head.table_id_size = (uint16_t)record.collection_id.size();
+    head.partition_tag_size = (uint16_t)record.partition_tag.size();
+    head.vector_num = record.length;
+    head.data_size = record.data_size;
+
+    auto attr_size_it = record.attr_data_size.begin();
+    for (; attr_size_it != record.attr_data_size.end(); attr_size_it++) {
+        head.attr_size.emplace_back(attr_size_it->second);
+        head.field_name_size.emplace_back(attr_size_it->first.size());
+    }
+
+
+    memcpy(current_write_buf + current_write_offset, &head, SizeOfMXLogRecordHeader);
+    current_write_offset += SizeOfMXLogRecordHeader;
+
+    if (!record.collection_id.empty()) {
+        memcpy(current_write_buf + current_write_offset, record.collection_id.data(), record.collection_id.size());
+        current_write_offset += record.collection_id.size();
+    }
+
+    if (!record.partition_tag.empty()) {
+        memcpy(current_write_buf + current_write_offset, record.partition_tag.data(), record.partition_tag.size());
+        current_write_offset += record.partition_tag.size();
+    }
+    if (record.ids != nullptr && record.length > 0) {
+        memcpy(current_write_buf + current_write_offset, record.ids, record.length * sizeof(IDNumber));
+        current_write_offset += record.length * sizeof(IDNumber);
+    }
+
+    if (record.data != nullptr && record.data_size > 0) {
+        memcpy(current_write_buf + current_write_offset, record.data, record.data_size);
+        current_write_offset += record.data_size;
+    }
+
+    //Assign attr names
+    attr_size_it = record.attr_data_size.begin();
+    for (; attr_size_it != record.attr_data_size.end(); attr_size_it++) {
+        if (attr_size_it->first.size() > 0) {
+            memcpy(current_write_buf + current_write_offset, attr_size_it->first.data(), attr_size_it->first.size());
+            current_write_offset += attr_size_it->first.size();
+        }
+    }
+
+    // Assign attr values
+    attr_size_it = record.attr_data_size.begin();
+    for (; attr_size_it != record.attr_data_size.end(); attr_size_it++) {
+        if (attr_size_it->second != 0) {
+            memcpy(current_write_buf + current_write_offset, record.attr_data.at(attr_size_it->first).data(),
+                   attr_size_it->second);
+            current_write_offset += attr_size_it->second;
+        }
     }
 
     bool write_rst = mxlog_writer_.Write(current_write_buf + mxlog_buffer_writer_.buf_offset, record_size);
@@ -331,6 +442,114 @@ MXLogBuffer::Next(const uint64_t last_applied_lsn, MXLogRecord& record) {
         record.data = current_read_buf + current_read_offset;
     } else {
         record.data = nullptr;
+    }
+
+    mxlog_buffer_reader_.buf_offset = uint32_t(head->mxl_lsn & LSN_OFFSET_MASK);
+    return WAL_SUCCESS;
+}
+
+ErrorCode
+MXLogBuffer::NextEntity(const uint64_t last_applied_lsn, milvus::engine::wal::MXLogRecord& record) {
+    // init output
+    record.type = MXLogType::None;
+
+    // reader catch up to writer, no next record, read fail
+    if (GetReadLsn() >= last_applied_lsn) {
+        return WAL_SUCCESS;
+    }
+
+    // otherwise, it means there must exists next record, in buffer or wal log
+    bool need_load_new = false;
+    std::unique_lock<std::mutex> lck(mutex_);
+    if (mxlog_buffer_reader_.file_no != mxlog_buffer_writer_.file_no) {
+        if (mxlog_buffer_reader_.buf_offset == mxlog_buffer_reader_.max_offset) {  // last record
+            mxlog_buffer_reader_.file_no++;
+            mxlog_buffer_reader_.buf_offset = 0;
+            need_load_new = (mxlog_buffer_reader_.file_no != mxlog_buffer_writer_.file_no);
+            if (!need_load_new) {
+                // read reach write buffer
+                mxlog_buffer_reader_.buf_idx = mxlog_buffer_writer_.buf_idx;
+            }
+        }
+    }
+    lck.unlock();
+
+    if (need_load_new) {
+        MXLogFileHandler mxlog_reader(mxlog_writer_.GetFilePath());
+        mxlog_reader.SetFileName(ToFileName(mxlog_buffer_reader_.file_no));
+        mxlog_reader.SetFileOpenMode("r");
+        uint32_t file_size = mxlog_reader.Load(buf_[mxlog_buffer_reader_.buf_idx].get(), 0);
+        if (file_size == 0) {
+            LOG_WAL_ERROR_ << "load wal file error " << mxlog_buffer_reader_.file_no;
+            return WAL_FILE_ERROR;
+        }
+        mxlog_buffer_reader_.max_offset = file_size;
+    }
+
+    char* current_read_buf = buf_[mxlog_buffer_reader_.buf_idx].get();
+    uint64_t current_read_offset = mxlog_buffer_reader_.buf_offset;
+
+    hybrid::MXLogRecordHeader* head = (hybrid::MXLogRecordHeader*)(current_read_buf + current_read_offset);
+
+    record.type = (MXLogType)head->mxl_type;
+    record.lsn = head->mxl_lsn;
+    record.length = head->vector_num;
+    record.data_size = head->data_size;
+
+    current_read_offset += hybrid::SizeOfMXLogRecordHeader;
+
+    if (head->table_id_size != 0) {
+        record.collection_id.assign(current_read_buf + current_read_offset, head->table_id_size);
+        current_read_offset += head->table_id_size;
+    } else {
+        record.collection_id = "";
+    }
+
+    if (head->partition_tag_size != 0) {
+        record.partition_tag.assign(current_read_buf + current_read_offset, head->partition_tag_size);
+        current_read_offset += head->partition_tag_size;
+    } else {
+        record.partition_tag = "";
+    }
+
+    if (head->vector_num != 0) {
+        record.ids = (IDNumber*)(current_read_buf + current_read_offset);
+        current_read_offset += head->vector_num * sizeof(IDNumber);
+    } else {
+        record.ids = nullptr;
+    }
+
+    if (record.data_size != 0) {
+        record.data = current_read_buf + current_read_offset;
+    } else {
+        record.data = nullptr;
+    }
+
+    // Read field names
+    if (head->field_name_size.size() > 0) {
+        for (auto size : head->field_name_size) {
+            if (size != 0) {
+                std::string name;
+                name.assign(current_read_buf + current_read_offset, size);
+                record.field_names.emplace_back(name);
+                current_read_offset += size;
+            } else {
+                record.field_names.emplace_back("");
+            }
+        }
+    }
+
+    // Read attributes data
+    auto attr_num = head->attr_size.size();
+    if (attr_num > 0) {
+        for (uint64_t i = 0; i < attr_num; ++i) {
+            auto attr_size =  head->attr_size[i];
+            record.attr_data_size.insert(std::make_pair(record.field_names[i], attr_size));
+            std::vector<uint8_t> data(attr_size);
+            memcpy(data.data(), current_read_buf + current_read_offset, attr_size);
+            record.attr_data.insert(std::make_pair(record.field_names[i], data));
+            current_read_offset += head->attr_size[i];
+        }
     }
 
     mxlog_buffer_reader_.buf_offset = uint32_t(head->mxl_lsn & LSN_OFFSET_MASK);

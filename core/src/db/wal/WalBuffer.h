@@ -67,7 +67,13 @@ class MXLogBuffer {
     Append(MXLogRecord& record);
 
     ErrorCode
+    AppendEntity(MXLogRecord& record);
+
+    ErrorCode
     Next(const uint64_t last_applied_lsn, MXLogRecord& record);
+
+    ErrorCode
+    NextEntity(const uint64_t last_applied_lsn, MXLogRecord& record);
 
     uint64_t
     GetReadLsn();
@@ -91,6 +97,9 @@ class MXLogBuffer {
     uint32_t
     RecordSize(const MXLogRecord& record);
 
+    uint32_t
+    EntityRecordSize(const milvus::engine::wal::MXLogRecord& record, std::vector<uint32_t>& field_name_size);
+
  private:
     uint32_t mxlog_buffer_size_;  // from config
     BufferPtr buf_[2];
@@ -102,6 +111,34 @@ class MXLogBuffer {
 };
 
 using MXLogBufferPtr = std::shared_ptr<MXLogBuffer>;
+
+namespace hybrid {
+
+struct MXLogRecordHeader {
+    uint64_t mxl_lsn;  // log sequence number (high 32 bits: file No. inc by 1, low 32 bits: offset in file, max 4GB)
+    uint8_t mxl_type;  // record type, insert/delete/update/flush...
+    uint16_t table_id_size;
+    uint16_t partition_tag_size;
+    std::vector<uint32_t> field_name_size;
+    uint32_t vector_num;
+    uint32_t data_size;
+    std::vector<uint32_t> attr_size;
+};
+
+const uint32_t SizeOfMXLogRecordHeader = sizeof(MXLogRecordHeader);
+
+#pragma pack(pop)
+
+struct MXLogBufferHandler {
+    uint32_t max_offset;
+    uint32_t file_no;
+    uint32_t buf_offset;
+    uint8_t buf_idx;
+};
+
+
+} // namespace hybrid
+
 
 }  // namespace wal
 }  // namespace engine

@@ -607,6 +607,128 @@ DBImpl::InsertVectors(const std::string& collection_id, const std::string& parti
 }
 
 Status
+CopyToAttr(std::vector<uint8_t>& record, uint64_t row_num,
+           std::unordered_map<std::string, meta::hybrid::DataType>& attr_types,
+           std::unordered_map<std::string, std::vector<uint8_t>>& attr_datas,
+           std::unordered_map<std::string, uint64_t>& attr_nbytes,
+           std::unordered_map<std::string, uint64_t>& attr_data_size) {
+    uint64_t offset = 0;
+    auto attr_it = attr_types.begin();
+    for (; attr_it != attr_types.end(); attr_it++) {
+        switch (attr_it->second) {
+            case meta::hybrid::DataType::INT8: {
+                std::vector<uint8_t> data;
+                data.resize(row_num * sizeof(int8_t));
+
+                std::vector<int64_t> attr_value(row_num, 0);
+                memcpy(attr_value.data(), record.data() + offset, row_num * sizeof(int64_t));
+                offset += row_num * sizeof(int64_t);
+
+                std::vector<int8_t> raw_value(row_num, 0);
+                for (uint64_t i = 0; i < row_num; ++i) {
+                    raw_value[i] = attr_value[i];
+                }
+
+                memcpy(data.data(), raw_value.data(), row_num * sizeof(int8_t));
+                attr_datas.insert(std::make_pair(attr_it->first, data));
+
+                attr_nbytes.insert(std::make_pair(attr_it->first, sizeof(int8_t)));
+                attr_data_size.insert(std::make_pair(attr_it->first, row_num * sizeof(int8_t)));
+                offset += row_num * sizeof(int64_t);
+                break;
+            }
+            case meta::hybrid::DataType::INT16: {
+                std::vector<uint8_t> data;
+                data.resize(row_num * sizeof(int16_t));
+
+                std::vector<int64_t> attr_value(row_num, 0);
+                memcpy(attr_value.data(), record.data() + offset, row_num * sizeof(int64_t));
+                offset += row_num * sizeof(int64_t);
+
+                std::vector<int16_t> raw_value(row_num, 0);
+                for (uint64_t i = 0; i < row_num; ++i) {
+                    raw_value[i] = attr_value[i];
+                }
+
+                memcpy(data.data(), raw_value.data(), row_num * sizeof(int16_t));
+                attr_datas.insert(std::make_pair(attr_it->first, data));
+
+                attr_nbytes.insert(std::make_pair(attr_it->first, sizeof(int16_t)));
+                attr_data_size.insert(std::make_pair(attr_it->first, row_num * sizeof(int16_t)));
+                offset += row_num * sizeof(int64_t);
+                break;
+            }
+            case meta::hybrid::DataType::INT32: {
+                std::vector<uint8_t> data;
+                data.resize(row_num * sizeof(int16_t));
+
+                std::vector<int64_t> attr_value(row_num, 0);
+                memcpy(attr_value.data(), record.data() + offset, row_num * sizeof(int64_t));
+                offset += row_num * sizeof(int64_t);
+
+                std::vector<int32_t> raw_value(row_num, 0);
+                for (uint64_t i = 0; i < row_num; ++i) {
+                    raw_value[i] = attr_value[i];
+                }
+
+                memcpy(data.data(), raw_value.data(), row_num * sizeof(int32_t));
+                attr_datas.insert(std::make_pair(attr_it->first, data));
+
+                attr_nbytes.insert(std::make_pair(attr_it->first, sizeof(int32_t)));
+                attr_data_size.insert(std::make_pair(attr_it->first, row_num * sizeof(int32_t)));
+                offset += row_num * sizeof(int64_t);
+                break;
+            }
+            case meta::hybrid::DataType::INT64: {
+                std::vector<uint8_t> data;
+                data.resize(row_num * sizeof(int64_t));
+                memcpy(data.data(), record.data() + offset, row_num * sizeof(int64_t));
+                attr_datas.insert(std::make_pair(attr_it->first, data));
+
+                attr_nbytes.insert(std::make_pair(attr_it->first, sizeof(int64_t)));
+                attr_data_size.insert(std::make_pair(attr_it->first, row_num * sizeof(int64_t)));
+                offset += row_num * sizeof(int64_t);
+                break;
+            }
+            case meta::hybrid::DataType::FLOAT: {
+                std::vector<uint8_t> data;
+                data.resize(row_num * sizeof(float));
+
+                std::vector<double> attr_value(row_num, 0);
+                memcpy(attr_value.data(), record.data() + offset, row_num * sizeof(double));
+                offset += row_num * sizeof(double);
+
+                std::vector<float> raw_value(row_num, 0);
+                for (uint64_t i = 0; i < row_num; ++i) {
+                    raw_value[i] = attr_value[i];
+                }
+
+                memcpy(data.data(), raw_value.data(), row_num * sizeof(float));
+                attr_datas.insert(std::make_pair(attr_it->first, data));
+
+                attr_nbytes.insert(std::make_pair(attr_it->first, sizeof(float)));
+                attr_data_size.insert(std::make_pair(attr_it->first, row_num * sizeof(float)));
+                offset += row_num * sizeof(double);
+                break;
+            }
+            case meta::hybrid::DataType::DOUBLE: {
+                std::vector<uint8_t> data;
+                data.resize(row_num * sizeof(double));
+                memcpy(data.data(), record.data() + offset, row_num * sizeof(double));
+                attr_datas.insert(std::make_pair(attr_it->first, data));
+
+                attr_nbytes.insert(std::make_pair(attr_it->first, sizeof(double)));
+                attr_data_size.insert(std::make_pair(attr_it->first, row_num * sizeof(double)));
+                offset += row_num * sizeof(double);
+                break;
+            }
+            default: { return Status{DB_ERROR, "Attributes type error"}; }
+        }
+    }
+    return Status::OK();
+}
+
+Status
 DBImpl::InsertEntities(const std::string& collection_id, const std::string& partition_tag,
                        const std::vector<std::string>& field_names, Entity& entity,
                        std::unordered_map<std::string, meta::hybrid::DataType>& attr_types) {
@@ -624,136 +746,57 @@ DBImpl::InsertEntities(const std::string& collection_id, const std::string& part
     }
 
     Status status;
-    // insert entities: collection_name is field id
-    wal::MXLogRecord record;
-    record.lsn = 0;
-    record.collection_id = collection_id;
-    record.partition_tag = partition_tag;
-    record.ids = entity.id_array_.data();
-    record.length = entity.entity_count_;
-
-    auto vector_it = entity.vector_data_.begin();
-    if (vector_it->second.binary_data_.empty()) {
-        record.type = wal::MXLogType::Entity;
-        record.data = vector_it->second.float_data_.data();
-        record.data_size = vector_it->second.float_data_.size() * sizeof(float);
-    } else {
-        //        record.type = wal::MXLogType::InsertBinary;
-        //        record.data = entities.vector_data_[0].binary_data_.data();
-        //        record.length = entities.vector_data_[0].binary_data_.size() * sizeof(uint8_t);
+    std::unordered_map<std::string, std::vector<uint8_t>> attr_data;
+    std::unordered_map<std::string, uint64_t> attr_nbytes;
+    std::unordered_map<std::string, uint64_t> attr_data_size;
+    status = CopyToAttr(entity.attr_value_, entity.entity_count_, attr_types, attr_data, attr_nbytes, attr_data_size);
+    if (!status.ok()) {
+        return status;
     }
 
-    uint64_t offset = 0;
-    for (auto field_name : field_names) {
-        switch (attr_types.at(field_name)) {
-            case meta::hybrid::DataType::INT8: {
-                std::vector<uint8_t> data;
-                data.resize(entity.entity_count_ * sizeof(int8_t));
-
-                std::vector<int64_t> attr_value(entity.entity_count_, 0);
-                memcpy(attr_value.data(), entity.attr_value_.data() + offset, entity.entity_count_ * sizeof(int64_t));
-                offset += entity.entity_count_ * sizeof(int64_t);
-
-                std::vector<int8_t> raw_value(entity.entity_count_, 0);
-                for (uint64_t i = 0; i < entity.entity_count_; ++i) {
-                    raw_value[i] = attr_value[i];
-                }
-
-                memcpy(data.data(), raw_value.data(), entity.entity_count_ * sizeof(int8_t));
-                record.attr_data.insert(std::make_pair(field_name, data));
-
-                record.attr_nbytes.insert(std::make_pair(field_name, sizeof(int8_t)));
-                record.attr_data_size.insert(std::make_pair(field_name, entity.entity_count_ * sizeof(int8_t)));
-                break;
-            }
-            case meta::hybrid::DataType::INT16: {
-                std::vector<uint8_t> data;
-                data.resize(entity.entity_count_ * sizeof(int16_t));
-
-                std::vector<int64_t> attr_value(entity.entity_count_, 0);
-                memcpy(attr_value.data(), entity.attr_value_.data() + offset, entity.entity_count_ * sizeof(int64_t));
-                offset += entity.entity_count_ * sizeof(int64_t);
-
-                std::vector<int16_t> raw_value(entity.entity_count_, 0);
-                for (uint64_t i = 0; i < entity.entity_count_; ++i) {
-                    raw_value[i] = attr_value[i];
-                }
-
-                memcpy(data.data(), raw_value.data(), entity.entity_count_ * sizeof(int16_t));
-                record.attr_data.insert(std::make_pair(field_name, data));
-
-                record.attr_nbytes.insert(std::make_pair(field_name, sizeof(int16_t)));
-                record.attr_data_size.insert(std::make_pair(field_name, entity.entity_count_ * sizeof(int16_t)));
-                break;
-            }
-            case meta::hybrid::DataType::INT32: {
-                std::vector<uint8_t> data;
-                data.resize(entity.entity_count_ * sizeof(int32_t));
-
-                std::vector<int64_t> attr_value(entity.entity_count_, 0);
-                memcpy(attr_value.data(), entity.attr_value_.data() + offset, entity.entity_count_ * sizeof(int64_t));
-                offset += entity.entity_count_ * sizeof(int64_t);
-
-                std::vector<int32_t> raw_value(entity.entity_count_, 0);
-                for (uint64_t i = 0; i < entity.entity_count_; ++i) {
-                    raw_value[i] = attr_value[i];
-                }
-
-                memcpy(data.data(), raw_value.data(), entity.entity_count_ * sizeof(int32_t));
-                record.attr_data.insert(std::make_pair(field_name, data));
-
-                record.attr_nbytes.insert(std::make_pair(field_name, sizeof(int32_t)));
-                record.attr_data_size.insert(std::make_pair(field_name, entity.entity_count_ * sizeof(int32_t)));
-                break;
-            }
-            case meta::hybrid::DataType::INT64: {
-                std::vector<uint8_t> data;
-                data.resize(entity.entity_count_ * sizeof(int64_t));
-                memcpy(data.data(), entity.attr_value_.data() + offset, entity.entity_count_ * sizeof(int64_t));
-                record.attr_data.insert(std::make_pair(field_name, data));
-
-                record.attr_nbytes.insert(std::make_pair(field_name, sizeof(int64_t)));
-                record.attr_data_size.insert(std::make_pair(field_name, entity.entity_count_ * sizeof(int64_t)));
-                offset += entity.entity_count_ * sizeof(int64_t);
-                break;
-            }
-            case meta::hybrid::DataType::FLOAT: {
-                std::vector<uint8_t> data;
-                data.resize(entity.entity_count_ * sizeof(float));
-
-                std::vector<double> attr_value(entity.entity_count_, 0);
-                memcpy(attr_value.data(), entity.attr_value_.data() + offset, entity.entity_count_ * sizeof(double));
-                offset += entity.entity_count_ * sizeof(double);
-
-                std::vector<float> raw_value(entity.entity_count_, 0);
-                for (uint64_t i = 0; i < entity.entity_count_; ++i) {
-                    raw_value[i] = attr_value[i];
-                }
-
-                memcpy(data.data(), raw_value.data(), entity.entity_count_ * sizeof(float));
-                record.attr_data.insert(std::make_pair(field_name, data));
-
-                record.attr_nbytes.insert(std::make_pair(field_name, sizeof(float)));
-                record.attr_data_size.insert(std::make_pair(field_name, entity.entity_count_ * sizeof(float)));
-                break;
-            }
-            case meta::hybrid::DataType::DOUBLE: {
-                std::vector<uint8_t> data;
-                data.resize(entity.entity_count_ * sizeof(double));
-                memcpy(data.data(), entity.attr_value_.data() + offset, entity.entity_count_ * sizeof(double));
-                record.attr_data.insert(std::make_pair(field_name, data));
-
-                record.attr_nbytes.insert(std::make_pair(field_name, sizeof(double)));
-                record.attr_data_size.insert(std::make_pair(field_name, entity.entity_count_ * sizeof(double)));
-                offset += entity.entity_count_ * sizeof(double);
-                break;
-            }
-            default:
-                break;
+    if (options_.wal_enable_) {
+        std::string target_collection_name;
+        status = GetPartitionByTag(collection_id, partition_tag, target_collection_name);
+        if (!status.ok()) {
+            LOG_ENGINE_ERROR_ << LogOut("[%s][%ld] Get partition fail: %s", "insert", 0, status.message().c_str());
+            return status;
         }
+
+        auto vector_it = entity.vector_data_.begin();
+        if (!vector_it->second.binary_data_.empty()) {
+            wal_mgr_->InsertEntities(collection_id, partition_tag, entity.id_array_, vector_it->second.binary_data_,
+                                     attr_types, attr_data);
+        } else if (!vector_it->second.float_data_.empty()) {
+            wal_mgr_->InsertEntities(collection_id, partition_tag, entity.id_array_, vector_it->second.float_data_,
+                                     attr_types, attr_data);
+        }
+        swn_wal_.Notify();
+    } else {
+        // insert entities: collection_name is field id
+        wal::MXLogRecord record;
+        record.lsn = 0;
+        record.collection_id = collection_id;
+        record.partition_tag = partition_tag;
+        record.ids = entity.id_array_.data();
+        record.length = entity.entity_count_;
+
+        auto vector_it = entity.vector_data_.begin();
+        if (vector_it->second.binary_data_.empty()) {
+            record.type = wal::MXLogType::Entity;
+            record.data = vector_it->second.float_data_.data();
+            record.data_size = vector_it->second.float_data_.size() * sizeof(float);
+            record.attr_data = attr_data;
+            record.attr_nbytes = attr_nbytes;
+            record.attr_data_size = attr_data_size;
+        } else {
+            //        record.type = wal::MXLogType::InsertBinary;
+            //        record.data = entities.vector_data_[0].binary_data_.data();
+            //        record.length = entities.vector_data_[0].binary_data_.size() * sizeof(uint8_t);
+        }
+
+        status = ExecWalRecord(record);
     }
 
-    status = ExecWalRecord(record);
     return status;
 }
 
