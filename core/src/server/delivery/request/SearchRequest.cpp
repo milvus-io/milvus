@@ -22,7 +22,7 @@
 #include "utils/TimeRecorder.h"
 #include "utils/ValidationUtil.h"
 
-#ifdef MILVUS_ENABLE_PROFILING
+#ifdef ENABLE_CPU_PROFILING
 #include <gperftools/profiler.h>
 #endif
 
@@ -136,7 +136,7 @@ SearchRequest::OnExecute() {
         rc.RecordSection("check validation");
 
         // step 7: search vectors
-#ifdef MILVUS_ENABLE_PROFILING
+#ifdef ENABLE_CPU_PROFILING
         std::string fname = "/tmp/search_" + CommonUtil::GetCurrentTimeStr() + ".profiling";
         ProfilerStart(fname.c_str());
 #endif
@@ -154,7 +154,7 @@ SearchRequest::OnExecute() {
 
         rc.RecordSection("query vectors from engine");
 
-#ifdef MILVUS_ENABLE_PROFILING
+#ifdef ENABLE_CPU_PROFILING
         ProfilerStop();
 #endif
         fiu_do_on("SearchRequest.OnExecute.query_fail", status = Status(milvus::SERVER_UNEXPECTED_ERROR, ""));
