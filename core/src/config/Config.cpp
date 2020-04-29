@@ -113,8 +113,8 @@ const char* CONFIG_ENGINE_USE_BLAS_THRESHOLD = "use_blas_threshold";
 const char* CONFIG_ENGINE_USE_BLAS_THRESHOLD_DEFAULT = "1100";
 const char* CONFIG_ENGINE_OMP_THREAD_NUM = "omp_thread_num";
 const char* CONFIG_ENGINE_OMP_THREAD_NUM_DEFAULT = "0";
-const char* CONFIG_ENGINE_USE_AVX512 = "use_avx512";
-const char* CONFIG_ENGINE_USE_AVX512_DEFAULT = "true";
+const char* CONFIG_ENGINE_SIMD_TYPE = "simd_type";
+const char* CONFIG_ENGINE_SIMD_TYPE_DEFAULT = "auto";
 const char* CONFIG_ENGINE_GPU_SEARCH_THRESHOLD = "gpu_search_threshold";
 const char* CONFIG_ENGINE_GPU_SEARCH_THRESHOLD_DEFAULT = "1000";
 
@@ -338,8 +338,8 @@ Config::ValidateConfig() {
     int64_t engine_omp_thread_num;
     CONFIG_CHECK(GetEngineConfigOmpThreadNum(engine_omp_thread_num));
 
-    bool engine_use_avx512;
-    CONFIG_CHECK(GetEngineConfigUseAVX512(engine_use_avx512));
+    std::string engine_simd_type;
+    CONFIG_CHECK(GetEngineConfigSimdType(engine_simd_type));
 
 #ifdef MILVUS_GPU_VERSION
     int64_t engine_gpu_search_threshold;
@@ -450,7 +450,7 @@ Config::ResetDefaultConfig() {
     /* engine config */
     CONFIG_CHECK(SetEngineConfigUseBlasThreshold(CONFIG_ENGINE_USE_BLAS_THRESHOLD_DEFAULT));
     CONFIG_CHECK(SetEngineConfigOmpThreadNum(CONFIG_ENGINE_OMP_THREAD_NUM_DEFAULT));
-    CONFIG_CHECK(SetEngineConfigUseAVX512(CONFIG_ENGINE_USE_AVX512_DEFAULT));
+    CONFIG_CHECK(SetEngineConfigSimdType(CONFIG_ENGINE_SIMD_TYPE_DEFAULT));
 
     /* wal config */
     CONFIG_CHECK(SetWalConfigEnable(CONFIG_WAL_ENABLE_DEFAULT));
@@ -577,8 +577,8 @@ Config::SetConfigCli(const std::string& parent_key, const std::string& child_key
             status = SetEngineConfigUseBlasThreshold(value);
         } else if (child_key == CONFIG_ENGINE_OMP_THREAD_NUM) {
             status = SetEngineConfigOmpThreadNum(value);
-        } else if (child_key == CONFIG_ENGINE_USE_AVX512) {
-            status = SetEngineConfigUseAVX512(value);
+        } else if (child_key == CONFIG_ENGINE_SIMD_TYPE) {
+            status = SetEngineConfigSimdType(value);
 #ifdef MILVUS_GPU_VERSION
         } else if (child_key == CONFIG_ENGINE_GPU_SEARCH_THRESHOLD) {
             status = SetEngineConfigGpuSearchThreshold(value);
@@ -1315,11 +1315,12 @@ Config::CheckEngineConfigOmpThreadNum(const std::string& value) {
 }
 
 Status
-Config::CheckEngineConfigUseAVX512(const std::string& value) {
-    if (!ValidationUtil::ValidateStringIsBool(value).ok()) {
-        std::string msg =
-            "Invalid engine config: " + value + ". Possible reason: engine_config.use_avx512 is not a boolean.";
-        return Status(SERVER_INVALID_ARGUMENT, msg);
+Config::CheckEngineConfigSimdType(const std::string& value) {
+    fiu_return_on("check_config_simd_type_fail",
+                  Status(SERVER_INVALID_ARGUMENT, "engine_config.simd_type is not one of avx512, avx2, sse and auto."));
+
+    if (value != "avx512" && value != "avx2" && value != "sse" && value != "auto") {
+        return Status(SERVER_INVALID_ARGUMENT, "engine_config.simd_type is not one of avx512, avx2, sse and auto.");
     }
     return Status::OK();
 }
@@ -1927,12 +1928,9 @@ Config::GetEngineConfigOmpThreadNum(int64_t& value) {
 }
 
 Status
-Config::GetEngineConfigUseAVX512(bool& value) {
-    std::string str = GetConfigStr(CONFIG_ENGINE, CONFIG_ENGINE_USE_AVX512, CONFIG_ENGINE_USE_AVX512_DEFAULT);
-    CONFIG_CHECK(CheckEngineConfigUseAVX512(str));
-    std::transform(str.begin(), str.end(), str.begin(), ::tolower);
-    value = (str == "true" || str == "on" || str == "yes" || str == "1");
-    return Status::OK();
+Config::GetEngineConfigSimdType(std::string& value) {
+    value = GetConfigStr(CONFIG_ENGINE, CONFIG_ENGINE_SIMD_TYPE, CONFIG_ENGINE_SIMD_TYPE_DEFAULT);
+    return CheckEngineConfigSimdType(value);
 }
 
 #ifdef MILVUS_GPU_VERSION
@@ -2333,9 +2331,9 @@ Config::SetEngineConfigOmpThreadNum(const std::string& value) {
 }
 
 Status
-Config::SetEngineConfigUseAVX512(const std::string& value) {
-    CONFIG_CHECK(CheckEngineConfigUseAVX512(value));
-    return SetConfigValueInMem(CONFIG_ENGINE, CONFIG_ENGINE_USE_AVX512, value);
+Config::SetEngineConfigSimdType(const std::string& value) {
+    CONFIG_CHECK(CheckEngineConfigSimdType(value));
+    return SetConfigValueInMem(CONFIG_ENGINE, CONFIG_ENGINE_SIMD_TYPE, value);
 }
 
 /* tracing config */
