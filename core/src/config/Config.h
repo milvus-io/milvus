@@ -109,8 +109,8 @@ extern const char* CONFIG_ENGINE_USE_BLAS_THRESHOLD;
 extern const char* CONFIG_ENGINE_USE_BLAS_THRESHOLD_DEFAULT;
 extern const char* CONFIG_ENGINE_OMP_THREAD_NUM;
 extern const char* CONFIG_ENGINE_OMP_THREAD_NUM_DEFAULT;
-extern const char* CONFIG_ENGINE_USE_AVX512;
-extern const char* CONFIG_ENGINE_USE_AVX512_DEFAULT;
+extern const char* CONFIG_ENGINE_SIMD_TYPE;
+extern const char* CONFIG_ENGINE_SIMD_TYPE_DEFAULT;
 extern const char* CONFIG_ENGINE_GPU_SEARCH_THRESHOLD;
 extern const char* CONFIG_ENGINE_GPU_SEARCH_THRESHOLD_DEFAULT;
 
@@ -284,7 +284,7 @@ class Config {
     Status
     CheckEngineConfigOmpThreadNum(const std::string& value);
     Status
-    CheckEngineConfigUseAVX512(const std::string& value);
+    CheckEngineConfigSimdType(const std::string& value);
 
 #ifdef MILVUS_GPU_VERSION
     Status
@@ -413,7 +413,7 @@ class Config {
     Status
     GetEngineConfigOmpThreadNum(int64_t& value);
     Status
-    GetEngineConfigUseAVX512(bool& value);
+    GetEngineConfigSimdType(std::string& value);
 
 #ifdef MILVUS_GPU_VERSION
     Status
@@ -534,7 +534,7 @@ class Config {
     Status
     SetEngineConfigOmpThreadNum(const std::string& value);
     Status
-    SetEngineConfigUseAVX512(const std::string& value);
+    SetEngineConfigSimdType(const std::string& value);
 
     /* tracing config */
     Status
