@@ -30,7 +30,6 @@
 #include <utility>
 #include <vector>
 
-#include "config/Config.h"
 #include "knowhere/common/Exception.h"
 #include "knowhere/common/Log.h"
 #include "knowhere/index/vector_index/IndexIVF.h"
@@ -308,15 +307,10 @@ IVF::QueryImpl(int64_t n, const float* data, int64_t k, float* distances, int64_
 void
 IVF::SealImpl() {
 #ifdef MILVUS_GPU_VERSION
-    server::Config& config = server::Config::GetInstance();
-    bool gpu_enable = false;
-    config.GetGpuResourceConfigEnable(gpu_enable);
-    if (gpu_enable) {
-        faiss::Index* index = index_.get();
-        auto idx = dynamic_cast<faiss::IndexIVF*>(index);
-        if (idx != nullptr) {
-            idx->to_readonly();
-        }
+    faiss::Index* index = index_.get();
+    auto idx = dynamic_cast<faiss::IndexIVF*>(index);
+    if (idx != nullptr) {
+        idx->to_readonly();
     }
 #endif
 }
