@@ -6,7 +6,6 @@ Please mark all change in change log and use the issue from GitHub
 
 ## Bug
 -   \#1705 Limit the insert data batch size
--   \#1796 Too much low performance of building index on ubuntu-mysql-version
 -   \#1929 Skip MySQL meta schema field width check
 -   \#1997 Index file missed after compact
 -   \#2073 Fix CheckDBConfigBackendUrl error message
@@ -28,10 +27,12 @@ Please mark all change in change log and use the issue from GitHub
 
 ## Improvement
 -   \#221 Refactor LOG macro
+-   \#1796 Compile Openblas with source code to improve the performance
 -   \#2039 Support Milvus run on SSE CPUs
 -   \#2149 Merge server_cpu_config.template and server_gpu_config.template
 -   \#2153 Upgrade thirdparty oatpp to v1.0.0
 -   \#2167 Merge log_config.conf with server_config.yaml
+-   \#2178 Using elkan K-Means to improve IVF
 
 ## Task
 
