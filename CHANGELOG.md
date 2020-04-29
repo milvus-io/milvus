@@ -7,6 +7,7 @@ Please mark all change in change log and use the issue from GitHub
 ## Bug
 -   \#1705 Limit the insert data batch size
 -   \#1929 Skip MySQL meta schema field width check
+-   \#1946 Fix load index file CPU2GPU fail during searching
 -   \#1997 Index file missed after compact
 -   \#2073 Fix CheckDBConfigBackendUrl error message
 -   \#2076 CheckMetricConfigAddress error message
