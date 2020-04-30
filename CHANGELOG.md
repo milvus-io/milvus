@@ -27,6 +27,7 @@ Please mark all change in change log and use the issue from GitHub
 -   \#2059 Add lock file avoid multiple instances modifying data at the same time
 -   \#2064 Warn when use SQLite as metadata management
 -   \#2111 Check GPU environment before start server
+-   \#2206 Log file rotating
 
 ## Improvement
 -   \#221 Refactor LOG macro
