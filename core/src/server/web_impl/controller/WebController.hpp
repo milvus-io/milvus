@@ -19,16 +19,17 @@
 #include <oatpp/parser/json/mapping/ObjectMapper.hpp>
 #include <oatpp/web/server/api/ApiController.hpp>
 
-#include "utils/Log.h"
-#include "utils/TimeRecorder.h"
-
 #include "server/web_impl/Constants.h"
+#include "server/web_impl/dto/CollectionDto.hpp"
 #include "server/web_impl/dto/ConfigDto.hpp"
 #include "server/web_impl/dto/IndexDto.hpp"
 #include "server/web_impl/dto/PartitionDto.hpp"
-#include "server/web_impl/dto/CollectionDto.hpp"
 #include "server/web_impl/dto/VectorDto.hpp"
 #include "server/web_impl/handler/WebRequestHandler.h"
+#include "utils/Log.h"
+#include "utils/TimeRecorder.h"
+
+#define WEB_LOG_PREFIX "[Web] "
 
 namespace milvus {
 namespace server {

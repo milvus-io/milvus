@@ -32,7 +32,6 @@
 #include "server/web_impl/dto/VectorDto.hpp"
 #include "server/web_impl/handler/WebRequestHandler.h"
 #include "src/version.h"
-#include "unittest/server/utils.h"
 #include "utils/CommonUtil.h"
 
 static const char* COLLECTION_NAME = "test_web";
