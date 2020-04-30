@@ -11,32 +11,16 @@
 
 #pragma once
 
-#include "server/web_impl/dto/Dto.h"
-#include "server/web_impl/dto/StatusDto.hpp"
+#include "utils/Status.h"
 
 namespace milvus {
 namespace server {
-namespace web {
 
-#include OATPP_CODEGEN_BEGIN(DTO)
-
-class PartitionRequestDto : public oatpp::data::mapping::type::Object {
- DTO_INIT(PartitionRequestDto, Object)
-
-    DTO_FIELD(String, partition_tag);
+class StorageChecker {
+ public:
+    static Status
+    CheckStoragePermission();
 };
 
-using PartitionFieldsDto = PartitionRequestDto;
-
-class PartitionListDto : public oatpp::data::mapping::type::Object {
- DTO_INIT(PartitionListDto, Object)
-
-    DTO_FIELD(List<PartitionFieldsDto::ObjectWrapper>::ObjectWrapper, partitions);
-    DTO_FIELD(Int64, count) = 0L;
-};
-
-#include OATPP_CODEGEN_END(DTO)
-
-} // namespace web
-} // namespace server
-} // namespace milvus
+}  // namespace server
+}  // namespace milvus

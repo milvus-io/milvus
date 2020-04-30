@@ -74,6 +74,23 @@ IndexFailedChecker::MarkSucceedIndexFile(const meta::SegmentSchema& file) {
     return Status::OK();
 }
 
+bool
+IndexFailedChecker::IsFailedIndexFile(const meta::SegmentSchema& file) {
+    std::lock_guard<std::mutex> lck(mutex_);
+
+    auto it_failed_files = index_failed_files_.find(file.collection_id_);
+    if (it_failed_files != index_failed_files_.end()) {
+        auto it_failed_file = it_failed_files->second.find(file.file_id_);
+        if (it_failed_file != it_failed_files->second.end()) {
+            if (it_failed_file->second.size() >= INDEX_FAILED_RETRY_TIME) {
+                return true;
+            }
+        }
+    }
+
+    return false;
+}
+
 Status
 IndexFailedChecker::IgnoreFailedIndexFiles(meta::SegmentsSchema& table_files) {
     std::lock_guard<std::mutex> lck(mutex_);

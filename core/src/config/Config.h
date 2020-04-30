@@ -109,8 +109,8 @@ extern const char* CONFIG_ENGINE_USE_BLAS_THRESHOLD;
 extern const char* CONFIG_ENGINE_USE_BLAS_THRESHOLD_DEFAULT;
 extern const char* CONFIG_ENGINE_OMP_THREAD_NUM;
 extern const char* CONFIG_ENGINE_OMP_THREAD_NUM_DEFAULT;
-extern const char* CONFIG_ENGINE_USE_AVX512;
-extern const char* CONFIG_ENGINE_USE_AVX512_DEFAULT;
+extern const char* CONFIG_ENGINE_SIMD_TYPE;
+extern const char* CONFIG_ENGINE_SIMD_TYPE_DEFAULT;
 extern const char* CONFIG_ENGINE_GPU_SEARCH_THRESHOLD;
 extern const char* CONFIG_ENGINE_GPU_SEARCH_THRESHOLD_DEFAULT;
 
@@ -148,6 +148,22 @@ extern const int64_t CONFIG_WAL_BUFFER_SIZE_MAX;
 extern const int64_t CONFIG_WAL_BUFFER_SIZE_MIN;
 extern const char* CONFIG_WAL_WAL_PATH;
 extern const char* CONFIG_WAL_WAL_PATH_DEFAULT;
+
+/* logs config */
+extern const char* CONFIG_LOGS;
+extern const char* CONFIG_LOGS_TRACE_ENABLE;
+extern const char* CONFIG_LOGS_TRACE_ENABLE_DEFAULT;
+extern const char* CONFIG_LOGS_DEBUG_ENABLE;
+extern const char* CONFIG_LOGS_DEBUG_ENABLE_DEFAULT;
+extern const char* CONFIG_LOGS_INFO_ENABLE;
+extern const char* CONFIG_LOGS_INFO_ENABLE_DEFAULT;
+extern const char* CONFIG_LOGS_WARNING_ENABLE;
+extern const char* CONFIG_LOGS_WARNING_ENABLE_DEFAULT;
+extern const char* CONFIG_LOGS_ERROR_ENABLE;
+extern const char* CONFIG_LOGS_ERROR_ENABLE_DEFAULT;
+extern const char* CONFIG_LOGS_FATAL_ENABLE;
+extern const char* CONFIG_LOGS_FATAL_ENABLE_DEFAULT;
+extern const char* CONFIG_LOGS_PATH;
 
 class Config {
  private:
@@ -268,7 +284,7 @@ class Config {
     Status
     CheckEngineConfigOmpThreadNum(const std::string& value);
     Status
-    CheckEngineConfigUseAVX512(const std::string& value);
+    CheckEngineConfigSimdType(const std::string& value);
 
 #ifdef MILVUS_GPU_VERSION
     Status
@@ -300,6 +316,22 @@ class Config {
     CheckWalConfigBufferSize(const std::string& value);
     Status
     CheckWalConfigWalPath(const std::string& value);
+
+    /* logs config */
+    Status
+    CheckLogsTraceEnable(const std::string& value);
+    Status
+    CheckLogsDebugEnable(const std::string& value);
+    Status
+    CheckLogsInfoEnable(const std::string& value);
+    Status
+    CheckLogsWarningEnable(const std::string& value);
+    Status
+    CheckLogsErrorEnable(const std::string& value);
+    Status
+    CheckLogsFatalEnable(const std::string& value);
+    Status
+    CheckLogsPath(const std::string& value);
 
     std::string
     GetConfigStr(const std::string& parent_key, const std::string& child_key, const std::string& default_value = "");
@@ -381,7 +413,7 @@ class Config {
     Status
     GetEngineConfigOmpThreadNum(int64_t& value);
     Status
-    GetEngineConfigUseAVX512(bool& value);
+    GetEngineConfigSimdType(std::string& value);
 
 #ifdef MILVUS_GPU_VERSION
     Status
@@ -413,6 +445,22 @@ class Config {
     GetWalConfigBufferSize(int64_t& value);
     Status
     GetWalConfigWalPath(std::string& value);
+
+    /* logs config */
+    Status
+    GetLogsTraceEnable(bool& value);
+    Status
+    GetLogsDebugEnable(bool& value);
+    Status
+    GetLogsInfoEnable(bool& value);
+    Status
+    GetLogsWarningEnable(bool& value);
+    Status
+    GetLogsErrorEnable(bool& value);
+    Status
+    GetLogsFatalEnable(bool& value);
+    Status
+    GetLogsPath(std::string& value);
 
     Status
     GetServerRestartRequired(bool& required);
@@ -486,7 +534,7 @@ class Config {
     Status
     SetEngineConfigOmpThreadNum(const std::string& value);
     Status
-    SetEngineConfigUseAVX512(const std::string& value);
+    SetEngineConfigSimdType(const std::string& value);
 
     /* tracing config */
     Status
@@ -501,6 +549,22 @@ class Config {
     SetWalConfigBufferSize(const std::string& value);
     Status
     SetWalConfigWalPath(const std::string& value);
+
+    /* logs config */
+    Status
+    SetLogsTraceEnable(const std::string& value);
+    Status
+    SetLogsDebugEnable(const std::string& value);
+    Status
+    SetLogsInfoEnable(const std::string& value);
+    Status
+    SetLogsWarningEnable(const std::string& value);
+    Status
+    SetLogsErrorEnable(const std::string& value);
+    Status
+    SetLogsFatalEnable(const std::string& value);
+    Status
+    SetLogsPath(const std::string& value);
 
 #ifdef MILVUS_GPU_VERSION
     Status

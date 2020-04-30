@@ -77,7 +77,8 @@ class FaissGpuResourceMgr {
     Dump();
 
  protected:
-    bool is_init = false;
+    bool initialized_ = false;
+    std::mutex init_mutex_;
 
     std::map<int64_t, std::unique_ptr<std::mutex>> mutex_cache_;
     std::map<int64_t, DeviceParams> devices_params_;

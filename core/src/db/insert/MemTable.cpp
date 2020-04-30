@@ -16,9 +16,9 @@
 #include <unordered_map>
 
 #include "cache/CpuCacheMgr.h"
-#include "db/OngoingFileChecker.h"
 #include "db/Utils.h"
 #include "db/insert/MemTable.h"
+#include "db/meta/FilesHolder.h"
 #include "knowhere/index/vector_index/VecIndex.h"
 #include "segment/SegmentReader.h"
 #include "utils/Log.h"
@@ -206,22 +206,22 @@ MemTable::ApplyDeletes() {
 
     std::vector<int> file_types{meta::SegmentSchema::FILE_TYPE::RAW, meta::SegmentSchema::FILE_TYPE::TO_INDEX,
                                 meta::SegmentSchema::FILE_TYPE::BACKUP};
-    meta::SegmentsSchema table_files;
-    auto status = meta_->FilesByType(collection_id_, file_types, table_files);
+    meta::FilesHolder files_holder;
+    auto status = meta_->FilesByType(collection_id_, file_types, files_holder);
     if (!status.ok()) {
         std::string err_msg = "Failed to apply deletes: " + status.ToString();
         LOG_ENGINE_ERROR_ << err_msg;
         return Status(DB_ERROR, err_msg);
     }
 
-    OngoingFileChecker::GetInstance().MarkOngoingFiles(table_files);
+    // attention: here is a copy, not reference, since files_holder.UnmarkFile will change the array internal
+    milvus::engine::meta::SegmentsSchema files = files_holder.HoldFiles();
 
-    std::unordered_map<size_t, std::vector<segment::doc_id_t>> ids_to_check_map;
-
-    for (size_t i = 0; i < table_files.size(); ++i) {
-        auto& table_file = table_files[i];
+    // which file need to be apply delete
+    std::unordered_map<size_t, std::vector<segment::doc_id_t>> ids_to_check_map;  // file id mapping to delete ids
+    for (auto& file : files) {
         std::string segment_dir;
-        utils::GetParentPath(table_file.location_, segment_dir);
+        utils::GetParentPath(file.location_, segment_dir);
 
         segment::SegmentReader segment_reader(segment_dir);
         segment::IdBloomFilterPtr id_bloom_filter_ptr;
@@ -229,37 +229,35 @@ MemTable::ApplyDeletes() {
 
         for (auto& id : doc_ids_to_delete_) {
             if (id_bloom_filter_ptr->Check(id)) {
-                ids_to_check_map[i].emplace_back(id);
+                ids_to_check_map[file.id_].emplace_back(id);
             }
         }
     }
 
-    meta::SegmentsSchema files_to_check;
-    for (auto& kv : ids_to_check_map) {
-        files_to_check.emplace_back(table_files[kv.first]);
+    // release unused files
+    for (auto& file : files) {
+        if (ids_to_check_map.find(file.id_) == ids_to_check_map.end()) {
+            files_holder.UnmarkFile(file);
+        }
     }
 
-    OngoingFileChecker::GetInstance().UnmarkOngoingFiles(table_files);
+    // attention: here is a copy, not reference, since files_holder.UnmarkFile will change the array internal
+    milvus::engine::meta::SegmentsSchema hold_files = files_holder.HoldFiles();
+    recorder.RecordSection("Found " + std::to_string(hold_files.size()) + " segment to apply deletes");
 
-    OngoingFileChecker::GetInstance().MarkOngoingFiles(files_to_check);
+    meta::SegmentsSchema files_to_update;
+    for (auto& file : hold_files) {
+        LOG_ENGINE_DEBUG_ << "Applying deletes in segment: " << file.segment_id_;
 
-    recorder.RecordSection("Found " + std::to_string(ids_to_check_map.size()) + " segment to apply deletes");
-
-    meta::SegmentsSchema table_files_to_update;
-
-    for (auto& kv : ids_to_check_map) {
-        auto& table_file = table_files[kv.first];
-        LOG_ENGINE_DEBUG_ << "Applying deletes in segment: " << table_file.segment_id_;
-
-        TimeRecorder rec("handle segment " + table_file.segment_id_);
+        TimeRecorder rec("handle segment " + file.segment_id_);
 
         std::string segment_dir;
-        utils::GetParentPath(table_file.location_, segment_dir);
+        utils::GetParentPath(file.location_, segment_dir);
         segment::SegmentReader segment_reader(segment_dir);
 
-        auto& segment_id = table_file.segment_id_;
-        meta::SegmentsSchema segment_files;
-        status = meta_->GetCollectionFilesBySegmentId(segment_id, segment_files);
+        auto& segment_id = file.segment_id_;
+        meta::FilesHolder segment_holder;
+        status = meta_->GetCollectionFilesBySegmentId(segment_id, segment_holder);
         if (!status.ok()) {
             break;
         }
@@ -267,8 +265,9 @@ MemTable::ApplyDeletes() {
         // Get all index that contains blacklist in cache
         std::vector<knowhere::VecIndexPtr> indexes;
         std::vector<faiss::ConcurrentBitsetPtr> blacklists;
-        for (auto& file : segment_files) {
-            auto data_obj_ptr = cache::CpuCacheMgr::GetInstance()->GetIndex(file.location_);
+        milvus::engine::meta::SegmentsSchema& segment_files = segment_holder.HoldFiles();
+        for (auto& segment_file : segment_files) {
+            auto data_obj_ptr = cache::CpuCacheMgr::GetInstance()->GetIndex(segment_file.location_);
             auto index = std::static_pointer_cast<knowhere::VecIndex>(data_obj_ptr);
             if (index != nullptr) {
                 faiss::ConcurrentBitsetPtr blacklist = index->GetBlacklist();
@@ -290,7 +289,7 @@ MemTable::ApplyDeletes() {
             break;
         }
 
-        auto& ids_to_check = kv.second;
+        auto& ids_to_check = ids_to_check_map[file.id_];
 
         segment::DeletedDocsPtr deleted_docs = std::make_shared<segment::DeletedDocs>();
 
@@ -361,11 +360,13 @@ MemTable::ApplyDeletes() {
         rec.RecordSection("Updated bloom filter");
 
         // Update collection file row count
-        for (auto& file : segment_files) {
-            if (file.file_type_ == meta::SegmentSchema::RAW || file.file_type_ == meta::SegmentSchema::TO_INDEX ||
-                file.file_type_ == meta::SegmentSchema::INDEX || file.file_type_ == meta::SegmentSchema::BACKUP) {
-                file.row_count_ -= delete_count;
-                table_files_to_update.emplace_back(file);
+        for (auto& segment_file : segment_files) {
+            if (segment_file.file_type_ == meta::SegmentSchema::RAW ||
+                segment_file.file_type_ == meta::SegmentSchema::TO_INDEX ||
+                segment_file.file_type_ == meta::SegmentSchema::INDEX ||
+                segment_file.file_type_ == meta::SegmentSchema::BACKUP) {
+                segment_file.row_count_ -= delete_count;
+                files_to_update.emplace_back(segment_file);
             }
         }
         rec.RecordSection("Update collection file row count in vector");
@@ -373,7 +374,7 @@ MemTable::ApplyDeletes() {
 
     recorder.RecordSection("Finished " + std::to_string(ids_to_check_map.size()) + " segment to apply deletes");
 
-    status = meta_->UpdateCollectionFilesRowCount(table_files_to_update);
+    status = meta_->UpdateCollectionFilesRowCount(files_to_update);
 
     if (!status.ok()) {
         std::string err_msg = "Failed to apply deletes: " + status.ToString();
@@ -385,8 +386,6 @@ MemTable::ApplyDeletes() {
 
     recorder.RecordSection("Update deletes to meta");
     recorder.ElapseFromBegin("Finished deletes");
-
-    OngoingFileChecker::GetInstance().UnmarkOngoingFiles(files_to_check);
 
     return Status::OK();
 }

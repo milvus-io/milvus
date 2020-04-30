@@ -22,7 +22,6 @@
 #include <fiu-local.h>
 #include <fiu-control.h>
 #include <boost/filesystem/operations.hpp>
-#include "src/db/OngoingFileChecker.h"
 
 TEST_F(MetaTest, COLLECTION_TEST) {
     auto collection_id = "meta_test_table";
@@ -149,13 +148,13 @@ TEST_F(MetaTest, FALID_TEST) {
         fiu_disable("SqliteMetaImpl.DeleteCollectionFiles.throw_exception");
     }
     {
-        milvus::engine::meta::SegmentsSchema schemas;
+        milvus::engine::meta::FilesHolder files_holder;
         std::vector<size_t> ids;
-        status = impl_->GetCollectionFiles("notexist", ids, schemas);
+        status = impl_->GetCollectionFiles("notexist", ids, files_holder);
         ASSERT_FALSE(status.ok());
 
         FIU_ENABLE_FIU("SqliteMetaImpl.GetCollectionFiles.throw_exception");
-        status = impl_->GetCollectionFiles(collection_id, ids, schemas);
+        status = impl_->GetCollectionFiles(collection_id, ids, files_holder);
         ASSERT_FALSE(status.ok());
         ASSERT_EQ(status.code(), milvus::DB_META_TRANSACTION_FAILED);
         fiu_disable("SqliteMetaImpl.GetCollectionFiles.throw_exception");
@@ -260,12 +259,12 @@ TEST_F(MetaTest, FALID_TEST) {
         fiu_disable("SqliteMetaImpl.GetPartitionName.throw_exception");
     }
     {
-        milvus::engine::meta::SegmentsSchema table_files;
-        status = impl_->FilesToSearch("notexist", table_files);
+        milvus::engine::meta::FilesHolder files_holder;
+        status = impl_->FilesToSearch("notexist", files_holder);
         ASSERT_EQ(status.code(), milvus::DB_NOT_FOUND);
 
         FIU_ENABLE_FIU("SqliteMetaImpl.FilesToSearch.throw_exception");
-        status = impl_->FilesToSearch(collection_id, table_files);
+        status = impl_->FilesToSearch(collection_id, files_holder);
         ASSERT_EQ(status.code(), milvus::DB_META_TRANSACTION_FAILED);
         fiu_disable("SqliteMetaImpl.FilesToSearch.throw_exception");
     }
@@ -277,23 +276,23 @@ TEST_F(MetaTest, FALID_TEST) {
         file.file_type_ = milvus::engine::meta::SegmentSchema::TO_INDEX;
         impl_->UpdateCollectionFile(file);
 
-        milvus::engine::meta::SegmentsSchema files;
+        milvus::engine::meta::FilesHolder files_holder;
         FIU_ENABLE_FIU("SqliteMetaImpl_FilesToIndex_CollectionNotFound");
-        status = impl_->FilesToIndex(files);
+        status = impl_->FilesToIndex(files_holder);
         ASSERT_EQ(status.code(), milvus::DB_NOT_FOUND);
         fiu_disable("SqliteMetaImpl_FilesToIndex_CollectionNotFound");
 
         FIU_ENABLE_FIU("SqliteMetaImpl.FilesToIndex.throw_exception");
-        status = impl_->FilesToIndex(files);
+        status = impl_->FilesToIndex(files_holder);
         ASSERT_EQ(status.code(), milvus::DB_META_TRANSACTION_FAILED);
         fiu_disable("SqliteMetaImpl.FilesToIndex.throw_exception");
     }
     {
-        milvus::engine::meta::SegmentsSchema files;
+        milvus::engine::meta::FilesHolder files_holder;
         std::vector<int> file_types;
         file_types.push_back(milvus::engine::meta::SegmentSchema::INDEX);
         FIU_ENABLE_FIU("SqliteMetaImpl.FilesByType.throw_exception");
-        status = impl_->FilesByType(collection_id, file_types, files);
+        status = impl_->FilesByType(collection_id, file_types, files_holder);
         ASSERT_EQ(status.code(), milvus::DB_META_TRANSACTION_FAILED);
         fiu_disable("SqliteMetaImpl.FilesByType.throw_exception");
     }
@@ -410,8 +409,10 @@ TEST_F(MetaTest, COLLECTION_FILE_ROW_COUNT_TEST) {
     ASSERT_EQ(table_file.row_count_, cnt);
 
     std::vector<size_t> ids = {table_file.id_};
-    milvus::engine::meta::SegmentsSchema schemas;
-    status = impl_->GetCollectionFiles(collection_id, ids, schemas);
+    milvus::engine::meta::FilesHolder files_holder;
+    status = impl_->GetCollectionFiles(collection_id, ids, files_holder);
+
+    milvus::engine::meta::SegmentsSchema& schemas = files_holder.HoldFiles();
     ASSERT_EQ(schemas.size(), 1UL);
     ASSERT_EQ(table_file.row_count_, schemas[0].row_count_);
     ASSERT_EQ(table_file.file_id_, schemas[0].file_id_);
@@ -470,10 +471,11 @@ TEST_F(MetaTest, ARCHIVE_TEST_DAYS) {
     impl.Archive();
     int i = 0;
 
-    milvus::engine::meta::SegmentsSchema files_get;
-    status = impl.GetCollectionFiles(table_file.collection_id_, ids, files_get);
+    milvus::engine::meta::FilesHolder files_holder;
+    status = impl.GetCollectionFiles(table_file.collection_id_, ids, files_holder);
     ASSERT_TRUE(status.ok());
 
+    milvus::engine::meta::SegmentsSchema& files_get = files_holder.HoldFiles();
     for (auto& file : files_get) {
         if (days[i] < days_num) {
             ASSERT_EQ(file.file_type_, milvus::engine::meta::SegmentSchema::NEW);
@@ -526,10 +528,11 @@ TEST_F(MetaTest, ARCHIVE_TEST_DISK) {
     impl.Archive();
     int i = 0;
 
-    milvus::engine::meta::SegmentsSchema files_get;
-    status = impl.GetCollectionFiles(table_file.collection_id_, ids, files_get);
+    milvus::engine::meta::FilesHolder files_holder;
+    status = impl.GetCollectionFiles(table_file.collection_id_, ids, files_holder);
     ASSERT_TRUE(status.ok());
 
+    milvus::engine::meta::SegmentsSchema& files_get = files_holder.HoldFiles();
     for (auto& file : files_get) {
         if (i >= 5) {
             ASSERT_EQ(file.file_type_, milvus::engine::meta::SegmentSchema::NEW);
@@ -609,39 +612,40 @@ TEST_F(MetaTest, COLLECTION_FILES_TEST) {
     ASSERT_TRUE(status.ok());
     ASSERT_EQ(total_row_count, raw_files_cnt + to_index_files_cnt + index_files_cnt);
 
-    milvus::engine::meta::SegmentsSchema files;
-    status = impl_->FilesToIndex(files);
-    ASSERT_EQ(files.size(), to_index_files_cnt);
+    milvus::engine::meta::FilesHolder files_holder;
+    status = impl_->FilesToIndex(files_holder);
+    ASSERT_EQ(files_holder.HoldFiles().size(), to_index_files_cnt);
 
-    milvus::engine::meta::SegmentsSchema table_files;
-    status = impl_->FilesToMerge(collection.collection_id_, table_files);
-    ASSERT_EQ(table_files.size(), raw_files_cnt);
+    files_holder.ReleaseFiles();
+    status = impl_->FilesToMerge(collection.collection_id_, files_holder);
+    ASSERT_EQ(files_holder.HoldFiles().size(), raw_files_cnt);
 
-    status = impl_->FilesToIndex(files);
-    ASSERT_EQ(files.size(), to_index_files_cnt);
+    files_holder.ReleaseFiles();
+    status = impl_->FilesToIndex(files_holder);
+    ASSERT_EQ(files_holder.HoldFiles().size(), to_index_files_cnt);
 
-    table_files.clear();
-    status = impl_->FilesToSearch(collection_id, table_files);
-    ASSERT_EQ(table_files.size(), to_index_files_cnt + raw_files_cnt + index_files_cnt);
+    files_holder.ReleaseFiles();
+    status = impl_->FilesToSearch(collection_id, files_holder);
+    ASSERT_EQ(files_holder.HoldFiles().size(), to_index_files_cnt + raw_files_cnt + index_files_cnt);
 
     std::vector<size_t> ids;
-    for (auto& file : table_files) {
+    for (auto& file : files_holder.HoldFiles()) {
         ids.push_back(file.id_);
     }
-    size_t cnt = table_files.size();
-    table_files.clear();
-    status = impl_->FilesByID(ids, table_files);
-    ASSERT_EQ(table_files.size(), cnt);
+    size_t cnt = files_holder.HoldFiles().size();
+    files_holder.ReleaseFiles();
+    status = impl_->FilesByID(ids, files_holder);
+    ASSERT_EQ(files_holder.HoldFiles().size(), cnt);
 
-    table_files.clear();
+    files_holder.ReleaseFiles();
     ids = {9999999999UL};
-    status = impl_->FilesByID(ids, table_files);
-    ASSERT_EQ(table_files.size(), 0);
+    status = impl_->FilesByID(ids, files_holder);
+    ASSERT_EQ(files_holder.HoldFiles().size(), 0);
 
-    table_files.clear();
+    files_holder.ReleaseFiles();
     std::vector<int> file_types;
-    status = impl_->FilesByType(collection.collection_id_, file_types, table_files);
-    ASSERT_TRUE(table_files.empty());
+    status = impl_->FilesByType(collection.collection_id_, file_types, files_holder);
+    ASSERT_TRUE(files_holder.HoldFiles().empty());
     ASSERT_FALSE(status.ok());
 
     file_types = {
@@ -650,11 +654,11 @@ TEST_F(MetaTest, COLLECTION_FILES_TEST) {
         milvus::engine::meta::SegmentSchema::INDEX, milvus::engine::meta::SegmentSchema::RAW,
         milvus::engine::meta::SegmentSchema::BACKUP,
     };
-    status = impl_->FilesByType(collection.collection_id_, file_types, table_files);
+    status = impl_->FilesByType(collection.collection_id_, file_types, files_holder);
     ASSERT_TRUE(status.ok());
     uint64_t total_cnt = new_index_files_cnt + new_merge_files_cnt + backup_files_cnt + new_files_cnt + raw_files_cnt +
                          to_index_files_cnt + index_files_cnt;
-    ASSERT_EQ(table_files.size(), total_cnt);
+    ASSERT_EQ(files_holder.HoldFiles().size(), total_cnt);
 
     status = impl_->DeleteCollectionFiles(collection_id);
     ASSERT_TRUE(status.ok());
@@ -670,15 +674,14 @@ TEST_F(MetaTest, COLLECTION_FILES_TEST) {
     status = impl_->CreateCollectionFile(table_file);
 
     std::vector<int> files_to_delete;
-    milvus::engine::meta::SegmentsSchema files_schema;
+    files_holder.ReleaseFiles();
     files_to_delete.push_back(milvus::engine::meta::SegmentSchema::TO_DELETE);
-    status = impl_->FilesByType(collection_id, files_to_delete, files_schema);
+    status = impl_->FilesByType(collection_id, files_to_delete, files_holder);
     ASSERT_TRUE(status.ok());
 
     table_file.collection_id_ = collection_id;
     table_file.file_type_ = milvus::engine::meta::SegmentSchema::TO_DELETE;
-    table_file.file_id_ = files_schema.front().file_id_;
-    milvus::engine::OngoingFileChecker::GetInstance().MarkOngoingFile(table_file);
+    table_file.file_id_ = files_holder.HoldFiles().front().file_id_;
     status = impl_->CleanUpFilesWithTTL(1UL);
     ASSERT_TRUE(status.ok());
 

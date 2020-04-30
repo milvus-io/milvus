@@ -246,7 +246,7 @@ TEST(UtilTest, BLOCKINGQUEUE_TEST) {
 }
 
 TEST(UtilTest, LOG_TEST) {
-    auto status = milvus::server::InitLog(LOG_FILE_PATH);
+    auto status = milvus::server::InitLog(true, true, true, true, true, true, "/tmp/test_util");
     ASSERT_TRUE(status.ok());
 
     EXPECT_FALSE(el::Loggers::hasFlag(el::LoggingFlag::NewLineForContainer));
