@@ -458,22 +458,15 @@ ExecutionEngineImpl::Load(bool to_cache) {
                     LOG_ENGINE_ERROR_ << msg;
                     return Status(DB_ERROR, msg);
                 } else {
-                    if (index_->index_mode() == knowhere::IndexMode::MODE_GPU) {
+                    bool gpu_enable = false;
 #ifdef MILVUS_GPU_VERSION
-                        server::Config& config = server::Config::GetInstance();
-                        bool gpu_enable = false;
-                        CONFIG_CHECK(config.GetGpuResourceConfigEnable(gpu_enable));
-                        if (!gpu_enable) {
-                            std::string err_msg =
-                                "Index with type " + index_->index_type() + " must be used in GPU mode";
-                            LOG_ENGINE_ERROR_ << err_msg;
-                            return Status(DB_ERROR, err_msg);
-                        }
-#else
+                    server::Config& config = server::Config::GetInstance();
+                    CONFIG_CHECK(config.GetGpuResourceConfigEnable(gpu_enable));
+#endif
+                    if (!gpu_enable && index_->index_mode() == knowhere::IndexMode::MODE_GPU) {
                         std::string err_msg = "Index with type " + index_->index_type() + " must be used in GPU mode";
                         LOG_ENGINE_ERROR_ << err_msg;
                         return Status(DB_ERROR, err_msg);
-#endif
                     }
                     segment::DeletedDocsPtr deleted_docs_ptr;
                     auto status = segment_reader_ptr->LoadDeletedDocs(deleted_docs_ptr);
