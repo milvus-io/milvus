@@ -520,17 +520,17 @@ class TestAddBase:
             assert status.OK()
             assert len(ids) == nq
 
-    @pytest.mark.level(2)
-    def test_add_vectors_without_connect(self, dis_connect, collection):
-        '''
-        target: test add vectors without connection
-        method: create collection and add vectors in it, check if added successfully
-        expected: raise exception
-        '''
-        nq = 5
-        vectors = gen_vectors(nq, dim)
-        with pytest.raises(Exception) as e:
-            status, ids = dis_connect.add_vectors(collection, vectors)
+    # @pytest.mark.level(2)
+    # def test_add_vectors_without_connect(self, dis_connect, collection):
+    #     '''
+    #     target: test add vectors without connection
+    #     method: create collection and add vectors in it, check if added successfully
+    #     expected: raise exception
+    #     '''
+    #     nq = 5
+    #     vectors = gen_vectors(nq, dim)
+    #     with pytest.raises(Exception) as e:
+    #         status, ids = dis_connect.add_vectors(collection, vectors)
 
     def test_add_collection_not_existed(self, connect):
         '''
@@ -601,12 +601,11 @@ class TestAddBase:
         processes = []
         def add():
             milvus = get_milvus(host=args["ip"], port=args["port"], handler=args["handler"])
-            milvus.connect(uri=uri)
             i = 0
             while i < loop_num:
                 status, ids = milvus.add_vectors(collection, vector)
                 i = i + 1
-            milvus.disconnect()
+            # milvus.disconnect()
         for i in range(process_num):
             p = Process(target=add, args=())
             processes.append(p)
@@ -1119,17 +1118,17 @@ class TestAddIP:
         assert status.OK()
         assert len(ids) == nq
 
-    @pytest.mark.level(2)
-    def test_add_vectors_without_connect(self, dis_connect, ip_collection):
-        '''
-        target: test add vectors without connection
-        method: create collection and add vectors in it, check if added successfully
-        expected: raise exception
-        '''
-        nq = 5
-        vectors = gen_vectors(nq, dim)
-        with pytest.raises(Exception) as e:
-            status, ids = dis_connect.add_vectors(ip_collection, vectors)
+    # @pytest.mark.level(2)
+    # def test_add_vectors_without_connect(self, dis_connect, ip_collection):
+    #     '''
+    #     target: test add vectors without connection
+    #     method: create collection and add vectors in it, check if added successfully
+    #     expected: raise exception
+    #     '''
+    #     nq = 5
+    #     vectors = gen_vectors(nq, dim)
+    #     with pytest.raises(Exception) as e:
+    #         status, ids = dis_connect.add_vectors(ip_collection, vectors)
 
     def test_add_vector_dim_not_matched(self, connect, ip_collection):
         '''
