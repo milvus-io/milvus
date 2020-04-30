@@ -83,3 +83,9 @@ def DBErrorHandler(err):
 def InvalidArgumentErrorHandler(err):
     logger.error(err)
     return resp_handler(err, status_pb2.ILLEGAL_RANGE)
+
+
+@server.errorhandler(exceptions.ConnectionNotFoundError)
+def InvalidArgumentErrorHandler(err):
+    logger.error(err)
+    return resp_handler(err, status_pb2.UNEXPECTED_ERROR)
