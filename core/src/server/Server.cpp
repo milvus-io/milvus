@@ -25,6 +25,7 @@
 #include "server/grpc_impl/GrpcServer.h"
 #include "server/init/CpuChecker.h"
 #include "server/init/GpuChecker.h"
+#include "server/init/StorageChecker.h"
 #include "server/web_impl/WebServer.h"
 #include "src/version.h"
 //#include "storage/s3/S3ClientWrapper.h"
@@ -289,6 +290,11 @@ Server::Start() {
 #else
         LOG_SERVER_INFO_ << "CPU edition";
 #endif
+        s = StorageChecker::CheckStoragePermission();
+        if (!s.ok()) {
+            return s;
+        }
+
         s = CpuChecker::CheckCpuInstructionSet();
         if (!s.ok()) {
             return s;
