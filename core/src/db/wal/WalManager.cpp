@@ -399,7 +399,7 @@ WalManager::InsertEntities(const std::string& collection_id,
                            const std::string& partition_tag,
                            const milvus::engine::IDNumbers& entity_ids,
                            const std::vector<T>& vectors,
-                           const std::unordered_map<std::string, engine::meta::hybrid::DataType>& attr_types,
+                           const std::unordered_map<std::string, uint64_t>& attr_nbytes,
                            const std::unordered_map<std::string, std::vector<uint8_t>>& attrs) {
     MXLogType log_type;
     if (std::is_same<T, float>::value) {
@@ -417,41 +417,11 @@ WalManager::InsertEntities(const std::string& collection_id,
 
     MXLogRecord record;
 
-    std::unordered_map<std::string, uint64_t> attr_nbytes;
-    auto type_it = attr_types.begin();
     size_t attr_unit_size = 0;
-    for (; type_it != attr_types.end(); ++type_it) {
-        record.field_names.emplace_back(type_it->first);
-        size_t nbytes = 0;
-        switch (type_it->second) {
-            case engine::meta::hybrid::DataType::INT8: {
-                nbytes = sizeof(int8_t);
-                break;
-            }
-            case engine::meta::hybrid::DataType::INT16: {
-                nbytes = sizeof(int16_t);
-                break;
-            }
-            case engine::meta::hybrid::DataType::INT32: {
-                nbytes = sizeof(int32_t);
-                break;
-            }
-            case engine::meta::hybrid::DataType::INT64: {
-                nbytes = sizeof(int64_t);
-                break;
-            }
-            case engine::meta::hybrid::DataType::FLOAT: {
-                nbytes = sizeof(float);
-                break;
-            }
-            case engine::meta::hybrid::DataType::DOUBLE: {
-                nbytes = sizeof(double);
-                break;
-            }
-            default:return false;
-        }
-        attr_unit_size += nbytes;
-        attr_nbytes.insert(std::make_pair(type_it->first, nbytes));
+    auto attr_it = attr_nbytes.begin();
+    for (; attr_it != attr_nbytes.end(); attr_it++) {
+        record.field_names.emplace_back(attr_it->first);
+        attr_unit_size += attr_it->second;
     }
 
     size_t unit_size = dim * sizeof(T) + sizeof(IDNumber) + attr_unit_size;
@@ -462,6 +432,7 @@ WalManager::InsertEntities(const std::string& collection_id,
     record.type = log_type;
     record.collection_id = collection_id;
     record.partition_tag = partition_tag;
+    record.attr_nbytes = attr_nbytes;
 
     uint64_t new_lsn = 0;
     for (size_t i = 0; i < entity_num; i += record.length) {
@@ -624,8 +595,8 @@ template bool
 WalManager::InsertEntities<float>(const std::string& collection_id,
                                   const std::string& partition_tag,
                                   const milvus::engine::IDNumbers& entity_ids,
-                                  const std::vector<float>& vectors,
-                                  const std::unordered_map<std::string, engine::meta::hybrid::DataType>& attr_types,
+                                  const std::vector<float >& vectors,
+                                  const std::unordered_map<std::string, uint64_t>& attr_nbytes,
                                   const std::unordered_map<std::string, std::vector<uint8_t>>& attrs);
 
 template bool
@@ -633,7 +604,7 @@ WalManager::InsertEntities<uint8_t>(const std::string& collection_id,
                                     const std::string& partition_tag,
                                     const milvus::engine::IDNumbers& entity_ids,
                                     const std::vector<uint8_t>& vectors,
-                                    const std::unordered_map<std::string, engine::meta::hybrid::DataType>& attr_types,
+                                    const std::unordered_map<std::string, uint64_t>& attr_nbytes,
                                     const std::unordered_map<std::string, std::vector<uint8_t>>& attrs);
 
 }  // namespace wal

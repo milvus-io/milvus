@@ -422,7 +422,7 @@ TEST(WalTest, HYBRID_BUFFFER_TEST) {
     uint32_t file_no = 4;
     uint32_t buf_off = 100;
     uint64_t lsn = (uint64_t)file_no << 32 | buf_off;
-    buffer.mxlog_buffer_size_ = 1000;
+    buffer.mxlog_buffer_size_ = 2000;
     buffer.Reset(lsn);
 
     milvus::engine::wal::MXLogRecord record[4];
@@ -442,6 +442,8 @@ TEST(WalTest, HYBRID_BUFFFER_TEST) {
     record[0].field_names[1] = "field_1";
     record[0].attr_data_size.insert(std::make_pair("field_0", length * sizeof(int64_t)));
     record[0].attr_data_size.insert(std::make_pair("field_1", length * sizeof(float)));
+    record[0].attr_nbytes.insert(std::make_pair("field_0", sizeof(uint64_t)));
+    record[0].attr_nbytes.insert(std::make_pair("field_1", sizeof(float)));
 
     std::vector<int64_t> data_0(length);
     std::default_random_engine e;
@@ -471,7 +473,7 @@ TEST(WalTest, HYBRID_BUFFFER_TEST) {
     record[1].type = milvus::engine::wal::MXLogType::Delete;
     record[1].collection_id = "insert_hybrid_collection";
     record[1].partition_tag = "parti1";
-    length = 10
+    length = 10;
     record[1].length = length;
     record[1].ids = (milvus::engine::IDNumber*)malloc(record[0].length * sizeof(milvus::engine::IDNumber));
     record[1].data_size = 0;
@@ -481,6 +483,8 @@ TEST(WalTest, HYBRID_BUFFFER_TEST) {
     record[1].field_names[1] = "field_1";
     record[1].attr_data_size.insert(std::make_pair("field_0", length * sizeof(int64_t)));
     record[1].attr_data_size.insert(std::make_pair("field_1", length * sizeof(float)));
+    record[1].attr_nbytes.insert(std::make_pair("field_0", sizeof(uint64_t)));
+    record[1].attr_nbytes.insert(std::make_pair("field_1", sizeof(float)));
 
     std::vector<int64_t> data1_0(length);
     for (uint64_t i = 0; i < length; ++i) {
@@ -510,9 +514,13 @@ TEST(WalTest, HYBRID_BUFFFER_TEST) {
     ASSERT_EQ(memcmp(read_rst.ids, record[0].ids, read_rst.length * sizeof(milvus::engine::IDNumber)), 0);
     ASSERT_EQ(read_rst.data_size, record[0].data_size);
     ASSERT_EQ(memcmp(read_rst.data, record[0].data, read_rst.data_size), 0);
+    ASSERT_EQ(read_rst.field_names.size(), record[0].field_names.size());
+    ASSERT_EQ(read_rst.field_names[0], record[0].field_names[0]);
+    ASSERT_EQ(read_rst.attr_data.at("field_0").size(), record[0].attr_data.at("field_0").size());
+    ASSERT_EQ(read_rst.attr_nbytes.at("field_0"), record[0].attr_nbytes.at("field_0"));
 
     // read 1
-    ASSERT_EQ(buffer.Next(record[1].lsn, read_rst), milvus::WAL_SUCCESS);
+    ASSERT_EQ(buffer.NextEntity(record[1].lsn, read_rst), milvus::WAL_SUCCESS);
     ASSERT_EQ(read_rst.type, record[1].type);
     ASSERT_EQ(read_rst.collection_id, record[1].collection_id);
     ASSERT_EQ(read_rst.partition_tag, record[1].partition_tag);
@@ -520,32 +528,60 @@ TEST(WalTest, HYBRID_BUFFFER_TEST) {
     ASSERT_EQ(memcmp(read_rst.ids, record[1].ids, read_rst.length * sizeof(milvus::engine::IDNumber)), 0);
     ASSERT_EQ(read_rst.data_size, 0);
     ASSERT_EQ(read_rst.data, nullptr);
+    ASSERT_EQ(read_rst.field_names.size(), record[1].field_names.size());
+    ASSERT_EQ(read_rst.field_names[1], record[1].field_names[1]);
+    ASSERT_EQ(read_rst.attr_data.at("field_1").size(), record[1].attr_data.at("field_1").size());
+    ASSERT_EQ(read_rst.attr_nbytes.at("field_0"), record[1].attr_nbytes.at("field_0"));
 
     // read empty
-    ASSERT_EQ(buffer.Next(record[1].lsn, read_rst), milvus::WAL_SUCCESS);
+    ASSERT_EQ(buffer.NextEntity(record[1].lsn, read_rst), milvus::WAL_SUCCESS);
     ASSERT_EQ(read_rst.type, milvus::engine::wal::MXLogType::None);
 
     // write 2 (new file)
-    record[2].type = milvus::engine::wal::MXLogType::InsertVector;
+    record[2].type = milvus::engine::wal::MXLogType::Entity;
     record[2].collection_id = "insert_table";
     record[2].partition_tag = "parti1";
-    record[2].length = 50;
+    length = 50;
+    record[2].length = length;
     record[2].ids = (milvus::engine::IDNumber*)malloc(record[2].length * sizeof(milvus::engine::IDNumber));
     record[2].data_size = record[2].length * sizeof(float);
     record[2].data = malloc(record[2].data_size);
-    ASSERT_EQ(buffer.Append(record[2]), milvus::WAL_SUCCESS);
+
+    record[2].field_names.resize(2);
+    record[2].field_names[0] = "field_0";
+    record[2].field_names[1] = "field_1";
+    record[2].attr_data_size.insert(std::make_pair("field_0", length * sizeof(int64_t)));
+    record[2].attr_data_size.insert(std::make_pair("field_1", length * sizeof(float)));
+
+    record[2].attr_data.insert(std::make_pair("field_0", attr_data_0));
+    record[2].attr_data.insert(std::make_pair("field_1", attr_data_1));
+    record[2].attr_nbytes.insert(std::make_pair("field_0", sizeof(uint64_t)));
+    record[2].attr_nbytes.insert(std::make_pair("field_1", sizeof(float)));
+
+    ASSERT_EQ(buffer.AppendEntity(record[2]), milvus::WAL_SUCCESS);
     new_file_no = uint32_t(record[2].lsn >> 32);
     ASSERT_EQ(new_file_no, ++file_no);
 
     // write 3 (new file)
-    record[3].type = milvus::engine::wal::MXLogType::InsertBinary;
+    record[3].type = milvus::engine::wal::MXLogType::Entity;
     record[3].collection_id = "insert_table";
     record[3].partition_tag = "parti1";
-    record[3].length = 100;
+    record[3].length = 10;
     record[3].ids = (milvus::engine::IDNumber*)malloc(record[3].length * sizeof(milvus::engine::IDNumber));
     record[3].data_size = record[3].length * sizeof(uint8_t);
     record[3].data = malloc(record[3].data_size);
-    ASSERT_EQ(buffer.Append(record[3]), milvus::WAL_SUCCESS);
+
+    record[3].field_names.resize(2);
+    record[3].field_names[0] = "field_0";
+    record[3].field_names[1] = "field_1";
+    record[3].attr_data_size.insert(std::make_pair("field_0", length * sizeof(int64_t)));
+    record[3].attr_data_size.insert(std::make_pair("field_1", length * sizeof(float)));
+
+    record[3].attr_data.insert(std::make_pair("field_0", attr_data1_0));
+    record[3].attr_data.insert(std::make_pair("field_1", attr_data1_1));
+    record[3].attr_nbytes.insert(std::make_pair("field_0", sizeof(uint64_t)));
+    record[3].attr_nbytes.insert(std::make_pair("field_1", sizeof(float)));
+    ASSERT_EQ(buffer.AppendEntity(record[3]), milvus::WAL_SUCCESS);
     new_file_no = uint32_t(record[3].lsn >> 32);
     ASSERT_EQ(new_file_no, ++file_no);
 
@@ -555,11 +591,11 @@ TEST(WalTest, HYBRID_BUFFFER_TEST) {
     ASSERT_TRUE(buffer.ResetWriteLsn(record[1].lsn));
 
     // write 2 and 3 again
-    ASSERT_EQ(buffer.Append(record[2]), milvus::WAL_SUCCESS);
-    ASSERT_EQ(buffer.Append(record[3]), milvus::WAL_SUCCESS);
+    ASSERT_EQ(buffer.AppendEntity(record[2]), milvus::WAL_SUCCESS);
+    ASSERT_EQ(buffer.AppendEntity(record[3]), milvus::WAL_SUCCESS);
 
     // read 2
-    ASSERT_EQ(buffer.Next(record[3].lsn, read_rst), milvus::WAL_SUCCESS);
+    ASSERT_EQ(buffer.NextEntity(record[3].lsn, read_rst), milvus::WAL_SUCCESS);
     ASSERT_EQ(read_rst.type, record[2].type);
     ASSERT_EQ(read_rst.collection_id, record[2].collection_id);
     ASSERT_EQ(read_rst.partition_tag, record[2].partition_tag);
@@ -568,8 +604,13 @@ TEST(WalTest, HYBRID_BUFFFER_TEST) {
     ASSERT_EQ(read_rst.data_size, record[2].data_size);
     ASSERT_EQ(memcmp(read_rst.data, record[2].data, read_rst.data_size), 0);
 
+    ASSERT_EQ(read_rst.field_names.size(), record[2].field_names.size());
+    ASSERT_EQ(read_rst.field_names[1], record[2].field_names[1]);
+    ASSERT_EQ(read_rst.attr_data.at("field_1").size(), record[2].attr_data.at("field_1").size());
+    ASSERT_EQ(read_rst.attr_nbytes.at("field_0"), record[2].attr_nbytes.at("field_0"));
+
     // read 3
-    ASSERT_EQ(buffer.Next(record[3].lsn, read_rst), milvus::WAL_SUCCESS);
+    ASSERT_EQ(buffer.NextEntity(record[3].lsn, read_rst), milvus::WAL_SUCCESS);
     ASSERT_EQ(read_rst.type, record[3].type);
     ASSERT_EQ(read_rst.collection_id, record[3].collection_id);
     ASSERT_EQ(read_rst.partition_tag, record[3].partition_tag);
@@ -578,13 +619,17 @@ TEST(WalTest, HYBRID_BUFFFER_TEST) {
     ASSERT_EQ(read_rst.data_size, record[3].data_size);
     ASSERT_EQ(memcmp(read_rst.data, record[3].data, read_rst.data_size), 0);
 
+    ASSERT_EQ(read_rst.field_names.size(), record[3].field_names.size());
+    ASSERT_EQ(read_rst.field_names[1], record[3].field_names[1]);
+    ASSERT_EQ(read_rst.attr_nbytes.at("field_0"), record[3].attr_nbytes.at("field_0"));
+
     // test an empty record
     milvus::engine::wal::MXLogRecord empty;
     empty.type = milvus::engine::wal::MXLogType::None;
     empty.length = 0;
     empty.data_size = 0;
-    ASSERT_EQ(buffer.Append(empty), milvus::WAL_SUCCESS);
-    ASSERT_EQ(buffer.Next(empty.lsn, read_rst), milvus::WAL_SUCCESS);
+    ASSERT_EQ(buffer.AppendEntity(empty), milvus::WAL_SUCCESS);
+    ASSERT_EQ(buffer.NextEntity(empty.lsn, read_rst), milvus::WAL_SUCCESS);
     ASSERT_EQ(read_rst.type, milvus::engine::wal::MXLogType::None);
     ASSERT_TRUE(read_rst.collection_id.empty());
     ASSERT_TRUE(read_rst.partition_tag.empty());

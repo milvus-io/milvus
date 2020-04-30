@@ -190,19 +190,27 @@ MXLogBuffer::RecordSize(const MXLogRecord& record) {
 }
 
 uint32_t
-MXLogBuffer::EntityRecordSize(const milvus::engine::wal::MXLogRecord& record, std::vector<uint32_t>& field_name_size) {
+MXLogBuffer::EntityRecordSize(const milvus::engine::wal::MXLogRecord& record,
+                              uint32_t attr_num,
+                              std::vector<uint32_t>& field_name_size) {
+
+    uint32_t attr_header_size = 0;
+    attr_header_size += sizeof(uint32_t);
+    attr_header_size += attr_num * sizeof(uint64_t) * 3;
+
     uint32_t name_sizes = 0;
     for (auto field_name : record.field_names) {
         field_name_size.emplace_back(field_name.size());
         name_sizes += field_name.size();
     }
 
-    uint32_t attrs_size = 0;
-    for (auto attr_size : record.attrs_size) {
-        attrs_size += attr_size;
+    uint64_t attr_size = 0;
+    auto attr_it = record.attr_data_size.begin();
+    for (; attr_it != record.attr_data_size.end(); attr_it++) {
+        attr_size += attr_it->second;
     }
 
-    return RecordSize(record) + name_sizes + attrs_size;
+    return RecordSize(record) + name_sizes + attr_size + attr_header_size;
 }
 
 ErrorCode
@@ -276,7 +284,16 @@ MXLogBuffer::Append(MXLogRecord& record) {
 ErrorCode
 MXLogBuffer::AppendEntity(milvus::engine::wal::MXLogRecord& record) {
     std::vector<uint32_t> field_name_size;
-    uint32_t record_size = EntityRecordSize(record, field_name_size);
+    MXLogAttrRecordHeader attr_header;
+    attr_header.attr_num = 0;
+    for (auto name : record.field_names) {
+        attr_header.attr_num++;
+        attr_header.field_name_size.emplace_back(name.size());
+        attr_header.attr_size.emplace_back(record.attr_data_size.at(name));
+        attr_header.attr_nbytes.emplace_back(record.attr_nbytes.at(name));
+    }
+
+    uint32_t record_size = EntityRecordSize(record, attr_header.attr_num, field_name_size);
     if (SurplusSpace() < record_size) {
         // writer buffer has no space, switch wal file and write to a new buffer
         std::unique_lock<std::mutex> lck(mutex_);
@@ -300,7 +317,7 @@ MXLogBuffer::AppendEntity(milvus::engine::wal::MXLogRecord& record) {
     char* current_write_buf = buf_[mxlog_buffer_writer_.buf_idx].get();
     uint32_t current_write_offset = mxlog_buffer_writer_.buf_offset;
 
-    hybrid::MXLogRecordHeader head;
+    MXLogRecordHeader head;
     BuildLsn(mxlog_buffer_writer_.file_no, mxlog_buffer_writer_.buf_offset + (uint32_t)record_size, head.mxl_lsn);
     head.mxl_type = (uint8_t)record.type;
     head.table_id_size = (uint16_t)record.collection_id.size();
@@ -308,15 +325,24 @@ MXLogBuffer::AppendEntity(milvus::engine::wal::MXLogRecord& record) {
     head.vector_num = record.length;
     head.data_size = record.data_size;
 
-    auto attr_size_it = record.attr_data_size.begin();
-    for (; attr_size_it != record.attr_data_size.end(); attr_size_it++) {
-        head.attr_size.emplace_back(attr_size_it->second);
-        head.field_name_size.emplace_back(attr_size_it->first.size());
-    }
-
-
     memcpy(current_write_buf + current_write_offset, &head, SizeOfMXLogRecordHeader);
     current_write_offset += SizeOfMXLogRecordHeader;
+
+    memcpy(current_write_buf + current_write_offset, &attr_header.attr_num, sizeof(int32_t));
+    current_write_offset += sizeof(int32_t);
+
+    memcpy(current_write_buf + current_write_offset, attr_header.field_name_size.data(),
+           sizeof(int64_t) * attr_header.attr_num);
+    current_write_offset += sizeof(int64_t) * attr_header.attr_num;
+
+    memcpy(current_write_buf + current_write_offset, attr_header.attr_size.data(),
+           sizeof(int64_t) * attr_header.attr_num);
+    current_write_offset += sizeof(int64_t) * attr_header.attr_num;
+
+    memcpy(current_write_buf + current_write_offset,
+           attr_header.attr_nbytes.data(),
+           sizeof(int64_t) * attr_header.attr_num);
+    current_write_offset += sizeof(int64_t) * attr_header.attr_num;
 
     if (!record.collection_id.empty()) {
         memcpy(current_write_buf + current_write_offset, record.collection_id.data(), record.collection_id.size());
@@ -337,22 +363,20 @@ MXLogBuffer::AppendEntity(milvus::engine::wal::MXLogRecord& record) {
         current_write_offset += record.data_size;
     }
 
-    //Assign attr names
-    attr_size_it = record.attr_data_size.begin();
-    for (; attr_size_it != record.attr_data_size.end(); attr_size_it++) {
-        if (attr_size_it->first.size() > 0) {
-            memcpy(current_write_buf + current_write_offset, attr_size_it->first.data(), attr_size_it->first.size());
-            current_write_offset += attr_size_it->first.size();
+    // Assign attr names
+    for (auto name : record.field_names) {
+        if (name.size() > 0) {
+            memcpy(current_write_buf + current_write_offset, name.data(), name.size());
+            current_write_offset += name.size();
         }
     }
 
     // Assign attr values
-    attr_size_it = record.attr_data_size.begin();
-    for (; attr_size_it != record.attr_data_size.end(); attr_size_it++) {
-        if (attr_size_it->second != 0) {
-            memcpy(current_write_buf + current_write_offset, record.attr_data.at(attr_size_it->first).data(),
-                   attr_size_it->second);
-            current_write_offset += attr_size_it->second;
+    for (auto name : record.field_names) {
+        if (record.attr_data_size.at(name) != 0) {
+            memcpy(current_write_buf + current_write_offset, record.attr_data.at(name).data(),
+                   record.attr_data_size.at(name));
+            current_write_offset += record.attr_data_size.at(name);
         }
     }
 
@@ -489,14 +513,32 @@ MXLogBuffer::NextEntity(const uint64_t last_applied_lsn, milvus::engine::wal::MX
     char* current_read_buf = buf_[mxlog_buffer_reader_.buf_idx].get();
     uint64_t current_read_offset = mxlog_buffer_reader_.buf_offset;
 
-    hybrid::MXLogRecordHeader* head = (hybrid::MXLogRecordHeader*)(current_read_buf + current_read_offset);
+    MXLogRecordHeader* head = (MXLogRecordHeader*)(current_read_buf + current_read_offset);
 
     record.type = (MXLogType)head->mxl_type;
     record.lsn = head->mxl_lsn;
     record.length = head->vector_num;
     record.data_size = head->data_size;
 
-    current_read_offset += hybrid::SizeOfMXLogRecordHeader;
+    current_read_offset += SizeOfMXLogRecordHeader;
+
+    MXLogAttrRecordHeader attr_head;
+
+    memcpy(&attr_head.attr_num, current_read_buf + current_read_offset, sizeof(uint32_t));
+    current_read_offset += sizeof(uint32_t);
+
+    attr_head.attr_size.resize(attr_head.attr_num);
+    attr_head.field_name_size.resize(attr_head.attr_num);
+    attr_head.attr_nbytes.resize(attr_head.attr_num);
+    memcpy(attr_head.field_name_size.data(), current_read_buf + current_read_offset,
+           sizeof(uint64_t) * attr_head.attr_num);
+    current_read_offset += sizeof(uint64_t) * attr_head.attr_num;
+
+    memcpy(attr_head.attr_size.data(), current_read_buf + current_read_offset, sizeof(uint64_t) * attr_head.attr_num);
+    current_read_offset += sizeof(uint64_t) * attr_head.attr_num;
+
+    memcpy(attr_head.attr_nbytes.data(), current_read_buf + current_read_offset, sizeof(uint64_t) * attr_head.attr_num);
+    current_read_offset += sizeof(uint64_t) * attr_head.attr_num;
 
     if (head->table_id_size != 0) {
         record.collection_id.assign(current_read_buf + current_read_offset, head->table_id_size);
@@ -521,13 +563,16 @@ MXLogBuffer::NextEntity(const uint64_t last_applied_lsn, milvus::engine::wal::MX
 
     if (record.data_size != 0) {
         record.data = current_read_buf + current_read_offset;
+        current_read_offset += record.data_size;
     } else {
         record.data = nullptr;
     }
 
     // Read field names
-    if (head->field_name_size.size() > 0) {
-        for (auto size : head->field_name_size) {
+    auto attr_num = attr_head.attr_num;
+    record.field_names.clear();
+    if (attr_num > 0) {
+        for (auto size : attr_head.field_name_size) {
             if (size != 0) {
                 std::string name;
                 name.assign(current_read_buf + current_read_offset, size);
@@ -540,15 +585,18 @@ MXLogBuffer::NextEntity(const uint64_t last_applied_lsn, milvus::engine::wal::MX
     }
 
     // Read attributes data
-    auto attr_num = head->attr_size.size();
+    record.attr_data.clear();
+    record.attr_data_size.clear();
+    record.attr_nbytes.clear();
     if (attr_num > 0) {
         for (uint64_t i = 0; i < attr_num; ++i) {
-            auto attr_size =  head->attr_size[i];
+            auto attr_size = attr_head.attr_size[i];
             record.attr_data_size.insert(std::make_pair(record.field_names[i], attr_size));
+            record.attr_nbytes.insert(std::make_pair(record.field_names[i], attr_head.attr_nbytes[i]));
             std::vector<uint8_t> data(attr_size);
             memcpy(data.data(), current_read_buf + current_read_offset, attr_size);
             record.attr_data.insert(std::make_pair(record.field_names[i], data));
-            current_read_offset += head->attr_size[i];
+            current_read_offset += attr_size;
         }
     }
 

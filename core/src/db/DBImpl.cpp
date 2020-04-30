@@ -227,8 +227,9 @@ DBImpl::CreateHybridCollection(meta::CollectionSchema& collection_schema, meta::
     }
 
     meta::CollectionSchema temp_schema = collection_schema;
+    temp_schema.index_file_size_ *= MB;
     if (options_.wal_enable_) {
-        // TODO(yukun): wal_mgr_->CreateHybridCollection()
+        temp_schema.flush_lsn_ = wal_mgr_->CreateHybridCollection(collection_schema.collection_id_);
     }
 
     return meta_ptr_->CreateHybridCollection(temp_schema, fields_schema);
@@ -765,10 +766,10 @@ DBImpl::InsertEntities(const std::string& collection_id, const std::string& part
         auto vector_it = entity.vector_data_.begin();
         if (!vector_it->second.binary_data_.empty()) {
             wal_mgr_->InsertEntities(collection_id, partition_tag, entity.id_array_, vector_it->second.binary_data_,
-                                     attr_types, attr_data);
+                                     attr_nbytes, attr_data);
         } else if (!vector_it->second.float_data_.empty()) {
             wal_mgr_->InsertEntities(collection_id, partition_tag, entity.id_array_, vector_it->second.float_data_,
-                                     attr_types, attr_data);
+                                     attr_nbytes, attr_data);
         }
         swn_wal_.Notify();
     } else {

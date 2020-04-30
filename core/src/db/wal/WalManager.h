@@ -117,9 +117,9 @@ class WalManager {
     bool
     InsertEntities(const std::string& collection_id,
                    const std::string& partition_tag,
-                   const IDNumbers& entity_ids,
+                   const milvus::engine::IDNumbers& entity_ids,
                    const std::vector<T>& vectors,
-                   const std::unordered_map<std::string, engine::meta::hybrid::DataType>& attr_types,
+                   const std::unordered_map<std::string, uint64_t>& attr_nbytes,
                    const std::unordered_map<std::string, std::vector<uint8_t>>& attrs);
 
     /*
