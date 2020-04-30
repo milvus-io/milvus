@@ -169,6 +169,14 @@ const char* CONFIG_LOGS_FATAL_ENABLE = "fatal.enable";
 const char* CONFIG_LOGS_FATAL_ENABLE_DEFAULT = "true";
 const char* CONFIG_LOGS_PATH = "path";
 const char* CONFIG_LOGS_PATH_DEFAULT = "/tmp/milvus/logs";
+const char* CONFIG_LOGS_MAX_LOG_FILE_SIZE = "max_log_file_size";
+const char* CONFIG_LOGS_MAX_LOG_FILE_SIZE_DEFAULT = "256";
+const int64_t CONFIG_LOGS_MAX_LOG_FILE_SIZE_MAX = 512;
+const int64_t CONFIG_LOGS_MAX_LOG_FILE_SIZE_MIN = 64;
+const char* CONFIG_LOGS_DELETE_EXCEEDS = "delete_exceeds";
+const char* CONFIG_LOGS_DELETE_EXCEEDS_DEFAULT = "10";
+const int64_t CONFIG_LOGS_DELETE_EXCEEDS_MAX = 4096;
+const int64_t CONFIG_LOGS_DELETE_EXCEEDS_MIN = 1;
 
 constexpr int64_t GB = 1UL << 30;
 constexpr int32_t PORT_NUMBER_MIN = 1024;
@@ -406,6 +414,12 @@ Config::ValidateConfig() {
     std::string logs_path;
     CONFIG_CHECK(GetLogsPath(logs_path));
 
+    int64_t logs_max_log_file_size;
+    CONFIG_CHECK(GetLogsMaxLogFileSize(logs_max_log_file_size));
+
+    int64_t delete_exceeds;
+    CONFIG_CHECK(GetLogsDeleteExceeds(delete_exceeds));
+
     return Status::OK();
 }
 
@@ -466,6 +480,8 @@ Config::ResetDefaultConfig() {
     CONFIG_CHECK(SetLogsErrorEnable(CONFIG_LOGS_ERROR_ENABLE_DEFAULT));
     CONFIG_CHECK(SetLogsFatalEnable(CONFIG_LOGS_FATAL_ENABLE_DEFAULT));
     CONFIG_CHECK(SetLogsPath(CONFIG_LOGS_PATH_DEFAULT));
+    CONFIG_CHECK(SetLogsMaxLogFileSize(CONFIG_LOGS_MAX_LOG_FILE_SIZE_DEFAULT));
+    CONFIG_CHECK(SetLogsDeleteExceeds(CONFIG_LOGS_DELETE_EXCEEDS_DEFAULT));
 
 #ifdef MILVUS_GPU_VERSION
     CONFIG_CHECK(SetEngineConfigGpuSearchThreshold(CONFIG_ENGINE_GPU_SEARCH_THRESHOLD_DEFAULT));
@@ -1625,6 +1641,32 @@ Config::CheckLogsPath(const std::string& value) {
     return ValidationUtil::ValidateStoragePath(value);
 }
 
+Status
+Config::CheckLogsMaxLogFileSize(const std::string& value) {
+    auto exist_error = !ValidationUtil::ValidateStringIsNumber(value).ok();
+    fiu_do_on("check_logs_max_log_file_size_fail", exist_error = true);
+
+    if (exist_error) {
+        std::string msg = "Invalid max_log_file_size: " + value +
+                          ". Possible reason: logs.max_log_file_size is not a positive integer.";
+        return Status(SERVER_INVALID_ARGUMENT, msg);
+    }
+    return Status::OK();
+}
+
+Status
+Config::CheckLogsDeleteExceeds(const std::string& value) {
+    auto exist_error = !ValidationUtil::ValidateStringIsNumber(value).ok();
+    fiu_do_on("check_logs_delete_exceeds_fail", exist_error = true);
+
+    if (exist_error) {
+        std::string msg = "Invalid max_log_file_size: " + value +
+                          ". Possible reason: logs.max_log_file_size is not a positive integer.";
+        return Status(SERVER_INVALID_ARGUMENT, msg);
+    }
+    return Status::OK();
+}
+
 ////////////////////////////////////////////////////////////////////////////////
 ConfigNode&
 Config::GetConfigRoot() {
@@ -2140,7 +2182,39 @@ Config::GetLogsFatalEnable(bool& value) {
 Status
 Config::GetLogsPath(std::string& value) {
     value = GetConfigStr(CONFIG_LOGS, CONFIG_LOGS_PATH, CONFIG_LOGS_PATH_DEFAULT);
-    CONFIG_CHECK(CheckWalConfigWalPath(value));
+    CONFIG_CHECK(CheckLogsPath(value));
+    return Status::OK();
+}
+
+Status
+Config::GetLogsMaxLogFileSize(int64_t& value) {
+    std::string str = GetConfigStr(CONFIG_LOGS, CONFIG_LOGS_MAX_LOG_FILE_SIZE, CONFIG_LOGS_MAX_LOG_FILE_SIZE_DEFAULT);
+    CONFIG_CHECK(CheckLogsMaxLogFileSize(str));
+    value = std::stoll(str);
+    if (value == 0) {
+        // OFF
+    } else if (value > CONFIG_LOGS_MAX_LOG_FILE_SIZE_MAX) {
+        value = CONFIG_LOGS_MAX_LOG_FILE_SIZE_MAX;
+    } else if (value < CONFIG_LOGS_MAX_LOG_FILE_SIZE_MIN) {
+        value = CONFIG_LOGS_MAX_LOG_FILE_SIZE_MIN;
+    }
+
+    return Status::OK();
+}
+
+Status
+Config::GetLogsDeleteExceeds(int64_t& value) {
+    std::string str = GetConfigStr(CONFIG_LOGS, CONFIG_LOGS_DELETE_EXCEEDS, CONFIG_LOGS_DELETE_EXCEEDS_DEFAULT);
+    CONFIG_CHECK(CheckLogsDeleteExceeds(str));
+    value = std::stoll(str);
+    if (value == 0) {
+        // OFF
+    } else if (value > CONFIG_LOGS_DELETE_EXCEEDS_MAX) {
+        value = CONFIG_LOGS_DELETE_EXCEEDS_MAX;
+    } else if (value < CONFIG_LOGS_DELETE_EXCEEDS_MIN) {
+        value = CONFIG_LOGS_DELETE_EXCEEDS_MIN;
+    }
+
     return Status::OK();
 }
 
@@ -2409,6 +2483,18 @@ Status
 Config::SetLogsPath(const std::string& value) {
     CONFIG_CHECK(CheckLogsPath(value));
     return SetConfigValueInMem(CONFIG_LOGS, CONFIG_LOGS_PATH, value);
+}
+
+Status
+Config::SetLogsMaxLogFileSize(const std::string& value) {
+    CONFIG_CHECK(CheckLogsMaxLogFileSize(value));
+    return SetConfigValueInMem(CONFIG_LOGS, CONFIG_LOGS_MAX_LOG_FILE_SIZE, value);
+}
+
+Status
+Config::SetLogsDeleteExceeds(const std::string& value) {
+    CONFIG_CHECK(CheckLogsDeleteExceeds(value));
+    return SetConfigValueInMem(CONFIG_LOGS, CONFIG_LOGS_DELETE_EXCEEDS, value);
 }
 
 #ifdef MILVUS_GPU_VERSION

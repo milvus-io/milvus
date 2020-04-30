@@ -164,6 +164,14 @@ extern const char* CONFIG_LOGS_ERROR_ENABLE_DEFAULT;
 extern const char* CONFIG_LOGS_FATAL_ENABLE;
 extern const char* CONFIG_LOGS_FATAL_ENABLE_DEFAULT;
 extern const char* CONFIG_LOGS_PATH;
+extern const char* CONFIG_LOGS_MAX_LOG_FILE_SIZE;
+extern const char* CONFIG_LOGS_MAX_LOG_FILE_SIZE_DEFAULT;
+extern const int64_t CONFIG_LOGS_MAX_LOG_FILE_SIZE_MAX;
+extern const int64_t CONFIG_LOGS_MAX_LOG_FILE_SIZE_MIN;
+extern const char* CONFIG_LOGS_DELETE_EXCEEDS;
+extern const char* CONFIG_LOGS_DELETE_EXCEEDS_DEFAULT;
+extern const int64_t CONFIG_LOGS_DELETE_EXCEEDS_MAX;
+extern const int64_t CONFIG_LOGS_DELETE_EXCEEDS_MIN;
 
 class Config {
  private:
@@ -332,6 +340,10 @@ class Config {
     CheckLogsFatalEnable(const std::string& value);
     Status
     CheckLogsPath(const std::string& value);
+    Status
+    CheckLogsMaxLogFileSize(const std::string& value);
+    Status
+    CheckLogsDeleteExceeds(const std::string& value);
 
     std::string
     GetConfigStr(const std::string& parent_key, const std::string& child_key, const std::string& default_value = "");
@@ -461,6 +473,10 @@ class Config {
     GetLogsFatalEnable(bool& value);
     Status
     GetLogsPath(std::string& value);
+    Status
+    GetLogsMaxLogFileSize(int64_t& value);
+    Status
+    GetLogsDeleteExceeds(int64_t& value);
 
     Status
     GetServerRestartRequired(bool& required);
@@ -565,6 +581,10 @@ class Config {
     SetLogsFatalEnable(const std::string& value);
     Status
     SetLogsPath(const std::string& value);
+    Status
+    SetLogsMaxLogFileSize(const std::string& value);
+    Status
+    SetLogsDeleteExceeds(const std::string& value);
 
 #ifdef MILVUS_GPU_VERSION
     Status
