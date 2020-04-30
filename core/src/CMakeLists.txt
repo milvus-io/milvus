@@ -215,7 +215,6 @@ endif ()
 if (ENABLE_CPU_PROFILING)
     set(third_party_libs ${third_party_libs}
             gperftools
-            tcmalloc
             libunwind
             )
 endif ()
