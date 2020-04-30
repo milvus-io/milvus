@@ -309,7 +309,7 @@ class TestClient : public oatpp::web::client::ApiClient {
 
     API_CALL("GET", "/collections/{collection_name}/partitions", showPartitions,
              PATH(String, collection_name, "collection_name"),
-             QUERY(String, offset), QUERY(String, page_size))
+             QUERY(String, offset), QUERY(String, page_size), BODY_STRING(String, body))
 
     API_CALL("DELETE", "/collections/{collection_name}/partitions", dropPartition,
              PATH(String, collection_name, "collection_name"), BODY_STRING(String, body))
@@ -962,23 +962,23 @@ TEST_F(WebControllerTest, PARTITION) {
     ASSERT_TRUE(status.ok()) << status.message();
 
     // Show all partitins
-    response = client_ptr->showPartitions(collection_name, "0", "10", conncetion_ptr);
+    response = client_ptr->showPartitions(collection_name, "0", "10", "", conncetion_ptr);
     ASSERT_EQ(OStatus::CODE_200.code, response->getStatusCode());
     auto result_dto = response->readBodyToDto<milvus::server::web::PartitionListDto>(object_mapper.get());
     ASSERT_EQ(2, result_dto->partitions->count());
     ASSERT_EQ("tag01", result_dto->partitions->get(1)->partition_tag->std_str());
 
-    response = client_ptr->showPartitions(collection_name, "0", "-1", conncetion_ptr);
+    response = client_ptr->showPartitions(collection_name, "0", "-1", "", conncetion_ptr);
     ASSERT_EQ(OStatus::CODE_400.code, response->getStatusCode());
-    response = client_ptr->showPartitions(collection_name, "0.1", "7", conncetion_ptr);
+    response = client_ptr->showPartitions(collection_name, "0.1", "7", "", conncetion_ptr);
     ASSERT_EQ(OStatus::CODE_400.code, response->getStatusCode());
-    response = client_ptr->showPartitions(collection_name, "0", "1.6", conncetion_ptr);
+    response = client_ptr->showPartitions(collection_name, "0", "1.6", "", conncetion_ptr);
     ASSERT_EQ(OStatus::CODE_400.code, response->getStatusCode());
-    response = client_ptr->showPartitions(collection_name, "567a", "1", conncetion_ptr);
+    response = client_ptr->showPartitions(collection_name, "567a", "1", "", conncetion_ptr);
     ASSERT_EQ(OStatus::CODE_400.code, response->getStatusCode());
 
     // show without existing collections
-    response = client_ptr->showPartitions(collection_name + "dfafaefaluanqibazao990099", "0", "10", conncetion_ptr);
+    response = client_ptr->showPartitions(collection_name + "dfafaao990099", "0", "10", "", conncetion_ptr);
     ASSERT_EQ(OStatus::CODE_404.code, response->getStatusCode());
     error_dto = response->readBodyToDto<milvus::server::web::StatusDto>(object_mapper.get());
     ASSERT_EQ(milvus::server::web::StatusCode::COLLECTION_NOT_EXISTS, error_dto->code->getValue());
@@ -990,6 +990,29 @@ TEST_F(WebControllerTest, PARTITION) {
     response = client_ptr->dropPartition(collection_name + "565755682353464aaasafdsfagagqq1223",
                                          "{\"partition_tag\": \"tag01\"}", conncetion_ptr);
     ASSERT_EQ(OStatus::CODE_404.code, response->getStatusCode());
+}
+
+TEST_F(WebControllerTest, PARTITION_FILTER) {
+    const OString collection_name = "test_controller_partition_" + OString(RandomName().c_str());
+    GenCollection(client_ptr, conncetion_ptr, collection_name, 64, 100, "L2");
+
+    nlohmann::json body_json;
+    body_json["filter"]["partition_tag"] = "tag_not_exists_";
+    auto response = client_ptr->showPartitions(collection_name, "0", "10", body_json.dump().c_str());
+    ASSERT_EQ(OStatus::CODE_200.code, response->getStatusCode());
+    auto result_dto = response->readBodyToDto<milvus::server::web::PartitionListDto>(object_mapper.get());
+    ASSERT_EQ(result_dto->count->getValue(), 0);
+
+    auto par_param = milvus::server::web::PartitionRequestDto::createShared();
+    par_param->partition_tag = "tag01";
+    response = client_ptr->createPartition(collection_name, par_param);
+    ASSERT_EQ(OStatus::CODE_201.code, response->getStatusCode());
+
+    body_json["filter"]["partition_tag"] = "tag01";
+    response = client_ptr->showPartitions(collection_name, "0", "10", body_json.dump().c_str());
+    ASSERT_EQ(OStatus::CODE_200.code, response->getStatusCode());
+    result_dto = response->readBodyToDto<milvus::server::web::PartitionListDto>(object_mapper.get());
+    ASSERT_EQ(result_dto->count->getValue(), 1);
 }
 
 TEST_F(WebControllerTest, SHOW_SEGMENTS) {
