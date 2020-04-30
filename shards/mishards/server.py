@@ -8,6 +8,7 @@ from urllib.parse import urlparse
 from functools import wraps
 from concurrent import futures
 from grpc._cython import cygrpc
+import milvus
 from milvus.grpc_gen.milvus_pb2_grpc import add_MilvusServiceServicer_to_server
 from mishards.grpc_utils import is_grpc_method
 from mishards.service_handler import ServiceHandler
@@ -109,6 +110,8 @@ class Server:
             sys.exit(1)
 
         self.start(port)
+        logger.info(f'Server Version: {settings.SERVER_VERSIONS[-1]}')
+        logger.info(f'Python SDK Version: {milvus.__version__}')
         logger.info('Listening on port {}'.format(port))
 
         try:
