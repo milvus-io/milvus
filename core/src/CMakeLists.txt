@@ -212,16 +212,16 @@ if (MILVUS_GPU_VERSION)
             )
 endif ()
 
+if (ENABLE_MEM_PROFILING)
+    set(third_party_libs ${third_party_libs}
+            tcmalloc
+            )
+endif ()
+
 if (ENABLE_CPU_PROFILING)
     set(third_party_libs ${third_party_libs}
             gperftools
             libunwind
-            )
-endif ()
-
-if (ENABLE_MEM_PROFILING)
-    set(third_party_libs ${third_party_libs}
-            tcmalloc
             )
 endif ()
 
