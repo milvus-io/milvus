@@ -15,6 +15,7 @@
 #include <memory>
 #include <mutex>
 #include <string>
+#include <vector>
 
 #include "WalDefinations.h"
 #include "WalFileHandler.h"
@@ -105,8 +106,7 @@ class MXLogBuffer {
     RecordSize(const MXLogRecord& record);
 
     uint32_t
-    EntityRecordSize(const milvus::engine::wal::MXLogRecord& record,
-                     uint32_t attr_num,
+    EntityRecordSize(const milvus::engine::wal::MXLogRecord& record, uint32_t attr_num,
                      std::vector<uint32_t>& field_name_size);
 
  private:

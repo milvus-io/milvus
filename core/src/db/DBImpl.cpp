@@ -131,8 +131,17 @@ DBImpl::Start() {
             if (record.type == wal::MXLogType::None) {
                 break;
             }
-
             ExecWalRecord(record);
+
+            wal::MXLogRecord hybrid_record;
+            error_code = wal_mgr_->GetNextEntityRecovery(hybrid_record);
+            if (error_code != WAL_SUCCESS) {
+                throw Exception(error_code, "Wal hybrid recovery error!");
+            }
+            if (hybrid_record.type == wal::MXLogType::None) {
+                break;
+            }
+            ExecWalRecord(hybrid_record);
         }
 
         // for distribute version, some nodes are read only
@@ -2690,6 +2699,42 @@ DBImpl::BackgroundWalThread() {
 
                 // if user flush all manually, update auto flush also
                 if (record.collection_id.empty() && options_.auto_flush_interval_ > 0) {
+                    next_auto_flush_time = get_next_auto_flush_time();
+                }
+            }
+
+        } else {
+            if (!initialized_.load(std::memory_order_acquire)) {
+                InternalFlush();
+                flush_req_swn_.Notify();
+                WaitMergeFileFinish();
+                WaitBuildIndexFinish();
+                LOG_ENGINE_DEBUG_ << "WAL background thread exit";
+                break;
+            }
+
+            if (options_.auto_flush_interval_ > 0) {
+                swn_wal_.Wait_Until(next_auto_flush_time);
+            } else {
+                swn_wal_.Wait();
+            }
+        }
+
+        wal::MXLogRecord hybrid_record;
+        error_code = wal_mgr_->GetNextEntityRecord(hybrid_record);
+        if (error_code != WAL_SUCCESS) {
+            LOG_ENGINE_ERROR_ << "WAL background GetNextRecord error";
+            break;
+        }
+
+        if (hybrid_record.type != wal::MXLogType::None) {
+            ExecWalRecord(hybrid_record);
+            if (hybrid_record.type == wal::MXLogType::Flush) {
+                // notify flush request to return
+                flush_req_swn_.Notify();
+
+                // if user flush all manually, update auto flush also
+                if (hybrid_record.collection_id.empty() && options_.auto_flush_interval_ > 0) {
                     next_auto_flush_time = get_next_auto_flush_time();
                 }
             }

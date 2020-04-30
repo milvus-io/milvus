@@ -15,6 +15,7 @@
 
 #include <algorithm>
 #include <memory>
+#include <unordered_map>
 
 #include "config/Config.h"
 #include "utils/CommonUtil.h"
@@ -395,10 +396,8 @@ WalManager::Insert(const std::string& collection_id, const std::string& partitio
 
 template <typename T>
 bool
-WalManager::InsertEntities(const std::string& collection_id,
-                           const std::string& partition_tag,
-                           const milvus::engine::IDNumbers& entity_ids,
-                           const std::vector<T>& vectors,
+WalManager::InsertEntities(const std::string& collection_id, const std::string& partition_tag,
+                           const milvus::engine::IDNumbers& entity_ids, const std::vector<T>& vectors,
                            const std::unordered_map<std::string, uint64_t>& attr_nbytes,
                            const std::unordered_map<std::string, std::vector<uint8_t>>& attrs) {
     MXLogType log_type;
@@ -592,18 +591,14 @@ WalManager::Insert<uint8_t>(const std::string& collection_id, const std::string&
                             const IDNumbers& vector_ids, const std::vector<uint8_t>& vectors);
 
 template bool
-WalManager::InsertEntities<float>(const std::string& collection_id,
-                                  const std::string& partition_tag,
-                                  const milvus::engine::IDNumbers& entity_ids,
-                                  const std::vector<float >& vectors,
+WalManager::InsertEntities<float>(const std::string& collection_id, const std::string& partition_tag,
+                                  const milvus::engine::IDNumbers& entity_ids, const std::vector<float>& vectors,
                                   const std::unordered_map<std::string, uint64_t>& attr_nbytes,
                                   const std::unordered_map<std::string, std::vector<uint8_t>>& attrs);
 
 template bool
-WalManager::InsertEntities<uint8_t>(const std::string& collection_id,
-                                    const std::string& partition_tag,
-                                    const milvus::engine::IDNumbers& entity_ids,
-                                    const std::vector<uint8_t>& vectors,
+WalManager::InsertEntities<uint8_t>(const std::string& collection_id, const std::string& partition_tag,
+                                    const milvus::engine::IDNumbers& entity_ids, const std::vector<uint8_t>& vectors,
                                     const std::unordered_map<std::string, uint64_t>& attr_nbytes,
                                     const std::unordered_map<std::string, std::vector<uint8_t>>& attrs);
 

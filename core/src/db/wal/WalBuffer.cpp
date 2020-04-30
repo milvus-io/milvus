@@ -12,6 +12,8 @@
 #include "db/wal/WalBuffer.h"
 
 #include <cstring>
+#include <utility>
+#include <vector>
 
 #include "db/wal/WalDefinations.h"
 #include "utils/Log.h"
@@ -190,10 +192,8 @@ MXLogBuffer::RecordSize(const MXLogRecord& record) {
 }
 
 uint32_t
-MXLogBuffer::EntityRecordSize(const milvus::engine::wal::MXLogRecord& record,
-                              uint32_t attr_num,
+MXLogBuffer::EntityRecordSize(const milvus::engine::wal::MXLogRecord& record, uint32_t attr_num,
                               std::vector<uint32_t>& field_name_size) {
-
     uint32_t attr_header_size = 0;
     attr_header_size += sizeof(uint32_t);
     attr_header_size += attr_num * sizeof(uint64_t) * 3;
@@ -339,8 +339,7 @@ MXLogBuffer::AppendEntity(milvus::engine::wal::MXLogRecord& record) {
            sizeof(int64_t) * attr_header.attr_num);
     current_write_offset += sizeof(int64_t) * attr_header.attr_num;
 
-    memcpy(current_write_buf + current_write_offset,
-           attr_header.attr_nbytes.data(),
+    memcpy(current_write_buf + current_write_offset, attr_header.attr_nbytes.data(),
            sizeof(int64_t) * attr_header.attr_num);
     current_write_offset += sizeof(int64_t) * attr_header.attr_num;
 
