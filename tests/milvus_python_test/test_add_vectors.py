@@ -601,12 +601,11 @@ class TestAddBase:
         processes = []
         def add():
             milvus = get_milvus(host=args["ip"], port=args["port"], handler=args["handler"])
-            milvus.connect(uri=uri)
             i = 0
             while i < loop_num:
                 status, ids = milvus.add_vectors(collection, vector)
                 i = i + 1
-            milvus.disconnect()
+            # milvus.disconnect()
         for i in range(process_num):
             p = Process(target=add, args=())
             processes.append(p)
