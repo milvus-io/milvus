@@ -24,6 +24,11 @@ class Context {
  public:
     explicit Context(const std::string& request_id);
 
+    inline std::string
+    RequestID() const {
+        return request_id_;
+    }
+
     std::shared_ptr<Context>
     Child(const std::string& operation_name) const;
 
