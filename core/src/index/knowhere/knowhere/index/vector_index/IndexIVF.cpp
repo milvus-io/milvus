@@ -310,8 +310,6 @@ IVF::SealImpl() {
     faiss::Index* index = index_.get();
     auto idx = dynamic_cast<faiss::IndexIVF*>(index);
     if (idx != nullptr) {
-        // To be deleted
-        LOG_KNOWHERE_DEBUG_ << "Test before to_readonly: IVF READONLY " << std::boolalpha << idx->is_readonly();
         idx->to_readonly();
     }
 #endif

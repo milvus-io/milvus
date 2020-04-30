@@ -228,7 +228,7 @@ CommonUtil::ConvertTime(tm time_struct, time_t& time_integer) {
     time_integer = mktime(&time_struct);
 }
 
-#ifdef MILVUS_ENABLE_PROFILING
+#ifdef ENABLE_CPU_PROFILING
 std::string
 CommonUtil::GetCurrentTimeStr() {
     time_t tt;

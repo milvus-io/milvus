@@ -23,6 +23,7 @@
 #endif
 #endif
 
+#include <fstream>
 #include <queue>
 #include <vector>
 

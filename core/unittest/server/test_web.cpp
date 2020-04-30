@@ -38,9 +38,9 @@
 #include "server/web_impl/dto/TableDto.hpp"
 #include "server/web_impl/dto/VectorDto.hpp"
 #include "server/web_impl/handler/WebRequestHandler.h"
+#include "src/version.h"
 #include "unittest/server/utils.h"
 #include "utils/CommonUtil.h"
-#include "version.h"
 
 
 static const char* COLLECTION_NAME = "test_web";
@@ -711,9 +711,11 @@ class TestClient : public oatpp::web::client::ApiClient {
 
     API_CALL("POST", "/hybrid_collections", createHybridCollection, BODY_STRING(String, body_str))
 
-    API_CALL("POST", "/hybrid_collections/{collection_name}/entities", InsertEntity, PATH(String, collection_name), BODY_STRING(String, body))
+    API_CALL("POST", "/hybrid_collections/{collection_name}/entities", InsertEntity,
+        PATH(String, collection_name), BODY_STRING(String, body))
 
-//    API_CALL("POST", "/hybrid_collections/{collection_name}/vectors", HybridSearch, PATH(String, collection_name), BODY_STRING(String, body))
+//    API_CALL("POST", "/hybrid_collections/{collection_name}/vectors", HybridSearch,
+//    PATH(String, collection_name), BODY_STRING(String, body))
 
 #include OATPP_CODEGEN_END(ApiClient)
 };
