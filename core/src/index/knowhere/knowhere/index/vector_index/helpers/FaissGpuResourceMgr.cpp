@@ -124,7 +124,7 @@ void
 FaissGpuResourceMgr::Dump() {
     for (auto& item : idle_map_) {
         auto& bq = item.second;
-        // std::cout << "DEVICEID: " << item.first << ", resource count:" << bq.Size();
+        LOG_KNOWHERE_DEBUG_ << "DEVICEID: " << item.first << ", resource count:" << bq.Size();
     }
 }
 

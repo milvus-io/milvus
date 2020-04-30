@@ -23,7 +23,7 @@
 #include <unordered_map>
 #include <utility>
 #include <vector>
-#ifdef MILVUS_ENABLE_PROFILING
+#ifdef ENABLE_CPU_PROFILING
 #include <gperftools/profiler.h>
 #endif
 
@@ -98,7 +98,7 @@ HybridSearchRequest::OnExecute() {
         status = DBWrapper::DB()->HybridQuery(context_, collection_name_, partition_list_, hybrid_search_contxt_,
                                               general_query_, attr_type, nq, result_ids, result_distances);
 
-#ifdef MILVUS_ENABLE_PROFILING
+#ifdef ENABLE_CPU_PROFILING
         ProfilerStop();
 #endif
 

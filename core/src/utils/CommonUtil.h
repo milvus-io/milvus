@@ -51,7 +51,7 @@ class CommonUtil {
     static void
     ConvertTime(tm time_struct, time_t& time_integer);
 
-#ifdef MILVUS_ENABLE_PROFILING
+#ifdef ENABLE_CPU_PROFILING
     static std::string
     GetCurrentTimeStr();
 #endif
