@@ -145,6 +145,10 @@ SegmentWriter::WriteAttrs() {
 
 Status
 SegmentWriter::WriteVectorIndex(const std::string& location) {
+    if (location.empty()) {
+        return Status(SERVER_WRITE_ERROR, "Invalid parameter of WriteVectorIndex");
+    }
+
     codec::DefaultCodec default_codec;
     try {
         fs_ptr_->operation_ptr_->CreateDirectory();

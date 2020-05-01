@@ -2224,7 +2224,7 @@ DBImpl::GetPartitionsByTags(const std::string& collection_id, const std::vector<
     }
 
     if (partition_name_array.empty()) {
-        return Status(DB_PARTITION_NOT_FOUND, "Cannot find the specified partitions");
+        return Status(DB_PARTITION_NOT_FOUND, "The specified partiton does not exist");
     }
 
     return Status::OK();
