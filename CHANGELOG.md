@@ -16,6 +16,7 @@ Please mark all change in change log and use the issue from GitHub
 -   \#2131 Distance/ID returned is not correct if searching with duplicate ids
 -   \#2141 Fix server start failed if wal directory exist
 -   \#2196 Fix server start failed if wal is disabled
+-   \#2203 Fix result set contains -1
 
 ## Feature
 -   \#1751 Add api SearchByID

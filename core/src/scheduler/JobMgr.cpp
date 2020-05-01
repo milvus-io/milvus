@@ -83,12 +83,6 @@ JobMgr::worker_function() {
         // TODO(zhiru): if the job is search by ids, pass any task where the ids don't exist
         auto search_job = std::dynamic_pointer_cast<SearchJob>(job);
         if (search_job != nullptr) {
-            scheduler::ResultIds ids(search_job->nq() * search_job->topk(), -1);
-            scheduler::ResultDistances distances(search_job->nq() * search_job->topk(),
-                                                 std::numeric_limits<float>::max());
-            search_job->GetResultIds() = ids;
-            search_job->GetResultDistances() = distances;
-
             if (search_job->vectors().float_data_.empty() && search_job->vectors().binary_data_.empty() &&
                 !search_job->vectors().id_array_.empty()) {
                 for (auto task = tasks.begin(); task != tasks.end();) {
