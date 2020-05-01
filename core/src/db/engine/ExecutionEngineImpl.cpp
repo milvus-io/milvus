@@ -360,7 +360,7 @@ ExecutionEngineImpl::Serialize() {
     auto segment_writer_ptr = std::make_shared<segment::SegmentWriter>(segment_dir);
     segment_writer_ptr->SetVectorIndex(index_);
     auto status = segment_writer_ptr->WriteVectorIndex(location_);
-    utils::ExitOnWriteError(status);
+
     if (!status.ok()) {
         return status;
     }

@@ -29,6 +29,7 @@
 #include "storage/disk/DiskOperation.h"
 #include "utils/Log.h"
 #include "utils/TimeRecorder.h"
+#include "db/Utils.h"
 
 namespace milvus {
 namespace segment {
@@ -119,6 +120,8 @@ SegmentWriter::WriteVectors() {
     } catch (std::exception& e) {
         std::string err_msg = "Failed to write vectors: " + std::string(e.what());
         LOG_ENGINE_ERROR_ << err_msg;
+
+        engine::utils::SendExitSignal();
         return Status(SERVER_WRITE_ERROR, err_msg);
     }
     return Status::OK();
@@ -133,6 +136,8 @@ SegmentWriter::WriteAttrs() {
     } catch (std::exception& e) {
         std::string err_msg = "Failed to write vectors: " + std::string(e.what());
         LOG_ENGINE_ERROR_ << err_msg;
+
+        engine::utils::SendExitSignal();
         return Status(SERVER_WRITE_ERROR, err_msg);
     }
     return Status::OK();
@@ -147,6 +152,8 @@ SegmentWriter::WriteVectorIndex(const std::string& location) {
     } catch (std::exception& e) {
         std::string err_msg = "Failed to write vector index: " + std::string(e.what());
         LOG_ENGINE_ERROR_ << err_msg;
+
+        engine::utils::SendExitSignal();
         return Status(SERVER_WRITE_ERROR, err_msg);
     }
     return Status::OK();
@@ -177,6 +184,8 @@ SegmentWriter::WriteBloomFilter() {
     } catch (std::exception& e) {
         std::string err_msg = "Failed to write vectors: " + std::string(e.what());
         LOG_ENGINE_ERROR_ << err_msg;
+
+        engine::utils::SendExitSignal();
         return Status(SERVER_WRITE_ERROR, err_msg);
     }
     return Status::OK();
@@ -192,6 +201,8 @@ SegmentWriter::WriteDeletedDocs() {
     } catch (std::exception& e) {
         std::string err_msg = "Failed to write deleted docs: " + std::string(e.what());
         LOG_ENGINE_ERROR_ << err_msg;
+
+        engine::utils::SendExitSignal();
         return Status(SERVER_WRITE_ERROR, err_msg);
     }
     return Status::OK();
@@ -206,6 +217,8 @@ SegmentWriter::WriteDeletedDocs(const DeletedDocsPtr& deleted_docs) {
     } catch (std::exception& e) {
         std::string err_msg = "Failed to write deleted docs: " + std::string(e.what());
         LOG_ENGINE_ERROR_ << err_msg;
+
+        engine::utils::SendExitSignal();
         return Status(SERVER_WRITE_ERROR, err_msg);
     }
     return Status::OK();
@@ -220,6 +233,8 @@ SegmentWriter::WriteBloomFilter(const IdBloomFilterPtr& id_bloom_filter_ptr) {
     } catch (std::exception& e) {
         std::string err_msg = "Failed to write bloom filter: " + std::string(e.what());
         LOG_ENGINE_ERROR_ << err_msg;
+
+        engine::utils::SendExitSignal();
         return Status(SERVER_WRITE_ERROR, err_msg);
     }
     return Status::OK();
