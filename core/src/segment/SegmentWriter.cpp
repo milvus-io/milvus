@@ -24,12 +24,12 @@
 #include "SegmentReader.h"
 #include "Vectors.h"
 #include "codecs/default/DefaultCodec.h"
+#include "db/Utils.h"
 #include "storage/disk/DiskIOReader.h"
 #include "storage/disk/DiskIOWriter.h"
 #include "storage/disk/DiskOperation.h"
 #include "utils/Log.h"
 #include "utils/TimeRecorder.h"
-#include "db/Utils.h"
 
 namespace milvus {
 namespace segment {
