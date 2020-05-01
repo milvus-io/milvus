@@ -23,7 +23,7 @@
 #include <unordered_map>
 #include <utility>
 #include <vector>
-#ifdef MILVUS_ENABLE_PROFILING
+#ifdef ENABLE_CPU_PROFILING
 #include <gperftools/profiler.h>
 #endif
 
@@ -123,7 +123,7 @@ InsertEntityRequest::OnExecute() {
 
         rc.RecordSection("check validation");
 
-#ifdef MILVUS_ENABLE_PROFILING
+#ifdef ENABLE_CPU_PROFILING
         std::string fname = "/tmp/insert_" + CommonUtil::GetCurrentTimeStr() + ".profiling";
         ProfilerStart(fname.c_str());
 #endif
@@ -162,7 +162,7 @@ InsertEntityRequest::OnExecute() {
                          : collection_schema.flag_ |= engine::meta::FLAG_MASK_NO_USERID;
         status = DBWrapper::DB()->UpdateCollectionFlag(collection_name_, collection_schema.flag_);
 
-#ifdef MILVUS_ENABLE_PROFILING
+#ifdef ENABLE_CPU_PROFILING
         ProfilerStop();
 #endif
 

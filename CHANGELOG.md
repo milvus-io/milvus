@@ -6,6 +6,7 @@ Please mark all change in change log and use the issue from GitHub
 
 ## Bug
 -   \#1705 Limit the insert data batch size
+-   \#1776 Error out when index SQ8H run in CPU mode
 -   \#1929 Skip MySQL meta schema field width check
 -   \#1946 Fix load index file CPU2GPU fail during searching
 -   \#1997 Index file missed after compact
@@ -14,6 +15,7 @@ Please mark all change in change log and use the issue from GitHub
 -   \#2128 Check has_partition params
 -   \#2131 Distance/ID returned is not correct if searching with duplicate ids
 -   \#2141 Fix server start failed if wal directory exist
+-   \#2196 Fix server start failed if wal is disabled
 
 ## Feature
 -   \#1751 Add api SearchByID
@@ -25,6 +27,7 @@ Please mark all change in change log and use the issue from GitHub
 -   \#2059 Add lock file avoid multiple instances modifying data at the same time
 -   \#2064 Warn when use SQLite as metadata management
 -   \#2111 Check GPU environment before start server
+-   \#2206 Log file rotating
 
 ## Improvement
 -   \#221 Refactor LOG macro
@@ -35,8 +38,10 @@ Please mark all change in change log and use the issue from GitHub
 -   \#2167 Merge log_config.conf with server_config.yaml
 -   \#2173 Check storage permission
 -   \#2178 Using elkan K-Means to improve IVF
+-   \#2190 Fix memory usage is twice of index size when using GPU searching
 
 ## Task
+
 
 # Milvus 0.8.0 (2020-04-15)
 

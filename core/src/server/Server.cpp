@@ -199,6 +199,8 @@ Server::Start() {
             bool error_enable = false;
             bool fatal_enable = false;
             std::string logs_path;
+            int64_t max_log_file_size = 0;
+            int64_t delete_exceeds = 0;
             s = config.GetLogsTraceEnable(trace_enable);
             if (!s.ok()) {
                 return s;
@@ -227,7 +229,16 @@ Server::Start() {
             if (!s.ok()) {
                 return s;
             }
-            InitLog(trace_enable, debug_enable, info_enable, warning_enable, error_enable, fatal_enable, logs_path);
+            s = config.GetLogsMaxLogFileSize(max_log_file_size);
+            if (!s.ok()) {
+                return s;
+            }
+            s = config.GetLogsDeleteExceeds(delete_exceeds);
+            if (!s.ok()) {
+                return s;
+            }
+            InitLog(trace_enable, debug_enable, info_enable, warning_enable, error_enable, fatal_enable, logs_path,
+                    max_log_file_size, delete_exceeds);
         }
 
         std::string deploy_mode;

@@ -84,19 +84,27 @@ StorageChecker::CheckStoragePermission() {
     }
 
     /* Check wal directory write permission */
-    std::string wal_path;
-    status = config.GetWalConfigWalPath(wal_path);
+    bool wal_enable = false;
+    status = config.GetWalConfigEnable(wal_enable);
     if (!status.ok()) {
         return status;
     }
-    ret = access(wal_path.c_str(), F_OK | R_OK | W_OK);
-    fiu_do_on("StorageChecker.CheckStoragePermission.wal_path_access_fail", ret = -1);
-    if (0 != ret) {
-        std::string err_msg = " Access WAL storage path " + wal_path + " fail. " + strerror(errno) +
-                              "(code: " + std::to_string(errno) + ")";
-        LOG_SERVER_FATAL_ << err_msg;
-        std::cerr << err_msg << std::endl;
-        return Status(SERVER_UNEXPECTED_ERROR, err_msg);
+
+    if (wal_enable) {
+        std::string wal_path;
+        status = config.GetWalConfigWalPath(wal_path);
+        if (!status.ok()) {
+            return status;
+        }
+        ret = access(wal_path.c_str(), F_OK | R_OK | W_OK);
+        fiu_do_on("StorageChecker.CheckStoragePermission.wal_path_access_fail", ret = -1);
+        if (0 != ret) {
+            std::string err_msg = " Access WAL storage path " + wal_path + " fail. " + strerror(errno) +
+                                  "(code: " + std::to_string(errno) + ")";
+            LOG_SERVER_FATAL_ << err_msg;
+            std::cerr << err_msg << std::endl;
+            return Status(SERVER_UNEXPECTED_ERROR, err_msg);
+        }
     }
 
     return Status::OK();
