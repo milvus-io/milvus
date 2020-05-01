@@ -128,7 +128,8 @@ class DBImpl : public DB, public server::CacheConfigHandler, public server::Engi
     //    Merge(const std::set<std::string>& collection_ids) override;
 
     Status
-    CreateIndex(const std::string& collection_id, const CollectionIndex& index) override;
+    CreateIndex(const std::shared_ptr<server::Context>& context, const std::string& collection_id,
+                const CollectionIndex& index) override;
 
     Status
     DescribeIndex(const std::string& collection_id, CollectionIndex& index) override;
@@ -270,7 +271,8 @@ class DBImpl : public DB, public server::CacheConfigHandler, public server::Engi
     UpdateCollectionIndexRecursively(const std::string& collection_id, const CollectionIndex& index);
 
     Status
-    WaitCollectionIndexRecursively(const std::string& collection_id, const CollectionIndex& index);
+    WaitCollectionIndexRecursively(const std::shared_ptr<server::Context>& context, const std::string& collection_id,
+                                   const CollectionIndex& index);
 
     Status
     DropCollectionIndexRecursively(const std::string& collection_id);

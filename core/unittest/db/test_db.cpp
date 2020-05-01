@@ -314,7 +314,7 @@ TEST_F(DBTest, SEARCH_TEST) {
     milvus::engine::CollectionIndex index;
     index.engine_type_ = (int)milvus::engine::EngineType::FAISS_IDMAP;
     index.extra_params_ = {{"nlist", 16384}};
-//    db_->CreateIndex(COLLECTION_NAME, index);  // wait until build index finish
+//    db_->CreateIndex(dummy_context_, COLLECTION_NAME, index);  // wait until build index finish
 //
 //    {
 //        std::vector<std::string> tags;
@@ -326,7 +326,7 @@ TEST_F(DBTest, SEARCH_TEST) {
 //
 //    index.engine_type_ = (int)milvus::engine::EngineType::FAISS_IVFFLAT;
 //    index.extra_params_ = {{"nlist", 16384}};
-//    db_->CreateIndex(COLLECTION_NAME, index);  // wait until build index finish
+//    db_->CreateIndex(dummy_context_, COLLECTION_NAME, index);  // wait until build index finish
 //
 //    {
 //        std::vector<std::string> tags;
@@ -338,7 +338,7 @@ TEST_F(DBTest, SEARCH_TEST) {
 
     index.engine_type_ = (int)milvus::engine::EngineType::FAISS_IVFSQ8;
     index.extra_params_ = {{"nlist", 16384}};
-    db_->CreateIndex(COLLECTION_NAME, index);  // wait until build index finish
+    db_->CreateIndex(dummy_context_, COLLECTION_NAME, index);  // wait until build index finish
 
     {
         std::vector<std::string> tags;
@@ -350,7 +350,7 @@ TEST_F(DBTest, SEARCH_TEST) {
 
 #ifdef MILVUS_GPU_VERSION
     index.engine_type_ = (int)milvus::engine::EngineType::FAISS_IVFSQ8H;
-    db_->CreateIndex(COLLECTION_NAME, index);  // wait until build index finish
+    db_->CreateIndex(dummy_context_, COLLECTION_NAME, index);  // wait until build index finish
 
     {
         std::vector<std::string> tags;
@@ -400,7 +400,7 @@ TEST_F(DBTest, SEARCH_TEST) {
 #ifdef MILVUS_GPU_VERSION
     // test FAISS_IVFSQ8H optimizer
     index.engine_type_ = (int)milvus::engine::EngineType::FAISS_IVFSQ8H;
-    db_->CreateIndex(COLLECTION_NAME, index);  // wait until build index finish
+    db_->CreateIndex(dummy_context_, COLLECTION_NAME, index);  // wait until build index finish
     std::vector<std::string> partition_tag;
     milvus::engine::ResultIds result_ids;
     milvus::engine::ResultDistances result_dists;
@@ -452,7 +452,7 @@ TEST_F(DBTest, PRELOAD_TEST) {
 
     milvus::engine::CollectionIndex index;
     index.engine_type_ = (int)milvus::engine::EngineType::FAISS_IDMAP;
-    db_->CreateIndex(COLLECTION_NAME, index);  // wait until build index finish
+    db_->CreateIndex(dummy_context_, COLLECTION_NAME, index);  // wait until build index finish
 
     int64_t prev_cache_usage = milvus::cache::CpuCacheMgr::GetInstance()->CacheUsage();
     stat = db_->PreloadCollection(COLLECTION_NAME);
@@ -551,7 +551,7 @@ TEST_F(DBTest, SHUTDOWN_TEST) {
     ASSERT_FALSE(stat.ok());
 
     milvus::engine::CollectionIndex index;
-    stat = db_->CreateIndex(collection_info.collection_id_, index);
+    stat = db_->CreateIndex(dummy_context_, collection_info.collection_id_, index);
     ASSERT_FALSE(stat.ok());
 
     stat = db_->DescribeIndex(collection_info.collection_id_, index);
@@ -713,28 +713,28 @@ TEST_F(DBTest, INDEX_TEST) {
     milvus::engine::CollectionIndex index;
     index.engine_type_ = (int)milvus::engine::EngineType::FAISS_IVFSQ8;
     index.metric_type_ = (int)milvus::engine::MetricType::IP;
-    stat = db_->CreateIndex(collection_info.collection_id_, index);
+    stat = db_->CreateIndex(dummy_context_, collection_info.collection_id_, index);
     ASSERT_TRUE(stat.ok());
 
     index.engine_type_ = (int)milvus::engine::EngineType::FAISS_IVFFLAT;
-    stat = db_->CreateIndex(collection_info.collection_id_, index);
+    stat = db_->CreateIndex(dummy_context_, collection_info.collection_id_, index);
     ASSERT_TRUE(stat.ok());
 
     fiu_init(0);
     FIU_ENABLE_FIU("SqliteMetaImpl.DescribeCollectionIndex.throw_exception");
-    stat = db_->CreateIndex(collection_info.collection_id_, index);
+    stat = db_->CreateIndex(dummy_context_, collection_info.collection_id_, index);
     ASSERT_FALSE(stat.ok());
     fiu_disable("SqliteMetaImpl.DescribeCollectionIndex.throw_exception");
 
     index.engine_type_ = (int)milvus::engine::EngineType::FAISS_PQ;
     FIU_ENABLE_FIU("DBImpl.UpdateCollectionIndexRecursively.fail_update_collection_index");
-    stat = db_->CreateIndex(collection_info.collection_id_, index);
+    stat = db_->CreateIndex(dummy_context_, collection_info.collection_id_, index);
     ASSERT_FALSE(stat.ok());
     fiu_disable("DBImpl.UpdateCollectionIndexRecursively.fail_update_collection_index");
 
 #ifdef MILVUS_GPU_VERSION
     index.engine_type_ = (int)milvus::engine::EngineType::FAISS_IVFSQ8H;
-    stat = db_->CreateIndex(collection_info.collection_id_, index);
+    stat = db_->CreateIndex(dummy_context_, collection_info.collection_id_, index);
     ASSERT_TRUE(stat.ok());
 #endif
 
@@ -815,17 +815,17 @@ TEST_F(DBTest, PARTITION_TEST) {
         milvus::engine::CollectionIndex index;
         index.engine_type_ = (int)milvus::engine::EngineType::FAISS_IVFFLAT;
         index.metric_type_ = (int)milvus::engine::MetricType::L2;
-        stat = db_->CreateIndex(collection_info.collection_id_, index);
+        stat = db_->CreateIndex(dummy_context_, collection_info.collection_id_, index);
         ASSERT_TRUE(stat.ok());
 
         fiu_init(0);
         FIU_ENABLE_FIU("DBImpl.WaitCollectionIndexRecursively.fail_build_collection_Index_for_partition");
-        stat = db_->CreateIndex(collection_info.collection_id_, index);
+        stat = db_->CreateIndex(dummy_context_, collection_info.collection_id_, index);
         ASSERT_FALSE(stat.ok());
         fiu_disable("DBImpl.WaitCollectionIndexRecursively.fail_build_collection_Index_for_partition");
 
         FIU_ENABLE_FIU("DBImpl.WaitCollectionIndexRecursively.not_empty_err_msg");
-        stat = db_->CreateIndex(collection_info.collection_id_, index);
+        stat = db_->CreateIndex(dummy_context_, collection_info.collection_id_, index);
         ASSERT_FALSE(stat.ok());
         fiu_disable("DBImpl.WaitCollectionIndexRecursively.not_empty_err_msg");
 
@@ -967,7 +967,7 @@ TEST_F(DBTest2, DELETE_TEST) {
     milvus::engine::IDNumbers vector_ids;
     stat = db_->InsertVectors(COLLECTION_NAME, "", xb);
     milvus::engine::CollectionIndex index;
-    stat = db_->CreateIndex(COLLECTION_NAME, index);
+    stat = db_->CreateIndex(dummy_context_, COLLECTION_NAME, index);
 
     // create partition, drop collection will drop partition recursively
     stat = db_->CreatePartition(COLLECTION_NAME, "part0", "0");
@@ -1341,7 +1341,7 @@ TEST_F(DBTest2, SEARCH_WITH_DIFFERENT_INDEX) {
     milvus::engine::CollectionIndex index;
     // index.metric_type_ = (int)milvus::engine::MetricType::IP;
     index.engine_type_ = (int)milvus::engine::EngineType::FAISS_IVFFLAT;
-    stat = db_->CreateIndex(collection_info.collection_id_, index);
+    stat = db_->CreateIndex(dummy_context_, collection_info.collection_id_, index);
     ASSERT_TRUE(stat.ok());
 
     stat = db_->PreloadCollection(collection_info.collection_id_);
@@ -1366,7 +1366,7 @@ result_distances);
     db_->DropIndex(collection_info.collection_id_);
 
     index.engine_type_ = (int)milvus::engine::EngineType::FAISS_IVFSQ8;
-    stat = db_->CreateIndex(collection_info.collection_id_, index);
+    stat = db_->CreateIndex(dummy_context_, collection_info.collection_id_, index);
     ASSERT_TRUE(stat.ok());
 
     stat = db_->PreloadCollection(collection_info.collection_id_);

@@ -1267,7 +1267,8 @@ DBImpl::GetVectorsByIdHelper(const std::string& collection_id, const IDNumbers& 
 }
 
 Status
-DBImpl::CreateIndex(const std::string& collection_id, const CollectionIndex& index) {
+DBImpl::CreateIndex(const std::shared_ptr<server::Context>& context, const std::string& collection_id,
+                    const CollectionIndex& index) {
     if (!initialized_.load(std::memory_order_acquire)) {
         return SHUTDOWN_ERROR;
     }
@@ -1305,7 +1306,7 @@ DBImpl::CreateIndex(const std::string& collection_id, const CollectionIndex& ind
 
     // step 4: wait and build index
     status = index_failed_checker_.CleanFailedIndexFileOfCollection(collection_id);
-    status = WaitCollectionIndexRecursively(collection_id, index);
+    status = WaitCollectionIndexRecursively(context, collection_id, index);
 
     return status;
 }
@@ -2291,7 +2292,8 @@ DBImpl::UpdateCollectionIndexRecursively(const std::string& collection_id, const
 }
 
 Status
-DBImpl::WaitCollectionIndexRecursively(const std::string& collection_id, const CollectionIndex& index) {
+DBImpl::WaitCollectionIndexRecursively(const std::shared_ptr<server::Context>& context,
+                                       const std::string& collection_id, const CollectionIndex& index) {
     // for IDMAP type, only wait all NEW file converted to RAW file
     // for other type, wait NEW/RAW/NEW_MERGE/NEW_INDEX/TO_INDEX files converted to INDEX files
     std::vector<int> file_types;
@@ -2322,6 +2324,13 @@ DBImpl::WaitCollectionIndexRecursively(const std::string& collection_id, const C
             }
 
             index_req_swn_.Wait_For(std::chrono::seconds(WAIT_BUILD_INDEX_INTERVAL));
+
+            // client break the connection, no need to block here
+            if (context->IsConnectionBroken()) {
+                LOG_ENGINE_DEBUG_ << "Client connection broken, build index in background";
+                break;  // just break, not return, continue to update partitions files to to_index
+            }
+
             GetFilesToBuildIndex(collection_id, file_types, files_holder);
             ++times;
         }
@@ -2331,7 +2340,7 @@ DBImpl::WaitCollectionIndexRecursively(const std::string& collection_id, const C
     std::vector<meta::CollectionSchema> partition_array;
     auto status = meta_ptr_->ShowPartitions(collection_id, partition_array);
     for (auto& schema : partition_array) {
-        status = WaitCollectionIndexRecursively(schema.collection_id_, index);
+        status = WaitCollectionIndexRecursively(context, schema.collection_id_, index);
         fiu_do_on("DBImpl.WaitCollectionIndexRecursively.fail_build_collection_Index_for_partition",
                   status = Status(DB_ERROR, ""));
         if (!status.ok()) {
