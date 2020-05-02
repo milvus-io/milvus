@@ -24,7 +24,7 @@ class SingleIndexTest : public DataGen, public TestGpuIndexBase {
     void
     SetUp() override {
         TestGpuIndexBase::SetUp();
-        nb = 1000000;
+        nb = 100000;
         nq = 1000;
         dim = DIM;
         Generate(dim, nb, nq);
