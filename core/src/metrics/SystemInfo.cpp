@@ -318,8 +318,9 @@ SystemInfo::CPUTemperature() {
                         return result;
                     }
                     float temp;
-                    fscanf(file, "%f", &temp);
-                    result.push_back(temp / 1000);
+                    if (fscanf(file, "%f", &temp) != -1) {
+                        result.push_back(temp / 1000);
+                    }
                 }
             }
         }
