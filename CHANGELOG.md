@@ -15,6 +15,7 @@ Please mark all change in change log and use the issue from GitHub
 -   \#2128 Check has_partition params
 -   \#2131 Distance/ID returned is not correct if searching with duplicate ids
 -   \#2141 Fix server start failed if wal directory exist
+-   \#2169 Fix SingleIndexTest.IVFSQHybrid unittest
 -   \#2196 Fix server start failed if wal is disabled
 
 ## Feature
