@@ -31,7 +31,9 @@ namespace faiss {
 PageLockMemory::PageLockMemory(size_t size) : nbytes(size) {
     auto err = cudaHostAlloc(&(this->data), size, 0);
     if (err) {
-        FAISS_THROW_MSG("Fail to alloc page lock memory " + std::to_string(size));
+        std::string msg =
+            "Fail to alloc page lock memory " + std::to_string(size) + ", err code " + std::to_string((int32_t)err);
+        FAISS_THROW_MSG(msg);
     }
 }
 
@@ -42,7 +44,9 @@ PageLockMemory::~PageLockMemory() {
 PageLockMemory::PageLockMemory(const PageLockMemory& other) {
     auto err = cudaHostAlloc(&(this->data), other.nbytes, 0);
     if (err) {
-        FAISS_THROW_MSG("Fail to alloc page lock memory " + std::to_string(other.nbytes));
+        std::string msg = "Fail to alloc page lock memory " + std::to_string(other.nbytes) + ", err code " +
+                          std::to_string((int32_t)err);
+        FAISS_THROW_MSG(msg);
     }
     memcpy(this->data, other.data, other.nbytes);
     this->nbytes = other.nbytes;
