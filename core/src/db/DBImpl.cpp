@@ -2315,24 +2315,30 @@ DBImpl::WaitCollectionIndexRecursively(const std::shared_ptr<server::Context>& c
         meta::FilesHolder files_holder;
         auto status = GetFilesToBuildIndex(collection_id, file_types, files_holder);
         int times = 1;
-
+        uint64_t repeat = 0;
         while (!files_holder.HoldFiles().empty()) {
-            LOG_ENGINE_DEBUG_ << files_holder.HoldFiles().size() << " non-index files detected! Will build index "
-                              << times;
-            if (!utils::IsRawIndexType(index.engine_type_)) {
-                status = meta_ptr_->UpdateCollectionFilesToIndex(collection_id);
+            if (repeat % WAIT_BUILD_INDEX_INTERVAL == 0) {
+                LOG_ENGINE_DEBUG_ << files_holder.HoldFiles().size() << " non-index files detected! Will build index "
+                                  << times;
+                if (!utils::IsRawIndexType(index.engine_type_)) {
+                    status = meta_ptr_->UpdateCollectionFilesToIndex(collection_id);
+                }
             }
 
-            index_req_swn_.Wait_For(std::chrono::seconds(WAIT_BUILD_INDEX_INTERVAL));
+            index_req_swn_.Wait_For(std::chrono::seconds(1));
 
-            // client break the connection, no need to block here
+            // client break the connection, no need to block, check every 1 second
             if (context->IsConnectionBroken()) {
                 LOG_ENGINE_DEBUG_ << "Client connection broken, build index in background";
                 break;  // just break, not return, continue to update partitions files to to_index
             }
 
-            GetFilesToBuildIndex(collection_id, file_types, files_holder);
-            ++times;
+            // check to_index files every 5 seconds
+            repeat++;
+            if (repeat % WAIT_BUILD_INDEX_INTERVAL == 0) {
+                GetFilesToBuildIndex(collection_id, file_types, files_holder);
+                ++times;
+            }
         }
     }
 
