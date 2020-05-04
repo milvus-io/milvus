@@ -62,6 +62,8 @@ constexpr uint64_t BACKGROUND_METRIC_INTERVAL = 1;
 constexpr uint64_t BACKGROUND_INDEX_INTERVAL = 1;
 constexpr uint64_t WAIT_BUILD_INDEX_INTERVAL = 5;
 
+constexpr double COMPACT_THREASHOLD = 0.1;  // compact segment threashold = delete_count/total_count
+
 constexpr const char* JSON_ROW_COUNT = "row_count";
 constexpr const char* JSON_PARTITIONS = "partitions";
 constexpr const char* JSON_PARTITION_TAG = "tag";
@@ -952,12 +954,32 @@ DBImpl::CompactFile(const std::string& collection_id, const meta::SegmentSchema&
                     meta::SegmentsSchema& files_to_update) {
     LOG_ENGINE_DEBUG_ << "Compacting segment " << file.segment_id_ << " for collection: " << collection_id;
 
+    std::string segment_dir_to_merge;
+    utils::GetParentPath(file.location_, segment_dir_to_merge);
+
+    // no need to compact if deleted vectors are too few(less than threashold)
+    // TODO: use server config to set the threashold
+    if (file.row_count_ > 0) {
+        segment::SegmentReader segment_reader_to_merge(segment_dir_to_merge);
+        segment::DeletedDocsPtr deleted_docs_ptr;
+        auto status = segment_reader_to_merge.LoadDeletedDocs(deleted_docs_ptr);
+        if (status.ok()) {
+            auto delete_items = deleted_docs_ptr->GetDeletedDocs();
+            double delete_rate = (double)delete_items.size() / (double)file.row_count_;
+            if (delete_rate < COMPACT_THREASHOLD) {
+                LOG_ENGINE_DEBUG_ << "Delete rate less than " << COMPACT_THREASHOLD << ", no need to compact for"
+                                  << segment_dir_to_merge;
+                return Status::OK();
+            }
+        }
+    }
+
     // Create new collection file
     meta::SegmentSchema compacted_file;
     compacted_file.collection_id_ = collection_id;
     // compacted_file.date_ = date;
     compacted_file.file_type_ = meta::SegmentSchema::NEW_MERGE;  // TODO: use NEW_MERGE for now
-    Status status = meta_ptr_->CreateCollectionFile(compacted_file);
+    auto status = meta_ptr_->CreateCollectionFile(compacted_file);
 
     if (!status.ok()) {
         LOG_ENGINE_ERROR_ << "Failed to create collection file: " << status.message();
@@ -969,9 +991,6 @@ DBImpl::CompactFile(const std::string& collection_id, const meta::SegmentSchema&
     std::string new_segment_dir;
     utils::GetParentPath(compacted_file.location_, new_segment_dir);
     auto segment_writer_ptr = std::make_shared<segment::SegmentWriter>(new_segment_dir);
-
-    std::string segment_dir_to_merge;
-    utils::GetParentPath(file.location_, segment_dir_to_merge);
 
     LOG_ENGINE_DEBUG_ << "Compacting begin...";
     segment_writer_ptr->Merge(segment_dir_to_merge, compacted_file.file_id_);
