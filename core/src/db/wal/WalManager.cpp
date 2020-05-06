@@ -302,8 +302,8 @@ WalManager::CreateHybridCollection(const std::string& collection_id) {
     LOG_WAL_INFO_ << "create hybrid collection " << collection_id << " " << last_applied_lsn_;
     std::lock_guard<std::mutex> lck(mutex_);
     uint64_t applied_lsn = last_applied_lsn_;
-    tables_[collection_id] = {last_applied_lsn_, last_applied_lsn_};
-    return last_applied_lsn_;
+    tables_[collection_id] = {applied_lsn, applied_lsn};
+    return applied_lsn;
 }
 
 void
