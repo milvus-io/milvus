@@ -21,18 +21,17 @@ namespace web {
 
 #include OATPP_CODEGEN_BEGIN(DTO)
 
-
-class TableRequestDto : public oatpp::data::mapping::type::Object {
- DTO_INIT(TableRequestDto, Object)
+class CollectionRequestDto : public oatpp::data::mapping::type::Object {
+ DTO_INIT(CollectionRequestDto, Object)
 
     DTO_FIELD(String, collection_name, "collection_name");
     DTO_FIELD(Int64, dimension, "dimension");
-    DTO_FIELD(Int64, index_file_size, "index_file_size") = VALUE_TABLE_INDEX_FILE_SIZE_DEFAULT;
-    DTO_FIELD(String, metric_type, "metric_type") = VALUE_TABLE_METRIC_TYPE_DEFAULT;
+    DTO_FIELD(Int64, index_file_size, "index_file_size") = VALUE_COLLECTION_INDEX_FILE_SIZE_DEFAULT;
+    DTO_FIELD(String, metric_type, "metric_type") = VALUE_COLLECTION_METRIC_TYPE_DEFAULT;
 };
 
-class TableFieldsDto : public oatpp::data::mapping::type::Object {
- DTO_INIT(TableFieldsDto, Object)
+class CollectionFieldsDto : public oatpp::data::mapping::type::Object {
+ DTO_INIT(CollectionFieldsDto, Object)
 
     DTO_FIELD(String, collection_name);
     DTO_FIELD(Int64, dimension);
@@ -43,16 +42,16 @@ class TableFieldsDto : public oatpp::data::mapping::type::Object {
     DTO_FIELD(String, index_params);
 };
 
-class TableListDto : public OObject {
- DTO_INIT(TableListDto, Object)
+class CollectionListDto : public OObject {
+ DTO_INIT(CollectionListDto, Object)
 
     DTO_FIELD(List<String>::ObjectWrapper, collection_names);
 };
 
-class TableListFieldsDto : public OObject {
-    DTO_INIT(TableListFieldsDto, Object)
+class CollectionListFieldsDto : public OObject {
+    DTO_INIT(CollectionListFieldsDto, Object)
 
-    DTO_FIELD(List<TableFieldsDto::ObjectWrapper>::ObjectWrapper, collections);
+    DTO_FIELD(List<CollectionFieldsDto::ObjectWrapper>::ObjectWrapper, collections);
     DTO_FIELD(Int64, count) = 0L;
 };
 
