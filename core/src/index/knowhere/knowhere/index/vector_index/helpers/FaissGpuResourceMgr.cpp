@@ -51,29 +51,31 @@ FaissGpuResourceMgr::InitDevice(int64_t device_id, int64_t pin_mem_size, int64_t
 
 void
 FaissGpuResourceMgr::InitResource() {
-    if (is_init)
-        return;
+    if (!initialized_) {
+        std::lock_guard<std::mutex> lock(init_mutex_);
 
-    is_init = true;
+        if (!initialized_) {
+            for (auto& device : devices_params_) {
+                auto& device_id = device.first;
 
-    for (auto& device : devices_params_) {
-        auto& device_id = device.first;
+                mutex_cache_.emplace(device_id, std::make_unique<std::mutex>());
 
-        mutex_cache_.emplace(device_id, std::make_unique<std::mutex>());
+                auto& device_param = device.second;
+                auto& bq = idle_map_[device_id];
 
-        auto& device_param = device.second;
-        auto& bq = idle_map_[device_id];
+                for (int64_t i = 0; i < device_param.resource_num; ++i) {
+                    auto raw_resource = std::make_shared<faiss::gpu::StandardGpuResources>();
 
-        for (int64_t i = 0; i < device_param.resource_num; ++i) {
-            auto raw_resource = std::make_shared<faiss::gpu::StandardGpuResources>();
+                    // TODO(linxj): enable set pinned memory
+                    auto res_wrapper = std::make_shared<Resource>(raw_resource);
+                    AllocateTempMem(res_wrapper, device_id, 0);
 
-            // TODO(linxj): enable set pinned memory
-            auto res_wrapper = std::make_shared<Resource>(raw_resource);
-            AllocateTempMem(res_wrapper, device_id, 0);
-
-            bq.Put(res_wrapper);
+                    bq.Put(res_wrapper);
+                }
+                LOG_KNOWHERE_DEBUG_ << "DEVICEID " << device_id << ", resource count " << bq.Size();
+            }
+            initialized_ = true;
         }
-        LOG_KNOWHERE_DEBUG_ << "DEVICEID " << device_id << ", resource count " << bq.Size();
     }
 }
 
@@ -115,14 +117,14 @@ FaissGpuResourceMgr::Free() {
             bq.Take();
         }
     }
-    is_init = false;
+    initialized_ = false;
 }
 
 void
 FaissGpuResourceMgr::Dump() {
     for (auto& item : idle_map_) {
         auto& bq = item.second;
-        // std::cout << "DEVICEID: " << item.first << ", resource count:" << bq.Size();
+        LOG_KNOWHERE_DEBUG_ << "DEVICEID: " << item.first << ", resource count:" << bq.Size();
     }
 }
 

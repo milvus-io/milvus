@@ -505,17 +505,17 @@ class TestSearchBase:
         assert check_result(result[0], ids[0])
         assert result[0][0].distance >= 1 - gen_inaccuracy(result[0][0].distance)
 
-    @pytest.mark.level(2)
-    def test_search_vectors_without_connect(self, dis_connect, collection):
-        '''
-        target: test search vectors without connection
-        method: use dis connected instance, call search method and check if search successfully
-        expected: raise exception
-        '''
-        query_vectors = [vectors[0]]
-        nprobe = 1
-        with pytest.raises(Exception) as e:
-            status, ids = dis_connect.search_vectors(collection, top_k, query_vectors)
+    # @pytest.mark.level(2)
+    # def test_search_vectors_without_connect(self, dis_connect, collection):
+    #     '''
+    #     target: test search vectors without connection
+    #     method: use dis connected instance, call search method and check if search successfully
+    #     expected: raise exception
+    #     '''
+    #     query_vectors = [vectors[0]]
+    #     nprobe = 1
+    #     with pytest.raises(Exception) as e:
+    #         status, ids = dis_connect.search_vectors(collection, top_k, query_vectors)
 
     def test_search_collection_name_not_existed(self, connect, collection):
         '''

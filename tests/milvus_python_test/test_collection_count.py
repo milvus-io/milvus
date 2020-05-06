@@ -145,15 +145,15 @@ class TestCollectionCount:
         status, res = connect.count_collection(collection)
         assert res == nb
 
-    @pytest.mark.level(2)
-    def test_count_without_connection(self, collection, dis_connect):
-        '''
-        target: test count_collection, without connection
-        method: calling count_collection with correct params, with a disconnected instance
-        expected: count_collection raise exception
-        '''
-        with pytest.raises(Exception) as e:
-            status = dis_connect.count_collection(collection)
+    # @pytest.mark.level(2)
+    # def test_count_without_connection(self, collection, dis_connect):
+    #     '''
+    #     target: test count_collection, without connection
+    #     method: calling count_collection with correct params, with a disconnected instance
+    #     expected: count_collection raise exception
+    #     '''
+    #     with pytest.raises(Exception) as e:
+    #         status = dis_connect.count_collection(collection)
 
     def test_collection_rows_count_no_vectors(self, connect, collection):
         '''
@@ -289,15 +289,15 @@ class TestCollectionCountIP:
         status, res = connect.count_collection(ip_collection)
         assert res == nb
 
-    @pytest.mark.level(2)
-    def test_count_without_connection(self, ip_collection, dis_connect):
-        '''
-        target: test count_collection, without connection
-        method: calling count_collection with correct params, with a disconnected instance
-        expected: count_collection raise exception
-        '''
-        with pytest.raises(Exception) as e:
-            status = dis_connect.count_collection(ip_collection)
+    # @pytest.mark.level(2)
+    # def test_count_without_connection(self, ip_collection, dis_connect):
+    #     '''
+    #     target: test count_collection, without connection
+    #     method: calling count_collection with correct params, with a disconnected instance
+    #     expected: count_collection raise exception
+    #     '''
+    #     with pytest.raises(Exception) as e:
+    #         status = dis_connect.count_collection(ip_collection)
 
     def test_collection_rows_count_no_vectors(self, connect, ip_collection):
         '''
@@ -431,15 +431,15 @@ class TestCollectionCountJAC:
         status, res = connect.count_collection(jac_collection)
         assert res == nb
 
-    @pytest.mark.level(2)
-    def test_count_without_connection(self, jac_collection, dis_connect):
-        '''
-        target: test count_collection, without connection
-        method: calling count_collection with correct params, with a disconnected instance
-        expected: count_collection raise exception
-        '''
-        with pytest.raises(Exception) as e:
-            status = dis_connect.count_collection(jac_collection)
+    # @pytest.mark.level(2)
+    # def test_count_without_connection(self, jac_collection, dis_connect):
+    #     '''
+    #     target: test count_collection, without connection
+    #     method: calling count_collection with correct params, with a disconnected instance
+    #     expected: count_collection raise exception
+    #     '''
+    #     with pytest.raises(Exception) as e:
+    #         status = dis_connect.count_collection(jac_collection)
 
     def test_collection_rows_count_no_vectors(self, connect, jac_collection):
         '''
@@ -624,15 +624,15 @@ class TestCollectionCountBinary:
         status, res = connect.count_collection(superstructure_collection)
         assert res == nb
 
-    @pytest.mark.level(2)
-    def test_count_without_connection(self, ham_collection, dis_connect):
-        '''
-        target: test count_collection, without connection
-        method: calling count_collection with correct params, with a disconnected instance
-        expected: count_collection raise exception
-        '''
-        with pytest.raises(Exception) as e:
-            status = dis_connect.count_collection(ham_collection)
+    # @pytest.mark.level(2)
+    # def test_count_without_connection(self, ham_collection, dis_connect):
+    #     '''
+    #     target: test count_collection, without connection
+    #     method: calling count_collection with correct params, with a disconnected instance
+    #     expected: count_collection raise exception
+    #     '''
+    #     with pytest.raises(Exception) as e:
+    #         status = dis_connect.count_collection(ham_collection)
 
     def test_collection_rows_count_no_vectors(self, connect, ham_collection):
         '''

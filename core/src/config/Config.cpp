@@ -113,8 +113,8 @@ const char* CONFIG_ENGINE_USE_BLAS_THRESHOLD = "use_blas_threshold";
 const char* CONFIG_ENGINE_USE_BLAS_THRESHOLD_DEFAULT = "1100";
 const char* CONFIG_ENGINE_OMP_THREAD_NUM = "omp_thread_num";
 const char* CONFIG_ENGINE_OMP_THREAD_NUM_DEFAULT = "0";
-const char* CONFIG_ENGINE_USE_AVX512 = "use_avx512";
-const char* CONFIG_ENGINE_USE_AVX512_DEFAULT = "true";
+const char* CONFIG_ENGINE_SIMD_TYPE = "simd_type";
+const char* CONFIG_ENGINE_SIMD_TYPE_DEFAULT = "auto";
 const char* CONFIG_ENGINE_GPU_SEARCH_THRESHOLD = "gpu_search_threshold";
 const char* CONFIG_ENGINE_GPU_SEARCH_THRESHOLD_DEFAULT = "1000";
 
@@ -169,6 +169,14 @@ const char* CONFIG_LOGS_FATAL_ENABLE = "fatal.enable";
 const char* CONFIG_LOGS_FATAL_ENABLE_DEFAULT = "true";
 const char* CONFIG_LOGS_PATH = "path";
 const char* CONFIG_LOGS_PATH_DEFAULT = "/tmp/milvus/logs";
+const char* CONFIG_LOGS_MAX_LOG_FILE_SIZE = "max_log_file_size";
+const char* CONFIG_LOGS_MAX_LOG_FILE_SIZE_DEFAULT = "256";
+const int64_t CONFIG_LOGS_MAX_LOG_FILE_SIZE_MAX = 512;
+const int64_t CONFIG_LOGS_MAX_LOG_FILE_SIZE_MIN = 64;
+const char* CONFIG_LOGS_DELETE_EXCEEDS = "delete_exceeds";
+const char* CONFIG_LOGS_DELETE_EXCEEDS_DEFAULT = "10";
+const int64_t CONFIG_LOGS_DELETE_EXCEEDS_MAX = 4096;
+const int64_t CONFIG_LOGS_DELETE_EXCEEDS_MIN = 1;
 
 constexpr int64_t GB = 1UL << 30;
 constexpr int32_t PORT_NUMBER_MIN = 1024;
@@ -338,8 +346,8 @@ Config::ValidateConfig() {
     int64_t engine_omp_thread_num;
     CONFIG_CHECK(GetEngineConfigOmpThreadNum(engine_omp_thread_num));
 
-    bool engine_use_avx512;
-    CONFIG_CHECK(GetEngineConfigUseAVX512(engine_use_avx512));
+    std::string engine_simd_type;
+    CONFIG_CHECK(GetEngineConfigSimdType(engine_simd_type));
 
 #ifdef MILVUS_GPU_VERSION
     int64_t engine_gpu_search_threshold;
@@ -406,6 +414,12 @@ Config::ValidateConfig() {
     std::string logs_path;
     CONFIG_CHECK(GetLogsPath(logs_path));
 
+    int64_t logs_max_log_file_size;
+    CONFIG_CHECK(GetLogsMaxLogFileSize(logs_max_log_file_size));
+
+    int64_t delete_exceeds;
+    CONFIG_CHECK(GetLogsDeleteExceeds(delete_exceeds));
+
     return Status::OK();
 }
 
@@ -450,7 +464,7 @@ Config::ResetDefaultConfig() {
     /* engine config */
     CONFIG_CHECK(SetEngineConfigUseBlasThreshold(CONFIG_ENGINE_USE_BLAS_THRESHOLD_DEFAULT));
     CONFIG_CHECK(SetEngineConfigOmpThreadNum(CONFIG_ENGINE_OMP_THREAD_NUM_DEFAULT));
-    CONFIG_CHECK(SetEngineConfigUseAVX512(CONFIG_ENGINE_USE_AVX512_DEFAULT));
+    CONFIG_CHECK(SetEngineConfigSimdType(CONFIG_ENGINE_SIMD_TYPE_DEFAULT));
 
     /* wal config */
     CONFIG_CHECK(SetWalConfigEnable(CONFIG_WAL_ENABLE_DEFAULT));
@@ -466,6 +480,8 @@ Config::ResetDefaultConfig() {
     CONFIG_CHECK(SetLogsErrorEnable(CONFIG_LOGS_ERROR_ENABLE_DEFAULT));
     CONFIG_CHECK(SetLogsFatalEnable(CONFIG_LOGS_FATAL_ENABLE_DEFAULT));
     CONFIG_CHECK(SetLogsPath(CONFIG_LOGS_PATH_DEFAULT));
+    CONFIG_CHECK(SetLogsMaxLogFileSize(CONFIG_LOGS_MAX_LOG_FILE_SIZE_DEFAULT));
+    CONFIG_CHECK(SetLogsDeleteExceeds(CONFIG_LOGS_DELETE_EXCEEDS_DEFAULT));
 
 #ifdef MILVUS_GPU_VERSION
     CONFIG_CHECK(SetEngineConfigGpuSearchThreshold(CONFIG_ENGINE_GPU_SEARCH_THRESHOLD_DEFAULT));
@@ -577,8 +593,8 @@ Config::SetConfigCli(const std::string& parent_key, const std::string& child_key
             status = SetEngineConfigUseBlasThreshold(value);
         } else if (child_key == CONFIG_ENGINE_OMP_THREAD_NUM) {
             status = SetEngineConfigOmpThreadNum(value);
-        } else if (child_key == CONFIG_ENGINE_USE_AVX512) {
-            status = SetEngineConfigUseAVX512(value);
+        } else if (child_key == CONFIG_ENGINE_SIMD_TYPE) {
+            status = SetEngineConfigSimdType(value);
 #ifdef MILVUS_GPU_VERSION
         } else if (child_key == CONFIG_ENGINE_GPU_SEARCH_THRESHOLD) {
             status = SetEngineConfigGpuSearchThreshold(value);
@@ -1315,11 +1331,12 @@ Config::CheckEngineConfigOmpThreadNum(const std::string& value) {
 }
 
 Status
-Config::CheckEngineConfigUseAVX512(const std::string& value) {
-    if (!ValidationUtil::ValidateStringIsBool(value).ok()) {
-        std::string msg =
-            "Invalid engine config: " + value + ". Possible reason: engine_config.use_avx512 is not a boolean.";
-        return Status(SERVER_INVALID_ARGUMENT, msg);
+Config::CheckEngineConfigSimdType(const std::string& value) {
+    fiu_return_on("check_config_simd_type_fail",
+                  Status(SERVER_INVALID_ARGUMENT, "engine_config.simd_type is not one of avx512, avx2, sse and auto."));
+
+    if (value != "avx512" && value != "avx2" && value != "sse" && value != "auto") {
+        return Status(SERVER_INVALID_ARGUMENT, "engine_config.simd_type is not one of avx512, avx2, sse and auto.");
     }
     return Status::OK();
 }
@@ -1622,6 +1639,32 @@ Config::CheckLogsPath(const std::string& value) {
     }
 
     return ValidationUtil::ValidateStoragePath(value);
+}
+
+Status
+Config::CheckLogsMaxLogFileSize(const std::string& value) {
+    auto exist_error = !ValidationUtil::ValidateStringIsNumber(value).ok();
+    fiu_do_on("check_logs_max_log_file_size_fail", exist_error = true);
+
+    if (exist_error) {
+        std::string msg = "Invalid max_log_file_size: " + value +
+                          ". Possible reason: logs.max_log_file_size is not a positive integer.";
+        return Status(SERVER_INVALID_ARGUMENT, msg);
+    }
+    return Status::OK();
+}
+
+Status
+Config::CheckLogsDeleteExceeds(const std::string& value) {
+    auto exist_error = !ValidationUtil::ValidateStringIsNumber(value).ok();
+    fiu_do_on("check_logs_delete_exceeds_fail", exist_error = true);
+
+    if (exist_error) {
+        std::string msg = "Invalid max_log_file_size: " + value +
+                          ". Possible reason: logs.max_log_file_size is not a positive integer.";
+        return Status(SERVER_INVALID_ARGUMENT, msg);
+    }
+    return Status::OK();
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -1927,12 +1970,9 @@ Config::GetEngineConfigOmpThreadNum(int64_t& value) {
 }
 
 Status
-Config::GetEngineConfigUseAVX512(bool& value) {
-    std::string str = GetConfigStr(CONFIG_ENGINE, CONFIG_ENGINE_USE_AVX512, CONFIG_ENGINE_USE_AVX512_DEFAULT);
-    CONFIG_CHECK(CheckEngineConfigUseAVX512(str));
-    std::transform(str.begin(), str.end(), str.begin(), ::tolower);
-    value = (str == "true" || str == "on" || str == "yes" || str == "1");
-    return Status::OK();
+Config::GetEngineConfigSimdType(std::string& value) {
+    value = GetConfigStr(CONFIG_ENGINE, CONFIG_ENGINE_SIMD_TYPE, CONFIG_ENGINE_SIMD_TYPE_DEFAULT);
+    return CheckEngineConfigSimdType(value);
 }
 
 #ifdef MILVUS_GPU_VERSION
@@ -2142,7 +2182,39 @@ Config::GetLogsFatalEnable(bool& value) {
 Status
 Config::GetLogsPath(std::string& value) {
     value = GetConfigStr(CONFIG_LOGS, CONFIG_LOGS_PATH, CONFIG_LOGS_PATH_DEFAULT);
-    CONFIG_CHECK(CheckWalConfigWalPath(value));
+    CONFIG_CHECK(CheckLogsPath(value));
+    return Status::OK();
+}
+
+Status
+Config::GetLogsMaxLogFileSize(int64_t& value) {
+    std::string str = GetConfigStr(CONFIG_LOGS, CONFIG_LOGS_MAX_LOG_FILE_SIZE, CONFIG_LOGS_MAX_LOG_FILE_SIZE_DEFAULT);
+    CONFIG_CHECK(CheckLogsMaxLogFileSize(str));
+    value = std::stoll(str);
+    if (value == 0) {
+        // OFF
+    } else if (value > CONFIG_LOGS_MAX_LOG_FILE_SIZE_MAX) {
+        value = CONFIG_LOGS_MAX_LOG_FILE_SIZE_MAX;
+    } else if (value < CONFIG_LOGS_MAX_LOG_FILE_SIZE_MIN) {
+        value = CONFIG_LOGS_MAX_LOG_FILE_SIZE_MIN;
+    }
+
+    return Status::OK();
+}
+
+Status
+Config::GetLogsDeleteExceeds(int64_t& value) {
+    std::string str = GetConfigStr(CONFIG_LOGS, CONFIG_LOGS_DELETE_EXCEEDS, CONFIG_LOGS_DELETE_EXCEEDS_DEFAULT);
+    CONFIG_CHECK(CheckLogsDeleteExceeds(str));
+    value = std::stoll(str);
+    if (value == 0) {
+        // OFF
+    } else if (value > CONFIG_LOGS_DELETE_EXCEEDS_MAX) {
+        value = CONFIG_LOGS_DELETE_EXCEEDS_MAX;
+    } else if (value < CONFIG_LOGS_DELETE_EXCEEDS_MIN) {
+        value = CONFIG_LOGS_DELETE_EXCEEDS_MIN;
+    }
+
     return Status::OK();
 }
 
@@ -2333,9 +2405,9 @@ Config::SetEngineConfigOmpThreadNum(const std::string& value) {
 }
 
 Status
-Config::SetEngineConfigUseAVX512(const std::string& value) {
-    CONFIG_CHECK(CheckEngineConfigUseAVX512(value));
-    return SetConfigValueInMem(CONFIG_ENGINE, CONFIG_ENGINE_USE_AVX512, value);
+Config::SetEngineConfigSimdType(const std::string& value) {
+    CONFIG_CHECK(CheckEngineConfigSimdType(value));
+    return SetConfigValueInMem(CONFIG_ENGINE, CONFIG_ENGINE_SIMD_TYPE, value);
 }
 
 /* tracing config */
@@ -2411,6 +2483,18 @@ Status
 Config::SetLogsPath(const std::string& value) {
     CONFIG_CHECK(CheckLogsPath(value));
     return SetConfigValueInMem(CONFIG_LOGS, CONFIG_LOGS_PATH, value);
+}
+
+Status
+Config::SetLogsMaxLogFileSize(const std::string& value) {
+    CONFIG_CHECK(CheckLogsMaxLogFileSize(value));
+    return SetConfigValueInMem(CONFIG_LOGS, CONFIG_LOGS_MAX_LOG_FILE_SIZE, value);
+}
+
+Status
+Config::SetLogsDeleteExceeds(const std::string& value) {
+    CONFIG_CHECK(CheckLogsDeleteExceeds(value));
+    return SetConfigValueInMem(CONFIG_LOGS, CONFIG_LOGS_DELETE_EXCEEDS, value);
 }
 
 #ifdef MILVUS_GPU_VERSION

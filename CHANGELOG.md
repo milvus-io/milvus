@@ -6,14 +6,17 @@ Please mark all change in change log and use the issue from GitHub
 
 ## Bug
 -   \#1705 Limit the insert data batch size
--   \#1796 Too much low performance of building index on ubuntu-mysql-version
+-   \#1776 Error out when index SQ8H run in CPU mode
 -   \#1929 Skip MySQL meta schema field width check
+-   \#1946 Fix load index file CPU2GPU fail during searching
 -   \#1997 Index file missed after compact
 -   \#2073 Fix CheckDBConfigBackendUrl error message
 -   \#2076 CheckMetricConfigAddress error message
 -   \#2128 Check has_partition params
 -   \#2131 Distance/ID returned is not correct if searching with duplicate ids
 -   \#2141 Fix server start failed if wal directory exist
+-   \#2169 Fix SingleIndexTest.IVFSQHybrid unittest
+-   \#2196 Fix server start failed if wal is disabled
 
 ## Feature
 -   \#1751 Add api SearchByID
@@ -25,15 +28,21 @@ Please mark all change in change log and use the issue from GitHub
 -   \#2059 Add lock file avoid multiple instances modifying data at the same time
 -   \#2064 Warn when use SQLite as metadata management
 -   \#2111 Check GPU environment before start server
+-   \#2206 Log file rotating
 
 ## Improvement
 -   \#221 Refactor LOG macro
+-   \#1796 Compile Openblas with source code to improve the performance
 -   \#2039 Support Milvus run on SSE CPUs
 -   \#2149 Merge server_cpu_config.template and server_gpu_config.template
 -   \#2153 Upgrade thirdparty oatpp to v1.0.0
--   \#2167 Merge config file
+-   \#2167 Merge log_config.conf with server_config.yaml
+-   \#2173 Check storage permission
+-   \#2178 Using elkan K-Means to improve IVF
+-   \#2190 Fix memory usage is twice of index size when using GPU searching
 
 ## Task
+
 
 # Milvus 0.8.0 (2020-04-15)
 

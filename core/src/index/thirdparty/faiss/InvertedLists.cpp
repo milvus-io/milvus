@@ -29,25 +29,36 @@ namespace faiss {
  */
 
 PageLockMemory::PageLockMemory(size_t size) : nbytes(size) {
-    CUDA_VERIFY(cudaHostAlloc(&data, size, 0));
+    auto err = cudaHostAlloc(&(this->data), size, 0);
+    if (err) {
+        std::string msg =
+            "Fail to alloc page lock memory " + std::to_string(size) + ", err code " + std::to_string((int32_t)err);
+        FAISS_THROW_MSG(msg);
+    }
 }
 
 PageLockMemory::~PageLockMemory() {
-    CUDA_VERIFY(cudaFreeHost((void*)data));
+    CUDA_VERIFY(cudaFreeHost((void*)(this->data)));
 }
 
 PageLockMemory::PageLockMemory(const PageLockMemory& other) {
-    CUDA_VERIFY(cudaHostAlloc(&data, other.nbytes, 0));
-    memcpy(data, other.data, other.nbytes);
-    nbytes = other.nbytes;
+    auto err = cudaHostAlloc(&(this->data), other.nbytes, 0);
+    if (err) {
+        std::string msg = "Fail to alloc page lock memory " + std::to_string(other.nbytes) + ", err code " +
+                          std::to_string((int32_t)err);
+        FAISS_THROW_MSG(msg);
+    }
+    memcpy(this->data, other.data, other.nbytes);
+    this->nbytes = other.nbytes;
 }
 
 PageLockMemory::PageLockMemory(PageLockMemory &&other) {
-    data = other.data;
-    nbytes = other.nbytes;
+    this->data = other.data;
+    this->nbytes = other.nbytes;
     other.data = nullptr;
     other.nbytes = 0;
 }
+
 }
 #endif
 
@@ -274,34 +285,42 @@ ReadOnlyArrayInvertedLists::ReadOnlyArrayInvertedLists(size_t nlist,
 
 ReadOnlyArrayInvertedLists::ReadOnlyArrayInvertedLists(const ArrayInvertedLists& other)
         : InvertedLists (other.nlist, other.code_size) {
-#ifndef USE_CPU
-    std::vector <uint8_t> readonly_codes;
-    std::vector <idx_t> readonly_ids;
-#endif
-    readonly_length.reserve(nlist);
+    readonly_length.resize(nlist);
+    readonly_offset.resize(nlist);
     size_t offset = 0;
-    for (auto& list_ids : other.ids) {
-        readonly_length.emplace_back(list_ids.size());
-        readonly_offset.emplace_back(offset);
+    for (auto i = 0; i < other.ids.size(); i++) {
+        auto& list_ids = other.ids[i];
+        readonly_length[i] = list_ids.size();
+        readonly_offset[i] = offset;
         offset += list_ids.size();
-        readonly_ids.insert(readonly_ids.end(), list_ids.begin(), list_ids.end());
     }
 
-    for(auto& list_codes : other.codes) {
+#ifdef USE_CPU
+    for (auto i = 0; i < other.ids.size(); i++) {
+        auto& list_ids = other.ids[i];
+        readonly_ids.insert(readonly_ids.end(), list_ids.begin(), list_ids.end());
+
+        auto& list_codes = other.codes[i];
         readonly_codes.insert(readonly_codes.end(), list_codes.begin(), list_codes.end());
     }
+#else
+    size_t ids_size = offset * sizeof(idx_t);
+    size_t codes_size = offset * (this->code_size) * sizeof(uint8_t);
+    pin_readonly_codes = std::make_shared<PageLockMemory>(codes_size);
+    pin_readonly_ids = std::make_shared<PageLockMemory>(ids_size);
 
-#ifndef USE_CPU
-    // convert to page-lock memory
-    {
-        size_t size = readonly_codes.size() * sizeof(uint8_t);
-        pin_readonly_codes = std::make_shared<PageLockMemory>(size);
-        memcpy(pin_readonly_codes->data, readonly_codes.data(), size);
-    }
-    {
-        size_t size = readonly_ids.size() * sizeof(idx_t);
-        pin_readonly_ids = std::make_shared<PageLockMemory>(size);
-        memcpy(pin_readonly_ids->data, readonly_ids.data(), size);
+    offset = 0;
+    for (auto i = 0; i < other.ids.size(); i++) {
+        auto& list_ids = other.ids[i];
+        auto& list_codes = other.codes[i];
+
+        uint8_t* ids_ptr = (uint8_t*)(pin_readonly_ids->data) + offset * sizeof(idx_t);
+        memcpy(ids_ptr, list_ids.data(), list_ids.size() * sizeof(idx_t));
+
+        uint8_t* codes_ptr = (uint8_t*)(pin_readonly_codes->data) + offset * (this->code_size) * sizeof(uint8_t);
+        memcpy(codes_ptr, list_codes.data(), list_codes.size() * sizeof(uint8_t));
+
+        offset += list_ids.size();
     }
 #endif
 

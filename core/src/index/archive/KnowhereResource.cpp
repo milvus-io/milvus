@@ -35,11 +35,28 @@ constexpr int64_t M_BYTE = 1024 * 1024;
 Status
 KnowhereResource::Initialize() {
     server::Config& config = server::Config::GetInstance();
-    bool use_avx512 = true;
-    CONFIG_CHECK(config.GetEngineConfigUseAVX512(use_avx512));
-    faiss::faiss_use_avx512 = use_avx512;
+    std::string simd_type;
+    CONFIG_CHECK(config.GetEngineConfigSimdType(simd_type));
+    if (simd_type == "avx512") {
+        faiss::faiss_use_avx512 = true;
+        faiss::faiss_use_avx2 = false;
+        faiss::faiss_use_sse = false;
+    } else if (simd_type == "avx2") {
+        faiss::faiss_use_avx512 = false;
+        faiss::faiss_use_avx2 = true;
+        faiss::faiss_use_sse = false;
+    } else if (simd_type == "sse") {
+        faiss::faiss_use_avx512 = false;
+        faiss::faiss_use_avx2 = false;
+        faiss::faiss_use_sse = true;
+    } else {
+        faiss::faiss_use_avx512 = true;
+        faiss::faiss_use_avx2 = true;
+        faiss::faiss_use_sse = true;
+    }
     std::string cpu_flag;
     if (faiss::hook_init(cpu_flag)) {
+        std::cout << "FAISS hook " << cpu_flag << std::endl;
         LOG_ENGINE_DEBUG_ << "FAISS hook " << cpu_flag;
     } else {
         return Status(KNOWHERE_UNEXPECTED_ERROR, "FAISS hook fail, CPU not supported!");

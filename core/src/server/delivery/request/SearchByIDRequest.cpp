@@ -26,7 +26,7 @@
 #include "utils/TimeRecorder.h"
 #include "utils/ValidationUtil.h"
 
-#ifdef MILVUS_ENABLE_PROFILING
+#ifdef ENABLE_CPU_PROFILING
 #include <gperftools/profiler.h>
 #endif
 
@@ -122,7 +122,7 @@ SearchByIDRequest::OnExecute() {
         engine::ResultIds result_ids;
         engine::ResultDistances result_distances;
 
-#ifdef MILVUS_ENABLE_PROFILING
+#ifdef ENABLE_CPU_PROFILING
         std::string fname = "/tmp/search_by_id_" + CommonUtil::GetCurrentTimeStr() + ".profiling";
         ProfilerStart(fname.c_str());
 #endif
@@ -132,7 +132,7 @@ SearchByIDRequest::OnExecute() {
         status = DBWrapper::DB()->QueryByIDs(context_, collection_name_, partition_list_, (size_t)topk_, extra_params_,
                                              id_array_, result_ids, result_distances);
 
-#ifdef MILVUS_ENABLE_PROFILING
+#ifdef ENABLE_CPU_PROFILING
         ProfilerStop();
 #endif
 
