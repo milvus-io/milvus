@@ -21,6 +21,7 @@
 
 #include "context/HybridSearchContext.h"
 #include "query/BinaryQuery.h"
+#include "server/context/ConnectionContext.h"
 #include "tracing/TextMapCarrier.h"
 #include "tracing/TracerUtil.h"
 #include "utils/Log.h"
@@ -128,6 +129,24 @@ ConstructResults(const TopKQueryResult& result, ::milvus::grpc::TopKQueryResult*
     memcpy(response->mutable_distances()->mutable_data(), result.distance_list_.data(),
            result.distance_list_.size() * sizeof(float));
 }
+
+class GrpcConnectionContext : public milvus::server::ConnectionContext {
+ public:
+    explicit GrpcConnectionContext(::grpc::ServerContext* context) : context_(context) {
+    }
+
+    bool
+    IsConnectionBroken() const override {
+        if (context_ == nullptr) {
+            return true;
+        }
+
+        return context_->IsCancelled();
+    }
+
+ private:
+    ::grpc::ServerContext* context_ = nullptr;
+};
 
 }  // namespace
 
@@ -265,11 +284,18 @@ std::shared_ptr<Context>
 GrpcRequestHandler::GetContext(::grpc::ServerContext* server_context) {
     std::lock_guard<std::mutex> lock(context_map_mutex_);
     auto request_id = get_request_id(server_context);
-    if (context_map_.find(request_id) == context_map_.end()) {
+
+    auto iter = context_map_.find(request_id);
+    if (iter == context_map_.end()) {
         LOG_SERVER_ERROR_ << "GetContext: request_id " << request_id << " not found in context_map_";
         return nullptr;
     }
-    return context_map_[request_id];
+
+    if (iter->second != nullptr) {
+        ConnectionContextPtr connection_context = std::make_shared<GrpcConnectionContext>(server_context);
+        iter->second->SetConnectionContext(connection_context);
+    }
+    return iter->second;
 }
 
 void
@@ -810,7 +836,8 @@ GrpcRequestHandler::Compact(::grpc::ServerContext* context, const ::milvus::grpc
     CHECK_NULLPTR_RETURN(request);
     LOG_SERVER_INFO_ << LogOut("Request [%s] %s begin.", GetContext(context)->RequestID().c_str(), __func__);
 
-    Status status = request_handler_.Compact(GetContext(context), request->collection_name());
+    double compact_threshold = 0.1;  // compact trigger threshold: delete_counts/segment_counts
+    Status status = request_handler_.Compact(GetContext(context), request->collection_name(), compact_threshold);
 
     LOG_SERVER_INFO_ << LogOut("Request [%s] %s end.", GetContext(context)->RequestID().c_str(), __func__);
     SET_RESPONSE(response, status, context);

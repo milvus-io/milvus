@@ -362,7 +362,7 @@ TEST_F(MySqlDBTest, PARTITION_TEST) {
         milvus::engine::CollectionIndex index;
         index.engine_type_ = (int)milvus::engine::EngineType::FAISS_IVFFLAT;
         index.metric_type_ = (int)milvus::engine::MetricType::L2;
-        stat = db_->CreateIndex(collection_info.collection_id_, index);
+        stat = db_->CreateIndex(dummy_context_, collection_info.collection_id_, index);
         ASSERT_TRUE(stat.ok());
 
         uint64_t row_count = 0;

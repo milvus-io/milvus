@@ -329,7 +329,7 @@ TEST_F(DeleteTest, delete_before_create_index) {
     milvus::engine::CollectionIndex index;
     index.engine_type_ = (int)milvus::engine::EngineType::FAISS_IVFSQ8;
     index.extra_params_ = {{"nlist", 100}};
-    stat = db_->CreateIndex(collection_info.collection_id_, index);
+    stat = db_->CreateIndex(dummy_context_, collection_info.collection_id_, index);
     ASSERT_TRUE(stat.ok());
 
     uint64_t row_count;
@@ -399,7 +399,7 @@ TEST_F(DeleteTest, delete_with_index) {
     milvus::engine::CollectionIndex index;
     index.engine_type_ = (int)milvus::engine::EngineType::FAISS_IVFSQ8;
     index.extra_params_ = {{"nlist", 100}};
-    stat = db_->CreateIndex(collection_info.collection_id_, index);
+    stat = db_->CreateIndex(dummy_context_, collection_info.collection_id_, index);
     ASSERT_TRUE(stat.ok());
 
     //    std::this_thread::sleep_for(std::chrono::seconds(3));  // ensure raw data write to disk
@@ -485,7 +485,7 @@ TEST_F(DeleteTest, delete_multiple_times_with_index) {
     milvus::engine::CollectionIndex index;
     index.engine_type_ = (int)milvus::engine::EngineType::FAISS_IVFFLAT;
     index.extra_params_ = {{"nlist", 1}};
-    stat = db_->CreateIndex(collection_info.collection_id_, index);
+    stat = db_->CreateIndex(dummy_context_, collection_info.collection_id_, index);
     ASSERT_TRUE(stat.ok());
 
     int topk = 10, nprobe = 10;
@@ -594,7 +594,7 @@ TEST_F(DeleteTest, delete_add_create_index) {
     milvus::engine::CollectionIndex index;
     index.engine_type_ = (int)milvus::engine::EngineType::FAISS_IVFFLAT;
     index.extra_params_ = {{"nlist", 100}};
-    stat = db_->CreateIndex(collection_info.collection_id_, index);
+    stat = db_->CreateIndex(dummy_context_, collection_info.collection_id_, index);
     ASSERT_TRUE(stat.ok());
 
     std::vector<milvus::engine::IDNumber> ids_to_delete;
@@ -610,7 +610,7 @@ TEST_F(DeleteTest, delete_add_create_index) {
 
     // stat = db_->Flush();
     // ASSERT_TRUE(stat.ok());
-    stat = db_->CreateIndex(collection_info.collection_id_, index);
+    stat = db_->CreateIndex(dummy_context_, collection_info.collection_id_, index);
     ASSERT_TRUE(stat.ok());
 
     uint64_t row_count;
@@ -665,7 +665,7 @@ TEST_F(DeleteTest, delete_add_auto_flush) {
     // ASSERT_TRUE(stat.ok());
     // milvus::engine::CollectionIndex index;
     // index.engine_type_ = (int)milvus::engine::EngineType::FAISS_IVFSQ8;
-    // stat = db_->CreateIndex(collection_info.collection_id_, index);
+    // stat = db_->CreateIndex(dummy_context_, collection_info.collection_id_, index);
     // ASSERT_TRUE(stat.ok());
 
     std::vector<milvus::engine::IDNumber> ids_to_delete;
@@ -682,7 +682,7 @@ TEST_F(DeleteTest, delete_add_auto_flush) {
     std::this_thread::sleep_for(std::chrono::seconds(2));
     // stat = db_->Flush();
     // ASSERT_TRUE(stat.ok());
-    // stat = db_->CreateIndex(collection_info.collection_id_, index);
+    // stat = db_->CreateIndex(dummy_context_, collection_info.collection_id_, index);
     // ASSERT_TRUE(stat.ok());
 
     uint64_t row_count;
@@ -814,7 +814,7 @@ TEST_F(CompactTest, compact_with_index) {
 
     milvus::engine::CollectionIndex index;
     index.engine_type_ = (int)milvus::engine::EngineType::FAISS_IVFSQ8;
-    stat = db_->CreateIndex(collection_info.collection_id_, index);
+    stat = db_->CreateIndex(dummy_context_, collection_info.collection_id_, index);
     ASSERT_TRUE(stat.ok());
 
     stat = db_->Flush();
