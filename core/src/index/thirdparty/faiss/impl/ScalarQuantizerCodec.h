@@ -362,7 +362,7 @@ struct SimilarityIP<1> {
 
 /* as same as SimilarityIP<1>, let build pass */
 template<>
-struct SimilarityIP<8> : public SimilarityIP<1> {
+struct SimilarityIP<8> : SimilarityIP<1> {
     static constexpr int simdwidth = 1;
     static constexpr MetricType metric_type = METRIC_INNER_PRODUCT;
     explicit SimilarityIP (const float * y) : SimilarityIP<1>(y) {}
@@ -370,7 +370,7 @@ struct SimilarityIP<8> : public SimilarityIP<1> {
 
 /* as same as SimilarityIP<1>, let build pass */
 template<>
-struct SimilarityIP<16> : public SimilarityIP<1> {
+struct SimilarityIP<16> : SimilarityIP<1> {
     static constexpr int simdwidth = 1;
     static constexpr MetricType metric_type = METRIC_INNER_PRODUCT;
     explicit SimilarityIP (const float * y) : SimilarityIP<1>(y) {}

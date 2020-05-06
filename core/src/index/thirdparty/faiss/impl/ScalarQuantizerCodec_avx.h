@@ -482,7 +482,7 @@ struct SimilarityL2_avx<8> {
 
 /* as same as SimilarityL2<8>, let build pass */
 template<>
-struct SimilarityL2_avx<16> : public SimilarityL2_avx<8>{
+struct SimilarityL2_avx<16> : SimilarityL2_avx<8>{
     static constexpr int simdwidth = 8;
     static constexpr MetricType metric_type = METRIC_L2;
     explicit SimilarityL2_avx (const float * y) : SimilarityL2_avx<8>(y) {}
@@ -566,7 +566,7 @@ struct SimilarityIP_avx<8> {
 
 /* as same as SimilarityIP<8>, let build pass */
 template<>
-struct SimilarityIP_avx<16> : public SimilarityIP_avx<8> {
+struct SimilarityIP_avx<16> : SimilarityIP_avx<8> {
     static constexpr int simdwidth = 8;
     static constexpr MetricType metric_type = METRIC_INNER_PRODUCT;
     explicit SimilarityIP_avx (const float * y) : SimilarityIP_avx<8>(y) {}
