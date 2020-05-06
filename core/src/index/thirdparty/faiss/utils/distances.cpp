@@ -21,6 +21,8 @@
 #include <faiss/impl/FaissAssert.h>
 #include <faiss/utils/ConcurrentBitset.h>
 
+#include "faiss/BuilderSuspend.h"
+
 
 #ifndef FINTEGER
 #define FINTEGER long
@@ -352,6 +354,73 @@ static void knn_L2sqr_sse (
     */
 }
 
+
+static void knn_inner_product_build_blas (
+        const float * x,
+        const float * y,
+        size_t d, size_t nx, size_t ny,
+        float_minheap_array_t * res)
+{
+
+    double t0 = getmillisecs();
+
+    res->heapify ();
+
+    // BLAS does not like empty matrices
+    if (nx == 0 || ny == 0) return;
+
+    size_t k = res->k;
+
+    /* block sizes */
+    const size_t bs_x = 4096, bs_y = 1024;
+    // const size_t bs_x = 16, bs_y = 16;
+    float *ip_block = new float[bs_x * bs_y];
+    ScopeDeleter<float> del1(ip_block);;
+
+    for (size_t i0 = 0; i0 < nx; i0 += bs_x) {
+
+        BuilderSuspend::check_wait();
+
+        size_t i1 = i0 + bs_x;
+        if(i1 > nx) i1 = nx;
+
+        for (size_t j0 = 0; j0 < ny; j0 += bs_y) {
+            size_t j1 = j0 + bs_y;
+            if (j1 > ny) j1 = ny;
+            /* compute the actual dot products */
+            {
+                float one = 1, zero = 0;
+                FINTEGER nyi = j1 - j0, nxi = i1 - i0, di = d;
+                sgemm_ ("Transpose", "Not transpose", &nyi, &nxi, &di, &one,
+                        y + j0 * d, &di,
+                        x + i0 * d, &di, &zero,
+                        ip_block, &nyi);
+            }
+
+            /* collect maxima */
+#pragma omp parallel for
+            for(size_t i = i0; i < i1; i++){
+                float * __restrict simi = res->get_val(i);
+                int64_t * __restrict idxi = res->get_ids (i);
+                const float *ip_line = ip_block + (i - i0) * (j1 - j0);
+
+                for(size_t j = j0; j < j1; j++){
+                    float dis = *ip_line;
+
+                    if(dis > simi[0]){
+                        minheap_swap_top(k, simi, idxi, dis, j);
+                    }
+                    ip_line++;
+                }
+            }
+        }
+        InterruptCallback::check ();
+    }
+    res->reorder ();
+}
+
+
+// Elkan K-means
 static void elkan_L2_sse (
         const float * x,
         const float * y,
@@ -366,6 +435,9 @@ static void elkan_L2_sse (
     float *data = (float *) malloc((bs_y * (bs_y - 1) / 2) * sizeof (float));
 
     for (size_t j0 = 0; j0 < ny; j0 += bs_y) {
+
+        BuilderSuspend::check_wait();
+
         size_t j1 = j0 + bs_y;
         if (j1 > ny) j1 = ny;
 
@@ -647,7 +719,10 @@ void knn_inner_product (const float * x,
         float_minheap_array_t * res,
         ConcurrentBitsetPtr bitset)
 {
-    if (d % 4 == 0 && nx < distance_compute_blas_threshold) {
+    if (bitset == nullptr && res->k == 1 && nx >= ny * 2) {
+        // usually used in IVF::train
+        knn_inner_product_build_blas(x, y, d, nx, ny, res);
+    } else if (d % 4 == 0 && nx < distance_compute_blas_threshold) {
         knn_inner_product_sse (x, y, d, nx, ny, res, bitset);
     } else {
         knn_inner_product_blas (x, y, d, nx, ny, res, bitset);
