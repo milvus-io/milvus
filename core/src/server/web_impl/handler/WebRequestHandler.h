@@ -27,11 +27,11 @@
 #include "server/context/Context.h"
 #include "server/delivery/RequestHandler.h"
 #include "server/web_impl/Types.h"
+#include "server/web_impl/dto/CollectionDto.hpp"
 #include "server/web_impl/dto/ConfigDto.hpp"
 #include "server/web_impl/dto/DevicesDto.hpp"
 #include "server/web_impl/dto/IndexDto.hpp"
 #include "server/web_impl/dto/PartitionDto.hpp"
-#include "server/web_impl/dto/TableDto.hpp"
 #include "server/web_impl/dto/VectorDto.hpp"
 #include "thirdparty/nlohmann/json.hpp"
 #include "utils/Status.h"
@@ -82,17 +82,17 @@ class WebRequestHandler {
     AddStatusToJson(nlohmann::json& json, int64_t code, const std::string& msg);
 
     Status
-    IsBinaryTable(const std::string& collection_name, bool& bin);
+    IsBinaryCollection(const std::string& collection_name, bool& bin);
 
     Status
     CopyRecordsFromJson(const nlohmann::json& json, engine::VectorsData& vectors, bool bin);
 
  protected:
     Status
-    GetTableMetaInfo(const std::string& collection_name, nlohmann::json& json_out);
+    GetCollectionMetaInfo(const std::string& collection_name, nlohmann::json& json_out);
 
     Status
-    GetTableStat(const std::string& collection_name, nlohmann::json& json_out);
+    GetCollectionStat(const std::string& collection_name, nlohmann::json& json_out);
 
     Status
     GetSegmentVectors(const std::string& collection_name, const std::string& segment_name, int64_t page_size,
@@ -109,7 +109,7 @@ class WebRequestHandler {
     Cmd(const std::string& cmd, std::string& result_str);
 
     Status
-    PreLoadTable(const nlohmann::json& json, std::string& result_str);
+    PreLoadCollection(const nlohmann::json& json, std::string& result_str);
 
     Status
     Flush(const nlohmann::json& json, std::string& result_str);
@@ -166,18 +166,18 @@ class WebRequestHandler {
 #endif
 
     StatusDto::ObjectWrapper
-    CreateTable(const TableRequestDto::ObjectWrapper& table_schema);
+    CreateCollection(const CollectionRequestDto::ObjectWrapper& table_schema);
     StatusDto::ObjectWrapper
-    ShowTables(const OQueryParams& query_params, OString& result);
+    ShowCollections(const OQueryParams& query_params, OString& result);
 
     StatusDto::ObjectWrapper
     CreateHybridCollection(const OString& body);
 
     StatusDto::ObjectWrapper
-    GetTable(const OString& collection_name, const OQueryParams& query_params, OString& result);
+    GetCollection(const OString& collection_name, const OQueryParams& query_params, OString& result);
 
     StatusDto::ObjectWrapper
-    DropTable(const OString& collection_name);
+    DropCollection(const OString& collection_name);
 
     StatusDto::ObjectWrapper
     CreateIndex(const OString& collection_name, const OString& body);
@@ -192,7 +192,7 @@ class WebRequestHandler {
     CreatePartition(const OString& collection_name, const PartitionRequestDto::ObjectWrapper& param);
 
     StatusDto::ObjectWrapper
-    ShowPartitions(const OString& collection_name, const OQueryParams& query_params,
+    ShowPartitions(const OString& collection_name, const OQueryParams& query_params, const OString& body,
                    PartitionListDto::ObjectWrapper& partition_list_dto);
 
     StatusDto::ObjectWrapper
@@ -220,7 +220,7 @@ class WebRequestHandler {
     InsertEntity(const OString& collection_name, const OString& body, VectorIdsDto::ObjectWrapper& ids_dto);
 
     StatusDto::ObjectWrapper
-    GetVector(const OString& collection_name, const OQueryParams& query_params, OString& response);
+    GetVector(const OString& collection_name, const OString& body, const OQueryParams& query_params, OString& response);
 
     StatusDto::ObjectWrapper
     VectorsOp(const OString& collection_name, const OString& payload, OString& response);
