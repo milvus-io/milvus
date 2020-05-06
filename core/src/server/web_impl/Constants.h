@@ -11,71 +11,46 @@
 
 #pragma once
 
+#include "db/engine/ExecutionEngine.h"
+
+#include <string>
+#include <unordered_map>
+
 namespace milvus {
 namespace server {
 namespace web {
 
-////////////////////////////////////////////////////
-static const char* WEB_LOG_PREFIX = "[Web] ";
+extern const char* NAME_ENGINE_TYPE_FLAT;
+extern const char* NAME_ENGINE_TYPE_IVFFLAT;
+extern const char* NAME_ENGINE_TYPE_IVFSQ8;
+extern const char* NAME_ENGINE_TYPE_IVFSQ8H;
+extern const char* NAME_ENGINE_TYPE_RNSG;
+extern const char* NAME_ENGINE_TYPE_IVFPQ;
+extern const char* NAME_ENGINE_TYPE_HNSW;
+extern const char* NAME_ENGINE_TYPE_ANNOY;
+
+extern const char* NAME_METRIC_TYPE_L2;
+extern const char* NAME_METRIC_TYPE_IP;
+extern const char* NAME_METRIC_TYPE_HAMMING;
+extern const char* NAME_METRIC_TYPE_JACCARD;
+extern const char* NAME_METRIC_TYPE_TANIMOTO;
+extern const char* NAME_METRIC_TYPE_SUBSTRUCTURE;
+extern const char* NAME_METRIC_TYPE_SUPERSTRUCTURE;
 
 ////////////////////////////////////////////////////
+extern const int64_t VALUE_COLLECTION_INDEX_FILE_SIZE_DEFAULT;
+extern const char* VALUE_COLLECTION_METRIC_TYPE_DEFAULT;
+extern const char* VALUE_PARTITION_TAG_DEFAULT;
+extern const char* VALUE_INDEX_INDEX_TYPE_DEFAULT;
+extern const int64_t VALUE_INDEX_NLIST_DEFAULT;
+extern const int64_t VALUE_CONFIG_CPU_CACHE_CAPACITY_DEFAULT;
+extern const bool VALUE_CONFIG_CACHE_INSERT_DATA_DEFAULT;
 
-static const char* CORS_KEY_METHODS = "Access-Control-Allow-Methods";
-static const char* CORS_KEY_ORIGIN = "Access-Control-Allow-Origin";
-static const char* CORS_KEY_HEADERS = "Access-Control-Allow-Headers";
-static const char* CORS_KEY_AGE = "Access-Control-Max-Age";
-
-static const char* CORS_VALUE_METHODS = "GET, POST, PUT, OPTIONS, DELETE";
-static const char* CORS_VALUE_ORIGIN = "*";
-static const char* CORS_VALUE_HEADERS =
-    "DNT, User-Agent, X-Requested-With, If-Modified-Since, Cache-Control, Content-Type, Range, Authorization";
-static const char* CORS_VALUE_AGE = "1728000";
-
-////////////////////////////////////////////////////
-
-static const char* NAME_ENGINE_TYPE_FLAT = "FLAT";
-static const char* NAME_ENGINE_TYPE_IVFFLAT = "IVFFLAT";
-static const char* NAME_ENGINE_TYPE_IVFSQ8 = "IVFSQ8";
-static const char* NAME_ENGINE_TYPE_IVFSQ8H = "IVFSQ8H";
-static const char* NAME_ENGINE_TYPE_RNSG = "RNSG";
-static const char* NAME_ENGINE_TYPE_IVFPQ = "IVFPQ";
-static const char* NAME_ENGINE_TYPE_HNSW = "HNSW";
-static const char* NAME_ENGINE_TYPE_ANNOY = "ANNOY";
-
-static const char* NAME_METRIC_TYPE_L2 = "L2";
-static const char* NAME_METRIC_TYPE_IP = "IP";
-static const char* NAME_METRIC_TYPE_HAMMING = "HAMMING";
-static const char* NAME_METRIC_TYPE_JACCARD = "JACCARD";
-static const char* NAME_METRIC_TYPE_TANIMOTO = "TANIMOTO";
-static const char* NAME_METRIC_TYPE_SUBSTRUCTURE = "SUBSTRUCTURE";
-static const char* NAME_METRIC_TYPE_SUPERSTRUCTURE = "SUPERSTRUCTURE";
-
-////////////////////////////////////////////////////
-
-static const char* KEY_TABLE_TABLE_NAME = "table_name";
-static const char* KEY_TABLE_DIMENSION = "dimension";
-static const char* KEY_TABLE_INDEX_FILE_SIZE = "index_file_size";
-static const char* KEY_TABLE_INDEX_METRIC_TYPE = "metric_type";
-static const char* KEY_TABLE_COUNT = "count";
-
-static const char* KEY_INDEX_INDEX_TYPE = "index_type";
-static const char* KEY_INDEX_NLIST = "nlist";
-
-static const char* KEY_PARTITION_NAME = "partition_name";
-static const char* KEY_PARTITION_TAG = "partition_tag";
-
-////////////////////////////////////////////////////
-
-static const int64_t VALUE_TABLE_INDEX_FILE_SIZE_DEFAULT = 1024;
-static const char* VALUE_TABLE_METRIC_TYPE_DEFAULT = "L2";
-
-static const char* VALUE_PARTITION_TAG_DEFAULT = "";
-
-static const char* VALUE_INDEX_INDEX_TYPE_DEFAULT = NAME_ENGINE_TYPE_FLAT;
-static const int64_t VALUE_INDEX_NLIST_DEFAULT = 16384;
-
-static const int64_t VALUE_CONFIG_CPU_CACHE_CAPACITY_DEFAULT = 4;
-static const bool VALUE_CONFIG_CACHE_INSERT_DATA_DEFAULT = false;
+/////////////////////////////////////////////////////
+extern const std::unordered_map<engine::EngineType, std::string> IndexMap;
+extern const std::unordered_map<std::string, engine::EngineType> IndexNameMap;
+extern const std::unordered_map<engine::MetricType, std::string> MetricMap;
+extern const std::unordered_map<std::string, engine::MetricType> MetricNameMap;
 
 }  // namespace web
 }  // namespace server

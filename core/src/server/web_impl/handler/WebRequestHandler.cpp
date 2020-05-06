@@ -85,7 +85,7 @@ WebRequestHandler::AddStatusToJson(nlohmann::json& json, int64_t code, const std
 }
 
 Status
-WebRequestHandler::IsBinaryTable(const std::string& collection_name, bool& bin) {
+WebRequestHandler::IsBinaryCollection(const std::string& collection_name, bool& bin) {
     CollectionSchema schema;
     auto status = request_handler_.DescribeCollection(context_ptr_, collection_name, schema);
     if (status.ok()) {
@@ -131,7 +131,7 @@ WebRequestHandler::CopyRecordsFromJson(const nlohmann::json& json, engine::Vecto
 
 ///////////////////////// WebRequestHandler methods ///////////////////////////////////////
 Status
-WebRequestHandler::GetTableMetaInfo(const std::string& collection_name, nlohmann::json& json_out) {
+WebRequestHandler::GetCollectionMetaInfo(const std::string& collection_name, nlohmann::json& json_out) {
     CollectionSchema schema;
     auto status = request_handler_.DescribeCollection(context_ptr_, collection_name, schema);
     if (!status.ok()) {
@@ -162,7 +162,7 @@ WebRequestHandler::GetTableMetaInfo(const std::string& collection_name, nlohmann
 }
 
 Status
-WebRequestHandler::GetTableStat(const std::string& collection_name, nlohmann::json& json_out) {
+WebRequestHandler::GetCollectionStat(const std::string& collection_name, nlohmann::json& json_out) {
     std::string collection_info;
     auto status = request_handler_.ShowCollectionInfo(context_ptr_, collection_name, collection_info);
 
@@ -170,6 +170,8 @@ WebRequestHandler::GetTableStat(const std::string& collection_name, nlohmann::js
         try {
             json_out = nlohmann::json::parse(collection_info);
         } catch (std::exception& e) {
+            return Status(SERVER_UNEXPECTED_ERROR,
+                          "Error occurred when parsing collection stat information: " + std::string(e.what()));
         }
     }
 
@@ -248,7 +250,7 @@ WebRequestHandler::Cmd(const std::string& cmd, std::string& result_str) {
 }
 
 Status
-WebRequestHandler::PreLoadTable(const nlohmann::json& json, std::string& result_str) {
+WebRequestHandler::PreLoadCollection(const nlohmann::json& json, std::string& result_str) {
     if (!json.contains("collection_name")) {
         return Status(BODY_FIELD_LOSS, "Field \"load\" must contains collection_name");
     }
@@ -408,6 +410,10 @@ WebRequestHandler::Search(const std::string& collection_name, const nlohmann::js
     }
     int64_t topk = json["topk"];
 
+    if (!json.contains("params")) {
+        return Status(BODY_FIELD_LOSS, "Field \'params\' is required");
+    }
+
     std::vector<std::string> partition_tags;
     if (json.contains("partition_tags")) {
         auto tags = json["partition_tags"];
@@ -420,41 +426,52 @@ WebRequestHandler::Search(const std::string& collection_name, const nlohmann::js
         }
     }
 
-    std::vector<std::string> file_id_vec;
-    if (json.contains("file_ids")) {
-        auto ids = json["file_ids"];
-        if (!ids.is_null() && !ids.is_array()) {
-            return Status(BODY_PARSE_FAIL, "Field \"file_ids\" must be a array");
-        }
-        for (auto& id : ids) {
-            file_id_vec.emplace_back(id.get<std::string>());
-        }
-    }
-
-    if (!json.contains("params")) {
-        return Status(BODY_FIELD_LOSS, "Field \'params\' is required");
-    }
-
-    bool bin_flag = false;
-    auto status = IsBinaryTable(collection_name, bin_flag);
-    if (!status.ok()) {
-        return status;
-    }
-
-    if (!json.contains("vectors")) {
-        return Status(BODY_FIELD_LOSS, "Field \"vectors\" is required");
-    }
-
-    engine::VectorsData vectors_data;
-    status = CopyRecordsFromJson(json["vectors"], vectors_data, bin_flag);
-    if (!status.ok()) {
-        return status;
-    }
-
     TopKQueryResult result;
-    status = request_handler_.Search(context_ptr_, collection_name, vectors_data, topk, json["params"], partition_tags,
-                                     file_id_vec, result);
+    Status status;
+    if (json.contains("ids")) {
+        auto vec_ids = json["ids"];
+        if (!vec_ids.is_array()) {
+            return Status(BODY_PARSE_FAIL, "Field \"ids\" must be ad array");
+        }
 
+        std::vector<int64_t> id_array;
+        for (auto& id_str : vec_ids) {
+            id_array.emplace_back(std::stol(id_str.get<std::string>()));
+        }
+        //        std::vector<int64_t> id_array(vec_ids.begin(), vec_ids.end());
+        status = request_handler_.SearchByID(context_ptr_, collection_name, id_array, topk, json["params"],
+                                             partition_tags, result);
+    } else {
+        std::vector<std::string> file_id_vec;
+        if (json.contains("file_ids")) {
+            auto ids = json["file_ids"];
+            if (!ids.is_null() && !ids.is_array()) {
+                return Status(BODY_PARSE_FAIL, "Field \"file_ids\" must be a array");
+            }
+            for (auto& id : ids) {
+                file_id_vec.emplace_back(id.get<std::string>());
+            }
+        }
+
+        bool bin_flag = false;
+        status = IsBinaryCollection(collection_name, bin_flag);
+        if (!status.ok()) {
+            return status;
+        }
+
+        if (!json.contains("vectors")) {
+            return Status(BODY_FIELD_LOSS, "Field \"vectors\" is required");
+        }
+
+        engine::VectorsData vectors_data;
+        status = CopyRecordsFromJson(json["vectors"], vectors_data, bin_flag);
+        if (!status.ok()) {
+            return status;
+        }
+
+        status = request_handler_.Search(context_ptr_, collection_name, vectors_data, topk, json["params"],
+                                         partition_tags, file_id_vec, result);
+    }
     if (!status.ok()) {
         return status;
     }
@@ -769,7 +786,7 @@ WebRequestHandler::GetVectorsByIDs(const std::string& collection_name, const std
     }
 
     bool bin;
-    status = IsBinaryTable(collection_name, bin);
+    status = IsBinaryCollection(collection_name, bin);
     if (!status.ok()) {
         return status;
     }
@@ -1059,7 +1076,7 @@ WebRequestHandler::SetGpuConfig(const GPUConfigDto::ObjectWrapper& gpu_config_dt
  * Collection {
  */
 StatusDto::ObjectWrapper
-WebRequestHandler::CreateTable(const TableRequestDto::ObjectWrapper& collection_schema) {
+WebRequestHandler::CreateCollection(const CollectionRequestDto::ObjectWrapper& collection_schema) {
     if (nullptr == collection_schema->collection_name.get()) {
         RETURN_STATUS_DTO(BODY_FIELD_LOSS, "Field \'collection_name\' is missing")
     }
@@ -1133,7 +1150,7 @@ WebRequestHandler::CreateHybridCollection(const milvus::server::web::OString& bo
 }
 
 StatusDto::ObjectWrapper
-WebRequestHandler::ShowTables(const OQueryParams& query_params, OString& result) {
+WebRequestHandler::ShowCollections(const OQueryParams& query_params, OString& result) {
     int64_t offset = 0;
     auto status = ParseQueryInteger(query_params, "offset", offset);
     if (!status.ok()) {
@@ -1173,7 +1190,7 @@ WebRequestHandler::ShowTables(const OQueryParams& query_params, OString& result)
     nlohmann::json collections_json;
     for (int64_t i = offset; i < page_size + offset; i++) {
         nlohmann::json collection_json;
-        status = GetTableMetaInfo(collections.at(i), collection_json);
+        status = GetCollectionMetaInfo(collections.at(i), collection_json);
         if (!status.ok()) {
             ASSIGN_RETURN_STATUS_DTO(status)
         }
@@ -1194,7 +1211,7 @@ WebRequestHandler::ShowTables(const OQueryParams& query_params, OString& result)
 }
 
 StatusDto::ObjectWrapper
-WebRequestHandler::GetTable(const OString& collection_name, const OQueryParams& query_params, OString& result) {
+WebRequestHandler::GetCollection(const OString& collection_name, const OQueryParams& query_params, OString& result) {
     if (nullptr == collection_name.get()) {
         RETURN_STATUS_DTO(PATH_PARAM_LOSS, "Path param \'collection_name\' is required!");
     }
@@ -1207,11 +1224,11 @@ WebRequestHandler::GetTable(const OString& collection_name, const OQueryParams& 
 
     if (!stat.empty() && stat == "stat") {
         nlohmann::json json;
-        status = GetTableStat(collection_name->std_str(), json);
+        status = GetCollectionStat(collection_name->std_str(), json);
         result = status.ok() ? json.dump().c_str() : "NULL";
     } else {
         nlohmann::json json;
-        status = GetTableMetaInfo(collection_name->std_str(), json);
+        status = GetCollectionMetaInfo(collection_name->std_str(), json);
         result = status.ok() ? json.dump().c_str() : "NULL";
     }
 
@@ -1219,7 +1236,7 @@ WebRequestHandler::GetTable(const OString& collection_name, const OQueryParams& 
 }
 
 StatusDto::ObjectWrapper
-WebRequestHandler::DropTable(const OString& collection_name) {
+WebRequestHandler::DropCollection(const OString& collection_name) {
     auto status = request_handler_.DropCollection(context_ptr_, collection_name->std_str());
 
     ASSIGN_RETURN_STATUS_DTO(status)
@@ -1294,7 +1311,7 @@ WebRequestHandler::CreatePartition(const OString& collection_name, const Partiti
 }
 
 StatusDto::ObjectWrapper
-WebRequestHandler::ShowPartitions(const OString& collection_name, const OQueryParams& query_params,
+WebRequestHandler::ShowPartitions(const OString& collection_name, const OQueryParams& query_params, const OString& body,
                                   PartitionListDto::ObjectWrapper& partition_list_dto) {
     int64_t offset = 0;
     auto status = ParseQueryInteger(query_params, "offset", offset);
@@ -1311,6 +1328,35 @@ WebRequestHandler::ShowPartitions(const OString& collection_name, const OQueryPa
     if (offset < 0 || page_size < 0) {
         ASSIGN_RETURN_STATUS_DTO(
             Status(SERVER_UNEXPECTED_ERROR, "Query param 'offset' or 'page_size' should equal or bigger than 0"));
+    }
+
+    if (nullptr != body.get() && body->getSize() > 0) {
+        auto body_json = nlohmann::json::parse(body->c_str());
+        if (!body_json.contains("filter")) {
+            RETURN_STATUS_DTO(BODY_FIELD_LOSS, "Field \'filter\' is required.")
+        }
+        auto filter_json = body_json["filter"];
+        if (filter_json.contains("partition_tag")) {
+            std::string tag = filter_json["partition_tag"];
+            bool exists = false;
+            status = request_handler_.HasPartition(context_ptr_, collection_name->std_str(), tag, exists);
+            if (!status.ok()) {
+                ASSIGN_RETURN_STATUS_DTO(status)
+            }
+            auto partition_dto = PartitionFieldsDto::createShared();
+            if (exists) {
+                partition_list_dto->count = 1;
+                partition_dto->partition_tag = tag.c_str();
+            } else {
+                partition_list_dto->count = 0;
+            }
+            partition_list_dto->partitions = partition_list_dto->partitions->createShared();
+            partition_list_dto->partitions->pushBack(partition_dto);
+
+            ASSIGN_RETURN_STATUS_DTO(status)
+        } else {
+            RETURN_STATUS_DTO(BODY_FIELD_LOSS, "Unknown field.")
+        }
     }
 
     bool all_required = false;
@@ -1465,7 +1511,7 @@ WebRequestHandler::Insert(const OString& collection_name, const OString& body, V
 
     // step 1: copy vectors
     bool bin_flag;
-    auto status = IsBinaryTable(collection_name->std_str(), bin_flag);
+    auto status = IsBinaryCollection(collection_name->std_str(), bin_flag);
     if (!status.ok()) {
         ASSIGN_RETURN_STATUS_DTO(status)
     }
@@ -1488,8 +1534,9 @@ WebRequestHandler::Insert(const OString& collection_name, const OString& body, V
         }
         auto& id_array = vectors.id_array_;
         id_array.clear();
-        for (auto& id : ids_json) {
-            id_array.emplace_back(id.get<int64_t>());
+        for (auto& id_str : ids_json) {
+            int64_t id = std::stol(id_str.get<std::string>());
+            id_array.emplace_back(id);
         }
     }
 
@@ -1578,7 +1625,7 @@ WebRequestHandler::InsertEntity(const OString& collection_name, const milvus::se
             }
             case engine::meta::hybrid::DataType::VECTOR: {
                 bool bin_flag;
-                status = IsBinaryTable(collection_name->c_str(), bin_flag);
+                status = IsBinaryCollection(collection_name->c_str(), bin_flag);
                 if (!status.ok()) {
                     ASSIGN_RETURN_STATUS_DTO(status)
                 }
@@ -1612,33 +1659,44 @@ WebRequestHandler::InsertEntity(const OString& collection_name, const milvus::se
 }
 
 StatusDto::ObjectWrapper
-WebRequestHandler::GetVector(const OString& collection_name, const OQueryParams& query_params, OString& response) {
-    int64_t id = 0;
-    auto status = ParseQueryInteger(query_params, "id", id, false);
-    if (!status.ok()) {
-        RETURN_STATUS_DTO(status.code(), status.message().c_str());
+WebRequestHandler::GetVector(const OString& collection_name, const OString& body, const OQueryParams& query_params,
+                             OString& response) {
+    auto status = Status::OK();
+    try {
+        auto body_json = nlohmann::json::parse(body->c_str());
+        if (!body_json.contains("ids")) {
+            RETURN_STATUS_DTO(BODY_FIELD_LOSS, "Field \'ids\' is required.")
+        }
+        auto ids = body_json["ids"];
+        if (!ids.is_array()) {
+            RETURN_STATUS_DTO(BODY_PARSE_FAIL, "Field \'ids\' must be a array.")
+        }
+
+        std::vector<int64_t> vector_ids;
+        for (auto& id : ids) {
+            vector_ids.push_back(std::stol(id.get<std::string>()));
+        }
+        engine::VectorsData vectors;
+        nlohmann::json vectors_json;
+        status = GetVectorsByIDs(collection_name->std_str(), vector_ids, vectors_json);
+        if (!status.ok()) {
+            response = "NULL";
+            ASSIGN_RETURN_STATUS_DTO(status)
+        }
+
+        nlohmann::json json;
+        AddStatusToJson(json, status.code(), status.message());
+        if (vectors_json.empty()) {
+            json["vectors"] = std::vector<int64_t>();
+        } else {
+            json["vectors"] = vectors_json;
+        }
+        response = json.dump().c_str();
+    } catch (std::exception& e) {
+        RETURN_STATUS_DTO(SERVER_UNEXPECTED_ERROR, e.what());
     }
 
-    std::vector<int64_t> ids = {id};
-    engine::VectorsData vectors;
-    nlohmann::json vectors_json;
-    status = GetVectorsByIDs(collection_name->std_str(), ids, vectors_json);
-    if (!status.ok()) {
-        response = "NULL";
-        ASSIGN_RETURN_STATUS_DTO(status)
-    }
-
-    nlohmann::json json;
-    AddStatusToJson(json, status.code(), status.message());
-    if (vectors_json.empty()) {
-        json["vectors"] = std::vector<int64_t>();
-    } else {
-        json["vectors"] = vectors_json;
-    }
-
-    response = json.dump().c_str();
-
-    ASSIGN_RETURN_STATUS_DTO(status)
+    ASSIGN_RETURN_STATUS_DTO(status);
 }
 
 StatusDto::ObjectWrapper
@@ -1718,7 +1776,7 @@ WebRequestHandler::SystemOp(const OString& op, const OString& body_str, OString&
         nlohmann::json j = nlohmann::json::parse(body_str->c_str());
         if (op->equals("task")) {
             if (j.contains("load")) {
-                status = PreLoadTable(j["load"], result_str);
+                status = PreLoadCollection(j["load"], result_str);
             } else if (j.contains("flush")) {
                 status = Flush(j["flush"], result_str);
             }

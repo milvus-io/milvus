@@ -39,6 +39,8 @@ Please mark all change in change log and use the issue from GitHub
 -   \#2167 Merge log_config.conf with server_config.yaml
 -   \#2173 Check storage permission
 -   \#2178 Using elkan K-Means to improve IVF
+-   \#2185 Change id to string format in http module
+-   \#2186 Update endpoints in http module
 -   \#2190 Fix memory usage is twice of index size when using GPU searching
 
 ## Task
