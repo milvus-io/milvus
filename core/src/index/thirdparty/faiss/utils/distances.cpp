@@ -362,8 +362,6 @@ static void knn_inner_product_build_blas (
         float_minheap_array_t * res)
 {
 
-    double t0 = getmillisecs();
-
     res->heapify ();
 
     // BLAS does not like empty matrices
