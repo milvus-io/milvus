@@ -115,7 +115,7 @@ class DBImpl : public DB, public server::CacheConfigHandler, public server::Engi
     Flush() override;
 
     Status
-    Compact(const std::string& collection_id) override;
+    Compact(const std::string& collection_id, double threshold = 0.0) override;
 
     Status
     GetVectorsByID(const std::string& collection_id, const IDNumbers& id_array,
@@ -245,7 +245,7 @@ class DBImpl : public DB, public server::CacheConfigHandler, public server::Engi
     BackgroundBuildIndex();
 
     Status
-    CompactFile(const std::string& collection_id, const meta::SegmentSchema& file,
+    CompactFile(const std::string& collection_id, double threshold, const meta::SegmentSchema& file,
                 meta::SegmentsSchema& files_to_update);
 
     /*

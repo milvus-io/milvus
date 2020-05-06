@@ -142,7 +142,7 @@ class TestCompactBase:
         logging.getLogger().info(info["partitions"])
         size_after = info["partitions"][0]["segments"][0]["data_size"]
         logging.getLogger().info(size_after)
-        assert(size_before > size_after)
+        assert(size_before >= size_after)
     
     @pytest.mark.timeout(COMPACT_TIMEOUT)
     def test_add_vectors_delete_all_and_compact(self, connect, collection):
@@ -280,7 +280,7 @@ class TestCompactBase:
         status, info = connect.collection_info(collection)
         assert status.OK()
         size_after = info["partitions"][0]["segments"][0]["data_size"]
-        assert(size_before > size_after)
+        assert(size_before >= size_after)
         status = connect.compact(collection)
         assert status.OK()
         # get collection info after compact twice
@@ -521,7 +521,7 @@ class TestCompactJAC:
         logging.getLogger().info(info["partitions"])
         size_after = info["partitions"][0]["segments"][0]["data_size"]
         logging.getLogger().info(size_after)
-        assert(size_before > size_after)
+        assert(size_before >= size_after)
     
     @pytest.mark.timeout(COMPACT_TIMEOUT)
     def test_add_vectors_delete_all_and_compact(self, connect, jac_collection):
@@ -608,7 +608,7 @@ class TestCompactJAC:
         status, info = connect.collection_info(jac_collection)
         assert status.OK()
         size_after = info["partitions"][0]["segments"][0]["data_size"]
-        assert(size_before > size_after)
+        assert(size_before >= size_after)
         status = connect.compact(jac_collection)
         assert status.OK()
         # get collection info after compact twice
@@ -802,7 +802,7 @@ class TestCompactIP:
         logging.getLogger().info(info["partitions"])
         size_after = info["partitions"][0]["segments"][0]["data_size"]
         logging.getLogger().info(size_after)
-        assert(size_before > size_after)
+        assert(size_before >= size_after)
     
     @pytest.mark.timeout(COMPACT_TIMEOUT)
     def test_add_vectors_delete_all_and_compact(self, connect, ip_collection):
@@ -891,7 +891,7 @@ class TestCompactIP:
         status, info = connect.collection_info(ip_collection)
         assert status.OK()
         size_after = info["partitions"][0]["segments"][0]["data_size"]
-        assert(size_before > size_after)
+        assert(size_before >= size_after)
         status = connect.compact(ip_collection)
         assert status.OK()
         status = connect.flush([ip_collection])

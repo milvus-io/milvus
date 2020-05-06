@@ -836,7 +836,8 @@ GrpcRequestHandler::Compact(::grpc::ServerContext* context, const ::milvus::grpc
     CHECK_NULLPTR_RETURN(request);
     LOG_SERVER_INFO_ << LogOut("Request [%s] %s begin.", GetContext(context)->RequestID().c_str(), __func__);
 
-    Status status = request_handler_.Compact(GetContext(context), request->collection_name());
+    double compact_threshold = 0.1;  // compact trigger threshold: delete_counts/segment_counts
+    Status status = request_handler_.Compact(GetContext(context), request->collection_name(), compact_threshold);
 
     LOG_SERVER_INFO_ << LogOut("Request [%s] %s end.", GetContext(context)->RequestID().c_str(), __func__);
     SET_RESPONSE(response, status, context);

@@ -62,8 +62,6 @@ constexpr uint64_t BACKGROUND_METRIC_INTERVAL = 1;
 constexpr uint64_t BACKGROUND_INDEX_INTERVAL = 1;
 constexpr uint64_t WAIT_BUILD_INDEX_INTERVAL = 5;
 
-constexpr double COMPACT_THREASHOLD = 0.1;  // compact segment threashold = delete_count/total_count
-
 constexpr const char* JSON_ROW_COUNT = "row_count";
 constexpr const char* JSON_PARTITIONS = "partitions";
 constexpr const char* JSON_PARTITION_TAG = "tag";
@@ -854,7 +852,7 @@ DBImpl::Flush() {
 }
 
 Status
-DBImpl::Compact(const std::string& collection_id) {
+DBImpl::Compact(const std::string& collection_id, double threshold) {
     if (!initialized_.load(std::memory_order_acquire)) {
         return SHUTDOWN_ERROR;
     }
@@ -919,7 +917,7 @@ DBImpl::Compact(const std::string& collection_id) {
 
         meta::SegmentsSchema files_to_update;
         if (deleted_docs_size != 0) {
-            compact_status = CompactFile(collection_id, file, files_to_update);
+            compact_status = CompactFile(collection_id, threshold, file, files_to_update);
 
             if (!compact_status.ok()) {
                 LOG_ENGINE_ERROR_ << "Compact failed for segment " << file.segment_id_ << ": "
@@ -950,7 +948,7 @@ DBImpl::Compact(const std::string& collection_id) {
 }
 
 Status
-DBImpl::CompactFile(const std::string& collection_id, const meta::SegmentSchema& file,
+DBImpl::CompactFile(const std::string& collection_id, double threshold, const meta::SegmentSchema& file,
                     meta::SegmentsSchema& files_to_update) {
     LOG_ENGINE_DEBUG_ << "Compacting segment " << file.segment_id_ << " for collection: " << collection_id;
 
@@ -958,16 +956,15 @@ DBImpl::CompactFile(const std::string& collection_id, const meta::SegmentSchema&
     utils::GetParentPath(file.location_, segment_dir_to_merge);
 
     // no need to compact if deleted vectors are too few(less than threashold)
-    // TODO: use server config to set the threashold
-    if (file.row_count_ > 0) {
+    if (file.row_count_ > 0 && threshold > 0.0) {
         segment::SegmentReader segment_reader_to_merge(segment_dir_to_merge);
         segment::DeletedDocsPtr deleted_docs_ptr;
         auto status = segment_reader_to_merge.LoadDeletedDocs(deleted_docs_ptr);
         if (status.ok()) {
             auto delete_items = deleted_docs_ptr->GetDeletedDocs();
             double delete_rate = (double)delete_items.size() / (double)file.row_count_;
-            if (delete_rate < COMPACT_THREASHOLD) {
-                LOG_ENGINE_DEBUG_ << "Delete rate less than " << COMPACT_THREASHOLD << ", no need to compact for"
+            if (delete_rate < threshold) {
+                LOG_ENGINE_DEBUG_ << "Delete rate less than " << threshold << ", no need to compact for"
                                   << segment_dir_to_merge;
                 return Status::OK();
             }
