@@ -23,8 +23,6 @@
 #include <boost/filesystem/operations.hpp>
 #include <iostream>
 #include <thread>
-#include <fiu-local.h>
-#include <fiu-control.h>
 
 const char* FAILED_CONNECT_SQL_SERVER = "Failed to connect to meta server(mysql)";
 const char* COLLECTION_ALREADY_EXISTS = "Collection already exists and it is in delete state, please wait a second";

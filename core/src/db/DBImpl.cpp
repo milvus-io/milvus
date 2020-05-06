@@ -132,16 +132,6 @@ DBImpl::Start() {
                 break;
             }
             ExecWalRecord(record);
-
-            wal::MXLogRecord hybrid_record;
-            error_code = wal_mgr_->GetNextEntityRecovery(hybrid_record);
-            if (error_code != WAL_SUCCESS) {
-                throw Exception(error_code, "Wal hybrid recovery error!");
-            }
-            if (hybrid_record.type == wal::MXLogType::None) {
-                break;
-            }
-            ExecWalRecord(hybrid_record);
         }
 
         // for distribute version, some nodes are read only
@@ -617,22 +607,20 @@ DBImpl::InsertVectors(const std::string& collection_id, const std::string& parti
 }
 
 Status
-CopyToAttr(std::vector<uint8_t>& record, uint64_t row_num,
+CopyToAttr(std::vector<uint8_t>& record, uint64_t row_num, const std::vector<std::string>& field_names,
            std::unordered_map<std::string, meta::hybrid::DataType>& attr_types,
            std::unordered_map<std::string, std::vector<uint8_t>>& attr_datas,
            std::unordered_map<std::string, uint64_t>& attr_nbytes,
            std::unordered_map<std::string, uint64_t>& attr_data_size) {
     uint64_t offset = 0;
-    auto attr_it = attr_types.begin();
-    for (; attr_it != attr_types.end(); attr_it++) {
-        switch (attr_it->second) {
+    for (auto name : field_names) {
+        switch (attr_types.at(name)) {
             case meta::hybrid::DataType::INT8: {
                 std::vector<uint8_t> data;
                 data.resize(row_num * sizeof(int8_t));
 
                 std::vector<int64_t> attr_value(row_num, 0);
                 memcpy(attr_value.data(), record.data() + offset, row_num * sizeof(int64_t));
-                offset += row_num * sizeof(int64_t);
 
                 std::vector<int8_t> raw_value(row_num, 0);
                 for (uint64_t i = 0; i < row_num; ++i) {
@@ -640,10 +628,10 @@ CopyToAttr(std::vector<uint8_t>& record, uint64_t row_num,
                 }
 
                 memcpy(data.data(), raw_value.data(), row_num * sizeof(int8_t));
-                attr_datas.insert(std::make_pair(attr_it->first, data));
+                attr_datas.insert(std::make_pair(name, data));
 
-                attr_nbytes.insert(std::make_pair(attr_it->first, sizeof(int8_t)));
-                attr_data_size.insert(std::make_pair(attr_it->first, row_num * sizeof(int8_t)));
+                attr_nbytes.insert(std::make_pair(name, sizeof(int8_t)));
+                attr_data_size.insert(std::make_pair(name, row_num * sizeof(int8_t)));
                 offset += row_num * sizeof(int64_t);
                 break;
             }
@@ -653,7 +641,6 @@ CopyToAttr(std::vector<uint8_t>& record, uint64_t row_num,
 
                 std::vector<int64_t> attr_value(row_num, 0);
                 memcpy(attr_value.data(), record.data() + offset, row_num * sizeof(int64_t));
-                offset += row_num * sizeof(int64_t);
 
                 std::vector<int16_t> raw_value(row_num, 0);
                 for (uint64_t i = 0; i < row_num; ++i) {
@@ -661,20 +648,19 @@ CopyToAttr(std::vector<uint8_t>& record, uint64_t row_num,
                 }
 
                 memcpy(data.data(), raw_value.data(), row_num * sizeof(int16_t));
-                attr_datas.insert(std::make_pair(attr_it->first, data));
+                attr_datas.insert(std::make_pair(name, data));
 
-                attr_nbytes.insert(std::make_pair(attr_it->first, sizeof(int16_t)));
-                attr_data_size.insert(std::make_pair(attr_it->first, row_num * sizeof(int16_t)));
+                attr_nbytes.insert(std::make_pair(name, sizeof(int16_t)));
+                attr_data_size.insert(std::make_pair(name, row_num * sizeof(int16_t)));
                 offset += row_num * sizeof(int64_t);
                 break;
             }
             case meta::hybrid::DataType::INT32: {
                 std::vector<uint8_t> data;
-                data.resize(row_num * sizeof(int16_t));
+                data.resize(row_num * sizeof(int32_t));
 
                 std::vector<int64_t> attr_value(row_num, 0);
                 memcpy(attr_value.data(), record.data() + offset, row_num * sizeof(int64_t));
-                offset += row_num * sizeof(int64_t);
 
                 std::vector<int32_t> raw_value(row_num, 0);
                 for (uint64_t i = 0; i < row_num; ++i) {
@@ -682,10 +668,10 @@ CopyToAttr(std::vector<uint8_t>& record, uint64_t row_num,
                 }
 
                 memcpy(data.data(), raw_value.data(), row_num * sizeof(int32_t));
-                attr_datas.insert(std::make_pair(attr_it->first, data));
+                attr_datas.insert(std::make_pair(name, data));
 
-                attr_nbytes.insert(std::make_pair(attr_it->first, sizeof(int32_t)));
-                attr_data_size.insert(std::make_pair(attr_it->first, row_num * sizeof(int32_t)));
+                attr_nbytes.insert(std::make_pair(name, sizeof(int32_t)));
+                attr_data_size.insert(std::make_pair(name, row_num * sizeof(int32_t)));
                 offset += row_num * sizeof(int64_t);
                 break;
             }
@@ -693,10 +679,13 @@ CopyToAttr(std::vector<uint8_t>& record, uint64_t row_num,
                 std::vector<uint8_t> data;
                 data.resize(row_num * sizeof(int64_t));
                 memcpy(data.data(), record.data() + offset, row_num * sizeof(int64_t));
-                attr_datas.insert(std::make_pair(attr_it->first, data));
+                attr_datas.insert(std::make_pair(name, data));
 
-                attr_nbytes.insert(std::make_pair(attr_it->first, sizeof(int64_t)));
-                attr_data_size.insert(std::make_pair(attr_it->first, row_num * sizeof(int64_t)));
+                std::vector<int64_t> test_data(row_num);
+                memcpy(test_data.data(), record.data(), row_num * sizeof(int64_t));
+
+                attr_nbytes.insert(std::make_pair(name, sizeof(int64_t)));
+                attr_data_size.insert(std::make_pair(name, row_num * sizeof(int64_t)));
                 offset += row_num * sizeof(int64_t);
                 break;
             }
@@ -706,7 +695,6 @@ CopyToAttr(std::vector<uint8_t>& record, uint64_t row_num,
 
                 std::vector<double> attr_value(row_num, 0);
                 memcpy(attr_value.data(), record.data() + offset, row_num * sizeof(double));
-                offset += row_num * sizeof(double);
 
                 std::vector<float> raw_value(row_num, 0);
                 for (uint64_t i = 0; i < row_num; ++i) {
@@ -714,10 +702,10 @@ CopyToAttr(std::vector<uint8_t>& record, uint64_t row_num,
                 }
 
                 memcpy(data.data(), raw_value.data(), row_num * sizeof(float));
-                attr_datas.insert(std::make_pair(attr_it->first, data));
+                attr_datas.insert(std::make_pair(name, data));
 
-                attr_nbytes.insert(std::make_pair(attr_it->first, sizeof(float)));
-                attr_data_size.insert(std::make_pair(attr_it->first, row_num * sizeof(float)));
+                attr_nbytes.insert(std::make_pair(name, sizeof(float)));
+                attr_data_size.insert(std::make_pair(name, row_num * sizeof(float)));
                 offset += row_num * sizeof(double);
                 break;
             }
@@ -725,14 +713,15 @@ CopyToAttr(std::vector<uint8_t>& record, uint64_t row_num,
                 std::vector<uint8_t> data;
                 data.resize(row_num * sizeof(double));
                 memcpy(data.data(), record.data() + offset, row_num * sizeof(double));
-                attr_datas.insert(std::make_pair(attr_it->first, data));
+                attr_datas.insert(std::make_pair(name, data));
 
-                attr_nbytes.insert(std::make_pair(attr_it->first, sizeof(double)));
-                attr_data_size.insert(std::make_pair(attr_it->first, row_num * sizeof(double)));
+                attr_nbytes.insert(std::make_pair(name, sizeof(double)));
+                attr_data_size.insert(std::make_pair(name, row_num * sizeof(double)));
                 offset += row_num * sizeof(double);
                 break;
             }
-            default: { return Status{DB_ERROR, "Attributes type error"}; }
+            default:
+                break;
         }
     }
     return Status::OK();
@@ -759,11 +748,36 @@ DBImpl::InsertEntities(const std::string& collection_id, const std::string& part
     std::unordered_map<std::string, std::vector<uint8_t>> attr_data;
     std::unordered_map<std::string, uint64_t> attr_nbytes;
     std::unordered_map<std::string, uint64_t> attr_data_size;
-    status = CopyToAttr(entity.attr_value_, entity.entity_count_, attr_types, attr_data, attr_nbytes, attr_data_size);
+    status = CopyToAttr(entity.attr_value_, entity.entity_count_, field_names, attr_types, attr_data, attr_nbytes,
+                        attr_data_size);
     if (!status.ok()) {
         return status;
     }
 
+    wal::MXLogRecord record;
+    record.lsn = 0;
+    record.collection_id = collection_id;
+    record.partition_tag = partition_tag;
+    record.ids = entity.id_array_.data();
+    record.length = entity.entity_count_;
+
+    auto vector_it = entity.vector_data_.begin();
+    if (vector_it->second.binary_data_.empty()) {
+        record.type = wal::MXLogType::Entity;
+        record.data = vector_it->second.float_data_.data();
+        record.data_size = vector_it->second.float_data_.size() * sizeof(float);
+        record.attr_data = attr_data;
+        record.attr_nbytes = attr_nbytes;
+        record.attr_data_size = attr_data_size;
+    } else {
+        //        record.type = wal::MXLogType::InsertBinary;
+        //        record.data = entities.vector_data_[0].binary_data_.data();
+        //        record.length = entities.vector_data_[0].binary_data_.size() * sizeof(uint8_t);
+    }
+
+    status = ExecWalRecord(record);
+
+#if 0
     if (options_.wal_enable_) {
         std::string target_collection_name;
         status = GetPartitionByTag(collection_id, partition_tag, target_collection_name);
@@ -806,6 +820,7 @@ DBImpl::InsertEntities(const std::string& collection_id, const std::string& part
 
         status = ExecWalRecord(record);
     }
+#endif
 
     return status;
 }
@@ -2699,42 +2714,6 @@ DBImpl::BackgroundWalThread() {
 
                 // if user flush all manually, update auto flush also
                 if (record.collection_id.empty() && options_.auto_flush_interval_ > 0) {
-                    next_auto_flush_time = get_next_auto_flush_time();
-                }
-            }
-
-        } else {
-            if (!initialized_.load(std::memory_order_acquire)) {
-                InternalFlush();
-                flush_req_swn_.Notify();
-                WaitMergeFileFinish();
-                WaitBuildIndexFinish();
-                LOG_ENGINE_DEBUG_ << "WAL background thread exit";
-                break;
-            }
-
-            if (options_.auto_flush_interval_ > 0) {
-                swn_wal_.Wait_Until(next_auto_flush_time);
-            } else {
-                swn_wal_.Wait();
-            }
-        }
-
-        wal::MXLogRecord hybrid_record;
-        error_code = wal_mgr_->GetNextEntityRecord(hybrid_record);
-        if (error_code != WAL_SUCCESS) {
-            LOG_ENGINE_ERROR_ << "WAL background GetNextRecord error";
-            break;
-        }
-
-        if (hybrid_record.type != wal::MXLogType::None) {
-            ExecWalRecord(hybrid_record);
-            if (hybrid_record.type == wal::MXLogType::Flush) {
-                // notify flush request to return
-                flush_req_swn_.Notify();
-
-                // if user flush all manually, update auto flush also
-                if (hybrid_record.collection_id.empty() && options_.auto_flush_interval_ > 0) {
                     next_auto_flush_time = get_next_auto_flush_time();
                 }
             }
