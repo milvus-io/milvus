@@ -852,7 +852,7 @@ DBImpl::Flush() {
 }
 
 Status
-DBImpl::Compact(const std::string& collection_id) {
+DBImpl::Compact(const std::string& collection_id, double threshold) {
     if (!initialized_.load(std::memory_order_acquire)) {
         return SHUTDOWN_ERROR;
     }
@@ -917,7 +917,7 @@ DBImpl::Compact(const std::string& collection_id) {
 
         meta::SegmentsSchema files_to_update;
         if (deleted_docs_size != 0) {
-            compact_status = CompactFile(collection_id, file, files_to_update);
+            compact_status = CompactFile(collection_id, threshold, file, files_to_update);
 
             if (!compact_status.ok()) {
                 LOG_ENGINE_ERROR_ << "Compact failed for segment " << file.segment_id_ << ": "
@@ -948,16 +948,35 @@ DBImpl::Compact(const std::string& collection_id) {
 }
 
 Status
-DBImpl::CompactFile(const std::string& collection_id, const meta::SegmentSchema& file,
+DBImpl::CompactFile(const std::string& collection_id, double threshold, const meta::SegmentSchema& file,
                     meta::SegmentsSchema& files_to_update) {
     LOG_ENGINE_DEBUG_ << "Compacting segment " << file.segment_id_ << " for collection: " << collection_id;
+
+    std::string segment_dir_to_merge;
+    utils::GetParentPath(file.location_, segment_dir_to_merge);
+
+    // no need to compact if deleted vectors are too few(less than threashold)
+    if (file.row_count_ > 0 && threshold > 0.0) {
+        segment::SegmentReader segment_reader_to_merge(segment_dir_to_merge);
+        segment::DeletedDocsPtr deleted_docs_ptr;
+        auto status = segment_reader_to_merge.LoadDeletedDocs(deleted_docs_ptr);
+        if (status.ok()) {
+            auto delete_items = deleted_docs_ptr->GetDeletedDocs();
+            double delete_rate = (double)delete_items.size() / (double)file.row_count_;
+            if (delete_rate < threshold) {
+                LOG_ENGINE_DEBUG_ << "Delete rate less than " << threshold << ", no need to compact for"
+                                  << segment_dir_to_merge;
+                return Status::OK();
+            }
+        }
+    }
 
     // Create new collection file
     meta::SegmentSchema compacted_file;
     compacted_file.collection_id_ = collection_id;
     // compacted_file.date_ = date;
     compacted_file.file_type_ = meta::SegmentSchema::NEW_MERGE;  // TODO: use NEW_MERGE for now
-    Status status = meta_ptr_->CreateCollectionFile(compacted_file);
+    auto status = meta_ptr_->CreateCollectionFile(compacted_file);
 
     if (!status.ok()) {
         LOG_ENGINE_ERROR_ << "Failed to create collection file: " << status.message();
@@ -969,9 +988,6 @@ DBImpl::CompactFile(const std::string& collection_id, const meta::SegmentSchema&
     std::string new_segment_dir;
     utils::GetParentPath(compacted_file.location_, new_segment_dir);
     auto segment_writer_ptr = std::make_shared<segment::SegmentWriter>(new_segment_dir);
-
-    std::string segment_dir_to_merge;
-    utils::GetParentPath(file.location_, segment_dir_to_merge);
 
     LOG_ENGINE_DEBUG_ << "Compacting begin...";
     segment_writer_ptr->Merge(segment_dir_to_merge, compacted_file.file_id_);
@@ -986,6 +1002,7 @@ DBImpl::CompactFile(const std::string& collection_id, const meta::SegmentSchema&
         if (mark_status.ok()) {
             LOG_ENGINE_DEBUG_ << "Mark file: " << compacted_file.file_id_ << " to to_delete";
         }
+
         return status;
     }
 
@@ -1266,7 +1283,8 @@ DBImpl::GetVectorsByIdHelper(const std::string& collection_id, const IDNumbers& 
 }
 
 Status
-DBImpl::CreateIndex(const std::string& collection_id, const CollectionIndex& index) {
+DBImpl::CreateIndex(const std::shared_ptr<server::Context>& context, const std::string& collection_id,
+                    const CollectionIndex& index) {
     if (!initialized_.load(std::memory_order_acquire)) {
         return SHUTDOWN_ERROR;
     }
@@ -1304,7 +1322,7 @@ DBImpl::CreateIndex(const std::string& collection_id, const CollectionIndex& ind
 
     // step 4: wait and build index
     status = index_failed_checker_.CleanFailedIndexFileOfCollection(collection_id);
-    status = WaitCollectionIndexRecursively(collection_id, index);
+    status = WaitCollectionIndexRecursively(context, collection_id, index);
 
     return status;
 }
@@ -1845,7 +1863,6 @@ DBImpl::MergeFiles(const std::string& collection_id, meta::FilesHolder& files_ho
     collection_file.collection_id_ = collection_id;
     collection_file.file_type_ = meta::SegmentSchema::NEW_MERGE;
     Status status = meta_ptr_->CreateCollectionFile(collection_file);
-
     if (!status.ok()) {
         LOG_ENGINE_ERROR_ << "Failed to create collection: " << status.ToString();
         return status;
@@ -2224,7 +2241,7 @@ DBImpl::GetPartitionsByTags(const std::string& collection_id, const std::vector<
     }
 
     if (partition_name_array.empty()) {
-        return Status(PARTITION_NOT_FOUND, "Cannot find the specified partitions");
+        return Status(DB_PARTITION_NOT_FOUND, "The specified partiton does not exist");
     }
 
     return Status::OK();
@@ -2291,7 +2308,8 @@ DBImpl::UpdateCollectionIndexRecursively(const std::string& collection_id, const
 }
 
 Status
-DBImpl::WaitCollectionIndexRecursively(const std::string& collection_id, const CollectionIndex& index) {
+DBImpl::WaitCollectionIndexRecursively(const std::shared_ptr<server::Context>& context,
+                                       const std::string& collection_id, const CollectionIndex& index) {
     // for IDMAP type, only wait all NEW file converted to RAW file
     // for other type, wait NEW/RAW/NEW_MERGE/NEW_INDEX/TO_INDEX files converted to INDEX files
     std::vector<int> file_types;
@@ -2313,17 +2331,30 @@ DBImpl::WaitCollectionIndexRecursively(const std::string& collection_id, const C
         meta::FilesHolder files_holder;
         auto status = GetFilesToBuildIndex(collection_id, file_types, files_holder);
         int times = 1;
-
+        uint64_t repeat = 0;
         while (!files_holder.HoldFiles().empty()) {
-            LOG_ENGINE_DEBUG_ << files_holder.HoldFiles().size() << " non-index files detected! Will build index "
-                              << times;
-            if (!utils::IsRawIndexType(index.engine_type_)) {
-                status = meta_ptr_->UpdateCollectionFilesToIndex(collection_id);
+            if (repeat % WAIT_BUILD_INDEX_INTERVAL == 0) {
+                LOG_ENGINE_DEBUG_ << files_holder.HoldFiles().size() << " non-index files detected! Will build index "
+                                  << times;
+                if (!utils::IsRawIndexType(index.engine_type_)) {
+                    status = meta_ptr_->UpdateCollectionFilesToIndex(collection_id);
+                }
             }
 
-            index_req_swn_.Wait_For(std::chrono::seconds(WAIT_BUILD_INDEX_INTERVAL));
-            GetFilesToBuildIndex(collection_id, file_types, files_holder);
-            ++times;
+            index_req_swn_.Wait_For(std::chrono::seconds(1));
+
+            // client break the connection, no need to block, check every 1 second
+            if (context->IsConnectionBroken()) {
+                LOG_ENGINE_DEBUG_ << "Client connection broken, build index in background";
+                break;  // just break, not return, continue to update partitions files to to_index
+            }
+
+            // check to_index files every 5 seconds
+            repeat++;
+            if (repeat % WAIT_BUILD_INDEX_INTERVAL == 0) {
+                GetFilesToBuildIndex(collection_id, file_types, files_holder);
+                ++times;
+            }
         }
     }
 
@@ -2331,7 +2362,7 @@ DBImpl::WaitCollectionIndexRecursively(const std::string& collection_id, const C
     std::vector<meta::CollectionSchema> partition_array;
     auto status = meta_ptr_->ShowPartitions(collection_id, partition_array);
     for (auto& schema : partition_array) {
-        status = WaitCollectionIndexRecursively(schema.collection_id_, index);
+        status = WaitCollectionIndexRecursively(context, schema.collection_id_, index);
         fiu_do_on("DBImpl.WaitCollectionIndexRecursively.fail_build_collection_Index_for_partition",
                   status = Status(DB_ERROR, ""));
         if (!status.ok()) {

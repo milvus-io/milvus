@@ -40,6 +40,20 @@ Context::Follower(const std::string& operation_name) const {
     return new_context;
 }
 
+void
+Context::SetConnectionContext(ConnectionContextPtr& context) {
+    context_ = context;
+}
+
+bool
+Context::IsConnectionBroken() const {
+    if (context_ == nullptr) {
+        return false;
+    }
+
+    return context_->IsConnectionBroken();
+}
+
 /////////////////////////////////////////////////////////////////////////////////////////////////
 ContextChild::ContextChild(const ContextPtr& context, const std::string& operation_name) {
     if (context) {

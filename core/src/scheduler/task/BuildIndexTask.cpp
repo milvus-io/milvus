@@ -75,6 +75,7 @@ XBuildIndexTask::Load(milvus::scheduler::LoadType type, uint8_t device_id) {
         } catch (std::exception& ex) {
             // typical error: out of disk space or permition denied
             error_msg = "Failed to load to_index file: " + std::string(ex.what());
+            LOG_ENGINE_ERROR_ << error_msg;
             stat = Status(SERVER_UNEXPECTED_ERROR, error_msg);
         }
         fiu_do_on("XBuildIndexTask.Load.out_of_memory", stat = Status(SERVER_UNEXPECTED_ERROR, "out of memory"));
@@ -88,8 +89,11 @@ XBuildIndexTask::Load(milvus::scheduler::LoadType type, uint8_t device_id) {
                 s = Status(SERVER_UNEXPECTED_ERROR, error_msg);
             }
 
+            LOG_ENGINE_ERROR_ << s.message();
+
             if (auto job = job_.lock()) {
                 auto build_index_job = std::static_pointer_cast<scheduler::BuildIndexJob>(job);
+                build_index_job->GetStatus() = s;
                 build_index_job->BuildIndexDone(file_->id_);
             }
 
