@@ -17,7 +17,6 @@
 #include "grpc/gen-status/status.grpc.pb.h"
 #include "grpc/gen-status/status.pb.h"
 #include "query/GeneralQuery.h"
-#include "server/context/Context.h"
 #include "utils/Json.h"
 #include "utils/Status.h"
 

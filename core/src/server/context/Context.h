@@ -24,8 +24,6 @@
 namespace milvus {
 namespace server {
 
-class BaseRequest;
-
 class Context {
  public:
     explicit Context(const std::string& request_id);
@@ -54,14 +52,13 @@ class Context {
     IsConnectionBroken() const;
 
     BaseRequest::RequestType
-    GetRequestType() const ;
+    GetRequestType() const;
 
     void
     SetRequestType(BaseRequest::RequestType type);
 
  private:
     std::string request_id_;
-//    std::string
     BaseRequest::RequestType request_type_;
     std::shared_ptr<tracing::TraceContext> trace_context_;
     ConnectionContextPtr context_;
