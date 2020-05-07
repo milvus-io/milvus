@@ -56,63 +56,66 @@ RolloutHandler(const char* filename, std::size_t size, el::Level level) {
     int ret;
     std::string m(std::string(dir) + "/" + s);
     s = m;
-    switch (level) {
-        case el::Level::Debug: {
-            s.append("." + std::to_string(++debug_idx));
-            ret = rename(m.c_str(), s.c_str());
-            // std::cout << "debug_idx:" << debug_idx << ", logs_delete_exceeds:" << logs_delete_exceeds << std::endl;
-            if (debug_idx - logs_delete_exceeds > 0) {
-                std::string to_delete = m + "." + std::to_string(debug_idx - logs_delete_exceeds);
-                // std::cout << "remote " << to_delete << std::endl;
-                boost::filesystem::remove(to_delete);
+    try {
+        switch (level) {
+            case el::Level::Debug: {
+                s.append("." + std::to_string(++debug_idx));
+                ret = rename(m.c_str(), s.c_str());
+                if (debug_idx - logs_delete_exceeds > 0) {
+                    std::string to_delete = m + "." + std::to_string(debug_idx - logs_delete_exceeds);
+                    // std::cout << "remote " << to_delete << std::endl;
+                    boost::filesystem::remove(to_delete);
+                }
+                break;
             }
-            break;
-        }
-        case el::Level::Warning: {
-            s.append("." + std::to_string(++warning_idx));
-            ret = rename(m.c_str(), s.c_str());
-            if (warning_idx - logs_delete_exceeds > 0) {
-                std::string to_delete = m + "." + std::to_string(warning_idx - logs_delete_exceeds);
-                boost::filesystem::remove(to_delete);
+            case el::Level::Warning: {
+                s.append("." + std::to_string(++warning_idx));
+                ret = rename(m.c_str(), s.c_str());
+                if (warning_idx - logs_delete_exceeds > 0) {
+                    std::string to_delete = m + "." + std::to_string(warning_idx - logs_delete_exceeds);
+                    boost::filesystem::remove(to_delete);
+                }
+                break;
             }
-            break;
-        }
-        case el::Level::Trace: {
-            s.append("." + std::to_string(++trace_idx));
-            ret = rename(m.c_str(), s.c_str());
-            if (trace_idx - logs_delete_exceeds > 0) {
-                std::string to_delete = m + "." + std::to_string(trace_idx - logs_delete_exceeds);
-                boost::filesystem::remove(to_delete);
+            case el::Level::Trace: {
+                s.append("." + std::to_string(++trace_idx));
+                ret = rename(m.c_str(), s.c_str());
+                if (trace_idx - logs_delete_exceeds > 0) {
+                    std::string to_delete = m + "." + std::to_string(trace_idx - logs_delete_exceeds);
+                    boost::filesystem::remove(to_delete);
+                }
+                break;
             }
-            break;
-        }
-        case el::Level::Error: {
-            s.append("." + std::to_string(++error_idx));
-            ret = rename(m.c_str(), s.c_str());
-            if (error_idx - logs_delete_exceeds > 0) {
-                std::string to_delete = m + "." + std::to_string(error_idx - logs_delete_exceeds);
-                boost::filesystem::remove(to_delete);
+            case el::Level::Error: {
+                s.append("." + std::to_string(++error_idx));
+                ret = rename(m.c_str(), s.c_str());
+                if (error_idx - logs_delete_exceeds > 0) {
+                    std::string to_delete = m + "." + std::to_string(error_idx - logs_delete_exceeds);
+                    boost::filesystem::remove(to_delete);
+                }
+                break;
             }
-            break;
-        }
-        case el::Level::Fatal: {
-            s.append("." + std::to_string(++fatal_idx));
-            ret = rename(m.c_str(), s.c_str());
-            if (fatal_idx - logs_delete_exceeds > 0) {
-                std::string to_delete = m + "." + std::to_string(fatal_idx - logs_delete_exceeds);
-                boost::filesystem::remove(to_delete);
+            case el::Level::Fatal: {
+                s.append("." + std::to_string(++fatal_idx));
+                ret = rename(m.c_str(), s.c_str());
+                if (fatal_idx - logs_delete_exceeds > 0) {
+                    std::string to_delete = m + "." + std::to_string(fatal_idx - logs_delete_exceeds);
+                    boost::filesystem::remove(to_delete);
+                }
+                break;
             }
-            break;
-        }
-        default: {
-            s.append("." + std::to_string(++global_idx));
-            ret = rename(m.c_str(), s.c_str());
-            if (global_idx - logs_delete_exceeds > 0) {
-                std::string to_delete = m + "." + std::to_string(global_idx - logs_delete_exceeds);
-                boost::filesystem::remove(to_delete);
+            default: {
+                s.append("." + std::to_string(++global_idx));
+                ret = rename(m.c_str(), s.c_str());
+                if (global_idx - logs_delete_exceeds > 0) {
+                    std::string to_delete = m + "." + std::to_string(global_idx - logs_delete_exceeds);
+                    boost::filesystem::remove(to_delete);
+                }
+                break;
             }
-            break;
         }
+    } catch (const std::exception& exc) {
+        std::cerr << exc.what() << ". Exception throws from RolloutHandler." << std::endl;
     }
 }
 
