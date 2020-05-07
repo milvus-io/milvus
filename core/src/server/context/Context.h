@@ -15,6 +15,9 @@
 #include <string>
 #include <unordered_map>
 
+#include <grpcpp/server_context.h>
+
+#include "server/context/ConnectionContext.h"
 #include "tracing/TraceContext.h"
 
 namespace milvus {
@@ -41,9 +44,16 @@ class Context {
     const std::shared_ptr<tracing::TraceContext>&
     GetTraceContext() const;
 
+    void
+    SetConnectionContext(ConnectionContextPtr& context);
+
+    bool
+    IsConnectionBroken() const;
+
  private:
     std::string request_id_;
     std::shared_ptr<tracing::TraceContext> trace_context_;
+    ConnectionContextPtr context_;
 };
 
 using ContextPtr = std::shared_ptr<milvus::server::Context>;

@@ -214,7 +214,7 @@ TEST_F(SearchByIdTest, WITH_INDEX_TEST) {
     milvus::engine::CollectionIndex index;
     index.engine_type_ = (int)milvus::engine::EngineType::FAISS_IVFSQ8;
     index.extra_params_ = {{"nlist", 10}};
-    stat = db_->CreateIndex(collection_info.collection_id_, index);
+    stat = db_->CreateIndex(dummy_context_, collection_info.collection_id_, index);
     ASSERT_TRUE(stat.ok());
 
     const int64_t topk = 10, nprobe = 10;
@@ -398,7 +398,7 @@ TEST_F(GetVectorByIdTest, WITH_INDEX_TEST) {
     milvus::engine::CollectionIndex index;
     index.extra_params_ = {{"nlist", 10}};
     index.engine_type_ = (int)milvus::engine::EngineType::FAISS_IVFSQ8;
-    stat = db_->CreateIndex(collection_info.collection_id_, index);
+    stat = db_->CreateIndex(dummy_context_, collection_info.collection_id_, index);
     ASSERT_TRUE(stat.ok());
 
     const int64_t topk = 10, nprobe = 10;

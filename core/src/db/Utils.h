@@ -73,6 +73,12 @@ ParseMetaUri(const std::string& uri, MetaUriInfo& info);
 std::string
 GetIndexName(int32_t index_type);
 
+void
+SendExitSignal();
+
+void
+ExitOnWriteError(Status& status);
+
 }  // namespace utils
 }  // namespace engine
 }  // namespace milvus

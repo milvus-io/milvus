@@ -195,4 +195,6 @@ logs:
   error.enable: true
   fatal.enable: true
   path: @MILVUS_DB_PATH@/logs
+  max_log_file_size: 256
+  delete_exceeds: 10
 

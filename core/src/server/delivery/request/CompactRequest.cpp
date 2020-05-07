@@ -27,13 +27,16 @@ namespace milvus {
 namespace server {
 
 CompactRequest::CompactRequest(const std::shared_ptr<milvus::server::Context>& context,
-                               const std::string& collection_name)
-    : BaseRequest(context, BaseRequest::kCompact), collection_name_(collection_name) {
+                               const std::string& collection_name, double compact_threshold)
+    : BaseRequest(context, BaseRequest::kCompact),
+      collection_name_(collection_name),
+      compact_threshold_(compact_threshold) {
 }
 
 BaseRequestPtr
-CompactRequest::Create(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name) {
-    return std::shared_ptr<BaseRequest>(new CompactRequest(context, collection_name));
+CompactRequest::Create(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name,
+                       double compact_threshold) {
+    return std::shared_ptr<BaseRequest>(new CompactRequest(context, collection_name, compact_threshold));
 }
 
 Status
@@ -67,7 +70,7 @@ CompactRequest::OnExecute() {
         rc.RecordSection("check validation");
 
         // step 2: check collection existence
-        status = DBWrapper::DB()->Compact(collection_name_);
+        status = DBWrapper::DB()->Compact(collection_name_, compact_threshold_);
         if (!status.ok()) {
             return status;
         }

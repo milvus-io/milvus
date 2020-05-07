@@ -7,7 +7,7 @@ sudo sh -c 'echo deb https://apt.repos.intel.com/mkl all main > /etc/apt/sources
 sudo apt-get -y update && sudo apt-get -y install intel-mkl-gnu-2019.5-281 intel-mkl-core-2019.5-281
 
 sudo apt-get install -y gfortran libmysqlclient-dev mysql-client libcurl4-openssl-dev libboost-system-dev \
-libboost-filesystem-dev libboost-serialization-dev libboost-regex-dev libopenblas-dev liblapack3 libssl-dev
+libboost-filesystem-dev libboost-serialization-dev libboost-regex-dev liblapack3 libssl-dev
 
 if [ ! -f "/usr/lib/x86_64-linux-gnu/libmysqlclient_r.so" ]; then
     sudo ln -s /usr/lib/x86_64-linux-gnu/libmysqlclient.so /usr/lib/x86_64-linux-gnu/libmysqlclient_r.so

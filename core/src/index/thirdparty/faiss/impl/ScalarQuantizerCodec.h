@@ -313,70 +313,18 @@ struct SimilarityL2<1> {
 
 /* as same as SimilarityL2<1>, let build pass */
 template<>
-struct SimilarityL2<8> {
+struct SimilarityL2<8> : SimilarityL2<1> {
     static constexpr int simdwidth = 1;
     static constexpr MetricType metric_type = METRIC_L2;
-
-    const float *y, *yi;
-
-    explicit SimilarityL2 (const float * y): y(y) {}
-
-    /******* scalar accumulator *******/
-
-    float accu;
-
-    void begin () {
-        accu = 0;
-        yi = y;
-    }
-
-    void add_component (float x) {
-        float tmp = *yi++ - x;
-        accu += tmp * tmp;
-    }
-
-    void add_component_2 (float x1, float x2) {
-        float tmp = x1 - x2;
-        accu += tmp * tmp;
-    }
-
-    float result () {
-        return accu;
-    }
+    explicit SimilarityL2 (const float * y) : SimilarityL2<1>(y) {}
 };
 
 /* as same as SimilarityL2<1>, let build pass */
 template<>
-struct SimilarityL2<16> {
+struct SimilarityL2<16> : SimilarityL2<1> {
     static constexpr int simdwidth = 1;
     static constexpr MetricType metric_type = METRIC_L2;
-
-    const float *y, *yi;
-
-    explicit SimilarityL2 (const float * y): y(y) {}
-
-    /******* scalar accumulator *******/
-
-    float accu;
-
-    void begin () {
-        accu = 0;
-        yi = y;
-    }
-
-    void add_component (float x) {
-        float tmp = *yi++ - x;
-        accu += tmp * tmp;
-    }
-
-    void add_component_2 (float x1, float x2) {
-        float tmp = x1 - x2;
-        accu += tmp * tmp;
-    }
-
-    float result () {
-        return accu;
-    }
+    explicit SimilarityL2 (const float * y) : SimilarityL2<1>(y) {}
 };
 
 
@@ -414,62 +362,18 @@ struct SimilarityIP<1> {
 
 /* as same as SimilarityIP<1>, let build pass */
 template<>
-struct SimilarityIP<8> {
+struct SimilarityIP<8> : SimilarityIP<1> {
     static constexpr int simdwidth = 1;
     static constexpr MetricType metric_type = METRIC_INNER_PRODUCT;
-    const float *y, *yi;
-
-    float accu;
-
-    explicit SimilarityIP (const float * y):
-        y (y) {}
-
-    void begin () {
-        accu = 0;
-        yi = y;
-    }
-
-    void add_component (float x) {
-        accu +=  *yi++ * x;
-    }
-
-    void add_component_2 (float x1, float x2) {
-        accu +=  x1 * x2;
-    }
-
-    float result () {
-        return accu;
-    }
+    explicit SimilarityIP (const float * y) : SimilarityIP<1>(y) {}
 };
 
 /* as same as SimilarityIP<1>, let build pass */
 template<>
-struct SimilarityIP<16> {
+struct SimilarityIP<16> : SimilarityIP<1> {
     static constexpr int simdwidth = 1;
     static constexpr MetricType metric_type = METRIC_INNER_PRODUCT;
-    const float *y, *yi;
-
-    float accu;
-
-    explicit SimilarityIP (const float * y):
-        y (y) {}
-
-    void begin () {
-        accu = 0;
-        yi = y;
-    }
-
-    void add_component (float x) {
-        accu +=  *yi++ * x;
-    }
-
-    void add_component_2 (float x1, float x2) {
-        accu +=  x1 * x2;
-    }
-
-    float result () {
-        return accu;
-    }
+    explicit SimilarityIP (const float * y) : SimilarityIP<1>(y) {}
 };
 
 
