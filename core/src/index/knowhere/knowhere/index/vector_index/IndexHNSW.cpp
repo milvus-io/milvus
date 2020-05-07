@@ -129,7 +129,7 @@ IndexHNSW::Add(const DatasetPtr& dataset_ptr, const Config& config) {
 
 #pragma omp parallel for
     for (int i = 1; i < rows; ++i) {
-        if ((i / thread_max_num) % 20 == 0) {
+        if ((i / thread_max_num) % 20000 == 0) {
             printf("Duration = %.2f\n", faiss::getmillisecs() - t0);
             t0 = faiss::getmillisecs();
         }
