@@ -24,6 +24,8 @@
 namespace milvus {
 namespace server {
 
+class BaseRequest;
+
 class Context {
  public:
     explicit Context(const std::string& request_id);

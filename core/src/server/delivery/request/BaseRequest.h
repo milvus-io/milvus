@@ -103,6 +103,8 @@ struct PartitionParam {
     }
 };
 
+class Context;
+
 class BaseRequest {
  public:
     enum RequestType {
