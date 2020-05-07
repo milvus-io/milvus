@@ -25,6 +25,8 @@
 #include "knowhere/index/vector_index/adapter/VectorAdapter.h"
 #include "knowhere/index/vector_index/helpers/FaissIO.h"
 
+#include <faiss/utils/utils.h>
+
 namespace milvus {
 namespace knowhere {
 
@@ -121,9 +123,12 @@ IndexHNSW::Add(const DatasetPtr& dataset_ptr, const Config& config) {
     //         }
     //     }
 
+    double t0 = faiss::getmillisecs();
     index_->addPoint(p_data, p_ids[0]);
 #pragma omp parallel for
     for (int i = 1; i < rows; ++i) {
+        printf("Duration = %.2f\n", faiss::getmillisecs() - t0);
+        t0 = faiss::getmillisecs();
         index_->addPoint(((float*)p_data + Dim() * i), p_ids[i]);
     }
 }
