@@ -255,6 +255,7 @@ if (NOT ${CMAKE_SYSTEM_PROCESSOR} MATCHES "aarch64")
 endif ()
 
 add_library(milvus_engine STATIC ${engine_files})
+add_dependencies(milvus_engine ${third_party_libs})
 target_link_libraries(milvus_engine
         knowhere
         ${third_party_libs}
@@ -266,6 +267,7 @@ if (MILVUS_WITH_PROMETHEUS)
 else ()
     add_library(metrics STATIC ${metrics_files})
 endif ()
+add_dependencies(metrics ${third_party_libs})
 
 set(metrics_lib
         yaml-cpp
@@ -280,6 +282,7 @@ endif ()
 target_link_libraries(metrics ${metrics_lib})
 
 add_library(tracing STATIC ${tracing_files} ${thirdparty_files})
+add_dependencies(tracing ${third_party_libs})
 set(tracing_lib
         opentracing
         opentracing_mocktracer
