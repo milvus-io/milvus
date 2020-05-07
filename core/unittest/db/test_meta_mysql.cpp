@@ -14,6 +14,8 @@
 #include "db/meta/MySQLMetaImpl.h"
 #include "db/utils.h"
 
+#include <fiu-control.h>
+#include <fiu-local.h>
 #include <gtest/gtest.h>
 #include <mysql++/mysql++.h>
 #include <stdlib.h>
@@ -21,8 +23,6 @@
 #include <boost/filesystem/operations.hpp>
 #include <iostream>
 #include <thread>
-#include <fiu-local.h>
-#include <fiu-control.h>
 
 const char* FAILED_CONNECT_SQL_SERVER = "Failed to connect to meta server(mysql)";
 const char* COLLECTION_ALREADY_EXISTS = "Collection already exists and it is in delete state, please wait a second";
@@ -67,7 +67,7 @@ TEST_F(MySqlMetaTest, COLLECTION_TEST) {
     ASSERT_FALSE(stat.ok());
     fiu_disable("MySQLMetaImpl.CreateCollection.throw_exception");
 
-    //ensure collection exists
+    // ensure collection exists
     stat = impl_->CreateCollection(collection);
     FIU_ENABLE_FIU("MySQLMetaImpl.CreateCollection.schema_TO_DELETE");
     stat = impl_->CreateCollection(collection);
@@ -121,6 +121,34 @@ TEST_F(MySqlMetaTest, COLLECTION_TEST) {
     ASSERT_TRUE(status.ok());
 }
 
+TEST_F(MySqlMetaTest, HYBRID_COLLECTION_TEST) {
+    auto collection_id = "meta_test_hybrid";
+
+    milvus::engine::meta::CollectionSchema collection;
+    collection.collection_id_ = collection_id;
+    collection.dimension_ = 128;
+    milvus::engine::meta::hybrid::FieldsSchema fields_schema;
+    fields_schema.fields_schema_.resize(2);
+    fields_schema.fields_schema_[0].collection_id_ = collection_id;
+    fields_schema.fields_schema_[0].field_name_ = "field_0";
+    fields_schema.fields_schema_[0].field_type_ = (int32_t)milvus::engine::meta::hybrid::DataType::INT64;
+    fields_schema.fields_schema_[0].field_params_ = "";
+
+    fields_schema.fields_schema_[1].collection_id_ = collection_id;
+    fields_schema.fields_schema_[1].field_name_ = "field_1";
+    fields_schema.fields_schema_[1].field_type_ = (int32_t)milvus::engine::meta::hybrid::DataType::VECTOR;
+    fields_schema.fields_schema_[1].field_params_ = "";
+
+    auto status = impl_->CreateHybridCollection(collection, fields_schema);
+    ASSERT_TRUE(status.ok());
+    milvus::engine::meta::CollectionSchema describe_collection;
+    milvus::engine::meta::hybrid::FieldsSchema describe_fields;
+    describe_collection.collection_id_ = collection_id;
+    status = impl_->DescribeHybridCollection(describe_collection, describe_fields);
+    ASSERT_TRUE(status.ok());
+    ASSERT_EQ(describe_fields.fields_schema_.size(), 2);
+}
+
 TEST_F(MySqlMetaTest, COLLECTION_FILE_TEST) {
     auto collection_id = "meta_test_table";
     fiu_init(0);
@@ -135,7 +163,7 @@ TEST_F(MySqlMetaTest, COLLECTION_FILE_TEST) {
     collection.dimension_ = 256;
     status = impl_->CreateCollection(collection);
 
-    //CreateCollectionFile
+    // CreateCollectionFile
     milvus::engine::meta::SegmentSchema table_file;
     table_file.collection_id_ = collection.collection_id_;
     status = impl_->CreateCollectionFile(table_file);
@@ -157,7 +185,7 @@ TEST_F(MySqlMetaTest, COLLECTION_FILE_TEST) {
     ASSERT_FALSE(status.ok());
     fiu_disable("MySQLMetaImpl.DescribeCollection.throw_exception");
 
-    //Count
+    // Count
     uint64_t cnt = 0;
     status = impl_->Count(collection_id, cnt);
     //    ASSERT_TRUE(status.ok());
@@ -182,7 +210,7 @@ TEST_F(MySqlMetaTest, COLLECTION_FILE_TEST) {
     auto new_file_type = milvus::engine::meta::SegmentSchema::INDEX;
     table_file.file_type_ = new_file_type;
 
-    //UpdateCollectionFile
+    // UpdateCollectionFile
     FIU_ENABLE_FIU("MySQLMetaImpl.UpdateCollectionFile.null_connection");
     status = impl_->UpdateCollectionFile(table_file);
     ASSERT_FALSE(status.ok());
@@ -487,7 +515,7 @@ TEST_F(MySqlMetaTest, INVALID_INITILIZE_TEST) {
     milvus::engine::DBMetaOptions meta = GetOptions().meta_;
     {
         FIU_ENABLE_FIU("MySQLMetaImpl.Initialize.fail_create_directory");
-        //delete directory created by SetUp
+        // delete directory created by SetUp
         boost::filesystem::remove_all(meta.path_);
         ASSERT_ANY_THROW(milvus::engine::meta::MySQLMetaImpl impl(meta, GetOptions().mode_));
         fiu_disable("MySQLMetaImpl.Initialize.fail_create_directory");
@@ -674,9 +702,9 @@ TEST_F(MySqlMetaTest, COLLECTION_FILES_TEST) {
     ASSERT_FALSE(status.ok());
 
     file_types = {
-        milvus::engine::meta::SegmentSchema::NEW, milvus::engine::meta::SegmentSchema::NEW_MERGE,
+        milvus::engine::meta::SegmentSchema::NEW,       milvus::engine::meta::SegmentSchema::NEW_MERGE,
         milvus::engine::meta::SegmentSchema::NEW_INDEX, milvus::engine::meta::SegmentSchema::TO_INDEX,
-        milvus::engine::meta::SegmentSchema::INDEX, milvus::engine::meta::SegmentSchema::RAW,
+        milvus::engine::meta::SegmentSchema::INDEX,     milvus::engine::meta::SegmentSchema::RAW,
         milvus::engine::meta::SegmentSchema::BACKUP,
     };
     status = impl_->FilesByType(collection.collection_id_, file_types, files_holder);
@@ -810,4 +838,3 @@ TEST_F(MySqlMetaTest, INDEX_TEST) {
     status = impl_->UpdateCollectionFilesToIndex(collection_id);
     ASSERT_TRUE(status.ok());
 }
-
