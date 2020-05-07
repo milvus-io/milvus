@@ -151,19 +151,23 @@ class ServiceHandler(milvus_pb2_grpc.MilvusServiceServicer):
 
         with self.tracer.start_span('do_search', child_of=p_span) as span:
             with ThreadPoolExecutor(max_workers=self.max_workers) as pool:
-                for addr, file_ids in routing.items():
-                    res = pool.submit(search,
-                                      addr,
-                                      collection_id,
-                                      file_ids,
-                                      vectors,
-                                      topk,
-                                      search_params,
-                                      span=span)
+                if len(routing) == 0:
+                    res = self.router.connection().search(collection_id, topk, vectors, partition_tags, search_params)
                     rs.append(res)
+                else:
+                    for addr, file_ids in routing.items():
+                        res = pool.submit(search,
+                                          addr,
+                                          collection_id,
+                                          file_ids,
+                                          vectors,
+                                          topk,
+                                          search_params,
+                                          span=span)
+                        rs.append(res)
 
-                for res in rs:
-                    res.result()
+                    for res in rs:
+                        res.result()
 
         reverse = collection_meta.metric_type == Types.MetricType.IP
         with self.tracer.start_span('do_merge', child_of=p_span):
