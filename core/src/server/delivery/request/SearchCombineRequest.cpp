@@ -384,6 +384,22 @@ SearchCombineRequest::OnExecute() {
             return status;
         }
 
+        // avoid memcpy crash, check id count = target vector count * topk
+        if (result_ids.size() != total_count * search_topk_) {
+            status = Status(DB_ERROR, "Result count doesn't match target vectors count");
+            // let all request return
+            FreeRequests(status);
+            return status;
+        }
+
+        // avoid memcpy crash, check distance count = id count
+        if (result_distances.size() != result_ids.size()) {
+            status = Status(DB_ERROR, "Result distance and id count doesn't match");
+            // let all request return
+            FreeRequests(status);
+            return status;
+        }
+
         // step 5: construct result array
         offset = 0;
         for (auto& request : request_list_) {
