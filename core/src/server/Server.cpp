@@ -159,6 +159,14 @@ Server::Start() {
 
         Config& config = Config::GetInstance();
 
+        std::string meta_uri;
+        CONFIG_CHECK(config.GetDBConfigBackendUrl(meta_uri));
+        if (meta_uri.length() > 6 && strcasecmp("sqlite", meta_uri.substr(0, 6).c_str()) == 0) {
+            std::cout << "WARNNING: You are using SQLite as the meta data management, "
+                         "which can't be used in production. Please change it to MySQL!"
+                      << std::endl;
+        }
+
         /* Init opentracing tracer from config */
         std::string tracing_config_path;
         s = config.GetTracingConfigJsonConfigPath(tracing_config_path);
