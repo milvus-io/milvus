@@ -28,6 +28,16 @@
                 </execution>
             </executions>
             </plugin>
+
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-compiler-plugin</artifactId>
+                <configuration>
+                    <source>8</source>
+                    <target>8</target>
+                </configuration>
+                <version>3.8.1</version>
+            </plugin>
         </plugins>
     </build>
 
@@ -69,7 +79,7 @@
         <dependency>
             <groupId>org.apache.commons</groupId>
             <artifactId>commons-lang3</artifactId>
-            <version>3.10</version>
+            <version>3.9</version>
         </dependency>
 
         <dependency>
@@ -83,6 +93,13 @@
             <artifactId>testng</artifactId>
             <version>6.14.3</version>
         </dependency>
+
+        <dependency>
+            <groupId>com.alibaba</groupId>
+            <artifactId>fastjson</artifactId>
+            <version>1.2.47</version>
+        </dependency>
+
 
         <dependency>
             <groupId>junit</groupId>
@@ -99,7 +116,7 @@
         <dependency>
             <groupId>io.milvus</groupId>
             <artifactId>milvus-sdk-java</artifactId>
-            <version>0.4.1-SNAPSHOT</version>
+            <version>0.8.0-SNAPSHOT</version>
         </dependency>
 
 <!--        <dependency>-->

@@ -4,321 +4,292 @@ import io.milvus.client.*;
 import org.testng.Assert;
 import org.testng.annotations.Test;
 
-import java.util.LinkedList;
+import java.nio.ByteBuffer;
 import java.util.List;
-import java.util.Random;
+import java.util.logging.Logger;
 
 public class TestIndex {
-    int index_file_size = 10;
     int dimension = 128;
     int n_list = 1024;
     int default_n_list = 16384;
     int nb = 100000;
     IndexType indexType = IndexType.IVF_SQ8;
     IndexType defaultIndexType = IndexType.FLAT;
+    String indexParam = Utils.setIndexParam(n_list);
 
-    public List<List<Float>> gen_vectors(Integer nb) {
-        List<List<Float>> xb = new LinkedList<>();
-        Random random = new Random();
-        for (int i = 0; i < nb; ++i) {
-            LinkedList<Float> vector = new LinkedList<>();
-            for (int j = 0; j < dimension; j++) {
-                vector.add(random.nextFloat());
-            }
-            xb.add(vector);
-        }
-        return xb;
-    }
+    List<List<Float>> vectors = Utils.genVectors(nb, dimension, true);
+    List<ByteBuffer> vectorsBinary = Utils.genBinaryVectors(nb, dimension);
 
-    @Test(dataProvider = "Table", dataProviderClass = MainClass.class)
-    public void test_create_index(MilvusClient client, String tableName) throws InterruptedException {
-        List<List<Float>> vectors = gen_vectors(nb);
-        InsertParam insertParam = new InsertParam.Builder(tableName, vectors).build();
+    @Test(dataProvider = "Collection", dataProviderClass = MainClass.class)
+    public void test_create_index(MilvusClient client, String collectionName) {
+        InsertParam insertParam = new InsertParam.Builder(collectionName).withFloatVectors(vectors).build();
         client.insert(insertParam);
-        Index index = new Index.Builder().withIndexType(indexType)
-                .withNList(n_list)
-                .build();
-        CreateIndexParam createIndexParam = new CreateIndexParam.Builder(tableName).withIndex(index).build();
-        Response res_create = client.createIndex(createIndexParam);
+        Index index = new Index.Builder(collectionName, indexType).withParamsInJson(indexParam).build();
+        Response res_create = client.createIndex(index);
         assert(res_create.ok());
     }
 
-    @Test(dataProvider = "Table", dataProviderClass = MainClass.class)
-    public void test_create_index_repeatably(MilvusClient client, String tableName) throws InterruptedException {
-        List<List<Float>> vectors = gen_vectors(nb);
-        InsertParam insertParam = new InsertParam.Builder(tableName, vectors).build();
+    @Test(dataProvider = "Collection", dataProviderClass = MainClass.class)
+    public void test_create_index_binary(MilvusClient client, String collectionName) {
+        InsertParam insertParam = new InsertParam.Builder(collectionName).withBinaryVectors(vectorsBinary).build();
         client.insert(insertParam);
-        Index index = new Index.Builder().withIndexType(indexType)
-                .withNList(n_list)
-                .build();
-        CreateIndexParam createIndexParam = new CreateIndexParam.Builder(tableName).withIndex(index).build();
-        Response res_create = client.createIndex(createIndexParam);
-        res_create = client.createIndex(createIndexParam);
+        Index index = new Index.Builder(collectionName, indexType).withParamsInJson(indexParam).build();
+        Response res_create = client.createIndex(index);
         assert(res_create.ok());
-        DescribeIndexResponse res = client.describeIndex(tableName);
+    }
+
+    @Test(dataProvider = "Collection", dataProviderClass = MainClass.class)
+    public void test_create_index_repeatably(MilvusClient client, String collectionName) {
+        InsertParam insertParam = new InsertParam.Builder(collectionName).withFloatVectors(vectors).build();
+        client.insert(insertParam);
+        Index index = new Index.Builder(collectionName, indexType).withParamsInJson(indexParam).build();
+        Response res_create = client.createIndex(index);
+        assert(res_create.ok());
+        DescribeIndexResponse res = client.describeIndex(collectionName);
         assert(res.getResponse().ok());
         Index index1 = res.getIndex().get();
-        Assert.assertEquals(index1.getNList(), n_list);
+        Assert.assertEquals(Utils.getIndexParamValue(index1.getParamsInJson(), "nlist"), n_list);
         Assert.assertEquals(index1.getIndexType(), indexType);
     }
 
-    @Test(dataProvider = "Table", dataProviderClass = MainClass.class)
-    public void test_create_index_FLAT(MilvusClient client, String tableName) throws InterruptedException {
+    @Test(dataProvider = "Collection", dataProviderClass = MainClass.class)
+    public void  test_create_index_FLAT(MilvusClient client, String collectionName) {
         IndexType indexType = IndexType.FLAT;
-        List<List<Float>> vectors = gen_vectors(nb);
-        InsertParam insertParam = new InsertParam.Builder(tableName, vectors).build();
+        InsertParam insertParam = new InsertParam.Builder(collectionName).withFloatVectors(vectors).build();
+        Logger.getLogger("a").info("start insert");
         client.insert(insertParam);
-        Index index = new Index.Builder().withIndexType(indexType)
-                .withNList(n_list)
-                .build();
-        CreateIndexParam createIndexParam = new CreateIndexParam.Builder(tableName).withIndex(index).build();
-        Response res_create = client.createIndex(createIndexParam);
+        Logger.getLogger("a").info("end insert");
+        Index index = new Index.Builder(collectionName, indexType).withParamsInJson(indexParam).build();
+        Response res_create = client.createIndex(index);
         assert(res_create.ok());
-        DescribeIndexResponse res = client.describeIndex(tableName);
+        Logger.getLogger("a").info("end create");
+        DescribeIndexResponse res = client.describeIndex(collectionName);
         assert(res.getResponse().ok());
         Index index1 = res.getIndex().get();
         Assert.assertEquals(index1.getIndexType(), indexType);
     }
 
-//    @Test(dataProvider = "Table", dataProviderClass = MainClass.class)
-//    public void test_create_index_FLAT_timeout(MilvusClient client, String tableName) throws InterruptedException {
-//        int nb = 500000;
-//        IndexType indexType = IndexType.IVF_SQ8;
-//        List<List<Float>> vectors = gen_vectors(nb);
-//        InsertParam insertParam = new InsertParam.Builder(tableName, vectors).build();
-//        client.insert(insertParam);
-//        Index index = new Index.Builder().withIndexType(indexType)
-//                .withNList(n_list)
-//                .build();
-//        System.out.println(new Date());
-//        CreateIndexParam createIndexParam = new CreateIndexParam.Builder(tableName).withIndex(index).withTimeout(1).build();
-//        Response res_create = client.createIndex(createIndexParam);
-//        assert(!res_create.ok());
-//    }
-
-    @Test(dataProvider = "Table", dataProviderClass = MainClass.class)
-    public void test_create_index_IVFLAT(MilvusClient client, String tableName) throws InterruptedException {
+    @Test(dataProvider = "Collection", dataProviderClass = MainClass.class)
+    public void test_create_index_IVFLAT(MilvusClient client, String collectionName) {
         IndexType indexType = IndexType.IVFLAT;
-        List<List<Float>> vectors = gen_vectors(nb);
-        InsertParam insertParam = new InsertParam.Builder(tableName, vectors).build();
+        InsertParam insertParam = new InsertParam.Builder(collectionName).withFloatVectors(vectors).build();
         client.insert(insertParam);
-        Index index = new Index.Builder().withIndexType(indexType)
-                .withNList(n_list)
-                .build();
-        CreateIndexParam createIndexParam = new CreateIndexParam.Builder(tableName).withIndex(index).build();
-        Response res_create = client.createIndex(createIndexParam);
+        Index index = new Index.Builder(collectionName, indexType).withParamsInJson(indexParam).build();
+        Response res_create = client.createIndex(index);
         assert(res_create.ok());
-        DescribeIndexResponse res = client.describeIndex(tableName);
+        DescribeIndexResponse res = client.describeIndex(collectionName);
         assert(res.getResponse().ok());
         Index index1 = res.getIndex().get();
         Assert.assertEquals(index1.getIndexType(), indexType);
     }
 
-    @Test(dataProvider = "Table", dataProviderClass = MainClass.class)
-    public void test_create_index_IVFSQ8(MilvusClient client, String tableName) throws InterruptedException {
+    @Test(dataProvider = "Collection", dataProviderClass = MainClass.class)
+    public void test_create_index_IVFSQ8(MilvusClient client, String collectionName) {
         IndexType indexType = IndexType.IVF_SQ8;
-        List<List<Float>> vectors = gen_vectors(nb);
-        InsertParam insertParam = new InsertParam.Builder(tableName, vectors).build();
+        InsertParam insertParam = new InsertParam.Builder(collectionName).withFloatVectors(vectors).build();
         client.insert(insertParam);
-        Index index = new Index.Builder().withIndexType(indexType)
-                .withNList(n_list)
-                .build();
-        CreateIndexParam createIndexParam = new CreateIndexParam.Builder(tableName).withIndex(index).build();
-        Response res_create = client.createIndex(createIndexParam);
+        Index index = new Index.Builder(collectionName, indexType).withParamsInJson(indexParam).build();
+        Response res_create = client.createIndex(index);
         assert(res_create.ok());
-        DescribeIndexResponse res = client.describeIndex(tableName);
+        DescribeIndexResponse res = client.describeIndex(collectionName);
         assert(res.getResponse().ok());
         Index index1 = res.getIndex().get();
         Assert.assertEquals(index1.getIndexType(), indexType);
     }
 
-    @Test(dataProvider = "Table", dataProviderClass = MainClass.class)
-    public void test_create_index_IVFSQ8H(MilvusClient client, String tableName) throws InterruptedException {
+    @Test(dataProvider = "Collection", dataProviderClass = MainClass.class)
+    public void test_create_index_IVFSQ8H(MilvusClient client, String collectionName) {
         IndexType indexType = IndexType.IVF_SQ8_H;
-        List<List<Float>> vectors = gen_vectors(nb);
-        InsertParam insertParam = new InsertParam.Builder(tableName, vectors).build();
+        InsertParam insertParam = new InsertParam.Builder(collectionName).withFloatVectors(vectors).build();
         client.insert(insertParam);
-        Index index = new Index.Builder().withIndexType(indexType)
-                .withNList(n_list)
-                .build();
-        CreateIndexParam createIndexParam = new CreateIndexParam.Builder(tableName).withIndex(index).build();
-        Response res_create = client.createIndex(createIndexParam);
+        Index index = new Index.Builder(collectionName, indexType).withParamsInJson(indexParam).build();
+        Response res_create = client.createIndex(index);
         assert(res_create.ok());
-        DescribeIndexResponse res = client.describeIndex(tableName);
+        DescribeIndexResponse res = client.describeIndex(collectionName);
         assert(res.getResponse().ok());
         Index index1 = res.getIndex().get();
         Assert.assertEquals(index1.getIndexType(), indexType);
     }
 
-    @Test(dataProvider = "Table", dataProviderClass = MainClass.class)
-    public void test_create_index_with_no_vector(MilvusClient client, String tableName) {
-        Index index = new Index.Builder().withIndexType(indexType)
-                .withNList(n_list)
-                .build();
-        CreateIndexParam createIndexParam = new CreateIndexParam.Builder(tableName).withIndex(index).build();
-        Response res_create = client.createIndex(createIndexParam);
+    @Test(dataProvider = "Collection", dataProviderClass = MainClass.class)
+    public void test_create_index_with_no_vector(MilvusClient client, String collectionName) {
+        Index index = new Index.Builder(collectionName, indexType).withParamsInJson(indexParam).build();
+        Response res_create = client.createIndex(index);
         assert(res_create.ok());
     }
 
-    @Test(dataProvider = "Table", dataProviderClass = MainClass.class)
-    public void test_create_index_table_not_existed(MilvusClient client, String tableName) throws InterruptedException {
-        String tableNameNew = tableName + "_";
-        Index index = new Index.Builder().withIndexType(indexType)
-                .withNList(n_list)
-                .build();
-        CreateIndexParam createIndexParam = new CreateIndexParam.Builder(tableNameNew).withIndex(index).build();
-        Response res_create = client.createIndex(createIndexParam);
+    @Test(dataProvider = "Collection", dataProviderClass = MainClass.class)
+    public void test_create_index_table_not_existed(MilvusClient client, String collectionName) {
+        String collectionNameNew = collectionName + "_";
+        Index index = new Index.Builder(collectionNameNew, indexType).withParamsInJson(indexParam).build();
+        Response res_create = client.createIndex(index);
         assert(!res_create.ok());
     }
 
     @Test(dataProvider = "DisConnectInstance", dataProviderClass = MainClass.class)
-    public void test_create_index_without_connect(MilvusClient client, String tableName) throws InterruptedException {
-        Index index = new Index.Builder().withIndexType(indexType)
-                .withNList(n_list)
-                .build();
-        CreateIndexParam createIndexParam = new CreateIndexParam.Builder(tableName).withIndex(index).build();
-        Response res_create = client.createIndex(createIndexParam);
+    public void test_create_index_without_connect(MilvusClient client, String collectionName) {
+        Index index = new Index.Builder(collectionName, indexType).withParamsInJson(indexParam).build();
+        Response res_create = client.createIndex(index);
         assert(!res_create.ok());
     }
 
-    @Test(dataProvider = "Table", dataProviderClass = MainClass.class)
-    public void test_create_index_invalid_n_list(MilvusClient client, String tableName) throws InterruptedException {
+    @Test(dataProvider = "Collection", dataProviderClass = MainClass.class)
+    public void test_create_index_invalid_n_list(MilvusClient client, String collectionName) {
         int n_list = 0;
-        List<List<Float>> vectors = gen_vectors(nb);
-        InsertParam insertParam = new InsertParam.Builder(tableName, vectors).build();
-        client.insert(insertParam);
-        Index index = new Index.Builder().withIndexType(indexType)
-                .withNList(n_list)
-                .build();
-        CreateIndexParam createIndexParam = new CreateIndexParam.Builder(tableName).withIndex(index).build();
+        String indexParamNew = Utils.setIndexParam(n_list);
+        Index createIndexParam = new Index.Builder(collectionName, indexType).withParamsInJson(indexParamNew).build();
         Response res_create = client.createIndex(createIndexParam);
         assert(!res_create.ok());
     }
 
-    @Test(dataProvider = "Table", dataProviderClass = MainClass.class)
-    public void test_describe_index(MilvusClient client, String tableName) throws InterruptedException {
-        List<List<Float>> vectors = gen_vectors(nb);
-        InsertParam insertParam = new InsertParam.Builder(tableName, vectors).build();
-        client.insert(insertParam);
-        Index index = new Index.Builder().withIndexType(indexType)
-                .withNList(n_list)
-                .build();
-        CreateIndexParam createIndexParam = new CreateIndexParam.Builder(tableName).withIndex(index).build();
+    @Test(dataProvider = "BinaryCollection", dataProviderClass = MainClass.class)
+    public void test_create_index_invalid_n_list_binary(MilvusClient client, String collectionName) {
+        int n_list = 0;
+        String indexParamNew = Utils.setIndexParam(n_list);
+        Index createIndexParam = new Index.Builder(collectionName, indexType).withParamsInJson(indexParamNew).build();
         Response res_create = client.createIndex(createIndexParam);
+        assert(!res_create.ok());
+    }
+
+    @Test(dataProvider = "Collection", dataProviderClass = MainClass.class)
+    public void test_describe_index(MilvusClient client, String collectionName) {
+        InsertParam insertParam = new InsertParam.Builder(collectionName).withFloatVectors(vectors).build();
+        client.insert(insertParam);
+        Index index = new Index.Builder(collectionName, indexType).withParamsInJson(indexParam).build();
+        Response res_create = client.createIndex(index);
         assert(res_create.ok());
-        DescribeIndexResponse res = client.describeIndex(tableName);
+        DescribeIndexResponse res = client.describeIndex(collectionName);
         assert(res.getResponse().ok());
         Index index1 = res.getIndex().get();
-        Assert.assertEquals(index1.getNList(), n_list);
+        Assert.assertEquals(Utils.getIndexParamValue(index1.getParamsInJson(), "nlist"), n_list);
         Assert.assertEquals(index1.getIndexType(), indexType);
     }
 
-    @Test(dataProvider = "Table", dataProviderClass = MainClass.class)
-    public void test_alter_index(MilvusClient client, String tableName) throws InterruptedException {
-        List<List<Float>> vectors = gen_vectors(nb);
-        InsertParam insertParam = new InsertParam.Builder(tableName, vectors).build();
+    @Test(dataProvider = "BinaryCollection", dataProviderClass = MainClass.class)
+    public void test_describe_index_binary(MilvusClient client, String collectionName) {
+        InsertParam insertParam = new InsertParam.Builder(collectionName).withBinaryVectors(vectorsBinary).build();
         client.insert(insertParam);
-        Index index = new Index.Builder().withIndexType(indexType)
-                .withNList(n_list)
-                .build();
-        CreateIndexParam createIndexParam = new CreateIndexParam.Builder(tableName).withIndex(index).build();
-        Response res_create = client.createIndex(createIndexParam);
+        Index index = new Index.Builder(collectionName, indexType).withParamsInJson(indexParam).build();
+        Response res_create = client.createIndex(index);
+        assert(!res_create.ok());
+    }
+
+    @Test(dataProvider = "Collection", dataProviderClass = MainClass.class)
+    public void test_after_index(MilvusClient client, String collectionName) {
+        int n_list = 1025;
+        InsertParam insertParam = new InsertParam.Builder(collectionName).withFloatVectors(vectors).build();
+        client.insert(insertParam);
+        Index index = new Index.Builder(collectionName, indexType).withParamsInJson(indexParam).build();
+        Response res_create = client.createIndex(index);
         assert(res_create.ok());
         // Create another index
         IndexType indexTypeNew = IndexType.IVFLAT;
-        int n_list_new = n_list + 1;
-        Index index_new = new Index.Builder().withIndexType(indexTypeNew)
-                .withNList(n_list_new)
-                .build();
-        CreateIndexParam createIndexParamNew = new CreateIndexParam.Builder(tableName).withIndex(index_new).build();
-        Response res_create_new = client.createIndex(createIndexParamNew);
-        assert(res_create_new.ok());
-        DescribeIndexResponse res = client.describeIndex(tableName);
+        String indexParam = Utils.setIndexParam(n_list);
+        Index indexNew = new Index.Builder(collectionName, indexTypeNew).withParamsInJson(indexParam).build();
+        Response resNew = client.createIndex(indexNew);
+        assert(resNew.ok());
+        DescribeIndexResponse res = client.describeIndex(collectionName);
         assert(res_create.ok());
         Index index1 = res.getIndex().get();
-        Assert.assertEquals(index1.getNList(), n_list_new);
+        Assert.assertEquals(Utils.getIndexParamValue(index1.getParamsInJson(), "nlist"), n_list);
         Assert.assertEquals(index1.getIndexType(), indexTypeNew);
     }
 
-    @Test(dataProvider = "Table", dataProviderClass = MainClass.class)
-    public void test_describe_index_table_not_existed(MilvusClient client, String tableName) throws InterruptedException {
-        String tableNameNew = tableName + "_";
-        DescribeIndexResponse res = client.describeIndex(tableNameNew);
+    @Test(dataProvider = "Collection", dataProviderClass = MainClass.class)
+    public void test_describe_index_table_not_existed(MilvusClient client, String collectionName) {
+        String collectionNameNew = collectionName + "_";
+        DescribeIndexResponse res = client.describeIndex(collectionNameNew);
         assert(!res.getResponse().ok());
     }
 
     @Test(dataProvider = "DisConnectInstance", dataProviderClass = MainClass.class)
-    public void test_describe_index_without_connect(MilvusClient client, String tableName) throws InterruptedException {
-        DescribeIndexResponse res = client.describeIndex(tableName);
+    public void test_describe_index_without_connect(MilvusClient client, String collectionName) {
+        DescribeIndexResponse res = client.describeIndex(collectionName);
         assert(!res.getResponse().ok());
     }
 
-    @Test(dataProvider = "Table", dataProviderClass = MainClass.class)
-    public void test_drop_index(MilvusClient client, String tableName) throws InterruptedException {
-        List<List<Float>> vectors = gen_vectors(nb);
-        InsertParam insertParam = new InsertParam.Builder(tableName, vectors).build();
+    @Test(dataProvider = "Collection", dataProviderClass = MainClass.class)
+    public void test_drop_index(MilvusClient client, String collectionName) {
+        InsertParam insertParam = new InsertParam.Builder(collectionName).withFloatVectors(vectors).build();
         client.insert(insertParam);
-        Index index = new Index.Builder().withIndexType(defaultIndexType)
-                .withNList(n_list)
-                .build();
-        CreateIndexParam createIndexParam = new CreateIndexParam.Builder(tableName).withIndex(index).build();
-        Response res_create = client.createIndex(createIndexParam);
-        assert(res_create.ok());
-        Response res_drop = client.dropIndex(tableName);
+        Index indexNew = new Index.Builder(collectionName, defaultIndexType).withParamsInJson(indexParam).build();
+        Response res = client.createIndex(indexNew);
+        assert(res.ok());
+        Response res_drop = client.dropIndex(collectionName);
         assert(res_drop.ok());
-        DescribeIndexResponse res = client.describeIndex(tableName);
-        assert(res.getResponse().ok());
-        Index index1 = res.getIndex().get();
-        Assert.assertEquals(index1.getNList(), default_n_list);
+        DescribeIndexResponse res2 = client.describeIndex(collectionName);
+        assert(res2.getResponse().ok());
+        Index index1 = res2.getIndex().get();
+        Assert.assertEquals(Utils.getIndexParamValue(index1.getParamsInJson(), "nlist"), 0);
         Assert.assertEquals(index1.getIndexType(), defaultIndexType);
     }
 
-    @Test(dataProvider = "Table", dataProviderClass = MainClass.class)
-    public void test_drop_index_repeatably(MilvusClient client, String tableName) throws InterruptedException {
-        List<List<Float>> vectors = gen_vectors(nb);
-        InsertParam insertParam = new InsertParam.Builder(tableName, vectors).build();
+    @Test(dataProvider = "BinaryCollection", dataProviderClass = MainClass.class)
+    public void test_drop_index_binary(MilvusClient client, String collectionName) {
+        InsertParam insertParam = new InsertParam.Builder(collectionName).withBinaryVectors(vectorsBinary).build();
         client.insert(insertParam);
-        Index index = new Index.Builder().withIndexType(defaultIndexType)
-                .withNList(n_list)
-                .build();
-        CreateIndexParam createIndexParam = new CreateIndexParam.Builder(tableName).withIndex(index).build();
-        Response res_create = client.createIndex(createIndexParam);
-        assert(res_create.ok());
-        Response res_drop = client.dropIndex(tableName);
-        res_drop = client.dropIndex(tableName);
+        Index indexNew = new Index.Builder(collectionName, defaultIndexType).withParamsInJson(indexParam).build();
+        Response res = client.createIndex(indexNew);
+        assert(res.ok());
+        Response res_drop = client.dropIndex(collectionName);
         assert(res_drop.ok());
-        DescribeIndexResponse res = client.describeIndex(tableName);
-        assert(res.getResponse().ok());
-        Index index1 = res.getIndex().get();
-        Assert.assertEquals(index1.getNList(), default_n_list);
+        DescribeIndexResponse res2 = client.describeIndex(collectionName);
+        assert(res2.getResponse().ok());
+        Index index1 = res2.getIndex().get();
+        Assert.assertEquals(Utils.getIndexParamValue(index1.getParamsInJson(), "nlist"), 0);
         Assert.assertEquals(index1.getIndexType(), defaultIndexType);
     }
 
-    @Test(dataProvider = "Table", dataProviderClass = MainClass.class)
-    public void test_drop_index_table_not_existed(MilvusClient client, String tableName) throws InterruptedException {
-        String tableNameNew = tableName + "_";
-        Response res_drop = client.dropIndex(tableNameNew);
+    @Test(dataProvider = "Collection", dataProviderClass = MainClass.class)
+    public void test_drop_index_repeatably(MilvusClient client, String collectionName) {
+        InsertParam insertParam = new InsertParam.Builder(collectionName).withFloatVectors(vectors).build();
+        client.insert(insertParam);
+        Index index = new Index.Builder(collectionName, defaultIndexType).withParamsInJson(indexParam).build();
+        Response res = client.createIndex(index);
+        assert(res.ok());
+        Response res_drop = client.dropIndex(collectionName);
+        assert(res_drop.ok());
+        DescribeIndexResponse res_desc = client.describeIndex(collectionName);
+        assert(res_desc.getResponse().ok());
+        Index index1 = res_desc.getIndex().get();
+        Assert.assertEquals(Utils.getIndexParamValue(index1.getParamsInJson(), "nlist"), 0);
+        Assert.assertEquals(index1.getIndexType(), defaultIndexType);
+    }
+
+    @Test(dataProvider = "Collection", dataProviderClass = MainClass.class)
+    public void test_drop_index_table_not_existed(MilvusClient client, String collectionName) {
+        String collectionNameNew = collectionName + "_";
+        Response res_drop = client.dropIndex(collectionNameNew);
         assert(!res_drop.ok());
     }
 
     @Test(dataProvider = "DisConnectInstance", dataProviderClass = MainClass.class)
-    public void test_drop_index_without_connect(MilvusClient client, String tableName) throws InterruptedException {
-        Response res_drop = client.dropIndex(tableName);
+    public void test_drop_index_without_connect(MilvusClient client, String collectionName) {
+        Response res_drop = client.dropIndex(collectionName);
         assert(!res_drop.ok());
     }
 
-    @Test(dataProvider = "Table", dataProviderClass = MainClass.class)
-    public void test_drop_index_no_index_created(MilvusClient client, String tableName) throws InterruptedException {
-        List<List<Float>> vectors = gen_vectors(nb);
-        InsertParam insertParam = new InsertParam.Builder(tableName, vectors).build();
+    @Test(dataProvider = "Collection", dataProviderClass = MainClass.class)
+    public void test_drop_index_no_index_created(MilvusClient client, String collectionName) {
+        InsertParam insertParam = new InsertParam.Builder(collectionName).withFloatVectors(vectors).build();
         client.insert(insertParam);
-        Response res_drop = client.dropIndex(tableName);
+        Response res_drop = client.dropIndex(collectionName);
         assert(res_drop.ok());
-        DescribeIndexResponse res = client.describeIndex(tableName);
+        DescribeIndexResponse res = client.describeIndex(collectionName);
         assert(res.getResponse().ok());
         Index index1 = res.getIndex().get();
-        Assert.assertEquals(index1.getNList(), default_n_list);
         Assert.assertEquals(index1.getIndexType(), defaultIndexType);
     }
 
+    @Test(dataProvider = "BinaryCollection", dataProviderClass = MainClass.class)
+    public void test_drop_index_no_index_created_binary(MilvusClient client, String collectionName) {
+        InsertParam insertParam = new InsertParam.Builder(collectionName).withBinaryVectors(vectorsBinary).build();
+        client.insert(insertParam);
+        Response res_drop = client.dropIndex(collectionName);
+        assert(res_drop.ok());
+        DescribeIndexResponse res = client.describeIndex(collectionName);
+        assert(res.getResponse().ok());
+        Index index1 = res.getIndex().get();
+        Assert.assertEquals(index1.getIndexType(), defaultIndexType);
+    }
 }
