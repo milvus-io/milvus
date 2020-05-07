@@ -746,10 +746,10 @@ class TestAddAsync:
         nb = 50000
         insert_vec_list = gen_vectors(nb, dim)
         future = connect.add_vectors(collection, insert_vec_list, _async=True, _callback=self.check_status)
-        connect.flush([collection])
         status, result = future.result()
         assert status.OK()
         assert len(result) == nb 
+        connect.flush([collection])
         status, count = connect.count_collection(collection)
         assert status.OK()
         logging.getLogger().info(status)
