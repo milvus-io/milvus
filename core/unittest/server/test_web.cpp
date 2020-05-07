@@ -342,9 +342,6 @@ class TestClient : public oatpp::web::client::ApiClient {
     API_CALL("POST", "/hybrid_collections/{collection_name}/entities", InsertEntity,
         PATH(String, collection_name), BODY_STRING(String, body))
 
-//    API_CALL("POST", "/hybrid_collections/{collection_name}/vectors", HybridSearch,
-//    PATH(String, collection_name), BODY_STRING(String, body))
-
 #include OATPP_CODEGEN_END(ApiClient)
 };
 
