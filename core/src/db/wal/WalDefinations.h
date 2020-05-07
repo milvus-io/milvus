@@ -40,6 +40,9 @@ struct MXLogRecord {
     const IDNumber* ids;
     uint32_t data_size;
     const void* data;
+    std::vector<std::string> field_names;
+    //    std::vector<uint32_t> attrs_size;
+    //    std::vector<const void* > attrs_data;
     std::unordered_map<std::string, uint64_t> attr_nbytes;
     std::unordered_map<std::string, uint64_t> attr_data_size;
     std::unordered_map<std::string, std::vector<uint8_t>> attr_data;

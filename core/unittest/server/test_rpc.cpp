@@ -91,6 +91,7 @@ class RpcHandlerTest : public testing::Test {
         milvus::server::Config::GetInstance().SetStorageConfigSecondaryPath("");
         milvus::server::Config::GetInstance().SetCacheConfigCacheInsertData("");
         milvus::server::Config::GetInstance().SetEngineConfigOmpThreadNum("");
+        milvus::server::Config::GetInstance().SetServerConfigPort("19531");
 
         //        serverConfig.SetValue(server::CONFIG_CLUSTER_MODE, "cluster");
         //        DBWrapper::GetInstance().GetInstance().StartService();

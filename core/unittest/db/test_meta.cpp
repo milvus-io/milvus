@@ -15,12 +15,11 @@
 #include "db/meta/SqliteMetaImpl.h"
 #include "db/utils.h"
 
+#include <fiu-control.h>
+#include <fiu-local.h>
 #include <gtest/gtest.h>
 #include <stdlib.h>
 #include <time.h>
-#include <thread>
-#include <fiu-local.h>
-#include <fiu-control.h>
 #include <boost/filesystem/operations.hpp>
 
 TEST_F(MetaTest, COLLECTION_TEST) {
@@ -71,7 +70,7 @@ TEST_F(MetaTest, FALID_TEST) {
         fiu_disable("SqliteMetaImpl.ValidateMetaSchema.NullConnection");
     }
     {
-        //failed initialize
+        // failed initialize
         auto options_1 = options;
         options_1.meta_.path_ = options.meta_.path_ + "1";
         if (boost::filesystem::is_directory(options_1.meta_.path_)) {
@@ -97,7 +96,7 @@ TEST_F(MetaTest, FALID_TEST) {
         ASSERT_FALSE(status.ok());
         fiu_disable("SqliteMetaImpl.CreateCollection.insert_throw_exception");
 
-        //success create collection
+        // success create collection
         collection.collection_id_ = collection_id;
         status = impl_->CreateCollection(collection);
         ASSERT_TRUE(status.ok());
@@ -236,7 +235,7 @@ TEST_F(MetaTest, FALID_TEST) {
         status = impl_->CreatePartition(collection_id, partition, partition_tag, 0);
         ASSERT_FALSE(status.ok());
 
-        //create empty name partition
+        // create empty name partition
         partition = "";
         status = impl_->CreatePartition(collection_id, partition, partition_tag, 0);
         ASSERT_TRUE(status.ok());
@@ -379,6 +378,34 @@ TEST_F(MetaTest, COLLECTION_FILE_TEST) {
     status = impl_->UpdateCollectionFile(table_file);
     ASSERT_TRUE(status.ok());
     ASSERT_EQ(table_file.file_type_, new_file_type);
+}
+
+TEST_F(MetaTest, HYBRID_COLLECTION_TEST) {
+    auto collection_id = "meta_test_hybrid";
+
+    milvus::engine::meta::CollectionSchema collection;
+    collection.collection_id_ = collection_id;
+    collection.dimension_ = 128;
+    milvus::engine::meta::hybrid::FieldsSchema fields_schema;
+    fields_schema.fields_schema_.resize(2);
+    fields_schema.fields_schema_[0].collection_id_ = collection_id;
+    fields_schema.fields_schema_[0].field_name_ = "field_0";
+    fields_schema.fields_schema_[0].field_type_ = (int32_t)milvus::engine::meta::hybrid::DataType::INT64;
+    fields_schema.fields_schema_[0].field_params_ = "";
+
+    fields_schema.fields_schema_[1].collection_id_ = collection_id;
+    fields_schema.fields_schema_[1].field_name_ = "field_1";
+    fields_schema.fields_schema_[1].field_type_ = (int32_t)milvus::engine::meta::hybrid::DataType::VECTOR;
+    fields_schema.fields_schema_[1].field_params_ = "";
+
+    auto status = impl_->CreateHybridCollection(collection, fields_schema);
+    ASSERT_TRUE(status.ok());
+    milvus::engine::meta::CollectionSchema describe_collection;
+    milvus::engine::meta::hybrid::FieldsSchema describe_fields;
+    describe_collection.collection_id_ = collection_id;
+    status = impl_->DescribeHybridCollection(describe_collection, describe_fields);
+    ASSERT_TRUE(status.ok());
+    ASSERT_EQ(describe_fields.fields_schema_.size(), 2);
 }
 
 TEST_F(MetaTest, COLLECTION_FILE_ROW_COUNT_TEST) {
@@ -649,9 +676,9 @@ TEST_F(MetaTest, COLLECTION_FILES_TEST) {
     ASSERT_FALSE(status.ok());
 
     file_types = {
-        milvus::engine::meta::SegmentSchema::NEW, milvus::engine::meta::SegmentSchema::NEW_MERGE,
+        milvus::engine::meta::SegmentSchema::NEW,       milvus::engine::meta::SegmentSchema::NEW_MERGE,
         milvus::engine::meta::SegmentSchema::NEW_INDEX, milvus::engine::meta::SegmentSchema::TO_INDEX,
-        milvus::engine::meta::SegmentSchema::INDEX, milvus::engine::meta::SegmentSchema::RAW,
+        milvus::engine::meta::SegmentSchema::INDEX,     milvus::engine::meta::SegmentSchema::RAW,
         milvus::engine::meta::SegmentSchema::BACKUP,
     };
     status = impl_->FilesByType(collection.collection_id_, file_types, files_holder);

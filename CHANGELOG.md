@@ -33,6 +33,7 @@ Please mark all change in change log and use the issue from GitHub
 
 ## Improvement
 -   \#221 Refactor LOG macro
+-   \#833 Catch exception in RolloutHandler and output in stderr
 -   \#1796 Compile Openblas with source code to improve the performance
 -   \#2039 Support Milvus run on SSE CPUs
 -   \#2149 Merge server_cpu_config.template and server_gpu_config.template
