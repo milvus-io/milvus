@@ -122,52 +122,31 @@ class ServiceHandler(milvus_pb2_grpc.MilvusServiceServicer):
 
         metadata = kwargs.get('metadata', None)
 
-        rs = []
         all_topk_results = []
 
-        def search(addr, collection_id, file_ids, vectors, topk, params, **kwargs):
-            logger.info(
-                'Send Search Request: addr={};collection_id={};ids={};nq={};topk={};params={}'
-                    .format(addr, collection_id, file_ids, len(vectors), topk, params))
-
-            conn = self.router.query_conn(addr, metadata=metadata)
-            start = time.time()
-            span = kwargs.get('span', None)
-            span = span if span else (None if self.tracer.empty else
-                                      context.get_active_span().context)
-
-            with self.tracer.start_span('search_{}'.format(addr),
-                                        child_of=span):
-                ret = conn.conn.search_vectors_in_files(collection_name=collection_id,
-                                                        file_ids=file_ids,
-                                                        query_records=vectors,
-                                                        top_k=topk,
-                                                        params=params)
-                if ret.status.error_code != 0:
-                    logger.error("Search fail {}".format(ret.status))
-
-                end = time.time()
-                all_topk_results.append(ret)
-
         with self.tracer.start_span('do_search', child_of=p_span) as span:
-            with ThreadPoolExecutor(max_workers=self.max_workers) as pool:
-                if len(routing) == 0:
-                    res = self.router.connection().search(collection_id, topk, vectors, partition_tags, search_params)
-                    rs.append(res)
-                else:
-                    for addr, file_ids in routing.items():
-                        res = pool.submit(search,
-                                          addr,
-                                          collection_id,
-                                          file_ids,
-                                          vectors,
-                                          topk,
-                                          search_params,
-                                          span=span)
-                        rs.append(res)
+            # with ThreadPoolExecutor(max_workers=self.max_workers) as pool:
+            futures = []
+            for addr, file_ids in routing.items():
+                conn = self.router.query_conn(addr, metadata=metadata)
+                start = time.time()
+                span = kwargs.get('span', None)
+                span = span if span else (None if self.tracer.empty else
+                                          context.get_active_span().context)
 
-                    for res in rs:
-                        res.result()
+                with self.tracer.start_span('search_{}'.format(addr),
+                                            child_of=span):
+                    logger.warning("Search file ids is {}".format(file_ids))
+                    future = conn.search_vectors_in_files(collection_name=collection_id,
+                                                          file_ids=file_ids,
+                                                          query_records=vectors,
+                                                          top_k=topk,
+                                                          params=search_params, _async=True)
+                    futures.append(future)
+
+                for f in futures:
+                    ret = f.result(raw=True)
+                    all_topk_results.append(ret)
 
         reverse = collection_meta.metric_type == Types.MetricType.IP
         with self.tracer.start_span('do_merge', child_of=p_span):

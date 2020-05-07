@@ -104,11 +104,11 @@ class TestConnect:
         '''
         uri_value = ""
         if self.local_ip(args):
-            milvus = get_milvus(uri=uri_value, handler=args["handler"])
+            milvus = get_milvus(None, None, uri=uri_value, handler=args["handler"])
             # assert milvus.connected()
         else:
             with pytest.raises(Exception) as e:
-                milvus = get_milvus(uri=uri_value, handler=args["handler"])
+                milvus = get_milvus(None, None, uri=uri_value, handler=args["handler"])
                 # assert not milvus.connected()
 
     # disable
