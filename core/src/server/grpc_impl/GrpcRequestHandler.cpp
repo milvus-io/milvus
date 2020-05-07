@@ -670,8 +670,19 @@ GrpcRequestHandler::Cmd(::grpc::ServerContext* context, const ::milvus::grpc::Co
     LOG_SERVER_INFO_ << LogOut("Request [%s] %s begin.", GetContext(context)->RequestID().c_str(), __func__);
 
     std::string reply;
-    Status status = request_handler_.Cmd(GetContext(context), request->cmd(), reply);
-    response->set_string_reply(reply);
+    Status status;
+
+    std::string cmd = request->cmd();
+    std::vector<std::string> requests;
+    if (cmd == "requests") {
+        for (auto & iter : context_map_) {
+            auto request_str = std::to_string(iter.second->GetRequestType()) + iter.second->RequestID();
+            requests.emplace_back(request_str);
+        }
+    } else {
+        status = request_handler_.Cmd(GetContext(context), request->cmd(), reply);
+        response->set_string_reply(reply);
+    }
 
     LOG_SERVER_INFO_ << LogOut("Request [%s] %s end.", GetContext(context)->RequestID().c_str(), __func__);
     SET_RESPONSE(response->mutable_status(), status, context);

@@ -54,6 +54,16 @@ Context::IsConnectionBroken() const {
     return context_->IsConnectionBroken();
 }
 
+BaseRequest::RequestType
+Context::GetRequestType() const {
+    return request_type_;
+}
+
+void
+Context::SetRequestType(BaseRequest::RequestType type) {
+    request_type_ = type;
+}
+
 /////////////////////////////////////////////////////////////////////////////////////////////////
 ContextChild::ContextChild(const ContextPtr& context, const std::string& operation_name) {
     if (context) {

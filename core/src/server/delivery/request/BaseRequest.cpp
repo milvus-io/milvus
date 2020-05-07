@@ -81,6 +81,7 @@ BaseRequest::BaseRequest(const std::shared_ptr<milvus::server::Context>& context
                          bool async)
     : context_(context), type_(type), async_(async), done_(false) {
     request_group_ = milvus::server::RequestGroup(type);
+    context->SetRequestType(type);
 }
 
 BaseRequest::~BaseRequest() {
