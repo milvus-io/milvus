@@ -125,10 +125,14 @@ IndexHNSW::Add(const DatasetPtr& dataset_ptr, const Config& config) {
 
     double t0 = faiss::getmillisecs();
     index_->addPoint(p_data, p_ids[0]);
+    size_t thread_max_num = omp_get_max_threads();
+
 #pragma omp parallel for
     for (int i = 1; i < rows; ++i) {
-        printf("Duration = %.2f\n", faiss::getmillisecs() - t0);
-        t0 = faiss::getmillisecs();
+        if ((i / thread_max_num) % 20 == 0) {
+            printf("Duration = %.2f\n", faiss::getmillisecs() - t0);
+            t0 = faiss::getmillisecs();
+        }
         index_->addPoint(((float*)p_data + Dim() * i), p_ids[i]);
     }
 }
