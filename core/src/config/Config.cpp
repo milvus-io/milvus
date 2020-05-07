@@ -1104,9 +1104,9 @@ Config::CheckStorageConfigFileCleanupTimeout(const std::string& value) {
                           ". Possible reason: storage_config.file_cleanup_timeout is not a positive integer.";
         return Status(SERVER_INVALID_ARGUMENT, msg);
     } else {
-        int64_t min = 0, max = 3600;
+        const int64_t min = 0, max = 3600;
         int64_t file_cleanup_timeout = std::stoll(value);
-        if (file_cleanup_timeout < min || file_cleanup_timeout > 3600) {
+        if (file_cleanup_timeout < min || file_cleanup_timeout > max) {
             std::string msg = "Invalid file cleanup timeout: " + value +
                               ". Possible reason: storage_config.file_cleanup_timeout is not in range [" +
                               std::to_string(min) + ", " + std::to_string(max) + "].";
