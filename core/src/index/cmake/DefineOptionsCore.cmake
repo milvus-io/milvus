@@ -73,7 +73,21 @@ define_option(KNOWHERE_BOOST_HEADER_ONLY "Use only BOOST headers" OFF)
 
 define_option(KNOWHERE_WITH_ARROW "Build with ARROW" OFF)
 
-define_option(KNOWHERE_WITH_OPENBLAS "Build with OpenBLAS library" ON)
+if(BUILD_OPENBLAS STREQUAL "ON")
+    message("BUILD_OPENBLAS ON and ignore OpenBLAS_FOUND")
+    define_option(KNOWHERE_WITH_OPENBLAS "Build with OpenBLAS library" ON)
+elseif(BUILD_OPENBLAS STREQUAL "OFF")
+    if (OpenBLAS_FOUND STREQUAL "OFF")
+        message("BUILD_OPENBLAS OFF and OpenBLAS_FOUND OFF")
+        define_option(KNOWHERE_WITH_OPENBLAS "Build with OpenBLAS library" ON)
+    else()
+        message("BUILD_OPENBLAS OFF and OpenBLAS_FOUND ON")
+        define_option(KNOWHERE_WITH_OPENBLAS "Build with OpenBLAS library" OFF)
+    endif()
+else()
+    message("unknown BUILD_OPENBLAS values ${BUILD_OPENBLAS}")
+endif()
+#define_option(KNOWHERE_WITH_OPENBLAS "Build with OpenBLAS library" ON)
 
 define_option(KNOWHERE_WITH_FAISS "Build with FAISS library" ON)
 

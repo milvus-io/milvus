@@ -62,6 +62,10 @@ set(INDEX_SOURCE_DIR ${PROJECT_SOURCE_DIR})
 set(INDEX_BINARY_DIR ${PROJECT_BINARY_DIR})
 set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${INDEX_SOURCE_DIR}/cmake")
 
+if (BUILD_OPENBLAS STREQUAL "OFF")
+    find_package(OpenBLAS)
+endif()
+
 include(ExternalProject)
 include(DefineOptionsCore)
 include(BuildUtilsCore)

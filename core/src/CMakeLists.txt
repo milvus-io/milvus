@@ -328,18 +328,28 @@ install(FILES
         ${CMAKE_BINARY_DIR}/fiu_ep-prefix/src/fiu_ep/lib/${CMAKE_SHARED_LIBRARY_PREFIX}fiu${CMAKE_SHARED_LIBRARY_SUFFIX}.1.00
         DESTINATION lib)
 
-if (CMAKE_BUILD_TYPE STREQUAL "Release")
-    install(FILES
-            ${CMAKE_BINARY_DIR}/src/index/openblas_ep-prefix/src/openblas_ep/lib/${CMAKE_SHARED_LIBRARY_PREFIX}openblas${CMAKE_SHARED_LIBRARY_SUFFIX}
-            ${CMAKE_BINARY_DIR}/src/index/openblas_ep-prefix/src/openblas_ep/lib/${CMAKE_SHARED_LIBRARY_PREFIX}openblas${CMAKE_SHARED_LIBRARY_SUFFIX}.0
-            ${CMAKE_BINARY_DIR}/src/index/openblas_ep-prefix/src/openblas_ep/lib/${CMAKE_SHARED_LIBRARY_PREFIX}openblas${CMAKE_SHARED_LIBRARY_SUFFIX}.0.3
-            DESTINATION lib)
-elseif(CMAKE_BUILD_TYPE STREQUAL "Debug")
-    install(FILES
-            ${CMAKE_BINARY_DIR}/src/index/openblas_ep-prefix/src/openblas_ep/lib/${CMAKE_SHARED_LIBRARY_PREFIX}openblas_d${CMAKE_SHARED_LIBRARY_SUFFIX}
-            ${CMAKE_BINARY_DIR}/src/index/openblas_ep-prefix/src/openblas_ep/lib/${CMAKE_SHARED_LIBRARY_PREFIX}openblas_d${CMAKE_SHARED_LIBRARY_SUFFIX}.0
-            ${CMAKE_BINARY_DIR}/src/index/openblas_ep-prefix/src/openblas_ep/lib/${CMAKE_SHARED_LIBRARY_PREFIX}openblas_d${CMAKE_SHARED_LIBRARY_SUFFIX}.0.3
-            DESTINATION lib)
+message("src BUILD_OPENBLAS value is: ${BUILD_OPENBLAS}")
+if (BUILD_OPENBLAS STREQUAL "ON")
+    message("src CMAKE_BINARY_DIR is ${CMAKE_BINARY_DIR}")
+    if (CMAKE_BUILD_TYPE STREQUAL "Release")
+        message("src installing openblas release version to lib")
+        install(FILES
+                ${CMAKE_BINARY_DIR}/src/index/openblas_ep-prefix/src/openblas_ep/lib/${CMAKE_SHARED_LIBRARY_PREFIX}openblas${CMAKE_SHARED_LIBRARY_SUFFIX}
+                ${CMAKE_BINARY_DIR}/src/index/openblas_ep-prefix/src/openblas_ep/lib/${CMAKE_SHARED_LIBRARY_PREFIX}openblas${CMAKE_SHARED_LIBRARY_SUFFIX}.0
+                ${CMAKE_BINARY_DIR}/src/index/openblas_ep-prefix/src/openblas_ep/lib/${CMAKE_SHARED_LIBRARY_PREFIX}openblas${CMAKE_SHARED_LIBRARY_SUFFIX}.0.3
+                DESTINATION lib)
+    elseif(CMAKE_BUILD_TYPE STREQUAL "Debug")
+        message("src installing openblas debug version to lib")
+        install(FILES
+                ${CMAKE_BINARY_DIR}/src/index/openblas_ep-prefix/src/openblas_ep/lib/${CMAKE_SHARED_LIBRARY_PREFIX}openblas_d${CMAKE_SHARED_LIBRARY_SUFFIX}
+                ${CMAKE_BINARY_DIR}/src/index/openblas_ep-prefix/src/openblas_ep/lib/${CMAKE_SHARED_LIBRARY_PREFIX}openblas_d${CMAKE_SHARED_LIBRARY_SUFFIX}.0
+                ${CMAKE_BINARY_DIR}/src/index/openblas_ep-prefix/src/openblas_ep/lib/${CMAKE_SHARED_LIBRARY_PREFIX}openblas_d${CMAKE_SHARED_LIBRARY_SUFFIX}.0.3
+                DESTINATION lib)
+    else()
+        message("src unknown CMAKE_BUILD_TYPE")
+    endif()
+elseif(BUILD_OPENBLAS STREQUAL "OFF")
+    message("src use system openbals library")
 else()
-    message("unknown CMAKE_BUILD_TYPE")
-endif()
+    message("src invalid BUILD_OPENBLAS = ${BUILD_OPENBLAS}")
+endif ()
