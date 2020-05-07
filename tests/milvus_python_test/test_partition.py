@@ -245,7 +245,7 @@ class TestHasBase:
     def test_has_partition(self, connect, collection):
         '''
         target: test has_partition, check status and result
-        method: create partition first, then call function: show_partition
+        method: create partition first, then call function: has_partition
         expected: status ok, result true
         '''
         status = connect.create_partition(collection, tag)
@@ -257,7 +257,7 @@ class TestHasBase:
     def test_has_partition_multi_partitions(self, connect, collection):
         '''
         target: test has_partition, check status and result
-        method: create partition first, then call function: show_partition
+        method: create partition first, then call function: has_partition
         expected: status ok, result true
         '''
         for tag_name in [tag, "tag_new", "tag_new_new"]:
@@ -270,8 +270,8 @@ class TestHasBase:
     def test_has_partition_tag_not_existed(self, connect, collection):
         '''
         target: test has_partition, check status and result
-        method: then call function: show_partition, with tag not existed
-        expected: status ok, result true
+        method: then call function: has_partition, with tag not existed
+        expected: status ok, result empty
         '''
         status, res = connect.has_partition(collection, tag)
         assert status.OK()
@@ -281,23 +281,23 @@ class TestHasBase:
     def test_has_partition_collection_not_existed(self, connect, collection):
         '''
         target: test has_partition, check status and result
-        method: then call function: show_partition, with collection not existed
-        expected: status ok, result true
+        method: then call function: has_partition, with collection not existed
+        expected: status not ok
         '''
         status, res = connect.has_partition("not_existed_collection", tag)
         assert not status.OK()
 
-    # TODO: enable
-    def _test_has_partition_with_invalid_tag_name(self, connect, collection, get_tag_name):
+    @pytest.mark.level(2)
+    def test_has_partition_with_invalid_tag_name(self, connect, collection, get_tag_name):
         '''
-        target: test drop partition, with invalid tag name, check status returned
-        method: call function: drop_partition
-        expected: status not ok
+        target: test has partition, with invalid tag name, check status returned
+        method: call function: has_partition
+        expected: status ok
         '''
         tag_name = get_tag_name
         status = connect.create_partition(collection, tag)
         status, res = connect.has_partition(collection, tag_name)
-        assert not status.OK()
+        assert status.OK()
 
 
 class TestDropBase:

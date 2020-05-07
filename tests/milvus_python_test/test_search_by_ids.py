@@ -29,14 +29,14 @@ raw_vectors, binary_vectors = gen_binary_vectors(6000, dim)
 
 
 class TestSearchBase:
-    @pytest.fixture(scope="function", autouse=True)
-    def skip_check(self, connect):
-        if str(connect._cmd("mode")[1]) == "CPU":
-            if request.param["index_type"] == IndexType.IVF_SQ8H:
-                pytest.skip("sq8h not support in CPU mode")
-        if str(connect._cmd("mode")[1]) == "GPU":
-            if request.param["index_type"] == IndexType.IVF_PQ:
-                pytest.skip("ivfpq not support in GPU mode")
+    # @pytest.fixture(scope="function", autouse=True)
+    # def skip_check(self, connect):
+    #     if str(connect._cmd("mode")[1]) == "CPU":
+    #         if request.param["index_type"] == IndexType.IVF_SQ8H:
+    #             pytest.skip("sq8h not support in CPU mode")
+    #     if str(connect._cmd("mode")[1]) == "GPU":
+    #         if request.param["index_type"] == IndexType.IVF_PQ:
+    #             pytest.skip("ivfpq not support in GPU mode")
 
     def init_data(self, connect, collection, nb=6000):
         '''
@@ -317,17 +317,19 @@ class TestSearchBase:
         status = connect.create_partition(collection, tag)
         vectors, ids = self.init_data(connect, collection)
         query_ids = [ids[0]]
-        status, result = connect.search_by_ids(collection, query_ids, top_k, partition_tags=[tag], params={})
-        assert status.OK() 
+        new_tag = gen_unique_str()
+        status, result = connect.search_by_ids(collection, query_ids, top_k, partition_tags=[new_tag], params={})
+        assert not status.OK() 
+        logging.getLogger().info(status)
         assert len(result) == 0
 
-    def test_search_l2_partition_other(self, connect, collection):
-        tag = gen_unique_str()
+    def test_search_l2_partition_empty(self, connect, collection):
         status = connect.create_partition(collection, tag)
         vectors, ids = self.init_data(connect, collection)
         query_ids = [ids[0]]
         status, result = connect.search_by_ids(collection, query_ids, top_k, partition_tags=[tag], params={})
-        assert status.OK()
+        assert not status.OK()
+        logging.getLogger().info(status)
         assert len(result) == 0
 
     def test_search_l2_partition(self, connect, collection):
