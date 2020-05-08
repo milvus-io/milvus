@@ -49,7 +49,7 @@ Please mark all change in change log and use the issue from GitHub
 -   \#2186 Update endpoints in http module
 -   \#2190 Fix memory usage is twice of index size when using GPU searching
 -   \#2248 Use hostname and port as instance label of metrics
--   \#2252 Upgrade mishards to v0.9.0
+-   \#2252 Upgrade mishards APIs and requirements
 
 ## Task
 
