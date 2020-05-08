@@ -1,116 +1,149 @@
 package com;
 
-import java.util.*;
+import io.milvus.client.*;
+import org.testng.Assert;
+import org.testng.annotations.Test;
+
+import java.nio.ByteBuffer;
+import java.util.ArrayList;
+import java.util.List;
 
 public class TestDeleteVectors {
-    int index_file_size = 50;
     int dimension = 128;
+    int nb = 8000;
 
-    public List<List<Float>> gen_vectors(Integer nb) {
-        List<List<Float>> xb = new LinkedList<>();
-        Random random = new Random();
-        for (int i = 0; i < nb; ++i) {
-            LinkedList<Float> vector = new LinkedList<>();
-            for (int j = 0; j < dimension; j++) {
-                vector.add(random.nextFloat());
-            }
-            xb.add(vector);
-        }
-        return xb;
+    List<List<Float>> vectors = Utils.genVectors(nb, dimension, true);
+    List<ByteBuffer> vectorsBinary = Utils.genBinaryVectors(nb, dimension);
+
+    @Test(dataProvider = "Collection", dataProviderClass = MainClass.class)
+    public void test_delete_vectors(MilvusClient client, String collectionName) {
+        // Add vectors
+        InsertParam insertParam = new InsertParam.Builder(collectionName).withFloatVectors(vectors).build();
+        InsertResponse res = client.insert(insertParam);
+        assert(res.getResponse().ok());
+        List<Long> ids = res.getVectorIds();
+        client.flush(collectionName);
+        Response res_delete = client.deleteByIds(collectionName, ids);
+        assert(res_delete.ok());
+        client.flush(collectionName);
+        // Assert collection row count
+        Assert.assertEquals(client.getCollectionRowCount(collectionName).getCollectionRowCount(), 0);
     }
 
-    public static Date getDeltaDate(int delta) {
-        Date today = new Date();
-        Calendar c = Calendar.getInstance();
-        c.setTime(today);
-        c.add(Calendar.DAY_OF_MONTH, delta);
-        return c.getTime();
+    @Test(dataProvider = "Collection", dataProviderClass = MainClass.class)
+    public void test_delete_single_vector(MilvusClient client, String collectionName) {
+        List<List<Float>> del_vector = new ArrayList<>();
+        del_vector.add(vectors.get(0));
+        List<Long> del_ids = new ArrayList<>();
+        InsertParam insertParam = new InsertParam.Builder(collectionName).withFloatVectors(vectors).build();
+        InsertResponse res = client.insert(insertParam);
+        assert(res.getResponse().ok());
+        List<Long> ids = res.getVectorIds();
+        del_ids.add(ids.get(0));
+        client.flush(collectionName);
+        Response res_delete = client.deleteById(collectionName, ids.get(0));
+        assert(res_delete.ok());
+        client.flush(collectionName);
+        // Assert collection row count
+        Assert.assertEquals(client.getCollectionRowCount(collectionName).getCollectionRowCount(), nb - 1);
+        GetVectorsByIdsResponse res_get = client.getVectorsByIds(collectionName, del_ids);
+        assert(res_get.getResponse().ok());
+        assert(res_get.getFloatVectors().get(0).size() == 0);
     }
 
-//    @Test(dataProvider = "Table", dataProviderClass = MainClass.class)
-//    public void test_delete_vectors(MilvusClient client, String tableName) throws InterruptedException {
-//        int nb = 10000;
-//        List<List<Float>> vectors = gen_vectors(nb);
-//        // Add vectors
-//        InsertParam insertParam = new InsertParam.Builder(tableName, vectors).build();
-//        InsertResponse res = client.insert(insertParam);
-//        assert(res.getResponse().ok());
-//        Thread.sleep(1000);
-//        DateRange dateRange = new DateRange(getDeltaDate(-1), getDeltaDate(1));
-//        DeleteByRangeParam param = new DeleteByRangeParam.Builder(dateRange, tableName).build();
-//        Response res_delete = client.deleteByRange(param);
-//        assert(res_delete.ok());
-//        Thread.sleep(1000);
-//        // Assert table row count
-//        Assert.assertEquals(client.getTableRowCount(tableParam).getTableRowCount(), 0);
-//    }
+    @Test(dataProvider = "Collection", dataProviderClass = MainClass.class)
+    public void test_delete_vectors_collection_not_existed(MilvusClient client, String collectionName) {
+        InsertParam insertParam = new InsertParam.Builder(collectionName).withFloatVectors(vectors).build();
+        InsertResponse res = client.insert(insertParam);
+        assert(res.getResponse().ok());
+        client.flush(collectionName);
+        List<Long> ids = res.getVectorIds();
+        Response res_delete = client.deleteByIds(collectionName + "_not_existed", ids);
+        assert(!res_delete.ok());
+    }
 
-//    @Test(dataProvider = "Table", dataProviderClass = MainClass.class)
-//    public void test_delete_vectors_table_not_existed(MilvusClient client, String tableName) throws InterruptedException {
-//        String tableNameNew = tableName + "_";
-//        DateRange dateRange = new DateRange(getDeltaDate(-1), getDeltaDate(1));
-//        DeleteByRangeParam param = new DeleteByRangeParam.Builder(dateRange, tableNameNew).build();
-//        Response res_delete = client.deleteByRange(param);
-//        assert(!res_delete.ok());
-//    }
+    @Test(dataProvider = "Collection", dataProviderClass = MainClass.class)
+    public void test_delete_vector_id_not_existed(MilvusClient client, String collectionName) {
+        InsertParam insertParam = new InsertParam.Builder(collectionName).withFloatVectors(vectors).build();
+        InsertResponse res = client.insert(insertParam);
+        assert(res.getResponse().ok());
+        List<Long> ids = new ArrayList<Long>();
+        ids.add((long)123456);
+        ids.add((long)1234561);
+        client.flush(collectionName);
+        Response res_delete = client.deleteByIds(collectionName, ids);
+        assert(res_delete.ok());
+        client.flush(collectionName);
+        // Assert collection row count
+        Assert.assertEquals(client.getCollectionRowCount(collectionName).getCollectionRowCount(), nb);
+    }
 
-//    @Test(dataProvider = "DisConnectInstance", dataProviderClass = MainClass.class)
-//    public void test_delete_vectors_without_connect(MilvusClient client, String tableName) throws InterruptedException {
-//        DateRange dateRange = new DateRange(getDeltaDate(-1), getDeltaDate(1));
-//        DeleteByRangeParam param = new DeleteByRangeParam.Builder(dateRange, tableName).build();
-//        Response res_delete = client.deleteByRange(param);
-//        assert(!res_delete.ok());
-//    }
-//
-//    @Test(dataProvider = "Table", dataProviderClass = MainClass.class)
-//    public void test_delete_vectors_table_empty(MilvusClient client, String tableName) throws InterruptedException {
-//        DateRange dateRange = new DateRange(getDeltaDate(-1), getDeltaDate(1));
-//        DeleteByRangeParam param = new DeleteByRangeParam.Builder(dateRange, tableName).build();
-//        Response res_delete = client.deleteByRange(param);
-//        assert(res_delete.ok());
-//    }
 
-//    @Test(dataProvider = "Table", dataProviderClass = MainClass.class)
-//    public void test_delete_vectors_invalid_date_range(MilvusClient client, String tableName) throws InterruptedException {
-//        int nb = 100;
-//        List<List<Float>> vectors = gen_vectors(nb);
-//        // Add vectors
-//        InsertParam insertParam = new InsertParam.Builder(tableName, vectors).build();
-//        InsertResponse res = client.insert(insertParam);
-//        assert(res.getResponse().ok());
-//        Thread.sleep(1000);
-//        DateRange dateRange = new DateRange(getDeltaDate(1), getDeltaDate(0));
-//        DeleteByRangeParam param = new DeleteByRangeParam.Builder(dateRange, tableName).build();
-//        Response res_delete = client.deleteByRange(param);
-//        assert(!res_delete.ok());
-//    }
+    // Below tests binary vectors
+    @Test(dataProvider = "BinaryCollection", dataProviderClass = MainClass.class)
+    public void test_delete_vectors_binary(MilvusClient client, String collectionName) {
+        // Add vectors
+        InsertParam insertParam = new InsertParam.Builder(collectionName).withBinaryVectors(vectorsBinary).build();
+        InsertResponse res = client.insert(insertParam);
+        assert(res.getResponse().ok());
+        List<Long> ids = res.getVectorIds();
+        client.flush(collectionName);
+        Response res_delete = client.deleteByIds(collectionName, ids);
+        assert(res_delete.ok());
+        client.flush(collectionName);
+        // Assert collection row count
+        Assert.assertEquals(client.getCollectionRowCount(collectionName).getCollectionRowCount(), 0);
+    }
 
-//    @Test(dataProvider = "Table", dataProviderClass = MainClass.class)
-//    public void test_delete_vectors_invalid_date_range_1(MilvusClient client, String tableName) throws InterruptedException {
-//        int nb = 100;
-//        List<List<Float>> vectors = gen_vectors(nb);
-//        InsertParam insertParam = new InsertParam.Builder(tableName, vectors).build();
-//        InsertResponse res = client.insert(insertParam);
-//        assert(res.getResponse().ok());
-//        DateRange dateRange = new DateRange(getDeltaDate(2), getDeltaDate(-1));
-//        DeleteByRangeParam param = new DeleteByRangeParam.Builder(dateRange, tableName).build();
-//        Response res_delete = client.deleteByRange(param);
-//        assert(!res_delete.ok());
-//    }
+    @Test(dataProvider = "BinaryCollection", dataProviderClass = MainClass.class)
+    public void test_delete_single_vector_binary(MilvusClient client, String collectionName) {
+        List<ByteBuffer> del_vector = new ArrayList<>();
+        del_vector.add(vectorsBinary.get(0));
+        InsertParam insertParam = new InsertParam.Builder(collectionName).withBinaryVectors(vectorsBinary).build();
+        InsertResponse res = client.insert(insertParam);
+        assert(res.getResponse().ok());
+        List<Long> ids = res.getVectorIds();
+        client.flush(collectionName);
+        Response res_delete = client.deleteById(collectionName, ids.get(0));
+        assert(res_delete.ok());
+        client.flush(collectionName);
+        // Assert collection row count
+        Assert.assertEquals(client.getCollectionRowCount(collectionName).getCollectionRowCount(), nb - 1);
+        // Cannot search for the vector
+        SearchParam searchParam = new SearchParam.Builder(collectionName)
+            .withBinaryVectors(del_vector)
+            .withTopK(1)
+            .withParamsInJson("{\"nprobe\": 20}")
+            .build();
+        SearchResponse res_search = client.search(searchParam);
+        assert(res_search.getResultIdsList().size() == 1);
+    }
 
-//    @Test(dataProvider = "Table", dataProviderClass = MainClass.class)
-//    public void test_delete_vectors_no_result(MilvusClient client, String tableName) throws InterruptedException {
-//        int nb = 100;
-//        List<List<Float>> vectors = gen_vectors(nb);
-//        InsertParam insertParam = new InsertParam.Builder(tableName, vectors).build();
-//        InsertResponse res = client.insert(insertParam);
-//        assert(res.getResponse().ok());
-//        Thread.sleep(1000);
-//        DateRange dateRange = new DateRange(getDeltaDate(-3), getDeltaDate(-2));
-//        DeleteByRangeParam param = new DeleteByRangeParam.Builder(dateRange, tableName).build();
-//        Response res_delete = client.deleteByRange(param);
-//        assert(res_delete.ok());
-//        Assert.assertEquals(client.getTableRowCount(tableParam).getTableRowCount(), nb);
-//    }
+    @Test(dataProvider = "BinaryCollection", dataProviderClass = MainClass.class)
+    public void test_delete_vectors_collection_not_existed_binary(MilvusClient client, String collectionName) {
+        InsertParam insertParam = new InsertParam.Builder(collectionName).withBinaryVectors(vectorsBinary).build();
+        InsertResponse res = client.insert(insertParam);
+        assert(res.getResponse().ok());
+        List<Long> ids = res.getVectorIds();
+        client.flush(collectionName);
+        Response res_delete = client.deleteByIds(collectionName + "_not_existed", ids);
+        assert(!res_delete.ok());
+    }
+
+    @Test(dataProvider = "BinaryCollection", dataProviderClass = MainClass.class)
+    public void test_delete_vector_id_not_existed_binary(MilvusClient client, String collectionName) {
+        InsertParam insertParam = new InsertParam.Builder(collectionName).withBinaryVectors(vectorsBinary).build();
+        InsertResponse res = client.insert(insertParam);
+        assert(res.getResponse().ok());
+        List<Long> ids = new ArrayList<Long>();
+        ids.add((long)123456);
+        ids.add((long)1234561);
+        client.flush(collectionName);
+        Response res_delete = client.deleteByIds(collectionName, ids);
+        assert(res_delete.ok());
+        client.flush(collectionName);
+        // Assert collection row count
+        Assert.assertEquals(client.getCollectionRowCount(collectionName).getCollectionRowCount(), nb);
+    }
 
 }
