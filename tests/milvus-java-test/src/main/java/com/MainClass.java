@@ -15,7 +15,7 @@ import java.util.List;
 
 public class MainClass {
     private static String host = "127.0.0.1";
-    private static String port = "19532";
+    private static int port = 19530;
     private int index_file_size = 50;
     public int dimension = 128;
 
@@ -23,7 +23,7 @@ public class MainClass {
         MainClass.host = host;
     }
 
-    public static void setPort(String port) {
+    public static void setPort(int port) {
         MainClass.port = port;
     }
 
@@ -40,8 +40,8 @@ public class MainClass {
                 .withPort(port)
                 .build();
         client.connect(connectParam);
-        String tableName = RandomStringUtils.randomAlphabetic(10);
-        return new Object[][]{{client, tableName}};
+        String collectionName = RandomStringUtils.randomAlphabetic(10);
+        return new Object[][]{{client, collectionName}};
     }
 
     @DataProvider(name="DisConnectInstance")
@@ -58,16 +58,16 @@ public class MainClass {
         } catch (InterruptedException e) {
             e.printStackTrace();
         }
-        String tableName = RandomStringUtils.randomAlphabetic(10);
-        return new Object[][]{{client, tableName}};
+        String collectionName = RandomStringUtils.randomAlphabetic(10);
+        return new Object[][]{{client, collectionName}};
     }
 
-    @DataProvider(name="Table")
-    public Object[][] provideTable() throws ConnectFailedException {
-        Object[][] tables = new Object[2][2];
+    @DataProvider(name="Collection")
+    public Object[][] provideCollection() throws ConnectFailedException, InterruptedException {
+        Object[][] collections = new Object[2][2];
         MetricType[] metricTypes = { MetricType.L2, MetricType.IP };
         for (int i = 0; i < metricTypes.length; ++i) {
-            String tableName = metricTypes[i].toString()+"_"+RandomStringUtils.randomAlphabetic(10);
+            String collectionName = metricTypes[i].toString()+"_"+RandomStringUtils.randomAlphabetic(10);
             // Generate connection instance
             MilvusClient client = new MilvusGrpcClient();
             ConnectParam connectParam = new ConnectParam.Builder()
@@ -75,19 +75,59 @@ public class MainClass {
                     .withPort(port)
                     .build();
             client.connect(connectParam);
-            TableSchema tableSchema = new TableSchema.Builder(tableName, dimension)
+//            List<String> tableNames = client.showCollections().getCollectionNames();
+//            for (int j = 0; j < tableNames.size(); ++j
+//                 ) {
+//                client.dropCollection(tableNames.get(j));
+//            }
+//            Thread.currentThread().sleep(2000);
+            CollectionMapping cm = new CollectionMapping.Builder(collectionName, dimension)
                     .withIndexFileSize(index_file_size)
                     .withMetricType(metricTypes[i])
                     .build();
-            Response res = client.createTable(tableSchema);
+            Response res = client.createCollection(cm);
             if (!res.ok()) {
                 System.out.println(res.getMessage());
-                throw new SkipException("Table created failed");
+                throw new SkipException("Collection created failed");
             }
-            tables[i] = new Object[]{client, tableName};
+            collections[i] = new Object[]{client, collectionName};
         }
-        return tables;
+        return collections;
     }
+
+    @DataProvider(name="BinaryCollection")
+    public Object[][] provideBinaryCollection() throws ConnectFailedException, InterruptedException {
+        Object[][] collections = new Object[3][2];
+        MetricType[] metricTypes = { MetricType.JACCARD, MetricType.HAMMING, MetricType.TANIMOTO };
+        for (int i = 0; i < metricTypes.length; ++i) {
+            String collectionName = metricTypes[i].toString()+"_"+RandomStringUtils.randomAlphabetic(10);
+            // Generate connection instance
+            MilvusClient client = new MilvusGrpcClient();
+            ConnectParam connectParam = new ConnectParam.Builder()
+                    .withHost(host)
+                    .withPort(port)
+                    .build();
+            client.connect(connectParam);
+//            List<String> tableNames = client.showCollections().getCollectionNames();
+//            for (int j = 0; j < tableNames.size(); ++j
+//            ) {
+//                client.dropCollection(tableNames.get(j));
+//            }
+//            Thread.currentThread().sleep(2000);
+            CollectionMapping cm = new CollectionMapping.Builder(collectionName, dimension)
+                    .withIndexFileSize(index_file_size)
+                    .withMetricType(metricTypes[i])
+                    .build();
+            Response res = client.createCollection(cm);
+            if (!res.ok()) {
+                System.out.println(res.getMessage());
+                throw new SkipException("Collection created failed");
+            }
+            collections[i] = new Object[]{client, collectionName};
+        }
+        return collections;
+    }
+
 
     public static void main(String[] args) {
         CommandLineParser parser = new DefaultParser();
@@ -102,20 +142,13 @@ public class MainClass {
             }
             String port = cmd.getOptionValue("port");
             if (port != null) {
-                setPort(port);
+                setPort(Integer.parseInt(port));
             }
             System.out.println("Host: "+host+", Port: "+port);
         }
         catch(ParseException exp) {
             System.err.println("Parsing failed.  Reason: " + exp.getMessage() );
         }
-
-//        TestListenerAdapter tla = new TestListenerAdapter();
-//        TestNG testng = new TestNG();
-//        testng.setTestClasses(new Class[] { TestPing.class });
-//        testng.setTestClasses(new Class[] { TestConnect.class });
-//        testng.addListener(tla);
-//        testng.run();
 
         XmlSuite suite = new XmlSuite();
         suite.setName("TmpSuite");
@@ -129,9 +162,15 @@ public class MainClass {
         classes.add(new XmlClass("com.TestConnect"));
         classes.add(new XmlClass("com.TestDeleteVectors"));
         classes.add(new XmlClass("com.TestIndex"));
+        classes.add(new XmlClass("com.TestCompact"));
         classes.add(new XmlClass("com.TestSearchVectors"));
-        classes.add(new XmlClass("com.TestTable"));
-        classes.add(new XmlClass("com.TestTableCount"));
+        classes.add(new XmlClass("com.TestCollection"));
+        classes.add(new XmlClass("com.TestCollectionCount"));
+        classes.add(new XmlClass("com.TestFlush"));
+        classes.add(new XmlClass("com.TestPartition"));
+        classes.add(new XmlClass("com.TestGetVectorByID"));
+        classes.add(new XmlClass("com.TestCollectionInfo"));
+        classes.add(new XmlClass("com.TestSearchByIds"));
 
         test.setXmlClasses(classes) ;
 
