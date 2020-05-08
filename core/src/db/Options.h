@@ -72,6 +72,7 @@ struct DBOptions {
     bool insert_cache_immediately_ = false;
 
     int64_t auto_flush_interval_ = 1;
+    int64_t file_cleanup_timeout_ = 10;
 
     // wal relative configurations
     bool wal_enable_ = true;
