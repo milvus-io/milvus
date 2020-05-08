@@ -25,14 +25,6 @@ namespace server {
 
 using ConfigCallBackF = std::function<Status(const std::string&)>;
 
-#define CONFIG_CHECK(func) \
-    do {                   \
-        Status s = func;   \
-        if (!s.ok()) {     \
-            return s;      \
-        }                  \
-    } while (false)
-
 extern const char* CONFIG_NODE_DELIMITER;
 extern const char* CONFIG_VERSION;
 
