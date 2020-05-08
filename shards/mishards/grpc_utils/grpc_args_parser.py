@@ -116,9 +116,9 @@ class GrpcArgsParser(object):
     @error_status
     def parse_proto_VectorIdentity(cls, param):
         _collection_name = param.collection_name
-        _id = param.id
+        _ids = list(param.id_array)
 
-        return _collection_name, _id
+        return _collection_name, _ids
 
     @classmethod
     @error_status
