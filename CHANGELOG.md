@@ -53,6 +53,7 @@ Please mark all change in change log and use the issue from GitHub
 -   \#2190 Fix memory usage is twice of index size when using GPU searching
 -   \#2248 Use hostname and port as instance label of metrics
 -   \#2252 Upgrade mishards APIs and requirements
+-   \#2256 k-means clustering algorithm use only Euclidean distance metric
 
 ## Task
 
