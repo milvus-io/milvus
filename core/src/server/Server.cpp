@@ -209,42 +209,15 @@ Server::Start() {
             std::string logs_path;
             int64_t max_log_file_size = 0;
             int64_t delete_exceeds = 0;
-            s = config.GetLogsTraceEnable(trace_enable);
-            if (!s.ok()) {
-                return s;
-            }
-            s = config.GetLogsDebugEnable(debug_enable);
-            if (!s.ok()) {
-                return s;
-            }
-            s = config.GetLogsInfoEnable(info_enable);
-            if (!s.ok()) {
-                return s;
-            }
-            s = config.GetLogsWarningEnable(warning_enable);
-            if (!s.ok()) {
-                return s;
-            }
-            s = config.GetLogsErrorEnable(error_enable);
-            if (!s.ok()) {
-                return s;
-            }
-            s = config.GetLogsFatalEnable(fatal_enable);
-            if (!s.ok()) {
-                return s;
-            }
-            s = config.GetLogsPath(logs_path);
-            if (!s.ok()) {
-                return s;
-            }
-            s = config.GetLogsMaxLogFileSize(max_log_file_size);
-            if (!s.ok()) {
-                return s;
-            }
-            s = config.GetLogsDeleteExceeds(delete_exceeds);
-            if (!s.ok()) {
-                return s;
-            }
+            CONFIG_CHECK(config.GetLogsTraceEnable(trace_enable));
+            CONFIG_CHECK(config.GetLogsDebugEnable(debug_enable));
+            CONFIG_CHECK(config.GetLogsInfoEnable(info_enable));
+            CONFIG_CHECK(config.GetLogsWarningEnable(warning_enable));
+            CONFIG_CHECK(config.GetLogsErrorEnable(error_enable));
+            CONFIG_CHECK(config.GetLogsFatalEnable(fatal_enable));
+            CONFIG_CHECK(config.GetLogsPath(logs_path));
+            CONFIG_CHECK(GetLogsMaxLogFileSize(max_log_file_size));
+            CONFIG_CHECK(config.GetLogsDeleteExceeds(delete_exceeds));
             InitLog(trace_enable, debug_enable, info_enable, warning_enable, error_enable, fatal_enable, logs_path,
                     max_log_file_size, delete_exceeds);
         }
