@@ -32,6 +32,7 @@ set(index_srcs
         knowhere/index/vector_index/helpers/FaissIO.cpp
         knowhere/index/vector_index/helpers/IndexParameter.cpp
         knowhere/index/vector_index/helpers/SPTAGParameterMgr.cpp
+        knowhere/index/vector_index/helpers/BuilderSuspend.cpp
         knowhere/index/vector_index/impl/nsg/Distance.cpp
         knowhere/index/vector_index/impl/nsg/NSG.cpp
         knowhere/index/vector_index/impl/nsg/NSGHelper.cpp

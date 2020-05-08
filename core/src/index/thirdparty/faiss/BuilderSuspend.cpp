@@ -17,11 +17,11 @@ std::atomic<bool> BuilderSuspend::suspend_flag_(false);
 std::mutex BuilderSuspend::mutex_;
 std::condition_variable BuilderSuspend::cv_;
 
-inline void BuilderSuspend::suspend() {
+void BuilderSuspend::suspend() {
     suspend_flag_ = true;
 }
 
-inline void BuilderSuspend::resume() {
+void BuilderSuspend::resume() {
     suspend_flag_ = false;
 }
 
