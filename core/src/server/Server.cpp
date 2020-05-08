@@ -216,7 +216,7 @@ Server::Start() {
             CONFIG_CHECK(config.GetLogsErrorEnable(error_enable));
             CONFIG_CHECK(config.GetLogsFatalEnable(fatal_enable));
             CONFIG_CHECK(config.GetLogsPath(logs_path));
-            CONFIG_CHECK(GetLogsMaxLogFileSize(max_log_file_size));
+            CONFIG_CHECK(config.GetLogsMaxLogFileSize(max_log_file_size));
             CONFIG_CHECK(config.GetLogsDeleteExceeds(delete_exceeds));
             InitLog(trace_enable, debug_enable, info_enable, warning_enable, error_enable, fatal_enable, logs_path,
                     max_log_file_size, delete_exceeds);
