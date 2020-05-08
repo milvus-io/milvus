@@ -61,9 +61,9 @@ public class TestSearchByIds {
                 .build();
         List<List<SearchResponse.QueryResult>> res_search = client.searchByIds(searchParam).getQueryResultsList();
         assert (client.searchByIds(searchParam).getResponse().ok());
-        Assert.assertEquals(res_search.get(0).size(), top_k);
-        Assert.assertEquals(res_search.size(), default_ids.size());
-        Assert.assertEquals(res_search.get(0).get(0).getVectorId(), -1);
+        Assert.assertEquals(res_search.get(0).size(), 0);
+//        Assert.assertEquals(res_search.size(), default_ids.size());
+//        Assert.assertEquals(res_search.get(0).get(0).getVectorId(), -1);
     }
 
     @Test(dataProvider = "Collection", dataProviderClass = MainClass.class)
