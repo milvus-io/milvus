@@ -11,6 +11,7 @@ Please mark all change in change log and use the issue from GitHub
 -   \#1946 Fix load index file CPU2GPU fail during searching
 -   \#1955 Switch create_index operation to background once client break connection
 -   \#1997 Index file missed after compact
+-   \#2002 Remove log error msg `Attributes is null`
 -   \#2073 Fix CheckDBConfigBackendUrl error message
 -   \#2076 CheckMetricConfigAddress error message
 -   \#2128 Check has_partition params
