@@ -73,6 +73,25 @@ ErrorMap(ErrorCode code) {
     }
 }
 
+std::string
+RequestMap(BaseRequest::RequestType request_type) {
+    static const std::unordered_map<BaseRequest::RequestType, std::string> request_map = {
+        {BaseRequest::kInsert, "Insert"},
+        {BaseRequest::kCreateIndex, "CreateIndex"},
+        {BaseRequest::kSearch, "Search"},
+        {BaseRequest::kSearchByID, "SearchByID"},
+        {BaseRequest::kHybridSearch, "HybridSearch"},
+        {BaseRequest::kFlush, "Flush"},
+        {BaseRequest::kCompact, "Compact"},
+    };
+
+    if (request_map.find(request_type) != request_map.end()) {
+        return request_map.at(request_type);
+    } else {
+        return "OtherRequest";
+    }
+}
+
 namespace {
 void
 CopyRowRecords(const google::protobuf::RepeatedPtrField<::milvus::grpc::RowRecord>& grpc_records,
@@ -670,8 +689,30 @@ GrpcRequestHandler::Cmd(::grpc::ServerContext* context, const ::milvus::grpc::Co
     LOG_SERVER_INFO_ << LogOut("Request [%s] %s begin.", GetContext(context)->RequestID().c_str(), __func__);
 
     std::string reply;
-    Status status = request_handler_.Cmd(GetContext(context), request->cmd(), reply);
-    response->set_string_reply(reply);
+    Status status;
+
+    std::string cmd = request->cmd();
+    std::vector<std::string> requests;
+    if (cmd == "requests") {
+        std::lock_guard<std::mutex> lock(context_map_mutex_);
+        for (auto& iter : context_map_) {
+            if (nullptr == iter.second) {
+                continue;
+            }
+            if (iter.second->RequestID() == get_request_id(context)) {
+                continue;
+            }
+            auto request_str = RequestMap(iter.second->GetRequestType()) + "-" + iter.second->RequestID();
+            requests.emplace_back(request_str);
+        }
+        nlohmann::json reply_json;
+        reply_json["requests"] = requests;
+        reply = reply_json.dump();
+        response->set_string_reply(reply);
+    } else {
+        status = request_handler_.Cmd(GetContext(context), cmd, reply);
+        response->set_string_reply(reply);
+    }
 
     LOG_SERVER_INFO_ << LogOut("Request [%s] %s end.", GetContext(context)->RequestID().c_str(), __func__);
     SET_RESPONSE(response->mutable_status(), status, context);
