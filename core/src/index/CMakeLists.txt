@@ -62,13 +62,15 @@ set(INDEX_SOURCE_DIR ${PROJECT_SOURCE_DIR})
 set(INDEX_BINARY_DIR ${PROJECT_BINARY_DIR})
 set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${INDEX_SOURCE_DIR}/cmake")
 
-if (BUILD_OPENBLAS STREQUAL "OFF")
-    find_package(OpenBLAS)
-endif()
+find_package(OpenBLAS)
 
 include(ExternalProject)
 include(DefineOptionsCore)
 include(BuildUtilsCore)
+
+set(OpenBLAS_INSTALL "${OpenBLAS_FOUND}" PARENT_SCOPE)
+
+set(openblas_libs ${OpenBLAS_LIBRARIES})
 
 if (MILVUS_GPU_VERSION OR KNOWHERE_GPU_VERSION)
     message(STATUS "Building Knowhere GPU version")

@@ -18,6 +18,7 @@ include_directories(${MILVUS_THIRDPARTY_SRC})
 include_directories(${MILVUS_ENGINE_SRC}/grpc/gen-status)
 include_directories(${MILVUS_ENGINE_SRC}/grpc/gen-milvus)
 
+set(OpenBLAS_INSTALL "")
 add_subdirectory(index)
 if (FAISS_WITH_MKL)
     add_compile_definitions("WITH_MKL")
@@ -328,28 +329,14 @@ install(FILES
         ${CMAKE_BINARY_DIR}/fiu_ep-prefix/src/fiu_ep/lib/${CMAKE_SHARED_LIBRARY_PREFIX}fiu${CMAKE_SHARED_LIBRARY_SUFFIX}.1.00
         DESTINATION lib)
 
-message("src BUILD_OPENBLAS value is: ${BUILD_OPENBLAS}")
-if (BUILD_OPENBLAS STREQUAL "ON")
-    message("src CMAKE_BINARY_DIR is ${CMAKE_BINARY_DIR}")
-    if (CMAKE_BUILD_TYPE STREQUAL "Release")
-        message("src installing openblas release version to lib")
-        install(FILES
-                ${CMAKE_BINARY_DIR}/src/index/openblas_ep-prefix/src/openblas_ep/lib/${CMAKE_SHARED_LIBRARY_PREFIX}openblas${CMAKE_SHARED_LIBRARY_SUFFIX}
-                ${CMAKE_BINARY_DIR}/src/index/openblas_ep-prefix/src/openblas_ep/lib/${CMAKE_SHARED_LIBRARY_PREFIX}openblas${CMAKE_SHARED_LIBRARY_SUFFIX}.0
-                ${CMAKE_BINARY_DIR}/src/index/openblas_ep-prefix/src/openblas_ep/lib/${CMAKE_SHARED_LIBRARY_PREFIX}openblas${CMAKE_SHARED_LIBRARY_SUFFIX}.0.3
-                DESTINATION lib)
-    elseif(CMAKE_BUILD_TYPE STREQUAL "Debug")
-        message("src installing openblas debug version to lib")
-        install(FILES
-                ${CMAKE_BINARY_DIR}/src/index/openblas_ep-prefix/src/openblas_ep/lib/${CMAKE_SHARED_LIBRARY_PREFIX}openblas_d${CMAKE_SHARED_LIBRARY_SUFFIX}
-                ${CMAKE_BINARY_DIR}/src/index/openblas_ep-prefix/src/openblas_ep/lib/${CMAKE_SHARED_LIBRARY_PREFIX}openblas_d${CMAKE_SHARED_LIBRARY_SUFFIX}.0
-                ${CMAKE_BINARY_DIR}/src/index/openblas_ep-prefix/src/openblas_ep/lib/${CMAKE_SHARED_LIBRARY_PREFIX}openblas_d${CMAKE_SHARED_LIBRARY_SUFFIX}.0.3
-                DESTINATION lib)
-    else()
-        message("src unknown CMAKE_BUILD_TYPE")
-    endif()
-elseif(BUILD_OPENBLAS STREQUAL "OFF")
-    message("src use system openbals library")
+if (OpenBLAS_INSTALL STREQUAL "OFF")
+    install(FILES
+            ${CMAKE_BINARY_DIR}/src/index/openblas_ep-prefix/src/openblas_ep/lib/${CMAKE_SHARED_LIBRARY_PREFIX}openblas${CMAKE_SHARED_LIBRARY_SUFFIX}
+            ${CMAKE_BINARY_DIR}/src/index/openblas_ep-prefix/src/openblas_ep/lib/${CMAKE_SHARED_LIBRARY_PREFIX}openblas${CMAKE_SHARED_LIBRARY_SUFFIX}.0
+            ${CMAKE_BINARY_DIR}/src/index/openblas_ep-prefix/src/openblas_ep/lib/${CMAKE_SHARED_LIBRARY_PREFIX}openblas${CMAKE_SHARED_LIBRARY_SUFFIX}.0.3
+            DESTINATION lib)
+elseif(OpenBLAS_INSTALL STREQUAL "ON")
+    message("use found openbals library")
 else()
-    message("src invalid BUILD_OPENBLAS = ${BUILD_OPENBLAS}")
+    message("invalid OpenBLAS_INSTALL value = ${OpenBLAS_INSTALL}")
 endif ()

@@ -121,7 +121,6 @@ CMAKE_CMD="cmake \
 -DFAISS_WITH_MKL=${WITH_MKL} \
 -DMILVUS_WITH_PROMETHEUS=${WITH_PROMETHEUS} \
 -DMILVUS_WITH_FIU=${FIU_ENABLE} \
--DBUILD_OPENBLAS=${BUILD_OPENBLAS} \
 ../"
 echo ${CMAKE_CMD}
 ${CMAKE_CMD}
@@ -157,5 +156,5 @@ if [[ ${RUN_CPPLINT} == "ON" ]]; then
 else
 
   # compile and build
-  make -j 8 install || exit 1
+  make -j 8 VERBOSE=1 install || exit 1
 fi
