@@ -174,7 +174,7 @@ ClientTest::InsertEntities(std::shared_ptr<milvus::Connection>& conn) {
         milvus_sdk::TimeRecorder rc(title);
         milvus::Status stat = conn->Insert(parameters_.collection_name_, "", entity_array, record_ids);
         if (!stat.ok()) {
-            std::cout << "CreateIndex function call status: " << stat.message() << std::endl;
+            std::cout << "Insert function call status: " << stat.message() << std::endl;
         }
 //        std::cout << "InsertEntities function call status: " << stat.message() << std::endl;
 //        std::cout << "Returned id array count: " << record_ids.size() << std::endl;
