@@ -268,7 +268,7 @@ XSearchTask::Execute() {
                     types.insert(std::make_pair(type_it->first, (engine::DataType)(type_it->second)));
                 }
                 faiss::ConcurrentBitsetPtr bitset;
-                s = index_engine_->ExecBinaryQuery(general_query, bitset, types, nq, topk, output_distance, output_ids);
+//                s = index_engine_->ExecBinaryQuery(general_query, bitset, types, nq, topk, output_distance, output_ids);
 
                 if (!s.ok()) {
                     search_job->GetStatus() = s;

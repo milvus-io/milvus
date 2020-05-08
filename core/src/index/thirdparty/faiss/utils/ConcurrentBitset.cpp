@@ -22,6 +22,35 @@ namespace faiss {
 ConcurrentBitset::ConcurrentBitset(id_type_t capacity) : capacity_(capacity), bitset_((capacity + 8 - 1) >> 3) {
 }
 
+std::vector<std::atomic<uint8_t>>&
+ConcurrentBitset::bitset() {
+    return bitset_;
+}
+
+ConcurrentBitset&
+ConcurrentBitset::operator&=(ConcurrentBitset& bitset) {
+    for (id_type_t i = 0; i < ((capacity_ + 8 -1) >> 3); ++i) {
+        bitset_[i].fetch_and(bitset.bitset()[i].load());
+    }
+    return *this;
+}
+
+ConcurrentBitset&
+ConcurrentBitset::operator|=(ConcurrentBitset& bitset) {
+    for (id_type_t i = 0; i < ((capacity_ + 8 -1) >> 3); ++i) {
+        bitset_[i].fetch_or(bitset.bitset()[i].load());
+    }
+    return *this;
+}
+
+ConcurrentBitset&
+ConcurrentBitset::operator^=(ConcurrentBitset& bitset) {
+    for (id_type_t i = 0; i < ((capacity_ + 8 -1) >> 3); ++i) {
+        bitset_[i].fetch_xor(bitset.bitset()[i].load());
+    }
+    return *this;
+}
+
 bool
 ConcurrentBitset::test(id_type_t id) {
     return bitset_[id >> 3].load() & (0x1 << (id & 0x7));

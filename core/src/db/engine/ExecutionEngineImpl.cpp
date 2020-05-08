@@ -832,17 +832,19 @@ ExecutionEngineImpl::ExecBinaryQuery(milvus::query::GeneralQueryPtr general_quer
                                      right_bitset);
         }
         switch (general_query->bin->relation) {
+            case milvus::query::QueryRelation::AND:
             case milvus::query::QueryRelation::R1: {
+                result_bitset = std::shared_ptr<faiss::ConcurrentBitset>(&((*left_bitset.get()) &= (*right_bitset.get())));
+                break;
             }
+            case milvus::query::QueryRelation::OR:
             case milvus::query::QueryRelation::R2: {
+                result_bitset = std::shared_ptr<faiss::ConcurrentBitset>(&((*left_bitset.get()) |= (*right_bitset.get())));
+                break;
             }
             case milvus::query::QueryRelation::R3: {
             }
             case milvus::query::QueryRelation::R4: {
-            }
-            case milvus::query::QueryRelation::AND: {
-            }
-            case milvus::query::QueryRelation::OR: {
             }
         }
         return status;
