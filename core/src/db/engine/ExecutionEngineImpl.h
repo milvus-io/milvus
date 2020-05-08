@@ -72,7 +72,8 @@ class ExecutionEngineImpl : public ExecutionEngine {
     Status
     ExecBinaryQuery(query::GeneralQueryPtr general_query, faiss::ConcurrentBitsetPtr bitset,
                     std::unordered_map<std::string, DataType>& attr_type, uint64_t& nq, uint64_t& topk,
-                    std::vector<float>& distances, std::vector<int64_t>& labels) override;
+                    std::vector<float>& distances, std::vector<int64_t>& labels,
+                    faiss::ConcurrentBitsetPtr result_bitset) override;
 
     Status
     Search(int64_t n, const float* data, int64_t k, const milvus::json& extra_params, float* distances, int64_t* labels,
@@ -113,6 +114,11 @@ class ExecutionEngineImpl : public ExecutionEngine {
     knowhere::VecIndexPtr
     Load(const std::string& location);
 
+    template <typename T>
+    void
+    ProcessRangeQuery(std::vector<T> data, T value, query::CompareOperator type, faiss::ConcurrentBitsetPtr bitset,
+                      faiss::ConcurrentBitsetPtr result_bitset);
+
     void
     HybridLoad() const;
 
@@ -124,10 +130,9 @@ class ExecutionEngineImpl : public ExecutionEngine {
     EngineType index_type_;
     MetricType metric_type_;
 
-    std::unordered_map<std::string, DataType> attr_types_;
     std::unordered_map<std::string, std::vector<uint8_t>> attr_data_;
     std::unordered_map<std::string, size_t> attr_size_;
-    query::BinaryQueryPtr binary_query_;
+    std::vector<int64_t> entity_ids_;
     int64_t vector_count_;
 
     int64_t dim_;

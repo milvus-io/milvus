@@ -1074,10 +1074,18 @@ GrpcRequestHandler::HybridSearch(::grpc::ServerContext* context, const ::milvus:
         partition_list[i] = request->partition_tag_array(i);
     }
 
+    milvus::json json_params;
+    for (int i = 0; i < request->extra_params_size(); i++) {
+        const ::milvus::grpc::KeyValuePair& extra = request->extra_params(i);
+        if (extra.key() == EXTRA_PARAM_KEY) {
+            json_params = json::parse(extra.value());
+        }
+    }
+
     TopKQueryResult result;
 
     status = request_handler_.HybridSearch(GetContext(context), hybrid_search_context, request->collection_name(),
-                                           partition_list, general_query, result);
+                                           partition_list, general_query, json_params, result);
 
     // step 6: construct and return result
     ConstructResults(result, response);

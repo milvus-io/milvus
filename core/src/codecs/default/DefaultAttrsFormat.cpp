@@ -186,6 +186,35 @@ DefaultAttrsFormat::write(const milvus::storage::FSHandlerPtr& fs_ptr, const mil
 }
 
 void
+DefaultAttrsFormat::read_attrs(const milvus::storage::FSHandlerPtr& fs_ptr,
+                               const std::string& field_name,
+                               off_t offset,
+                               size_t num_bytes,
+                               std::vector<uint8_t>& raw_attrs) {
+    const std::lock_guard<std::mutex> lock(mutex_);
+
+    std::string dir_path = fs_ptr->operation_ptr_->GetDirectory();
+    if (!boost::filesystem::is_directory(dir_path)) {
+        std::string err_msg = "Directory: " + dir_path + "does not exist";
+        LOG_ENGINE_ERROR_ << err_msg;
+        throw Exception(SERVER_INVALID_ARGUMENT, err_msg);
+    }
+
+    boost::filesystem::path target_path(dir_path);
+    typedef boost::filesystem::directory_iterator d_it;
+    d_it it_end;
+    d_it it(target_path);
+
+    for (; it != it_end; ++it) {
+        const auto& path = it->path();
+        if (path.extension().string() == raw_attr_extension_ && path.filename().string() == field_name) {
+            size_t nbytes;
+            read_attrs_internal(fs_ptr, path.string(), offset, num_bytes, raw_attrs, nbytes);
+        }
+    }
+}
+
+void
 DefaultAttrsFormat::read_uids(const milvus::storage::FSHandlerPtr& fs_ptr, std::vector<int64_t>& uids) {
     const std::lock_guard<std::mutex> lock(mutex_);
 

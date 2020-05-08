@@ -143,7 +143,7 @@ class RequestHandler {
     Status
     HybridSearch(const std::shared_ptr<Context>& context, context::HybridSearchContextPtr hybrid_search_context,
                  const std::string& collection_name, std::vector<std::string>& partition_list,
-                 query::GeneralQueryPtr& boolean_query, TopKQueryResult& result);
+                 query::GeneralQueryPtr& general_query, milvus::json& json_params, TopKQueryResult& result);
 };
 
 }  // namespace server

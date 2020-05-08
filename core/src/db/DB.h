@@ -115,6 +115,10 @@ class DB {
                    std::vector<engine::VectorsData>& vectors) = 0;
 
     virtual Status
+    GetEntitiesByID(const std::string& collection_id, const IDNumbers& id_array,
+                    std::vector<engine::VectorsData>& vectors, std::vector<engine::AttrsData>& attrs) = 0;
+
+    virtual Status
     GetVectorIDs(const std::string& collection_id, const std::string& segment_id, IDNumbers& vector_ids) = 0;
 
     //    virtual Status
@@ -165,7 +169,7 @@ class DB {
     virtual Status
     HybridQuery(const std::shared_ptr<server::Context>& context, const std::string& collection_id,
                 const std::vector<std::string>& partition_tags, context::HybridSearchContextPtr hybrid_search_context,
-                query::GeneralQueryPtr general_query,
+                query::GeneralQueryPtr general_query, std::vector<std::string>& field_name,
                 std::unordered_map<std::string, engine::meta::hybrid::DataType>& attr_type, uint64_t& nq,
                 engine::ResultIds& result_ids, engine::ResultDistances& result_distances) = 0;
 };  // DB

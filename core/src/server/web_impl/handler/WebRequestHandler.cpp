@@ -689,9 +689,17 @@ WebRequestHandler::HybridSearch(const std::string& collection_name, const nlohma
         return Status{UNEXPECTED_ERROR, "DescribeHybridCollection failed"};
     }
 
+    milvus::json extra_params;
+    if (json.contains("fields")) {
+        if (json["fields"].is_array()) {
+            extra_params["fields"] = json["fields"];
+        }
+    }
+    auto query_json = json["query"];
+
     std::vector<std::string> partition_tags;
-    if (json.contains("partition_tags")) {
-        auto tags = json["partition_tags"];
+    if (query_json.contains("partition_tags")) {
+        auto tags = query_json["partition_tags"];
         if (!tags.is_null() && !tags.is_array()) {
             return Status(BODY_PARSE_FAIL, "Field \"partition_tags\" must be a array");
         }
@@ -701,8 +709,8 @@ WebRequestHandler::HybridSearch(const std::string& collection_name, const nlohma
         }
     }
 
-    if (json.contains("bool")) {
-        auto boolean_query_json = json["bool"];
+    if (query_json.contains("bool")) {
+        auto boolean_query_json = query_json["bool"];
         query::BooleanQueryPtr boolean_query = std::make_shared<query::BooleanQuery>();
 
         status = ProcessBoolQueryJson(boolean_query_json, boolean_query);
@@ -715,7 +723,7 @@ WebRequestHandler::HybridSearch(const std::string& collection_name, const nlohma
         context::HybridSearchContextPtr hybrid_search_context = std::make_shared<context::HybridSearchContext>();
         TopKQueryResult result;
         status = request_handler_.HybridSearch(context_ptr_, hybrid_search_context, collection_name, partition_tags,
-                                               general_query, result);
+                                               general_query, extra_params, result);
 
         if (!status.ok()) {
             return status;
@@ -1744,7 +1752,7 @@ WebRequestHandler::VectorsOp(const OString& collection_name, const OString& payl
         } else if (payload_json.contains("search")) {
             status = Search(collection_name->std_str(), payload_json["search"], result_str);
         } else if (payload_json.contains("query")) {
-            status = HybridSearch(collection_name->c_str(), payload_json["query"], result_str);
+            status = HybridSearch(collection_name->c_str(), payload_json, result_str);
         } else {
             status = Status(ILLEGAL_BODY, "Unknown body");
         }

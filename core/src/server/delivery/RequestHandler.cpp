@@ -308,9 +308,10 @@ Status
 RequestHandler::HybridSearch(const std::shared_ptr<Context>& context,
                              context::HybridSearchContextPtr hybrid_search_context, const std::string& collection_name,
                              std::vector<std::string>& partition_list, milvus::query::GeneralQueryPtr& general_query,
-                             TopKQueryResult& result) {
+                             milvus::json& json_params, TopKQueryResult& result) {
     BaseRequestPtr request_ptr = HybridSearchRequest::Create(context, hybrid_search_context, collection_name,
-                                                             partition_list, general_query, result);
+                                                             partition_list, general_query, json_params, result);
+
     RequestScheduler::ExecRequest(request_ptr);
 
     return request_ptr->status();

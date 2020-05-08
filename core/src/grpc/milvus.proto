@@ -363,7 +363,7 @@ message AttrRecord {
 
 message HEntity {
     Status status = 1;
-    int64 entity_id = 2;
+    repeated int64 entity_id = 2;
     repeated string field_names = 3;
     bytes attr_records = 4;
     int64 row_num = 5;
@@ -372,10 +372,11 @@ message HEntity {
 
 message HQueryResult {
     Status status = 1;
-    repeated HEntity entities = 2;
+    HEntity entities = 2;
     int64 row_num = 3;
     repeated float score = 4;
     repeated float distance = 5;
+    repeated KeyValuePair extra_params = 6;
 }
 
 message HInsertParam {
@@ -673,7 +674,7 @@ service MilvusService {
     rpc InsertEntity(HInsertParam) returns (HEntityIDs) {}
 
     // TODO(yukun): will change to HQueryResult
-    rpc HybridSearch(HSearchParam) returns (TopKQueryResult) {}
+    rpc HybridSearch(HSearchParam) returns (HQueryResult) {}
 
     rpc HybridSearchInSegments(HSearchInSegmentsParam) returns (TopKQueryResult) {}
 

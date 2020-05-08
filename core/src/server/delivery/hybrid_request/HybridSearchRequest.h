@@ -27,22 +27,23 @@ class HybridSearchRequest : public BaseRequest {
     Create(const std::shared_ptr<milvus::server::Context>& context,
            context::HybridSearchContextPtr& hybrid_search_context, const std::string& collection_name,
            std::vector<std::string>& partition_list, milvus::query::GeneralQueryPtr& general_query,
-           TopKQueryResult& result);
+           milvus::json& json_params, TopKQueryResult& result);
 
  protected:
     HybridSearchRequest(const std::shared_ptr<milvus::server::Context>& context,
                         context::HybridSearchContextPtr& hybrid_search_context, const std::string& collection_name,
                         std::vector<std::string>& partition_list, milvus::query::GeneralQueryPtr& general_query,
-                        TopKQueryResult& result);
+                        milvus::json& json_params, TopKQueryResult& result);
 
     Status
     OnExecute() override;
 
  private:
-    context::HybridSearchContextPtr hybrid_search_contxt_;
+    context::HybridSearchContextPtr hybrid_search_context_;
     const std::string collection_name_;
-    std::vector<std::string>& partition_list_;
-    milvus::query::GeneralQueryPtr& general_query_;
+    std::vector<std::string> partition_list_;
+    milvus::query::GeneralQueryPtr general_query_;
+    milvus::json json_params;
     TopKQueryResult& result_;
 };
 
