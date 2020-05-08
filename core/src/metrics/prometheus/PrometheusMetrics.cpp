@@ -15,6 +15,7 @@
 #include "metrics/SystemInfo.h"
 #include "utils/Log.h"
 
+#include <unistd.h>
 #include <string>
 #include <utility>
 
@@ -31,14 +32,23 @@ PrometheusMetrics::Init() {
         }
 
         // Following should be read from config file.
-        std::string push_port, push_address;
+        std::string server_port, push_port, push_address;
+        CONFIG_CHECK(config.GetServerConfigPort(server_port));
         CONFIG_CHECK(config.GetMetricConfigPort(push_port));
         CONFIG_CHECK(config.GetMetricConfigAddress(push_address));
 
         const std::string uri = std::string("/metrics");
         // const std::size_t num_threads = 2;
 
-        auto labels = prometheus::Gateway::GetInstanceLabel("pushgateway");
+        std::string hostportstr;
+        char hostname[1024];
+        if (gethostname(hostname, sizeof(hostname)) == 0) {
+            hostportstr = std::string(hostname) + ":" + server_port;
+        } else {
+            hostportstr = "pushgateway";
+        }
+
+        auto labels = prometheus::Gateway::GetInstanceLabel(hostportstr);
 
         // Init pushgateway
         gateway_ = std::make_shared<prometheus::Gateway>(push_address, push_port, "milvus_metrics", labels);
