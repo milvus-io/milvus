@@ -1563,9 +1563,14 @@ WebRequestHandler::Insert(const OString& collection_name, const OString& body, V
         }
         auto& id_array = vectors.id_array_;
         id_array.clear();
-        for (auto& id_str : ids_json) {
-            int64_t id = std::stol(id_str.get<std::string>());
-            id_array.emplace_back(id);
+        try {
+            for (auto& id_str : ids_json) {
+                int64_t id = std::stol(id_str.get<std::string>());
+                id_array.emplace_back(id);
+            }
+        } catch (std::exception& e) {
+            std::string err_msg = std::string("Cannot convert vectors id. details: ") + e.what();
+            RETURN_STATUS_DTO(SERVER_UNEXPECTED_ERROR, err_msg.c_str());
         }
     }
 
