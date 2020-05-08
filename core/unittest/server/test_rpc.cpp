@@ -934,6 +934,10 @@ TEST_F(RpcHandlerTest, CMD_TEST) {
     handler->Cmd(&context, &command, &reply);
     ASSERT_EQ(reply.string_reply(), MILVUS_VERSION);
 
+    command.set_cmd("requests");
+    handler->Cmd(&context, &command, &reply);
+    ASSERT_EQ(reply.status().error_code(), ::grpc::Status::OK.error_code());
+
     command.set_cmd("tasktable");
     handler->Cmd(&context, &command, &reply);
     ASSERT_EQ(reply.status().error_code(), ::grpc::Status::OK.error_code());
