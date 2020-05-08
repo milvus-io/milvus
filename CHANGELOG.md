@@ -18,6 +18,7 @@ Please mark all change in change log and use the issue from GitHub
 -   \#2141 Fix server start failed if wal directory exist
 -   \#2169 Fix SingleIndexTest.IVFSQHybrid unittest
 -   \#2196 Fix server start failed if wal is disabled
+-   \#2231 Use server_config to define hard-delete delay time for segment files
 
 ## Feature
 -   \#1751 Add api SearchByID

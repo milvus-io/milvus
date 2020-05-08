@@ -70,6 +70,7 @@ extern const char* CONFIG_STORAGE_PRIMARY_PATH;
 extern const char* CONFIG_STORAGE_PRIMARY_PATH_DEFAULT;
 extern const char* CONFIG_STORAGE_SECONDARY_PATH;
 extern const char* CONFIG_STORAGE_SECONDARY_PATH_DEFAULT;
+extern const char* CONFIG_STORAGE_FILE_CLEANUP_TIMEOUT;
 extern const char* CONFIG_STORAGE_S3_ENABLE;
 extern const char* CONFIG_STORAGE_S3_ENABLE_DEFAULT;
 extern const char* CONFIG_STORAGE_S3_ADDRESS;
@@ -256,6 +257,8 @@ class Config {
     Status
     CheckStorageConfigSecondaryPath(const std::string& value);
     Status
+    CheckStorageConfigFileCleanupTimeout(const std::string& value);
+    Status
     CheckStorageConfigS3Enable(const std::string& value);
     Status
     CheckStorageConfigS3Address(const std::string& value);
@@ -389,6 +392,8 @@ class Config {
     Status
     GetStorageConfigSecondaryPath(std::string& value);
     Status
+    GetStorageConfigFileCleanupTimeup(int64_t& value);
+    Status
     GetStorageConfigS3Enable(bool& value);
     Status
     GetStorageConfigS3Address(std::string& value);
@@ -513,6 +518,8 @@ class Config {
     SetStorageConfigPrimaryPath(const std::string& value);
     Status
     SetStorageConfigSecondaryPath(const std::string& value);
+    Status
+    SetStorageConfigFileCleanupTimeout(const std::string& value);
     Status
     SetStorageConfigS3Enable(const std::string& value);
     Status

@@ -74,6 +74,8 @@ const char* CONFIG_STORAGE_PRIMARY_PATH = "primary_path";
 const char* CONFIG_STORAGE_PRIMARY_PATH_DEFAULT = "/tmp/milvus";
 const char* CONFIG_STORAGE_SECONDARY_PATH = "secondary_path";
 const char* CONFIG_STORAGE_SECONDARY_PATH_DEFAULT = "";
+const char* CONFIG_STORAGE_FILE_CLEANUP_TIMEOUT = "file_cleanup_timeout";
+const char* CONFIG_STORAGE_FILE_CLEANUP_TIMEOUT_DEFAULT = "10";
 const char* CONFIG_STORAGE_S3_ENABLE = "s3_enable";
 const char* CONFIG_STORAGE_S3_ENABLE_DEFAULT = "false";
 const char* CONFIG_STORAGE_S3_ADDRESS = "s3_address";
@@ -443,6 +445,7 @@ Config::ResetDefaultConfig() {
     /* storage config */
     CONFIG_CHECK(SetStorageConfigPrimaryPath(CONFIG_STORAGE_PRIMARY_PATH_DEFAULT));
     CONFIG_CHECK(SetStorageConfigSecondaryPath(CONFIG_STORAGE_SECONDARY_PATH_DEFAULT));
+    CONFIG_CHECK(SetStorageConfigFileCleanupTimeout(CONFIG_STORAGE_FILE_CLEANUP_TIMEOUT_DEFAULT));
     CONFIG_CHECK(SetStorageConfigS3Enable(CONFIG_STORAGE_S3_ENABLE_DEFAULT));
     CONFIG_CHECK(SetStorageConfigS3Address(CONFIG_STORAGE_S3_ADDRESS_DEFAULT));
     CONFIG_CHECK(SetStorageConfigS3Port(CONFIG_STORAGE_S3_PORT_DEFAULT));
@@ -1089,6 +1092,32 @@ Config::CheckStorageConfigSecondaryPath(const std::string& value) {
 }
 
 Status
+Config::CheckStorageConfigFileCleanupTimeout(const std::string& value) {
+    auto status = Status::OK();
+
+    if (value.empty()) {
+        return status;
+    }
+
+    if (!ValidationUtil::ValidateStringIsNumber(value).ok()) {
+        std::string msg = "Invalid file cleanup timeout: " + value +
+                          ". Possible reason: storage_config.file_cleanup_timeout is not a positive integer.";
+        return Status(SERVER_INVALID_ARGUMENT, msg);
+    } else {
+        const int64_t min = 0, max = 3600;
+        int64_t file_cleanup_timeout = std::stoll(value);
+        if (file_cleanup_timeout < min || file_cleanup_timeout > max) {
+            std::string msg = "Invalid file cleanup timeout: " + value +
+                              ". Possible reason: storage_config.file_cleanup_timeout is not in range [" +
+                              std::to_string(min) + ", " + std::to_string(max) + "].";
+            return Status(SERVER_INVALID_ARGUMENT, msg);
+        }
+    }
+
+    return Status::OK();
+}
+
+Status
 Config::CheckStorageConfigS3Enable(const std::string& value) {
     if (!ValidationUtil::ValidateStringIsBool(value).ok()) {
         std::string msg =
@@ -1501,6 +1530,7 @@ Config::CheckGpuResourceConfigBuildIndexResources(const std::vector<std::string>
 }
 
 #endif
+
 /* tracing config */
 Status
 Config::CheckTracingConfigJsonConfigPath(const std::string& value) {
@@ -1852,6 +1882,15 @@ Status
 Config::GetStorageConfigSecondaryPath(std::string& value) {
     value = GetConfigStr(CONFIG_STORAGE, CONFIG_STORAGE_SECONDARY_PATH, CONFIG_STORAGE_SECONDARY_PATH_DEFAULT);
     return CheckStorageConfigSecondaryPath(value);
+}
+
+Status
+Config::GetStorageConfigFileCleanupTimeup(int64_t& value) {
+    std::string str =
+        GetConfigStr(CONFIG_STORAGE, CONFIG_STORAGE_FILE_CLEANUP_TIMEOUT, CONFIG_STORAGE_FILE_CLEANUP_TIMEOUT_DEFAULT);
+    CONFIG_CHECK(CheckStorageConfigFileCleanupTimeout(str));
+    value = std::stoll(str);
+    return Status::OK();
 }
 
 Status
@@ -2308,6 +2347,12 @@ Config::SetStorageConfigSecondaryPath(const std::string& value) {
 }
 
 Status
+Config::SetStorageConfigFileCleanupTimeout(const std::string& value) {
+    CONFIG_CHECK(CheckStorageConfigFileCleanupTimeout(value));
+    return SetConfigValueInMem(CONFIG_STORAGE, CONFIG_STORAGE_FILE_CLEANUP_TIMEOUT, value);
+}
+
+Status
 Config::SetStorageConfigS3Enable(const std::string& value) {
     CONFIG_CHECK(CheckStorageConfigS3Enable(value));
     return SetConfigValueInMem(CONFIG_STORAGE, CONFIG_STORAGE_S3_ENABLE, value);
@@ -2498,12 +2543,14 @@ Config::SetLogsDeleteExceeds(const std::string& value) {
 }
 
 #ifdef MILVUS_GPU_VERSION
+
 Status
 Config::SetEngineConfigGpuSearchThreshold(const std::string& value) {
     CONFIG_CHECK(CheckEngineConfigGpuSearchThreshold(value));
     CONFIG_CHECK(SetConfigValueInMem(CONFIG_ENGINE, CONFIG_ENGINE_GPU_SEARCH_THRESHOLD, value));
     return ExecCallBacks(CONFIG_ENGINE, CONFIG_ENGINE_GPU_SEARCH_THRESHOLD, value);
 }
+
 #endif
 
 /* gpu resource config */
