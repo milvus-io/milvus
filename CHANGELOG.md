@@ -11,6 +11,7 @@ Please mark all change in change log and use the issue from GitHub
 -   \#1946 Fix load index file CPU2GPU fail during searching
 -   \#1955 Switch create_index operation to background once client break connection
 -   \#1997 Index file missed after compact
+-   \#2203 0.8.0 id=-1 is returned when total count < topk
 -   \#2073 Fix CheckDBConfigBackendUrl error message
 -   \#2076 CheckMetricConfigAddress error message
 -   \#2120 Fix Search expected failed if search params set invalid
