@@ -13,10 +13,13 @@ Please mark all change in change log and use the issue from GitHub
 -   \#1997 Index file missed after compact
 -   \#2073 Fix CheckDBConfigBackendUrl error message
 -   \#2076 CheckMetricConfigAddress error message
+-   \#2120 Fix Search expected failed if search params set invalid
+-   \#2121 Allow regex match partition tag when search
 -   \#2128 Check has_partition params
 -   \#2131 Distance/ID returned is not correct if searching with duplicate ids
 -   \#2141 Fix server start failed if wal directory exist
 -   \#2169 Fix SingleIndexTest.IVFSQHybrid unittest
+-   \#2194 Fix get collection info failed
 -   \#2196 Fix server start failed if wal is disabled
 -   \#2231 Use server_config to define hard-delete delay time for segment files
 
@@ -45,6 +48,7 @@ Please mark all change in change log and use the issue from GitHub
 -   \#2185 Change id to string format in http module
 -   \#2186 Update endpoints in http module
 -   \#2190 Fix memory usage is twice of index size when using GPU searching
+-   \#2252 Upgrade mishards to v0.9.0
 
 ## Task
 
