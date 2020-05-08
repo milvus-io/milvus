@@ -62,22 +62,22 @@ ConstructTopkResult(const ::milvus::grpc::TopKQueryResult& grpc_result, TopKQuer
     topk_query_result.reserve(grpc_result.row_num());
     int64_t nq = grpc_result.row_num();
     int64_t topk = grpc_result.ids().size() / nq;
-    std::vector<int64_t> valid_num(nq);
-    for (int64_t i = 0; i < nq; ++i) {
-        valid_num[i] = topk;
-        for (int64_t j = 0; j < topk; ++j) {
-            if (grpc_result.ids(i * topk + j) == -1) {
-                valid_num[i] = j;
-                break;
-            }
-        }
-    }
     for (int64_t i = 0; i < nq; i++) {
         milvus::QueryResult one_result;
-        one_result.ids.resize(valid_num[i]);
-        one_result.distances.resize(valid_num[i]);
-        memcpy(one_result.ids.data(), grpc_result.ids().data() + topk * i, valid_num[i] * sizeof(int64_t));
-        memcpy(one_result.distances.data(), grpc_result.distances().data() + topk * i, valid_num[i] * sizeof(float));
+        one_result.ids.resize(topk);
+        one_result.distances.resize(topk);
+        memcpy(one_result.ids.data(), grpc_result.ids().data() + topk * i, topk * sizeof(int64_t));
+        memcpy(one_result.distances.data(), grpc_result.distances().data() + topk * i, topk * sizeof(float));
+
+        int valid_size = one_result.ids.size();
+        while (valid_size > 0 && one_result.ids[valid_size - 1] == -1) {
+            valid_size--;
+        }
+        if (valid_size != topk) {
+            one_result.ids.resize(valid_size);
+            one_result.distances.resize(valid_size);
+        }
+
         topk_query_result.emplace_back(one_result);
     }
 }
