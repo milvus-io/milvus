@@ -2122,7 +2122,7 @@ DBImpl::BackgroundMergeFiles(const std::string& collection_id) {
     }
 
     if (files_holder.HoldFiles().size() < options_.merge_trigger_number_) {
-        LOG_ENGINE_TRACE_ << "Files number not greater equal than merge trigger number, skip merge action";
+//        LOG_ENGINE_TRACE_ << "Files number not greater equal than merge trigger number, skip merge action";
         return Status::OK();
     }
 
