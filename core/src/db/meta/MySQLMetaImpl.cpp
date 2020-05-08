@@ -541,7 +541,7 @@ MySQLMetaImpl::DescribeCollection(CollectionSchema& collection_schema) {
 }
 
 Status
-MySQLMetaImpl::HasCollection(const std::string& collection_id, bool& has_or_not) {
+MySQLMetaImpl::HasCollection(const std::string& collection_id, bool is_root, bool& has_or_not) {
     try {
         server::MetricCollector metric;
         mysqlpp::StoreQueryResult res;
