@@ -88,26 +88,26 @@ BuildEntity(uint64_t n, uint64_t batch_index, milvus::engine::Entity& entity) {
         vectors.id_array_.push_back(n * batch_index + i);
     }
     entity.vector_data_.insert(std::make_pair("field_3", vectors));
-    std::vector<int32_t> value_0;
+    std::vector<int64_t> value_0;
     std::vector<int64_t> value_1;
-    std::vector<float> value_2;
+    std::vector<double> value_2;
     value_0.resize(n);
     value_1.resize(n);
     value_2.resize(n);
     for (uint64_t i = 0; i < n; ++i) {
         value_0[i] = i;
         value_1[i] = i + n;
-        value_2[i] = (float)((i + 100) / (n + 1));
+        value_2[i] = (double)((i + 100) / (n + 1));
     }
     entity.entity_count_ = n;
-    size_t attr_size = n * (sizeof(int32_t) + sizeof(float) + sizeof(int64_t));
+    size_t attr_size = n * (sizeof(int64_t) + sizeof(double) + sizeof(int64_t));
     std::vector<uint8_t> attr_value(attr_size, 0);
     size_t offset = 0;
-    memcpy(attr_value.data(), value_0.data(), n * sizeof(int32_t));
-    offset += n * sizeof(int32_t);
+    memcpy(attr_value.data(), value_0.data(), n * sizeof(int64_t));
+    offset += n * sizeof(int64_t);
     memcpy(attr_value.data() + offset, value_1.data(), n * sizeof(int64_t));
     offset += n * sizeof(int64_t);
-    memcpy(attr_value.data() + offset, value_2.data(), n * sizeof(float));
+    memcpy(attr_value.data() + offset, value_2.data(), n * sizeof(double));
 
     entity.attr_value_ = attr_value;
 }
