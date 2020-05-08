@@ -11,6 +11,7 @@ Please mark all change in change log and use the issue from GitHub
 -   \#1946 Fix load index file CPU2GPU fail during searching
 -   \#1955 Switch create_index operation to background once client break connection
 -   \#1997 Index file missed after compact
+-   \#2002 Remove log error msg `Attributes is null`
 -   \#2073 Fix CheckDBConfigBackendUrl error message
 -   \#2076 CheckMetricConfigAddress error message
 -   \#2120 Fix Search expected failed if search params set invalid
@@ -34,6 +35,7 @@ Please mark all change in change log and use the issue from GitHub
 -   \#2064 Warn when use SQLite as metadata management
 -   \#2111 Check GPU environment before start server
 -   \#2206 Log file rotating
+-   \#2240 Obtain running rpc requests information
 
 ## Improvement
 -   \#221 Refactor LOG macro
