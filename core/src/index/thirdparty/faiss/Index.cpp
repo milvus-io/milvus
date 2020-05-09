@@ -36,11 +36,13 @@ void Index::range_search (idx_t , const float *, float,
   FAISS_THROW_MSG ("range search not implemented");
 }
 
-void Index::assign (idx_t n, const float * x, idx_t * labels, idx_t k)
+void Index::assign (idx_t n, const float *x, idx_t *labels, float *distance)
 {
-  float * distances = new float[n * k];
-  ScopeDeleter<float> del(distances);
-  search (n, x, k, distances, labels);
+  float *dis_inner = (distance == nullptr) ? new float[n] : distance;
+  search (n, x, 1, dis_inner, labels);
+  if (distance == nullptr) {
+    delete[] dis_inner;
+  }
 }
 
 void Index::add_with_ids(idx_t n, const float* x, const idx_t* xids) {

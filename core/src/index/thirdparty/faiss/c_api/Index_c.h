@@ -106,9 +106,9 @@ int faiss_Index_range_search(const FaissIndex* index, idx_t n, const float* x,
  * This function is identical as search but only return labels of neighbors.
  * @param index       opaque pointer to index object
  * @param x           input vectors to search, size n * d
- * @param labels      output labels of the NNs, size n*k
+ * @param labels      output labels of the NNs, size n
  */
-int faiss_Index_assign(FaissIndex* index, idx_t n, const float * x, idx_t * labels, idx_t k);
+int faiss_Index_assign(FaissIndex* index, idx_t n, const float * x, idx_t * labels);
 
 /** removes all elements from the database.
  * @param index       opaque pointer to index object

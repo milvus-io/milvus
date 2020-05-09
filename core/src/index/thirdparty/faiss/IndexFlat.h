@@ -36,6 +36,12 @@ struct IndexFlat: Index {
         idx_t* labels,
         ConcurrentBitsetPtr bitset = nullptr) const override;
 
+    void assign (
+        idx_t n,
+        const float * x,
+        idx_t * labels,
+        float* distances = nullptr) override;
+
     void range_search(
         idx_t n,
         const float* x,
