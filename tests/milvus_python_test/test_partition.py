@@ -228,6 +228,78 @@ class TestShowBase:
         assert status.OK()
 
 
+class TestHasBase:
+
+    """
+    ******************************************************************
+      The following cases are used to test `has_partition` function
+    ******************************************************************
+    """
+    @pytest.fixture(
+        scope="function",
+        params=gen_invalid_collection_names()
+    )
+    def get_tag_name(self, request):
+        yield request.param
+
+    def test_has_partition(self, connect, collection):
+        '''
+        target: test has_partition, check status and result
+        method: create partition first, then call function: has_partition
+        expected: status ok, result true
+        '''
+        status = connect.create_partition(collection, tag)
+        status, res = connect.has_partition(collection, tag)
+        assert status.OK()
+        logging.getLogger().info(res)
+        assert res
+
+    def test_has_partition_multi_partitions(self, connect, collection):
+        '''
+        target: test has_partition, check status and result
+        method: create partition first, then call function: has_partition
+        expected: status ok, result true
+        '''
+        for tag_name in [tag, "tag_new", "tag_new_new"]:
+            status = connect.create_partition(collection, tag_name)
+        for tag_name in [tag, "tag_new", "tag_new_new"]:
+            status, res = connect.has_partition(collection, tag_name)
+            assert status.OK()
+            assert res
+
+    def test_has_partition_tag_not_existed(self, connect, collection):
+        '''
+        target: test has_partition, check status and result
+        method: then call function: has_partition, with tag not existed
+        expected: status ok, result empty
+        '''
+        status, res = connect.has_partition(collection, tag)
+        assert status.OK()
+        logging.getLogger().info(res)
+        assert not res
+
+    def test_has_partition_collection_not_existed(self, connect, collection):
+        '''
+        target: test has_partition, check status and result
+        method: then call function: has_partition, with collection not existed
+        expected: status not ok
+        '''
+        status, res = connect.has_partition("not_existed_collection", tag)
+        assert not status.OK()
+
+    @pytest.mark.level(2)
+    def test_has_partition_with_invalid_tag_name(self, connect, collection, get_tag_name):
+        '''
+        target: test has partition, with invalid tag name, check status returned
+        method: call function: has_partition
+        expected: status ok
+        '''
+        tag_name = get_tag_name
+        status = connect.create_partition(collection, tag)
+        status, res = connect.has_partition(collection, tag_name)
+        assert status.OK()
+
+
 class TestDropBase:
 
     """

@@ -1806,3 +1806,75 @@ class TestCreateIndexParamsInvalid(object):
         logging.getLogger().info(result)
         assert result._collection_name == collection
         assert result._index_type == IndexType.FLAT
+
+class TestIndexAsync:
+    """
+    ******************************************************************
+      The following cases are used to test `create_index` function
+    ******************************************************************
+    """
+    @pytest.fixture(
+        scope="function",
+        params=gen_index()
+    )
+    def get_index(self, request, connect):
+        if str(connect._cmd("mode")[1]) == "CPU":
+            if request.param["index_type"] == IndexType.IVF_SQ8H:
+                pytest.skip("sq8h not support in CPU mode")
+        if str(connect._cmd("mode")[1]) == "GPU":
+            if request.param["index_type"] == IndexType.IVF_PQ:
+                pytest.skip("ivfpq not support in GPU mode")
+        return request.param
+
+    @pytest.fixture(
+        scope="function",
+        params=gen_simple_index()
+    )
+    def get_simple_index(self, request, connect):
+        if str(connect._cmd("mode")[1]) == "CPU":
+            if request.param["index_type"] == IndexType.IVF_SQ8H:
+                pytest.skip("sq8h not support in CPU mode")
+        if str(connect._cmd("mode")[1]) == "GPU":
+            # if request.param["index_type"] == IndexType.IVF_PQ:
+            if request.param["index_type"] not in [IndexType.IVF_FLAT]:
+                # pytest.skip("ivfpq not support in GPU mode")
+                pytest.skip("debug ivf_flat in GPU mode")
+        return request.param
+
+    def check_status(self, status):
+        logging.getLogger().info("In callback check status")
+        assert status.OK()
+
+    """
+    ******************************************************************
+      The following cases are used to test `create_index` function
+    ******************************************************************
+    """
+
+    @pytest.mark.timeout(BUILD_TIMEOUT)
+    def test_create_index(self, connect, collection, get_simple_index):
+        '''
+        target: test create index interface
+        method: create collection and add vectors in it, create index
+        expected: return code equals to 0, and search success
+        '''
+        index_param = get_simple_index["index_param"]
+        index_type = get_simple_index["index_type"]
+        logging.getLogger().info(get_simple_index)
+        vectors = gen_vectors(nb, dim)
+        status, ids = connect.add_vectors(collection, vectors)
+        logging.getLogger().info("start index")
+        # future = connect.create_index(collection, index_type, index_param, _async=True, _callback=self.check_status) 
+        future = connect.create_index(collection, index_type, index_param, _async=True) 
+        logging.getLogger().info("before result")
+        status = future.result()
+        assert status.OK()
+
+    def test_create_index_with_invalid_collectionname(self, connect):
+        collection_name = " "
+        nlist = NLIST
+        index_param = {"nlist": nlist}
+        future = connect.create_index(collection_name, IndexType.IVF_SQ8, index_param, _async=True)
+        status = future.result()
+        assert not status.OK()
+
