@@ -185,7 +185,7 @@ constexpr int32_t PORT_NUMBER_MIN = 1024;
 constexpr int32_t PORT_NUMBER_MAX = 65535;
 
 static const std::unordered_map<std::string, std::string> milvus_config_version_map(
-    {{"0.6.0", "0.1"}, {"0.7.0", "0.2"}, {"0.7.1", "0.2"}, {"0.8.0", "0.3"}});
+    {{"0.6.0", "0.1"}, {"0.7.0", "0.2"}, {"0.7.1", "0.2"}, {"0.8.0", "0.3"}, {"0.9.0", "0.4"}});
 
 /////////////////////////////////////////////////////////////
 Config::Config() {

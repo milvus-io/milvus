@@ -38,7 +38,7 @@ class MySQLMetaImpl : public Meta {
     DescribeCollection(CollectionSchema& collection_schema) override;
 
     Status
-    HasCollection(const std::string& collection_id, bool& has_or_not) override;
+    HasCollection(const std::string& collection_id, bool& has_or_not, bool is_root = false) override;
 
     Status
     AllCollections(std::vector<CollectionSchema>& collection_schema_array) override;

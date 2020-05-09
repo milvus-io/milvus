@@ -217,8 +217,6 @@ else ()
         @ONLY)
 endif ()
 
-configure_file(${CMAKE_CURRENT_SOURCE_DIR}/conf/log_config.template ${CMAKE_CURRENT_SOURCE_DIR}/conf/log_config.conf)
-
 install(DIRECTORY scripts/
         DESTINATION scripts
         FILE_PERMISSIONS OWNER_EXECUTE OWNER_WRITE OWNER_READ
@@ -232,7 +230,6 @@ install(DIRECTORY scripts/migration
         WORLD_EXECUTE WORLD_READ)
 install(FILES
         conf/server_config.yaml
-        conf/log_config.conf
         DESTINATION
         conf)
 
