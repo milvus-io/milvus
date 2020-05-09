@@ -25,6 +25,7 @@ Please mark all change in change log and use the issue from GitHub
 -   \#2196 Fix server start failed if wal is disabled
 -   \#2203 0.8.0 id=-1 is returned when total count < topk
 -   \#2231 Use server_config to define hard-delete delay time for segment files
+-   \#2261 Re-define result returned by has_collection if collection in delete state
 
 ## Feature
 -   \#1751 Add api SearchByID

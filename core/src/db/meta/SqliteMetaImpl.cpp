@@ -272,7 +272,7 @@ SqliteMetaImpl::DescribeCollection(CollectionSchema& collection_schema) {
 }
 
 Status
-SqliteMetaImpl::HasCollection(const std::string& collection_id, bool& has_or_not) {
+SqliteMetaImpl::HasCollection(const std::string& collection_id, bool& has_or_not, bool is_root) {
     has_or_not = false;
 
     try {
@@ -281,11 +281,21 @@ SqliteMetaImpl::HasCollection(const std::string& collection_id, bool& has_or_not
 
         // multi-threads call sqlite update may get exception('bad logic', etc), so we add a lock here
         std::lock_guard<std::mutex> meta_lock(meta_mutex_);
-        auto collections = ConnectorPtr->select(
-            columns(&CollectionSchema::id_),
-            where(c(&CollectionSchema::collection_id_) == collection_id
-                  and c(&CollectionSchema::state_) != (int)CollectionSchema::TO_DELETE));
-        if (collections.size() == 1) {
+
+        auto select_columns = columns(&CollectionSchema::id_, &CollectionSchema::owner_collection_);
+        decltype(ConnectorPtr->select(select_columns)) selected;
+        if (is_root) {
+            selected = ConnectorPtr->select(select_columns,
+                where(c(&CollectionSchema::collection_id_) == collection_id
+                      and c(&CollectionSchema::state_) != (int)CollectionSchema::TO_DELETE
+                      and c(&CollectionSchema::owner_collection_) == ""));
+        } else {
+            selected = ConnectorPtr->select(select_columns,
+                where(c(&CollectionSchema::collection_id_) == collection_id
+                      and c(&CollectionSchema::state_) != (int)CollectionSchema::TO_DELETE));
+        }
+
+        if (selected.size() == 1) {
             has_or_not = true;
         } else {
             has_or_not = false;
