@@ -272,7 +272,7 @@ SqliteMetaImpl::DescribeCollection(CollectionSchema& collection_schema) {
 }
 
 Status
-SqliteMetaImpl::HasCollection(const std::string& collection_id, bool is_root, bool& has_or_not) {
+SqliteMetaImpl::HasCollection(const std::string& collection_id, bool& has_or_not, bool is_root) {
     has_or_not = false;
 
     try {
@@ -287,7 +287,8 @@ SqliteMetaImpl::HasCollection(const std::string& collection_id, bool is_root, bo
         if (is_root) {
             selected = ConnectorPtr->select(select_columns,
                 where(c(&CollectionSchema::collection_id_) == collection_id
-                      and c(&CollectionSchema::state_) != (int)CollectionSchema::TO_DELETE));
+                      and c(&CollectionSchema::state_) != (int)CollectionSchema::TO_DELETE
+                      and c(&CollectionSchema::owner_collection_) == ""));
         } else {
             selected = ConnectorPtr->select(select_columns,
                 where(c(&CollectionSchema::collection_id_) == collection_id

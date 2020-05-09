@@ -275,7 +275,7 @@ DBImpl::HasCollection(const std::string& collection_id, bool& has_or_not) {
         return SHUTDOWN_ERROR;
     }
 
-    return meta_ptr_->HasCollection(collection_id, false, has_or_not);
+    return meta_ptr_->HasCollection(collection_id, has_or_not, false);
 }
 
 Status
@@ -284,7 +284,7 @@ DBImpl::HasNativeCollection(const std::string& collection_id, bool& has_or_not) 
         return SHUTDOWN_ERROR;
     }
 
-    return meta_ptr_->HasCollection(collection_id, true, has_or_not);
+    return meta_ptr_->HasCollection(collection_id, has_or_not, true);
 }
 
 Status

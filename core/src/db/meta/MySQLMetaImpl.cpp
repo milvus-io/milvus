@@ -541,7 +541,7 @@ MySQLMetaImpl::DescribeCollection(CollectionSchema& collection_schema) {
 }
 
 Status
-MySQLMetaImpl::HasCollection(const std::string& collection_id, bool is_root, bool& has_or_not) {
+MySQLMetaImpl::HasCollection(const std::string& collection_id, bool& has_or_not, bool is_root) {
     try {
         server::MetricCollector metric;
         mysqlpp::StoreQueryResult res;
@@ -557,12 +557,21 @@ MySQLMetaImpl::HasCollection(const std::string& collection_id, bool is_root, boo
 
             mysqlpp::Query HasCollectionQuery = connectionPtr->query();
             // since collection_id is a unique column we just need to check whether it exists or not
-            HasCollectionQuery << "SELECT EXISTS"
-                               << " (SELECT 1 FROM " << META_TABLES << " WHERE table_id = " << mysqlpp::quote
-                               << collection_id << " AND state <> " << std::to_string(CollectionSchema::TO_DELETE)
-                               << ")"
-                               << " AS " << mysqlpp::quote << "check"
-                               << ";";
+            if (is_root) {
+                HasCollectionQuery << "SELECT EXISTS"
+                                   << " (SELECT 1 FROM " << META_TABLES << " WHERE table_id = " << mysqlpp::quote
+                                   << collection_id << " AND state <> " << std::to_string(CollectionSchema::TO_DELETE)
+                                   << " AND owner_table <> " << mysqlpp::quote << ")"
+                                   << " AS " << mysqlpp::quote << "check"
+                                   << ";";
+            } else {
+                HasCollectionQuery << "SELECT EXISTS"
+                                   << " (SELECT 1 FROM " << META_TABLES << " WHERE table_id = " << mysqlpp::quote
+                                   << collection_id << " AND state <> " << std::to_string(CollectionSchema::TO_DELETE)
+                                   << ")"
+                                   << " AS " << mysqlpp::quote << "check"
+                                   << ";";
+            }
 
             LOG_ENGINE_DEBUG_ << "HasCollection: " << HasCollectionQuery.str();
 
