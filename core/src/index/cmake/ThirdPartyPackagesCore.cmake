@@ -597,17 +597,10 @@ macro(build_faiss)
                 PROPERTIES
                 INTERFACE_LINK_LIBRARIES "${MKL_LIBS}")
     else ()
-        if (OpenBLAS_FOUND STREQUAL "OFF")
-            set(openblas_include "${OPENBLAS_PREFIX}/include")
-            set(openblas_lib "${OPENBLAS_PREFIX}/lib/libopenblas.so")
-        else()
-            set(openblas_lib ${OpenBLAS_LIBRARIES})
-            set(openblas_include ${OpenBLAS_INCLUDE_DIR})
-        endif()
         set_target_properties(
                 faiss
                 PROPERTIES
-                INTERFACE_LINK_LIBRARIES "${openblas_lib}")
+                INTERFACE_LINK_LIBRARIES "${OpenBLAS_LIBRARIES}")
     endif ()
 
     add_dependencies(faiss faiss_ep)

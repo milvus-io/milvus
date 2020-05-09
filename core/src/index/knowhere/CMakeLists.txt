@@ -70,9 +70,6 @@ if (FAISS_WITH_MKL)
             -Wl,--end-group -lgomp -lpthread -lm -ldl"
             )
 else ()
-    if (NOT OpenBLAS_LIBRARIES)
-        set(OpenBLAS_LIBRARIES openblas)
-    endif()
     set(depend_libs ${depend_libs}
             ${OpenBLAS_LIBRARIES}
             ${LAPACK_LIBRARIES}
