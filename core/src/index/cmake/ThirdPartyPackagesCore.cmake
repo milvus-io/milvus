@@ -317,7 +317,8 @@ endif ()
 set(OPENBLAS_PREFIX "${INDEX_BINARY_DIR}/openblas_ep-prefix/src/openblas_ep")
 macro(build_openblas)
     message(STATUS "Building OpenBLAS-${OPENBLAS_VERSION} from source")
-    set(OPENBLAS_INCLUDE_DIR "${OPENBLAS_PREFIX}/include")
+    set(OpenBLAS_INCLUDE_DIR "${OPENBLAS_PREFIX}/include")
+    set(OpenBLAS_LIB_DIR "${OPENBLAS_PREFIX}/lib")
     set(OPENBLAS_SHARED_LIB
             "${OPENBLAS_PREFIX}/lib/${CMAKE_SHARED_LIBRARY_PREFIX}openblas${CMAKE_SHARED_LIBRARY_SUFFIX}")
     set(OPENBLAS_STATIC_LIB
@@ -360,22 +361,23 @@ macro(build_openblas)
             ${OPENBLAS_SHARED_LIB}
             ${OPENBLAS_STATIC_LIB})
 
-    file(MAKE_DIRECTORY "${OPENBLAS_INCLUDE_DIR}")
+    file(MAKE_DIRECTORY "${OpenBLAS_INCLUDE_DIR}")
     add_library(openblas SHARED IMPORTED)
     set_target_properties(
             openblas
             PROPERTIES
             IMPORTED_LOCATION "${OPENBLAS_SHARED_LIB}"
             LIBRARY_OUTPUT_NAME "openblas"
-            INTERFACE_INCLUDE_DIRECTORIES "${OPENBLAS_INCLUDE_DIR}")
+            INTERFACE_INCLUDE_DIRECTORIES "${OpenBLAS_INCLUDE_DIR}")
     add_dependencies(openblas openblas_ep)
+    get_target_property(OpenBLAS_INCLUDE_DIR openblas INTERFACE_INCLUDE_DIRECTORIES)
+    set(OpenBLAS_LIBRARIES "${OPENBLAS_SHARED_LIB}")
 endmacro()
 
 if (KNOWHERE_WITH_OPENBLAS)
     resolve_dependency(OpenBLAS)
-    get_target_property(OPENBLAS_INCLUDE_DIR openblas INTERFACE_INCLUDE_DIRECTORIES)
-    include_directories(SYSTEM "${OPENBLAS_INCLUDE_DIR}")
-    link_directories(SYSTEM ${OPENBLAS_PREFIX}/lib)
+    include_directories(SYSTEM "${OpenBLAS_INCLUDE_DIR}")
+    link_directories(SYSTEM "${OpenBLAS_LIB_DIR}")
 endif()
 
 # ----------------------------------------------------------------------
@@ -521,12 +523,12 @@ macro(build_faiss)
                 )
     else ()
         message(STATUS "Build Faiss with OpenBlas/LAPACK")
-        if(KNOWHERE_WITH_OPENBLAS)
+        if(OpenBLAS_FOUND)
             set(FAISS_CONFIGURE_ARGS ${FAISS_CONFIGURE_ARGS}
-                "LDFLAGS=-L${OPENBLAS_PREFIX}/lib")
+                "LDFLAGS=-L${OpenBLAS_LIB_DIR}")
         else()
             set(FAISS_CONFIGURE_ARGS ${FAISS_CONFIGURE_ARGS}
-                "LDFLAGS=-L${OpenBLAS_PATH}/lib")
+                "LDFLAGS=-L${OPENBLAS_PREFIX}/lib")
         endif()
     endif ()
 
@@ -578,10 +580,11 @@ macro(build_faiss)
                 ${FAISS_STATIC_LIB})
     endif ()
 
-    if(KNOWHERE_WITH_OPENBLAS)
+    if(NOT OpenBLAS_FOUND)
         message("add faiss dependencies: openblas_ep")
         ExternalProject_Add_StepDependencies(faiss_ep configure openblas_ep)
     endif()
+
     file(MAKE_DIRECTORY "${FAISS_INCLUDE_DIR}")
     add_library(faiss STATIC IMPORTED)
 
@@ -597,17 +600,10 @@ macro(build_faiss)
                 PROPERTIES
                 INTERFACE_LINK_LIBRARIES "${MKL_LIBS}")
     else ()
-        if (OpenBLAS_FOUND STREQUAL "OFF")
-            set(openblas_include "${OPENBLAS_PREFIX}/include")
-            set(openblas_lib "${OPENBLAS_PREFIX}/lib/libopenblas.so")
-        else()
-            set(openblas_lib ${OpenBLAS_LIBRARIES})
-            set(openblas_include ${OpenBLAS_INCLUDE_DIR})
-        endif()
         set_target_properties(
                 faiss
                 PROPERTIES
-                INTERFACE_LINK_LIBRARIES "${openblas_lib}")
+                INTERFACE_LINK_LIBRARIES "${OpenBLAS_LIBRARIES}")
     endif ()
 
     add_dependencies(faiss faiss_ep)

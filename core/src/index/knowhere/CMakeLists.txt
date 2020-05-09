@@ -70,9 +70,6 @@ if (FAISS_WITH_MKL)
             -Wl,--end-group -lgomp -lpthread -lm -ldl"
             )
 else ()
-    if (NOT OpenBLAS_LIBRARIES)
-        set(OpenBLAS_LIBRARIES openblas)
-    endif()
     set(depend_libs ${depend_libs}
             ${OpenBLAS_LIBRARIES}
             ${LAPACK_LIBRARIES}
@@ -121,7 +118,7 @@ set(INDEX_INCLUDE_DIRS
         ${INDEX_SOURCE_DIR}/thirdparty/SPTAG/AnnService
 #        ${ARROW_INCLUDE_DIR}
         ${FAISS_INCLUDE_DIR}
-        ${OPENBLAS_INCLUDE_DIR}
+        ${OpenBLAS_INCLUDE_DIR}
         ${LAPACK_INCLUDE_DIR}
         )
 

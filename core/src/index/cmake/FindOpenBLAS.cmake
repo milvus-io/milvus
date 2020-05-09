@@ -68,8 +68,7 @@ else()
 
     if (OpenBLAS_FOUND)
         set(OpenBLAS_LIBRARIES ${OpenBLAS_LIB})
-        STRING(REGEX REPLACE "/lib/libopenblas.so" "" OpenBLAS_PATH ${OpenBLAS_LIBRARIES})
-        message(STATUS "get OpenBLAS path:${OpenBLAS_PATH} ")
+        STRING(REGEX REPLACE "/libopenblas.so" "" OpenBLAS_LIB_DIR ${OpenBLAS_LIBRARIES})
         message(STATUS "find OpenBLAS libraries:${OpenBLAS_LIBRARIES} ")
         if (Lapacke_LIB)
             set(OpenBLAS_LIBRARIES ${OpenBLAS_LIBRARIES} ${Lapacke_LIB})
@@ -88,5 +87,5 @@ endif()
 mark_as_advanced(
         OpenBLAS_INCLUDE_DIR
         OpenBLAS_LIBRARIES
-        OpenBLAS_PATH
+        OpenBLAS_LIB_DIR
 )
