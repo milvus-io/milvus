@@ -275,30 +275,16 @@ DBImpl::HasCollection(const std::string& collection_id, bool& has_or_not) {
         return SHUTDOWN_ERROR;
     }
 
-    return meta_ptr_->HasCollection(collection_id, has_or_not);
+    return meta_ptr_->HasCollection(collection_id, has_or_not, false);
 }
 
 Status
-DBImpl::HasNativeCollection(const std::string& collection_id, bool& has_or_not_) {
+DBImpl::HasNativeCollection(const std::string& collection_id, bool& has_or_not) {
     if (!initialized_.load(std::memory_order_acquire)) {
         return SHUTDOWN_ERROR;
     }
 
-    engine::meta::CollectionSchema collection_schema;
-    collection_schema.collection_id_ = collection_id;
-    auto status = DescribeCollection(collection_schema);
-    if (!status.ok()) {
-        has_or_not_ = false;
-        return status;
-    } else {
-        if (!collection_schema.owner_collection_.empty()) {
-            has_or_not_ = false;
-            return Status(DB_NOT_FOUND, "");
-        }
-
-        has_or_not_ = true;
-        return Status::OK();
-    }
+    return meta_ptr_->HasCollection(collection_id, has_or_not, true);
 }
 
 Status
