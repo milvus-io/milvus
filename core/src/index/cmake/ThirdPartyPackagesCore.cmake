@@ -318,6 +318,7 @@ set(OPENBLAS_PREFIX "${INDEX_BINARY_DIR}/openblas_ep-prefix/src/openblas_ep")
 macro(build_openblas)
     message(STATUS "Building OpenBLAS-${OPENBLAS_VERSION} from source")
     set(OPENBLAS_INCLUDE_DIR "${OPENBLAS_PREFIX}/include")
+    set(OpenBLAS_LIB_DIR "${OPENBLAS_PREFIX}/lib")
     set(OPENBLAS_SHARED_LIB
             "${OPENBLAS_PREFIX}/lib/${CMAKE_SHARED_LIBRARY_PREFIX}openblas${CMAKE_SHARED_LIBRARY_SUFFIX}")
     set(OPENBLAS_STATIC_LIB
@@ -369,13 +370,13 @@ macro(build_openblas)
             LIBRARY_OUTPUT_NAME "openblas"
             INTERFACE_INCLUDE_DIRECTORIES "${OPENBLAS_INCLUDE_DIR}")
     add_dependencies(openblas openblas_ep)
+    resolve_dependency(OpenBLAS)
+    get_target_property(OPENBLAS_INCLUDE_DIR openblas INTERFACE_INCLUDE_DIRECTORIES)
 endmacro()
 
 if (KNOWHERE_WITH_OPENBLAS)
-    resolve_dependency(OpenBLAS)
-    get_target_property(OPENBLAS_INCLUDE_DIR openblas INTERFACE_INCLUDE_DIRECTORIES)
     include_directories(SYSTEM "${OPENBLAS_INCLUDE_DIR}")
-    link_directories(SYSTEM ${OPENBLAS_PREFIX}/lib)
+    link_directories(SYSTEM "${OpenBLAS_LIB_DIR}")
 endif()
 
 # ----------------------------------------------------------------------
@@ -521,13 +522,8 @@ macro(build_faiss)
                 )
     else ()
         message(STATUS "Build Faiss with OpenBlas/LAPACK")
-        if(KNOWHERE_WITH_OPENBLAS)
-            set(FAISS_CONFIGURE_ARGS ${FAISS_CONFIGURE_ARGS}
-                "LDFLAGS=-L${OPENBLAS_PREFIX}/lib")
-        else()
-            set(FAISS_CONFIGURE_ARGS ${FAISS_CONFIGURE_ARGS}
-                "LDFLAGS=-L${OpenBLAS_PATH}/lib")
-        endif()
+        set(FAISS_CONFIGURE_ARGS ${FAISS_CONFIGURE_ARGS}
+            "LDFLAGS=-L${OpenBLAS_LIB_DIR}")
     endif ()
 
     if (KNOWHERE_GPU_VERSION)
