@@ -71,7 +71,7 @@ if (FAISS_WITH_MKL)
             )
 else ()
     set(depend_libs ${depend_libs}
-            ${BLAS_LIBRARIES}
+            ${OpenBLAS_LIBRARIES}
             ${LAPACK_LIBRARIES}
             )
 endif ()
@@ -118,7 +118,7 @@ set(INDEX_INCLUDE_DIRS
         ${INDEX_SOURCE_DIR}/thirdparty/SPTAG/AnnService
 #        ${ARROW_INCLUDE_DIR}
         ${FAISS_INCLUDE_DIR}
-        ${OPENBLAS_INCLUDE_DIR}
+        ${OpenBLAS_INCLUDE_DIR}
         ${LAPACK_INCLUDE_DIR}
         )
 
