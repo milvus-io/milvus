@@ -2,3 +2,5 @@ ignored:
   - DL3003
   - DL3007
   - DL3008
+# disable following sourced files
+  - SC1091
