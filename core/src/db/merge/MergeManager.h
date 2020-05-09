@@ -26,7 +26,7 @@ namespace engine {
 
 class MergeManager {
  public:
-    virtual Status MergeFiles(const std::string& collection_id);
+    virtual Status MergeFiles(const std::string& collection_id) = 0;
 };  // MergeManager
 
 using MergeManagerPtr = std::shared_ptr<MergeManager>;

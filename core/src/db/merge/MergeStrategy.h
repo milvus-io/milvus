@@ -26,7 +26,7 @@ namespace engine {
 
 class MergeStrategy {
  public:
-    virtual Status SchedulerFiles(meta::FilesHolder& files_holder);
+    virtual Status SchedulerFiles(meta::FilesHolder& files_holder) = 0;
 };  // MergeStrategy
 
 using MergeStrategyPtr = std::shared_ptr<MergeStrategy>;
