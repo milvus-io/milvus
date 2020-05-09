@@ -372,12 +372,9 @@ macro(build_openblas)
     add_dependencies(openblas openblas_ep)
     resolve_dependency(OpenBLAS)
     get_target_property(OPENBLAS_INCLUDE_DIR openblas INTERFACE_INCLUDE_DIRECTORIES)
-endmacro()
-
-if (KNOWHERE_WITH_OPENBLAS)
     include_directories(SYSTEM "${OPENBLAS_INCLUDE_DIR}")
     link_directories(SYSTEM "${OpenBLAS_LIB_DIR}")
-endif()
+endmacro()
 
 # ----------------------------------------------------------------------
 # Google gtest
