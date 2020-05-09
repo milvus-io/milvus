@@ -580,10 +580,11 @@ macro(build_faiss)
                 ${FAISS_STATIC_LIB})
     endif ()
 
-    if(KNOWHERE_WITH_OPENBLAS)
+    if(NOT OpenBLAS_FOUND)
         message("add faiss dependencies: openblas_ep")
         ExternalProject_Add_StepDependencies(faiss_ep configure openblas_ep)
     endif()
+
     file(MAKE_DIRECTORY "${FAISS_INCLUDE_DIR}")
     add_library(faiss STATIC IMPORTED)
 
