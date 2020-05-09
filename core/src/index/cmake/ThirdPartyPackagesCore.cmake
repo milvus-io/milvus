@@ -522,8 +522,13 @@ macro(build_faiss)
                 )
     else ()
         message(STATUS "Build Faiss with OpenBlas/LAPACK")
-        set(FAISS_CONFIGURE_ARGS ${FAISS_CONFIGURE_ARGS}
-            "LDFLAGS=-L${OpenBLAS_LIB_DIR}")
+        if(OpenBLAS_FOUND)
+            set(FAISS_CONFIGURE_ARGS ${FAISS_CONFIGURE_ARGS}
+                "LDFLAGS=-L${OpenBLAS_LIB_DIR}")
+        else()
+            set(FAISS_CONFIGURE_ARGS ${FAISS_CONFIGURE_ARGS}
+                "LDFLAGS=-L${OPENBLAS_PREFIX}/lib")
+        endif()
     endif ()
 
     if (KNOWHERE_GPU_VERSION)
