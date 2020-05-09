@@ -371,6 +371,7 @@ macro(build_openblas)
             INTERFACE_INCLUDE_DIRECTORIES "${OpenBLAS_INCLUDE_DIR}")
     add_dependencies(openblas openblas_ep)
     get_target_property(OpenBLAS_INCLUDE_DIR openblas INTERFACE_INCLUDE_DIRECTORIES)
+    set(OpenBLAS_LIBRARIES "${OPENBLAS_SHARED_LIB}")
 endmacro()
 
 if (KNOWHERE_WITH_OPENBLAS)
