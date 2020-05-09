@@ -209,7 +209,7 @@ class TestSearchBase:
         query_ids = non_exist_id
         status, result = connect.search_by_ids(collection, query_ids, top_k, params={})
         assert status.OK()
-        assert len(result[0]) == min(len(vectors), top_k)
+        assert len(result[0]) == 0
 
     def test_search_collection_empty(self, connect, collection):
         '''
@@ -232,6 +232,8 @@ class TestSearchBase:
         '''
         index_param = get_simple_index["index_param"]
         index_type = get_simple_index["index_type"]
+        if index_type == IndexType.IVF_PQ:
+            pytest.skip("skip pq")
         vectors, ids = self.init_data(connect, collection)
         status = connect.create_index(collection, index_type, index_param)
         query_ids = [ids[0]]
@@ -250,6 +252,8 @@ class TestSearchBase:
         '''
         index_param = get_simple_index["index_param"]
         index_type = get_simple_index["index_type"]
+        if index_type == IndexType.IVF_PQ:
+            pytest.skip("skip pq")
         vectors, ids = self.init_data(connect, collection)
         status = connect.create_index(collection, index_type, index_param)
         query_ids = ids[0:nq]
@@ -270,6 +274,8 @@ class TestSearchBase:
         '''
         index_param = get_simple_index["index_param"]
         index_type = get_simple_index["index_type"]
+        if index_type == IndexType.IVF_PQ:
+            pytest.skip("skip pq")
         vectors, ids = self.init_data(connect, collection)
         status = connect.create_index(collection, index_type, index_param)
         query_ids = ids[0:nq]
@@ -295,7 +301,8 @@ class TestSearchBase:
         status, result = connect.search_by_ids(collection, query_ids, top_k, params={})
         assert status.OK()
         assert len(result) == nq 
-        assert result[0][0].id != ids[0]
+        assert len(result[0]) == 0
+        assert len(result[1]) == top_k 
         assert result[1][0].distance <= epsilon
 
     def test_search_l2_partition_tag_not_existed(self, connect, collection):
