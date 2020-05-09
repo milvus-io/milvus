@@ -24,6 +24,7 @@
 #include "SegmentReader.h"
 #include "Vectors.h"
 #include "codecs/default/DefaultCodec.h"
+#include "db/Utils.h"
 #include "storage/disk/DiskIOReader.h"
 #include "storage/disk/DiskIOWriter.h"
 #include "storage/disk/DiskOperation.h"
@@ -119,6 +120,8 @@ SegmentWriter::WriteVectors() {
     } catch (std::exception& e) {
         std::string err_msg = "Failed to write vectors: " + std::string(e.what());
         LOG_ENGINE_ERROR_ << err_msg;
+
+        engine::utils::SendExitSignal();
         return Status(SERVER_WRITE_ERROR, err_msg);
     }
     return Status::OK();
@@ -133,6 +136,8 @@ SegmentWriter::WriteAttrs() {
     } catch (std::exception& e) {
         std::string err_msg = "Failed to write vectors: " + std::string(e.what());
         LOG_ENGINE_ERROR_ << err_msg;
+
+        engine::utils::SendExitSignal();
         return Status(SERVER_WRITE_ERROR, err_msg);
     }
     return Status::OK();
@@ -140,6 +145,10 @@ SegmentWriter::WriteAttrs() {
 
 Status
 SegmentWriter::WriteVectorIndex(const std::string& location) {
+    if (location.empty()) {
+        return Status(SERVER_WRITE_ERROR, "Invalid parameter of WriteVectorIndex");
+    }
+
     codec::DefaultCodec default_codec;
     try {
         fs_ptr_->operation_ptr_->CreateDirectory();
@@ -147,6 +156,8 @@ SegmentWriter::WriteVectorIndex(const std::string& location) {
     } catch (std::exception& e) {
         std::string err_msg = "Failed to write vector index: " + std::string(e.what());
         LOG_ENGINE_ERROR_ << err_msg;
+
+        engine::utils::SendExitSignal();
         return Status(SERVER_WRITE_ERROR, err_msg);
     }
     return Status::OK();
@@ -177,6 +188,8 @@ SegmentWriter::WriteBloomFilter() {
     } catch (std::exception& e) {
         std::string err_msg = "Failed to write vectors: " + std::string(e.what());
         LOG_ENGINE_ERROR_ << err_msg;
+
+        engine::utils::SendExitSignal();
         return Status(SERVER_WRITE_ERROR, err_msg);
     }
     return Status::OK();
@@ -192,6 +205,8 @@ SegmentWriter::WriteDeletedDocs() {
     } catch (std::exception& e) {
         std::string err_msg = "Failed to write deleted docs: " + std::string(e.what());
         LOG_ENGINE_ERROR_ << err_msg;
+
+        engine::utils::SendExitSignal();
         return Status(SERVER_WRITE_ERROR, err_msg);
     }
     return Status::OK();
@@ -206,6 +221,8 @@ SegmentWriter::WriteDeletedDocs(const DeletedDocsPtr& deleted_docs) {
     } catch (std::exception& e) {
         std::string err_msg = "Failed to write deleted docs: " + std::string(e.what());
         LOG_ENGINE_ERROR_ << err_msg;
+
+        engine::utils::SendExitSignal();
         return Status(SERVER_WRITE_ERROR, err_msg);
     }
     return Status::OK();
@@ -220,6 +237,8 @@ SegmentWriter::WriteBloomFilter(const IdBloomFilterPtr& id_bloom_filter_ptr) {
     } catch (std::exception& e) {
         std::string err_msg = "Failed to write bloom filter: " + std::string(e.what());
         LOG_ENGINE_ERROR_ << err_msg;
+
+        engine::utils::SendExitSignal();
         return Status(SERVER_WRITE_ERROR, err_msg);
     }
     return Status::OK();

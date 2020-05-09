@@ -116,7 +116,7 @@ CreateIndexRequest::OnExecute() {
         engine::CollectionIndex index;
         index.engine_type_ = adapter_index_type;
         index.extra_params_ = json_params_;
-        status = DBWrapper::DB()->CreateIndex(collection_name_, index);
+        status = DBWrapper::DB()->CreateIndex(context_, collection_name_, index);
         fiu_do_on("CreateIndexRequest.OnExecute.create_index_fail",
                   status = Status(milvus::SERVER_UNEXPECTED_ERROR, ""));
         if (!status.ok()) {

@@ -256,8 +256,9 @@ RequestHandler::Flush(const std::shared_ptr<Context>& context, const std::vector
 }
 
 Status
-RequestHandler::Compact(const std::shared_ptr<Context>& context, const std::string& collection_name) {
-    BaseRequestPtr request_ptr = CompactRequest::Create(context, collection_name);
+RequestHandler::Compact(const std::shared_ptr<Context>& context, const std::string& collection_name,
+                        double compact_threshold) {
+    BaseRequestPtr request_ptr = CompactRequest::Create(context, collection_name, compact_threshold);
     RequestScheduler::ExecRequest(request_ptr);
 
     return request_ptr->status();

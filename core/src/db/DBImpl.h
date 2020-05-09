@@ -115,7 +115,7 @@ class DBImpl : public DB, public server::CacheConfigHandler, public server::Engi
     Flush() override;
 
     Status
-    Compact(const std::string& collection_id) override;
+    Compact(const std::string& collection_id, double threshold = 0.0) override;
 
     Status
     GetVectorsByID(const std::string& collection_id, const IDNumbers& id_array,
@@ -128,7 +128,8 @@ class DBImpl : public DB, public server::CacheConfigHandler, public server::Engi
     //    Merge(const std::set<std::string>& collection_ids) override;
 
     Status
-    CreateIndex(const std::string& collection_id, const CollectionIndex& index) override;
+    CreateIndex(const std::shared_ptr<server::Context>& context, const std::string& collection_id,
+                const CollectionIndex& index) override;
 
     Status
     DescribeIndex(const std::string& collection_id, CollectionIndex& index) override;
@@ -244,7 +245,7 @@ class DBImpl : public DB, public server::CacheConfigHandler, public server::Engi
     BackgroundBuildIndex();
 
     Status
-    CompactFile(const std::string& collection_id, const meta::SegmentSchema& file,
+    CompactFile(const std::string& collection_id, double threshold, const meta::SegmentSchema& file,
                 meta::SegmentsSchema& files_to_update);
 
     /*
@@ -270,7 +271,8 @@ class DBImpl : public DB, public server::CacheConfigHandler, public server::Engi
     UpdateCollectionIndexRecursively(const std::string& collection_id, const CollectionIndex& index);
 
     Status
-    WaitCollectionIndexRecursively(const std::string& collection_id, const CollectionIndex& index);
+    WaitCollectionIndexRecursively(const std::shared_ptr<server::Context>& context, const std::string& collection_id,
+                                   const CollectionIndex& index);
 
     Status
     DropCollectionIndexRecursively(const std::string& collection_id);

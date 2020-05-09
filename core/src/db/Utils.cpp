@@ -13,6 +13,7 @@
 
 #include <fiu-local.h>
 
+#include <unistd.h>
 #include <boost/filesystem.hpp>
 #include <chrono>
 #include <mutex>
@@ -316,6 +317,20 @@ GetIndexName(int32_t index_type) {
     }
 
     return index_type_name[index_type];
+}
+
+void
+SendExitSignal() {
+    LOG_SERVER_INFO_ << "Send SIGUSR2 signal to exit";
+    pid_t pid = getpid();
+    kill(pid, SIGUSR2);
+}
+
+void
+ExitOnWriteError(Status& status) {
+    if (status.code() == SERVER_WRITE_ERROR) {
+        utils::SendExitSignal();
+    }
 }
 
 }  // namespace utils

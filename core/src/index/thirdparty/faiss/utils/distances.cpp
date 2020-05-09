@@ -15,13 +15,11 @@
 #include <cmath>
 
 #include <omp.h>
-
+#include <faiss/BuilderSuspend.h>
 #include <faiss/FaissHook.h>
 #include <faiss/impl/AuxIndexStructures.h>
 #include <faiss/impl/FaissAssert.h>
 #include <faiss/utils/ConcurrentBitset.h>
-
-#include "faiss/BuilderSuspend.h"
 
 
 #ifndef FINTEGER
@@ -354,136 +352,6 @@ static void knn_L2sqr_sse (
     */
 }
 
-
-static void knn_inner_product_build_blas (
-        const float * x,
-        const float * y,
-        size_t d, size_t nx, size_t ny,
-        float_minheap_array_t * res)
-{
-
-    res->heapify ();
-
-    // BLAS does not like empty matrices
-    if (nx == 0 || ny == 0) return;
-
-    size_t k = res->k;
-
-    /* block sizes */
-    const size_t bs_x = 4096, bs_y = 1024;
-    // const size_t bs_x = 16, bs_y = 16;
-    float *ip_block = new float[bs_x * bs_y];
-    ScopeDeleter<float> del1(ip_block);;
-
-    for (size_t i0 = 0; i0 < nx; i0 += bs_x) {
-
-        BuilderSuspend::check_wait();
-
-        size_t i1 = i0 + bs_x;
-        if(i1 > nx) i1 = nx;
-
-        for (size_t j0 = 0; j0 < ny; j0 += bs_y) {
-            size_t j1 = j0 + bs_y;
-            if (j1 > ny) j1 = ny;
-            /* compute the actual dot products */
-            {
-                float one = 1, zero = 0;
-                FINTEGER nyi = j1 - j0, nxi = i1 - i0, di = d;
-                sgemm_ ("Transpose", "Not transpose", &nyi, &nxi, &di, &one,
-                        y + j0 * d, &di,
-                        x + i0 * d, &di, &zero,
-                        ip_block, &nyi);
-            }
-
-            /* collect maxima */
-#pragma omp parallel for
-            for(size_t i = i0; i < i1; i++){
-                float * __restrict simi = res->get_val(i);
-                int64_t * __restrict idxi = res->get_ids (i);
-                const float *ip_line = ip_block + (i - i0) * (j1 - j0);
-
-                for(size_t j = j0; j < j1; j++){
-                    float dis = *ip_line;
-
-                    if(dis > simi[0]){
-                        minheap_swap_top(k, simi, idxi, dis, j);
-                    }
-                    ip_line++;
-                }
-            }
-        }
-        InterruptCallback::check ();
-    }
-    res->reorder ();
-}
-
-
-// Elkan K-means
-static void elkan_L2_sse (
-        const float * x,
-        const float * y,
-        size_t d, size_t nx, size_t ny,
-        float_maxheap_array_t * res) {
-
-    if (nx == 0 || ny == 0) {
-        return;
-    }
-
-    const size_t bs_y = 1024;
-    float *data = (float *) malloc((bs_y * (bs_y - 1) / 2) * sizeof (float));
-
-    for (size_t j0 = 0; j0 < ny; j0 += bs_y) {
-
-        BuilderSuspend::check_wait();
-
-        size_t j1 = j0 + bs_y;
-        if (j1 > ny) j1 = ny;
-
-        auto Y = [&](size_t i, size_t j) -> float& {
-            assert(i != j);
-            i -= j0, j -= j0;
-            return (i > j) ? data[j + i * (i - 1) / 2] : data[i + j * (j - 1) / 2];
-        };
-
-#pragma omp parallel for
-        for (size_t i = j0 + 1; i < j1; i++) {
-            const float *y_i = y + i * d;
-            for (size_t j = j0; j < i; j++) {
-                const float *y_j = y + j * d;
-                Y(i, j) = sqrt(fvec_L2sqr(y_i, y_j, d));
-            }
-        }
-
-#pragma omp parallel for
-        for (size_t i = 0; i < nx; i++) {
-            const float *x_i = x + i * d;
-
-            int64_t ids_i = j0;
-            float val_i = sqrt(fvec_L2sqr(x_i, y + j0 * d, d));
-            float val_i_2 = val_i * 2;
-            for (size_t j = j0 + 1; j < j1; j++) {
-                if (val_i_2 <= Y(ids_i, j)) {
-                    continue;
-                }
-                const float *y_j = y + j * d;
-                float disij = sqrt(fvec_L2sqr(x_i, y_j, d));
-                if (disij < val_i) {
-                    ids_i = j;
-                    val_i = disij;
-                    val_i_2 = val_i * 2;
-                }
-            }
-
-            if (j0 == 0 || res->val[i] > val_i) {
-                res->val[i] = val_i;
-                res->ids[i] = ids_i;
-            }
-        }
-    }
-
-    free(data);
-}
-
 /** Find the nearest neighbors for nx queries in a set of ny vectors */
 static void knn_inner_product_blas (
         const float * x,
@@ -717,10 +585,7 @@ void knn_inner_product (const float * x,
         float_minheap_array_t * res,
         ConcurrentBitsetPtr bitset)
 {
-    if (bitset == nullptr && res->k == 1 && nx >= ny * 2) {
-        // usually used in IVF::train
-        knn_inner_product_build_blas(x, y, d, nx, ny, res);
-    } else if (d % 4 == 0 && nx < distance_compute_blas_threshold) {
+    if (d % 4 == 0 && nx < distance_compute_blas_threshold) {
         knn_inner_product_sse (x, y, d, nx, ny, res, bitset);
     } else {
         knn_inner_product_blas (x, y, d, nx, ny, res, bitset);
@@ -741,11 +606,7 @@ void knn_L2sqr (const float * x,
                 float_maxheap_array_t * res,
                 ConcurrentBitsetPtr bitset)
 {
-    if (bitset == nullptr && res->k == 1 && nx >= ny * 2) {
-        // Note: L2 but not L2sqr
-        // usually used in IVF::train
-        elkan_L2_sse(x, y, d, nx, ny, res);
-    } else if (d % 4 == 0 && nx < distance_compute_blas_threshold) {
+    if (d % 4 == 0 && nx < distance_compute_blas_threshold) {
         knn_L2sqr_sse (x, y, d, nx, ny, res, bitset);
     } else {
         NopDistanceCorrection nop;
@@ -1138,6 +999,70 @@ void pairwise_L2sqr (int64_t d,
                 &one, dis, &lddi);
     }
 
+}
+
+void elkan_L2_sse (
+        const float * x,
+        const float * y,
+        size_t d, size_t nx, size_t ny,
+        int64_t *ids, float *val) {
+
+    if (nx == 0 || ny == 0) {
+        return;
+    }
+
+    const size_t bs_y = 1024;
+    float *data = (float *) malloc((bs_y * (bs_y - 1) / 2) * sizeof (float));
+
+    for (size_t j0 = 0; j0 < ny; j0 += bs_y) {
+        BuilderSuspend::check_wait();
+
+        size_t j1 = j0 + bs_y;
+        if (j1 > ny) j1 = ny;
+
+        auto Y = [&](size_t i, size_t j) -> float& {
+            assert(i != j);
+            i -= j0, j -= j0;
+            return (i > j) ? data[j + i * (i - 1) / 2] : data[i + j * (j - 1) / 2];
+        };
+
+#pragma omp parallel for
+        for (size_t i = j0 + 1; i < j1; i++) {
+            const float *y_i = y + i * d;
+            for (size_t j = j0; j < i; j++) {
+                const float *y_j = y + j * d;
+                Y(i, j) = sqrt(fvec_L2sqr(y_i, y_j, d));
+            }
+        }
+
+#pragma omp parallel for
+        for (size_t i = 0; i < nx; i++) {
+            const float *x_i = x + i * d;
+
+            int64_t ids_i = j0;
+            float val_i = sqrt(fvec_L2sqr(x_i, y + j0 * d, d));
+            float val_i_2 = val_i * 2;
+            for (size_t j = j0 + 1; j < j1; j++) {
+                if (val_i_2 <= Y(ids_i, j)) {
+                    continue;
+                }
+                const float *y_j = y + j * d;
+                float disij = sqrt(fvec_L2sqr(x_i, y_j, d));
+                if (disij < val_i) {
+                    ids_i = j;
+                    val_i = disij;
+                    val_i_2 = val_i * 2;
+                }
+            }
+
+            if (j0 == 0 || val[i] > val_i) {
+                val[i] = val_i;
+                ids[i] = ids_i;
+            }
+        }
+    }
+
+    free(data);
 }
 
 

@@ -133,7 +133,6 @@ DBImpl::Start() {
             if (record.type == wal::MXLogType::None) {
                 break;
             }
-
             ExecWalRecord(record);
         }
 
@@ -229,8 +228,9 @@ DBImpl::CreateHybridCollection(meta::CollectionSchema& collection_schema, meta::
     }
 
     meta::CollectionSchema temp_schema = collection_schema;
+    temp_schema.index_file_size_ *= MB;
     if (options_.wal_enable_) {
-        // TODO(yukun): wal_mgr_->CreateHybridCollection()
+        temp_schema.flush_lsn_ = wal_mgr_->CreateHybridCollection(collection_schema.collection_id_);
     }
 
     return meta_ptr_->CreateHybridCollection(temp_schema, fields_schema);
@@ -609,6 +609,127 @@ DBImpl::InsertVectors(const std::string& collection_id, const std::string& parti
 }
 
 Status
+CopyToAttr(std::vector<uint8_t>& record, uint64_t row_num, const std::vector<std::string>& field_names,
+           std::unordered_map<std::string, meta::hybrid::DataType>& attr_types,
+           std::unordered_map<std::string, std::vector<uint8_t>>& attr_datas,
+           std::unordered_map<std::string, uint64_t>& attr_nbytes,
+           std::unordered_map<std::string, uint64_t>& attr_data_size) {
+    uint64_t offset = 0;
+    for (auto name : field_names) {
+        switch (attr_types.at(name)) {
+            case meta::hybrid::DataType::INT8: {
+                std::vector<uint8_t> data;
+                data.resize(row_num * sizeof(int8_t));
+
+                std::vector<int64_t> attr_value(row_num, 0);
+                memcpy(attr_value.data(), record.data() + offset, row_num * sizeof(int64_t));
+
+                std::vector<int8_t> raw_value(row_num, 0);
+                for (uint64_t i = 0; i < row_num; ++i) {
+                    raw_value[i] = attr_value[i];
+                }
+
+                memcpy(data.data(), raw_value.data(), row_num * sizeof(int8_t));
+                attr_datas.insert(std::make_pair(name, data));
+
+                attr_nbytes.insert(std::make_pair(name, sizeof(int8_t)));
+                attr_data_size.insert(std::make_pair(name, row_num * sizeof(int8_t)));
+                offset += row_num * sizeof(int64_t);
+                break;
+            }
+            case meta::hybrid::DataType::INT16: {
+                std::vector<uint8_t> data;
+                data.resize(row_num * sizeof(int16_t));
+
+                std::vector<int64_t> attr_value(row_num, 0);
+                memcpy(attr_value.data(), record.data() + offset, row_num * sizeof(int64_t));
+
+                std::vector<int16_t> raw_value(row_num, 0);
+                for (uint64_t i = 0; i < row_num; ++i) {
+                    raw_value[i] = attr_value[i];
+                }
+
+                memcpy(data.data(), raw_value.data(), row_num * sizeof(int16_t));
+                attr_datas.insert(std::make_pair(name, data));
+
+                attr_nbytes.insert(std::make_pair(name, sizeof(int16_t)));
+                attr_data_size.insert(std::make_pair(name, row_num * sizeof(int16_t)));
+                offset += row_num * sizeof(int64_t);
+                break;
+            }
+            case meta::hybrid::DataType::INT32: {
+                std::vector<uint8_t> data;
+                data.resize(row_num * sizeof(int32_t));
+
+                std::vector<int64_t> attr_value(row_num, 0);
+                memcpy(attr_value.data(), record.data() + offset, row_num * sizeof(int64_t));
+
+                std::vector<int32_t> raw_value(row_num, 0);
+                for (uint64_t i = 0; i < row_num; ++i) {
+                    raw_value[i] = attr_value[i];
+                }
+
+                memcpy(data.data(), raw_value.data(), row_num * sizeof(int32_t));
+                attr_datas.insert(std::make_pair(name, data));
+
+                attr_nbytes.insert(std::make_pair(name, sizeof(int32_t)));
+                attr_data_size.insert(std::make_pair(name, row_num * sizeof(int32_t)));
+                offset += row_num * sizeof(int64_t);
+                break;
+            }
+            case meta::hybrid::DataType::INT64: {
+                std::vector<uint8_t> data;
+                data.resize(row_num * sizeof(int64_t));
+                memcpy(data.data(), record.data() + offset, row_num * sizeof(int64_t));
+                attr_datas.insert(std::make_pair(name, data));
+
+                std::vector<int64_t> test_data(row_num);
+                memcpy(test_data.data(), record.data(), row_num * sizeof(int64_t));
+
+                attr_nbytes.insert(std::make_pair(name, sizeof(int64_t)));
+                attr_data_size.insert(std::make_pair(name, row_num * sizeof(int64_t)));
+                offset += row_num * sizeof(int64_t);
+                break;
+            }
+            case meta::hybrid::DataType::FLOAT: {
+                std::vector<uint8_t> data;
+                data.resize(row_num * sizeof(float));
+
+                std::vector<double> attr_value(row_num, 0);
+                memcpy(attr_value.data(), record.data() + offset, row_num * sizeof(double));
+
+                std::vector<float> raw_value(row_num, 0);
+                for (uint64_t i = 0; i < row_num; ++i) {
+                    raw_value[i] = attr_value[i];
+                }
+
+                memcpy(data.data(), raw_value.data(), row_num * sizeof(float));
+                attr_datas.insert(std::make_pair(name, data));
+
+                attr_nbytes.insert(std::make_pair(name, sizeof(float)));
+                attr_data_size.insert(std::make_pair(name, row_num * sizeof(float)));
+                offset += row_num * sizeof(double);
+                break;
+            }
+            case meta::hybrid::DataType::DOUBLE: {
+                std::vector<uint8_t> data;
+                data.resize(row_num * sizeof(double));
+                memcpy(data.data(), record.data() + offset, row_num * sizeof(double));
+                attr_datas.insert(std::make_pair(name, data));
+
+                attr_nbytes.insert(std::make_pair(name, sizeof(double)));
+                attr_data_size.insert(std::make_pair(name, row_num * sizeof(double)));
+                offset += row_num * sizeof(double);
+                break;
+            }
+            default:
+                break;
+        }
+    }
+    return Status::OK();
+}
+
+Status
 DBImpl::InsertEntities(const std::string& collection_id, const std::string& partition_tag,
                        const std::vector<std::string>& field_names, Entity& entity,
                        std::unordered_map<std::string, meta::hybrid::DataType>& attr_types) {
@@ -626,7 +747,15 @@ DBImpl::InsertEntities(const std::string& collection_id, const std::string& part
     }
 
     Status status;
-    // insert entities: collection_name is field id
+    std::unordered_map<std::string, std::vector<uint8_t>> attr_data;
+    std::unordered_map<std::string, uint64_t> attr_nbytes;
+    std::unordered_map<std::string, uint64_t> attr_data_size;
+    status = CopyToAttr(entity.attr_value_, entity.entity_count_, field_names, attr_types, attr_data, attr_nbytes,
+                        attr_data_size);
+    if (!status.ok()) {
+        return status;
+    }
+
     wal::MXLogRecord record;
     record.lsn = 0;
     record.collection_id = collection_id;
@@ -639,123 +768,62 @@ DBImpl::InsertEntities(const std::string& collection_id, const std::string& part
         record.type = wal::MXLogType::Entity;
         record.data = vector_it->second.float_data_.data();
         record.data_size = vector_it->second.float_data_.size() * sizeof(float);
+        record.attr_data = attr_data;
+        record.attr_nbytes = attr_nbytes;
+        record.attr_data_size = attr_data_size;
     } else {
         //        record.type = wal::MXLogType::InsertBinary;
         //        record.data = entities.vector_data_[0].binary_data_.data();
         //        record.length = entities.vector_data_[0].binary_data_.size() * sizeof(uint8_t);
     }
 
-    uint64_t offset = 0;
-    for (auto field_name : field_names) {
-        switch (attr_types.at(field_name)) {
-            case meta::hybrid::DataType::INT8: {
-                std::vector<uint8_t> data;
-                data.resize(entity.entity_count_ * sizeof(int8_t));
-
-                std::vector<int64_t> attr_value(entity.entity_count_, 0);
-                memcpy(attr_value.data(), entity.attr_value_.data() + offset, entity.entity_count_ * sizeof(int64_t));
-                offset += entity.entity_count_ * sizeof(int64_t);
-
-                std::vector<int8_t> raw_value(entity.entity_count_, 0);
-                for (uint64_t i = 0; i < entity.entity_count_; ++i) {
-                    raw_value[i] = attr_value[i];
-                }
-
-                memcpy(data.data(), raw_value.data(), entity.entity_count_ * sizeof(int8_t));
-                record.attr_data.insert(std::make_pair(field_name, data));
-
-                record.attr_nbytes.insert(std::make_pair(field_name, sizeof(int8_t)));
-                record.attr_data_size.insert(std::make_pair(field_name, entity.entity_count_ * sizeof(int8_t)));
-                break;
-            }
-            case meta::hybrid::DataType::INT16: {
-                std::vector<uint8_t> data;
-                data.resize(entity.entity_count_ * sizeof(int16_t));
-
-                std::vector<int64_t> attr_value(entity.entity_count_, 0);
-                memcpy(attr_value.data(), entity.attr_value_.data() + offset, entity.entity_count_ * sizeof(int64_t));
-                offset += entity.entity_count_ * sizeof(int64_t);
-
-                std::vector<int16_t> raw_value(entity.entity_count_, 0);
-                for (uint64_t i = 0; i < entity.entity_count_; ++i) {
-                    raw_value[i] = attr_value[i];
-                }
-
-                memcpy(data.data(), raw_value.data(), entity.entity_count_ * sizeof(int16_t));
-                record.attr_data.insert(std::make_pair(field_name, data));
-
-                record.attr_nbytes.insert(std::make_pair(field_name, sizeof(int16_t)));
-                record.attr_data_size.insert(std::make_pair(field_name, entity.entity_count_ * sizeof(int16_t)));
-                break;
-            }
-            case meta::hybrid::DataType::INT32: {
-                std::vector<uint8_t> data;
-                data.resize(entity.entity_count_ * sizeof(int32_t));
-
-                std::vector<int64_t> attr_value(entity.entity_count_, 0);
-                memcpy(attr_value.data(), entity.attr_value_.data() + offset, entity.entity_count_ * sizeof(int64_t));
-                offset += entity.entity_count_ * sizeof(int64_t);
-
-                std::vector<int32_t> raw_value(entity.entity_count_, 0);
-                for (uint64_t i = 0; i < entity.entity_count_; ++i) {
-                    raw_value[i] = attr_value[i];
-                }
-
-                memcpy(data.data(), raw_value.data(), entity.entity_count_ * sizeof(int32_t));
-                record.attr_data.insert(std::make_pair(field_name, data));
-
-                record.attr_nbytes.insert(std::make_pair(field_name, sizeof(int32_t)));
-                record.attr_data_size.insert(std::make_pair(field_name, entity.entity_count_ * sizeof(int32_t)));
-                break;
-            }
-            case meta::hybrid::DataType::INT64: {
-                std::vector<uint8_t> data;
-                data.resize(entity.entity_count_ * sizeof(int64_t));
-                memcpy(data.data(), entity.attr_value_.data() + offset, entity.entity_count_ * sizeof(int64_t));
-                record.attr_data.insert(std::make_pair(field_name, data));
-
-                record.attr_nbytes.insert(std::make_pair(field_name, sizeof(int64_t)));
-                record.attr_data_size.insert(std::make_pair(field_name, entity.entity_count_ * sizeof(int64_t)));
-                offset += entity.entity_count_ * sizeof(int64_t);
-                break;
-            }
-            case meta::hybrid::DataType::FLOAT: {
-                std::vector<uint8_t> data;
-                data.resize(entity.entity_count_ * sizeof(float));
-
-                std::vector<double> attr_value(entity.entity_count_, 0);
-                memcpy(attr_value.data(), entity.attr_value_.data() + offset, entity.entity_count_ * sizeof(double));
-                offset += entity.entity_count_ * sizeof(double);
-
-                std::vector<float> raw_value(entity.entity_count_, 0);
-                for (uint64_t i = 0; i < entity.entity_count_; ++i) {
-                    raw_value[i] = attr_value[i];
-                }
-
-                memcpy(data.data(), raw_value.data(), entity.entity_count_ * sizeof(float));
-                record.attr_data.insert(std::make_pair(field_name, data));
-
-                record.attr_nbytes.insert(std::make_pair(field_name, sizeof(float)));
-                record.attr_data_size.insert(std::make_pair(field_name, entity.entity_count_ * sizeof(float)));
-                break;
-            }
-            case meta::hybrid::DataType::DOUBLE: {
-                std::vector<uint8_t> data;
-                data.resize(entity.entity_count_ * sizeof(double));
-                memcpy(data.data(), entity.attr_value_.data() + offset, entity.entity_count_ * sizeof(double));
-                record.attr_data.insert(std::make_pair(field_name, data));
-
-                record.attr_nbytes.insert(std::make_pair(field_name, sizeof(double)));
-                record.attr_data_size.insert(std::make_pair(field_name, entity.entity_count_ * sizeof(double)));
-                offset += entity.entity_count_ * sizeof(double);
-                break;
-            }
-            default:
-                break;
-        }
-    }
-
     status = ExecWalRecord(record);
+
+#if 0
+    if (options_.wal_enable_) {
+        std::string target_collection_name;
+        status = GetPartitionByTag(collection_id, partition_tag, target_collection_name);
+        if (!status.ok()) {
+            LOG_ENGINE_ERROR_ << LogOut("[%s][%ld] Get partition fail: %s", "insert", 0, status.message().c_str());
+            return status;
+        }
+
+        auto vector_it = entity.vector_data_.begin();
+        if (!vector_it->second.binary_data_.empty()) {
+            wal_mgr_->InsertEntities(collection_id, partition_tag, entity.id_array_, vector_it->second.binary_data_,
+                                     attr_nbytes, attr_data);
+        } else if (!vector_it->second.float_data_.empty()) {
+            wal_mgr_->InsertEntities(collection_id, partition_tag, entity.id_array_, vector_it->second.float_data_,
+                                     attr_nbytes, attr_data);
+        }
+        swn_wal_.Notify();
+    } else {
+        // insert entities: collection_name is field id
+        wal::MXLogRecord record;
+        record.lsn = 0;
+        record.collection_id = collection_id;
+        record.partition_tag = partition_tag;
+        record.ids = entity.id_array_.data();
+        record.length = entity.entity_count_;
+
+        auto vector_it = entity.vector_data_.begin();
+        if (vector_it->second.binary_data_.empty()) {
+            record.type = wal::MXLogType::Entity;
+            record.data = vector_it->second.float_data_.data();
+            record.data_size = vector_it->second.float_data_.size() * sizeof(float);
+            record.attr_data = attr_data;
+            record.attr_nbytes = attr_nbytes;
+            record.attr_data_size = attr_data_size;
+        } else {
+            //        record.type = wal::MXLogType::InsertBinary;
+            //        record.data = entities.vector_data_[0].binary_data_.data();
+            //        record.length = entities.vector_data_[0].binary_data_.size() * sizeof(uint8_t);
+        }
+
+        status = ExecWalRecord(record);
+    }
+#endif
+
     return status;
 }
 
@@ -854,7 +922,7 @@ DBImpl::Flush() {
 }
 
 Status
-DBImpl::Compact(const std::string& collection_id) {
+DBImpl::Compact(const std::string& collection_id, double threshold) {
     if (!initialized_.load(std::memory_order_acquire)) {
         return SHUTDOWN_ERROR;
     }
@@ -919,7 +987,7 @@ DBImpl::Compact(const std::string& collection_id) {
 
         meta::SegmentsSchema files_to_update;
         if (deleted_docs_size != 0) {
-            compact_status = CompactFile(collection_id, file, files_to_update);
+            compact_status = CompactFile(collection_id, threshold, file, files_to_update);
 
             if (!compact_status.ok()) {
                 LOG_ENGINE_ERROR_ << "Compact failed for segment " << file.segment_id_ << ": "
@@ -950,16 +1018,35 @@ DBImpl::Compact(const std::string& collection_id) {
 }
 
 Status
-DBImpl::CompactFile(const std::string& collection_id, const meta::SegmentSchema& file,
+DBImpl::CompactFile(const std::string& collection_id, double threshold, const meta::SegmentSchema& file,
                     meta::SegmentsSchema& files_to_update) {
     LOG_ENGINE_DEBUG_ << "Compacting segment " << file.segment_id_ << " for collection: " << collection_id;
+
+    std::string segment_dir_to_merge;
+    utils::GetParentPath(file.location_, segment_dir_to_merge);
+
+    // no need to compact if deleted vectors are too few(less than threashold)
+    if (file.row_count_ > 0 && threshold > 0.0) {
+        segment::SegmentReader segment_reader_to_merge(segment_dir_to_merge);
+        segment::DeletedDocsPtr deleted_docs_ptr;
+        auto status = segment_reader_to_merge.LoadDeletedDocs(deleted_docs_ptr);
+        if (status.ok()) {
+            auto delete_items = deleted_docs_ptr->GetDeletedDocs();
+            double delete_rate = (double)delete_items.size() / (double)file.row_count_;
+            if (delete_rate < threshold) {
+                LOG_ENGINE_DEBUG_ << "Delete rate less than " << threshold << ", no need to compact for"
+                                  << segment_dir_to_merge;
+                return Status::OK();
+            }
+        }
+    }
 
     // Create new collection file
     meta::SegmentSchema compacted_file;
     compacted_file.collection_id_ = collection_id;
     // compacted_file.date_ = date;
     compacted_file.file_type_ = meta::SegmentSchema::NEW_MERGE;  // TODO: use NEW_MERGE for now
-    Status status = meta_ptr_->CreateCollectionFile(compacted_file);
+    auto status = meta_ptr_->CreateCollectionFile(compacted_file);
 
     if (!status.ok()) {
         LOG_ENGINE_ERROR_ << "Failed to create collection file: " << status.message();
@@ -971,9 +1058,6 @@ DBImpl::CompactFile(const std::string& collection_id, const meta::SegmentSchema&
     std::string new_segment_dir;
     utils::GetParentPath(compacted_file.location_, new_segment_dir);
     auto segment_writer_ptr = std::make_shared<segment::SegmentWriter>(new_segment_dir);
-
-    std::string segment_dir_to_merge;
-    utils::GetParentPath(file.location_, segment_dir_to_merge);
 
     LOG_ENGINE_DEBUG_ << "Compacting begin...";
     segment_writer_ptr->Merge(segment_dir_to_merge, compacted_file.file_id_);
@@ -988,6 +1072,7 @@ DBImpl::CompactFile(const std::string& collection_id, const meta::SegmentSchema&
         if (mark_status.ok()) {
             LOG_ENGINE_DEBUG_ << "Mark file: " << compacted_file.file_id_ << " to to_delete";
         }
+
         return status;
     }
 
@@ -1268,7 +1353,8 @@ DBImpl::GetVectorsByIdHelper(const std::string& collection_id, const IDNumbers& 
 }
 
 Status
-DBImpl::CreateIndex(const std::string& collection_id, const CollectionIndex& index) {
+DBImpl::CreateIndex(const std::shared_ptr<server::Context>& context, const std::string& collection_id,
+                    const CollectionIndex& index) {
     if (!initialized_.load(std::memory_order_acquire)) {
         return SHUTDOWN_ERROR;
     }
@@ -1306,7 +1392,7 @@ DBImpl::CreateIndex(const std::string& collection_id, const CollectionIndex& ind
 
     // step 4: wait and build index
     status = index_failed_checker_.CleanFailedIndexFileOfCollection(collection_id);
-    status = WaitCollectionIndexRecursively(collection_id, index);
+    status = WaitCollectionIndexRecursively(context, collection_id, index);
 
     return status;
 }
@@ -1853,7 +1939,6 @@ DBImpl::MergeFiles(const std::string& collection_id, meta::FilesHolder& files_ho
     collection_file.collection_id_ = collection_id;
     collection_file.file_type_ = meta::SegmentSchema::NEW_MERGE;
     Status status = meta_ptr_->CreateCollectionFile(collection_file);
-
     if (!status.ok()) {
         LOG_ENGINE_ERROR_ << "Failed to create collection: " << status.ToString();
         return status;
@@ -2078,11 +2163,8 @@ DBImpl::BackgroundMerge(std::set<std::string> collection_ids) {
     meta_ptr_->Archive();
 
     {
-        uint64_t ttl = 10 * meta::SECOND;  // default: file will be hard-deleted few seconds after soft-deleted
-        if (options_.mode_ == DBOptions::MODE::CLUSTER_WRITABLE) {
-            ttl = meta::HOUR;
-        }
-
+        uint64_t timeout = (options_.file_cleanup_timeout_ > 0) ? options_.file_cleanup_timeout_ : 10;
+        uint64_t ttl = timeout * meta::SECOND;  // default: file will be hard-deleted few seconds after soft-deleted
         meta_ptr_->CleanUpFilesWithTTL(ttl);
     }
 
@@ -2232,7 +2314,7 @@ DBImpl::GetPartitionsByTags(const std::string& collection_id, const std::vector<
     }
 
     if (partition_name_array.empty()) {
-        return Status(PARTITION_NOT_FOUND, "Cannot find the specified partitions");
+        return Status(DB_PARTITION_NOT_FOUND, "The specified partiton does not exist");
     }
 
     return Status::OK();
@@ -2299,7 +2381,8 @@ DBImpl::UpdateCollectionIndexRecursively(const std::string& collection_id, const
 }
 
 Status
-DBImpl::WaitCollectionIndexRecursively(const std::string& collection_id, const CollectionIndex& index) {
+DBImpl::WaitCollectionIndexRecursively(const std::shared_ptr<server::Context>& context,
+                                       const std::string& collection_id, const CollectionIndex& index) {
     // for IDMAP type, only wait all NEW file converted to RAW file
     // for other type, wait NEW/RAW/NEW_MERGE/NEW_INDEX/TO_INDEX files converted to INDEX files
     std::vector<int> file_types;
@@ -2321,17 +2404,30 @@ DBImpl::WaitCollectionIndexRecursively(const std::string& collection_id, const C
         meta::FilesHolder files_holder;
         auto status = GetFilesToBuildIndex(collection_id, file_types, files_holder);
         int times = 1;
-
+        uint64_t repeat = 0;
         while (!files_holder.HoldFiles().empty()) {
-            LOG_ENGINE_DEBUG_ << files_holder.HoldFiles().size() << " non-index files detected! Will build index "
-                              << times;
-            if (!utils::IsRawIndexType(index.engine_type_)) {
-                status = meta_ptr_->UpdateCollectionFilesToIndex(collection_id);
+            if (repeat % WAIT_BUILD_INDEX_INTERVAL == 0) {
+                LOG_ENGINE_DEBUG_ << files_holder.HoldFiles().size() << " non-index files detected! Will build index "
+                                  << times;
+                if (!utils::IsRawIndexType(index.engine_type_)) {
+                    status = meta_ptr_->UpdateCollectionFilesToIndex(collection_id);
+                }
             }
 
-            index_req_swn_.Wait_For(std::chrono::seconds(WAIT_BUILD_INDEX_INTERVAL));
-            GetFilesToBuildIndex(collection_id, file_types, files_holder);
-            ++times;
+            index_req_swn_.Wait_For(std::chrono::seconds(1));
+
+            // client break the connection, no need to block, check every 1 second
+            if (context->IsConnectionBroken()) {
+                LOG_ENGINE_DEBUG_ << "Client connection broken, build index in background";
+                break;  // just break, not return, continue to update partitions files to to_index
+            }
+
+            // check to_index files every 5 seconds
+            repeat++;
+            if (repeat % WAIT_BUILD_INDEX_INTERVAL == 0) {
+                GetFilesToBuildIndex(collection_id, file_types, files_holder);
+                ++times;
+            }
         }
     }
 
@@ -2339,7 +2435,7 @@ DBImpl::WaitCollectionIndexRecursively(const std::string& collection_id, const C
     std::vector<meta::CollectionSchema> partition_array;
     auto status = meta_ptr_->ShowPartitions(collection_id, partition_array);
     for (auto& schema : partition_array) {
-        status = WaitCollectionIndexRecursively(schema.collection_id_, index);
+        status = WaitCollectionIndexRecursively(context, schema.collection_id_, index);
         fiu_do_on("DBImpl.WaitCollectionIndexRecursively.fail_build_collection_Index_for_partition",
                   status = Status(DB_ERROR, ""));
         if (!status.ok()) {

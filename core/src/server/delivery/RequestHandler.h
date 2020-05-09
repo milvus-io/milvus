@@ -115,7 +115,7 @@ class RequestHandler {
     Flush(const std::shared_ptr<Context>& context, const std::vector<std::string>& collection_names);
 
     Status
-    Compact(const std::shared_ptr<Context>& context, const std::string& collection_name);
+    Compact(const std::shared_ptr<Context>& context, const std::string& collection_name, double compact_threshold);
 
     /*******************************************New Interface*********************************************/
 

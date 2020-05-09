@@ -13,9 +13,9 @@ protobuf==3.9.1
 py==1.8.0
 pyasn1==0.4.7
 pyasn1-modules==0.2.6
-pylint==2.3.1
-pymilvus==0.2.10
-#pymilvus-test==0.3.3
+pylint==2.5.0
+#pymilvus==0.2.10
+pymilvus-test==0.3.11
 pyparsing==2.4.0
 pytest==4.6.3
 pytest-level==0.1.1

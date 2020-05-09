@@ -192,7 +192,7 @@ void Clustering::train (idx_t nx, const float *x_in, Index & index) {
         for (int i = 0; i < niter; i++) {
 
             double t0s = getmillisecs();
-            index.search (nx, x, 1, dis, assign);
+            index.assign(nx, x, assign, dis);
             InterruptCallback::check();
             t_search_tot += getmillisecs() - t0s;
 
