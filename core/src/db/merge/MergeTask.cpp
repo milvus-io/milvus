@@ -12,15 +12,18 @@
 #include "db/merge/MergeTask.h"
 #include "db/Utils.h"
 #include "metrics/Metrics.h"
-#include "utils/Log.h"
 #include "segment/SegmentReader.h"
 #include "segment/SegmentWriter.h"
+#include "utils/Log.h"
+
+#include <memory>
+#include <string>
 
 namespace milvus {
 namespace engine {
 
-MergeTask::MergeTask(const meta::MetaPtr& meta_ptr, const DBOptions& options, meta::SegmentsSchema&& files)
-: meta_ptr_(meta_ptr), options_(options), files_(std::move(files)) {
+MergeTask::MergeTask(const meta::MetaPtr& meta_ptr, const DBOptions& options, meta::SegmentsSchema& files)
+    : meta_ptr_(meta_ptr), options_(options), files_(files) {
 }
 
 Status
@@ -48,11 +51,6 @@ MergeTask::Execute() {
     }
 
     // step 2: merge files
-    /*
-    ExecutionEnginePtr index =
-        EngineFactory::Build(collection_file.dimension_, collection_file.location_,
-    (EngineType)collection_file.engine_type_, (MetricType)collection_file.metric_type_, collection_file.nlist_);
-*/
     meta::SegmentsSchema updated;
 
     std::string new_segment_dir;
@@ -60,7 +58,11 @@ MergeTask::Execute() {
     auto segment_writer_ptr = std::make_shared<segment::SegmentWriter>(new_segment_dir);
 
     // attention: here is a copy, not reference, since files_holder.UnmarkFile will change the array internal
+    std::string info = "Merge task files size info:";
     for (auto& file : files_) {
+        info += std::to_string(file.file_size_);
+        info += ", ";
+
         server::CollectMergeFilesMetrics metrics;
         std::string segment_dir_to_merge;
         utils::GetParentPath(file.location_, segment_dir_to_merge);
@@ -74,6 +76,7 @@ MergeTask::Execute() {
             break;
         }
     }
+    LOG_ENGINE_DEBUG_ << info;
 
     // step 3: serialize to disk
     try {
@@ -102,8 +105,8 @@ MergeTask::Execute() {
     // else set file type to RAW, no need to build index
     if (!utils::IsRawIndexType(collection_file.engine_type_)) {
         collection_file.file_type_ = (segment_writer_ptr->Size() >= collection_file.index_file_size_)
-                                     ? meta::SegmentSchema::TO_INDEX
-                                     : meta::SegmentSchema::RAW;
+                                         ? meta::SegmentSchema::TO_INDEX
+                                         : meta::SegmentSchema::RAW;
     } else {
         collection_file.file_type_ = meta::SegmentSchema::RAW;
     }

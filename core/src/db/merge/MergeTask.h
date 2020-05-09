@@ -20,7 +20,7 @@ namespace engine {
 
 class MergeTask {
  public:
-    MergeTask(const meta::MetaPtr& meta, const DBOptions& options, meta::SegmentsSchema&& files);
+    MergeTask(const meta::MetaPtr& meta, const DBOptions& options, meta::SegmentsSchema& files);
 
     Status
     Execute();

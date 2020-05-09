@@ -9,40 +9,17 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
-#pragma once
-
-#include <ctime>
-#include <map>
-#include <memory>
-#include <mutex>
-#include <set>
-#include <string>
-#include <unordered_map>
-#include <vector>
-
-#include "db/merge/MergeManager.h"
-#include "db/merge/MergeStrategy.h"
-#include "utils/Status.h"
+#include "db/merge/MergeSimpleStrategy.h"
+#include "utils/Log.h"
 
 namespace milvus {
 namespace engine {
 
-class MergeManagerImpl : public MergeManager {
- public:
-    MergeManagerImpl(const meta::MetaPtr& meta_ptr, const DBOptions& options, MergeStrategyType type);
-
-    Status
-    UseStrategy(MergeStrategyType type) override;
-
-    Status
-    MergeFiles(const std::string& collection_id) override;
-
- private:
-    meta::MetaPtr meta_ptr_;
-    DBOptions options_;
-
-    MergeStrategyPtr strategy_;
-};  // MergeManagerImpl
+Status
+MergeSimpleStrategy::RegroupFiles(meta::FilesHolder& files_holder, MergeFilesGroups& files_groups) {
+    files_groups.push_back(files_holder.HoldFiles());
+    return Status::OK();
+}
 
 }  // namespace engine
 }  // namespace milvus

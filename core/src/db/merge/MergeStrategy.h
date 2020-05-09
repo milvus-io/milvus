@@ -24,9 +24,12 @@
 namespace milvus {
 namespace engine {
 
+using MergeFilesGroups = std::vector<meta::SegmentsSchema>;
+
 class MergeStrategy {
  public:
-    virtual Status SchedulerFiles(meta::FilesHolder& files_holder) = 0;
+    virtual Status
+    RegroupFiles(meta::FilesHolder& files_holder, MergeFilesGroups& files_groups) = 0;
 };  // MergeStrategy
 
 using MergeStrategyPtr = std::shared_ptr<MergeStrategy>;

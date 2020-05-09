@@ -24,9 +24,17 @@
 namespace milvus {
 namespace engine {
 
+enum class MergeStrategyType {
+    SIMPLE = 1,
+    LAYERED = 2,
+};
+
 class MergeManager {
  public:
-    virtual Status MergeFiles(const std::string& collection_id) = 0;
+    virtual Status
+    UseStrategy(MergeStrategyType type) = 0;
+    virtual Status
+    MergeFiles(const std::string& collection_id) = 0;
 };  // MergeManager
 
 using MergeManagerPtr = std::shared_ptr<MergeManager>;
