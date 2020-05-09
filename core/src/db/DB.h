@@ -56,10 +56,10 @@ class DB {
     DescribeCollection(meta::CollectionSchema& table_schema_) = 0;
 
     virtual Status
-    HasCollection(const std::string& collection_id, bool& has_or_not_) = 0;
+    HasCollection(const std::string& collection_id, bool& has_or_not) = 0;
 
     virtual Status
-    HasNativeCollection(const std::string& collection_id, bool& has_or_not_) = 0;
+    HasNativeCollection(const std::string& collection_id, bool& has_or_not) = 0;
 
     virtual Status
     AllCollections(std::vector<meta::CollectionSchema>& table_schema_array) = 0;
