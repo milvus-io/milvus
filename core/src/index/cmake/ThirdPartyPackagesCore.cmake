@@ -10,7 +10,6 @@
 # or implied. See the License for the specific language governing permissions and limitations under the License.
 
 set(KNOWHERE_THIRDPARTY_DEPENDENCIES
-
         Arrow
         FAISS
         GTest
@@ -319,17 +318,13 @@ set(OPENBLAS_PREFIX "${INDEX_BINARY_DIR}/openblas_ep-prefix/src/openblas_ep")
 macro(build_openblas)
     message(STATUS "Building OpenBLAS-${OPENBLAS_VERSION} from source")
     set(OPENBLAS_INCLUDE_DIR "${OPENBLAS_PREFIX}/include")
-    if (CMAKE_BUILD_TYPE STREQUAL "Release")
-        set(OPENBLAS_SHARED_LIB
-                "${OPENBLAS_PREFIX}/lib/${CMAKE_SHARED_LIBRARY_PREFIX}openblas${CMAKE_SHARED_LIBRARY_SUFFIX}")
-    elseif(CMAKE_BUILD_TYPE STREQUAL "Debug")
-        set(OPENBLAS_SHARED_LIB
-                "${OPENBLAS_PREFIX}/lib/${CMAKE_SHARED_LIBRARY_PREFIX}openblas_d${CMAKE_SHARED_LIBRARY_SUFFIX}")
-    endif()
+    set(OPENBLAS_SHARED_LIB
+            "${OPENBLAS_PREFIX}/lib/${CMAKE_SHARED_LIBRARY_PREFIX}openblas${CMAKE_SHARED_LIBRARY_SUFFIX}")
     set(OPENBLAS_STATIC_LIB
             "${OPENBLAS_PREFIX}/lib/${CMAKE_STATIC_LIBRARY_PREFIX}openblas${CMAKE_STATIC_LIBRARY_SUFFIX}")
     set(OPENBLAS_CMAKE_ARGS
             ${EP_COMMON_CMAKE_ARGS}
+            -DCMAKE_BUILD_TYPE=Release
             -DBUILD_SHARED_LIBS=ON
             -DBUILD_STATIC_LIBS=ON
             -DTARGET=CORE2
@@ -342,7 +337,7 @@ macro(build_openblas)
             -DINTERFACE64=0
             -DNUM_THREADS=128
             -DNO_LAPACKE=1
-            "-DVERSION=${VERSION}"
+            "-DVERSION=${OPENBLAS_VERSION}"
             "-DCMAKE_INSTALL_PREFIX=${OPENBLAS_PREFIX}"
             -DCMAKE_INSTALL_LIBDIR=lib)
 
@@ -369,9 +364,10 @@ macro(build_openblas)
     add_library(openblas SHARED IMPORTED)
     set_target_properties(
             openblas
-            PROPERTIES IMPORTED_LOCATION "${OPENBLAS_SHARED_LIB}"
+            PROPERTIES
+            IMPORTED_LOCATION "${OPENBLAS_SHARED_LIB}"
+            LIBRARY_OUTPUT_NAME "openblas"
             INTERFACE_INCLUDE_DIRECTORIES "${OPENBLAS_INCLUDE_DIR}")
-
     add_dependencies(openblas openblas_ep)
 endmacro()
 
@@ -525,8 +521,13 @@ macro(build_faiss)
                 )
     else ()
         message(STATUS "Build Faiss with OpenBlas/LAPACK")
-        set(FAISS_CONFIGURE_ARGS ${FAISS_CONFIGURE_ARGS}
-                "LDFLAGS=-L${OPENBLAS_PREFIX}/lib -L${LAPACK_PREFIX}/lib")
+        if(KNOWHERE_WITH_OPENBLAS)
+            set(FAISS_CONFIGURE_ARGS ${FAISS_CONFIGURE_ARGS}
+                "LDFLAGS=-L${OPENBLAS_PREFIX}/lib")
+        else()
+            set(FAISS_CONFIGURE_ARGS ${FAISS_CONFIGURE_ARGS}
+                "LDFLAGS=-L${OpenBLAS_PATH}/lib")
+        endif()
     endif ()
 
     if (KNOWHERE_GPU_VERSION)
@@ -577,6 +578,10 @@ macro(build_faiss)
                 ${FAISS_STATIC_LIB})
     endif ()
 
+    if(KNOWHERE_WITH_OPENBLAS)
+        message("add faiss dependencies: openblas_ep")
+        ExternalProject_Add_StepDependencies(faiss_ep configure openblas_ep)
+    endif()
     file(MAKE_DIRECTORY "${FAISS_INCLUDE_DIR}")
     add_library(faiss STATIC IMPORTED)
 
@@ -592,13 +597,18 @@ macro(build_faiss)
                 PROPERTIES
                 INTERFACE_LINK_LIBRARIES "${MKL_LIBS}")
     else ()
+        if (OpenBLAS_FOUND STREQUAL "OFF")
+            set(openblas_include "${OPENBLAS_PREFIX}/include")
+            set(openblas_lib "${OPENBLAS_PREFIX}/lib/libopenblas.so")
+        else()
+            set(openblas_lib ${OpenBLAS_LIBRARIES})
+            set(openblas_include ${OpenBLAS_INCLUDE_DIR})
+        endif()
         set_target_properties(
                 faiss
                 PROPERTIES
-#                INTERFACE_LINK_LIBRARIES ${BLAS_LIBRARIES} ${LAPACK_LIBRARIES})
-                INTERFACE_LINK_LIBRARIES "openblas")
+                INTERFACE_LINK_LIBRARIES "${openblas_lib}")
     endif ()
-
 
     add_dependencies(faiss faiss_ep)
 

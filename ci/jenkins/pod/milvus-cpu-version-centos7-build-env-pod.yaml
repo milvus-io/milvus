@@ -8,7 +8,7 @@ metadata:
 spec:
   containers:
   - name: milvus-cpu-build-env
-    image: registry.zilliz.com/milvus/milvus-cpu-build-env:v0.7.0-centos7
+    image: registry.zilliz.com/milvus/milvus-cpu-build-env:v0.9.0-centos7
     env:
     - name: POD_IP
       valueFrom:
@@ -17,7 +17,7 @@ spec:
     - name: OS_NAME
       value: "centos7"
     - name: BUILD_ENV_IMAGE_ID
-      value: "225b4d9c26d67b70b476964b4dd6e216de4b464d7a973a8c0c7ed1313c4d81ad"
+      value: "f2386d84d312e42891c8c70219b12fde014c21fbdbc0e59bede7e7609b1ba58b"
     command:
     - cat
     tty: true

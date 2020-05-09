@@ -16,6 +16,7 @@ FAISS_ROOT="" #FAISS root path
 FAISS_SOURCE="BUNDLED"
 WITH_PROMETHEUS="ON"
 FIU_ENABLE="OFF"
+BUILD_OPENBLAS="ON"
 
 while getopts "p:d:t:f:ulrcghzmei" arg; do
   case $arg in
@@ -119,7 +120,7 @@ CMAKE_CMD="cmake \
 -DMILVUS_GPU_VERSION=${GPU_VERSION} \
 -DFAISS_WITH_MKL=${WITH_MKL} \
 -DMILVUS_WITH_PROMETHEUS=${WITH_PROMETHEUS} \
--DMILVUS_WITH_FIU=${FIU_ENABLE}
+-DMILVUS_WITH_FIU=${FIU_ENABLE} \
 ../"
 echo ${CMAKE_CMD}
 ${CMAKE_CMD}
@@ -155,5 +156,5 @@ if [[ ${RUN_CPPLINT} == "ON" ]]; then
 else
 
   # compile and build
-  make -j 8 install || exit 1
+  make -j 8 VERBOSE=1 install || exit 1
 fi
