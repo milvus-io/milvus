@@ -558,18 +558,13 @@ MySQLMetaImpl::HasCollection(const std::string& collection_id, bool& has_or_not,
             mysqlpp::Query HasCollectionQuery = connectionPtr->query();
             // since collection_id is a unique column we just need to check whether it exists or not
             if (is_root) {
-                HasCollectionQuery << "SELECT EXISTS"
-                                   << " (SELECT 1 FROM " << META_TABLES << " WHERE table_id = " << mysqlpp::quote
+                HasCollectionQuery << "SELECT id FROM " << META_TABLES << " WHERE table_id = " << mysqlpp::quote
                                    << collection_id << " AND state <> " << std::to_string(CollectionSchema::TO_DELETE)
-                                   << " AND owner_table <> " << mysqlpp::quote << ")"
-                                   << " AS " << mysqlpp::quote << "check"
+                                   << " AND owner_table = " << mysqlpp::quote << ""
                                    << ";";
             } else {
-                HasCollectionQuery << "SELECT EXISTS"
-                                   << " (SELECT 1 FROM " << META_TABLES << " WHERE table_id = " << mysqlpp::quote
+                HasCollectionQuery << "SELECT id FROM " << META_TABLES << " WHERE table_id = " << mysqlpp::quote
                                    << collection_id << " AND state <> " << std::to_string(CollectionSchema::TO_DELETE)
-                                   << ")"
-                                   << " AS " << mysqlpp::quote << "check"
                                    << ";";
             }
 
@@ -578,8 +573,7 @@ MySQLMetaImpl::HasCollection(const std::string& collection_id, bool& has_or_not,
             res = HasCollectionQuery.store();
         }  // Scoped Connection
 
-        int check = res[0]["check"];
-        has_or_not = (check == 1);
+        has_or_not = (res.num_rows() > 0);
     } catch (std::exception& e) {
         return HandleException("Failed to check collection existence", e.what());
     }
