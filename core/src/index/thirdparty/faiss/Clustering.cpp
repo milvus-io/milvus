@@ -190,7 +190,6 @@ void Clustering::train (idx_t nx, const float *x_in, Index & index) {
         index.add (k, centroids.data());
         float err = 0;
         for (int i = 0; i < niter; i++) {
-
             double t0s = getmillisecs();
             index.assign(nx, x, assign, dis);
             InterruptCallback::check();
