@@ -1877,3 +1877,4 @@ class TestIndexAsync:
         future = connect.create_index(collection_name, IndexType.IVF_SQ8, index_param, _async=True)
         status = future.result()
         assert not status.OK()
+
