@@ -47,13 +47,9 @@ BuildIndexPass::Run(const TaskPtr& task) {
             LOG_SERVER_WARNING_ << "BuildIndexPass cannot get build index gpu!";
             return false;
         }
-
-        if (specified_gpu_id_ >= build_gpus_.size()) {
-            specified_gpu_id_ = specified_gpu_id_ % build_gpus_.size();
-        }
-        LOG_SERVER_DEBUG_ << "Specify gpu" << specified_gpu_id_ << " to build index!";
-        res_ptr = ResMgrInst::GetInstance()->GetResource(ResourceType::GPU, build_gpus_[specified_gpu_id_]);
-        specified_gpu_id_ = (specified_gpu_id_ + 1) % build_gpus_.size();
+        LOG_SERVER_DEBUG_ << "Specify gpu" << build_gpus_[idx_] << " to build index!";
+        res_ptr = ResMgrInst::GetInstance()->GetResource(ResourceType::GPU, build_gpus_[idx_]);
+        idx_ = (idx_ + 1) % build_gpus_.size();
     }
 
     auto label = std::make_shared<SpecResLabel>(std::weak_ptr<Resource>(res_ptr));
