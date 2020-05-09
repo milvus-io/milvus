@@ -23,6 +23,7 @@ Please mark all change in change log and use the issue from GitHub
 -   \#2169 Fix SingleIndexTest.IVFSQHybrid unittest
 -   \#2194 Fix get collection info failed
 -   \#2196 Fix server start failed if wal is disabled
+-   \#2203 0.8.0 id=-1 is returned when total count < topk
 -   \#2231 Use server_config to define hard-delete delay time for segment files
 
 ## Feature
