@@ -68,9 +68,13 @@ db_config:
 # secondary_path       | A semicolon-separated list of secondary directories used   | Path       |                 |
 #                      | to save vector data and index data.                        |            |                 |
 #----------------------+------------------------------------------------------------+------------+-----------------+
+# file_cleanup_timeout | time gap between soft-delete and hard-delete               | Integer    | 10 (s)          |
+#                      | range [0, 3600]                                            |            |                 |
+#----------------------+------------------------------------------------------------+------------+-----------------+
 storage_config:
   primary_path: @MILVUS_DB_PATH@
   secondary_path:
+  file_cleanup_timeout: 10
 
 #----------------------+------------------------------------------------------------+------------+-----------------+
 # Metric Config        | Description                                                | Type       | Default         |

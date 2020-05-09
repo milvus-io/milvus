@@ -91,6 +91,7 @@ class RpcHandlerTest : public testing::Test {
         milvus::server::Config::GetInstance().SetStorageConfigSecondaryPath("");
         milvus::server::Config::GetInstance().SetCacheConfigCacheInsertData("");
         milvus::server::Config::GetInstance().SetEngineConfigOmpThreadNum("");
+        milvus::server::Config::GetInstance().SetServerConfigPort("19531");
 
         //        serverConfig.SetValue(server::CONFIG_CLUSTER_MODE, "cluster");
         //        DBWrapper::GetInstance().GetInstance().StartService();
@@ -932,6 +933,10 @@ TEST_F(RpcHandlerTest, CMD_TEST) {
     ::milvus::grpc::StringReply reply;
     handler->Cmd(&context, &command, &reply);
     ASSERT_EQ(reply.string_reply(), MILVUS_VERSION);
+
+    command.set_cmd("requests");
+    handler->Cmd(&context, &command, &reply);
+    ASSERT_EQ(reply.status().error_code(), ::grpc::Status::OK.error_code());
 
     command.set_cmd("tasktable");
     handler->Cmd(&context, &command, &reply);

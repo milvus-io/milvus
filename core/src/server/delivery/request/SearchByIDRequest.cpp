@@ -104,21 +104,9 @@ SearchByIDRequest::OnExecute() {
             return status;
         }
 
-        // step 6: check collection's index type supports search by id
-        if (collection_schema.engine_type_ != (int32_t)engine::EngineType::FAISS_IDMAP &&
-            collection_schema.engine_type_ != (int32_t)engine::EngineType::FAISS_BIN_IDMAP &&
-            collection_schema.engine_type_ != (int32_t)engine::EngineType::FAISS_IVFFLAT &&
-            collection_schema.engine_type_ != (int32_t)engine::EngineType::FAISS_BIN_IVFFLAT &&
-            collection_schema.engine_type_ != (int32_t)engine::EngineType::FAISS_IVFSQ8) {
-            std::string err_msg = "Index type " + std::to_string(collection_schema.engine_type_) +
-                                  " does not support SearchByID operation";
-            LOG_SERVER_ERROR_ << err_msg;
-            return Status(SERVER_UNSUPPORTED_ERROR, err_msg);
-        }
-
         rc.RecordSection("check validation");
 
-        // step 7: search vectors
+        // step 6: search vectors
         engine::ResultIds result_ids;
         engine::ResultDistances result_distances;
 
@@ -145,7 +133,7 @@ SearchByIDRequest::OnExecute() {
             return Status::OK();  // empty collection
         }
 
-        // step 8: construct result array
+        // step 7: construct result array
         milvus::server::ContextChild tracer(context_, "Constructing result");
         result_.row_num_ = id_array_.size();
         result_.distance_list_.swap(result_distances);

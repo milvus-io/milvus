@@ -121,8 +121,8 @@ DefaultAttrsFormat::write(const milvus::storage::FSHandlerPtr& fs_ptr, const mil
 
     auto it = attrs_ptr->attrs.begin();
     if (it == attrs_ptr->attrs.end()) {
-        std::string err_msg = "Attributes is null";
-        LOG_ENGINE_ERROR_ << err_msg;
+        // std::string err_msg = "Attributes is null";
+        // LOG_ENGINE_ERROR_ << err_msg;
         return;
     }
 

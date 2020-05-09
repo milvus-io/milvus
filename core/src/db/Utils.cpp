@@ -13,6 +13,7 @@
 
 #include <fiu-local.h>
 
+#include <unistd.h>
 #include <boost/filesystem.hpp>
 #include <chrono>
 #include <mutex>
@@ -157,15 +158,15 @@ GetCollectionFilePath(const DBMetaOptions& options, meta::SegmentSchema& table_f
     std::string parent_path = ConstructParentFolder(options.path_, table_file);
     std::string file_path = parent_path + "/" + table_file.file_id_;
 
-    bool s3_enable = false;
-    server::Config& config = server::Config::GetInstance();
-    config.GetStorageConfigS3Enable(s3_enable);
-    fiu_do_on("GetCollectionFilePath.enable_s3", s3_enable = true);
-    if (s3_enable) {
-        /* need not check file existence */
-        table_file.location_ = file_path;
-        return Status::OK();
-    }
+    // bool s3_enable = false;
+    // server::Config& config = server::Config::GetInstance();
+    // config.GetStorageConfigS3Enable(s3_enable);
+    // fiu_do_on("GetCollectionFilePath.enable_s3", s3_enable = true);
+    // if (s3_enable) {
+    //     /* need not check file existence */
+    //     table_file.location_ = file_path;
+    //     return Status::OK();
+    // }
 
     if (boost::filesystem::exists(parent_path)) {
         table_file.location_ = file_path;
@@ -316,6 +317,20 @@ GetIndexName(int32_t index_type) {
     }
 
     return index_type_name[index_type];
+}
+
+void
+SendExitSignal() {
+    LOG_SERVER_INFO_ << "Send SIGUSR2 signal to exit";
+    pid_t pid = getpid();
+    kill(pid, SIGUSR2);
+}
+
+void
+ExitOnWriteError(Status& status) {
+    if (status.code() == SERVER_WRITE_ERROR) {
+        utils::SendExitSignal();
+    }
 }
 
 }  // namespace utils

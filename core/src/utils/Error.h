@@ -95,7 +95,8 @@ constexpr ErrorCode DB_INCOMPATIB_META = ToDbErrorCode(6);
 constexpr ErrorCode DB_INVALID_META_URI = ToDbErrorCode(7);
 constexpr ErrorCode DB_EMPTY_COLLECTION = ToDbErrorCode(8);
 constexpr ErrorCode DB_BLOOM_FILTER_ERROR = ToDbErrorCode(9);
-constexpr ErrorCode PARTITION_NOT_FOUND = ToDbErrorCode(10);
+constexpr ErrorCode DB_PARTITION_NOT_FOUND = ToDbErrorCode(10);
+constexpr ErrorCode DB_OUT_OF_STORAGE = ToDbErrorCode(11);
 
 // knowhere error code
 constexpr ErrorCode KNOWHERE_ERROR = ToKnowhereErrorCode(1);

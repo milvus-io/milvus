@@ -105,7 +105,7 @@ class DB {
     Flush() = 0;
 
     virtual Status
-    Compact(const std::string& collection_id) = 0;
+    Compact(const std::string& collection_id, double threshold = 0.0) = 0;
 
     virtual Status
     GetVectorsByID(const std::string& collection_id, const IDNumbers& id_array,
@@ -136,7 +136,8 @@ class DB {
     Size(uint64_t& result) = 0;
 
     virtual Status
-    CreateIndex(const std::string& collection_id, const CollectionIndex& index) = 0;
+    CreateIndex(const std::shared_ptr<server::Context>& context, const std::string& collection_id,
+                const CollectionIndex& index) = 0;
 
     virtual Status
     DescribeIndex(const std::string& collection_id, CollectionIndex& index) = 0;

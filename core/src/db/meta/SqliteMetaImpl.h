@@ -164,8 +164,6 @@ class SqliteMetaImpl : public Meta {
 
     void
     ValidateMetaSchema();
-    void
-    ValidateCollectionMetaSchema();
     Status
     Initialize();
 

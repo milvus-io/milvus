@@ -1,4 +1,5 @@
 import logging
+import re
 from sqlalchemy import exc as sqlalchemy_exc
 from sqlalchemy import and_, or_
 from mishards.models import Tables, TableFiles
@@ -31,8 +32,8 @@ class Factory(RouterMixin):
         else:
             # TODO: collection default partition is '_default'
             cond = and_(Tables.state != Tables.TO_DELETE,
-                        Tables.owner_table == collection_name,
-                        Tables.partition_tag.in_(partition_tags))
+                        Tables.owner_table == collection_name)
+                        # Tables.partition_tag.in_(partition_tags))
             if '_default' in partition_tags:
                 default_par_cond = and_(Tables.table_id == collection_name, Tables.state != Tables.TO_DELETE)
                 cond = or_(cond, default_par_cond)
@@ -45,7 +46,19 @@ class Factory(RouterMixin):
             logger.error("Cannot find collection {} / {} in metadata".format(collection_name, partition_tags))
             raise exceptions.CollectionNotFoundError('{}:{}'.format(collection_name, partition_tags), metadata=metadata)
 
-        collection_list = [str(collection.table_id) for collection in collections]
+        collection_list = []
+        if not partition_tags:
+            collection_list = [str(collection.table_id) for collection in collections]
+        else:
+            for collection in collections:
+                if collection.table_id == collection_name:
+                    collection_list.append(collection_name)
+                    continue
+
+                for tag in partition_tags:
+                    if re.match(tag, collection.partition_tag):
+                        collection_list.append(collection.table_id)
+                        break
 
         file_type_cond = or_(
             TableFiles.file_type == TableFiles.FILE_TYPE_RAW,

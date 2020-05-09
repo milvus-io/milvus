@@ -122,48 +122,36 @@ class ServiceHandler(milvus_pb2_grpc.MilvusServiceServicer):
 
         metadata = kwargs.get('metadata', None)
 
-        rs = []
         all_topk_results = []
 
-        def search(addr, collection_id, file_ids, vectors, topk, params, **kwargs):
-            logger.info(
-                'Send Search Request: addr={};collection_id={};ids={};nq={};topk={};params={}'
-                    .format(addr, collection_id, file_ids, len(vectors), topk, params))
-
-            conn = self.router.query_conn(addr, metadata=metadata)
-            start = time.time()
-            span = kwargs.get('span', None)
-            span = span if span else (None if self.tracer.empty else
-                                      context.get_active_span().context)
-
-            with self.tracer.start_span('search_{}'.format(addr),
-                                        child_of=span):
-                ret = conn.conn.search_vectors_in_files(collection_name=collection_id,
-                                                        file_ids=file_ids,
-                                                        query_records=vectors,
-                                                        top_k=topk,
-                                                        params=params)
-                if ret.status.error_code != 0:
-                    logger.error("Search fail {}".format(ret.status))
-
-                end = time.time()
-                all_topk_results.append(ret)
-
         with self.tracer.start_span('do_search', child_of=p_span) as span:
-            with ThreadPoolExecutor(max_workers=self.max_workers) as pool:
+            if len(routing) == 0:
+                logger.warning('SearchVector: partition_tags = {}'.format(partition_tags))
+                ft = self.router.connection().search(collection_id, topk, vectors, list(partition_tags), search_params, _async=True)
+                ret = ft.result(raw=True)
+                all_topk_results.append(ret)
+            else:
+                futures = []
                 for addr, file_ids in routing.items():
-                    res = pool.submit(search,
-                                      addr,
-                                      collection_id,
-                                      file_ids,
-                                      vectors,
-                                      topk,
-                                      search_params,
-                                      span=span)
-                    rs.append(res)
+                    conn = self.router.query_conn(addr, metadata=metadata)
+                    start = time.time()
+                    span = kwargs.get('span', None)
+                    span = span if span else (None if self.tracer.empty else
+                                              context.get_active_span().context)
 
-                for res in rs:
-                    res.result()
+                    with self.tracer.start_span('search_{}'.format(addr),
+                                                child_of=span):
+                        logger.warning("Search file ids is {}".format(file_ids))
+                        future = conn.search_vectors_in_files(collection_name=collection_id,
+                                                              file_ids=file_ids,
+                                                              query_records=vectors,
+                                                              top_k=topk,
+                                                              params=search_params, _async=True)
+                        futures.append(future)
+
+                    for f in futures:
+                        ret = f.result(raw=True)
+                        all_topk_results.append(ret)
 
         reverse = collection_meta.metric_type == Types.MetricType.IP
         with self.tracer.start_span('do_merge', child_of=p_span):
@@ -230,6 +218,13 @@ class ServiceHandler(milvus_pb2_grpc.MilvusServiceServicer):
         _status = self.router.connection().drop_partition(_collection_name, _tag)
         return status_pb2.Status(error_code=_status.code,
                                  reason=_status.message)
+
+    @mark_grpc_method
+    def HasPartition(self, request, context):
+        _collection_name, _tag = Parser.parse_proto_PartitionParam(request)
+        _status, _ok = self.router.connection().has_partition(_collection_name, _tag)
+        return milvus_pb2.BoolReply(status_pb2.Status(error_code=_status.code,
+                                 reason=_status.message), bool_reply=_ok)
 
     @mark_grpc_method
     def ShowPartitions(self, request, context):
@@ -370,6 +365,72 @@ class ServiceHandler(milvus_pb2_grpc.MilvusServiceServicer):
     def SearchInFiles(self, request, context):
         raise NotImplemented()
 
+    @mark_grpc_method
+    def SearchByID(self, request, context):
+        metadata = {'resp_class': milvus_pb2.TopKQueryResult}
+
+        collection_name = request.collection_name
+
+        topk = request.topk
+
+        if len(request.extra_params) == 0:
+            raise exceptions.SearchParamError(message="Search param loss", metadata=metadata)
+        params = ujson.loads(str(request.extra_params[0].value))
+
+        logger.info('Search {}: topk={} params={}'.format(
+            collection_name, topk, params))
+
+        if topk > self.MAX_TOPK or topk <= 0:
+            raise exceptions.InvalidTopKError(
+                message='Invalid topk: {}'.format(topk), metadata=metadata)
+
+        collection_meta = self.collection_meta.get(collection_name, None)
+
+        if not collection_meta:
+            status, info = self.router.connection(
+                metadata=metadata).describe_collection(collection_name)
+            if not status.OK():
+                raise exceptions.CollectionNotFoundError(collection_name,
+                                                         metadata=metadata)
+
+            self.collection_meta[collection_name] = info
+            collection_meta = info
+
+        start = time.time()
+
+        query_record_array = []
+        if int(collection_meta.metric_type) >= MetricType.HAMMING.value:
+            for query_record in request.query_record_array:
+                query_record_array.append(bytes(query_record.binary_data))
+        else:
+            for query_record in request.query_record_array:
+                query_record_array.append(list(query_record.float_data))
+
+        partition_tags = getattr(request, "partition_tag_array", [])
+        ids = getattr(request, "id_array", [])
+        search_result = self.router.connection(metadata=metadata).search_by_ids(collection_name, ids, topk, partition_tags, params)
+        # status, id_results, dis_results = self._do_query(context,
+        #                                                  collection_name,
+        #                                                  collection_meta,
+        #                                                  query_record_array,
+        #                                                  topk,
+        #                                                  params,
+        #                                                  partition_tags=getattr(request, "partition_tag_array", []),
+        #                                                  metadata=metadata)
+
+        now = time.time()
+        logger.info('SearchVector takes: {}'.format(now - start))
+        return search_result
+        #
+        # topk_result_list = milvus_pb2.TopKQueryResult(
+        #     status=status_pb2.Status(error_code=status.error_code,
+        #                              reason=status.reason),
+        #     row_num=len(request.query_record_array) if len(id_results) else 0,
+        #     ids=id_results,
+        #     distances=dis_results)
+        # return topk_result_list
+        # raise NotImplemented()
+
     def _describe_collection(self, collection_name, metadata=None):
         return self.router.connection(metadata=metadata).describe_collection(collection_name)
 
@@ -416,31 +477,15 @@ class ServiceHandler(milvus_pb2_grpc.MilvusServiceServicer):
 
         metadata = {'resp_class': milvus_pb2.CollectionInfo}
 
-        logger.info('ShowCollectionInfo {}'.format(_collection_name))
         _status, _info = self._collection_info(metadata=metadata, collection_name=_collection_name)
+        _info_str = ujson.dumps(_info)
 
         if _status.OK():
-            _collection_info = milvus_pb2.CollectionInfo(
+            return milvus_pb2.CollectionInfo(
                 status=status_pb2.Status(error_code=_status.code,
                                          reason=_status.message),
-                total_row_count=_info.count
+                json_info=_info_str
             )
-
-            for par_stat in _info.partitions_stat:
-                _par = milvus_pb2.PartitionStat(
-                    tag=par_stat.tag,
-                    total_row_count=par_stat.count
-                )
-                for seg_stat in par_stat.segments_stat:
-                    _par.segments_stat.add(
-                        segment_name=seg_stat.segment_name,
-                        row_count=seg_stat.count,
-                        index_name=seg_stat.index_name,
-                        data_size=seg_stat.data_size,
-                    )
-
-                _collection_info.partitions_stat.append(_par)
-            return _collection_info
 
         return milvus_pb2.CollectionInfo(
             status=status_pb2.Status(error_code=_status.code,
@@ -564,35 +609,35 @@ class ServiceHandler(milvus_pb2_grpc.MilvusServiceServicer):
         grpc_index.extra_params.add(key='params', value=ujson.dumps(_index_param._params))
         return grpc_index
 
-    def _get_vector_by_id(self, collection_name, vec_id, metadata):
-        return self.router.connection(metadata=metadata).get_vector_by_id(collection_name, vec_id)
+    def _get_vectors_by_id(self, collection_name, ids, metadata):
+        return self.router.connection(metadata=metadata).get_vectors_by_ids(collection_name, ids)
 
     @mark_grpc_method
-    def GetVectorByID(self, request, context):
+    def GetVectorsByID(self, request, context):
         _status, unpacks = Parser.parse_proto_VectorIdentity(request)
         if not _status.OK():
             return status_pb2.Status(error_code=_status.code,
                                      reason=_status.message)
 
-        metadata = {'resp_class': milvus_pb2.VectorData}
+        metadata = {'resp_class': milvus_pb2.VectorsData}
 
-        _collection_name, _id = unpacks
+        _collection_name, _ids = unpacks
         logger.info('GetVectorByID {}'.format(_collection_name))
-        _status, vector = self._get_vector_by_id(_collection_name, _id, metadata)
+        _status, vectors = self._get_vectors_by_id(_collection_name, _ids, metadata)
+        _rpc_status = status_pb2.Status(error_code=_status.code, reason=_status.message)
+        if not vectors:
+            return milvus_pb2.VectorsData(status=_rpc_status, )
 
-        if not vector:
-            return milvus_pb2.VectorData(status=status_pb2.Status(
-                error_code=_status.code, reason=_status.message), )
-
-        if isinstance(vector, bytes):
-            records = milvus_pb2.RowRecord(binary_data=vector)
+        if len(vectors) == 0:
+            return milvus_pb2.VectorsData(status=_rpc_status, vectors_data=[])
+        if isinstance(vectors[0], bytes):
+            records = [milvus_pb2.RowRecord(binary_data=v) for v in vectors]
         else:
-            records = milvus_pb2.RowRecord(float_data=vector)
+            records = [milvus_pb2.RowRecord(float_data=v) for v in vectors]
 
-        return milvus_pb2.VectorData(status=status_pb2.Status(
-            error_code=_status.code, reason=_status.message),
-            vector_data=records
-        )
+        response = milvus_pb2.VectorsData(status=_rpc_status)
+        response.vectors_data.extend(records)
+        return response
 
     def _get_vector_ids(self, collection_name, segment_name, metadata):
         return self.router.connection(metadata=metadata).get_vector_ids(collection_name, segment_name)

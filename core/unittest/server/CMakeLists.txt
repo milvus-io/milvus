@@ -23,27 +23,16 @@ set(test_files
 include_directories("${CUDA_TOOLKIT_ROOT_DIR}/include")
 link_directories("${CUDA_TOOLKIT_ROOT_DIR}/lib64")
 
-include_directories(${MILVUS_ENGINE_SRC}/grpc/gen-status)
-include_directories(${MILVUS_ENGINE_SRC}/grpc/gen-milvus)
-
 set(util_files
         ${MILVUS_ENGINE_SRC}/utils/StringHelpFunctions.cpp
         ${MILVUS_ENGINE_SRC}/utils/LogUtil.cpp
         ${MILVUS_ENGINE_SRC}/utils/SignalUtil.cpp)
-
-set(grpc_service_files
-        ${MILVUS_ENGINE_SRC}/grpc/gen-milvus/milvus.grpc.pb.cc
-        ${MILVUS_ENGINE_SRC}/grpc/gen-milvus/milvus.pb.cc
-        ${MILVUS_ENGINE_SRC}/grpc/gen-status/status.grpc.pb.cc
-        ${MILVUS_ENGINE_SRC}/grpc/gen-status/status.pb.cc
-        )
 
 set(server_test_files
         ${common_files}
         ${server_files}
         ${server_init_files}
         ${grpc_server_files}
-        ${grpc_service_files}
         ${server_delivery_files}
         ${web_server_files}
         ${util_files}
@@ -53,19 +42,13 @@ set(server_test_files
 
 add_executable(test_server ${server_test_files})
 
-set(grpc_lib
-        grpcpp_channelz
-        grpc++
-        grpc
-        grpc_protobuf
-        grpc_protoc
-        )
+
 
 target_link_libraries(test_server
         knowhere
         metrics
         stdc++
-        ${grpc_lib}
+        # ${grpc_lib}
         ${unittest_libs}
         oatpp
         )

@@ -359,7 +359,11 @@ ExecutionEngineImpl::Serialize() {
     utils::GetParentPath(location_, segment_dir);
     auto segment_writer_ptr = std::make_shared<segment::SegmentWriter>(segment_dir);
     segment_writer_ptr->SetVectorIndex(index_);
-    segment_writer_ptr->WriteVectorIndex(location_);
+    auto status = segment_writer_ptr->WriteVectorIndex(location_);
+
+    if (!status.ok()) {
+        return status;
+    }
 
     // here we reset index size by file size,
     // since some index type(such as SQ8) data size become smaller after serialized
@@ -461,7 +465,7 @@ ExecutionEngineImpl::Load(bool to_cache) {
                     bool gpu_enable = false;
 #ifdef MILVUS_GPU_VERSION
                     server::Config& config = server::Config::GetInstance();
-                    CONFIG_CHECK(config.GetGpuResourceConfigEnable(gpu_enable));
+                    STATUS_CHECK(config.GetGpuResourceConfigEnable(gpu_enable));
 #endif
                     if (!gpu_enable && index_->index_mode() == knowhere::IndexMode::MODE_GPU) {
                         std::string err_msg = "Index with type " + index_->index_type() + " must be used in GPU mode";

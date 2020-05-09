@@ -10,11 +10,13 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
 #include "server/delivery/request/BaseRequest.h"
+
+#include <map>
+
+#include "server/context/Context.h"
 #include "utils/CommonUtil.h"
 #include "utils/Exception.h"
 #include "utils/Log.h"
-
-#include <map>
 
 namespace milvus {
 namespace server {
@@ -81,6 +83,9 @@ BaseRequest::BaseRequest(const std::shared_ptr<milvus::server::Context>& context
                          bool async)
     : context_(context), type_(type), async_(async), done_(false) {
     request_group_ = milvus::server::RequestGroup(type);
+    if (nullptr != context_) {
+        context_->SetRequestType(type_);
+    }
 }
 
 BaseRequest::~BaseRequest() {
