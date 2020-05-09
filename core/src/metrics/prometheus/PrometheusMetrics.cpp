@@ -26,16 +26,16 @@ Status
 PrometheusMetrics::Init() {
     try {
         Config& config = Config::GetInstance();
-        CONFIG_CHECK(config.GetMetricConfigEnableMonitor(startup_));
+        STATUS_CHECK(config.GetMetricConfigEnableMonitor(startup_));
         if (!startup_) {
             return Status::OK();
         }
 
         // Following should be read from config file.
         std::string server_port, push_port, push_address;
-        CONFIG_CHECK(config.GetServerConfigPort(server_port));
-        CONFIG_CHECK(config.GetMetricConfigPort(push_port));
-        CONFIG_CHECK(config.GetMetricConfigAddress(push_address));
+        STATUS_CHECK(config.GetServerConfigPort(server_port));
+        STATUS_CHECK(config.GetMetricConfigPort(push_port));
+        STATUS_CHECK(config.GetMetricConfigAddress(push_address));
 
         const std::string uri = std::string("/metrics");
         // const std::size_t num_threads = 2;

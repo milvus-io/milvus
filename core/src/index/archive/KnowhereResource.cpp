@@ -36,7 +36,7 @@ Status
 KnowhereResource::Initialize() {
     server::Config& config = server::Config::GetInstance();
     std::string simd_type;
-    CONFIG_CHECK(config.GetEngineConfigSimdType(simd_type));
+    STATUS_CHECK(config.GetEngineConfigSimdType(simd_type));
     if (simd_type == "avx512") {
         faiss::faiss_use_avx512 = true;
         faiss::faiss_use_avx2 = false;
@@ -64,7 +64,7 @@ KnowhereResource::Initialize() {
 
 #ifdef MILVUS_GPU_VERSION
     bool enable_gpu = false;
-    CONFIG_CHECK(config.GetGpuResourceConfigEnable(enable_gpu));
+    STATUS_CHECK(config.GetGpuResourceConfigEnable(enable_gpu));
     fiu_do_on("KnowhereResource.Initialize.disable_gpu", enable_gpu = false);
     if (not enable_gpu)
         return Status::OK();
@@ -79,7 +79,7 @@ KnowhereResource::Initialize() {
 
     // get build index gpu resource
     std::vector<int64_t> build_index_gpus;
-    CONFIG_CHECK(config.GetGpuResourceConfigBuildIndexResources(build_index_gpus));
+    STATUS_CHECK(config.GetGpuResourceConfigBuildIndexResources(build_index_gpus));
 
     for (auto gpu_id : build_index_gpus) {
         gpu_resources.insert(std::make_pair(gpu_id, GpuResourceSetting()));
@@ -87,7 +87,7 @@ KnowhereResource::Initialize() {
 
     // get search gpu resource
     std::vector<int64_t> search_gpus;
-    CONFIG_CHECK(config.GetGpuResourceConfigSearchResources(search_gpus));
+    STATUS_CHECK(config.GetGpuResourceConfigSearchResources(search_gpus));
 
     for (auto& gpu_id : search_gpus) {
         gpu_resources.insert(std::make_pair(gpu_id, GpuResourceSetting()));
