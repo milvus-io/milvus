@@ -29,12 +29,14 @@ raw_vectors, binary_vectors = gen_binary_vectors(6000, dim)
 
 
 class TestSearchBase:
-    @pytest.fixture(scope="function", autouse=True)
-    def skip_check(self, connect):
-        if str(connect._cmd("mode")[1]) == "CPU" or str(connect._cmd("mode")[1]) == "GPU":
-            reason = "GPU mode not support"
-            logging.getLogger().info(reason)
-            pytest.skip(reason)
+    # @pytest.fixture(scope="function", autouse=True)
+    # def skip_check(self, connect):
+    #     if str(connect._cmd("mode")[1]) == "CPU":
+    #         if request.param["index_type"] == IndexType.IVF_SQ8H:
+    #             pytest.skip("sq8h not support in CPU mode")
+    #     if str(connect._cmd("mode")[1]) == "GPU":
+    #         if request.param["index_type"] == IndexType.IVF_PQ:
+    #             pytest.skip("ivfpq not support in GPU mode")
 
     def init_data(self, connect, collection, nb=6000):
         '''
@@ -82,16 +84,6 @@ class TestSearchBase:
         connect.flush([collection])
         return add_vectors, ids
 
-    def check_no_result(self, results):
-        if len(results) == 0:
-            return True
-        flag = True
-        for r in results:
-            flag = flag and (r.id == -1)
-            if not flag:
-                return False
-        return flag
-
     def init_data_partition(self, connect, collection, partition_tag, nb=6000):
         '''
         Generate vectors and add it in collection, before search vectors
@@ -104,6 +96,7 @@ class TestSearchBase:
             add_vectors = sklearn.preprocessing.normalize(add_vectors, axis=1, norm='l2')
             add_vectors = add_vectors.tolist()
         status, ids = connect.add_vectors(collection, add_vectors, partition_tag=partition_tag)
+        assert status.OK()
         connect.flush([collection])
         return add_vectors, ids
 
@@ -178,6 +171,22 @@ class TestSearchBase:
         assert result[0][0].distance <= epsilon
         assert check_result(result[0], ids[0])
 
+    def test_search_flat_same_ids(self, connect, collection):
+        '''
+        target: test basic search fuction, all the search params is corrent, change top-k value
+        method: search with the given vector id, check the result
+        expected: search status ok, and the length of the result is top_k
+        '''
+        vectors, ids = self.init_data(connect, collection)
+        query_ids = [ids[0], ids[0]]
+        status, result = connect.search_by_ids(collection, query_ids, top_k, params={})
+        assert status.OK()
+        assert len(result[0]) == min(len(vectors), top_k)
+        assert result[0][0].distance <= epsilon
+        assert result[1][0].distance <= epsilon
+        assert check_result(result[0], ids[0])
+        assert check_result(result[1], ids[0])
+
     def test_search_flat_max_topk(self, connect, collection):
         '''
         target: test basic search fuction, all the search params is corrent, change top-k value
@@ -186,7 +195,7 @@ class TestSearchBase:
         '''
         top_k = 2049
         vectors, ids = self.init_data(connect, collection)
-        query_ids = ids[0]
+        query_ids = [ids[0]]
         status, result = connect.search_by_ids(collection, query_ids, top_k, params={})
         assert not status.OK()
 
@@ -200,7 +209,7 @@ class TestSearchBase:
         query_ids = non_exist_id
         status, result = connect.search_by_ids(collection, query_ids, top_k, params={})
         assert status.OK()
-        assert len(result[0]) == min(len(vectors), top_k)
+        assert len(result[0]) == 0
 
     def test_search_collection_empty(self, connect, collection):
         '''
@@ -209,9 +218,11 @@ class TestSearchBase:
         expected: search status ok, and the length of the result is top_k
         '''
         query_ids = non_exist_id
+        logging.getLogger().info(query_ids)
+        logging.getLogger().info(collection)
+        logging.getLogger().info(connect.describe_collection(collection))
         status, result = connect.search_by_ids(collection, query_ids, top_k, params={})
-        assert status.OK()
-        assert len(result) == 0 
+        assert not status.OK()
 
     def test_search_index_l2(self, connect, collection, get_simple_index):
         '''
@@ -221,6 +232,8 @@ class TestSearchBase:
         '''
         index_param = get_simple_index["index_param"]
         index_type = get_simple_index["index_type"]
+        if index_type == IndexType.IVF_PQ:
+            pytest.skip("skip pq")
         vectors, ids = self.init_data(connect, collection)
         status = connect.create_index(collection, index_type, index_param)
         query_ids = [ids[0]]
@@ -239,6 +252,8 @@ class TestSearchBase:
         '''
         index_param = get_simple_index["index_param"]
         index_type = get_simple_index["index_type"]
+        if index_type == IndexType.IVF_PQ:
+            pytest.skip("skip pq")
         vectors, ids = self.init_data(connect, collection)
         status = connect.create_index(collection, index_type, index_param)
         query_ids = ids[0:nq]
@@ -246,7 +261,7 @@ class TestSearchBase:
         status, result = connect.search_by_ids(collection, query_ids, top_k, params=search_param)
         assert status.OK()
         assert len(result) == nq
-        for i in nq:
+        for i in range(nq):
             assert len(result[i]) == min(len(vectors), top_k)
             assert result[i][0].distance <= epsilon
             assert check_result(result[i], ids[i])
@@ -259,17 +274,19 @@ class TestSearchBase:
         '''
         index_param = get_simple_index["index_param"]
         index_type = get_simple_index["index_type"]
+        if index_type == IndexType.IVF_PQ:
+            pytest.skip("skip pq")
         vectors, ids = self.init_data(connect, collection)
         status = connect.create_index(collection, index_type, index_param)
         query_ids = ids[0:nq]
-        query_ids[0] = non_exist_id
+        query_ids[0] = 1
         search_param = get_search_param(index_type)
-        status, result = connect.search_by_ids(collection, [query_ids], top_k, params=search_param)
+        status, result = connect.search_by_ids(collection, query_ids, top_k, params=search_param)
         assert status.OK()
         assert len(result) == nq
-        for i in nq:
+        for i in range(nq):
             if i == 0:
-                assert result[i].id == -1
+                assert len(result[i]) == 0
             else:
                 assert len(result[i]) == min(len(vectors), top_k)
                 assert result[i][0].distance <= epsilon
@@ -277,15 +294,16 @@ class TestSearchBase:
 
     def test_search_index_delete(self, connect, collection):
         vectors, ids = self.init_data(connect, collection)
-        query_ids = ids[0]
-        status = connect.delete_by_id(collection, [query_ids])
+        query_ids = ids[0:nq]
+        status = connect.delete_by_id(collection, [query_ids[0]])
         assert status.OK()
-        status = connect.flush(collection)
-        status, result = connect.search_by_ids(collection, [query_ids], top_k, params={})
+        status = connect.flush([collection])
+        status, result = connect.search_by_ids(collection, query_ids, top_k, params={})
         assert status.OK()
-        assert len(result) == 1 
-        assert result[0][0].distance <= epsilon
-        assert result[0][0].id != ids[0]
+        assert len(result) == nq 
+        assert len(result[0]) == 0
+        assert len(result[1]) == top_k 
+        assert result[1][0].distance <= epsilon
 
     def test_search_l2_partition_tag_not_existed(self, connect, collection):
         '''
@@ -295,28 +313,31 @@ class TestSearchBase:
         '''
         status = connect.create_partition(collection, tag)
         vectors, ids = self.init_data(connect, collection)
-        query_ids = ids[0]
-        status, result = connect.search_by_ids(collection, query_ids, top_k, partition_tags=[tag], params=search_param)
-        assert status.OK() 
+        query_ids = [ids[0]]
+        new_tag = gen_unique_str()
+        status, result = connect.search_by_ids(collection, query_ids, top_k, partition_tags=[new_tag], params={})
+        assert not status.OK() 
+        logging.getLogger().info(status)
         assert len(result) == 0
 
-    def test_search_l2_partition_other(self, connect, collection):
-        tag = gen_unique_str()
+    def test_search_l2_partition_empty(self, connect, collection):
         status = connect.create_partition(collection, tag)
         vectors, ids = self.init_data(connect, collection)
-        query_ids = ids[0]
-        status, result = connect.search_by_ids(collection, query_ids, top_k, partition_tags=[tag], params=search_param)
-        assert status.OK()
+        query_ids = [ids[0]]
+        status, result = connect.search_by_ids(collection, query_ids, top_k, partition_tags=[tag], params={})
+        assert not status.OK()
+        logging.getLogger().info(status)
         assert len(result) == 0
 
     def test_search_l2_partition(self, connect, collection):
+        status = connect.create_partition(collection, tag)
         vectors, ids = self.init_data_partition(connect, collection, tag)
-        query_ids = ids[-1]
+        query_ids = ids[-1:]
         status, result = connect.search_by_ids(collection, query_ids, top_k, partition_tags=[tag])
         assert status.OK() 
         assert len(result) == 1
         assert len(result[0]) == min(len(vectors), top_k)
-        assert check_result(result[0], query_ids)
+        assert check_result(result[0], query_ids[-1])
 
     def test_search_l2_partition_B(self, connect, collection):
         status = connect.create_partition(collection, tag)
@@ -325,7 +346,7 @@ class TestSearchBase:
         status, result = connect.search_by_ids(collection, query_ids, top_k, partition_tags=[tag])
         assert status.OK()
         assert len(result) == nq
-        for i in nq:
+        for i in range(nq):
             assert len(result[i]) == min(len(vectors), top_k)
             assert result[i][0].distance <= epsilon
             assert check_result(result[i], ids[i])
@@ -338,14 +359,17 @@ class TestSearchBase:
         vectors, new_ids = self.init_data_partition(connect, collection, new_tag, nb=nb+1)
         tmp = 2
         query_ids = ids[0:tmp]
-        query_ids.extend(new_ids[0:nq-tmp])
+        query_ids.extend(new_ids[tmp:nq])
         status, result = connect.search_by_ids(collection, query_ids, top_k, partition_tags=[tag, new_tag], params={})
         assert status.OK()
         assert len(result) == nq
-        for i in nq:
+        for i in range(nq):
             assert len(result[i]) == min(len(vectors), top_k)
             assert result[i][0].distance <= epsilon
-            assert check_result(result[i], ids[i])
+            if i < tmp:
+                assert result[i][0].id == ids[i]
+            else:
+                assert result[i][0].id == new_ids[i]
 
     def test_search_l2_index_partitions_match_one_tag(self, connect, collection):
         new_tag = "new_tag"
@@ -355,18 +379,19 @@ class TestSearchBase:
         vectors, new_ids = self.init_data_partition(connect, collection, new_tag, nb=nb+1)
         tmp = 2
         query_ids = ids[0:tmp]
-        query_ids.extend(new_ids[0:nq-tmp])
+        query_ids.extend(new_ids[tmp:nq])
         status, result = connect.search_by_ids(collection, query_ids, top_k, partition_tags=[new_tag], params={})
         assert status.OK()
         assert len(result) == nq
-        for i in nq:
+        for i in range(nq):
             if i < tmp:
                 assert result[i][0].distance > epsilon
                 assert result[i][0].id != ids[i]
             else:
                 assert len(result[i]) == min(len(vectors), top_k)
                 assert result[i][0].distance <= epsilon
-                assert check_result(result[i], ids[i])
+                assert result[i][0].id == new_ids[i]
+                assert result[i][1].distance > epsilon
 
     # def test_search_by_ids_without_connect(self, dis_connect, collection):
     #     '''
@@ -411,7 +436,7 @@ class TestSearchBase:
         status, result = connect.search_by_ids(jac_collection, query_ids, top_k, params=search_param)
         assert status.OK()
         assert len(result) == nq
-        for i in nq:
+        for i in range(nq):
             assert len(result[i]) == min(len(vectors), top_k)
             assert result[i][0].distance <= epsilon
             assert check_result(result[i], ids[i])
@@ -499,7 +524,7 @@ class TestSearchParamsInvalid(object):
 
 
 def check_result(result, id):
-    if len(result) >= 5:
-        return id in [x.id for x in result[:5]]
+    if len(result) >= top_k:
+        return id in [x.id for x in result[:top_k]]
     else:
         return id in (i.id for i in result)

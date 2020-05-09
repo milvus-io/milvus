@@ -233,6 +233,44 @@ class TestFlushBase:
         assert res == 0
 
 
+class TestFlushAsync:
+    """
+    ******************************************************************
+      The following cases are used to test `flush` function
+    ******************************************************************
+    """
+    def check_status(self, status, result):
+        logging.getLogger().info("In callback check status")
+        assert status.OK()
+
+    def test_flush_empty_collection(self, connect, collection):
+        '''
+        method: flush collection with no vectors
+        expected: status ok
+        '''
+        future = connect.flush([collection], _async=True)
+        status = future.result()
+        assert status.OK()
+
+    def test_flush_async(self, connect, collection):
+        vectors = gen_vectors(nb, dim)
+        status, ids = connect.add_vectors(collection, vectors)
+        future = connect.flush([collection], _async=True)
+        status = future.result()
+        assert status.OK()
+
+    def test_flush_async(self, connect, collection):
+        nb = 100000
+        vectors = gen_vectors(nb, dim)
+        connect.add_vectors(collection, vectors)
+        logging.getLogger().info("before")
+        future = connect.flush([collection], _async=True, _callback=self.check_status)
+        logging.getLogger().info("after")
+        future.done()
+        status = future.result()
+        assert status.OK()
+
+
 class TestCollectionNameInvalid(object):
     """
     Test adding vectors with invalid collection names
