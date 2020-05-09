@@ -317,7 +317,7 @@ endif ()
 set(OPENBLAS_PREFIX "${INDEX_BINARY_DIR}/openblas_ep-prefix/src/openblas_ep")
 macro(build_openblas)
     message(STATUS "Building OpenBLAS-${OPENBLAS_VERSION} from source")
-    set(OPENBLAS_INCLUDE_DIR "${OPENBLAS_PREFIX}/include")
+    set(OpenBLAS_INCLUDE_DIR "${OPENBLAS_PREFIX}/include")
     set(OpenBLAS_LIB_DIR "${OPENBLAS_PREFIX}/lib")
     set(OPENBLAS_SHARED_LIB
             "${OPENBLAS_PREFIX}/lib/${CMAKE_SHARED_LIBRARY_PREFIX}openblas${CMAKE_SHARED_LIBRARY_SUFFIX}")
@@ -361,22 +361,22 @@ macro(build_openblas)
             ${OPENBLAS_SHARED_LIB}
             ${OPENBLAS_STATIC_LIB})
 
-    file(MAKE_DIRECTORY "${OPENBLAS_INCLUDE_DIR}")
+    file(MAKE_DIRECTORY "${OpenBLAS_INCLUDE_DIR}")
     add_library(openblas SHARED IMPORTED)
     set_target_properties(
             openblas
             PROPERTIES
             IMPORTED_LOCATION "${OPENBLAS_SHARED_LIB}"
             LIBRARY_OUTPUT_NAME "openblas"
-            INTERFACE_INCLUDE_DIRECTORIES "${OPENBLAS_INCLUDE_DIR}")
+            INTERFACE_INCLUDE_DIRECTORIES "${OpenBLAS_INCLUDE_DIR}")
     add_dependencies(openblas openblas_ep)
-    get_target_property(OPENBLAS_INCLUDE_DIR openblas INTERFACE_INCLUDE_DIRECTORIES)
-    include_directories(SYSTEM "${OPENBLAS_INCLUDE_DIR}")
-    link_directories(SYSTEM "${OpenBLAS_LIB_DIR}")
+    get_target_property(OpenBLAS_INCLUDE_DIR openblas INTERFACE_INCLUDE_DIRECTORIES)
 endmacro()
 
 if (KNOWHERE_WITH_OPENBLAS)
     resolve_dependency(OpenBLAS)
+    include_directories(SYSTEM "${OpenBLAS_INCLUDE_DIR}")
+    link_directories(SYSTEM "${OpenBLAS_LIB_DIR}")
 endif()
 
 # ----------------------------------------------------------------------
