@@ -84,16 +84,6 @@ class TestSearchBase:
         connect.flush([collection])
         return add_vectors, ids
 
-    def check_no_result(self, results):
-        if len(results) == 0:
-            return True
-        flag = True
-        for r in results:
-            flag = flag and (r.id == -1)
-            if not flag:
-                return False
-        return flag
-
     def init_data_partition(self, connect, collection, partition_tag, nb=6000):
         '''
         Generate vectors and add it in collection, before search vectors
@@ -290,7 +280,7 @@ class TestSearchBase:
         assert len(result) == nq
         for i in range(nq):
             if i == 0:
-                assert result[i][0].id == -1
+                assert len(result[i]) == 0
             else:
                 assert len(result[i]) == min(len(vectors), top_k)
                 assert result[i][0].distance <= epsilon
