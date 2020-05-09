@@ -55,7 +55,7 @@ class Meta {
     DescribeCollection(CollectionSchema& table_schema) = 0;
 
     virtual Status
-    HasCollection(const std::string& collection_id, bool& has_or_not) = 0;
+    HasCollection(const std::string& collection_id, bool& has_or_not, bool is_root = false) = 0;
 
     virtual Status
     AllCollections(std::vector<CollectionSchema>& table_schema_array) = 0;

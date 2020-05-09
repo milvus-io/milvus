@@ -50,20 +50,10 @@ HasCollectionRequest::OnExecute() {
         status = DBWrapper::DB()->HasNativeCollection(collection_name_, has_collection_);
         fiu_do_on("HasCollectionRequest.OnExecute.throw_std_exception", throw std::exception());
 
-        // only process root collection, ignore partition collection
-        if (has_collection_) {
-            engine::meta::CollectionSchema collection_schema;
-            collection_schema.collection_id_ = collection_name_;
-            status = DBWrapper::DB()->DescribeCollection(collection_schema);
-            if (!collection_schema.owner_collection_.empty()) {
-                has_collection_ = false;
-            }
-        }
+        return status;
     } catch (std::exception& ex) {
         return Status(SERVER_UNEXPECTED_ERROR, ex.what());
     }
-
-    return Status::OK();
 }
 
 }  // namespace server
