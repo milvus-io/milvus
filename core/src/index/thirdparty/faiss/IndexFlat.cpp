@@ -64,6 +64,30 @@ void IndexFlat::search(idx_t n, const float* x, idx_t k, float* distances, idx_t
     }
 }
 
+void IndexFlat::assign(idx_t n, const float * x, idx_t * labels, float* distances)
+{
+    // usually used in IVF k-means algorithm
+
+    float *dis_inner = (distances == nullptr) ? new float[n] : distances;
+    switch (metric_type) {
+        case METRIC_INNER_PRODUCT:
+        case METRIC_L2: {
+            // ignore the metric_type, both use L2
+            elkan_L2_sse(x, xb.data(), d, n, ntotal, labels, dis_inner);
+            break;
+        }
+        default: {
+            // binary metrics
+            // There may be something wrong, but maintain the original logic now.
+            Index::assign(n, x, labels, dis_inner);
+            break;
+        }
+    }
+    if (distances == nullptr) {
+        delete[] dis_inner;
+    }
+}
+
 void IndexFlat::range_search (idx_t n, const float *x, float radius,
                               RangeSearchResult *result,
                               ConcurrentBitsetPtr bitset) const

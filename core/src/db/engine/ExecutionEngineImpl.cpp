@@ -465,7 +465,7 @@ ExecutionEngineImpl::Load(bool to_cache) {
                     bool gpu_enable = false;
 #ifdef MILVUS_GPU_VERSION
                     server::Config& config = server::Config::GetInstance();
-                    CONFIG_CHECK(config.GetGpuResourceConfigEnable(gpu_enable));
+                    STATUS_CHECK(config.GetGpuResourceConfigEnable(gpu_enable));
 #endif
                     if (!gpu_enable && index_->index_mode() == knowhere::IndexMode::MODE_GPU) {
                         std::string err_msg = "Index with type " + index_->index_type() + " must be used in GPU mode";
