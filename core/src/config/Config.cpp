@@ -76,18 +76,18 @@ const char* CONFIG_STORAGE_SECONDARY_PATH = "secondary_path";
 const char* CONFIG_STORAGE_SECONDARY_PATH_DEFAULT = "";
 const char* CONFIG_STORAGE_FILE_CLEANUP_TIMEOUT = "file_cleanup_timeout";
 const char* CONFIG_STORAGE_FILE_CLEANUP_TIMEOUT_DEFAULT = "10";
-const char* CONFIG_STORAGE_S3_ENABLE = "s3_enable";
-const char* CONFIG_STORAGE_S3_ENABLE_DEFAULT = "false";
-const char* CONFIG_STORAGE_S3_ADDRESS = "s3_address";
-const char* CONFIG_STORAGE_S3_ADDRESS_DEFAULT = "127.0.0.1";
-const char* CONFIG_STORAGE_S3_PORT = "s3_port";
-const char* CONFIG_STORAGE_S3_PORT_DEFAULT = "9000";
-const char* CONFIG_STORAGE_S3_ACCESS_KEY = "s3_access_key";
-const char* CONFIG_STORAGE_S3_ACCESS_KEY_DEFAULT = "minioadmin";
-const char* CONFIG_STORAGE_S3_SECRET_KEY = "s3_secret_key";
-const char* CONFIG_STORAGE_S3_SECRET_KEY_DEFAULT = "minioadmin";
-const char* CONFIG_STORAGE_S3_BUCKET = "s3_bucket";
-const char* CONFIG_STORAGE_S3_BUCKET_DEFAULT = "milvus-bucket";
+// const char* CONFIG_STORAGE_S3_ENABLE = "s3_enable";
+// const char* CONFIG_STORAGE_S3_ENABLE_DEFAULT = "false";
+// const char* CONFIG_STORAGE_S3_ADDRESS = "s3_address";
+// const char* CONFIG_STORAGE_S3_ADDRESS_DEFAULT = "127.0.0.1";
+// const char* CONFIG_STORAGE_S3_PORT = "s3_port";
+// const char* CONFIG_STORAGE_S3_PORT_DEFAULT = "9000";
+// const char* CONFIG_STORAGE_S3_ACCESS_KEY = "s3_access_key";
+// const char* CONFIG_STORAGE_S3_ACCESS_KEY_DEFAULT = "minioadmin";
+// const char* CONFIG_STORAGE_S3_SECRET_KEY = "s3_secret_key";
+// const char* CONFIG_STORAGE_S3_SECRET_KEY_DEFAULT = "minioadmin";
+// const char* CONFIG_STORAGE_S3_BUCKET = "s3_bucket";
+// const char* CONFIG_STORAGE_S3_BUCKET_DEFAULT = "milvus-bucket";
 
 /* cache config */
 const char* CONFIG_CACHE = "cache_config";
@@ -241,10 +241,7 @@ Config::LoadConfigFile(const std::string& filename) {
     }
 
     ConfigMgr* mgr = YamlConfigMgr::GetInstance();
-    Status s = mgr->LoadConfigFile(filename);
-    if (!s.ok()) {
-        return s;
-    }
+    STATUS_CHECK(mgr->LoadConfigFile(filename));
 
     // store config file path
     config_file_ = filename;
@@ -255,172 +252,172 @@ Config::LoadConfigFile(const std::string& filename) {
 Status
 Config::ValidateConfig() {
     std::string config_version;
-    CONFIG_CHECK(GetConfigVersion(config_version));
+    STATUS_CHECK(GetConfigVersion(config_version));
 
     /* server config */
     std::string server_addr;
-    CONFIG_CHECK(GetServerConfigAddress(server_addr));
+    STATUS_CHECK(GetServerConfigAddress(server_addr));
 
     std::string server_port;
-    CONFIG_CHECK(GetServerConfigPort(server_port));
+    STATUS_CHECK(GetServerConfigPort(server_port));
 
     std::string server_mode;
-    CONFIG_CHECK(GetServerConfigDeployMode(server_mode));
+    STATUS_CHECK(GetServerConfigDeployMode(server_mode));
 
     std::string server_time_zone;
-    CONFIG_CHECK(GetServerConfigTimeZone(server_time_zone));
+    STATUS_CHECK(GetServerConfigTimeZone(server_time_zone));
 
     bool server_web_enable;
-    CONFIG_CHECK(GetServerConfigWebEnable(server_web_enable));
+    STATUS_CHECK(GetServerConfigWebEnable(server_web_enable));
 
     std::string server_web_port;
-    CONFIG_CHECK(GetServerConfigWebPort(server_web_port));
+    STATUS_CHECK(GetServerConfigWebPort(server_web_port));
 
     /* db config */
     std::string db_backend_url;
-    CONFIG_CHECK(GetDBConfigBackendUrl(db_backend_url));
+    STATUS_CHECK(GetDBConfigBackendUrl(db_backend_url));
 
     std::string db_preload_collection;
-    CONFIG_CHECK(GetDBConfigPreloadCollection(db_preload_collection));
+    STATUS_CHECK(GetDBConfigPreloadCollection(db_preload_collection));
 
     int64_t db_archive_disk_threshold;
-    CONFIG_CHECK(GetDBConfigArchiveDiskThreshold(db_archive_disk_threshold));
+    STATUS_CHECK(GetDBConfigArchiveDiskThreshold(db_archive_disk_threshold));
 
     int64_t db_archive_days_threshold;
-    CONFIG_CHECK(GetDBConfigArchiveDaysThreshold(db_archive_days_threshold));
+    STATUS_CHECK(GetDBConfigArchiveDaysThreshold(db_archive_days_threshold));
 
     int64_t auto_flush_interval;
-    CONFIG_CHECK(GetDBConfigAutoFlushInterval(auto_flush_interval));
+    STATUS_CHECK(GetDBConfigAutoFlushInterval(auto_flush_interval));
 
     /* storage config */
     std::string storage_primary_path;
-    CONFIG_CHECK(GetStorageConfigPrimaryPath(storage_primary_path));
+    STATUS_CHECK(GetStorageConfigPrimaryPath(storage_primary_path));
 
     std::string storage_secondary_path;
-    CONFIG_CHECK(GetStorageConfigSecondaryPath(storage_secondary_path));
+    STATUS_CHECK(GetStorageConfigSecondaryPath(storage_secondary_path));
 
-    bool storage_s3_enable;
-    CONFIG_CHECK(GetStorageConfigS3Enable(storage_s3_enable));
-    // std::cout << "S3 " << (storage_s3_enable ? "ENABLED !" : "DISABLED !") << std::endl;
-
-    std::string storage_s3_address;
-    CONFIG_CHECK(GetStorageConfigS3Address(storage_s3_address));
-
-    std::string storage_s3_port;
-    CONFIG_CHECK(GetStorageConfigS3Port(storage_s3_port));
-
-    std::string storage_s3_access_key;
-    CONFIG_CHECK(GetStorageConfigS3AccessKey(storage_s3_access_key));
-
-    std::string storage_s3_secret_key;
-    CONFIG_CHECK(GetStorageConfigS3SecretKey(storage_s3_secret_key));
-
-    std::string storage_s3_bucket;
-    CONFIG_CHECK(GetStorageConfigS3Bucket(storage_s3_bucket));
+    // bool storage_s3_enable;
+    // STATUS_CHECK(GetStorageConfigS3Enable(storage_s3_enable));
+    // // std::cout << "S3 " << (storage_s3_enable ? "ENABLED !" : "DISABLED !") << std::endl;
+    //
+    // std::string storage_s3_address;
+    // STATUS_CHECK(GetStorageConfigS3Address(storage_s3_address));
+    //
+    // std::string storage_s3_port;
+    // STATUS_CHECK(GetStorageConfigS3Port(storage_s3_port));
+    //
+    // std::string storage_s3_access_key;
+    // STATUS_CHECK(GetStorageConfigS3AccessKey(storage_s3_access_key));
+    //
+    // std::string storage_s3_secret_key;
+    // STATUS_CHECK(GetStorageConfigS3SecretKey(storage_s3_secret_key));
+    //
+    // std::string storage_s3_bucket;
+    // STATUS_CHECK(GetStorageConfigS3Bucket(storage_s3_bucket));
 
     /* metric config */
     bool metric_enable_monitor;
-    CONFIG_CHECK(GetMetricConfigEnableMonitor(metric_enable_monitor));
+    STATUS_CHECK(GetMetricConfigEnableMonitor(metric_enable_monitor));
 
     std::string metric_address;
-    CONFIG_CHECK(GetMetricConfigAddress(metric_address));
+    STATUS_CHECK(GetMetricConfigAddress(metric_address));
 
     std::string metric_port;
-    CONFIG_CHECK(GetMetricConfigPort(metric_port));
+    STATUS_CHECK(GetMetricConfigPort(metric_port));
 
     /* cache config */
     int64_t cache_cpu_cache_capacity;
-    CONFIG_CHECK(GetCacheConfigCpuCacheCapacity(cache_cpu_cache_capacity));
+    STATUS_CHECK(GetCacheConfigCpuCacheCapacity(cache_cpu_cache_capacity));
 
     float cache_cpu_cache_threshold;
-    CONFIG_CHECK(GetCacheConfigCpuCacheThreshold(cache_cpu_cache_threshold));
+    STATUS_CHECK(GetCacheConfigCpuCacheThreshold(cache_cpu_cache_threshold));
 
     int64_t cache_insert_buffer_size;
-    CONFIG_CHECK(GetCacheConfigInsertBufferSize(cache_insert_buffer_size));
+    STATUS_CHECK(GetCacheConfigInsertBufferSize(cache_insert_buffer_size));
 
     bool cache_insert_data;
-    CONFIG_CHECK(GetCacheConfigCacheInsertData(cache_insert_data));
+    STATUS_CHECK(GetCacheConfigCacheInsertData(cache_insert_data));
 
     /* engine config */
     int64_t engine_use_blas_threshold;
-    CONFIG_CHECK(GetEngineConfigUseBlasThreshold(engine_use_blas_threshold));
+    STATUS_CHECK(GetEngineConfigUseBlasThreshold(engine_use_blas_threshold));
 
     int64_t engine_omp_thread_num;
-    CONFIG_CHECK(GetEngineConfigOmpThreadNum(engine_omp_thread_num));
+    STATUS_CHECK(GetEngineConfigOmpThreadNum(engine_omp_thread_num));
 
     std::string engine_simd_type;
-    CONFIG_CHECK(GetEngineConfigSimdType(engine_simd_type));
+    STATUS_CHECK(GetEngineConfigSimdType(engine_simd_type));
 
 #ifdef MILVUS_GPU_VERSION
     int64_t engine_gpu_search_threshold;
-    CONFIG_CHECK(GetEngineConfigGpuSearchThreshold(engine_gpu_search_threshold));
+    STATUS_CHECK(GetEngineConfigGpuSearchThreshold(engine_gpu_search_threshold));
 #endif
 
     /* gpu resource config */
 #ifdef MILVUS_GPU_VERSION
     bool gpu_resource_enable;
-    CONFIG_CHECK(GetGpuResourceConfigEnable(gpu_resource_enable));
+    STATUS_CHECK(GetGpuResourceConfigEnable(gpu_resource_enable));
     std::cout << "GPU resources " << (gpu_resource_enable ? "ENABLED !" : "DISABLED !") << std::endl;
 
     if (gpu_resource_enable) {
         int64_t resource_cache_capacity;
-        CONFIG_CHECK(GetGpuResourceConfigCacheCapacity(resource_cache_capacity));
+        STATUS_CHECK(GetGpuResourceConfigCacheCapacity(resource_cache_capacity));
 
         float resource_cache_threshold;
-        CONFIG_CHECK(GetGpuResourceConfigCacheThreshold(resource_cache_threshold));
+        STATUS_CHECK(GetGpuResourceConfigCacheThreshold(resource_cache_threshold));
 
         std::vector<int64_t> search_resources;
-        CONFIG_CHECK(GetGpuResourceConfigSearchResources(search_resources));
+        STATUS_CHECK(GetGpuResourceConfigSearchResources(search_resources));
 
         std::vector<int64_t> index_build_resources;
-        CONFIG_CHECK(GetGpuResourceConfigBuildIndexResources(index_build_resources));
+        STATUS_CHECK(GetGpuResourceConfigBuildIndexResources(index_build_resources));
     }
 #endif
 
     /* tracing config */
     std::string tracing_config_path;
-    CONFIG_CHECK(GetTracingConfigJsonConfigPath(tracing_config_path));
+    STATUS_CHECK(GetTracingConfigJsonConfigPath(tracing_config_path));
 
     /* wal config */
     bool enable;
-    CONFIG_CHECK(GetWalConfigEnable(enable));
+    STATUS_CHECK(GetWalConfigEnable(enable));
 
     bool recovery_error_ignore;
-    CONFIG_CHECK(GetWalConfigRecoveryErrorIgnore(recovery_error_ignore));
+    STATUS_CHECK(GetWalConfigRecoveryErrorIgnore(recovery_error_ignore));
 
     int64_t buffer_size;
-    CONFIG_CHECK(GetWalConfigBufferSize(buffer_size));
+    STATUS_CHECK(GetWalConfigBufferSize(buffer_size));
 
     std::string wal_path;
-    CONFIG_CHECK(GetWalConfigWalPath(wal_path));
+    STATUS_CHECK(GetWalConfigWalPath(wal_path));
 
     /* logs config */
     bool trace_enable;
-    CONFIG_CHECK(GetLogsTraceEnable(trace_enable));
+    STATUS_CHECK(GetLogsTraceEnable(trace_enable));
 
     bool debug_enable;
-    CONFIG_CHECK(GetLogsDebugEnable(trace_enable));
+    STATUS_CHECK(GetLogsDebugEnable(trace_enable));
 
     bool info_enable;
-    CONFIG_CHECK(GetLogsInfoEnable(trace_enable));
+    STATUS_CHECK(GetLogsInfoEnable(trace_enable));
 
     bool warning_enable;
-    CONFIG_CHECK(GetLogsWarningEnable(trace_enable));
+    STATUS_CHECK(GetLogsWarningEnable(trace_enable));
 
     bool error_enable;
-    CONFIG_CHECK(GetLogsErrorEnable(trace_enable));
+    STATUS_CHECK(GetLogsErrorEnable(trace_enable));
 
     bool fatal_enable;
-    CONFIG_CHECK(GetLogsFatalEnable(trace_enable));
+    STATUS_CHECK(GetLogsFatalEnable(trace_enable));
 
     std::string logs_path;
-    CONFIG_CHECK(GetLogsPath(logs_path));
+    STATUS_CHECK(GetLogsPath(logs_path));
 
     int64_t logs_max_log_file_size;
-    CONFIG_CHECK(GetLogsMaxLogFileSize(logs_max_log_file_size));
+    STATUS_CHECK(GetLogsMaxLogFileSize(logs_max_log_file_size));
 
     int64_t delete_exceeds;
-    CONFIG_CHECK(GetLogsDeleteExceeds(delete_exceeds));
+    STATUS_CHECK(GetLogsDeleteExceeds(delete_exceeds));
 
     return Status::OK();
 }
@@ -428,76 +425,75 @@ Config::ValidateConfig() {
 Status
 Config::ResetDefaultConfig() {
     /* server config */
-    CONFIG_CHECK(SetServerConfigAddress(CONFIG_SERVER_ADDRESS_DEFAULT));
-    CONFIG_CHECK(SetServerConfigPort(CONFIG_SERVER_PORT_DEFAULT));
-    CONFIG_CHECK(SetServerConfigDeployMode(CONFIG_SERVER_DEPLOY_MODE_DEFAULT));
-    CONFIG_CHECK(SetServerConfigTimeZone(CONFIG_SERVER_TIME_ZONE_DEFAULT));
-    CONFIG_CHECK(SetServerConfigWebEnable(CONFIG_SERVER_WEB_ENABLE_DEFAULT));
-    CONFIG_CHECK(SetServerConfigWebPort(CONFIG_SERVER_WEB_PORT_DEFAULT));
+    STATUS_CHECK(SetServerConfigAddress(CONFIG_SERVER_ADDRESS_DEFAULT));
+    STATUS_CHECK(SetServerConfigPort(CONFIG_SERVER_PORT_DEFAULT));
+    STATUS_CHECK(SetServerConfigDeployMode(CONFIG_SERVER_DEPLOY_MODE_DEFAULT));
+    STATUS_CHECK(SetServerConfigTimeZone(CONFIG_SERVER_TIME_ZONE_DEFAULT));
+    STATUS_CHECK(SetServerConfigWebEnable(CONFIG_SERVER_WEB_ENABLE_DEFAULT));
+    STATUS_CHECK(SetServerConfigWebPort(CONFIG_SERVER_WEB_PORT_DEFAULT));
 
     /* db config */
-    CONFIG_CHECK(SetDBConfigBackendUrl(CONFIG_DB_BACKEND_URL_DEFAULT));
-    CONFIG_CHECK(SetDBConfigPreloadCollection(CONFIG_DB_PRELOAD_COLLECTION_DEFAULT));
-    CONFIG_CHECK(SetDBConfigArchiveDiskThreshold(CONFIG_DB_ARCHIVE_DISK_THRESHOLD_DEFAULT));
-    CONFIG_CHECK(SetDBConfigArchiveDaysThreshold(CONFIG_DB_ARCHIVE_DAYS_THRESHOLD_DEFAULT));
-    CONFIG_CHECK(SetDBConfigAutoFlushInterval(CONFIG_DB_AUTO_FLUSH_INTERVAL_DEFAULT));
+    STATUS_CHECK(SetDBConfigBackendUrl(CONFIG_DB_BACKEND_URL_DEFAULT));
+    STATUS_CHECK(SetDBConfigPreloadCollection(CONFIG_DB_PRELOAD_COLLECTION_DEFAULT));
+    STATUS_CHECK(SetDBConfigArchiveDiskThreshold(CONFIG_DB_ARCHIVE_DISK_THRESHOLD_DEFAULT));
+    STATUS_CHECK(SetDBConfigArchiveDaysThreshold(CONFIG_DB_ARCHIVE_DAYS_THRESHOLD_DEFAULT));
+    STATUS_CHECK(SetDBConfigAutoFlushInterval(CONFIG_DB_AUTO_FLUSH_INTERVAL_DEFAULT));
 
     /* storage config */
-    CONFIG_CHECK(SetStorageConfigPrimaryPath(CONFIG_STORAGE_PRIMARY_PATH_DEFAULT));
-    CONFIG_CHECK(SetStorageConfigSecondaryPath(CONFIG_STORAGE_SECONDARY_PATH_DEFAULT));
-    CONFIG_CHECK(SetStorageConfigFileCleanupTimeout(CONFIG_STORAGE_FILE_CLEANUP_TIMEOUT_DEFAULT));
-    CONFIG_CHECK(SetStorageConfigS3Enable(CONFIG_STORAGE_S3_ENABLE_DEFAULT));
-    CONFIG_CHECK(SetStorageConfigS3Address(CONFIG_STORAGE_S3_ADDRESS_DEFAULT));
-    CONFIG_CHECK(SetStorageConfigS3Port(CONFIG_STORAGE_S3_PORT_DEFAULT));
-    CONFIG_CHECK(SetStorageConfigS3AccessKey(CONFIG_STORAGE_S3_ACCESS_KEY_DEFAULT));
-    CONFIG_CHECK(SetStorageConfigS3SecretKey(CONFIG_STORAGE_S3_SECRET_KEY_DEFAULT));
-    CONFIG_CHECK(SetStorageConfigS3Bucket(CONFIG_STORAGE_S3_BUCKET_DEFAULT));
+    STATUS_CHECK(SetStorageConfigPrimaryPath(CONFIG_STORAGE_PRIMARY_PATH_DEFAULT));
+    STATUS_CHECK(SetStorageConfigSecondaryPath(CONFIG_STORAGE_SECONDARY_PATH_DEFAULT));
+    STATUS_CHECK(SetStorageConfigFileCleanupTimeout(CONFIG_STORAGE_FILE_CLEANUP_TIMEOUT_DEFAULT));
+    // STATUS_CHECK(SetStorageConfigS3Enable(CONFIG_STORAGE_S3_ENABLE_DEFAULT));
+    // STATUS_CHECK(SetStorageConfigS3Address(CONFIG_STORAGE_S3_ADDRESS_DEFAULT));
+    // STATUS_CHECK(SetStorageConfigS3Port(CONFIG_STORAGE_S3_PORT_DEFAULT));
+    // STATUS_CHECK(SetStorageConfigS3AccessKey(CONFIG_STORAGE_S3_ACCESS_KEY_DEFAULT));
+    // STATUS_CHECK(SetStorageConfigS3SecretKey(CONFIG_STORAGE_S3_SECRET_KEY_DEFAULT));
+    // STATUS_CHECK(SetStorageConfigS3Bucket(CONFIG_STORAGE_S3_BUCKET_DEFAULT));
 
     /* metric config */
-    CONFIG_CHECK(SetMetricConfigEnableMonitor(CONFIG_METRIC_ENABLE_MONITOR_DEFAULT));
-    CONFIG_CHECK(SetMetricConfigAddress(CONFIG_METRIC_ADDRESS_DEFAULT));
-    CONFIG_CHECK(SetMetricConfigPort(CONFIG_METRIC_PORT_DEFAULT));
+    STATUS_CHECK(SetMetricConfigEnableMonitor(CONFIG_METRIC_ENABLE_MONITOR_DEFAULT));
+    STATUS_CHECK(SetMetricConfigAddress(CONFIG_METRIC_ADDRESS_DEFAULT));
+    STATUS_CHECK(SetMetricConfigPort(CONFIG_METRIC_PORT_DEFAULT));
 
     /* cache config */
-    CONFIG_CHECK(SetCacheConfigCpuCacheCapacity(CONFIG_CACHE_CPU_CACHE_CAPACITY_DEFAULT));
-    CONFIG_CHECK(SetCacheConfigCpuCacheThreshold(CONFIG_CACHE_CPU_CACHE_THRESHOLD_DEFAULT));
-    CONFIG_CHECK(SetCacheConfigInsertBufferSize(CONFIG_CACHE_INSERT_BUFFER_SIZE_DEFAULT));
-    CONFIG_CHECK(SetCacheConfigCacheInsertData(CONFIG_CACHE_CACHE_INSERT_DATA_DEFAULT));
+    STATUS_CHECK(SetCacheConfigCpuCacheCapacity(CONFIG_CACHE_CPU_CACHE_CAPACITY_DEFAULT));
+    STATUS_CHECK(SetCacheConfigCpuCacheThreshold(CONFIG_CACHE_CPU_CACHE_THRESHOLD_DEFAULT));
+    STATUS_CHECK(SetCacheConfigInsertBufferSize(CONFIG_CACHE_INSERT_BUFFER_SIZE_DEFAULT));
+    STATUS_CHECK(SetCacheConfigCacheInsertData(CONFIG_CACHE_CACHE_INSERT_DATA_DEFAULT));
 
     /* engine config */
-    CONFIG_CHECK(SetEngineConfigUseBlasThreshold(CONFIG_ENGINE_USE_BLAS_THRESHOLD_DEFAULT));
-    CONFIG_CHECK(SetEngineConfigOmpThreadNum(CONFIG_ENGINE_OMP_THREAD_NUM_DEFAULT));
-    CONFIG_CHECK(SetEngineConfigSimdType(CONFIG_ENGINE_SIMD_TYPE_DEFAULT));
-
-    /* wal config */
-    CONFIG_CHECK(SetWalConfigEnable(CONFIG_WAL_ENABLE_DEFAULT));
-    CONFIG_CHECK(SetWalConfigRecoveryErrorIgnore(CONFIG_WAL_RECOVERY_ERROR_IGNORE_DEFAULT));
-    CONFIG_CHECK(SetWalConfigBufferSize(CONFIG_WAL_BUFFER_SIZE_DEFAULT));
-    CONFIG_CHECK(SetWalConfigWalPath(CONFIG_WAL_WAL_PATH_DEFAULT));
-
-    /* logs config */
-    CONFIG_CHECK(SetLogsTraceEnable(CONFIG_LOGS_TRACE_ENABLE_DEFAULT));
-    CONFIG_CHECK(SetLogsDebugEnable(CONFIG_LOGS_DEBUG_ENABLE_DEFAULT));
-    CONFIG_CHECK(SetLogsInfoEnable(CONFIG_LOGS_INFO_ENABLE_DEFAULT));
-    CONFIG_CHECK(SetLogsWarningEnable(CONFIG_LOGS_WARNING_ENABLE_DEFAULT));
-    CONFIG_CHECK(SetLogsErrorEnable(CONFIG_LOGS_ERROR_ENABLE_DEFAULT));
-    CONFIG_CHECK(SetLogsFatalEnable(CONFIG_LOGS_FATAL_ENABLE_DEFAULT));
-    CONFIG_CHECK(SetLogsPath(CONFIG_LOGS_PATH_DEFAULT));
-    CONFIG_CHECK(SetLogsMaxLogFileSize(CONFIG_LOGS_MAX_LOG_FILE_SIZE_DEFAULT));
-    CONFIG_CHECK(SetLogsDeleteExceeds(CONFIG_LOGS_DELETE_EXCEEDS_DEFAULT));
-
+    STATUS_CHECK(SetEngineConfigUseBlasThreshold(CONFIG_ENGINE_USE_BLAS_THRESHOLD_DEFAULT));
+    STATUS_CHECK(SetEngineConfigOmpThreadNum(CONFIG_ENGINE_OMP_THREAD_NUM_DEFAULT));
+    STATUS_CHECK(SetEngineConfigSimdType(CONFIG_ENGINE_SIMD_TYPE_DEFAULT));
 #ifdef MILVUS_GPU_VERSION
-    CONFIG_CHECK(SetEngineConfigGpuSearchThreshold(CONFIG_ENGINE_GPU_SEARCH_THRESHOLD_DEFAULT));
+    STATUS_CHECK(SetEngineConfigGpuSearchThreshold(CONFIG_ENGINE_GPU_SEARCH_THRESHOLD_DEFAULT));
 #endif
 
     /* gpu resource config */
 #ifdef MILVUS_GPU_VERSION
-    CONFIG_CHECK(SetGpuResourceConfigEnable(CONFIG_GPU_RESOURCE_ENABLE_DEFAULT));
-    CONFIG_CHECK(SetGpuResourceConfigCacheCapacity(CONFIG_GPU_RESOURCE_CACHE_CAPACITY_DEFAULT));
-    CONFIG_CHECK(SetGpuResourceConfigCacheThreshold(CONFIG_GPU_RESOURCE_CACHE_THRESHOLD_DEFAULT));
-    CONFIG_CHECK(SetGpuResourceConfigSearchResources(CONFIG_GPU_RESOURCE_SEARCH_RESOURCES_DEFAULT));
-    CONFIG_CHECK(SetGpuResourceConfigBuildIndexResources(CONFIG_GPU_RESOURCE_BUILD_INDEX_RESOURCES_DEFAULT));
+    STATUS_CHECK(SetGpuResourceConfigEnable(CONFIG_GPU_RESOURCE_ENABLE_DEFAULT));
+    STATUS_CHECK(SetGpuResourceConfigCacheCapacity(CONFIG_GPU_RESOURCE_CACHE_CAPACITY_DEFAULT));
+    STATUS_CHECK(SetGpuResourceConfigCacheThreshold(CONFIG_GPU_RESOURCE_CACHE_THRESHOLD_DEFAULT));
+    STATUS_CHECK(SetGpuResourceConfigSearchResources(CONFIG_GPU_RESOURCE_SEARCH_RESOURCES_DEFAULT));
+    STATUS_CHECK(SetGpuResourceConfigBuildIndexResources(CONFIG_GPU_RESOURCE_BUILD_INDEX_RESOURCES_DEFAULT));
 #endif
+
+    /* wal config */
+    STATUS_CHECK(SetWalConfigEnable(CONFIG_WAL_ENABLE_DEFAULT));
+    STATUS_CHECK(SetWalConfigRecoveryErrorIgnore(CONFIG_WAL_RECOVERY_ERROR_IGNORE_DEFAULT));
+    STATUS_CHECK(SetWalConfigBufferSize(CONFIG_WAL_BUFFER_SIZE_DEFAULT));
+    STATUS_CHECK(SetWalConfigWalPath(CONFIG_WAL_WAL_PATH_DEFAULT));
+
+    /* logs config */
+    STATUS_CHECK(SetLogsTraceEnable(CONFIG_LOGS_TRACE_ENABLE_DEFAULT));
+    STATUS_CHECK(SetLogsDebugEnable(CONFIG_LOGS_DEBUG_ENABLE_DEFAULT));
+    STATUS_CHECK(SetLogsInfoEnable(CONFIG_LOGS_INFO_ENABLE_DEFAULT));
+    STATUS_CHECK(SetLogsWarningEnable(CONFIG_LOGS_WARNING_ENABLE_DEFAULT));
+    STATUS_CHECK(SetLogsErrorEnable(CONFIG_LOGS_ERROR_ENABLE_DEFAULT));
+    STATUS_CHECK(SetLogsFatalEnable(CONFIG_LOGS_FATAL_ENABLE_DEFAULT));
+    STATUS_CHECK(SetLogsPath(CONFIG_LOGS_PATH_DEFAULT));
+    STATUS_CHECK(SetLogsMaxLogFileSize(CONFIG_LOGS_MAX_LOG_FILE_SIZE_DEFAULT));
+    STATUS_CHECK(SetLogsDeleteExceeds(CONFIG_LOGS_DELETE_EXCEEDS_DEFAULT));
 
     return Status::OK();
 }
@@ -554,18 +550,18 @@ Config::SetConfigCli(const std::string& parent_key, const std::string& child_key
             status = SetStorageConfigPrimaryPath(value);
         } else if (child_key == CONFIG_STORAGE_SECONDARY_PATH) {
             status = SetStorageConfigSecondaryPath(value);
-        } else if (child_key == CONFIG_STORAGE_S3_ENABLE) {
-            status = SetStorageConfigS3Enable(value);
-        } else if (child_key == CONFIG_STORAGE_S3_ADDRESS) {
-            status = SetStorageConfigS3Address(value);
-        } else if (child_key == CONFIG_STORAGE_S3_PORT) {
-            status = SetStorageConfigS3Port(value);
-        } else if (child_key == CONFIG_STORAGE_S3_ACCESS_KEY) {
-            status = SetStorageConfigS3AccessKey(value);
-        } else if (child_key == CONFIG_STORAGE_S3_SECRET_KEY) {
-            status = SetStorageConfigS3SecretKey(value);
-        } else if (child_key == CONFIG_STORAGE_S3_BUCKET) {
-            status = SetStorageConfigS3Bucket(value);
+            // } else if (child_key == CONFIG_STORAGE_S3_ENABLE) {
+            //     status = SetStorageConfigS3Enable(value);
+            // } else if (child_key == CONFIG_STORAGE_S3_ADDRESS) {
+            //     status = SetStorageConfigS3Address(value);
+            // } else if (child_key == CONFIG_STORAGE_S3_PORT) {
+            //     status = SetStorageConfigS3Port(value);
+            // } else if (child_key == CONFIG_STORAGE_S3_ACCESS_KEY) {
+            //     status = SetStorageConfigS3AccessKey(value);
+            // } else if (child_key == CONFIG_STORAGE_S3_SECRET_KEY) {
+            //     status = SetStorageConfigS3SecretKey(value);
+            // } else if (child_key == CONFIG_STORAGE_S3_BUCKET) {
+            //     status = SetStorageConfigS3Bucket(value);
         } else {
             status = Status(SERVER_UNEXPECTED_ERROR, invalid_node_str);
         }
@@ -739,14 +735,12 @@ Config::UpdateFileConfigFromMem(const std::string& parent_key, const std::string
 
     // convert value string to standard string stored in yaml file
     std::string value_str;
-    if (child_key == CONFIG_CACHE_CACHE_INSERT_DATA || child_key == CONFIG_STORAGE_S3_ENABLE ||
+    if (child_key == CONFIG_CACHE_CACHE_INSERT_DATA ||
+        // child_key == CONFIG_STORAGE_S3_ENABLE ||
         child_key == CONFIG_METRIC_ENABLE_MONITOR || child_key == CONFIG_GPU_RESOURCE_ENABLE ||
         child_key == CONFIG_WAL_ENABLE || child_key == CONFIG_WAL_RECOVERY_ERROR_IGNORE) {
         bool ok = false;
-        status = StringHelpFunctions::ConvertToBoolean(value, ok);
-        if (!status.ok()) {
-            return status;
-        }
+        STATUS_CHECK(StringHelpFunctions::ConvertToBoolean(value, ok));
         value_str = ok ? "true" : "false";
     } else if (child_key == CONFIG_GPU_RESOURCE_SEARCH_RESOURCES ||
                child_key == CONFIG_GPU_RESOURCE_BUILD_INDEX_RESOURCES) {
@@ -826,7 +820,6 @@ Config::RegisterCallBack(const std::string& node, const std::string& sub_node, c
     }
 
     auto& callback_map = config_callback_.at(cb_node);
-
     callback_map[key] = cb;
 
     return Status::OK();
@@ -1117,68 +1110,68 @@ Config::CheckStorageConfigFileCleanupTimeout(const std::string& value) {
     return Status::OK();
 }
 
-Status
-Config::CheckStorageConfigS3Enable(const std::string& value) {
-    if (!ValidationUtil::ValidateStringIsBool(value).ok()) {
-        std::string msg =
-            "Invalid storage config: " + value + ". Possible reason: storage_config.s3_enable is not a boolean.";
-        return Status(SERVER_INVALID_ARGUMENT, msg);
-    }
-    return Status::OK();
-}
-
-Status
-Config::CheckStorageConfigS3Address(const std::string& value) {
-    if (!ValidationUtil::ValidateIpAddress(value).ok()) {
-        std::string msg = "Invalid s3 address: " + value + ". Possible reason: storage_config.s3_address is invalid.";
-        return Status(SERVER_INVALID_ARGUMENT, msg);
-    }
-    return Status::OK();
-}
-
-Status
-Config::CheckStorageConfigS3Port(const std::string& value) {
-    if (!ValidationUtil::ValidateStringIsNumber(value).ok()) {
-        std::string msg = "Invalid s3 port: " + value + ". Possible reason: storage_config.s3_port is not a number.";
-        return Status(SERVER_INVALID_ARGUMENT, msg);
-    } else {
-        try {
-            int32_t port = std::stoi(value);
-            if (!(port > PORT_NUMBER_MIN && port < PORT_NUMBER_MAX)) {
-                std::string msg = "Invalid s3 port: " + value +
-                                  ". Possible reason: storage_config.s3_port is not in range (1024, 65535).";
-                return Status(SERVER_INVALID_ARGUMENT, msg);
-            }
-        } catch (...) {
-            return Status(SERVER_INVALID_ARGUMENT, "Invalid storage_config.s3_port: " + value);
-        }
-    }
-    return Status::OK();
-}
-
-Status
-Config::CheckStorageConfigS3AccessKey(const std::string& value) {
-    if (value.empty()) {
-        return Status(SERVER_INVALID_ARGUMENT, "storage_config.s3_access_key is empty.");
-    }
-    return Status::OK();
-}
-
-Status
-Config::CheckStorageConfigS3SecretKey(const std::string& value) {
-    if (value.empty()) {
-        return Status(SERVER_INVALID_ARGUMENT, "storage_config.s3_secret_key is empty.");
-    }
-    return Status::OK();
-}
-
-Status
-Config::CheckStorageConfigS3Bucket(const std::string& value) {
-    if (value.empty()) {
-        return Status(SERVER_INVALID_ARGUMENT, "storage_config.s3_bucket is empty.");
-    }
-    return Status::OK();
-}
+// Status
+// Config::CheckStorageConfigS3Enable(const std::string& value) {
+//    if (!ValidationUtil::ValidateStringIsBool(value).ok()) {
+//        std::string msg =
+//            "Invalid storage config: " + value + ". Possible reason: storage_config.s3_enable is not a boolean.";
+//        return Status(SERVER_INVALID_ARGUMENT, msg);
+//    }
+//    return Status::OK();
+// }
+//
+// Status
+// Config::CheckStorageConfigS3Address(const std::string& value) {
+//    if (!ValidationUtil::ValidateIpAddress(value).ok()) {
+//        std::string msg = "Invalid s3 address: " + value + ". Possible reason: storage_config.s3_address is invalid.";
+//        return Status(SERVER_INVALID_ARGUMENT, msg);
+//    }
+//    return Status::OK();
+// }
+//
+// Status
+// Config::CheckStorageConfigS3Port(const std::string& value) {
+//    if (!ValidationUtil::ValidateStringIsNumber(value).ok()) {
+//        std::string msg = "Invalid s3 port: " + value + ". Possible reason: storage_config.s3_port is not a number.";
+//        return Status(SERVER_INVALID_ARGUMENT, msg);
+//    } else {
+//        try {
+//            int32_t port = std::stoi(value);
+//            if (!(port > PORT_NUMBER_MIN && port < PORT_NUMBER_MAX)) {
+//                std::string msg = "Invalid s3 port: " + value +
+//                                  ". Possible reason: storage_config.s3_port is not in range (1024, 65535).";
+//                return Status(SERVER_INVALID_ARGUMENT, msg);
+//            }
+//        } catch (...) {
+//            return Status(SERVER_INVALID_ARGUMENT, "Invalid storage_config.s3_port: " + value);
+//        }
+//    }
+//    return Status::OK();
+// }
+//
+// Status
+// Config::CheckStorageConfigS3AccessKey(const std::string& value) {
+//    if (value.empty()) {
+//        return Status(SERVER_INVALID_ARGUMENT, "storage_config.s3_access_key is empty.");
+//    }
+//    return Status::OK();
+// }
+//
+// Status
+// Config::CheckStorageConfigS3SecretKey(const std::string& value) {
+//    if (value.empty()) {
+//        return Status(SERVER_INVALID_ARGUMENT, "storage_config.s3_secret_key is empty.");
+//    }
+//    return Status::OK();
+// }
+//
+// Status
+// Config::CheckStorageConfigS3Bucket(const std::string& value) {
+//    if (value.empty()) {
+//        return Status(SERVER_INVALID_ARGUMENT, "storage_config.s3_bucket is empty.");
+//    }
+//    return Status::OK();
+// }
 
 /* metric config */
 Status
@@ -1408,7 +1401,7 @@ Config::CheckGpuResourceConfigCacheCapacity(const std::string& value) {
     } else {
         int64_t gpu_cache_capacity = std::stoll(value) * GB;
         std::vector<int64_t> gpu_ids;
-        CONFIG_CHECK(GetGpuResourceConfigBuildIndexResources(gpu_ids));
+        STATUS_CHECK(GetGpuResourceConfigBuildIndexResources(gpu_ids));
 
         for (int64_t gpu_id : gpu_ids) {
             size_t gpu_memory;
@@ -1488,7 +1481,7 @@ Config::CheckGpuResourceConfigSearchResources(const std::vector<std::string>& va
 
     std::unordered_set<std::string> value_set;
     for (auto& resource : value) {
-        CONFIG_CHECK(CheckGpuResource(resource));
+        STATUS_CHECK(CheckGpuResource(resource));
         value_set.insert(resource);
     }
 
@@ -1515,7 +1508,7 @@ Config::CheckGpuResourceConfigBuildIndexResources(const std::vector<std::string>
 
     std::unordered_set<std::string> value_set;
     for (auto& resource : value) {
-        CONFIG_CHECK(CheckGpuResource(resource));
+        STATUS_CHECK(CheckGpuResource(resource));
         value_set.insert(resource);
     }
 
@@ -1822,7 +1815,7 @@ Config::GetServerConfigTimeZone(std::string& value) {
 Status
 Config::GetServerConfigWebEnable(bool& value) {
     std::string str = GetConfigStr(CONFIG_SERVER, CONFIG_SERVER_WEB_ENABLE, CONFIG_SERVER_WEB_ENABLE_DEFAULT);
-    CONFIG_CHECK(CheckServerConfigWebEnable(str));
+    STATUS_CHECK(CheckServerConfigWebEnable(str));
     return StringHelpFunctions::ConvertToBoolean(str, value);
 }
 
@@ -1843,7 +1836,7 @@ Status
 Config::GetDBConfigArchiveDiskThreshold(int64_t& value) {
     std::string str =
         GetConfigStr(CONFIG_DB, CONFIG_DB_ARCHIVE_DISK_THRESHOLD, CONFIG_DB_ARCHIVE_DISK_THRESHOLD_DEFAULT);
-    CONFIG_CHECK(CheckDBConfigArchiveDiskThreshold(str));
+    STATUS_CHECK(CheckDBConfigArchiveDiskThreshold(str));
     value = std::stoll(str);
     return Status::OK();
 }
@@ -1852,7 +1845,7 @@ Status
 Config::GetDBConfigArchiveDaysThreshold(int64_t& value) {
     std::string str =
         GetConfigStr(CONFIG_DB, CONFIG_DB_ARCHIVE_DAYS_THRESHOLD, CONFIG_DB_ARCHIVE_DAYS_THRESHOLD_DEFAULT);
-    CONFIG_CHECK(CheckDBConfigArchiveDaysThreshold(str));
+    STATUS_CHECK(CheckDBConfigArchiveDaysThreshold(str));
     value = std::stoll(str);
     return Status::OK();
 }
@@ -1866,7 +1859,7 @@ Config::GetDBConfigPreloadCollection(std::string& value) {
 Status
 Config::GetDBConfigAutoFlushInterval(int64_t& value) {
     std::string str = GetConfigStr(CONFIG_DB, CONFIG_DB_AUTO_FLUSH_INTERVAL, CONFIG_DB_AUTO_FLUSH_INTERVAL_DEFAULT);
-    CONFIG_CHECK(CheckDBConfigAutoFlushInterval(str));
+    STATUS_CHECK(CheckDBConfigAutoFlushInterval(str));
     value = std::stoll(str);
     return Status::OK();
 }
@@ -1888,55 +1881,55 @@ Status
 Config::GetStorageConfigFileCleanupTimeup(int64_t& value) {
     std::string str =
         GetConfigStr(CONFIG_STORAGE, CONFIG_STORAGE_FILE_CLEANUP_TIMEOUT, CONFIG_STORAGE_FILE_CLEANUP_TIMEOUT_DEFAULT);
-    CONFIG_CHECK(CheckStorageConfigFileCleanupTimeout(str));
+    STATUS_CHECK(CheckStorageConfigFileCleanupTimeout(str));
     value = std::stoll(str);
     return Status::OK();
 }
 
-Status
-Config::GetStorageConfigS3Enable(bool& value) {
-    std::string str = GetConfigStr(CONFIG_STORAGE, CONFIG_STORAGE_S3_ENABLE, CONFIG_STORAGE_S3_ENABLE_DEFAULT);
-    CONFIG_CHECK(CheckStorageConfigS3Enable(str));
-    CONFIG_CHECK(StringHelpFunctions::ConvertToBoolean(str, value));
-    return Status::OK();
-}
-
-Status
-Config::GetStorageConfigS3Address(std::string& value) {
-    value = GetConfigStr(CONFIG_STORAGE, CONFIG_STORAGE_S3_ADDRESS, CONFIG_STORAGE_S3_ADDRESS_DEFAULT);
-    return CheckStorageConfigS3Address(value);
-}
-
-Status
-Config::GetStorageConfigS3Port(std::string& value) {
-    value = GetConfigStr(CONFIG_STORAGE, CONFIG_STORAGE_S3_PORT, CONFIG_STORAGE_S3_PORT_DEFAULT);
-    return CheckStorageConfigS3Port(value);
-}
-
-Status
-Config::GetStorageConfigS3AccessKey(std::string& value) {
-    value = GetConfigStr(CONFIG_STORAGE, CONFIG_STORAGE_S3_ACCESS_KEY, CONFIG_STORAGE_S3_ACCESS_KEY_DEFAULT);
-    return Status::OK();
-}
-
-Status
-Config::GetStorageConfigS3SecretKey(std::string& value) {
-    value = GetConfigStr(CONFIG_STORAGE, CONFIG_STORAGE_S3_SECRET_KEY, CONFIG_STORAGE_S3_SECRET_KEY_DEFAULT);
-    return Status::OK();
-}
-
-Status
-Config::GetStorageConfigS3Bucket(std::string& value) {
-    value = GetConfigStr(CONFIG_STORAGE, CONFIG_STORAGE_S3_BUCKET, CONFIG_STORAGE_S3_BUCKET_DEFAULT);
-    return Status::OK();
-}
+// Status
+// Config::GetStorageConfigS3Enable(bool& value) {
+//    std::string str = GetConfigStr(CONFIG_STORAGE, CONFIG_STORAGE_S3_ENABLE, CONFIG_STORAGE_S3_ENABLE_DEFAULT);
+//    STATUS_CHECK(CheckStorageConfigS3Enable(str));
+//    STATUS_CHECK(StringHelpFunctions::ConvertToBoolean(str, value));
+//    return Status::OK();
+// }
+//
+// Status
+// Config::GetStorageConfigS3Address(std::string& value) {
+//    value = GetConfigStr(CONFIG_STORAGE, CONFIG_STORAGE_S3_ADDRESS, CONFIG_STORAGE_S3_ADDRESS_DEFAULT);
+//    return CheckStorageConfigS3Address(value);
+// }
+//
+// Status
+// Config::GetStorageConfigS3Port(std::string& value) {
+//    value = GetConfigStr(CONFIG_STORAGE, CONFIG_STORAGE_S3_PORT, CONFIG_STORAGE_S3_PORT_DEFAULT);
+//    return CheckStorageConfigS3Port(value);
+// }
+//
+// Status
+// Config::GetStorageConfigS3AccessKey(std::string& value) {
+//    value = GetConfigStr(CONFIG_STORAGE, CONFIG_STORAGE_S3_ACCESS_KEY, CONFIG_STORAGE_S3_ACCESS_KEY_DEFAULT);
+//    return Status::OK();
+// }
+//
+// Status
+// Config::GetStorageConfigS3SecretKey(std::string& value) {
+//    value = GetConfigStr(CONFIG_STORAGE, CONFIG_STORAGE_S3_SECRET_KEY, CONFIG_STORAGE_S3_SECRET_KEY_DEFAULT);
+//    return Status::OK();
+// }
+//
+// Status
+// Config::GetStorageConfigS3Bucket(std::string& value) {
+//    value = GetConfigStr(CONFIG_STORAGE, CONFIG_STORAGE_S3_BUCKET, CONFIG_STORAGE_S3_BUCKET_DEFAULT);
+//    return Status::OK();
+// }
 
 /* metric config */
 Status
 Config::GetMetricConfigEnableMonitor(bool& value) {
     std::string str = GetConfigStr(CONFIG_METRIC, CONFIG_METRIC_ENABLE_MONITOR, CONFIG_METRIC_ENABLE_MONITOR_DEFAULT);
-    CONFIG_CHECK(CheckMetricConfigEnableMonitor(str));
-    CONFIG_CHECK(StringHelpFunctions::ConvertToBoolean(str, value));
+    STATUS_CHECK(CheckMetricConfigEnableMonitor(str));
+    STATUS_CHECK(StringHelpFunctions::ConvertToBoolean(str, value));
     return Status::OK();
 }
 
@@ -1957,7 +1950,7 @@ Status
 Config::GetCacheConfigCpuCacheCapacity(int64_t& value) {
     std::string str =
         GetConfigStr(CONFIG_CACHE, CONFIG_CACHE_CPU_CACHE_CAPACITY, CONFIG_CACHE_CPU_CACHE_CAPACITY_DEFAULT);
-    CONFIG_CHECK(CheckCacheConfigCpuCacheCapacity(str));
+    STATUS_CHECK(CheckCacheConfigCpuCacheCapacity(str));
     value = std::stoll(str);
     return Status::OK();
 }
@@ -1966,7 +1959,7 @@ Status
 Config::GetCacheConfigCpuCacheThreshold(float& value) {
     std::string str =
         GetConfigStr(CONFIG_CACHE, CONFIG_CACHE_CPU_CACHE_THRESHOLD, CONFIG_CACHE_CPU_CACHE_THRESHOLD_DEFAULT);
-    CONFIG_CHECK(CheckCacheConfigCpuCacheThreshold(str));
+    STATUS_CHECK(CheckCacheConfigCpuCacheThreshold(str));
     value = std::stof(str);
     return Status::OK();
 }
@@ -1975,7 +1968,7 @@ Status
 Config::GetCacheConfigInsertBufferSize(int64_t& value) {
     std::string str =
         GetConfigStr(CONFIG_CACHE, CONFIG_CACHE_INSERT_BUFFER_SIZE, CONFIG_CACHE_INSERT_BUFFER_SIZE_DEFAULT);
-    CONFIG_CHECK(CheckCacheConfigInsertBufferSize(str));
+    STATUS_CHECK(CheckCacheConfigInsertBufferSize(str));
     value = std::stoll(str);
     return Status::OK();
 }
@@ -1984,7 +1977,7 @@ Status
 Config::GetCacheConfigCacheInsertData(bool& value) {
     std::string str =
         GetConfigStr(CONFIG_CACHE, CONFIG_CACHE_CACHE_INSERT_DATA, CONFIG_CACHE_CACHE_INSERT_DATA_DEFAULT);
-    CONFIG_CHECK(CheckCacheConfigCacheInsertData(str));
+    STATUS_CHECK(CheckCacheConfigCacheInsertData(str));
     std::transform(str.begin(), str.end(), str.begin(), ::tolower);
     value = (str == "true" || str == "on" || str == "yes" || str == "1");
     return Status::OK();
@@ -1995,7 +1988,7 @@ Status
 Config::GetEngineConfigUseBlasThreshold(int64_t& value) {
     std::string str =
         GetConfigStr(CONFIG_ENGINE, CONFIG_ENGINE_USE_BLAS_THRESHOLD, CONFIG_ENGINE_USE_BLAS_THRESHOLD_DEFAULT);
-    CONFIG_CHECK(CheckEngineConfigUseBlasThreshold(str));
+    STATUS_CHECK(CheckEngineConfigUseBlasThreshold(str));
     value = std::stoll(str);
     return Status::OK();
 }
@@ -2003,7 +1996,7 @@ Config::GetEngineConfigUseBlasThreshold(int64_t& value) {
 Status
 Config::GetEngineConfigOmpThreadNum(int64_t& value) {
     std::string str = GetConfigStr(CONFIG_ENGINE, CONFIG_ENGINE_OMP_THREAD_NUM, CONFIG_ENGINE_OMP_THREAD_NUM_DEFAULT);
-    CONFIG_CHECK(CheckEngineConfigOmpThreadNum(str));
+    STATUS_CHECK(CheckEngineConfigOmpThreadNum(str));
     value = std::stoll(str);
     return Status::OK();
 }
@@ -2015,16 +2008,14 @@ Config::GetEngineConfigSimdType(std::string& value) {
 }
 
 #ifdef MILVUS_GPU_VERSION
-
 Status
 Config::GetEngineConfigGpuSearchThreshold(int64_t& value) {
     std::string str =
         GetConfigStr(CONFIG_ENGINE, CONFIG_ENGINE_GPU_SEARCH_THRESHOLD, CONFIG_ENGINE_GPU_SEARCH_THRESHOLD_DEFAULT);
-    CONFIG_CHECK(CheckEngineConfigGpuSearchThreshold(str));
+    STATUS_CHECK(CheckEngineConfigGpuSearchThreshold(str));
     value = std::stoll(str);
     return Status::OK();
 }
-
 #endif
 
 /* gpu resource config */
@@ -2033,15 +2024,15 @@ Config::GetEngineConfigGpuSearchThreshold(int64_t& value) {
 Status
 Config::GetGpuResourceConfigEnable(bool& value) {
     std::string str = GetConfigStr(CONFIG_GPU_RESOURCE, CONFIG_GPU_RESOURCE_ENABLE, CONFIG_GPU_RESOURCE_ENABLE_DEFAULT);
-    CONFIG_CHECK(CheckGpuResourceConfigEnable(str));
-    CONFIG_CHECK(StringHelpFunctions::ConvertToBoolean(str, value));
+    STATUS_CHECK(CheckGpuResourceConfigEnable(str));
+    STATUS_CHECK(StringHelpFunctions::ConvertToBoolean(str, value));
     return Status::OK();
 }
 
 Status
 Config::GetGpuResourceConfigCacheCapacity(int64_t& value) {
     bool gpu_resource_enable = false;
-    CONFIG_CHECK(GetGpuResourceConfigEnable(gpu_resource_enable));
+    STATUS_CHECK(GetGpuResourceConfigEnable(gpu_resource_enable));
     fiu_do_on("Config.GetGpuResourceConfigCacheCapacity.diable_gpu_resource", gpu_resource_enable = false);
     if (!gpu_resource_enable) {
         std::string msg = "GPU not supported. Possible reason: gpu_resource_config.enable is set to false.";
@@ -2049,7 +2040,7 @@ Config::GetGpuResourceConfigCacheCapacity(int64_t& value) {
     }
     std::string str = GetConfigStr(CONFIG_GPU_RESOURCE, CONFIG_GPU_RESOURCE_CACHE_CAPACITY,
                                    CONFIG_GPU_RESOURCE_CACHE_CAPACITY_DEFAULT);
-    CONFIG_CHECK(CheckGpuResourceConfigCacheCapacity(str));
+    STATUS_CHECK(CheckGpuResourceConfigCacheCapacity(str));
     value = std::stoll(str);
     return Status::OK();
 }
@@ -2057,7 +2048,7 @@ Config::GetGpuResourceConfigCacheCapacity(int64_t& value) {
 Status
 Config::GetGpuResourceConfigCacheThreshold(float& value) {
     bool gpu_resource_enable = false;
-    CONFIG_CHECK(GetGpuResourceConfigEnable(gpu_resource_enable));
+    STATUS_CHECK(GetGpuResourceConfigEnable(gpu_resource_enable));
     fiu_do_on("Config.GetGpuResourceConfigCacheThreshold.diable_gpu_resource", gpu_resource_enable = false);
     if (!gpu_resource_enable) {
         std::string msg = "GPU not supported. Possible reason: gpu_resource_config.enable is set to false.";
@@ -2065,7 +2056,7 @@ Config::GetGpuResourceConfigCacheThreshold(float& value) {
     }
     std::string str = GetConfigStr(CONFIG_GPU_RESOURCE, CONFIG_GPU_RESOURCE_CACHE_THRESHOLD,
                                    CONFIG_GPU_RESOURCE_CACHE_THRESHOLD_DEFAULT);
-    CONFIG_CHECK(CheckGpuResourceConfigCacheThreshold(str));
+    STATUS_CHECK(CheckGpuResourceConfigCacheThreshold(str));
     value = std::stof(str);
     return Status::OK();
 }
@@ -2073,7 +2064,7 @@ Config::GetGpuResourceConfigCacheThreshold(float& value) {
 Status
 Config::GetGpuResourceConfigSearchResources(std::vector<int64_t>& value) {
     bool gpu_resource_enable = false;
-    CONFIG_CHECK(GetGpuResourceConfigEnable(gpu_resource_enable));
+    STATUS_CHECK(GetGpuResourceConfigEnable(gpu_resource_enable));
     fiu_do_on("get_gpu_config_search_resources.disable_gpu_resource_fail", gpu_resource_enable = false);
     if (!gpu_resource_enable) {
         std::string msg = "GPU not supported. Possible reason: gpu_resource_config.enable is set to false.";
@@ -2083,7 +2074,7 @@ Config::GetGpuResourceConfigSearchResources(std::vector<int64_t>& value) {
                                            CONFIG_GPU_RESOURCE_DELIMITER, CONFIG_GPU_RESOURCE_SEARCH_RESOURCES_DEFAULT);
     std::vector<std::string> res_vec;
     server::StringHelpFunctions::SplitStringByDelimeter(str, CONFIG_GPU_RESOURCE_DELIMITER, res_vec);
-    CONFIG_CHECK(CheckGpuResourceConfigSearchResources(res_vec));
+    STATUS_CHECK(CheckGpuResourceConfigSearchResources(res_vec));
     value.clear();
     for (std::string& res : res_vec) {
         value.push_back(std::stoll(res.substr(3)));
@@ -2094,7 +2085,7 @@ Config::GetGpuResourceConfigSearchResources(std::vector<int64_t>& value) {
 Status
 Config::GetGpuResourceConfigBuildIndexResources(std::vector<int64_t>& value) {
     bool gpu_resource_enable = false;
-    CONFIG_CHECK(GetGpuResourceConfigEnable(gpu_resource_enable));
+    STATUS_CHECK(GetGpuResourceConfigEnable(gpu_resource_enable));
     fiu_do_on("get_gpu_config_build_index_resources.disable_gpu_resource_fail", gpu_resource_enable = false);
     if (!gpu_resource_enable) {
         std::string msg = "GPU not supported. Possible reason: gpu_resource_config.enable is set to false.";
@@ -2105,7 +2096,7 @@ Config::GetGpuResourceConfigBuildIndexResources(std::vector<int64_t>& value) {
                              CONFIG_GPU_RESOURCE_DELIMITER, CONFIG_GPU_RESOURCE_BUILD_INDEX_RESOURCES_DEFAULT);
     std::vector<std::string> res_vec;
     server::StringHelpFunctions::SplitStringByDelimeter(str, CONFIG_GPU_RESOURCE_DELIMITER, res_vec);
-    CONFIG_CHECK(CheckGpuResourceConfigBuildIndexResources(res_vec));
+    STATUS_CHECK(CheckGpuResourceConfigBuildIndexResources(res_vec));
     value.clear();
     for (std::string& res : res_vec) {
         value.push_back(std::stoll(res.substr(3)));
@@ -2135,8 +2126,8 @@ Config::GetTracingConfigJsonConfigPath(std::string& value) {
 Status
 Config::GetWalConfigEnable(bool& wal_enable) {
     std::string str = GetConfigStr(CONFIG_WAL, CONFIG_WAL_ENABLE, CONFIG_WAL_ENABLE_DEFAULT);
-    CONFIG_CHECK(CheckWalConfigEnable(str));
-    CONFIG_CHECK(StringHelpFunctions::ConvertToBoolean(str, wal_enable));
+    STATUS_CHECK(CheckWalConfigEnable(str));
+    STATUS_CHECK(StringHelpFunctions::ConvertToBoolean(str, wal_enable));
     return Status::OK();
 }
 
@@ -2144,15 +2135,15 @@ Status
 Config::GetWalConfigRecoveryErrorIgnore(bool& recovery_error_ignore) {
     std::string str =
         GetConfigStr(CONFIG_WAL, CONFIG_WAL_RECOVERY_ERROR_IGNORE, CONFIG_WAL_RECOVERY_ERROR_IGNORE_DEFAULT);
-    CONFIG_CHECK(CheckWalConfigRecoveryErrorIgnore(str));
-    CONFIG_CHECK(StringHelpFunctions::ConvertToBoolean(str, recovery_error_ignore));
+    STATUS_CHECK(CheckWalConfigRecoveryErrorIgnore(str));
+    STATUS_CHECK(StringHelpFunctions::ConvertToBoolean(str, recovery_error_ignore));
     return Status::OK();
 }
 
 Status
 Config::GetWalConfigBufferSize(int64_t& buffer_size) {
     std::string str = GetConfigStr(CONFIG_WAL, CONFIG_WAL_BUFFER_SIZE, CONFIG_WAL_BUFFER_SIZE_DEFAULT);
-    CONFIG_CHECK(CheckWalConfigBufferSize(str));
+    STATUS_CHECK(CheckWalConfigBufferSize(str));
     buffer_size = std::stoll(str);
     if (buffer_size > CONFIG_WAL_BUFFER_SIZE_MAX) {
         buffer_size = CONFIG_WAL_BUFFER_SIZE_MAX;
@@ -2165,7 +2156,7 @@ Config::GetWalConfigBufferSize(int64_t& buffer_size) {
 Status
 Config::GetWalConfigWalPath(std::string& wal_path) {
     wal_path = GetConfigStr(CONFIG_WAL, CONFIG_WAL_WAL_PATH, CONFIG_WAL_WAL_PATH_DEFAULT);
-    CONFIG_CHECK(CheckWalConfigWalPath(wal_path));
+    STATUS_CHECK(CheckWalConfigWalPath(wal_path));
     return Status::OK();
 }
 
@@ -2173,62 +2164,62 @@ Config::GetWalConfigWalPath(std::string& wal_path) {
 Status
 Config::GetLogsTraceEnable(bool& value) {
     std::string str = GetConfigStr(CONFIG_LOGS, CONFIG_LOGS_TRACE_ENABLE, CONFIG_LOGS_TRACE_ENABLE_DEFAULT);
-    CONFIG_CHECK(CheckLogsTraceEnable(str));
-    CONFIG_CHECK(StringHelpFunctions::ConvertToBoolean(str, value));
+    STATUS_CHECK(CheckLogsTraceEnable(str));
+    STATUS_CHECK(StringHelpFunctions::ConvertToBoolean(str, value));
     return Status::OK();
 }
 
 Status
 Config::GetLogsDebugEnable(bool& value) {
     std::string str = GetConfigStr(CONFIG_LOGS, CONFIG_LOGS_DEBUG_ENABLE, CONFIG_LOGS_DEBUG_ENABLE_DEFAULT);
-    CONFIG_CHECK(CheckLogsDebugEnable(str));
-    CONFIG_CHECK(StringHelpFunctions::ConvertToBoolean(str, value));
+    STATUS_CHECK(CheckLogsDebugEnable(str));
+    STATUS_CHECK(StringHelpFunctions::ConvertToBoolean(str, value));
     return Status::OK();
 }
 
 Status
 Config::GetLogsInfoEnable(bool& value) {
     std::string str = GetConfigStr(CONFIG_LOGS, CONFIG_LOGS_INFO_ENABLE, CONFIG_LOGS_INFO_ENABLE_DEFAULT);
-    CONFIG_CHECK(CheckLogsInfoEnable(str));
-    CONFIG_CHECK(StringHelpFunctions::ConvertToBoolean(str, value));
+    STATUS_CHECK(CheckLogsInfoEnable(str));
+    STATUS_CHECK(StringHelpFunctions::ConvertToBoolean(str, value));
     return Status::OK();
 }
 
 Status
 Config::GetLogsWarningEnable(bool& value) {
     std::string str = GetConfigStr(CONFIG_LOGS, CONFIG_LOGS_WARNING_ENABLE, CONFIG_LOGS_WARNING_ENABLE_DEFAULT);
-    CONFIG_CHECK(CheckLogsWarningEnable(str));
-    CONFIG_CHECK(StringHelpFunctions::ConvertToBoolean(str, value));
+    STATUS_CHECK(CheckLogsWarningEnable(str));
+    STATUS_CHECK(StringHelpFunctions::ConvertToBoolean(str, value));
     return Status::OK();
 }
 
 Status
 Config::GetLogsErrorEnable(bool& value) {
     std::string str = GetConfigStr(CONFIG_LOGS, CONFIG_LOGS_ERROR_ENABLE, CONFIG_LOGS_ERROR_ENABLE_DEFAULT);
-    CONFIG_CHECK(CheckLogsErrorEnable(str));
-    CONFIG_CHECK(StringHelpFunctions::ConvertToBoolean(str, value));
+    STATUS_CHECK(CheckLogsErrorEnable(str));
+    STATUS_CHECK(StringHelpFunctions::ConvertToBoolean(str, value));
     return Status::OK();
 }
 
 Status
 Config::GetLogsFatalEnable(bool& value) {
     std::string str = GetConfigStr(CONFIG_LOGS, CONFIG_LOGS_FATAL_ENABLE, CONFIG_LOGS_FATAL_ENABLE_DEFAULT);
-    CONFIG_CHECK(CheckLogsFatalEnable(str));
-    CONFIG_CHECK(StringHelpFunctions::ConvertToBoolean(str, value));
+    STATUS_CHECK(CheckLogsFatalEnable(str));
+    STATUS_CHECK(StringHelpFunctions::ConvertToBoolean(str, value));
     return Status::OK();
 }
 
 Status
 Config::GetLogsPath(std::string& value) {
     value = GetConfigStr(CONFIG_LOGS, CONFIG_LOGS_PATH, CONFIG_LOGS_PATH_DEFAULT);
-    CONFIG_CHECK(CheckLogsPath(value));
+    STATUS_CHECK(CheckLogsPath(value));
     return Status::OK();
 }
 
 Status
 Config::GetLogsMaxLogFileSize(int64_t& value) {
     std::string str = GetConfigStr(CONFIG_LOGS, CONFIG_LOGS_MAX_LOG_FILE_SIZE, CONFIG_LOGS_MAX_LOG_FILE_SIZE_DEFAULT);
-    CONFIG_CHECK(CheckLogsMaxLogFileSize(str));
+    STATUS_CHECK(CheckLogsMaxLogFileSize(str));
     value = std::stoll(str);
     if (value == 0) {
         // OFF
@@ -2244,7 +2235,7 @@ Config::GetLogsMaxLogFileSize(int64_t& value) {
 Status
 Config::GetLogsDeleteExceeds(int64_t& value) {
     std::string str = GetConfigStr(CONFIG_LOGS, CONFIG_LOGS_DELETE_EXCEEDS, CONFIG_LOGS_DELETE_EXCEEDS_DEFAULT);
-    CONFIG_CHECK(CheckLogsDeleteExceeds(str));
+    STATUS_CHECK(CheckLogsDeleteExceeds(str));
     value = std::stoll(str);
     if (value == 0) {
         // OFF
@@ -2267,312 +2258,222 @@ Config::GetServerRestartRequired(bool& required) {
 /* server config */
 Status
 Config::SetServerConfigAddress(const std::string& value) {
-    CONFIG_CHECK(CheckServerConfigAddress(value));
+    STATUS_CHECK(CheckServerConfigAddress(value));
     return SetConfigValueInMem(CONFIG_SERVER, CONFIG_SERVER_ADDRESS, value);
 }
 
 Status
 Config::SetServerConfigPort(const std::string& value) {
-    CONFIG_CHECK(CheckServerConfigPort(value));
+    STATUS_CHECK(CheckServerConfigPort(value));
     return SetConfigValueInMem(CONFIG_SERVER, CONFIG_SERVER_PORT, value);
 }
 
 Status
 Config::SetServerConfigDeployMode(const std::string& value) {
-    CONFIG_CHECK(CheckServerConfigDeployMode(value));
+    STATUS_CHECK(CheckServerConfigDeployMode(value));
     return SetConfigValueInMem(CONFIG_SERVER, CONFIG_SERVER_DEPLOY_MODE, value);
 }
 
 Status
 Config::SetServerConfigTimeZone(const std::string& value) {
-    CONFIG_CHECK(CheckServerConfigTimeZone(value));
+    STATUS_CHECK(CheckServerConfigTimeZone(value));
     return SetConfigValueInMem(CONFIG_SERVER, CONFIG_SERVER_TIME_ZONE, value);
 }
 
 Status
 Config::SetServerConfigWebEnable(const std::string& value) {
-    CONFIG_CHECK(CheckServerConfigWebEnable(value));
+    STATUS_CHECK(CheckServerConfigWebEnable(value));
     return SetConfigValueInMem(CONFIG_SERVER, CONFIG_SERVER_WEB_ENABLE, value);
 }
 
 Status
 Config::SetServerConfigWebPort(const std::string& value) {
-    CONFIG_CHECK(CheckServerConfigWebPort(value));
+    STATUS_CHECK(CheckServerConfigWebPort(value));
     return SetConfigValueInMem(CONFIG_SERVER, CONFIG_SERVER_WEB_PORT, value);
 }
 
 /* db config */
 Status
 Config::SetDBConfigBackendUrl(const std::string& value) {
-    CONFIG_CHECK(CheckDBConfigBackendUrl(value));
+    STATUS_CHECK(CheckDBConfigBackendUrl(value));
     return SetConfigValueInMem(CONFIG_DB, CONFIG_DB_BACKEND_URL, value);
 }
 
 Status
 Config::SetDBConfigPreloadCollection(const std::string& value) {
-    CONFIG_CHECK(CheckDBConfigPreloadCollection(value));
+    STATUS_CHECK(CheckDBConfigPreloadCollection(value));
     std::string cor_value = value == "*" ? "\'*\'" : value;
     return SetConfigValueInMem(CONFIG_DB, CONFIG_DB_PRELOAD_COLLECTION, cor_value);
 }
 
 Status
 Config::SetDBConfigArchiveDiskThreshold(const std::string& value) {
-    CONFIG_CHECK(CheckDBConfigArchiveDiskThreshold(value));
+    STATUS_CHECK(CheckDBConfigArchiveDiskThreshold(value));
     return SetConfigValueInMem(CONFIG_DB, CONFIG_DB_ARCHIVE_DISK_THRESHOLD, value);
 }
 
 Status
 Config::SetDBConfigArchiveDaysThreshold(const std::string& value) {
-    CONFIG_CHECK(CheckDBConfigArchiveDaysThreshold(value));
+    STATUS_CHECK(CheckDBConfigArchiveDaysThreshold(value));
     return SetConfigValueInMem(CONFIG_DB, CONFIG_DB_ARCHIVE_DAYS_THRESHOLD, value);
 }
 
 Status
 Config::SetDBConfigAutoFlushInterval(const std::string& value) {
-    CONFIG_CHECK(CheckDBConfigAutoFlushInterval(value));
+    STATUS_CHECK(CheckDBConfigAutoFlushInterval(value));
     return SetConfigValueInMem(CONFIG_DB, CONFIG_DB_AUTO_FLUSH_INTERVAL, value);
 }
 
 /* storage config */
 Status
 Config::SetStorageConfigPrimaryPath(const std::string& value) {
-    CONFIG_CHECK(CheckStorageConfigPrimaryPath(value));
+    STATUS_CHECK(CheckStorageConfigPrimaryPath(value));
     return SetConfigValueInMem(CONFIG_STORAGE, CONFIG_STORAGE_PRIMARY_PATH, value);
 }
 
 Status
 Config::SetStorageConfigSecondaryPath(const std::string& value) {
-    CONFIG_CHECK(CheckStorageConfigSecondaryPath(value));
+    STATUS_CHECK(CheckStorageConfigSecondaryPath(value));
     return SetConfigValueInMem(CONFIG_STORAGE, CONFIG_STORAGE_SECONDARY_PATH, value);
 }
 
 Status
 Config::SetStorageConfigFileCleanupTimeout(const std::string& value) {
-    CONFIG_CHECK(CheckStorageConfigFileCleanupTimeout(value));
+    STATUS_CHECK(CheckStorageConfigFileCleanupTimeout(value));
     return SetConfigValueInMem(CONFIG_STORAGE, CONFIG_STORAGE_FILE_CLEANUP_TIMEOUT, value);
 }
 
-Status
-Config::SetStorageConfigS3Enable(const std::string& value) {
-    CONFIG_CHECK(CheckStorageConfigS3Enable(value));
-    return SetConfigValueInMem(CONFIG_STORAGE, CONFIG_STORAGE_S3_ENABLE, value);
-}
-
-Status
-Config::SetStorageConfigS3Address(const std::string& value) {
-    CONFIG_CHECK(CheckStorageConfigS3Address(value));
-    return SetConfigValueInMem(CONFIG_STORAGE, CONFIG_STORAGE_S3_ADDRESS, value);
-}
-
-Status
-Config::SetStorageConfigS3Port(const std::string& value) {
-    CONFIG_CHECK(CheckStorageConfigS3Port(value));
-    return SetConfigValueInMem(CONFIG_STORAGE, CONFIG_STORAGE_S3_PORT, value);
-}
-
-Status
-Config::SetStorageConfigS3AccessKey(const std::string& value) {
-    CONFIG_CHECK(CheckStorageConfigS3AccessKey(value));
-    return SetConfigValueInMem(CONFIG_STORAGE, CONFIG_STORAGE_S3_ACCESS_KEY, value);
-}
-
-Status
-Config::SetStorageConfigS3SecretKey(const std::string& value) {
-    CONFIG_CHECK(CheckStorageConfigS3SecretKey(value));
-    return SetConfigValueInMem(CONFIG_STORAGE, CONFIG_STORAGE_S3_SECRET_KEY, value);
-}
-
-Status
-Config::SetStorageConfigS3Bucket(const std::string& value) {
-    CONFIG_CHECK(CheckStorageConfigS3Bucket(value));
-    return SetConfigValueInMem(CONFIG_STORAGE, CONFIG_STORAGE_S3_BUCKET, value);
-}
+// Status
+// Config::SetStorageConfigS3Enable(const std::string& value) {
+//    STATUS_CHECK(CheckStorageConfigS3Enable(value));
+//    return SetConfigValueInMem(CONFIG_STORAGE, CONFIG_STORAGE_S3_ENABLE, value);
+// }
+//
+// Status
+// Config::SetStorageConfigS3Address(const std::string& value) {
+//    STATUS_CHECK(CheckStorageConfigS3Address(value));
+//    return SetConfigValueInMem(CONFIG_STORAGE, CONFIG_STORAGE_S3_ADDRESS, value);
+// }
+//
+// Status
+// Config::SetStorageConfigS3Port(const std::string& value) {
+//    STATUS_CHECK(CheckStorageConfigS3Port(value));
+//    return SetConfigValueInMem(CONFIG_STORAGE, CONFIG_STORAGE_S3_PORT, value);
+// }
+//
+// Status
+// Config::SetStorageConfigS3AccessKey(const std::string& value) {
+//    STATUS_CHECK(CheckStorageConfigS3AccessKey(value));
+//    return SetConfigValueInMem(CONFIG_STORAGE, CONFIG_STORAGE_S3_ACCESS_KEY, value);
+// }
+//
+// Status
+// Config::SetStorageConfigS3SecretKey(const std::string& value) {
+//    STATUS_CHECK(CheckStorageConfigS3SecretKey(value));
+//    return SetConfigValueInMem(CONFIG_STORAGE, CONFIG_STORAGE_S3_SECRET_KEY, value);
+// }
+//
+// Status
+// Config::SetStorageConfigS3Bucket(const std::string& value) {
+//    STATUS_CHECK(CheckStorageConfigS3Bucket(value));
+//    return SetConfigValueInMem(CONFIG_STORAGE, CONFIG_STORAGE_S3_BUCKET, value);
+// }
 
 /* metric config */
 Status
 Config::SetMetricConfigEnableMonitor(const std::string& value) {
-    CONFIG_CHECK(CheckMetricConfigEnableMonitor(value));
+    STATUS_CHECK(CheckMetricConfigEnableMonitor(value));
     return SetConfigValueInMem(CONFIG_METRIC, CONFIG_METRIC_ENABLE_MONITOR, value);
 }
 
 Status
 Config::SetMetricConfigAddress(const std::string& value) {
-    CONFIG_CHECK(CheckMetricConfigAddress(value));
+    STATUS_CHECK(CheckMetricConfigAddress(value));
     return SetConfigValueInMem(CONFIG_METRIC, CONFIG_METRIC_ADDRESS, value);
 }
 
 Status
 Config::SetMetricConfigPort(const std::string& value) {
-    CONFIG_CHECK(CheckMetricConfigPort(value));
+    STATUS_CHECK(CheckMetricConfigPort(value));
     return SetConfigValueInMem(CONFIG_METRIC, CONFIG_METRIC_PORT, value);
 }
 
 /* cache config */
 Status
 Config::SetCacheConfigCpuCacheCapacity(const std::string& value) {
-    CONFIG_CHECK(CheckCacheConfigCpuCacheCapacity(value));
-    CONFIG_CHECK(SetConfigValueInMem(CONFIG_CACHE, CONFIG_CACHE_CPU_CACHE_CAPACITY, value));
+    STATUS_CHECK(CheckCacheConfigCpuCacheCapacity(value));
+    STATUS_CHECK(SetConfigValueInMem(CONFIG_CACHE, CONFIG_CACHE_CPU_CACHE_CAPACITY, value));
     return ExecCallBacks(CONFIG_CACHE, CONFIG_CACHE_CPU_CACHE_CAPACITY, value);
 }
 
 Status
 Config::SetCacheConfigCpuCacheThreshold(const std::string& value) {
-    CONFIG_CHECK(CheckCacheConfigCpuCacheThreshold(value));
+    STATUS_CHECK(CheckCacheConfigCpuCacheThreshold(value));
     return SetConfigValueInMem(CONFIG_CACHE, CONFIG_CACHE_CPU_CACHE_THRESHOLD, value);
 }
 
 Status
 Config::SetCacheConfigInsertBufferSize(const std::string& value) {
-    CONFIG_CHECK(CheckCacheConfigInsertBufferSize(value));
-    CONFIG_CHECK(SetConfigValueInMem(CONFIG_CACHE, CONFIG_CACHE_INSERT_BUFFER_SIZE, value));
+    STATUS_CHECK(CheckCacheConfigInsertBufferSize(value));
+    STATUS_CHECK(SetConfigValueInMem(CONFIG_CACHE, CONFIG_CACHE_INSERT_BUFFER_SIZE, value));
     return ExecCallBacks(CONFIG_CACHE, CONFIG_CACHE_INSERT_BUFFER_SIZE, value);
 }
 
 Status
 Config::SetCacheConfigCacheInsertData(const std::string& value) {
-    CONFIG_CHECK(CheckCacheConfigCacheInsertData(value));
-    CONFIG_CHECK(SetConfigValueInMem(CONFIG_CACHE, CONFIG_CACHE_CACHE_INSERT_DATA, value));
+    STATUS_CHECK(CheckCacheConfigCacheInsertData(value));
+    STATUS_CHECK(SetConfigValueInMem(CONFIG_CACHE, CONFIG_CACHE_CACHE_INSERT_DATA, value));
     return ExecCallBacks(CONFIG_CACHE, CONFIG_CACHE_CACHE_INSERT_DATA, value);
 }
 
 /* engine config */
 Status
 Config::SetEngineConfigUseBlasThreshold(const std::string& value) {
-    CONFIG_CHECK(CheckEngineConfigUseBlasThreshold(value));
-    CONFIG_CHECK(SetConfigValueInMem(CONFIG_ENGINE, CONFIG_ENGINE_USE_BLAS_THRESHOLD, value));
+    STATUS_CHECK(CheckEngineConfigUseBlasThreshold(value));
+    STATUS_CHECK(SetConfigValueInMem(CONFIG_ENGINE, CONFIG_ENGINE_USE_BLAS_THRESHOLD, value));
     return ExecCallBacks(CONFIG_ENGINE, CONFIG_ENGINE_USE_BLAS_THRESHOLD, value);
 }
 
 Status
 Config::SetEngineConfigOmpThreadNum(const std::string& value) {
-    CONFIG_CHECK(CheckEngineConfigOmpThreadNum(value));
+    STATUS_CHECK(CheckEngineConfigOmpThreadNum(value));
     return SetConfigValueInMem(CONFIG_ENGINE, CONFIG_ENGINE_OMP_THREAD_NUM, value);
 }
 
 Status
 Config::SetEngineConfigSimdType(const std::string& value) {
-    CONFIG_CHECK(CheckEngineConfigSimdType(value));
+    STATUS_CHECK(CheckEngineConfigSimdType(value));
     return SetConfigValueInMem(CONFIG_ENGINE, CONFIG_ENGINE_SIMD_TYPE, value);
 }
 
-/* tracing config */
-Status
-Config::SetTracingConfigJsonConfigPath(const std::string& value) {
-    CONFIG_CHECK(CheckTracingConfigJsonConfigPath(value));
-    return SetConfigValueInMem(CONFIG_TRACING, CONFIG_TRACING_JSON_CONFIG_PATH, value);
-}
-
-/* wal config */
-Status
-Config::SetWalConfigEnable(const std::string& value) {
-    CONFIG_CHECK(CheckWalConfigEnable(value));
-    return SetConfigValueInMem(CONFIG_WAL, CONFIG_WAL_ENABLE, value);
-}
-
-Status
-Config::SetWalConfigRecoveryErrorIgnore(const std::string& value) {
-    CONFIG_CHECK(CheckWalConfigRecoveryErrorIgnore(value));
-    return SetConfigValueInMem(CONFIG_WAL, CONFIG_WAL_RECOVERY_ERROR_IGNORE, value);
-}
-
-Status
-Config::SetWalConfigBufferSize(const std::string& value) {
-    CONFIG_CHECK(CheckWalConfigBufferSize(value));
-    return SetConfigValueInMem(CONFIG_WAL, CONFIG_WAL_BUFFER_SIZE, value);
-}
-
-Status
-Config::SetWalConfigWalPath(const std::string& value) {
-    CONFIG_CHECK(CheckWalConfigWalPath(value));
-    return SetConfigValueInMem(CONFIG_WAL, CONFIG_WAL_WAL_PATH, value);
-}
-
-/* logs config */
-Status
-Config::SetLogsTraceEnable(const std::string& value) {
-    CONFIG_CHECK(CheckLogsTraceEnable(value));
-    return SetConfigValueInMem(CONFIG_LOGS, CONFIG_LOGS_TRACE_ENABLE, value);
-}
-
-Status
-Config::SetLogsDebugEnable(const std::string& value) {
-    CONFIG_CHECK(CheckLogsDebugEnable(value));
-    return SetConfigValueInMem(CONFIG_LOGS, CONFIG_LOGS_DEBUG_ENABLE, value);
-}
-
-Status
-Config::SetLogsInfoEnable(const std::string& value) {
-    CONFIG_CHECK(CheckLogsInfoEnable(value));
-    return SetConfigValueInMem(CONFIG_LOGS, CONFIG_LOGS_INFO_ENABLE, value);
-}
-
-Status
-Config::SetLogsWarningEnable(const std::string& value) {
-    CONFIG_CHECK(CheckLogsWarningEnable(value));
-    return SetConfigValueInMem(CONFIG_LOGS, CONFIG_LOGS_WARNING_ENABLE, value);
-}
-
-Status
-Config::SetLogsErrorEnable(const std::string& value) {
-    CONFIG_CHECK(CheckLogsErrorEnable(value));
-    return SetConfigValueInMem(CONFIG_LOGS, CONFIG_LOGS_ERROR_ENABLE, value);
-}
-
-Status
-Config::SetLogsFatalEnable(const std::string& value) {
-    CONFIG_CHECK(CheckLogsFatalEnable(value));
-    return SetConfigValueInMem(CONFIG_LOGS, CONFIG_LOGS_FATAL_ENABLE, value);
-}
-
-Status
-Config::SetLogsPath(const std::string& value) {
-    CONFIG_CHECK(CheckLogsPath(value));
-    return SetConfigValueInMem(CONFIG_LOGS, CONFIG_LOGS_PATH, value);
-}
-
-Status
-Config::SetLogsMaxLogFileSize(const std::string& value) {
-    CONFIG_CHECK(CheckLogsMaxLogFileSize(value));
-    return SetConfigValueInMem(CONFIG_LOGS, CONFIG_LOGS_MAX_LOG_FILE_SIZE, value);
-}
-
-Status
-Config::SetLogsDeleteExceeds(const std::string& value) {
-    CONFIG_CHECK(CheckLogsDeleteExceeds(value));
-    return SetConfigValueInMem(CONFIG_LOGS, CONFIG_LOGS_DELETE_EXCEEDS, value);
-}
-
 #ifdef MILVUS_GPU_VERSION
-
 Status
 Config::SetEngineConfigGpuSearchThreshold(const std::string& value) {
-    CONFIG_CHECK(CheckEngineConfigGpuSearchThreshold(value));
-    CONFIG_CHECK(SetConfigValueInMem(CONFIG_ENGINE, CONFIG_ENGINE_GPU_SEARCH_THRESHOLD, value));
+    STATUS_CHECK(CheckEngineConfigGpuSearchThreshold(value));
+    STATUS_CHECK(SetConfigValueInMem(CONFIG_ENGINE, CONFIG_ENGINE_GPU_SEARCH_THRESHOLD, value));
     return ExecCallBacks(CONFIG_ENGINE, CONFIG_ENGINE_GPU_SEARCH_THRESHOLD, value);
 }
-
 #endif
 
 /* gpu resource config */
 #ifdef MILVUS_GPU_VERSION
-
 Status
 Config::SetGpuResourceConfigEnable(const std::string& value) {
-    CONFIG_CHECK(CheckGpuResourceConfigEnable(value));
-    CONFIG_CHECK(SetConfigValueInMem(CONFIG_GPU_RESOURCE, CONFIG_GPU_RESOURCE_ENABLE, value));
+    STATUS_CHECK(CheckGpuResourceConfigEnable(value));
+    STATUS_CHECK(SetConfigValueInMem(CONFIG_GPU_RESOURCE, CONFIG_GPU_RESOURCE_ENABLE, value));
     return ExecCallBacks(CONFIG_GPU_RESOURCE, CONFIG_GPU_RESOURCE_ENABLE, value);
 }
 
 Status
 Config::SetGpuResourceConfigCacheCapacity(const std::string& value) {
-    CONFIG_CHECK(CheckGpuResourceConfigCacheCapacity(value));
-    CONFIG_CHECK(SetConfigValueInMem(CONFIG_GPU_RESOURCE, CONFIG_GPU_RESOURCE_CACHE_CAPACITY, value));
+    STATUS_CHECK(CheckGpuResourceConfigCacheCapacity(value));
+    STATUS_CHECK(SetConfigValueInMem(CONFIG_GPU_RESOURCE, CONFIG_GPU_RESOURCE_CACHE_CAPACITY, value));
     return ExecCallBacks(CONFIG_GPU_RESOURCE, CONFIG_GPU_RESOURCE_CACHE_CAPACITY, value);
 }
 
 Status
 Config::SetGpuResourceConfigCacheThreshold(const std::string& value) {
-    CONFIG_CHECK(CheckGpuResourceConfigCacheThreshold(value));
+    STATUS_CHECK(CheckGpuResourceConfigCacheThreshold(value));
     return SetConfigValueInMem(CONFIG_GPU_RESOURCE, CONFIG_GPU_RESOURCE_CACHE_THRESHOLD, value);
 }
 
@@ -2580,8 +2481,8 @@ Status
 Config::SetGpuResourceConfigSearchResources(const std::string& value) {
     std::vector<std::string> res_vec;
     server::StringHelpFunctions::SplitStringByDelimeter(value, CONFIG_GPU_RESOURCE_DELIMITER, res_vec);
-    CONFIG_CHECK(CheckGpuResourceConfigSearchResources(res_vec));
-    CONFIG_CHECK(SetConfigValueInMem(CONFIG_GPU_RESOURCE, CONFIG_GPU_RESOURCE_SEARCH_RESOURCES, value));
+    STATUS_CHECK(CheckGpuResourceConfigSearchResources(res_vec));
+    STATUS_CHECK(SetConfigValueInMem(CONFIG_GPU_RESOURCE, CONFIG_GPU_RESOURCE_SEARCH_RESOURCES, value));
     return ExecCallBacks(CONFIG_GPU_RESOURCE, CONFIG_GPU_RESOURCE_SEARCH_RESOURCES, value);
 }
 
@@ -2589,12 +2490,98 @@ Status
 Config::SetGpuResourceConfigBuildIndexResources(const std::string& value) {
     std::vector<std::string> res_vec;
     server::StringHelpFunctions::SplitStringByDelimeter(value, CONFIG_GPU_RESOURCE_DELIMITER, res_vec);
-    CONFIG_CHECK(CheckGpuResourceConfigBuildIndexResources(res_vec));
-    CONFIG_CHECK(SetConfigValueInMem(CONFIG_GPU_RESOURCE, CONFIG_GPU_RESOURCE_BUILD_INDEX_RESOURCES, value));
+    STATUS_CHECK(CheckGpuResourceConfigBuildIndexResources(res_vec));
+    STATUS_CHECK(SetConfigValueInMem(CONFIG_GPU_RESOURCE, CONFIG_GPU_RESOURCE_BUILD_INDEX_RESOURCES, value));
     return ExecCallBacks(CONFIG_GPU_RESOURCE, CONFIG_GPU_RESOURCE_BUILD_INDEX_RESOURCES, value);
 }
-
 #endif
+
+/* tracing config */
+Status
+Config::SetTracingConfigJsonConfigPath(const std::string& value) {
+    STATUS_CHECK(CheckTracingConfigJsonConfigPath(value));
+    return SetConfigValueInMem(CONFIG_TRACING, CONFIG_TRACING_JSON_CONFIG_PATH, value);
+}
+
+/* wal config */
+Status
+Config::SetWalConfigEnable(const std::string& value) {
+    STATUS_CHECK(CheckWalConfigEnable(value));
+    return SetConfigValueInMem(CONFIG_WAL, CONFIG_WAL_ENABLE, value);
+}
+
+Status
+Config::SetWalConfigRecoveryErrorIgnore(const std::string& value) {
+    STATUS_CHECK(CheckWalConfigRecoveryErrorIgnore(value));
+    return SetConfigValueInMem(CONFIG_WAL, CONFIG_WAL_RECOVERY_ERROR_IGNORE, value);
+}
+
+Status
+Config::SetWalConfigBufferSize(const std::string& value) {
+    STATUS_CHECK(CheckWalConfigBufferSize(value));
+    return SetConfigValueInMem(CONFIG_WAL, CONFIG_WAL_BUFFER_SIZE, value);
+}
+
+Status
+Config::SetWalConfigWalPath(const std::string& value) {
+    STATUS_CHECK(CheckWalConfigWalPath(value));
+    return SetConfigValueInMem(CONFIG_WAL, CONFIG_WAL_WAL_PATH, value);
+}
+
+/* logs config */
+Status
+Config::SetLogsTraceEnable(const std::string& value) {
+    STATUS_CHECK(CheckLogsTraceEnable(value));
+    return SetConfigValueInMem(CONFIG_LOGS, CONFIG_LOGS_TRACE_ENABLE, value);
+}
+
+Status
+Config::SetLogsDebugEnable(const std::string& value) {
+    STATUS_CHECK(CheckLogsDebugEnable(value));
+    return SetConfigValueInMem(CONFIG_LOGS, CONFIG_LOGS_DEBUG_ENABLE, value);
+}
+
+Status
+Config::SetLogsInfoEnable(const std::string& value) {
+    STATUS_CHECK(CheckLogsInfoEnable(value));
+    return SetConfigValueInMem(CONFIG_LOGS, CONFIG_LOGS_INFO_ENABLE, value);
+}
+
+Status
+Config::SetLogsWarningEnable(const std::string& value) {
+    STATUS_CHECK(CheckLogsWarningEnable(value));
+    return SetConfigValueInMem(CONFIG_LOGS, CONFIG_LOGS_WARNING_ENABLE, value);
+}
+
+Status
+Config::SetLogsErrorEnable(const std::string& value) {
+    STATUS_CHECK(CheckLogsErrorEnable(value));
+    return SetConfigValueInMem(CONFIG_LOGS, CONFIG_LOGS_ERROR_ENABLE, value);
+}
+
+Status
+Config::SetLogsFatalEnable(const std::string& value) {
+    STATUS_CHECK(CheckLogsFatalEnable(value));
+    return SetConfigValueInMem(CONFIG_LOGS, CONFIG_LOGS_FATAL_ENABLE, value);
+}
+
+Status
+Config::SetLogsPath(const std::string& value) {
+    STATUS_CHECK(CheckLogsPath(value));
+    return SetConfigValueInMem(CONFIG_LOGS, CONFIG_LOGS_PATH, value);
+}
+
+Status
+Config::SetLogsMaxLogFileSize(const std::string& value) {
+    STATUS_CHECK(CheckLogsMaxLogFileSize(value));
+    return SetConfigValueInMem(CONFIG_LOGS, CONFIG_LOGS_MAX_LOG_FILE_SIZE, value);
+}
+
+Status
+Config::SetLogsDeleteExceeds(const std::string& value) {
+    STATUS_CHECK(CheckLogsDeleteExceeds(value));
+    return SetConfigValueInMem(CONFIG_LOGS, CONFIG_LOGS_DELETE_EXCEEDS, value);
+}
 
 }  // namespace server
 }  // namespace milvus

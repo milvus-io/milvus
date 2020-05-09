@@ -7,10 +7,12 @@ Please mark all change in change log and use the issue from GitHub
 ## Bug
 -   \#1705 Limit the insert data batch size
 -   \#1776 Error out when index SQ8H run in CPU mode
+-   \#1925 To flush all collections, flush cannot work
 -   \#1929 Skip MySQL meta schema field width check
 -   \#1946 Fix load index file CPU2GPU fail during searching
 -   \#1955 Switch create_index operation to background once client break connection
 -   \#1997 Index file missed after compact
+-   \#2002 Remove log error msg `Attributes is null`
 -   \#2073 Fix CheckDBConfigBackendUrl error message
 -   \#2076 CheckMetricConfigAddress error message
 -   \#2120 Fix Search expected failed if search params set invalid
@@ -21,6 +23,7 @@ Please mark all change in change log and use the issue from GitHub
 -   \#2169 Fix SingleIndexTest.IVFSQHybrid unittest
 -   \#2194 Fix get collection info failed
 -   \#2196 Fix server start failed if wal is disabled
+-   \#2203 0.8.0 id=-1 is returned when total count < topk
 -   \#2231 Use server_config to define hard-delete delay time for segment files
 
 ## Feature
@@ -34,6 +37,7 @@ Please mark all change in change log and use the issue from GitHub
 -   \#2064 Warn when use SQLite as metadata management
 -   \#2111 Check GPU environment before start server
 -   \#2206 Log file rotating
+-   \#2240 Obtain running rpc requests information
 
 ## Improvement
 -   \#221 Refactor LOG macro
@@ -48,7 +52,9 @@ Please mark all change in change log and use the issue from GitHub
 -   \#2185 Change id to string format in http module
 -   \#2186 Update endpoints in http module
 -   \#2190 Fix memory usage is twice of index size when using GPU searching
--   \#2252 Upgrade mishards to v0.9.0
+-   \#2248 Use hostname and port as instance label of metrics
+-   \#2252 Upgrade mishards APIs and requirements
+-   \#2256 k-means clustering algorithm use only Euclidean distance metric
 
 ## Task
 
