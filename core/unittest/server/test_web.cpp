@@ -1026,11 +1026,12 @@ TEST_F(WebControllerTest, SHOW_SEGMENTS) {
     std::string json_str = response->readBodyToString()->c_str();
     auto result_json = nlohmann::json::parse(json_str);
 
-    ASSERT_TRUE(result_json.contains("row_count"));
-
-    ASSERT_TRUE(result_json.contains("partitions"));
-    auto segments_json = result_json["partitions"];
+    ASSERT_TRUE(result_json.contains("count"));
+    ASSERT_TRUE(result_json.contains("segments"));
+    auto segments_json = result_json["segments"];
     ASSERT_TRUE(segments_json.is_array());
+    auto seg0_json = segments_json[0];
+    ASSERT_TRUE(seg0_json.contains("partition_tag"));
 //    ASSERT_EQ(10, segments_json.size());
 }
 
@@ -1049,7 +1050,7 @@ TEST_F(WebControllerTest, GET_SEGMENT_INFO) {
     std::string json_str = response->readBodyToString()->c_str();
     auto result_json = nlohmann::json::parse(json_str);
 
-    auto segment0_json = result_json["partitions"][0]["segments"][0];
+    auto segment0_json = result_json["segments"][0];
     std::string segment_name = segment0_json["name"];
 
     // get segment ids
@@ -1104,15 +1105,15 @@ TEST_F(WebControllerTest, SEGMENT_FILTER) {
 
     std::string json_str = response->readBodyToString()->c_str();
     auto result_json = nlohmann::json::parse(json_str);
-    ASSERT_TRUE(result_json.contains("row_count"));
+    ASSERT_TRUE(result_json.contains("count"));
 
-    ASSERT_TRUE(result_json.contains("partitions"));
-    auto partitions_json = result_json["partitions"];
-    ASSERT_TRUE(partitions_json.is_array());
-    for (auto& part : partitions_json) {
-        ASSERT_TRUE(part.contains("tag"));
+    ASSERT_TRUE(result_json.contains("segments"));
+    auto segments_json = result_json["segments"];
+    ASSERT_TRUE(segments_json.is_array());
+    for (auto& part : segments_json) {
+        ASSERT_TRUE(part.contains("partition_tag"));
     }
-    ASSERT_EQ("_default", partitions_json[0]["tag"].get<std::string>());
+    ASSERT_EQ("_default", segments_json[0]["partition_tag"].get<std::string>());
 }
 
 TEST_F(WebControllerTest, SEARCH) {
