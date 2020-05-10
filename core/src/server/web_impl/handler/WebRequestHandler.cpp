@@ -1457,7 +1457,35 @@ WebRequestHandler::ShowSegments(const OString& collection_name, const OQueryPara
         ASSIGN_RETURN_STATUS_DTO(status)
     }
 
-    nlohmann::json result_json = nlohmann::json::parse(info);
+    nlohmann::json info_json = nlohmann::json::parse(info);
+    nlohmann::json segments_json = nlohmann::json::array();
+    for (auto& par : info_json["partitions"]) {
+        if (!(all_required || tag.empty() || tag == par["tag"])) {
+            continue;
+        }
+
+        auto segments = par["segments"];
+        if (!segments.is_null()) {
+            for (auto& seg : segments) {
+                seg["partition_tag"] = par["tag"];
+                segments_json.push_back(seg);
+            }
+        }
+    }
+    nlohmann::json result_json;
+    if (!all_required) {
+        int64_t size = segments_json.size();
+        int iter_begin = std::min(size, offset);
+        int iter_end = std::min(size, offset + page_size);
+
+        nlohmann::json segments_slice_json = nlohmann::json::array();
+        segments_slice_json.insert(segments_slice_json.begin(), segments_json.begin() + iter_begin,
+                                   segments_json.begin() + iter_end);
+        result_json["segments"] = segments_slice_json;  // segments_json;
+    } else {
+        result_json["segments"] = segments_json;
+    }
+    result_json["count"] = segments_json.size();
     AddStatusToJson(result_json, status.code(), status.message());
     response = result_json.dump().c_str();
 
@@ -1535,9 +1563,14 @@ WebRequestHandler::Insert(const OString& collection_name, const OString& body, V
         }
         auto& id_array = vectors.id_array_;
         id_array.clear();
-        for (auto& id_str : ids_json) {
-            int64_t id = std::stol(id_str.get<std::string>());
-            id_array.emplace_back(id);
+        try {
+            for (auto& id_str : ids_json) {
+                int64_t id = std::stol(id_str.get<std::string>());
+                id_array.emplace_back(id);
+            }
+        } catch (std::exception& e) {
+            std::string err_msg = std::string("Cannot convert vectors id. details: ") + e.what();
+            RETURN_STATUS_DTO(SERVER_UNEXPECTED_ERROR, err_msg.c_str());
         }
     }
 
