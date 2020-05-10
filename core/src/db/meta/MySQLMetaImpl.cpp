@@ -2508,7 +2508,8 @@ MySQLMetaImpl::DropAll() {
         }
 
         mysqlpp::Query statement = connectionPtr->query();
-        statement << "DROP TABLE IF EXISTS " << TABLES_SCHEMA.name() << ", " << TABLEFILES_SCHEMA.name() << ";";
+        statement << "DROP TABLE IF EXISTS " << TABLES_SCHEMA.name() << ", " << TABLEFILES_SCHEMA.name() << ", "
+                  << ENVIRONMENT_SCHEMA.name() << ", " << FIELDS_SCHEMA.name() << ";";
 
         LOG_ENGINE_DEBUG_ << "DropAll: " << statement.str();
 

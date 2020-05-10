@@ -1752,6 +1752,8 @@ SqliteMetaImpl::DropAll() {
     try {
         ConnectorPtr->drop_table(META_TABLES);
         ConnectorPtr->drop_table(META_TABLEFILES);
+        ConnectorPtr->drop_table(META_ENVIRONMENT);
+        ConnectorPtr->drop_table(META_FIELDS);
     } catch (std::exception& e) {
         return HandleException("Encounter exception when drop all meta", e.what());
     }
