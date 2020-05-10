@@ -40,7 +40,7 @@ class BuildIndexPass : public Pass, public server::GpuResourceConfigHandler {
     Run(const TaskPtr& task) override;
 
  private:
-    uint64_t specified_gpu_id_ = 0;
+    uint64_t idx_ = 0;
 };
 
 using BuildIndexPassPtr = std::shared_ptr<BuildIndexPass>;
