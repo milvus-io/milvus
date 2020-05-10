@@ -17,8 +17,8 @@
 #include <oatpp/network/client/SimpleTCPConnectionProvider.hpp>
 #include <oatpp/network/server/SimpleTCPConnectionProvider.hpp>
 #include <oatpp/parser/json/mapping/Deserializer.hpp>
-#include <oatpp/parser/json/mapping/Serializer.hpp>
 #include <oatpp/parser/json/mapping/ObjectMapper.hpp>
+#include <oatpp/parser/json/mapping/Serializer.hpp>
 #include <oatpp/web/server/HttpConnectionHandler.hpp>
 #include <oatpp/web/server/HttpRouter.hpp>
 
