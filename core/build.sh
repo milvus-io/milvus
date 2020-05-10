@@ -157,5 +157,5 @@ if [[ ${RUN_CPPLINT} == "ON" ]]; then
 else
 
   # compile and build
-  make -j 8 VERBOSE=1 install || exit 1
+  make -j 8 install || exit 1
 fi
