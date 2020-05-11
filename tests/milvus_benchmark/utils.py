@@ -22,14 +22,12 @@ import h5py
 from yaml import full_load, dump
 import tableprint as tp
 from pprint import pprint
-from kubernetes import client, config
 
 
 logger = logging.getLogger("milvus_benchmark.utils")
-config.load_kube_config()
 
 MULTI_DB_SLAVE_PATH = "/opt/milvus/data2;/opt/milvus/data3"
-
+REGISTRY_URL = "registry.zilliz.com/milvus/engine"
 
 def get_unique_name():
     return "benchmark-test-"+"".join(random.choice(string.ascii_letters + string.digits) for _ in range(8)).lower()
@@ -118,38 +116,88 @@ def update_server_config(file_path, server_config):
 
 
 # update values.yaml
-def update_values(file_path, hostname):
+def update_values(file_path, hostname, server_config):
+    from kubernetes import client, config
+    client.rest.logger.setLevel(logging.WARNING)
+
     if not os.path.isfile(file_path):
         raise Exception('File: %s not found' % file_path)
+    #　bak values.yaml
+    file_name = os.path.basename(file_path)
+    bak_file_name = file_name+".bak"
+    file_parent_path = os.path.dirname(file_path)
+    bak_file_path = file_parent_path+'/'+bak_file_name
+    if os.path.exists(bak_file_path):
+        os.system("cp %s %s" % (bak_file_path, file_path))
+    else:
+        os.system("cp %s %s" % (file_path, bak_file_path))
     with open(file_path) as f:
         values_dict = full_load(f)
         f.close()
-    if values_dict['engine']['nodeSelector']:
-        logger.warning("nodeSelector has been set: %s" % str(values_dict['engine']['nodeSelector']))
-        return
+
+    for k, v in server_config.items():
+        if k.find("primary_path") != -1:
+            values_dict["primaryPath"] = v
+            values_dict['wal']['path'] = v+"/wal"
+        elif k.find("use_blas_threshold") != -1:
+            values_dict['useBLASThreshold'] = int(v)
+        elif k.find("gpu_search_threshold") != -1:
+            values_dict['gpuSearchThreshold'] = int(v)
+        elif k.find("cpu_cache_capacity") != -1:
+            values_dict['cpuCacheCapacity'] = int(v)
+        elif k.find("cache_insert_data") != -1:
+            values_dict['cacheInsertData'] = v
+        elif k.find("insert_buffer_size") != -1:
+            values_dict['insertBufferSize'] = v
+        elif k.find("gpu_resource_config.enable") != -1:
+            values_dict['gpu']['enabled'] = v
+        elif k.find("gpu_resource_config.cache_capacity") != -1:
+            values_dict['gpu']['cacheCapacity'] = int(v)
+        elif k.find("build_index_resources") != -1:
+            values_dict['gpu']['buildIndexResources'] = v
+        elif k.find("search_resources") != -1:  
+            values_dict['gpu']['searchResources'] = v
+        # wal
+        elif k.find("auto_flush_interval") != -1:
+            values_dict['autoFlushInterval'] = v
+        elif k.find("wal_enable") != -1:
+            values_dict['wal']['enabled'] = v
+
+    # if values_dict['nodeSelector']:
+    #     logger.warning("nodeSelector has been set: %s" % str(values_dict['engine']['nodeSelector']))
+    #     return
+    values_dict["wal"]["ignoreErrorLog"] = True
+    # enable monitor
+    values_dict["metrics"]["enabled"] = True
+    values_dict["metrics"]["address"] = "192.168.1.237"
+    values_dict["metrics"]["port"] = 9091
     # update values.yaml with the given host
-    # set limit/request cpus in resources
+    values_dict['nodeSelector'] = {'kubernetes.io/hostname': hostname}
+    # Using sqlite
+    values_dict["mysql"]["enabled"] = False
+
+    config.load_kube_config()
     v1 = client.CoreV1Api()
-    node = v1.read_node(hostname)
-    cpus = node.status.allocatable.get("cpu")
+    # node = v1.read_node(hostname)
+    cpus = v1.read_node(hostname).status.allocatable.get("cpu")
     # DEBUG
-    values_dict['engine']['resources'] = {
+    # set limit/request cpus in resources
+    values_dict['resources'] = {
         "limits": {
-            "cpu": str(int(cpus)-1)+".0"
+            "cpu": str(int(cpus))+".0"
         },
         "requests": {
-            "cpu": str(int(cpus)-2)+".0"
+            "cpu": str(int(cpus)-1)+".0"
         }
     }
-    values_dict['engine']['nodeSelector'] = {'kubernetes.io/hostname': hostname}
-    values_dict['engine']['tolerations'].append({
+    values_dict['tolerations'] = [{
         "key": "worker",
         "operator": "Equal",
         "value": "performance",
         "effect": "NoSchedule"
-        })
+        }]
     # add extra volumes
-    values_dict['extraVolumes'].append({
+    values_dict['extraVolumes'] = [{
         'name': 'test',
         'flexVolume': {
             'driver': "fstab/cifs",
@@ -162,11 +210,12 @@ def update_values(file_path, hostname):
                 'mountOptions': "vers=1.0"
             }
         }
-    })
-    values_dict['extraVolumeMounts'].append({
+    }]
+    values_dict['extraVolumeMounts'] = [{
         'name': 'test',
         'mountPath': '/test'
-    })
+    }]
+    logger.debug(values_dict)
     with open(file_path, 'w') as f:
         dump(values_dict, f, default_flow_style=False)
     f.close()
@@ -174,22 +223,27 @@ def update_values(file_path, hostname):
 
 # deploy server
 def helm_install_server(helm_path, image_tag, image_type, name, namespace):
-    timeout = 180
-    install_cmd = "helm install --wait --timeout %d \
-            --set engine.image.tag=%s \
-            --set expose.type=clusterIP \
-            --name %s \
-            -f ci/db_backend/sqlite_%s_values.yaml \
+    from kubernetes import client, config
+    client.rest.logger.setLevel(logging.WARNING)
+
+    timeout = 300
+    install_cmd = "helm install --wait --timeout %ds \
+            --set image.repository=%s \
+            --set image.tag=%s \
+            --set image.pullPolicy=Always \
+            --set service.type=ClusterIP \
             -f ci/filebeat/values.yaml \
             --namespace %s \
-            --version 0.0 ." % (timeout, image_tag, name, image_type, namespace)
+            %s ." % (timeout, REGISTRY_URL, image_tag, namespace, name)
     logger.debug(install_cmd)
     if os.system("cd %s && %s" % (helm_path, install_cmd)):
         logger.error("Helm install failed")
         return None
     time.sleep(5)
+    config.load_kube_config()
     v1 = client.CoreV1Api()
-    host = "%s-milvus-engine.%s.svc.cluster.local" % (name, namespace)
+    host = "%s.%s.svc.cluster.local" % (name, namespace)
+    logger.debug(host)
     pod_name = None
     pod_id = None
     pods = v1.list_namespaced_pod(namespace)
@@ -203,8 +257,10 @@ def helm_install_server(helm_path, image_tag, image_type, name, namespace):
 
 
 # delete server
-def helm_del_server(name):
-    del_cmd = "helm del --purge %s" % name
+def helm_del_server(name, namespace):
+    # del_cmd = "helm uninstall -n milvus benchmark-test-gzelwvgk"
+    # os.system(del_cmd)
+    del_cmd = "helm uninstall -n milvus %s" % name
     logger.debug(del_cmd)
     if os.system(del_cmd):
         logger.error("Helm delete name:%s failed" % name)

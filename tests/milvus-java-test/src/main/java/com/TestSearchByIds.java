@@ -14,6 +14,7 @@ public class TestSearchByIds {
     int n_list = 1024;
     int default_n_list = 16384;
     int nb = 10000;
+    int small_nb = 10;
     int n_probe = 20;
     int top_k = 10;
     int nq = 5;
@@ -22,6 +23,7 @@ public class TestSearchByIds {
     IndexType defaultIndexType = IndexType.FLAT;
     List<Long> default_ids = Utils.toListIds(1111);
     List<List<Float>> vectors = Utils.genVectors(nb, dimension, true);
+    List<List<Float>> small_vectors = Utils.genVectors(small_nb, dimension, true);
     List<ByteBuffer> vectorsBinary = Utils.genBinaryVectors(nb, dimension);
     String indexParam = Utils.setIndexParam(n_list);
     public String searchParamStr = Utils.setSearchParam(n_probe);
@@ -62,6 +64,22 @@ public class TestSearchByIds {
         List<List<SearchResponse.QueryResult>> res_search = client.searchByIds(searchParam).getQueryResultsList();
         assert (client.searchByIds(searchParam).getResponse().ok());
         Assert.assertEquals(res_search.get(0).size(), 0);
+    }
+
+    @Test(dataProvider = "Collection", dataProviderClass = MainClass.class)
+    public void test_search_count_lt_top_k(MilvusClient client, String collectionName)  {
+        int top_k = 100;
+        InsertParam insertParam = new InsertParam.Builder(collectionName).withFloatVectors(small_vectors).build();
+        InsertResponse res_insert = client.insert(insertParam);
+        client.flush(collectionName);
+        SearchByIdsParam searchParam = new SearchByIdsParam.Builder(collectionName)
+                .withParamsInJson(searchParamStr)
+                .withTopK(top_k)
+                .withIDs(Utils.toListIds(res_insert.getVectorIds().get(0)))
+                .build();
+        List<List<SearchResponse.QueryResult>> res_search = client.searchByIds(searchParam).getQueryResultsList();
+        // reason: "Failed to query by id in collection L2_FmVKbqSZaN, result doesn\'t match id count"
+        assert (!client.searchByIds(searchParam).getResponse().ok());
 //        Assert.assertEquals(res_search.size(), default_ids.size());
 //        Assert.assertEquals(res_search.get(0).get(0).getVectorId(), -1);
     }

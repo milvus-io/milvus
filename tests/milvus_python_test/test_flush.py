@@ -234,6 +234,11 @@ class TestFlushBase:
 
 
 class TestFlushAsync:
+    @pytest.fixture(scope="function", autouse=True)
+    def skip_http_check(self, args):
+        if args["handler"] == "HTTP":
+            pytest.skip("skip in http mode")
+
     """
     ******************************************************************
       The following cases are used to test `flush` function
