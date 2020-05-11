@@ -47,7 +47,7 @@ WebServer::StartService() {
 
     Config& config = Config::GetInstance();
     std::string port;
-    CONFIG_CHECK(config.GetServerConfigWebPort(port));
+    STATUS_CHECK(config.GetServerConfigWebPort(port));
 
     {
         AppComponent components = AppComponent(std::stoi(port));

@@ -41,14 +41,11 @@ SearchReqStrategy::ReScheduleQueue(const BaseRequestPtr& request, std::queue<Bas
     if (last_req->GetRequestType() == BaseRequest::kSearch) {
         SearchRequestPtr last_search_req = std::static_pointer_cast<SearchRequest>(last_req);
         if (SearchCombineRequest::CanCombine(last_search_req, new_search_req)) {
-            // pop last request
-            queue.pop();
-
             // combine request
             SearchCombineRequestPtr combine_request = std::make_shared<SearchCombineRequest>();
             combine_request->Combine(last_search_req);
             combine_request->Combine(new_search_req);
-            queue.push(combine_request);
+            queue.back() = combine_request;  // replace the last request to combine request
             LOG_SERVER_DEBUG_ << "Combine 2 search request";
         } else {
             // directly put to queue

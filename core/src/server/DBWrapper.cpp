@@ -64,12 +64,26 @@ DBWrapper::StartService() {
 
     StringHelpFunctions::SplitStringByDelimeter(db_slave_path, ";", opt.meta_.slave_paths_);
 
+    s = config.GetStorageConfigFileCleanupTimeup(opt.file_cleanup_timeout_);
+    if (!s.ok()) {
+        std::cerr << s.ToString() << std::endl;
+        return s;
+    }
+
     // cache config
     s = config.GetCacheConfigCacheInsertData(opt.insert_cache_immediately_);
     if (!s.ok()) {
         std::cerr << s.ToString() << std::endl;
         return s;
     }
+
+    int64_t insert_buffer_size = 1 * engine::GB;
+    s = config.GetCacheConfigInsertBufferSize(insert_buffer_size);
+    if (!s.ok()) {
+        std::cerr << s.ToString() << std::endl;
+        return s;
+    }
+    opt.insert_buffer_size_ = insert_buffer_size * engine::GB;
 
     std::string mode;
     s = config.GetServerConfigDeployMode(mode);

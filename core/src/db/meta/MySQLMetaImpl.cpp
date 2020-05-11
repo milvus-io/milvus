@@ -541,7 +541,7 @@ MySQLMetaImpl::DescribeCollection(CollectionSchema& collection_schema) {
 }
 
 Status
-MySQLMetaImpl::HasCollection(const std::string& collection_id, bool& has_or_not) {
+MySQLMetaImpl::HasCollection(const std::string& collection_id, bool& has_or_not, bool is_root) {
     try {
         server::MetricCollector metric;
         mysqlpp::StoreQueryResult res;
@@ -557,20 +557,23 @@ MySQLMetaImpl::HasCollection(const std::string& collection_id, bool& has_or_not)
 
             mysqlpp::Query HasCollectionQuery = connectionPtr->query();
             // since collection_id is a unique column we just need to check whether it exists or not
-            HasCollectionQuery << "SELECT EXISTS"
-                               << " (SELECT 1 FROM " << META_TABLES << " WHERE table_id = " << mysqlpp::quote
-                               << collection_id << " AND state <> " << std::to_string(CollectionSchema::TO_DELETE)
-                               << ")"
-                               << " AS " << mysqlpp::quote << "check"
-                               << ";";
+            if (is_root) {
+                HasCollectionQuery << "SELECT id FROM " << META_TABLES << " WHERE table_id = " << mysqlpp::quote
+                                   << collection_id << " AND state <> " << std::to_string(CollectionSchema::TO_DELETE)
+                                   << " AND owner_table = " << mysqlpp::quote << ""
+                                   << ";";
+            } else {
+                HasCollectionQuery << "SELECT id FROM " << META_TABLES << " WHERE table_id = " << mysqlpp::quote
+                                   << collection_id << " AND state <> " << std::to_string(CollectionSchema::TO_DELETE)
+                                   << ";";
+            }
 
             LOG_ENGINE_DEBUG_ << "HasCollection: " << HasCollectionQuery.str();
 
             res = HasCollectionQuery.store();
         }  // Scoped Connection
 
-        int check = res[0]["check"];
-        has_or_not = (check == 1);
+        has_or_not = (res.num_rows() > 0);
     } catch (std::exception& e) {
         return HandleException("Failed to check collection existence", e.what());
     }
@@ -2505,7 +2508,8 @@ MySQLMetaImpl::DropAll() {
         }
 
         mysqlpp::Query statement = connectionPtr->query();
-        statement << "DROP TABLE IF EXISTS " << TABLES_SCHEMA.name() << ", " << TABLEFILES_SCHEMA.name() << ";";
+        statement << "DROP TABLE IF EXISTS " << TABLES_SCHEMA.name() << ", " << TABLEFILES_SCHEMA.name() << ", "
+                  << ENVIRONMENT_SCHEMA.name() << ", " << FIELDS_SCHEMA.name() << ";";
 
         LOG_ENGINE_DEBUG_ << "DropAll: " << statement.str();
 

@@ -20,6 +20,9 @@ include_directories(${MILVUS_ENGINE_SRC})
 include_directories(${MILVUS_THIRDPARTY_SRC})
 include_directories(${CMAKE_CURRENT_SOURCE_DIR})
 
+include_directories(${MILVUS_ENGINE_SRC}/grpc/gen-status)
+include_directories(${MILVUS_ENGINE_SRC}/grpc/gen-milvus)
+
 aux_source_directory(${MILVUS_ENGINE_SRC}/cache cache_files)
 aux_source_directory(${MILVUS_ENGINE_SRC}/config config_files)
 aux_source_directory(${MILVUS_ENGINE_SRC}/config/handler config_handler_files)
@@ -28,6 +31,7 @@ aux_source_directory(${MILVUS_ENGINE_SRC}/db db_main_files)
 aux_source_directory(${MILVUS_ENGINE_SRC}/db/engine db_engine_files)
 aux_source_directory(${MILVUS_ENGINE_SRC}/db/insert db_insert_files)
 aux_source_directory(${MILVUS_ENGINE_SRC}/db/meta db_meta_files)
+aux_source_directory(${MILVUS_ENGINE_SRC}/db/merge db_merge_files)
 aux_source_directory(${MILVUS_ENGINE_SRC}/db/wal db_wal_files)
 aux_source_directory(${MILVUS_ENGINE_SRC}/search search_files)
 aux_source_directory(${MILVUS_ENGINE_SRC}/query query_files)
@@ -140,6 +144,7 @@ set(common_files
         ${db_engine_files}
         ${db_insert_files}
         ${db_meta_files}
+        ${db_merge_files}
         ${db_wal_files}
         ${metrics_files}
         ${thirdparty_files}
@@ -149,12 +154,21 @@ set(common_files
         ${helper_files}
         ${server_init_files}
         ${server_context_files}
+        ${grpc_service_files}
         ${tracing_files}
         ${codecs_files}
         ${codecs_default_files}
         ${segment_files}
         ${search_files}
         ${query_files}
+        )
+
+set(grpc_lib
+        grpcpp_channelz
+        grpc++
+        grpc
+        grpc_protobuf
+        grpc_protoc
         )
 
 set(unittest_libs
@@ -172,6 +186,7 @@ set(unittest_libs
         opentracing
         opentracing_mocktracer
         fiu
+        ${grpc_lib}
         )
 
 if (MILVUS_WITH_AWS)

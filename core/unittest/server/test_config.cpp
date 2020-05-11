@@ -209,35 +209,35 @@ TEST_F(ConfigTest, SERVER_CONFIG_VALID_TEST) {
     ASSERT_TRUE(config.GetStorageConfigSecondaryPath(str_val).ok());
     ASSERT_TRUE(str_val == storage_secondary_path);
 
-    bool storage_s3_enable = true;
-    ASSERT_TRUE(config.SetStorageConfigS3Enable(std::to_string(storage_s3_enable)).ok());
-    ASSERT_TRUE(config.GetStorageConfigS3Enable(bool_val).ok());
-    ASSERT_TRUE(bool_val == storage_s3_enable);
-
-    std::string storage_s3_addr = "192.168.1.100";
-    ASSERT_TRUE(config.SetStorageConfigS3Address(storage_s3_addr).ok());
-    ASSERT_TRUE(config.GetStorageConfigS3Address(str_val).ok());
-    ASSERT_TRUE(str_val == storage_s3_addr);
-
-    std::string storage_s3_port = "12345";
-    ASSERT_TRUE(config.SetStorageConfigS3Port(storage_s3_port).ok());
-    ASSERT_TRUE(config.GetStorageConfigS3Port(str_val).ok());
-    ASSERT_TRUE(str_val == storage_s3_port);
-
-    std::string storage_s3_access_key = "minioadmin";
-    ASSERT_TRUE(config.SetStorageConfigS3AccessKey(storage_s3_access_key).ok());
-    ASSERT_TRUE(config.GetStorageConfigS3AccessKey(str_val).ok());
-    ASSERT_TRUE(str_val == storage_s3_access_key);
-
-    std::string storage_s3_secret_key = "minioadmin";
-    ASSERT_TRUE(config.SetStorageConfigS3SecretKey(storage_s3_secret_key).ok());
-    ASSERT_TRUE(config.GetStorageConfigS3SecretKey(str_val).ok());
-    ASSERT_TRUE(str_val == storage_s3_secret_key);
-
-    std::string storage_s3_bucket = "s3bucket";
-    ASSERT_TRUE(config.SetStorageConfigS3Bucket(storage_s3_bucket).ok());
-    ASSERT_TRUE(config.GetStorageConfigS3Bucket(str_val).ok());
-    ASSERT_TRUE(str_val == storage_s3_bucket);
+//    bool storage_s3_enable = true;
+//    ASSERT_TRUE(config.SetStorageConfigS3Enable(std::to_string(storage_s3_enable)).ok());
+//    ASSERT_TRUE(config.GetStorageConfigS3Enable(bool_val).ok());
+//    ASSERT_TRUE(bool_val == storage_s3_enable);
+//
+//    std::string storage_s3_addr = "192.168.1.100";
+//    ASSERT_TRUE(config.SetStorageConfigS3Address(storage_s3_addr).ok());
+//    ASSERT_TRUE(config.GetStorageConfigS3Address(str_val).ok());
+//    ASSERT_TRUE(str_val == storage_s3_addr);
+//
+//    std::string storage_s3_port = "12345";
+//    ASSERT_TRUE(config.SetStorageConfigS3Port(storage_s3_port).ok());
+//    ASSERT_TRUE(config.GetStorageConfigS3Port(str_val).ok());
+//    ASSERT_TRUE(str_val == storage_s3_port);
+//
+//    std::string storage_s3_access_key = "minioadmin";
+//    ASSERT_TRUE(config.SetStorageConfigS3AccessKey(storage_s3_access_key).ok());
+//    ASSERT_TRUE(config.GetStorageConfigS3AccessKey(str_val).ok());
+//    ASSERT_TRUE(str_val == storage_s3_access_key);
+//
+//    std::string storage_s3_secret_key = "minioadmin";
+//    ASSERT_TRUE(config.SetStorageConfigS3SecretKey(storage_s3_secret_key).ok());
+//    ASSERT_TRUE(config.GetStorageConfigS3SecretKey(str_val).ok());
+//    ASSERT_TRUE(str_val == storage_s3_secret_key);
+//
+//    std::string storage_s3_bucket = "s3bucket";
+//    ASSERT_TRUE(config.SetStorageConfigS3Bucket(storage_s3_bucket).ok());
+//    ASSERT_TRUE(config.GetStorageConfigS3Bucket(str_val).ok());
+//    ASSERT_TRUE(str_val == storage_s3_bucket);
 
     /* metric config */
     bool metric_enable_monitor = false;
@@ -417,9 +417,9 @@ TEST_F(ConfigTest, SERVER_CONFIG_CLI_TEST) {
     ASSERT_TRUE(s.ok());
 
     /* storage config */
-    std::string storage_s3_enable = "true";
-    get_cmd = gen_get_command(ms::CONFIG_STORAGE, ms::CONFIG_STORAGE_S3_ENABLE);
-    set_cmd = gen_set_command(ms::CONFIG_STORAGE, ms::CONFIG_STORAGE_S3_ENABLE, storage_s3_enable);
+    std::string storage_primary_path = "/tmp/milvus1";
+    get_cmd = gen_get_command(ms::CONFIG_STORAGE, ms::CONFIG_STORAGE_PRIMARY_PATH);
+    set_cmd = gen_set_command(ms::CONFIG_STORAGE, ms::CONFIG_STORAGE_PRIMARY_PATH, storage_primary_path);
     s = config.ProcessConfigCli(dummy, set_cmd);
     ASSERT_TRUE(s.ok());
     s = config.ProcessConfigCli(result, get_cmd);
@@ -599,18 +599,18 @@ TEST_F(ConfigTest, SERVER_CONFIG_INVALID_TEST) {
     ASSERT_FALSE(config.SetStorageConfigSecondaryPath("../milvus,./zilliz").ok());
     ASSERT_FALSE(config.SetStorageConfigSecondaryPath("/home/^^__^^,/zilliz").ok());
 
-    ASSERT_FALSE(config.SetStorageConfigS3Enable("10").ok());
-
-    ASSERT_FALSE(config.SetStorageConfigS3Address("127.0.0").ok());
-
-    ASSERT_FALSE(config.SetStorageConfigS3Port("100").ok());
-    ASSERT_FALSE(config.SetStorageConfigS3Port("100000").ok());
-
-    ASSERT_FALSE(config.SetStorageConfigS3AccessKey("").ok());
-
-    ASSERT_FALSE(config.SetStorageConfigS3SecretKey("").ok());
-
-    ASSERT_FALSE(config.SetStorageConfigS3Bucket("").ok());
+//    ASSERT_FALSE(config.SetStorageConfigS3Enable("10").ok());
+//
+//    ASSERT_FALSE(config.SetStorageConfigS3Address("127.0.0").ok());
+//
+//    ASSERT_FALSE(config.SetStorageConfigS3Port("100").ok());
+//    ASSERT_FALSE(config.SetStorageConfigS3Port("100000").ok());
+//
+//    ASSERT_FALSE(config.SetStorageConfigS3AccessKey("").ok());
+//
+//    ASSERT_FALSE(config.SetStorageConfigS3SecretKey("").ok());
+//
+//    ASSERT_FALSE(config.SetStorageConfigS3Bucket("").ok());
 
     /* metric config */
     ASSERT_FALSE(config.SetMetricConfigEnableMonitor("Y").ok());
