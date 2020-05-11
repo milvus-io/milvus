@@ -9,7 +9,7 @@
 # is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 # or implied. See the License for the specific language governing permissions and limitations under the License.
 
-version: 0.3
+version: 0.4
 
 #----------------------+------------------------------------------------------------+------------+-----------------+
 # Server Config        | Description                                                | Type       | Default         |
@@ -23,6 +23,8 @@ version: 0.3
 #----------------------+------------------------------------------------------------+------------+-----------------+
 # time_zone            | Use UTC-x or UTC+x to specify a time zone.                 | Timezone   | UTC+8           |
 #----------------------+------------------------------------------------------------+------------+-----------------+
+# web_enable           | Enable web server or not.                                  | Boolean    | true            |
+#----------------------+------------------------------------------------------------+------------+-----------------+
 # web_port             | Port that Milvus web server monitors.                      | Integer    | 19121           |
 #                      | Port range (1024, 65535)                                   |            |                 |
 #----------------------+------------------------------------------------------------+------------+-----------------+
@@ -31,6 +33,7 @@ server_config:
   port: 19530
   deploy_mode: cluster_writable
   time_zone: UTC+8
+  web_enable: true
   web_port: 19121
 
 #----------------------+------------------------------------------------------------+------------+-----------------+
@@ -65,9 +68,13 @@ db_config:
 # secondary_path       | A semicolon-separated list of secondary directories used   | Path       |                 |
 #                      | to save vector data and index data.                        |            |                 |
 #----------------------+------------------------------------------------------------+------------+-----------------+
+# file_cleanup_timeout | time gap between soft-delete and hard-delete               | Integer    | 10 (s)          |
+#                      | range [0, 3600]                                            |            |                 |
+#----------------------+------------------------------------------------------------+------------+-----------------+
 storage_config:
   primary_path: /var/lib/milvus
   secondary_path:
+  file_cleanup_timeout: 10
 
 #----------------------+------------------------------------------------------------+------------+-----------------+
 # Metric Config        | Description                                                | Type       | Default         |
@@ -183,3 +190,39 @@ wal_config:
   recovery_error_ignore: true
   buffer_size: 256
   wal_path: /var/lib/milvus/wal
+
+#----------------------+------------------------------------------------------------+------------+-----------------+
+# Logs                 | Description                                                | Type       | Default         |
+#----------------------+------------------------------------------------------------+------------+-----------------+
+# trace.enable         | Whether to enable trace level logging in Milvus.           | Boolean    | true            |
+#----------------------+------------------------------------------------------------+------------+-----------------+
+# debug.enable         | Whether to enable debug level logging in Milvus.           | Boolean    | true            |
+#----------------------+------------------------------------------------------------+------------+-----------------+
+# info.enable          | Whether to enable info level logging in Milvus.            | Boolean    | true            |
+#----------------------+------------------------------------------------------------+------------+-----------------+
+# warning.enable       | Whether to enable warning level logging in Milvus.         | Boolean    | true            |
+#----------------------+------------------------------------------------------------+------------+-----------------+
+# error.enable         | Whether to enable error level logging in Milvus.           | Boolean    | true            |
+#----------------------+------------------------------------------------------------+------------+-----------------+
+# fatal.enable         | Whether to enable fatal level logging in Milvus.           | Boolean    | true            |
+#----------------------+------------------------------------------------------------+------------+-----------------+
+# path                 | Location of logs files.                                    | String     |                 |
+#----------------------+------------------------------------------------------------+------------+-----------------+
+# max_log_file_size    | Max size of a single log file. After exceeding this value, | Integer    | 256 (MB)        |
+#                      | rename this file to xxx.log.n, means the nth file.         |            |                 |
+#----------------------+------------------------------------------------------------+------------+-----------------+
+# delete_exceeds       | Milvus will keep up to ${delete_exceeds} log files per     | Integer    | 10              |
+#                      | level. For example, after xxx.log.11 file is generated,    |            |                 |
+#                      | the xxx.log.1 file will be deleted.                        |            |                 |
+#----------------------+------------------------------------------------------------+------------+-----------------+
+logs:
+  trace.enable: true
+  debug.enable: true
+  info.enable: true
+  warning.enable: true
+  error.enable: true
+  fatal.enable: true
+  path: /var/lib/milvus/logs
+  max_log_file_size: 256
+  delete_exceeds: 10
+
