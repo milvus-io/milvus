@@ -50,7 +50,7 @@ StorageChecker::CheckStoragePermission() {
         return status;
     }
 
-    if (!(deploy_mode == "single" || deploy_mode == "cluster_writable")) {
+    if (deploy_mode == "cluster_readonly") {
         return Status::OK();
     }
 
