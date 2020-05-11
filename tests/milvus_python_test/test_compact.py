@@ -75,14 +75,14 @@ class TestCompactBase:
         status = connect.flush([collection])
         assert status.OK()
         # get collection info before compact
-        status, info = connect.collection_info(collection)
+        status, info = connect.get_collection_stats(collection)
         assert status.OK()
         logging.getLogger().info(info)
         size_before = info["partitions"][0]["segments"][0]["data_size"]
         status = connect.compact(collection)
         assert status.OK()
         # get collection info after compact
-        status, info = connect.collection_info(collection)
+        status, info = connect.get_collection_stats(collection)
         assert status.OK()
         size_after = info["partitions"][0]["segments"][0]["data_size"]
         assert(size_before == size_after)
@@ -100,13 +100,13 @@ class TestCompactBase:
         status = connect.flush([collection])
         assert status.OK()
         # get collection info before compact
-        status, info = connect.collection_info(collection)
+        status, info = connect.get_collection_stats(collection)
         assert status.OK()
         size_before = info["partitions"][0]["segments"][0]["data_size"]
         status = connect.compact(collection)
         assert status.OK()
         # get collection info after compact
-        status, info = connect.collection_info(collection)
+        status, info = connect.get_collection_stats(collection)
         assert status.OK()
         size_after = info["partitions"][0]["segments"][0]["data_size"]
         assert(size_before == size_after)
@@ -124,12 +124,12 @@ class TestCompactBase:
         status = connect.flush([collection])
         assert status.OK()
         delete_ids = [ids[0], ids[-1]]
-        status = connect.delete_by_id(collection, delete_ids)
+        status = connect.delete_entity_by_id(collection, delete_ids)
         assert status.OK()
         status = connect.flush([collection])
         assert status.OK()
         # get collection info before compact
-        status, info = connect.collection_info(collection)
+        status, info = connect.get_collection_stats(collection)
         assert status.OK()
         logging.getLogger().info(info["partitions"])
         size_before = info["partitions"][0]["segments"][0]["data_size"]
@@ -137,7 +137,7 @@ class TestCompactBase:
         status = connect.compact(collection)
         assert status.OK()
         # get collection info after compact
-        status, info = connect.collection_info(collection)
+        status, info = connect.get_collection_stats(collection)
         assert status.OK()
         logging.getLogger().info(info["partitions"])
         size_after = info["partitions"][0]["segments"][0]["data_size"]
@@ -156,17 +156,17 @@ class TestCompactBase:
         assert status.OK()
         status = connect.flush([collection])
         assert status.OK()
-        status = connect.delete_by_id(collection, ids)
+        status = connect.delete_entity_by_id(collection, ids)
         assert status.OK()
         status = connect.flush([collection])
         assert status.OK()
         # get collection info before compact
-        status, info = connect.collection_info(collection)
+        status, info = connect.get_collection_stats(collection)
         assert status.OK()
         status = connect.compact(collection)
         assert status.OK()
         # get collection info after compact
-        status, info = connect.collection_info(collection)
+        status, info = connect.get_collection_stats(collection)
         assert status.OK()
         logging.getLogger().info(info["partitions"])
         assert not info["partitions"][0]["segments"]
@@ -202,19 +202,19 @@ class TestCompactBase:
         status = connect.flush([collection])
         assert status.OK()
         # get collection info before compact
-        status, info = connect.collection_info(collection)
+        status, info = connect.get_collection_stats(collection)
         assert status.OK()
         size_before = info["partitions"][0]["segments"][0]["data_size"]
         logging.getLogger().info(info["partitions"])
         delete_ids = [ids[0], ids[-1]]
-        status = connect.delete_by_id(collection, delete_ids)
+        status = connect.delete_entity_by_id(collection, delete_ids)
         assert status.OK()
         status = connect.flush([collection])
         assert status.OK()
         status = connect.compact(collection)
         assert status.OK()
         # get collection info after compact
-        status, info = connect.collection_info(collection)
+        status, info = connect.get_collection_stats(collection)
         assert status.OK()
         logging.getLogger().info(info["partitions"])
         size_after = info["partitions"][0]["segments"][0]["data_size"]
@@ -233,7 +233,7 @@ class TestCompactBase:
         status = connect.flush([collection])
         assert status.OK()
         # get collection info before compact
-        status, info = connect.collection_info(collection)
+        status, info = connect.get_collection_stats(collection)
         assert status.OK()
         size_before = info["partitions"][0]["segments"][0]["data_size"]
         status = connect.compact(collection)
@@ -241,14 +241,14 @@ class TestCompactBase:
         status = connect.flush([collection])
         assert status.OK()
         # get collection info after compact
-        status, info = connect.collection_info(collection)
+        status, info = connect.get_collection_stats(collection)
         assert status.OK()
         size_after = info["partitions"][0]["segments"][0]["data_size"]
         assert(size_before == size_after)
         status = connect.compact(collection)
         assert status.OK()
         # get collection info after compact twice
-        status, info = connect.collection_info(collection)
+        status, info = connect.get_collection_stats(collection)
         assert status.OK()
         size_after_twice = info["partitions"][0]["segments"][0]["data_size"]
         assert(size_after == size_after_twice)
@@ -266,25 +266,25 @@ class TestCompactBase:
         status = connect.flush([collection])
         assert status.OK()
         delete_ids = [ids[0], ids[-1]]
-        status = connect.delete_by_id(collection, delete_ids)
+        status = connect.delete_entity_by_id(collection, delete_ids)
         assert status.OK()
         status = connect.flush([collection])
         assert status.OK()
         # get collection info before compact
-        status, info = connect.collection_info(collection)
+        status, info = connect.get_collection_stats(collection)
         assert status.OK()
         size_before = info["partitions"][0]["segments"][0]["data_size"]
         status = connect.compact(collection)
         assert status.OK()
         # get collection info after compact
-        status, info = connect.collection_info(collection)
+        status, info = connect.get_collection_stats(collection)
         assert status.OK()
         size_after = info["partitions"][0]["segments"][0]["data_size"]
         assert(size_before >= size_after)
         status = connect.compact(collection)
         assert status.OK()
         # get collection info after compact twice
-        status, info = connect.collection_info(collection)
+        status, info = connect.get_collection_stats(collection)
         assert status.OK()
         size_after_twice = info["partitions"][0]["segments"][0]["data_size"]
         assert(size_after == size_after_twice)
@@ -328,13 +328,13 @@ class TestCompactBase:
         status = connect.flush([collection])
         assert status.OK()
         # get collection info before compact
-        status, info = connect.collection_info(collection)
+        status, info = connect.get_collection_stats(collection)
         assert status.OK()
         size_before = info["partitions"][0]["segments"][0]["data_size"]
         status = connect.compact(collection)
         assert status.OK()
         # get collection info after compact
-        status, info = connect.collection_info(collection)
+        status, info = connect.get_collection_stats(collection)
         assert status.OK()
         size_after = info["partitions"][0]["segments"][0]["data_size"]
         assert(size_before == size_after)
@@ -354,7 +354,7 @@ class TestCompactBase:
         assert status.OK()
         status = connect.flush([collection])
         assert status.OK()
-        status = connect.delete_by_id(collection, ids[:10])
+        status = connect.delete_entity_by_id(collection, ids[:10])
         assert status.OK()
         status = connect.flush([collection])
         assert status.OK()
@@ -364,7 +364,7 @@ class TestCompactBase:
         index_type = get_simple_index["index_type"]
         status = connect.create_index(collection, index_type, index_param) 
         assert status.OK()
-        status, result = connect.describe_index(collection)
+        status, result = connect.get_index_info(collection)
         assert result._collection_name == collection
         assert result._index_type == index_type
 
@@ -384,7 +384,7 @@ class TestCompactBase:
         assert status.OK()
         status = connect.flush([collection])
         assert status.OK()
-        status = connect.delete_by_id(collection, ids)
+        status = connect.delete_entity_by_id(collection, ids)
         assert status.OK()
         status = connect.flush([collection])
         assert status.OK()
@@ -421,7 +421,7 @@ class TestCompactBase:
         status = connect.flush([collection])
         assert status.OK()
         delete_ids = ids[0:1000]
-        status = connect.delete_by_id(collection, delete_ids)
+        status = connect.delete_entity_by_id(collection, delete_ids)
         assert status.OK()
         status = connect.flush([collection])
         assert status.OK()
@@ -431,7 +431,7 @@ class TestCompactBase:
         # pdb.set_trace()
         assert status.OK()
         # get collection info after compact
-        status, info = connect.collection_info(collection)
+        status, info = connect.get_collection_stats(collection)
         assert status.OK()
         assert info["partitions"][0].count == nb * 100 - 1000
 
@@ -455,13 +455,13 @@ class TestCompactJAC:
         status = connect.flush([jac_collection])
         assert status.OK()
         # get collection info before compact
-        status, info = connect.collection_info(jac_collection)
+        status, info = connect.get_collection_stats(jac_collection)
         assert status.OK()
         size_before = info["partitions"][0]["segments"][0]["data_size"]
         status = connect.compact(jac_collection)
         assert status.OK()
         # get collection info after compact
-        status, info = connect.collection_info(jac_collection)
+        status, info = connect.get_collection_stats(jac_collection)
         assert status.OK()
         size_after = info["partitions"][0]["segments"][0]["data_size"]
         assert(size_before == size_after)
@@ -479,13 +479,13 @@ class TestCompactJAC:
         status = connect.flush([jac_collection])
         assert status.OK()
         # get collection info before compact
-        status, info = connect.collection_info(jac_collection)
+        status, info = connect.get_collection_stats(jac_collection)
         assert status.OK()
         size_before = info["partitions"][0]["segments"][0]["data_size"]
         status = connect.compact(jac_collection)
         assert status.OK()
         # get collection info after compact
-        status, info = connect.collection_info(jac_collection)
+        status, info = connect.get_collection_stats(jac_collection)
         assert status.OK()
         size_after = info["partitions"][0]["segments"][0]["data_size"]
         assert(size_before == size_after)
@@ -503,12 +503,12 @@ class TestCompactJAC:
         status = connect.flush([jac_collection])
         assert status.OK()
         delete_ids = [ids[0], ids[-1]]
-        status = connect.delete_by_id(jac_collection, delete_ids)
+        status = connect.delete_entity_by_id(jac_collection, delete_ids)
         assert status.OK()
         status = connect.flush([jac_collection])
         assert status.OK()
         # get collection info before compact
-        status, info = connect.collection_info(jac_collection)
+        status, info = connect.get_collection_stats(jac_collection)
         assert status.OK()
         logging.getLogger().info(info["partitions"])
         size_before = info["partitions"][0]["segments"][0]["data_size"]
@@ -516,7 +516,7 @@ class TestCompactJAC:
         status = connect.compact(jac_collection)
         assert status.OK()
         # get collection info after compact
-        status, info = connect.collection_info(jac_collection)
+        status, info = connect.get_collection_stats(jac_collection)
         assert status.OK()
         logging.getLogger().info(info["partitions"])
         size_after = info["partitions"][0]["segments"][0]["data_size"]
@@ -535,17 +535,17 @@ class TestCompactJAC:
         assert status.OK()
         status = connect.flush([jac_collection])
         assert status.OK()
-        status = connect.delete_by_id(jac_collection, ids)
+        status = connect.delete_entity_by_id(jac_collection, ids)
         assert status.OK()
         status = connect.flush([jac_collection])
         assert status.OK()
         # get collection info before compact
-        status, info = connect.collection_info(jac_collection)
+        status, info = connect.get_collection_stats(jac_collection)
         assert status.OK()
         status = connect.compact(jac_collection)
         assert status.OK()
         # get collection info after compact
-        status, info = connect.collection_info(jac_collection)
+        status, info = connect.get_collection_stats(jac_collection)
         assert status.OK()
         logging.getLogger().info(info["partitions"])
         assert not info["partitions"][0]["segments"]
@@ -563,20 +563,20 @@ class TestCompactJAC:
         status = connect.flush([jac_collection])
         assert status.OK()
         # get collection info before compact
-        status, info = connect.collection_info(jac_collection)
+        status, info = connect.get_collection_stats(jac_collection)
         assert status.OK()
         size_before = info["partitions"][0]["segments"][0]["data_size"]
         status = connect.compact(jac_collection)
         assert status.OK()
         # get collection info after compact
-        status, info = connect.collection_info(jac_collection)
+        status, info = connect.get_collection_stats(jac_collection)
         assert status.OK()
         size_after = info["partitions"][0]["segments"][0]["data_size"]
         assert(size_before == size_after)
         status = connect.compact(jac_collection)
         assert status.OK()
         # get collection info after compact twice
-        status, info = connect.collection_info(jac_collection)
+        status, info = connect.get_collection_stats(jac_collection)
         assert status.OK()
         size_after_twice = info["partitions"][0]["segments"][0]["data_size"]
         assert(size_after == size_after_twice)
@@ -594,25 +594,25 @@ class TestCompactJAC:
         status = connect.flush([jac_collection])
         assert status.OK()
         delete_ids = [ids[0], ids[-1]]
-        status = connect.delete_by_id(jac_collection, delete_ids)
+        status = connect.delete_entity_by_id(jac_collection, delete_ids)
         assert status.OK()
         status = connect.flush([jac_collection])
         assert status.OK()
         # get collection info before compact
-        status, info = connect.collection_info(jac_collection)
+        status, info = connect.get_collection_stats(jac_collection)
         assert status.OK()
         size_before = info["partitions"][0]["segments"][0]["data_size"]
         status = connect.compact(jac_collection)
         assert status.OK()
         # get collection info after compact
-        status, info = connect.collection_info(jac_collection)
+        status, info = connect.get_collection_stats(jac_collection)
         assert status.OK()
         size_after = info["partitions"][0]["segments"][0]["data_size"]
         assert(size_before >= size_after)
         status = connect.compact(jac_collection)
         assert status.OK()
         # get collection info after compact twice
-        status, info = connect.collection_info(jac_collection)
+        status, info = connect.get_collection_stats(jac_collection)
         assert status.OK()
         size_after_twice = info["partitions"][0]["segments"][0]["data_size"]
         assert(size_after == size_after_twice)
@@ -640,7 +640,7 @@ class TestCompactJAC:
         for i in range(num_collections):
             status, ids = connect.add_vectors(collection_name=collection_list[i], records=vectors)
             assert status.OK()
-            status = connect.delete_by_id(collection_list[i], [ids[0], ids[-1]])
+            status = connect.delete_entity_by_id(collection_list[i], [ids[0], ids[-1]])
             assert status.OK()
             status = connect.flush([collection_list[i]])
             assert status.OK()
@@ -660,13 +660,13 @@ class TestCompactJAC:
         status = connect.flush([jac_collection])
         assert status.OK()
         # get collection info before compact
-        status, info = connect.collection_info(jac_collection)
+        status, info = connect.get_collection_stats(jac_collection)
         assert status.OK()
         size_before = info["partitions"][0]["segments"][0]["data_size"]
         status = connect.compact(jac_collection)
         assert status.OK()
         # get collection info after compact
-        status, info = connect.collection_info(jac_collection)
+        status, info = connect.get_collection_stats(jac_collection)
         assert status.OK()
         size_after = info["partitions"][0]["segments"][0]["data_size"]
         assert(size_before == size_after)
@@ -690,7 +690,7 @@ class TestCompactJAC:
         assert status.OK()
         status = connect.flush([jac_collection])
         assert status.OK()
-        status = connect.delete_by_id(jac_collection, ids)
+        status = connect.delete_entity_by_id(jac_collection, ids)
         assert status.OK()
         status = connect.flush([jac_collection])
         assert status.OK()
@@ -734,7 +734,7 @@ class TestCompactIP:
         status = connect.flush([ip_collection])
         assert status.OK()
         # get collection info before compact
-        status, info = connect.collection_info(ip_collection)
+        status, info = connect.get_collection_stats(ip_collection)
         assert status.OK()
         size_before = info["partitions"][0]["segments"][0]["data_size"]
         status = connect.compact(ip_collection)
@@ -742,7 +742,7 @@ class TestCompactIP:
         status = connect.flush([ip_collection])
         assert status.OK()
         # get collection info after compact
-        status, info = connect.collection_info(ip_collection)
+        status, info = connect.get_collection_stats(ip_collection)
         assert status.OK()
         size_after = info["partitions"][0]["segments"][0]["data_size"]
         assert(size_before == size_after)
@@ -760,13 +760,13 @@ class TestCompactIP:
         status = connect.flush([ip_collection])
         assert status.OK()
         # get collection info before compact
-        status, info = connect.collection_info(ip_collection)
+        status, info = connect.get_collection_stats(ip_collection)
         assert status.OK()
         size_before = info["partitions"][0]["segments"][0]["data_size"]
         status = connect.compact(ip_collection)
         assert status.OK()
         # get collection info after compact
-        status, info = connect.collection_info(ip_collection)
+        status, info = connect.get_collection_stats(ip_collection)
         assert status.OK()
         size_after = info["partitions"][0]["segments"][0]["data_size"]
         assert(size_before == size_after)
@@ -784,12 +784,12 @@ class TestCompactIP:
         status = connect.flush([ip_collection])
         assert status.OK()
         delete_ids = [ids[0], ids[-1]]
-        status = connect.delete_by_id(ip_collection, delete_ids)
+        status = connect.delete_entity_by_id(ip_collection, delete_ids)
         assert status.OK()
         status = connect.flush([ip_collection])
         assert status.OK()
         # get collection info before compact
-        status, info = connect.collection_info(ip_collection)
+        status, info = connect.get_collection_stats(ip_collection)
         assert status.OK()
         logging.getLogger().info(info["partitions"])
         size_before = info["partitions"][0]["segments"][0]["data_size"]
@@ -797,7 +797,7 @@ class TestCompactIP:
         status = connect.compact(ip_collection)
         assert status.OK()
         # get collection info after compact
-        status, info = connect.collection_info(ip_collection)
+        status, info = connect.get_collection_stats(ip_collection)
         assert status.OK()
         logging.getLogger().info(info["partitions"])
         size_after = info["partitions"][0]["segments"][0]["data_size"]
@@ -816,17 +816,17 @@ class TestCompactIP:
         assert status.OK()
         status = connect.flush([ip_collection])
         assert status.OK()
-        status = connect.delete_by_id(ip_collection, ids)
+        status = connect.delete_entity_by_id(ip_collection, ids)
         assert status.OK()
         status = connect.flush([ip_collection])
         assert status.OK()
         # get collection info before compact
-        status, info = connect.collection_info(ip_collection)
+        status, info = connect.get_collection_stats(ip_collection)
         assert status.OK()
         status = connect.compact(ip_collection)
         assert status.OK()
         # get collection info after compact
-        status, info = connect.collection_info(ip_collection)
+        status, info = connect.get_collection_stats(ip_collection)
         assert status.OK()
         logging.getLogger().info(info["partitions"])
         assert not info["partitions"][0]["segments"]
@@ -844,20 +844,20 @@ class TestCompactIP:
         status = connect.flush([ip_collection])
         assert status.OK()
         # get collection info before compact
-        status, info = connect.collection_info(ip_collection)
+        status, info = connect.get_collection_stats(ip_collection)
         assert status.OK()
         size_before = info["partitions"][0]["segments"][0]["data_size"]
         status = connect.compact(ip_collection)
         assert status.OK()
         # get collection info after compact
-        status, info = connect.collection_info(ip_collection)
+        status, info = connect.get_collection_stats(ip_collection)
         assert status.OK()
         size_after = info["partitions"][0]["segments"][0]["data_size"]
         assert(size_before == size_after)
         status = connect.compact(ip_collection)
         assert status.OK()
         # get collection info after compact twice
-        status, info = connect.collection_info(ip_collection)
+        status, info = connect.get_collection_stats(ip_collection)
         assert status.OK()
         size_after_twice = info["partitions"][0]["segments"][0]["data_size"]
         assert(size_after == size_after_twice)
@@ -875,12 +875,12 @@ class TestCompactIP:
         status = connect.flush([ip_collection])
         assert status.OK()
         delete_ids = [ids[0], ids[-1]]
-        status = connect.delete_by_id(ip_collection, delete_ids)
+        status = connect.delete_entity_by_id(ip_collection, delete_ids)
         assert status.OK()
         status = connect.flush([ip_collection])
         assert status.OK()
         # get collection info before compact
-        status, info = connect.collection_info(ip_collection)
+        status, info = connect.get_collection_stats(ip_collection)
         assert status.OK()
         size_before = info["partitions"][0]["segments"][0]["data_size"]
         status = connect.compact(ip_collection)
@@ -888,7 +888,7 @@ class TestCompactIP:
         status = connect.flush([ip_collection])
         assert status.OK()
         # get collection info after compact
-        status, info = connect.collection_info(ip_collection)
+        status, info = connect.get_collection_stats(ip_collection)
         assert status.OK()
         size_after = info["partitions"][0]["segments"][0]["data_size"]
         assert(size_before >= size_after)
@@ -897,7 +897,7 @@ class TestCompactIP:
         status = connect.flush([ip_collection])
         assert status.OK()
         # get collection info after compact twice
-        status, info = connect.collection_info(ip_collection)
+        status, info = connect.get_collection_stats(ip_collection)
         assert status.OK()
         size_after_twice = info["partitions"][0]["segments"][0]["data_size"]
         assert(size_after == size_after_twice)
@@ -941,13 +941,13 @@ class TestCompactIP:
         status = connect.flush([ip_collection])
         assert status.OK()
         # get collection info before compact
-        status, info = connect.collection_info(ip_collection)
+        status, info = connect.get_collection_stats(ip_collection)
         assert status.OK()
         size_before = info["partitions"][0]["segments"][0]["data_size"]
         status = connect.compact(ip_collection)
         assert status.OK()
         # get collection info after compact
-        status, info = connect.collection_info(ip_collection)
+        status, info = connect.get_collection_stats(ip_collection)
         assert status.OK()
         size_after = info["partitions"][0]["segments"][0]["data_size"]
         assert(size_before == size_after)
@@ -969,7 +969,7 @@ class TestCompactIP:
         assert status.OK()
         status = connect.compact(ip_collection)
         assert status.OK()
-        status = connect.delete_by_id(ip_collection, ids)
+        status = connect.delete_entity_by_id(ip_collection, ids)
         assert status.OK()
         status = connect.flush([ip_collection])
         assert status.OK()

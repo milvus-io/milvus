@@ -585,7 +585,7 @@ class TestSearchBase:
             "nlist": 16384
         }
         connect.create_index(ip_collection, index_type, index_param)
-        logging.getLogger().info(connect.describe_index(ip_collection))
+        logging.getLogger().info(connect.get_index_info(ip_collection))
         query_vecs = [[0.50 for i in range(dim)]]
         distance_0 = numpy.inner(numpy.array(query_vecs[0]), numpy.array(vectors[0]))
         distance_1 = numpy.inner(numpy.array(query_vecs[0]), numpy.array(vectors[1]))
@@ -607,8 +607,8 @@ class TestSearchBase:
             "nlist": 16384
         }
         connect.create_index(jac_collection, index_type, index_param)
-        logging.getLogger().info(connect.describe_collection(jac_collection))
-        logging.getLogger().info(connect.describe_index(jac_collection))
+        logging.getLogger().info(connect.get_collection_info(jac_collection))
+        logging.getLogger().info(connect.get_index_info(jac_collection))
         query_int_vectors, query_vecs, tmp_ids = self.init_binary_data(connect, jac_collection, nb=1, insert=False)
         distance_0 = jaccard(query_int_vectors[0], int_vectors[0])
         distance_1 = jaccard(query_int_vectors[0], int_vectors[1])
@@ -632,8 +632,8 @@ class TestSearchBase:
             "nlist": 16384
         }
         connect.create_index(ham_collection, index_type, index_param)
-        logging.getLogger().info(connect.describe_collection(ham_collection))
-        logging.getLogger().info(connect.describe_index(ham_collection))
+        logging.getLogger().info(connect.get_collection_info(ham_collection))
+        logging.getLogger().info(connect.get_index_info(ham_collection))
         query_int_vectors, query_vecs, tmp_ids = self.init_binary_data(connect, ham_collection, nb=1, insert=False)
         distance_0 = hamming(query_int_vectors[0], int_vectors[0])
         distance_1 = hamming(query_int_vectors[0], int_vectors[1])
@@ -657,8 +657,8 @@ class TestSearchBase:
             "nlist": 16384
         }
         connect.create_index(substructure_collection, index_type, index_param)
-        logging.getLogger().info(connect.describe_collection(substructure_collection))
-        logging.getLogger().info(connect.describe_index(substructure_collection))
+        logging.getLogger().info(connect.get_collection_info(substructure_collection))
+        logging.getLogger().info(connect.get_index_info(substructure_collection))
         query_int_vectors, query_vecs, tmp_ids = self.init_binary_data(connect, substructure_collection, nb=1, insert=False)
         distance_0 = substructure(query_int_vectors[0], int_vectors[0])
         distance_1 = substructure(query_int_vectors[0], int_vectors[1])
@@ -683,8 +683,8 @@ class TestSearchBase:
             "nlist": 16384
         }
         connect.create_index(substructure_collection, index_type, index_param)
-        logging.getLogger().info(connect.describe_collection(substructure_collection))
-        logging.getLogger().info(connect.describe_index(substructure_collection))
+        logging.getLogger().info(connect.get_collection_info(substructure_collection))
+        logging.getLogger().info(connect.get_index_info(substructure_collection))
         query_int_vectors, query_vecs = gen_binary_sub_vectors(int_vectors, 2)
         search_param = get_search_param(index_type)
         status, result = connect.search_vectors(substructure_collection, top_k, query_vecs, params=search_param)
@@ -711,8 +711,8 @@ class TestSearchBase:
             "nlist": 16384
         }
         connect.create_index(superstructure_collection, index_type, index_param)
-        logging.getLogger().info(connect.describe_collection(superstructure_collection))
-        logging.getLogger().info(connect.describe_index(superstructure_collection))
+        logging.getLogger().info(connect.get_collection_info(superstructure_collection))
+        logging.getLogger().info(connect.get_index_info(superstructure_collection))
         query_int_vectors, query_vecs, tmp_ids = self.init_binary_data(connect, superstructure_collection, nb=1, insert=False)
         distance_0 = superstructure(query_int_vectors[0], int_vectors[0])
         distance_1 = superstructure(query_int_vectors[0], int_vectors[1])
@@ -737,8 +737,8 @@ class TestSearchBase:
             "nlist": 16384
         }
         connect.create_index(superstructure_collection, index_type, index_param)
-        logging.getLogger().info(connect.describe_collection(superstructure_collection))
-        logging.getLogger().info(connect.describe_index(superstructure_collection))
+        logging.getLogger().info(connect.get_collection_info(superstructure_collection))
+        logging.getLogger().info(connect.get_index_info(superstructure_collection))
         query_int_vectors, query_vecs = gen_binary_super_vectors(int_vectors, 2)
         search_param = get_search_param(index_type)
         status, result = connect.search_vectors(superstructure_collection, top_k, query_vecs, params=search_param)
@@ -765,8 +765,8 @@ class TestSearchBase:
             "nlist": 16384
         }
         connect.create_index(tanimoto_collection, index_type, index_param)
-        logging.getLogger().info(connect.describe_collection(tanimoto_collection))
-        logging.getLogger().info(connect.describe_index(tanimoto_collection))
+        logging.getLogger().info(connect.get_collection_info(tanimoto_collection))
+        logging.getLogger().info(connect.get_index_info(tanimoto_collection))
         query_int_vectors, query_vecs, tmp_ids = self.init_binary_data(connect, tanimoto_collection, nb=1, insert=False)
         distance_0 = tanimoto(query_int_vectors[0], int_vectors[0])
         distance_1 = tanimoto(query_int_vectors[0], int_vectors[1])
@@ -790,7 +790,7 @@ class TestSearchBase:
             pytest.skip("rnsg not support in ip")
         vectors, ids = self.init_data(connect, ip_collection, nb=2)
         connect.create_index(ip_collection, index_type, index_param)
-        logging.getLogger().info(connect.describe_index(ip_collection))
+        logging.getLogger().info(connect.get_index_info(ip_collection))
         query_vecs = [[0.50 for i in range(dim)]]
         search_param = get_search_param(index_type)
         status, result = connect.search_vectors(ip_collection, top_k, query_vecs, params=search_param)
