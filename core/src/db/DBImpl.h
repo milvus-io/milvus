@@ -91,6 +91,9 @@ class DBImpl : public DB, public server::CacheConfigHandler, public server::Engi
                     const std::string& partition_tag) override;
 
     Status
+    HasPartition(const std::string& collection_id, const std::string& tag, bool& has_or_not) override;
+
+    Status
     DropPartition(const std::string& partition_name) override;
 
     Status
