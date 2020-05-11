@@ -17,6 +17,15 @@
 
 namespace milvus {
 
+class Status;
+#define STATUS_CHECK(func) \
+    do {                   \
+        Status s = func;   \
+        if (!s.ok()) {     \
+            return s;      \
+        }                  \
+    } while (false)
+
 using StatusCode = ErrorCode;
 
 class Status {

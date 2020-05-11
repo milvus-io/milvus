@@ -159,6 +159,14 @@ Server::Start() {
 
         Config& config = Config::GetInstance();
 
+        std::string meta_uri;
+        STATUS_CHECK(config.GetDBConfigBackendUrl(meta_uri));
+        if (meta_uri.length() > 6 && strcasecmp("sqlite", meta_uri.substr(0, 6).c_str()) == 0) {
+            std::cout << "WARNNING: You are using SQLite as the meta data management, "
+                         "which can't be used in production. Please change it to MySQL!"
+                      << std::endl;
+        }
+
         /* Init opentracing tracer from config */
         std::string tracing_config_path;
         s = config.GetTracingConfigJsonConfigPath(tracing_config_path);
@@ -201,58 +209,25 @@ Server::Start() {
             std::string logs_path;
             int64_t max_log_file_size = 0;
             int64_t delete_exceeds = 0;
-            s = config.GetLogsTraceEnable(trace_enable);
-            if (!s.ok()) {
-                return s;
-            }
-            s = config.GetLogsDebugEnable(debug_enable);
-            if (!s.ok()) {
-                return s;
-            }
-            s = config.GetLogsInfoEnable(info_enable);
-            if (!s.ok()) {
-                return s;
-            }
-            s = config.GetLogsWarningEnable(warning_enable);
-            if (!s.ok()) {
-                return s;
-            }
-            s = config.GetLogsErrorEnable(error_enable);
-            if (!s.ok()) {
-                return s;
-            }
-            s = config.GetLogsFatalEnable(fatal_enable);
-            if (!s.ok()) {
-                return s;
-            }
-            s = config.GetLogsPath(logs_path);
-            if (!s.ok()) {
-                return s;
-            }
-            s = config.GetLogsMaxLogFileSize(max_log_file_size);
-            if (!s.ok()) {
-                return s;
-            }
-            s = config.GetLogsDeleteExceeds(delete_exceeds);
-            if (!s.ok()) {
-                return s;
-            }
+            STATUS_CHECK(config.GetLogsTraceEnable(trace_enable));
+            STATUS_CHECK(config.GetLogsDebugEnable(debug_enable));
+            STATUS_CHECK(config.GetLogsInfoEnable(info_enable));
+            STATUS_CHECK(config.GetLogsWarningEnable(warning_enable));
+            STATUS_CHECK(config.GetLogsErrorEnable(error_enable));
+            STATUS_CHECK(config.GetLogsFatalEnable(fatal_enable));
+            STATUS_CHECK(config.GetLogsPath(logs_path));
+            STATUS_CHECK(config.GetLogsMaxLogFileSize(max_log_file_size));
+            STATUS_CHECK(config.GetLogsDeleteExceeds(delete_exceeds));
             InitLog(trace_enable, debug_enable, info_enable, warning_enable, error_enable, fatal_enable, logs_path,
                     max_log_file_size, delete_exceeds);
         }
 
         std::string deploy_mode;
-        s = config.GetServerConfigDeployMode(deploy_mode);
-        if (!s.ok()) {
-            return s;
-        }
+        STATUS_CHECK(config.GetServerConfigDeployMode(deploy_mode));
 
         if (deploy_mode == "single" || deploy_mode == "cluster_writable") {
             std::string db_path;
-            s = config.GetStorageConfigPrimaryPath(db_path);
-            if (!s.ok()) {
-                return s;
-            }
+            STATUS_CHECK(config.GetStorageConfigPrimaryPath(db_path));
 
             try {
                 // True if a new directory was created, otherwise false.
@@ -268,17 +243,11 @@ Server::Start() {
             }
 
             bool wal_enable = false;
-            s = config.GetWalConfigEnable(wal_enable);
-            if (!s.ok()) {
-                return s;
-            }
+            STATUS_CHECK(config.GetWalConfigEnable(wal_enable));
 
             if (wal_enable) {
                 std::string wal_path;
-                s = config.GetWalConfigWalPath(wal_path);
-                if (!s.ok()) {
-                    return s;
-                }
+                STATUS_CHECK(config.GetWalConfigWalPath(wal_path));
 
                 try {
                     // True if a new directory was created, otherwise false.
@@ -301,21 +270,10 @@ Server::Start() {
 #else
         LOG_SERVER_INFO_ << "CPU edition";
 #endif
-        s = StorageChecker::CheckStoragePermission();
-        if (!s.ok()) {
-            return s;
-        }
-
-        s = CpuChecker::CheckCpuInstructionSet();
-        if (!s.ok()) {
-            return s;
-        }
-
+        STATUS_CHECK(StorageChecker::CheckStoragePermission());
+        STATUS_CHECK(CpuChecker::CheckCpuInstructionSet());
 #ifdef MILVUS_GPU_VERSION
-        s = GpuChecker::CheckGpuEnvironment();
-        if (!s.ok()) {
-            return s;
-        }
+        STATUS_CHECK(GpuChecker::CheckGpuEnvironment());
 #endif
         /* record config and hardware information into log */
         LogConfigInFile(config_filename_);

@@ -7,17 +7,26 @@ Please mark all change in change log and use the issue from GitHub
 ## Bug
 -   \#1705 Limit the insert data batch size
 -   \#1776 Error out when index SQ8H run in CPU mode
+-   \#1925 To flush all collections, flush cannot work
 -   \#1929 Skip MySQL meta schema field width check
 -   \#1946 Fix load index file CPU2GPU fail during searching
 -   \#1955 Switch create_index operation to background once client break connection
 -   \#1997 Index file missed after compact
+-   \#2002 Remove log error msg `Attributes is null`
 -   \#2073 Fix CheckDBConfigBackendUrl error message
 -   \#2076 CheckMetricConfigAddress error message
+-   \#2120 Fix Search expected failed if search params set invalid
+-   \#2121 Allow regex match partition tag when search
 -   \#2128 Check has_partition params
 -   \#2131 Distance/ID returned is not correct if searching with duplicate ids
 -   \#2141 Fix server start failed if wal directory exist
 -   \#2169 Fix SingleIndexTest.IVFSQHybrid unittest
+-   \#2194 Fix get collection info failed
 -   \#2196 Fix server start failed if wal is disabled
+-   \#2203 0.8.0 id=-1 is returned when total count < topk
+-   \#2228 Fix show partitions failed in http module
+-   \#2231 Use server_config to define hard-delete delay time for segment files
+-   \#2261 Re-define result returned by has_collection if collection in delete state
 
 ## Feature
 -   \#1751 Add api SearchByID
@@ -30,6 +39,8 @@ Please mark all change in change log and use the issue from GitHub
 -   \#2064 Warn when use SQLite as metadata management
 -   \#2111 Check GPU environment before start server
 -   \#2206 Log file rotating
+-   \#2240 Obtain running rpc requests information
+-   \#2268 Intelligently detect openblas library in system to avoid installing from source code every time
 
 ## Improvement
 -   \#221 Refactor LOG macro
@@ -44,6 +55,9 @@ Please mark all change in change log and use the issue from GitHub
 -   \#2185 Change id to string format in http module
 -   \#2186 Update endpoints in http module
 -   \#2190 Fix memory usage is twice of index size when using GPU searching
+-   \#2248 Use hostname and port as instance label of metrics
+-   \#2252 Upgrade mishards APIs and requirements
+-   \#2256 k-means clustering algorithm use only Euclidean distance metric
 
 ## Task
 

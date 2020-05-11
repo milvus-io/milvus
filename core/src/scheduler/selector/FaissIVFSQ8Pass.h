@@ -41,7 +41,7 @@ class FaissIVFSQ8Pass : public Pass, public server::GpuResourceConfigHandler {
     Run(const TaskPtr& task) override;
 
  private:
-    int64_t count_ = 0;
+    int64_t idx_ = 0;
 };
 
 using FaissIVFSQ8PassPtr = std::shared_ptr<FaissIVFSQ8Pass>;

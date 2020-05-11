@@ -80,6 +80,8 @@ public class TestSearchByIds {
         List<List<SearchResponse.QueryResult>> res_search = client.searchByIds(searchParam).getQueryResultsList();
         // reason: "Failed to query by id in collection L2_FmVKbqSZaN, result doesn\'t match id count"
         assert (!client.searchByIds(searchParam).getResponse().ok());
+//        Assert.assertEquals(res_search.size(), default_ids.size());
+//        Assert.assertEquals(res_search.get(0).get(0).getVectorId(), -1);
     }
 
     @Test(dataProvider = "Collection", dataProviderClass = MainClass.class)

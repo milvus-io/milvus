@@ -1,4 +1,5 @@
 import time
+import pdb
 import threading
 import logging
 import threading
@@ -675,6 +676,121 @@ class TestAddBase:
             for i in range(20):
                 status, ids = connect.add_vectors(collection_name=collection_list[i], records=vectors)
                 assert status.OK()
+
+class TestAddAsync:
+    @pytest.fixture(
+        scope="function",
+        params=[
+            1,
+            1000
+        ],
+    )
+    def insert_count(self, request):
+        yield request.param
+
+    def check_status(self, status, result):
+        logging.getLogger().info("In callback check status")
+        assert status.OK()
+
+    def check_status_not_ok(self, status, result):
+        logging.getLogger().info("In callback check status")
+        assert not status.OK()
+
+
+    def test_insert_async(self, connect, collection, insert_count):
+        '''
+        target: test add vectors with different length of vectors
+        method: set different vectors as add method params
+        expected: length of ids is equal to the length of vectors
+        '''
+        nb = insert_count
+        insert_vec_list = gen_vectors(nb, dim)
+        future = connect.add_vectors(collection, insert_vec_list, _async=True)
+        status, ids = future.result()
+        connect.flush([collection])
+        assert len(ids) == nb
+        assert status.OK()
+
+    @pytest.mark.level(2)
+    def test_insert_async_false(self, connect, collection, insert_count):
+        '''
+        target: test add vectors with different length of vectors
+        method: set different vectors as add method params
+        expected: length of ids is equal to the length of vectors
+        '''
+        nb = insert_count
+        insert_vec_list = gen_vectors(nb, dim)
+        status, ids = connect.add_vectors(collection, insert_vec_list, _async=False)
+        connect.flush([collection])
+        assert len(ids) == nb
+        assert status.OK()
+
+    def test_insert_async_callback(self, connect, collection, insert_count):
+        '''
+        target: test add vectors with different length of vectors
+        method: set different vectors as add method params
+        expected: length of ids is equal to the length of vectors
+        '''
+        nb = insert_count
+        insert_vec_list = gen_vectors(nb, dim)
+        future = connect.add_vectors(collection, insert_vec_list, _async=True, _callback=self.check_status)
+        future.done()
+
+    @pytest.mark.level(2)
+    def test_insert_async_long(self, connect, collection):
+        '''
+        target: test add vectors with different length of vectors
+        method: set different vectors as add method params
+        expected: length of ids is equal to the length of vectors
+        '''
+        nb = 50000
+        insert_vec_list = gen_vectors(nb, dim)
+        future = connect.add_vectors(collection, insert_vec_list, _async=True, _callback=self.check_status)
+        status, result = future.result()
+        assert status.OK()
+        assert len(result) == nb 
+        connect.flush([collection])
+        status, count = connect.count_collection(collection)
+        assert status.OK()
+        logging.getLogger().info(status)
+        logging.getLogger().info(count)
+        assert count == nb
+
+    def test_insert_async_callback_timeout(self, connect, collection):
+        '''
+        target: test add vectors with different length of vectors
+        method: set different vectors as add method params
+        expected: length of ids is equal to the length of vectors
+        '''
+        nb = 100000
+        insert_vec_list = gen_vectors(nb, dim)
+        future = connect.add_vectors(collection, insert_vec_list, _async=True, _callback=self.check_status, timeout=1)
+        future.done()
+
+    def test_insert_async_invalid_params(self, connect, collection):
+        '''
+        target: test add vectors with different length of vectors
+        method: set different vectors as add method params
+        expected: length of ids is equal to the length of vectors
+        '''
+        insert_vec_list = gen_vectors(nb, dim)
+        collection_new = gen_unique_str()
+        future = connect.add_vectors(collection_new, insert_vec_list, _async=True)
+        status, result = future.result()
+        assert not status.OK()
+
+    # TODO: add assertion
+    def test_insert_async_invalid_params_raise_exception(self, connect, collection):
+        '''
+        target: test add vectors with different length of vectors
+        method: set different vectors as add method params
+        expected: length of ids is equal to the length of vectors
+        '''
+        insert_vec_list = []
+        collection_new = gen_unique_str()
+        with pytest.raises(Exception) as e:
+            future = connect.add_vectors(collection_new, insert_vec_list, _async=True)
+
 
 class TestAddIP:
     """
