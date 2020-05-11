@@ -42,7 +42,7 @@ class TestCollectionInfoBase:
         '''
         collection_name = None
         with pytest.raises(Exception) as e:
-            status, info = connect.collection_info(collection_name)
+            status, info = connect.get_collection_stats(collection_name)
 
     @pytest.mark.timeout(INFO_TIMEOUT)
     def test_get_collection_info_name_not_existed(self, connect, collection):
@@ -52,7 +52,7 @@ class TestCollectionInfoBase:
         expected: status not ok
         '''
         collection_name = gen_unique_str("not_existed_collection")
-        status, info = connect.collection_info(collection_name)
+        status, info = connect.get_collection_stats(collection_name)
         assert not status.OK()
     
     @pytest.fixture(
@@ -70,7 +70,7 @@ class TestCollectionInfoBase:
         expected: status not ok
         '''
         collection_name = get_collection_name
-        status, info = connect.collection_info(collection_name)
+        status, info = connect.get_collection_stats(collection_name)
         assert not status.OK()
 
     @pytest.mark.timeout(INFO_TIMEOUT)
@@ -85,16 +85,16 @@ class TestCollectionInfoBase:
         assert status.OK()
         status = connect.flush([collection])
         assert status.OK()
-        status, info = connect.collection_info(collection)
+        status, info = connect.get_collection_stats(collection)
         assert status.OK()
         assert info["row_count"] == nb
         # delete a few vectors
         delete_ids = [ids[0], ids[-1]]
-        status = connect.delete_by_id(collection, delete_ids)
+        status = connect.delete_entity_by_id(collection, delete_ids)
         assert status.OK()
         status = connect.flush([collection])
         assert status.OK()
-        status, info = connect.collection_info(collection)
+        status, info = connect.get_collection_stats(collection)
         assert status.OK()
         assert info["row_count"] == nb - 2
 
@@ -110,7 +110,7 @@ class TestCollectionInfoBase:
         assert status.OK()
         status = connect.flush([collection])
         assert status.OK()
-        status, info = connect.collection_info(collection)
+        status, info = connect.get_collection_stats(collection)
         assert status.OK()
         logging.getLogger().info(info)
         assert len(info["partitions"]) == 1
@@ -131,7 +131,7 @@ class TestCollectionInfoBase:
         assert status.OK()
         status = connect.flush([collection])
         assert status.OK()
-        status, info = connect.collection_info(collection)
+        status, info = connect.get_collection_stats(collection)
         assert status.OK()
         logging.getLogger().info(info)
         assert len(info["partitions"]) == 2
@@ -155,7 +155,7 @@ class TestCollectionInfoBase:
         assert status.OK()
         status = connect.flush([collection])
         assert status.OK()
-        status, info = connect.collection_info(collection)
+        status, info = connect.get_collection_stats(collection)
         assert status.OK()
         logging.getLogger().info(info)
         for partition in info["partitions"]:
@@ -183,7 +183,7 @@ class TestCollectionInfoBase:
         assert status.OK()
         status = connect.flush([collection])
         assert status.OK()
-        status, info = connect.collection_info(collection)
+        status, info = connect.get_collection_stats(collection)
         assert status.OK()
         assert info["row_count"] == nb * 2
         for partition in info["partitions"]:
@@ -222,7 +222,7 @@ class TestCollectionInfoBase:
         assert status.OK()
         status = connect.flush([collection])
         assert status.OK()
-        status, info = connect.collection_info(collection)
+        status, info = connect.get_collection_stats(collection)
         assert status.OK()
         logging.getLogger().info(info)
         index_string = info["partitions"][0]["segments"][0]["index_name"]
@@ -248,7 +248,7 @@ class TestCollectionInfoBase:
         status = connect.create_index(collection, index_type, index_param)
         status = connect.create_index(collection, index_type, index_param)
         assert status.OK()
-        status, info = connect.collection_info(collection)
+        status, info = connect.get_collection_stats(collection)
         assert status.OK()
         logging.getLogger().info(info)
         index_string = info["partitions"][0]["segments"][0]["index_name"]
@@ -272,7 +272,7 @@ class TestCollectionInfoBase:
         for index_type in [IndexType.FLAT, IndexType.IVFLAT, IndexType.IVF_SQ8]:
             status = connect.create_index(collection, index_type, index_param)
             assert status.OK()
-            status, info = connect.collection_info(collection)
+            status, info = connect.get_collection_stats(collection)
             assert status.OK()
             logging.getLogger().info(info)
             index_string = info["partitions"][0]["segments"][0]["index_name"]

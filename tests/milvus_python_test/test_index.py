@@ -1,5 +1,5 @@
 """
-   For testing index operations, including `create_index`, `describe_index` and `drop_index` interfaces
+   For testing index operations, including `create_index`, `get_index_info` and `drop_index` interfaces
 """
 import logging
 import pytest
@@ -141,7 +141,7 @@ class TestIndexBase:
         logging.getLogger().info(get_simple_index)
         status, ids = connect.add_vectors(collection, vectors)
         status = connect.create_index(collection, index_type, index_param)
-        logging.getLogger().info(connect.describe_index(collection))
+        logging.getLogger().info(connect.get_index_info(collection))
         query_vecs = [vectors[0], vectors[1], vectors[2]]
         top_k = 5
         search_param = get_search_param(index_type)
@@ -239,7 +239,7 @@ class TestIndexBase:
             status = connect.create_index(collection, IndexType.IVFLAT, {"nlist": NLIST})
             assert status.OK()
         def count(connect):
-            status, count = connect.count_collection(collection)
+            status, count = connect.count_entities(collection)
             assert status.OK()
             assert count == nb
 
@@ -415,18 +415,18 @@ class TestIndexBase:
         for index in indexs:
             status = connect.create_index(collection, index["index_type"], index["index_param"])
             assert status.OK()
-        status, result = connect.describe_index(collection)
+        status, result = connect.get_index_info(collection)
         assert result._params["nlist"] == nlist
         assert result._collection_name == collection
         assert result._index_type == index_type_2
 
     """
     ******************************************************************
-      The following cases are used to test `describe_index` function
+      The following cases are used to test `get_index_info` function
     ******************************************************************
     """
 
-    def test_describe_index(self, connect, collection, get_index):
+    def test_get_index_info(self, connect, collection, get_index):
         '''
         target: test describe index interface
         method: create collection and add vectors in it, create index, call describe index
@@ -438,7 +438,7 @@ class TestIndexBase:
         # status, ids = connect.add_vectors(collection, vectors)
         status = connect.create_index(collection, index_type, index_param)
         if status.OK():
-            status, result = connect.describe_index(collection)
+            status, result = connect.get_index_info(collection)
             logging.getLogger().info(result)
             assert result._params == index_param
             assert result._collection_name == collection
@@ -469,7 +469,7 @@ class TestIndexBase:
             assert status.OK()
 
         for i in range(10):
-            status, result = connect.describe_index(collection_list[i])
+            status, result = connect.get_index_info(collection_list[i])
             logging.getLogger().info(result)
             assert result._params == index_param
             assert result._collection_name == collection_list[i]
@@ -478,22 +478,22 @@ class TestIndexBase:
         for i in range(10):
             status = connect.drop_index(collection_list[i])
             assert status.OK()
-            status, result = connect.describe_index(collection_list[i])
+            status, result = connect.get_index_info(collection_list[i])
             logging.getLogger().info(result)
             assert result._collection_name == collection_list[i]
             assert result._index_type == IndexType.FLAT
 
     # @pytest.mark.level(2)
-    # def test_describe_index_without_connect(self, dis_connect, collection):
+    # def test_get_index_info_without_connect(self, dis_connect, collection):
     #     '''
     #     target: test describe index without connection
     #     method: describe index, and check if describe successfully
     #     expected: raise exception
     #     '''
     #     with pytest.raises(Exception) as e:
-    #         status = dis_connect.describe_index(collection)
+    #         status = dis_connect.get_index_info(collection)
 
-    def test_describe_index_collection_not_existed(self, connect):
+    def test_get_index_info_collection_not_existed(self, connect):
         '''
         target: test describe index interface when collection name not existed
         method: create collection and add vectors in it, create index
@@ -501,10 +501,10 @@ class TestIndexBase:
         expected: return code not equals to 0, describe index failed
         '''
         collection_name = gen_unique_str(self.__class__.__name__)
-        status, result = connect.describe_index(collection_name)
+        status, result = connect.get_index_info(collection_name)
         assert not status.OK()
 
-    def test_describe_index_collection_None(self, connect):
+    def test_get_index_info_collection_None(self, connect):
         '''
         target: test describe index interface when collection name is None
         method: create collection and add vectors in it, create index with an collection_name: None
@@ -512,9 +512,9 @@ class TestIndexBase:
         '''
         collection_name = None
         with pytest.raises(Exception) as e:
-            status = connect.describe_index(collection_name)
+            status = connect.get_index_info(collection_name)
 
-    def test_describe_index_not_create(self, connect, collection):
+    def test_get_index_info_not_create(self, connect, collection):
         '''
         target: test describe index interface when index not created
         method: create collection and add vectors in it, create index
@@ -522,7 +522,7 @@ class TestIndexBase:
         expected: return code not equals to 0, describe index failed
         '''
         status, ids = connect.add_vectors(collection, vectors)
-        status, result = connect.describe_index(collection)
+        status, result = connect.get_index_info(collection)
         logging.getLogger().info(result)
         assert status.OK()
         # assert result._params["nlist"] == index_params["nlist"]
@@ -546,11 +546,11 @@ class TestIndexBase:
         # status, ids = connect.add_vectors(collection, vectors)
         status = connect.create_index(collection, index_type, index_param)
         assert status.OK()
-        status, result = connect.describe_index(collection)
+        status, result = connect.get_index_info(collection)
         logging.getLogger().info(result)
         status = connect.drop_index(collection)
         assert status.OK()
-        status, result = connect.describe_index(collection)
+        status, result = connect.get_index_info(collection)
         logging.getLogger().info(result)
         assert result._collection_name == collection
         assert result._index_type == IndexType.FLAT
@@ -567,13 +567,13 @@ class TestIndexBase:
         # status, ids = connect.add_vectors(collection, vectors)
         status = connect.create_index(collection, index_type, index_param)
         assert status.OK()
-        status, result = connect.describe_index(collection)
+        status, result = connect.get_index_info(collection)
         logging.getLogger().info(result)
         status = connect.drop_index(collection)
         assert status.OK()
         status = connect.drop_index(collection)
         assert status.OK()
-        status, result = connect.describe_index(collection)
+        status, result = connect.get_index_info(collection)
         logging.getLogger().info(result)
         assert result._collection_name == collection
         assert result._index_type == IndexType.FLAT
@@ -616,7 +616,7 @@ class TestIndexBase:
         expected: return code not equals to 0, drop index failed
         '''
         status, ids = connect.add_vectors(collection, vectors)
-        status, result = connect.describe_index(collection)
+        status, result = connect.get_index_info(collection)
         logging.getLogger().info(result)
         # no create index
         status = connect.drop_index(collection)
@@ -636,11 +636,11 @@ class TestIndexBase:
         for i in range(2):
             status = connect.create_index(collection, index_type, index_param)
             assert status.OK()
-            status, result = connect.describe_index(collection)
+            status, result = connect.get_index_info(collection)
             logging.getLogger().info(result)
             status = connect.drop_index(collection)
             assert status.OK()
-            status, result = connect.describe_index(collection)
+            status, result = connect.get_index_info(collection)
             logging.getLogger().info(result)
             assert result._collection_name == collection
             assert result._index_type == IndexType.FLAT
@@ -657,11 +657,11 @@ class TestIndexBase:
         for i in range(2):
             status = connect.create_index(collection, indexs[i]["index_type"], indexs[i]["index_param"])
             assert status.OK()
-            status, result = connect.describe_index(collection)
+            status, result = connect.get_index_info(collection)
             logging.getLogger().info(result)
             status = connect.drop_index(collection)
             assert status.OK()
-            status, result = connect.describe_index(collection)
+            status, result = connect.get_index_info(collection)
             logging.getLogger().info(result)
             assert result._collection_name == collection
             assert result._index_type == IndexType.FLAT
@@ -757,7 +757,7 @@ class TestIndexIP:
         logging.getLogger().info(get_simple_index)
         status, ids = connect.add_vectors(ip_collection, vectors)
         status = connect.create_index(ip_collection, index_type, index_param)
-        logging.getLogger().info(connect.describe_index(ip_collection))
+        logging.getLogger().info(connect.get_index_info(ip_collection))
         query_vecs = [vectors[0], vectors[1], vectors[2]]
         top_k = 5
         search_param = get_search_param(index_type)
@@ -911,18 +911,18 @@ class TestIndexIP:
         for index in indexs:
             status = connect.create_index(ip_collection, index["index_type"], index["index_param"])
             assert status.OK()
-        status, result = connect.describe_index(ip_collection)
+        status, result = connect.get_index_info(ip_collection)
         assert result._params["nlist"] == nlist
         assert result._collection_name == ip_collection
         assert result._index_type == index_type_2
 
     """
     ******************************************************************
-      The following cases are used to test `describe_index` function
+      The following cases are used to test `get_index_info` function
     ******************************************************************
     """
 
-    def test_describe_index(self, connect, ip_collection, get_simple_index):
+    def test_get_index_info(self, connect, ip_collection, get_simple_index):
         '''
         target: test describe index interface
         method: create collection and add vectors in it, create index, call describe index
@@ -933,7 +933,7 @@ class TestIndexIP:
         logging.getLogger().info(get_simple_index)
         # status, ids = connect.add_vectors(ip_collection, vectors[:5000])
         status = connect.create_index(ip_collection, index_type, index_param)
-        status, result = connect.describe_index(ip_collection)
+        status, result = connect.get_index_info(ip_collection)
         logging.getLogger().info(result)
         assert result._collection_name == ip_collection
         status, mode = connect._cmd("mode")
@@ -944,7 +944,7 @@ class TestIndexIP:
             assert result._index_type == index_type
             assert result._params == index_param
 
-    def test_describe_index_partition(self, connect, ip_collection, get_simple_index):
+    def test_get_index_info_partition(self, connect, ip_collection, get_simple_index):
         '''
         target: test describe index interface
         method: create collection, create partition and add vectors in it, create index, call describe index
@@ -956,13 +956,13 @@ class TestIndexIP:
         status = connect.create_partition(ip_collection, tag)
         status, ids = connect.add_vectors(ip_collection, vectors, partition_tag=tag)
         status = connect.create_index(ip_collection, index_type, index_param)
-        status, result = connect.describe_index(ip_collection)
+        status, result = connect.get_index_info(ip_collection)
         logging.getLogger().info(result)
         assert result._params == index_param
         assert result._collection_name == ip_collection
         assert result._index_type == index_type
 
-    def test_describe_index_partition_A(self, connect, ip_collection, get_simple_index):
+    def test_get_index_info_partition_A(self, connect, ip_collection, get_simple_index):
         '''
         target: test describe index interface
         method: create collection, create partitions and add vectors in it, create index on partitions, call describe index
@@ -977,7 +977,7 @@ class TestIndexIP:
         # status, ids = connect.add_vectors(ip_collection, vectors, partition_tag=tag)
         # status, ids = connect.add_vectors(ip_collection, vectors, partition_tag=new_tag)
         status = connect.create_index(ip_collection, index_type, index_param)
-        status, result = connect.describe_index(ip_collection)
+        status, result = connect.get_index_info(ip_collection)
         logging.getLogger().info(result)
         assert result._params == index_param
         assert result._collection_name == ip_collection
@@ -1007,7 +1007,7 @@ class TestIndexIP:
             status = connect.create_index(collection_name, index_type, index_param)
             assert status.OK()
         for i in range(10):
-            status, result = connect.describe_index(collection_list[i])
+            status, result = connect.get_index_info(collection_list[i])
             logging.getLogger().info(result)
             assert result._params == index_param
             assert result._collection_name == collection_list[i]
@@ -1015,22 +1015,22 @@ class TestIndexIP:
         for i in range(10):
             status = connect.drop_index(collection_list[i])
             assert status.OK()
-            status, result = connect.describe_index(collection_list[i])
+            status, result = connect.get_index_info(collection_list[i])
             logging.getLogger().info(result)
             assert result._collection_name == collection_list[i]
             assert result._index_type == IndexType.FLAT
 
     # @pytest.mark.level(2)
-    # def test_describe_index_without_connect(self, dis_connect, ip_collection):
+    # def test_get_index_info_without_connect(self, dis_connect, ip_collection):
     #     '''
     #     target: test describe index without connection
     #     method: describe index, and check if describe successfully
     #     expected: raise exception
     #     '''
     #     with pytest.raises(Exception) as e:
-    #         status = dis_connect.describe_index(ip_collection)
+    #         status = dis_connect.get_index_info(ip_collection)
 
-    def test_describe_index_not_create(self, connect, ip_collection):
+    def test_get_index_info_not_create(self, connect, ip_collection):
         '''
         target: test describe index interface when index not created
         method: create collection and add vectors in it, create index
@@ -1038,7 +1038,7 @@ class TestIndexIP:
         expected: return code not equals to 0, describe index failed
         '''
         status, ids = connect.add_vectors(ip_collection, vectors)
-        status, result = connect.describe_index(ip_collection)
+        status, result = connect.get_index_info(ip_collection)
         logging.getLogger().info(result)
         assert status.OK()
         # assert result._params["nlist"] == index_params["nlist"]
@@ -1067,11 +1067,11 @@ class TestIndexIP:
             assert not status.OK()
         else:
             assert status.OK()
-        status, result = connect.describe_index(ip_collection)
+        status, result = connect.get_index_info(ip_collection)
         logging.getLogger().info(result)
         status = connect.drop_index(ip_collection)
         assert status.OK()
-        status, result = connect.describe_index(ip_collection)
+        status, result = connect.get_index_info(ip_collection)
         logging.getLogger().info(result)
         assert result._collection_name == ip_collection
         assert result._index_type == IndexType.FLAT
@@ -1088,11 +1088,11 @@ class TestIndexIP:
         status, ids = connect.add_vectors(ip_collection, vectors, partition_tag=tag)
         status = connect.create_index(ip_collection, index_type, index_param)
         assert status.OK()
-        status, result = connect.describe_index(ip_collection)
+        status, result = connect.get_index_info(ip_collection)
         logging.getLogger().info(result)
         status = connect.drop_index(ip_collection)
         assert status.OK()
-        status, result = connect.describe_index(ip_collection)
+        status, result = connect.get_index_info(ip_collection)
         logging.getLogger().info(result)
         assert result._collection_name == ip_collection
         assert result._index_type == IndexType.FLAT
@@ -1113,7 +1113,7 @@ class TestIndexIP:
         assert status.OK()
         status = connect.drop_index(ip_collection)
         assert status.OK()
-        status, result = connect.describe_index(ip_collection)
+        status, result = connect.get_index_info(ip_collection)
         logging.getLogger().info(result)
         assert result._collection_name == ip_collection
         assert result._index_type == IndexType.FLAT
@@ -1136,13 +1136,13 @@ class TestIndexIP:
             assert not status.OK()
         else:
             assert status.OK()        
-        status, result = connect.describe_index(ip_collection)
+        status, result = connect.get_index_info(ip_collection)
         logging.getLogger().info(result)
         status = connect.drop_index(ip_collection)
         assert status.OK()
         status = connect.drop_index(ip_collection)
         assert status.OK()
-        status, result = connect.describe_index(ip_collection)
+        status, result = connect.get_index_info(ip_collection)
         logging.getLogger().info(result)
         assert result._collection_name == ip_collection
         assert result._index_type == IndexType.FLAT
@@ -1167,7 +1167,7 @@ class TestIndexIP:
         expected: return code not equals to 0, drop index failed
         '''
         status, ids = connect.add_vectors(ip_collection, vectors)
-        status, result = connect.describe_index(ip_collection)
+        status, result = connect.get_index_info(ip_collection)
         logging.getLogger().info(result)
         # no create index
         status = connect.drop_index(ip_collection)
@@ -1187,11 +1187,11 @@ class TestIndexIP:
         for i in range(2):
             status = connect.create_index(ip_collection, index_type, index_param)
             assert status.OK()
-            status, result = connect.describe_index(ip_collection)
+            status, result = connect.get_index_info(ip_collection)
             logging.getLogger().info(result)
             status = connect.drop_index(ip_collection)
             assert status.OK()
-            status, result = connect.describe_index(ip_collection)
+            status, result = connect.get_index_info(ip_collection)
             logging.getLogger().info(result)
             assert result._collection_name == ip_collection
             assert result._index_type == IndexType.FLAT
@@ -1208,15 +1208,15 @@ class TestIndexIP:
         for i in range(2):
             status = connect.create_index(ip_collection, indexs[i]["index_type"], indexs[i]["index_param"])
             assert status.OK()
-            status, result = connect.describe_index(ip_collection)
+            status, result = connect.get_index_info(ip_collection)
             assert result._params == indexs[i]["index_param"]
             assert result._collection_name == ip_collection
             assert result._index_type == indexs[i]["index_type"]
-            status, result = connect.describe_index(ip_collection)
+            status, result = connect.get_index_info(ip_collection)
             logging.getLogger().info(result)
             status = connect.drop_index(ip_collection)
             assert status.OK()
-            status, result = connect.describe_index(ip_collection)
+            status, result = connect.get_index_info(ip_collection)
             logging.getLogger().info(result)
             assert result._collection_name == ip_collection
             assert result._index_type == IndexType.FLAT
@@ -1323,7 +1323,7 @@ class TestIndexJAC:
         logging.getLogger().info(get_jaccard_index)
         status, ids = connect.add_vectors(jac_collection, self.vectors)
         status = connect.create_index(jac_collection, index_type, index_param)
-        logging.getLogger().info(connect.describe_index(jac_collection))
+        logging.getLogger().info(connect.get_index_info(jac_collection))
         query_vecs = [self.vectors[0], self.vectors[1], self.vectors[2]]
         top_k = 5
         search_param = get_search_param(index_type)
@@ -1334,11 +1334,11 @@ class TestIndexJAC:
 
     """
     ******************************************************************
-      The following cases are used to test `describe_index` function
+      The following cases are used to test `get_index_info` function
     ******************************************************************
     """
 
-    def test_describe_index(self, connect, jac_collection, get_jaccard_index):
+    def test_get_index_info(self, connect, jac_collection, get_jaccard_index):
         '''
         target: test describe index interface
         method: create collection and add vectors in it, create index, call describe index
@@ -1349,13 +1349,13 @@ class TestIndexJAC:
         logging.getLogger().info(get_jaccard_index)
         # status, ids = connect.add_vectors(jac_collection, vectors[:5000])
         status = connect.create_index(jac_collection, index_type, index_param)
-        status, result = connect.describe_index(jac_collection)
+        status, result = connect.get_index_info(jac_collection)
         logging.getLogger().info(result)
         assert result._collection_name == jac_collection
         assert result._index_type == index_type
         assert result._params == index_param
 
-    def test_describe_index_partition(self, connect, jac_collection, get_jaccard_index):
+    def test_get_index_info_partition(self, connect, jac_collection, get_jaccard_index):
         '''
         target: test describe index interface
         method: create collection, create partition and add vectors in it, create index, call describe index
@@ -1367,7 +1367,7 @@ class TestIndexJAC:
         status = connect.create_partition(jac_collection, tag)
         status, ids = connect.add_vectors(jac_collection, vectors, partition_tag=tag)
         status = connect.create_index(jac_collection, index_type, index_param)
-        status, result = connect.describe_index(jac_collection)
+        status, result = connect.get_index_info(jac_collection)
         logging.getLogger().info(result)
         assert result._params == index_param
         assert result._collection_name == jac_collection
@@ -1392,11 +1392,11 @@ class TestIndexJAC:
         # status, ids = connect.add_vectors(ip_collection, vectors)
         status = connect.create_index(jac_collection, index_type, index_param)
         assert status.OK()
-        status, result = connect.describe_index(jac_collection)
+        status, result = connect.get_index_info(jac_collection)
         logging.getLogger().info(result)
         status = connect.drop_index(jac_collection)
         assert status.OK()
-        status, result = connect.describe_index(jac_collection)
+        status, result = connect.get_index_info(jac_collection)
         logging.getLogger().info(result)
         assert result._collection_name == jac_collection
         assert result._index_type == IndexType.FLAT
@@ -1413,11 +1413,11 @@ class TestIndexJAC:
         status, ids = connect.add_vectors(jac_collection, vectors, partition_tag=tag)
         status = connect.create_index(jac_collection, index_type, index_param)
         assert status.OK()
-        status, result = connect.describe_index(jac_collection)
+        status, result = connect.get_index_info(jac_collection)
         logging.getLogger().info(result)
         status = connect.drop_index(jac_collection)
         assert status.OK()
-        status, result = connect.describe_index(jac_collection)
+        status, result = connect.get_index_info(jac_collection)
         logging.getLogger().info(result)
         assert result._collection_name == jac_collection
         assert result._index_type == IndexType.FLAT
@@ -1519,7 +1519,7 @@ class TestIndexBinary:
         status, ids = connect.add_vectors(ham_collection, self.vectors, partition_tag=tag)
         status = connect.create_index(ham_collection, index_type, index_param)
         assert status.OK()
-        status, res = connect.count_collection(ham_collection)
+        status, res = connect.count_entities(ham_collection)
         assert res == len(self.vectors)
 
     @pytest.mark.timeout(BUILD_TIMEOUT)
@@ -1536,7 +1536,7 @@ class TestIndexBinary:
         status, ids = connect.add_vectors(substructure_collection, self.vectors, partition_tag=tag)
         status = connect.create_index(substructure_collection, index_type, index_param)
         assert status.OK()
-        status, res = connect.count_collection(substructure_collection,)
+        status, res = connect.count_entities(substructure_collection,)
         assert res == len(self.vectors)
 
     # @pytest.mark.level(2)
@@ -1563,7 +1563,7 @@ class TestIndexBinary:
         logging.getLogger().info(get_hamming_index)
         status, ids = connect.add_vectors(ham_collection, self.vectors)
         status = connect.create_index(ham_collection,  index_type, index_param)
-        logging.getLogger().info(connect.describe_index(ham_collection))
+        logging.getLogger().info(connect.get_index_info(ham_collection))
         query_vecs = [self.vectors[0], self.vectors[1], self.vectors[2]]
         top_k = 5
         search_param = get_search_param(index_type)
@@ -1584,7 +1584,7 @@ class TestIndexBinary:
         logging.getLogger().info(get_superstructure_index)
         status, ids = connect.add_vectors(superstructure_collection, self.vectors)
         status = connect.create_index(superstructure_collection, index_type, index_param)
-        logging.getLogger().info(connect.describe_index(superstructure_collection))
+        logging.getLogger().info(connect.get_index_info(superstructure_collection))
         query_vecs = [self.vectors[0], self.vectors[1], self.vectors[2]]
         top_k = 5
         search_param = get_search_param(index_type)
@@ -1595,11 +1595,11 @@ class TestIndexBinary:
 
     """
     ******************************************************************
-      The following cases are used to test `describe_index` function
+      The following cases are used to test `get_index_info` function
     ******************************************************************
     """
 
-    def test_describe_index(self, connect, ham_collection, get_hamming_index):
+    def test_get_index_info(self, connect, ham_collection, get_hamming_index):
         '''
         target: test describe index interface
         method: create collection and add vectors in it, create index, call describe index
@@ -1610,13 +1610,13 @@ class TestIndexBinary:
         logging.getLogger().info(get_hamming_index)
         # status, ids = connect.add_vectors(jac_collection, vectors[:5000])
         status = connect.create_index(ham_collection, index_type, index_param)
-        status, result = connect.describe_index(ham_collection)
+        status, result = connect.get_index_info(ham_collection)
         logging.getLogger().info(result)
         assert result._collection_name == ham_collection
         assert result._index_type == index_type
         assert result._params == index_param
 
-    def test_describe_index_partition(self, connect, ham_collection, get_hamming_index):
+    def test_get_index_info_partition(self, connect, ham_collection, get_hamming_index):
         '''
         target: test describe index interface
         method: create collection, create partition and add vectors in it, create index, call describe index
@@ -1628,13 +1628,13 @@ class TestIndexBinary:
         status = connect.create_partition(ham_collection, tag)
         status, ids = connect.add_vectors(ham_collection, vectors, partition_tag=tag)
         status = connect.create_index(ham_collection, index_type, index_param)
-        status, result = connect.describe_index(ham_collection)
+        status, result = connect.get_index_info(ham_collection)
         logging.getLogger().info(result)
         assert result._params == index_param
         assert result._collection_name == ham_collection
         assert result._index_type == index_type
 
-    def test_describe_index_partition_superstructrue(self, connect, superstructure_collection, get_superstructure_index):
+    def test_get_index_info_partition_superstructrue(self, connect, superstructure_collection, get_superstructure_index):
         '''
         target: test describe index interface
         method: create collection, create partition and add vectors in it, create index, call describe index
@@ -1646,7 +1646,7 @@ class TestIndexBinary:
         status = connect.create_partition(superstructure_collection, tag)
         status, ids = connect.add_vectors(superstructure_collection, vectors, partition_tag=tag)
         status = connect.create_index(superstructure_collection, index_type, index_param)
-        status, result = connect.describe_index(superstructure_collection)
+        status, result = connect.get_index_info(superstructure_collection)
         logging.getLogger().info(result)
         assert result._params == index_param
         assert result._collection_name == superstructure_collection
@@ -1671,11 +1671,11 @@ class TestIndexBinary:
         # status, ids = connect.add_vectors(ip_collection, vectors)
         status = connect.create_index(ham_collection, index_type, index_param)
         assert status.OK()
-        status, result = connect.describe_index(ham_collection)
+        status, result = connect.get_index_info(ham_collection)
         logging.getLogger().info(result)
         status = connect.drop_index(ham_collection)
         assert status.OK()
-        status, result = connect.describe_index(ham_collection)
+        status, result = connect.get_index_info(ham_collection)
         logging.getLogger().info(result)
         assert result._collection_name == ham_collection
         assert result._index_type == IndexType.FLAT
@@ -1692,11 +1692,11 @@ class TestIndexBinary:
         assert status.OK()
         status = connect.create_index(substructure_collection, index_type, index_param)
         assert status.OK()
-        status, result = connect.describe_index(substructure_collection)
+        status, result = connect.get_index_info(substructure_collection)
         logging.getLogger().info(result)
         status = connect.drop_index(substructure_collection)
         assert status.OK()
-        status, result = connect.describe_index(substructure_collection)
+        status, result = connect.get_index_info(substructure_collection)
         logging.getLogger().info(result)
         assert result._collection_name == substructure_collection
         assert result._index_type == IndexType.FLAT
@@ -1713,11 +1713,11 @@ class TestIndexBinary:
         status, ids = connect.add_vectors(ham_collection, vectors, partition_tag=tag)
         status = connect.create_index(ham_collection, index_type, index_param)
         assert status.OK()
-        status, result = connect.describe_index(ham_collection)
+        status, result = connect.get_index_info(ham_collection)
         logging.getLogger().info(result)
         status = connect.drop_index(ham_collection)
         assert status.OK()
-        status, result = connect.describe_index(ham_collection)
+        status, result = connect.get_index_info(ham_collection)
         logging.getLogger().info(result)
         assert result._collection_name == ham_collection
         assert result._index_type == IndexType.FLAT
@@ -1742,9 +1742,9 @@ class TestIndexCollectionInvalid(object):
         assert not status.OK()
 
     @pytest.mark.level(1)
-    def test_describe_index_with_invalid_collectionname(self, connect, get_collection_name):
+    def test_get_index_info_with_invalid_collectionname(self, connect, get_collection_name):
         collection_name = get_collection_name
-        status, result = connect.describe_index(collection_name)
+        status, result = connect.get_index_info(collection_name)
         assert not status.OK()   
 
     @pytest.mark.level(1)
@@ -1802,7 +1802,7 @@ class TestCreateIndexParamsInvalid(object):
         status = connect.create_index(collection, get_index_type, {})
         if get_index_type != IndexType.FLAT :
             assert not status.OK()
-        status, result = connect.describe_index(collection)
+        status, result = connect.get_index_info(collection)
         logging.getLogger().info(result)
         assert result._collection_name == collection
         assert result._index_type == IndexType.FLAT

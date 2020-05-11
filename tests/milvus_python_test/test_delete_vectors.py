@@ -22,7 +22,7 @@ nb = 6000
 class TestDeleteBase:
     """
     ******************************************************************
-      The following cases are used to test `delete_by_id` function
+      The following cases are used to test `delete_entity_by_id` function
     ******************************************************************
     """
 
@@ -52,7 +52,7 @@ class TestDeleteBase:
         assert status.OK()
         status = connect.flush([collection])
         assert status.OK()
-        status = connect.delete_by_id(collection, ids)
+        status = connect.delete_entity_by_id(collection, ids)
         assert status.OK()
         status = connect.flush([collection])
         search_param = get_search_param(index_type)
@@ -76,7 +76,7 @@ class TestDeleteBase:
         status = connect.flush([collection])
         # Bloom filter error
         assert status.OK()
-        status = connect.delete_by_id(collection, [1])
+        status = connect.delete_entity_by_id(collection, [1])
         assert status.OK()
         status = connect.flush([collection])
         search_param = get_search_param(index_type)
@@ -96,10 +96,10 @@ class TestDeleteBase:
         assert status.OK()
         status = connect.flush([collection])
         assert status.OK()
-        status = connect.delete_by_id(collection, ids)
+        status = connect.delete_entity_by_id(collection, ids)
         assert status.OK()
         status = connect.flush([collection])
-        status, res = connect.count_collection(collection)
+        status, res = connect.count_entities(collection)
         assert status.OK()
         assert res == 0
 
@@ -116,10 +116,10 @@ class TestDeleteBase:
         assert status.OK()
         status = connect.flush([collection])
         assert status.OK()
-        status = connect.delete_by_id(collection, ids)
+        status = connect.delete_entity_by_id(collection, ids)
         assert status.OK()
         time.sleep(2)
-        status, res = connect.count_collection(collection)
+        status, res = connect.count_entities(collection)
         assert status.OK()
         assert res == 0
 
@@ -136,7 +136,7 @@ class TestDeleteBase:
         assert status.OK()
         status = connect.flush([collection])
         assert status.OK()
-        status = connect.delete_by_id(collection, [0])
+        status = connect.delete_entity_by_id(collection, [0])
         assert status.OK()
         status = connect.flush([collection])
         search_param = get_search_param(index_type)
@@ -156,7 +156,7 @@ class TestDeleteBase:
         status = connect.flush([collection])
         assert status.OK()
         collection_new = gen_unique_str()
-        status = connect.delete_by_id(collection_new, [0])
+        status = connect.delete_entity_by_id(collection_new, [0])
         assert not status.OK()
 
     def test_add_vectors_delete_vector(self, connect, collection, get_simple_index):
@@ -173,7 +173,7 @@ class TestDeleteBase:
         assert status.OK()
         delete_ids = [ids[0], ids[-1]]
         query_vecs = [vectors[0], vectors[1], vectors[-1]]
-        status = connect.delete_by_id(collection, delete_ids)
+        status = connect.delete_entity_by_id(collection, delete_ids)
         assert status.OK()
         status = connect.flush([collection])
         search_param = get_search_param(index_type)
@@ -199,7 +199,7 @@ class TestDeleteBase:
         assert status.OK()
         delete_ids = [ids[0], ids[-1]]
         query_vecs = [vectors[0], vectors[1], vectors[-1]]
-        status = connect.delete_by_id(collection, delete_ids)
+        status = connect.delete_entity_by_id(collection, delete_ids)
         assert status.OK()
         status = connect.flush([collection])
         status = connect.create_index(collection, index_type, index_param)
@@ -231,7 +231,7 @@ class TestDeleteBase:
         assert status.OK()
         delete_ids = [ids[0], ids[-1]]
         query_vecs = [vectors[0], vectors[1], vectors[-1]]
-        status = connect.delete_by_id(collection, delete_ids)
+        status = connect.delete_entity_by_id(collection, delete_ids)
         assert status.OK()
         status = connect.flush([collection])
         status, tmp_ids = connect.add_vectors(collection, [vectors[0], vectors[-1]])
@@ -259,11 +259,11 @@ class TestDeleteBase:
         assert status.OK()
         delete_ids = [ids[0], ids[-1]]
         query_vecs = [vectors[0], vectors[1], vectors[-1]]
-        status = connect.delete_by_id(collection, delete_ids)
+        status = connect.delete_entity_by_id(collection, delete_ids)
         assert status.OK()
         status = connect.flush([collection])
         for i in range(10):
-            status = connect.delete_by_id(collection, delete_ids)
+            status = connect.delete_entity_by_id(collection, delete_ids)
             assert status.OK()
 
     def test_delete_no_flush_multiable_times(self, connect, collection):
@@ -278,10 +278,10 @@ class TestDeleteBase:
         assert status.OK()
         delete_ids = [ids[0], ids[-1]]
         query_vecs = [vectors[0], vectors[1], vectors[-1]]
-        status = connect.delete_by_id(collection, delete_ids)
+        status = connect.delete_entity_by_id(collection, delete_ids)
         assert status.OK()
         for i in range(10):
-            status = connect.delete_by_id(collection, delete_ids)
+            status = connect.delete_entity_by_id(collection, delete_ids)
             assert status.OK()
             assert status.OK()
 
@@ -289,7 +289,7 @@ class TestDeleteBase:
 class TestDeleteIndexedVectors:
     """
     ******************************************************************
-      The following cases are used to test `delete_by_id` function
+      The following cases are used to test `delete_entity_by_id` function
     ******************************************************************
     """
     @pytest.fixture(
@@ -320,7 +320,7 @@ class TestDeleteIndexedVectors:
         assert status.OK()
         status = connect.create_index(collection, index_type, index_param)
         assert status.OK()
-        status = connect.delete_by_id(collection, ids)
+        status = connect.delete_entity_by_id(collection, ids)
         assert status.OK()
         status = connect.flush([collection])
         search_param = get_search_param(index_type)
@@ -347,7 +347,7 @@ class TestDeleteIndexedVectors:
         assert status.OK()
         delete_ids = [ids[0], ids[-1]]
         query_vecs = [vectors[0], vectors[1], vectors[-1]]
-        status = connect.delete_by_id(collection, delete_ids)
+        status = connect.delete_entity_by_id(collection, delete_ids)
         assert status.OK()
         status = connect.flush([collection])
         search_param = get_search_param(index_type)
@@ -365,7 +365,7 @@ class TestDeleteIndexedVectors:
 class TestDeleteBinary:
     """
     ******************************************************************
-      The following cases are used to test `delete_by_id` function
+      The following cases are used to test `delete_entity_by_id` function
     ******************************************************************
     """
     @pytest.fixture(
@@ -392,7 +392,7 @@ class TestDeleteBinary:
         assert status.OK()
         status = connect.flush([jac_collection])
         assert status.OK()
-        status = connect.delete_by_id(jac_collection, ids)
+        status = connect.delete_entity_by_id(jac_collection, ids)
         assert status.OK()
         status = connect.flush([jac_collection])
         search_param = get_search_param(index_type)
@@ -415,10 +415,10 @@ class TestDeleteBinary:
         assert status.OK()
         status = connect.flush([jac_collection])
         assert status.OK()
-        status = connect.delete_by_id(jac_collection, ids)
+        status = connect.delete_entity_by_id(jac_collection, ids)
         assert status.OK()
         status = connect.flush([jac_collection])
-        status, res = connect.count_collection(jac_collection)
+        status, res = connect.count_entities(jac_collection)
         assert status.OK()
         assert res == 0
 
@@ -435,7 +435,7 @@ class TestDeleteBinary:
         assert status.OK()
         status = connect.flush([jac_collection])
         assert status.OK()
-        status = connect.delete_by_id(jac_collection, [0])
+        status = connect.delete_entity_by_id(jac_collection, [0])
         assert status.OK()
         status = connect.flush([jac_collection])
         status = connect.flush([jac_collection])
@@ -456,9 +456,9 @@ class TestDeleteBinary:
         status = connect.flush([jac_collection])
         assert status.OK()
         collection_new = gen_unique_str()
-        status = connect.delete_by_id(collection_new, [0])
+        status = connect.delete_entity_by_id(collection_new, [0])
         collection_new = gen_unique_str()
-        status = connect.delete_by_id(collection_new, [0])
+        status = connect.delete_entity_by_id(collection_new, [0])
         assert not status.OK()
 
     def test_add_vectors_delete_vector(self, connect, jac_collection, get_simple_index):
@@ -475,7 +475,7 @@ class TestDeleteBinary:
         assert status.OK()
         delete_ids = [ids[0], ids[-1]]
         query_vecs = [vectors[0], vectors[1], vectors[-1]]
-        status = connect.delete_by_id(jac_collection, delete_ids)
+        status = connect.delete_entity_by_id(jac_collection, delete_ids)
         assert status.OK()
         status = connect.flush([jac_collection])
         search_param = get_search_param(index_type)
@@ -500,7 +500,7 @@ class TestDeleteBinary:
         assert status.OK()
         delete_ids = [ids[0], ids[-1]]
         query_vecs = [vectors[0], vectors[1], vectors[-1]]
-        status = connect.delete_by_id(jac_collection, delete_ids)
+        status = connect.delete_entity_by_id(jac_collection, delete_ids)
         assert status.OK()
         status = connect.flush([jac_collection])
         status, tmp_ids = connect.add_vectors(jac_collection, [vectors[0], vectors[-1]])
@@ -533,13 +533,13 @@ class TestDeleteIdsIngalid(object):
     def test_delete_vector_id_invalid(self, connect, collection, gen_invalid_id):
         invalid_id = gen_invalid_id
         with pytest.raises(Exception) as e:
-            status = connect.delete_by_id(collection, [invalid_id])
+            status = connect.delete_entity_by_id(collection, [invalid_id])
 
     @pytest.mark.level(2)
     def test_delete_vector_ids_invalid(self, connect, collection, gen_invalid_id):
         invalid_id = gen_invalid_id
         with pytest.raises(Exception) as e:
-            status = connect.delete_by_id(collection, [1, invalid_id])
+            status = connect.delete_entity_by_id(collection, [1, invalid_id])
 
 
 class TestCollectionNameInvalid(object):
@@ -556,6 +556,6 @@ class TestCollectionNameInvalid(object):
     @pytest.mark.level(2)
     def test_delete_vectors_with_invalid_collection_name(self, connect, get_collection_name):
         collection_name = get_collection_name
-        status = connect.delete_by_id(collection_name, [1])
+        status = connect.delete_entity_by_id(collection_name, [1])
         assert not status.OK()
 
