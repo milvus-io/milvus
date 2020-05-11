@@ -15,6 +15,7 @@ public class TestSearchVectors {
     int n_list = 1024;
     int default_n_list = 16384;
     int nb = 10000;
+    int small_nb = 10;
     int n_probe = 20;
     int top_k = 10;
     int nq = 5;
@@ -22,6 +23,7 @@ public class TestSearchVectors {
     IndexType indexType = IndexType.IVF_SQ8;
     IndexType defaultIndexType = IndexType.FLAT;
     List<List<Float>> vectors = Utils.genVectors(nb, dimension, true);
+    List<List<Float>> small_vectors = Utils.genVectors(small_nb, dimension, true);
     List<ByteBuffer> vectorsBinary = Utils.genBinaryVectors(nb, dimension);
     List<List<Float>> queryVectors = vectors.subList(0, nq);
     List<ByteBuffer> queryVectorsBinary = vectorsBinary.subList(0, nq);
@@ -188,6 +190,21 @@ public class TestSearchVectors {
                 .withTopK(top_k).build();
         SearchResponse res_search = client.search(searchParam);
         assert (!res_search.getResponse().ok());
+    }
+
+    @Test(dataProvider = "Collection", dataProviderClass = MainClass.class)
+    public void test_search_count_lt_top_k(MilvusClient client, String collectionName) {
+        int top_k_new = 100;
+        InsertParam insertParam = new InsertParam.Builder(collectionName).withFloatVectors(small_vectors).build();
+        client.insert(insertParam);
+        client.flush(collectionName);
+        SearchParam searchParam = new SearchParam.Builder(collectionName)
+                .withFloatVectors(queryVectors)
+                .withParamsInJson(searchParamStr)
+                .withTopK(top_k_new).build();
+        List<List<SearchResponse.QueryResult>> res_search = client.search(searchParam).getQueryResultsList();
+        Assert.assertEquals(res_search.size(), nq);
+        Assert.assertEquals(res_search.get(0).size(), small_vectors.size());
     }
 
     @Test(dataProvider = "Collection", dataProviderClass = MainClass.class)
