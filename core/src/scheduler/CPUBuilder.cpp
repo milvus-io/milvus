@@ -9,7 +9,7 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
-#include "CPUBuilder.h"
+#include "scheduler/CPUBuilder.h"
 #include "utils/Log.h"
 
 namespace milvus {
@@ -19,7 +19,7 @@ void
 CPUBuilder::Start() {
     std::lock_guard<std::mutex> lock(mutex_);
     if (not running_) {
-        running_ = true;;
+        running_ = true;
         thread_ = std::thread(&CPUBuilder::worker_function, this);
     }
 }
@@ -64,4 +64,3 @@ CPUBuilder::worker_function() {
 
 }  // namespace scheduler
 }  // namespace milvus
-

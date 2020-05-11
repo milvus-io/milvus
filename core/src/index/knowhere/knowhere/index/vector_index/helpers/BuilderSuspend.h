@@ -11,12 +11,20 @@
 
 #pragma once
 
+#include "faiss/BuilderSuspend.h"
+
 namespace milvus {
 namespace knowhere {
 
-extern void BuilderSuspend();
+inline void
+BuilderSuspend() {
+    faiss::BuilderSuspend::suspend();
+}
 
-extern void BuildResume();
+inline void
+BuildResume() {
+    faiss::BuilderSuspend::resume();
+}
 
 }  // namespace knowhere
 }  // namespace milvus
