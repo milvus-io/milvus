@@ -13,7 +13,7 @@ from milvus import Milvus, IndexType, MetricType
 from utils import *
 
 dim = 128
-collection_id = "test_search_by_ids"
+collection_id = "test_search_by_id"
 nb = 6000
 vectors = gen_vectors(nb, dim)
 vectors = sklearn.preprocessing.normalize(vectors, axis=1, norm='l2')
@@ -165,7 +165,7 @@ class TestSearchBase:
         top_k = get_top_k
         vectors, ids = self.init_data(connect, collection)
         query_ids = [ids[0]]
-        status, result = connect.search_by_ids(collection, query_ids, top_k, params={})
+        status, result = connect.search_by_id(collection, query_ids, top_k, params={})
         assert status.OK()
         assert len(result[0]) == min(len(vectors), top_k)
         assert result[0][0].distance <= epsilon
@@ -179,7 +179,7 @@ class TestSearchBase:
         '''
         vectors, ids = self.init_data(connect, collection)
         query_ids = [ids[0], ids[0]]
-        status, result = connect.search_by_ids(collection, query_ids, top_k, params={})
+        status, result = connect.search_by_id(collection, query_ids, top_k, params={})
         assert status.OK()
         assert len(result[0]) == min(len(vectors), top_k)
         assert result[0][0].distance <= epsilon
@@ -196,7 +196,7 @@ class TestSearchBase:
         top_k = 2049
         vectors, ids = self.init_data(connect, collection)
         query_ids = [ids[0]]
-        status, result = connect.search_by_ids(collection, query_ids, top_k, params={})
+        status, result = connect.search_by_id(collection, query_ids, top_k, params={})
         assert not status.OK()
 
     def test_search_id_not_existed(self, connect, collection):
@@ -207,7 +207,7 @@ class TestSearchBase:
         '''
         vectors, ids = self.init_data(connect, collection)
         query_ids = non_exist_id
-        status, result = connect.search_by_ids(collection, query_ids, top_k, params={})
+        status, result = connect.search_by_id(collection, query_ids, top_k, params={})
         assert status.OK()
         assert len(result[0]) == 0
 
@@ -221,7 +221,7 @@ class TestSearchBase:
         logging.getLogger().info(query_ids)
         logging.getLogger().info(collection)
         logging.getLogger().info(connect.get_collection_info(collection))
-        status, result = connect.search_by_ids(collection, query_ids, top_k, params={})
+        status, result = connect.search_by_id(collection, query_ids, top_k, params={})
         assert not status.OK()
 
     def test_search_index_l2(self, connect, collection, get_simple_index):
@@ -238,7 +238,7 @@ class TestSearchBase:
         status = connect.create_index(collection, index_type, index_param)
         query_ids = [ids[0]]
         search_param = get_search_param(index_type)
-        status, result = connect.search_by_ids(collection, query_ids, top_k, params=search_param)
+        status, result = connect.search_by_id(collection, query_ids, top_k, params=search_param)
         assert status.OK()
         assert len(result[0]) == min(len(vectors), top_k)
         assert result[0][0].distance <= epsilon
@@ -258,7 +258,7 @@ class TestSearchBase:
         status = connect.create_index(collection, index_type, index_param)
         query_ids = ids[0:nq]
         search_param = get_search_param(index_type)
-        status, result = connect.search_by_ids(collection, query_ids, top_k, params=search_param)
+        status, result = connect.search_by_id(collection, query_ids, top_k, params=search_param)
         assert status.OK()
         assert len(result) == nq
         for i in range(nq):
@@ -281,7 +281,7 @@ class TestSearchBase:
         query_ids = ids[0:nq]
         query_ids[0] = 1
         search_param = get_search_param(index_type)
-        status, result = connect.search_by_ids(collection, query_ids, top_k, params=search_param)
+        status, result = connect.search_by_id(collection, query_ids, top_k, params=search_param)
         assert status.OK()
         assert len(result) == nq
         for i in range(nq):
@@ -298,7 +298,7 @@ class TestSearchBase:
         status = connect.delete_entity_by_id(collection, [query_ids[0]])
         assert status.OK()
         status = connect.flush([collection])
-        status, result = connect.search_by_ids(collection, query_ids, top_k, params={})
+        status, result = connect.search_by_id(collection, query_ids, top_k, params={})
         assert status.OK()
         assert len(result) == nq 
         assert len(result[0]) == 0
@@ -315,7 +315,7 @@ class TestSearchBase:
         vectors, ids = self.init_data(connect, collection)
         query_ids = [ids[0]]
         new_tag = gen_unique_str()
-        status, result = connect.search_by_ids(collection, query_ids, top_k, partition_tags=[new_tag], params={})
+        status, result = connect.search_by_id(collection, query_ids, top_k, partition_tags=[new_tag], params={})
         assert not status.OK() 
         logging.getLogger().info(status)
         assert len(result) == 0
@@ -324,7 +324,7 @@ class TestSearchBase:
         status = connect.create_partition(collection, tag)
         vectors, ids = self.init_data(connect, collection)
         query_ids = [ids[0]]
-        status, result = connect.search_by_ids(collection, query_ids, top_k, partition_tags=[tag], params={})
+        status, result = connect.search_by_id(collection, query_ids, top_k, partition_tags=[tag], params={})
         assert not status.OK()
         logging.getLogger().info(status)
         assert len(result) == 0
@@ -333,7 +333,7 @@ class TestSearchBase:
         status = connect.create_partition(collection, tag)
         vectors, ids = self.init_data_partition(connect, collection, tag)
         query_ids = ids[-1:]
-        status, result = connect.search_by_ids(collection, query_ids, top_k, partition_tags=[tag])
+        status, result = connect.search_by_id(collection, query_ids, top_k, partition_tags=[tag])
         assert status.OK() 
         assert len(result) == 1
         assert len(result[0]) == min(len(vectors), top_k)
@@ -343,7 +343,7 @@ class TestSearchBase:
         status = connect.create_partition(collection, tag)
         vectors, ids = self.init_data_partition(connect, collection, tag)
         query_ids = ids[0:nq]
-        status, result = connect.search_by_ids(collection, query_ids, top_k, partition_tags=[tag])
+        status, result = connect.search_by_id(collection, query_ids, top_k, partition_tags=[tag])
         assert status.OK()
         assert len(result) == nq
         for i in range(nq):
@@ -360,7 +360,7 @@ class TestSearchBase:
         tmp = 2
         query_ids = ids[0:tmp]
         query_ids.extend(new_ids[tmp:nq])
-        status, result = connect.search_by_ids(collection, query_ids, top_k, partition_tags=[tag, new_tag], params={})
+        status, result = connect.search_by_id(collection, query_ids, top_k, partition_tags=[tag, new_tag], params={})
         assert status.OK()
         assert len(result) == nq
         for i in range(nq):
@@ -380,7 +380,7 @@ class TestSearchBase:
         tmp = 2
         query_ids = ids[0:tmp]
         query_ids.extend(new_ids[tmp:nq])
-        status, result = connect.search_by_ids(collection, query_ids, top_k, partition_tags=[new_tag], params={})
+        status, result = connect.search_by_id(collection, query_ids, top_k, partition_tags=[new_tag], params={})
         assert status.OK()
         assert len(result) == nq
         for i in range(nq):
@@ -393,7 +393,7 @@ class TestSearchBase:
                 assert result[i][0].id == new_ids[i]
                 assert result[i][1].distance > epsilon
 
-    # def test_search_by_ids_without_connect(self, dis_connect, collection):
+    # def test_search_by_id_without_connect(self, dis_connect, collection):
     #     '''
     #     target: test search vectors without connection
     #     method: use dis connected instance, call search method and check if search successfully
@@ -401,7 +401,7 @@ class TestSearchBase:
     #     '''
     #     query_ids = [1]
     #     with pytest.raises(Exception) as e:
-    #         status, ids = dis_connect.search_by_ids(collection, query_ids, top_k, params={})
+    #         status, ids = dis_connect.search_by_id(collection, query_ids, top_k, params={})
 
     def test_search_collection_name_not_existed(self, connect, collection):
         '''
@@ -411,7 +411,7 @@ class TestSearchBase:
         '''
         collection_name = gen_unique_str("not_existed_collection")
         query_ids = non_exist_id
-        status, result = connect.search_by_ids(collection_name, query_ids, top_k, params={})
+        status, result = connect.search_by_id(collection_name, query_ids, top_k, params={})
         assert not status.OK()
 
     def test_search_collection_name_None(self, connect, collection):
@@ -423,7 +423,7 @@ class TestSearchBase:
         collection_name = None
         query_ids = non_exist_id
         with pytest.raises(Exception) as e: 
-            status, result = connect.search_by_ids(collection_name, query_ids, top_k, params={})
+            status, result = connect.search_by_id(collection_name, query_ids, top_k, params={})
 
     def test_search_jac(self, connect, jac_collection, get_jaccard_index):
         index_param = get_jaccard_index["index_param"]
@@ -433,7 +433,7 @@ class TestSearchBase:
         assert status.OK()
         query_ids = ids[0:nq]
         search_param = get_search_param(index_type)
-        status, result = connect.search_by_ids(jac_collection, query_ids, top_k, params=search_param)
+        status, result = connect.search_by_id(jac_collection, query_ids, top_k, params=search_param)
         assert status.OK()
         assert len(result) == nq
         for i in range(nq):
@@ -444,7 +444,7 @@ class TestSearchBase:
 
 """
 ******************************************************************
-#  The following cases are used to test `search_by_ids` function 
+#  The following cases are used to test `search_by_id` function 
 #  with invalid collection_name top-k / ids / tags
 ******************************************************************
 """
@@ -467,14 +467,14 @@ class TestSearchParamsInvalid(object):
     def test_search_with_invalid_collectionname(self, connect, get_collection_name):
         collection_name = get_collection_name
         query_ids = non_exist_id
-        status, result = connect.search_by_ids(collection_name, query_ids, top_k, params={})
+        status, result = connect.search_by_id(collection_name, query_ids, top_k, params={})
         assert not status.OK()
 
     @pytest.mark.level(1)
     def test_search_with_invalid_tag_format(self, connect, collection):
         query_ids = non_exist_id
         with pytest.raises(Exception) as e:
-            status, result = connect.search_by_ids(collection_name, query_ids, top_k, partition_tags="tag")
+            status, result = connect.search_by_id(collection_name, query_ids, top_k, partition_tags="tag")
 
     """
     Test search collection with invalid top-k
@@ -491,11 +491,11 @@ class TestSearchParamsInvalid(object):
         top_k = get_top_k
         query_ids = non_exist_id
         if isinstance(top_k, int):
-            status, result = connect.search_by_ids(collection, query_ids, top_k)
+            status, result = connect.search_by_id(collection, query_ids, top_k)
             assert not status.OK()
         else:
             with pytest.raises(Exception) as e:
-                status, result = connect.search_by_ids(collection, query_ids, top_k)
+                status, result = connect.search_by_id(collection, query_ids, top_k)
 
     """
     Test search collection with invalid query ids 
@@ -513,14 +513,14 @@ class TestSearchParamsInvalid(object):
         query_ids = [id]
         if not isinstance(id, int):
             with pytest.raises(Exception) as e:
-                status, result = connect.search_by_ids(collection, query_ids, top_k)
+                status, result = connect.search_by_id(collection, query_ids, top_k)
 
     @pytest.mark.level(2)
     def test_search_with_part_invalid_ids(self, connect, collection, get_ids):
         id = get_ids
         query_ids = [1, id]
         with pytest.raises(Exception) as e:
-            status, result = connect.search_by_ids(collection, query_ids, top_k)
+            status, result = connect.search_by_id(collection, query_ids, top_k)
 
 
 def check_result(result, id):
