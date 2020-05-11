@@ -1,0 +1,58 @@
+[
+    {
+        "server": "athena",
+        "suite_params": [
+            {
+                "suite": "gpu_accuracy.yaml",
+                "image_type": "gpu"
+            }
+        ]
+    },
+    {
+        "server": "poseidon",
+        "suite_params": [
+            {
+                "suite": "070_gpu_search.yaml",
+                "image_type": "gpu"
+            },
+            {
+                "suite": "070_cpu_search.yaml",
+                "image_type": "cpu"
+            },
+            {
+                "suite": "070_gpu_build.yaml",
+                "image_type": "gpu"
+            },
+            {
+                "suite": "cpu_accuracy.yaml",
+                "image_type": "cpu"
+            }
+        ]
+    },
+    {
+        "server": "apollo",
+        "suite_params": [
+            {
+                "suite": "cpu_accuracy_ann.yaml",
+                "image_type": "cpu"
+            },
+            {
+                "suite": "070_cpu_search_stability.yaml",
+                "image_type": "cpu"
+            }
+        ]
+    },
+    {
+        "server": "eros",
+        "suite_params": [
+            {
+                "suite": "070_gpu_stability.yaml",
+                "image_type": "gpu"
+            },
+            {
+                "suite": "gpu_accuracy_ann.yaml",
+                "image_type": "gpu"
+            }
+        ]
+    }
+]
