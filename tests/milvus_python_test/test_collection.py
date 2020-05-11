@@ -189,7 +189,7 @@ class TestCollection:
                  'metric_type': MetricType.L2}
         status = connect.create_collection(param)
         logging.getLogger().info(status)
-        status, result = connect.describe_collection(collection_name)
+        status, result = connect.get_collection_info(collection_name)
         logging.getLogger().info(result)
         assert result.index_file_size == 1024
 
@@ -204,13 +204,13 @@ class TestCollection:
                  'dimension': dim,
                  'index_file_size': index_file_size}
         status = connect.create_collection(param)
-        status, result = connect.describe_collection(collection_name)
+        status, result = connect.get_collection_info(collection_name)
         logging.getLogger().info(result)
         assert result.metric_type == MetricType.L2
 
     """
     ******************************************************************
-      The following cases are used to test `describe_collection` function
+      The following cases are used to test `get_collection_info` function
     ******************************************************************
     """
 
@@ -226,12 +226,12 @@ class TestCollection:
                  'index_file_size': index_file_size,
                  'metric_type': MetricType.L2}
         connect.create_collection(param)
-        status, res = connect.describe_collection(collection_name)
+        status, res = connect.get_collection_info(collection_name)
         assert res.collection_name == collection_name
         assert res.metric_type == MetricType.L2
 
     @pytest.mark.level(2)
-    def test_collection_describe_collection_name_ip(self, connect):
+    def test_collection_get_collection_info_name_ip(self, connect):
         '''
         target: test describe collection created with correct params 
         method: create collection, assert the value returned by describe method
@@ -243,12 +243,12 @@ class TestCollection:
                  'index_file_size': index_file_size,
                  'metric_type': MetricType.IP}
         connect.create_collection(param)
-        status, res = connect.describe_collection(collection_name)
+        status, res = connect.get_collection_info(collection_name)
         assert res.collection_name == collection_name
         assert res.metric_type == MetricType.IP
 
     @pytest.mark.level(2)
-    def test_collection_describe_collection_name_jaccard(self, connect):
+    def test_collection_get_collection_info_name_jaccard(self, connect):
         '''
         target: test describe collection created with correct params 
         method: create collection, assert the value returned by describe method
@@ -260,12 +260,12 @@ class TestCollection:
                  'index_file_size': index_file_size,
                  'metric_type': MetricType.JACCARD}
         connect.create_collection(param)
-        status, res = connect.describe_collection(collection_name)
+        status, res = connect.get_collection_info(collection_name)
         assert res.collection_name == collection_name
         assert res.metric_type == MetricType.JACCARD
 
     @pytest.mark.level(2)
-    def test_collection_describe_collection_name_hamming(self, connect):
+    def test_collection_get_collection_info_name_hamming(self, connect):
         '''
         target: test describe collection created with correct params
         method: create collection, assert the value returned by describe method
@@ -277,11 +277,11 @@ class TestCollection:
                  'index_file_size': index_file_size,
                  'metric_type': MetricType.HAMMING}
         connect.create_collection(param)
-        status, res = connect.describe_collection(collection_name)
+        status, res = connect.get_collection_info(collection_name)
         assert res.collection_name == collection_name
         assert res.metric_type == MetricType.HAMMING
 
-    def test_collection_describe_collection_name_substructure(self, connect):
+    def test_collection_get_collection_info_name_substructure(self, connect):
         '''
         target: test describe collection created with correct params
         method: create collection, assert the value returned by describe method
@@ -293,11 +293,11 @@ class TestCollection:
                  'index_file_size': index_file_size,
                  'metric_type': MetricType.SUBSTRUCTURE}
         connect.create_collection(param)
-        status, res = connect.describe_collection(collection_name)
+        status, res = connect.get_collection_info(collection_name)
         assert res.collection_name == collection_name
         assert res.metric_type == MetricType.SUBSTRUCTURE
 
-    def test_collection_describe_collection_name_superstructure(self, connect):
+    def test_collection_get_collection_info_name_superstructure(self, connect):
         '''
         target: test describe collection created with correct params
         method: create collection, assert the value returned by describe method
@@ -309,13 +309,13 @@ class TestCollection:
                  'index_file_size': index_file_size,
                  'metric_type': MetricType.SUPERSTRUCTURE}
         connect.create_collection(param)
-        status, res = connect.describe_collection(collection_name)
+        status, res = connect.get_collection_info(collection_name)
         assert res.collection_name == collection_name
         assert res.metric_type == MetricType.SUPERSTRUCTURE
 
     # TODO: enable
     @pytest.mark.level(2)
-    def _test_collection_describe_collection_name_multiprocessing(self, connect, args):
+    def _test_collection_get_collection_info_name_multiprocessing(self, connect, args):
         '''
         target: test describe collection created with multiprocess 
         method: create collection, assert the value returned by describe method
@@ -329,7 +329,7 @@ class TestCollection:
         connect.create_collection(param)
 
         def describecollection(milvus):
-            status, res = milvus.describe_collection(collection_name)
+            status, res = milvus.get_collection_info(collection_name)
             assert res.collection_name == collection_name
 
         process_num = 4
@@ -350,7 +350,7 @@ class TestCollection:
     #     expected: describe raise exception
     #     '''
     #     with pytest.raises(Exception) as e:
-    #         status = dis_connect.describe_collection(collection)
+    #         status = dis_connect.get_collection_info(collection)
 
     def test_collection_describe_dimension(self, connect):
         '''
@@ -364,7 +364,7 @@ class TestCollection:
                  'index_file_size': index_file_size,
                  'metric_type': MetricType.L2}
         connect.create_collection(param)
-        status, res = connect.describe_collection(collection_name)
+        status, res = connect.get_collection_info(collection_name)
         assert res.dimension == dim+1
 
     """
@@ -614,14 +614,14 @@ class TestCollection:
 
     """
     ******************************************************************
-      The following cases are used to test `show_collections` function
+      The following cases are used to test `list_collections` function
     ******************************************************************
     """
 
-    def test_show_collections(self, connect):
+    def test_list_collections(self, connect):
         '''
         target: test show collections is correct or not, if collection created
-        method: create collection, assert the value returned by show_collections method is equal to 0
+        method: create collection, assert the value returned by list_collections method is equal to 0
         expected: collection_name in show collections   
         '''
         collection_name = gen_unique_str("test_collection")
@@ -630,14 +630,14 @@ class TestCollection:
                  'index_file_size': index_file_size,
                  'metric_type': MetricType.L2}
         connect.create_collection(param)    
-        status, result = connect.show_collections()
+        status, result = connect.list_collections()
         assert status.OK()
         assert collection_name in result
 
-    def test_show_collections_ip(self, connect):
+    def test_list_collections_ip(self, connect):
         '''
         target: test show collections is correct or not, if collection created
-        method: create collection, assert the value returned by show_collections method is equal to 0
+        method: create collection, assert the value returned by list_collections method is equal to 0
         expected: collection_name in show collections   
         '''
         collection_name = gen_unique_str("test_collection")
@@ -646,14 +646,14 @@ class TestCollection:
                  'index_file_size': index_file_size,
                  'metric_type': MetricType.IP}
         connect.create_collection(param)    
-        status, result = connect.show_collections()
+        status, result = connect.list_collections()
         assert status.OK()
         assert collection_name in result
 
-    def test_show_collections_jaccard(self, connect):
+    def test_list_collections_jaccard(self, connect):
         '''
         target: test show collections is correct or not, if collection created
-        method: create collection, assert the value returned by show_collections method is equal to 0
+        method: create collection, assert the value returned by list_collections method is equal to 0
         expected: collection_name in show collections   
         '''
         collection_name = gen_unique_str("test_collection")
@@ -662,14 +662,14 @@ class TestCollection:
                  'index_file_size': index_file_size,
                  'metric_type': MetricType.JACCARD}
         connect.create_collection(param)    
-        status, result = connect.show_collections()
+        status, result = connect.list_collections()
         assert status.OK()
         assert collection_name in result
 
-    def test_show_collections_hamming(self, connect):
+    def test_list_collections_hamming(self, connect):
         '''
         target: test show collections is correct or not, if collection created
-        method: create collection, assert the value returned by show_collections method is equal to 0
+        method: create collection, assert the value returned by list_collections method is equal to 0
         expected: collection_name in show collections
         '''
         collection_name = gen_unique_str("test_collection")
@@ -678,14 +678,14 @@ class TestCollection:
                  'index_file_size': index_file_size,
                  'metric_type': MetricType.HAMMING}
         connect.create_collection(param)
-        status, result = connect.show_collections()
+        status, result = connect.list_collections()
         assert status.OK()
         assert collection_name in result
 
-    def test_show_collections_substructure(self, connect):
+    def test_list_collections_substructure(self, connect):
         '''
         target: test show collections is correct or not, if collection created
-        method: create collection, assert the value returned by show_collections method is equal to 0
+        method: create collection, assert the value returned by list_collections method is equal to 0
         expected: collection_name in show collections
         '''
         collection_name = gen_unique_str("test_collection")
@@ -694,14 +694,14 @@ class TestCollection:
                  'index_file_size': index_file_size,
                  'metric_type': MetricType.SUBSTRUCTURE}
         connect.create_collection(param)
-        status, result = connect.show_collections()
+        status, result = connect.list_collections()
         assert status.OK()
         assert collection_name in result
 
-    def test_show_collections_superstructure(self, connect):
+    def test_list_collections_superstructure(self, connect):
         '''
         target: test show collections is correct or not, if collection created
-        method: create collection, assert the value returned by show_collections method is equal to 0
+        method: create collection, assert the value returned by list_collections method is equal to 0
         expected: collection_name in show collections
         '''
         collection_name = gen_unique_str("test_collection")
@@ -710,43 +710,43 @@ class TestCollection:
                  'index_file_size': index_file_size,
                  'metric_type': MetricType.SUPERSTRUCTURE}
         connect.create_collection(param)
-        status, result = connect.show_collections()
+        status, result = connect.list_collections()
         assert status.OK()
         assert collection_name in result
 
     # @pytest.mark.level(2)
-    # def test_show_collections_without_connection(self, dis_connect):
+    # def test_list_collections_without_connection(self, dis_connect):
     #     '''
-    #     target: test show_collections, without connection
-    #     method: calling show_collections with correct params, with a disconnected instance
-    #     expected: show_collections raise exception
+    #     target: test list_collections, without connection
+    #     method: calling list_collections with correct params, with a disconnected instance
+    #     expected: list_collections raise exception
     #     '''
     #     with pytest.raises(Exception) as e:
-    #         status = dis_connect.show_collections()
+    #         status = dis_connect.list_collections()
 
     @pytest.mark.level(2)
-    def test_show_collections_no_collection(self, connect):
+    def test_list_collections_no_collection(self, connect):
         '''
         target: test show collections is correct or not, if no collection in db
         method: delete all collections,
-            assert the value returned by show_collections method is equal to []
+            assert the value returned by list_collections method is equal to []
         expected: the status is ok, and the result is equal to []      
         '''
-        status, result = connect.show_collections()
+        status, result = connect.list_collections()
         if result:
             for collection_name in result:
                 connect.drop_collection(collection_name)
         time.sleep(drop_collection_interval_time)
-        status, result = connect.show_collections()
+        status, result = connect.list_collections()
         assert status.OK()
         assert len(result) == 0
 
     # TODO: enable
     @pytest.mark.level(2)
-    def _test_show_collections_multiprocessing(self, connect, args):
+    def _test_list_collections_multiprocessing(self, connect, args):
         '''
         target: test show collections is correct or not with processes
-        method: create collection, assert the value returned by show_collections method is equal to 0
+        method: create collection, assert the value returned by list_collections method is equal to 0
         expected: collection_name in show collections
         '''
         collection_name = gen_unique_str("test_collection")
@@ -756,7 +756,7 @@ class TestCollection:
                  'metric_type': MetricType.L2}
         connect.create_collection(param)
         def showcollections(milvus):
-            status, result = milvus.show_collections()
+            status, result = milvus.list_collections()
             assert status.OK()
             assert collection_name in result
 
@@ -773,7 +773,7 @@ class TestCollection:
 
     """
     ******************************************************************
-      The following cases are used to test `preload_collection` function
+      The following cases are used to test `load_collection` function
     ******************************************************************
     """
 
@@ -793,74 +793,74 @@ class TestCollection:
         return request.param
 
     @pytest.mark.level(1)
-    def test_preload_collection(self, connect, collection, get_simple_index):
+    def test_load_collection(self, connect, collection, get_simple_index):
         index_param = get_simple_index["index_param"]
         index_type = get_simple_index["index_type"]
         status, ids = connect.add_vectors(collection, vectors)
         status = connect.create_index(collection, index_type, index_param)
-        status = connect.preload_collection(collection)
+        status = connect.load_collection(collection)
         assert status.OK()
 
     @pytest.mark.level(1)
-    def test_preload_collection_ip(self, connect, ip_collection, get_simple_index):
+    def test_load_collection_ip(self, connect, ip_collection, get_simple_index):
         index_param = get_simple_index["index_param"]
         index_type = get_simple_index["index_type"]
         status, ids = connect.add_vectors(ip_collection, vectors)
         status = connect.create_index(ip_collection, index_type, index_param)
-        status = connect.preload_collection(ip_collection)
+        status = connect.load_collection(ip_collection)
         assert status.OK()
 
     @pytest.mark.level(1)
-    def test_preload_collection_jaccard(self, connect, jac_collection, get_simple_index):
+    def test_load_collection_jaccard(self, connect, jac_collection, get_simple_index):
         index_param = get_simple_index["index_param"]
         index_type = get_simple_index["index_type"]
         status, ids = connect.add_vectors(jac_collection, vectors)
         status = connect.create_index(jac_collection, index_type, index_param)
-        status = connect.preload_collection(jac_collection)
+        status = connect.load_collection(jac_collection)
         assert status.OK()
 
     @pytest.mark.level(1)
-    def test_preload_collection_hamming(self, connect, ham_collection, get_simple_index):
+    def test_load_collection_hamming(self, connect, ham_collection, get_simple_index):
         index_param = get_simple_index["index_param"]
         index_type = get_simple_index["index_type"]
         status, ids = connect.add_vectors(ham_collection, vectors)
         status = connect.create_index(ham_collection, index_type, index_param)
-        status = connect.preload_collection(ham_collection)
+        status = connect.load_collection(ham_collection)
         assert status.OK()
 
     @pytest.mark.level(2)
-    def test_preload_collection_not_existed(self, connect, collection, get_simple_index):
+    def test_load_collection_not_existed(self, connect, collection, get_simple_index):
         index_param = get_simple_index["index_param"]
         index_type = get_simple_index["index_type"]
         collection_name = gen_unique_str()
         status, ids = connect.add_vectors(collection, vectors)
         status = connect.create_index(collection, index_type, index_param)
-        status = connect.preload_collection(collection_name)
+        status = connect.load_collection(collection_name)
         assert not status.OK()
 
     @pytest.mark.level(2)
-    def test_preload_collection_not_existed_ip(self, connect, ip_collection, get_simple_index):
+    def test_load_collection_not_existed_ip(self, connect, ip_collection, get_simple_index):
         index_param = get_simple_index["index_param"]
         index_type = get_simple_index["index_type"]
         collection_name = gen_unique_str()
         status, ids = connect.add_vectors(ip_collection, vectors)
         status = connect.create_index(ip_collection, index_type, index_param)
-        status = connect.preload_collection(collection_name)
+        status = connect.load_collection(collection_name)
         assert not status.OK()
 
     @pytest.mark.level(1)
-    def test_preload_collection_no_vectors(self, connect, collection):
-        status = connect.preload_collection(collection)
+    def test_load_collection_no_vectors(self, connect, collection):
+        status = connect.load_collection(collection)
         assert status.OK()
 
     @pytest.mark.level(2)
-    def test_preload_collection_no_vectors_ip(self, connect, ip_collection):
-        status = connect.preload_collection(ip_collection)
+    def test_load_collection_no_vectors_ip(self, connect, ip_collection):
+        status = connect.load_collection(ip_collection)
         assert status.OK()
 
     # TODO: psutils get memory usage
     @pytest.mark.level(1)
-    def test_preload_collection_memory_usage(self, connect, collection):
+    def test_load_collection_memory_usage(self, connect, collection):
         pass
 
 
@@ -894,10 +894,10 @@ class TestCollectionInvalid(object):
         with pytest.raises(Exception) as e:
             status = connect.create_collection(param)
 
-    def test_preload_collection_with_invalid_collectionname(self, connect):
+    def test_load_collection_with_invalid_collectionname(self, connect):
         collection_name = ''
         with pytest.raises(Exception) as e:
-            status = connect.preload_collection(collection_name)
+            status = connect.load_collection(collection_name)
 
 
 class TestCreateCollectionDimInvalid(object):
@@ -993,8 +993,8 @@ def search_collection(connect, **params):
         params={"nprobe": params["nprobe"]})
     return status
 
-def preload_collection(connect, **params):
-    status = connect.preload_collection(params["collection_name"])
+def load_collection(connect, **params):
+    status = connect.load_collection(params["collection_name"])
     return status
 
 def has(connect, **params):
@@ -1002,7 +1002,7 @@ def has(connect, **params):
     return status
 
 def show(connect, **params):
-    status, result = connect.show_collections()
+    status, result = connect.list_collections()
     return status
 
 def delete(connect, **params):
@@ -1010,11 +1010,11 @@ def delete(connect, **params):
     return status
 
 def describe(connect, **params):
-    status, result = connect.describe_collection(params["collection_name"])
+    status, result = connect.get_collection_info(params["collection_name"])
     return status
 
 def rowcount(connect, **params):
-    status, result = connect.count_collection(params["collection_name"])
+    status, result = connect.count_entities(params["collection_name"])
     return status
 
 def create_index(connect, **params):
@@ -1028,7 +1028,7 @@ func_map = {
     11:describe,
     12:rowcount,
     13:search_collection,
-    14:preload_collection,
+    14:load_collection,
     15:create_index,
     30:delete
 }

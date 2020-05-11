@@ -48,7 +48,7 @@ class TestMixBase:
             logging.getLogger().info("In create index")
             status = milvus_instance.create_index(collection, index_params)
             logging.getLogger().info(status)
-            status, result = milvus_instance.describe_index(collection)
+            status, result = milvus_instance.get_index_info(collection)
             logging.getLogger().info(result)
         def add_vectors(milvus_instance):
             logging.getLogger().info("In add vectors")
@@ -130,17 +130,17 @@ class TestMixBase:
 
         #describe index
         for i in range(10):
-            status, result = connect.describe_index(collection_list[i])
+            status, result = connect.get_index_info(collection_list[i])
             assert result._index_type == IndexType.FLAT
-            status, result = connect.describe_index(collection_list[10 + i])
+            status, result = connect.get_index_info(collection_list[10 + i])
             assert result._index_type == IndexType.IVFLAT
-            status, result = connect.describe_index(collection_list[20 + i])
+            status, result = connect.get_index_info(collection_list[20 + i])
             assert result._index_type == IndexType.IVF_SQ8
-            status, result = connect.describe_index(collection_list[30 + i])
+            status, result = connect.get_index_info(collection_list[30 + i])
             assert result._index_type == IndexType.FLAT
-            status, result = connect.describe_index(collection_list[40 + i])
+            status, result = connect.get_index_info(collection_list[40 + i])
             assert result._index_type == IndexType.IVFLAT
-            status, result = connect.describe_index(collection_list[50 + i])
+            status, result = connect.get_index_info(collection_list[50 + i])
             assert result._index_type == IndexType.IVF_SQ8
 
         #search

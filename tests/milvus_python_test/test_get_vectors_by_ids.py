@@ -11,7 +11,7 @@ from utils import *
 
 dim = 128
 index_file_size = 10
-collection_id = "get_vectors_by_ids"
+collection_id = "get_entity_by_id"
 DELETE_TIMEOUT = 60
 nprobe = 1
 tag = "1970-01-01"
@@ -22,12 +22,12 @@ tag = "tag"
 class TestGetBase:
     """
     ******************************************************************
-      The following cases are used to test .get_vectors_by_ids` function
+      The following cases are used to test .get_entity_by_id` function
     ******************************************************************
     """
     def test_get_vector_A(self, connect, collection):
         '''
-        target: test.get_vectors_by_ids
+        target: test.get_entity_by_id
         method: add vector, and get
         expected: status ok, vector returned
         '''
@@ -36,13 +36,13 @@ class TestGetBase:
         assert status.OK()
         status = connect.flush([collection])
         assert status.OK()
-        status, res = connect.get_vectors_by_ids(collection, ids) 
+        status, res = connect.get_entity_by_id(collection, ids) 
         assert status.OK()
         assert_equal_vector(res[0], vector[0])
 
     def test_get_vector_B(self, connect, collection):
         '''
-        target: test.get_vectors_by_ids
+        target: test.get_entity_by_id
         method: add vector, and get
         expected: status ok, vector returned
         '''
@@ -52,14 +52,14 @@ class TestGetBase:
         status = connect.flush([collection])
         assert status.OK()
         length = 100
-        status, res = connect.get_vectors_by_ids(collection, ids[:length])
+        status, res = connect.get_entity_by_id(collection, ids[:length])
         assert status.OK()
         for i in range(length):
             assert_equal_vector(res[i], vectors[i])
 
     def test_get_vector_C_limit(self, connect, collection):
         '''
-        target: test.get_vectors_by_ids
+        target: test.get_entity_by_id
         method: add vector, and get, limit > 1000
         expected: status ok, vector returned
         '''
@@ -68,12 +68,12 @@ class TestGetBase:
         assert status.OK()
         status = connect.flush([collection])
         assert status.OK()
-        status, res = connect.get_vectors_by_ids(collection, ids)
+        status, res = connect.get_entity_by_id(collection, ids)
         assert not status.OK()
 
     def test_get_vector_partition(self, connect, collection):
         '''
-        target: test.get_vectors_by_ids
+        target: test.get_entity_by_id
         method: add vector, and get
         expected: status ok, vector returned
         '''
@@ -85,14 +85,14 @@ class TestGetBase:
         status = connect.flush([collection])
         assert status.OK()
         length = 100
-        status, res = connect.get_vectors_by_ids(collection, ids[:length])
+        status, res = connect.get_entity_by_id(collection, ids[:length])
         assert status.OK()
         for i in range(length):
             assert_equal_vector(res[i], vectors[i])
 
     def test_get_vector_multi_same_ids(self, connect, collection):
         '''
-        target: test.get_vectors_by_ids
+        target: test.get_entity_by_id
         method: add vectors, with the same id, get vector by the given id
         expected: status ok, get one vector 
         '''
@@ -102,7 +102,7 @@ class TestGetBase:
         status, ids = connect.add_vectors(collection, vectors, ids=ids)
         status = connect.flush([collection])
         assert status.OK()
-        status, res = connect.get_vectors_by_ids(collection, [0]) 
+        status, res = connect.get_entity_by_id(collection, [0]) 
         assert status.OK()
         assert_equal_vector(res[0], vectors[0])
 
@@ -121,7 +121,7 @@ class TestGetBase:
 
     def test_get_vector_after_delete(self, connect, collection, get_id):
         '''
-        target: test.get_vectors_by_ids
+        target: test.get_entity_by_id
         method: add vectors, and delete, get vector by the given id
         expected: status ok, get one vector
         '''
@@ -131,17 +131,17 @@ class TestGetBase:
         status = connect.flush([collection])
         assert status.OK()
         id = get_id
-        status = connect.delete_by_id(collection, [ids[id]])
+        status = connect.delete_entity_by_id(collection, [ids[id]])
         assert status.OK()
         status = connect.flush([collection])
         assert status.OK()
-        status, res = connect.get_vectors_by_ids(collection, [ids[id]])
+        status, res = connect.get_entity_by_id(collection, [ids[id]])
         assert status.OK()
         assert not len(res[0])
 
     def test_get_vector_after_delete_with_partition(self, connect, collection, get_id):
         '''
-        target: test.get_vectors_by_ids
+        target: test.get_entity_by_id
         method: add vectors into partition, and delete, get vector by the given id
         expected: status ok, get one vector
         '''
@@ -152,11 +152,11 @@ class TestGetBase:
         status = connect.flush([collection])
         assert status.OK()
         id = get_id
-        status = connect.delete_by_id(collection, [ids[id]])
+        status = connect.delete_entity_by_id(collection, [ids[id]])
         assert status.OK()
         status = connect.flush([collection])
         assert status.OK()
-        status, res = connect.get_vectors_by_ids(collection, [ids[id]])
+        status, res = connect.get_entity_by_id(collection, [ids[id]])
         assert status.OK()
         assert not len(res[0])
 
@@ -171,7 +171,7 @@ class TestGetBase:
         assert status.OK()
         status = connect.flush([collection])
         assert status.OK()
-        status, res = connect.get_vectors_by_ids(collection, [1]) 
+        status, res = connect.get_entity_by_id(collection, [1]) 
         assert status.OK()
         assert not len(res[0])
 
@@ -187,14 +187,14 @@ class TestGetBase:
         status = connect.flush([collection])
         assert status.OK()
         collection_new = gen_unique_str()
-        status, res = connect.get_vectors_by_ids(collection_new, [1]) 
+        status, res = connect.get_entity_by_id(collection_new, [1]) 
         assert not status.OK()
 
 
 class TestGetIndexedVectors:
     """
     ******************************************************************
-      The following cases are used to test .get_vectors_by_ids` function
+      The following cases are used to test .get_entity_by_id` function
     ******************************************************************
     """
     @pytest.fixture(
@@ -240,13 +240,13 @@ class TestGetIndexedVectors:
         status = connect.create_index(collection, index_type, index_param)
         assert status.OK()
         id = get_id
-        status, res = connect.get_vectors_by_ids(collection, [ids[id]])
+        status, res = connect.get_entity_by_id(collection, [ids[id]])
         assert status.OK()
         assert_equal_vector(res[0], vectors[id])
 
     def test_get_vector_after_delete(self, connect, collection, get_simple_index, get_id):
         '''
-        target: test.get_vectors_by_ids
+        target: test.get_entity_by_id
         method: add vectors, and delete, get vector by the given id
         expected: status ok, get one vector
         '''
@@ -260,17 +260,17 @@ class TestGetIndexedVectors:
         status = connect.create_index(collection, index_type, index_param)
         assert status.OK()
         id = get_id
-        status = connect.delete_by_id(collection, [ids[id]])
+        status = connect.delete_entity_by_id(collection, [ids[id]])
         assert status.OK()
         status = connect.flush([collection])
         assert status.OK()
-        status, res = connect.get_vectors_by_ids(collection, [ids[id]])
+        status, res = connect.get_entity_by_id(collection, [ids[id]])
         assert status.OK()
         assert not len(res[0])
 
     def test_get_vector_partition(self, connect, collection, get_simple_index, get_id):
         '''
-        target: test.get_vectors_by_ids
+        target: test.get_entity_by_id
         method: add vector, and get
         expected: status ok, vector returned
         '''
@@ -286,7 +286,7 @@ class TestGetIndexedVectors:
         status = connect.create_index(collection, index_type, index_param)
         assert status.OK()
         id = get_id
-        status, res = connect.get_vectors_by_ids(collection, [ids[id]])
+        status, res = connect.get_entity_by_id(collection, [ids[id]])
         assert status.OK()
         assert_equal_vector(res[0], vectors[id])
 
@@ -294,12 +294,12 @@ class TestGetIndexedVectors:
 class TestGetBinary:
     """
     ******************************************************************
-      The following cases are used to test .get_vectors_by_ids` function
+      The following cases are used to test .get_entity_by_id` function
     ******************************************************************
     """
     def test_get_vector_A(self, connect, jac_collection):
         '''
-        target: test.get_vectors_by_ids
+        target: test.get_entity_by_id
         method: add vector, and get
         expected: status ok, vector returned
         '''
@@ -308,13 +308,13 @@ class TestGetBinary:
         assert status.OK()
         status = connect.flush([jac_collection])
         assert status.OK()
-        status, res = connect.get_vectors_by_ids(jac_collection, [ids[0]]) 
+        status, res = connect.get_entity_by_id(jac_collection, [ids[0]]) 
         assert status.OK()
         assert_equal_vector(res[0], vector[0])
 
     def test_get_vector_B(self, connect, jac_collection):
         '''
-        target: test.get_vectors_by_ids
+        target: test.get_entity_by_id
         method: add vector, and get
         expected: status ok, vector returned
         '''
@@ -323,13 +323,13 @@ class TestGetBinary:
         assert status.OK()
         status = connect.flush([jac_collection])
         assert status.OK()
-        status, res = connect.get_vectors_by_ids(jac_collection, [ids[0]])
+        status, res = connect.get_entity_by_id(jac_collection, [ids[0]])
         assert status.OK()
         assert_equal_vector(res[0], vectors[0])
 
     def test_get_vector_multi_same_ids(self, connect, jac_collection):
         '''
-        target: test.get_vectors_by_ids
+        target: test.get_entity_by_id
         method: add vectors, with the same id, get vector by the given id
         expected: status ok, get one vector 
         '''
@@ -339,7 +339,7 @@ class TestGetBinary:
         status, ids = connect.add_vectors(jac_collection, vectors, ids=ids)
         status = connect.flush([jac_collection])
         assert status.OK()
-        status, res = connect.get_vectors_by_ids(jac_collection, [0]) 
+        status, res = connect.get_entity_by_id(jac_collection, [0]) 
         assert status.OK()
         assert_equal_vector(res[0], vectors[0])
 
@@ -354,7 +354,7 @@ class TestGetBinary:
         assert status.OK()
         status = connect.flush([jac_collection])
         assert status.OK()
-        status, res = connect.get_vectors_by_ids(jac_collection, [1]) 
+        status, res = connect.get_entity_by_id(jac_collection, [1]) 
         assert status.OK()
         assert not len(res[0])
 
@@ -370,12 +370,12 @@ class TestGetBinary:
         status = connect.flush([jac_collection])
         assert status.OK()
         collection_new = gen_unique_str()
-        status, res = connect.get_vectors_by_ids(collection_new, [1]) 
+        status, res = connect.get_entity_by_id(collection_new, [1]) 
         assert not status.OK()
 
     def test_get_vector_partition(self, connect, jac_collection):
         '''
-        target: test.get_vectors_by_ids
+        target: test.get_entity_by_id
         method: add vector, and get
         expected: status ok, vector returned
         '''
@@ -385,7 +385,7 @@ class TestGetBinary:
         assert status.OK()
         status = connect.flush([jac_collection])
         assert status.OK()
-        status, res = connect.get_vectors_by_ids(jac_collection, [ids[0]])
+        status, res = connect.get_entity_by_id(jac_collection, [ids[0]])
         assert status.OK()
         assert_equal_vector(res[0], vectors[0])
 
@@ -407,7 +407,7 @@ class TestGetVectorIdIngalid(object):
     def test_get_vector_id_invalid(self, connect, collection, gen_invalid_id):
         invalid_id = gen_invalid_id
         with pytest.raises(Exception) as e:
-            status = connect.get_vectors_by_ids(collection, [invalid_id])
+            status = connect.get_entity_by_id(collection, [invalid_id])
 
 
 class TestCollectionNameInvalid(object):
@@ -425,5 +425,5 @@ class TestCollectionNameInvalid(object):
     def test_get_vectors_with_invalid_collection_name(self, connect, get_collection_name):
         collection_name = get_collection_name
         vectors = gen_vectors(1, dim)
-        status, result = connect.get_vectors_by_ids(collection_name, [1])
+        status, result = connect.get_entity_by_id(collection_name, [1])
         assert not status.OK()
