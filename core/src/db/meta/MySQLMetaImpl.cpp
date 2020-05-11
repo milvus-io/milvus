@@ -1472,6 +1472,47 @@ MySQLMetaImpl::CreatePartition(const std::string& collection_id, const std::stri
 }
 
 Status
+MySQLMetaImpl::HasPartition(const std::string& collection_id, const std::string& tag, bool& has_or_not) {
+    try {
+        server::MetricCollector metric;
+        mysqlpp::StoreQueryResult res;
+
+        // trim side-blank of tag, only compare valid characters
+        // for example: " ab cd " is treated as "ab cd"
+        std::string valid_tag = tag;
+        server::StringHelpFunctions::TrimStringBlank(valid_tag);
+
+        {
+            mysqlpp::ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab_);
+
+            bool is_null_connection = (connectionPtr == nullptr);
+            if (is_null_connection) {
+                return Status(DB_ERROR, "Failed to connect to meta server(mysql)");
+            }
+
+            mysqlpp::Query statement = connectionPtr->query();
+            statement << "SELECT table_id FROM " << META_TABLES << " WHERE owner_table = " << mysqlpp::quote
+                      << collection_id << " AND partition_tag = " << mysqlpp::quote << valid_tag << " AND state <> "
+                      << std::to_string(CollectionSchema::TO_DELETE) << ";";
+
+            LOG_ENGINE_DEBUG_ << "HasPartition: " << statement.str();
+
+            res = statement.store();
+        }  // Scoped Connection
+
+        if (res.num_rows() > 0) {
+            has_or_not = true;
+        } else {
+            has_or_not = false;
+        }
+    } catch (std::exception& e) {
+        return HandleException("Failed to lookup partition", e.what());
+    }
+
+    return Status::OK();
+}
+
+Status
 MySQLMetaImpl::DropPartition(const std::string& partition_name) {
     return DropCollection(partition_name);
 }
