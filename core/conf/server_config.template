@@ -9,7 +9,7 @@
 # is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 # or implied. See the License for the specific language governing permissions and limitations under the License.
 
-version: 0.3
+version: 0.4
 
 #----------------------+------------------------------------------------------------+------------+-----------------+
 # Server Config        | Description                                                | Type       | Default         |
@@ -191,6 +191,30 @@ wal_config:
   buffer_size: 256
   wal_path: @MILVUS_DB_PATH@/wal
 
+#----------------------+------------------------------------------------------------+------------+-----------------+
+# Logs                 | Description                                                | Type       | Default         |
+#----------------------+------------------------------------------------------------+------------+-----------------+
+# trace.enable         | Whether to enable trace level logging in Milvus.           | Boolean    | true            |
+#----------------------+------------------------------------------------------------+------------+-----------------+
+# debug.enable         | Whether to enable debug level logging in Milvus.           | Boolean    | true            |
+#----------------------+------------------------------------------------------------+------------+-----------------+
+# info.enable          | Whether to enable info level logging in Milvus.            | Boolean    | true            |
+#----------------------+------------------------------------------------------------+------------+-----------------+
+# warning.enable       | Whether to enable warning level logging in Milvus.         | Boolean    | true            |
+#----------------------+------------------------------------------------------------+------------+-----------------+
+# error.enable         | Whether to enable error level logging in Milvus.           | Boolean    | true            |
+#----------------------+------------------------------------------------------------+------------+-----------------+
+# fatal.enable         | Whether to enable fatal level logging in Milvus.           | Boolean    | true            |
+#----------------------+------------------------------------------------------------+------------+-----------------+
+# path                 | Location of logs files.                                    | String     |                 |
+#----------------------+------------------------------------------------------------+------------+-----------------+
+# max_log_file_size    | Max size of a single log file. After exceeding this value, | Integer    | 256 (MB)        |
+#                      | rename this file to xxx.log.n, means the nth file.         |            |                 |
+#----------------------+------------------------------------------------------------+------------+-----------------+
+# delete_exceeds       | Milvus will keep up to ${delete_exceeds} log files per     | Integer    | 10              |
+#                      | level. For example, after xxx.log.11 file is generated,    |            |                 |
+#                      | the xxx.log.1 file will be deleted.                        |            |                 |
+#----------------------+------------------------------------------------------------+------------+-----------------+
 logs:
   trace.enable: true
   debug.enable: true

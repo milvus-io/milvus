@@ -90,7 +90,7 @@ if (MILVUS_VERSION_MAJOR STREQUAL ""
         OR MILVUS_VERSION_MINOR STREQUAL ""
         OR MILVUS_VERSION_PATCH STREQUAL "")
     message(WARNING "Failed to determine Milvus version from git branch name")
-    set(MILVUS_VERSION "0.8.0")
+    set(MILVUS_VERSION "0.9.0")
 endif ()
 
 message(STATUS "Build version = ${MILVUS_VERSION}")
@@ -217,8 +217,6 @@ else ()
         @ONLY)
 endif ()
 
-configure_file(${CMAKE_CURRENT_SOURCE_DIR}/conf/log_config.template ${CMAKE_CURRENT_SOURCE_DIR}/conf/log_config.conf)
-
 install(DIRECTORY scripts/
         DESTINATION scripts
         FILE_PERMISSIONS OWNER_EXECUTE OWNER_WRITE OWNER_READ
@@ -232,7 +230,6 @@ install(DIRECTORY scripts/migration
         WORLD_EXECUTE WORLD_READ)
 install(FILES
         conf/server_config.yaml
-        conf/log_config.conf
         DESTINATION
         conf)
 

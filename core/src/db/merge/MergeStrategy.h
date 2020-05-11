@@ -8,44 +8,31 @@
 // Unless required by applicable law or agreed to in writing, software distributed under the License
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
-#ifdef MILVUS_GPU_VERSION
+
 #pragma once
 
-#include <condition_variable>
-#include <deque>
-#include <limits>
-#include <list>
 #include <memory>
-#include <mutex>
-#include <queue>
+#include <set>
 #include <string>
-#include <thread>
 #include <unordered_map>
 #include <vector>
 
-#include "config/handler/GpuResourceConfigHandler.h"
-#include "scheduler/selector/Pass.h"
+#include "db/Types.h"
+#include "db/meta/FilesHolder.h"
+#include "utils/Status.h"
 
 namespace milvus {
-namespace scheduler {
+namespace engine {
 
-class FaissIVFSQ8HPass : public Pass, public server::GpuResourceConfigHandler {
+using MergeFilesGroups = std::vector<meta::SegmentsSchema>;
+
+class MergeStrategy {
  public:
-    FaissIVFSQ8HPass() = default;
+    virtual Status
+    RegroupFiles(meta::FilesHolder& files_holder, MergeFilesGroups& files_groups) = 0;
+};  // MergeStrategy
 
- public:
-    void
-    Init() override;
+using MergeStrategyPtr = std::shared_ptr<MergeStrategy>;
 
-    bool
-    Run(const TaskPtr& task) override;
-
- private:
-    int64_t idx_ = 0;
-};
-
-using FaissIVFSQ8HPassPtr = std::shared_ptr<FaissIVFSQ8HPass>;
-
-}  // namespace scheduler
+}  // namespace engine
 }  // namespace milvus
-#endif

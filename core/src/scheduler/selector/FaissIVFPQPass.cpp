@@ -64,11 +64,10 @@ FaissIVFPQPass::Run(const TaskPtr& task) {
                                     "search", 0);
         res_ptr = ResMgrInst::GetInstance()->GetResource("cpu");
     } else {
-        auto best_device_id = count_ % search_gpus_.size();
-        LOG_SERVER_DEBUG_ << LogOut("[%s][%d] FaissIVFPQPass: nq > gpu_search_threshold, specify gpu %d to search!",
-                                    "search", 0, best_device_id);
-        ++count_;
-        res_ptr = ResMgrInst::GetInstance()->GetResource(ResourceType::GPU, search_gpus_[best_device_id]);
+        LOG_SERVER_DEBUG_ << LogOut("[%s][%d] FaissIVFPQPass: nq >= gpu_search_threshold, specify gpu %d to search!",
+                                    "search", 0, search_gpus_[idx_]);
+        res_ptr = ResMgrInst::GetInstance()->GetResource(ResourceType::GPU, search_gpus_[idx_]);
+        idx_ = (idx_ + 1) % search_gpus_.size();
     }
     auto label = std::make_shared<SpecResLabel>(res_ptr);
     task->label() = label;

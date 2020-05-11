@@ -8,43 +8,22 @@
 // Unless required by applicable law or agreed to in writing, software distributed under the License
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
-#ifdef MILVUS_GPU_VERSION
+
 #pragma once
 
-#include <condition_variable>
-#include <deque>
-#include <list>
-#include <memory>
-#include <mutex>
-#include <queue>
-#include <string>
-#include <thread>
-#include <unordered_map>
-#include <vector>
+#include "MergeManager.h"
+#include "db/Options.h"
 
-#include "config/handler/GpuResourceConfigHandler.h"
-#include "scheduler/selector/Pass.h"
+#include <memory>
 
 namespace milvus {
-namespace scheduler {
+namespace engine {
 
-class BuildIndexPass : public Pass, public server::GpuResourceConfigHandler {
+class MergeManagerFactory {
  public:
-    BuildIndexPass() = default;
-
- public:
-    void
-    Init() override;
-
-    bool
-    Run(const TaskPtr& task) override;
-
- private:
-    uint64_t idx_ = 0;
+    static MergeManagerPtr
+    Build(const meta::MetaPtr& meta_ptr, const DBOptions& options);
 };
 
-using BuildIndexPassPtr = std::shared_ptr<BuildIndexPass>;
-
-}  // namespace scheduler
+}  // namespace engine
 }  // namespace milvus
-#endif
