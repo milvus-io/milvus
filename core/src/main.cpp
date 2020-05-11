@@ -78,6 +78,10 @@ main(int argc, char* argv[]) {
     std::string app_name = argv[0];
     milvus::Status s;
 
+    /*
+        Get a milvus::server::Server instance.
+        The milvus::server::Server is a singlton class.
+    */
     milvus::server::Server& server = milvus::server::Server::GetInstance();
 
     if (argc < 2) {
@@ -132,6 +136,11 @@ main(int argc, char* argv[]) {
     signal(SIGUSR2, milvus::server::SignalUtil::HandleSignal);
     signal(SIGTERM, milvus::server::SignalUtil::HandleSignal);
 
+    /*
+        call milvus::server::Server Init function,
+        the input parameters are incoming in background.
+        call milvus::server::Server Start function, compelte the startup process.
+    */
     server.Init(start_daemonized, pid_filename, config_filename, log_config_file);
 
     s = server.Start();
