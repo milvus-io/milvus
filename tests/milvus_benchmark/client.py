@@ -18,8 +18,11 @@ INDEX_MAP = {
     "ivf_sq8": IndexType.IVF_SQ8,
     "nsg": IndexType.RNSG,
     "ivf_sq8h": IndexType.IVF_SQ8H,
-    "ivf_pq": IndexType.IVF_PQ
+    "ivf_pq": IndexType.IVF_PQ,
+    "hnsw": IndexType.HNSW,
+    "annoy": IndexType.ANNOY
 }
+epsilon = 0.1
 
 def time_wrapper(func):
     """
@@ -35,24 +38,23 @@ def time_wrapper(func):
 
 
 class MilvusClient(object):
-    def __init__(self, table_name=None, ip=None, port=None, timeout=60):
-        self._milvus = Milvus()
-        self._table_name = table_name
+    def __init__(self, collection_name=None, ip=None, port=None, timeout=60):
+        self._collection_name = collection_name
         try:
             i = 1
             start_time = time.time()
             if not ip:
-                self._milvus.connect(
+                self._milvus = Milvus(
                     host = SERVER_HOST_DEFAULT,
                     port = SERVER_PORT_DEFAULT)
             else:
                 # retry connect for remote server
                 while time.time() < start_time + timeout:
                     try:
-                        self._milvus.connect(
+                        self._milvus = Milvus(
                             host = ip,
                             port = port)
-                        if self._milvus.connected() is True:
+                        if self._milvus.server_status():
                             logger.debug("Try connect times: %d, %s" % (i, round(time.time() - start_time, 2)))
                             break
                     except Exception as e:
@@ -63,16 +65,23 @@ class MilvusClient(object):
             raise e
 
     def __str__(self):
-        return 'Milvus table %s' % self._table_name
+        return 'Milvus collection %s' % self._collection_name
 
     def check_status(self, status):
         if not status.OK():
             logger.error(status.message)
-            # raise Exception("Status not ok")
+            raise Exception("Status not ok")
 
-    def create_table(self, table_name, dimension, index_file_size, metric_type):
-        if not self._table_name:
-            self._table_name = table_name
+    def check_result_ids(self, result):
+        for index, item in enumerate(result):
+            if item[0].distance >= epsilon:
+                logger.error(index)
+                logger.error(item[0].distance)
+                raise Exception("Distance wrong")
+
+    def create_collection(self, collection_name, dimension, index_file_size, metric_type):
+        if not self._collection_name:
+            self._collection_name = collection_name
         if metric_type == "l2":
             metric_type = MetricType.L2
         elif metric_type == "ip":
@@ -81,61 +90,82 @@ class MilvusClient(object):
             metric_type = MetricType.JACCARD
         elif metric_type == "hamming":
             metric_type = MetricType.HAMMING
+        elif metric_type == "sub":
+            metric_type = MetricType.SUBSTRUCTURE
+        elif metric_type == "super":
+            metric_type = MetricType.SUPERSTRUCTURE
         else:
             logger.error("Not supported metric_type: %s" % metric_type)
-        create_param = {'table_name': table_name,
+        create_param = {'collection_name': collection_name,
                  'dimension': dimension,
                  'index_file_size': index_file_size, 
                  "metric_type": metric_type}
-        status = self._milvus.create_table(create_param)
+        status = self._milvus.create_collection(create_param)
         self.check_status(status)
 
     @time_wrapper
     def insert(self, X, ids=None):
-        status, result = self._milvus.add_vectors(self._table_name, X, ids)
+        status, result = self._milvus.add_vectors(self._collection_name, X, ids)
         self.check_status(status)
         return status, result
 
     @time_wrapper
-    def create_index(self, index_type, nlist):
-        index_params = {
-            "index_type": INDEX_MAP[index_type],
-            "nlist": nlist,
-        }
-        logger.info("Building index start, table_name: %s, index_params: %s" % (self._table_name, json.dumps(index_params)))
-        status = self._milvus.create_index(self._table_name, index=index_params)
+    def delete_vectors(self, ids):
+        status = self._milvus.delete_by_id(self._collection_name, ids)
+        self.check_status(status)
+
+    @time_wrapper
+    def flush(self):
+        status = self._milvus.flush([self._collection_name])
+        self.check_status(status)
+
+    @time_wrapper
+    def compact(self):
+        status = self._milvus.compact(self._collection_name)
+        self.check_status(status)
+
+    @time_wrapper
+    def create_index(self, index_type, index_param=None):
+        index_type = INDEX_MAP[index_type]
+        logger.info("Building index start, collection_name: %s, index_type: %s" % (self._collection_name, index_type))
+        if index_param:
+            logger.info(index_param)
+        status = self._milvus.create_index(self._collection_name, index_type, index_param)
         self.check_status(status)
 
     def describe_index(self):
-        status, result = self._milvus.describe_index(self._table_name)
+        status, result = self._milvus.describe_index(self._collection_name)
+        self.check_status(status)
         index_type = None
         for k, v in INDEX_MAP.items():
             if result._index_type == v:
                 index_type = k
                 break
-        nlist = result._nlist
-        res = {
-            "index_type": index_type,
-            "nlist": nlist
-        }
-        return res
+        return {"index_type": index_type, "index_param": result._params}
 
     def drop_index(self):
-        logger.info("Drop index: %s" % self._table_name)
-        return self._milvus.drop_index(self._table_name)
+        logger.info("Drop index: %s" % self._collection_name)
+        return self._milvus.drop_index(self._collection_name)
 
     @time_wrapper
-    def query(self, X, top_k, nprobe):
-        status, result = self._milvus.search_vectors(self._table_name, top_k, nprobe, X)
+    def query(self, X, top_k, search_param=None):
+        status, result = self._milvus.search_vectors(self._collection_name, top_k, query_records=X, params=search_param)
         self.check_status(status)
         return result
 
-    def count(self):
-        return self._milvus.get_table_row_count(self._table_name)[1]
+    @time_wrapper
+    def query_ids(self, top_k, ids, search_param=None):
+        status, result = self._milvus.search_by_ids(self._collection_name, ids, top_k, params=search_param)
+        self.check_result_ids(result)
+        return result
 
-    def delete(self, timeout=60):
-        logger.info("Start delete table: %s" % self._table_name)
-        self._milvus.delete_table(self._table_name)
+    def count(self):
+        return self._milvus.count_collection(self._collection_name)[1]
+
+    def delete(self, timeout=120):
+        timeout = int(timeout)
+        logger.info("Start delete collection: %s" % self._collection_name)
+        self._milvus.drop_collection(self._collection_name)
         i = 0
         while i < timeout:
             if self.count():
@@ -145,24 +175,26 @@ class MilvusClient(object):
             else:
                 break
         if i >= timeout:
-            logger.error("Delete table timeout")
+            logger.error("Delete collection timeout")
 
     def describe(self):
-        return self._milvus.describe_table(self._table_name)
+        return self._milvus.describe_collection(self._collection_name)
 
-    def show_tables(self):
-        return self._milvus.show_tables()
+    def show_collections(self):
+        return self._milvus.show_collections()
 
-    def exists_table(self, table_name=None):
-        if table_name is None:
-            table_name = self._table_name
-        status, res = self._milvus.has_table(table_name)
-        self.check_status(status)
+    def exists_collection(self, collection_name=None):
+        if collection_name is None:
+            collection_name = self._collection_name
+        status, res = self._milvus.has_collection(collection_name)
+        # self.check_status(status)
         return res
 
     @time_wrapper
-    def preload_table(self):
-        return self._milvus.preload_table(self._table_name, timeout=3000)
+    def preload_collection(self):
+        status = self._milvus.preload_collection(self._collection_name, timeout=3000)
+        self.check_status(status)
+        return status
 
     def get_server_version(self):
         status, res = self._milvus.server_version()
@@ -192,20 +224,20 @@ class MilvusClient(object):
         return res
 
 
-def fit(table_name, X):
+def fit(collection_name, X):
     milvus = Milvus()
     milvus.connect(host = SERVER_HOST_DEFAULT, port = SERVER_PORT_DEFAULT) 
     start = time.time()
-    status, ids = milvus.add_vectors(table_name, X)
+    status, ids = milvus.add_vectors(collection_name, X)
     end = time.time()
     logger(status, round(end - start, 2))
 
 
-def fit_concurrent(table_name, process_num, vectors):
+def fit_concurrent(collection_name, process_num, vectors):
     processes = []
 
     for i in range(process_num):
-        p = Process(target=fit, args=(table_name, vectors, ))
+        p = Process(target=fit, args=(collection_name, vectors, ))
         processes.append(p)
         p.start()
     for p in processes:             
@@ -216,12 +248,12 @@ if __name__ == "__main__":
     import numpy
     import sklearn.preprocessing
 
-    # table_name = "tset_test"
-    # # table_name = "test_tset1"
-    # m = MilvusClient(table_name)
+    # collection_name = "tset_test"
+    # # collection_name = "test_tset1"
+    # m = MilvusClient(collection_name)
     # m.delete()
     # time.sleep(2)
-    # m.create_table(table_name, 128, 20, "ip")
+    # m.create_collection(collection_name, 128, 20, "ip")
 
     # print(m.describe())
     # print(m.count())

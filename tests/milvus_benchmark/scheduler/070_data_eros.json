@@ -1,0 +1,11 @@
+[
+    {
+        "server": "poseidon",
+        "suite_params": [
+            {
+                "suite": "gpu_accuracy_ann.yaml",
+                "image_type": "gpu"
+            }
+        ]
+    }
+]
