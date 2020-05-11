@@ -1808,6 +1808,11 @@ class TestCreateIndexParamsInvalid(object):
         assert result._index_type == IndexType.FLAT
 
 class TestIndexAsync:
+    @pytest.fixture(scope="function", autouse=True)
+    def skip_http_check(self, args):
+        if args["handler"] == "HTTP":
+            pytest.skip("skip in http mode")
+
     """
     ******************************************************************
       The following cases are used to test `create_index` function

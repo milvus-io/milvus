@@ -678,6 +678,11 @@ class TestAddBase:
                 assert status.OK()
 
 class TestAddAsync:
+    @pytest.fixture(scope="function", autouse=True)
+    def skip_http_check(self, args):
+        if args["handler"] == "HTTP":
+            pytest.skip("skip in http mode")
+
     @pytest.fixture(
         scope="function",
         params=[
