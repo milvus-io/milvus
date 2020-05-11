@@ -220,7 +220,7 @@ class TestSearchBase:
         query_ids = non_exist_id
         logging.getLogger().info(query_ids)
         logging.getLogger().info(collection)
-        logging.getLogger().info(connect.describe_collection(collection))
+        logging.getLogger().info(connect.get_collection_info(collection))
         status, result = connect.search_by_ids(collection, query_ids, top_k, params={})
         assert not status.OK()
 
@@ -295,7 +295,7 @@ class TestSearchBase:
     def test_search_index_delete(self, connect, collection):
         vectors, ids = self.init_data(connect, collection)
         query_ids = ids[0:nq]
-        status = connect.delete_by_id(collection, [query_ids[0]])
+        status = connect.delete_entity_by_id(collection, [query_ids[0]])
         assert status.OK()
         status = connect.flush([collection])
         status, result = connect.search_by_ids(collection, query_ids, top_k, params={})
