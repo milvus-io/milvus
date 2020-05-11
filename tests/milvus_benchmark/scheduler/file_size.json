@@ -1,0 +1,11 @@
+[
+    {
+        "server": "athena",
+        "suite_params": [
+            {
+                "suite": "file_size.yaml",
+                "image_type": "cpu"
+            }
+        ]
+    }
+ ]

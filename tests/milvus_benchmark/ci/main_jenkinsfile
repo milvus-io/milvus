@@ -6,17 +6,14 @@ pipeline {
     }
 
     parameters{
-        choice choices: ['gpu', 'cpu'], description: 'cpu or gpu version', name: 'IMAGE_TYPE'
         string defaultValue: 'master', description: 'server image version', name: 'IMAGE_VERSION', trim: true
-        choice choices: ['poseidon', 'eros', 'apollo', 'athena'], description: 'server host', name: 'SERVER_HOST'
-        string defaultValue: 'gpu_search_performance_sift1m.yaml', description: 'test suite config yaml', name: 'SUITE', trim: true
+        string defaultValue: '080_data.json', description: 'test suite config yaml', name: 'CONFIG_FILE', trim: true
         string defaultValue: '09509e53-9125-4f5d-9ce8-42855987ad67', description: 'git credentials', name: 'GIT_USER', trim: true
     }
 
     environment {
-        IMAGE_TAG = "${params.IMAGE_VERSION}-${params.IMAGE_TYPE}-ubuntu18.04-release"
         HELM_URL = "https://github.com/milvus-io/milvus-helm.git"
-        HELM_BRANCH = "0.6.0"
+        HELM_BRANCH = "master"
         TEST_URL = "git@192.168.1.105:Test/milvus_benchmark.git"
         TEST_BRANCH = "master"
         TEST_LIB_URL = "http://192.168.1.105:6060/Test/milvus_metrics.git"
@@ -37,8 +34,8 @@ pipeline {
                             componet: test
                         spec:
                           containers:
-                          - name: milvus-testframework
-                            image: registry.zilliz.com/milvus/milvus-test:v0.2
+                          - name: milvus-test-env
+                            image: registry.zilliz.com/milvus/milvus-test-env:v0.2
                             command:
                             - cat
                             tty: true
@@ -79,10 +76,25 @@ pipeline {
             }
 
             stages {
+                stage("Publish Daily Docker images") {
+                    steps {
+                        container('milvus-test-env') {
+                            script {
+                                boolean isNightlyTest = isTimeTriggeredBuild()
+                                if (isNightlyTest) {
+                                    build job: 'milvus-publish-daily-docker', wait: false
+                                } else {
+                                    echo "Skip publish daily docker images ..."
+                                }
+                            }
+                        }
+                    }
+                }
+
                 stage("Deploy Test") {
                     steps {
                         gitlabCommitStatus(name: 'Deploy Test') {
-                            container('milvus-testframework') {
+                            container('milvus-test-env') {
                                 script {
                                     print "In Deploy Test Stage"
                                     load "${env.WORKSPACE}/ci/jenkinsfile/deploy_test.groovy"
@@ -95,7 +107,7 @@ pipeline {
                 stage ("Cleanup Env") {
                     steps {
                         gitlabCommitStatus(name: 'Cleanup Env') {
-                            container('milvus-testframework') {
+                            container('milvus-test-env') {
                                 script {
                                     load "${env.WORKSPACE}/ci/jenkinsfile/cleanup.groovy"
                                 }
@@ -106,7 +118,7 @@ pipeline {
             }
             post {
                 always {
-                    container('milvus-testframework') {
+                    container('milvus-test-env') {
                         script {
                             load "${env.WORKSPACE}/ci/jenkinsfile/cleanup.groovy"
                         }
@@ -130,4 +142,11 @@ pipeline {
             }
         }
     }
+}
+
+boolean isTimeTriggeredBuild() {
+    if (currentBuild.getBuildCauses('hudson.triggers.TimerTrigger$TimerTriggerCause').size() != 0) {
+        return true
+    }
+    return false
 }
