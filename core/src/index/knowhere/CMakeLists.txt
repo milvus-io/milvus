@@ -13,24 +13,27 @@
 
 include_directories(${INDEX_SOURCE_DIR}/knowhere)
 include_directories(${INDEX_SOURCE_DIR}/thirdparty)
-include_directories(${INDEX_SOURCE_DIR}/thirdparty/SPTAG/AnnService)
 
-set(SPTAG_SOURCE_DIR ${INDEX_SOURCE_DIR}/thirdparty/SPTAG)
-file(GLOB HDR_FILES
-        ${SPTAG_SOURCE_DIR}/AnnService/inc/Core/*.h
-        ${SPTAG_SOURCE_DIR}/AnnService/inc/Core/Common/*.h
-        ${SPTAG_SOURCE_DIR}/AnnService/inc/Core/BKT/*.h
-        ${SPTAG_SOURCE_DIR}/AnnService/inc/Core/KDT/*.h
-        ${SPTAG_SOURCE_DIR}/AnnService/inc/Helper/*.h)
-file(GLOB SRC_FILES
-        ${SPTAG_SOURCE_DIR}/AnnService/src/Core/*.cpp
-        ${SPTAG_SOURCE_DIR}/AnnService/src/Core/Common/*.cpp
-        ${SPTAG_SOURCE_DIR}/AnnService/src/Core/BKT/*.cpp
-        ${SPTAG_SOURCE_DIR}/AnnService/src/Core/KDT/*.cpp
-        ${SPTAG_SOURCE_DIR}/AnnService/src/Helper/*.cpp)
+if (MILVUS_SUPPORT_SPTAG)
+    include_directories(${INDEX_SOURCE_DIR}/thirdparty/SPTAG/AnnService)
 
-if (NOT TARGET SPTAGLibStatic)
-    add_library(SPTAGLibStatic STATIC ${SRC_FILES} ${HDR_FILES})
+    set(SPTAG_SOURCE_DIR ${INDEX_SOURCE_DIR}/thirdparty/SPTAG)
+    file(GLOB HDR_FILES
+            ${SPTAG_SOURCE_DIR}/AnnService/inc/Core/*.h
+            ${SPTAG_SOURCE_DIR}/AnnService/inc/Core/Common/*.h
+            ${SPTAG_SOURCE_DIR}/AnnService/inc/Core/BKT/*.h
+            ${SPTAG_SOURCE_DIR}/AnnService/inc/Core/KDT/*.h
+            ${SPTAG_SOURCE_DIR}/AnnService/inc/Helper/*.h)
+    file(GLOB SRC_FILES
+            ${SPTAG_SOURCE_DIR}/AnnService/src/Core/*.cpp
+            ${SPTAG_SOURCE_DIR}/AnnService/src/Core/Common/*.cpp
+            ${SPTAG_SOURCE_DIR}/AnnService/src/Core/BKT/*.cpp
+            ${SPTAG_SOURCE_DIR}/AnnService/src/Core/KDT/*.cpp
+            ${SPTAG_SOURCE_DIR}/AnnService/src/Helper/*.cpp)
+
+    if (NOT TARGET SPTAGLibStatic)
+        add_library(SPTAGLibStatic STATIC ${SRC_FILES} ${HDR_FILES})
+    endif ()
 endif ()
 
 set(external_srcs
@@ -40,7 +43,6 @@ set(external_srcs
         )
 
 set(index_srcs
-        knowhere/index/vector_index/adapter/SptagAdapter.cpp
         knowhere/index/vector_index/adapter/VectorAdapter.cpp
         knowhere/index/vector_index/helpers/FaissIO.cpp
         knowhere/index/vector_index/helpers/IndexParameter.cpp
@@ -61,19 +63,33 @@ set(index_srcs
         knowhere/index/vector_index/IndexIVFPQ.cpp
         knowhere/index/vector_index/IndexIVFSQ.cpp
         knowhere/index/vector_index/IndexNSG.cpp
-        knowhere/index/vector_index/IndexSPTAG.cpp
         knowhere/index/vector_index/IndexType.cpp
         knowhere/index/vector_index/VecIndexFactory.cpp
         knowhere/index/vector_index/IndexAnnoy.cpp
         )
 
+if (MILVUS_SUPPORT_SPTAG)
+    set(index_srcs ${index_srcs}
+            knowhere/index/vector_index/adapter/SptagAdapter.cpp
+            knowhere/index/vector_index/IndexSPTAG.cpp
+            )
+endif ()
+
 set(depend_libs
-        SPTAGLibStatic
         faiss
         gomp
         gfortran
         pthread
         )
+
+if (MILVUS_SUPPORT_SPTAG)
+    set(depend_libs
+            SPTAGLibStatic
+            ${depend_libs}
+            )
+endif ()
+
+
 if (FAISS_WITH_MKL)
     set(depend_libs ${depend_libs}
             "-Wl,--start-group \
@@ -109,7 +125,6 @@ if (MILVUS_GPU_VERSION)
             knowhere/index/vector_index/helpers/Cloner.cpp
             knowhere/index/vector_index/helpers/FaissGpuResourceMgr.cpp
             )
-
 endif ()
 
 if (NOT TARGET knowhere)
