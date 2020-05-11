@@ -51,6 +51,7 @@ class ConnectionWrapper {
     std::shared_ptr<milvus::Connection>& Connection() {
         return connection_;
     }
+
  private:
     std::shared_ptr<milvus::Connection> connection_;
 };
@@ -179,7 +180,8 @@ ClientTest::InsertEntities(std::shared_ptr<milvus::Connection>& conn) {
 //        std::cout << "InsertEntities function call status: " << stat.message() << std::endl;
 //        std::cout << "Returned id array count: " << record_ids.size() << std::endl;
 
-        stat = conn->FlushCollection(parameters_.collection_name_);
+        std::vector<std::string> collections = {parameters_.collection_name_};
+        stat = conn->Flush(collections);
     }
 
     return true;
@@ -212,11 +214,11 @@ ClientTest::PreloadCollection() {
         return false;
     }
 
-    std::string title = "Preload table " + parameters_.collection_name_;
+    std::string title = "Load table " + parameters_.collection_name_;
     milvus_sdk::TimeRecorder rc(title);
-    milvus::Status stat = conn->PreloadCollection(parameters_.collection_name_);
+    milvus::Status stat = conn->LoadCollection(parameters_.collection_name_);
     if (!stat.ok()) {
-        std::string msg = "PreloadCollection function call status: " + stat.message();
+        std::string msg = "LoadCollection function call status: " + stat.message();
         std::cout << msg << std::endl;
         return false;
     }
@@ -233,13 +235,13 @@ ClientTest::GetCollectionInfo() {
     }
 
     milvus::CollectionParam collection_param;
-    milvus::Status stat = conn->DescribeCollection(parameters_.collection_name_, collection_param);
+    milvus::Status stat = conn->GetCollectionInfo(parameters_.collection_name_, collection_param);
 
     milvus::IndexParam index_param;
-    stat = conn->DescribeIndex(parameters_.collection_name_, index_param);
+    stat = conn->GetIndexInfo(parameters_.collection_name_, index_param);
 
     int64_t row_count = 0;
-    stat = conn->CountCollection(parameters_.collection_name_, row_count);
+    stat = conn->CountEntities(parameters_.collection_name_, row_count);
 
     parameters_.index_type_ = (int64_t)index_param.index_type;
     if (!IsSupportedIndex(parameters_.index_type_)) {
