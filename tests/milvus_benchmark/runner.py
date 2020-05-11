@@ -4,6 +4,7 @@ import pdb
 import time
 import random
 from multiprocessing import Process
+from itertools import product
 import numpy as np
 import sklearn.preprocessing
 from client import MilvusClient
@@ -25,6 +26,7 @@ SIFT_SRC_DATA_DIR = '/test/milvus/raw_data/sift1b/'
 DEEP_SRC_DATA_DIR = '/test/milvus/raw_data/deep1b/'
 JACCARD_SRC_DATA_DIR = '/test/milvus/raw_data/jaccard/'
 HAMMING_SRC_DATA_DIR = '/test/milvus/raw_data/jaccard/'
+STRUCTURE_SRC_DATA_DIR = '/test/milvus/raw_data/jaccard/'
 SIFT_SRC_GROUNDTRUTH_DATA_DIR = SIFT_SRC_DATA_DIR + 'gnd'
 
 WARM_TOP_K = 1
@@ -59,6 +61,8 @@ def gen_file_name(idx, dimension, data_type):
         fname = JACCARD_SRC_DATA_DIR+fname
     elif data_type == "hamming":
         fname = HAMMING_SRC_DATA_DIR+fname
+    elif data_type == "sub" or data_type == "super":
+        fname = STRUCTURE_SRC_DATA_DIR+fname
     return fname
 
 
@@ -76,6 +80,8 @@ def get_vectors_from_binary(nq, dimension, data_type):
         file_name = JACCARD_SRC_DATA_DIR+'query.npy'
     elif data_type == "hamming":
         file_name = HAMMING_SRC_DATA_DIR+'query.npy'
+    elif data_type == "sub" or data_type == "super":
+        file_name = STRUCTURE_SRC_DATA_DIR+'query.npy'
     data = np.load(file_name)
     vectors = data[0:nq].tolist()
     return vectors
@@ -92,7 +98,7 @@ class Runner(object):
             X = X.astype(np.float32)
         elif metric_type == "l2":
             X = X.astype(np.float32)
-        elif metric_type == "jaccard" or metric_type == "hamming":
+        elif metric_type in ["jaccard", "hamming", "sub", "super"]:
             tmp = []
             for index, item in enumerate(X):
                 new_vector = bytes(np.packbits(item, axis=-1).tolist())
@@ -100,11 +106,26 @@ class Runner(object):
             X = tmp
         return X
 
-    def do_insert(self, milvus, table_name, data_type, dimension, size, ni):
+    def generate_combinations(self, args):
+        if isinstance(args, list):
+            args = [el if isinstance(el, list) else [el] for el in args]
+            return [list(x) for x in product(*args)]
+        elif isinstance(args, dict):
+            flat = []
+            for k, v in args.items():
+                if isinstance(v, list):
+                    flat.append([(k, el) for el in v])
+                else:
+                    flat.append([(k, v)])
+            return [dict(x) for x in product(*flat)]
+        else:
+            raise TypeError("No args handling exists for %s" % type(args).__name__)
+
+    def do_insert(self, milvus, collection_name, data_type, dimension, size, ni):
         '''
         @params:
             mivlus: server connect instance
-            dimension: table dimensionn
+            dimension: collection dimensionn
             # index_file_size: size trigger file merge
             size: row count of vectors to be insert
             ni: row count of vectors to be insert each time
@@ -127,12 +148,12 @@ class Runner(object):
                 vectors_per_file = 10000
         elif data_type == "sift":
             vectors_per_file = SIFT_VECTORS_PER_FILE
-        elif data_type == "jaccard" or data_type == "hamming":
+        elif data_type in ["jaccard", "hamming", "sub", "super"]:
             vectors_per_file = JACCARD_VECTORS_PER_FILE
         else:
             raise Exception("data_type: %s not supported" % data_type)
         if size % vectors_per_file or ni > vectors_per_file:
-            raise Exception("Not invalid table size or ni")
+            raise Exception("Not invalid collection size or ni")
         file_num = size // vectors_per_file
         for i in range(file_num):
             file_name = gen_file_name(i, dimension, data_type)
@@ -150,6 +171,8 @@ class Runner(object):
                     logger.info("Start id: %s, end id: %s" % (start_id, end_id))
                     ids = [k for k in range(start_id, end_id)]
                     status, ids = milvus.insert(vectors, ids=ids)
+                    # milvus.flush()
+                    logger.debug(milvus.count())
                     ni_end_time = time.time()
                     total_time = total_time + ni_end_time - ni_start_time
 
@@ -160,9 +183,9 @@ class Runner(object):
         bi_res["ni_time"] = ni_time
         return bi_res
 
-    def do_query(self, milvus, table_name, top_ks, nqs, nprobe, run_count=1):
+    def do_query(self, milvus, collection_name, top_ks, nqs, run_count=1, search_param=None):
         bi_res = []
-        (data_type, table_size, index_file_size, dimension, metric_type) = parser.table_parser(table_name)
+        (data_type, collection_size, index_file_size, dimension, metric_type) = parser.collection_parser(collection_name)
         base_query_vectors = get_vectors_from_binary(MAX_NQ, dimension, data_type)
         for nq in nqs:
             tmp_res = []
@@ -174,7 +197,7 @@ class Runner(object):
                 for i in range(run_count):
                     logger.info("Start run query, run %d of %s" % (i+1, run_count))
                     start_time = time.time()
-                    query_res = milvus.query(vectors, top_k, nprobe)
+                    query_res = milvus.query(vectors, top_k, search_param=search_param)
                     interval_time = time.time() - start_time
                     if (i == 0) or (min_query_time > interval_time):
                         min_query_time = interval_time
@@ -183,12 +206,18 @@ class Runner(object):
             bi_res.append(tmp_res)
         return bi_res
 
-    def do_query_ids(self, milvus, table_name, top_k, nq, nprobe):
-        (data_type, table_size, index_file_size, dimension, metric_type) = parser.table_parser(table_name)
+    def do_query_qps(self, milvus, query_vectors, top_k, search_param):
+        start_time = time.time()
+        result = milvus.query(query_vectors, top_k, search_param) 
+        end_time = time.time()
+        return end_time - start_time
+
+    def do_query_ids(self, milvus, collection_name, top_k, nq, search_param=None):
+        (data_type, collection_size, index_file_size, dimension, metric_type) = parser.collection_parser(collection_name)
         base_query_vectors = get_vectors_from_binary(MAX_NQ, dimension, data_type)
         vectors = base_query_vectors[0:nq]
         logger.info("Start query, query params: top-k: {}, nq: {}, actually length of vectors: {}".format(top_k, nq, len(vectors)))
-        query_res = milvus.query(vectors, top_k, nprobe)
+        query_res = milvus.query(vectors, top_k, search_param=search_param)
         result_ids = []
         result_distances = []
         for result in query_res:
@@ -201,12 +230,12 @@ class Runner(object):
             result_distances.append(tmp_distance)
         return result_ids, result_distances
 
-    def do_query_acc(self, milvus, table_name, top_k, nq, nprobe, id_store_name):
-        (data_type, table_size, index_file_size, dimension, metric_type) = parser.table_parser(table_name)
+    def do_query_acc(self, milvus, collection_name, top_k, nq, id_store_name, search_param=None):
+        (data_type, collection_size, index_file_size, dimension, metric_type) = parser.collection_parser(collection_name)
         base_query_vectors = get_vectors_from_binary(MAX_NQ, dimension, data_type)
         vectors = base_query_vectors[0:nq]
         logger.info("Start query, query params: top-k: {}, nq: {}, actually length of vectors: {}".format(top_k, nq, len(vectors)))
-        query_res = milvus.query(vectors, top_k, nprobe)
+        query_res = milvus.query(vectors, top_k, search_param=None)
         # if file existed, cover it
         if os.path.isfile(id_store_name):
             os.remove(id_store_name)
@@ -250,8 +279,8 @@ class Runner(object):
     Implementation based on:
         https://github.com/facebookresearch/faiss/blob/master/benchs/datasets.py
     """
-    def get_groundtruth_ids(self, table_size):
-        fname = GROUNDTRUTH_MAP[str(table_size)]
+    def get_groundtruth_ids(self, collection_size):
+        fname = GROUNDTRUTH_MAP[str(collection_size)]
         fname = SIFT_SRC_GROUNDTRUTH_DATA_DIR + "/" + fname
         a = np.fromfile(fname, dtype='int32')
         d = a[0]

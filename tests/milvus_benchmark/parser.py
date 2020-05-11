@@ -12,29 +12,29 @@ def operations_parser(operations):
         return (run_type, run_params)
 
 
-def table_parser(table_name):
-    tmp = table_name.split("_")
+def collection_parser(collection_name):
+    tmp = collection_name.split("_")
     # if len(tmp) != 5:
     #     return None
     data_type = tmp[0]
-    table_size_unit = tmp[1][-1]
-    table_size = tmp[1][0:-1]
-    if table_size_unit == "m":
-        table_size = int(table_size) * 1000000
-    elif table_size_unit == "b":
-        table_size = int(table_size) * 1000000000
+    collection_size_unit = tmp[1][-1]
+    collection_size = tmp[1][0:-1]
+    if collection_size_unit == "m":
+        collection_size = int(collection_size) * 1000000
+    elif collection_size_unit == "b":
+        collection_size = int(collection_size) * 1000000000
     index_file_size = int(tmp[2])
     dimension = int(tmp[3])
     metric_type = str(tmp[4])
-    return (data_type, table_size, index_file_size, dimension, metric_type)
+    return (data_type, collection_size, index_file_size, dimension, metric_type)
 
 
-def parse_ann_table_name(table_name):
-    data_type = table_name.split("_")[0]
-    dimension = int(table_name.split("_")[1])
-    metric = table_name.split("_")[-1]
-    # metric = table_name.attrs['distance']
-    # dimension = len(table_name["train"][0])
+def parse_ann_collection_name(collection_name):
+    data_type = collection_name.split("_")[0]
+    dimension = int(collection_name.split("_")[1])
+    metric = collection_name.split("_")[-1]
+    # metric = collection_name.attrs['distance']
+    # dimension = len(collection_name["train"][0])
     if metric == "euclidean":
         metric_type = "l2"
     elif metric  == "angular":

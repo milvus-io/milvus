@@ -6,3 +6,5 @@ logs/
 __pycache__/
 venv
 .idea
+
+suites/

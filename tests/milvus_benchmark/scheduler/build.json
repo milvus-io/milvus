@@ -1,0 +1,11 @@
+[
+    {
+        "server": "athena",
+        "suite_params": [
+            {
+                "suite": "debug_build.yaml",
+                "image_type": "gpu"
+            }
+        ]
+    }
+]
