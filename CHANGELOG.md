@@ -41,6 +41,7 @@ Please mark all change in change log and use the issue from GitHub
 -   \#2206 Log file rotating
 -   \#2240 Obtain running rpc requests information
 -   \#2268 Intelligently detect openblas library in system to avoid installing from source code every time
+-   \#2283 Suspend the building tasks when any query comand arrives.
 
 ## Improvement
 -   \#221 Refactor LOG macro
