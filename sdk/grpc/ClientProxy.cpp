@@ -205,11 +205,14 @@ ClientProxy::CreateCollection(const CollectionParam& param) {
 
 bool
 ClientProxy::HasCollection(const std::string& collection_name) {
-    Status status = Status::OK();
-    ::milvus::grpc::CollectionName grpc_collection_name;
-    grpc_collection_name.set_collection_name(collection_name);
-    bool result = client_ptr_->HasCollection(grpc_collection_name, status);
-    return result;
+    try {
+        Status status = Status::OK();
+        ::milvus::grpc::CollectionName grpc_collection_name;
+        grpc_collection_name.set_collection_name(collection_name);
+        return client_ptr_->HasCollection(grpc_collection_name, status);
+    } catch (std::exception& ex) {
+        return false;
+    }
 }
 
 Status
@@ -553,6 +556,19 @@ ClientProxy::CreatePartition(const PartitionParam& partition_param) {
         return status;
     } catch (std::exception& ex) {
         return Status(StatusCode::UnknownError, "Failed to create partition: " + std::string(ex.what()));
+    }
+}
+
+bool
+ClientProxy::HasPartition(const std::string& collection_name, const std::string& partition_tag) const {
+    try {
+        Status status = Status::OK();
+        ::milvus::grpc::PartitionParam grpc_partition_param;
+        grpc_partition_param.set_collection_name(collection_name);
+        grpc_partition_param.set_tag(partition_tag);
+        return client_ptr_->HasPartition(grpc_partition_param, status);
+    } catch (std::exception& ex) {
+        return false;
     }
 }
 

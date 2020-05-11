@@ -189,6 +189,11 @@ ConnectionImpl::CreatePartition(const PartitionParam& partition_param) {
     return client_proxy_->CreatePartition(partition_param);
 }
 
+bool
+ConnectionImpl::HasPartition(const std::string& collection_name, const std::string& partition_tag) const {
+    return client_proxy_->HasPartition(collection_name, partition_tag);
+}
+
 Status
 ConnectionImpl::ShowPartitions(const std::string& collection_name, PartitionTagList& partition_array) const {
     return client_proxy_->ShowPartitions(collection_name, partition_array);

@@ -543,6 +543,19 @@ class Connection {
     CreatePartition(const PartitionParam& partition_param) = 0;
 
     /**
+     * @brief Has partition method
+     *
+     * This method is used to test existence of collection's partition
+     *
+     * @param collection_name, target collection's name.
+     * @param partition_tag, target partition's tag.
+     *
+     * @return Indicate if partition is created successfully
+     */
+    virtual bool
+    HasPartition(const std::string& collection_name, const std::string& partition_tag) const = 0;
+
+    /**
      * @brief Show all partitions method
      *
      * This method is used to show all partitions(return their tags)

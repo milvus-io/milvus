@@ -92,6 +92,9 @@ class GrpcClient {
     Status
     CreatePartition(const grpc::PartitionParam& partition_param);
 
+    bool
+    HasPartition(const grpc::PartitionParam& partition_param, Status& status) const;
+
     Status
     ShowPartitions(const grpc::CollectionName& collection_name, grpc::PartitionList& partition_array) const;
 

@@ -151,8 +151,12 @@ ClientTest::Test(const std::string& address, const std::string& port) {
     }
 
     {  // search vectors
+        std::string partition_tag = std::to_string(TARGET_PARTITION);
+        bool exist = conn->HasPartition(COLLECTION_NAME, partition_tag);
+        std::cout << "Partition " << partition_tag << (exist ? " exists" : " doesn't exist") << std::endl;
+
         std::cout << "Search in correct partition" << std::endl;
-        std::vector<std::string> partition_tags = {std::to_string(TARGET_PARTITION)};
+        std::vector<std::string> partition_tags = {partition_tag};
         milvus::TopKQueryResult topk_query_result;
         milvus_sdk::Utils::DoSearch(conn, COLLECTION_NAME, partition_tags, TOP_K, NPROBE, search_entity_array,
                                     topk_query_result);

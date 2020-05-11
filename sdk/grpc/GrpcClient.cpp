@@ -391,6 +391,24 @@ GrpcClient::CreatePartition(const grpc::PartitionParam& partition_param) {
     return Status::OK();
 }
 
+bool
+GrpcClient::HasPartition(const grpc::PartitionParam& partition_param, Status& status) const {
+    ClientContext context;
+    ::milvus::grpc::BoolReply response;
+    ::grpc::Status grpc_status = stub_->HasPartition(&context, partition_param, &response);
+
+    if (!grpc_status.ok()) {
+        std::cerr << "HasPartition gRPC failed!" << std::endl;
+        status = Status(StatusCode::RPCFailed, grpc_status.error_message());
+    }
+    if (response.status().error_code() != grpc::SUCCESS) {
+        std::cerr << response.status().reason() << std::endl;
+        status = Status(StatusCode::ServerFailed, response.status().reason());
+    }
+    status = Status::OK();
+    return response.bool_reply();
+}
+
 Status
 GrpcClient::ShowPartitions(const grpc::CollectionName& collection_name, grpc::PartitionList& partition_array) const {
     ClientContext context;

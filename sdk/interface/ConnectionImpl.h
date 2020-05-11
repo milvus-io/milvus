@@ -119,6 +119,9 @@ class ConnectionImpl : public Connection {
     Status
     CreatePartition(const PartitionParam& partition_param) override;
 
+    bool
+    HasPartition(const std::string& collection_name, const std::string& partition_tag) const override;
+
     Status
     ShowPartitions(const std::string& collection_name, PartitionTagList& partition_tag_array) const override;
 
