@@ -31,6 +31,7 @@
 #include "cache/CpuCacheMgr.h"
 #include "cache/GpuCacheMgr.h"
 #include "db/IDGenerator.h"
+#include "db/merge/MergeManagerFactory.h"
 #include "engine/EngineFactory.h"
 #include "index/thirdparty/faiss/utils/distances.h"
 #include "insert/MemManagerFactory.h"
@@ -78,6 +79,7 @@ DBImpl::DBImpl(const DBOptions& options)
     : options_(options), initialized_(false), merge_thread_pool_(1, 1), index_thread_pool_(1, 1) {
     meta_ptr_ = MetaFactory::Build(options.meta_, options.mode_);
     mem_mgr_ = MemManagerFactory::Build(meta_ptr_, options_);
+    merge_mgr_ptr_ = MergeManagerFactory::Build(meta_ptr_, options_);
 
     if (options_.wal_enable_) {
         wal::MXLogConfiguration mxlog_config;
@@ -1907,101 +1909,6 @@ DBImpl::StartMergeTask() {
 }
 
 Status
-DBImpl::MergeFiles(const std::string& collection_id, meta::FilesHolder& files_holder) {
-    // const std::lock_guard<std::mutex> lock(flush_merge_compact_mutex_);
-
-    LOG_ENGINE_DEBUG_ << "Merge files for collection: " << collection_id;
-
-    // step 1: create collection file
-    meta::SegmentSchema collection_file;
-    collection_file.collection_id_ = collection_id;
-    collection_file.file_type_ = meta::SegmentSchema::NEW_MERGE;
-    Status status = meta_ptr_->CreateCollectionFile(collection_file);
-    if (!status.ok()) {
-        LOG_ENGINE_ERROR_ << "Failed to create collection: " << status.ToString();
-        return status;
-    }
-
-    // step 2: merge files
-    /*
-    ExecutionEnginePtr index =
-        EngineFactory::Build(collection_file.dimension_, collection_file.location_,
-    (EngineType)collection_file.engine_type_, (MetricType)collection_file.metric_type_, collection_file.nlist_);
-*/
-    meta::SegmentsSchema updated;
-
-    std::string new_segment_dir;
-    utils::GetParentPath(collection_file.location_, new_segment_dir);
-    auto segment_writer_ptr = std::make_shared<segment::SegmentWriter>(new_segment_dir);
-
-    // attention: here is a copy, not reference, since files_holder.UnmarkFile will change the array internal
-    milvus::engine::meta::SegmentsSchema files = files_holder.HoldFiles();
-    for (auto& file : files) {
-        server::CollectMergeFilesMetrics metrics;
-        std::string segment_dir_to_merge;
-        utils::GetParentPath(file.location_, segment_dir_to_merge);
-        segment_writer_ptr->Merge(segment_dir_to_merge, collection_file.file_id_);
-
-        files_holder.UnmarkFile(file);
-
-        auto file_schema = file;
-        file_schema.file_type_ = meta::SegmentSchema::TO_DELETE;
-        updated.push_back(file_schema);
-        auto size = segment_writer_ptr->Size();
-        if (size >= file_schema.index_file_size_) {
-            break;
-        }
-    }
-
-    // step 3: serialize to disk
-    try {
-        status = segment_writer_ptr->Serialize();
-        fiu_do_on("DBImpl.MergeFiles.Serialize_ThrowException", throw std::exception());
-        fiu_do_on("DBImpl.MergeFiles.Serialize_ErrorStatus", status = Status(DB_ERROR, ""));
-    } catch (std::exception& ex) {
-        std::string msg = "Serialize merged index encounter exception: " + std::string(ex.what());
-        LOG_ENGINE_ERROR_ << msg;
-        status = Status(DB_ERROR, msg);
-    }
-
-    if (!status.ok()) {
-        LOG_ENGINE_ERROR_ << "Failed to persist merged segment: " << new_segment_dir << ". Error: " << status.message();
-
-        // if failed to serialize merge file to disk
-        // typical error: out of disk space, out of memory or permission denied
-        collection_file.file_type_ = meta::SegmentSchema::TO_DELETE;
-        status = meta_ptr_->UpdateCollectionFile(collection_file);
-        LOG_ENGINE_DEBUG_ << "Failed to update file to index, mark file: " << collection_file.file_id_
-                          << " to to_delete";
-
-        return status;
-    }
-
-    // step 4: update collection files state
-    // if index type isn't IDMAP, set file type to TO_INDEX if file size exceed index_file_size
-    // else set file type to RAW, no need to build index
-    if (!utils::IsRawIndexType(collection_file.engine_type_)) {
-        collection_file.file_type_ = (segment_writer_ptr->Size() >= collection_file.index_file_size_)
-                                         ? meta::SegmentSchema::TO_INDEX
-                                         : meta::SegmentSchema::RAW;
-    } else {
-        collection_file.file_type_ = meta::SegmentSchema::RAW;
-    }
-    collection_file.file_size_ = segment_writer_ptr->Size();
-    collection_file.row_count_ = segment_writer_ptr->VectorCount();
-    updated.push_back(collection_file);
-    status = meta_ptr_->UpdateCollectionFiles(updated);
-    LOG_ENGINE_DEBUG_ << "New merged segment " << collection_file.segment_id_ << " of size "
-                      << segment_writer_ptr->Size() << " bytes";
-
-    if (options_.insert_cache_immediately_) {
-        segment_writer_ptr->Cache();
-    }
-
-    return status;
-}
-
-Status
 DBImpl::MergeHybridFiles(const std::string& collection_id, meta::FilesHolder& files_holder) {
     // const std::lock_guard<std::mutex> lock(flush_merge_compact_mutex_);
 
@@ -2096,44 +2003,22 @@ DBImpl::MergeHybridFiles(const std::string& collection_id, meta::FilesHolder& fi
     return status;
 }
 
-Status
-DBImpl::BackgroundMergeFiles(const std::string& collection_id) {
-    const std::lock_guard<std::mutex> lock(flush_merge_compact_mutex_);
-
-    meta::FilesHolder files_holder;
-    auto status = meta_ptr_->FilesToMerge(collection_id, files_holder);
-    if (!status.ok()) {
-        LOG_ENGINE_ERROR_ << "Failed to get merge files for collection: " << collection_id;
-        return status;
-    }
-
-    if (files_holder.HoldFiles().size() < options_.merge_trigger_number_) {
-        LOG_ENGINE_TRACE_ << "Files number not greater equal than merge trigger number, skip merge action";
-        return Status::OK();
-    }
-
-    MergeFiles(collection_id, files_holder);
-
-    if (!initialized_.load(std::memory_order_acquire)) {
-        LOG_ENGINE_DEBUG_ << "Server will shutdown, skip merge action for collection: " << collection_id;
-    }
-
-    return Status::OK();
-}
-
 void
 DBImpl::BackgroundMerge(std::set<std::string> collection_ids) {
     // LOG_ENGINE_TRACE_ << " Background merge thread start";
 
     Status status;
     for (auto& collection_id : collection_ids) {
-        status = BackgroundMergeFiles(collection_id);
+        const std::lock_guard<std::mutex> lock(flush_merge_compact_mutex_);
+
+        auto status = merge_mgr_ptr_->MergeFiles(collection_id);
         if (!status.ok()) {
-            LOG_ENGINE_ERROR_ << "Merge files for collection " << collection_id << " failed: " << status.ToString();
+            LOG_ENGINE_ERROR_ << "Failed to get merge files for collection: " << collection_id
+                              << " reason:" << status.message();
         }
 
         if (!initialized_.load(std::memory_order_acquire)) {
-            LOG_ENGINE_DEBUG_ << "Server will shutdown, skip merge action";
+            LOG_ENGINE_DEBUG_ << "Server will shutdown, skip merge action for collection: " << collection_id;
             break;
         }
     }
