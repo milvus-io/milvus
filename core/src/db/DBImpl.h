@@ -29,6 +29,7 @@
 #include "db/IndexFailedChecker.h"
 #include "db/Types.h"
 #include "db/insert/MemManager.h"
+#include "db/merge/MergeManager.h"
 #include "db/meta/FilesHolder.h"
 #include "utils/ThreadPool.h"
 #include "wal/WalManager.h"
@@ -226,12 +227,6 @@ class DBImpl : public DB, public server::CacheConfigHandler, public server::Engi
     void
     StartMergeTask();
 
-    Status
-    MergeFiles(const std::string& collection_id, meta::FilesHolder& files_holder);
-
-    Status
-    BackgroundMergeFiles(const std::string& collection_id);
-
     void
     BackgroundMerge(std::set<std::string> collection_ids);
 
@@ -290,6 +285,7 @@ class DBImpl : public DB, public server::CacheConfigHandler, public server::Engi
 
     meta::MetaPtr meta_ptr_;
     MemManagerPtr mem_mgr_;
+    MergeManagerPtr merge_mgr_ptr_;
 
     std::shared_ptr<wal::WalManager> wal_mgr_;
     std::thread bg_wal_thread_;
