@@ -1046,7 +1046,7 @@ DeSerialization(const ::milvus::grpc::GeneralQuery& general_query, query::Boolea
 
 ::grpc::Status
 GrpcRequestHandler::HybridSearch(::grpc::ServerContext* context, const ::milvus::grpc::HSearchParam* request,
-                                 ::milvus::grpc::TopKQueryResult* response) {
+                                 ::milvus::grpc::HQueryResult* response) {
     CHECK_NULLPTR_RETURN(request);
     LOG_SERVER_INFO_ << LogOut("Request [%s] %s begin.", GetContext(context)->RequestID().c_str(), __func__);
 
@@ -1088,7 +1088,116 @@ GrpcRequestHandler::HybridSearch(::grpc::ServerContext* context, const ::milvus:
                                            partition_list, general_query, json_params, result);
 
     // step 6: construct and return result
-    ConstructResults(result, response);
+//    ConstructResults(result, response);
+
+    LOG_SERVER_INFO_ << LogOut("Request [%s] %s end.", GetContext(context)->RequestID().c_str(), __func__);
+    SET_RESPONSE(response->mutable_status(), status, context);
+
+    return ::grpc::Status::OK;
+}
+
+::grpc::Status
+GrpcRequestHandler::GetEntityByID(::grpc::ServerContext* context,
+                                    const ::milvus::grpc::VectorsIdentity* request,
+                                    ::milvus::grpc::HEntity* response) {
+    CHECK_NULLPTR_RETURN(request);
+    LOG_SERVER_INFO_ << LogOut("Request [%s] %s begin.", GetContext(context)->RequestID().c_str(), __func__);
+
+    std::vector<int64_t> vector_ids;
+    vector_ids.reserve(request->id_array_size());
+    for (int i = 0; i < request->id_array_size(); i++) {
+        vector_ids.push_back(request->id_array(i));
+    }
+
+    std::vector<engine::AttrsData> attrs;
+    std::vector<engine::VectorsData> vectors;
+    Status status =
+        request_handler_.GetEntitiesByID(GetContext(context), request->collection_name(), vector_ids, attrs, vectors);
+
+    response->set_row_num(attrs.size());
+    std::vector<std::string> field_names;
+    if (attrs.size() > 0) {
+        auto attr_it = attrs[0].attr_type_.begin();
+        for (; attr_it != attrs[0].attr_type_.end(); attr_it++) {
+            field_names.emplace_back(attr_it->first);
+            response->add_field_names(attr_it->first);
+            response->add_data_types((::milvus::grpc::DataType)attr_it->second);
+        }
+    }
+
+    for (auto field_name : field_names) {
+        for (auto& attr : attrs) {
+            auto grpc_value = response->add_result_values();
+            auto attr_data = attr.attr_data_.at(field_name);
+            int64_t grpc_data;
+            switch (attr.attr_type_.at(field_name)) {
+                case engine::meta::hybrid::DataType::INT8: {
+                    if (attr_data.size() == 1) {
+                        grpc_data = attr_data[0];
+                    } else {
+                        response->mutable_status()->set_error_code(::milvus::grpc::ErrorCode::UNEXPECTED_ERROR);
+                        return ::grpc::Status::OK;
+                    }
+                    break;
+                }
+                case engine::meta::hybrid::DataType::INT16: {
+                    if (attr_data.size() == 2) {
+                        memcpy(&grpc_data, attr_data.data(), 2);
+                    } else {
+                        response->mutable_status()->set_error_code(::milvus::grpc::ErrorCode::UNEXPECTED_ERROR);
+                        return ::grpc::Status::OK;
+                    }
+                    break;
+                }
+                case engine::meta::hybrid::DataType::INT32: {
+                    if (attr_data.size() == 4) {
+                        memcpy(&grpc_data, attr_data.data(), 4);
+                    } else {
+                        response->mutable_status()->set_error_code(::milvus::grpc::ErrorCode::UNEXPECTED_ERROR);
+                        return ::grpc::Status::OK;
+                    }
+                    break;
+                }
+                case engine::meta::hybrid::DataType::INT64: {
+                    if (attr_data.size() == 8) {
+                        memcpy(&grpc_data, attr_data.data(), 8);
+                    } else {
+                        response->mutable_status()->set_error_code(::milvus::grpc::ErrorCode::UNEXPECTED_ERROR);
+                        return ::grpc::Status::OK;
+                    }
+                    break;
+                }
+                case engine::meta::hybrid::DataType::FLOAT: {
+                    if (attr_data.size() == 8) {
+                        memcpy(&grpc_data, attr_data.data(), 8);
+                    } else {
+                        response->mutable_status()->set_error_code(::milvus::grpc::ErrorCode::UNEXPECTED_ERROR);
+                        return ::grpc::Status::OK;
+                    }
+                    break;
+                }
+                case engine::meta::hybrid::DataType::DOUBLE: {
+
+                }
+                default: {
+
+                }
+            }
+        }
+    }
+
+//    for (auto& vector : vectors) {
+//        auto grpc_data = response->add_vectors_data();
+//        if (!vector.float_data_.empty()) {
+//            grpc_data->mutable_float_data()->Resize(vector.float_data_.size(), 0);
+//            memcpy(grpc_data->mutable_float_data()->mutable_data(), vector.float_data_.data(),
+//                   vector.float_data_.size() * sizeof(float));
+//        } else if (!vector.binary_data_.empty()) {
+//            grpc_data->mutable_binary_data()->resize(vector.binary_data_.size());
+//            memcpy(grpc_data->mutable_binary_data()->data(), vector.binary_data_.data(),
+//                   vector.binary_data_.size() * sizeof(uint8_t));
+//        }
+//    }
 
     LOG_SERVER_INFO_ << LogOut("Request [%s] %s end.", GetContext(context)->RequestID().c_str(), __func__);
     SET_RESPONSE(response->mutable_status(), status, context);

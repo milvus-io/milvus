@@ -31,6 +31,9 @@ class XSearchTask : public Task {
     Load(LoadType type, uint8_t device_id) override;
 
     void
+    HybridExecute();
+
+    void
     Execute() override;
 
  public:

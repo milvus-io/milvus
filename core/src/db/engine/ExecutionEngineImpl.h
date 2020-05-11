@@ -73,6 +73,7 @@ class ExecutionEngineImpl : public ExecutionEngine {
     ExecBinaryQuery(query::GeneralQueryPtr general_query, faiss::ConcurrentBitsetPtr bitset,
                     std::unordered_map<std::string, DataType>& attr_type, uint64_t& nq, uint64_t& topk,
                     std::vector<float>& distances, std::vector<int64_t>& labels,
+                    std::vector<int64_t>& search_ids,
                     faiss::ConcurrentBitsetPtr result_bitset) override;
 
     Status

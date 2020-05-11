@@ -42,6 +42,7 @@
 
 #include "server/delivery/hybrid_request/CreateHybridCollectionRequest.h"
 #include "server/delivery/hybrid_request/DescribeHybridCollectionRequest.h"
+#include "server/delivery/hybrid_request/GetEntitiesByIDRequest.h"
 #include "server/delivery/hybrid_request/HybridSearchRequest.h"
 #include "server/delivery/hybrid_request/InsertEntityRequest.h"
 
@@ -299,6 +300,16 @@ RequestHandler::InsertEntity(const std::shared_ptr<Context>& context, const std:
                              std::unordered_map<std::string, engine::VectorsData>& vector_datas) {
     BaseRequestPtr request_ptr = InsertEntityRequest::Create(context, collection_name, partition_tag, row_num,
                                                              field_names, attr_values, vector_datas);
+
+    RequestScheduler::ExecRequest(request_ptr);
+    return request_ptr->status();
+}
+
+Status
+RequestHandler::GetEntitiesByID(const std::shared_ptr<Context>& context, const std::string& collection_name,
+                                const std::vector<int64_t>& ids, std::vector<engine::AttrsData>& attrs,
+                                std::vector<engine::VectorsData>& vectors) {
+    BaseRequestPtr request_ptr = GetEntitiesByIDRequest::Create(context, collection_name, ids, attrs, vectors);
 
     RequestScheduler::ExecRequest(request_ptr);
     return request_ptr->status();

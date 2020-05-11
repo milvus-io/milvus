@@ -811,12 +811,22 @@ ExecutionEngineImpl::ProcessRangeQuery(std::vector<T> data, T value, query::Comp
 }
 
 Status
-ExecutionEngineImpl::ExecBinaryQuery(milvus::query::GeneralQueryPtr general_query, faiss::ConcurrentBitsetPtr bitset,
-                                     std::unordered_map<std::string, DataType>& attr_type, uint64_t& nq, uint64_t& topk,
-                                     std::vector<float>& distances, std::vector<int64_t>& labels,
+ExecutionEngineImpl::ExecBinaryQuery(milvus::query::GeneralQueryPtr general_query,
+                                     faiss::ConcurrentBitsetPtr bitset,
+                                     std::unordered_map<std::string, DataType>& attr_type,
+                                     uint64_t& nq,
+                                     uint64_t& topk,
+                                     std::vector<float>& distances,
+                                     std::vector<int64_t>& labels,
+                                     std::vector<int64_t>& search_ids,
                                      faiss::ConcurrentBitsetPtr result_bitset) {
+
     if (bitset == nullptr) {
+        labels = index_->GetUids();
         bitset = std::make_shared<faiss::ConcurrentBitset>(vector_count_);
+    }
+    if (result_bitset == nullptr) {
+        result_bitset = std::make_shared<faiss::ConcurrentBitset>(vector_count_);
     }
 
     if (general_query->leaf == nullptr) {
@@ -824,29 +834,62 @@ ExecutionEngineImpl::ExecBinaryQuery(milvus::query::GeneralQueryPtr general_quer
         faiss::ConcurrentBitsetPtr left_bitset = std::make_shared<faiss::ConcurrentBitset>(vector_count_);
         faiss::ConcurrentBitsetPtr right_bitset = std::make_shared<faiss::ConcurrentBitset>(vector_count_);
         if (general_query->bin->left_query != nullptr) {
-            status = ExecBinaryQuery(general_query->bin->left_query, bitset, attr_type, nq, topk, distances, labels,
+            status = ExecBinaryQuery(general_query->bin->left_query,
+                                     bitset,
+                                     attr_type,
+                                     nq,
+                                     topk,
+                                     distances,
+                                     labels,
+                                     search_ids,
                                      left_bitset);
+            if (!status.ok()) {
+                return status;
+            }
         }
         if (general_query->bin->right_query != nullptr) {
-            status = ExecBinaryQuery(general_query->bin->right_query, bitset, attr_type, nq, topk, distances, labels,
+            status = ExecBinaryQuery(general_query->bin->right_query,
+                                     bitset,
+                                     attr_type,
+                                     nq,
+                                     topk,
+                                     distances,
+                                     labels,
+                                     search_ids,
                                      right_bitset);
+            if (!status.ok()) {
+                return status;
+            }
         }
+
         switch (general_query->bin->relation) {
             case milvus::query::QueryRelation::AND:
             case milvus::query::QueryRelation::R1: {
-                result_bitset = std::shared_ptr<faiss::ConcurrentBitset>(&((*left_bitset.get()) &= (*right_bitset.get())));
+                result_bitset =
+                    std::shared_ptr<faiss::ConcurrentBitset>(&((*left_bitset.get()) &= (*right_bitset.get())));
                 break;
             }
             case milvus::query::QueryRelation::OR:
-            case milvus::query::QueryRelation::R2: {
-                result_bitset = std::shared_ptr<faiss::ConcurrentBitset>(&((*left_bitset.get()) |= (*right_bitset.get())));
+            case milvus::query::QueryRelation::R2:
+            case milvus::query::QueryRelation::R3: {
+                result_bitset =
+                    std::shared_ptr<faiss::ConcurrentBitset>(&((*left_bitset.get()) |= (*right_bitset.get())));
                 break;
             }
-            case milvus::query::QueryRelation::R3: {
-            }
             case milvus::query::QueryRelation::R4: {
+                for (uint64_t i = 0; i < vector_count_; ++i) {
+                    if (left_bitset->test(i) && !right_bitset->test(i)) {
+                        result_bitset->set(i);
+                    }
+                }
+                break;
+            }
+            default : {
+                std::string msg = "Invalid queryRelation in RangeQuery";
+                return Status{SERVER_INVALID_ARGUMENT, msg};
             }
         }
+
         return status;
     } else {
         if (general_query->leaf->term_query != nullptr) {
@@ -1117,16 +1160,16 @@ ExecutionEngineImpl::ExecBinaryQuery(milvus::query::GeneralQueryPtr general_quer
             nq = vector_query->query_vector.float_data.size() / dim_;
 
             distances.resize(nq * topk);
-            labels.resize(nq * topk);
+            search_ids.resize(nq * topk);
 
             auto status = Search(nq, vector_query->query_vector.float_data.data(), topk, vector_query->extra_params,
-                                 distances.data(), labels.data());
+                                 distances.data(), search_ids.data());
             if (!status.ok()) {
                 return status;
             }
 
-            // Generate result_bitset from labels
-            for (auto id : labels) {
+            // Generate result_bitset from ids
+            for (auto id : search_ids) {
                 for (uint64_t i = 0; i < index_->GetUids().size(); ++i) {
                     if (id == index_->GetUids().at(i)) {
                         result_bitset->set(i);

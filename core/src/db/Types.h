@@ -57,6 +57,7 @@ struct Entity {
 
 struct AttrsData {
     uint64_t attr_count_ = 0;
+    std::unordered_map<std::string, engine::meta::hybrid::DataType> attr_type_;
     std::unordered_map<std::string, std::vector<uint8_t>> attr_data_;
     IDNumbers id_array_;
 };

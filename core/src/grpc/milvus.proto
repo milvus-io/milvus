@@ -259,13 +259,11 @@ message VectorFieldValue {
 
 message FieldValue {
     oneof value {
-        int32 int32_value = 1;
-        int64 int64_value = 2;
-        float float_value = 3;
-        double double_value = 4;
-        string string_value = 5;
-        bool  bool_value = 6;
-        VectorFieldValue vector_value = 7;
+        int64 int64_value = 1;
+        double double_value = 2;
+        string string_value = 3;
+        bool  bool_value = 4;
+        VectorFieldValue vector_value = 5;
     }
 }
 
@@ -365,9 +363,10 @@ message HEntity {
     Status status = 1;
     repeated int64 entity_id = 2;
     repeated string field_names = 3;
-    bytes attr_records = 4;
-    int64 row_num = 5;
-    repeated FieldValue result_values = 6;
+    repeated DataType data_types = 4;
+    bytes attr_records = 5;
+    int64 row_num = 6;
+    repeated FieldValue result_values = 7;
 }
 
 message HQueryResult {
@@ -389,7 +388,7 @@ message HInsertParam {
 
 message HEntityIdentity {
     string collection_name = 1;
-    int64 id = 2;
+    repeated int64 id = 2;
 }
 
 message HEntityIDs {
@@ -673,12 +672,11 @@ service MilvusService {
 
     rpc InsertEntity(HInsertParam) returns (HEntityIDs) {}
 
-    // TODO(yukun): will change to HQueryResult
     rpc HybridSearch(HSearchParam) returns (HQueryResult) {}
 
     rpc HybridSearchInSegments(HSearchInSegmentsParam) returns (TopKQueryResult) {}
 
-    rpc GetEntityByID(HEntityIdentity) returns (HEntity) {}
+    rpc GetEntityByID(VectorsIdentity) returns (HEntity) {}
 
     rpc GetEntityIDs(HGetEntityIDsParam) returns (HEntityIDs) {}
 

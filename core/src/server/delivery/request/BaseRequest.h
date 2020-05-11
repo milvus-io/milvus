@@ -118,6 +118,7 @@ class BaseRequest {
         kGetVectorByID,
         kGetVectorIDs,
         kInsertEntity,
+        kGetEntityByID,
 
         // collection operations
         kShowCollections = 300,
