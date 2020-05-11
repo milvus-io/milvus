@@ -615,7 +615,7 @@ class TestAddBase:
         for p in processes:
             p.join()
         time.sleep(2)
-        status, count = milvus.count_collection(collection)
+        status, count = milvus.count_entities(collection)
         assert count == process_num * loop_num
 
     @pytest.mark.level(2)
@@ -624,7 +624,7 @@ class TestAddBase:
         '''
         target: test collection rows_count is correct or not with multi threading
         method: create collection and add vectors in it(idmap),
-            assert the value returned by count_collection method is equal to length of vectors
+            assert the value returned by count_entities method is equal to length of vectors
         expected: the count is equal to the length of vectors
         '''
         if args["handler"] == "HTTP":
@@ -652,7 +652,7 @@ class TestAddBase:
             x.start()
         for th in threads:
             th.join()
-        status, res = milvus.count_collection(collection)
+        status, res = milvus.count_entities(collection)
         assert res == thread_num * nb
 
     def test_add_vector_multi_collections(self, connect):
@@ -755,7 +755,7 @@ class TestAddAsync:
         assert status.OK()
         assert len(result) == nb 
         connect.flush([collection])
-        status, count = connect.count_collection(collection)
+        status, count = connect.count_entities(collection)
         assert status.OK()
         logging.getLogger().info(status)
         logging.getLogger().info(count)
