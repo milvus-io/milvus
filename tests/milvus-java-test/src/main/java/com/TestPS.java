@@ -88,7 +88,7 @@ public class TestPS {
         }
         executor_search.awaitQuiescence(300, TimeUnit.SECONDS);
         executor_search.shutdown();
-        GetCollectionRowCountResponse getTableRowCountResponse = client.getCollectionRowCount(collectionName);
-        System.out.println(getTableRowCountResponse.getCollectionRowCount());
+        CountEntitiesResponse getTableRowCountResponse = client.countEntities(collectionName);
+        System.out.println(getTableRowCountResponse.getCollectionEntityCount());
     }
 }

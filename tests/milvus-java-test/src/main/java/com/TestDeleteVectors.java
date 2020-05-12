@@ -6,6 +6,7 @@ import org.testng.annotations.Test;
 
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 
 public class TestDeleteVectors {
@@ -23,11 +24,11 @@ public class TestDeleteVectors {
         assert(res.getResponse().ok());
         List<Long> ids = res.getVectorIds();
         client.flush(collectionName);
-        Response res_delete = client.deleteByIds(collectionName, ids);
+        Response res_delete = client.deleteEntityByID(collectionName, ids);
         assert(res_delete.ok());
         client.flush(collectionName);
         // Assert collection row count
-        Assert.assertEquals(client.getCollectionRowCount(collectionName).getCollectionRowCount(), 0);
+        Assert.assertEquals(client.countEntities(collectionName).getCollectionEntityCount(), 0);
     }
 
     @Test(dataProvider = "Collection", dataProviderClass = MainClass.class)
@@ -41,12 +42,12 @@ public class TestDeleteVectors {
         List<Long> ids = res.getVectorIds();
         del_ids.add(ids.get(0));
         client.flush(collectionName);
-        Response res_delete = client.deleteById(collectionName, ids.get(0));
+        Response res_delete = client.deleteEntityByID(collectionName, Collections.singletonList(ids.get(0)));
         assert(res_delete.ok());
         client.flush(collectionName);
         // Assert collection row count
-        Assert.assertEquals(client.getCollectionRowCount(collectionName).getCollectionRowCount(), nb - 1);
-        GetVectorsByIdsResponse res_get = client.getVectorsByIds(collectionName, del_ids);
+        Assert.assertEquals(client.countEntities(collectionName).getCollectionEntityCount(), nb - 1);
+        GetEntityByIDResponse res_get = client.getEntityByID(collectionName, del_ids);
         assert(res_get.getResponse().ok());
         assert(res_get.getFloatVectors().get(0).size() == 0);
     }
@@ -58,7 +59,7 @@ public class TestDeleteVectors {
         assert(res.getResponse().ok());
         client.flush(collectionName);
         List<Long> ids = res.getVectorIds();
-        Response res_delete = client.deleteByIds(collectionName + "_not_existed", ids);
+        Response res_delete = client.deleteEntityByID(collectionName + "_not_existed", ids);
         assert(!res_delete.ok());
     }
 
@@ -71,11 +72,11 @@ public class TestDeleteVectors {
         ids.add((long)123456);
         ids.add((long)1234561);
         client.flush(collectionName);
-        Response res_delete = client.deleteByIds(collectionName, ids);
+        Response res_delete = client.deleteEntityByID(collectionName, ids);
         assert(res_delete.ok());
         client.flush(collectionName);
         // Assert collection row count
-        Assert.assertEquals(client.getCollectionRowCount(collectionName).getCollectionRowCount(), nb);
+        Assert.assertEquals(client.countEntities(collectionName).getCollectionEntityCount(), nb);
     }
 
 
@@ -88,11 +89,11 @@ public class TestDeleteVectors {
         assert(res.getResponse().ok());
         List<Long> ids = res.getVectorIds();
         client.flush(collectionName);
-        Response res_delete = client.deleteByIds(collectionName, ids);
+        Response res_delete = client.deleteEntityByID(collectionName, ids);
         assert(res_delete.ok());
         client.flush(collectionName);
         // Assert collection row count
-        Assert.assertEquals(client.getCollectionRowCount(collectionName).getCollectionRowCount(), 0);
+        Assert.assertEquals(client.countEntities(collectionName).getCollectionEntityCount(), 0);
     }
 
     @Test(dataProvider = "BinaryCollection", dataProviderClass = MainClass.class)
@@ -104,11 +105,11 @@ public class TestDeleteVectors {
         assert(res.getResponse().ok());
         List<Long> ids = res.getVectorIds();
         client.flush(collectionName);
-        Response res_delete = client.deleteById(collectionName, ids.get(0));
+        Response res_delete = client.deleteEntityByID(collectionName, Collections.singletonList(ids.get(0)));
         assert(res_delete.ok());
         client.flush(collectionName);
         // Assert collection row count
-        Assert.assertEquals(client.getCollectionRowCount(collectionName).getCollectionRowCount(), nb - 1);
+        Assert.assertEquals(client.countEntities(collectionName).getCollectionEntityCount(), nb - 1);
         // Cannot search for the vector
         SearchParam searchParam = new SearchParam.Builder(collectionName)
             .withBinaryVectors(del_vector)
@@ -126,7 +127,7 @@ public class TestDeleteVectors {
         assert(res.getResponse().ok());
         List<Long> ids = res.getVectorIds();
         client.flush(collectionName);
-        Response res_delete = client.deleteByIds(collectionName + "_not_existed", ids);
+        Response res_delete = client.deleteEntityByID(collectionName + "_not_existed", ids);
         assert(!res_delete.ok());
     }
 
@@ -139,11 +140,11 @@ public class TestDeleteVectors {
         ids.add((long)123456);
         ids.add((long)1234561);
         client.flush(collectionName);
-        Response res_delete = client.deleteByIds(collectionName, ids);
+        Response res_delete = client.deleteEntityByID(collectionName, ids);
         assert(res_delete.ok());
         client.flush(collectionName);
         // Assert collection row count
-        Assert.assertEquals(client.getCollectionRowCount(collectionName).getCollectionRowCount(), nb);
+        Assert.assertEquals(client.countEntities(collectionName).getCollectionEntityCount(), nb);
     }
 
 }

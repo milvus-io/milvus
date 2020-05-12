@@ -591,7 +591,7 @@ def gen_simple_index():
         {"nlist": 1024},
         {"nlist": 1024},
         {"nlist": 1024, "m": 16},
-        {"M": 16, "efConstruction": 500},
+        {"M": 48, "efConstruction": 500},
         {"search_length": 50, "out_degree": 40, "candidate_pool_size": 100, "knng": 50},
         {"n_trees": 4}
     ]

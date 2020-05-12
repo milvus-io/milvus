@@ -98,8 +98,8 @@ public class TestMix {
         executor.shutdown();
 
         Thread.sleep(2000);
-        GetCollectionRowCountResponse getCollectionRowCountResponse = client.getCollectionRowCount(collectionName);
-        Assert.assertEquals(getCollectionRowCountResponse.getCollectionRowCount(), thread_num * nb);
+        CountEntitiesResponse countEntitiesResponse = client.countEntities(collectionName);
+        Assert.assertEquals(countEntitiesResponse.getCollectionEntityCount(), thread_num * nb);
     }
 
     @Test(dataProvider = "Collection", dataProviderClass = MainClass.class)
@@ -120,8 +120,8 @@ public class TestMix {
         executor.shutdown();
 
         Thread.sleep(2000);
-        GetCollectionRowCountResponse getCollectionRowCountResponse = client.getCollectionRowCount(collectionName);
-        Assert.assertEquals(getCollectionRowCountResponse.getCollectionRowCount(), thread_num * nb);
+        CountEntitiesResponse countEntitiesResponse = client.countEntities(collectionName);
+        Assert.assertEquals(countEntitiesResponse.getCollectionEntityCount(), thread_num * nb);
     }
 
     @Test(dataProvider = "Collection", dataProviderClass = MainClass.class)
@@ -143,8 +143,8 @@ public class TestMix {
         executor.awaitQuiescence(300, TimeUnit.SECONDS);
         executor.shutdown();
         Thread.sleep(2000);
-        GetCollectionRowCountResponse getCollectionRowCountResponse = client.getCollectionRowCount(collectionName);
-        Assert.assertEquals(getCollectionRowCountResponse.getCollectionRowCount(), thread_num * nb);
+        CountEntitiesResponse countEntitiesResponse = client.countEntities(collectionName);
+        Assert.assertEquals(countEntitiesResponse.getCollectionEntityCount(), thread_num * nb);
     }
 
     @Test(dataProvider = "Collection", dataProviderClass = MainClass.class)
@@ -182,8 +182,8 @@ public class TestMix {
         executor.awaitQuiescence(300, TimeUnit.SECONDS);
         executor.shutdown();
         Thread.sleep(2000);
-        GetCollectionRowCountResponse getCollectionRowCountResponse = client.getCollectionRowCount(collectionName);
-        Assert.assertEquals(getCollectionRowCountResponse.getCollectionRowCount(), thread_num * nb);
+        CountEntitiesResponse countEntitiesResponse = client.countEntities(collectionName);
+        Assert.assertEquals(countEntitiesResponse.getCollectionEntityCount(), thread_num * nb);
     }
 
     @Test(dataProvider = "DefaultConnectArgs", dataProviderClass = MainClass.class)

@@ -52,7 +52,7 @@ public class TestFlush {
         assert(res.ok());
         for (int i = 0; i < 10; i++) {
             // check row count
-            Assert.assertEquals(client.getCollectionRowCount(names.get(i)).getCollectionRowCount(), nb);
+            Assert.assertEquals(client.countEntities(names.get(i)).getCollectionEntityCount(), nb);
         }
     }
 
@@ -74,7 +74,7 @@ public class TestFlush {
         flushResponseFuture.get();
         for (int i = 0; i < 100; i++) {
             // check row count
-            Assert.assertEquals(client.getCollectionRowCount(names.get(i)).getCollectionRowCount(), nb);
+            Assert.assertEquals(client.countEntities(names.get(i)).getCollectionEntityCount(), nb);
         }
     }
 
@@ -85,7 +85,7 @@ public class TestFlush {
             client.insert(insertParam);
             Response res = client.flush(collectionName);
             assert(res.ok());
-            Assert.assertEquals(client.getCollectionRowCount(collectionName).getCollectionRowCount(), nb * (i+1));
+            Assert.assertEquals(client.countEntities(collectionName).getCollectionEntityCount(), nb * (i+1));
         }
     }
 
@@ -96,7 +96,7 @@ public class TestFlush {
             client.insert(insertParam);
             Response res = client.flush(collectionName);
             assert(res.ok());
-            Assert.assertEquals(client.getCollectionRowCount(collectionName).getCollectionRowCount(), nb * (i+1));
+            Assert.assertEquals(client.countEntities(collectionName).getCollectionEntityCount(), nb * (i+1));
         }
     }
 }
