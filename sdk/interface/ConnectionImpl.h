@@ -71,15 +71,12 @@ class ConnectionImpl : public Connection {
            std::vector<int64_t>& id_array) override;
 
     Status
-    GetEntityByID(const std::string& collection_name, int64_t entity_id, Entity& entity_data) override;
+    GetEntityByID(const std::string& collection_name,
+                  const std::vector<int64_t>& id_array,
+                  std::vector<Entity>& entities_data) override;
 
     Status
-    GetEntitiesByID(const std::string& collection_name,
-                    const std::vector<int64_t>& id_array,
-                    std::vector<Entity>& entities_data) override;
-
-    Status
-    GetIDsInSegment(const std::string& collection_name, const std::string& segment_name,
+    ListIDInSegment(const std::string& collection_name, const std::string& segment_name,
                     std::vector<int64_t>& id_array) override;
 
     Status
@@ -93,25 +90,25 @@ class ConnectionImpl : public Connection {
                const std::string& extra_params, TopKQueryResult& topk_query_result) override;
 
     Status
-    DescribeCollection(const std::string& collection_name, CollectionParam& collection_schema) override;
+    GetCollectionInfo(const std::string& collection_name, CollectionParam& collection_param) override;
 
     Status
-    CountCollection(const std::string& collection_name, int64_t& entity_count) override;
+    CountEntities(const std::string& collection_name, int64_t& entity_count) override;
 
     Status
-    ShowCollections(std::vector<std::string>& collection_array) override;
+    ListCollections(std::vector<std::string>& collection_array) override;
 
     Status
-    ShowCollectionInfo(const std::string& collection_name, std::string& collection_info) override;
+    GetCollectionStats(const std::string& collection_name, std::string& collection_stats) override;
 
     Status
-    DeleteByID(const std::string& collection_name, const std::vector<int64_t>& id_array) override;
+    DeleteEntityByID(const std::string& collection_name, const std::vector<int64_t>& id_array) override;
 
     Status
-    PreloadCollection(const std::string& collection_name) const override;
+    LoadCollection(const std::string& collection_name) const override;
 
     Status
-    DescribeIndex(const std::string& collection_name, IndexParam& index_param) const override;
+    GetIndexInfo(const std::string& collection_name, IndexParam& index_param) const override;
 
     Status
     DropIndex(const std::string& collection_name) const override;
@@ -119,20 +116,20 @@ class ConnectionImpl : public Connection {
     Status
     CreatePartition(const PartitionParam& partition_param) override;
 
+    bool
+    HasPartition(const std::string& collection_name, const std::string& partition_tag) const override;
+
     Status
-    ShowPartitions(const std::string& collection_name, PartitionTagList& partition_tag_array) const override;
+    ListPartitions(const std::string& collection_name, PartitionTagList& partition_tag_array) const override;
 
     Status
     DropPartition(const PartitionParam& partition_param) override;
 
     Status
-    FlushCollection(const std::string& collection_name) override;
+    Flush(const std::vector<std::string>& collection_name_array) override;
 
     Status
-    Flush() override;
-
-    Status
-    CompactCollection(const std::string& collection_name) override;
+    Compact(const std::string& collection_name) override;
 
     /*******************************New Interface**********************************/
 

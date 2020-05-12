@@ -9,18 +9,47 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
-#include "db/merge/MergeManagerFactory.h"
-#include "db/merge/MergeManagerImpl.h"
-#include "utils/Exception.h"
-#include "utils/Log.h"
+#pragma once
+
+#include <condition_variable>
+#include <memory>
+#include <mutex>
+#include <queue>
+#include <thread>
+
+#include "task/Task.h"
 
 namespace milvus {
-namespace engine {
+namespace scheduler {
 
-MergeManagerPtr
-MergeManagerFactory::Build(const meta::MetaPtr& meta_ptr, const DBOptions& options) {
-    return std::make_shared<MergeManagerImpl>(meta_ptr, options, MergeStrategyType::LAYERED);
-}
+class CPUBuilder {
+ public:
+    CPUBuilder() = default;
 
-}  // namespace engine
+    void
+    Start();
+
+    void
+    Stop();
+
+    void
+    Put(const TaskPtr& task);
+
+ private:
+    void
+    worker_function();
+
+ private:
+    bool running_ = false;
+    std::mutex mutex_;
+    std::thread thread_;
+
+    std::queue<TaskPtr> queue_;
+    std::condition_variable queue_cv_;
+    std::mutex queue_mutex_;
+};
+
+using CPUBuilderPtr = std::shared_ptr<CPUBuilder>;
+
+}  // namespace scheduler
 }  // namespace milvus

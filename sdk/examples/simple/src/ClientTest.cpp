@@ -36,7 +36,8 @@ constexpr int64_t ADD_ENTITY_LOOP = 5;
 constexpr milvus::IndexType INDEX_TYPE = milvus::IndexType::IVFSQ8;
 constexpr int32_t NLIST = 16384;
 
-void PrintEntity(const std::string& tag, const milvus::Entity& entity) {
+void
+PrintEntity(const std::string& tag, const milvus::Entity& entity) {
     std::cout << tag << "\t[";
     for (size_t i = 0; i < entity.float_data.size(); i++) {
         if (i != 0) {
@@ -75,12 +76,12 @@ ClientTest::ShowSdkVersion() {
 
 void
 ClientTest::ShowCollections(std::vector<std::string>& collection_array) {
-    milvus::Status stat = conn_->ShowCollections(collection_array);
+    milvus::Status stat = conn_->ListCollections(collection_array);
     std::cout << "ShowCollections function call status: " << stat.message() << std::endl;
     std::cout << "All collections: " << std::endl;
     for (auto& collection : collection_array) {
         int64_t entity_count = 0;
-        stat = conn_->CountCollection(collection, entity_count);
+        stat = conn_->CountEntities(collection, entity_count);
         std::cout << "\t" << collection << "(" << entity_count << " entities)" << std::endl;
     }
 }
@@ -99,9 +100,9 @@ ClientTest::CreateCollection(const std::string& collection_name, int64_t dim, mi
 }
 
 void
-ClientTest::DescribeCollection(const std::string& collection_name) {
+ClientTest::GetCollectionInfo(const std::string& collection_name) {
     milvus::CollectionParam collection_param;
-    milvus::Status stat = conn_->DescribeCollection(collection_name, collection_param);
+    milvus::Status stat = conn_->GetCollectionInfo(collection_name, collection_param);
     std::cout << "DescribeCollection function call status: " << stat.message() << std::endl;
     milvus_sdk::Utils::PrintCollectionParam(collection_param);
 }
@@ -146,25 +147,26 @@ ClientTest::BuildSearchEntities(int64_t nq, int64_t dim) {
 void
 ClientTest::Flush(const std::string& collection_name) {
     milvus_sdk::TimeRecorder rc("Flush");
-    milvus::Status stat = conn_->FlushCollection(collection_name);
-    std::cout << "FlushCollection function call status: " << stat.message() << std::endl;
+    std::vector<std::string> collections = {collection_name};
+    milvus::Status stat = conn_->Flush(collections);
+    std::cout << "Flush function call status: " << stat.message() << std::endl;
 }
 
 void
-ClientTest::ShowCollectionInfo(const std::string& collection_name) {
+ClientTest::GetCollectionStats(const std::string& collection_name) {
     std::string collection_info;
-    milvus::Status stat = conn_->ShowCollectionInfo(collection_name, collection_info);
+    milvus::Status stat = conn_->GetCollectionStats(collection_name, collection_info);
     std::cout << "Collection info: " << collection_info << std::endl;
-    std::cout << "ShowCollectionInfo function call status: " << stat.message() << std::endl;
+    std::cout << "GetCollectionStats function call status: " << stat.message() << std::endl;
 }
 
 void
-ClientTest::GetEntitiesByID(const std::string& collection_name,  const std::vector<int64_t>& id_array) {
+ClientTest::GetEntityByID(const std::string& collection_name, const std::vector<int64_t>& id_array) {
     std::vector<milvus::Entity> entities;
     {
-        milvus_sdk::TimeRecorder rc("GetEntitiesByID");
-        milvus::Status stat = conn_->GetEntitiesByID(collection_name, id_array, entities);
-        std::cout << "GetEntitiesByID function call status: " << stat.message() << std::endl;
+        milvus_sdk::TimeRecorder rc("GetEntityByID");
+        milvus::Status stat = conn_->GetEntityByID(collection_name, id_array, entities);
+        std::cout << "GetEntityByID function call status: " << stat.message() << std::endl;
     }
 
     for (size_t i = 0; i < entities.size(); i++) {
@@ -228,22 +230,22 @@ ClientTest::CreateIndex(const std::string& collection_name, milvus::IndexType ty
     std::cout << "CreateIndex function call status: " << stat.message() << std::endl;
 
     milvus::IndexParam index2;
-    stat = conn_->DescribeIndex(collection_name, index2);
-    std::cout << "DescribeIndex function call status: " << stat.message() << std::endl;
+    stat = conn_->GetIndexInfo(collection_name, index2);
+    std::cout << "GetIndexInfo function call status: " << stat.message() << std::endl;
     milvus_sdk::Utils::PrintIndexParam(index2);
 }
 
 void
-ClientTest::PreloadCollection(const std::string& collection_name) {
+ClientTest::LoadCollection(const std::string& collection_name) {
     milvus_sdk::TimeRecorder rc("Preload");
-    milvus::Status stat = conn_->PreloadCollection(collection_name);
+    milvus::Status stat = conn_->LoadCollection(collection_name);
     std::cout << "PreloadCollection function call status: " << stat.message() << std::endl;
 }
 
 void
 ClientTest::CompactCollection(const std::string& collection_name) {
     milvus_sdk::TimeRecorder rc("Compact");
-    milvus::Status stat = conn_->CompactCollection(collection_name);
+    milvus::Status stat = conn_->Compact(collection_name);
     std::cout << "CompactCollection function call status: " << stat.message() << std::endl;
 }
 
@@ -255,14 +257,10 @@ ClientTest::DeleteByIds(const std::string& collection_name, const std::vector<in
     }
     std::cout << std::endl;
 
-    milvus::Status stat = conn_->DeleteByID(collection_name, id_array);
+    milvus::Status stat = conn_->DeleteEntityByID(collection_name, id_array);
     std::cout << "DeleteByID function call status: " << stat.message() << std::endl;
 
-    {
-        milvus_sdk::TimeRecorder rc("Flush");
-        stat = conn_->FlushCollection(collection_name);
-        std::cout << "FlushCollection function call status: " << stat.message() << std::endl;
-    }
+    Flush(collection_name);
 }
 
 void
@@ -271,7 +269,7 @@ ClientTest::DropIndex(const std::string& collection_name) {
     std::cout << "DropIndex function call status: " << stat.message() << std::endl;
 
     int64_t row_count = 0;
-    stat = conn_->CountCollection(collection_name, row_count);
+    stat = conn_->CountEntities(collection_name, row_count);
     std::cout << collection_name << "(" << row_count << " rows)" << std::endl;
 }
 
@@ -294,25 +292,25 @@ ClientTest::Test() {
     ShowCollections(table_array);
 
     CreateCollection(collection_name, dim, metric_type);
-    DescribeCollection(collection_name);
+    GetCollectionInfo(collection_name);
 
     InsertEntities(collection_name, dim);
     Flush(collection_name);
-    ShowCollectionInfo(collection_name);
+    GetCollectionStats(collection_name);
 
     BuildSearchEntities(NQ, dim);
-    GetEntitiesByID(collection_name, search_id_array_);
+    GetEntityByID(collection_name, search_id_array_);
 //    SearchEntities(collection_name, TOP_K, NPROBE);
     SearchEntitiesByID(collection_name, TOP_K, NPROBE);
 
     CreateIndex(collection_name, INDEX_TYPE, NLIST);
-    ShowCollectionInfo(collection_name);
+    GetCollectionStats(collection_name);
 
     std::vector<int64_t> delete_ids = {search_id_array_[0], search_id_array_[1]};
     DeleteByIds(collection_name, delete_ids);
     CompactCollection(collection_name);
 
-    PreloadCollection(collection_name);
+    LoadCollection(collection_name);
     SearchEntities(collection_name, TOP_K, NPROBE); // this line get two search error since we delete two entities
 
     DropIndex(collection_name);

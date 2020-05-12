@@ -67,17 +67,9 @@ HasPartitionRequest::OnExecute() {
             }
         }
 
-        std::vector<engine::meta::CollectionSchema> schema_array;
-        status = DBWrapper::DB()->ShowPartitions(collection_name_, schema_array);
+        status = DBWrapper::DB()->HasPartition(collection_name_, partition_tag_, has_partition_);
         if (!status.ok()) {
             return status;
-        }
-
-        for (auto& schema : schema_array) {
-            if (schema.partition_tag_ == partition_tag_) {
-                has_partition_ = true;
-                break;
-            }
         }
     } catch (std::exception& ex) {
         return Status(SERVER_UNEXPECTED_ERROR, ex.what());

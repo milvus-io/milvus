@@ -126,6 +126,7 @@ inline void set_error_from_string(char **error, const char* msg) {
 #endif
 
 #include <faiss/FaissHook.h>
+#include <faiss/BuilderSuspend.h>
 
 using std::vector;
 using std::pair;
@@ -1280,6 +1281,7 @@ protected:
     vector<S> children_indices[2];
     Node* m = (Node*)alloca(_s);
     D::create_split(children, _f, _s, _random, m);
+    faiss::BuilderSuspend::check_wait();
 
     for (size_t i = 0; i < indices.size(); i++) {
       S j = indices[i];
@@ -1319,6 +1321,7 @@ protected:
     m->n_descendants = is_root ? _n_items : (S)indices.size();
     for (int side = 0; side < 2; side++) {
       // run _make_tree for the smallest child first (for cache locality)
+      faiss::BuilderSuspend::check_wait();
       m->children[side^flip] = _make_tree(children_indices[side^flip], false);
     }
 

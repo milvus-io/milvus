@@ -59,20 +59,27 @@ BuildIndexParam() {
 }
 
 void
-CountCollection(std::shared_ptr<milvus::Connection>& conn) {
+CountEntities(std::shared_ptr<milvus::Connection>& conn) {
     int64_t entity_count = 0;
-    auto stat = conn->CountCollection(COLLECTION_NAME, entity_count);
+    auto stat = conn->CountEntities(COLLECTION_NAME, entity_count);
     std::cout << COLLECTION_NAME << "(" << entity_count << " entities)" << std::endl;
 }
 
 void
-ShowCollectionInfo(std::shared_ptr<milvus::Connection>& conn) {
-    CountCollection(conn);
+GetCollectionStats(std::shared_ptr<milvus::Connection>& conn) {
+    CountEntities(conn);
 
-    std::string collection_info;
-    auto stat = conn->ShowCollectionInfo(COLLECTION_NAME, collection_info);
-    std::cout << collection_info << std::endl;
-    std::cout << "ShowCollectionInfo function call status: " << stat.message() << std::endl;
+    std::string collection_stats;
+    auto stat = conn->GetCollectionStats(COLLECTION_NAME, collection_stats);
+    std::cout << collection_stats << std::endl;
+    std::cout << "GetCollectionStats function call status: " << stat.message() << std::endl;
+}
+
+void
+Flush(std::shared_ptr<milvus::Connection>& conn, const std::string& collection_name) {
+    std::vector<std::string> collections = {collection_name};
+    milvus::Status stat = conn->Flush(collections);
+    std::cout << "Flush function call status: " << stat.message() << std::endl;
 }
 
 }  // namespace
@@ -105,7 +112,7 @@ ClientTest::Test(const std::string& address, const std::string& port) {
 
         // show partitions
         milvus::PartitionTagList partition_array;
-        stat = conn->ShowPartitions(COLLECTION_NAME, partition_array);
+        stat = conn->ListPartitions(COLLECTION_NAME, partition_array);
 
         std::cout << partition_array.size() << " partitions created:" << std::endl;
         for (auto& partition_tag : partition_array) {
@@ -134,12 +141,8 @@ ClientTest::Test(const std::string& address, const std::string& port) {
         }
     }
 
-    {  // flush buffer
-        stat = conn->FlushCollection(COLLECTION_NAME);
-        std::cout << "FlushCollection function call status: " << stat.message() << std::endl;
-    }
-
-    ShowCollectionInfo(conn);
+    Flush(conn, COLLECTION_NAME);
+    GetCollectionStats(conn);
 
     std::vector<std::pair<int64_t, milvus::Entity>> search_entity_array;
     {  // build search vectors
@@ -151,8 +154,12 @@ ClientTest::Test(const std::string& address, const std::string& port) {
     }
 
     {  // search vectors
+        std::string partition_tag = std::to_string(TARGET_PARTITION);
+        bool exist = conn->HasPartition(COLLECTION_NAME, partition_tag);
+        std::cout << "Partition " << partition_tag << (exist ? " exists" : " doesn't exist") << std::endl;
+
         std::cout << "Search in correct partition" << std::endl;
-        std::vector<std::string> partition_tags = {std::to_string(TARGET_PARTITION)};
+        std::vector<std::string> partition_tags = {partition_tag};
         milvus::TopKQueryResult topk_query_result;
         milvus_sdk::Utils::DoSearch(conn, COLLECTION_NAME, partition_tags, TOP_K, NPROBE, search_entity_array,
                                     topk_query_result);
@@ -176,12 +183,12 @@ ClientTest::Test(const std::string& address, const std::string& port) {
         std::cout << "CreateIndex function call status: " << stat.message() << std::endl;
 
         milvus::IndexParam index2;
-        stat = conn->DescribeIndex(COLLECTION_NAME, index2);
+        stat = conn->GetIndexInfo(COLLECTION_NAME, index2);
         std::cout << "DescribeIndex function call status: " << stat.message() << std::endl;
         milvus_sdk::Utils::PrintIndexParam(index2);
     }
 
-    ShowCollectionInfo(conn);
+    GetCollectionStats(conn);
 
     {  // drop partition
         milvus::PartitionParam param1 = {COLLECTION_NAME, std::to_string(TARGET_PARTITION)};
@@ -190,7 +197,7 @@ ClientTest::Test(const std::string& address, const std::string& port) {
         std::cout << "DropPartition function call status: " << stat.message() << std::endl;
     }
 
-    CountCollection(conn);
+    CountEntities(conn);
 
     {  // search vectors, will get search error since we delete a partition
         std::cout << "Search in whole collection after delete one partition" << std::endl;
@@ -203,11 +210,9 @@ ClientTest::Test(const std::string& address, const std::string& port) {
     {  // drop index
         stat = conn->DropIndex(COLLECTION_NAME);
         std::cout << "DropIndex function call status: " << stat.message() << std::endl;
-
-        int64_t entity_count = 0;
-        stat = conn->CountCollection(COLLECTION_NAME, entity_count);
-        std::cout << COLLECTION_NAME << "(" << entity_count << " entities)" << std::endl;
     }
+
+    CountEntities(conn);
 
     {  // drop collection
         stat = conn->DropCollection(COLLECTION_NAME);

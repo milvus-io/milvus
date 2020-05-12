@@ -7,20 +7,24 @@
 //
 // Unless required by applicable law or agreed to in writing, software distributed under the License
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
-// or implied. See the License for the specific language governing permissions and limitations under the License.
+// or implied. See the License for the specific language governing permissions and limitations under the License
 
-#include "db/merge/MergeManagerFactory.h"
-#include "db/merge/MergeManagerImpl.h"
-#include "utils/Exception.h"
-#include "utils/Log.h"
+#pragma once
+
+#include "faiss/BuilderSuspend.h"
 
 namespace milvus {
-namespace engine {
+namespace knowhere {
 
-MergeManagerPtr
-MergeManagerFactory::Build(const meta::MetaPtr& meta_ptr, const DBOptions& options) {
-    return std::make_shared<MergeManagerImpl>(meta_ptr, options, MergeStrategyType::LAYERED);
+inline void
+BuilderSuspend() {
+    faiss::BuilderSuspend::suspend();
 }
 
-}  // namespace engine
+inline void
+BuildResume() {
+    faiss::BuilderSuspend::resume();
+}
+
+}  // namespace knowhere
 }  // namespace milvus

@@ -125,7 +125,7 @@ GrpcClient::Insert(const ::milvus::grpc::InsertParam& insert_param, ::milvus::gr
 }
 
 Status
-GrpcClient::GetVectorsByID(const grpc::VectorsIdentity& vectors_identity, ::milvus::grpc::VectorsData& vectors_data) {
+GrpcClient::GetEntityByID(const grpc::VectorsIdentity& vectors_identity, ::milvus::grpc::VectorsData& vectors_data) {
     ClientContext context;
     ::grpc::Status grpc_status = stub_->GetVectorsByID(&context, vectors_identity, &vectors_data);
 
@@ -142,7 +142,7 @@ GrpcClient::GetVectorsByID(const grpc::VectorsIdentity& vectors_identity, ::milv
 }
 
 Status
-GrpcClient::GetIDsInSegment(const grpc::GetVectorIDsParam& param, grpc::VectorIds& vector_ids) {
+GrpcClient::ListIDInSegment(const grpc::GetVectorIDsParam& param, grpc::VectorIds& vector_ids) {
     ClientContext context;
     ::grpc::Status grpc_status = stub_->GetVectorIDs(&context, param, &vector_ids);
 
@@ -198,7 +198,7 @@ GrpcClient::SearchByID(const grpc::SearchByIDParam& search_param, ::milvus::grpc
 }
 
 Status
-GrpcClient::DescribeCollection(const std::string& collection_name, ::milvus::grpc::CollectionSchema& grpc_schema) {
+GrpcClient::GetCollectionInfo(const std::string& collection_name, ::milvus::grpc::CollectionSchema& grpc_schema) {
     ClientContext context;
     ::milvus::grpc::CollectionName grpc_collectionname;
     grpc_collectionname.set_collection_name(collection_name);
@@ -219,7 +219,7 @@ GrpcClient::DescribeCollection(const std::string& collection_name, ::milvus::grp
 }
 
 int64_t
-GrpcClient::CountCollection(grpc::CollectionName& collection_name, Status& status) {
+GrpcClient::CountEntities(grpc::CollectionName& collection_name, Status& status) {
     ClientContext context;
     ::milvus::grpc::CollectionRowCount response;
     ::grpc::Status grpc_status = stub_->CountCollection(&context, collection_name, &response);
@@ -241,7 +241,7 @@ GrpcClient::CountCollection(grpc::CollectionName& collection_name, Status& statu
 }
 
 Status
-GrpcClient::ShowCollections(milvus::grpc::CollectionNameList& collection_name_list) {
+GrpcClient::ListCollections(milvus::grpc::CollectionNameList& collection_name_list) {
     ClientContext context;
     ::milvus::grpc::Command command;
     ::grpc::Status grpc_status = stub_->ShowCollections(&context, command, &collection_name_list);
@@ -261,10 +261,10 @@ GrpcClient::ShowCollections(milvus::grpc::CollectionNameList& collection_name_li
 }
 
 Status
-GrpcClient::ShowCollectionInfo(grpc::CollectionName& collection_name, grpc::CollectionInfo& collection_info) {
+GrpcClient::GetCollectionStats(grpc::CollectionName& collection_name, grpc::CollectionInfo& collection_stats) {
     ClientContext context;
     ::milvus::grpc::Command command;
-    ::grpc::Status grpc_status = stub_->ShowCollectionInfo(&context, collection_name, &collection_info);
+    ::grpc::Status grpc_status = stub_->ShowCollectionInfo(&context, collection_name, &collection_stats);
 
     if (!grpc_status.ok()) {
         std::cerr << "ShowCollectionInfo gRPC failed!" << std::endl;
@@ -272,9 +272,9 @@ GrpcClient::ShowCollectionInfo(grpc::CollectionName& collection_name, grpc::Coll
         return Status(StatusCode::RPCFailed, grpc_status.error_message());
     }
 
-    if (collection_info.status().error_code() != grpc::SUCCESS) {
-        std::cerr << collection_info.status().reason() << std::endl;
-        return Status(StatusCode::ServerFailed, collection_info.status().reason());
+    if (collection_stats.status().error_code() != grpc::SUCCESS) {
+        std::cerr << collection_stats.status().reason() << std::endl;
+        return Status(StatusCode::ServerFailed, collection_stats.status().reason());
     }
 
     return Status::OK();
@@ -303,7 +303,7 @@ GrpcClient::Cmd(const std::string& cmd, std::string& result) {
 }
 
 Status
-GrpcClient::PreloadCollection(milvus::grpc::CollectionName& collection_name) {
+GrpcClient::LoadCollection(milvus::grpc::CollectionName& collection_name) {
     ClientContext context;
     ::milvus::grpc::Status response;
     ::grpc::Status grpc_status = stub_->PreloadCollection(&context, collection_name, &response);
@@ -321,7 +321,7 @@ GrpcClient::PreloadCollection(milvus::grpc::CollectionName& collection_name) {
 }
 
 Status
-GrpcClient::DeleteByID(grpc::DeleteByIDParam& delete_by_id_param) {
+GrpcClient::DeleteEntityByID(grpc::DeleteByIDParam& delete_by_id_param) {
     ClientContext context;
     ::milvus::grpc::Status response;
     ::grpc::Status grpc_status = stub_->DeleteByID(&context, delete_by_id_param, &response);
@@ -339,7 +339,7 @@ GrpcClient::DeleteByID(grpc::DeleteByIDParam& delete_by_id_param) {
 }
 
 Status
-GrpcClient::DescribeIndex(grpc::CollectionName& collection_name, grpc::IndexParam& index_param) {
+GrpcClient::GetIndexInfo(grpc::CollectionName& collection_name, grpc::IndexParam& index_param) {
     ClientContext context;
     ::grpc::Status grpc_status = stub_->DescribeIndex(&context, collection_name, &index_param);
 
@@ -391,8 +391,26 @@ GrpcClient::CreatePartition(const grpc::PartitionParam& partition_param) {
     return Status::OK();
 }
 
+bool
+GrpcClient::HasPartition(const grpc::PartitionParam& partition_param, Status& status) const {
+    ClientContext context;
+    ::milvus::grpc::BoolReply response;
+    ::grpc::Status grpc_status = stub_->HasPartition(&context, partition_param, &response);
+
+    if (!grpc_status.ok()) {
+        std::cerr << "HasPartition gRPC failed!" << std::endl;
+        status = Status(StatusCode::RPCFailed, grpc_status.error_message());
+    }
+    if (response.status().error_code() != grpc::SUCCESS) {
+        std::cerr << response.status().reason() << std::endl;
+        status = Status(StatusCode::ServerFailed, response.status().reason());
+    }
+    status = Status::OK();
+    return response.bool_reply();
+}
+
 Status
-GrpcClient::ShowPartitions(const grpc::CollectionName& collection_name, grpc::PartitionList& partition_array) const {
+GrpcClient::ListPartitions(const grpc::CollectionName& collection_name, grpc::PartitionList& partition_array) const {
     ClientContext context;
     ::grpc::Status grpc_status = stub_->ShowPartitions(&context, collection_name, &partition_array);
 

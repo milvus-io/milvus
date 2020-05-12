@@ -95,8 +95,9 @@ TestProcess(std::shared_ptr<milvus::Connection> connection,
     }
 
     {  // flush buffer
-        stat = connection->FlushCollection(collection_param.collection_name);
-        std::cout << "FlushCollection function call status: " << stat.message() << std::endl;
+        std::vector<std::string> collections = {collection_param.collection_name};
+        stat = connection->Flush(collections);
+        std::cout << "Flush function call status: " << stat.message() << std::endl;
     }
 
     {  // search vectors
@@ -153,54 +154,54 @@ ClientTest::Test(const std::string& address, const std::string& port) {
 
     {
         milvus::CollectionParam collection_param = {
-                "collection_1",
-                512, // dimension
-                256, // index file size
-                milvus::MetricType::TANIMOTO
-            };
+            "collection_1",
+            512, // dimension
+            256, // index file size
+            milvus::MetricType::TANIMOTO
+        };
 
         JSON json_params = {{"nlist", 1024}};
         milvus::IndexParam index_param = {
-                collection_param.collection_name,
-                milvus::IndexType::IVFFLAT,
-                json_params.dump()
-            };
+            collection_param.collection_name,
+            milvus::IndexType::IVFFLAT,
+            json_params.dump()
+        };
 
         TestProcess(connection, collection_param, index_param);
     }
 
     {
         milvus::CollectionParam collection_param = {
-                "collection_2",
-                512, // dimension
-                512, // index file size
-                milvus::MetricType::SUBSTRUCTURE
-            };
+            "collection_2",
+            512, // dimension
+            512, // index file size
+            milvus::MetricType::SUBSTRUCTURE
+        };
 
         JSON json_params = {};
         milvus::IndexParam index_param = {
-                collection_param.collection_name,
-                milvus::IndexType::FLAT,
-                json_params.dump()
-            };
+            collection_param.collection_name,
+            milvus::IndexType::FLAT,
+            json_params.dump()
+        };
 
         TestProcess(connection, collection_param, index_param);
     }
 
     {
         milvus::CollectionParam collection_param = {
-                "collection_3",
-                128, // dimension
-                1024, // index file size
-                milvus::MetricType::SUPERSTRUCTURE
-            };
+            "collection_3",
+            128, // dimension
+            1024, // index file size
+            milvus::MetricType::SUPERSTRUCTURE
+        };
 
         JSON json_params = {};
         milvus::IndexParam index_param = {
-                collection_param.collection_name,
-                milvus::IndexType::FLAT,
-                json_params.dump()
-            };
+            collection_param.collection_name,
+            milvus::IndexType::FLAT,
+            json_params.dump()
+        };
 
         TestProcess(connection, collection_param, index_param);
     }

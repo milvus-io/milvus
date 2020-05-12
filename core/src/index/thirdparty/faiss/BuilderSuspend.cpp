@@ -9,18 +9,27 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
-#include "db/merge/MergeManagerFactory.h"
-#include "db/merge/MergeManagerImpl.h"
-#include "utils/Exception.h"
-#include "utils/Log.h"
+#include "BuilderSuspend.h"
 
-namespace milvus {
-namespace engine {
+namespace faiss {
 
-MergeManagerPtr
-MergeManagerFactory::Build(const meta::MetaPtr& meta_ptr, const DBOptions& options) {
-    return std::make_shared<MergeManagerImpl>(meta_ptr, options, MergeStrategyType::LAYERED);
+std::atomic<bool> BuilderSuspend::suspend_flag_(false);
+std::mutex BuilderSuspend::mutex_;
+std::condition_variable BuilderSuspend::cv_;
+
+void BuilderSuspend::suspend() {
+    suspend_flag_ = true;
 }
 
-}  // namespace engine
-}  // namespace milvus
+void BuilderSuspend::resume() {
+    suspend_flag_ = false;
+}
+
+void BuilderSuspend::check_wait() {
+    while (suspend_flag_) {
+        std::unique_lock<std::mutex> lck(mutex_);
+        cv_.wait_for(lck, std::chrono::seconds(5));
+    }
+}
+
+}  // namespace faiss

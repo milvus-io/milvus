@@ -17,6 +17,7 @@
 #include <utility>
 #include <vector>
 
+#include "faiss/BuilderSuspend.h"
 #include "hnswlib/hnswalg.h"
 #include "hnswlib/space_ip.h"
 #include "hnswlib/space_l2.h"
@@ -124,6 +125,7 @@ IndexHNSW::Add(const DatasetPtr& dataset_ptr, const Config& config) {
     index_->addPoint(p_data, p_ids[0]);
 #pragma omp parallel for
     for (int i = 1; i < rows; ++i) {
+        faiss::BuilderSuspend::check_wait();
         index_->addPoint(((float*)p_data + Dim() * i), p_ids[i]);
     }
 }

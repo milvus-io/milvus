@@ -2,7 +2,7 @@
 
 Please mark all change in change log and use the issue from GitHub
 
-# Milvus 0.9.0 (TBD)
+# Milvus 0.9.0 (2020-05-15)
 
 ## Bug
 -   \#1705 Limit the insert data batch size
@@ -27,6 +27,8 @@ Please mark all change in change log and use the issue from GitHub
 -   \#2228 Fix show partitions failed in http module
 -   \#2231 Use server_config to define hard-delete delay time for segment files
 -   \#2261 Re-define result returned by has_collection if collection in delete state
+-   \#2266 Server hang when using multi-clients to query different collections
+-   \#2280 has_partition should return true for '_default'
 
 ## Feature
 -   \#1751 Add api SearchByID
@@ -41,11 +43,13 @@ Please mark all change in change log and use the issue from GitHub
 -   \#2206 Log file rotating
 -   \#2240 Obtain running rpc requests information
 -   \#2268 Intelligently detect openblas library in system to avoid installing from source code every time
+-   \#2283 Suspend the building tasks when any query comand arrives.
 
 ## Improvement
 -   \#221 Refactor LOG macro
 -   \#833 Catch exception in RolloutHandler and output in stderr
 -   \#1796 Compile Openblas with source code to improve the performance
+-   \#1942 Background merge file strategy
 -   \#2039 Support Milvus run on SSE CPUs
 -   \#2149 Merge server_cpu_config.template and server_gpu_config.template
 -   \#2153 Upgrade thirdparty oatpp to v1.0.0
