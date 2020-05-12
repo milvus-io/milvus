@@ -2,7 +2,7 @@
 
 Please mark all change in change log and use the issue from GitHub
 
-# Milvus 0.9.0 (TBD)
+# Milvus 0.9.0 (2020-05-15)
 
 ## Bug
 -   \#1705 Limit the insert data batch size
@@ -63,9 +63,9 @@ Please mark all change in change log and use the issue from GitHub
 -   \#2252 Upgrade mishards APIs and requirements
 -   \#2256 k-means clustering algorithm use only Euclidean distance metric
 -   \#2300 Upgrade mishrads configuration to version 0.4
+-   \#2307 Disable index SPTAG by default
 
 ## Task
-
 
 # Milvus 0.8.0 (2020-04-15)
 
