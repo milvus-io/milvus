@@ -81,7 +81,7 @@ class TestCollectionInfoBase:
         expected: status ok, count as expected
         '''
         vectors = gen_vector(nb, dim)
-        status, ids = connect.add_vectors(collection, vectors)
+        status, ids = connect.insert(collection, vectors)
         assert status.OK()
         status = connect.flush([collection])
         assert status.OK()
@@ -106,7 +106,7 @@ class TestCollectionInfoBase:
         expected: status ok, "_default" partition is listed
         '''
         vectors = gen_vector(nb, dim)
-        status, ids = connect.add_vectors(collection, vectors)
+        status, ids = connect.insert(collection, vectors)
         assert status.OK()
         status = connect.flush([collection])
         assert status.OK()
@@ -127,7 +127,7 @@ class TestCollectionInfoBase:
         '''
         vectors = gen_vectors(nb, dim)
         status = connect.create_partition(collection, tag)
-        status, ids = connect.add_vectors(collection, vectors, partition_tag=tag)
+        status, ids = connect.insert(collection, vectors, partition_tag=tag)
         assert status.OK()
         status = connect.flush([collection])
         assert status.OK()
@@ -151,7 +151,7 @@ class TestCollectionInfoBase:
         assert status.OK()
         status = connect.create_partition(collection, new_tag)
         assert status.OK()
-        status, ids = connect.add_vectors(collection, vectors, partition_tag=tag)
+        status, ids = connect.insert(collection, vectors, partition_tag=tag)
         assert status.OK()
         status = connect.flush([collection])
         assert status.OK()
@@ -177,9 +177,9 @@ class TestCollectionInfoBase:
         assert status.OK()
         status = connect.create_partition(collection, new_tag)
         assert status.OK()
-        status, ids = connect.add_vectors(collection, vectors, partition_tag=tag)
+        status, ids = connect.insert(collection, vectors, partition_tag=tag)
         assert status.OK()
-        status, ids = connect.add_vectors(collection, vectors, partition_tag=new_tag)
+        status, ids = connect.insert(collection, vectors, partition_tag=new_tag)
         assert status.OK()
         status = connect.flush([collection])
         assert status.OK()
@@ -214,7 +214,7 @@ class TestCollectionInfoBase:
         index_param = get_simple_index["index_param"]
         index_type = get_simple_index["index_type"]
         vectors = gen_vector(nb, dim)
-        status, ids = connect.add_vectors(collection, vectors)
+        status, ids = connect.insert(collection, vectors)
         assert status.OK()
         status = connect.flush([collection])
         assert status.OK()
@@ -240,7 +240,7 @@ class TestCollectionInfoBase:
         index_param = get_simple_index["index_param"]
         index_type = get_simple_index["index_type"]
         vectors = gen_vector(nb, dim)
-        status, ids = connect.add_vectors(collection, vectors)
+        status, ids = connect.insert(collection, vectors)
         assert status.OK()
         status = connect.flush([collection])
         assert status.OK()
@@ -264,7 +264,7 @@ class TestCollectionInfoBase:
         expected: status ok, index info shown in segments
         '''
         vectors = gen_vector(nb, dim)
-        status, ids = connect.add_vectors(collection, vectors)
+        status, ids = connect.insert(collection, vectors)
         assert status.OK()
         status = connect.flush([collection])
         assert status.OK()

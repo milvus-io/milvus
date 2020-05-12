@@ -21,7 +21,7 @@ nb = 6000
 class TestGetVectorIdsBase:
     def get_valid_name(self, connect, collection):
         vectors = gen_vector(nb, dim)
-        status, ids = connect.add_vectors(collection, vectors)
+        status, ids = connect.insert(collection, vectors)
         assert status.OK()
         status = connect.flush([collection])
         assert status.OK()
@@ -110,7 +110,7 @@ class TestGetVectorIdsBase:
         expected: status ok
         '''
         vectors = gen_vector(10, dim)
-        status, ids = connect.add_vectors(collection, vectors)
+        status, ids = connect.insert(collection, vectors)
         assert status.OK()
         status = connect.flush([collection])
         assert status.OK()
@@ -133,7 +133,7 @@ class TestGetVectorIdsBase:
         status = connect.create_partition(collection, tag)
         assert status.OK()
         vectors = gen_vector(10, dim)
-        status, ids = connect.add_vectors(collection, vectors, partition_tag=tag)
+        status, ids = connect.insert(collection, vectors, partition_tag=tag)
         assert status.OK()
         status = connect.flush([collection])
         assert status.OK()
@@ -170,7 +170,7 @@ class TestGetVectorIdsBase:
         status = connect.create_index(collection, index_type, index_param)
         assert status.OK()
         vectors = gen_vector(10, dim)
-        status, ids = connect.add_vectors(collection, vectors)
+        status, ids = connect.insert(collection, vectors)
         assert status.OK()
         status = connect.flush([collection])
         assert status.OK()
@@ -196,7 +196,7 @@ class TestGetVectorIdsBase:
         status = connect.create_index(collection, index_type, index_param)
         assert status.OK()
         vectors = gen_vector(10, dim)
-        status, ids = connect.add_vectors(collection, vectors, partition_tag=tag)
+        status, ids = connect.insert(collection, vectors, partition_tag=tag)
         assert status.OK()
         status = connect.flush([collection])
         assert status.OK()
@@ -217,7 +217,7 @@ class TestGetVectorIdsBase:
         expected: status ok, vector_ids decreased after vectors deleted
         '''
         vectors = gen_vector(2, dim)
-        status, ids = connect.add_vectors(collection, vectors)
+        status, ids = connect.insert(collection, vectors)
         assert status.OK()
         delete_ids = [ids[0]]
         status = connect.delete_entity_by_id(collection, delete_ids)
@@ -244,7 +244,7 @@ class TestGetVectorIdsIP:
         expected: status ok
         '''
         vectors = gen_vector(10, dim)
-        status, ids = connect.add_vectors(ip_collection, vectors)
+        status, ids = connect.insert(ip_collection, vectors)
         assert status.OK()
         status = connect.flush([ip_collection])
         assert status.OK()
@@ -267,7 +267,7 @@ class TestGetVectorIdsIP:
         status = connect.create_partition(ip_collection, tag)
         assert status.OK()
         vectors = gen_vector(10, dim)
-        status, ids = connect.add_vectors(ip_collection, vectors, partition_tag=tag)
+        status, ids = connect.insert(ip_collection, vectors, partition_tag=tag)
         assert status.OK()
         status = connect.flush([ip_collection])
         assert status.OK()
@@ -304,7 +304,7 @@ class TestGetVectorIdsIP:
         status = connect.create_index(ip_collection, index_type, index_param)
         assert status.OK()
         vectors = gen_vector(10, dim)
-        status, ids = connect.add_vectors(ip_collection, vectors)
+        status, ids = connect.insert(ip_collection, vectors)
         assert status.OK()
         status = connect.flush([ip_collection])
         assert status.OK()
@@ -330,7 +330,7 @@ class TestGetVectorIdsIP:
         status = connect.create_index(ip_collection, index_type, index_param)
         assert status.OK()
         vectors = gen_vector(10, dim)
-        status, ids = connect.add_vectors(ip_collection, vectors, partition_tag=tag)
+        status, ids = connect.insert(ip_collection, vectors, partition_tag=tag)
         assert status.OK()
         status = connect.flush([ip_collection])
         assert status.OK()
@@ -351,7 +351,7 @@ class TestGetVectorIdsIP:
         expected: status ok, vector_ids decreased after vectors deleted
         '''
         vectors = gen_vector(2, dim)
-        status, ids = connect.add_vectors(ip_collection, vectors)
+        status, ids = connect.insert(ip_collection, vectors)
         assert status.OK()
         delete_ids = [ids[0]]
         status = connect.delete_entity_by_id(ip_collection, delete_ids)
@@ -378,7 +378,7 @@ class TestGetVectorIdsJAC:
         expected: status ok
         '''
         tmp, vectors = gen_binary_vectors(10, dim)
-        status, ids = connect.add_vectors(jac_collection, vectors)
+        status, ids = connect.insert(jac_collection, vectors)
         assert status.OK()
         status = connect.flush([jac_collection])
         assert status.OK()
@@ -400,7 +400,7 @@ class TestGetVectorIdsJAC:
         status = connect.create_partition(jac_collection, tag)
         assert status.OK()
         tmp, vectors = gen_binary_vectors(10, dim)
-        status, ids = connect.add_vectors(jac_collection, vectors, partition_tag=tag)
+        status, ids = connect.insert(jac_collection, vectors, partition_tag=tag)
         assert status.OK()
         status = connect.flush([jac_collection])
         assert status.OK()
@@ -436,7 +436,7 @@ class TestGetVectorIdsJAC:
         status = connect.create_index(jac_collection, index_type, index_param)
         assert status.OK()
         tmp, vectors = gen_binary_vectors(10, dim)
-        status, ids = connect.add_vectors(jac_collection, vectors)
+        status, ids = connect.insert(jac_collection, vectors)
         assert status.OK()
         status = connect.flush([jac_collection])
         assert status.OK()
@@ -462,7 +462,7 @@ class TestGetVectorIdsJAC:
         status = connect.create_index(jac_collection, index_type, index_param)
         assert status.OK()
         tmp, vectors = gen_binary_vectors(10, dim)
-        status, ids = connect.add_vectors(jac_collection, vectors, partition_tag=tag)
+        status, ids = connect.insert(jac_collection, vectors, partition_tag=tag)
         assert status.OK()
         status = connect.flush([jac_collection])
         assert status.OK()
@@ -483,7 +483,7 @@ class TestGetVectorIdsJAC:
         expected: status ok, vector_ids decreased after vectors deleted
         '''
         tmp, vectors = gen_binary_vectors(2, dim)
-        status, ids = connect.add_vectors(jac_collection, vectors)
+        status, ids = connect.insert(jac_collection, vectors)
         assert status.OK()
         delete_ids = [ids[0]]
         status = connect.delete_entity_by_id(jac_collection, delete_ids)

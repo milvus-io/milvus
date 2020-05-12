@@ -97,7 +97,7 @@ class TestCreateBase:
         assert tag_name in tag_list
         assert "_default" in tag_list
 
-    def test_create_partition_add_vectors_default(self, connect, collection):
+    def test_create_partition_insert_default(self, connect, collection):
         '''
         target: test create partition, and insert vectors, check status returned
         method: call function: create_partition

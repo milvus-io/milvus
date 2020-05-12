@@ -40,7 +40,7 @@ class TestMixBase:
              'index_file_size': index_file_size,
              'metric_type': MetricType.L2})
         for i in range(10):
-            status, ids = milvus_instance.add_vectors(collection, vectors)
+            status, ids = milvus_instance.insert(collection, vectors)
             # logging.getLogger().info(ids)
             if i == 0:
                 id_0 = ids[0]; id_1 = ids[1]
@@ -50,14 +50,14 @@ class TestMixBase:
             logging.getLogger().info(status)
             status, result = milvus_instance.get_index_info(collection)
             logging.getLogger().info(result)
-        def add_vectors(milvus_instance):
+        def insert(milvus_instance):
             logging.getLogger().info("In add vectors")
-            status, ids = milvus_instance.add_vectors(collection, vectors)
+            status, ids = milvus_instance.insert(collection, vectors)
             logging.getLogger().info(status)
         def search(milvus_instance):
             logging.getLogger().info("In search vectors")
             for i in range(loops):
-                status, result = milvus_instance.search_vectors(collection, top_k, nprobe, query_vecs)
+                status, result = milvus_instance.search(collection, top_k, nprobe, query_vecs)
                 logging.getLogger().info(status)
                 assert result[0][0].id == id_0
                 assert result[1][0].id == id_1
@@ -67,7 +67,7 @@ class TestMixBase:
         p_search.start()
         milvus_instance = get_milvus(args["handler"])
         # milvus_instance.connect(uri=uri)
-        p_create = Process(target=add_vectors, args=(milvus_instance, ))
+        p_create = Process(target=insert, args=(milvus_instance, ))
         p_create.start()
         p_create.join()
 
@@ -93,7 +93,7 @@ class TestMixBase:
                      'index_file_size': index_file_size,
                      'metric_type': MetricType.L2}
             connect.create_collection(param)
-            status, ids = connect.add_vectors(collection_name=collection_name, records=vectors)
+            status, ids = connect.insert(collection_name=collection_name, records=vectors)
             idx.append(ids[0])
             idx.append(ids[10])
             idx.append(ids[20])
@@ -106,7 +106,7 @@ class TestMixBase:
                      'index_file_size': index_file_size,
                      'metric_type': MetricType.IP}
             connect.create_collection(param)
-            status, ids = connect.add_vectors(collection_name=collection_name, records=vectors)
+            status, ids = connect.insert(collection_name=collection_name, records=vectors)
             assert status.OK()
             status = connect.flush([collection_name])
             assert status.OK()
@@ -147,7 +147,7 @@ class TestMixBase:
         query_vecs = [vectors[0], vectors[10], vectors[20]]
         for i in range(60):
             collection = collection_list[i]
-            status, result = connect.search_vectors(collection, top_k, query_records=query_vecs, params={"nprobe": 1})
+            status, result = connect.search(collection, top_k, query_records=query_vecs, params={"nprobe": 1})
             assert status.OK()
             assert len(result) == len(query_vecs)
             logging.getLogger().info(i)

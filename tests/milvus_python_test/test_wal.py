@@ -21,14 +21,14 @@ class TestWalBase:
     ******************************************************************
     """
     @pytest.mark.timeout(WAL_TIMEOUT)
-    def test_wal_add_vectors(self, connect, collection):
+    def test_wal_insert(self, connect, collection):
         '''
         target: add vectors in WAL
         method: add vectors and flush when WAL is enabled
         expected: status ok, vectors added
         '''
         vectors = gen_vector(nb, dim)
-        status, ids = connect.add_vectors(collection, vectors)
+        status, ids = connect.insert(collection, vectors)
         assert status.OK()
         status = connect.flush([collection])
         assert status.OK()
@@ -48,7 +48,7 @@ class TestWalBase:
         expected: status ok, vectors deleted
         '''
         vectors = gen_vector(nb, dim)
-        status, ids = connect.add_vectors(collection, vectors)
+        status, ids = connect.insert(collection, vectors)
         assert status.OK()
         connect.flush([collection])
         status, res = connect.count_entities(collection)
@@ -69,7 +69,7 @@ class TestWalBase:
         expected: status ok, search with vector have result
         '''
         vector = gen_single_vector(dim)
-        status, ids = connect.add_vectors(collection, vector)
+        status, ids = connect.insert(collection, vector)
         assert status.OK()
         connect.flush([collection])
         status = connect.delete_entity_by_id(collection, [0])
@@ -87,7 +87,7 @@ class TestWalBase:
         expected: status not ok
         '''
         vectors = gen_vector(nb, dim)
-        status, ids = connect.add_vectors(collection, vectors)
+        status, ids = connect.insert(collection, vectors)
         assert status.OK()
         status = connect.flush([collection])
         status = connect.delete_entity_by_id(collection, [0])
@@ -109,7 +109,7 @@ class TestWalBase:
         expected: status ok, add request is recovered and vectors added
         '''
         vector = gen_single_vector(dim)
-        status, ids = connect.add_vectors(collection, vector)
+        status, ids = connect.insert(collection, vector)
         assert status.OK()
         status = connect.flush([collection])
         status, res = connect.count_entities(collection)

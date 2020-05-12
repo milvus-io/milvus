@@ -21,12 +21,12 @@ public class TestCompact {
         assert(res.getResponse().ok());
         List<Long> ids = res.getVectorIds();
         client.flush(collectionName);
-        Response res_delete = client.deleteByIds(collectionName, ids);
+        Response res_delete = client.deleteEntityByID(collectionName, ids);
         assert(res_delete.ok());
         client.flush(collectionName);
         Response res_compact = client.compact(collectionName);
         assert(res_compact.ok());
-        Assert.assertEquals(client.getCollectionRowCount(collectionName).getCollectionRowCount(), 0);
+        Assert.assertEquals(client.countEntities(collectionName).getCollectionEntityCount(), 0);
     }
 
     @Test(dataProvider = "BinaryCollection", dataProviderClass = MainClass.class)
@@ -36,12 +36,12 @@ public class TestCompact {
         assert(res.getResponse().ok());
         List<Long> ids = res.getVectorIds();
         client.flush(collectionName);
-        Response res_delete = client.deleteByIds(collectionName, ids);
+        Response res_delete = client.deleteEntityByID(collectionName, ids);
         assert(res_delete.ok());
         client.flush(collectionName);
         Response res_compact = client.compact(collectionName);
         assert(res_compact.ok());
-        Assert.assertEquals(client.getCollectionRowCount(collectionName).getCollectionRowCount(), 0);
+        Assert.assertEquals(client.countEntities(collectionName).getCollectionEntityCount(), 0);
     }
 
     @Test(dataProvider = "Collection", dataProviderClass = MainClass.class)

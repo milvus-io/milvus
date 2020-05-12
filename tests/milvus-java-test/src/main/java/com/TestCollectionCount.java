@@ -16,18 +16,18 @@ public class TestCollectionCount {
 
     @Test(dataProvider = "Collection", dataProviderClass = MainClass.class)
     public void test_collection_count_no_vectors(MilvusClient client, String collectionName) {
-        Assert.assertEquals(client.getCollectionRowCount(collectionName).getCollectionRowCount(), 0);
+        Assert.assertEquals(client.countEntities(collectionName).getCollectionEntityCount(), 0);
     }
 
     @Test(dataProvider = "Collection", dataProviderClass = MainClass.class)
     public void test_collection_count_collection_not_existed(MilvusClient client, String collectionName) {
-        GetCollectionRowCountResponse res = client.getCollectionRowCount(collectionName+"_");
+        CountEntitiesResponse res = client.countEntities(collectionName+"_");
         assert(!res.getResponse().ok());
     }
 
     @Test(dataProvider = "DisConnectInstance", dataProviderClass = MainClass.class)
     public void test_collection_count_without_connect(MilvusClient client, String collectionName) {
-        GetCollectionRowCountResponse res = client.getCollectionRowCount(collectionName+"_");
+        CountEntitiesResponse res = client.countEntities(collectionName+"_");
         assert(!res.getResponse().ok());
     }
 
@@ -37,7 +37,7 @@ public class TestCollectionCount {
         InsertParam insertParam = new InsertParam.Builder(collectionName).withFloatVectors(vectors).build();
         client.insert(insertParam);
         client.flush(collectionName);
-        Assert.assertEquals(client.getCollectionRowCount(collectionName).getCollectionRowCount(), nb);
+        Assert.assertEquals(client.countEntities(collectionName).getCollectionEntityCount(), nb);
     }
 
     @Test(dataProvider = "BinaryCollection", dataProviderClass = MainClass.class)
@@ -46,13 +46,13 @@ public class TestCollectionCount {
         InsertParam insertParam = new InsertParam.Builder(collectionName).withBinaryVectors(vectorsBinary).build();
         client.insert(insertParam);
         client.flush(collectionName);
-        Assert.assertEquals(client.getCollectionRowCount(collectionName).getCollectionRowCount(), nb);
+        Assert.assertEquals(client.countEntities(collectionName).getCollectionEntityCount(), nb);
     }
 
     @Test(dataProvider = "Collection", dataProviderClass = MainClass.class)
     public void test_collection_count_multi_collections(MilvusClient client, String collectionName) throws InterruptedException {
         Integer collectionNum = 10;
-        GetCollectionRowCountResponse res;
+        CountEntitiesResponse res;
         for (int i = 0; i < collectionNum; ++i) {
             String collectionNameNew = collectionName + "_" + i;
             CollectionMapping collectionSchema = new CollectionMapping.Builder(collectionNameNew, dimension)
@@ -67,8 +67,8 @@ public class TestCollectionCount {
         }
         for (int i = 0; i < collectionNum; ++i) {
             String collectionNameNew = collectionName + "_" + i;
-            res = client.getCollectionRowCount(collectionNameNew);
-            Assert.assertEquals(res.getCollectionRowCount(), nb);
+            res = client.countEntities(collectionNameNew);
+            Assert.assertEquals(res.getCollectionEntityCount(), nb);
         }
     }
 

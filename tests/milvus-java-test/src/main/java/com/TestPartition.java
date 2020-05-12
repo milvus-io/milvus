@@ -1,9 +1,6 @@
 package com;
 
-import io.milvus.client.HasPartitionResponse;
-import io.milvus.client.MilvusClient;
-import io.milvus.client.Response;
-import io.milvus.client.ShowPartitionsResponse;
+import io.milvus.client.*;
 import org.apache.commons.lang3.RandomStringUtils;
 import org.testng.Assert;
 import org.testng.annotations.Test;
@@ -21,7 +18,7 @@ public class TestPartition {
         Response createpResponse = client.createPartition(collectionName, tag);
         assert (createpResponse.ok());
         // show partitions
-        List<String> partitions = client.showPartitions(collectionName).getPartitionList();
+        List<String> partitions = client.listPartitions(collectionName).getPartitionList();
         System.out.println(partitions);
         Assert.assertTrue(partitions.contains(tag));
     }
@@ -71,8 +68,8 @@ public class TestPartition {
         Response response = client.dropPartition(collectionName, tag);
         assert (response.ok());
         // show partitions
-        System.out.println(client.showPartitions(collectionName).getPartitionList());
-        int length = client.showPartitions(collectionName).getPartitionList().size();
+        System.out.println(client.listPartitions(collectionName).getPartitionList());
+        int length = client.listPartitions(collectionName).getPartitionList().size();
         // _default
         Assert.assertEquals(length, 1);
     }
@@ -83,8 +80,8 @@ public class TestPartition {
         Response createpResponseNew = client.createPartition(collectionName, tag);
         assert (!createpResponseNew.ok());
 //         show partitions
-//        System.out.println(client.showPartitions(collectionName).getPartitionList());
-//        int length = client.showPartitions(collectionName).getPartitionList().size();
+//        System.out.println(client.listPartitions(collectionName).getPartitionList());
+//        int length = client.listPartitions(collectionName).getPartitionList().size();
 //        // _default
 //        Assert.assertEquals(length, 1);
     }
@@ -132,7 +129,7 @@ public class TestPartition {
         String tag = RandomStringUtils.randomAlphabetic(10);
         Response createpResponse = client.createPartition(collectionName, tag);
         assert (createpResponse.ok());
-        ShowPartitionsResponse response = client.showPartitions(collectionName);
+        ListPartitionsResponse response = client.listPartitions(collectionName);
         assert (response.getResponse().ok());
         Assert.assertTrue(response.getPartitionList().contains(tag));
     }
@@ -146,7 +143,7 @@ public class TestPartition {
         String tagNew = RandomStringUtils.randomAlphabetic(10);
         Response newCreatepResponse = client.createPartition(collectionName, tagNew);
         assert (newCreatepResponse.ok());
-        ShowPartitionsResponse response = client.showPartitions(collectionName);
+        ListPartitionsResponse response = client.listPartitions(collectionName);
         assert (response.getResponse().ok());
         System.out.println(response.getPartitionList());
         Assert.assertTrue(response.getPartitionList().contains(tag));
