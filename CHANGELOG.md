@@ -2,7 +2,7 @@
 
 Please mark all change in change log and use the issue from GitHub
 
-# Milvus 0.9.0 (TBD)
+# Milvus 0.9.0 (2020-05-15)
 
 ## Bug
 -   \#1705 Limit the insert data batch size
