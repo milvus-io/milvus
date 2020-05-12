@@ -26,7 +26,7 @@ class TestCollectionCount:
             20000,
         ],
     )
-    def add_vectors_nb(self, request):
+    def insert_nb(self, request):
         yield request.param
 
     """
@@ -44,37 +44,37 @@ class TestCollectionCount:
             pytest.skip("Skip PQ Temporary")
         return request.param
 
-    def test_collection_rows_count(self, connect, collection, add_vectors_nb):
+    def test_collection_rows_count(self, connect, collection, insert_nb):
         '''
         target: test collection rows_count is correct or not
         method: create collection and add vectors in it,
             assert the value returned by count_entities method is equal to length of vectors
         expected: the count is equal to the length of vectors
         '''
-        nb = add_vectors_nb
+        nb = insert_nb
         vectors = gen_vectors(nb, dim)
-        res = connect.add_vectors(collection_name=collection, records=vectors)
+        res = connect.insert(collection_name=collection, records=vectors)
         connect.flush([collection])
         status, res = connect.count_entities(collection)
         assert res == nb
 
-    def test_collection_rows_count_partition(self, connect, collection, add_vectors_nb):
+    def test_collection_rows_count_partition(self, connect, collection, insert_nb):
         '''
         target: test collection rows_count is correct or not
         method: create collection, create partition and add vectors in it,
             assert the value returned by count_entities method is equal to length of vectors
         expected: the count is equal to the length of vectors
         '''
-        nb = add_vectors_nb
+        nb = insert_nb
         vectors = gen_vectors(nb, dim)
         status = connect.create_partition(collection, tag)
         assert status.OK()
-        res = connect.add_vectors(collection_name=collection, records=vectors, partition_tag=tag)
+        res = connect.insert(collection_name=collection, records=vectors, partition_tag=tag)
         connect.flush([collection])
         status, res = connect.count_entities(collection)
         assert res == nb
 
-    def test_collection_rows_count_multi_partitions_A(self, connect, collection, add_vectors_nb):
+    def test_collection_rows_count_multi_partitions_A(self, connect, collection, insert_nb):
         '''
         target: test collection rows_count is correct or not
         method: create collection, create partitions and add vectors in it,
@@ -82,17 +82,17 @@ class TestCollectionCount:
         expected: the count is equal to the length of vectors
         '''
         new_tag = "new_tag"
-        nb = add_vectors_nb
+        nb = insert_nb
         vectors = gen_vectors(nb, dim)
         status = connect.create_partition(collection, tag)
         status = connect.create_partition(collection, new_tag)
         assert status.OK()
-        res = connect.add_vectors(collection_name=collection, records=vectors)
+        res = connect.insert(collection_name=collection, records=vectors)
         connect.flush([collection])
         status, res = connect.count_entities(collection)
         assert res == nb
 
-    def test_collection_rows_count_multi_partitions_B(self, connect, collection, add_vectors_nb):
+    def test_collection_rows_count_multi_partitions_B(self, connect, collection, insert_nb):
         '''
         target: test collection rows_count is correct or not
         method: create collection, create partitions and add vectors in one of the partitions,
@@ -100,17 +100,17 @@ class TestCollectionCount:
         expected: the count is equal to the length of vectors
         '''
         new_tag = "new_tag"
-        nb = add_vectors_nb
+        nb = insert_nb
         vectors = gen_vectors(nb, dim)
         status = connect.create_partition(collection, tag)
         status = connect.create_partition(collection, new_tag)
         assert status.OK()
-        res = connect.add_vectors(collection_name=collection, records=vectors, partition_tag=tag)
+        res = connect.insert(collection_name=collection, records=vectors, partition_tag=tag)
         connect.flush([collection])
         status, res = connect.count_entities(collection)
         assert res == nb
 
-    def test_collection_rows_count_multi_partitions_C(self, connect, collection, add_vectors_nb):
+    def test_collection_rows_count_multi_partitions_C(self, connect, collection, insert_nb):
         '''
         target: test collection rows_count is correct or not
         method: create collection, create partitions and add vectors in one of the partitions,
@@ -118,13 +118,13 @@ class TestCollectionCount:
         expected: the collection count is equal to the length of vectors
         '''
         new_tag = "new_tag"
-        nb = add_vectors_nb
+        nb = insert_nb
         vectors = gen_vectors(nb, dim)
         status = connect.create_partition(collection, tag)
         status = connect.create_partition(collection, new_tag)
         assert status.OK()
-        res = connect.add_vectors(collection_name=collection, records=vectors, partition_tag=tag)
-        res = connect.add_vectors(collection_name=collection, records=vectors, partition_tag=new_tag)
+        res = connect.insert(collection_name=collection, records=vectors, partition_tag=tag)
+        res = connect.insert(collection_name=collection, records=vectors, partition_tag=new_tag)
         connect.flush([collection])
         status, res = connect.count_entities(collection)
         assert res == nb * 2
@@ -139,7 +139,7 @@ class TestCollectionCount:
         index_type = get_simple_index["index_type"]
         nb = 100
         vectors = gen_vectors(nb, dim)
-        res = connect.add_vectors(collection_name=collection, records=vectors)
+        res = connect.insert(collection_name=collection, records=vectors)
         connect.flush([collection])
         connect.create_index(collection, index_type, index_param)
         status, res = connect.count_entities(collection)
@@ -182,7 +182,7 @@ class TestCollectionCount:
         '''
         nq = 2
         vectors = gen_vectors(nq, dim)
-        res = connect.add_vectors(collection_name=collection, records=vectors)
+        res = connect.insert(collection_name=collection, records=vectors)
         time.sleep(add_time_interval)
 
         def rows_count(milvus):
@@ -219,7 +219,7 @@ class TestCollectionCount:
                      'index_file_size': index_file_size,
                      'metric_type': MetricType.L2}
             connect.create_collection(param)
-            res = connect.add_vectors(collection_name=collection_name, records=vectors)
+            res = connect.insert(collection_name=collection_name, records=vectors)
         connect.flush(collection_list)
         for i in range(20):
             status, res = connect.count_entities(collection_list[i])
@@ -240,7 +240,7 @@ class TestCollectionCountIP:
             20000,
         ],
     )
-    def add_vectors_nb(self, request):
+    def insert_nb(self, request):
         yield request.param
 
     """
@@ -259,16 +259,16 @@ class TestCollectionCountIP:
             pytest.skip("Skip PQ Temporary")
         return request.param
 
-    def test_collection_rows_count(self, connect, ip_collection, add_vectors_nb):
+    def test_collection_rows_count(self, connect, ip_collection, insert_nb):
         '''
         target: test collection rows_count is correct or not
         method: create collection and add vectors in it,
             assert the value returned by count_entities method is equal to length of vectors
         expected: the count is equal to the length of vectors
         '''
-        nb = add_vectors_nb
+        nb = insert_nb
         vectors = gen_vectors(nb, dim)
-        res = connect.add_vectors(collection_name=ip_collection, records=vectors)
+        res = connect.insert(collection_name=ip_collection, records=vectors)
         connect.flush([ip_collection])
         status, res = connect.count_entities(ip_collection)
         assert res == nb
@@ -283,7 +283,7 @@ class TestCollectionCountIP:
         index_type = get_simple_index["index_type"]
         nb = 100
         vectors = gen_vectors(nb, dim)
-        res = connect.add_vectors(collection_name=ip_collection, records=vectors)
+        res = connect.insert(collection_name=ip_collection, records=vectors)
         connect.flush([ip_collection])
         connect.create_index(ip_collection, index_type, index_param)
         status, res = connect.count_entities(ip_collection)
@@ -325,7 +325,7 @@ class TestCollectionCountIP:
         '''
         nq = 2
         vectors = gen_vectors(nq, dim)
-        res = connect.add_vectors(collection_name=ip_collection, records=vectors)
+        res = connect.insert(collection_name=ip_collection, records=vectors)
         time.sleep(add_time_interval)
 
         def rows_count(milvus):
@@ -362,7 +362,7 @@ class TestCollectionCountIP:
                      'index_file_size': index_file_size,
                      'metric_type': MetricType.IP}
             connect.create_collection(param)
-            res = connect.add_vectors(collection_name=collection_name, records=vectors)
+            res = connect.insert(collection_name=collection_name, records=vectors)
         connect.flush(collection_list)
         for i in range(20):
             status, res = connect.count_entities(collection_list[i])
@@ -383,7 +383,7 @@ class TestCollectionCountJAC:
             20000,
         ],
     )
-    def add_vectors_nb(self, request):
+    def insert_nb(self, request):
         yield request.param
 
     """
@@ -401,16 +401,16 @@ class TestCollectionCountJAC:
         else:
             pytest.skip("Skip index Temporary")
 
-    def test_collection_rows_count(self, connect, jac_collection, add_vectors_nb):
+    def test_collection_rows_count(self, connect, jac_collection, insert_nb):
         '''
         target: test collection rows_count is correct or not
         method: create collection and add vectors in it,
             assert the value returned by count_entities method is equal to length of vectors
         expected: the count is equal to the length of vectors
         '''
-        nb = add_vectors_nb
+        nb = insert_nb
         tmp, vectors = gen_binary_vectors(nb, dim)
-        res = connect.add_vectors(collection_name=jac_collection, records=vectors)
+        res = connect.insert(collection_name=jac_collection, records=vectors)
         connect.flush([jac_collection])
         status, res = connect.count_entities(jac_collection)
         assert res == nb
@@ -425,7 +425,7 @@ class TestCollectionCountJAC:
         index_param = get_jaccard_index["index_param"]
         index_type = get_jaccard_index["index_type"]
         tmp, vectors = gen_binary_vectors(nb, dim)
-        res = connect.add_vectors(collection_name=jac_collection, records=vectors)
+        res = connect.insert(collection_name=jac_collection, records=vectors)
         connect.flush([jac_collection])
         connect.create_index(jac_collection, index_type, index_param)
         status, res = connect.count_entities(jac_collection)
@@ -474,7 +474,7 @@ class TestCollectionCountJAC:
                      'index_file_size': index_file_size,
                      'metric_type': MetricType.JACCARD}
             connect.create_collection(param)
-            res = connect.add_vectors(collection_name=collection_name, records=vectors)
+            res = connect.insert(collection_name=collection_name, records=vectors)
         connect.flush(collection_list)
         for i in range(20):
             status, res = connect.count_entities(collection_list[i])
@@ -494,7 +494,7 @@ class TestCollectionCountBinary:
             20000,
         ],
     )
-    def add_vectors_nb(self, request):
+    def insert_nb(self, request):
         yield request.param
 
     """
@@ -534,44 +534,44 @@ class TestCollectionCountBinary:
         else:
             pytest.skip("Skip index Temporary")
 
-    def test_collection_rows_count(self, connect, ham_collection, add_vectors_nb):
+    def test_collection_rows_count(self, connect, ham_collection, insert_nb):
         '''
         target: test collection rows_count is correct or not
         method: create collection and add vectors in it,
             assert the value returned by count_entities method is equal to length of vectors
         expected: the count is equal to the length of vectors
         '''
-        nb = add_vectors_nb
+        nb = insert_nb
         tmp, vectors = gen_binary_vectors(nb, dim)
-        res = connect.add_vectors(collection_name=ham_collection, records=vectors)
+        res = connect.insert(collection_name=ham_collection, records=vectors)
         connect.flush([ham_collection])
         status, res = connect.count_entities(ham_collection)
         assert res == nb
 
-    def test_collection_rows_count_substructure(self, connect, substructure_collection, add_vectors_nb):
+    def test_collection_rows_count_substructure(self, connect, substructure_collection, insert_nb):
         '''
         target: test collection rows_count is correct or not
         method: create collection and add vectors in it,
             assert the value returned by count_entities method is equal to length of vectors
         expected: the count is equal to the length of vectors
         '''
-        nb = add_vectors_nb
+        nb = insert_nb
         tmp, vectors = gen_binary_vectors(nb, dim)
-        res = connect.add_vectors(collection_name=substructure_collection, records=vectors)
+        res = connect.insert(collection_name=substructure_collection, records=vectors)
         connect.flush([substructure_collection])
         status, res = connect.count_entities(substructure_collection)
         assert res == nb
 
-    def test_collection_rows_count_superstructure(self, connect, superstructure_collection, add_vectors_nb):
+    def test_collection_rows_count_superstructure(self, connect, superstructure_collection, insert_nb):
         '''
         target: test collection rows_count is correct or not
         method: create collection and add vectors in it,
             assert the value returned by count_entities method is equal to length of vectors
         expected: the count is equal to the length of vectors
         '''
-        nb = add_vectors_nb
+        nb = insert_nb
         tmp, vectors = gen_binary_vectors(nb, dim)
-        res = connect.add_vectors(collection_name=superstructure_collection, records=vectors)
+        res = connect.insert(collection_name=superstructure_collection, records=vectors)
         connect.flush([superstructure_collection])
         status, res = connect.count_entities(superstructure_collection)
         assert res == nb
@@ -586,7 +586,7 @@ class TestCollectionCountBinary:
         index_type = get_hamming_index["index_type"]
         index_param = get_hamming_index["index_param"]
         tmp, vectors = gen_binary_vectors(nb, dim)
-        res = connect.add_vectors(collection_name=ham_collection, records=vectors)
+        res = connect.insert(collection_name=ham_collection, records=vectors)
         connect.flush([ham_collection])
         connect.create_index(ham_collection, index_type, index_param)
         status, res = connect.count_entities(ham_collection)
@@ -602,7 +602,7 @@ class TestCollectionCountBinary:
         index_type = get_substructure_index["index_type"]
         index_param = get_substructure_index["index_param"]
         tmp, vectors = gen_binary_vectors(nb, dim)
-        res = connect.add_vectors(collection_name=substructure_collection, records=vectors)
+        res = connect.insert(collection_name=substructure_collection, records=vectors)
         connect.flush([substructure_collection])
         connect.create_index(substructure_collection, index_type, index_param)
         status, res = connect.count_entities(substructure_collection)
@@ -618,7 +618,7 @@ class TestCollectionCountBinary:
         index_type = get_superstructure_index["index_type"]
         index_param = get_superstructure_index["index_param"]
         tmp, vectors = gen_binary_vectors(nb, dim)
-        res = connect.add_vectors(collection_name=superstructure_collection, records=vectors)
+        res = connect.insert(collection_name=superstructure_collection, records=vectors)
         connect.flush([superstructure_collection])
         connect.create_index(superstructure_collection, index_type, index_param)
         status, res = connect.count_entities(superstructure_collection)
@@ -667,7 +667,7 @@ class TestCollectionCountBinary:
                      'index_file_size': index_file_size,
                      'metric_type': MetricType.HAMMING}
             connect.create_collection(param)
-            res = connect.add_vectors(collection_name=collection_name, records=vectors)
+            res = connect.insert(collection_name=collection_name, records=vectors)
         connect.flush(collection_list)
         for i in range(20):
             status, res = connect.count_entities(collection_list[i])
@@ -688,7 +688,7 @@ class TestCollectionCountTANIMOTO:
             20000,
         ],
     )
-    def add_vectors_nb(self, request):
+    def insert_nb(self, request):
         yield request.param
 
     """
@@ -706,16 +706,16 @@ class TestCollectionCountTANIMOTO:
         else:
             pytest.skip("Skip index Temporary")
 
-    def test_collection_rows_count(self, connect, tanimoto_collection, add_vectors_nb):
+    def test_collection_rows_count(self, connect, tanimoto_collection, insert_nb):
         '''
         target: test collection rows_count is correct or not
         method: create collection and add vectors in it,
             assert the value returned by count_entities method is equal to length of vectors
         expected: the count is equal to the length of vectors
         '''
-        nb = add_vectors_nb
+        nb = insert_nb
         tmp, vectors = gen_binary_vectors(nb, dim)
-        res = connect.add_vectors(collection_name=tanimoto_collection, records=vectors)
+        res = connect.insert(collection_name=tanimoto_collection, records=vectors)
         connect.flush([tanimoto_collection])
         status, res = connect.count_entities(tanimoto_collection)
         assert status.OK()

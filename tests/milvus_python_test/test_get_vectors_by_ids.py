@@ -32,7 +32,7 @@ class TestGetBase:
         expected: status ok, vector returned
         '''
         vector = gen_single_vector(dim)
-        status, ids = connect.add_vectors(collection, vector)
+        status, ids = connect.insert(collection, vector)
         assert status.OK()
         status = connect.flush([collection])
         assert status.OK()
@@ -47,7 +47,7 @@ class TestGetBase:
         expected: status ok, vector returned
         '''
         vectors = gen_vectors(nb, dim)
-        status, ids = connect.add_vectors(collection, vectors)
+        status, ids = connect.insert(collection, vectors)
         assert status.OK()
         status = connect.flush([collection])
         assert status.OK()
@@ -64,7 +64,7 @@ class TestGetBase:
         expected: status ok, vector returned
         '''
         vectors = gen_vectors(nb, dim)
-        status, ids = connect.add_vectors(collection, vectors)
+        status, ids = connect.insert(collection, vectors)
         assert status.OK()
         status = connect.flush([collection])
         assert status.OK()
@@ -80,7 +80,7 @@ class TestGetBase:
         vectors = gen_vectors(nb, dim)
         status = connect.create_partition(collection, tag)
         assert status.OK()
-        status, ids = connect.add_vectors(collection, vectors, partition_tag=tag)
+        status, ids = connect.insert(collection, vectors, partition_tag=tag)
         assert status.OK()
         status = connect.flush([collection])
         assert status.OK()
@@ -99,7 +99,7 @@ class TestGetBase:
         vectors = gen_vectors(nb, dim)
         ids = [i for i in range(nb)]
         ids[1] = 0; ids[-1] = 0
-        status, ids = connect.add_vectors(collection, vectors, ids=ids)
+        status, ids = connect.insert(collection, vectors, ids=ids)
         status = connect.flush([collection])
         assert status.OK()
         status, res = connect.get_entity_by_id(collection, [0]) 
@@ -126,7 +126,7 @@ class TestGetBase:
         expected: status ok, get one vector
         '''
         vectors = gen_vectors(nb, dim)
-        status, ids = connect.add_vectors(collection, vectors)
+        status, ids = connect.insert(collection, vectors)
         assert status.OK()
         status = connect.flush([collection])
         assert status.OK()
@@ -167,7 +167,7 @@ class TestGetBase:
         expected: status ok, empty result
         '''
         vector = gen_single_vector(dim)
-        status, ids = connect.add_vectors(collection, vector)
+        status, ids = connect.insert(collection, vector)
         assert status.OK()
         status = connect.flush([collection])
         assert status.OK()
@@ -182,7 +182,7 @@ class TestGetBase:
         expected: status not ok
         '''
         vector = gen_single_vector(dim)
-        status, ids = connect.add_vectors(collection, vector)
+        status, ids = connect.insert(collection, vector)
         assert status.OK()
         status = connect.flush([collection])
         assert status.OK()
@@ -233,7 +233,7 @@ class TestGetIndexedVectors:
         index_param = get_simple_index["index_param"]
         index_type = get_simple_index["index_type"]
         vectors = gen_vector(nb, dim)
-        status, ids = connect.add_vectors(collection, vectors)
+        status, ids = connect.insert(collection, vectors)
         assert status.OK()
         status = connect.flush([collection])
         assert status.OK()
@@ -253,7 +253,7 @@ class TestGetIndexedVectors:
         index_param = get_simple_index["index_param"]
         index_type = get_simple_index["index_type"]
         vectors = gen_vectors(nb, dim)
-        status, ids = connect.add_vectors(collection, vectors)
+        status, ids = connect.insert(collection, vectors)
         assert status.OK()
         status = connect.flush([collection])
         assert status.OK()
@@ -279,7 +279,7 @@ class TestGetIndexedVectors:
         vectors = gen_vectors(nb, dim)
         status = connect.create_partition(collection, tag)
         ids = [i for i in range(nb)] 
-        status, ids = connect.add_vectors(collection, vectors, ids, partition_tag=tag)
+        status, ids = connect.insert(collection, vectors, ids, partition_tag=tag)
         assert status.OK()
         status = connect.flush([collection])
         assert status.OK()
@@ -304,7 +304,7 @@ class TestGetBinary:
         expected: status ok, vector returned
         '''
         tmp, vector = gen_binary_vectors(1, dim)
-        status, ids = connect.add_vectors(jac_collection, vector)
+        status, ids = connect.insert(jac_collection, vector)
         assert status.OK()
         status = connect.flush([jac_collection])
         assert status.OK()
@@ -319,7 +319,7 @@ class TestGetBinary:
         expected: status ok, vector returned
         '''
         tmp, vectors = gen_binary_vectors(nb, dim)
-        status, ids = connect.add_vectors(jac_collection, vectors)
+        status, ids = connect.insert(jac_collection, vectors)
         assert status.OK()
         status = connect.flush([jac_collection])
         assert status.OK()
@@ -336,7 +336,7 @@ class TestGetBinary:
         tmp, vectors = gen_binary_vectors(nb, dim)
         ids = [i for i in range(nb)]
         ids[0] = 0; ids[-1] = 0
-        status, ids = connect.add_vectors(jac_collection, vectors, ids=ids)
+        status, ids = connect.insert(jac_collection, vectors, ids=ids)
         status = connect.flush([jac_collection])
         assert status.OK()
         status, res = connect.get_entity_by_id(jac_collection, [0]) 
@@ -350,7 +350,7 @@ class TestGetBinary:
         expected: status ok, empty result
         '''
         tmp, vector = gen_binary_vectors(1, dim)
-        status, ids = connect.add_vectors(jac_collection, vector)
+        status, ids = connect.insert(jac_collection, vector)
         assert status.OK()
         status = connect.flush([jac_collection])
         assert status.OK()
@@ -365,7 +365,7 @@ class TestGetBinary:
         expected: status not ok
         '''
         tmp, vector = gen_binary_vectors(1, dim)
-        status, ids = connect.add_vectors(jac_collection, vector)
+        status, ids = connect.insert(jac_collection, vector)
         assert status.OK()
         status = connect.flush([jac_collection])
         assert status.OK()
@@ -381,7 +381,7 @@ class TestGetBinary:
         '''
         tmp, vectors = gen_binary_vectors(nb, dim)
         status = connect.create_partition(jac_collection, tag)
-        status, ids = connect.add_vectors(jac_collection, vectors, partition_tag=tag)
+        status, ids = connect.insert(jac_collection, vectors, partition_tag=tag)
         assert status.OK()
         status = connect.flush([jac_collection])
         assert status.OK()
