@@ -278,6 +278,12 @@ class DBImpl : public DB, public server::CacheConfigHandler, public server::Engi
     Status
     ExecWalRecord(const wal::MXLogRecord& record);
 
+    void
+    SuspendIfFirst();
+
+    void
+    ResumeIfLast();
+
  private:
     DBOptions options_;
 
@@ -357,6 +363,9 @@ class DBImpl : public DB, public server::CacheConfigHandler, public server::Engi
     IndexFailedChecker index_failed_checker_;
 
     std::mutex flush_merge_compact_mutex_;
+
+    int64_t live_search_num_ = 0;
+    std::mutex suspend_build_mutex_;
 };  // DBImpl
 
 }  // namespace engine

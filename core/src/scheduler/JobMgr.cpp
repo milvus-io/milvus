@@ -20,6 +20,7 @@
 #include "SchedInst.h"
 #include "TaskCreator.h"
 #include "scheduler/Algorithm.h"
+#include "scheduler/CPUBuilder.h"
 #include "scheduler/tasklabel/SpecResLabel.h"
 #include "selector/Optimizer.h"
 #include "task/Task.h"
@@ -140,7 +141,11 @@ JobMgr::worker_function() {
         if (auto disk = res_mgr_->GetDiskResources()[0].lock()) {
             // if (auto disk = res_mgr_->GetCpuResources()[0].lock()) {
             for (auto& task : tasks) {
-                disk->task_table().Put(task, nullptr);
+                if (task->Type() == TaskType::BuildIndexTask && task->path().Last() == "cpu") {
+                    CPUBuilderInst::GetInstance()->Put(task);
+                } else {
+                    disk->task_table().Put(task, nullptr);
+                }
             }
         }
     }

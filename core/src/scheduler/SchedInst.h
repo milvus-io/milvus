@@ -12,6 +12,7 @@
 #pragma once
 
 #include "BuildMgr.h"
+#include "CPUBuilder.h"
 #include "JobMgr.h"
 #include "ResourceMgr.h"
 #include "Scheduler.h"
@@ -154,6 +155,24 @@ class BuildMgrInst {
 
  private:
     static BuildMgrPtr instance;
+    static std::mutex mutex_;
+};
+
+class CPUBuilderInst {
+ public:
+    static CPUBuilderPtr
+    GetInstance() {
+        if (instance == nullptr) {
+            std::lock_guard<std::mutex> lock(mutex_);
+            if (instance == nullptr) {
+                instance = std::make_shared<CPUBuilder>();
+            }
+        }
+        return instance;
+    }
+
+ private:
+    static CPUBuilderPtr instance;
     static std::mutex mutex_;
 };
 
