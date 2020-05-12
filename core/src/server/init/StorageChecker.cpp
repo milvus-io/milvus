@@ -44,6 +44,16 @@ StorageChecker::CheckStoragePermission() {
         return Status(SERVER_UNEXPECTED_ERROR, err_msg);
     }
 
+    std::string deploy_mode;
+    status = config.GetServerConfigDeployMode(deploy_mode);
+    if (!status.ok()) {
+        return status;
+    }
+
+    if (deploy_mode == "cluster_readonly") {
+        return Status::OK();
+    }
+
     /* Check db directory write permission */
     std::string primary_path;
     status = config.GetStorageConfigPrimaryPath(primary_path);
