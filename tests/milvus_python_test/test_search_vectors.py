@@ -33,19 +33,19 @@ class TestSearchBase:
         '''
         global vectors
         if nb == 6000:
-            insert = vectors
+            add_vectors = vectors
         else:  
-            insert = gen_vectors(nb, dim)
-            vectors = sklearn.preprocessing.normalize(vectors, axis=1, norm='l2')
-            vectors = vectors.tolist()
+            add_vectors = gen_vectors(nb, dim)
+            add_vectors = sklearn.preprocessing.normalize(add_vectors, axis=1, norm='l2')
+            add_vectors = add_vectors.tolist()
         if partition_tags is None:
-            status, ids = connect.insert(collection, insert)
+            status, ids = connect.insert(collection, add_vectors)
             assert status.OK()
         else:
-            status, ids = connect.insert(collection, insert, partition_tag=partition_tags)
+            status, ids = connect.insert(collection, add_vectors, partition_tag=partition_tags)
             assert status.OK()
         sleep(add_interval_time)
-        return insert, ids
+        return add_vectors, ids
 
     def init_binary_data(self, connect, collection, nb=6000, insert=True, partition_tags=None):
         '''
@@ -55,19 +55,19 @@ class TestSearchBase:
         global binary_vectors
         global raw_vectors
         if nb == 6000:
-            insert = binary_vectors
+            add_vectors = binary_vectors
             add_raw_vectors = raw_vectors
         else:  
-            add_raw_vectors, insert = gen_binary_vectors(nb, dim)
+            add_raw_vectors, add_vectors = gen_binary_vectors(nb, dim)
         if insert is True:
             if partition_tags is None:
-                status, ids = connect.insert(collection, insert)
+                status, ids = connect.insert(collection, add_vectors)
                 assert status.OK()
             else:
-                status, ids = connect.insert(collection, insert, partition_tag=partition_tags)
+                status, ids = connect.insert(collection, add_vectors, partition_tag=partition_tags)
                 assert status.OK()
-            sleep(add_interval_time)
-        return add_raw_vectors, insert, ids
+            connect.flush([collection])
+        return add_raw_vectors, add_vectors, ids
 
     """
     generate valid create_index params
