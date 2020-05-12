@@ -21,6 +21,7 @@
 #include <functional>
 #include <iostream>
 #include <limits>
+#include <mutex>
 #include <queue>
 #include <set>
 #include <thread>
@@ -33,6 +34,7 @@
 #include "db/IDGenerator.h"
 #include "db/merge/MergeManagerFactory.h"
 #include "engine/EngineFactory.h"
+#include "index/knowhere/knowhere/index/vector_index/helpers/BuilderSuspend.h"
 #include "index/thirdparty/faiss/utils/distances.h"
 #include "insert/MemManagerFactory.h"
 #include "meta/MetaConsts.h"
@@ -1721,9 +1723,15 @@ DBImpl::QueryAsync(const std::shared_ptr<server::Context>& context, meta::FilesH
         job->AddIndexFile(file_ptr);
     }
 
+    // Suspend builder
+    SuspendIfFirst();
+
     // step 2: put search job to scheduler and wait result
     scheduler::JobMgrInst::GetInstance()->Put(job);
     job->WaitResult();
+
+    // Resume builder
+    ResumeIfLast();
 
     files_holder.ReleaseFiles();
     if (!job->GetStatus().ok()) {
@@ -2647,6 +2655,24 @@ DBImpl::OnCacheInsertDataChanged(bool value) {
 void
 DBImpl::OnUseBlasThresholdChanged(int64_t threshold) {
     faiss::distance_compute_blas_threshold = threshold;
+}
+
+void
+DBImpl::SuspendIfFirst() {
+    std::lock_guard<std::mutex> lock(suspend_build_mutex_);
+    if (++live_search_num_ == 1) {
+        LOG_ENGINE_TRACE_ << "live_search_num_: " << live_search_num_;
+        knowhere::BuilderSuspend();
+    }
+}
+
+void
+DBImpl::ResumeIfLast() {
+    std::lock_guard<std::mutex> lock(suspend_build_mutex_);
+    if (--live_search_num_ == 0) {
+        LOG_ENGINE_TRACE_ << "live_search_num_: " << live_search_num_;
+        knowhere::BuildResume();
+    }
 }
 
 }  // namespace engine

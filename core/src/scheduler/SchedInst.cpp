@@ -38,6 +38,9 @@ std::mutex OptimizerInst::mutex_;
 BuildMgrPtr BuildMgrInst::instance = nullptr;
 std::mutex BuildMgrInst::mutex_;
 
+CPUBuilderPtr CPUBuilderInst::instance = nullptr;
+std::mutex CPUBuilderInst::mutex_;
+
 void
 load_simple_config() {
     // create and connect
@@ -94,10 +97,12 @@ StartSchedulerService() {
     ResMgrInst::GetInstance()->Start();
     SchedInst::GetInstance()->Start();
     JobMgrInst::GetInstance()->Start();
+    CPUBuilderInst::GetInstance()->Start();
 }
 
 void
 StopSchedulerService() {
+    CPUBuilderInst::GetInstance()->Stop();
     JobMgrInst::GetInstance()->Stop();
     SchedInst::GetInstance()->Stop();
     ResMgrInst::GetInstance()->Stop();
