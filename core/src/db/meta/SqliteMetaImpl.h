@@ -96,6 +96,9 @@ class SqliteMetaImpl : public Meta {
                     uint64_t lsn) override;
 
     Status
+    HasPartition(const std::string& collection_id, const std::string& tag, bool& has_or_not) override;
+
+    Status
     DropPartition(const std::string& partition_name) override;
 
     Status

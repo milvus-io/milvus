@@ -80,8 +80,9 @@ ClientTest::CreateHybridCollection(const std::string& collection_name) {
 void
 ClientTest::Flush(const std::string& collection_name) {
     milvus_sdk::TimeRecorder rc("Flush");
-    milvus::Status stat = conn_->FlushCollection(collection_name);
-    std::cout << "FlushCollection function call status: " << stat.message() << std::endl;
+    std::vector<std::string> collections = {collection_name};
+    milvus::Status stat = conn_->Flush(collections);
+    std::cout << "Flush function call status: " << stat.message() << std::endl;
 }
 
 void

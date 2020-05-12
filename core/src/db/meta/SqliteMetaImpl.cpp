@@ -941,6 +941,33 @@ SqliteMetaImpl::CreatePartition(const std::string& collection_id,
 }
 
 Status
+SqliteMetaImpl::HasPartition(const std::string& collection_id, const std::string& tag, bool& has_or_not) {
+    try {
+        server::MetricCollector metric;
+
+        // trim side-blank of tag, only compare valid characters
+        // for example: " ab cd " is treated as "ab cd"
+        std::string valid_tag = tag;
+        server::StringHelpFunctions::TrimStringBlank(valid_tag);
+
+        auto name = ConnectorPtr->select(
+            columns(&CollectionSchema::collection_id_),
+            where(c(&CollectionSchema::owner_collection_) == collection_id
+                  and c(&CollectionSchema::partition_tag_) == valid_tag and
+                  c(&CollectionSchema::state_) != (int)CollectionSchema::TO_DELETE));
+        if (name.size() > 0) {
+            has_or_not = true;
+        } else {
+            has_or_not = false;
+        }
+    } catch (std::exception& e) {
+        return HandleException("Encounter exception when lookup partition", e.what());
+    }
+
+    return Status::OK();
+}
+
+Status
 SqliteMetaImpl::DropPartition(const std::string& partition_name) {
     return DropCollection(partition_name);
 }

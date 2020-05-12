@@ -81,6 +81,9 @@ class DB {
                     const std::string& partition_tag) = 0;
 
     virtual Status
+    HasPartition(const std::string& collection_id, const std::string& tag, bool& has_or_not) = 0;
+
+    virtual Status
     DropPartition(const std::string& partition_name) = 0;
 
     virtual Status

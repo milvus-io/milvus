@@ -103,21 +103,16 @@ ConnectionImpl::Insert(const std::string& collection_name, const std::string& pa
 }
 
 Status
-ConnectionImpl::GetEntityByID(const std::string& collection_name, int64_t entity_id, Entity& entity_data) {
-    return client_proxy_->GetEntityByID(collection_name, entity_id, entity_data);
+ConnectionImpl::GetEntityByID(const std::string& collection_name,
+                              const std::vector<int64_t>& id_array,
+                              std::vector<Entity>& entities_data) {
+    return client_proxy_->GetEntityByID(collection_name, id_array, entities_data);
 }
 
 Status
-ConnectionImpl::GetEntitiesByID(const std::string& collection_name,
-                                const std::vector<int64_t>& id_array,
-                                std::vector<Entity>& entities_data) {
-    return client_proxy_->GetEntitiesByID(collection_name, id_array, entities_data);
-}
-
-Status
-ConnectionImpl::GetIDsInSegment(const std::string& collection_name, const std::string& segment_name,
+ConnectionImpl::ListIDInSegment(const std::string& collection_name, const std::string& segment_name,
                                 std::vector<int64_t>& id_array) {
-    return client_proxy_->GetIDsInSegment(collection_name, segment_name, id_array);
+    return client_proxy_->ListIDInSegment(collection_name, segment_name, id_array);
 }
 
 Status
@@ -145,38 +140,38 @@ ConnectionImpl::SearchByID(const std::string& collection_name, const PartitionTa
 }
 
 Status
-ConnectionImpl::DescribeCollection(const std::string& collection_name, CollectionParam& collection_schema) {
-    return client_proxy_->DescribeCollection(collection_name, collection_schema);
+ConnectionImpl::GetCollectionInfo(const std::string& collection_name, CollectionParam& collection_schema) {
+    return client_proxy_->GetCollectionInfo(collection_name, collection_schema);
 }
 
 Status
-ConnectionImpl::CountCollection(const std::string& collection_name, int64_t& row_count) {
-    return client_proxy_->CountCollection(collection_name, row_count);
+ConnectionImpl::CountEntities(const std::string& collection_name, int64_t& row_count) {
+    return client_proxy_->CountEntities(collection_name, row_count);
 }
 
 Status
-ConnectionImpl::ShowCollections(std::vector<std::string>& collection_array) {
-    return client_proxy_->ShowCollections(collection_array);
+ConnectionImpl::ListCollections(std::vector<std::string>& collection_array) {
+    return client_proxy_->ListCollections(collection_array);
 }
 
 Status
-ConnectionImpl::ShowCollectionInfo(const std::string& collection_name, std::string& collection_info) {
-    return client_proxy_->ShowCollectionInfo(collection_name, collection_info);
+ConnectionImpl::GetCollectionStats(const std::string& collection_name, std::string& collection_stats) {
+    return client_proxy_->GetCollectionStats(collection_name, collection_stats);
 }
 
 Status
-ConnectionImpl::DeleteByID(const std::string& collection_name, const std::vector<int64_t>& id_array) {
-    return client_proxy_->DeleteByID(collection_name, id_array);
+ConnectionImpl::DeleteEntityByID(const std::string& collection_name, const std::vector<int64_t>& id_array) {
+    return client_proxy_->DeleteEntityByID(collection_name, id_array);
 }
 
 Status
-ConnectionImpl::PreloadCollection(const std::string& collection_name) const {
-    return client_proxy_->PreloadCollection(collection_name);
+ConnectionImpl::LoadCollection(const std::string& collection_name) const {
+    return client_proxy_->LoadCollection(collection_name);
 }
 
 Status
-ConnectionImpl::DescribeIndex(const std::string& collection_name, IndexParam& index_param) const {
-    return client_proxy_->DescribeIndex(collection_name, index_param);
+ConnectionImpl::GetIndexInfo(const std::string& collection_name, IndexParam& index_param) const {
+    return client_proxy_->GetIndexInfo(collection_name, index_param);
 }
 
 Status
@@ -189,9 +184,14 @@ ConnectionImpl::CreatePartition(const PartitionParam& partition_param) {
     return client_proxy_->CreatePartition(partition_param);
 }
 
+bool
+ConnectionImpl::HasPartition(const std::string& collection_name, const std::string& partition_tag) const {
+    return client_proxy_->HasPartition(collection_name, partition_tag);
+}
+
 Status
-ConnectionImpl::ShowPartitions(const std::string& collection_name, PartitionTagList& partition_array) const {
-    return client_proxy_->ShowPartitions(collection_name, partition_array);
+ConnectionImpl::ListPartitions(const std::string& collection_name, PartitionTagList& partition_array) const {
+    return client_proxy_->ListPartitions(collection_name, partition_array);
 }
 
 Status
@@ -200,18 +200,13 @@ ConnectionImpl::DropPartition(const PartitionParam& partition_param) {
 }
 
 Status
-ConnectionImpl::FlushCollection(const std::string& Status) {
-    return client_proxy_->FlushCollection(Status);
+ConnectionImpl::Flush(const std::vector<std::string>& collection_name_array) {
+    return client_proxy_->Flush(collection_name_array);
 }
 
 Status
-ConnectionImpl::Flush() {
-    return client_proxy_->Flush();
-}
-
-Status
-ConnectionImpl::CompactCollection(const std::string& collection_name) {
-    return client_proxy_->CompactCollection(collection_name);
+ConnectionImpl::Compact(const std::string& collection_name) {
+    return client_proxy_->Compact(collection_name);
 }
 
 /*******************************New Interface**********************************/

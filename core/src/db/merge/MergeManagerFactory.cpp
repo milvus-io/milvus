@@ -19,7 +19,7 @@ namespace engine {
 
 MergeManagerPtr
 MergeManagerFactory::Build(const meta::MetaPtr& meta_ptr, const DBOptions& options) {
-    return std::make_shared<MergeManagerImpl>(meta_ptr, options, MergeStrategyType::SIMPLE);
+    return std::make_shared<MergeManagerImpl>(meta_ptr, options, MergeStrategyType::LAYERED);
 }
 
 }  // namespace engine

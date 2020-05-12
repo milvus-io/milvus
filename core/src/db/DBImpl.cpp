@@ -492,6 +492,25 @@ DBImpl::CreatePartition(const std::string& collection_id, const std::string& par
 }
 
 Status
+DBImpl::HasPartition(const std::string& collection_id, const std::string& tag, bool& has_or_not) {
+    if (!initialized_.load(std::memory_order_acquire)) {
+        return SHUTDOWN_ERROR;
+    }
+
+    // trim side-blank of tag, only compare valid characters
+    // for example: " ab cd " is treated as "ab cd"
+    std::string valid_tag = tag;
+    server::StringHelpFunctions::TrimStringBlank(valid_tag);
+
+    if (valid_tag == milvus::engine::DEFAULT_PARTITON_TAG) {
+        has_or_not = true;
+        return Status::OK();
+    }
+
+    return meta_ptr_->HasPartition(collection_id, valid_tag, has_or_not);
+}
+
+Status
 DBImpl::DropPartition(const std::string& partition_name) {
     if (!initialized_.load(std::memory_order_acquire)) {
         return SHUTDOWN_ERROR;

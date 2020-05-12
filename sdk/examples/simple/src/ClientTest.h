@@ -40,7 +40,7 @@ class ClientTest {
     CreateCollection(const std::string&, int64_t, milvus::MetricType);
 
     void
-    DescribeCollection(const std::string&);
+    GetCollectionInfo(const std::string&);
 
     void
     InsertEntities(const std::string&, int64_t);
@@ -52,10 +52,10 @@ class ClientTest {
     Flush(const std::string&);
 
     void
-    ShowCollectionInfo(const std::string&);
+    GetCollectionStats(const std::string&);
 
     void
-    GetEntitiesByID(const std::string&, const std::vector<int64_t>&);
+    GetEntityByID(const std::string&, const std::vector<int64_t>&);
 
     void
     SearchEntities(const std::string&, int64_t, int64_t);
@@ -67,7 +67,7 @@ class ClientTest {
     CreateIndex(const std::string&, milvus::IndexType, int64_t);
 
     void
-    PreloadCollection(const std::string&);
+    LoadCollection(const std::string&);
 
     void
     CompactCollection(const std::string&);

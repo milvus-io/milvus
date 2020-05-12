@@ -20,6 +20,8 @@
 namespace milvus {
 namespace engine {
 
+const int64_t FORCE_MERGE_THREASHOLD = 10;  // force merge files older this time(in second)
+
 Status
 MergeLayeredStrategy::RegroupFiles(meta::FilesHolder& files_holder, MergeFilesGroups& files_groups) {
     using LayerGroups = std::map<uint64_t, meta::SegmentsSchema>;
@@ -57,7 +59,6 @@ MergeLayeredStrategy::RegroupFiles(meta::FilesHolder& files_holder, MergeFilesGr
         }
     }
 
-    const int64_t force_merge_threashold = 60;  // force merge files older than 1 minute
     auto now = utils::GetMicroSecTimeStamp();
     meta::SegmentsSchema force_merge_file;
     for (auto& pair : layers) {
@@ -76,7 +77,7 @@ MergeLayeredStrategy::RegroupFiles(meta::FilesHolder& files_holder, MergeFilesGr
 
         // layer only has one file, if the file is too old, force merge it, else no need to merge it
         if (pair.second.size() == 1) {
-            if (now - pair.second[0].created_on_ > force_merge_threashold * meta::US_PS) {
+            if (now - pair.second[0].created_on_ > FORCE_MERGE_THREASHOLD * meta::US_PS) {
                 force_merge_file.push_back(pair.second[0]);
                 pair.second.clear();
             }
