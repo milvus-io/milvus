@@ -46,7 +46,6 @@ set(index_srcs
         knowhere/index/vector_index/adapter/VectorAdapter.cpp
         knowhere/index/vector_index/helpers/FaissIO.cpp
         knowhere/index/vector_index/helpers/IndexParameter.cpp
-        knowhere/index/vector_index/helpers/SPTAGParameterMgr.cpp
         knowhere/index/vector_index/impl/nsg/Distance.cpp
         knowhere/index/vector_index/impl/nsg/NSG.cpp
         knowhere/index/vector_index/impl/nsg/NSGHelper.cpp
@@ -69,9 +68,11 @@ set(index_srcs
         )
 
 if (MILVUS_SUPPORT_SPTAG)
-    set(index_srcs ${index_srcs}
+    set(index_srcs
             knowhere/index/vector_index/adapter/SptagAdapter.cpp
+            knowhere/index/vector_index/helpers/SPTAGParameterMgr.cpp
             knowhere/index/vector_index/IndexSPTAG.cpp
+            ${index_srcs}
             )
 endif ()
 
@@ -143,11 +144,16 @@ target_link_libraries(
 set(INDEX_INCLUDE_DIRS
         ${INDEX_SOURCE_DIR}/knowhere
         ${INDEX_SOURCE_DIR}/thirdparty
-        ${INDEX_SOURCE_DIR}/thirdparty/SPTAG/AnnService
-#        ${ARROW_INCLUDE_DIR}
         ${FAISS_INCLUDE_DIR}
         ${OpenBLAS_INCLUDE_DIR}
         ${LAPACK_INCLUDE_DIR}
         )
+
+if (MILVUS_SUPPORT_SPTAG)
+    set(INDEX_INCLUDE_DIRS
+            ${INDEX_SOURCE_DIR}/thirdparty/SPTAG/AnnService
+            ${INDEX_INCLUDE_DIRS}
+        )
+endif ()
 
 set(INDEX_INCLUDE_DIRS ${INDEX_INCLUDE_DIRS} PARENT_SCOPE)

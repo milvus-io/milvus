@@ -60,6 +60,11 @@ else ()
     message(STATUS "Building Knowhere CPU version")
 endif ()
 
+if (MILVUS_SUPPORT_SPTAG)
+    message(STATUS "Building Knowhere with SPTAG supported")
+    add_compile_definitions("MILVUS_SUPPORT_SPTAG")
+endif ()
+
 include(ThirdPartyPackagesCore)
 
 if (CMAKE_BUILD_TYPE STREQUAL "Release")
