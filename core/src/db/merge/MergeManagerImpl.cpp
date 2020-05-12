@@ -76,7 +76,7 @@ MergeManagerImpl::MergeFiles(const std::string& collection_id) {
     }
 
     for (auto& group : files_groups) {
-        MergeTask task(meta_ptr_, options_, files_holder.HoldFiles());
+        MergeTask task(meta_ptr_, options_, group);
         status = task.Execute();
 
         files_holder.UnmarkFiles(group);

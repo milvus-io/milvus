@@ -329,21 +329,6 @@ class Connection {
     /**
      * @brief Get entity data by id
      *
-     * This method is used to get entity data by id from a collection.
-     * Return the first found entity if there are entities with duplicated id
-     *
-     * @param collection_name, target collection's name.
-     * @param entity_id, target entity id.
-     * @param entity_data, returned entity data.
-     *
-     * @return Indicate if the operation is succeed.
-     */
-    virtual Status
-    GetEntityByID(const std::string& collection_name, int64_t entity_id, Entity& entity_data) = 0;
-
-    /**
-     * @brief Get entity data by id
-     *
      * This method is used to get entities data by id array from a collection.
      * Return the first found entity if there are entities with duplicated id
      *
@@ -354,12 +339,12 @@ class Connection {
      * @return Indicate if the operation is succeed.
      */
     virtual Status
-    GetEntitiesByID(const std::string& collection_name,
-                    const std::vector<int64_t>& id_array,
-                    std::vector<Entity>& entities_data) = 0;
+    GetEntityByID(const std::string& collection_name,
+                  const std::vector<int64_t>& id_array,
+                  std::vector<Entity>& entities_data) = 0;
 
     /**
-     * @brief Get entity ids from a segment
+     * @brief List entity ids from a segment
      *
      * This method is used to get entity ids from a segment
      * Return all entity(not deleted) ids
@@ -371,7 +356,7 @@ class Connection {
      * @return Indicate if the operation is succeed.
      */
     virtual Status
-    GetIDsInSegment(const std::string& collection_name,
+    ListIDInSegment(const std::string& collection_name,
                     const std::string& segment_name,
                     std::vector<int64_t>& id_array) = 0;
 
@@ -430,9 +415,9 @@ class Connection {
                const std::string& extra_params, TopKQueryResult& topk_query_result) = 0;
 
     /**
-     * @brief Show collection description
+     * @brief Get collection information
      *
-     * This method is used to show collection information.
+     * This method is used to get collection information.
      *
      * @param collection_name, target collection's name.
      * @param collection_param, collection_param is given when operation is successful.
@@ -440,7 +425,7 @@ class Connection {
      * @return Indicate if this operation is successful.
      */
     virtual Status
-    DescribeCollection(const std::string& collection_name, CollectionParam& collection_param) = 0;
+    GetCollectionInfo(const std::string& collection_name, CollectionParam& collection_param) = 0;
 
     /**
      * @brief Get collection entity count
@@ -453,10 +438,10 @@ class Connection {
      * @return Indicate if this operation is successful.
      */
     virtual Status
-    CountCollection(const std::string& collection_name, int64_t& entity_count) = 0;
+    CountEntities(const std::string& collection_name, int64_t& entity_count) = 0;
 
     /**
-     * @brief Show all collections in database
+     * @brief List all collections in database
      *
      * This method is used to list all collections.
      *
@@ -465,20 +450,20 @@ class Connection {
      * @return Indicate if this operation is successful.
      */
     virtual Status
-    ShowCollections(std::vector<std::string>& collection_array) = 0;
+    ListCollections(std::vector<std::string>& collection_array) = 0;
 
     /**
-     * @brief Show collection information
+     * @brief Get collection statistics
      *
-     * This method is used to get detail information of a collection.
+     * This method is used to get statistics of a collection.
      *
      * @param collection_name, target collection's name.
-     * @param collection_info, target collection's information in json format
+     * @param collection_stats, target collection's statistics in json format
      *
      * @return Indicate if this operation is successful.
      */
     virtual Status
-    ShowCollectionInfo(const std::string& collection_name, std::string& collection_info) = 0;
+    GetCollectionStats(const std::string& collection_name, std::string& collection_stats) = 0;
 
     /**
      * @brief Delete entity by id
@@ -491,24 +476,24 @@ class Connection {
      * @return Indicate if this operation is successful.
      */
     virtual Status
-    DeleteByID(const std::string& collection_name, const std::vector<int64_t>& id_array) = 0;
+    DeleteEntityByID(const std::string& collection_name, const std::vector<int64_t>& id_array) = 0;
 
     /**
-     * @brief Preload collection
+     * @brief Load collection from disk to memory
      *
-     * This method is used to preload collection data into memory
+     * This method is used to load collection data into memory
      *
      * @param collection_name, target collection's name.
      *
      * @return Indicate if this operation is successful.
      */
     virtual Status
-    PreloadCollection(const std::string& collection_name) const = 0;
+    LoadCollection(const std::string& collection_name) const = 0;
 
     /**
-     * @brief Describe index
+     * @brief Get index information
      *
-     * This method is used to describe index
+     * This method is used to get index information
      *
      * @param collection_name, target collection's name.
      * @param index_param, returned index information.
@@ -516,7 +501,7 @@ class Connection {
      * @return Indicate if this operation is successful.
      */
     virtual Status
-    DescribeIndex(const std::string& collection_name, IndexParam& index_param) const = 0;
+    GetIndexInfo(const std::string& collection_name, IndexParam& index_param) const = 0;
 
     /**
      * @brief Drop index
@@ -543,9 +528,22 @@ class Connection {
     CreatePartition(const PartitionParam& partition_param) = 0;
 
     /**
-     * @brief Show all partitions method
+     * @brief Has partition method
      *
-     * This method is used to show all partitions(return their tags)
+     * This method is used to test existence of collection's partition
+     *
+     * @param collection_name, target collection's name.
+     * @param partition_tag, target partition's tag.
+     *
+     * @return Indicate if partition is created successfully
+     */
+    virtual bool
+    HasPartition(const std::string& collection_name, const std::string& partition_tag) const = 0;
+
+    /**
+     * @brief List all partitions method
+     *
+     * This method is used to list all partitions(return their tags)
      *
      * @param collection_name, target collection's name.
      * @param partition_tag_array, partition tag array of the collection.
@@ -553,7 +551,7 @@ class Connection {
      * @return Indicate if this operation is successful
      */
     virtual Status
-    ShowPartitions(const std::string& collection_name, PartitionTagList& partition_tag_array) const = 0;
+    ListPartitions(const std::string& collection_name, PartitionTagList& partition_tag_array) const = 0;
 
     /**
      * @brief Delete partition method
@@ -568,26 +566,16 @@ class Connection {
     DropPartition(const PartitionParam& partition_param) = 0;
 
     /**
-     * @brief Flush collection buffer into storage
+     * @brief Flush collections insert buffer into storage
      *
-     * This method is used to flush collection buffer into storage
+     * This method is used to flush collection insert buffer into storage
      *
-     * @param collection_name, target collection's name.
-     *
-     * @return Indicate if this operation is successful.
-     */
-    virtual Status
-    FlushCollection(const std::string& collection_name) = 0;
-
-    /**
-     * @brief Flush all buffer into storage
-     *
-     * This method is used to all collection buffer into storage
+     * @param collection_name_array, target collections name array.
      *
      * @return Indicate if this operation is successful.
      */
     virtual Status
-    Flush() = 0;
+    Flush(const std::vector<std::string>& collection_name_array) = 0;
 
     /**
      * @brief Compact collection, permanently remove deleted vectors
@@ -599,7 +587,7 @@ class Connection {
      * @return Indicate if this operation is successful.
      */
     virtual Status
-    CompactCollection(const std::string& collection_name) = 0;
+    Compact(const std::string& collection_name) = 0;
 
     /*******************************New Interface**********************************/
 
