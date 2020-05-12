@@ -7,6 +7,7 @@ import io.milvus.client.*;
 import org.testng.annotations.Test;
 
 import java.nio.ByteBuffer;
+import java.util.Collections;
 import java.util.List;
 
 public class TestCollectionInfo {
@@ -26,9 +27,9 @@ public class TestCollectionInfo {
         InsertResponse resInsert = client.insert(insertParam);
         client.flush(collectionName);
         List<Long> idsBefore = resInsert.getVectorIds();
-        client.deleteById(collectionName, idsBefore.get(0));
+        client.deleteEntityByID(collectionName, Collections.singletonList(idsBefore.get(0)));
         client.flush(collectionName);
-        Response res = client.showCollectionInfo(collectionName);
+        Response res = client.getCollectionStats(collectionName);
         System.out.println(res.getMessage());
         JSONObject collectionInfo = Utils.getCollectionInfo(res.getMessage());
         int row_count = collectionInfo.getIntValue("row_count");
@@ -43,9 +44,9 @@ public class TestCollectionInfo {
         Index index = new Index.Builder(collectionName, indexType).withParamsInJson(indexParam).build();
         client.createIndex(index);
         List<Long> idsBefore = resInsert.getVectorIds();
-        client.deleteById(collectionName, idsBefore.get(0));
+        client.deleteEntityByID(collectionName, Collections.singletonList(idsBefore.get(0)));
         client.flush(collectionName);
-        Response res = client.showCollectionInfo(collectionName);
+        Response res = client.getCollectionStats(collectionName);
         System.out.println(res.getMessage());
         JSONObject collectionInfo = Utils.getCollectionInfo(res.getMessage());
         int row_count = collectionInfo.getIntValue("row_count");
@@ -58,9 +59,9 @@ public class TestCollectionInfo {
         InsertResponse resInsert = client.insert(insertParam);
         client.flush(collectionName);
         List<Long> idsBefore = resInsert.getVectorIds();
-        client.deleteById(collectionName, idsBefore.get(0));
+        client.deleteEntityByID(collectionName, Collections.singletonList(idsBefore.get(0)));
         client.flush(collectionName);
-        Response res = client.showCollectionInfo(collectionName);
+        Response res = client.getCollectionStats(collectionName);
         System.out.println(res.getMessage());
         JSONObject collectionInfo = Utils.getCollectionInfo(res.getMessage());
         int row_count = collectionInfo.getIntValue("row_count");

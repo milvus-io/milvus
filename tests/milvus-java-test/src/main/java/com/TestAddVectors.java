@@ -40,7 +40,7 @@ public class TestAddVectors {
         Response res_flush = client.flush(collectionName);
         assert(res_flush.ok());
         // Assert collection row count
-        Assert.assertEquals(client.getCollectionRowCount(collectionName).getCollectionRowCount(), nb);
+        Assert.assertEquals(client.countEntities(collectionName).getCollectionEntityCount(), nb);
     }
 
     @Test(dataProvider = "Collection", dataProviderClass = MainClass.class)
@@ -56,7 +56,7 @@ public class TestAddVectors {
         Response res_flush = client.flush(collectionName);
         assert(res_flush.ok());
         // Assert collection row count
-        Assert.assertEquals(client.getCollectionRowCount(collectionName).getCollectionRowCount(), nb);
+        Assert.assertEquals(client.countEntities(collectionName).getCollectionEntityCount(), nb);
     }
 
     @Test(dataProvider = "Collection", dataProviderClass = MainClass.class)
@@ -99,7 +99,7 @@ public class TestAddVectors {
         Response res_flush = client.flush(collectionName);
         assert(res_flush.ok());
         // Assert collection row count
-        Assert.assertEquals(client.getCollectionRowCount(collectionName).getCollectionRowCount(), nb);
+        Assert.assertEquals(client.countEntities(collectionName).getCollectionEntityCount(), nb);
     }
 
     // Add vectors into collection, which tag not existed
@@ -123,7 +123,7 @@ public class TestAddVectors {
         Response res_flush = client.flush(collectionName);
         assert(res_flush.ok());
         // Assert collection row count
-        Assert.assertEquals(client.getCollectionRowCount(collectionName).getCollectionRowCount(), nb);
+        Assert.assertEquals(client.countEntities(collectionName).getCollectionEntityCount(), nb);
     }
 
     @Test(dataProvider = "BinaryCollection", dataProviderClass = MainClass.class)
@@ -135,7 +135,7 @@ public class TestAddVectors {
         Response res_flush = client.flush(collectionName);
         assert(res_flush.ok());
         // Assert collection row count
-        Assert.assertEquals(client.getCollectionRowCount(collectionName).getCollectionRowCount(), nb);
+        Assert.assertEquals(client.countEntities(collectionName).getCollectionEntityCount(), nb);
     }
 
     @Test(dataProvider = "BinaryCollection", dataProviderClass = MainClass.class)
@@ -151,7 +151,7 @@ public class TestAddVectors {
         Response res_flush = client.flush(collectionName);
         assert(res_flush.ok());
         // Assert collection row count
-        Assert.assertEquals(client.getCollectionRowCount(collectionName).getCollectionRowCount(), nb);
+        Assert.assertEquals(client.countEntities(collectionName).getCollectionEntityCount(), nb);
     }
 
     @Test(dataProvider = "BinaryCollection", dataProviderClass = MainClass.class)

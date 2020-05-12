@@ -5,6 +5,7 @@ import org.testng.annotations.Test;
 
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 
 public class TestGetVectorByID {
@@ -21,7 +22,7 @@ public class TestGetVectorByID {
         InsertResponse resInsert = client.insert(insertParam);
         List<Long> ids = resInsert.getVectorIds();
         client.flush(collectionName);
-        GetVectorsByIdsResponse res = client.getVectorsByIds(collectionName, ids.subList(0, get_length));
+        GetEntityByIDResponse res = client.getEntityByID(collectionName, ids.subList(0, get_length));
         assert (res.getResponse().ok());
         for (int i = 0; i < get_length; i++) {
             assert (res.getFloatVectors().get(i).equals(vectors.get(i)));
@@ -33,10 +34,10 @@ public class TestGetVectorByID {
         InsertParam insertParam = new InsertParam.Builder(collectionName).withFloatVectors(vectors).build();
         InsertResponse resInsert = client.insert(insertParam);
         List<Long> ids = resInsert.getVectorIds();
-        Response res_delete = client.deleteById(collectionName, ids.get(0));
+        Response res_delete = client.deleteEntityByID(collectionName, Collections.singletonList(ids.get(0)));
         assert(res_delete.ok());
         client.flush(collectionName);
-        GetVectorsByIdsResponse res = client.getVectorsByIds(collectionName, ids.subList(0, 1));
+        GetEntityByIDResponse res = client.getEntityByID(collectionName, ids.subList(0, 1));
         assert (res.getResponse().ok());
         assert (res.getFloatVectors().get(0).size() == 0);
     }
@@ -44,7 +45,7 @@ public class TestGetVectorByID {
     @Test(dataProvider = "Collection", dataProviderClass = MainClass.class)
     public void test_get_vector_by_id_collection_name_not_existed(MilvusClient client, String collectionName) {
         String newCollection = "not_existed";
-        GetVectorsByIdsResponse res = client.getVectorsByIds(newCollection, get_ids);
+        GetEntityByIDResponse res = client.getEntityByID(newCollection, get_ids);
         assert(!res.getResponse().ok());
     }
 
@@ -53,7 +54,7 @@ public class TestGetVectorByID {
         InsertParam insertParam = new InsertParam.Builder(collectionName).withFloatVectors(vectors).build();
         client.insert(insertParam);
         client.flush(collectionName);
-        GetVectorsByIdsResponse res = client.getVectorsByIds(collectionName, get_ids);
+        GetEntityByIDResponse res = client.getEntityByID(collectionName, get_ids);
         assert (res.getFloatVectors().get(0).size() == 0);
     }
 
@@ -64,7 +65,7 @@ public class TestGetVectorByID {
         InsertResponse resInsert = client.insert(insertParam);
         List<Long> ids = resInsert.getVectorIds();
         client.flush(collectionName);
-        GetVectorsByIdsResponse res = client.getVectorsByIds(collectionName, ids.subList(0, 1));
+        GetEntityByIDResponse res = client.getEntityByID(collectionName, ids.subList(0, 1));
         assert res.getBinaryVectors().get(0).equals(vectorsBinary.get(0).rewind());
     }
 
@@ -73,10 +74,10 @@ public class TestGetVectorByID {
         InsertParam insertParam = new InsertParam.Builder(collectionName).withBinaryVectors(vectorsBinary).build();
         InsertResponse resInsert = client.insert(insertParam);
         List<Long> ids = resInsert.getVectorIds();
-        Response res_delete = client.deleteById(collectionName, ids.get(0));
+        Response res_delete = client.deleteEntityByID(collectionName, Collections.singletonList(ids.get(0)));
         assert(res_delete.ok());
         client.flush(collectionName);
-        GetVectorsByIdsResponse res = client.getVectorsByIds(collectionName, ids.subList(0, 1));
+        GetEntityByIDResponse res = client.getEntityByID(collectionName, ids.subList(0, 1));
         assert (res.getFloatVectors().get(0).size() == 0);
     }
 
@@ -85,7 +86,7 @@ public class TestGetVectorByID {
         InsertParam insertParam = new InsertParam.Builder(collectionName).withBinaryVectors(vectorsBinary).build();
         client.insert(insertParam);
         client.flush(collectionName);
-        GetVectorsByIdsResponse res = client.getVectorsByIds(collectionName, get_ids);
+        GetEntityByIDResponse res = client.getEntityByID(collectionName, get_ids);
         assert (res.getFloatVectors().get(0).size() == 0);
     }
 }
