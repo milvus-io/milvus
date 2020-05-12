@@ -7,7 +7,7 @@ metadata:
 spec:
   containers:
   - name: publish-images
-    image: registry.zilliz.com/library/docker:v1.0.0
+    image: registry.zilliz.com/library/docker:v1.1.0
     securityContext:
       privileged: true
     command:

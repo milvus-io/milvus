@@ -1,4 +1,4 @@
-dir ("docker/deploy/${BINARY_VERSION}/${OS_NAME}") {
+dir ("docker/deploy") {
     def binaryPackage = "${PROJECT_NAME}-${PACKAGE_VERSION}.tar.gz"
 
     withCredentials([usernamePassword(credentialsId: "${params.JFROG_CREDENTIALS_ID}", usernameVariable: 'JFROG_USERNAME', passwordVariable: 'JFROG_PASSWORD')]) {
@@ -12,39 +12,14 @@ dir ("docker/deploy/${BINARY_VERSION}/${OS_NAME}") {
     def imageName = "${PROJECT_NAME}/engine:${DOCKER_VERSION}"
 
     try {
-        deleteImages("${imageName}", true)
-
-        def customImage = docker.build("${imageName}")
-
-        deleteImages("${params.DOKCER_REGISTRY_URL}/${imageName}", true)
-
+        sh "docker-compose pull --ignore-pull-failures ${BINARY_VERSION}_${OS_NAME}"
+        sh "docker-compose build ${BINARY_VERSION}_${OS_NAME}"
         docker.withRegistry("https://${params.DOKCER_REGISTRY_URL}", "${params.DOCKER_CREDENTIALS_ID}") {
-            customImage.push()
+            sh "docker-compose push ${BINARY_VERSION}_${OS_NAME}"
         }
     } catch (exc) {
         throw exc
     } finally {
-        deleteImages("${imageName}", true)
-        deleteImages("${params.DOKCER_REGISTRY_URL}/${imageName}", true)
+        sh "docker-compose down ${BINARY_VERSION}_${OS_NAME}"
     }
 }
-
-boolean deleteImages(String imageName, boolean force) {
-    def imageNameStr = imageName.trim()
-    def isExistImage = sh(returnStatus: true, script: "docker inspect --type=image ${imageNameStr} 2>&1 > /dev/null")
-    if (isExistImage == 0) {
-        def deleteImageStatus = 0
-        if (force) {
-            def imageID = sh(returnStdout: true, script: "docker inspect --type=image --format \"{{.ID}}\" ${imageNameStr}")
-            deleteImageStatus = sh(returnStatus: true, script: "docker rmi -f ${imageID}")
-        } else {
-            deleteImageStatus = sh(returnStatus: true, script: "docker rmi ${imageNameStr}")
-        }
-
-        if (deleteImageStatus != 0) {
-            return false
-        }
-    }
-    return true
-}
-
