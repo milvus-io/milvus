@@ -8,6 +8,7 @@ spec:
   containers:
   - name: publish-images
     image: registry.zilliz.com/library/docker:v1.1.0
+    imagePullPolicy: Always
     securityContext:
       privileged: true
     command:
