@@ -48,7 +48,7 @@ class TestDeleteBase:
         index_param = get_simple_index["index_param"]
         index_type = get_simple_index["index_type"]
         vector = gen_single_vector(dim)
-        status, ids = connect.add_vectors(collection, vector)
+        status, ids = connect.insert(collection, vector)
         assert status.OK()
         status = connect.flush([collection])
         assert status.OK()
@@ -58,7 +58,7 @@ class TestDeleteBase:
         search_param = get_search_param(index_type)
         status = connect.flush([collection])
         search_param = get_search_param(index_type)
-        status, res = connect.search_vectors(collection, top_k, vector, params=search_param)
+        status, res = connect.search(collection, top_k, vector, params=search_param)
         logging.getLogger().info(res)
         assert status.OK()
         assert len(res) == 0
@@ -72,7 +72,7 @@ class TestDeleteBase:
         index_param = get_simple_index["index_param"]
         index_type = get_simple_index["index_type"]
         vectors = gen_vectors(nb, dim)
-        connect.add_vectors(collection, vectors, ids=[1 for i in range(nb)])
+        connect.insert(collection, vectors, ids=[1 for i in range(nb)])
         status = connect.flush([collection])
         # Bloom filter error
         assert status.OK()
@@ -80,7 +80,7 @@ class TestDeleteBase:
         assert status.OK()
         status = connect.flush([collection])
         search_param = get_search_param(index_type)
-        status, res = connect.search_vectors(collection, top_k, [vectors[0]], params=search_param)
+        status, res = connect.search(collection, top_k, [vectors[0]], params=search_param)
         logging.getLogger().info(res)
         assert status.OK()
         assert len(res) == 0
@@ -92,7 +92,7 @@ class TestDeleteBase:
         expected: status ok, vector deleted
         '''
         vector = gen_single_vector(dim)
-        status, ids = connect.add_vectors(collection, vector)
+        status, ids = connect.insert(collection, vector)
         assert status.OK()
         status = connect.flush([collection])
         assert status.OK()
@@ -110,7 +110,7 @@ class TestDeleteBase:
         expected: status ok, vector deleted
         '''
         vector = gen_single_vector(dim)
-        status, ids = connect.add_vectors(collection, vector)
+        status, ids = connect.insert(collection, vector)
         assert status.OK()
         status = connect.flush([collection])
         assert status.OK()
@@ -132,7 +132,7 @@ class TestDeleteBase:
         index_param = get_simple_index["index_param"]
         index_type = get_simple_index["index_type"]
         vector = gen_single_vector(dim)
-        status, ids = connect.add_vectors(collection, vector)
+        status, ids = connect.insert(collection, vector)
         assert status.OK()
         status = connect.flush([collection])
         assert status.OK()
@@ -140,7 +140,7 @@ class TestDeleteBase:
         assert status.OK()
         status = connect.flush([collection])
         search_param = get_search_param(index_type)
-        status, res = connect.search_vectors(collection, top_k, vector, params=search_param)
+        status, res = connect.search(collection, top_k, vector, params=search_param)
         assert status.OK()
         assert res[0][0].id == ids[0]
 
@@ -151,7 +151,7 @@ class TestDeleteBase:
         expected: status not ok
         '''
         vector = gen_single_vector(dim)
-        status, ids = connect.add_vectors(collection, vector)
+        status, ids = connect.insert(collection, vector)
         assert status.OK()
         status = connect.flush([collection])
         assert status.OK()
@@ -159,7 +159,7 @@ class TestDeleteBase:
         status = connect.delete_entity_by_id(collection_new, [0])
         assert not status.OK()
 
-    def test_add_vectors_delete_vector(self, connect, collection, get_simple_index):
+    def test_insert_delete_vector(self, connect, collection, get_simple_index):
         '''
         method: add vectors and delete
         expected: status ok, vectors deleted
@@ -167,7 +167,7 @@ class TestDeleteBase:
         index_param = get_simple_index["index_param"]
         index_type = get_simple_index["index_type"]
         vectors = gen_vector(nb, dim)
-        status, ids = connect.add_vectors(collection, vectors)
+        status, ids = connect.insert(collection, vectors)
         assert status.OK()
         status = connect.flush([collection])
         assert status.OK()
@@ -177,7 +177,7 @@ class TestDeleteBase:
         assert status.OK()
         status = connect.flush([collection])
         search_param = get_search_param(index_type)
-        status, res = connect.search_vectors(collection, top_k, query_vecs, params=search_param)
+        status, res = connect.search(collection, top_k, query_vecs, params=search_param)
         assert status.OK()
         logging.getLogger().info(res)
         assert res[0][0].distance > epsilon
@@ -193,7 +193,7 @@ class TestDeleteBase:
         index_param = get_simple_index["index_param"]
         index_type = get_simple_index["index_type"]
         vectors = gen_vector(nb, dim)
-        status, ids = connect.add_vectors(collection, vectors)
+        status, ids = connect.insert(collection, vectors)
         assert status.OK()
         status = connect.flush([collection])
         assert status.OK()
@@ -205,7 +205,7 @@ class TestDeleteBase:
         status = connect.create_index(collection, index_type, index_param)
         assert status.OK()
         search_param = get_search_param(index_type)
-        status, res = connect.search_vectors(collection, top_k, query_vecs, params=search_param)
+        status, res = connect.search(collection, top_k, query_vecs, params=search_param)
         assert status.OK()
         logging.getLogger().info(res)
         logging.getLogger().info(ids[0])
@@ -223,7 +223,7 @@ class TestDeleteBase:
         index_param = get_simple_index["index_param"]
         index_type = get_simple_index["index_type"]
         vectors = gen_vector(nb, dim)
-        status, ids = connect.add_vectors(collection, vectors)
+        status, ids = connect.insert(collection, vectors)
         assert status.OK()
         status = connect.flush([collection])
         assert status.OK()
@@ -234,11 +234,11 @@ class TestDeleteBase:
         status = connect.delete_entity_by_id(collection, delete_ids)
         assert status.OK()
         status = connect.flush([collection])
-        status, tmp_ids = connect.add_vectors(collection, [vectors[0], vectors[-1]])
+        status, tmp_ids = connect.insert(collection, [vectors[0], vectors[-1]])
         assert status.OK()
         status = connect.flush([collection])
         search_param = get_search_param(index_type)
-        status, res = connect.search_vectors(collection, top_k, query_vecs, params=search_param)
+        status, res = connect.search(collection, top_k, query_vecs, params=search_param)
         assert status.OK()
         logging.getLogger().info(res)
         assert res[0][0].id == tmp_ids[0]
@@ -253,7 +253,7 @@ class TestDeleteBase:
         expected: status ok, vectors deleted, and status ok for next delete operation
         '''
         vectors = gen_vector(nb, dim)
-        status, ids = connect.add_vectors(collection, vectors)
+        status, ids = connect.insert(collection, vectors)
         assert status.OK()
         status = connect.flush([collection])
         assert status.OK()
@@ -272,7 +272,7 @@ class TestDeleteBase:
         expected: status ok, vectors deleted, and status ok for next delete operation
         '''
         vectors = gen_vector(nb, dim)
-        status, ids = connect.add_vectors(collection, vectors)
+        status, ids = connect.insert(collection, vectors)
         assert status.OK()
         status = connect.flush([collection])
         assert status.OK()
@@ -314,7 +314,7 @@ class TestDeleteIndexedVectors:
         index_param = get_simple_index["index_param"]
         index_type = get_simple_index["index_type"]
         vector = gen_single_vector(dim)
-        status, ids = connect.add_vectors(collection, vector)
+        status, ids = connect.insert(collection, vector)
         assert status.OK()
         status = connect.flush([collection])
         assert status.OK()
@@ -324,12 +324,12 @@ class TestDeleteIndexedVectors:
         assert status.OK()
         status = connect.flush([collection])
         search_param = get_search_param(index_type)
-        status, res = connect.search_vectors(collection, top_k, vector, params=search_param)
+        status, res = connect.search(collection, top_k, vector, params=search_param)
         logging.getLogger().info(res)
         assert status.OK()
         assert len(res) == 0
 
-    def test_add_vectors_delete_vector(self, connect, collection, get_simple_index):
+    def test_insert_delete_vector(self, connect, collection, get_simple_index):
         '''
         method: add vectors and delete
         expected: status ok, vectors deleted
@@ -337,7 +337,7 @@ class TestDeleteIndexedVectors:
         index_param = get_simple_index["index_param"]
         index_type = get_simple_index["index_type"]
         vectors = gen_vector(nb, dim)
-        status, ids = connect.add_vectors(collection, vectors)
+        status, ids = connect.insert(collection, vectors)
         assert status.OK()
         status = connect.flush([collection])
         assert status.OK()
@@ -351,7 +351,7 @@ class TestDeleteIndexedVectors:
         assert status.OK()
         status = connect.flush([collection])
         search_param = get_search_param(index_type)
-        status, res = connect.search_vectors(collection, top_k, query_vecs, params=search_param)
+        status, res = connect.search(collection, top_k, query_vecs, params=search_param)
         assert status.OK()
         logging.getLogger().info(ids[0])
         logging.getLogger().info(ids[1])
@@ -388,7 +388,7 @@ class TestDeleteBinary:
         index_param = get_simple_index["index_param"]
         index_type = get_simple_index["index_type"]
         tmp, vector = gen_binary_vectors(1, dim)
-        status, ids = connect.add_vectors(jac_collection, vector)
+        status, ids = connect.insert(jac_collection, vector)
         assert status.OK()
         status = connect.flush([jac_collection])
         assert status.OK()
@@ -396,7 +396,7 @@ class TestDeleteBinary:
         assert status.OK()
         status = connect.flush([jac_collection])
         search_param = get_search_param(index_type)
-        status, res = connect.search_vectors(jac_collection, top_k, vector, params=search_param)
+        status, res = connect.search(jac_collection, top_k, vector, params=search_param)
         logging.getLogger().info(res)
         assert status.OK()
         assert len(res) == 0
@@ -411,7 +411,7 @@ class TestDeleteBinary:
         expected: status ok, vector deleted
         '''
         tmp, vector = gen_binary_vectors(1, dim)
-        status, ids = connect.add_vectors(jac_collection, vector)
+        status, ids = connect.insert(jac_collection, vector)
         assert status.OK()
         status = connect.flush([jac_collection])
         assert status.OK()
@@ -431,7 +431,7 @@ class TestDeleteBinary:
         index_param = get_simple_index["index_param"]
         index_type = get_simple_index["index_type"]
         tmp, vector = gen_binary_vectors(1, dim)
-        status, ids = connect.add_vectors(jac_collection, vector)
+        status, ids = connect.insert(jac_collection, vector)
         assert status.OK()
         status = connect.flush([jac_collection])
         assert status.OK()
@@ -440,7 +440,7 @@ class TestDeleteBinary:
         status = connect.flush([jac_collection])
         status = connect.flush([jac_collection])
         search_param = get_search_param(index_type)
-        status, res = connect.search_vectors(jac_collection, top_k, vector, params=search_param)
+        status, res = connect.search(jac_collection, top_k, vector, params=search_param)
         assert status.OK()
         assert res[0][0].id == ids[0]
 
@@ -451,7 +451,7 @@ class TestDeleteBinary:
         expected: status not ok
         '''
         tmp, vector = gen_binary_vectors(1, dim)
-        status, ids = connect.add_vectors(jac_collection, vector)
+        status, ids = connect.insert(jac_collection, vector)
         assert status.OK()
         status = connect.flush([jac_collection])
         assert status.OK()
@@ -461,7 +461,7 @@ class TestDeleteBinary:
         status = connect.delete_entity_by_id(collection_new, [0])
         assert not status.OK()
 
-    def test_add_vectors_delete_vector(self, connect, jac_collection, get_simple_index):
+    def test_insert_delete_vector(self, connect, jac_collection, get_simple_index):
         '''
         method: add vectors and delete
         expected: status ok, vectors deleted
@@ -469,7 +469,7 @@ class TestDeleteBinary:
         index_param = get_simple_index["index_param"]
         index_type = get_simple_index["index_type"]
         tmp, vectors = gen_binary_vectors(nb, dim)
-        status, ids = connect.add_vectors(jac_collection, vectors)
+        status, ids = connect.insert(jac_collection, vectors)
         assert status.OK()
         status = connect.flush([jac_collection])
         assert status.OK()
@@ -479,7 +479,7 @@ class TestDeleteBinary:
         assert status.OK()
         status = connect.flush([jac_collection])
         search_param = get_search_param(index_type)
-        status, res = connect.search_vectors(jac_collection, top_k, query_vecs, params=search_param)
+        status, res = connect.search(jac_collection, top_k, query_vecs, params=search_param)
         assert status.OK()
         logging.getLogger().info(res)
         assert res[0][0].id != ids[0]
@@ -494,7 +494,7 @@ class TestDeleteBinary:
         index_param = get_simple_index["index_param"]
         index_type = get_simple_index["index_type"]
         tmp, vectors = gen_binary_vectors(nb, dim)
-        status, ids = connect.add_vectors(jac_collection, vectors)
+        status, ids = connect.insert(jac_collection, vectors)
         assert status.OK()
         status = connect.flush([jac_collection])
         assert status.OK()
@@ -503,11 +503,11 @@ class TestDeleteBinary:
         status = connect.delete_entity_by_id(jac_collection, delete_ids)
         assert status.OK()
         status = connect.flush([jac_collection])
-        status, tmp_ids = connect.add_vectors(jac_collection, [vectors[0], vectors[-1]])
+        status, tmp_ids = connect.insert(jac_collection, [vectors[0], vectors[-1]])
         assert status.OK()
         status = connect.flush([jac_collection])
         search_param = get_search_param(index_type)
-        status, res = connect.search_vectors(jac_collection, top_k, query_vecs, params=search_param)
+        status, res = connect.search(jac_collection, top_k, query_vecs, params=search_param)
         assert status.OK()
         logging.getLogger().info(res)
         assert res[0][0].id == tmp_ids[0]

@@ -44,12 +44,12 @@
 #         '''
 #         global vectors
 #         if nb == 6000:
-#             add_vectors = vectors
+#             insert = vectors
 #         else:  
-#             add_vectors = gen_vectors(nb, dim)
-#         status, ids = connect.add_vectors(collection, add_vectors)
+#             insert = gen_vectors(nb, dim)
+#         status, ids = connect.insert(collection, insert)
 #         connect.flush([collection])
-#         return add_vectors, ids
+#         return insert, ids
 # 
 #     def init_data_binary(self, connect, collection, nb=6000):
 #         '''
@@ -57,32 +57,32 @@
 #         '''
 #         global binary_vectors
 #         if nb == 6000:
-#             add_vectors = binary_vectors
+#             insert = binary_vectors
 #         else:
-#             add_vectors = gen_binary_vectors(nb, dim)
-#         status, ids = connect.add_vectors(collection, add_vectors)
+#             insert = gen_binary_vectors(nb, dim)
+#         status, ids = connect.insert(collection, insert)
 #         connect.flush([collection])
-#         return add_vectors, ids
+#         return insert, ids
 # 
 #     def init_data_no_flush(self, connect, collection, nb=6000):
 #         global vectors
 #         if nb == 6000:
-#             add_vectors = vectors
+#             insert = vectors
 #         else:  
-#             add_vectors = gen_vectors(nb, dim)
-#         status, ids = connect.add_vectors(collection, add_vectors)
-#         return add_vectors, ids
+#             insert = gen_vectors(nb, dim)
+#         status, ids = connect.insert(collection, insert)
+#         return insert, ids
 # 
 #     def init_data_ids(self, connect, collection, nb=6000):
 #         global vectors
 #         my_ids = [i for i in range(nb)]
 #         if nb == 6000:
-#             add_vectors = vectors
+#             insert = vectors
 #         else:  
-#             add_vectors = gen_vectors(nb, dim)
-#         status, ids = connect.add_vectors(collection, add_vectors, my_ids)
+#             insert = gen_vectors(nb, dim)
+#         status, ids = connect.insert(collection, insert, my_ids)
 #         connect.flush([collection])
-#         return add_vectors, ids
+#         return insert, ids
 # 
 #     def init_data_partition(self, connect, collection, partition_tag, nb=6000):
 #         '''
@@ -90,15 +90,15 @@
 #         '''
 #         global vectors
 #         if nb == 6000:
-#             add_vectors = vectors
+#             insert = vectors
 #         else:  
-#             add_vectors = gen_vectors(nb, dim)
-#             add_vectors = sklearn.preprocessing.normalize(add_vectors, axis=1, norm='l2')
-#             add_vectors = add_vectors.tolist()
-#         status, ids = connect.add_vectors(collection, add_vectors, partition_tag=partition_tag)
+#             insert = gen_vectors(nb, dim)
+#             insert = sklearn.preprocessing.normalize(insert, axis=1, norm='l2')
+#             insert = insert.tolist()
+#         status, ids = connect.insert(collection, insert, partition_tag=partition_tag)
 #         assert status.OK()
 #         connect.flush([collection])
-#         return add_vectors, ids
+#         return insert, ids
 # 
 #     @pytest.fixture(
 #         scope="function",

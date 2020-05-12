@@ -21,7 +21,7 @@ nb = 6000
 class TestAddBase:
     """
     ******************************************************************
-      The following cases are used to test `add_vectors` function
+      The following cases are used to test `insert` function
     ******************************************************************
     """
     @pytest.fixture(
@@ -43,7 +43,7 @@ class TestAddBase:
         expected: status not ok
         '''
         vector = gen_single_vector(dim)
-        status, ids = connect.add_vectors(collection, vector)
+        status, ids = connect.insert(collection, vector)
         param = {'collection_name': collection,
                  'dimension': dim,
                  'index_file_size': index_file_size,
@@ -58,7 +58,7 @@ class TestAddBase:
         expected: collection exists, status ok
         '''
         vector = gen_single_vector(dim)
-        status, ids = connect.add_vectors(collection, vector)
+        status, ids = connect.insert(collection, vector)
         assert assert_has_collection(connect, collection)
 
     @pytest.mark.timeout(ADD_TIMEOUT)
@@ -70,7 +70,7 @@ class TestAddBase:
         '''
         status = connect.drop_collection(collection)
         vector = gen_single_vector(dim)
-        status, ids = connect.add_vectors(collection, vector)
+        status, ids = connect.insert(collection, vector)
         assert not status.OK()
 
     @pytest.mark.timeout(ADD_TIMEOUT)
@@ -87,7 +87,7 @@ class TestAddBase:
         status = connect.create_collection(param)
         status = connect.drop_collection(collection)
         vector = gen_single_vector(dim)
-        status, ids = connect.add_vectors(param['collection_name'], vector)
+        status, ids = connect.insert(param['collection_name'], vector)
         assert status.OK()
 
     @pytest.mark.timeout(ADD_TIMEOUT)
@@ -98,7 +98,7 @@ class TestAddBase:
         expected: status ok
         '''
         vector = gen_single_vector(dim)
-        status, ids = connect.add_vectors(collection, vector)
+        status, ids = connect.insert(collection, vector)
         status = connect.drop_collection(collection)
         assert status.OK()
 
@@ -115,7 +115,7 @@ class TestAddBase:
                  'metric_type': MetricType.L2}
         status = connect.create_collection(param)
         vector = gen_single_vector(dim)
-        status, ids = connect.add_vectors(collection, vector)
+        status, ids = connect.insert(collection, vector)
         assert status.OK()
 
     @pytest.mark.timeout(ADD_TIMEOUT)
@@ -126,7 +126,7 @@ class TestAddBase:
         expected: status ok
         '''
         vector = gen_single_vector(dim)
-        status, ids = connect.add_vectors(collection, vector)
+        status, ids = connect.insert(collection, vector)
         assert status.OK()
         connect.flush([collection])
         status = connect.drop_collection(collection)
@@ -145,7 +145,7 @@ class TestAddBase:
                  'metric_type': MetricType.L2}
         status = connect.create_collection(param)
         vector = gen_single_vector(dim)
-        status, ids = connect.add_vectors(collection, vector)
+        status, ids = connect.insert(collection, vector)
         connect.flush([collection])
         status = connect.drop_collection(param['collection_name'])
         assert status.OK()
@@ -161,7 +161,7 @@ class TestAddBase:
         index_type = get_simple_index["index_type"]
         status = connect.create_index(collection, index_type, index_param)
         vector = gen_single_vector(dim)
-        status, ids = connect.add_vectors(collection, vector)
+        status, ids = connect.insert(collection, vector)
         assert status.OK()
 
     @pytest.mark.timeout(ADD_TIMEOUT)
@@ -180,7 +180,7 @@ class TestAddBase:
         status = connect.create_collection(param)
         status = connect.create_index(collection, index_type, index_param)
         vector = gen_single_vector(dim)
-        status, ids = connect.add_vectors(collection, vector)
+        status, ids = connect.insert(collection, vector)
         connect.drop_collection(param['collection_name'])
         assert status.OK()
 
@@ -195,7 +195,7 @@ class TestAddBase:
         index_type = get_simple_index["index_type"]
         logging.getLogger().info(index_param)
         vector = gen_single_vector(dim)
-        status, ids = connect.add_vectors(collection, vector)
+        status, ids = connect.insert(collection, vector)
         status = connect.create_index(collection, index_type, index_param)
         assert status.OK()
 
@@ -214,7 +214,7 @@ class TestAddBase:
                  'metric_type': MetricType.L2}
         status = connect.create_collection(param)
         vector = gen_single_vector(dim)
-        status, ids = connect.add_vectors(collection, vector)
+        status, ids = connect.insert(collection, vector)
         status = connect.create_index(param['collection_name'], index_type, index_param)
         assert status.OK()
 
@@ -228,7 +228,7 @@ class TestAddBase:
         index_param = get_simple_index["index_param"]
         index_type = get_simple_index["index_type"]
         vector = gen_single_vector(dim)
-        status, ids = connect.add_vectors(collection, vector)
+        status, ids = connect.insert(collection, vector)
         connect.flush([collection])
         status = connect.create_index(collection, index_type, index_param)
         assert status.OK()
@@ -248,7 +248,7 @@ class TestAddBase:
                  'metric_type': MetricType.L2}
         status = connect.create_collection(param)
         vector = gen_single_vector(dim)
-        status, ids = connect.add_vectors(collection, vector)
+        status, ids = connect.insert(collection, vector)
         connect.flush([collection])
         status = connect.create_index(param['collection_name'], index_type, index_param)
         assert status.OK()
@@ -261,8 +261,8 @@ class TestAddBase:
         expected: status ok
         '''
         vector = gen_single_vector(dim)
-        status, result = connect.search_vectors(collection, 1, vector)
-        status, ids = connect.add_vectors(collection, vector)
+        status, result = connect.search(collection, 1, vector)
+        status, ids = connect.insert(collection, vector)
         assert status.OK()
 
     @pytest.mark.timeout(ADD_TIMEOUT)
@@ -278,8 +278,8 @@ class TestAddBase:
                  'metric_type': MetricType.L2}
         status = connect.create_collection(param)
         vector = gen_single_vector(dim)
-        status, result = connect.search_vectors(collection, 1, vector)
-        status, ids = connect.add_vectors(param['collection_name'], vector)
+        status, result = connect.search(collection, 1, vector)
+        status, ids = connect.insert(param['collection_name'], vector)
         assert status.OK()
 
     @pytest.mark.timeout(ADD_TIMEOUT)
@@ -290,10 +290,10 @@ class TestAddBase:
         expected: status ok
         '''
         vector = gen_single_vector(dim)
-        status, ids = connect.add_vectors(collection, vector)
+        status, ids = connect.insert(collection, vector)
         assert status.OK()
         connect.flush([collection])
-        status, result = connect.search_vectors(collection, 1, vector)
+        status, result = connect.search(collection, 1, vector)
         assert status.OK()
 
     @pytest.mark.timeout(ADD_TIMEOUT)
@@ -309,8 +309,8 @@ class TestAddBase:
                  'metric_type': MetricType.L2}
         status = connect.create_collection(param)
         vector = gen_single_vector(dim)
-        status, ids = connect.add_vectors(collection, vector)
-        status, result = connect.search_vectors(param['collection_name'], 1, vector)
+        status, ids = connect.insert(collection, vector)
+        status, result = connect.search(param['collection_name'], 1, vector)
         assert status.OK()
 
     @pytest.mark.timeout(ADD_TIMEOUT)
@@ -321,9 +321,9 @@ class TestAddBase:
         expected: status ok
         '''
         vector = gen_single_vector(dim)
-        status, ids = connect.add_vectors(collection, vector)
+        status, ids = connect.insert(collection, vector)
         connect.flush([collection])
-        status, result = connect.search_vectors(collection, 1, vector)
+        status, result = connect.search(collection, 1, vector)
         assert status.OK()
 
     @pytest.mark.timeout(ADD_TIMEOUT)
@@ -339,19 +339,19 @@ class TestAddBase:
                  'metric_type': MetricType.L2}
         status = connect.create_collection(param)
         vector = gen_single_vector(dim)
-        status, ids = connect.add_vectors(collection, vector)
+        status, ids = connect.insert(collection, vector)
         connect.flush([collection])
-        status, result = connect.search_vectors(param['collection_name'], 1, vector)
+        status, result = connect.search(param['collection_name'], 1, vector)
         assert status.OK()
 
     """
     ******************************************************************
-      The following cases are used to test `add_vectors` function
+      The following cases are used to test `insert` function
     ******************************************************************
     """
 
     @pytest.mark.timeout(ADD_TIMEOUT)
-    def test_add_vectors_ids(self, connect, collection):
+    def test_insert_ids(self, connect, collection):
         '''
         target: test add vectors in collection, use customize ids
         method: create collection and add vectors in it, check the ids returned and the collection length after vectors added
@@ -360,52 +360,52 @@ class TestAddBase:
         nq = 5; top_k = 1;
         vectors = gen_vectors(nq, dim)
         ids = [i for i in range(nq)]
-        status, ids = connect.add_vectors(collection, vectors, ids)
+        status, ids = connect.insert(collection, vectors, ids)
         connect.flush([collection])
         assert status.OK()
         assert len(ids) == nq
-        status, result = connect.search_vectors(collection, top_k, query_records=vectors)
+        status, result = connect.search(collection, top_k, query_records=vectors)
         logging.getLogger().info(result)
         assert len(result) == nq
         for i in range(nq):
             assert result[i][0].id == i
 
     @pytest.mark.timeout(ADD_TIMEOUT)
-    def test_add_vectors_twice_ids_no_ids(self, connect, collection):
+    def test_insert_twice_ids_no_ids(self, connect, collection):
         '''
-        target: check the result of add_vectors, with params ids and no ids
+        target: check the result of insert, with params ids and no ids
         method: test add vectors twice, use customize ids first, and then use no ids
         expected: status not OK 
         '''
         nq = 5; top_k = 1;
         vectors = gen_vectors(nq, dim)
         ids = [i for i in range(nq)]
-        status, ids = connect.add_vectors(collection, vectors, ids)
+        status, ids = connect.insert(collection, vectors, ids)
         assert status.OK()
-        status, ids = connect.add_vectors(collection, vectors)
+        status, ids = connect.insert(collection, vectors)
         logging.getLogger().info(status)
         logging.getLogger().info(ids)
         assert not status.OK()
 
     @pytest.mark.timeout(ADD_TIMEOUT)
-    def test_add_vectors_twice_not_ids_ids(self, connect, collection):
+    def test_insert_twice_not_ids_ids(self, connect, collection):
         '''
-        target: check the result of add_vectors, with params ids and no ids
+        target: check the result of insert, with params ids and no ids
         method: test add vectors twice, use not ids first, and then use customize ids
         expected: status not OK 
         '''
         nq = 5; top_k = 1;
         vectors = gen_vectors(nq, dim)
         ids = [i for i in range(nq)]
-        status, ids = connect.add_vectors(collection, vectors)
+        status, ids = connect.insert(collection, vectors)
         assert status.OK()
-        status, ids = connect.add_vectors(collection, vectors, ids)
+        status, ids = connect.insert(collection, vectors, ids)
         logging.getLogger().info(status)
         logging.getLogger().info(ids)
         assert not status.OK()
 
     @pytest.mark.timeout(ADD_TIMEOUT)
-    def test_add_vectors_ids_length_not_match(self, connect, collection):
+    def test_insert_ids_length_not_match(self, connect, collection):
         '''
         target: test add vectors in collection, use customize ids, len(ids) != len(vectors)
         method: create collection and add vectors in it
@@ -415,7 +415,7 @@ class TestAddBase:
         vectors = gen_vectors(nq, dim)
         ids = [i for i in range(1, nq)]
         with pytest.raises(Exception) as e:
-            status, ids = connect.add_vectors(collection, vectors, ids)
+            status, ids = connect.insert(collection, vectors, ids)
 
     @pytest.fixture(
         scope="function",
@@ -425,7 +425,7 @@ class TestAddBase:
         yield request.param
 
     @pytest.mark.level(2)
-    def test_add_vectors_ids_invalid(self, connect, collection, get_vector_id):
+    def test_insert_ids_invalid(self, connect, collection, get_vector_id):
         '''
         target: test add vectors in collection, use customize ids, which are not int64
         method: create collection and add vectors in it
@@ -436,10 +436,10 @@ class TestAddBase:
         vector_id = get_vector_id
         ids = [vector_id for _ in range(nq)]
         with pytest.raises(Exception):
-            connect.add_vectors(collection, vectors, ids)
+            connect.insert(collection, vectors, ids)
 
     @pytest.mark.timeout(ADD_TIMEOUT)
-    def test_add_vectors(self, connect, collection):
+    def test_insert(self, connect, collection):
         '''
         target: test add vectors in collection created before
         method: create collection and add vectors in it, check the ids returned and the collection length after vectors added
@@ -447,12 +447,12 @@ class TestAddBase:
         '''
         nq = 5
         vectors = gen_vectors(nq, dim)
-        status, ids = connect.add_vectors(collection, vectors)
+        status, ids = connect.insert(collection, vectors)
         assert status.OK()
         assert len(ids) == nq
 
     @pytest.mark.timeout(ADD_TIMEOUT)
-    def test_add_vectors_tag(self, connect, collection):
+    def test_insert_tag(self, connect, collection):
         '''
         target: test add vectors in collection created before
         method: create collection and add vectors in it, with the partition_tag param
@@ -461,12 +461,12 @@ class TestAddBase:
         nq = 5
         vectors = gen_vectors(nq, dim)
         status = connect.create_partition(collection, tag)
-        status, ids = connect.add_vectors(collection, vectors, partition_tag=tag)
+        status, ids = connect.insert(collection, vectors, partition_tag=tag)
         assert status.OK()
         assert len(ids) == nq
 
     @pytest.mark.timeout(ADD_TIMEOUT)
-    def test_add_vectors_tag_A(self, connect, collection):
+    def test_insert_tag_A(self, connect, collection):
         '''
         target: test add vectors in collection created before
         method: create partition and add vectors in it
@@ -475,12 +475,12 @@ class TestAddBase:
         nq = 5
         vectors = gen_vectors(nq, dim)
         status = connect.create_partition(collection, tag)
-        status, ids = connect.add_vectors(collection, vectors, partition_tag=tag)
+        status, ids = connect.insert(collection, vectors, partition_tag=tag)
         assert status.OK()
         assert len(ids) == nq
 
     @pytest.mark.timeout(ADD_TIMEOUT)
-    def test_add_vectors_tag_not_existed(self, connect, collection):
+    def test_insert_tag_not_existed(self, connect, collection):
         '''
         target: test add vectors in collection created before
         method: create collection and add vectors in it, with the not existed partition_tag param
@@ -488,11 +488,11 @@ class TestAddBase:
         '''
         nq = 5
         vectors = gen_vectors(nq, dim)
-        status, ids = connect.add_vectors(collection, vectors, partition_tag=tag)
+        status, ids = connect.insert(collection, vectors, partition_tag=tag)
         assert not status.OK()
 
     @pytest.mark.timeout(ADD_TIMEOUT)
-    def test_add_vectors_tag_not_existed_A(self, connect, collection):
+    def test_insert_tag_not_existed_A(self, connect, collection):
         '''
         target: test add vectors in collection created before
         method: create partition, add vectors with the not existed partition_tag param
@@ -502,11 +502,11 @@ class TestAddBase:
         vectors = gen_vectors(nq, dim)
         new_tag = "new_tag"
         status = connect.create_partition(collection, tag)
-        status, ids = connect.add_vectors(collection, vectors, partition_tag=new_tag)
+        status, ids = connect.insert(collection, vectors, partition_tag=new_tag)
         assert not status.OK()
 
     @pytest.mark.timeout(ADD_TIMEOUT)
-    def test_add_vectors_tag_existed(self, connect, collection):
+    def test_insert_tag_existed(self, connect, collection):
         '''
         target: test add vectors in collection created before
         method: create collection and add vectors in it repeatly, with the partition_tag param
@@ -515,14 +515,14 @@ class TestAddBase:
         nq = 5
         vectors = gen_vectors(nq, dim)
         status = connect.create_partition(collection, tag)
-        status, ids = connect.add_vectors(collection, vectors, partition_tag=tag)
+        status, ids = connect.insert(collection, vectors, partition_tag=tag)
         for i in range(5):
-            status, ids = connect.add_vectors(collection, vectors, partition_tag=tag)
+            status, ids = connect.insert(collection, vectors, partition_tag=tag)
             assert status.OK()
             assert len(ids) == nq
 
     # @pytest.mark.level(2)
-    # def test_add_vectors_without_connect(self, dis_connect, collection):
+    # def test_insert_without_connect(self, dis_connect, collection):
     #     '''
     #     target: test add vectors without connection
     #     method: create collection and add vectors in it, check if added successfully
@@ -531,7 +531,7 @@ class TestAddBase:
     #     nq = 5
     #     vectors = gen_vectors(nq, dim)
     #     with pytest.raises(Exception) as e:
-    #         status, ids = dis_connect.add_vectors(collection, vectors)
+    #         status, ids = dis_connect.insert(collection, vectors)
 
     def test_add_collection_not_existed(self, connect):
         '''
@@ -541,7 +541,7 @@ class TestAddBase:
         '''
         nq = 5
         vector = gen_single_vector(dim)
-        status, ids = connect.add_vectors(gen_unique_str("not_exist_collection"), vector)
+        status, ids = connect.insert(gen_unique_str("not_exist_collection"), vector)
         assert not status.OK()
         assert not ids
 
@@ -552,10 +552,10 @@ class TestAddBase:
         expected: status not ok
         '''
         vector = gen_single_vector(int(dim)//2)
-        status, ids = connect.add_vectors(collection, vector)
+        status, ids = connect.insert(collection, vector)
         assert not status.OK()
 
-    def test_add_vectors_dim_not_matched(self, connect, collection):
+    def test_insert_dim_not_matched(self, connect, collection):
         '''
         target: test add vectors, the vector dimension is not equal to the collection dimension
         method: the vectors dimension is half of the collection dimension, check the status
@@ -563,7 +563,7 @@ class TestAddBase:
         '''
         nq = 5
         vectors = gen_vectors(nq, int(dim)//2)
-        status, ids = connect.add_vectors(collection, vectors)
+        status, ids = connect.insert(collection, vectors)
         assert not status.OK()
 
     def test_add_vector_query_after_sleep(self, connect, collection):
@@ -574,9 +574,9 @@ class TestAddBase:
         '''
         nq = 5
         vectors = gen_vectors(nq, dim)
-        status, ids = connect.add_vectors(collection, vectors)
+        status, ids = connect.insert(collection, vectors)
         connect.flush([collection])
-        status, result = connect.search_vectors(collection, 1, [vectors[0]])
+        status, result = connect.search(collection, 1, [vectors[0]])
         assert status.OK()
         assert len(result) == 1
 
@@ -604,7 +604,7 @@ class TestAddBase:
             milvus = get_milvus(host=args["ip"], port=args["port"], handler=args["handler"])
             i = 0
             while i < loop_num:
-                status, ids = milvus.add_vectors(collection, vector)
+                status, ids = milvus.insert(collection, vector)
                 i = i + 1
             # milvus.disconnect()
         for i in range(process_num):
@@ -642,7 +642,7 @@ class TestAddBase:
         def add(thread_i):
             logging.getLogger().info("In thread-%d" % thread_i)
             milvus = get_milvus(host=args["ip"], port=args["port"], handler=args["handler"])
-            status, result = milvus.add_vectors(collection, records=vectors)
+            status, result = milvus.insert(collection, records=vectors)
             assert status.OK()
             status = milvus.flush([collection])
             assert status.OK()
@@ -674,7 +674,7 @@ class TestAddBase:
             connect.create_collection(param)
         for j in range(5):
             for i in range(20):
-                status, ids = connect.add_vectors(collection_name=collection_list[i], records=vectors)
+                status, ids = connect.insert(collection_name=collection_list[i], records=vectors)
                 assert status.OK()
 
 class TestAddAsync:
@@ -710,7 +710,7 @@ class TestAddAsync:
         '''
         nb = insert_count
         insert_vec_list = gen_vectors(nb, dim)
-        future = connect.add_vectors(collection, insert_vec_list, _async=True)
+        future = connect.insert(collection, insert_vec_list, _async=True)
         status, ids = future.result()
         connect.flush([collection])
         assert len(ids) == nb
@@ -725,7 +725,7 @@ class TestAddAsync:
         '''
         nb = insert_count
         insert_vec_list = gen_vectors(nb, dim)
-        status, ids = connect.add_vectors(collection, insert_vec_list, _async=False)
+        status, ids = connect.insert(collection, insert_vec_list, _async=False)
         connect.flush([collection])
         assert len(ids) == nb
         assert status.OK()
@@ -738,7 +738,7 @@ class TestAddAsync:
         '''
         nb = insert_count
         insert_vec_list = gen_vectors(nb, dim)
-        future = connect.add_vectors(collection, insert_vec_list, _async=True, _callback=self.check_status)
+        future = connect.insert(collection, insert_vec_list, _async=True, _callback=self.check_status)
         future.done()
 
     @pytest.mark.level(2)
@@ -750,7 +750,7 @@ class TestAddAsync:
         '''
         nb = 50000
         insert_vec_list = gen_vectors(nb, dim)
-        future = connect.add_vectors(collection, insert_vec_list, _async=True, _callback=self.check_status)
+        future = connect.insert(collection, insert_vec_list, _async=True, _callback=self.check_status)
         status, result = future.result()
         assert status.OK()
         assert len(result) == nb 
@@ -769,7 +769,7 @@ class TestAddAsync:
         '''
         nb = 100000
         insert_vec_list = gen_vectors(nb, dim)
-        future = connect.add_vectors(collection, insert_vec_list, _async=True, _callback=self.check_status, timeout=1)
+        future = connect.insert(collection, insert_vec_list, _async=True, _callback=self.check_status, timeout=1)
         future.done()
 
     def test_insert_async_invalid_params(self, connect, collection):
@@ -780,7 +780,7 @@ class TestAddAsync:
         '''
         insert_vec_list = gen_vectors(nb, dim)
         collection_new = gen_unique_str()
-        future = connect.add_vectors(collection_new, insert_vec_list, _async=True)
+        future = connect.insert(collection_new, insert_vec_list, _async=True)
         status, result = future.result()
         assert not status.OK()
 
@@ -794,13 +794,13 @@ class TestAddAsync:
         insert_vec_list = []
         collection_new = gen_unique_str()
         with pytest.raises(Exception) as e:
-            future = connect.add_vectors(collection_new, insert_vec_list, _async=True)
+            future = connect.insert(collection_new, insert_vec_list, _async=True)
 
 
 class TestAddIP:
     """
     ******************************************************************
-      The following cases are used to test `add_vectors / index / search / delete` mixed function
+      The following cases are used to test `insert / index / search / delete` mixed function
     ******************************************************************
     """
     @pytest.fixture(
@@ -822,7 +822,7 @@ class TestAddIP:
         expected: status not ok
         '''
         vector = gen_single_vector(dim)
-        status, ids = connect.add_vectors(ip_collection, vector)
+        status, ids = connect.insert(ip_collection, vector)
         param = {'collection_name': ip_collection,
                  'dimension': dim,
                  'index_file_size': index_file_size,
@@ -837,7 +837,7 @@ class TestAddIP:
         expected: collection exists, status ok
         '''
         vector = gen_single_vector(dim)
-        status, ids = connect.add_vectors(ip_collection, vector)
+        status, ids = connect.insert(ip_collection, vector)
         assert assert_has_collection(connect, ip_collection)
 
     @pytest.mark.timeout(ADD_TIMEOUT)
@@ -849,7 +849,7 @@ class TestAddIP:
         '''
         status = connect.drop_collection(ip_collection)
         vector = gen_single_vector(dim)
-        status, ids = connect.add_vectors(ip_collection, vector)
+        status, ids = connect.insert(ip_collection, vector)
         assert not status.OK()
 
     @pytest.mark.timeout(ADD_TIMEOUT)
@@ -866,7 +866,7 @@ class TestAddIP:
         status = connect.create_collection(param)
         status = connect.drop_collection(ip_collection)
         vector = gen_single_vector(dim)
-        status, ids = connect.add_vectors(param['collection_name'], vector)
+        status, ids = connect.insert(param['collection_name'], vector)
         assert status.OK()
 
     @pytest.mark.timeout(ADD_TIMEOUT)
@@ -877,7 +877,7 @@ class TestAddIP:
         expected: status ok
         '''
         vector = gen_single_vector(dim)
-        status, ids = connect.add_vectors(ip_collection, vector)
+        status, ids = connect.insert(ip_collection, vector)
         status = connect.drop_collection(ip_collection)
         assert status.OK()
 
@@ -894,7 +894,7 @@ class TestAddIP:
                  'metric_type': MetricType.L2}
         status = connect.create_collection(param)
         vector = gen_single_vector(dim)
-        status, ids = connect.add_vectors(ip_collection, vector)
+        status, ids = connect.insert(ip_collection, vector)
         status = connect.drop_collection(param['collection_name'])
         assert status.OK()
 
@@ -906,7 +906,7 @@ class TestAddIP:
         expected: status ok
         '''
         vector = gen_single_vector(dim)
-        status, ids = connect.add_vectors(ip_collection, vector)
+        status, ids = connect.insert(ip_collection, vector)
         connect.flush([ip_collection])
         status = connect.drop_collection(ip_collection)
         assert status.OK()
@@ -924,7 +924,7 @@ class TestAddIP:
                  'metric_type': MetricType.L2}
         status = connect.create_collection(param)
         vector = gen_single_vector(dim)
-        status, ids = connect.add_vectors(ip_collection, vector)
+        status, ids = connect.insert(ip_collection, vector)
         connect.flush([ip_collection])
         status = connect.drop_collection(param['collection_name'])
         assert status.OK()
@@ -940,7 +940,7 @@ class TestAddIP:
         index_type = get_simple_index["index_type"]
         status = connect.create_index(ip_collection, index_type, index_param)
         vector = gen_single_vector(dim)
-        status, ids = connect.add_vectors(ip_collection, vector)
+        status, ids = connect.insert(ip_collection, vector)
         assert status.OK()
 
     @pytest.mark.timeout(ADD_TIMEOUT)
@@ -959,7 +959,7 @@ class TestAddIP:
         status = connect.create_collection(param)
         status = connect.create_index(ip_collection, index_type, index_param)
         vector = gen_single_vector(dim)
-        status, ids = connect.add_vectors(ip_collection, vector)
+        status, ids = connect.insert(ip_collection, vector)
         assert status.OK()
 
     @pytest.mark.timeout(ADD_TIMEOUT)
@@ -972,7 +972,7 @@ class TestAddIP:
         index_param = get_simple_index["index_param"]
         index_type = get_simple_index["index_type"]
         vector = gen_single_vector(dim)
-        status, ids = connect.add_vectors(ip_collection, vector)
+        status, ids = connect.insert(ip_collection, vector)
         status, mode = connect._cmd("mode")
         assert status.OK()
         status = connect.create_index(ip_collection, index_type, index_param)
@@ -996,7 +996,7 @@ class TestAddIP:
                  'metric_type': MetricType.L2}
         status = connect.create_collection(param)
         vector = gen_single_vector(dim)
-        status, ids = connect.add_vectors(ip_collection, vector)
+        status, ids = connect.insert(ip_collection, vector)
         status = connect.create_index(param['collection_name'], index_type, index_param)
         assert status.OK()
 
@@ -1012,7 +1012,7 @@ class TestAddIP:
         if index_type == IndexType.IVF_PQ:
             pytest.skip("Skip some PQ cases")
         vector = gen_single_vector(dim)
-        status, ids = connect.add_vectors(ip_collection, vector)
+        status, ids = connect.insert(ip_collection, vector)
         assert status.OK()
         time.sleep(add_interval_time)
         status = connect.create_index(ip_collection, index_type, index_param)
@@ -1033,7 +1033,7 @@ class TestAddIP:
                  'metric_type': MetricType.L2}
         status = connect.create_collection(param)
         vector = gen_single_vector(dim)
-        status, ids = connect.add_vectors(ip_collection, vector)
+        status, ids = connect.insert(ip_collection, vector)
         connect.flush([ip_collection])
         status = connect.create_index(param['collection_name'], index_type, index_param)
         assert status.OK()
@@ -1046,8 +1046,8 @@ class TestAddIP:
         expected: status ok
         '''
         vector = gen_single_vector(dim)
-        status, result = connect.search_vectors(ip_collection, 1, vector)
-        status, ids = connect.add_vectors(ip_collection, vector)
+        status, result = connect.search(ip_collection, 1, vector)
+        status, ids = connect.insert(ip_collection, vector)
         assert status.OK()
 
     @pytest.mark.timeout(ADD_TIMEOUT)
@@ -1063,8 +1063,8 @@ class TestAddIP:
                  'metric_type': MetricType.L2}
         status = connect.create_collection(param)
         vector = gen_single_vector(dim)
-        status, result = connect.search_vectors(ip_collection, 1, vector)
-        status, ids = connect.add_vectors(param['collection_name'], vector)
+        status, result = connect.search(ip_collection, 1, vector)
+        status, ids = connect.insert(param['collection_name'], vector)
         assert status.OK()
 
     @pytest.mark.timeout(ADD_TIMEOUT)
@@ -1075,10 +1075,10 @@ class TestAddIP:
         expected: status ok
         '''
         vector = gen_single_vector(dim)
-        status, ids = connect.add_vectors(ip_collection, vector)
+        status, ids = connect.insert(ip_collection, vector)
         assert status.OK()
         connect.flush([ip_collection])
-        status, result = connect.search_vectors(ip_collection, 1, vector)
+        status, result = connect.search(ip_collection, 1, vector)
         assert status.OK()
 
     @pytest.mark.timeout(ADD_TIMEOUT)
@@ -1094,9 +1094,9 @@ class TestAddIP:
                  'metric_type': MetricType.L2}
         status = connect.create_collection(param)
         vector = gen_single_vector(dim)
-        status, ids = connect.add_vectors(ip_collection, vector)
+        status, ids = connect.insert(ip_collection, vector)
         connect.flush([ip_collection])
-        status, result = connect.search_vectors(param['collection_name'], 1, vector)
+        status, result = connect.search(param['collection_name'], 1, vector)
         assert status.OK()
 
     @pytest.mark.timeout(ADD_TIMEOUT)
@@ -1107,9 +1107,9 @@ class TestAddIP:
         expected: status ok
         '''
         vector = gen_single_vector(dim)
-        status, ids = connect.add_vectors(ip_collection, vector)
+        status, ids = connect.insert(ip_collection, vector)
         time.sleep(add_interval_time)
-        status, result = connect.search_vectors(ip_collection, 1, vector)
+        status, result = connect.search(ip_collection, 1, vector)
         assert status.OK()
 
     @pytest.mark.timeout(ADD_TIMEOUT)
@@ -1125,20 +1125,20 @@ class TestAddIP:
                  'metric_type': MetricType.L2}
         status = connect.create_collection(param)
         vector = gen_single_vector(dim)
-        status, ids = connect.add_vectors(ip_collection, vector)
+        status, ids = connect.insert(ip_collection, vector)
         assert status.OK()
         time.sleep(add_interval_time)
-        status, result = connect.search_vectors(param['collection_name'], 1, vector)
+        status, result = connect.search(param['collection_name'], 1, vector)
         assert status.OK()
 
     """
     ******************************************************************
-      The following cases are used to test `add_vectors` function
+      The following cases are used to test `insert` function
     ******************************************************************
     """
 
     @pytest.mark.timeout(ADD_TIMEOUT)
-    def test_add_vectors_ids(self, connect, ip_collection):
+    def test_insert_ids(self, connect, ip_collection):
         '''
         target: test add vectors in collection, use customize ids
         method: create collection and add vectors in it, check the ids returned and the collection length after vectors added
@@ -1147,53 +1147,53 @@ class TestAddIP:
         nq = 5; top_k = 1
         vectors = gen_vectors(nq, dim)
         ids = [i for i in range(nq)]
-        status, ids = connect.add_vectors(ip_collection, vectors, ids)
+        status, ids = connect.insert(ip_collection, vectors, ids)
         assert status.OK()
         connect.flush([ip_collection])
         assert len(ids) == nq
         # check search result
-        status, result = connect.search_vectors(ip_collection, top_k, vectors)
+        status, result = connect.search(ip_collection, top_k, vectors)
         logging.getLogger().info(result)
         assert len(result) == nq
         for i in range(nq):
             assert result[i][0].id == i
 
     @pytest.mark.timeout(ADD_TIMEOUT)
-    def test_add_vectors_twice_ids_no_ids(self, connect, ip_collection):
+    def test_insert_twice_ids_no_ids(self, connect, ip_collection):
         '''
-        target: check the result of add_vectors, with params ids and no ids
+        target: check the result of insert, with params ids and no ids
         method: test add vectors twice, use customize ids first, and then use no ids
         expected: status not OK 
         '''
         nq = 5; top_k = 1
         vectors = gen_vectors(nq, dim)
         ids = [i for i in range(nq)]
-        status, ids = connect.add_vectors(ip_collection, vectors, ids)
+        status, ids = connect.insert(ip_collection, vectors, ids)
         assert status.OK()
-        status, ids = connect.add_vectors(ip_collection, vectors)
+        status, ids = connect.insert(ip_collection, vectors)
         logging.getLogger().info(status)
         logging.getLogger().info(ids)
         assert not status.OK()
 
     @pytest.mark.timeout(ADD_TIMEOUT)
-    def test_add_vectors_twice_not_ids_ids(self, connect, ip_collection):
+    def test_insert_twice_not_ids_ids(self, connect, ip_collection):
         '''
-        target: check the result of add_vectors, with params ids and no ids
+        target: check the result of insert, with params ids and no ids
         method: test add vectors twice, use not ids first, and then use customize ids
         expected: status not OK 
         '''
         nq = 5; top_k = 1
         vectors = gen_vectors(nq, dim)
         ids = [i for i in range(nq)]
-        status, ids = connect.add_vectors(ip_collection, vectors)
+        status, ids = connect.insert(ip_collection, vectors)
         assert status.OK()
-        status, ids = connect.add_vectors(ip_collection, vectors, ids)
+        status, ids = connect.insert(ip_collection, vectors, ids)
         logging.getLogger().info(status)
         logging.getLogger().info(ids)
         assert not status.OK()
 
     @pytest.mark.timeout(ADD_TIMEOUT)
-    def test_add_vectors_ids_length_not_match(self, connect, ip_collection):
+    def test_insert_ids_length_not_match(self, connect, ip_collection):
         '''
         target: test add vectors in collection, use customize ids, len(ids) != len(vectors)
         method: create collection and add vectors in it
@@ -1203,7 +1203,7 @@ class TestAddIP:
         vectors = gen_vectors(nq, dim)
         ids = [i for i in range(1, nq)]
         with pytest.raises(Exception) as e:
-            status, ids = connect.add_vectors(ip_collection, vectors, ids)
+            status, ids = connect.insert(ip_collection, vectors, ids)
 
     @pytest.fixture(
         scope="function",
@@ -1213,7 +1213,7 @@ class TestAddIP:
         yield request.param
 
     @pytest.mark.level(2)
-    def test_add_vectors_ids_invalid(self, connect, ip_collection, get_vector_id):
+    def test_insert_ids_invalid(self, connect, ip_collection, get_vector_id):
         '''
         target: test add vectors in collection, use customize ids, which are not int64
         method: create collection and add vectors in it
@@ -1224,10 +1224,10 @@ class TestAddIP:
         vector_id = get_vector_id
         ids = [vector_id for i in range(nq)]
         with pytest.raises(Exception) as e:
-            status, ids = connect.add_vectors(ip_collection, vectors, ids)
+            status, ids = connect.insert(ip_collection, vectors, ids)
 
     @pytest.mark.timeout(ADD_TIMEOUT)
-    def test_add_vectors(self, connect, ip_collection):
+    def test_insert(self, connect, ip_collection):
         '''
         target: test add vectors in collection created before
         method: create collection and add vectors in it, check the ids returned and the collection length after vectors added
@@ -1235,12 +1235,12 @@ class TestAddIP:
         '''
         nq = 5
         vectors = gen_vectors(nq, dim)
-        status, ids = connect.add_vectors(ip_collection, vectors)
+        status, ids = connect.insert(ip_collection, vectors)
         assert status.OK()
         assert len(ids) == nq
 
     # @pytest.mark.level(2)
-    # def test_add_vectors_without_connect(self, dis_connect, ip_collection):
+    # def test_insert_without_connect(self, dis_connect, ip_collection):
     #     '''
     #     target: test add vectors without connection
     #     method: create collection and add vectors in it, check if added successfully
@@ -1249,7 +1249,7 @@ class TestAddIP:
     #     nq = 5
     #     vectors = gen_vectors(nq, dim)
     #     with pytest.raises(Exception) as e:
-    #         status, ids = dis_connect.add_vectors(ip_collection, vectors)
+    #         status, ids = dis_connect.insert(ip_collection, vectors)
 
     def test_add_vector_dim_not_matched(self, connect, ip_collection):
         '''
@@ -1258,10 +1258,10 @@ class TestAddIP:
         expected: status not ok
         '''
         vector = gen_single_vector(int(dim)//2)
-        status, ids = connect.add_vectors(ip_collection, vector)
+        status, ids = connect.insert(ip_collection, vector)
         assert not status.OK()
 
-    def test_add_vectors_dim_not_matched(self, connect, ip_collection):
+    def test_insert_dim_not_matched(self, connect, ip_collection):
         '''
         target: test add vectors, the vector dimension is not equal to the collection dimension
         method: the vectors dimension is half of the collection dimension, check the status
@@ -1269,7 +1269,7 @@ class TestAddIP:
         '''
         nq = 5
         vectors = gen_vectors(nq, int(dim)//2)
-        status, ids = connect.add_vectors(ip_collection, vectors)
+        status, ids = connect.insert(ip_collection, vectors)
         assert not status.OK()
 
     def test_add_vector_query_after_sleep(self, connect, ip_collection):
@@ -1280,9 +1280,9 @@ class TestAddIP:
         '''
         nq = 5
         vectors = gen_vectors(nq, dim)
-        status, ids = connect.add_vectors(ip_collection, vectors)
+        status, ids = connect.insert(ip_collection, vectors)
         time.sleep(add_interval_time)
-        status, result = connect.search_vectors(ip_collection, 1, [vectors[0]])
+        status, result = connect.search(ip_collection, 1, [vectors[0]])
         assert status.OK()
         assert len(result) == 1
 
@@ -1305,7 +1305,7 @@ class TestAddIP:
             connect.create_collection(param)
         for j in range(10):
             for i in range(20):
-                status, ids = connect.add_vectors(collection_name=collection_list[i], records=vectors)
+                status, ids = connect.insert(collection_name=collection_list[i], records=vectors)
                 assert status.OK()
 
 class TestAddAdvance:
@@ -1328,7 +1328,7 @@ class TestAddAdvance:
         '''
         nb = insert_count
         insert_vec_list = gen_vectors(nb, dim)
-        status, ids = connect.add_vectors(collection, insert_vec_list)
+        status, ids = connect.insert(collection, insert_vec_list)
         assert len(ids) == nb
         assert status.OK()
 
@@ -1340,7 +1340,7 @@ class TestAddAdvance:
         '''
         nb = insert_count
         insert_vec_list = gen_vectors(nb, dim)
-        status, ids = connect.add_vectors(ip_collection, insert_vec_list)
+        status, ids = connect.insert(ip_collection, insert_vec_list)
         assert len(ids) == nb
         assert status.OK()
 
@@ -1352,7 +1352,7 @@ class TestAddAdvance:
         '''
         nb = insert_count
         tmp, insert_vec_list = gen_binary_vectors(nb, dim)
-        status, ids = connect.add_vectors(jac_collection, insert_vec_list)
+        status, ids = connect.insert(jac_collection, insert_vec_list)
         assert len(ids) == nb
         assert status.OK()
 
@@ -1364,7 +1364,7 @@ class TestAddAdvance:
         '''
         nb = insert_count
         tmp, insert_vec_list = gen_binary_vectors(nb, dim)
-        status, ids = connect.add_vectors(ham_collection, insert_vec_list)
+        status, ids = connect.insert(ham_collection, insert_vec_list)
         assert len(ids) == nb
         assert status.OK()
 
@@ -1376,7 +1376,7 @@ class TestAddAdvance:
         '''
         nb = insert_count
         tmp, insert_vec_list = gen_binary_vectors(nb, dim)
-        status, ids = connect.add_vectors(tanimoto_collection, insert_vec_list)
+        status, ids = connect.insert(tanimoto_collection, insert_vec_list)
         assert len(ids) == nb
         assert status.OK()
 
@@ -1400,18 +1400,18 @@ class TestNameInvalid(object):
         yield request.param
 
     @pytest.mark.level(2)
-    def test_add_vectors_with_invalid_collection_name(self, connect, get_collection_name):
+    def test_insert_with_invalid_collection_name(self, connect, get_collection_name):
         collection_name = get_collection_name
         vectors = gen_vectors(1, dim)
-        status, result = connect.add_vectors(collection_name, vectors)
+        status, result = connect.insert(collection_name, vectors)
         assert not status.OK()
 
     @pytest.mark.level(2)
-    def test_add_vectors_with_invalid_tag_name(self, connect, get_collection_name, get_tag_name):
+    def test_insert_with_invalid_tag_name(self, connect, get_collection_name, get_tag_name):
         collection_name = get_collection_name
         tag_name = get_tag_name
         vectors = gen_vectors(1, dim)
-        status, result = connect.add_vectors(collection_name, vectors, partition_tag=tag_name)
+        status, result = connect.insert(collection_name, vectors, partition_tag=tag_name)
         assert not status.OK()
 
 
@@ -1434,25 +1434,25 @@ class TestAddCollectionVectorsInvalid(object):
         tmp_single_vector = copy.deepcopy(self.single_vector)
         tmp_single_vector[0][1] = gen_vector
         with pytest.raises(Exception) as e:
-            status, result = connect.add_vectors(collection, tmp_single_vector)
+            status, result = connect.insert(collection, tmp_single_vector)
 
     @pytest.mark.level(2)
-    def test_add_vectors_with_invalid_vectors(self, connect, collection, gen_vector):
+    def test_insert_with_invalid_vectors(self, connect, collection, gen_vector):
         tmp_vectors = copy.deepcopy(self.vectors)
         tmp_vectors[1][1] = gen_vector
         with pytest.raises(Exception) as e:
-            status, result = connect.add_vectors(collection, tmp_vectors)
+            status, result = connect.insert(collection, tmp_vectors)
 
     @pytest.mark.level(2)
-    def test_add_vectors_with_invalid_vectors_jaccard(self, connect, jac_collection, gen_vector):
+    def test_insert_with_invalid_vectors_jaccard(self, connect, jac_collection, gen_vector):
         tmp_vectors = copy.deepcopy(self.vectors)
         tmp_vectors[1][1] = gen_vector
         with pytest.raises(Exception) as e:
-            status, result = connect.add_vectors(jac_collection, tmp_vectors)
+            status, result = connect.insert(jac_collection, tmp_vectors)
 
     @pytest.mark.level(2)
-    def test_add_vectors_with_invalid_vectors_hamming(self, connect, ham_collection, gen_vector):
+    def test_insert_with_invalid_vectors_hamming(self, connect, ham_collection, gen_vector):
         tmp_vectors = copy.deepcopy(self.vectors)
         tmp_vectors[1][1] = gen_vector
         with pytest.raises(Exception) as e:
-            status, result = connect.add_vectors(ham_collection, tmp_vectors)
+            status, result = connect.insert(ham_collection, tmp_vectors)
