@@ -75,7 +75,7 @@ public class MainClass {
                     .withPort(port)
                     .build();
             client.connect(connectParam);
-//            List<String> tableNames = client.showCollections().getCollectionNames();
+//            List<String> tableNames = client.listCollections().getCollectionNames();
 //            for (int j = 0; j < tableNames.size(); ++j
 //                 ) {
 //                client.dropCollection(tableNames.get(j));
@@ -108,7 +108,7 @@ public class MainClass {
                     .withPort(port)
                     .build();
             client.connect(connectParam);
-//            List<String> tableNames = client.showCollections().getCollectionNames();
+//            List<String> tableNames = client.listCollections().getCollectionNames();
 //            for (int j = 0; j < tableNames.size(); ++j
 //            ) {
 //                client.dropCollection(tableNames.get(j));
@@ -170,7 +170,7 @@ public class MainClass {
         classes.add(new XmlClass("com.TestPartition"));
         classes.add(new XmlClass("com.TestGetVectorByID"));
         classes.add(new XmlClass("com.TestCollectionInfo"));
-        classes.add(new XmlClass("com.TestSearchByIds"));
+//        classes.add(new XmlClass("com.TestSearchByIds"));
 
         test.setXmlClasses(classes) ;
 

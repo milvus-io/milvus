@@ -45,7 +45,7 @@ public class TestIndex {
         Index index = new Index.Builder(collectionName, indexType).withParamsInJson(indexParam).build();
         Response res_create = client.createIndex(index);
         assert(res_create.ok());
-        DescribeIndexResponse res = client.describeIndex(collectionName);
+        GetIndexInfoResponse res = client.getIndexInfo(collectionName);
         assert(res.getResponse().ok());
         Index index1 = res.getIndex().get();
         Assert.assertEquals(Utils.getIndexParamValue(index1.getParamsInJson(), "nlist"), n_list);
@@ -63,7 +63,7 @@ public class TestIndex {
         Response res_create = client.createIndex(index);
         assert(res_create.ok());
         Logger.getLogger("a").info("end create");
-        DescribeIndexResponse res = client.describeIndex(collectionName);
+        GetIndexInfoResponse res = client.getIndexInfo(collectionName);
         assert(res.getResponse().ok());
         Index index1 = res.getIndex().get();
         Assert.assertEquals(index1.getIndexType(), indexType);
@@ -77,7 +77,7 @@ public class TestIndex {
         Index index = new Index.Builder(collectionName, indexType).withParamsInJson(indexParam).build();
         Response res_create = client.createIndex(index);
         assert(res_create.ok());
-        DescribeIndexResponse res = client.describeIndex(collectionName);
+        GetIndexInfoResponse res = client.getIndexInfo(collectionName);
         assert(res.getResponse().ok());
         Index index1 = res.getIndex().get();
         Assert.assertEquals(index1.getIndexType(), indexType);
@@ -91,7 +91,7 @@ public class TestIndex {
         Index index = new Index.Builder(collectionName, indexType).withParamsInJson(indexParam).build();
         Response res_create = client.createIndex(index);
         assert(res_create.ok());
-        DescribeIndexResponse res = client.describeIndex(collectionName);
+        GetIndexInfoResponse res = client.getIndexInfo(collectionName);
         assert(res.getResponse().ok());
         Index index1 = res.getIndex().get();
         Assert.assertEquals(index1.getIndexType(), indexType);
@@ -105,7 +105,7 @@ public class TestIndex {
         Index index = new Index.Builder(collectionName, indexType).withParamsInJson(indexParam).build();
         Response res_create = client.createIndex(index);
         assert(res_create.ok());
-        DescribeIndexResponse res = client.describeIndex(collectionName);
+        GetIndexInfoResponse res = client.getIndexInfo(collectionName);
         assert(res.getResponse().ok());
         Index index1 = res.getIndex().get();
         Assert.assertEquals(index1.getIndexType(), indexType);
@@ -158,7 +158,7 @@ public class TestIndex {
         Index index = new Index.Builder(collectionName, indexType).withParamsInJson(indexParam).build();
         Response res_create = client.createIndex(index);
         assert(res_create.ok());
-        DescribeIndexResponse res = client.describeIndex(collectionName);
+        GetIndexInfoResponse res = client.getIndexInfo(collectionName);
         assert(res.getResponse().ok());
         Index index1 = res.getIndex().get();
         Assert.assertEquals(Utils.getIndexParamValue(index1.getParamsInJson(), "nlist"), n_list);
@@ -188,7 +188,7 @@ public class TestIndex {
         Index indexNew = new Index.Builder(collectionName, indexTypeNew).withParamsInJson(indexParam).build();
         Response resNew = client.createIndex(indexNew);
         assert(resNew.ok());
-        DescribeIndexResponse res = client.describeIndex(collectionName);
+        GetIndexInfoResponse res = client.getIndexInfo(collectionName);
         assert(res_create.ok());
         Index index1 = res.getIndex().get();
         Assert.assertEquals(Utils.getIndexParamValue(index1.getParamsInJson(), "nlist"), n_list);
@@ -198,13 +198,13 @@ public class TestIndex {
     @Test(dataProvider = "Collection", dataProviderClass = MainClass.class)
     public void test_describe_index_table_not_existed(MilvusClient client, String collectionName) {
         String collectionNameNew = collectionName + "_";
-        DescribeIndexResponse res = client.describeIndex(collectionNameNew);
+        GetIndexInfoResponse res = client.getIndexInfo(collectionNameNew);
         assert(!res.getResponse().ok());
     }
 
     @Test(dataProvider = "DisConnectInstance", dataProviderClass = MainClass.class)
     public void test_describe_index_without_connect(MilvusClient client, String collectionName) {
-        DescribeIndexResponse res = client.describeIndex(collectionName);
+        GetIndexInfoResponse res = client.getIndexInfo(collectionName);
         assert(!res.getResponse().ok());
     }
 
@@ -217,7 +217,7 @@ public class TestIndex {
         assert(res.ok());
         Response res_drop = client.dropIndex(collectionName);
         assert(res_drop.ok());
-        DescribeIndexResponse res2 = client.describeIndex(collectionName);
+        GetIndexInfoResponse res2 = client.getIndexInfo(collectionName);
         assert(res2.getResponse().ok());
         Index index1 = res2.getIndex().get();
         Assert.assertEquals(Utils.getIndexParamValue(index1.getParamsInJson(), "nlist"), 0);
@@ -233,7 +233,7 @@ public class TestIndex {
         assert(res.ok());
         Response res_drop = client.dropIndex(collectionName);
         assert(res_drop.ok());
-        DescribeIndexResponse res2 = client.describeIndex(collectionName);
+        GetIndexInfoResponse res2 = client.getIndexInfo(collectionName);
         assert(res2.getResponse().ok());
         Index index1 = res2.getIndex().get();
         Assert.assertEquals(Utils.getIndexParamValue(index1.getParamsInJson(), "nlist"), 0);
@@ -249,7 +249,7 @@ public class TestIndex {
         assert(res.ok());
         Response res_drop = client.dropIndex(collectionName);
         assert(res_drop.ok());
-        DescribeIndexResponse res_desc = client.describeIndex(collectionName);
+        GetIndexInfoResponse res_desc = client.getIndexInfo(collectionName);
         assert(res_desc.getResponse().ok());
         Index index1 = res_desc.getIndex().get();
         Assert.assertEquals(Utils.getIndexParamValue(index1.getParamsInJson(), "nlist"), 0);
@@ -275,7 +275,7 @@ public class TestIndex {
         client.insert(insertParam);
         Response res_drop = client.dropIndex(collectionName);
         assert(res_drop.ok());
-        DescribeIndexResponse res = client.describeIndex(collectionName);
+        GetIndexInfoResponse res = client.getIndexInfo(collectionName);
         assert(res.getResponse().ok());
         Index index1 = res.getIndex().get();
         Assert.assertEquals(index1.getIndexType(), defaultIndexType);
@@ -287,7 +287,7 @@ public class TestIndex {
         client.insert(insertParam);
         Response res_drop = client.dropIndex(collectionName);
         assert(res_drop.ok());
-        DescribeIndexResponse res = client.describeIndex(collectionName);
+        GetIndexInfoResponse res = client.getIndexInfo(collectionName);
         assert(res.getResponse().ok());
         Index index1 = res.getIndex().get();
         Assert.assertEquals(index1.getIndexType(), defaultIndexType);

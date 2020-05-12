@@ -796,7 +796,7 @@ class TestCollection:
     def test_load_collection(self, connect, collection, get_simple_index):
         index_param = get_simple_index["index_param"]
         index_type = get_simple_index["index_type"]
-        status, ids = connect.add_vectors(collection, vectors)
+        status, ids = connect.insert(collection, vectors)
         status = connect.create_index(collection, index_type, index_param)
         status = connect.load_collection(collection)
         assert status.OK()
@@ -805,7 +805,7 @@ class TestCollection:
     def test_load_collection_ip(self, connect, ip_collection, get_simple_index):
         index_param = get_simple_index["index_param"]
         index_type = get_simple_index["index_type"]
-        status, ids = connect.add_vectors(ip_collection, vectors)
+        status, ids = connect.insert(ip_collection, vectors)
         status = connect.create_index(ip_collection, index_type, index_param)
         status = connect.load_collection(ip_collection)
         assert status.OK()
@@ -814,7 +814,7 @@ class TestCollection:
     def test_load_collection_jaccard(self, connect, jac_collection, get_simple_index):
         index_param = get_simple_index["index_param"]
         index_type = get_simple_index["index_type"]
-        status, ids = connect.add_vectors(jac_collection, vectors)
+        status, ids = connect.insert(jac_collection, vectors)
         status = connect.create_index(jac_collection, index_type, index_param)
         status = connect.load_collection(jac_collection)
         assert status.OK()
@@ -823,7 +823,7 @@ class TestCollection:
     def test_load_collection_hamming(self, connect, ham_collection, get_simple_index):
         index_param = get_simple_index["index_param"]
         index_type = get_simple_index["index_type"]
-        status, ids = connect.add_vectors(ham_collection, vectors)
+        status, ids = connect.insert(ham_collection, vectors)
         status = connect.create_index(ham_collection, index_type, index_param)
         status = connect.load_collection(ham_collection)
         assert status.OK()
@@ -833,7 +833,7 @@ class TestCollection:
         index_param = get_simple_index["index_param"]
         index_type = get_simple_index["index_type"]
         collection_name = gen_unique_str()
-        status, ids = connect.add_vectors(collection, vectors)
+        status, ids = connect.insert(collection, vectors)
         status = connect.create_index(collection, index_type, index_param)
         status = connect.load_collection(collection_name)
         assert not status.OK()
@@ -843,7 +843,7 @@ class TestCollection:
         index_param = get_simple_index["index_param"]
         index_type = get_simple_index["index_type"]
         collection_name = gen_unique_str()
-        status, ids = connect.add_vectors(ip_collection, vectors)
+        status, ids = connect.insert(ip_collection, vectors)
         status = connect.create_index(ip_collection, index_type, index_param)
         status = connect.load_collection(collection_name)
         assert not status.OK()
@@ -986,7 +986,7 @@ def create_collection(connect, **params):
     return status
 
 def search_collection(connect, **params):
-    status, result = connect.search_vectors(
+    status, result = connect.search(
         params["collection_name"], 
         params["top_k"], 
         params["query_vectors"],

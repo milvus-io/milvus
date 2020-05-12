@@ -59,7 +59,7 @@ public class TestCollection {
     @Test(dataProvider = "ConnectInstance", dataProviderClass = MainClass.class)
     public void test_show_tables(MilvusClient client, String collectionName){
         Integer tableNum = 10;
-        ShowCollectionsResponse res = null;
+        ListCollectionsResponse res = null;
         for (int i = 0; i < tableNum; ++i) {
             String collectionNameNew = collectionName+"_"+Integer.toString(i);
             CollectionMapping tableSchema = new CollectionMapping.Builder(collectionNameNew, dimension)
@@ -67,14 +67,14 @@ public class TestCollection {
                     .withMetricType(MetricType.L2)
                     .build();
             client.createCollection(tableSchema);
-            List<String> collectionNames = client.showCollections().getCollectionNames();
+            List<String> collectionNames = client.listCollections().getCollectionNames();
             Assert.assertTrue(collectionNames.contains(collectionNameNew));
         }
     }
 
     @Test(dataProvider = "DisConnectInstance", dataProviderClass = MainClass.class)
     public void test_show_tables_without_connect(MilvusClient client, String collectionName){
-        ShowCollectionsResponse res = client.showCollections();
+        ListCollectionsResponse res = client.listCollections();
         assert(!res.getResponse().ok());
     }
 
@@ -83,7 +83,7 @@ public class TestCollection {
         Response res = client.dropCollection(collectionName);
         assert(res.ok());
         Thread.currentThread().sleep(1000);
-        List<String> collectionNames = client.showCollections().getCollectionNames();
+        List<String> collectionNames = client.listCollections().getCollectionNames();
         Assert.assertFalse(collectionNames.contains(collectionName));
     }
 
@@ -91,7 +91,7 @@ public class TestCollection {
     public void test_drop_table_not_existed(MilvusClient client, String collectionName) {
         Response res = client.dropCollection(collectionName+"_");
         assert(!res.ok());
-        List<String> collectionNames = client.showCollections().getCollectionNames();
+        List<String> collectionNames = client.listCollections().getCollectionNames();
         Assert.assertTrue(collectionNames.contains(collectionName));
     }
 
@@ -103,7 +103,7 @@ public class TestCollection {
 
     @Test(dataProvider = "Collection", dataProviderClass = MainClass.class)
     public void test_describe_table(MilvusClient client, String collectionName) {
-        DescribeCollectionResponse res = client.describeCollection(collectionName);
+        GetCollectionInfoResponse res = client.getCollectionInfo(collectionName);
         assert(res.getResponse().ok());
         CollectionMapping tableSchema = res.getCollectionMapping().get();
         Assert.assertEquals(tableSchema.getDimension(), dimension);
@@ -114,7 +114,7 @@ public class TestCollection {
 
     @Test(dataProvider = "DisConnectInstance", dataProviderClass = MainClass.class)
     public void test_describe_table_without_connect(MilvusClient client, String collectionName) {
-        DescribeCollectionResponse res = client.describeCollection(collectionName);
+        GetCollectionInfoResponse res = client.getCollectionInfo(collectionName);
         assert(!res.getResponse().ok());
     }
 
