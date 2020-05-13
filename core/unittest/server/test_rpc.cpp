@@ -1063,7 +1063,7 @@ TEST_F(RpcHandlerTest, HYBRID_TEST) {
     search_extra_param->set_value("");
 
     milvus::grpc::TopKQueryResult topk_query_result;
-    handler->HybridSearch(&context, &search_param, &topk_query_result);
+//    handler->HybridSearch(&context, &search_param, &topk_query_result);
 }
 
 //////////////////////////////////////////////////////////////////////

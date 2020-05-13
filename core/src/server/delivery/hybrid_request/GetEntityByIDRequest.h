@@ -26,7 +26,7 @@
 namespace milvus {
 namespace server {
 
-class GetEntitiesByIDRequest : public BaseRequest {
+class GetEntityByIDRequest : public BaseRequest {
  public:
     static BaseRequestPtr
     Create(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name,
@@ -34,7 +34,7 @@ class GetEntitiesByIDRequest : public BaseRequest {
            std::vector<engine::VectorsData>& vectors);
 
  protected:
-    GetEntitiesByIDRequest(const std::shared_ptr<milvus::server::Context>& context,
+    GetEntityByIDRequest(const std::shared_ptr<milvus::server::Context>& context,
                            const std::string& collection_name,
                            const std::vector<int64_t>& ids,
                            std::vector<engine::AttrsData>& attrs,

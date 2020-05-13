@@ -253,7 +253,7 @@ message FieldParam {
     repeated KeyValuePair extra_params = 4;
 }
 
-message VectorFieldValue {
+message VectorFieldRecord {
     repeated RowRecord value = 1;
 }
 
@@ -263,7 +263,7 @@ message FieldValue {
         double double_value = 2;
         string string_value = 3;
         bool  bool_value = 4;
-        VectorFieldValue vector_value = 5;
+        VectorFieldRecord vector_value = 5;
     }
 }
 
@@ -285,10 +285,11 @@ message MappingList {
 
 message TermQuery {
     string field_name = 1;
-    bytes values = 2;
-    int64 value_num = 3;
-    float boost = 4;
-    repeated KeyValuePair extra_params = 5;
+    repeated int64 int_value = 2;
+    repeated double double_value = 3;
+    int64 value_num = 4;
+    float boost = 5;
+    repeated KeyValuePair extra_params = 6;
 }
 
 enum CompareOperator {
@@ -356,7 +357,8 @@ message HSearchInSegmentsParam {
 ///////////////////////////////////////////////////////////////////
 
 message AttrRecord {
-    repeated string value = 1;
+    repeated int64 int_value = 1;
+    repeated double double_value = 2;
 }
 
 message HEntity {
@@ -364,14 +366,14 @@ message HEntity {
     repeated int64 entity_id = 2;
     repeated string field_names = 3;
     repeated DataType data_types = 4;
-    bytes attr_records = 5;
-    int64 row_num = 6;
-    repeated FieldValue result_values = 7;
+    int64 row_num = 5;
+    repeated AttrRecord attr_data = 6;
+    repeated VectorFieldRecord vector_data = 7;
 }
 
 message HQueryResult {
     Status status = 1;
-    HEntity entities = 2;
+    HEntity entity = 2;
     int64 row_num = 3;
     repeated float score = 4;
     repeated float distance = 5;
@@ -381,7 +383,7 @@ message HQueryResult {
 message HInsertParam {
     string collection_name = 1;
     string partition_tag = 2;
-    HEntity entities = 3;
+    HEntity entity = 3;
     repeated int64 entity_id_array = 4;
     repeated KeyValuePair extra_params = 5;
 }

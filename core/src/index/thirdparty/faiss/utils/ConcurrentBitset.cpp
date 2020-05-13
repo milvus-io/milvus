@@ -29,25 +29,85 @@ ConcurrentBitset::bitset() {
 
 ConcurrentBitset&
 ConcurrentBitset::operator&=(ConcurrentBitset& bitset) {
-    for (id_type_t i = 0; i < ((capacity_ + 8 -1) >> 3); ++i) {
-        bitset_[i].fetch_and(bitset.bitset()[i].load());
+    //    for (id_type_t i = 0; i < ((capacity_ + 8 -1) >> 3); ++i) {
+    //        bitset_[i].fetch_and(bitset.bitset()[i].load());
+    //    }
+
+    auto u8_1 = const_cast<uint8_t*>(data());
+    auto u8_2 = const_cast<uint8_t*>(bitset.data());
+    auto u64_1 = reinterpret_cast<uint64_t*>(u8_1);
+    auto u64_2 = reinterpret_cast<uint64_t*>(u8_2);
+
+    size_t n8 = bitset_.size();
+    size_t n64 = n8 / 8;
+
+    for (size_t i = 0; i < n64; i++) {
+        u64_1[i] &= u64_2[i];
     }
+
+    size_t remain = n8 % 8;
+    u8_1 += n64 * 8;
+    u8_2 += n64 * 8;
+    for (size_t i = 0; i < remain; i++) {
+        u8_1[i] &= u8_2[i];
+    }
+
     return *this;
 }
 
 ConcurrentBitset&
 ConcurrentBitset::operator|=(ConcurrentBitset& bitset) {
-    for (id_type_t i = 0; i < ((capacity_ + 8 -1) >> 3); ++i) {
-        bitset_[i].fetch_or(bitset.bitset()[i].load());
+    //    for (id_type_t i = 0; i < ((capacity_ + 8 -1) >> 3); ++i) {
+    //        bitset_[i].fetch_or(bitset.bitset()[i].load());
+    //    }
+
+    auto u8_1 = const_cast<uint8_t*>(data());
+    auto u8_2 = const_cast<uint8_t*>(bitset.data());
+    auto u64_1 = reinterpret_cast<uint64_t*>(u8_1);
+    auto u64_2 = reinterpret_cast<uint64_t*>(u8_2);
+
+    size_t n8 = bitset_.size();
+    size_t n64 = n8 / 8;
+
+    for (size_t i = 0; i < n64; i++) {
+        u64_1[i] &= u64_2[i];
     }
+
+    size_t remain = n8 % 8;
+    u8_1 += n64 * 8;
+    u8_2 += n64 * 8;
+    for (size_t i = 0; i < remain; i++) {
+        u8_1[i] |= u8_2[i];
+    }
+
     return *this;
 }
 
 ConcurrentBitset&
 ConcurrentBitset::operator^=(ConcurrentBitset& bitset) {
-    for (id_type_t i = 0; i < ((capacity_ + 8 -1) >> 3); ++i) {
-        bitset_[i].fetch_xor(bitset.bitset()[i].load());
+    //    for (id_type_t i = 0; i < ((capacity_ + 8 -1) >> 3); ++i) {
+    //        bitset_[i].fetch_xor(bitset.bitset()[i].load());
+    //    }
+
+    auto u8_1 = const_cast<uint8_t*>(data());
+    auto u8_2 = const_cast<uint8_t*>(bitset.data());
+    auto u64_1 = reinterpret_cast<uint64_t*>(u8_1);
+    auto u64_2 = reinterpret_cast<uint64_t*>(u8_2);
+
+    size_t n8 = bitset_.size();
+    size_t n64 = n8 / 8;
+
+    for (size_t i = 0; i < n64; i++) {
+        u64_1[i] &= u64_2[i];
     }
+
+    size_t remain = n8 % 8;
+    u8_1 += n64 * 8;
+    u8_2 += n64 * 8;
+    for (size_t i = 0; i < remain; i++) {
+        u8_1[i] ^= u8_2[i];
+    }
+
     return *this;
 }
 

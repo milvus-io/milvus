@@ -16,7 +16,7 @@
 // under the License.
 
 #include "server/DBWrapper.h"
-#include "server/delivery/hybrid_request/GetEntitiesByIDRequest.h"
+#include "server/delivery/hybrid_request/GetEntityByIDRequest.h"
 #include "utils/Log.h"
 #include "utils/TimeRecorder.h"
 #include "utils/ValidationUtil.h"
@@ -29,7 +29,7 @@ namespace server {
 
 constexpr uint64_t MAX_COUNT_RETURNED = 1000;
 
-GetEntitiesByIDRequest::GetEntitiesByIDRequest(const std::shared_ptr<milvus::server::Context>& context,
+GetEntityByIDRequest::GetEntityByIDRequest(const std::shared_ptr<milvus::server::Context>& context,
                                                const std::string& collection_name, const std::vector<int64_t>& ids,
                                                std::vector<engine::AttrsData>& attrs,
                                                std::vector<engine::VectorsData>& vectors)
@@ -41,14 +41,14 @@ GetEntitiesByIDRequest::GetEntitiesByIDRequest(const std::shared_ptr<milvus::ser
 }
 
 BaseRequestPtr
-GetEntitiesByIDRequest::Create(const std::shared_ptr<milvus::server::Context>& context,
+GetEntityByIDRequest::Create(const std::shared_ptr<milvus::server::Context>& context,
                                const std::string& collection_name, const std::vector<int64_t>& ids,
                                std::vector<engine::AttrsData>& attrs, std::vector<engine::VectorsData>& vectors) {
-    return std::shared_ptr<BaseRequest>(new GetEntitiesByIDRequest(context, collection_name, ids, attrs, vectors));
+    return std::shared_ptr<BaseRequest>(new GetEntityByIDRequest(context, collection_name, ids, attrs, vectors));
 }
 
 Status
-GetEntitiesByIDRequest::OnExecute() {
+GetEntityByIDRequest::OnExecute() {
     try {
         std::string hdr = "GetEntitiesByIDRequest(collection=" + collection_name_ + ")";
         TimeRecorderAuto rc(hdr);

@@ -1428,8 +1428,7 @@ DBImpl::GetVectorsByIdHelper(const std::string& collection_id, const IDNumbers& 
 Status
 DBImpl::GetEntitiesByIdHelper(const std::string& collection_id, const milvus::engine::IDNumbers& id_array,
                               std::unordered_map<std::string, engine::meta::hybrid::DataType>& attr_type,
-                              std::vector<engine::VectorsData>& vectors,
-                              std::vector<engine::AttrsData>& attrs,
+                              std::vector<engine::VectorsData>& vectors, std::vector<engine::AttrsData>& attrs,
                               milvus::engine::meta::FilesHolder& files_holder) {
     // attention: this is a copy, not a reference, since the files_holder.UnMarkFile will change the array internal
     milvus::engine::meta::SegmentsSchema files = files_holder.HoldFiles();
@@ -1556,6 +1555,7 @@ DBImpl::GetEntitiesByIdHelper(const std::string& collection_id, const milvus::en
 
                         attr_ref.attr_count_ = 1;
                         attr_ref.attr_data_ = raw_attrs;
+                        attr_ref.attr_type_ = attr_type;
                         temp_ids.erase(it);
                         continue;
                     }
@@ -1786,8 +1786,8 @@ DBImpl::HybridQuery(const std::shared_ptr<server::Context>& context, const std::
                     const std::vector<std::string>& partition_tags,
                     context::HybridSearchContextPtr hybrid_search_context, query::GeneralQueryPtr general_query,
                     std::vector<std::string>& field_names,
-                    std::unordered_map<std::string, engine::meta::hybrid::DataType>& attr_type, uint64_t& nq,
-                    ResultIds& result_ids, ResultDistances& result_distances) {
+                    std::unordered_map<std::string, engine::meta::hybrid::DataType>& attr_type,
+                    engine::QueryResult& result) {
     auto query_ctx = context->Child("Query");
 
     if (!initialized_.load(std::memory_order_acquire)) {
@@ -1838,7 +1838,7 @@ DBImpl::HybridQuery(const std::shared_ptr<server::Context>& context, const std::
 
     cache::CpuCacheMgr::GetInstance()->PrintInfo();  // print cache info before query
     status = HybridQueryAsync(query_ctx, collection_id, files_holder, hybrid_search_context, general_query, field_names,
-                              attr_type, nq, result_ids, result_distances);
+                              attr_type, result);
     if (!status.ok()) {
         return status;
     }
@@ -2001,8 +2001,8 @@ Status
 DBImpl::HybridQueryAsync(const std::shared_ptr<server::Context>& context, const std::string& collection_id,
                          meta::FilesHolder& files_holder, context::HybridSearchContextPtr hybrid_search_context,
                          query::GeneralQueryPtr general_query, std::vector<std::string>& field_names,
-                         std::unordered_map<std::string, engine::meta::hybrid::DataType>& attr_type, uint64_t& nq,
-                         ResultIds& result_ids, ResultDistances& result_distances) {
+                         std::unordered_map<std::string, engine::meta::hybrid::DataType>& attr_type,
+                         engine::QueryResult& result) {
     auto query_async_ctx = context->Child("Query Async");
 
 #if 0
@@ -2046,17 +2046,17 @@ DBImpl::HybridQueryAsync(const std::shared_ptr<server::Context>& context, const 
     }
 
     // step 3: construct results
-    nq = job->vector_count();
-    result_ids = job->GetResultIds();
-    result_distances = job->GetResultDistances();
-    
+    result.row_num_ = job->vector_count();
+    result.result_ids_ = job->GetResultIds();
+    result.result_distances_ = job->GetResultDistances();
+
     // step 4: get entities by result ids
     std::vector<engine::VectorsData> result_vectors;
     std::vector<engine::AttrsData> result_attrs;
-    auto status = GetEntitiesByID(collection_id, result_ids, result_vectors, result_attrs);
+    auto status = GetEntitiesByID(collection_id, result.result_ids_, result_vectors, result_attrs);
     if (!status.ok()) {
         query_async_ctx->GetTraceContext()->GetSpan()->Finish();
-        return status;        
+        return status;
     }
 
     rc.ElapseFromBegin("Engine query totally cost");

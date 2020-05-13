@@ -34,7 +34,7 @@ HybridSearchRequest::HybridSearchRequest(const std::shared_ptr<milvus::server::C
                                          context::HybridSearchContextPtr& hybrid_search_context,
                                          const std::string& collection_name, std::vector<std::string>& partition_list,
                                          milvus::query::GeneralQueryPtr& general_query, milvus::json& json_params,
-                                         TopKQueryResult& result)
+                                         engine::QueryResult& result)
     : BaseRequest(context, BaseRequest::kHybridSearch),
       hybrid_search_context_(hybrid_search_context),
       collection_name_(collection_name),
@@ -47,7 +47,7 @@ BaseRequestPtr
 HybridSearchRequest::Create(const std::shared_ptr<milvus::server::Context>& context,
                             context::HybridSearchContextPtr& hybrid_search_context, const std::string& collection_name,
                             std::vector<std::string>& partition_list, milvus::query::GeneralQueryPtr& general_query,
-                            milvus::json& json_params, TopKQueryResult& result) {
+                            milvus::json& json_params, engine::QueryResult& result) {
     return std::shared_ptr<BaseRequest>(new HybridSearchRequest(context, hybrid_search_context, collection_name,
                                                                 partition_list, general_query, json_params, result));
 }
@@ -100,12 +100,8 @@ HybridSearchRequest::OnExecute() {
             }
         }
 
-        engine::ResultIds result_ids;
-        engine::ResultDistances result_distances;
-        uint64_t nq;
-
         status = DBWrapper::DB()->HybridQuery(context_, collection_name_, partition_list_, hybrid_search_context_,
-                                              general_query_, field_names, attr_type, nq, result_ids, result_distances);
+                                              general_query_, field_names, attr_type, result_);
 
 #ifdef ENABLE_CPU_PROFILING
         ProfilerStop();
@@ -115,18 +111,14 @@ HybridSearchRequest::OnExecute() {
         if (!status.ok()) {
             return status;
         }
-        fiu_do_on("SearchRequest.OnExecute.empty_result_ids", result_ids.clear());
-        if (result_ids.empty()) {
+        fiu_do_on("SearchRequest.OnExecute.empty_result_ids", result_.result_ids_.clear());
+        if (result_.result_ids_.empty()) {
             return Status::OK();  // empty table
         }
 
         auto post_query_ctx = context_->Child("Constructing result");
 
         // step 7: construct result array
-        result_.row_num_ = nq;
-        result_.distance_list_ = result_distances;
-        result_.id_list_ = result_ids;
-
         post_query_ctx->GetTraceContext()->GetSpan()->Finish();
 
         // step 8: print time cost percent

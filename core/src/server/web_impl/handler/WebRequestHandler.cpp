@@ -721,7 +721,7 @@ WebRequestHandler::HybridSearch(const std::string& collection_name, const nlohma
         query::GenBinaryQuery(boolean_query, general_query->bin);
 
         context::HybridSearchContextPtr hybrid_search_context = std::make_shared<context::HybridSearchContext>();
-        TopKQueryResult result;
+        engine::QueryResult result;
         status = request_handler_.HybridSearch(context_ptr_, hybrid_search_context, collection_name, partition_tags,
                                                general_query, extra_params, result);
 
@@ -737,20 +737,20 @@ WebRequestHandler::HybridSearch(const std::string& collection_name, const nlohma
             return Status::OK();
         }
 
-        auto step = result.id_list_.size() / result.row_num_;
-        nlohmann::json search_result_json;
-        for (size_t i = 0; i < result.row_num_; i++) {
-            nlohmann::json raw_result_json;
-            for (size_t j = 0; j < step; j++) {
-                nlohmann::json one_result_json;
-                one_result_json["id"] = std::to_string(result.id_list_.at(i * step + j));
-                one_result_json["distance"] = std::to_string(result.distance_list_.at(i * step + j));
-                raw_result_json.emplace_back(one_result_json);
-            }
-            search_result_json.emplace_back(raw_result_json);
-        }
-        result_json["result"] = search_result_json;
-        result_str = result_json.dump();
+        //        auto step = result.id_list_.size() / result.row_num_;
+        //        nlohmann::json search_result_json;
+        //        for (size_t i = 0; i < result.row_num_; i++) {
+        //            nlohmann::json raw_result_json;
+        //            for (size_t j = 0; j < step; j++) {
+        //                nlohmann::json one_result_json;
+        //                one_result_json["id"] = std::to_string(result.id_list_.at(i * step + j));
+        //                one_result_json["distance"] = std::to_string(result.distance_list_.at(i * step + j));
+        //                raw_result_json.emplace_back(one_result_json);
+        //            }
+        //            search_result_json.emplace_back(raw_result_json);
+        //        }
+        //        result_json["result"] = search_result_json;
+        //        result_str = result_json.dump();
     }
 
     return Status::OK();

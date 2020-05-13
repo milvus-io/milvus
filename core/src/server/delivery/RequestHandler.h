@@ -141,16 +141,14 @@ class RequestHandler {
                  std::vector<uint8_t>& attr_values, std::unordered_map<std::string, engine::VectorsData>& vector_datas);
 
     Status
-    GetEntitiesByID(const std::shared_ptr<Context>& context,
-                    const std::string& collection_name,
-                    const std::vector<int64_t>& ids,
-                    std::vector<engine::AttrsData>& attrs,
+    GetEntityByID(const std::shared_ptr<Context>& context, const std::string& collection_name,
+                    const std::vector<int64_t>& ids, std::vector<engine::AttrsData>& attrs,
                     std::vector<engine::VectorsData>& vectors);
 
     Status
     HybridSearch(const std::shared_ptr<Context>& context, context::HybridSearchContextPtr hybrid_search_context,
                  const std::string& collection_name, std::vector<std::string>& partition_list,
-                 query::GeneralQueryPtr& general_query, milvus::json& json_params, TopKQueryResult& result);
+                 query::GeneralQueryPtr& general_query, milvus::json& json_params, engine::QueryResult& result);
 };
 
 }  // namespace server

@@ -22,6 +22,7 @@
 #include <vector>
 
 #include "db/engine/ExecutionEngine.h"
+#include "db/meta/MetaTypes.h"
 #include "segment/Types.h"
 #include "utils/Json.h"
 
@@ -60,6 +61,14 @@ struct AttrsData {
     std::unordered_map<std::string, engine::meta::hybrid::DataType> attr_type_;
     std::unordered_map<std::string, std::vector<uint8_t>> attr_data_;
     IDNumbers id_array_;
+};
+
+struct QueryResult {
+    uint64_t row_num_;
+    engine::ResultIds result_ids_;
+    engine::ResultDistances result_distances_;
+    std::vector<engine::VectorsData> vectors_;
+    std::vector<engine::AttrsData> attrs_;
 };
 
 using File2ErrArray = std::map<std::string, std::vector<std::string>>;

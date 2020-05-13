@@ -72,7 +72,9 @@ struct HybridQueryResult {
     int64_t row_num_;
     engine::ResultIds id_list_;
     engine::ResultDistances distance_list_;
-    engine::Entity entities_;
+
+    std::vector<engine::VectorsData> vectors_;
+    std::vector<engine::AttrsData> attrs_;
 };
 
 struct IndexParam {

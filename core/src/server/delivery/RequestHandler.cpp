@@ -42,7 +42,7 @@
 
 #include "server/delivery/hybrid_request/CreateHybridCollectionRequest.h"
 #include "server/delivery/hybrid_request/DescribeHybridCollectionRequest.h"
-#include "server/delivery/hybrid_request/GetEntitiesByIDRequest.h"
+#include "server/delivery/hybrid_request/GetEntityByIDRequest.h"
 #include "server/delivery/hybrid_request/HybridSearchRequest.h"
 #include "server/delivery/hybrid_request/InsertEntityRequest.h"
 
@@ -306,10 +306,10 @@ RequestHandler::InsertEntity(const std::shared_ptr<Context>& context, const std:
 }
 
 Status
-RequestHandler::GetEntitiesByID(const std::shared_ptr<Context>& context, const std::string& collection_name,
+RequestHandler::GetEntityByID(const std::shared_ptr<Context>& context, const std::string& collection_name,
                                 const std::vector<int64_t>& ids, std::vector<engine::AttrsData>& attrs,
                                 std::vector<engine::VectorsData>& vectors) {
-    BaseRequestPtr request_ptr = GetEntitiesByIDRequest::Create(context, collection_name, ids, attrs, vectors);
+    BaseRequestPtr request_ptr = GetEntityByIDRequest::Create(context, collection_name, ids, attrs, vectors);
 
     RequestScheduler::ExecRequest(request_ptr);
     return request_ptr->status();
@@ -319,7 +319,7 @@ Status
 RequestHandler::HybridSearch(const std::shared_ptr<Context>& context,
                              context::HybridSearchContextPtr hybrid_search_context, const std::string& collection_name,
                              std::vector<std::string>& partition_list, milvus::query::GeneralQueryPtr& general_query,
-                             milvus::json& json_params, TopKQueryResult& result) {
+                             milvus::json& json_params, engine::QueryResult& result) {
     BaseRequestPtr request_ptr = HybridSearchRequest::Create(context, hybrid_search_context, collection_name,
                                                              partition_list, general_query, json_params, result);
 
