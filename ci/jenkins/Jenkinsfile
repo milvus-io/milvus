@@ -64,6 +64,8 @@ pipeline {
                         versionNumberString : '${SEMVER}-${BINARY_VERSION}-${OS_NAME}-${CPU_ARCH}-${LOWER_BUILD_TYPE}-${BUILD_DATE_FORMATTED, "yyyyMMdd"}-${BUILDS_TODAY}'
                     ]);
                     DOCKER_VERSION = "${SEMVER}-${BINARY_VERSION}-${OS_NAME}-${LOWER_BUILD_TYPE}"
+                    CHANGE_DOCKER_VERSION = "${CHANGE_TARGET}-${BINARY_VERSION}-${OS_NAME}-${LOWER_BUILD_TYPE}"
+                    CACHA_DOCKER_VERSION = "${CHANGE_TARGET ? CHANGE_DOCKER_VERSION : DOCKER_VERSION}"
                 }
 
                 stages {
@@ -91,11 +93,7 @@ pipeline {
                                 steps {
                                     container("milvus-${BINARY_VERSION}-build-env") {
                                         script {
-                                            if ("${BINARY_VERSION}" == "gpu") {
-                                                load "${env.WORKSPACE}/ci/jenkins/step/unittest.groovy"
-                                            } else {
-                                                echo "Skip Unittest"
-                                            }
+                                            load "${env.WORKSPACE}/ci/jenkins/step/unittest.groovy"
                                         }
                                     }
                                 }
@@ -105,11 +103,7 @@ pipeline {
                                 steps {
                                     container("milvus-${BINARY_VERSION}-build-env") {
                                         script {
-                                            if ("${BINARY_VERSION}" == "gpu") {
-                                                load "${env.WORKSPACE}/ci/jenkins/step/coverage.groovy"
-                                            } else {
-                                                echo "Skip Code Coverage"
-                                            }
+                                            load "${env.WORKSPACE}/ci/jenkins/step/coverage.groovy"
                                         }
                                     }
                                 }
@@ -128,6 +122,13 @@ pipeline {
                     }
 
                     stage('Publish Docker images') {
+                        environment {
+                            SOURCE_REPO = "${params.DOKCER_REGISTRY_URL}/milvus/engine"
+                            TARGET_REPO = "${params.DOKCER_REGISTRY_URL}/milvus/engine"
+                            SOURCE_TAG = "${CACHA_DOCKER_VERSION}"
+                            TARGET_TAG = "${DOCKER_VERSION}"
+                        }
+
                         agent {
                             kubernetes {
                                 label "${OS_NAME}-${BINARY_VERSION}-publish-${SEMVER}-${env.PIPELINE_NAME}-${env.BUILD_NUMBER}"
