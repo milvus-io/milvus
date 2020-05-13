@@ -29,7 +29,7 @@ dir ("docker/deploy") {
     } finally {
         deleteImages("${sourceImage}", true)
         sh "docker-compose down --rmi all"
-        sh(returnStatus: true, "docker rmi -f \$(docker images | grep '<none>' | awk '{print \$3}')")
+        sh(returnStatus: true, script: "docker rmi -f \$(docker images | grep '<none>' | awk '{print \$3}')")
     }
 }
 
