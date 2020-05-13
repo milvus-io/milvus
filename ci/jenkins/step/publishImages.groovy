@@ -1,4 +1,4 @@
-dir ("docker/deploy/${BINARY_VERSION}/${OS_NAME}") {
+dir ("docker/deploy") {
     def binaryPackage = "${PROJECT_NAME}-${PACKAGE_VERSION}.tar.gz"
 
     withCredentials([usernamePassword(credentialsId: "${params.JFROG_CREDENTIALS_ID}", usernameVariable: 'JFROG_USERNAME', passwordVariable: 'JFROG_PASSWORD')]) {
@@ -9,23 +9,27 @@ dir ("docker/deploy/${BINARY_VERSION}/${OS_NAME}") {
         }
     }
     sh "tar zxvf ${binaryPackage}"
-    def imageName = "${PROJECT_NAME}/engine:${DOCKER_VERSION}"
+    def sourceImage = "${params.DOKCER_REGISTRY_URL}/${PROJECT_NAME}/engine:${SOURCE_TAG}"
 
     try {
-        deleteImages("${imageName}", true)
-
-        def customImage = docker.build("${imageName}")
-
-        deleteImages("${params.DOKCER_REGISTRY_URL}/${imageName}", true)
-
-        docker.withRegistry("https://${params.DOKCER_REGISTRY_URL}", "${params.DOCKER_CREDENTIALS_ID}") {
-            customImage.push()
+        sh(returnStatus: true, script: "docker pull ${sourceImage}")
+        sh "docker-compose build --force-rm ${BINARY_VERSION}_${OS_NAME}"
+        try {
+            withCredentials([usernamePassword(credentialsId: "${params.DOCKER_CREDENTIALS_ID}", usernameVariable: 'DOCKER_USERNAME', passwordVariable: 'DOCKER_PASSWORD')]) {
+                sh "docker login -u ${DOCKER_USERNAME} -p ${DOCKER_PASSWORD} ${params.DOKCER_REGISTRY_URL}"
+                sh "docker-compose push ${BINARY_VERSION}_${OS_NAME}"
+            }
+        } catch (exc) {
+            throw exc
+        } finally {
+            sh "docker logout ${params.DOKCER_REGISTRY_URL}"
         }
     } catch (exc) {
         throw exc
     } finally {
-        deleteImages("${imageName}", true)
-        deleteImages("${params.DOKCER_REGISTRY_URL}/${imageName}", true)
+        deleteImages("${sourceImage}", true)
+        sh "docker-compose down --rmi all"
+        sh(returnStatus: true, script: "docker rmi -f \$(docker images | grep '<none>' | awk '{print \$3}')")
     }
 }
 
@@ -47,4 +51,3 @@ boolean deleteImages(String imageName, boolean force) {
     }
     return true
 }
-
