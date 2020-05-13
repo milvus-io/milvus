@@ -1,3 +1,4 @@
+#-------------------------------------------------------------------------------
 # Copyright (C) 2019-2020 Zilliz. All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance
@@ -8,6 +9,7 @@
 # Unless required by applicable law or agreed to in writing, software distributed under the License
 # is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 # or implied. See the License for the specific language governing permissions and limitations under the License.
+#-------------------------------------------------------------------------------
 
 set(KNOWHERE_THIRDPARTY_DEPENDENCIES
         Arrow
@@ -532,7 +534,7 @@ macro(build_faiss)
         endif()
     endif ()
 
-    if (KNOWHERE_GPU_VERSION)
+    if (MILVUS_GPU_VERSION)
         set(FAISS_CONFIGURE_ARGS ${FAISS_CONFIGURE_ARGS}
                 "--with-cuda=${CUDA_TOOLKIT_ROOT_DIR}"
                 "--with-cuda-arch=-gencode=arch=compute_60,code=sm_60 -gencode=arch=compute_61,code=sm_61 -gencode=arch=compute_70,code=sm_70 -gencode=arch=compute_75,code=sm_75"
