@@ -2053,7 +2053,7 @@ DBImpl::BackgroundMerge(std::set<std::string> collection_ids) {
     meta_ptr_->Archive();
 
     {
-        uint64_t timeout = (options_.file_cleanup_timeout_ > 0) ? options_.file_cleanup_timeout_ : 10;
+        uint64_t timeout = (options_.file_cleanup_timeout_ >= 0) ? options_.file_cleanup_timeout_ : 10;
         uint64_t ttl = timeout * meta::SECOND;  // default: file will be hard-deleted few seconds after soft-deleted
         meta_ptr_->CleanUpFilesWithTTL(ttl);
     }

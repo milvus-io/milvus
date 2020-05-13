@@ -195,8 +195,8 @@ DBTest::SetUp() {
 #endif
     res_mgr->Start();
     milvus::scheduler::SchedInst::GetInstance()->Start();
-
     milvus::scheduler::JobMgrInst::GetInstance()->Start();
+    milvus::scheduler::CPUBuilderInst::GetInstance()->Start();
 
     auto options = GetOptions();
     options.insert_cache_immediately_ = true;
@@ -215,6 +215,7 @@ DBTest::TearDown() {
 
     milvus::scheduler::JobMgrInst::GetInstance()->Stop();
     milvus::scheduler::SchedInst::GetInstance()->Stop();
+    milvus::scheduler::CPUBuilderInst::GetInstance()->Stop();
     milvus::scheduler::ResMgrInst::GetInstance()->Stop();
     milvus::scheduler::ResMgrInst::GetInstance()->Clear();
 
