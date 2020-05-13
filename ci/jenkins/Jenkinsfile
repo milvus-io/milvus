@@ -131,8 +131,8 @@ pipeline {
 
                     stage('Publish Docker images') {
                         environment {
-                            SOURCE_REPO = "${params.DOKCER_REGISTRY_URL}"
-                            TARGET_REPO = "${params.DOKCER_REGISTRY_URL}"
+                            SOURCE_REPO = "${params.DOKCER_REGISTRY_URL}/milvus/engine"
+                            TARGET_REPO = "${params.DOKCER_REGISTRY_URL}/milvus/engine"
                             SOURCE_TAG = "${CACHA_DOCKER_VERSION}"
                             TARGET_TAG = "${DOCKER_VERSION}"
                         }

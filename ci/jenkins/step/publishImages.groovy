@@ -9,17 +9,44 @@ dir ("docker/deploy") {
         }
     }
     sh "tar zxvf ${binaryPackage}"
-    def imageName = "${PROJECT_NAME}/engine:${DOCKER_VERSION}"
+    def sourceImage = "${PROJECT_NAME}/engine:${SOURCE_TAG}"
 
     try {
-        sh "docker-compose pull --ignore-pull-failures ${BINARY_VERSION}_${OS_NAME}"
-        sh "docker-compose build ${BINARY_VERSION}_${OS_NAME}"
-        docker.withRegistry("https://${params.DOKCER_REGISTRY_URL}", "${params.DOCKER_CREDENTIALS_ID}") {
-            sh "docker-compose push ${BINARY_VERSION}_${OS_NAME}"
+        sh(returnStatus: true, script: "docker pull ${sourceImage}")
+        sh "docker-compose build --force-rm ${BINARY_VERSION}_${OS_NAME}"
+        try {
+            withCredentials([usernamePassword(credentialsId: "${params.DOCKER_CREDENTIALS_ID}", usernameVariable: 'DOCKER_USERNAME', passwordVariable: 'DOCKER_PASSWORD')]) {
+                sh "docker login -u ${DOCKER_USERNAME} -p ${DOCKER_PASSWORD} ${params.DOKCER_REGISTRY_URL}"
+                sh "docker-compose push ${BINARY_VERSION}_${OS_NAME}"
+            }
+        } catch (exc) {
+            throw exc
+        } finally {
+            sh "docker logout ${params.DOKCER_REGISTRY_URL}"
         }
     } catch (exc) {
         throw exc
     } finally {
-        sh "docker-compose down ${BINARY_VERSION}_${OS_NAME}"
+        deleteImages("${sourceImage}", true)
+        sh "docker-compose down --rmi all"
     }
+}
+
+boolean deleteImages(String imageName, boolean force) {
+    def imageNameStr = imageName.trim()
+    def isExistImage = sh(returnStatus: true, script: "docker inspect --type=image ${imageNameStr} 2>&1 > /dev/null")
+    if (isExistImage == 0) {
+        def deleteImageStatus = 0
+        if (force) {
+            def imageID = sh(returnStdout: true, script: "docker inspect --type=image --format \"{{.ID}}\" ${imageNameStr}")
+            deleteImageStatus = sh(returnStatus: true, script: "docker rmi -f ${imageID}")
+        } else {
+            deleteImageStatus = sh(returnStatus: true, script: "docker rmi ${imageNameStr}")
+        }
+
+        if (deleteImageStatus != 0) {
+            return false
+        }
+    }
+    return true
 }
