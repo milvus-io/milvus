@@ -607,7 +607,7 @@ def get_search_param(index_type):
     elif index_type == IndexType.HNSW:
         return {"ef": 64}
     elif index_type == IndexType.RNSG:
-        return {"search_length": 50}
+        return {"search_length": 100}
     elif index_type == IndexType.ANNOY:
         return {"search_k": 100}
 
