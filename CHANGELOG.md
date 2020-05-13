@@ -9,6 +9,7 @@ Please mark all change in change log and use the issue from GitHub
 ## Feature
 
 ## Improvement
+-   \#2307 Disable index SPTAG by default
 
 ## Task
 
@@ -73,7 +74,6 @@ Please mark all change in change log and use the issue from GitHub
 -   \#2252 Upgrade mishards APIs and requirements
 -   \#2256 k-means clustering algorithm use only Euclidean distance metric
 -   \#2300 Upgrade mishrads configuration to version 0.4
--   \#2307 Disable index SPTAG by default
 
 ## Task
 
