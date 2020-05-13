@@ -6,6 +6,10 @@ metadata:
     app: milvus
     componet: cpu-build-env
 spec:
+  initContainers:
+  - name: pre-build
+    image: registry.zilliz.com/library/docker:v1.1.0
+    command: ['sh', '-c', "env; sleep 120;"]
   containers:
   - name: milvus-cpu-build-env
     image: registry.zilliz.com/milvus/milvus-cpu-build-env:v0.9.0-centos7
