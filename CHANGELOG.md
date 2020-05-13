@@ -27,7 +27,8 @@ Please mark all change in change log and use the issue from GitHub
 -   \#2228 Fix show partitions failed in http module
 -   \#2231 Use server_config to define hard-delete delay time for segment files
 -   \#2261 Re-define result returned by has_collection if collection in delete state
--   \#2266 Server hang when using multi-clients to query different collections
+-   \#2264 Milvus opened too many files when the metric_config.enable_monitor=true
+-   \#2266 Server hangs when using multi-clients to query different collections
 -   \#2280 has_partition should return true for '_default'
 
 ## Feature
