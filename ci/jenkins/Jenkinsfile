@@ -93,11 +93,7 @@ pipeline {
                                 steps {
                                     container("milvus-${BINARY_VERSION}-build-env") {
                                         script {
-                                            if ("${BINARY_VERSION}" == "gpu") {
-                                                load "${env.WORKSPACE}/ci/jenkins/step/unittest.groovy"
-                                            } else {
-                                                echo "Skip Unittest"
-                                            }
+                                            load "${env.WORKSPACE}/ci/jenkins/step/unittest.groovy"
                                         }
                                     }
                                 }
@@ -107,11 +103,7 @@ pipeline {
                                 steps {
                                     container("milvus-${BINARY_VERSION}-build-env") {
                                         script {
-                                            if ("${BINARY_VERSION}" == "gpu") {
-                                                load "${env.WORKSPACE}/ci/jenkins/step/coverage.groovy"
-                                            } else {
-                                                echo "Skip Code Coverage"
-                                            }
+                                            load "${env.WORKSPACE}/ci/jenkins/step/coverage.groovy"
                                         }
                                     }
                                 }
