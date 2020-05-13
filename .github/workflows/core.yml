@@ -8,6 +8,7 @@ on:
       - 'ci/**'
       - 'core/**'
       - '.github/workflows/core.yml'
+      - docker-compose.yml
       - '!**.md'
       - '!ci/jenkins/**'
   pull_request:
@@ -16,6 +17,7 @@ on:
       - 'ci/**'
       - 'core/**'
       - '.github/workflows/core.yml'
+      - docker-compose.yml
       - '!**.md'
       - '!ci/jenkins/**'
 
