@@ -9,7 +9,7 @@ dir ("docker/deploy") {
         }
     }
     sh "tar zxvf ${binaryPackage}"
-    def sourceImage = "${PROJECT_NAME}/engine:${SOURCE_TAG}"
+    def sourceImage = "${params.DOKCER_REGISTRY_URL}/${PROJECT_NAME}/engine:${SOURCE_TAG}"
 
     try {
         sh(returnStatus: true, script: "docker pull ${sourceImage}")
