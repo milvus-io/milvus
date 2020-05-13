@@ -180,6 +180,7 @@ TEST_F(EngineTest, ENGINE_IMPL_TEST) {
 #endif
     }
 
+#ifdef MILVUS_SUPPORT_SPTAG
     {
         milvus::json index_params = {{"nlist", 10}};
         auto engine_ptr = CreateExecEngine(index_params);
@@ -191,6 +192,7 @@ TEST_F(EngineTest, ENGINE_IMPL_TEST) {
         auto status = engine_ptr->CopyToCpu();
         ASSERT_FALSE(status.ok());
     }
+#endif
 
 #ifdef MILVUS_GPU_VERSION
     {

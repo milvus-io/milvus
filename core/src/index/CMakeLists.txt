@@ -11,28 +11,12 @@
 # or implied. See the License for the specific language governing permissions and limitations under the License.
 #-------------------------------------------------------------------------------
 
-
 cmake_minimum_required(VERSION 3.12)
 message(STATUS "------------------------------KNOWHERE-----------------------------------")
 message(STATUS "Building using CMake version: ${CMAKE_VERSION}")
 
-set(KNOWHERE_VERSION "0.6.0")
-string(REGEX MATCH "^[0-9]+\\.[0-9]+\\.[0-9]+" KNOWHERE_BASE_VERSION "${KNOWHERE_VERSION}")
-project(knowhere VERSION "${KNOWHERE_BASE_VERSION}" LANGUAGES C CXX)
+project(knowhere LANGUAGES C CXX)
 set(CMAKE_CXX_STANDARD 17)
-
-set(KNOWHERE_VERSION_MAJOR "${knowhere_VERSION_MAJOR}")
-set(KNOWHERE_VERSION_MINOR "${knowhere_VERSION_MINOR}")
-set(KNOWHERE_VERSION_PATCH "${knowhere_VERSION_PATCH}")
-if (KNOWHERE_VERSION_MAJOR STREQUAL ""
-        OR KNOWHERE_VERSION_MINOR STREQUAL ""
-        OR KNOWHERE_VERSION_PATCH STREQUAL "")
-    message(FATAL_ERROR "Failed to determine Knowhere version from '${KNOWHERE_VERSION}'")
-endif ()
-
-message(STATUS "Knowhere version: "
-        "${KNOWHERE_VERSION_MAJOR}.${KNOWHERE_VERSION_MINOR}.${KNOWHERE_VERSION_PATCH} "
-        "(full: '${KNOWHERE_VERSION}')")
 
 # if no build build type is specified, default to release builds
 if (NOT CMAKE_BUILD_TYPE)
@@ -66,7 +50,7 @@ include(ExternalProject)
 include(DefineOptionsCore)
 include(BuildUtilsCore)
 
-if (MILVUS_GPU_VERSION OR KNOWHERE_GPU_VERSION)
+if (MILVUS_GPU_VERSION)
     message(STATUS "Building Knowhere GPU version")
     add_compile_definitions("MILVUS_GPU_VERSION")
     enable_language(CUDA)
@@ -76,16 +60,21 @@ else ()
     message(STATUS "Building Knowhere CPU version")
 endif ()
 
+if (MILVUS_SUPPORT_SPTAG)
+    message(STATUS "Building Knowhere with SPTAG supported")
+    add_compile_definitions("MILVUS_SUPPORT_SPTAG")
+endif ()
+
 include(ThirdPartyPackagesCore)
 
 if (CMAKE_BUILD_TYPE STREQUAL "Release")
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O3 -fPIC -DELPP_THREAD_SAFE -fopenmp")
-    if (KNOWHERE_GPU_VERSION)
+    if (MILVUS_GPU_VERSION)
         set(CUDA_NVCC_FLAGS "${CUDA_NVCC_FLAGS} -O3")
     endif ()
 else ()
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O0 -g -fPIC -DELPP_THREAD_SAFE -fopenmp")
-    if (KNOWHERE_GPU_VERSION)
+    if (MILVUS_GPU_VERSION)
         set(CUDA_NVCC_FLAGS "${CUDA_NVCC_FLAGS} -O0 -g")
     endif ()
 endif ()

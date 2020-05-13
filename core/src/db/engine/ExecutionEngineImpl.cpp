@@ -207,6 +207,7 @@ ExecutionEngineImpl::CreatetVecIndex(EngineType type) {
             index = vec_index_factory.CreateVecIndex(knowhere::IndexEnum::INDEX_NSG, mode);
             break;
         }
+#ifdef MILVUS_SUPPORT_SPTAG
         case EngineType::SPTAG_KDT: {
             index = vec_index_factory.CreateVecIndex(knowhere::IndexEnum::INDEX_SPTAG_KDT_RNT, mode);
             break;
@@ -215,6 +216,7 @@ ExecutionEngineImpl::CreatetVecIndex(EngineType type) {
             index = vec_index_factory.CreateVecIndex(knowhere::IndexEnum::INDEX_SPTAG_BKT_RNT, mode);
             break;
         }
+#endif
         case EngineType::HNSW: {
             index = vec_index_factory.CreateVecIndex(knowhere::IndexEnum::INDEX_HNSW, mode);
             break;

@@ -22,7 +22,9 @@
 #include "knowhere/index/vector_index/IndexIVFPQ.h"
 #include "knowhere/index/vector_index/IndexIVFSQ.h"
 #include "knowhere/index/vector_index/IndexNSG.h"
+#ifdef MILVUS_SUPPORT_SPTAG
 #include "knowhere/index/vector_index/IndexSPTAG.h"
+#endif
 
 #ifdef MILVUS_GPU_VERSION
 #include <cuda.h>
@@ -73,10 +75,12 @@ VecIndexFactory::CreateVecIndex(const IndexType& type, const IndexMode mode) {
         return std::make_shared<knowhere::BinaryIVF>();
     } else if (type == IndexEnum::INDEX_NSG) {
         return std::make_shared<knowhere::NSG>(-1);
+#ifdef MILVUS_SUPPORT_SPTAG
     } else if (type == IndexEnum::INDEX_SPTAG_KDT_RNT) {
         return std::make_shared<knowhere::CPUSPTAGRNG>("KDT");
     } else if (type == IndexEnum::INDEX_SPTAG_BKT_RNT) {
         return std::make_shared<knowhere::CPUSPTAGRNG>("BKT");
+#endif
     } else if (type == IndexEnum::INDEX_HNSW) {
         return std::make_shared<knowhere::IndexHNSW>();
     } else if (type == IndexEnum::INDEX_ANNOY) {
