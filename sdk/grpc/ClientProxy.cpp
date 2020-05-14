@@ -371,35 +371,6 @@ ClientProxy::Search(const std::string& collection_name, const std::vector<std::s
 }
 
 Status
-ClientProxy::SearchByID(const std::string& collection_name, const PartitionTagList& partition_tag_array,
-                        const std::vector<int64_t>& id_array, int64_t topk, const std::string& extra_params,
-                        TopKQueryResult& topk_query_result) {
-    try {
-        // step 1: convert vectors data
-        ::milvus::grpc::SearchByIDParam search_param;
-        ConstructSearchParam(collection_name, partition_tag_array, topk, extra_params, search_param);
-
-        for (auto& id : id_array) {
-            search_param.add_id_array(id);
-        }
-
-        // step 2: search vectors
-        ::milvus::grpc::TopKQueryResult grpc_result;
-        Status status = client_ptr_->SearchByID(search_param, grpc_result);
-        if (grpc_result.row_num() == 0) {
-            return status;
-        }
-
-        // step 3: convert result array
-        ConstructTopkResult(grpc_result, topk_query_result);
-
-        return status;
-    } catch (std::exception& ex) {
-        return Status(StatusCode::UnknownError, "Failed to search entities: " + std::string(ex.what()));
-    }
-}
-
-Status
 ClientProxy::GetCollectionInfo(const std::string& collection_name, CollectionParam& collection_param) {
     try {
         ::milvus::grpc::CollectionSchema grpc_schema;

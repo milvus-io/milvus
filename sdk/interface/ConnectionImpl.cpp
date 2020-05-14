@@ -128,18 +128,6 @@ ConnectionImpl::Search(const std::string& collection_name, const PartitionTagLis
 }
 
 Status
-ConnectionImpl::SearchByID(const std::string& collection_name, const PartitionTagList& partition_tag_array,
-                           const std::vector<int64_t>& id_array, int64_t topk,
-                           const std::string& extra_params, TopKQueryResult& topk_query_result) {
-    return client_proxy_->SearchByID(collection_name,
-                                     partition_tag_array,
-                                     id_array,
-                                     topk,
-                                     extra_params,
-                                     topk_query_result);
-}
-
-Status
 ConnectionImpl::GetCollectionInfo(const std::string& collection_name, CollectionParam& collection_schema) {
     return client_proxy_->GetCollectionInfo(collection_name, collection_schema);
 }
