@@ -66,6 +66,7 @@ Please mark all change in change log and use the issue from GitHub
 -   \#2300 Upgrade mishrads configuration to version 0.4
 -   \#2311 Update mishards methods 
 -   \#2330 Change url for behavior 'get_entities_by_id'
+-   \#2347 Update http document for v0.9.0
 
 ## Task
 
