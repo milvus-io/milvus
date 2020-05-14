@@ -35,6 +35,13 @@ Vectors::AddData(const std::vector<uint8_t>& data) {
 }
 
 void
+Vectors::AddData(const uint8_t* data, uint64_t size) {
+    int64_t old_size = data_.size();
+    data_.resize(data_.size() + size);
+    memcpy(data_.data() + old_size, data, size);
+}
+
+void
 Vectors::AddUids(const std::vector<doc_id_t>& uids) {
     uids_.reserve(uids_.size() + uids.size());
     uids_.insert(uids_.end(), std::make_move_iterator(uids.begin()), std::make_move_iterator(uids.end()));
