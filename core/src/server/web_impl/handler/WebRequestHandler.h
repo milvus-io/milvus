@@ -220,7 +220,7 @@ class WebRequestHandler {
     InsertEntity(const OString& collection_name, const OString& body, VectorIdsDto::ObjectWrapper& ids_dto);
 
     StatusDto::ObjectWrapper
-    GetVector(const OString& collection_name, const OString& body, const OQueryParams& query_params, OString& response);
+    GetVector(const OString& collection_name, const OQueryParams& query_params, OString& response);
 
     StatusDto::ObjectWrapper
     VectorsOp(const OString& collection_name, const OString& payload, OString& response);
