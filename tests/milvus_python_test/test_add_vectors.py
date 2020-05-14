@@ -521,17 +521,17 @@ class TestAddBase:
             assert status.OK()
             assert len(ids) == nq
 
-    # @pytest.mark.level(2)
-    # def test_insert_without_connect(self, dis_connect, collection):
-    #     '''
-    #     target: test add vectors without connection
-    #     method: create collection and add vectors in it, check if added successfully
-    #     expected: raise exception
-    #     '''
-    #     nq = 5
-    #     vectors = gen_vectors(nq, dim)
-    #     with pytest.raises(Exception) as e:
-    #         status, ids = dis_connect.insert(collection, vectors)
+    @pytest.mark.level(2)
+    def test_insert_without_connect(self, dis_connect, collection):
+        '''
+        target: test add vectors without connection
+        method: create collection and add vectors in it, check if added successfully
+        expected: raise exception
+        '''
+        nq = 5
+        vectors = gen_vectors(nq, dim)
+        with pytest.raises(Exception) as e:
+            status, ids = dis_connect.insert(collection, vectors)
 
     def test_add_collection_not_existed(self, connect):
         '''
@@ -580,44 +580,6 @@ class TestAddBase:
         assert status.OK()
         assert len(result) == 1
 
-    # TODO: enable
-    # @pytest.mark.repeat(10)
-    @pytest.mark.timeout(ADD_TIMEOUT)
-    def _test_add_vector_with_multiprocessing(self, args):
-        '''
-        target: test add vectors, with multi processes
-        method: 10 processed add vectors concurrently
-        expected: status ok and result length is equal to the length off added vectors
-        '''
-        collection = gen_unique_str()
-        param = {'collection_name': collection,
-                 'dimension': dim,
-                 'index_file_size': index_file_size,
-                 'metric_type': MetricType.L2}
-        milvus = get_milvus(host=args["ip"], port=args["port"], handler=args["handler"])
-        milvus.create_collection(param)
-        vector = gen_single_vector(dim)
-        process_num = 4
-        loop_num = 5
-        processes = []
-        def add():
-            milvus = get_milvus(host=args["ip"], port=args["port"], handler=args["handler"])
-            i = 0
-            while i < loop_num:
-                status, ids = milvus.insert(collection, vector)
-                i = i + 1
-            # milvus.disconnect()
-        for i in range(process_num):
-            p = Process(target=add, args=())
-            processes.append(p)
-            p.start()
-            time.sleep(0.2)
-        for p in processes:
-            p.join()
-        time.sleep(2)
-        status, count = milvus.count_entities(collection)
-        assert count == process_num * loop_num
-
     @pytest.mark.level(2)
     @pytest.mark.timeout(30)
     def test_collection_add_rows_count_multi_threading(self, args):
@@ -642,6 +604,7 @@ class TestAddBase:
         def add(thread_i):
             logging.getLogger().info("In thread-%d" % thread_i)
             milvus = get_milvus(host=args["ip"], port=args["port"], handler=args["handler"])
+            assert milvus
             status, result = milvus.insert(collection, records=vectors)
             assert status.OK()
             status = milvus.flush([collection])
