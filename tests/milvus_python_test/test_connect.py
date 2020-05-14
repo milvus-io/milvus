@@ -2,6 +2,7 @@ import pytest
 import pdb
 import threading
 from multiprocessing import Process
+import concurrent.futures
 from utils import *
 
 CONNECT_TIMEOUT = 12
@@ -18,30 +19,24 @@ class TestConnect:
         else:
             return False
 
-    # def test_disconnect(self, connect):
-    #     '''
-    #     target: test disconnect
-    #     method: disconnect a connected client
-    #     expected: connect failed after disconnected
-    #     '''
-    #     res = connect.disconnect()
-    #     assert res.OK()
-    #     with pytest.raises(Exception) as e:
-    #         res = connect.server_version()
+    def test_disconnect(self, connect):
+        '''
+        target: test disconnect
+        method: disconnect a connected client
+        expected: connect failed after disconnected
+        '''
+        res = connect.close()
+        with pytest.raises(Exception) as e:
+            res = connect.server_version()
 
-    # def test_disconnect_repeatedly(self, connect, args):
-    #     '''
-    #     target: test disconnect repeatedly
-    #     method: disconnect a connected client, disconnect again
-    #     expected: raise an error after disconnected
-    #     '''
-    #     if not connect.connected():
-    #         with pytest.raises(Exception) as e:
-    #             connect.disconnect()
-    #     else:
-    #         connect.disconnect()
-    #         with pytest.raises(Exception) as e:
-    #             connect.disconnect()
+    def test_disconnect_repeatedly(self, dis_connect, args):
+        '''
+        target: test disconnect repeatedly
+        method: disconnect a connected client, disconnect again
+        expected: raise an error after disconnected
+        '''
+        with pytest.raises(Exception) as e:
+            connect.close()
 
     def test_connect_correct_ip_port(self, args):
         '''
@@ -111,30 +106,21 @@ class TestConnect:
                 milvus = get_milvus(None, None, uri=uri_value, handler=args["handler"])
                 # assert not milvus.connected()
 
-    # disable
-    # def _test_connect_with_multiprocess(self, args):
-    #     '''
-    #     target: test uri connect with multiprocess
-    #     method: set correct uri, test with multiprocessing connecting
-    #     expected: all connection is connected        
-    #     '''
-    #     uri_value = "tcp://%s:%s" % (args["ip"], args["port"])
-    #     process_num = 10
-    #     processes = []
-
-    #     def connect(milvus):
-    #         milvus.connect(uri=uri_value)
-    #         with pytest.raises(Exception) as e:
-    #             milvus.connect(uri=uri_value)
-    #         # assert milvus.connected()
-
-    #     for i in range(process_num):
-    #         milvus = get_milvus(args["ip"], args["port"], args["handler"])
-    #         p = Process(target=connect, args=(milvus, ))
-    #         processes.append(p)
-    #         p.start()
-    #     for p in processes:
-    #         p.join()
+    def test_connect_with_multiprocess(self, args):
+        '''
+        target: test uri connect with multiprocess
+        method: set correct uri, test with multiprocessing connecting
+        expected: all connection is connected        
+        '''
+        processes = []
+        def connect():
+            milvus = get_milvus(args["ip"], args["port"], handler=args["handler"])
+            assert milvus           
+        with concurrent.futures.ThreadPoolExecutor(max_workers=20) as executor:
+            future_results = {executor.submit(
+                connect): i for i in range(100)}
+            for future in concurrent.futures.as_completed(future_results):
+                future.result()
 
     def test_connect_repeatedly(self, args):
         '''
@@ -148,57 +134,6 @@ class TestConnect:
         # milvus.connect(uri=uri_value, timeout=5)
         milvus = Milvus(uri=uri_value, handler=args["handler"])
         # assert milvus.connected()
-
-    # def test_connect_disconnect_repeatedly_times(self, args):
-    #     '''
-    #     target: test connect and disconnect for 10 times repeatedly
-    #     method: disconnect, and then connect, assert connect status
-    #     expected: status.code is 0
-    #     '''
-    #     times = 10
-    #     for i in range(times):
-    #         milvus = get_milvus(args["ip"], args["port"], handler=args["handler"])
-    #         milvus.disconnect()
-    #         assert not milvus.connected()
-
-    # TODO: enable
-    # def _test_connect_disconnect_with_multiprocess(self, args):
-    #     '''
-    #     target: test uri connect and disconnect repeatly with multiprocess
-    #     method: set correct uri, test with multiprocessing connecting and disconnecting
-    #     expected: all connection is connected after 10 times operation       
-    #     '''
-    #     uri_value = "tcp://%s:%s" % (args["ip"], args["port"])
-    #     process_num = 4
-    #     processes = []
-
-    #     def connect(milvus):
-    #         milvus.connect(uri=uri_value)
-    #         milvus.disconnect()
-    #         milvus.connect(uri=uri_value)
-    #         assert milvus.connected()
-
-    #     for i in range(process_num):
-    #         milvus = get_milvus(args["ip"], args["port"], args["handler"])
-    #         p = Process(target=connect, args=(milvus, ))
-    #         processes.append(p)
-    #         p.start()
-    #     for p in processes:
-    #         p.join()
-
-    # Disable, (issue: https://github.com/milvus-io/milvus/issues/288)
-    # def _test_connect_param_priority_both_hostip_uri(self, args):
-    #     '''
-    #     target: both host_ip_port / uri are both given, and not null, use the uri params
-    #     method: check if wrong uri connection is ok
-    #     expected: connect raise an exception and connected is false
-    #     '''
-    #     milvus = get_milvus(args["ip"], args["port"], args["handler"])
-    #     uri_value = "tcp://%s:%s" % (args["ip"], args["port"])
-    #     with pytest.raises(Exception) as e:
-    #         res = milvus.connect(host=args["ip"], port=39540, uri=uri_value, timeout=1)
-    #         logging.getLogger().info(res)
-    #     # assert not milvus.connected()
 
     def _test_add_vector_and_disconnect_concurrently(self):
         '''

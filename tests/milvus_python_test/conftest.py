@@ -55,17 +55,17 @@ def connect(request):
     return milvus
 
 
-# @pytest.fixture(scope="module")
-# def dis_connect(request):
-#     ip = request.config.getoption("--ip")
-#     port = request.config.getoption("--port")
-#     http_port = request.config.getoption("--http-port")
-#     handler = request.config.getoption("--handler")
-#     if handler == "HTTP":
-#         port = http_port
-#     milvus = get_milvus(host=ip, port=port, handler=handler)
-#     milvus.disconnect()
-#     return milvus
+@pytest.fixture(scope="module")
+def dis_connect(request):
+    ip = request.config.getoption("--ip")
+    port = request.config.getoption("--port")
+    http_port = request.config.getoption("--http-port")
+    handler = request.config.getoption("--handler")
+    if handler == "HTTP":
+        port = http_port
+    milvus = get_milvus(host=ip, port=port, handler=handler)
+    milvus.close()
+    return milvus
 
 
 @pytest.fixture(scope="module")

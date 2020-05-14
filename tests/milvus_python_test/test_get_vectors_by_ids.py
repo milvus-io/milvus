@@ -190,6 +190,15 @@ class TestGetBase:
         status, res = connect.get_entity_by_id(collection_new, [1]) 
         assert not status.OK()
 
+    def test_get_vector_by_id_multithreads(self, connect, collection):
+        vectors = gen_vectors(nb, dim)
+        status, ids = connect.insert(collection, vectors, partition_tag=tag)
+        status = connect.flush([collection])
+        assert status.OK()
+        get_id = ids[100:200]
+        def get():
+
+
 
 class TestGetIndexedVectors:
     """
