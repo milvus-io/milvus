@@ -83,11 +83,6 @@ class ClientProxy : public Connection {
            const std::string& extra_params, TopKQueryResult& topk_query_result) override;
 
     Status
-    SearchByID(const std::string& collection_name, const PartitionTagList& partition_tag_array,
-               const std::vector<int64_t>& id_array, int64_t topk,
-               const std::string& extra_params, TopKQueryResult& topk_query_result) override;
-
-    Status
     GetCollectionInfo(const std::string& collection_name, CollectionParam& collection_param) override;
 
     Status

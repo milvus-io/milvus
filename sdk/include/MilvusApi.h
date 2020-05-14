@@ -388,33 +388,6 @@ class Connection {
            const std::string& extra_params, TopKQueryResult& topk_query_result) = 0;
 
     /**
-     * @brief Search entities in a collection by id
-     *
-     * This method is used to query entity in collection by id.
-     *
-     * @param collection_name, target collection's name.
-     * @param partition_tag_array, target partitions, keep empty if no partition specified.
-     * @param id_array, vectors id array to be queried.
-     * @param topk, how many similarity entities will be returned.
-     * @param extra_params, extra search parameters according to different index type, must be json format.
-     * Note: extra_params is extra parameters list, it must be json format, for example:
-     *       For different index type, parameter list is different accordingly
-     *       FLAT/IVFLAT/SQ8/IVFPQ:  {nprobe: 32}
-     *           ///< nprobe range:[1,999999]
-     *       NSG:  {search_length:100}
-     *           ///< search_length range:[10, 300]
-     *       HNSW  {ef: 64}
-     *           ///< ef range:[topk, 4096]
-     * @param topk_query_result, result array.
-     *
-     * @return Indicate if query is successful.
-     */
-    virtual Status
-    SearchByID(const std::string& collection_name, const PartitionTagList& partition_tag_array,
-               const std::vector<int64_t>& id_array, int64_t topk,
-               const std::string& extra_params, TopKQueryResult& topk_query_result) = 0;
-
-    /**
      * @brief Get collection information
      *
      * This method is used to get collection information.

@@ -179,25 +179,6 @@ GrpcClient::Search(const ::milvus::grpc::SearchParam& search_param,
 }
 
 Status
-GrpcClient::SearchByID(const grpc::SearchByIDParam& search_param, ::milvus::grpc::TopKQueryResult& topk_query_result) {
-    ::milvus::grpc::TopKQueryResult query_result;
-    ClientContext context;
-    ::grpc::Status grpc_status = stub_->SearchByID(&context, search_param, &topk_query_result);
-
-    if (!grpc_status.ok()) {
-        std::cerr << "SearchByID rpc failed!" << std::endl;
-        std::cerr << grpc_status.error_message() << std::endl;
-        return Status(StatusCode::RPCFailed, grpc_status.error_message());
-    }
-    if (topk_query_result.status().error_code() != grpc::SUCCESS) {
-        std::cerr << topk_query_result.status().reason() << std::endl;
-        return Status(StatusCode::ServerFailed, topk_query_result.status().reason());
-    }
-
-    return Status::OK();
-}
-
-Status
 GrpcClient::GetCollectionInfo(const std::string& collection_name, ::milvus::grpc::CollectionSchema& grpc_schema) {
     ClientContext context;
     ::milvus::grpc::CollectionName grpc_collectionname;
