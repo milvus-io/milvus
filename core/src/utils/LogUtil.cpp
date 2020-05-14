@@ -32,6 +32,7 @@ static int trace_idx = 0;
 static int error_idx = 0;
 static int fatal_idx = 0;
 static int64_t logs_delete_exceeds = 1;
+static bool enable_log_delete = false;
 }  // namespace
 
 // TODO(yzb) : change the easylogging library to get the log level from parameter rather than filename
@@ -61,7 +62,7 @@ RolloutHandler(const char* filename, std::size_t size, el::Level level) {
             case el::Level::Debug: {
                 s.append("." + std::to_string(++debug_idx));
                 ret = rename(m.c_str(), s.c_str());
-                if (debug_idx - logs_delete_exceeds > 0) {
+                if (enable_log_delete && debug_idx - logs_delete_exceeds > 0) {
                     std::string to_delete = m + "." + std::to_string(debug_idx - logs_delete_exceeds);
                     // std::cout << "remote " << to_delete << std::endl;
                     boost::filesystem::remove(to_delete);
@@ -71,7 +72,7 @@ RolloutHandler(const char* filename, std::size_t size, el::Level level) {
             case el::Level::Warning: {
                 s.append("." + std::to_string(++warning_idx));
                 ret = rename(m.c_str(), s.c_str());
-                if (warning_idx - logs_delete_exceeds > 0) {
+                if (enable_log_delete && warning_idx - logs_delete_exceeds > 0) {
                     std::string to_delete = m + "." + std::to_string(warning_idx - logs_delete_exceeds);
                     boost::filesystem::remove(to_delete);
                 }
@@ -80,7 +81,7 @@ RolloutHandler(const char* filename, std::size_t size, el::Level level) {
             case el::Level::Trace: {
                 s.append("." + std::to_string(++trace_idx));
                 ret = rename(m.c_str(), s.c_str());
-                if (trace_idx - logs_delete_exceeds > 0) {
+                if (enable_log_delete && trace_idx - logs_delete_exceeds > 0) {
                     std::string to_delete = m + "." + std::to_string(trace_idx - logs_delete_exceeds);
                     boost::filesystem::remove(to_delete);
                 }
@@ -89,7 +90,7 @@ RolloutHandler(const char* filename, std::size_t size, el::Level level) {
             case el::Level::Error: {
                 s.append("." + std::to_string(++error_idx));
                 ret = rename(m.c_str(), s.c_str());
-                if (error_idx - logs_delete_exceeds > 0) {
+                if (enable_log_delete && error_idx - logs_delete_exceeds > 0) {
                     std::string to_delete = m + "." + std::to_string(error_idx - logs_delete_exceeds);
                     boost::filesystem::remove(to_delete);
                 }
@@ -98,7 +99,7 @@ RolloutHandler(const char* filename, std::size_t size, el::Level level) {
             case el::Level::Fatal: {
                 s.append("." + std::to_string(++fatal_idx));
                 ret = rename(m.c_str(), s.c_str());
-                if (fatal_idx - logs_delete_exceeds > 0) {
+                if (enable_log_delete && fatal_idx - logs_delete_exceeds > 0) {
                     std::string to_delete = m + "." + std::to_string(fatal_idx - logs_delete_exceeds);
                     boost::filesystem::remove(to_delete);
                 }
@@ -107,7 +108,7 @@ RolloutHandler(const char* filename, std::size_t size, el::Level level) {
             default: {
                 s.append("." + std::to_string(++global_idx));
                 ret = rename(m.c_str(), s.c_str());
-                if (global_idx - logs_delete_exceeds > 0) {
+                if (enable_log_delete && global_idx - logs_delete_exceeds > 0) {
                     std::string to_delete = m + "." + std::to_string(global_idx - logs_delete_exceeds);
                     boost::filesystem::remove(to_delete);
                 }
@@ -183,26 +184,29 @@ InitLog(bool trace_enable, bool debug_enable, bool info_enable, bool warning_ena
         defaultConf.set(el::Level::Fatal, el::ConfigurationType::Enabled, "false");
     }
 
-    // set max_log_file_size = 0 means disable log file rotating
-    if (max_log_file_size != 0) {
-        if (max_log_file_size < 64 || max_log_file_size > 512) {
-            return Status(SERVER_UNEXPECTED_ERROR,
-                          "max_log_file_size must in range[64, 512], now is " + std::to_string(max_log_file_size));
-        }
-        max_log_file_size *= 1024 * 1024;
-        defaultConf.setGlobally(el::ConfigurationType::MaxLogFileSize, std::to_string(max_log_file_size));
-        el::Loggers::addFlag(el::LoggingFlag::StrictLogFileSizeCheck);
-        el::Helpers::installPreRollOutCallback(RolloutHandler);
-        el::Loggers::addFlag(el::LoggingFlag::DisableApplicationAbortOnFatalLog);
+    if (max_log_file_size < CONFIG_LOGS_MAX_LOG_FILE_SIZE_MIN ||
+        max_log_file_size > CONFIG_LOGS_MAX_LOG_FILE_SIZE_MAX) {
+        return Status(SERVER_UNEXPECTED_ERROR, "max_log_file_size must in range[" +
+                                                   std::to_string(CONFIG_LOGS_MAX_LOG_FILE_SIZE_MIN) + ", " +
+                                                   std::to_string(CONFIG_LOGS_MAX_LOG_FILE_SIZE_MAX) + "], now is " +
+                                                   std::to_string(max_log_file_size));
+    }
+    max_log_file_size *= 1024 * 1024;
+    defaultConf.setGlobally(el::ConfigurationType::MaxLogFileSize, std::to_string(max_log_file_size));
+    el::Loggers::addFlag(el::LoggingFlag::StrictLogFileSizeCheck);
+    el::Helpers::installPreRollOutCallback(RolloutHandler);
+    el::Loggers::addFlag(el::LoggingFlag::DisableApplicationAbortOnFatalLog);
 
-        // set delete_exceeds = 0 means disable throw away log file even they reach certain limit.
-        if (delete_exceeds != 0) {
-            if (delete_exceeds < 1 || delete_exceeds > 4096) {
-                return Status(SERVER_UNEXPECTED_ERROR,
-                              "delete_exceeds must in range[1, 4096], now is " + std::to_string(delete_exceeds));
-            }
-            logs_delete_exceeds = delete_exceeds;
+    // set delete_exceeds = 0 means disable throw away log file even they reach certain limit.
+    if (delete_exceeds != 0) {
+        if (delete_exceeds < CONFIG_LOGS_LOG_ROTATE_NUM_MIN || delete_exceeds > CONFIG_LOGS_LOG_ROTATE_NUM_MAX) {
+            return Status(SERVER_UNEXPECTED_ERROR, "delete_exceeds must in range[" +
+                                                       std::to_string(CONFIG_LOGS_LOG_ROTATE_NUM_MIN) + ", " +
+                                                       std::to_string(CONFIG_LOGS_LOG_ROTATE_NUM_MAX) + "], now is " +
+                                                       std::to_string(delete_exceeds));
         }
+        enable_log_delete = true;
+        logs_delete_exceeds = delete_exceeds;
     }
 
     el::Loggers::reconfigureLogger("default", defaultConf);
