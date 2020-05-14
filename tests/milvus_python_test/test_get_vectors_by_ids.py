@@ -4,6 +4,7 @@ import pdb
 import threading
 import logging
 from multiprocessing import Pool, Process
+import concurrent.futures
 import pytest
 from milvus import IndexType, MetricType
 from utils import *
@@ -189,6 +190,40 @@ class TestGetBase:
         collection_new = gen_unique_str()
         status, res = connect.get_entity_by_id(collection_new, [1]) 
         assert not status.OK()
+
+    @pytest.mark.timeout(60)
+    def test_get_vector_by_id_multithreads(self, connect, collection):
+        vectors = gen_vectors(nb, dim)
+        status, ids = connect.insert(collection, vectors)
+        status = connect.flush([collection])
+        assert status.OK()
+        get_id = ids[100:200]
+        def get():
+            status, res = connect.get_entity_by_id(collection, get_id)
+            assert status.OK()
+            assert len(res) == len(get_id)
+            for i in range(len(res)):
+                assert_equal_vector(res[i], vectors[100+i])
+        with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
+            future_results = {executor.submit(
+                get): i for i in range(10)}
+            for future in concurrent.futures.as_completed(future_results):
+                future.result()
+
+    # TODO: autoflush
+    def _test_get_vector_by_id_after_delete_no_flush(self, connect, collection):
+        vectors = gen_vectors(nb, dim)
+        status, ids = connect.insert(collection, vectors)
+        status = connect.flush([collection])
+        assert status.OK()
+        get_id = ids[100:200]
+        status = connect.delete_entity_by_id(collection, get_id)
+        assert status.OK()
+        status, res = connect.get_entity_by_id(collection, get_id)
+        assert status.OK()
+        assert len(res) == len(get_id)
+        for i in range(len(res)):
+            assert_equal_vector(res[i], vectors[100+i])
 
 
 class TestGetIndexedVectors:
