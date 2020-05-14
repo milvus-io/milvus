@@ -419,14 +419,13 @@ gen_set_command(const std::string& parent_node, const std::string& child_node, c
 }
 
 TEST_F(ConfigTest, SERVER_CONFIG_CLI_TEST) {
-    std::string config_path(CONFIG_PATH);
-    milvus::Status s;
-
     std::string conf_file = std::string(CONFIG_PATH) + VALID_CONFIG_FILE;
     milvus::server::Config& config = milvus::server::Config::GetInstance();
 
-    auto status = config.LoadConfigFile(conf_file);
-    ASSERT_TRUE(status.ok()) << status.message();
+    auto s = config.LoadConfigFile(conf_file);
+    ASSERT_TRUE(s.ok()) << s.message();
+    s = config.ResetDefaultConfig();
+    ASSERT_TRUE(s.ok());
 
     std::string get_cmd, set_cmd;
     std::string result, dummy;
