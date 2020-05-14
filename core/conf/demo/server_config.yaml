@@ -208,10 +208,10 @@ wal_config:
 #----------------------+------------------------------------------------------------+------------+-----------------+
 # path                 | Absolute path to the folder holding the log files.         | String     |                 |
 #----------------------+------------------------------------------------------------+------------+-----------------+
-# max_log_file_size    | The maximum size of each log file.                         | Integer    | 256 (MB)        |
+# max_log_file_size    | The maximum size of each log file, size range [64, 512]    | Integer    | 256 (MB)        |
 #----------------------+------------------------------------------------------------+------------+-----------------+
 # log_rotate_num       | The maximum number of log files that Milvus keeps for each | Integer    | 10              |
-#                      | logging level.                                             |            |                 |
+#                      | logging level, num range [1, 512]                          |            |                 |
 #----------------------+------------------------------------------------------------+------------+-----------------+
 logs:
   trace.enable: true

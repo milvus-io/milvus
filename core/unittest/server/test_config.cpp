@@ -747,7 +747,9 @@ TEST_F(ConfigTest, SERVER_CONFIG_INVALID_TEST) {
     ASSERT_FALSE(config.SetLogsFatalEnable("invalid").ok());
     ASSERT_FALSE(config.SetLogsPath("").ok());
     ASSERT_FALSE(config.SetLogsMaxLogFileSize("-1").ok());
-    ASSERT_FALSE(config.SetLogsLogRotateNum("a").ok());
+    ASSERT_FALSE(config.SetLogsMaxLogFileSize("513").ok());
+    ASSERT_FALSE(config.SetLogsLogRotateNum("-1").ok());
+    ASSERT_FALSE(config.SetLogsLogRotateNum("513").ok());
 }
 
 TEST_F(ConfigTest, SERVER_CONFIG_TEST) {

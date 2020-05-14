@@ -76,6 +76,8 @@ const char* CONFIG_STORAGE_SECONDARY_PATH = "secondary_path";
 const char* CONFIG_STORAGE_SECONDARY_PATH_DEFAULT = "";
 const char* CONFIG_STORAGE_FILE_CLEANUP_TIMEOUT = "file_cleanup_timeout";
 const char* CONFIG_STORAGE_FILE_CLEANUP_TIMEOUT_DEFAULT = "10";
+const int64_t CONFIG_STORAGE_FILE_CLEANUP_TIMEOUT_MIN = 0;
+const int64_t CONFIG_STORAGE_FILE_CLEANUP_TIMEOUT_MAX = 3600;
 // const char* CONFIG_STORAGE_S3_ENABLE = "s3_enable";
 // const char* CONFIG_STORAGE_S3_ENABLE_DEFAULT = "false";
 // const char* CONFIG_STORAGE_S3_ADDRESS = "s3_address";
@@ -1108,23 +1110,18 @@ Config::CheckStorageConfigSecondaryPath(const std::string& value) {
 
 Status
 Config::CheckStorageConfigFileCleanupTimeout(const std::string& value) {
-    auto status = Status::OK();
-
-    if (value.empty()) {
-        return status;
-    }
-
     if (!ValidationUtil::ValidateStringIsNumber(value).ok()) {
-        std::string msg = "Invalid file cleanup timeout: " + value +
+        std::string msg = "Invalid file_cleanup_timeout: " + value +
                           ". Possible reason: storage_config.file_cleanup_timeout is not a positive integer.";
         return Status(SERVER_INVALID_ARGUMENT, msg);
     } else {
-        const int64_t min = 0, max = 3600;
         int64_t file_cleanup_timeout = std::stoll(value);
-        if (file_cleanup_timeout < min || file_cleanup_timeout > max) {
-            std::string msg = "Invalid file cleanup timeout: " + value +
+        if (file_cleanup_timeout < CONFIG_STORAGE_FILE_CLEANUP_TIMEOUT_MIN ||
+            file_cleanup_timeout > CONFIG_STORAGE_FILE_CLEANUP_TIMEOUT_MAX) {
+            std::string msg = "Invalid file_cleanup_timeout: " + value +
                               ". Possible reason: storage_config.file_cleanup_timeout is not in range [" +
-                              std::to_string(min) + ", " + std::to_string(max) + "].";
+                              std::to_string(CONFIG_STORAGE_FILE_CLEANUP_TIMEOUT_MIN) + ", " +
+                              std::to_string(CONFIG_STORAGE_FILE_CLEANUP_TIMEOUT_MIN) + "].";
             return Status(SERVER_INVALID_ARGUMENT, msg);
         }
     }
@@ -1695,6 +1692,16 @@ Config::CheckLogsMaxLogFileSize(const std::string& value) {
         std::string msg = "Invalid max_log_file_size: " + value +
                           ". Possible reason: logs.max_log_file_size is not a positive integer.";
         return Status(SERVER_INVALID_ARGUMENT, msg);
+    } else {
+        int64_t max_log_file_size = std::stoll(value);
+        if (max_log_file_size < CONFIG_LOGS_MAX_LOG_FILE_SIZE_MIN ||
+            max_log_file_size > CONFIG_LOGS_MAX_LOG_FILE_SIZE_MAX) {
+            std::string msg = "Invalid max_log_file_size: " + value +
+                              ". Possible reason: logs.max_log_file_size is not in range [" +
+                              std::to_string(CONFIG_LOGS_MAX_LOG_FILE_SIZE_MIN) + ", " +
+                              std::to_string(CONFIG_LOGS_MAX_LOG_FILE_SIZE_MAX) + "].";
+            return Status(SERVER_INVALID_ARGUMENT, msg);
+        }
     }
     return Status::OK();
 }
@@ -1706,8 +1713,18 @@ Config::CheckLogsLogRotateNum(const std::string& value) {
 
     if (exist_error) {
         std::string msg = "Invalid log_rotate_num: " + value +
-                          ". Possible reason: logs.log_rotate_num is not a valid integer.";
+                          ". Possible reason: logs.log_rotate_num is not a positive integer.";
         return Status(SERVER_INVALID_ARGUMENT, msg);
+    } else {
+        int64_t log_rotate_num = std::stoll(value);
+        if (log_rotate_num < CONFIG_LOGS_LOG_ROTATE_NUM_MIN ||
+            log_rotate_num > CONFIG_LOGS_LOG_ROTATE_NUM_MAX) {
+            std::string msg = "Invalid log_rotate_num: " + value +
+                              ". Possible reason: logs.log_rotate_num is not in range [" +
+                              std::to_string(CONFIG_LOGS_LOG_ROTATE_NUM_MIN) + ", " +
+                              std::to_string(CONFIG_LOGS_LOG_ROTATE_NUM_MAX) + "].";
+            return Status(SERVER_INVALID_ARGUMENT, msg);
+        }
     }
     return Status::OK();
 }
@@ -2243,14 +2260,6 @@ Config::GetLogsMaxLogFileSize(int64_t& value) {
     std::string str = GetConfigStr(CONFIG_LOGS, CONFIG_LOGS_MAX_LOG_FILE_SIZE, CONFIG_LOGS_MAX_LOG_FILE_SIZE_DEFAULT);
     STATUS_CHECK(CheckLogsMaxLogFileSize(str));
     value = std::stoll(str);
-    if (value == 0) {
-        // OFF
-    } else if (value > CONFIG_LOGS_MAX_LOG_FILE_SIZE_MAX) {
-        value = CONFIG_LOGS_MAX_LOG_FILE_SIZE_MAX;
-    } else if (value < CONFIG_LOGS_MAX_LOG_FILE_SIZE_MIN) {
-        value = CONFIG_LOGS_MAX_LOG_FILE_SIZE_MIN;
-    }
-
     return Status::OK();
 }
 
@@ -2259,12 +2268,6 @@ Config::GetLogsLogRotateNum(int64_t& value) {
     std::string str = GetConfigStr(CONFIG_LOGS, CONFIG_LOGS_LOG_ROTATE_NUM, CONFIG_LOGS_LOG_ROTATE_NUM_DEFAULT);
     STATUS_CHECK(CheckLogsLogRotateNum(str));
     value = std::stoll(str);
-    if (value > CONFIG_LOGS_LOG_ROTATE_NUM_MAX) {
-        value = CONFIG_LOGS_LOG_ROTATE_NUM_MAX;
-    } else if (value < CONFIG_LOGS_LOG_ROTATE_NUM_MIN) {
-        value = CONFIG_LOGS_LOG_ROTATE_NUM_MIN;
-    }
-
     return Status::OK();
 }
 
