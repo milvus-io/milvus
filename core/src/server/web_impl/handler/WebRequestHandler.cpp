@@ -1693,22 +1693,20 @@ WebRequestHandler::InsertEntity(const OString& collection_name, const milvus::se
 }
 
 StatusDto::ObjectWrapper
-WebRequestHandler::GetVector(const OString& collection_name, const OString& body, const OQueryParams& query_params,
-                             OString& response) {
+WebRequestHandler::GetVector(const OString& collection_name, const OQueryParams& query_params, OString& response) {
     auto status = Status::OK();
     try {
-        auto body_json = nlohmann::json::parse(body->c_str());
-        if (!body_json.contains("ids")) {
-            RETURN_STATUS_DTO(BODY_FIELD_LOSS, "Field \'ids\' is required.")
+        auto query_ids = query_params.get("ids");
+        if (query_ids == nullptr || query_ids.get() == nullptr) {
+            RETURN_STATUS_DTO(QUERY_PARAM_LOSS, "Query param ids is required.");
         }
-        auto ids = body_json["ids"];
-        if (!ids.is_array()) {
-            RETURN_STATUS_DTO(BODY_PARSE_FAIL, "Field \'ids\' must be a array.")
-        }
+
+        std::vector<std::string> ids;
+        StringHelpFunctions::SplitStringByDelimeter(query_ids->c_str(), ",", ids);
 
         std::vector<int64_t> vector_ids;
         for (auto& id : ids) {
-            vector_ids.push_back(std::stol(id.get<std::string>()));
+            vector_ids.push_back(std::stol(id));
         }
         engine::VectorsData vectors;
         nlohmann::json vectors_json;
