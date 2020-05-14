@@ -33,6 +33,7 @@
 #include "server/web_impl/handler/WebRequestHandler.h"
 #include "src/version.h"
 #include "utils/CommonUtil.h"
+#include "utils/StringHelpFunctions.h"
 
 static const char* COLLECTION_NAME = "test_web";
 
@@ -325,7 +326,7 @@ class TestClient : public oatpp::web::client::ApiClient {
              PATH(String, collection_name, "collection_name"))
 
     API_CALL("GET", "/collections/{collection_name}/vectors", getVectors,
-             PATH(String, collection_name, "collection_name"), BODY_STRING(String, body))
+             PATH(String, collection_name, "collection_name"), QUERY(String, ids))
 
     API_CALL("POST", "/collections/{collection_name}/vectors", insert,
              PATH(String, collection_name, "collection_name"), BODY_STRING(String, body))
@@ -1302,9 +1303,10 @@ TEST_F(WebControllerTest, GET_VECTORS_BY_IDS) {
     for (size_t i = 0; i < 10; i++) {
         vector_ids.emplace_back(ids.at(i));
     }
-    auto body = nlohmann::json();
-    body["ids"] = vector_ids;
-    auto response = client_ptr->getVectors(collection_name, body.dump().c_str(), conncetion_ptr);
+
+    std::string query_ids;
+    milvus::server::StringHelpFunctions::MergeStringWithDelimeter(vector_ids, ",", query_ids);
+    auto response = client_ptr->getVectors(collection_name, query_ids.c_str(), conncetion_ptr);
     ASSERT_EQ(OStatus::CODE_200.code, response->getStatusCode()) << response->readBodyToString()->c_str();
 
     // validate result
@@ -1329,7 +1331,7 @@ TEST_F(WebControllerTest, GET_VECTORS_BY_IDS) {
     ASSERT_EQ(64, vec.size());
 
     // non-existent collection
-    response = client_ptr->getVectors(collection_name + "_non_existent", body.dump().c_str(), conncetion_ptr);
+    response = client_ptr->getVectors(collection_name + "_non_existent", query_ids.c_str(), conncetion_ptr);
     ASSERT_EQ(OStatus::CODE_404.code, response->getStatusCode()) << response->readBodyToString()->c_str();
 }
 
