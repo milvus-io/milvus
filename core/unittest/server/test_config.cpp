@@ -395,7 +395,7 @@ TEST_F(ConfigTest, SERVER_CONFIG_VALID_TEST) {
     ASSERT_TRUE(config.GetLogsPath(str_val).ok());
     ASSERT_TRUE(str_val == logs_path);
 
-    int64_t logs_max_log_file_size = 500;
+    int64_t logs_max_log_file_size = 1000;
     ASSERT_TRUE(config.SetLogsMaxLogFileSize(std::to_string(logs_max_log_file_size)).ok());
     ASSERT_TRUE(config.GetLogsMaxLogFileSize(int64_val).ok());
     ASSERT_TRUE(int64_val == logs_max_log_file_size);
@@ -746,9 +746,9 @@ TEST_F(ConfigTest, SERVER_CONFIG_INVALID_TEST) {
     ASSERT_FALSE(config.SetLogsFatalEnable("invalid").ok());
     ASSERT_FALSE(config.SetLogsPath("").ok());
     ASSERT_FALSE(config.SetLogsMaxLogFileSize("-1").ok());
-    ASSERT_FALSE(config.SetLogsMaxLogFileSize("513").ok());
+    ASSERT_FALSE(config.SetLogsMaxLogFileSize("511").ok());
     ASSERT_FALSE(config.SetLogsLogRotateNum("-1").ok());
-    ASSERT_FALSE(config.SetLogsLogRotateNum("513").ok());
+    ASSERT_FALSE(config.SetLogsLogRotateNum("1025").ok());
 }
 
 TEST_F(ConfigTest, SERVER_CONFIG_TEST) {

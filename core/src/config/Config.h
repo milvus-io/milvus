@@ -135,8 +135,8 @@ extern const char* CONFIG_WAL_RECOVERY_ERROR_IGNORE;
 extern const char* CONFIG_WAL_RECOVERY_ERROR_IGNORE_DEFAULT;
 extern const char* CONFIG_WAL_BUFFER_SIZE;
 extern const char* CONFIG_WAL_BUFFER_SIZE_DEFAULT;
-extern const int64_t CONFIG_WAL_BUFFER_SIZE_MAX;
 extern const int64_t CONFIG_WAL_BUFFER_SIZE_MIN;
+extern const int64_t CONFIG_WAL_BUFFER_SIZE_MAX;
 extern const char* CONFIG_WAL_WAL_PATH;
 extern const char* CONFIG_WAL_WAL_PATH_DEFAULT;
 
@@ -157,12 +157,12 @@ extern const char* CONFIG_LOGS_FATAL_ENABLE_DEFAULT;
 extern const char* CONFIG_LOGS_PATH;
 extern const char* CONFIG_LOGS_MAX_LOG_FILE_SIZE;
 extern const char* CONFIG_LOGS_MAX_LOG_FILE_SIZE_DEFAULT;
-extern const int64_t CONFIG_LOGS_MAX_LOG_FILE_SIZE_MAX;
 extern const int64_t CONFIG_LOGS_MAX_LOG_FILE_SIZE_MIN;
+extern const int64_t CONFIG_LOGS_MAX_LOG_FILE_SIZE_MAX;
 extern const char* CONFIG_LOGS_LOG_ROTATE_NUM;
 extern const char* CONFIG_LOGS_LOG_ROTATE_NUM_DEFAULT;
-extern const int64_t CONFIG_LOGS_LOG_ROTATE_NUM_MAX;
 extern const int64_t CONFIG_LOGS_LOG_ROTATE_NUM_MIN;
+extern const int64_t CONFIG_LOGS_LOG_ROTATE_NUM_MAX;
 
 class Config {
  private:
