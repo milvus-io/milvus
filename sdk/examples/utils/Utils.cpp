@@ -248,11 +248,9 @@ Utils::GenLeafQuery() {
     for (uint64_t i = 0; i < row_num; ++i) {
         field_value[i] = i;
     }
-    std::vector<int8_t> term_value(row_num * sizeof(int64_t));
-    memcpy(term_value.data(), field_value.data(), row_num * sizeof(int64_t));
     milvus::TermQueryPtr tq = std::make_shared<milvus::TermQuery>();
     tq->field_name = "field_1";
-    tq->field_value = term_value;
+    tq->int_value = field_value;
 
     //Construct RangeQuery
     milvus::CompareExpr ce1 = {milvus::CompareOperator::LTE, "10000"}, ce2 = {milvus::CompareOperator::GTE, "1"};

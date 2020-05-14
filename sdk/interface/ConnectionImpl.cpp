@@ -119,11 +119,7 @@ Status
 ConnectionImpl::Search(const std::string& collection_name, const PartitionTagList& partition_tag_array,
                        const std::vector<Entity>& entity_array, int64_t topk, const std::string& extra_params,
                        TopKQueryResult& topk_query_result) {
-    return client_proxy_->Search(collection_name,
-                                 partition_tag_array,
-                                 entity_array,
-                                 topk,
-                                 extra_params,
+    return client_proxy_->Search(collection_name, partition_tag_array, entity_array, topk, extra_params,
                                  topk_query_result);
 }
 
@@ -205,20 +201,22 @@ ConnectionImpl::CreateHybridCollection(const HMapping& mapping) {
 }
 
 Status
-ConnectionImpl::InsertEntity(const std::string& collection_name,
-                             const std::string& partition_tag,
-                             HEntity& entities,
+ConnectionImpl::InsertEntity(const std::string& collection_name, const std::string& partition_tag, HEntity& entities,
                              std::vector<uint64_t>& id_array) {
     return client_proxy_->InsertEntity(collection_name, partition_tag, entities, id_array);
 }
 
 Status
-ConnectionImpl::HybridSearch(const std::string& collection_name,
-                             const std::vector<std::string>& partition_list,
-                             BooleanQueryPtr& boolean_query,
-                             const std::string& extra_params,
-                             TopKQueryResult& topk_query_result) {
+ConnectionImpl::HybridSearch(const std::string& collection_name, const std::vector<std::string>& partition_list,
+                             BooleanQueryPtr& boolean_query, const std::string& extra_params,
+                             TopKHybridQueryResult& topk_query_result) {
     return client_proxy_->HybridSearch(collection_name, partition_list, boolean_query, extra_params, topk_query_result);
+}
+
+Status
+ConnectionImpl::GetHEntityByID(const std::string& collection_name, const std::vector<int64_t>& id_array,
+                               milvus::HybridQueryResult& result) {
+    return client_proxy_->GetHEntityByID(collection_name, id_array, result);
 }
 
 }  // namespace milvus

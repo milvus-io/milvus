@@ -13,8 +13,8 @@
 
 #include <memory>
 #include <string>
-#include <vector>
 #include <unordered_map>
+#include <vector>
 
 #include "BooleanQuery.h"
 #include "Field.h"
@@ -42,12 +42,12 @@ enum class IndexType {
 };
 
 enum class MetricType {
-    L2 = 1,        // Euclidean Distance
-    IP = 2,        // Cosine Similarity
-    HAMMING = 3,   // Hamming Distance
-    JACCARD = 4,   // Jaccard Distance
-    TANIMOTO = 5,  // Tanimoto Distance
-    SUBSTRUCTURE = 6,   // Substructure Distance
+    L2 = 1,              // Euclidean Distance
+    IP = 2,              // Cosine Similarity
+    HAMMING = 3,         // Hamming Distance
+    JACCARD = 4,         // Jaccard Distance
+    TANIMOTO = 5,        // Tanimoto Distance
+    SUBSTRUCTURE = 6,    // Substructure Distance
     SUPERSTRUCTURE = 7,  // Superstructure Distance
 };
 
@@ -79,6 +79,25 @@ struct QueryResult {
 using TopKQueryResult = std::vector<QueryResult>;  ///< Topk query result
 
 /**
+ * @brief Attribute record
+ */
+struct AttrRecord {
+    std::vector<int64_t> int_record;
+    std::vector<double> double_record;
+};
+
+/**
+ * @brief Hybrid query result
+ */
+struct HybridQueryResult {
+    std::vector<int64_t> ids;                                                 ///< Query entity ids result
+    std::vector<float> distances;                                             ///< Query distances result
+    std::vector<std::pair<std::string, AttrRecord>> attr_records;             ///< Query attributes result
+    std::vector<std::pair<std::string, std::vector<Entity>>> vector_records;  ///< Query vectors result
+};
+using TopKHybridQueryResult = std::vector<HybridQueryResult>;  ///< Topk hybrid query result
+
+/**
  * @brief Index parameters
  * Note: extra_params is extra parameters list, it must be json format
  *       For different index type, parameter list is different accordingly, for example:
@@ -97,9 +116,9 @@ using TopKQueryResult = std::vector<QueryResult>;  ///< Topk query result
  *           ///< efConstruction range:[100, 500]
  */
 struct IndexParam {
-    std::string collection_name;        ///< Collection name for create index
-    IndexType index_type;               ///< Index type
-    std::string extra_params;           ///< Extra parameters according to different index type, must be json format
+    std::string collection_name;  ///< Collection name for create index
+    IndexType index_type;         ///< Index type
+    std::string extra_params;     ///< Extra parameters according to different index type, must be json format
 };
 
 /**
@@ -112,7 +131,6 @@ struct PartitionParam {
 
 using PartitionTagList = std::vector<std::string>;
 
-
 struct HMapping {
     std::string collection_name;
     std::vector<FieldPtr> numerica_fields;
@@ -121,7 +139,8 @@ struct HMapping {
 
 struct HEntity {
     int64_t row_num;
-    std::unordered_map<std::string, std::vector<int8_t>> numerica_value;
+    std::unordered_map<std::string, std::vector<int64_t>> numerica_int_value;
+    std::unordered_map<std::string, std::vector<double>> numerica_double_value;
     std::unordered_map<std::string, std::vector<Entity>> vector_value;
 };
 
@@ -321,10 +340,8 @@ class Connection {
      * @return Indicate if entity array are inserted successfully
      */
     virtual Status
-    Insert(const std::string& collection_name,
-           const std::string& partition_tag,
-           const std::vector<Entity>& entity_array,
-           std::vector<int64_t>& id_array) = 0;
+    Insert(const std::string& collection_name, const std::string& partition_tag,
+           const std::vector<Entity>& entity_array, std::vector<int64_t>& id_array) = 0;
 
     /**
      * @brief Get entity data by id
@@ -384,8 +401,8 @@ class Connection {
      */
     virtual Status
     Search(const std::string& collection_name, const PartitionTagList& partition_tag_array,
-           const std::vector<Entity>& entity_array, int64_t topk,
-           const std::string& extra_params, TopKQueryResult& topk_query_result) = 0;
+           const std::vector<Entity>& entity_array, int64_t topk, const std::string& extra_params,
+           TopKQueryResult& topk_query_result) = 0;
 
     /**
      * @brief Get collection information
@@ -568,17 +585,17 @@ class Connection {
     CreateHybridCollection(const HMapping& mapping) = 0;
 
     virtual Status
-    InsertEntity(const std::string& collection_name,
-                 const std::string& partition_tag,
-                 HEntity& entities,
+    InsertEntity(const std::string& collection_name, const std::string& partition_tag, HEntity& entities,
                  std::vector<uint64_t>& id_array) = 0;
 
     virtual Status
-    HybridSearch(const std::string& collection_name,
-                 const std::vector<std::string>& partition_list,
-                 BooleanQueryPtr& boolean_query,
-                 const std::string& extra_params,
-                 TopKQueryResult& topk_query_result) = 0;
+    HybridSearch(const std::string& collection_name, const std::vector<std::string>& partition_list,
+                 BooleanQueryPtr& boolean_query, const std::string& extra_params,
+                 TopKHybridQueryResult& query_result) = 0;
+
+    virtual Status
+    GetHEntityByID(const std::string& collection_name, const std::vector<int64_t>& id_array,
+                   HybridQueryResult& result) = 0;
 };
 
 }  // namespace milvus
