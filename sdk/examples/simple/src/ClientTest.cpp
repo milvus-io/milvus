@@ -33,7 +33,7 @@ constexpr int64_t TOP_K = 10;
 constexpr int64_t NPROBE = 32;
 constexpr int64_t SEARCH_TARGET = BATCH_ENTITY_COUNT / 2;  // change this value, result is different
 constexpr int64_t ADD_ENTITY_LOOP = 5;
-constexpr milvus::IndexType INDEX_TYPE = milvus::IndexType::IVFSQ8;
+constexpr milvus::IndexType INDEX_TYPE = milvus::IndexType::IVFFLAT;
 constexpr int32_t NLIST = 16384;
 
 void
@@ -195,15 +195,19 @@ ClientTest::SearchEntitiesByID(const std::string& collection_name, int64_t topk,
         id_array.push_back(pair.first);
     }
 
+    std::vector<milvus::Entity> entities;
+    milvus::Status stat = conn_->GetEntityByID(collection_name, id_array, entities);
+    std::cout << "GetEntityByID function call status: " << stat.message() << std::endl;
+
     JSON json_params = {{"nprobe", nprobe}};
-    milvus_sdk::TimeRecorder rc("SearchByID");
-    milvus::Status stat = conn_->SearchByID(collection_name,
-                                            partition_tags,
-                                            id_array,
-                                            topk,
-                                            json_params.dump(),
-                                            topk_query_result);
-    std::cout << "SearchByID function call status: " << stat.message() << std::endl;
+    milvus_sdk::TimeRecorder rc("Search");
+    stat = conn_->Search(collection_name,
+                         partition_tags,
+                         entities,
+                         topk,
+                         json_params.dump(),
+                         topk_query_result);
+    std::cout << "Search function call status: " << stat.message() << std::endl;
 
     if (topk_query_result.size() != id_array.size()) {
         std::cout << "ERROR! wrong result for query by id" << std::endl;
