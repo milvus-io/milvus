@@ -217,7 +217,7 @@ Server::Start() {
             STATUS_CHECK(config.GetLogsFatalEnable(fatal_enable));
             STATUS_CHECK(config.GetLogsPath(logs_path));
             STATUS_CHECK(config.GetLogsMaxLogFileSize(max_log_file_size));
-            STATUS_CHECK(config.GetLogsDeleteExceeds(delete_exceeds));
+            STATUS_CHECK(config.GetLogsLogRotateNum(delete_exceeds));
             InitLog(trace_enable, debug_enable, info_enable, warning_enable, error_enable, fatal_enable, logs_path,
                     max_log_file_size, delete_exceeds);
         }

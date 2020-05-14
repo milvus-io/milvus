@@ -134,7 +134,6 @@ TEST_F(ConfigTest, CONFIG_TEST) {
 }
 
 TEST_F(ConfigTest, SERVER_CONFIG_VALID_TEST) {
-    std::string config_path(CONFIG_PATH);
     milvus::server::Config& config = milvus::server::Config::GetInstance();
     std::string str_val;
     int64_t int64_val;
@@ -359,6 +358,52 @@ TEST_F(ConfigTest, SERVER_CONFIG_VALID_TEST) {
     ASSERT_TRUE(config.SetWalConfigWalPath(wal_path).ok());
     ASSERT_TRUE(config.GetWalConfigWalPath(str_val).ok());
     ASSERT_TRUE(str_val == wal_path);
+
+    /* logs config */
+    bool logs_trace_enable = false;
+    ASSERT_TRUE(config.SetLogsTraceEnable(std::to_string(logs_trace_enable)).ok());
+    ASSERT_TRUE(config.GetLogsTraceEnable(bool_val).ok());
+    ASSERT_TRUE(bool_val == logs_trace_enable);
+
+    bool logs_debug_enable = false;
+    ASSERT_TRUE(config.SetLogsDebugEnable(std::to_string(logs_debug_enable)).ok());
+    ASSERT_TRUE(config.GetLogsDebugEnable(bool_val).ok());
+    ASSERT_TRUE(bool_val == logs_debug_enable);
+
+    bool logs_info_enable = false;
+    ASSERT_TRUE(config.SetLogsTraceEnable(std::to_string(logs_info_enable)).ok());
+    ASSERT_TRUE(config.GetLogsTraceEnable(bool_val).ok());
+    ASSERT_TRUE(bool_val == logs_info_enable);
+
+    bool logs_warning_enable = false;
+    ASSERT_TRUE(config.SetLogsDebugEnable(std::to_string(logs_warning_enable)).ok());
+    ASSERT_TRUE(config.GetLogsDebugEnable(bool_val).ok());
+    ASSERT_TRUE(bool_val == logs_warning_enable);
+
+    bool logs_error_enable = false;
+    ASSERT_TRUE(config.SetLogsTraceEnable(std::to_string(logs_error_enable)).ok());
+    ASSERT_TRUE(config.GetLogsTraceEnable(bool_val).ok());
+    ASSERT_TRUE(bool_val == logs_error_enable);
+
+    bool logs_fatal_enable = false;
+    ASSERT_TRUE(config.SetLogsDebugEnable(std::to_string(logs_fatal_enable)).ok());
+    ASSERT_TRUE(config.GetLogsDebugEnable(bool_val).ok());
+    ASSERT_TRUE(bool_val == logs_fatal_enable);
+
+    std::string logs_path = "/tmp/aaa/logs";
+    ASSERT_TRUE(config.SetLogsPath(logs_path).ok());
+    ASSERT_TRUE(config.GetLogsPath(str_val).ok());
+    ASSERT_TRUE(str_val == logs_path);
+
+    int64_t logs_max_log_file_size = 1000;
+    ASSERT_TRUE(config.SetLogsMaxLogFileSize(std::to_string(logs_max_log_file_size)).ok());
+    ASSERT_TRUE(config.GetLogsMaxLogFileSize(int64_val).ok());
+    ASSERT_TRUE(int64_val == logs_max_log_file_size);
+
+    int64_t logs_log_rotate_num = 100;
+    ASSERT_TRUE(config.SetLogsLogRotateNum(std::to_string(logs_log_rotate_num)).ok());
+    ASSERT_TRUE(config.GetLogsLogRotateNum(int64_val).ok());
+    ASSERT_TRUE(int64_val == logs_log_rotate_num);
 }
 
 std::string
@@ -374,14 +419,13 @@ gen_set_command(const std::string& parent_node, const std::string& child_node, c
 }
 
 TEST_F(ConfigTest, SERVER_CONFIG_CLI_TEST) {
-    std::string config_path(CONFIG_PATH);
-    milvus::Status s;
-
     std::string conf_file = std::string(CONFIG_PATH) + VALID_CONFIG_FILE;
     milvus::server::Config& config = milvus::server::Config::GetInstance();
 
-    auto status = config.LoadConfigFile(conf_file);
-    ASSERT_TRUE(status.ok()) << status.message();
+    auto s = config.LoadConfigFile(conf_file);
+    ASSERT_TRUE(s.ok()) << s.message();
+    s = config.ResetDefaultConfig();
+    ASSERT_TRUE(s.ok());
 
     std::string get_cmd, set_cmd;
     std::string result, dummy;
@@ -549,6 +593,24 @@ TEST_F(ConfigTest, SERVER_CONFIG_CLI_TEST) {
     ASSERT_TRUE(s.ok());
     ASSERT_TRUE(result == build_index_resources);
 #endif
+
+    /* wal config */
+    std::string wal_path = "/tmp/aaa/wal";
+    get_cmd = gen_get_command(ms::CONFIG_WAL, ms::CONFIG_WAL_WAL_PATH);
+    set_cmd = gen_set_command(ms::CONFIG_WAL, ms::CONFIG_WAL_WAL_PATH, wal_path);
+    s = config.ProcessConfigCli(dummy, set_cmd);
+    ASSERT_TRUE(s.ok());
+    s = config.ProcessConfigCli(result, get_cmd);
+    ASSERT_TRUE(s.ok());
+
+    /* logs config */
+    std::string logs_path = "/tmp/aaa/logs";
+    get_cmd = gen_get_command(ms::CONFIG_LOGS, ms::CONFIG_LOGS_PATH);
+    set_cmd = gen_set_command(ms::CONFIG_LOGS, ms::CONFIG_LOGS_PATH, logs_path);
+    s = config.ProcessConfigCli(dummy, set_cmd);
+    ASSERT_TRUE(s.ok());
+    s = config.ProcessConfigCli(result, get_cmd);
+    ASSERT_TRUE(s.ok());
 }
 
 TEST_F(ConfigTest, SERVER_CONFIG_INVALID_TEST) {
@@ -674,6 +736,19 @@ TEST_F(ConfigTest, SERVER_CONFIG_INVALID_TEST) {
     ASSERT_FALSE(config.SetWalConfigWalPath("").ok());
     ASSERT_FALSE(config.SetWalConfigBufferSize("-1").ok());
     ASSERT_FALSE(config.SetWalConfigBufferSize("a").ok());
+
+    /* wal config */
+    ASSERT_FALSE(config.SetLogsTraceEnable("invalid").ok());
+    ASSERT_FALSE(config.SetLogsDebugEnable("invalid").ok());
+    ASSERT_FALSE(config.SetLogsInfoEnable("invalid").ok());
+    ASSERT_FALSE(config.SetLogsWarningEnable("invalid").ok());
+    ASSERT_FALSE(config.SetLogsErrorEnable("invalid").ok());
+    ASSERT_FALSE(config.SetLogsFatalEnable("invalid").ok());
+    ASSERT_FALSE(config.SetLogsPath("").ok());
+    ASSERT_FALSE(config.SetLogsMaxLogFileSize("-1").ok());
+    ASSERT_FALSE(config.SetLogsMaxLogFileSize("511").ok());
+    ASSERT_FALSE(config.SetLogsLogRotateNum("-1").ok());
+    ASSERT_FALSE(config.SetLogsLogRotateNum("1025").ok());
 }
 
 TEST_F(ConfigTest, SERVER_CONFIG_TEST) {
@@ -919,6 +994,52 @@ TEST_F(ConfigTest, SERVER_CONFIG_VALID_FAIL_TEST) {
     s = config.ValidateConfig();
     ASSERT_FALSE(s.ok());
     fiu_disable("check_wal_path_fail");
+
+    /* logs config */
+    fiu_enable("check_logs_trace_enable_fail", 1, NULL, 0);
+    s = config.ValidateConfig();
+    ASSERT_FALSE(s.ok());
+    fiu_disable("check_logs_trace_enable_fail");
+
+    fiu_enable("check_logs_debug_enable_fail", 1, NULL, 0);
+    s = config.ValidateConfig();
+    ASSERT_FALSE(s.ok());
+    fiu_disable("check_logs_debug_enable_fail");
+
+    fiu_enable("check_logs_info_enable_fail", 1, NULL, 0);
+    s = config.ValidateConfig();
+    ASSERT_FALSE(s.ok());
+    fiu_disable("check_logs_info_enable_fail");
+
+    fiu_enable("check_logs_warning_enable_fail", 1, NULL, 0);
+    s = config.ValidateConfig();
+    ASSERT_FALSE(s.ok());
+    fiu_disable("check_logs_warning_enable_fail");
+
+    fiu_enable("check_logs_error_enable_fail", 1, NULL, 0);
+    s = config.ValidateConfig();
+    ASSERT_FALSE(s.ok());
+    fiu_disable("check_logs_error_enable_fail");
+
+    fiu_enable("check_logs_fatal_enable_fail", 1, NULL, 0);
+    s = config.ValidateConfig();
+    ASSERT_FALSE(s.ok());
+    fiu_disable("check_logs_fatal_enable_fail");
+
+    fiu_enable("check_logs_path_fail", 1, NULL, 0);
+    s = config.ValidateConfig();
+    ASSERT_FALSE(s.ok());
+    fiu_disable("check_logs_path_fail");
+
+    fiu_enable("check_logs_max_log_file_size_fail", 1, NULL, 0);
+    s = config.ValidateConfig();
+    ASSERT_FALSE(s.ok());
+    fiu_disable("check_logs_max_log_file_size_fail");
+
+    fiu_enable("check_logs_log_rotate_num_fail", 1, NULL, 0);
+    s = config.ValidateConfig();
+    ASSERT_FALSE(s.ok());
+    fiu_disable("check_logs_log_rotate_num_fail");
 }
 
 TEST_F(ConfigTest, SERVER_CONFIG_RESET_DEFAULT_CONFIG_FAIL_TEST) {
@@ -1088,6 +1209,52 @@ TEST_F(ConfigTest, SERVER_CONFIG_RESET_DEFAULT_CONFIG_FAIL_TEST) {
     s = config.ResetDefaultConfig();
     ASSERT_FALSE(s.ok());
     fiu_disable("check_wal_path_fail");
+
+    /* logs config */
+    fiu_enable("check_logs_trace_enable_fail", 1, NULL, 0);
+    s = config.ResetDefaultConfig();
+    ASSERT_FALSE(s.ok());
+    fiu_disable("check_logs_trace_enable_fail");
+
+    fiu_enable("check_logs_debug_enable_fail", 1, NULL, 0);
+    s = config.ResetDefaultConfig();
+    ASSERT_FALSE(s.ok());
+    fiu_disable("check_logs_debug_enable_fail");
+
+    fiu_enable("check_logs_info_enable_fail", 1, NULL, 0);
+    s = config.ResetDefaultConfig();
+    ASSERT_FALSE(s.ok());
+    fiu_disable("check_logs_info_enable_fail");
+
+    fiu_enable("check_logs_warning_enable_fail", 1, NULL, 0);
+    s = config.ResetDefaultConfig();
+    ASSERT_FALSE(s.ok());
+    fiu_disable("check_logs_warning_enable_fail");
+
+    fiu_enable("check_logs_error_enable_fail", 1, NULL, 0);
+    s = config.ResetDefaultConfig();
+    ASSERT_FALSE(s.ok());
+    fiu_disable("check_logs_error_enable_fail");
+
+    fiu_enable("check_logs_fatal_enable_fail", 1, NULL, 0);
+    s = config.ResetDefaultConfig();
+    ASSERT_FALSE(s.ok());
+    fiu_disable("check_logs_fatal_enable_fail");
+
+    fiu_enable("check_logs_path_fail", 1, NULL, 0);
+    s = config.ResetDefaultConfig();
+    ASSERT_FALSE(s.ok());
+    fiu_disable("check_logs_path_fail");
+
+    fiu_enable("check_logs_max_log_file_size_fail", 1, NULL, 0);
+    s = config.ResetDefaultConfig();
+    ASSERT_FALSE(s.ok());
+    fiu_disable("check_logs_max_log_file_size_fail");
+
+    fiu_enable("check_logs_log_rotate_num_fail", 1, NULL, 0);
+    s = config.ResetDefaultConfig();
+    ASSERT_FALSE(s.ok());
+    fiu_disable("check_logs_log_rotate_num_fail");
 }
 
 TEST_F(ConfigTest, SERVER_CONFIG_OTHER_CONFIGS_FAIL_TEST) {

@@ -76,6 +76,8 @@ const char* CONFIG_STORAGE_SECONDARY_PATH = "secondary_path";
 const char* CONFIG_STORAGE_SECONDARY_PATH_DEFAULT = "";
 const char* CONFIG_STORAGE_FILE_CLEANUP_TIMEOUT = "file_cleanup_timeout";
 const char* CONFIG_STORAGE_FILE_CLEANUP_TIMEOUT_DEFAULT = "10";
+const int64_t CONFIG_STORAGE_FILE_CLEANUP_TIMEOUT_MIN = 0;
+const int64_t CONFIG_STORAGE_FILE_CLEANUP_TIMEOUT_MAX = 3600;
 // const char* CONFIG_STORAGE_S3_ENABLE = "s3_enable";
 // const char* CONFIG_STORAGE_S3_ENABLE_DEFAULT = "false";
 // const char* CONFIG_STORAGE_S3_ADDRESS = "s3_address";
@@ -150,8 +152,8 @@ const char* CONFIG_WAL_RECOVERY_ERROR_IGNORE = "recovery_error_ignore";
 const char* CONFIG_WAL_RECOVERY_ERROR_IGNORE_DEFAULT = "true";
 const char* CONFIG_WAL_BUFFER_SIZE = "buffer_size";
 const char* CONFIG_WAL_BUFFER_SIZE_DEFAULT = "256";
-const int64_t CONFIG_WAL_BUFFER_SIZE_MAX = 4096;
 const int64_t CONFIG_WAL_BUFFER_SIZE_MIN = 64;
+const int64_t CONFIG_WAL_BUFFER_SIZE_MAX = 4096;
 const char* CONFIG_WAL_WAL_PATH = "wal_path";
 const char* CONFIG_WAL_WAL_PATH_DEFAULT = "/tmp/milvus/wal";
 
@@ -172,13 +174,13 @@ const char* CONFIG_LOGS_FATAL_ENABLE_DEFAULT = "true";
 const char* CONFIG_LOGS_PATH = "path";
 const char* CONFIG_LOGS_PATH_DEFAULT = "/tmp/milvus/logs";
 const char* CONFIG_LOGS_MAX_LOG_FILE_SIZE = "max_log_file_size";
-const char* CONFIG_LOGS_MAX_LOG_FILE_SIZE_DEFAULT = "256";
-const int64_t CONFIG_LOGS_MAX_LOG_FILE_SIZE_MAX = 512;
-const int64_t CONFIG_LOGS_MAX_LOG_FILE_SIZE_MIN = 64;
-const char* CONFIG_LOGS_DELETE_EXCEEDS = "delete_exceeds";
-const char* CONFIG_LOGS_DELETE_EXCEEDS_DEFAULT = "10";
-const int64_t CONFIG_LOGS_DELETE_EXCEEDS_MAX = 4096;
-const int64_t CONFIG_LOGS_DELETE_EXCEEDS_MIN = 1;
+const char* CONFIG_LOGS_MAX_LOG_FILE_SIZE_DEFAULT = "1024";
+const int64_t CONFIG_LOGS_MAX_LOG_FILE_SIZE_MIN = 512;
+const int64_t CONFIG_LOGS_MAX_LOG_FILE_SIZE_MAX = 4096;
+const char* CONFIG_LOGS_LOG_ROTATE_NUM = "log_rotate_num";
+const char* CONFIG_LOGS_LOG_ROTATE_NUM_DEFAULT = "0";
+const int64_t CONFIG_LOGS_LOG_ROTATE_NUM_MIN = 0;
+const int64_t CONFIG_LOGS_LOG_ROTATE_NUM_MAX = 1024;
 
 constexpr int64_t GB = 1UL << 30;
 constexpr int32_t PORT_NUMBER_MIN = 1024;
@@ -416,8 +418,8 @@ Config::ValidateConfig() {
     int64_t logs_max_log_file_size;
     STATUS_CHECK(GetLogsMaxLogFileSize(logs_max_log_file_size));
 
-    int64_t delete_exceeds;
-    STATUS_CHECK(GetLogsDeleteExceeds(delete_exceeds));
+    int64_t logs_log_rotate_num;
+    STATUS_CHECK(GetLogsLogRotateNum(logs_log_rotate_num));
 
     return Status::OK();
 }
@@ -493,7 +495,7 @@ Config::ResetDefaultConfig() {
     STATUS_CHECK(SetLogsFatalEnable(CONFIG_LOGS_FATAL_ENABLE_DEFAULT));
     STATUS_CHECK(SetLogsPath(CONFIG_LOGS_PATH_DEFAULT));
     STATUS_CHECK(SetLogsMaxLogFileSize(CONFIG_LOGS_MAX_LOG_FILE_SIZE_DEFAULT));
-    STATUS_CHECK(SetLogsDeleteExceeds(CONFIG_LOGS_DELETE_EXCEEDS_DEFAULT));
+    STATUS_CHECK(SetLogsLogRotateNum(CONFIG_LOGS_LOG_ROTATE_NUM_DEFAULT));
 
     return Status::OK();
 }
@@ -632,6 +634,28 @@ Config::SetConfigCli(const std::string& parent_key, const std::string& child_key
             status = SetWalConfigBufferSize(value);
         } else if (child_key == CONFIG_WAL_WAL_PATH) {
             status = SetWalConfigWalPath(value);
+        } else {
+            status = Status(SERVER_UNEXPECTED_ERROR, invalid_node_str);
+        }
+    } else if (parent_key == CONFIG_LOGS) {
+        if (child_key == CONFIG_LOGS_TRACE_ENABLE) {
+            status = SetLogsTraceEnable(value);
+        } else if (child_key == CONFIG_LOGS_DEBUG_ENABLE) {
+            status = SetLogsDebugEnable(value);
+        } else if (child_key == CONFIG_LOGS_INFO_ENABLE) {
+            status = SetLogsInfoEnable(value);
+        } else if (child_key == CONFIG_LOGS_WARNING_ENABLE) {
+            status = SetLogsWarningEnable(value);
+        } else if (child_key == CONFIG_LOGS_ERROR_ENABLE) {
+            status = SetLogsErrorEnable(value);
+        } else if (child_key == CONFIG_LOGS_FATAL_ENABLE) {
+            status = SetLogsFatalEnable(value);
+        } else if (child_key == CONFIG_LOGS_PATH) {
+            status = SetLogsPath(value);
+        } else if (child_key == CONFIG_LOGS_MAX_LOG_FILE_SIZE) {
+            status = SetLogsMaxLogFileSize(value);
+        } else if (child_key == CONFIG_LOGS_LOG_ROTATE_NUM) {
+            status = SetLogsLogRotateNum(value);
         } else {
             status = Status(SERVER_UNEXPECTED_ERROR, invalid_node_str);
         }
@@ -1086,23 +1110,18 @@ Config::CheckStorageConfigSecondaryPath(const std::string& value) {
 
 Status
 Config::CheckStorageConfigFileCleanupTimeout(const std::string& value) {
-    auto status = Status::OK();
-
-    if (value.empty()) {
-        return status;
-    }
-
     if (!ValidationUtil::ValidateStringIsNumber(value).ok()) {
-        std::string msg = "Invalid file cleanup timeout: " + value +
+        std::string msg = "Invalid file_cleanup_timeout: " + value +
                           ". Possible reason: storage_config.file_cleanup_timeout is not a positive integer.";
         return Status(SERVER_INVALID_ARGUMENT, msg);
     } else {
-        const int64_t min = 0, max = 3600;
         int64_t file_cleanup_timeout = std::stoll(value);
-        if (file_cleanup_timeout < min || file_cleanup_timeout > max) {
-            std::string msg = "Invalid file cleanup timeout: " + value +
+        if (file_cleanup_timeout < CONFIG_STORAGE_FILE_CLEANUP_TIMEOUT_MIN ||
+            file_cleanup_timeout > CONFIG_STORAGE_FILE_CLEANUP_TIMEOUT_MAX) {
+            std::string msg = "Invalid file_cleanup_timeout: " + value +
                               ". Possible reason: storage_config.file_cleanup_timeout is not in range [" +
-                              std::to_string(min) + ", " + std::to_string(max) + "].";
+                              std::to_string(CONFIG_STORAGE_FILE_CLEANUP_TIMEOUT_MIN) + ", " +
+                              std::to_string(CONFIG_STORAGE_FILE_CLEANUP_TIMEOUT_MIN) + "].";
             return Status(SERVER_INVALID_ARGUMENT, msg);
         }
     }
@@ -1673,19 +1692,38 @@ Config::CheckLogsMaxLogFileSize(const std::string& value) {
         std::string msg = "Invalid max_log_file_size: " + value +
                           ". Possible reason: logs.max_log_file_size is not a positive integer.";
         return Status(SERVER_INVALID_ARGUMENT, msg);
+    } else {
+        int64_t max_log_file_size = std::stoll(value);
+        if (max_log_file_size < CONFIG_LOGS_MAX_LOG_FILE_SIZE_MIN ||
+            max_log_file_size > CONFIG_LOGS_MAX_LOG_FILE_SIZE_MAX) {
+            std::string msg = "Invalid max_log_file_size: " + value +
+                              ". Possible reason: logs.max_log_file_size is not in range [" +
+                              std::to_string(CONFIG_LOGS_MAX_LOG_FILE_SIZE_MIN) + ", " +
+                              std::to_string(CONFIG_LOGS_MAX_LOG_FILE_SIZE_MAX) + "].";
+            return Status(SERVER_INVALID_ARGUMENT, msg);
+        }
     }
     return Status::OK();
 }
 
 Status
-Config::CheckLogsDeleteExceeds(const std::string& value) {
+Config::CheckLogsLogRotateNum(const std::string& value) {
     auto exist_error = !ValidationUtil::ValidateStringIsNumber(value).ok();
-    fiu_do_on("check_logs_delete_exceeds_fail", exist_error = true);
+    fiu_do_on("check_logs_log_rotate_num_fail", exist_error = true);
 
     if (exist_error) {
-        std::string msg = "Invalid max_log_file_size: " + value +
-                          ". Possible reason: logs.max_log_file_size is not a positive integer.";
+        std::string msg =
+            "Invalid log_rotate_num: " + value + ". Possible reason: logs.log_rotate_num is not a positive integer.";
         return Status(SERVER_INVALID_ARGUMENT, msg);
+    } else {
+        int64_t log_rotate_num = std::stoll(value);
+        if (log_rotate_num < CONFIG_LOGS_LOG_ROTATE_NUM_MIN || log_rotate_num > CONFIG_LOGS_LOG_ROTATE_NUM_MAX) {
+            std::string msg = "Invalid log_rotate_num: " + value +
+                              ". Possible reason: logs.log_rotate_num is not in range [" +
+                              std::to_string(CONFIG_LOGS_LOG_ROTATE_NUM_MIN) + ", " +
+                              std::to_string(CONFIG_LOGS_LOG_ROTATE_NUM_MAX) + "].";
+            return Status(SERVER_INVALID_ARGUMENT, msg);
+        }
     }
     return Status::OK();
 }
@@ -2221,30 +2259,14 @@ Config::GetLogsMaxLogFileSize(int64_t& value) {
     std::string str = GetConfigStr(CONFIG_LOGS, CONFIG_LOGS_MAX_LOG_FILE_SIZE, CONFIG_LOGS_MAX_LOG_FILE_SIZE_DEFAULT);
     STATUS_CHECK(CheckLogsMaxLogFileSize(str));
     value = std::stoll(str);
-    if (value == 0) {
-        // OFF
-    } else if (value > CONFIG_LOGS_MAX_LOG_FILE_SIZE_MAX) {
-        value = CONFIG_LOGS_MAX_LOG_FILE_SIZE_MAX;
-    } else if (value < CONFIG_LOGS_MAX_LOG_FILE_SIZE_MIN) {
-        value = CONFIG_LOGS_MAX_LOG_FILE_SIZE_MIN;
-    }
-
     return Status::OK();
 }
 
 Status
-Config::GetLogsDeleteExceeds(int64_t& value) {
-    std::string str = GetConfigStr(CONFIG_LOGS, CONFIG_LOGS_DELETE_EXCEEDS, CONFIG_LOGS_DELETE_EXCEEDS_DEFAULT);
-    STATUS_CHECK(CheckLogsDeleteExceeds(str));
+Config::GetLogsLogRotateNum(int64_t& value) {
+    std::string str = GetConfigStr(CONFIG_LOGS, CONFIG_LOGS_LOG_ROTATE_NUM, CONFIG_LOGS_LOG_ROTATE_NUM_DEFAULT);
+    STATUS_CHECK(CheckLogsLogRotateNum(str));
     value = std::stoll(str);
-    if (value == 0) {
-        // OFF
-    } else if (value > CONFIG_LOGS_DELETE_EXCEEDS_MAX) {
-        value = CONFIG_LOGS_DELETE_EXCEEDS_MAX;
-    } else if (value < CONFIG_LOGS_DELETE_EXCEEDS_MIN) {
-        value = CONFIG_LOGS_DELETE_EXCEEDS_MIN;
-    }
-
     return Status::OK();
 }
 
@@ -2578,9 +2600,9 @@ Config::SetLogsMaxLogFileSize(const std::string& value) {
 }
 
 Status
-Config::SetLogsDeleteExceeds(const std::string& value) {
-    STATUS_CHECK(CheckLogsDeleteExceeds(value));
-    return SetConfigValueInMem(CONFIG_LOGS, CONFIG_LOGS_DELETE_EXCEEDS, value);
+Config::SetLogsLogRotateNum(const std::string& value) {
+    STATUS_CHECK(CheckLogsLogRotateNum(value));
+    return SetConfigValueInMem(CONFIG_LOGS, CONFIG_LOGS_LOG_ROTATE_NUM, value);
 }
 
 }  // namespace server

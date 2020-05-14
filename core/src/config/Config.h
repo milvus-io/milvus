@@ -63,6 +63,8 @@ extern const char* CONFIG_STORAGE_PRIMARY_PATH_DEFAULT;
 extern const char* CONFIG_STORAGE_SECONDARY_PATH;
 extern const char* CONFIG_STORAGE_SECONDARY_PATH_DEFAULT;
 extern const char* CONFIG_STORAGE_FILE_CLEANUP_TIMEOUT;
+extern const int64_t CONFIG_STORAGE_FILE_CLEANUP_TIMEOUT_MIN;
+extern const int64_t CONFIG_STORAGE_FILE_CLEANUP_TIMEOUT_MAX;
 // extern const char* CONFIG_STORAGE_S3_ENABLE;
 // extern const char* CONFIG_STORAGE_S3_ENABLE_DEFAULT;
 // extern const char* CONFIG_STORAGE_S3_ADDRESS;
@@ -133,8 +135,8 @@ extern const char* CONFIG_WAL_RECOVERY_ERROR_IGNORE;
 extern const char* CONFIG_WAL_RECOVERY_ERROR_IGNORE_DEFAULT;
 extern const char* CONFIG_WAL_BUFFER_SIZE;
 extern const char* CONFIG_WAL_BUFFER_SIZE_DEFAULT;
-extern const int64_t CONFIG_WAL_BUFFER_SIZE_MAX;
 extern const int64_t CONFIG_WAL_BUFFER_SIZE_MIN;
+extern const int64_t CONFIG_WAL_BUFFER_SIZE_MAX;
 extern const char* CONFIG_WAL_WAL_PATH;
 extern const char* CONFIG_WAL_WAL_PATH_DEFAULT;
 
@@ -155,12 +157,12 @@ extern const char* CONFIG_LOGS_FATAL_ENABLE_DEFAULT;
 extern const char* CONFIG_LOGS_PATH;
 extern const char* CONFIG_LOGS_MAX_LOG_FILE_SIZE;
 extern const char* CONFIG_LOGS_MAX_LOG_FILE_SIZE_DEFAULT;
-extern const int64_t CONFIG_LOGS_MAX_LOG_FILE_SIZE_MAX;
 extern const int64_t CONFIG_LOGS_MAX_LOG_FILE_SIZE_MIN;
-extern const char* CONFIG_LOGS_DELETE_EXCEEDS;
-extern const char* CONFIG_LOGS_DELETE_EXCEEDS_DEFAULT;
-extern const int64_t CONFIG_LOGS_DELETE_EXCEEDS_MAX;
-extern const int64_t CONFIG_LOGS_DELETE_EXCEEDS_MIN;
+extern const int64_t CONFIG_LOGS_MAX_LOG_FILE_SIZE_MAX;
+extern const char* CONFIG_LOGS_LOG_ROTATE_NUM;
+extern const char* CONFIG_LOGS_LOG_ROTATE_NUM_DEFAULT;
+extern const int64_t CONFIG_LOGS_LOG_ROTATE_NUM_MIN;
+extern const int64_t CONFIG_LOGS_LOG_ROTATE_NUM_MAX;
 
 class Config {
  private:
@@ -334,7 +336,7 @@ class Config {
     Status
     CheckLogsMaxLogFileSize(const std::string& value);
     Status
-    CheckLogsDeleteExceeds(const std::string& value);
+    CheckLogsLogRotateNum(const std::string& value);
 
     std::string
     GetConfigStr(const std::string& parent_key, const std::string& child_key, const std::string& default_value = "");
@@ -469,7 +471,7 @@ class Config {
     Status
     GetLogsMaxLogFileSize(int64_t& value);
     Status
-    GetLogsDeleteExceeds(int64_t& value);
+    GetLogsLogRotateNum(int64_t& value);
 
     Status
     GetServerRestartRequired(bool& required);
@@ -595,7 +597,7 @@ class Config {
     Status
     SetLogsMaxLogFileSize(const std::string& value);
     Status
-    SetLogsDeleteExceeds(const std::string& value);
+    SetLogsLogRotateNum(const std::string& value);
 
  private:
     bool restart_required_ = false;
