@@ -53,6 +53,16 @@ SegmentWriter::AddVectors(const std::string& name, const std::vector<uint8_t>& d
 }
 
 Status
+SegmentWriter::AddVectors(const std::string& name, const uint8_t* data, uint64_t size,
+                          const std::vector<doc_id_t>& uids) {
+    segment_ptr_->vectors_ptr_->AddData(data, size);
+    segment_ptr_->vectors_ptr_->AddUids(uids);
+    segment_ptr_->vectors_ptr_->SetName(name);
+
+    return Status::OK();
+}
+
+Status
 SegmentWriter::AddAttrs(const std::string& name, const std::unordered_map<std::string, uint64_t>& attr_nbytes,
                         const std::unordered_map<std::string, std::vector<uint8_t>>& attr_data,
                         const std::vector<doc_id_t>& uids) {

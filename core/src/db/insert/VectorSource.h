@@ -36,8 +36,8 @@ class VectorSource {
                  const std::unordered_map<std::string, std::vector<uint8_t>>& attr_data);
 
     Status
-    Add(/*const ExecutionEnginePtr& execution_engine,*/ const segment::SegmentWriterPtr& segment_writer_ptr,
-        const meta::SegmentSchema& table_file_schema, const size_t& num_vectors_to_add, size_t& num_vectors_added);
+    Add(const segment::SegmentWriterPtr& segment_writer_ptr, const meta::SegmentSchema& table_file_schema,
+        const size_t& num_vectors_to_add, size_t& num_vectors_added);
 
     Status
     AddEntities(const segment::SegmentWriterPtr& segment_writer_ptr, const meta::SegmentSchema& collection_file_schema,
