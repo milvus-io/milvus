@@ -44,7 +44,7 @@ class TestSearchBase:
         else:
             status, ids = connect.insert(collection, add_vectors, partition_tag=partition_tags)
             assert status.OK()
-        sleep(add_interval_time)
+        connect.flush([collection])
         return add_vectors, ids
 
     def init_binary_data(self, connect, collection, nb=6000, insert=True, partition_tags=None):
