@@ -44,7 +44,7 @@ class TestSearchBase:
         else:
             status, ids = connect.insert(collection, add_vectors, partition_tag=partition_tags)
             assert status.OK()
-        sleep(add_interval_time)
+        connect.flush([collection])
         return add_vectors, ids
 
     def init_binary_data(self, connect, collection, nb=6000, insert=True, partition_tags=None):
@@ -316,6 +316,7 @@ class TestSearchBase:
         assert check_result(result[0], ids[0])
         assert result[0][0].distance <= epsilon
 
+    @pytest.mark.level(2)
     def test_search_l2_index_params_partition_D(self, connect, collection, get_simple_index):
         '''
         target: test basic search fuction, all the search params is corrent, test all index params, and build
@@ -335,6 +336,7 @@ class TestSearchBase:
         logging.getLogger().info(result)
         assert not status.OK()
 
+    @pytest.mark.level(2)
     def test_search_l2_index_params_partition_E(self, connect, collection, get_simple_index):
         '''
         target: test basic search fuction, all the search params is corrent, test all index params, and build
@@ -402,6 +404,7 @@ class TestSearchBase:
         assert result[0][0].distance <= epsilon
         assert result[1][0].distance <= epsilon
 
+    @pytest.mark.level(2)
     def test_search_ip_index_params(self, connect, ip_collection, get_simple_index):
         '''
         target: test basic search fuction, all the search params is corrent, test all index params, and build
@@ -451,6 +454,7 @@ class TestSearchBase:
         assert check_result(result[0], ids[0])
         assert result[0][0].distance >= 1 - gen_inaccuracy(result[0][0].distance)
 
+    @pytest.mark.level(2)
     def test_search_ip_index_params_partition(self, connect, ip_collection, get_simple_index):
         '''
         target: test basic search fuction, all the search params is corrent, test all index params, and build
@@ -480,6 +484,7 @@ class TestSearchBase:
         assert status.OK()
         assert len(result) == 0
 
+    @pytest.mark.level(2)
     def test_search_ip_index_params_partition_A(self, connect, ip_collection, get_simple_index):
         '''
         target: test basic search fuction, all the search params is corrent, test all index params, and build
@@ -505,17 +510,17 @@ class TestSearchBase:
         assert check_result(result[0], ids[0])
         assert result[0][0].distance >= 1 - gen_inaccuracy(result[0][0].distance)
 
-    # @pytest.mark.level(2)
-    # def test_search_vectors_without_connect(self, dis_connect, collection):
-    #     '''
-    #     target: test search vectors without connection
-    #     method: use dis connected instance, call search method and check if search successfully
-    #     expected: raise exception
-    #     '''
-    #     query_vectors = [vectors[0]]
-    #     nprobe = 1
-    #     with pytest.raises(Exception) as e:
-    #         status, ids = dis_connect.search(collection, top_k, query_vectors)
+    @pytest.mark.level(2)
+    def test_search_vectors_without_connect(self, dis_connect, collection):
+        '''
+        target: test search vectors without connection
+        method: use dis connected instance, call search method and check if search successfully
+        expected: raise exception
+        '''
+        query_vectors = [vectors[0]]
+        nprobe = 1
+        with pytest.raises(Exception) as e:
+            status, ids = dis_connect.search(collection, top_k, query_vectors)
 
     def test_search_collection_name_not_existed(self, connect, collection):
         '''
