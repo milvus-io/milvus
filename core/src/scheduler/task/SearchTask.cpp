@@ -272,32 +272,13 @@ XSearchTask::Execute() {
                 for (; type_it != attr_type.end(); type_it++) {
                     types.insert(std::make_pair(type_it->first, (engine::DataType)(type_it->second)));
                 }
-                // bitset used to set blacklist for vector search, result_bitset used to get result
-                faiss::ConcurrentBitsetPtr bitset, result_bitset;
-                // Search_ids only for search, output_ids used to get all ids`
                 std::vector<int64_t> search_ids;
-                s = index_engine_->ExecBinaryQuery(general_query,
-                                                   bitset,
-                                                   types,
-                                                   nq,
-                                                   topk,
-                                                   output_distance,
-                                                   output_ids,
-                                                   search_ids,
-                                                   result_bitset);
+                s = index_engine_->HybridSearch(general_query, types, nq, topk, output_distance, output_ids);
 
                 if (!s.ok()) {
                     search_job->GetStatus() = s;
                     search_job->SearchDone(index_id_);
                     return;
-                }
-
-                // TODO(yukun): optimize
-                std::vector<int64_t> result_ids;
-                for (uint64_t i = 0; i < output_ids.size(); ++i) {
-                    if (result_bitset->test(i)){
-                        result_ids.emplace_back(output_ids[i]);
-                    }
                 }
 
                 auto spec_k = file_->row_count_ < topk ? file_->row_count_ : topk;

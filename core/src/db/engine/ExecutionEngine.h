@@ -117,10 +117,12 @@ class ExecutionEngine {
 
     virtual Status
     ExecBinaryQuery(query::GeneralQueryPtr general_query, faiss::ConcurrentBitsetPtr bitset,
-                    std::unordered_map<std::string, DataType>& attr_type, uint64_t& nq, uint64_t& topk,
-                    std::vector<float>& distances, std::vector<int64_t>& labels,
-                    std::vector<int64_t>& search_ids,
-                    faiss::ConcurrentBitsetPtr result_bitset) = 0;
+                    std::unordered_map<std::string, DataType>& attr_type,
+                    milvus::query::VectorQueryPtr vector_query) = 0;
+
+    virtual Status
+    HybridSearch(query::GeneralQueryPtr general_query, std::unordered_map<std::string, DataType>& attr_type,
+                 uint64_t& nq, uint64_t& topk, std::vector<float>& distances, std::vector<int64_t>& search_ids) = 0;
 
     virtual Status
     Search(int64_t n, const float* data, int64_t k, const milvus::json& extra_params, float* distances, int64_t* labels,

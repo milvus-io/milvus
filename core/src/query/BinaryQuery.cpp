@@ -64,7 +64,7 @@ Status
 GenBinaryQuery(BooleanQueryPtr query, BinaryQueryPtr& binary_query) {
     if (query->getBooleanQuerys().size() == 0) {
         if (binary_query->relation == QueryRelation::AND || binary_query->relation == QueryRelation::OR) {
-            // Put VectorQuery to the end of leafqueries
+            // Put VectorQuery to the end of leaf queries
             auto query_size = query->getLeafQueries().size();
             for (uint64_t i = 0; i < query_size; ++i) {
                 if (query->getLeafQueries()[i]->vector_query != nullptr) {
