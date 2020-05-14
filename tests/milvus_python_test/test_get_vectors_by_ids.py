@@ -210,6 +210,20 @@ class TestGetBase:
             for future in concurrent.futures.as_completed(future_results):
                 future.result()
 
+    def test_get_vector_by_id_after_delete_no_flush(self, connect, collection):
+        vectors = gen_vectors(nb, dim)
+        status, ids = connect.insert(collection, vectors)
+        status = connect.flush([collection])
+        assert status.OK()
+        get_id = ids[100:200]
+        status = connect.delete_entity_by_id(collection, get_id)
+        assert status.OK()
+        status, res = connect.get_entity_by_id(collection, get_id)
+        assert status.OK()
+        assert len(res) == len(get_id)
+        for i in range(len(res)):
+            assert_equal_vector(res[i], vectors[100+i])
+
 
 class TestGetIndexedVectors:
     """
