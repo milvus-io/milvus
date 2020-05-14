@@ -34,6 +34,9 @@ class Vectors {
     AddData(const std::vector<uint8_t>& data);
 
     void
+    AddData(const uint8_t* data, uint64_t size);
+
+    void
     AddUids(const std::vector<doc_id_t>& uids);
 
     void
