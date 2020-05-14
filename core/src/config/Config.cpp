@@ -175,10 +175,10 @@ const char* CONFIG_LOGS_MAX_LOG_FILE_SIZE = "max_log_file_size";
 const char* CONFIG_LOGS_MAX_LOG_FILE_SIZE_DEFAULT = "256";
 const int64_t CONFIG_LOGS_MAX_LOG_FILE_SIZE_MAX = 512;
 const int64_t CONFIG_LOGS_MAX_LOG_FILE_SIZE_MIN = 64;
-const char* CONFIG_LOGS_DELETE_EXCEEDS = "delete_exceeds";
-const char* CONFIG_LOGS_DELETE_EXCEEDS_DEFAULT = "10";
-const int64_t CONFIG_LOGS_DELETE_EXCEEDS_MAX = 4096;
-const int64_t CONFIG_LOGS_DELETE_EXCEEDS_MIN = 1;
+const char* CONFIG_LOGS_LOG_ROTATE_NUM = "log_rotate_num";
+const char* CONFIG_LOGS_LOG_ROTATE_NUM_DEFAULT = "10";
+const int64_t CONFIG_LOGS_LOG_ROTATE_NUM_MAX = 512;
+const int64_t CONFIG_LOGS_LOG_ROTATE_NUM_MIN = 1;
 
 constexpr int64_t GB = 1UL << 30;
 constexpr int32_t PORT_NUMBER_MIN = 1024;
@@ -416,8 +416,8 @@ Config::ValidateConfig() {
     int64_t logs_max_log_file_size;
     STATUS_CHECK(GetLogsMaxLogFileSize(logs_max_log_file_size));
 
-    int64_t delete_exceeds;
-    STATUS_CHECK(GetLogsDeleteExceeds(delete_exceeds));
+    int64_t logs_log_rotate_num;
+    STATUS_CHECK(GetLogsLogRotateNum(logs_log_rotate_num));
 
     return Status::OK();
 }
@@ -493,7 +493,7 @@ Config::ResetDefaultConfig() {
     STATUS_CHECK(SetLogsFatalEnable(CONFIG_LOGS_FATAL_ENABLE_DEFAULT));
     STATUS_CHECK(SetLogsPath(CONFIG_LOGS_PATH_DEFAULT));
     STATUS_CHECK(SetLogsMaxLogFileSize(CONFIG_LOGS_MAX_LOG_FILE_SIZE_DEFAULT));
-    STATUS_CHECK(SetLogsDeleteExceeds(CONFIG_LOGS_DELETE_EXCEEDS_DEFAULT));
+    STATUS_CHECK(SetLogsLogRotateNum(CONFIG_LOGS_LOG_ROTATE_NUM_DEFAULT));
 
     return Status::OK();
 }
@@ -632,6 +632,28 @@ Config::SetConfigCli(const std::string& parent_key, const std::string& child_key
             status = SetWalConfigBufferSize(value);
         } else if (child_key == CONFIG_WAL_WAL_PATH) {
             status = SetWalConfigWalPath(value);
+        } else {
+            status = Status(SERVER_UNEXPECTED_ERROR, invalid_node_str);
+        }
+    } else if (parent_key == CONFIG_LOGS) {
+        if (child_key == CONFIG_LOGS_TRACE_ENABLE) {
+            status = SetLogsTraceEnable(value);
+        } else if (child_key == CONFIG_LOGS_DEBUG_ENABLE) {
+            status = SetLogsDebugEnable(value);
+        } else if (child_key == CONFIG_LOGS_INFO_ENABLE) {
+            status = SetLogsInfoEnable(value);
+        } else if (child_key == CONFIG_LOGS_WARNING_ENABLE) {
+            status = SetLogsWarningEnable(value);
+        } else if (child_key == CONFIG_LOGS_ERROR_ENABLE) {
+            status = SetLogsErrorEnable(value);
+        } else if (child_key == CONFIG_LOGS_FATAL_ENABLE) {
+            status = SetLogsFatalEnable(value);
+        } else if (child_key == CONFIG_LOGS_PATH) {
+            status = SetLogsPath(value);
+        } else if (child_key == CONFIG_LOGS_MAX_LOG_FILE_SIZE) {
+            status = SetLogsMaxLogFileSize(value);
+        } else if (child_key == CONFIG_LOGS_LOG_ROTATE_NUM) {
+            status = SetLogsLogRotateNum(value);
         } else {
             status = Status(SERVER_UNEXPECTED_ERROR, invalid_node_str);
         }
@@ -1678,13 +1700,13 @@ Config::CheckLogsMaxLogFileSize(const std::string& value) {
 }
 
 Status
-Config::CheckLogsDeleteExceeds(const std::string& value) {
+Config::CheckLogsLogRotateNum(const std::string& value) {
     auto exist_error = !ValidationUtil::ValidateStringIsNumber(value).ok();
-    fiu_do_on("check_logs_delete_exceeds_fail", exist_error = true);
+    fiu_do_on("check_logs_log_rotate_num_fail", exist_error = true);
 
     if (exist_error) {
-        std::string msg = "Invalid max_log_file_size: " + value +
-                          ". Possible reason: logs.max_log_file_size is not a positive integer.";
+        std::string msg = "Invalid log_rotate_num: " + value +
+                          ". Possible reason: logs.log_rotate_num is not a valid integer.";
         return Status(SERVER_INVALID_ARGUMENT, msg);
     }
     return Status::OK();
@@ -2233,16 +2255,14 @@ Config::GetLogsMaxLogFileSize(int64_t& value) {
 }
 
 Status
-Config::GetLogsDeleteExceeds(int64_t& value) {
-    std::string str = GetConfigStr(CONFIG_LOGS, CONFIG_LOGS_DELETE_EXCEEDS, CONFIG_LOGS_DELETE_EXCEEDS_DEFAULT);
-    STATUS_CHECK(CheckLogsDeleteExceeds(str));
+Config::GetLogsLogRotateNum(int64_t& value) {
+    std::string str = GetConfigStr(CONFIG_LOGS, CONFIG_LOGS_LOG_ROTATE_NUM, CONFIG_LOGS_LOG_ROTATE_NUM_DEFAULT);
+    STATUS_CHECK(CheckLogsLogRotateNum(str));
     value = std::stoll(str);
-    if (value == 0) {
-        // OFF
-    } else if (value > CONFIG_LOGS_DELETE_EXCEEDS_MAX) {
-        value = CONFIG_LOGS_DELETE_EXCEEDS_MAX;
-    } else if (value < CONFIG_LOGS_DELETE_EXCEEDS_MIN) {
-        value = CONFIG_LOGS_DELETE_EXCEEDS_MIN;
+    if (value > CONFIG_LOGS_LOG_ROTATE_NUM_MAX) {
+        value = CONFIG_LOGS_LOG_ROTATE_NUM_MAX;
+    } else if (value < CONFIG_LOGS_LOG_ROTATE_NUM_MIN) {
+        value = CONFIG_LOGS_LOG_ROTATE_NUM_MIN;
     }
 
     return Status::OK();
@@ -2578,9 +2598,9 @@ Config::SetLogsMaxLogFileSize(const std::string& value) {
 }
 
 Status
-Config::SetLogsDeleteExceeds(const std::string& value) {
-    STATUS_CHECK(CheckLogsDeleteExceeds(value));
-    return SetConfigValueInMem(CONFIG_LOGS, CONFIG_LOGS_DELETE_EXCEEDS, value);
+Config::SetLogsLogRotateNum(const std::string& value) {
+    STATUS_CHECK(CheckLogsLogRotateNum(value));
+    return SetConfigValueInMem(CONFIG_LOGS, CONFIG_LOGS_LOG_ROTATE_NUM, value);
 }
 
 }  // namespace server
