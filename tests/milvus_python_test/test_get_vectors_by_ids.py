@@ -210,7 +210,8 @@ class TestGetBase:
             for future in concurrent.futures.as_completed(future_results):
                 future.result()
 
-    def test_get_vector_by_id_after_delete_no_flush(self, connect, collection):
+    # TODO: autoflush
+    def _test_get_vector_by_id_after_delete_no_flush(self, connect, collection):
         vectors = gen_vectors(nb, dim)
         status, ids = connect.insert(collection, vectors)
         status = connect.flush([collection])
