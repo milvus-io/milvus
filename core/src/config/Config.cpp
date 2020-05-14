@@ -1712,13 +1712,12 @@ Config::CheckLogsLogRotateNum(const std::string& value) {
     fiu_do_on("check_logs_log_rotate_num_fail", exist_error = true);
 
     if (exist_error) {
-        std::string msg = "Invalid log_rotate_num: " + value +
-                          ". Possible reason: logs.log_rotate_num is not a positive integer.";
+        std::string msg =
+            "Invalid log_rotate_num: " + value + ". Possible reason: logs.log_rotate_num is not a positive integer.";
         return Status(SERVER_INVALID_ARGUMENT, msg);
     } else {
         int64_t log_rotate_num = std::stoll(value);
-        if (log_rotate_num < CONFIG_LOGS_LOG_ROTATE_NUM_MIN ||
-            log_rotate_num > CONFIG_LOGS_LOG_ROTATE_NUM_MAX) {
+        if (log_rotate_num < CONFIG_LOGS_LOG_ROTATE_NUM_MIN || log_rotate_num > CONFIG_LOGS_LOG_ROTATE_NUM_MAX) {
             std::string msg = "Invalid log_rotate_num: " + value +
                               ". Possible reason: logs.log_rotate_num is not in range [" +
                               std::to_string(CONFIG_LOGS_LOG_ROTATE_NUM_MIN) + ", " +
