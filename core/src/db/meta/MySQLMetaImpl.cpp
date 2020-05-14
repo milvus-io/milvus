@@ -1731,7 +1731,7 @@ MySQLMetaImpl::FilesToMerge(const std::string& collection_id, FilesHolder& files
         }  // Scoped Connection
 
         Status ret;
-        int64_t files_count = 0;
+        SegmentsSchema files;
         for (auto& resRow : res) {
             SegmentSchema collection_file;
             collection_file.file_size_ = resRow["file_size"];
@@ -1759,12 +1759,15 @@ MySQLMetaImpl::FilesToMerge(const std::string& collection_id, FilesHolder& files
                 continue;
             }
 
-            files_holder.MarkFile(collection_file);
-            files_count++;
+            files.emplace_back(collection_file);
         }
 
-        if (files_count > 0) {
-            LOG_ENGINE_DEBUG_ << "Collect " << files_count << " to-merge files in collection " << collection_id;
+        // no need to merge if files count  less than 2
+        if (files.size() > 1) {
+            LOG_ENGINE_DEBUG_ << "Collect " << files.size() << " to-merge files in collection " << collection_id;
+            for (auto& file : files) {
+                files_holder.MarkFile(file);
+            }
         }
         return ret;
     } catch (std::exception& e) {
