@@ -206,14 +206,12 @@ wal_config:
 #----------------------+------------------------------------------------------------+------------+-----------------+
 # fatal.enable         | Whether to enable fatal level logging in Milvus.           | Boolean    | true            |
 #----------------------+------------------------------------------------------------+------------+-----------------+
-# path                 | Location of logs files.                                    | String     |                 |
+# path                 | Absolute path to the folder holding the log files.         | String     |                 |
 #----------------------+------------------------------------------------------------+------------+-----------------+
-# max_log_file_size    | Max size of a single log file. After exceeding this value, | Integer    | 256 (MB)        |
-#                      | rename this file to xxx.log.n, means the nth file.         |            |                 |
+# max_log_file_size    | The maximum size of each log file, size range [512, 4096]  | Integer    | 1024 (MB)       |
 #----------------------+------------------------------------------------------------+------------+-----------------+
-# delete_exceeds       | Milvus will keep up to ${delete_exceeds} log files per     | Integer    | 10              |
-#                      | level. For example, after xxx.log.11 file is generated,    |            |                 |
-#                      | the xxx.log.1 file will be deleted.                        |            |                 |
+# log_rotate_num       | The maximum number of log files that Milvus keeps for each | Integer    | 0               |
+#                      | logging level, num range [0, 1024], 0 means unlimited.     |            |                 |
 #----------------------+------------------------------------------------------------+------------+-----------------+
 logs:
   trace.enable: true
@@ -223,6 +221,6 @@ logs:
   error.enable: true
   fatal.enable: true
   path: /var/lib/milvus/logs
-  max_log_file_size: 256
-  delete_exceeds: 10
+  max_log_file_size: 1024
+  log_rotate_num: 0
 
