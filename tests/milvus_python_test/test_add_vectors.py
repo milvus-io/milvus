@@ -582,7 +582,8 @@ class TestAddBase:
 
     @pytest.mark.level(2)
     @pytest.mark.timeout(30)
-    def test_collection_add_rows_count_multi_threading(self, args):
+    @pytest.mark.repeat(2)
+    def test_collection_add_rows_count_multi_threading(self, args, collection):
         '''
         target: test collection rows_count is correct or not with multi threading
         method: create collection and add vectors in it(idmap),
@@ -593,13 +594,7 @@ class TestAddBase:
             pytest.skip("Skip test in http mode")
         thread_num = 8
         threads = []
-        collection = gen_unique_str()
-        param = {'collection_name': collection,
-                 'dimension': dim,
-                 'index_file_size': index_file_size,
-                 'metric_type': MetricType.L2}
         milvus = get_milvus(host=args["ip"], port=args["port"], handler=args["handler"])
-        milvus.create_collection(param)
         vectors = gen_vectors(nb, dim)
         def add(thread_i):
             logging.getLogger().info("In thread-%d" % thread_i)
