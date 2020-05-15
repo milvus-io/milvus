@@ -9,15 +9,19 @@
 # is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 # or implied. See the License for the specific language governing permissions and limitations under the License.
 
+FROM milvusdb/milvus-dev:amd64-centos-7-core AS openblas
+
 FROM centos:centos7
 
 RUN yum install -y epel-release && \
-    yum install -y libgomp libgfortran4 mysql-devel openblas-devel lapack-devel && \
+    yum install -y libgomp libgfortran4 mysql-devel && \
     rm -rf /var/cache/yum/*
 
 COPY ./milvus /var/lib/milvus
-COPY ./docker-entrypoint.sh /var/lib/milvus
+COPY ./docker-entrypoint.sh /var/lib/milvus/
 ENV LD_LIBRARY_PATH="$LD_LIBRARY_PATH:/var/lib/milvus/lib"
+
+COPY --from=openblas /usr/lib/libopenblas*.so* /var/lib/milvus/lib/
 
 WORKDIR /var/lib/milvus
 
