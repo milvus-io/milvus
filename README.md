@@ -54,7 +54,7 @@ See our [test reports](https://github.com/milvus-io/milvus/tree/master/docs) for
 
 ## Roadmap
 
-To learn what's coming up soon in Milvus, read our [Roadmap](https://github.com/milvus-io/milvus/milestones).
+To learn what's coming up soon in Milvus, read our [Roadmap](https://github.com/milvus-io/milvus/projects).
 
 It is a Work in Progress, and is subject to reasonable adjustments when necessary. And we greatly welcome any comments/requirements/suggestions regarding Milvus roadmap.:clap:
 
