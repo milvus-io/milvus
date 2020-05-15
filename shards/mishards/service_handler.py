@@ -282,7 +282,7 @@ class ServiceHandler(milvus_pb2_grpc.MilvusServiceServicer):
                                  reason=_status.message)
 
     def _add_vectors(self, param, metadata=None):
-        return self.router.connection(metadata=metadata).add_vectors(
+        return self.router.connection(metadata=metadata).insert(
             None, None, insert_param=param)
 
     @mark_grpc_method
