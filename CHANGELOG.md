@@ -12,7 +12,6 @@ Please mark all change in change log and use the issue from GitHub
 
 ## Task
 
-
 # Milvus 0.9.0 (2020-05-15)
 
 ## Bug
