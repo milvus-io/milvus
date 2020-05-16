@@ -10,6 +10,7 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
 #include "db/merge/MergeManagerImpl.h"
+#include "db/merge/MergeAdaptiveStrategy.h"
 #include "db/merge/MergeLayeredStrategy.h"
 #include "db/merge/MergeSimpleStrategy.h"
 #include "db/merge/MergeStrategy.h"
@@ -34,6 +35,10 @@ MergeManagerImpl::UseStrategy(MergeStrategyType type) {
         }
         case MergeStrategyType::LAYERED: {
             strategy_ = std::make_shared<MergeLayeredStrategy>();
+            break;
+        }
+        case MergeStrategyType::ADAPTIVE: {
+            strategy_ = std::make_shared<MergeAdaptiveStrategy>();
             break;
         }
         default: {

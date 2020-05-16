@@ -1395,6 +1395,7 @@ DBImpl::CreateIndex(const std::shared_ptr<server::Context>& context, const std::
 
     // step 3: let merge file thread finish
     // to avoid duplicate data bug
+    StartMergeTask();
     WaitMergeFileFinish();
 
     // step 4: wait and build index

@@ -9,18 +9,21 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
-#include "db/merge/MergeManagerFactory.h"
-#include "db/merge/MergeManagerImpl.h"
-#include "utils/Exception.h"
-#include "utils/Log.h"
+#pragma once
+
+#include <vector>
+
+#include "db/merge/MergeStrategy.h"
+#include "utils/Status.h"
 
 namespace milvus {
 namespace engine {
 
-MergeManagerPtr
-MergeManagerFactory::Build(const meta::MetaPtr& meta_ptr, const DBOptions& options) {
-    return std::make_shared<MergeManagerImpl>(meta_ptr, options, MergeStrategyType::ADAPTIVE);
-}
+class MergeAdaptiveStrategy : public MergeStrategy {
+ public:
+    Status
+    RegroupFiles(meta::FilesHolder& files_holder, MergeFilesGroups& files_groups) override;
+};  // MergeSimpleStrategy
 
 }  // namespace engine
 }  // namespace milvus
