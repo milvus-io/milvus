@@ -40,11 +40,6 @@ namespace knowhere {
         return false;                                                                                    \
     }
 
-// #define checkfloat(key, min, max)                                                                              \
-//     if (!oricfg.contains(key) || !oricfg[key].is_number_float() || oricfg[key] >= max || oricfg[key] <= min) { \
-//         return false;                                                                                          \
-//     }
-
 #define CheckIntByValues(key, container)                                                                 \
     if (!oricfg.contains(key) || !oricfg[key].is_number_integer()) {                                     \
         return false;                                                                                    \

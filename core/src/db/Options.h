@@ -23,8 +23,9 @@ namespace engine {
 
 class Env;
 
-static const char* ARCHIVE_CONF_DISK = "disk";
-static const char* ARCHIVE_CONF_DAYS = "days";
+extern const char* ARCHIVE_CONF_DISK;
+extern const char* ARCHIVE_CONF_DAYS;
+extern const char* DEFAULT_PARTITON_TAG;
 
 struct ArchiveConf {
     using CriteriaT = std::map<std::string, int64_t>;

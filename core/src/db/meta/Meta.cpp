@@ -9,29 +9,18 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
-#pragma once
+#include "db/meta/Meta.h"
 
 namespace milvus {
 namespace engine {
 namespace meta {
 
-const size_t S_PS = 1UL;
-const size_t MS_PS = 1000 * S_PS;
-const size_t US_PS = 1000 * MS_PS;
-const size_t NS_PS = 1000 * US_PS;
-
-const size_t SECOND = 1UL;
-const size_t MINUTE = 60 * SECOND;
-const size_t HOUR = 60 * MINUTE;
-const size_t DAY = 24 * HOUR;
-const size_t WEEK = 7 * DAY;
-
-// This value is to ignore small raw files when building index.
-// The reason is:
-// 1. The performance of brute-search for small raw files could be better than small index file.
-// 2. And small raw files can be merged to larger files, thus reduce fragmented files count.
-// We decide the value based on a testing for small size raw/index files.
-const size_t BUILD_INDEX_THRESHOLD = 4096;
+const char* META_ENVIRONMENT = "Environment";
+const char* META_TABLES = "Tables";
+const char* META_TABLEFILES = "TableFiles";
+const char* META_COLLECTIONS = "Collections";
+const char* META_FIELDS = "Fields";
+const char* META_COLLECTIONFILES = "CollectionFiles";
 
 }  // namespace meta
 }  // namespace engine

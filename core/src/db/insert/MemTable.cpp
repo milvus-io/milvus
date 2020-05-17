@@ -339,7 +339,7 @@ MemTable::ApplyDeletes() {
 
         rec.RecordSection("Find uids and set deleted docs and bloom filter");
 
-        for (auto i = 0; i < indexes.size(); ++i) {
+        for (size_t i = 0; i < indexes.size(); ++i) {
             indexes[i]->SetBlacklist(blacklists[i]);
         }
 

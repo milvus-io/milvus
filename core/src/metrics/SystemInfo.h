@@ -21,17 +21,17 @@ namespace server {
 
 class SystemInfo {
  private:
-    uint64_t total_ram_ = 0;
+    int64_t total_ram_ = 0;
     clock_t last_cpu_ = clock_t();
     clock_t last_sys_cpu_ = clock_t();
     clock_t last_user_cpu_ = clock_t();
     std::chrono::system_clock::time_point net_time_ = std::chrono::system_clock::now();
-    int num_processors_ = 0;
-    int num_physical_processors_ = 0;
+    int32_t num_processors_ = 0;
+    int32_t num_physical_processors_ = 0;
     // number of GPU
     uint32_t num_device_ = 0;
-    uint64_t in_octets_ = 0;
-    uint64_t out_octets_ = 0;
+    int64_t in_octets_ = 0;
+    int64_t out_octets_ = 0;
     bool initialized_ = false;
 
  public:
@@ -44,27 +44,27 @@ class SystemInfo {
     void
     Init();
 
-    int
+    int32_t
     num_processor() const {
         return num_processors_;
     }
 
-    int
+    int32_t
     num_physical_processors() const {
         return num_physical_processors_;
     }
 
-    uint32_t
+    int32_t
     num_device() const {
         return num_device_;
     }
 
-    uint64_t
+    int64_t
     get_inoctets() {
         return in_octets_;
     }
 
-    uint64_t
+    int64_t
     get_octets() {
         return out_octets_;
     }
@@ -75,12 +75,12 @@ class SystemInfo {
     }
 
     void
-    set_inoctets(uint64_t value) {
+    set_inoctets(int64_t value) {
         in_octets_ = value;
     }
 
     void
-    set_outoctets(uint64_t value) {
+    set_outoctets(int64_t value) {
         out_octets_ = value;
     }
 
@@ -89,28 +89,28 @@ class SystemInfo {
         net_time_ = std::chrono::system_clock::now();
     }
 
-    uint64_t
+    int64_t
     ParseLine(char* line);
-    uint64_t
+    int64_t
     GetPhysicalMemory();
-    uint64_t
+    int64_t
     GetProcessUsedMemory();
     double
     MemoryPercent();
     double
     CPUPercent();
-    std::pair<uint64_t, uint64_t>
+    std::pair<int64_t, int64_t>
     Octets();
-    std::vector<uint64_t>
+    std::vector<int64_t>
     GPUMemoryTotal();
-    std::vector<uint64_t>
+    std::vector<int64_t>
     GPUMemoryUsed();
 
     std::vector<double>
     CPUCorePercent();
-    std::vector<uint64_t>
-    getTotalCpuTime(std::vector<uint64_t>& workTime);
-    std::vector<uint64_t>
+    std::vector<int64_t>
+    getTotalCpuTime(std::vector<int64_t>& workTime);
+    std::vector<int64_t>
     GPUTemperature();
     std::vector<float>
     CPUTemperature();

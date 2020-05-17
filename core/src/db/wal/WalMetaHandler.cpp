@@ -17,6 +17,8 @@ namespace milvus {
 namespace engine {
 namespace wal {
 
+const char* WAL_META_FILE_NAME = "mxlog.meta";
+
 MXLogMetaHandler::MXLogMetaHandler(const std::string& internal_meta_file_path) {
     std::string file_full_path = internal_meta_file_path + WAL_META_FILE_NAME;
 

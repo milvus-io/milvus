@@ -819,7 +819,7 @@ WebRequestHandler::GetDevices(DevicesDto::ObjectWrapper& devices_dto) {
 
 #ifdef MILVUS_GPU_VERSION
     size_t count = system_info.num_device();
-    std::vector<uint64_t> device_mems = system_info.GPUMemoryTotal();
+    std::vector<int64_t> device_mems = system_info.GPUMemoryTotal();
 
     if (count != device_mems.size()) {
         RETURN_STATUS_DTO(UNEXPECTED_ERROR, "Can't obtain GPU info");
