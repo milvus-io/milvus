@@ -22,7 +22,7 @@ namespace milvus {
 namespace engine {
 
 MergeManagerImpl::MergeManagerImpl(const meta::MetaPtr& meta_ptr, const DBOptions& options, MergeStrategyType type)
-    : meta_ptr_(meta_ptr), options_(options) {
+    : meta_ptr_(meta_ptr), options_(options), strategy_type_(type) {
     UseStrategy(type);
 }
 
@@ -47,6 +47,7 @@ MergeManagerImpl::UseStrategy(MergeStrategyType type) {
             throw Exception(DB_ERROR, msg);
         }
     }
+    strategy_type_ = type;
 
     return Status::OK();
 }

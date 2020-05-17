@@ -228,10 +228,10 @@ class DBImpl : public DB, public server::CacheConfigHandler, public server::Engi
     StartMetricTask();
 
     void
-    StartMergeTask();
+    StartMergeTask(bool force_merge_all = false);
 
     void
-    BackgroundMerge(std::set<std::string> collection_ids);
+    BackgroundMerge(std::set<std::string> collection_ids, bool force_merge_all);
 
     Status
     MergeHybridFiles(const std::string& table_id, meta::FilesHolder& files_holder);

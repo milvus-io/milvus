@@ -31,6 +31,11 @@ class MergeManagerImpl : public MergeManager {
  public:
     MergeManagerImpl(const meta::MetaPtr& meta_ptr, const DBOptions& options, MergeStrategyType type);
 
+    MergeStrategyType
+    Strategy() const override {
+        return strategy_type_;
+    }
+
     Status
     UseStrategy(MergeStrategyType type) override;
 
@@ -41,6 +46,7 @@ class MergeManagerImpl : public MergeManager {
     meta::MetaPtr meta_ptr_;
     DBOptions options_;
 
+    MergeStrategyType strategy_type_ = MergeStrategyType::SIMPLE;
     MergeStrategyPtr strategy_;
 };  // MergeManagerImpl
 
