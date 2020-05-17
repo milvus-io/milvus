@@ -56,27 +56,30 @@ MergeAdaptiveStrategy::RegroupFiles(meta::FilesHolder& files_holder, MergeFilesG
     // pick files to merge
     int64_t index_file_size = sort_files[0].index_file_size_;
     while (true) {
-        meta::SegmentsSchema temp_grouop;
+        meta::SegmentsSchema temp_group;
         int64_t sum_size = 0;
         for (auto iter = sort_files.begin(); iter != sort_files.end();) {
             meta::SegmentSchema& file = *iter;
-            if (sum_size + file.file_size_ < index_file_size) {
-                temp_grouop.push_back(file);
+            if (sum_size + file.file_size_ <= index_file_size) {
+                temp_group.push_back(file);
                 sum_size += file.file_size_;
                 iter = sort_files.erase(iter);
             } else {
-                if (iter == sort_files.end()) {
-                    temp_grouop.push_back(file);
-                    files_groups.emplace_back(temp_grouop);
+                if ((iter + 1 == sort_files.end()) && sum_size < index_file_size) {
+                    temp_group.push_back(file);
+                    sort_files.erase(iter);
                     break;
+                } else {
+                    ++iter;
                 }
-                ++iter;
             }
         }
+
+        if (!temp_group.empty()) {
+            files_groups.emplace_back(temp_group);
+        }
+
         if (sort_files.empty()) {
-            if (!temp_grouop.empty()) {
-                files_groups.emplace_back(temp_grouop);
-            }
             break;
         }
     }
