@@ -16,6 +16,7 @@
 
 #include <iostream>
 #include <memory>
+#include <random>
 #include <utility>
 #include <vector>
 
@@ -136,11 +137,13 @@ Utils::BuildEntities(int64_t from, int64_t to, std::vector<milvus::Entity>& enti
 
     entity_array.clear();
     entity_ids.clear();
+    std::default_random_engine e;
+    std::uniform_real_distribution<float> u(0, 1);
     for (int64_t k = from; k < to; k++) {
         milvus::Entity entity;
         entity.float_data.resize(dimension);
         for (int64_t i = 0; i < dimension; i++) {
-            entity.float_data[i] = (float)((k + 100) % (i + 1));
+            entity.float_data[i] = (u(e));
         }
 
         entity_array.emplace_back(entity);

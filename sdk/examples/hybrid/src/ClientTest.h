@@ -39,6 +39,9 @@ class ClientTest {
     void
     HybridSearch(std::string&);
 
+    void
+    GetHEntityByID(const std::string&, const std::vector<int64_t>&);
+
  private:
     std::shared_ptr<milvus::Connection> conn_;
     std::vector<std::pair<int64_t, milvus::Entity>> search_entity_array_;

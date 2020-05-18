@@ -116,9 +116,9 @@ class ExecutionEngine {
     GetVectorByID(const int64_t& id, uint8_t* vector, bool hybrid) = 0;
 
     virtual Status
-    ExecBinaryQuery(query::GeneralQueryPtr general_query, faiss::ConcurrentBitsetPtr bitset,
+    ExecBinaryQuery(query::GeneralQueryPtr general_query, faiss::ConcurrentBitsetPtr& bitset,
                     std::unordered_map<std::string, DataType>& attr_type,
-                    milvus::query::VectorQueryPtr vector_query) = 0;
+                    milvus::query::VectorQueryPtr& vector_query) = 0;
 
     virtual Status
     HybridSearch(query::GeneralQueryPtr general_query, std::unordered_map<std::string, DataType>& attr_type,

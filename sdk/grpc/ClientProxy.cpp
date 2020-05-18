@@ -611,17 +611,53 @@ ClientProxy::CreateHybridCollection(const HMapping& mapping) {
     }
 }
 
+// void
+// CopyVectorField(::milvus::grpc::RowRecord* target, const Entity& src) {
+//    if (!src.float_data.empty()) {
+//        auto vector_data = target->mutable_float_data();
+//        vector_data->Resize(static_cast<int>(src.float_data.size()), 0.0);
+//        memcpy(vector_data->mutable_data(), src.float_data.data(), src.float_data.size() * sizeof(float));
+//    }
+//
+//    if (!src.binary_data.empty()) {
+//        target->set_binary_data(src.binary_data.data(), src.binary_data.size());
+//    }
+//}
+
 void
-CopyVectorField(::milvus::grpc::RowRecord* target, const Entity& src) {
-    if (!src.float_data.empty()) {
-        auto vector_data = target->mutable_float_data();
-        vector_data->Resize(static_cast<int>(src.float_data.size()), 0.0);
-        memcpy(vector_data->mutable_data(), src.float_data.data(), src.float_data.size() * sizeof(float));
+_CopyRowRecords(const google::protobuf::RepeatedPtrField<::milvus::grpc::RowRecord>& grpc_records,
+               const google::protobuf::RepeatedField<google::protobuf::int64>& grpc_id_array,
+               Entity& vectors) {
+    // step 1: copy vector data
+    int64_t float_data_size = 0, binary_data_size = 0;
+    auto size = grpc_records.size();
+    for (auto& record : grpc_records) {
+        float_data_size += record.float_data_size();
+        binary_data_size += record.binary_data().size();
     }
 
-    if (!src.binary_data.empty()) {
-        target->set_binary_data(src.binary_data.data(), src.binary_data.size());
+    std::vector<float> float_array(float_data_size, 0.0f);
+    std::vector<uint8_t> binary_array(binary_data_size, 0);
+    int64_t float_offset = 0, binary_offset = 0;
+    if (float_data_size > 0) {
+        for (auto& record : grpc_records) {
+            memcpy(&float_array[float_offset], record.float_data().data(), record.float_data_size() * sizeof(float));
+            float_offset += record.float_data_size();
+        }
+    } else if (binary_data_size > 0) {
+        for (auto& record : grpc_records) {
+            memcpy(&binary_array[binary_offset], record.binary_data().data(), record.binary_data().size());
+            binary_offset += record.binary_data().size();
+        }
     }
+
+    // step 2: copy id array
+    std::vector<int64_t> id_array;
+    if (grpc_id_array.size() > 0) {
+        id_array.resize(grpc_id_array.size());
+        memcpy(id_array.data(), grpc_id_array.data(), grpc_id_array.size() * sizeof(int64_t));
+    }
+
 }
 
 Status
@@ -634,8 +670,6 @@ ClientProxy::InsertEntity(const std::string& collection_name, const std::string&
         grpc_param.set_partition_tag(partition_tag);
 
         std::vector<std::vector<int8_t>> numerica_data;
-        auto numerica_size = 0;
-
         auto numerica_int_it = entities.numerica_int_value.begin();
         auto grpc_entity = grpc_param.mutable_entity();
         grpc_entity->set_row_num(entities.row_num);
@@ -644,7 +678,7 @@ ClientProxy::InsertEntity(const std::string& collection_name, const std::string&
             auto grpc_attr_data = grpc_entity->add_attr_data();
             auto size = numerica_int_it->second.size();
             auto mutable_int_value = grpc_attr_data->mutable_int_value();
-            mutable_int_value->Resize(size, 0);
+            mutable_int_value->Resize(static_cast<int>(size), 0l);
             memcpy(mutable_int_value->mutable_data(), numerica_int_it->second.data(), size * sizeof(int64_t));
         }
 
@@ -654,17 +688,17 @@ ClientProxy::InsertEntity(const std::string& collection_name, const std::string&
             auto grpc_attr_data = grpc_entity->add_attr_data();
             auto size = numerica_double_it->second.size();
             auto mutable_double_data = grpc_attr_data->mutable_double_value();
-            mutable_double_data->Resize(size, 0);
+            mutable_double_data->Resize(static_cast<int>(size), 0.0);
             memcpy(mutable_double_data->mutable_data(), numerica_double_it->second.data(), size * sizeof(double));
         }
 
         auto entity_it = entities.vector_value.begin();
         for (; entity_it != entities.vector_value.end(); entity_it++) {
             grpc_entity->add_field_names(entity_it->first);
-            auto vector_field = grpc_param.mutable_entity()->add_vector_data();
+            auto vector_field = grpc_entity->add_vector_data();
             for (auto& vector : entity_it->second) {
                 auto record = vector_field->add_value();
-                CopyVectorField(record, vector);
+                CopyRowRecord(record, vector);
             }
         }
 
@@ -757,9 +791,11 @@ ClientProxy::HybridSearch(const std::string& collection_name, const std::vector<
             auto value = search_param.add_partition_tag_array();
             *value = partition;
         }
-        auto extra_param = search_param.add_extra_params();
-        extra_param->set_key("params");
-        extra_param->set_value(extra_params);
+        if (extra_params.size() > 0) {
+            auto extra_param = search_param.add_extra_params();
+            extra_param->set_key("params");
+            extra_param->set_value(extra_params);
+        }
         WriteQueryToProto(search_param.mutable_general_query(), boolean_query);
 
         // step 2: search vectors

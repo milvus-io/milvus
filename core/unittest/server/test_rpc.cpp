@@ -988,7 +988,7 @@ TEST_F(RpcHandlerTest, HYBRID_TEST) {
     milvus::grpc::HEntityIDs entity_ids;
     insert_param.set_collection_name("test_hybrid");
 
-    auto entity = insert_param.mutable_entities();
+    auto entity = insert_param.mutable_entity();
     auto field_name_0 = entity->add_field_names();
     *field_name_0 = "field_0";
     auto field_name_1 = entity->add_field_names();

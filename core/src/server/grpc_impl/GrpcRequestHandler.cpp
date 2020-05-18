@@ -99,6 +99,7 @@ CopyRowRecords(const google::protobuf::RepeatedPtrField<::milvus::grpc::RowRecor
                engine::VectorsData& vectors) {
     // step 1: copy vector data
     int64_t float_data_size = 0, binary_data_size = 0;
+    auto size = grpc_records.size();
     for (auto& record : grpc_records) {
         float_data_size += record.float_data_size();
         binary_data_size += record.binary_data().size();
@@ -938,23 +939,28 @@ GrpcRequestHandler::DescribeHybridCollection(::grpc::ServerContext* context,
 ::grpc::Status
 GrpcRequestHandler::InsertEntity(::grpc::ServerContext* context, const ::milvus::grpc::HInsertParam* request,
                                  ::milvus::grpc::HEntityIDs* response) {
+    //    engine::VectorsData vectors;
+    //    CopyRowRecords(request->entity().vector_data(0).value(), request->entity_id_array(), vectors);
+
     CHECK_NULLPTR_RETURN(request);
     LOG_SERVER_INFO_ << LogOut("Request [%s] %s begin.", GetContext(context)->RequestID().c_str(), __func__);
 
     auto attr_size = request->entity().attr_data().size();
     uint64_t row_num = request->entity().row_num();
-    std::vector<uint8_t> attr_data(attr_size, row_num * sizeof(int64_t));
+    std::vector<uint8_t> attr_data(attr_size * row_num * sizeof(int64_t));
     std::unordered_map<std::string, engine::VectorsData> vector_data;
     int64_t offset = 0;
     for (uint64_t i = 0; i < attr_size; i++) {
-        if (request->entity().attr_data(i).int_value_size() > 0) {
+        auto grpc_int_size = request->entity().attr_data(i).int_value_size();
+        auto grpc_double_size = request->entity().attr_data(i).double_value_size();
+        if (grpc_int_size > 0) {
             memcpy(attr_data.data() + offset, request->entity().attr_data(i).int_value().data(),
-                   row_num * sizeof(int64_t));
-            offset += row_num * sizeof(int64_t);
-        } else if (request->entity().attr_data(i).double_value_size() > 0) {
+                   grpc_int_size * sizeof(int64_t));
+            offset += grpc_int_size * sizeof(int64_t);
+        } else if (grpc_double_size > 0) {
             memcpy(attr_data.data() + offset, request->entity().attr_data(i).double_value().data(),
-                   row_num * sizeof(double));
-            offset += row_num * sizeof(double);
+                   grpc_double_size * sizeof(double));
+            offset += grpc_double_size * sizeof(double);
         }
     }
 
@@ -1219,11 +1225,11 @@ GrpcRequestHandler::GetEntityByID(::grpc::ServerContext* context, const ::milvus
         }
         if (int_data.size() > 0) {
             grpc_attr_data->mutable_int_value()->Resize(int_data.size(), 0);
-            memcpy(grpc_attr_data->mutable_int_value()->mutable_data(), int_data.data(), int_data.size() * sizeof(int64_t));
+            memcpy(grpc_attr_data->mutable_int_value()->mutable_data(), int_data.data(),
+                   int_data.size() * sizeof(int64_t));
         } else if (double_data.size() > 0) {
             grpc_attr_data->mutable_double_value()->Resize(double_data.size(), 0);
-            memcpy(grpc_attr_data->mutable_double_value()->mutable_data(),
-                   double_data.data(),
+            memcpy(grpc_attr_data->mutable_double_value()->mutable_data(), double_data.data(),
                    double_data.size() * sizeof(double));
         }
     }
@@ -1233,13 +1239,11 @@ GrpcRequestHandler::GetEntityByID(::grpc::ServerContext* context, const ::milvus
         auto grpc_data = grpc_vector_data->add_value();
         if (!vector.float_data_.empty()) {
             grpc_data->mutable_float_data()->Resize(vector.float_data_.size(), 0);
-            memcpy(grpc_data->mutable_float_data()->mutable_data(),
-                   vector.float_data_.data(),
+            memcpy(grpc_data->mutable_float_data()->mutable_data(), vector.float_data_.data(),
                    vector.float_data_.size() * sizeof(int64_t));
         } else if (!vector.binary_data_.empty()) {
             grpc_data->mutable_binary_data()->resize(vector.binary_data_.size());
-            memcpy(grpc_data->mutable_binary_data()->data(),
-                   vector.binary_data_.data(),
+            memcpy(grpc_data->mutable_binary_data()->data(), vector.binary_data_.data(),
                    vector.binary_data_.size() * sizeof(uint8_t));
         }
     }

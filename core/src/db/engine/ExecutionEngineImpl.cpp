@@ -797,9 +797,9 @@ ExecutionEngineImpl::HybridSearch(milvus::query::GeneralQueryPtr general_query,
     // Do search
     faiss::ConcurrentBitsetPtr list;
     list = index_->GetBlacklist();
-    // Do OR
+    // Do AND
     for (uint64_t i = 0; i < vector_count_; ++i) {
-        if (list->test(i) || !bitset->test(i)) {
+        if (list->test(i) && !bitset->test(i)) {
             bitset->set(i);
         }
     }
@@ -820,17 +820,12 @@ ExecutionEngineImpl::HybridSearch(milvus::query::GeneralQueryPtr general_query,
 }
 
 Status
-ExecutionEngineImpl::ExecBinaryQuery(milvus::query::GeneralQueryPtr general_query, faiss::ConcurrentBitsetPtr bitset,
+ExecutionEngineImpl::ExecBinaryQuery(milvus::query::GeneralQueryPtr general_query, faiss::ConcurrentBitsetPtr& bitset,
                                      std::unordered_map<std::string, DataType>& attr_type,
-                                     milvus::query::VectorQueryPtr vector_query) {
-    if (bitset == nullptr) {
-        bitset = std::make_shared<faiss::ConcurrentBitset>(vector_count_);
-    }
-
+                                     milvus::query::VectorQueryPtr& vector_query) {
     if (general_query->leaf == nullptr) {
         Status status;
-        faiss::ConcurrentBitsetPtr left_bitset = std::make_shared<faiss::ConcurrentBitset>(vector_count_);
-        faiss::ConcurrentBitsetPtr right_bitset = std::make_shared<faiss::ConcurrentBitset>(vector_count_);
+        faiss::ConcurrentBitsetPtr left_bitset, right_bitset;
         if (general_query->bin->left_query != nullptr) {
             status = ExecBinaryQuery(general_query->bin->left_query, left_bitset, attr_type, vector_query);
             if (!status.ok()) {
@@ -850,13 +845,15 @@ ExecutionEngineImpl::ExecBinaryQuery(milvus::query::GeneralQueryPtr general_quer
             switch (general_query->bin->relation) {
                 case milvus::query::QueryRelation::AND:
                 case milvus::query::QueryRelation::R1: {
-                    bitset = std::shared_ptr<faiss::ConcurrentBitset>(&((*left_bitset) &= (*right_bitset)));
+                    bitset.reset(&((*left_bitset) &= (*right_bitset)));
+//                    bitset = (*left_bitset) &= right_bitset;
                     break;
                 }
                 case milvus::query::QueryRelation::OR:
                 case milvus::query::QueryRelation::R2:
                 case milvus::query::QueryRelation::R3: {
-                    bitset = std::shared_ptr<faiss::ConcurrentBitset>(&((*left_bitset) |= (*right_bitset)));
+                    bitset.reset(&((*left_bitset) |= (*right_bitset)));
+//                    bitset = (*left_bitset) |= right_bitset;
                     break;
                 }
                 case milvus::query::QueryRelation::R4: {
@@ -868,13 +865,14 @@ ExecutionEngineImpl::ExecBinaryQuery(milvus::query::GeneralQueryPtr general_quer
                     break;
                 }
                 default: {
-                    std::string msg = "Invalid queryRelation in RangeQuery";
+                    std::string msg = "Invalid QueryRelation in RangeQuery";
                     return Status{SERVER_INVALID_ARGUMENT, msg};
                 }
             }
         }
         return status;
     } else {
+        bitset = std::make_shared<faiss::ConcurrentBitset>(vector_count_);
         if (general_query->leaf->term_query != nullptr) {
             // process attrs_data
             auto field_name = general_query->leaf->term_query->field_name;
