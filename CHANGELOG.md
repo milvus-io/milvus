@@ -1,6 +1,17 @@
 # Changelog
 
 Please mark all change in change log and use the issue from GitHub
+# Milvus 0.9.1 (TBD)
+
+## Bug
+
+## Feature
+-   \#2363 Update branch version to 0.9.1
+
+## Improvement
+-   \#2370 Clean compile warning
+
+## Task
 
 # Milvus 0.9.0 (2020-05-15)
 
@@ -29,7 +40,7 @@ Please mark all change in change log and use the issue from GitHub
 -   \#2261 Re-define result returned by has_collection if collection in delete state
 -   \#2264 Milvus opened too many files when the metric_config.enable_monitor=true
 -   \#2266 Server hangs when using multi-clients to query different collections
--   \#2280 has_partition should return true for '_default'
+-   \#2280 has_partition should return true for `_default`
 
 ## Feature
 -   \#1751 Add api SearchByID

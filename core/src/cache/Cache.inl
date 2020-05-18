@@ -16,9 +16,9 @@ constexpr double DEFAULT_THRESHOLD_PERCENT = 0.7;
 
 template <typename ItemObj>
 Cache<ItemObj>::Cache(int64_t capacity, int64_t cache_max_count, const std::string& header)
-    : usage_(0),
+    : header_(header),
+      usage_(0),
       capacity_(capacity),
-      header_(header),
       freemem_percent_(DEFAULT_THRESHOLD_PERCENT),
       lru_(cache_max_count) {
 }

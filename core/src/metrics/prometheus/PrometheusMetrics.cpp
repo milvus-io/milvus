@@ -93,8 +93,8 @@ PrometheusMetrics::GPUPercentGaugeSet() {
     }
 
     int numDevice = server::SystemInfo::GetInstance().num_device();
-    std::vector<uint64_t> used_total = server::SystemInfo::GetInstance().GPUMemoryTotal();
-    std::vector<uint64_t> used_memory = server::SystemInfo::GetInstance().GPUMemoryUsed();
+    std::vector<int64_t> used_total = server::SystemInfo::GetInstance().GPUMemoryTotal();
+    std::vector<int64_t> used_memory = server::SystemInfo::GetInstance().GPUMemoryUsed();
 
     for (int i = 0; i < numDevice; ++i) {
         prometheus::Gauge& GPU_percent = GPU_percent_.Add({{"DeviceNum", std::to_string(i)}});
@@ -109,13 +109,13 @@ PrometheusMetrics::GPUMemoryUsageGaugeSet() {
         return;
     }
 
-    std::vector<uint64_t> values = server::SystemInfo::GetInstance().GPUMemoryUsed();
-    constexpr uint64_t MtoB = 1024 * 1024;
+    std::vector<int64_t> values = server::SystemInfo::GetInstance().GPUMemoryUsed();
+    constexpr int64_t MB = 1024 * 1024;
     int numDevice = server::SystemInfo::GetInstance().num_device();
 
     for (int i = 0; i < numDevice; ++i) {
         prometheus::Gauge& GPU_memory = GPU_memory_usage_.Add({{"DeviceNum", std::to_string(i)}});
-        GPU_memory.Set(values[i] / MtoB);
+        GPU_memory.Set(values[i] / MB);
     }
 }
 
@@ -216,7 +216,7 @@ PrometheusMetrics::GPUTemperature() {
         return;
     }
 
-    std::vector<uint64_t> GPU_temperatures = server::SystemInfo::GetInstance().GPUTemperature();
+    std::vector<int64_t> GPU_temperatures = server::SystemInfo::GetInstance().GPUTemperature();
 
     for (int i = 0; i < GPU_temperatures.size(); ++i) {
         prometheus::Gauge& gpu_temp = GPU_temperature_.Add({{"GPU", std::to_string(i)}});

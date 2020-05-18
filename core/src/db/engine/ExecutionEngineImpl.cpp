@@ -804,7 +804,7 @@ ExecutionEngineImpl::ExecBinaryQuery(milvus::query::GeneralQueryPtr general_quer
     }
 
     if (general_query->leaf == nullptr) {
-        Status status;
+        Status status = Status::OK();
         if (general_query->bin->left_query != nullptr) {
             status = ExecBinaryQuery(general_query->bin->left_query, bitset, attr_type, nq, topk, distances, labels);
         }
@@ -986,6 +986,8 @@ ExecutionEngineImpl::ExecBinaryQuery(milvus::query::GeneralQueryPtr general_quer
                     }
                     break;
                 }
+                default:
+                    break;
             }
             return Status::OK();
         }
@@ -1049,6 +1051,8 @@ ExecutionEngineImpl::ExecBinaryQuery(milvus::query::GeneralQueryPtr general_quer
                         ProcessRangeQuery<double>(data, value, com_expr[j].compare_operator, bitset);
                         break;
                     }
+                    default:
+                        break;
                 }
             }
             return Status::OK();
@@ -1075,6 +1079,7 @@ ExecutionEngineImpl::ExecBinaryQuery(milvus::query::GeneralQueryPtr general_quer
                           distances.data(), labels.data());
         }
     }
+    return Status::OK();
 }
 
 Status

@@ -121,6 +121,8 @@ class ExecutionEngineImpl : public ExecutionEngine {
 
  protected:
     knowhere::VecIndexPtr index_ = nullptr;
+    std::string location_;
+    int64_t dim_;
     EngineType index_type_;
     MetricType metric_type_;
 
@@ -129,9 +131,6 @@ class ExecutionEngineImpl : public ExecutionEngine {
     std::unordered_map<std::string, size_t> attr_size_;
     query::BinaryQueryPtr binary_query_;
     int64_t vector_count_;
-
-    int64_t dim_;
-    std::string location_;
 
     milvus::json index_params_;
     int64_t gpu_num_ = 0;

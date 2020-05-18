@@ -85,7 +85,7 @@ SystemInfo::Init() {
 
     // initialize network traffic information
     try {
-        std::pair<uint64_t, uint64_t> in_and_out_octets = Octets();
+        std::pair<int64_t, int64_t> in_and_out_octets = Octets();
         in_octets_ = in_and_out_octets.first;
         out_octets_ = in_and_out_octets.second;
         net_time_ = std::chrono::system_clock::now();
@@ -95,7 +95,7 @@ SystemInfo::Init() {
     }
 }
 
-uint64_t
+int64_t
 SystemInfo::ParseLine(char* line) {
     // This assumes that a digit will be found and the line ends in " Kb".
     int i = strlen(line);
@@ -105,29 +105,29 @@ SystemInfo::ParseLine(char* line) {
     }
     line[i - 3] = '\0';
     i = atoi(p);
-    return static_cast<uint64_t>(i);
+    return i;
 }
 
-uint64_t
+int64_t
 SystemInfo::GetPhysicalMemory() {
     struct sysinfo memInfo;
     sysinfo(&memInfo);
-    uint64_t totalPhysMem = memInfo.totalram;
+    int64_t totalPhysMem = memInfo.totalram;
     // Multiply in next statement to avoid int overflow on right hand side...
     totalPhysMem *= memInfo.mem_unit;
 
     return totalPhysMem;
 }
 
-uint64_t
+int64_t
 SystemInfo::GetProcessUsedMemory() {
     try {
         // Note: this value is in KB!
         FILE* file = fopen("/proc/self/status", "r");
-        uint64_t result = 0;
-        constexpr uint64_t KB_SIZE = 1024;
+        int64_t result = 0;
+        constexpr int64_t KB = 1024;
         if (file) {
-            constexpr uint64_t line_length = 128;
+            constexpr int64_t line_length = 128;
             char line[line_length];
 
             while (fgets(line, line_length, file) != nullptr) {
@@ -142,7 +142,7 @@ SystemInfo::GetProcessUsedMemory() {
         }
 
         // return value in Byte
-        return (result * KB_SIZE);
+        return (result * KB);
     } catch (std::exception& ex) {
         std::string msg = "Failed to read /proc/self/status, reason: " + std::string(ex.what());
         LOG_SERVER_ERROR_ << msg;
@@ -163,11 +163,11 @@ SystemInfo::MemoryPercent() {
 
 std::vector<double>
 SystemInfo::CPUCorePercent() {
-    std::vector<uint64_t> prev_work_time_array;
-    std::vector<uint64_t> prev_total_time_array = getTotalCpuTime(prev_work_time_array);
+    std::vector<int64_t> prev_work_time_array;
+    std::vector<int64_t> prev_total_time_array = getTotalCpuTime(prev_work_time_array);
     usleep(100000);
-    std::vector<uint64_t> cur_work_time_array;
-    std::vector<uint64_t> cur_total_time_array = getTotalCpuTime(cur_work_time_array);
+    std::vector<int64_t> cur_work_time_array;
+    std::vector<int64_t> cur_total_time_array = getTotalCpuTime(cur_work_time_array);
 
     std::vector<double> cpu_core_percent;
     for (int i = 0; i < cur_total_time_array.size(); i++) {
@@ -178,9 +178,9 @@ SystemInfo::CPUCorePercent() {
     return cpu_core_percent;
 }
 
-std::vector<uint64_t>
-SystemInfo::getTotalCpuTime(std::vector<uint64_t>& work_time_array) {
-    std::vector<uint64_t> total_time_array;
+std::vector<int64_t>
+SystemInfo::getTotalCpuTime(std::vector<int64_t>& work_time_array) {
+    std::vector<int64_t> total_time_array;
     try {
         FILE* file = fopen("/proc/stat", "r");
         fiu_do_on("SystemInfo.getTotalCpuTime.open_proc", file = NULL);
@@ -189,8 +189,8 @@ SystemInfo::getTotalCpuTime(std::vector<uint64_t>& work_time_array) {
             return total_time_array;
         }
 
-        uint64_t user = 0, nice = 0, system = 0, idle = 0;
-        uint64_t iowait = 0, irq = 0, softirq = 0, steal = 0, guest = 0, guestnice = 0;
+        int64_t user = 0, nice = 0, system = 0, idle = 0;
+        int64_t iowait = 0, irq = 0, softirq = 0, steal = 0, guest = 0, guestnice = 0;
 
         for (int i = 0; i < num_processors_; i++) {
             char buffer[1024];
@@ -244,16 +244,15 @@ SystemInfo::CPUPercent() {
     return percent;
 }
 
-std::vector<uint64_t>
+std::vector<int64_t>
 SystemInfo::GPUMemoryTotal() {
     // get GPU usage percent
     fiu_do_on("SystemInfo.GPUMemoryTotal.mock", initialized_ = false);
     if (!initialized_)
         Init();
-    std::vector<uint64_t> result;
+    std::vector<int64_t> result;
 
 #ifdef MILVUS_GPU_VERSION
-
     nvmlMemory_t nvmlMemory;
     for (int i = 0; i < num_device_; ++i) {
         nvmlDevice_t device;
@@ -266,15 +265,14 @@ SystemInfo::GPUMemoryTotal() {
     return result;
 }
 
-std::vector<uint64_t>
+std::vector<int64_t>
 SystemInfo::GPUTemperature() {
     fiu_do_on("SystemInfo.GPUTemperature.mock", initialized_ = false);
     if (!initialized_)
         Init();
-    std::vector<uint64_t> result;
+    std::vector<int64_t> result;
 
 #ifdef MILVUS_GPU_VERSION
-
     for (int i = 0; i < num_device_; i++) {
         nvmlDevice_t device;
         nvmlDeviceGetHandleByIndex(i, &device);
@@ -282,7 +280,6 @@ SystemInfo::GPUTemperature() {
         nvmlDeviceGetTemperature(device, NVML_TEMPERATURE_GPU, &temp);
         result.push_back(temp);
     }
-
 #endif
 
     return result;
@@ -334,17 +331,16 @@ SystemInfo::CPUTemperature() {
     return result;
 }
 
-std::vector<uint64_t>
+std::vector<int64_t>
 SystemInfo::GPUMemoryUsed() {
     // get GPU memory used
     fiu_do_on("SystemInfo.GPUMemoryUsed.mock", initialized_ = false);
     if (!initialized_)
         Init();
 
-    std::vector<uint64_t> result;
+    std::vector<int64_t> result;
 
 #ifdef MILVUS_GPU_VERSION
-
     nvmlMemory_t nvmlMemory;
     for (int i = 0; i < num_device_; ++i) {
         nvmlDevice_t device;
@@ -352,13 +348,12 @@ SystemInfo::GPUMemoryUsed() {
         nvmlDeviceGetMemoryInfo(device, &nvmlMemory);
         result.push_back(nvmlMemory.used);
     }
-
 #endif
 
     return result;
 }
 
-std::pair<uint64_t, uint64_t>
+std::pair<int64_t, int64_t>
 SystemInfo::Octets() {
     pid_t pid = getpid();
     //    const std::string filename = "/proc/"+std::to_string(pid)+"/net/netstat";
@@ -387,9 +382,9 @@ SystemInfo::Octets() {
     std::string inoctets = lastline.substr(inoctets_begin, inoctets_length);
     std::string outoctets = lastline.substr(outoctets_begin, outoctets_length);
 
-    uint64_t inoctets_bytes = std::stoull(inoctets);
-    uint64_t outoctets_bytes = std::stoull(outoctets);
-    std::pair<uint64_t, uint64_t> res(inoctets_bytes, outoctets_bytes);
+    int64_t inoctets_bytes = std::stoull(inoctets);
+    int64_t outoctets_bytes = std::stoull(outoctets);
+    std::pair<int64_t, int64_t> res(inoctets_bytes, outoctets_bytes);
     return res;
 }
 
@@ -400,8 +395,8 @@ SystemInfo::GetSysInfoJsonStr(std::string& result) {
     sys_info_map["memory_total"] = std::to_string(GetPhysicalMemory());
     sys_info_map["memory_used"] = std::to_string(GetProcessUsedMemory());
 
-    std::vector<uint64_t> gpu_mem_total = GPUMemoryTotal();
-    std::vector<uint64_t> gpu_mem_used = GPUMemoryUsed();
+    std::vector<int64_t> gpu_mem_total = GPUMemoryTotal();
+    std::vector<int64_t> gpu_mem_used = GPUMemoryUsed();
     for (size_t i = 0; i < gpu_mem_total.size(); i++) {
         std::string key_total = "gpu" + std::to_string(i) + "_memory_total";
         std::string key_used = "gpu" + std::to_string(i) + "_memory_used";
