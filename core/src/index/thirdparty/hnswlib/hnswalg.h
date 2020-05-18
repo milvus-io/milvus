@@ -618,8 +618,6 @@ class HierarchicalNSW : public AlgorithmInterface<dist_t> {
     }
 
     void loadIndex(milvus::knowhere::MemoryIOReader& input, size_t max_elements_i = 0) {
-        auto totoal_filesize = input.total;
-
         // linxj: init with metrictype
         size_t dim = 100;
         readBinaryPOD(input, metric_type_);

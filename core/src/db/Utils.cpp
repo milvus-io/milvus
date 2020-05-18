@@ -249,8 +249,6 @@ GetDate(const std::time_t& t, int day_delta) {
             ++day_delta;
         } while (day_delta < 0);
         mktime(&ltm);
-    } else {
-        ltm.tm_mday;
     }
     return ltm.tm_year * 10000 + ltm.tm_mon * 100 + ltm.tm_mday;
 }

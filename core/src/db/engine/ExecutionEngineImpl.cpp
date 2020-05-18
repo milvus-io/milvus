@@ -829,7 +829,7 @@ ExecutionEngineImpl::ExecBinaryQuery(milvus::query::GeneralQueryPtr general_quer
                                      std::unordered_map<std::string, DataType>& attr_type,
                                      std::string& vector_placeholder) {
     if (general_query->leaf == nullptr) {
-        Status status;
+        Status status = Status::OK();
         faiss::ConcurrentBitsetPtr left_bitset, right_bitset;
         if (general_query->bin->left_query != nullptr) {
             status = ExecBinaryQuery(general_query->bin->left_query, left_bitset, attr_type, vector_placeholder);
@@ -1037,6 +1037,8 @@ ExecutionEngineImpl::ExecBinaryQuery(milvus::query::GeneralQueryPtr general_quer
                     }
                     break;
                 }
+                default:
+                    break;
             }
             return Status::OK();
         }
@@ -1100,6 +1102,8 @@ ExecutionEngineImpl::ExecBinaryQuery(milvus::query::GeneralQueryPtr general_quer
                         ProcessRangeQuery<double>(data, value, com_expr[j].compare_operator, bitset);
                         break;
                     }
+                    default:
+                        break;
                 }
             }
             return Status::OK();
@@ -1111,6 +1115,7 @@ ExecutionEngineImpl::ExecBinaryQuery(milvus::query::GeneralQueryPtr general_quer
             return Status::OK();
         }
     }
+    return Status::OK();
 }
 
 Status
