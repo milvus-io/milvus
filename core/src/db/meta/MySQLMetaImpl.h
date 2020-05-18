@@ -17,6 +17,7 @@
 #include <mutex>
 #include <string>
 #include <vector>
+#include <set>
 
 #include "Meta.h"
 #include "MySQLConnectionPool.h"
@@ -108,6 +109,11 @@ class MySQLMetaImpl : public Meta {
 
     Status
     FilesToSearch(const std::string& collection_id, FilesHolder& files_holder) override;
+
+    Status
+    FilesToSearchEx(const std::string& root_collection,
+                    const std::set<std::string>& partition_id_array,
+                    FilesHolder& files_holder) override;
 
     Status
     FilesToMerge(const std::string& collection_id, FilesHolder& files_holder) override;
