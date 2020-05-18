@@ -26,12 +26,12 @@ namespace milvus {
 namespace engine {
 namespace meta {
 
-static const char* META_ENVIRONMENT = "Environment";
-static const char* META_TABLES = "Tables";
-static const char* META_TABLEFILES = "TableFiles";
-static const char* META_COLLECTIONS = "Collections";
-static const char* META_FIELDS = "Fields";
-static const char* META_COLLECTIONFILES = "CollectionFiles";
+extern const char* META_ENVIRONMENT;
+extern const char* META_TABLES;
+extern const char* META_TABLEFILES;
+extern const char* META_COLLECTIONS;
+extern const char* META_FIELDS;
+extern const char* META_COLLECTIONFILES;
 
 class FilesHolder;
 

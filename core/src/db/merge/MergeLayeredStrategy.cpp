@@ -39,7 +39,7 @@ MergeLayeredStrategy::RegroupFiles(meta::FilesHolder& files_holder, MergeFilesGr
     // iterater from end, because typically the files_holder get files in order from largest to smallest
     for (meta::SegmentsSchema::reverse_iterator iter = files.rbegin(); iter != files.rend(); ++iter) {
         meta::SegmentSchema& file = *iter;
-        if (file.index_file_size_ > 0 && file.file_size_ > file.index_file_size_) {
+        if (file.index_file_size_ > 0 && file.file_size_ > (size_t)(file.index_file_size_)) {
             // release file that no need to merge
             files_holder.UnmarkFile(file);
             continue;
@@ -77,7 +77,7 @@ MergeLayeredStrategy::RegroupFiles(meta::FilesHolder& files_holder, MergeFilesGr
 
         // layer only has one file, if the file is too old, force merge it, else no need to merge it
         if (pair.second.size() == 1) {
-            if (now - pair.second[0].created_on_ > FORCE_MERGE_THREASHOLD * meta::US_PS) {
+            if (now - pair.second[0].created_on_ > (int64_t)(FORCE_MERGE_THREASHOLD * meta::US_PS)) {
                 force_merge_file.push_back(pair.second[0]);
                 pair.second.clear();
             }

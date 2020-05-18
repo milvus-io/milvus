@@ -182,7 +182,7 @@ MemTableFile::IsFull() {
 
 Status
 MemTableFile::Serialize(uint64_t wal_lsn) {
-    size_t size = GetCurrentMem();
+    int64_t size = GetCurrentMem();
     server::CollectSerializeMetrics metrics(size);
 
     auto status = segment_writer_ptr_->Serialize();

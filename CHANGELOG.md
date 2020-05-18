@@ -9,6 +9,7 @@ Please mark all change in change log and use the issue from GitHub
 -   \#2363 Update branch version to 0.9.1
 
 ## Improvement
+-   \#2370 Clean compile warning
 
 ## Task
 

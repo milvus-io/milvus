@@ -1977,7 +1977,7 @@ DBImpl::MergeHybridFiles(const std::string& collection_id, meta::FilesHolder& fi
         auto file_schema = file;
         file_schema.file_type_ = meta::SegmentSchema::TO_DELETE;
         updated.push_back(file_schema);
-        auto size = segment_writer_ptr->Size();
+        int64_t size = segment_writer_ptr->Size();
         if (size >= file_schema.index_file_size_) {
             break;
         }
@@ -2558,6 +2558,9 @@ DBImpl::ExecWalRecord(const wal::MXLogRecord& record) {
             }
             break;
         }
+
+        default:
+            break;
     }
 
     return status;

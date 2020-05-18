@@ -25,7 +25,7 @@ namespace milvus {
 namespace engine {
 namespace wal {
 
-static const char* WAL_META_FILE_NAME = "mxlog.meta";
+extern const char* WAL_META_FILE_NAME;
 
 class MXLogMetaHandler {
  public:
