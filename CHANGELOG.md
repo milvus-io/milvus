@@ -10,6 +10,7 @@ Please mark all change in change log and use the issue from GitHub
 
 ## Improvement
 -   \#2307 Disable index SPTAG by default
+-   \#2370 Clean compile warning
 
 ## Task
 

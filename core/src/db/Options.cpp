@@ -22,6 +22,10 @@
 namespace milvus {
 namespace engine {
 
+const char* ARCHIVE_CONF_DISK = "disk";
+const char* ARCHIVE_CONF_DAYS = "days";
+const char* DEFAULT_PARTITON_TAG = "_default";
+
 ArchiveConf::ArchiveConf(const std::string& type, const std::string& criterias) {
     ParseType(type);
     ParseCritirias(criterias);
