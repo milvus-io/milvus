@@ -13,9 +13,9 @@
 
 #include <cstddef>
 #include <memory>
+#include <set>
 #include <string>
 #include <vector>
-#include <set>
 
 #include "MetaTypes.h"
 #include "db/Options.h"
@@ -126,8 +126,7 @@ class Meta {
     FilesToSearch(const std::string& collection_id, FilesHolder& files_holder) = 0;
 
     virtual Status
-    FilesToSearchEx(const std::string& root_collection,
-                    const std::set<std::string>& partition_id_array,
+    FilesToSearchEx(const std::string& root_collection, const std::set<std::string>& partition_id_array,
                     FilesHolder& files_holder) = 0;
 
     virtual Status

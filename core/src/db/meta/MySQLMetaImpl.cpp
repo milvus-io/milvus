@@ -1693,8 +1693,7 @@ MySQLMetaImpl::FilesToSearch(const std::string& collection_id, FilesHolder& file
 }
 
 Status
-MySQLMetaImpl::FilesToSearchEx(const std::string& root_collection,
-                               const std::set<std::string>& partition_id_array,
+MySQLMetaImpl::FilesToSearchEx(const std::string& root_collection, const std::set<std::string>& partition_id_array,
                                FilesHolder& files_holder) {
     try {
         server::MetricCollector metric;
@@ -1739,14 +1738,20 @@ MySQLMetaImpl::FilesToSearchEx(const std::string& root_collection,
                     return Status(DB_ERROR, "Failed to connect to meta server(mysql)");
                 }
 
-
                 // to ensure UpdateCollectionFiles to be a atomic operation
                 std::lock_guard<std::mutex> meta_lock(meta_mutex_);
 
                 mysqlpp::Query statement = connectionPtr->query();
                 statement
                     << "SELECT id, table_id, segment_id, engine_type, file_id, file_type, file_size, row_count, date"
-                    << " FROM " << META_TABLEFILES << " WHERE table_id = " << mysqlpp::quote << collection_id;
+                    << " FROM " << META_TABLEFILES << " WHERE table_id in (";
+                for (size_t i = 0; i < group.size(); i++) {
+                    statement << mysqlpp::quote << group[i];
+                    if (i != group.size() - 1) {
+                        statement << ",";
+                    }
+                }
+                statement << ")";
 
                 // End
                 statement << " AND"
