@@ -614,7 +614,7 @@ bool
 MXLogBuffer::ResetWriteLsn(uint64_t lsn) {
     LOG_WAL_INFO_ << "reset write lsn " << lsn;
 
-    int32_t old_file_no = mxlog_buffer_writer_.file_no;
+    uint32_t old_file_no = mxlog_buffer_writer_.file_no;
     ParserLsn(lsn, mxlog_buffer_writer_.file_no, mxlog_buffer_writer_.buf_offset);
     if (old_file_no == mxlog_buffer_writer_.file_no) {
         LOG_WAL_DEBUG_ << "file No. is not changed";

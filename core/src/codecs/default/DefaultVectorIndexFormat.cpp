@@ -47,7 +47,7 @@ DefaultVectorIndexFormat::read_internal(const storage::FSHandlerPtr& fs_ptr, con
         return nullptr;
     }
 
-    size_t rp = 0;
+    int64_t rp = 0;
     fs_ptr->reader_ptr_->seekg(0);
 
     int32_t current_type = 0;
