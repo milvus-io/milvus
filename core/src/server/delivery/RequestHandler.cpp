@@ -290,6 +290,7 @@ RequestHandler::DescribeHybridCollection(const std::shared_ptr<Context>& context
 Status
 RequestHandler::HasHybridCollection(const std::shared_ptr<Context>& context, std::string& collection_name,
                                     bool& has_collection) {
+    return Status::OK();
 }
 
 Status

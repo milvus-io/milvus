@@ -68,7 +68,7 @@ InsertRequest::OnExecute() {
 
         fiu_do_on("InsertRequest.OnExecute.id_array_error", vectors_data_.id_array_.resize(vector_count + 1));
         if (!vectors_data_.id_array_.empty()) {
-            if (vectors_data_.id_array_.size() != vector_count) {
+            if (vectors_data_.id_array_.size() != (size_t)vector_count) {
                 std::string msg = "The size of vector ID array must be equal to the size of the vector.";
                 LOG_SERVER_ERROR_ << LogOut("[%s][%ld] Invalid id array: %s", "insert", 0, msg.c_str());
                 return Status(SERVER_ILLEGAL_VECTOR_ID, msg);

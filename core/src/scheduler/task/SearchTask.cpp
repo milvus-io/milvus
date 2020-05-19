@@ -316,8 +316,8 @@ XSearchTask::Execute() {
                 return;
             }
 
-            double span = rc.RecordSection(hdr + ", do search");
-            //            search_job->AccumSearchCost(span);
+            // double span = rc.RecordSection(hdr + ", do search");
+            // search_job->AccumSearchCost(span);
 
             // step 3: pick up topk result
             auto spec_k = file_->row_count_ < topk ? file_->row_count_ : topk;
@@ -341,8 +341,8 @@ XSearchTask::Execute() {
                                                   search_job->GetResultIds(), search_job->GetResultDistances());
             }
 
-            span = rc.RecordSection(hdr + ", reduce topk");
-            //            search_job->AccumReduceCost(span);
+            // span = rc.RecordSection(hdr + ", reduce topk");
+            // search_job->AccumReduceCost(span);
         } catch (std::exception& ex) {
             LOG_ENGINE_ERROR_ << LogOut("[%s][%ld] SearchTask encounter exception: %s", "search", 0, ex.what());
             //            search_job->IndexSearchDone(index_id_);//mark as done avoid dead lock, even search failed

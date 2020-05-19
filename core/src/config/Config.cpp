@@ -398,19 +398,19 @@ Config::ValidateConfig() {
     STATUS_CHECK(GetLogsTraceEnable(trace_enable));
 
     bool debug_enable;
-    STATUS_CHECK(GetLogsDebugEnable(trace_enable));
+    STATUS_CHECK(GetLogsDebugEnable(debug_enable));
 
     bool info_enable;
-    STATUS_CHECK(GetLogsInfoEnable(trace_enable));
+    STATUS_CHECK(GetLogsInfoEnable(info_enable));
 
     bool warning_enable;
-    STATUS_CHECK(GetLogsWarningEnable(trace_enable));
+    STATUS_CHECK(GetLogsWarningEnable(warning_enable));
 
     bool error_enable;
-    STATUS_CHECK(GetLogsErrorEnable(trace_enable));
+    STATUS_CHECK(GetLogsErrorEnable(error_enable));
 
     bool fatal_enable;
-    STATUS_CHECK(GetLogsFatalEnable(trace_enable));
+    STATUS_CHECK(GetLogsFatalEnable(fatal_enable));
 
     std::string logs_path;
     STATUS_CHECK(GetLogsPath(logs_path));
@@ -1252,9 +1252,9 @@ Config::CheckCacheConfigCpuCacheCapacity(const std::string& value) {
             return Status(SERVER_INVALID_ARGUMENT, msg);
         }
 
-        uint64_t total_mem = 0, free_mem = 0;
+        int64_t total_mem = 0, free_mem = 0;
         CommonUtil::GetSystemMemInfo(total_mem, free_mem);
-        if (static_cast<uint64_t>(cpu_cache_capacity) >= total_mem) {
+        if (cpu_cache_capacity >= total_mem) {
             std::string msg = "Invalid cpu cache capacity: " + value +
                               ". Possible reason: cache_config.cpu_cache_capacity exceeds system memory.";
             return Status(SERVER_INVALID_ARGUMENT, msg);
@@ -1314,7 +1314,7 @@ Config::CheckCacheConfigInsertBufferSize(const std::string& value) {
         std::string str = GetConfigStr(CONFIG_CACHE, CONFIG_CACHE_CPU_CACHE_CAPACITY, "0");
         int64_t cache_size = std::stoll(str) * GB;
 
-        uint64_t total_mem = 0, free_mem = 0;
+        int64_t total_mem = 0, free_mem = 0;
         CommonUtil::GetSystemMemInfo(total_mem, free_mem);
         if (buffer_size + cache_size >= total_mem) {
             std::string msg = "Invalid insert buffer size: " + value +
@@ -1423,7 +1423,7 @@ Config::CheckGpuResourceConfigCacheCapacity(const std::string& value) {
         STATUS_CHECK(GetGpuResourceConfigBuildIndexResources(gpu_ids));
 
         for (int64_t gpu_id : gpu_ids) {
-            size_t gpu_memory;
+            int64_t gpu_memory;
             if (!ValidationUtil::GetGpuMemory(gpu_id, gpu_memory).ok()) {
                 std::string msg = "Fail to get GPU memory for GPU device: " + std::to_string(gpu_id);
                 return Status(SERVER_UNEXPECTED_ERROR, msg);

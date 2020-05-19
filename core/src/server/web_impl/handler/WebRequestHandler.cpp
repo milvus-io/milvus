@@ -487,7 +487,7 @@ WebRequestHandler::Search(const std::string& collection_name, const nlohmann::js
 
     auto step = result.id_list_.size() / result.row_num_;
     nlohmann::json search_result_json;
-    for (size_t i = 0; i < result.row_num_; i++) {
+    for (int64_t i = 0; i < result.row_num_; i++) {
         nlohmann::json raw_result_json;
         for (size_t j = 0; j < step; j++) {
             nlohmann::json one_result_json;
@@ -541,6 +541,8 @@ WebRequestHandler::ProcessLeafQueryJson(const nlohmann::json& json, milvus::quer
                 memcpy(term_query->field_value.data(), term_value.data(), term_size * sizeof(double));
                 break;
             }
+            default:
+                break;
         }
 
         leaf_query->term_query = term_query;
@@ -731,7 +733,7 @@ WebRequestHandler::HybridSearch(const std::string& collection_name, const nlohma
 
         auto step = result.id_list_.size() / result.row_num_;
         nlohmann::json search_result_json;
-        for (size_t i = 0; i < result.row_num_; i++) {
+        for (int64_t i = 0; i < result.row_num_; i++) {
             nlohmann::json raw_result_json;
             for (size_t j = 0; j < step; j++) {
                 nlohmann::json one_result_json;
@@ -837,7 +839,6 @@ WebRequestHandler::GetDevices(DevicesDto::ObjectWrapper& devices_dto) {
 
 StatusDto::ObjectWrapper
 WebRequestHandler::GetAdvancedConfig(AdvancedConfigDto::ObjectWrapper& advanced_config) {
-    Config& config = Config::GetInstance();
     std::string reply;
     std::string cache_cmd_prefix = "get_config " + std::string(CONFIG_CACHE) + ".";
 
@@ -1387,7 +1388,7 @@ WebRequestHandler::ShowPartitions(const OString& collection_name, const OQueryPa
     partition_list_dto->count = partitions.size();
     partition_list_dto->partitions = partition_list_dto->partitions->createShared();
 
-    if (offset < partitions.size()) {
+    if (offset < (int64_t)(partitions.size())) {
         for (int64_t i = offset; i < page_size + offset; i++) {
             auto partition_dto = PartitionFieldsDto::createShared();
             partition_dto->partition_tag = partitions.at(i).tag_.c_str();

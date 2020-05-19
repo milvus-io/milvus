@@ -65,7 +65,7 @@ TEST(UtilTest, SIGNAL_TEST) {
 }
 
 TEST(UtilTest, COMMON_TEST) {
-    uint64_t total_mem = 0, free_mem = 0;
+    int64_t total_mem = 0, free_mem = 0;
     milvus::server::CommonUtil::GetSystemMemInfo(total_mem, free_mem);
     ASSERT_GT(total_mem, 0);
     ASSERT_GT(free_mem, 0);
@@ -685,7 +685,7 @@ TEST(ValidationUtilTest, VALIDATE_GPU_TEST) {
     ASSERT_NE(milvus::server::ValidationUtil::ValidateGpuIndex(0).code(), milvus::SERVER_SUCCESS);
     fiu_disable("ValidationUtil.ValidateGpuIndex.get_device_count_fail");
 
-    size_t memory = 0;
+    int64_t memory = 0;
     ASSERT_EQ(milvus::server::ValidationUtil::GetGpuMemory(0, memory).code(), milvus::SERVER_SUCCESS);
     ASSERT_NE(milvus::server::ValidationUtil::GetGpuMemory(100, memory).code(), milvus::SERVER_SUCCESS);
 }
