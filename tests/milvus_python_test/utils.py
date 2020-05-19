@@ -1,8 +1,8 @@
-# STL imports
+import os
+import sys
 import random
 import string
 import struct
-import sys
 import logging
 import time, datetime
 import copy
@@ -625,3 +625,19 @@ def assert_equal_vector(v1, v2):
         assert False
     for i in range(len(v1)):
         assert abs(v1[i] - v2[i]) < epsilon
+
+
+def restart_server(helm_release_name):
+    res = False
+    chart_file = "../../milvus-helm/values.yaml"
+    # reset replica: 0
+    for replica_num in [0, 1]:
+        cmd = "helm upgrade %s %s --set replicas=%d" % (release_name, chart_file, replica_num)
+        if os.system(cmd):
+            logging.error("Helm upgrade to %d failed" % replica_num)
+        else:
+            res = True
+        time.sleep(15)
+        if res is False:
+            return res
+    return res

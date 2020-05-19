@@ -13,6 +13,7 @@ timeout = 1
 
 def pytest_addoption(parser):
     parser.addoption("--ip", action="store", default="localhost")
+    parser.addoption("--service", action="store", default="")
     parser.addoption("--port", action="store", default=19530)
     parser.addoption("--http-port", action="store", default=19121)
     parser.addoption("--handler", action="store", default="GRPC")
@@ -35,6 +36,7 @@ def check_server_connection(request):
 @pytest.fixture(scope="module")
 def connect(request):
     ip = request.config.getoption("--ip")
+    service_name = request.config.getoption("--service")
     port = request.config.getoption("--port")
     http_port = request.config.getoption("--http-port")
     handler = request.config.getoption("--handler")
@@ -58,6 +60,7 @@ def connect(request):
 @pytest.fixture(scope="module")
 def dis_connect(request):
     ip = request.config.getoption("--ip")
+    service_name = request.config.getoption("--service")
     port = request.config.getoption("--port")
     http_port = request.config.getoption("--http-port")
     handler = request.config.getoption("--handler")
@@ -71,12 +74,13 @@ def dis_connect(request):
 @pytest.fixture(scope="module")
 def args(request):
     ip = request.config.getoption("--ip")
+    service_name = request.config.getoption("--service")
     port = request.config.getoption("--port")
     http_port = request.config.getoption("--http-port")
     handler = request.config.getoption("--handler")
     if handler == "HTTP":
         port = http_port
-    args = {"ip": ip, "port": port, "handler": handler}
+    args = {"ip": ip, "port": port, "handler": handler, "service_name": service_name}
     return args
 
 
