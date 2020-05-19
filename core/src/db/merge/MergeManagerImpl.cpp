@@ -10,6 +10,7 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
 #include "db/merge/MergeManagerImpl.h"
+#include "db/merge/MergeAdaptiveStrategy.h"
 #include "db/merge/MergeLayeredStrategy.h"
 #include "db/merge/MergeSimpleStrategy.h"
 #include "db/merge/MergeStrategy.h"
@@ -21,7 +22,7 @@ namespace milvus {
 namespace engine {
 
 MergeManagerImpl::MergeManagerImpl(const meta::MetaPtr& meta_ptr, const DBOptions& options, MergeStrategyType type)
-    : meta_ptr_(meta_ptr), options_(options) {
+    : meta_ptr_(meta_ptr), options_(options), strategy_type_(type) {
     UseStrategy(type);
 }
 
@@ -36,12 +37,17 @@ MergeManagerImpl::UseStrategy(MergeStrategyType type) {
             strategy_ = std::make_shared<MergeLayeredStrategy>();
             break;
         }
+        case MergeStrategyType::ADAPTIVE: {
+            strategy_ = std::make_shared<MergeAdaptiveStrategy>();
+            break;
+        }
         default: {
             std::string msg = "Unsupported merge strategy type: " + std::to_string((int32_t)type);
             LOG_ENGINE_ERROR_ << msg;
             throw Exception(DB_ERROR, msg);
         }
     }
+    strategy_type_ = type;
 
     return Status::OK();
 }

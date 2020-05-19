@@ -1693,6 +1693,116 @@ MySQLMetaImpl::FilesToSearch(const std::string& collection_id, FilesHolder& file
 }
 
 Status
+MySQLMetaImpl::FilesToSearchEx(const std::string& root_collection, const std::set<std::string>& partition_id_array,
+                               FilesHolder& files_holder) {
+    try {
+        server::MetricCollector metric;
+
+        // get root collection information
+        CollectionSchema collection_schema;
+        collection_schema.collection_id_ = root_collection;
+        auto status = DescribeCollection(collection_schema);
+        if (!status.ok()) {
+            return status;
+        }
+
+        // distribute id array to batchs
+        const int64_t batch_size = 50;
+        std::vector<std::vector<std::string>> id_groups;
+        std::vector<std::string> temp_group = {root_collection};
+        int64_t count = 1;
+        for (auto& id : partition_id_array) {
+            temp_group.push_back(id);
+            count++;
+            if (count >= batch_size) {
+                id_groups.emplace_back(temp_group);
+                temp_group.clear();
+                count = 0;
+            }
+        }
+
+        if (!temp_group.empty()) {
+            id_groups.emplace_back(temp_group);
+        }
+
+        // perform query batch by batch
+        int64_t files_count = 0;
+        Status ret;
+        for (auto group : id_groups) {
+            mysqlpp::StoreQueryResult res;
+            {
+                mysqlpp::ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab_);
+
+                bool is_null_connection = (connectionPtr == nullptr);
+                if (is_null_connection) {
+                    return Status(DB_ERROR, "Failed to connect to meta server(mysql)");
+                }
+
+                // to ensure UpdateCollectionFiles to be a atomic operation
+                std::lock_guard<std::mutex> meta_lock(meta_mutex_);
+
+                mysqlpp::Query statement = connectionPtr->query();
+                statement
+                    << "SELECT id, table_id, segment_id, engine_type, file_id, file_type, file_size, row_count, date"
+                    << " FROM " << META_TABLEFILES << " WHERE table_id in (";
+                for (size_t i = 0; i < group.size(); i++) {
+                    statement << mysqlpp::quote << group[i];
+                    if (i != group.size() - 1) {
+                        statement << ",";
+                    }
+                }
+                statement << ")";
+
+                // End
+                statement << " AND"
+                          << " (file_type = " << std::to_string(SegmentSchema::RAW)
+                          << " OR file_type = " << std::to_string(SegmentSchema::TO_INDEX)
+                          << " OR file_type = " << std::to_string(SegmentSchema::INDEX) << ");";
+
+                LOG_ENGINE_DEBUG_ << "FilesToSearch: " << statement.str();
+
+                res = statement.store();
+            }  // Scoped Connection
+
+            for (auto& resRow : res) {
+                SegmentSchema collection_file;
+                collection_file.id_ = resRow["id"];  // implicit conversion
+                resRow["table_id"].to_string(collection_file.collection_id_);
+                resRow["segment_id"].to_string(collection_file.segment_id_);
+                collection_file.index_file_size_ = collection_schema.index_file_size_;
+                collection_file.engine_type_ = resRow["engine_type"];
+                collection_file.index_params_ = collection_schema.index_params_;
+                collection_file.metric_type_ = collection_schema.metric_type_;
+                resRow["file_id"].to_string(collection_file.file_id_);
+                collection_file.file_type_ = resRow["file_type"];
+                collection_file.file_size_ = resRow["file_size"];
+                collection_file.row_count_ = resRow["row_count"];
+                collection_file.date_ = resRow["date"];
+                collection_file.dimension_ = collection_schema.dimension_;
+
+                auto status = utils::GetCollectionFilePath(options_, collection_file);
+                if (!status.ok()) {
+                    ret = status;
+                    continue;
+                }
+
+                files_holder.MarkFile(collection_file);
+                files_count++;
+            }
+        }
+
+        if (files_count == 0) {
+            LOG_ENGINE_DEBUG_ << "No file to search for collection: " << root_collection;
+        } else {
+            LOG_ENGINE_DEBUG_ << "Collect " << files_count << " to-search files in collection " << root_collection;
+        }
+        return ret;
+    } catch (std::exception& e) {
+        return HandleException("Failed to get files to search", e.what());
+    }
+}
+
+Status
 MySQLMetaImpl::FilesToMerge(const std::string& collection_id, FilesHolder& files_holder) {
     try {
         server::MetricCollector metric;
