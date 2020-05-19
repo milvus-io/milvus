@@ -633,7 +633,7 @@ def restart_server(helm_release_name):
     namespace = "milvus"
     # reset replica: 0
     for replica_num in [0, 1]:
-        cmd = "helm upgrade %s %s --set replicas=%d -n %s" % (release_name, chart_file, replica_num, namespace)
+        cmd = "helm upgrade %s %s --set replicas=%d -n %s" % (helm_release_name, chart_file, replica_num, namespace)
         logging.error(cmd)
         if os.system(cmd):
             logging.error("Helm upgrade to %d failed" % replica_num)
