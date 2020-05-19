@@ -2011,7 +2011,7 @@ DBImpl::MergeHybridFiles(const std::string& collection_id, meta::FilesHolder& fi
     // if index type isn't IDMAP, set file type to TO_INDEX if file size exceed index_file_size
     // else set file type to RAW, no need to build index
     if (!utils::IsRawIndexType(table_file.engine_type_)) {
-        table_file.file_type_ = (segment_writer_ptr->Size() >= table_file.index_file_size_)
+        table_file.file_type_ = (segment_writer_ptr->Size() >= (size_t)(table_file.index_file_size_))
                                     ? meta::SegmentSchema::TO_INDEX
                                     : meta::SegmentSchema::RAW;
     } else {

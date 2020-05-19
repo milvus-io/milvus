@@ -1845,7 +1845,7 @@ MySQLMetaImpl::FilesToMerge(const std::string& collection_id, FilesHolder& files
         for (auto& resRow : res) {
             SegmentSchema collection_file;
             collection_file.file_size_ = resRow["file_size"];
-            if (collection_file.file_size_ >= collection_schema.index_file_size_) {
+            if ((int64_t)(collection_file.file_size_) >= collection_schema.index_file_size_) {
                 continue;  // skip large file
             }
 
@@ -3001,6 +3001,7 @@ MySQLMetaImpl::DescribeHybridCollection(CollectionSchema& collection_schema, hyb
 
 Status
 MySQLMetaImpl::CreateHybridCollectionFile(milvus::engine::meta::SegmentSchema& file_schema) {
+    return Status::OK();
 }
 
 }  // namespace meta

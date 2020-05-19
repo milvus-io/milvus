@@ -22,7 +22,7 @@ namespace server {
 class CommonUtil {
  public:
     static bool
-    GetSystemMemInfo(uint64_t& total_mem, uint64_t& free_mem);
+    GetSystemMemInfo(int64_t& total_mem, int64_t& free_mem);
     static bool
     GetSystemAvailableThreads(int64_t& thread_count);
 
