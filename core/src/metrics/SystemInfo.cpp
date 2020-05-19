@@ -170,7 +170,7 @@ SystemInfo::CPUCorePercent() {
     std::vector<int64_t> cur_total_time_array = getTotalCpuTime(cur_work_time_array);
 
     std::vector<double> cpu_core_percent;
-    for (int i = 0; i < cur_total_time_array.size(); i++) {
+    for (size_t i = 0; i < cur_total_time_array.size(); i++) {
         double total_cpu_time = cur_total_time_array[i] - prev_total_time_array[i];
         double cpu_work_time = cur_work_time_array[i] - prev_work_time_array[i];
         cpu_core_percent.push_back((cpu_work_time / total_cpu_time) * 100);
@@ -254,7 +254,7 @@ SystemInfo::GPUMemoryTotal() {
 
 #ifdef MILVUS_GPU_VERSION
     nvmlMemory_t nvmlMemory;
-    for (int i = 0; i < num_device_; ++i) {
+    for (uint32_t i = 0; i < num_device_; ++i) {
         nvmlDevice_t device;
         nvmlDeviceGetHandleByIndex(i, &device);
         nvmlDeviceGetMemoryInfo(device, &nvmlMemory);
@@ -273,7 +273,7 @@ SystemInfo::GPUTemperature() {
     std::vector<int64_t> result;
 
 #ifdef MILVUS_GPU_VERSION
-    for (int i = 0; i < num_device_; i++) {
+    for (uint32_t i = 0; i < num_device_; i++) {
         nvmlDevice_t device;
         nvmlDeviceGetHandleByIndex(i, &device);
         unsigned int temp;
@@ -342,7 +342,7 @@ SystemInfo::GPUMemoryUsed() {
 
 #ifdef MILVUS_GPU_VERSION
     nvmlMemory_t nvmlMemory;
-    for (int i = 0; i < num_device_; ++i) {
+    for (uint32_t i = 0; i < num_device_; ++i) {
         nvmlDevice_t device;
         nvmlDeviceGetHandleByIndex(i, &device);
         nvmlDeviceGetMemoryInfo(device, &nvmlMemory);
@@ -355,8 +355,6 @@ SystemInfo::GPUMemoryUsed() {
 
 std::pair<int64_t, int64_t>
 SystemInfo::Octets() {
-    pid_t pid = getpid();
-    //    const std::string filename = "/proc/"+std::to_string(pid)+"/net/netstat";
     const std::string filename = "/proc/net/netstat";
     std::ifstream file(filename);
     std::string lastline = "";

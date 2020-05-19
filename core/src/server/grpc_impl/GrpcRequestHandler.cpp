@@ -32,6 +32,8 @@ namespace milvus {
 namespace server {
 namespace grpc {
 
+const char* EXTRA_PARAM_KEY = "params";
+
 ::milvus::grpc::ErrorCode
 ErrorMap(ErrorCode code) {
     static const std::map<ErrorCode, ::milvus::grpc::ErrorCode> code_map = {
@@ -1104,7 +1106,7 @@ GrpcRequestHandler::CreateHybridCollection(::grpc::ServerContext* context, const
     std::vector<std::pair<std::string, engine::meta::hybrid::DataType>> field_types;
     std::vector<std::pair<std::string, uint64_t>> vector_dimensions;
     std::vector<std::pair<std::string, std::string>> field_params;
-    for (uint64_t i = 0; i < request->fields_size(); ++i) {
+    for (int i = 0; i < request->fields_size(); ++i) {
         if (request->fields(i).type().has_vector_param()) {
             auto vector_dimension =
                 std::make_pair(request->fields(i).name(), request->fields(i).type().vector_param().dimension());
@@ -1140,6 +1142,7 @@ GrpcRequestHandler::DescribeHybridCollection(::grpc::ServerContext* context,
     LOG_SERVER_INFO_ << LogOut("Request [%s] %s begin.", GetContext(context)->RequestID().c_str(), __func__);
     CHECK_NULLPTR_RETURN(request);
     LOG_SERVER_INFO_ << LogOut("Request [%s] %s end.", GetContext(context)->RequestID().c_str(), __func__);
+    return ::grpc::Status::OK;
 }
 
 ::grpc::Status
@@ -1550,7 +1553,7 @@ GrpcRequestHandler::HybridSearch(::grpc::ServerContext* context, const ::milvus:
 
     std::vector<std::string> partition_list;
     partition_list.resize(request->partition_tag_array_size());
-    for (uint64_t i = 0; i < request->partition_tag_array_size(); ++i) {
+    for (int i = 0; i < request->partition_tag_array_size(); ++i) {
         partition_list[i] = request->partition_tag_array(i);
     }
 
