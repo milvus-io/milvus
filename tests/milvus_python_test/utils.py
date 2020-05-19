@@ -634,6 +634,7 @@ def restart_server(helm_release_name):
     # reset replica: 0
     for replica_num in [0, 1]:
         cmd = "helm upgrade %s %s --set replicas=%d -n %s" % (release_name, chart_file, replica_num, namespace)
+        logging.error(cmd)
         if os.system(cmd):
             logging.error("Helm upgrade to %d failed" % replica_num)
         else:
@@ -641,4 +642,5 @@ def restart_server(helm_release_name):
         time.sleep(15)
         if res is False:
             return res
+    logging.error(res)
     return res
