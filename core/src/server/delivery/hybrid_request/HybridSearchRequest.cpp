@@ -34,12 +34,13 @@ HybridSearchRequest::HybridSearchRequest(const std::shared_ptr<milvus::server::C
                                          context::HybridSearchContextPtr& hybrid_search_context,
                                          const std::string& collection_name, std::vector<std::string>& partition_list,
                                          milvus::query::GeneralQueryPtr& general_query, milvus::json& json_params,
-                                         engine::QueryResult& result)
+                                         std::vector<std::string>& field_names, engine::QueryResult& result)
     : BaseRequest(context, BaseRequest::kHybridSearch),
       hybrid_search_context_(hybrid_search_context),
       collection_name_(collection_name),
       partition_list_(partition_list),
       general_query_(general_query),
+      field_names_(field_names),
       result_(result) {
 }
 
@@ -47,9 +48,11 @@ BaseRequestPtr
 HybridSearchRequest::Create(const std::shared_ptr<milvus::server::Context>& context,
                             context::HybridSearchContextPtr& hybrid_search_context, const std::string& collection_name,
                             std::vector<std::string>& partition_list, milvus::query::GeneralQueryPtr& general_query,
-                            milvus::json& json_params, engine::QueryResult& result) {
+                            milvus::json& json_params, std::vector<std::string>& field_names,
+                            engine::QueryResult& result) {
     return std::shared_ptr<BaseRequest>(new HybridSearchRequest(context, hybrid_search_context, collection_name,
-                                                                partition_list, general_query, json_params, result));
+                                                                partition_list, general_query, json_params, field_names,
+                                                                result));
 }
 
 Status
@@ -91,17 +94,20 @@ HybridSearchRequest::OnExecute() {
                 std::make_pair(field_schema.field_name_, (engine::meta::hybrid::DataType)field_schema.field_type_));
         }
 
-        std::vector<std::string> field_names;
         if (json_params.contains("field_names")) {
             if (json_params["field_names"].is_array()) {
                 for (auto& name : json_params["field_names"]) {
-                    field_names.emplace_back(name.get<std::string>());
+                    field_names_.emplace_back(name.get<std::string>());
                 }
+            }
+        } else {
+            for (auto& field_schema : fields_schema.fields_schema_) {
+                field_names_.emplace_back(field_schema.field_name_);
             }
         }
 
         status = DBWrapper::DB()->HybridQuery(context_, collection_name_, partition_list_, hybrid_search_context_,
-                                              general_query_, field_names, attr_type, result_);
+                                              general_query_, field_names_, attr_type, result_);
 
 #ifdef ENABLE_CPU_PROFILING
         ProfilerStop();

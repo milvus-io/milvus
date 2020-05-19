@@ -150,6 +150,139 @@ ConstructResults(const TopKQueryResult& result, ::milvus::grpc::TopKQueryResult*
            result.distance_list_.size() * sizeof(float));
 }
 
+void
+ConstructHEntityResults(const std::vector<engine::AttrsData>& attrs, const std::vector<engine::VectorsData>& vectors,
+                        std::vector<std::string>& field_names, ::milvus::grpc::HEntity* response) {
+    if (!response) {
+        return;
+    }
+
+    response->set_row_num(attrs.size());
+    if (field_names.size() > 0) {
+        for (auto& name : field_names) {
+            response->add_field_names(name);
+        }
+    } else {
+        if (attrs.size() > 0) {
+            auto attr_it = attrs[0].attr_type_.begin();
+            for (; attr_it != attrs[0].attr_type_.end(); attr_it++) {
+                field_names.emplace_back(attr_it->first);
+                response->add_field_names(attr_it->first);
+            }
+        }
+    }
+
+    for (uint64_t i = 0; i < field_names.size() - 1; i++) {
+        auto field_name = field_names[i];
+        if (attrs.size() > 0) {
+            if (attrs[0].attr_type_.find(field_name) != attrs[0].attr_type_.end()) {
+                response->add_data_types((::milvus::grpc::DataType)attrs[0].attr_type_.at(field_name));
+            }
+        }
+        auto grpc_attr_data = response->add_attr_data();
+        std::vector<int64_t> int_data;
+        std::vector<double> double_data;
+        for (auto& attr : attrs) {
+            auto attr_data = attr.attr_data_.at(field_name);
+            int64_t grpc_int_data;
+            double grpc_double_data;
+            switch (attr.attr_type_.at(field_name)) {
+                case engine::meta::hybrid::DataType::INT8: {
+                    if (attr_data.size() == sizeof(int8_t)) {
+                        grpc_int_data = attr_data[0];
+                        int_data.emplace_back(grpc_int_data);
+                    } else {
+                        response->mutable_status()->set_error_code(::milvus::grpc::ErrorCode::UNEXPECTED_ERROR);
+                        return;
+                    }
+                    break;
+                }
+                case engine::meta::hybrid::DataType::INT16: {
+                    if (attr_data.size() == sizeof(int16_t)) {
+                        memcpy(&grpc_int_data, attr_data.data(), sizeof(int16_t));
+                        int_data.emplace_back(grpc_int_data);
+                    } else {
+                        response->mutable_status()->set_error_code(::milvus::grpc::ErrorCode::UNEXPECTED_ERROR);
+                        return;
+                    }
+                    break;
+                }
+                case engine::meta::hybrid::DataType::INT32: {
+                    if (attr_data.size() == sizeof(int32_t)) {
+                        memcpy(&grpc_int_data, attr_data.data(), sizeof(int32_t));
+                        int_data.emplace_back(grpc_int_data);
+                    } else {
+                        response->mutable_status()->set_error_code(::milvus::grpc::ErrorCode::UNEXPECTED_ERROR);
+                        return;
+                    }
+                    break;
+                }
+                case engine::meta::hybrid::DataType::INT64: {
+                    if (attr_data.size() == sizeof(int64_t)) {
+                        memcpy(&grpc_int_data, attr_data.data(), sizeof(int64_t));
+                        int_data.emplace_back(grpc_int_data);
+                    } else {
+                        response->mutable_status()->set_error_code(::milvus::grpc::ErrorCode::UNEXPECTED_ERROR);
+                        return;
+                    }
+                    break;
+                }
+                case engine::meta::hybrid::DataType::FLOAT: {
+                    if (attr_data.size() == sizeof(float)) {
+                        float float_data;
+                        memcpy(&float_data, attr_data.data(), sizeof(float));
+                        grpc_double_data = float_data;
+                        double_data.emplace_back(grpc_double_data);
+                    } else {
+                        response->mutable_status()->set_error_code(::milvus::grpc::ErrorCode::UNEXPECTED_ERROR);
+                        return;
+                    }
+                    break;
+                }
+                case engine::meta::hybrid::DataType::DOUBLE: {
+                    if (attr_data.size() == sizeof(double)) {
+                        memcpy(&grpc_double_data, attr_data.data(), sizeof(double));
+                        double_data.emplace_back(grpc_double_data);
+                    } else {
+                        response->mutable_status()->set_error_code(::milvus::grpc::ErrorCode::UNEXPECTED_ERROR);
+                        return;
+                    }
+                    break;
+                }
+                default: { break; }
+            }
+        }
+        if (int_data.size() > 0) {
+            grpc_attr_data->mutable_int_value()->Resize(static_cast<int>(int_data.size()), 0);
+            memcpy(grpc_attr_data->mutable_int_value()->mutable_data(), int_data.data(),
+                   int_data.size() * sizeof(int64_t));
+        } else if (double_data.size() > 0) {
+            grpc_attr_data->mutable_double_value()->Resize(static_cast<int>(double_data.size()), 0.0);
+            memcpy(grpc_attr_data->mutable_double_value()->mutable_data(), double_data.data(),
+                   double_data.size() * sizeof(double));
+        }
+    }
+
+    std::vector<int64_t> aaa(100);
+    memcpy(aaa.data(), response->attr_data(0).int_value().data(), 100 * sizeof(int64_t));
+    std::vector<double> bbb(100);
+    memcpy(bbb.data(), response->attr_data(1).double_value().data(), 100 * sizeof(double));
+
+    ::milvus::grpc::VectorFieldRecord* grpc_vector_data = response->add_vector_data();
+    for (auto& vector : vectors) {
+        auto grpc_data = grpc_vector_data->add_value();
+        if (!vector.float_data_.empty()) {
+            grpc_data->mutable_float_data()->Resize(vector.float_data_.size(), 0);
+            memcpy(grpc_data->mutable_float_data()->mutable_data(), vector.float_data_.data(),
+                   vector.float_data_.size() * sizeof(float));
+        } else if (!vector.binary_data_.empty()) {
+            grpc_data->mutable_binary_data()->resize(vector.binary_data_.size());
+            memcpy(grpc_data->mutable_binary_data()->data(), vector.binary_data_.data(),
+                   vector.binary_data_.size() * sizeof(uint8_t));
+        }
+    }
+}
+
 class GrpcConnectionContext : public milvus::server::ConnectionContext {
  public:
     explicit GrpcConnectionContext(::grpc::ServerContext* context) : context_(context) {
@@ -1105,12 +1238,21 @@ GrpcRequestHandler::HybridSearch(::grpc::ServerContext* context, const ::milvus:
     }
 
     engine::QueryResult result;
-
+    std::vector<std::string> field_names;
     status = request_handler_.HybridSearch(GetContext(context), hybrid_search_context, request->collection_name(),
-                                           partition_list, general_query, json_params, result);
+                                           partition_list, general_query, json_params, field_names, result);
 
     // step 6: construct and return result
-    //    ConstructResults(result, response);
+    response->set_row_num(result.row_num_);
+    auto grpc_entity = response->mutable_entity();
+    ConstructHEntityResults(result.attrs_, result.vectors_, field_names, grpc_entity);
+    grpc_entity->mutable_entity_id()->Resize(static_cast<int>(result.result_ids_.size()), 0);
+    memcpy(grpc_entity->mutable_entity_id()->mutable_data(), result.result_ids_.data(),
+           result.result_ids_.size() * sizeof(int64_t));
+
+    response->mutable_distance()->Resize(static_cast<int>(result.result_distances_.size()), 0.0);
+    memcpy(response->mutable_distance()->mutable_data(), result.result_distances_.data(),
+           result.result_distances_.size() * sizeof(float));
 
     LOG_SERVER_INFO_ << LogOut("Request [%s] %s end.", GetContext(context)->RequestID().c_str(), __func__);
     SET_RESPONSE(response->mutable_status(), status, context);
@@ -1135,118 +1277,8 @@ GrpcRequestHandler::GetEntityByID(::grpc::ServerContext* context, const ::milvus
     Status status =
         request_handler_.GetEntityByID(GetContext(context), request->collection_name(), vector_ids, attrs, vectors);
 
-    response->set_row_num(attrs.size());
     std::vector<std::string> field_names;
-    if (attrs.size() > 0) {
-        auto attr_it = attrs[0].attr_type_.begin();
-        for (; attr_it != attrs[0].attr_type_.end(); attr_it++) {
-            field_names.emplace_back(attr_it->first);
-            response->add_field_names(attr_it->first);
-            response->add_data_types((::milvus::grpc::DataType)attr_it->second);
-        }
-    }
-
-    for (auto field_name : field_names) {
-        auto grpc_attr_data = response->add_attr_data();
-        std::vector<int64_t> int_data;
-        std::vector<double> double_data;
-        for (auto& attr : attrs) {
-            auto attr_data = attr.attr_data_.at(field_name);
-            int64_t grpc_int_data;
-            double grpc_double_data;
-            switch (attr.attr_type_.at(field_name)) {
-                case engine::meta::hybrid::DataType::INT8: {
-                    if (attr_data.size() == sizeof(int8_t)) {
-                        grpc_int_data = attr_data[0];
-                        int_data.emplace_back(grpc_int_data);
-                    } else {
-                        response->mutable_status()->set_error_code(::milvus::grpc::ErrorCode::UNEXPECTED_ERROR);
-                        return ::grpc::Status::OK;
-                    }
-                    break;
-                }
-                case engine::meta::hybrid::DataType::INT16: {
-                    if (attr_data.size() == sizeof(int16_t)) {
-                        memcpy(&grpc_int_data, attr_data.data(), sizeof(int16_t));
-                        int_data.emplace_back(grpc_int_data);
-                    } else {
-                        response->mutable_status()->set_error_code(::milvus::grpc::ErrorCode::UNEXPECTED_ERROR);
-                        return ::grpc::Status::OK;
-                    }
-                    break;
-                }
-                case engine::meta::hybrid::DataType::INT32: {
-                    if (attr_data.size() == sizeof(int32_t)) {
-                        memcpy(&grpc_int_data, attr_data.data(), sizeof(int32_t));
-                        int_data.emplace_back(grpc_int_data);
-                    } else {
-                        response->mutable_status()->set_error_code(::milvus::grpc::ErrorCode::UNEXPECTED_ERROR);
-                        return ::grpc::Status::OK;
-                    }
-                    break;
-                }
-                case engine::meta::hybrid::DataType::INT64: {
-                    if (attr_data.size() == sizeof(int64_t)) {
-                        memcpy(&grpc_int_data, attr_data.data(), sizeof(int64_t));
-                        int_data.emplace_back(grpc_int_data);
-                    } else {
-                        response->mutable_status()->set_error_code(::milvus::grpc::ErrorCode::UNEXPECTED_ERROR);
-                        return ::grpc::Status::OK;
-                    }
-                    break;
-                }
-                case engine::meta::hybrid::DataType::FLOAT: {
-                    if (attr_data.size() == sizeof(float)) {
-                        float float_data;
-                        memcpy(&float_data, attr_data.data(), sizeof(float));
-                        grpc_double_data = float_data;
-                        double_data.emplace_back(grpc_double_data);
-                    } else {
-                        response->mutable_status()->set_error_code(::milvus::grpc::ErrorCode::UNEXPECTED_ERROR);
-                        return ::grpc::Status::OK;
-                    }
-                    break;
-                }
-                case engine::meta::hybrid::DataType::DOUBLE: {
-                    if (attr_data.size() == sizeof(double)) {
-                        memcpy(&grpc_double_data, attr_data.data(), sizeof(double));
-                        double_data.emplace_back(grpc_double_data);
-                    } else {
-                        response->mutable_status()->set_error_code(::milvus::grpc::ErrorCode::UNEXPECTED_ERROR);
-                        return ::grpc::Status::OK;
-                    }
-                    break;
-                }
-                default: {
-                    response->mutable_status()->set_error_code(::milvus::grpc::ErrorCode::UNEXPECTED_ERROR);
-                    return ::grpc::Status::OK;
-                }
-            }
-        }
-        if (int_data.size() > 0) {
-            grpc_attr_data->mutable_int_value()->Resize(int_data.size(), 0);
-            memcpy(grpc_attr_data->mutable_int_value()->mutable_data(), int_data.data(),
-                   int_data.size() * sizeof(int64_t));
-        } else if (double_data.size() > 0) {
-            grpc_attr_data->mutable_double_value()->Resize(double_data.size(), 0);
-            memcpy(grpc_attr_data->mutable_double_value()->mutable_data(), double_data.data(),
-                   double_data.size() * sizeof(double));
-        }
-    }
-
-    auto grpc_vector_data = response->add_vector_data();
-    for (auto& vector : vectors) {
-        auto grpc_data = grpc_vector_data->add_value();
-        if (!vector.float_data_.empty()) {
-            grpc_data->mutable_float_data()->Resize(vector.float_data_.size(), 0);
-            memcpy(grpc_data->mutable_float_data()->mutable_data(), vector.float_data_.data(),
-                   vector.float_data_.size() * sizeof(int64_t));
-        } else if (!vector.binary_data_.empty()) {
-            grpc_data->mutable_binary_data()->resize(vector.binary_data_.size());
-            memcpy(grpc_data->mutable_binary_data()->data(), vector.binary_data_.data(),
-                   vector.binary_data_.size() * sizeof(uint8_t));
-        }
-    }
+    ConstructHEntityResults(attrs, vectors, field_names, response);
 
     LOG_SERVER_INFO_ << LogOut("Request [%s] %s end.", GetContext(context)->RequestID().c_str(), __func__);
     SET_RESPONSE(response->mutable_status(), status, context);

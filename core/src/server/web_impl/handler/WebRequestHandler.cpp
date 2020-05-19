@@ -722,8 +722,9 @@ WebRequestHandler::HybridSearch(const std::string& collection_name, const nlohma
 
         context::HybridSearchContextPtr hybrid_search_context = std::make_shared<context::HybridSearchContext>();
         engine::QueryResult result;
+        std::vector<std::string> field_names;
         status = request_handler_.HybridSearch(context_ptr_, hybrid_search_context, collection_name, partition_tags,
-                                               general_query, extra_params, result);
+                                               general_query, extra_params, field_names, result);
 
         if (!status.ok()) {
             return status;

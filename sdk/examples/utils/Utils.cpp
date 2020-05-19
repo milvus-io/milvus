@@ -234,10 +234,12 @@ Utils::DoSearch(std::shared_ptr<milvus::Connection> conn, const std::string& col
 
 void ConstructVector(uint64_t nq, uint64_t dimension, std::vector<milvus::Entity>& query_vector) {
     query_vector.resize(nq);
+    std::default_random_engine e;
+    std::uniform_real_distribution<float> u(0, 1);
     for (uint64_t i = 0; i < nq; ++i) {
         query_vector[i].float_data.resize(dimension);
         for (uint64_t j = 0; j < dimension; ++j) {
-            query_vector[i].float_data[j] = (float)((i + 100) / (j + 1));
+            query_vector[i].float_data[j] = u(e);
         }
     }
 }
@@ -245,7 +247,7 @@ void ConstructVector(uint64_t nq, uint64_t dimension, std::vector<milvus::Entity
 std::vector<milvus::LeafQueryPtr>
 Utils::GenLeafQuery() {
     //Construct TermQuery
-    uint64_t row_num = 1000;
+    uint64_t row_num = 10000;
     std::vector<int64_t> field_value;
     field_value.resize(row_num);
     for (uint64_t i = 0; i < row_num; ++i) {
@@ -256,7 +258,7 @@ Utils::GenLeafQuery() {
     tq->int_value = field_value;
 
     //Construct RangeQuery
-    milvus::CompareExpr ce1 = {milvus::CompareOperator::LTE, "10000"}, ce2 = {milvus::CompareOperator::GTE, "1"};
+    milvus::CompareExpr ce1 = {milvus::CompareOperator::LTE, "100000"}, ce2 = {milvus::CompareOperator::GTE, "1"};
     std::vector<milvus::CompareExpr> ces{ce1, ce2};
     milvus::RangeQueryPtr rq = std::make_shared<milvus::RangeQuery>();
     rq->field_name = "field_2";

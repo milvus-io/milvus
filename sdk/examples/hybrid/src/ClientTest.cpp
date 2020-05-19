@@ -145,8 +145,25 @@ ClientTest::HybridSearch(std::string& collection_name) {
     std::string extra_params;
     milvus::Status status =
         conn_->HybridSearch(collection_name, partition_tags, query_clause, extra_params, topk_query_result);
+
+    for (uint64_t i = 0; i < topk_query_result.size(); i++) {
+        for (auto attr : topk_query_result[i].attr_records) {
+            std::cout << "Field: " << attr.first << std::endl;
+            if (attr.second.int_record.size() > 0) {
+                for (auto record : attr.second.int_record) {
+                    std::cout << record << "\t";
+                }
+            } else if (attr.second.double_record.size() > 0) {
+                for (auto record : attr.second.double_record) {
+                    std::cout << record << "\t";
+                }
+            }
+            std::cout << std::endl;
+        }
+    }
+
     for (uint64_t i = 0; i < topk_query_result.size(); ++i) {
-        std::cout << topk_query_result[i].ids[0] << "  ---------  " << topk_query_result[i].distances[0] << std::endl;
+        std::cout << topk_query_result[i].ids[1] << "  ---------  " << topk_query_result[i].distances[1] << std::endl;
     }
     std::cout << "HybridSearch function call status: " << status.message() << std::endl;
 }

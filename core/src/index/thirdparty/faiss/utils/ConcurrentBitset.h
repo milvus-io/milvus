@@ -39,8 +39,14 @@ class ConcurrentBitset {
     ConcurrentBitset&
     operator&=(ConcurrentBitset& bitset);
 
+    std::shared_ptr<ConcurrentBitset>
+    operator&(std::shared_ptr<ConcurrentBitset>& bitset);
+
     ConcurrentBitset&
     operator|=(ConcurrentBitset& bitset);
+
+    std::shared_ptr<ConcurrentBitset>
+    operator|(std::shared_ptr<ConcurrentBitset>& bitset);
 
     ConcurrentBitset&
     operator^=(ConcurrentBitset& bitset);

@@ -1207,7 +1207,7 @@ DBImpl::GetEntitiesByID(const std::string& collection_id, const milvus::engine::
         if (schema.field_type_ == (int32_t)engine::meta::hybrid::DataType::VECTOR) {
             continue;
         }
-        attr_type.insert(std::make_pair(schema.collection_id_, (engine::meta::hybrid::DataType)schema.field_type_));
+        attr_type.insert(std::make_pair(schema.field_name_, (engine::meta::hybrid::DataType)schema.field_type_));
     }
 
     meta::FilesHolder files_holder;
@@ -1535,12 +1535,11 @@ DBImpl::GetEntitiesByIdHelper(const std::string& collection_id, const milvus::en
                                 LOG_ENGINE_ERROR_ << status.message();
                                 return status;
                             }
+                            float f2;
+                            memcpy(&f2, raw_attr.data(), sizeof(float));
+                            int64_t f1;
+                            memcpy(&f1, raw_attr.data(), sizeof(int64_t));
                             raw_attrs.insert(std::make_pair(attr_it->first, raw_attr));
-                        }
-
-                        if (!status.ok()) {
-                            LOG_ENGINE_ERROR_ << status.message();
-                            return status;
                         }
 
                         vector_ref.vector_count_ = 1;
@@ -2051,12 +2050,16 @@ DBImpl::HybridQueryAsync(const std::shared_ptr<server::Context>& context, const 
     result.result_distances_ = job->GetResultDistances();
 
     // step 4: get entities by result ids
-    std::vector<engine::VectorsData> result_vectors;
-    std::vector<engine::AttrsData> result_attrs;
-    auto status = GetEntitiesByID(collection_id, result.result_ids_, result_vectors, result_attrs);
+    auto status = GetEntitiesByID(collection_id, result.result_ids_, result.vectors_, result.attrs_);
     if (!status.ok()) {
         query_async_ctx->GetTraceContext()->GetSpan()->Finish();
         return status;
+    }
+
+    // step 5: filter entities by field names
+    for (auto& name : field_names) {
+        for (auto attr : result.attrs_) {
+        }
     }
 
     rc.ElapseFromBegin("Engine query totally cost");

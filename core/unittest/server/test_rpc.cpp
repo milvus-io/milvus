@@ -994,12 +994,13 @@ TEST_F(RpcHandlerTest, HYBRID_TEST) {
     auto field_name_1 = entity->add_field_names();
     *field_name_1 = "field_1";
 
+    auto attr_record = entity.add_attr_data();
     entity->set_row_num(row_num);
     std::vector<int64_t> field_value(row_num, 0);
     for (uint64_t i = 0; i < row_num; i++) {
         field_value[i] = i;
     }
-    entity->set_attr_records(field_value.data(), row_num * sizeof(int64_t));
+    attr_record->set_int_value(field_value.data(), row_num * sizeof(int64_t));
 
     std::vector<std::vector<float>> vector_field;
     vector_field.resize(row_num);

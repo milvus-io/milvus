@@ -82,6 +82,64 @@ ConstructTopkResult(const ::milvus::grpc::TopKQueryResult& grpc_result, TopKQuer
     }
 }
 
+void
+ConstructTopkHybridResult(const ::milvus::grpc::HQueryResult& result, TopKHybridQueryResult& topk_query_result) {
+    int64_t nq = result.row_num();
+    if (nq == 0) {
+        return;
+    }
+    topk_query_result.reserve(nq);
+
+    std::vector<int64_t> aaa(100);
+    memcpy(aaa.data(), result.entity().attr_data(0).int_value().data(), 100 * sizeof(int64_t));
+    std::vector<double> bbb(100);
+    memcpy(bbb.data(), result.entity().attr_data(1).double_value().data(), 100 * sizeof(double));
+
+    auto grpc_entity = result.entity();
+    int64_t topk = grpc_entity.entity_id().size() / nq;
+    for (int64_t i = 0; i < result.row_num(); i++) {
+        milvus::HybridQueryResult one_result;
+        one_result.ids.resize(topk);
+        one_result.distances.resize(topk);
+        memcpy(one_result.ids.data(), grpc_entity.entity_id().data() + topk * i, topk * sizeof(int64_t));
+        memcpy(one_result.distances.data(), result.distance().data() + topk * i, topk * sizeof(float));
+        int64_t j;
+        for (j = 0; j < grpc_entity.attr_data_size(); j++) {
+            AttrRecord attr_record;
+            if (grpc_entity.attr_data(j).int_value_size() > 0) {
+                attr_record.int_record.resize(topk);
+                memcpy(attr_record.int_record.data(), grpc_entity.attr_data(j).int_value().data() + topk * i,
+                       topk * sizeof(int64_t));
+            } else if (grpc_entity.attr_data(j).double_value_size() > 0) {
+                attr_record.double_record.resize(topk);
+                memcpy(attr_record.double_record.data(), grpc_entity.attr_data(j).double_value().data() + topk * i,
+                       topk * sizeof(double));
+            }
+            one_result.attr_records.emplace_back(std::make_pair(grpc_entity.field_names(j), attr_record));
+        }
+        if (grpc_entity.vector_data_size() > 0) {
+            std::vector<Entity> entities;
+            entities.resize(topk);
+            auto grpc_vector_data = grpc_entity.vector_data(0);
+            for (int64_t k = 0; k < topk; k++) {
+                auto grpc_float_size = grpc_vector_data.value(topk * i + k).float_data_size();
+                auto grpc_binary_size = grpc_vector_data.value(topk * i + k).binary_data().size();
+                if (grpc_float_size > 0) {
+                    entities[k].float_data.resize(grpc_float_size);
+                    memcpy(entities[k].float_data.data(), grpc_vector_data.value(topk * i + k).float_data().data(),
+                           grpc_float_size * sizeof(float));
+                } else if (grpc_binary_size > 0) {
+                    entities[k].binary_data.resize(grpc_binary_size / 8);
+                    memcpy(entities[k].binary_data.data(), grpc_vector_data.value(topk * i + k).binary_data().data(),
+                           grpc_binary_size);
+                }
+            }
+            one_result.vector_records.emplace_back(std::make_pair(grpc_entity.field_names(j), entities));
+        }
+        topk_query_result.emplace_back(one_result);
+    }
+}
+
 Status
 ClientProxy::Connect(const ConnectParam& param) {
     std::string uri = param.ip_address + ":" + param.port;
@@ -611,55 +669,6 @@ ClientProxy::CreateHybridCollection(const HMapping& mapping) {
     }
 }
 
-// void
-// CopyVectorField(::milvus::grpc::RowRecord* target, const Entity& src) {
-//    if (!src.float_data.empty()) {
-//        auto vector_data = target->mutable_float_data();
-//        vector_data->Resize(static_cast<int>(src.float_data.size()), 0.0);
-//        memcpy(vector_data->mutable_data(), src.float_data.data(), src.float_data.size() * sizeof(float));
-//    }
-//
-//    if (!src.binary_data.empty()) {
-//        target->set_binary_data(src.binary_data.data(), src.binary_data.size());
-//    }
-//}
-
-void
-_CopyRowRecords(const google::protobuf::RepeatedPtrField<::milvus::grpc::RowRecord>& grpc_records,
-               const google::protobuf::RepeatedField<google::protobuf::int64>& grpc_id_array,
-               Entity& vectors) {
-    // step 1: copy vector data
-    int64_t float_data_size = 0, binary_data_size = 0;
-    auto size = grpc_records.size();
-    for (auto& record : grpc_records) {
-        float_data_size += record.float_data_size();
-        binary_data_size += record.binary_data().size();
-    }
-
-    std::vector<float> float_array(float_data_size, 0.0f);
-    std::vector<uint8_t> binary_array(binary_data_size, 0);
-    int64_t float_offset = 0, binary_offset = 0;
-    if (float_data_size > 0) {
-        for (auto& record : grpc_records) {
-            memcpy(&float_array[float_offset], record.float_data().data(), record.float_data_size() * sizeof(float));
-            float_offset += record.float_data_size();
-        }
-    } else if (binary_data_size > 0) {
-        for (auto& record : grpc_records) {
-            memcpy(&binary_array[binary_offset], record.binary_data().data(), record.binary_data().size());
-            binary_offset += record.binary_data().size();
-        }
-    }
-
-    // step 2: copy id array
-    std::vector<int64_t> id_array;
-    if (grpc_id_array.size() > 0) {
-        id_array.resize(grpc_id_array.size());
-        memcpy(id_array.data(), grpc_id_array.data(), grpc_id_array.size() * sizeof(int64_t));
-    }
-
-}
-
 Status
 ClientProxy::InsertEntity(const std::string& collection_name, const std::string& partition_tag, HEntity& entities,
                           std::vector<uint64_t>& id_array) {
@@ -803,57 +812,7 @@ ClientProxy::HybridSearch(const std::string& collection_name, const std::vector<
         Status status = client_ptr_->HybridSearch(search_param, result);
 
         // step 3: convert result array
-
-        int64_t nq = result.row_num();
-        if (nq == 0) {
-            return status;
-        }
-        topk_query_result.reserve(nq);
-
-        auto grpc_entity = result.entity();
-        int64_t topk = grpc_entity.entity_id().size() / nq;
-        for (int64_t i = 0; i < result.row_num(); i++) {
-            milvus::HybridQueryResult one_result;
-            one_result.ids.resize(topk);
-            one_result.distances.resize(topk);
-            memcpy(one_result.ids.data(), grpc_entity.entity_id().data() + topk * i, topk * sizeof(int64_t));
-            memcpy(one_result.distances.data(), result.distance().data() + topk * i, topk * sizeof(float));
-            int64_t j;
-            for (j = 0; j < grpc_entity.attr_data_size(); j++) {
-                AttrRecord attr_record;
-                if (grpc_entity.attr_data(j).int_value_size() > 0) {
-                    attr_record.int_record.resize(topk);
-                    memcpy(attr_record.int_record.data(), grpc_entity.attr_data().data() + topk * i,
-                           topk * sizeof(int64_t));
-                } else if (grpc_entity.attr_data(j).double_value_size() > 0) {
-                    attr_record.double_record.resize(topk);
-                    memcpy(attr_record.double_record.data(), grpc_entity.attr_data().data() + topk * i,
-                           topk * sizeof(double));
-                }
-                one_result.attr_records.emplace_back(std::make_pair(grpc_entity.field_names(j), attr_record));
-            }
-            if (grpc_entity.vector_data_size() > 0) {
-                std::vector<Entity> entities;
-                entities.resize(topk);
-                auto grpc_vector_data = grpc_entity.vector_data(0);
-                for (int64_t k = 0; k < topk; k++) {
-                    auto grpc_float_size = grpc_vector_data.value(topk * i + k).float_data_size();
-                    auto grpc_binary_size = grpc_vector_data.value(topk * i + k).binary_data().size();
-                    if (grpc_float_size > 0) {
-                        entities[k].float_data.resize(grpc_float_size);
-                        memcpy(entities[k].float_data.data(), grpc_vector_data.value(topk * i + k).float_data().data(),
-                               grpc_float_size * sizeof(float));
-                    } else if (grpc_binary_size > 0) {
-                        entities[k].binary_data.resize(grpc_binary_size / 8);
-                        memcpy(entities[k].binary_data.data(),
-                               grpc_vector_data.value(topk * i + k).binary_data().data(), grpc_binary_size);
-                    }
-                }
-                one_result.vector_records.emplace_back(std::make_pair(grpc_entity.field_names(j), entities));
-            }
-            topk_query_result.emplace_back(one_result);
-        }
-
+        ConstructTopkHybridResult(result, topk_query_result);
         return status;
     } catch (std::exception& ex) {
         return Status(StatusCode::UnknownError, "Failed to search entities: " + std::string(ex.what()));

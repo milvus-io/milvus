@@ -120,7 +120,7 @@ class ExecutionEngineImpl : public ExecutionEngine {
 
     template <typename T>
     void
-    ProcessRangeQuery(std::vector<T> data, T value, query::CompareOperator type, faiss::ConcurrentBitsetPtr bitset);
+    ProcessRangeQuery(std::vector<T> data, T value, query::CompareOperator type, faiss::ConcurrentBitsetPtr& bitset);
 
     void
     HybridLoad() const;

@@ -272,7 +272,6 @@ XSearchTask::Execute() {
                 for (; type_it != attr_type.end(); type_it++) {
                     types.insert(std::make_pair(type_it->first, (engine::DataType)(type_it->second)));
                 }
-                std::vector<int64_t> search_ids;
                 s = index_engine_->HybridSearch(general_query, types, nq, topk, output_distance, output_ids);
 
                 if (!s.ok()) {
@@ -298,7 +297,7 @@ XSearchTask::Execute() {
                     }
 
                     search_job->vector_count() = nq;
-                    XSearchTask::MergeTopkToResultSet(search_ids, output_distance, spec_k, nq, topk, ascending_reduce,
+                    XSearchTask::MergeTopkToResultSet(output_ids, output_distance, spec_k, nq, topk, ascending_reduce,
                                                       search_job->GetResultIds(), search_job->GetResultDistances());
                 }
                 search_job->SearchDone(index_id_);

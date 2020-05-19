@@ -734,7 +734,7 @@ MapAndCopyResult(const knowhere::DatasetPtr& dataset, const std::vector<milvus::
 template <typename T>
 void
 ExecutionEngineImpl::ProcessRangeQuery(std::vector<T> data, T value, query::CompareOperator type,
-                                       faiss::ConcurrentBitsetPtr bitset) {
+                                       faiss::ConcurrentBitsetPtr& bitset) {
     switch (type) {
         case query::CompareOperator::LT: {
             for (uint64_t i = 0; i < data.size(); ++i) {
@@ -800,10 +800,10 @@ ExecutionEngineImpl::HybridSearch(milvus::query::GeneralQueryPtr general_query,
     // Do AND
     for (uint64_t i = 0; i < vector_count_; ++i) {
         if (list->test(i) && !bitset->test(i)) {
-            bitset->set(i);
+            list->clear(i);
         }
     }
-    index_->SetBlacklist(bitset);
+    index_->SetBlacklist(list);
     topk = vector_query->topk;
     nq = vector_query->query_vector.float_data.size() / dim_;
 
@@ -845,15 +845,14 @@ ExecutionEngineImpl::ExecBinaryQuery(milvus::query::GeneralQueryPtr general_quer
             switch (general_query->bin->relation) {
                 case milvus::query::QueryRelation::AND:
                 case milvus::query::QueryRelation::R1: {
-                    bitset.reset(&((*left_bitset) &= (*right_bitset)));
-//                    bitset = (*left_bitset) &= right_bitset;
+                    bitset = (*left_bitset) & right_bitset;
                     break;
                 }
                 case milvus::query::QueryRelation::OR:
                 case milvus::query::QueryRelation::R2:
                 case milvus::query::QueryRelation::R3: {
-                    bitset.reset(&((*left_bitset) |= (*right_bitset)));
-//                    bitset = (*left_bitset) |= right_bitset;
+//                    bitset = std::shared_ptr<faiss::ConcurrentBitset>(&((*left_bitset) |= (*right_bitset)));
+                    bitset = (*left_bitset) | right_bitset;
                     break;
                 }
                 case milvus::query::QueryRelation::R4: {

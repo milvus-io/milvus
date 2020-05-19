@@ -186,11 +186,8 @@ DefaultAttrsFormat::write(const milvus::storage::FSHandlerPtr& fs_ptr, const mil
 }
 
 void
-DefaultAttrsFormat::read_attrs(const milvus::storage::FSHandlerPtr& fs_ptr,
-                               const std::string& field_name,
-                               off_t offset,
-                               size_t num_bytes,
-                               std::vector<uint8_t>& raw_attrs) {
+DefaultAttrsFormat::read_attrs(const milvus::storage::FSHandlerPtr& fs_ptr, const std::string& field_name, off_t offset,
+                               size_t num_bytes, std::vector<uint8_t>& raw_attrs) {
     const std::lock_guard<std::mutex> lock(mutex_);
 
     std::string dir_path = fs_ptr->operation_ptr_->GetDirectory();
@@ -207,7 +204,9 @@ DefaultAttrsFormat::read_attrs(const milvus::storage::FSHandlerPtr& fs_ptr,
 
     for (; it != it_end; ++it) {
         const auto& path = it->path();
-        if (path.extension().string() == raw_attr_extension_ && path.filename().string() == field_name) {
+        const auto& file_name = path.filename().string();
+        if (path.extension().string() == raw_attr_extension_ &&
+            file_name.substr(0, file_name.size() - 3) == field_name) {
             size_t nbytes;
             read_attrs_internal(fs_ptr, path.string(), offset, num_bytes, raw_attrs, nbytes);
         }
