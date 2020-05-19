@@ -1,12 +1,12 @@
 # Changelog
 
 Please mark all change in change log and use the issue from GitHub
-# Milvus 0.9.1 (TBD)
+# Milvus 0.10.0 (TBD)
 
 ## Bug
 
 ## Feature
--   \#2363 Update branch version to 0.9.1
+-   \#2363 Update branch version
 
 ## Improvement
 -   \#2370 Clean compile warning
