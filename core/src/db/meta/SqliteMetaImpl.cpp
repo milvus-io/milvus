@@ -992,7 +992,8 @@ SqliteMetaImpl::ShowPartitions(const std::string& collection_id,
                     &CollectionSchema::metric_type_,
                     &CollectionSchema::partition_tag_,
                     &CollectionSchema::version_,
-                    &CollectionSchema::collection_id_),
+                    &CollectionSchema::collection_id_,
+                    &CollectionSchema::flush_lsn_),
             where(c(&CollectionSchema::owner_collection_) == collection_id and
                   c(&CollectionSchema::state_) != (int)CollectionSchema::TO_DELETE));
 
@@ -1011,6 +1012,7 @@ SqliteMetaImpl::ShowPartitions(const std::string& collection_id,
             partition_schema.partition_tag_ = std::get<9>(partitions[i]);
             partition_schema.version_ = std::get<10>(partitions[i]);
             partition_schema.collection_id_ = std::get<11>(partitions[i]);
+            partition_schema.flush_lsn_ = std::get<12>(partitions[i]);
             partition_schema_array.emplace_back(partition_schema);
         }
     } catch (std::exception& e) {
