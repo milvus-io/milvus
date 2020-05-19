@@ -629,7 +629,7 @@ def assert_equal_vector(v1, v2):
 
 def restart_server(helm_release_name):
     res = False
-    chart_file = "../../milvus-helm/values.yaml"
+    chart_file = "../../milvus-helm/"
     namespace = "milvus"
     # reset replica: 0
     for replica_num in [0, 1]:
