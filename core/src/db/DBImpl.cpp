@@ -1393,9 +1393,10 @@ DBImpl::CreateIndex(const std::shared_ptr<server::Context>& context, const std::
         }
     }
 
-    // step 3: let merge file thread finish
-    // to avoid duplicate data bug
-    WaitMergeFileFinish();
+    // step 3: wait merge file thread finished to avoid duplicate data bug
+    WaitMergeFileFinish();  // let merge file thread finish
+    StartMergeTask(true);   // start force-merge task
+    WaitMergeFileFinish();  // let force-merge file thread finish
 
     // step 4: wait and build index
     status = index_failed_checker_.CleanFailedIndexFileOfCollection(collection_id);
@@ -1897,7 +1898,7 @@ DBImpl::StartMetricTask() {
 }
 
 void
-DBImpl::StartMergeTask() {
+DBImpl::StartMergeTask(bool force_merge_all) {
     // LOG_ENGINE_DEBUG_ << "Begin StartMergeTask";
     // merge task has been finished?
     {
@@ -1927,7 +1928,7 @@ DBImpl::StartMergeTask() {
 
             // start merge file thread
             merge_thread_results_.push_back(
-                merge_thread_pool_.enqueue(&DBImpl::BackgroundMerge, this, merge_collection_ids_));
+                merge_thread_pool_.enqueue(&DBImpl::BackgroundMerge, this, merge_collection_ids_, force_merge_all));
             merge_collection_ids_.clear();
         }
     }
@@ -2031,14 +2032,20 @@ DBImpl::MergeHybridFiles(const std::string& collection_id, meta::FilesHolder& fi
 }
 
 void
-DBImpl::BackgroundMerge(std::set<std::string> collection_ids) {
+DBImpl::BackgroundMerge(std::set<std::string> collection_ids, bool force_merge_all) {
     // LOG_ENGINE_TRACE_ << " Background merge thread start";
 
     Status status;
     for (auto& collection_id : collection_ids) {
         const std::lock_guard<std::mutex> lock(flush_merge_compact_mutex_);
 
+        auto old_strategy = merge_mgr_ptr_->Strategy();
+        if (force_merge_all) {
+            merge_mgr_ptr_->UseStrategy(MergeStrategyType::ADAPTIVE);
+        }
+
         auto status = merge_mgr_ptr_->MergeFiles(collection_id);
+        merge_mgr_ptr_->UseStrategy(old_strategy);
         if (!status.ok()) {
             LOG_ENGINE_ERROR_ << "Failed to get merge files for collection: " << collection_id
                               << " reason:" << status.message();

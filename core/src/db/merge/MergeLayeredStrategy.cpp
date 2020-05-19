@@ -40,8 +40,7 @@ MergeLayeredStrategy::RegroupFiles(meta::FilesHolder& files_holder, MergeFilesGr
     for (meta::SegmentsSchema::reverse_iterator iter = files.rbegin(); iter != files.rend(); ++iter) {
         meta::SegmentSchema& file = *iter;
         if (file.index_file_size_ > 0 && file.file_size_ > (size_t)(file.index_file_size_)) {
-            // release file that no need to merge
-            files_holder.UnmarkFile(file);
+            // file that no need to merge
             continue;
         }
 

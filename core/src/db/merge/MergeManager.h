@@ -24,15 +24,34 @@
 namespace milvus {
 namespace engine {
 
+// 1. SIMPLE
+//    merge in old way, merge files one by one, stop merge until file size exceed index_file_size
+// 2. LAYERED
+//    distribute files to several groups according to file size
+//    firstly, define layers by file size: 4MB, 16MB, 64MB, 256MB, 1024MB
+//    if file size between 0MB~4MB, put it into layer "4"
+//    if file size between 4MB~16MB, put it into layer "16"
+//    if file size between 16MB~64MB, put it into layer "64"
+//    if file size between 64MB~256MB, put it into layer "256"
+//    if file size between 256MB~1024MB, put it into layer "1024"
+//    secondly, merge files for each group
+//    third, if some file's create time is 30 seconds ago, and it still un-merged, force merge with upper layer files
+// 3. ADAPTIVE
+//    Pick files that sum of size is close to index_file_size, merge them
 enum class MergeStrategyType {
     SIMPLE = 1,
     LAYERED = 2,
+    ADAPTIVE = 3,
 };
 
 class MergeManager {
  public:
+    virtual MergeStrategyType
+    Strategy() const = 0;
+
     virtual Status
     UseStrategy(MergeStrategyType type) = 0;
+
     virtual Status
     MergeFiles(const std::string& collection_id) = 0;
 };  // MergeManager

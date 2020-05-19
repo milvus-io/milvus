@@ -13,6 +13,7 @@
 
 #include <cstddef>
 #include <memory>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -123,6 +124,10 @@ class Meta {
 
     virtual Status
     FilesToSearch(const std::string& collection_id, FilesHolder& files_holder) = 0;
+
+    virtual Status
+    FilesToSearchEx(const std::string& root_collection, const std::set<std::string>& partition_id_array,
+                    FilesHolder& files_holder) = 0;
 
     virtual Status
     FilesToMerge(const std::string& collection_id, FilesHolder& files_holder) = 0;

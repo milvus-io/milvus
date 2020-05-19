@@ -11,44 +11,19 @@
 
 #pragma once
 
-#include <ctime>
-#include <map>
-#include <memory>
-#include <mutex>
-#include <set>
-#include <string>
-#include <unordered_map>
 #include <vector>
 
-#include "db/merge/MergeManager.h"
 #include "db/merge/MergeStrategy.h"
 #include "utils/Status.h"
 
 namespace milvus {
 namespace engine {
 
-class MergeManagerImpl : public MergeManager {
+class MergeAdaptiveStrategy : public MergeStrategy {
  public:
-    MergeManagerImpl(const meta::MetaPtr& meta_ptr, const DBOptions& options, MergeStrategyType type);
-
-    MergeStrategyType
-    Strategy() const override {
-        return strategy_type_;
-    }
-
     Status
-    UseStrategy(MergeStrategyType type) override;
-
-    Status
-    MergeFiles(const std::string& collection_id) override;
-
- private:
-    meta::MetaPtr meta_ptr_;
-    DBOptions options_;
-
-    MergeStrategyType strategy_type_ = MergeStrategyType::SIMPLE;
-    MergeStrategyPtr strategy_;
-};  // MergeManagerImpl
+    RegroupFiles(meta::FilesHolder& files_holder, MergeFilesGroups& files_groups) override;
+};  // MergeSimpleStrategy
 
 }  // namespace engine
 }  // namespace milvus
