@@ -630,9 +630,10 @@ def assert_equal_vector(v1, v2):
 def restart_server(helm_release_name):
     res = False
     chart_file = "../../milvus-helm/values.yaml"
+    namespace = "milvus"
     # reset replica: 0
     for replica_num in [0, 1]:
-        cmd = "helm upgrade %s %s --set replicas=%d" % (release_name, chart_file, replica_num)
+        cmd = "helm upgrade %s %s --set replicas=%d -n %s" % (release_name, chart_file, replica_num, namespace)
         if os.system(cmd):
             logging.error("Helm upgrade to %d failed" % replica_num)
         else:
