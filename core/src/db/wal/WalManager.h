@@ -62,6 +62,7 @@ class WalManager {
 
     ErrorCode
     GetNextEntityRecord(MXLogRecord& record);
+
     /*
      * Create collection
      * @param collection_id: collection id
@@ -69,6 +70,15 @@ class WalManager {
      */
     uint64_t
     CreateCollection(const std::string& collection_id);
+
+    /*
+     * Create partition
+     * @param collection_id: collection id
+     * @param partition_tag: partition tag
+     * @retval lsn
+     */
+    uint64_t
+    CreatePartition(const std::string& collection_id, const std::string& partition_tag);
 
     /*
      * Create hybrid collection
@@ -87,6 +97,15 @@ class WalManager {
     DropCollection(const std::string& collection_id);
 
     /*
+     * Drop partition
+     * @param collection_id: collection id
+     * @param partition_tag: partition tag
+     * @retval none
+     */
+    void
+    DropPartition(const std::string& collection_id, const std::string& partition_tag);
+
+    /*
      * Collection is flushed
      * @param collection_id: collection id
      * @param lsn: flushed lsn
@@ -94,6 +113,32 @@ class WalManager {
     void
     CollectionFlushed(const std::string& collection_id, uint64_t lsn);
 
+    /*
+     * Partition is flushed
+     * @param collection_id: collection id
+     * @param partition_tag: partition_tag
+     * @param lsn: flushed lsn
+     */
+    void
+    PartitionFlushed(const std::string& collection_id, const std::string& partition_tag, uint64_t lsn);
+
+    /*
+     * Collection is updated
+     * @param collection_id: collection id
+     * @param partition_tag: partition_tag
+     * @param lsn: flushed lsn
+     */
+    void
+    CollectionUpdated(const std::string& collection_id, uint64_t lsn);
+
+    /*
+     * Partition is updated
+     * @param collection_id: collection id
+     * @param partition_tag: partition_tag
+     * @param lsn: flushed lsn
+     */
+    void
+    PartitionUpdated(const std::string& collection_id, const std::string& partition_tag, uint64_t lsn);
     /*
      * Insert
      * @param collection_id: collection id
@@ -155,7 +200,7 @@ class WalManager {
         uint64_t wal_lsn;
     };
     std::mutex mutex_;
-    std::map<std::string, TableLsn> tables_;
+    std::map<std::string, std::map<std::string, TableLsn>> collections_;
     std::atomic<uint64_t> last_applied_lsn_;
 
     // if multi-thread call Flush(), use list
