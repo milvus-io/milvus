@@ -44,7 +44,7 @@ namespace server {
 namespace fs = boost::filesystem;
 
 bool
-CommonUtil::GetSystemMemInfo(uint64_t& total_mem, uint64_t& free_mem) {
+CommonUtil::GetSystemMemInfo(int64_t& total_mem, int64_t& free_mem) {
     struct sysinfo info;
     int ret = sysinfo(&info);
     total_mem = info.totalram;
@@ -180,9 +180,9 @@ CommonUtil::GetFileName(std::string filename) {
 
 std::string
 CommonUtil::GetExePath() {
-    const size_t buf_len = 1024;
+    const int64_t buf_len = 1024;
     char buf[buf_len];
-    ssize_t cnt = readlink("/proc/self/exe", buf, buf_len);
+    int64_t cnt = readlink("/proc/self/exe", buf, buf_len);
     fiu_do_on("CommonUtil.GetExePath.readlink_fail", cnt = -1);
     if (cnt < 0 || cnt >= buf_len) {
         return "";

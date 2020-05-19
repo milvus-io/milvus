@@ -43,7 +43,7 @@ ToString(ResourceType type) {
 }
 
 Resource::Resource(std::string name, ResourceType type, uint64_t device_id, bool enable_executor)
-    : name_(std::move(name)), type_(type), device_id_(device_id), enable_executor_(enable_executor) {
+    : device_id_(device_id), name_(std::move(name)), type_(type), enable_executor_(enable_executor) {
     // register subscriber in tasktable
     task_table_.RegisterSubscriber([&] {
         if (subscriber_) {

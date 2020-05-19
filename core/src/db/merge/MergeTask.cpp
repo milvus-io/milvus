@@ -71,7 +71,7 @@ MergeTask::Execute() {
         auto file_schema = file;
         file_schema.file_type_ = meta::SegmentSchema::TO_DELETE;
         updated.push_back(file_schema);
-        auto size = segment_writer_ptr->Size();
+        int64_t size = segment_writer_ptr->Size();
         if (size >= file_schema.index_file_size_) {
             break;
         }
@@ -104,7 +104,7 @@ MergeTask::Execute() {
     // if index type isn't IDMAP, set file type to TO_INDEX if file size exceed index_file_size
     // else set file type to RAW, no need to build index
     if (!utils::IsRawIndexType(collection_file.engine_type_)) {
-        collection_file.file_type_ = (segment_writer_ptr->Size() >= collection_file.index_file_size_)
+        collection_file.file_type_ = (segment_writer_ptr->Size() >= (size_t)(collection_file.index_file_size_))
                                          ? meta::SegmentSchema::TO_INDEX
                                          : meta::SegmentSchema::RAW;
     } else {
