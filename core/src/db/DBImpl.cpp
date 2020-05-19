@@ -393,6 +393,7 @@ DBImpl::PreloadCollection(const std::string& collection_id) {
 
     // step 1: get all collection files from parent collection
     meta::FilesHolder files_holder;
+#if 0
     auto status = meta_ptr_->FilesToSearch(collection_id, files_holder);
     if (!status.ok()) {
         return status;
@@ -404,6 +405,17 @@ DBImpl::PreloadCollection(const std::string& collection_id) {
     for (auto& schema : partition_array) {
         status = meta_ptr_->FilesToSearch(schema.collection_id_, files_holder);
     }
+#else
+    std::vector<meta::CollectionSchema> partition_array;
+    auto status = meta_ptr_->ShowPartitions(collection_id, partition_array);
+
+    std::set<std::string> partition_ids;
+    for (auto& schema : partition_array) {
+        partition_ids.insert(schema.collection_id_);
+    }
+
+    status = meta_ptr_->FilesToSearchEx(collection_id, partition_ids, files_holder);
+#endif
 
     int64_t size = 0;
     int64_t cache_total = cache::CpuCacheMgr::GetInstance()->CacheCapacity();
@@ -1659,6 +1671,7 @@ DBImpl::Query(const std::shared_ptr<server::Context>& context, const std::string
             return Status::OK();  // no files to search
         }
     } else {
+#if 0
         // get files from specified partitions
         std::set<std::string> partition_name_array;
         status = GetPartitionsByTags(collection_id, partition_tags, partition_name_array);
@@ -1669,7 +1682,20 @@ DBImpl::Query(const std::shared_ptr<server::Context>& context, const std::string
         for (auto& partition_name : partition_name_array) {
             status = meta_ptr_->FilesToSearch(partition_name, files_holder);
         }
+#else
+        std::set<std::string> partition_name_array;
+        status = GetPartitionsByTags(collection_id, partition_tags, partition_name_array);
+        if (!status.ok()) {
+            return status;  // didn't match any partition.
+        }
 
+        std::set<std::string> partition_ids;
+        for (auto& partition_name : partition_name_array) {
+            partition_ids.insert(partition_name);
+        }
+
+        status = meta_ptr_->FilesToSearchEx(collection_id, partition_ids, files_holder);
+#endif
         if (files_holder.HoldFiles().empty()) {
             return Status::OK();  // no files to search
         }
