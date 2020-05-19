@@ -42,7 +42,6 @@
 
 namespace faiss {
 
-using idx_t = Index::idx_t;
 
 /*************************************
  * Index2Layer implementation

@@ -10,7 +10,7 @@ SRC         = $(wildcard *.cpp impl/*.cpp utils/*.cpp)
 OBJ         = $(SRC:.cpp=.o)
 INSTALLDIRS = $(DESTDIR)$(libdir) $(DESTDIR)$(includedir)/faiss
 
-GPU_HEADERS = $(wildcard gpu/*.h gpu/impl/*.h gpu/utils/*.h)
+GPU_HEADERS = $(wildcard gpu/*.h gpu/impl/*.h gpu/impl/*.cuh gpu/utils/*.h gpu/utils/*.cuh)
 GPU_CPPSRC  = $(wildcard gpu/*.cpp gpu/impl/*.cpp gpu/utils/*.cpp)
 GPU_CUSRC   = $(wildcard gpu/*.cu gpu/impl/*.cu gpu/utils/*.cu \
 gpu/utils/nvidia/*.cu gpu/utils/blockselect/*.cu gpu/utils/warpselect/*.cu)

@@ -65,8 +65,8 @@ __global__ void l2SelectMin1(Tensor<T, 2, true> productDistances,
 
       // Reduce within the block
       threadMin[0] =
-        blockReduceAll<Pair<T, int>, Min<Pair<T, int> >, false, false>(
-        threadMin[0], Min<Pair<T, int> >(), blockMin);
+        blockReduceAll<Pair<T, int>, Min<Pair<T, int>>, false, false>(
+        threadMin[0], Min<Pair<T, int>>(), blockMin);
 
       if (threadIdx.x == 0) {
         outDistances[row][0] = threadMin[0].k;
@@ -104,8 +104,13 @@ __global__ void l2SelectMin1(Tensor<T, 2, true> productDistances,
     }
 
     // Reduce within the block
-    blockReduceAll<kRowsPerBlock, Pair<T, int>, Min<Pair<T, int> >, false, false>(
-      threadMin, Min<Pair<T, int> >(), blockMin);
+    blockReduceAll<kRowsPerBlock,
+                   Pair<T, int>,
+                   Min<Pair<T, int> >,
+                   false,
+                   false>(threadMin,
+                          Min<Pair<T, int> >(),
+                          blockMin);
 
     if (threadIdx.x == 0) {
 #pragma unroll
@@ -234,20 +239,6 @@ void runL2SelectMin(Tensor<float, 2, true>& productDistances,
                         outIndices,
                         k,
                         stream);
-}
-
-void runL2SelectMin(Tensor<half, 2, true>& productDistances,
-                    Tensor<half, 1, true>& centroidDistances,
-                    Tensor<half, 2, true>& outDistances,
-                    Tensor<int, 2, true>& outIndices,
-                    int k,
-                    cudaStream_t stream) {
-  runL2SelectMin<half>(productDistances,
-                       centroidDistances,
-                       outDistances,
-                       outIndices,
-                       k,
-                       stream);
 }
 
 } } // namespace

@@ -3,12 +3,15 @@
 # This source code is licensed under the MIT license found in the
 # LICENSE file in the root directory of this source tree.
 
-#! /usr/bin/env python2
+from __future__ import absolute_import, division, print_function
 
 import numpy as np
 
 import faiss
 import unittest
+
+from common import get_dataset_2
+
 
 
 class TestClustering(unittest.TestCase):
@@ -62,17 +65,19 @@ class TestClustering(unittest.TestCase):
         rs = np.random.RandomState(123)
         x = rs.uniform(size=(n, d)).astype('float32')
 
+        # make sure that doing 10 redos yields a better objective than just 1
+
         clus = faiss.Clustering(d, 20)
         clus.nredo = 1
         clus.train(x, faiss.IndexFlatL2(d))
-        obj1 = faiss.vector_to_array(clus.obj)
+        obj1 = clus.iteration_stats.at(clus.iteration_stats.size() - 1).obj
 
         clus = faiss.Clustering(d, 20)
         clus.nredo = 10
         clus.train(x, faiss.IndexFlatL2(d))
-        obj10 = faiss.vector_to_array(clus.obj)
+        obj10 = clus.iteration_stats.at(clus.iteration_stats.size() - 1).obj
 
-        self.assertGreater(obj1[-1], obj10[-1])
+        self.assertGreater(obj1, obj10)
 
     def test_1ptpercluster(self):
         # https://github.com/facebookresearch/faiss/issues/842
@@ -83,6 +88,89 @@ class TestClustering(unittest.TestCase):
         kmeans = faiss.Kmeans(X.shape[1], k, niter=niter, verbose=verbose)
         kmeans.train(X)
         l2_distances, I = kmeans.index.search(X, 1)
+
+    def test_weighted(self):
+        d = 32
+        sigma = 0.1
+
+        # Data is naturally clustered in 10 clusters.
+        # 5 clusters have 100 points
+        # 5 clusters have 10 points
+        # run k-means with 5 clusters
+
+        ccent = faiss.randn((10, d), 123)
+        faiss.normalize_L2(ccent)
+        x = [ccent[i] + sigma * faiss.randn((100, d), 1234 + i) for i in range(5)]
+        x += [ccent[i] + sigma * faiss.randn((10, d), 1234 + i) for i in range(5, 10)]
+        x = np.vstack(x)
+
+        clus = faiss.Clustering(d, 5)
+        index = faiss.IndexFlatL2(d)
+        clus.train(x, index)
+        cdis1, perm1 = index.search(ccent, 1)
+
+        # distance^2 of ground-truth centroids to clusters
+        cdis1_first = cdis1[:5].sum()
+        cdis1_last = cdis1[5:].sum()
+
+        # now assign weight 0.1 to the 5 first clusters and weight 10
+        # to the 5 last ones and re-run k-means
+        weights = np.ones(100 * 5 + 10 * 5, dtype='float32')
+        weights[:100 * 5] = 0.1
+        weights[100 * 5:] = 10
+
+        clus = faiss.Clustering(d, 5)
+        index = faiss.IndexFlatL2(d)
+        clus.train(x, index, weights=weights)
+        cdis2, perm2 = index.search(ccent, 1)
+
+        # distance^2 of ground-truth centroids to clusters
+        cdis2_first = cdis2[:5].sum()
+        cdis2_last = cdis2[5:].sum()
+
+        print(cdis1_first, cdis1_last)
+        print(cdis2_first, cdis2_last)
+
+        # with the new clustering, the last should be much (*2) closer
+        # to their centroids
+        self.assertGreater(cdis1_last, cdis1_first * 2)
+        self.assertGreater(cdis2_first, cdis2_last * 2)
+
+    def test_encoded(self):
+        d = 32
+        k = 5
+        xt, xb, xq = get_dataset_2(d, 1000, 0, 0)
+
+        # make sure that training on a compressed then decompressed
+        # dataset gives the same result as decompressing on-the-fly
+
+        codec = faiss.IndexScalarQuantizer(d, faiss.ScalarQuantizer.QT_4bit)
+        codec.train(xt)
+        codes = codec.sa_encode(xt)
+
+        xt2 = codec.sa_decode(codes)
+
+        clus = faiss.Clustering(d, k)
+        # clus.verbose = True
+        clus.niter = 0
+        index = faiss.IndexFlatL2(d)
+        clus.train(xt2, index)
+        ref_centroids = faiss.vector_to_array(clus.centroids).reshape(-1, d)
+
+        _, ref_errs = index.search(xt2, 1)
+
+        clus = faiss.Clustering(d, k)
+        # clus.verbose = True
+        clus.niter = 0
+        clus.decode_block_size = 120
+        index = faiss.IndexFlatL2(d)
+        clus.train_encoded(codes, codec, index)
+        new_centroids = faiss.vector_to_array(clus.centroids).reshape(-1, d)
+
+        _, new_errs = index.search(xt2, 1)
+
+        # It's the same operation, so should be bit-exact the same
+        self.assertTrue(np.all(ref_centroids == new_centroids))
 
 
 class TestPCA(unittest.TestCase):
@@ -120,7 +208,7 @@ class TestProductQuantizer(unittest.TestCase):
         x2 = pq.decode(codes)
         diff = ((x - x2)**2).sum()
 
-        # print "diff=", diff
+        # print("diff=", diff)
         # diff= 4418.0562
         self.assertGreater(5000, diff)
 
@@ -191,22 +279,20 @@ class TestException(unittest.TestCase):
         a = np.zeros((5, 10), dtype='float32')
         b = np.zeros(5, dtype='int64')
 
-        try:
-            # an unsupported operation for IndexFlat
-            index.add_with_ids(a, b)
-        except RuntimeError as e:
-            assert 'add_with_ids not implemented' in str(e)
-        else:
-            assert False, 'exception did not fire???'
+        # an unsupported operation for IndexFlat
+        self.assertRaises(
+            RuntimeError,
+            index.add_with_ids, a, b
+        )
+        # assert 'add_with_ids not implemented' in str(e)
 
     def test_exception_2(self):
+        self.assertRaises(
+            RuntimeError,
+            faiss.index_factory, 12, 'IVF256,Flat,PQ8'
+        )
+        #    assert 'could not parse' in str(e)
 
-        try:
-            faiss.index_factory(12, 'IVF256,Flat,PQ8')
-        except RuntimeError as e:
-            assert 'could not parse' in str(e)
-        else:
-            assert False, 'exception did not fire???'
 
 class TestMapLong2Long(unittest.TestCase):
 
@@ -273,7 +359,7 @@ class TestMAdd(unittest.TestCase):
         rs = np.random.RandomState(123)
         swig_ptr = faiss.swig_ptr
         for dim in 16, 32, 20, 25:
-            for repeat in 1, 2, 3, 4, 5:
+            for _repeat in 1, 2, 3, 4, 5:
                 a = rs.rand(dim).astype('float32')
                 b = rs.rand(dim).astype('float32')
                 c = np.zeros(dim, dtype='float32')
@@ -325,7 +411,7 @@ class TestMatrixStats(unittest.TestCase):
         m = rs.rand(40, 20).astype('float32')
         m[5:10] = 0
         comments = faiss.MatrixStats(m).comments
-        print comments
+        print(comments)
         assert 'has 5 copies' in comments
         assert '5 null vectors' in comments
 
@@ -334,7 +420,7 @@ class TestMatrixStats(unittest.TestCase):
         m = rs.rand(40, 20).astype('float32')
         m[::2] = m[1::2]
         comments = faiss.MatrixStats(m).comments
-        print comments
+        print(comments)
         assert '20 vectors are distinct' in comments
 
     def test_dead_dims(self):
@@ -342,7 +428,7 @@ class TestMatrixStats(unittest.TestCase):
         m = rs.rand(40, 20).astype('float32')
         m[:, 5:10] = 0
         comments = faiss.MatrixStats(m).comments
-        print comments
+        print(comments)
         assert '5 dimensions are constant' in comments
 
     def test_rogue_means(self):
@@ -350,7 +436,7 @@ class TestMatrixStats(unittest.TestCase):
         m = rs.rand(40, 20).astype('float32')
         m[:, 5:10] += 12345
         comments = faiss.MatrixStats(m).comments
-        print comments
+        print(comments)
         assert '5 dimensions are too large wrt. their variance' in comments
 
     def test_normalized(self):
@@ -358,7 +444,7 @@ class TestMatrixStats(unittest.TestCase):
         m = rs.rand(40, 20).astype('float32')
         faiss.normalize_L2(m)
         comments = faiss.MatrixStats(m).comments
-        print comments
+        print(comments)
         assert 'vectors are normalized' in comments
 
 
@@ -366,7 +452,7 @@ class TestScalarQuantizer(unittest.TestCase):
 
     def test_8bit_equiv(self):
         rs = np.random.RandomState(123)
-        for it in range(20):
+        for _it in range(20):
             for d in 13, 16, 24:
                 x = np.floor(rs.rand(5, d) * 256).astype('float32')
                 x[0] = 0
@@ -483,6 +569,31 @@ class TestPairwiseDis(unittest.TestCase):
                 dis[i], np.dot(x[ix[i]], y[iy[i]]))
 
 
+class TestSWIGWrap(unittest.TestCase):
+    """ various regressions with the SWIG wrapper """
+
+    def test_size_t_ptr(self):
+        # issue 1064
+        index = faiss.IndexHNSWFlat(10, 32)
+
+        hnsw = index.hnsw
+        index.add(np.random.rand(100, 10).astype('float32'))
+        be = np.empty(2, 'uint64')
+        hnsw.neighbor_range(23, 0, faiss.swig_ptr(be), faiss.swig_ptr(be[1:]))
+
+    def test_id_map_at(self):
+        # issue 1020
+        n_features = 100
+        feature_dims = 10
+
+        features = np.random.random((n_features, feature_dims)).astype(np.float32)
+        idx = np.arange(n_features).astype(np.int64)
+
+        index = faiss.IndexFlatL2(feature_dims)
+        index = faiss.IndexIDMap2(index)
+        index.add_with_ids(features, idx)
+
+        [index.id_map.at(int(i)) for i in range(index.ntotal)]
 
 
 if __name__ == '__main__':

@@ -173,70 +173,65 @@ struct ProductQuantizer {
                      float_maxheap_array_t * res,
                      bool init_finalize_heap = true) const;
 
-    struct PQEncoderGeneric {
-        uint8_t *code;   ///< code for this vector
-        uint8_t offset;
-        const int nbits; ///< number of bits per subquantizer index
-
-        uint8_t reg;
-
-        PQEncoderGeneric(uint8_t *code, int nbits, uint8_t offset = 0);
-
-        void encode(uint64_t x);
-
-        ~PQEncoderGeneric();
-    };
-
-
-    struct PQEncoder8 {
-        uint8_t *code;
-
-        PQEncoder8(uint8_t *code, int nbits);
-
-        void encode(uint64_t x);
-    };
-
-    struct PQEncoder16 {
-        uint16_t *code;
-
-        PQEncoder16(uint8_t *code, int nbits);
-
-        void encode(uint64_t x);
-    };
-
-
-    struct PQDecoderGeneric {
-        const uint8_t *code;
-        uint8_t offset;
-        const int nbits;
-        const uint64_t mask;
-        uint8_t reg;
-
-        PQDecoderGeneric(const uint8_t *code, int nbits);
-
-        uint64_t decode();
-    };
-
-    struct PQDecoder8 {
-        const uint8_t *code;
-
-        PQDecoder8(const uint8_t *code, int nbits);
-
-        uint64_t decode();
-    };
-
-    struct PQDecoder16 {
-        const uint16_t *code;
-
-        PQDecoder16(const uint8_t *code, int nbits);
-
-        uint64_t decode();
-    };
-
 };
 
 
+/*************************************************
+ * Objects to encode / decode strings of bits
+ *************************************************/
+
+struct PQEncoderGeneric {
+    uint8_t *code;   ///< code for this vector
+    uint8_t offset;
+    const int nbits; ///< number of bits per subquantizer index
+
+    uint8_t reg;
+
+    PQEncoderGeneric(uint8_t *code, int nbits, uint8_t offset = 0);
+
+    void encode(uint64_t x);
+
+    ~PQEncoderGeneric();
+};
+
+
+struct PQEncoder8 {
+    uint8_t *code;
+    PQEncoder8(uint8_t *code, int nbits);
+    void encode(uint64_t x);
+};
+
+struct PQEncoder16 {
+    uint16_t *code;
+    PQEncoder16(uint8_t *code, int nbits);
+    void encode(uint64_t x);
+};
+
+
+struct PQDecoderGeneric {
+    const uint8_t *code;
+    uint8_t offset;
+    const int nbits;
+    const uint64_t mask;
+    uint8_t reg;
+    PQDecoderGeneric(const uint8_t *code, int nbits);
+    uint64_t decode();
+};
+
+struct PQDecoder8 {
+    const uint8_t *code;
+    PQDecoder8(const uint8_t *code, int nbits);
+    uint64_t decode();
+};
+
+struct PQDecoder16 {
+    const uint16_t *code;
+    PQDecoder16(const uint8_t *code, int nbits);
+    uint64_t decode();
+};
+
 }  // namespace faiss
 
+#include <faiss/impl/ProductQuantizer-inl.h>
 
 #endif

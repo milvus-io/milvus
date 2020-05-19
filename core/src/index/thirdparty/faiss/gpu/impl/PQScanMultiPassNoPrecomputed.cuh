@@ -8,6 +8,7 @@
 
 #pragma once
 
+#include <faiss/MetricType.h>
 #include <faiss/gpu/GpuIndicesOptions.h>
 #include <faiss/gpu/utils/Tensor.cuh>
 #include <thrust/device_vector.h>
@@ -20,8 +21,9 @@ class GpuResources;
 /// per subquantizer?
 bool isSupportedNoPrecomputedSubDimSize(int dims);
 
+template <typename CentroidT>
 void runPQScanMultiPassNoPrecomputed(Tensor<float, 2, true>& queries,
-                                     Tensor<float, 2, true>& centroids,
+                                     Tensor<CentroidT, 2, true>& centroids,
                                      Tensor<float, 3, true>& pqCentroidsInnermostCode,
                                      Tensor<int, 2, true>& topQueryToCentroid,
                                      bool useFloat16Lookup,
@@ -34,6 +36,7 @@ void runPQScanMultiPassNoPrecomputed(Tensor<float, 2, true>& queries,
                                      thrust::device_vector<int>& listLengths,
                                      int maxListLength,
                                      int k,
+                                     faiss::MetricType metric,
                                      // output
                                      Tensor<float, 2, true>& outDistances,
                                      // output
@@ -41,3 +44,5 @@ void runPQScanMultiPassNoPrecomputed(Tensor<float, 2, true>& queries,
                                      GpuResources* res);
 
 } } // namespace
+
+#include <faiss/gpu/impl/PQScanMultiPassNoPrecomputed-inl.cuh>

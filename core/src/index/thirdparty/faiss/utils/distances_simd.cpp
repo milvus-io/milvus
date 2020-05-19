@@ -22,7 +22,6 @@
 #include <arm_neon.h>
 #endif
 
-#include <omp.h>
 
 namespace faiss {
 

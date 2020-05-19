@@ -7,8 +7,8 @@
 
 
 #include <faiss/gpu/impl/IVFFlatScan.cuh>
+#include <faiss/gpu/impl/DistanceUtils.cuh>
 #include <faiss/gpu/impl/IVFUtils.cuh>
-#include <faiss/gpu/impl/Metrics.cuh>
 #include <faiss/gpu/GpuResources.h>
 #include <faiss/gpu/utils/ConversionOperators.cuh>
 #include <faiss/gpu/utils/DeviceDefs.cuh>
@@ -23,6 +23,26 @@
 #include <thrust/host_vector.h>
 
 namespace faiss { namespace gpu {
+
+namespace {
+
+/// Sort direction per each metric
+inline bool metricToSortDirection(MetricType mt) {
+  switch (mt) {
+    case MetricType::METRIC_INNER_PRODUCT:
+      // highest
+      return true;
+    case MetricType::METRIC_L2:
+      // lowest
+      return false;
+    default:
+      // unhandled metric
+      FAISS_ASSERT(false);
+      return false;
+  }
+}
+
+}
 
 // Number of warps we create per block of IVFFlatScan
 constexpr int kIVFFlatScanWarps = 4;
@@ -55,8 +75,7 @@ struct IVFFlatScan {
 
     // Walk the list of vectors for this warp
     for (int vec = vecStart; vec < vecEnd; ++vec) {
-      // Reduce in dist
-      float dist = 0.0f;
+      Metric dist = metric.zero();
 
       // Scan the dimensions availabe that have whole units for the decoder,
       // as the decoder may handle more than one dimension at once (leaving the
@@ -75,7 +94,7 @@ struct IVFFlatScan {
 
 #pragma unroll
         for (int j = 0; j < Codec::kDimPerIter; ++j) {
-          dist += metric.distance(query[realDim + j], vecVal[j]);
+          dist.handle(query[realDim + j], vecVal[j]);
         }
       }
 
@@ -93,16 +112,16 @@ struct IVFFlatScan {
             float vecVal =
               codec.decodePartial(vecData, vec, limit, laneId);
             vecVal += useResidual ? residualBaseSlice[remainderDim] : 0.0f;
-            dist += metric.distance(query[remainderDim], vecVal);
+            dist.handle(query[remainderDim], vecVal);
           }
         }
       }
 
       // Reduce distance within warp
-      dist = warpReduceAllSum(dist);
+      auto warpDist = warpReduceAllSum(dist.reduce());
 
       if (laneId == 0) {
-        distanceOut[vec] = dist;
+        distanceOut[vec] = warpDist;
       }
     }
   }
@@ -219,9 +238,9 @@ runIVFFlatScanTile(Tensor<float, 2, true>& queries,
 #define HANDLE_METRICS                                  \
     do {                                                \
       if (metricType == MetricType::METRIC_L2) {        \
-        L2Metric metric; RUN_IVF_FLAT;                  \
+        L2Distance metric; RUN_IVF_FLAT;                \
       } else {                                          \
-        IPMetric metric; RUN_IVF_FLAT;                  \
+        IPDistance metric; RUN_IVF_FLAT;                \
       }                                                 \
     } while (0)
 

@@ -26,6 +26,7 @@ GpuIndexIVFPQ::GpuIndexIVFPQ(GpuResources* resources,
     GpuIndexIVF(resources,
                 index->d,
                 index->metric_type,
+                index->metric_arg,
                 index->nlist,
                 config),
     ivfpqConfig_(config),
@@ -46,6 +47,7 @@ GpuIndexIVFPQ::GpuIndexIVFPQ(GpuResources* resources,
     GpuIndexIVF(resources,
                 dims,
                 metric,
+                0,
                 nlist,
                 config),
     ivfpqConfig_(config),
@@ -54,9 +56,6 @@ GpuIndexIVFPQ::GpuIndexIVFPQ(GpuResources* resources,
     reserveMemoryVecs_(0),
     index_(nullptr) {
   verifySettings_();
-
-  // FIXME make IP work fully
-  FAISS_ASSERT(this->metric_type == faiss::METRIC_L2);
 
   // We haven't trained ourselves, so don't construct the PQ index yet
   this->is_trained = false;
@@ -70,9 +69,6 @@ void
 GpuIndexIVFPQ::copyFrom(const faiss::IndexIVFPQ* index) {
   DeviceScope scope(device_);
 
-  // FIXME: support this
-  FAISS_THROW_IF_NOT_MSG(index->metric_type == faiss::METRIC_L2,
-                     "GPU: inner product unsupported");
   GpuIndexIVF::copyFrom(index);
 
   // Clear out our old data
@@ -94,16 +90,17 @@ GpuIndexIVFPQ::copyFrom(const faiss::IndexIVFPQ* index) {
 
   // The other index might not be trained
   if (!index->is_trained) {
+    // copied in GpuIndex::copyFrom
+    FAISS_ASSERT(!is_trained);
     return;
   }
-
-  // Otherwise, we can populate ourselves from the other index
-  this->is_trained = true;
 
   // Copy our lists as well
   // The product quantizer must have data in it
   FAISS_ASSERT(index->pq.centroids.size() > 0);
   index_ = new IVFPQ(resources_,
+                     index->metric_type,
+                     index->metric_arg,
                      quantizer->getGpuData(),
                      subQuantizers_,
                      bitsPerCode_,
@@ -280,6 +277,8 @@ GpuIndexIVFPQ::trainResidualQuantizer_(Index::idx_t n, const float* x) {
   pq.train(n, residuals.data());
 
   index_ = new IVFPQ(resources_,
+                     metric_type,
+                     metric_arg,
                      quantizer->getGpuData(),
                      subQuantizers_,
                      bitsPerCode_,
@@ -444,10 +443,6 @@ GpuIndexIVFPQ::verifySettings_() const {
                      "Precomputed codes supports any number of dimensions, but "
                      "will involve memory overheads.",
                      this->d / subQuantizers_);
-
-  // TODO: fully implement METRIC_INNER_PRODUCT
-  FAISS_THROW_IF_NOT_MSG(this->metric_type == faiss::METRIC_L2,
-                     "METRIC_INNER_PRODUCT is currently unsupported");
 }
 
 } } // namespace

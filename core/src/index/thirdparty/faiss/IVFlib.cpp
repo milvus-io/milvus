@@ -13,6 +13,7 @@
 
 #include <faiss/IndexPreTransform.h>
 #include <faiss/impl/FaissAssert.h>
+#include <faiss/MetaIndexes.h>
 
 
 
@@ -56,23 +57,42 @@ void check_compatible_for_merge (const Index * index0,
 
 }
 
-const IndexIVF * extract_index_ivf (const Index * index)
+const IndexIVF * try_extract_index_ivf (const Index * index)
 {
     if (auto *pt =
         dynamic_cast<const IndexPreTransform *>(index)) {
         index = pt->index;
     }
 
+    if (auto *idmap =
+        dynamic_cast<const IndexIDMap *>(index)) {
+        index = idmap->index;
+    }
+    if (auto *idmap =
+        dynamic_cast<const IndexIDMap2 *>(index)) {
+        index = idmap->index;
+    }
+
     auto *ivf = dynamic_cast<const IndexIVF *>(index);
 
-    FAISS_THROW_IF_NOT (ivf);
+    return ivf;
+}
 
+IndexIVF * try_extract_index_ivf (Index * index) {
+    return const_cast<IndexIVF*> (try_extract_index_ivf ((const Index*)(index)));
+}
+
+const IndexIVF * extract_index_ivf (const Index * index)
+{
+    const IndexIVF *ivf = try_extract_index_ivf (index);
+    FAISS_THROW_IF_NOT (ivf);
     return ivf;
 }
 
 IndexIVF * extract_index_ivf (Index * index) {
     return const_cast<IndexIVF*> (extract_index_ivf ((const Index*)(index)));
 }
+
 
 void merge_into(faiss::Index *index0, faiss::Index *index1, bool shift_ids) {
 
@@ -146,8 +166,8 @@ void search_and_return_centroids(faiss::Index *index,
             if (result_centroid_ids)
                 result_centroid_ids[i] = -1;
         } else {
-            long list_no = label >> 32;
-            long list_index = label & 0xffffffff;
+            long list_no = lo_listno (label);
+            long list_index = lo_offset (label);
             if (result_centroid_ids)
                 result_centroid_ids[i] = list_no;
             labels[i] = index_ivf->invlists->get_single_id(list_no, list_index);

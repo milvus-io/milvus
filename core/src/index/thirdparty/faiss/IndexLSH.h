@@ -69,7 +69,10 @@ struct IndexLSH:Index {
 
     IndexLSH ();
 
-    /* standalone codec interface */
+    /* standalone codec interface.
+     *
+     * The vectors are decoded to +/- 1 (not 0, 1) */
+
     size_t sa_code_size () const override;
 
     void sa_encode (idx_t n, const float *x,

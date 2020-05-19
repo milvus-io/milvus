@@ -3,9 +3,9 @@
 # This source code is licensed under the MIT license found in the
 # LICENSE file in the root directory of this source tree.
 
-#! /usr/bin/env python2
-
 """this is a basic test script for simple indices work"""
+from __future__ import absolute_import, division, print_function
+# no unicode_literals because it messes up in py2
 
 import numpy as np
 import unittest
@@ -13,7 +13,7 @@ import faiss
 import tempfile
 import os
 import re
-
+import warnings
 
 from common import get_dataset, get_dataset_2
 
@@ -22,7 +22,6 @@ class TestModuleInterface(unittest.TestCase):
     def test_version_attribute(self):
         assert hasattr(faiss, '__version__')
         assert re.match('^\\d+\\.\\d+\\.\\d+$', faiss.__version__)
-
 
 
 class EvalIVFPQAccuracy(unittest.TestCase):
@@ -487,38 +486,25 @@ class TestHNSW(unittest.TestCase):
         # infinite loop
         index.add(zero_vecs)
 
+    def test_hnsw_IP(self):
+        d = self.xq.shape[1]
 
-class TestIOError(unittest.TestCase):
+        index_IP = faiss.IndexFlatIP(d)
+        index_IP.add(self.xb)
+        Dref, Iref = index_IP.search(self.xq, 1)
 
-    def test_io_error(self):
-        d, n = 32, 1000
-        x = np.random.uniform(size=(n, d)).astype('float32')
-        index = faiss.IndexFlatL2(d)
-        index.add(x)
-        _, fname = tempfile.mkstemp()
-        try:
-            faiss.write_index(index, fname)
+        index = faiss.IndexHNSWFlat(d, 16, faiss.METRIC_INNER_PRODUCT)
+        index.add(self.xb)
+        Dhnsw, Ihnsw = index.search(self.xq, 1)
 
-            # should be fine
-            faiss.read_index(fname)
+        print('nb equal: ', (Iref == Ihnsw).sum())
 
-            # now damage file
-            data = open(fname, 'rb').read()
-            data = data[:int(len(data) / 2)]
-            open(fname, 'wb').write(data)
+        self.assertGreaterEqual((Iref == Ihnsw).sum(), 480)
 
-            # should make a nice readable exception that mentions the
-            try:
-                faiss.read_index(fname)
-            except RuntimeError as e:
-                if fname not in str(e):
-                    raise
-            else:
-                raise
+        mask = Iref[:, 0] == Ihnsw[:, 0]
+        assert np.allclose(Dref[mask, 0], Dhnsw[mask, 0])
 
-        finally:
-            if os.path.exists(fname):
-                os.unlink(fname)
+
 
 
 class TestDistancesPositive(unittest.TestCase):
@@ -546,7 +532,7 @@ class TestDistancesPositive(unittest.TestCase):
 
 class TestReconsException(unittest.TestCase):
 
-    def test_recons(self):
+    def test_recons_exception(self):
 
         d = 64                           # dimension
         nb = 1000
@@ -561,14 +547,93 @@ class TestReconsException(unittest.TestCase):
 
         index.reconstruct(9)
 
-        try:
-            index.reconstruct(100001)
-        except RuntimeError:
-            pass
-        else:
-            assert False, "should raise an exception"
+        self.assertRaises(
+            RuntimeError,
+            index.reconstruct, 100001
+        )
+
+    def test_reconstuct_after_add(self):
+        index = faiss.index_factory(10, 'IVF5,SQfp16')
+        index.train(faiss.randn((100, 10), 123))
+        index.add(faiss.randn((100, 10), 345))
+        index.make_direct_map()
+        index.add(faiss.randn((100, 10), 678))
+
+        # should not raise an exception
+        index.reconstruct(5)
+        print(index.ntotal)
+        index.reconstruct(150)
 
 
+class TestReconsHash(unittest.TestCase):
+
+    def do_test(self, index_key):
+        d = 32
+        index = faiss.index_factory(d, index_key)
+        index.train(faiss.randn((100, d), 123))
+
+        # reference reconstruction
+        index.add(faiss.randn((100, d), 345))
+        index.add(faiss.randn((100, d), 678))
+        ref_recons = index.reconstruct_n(0, 200)
+
+        # with lookup
+        index.reset()
+        rs = np.random.RandomState(123)
+        ids = rs.choice(10000, size=200, replace=False)
+        index.add_with_ids(faiss.randn((100, d), 345), ids[:100])
+        index.set_direct_map_type(faiss.DirectMap.Hashtable)
+        index.add_with_ids(faiss.randn((100, d), 678), ids[100:])
+
+        # compare
+        for i in range(0, 200, 13):
+            recons = index.reconstruct(int(ids[i]))
+            self.assertTrue(np.all(recons == ref_recons[i]))
+
+        # test I/O
+        buf = faiss.serialize_index(index)
+        index2 = faiss.deserialize_index(buf)
+
+        # compare
+        for i in range(0, 200, 13):
+            recons = index2.reconstruct(int(ids[i]))
+            self.assertTrue(np.all(recons == ref_recons[i]))
+
+        # remove
+        toremove = np.ascontiguousarray(ids[0:200:3])
+
+        sel = faiss.IDSelectorArray(50, faiss.swig_ptr(toremove[:50]))
+
+        # test both ways of removing elements
+        nremove = index2.remove_ids(sel)
+        nremove += index2.remove_ids(toremove[50:])
+
+        self.assertEqual(nremove, len(toremove))
+
+        for i in range(0, 200, 13):
+            if i % 3 == 0:
+                self.assertRaises(
+                    RuntimeError,
+                    index2.reconstruct, int(ids[i])
+                )
+            else:
+                recons = index2.reconstruct(int(ids[i]))
+                self.assertTrue(np.all(recons == ref_recons[i]))
+
+        # index error should raise
+        self.assertRaises(
+            RuntimeError,
+            index.reconstruct, 20000
+        )
+
+    def test_IVFFlat(self):
+        self.do_test("IVF5,Flat")
+
+    def test_IVFSQ(self):
+        self.do_test("IVF5,SQfp16")
+
+    def test_IVFPQ(self):
+        self.do_test("IVF5,PQ4x4np")
 
 if __name__ == '__main__':
     unittest.main()

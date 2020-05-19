@@ -99,9 +99,13 @@ struct IndexBinary {
 
   /** Query n vectors of dimension d to the index.
    *
-   * return all vectors with distance < radius. Note that many
-   * indexes do not implement the range_search (only the k-NN search
-   * is mandatory).
+   * return all vectors with distance < radius. Note that many indexes
+   * do not implement the range_search (only the k-NN search is
+   * mandatory). The distances are converted to float to reuse the
+   * RangeSearchResult structure, but they are integer. By convention,
+   * only distances < radius (strict comparison) are returned,
+   * ie. radius = 0 does not return any result and 1 returns only
+   * exact same vectors.
    *
    * @param x           input vectors to search, size n * d / 8
    * @param radius      search radius

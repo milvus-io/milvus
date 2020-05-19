@@ -20,6 +20,7 @@ class IVFFlat : public IVFBase {
           /// We do not own this reference
           FlatIndex* quantizer,
           faiss::MetricType metric,
+          float metricArg,
           bool useResidual,
           /// Optional ScalarQuantizer
           faiss::ScalarQuantizer* scalarQ,
@@ -55,9 +56,6 @@ class IVFFlat : public IVFBase {
   size_t getVectorMemorySize() const;
 
  private:
-  /// Metric type used
-  faiss::MetricType metric_;
-
   /// Do we encode the residual from a coarse quantizer or not?
   bool useResidual_;
 

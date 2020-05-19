@@ -13,6 +13,7 @@
 #include <faiss/impl/FaissAssert.h>
 #include <faiss/impl/AuxIndexStructures.h>
 #include <faiss/gpu/GpuResources.h>
+#include <faiss/gpu/impl/DistanceUtils.cuh>
 #include <faiss/gpu/utils/DeviceDefs.cuh>
 #include <faiss/gpu/utils/DeviceUtils.h>
 #include <faiss/gpu/utils/Limits.cuh>
@@ -28,112 +29,17 @@
 
 namespace faiss { namespace gpu {
 
-namespace {
-
-template <typename T>
-Tensor<T, 2, true> sliceCentroids(Tensor<T, 2, true>& centroids,
-                                  bool centroidsRowMajor,
-                                  int startCentroid,
-                                  int num) {
-  // Row major is (num, dim)
-  // Col major is (dim, num)
-  if (startCentroid == 0 &&
-      num == centroids.getSize(centroidsRowMajor ? 0 : 1)) {
-    return centroids;
-  }
-
-  return centroids.narrow(centroidsRowMajor ? 0 : 1, startCentroid, num);
-}
-
-// For each chunk of k indices, increment the index by chunk * increment
-template <typename T>
-__global__ void incrementIndex(Tensor<T, 2, true> indices,
-                               int k,
-                               int increment) {
-  for (int i = threadIdx.x; i < k; i += blockDim.x) {
-    indices[blockIdx.y][blockIdx.x * k + i] += blockIdx.x * increment;
-  }
-}
-
-// Used to update result indices in distance computation where the number of
-// centroids is high, and is tiled
-template <typename T>
-void runIncrementIndex(Tensor<T, 2, true>& indices,
-                       int k,
-                       int increment,
-                       cudaStream_t stream) {
-  dim3 grid(indices.getSize(1) / k, indices.getSize(0));
-  int block = std::min(k, 512);
-
-  // should be exact
-  FAISS_ASSERT(grid.x * k == indices.getSize(1));
-
-  incrementIndex<<<grid, block, 0, stream>>>(indices, k, increment);
-
-  cudaDeviceSynchronize();
-}
-
-// If the inner size (dim) of the vectors is small, we want a larger query tile
-// size, like 1024
-
-void chooseTileSize(int numQueries,
-                    int numCentroids,
-                    int dim,
-                    int elementSize,
-                    size_t tempMemAvailable,
-                    int& tileRows,
-                    int& tileCols) {
-  // The matrix multiplication should be large enough to be efficient, but if it
-  // is too large, we seem to lose efficiency as opposed to double-streaming.
-  // Each tile size here defines 1/2 of the memory use due to double streaming.
-  // We ignore available temporary memory, as that is adjusted independently by
-  // the user and can thus meet these requirements (or not).
-  // For <= 4 GB GPUs, prefer 512 MB of usage.
-  // For <= 8 GB GPUs, prefer 768 MB of usage.
-  // Otherwise, prefer 1 GB of usage.
-  auto totalMem = getCurrentDeviceProperties().totalGlobalMem;
-
-  int targetUsage = 0;
-
-  if (totalMem <= ((size_t) 4) * 1024 * 1024 * 1024) {
-    targetUsage = 512 * 1024 * 1024;
-  } else if (totalMem <= ((size_t) 8) * 1024 * 1024 * 1024) {
-    targetUsage = 768 * 1024 * 1024;
-  } else {
-    targetUsage = 1024 * 1024 * 1024;
-  }
-
-  targetUsage /= 2 * elementSize;
-
-  // 512 seems to be a batch size sweetspot for float32.
-  // If we are on float16, increase to 512.
-  // If the k size (vec dim) of the matrix multiplication is small (<= 32),
-  // increase to 1024.
-  int preferredTileRows = 512;
-  if (dim <= 32) {
-    preferredTileRows = 1024;
-  }
-
-  tileRows = std::min(preferredTileRows, numQueries);
-
-  // tileCols is the remainder size
-  tileCols = std::min(targetUsage / preferredTileRows, numCentroids);
-}
-
-}
-
 template <typename T>
 void runDistance(bool computeL2,
                  GpuResources* resources,
                  Tensor<T, 2, true>& centroids,
                  bool centroidsRowMajor,
-                 Tensor<T, 1, true>* centroidNorms,
+                 Tensor<float, 1, true>* centroidNorms,
                  Tensor<T, 2, true>& queries,
                  bool queriesRowMajor,
                  int k,
-                 Tensor<T, 2, true>& outDistances,
+                 Tensor<float, 2, true>& outDistances,
                  Tensor<int, 2, true>& outIndices,
-                 bool useHgemm,
                  bool ignoreOutDistances) {
   // The # of centroids in `centroids` based on memory layout
   auto numCentroids = centroids.getSize(centroidsRowMajor ? 0 : 1);
@@ -168,11 +74,11 @@ void runDistance(bool computeL2,
   }
 
   // L2: If ||c||^2 is not pre-computed, calculate it
-  DeviceTensor<T, 1, true> cNorms;
+  DeviceTensor<float, 1, true> cNorms;
   if (computeL2 && !centroidNorms) {
     cNorms =
-      std::move(DeviceTensor<T, 1, true>(mem,
-                                         {numCentroids}, defaultStream));
+      std::move(DeviceTensor<float, 1, true>(
+                  mem, {numCentroids}, defaultStream));
     runL2Norm(centroids, centroidsRowMajor, cNorms, true, defaultStream);
     centroidNorms = &cNorms;
   }
@@ -181,7 +87,7 @@ void runDistance(bool computeL2,
   // Prepare norm vector ||q||^2; ||c||^2 is already pre-computed
   //
   int qNormSize[1] = {numQueries};
-  DeviceTensor<T, 1, true> queryNorms(mem, qNormSize, defaultStream);
+  DeviceTensor<float, 1, true> queryNorms(mem, qNormSize, defaultStream);
 
   // ||q||^2
   if (computeL2) {
@@ -207,18 +113,18 @@ void runDistance(bool computeL2,
   FAISS_ASSERT(k <= GPU_MAX_SELECTION_K); // select limitation
 
   // Temporary output memory space we'll use
-  DeviceTensor<T, 2, true> distanceBuf1(
+  DeviceTensor<float, 2, true> distanceBuf1(
     mem, {tileRows, tileCols}, defaultStream);
-  DeviceTensor<T, 2, true> distanceBuf2(
+  DeviceTensor<float, 2, true> distanceBuf2(
     mem, {tileRows, tileCols}, defaultStream);
-  DeviceTensor<T, 2, true>* distanceBufs[2] =
+  DeviceTensor<float, 2, true>* distanceBufs[2] =
     {&distanceBuf1, &distanceBuf2};
 
-  DeviceTensor<T, 2, true> outDistanceBuf1(
+  DeviceTensor<float, 2, true> outDistanceBuf1(
     mem, {tileRows, numColTiles * k}, defaultStream);
-  DeviceTensor<T, 2, true> outDistanceBuf2(
+  DeviceTensor<float, 2, true> outDistanceBuf2(
     mem, {tileRows, numColTiles * k}, defaultStream);
-  DeviceTensor<T, 2, true>* outDistanceBufs[2] =
+  DeviceTensor<float, 2, true>* outDistanceBufs[2] =
     {&outDistanceBuf1, &outDistanceBuf2};
 
   DeviceTensor<int, 2, true> outIndexBuf1(
@@ -290,7 +196,6 @@ void runDistance(bool computeL2,
                     centroidsRowMajor, // transposed MM if row major
                     computeL2 ? -2.0f : 1.0f,
                     0.0f,
-                    useHgemm,
                     resources->getBlasHandleCurrentDevice(),
                     streams[curStream]);
 
@@ -388,13 +293,12 @@ template <typename T>
 void runL2Distance(GpuResources* resources,
                    Tensor<T, 2, true>& centroids,
                    bool centroidsRowMajor,
-                   Tensor<T, 1, true>* centroidNorms,
+                   Tensor<float, 1, true>* centroidNorms,
                    Tensor<T, 2, true>& queries,
                    bool queriesRowMajor,
                    int k,
-                   Tensor<T, 2, true>& outDistances,
+                   Tensor<float, 2, true>& outDistances,
                    Tensor<int, 2, true>& outIndices,
-                   bool useHgemm,
                    bool ignoreOutDistances = false) {
   runDistance<T>(true, // L2
                  resources,
@@ -406,7 +310,6 @@ void runL2Distance(GpuResources* resources,
                  k,
                  outDistances,
                  outIndices,
-                 useHgemm,
                  ignoreOutDistances);
 }
 
@@ -417,9 +320,8 @@ void runIPDistance(GpuResources* resources,
                    Tensor<T, 2, true>& queries,
                    bool queriesRowMajor,
                    int k,
-                   Tensor<T, 2, true>& outDistances,
-                   Tensor<int, 2, true>& outIndices,
-                   bool useHgemm) {
+                   Tensor<float, 2, true>& outDistances,
+                   Tensor<int, 2, true>& outIndices) {
   runDistance<T>(false, // IP
                  resources,
                  centroids,
@@ -430,7 +332,6 @@ void runIPDistance(GpuResources* resources,
                  k,
                  outDistances,
                  outIndices,
-                 useHgemm,
                  false);
 }
 
@@ -454,8 +355,7 @@ runIPDistance(GpuResources* resources,
                        queriesRowMajor,
                        k,
                        outDistances,
-                       outIndices,
-                       false);
+                       outIndices);
 }
 
 void
@@ -465,9 +365,8 @@ runIPDistance(GpuResources* resources,
               Tensor<half, 2, true>& queries,
               bool queriesRowMajor,
               int k,
-              Tensor<half, 2, true>& outDistances,
-              Tensor<int, 2, true>& outIndices,
-              bool useHgemm) {
+              Tensor<float, 2, true>& outDistances,
+              Tensor<int, 2, true>& outIndices) {
   runIPDistance<half>(resources,
                       vectors,
                       vectorsRowMajor,
@@ -475,8 +374,7 @@ runIPDistance(GpuResources* resources,
                       queriesRowMajor,
                       k,
                       outDistances,
-                      outIndices,
-                      useHgemm);
+                      outIndices);
 }
 
 void
@@ -499,7 +397,6 @@ runL2Distance(GpuResources* resources,
                        k,
                        outDistances,
                        outIndices,
-                       false,
                        ignoreOutDistances);
 }
 
@@ -507,13 +404,12 @@ void
 runL2Distance(GpuResources* resources,
               Tensor<half, 2, true>& vectors,
               bool vectorsRowMajor,
-              Tensor<half, 1, true>* vectorNorms,
+              Tensor<float, 1, true>* vectorNorms,
               Tensor<half, 2, true>& queries,
               bool queriesRowMajor,
               int k,
-              Tensor<half, 2, true>& outDistances,
+              Tensor<float, 2, true>& outDistances,
               Tensor<int, 2, true>& outIndices,
-              bool useHgemm,
               bool ignoreOutDistances) {
   runL2Distance<half>(resources,
                       vectors,
@@ -524,7 +420,6 @@ runL2Distance(GpuResources* resources,
                       k,
                       outDistances,
                       outIndices,
-                      useHgemm,
                       ignoreOutDistances);
 }
 

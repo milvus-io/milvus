@@ -28,15 +28,13 @@
 
 #include <vector>
 #include <memory>
-#include <stdlib.h>
 #include <stdio.h>
 #include <math.h>
-#include <assert.h>
-#include <limits.h>
 
 #include <faiss/utils/Heap.h>
 #include <faiss/impl/FaissAssert.h>
 #include <faiss/utils/utils.h>
+#include <faiss/impl/AuxIndexStructures.h>
 
 static const size_t BLOCKSIZE_QUERY = 8192;
 
@@ -487,6 +485,30 @@ void bitvec_print (const uint8_t * b, size_t d)
 }
 
 
+void bitvec_shuffle (size_t n, size_t da, size_t db,
+                     const int *order,
+                     const uint8_t *a,
+                     uint8_t *b)
+{
+    for(size_t i = 0; i < db; i++) {
+        FAISS_THROW_IF_NOT (order[i] >= 0 && order[i] < da);
+    }
+    size_t lda = (da + 7) / 8;
+    size_t ldb = (db + 7) / 8;
+
+#pragma omp parallel for if(n > 10000)
+    for (size_t i = 0; i < n; i++) {
+        const uint8_t *ai = a + i * lda;
+        uint8_t *bi = b + i * ldb;
+        memset (bi, 0, ldb);
+        for(size_t i = 0; i < db; i++) {
+            int o = order[i];
+            uint8_t the_bit = (ai[o >> 3] >> (o & 7)) & 1;
+            bi[i >> 3] |= the_bit << (i & 7);
+        }
+    }
+
+}
 
 
 
@@ -530,6 +552,7 @@ void hammings_knn(
 {
     hammings_knn_hc(ha, a, b, nb, ncodes, order);
 }
+
 void hammings_knn_hc (
         int_maxheap_array_t * ha,
         const uint8_t * a,
@@ -613,7 +636,66 @@ void hammings_knn_mc(
         }
     }
 }
+template <class HammingComputer>
+static
+void hamming_range_search_template (
+    const uint8_t * a,
+    const uint8_t * b,
+    size_t na,
+    size_t nb,
+    int radius,
+    size_t code_size,
+    RangeSearchResult *res)
+{
 
+#pragma omp parallel
+    {
+        RangeSearchPartialResult pres (res);
+
+#pragma omp for
+        for (size_t i = 0; i < na; i++) {
+             HammingComputer hc (a + i * code_size, code_size);
+            const uint8_t * yi = b;
+            RangeQueryResult & qres = pres.new_result (i);
+
+            for (size_t j = 0; j < nb; j++) {
+                int dis = hc.hamming (yi);
+                if (dis < radius) {
+                    qres.add(dis, j);
+                }
+                yi += code_size;
+            }
+        }
+        pres.finalize ();
+    }
+}
+
+void hamming_range_search (
+    const uint8_t * a,
+    const uint8_t * b,
+    size_t na,
+    size_t nb,
+    int radius,
+    size_t code_size,
+    RangeSearchResult *result)
+{
+
+#define HC(name) hamming_range_search_template<name> (a, b, na, nb, radius, code_size, result)
+
+    switch(code_size) {
+    case 4: HC(HammingComputer4); break;
+    case 8: HC(HammingComputer8); break;
+    case 16: HC(HammingComputer16); break;
+    case 32: HC(HammingComputer32); break;
+    default:
+        if (code_size % 8 == 0) {
+            HC(HammingComputerM8);
+        } else {
+            HC(HammingComputerDefault);
+        }
+    }
+#undef HC
+}
 
 
 

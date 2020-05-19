@@ -51,9 +51,7 @@ struct RangeSearchResult {
 };
 
 
-/**
-
- Encapsulates a set of ids to remove. */
+/** Encapsulates a set of ids to remove. */
 struct IDSelector {
     typedef Index::idx_t idx_t;
     virtual bool is_member (idx_t id) const = 0;
@@ -71,6 +69,19 @@ struct IDSelectorRange: IDSelector {
     ~IDSelectorRange() override {}
 };
 
+/** simple list of elements to remove
+ *
+ * this is inefficient in most cases, except for IndexIVF with
+ * maintain_direct_map
+ */
+struct IDSelectorArray: IDSelector {
+    size_t n;
+    const idx_t *ids;
+
+    IDSelectorArray (size_t n, const idx_t *ids);
+    bool is_member(idx_t id) const override;
+    ~IDSelectorArray() override {}
+};
 
 /** Remove ids from a set. Repetitions of ids in the indices set
  * passed to the constructor does not hurt performance. The hash

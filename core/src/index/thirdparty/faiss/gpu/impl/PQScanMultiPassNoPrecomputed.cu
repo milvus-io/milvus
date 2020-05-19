@@ -238,9 +238,16 @@ runMultiPassTile(Tensor<float, 2, true>& queries,
                  Tensor<float, 3, true>& heapDistances,
                  Tensor<int, 3, true>& heapIndices,
                  int k,
+                 faiss::MetricType metric,
                  Tensor<float, 2, true>& outDistances,
                  Tensor<long, 2, true>& outIndices,
                  cudaStream_t stream) {
+  // We only support two metrics at the moment
+  FAISS_ASSERT(metric == MetricType::METRIC_INNER_PRODUCT ||
+               metric == MetricType::METRIC_L2);
+
+  bool l2Distance = metric == MetricType::METRIC_L2;
+
   // Calculate offset lengths, so we know where to write out
   // intermediate results
   runCalcListOffsets(topQueryToCentroid, listLengths, prefixSumOffsets,
@@ -253,6 +260,7 @@ runMultiPassTile(Tensor<float, 2, true>& queries,
                      centroids,
                      topQueryToCentroid,
                      codeDistances,
+                     l2Distance,
                      useFloat16Lookup,
                      stream);
 
@@ -361,7 +369,7 @@ runMultiPassTile(Tensor<float, 2, true>& queries,
                       allDistances,
                       topQueryToCentroid.getSize(1),
                       k,
-                      false, // L2 distance chooses smallest
+                      !l2Distance, // L2 distance chooses smallest
                       heapDistances,
                       heapIndices,
                       stream);
@@ -377,7 +385,7 @@ runMultiPassTile(Tensor<float, 2, true>& queries,
                       prefixSumOffsets,
                       topQueryToCentroid,
                       k,
-                      false, // L2 distance chooses smallest
+                      !l2Distance, // L2 distance chooses smallest
                       outDistances,
                       outIndices,
                       stream);
@@ -397,6 +405,7 @@ void runPQScanMultiPassNoPrecomputed(Tensor<float, 2, true>& queries,
                                      thrust::device_vector<int>& listLengths,
                                      int maxListLength,
                                      int k,
+                                     faiss::MetricType metric,
                                      // output
                                      Tensor<float, 2, true>& outDistances,
                                      // output
@@ -574,6 +583,7 @@ void runPQScanMultiPassNoPrecomputed(Tensor<float, 2, true>& queries,
                      heapDistancesView,
                      heapIndicesView,
                      k,
+                     metric,
                      outDistanceView,
                      outIndicesView,
                      streams[curStream]);

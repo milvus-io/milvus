@@ -37,6 +37,7 @@ class GpuIndexIVF : public GpuIndex {
   GpuIndexIVF(GpuResources* resources,
               int dims,
               faiss::MetricType metric,
+              float metricArg,
               int nlist,
               GpuIndexIVFConfig config = GpuIndexIVFConfig());
 

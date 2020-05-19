@@ -38,6 +38,9 @@ struct IndexBinaryFlat : IndexBinary {
   void search(idx_t n, const uint8_t *x, idx_t k,
               int32_t *distances, idx_t *labels) const override;
 
+  void range_search(idx_t n, const uint8_t *x, int radius,
+                   RangeSearchResult *result) const override;
+
   void reconstruct(idx_t key, uint8_t *recons) const override;
 
   /** Remove some ids. Note that because of the indexing structure,

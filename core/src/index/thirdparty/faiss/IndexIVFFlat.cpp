@@ -45,8 +45,7 @@ void IndexIVFFlat::add_core (idx_t n, const float * x, const int64_t *xids,
 {
     FAISS_THROW_IF_NOT (is_trained);
     assert (invlists);
-    FAISS_THROW_IF_NOT_MSG (!(maintain_direct_map && xids),
-                            "cannot have direct map and add with ids");
+    direct_map.check_can_add (xids);
     const int64_t * idx;
     ScopeDeleter<int64_t> del;
 
@@ -60,19 +59,21 @@ void IndexIVFFlat::add_core (idx_t n, const float * x, const int64_t *xids,
     }
     int64_t n_add = 0;
     for (size_t i = 0; i < n; i++) {
-        int64_t id = xids ? xids[i] : ntotal + i;
-        int64_t list_no = idx [i];
+        idx_t id = xids ? xids[i] : ntotal + i;
+        idx_t list_no = idx [i];
+        size_t offset;
 
-        if (list_no < 0)
-            continue;
-        const float *xi = x + i * d;
-        size_t offset = invlists->add_entry (
-              list_no, id, (const uint8_t*) xi);
-
-        if (maintain_direct_map)
-            direct_map.push_back (list_no << 32 | offset);
-        n_add++;
+        if (list_no >= 0) {
+            const float *xi = x + i * d;
+            offset = invlists->add_entry (
+                     list_no, id, (const uint8_t*) xi);
+            n_add++;
+        } else {
+            offset = 0;
+        }
+        direct_map.add_single_id (id, list_no, offset);
     }
+
     if (verbose) {
         printf("IndexIVFFlat::add_core: added %ld / %ld vectors\n",
                n_add, n);
@@ -158,7 +159,7 @@ struct IVFFlatScanner: InvertedListScanner {
                 fvec_inner_product (xi, yj, d) : fvec_L2sqr (xi, yj, d);
             if (C::cmp (simi[0], dis)) {
                 heap_pop<C> (k, simi, idxi);
-                int64_t id = store_pairs ? (list_no << 32 | j) : ids[j];
+                int64_t id = store_pairs ? lo_build (list_no, j) : ids[j];
                 heap_push<C> (k, simi, idxi, dis, id);
                 nup++;
             }
@@ -178,7 +179,7 @@ struct IVFFlatScanner: InvertedListScanner {
             float dis = metric == METRIC_INNER_PRODUCT ?
                 fvec_inner_product (xi, yj, d) : fvec_L2sqr (xi, yj, d);
             if (C::cmp (radius, dis)) {
-                int64_t id = store_pairs ? (list_no << 32 | j) : ids[j];
+                int64_t id = store_pairs ? lo_build (list_no, j) : ids[j];
                 res.add (dis, id);
             }
         }
@@ -209,41 +210,6 @@ InvertedListScanner* IndexIVFFlat::get_InvertedListScanner
 
 
 
-void IndexIVFFlat::update_vectors (int n, idx_t *new_ids, const float *x)
-{
-
-    FAISS_THROW_IF_NOT (maintain_direct_map);
-    FAISS_THROW_IF_NOT (is_trained);
-    std::vector<idx_t> assign (n);
-    quantizer->assign (n, x, assign.data());
-
-    for (size_t i = 0; i < n; i++) {
-        idx_t id = new_ids[i];
-        FAISS_THROW_IF_NOT_MSG (0 <= id && id < ntotal,
-                                "id to update out of range");
-        { // remove old one
-            int64_t dm = direct_map[id];
-            int64_t ofs = dm & 0xffffffff;
-            int64_t il = dm >> 32;
-            size_t l = invlists->list_size (il);
-            if (ofs != l - 1) { // move l - 1 to ofs
-                int64_t id2 = invlists->get_single_id (il, l - 1);
-                direct_map[id2] = (il << 32) | ofs;
-                invlists->update_entry (il, ofs, id2,
-                                        invlists->get_single_code (il, l - 1));
-            }
-            invlists->resize (il, l - 1);
-        }
-        { // insert new one
-            int64_t il = assign[i];
-            size_t l = invlists->list_size (il);
-            int64_t dm = (il << 32) | l;
-            direct_map[id] = dm;
-            invlists->add_entry (il, id, (const uint8_t*)(x + i * d));
-        }
-    }
-
-}
 
 void IndexIVFFlat::reconstruct_from_offset (int64_t list_no, int64_t offset,
                                             float* recons) const
@@ -295,8 +261,7 @@ void IndexIVFFlatDedup::add_with_ids(
 
     FAISS_THROW_IF_NOT (is_trained);
     assert (invlists);
-    FAISS_THROW_IF_NOT_MSG (
-           !maintain_direct_map,
+    FAISS_THROW_IF_NOT_MSG (direct_map.no(),
            "IVFFlatDedup not implemented with direct_map");
     int64_t * idx = new int64_t [na];
     ScopeDeleter<int64_t> del (idx);
@@ -431,7 +396,7 @@ size_t IndexIVFFlatDedup::remove_ids(const IDSelector& sel)
 
     // mostly copied from IndexIVF.cpp
 
-    FAISS_THROW_IF_NOT_MSG (!maintain_direct_map,
+    FAISS_THROW_IF_NOT_MSG (direct_map.no(),
                     "direct map remove not implemented");
 
     std::vector<int64_t> toremove(nlist);
@@ -484,7 +449,7 @@ void IndexIVFFlatDedup::range_search(
     FAISS_THROW_MSG ("not implemented");
 }
 
-void IndexIVFFlatDedup::update_vectors (int , idx_t *, const float *)
+void IndexIVFFlatDedup::update_vectors (int , const idx_t *, const float *)
 {
     FAISS_THROW_MSG ("not implemented");
 }

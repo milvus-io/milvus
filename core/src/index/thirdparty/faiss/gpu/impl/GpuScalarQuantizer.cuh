@@ -159,8 +159,8 @@ struct Codec<ScalarQuantizer::QuantizerType::QT_fp16, 2> {
     half2* p = (half2*) &((uint8_t*) data)[vec * bytesPerVec];
     half2 pd = p[d];
 
-    out[0] = Convert<half, float>()(pd.x);
-    out[1] = Convert<half, float>()(pd.y);
+    out[0] = Convert<half, float>()(__low2half(pd));
+    out[1] = Convert<half, float>()(__high2half(pd));
   }
 
   inline __device__ float decodePartial(void* data, int vec, int d,
@@ -176,11 +176,7 @@ struct Codec<ScalarQuantizer::QuantizerType::QT_fp16, 2> {
     half h0 = Convert<float, half>()(v[0]);
     half h1 = Convert<float, half>()(v[1]);
 
-    half2 h;
-    h.x = h0;
-    h.y = h1;
-
-    p[d] = h;
+    p[d] = __halves2half2(h0, h1);
   }
 
   inline __device__ void encodePartial(void* data, int vec, int d,

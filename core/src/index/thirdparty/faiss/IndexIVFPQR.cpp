@@ -144,8 +144,8 @@ void IndexIVFPQR::search_preassigned (idx_t n, const float *x, idx_t k,
 
                 if (sl == -1) continue;
 
-                int list_no = sl >> 32;
-                int ofs = sl & 0xffffffff;
+                int list_no = lo_listno(sl);
+                int ofs = lo_offset(sl);
 
                 assert (list_no >= 0 && list_no < nlist);
                 assert (ofs >= 0 && ofs < invlists->list_size (list_no));

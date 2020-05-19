@@ -46,8 +46,7 @@ struct IndexBinaryIVF : IndexBinary {
     bool use_heap = true;
 
     /// map for direct access to the elements. Enables reconstruct().
-    bool maintain_direct_map;
-    std::vector<idx_t> direct_map;
+    DirectMap direct_map;
 
     IndexBinary *quantizer;   ///< quantizer that maps vectors to inverted lists
     size_t nlist;             ///< number of possible key values
@@ -110,8 +109,11 @@ struct IndexBinaryIVF : IndexBinary {
                                          bool store_pairs=false) const;
 
     /** assign the vectors, then call search_preassign */
-    virtual void search(idx_t n, const uint8_t *x, idx_t k,
-                        int32_t *distances, idx_t *labels) const override;
+    void search(idx_t n, const uint8_t *x, idx_t k,
+                int32_t *distances, idx_t *labels) const override;
+
+    void range_search(idx_t n, const uint8_t *x, int radius,
+                      RangeSearchResult *result) const override;
 
     void reconstruct(idx_t key, uint8_t *recons) const override;
 
@@ -168,6 +170,8 @@ struct IndexBinaryIVF : IndexBinary {
      */
     void make_direct_map(bool new_maintain_direct_map=true);
 
+    void set_direct_map_type (DirectMap::Type type);
+
     void replace_invlists(InvertedLists *il, bool own=false);
 };
 
@@ -200,6 +204,12 @@ struct BinaryInvertedListScanner {
                                const idx_t *ids,
                                int32_t *distances, idx_t *labels,
                                size_t k) const = 0;
+
+    virtual void scan_codes_range (size_t n,
+                                   const uint8_t *codes,
+                                   const idx_t *ids,
+                                   int radius,
+                                   RangeQueryResult &result) const = 0;
 
     virtual ~BinaryInvertedListScanner () {}
 

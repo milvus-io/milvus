@@ -21,11 +21,15 @@
 namespace faiss { namespace gpu {
 
 IVFBase::IVFBase(GpuResources* resources,
+                 faiss::MetricType metric,
+                 float metricArg,
                  FlatIndex* quantizer,
                  int bytesPerVector,
                  IndicesOptions indicesOptions,
                  MemorySpace space) :
     resources_(resources),
+    metric_(metric),
+    metricArg_(metricArg),
     quantizer_(quantizer),
     bytesPerVector_(bytesPerVector),
     indicesOptions_(indicesOptions),

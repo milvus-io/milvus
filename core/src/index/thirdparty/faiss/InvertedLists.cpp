@@ -16,8 +16,6 @@
 
 namespace faiss {
 
-using ScopedIds = InvertedLists::ScopedIds;
-using ScopedCodes = InvertedLists::ScopedCodes;
 
 
 /*****************************************

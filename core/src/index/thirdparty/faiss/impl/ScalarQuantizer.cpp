@@ -43,6 +43,9 @@ namespace faiss {
 #define USE_AVX
 #endif
 
+#ifdef __F16C__
+#define USE_F16C
+#endif
 
 
 namespace {
@@ -183,7 +186,7 @@ struct Codec6bit {
 
 
 
-#ifdef USE_AVX
+#ifdef USE_F16C
 
 
 uint16_t encode_fp16 (float x) {
@@ -458,7 +461,7 @@ struct QuantizerFP16<1>: ScalarQuantizer::Quantizer {
 
 };
 
-#ifdef USE_AVX
+#ifdef USE_F16C
 
 template<>
 struct QuantizerFP16<8>: QuantizerFP16<1> {
@@ -937,7 +940,7 @@ struct DCTemplate<Quantizer, Similarity, 1> : SQDistanceComputer
 
 };
 
-#ifdef USE_AVX
+#ifdef USE_F16C
 
 template<class Quantizer, class Similarity>
 struct DCTemplate<Quantizer, Similarity, 8> : SQDistanceComputer
@@ -1276,7 +1279,7 @@ void ScalarQuantizer::train_residual(size_t n,
 
 ScalarQuantizer::Quantizer *ScalarQuantizer::select_quantizer () const
 {
-#ifdef USE_AVX
+#ifdef USE_F16C
     if (d % 8 == 0) {
         return select_quantizer_1<8> (qtype, d, trained);
     } else
@@ -1313,7 +1316,7 @@ SQDistanceComputer *
 ScalarQuantizer::get_distance_computer (MetricType metric) const
 {
     FAISS_THROW_IF_NOT(metric == METRIC_L2 || metric == METRIC_INNER_PRODUCT);
-#ifdef USE_AVX
+#ifdef USE_F16C
     if (d % 8 == 0) {
         if (metric == METRIC_L2) {
             return select_distance_computer<SimilarityL2<8> >
@@ -1606,7 +1609,7 @@ InvertedListScanner* ScalarQuantizer::select_InvertedListScanner
         (MetricType mt, const Index *quantizer,
          bool store_pairs, bool by_residual) const
 {
-#ifdef USE_AVX
+#ifdef USE_F16C
     if (d % 8 == 0) {
         return sel0_InvertedListScanner<8>
             (mt, this, quantizer, store_pairs, by_residual);

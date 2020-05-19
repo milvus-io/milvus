@@ -19,11 +19,4 @@ void runL2SelectMin(Tensor<float, 2, true>& productDistances,
                     int k,
                     cudaStream_t stream);
 
-void runL2SelectMin(Tensor<half, 2, true>& productDistances,
-                    Tensor<half, 1, true>& centroidDistances,
-                    Tensor<half, 2, true>& outDistances,
-                    Tensor<int, 2, true>& outIndices,
-                    int k,
-                    cudaStream_t stream);
-
 } } // namespace

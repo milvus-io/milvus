@@ -26,6 +26,7 @@ GpuIndexIVFFlat::GpuIndexIVFFlat(GpuResources* resources,
     GpuIndexIVF(resources,
                 index->d,
                 index->metric_type,
+                index->metric_arg,
                 index->nlist,
                 config),
     ivfFlatConfig_(config),
@@ -39,7 +40,7 @@ GpuIndexIVFFlat::GpuIndexIVFFlat(GpuResources* resources,
                                  int nlist,
                                  faiss::MetricType metric,
                                  GpuIndexIVFFlatConfig config) :
-    GpuIndexIVF(resources, dims, metric, nlist, config),
+    GpuIndexIVF(resources, dims, metric, 0, nlist, config),
     ivfFlatConfig_(config),
     reserveMemoryVecs_(0),
     index_(nullptr) {
@@ -59,6 +60,7 @@ void
 GpuIndexIVFFlat::reserveMemory(size_t numVecs) {
   reserveMemoryVecs_ = numVecs;
   if (index_) {
+    DeviceScope scope(device_);
     index_->reserveMemory(numVecs);
   }
 }
@@ -75,16 +77,18 @@ GpuIndexIVFFlat::copyFrom(const faiss::IndexIVFFlat* index) {
 
   // The other index might not be trained
   if (!index->is_trained) {
+    FAISS_ASSERT(!is_trained);
     return;
   }
 
   // Otherwise, we can populate ourselves from the other index
-  this->is_trained = true;
+  FAISS_ASSERT(is_trained);
 
   // Copy our lists as well
   index_ = new IVFFlat(resources_,
                        quantizer->getGpuData(),
                        index->metric_type,
+                       index->metric_arg,
                        false, // no residual
                        nullptr, // no scalar quantizer
                        ivfFlatConfig_.indicesOptions,
@@ -180,6 +184,7 @@ GpuIndexIVFFlat::train(Index::idx_t n, const float* x) {
   index_ = new IVFFlat(resources_,
                        quantizer->getGpuData(),
                        this->metric_type,
+                       this->metric_arg,
                        false, // no residual
                        nullptr, // no scalar quantizer
                        ivfFlatConfig_.indicesOptions,

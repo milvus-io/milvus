@@ -107,6 +107,12 @@ Index *Cloner::clone_Index (const Index *index)
                dynamic_cast<const IndexPreTransform*> (index)) {
         IndexPreTransform *res = new IndexPreTransform ();
         res->d = ipt->d;
+        res->ntotal = ipt->ntotal;
+        res->is_trained = ipt->is_trained;
+        res->metric_type = ipt->metric_type;
+        res->metric_arg = ipt->metric_arg;
+
+
         res->index = clone_Index (ipt->index);
         for (int i = 0; i < ipt->chain.size(); i++)
             res->chain.push_back (clone_VectorTransform (ipt->chain[i]));

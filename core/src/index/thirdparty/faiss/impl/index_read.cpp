@@ -19,6 +19,7 @@
 
 #include <faiss/impl/FaissAssert.h>
 #include <faiss/impl/io.h>
+#include <faiss/utils/hamming.h>
 
 #include <faiss/IndexFlat.h>
 #include <faiss/VectorTransform.h>
@@ -41,6 +42,7 @@
 #include <faiss/IndexBinaryFromFloat.h>
 #include <faiss/IndexBinaryHNSW.h>
 #include <faiss/IndexBinaryIVF.h>
+#include <faiss/IndexBinaryHash.h>
 
 
 
@@ -364,6 +366,25 @@ ProductQuantizer * read_ProductQuantizer (IOReader *reader) {
   return pq;
 }
 
+static void read_direct_map (DirectMap *dm, IOReader *f) {
+    char maintain_direct_map;
+    READ1 (maintain_direct_map);
+    dm->type = (DirectMap::Type)maintain_direct_map;
+    READVECTOR (dm->array);
+    if (dm->type == DirectMap::Hashtable) {
+        using idx_t = Index::idx_t;
+        std::vector<std::pair<idx_t, idx_t>> v;
+        READVECTOR (v);
+        std::unordered_map<idx_t, idx_t> & map = dm->hashtable;
+        map.reserve (v.size());
+        for (auto it: v) {
+            map [it.first] = it.second;
+        }
+    }
+
+}
+
+
 static void read_ivf_header (
     IndexIVF *ivf, IOReader *f,
     std::vector<std::vector<Index::idx_t> > *ids = nullptr)
@@ -378,8 +399,7 @@ static void read_ivf_header (
         for (size_t i = 0; i < ivf->nlist; i++)
             READVECTOR ((*ids)[i]);
     }
-    READ1 (ivf->maintain_direct_map);
-    READVECTOR (ivf->direct_map);
+    read_direct_map (&ivf->direct_map, f);
 }
 
 // used for legacy formats
@@ -437,10 +457,15 @@ Index *read_index (IOReader *f, int io_flags) {
     Index * idx = nullptr;
     uint32_t h;
     READ1 (h);
-    if (h == fourcc ("IxFI") || h == fourcc ("IxF2")) {
+    if (h == fourcc ("IxFI") || h == fourcc ("IxF2") || h == fourcc("IxFl")) {
         IndexFlat *idxf;
-        if (h == fourcc ("IxFI")) idxf = new IndexFlatIP ();
-        else                      idxf = new IndexFlatL2 ();
+        if (h == fourcc ("IxFI")) {
+            idxf = new IndexFlatIP ();
+        } else if (h == fourcc("IxF2")) {
+            idxf = new IndexFlatL2 ();
+        } else {
+            idxf = new IndexFlat ();
+        }
         read_index_header (idxf, f);
         READVECTOR (idxf->xb);
         FAISS_THROW_IF_NOT (idxf->xb.size() == idxf->ntotal * idxf->d);
@@ -726,9 +751,58 @@ static void read_binary_ivf_header (
         for (size_t i = 0; i < ivf->nlist; i++)
             READVECTOR ((*ids)[i]);
     }
-    READ1 (ivf->maintain_direct_map);
-    READVECTOR (ivf->direct_map);
+    read_direct_map (&ivf->direct_map, f);
 }
+
+static void read_binary_hash_invlists (
+        IndexBinaryHash::InvertedListMap &invlists,
+        int b, IOReader *f)
+{
+    size_t sz;
+    READ1 (sz);
+    int il_nbit = 0;
+    READ1 (il_nbit);
+    // buffer for bitstrings
+    std::vector<uint8_t> buf((b + il_nbit) * sz);
+    READVECTOR (buf);
+    BitstringReader rd (buf.data(), buf.size());
+    invlists.reserve (sz);
+    for (size_t i = 0; i < sz; i++) {
+        uint64_t hash = rd.read(b);
+        uint64_t ilsz = rd.read(il_nbit);
+        auto & il = invlists[hash];
+        READVECTOR (il.ids);
+        FAISS_THROW_IF_NOT (il.ids.size() == ilsz);
+        READVECTOR (il.vecs);
+    }
+}
+
+static void read_binary_multi_hash_map(
+        IndexBinaryMultiHash::Map &map,
+        int b, size_t ntotal,
+        IOReader *f)
+{
+    int id_bits;
+    size_t sz;
+    READ1 (id_bits);
+    READ1 (sz);
+    std::vector<uint8_t> buf;
+    READVECTOR (buf);
+    size_t nbit = (b + id_bits) * sz + ntotal * id_bits;
+    FAISS_THROW_IF_NOT (buf.size() == (nbit + 7) / 8);
+    BitstringReader rd (buf.data(), buf.size());
+    map.reserve (sz);
+    for (size_t i = 0; i < sz; i++) {
+        uint64_t hash = rd.read(b);
+        uint64_t ilsz = rd.read(id_bits);
+        auto & il = map[hash];
+        for (size_t j = 0; j < ilsz; j++) {
+            il.push_back (rd.read (id_bits));
+        }
+    }
+}
+
+
 
 IndexBinary *read_index_binary (IOReader *f, int io_flags) {
     IndexBinary * idx = nullptr;
@@ -771,6 +845,28 @@ IndexBinary *read_index_binary (IOReader *f, int io_flags) {
             static_cast<IndexBinaryIDMap2*>(idxmap)->construct_rev_map ();
         }
         idx = idxmap;
+    } else if(h == fourcc("IBHh")) {
+        IndexBinaryHash *idxh = new IndexBinaryHash ();
+        read_index_binary_header (idxh, f);
+        READ1 (idxh->b);
+        READ1 (idxh->nflip);
+        read_binary_hash_invlists(idxh->invlists, idxh->b, f);
+        idx = idxh;
+    } else if(h == fourcc("IBHm")) {
+        IndexBinaryMultiHash* idxmh = new IndexBinaryMultiHash ();
+        read_index_binary_header (idxmh, f);
+        idxmh->storage = dynamic_cast<IndexBinaryFlat*> (read_index_binary (f));
+        FAISS_THROW_IF_NOT(idxmh->storage && idxmh->storage->ntotal == idxmh->ntotal);
+        idxmh->own_fields = true;
+        READ1 (idxmh->b);
+        READ1 (idxmh->nhash);
+        READ1 (idxmh->nflip);
+        idxmh->maps.resize (idxmh->nhash);
+        for (int i = 0; i < idxmh->nhash; i++) {
+            read_binary_multi_hash_map(
+                    idxmh->maps[i], idxmh->b, idxmh->ntotal, f);
+        }
+        idx = idxmh;
     } else {
         FAISS_THROW_FMT("Index type 0x%08x not supported\n", h);
         idx = nullptr;

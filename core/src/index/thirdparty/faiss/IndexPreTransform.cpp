@@ -14,7 +14,6 @@
 #include <cstring>
 #include <memory>
 
-#include <faiss/utils/utils.h>
 #include <faiss/impl/FaissAssert.h>
 
 namespace faiss {

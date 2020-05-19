@@ -24,6 +24,7 @@ GpuIndexIVFScalarQuantizer::GpuIndexIVFScalarQuantizer(
     GpuIndexIVF(resources,
                 index->d,
                 index->metric_type,
+                index->metric_arg,
                 index->nlist,
                 config),
     ivfSQConfig_(config),
@@ -45,7 +46,7 @@ GpuIndexIVFScalarQuantizer::GpuIndexIVFScalarQuantizer(
   faiss::MetricType metric,
   bool encodeResidual,
   GpuIndexIVFScalarQuantizerConfig config) :
-    GpuIndexIVF(resources, dims, metric, nlist, config),
+    GpuIndexIVF(resources, dims, metric, 0, nlist, config),
     ivfSQConfig_(config),
     sq(dims, qtype),
     by_residual(encodeResidual),
@@ -69,6 +70,7 @@ void
 GpuIndexIVFScalarQuantizer::reserveMemory(size_t numVecs) {
   reserveMemoryVecs_ = numVecs;
   if (index_) {
+    DeviceScope scope(device_);
     index_->reserveMemory(numVecs);
   }
 }
@@ -100,6 +102,7 @@ GpuIndexIVFScalarQuantizer::copyFrom(
   index_ = new IVFFlat(resources_,
                        quantizer->getGpuData(),
                        index->metric_type,
+                       index->metric_arg,
                        by_residual,
                        &sq,
                        ivfSQConfig_.indicesOptions,
@@ -139,6 +142,7 @@ GpuIndexIVFScalarQuantizer::copyTo(
 
   GpuIndexIVF::copyTo(index);
   index->sq = sq;
+  index->code_size = sq.code_size;
   index->by_residual = by_residual;
 
   InvertedLists* ivf = new ArrayInvertedLists(nlist, index->code_size);
@@ -214,6 +218,7 @@ GpuIndexIVFScalarQuantizer::train(Index::idx_t n, const float* x) {
   index_ = new IVFFlat(resources_,
                        quantizer->getGpuData(),
                        this->metric_type,
+                       this->metric_arg,
                        by_residual,
                        &sq,
                        ivfSQConfig_.indicesOptions,

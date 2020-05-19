@@ -35,6 +35,7 @@ class GpuIndex : public faiss::Index {
   GpuIndex(GpuResources* resources,
            int dims,
            faiss::MetricType metric,
+           float metricArg,
            GpuIndexConfig config);
 
   inline int getDevice() const {
@@ -86,6 +87,12 @@ class GpuIndex : public faiss::Index {
                           const Index::idx_t* keys) const override;
 
  protected:
+  /// Copy what we need from the CPU equivalent
+  void copyFrom(const faiss::Index* index);
+
+  /// Copy what we have to the CPU equivalent
+  void copyTo(faiss::Index* index) const;
+
   /// Does addImpl_ require IDs? If so, and no IDs are provided, we will
   /// generate them sequentially based on the order in which the IDs are added
   virtual bool addImplRequiresIDs_() const = 0;

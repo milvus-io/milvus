@@ -26,7 +26,6 @@
 #include <stdint.h>
 
 #ifdef __SSE__
-#include <immintrin.h>
 #endif
 
 #include <faiss/utils/distances.h>
@@ -55,7 +54,6 @@ namespace faiss {
 using idx_t = Index::idx_t;
 using MinimaxHeap = HNSW::MinimaxHeap;
 using storage_idx_t = HNSW::storage_idx_t;
-using NodeDistCloser = HNSW::NodeDistCloser;
 using NodeDistFarther = HNSW::NodeDistFarther;
 
 HNSWStats hnsw_stats;
@@ -65,6 +63,50 @@ HNSWStats hnsw_stats;
  **************************************************************/
 
 namespace {
+
+
+/* Wrap the distance computer into one that negates the
+   distances. This makes supporting INNER_PRODUCE search easier */
+
+struct NegativeDistanceComputer: DistanceComputer {
+
+    /// owned by this
+    DistanceComputer *basedis;
+
+    explicit NegativeDistanceComputer(DistanceComputer *basedis):
+        basedis(basedis)
+    {}
+
+    void set_query(const float *x) override {
+        basedis->set_query(x);
+    }
+
+     /// compute distance of vector i to current query
+    float operator () (idx_t i) override {
+        return -(*basedis)(i);
+    }
+
+     /// compute distance between two stored vectors
+    float symmetric_dis (idx_t i, idx_t j) override {
+        return -basedis->symmetric_dis(i, j);
+    }
+
+    virtual ~NegativeDistanceComputer ()
+    {
+        delete basedis;
+    }
+
+};
+
+DistanceComputer *storage_distance_computer(const Index *storage)
+{
+    if (storage->metric_type == METRIC_INNER_PRODUCT) {
+        return new NegativeDistanceComputer(storage->get_distance_computer());
+    } else {
+        return storage->get_distance_computer();
+    }
+}
+
 
 
 void hnsw_add_vertices(IndexHNSW &index_hnsw,
@@ -152,7 +194,7 @@ void hnsw_add_vertices(IndexHNSW &index_hnsw,
                 VisitedTable vt (ntotal);
 
                 DistanceComputer *dis =
-                    index_hnsw.storage->get_distance_computer();
+                    storage_distance_computer (index_hnsw.storage);
                 ScopeDeleter1<DistanceComputer> del(dis);
                 int prev_display = verbose && omp_get_thread_num() == 0 ? 0 : -1;
                 size_t counter = 0;
@@ -210,8 +252,8 @@ void hnsw_add_vertices(IndexHNSW &index_hnsw,
  * IndexHNSW implementation
  **************************************************************/
 
-IndexHNSW::IndexHNSW(int d, int M):
-    Index(d, METRIC_L2),
+IndexHNSW::IndexHNSW(int d, int M, MetricType metric):
+    Index(d, metric),
     hnsw(M),
     own_fields(false),
     storage(nullptr),
@@ -258,7 +300,8 @@ void IndexHNSW::search (idx_t n, const float *x, idx_t k,
 #pragma omp parallel reduction(+ : nreorder)
         {
             VisitedTable vt (ntotal);
-            DistanceComputer *dis = storage->get_distance_computer();
+
+            DistanceComputer *dis = storage_distance_computer(storage);
             ScopeDeleter1<DistanceComputer> del(dis);
 
 #pragma omp for
@@ -290,6 +333,14 @@ void IndexHNSW::search (idx_t n, const float *x, idx_t k,
         }
         InterruptCallback::check ();
     }
+
+    if (metric_type == METRIC_INNER_PRODUCT) {
+        // we need to revert the negated distances
+        for (size_t i = 0; i < k * n; i++) {
+            distances[i] = -distances[i];
+        }
+    }
+
     hnsw_stats.nreorder += nreorder;
 }
 
@@ -323,7 +374,7 @@ void IndexHNSW::shrink_level_0_neighbors(int new_size)
 {
 #pragma omp parallel
     {
-        DistanceComputer *dis = storage->get_distance_computer();
+        DistanceComputer *dis = storage_distance_computer(storage);
         ScopeDeleter1<DistanceComputer> del(dis);
 
 #pragma omp for
@@ -367,7 +418,7 @@ void IndexHNSW::search_level_0(
     storage_idx_t ntotal = hnsw.levels.size();
 #pragma omp parallel
     {
-        DistanceComputer *qdis = storage->get_distance_computer();
+        DistanceComputer *qdis = storage_distance_computer(storage);
         ScopeDeleter1<DistanceComputer> del(qdis);
 
         VisitedTable vt (ntotal);
@@ -436,7 +487,7 @@ void IndexHNSW::init_level_0_from_knngraph(
 
 #pragma omp parallel for
     for (idx_t i = 0; i < ntotal; i++) {
-        DistanceComputer *qdis = storage->get_distance_computer();
+        DistanceComputer *qdis = storage_distance_computer(storage);
         float vec[d];
         storage->reconstruct(i, vec);
         qdis->set_query(vec);
@@ -480,7 +531,7 @@ void IndexHNSW::init_level_0_from_entry_points(
     {
         VisitedTable vt (ntotal);
 
-        DistanceComputer *dis = storage->get_distance_computer();
+        DistanceComputer *dis = storage_distance_computer(storage);
         ScopeDeleter1<DistanceComputer> del(dis);
         float vec[storage->d];
 
@@ -518,7 +569,7 @@ void IndexHNSW::reorder_links()
         std::vector<float> distances (M);
         std::vector<size_t> order (M);
         std::vector<storage_idx_t> tmp (M);
-        DistanceComputer *dis = storage->get_distance_computer();
+        DistanceComputer *dis = storage_distance_computer(storage);
         ScopeDeleter1<DistanceComputer> del(dis);
 
 #pragma omp for
@@ -826,8 +877,8 @@ IndexHNSWFlat::IndexHNSWFlat()
     is_trained = true;
 }
 
-IndexHNSWFlat::IndexHNSWFlat(int d, int M):
-    IndexHNSW(new IndexFlatL2(d), M)
+IndexHNSWFlat::IndexHNSWFlat(int d, int M, MetricType metric):
+    IndexHNSW(new IndexFlat(d, metric), M)
 {
     own_fields = true;
     is_trained = true;
@@ -860,8 +911,9 @@ void IndexHNSWPQ::train(idx_t n, const float* x)
  **************************************************************/
 
 
-IndexHNSWSQ::IndexHNSWSQ(int d, ScalarQuantizer::QuantizerType qtype, int M):
-    IndexHNSW (new IndexScalarQuantizer (d, qtype), M)
+IndexHNSWSQ::IndexHNSWSQ(int d, ScalarQuantizer::QuantizerType qtype, int M,
+                         MetricType metric):
+    IndexHNSW (new IndexScalarQuantizer (d, qtype, metric), M)
 {
     is_trained = false;
     own_fields = true;
@@ -986,7 +1038,7 @@ void IndexHNSW2Level::search (idx_t n, const float *x, idx_t k,
 #pragma omp parallel
         {
             VisitedTable vt (ntotal);
-            DistanceComputer *dis = storage->get_distance_computer();
+            DistanceComputer *dis = storage_distance_computer(storage);
             ScopeDeleter1<DistanceComputer> del(dis);
 
             int candidates_size = hnsw.upper_beam;

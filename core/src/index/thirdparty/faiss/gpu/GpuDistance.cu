@@ -17,83 +17,71 @@
 
 namespace faiss { namespace gpu {
 
-void bruteForceKnn(GpuResources* resources,
-                   faiss::MetricType metric,
-                   // A region of memory size numVectors x dims, with dims
-                   // innermost
-                   const float* vectors,
-                   bool vectorsRowMajor,
-                   int numVectors,
-                   // A region of memory size numQueries x dims, with dims
-                   // innermost
-                   const float* queries,
-                   bool queriesRowMajor,
-                   int numQueries,
-                   int dims,
-                   int k,
-                   // A region of memory size numQueries x k, with k
-                   // innermost
-                   float* outDistances,
-                   // A region of memory size numQueries x k, with k
-                   // innermost
-                   faiss::Index::idx_t* outIndices) {
+template <typename T>
+void bfKnnConvert(GpuResources* resources, const GpuDistanceParams& args) {
   auto device = getCurrentDevice();
   auto stream = resources->getDefaultStreamCurrentDevice();
   auto& mem = resources->getMemoryManagerCurrentDevice();
 
-  auto tVectors = toDevice<float, 2>(resources,
-                                     device,
-                                     const_cast<float*>(vectors),
-                                     stream,
-                                     {vectorsRowMajor ? numVectors : dims,
-                                      vectorsRowMajor ? dims : numVectors});
-  auto tQueries = toDevice<float, 2>(resources,
-                                     device,
-                                     const_cast<float*>(queries),
-                                     stream,
-                                     {queriesRowMajor ? numQueries : dims,
-                                      queriesRowMajor ? dims : numQueries});
+  auto tVectors =
+    toDevice<T, 2>(resources,
+                   device,
+                   const_cast<T*>(reinterpret_cast<const T*>(args.vectors)),
+                   stream,
+                   {args.vectorsRowMajor ? args.numVectors : args.dims,
+                    args.vectorsRowMajor ? args.dims : args.numVectors});
+  auto tQueries =
+    toDevice<T, 2>(resources,
+                   device,
+                   const_cast<T*>(reinterpret_cast<const T*>(args.queries)),
+                   stream,
+                   {args.queriesRowMajor ? args.numQueries : args.dims,
+                    args.queriesRowMajor ? args.dims : args.numQueries});
 
-  auto tOutDistances = toDevice<float, 2>(resources,
-                                          device,
-                                          outDistances,
-                                          stream,
-                                          {numQueries, k});
-
-  // FlatIndex only supports an interface returning int indices, allocate
-  // temporary memory for it
-  DeviceTensor<int, 2, true> tOutIntIndices(mem, {numQueries, k}, stream);
-
-  // Do the work
-  if (metric == faiss::MetricType::METRIC_L2) {
-    runL2Distance(resources,
-                  tVectors,
-                  vectorsRowMajor,
-                  nullptr, // compute norms in temp memory
-                  tQueries,
-                  queriesRowMajor,
-                  k,
-                  tOutDistances,
-                  tOutIntIndices);
-  } else if (metric == faiss::MetricType::METRIC_INNER_PRODUCT) {
-    runIPDistance(resources,
-                  tVectors,
-                  vectorsRowMajor,
-                  tQueries,
-                  queriesRowMajor,
-                  k,
-                  tOutDistances,
-                  tOutIntIndices);
-  } else {
-    FAISS_THROW_MSG("metric should be METRIC_L2 or METRIC_INNER_PRODUCT");
+  DeviceTensor<float, 1, true> tVectorNorms;
+  if (args.vectorNorms) {
+    tVectorNorms = toDevice<float, 1>(resources,
+                                      device,
+                                      const_cast<float*>(args.vectorNorms),
+                                      stream,
+                                      {args.numVectors});
   }
 
+  auto tOutDistances =
+    toDevice<float, 2>(resources,
+                       device,
+                       args.outDistances,
+                       stream,
+                       {args.numQueries, args.k});
+
+  // The brute-force API only supports an interface for integer indices
+  DeviceTensor<int, 2, true>
+    tOutIntIndices(mem, {args.numQueries, args.k}, stream);
+
+  // Since we've guaranteed that all arguments are on device, call the
+  // implementation
+  bfKnnOnDevice<T>(resources,
+                   device,
+                   stream,
+                   tVectors,
+                   args.vectorsRowMajor,
+                   args.vectorNorms ? &tVectorNorms : nullptr,
+                   tQueries,
+                   args.queriesRowMajor,
+                   args.k,
+                   args.metric,
+                   args.metricArg,
+                   tOutDistances,
+                   tOutIntIndices,
+                   args.ignoreOutDistances);
+
   // Convert and copy int indices out
-  auto tOutIndices = toDevice<faiss::Index::idx_t, 2>(resources,
-                                                      device,
-                                                      outIndices,
-                                                      stream,
-                                                      {numQueries, k});
+  auto tOutIndices =
+    toDevice<faiss::Index::idx_t, 2>(resources,
+                                     device,
+                                     args.outIndices,
+                                     stream,
+                                     {args.numQueries, args.k});
 
   // Convert int to idx_t
   convertTensor<int, faiss::Index::idx_t, 2>(stream,
@@ -101,8 +89,65 @@ void bruteForceKnn(GpuResources* resources,
                                              tOutIndices);
 
   // Copy back if necessary
-  fromDevice<float, 2>(tOutDistances, outDistances, stream);
-  fromDevice<faiss::Index::idx_t, 2>(tOutIndices, outIndices, stream);
+  fromDevice<float, 2>(tOutDistances, args.outDistances, stream);
+  fromDevice<faiss::Index::idx_t, 2>(tOutIndices, args.outIndices, stream);
+}
+
+void
+bfKnn(GpuResources* resources, const GpuDistanceParams& args) {
+  // For now, both vectors and queries must be of the same data type
+  FAISS_THROW_IF_NOT_MSG(
+    args.vectorType == args.queryType,
+    "limitation: both vectorType and queryType must currently "
+    "be the same (F32 or F16");
+
+  if (args.vectorType == DistanceDataType::F32) {
+    bfKnnConvert<float>(resources, args);
+  } else if (args.vectorType == DistanceDataType::F16) {
+    bfKnnConvert<half>(resources, args);
+  } else {
+    FAISS_THROW_MSG("unknown vectorType");
+  }
+}
+
+// legacy version
+void
+bruteForceKnn(GpuResources* resources,
+              faiss::MetricType metric,
+              // A region of memory size numVectors x dims, with dims
+              // innermost
+              const float* vectors,
+              bool vectorsRowMajor,
+              int numVectors,
+              // A region of memory size numQueries x dims, with dims
+              // innermost
+              const float* queries,
+              bool queriesRowMajor,
+              int numQueries,
+              int dims,
+              int k,
+              // A region of memory size numQueries x k, with k
+              // innermost
+              float* outDistances,
+              // A region of memory size numQueries x k, with k
+              // innermost
+              faiss::Index::idx_t* outIndices) {
+  std::cerr << "bruteForceKnn is deprecated; call bfKnn instead" << std::endl;
+
+  GpuDistanceParams args;
+  args.metric = metric;
+  args.k = k;
+  args.dims = dims;
+  args.vectors = vectors;
+  args.vectorsRowMajor = vectorsRowMajor;
+  args.numVectors = numVectors;
+  args.queries = queries;
+  args.queriesRowMajor = queriesRowMajor;
+  args.numQueries = numQueries;
+  args.outDistances = outDistances;
+  args.outIndices = outIndices;
+
+  bfKnn(resources, args);
 }
 
 } } // namespace

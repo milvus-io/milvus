@@ -359,7 +359,7 @@ void knn_inner_product (const float * x,
         size_t d, size_t nx, size_t ny,
         float_minheap_array_t * res)
 {
-    if (d % 4 == 0 && nx < distance_compute_blas_threshold) {
+    if (nx < distance_compute_blas_threshold) {
         knn_inner_product_sse (x, y, d, nx, ny, res);
     } else {
         knn_inner_product_blas (x, y, d, nx, ny, res);
@@ -379,7 +379,7 @@ void knn_L2sqr (const float * x,
                 size_t d, size_t nx, size_t ny,
                 float_maxheap_array_t * res)
 {
-    if (d % 4 == 0 && nx < distance_compute_blas_threshold) {
+    if (nx < distance_compute_blas_threshold) {
         knn_L2sqr_sse (x, y, d, nx, ny, res);
     } else {
         NopDistanceCorrection nop;
@@ -643,7 +643,6 @@ static void range_search_sse (const float * x,
                 float radius,
                 RangeSearchResult *res)
 {
-    FAISS_THROW_IF_NOT (d % 4 == 0);
 
 #pragma omp parallel
     {
@@ -693,7 +692,7 @@ void range_search_L2sqr (
         RangeSearchResult *res)
 {
 
-    if (d % 4 == 0 && nx < distance_compute_blas_threshold) {
+    if (nx < distance_compute_blas_threshold) {
         range_search_sse<true> (x, y, d, nx, ny, radius, res);
     } else {
         range_search_blas<true> (x, y, d, nx, ny, radius, res);
@@ -708,7 +707,7 @@ void range_search_inner_product (
         RangeSearchResult *res)
 {
 
-    if (d % 4 == 0 && nx < distance_compute_blas_threshold) {
+    if (nx < distance_compute_blas_threshold) {
         range_search_sse<false> (x, y, d, nx, ny, radius, res);
     } else {
         range_search_blas<false> (x, y, d, nx, ny, radius, res);

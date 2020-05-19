@@ -19,6 +19,7 @@
 
 #include <faiss/impl/FaissAssert.h>
 #include <faiss/impl/io.h>
+#include <faiss/utils/hamming.h>
 
 #include <faiss/IndexFlat.h>
 #include <faiss/VectorTransform.h>
@@ -41,6 +42,7 @@
 #include <faiss/IndexBinaryFromFloat.h>
 #include <faiss/IndexBinaryHNSW.h>
 #include <faiss/IndexBinaryIVF.h>
+#include <faiss/IndexBinaryHash.h>
 
 
 
@@ -286,20 +288,33 @@ static void write_HNSW (const HNSW *hnsw, IOWriter *f) {
     WRITE1 (hnsw->upper_beam);
 }
 
+static void write_direct_map (const DirectMap *dm, IOWriter *f) {
+    char maintain_direct_map = (char)dm->type; // for backwards compatibility with bool
+    WRITE1 (maintain_direct_map);
+    WRITEVECTOR (dm->array);
+    if (dm->type == DirectMap::Hashtable) {
+        using idx_t = Index::idx_t;
+        std::vector<std::pair<idx_t, idx_t>> v;
+        const std::unordered_map<idx_t, idx_t> & map = dm->hashtable;
+        v.resize (map.size());
+        std::copy(map.begin(), map.end(), v.begin());
+        WRITEVECTOR (v);
+    }
+}
+
 static void write_ivf_header (const IndexIVF *ivf, IOWriter *f) {
     write_index_header (ivf, f);
     WRITE1 (ivf->nlist);
     WRITE1 (ivf->nprobe);
     write_index (ivf->quantizer, f);
-    WRITE1 (ivf->maintain_direct_map);
-    WRITEVECTOR (ivf->direct_map);
+    write_direct_map (&ivf->direct_map, f);
 }
 
 void write_index (const Index *idx, IOWriter *f) {
     if (const IndexFlat * idxf = dynamic_cast<const IndexFlat *> (idx)) {
         uint32_t h = fourcc (
               idxf->metric_type == METRIC_INNER_PRODUCT ? "IxFI" :
-              idxf->metric_type == METRIC_L2 ? "IxF2" : nullptr);
+              idxf->metric_type == METRIC_L2 ? "IxF2" : "IxFl");
         WRITE1 (h);
         write_index_header (idx, f);
         WRITEVECTOR (idxf->xb);
@@ -499,8 +514,68 @@ static void write_binary_ivf_header (const IndexBinaryIVF *ivf, IOWriter *f) {
     WRITE1 (ivf->nlist);
     WRITE1 (ivf->nprobe);
     write_index_binary (ivf->quantizer, f);
-    WRITE1 (ivf->maintain_direct_map);
-    WRITEVECTOR (ivf->direct_map);
+    write_direct_map (&ivf->direct_map, f);
+}
+
+static void write_binary_hash_invlists (
+        const IndexBinaryHash::InvertedListMap &invlists,
+        int b, IOWriter *f)
+{
+    size_t sz = invlists.size();
+    WRITE1 (sz);
+    size_t maxil = 0;
+    for (auto it = invlists.begin(); it != invlists.end(); ++it) {
+        if(it->second.ids.size() > maxil) {
+            maxil = it->second.ids.size();
+        }
+    }
+    int il_nbit = 0;
+    while(maxil >= ((uint64_t)1 << il_nbit)) {
+        il_nbit++;
+    }
+    WRITE1(il_nbit);
+
+    // first write sizes then data, may be useful if we want to
+    // memmap it at some point
+
+    // buffer for bitstrings
+    std::vector<uint8_t> buf (((b + il_nbit) * sz + 7) / 8);
+    BitstringWriter wr (buf.data(), buf.size());
+    for (auto it = invlists.begin(); it != invlists.end(); ++it) {
+        wr.write (it->first, b);
+        wr.write (it->second.ids.size(), il_nbit);
+    }
+    WRITEVECTOR (buf);
+
+    for (auto it = invlists.begin(); it != invlists.end(); ++it) {
+        WRITEVECTOR (it->second.ids);
+        WRITEVECTOR (it->second.vecs);
+    }
+}
+
+static void write_binary_multi_hash_map(
+        const IndexBinaryMultiHash::Map &map,
+        int b, size_t ntotal,
+        IOWriter *f)
+{
+    int id_bits = 0;
+    while ((ntotal > ((Index::idx_t)1 << id_bits))) {
+        id_bits++;
+    }
+    WRITE1(id_bits);
+    size_t sz = map.size();
+    WRITE1(sz);
+    size_t nbit = (b + id_bits) * sz + ntotal * id_bits;
+    std::vector<uint8_t> buf((nbit + 7) / 8);
+    BitstringWriter wr (buf.data(), buf.size());
+    for (auto it = map.begin(); it != map.end(); ++it) {
+        wr.write(it->first, b);
+        wr.write(it->second.size(), id_bits);
+        for (auto id : it->second) {
+            wr.write(id, id_bits);
+        }
+    }
+    WRITEVECTOR (buf);
 }
 
 void write_index_binary (const IndexBinary *idx, IOWriter *f) {
@@ -539,6 +614,27 @@ void write_index_binary (const IndexBinary *idx, IOWriter *f) {
         write_index_binary_header (idxmap, f);
         write_index_binary (idxmap->index, f);
         WRITEVECTOR (idxmap->id_map);
+    } else if (const IndexBinaryHash *idxh =
+               dynamic_cast<const IndexBinaryHash *> (idx)) {
+        uint32_t h = fourcc ("IBHh");
+        WRITE1 (h);
+        write_index_binary_header (idxh, f);
+        WRITE1 (idxh->b);
+        WRITE1 (idxh->nflip);
+        write_binary_hash_invlists(idxh->invlists, idxh->b, f);
+    } else if (const IndexBinaryMultiHash *idxmh =
+               dynamic_cast<const IndexBinaryMultiHash *> (idx)) {
+        uint32_t h = fourcc ("IBHm");
+        WRITE1 (h);
+        write_index_binary_header (idxmh, f);
+        write_index_binary (idxmh->storage, f);
+        WRITE1 (idxmh->b);
+        WRITE1 (idxmh->nhash);
+        WRITE1 (idxmh->nflip);
+        for (int i = 0; i < idxmh->nhash; i++) {
+            write_binary_multi_hash_map(
+                    idxmh->maps[i], idxmh->b, idxmh->ntotal, f);
+        }
     } else {
         FAISS_THROW_MSG ("don't know how to serialize this type of index");
     }

@@ -8,6 +8,7 @@
 
 #pragma once
 
+#include <faiss/MetricType.h>
 #include <faiss/gpu/GpuIndicesOptions.h>
 #include <faiss/gpu/utils/DeviceVector.cuh>
 #include <faiss/gpu/utils/DeviceTensor.cuh>
@@ -25,6 +26,8 @@ struct FlatIndex;
 class IVFBase {
  public:
   IVFBase(GpuResources* resources,
+          faiss::MetricType metric,
+          float metricArg,
           /// We do not own this reference
           FlatIndex* quantizer,
           int bytesPerVector,
@@ -81,6 +84,12 @@ class IVFBase {
  protected:
   /// Collection of GPU resources that we use
   GpuResources* resources_;
+
+  /// Metric type of the index
+  faiss::MetricType metric_;
+
+  /// Metric arg
+  float metricArg_;
 
   /// Quantizer object
   FlatIndex* quantizer_;

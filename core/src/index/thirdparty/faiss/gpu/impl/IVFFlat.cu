@@ -28,17 +28,19 @@ namespace faiss { namespace gpu {
 IVFFlat::IVFFlat(GpuResources* resources,
                  FlatIndex* quantizer,
                  faiss::MetricType metric,
+                 float metricArg,
                  bool useResidual,
                  faiss::ScalarQuantizer* scalarQ,
                  IndicesOptions indicesOptions,
                  MemorySpace space) :
     IVFBase(resources,
+            metric,
+            metricArg,
             quantizer,
             scalarQ ? scalarQ->code_size :
             sizeof(float) * quantizer->getDim(),
             indicesOptions,
             space),
-    metric_(metric),
     useResidual_(useResidual),
     scalarQ_(scalarQ ? new GpuScalarQuantizer(*scalarQ) : nullptr) {
 }
@@ -117,7 +119,8 @@ IVFFlat::classifyAndAddVectors(Tensor<float, 2, true>& vecs,
     listIds2d(mem, {vecs.getSize(0), 1},  stream);
   auto listIds = listIds2d.view<1>({vecs.getSize(0)});
 
-  quantizer_->query(vecs, 1, listDistance2d, listIds2d, false);
+  quantizer_->query(vecs, 1, metric_, metricArg_,
+                    listDistance2d, listIds2d, false);
 
   // Calculate residuals for these vectors, if needed
   DeviceTensor<float, 2, true>
@@ -296,6 +299,8 @@ IVFFlat::query(Tensor<float, 2, true>& queries,
   // internally and externally
   quantizer_->query(queries,
                     nprobe,
+                    metric_,
+                    metricArg_,
                     coarseDistances,
                     coarseIndices,
                     false);

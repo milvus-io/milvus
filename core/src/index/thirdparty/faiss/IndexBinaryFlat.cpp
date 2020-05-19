@@ -79,5 +79,10 @@ void IndexBinaryFlat::reconstruct(idx_t key, uint8_t *recons) const {
   memcpy(recons, &(xb[code_size * key]), sizeof(*recons) * code_size);
 }
 
+void IndexBinaryFlat::range_search(idx_t n, const uint8_t *x, int radius,
+                   RangeSearchResult *result) const
+{
+    hamming_range_search (x, xb.data(), n, ntotal, radius, code_size, result);
+}
 
 }  // namespace faiss

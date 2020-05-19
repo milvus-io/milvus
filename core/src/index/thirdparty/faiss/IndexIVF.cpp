@@ -157,8 +157,7 @@ IndexIVF::IndexIVF (Index * quantizer, size_t d,
     code_size (code_size),
     nprobe (1),
     max_codes (0),
-    parallel_mode (0),
-    maintain_direct_map (false)
+    parallel_mode (0)
 {
     FAISS_THROW_IF_NOT (d == quantizer->d);
     is_trained = quantizer->is_trained && (quantizer->ntotal == nlist);
@@ -172,8 +171,7 @@ IndexIVF::IndexIVF (Index * quantizer, size_t d,
 IndexIVF::IndexIVF ():
     invlists (nullptr), own_invlists (false),
     code_size (0),
-    nprobe (1), max_codes (0), parallel_mode (0),
-    maintain_direct_map (false)
+    nprobe (1), max_codes (0), parallel_mode (0)
 {}
 
 void IndexIVF::add (idx_t n, const float * x)
@@ -199,6 +197,8 @@ void IndexIVF::add_with_ids (idx_t n, const float * x, const idx_t *xids)
     }
 
     FAISS_THROW_IF_NOT (is_trained);
+    direct_map.check_can_add (xids);
+
     std::unique_ptr<idx_t []> idx(new idx_t[n]);
     quantizer->assign (n, x, idx.get());
     size_t nadd = 0, nminus1 = 0;
@@ -210,6 +210,8 @@ void IndexIVF::add_with_ids (idx_t n, const float * x, const idx_t *xids)
     std::unique_ptr<uint8_t []> flat_codes(new uint8_t [n * code_size]);
     encode_vectors (n, x, idx.get(), flat_codes.get());
 
+    DirectMapAdd dm_adder(direct_map, n, xids);
+
 #pragma omp parallel reduction(+: nadd)
     {
         int nt = omp_get_num_threads();
@@ -220,12 +222,20 @@ void IndexIVF::add_with_ids (idx_t n, const float * x, const idx_t *xids)
             idx_t list_no = idx [i];
             if (list_no >= 0 && list_no % nt == rank) {
                 idx_t id = xids ? xids[i] : ntotal + i;
-                invlists->add_entry (list_no, id,
-                                     flat_codes.get() + i * code_size);
+                size_t ofs = invlists->add_entry (
+                     list_no, id,
+                     flat_codes.get() + i * code_size
+                );
+
+                dm_adder.add (i, list_no, ofs);
+
                 nadd++;
+            } else if (rank == 0 && list_no == -1) {
+                dm_adder.add (i, -1, 0);
             }
         }
     }
+
 
     if (verbose) {
         printf("    added %ld / %ld vectors (%ld -1s)\n", nadd, n, nminus1);
@@ -234,30 +244,18 @@ void IndexIVF::add_with_ids (idx_t n, const float * x, const idx_t *xids)
     ntotal += n;
 }
 
-
-void IndexIVF::make_direct_map (bool new_maintain_direct_map)
+void IndexIVF::make_direct_map (bool b)
 {
-    // nothing to do
-    if (new_maintain_direct_map == maintain_direct_map)
-        return;
-
-    if (new_maintain_direct_map) {
-        direct_map.resize (ntotal, -1);
-        for (size_t key = 0; key < nlist; key++) {
-            size_t list_size = invlists->list_size (key);
-            ScopedIds idlist (invlists, key);
-
-            for (long ofs = 0; ofs < list_size; ofs++) {
-                FAISS_THROW_IF_NOT_MSG (
-                       0 <= idlist [ofs] && idlist[ofs] < ntotal,
-                       "direct map supported only for seuquential ids");
-                direct_map [idlist [ofs]] = key << 32 | ofs;
-            }
-        }
+    if (b) {
+        direct_map.set_type (DirectMap::Array, invlists, ntotal);
     } else {
-        direct_map.clear ();
+        direct_map.set_type (DirectMap::NoMap, invlists, ntotal);
     }
-    maintain_direct_map = new_maintain_direct_map;
+}
+
+void IndexIVF::set_direct_map_type (DirectMap::Type type)
+{
+    direct_map.set_type (type, invlists, ntotal);
 }
 
 
@@ -298,10 +296,13 @@ void IndexIVF::search_preassigned (idx_t n, const float *x, idx_t k,
 
     bool interrupt = false;
 
+    int pmode = this->parallel_mode & ~PARALLEL_MODE_NO_HEAP_INIT;
+    bool do_heap_init = !(this->parallel_mode & PARALLEL_MODE_NO_HEAP_INIT);
+
     // don't start parallel section if single query
     bool do_parallel =
-        parallel_mode == 0 ? n > 1 :
-        parallel_mode == 1 ? nprobe > 1 :
+        pmode == 0 ? n > 1 :
+        pmode == 1 ? nprobe > 1 :
         nprobe * n > 1;
 
 #pragma omp parallel if(do_parallel) reduction(+: nlistv, ndis, nheap)
@@ -318,6 +319,7 @@ void IndexIVF::search_preassigned (idx_t n, const float *x, idx_t k,
         // intialize + reorder a result heap
 
         auto init_result = [&](float *simi, idx_t *idxi) {
+            if (!do_heap_init) return;
             if (metric_type == METRIC_INNER_PRODUCT) {
                 heap_heapify<HeapForIP> (k, simi, idxi);
             } else {
@@ -326,6 +328,7 @@ void IndexIVF::search_preassigned (idx_t n, const float *x, idx_t k,
         };
 
         auto reorder_result = [&] (float *simi, idx_t *idxi) {
+            if (!do_heap_init) return;
             if (metric_type == METRIC_INNER_PRODUCT) {
                 heap_reorder<HeapForIP> (k, simi, idxi);
             } else {
@@ -377,7 +380,7 @@ void IndexIVF::search_preassigned (idx_t n, const float *x, idx_t k,
          * Actual loops, depending on parallel_mode
          ****************************************************/
 
-        if (parallel_mode == 0) {
+        if (pmode == 0) {
 
 #pragma omp for
             for (size_t i = 0; i < n; i++) {
@@ -417,7 +420,7 @@ void IndexIVF::search_preassigned (idx_t n, const float *x, idx_t k,
                 }
 
             } // parallel for
-        } else if (parallel_mode == 1) {
+        } else if (pmode == 1) {
             std::vector <idx_t> local_idx (k);
             std::vector <float> local_dis (k);
 
@@ -460,7 +463,7 @@ void IndexIVF::search_preassigned (idx_t n, const float *x, idx_t k,
             }
         } else {
             FAISS_THROW_FMT ("parallel_mode %d not supported\n",
-                             parallel_mode);
+                             pmode);
         }
     } // parallel section
 
@@ -608,13 +611,8 @@ InvertedListScanner *IndexIVF::get_InvertedListScanner (
 
 void IndexIVF::reconstruct (idx_t key, float* recons) const
 {
-    FAISS_THROW_IF_NOT_MSG (direct_map.size() == ntotal,
-                            "direct map is not initialized");
-    FAISS_THROW_IF_NOT_MSG (key >= 0 && key < direct_map.size(),
-                            "invalid key");
-    idx_t list_no = direct_map[key] >> 32;
-    idx_t offset = direct_map[key] & 0xffffffff;
-    reconstruct_from_offset (list_no, offset, recons);
+    idx_t lo = direct_map.get (key);
+    reconstruct_from_offset (lo_listno(lo), lo_offset(lo), recons);
 }
 
 
@@ -682,8 +680,8 @@ void IndexIVF::search_and_reconstruct (idx_t n, const float *x, idx_t k,
                 // Fill with NaNs
                 memset(reconstructed, -1, sizeof(*reconstructed) * d);
             } else {
-                int list_no = key >> 32;
-                int offset = key & 0xffffffff;
+                int list_no = lo_listno (key);
+                int offset = lo_offset (key);
 
                 // Update label to the actual id
                 labels[ij] = invlists->get_single_id (list_no, offset);
@@ -711,39 +709,38 @@ void IndexIVF::reset ()
 
 size_t IndexIVF::remove_ids (const IDSelector & sel)
 {
-    FAISS_THROW_IF_NOT_MSG (!maintain_direct_map,
-                    "direct map remove not implemented");
-
-    std::vector<idx_t> toremove(nlist);
-
-#pragma omp parallel for
-    for (idx_t i = 0; i < nlist; i++) {
-        idx_t l0 = invlists->list_size (i), l = l0, j = 0;
-        ScopedIds idsi (invlists, i);
-        while (j < l) {
-            if (sel.is_member (idsi[j])) {
-                l--;
-                invlists->update_entry (
-                     i, j,
-                     invlists->get_single_id (i, l),
-                     ScopedCodes (invlists, i, l).get());
-            } else {
-                j++;
-            }
-        }
-        toremove[i] = l0 - l;
-    }
-    // this will not run well in parallel on ondisk because of possible shrinks
-    size_t nremove = 0;
-    for (idx_t i = 0; i < nlist; i++) {
-        if (toremove[i] > 0) {
-            nremove += toremove[i];
-            invlists->resize(
-                i, invlists->list_size(i) - toremove[i]);
-        }
-    }
+    size_t nremove = direct_map.remove_ids (sel, invlists);
     ntotal -= nremove;
     return nremove;
+}
+
+
+void IndexIVF::update_vectors (int n, const idx_t *new_ids, const float *x)
+{
+
+    if (direct_map.type == DirectMap::Hashtable) {
+        // just remove then add
+        IDSelectorArray sel(n, new_ids);
+        size_t nremove = remove_ids (sel);
+        FAISS_THROW_IF_NOT_MSG (nremove == n,
+                                "did not find all entries to remove");
+        add_with_ids (n, x, new_ids);
+        return;
+    }
+
+    FAISS_THROW_IF_NOT (direct_map.type == DirectMap::Array);
+    // here it is more tricky because we don't want to introduce holes
+    // in continuous range of ids
+
+    FAISS_THROW_IF_NOT (is_trained);
+    std::vector<idx_t> assign (n);
+    quantizer->assign (n, x, assign.data());
+
+    std::vector<uint8_t> flat_codes (n * code_size);
+    encode_vectors (n, x, assign.data(), flat_codes.data());
+
+    direct_map.update_codes (invlists, n, new_ids, assign.data(), flat_codes.data());
+
 }
 
 
@@ -779,15 +776,14 @@ void IndexIVF::check_compatible_for_merge (const IndexIVF &other) const
     FAISS_THROW_IF_NOT (other.code_size == code_size);
     FAISS_THROW_IF_NOT_MSG (typeid (*this) == typeid (other),
                   "can only merge indexes of the same type");
+    FAISS_THROW_IF_NOT_MSG (this->direct_map.no() && other.direct_map.no(),
+                            "merge direct_map not implemented");
 }
 
 
 void IndexIVF::merge_from (IndexIVF &other, idx_t add_id)
 {
     check_compatible_for_merge (other);
-    FAISS_THROW_IF_NOT_MSG ((!maintain_direct_map &&
-                             !other.maintain_direct_map),
-                  "direct map copy not implemented");
 
     invlists->merge_from (other.invlists, add_id);
 
@@ -817,7 +813,7 @@ void IndexIVF::copy_subset_to (IndexIVF & other, int subset_type,
 
     FAISS_THROW_IF_NOT (nlist == other.nlist);
     FAISS_THROW_IF_NOT (code_size == other.code_size);
-    FAISS_THROW_IF_NOT (!other.maintain_direct_map);
+    FAISS_THROW_IF_NOT (other.direct_map.no());
     FAISS_THROW_IF_NOT_FMT (
           subset_type == 0 || subset_type == 1 || subset_type == 2,
           "subset type %d not implemented", subset_type);

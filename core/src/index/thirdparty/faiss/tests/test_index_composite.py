@@ -3,9 +3,8 @@
 # This source code is licensed under the MIT license found in the
 # LICENSE file in the root directory of this source tree.
 
-#! /usr/bin/env python2
-
 """ more elaborate that test_index.py """
+from __future__ import absolute_import, division, print_function
 
 import numpy as np
 import unittest
@@ -89,7 +88,7 @@ class TestRemove(unittest.TestCase):
         assert index.reconstruct(104)[0] == 1004
         try:
             index.reconstruct(103)
-        except:
+        except RuntimeError:
             pass
         else:
             assert False, 'should have raised an exception'
@@ -125,7 +124,7 @@ class TestRemove(unittest.TestCase):
         assert index.reconstruct(1004)[0] == 104
         try:
             index.reconstruct(1003)
-        except:
+        except RuntimeError:
             pass
         else:
             assert False, 'should have raised an exception'
@@ -141,7 +140,7 @@ class TestRemove(unittest.TestCase):
         assert index.reconstruct(1004)[0] == 104
         try:
             index.reconstruct(1003)
-        except:
+        except RuntimeError:
             pass
         else:
             assert False, 'should have raised an exception'
