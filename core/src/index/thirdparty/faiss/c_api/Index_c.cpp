@@ -57,9 +57,9 @@ int faiss_Index_range_search(const FaissIndex* index, idx_t n, const float* x, f
     } CATCH_AND_HANDLE
 }
 
-int faiss_Index_assign(FaissIndex* index, idx_t n, const float * x, idx_t * labels) {
+int faiss_Index_assign(FaissIndex* index, idx_t n, const float * x, idx_t * labels, idx_t k) {
     try {
-        reinterpret_cast<faiss::Index*>(index)->assign(n, x, labels);
+        reinterpret_cast<faiss::Index*>(index)->assign(n, x, labels, k);
     } CATCH_AND_HANDLE
 }
 

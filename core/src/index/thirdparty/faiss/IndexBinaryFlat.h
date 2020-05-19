@@ -31,14 +31,12 @@ struct IndexBinaryFlat : IndexBinary {
 
   explicit IndexBinaryFlat(idx_t d);
 
-  IndexBinaryFlat(idx_t d, MetricType metric);
-
   void add(idx_t n, const uint8_t *x) override;
 
   void reset() override;
 
-  void search (idx_t n, const uint8_t *x, idx_t k,
-               int32_t *distances, idx_t *labels, ConcurrentBitsetPtr bitset = nullptr) const override;
+  void search(idx_t n, const uint8_t *x, idx_t k,
+              int32_t *distances, idx_t *labels) const override;
 
   void reconstruct(idx_t key, uint8_t *recons) const override;
 

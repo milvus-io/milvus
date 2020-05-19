@@ -204,8 +204,7 @@ DistanceComputer * IndexPQ::get_distance_computer() const {
 
 
 void IndexPQ::search (idx_t n, const float *x, idx_t k,
-                           float *distances, idx_t *labels,
-                           ConcurrentBitsetPtr bitset) const
+                           float *distances, idx_t *labels) const
 {
     FAISS_THROW_IF_NOT (is_trained);
     if (search_type == ST_PQ) {  // Simple PQ search
@@ -330,7 +329,8 @@ static size_t polysemous_inner_loop (
             }
 
             if (dis < heap_dis[0]) {
-                maxheap_swap_top (k, heap_dis, heap_ids, dis, bi);
+                maxheap_pop (k, heap_dis, heap_ids);
+                maxheap_push (k, heap_dis, heap_ids, dis, bi);
             }
         }
         b_code += code_size;
@@ -946,8 +946,7 @@ void MultiIndexQuantizer::train(idx_t n, const float *x)
 
 
 void MultiIndexQuantizer::search (idx_t n, const float *x, idx_t k,
-                                  float *distances, idx_t *labels,
-                                  ConcurrentBitsetPtr bitset) const {
+                                  float *distances, idx_t *labels) const {
     if (n == 0) return;
 
     // the allocation just below can be severe...
@@ -1100,8 +1099,7 @@ void MultiIndexQuantizer2::train(idx_t n, const float* x)
 
 void MultiIndexQuantizer2::search(
         idx_t n, const float* x, idx_t K,
-        float* distances, idx_t* labels,
-        ConcurrentBitsetPtr bitset) const
+        float* distances, idx_t* labels) const
 {
 
     if (n == 0) return;

@@ -57,8 +57,6 @@ class IVFBase {
   /// Return the list indices of a particular list back to the CPU
   std::vector<long> getListIndices(int listId) const;
 
-  DeviceVector<unsigned char>* getTrainedData() { return deviceTrained_.get(); };
-
   /// Return the encoded vectors of a particular list back to the CPU
   std::vector<unsigned char> getListVectors(int listId) const;
 
@@ -79,11 +77,6 @@ class IVFBase {
   void addIndicesFromCpu_(int listId,
                           const long* indices,
                           size_t numVecs);
-
-  void copyIndicesFromCpu_(const long* indices,
-                           const std::vector<size_t>& list_length);
-
-  void addTrainedDataFromCpu_(const uint8_t* trained, size_t numData);
 
  protected:
   /// Collection of GPU resources that we use
@@ -128,10 +121,6 @@ class IVFBase {
   /// resizing of deviceLists_
   std::vector<std::unique_ptr<DeviceVector<unsigned char>>> deviceListData_;
   std::vector<std::unique_ptr<DeviceVector<unsigned char>>> deviceListIndices_;
-
-  std::unique_ptr<DeviceVector<unsigned char>> deviceData_;
-  std::unique_ptr<DeviceVector<unsigned char>> deviceIndices_;
-  std::unique_ptr<DeviceVector<unsigned char>> deviceTrained_;
 
   /// If we are storing indices on the CPU (indicesOptions_ is
   /// INDICES_CPU), then this maintains a CPU-side map of what

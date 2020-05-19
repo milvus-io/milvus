@@ -80,8 +80,7 @@ IndexReplicasTemplate<IndexT>::search(idx_t n,
                                       const component_t* x,
                                       idx_t k,
                                       distance_t* distances,
-                                      idx_t* labels,
-                                      ConcurrentBitsetPtr bitset) const {
+                                      idx_t* labels) const {
   FAISS_THROW_IF_NOT_MSG(this->count() > 0, "no replicas in index");
 
   if (n == 0) {

@@ -9,7 +9,6 @@
 #pragma once
 
 #include <faiss/gpu/GpuIndexIVF.h>
-#include <faiss/utils/ConcurrentBitset.h>
 
 namespace faiss { struct IndexIVFFlat; }
 
@@ -71,8 +70,7 @@ class GpuIndexIVFFlat : public GpuIndexIVF {
                    const float* x,
                    int k,
                    float* distances,
-                   Index::idx_t* labels,
-                   ConcurrentBitsetPtr bitset = nullptr) const override;
+                   Index::idx_t* labels) const override;
 
  private:
   GpuIndexIVFFlatConfig ivfFlatConfig_;

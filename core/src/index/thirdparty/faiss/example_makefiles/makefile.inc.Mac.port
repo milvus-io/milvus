@@ -12,7 +12,7 @@
 # port install g++-mp-6
 CXX      = /opt/local/bin/g++-mp-6 -std=c++11
 CXXFLAGS = -fPIC -m64 -Wall -g -O3 -fopenmp -Wno-sign-compare
-CPUFLAGS = -mavx2 -mf16c -msse4 -mpopcnt
+CPUFLAGS = -msse4 -mpopcnt
 LDFLAGS  = -g -fPIC -fopenmp
 
 # common linux flags

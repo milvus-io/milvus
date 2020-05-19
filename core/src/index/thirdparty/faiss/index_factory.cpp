@@ -39,7 +39,6 @@
 #include <faiss/IndexBinaryFlat.h>
 #include <faiss/IndexBinaryHNSW.h>
 #include <faiss/IndexBinaryIVF.h>
-#include <faiss/IndexSQHybrid.h>
 
 namespace faiss {
 
@@ -195,12 +194,12 @@ Index *index_factory (int d, const char *description_in, MetricType metric)
             }
         } else if (!index && (stok == "SQ8" || stok == "SQ4" || stok == "SQ6" ||
                               stok == "SQfp16")) {
-            QuantizerType qt =
-                stok == "SQ8" ? QuantizerType::QT_8bit :
-                stok == "SQ6" ? QuantizerType::QT_6bit :
-                stok == "SQ4" ? QuantizerType::QT_4bit :
-                stok == "SQfp16" ? QuantizerType::QT_fp16 :
-                QuantizerType::QT_4bit;
+            ScalarQuantizer::QuantizerType qt =
+                stok == "SQ8" ? ScalarQuantizer::QT_8bit :
+                stok == "SQ6" ? ScalarQuantizer::QT_6bit :
+                stok == "SQ4" ? ScalarQuantizer::QT_4bit :
+                stok == "SQfp16" ? ScalarQuantizer::QT_fp16 :
+                ScalarQuantizer::QT_4bit;
             if (coarse_quantizer) {
                 FAISS_THROW_IF_NOT (!use_2layer);
                 IndexIVFScalarQuantizer *index_ivf =
@@ -214,25 +213,6 @@ Index *index_factory (int d, const char *description_in, MetricType metric)
             } else {
                 index_1 = new IndexScalarQuantizer (d, qt, metric);
             }
-        } else if (!index && (stok == "SQ8Hybrid" || stok == "SQ4Hybrid" || stok == "SQ6Hybrid" ||
-                              stok == "SQfp16Hybrid")) {
-            QuantizerType qt =
-                    stok == "SQ8Hybrid" ? QuantizerType::QT_8bit :
-                    stok == "SQ6Hybrid" ? QuantizerType::QT_6bit :
-                    stok == "SQ4Hybrid" ? QuantizerType::QT_4bit :
-                    stok == "SQfp16Hybrid" ? QuantizerType::QT_fp16 :
-                    QuantizerType::QT_4bit;
-            FAISS_THROW_IF_NOT_MSG(coarse_quantizer,
-                                   "SQ Hybrid only with an IVF");
-            FAISS_THROW_IF_NOT (!use_2layer);
-            IndexIVFSQHybrid *index_ivf =
-                    new IndexIVFSQHybrid (
-                            coarse_quantizer, d, ncentroids, qt, metric);
-            index_ivf->quantizer_trains_alone =
-                    get_trains_alone (coarse_quantizer);
-            del_coarse_quantizer.release ();
-            index_ivf->own_fields = true;
-            index_1 = index_ivf;
         } else if (!index && sscanf (tok, "PQ%d+%d", &M, &M2) == 2) {
             FAISS_THROW_IF_NOT_MSG(coarse_quantizer,
                              "PQ with + works only with an IVF");
@@ -299,7 +279,7 @@ Index *index_factory (int d, const char *description_in, MetricType metric)
         } else if (!index &&
                    sscanf (tok, "HNSW%d_SQ%d", &M, &pq_m) == 2 &&
                    pq_m == 8) {
-            index_1 = new IndexHNSWSQ (d, QuantizerType::QT_8bit, M);
+            index_1 = new IndexHNSWSQ (d, ScalarQuantizer::QT_8bit, M);
         } else if (!index && (stok == "LSH" || stok == "LSHr" ||
                               stok == "LSHrt" || stok == "LSHt")) {
             bool rotate_data = strstr(tok, "r") != nullptr;
@@ -371,24 +351,23 @@ Index *index_factory (int d, const char *description_in, MetricType metric)
     return index;
 }
 
-IndexBinary *index_binary_factory(int d, const char *description, MetricType metric = METRIC_L2)
+IndexBinary *index_binary_factory(int d, const char *description)
 {
     IndexBinary *index = nullptr;
 
     int ncentroids = -1;
     int M;
 
-    ScopeDeleter1<IndexBinary> del_index;
     if (sscanf(description, "BIVF%d_HNSW%d", &ncentroids, &M) == 2) {
         IndexBinaryIVF *index_ivf = new IndexBinaryIVF(
-                new IndexBinaryHNSW(d, M), d, ncentroids
+            new IndexBinaryHNSW(d, M), d, ncentroids
         );
         index_ivf->own_fields = true;
         index = index_ivf;
 
     } else if (sscanf(description, "BIVF%d", &ncentroids) == 1) {
         IndexBinaryIVF *index_ivf = new IndexBinaryIVF(
-                new IndexBinaryFlat(d), d, ncentroids
+            new IndexBinaryFlat(d), d, ncentroids
         );
         index_ivf->own_fields = true;
         index = index_ivf;
@@ -398,26 +377,12 @@ IndexBinary *index_binary_factory(int d, const char *description, MetricType met
         index = index_hnsw;
 
     } else if (std::string(description) == "BFlat") {
-        IndexBinary* index_x = new IndexBinaryFlat(d, metric);
-
-        {
-            IndexBinaryIDMap *idmap = new IndexBinaryIDMap(index_x);
-            del_index.set (idmap);
-            idmap->own_fields = true;
-            index_x = idmap;
-        }
-
-        if (index_x) {
-            index = index_x;
-            del_index.set(index);
-        }
+        index = new IndexBinaryFlat(d);
 
     } else {
         FAISS_THROW_IF_NOT_FMT(index, "description %s did not generate an index",
-                                   description);
+                               description);
     }
-
-    del_index.release();
 
     return index;
 }

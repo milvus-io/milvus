@@ -13,9 +13,9 @@
 namespace faiss { namespace gpu {
 
 DeviceMemoryReservation::DeviceMemoryReservation()
-    : state_(nullptr),
+    : state_(NULL),
       device_(0),
-      data_(nullptr),
+      data_(NULL),
       size_(0),
       stream_(0) {
 }
@@ -41,7 +41,7 @@ DeviceMemoryReservation::DeviceMemoryReservation(
   size_ = m.size_;
   stream_ = m.stream_;
 
-  m.data_ = nullptr;
+  m.data_ = NULL;
 }
 
 DeviceMemoryReservation::~DeviceMemoryReservation() {
@@ -50,7 +50,7 @@ DeviceMemoryReservation::~DeviceMemoryReservation() {
     state_->returnAllocation(*this);
   }
 
-  data_ = nullptr;
+  data_ = NULL;
 }
 
 DeviceMemoryReservation&
@@ -66,7 +66,7 @@ DeviceMemoryReservation::operator=(DeviceMemoryReservation&& m) {
   size_ = m.size_;
   stream_ = m.stream_;
 
-  m.data_ = nullptr;
+  m.data_ = NULL;
 
   return *this;
 }

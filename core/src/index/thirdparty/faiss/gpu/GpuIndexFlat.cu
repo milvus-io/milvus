@@ -91,12 +91,6 @@ GpuIndexFlat::copyFrom(const faiss::IndexFlat* index) {
                index->ntotal,
                resources_->getDefaultStream(device_));
   }
-
-  xb_.clear();
-
-  if (config_.storeInCpu) {
-      xb_ = index->xb;
-  }
 }
 
 void
@@ -203,8 +197,7 @@ GpuIndexFlat::searchImpl_(int n,
                           const float* x,
                           int k,
                           float* distances,
-                          Index::idx_t* labels,
-                          ConcurrentBitsetPtr bitset) const {
+                          Index::idx_t* labels) const {
   auto stream = resources_->getDefaultStream(device_);
 
   // Input and output data are already resident on the GPU
@@ -216,16 +209,7 @@ GpuIndexFlat::searchImpl_(int n,
   DeviceTensor<int, 2, true> outIntLabels(
     resources_->getMemoryManagerCurrentDevice(), {n, k}, stream);
 
-  // Copy bitset to GPU
-  if (!bitset) {
-    auto bitsetDevice = toDevice<uint8_t, 1>(resources_, device_, nullptr, stream, {0});
-    data_->query(queries, bitsetDevice, k, outDistances, outIntLabels, true);
-  } else {
-    auto bitsetDevice = toDevice<uint8_t, 1>(resources_, device_,
-                                             const_cast<uint8_t*>(bitset->data()), stream,
-                                             {(int) bitset->size()});
-    data_->query(queries, bitsetDevice, k, outDistances, outIntLabels, true);
-  }
+  data_->query(queries, k, outDistances, outIntLabels, true);
 
   // Convert int to idx_t
   convertTensor<int, faiss::Index::idx_t, 2>(stream,
@@ -236,11 +220,6 @@ GpuIndexFlat::searchImpl_(int n,
 void
 GpuIndexFlat::reconstruct(faiss::Index::idx_t key,
                           float* out) const {
-  if(config_.storeInCpu && xb_.size() > 0) {
-      memcpy (out, &(this->xb_[key * this->d]), sizeof(*out) * this->d);
-      return;
-  }
-
   DeviceScope scope(device_);
 
   FAISS_THROW_IF_NOT_MSG(key < this->ntotal, "index out of bounds");

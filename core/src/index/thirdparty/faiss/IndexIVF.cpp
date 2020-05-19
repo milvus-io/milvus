@@ -14,7 +14,6 @@
 
 #include <cstdio>
 #include <memory>
-#include <iostream>
 
 #include <faiss/utils/utils.h>
 #include <faiss/utils/hamming.h>
@@ -55,23 +54,7 @@ Level1Quantizer::Level1Quantizer ():
 
 Level1Quantizer::~Level1Quantizer ()
 {
-    if (own_fields) {
-        if(quantizer == quantizer_backup) {
-            if(quantizer != nullptr) {
-                delete quantizer;
-            }
-        } else {
-            if(quantizer != nullptr) {
-                delete quantizer;
-            }
-
-            if(quantizer_backup != nullptr) {
-                delete quantizer_backup;
-            }
-        }
-        quantizer = nullptr;
-        quantizer_backup = nullptr;
-    }
+    if (own_fields) delete quantizer;
 }
 
 void Level1Quantizer::train_q1 (size_t n, const float *x, bool verbose, MetricType metric_type)
@@ -251,26 +234,6 @@ void IndexIVF::add_with_ids (idx_t n, const float * x, const idx_t *xids)
     ntotal += n;
 }
 
-void IndexIVF::to_readonly() {
-    if (is_readonly()) return;
-    auto readonly_lists = this->invlists->to_readonly();
-    if (!readonly_lists) return;
-    this->replace_invlists(readonly_lists, true);
-}
-
-bool IndexIVF::is_readonly() const {
-    return this->invlists->is_readonly();
-}
-
-void IndexIVF::backup_quantizer() {
-    this->quantizer_backup = quantizer;
-}
-
-void IndexIVF::restore_quantizer() {
-    if(this->quantizer_backup != nullptr) {
-        quantizer = this->quantizer_backup;
-    }
-}
 
 void IndexIVF::make_direct_map (bool new_maintain_direct_map)
 {
@@ -297,8 +260,10 @@ void IndexIVF::make_direct_map (bool new_maintain_direct_map)
     maintain_direct_map = new_maintain_direct_map;
 }
 
-void IndexIVF::search (idx_t n, const float *x, idx_t k, float *distances, idx_t *labels,
-                       ConcurrentBitsetPtr bitset) const {
+
+void IndexIVF::search (idx_t n, const float *x, idx_t k,
+                         float *distances, idx_t *labels) const
+{
     std::unique_ptr<idx_t[]> idx(new idx_t[n * nprobe]);
     std::unique_ptr<float[]> coarse_dis(new float[n * nprobe]);
 
@@ -310,47 +275,18 @@ void IndexIVF::search (idx_t n, const float *x, idx_t k, float *distances, idx_t
     invlists->prefetch_lists (idx.get(), n * nprobe);
 
     search_preassigned (n, x, k, idx.get(), coarse_dis.get(),
-                        distances, labels, false, nullptr, bitset);
+                        distances, labels, false);
     indexIVF_stats.search_time += getmillisecs() - t0;
 }
 
-void IndexIVF::get_vector_by_id (idx_t n, const idx_t *xid, float *x, ConcurrentBitsetPtr bitset) {
 
-    if (!maintain_direct_map) {
-        make_direct_map(true);
-    }
-
-    /* only get vector by 1 id */
-    FAISS_ASSERT(n == 1);
-    if (!bitset || !bitset->test(xid[0])) {
-        reconstruct(xid[0], x + 0 * d);
-    } else {
-        memset(x, UINT8_MAX, d * sizeof(float));
-    }
-}
-
-void IndexIVF::search_by_id (idx_t n, const idx_t *xid, idx_t k, float *distances, idx_t *labels,
-                             ConcurrentBitsetPtr bitset) {
-    if (!maintain_direct_map) {
-        make_direct_map(true);
-    }
-
-    auto x = new float[n * d];
-    for (idx_t i = 0; i < n; ++i) {
-        reconstruct(xid[i], x + i * d);
-    }
-
-    search(n, x, k, distances, labels, bitset);
-    delete []x;
-}
 
 void IndexIVF::search_preassigned (idx_t n, const float *x, idx_t k,
                                    const idx_t *keys,
                                    const float *coarse_dis ,
                                    float *distances, idx_t *labels,
                                    bool store_pairs,
-                                   const IVFSearchParameters *params,
-                                   ConcurrentBitsetPtr bitset) const
+                                   const IVFSearchParameters *params) const
 {
     long nprobe = params ? params->nprobe : this->nprobe;
     long max_codes = params ? params->max_codes : this->max_codes;
@@ -400,7 +336,7 @@ void IndexIVF::search_preassigned (idx_t n, const float *x, idx_t k,
         // single list scan using the current scanner (with query
         // set porperly) and storing results in simi and idxi
         auto scan_one_list = [&] (idx_t key, float coarse_dis_i,
-                                  float *simi, idx_t *idxi, ConcurrentBitsetPtr bitset) {
+                                  float *simi, idx_t *idxi) {
 
             if (key < 0) {
                 // not enough centroids for multiprobe
@@ -432,7 +368,7 @@ void IndexIVF::search_preassigned (idx_t n, const float *x, idx_t k,
             }
 
             nheap += scanner->scan_codes (list_size, scodes.get(),
-                                          ids, simi, idxi, k, bitset);
+                                          ids, simi, idxi, k);
 
             return list_size;
         };
@@ -465,7 +401,7 @@ void IndexIVF::search_preassigned (idx_t n, const float *x, idx_t k,
                     nscan += scan_one_list (
                          keys [i * nprobe + ik],
                          coarse_dis[i * nprobe + ik],
-                         simi, idxi, bitset
+                         simi, idxi
                     );
 
                     if (max_codes && nscan >= max_codes) {
@@ -494,7 +430,7 @@ void IndexIVF::search_preassigned (idx_t n, const float *x, idx_t k,
                     ndis += scan_one_list
                         (keys [i * nprobe + ik],
                          coarse_dis[i * nprobe + ik],
-                         local_dis.data(), local_idx.data(), bitset);
+                         local_dis.data(), local_idx.data());
 
                     // can't do the test on max_codes
                 }
@@ -543,8 +479,7 @@ void IndexIVF::search_preassigned (idx_t n, const float *x, idx_t k,
 
 
 void IndexIVF::range_search (idx_t nx, const float *x, float radius,
-                             RangeSearchResult *result,
-                             ConcurrentBitsetPtr bitset) const
+                             RangeSearchResult *result) const
 {
     std::unique_ptr<idx_t[]> keys (new idx_t[nx * nprobe]);
     std::unique_ptr<float []> coarse_dis (new float[nx * nprobe]);
@@ -557,7 +492,7 @@ void IndexIVF::range_search (idx_t nx, const float *x, float radius,
     invlists->prefetch_lists (keys.get(), nx * nprobe);
 
     range_search_preassigned (nx, x, radius, keys.get (), coarse_dis.get (),
-                              result, bitset);
+                              result);
 
     indexIVF_stats.search_time += getmillisecs() - t0;
 }
@@ -565,8 +500,7 @@ void IndexIVF::range_search (idx_t nx, const float *x, float radius,
 void IndexIVF::range_search_preassigned (
          idx_t nx, const float *x, float radius,
          const idx_t *keys, const float *coarse_dis,
-         RangeSearchResult *result,
-         ConcurrentBitsetPtr bitset) const
+         RangeSearchResult *result) const
 {
 
     size_t nlistv = 0, ndis = 0;
@@ -603,7 +537,7 @@ void IndexIVF::range_search_preassigned (
             nlistv++;
             ndis += list_size;
             scanner->scan_codes_range (list_size, scodes.get(),
-                                       ids.get(), radius, qres, bitset);
+                                       ids.get(), radius, qres);
         };
 
         if (parallel_mode == 0) {
@@ -942,28 +876,8 @@ void IndexIVF::copy_subset_to (IndexIVF & other, int subset_type,
 
 }
 
-void
-IndexIVF::dump() {
-    for (auto i = 0; i < invlists->nlist; ++ i) {
-        auto numVecs = invlists->list_size(i);
-        auto ids = invlists->get_ids(i);
-        auto codes = invlists->get_codes(i);
-        int code_size = invlists->code_size;
 
-        std::cout << "Bucket ID: " << i << ", with code size: " << code_size << ", vectors number: " << numVecs << std::endl;
-        if(code_size == 8) {
-            // int8 types
-            for (auto j=0; j < numVecs; ++j) {
-                std::cout << *(ids+j) << ": " << std::endl;
-                for(int k = 0; k < this->d; ++ k) {
-                    printf("%u ", (uint8_t)(codes[j * d + k]));
-                }
-                std::cout << std::endl;
-            }
-        }
-        std::cout << "Bucket End." << std::endl;
-    }
-}
+
 
 IndexIVF::~IndexIVF()
 {
@@ -985,8 +899,7 @@ void InvertedListScanner::scan_codes_range (size_t ,
                        const uint8_t *,
                        const idx_t *,
                        float ,
-                       RangeQueryResult &,
-                       ConcurrentBitsetPtr) const
+                       RangeQueryResult &) const
 {
     FAISS_THROW_MSG ("scan_codes_range not implemented");
 }

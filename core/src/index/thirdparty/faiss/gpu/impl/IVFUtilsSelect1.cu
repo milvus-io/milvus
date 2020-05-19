@@ -23,14 +23,10 @@ namespace faiss { namespace gpu {
 
 template <int ThreadsPerBlock, int NumWarpQ, int NumThreadQ, bool Dir>
 __global__ void
-pass1SelectLists(void** listIndices,
-                 Tensor<int, 2, true> prefixSumOffsets,
-                 Tensor<int, 2, true> topQueryToCentroid,
-                 Tensor<uint8_t, 1, true> bitset,
+pass1SelectLists(Tensor<int, 2, true> prefixSumOffsets,
                  Tensor<float, 1, true> distance,
                  int nprobe,
                  int k,
-                 IndicesOptions opt,
                  Tensor<float, 3, true> heapDistances,
                  Tensor<int, 3, true> heapIndices) {
   constexpr int kNumWarps = ThreadsPerBlock / kWarpSize;
@@ -62,38 +58,16 @@ pass1SelectLists(void** listIndices,
 
   int i = threadIdx.x;
   auto distanceStart = distance[start].data();
-  bool bitsetEmpty = (bitset.getSize(0) == 0);
-  long index = -1;
 
   // BlockSelect add cannot be used in a warp divergent circumstance; we
   // handle the remainder warp below
   for (; i < limit; i += blockDim.x) {
-    index = getListIndex(queryId,
-                         start + i,
-                         listIndices,
-                         prefixSumOffsets,
-                         topQueryToCentroid,
-                         opt);
-    if (bitsetEmpty || (!(bitset[index >> 3] & (0x1 << (index & 0x7))))) {
-      heap.add(distanceStart[i], start + i);
-    } else {
-      heap.add((1.0 / 0.0), start + i);
-    }
+    heap.add(distanceStart[i], start + i);
   }
 
   // Handle warp divergence separately
   if (i < num) {
-    index = getListIndex(queryId,
-                         start + i,
-                         listIndices,
-                         prefixSumOffsets,
-                         topQueryToCentroid,
-                         opt);
-    if (bitsetEmpty || (!(bitset[index >> 3] & (0x1 << (index & 0x7))))) {
-      heap.addThreadQ(distanceStart[i], start + i);
-    } else {
-      heap.addThreadQ((1.0 / 0.0), start + i);
-    }
+    heap.addThreadQ(distanceStart[i], start + i);
   }
 
   // Merge all final results
@@ -108,11 +82,7 @@ pass1SelectLists(void** listIndices,
 }
 
 void
-runPass1SelectLists(thrust::device_vector<void*>& listIndices,
-                    IndicesOptions indicesOptions,
-                    Tensor<int, 2, true>& prefixSumOffsets,
-                    Tensor<int, 2, true>& topQueryToCentroid,
-                    Tensor<uint8_t, 1, true>& bitset,
+runPass1SelectLists(Tensor<int, 2, true>& prefixSumOffsets,
                     Tensor<float, 1, true>& distance,
                     int nprobe,
                     int k,
@@ -128,14 +98,10 @@ runPass1SelectLists(thrust::device_vector<void*>& listIndices,
 #define RUN_PASS(BLOCK, NUM_WARP_Q, NUM_THREAD_Q, DIR)                  \
   do {                                                                  \
     pass1SelectLists<BLOCK, NUM_WARP_Q, NUM_THREAD_Q, DIR>              \
-      <<<grid, BLOCK, 0, stream>>>(listIndices.data().get(),            \
-                                   prefixSumOffsets,                    \
-                                   topQueryToCentroid,                  \
-                                   bitset,                              \
+      <<<grid, BLOCK, 0, stream>>>(prefixSumOffsets,                    \
                                    distance,                            \
                                    nprobe,                              \
                                    k,                                   \
-                                   indicesOptions,                      \
                                    heapDistances,                       \
                                    heapIndices);                        \
     CUDA_TEST_ERROR();                                                  \

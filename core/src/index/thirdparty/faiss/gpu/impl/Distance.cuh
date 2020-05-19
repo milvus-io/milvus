@@ -10,7 +10,6 @@
 
 #include <faiss/gpu/utils/DeviceTensor.cuh>
 #include <faiss/gpu/utils/Float16.cuh>
-#include <faiss/utils/ConcurrentBitset.h>
 
 namespace faiss { namespace gpu {
 
@@ -26,7 +25,6 @@ void runL2Distance(GpuResources* resources,
                    Tensor<float, 1, true>* vectorNorms,
                    Tensor<float, 2, true>& queries,
                    bool queriesRowMajor,
-                   Tensor<uint8_t, 1, true>& bitset,
                    int k,
                    Tensor<float, 2, true>& outDistances,
                    Tensor<int, 2, true>& outIndices,
@@ -41,7 +39,6 @@ void runIPDistance(GpuResources* resources,
                    bool vectorsRowMajor,
                    Tensor<float, 2, true>& queries,
                    bool queriesRowMajor,
-                   Tensor<uint8_t, 1, true>& bitset,
                    int k,
                    Tensor<float, 2, true>& outDistances,
                    Tensor<int, 2, true>& outIndices);
@@ -51,7 +48,6 @@ void runIPDistance(GpuResources* resources,
                    bool vectorsRowMajor,
                    Tensor<half, 2, true>& queries,
                    bool queriesRowMajor,
-                   Tensor<uint8_t, 1, true>& bitset,
                    int k,
                    Tensor<half, 2, true>& outDistances,
                    Tensor<int, 2, true>& outIndices,
@@ -63,12 +59,10 @@ void runL2Distance(GpuResources* resources,
                    Tensor<half, 1, true>* vectorNorms,
                    Tensor<half, 2, true>& queries,
                    bool queriesRowMajor,
-                   Tensor<uint8_t, 1, true>& bitset,
                    int k,
                    Tensor<half, 2, true>& outDistances,
                    Tensor<int, 2, true>& outIndices,
                    bool useHgemm,
                    bool ignoreOutDistances = false);
-
 
 } } // namespace

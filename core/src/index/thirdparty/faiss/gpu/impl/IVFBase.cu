@@ -17,7 +17,6 @@
 #include <limits>
 #include <thrust/host_vector.h>
 #include <unordered_map>
-#include <numeric>
 
 namespace faiss { namespace gpu {
 
@@ -79,10 +78,6 @@ IVFBase::reset() {
   deviceListLengths_.clear();
   listOffsetToUserIndex_.clear();
 
-  deviceListData_.reserve(numLists_);
-  deviceListIndices_.reserve(numLists_);
-  listOffsetToUserIndex_.resize(numLists_);
-
   for (size_t i = 0; i < numLists_; ++i) {
     deviceListData_.emplace_back(
       std::unique_ptr<DeviceVector<unsigned char>>(
@@ -97,10 +92,6 @@ IVFBase::reset() {
   deviceListIndexPointers_.resize(numLists_, nullptr);
   deviceListLengths_.resize(numLists_, 0);
   maxListLength_ = 0;
-
-  deviceData_.reset(new DeviceVector<unsigned char>(space_));
-  deviceIndices_.reset(new DeviceVector<unsigned char>(space_));
-  deviceTrained_.reset(new DeviceVector<unsigned char>(space_));
 }
 
 int
@@ -258,67 +249,6 @@ IVFBase::getListVectors(int listId) const {
 }
 
 void
-IVFBase::copyIndicesFromCpu_(const long* indices,
-                             const std::vector<size_t>& list_length) {
-    FAISS_ASSERT_FMT(list_length.size() == this->getNumLists(), "Expect list size %zu but %zu received!",
-                     this->getNumLists(), list_length.size());
-    auto numVecs = std::accumulate(list_length.begin(), list_length.end(), 0);
-
-    auto stream = resources_->getDefaultStreamCurrentDevice();
-    int bytesPerRecord;
-
-    if (indicesOptions_ == INDICES_32_BIT) {
-        std::vector<int> indices32(numVecs);
-        for (size_t i = 0; i < numVecs; ++i) {
-            auto ind = indices[i];
-            FAISS_ASSERT(ind <= (long) std::numeric_limits<int>::max());
-            indices32[i] = (int) ind;
-        }
-
-        bytesPerRecord = sizeof(int);
-
-        deviceIndices_->append((unsigned char*) indices32.data(),
-                               numVecs * bytesPerRecord,
-                               stream,
-                               true);
-    } else if (indicesOptions_ == INDICES_64_BIT) {
-        bytesPerRecord = sizeof(long);
-        deviceIndices_->append((unsigned char*) indices,
-                               numVecs * bytesPerRecord,
-                               stream,
-                               true);
-    } else if (indicesOptions_ == INDICES_CPU) {
-        FAISS_ASSERT(false);
-        size_t listId = 0;
-        auto curr_indices = indices;
-        for (auto& userIndices : listOffsetToUserIndex_) {
-            userIndices.insert(userIndices.begin(), curr_indices, curr_indices + list_length[listId]);
-            curr_indices += list_length[listId];
-            listId++;
-        }
-    } else {
-        // indices are not stored
-        FAISS_ASSERT(indicesOptions_ == INDICES_IVF);
-    }
-
-    size_t listId = 0;
-    size_t pos = 0;
-    size_t size = 0;
-
-    thrust::host_vector<void*> hostPointers(deviceListData_.size(), nullptr);
-    for (auto& device_indice : deviceListIndices_) {
-        auto data = deviceIndices_->data() + pos;
-        size = list_length[listId] * bytesPerRecord;
-        device_indice->reset(data, size, size);
-        hostPointers[listId] = device_indice->data();
-        pos += size;
-        ++ listId;
-    }
-
-    deviceListIndexPointers_ = hostPointers;
-}
-
-void
 IVFBase::addIndicesFromCpu_(int listId,
                             const long* indices,
                             size_t numVecs) {
@@ -359,17 +289,6 @@ IVFBase::addIndicesFromCpu_(int listId,
   if (prevIndicesData != listIndices->data()) {
     deviceListIndexPointers_[listId] = listIndices->data();
   }
-}
-
-void
-IVFBase::addTrainedDataFromCpu_(const uint8_t* trained,
-                                size_t numData) {
-    auto stream = resources_->getDefaultStreamCurrentDevice();
-
-    deviceTrained_->append((unsigned char*)trained,
-                           numData,
-                           stream,
-                           true);
 }
 
 } } // namespace

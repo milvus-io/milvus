@@ -103,7 +103,6 @@ FlatIndex::getVectorsFloat32Copy(int from, int num, cudaStream_t stream) {
 
 void
 FlatIndex::query(Tensor<float, 2, true>& input,
-                 Tensor<uint8_t, 1, true>& bitset,
                  int k,
                  Tensor<float, 2, true>& outDistances,
                  Tensor<int, 2, true>& outIndices,
@@ -120,7 +119,7 @@ FlatIndex::query(Tensor<float, 2, true>& input,
     DeviceTensor<half, 2, true> outDistancesHalf(
       mem, {outDistances.getSize(0), outDistances.getSize(1)}, stream);
 
-    query(inputHalf, bitset, k, outDistancesHalf, outIndices, exactDistance);
+    query(inputHalf, k, outDistancesHalf, outIndices, exactDistance);
 
     if (exactDistance) {
       // Convert outDistances back
@@ -136,7 +135,6 @@ FlatIndex::query(Tensor<float, 2, true>& input,
                     &norms_,
                     input,
                     true, // input is row major
-                    bitset,
                     k,
                     outDistances,
                     outIndices,
@@ -147,7 +145,6 @@ FlatIndex::query(Tensor<float, 2, true>& input,
                     !storeTransposed_, // is vectors row major?
                     input,
                     true, // input is row major
-                    bitset,
                     k,
                     outDistances,
                     outIndices);
@@ -157,7 +154,6 @@ FlatIndex::query(Tensor<float, 2, true>& input,
 
 void
 FlatIndex::query(Tensor<half, 2, true>& input,
-                 Tensor<uint8_t, 1, true>& bitset,
                  int k,
                  Tensor<half, 2, true>& outDistances,
                  Tensor<int, 2, true>& outIndices,
@@ -171,7 +167,6 @@ FlatIndex::query(Tensor<half, 2, true>& input,
                   &normsHalf_,
                   input,
                   true, // input is row major
-                  bitset,
                   k,
                   outDistances,
                   outIndices,
@@ -184,7 +179,6 @@ FlatIndex::query(Tensor<half, 2, true>& input,
                   !storeTransposed_, // is vectors row major?
                   input,
                   true, // input is row major
-                  bitset,
                   k,
                   outDistances,
                   outIndices,

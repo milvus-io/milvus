@@ -20,7 +20,6 @@
 #include <faiss/gpu/utils/PtxUtils.cuh>
 #include <faiss/gpu/utils/Reductions.cuh>
 #include <faiss/gpu/utils/StaticUtils.h>
-#include <faiss/impl/ScalarQuantizerOp.h>
 #include <thrust/host_vector.h>
 
 namespace faiss { namespace gpu {
@@ -160,7 +159,6 @@ ivfFlatScan(Tensor<float, 2, true> queries,
 void
 runIVFFlatScanTile(Tensor<float, 2, true>& queries,
                    Tensor<int, 2, true>& listIds,
-                   Tensor<uint8_t, 1, true>& bitset,
                    thrust::device_vector<void*>& listData,
                    thrust::device_vector<void*>& listIndices,
                    IndicesOptions indicesOptions,
@@ -183,8 +181,8 @@ runIVFFlatScanTile(Tensor<float, 2, true>& queries,
   // Check the amount of shared memory per block available based on our type is
   // sufficient
   if (scalarQ &&
-      (scalarQ->qtype == QuantizerType::QT_8bit ||
-       scalarQ->qtype == QuantizerType::QT_4bit)) {
+      (scalarQ->qtype == ScalarQuantizer::QuantizerType::QT_8bit ||
+       scalarQ->qtype == ScalarQuantizer::QuantizerType::QT_4bit)) {
     int maxDim = getMaxSharedMemPerBlockCurrentDevice() /
       (sizeof(float) * 2);
 
@@ -232,18 +230,18 @@ runIVFFlatScanTile(Tensor<float, 2, true>& queries,
     HANDLE_METRICS;
   } else {
     switch (scalarQ->qtype) {
-      case QuantizerType::QT_8bit:
+      case ScalarQuantizer::QuantizerType::QT_8bit:
       {
         // FIXME: investigate 32 bit load perf issues
 //        if (dim % 4 == 0) {
         if (false) {
-          Codec<(int)QuantizerType::QT_8bit, 4>
+          Codec<ScalarQuantizer::QuantizerType::QT_8bit, 4>
             codec(scalarQ->code_size,
                   scalarQ->gpuTrained.data(),
                   scalarQ->gpuTrained.data() + dim);
           HANDLE_METRICS;
         } else {
-          Codec<(int)QuantizerType::QT_8bit, 1>
+          Codec<ScalarQuantizer::QuantizerType::QT_8bit, 1>
             codec(scalarQ->code_size,
                   scalarQ->gpuTrained.data(),
                   scalarQ->gpuTrained.data() + dim);
@@ -251,55 +249,55 @@ runIVFFlatScanTile(Tensor<float, 2, true>& queries,
         }
       }
       break;
-      case QuantizerType::QT_8bit_uniform:
+      case ScalarQuantizer::QuantizerType::QT_8bit_uniform:
       {
         // FIXME: investigate 32 bit load perf issues
         if (false) {
 //        if (dim % 4 == 0) {
-          Codec<(int)QuantizerType::QT_8bit_uniform, 4>
+          Codec<ScalarQuantizer::QuantizerType::QT_8bit_uniform, 4>
             codec(scalarQ->code_size, scalarQ->trained[0], scalarQ->trained[1]);
           HANDLE_METRICS;
         } else {
-          Codec<(int)QuantizerType::QT_8bit_uniform, 1>
+          Codec<ScalarQuantizer::QuantizerType::QT_8bit_uniform, 1>
             codec(scalarQ->code_size, scalarQ->trained[0], scalarQ->trained[1]);
           HANDLE_METRICS;
         }
       }
       break;
-      case QuantizerType::QT_fp16:
+      case ScalarQuantizer::QuantizerType::QT_fp16:
       {
         if (false) {
           // FIXME: investigate 32 bit load perf issues
 //        if (dim % 2 == 0) {
-          Codec<(int)QuantizerType::QT_fp16, 2>
+          Codec<ScalarQuantizer::QuantizerType::QT_fp16, 2>
             codec(scalarQ->code_size);
           HANDLE_METRICS;
         } else {
-          Codec<(int)QuantizerType::QT_fp16, 1>
+          Codec<ScalarQuantizer::QuantizerType::QT_fp16, 1>
             codec(scalarQ->code_size);
           HANDLE_METRICS;
         }
       }
       break;
-      case QuantizerType::QT_8bit_direct:
+      case ScalarQuantizer::QuantizerType::QT_8bit_direct:
       {
-        Codec<(int)QuantizerType::QT_8bit_direct, 1>
+        Codec<ScalarQuantizer::QuantizerType::QT_8bit_direct, 1>
           codec(scalarQ->code_size);
         HANDLE_METRICS;
       }
       break;
-      case QuantizerType::QT_4bit:
+      case ScalarQuantizer::QuantizerType::QT_4bit:
       {
-        Codec<(int)QuantizerType::QT_4bit, 1>
+        Codec<ScalarQuantizer::QuantizerType::QT_4bit, 1>
           codec(scalarQ->code_size,
                 scalarQ->gpuTrained.data(),
                 scalarQ->gpuTrained.data() + dim);
         HANDLE_METRICS;
       }
       break;
-      case QuantizerType::QT_4bit_uniform:
+      case ScalarQuantizer::QuantizerType::QT_4bit_uniform:
       {
-        Codec<(int)QuantizerType::QT_4bit_uniform, 1>
+        Codec<ScalarQuantizer::QuantizerType::QT_4bit_uniform, 1>
           codec(scalarQ->code_size, scalarQ->trained[0], scalarQ->trained[1]);
         HANDLE_METRICS;
       }
@@ -316,11 +314,7 @@ runIVFFlatScanTile(Tensor<float, 2, true>& queries,
 #undef RUN_IVF_FLAT
 
   // k-select the output in chunks, to increase parallelism
-  runPass1SelectLists(listIndices,
-                      indicesOptions,
-                      prefixSumOffsets,
-                      listIds,
-                      bitset,
+  runPass1SelectLists(prefixSumOffsets,
                       allDistances,
                       listIds.getSize(1),
                       k,
@@ -349,7 +343,6 @@ runIVFFlatScanTile(Tensor<float, 2, true>& queries,
 void
 runIVFFlatScan(Tensor<float, 2, true>& queries,
                Tensor<int, 2, true>& listIds,
-               Tensor<uint8_t, 1, true>& bitset,
                thrust::device_vector<void*>& listData,
                thrust::device_vector<void*>& listIndices,
                IndicesOptions indicesOptions,
@@ -495,7 +488,6 @@ runIVFFlatScan(Tensor<float, 2, true>& queries,
 
     runIVFFlatScanTile(queryView,
                        listIdsView,
-                       bitset,
                        listData,
                        listIndices,
                        indicesOptions,

@@ -13,7 +13,7 @@
 
 #include <faiss/IndexPreTransform.h>
 #include <faiss/impl/FaissAssert.h>
-#include <faiss/utils/utils.h>
+
 
 
 namespace faiss { namespace ivflib {
@@ -315,11 +315,8 @@ void search_with_parameters (const Index *index,
     const IndexIVF *index_ivf = dynamic_cast<const IndexIVF *>(index);
     FAISS_THROW_IF_NOT (index_ivf);
 
-    double t0 = getmillisecs();
     index_ivf->quantizer->search(n, x, params->nprobe,
                                  Dq.data(), Iq.data());
-    double t1 = getmillisecs();
-    indexIVF_stats.quantization_time += t1 - t0;
 
     if (nb_dis_ptr) {
         size_t nb_dis = 0;
@@ -335,8 +332,6 @@ void search_with_parameters (const Index *index,
     index_ivf->search_preassigned(n, x, k, Iq.data(), Dq.data(),
                                   distances, labels,
                                   false, params);
-    double t2 = getmillisecs();
-    indexIVF_stats.search_time += t2 - t1;
 }
 
 

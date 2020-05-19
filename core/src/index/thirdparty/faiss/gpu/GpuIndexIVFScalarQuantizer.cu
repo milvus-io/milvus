@@ -41,7 +41,7 @@ GpuIndexIVFScalarQuantizer::GpuIndexIVFScalarQuantizer(
   GpuResources* resources,
   int dims,
   int nlist,
-  faiss::QuantizerType qtype,
+  faiss::ScalarQuantizer::QuantizerType qtype,
   faiss::MetricType metric,
   bool encodeResidual,
   GpuIndexIVFScalarQuantizerConfig config) :
@@ -106,27 +106,23 @@ GpuIndexIVFScalarQuantizer::copyFrom(
                        memorySpace_);
 
   InvertedLists* ivf = index->invlists;
-  if(ReadOnlyArrayInvertedLists* rol = dynamic_cast<ReadOnlyArrayInvertedLists*>(ivf)) {
-      index_->copyCodeVectorsFromCpu((const float* )(rol->pin_readonly_codes->data),
-                                     (const long *)(rol->pin_readonly_ids->data), rol->readonly_length);
-  } else {
-      for (size_t i = 0; i < ivf->nlist; ++i) {
-          auto numVecs = ivf->list_size(i);
 
-          // GPU index can only support max int entries per list
-          FAISS_THROW_IF_NOT_FMT(numVecs <=
-                                 (size_t) std::numeric_limits<int>::max(),
-                                 "GPU inverted list can only support "
-                                 "%zu entries; %zu found",
-                                 (size_t) std::numeric_limits<int>::max(),
-                                 numVecs);
+  for (size_t i = 0; i < ivf->nlist; ++i) {
+    auto numVecs = ivf->list_size(i);
 
-          index_->addCodeVectorsFromCpu(
-                  i,
-                  (const unsigned char*) ivf->get_codes(i),
-                  ivf->get_ids(i),
-                  numVecs);
-      }
+    // GPU index can only support max int entries per list
+    FAISS_THROW_IF_NOT_FMT(numVecs <=
+                           (size_t) std::numeric_limits<int>::max(),
+                           "GPU inverted list can only support "
+                           "%zu entries; %zu found",
+                           (size_t) std::numeric_limits<int>::max(),
+                           numVecs);
+
+    index_->addCodeVectorsFromCpu(
+      i,
+      (const unsigned char*) ivf->get_codes(i),
+      ivf->get_ids(i),
+      numVecs);
   }
 }
 
@@ -144,7 +140,6 @@ GpuIndexIVFScalarQuantizer::copyTo(
   GpuIndexIVF::copyTo(index);
   index->sq = sq;
   index->by_residual = by_residual;
-  index->code_size = sq.code_size;
 
   InvertedLists* ivf = new ArrayInvertedLists(nlist, index->code_size);
   index->replace_invlists(ivf, true);
@@ -239,8 +234,6 @@ GpuIndexIVFScalarQuantizer::addImpl_(int n,
   FAISS_ASSERT(index_);
   FAISS_ASSERT(n > 0);
 
-  auto stream = resources_->getDefaultStream(device_);
-
   // Data is already resident on the GPU
   Tensor<float, 2, true> data(const_cast<float*>(x), {n, (int) this->d});
 
@@ -260,13 +253,10 @@ GpuIndexIVFScalarQuantizer::searchImpl_(int n,
                                         const float* x,
                                         int k,
                                         float* distances,
-                                        Index::idx_t* labels,
-                                        ConcurrentBitsetPtr bitset) const {
+                                        Index::idx_t* labels) const {
   // Device is already set in GpuIndex::search
   FAISS_ASSERT(index_);
   FAISS_ASSERT(n > 0);
-
-  auto stream = resources_->getDefaultStream(device_);
 
   // Data is already resident on the GPU
   Tensor<float, 2, true> queries(const_cast<float*>(x), {n, (int) this->d});
@@ -275,15 +265,7 @@ GpuIndexIVFScalarQuantizer::searchImpl_(int n,
   static_assert(sizeof(long) == sizeof(Index::idx_t), "size mismatch");
   Tensor<long, 2, true> outLabels(const_cast<long*>(labels), {n, k});
 
-  if (!bitset) {
-    auto bitsetDevice = toDevice<uint8_t, 1>(resources_, device_, nullptr, stream, {0});
-    index_->query(queries, bitsetDevice, nprobe, k, outDistances, outLabels);
-  } else {
-    auto bitsetDevice = toDevice<uint8_t, 1>(resources_, device_,
-                                             const_cast<uint8_t*>(bitset->data()), stream,
-                                             {(int) bitset->size()});
-    index_->query(queries, bitsetDevice, nprobe, k, outDistances, outLabels);
-  }
+  index_->query(queries, nprobe, k, outDistances, outLabels);
 }
 
 } } // namespace

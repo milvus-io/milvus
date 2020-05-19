@@ -19,11 +19,9 @@
 #include <faiss/gpu/utils/Float16.cuh>
 #include <faiss/gpu/utils/HostTensor.cuh>
 #include <faiss/gpu/utils/Transpose.cuh>
-#include <faiss/utils/utils.h>
 #include <limits>
 #include <thrust/host_vector.h>
 #include <unordered_map>
-#include <numeric>
 
 namespace faiss { namespace gpu {
 
@@ -46,61 +44,6 @@ IVFFlat::IVFFlat(GpuResources* resources,
 }
 
 IVFFlat::~IVFFlat() {
-}
-
-
-void
-IVFFlat::copyCodeVectorsFromCpu(const float* vecs,
-                                const long* indices,
-                                const std::vector<size_t>& list_length) {
-    FAISS_ASSERT_FMT(list_length.size() == this->getNumLists(), "Expect list size %zu but %zu received!",
-                     this->getNumLists(), list_length.size());
-    int64_t numVecs = std::accumulate(list_length.begin(), list_length.end(), 0);
-    if (numVecs == 0) {
-        return;
-    }
-
-    auto stream = resources_->getDefaultStreamCurrentDevice();
-
-    deviceListLengths_ = list_length;
-
-    int64_t lengthInBytes = numVecs * bytesPerVector_;
-
-    // We only have int32 length representations on the GPU per each
-    // list; the length is in sizeof(char)
-    FAISS_ASSERT(deviceData_->size() + lengthInBytes <= std::numeric_limits<int64_t>::max());
-
-    deviceData_->append((unsigned char*) vecs,
-                            lengthInBytes,
-                            stream,
-                            true /* exact reserved size */);
-    copyIndicesFromCpu_(indices, list_length);
-    maxListLength_ = 0;
-
-    size_t listId = 0;
-    size_t pos = 0;
-    size_t size = 0;
-    thrust::host_vector<void*> hostPointers(deviceListData_.size(), nullptr);
-
-    for (auto& device_data : deviceListData_) {
-        auto data = deviceData_->data() + pos;
-
-        size = list_length[listId] * bytesPerVector_;
-
-        device_data->reset(data, size, size);
-        hostPointers[listId] = device_data->data();
-        maxListLength_ = std::max(maxListLength_, (int)list_length[listId]);
-        pos += size;
-        ++ listId;
-    }
-
-    deviceListDataPointers_ = hostPointers;
-
-    // device_vector add is potentially happening on a different stream
-    // than our default stream
-    if (stream != 0) {
-        streamWait({stream}, {0});
-    }
 }
 
 void
@@ -174,9 +117,7 @@ IVFFlat::classifyAndAddVectors(Tensor<float, 2, true>& vecs,
     listIds2d(mem, {vecs.getSize(0), 1},  stream);
   auto listIds = listIds2d.view<1>({vecs.getSize(0)});
 
-  /* pseudo bitset */
-  DeviceTensor<uint8_t, 1, true> bitset(mem, {0}, stream);
-  quantizer_->query(vecs, bitset, 1, listDistance2d, listIds2d, false);
+  quantizer_->query(vecs, 1, listDistance2d, listIds2d, false);
 
   // Calculate residuals for these vectors, if needed
   DeviceTensor<float, 2, true>
@@ -328,7 +269,6 @@ IVFFlat::classifyAndAddVectors(Tensor<float, 2, true>& vecs,
 
 void
 IVFFlat::query(Tensor<float, 2, true>& queries,
-               Tensor<uint8_t, 1, true>& bitset,
                int nprobe,
                int k,
                Tensor<float, 2, true>& outDistances,
@@ -354,9 +294,7 @@ IVFFlat::query(Tensor<float, 2, true>& queries,
 
   // Find the `nprobe` closest lists; we can use int indices both
   // internally and externally
-  DeviceTensor<uint8_t, 1, true> coarseBitset(mem, {0}, stream);
   quantizer_->query(queries,
-                    coarseBitset,
                     nprobe,
                     coarseDistances,
                     coarseIndices,
@@ -372,7 +310,6 @@ IVFFlat::query(Tensor<float, 2, true>& queries,
 
   runIVFFlatScan(queries,
                  coarseIndices,
-                 bitset,
                  deviceListDataPointers_,
                  deviceListIndexPointers_,
                  indicesOptions_,

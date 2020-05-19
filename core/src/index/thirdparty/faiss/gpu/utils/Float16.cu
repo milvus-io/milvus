@@ -7,8 +7,7 @@
 
 
 #include <faiss/gpu/utils/Float16.cuh>
-//#include <faiss/gpu/utils/nvidia/fp16_emu.cuh>
-#include <faiss/impl/FaissAssert.h>
+#include <faiss/gpu/utils/nvidia/fp16_emu.cuh>
 #include <thrust/execution_policy.h>
 #include <thrust/transform.h>
 
@@ -24,13 +23,11 @@ bool getDeviceSupportsFloat16Math(int device) {
 __half hostFloat2Half(float a) {
 #if CUDA_VERSION >= 9000
   __half_raw raw;
-  //raw.x = cpu_float2half_rn(a).x;
-  FAISS_ASSERT_FMT(false, "%s", "cpu_float2half_rn() not support");
+  raw.x = cpu_float2half_rn(a).x;
   return __half(raw);
 #else
   __half h;
-  //h.x = cpu_float2half_rn(a).x;
-  FAISS_ASSERT_FMT(false, "%s", "cpu_float2half_rn() not support");
+  h.x = cpu_float2half_rn(a).x;
   return h;
 #endif
 }

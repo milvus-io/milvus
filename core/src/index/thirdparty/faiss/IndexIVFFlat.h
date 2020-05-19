@@ -86,8 +86,7 @@ struct IndexIVFFlatDedup: IndexIVFFlat {
                              const float *centroid_dis,
                              float *distances, idx_t *labels,
                              bool store_pairs,
-                             const IVFSearchParameters *params=nullptr,
-                             ConcurrentBitsetPtr bitset = nullptr
+                             const IVFSearchParameters *params=nullptr
                              ) const override;
 
     size_t remove_ids(const IDSelector& sel) override;
@@ -97,8 +96,7 @@ struct IndexIVFFlatDedup: IndexIVFFlat {
         idx_t n,
         const float* x,
         float radius,
-        RangeSearchResult* result,
-        ConcurrentBitsetPtr bitset = nullptr) const override;
+        RangeSearchResult* result) const override;
 
     /// not implemented
     void update_vectors (int nv, idx_t *idx, const float *v) override;

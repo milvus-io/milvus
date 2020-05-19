@@ -14,7 +14,7 @@
 #include <faiss/utils/distances.h>
 
 #include <faiss/impl/FaissAssert.h>
-#include <faiss/FaissHook.h>
+
 
 namespace faiss {
 
@@ -100,8 +100,7 @@ void IndexIVFPQR::search_preassigned (idx_t n, const float *x, idx_t k,
                                       const float *L1_dis,
                                       float *distances, idx_t *labels,
                                       bool store_pairs,
-                                      const IVFSearchParameters *params,
-                                      ConcurrentBitsetPtr bitset
+                                      const IVFSearchParameters *params
                                       ) const
 {
     uint64_t t0;
@@ -171,8 +170,9 @@ void IndexIVFPQR::search_preassigned (idx_t n, const float *x, idx_t k,
                 float dis = fvec_L2sqr (residual_1, residual_2, d);
 
                 if (dis < heap_sim[0]) {
+                    maxheap_pop (k, heap_sim, heap_ids);
                     idx_t id_or_pair = store_pairs ? sl : id;
-                    maxheap_swap_top (k, heap_sim, heap_ids, dis, id_or_pair);
+                    maxheap_push (k, heap_sim, heap_ids, dis, id_or_pair);
                 }
                 n_refine ++;
             }
