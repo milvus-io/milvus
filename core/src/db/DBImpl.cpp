@@ -1631,6 +1631,7 @@ DBImpl::Query(const std::shared_ptr<server::Context>& context, const std::string
     Status status;
     meta::FilesHolder files_holder;
     if (partition_tags.empty()) {
+#if 0
         // no partition tag specified, means search in whole collection
         // get all collection files from parent collection
         status = meta_ptr_->FilesToSearch(collection_id, files_holder);
@@ -1643,6 +1644,16 @@ DBImpl::Query(const std::shared_ptr<server::Context>& context, const std::string
         for (auto& schema : partition_array) {
             status = meta_ptr_->FilesToSearch(schema.collection_id_, files_holder);
         }
+#else
+        std::set<std::string> partition_ids;
+        std::vector<meta::CollectionSchema> partition_array;
+        status = meta_ptr_->ShowPartitions(collection_id, partition_array);
+        for (auto& id : partition_array) {
+            partition_ids.insert(id.collection_id_);
+        }
+
+        status = meta_ptr_->FilesToSearchEx(collection_id, partition_ids, files_holder);
+#endif
 
         if (files_holder.HoldFiles().empty()) {
             return Status::OK();  // no files to search
