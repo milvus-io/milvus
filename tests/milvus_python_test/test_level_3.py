@@ -45,9 +45,9 @@ class TestCreateBase:
 
         # restart server
         if restart_server(args["service_name"]):
-            logging.getLogger.info("Restart success") 
+            logging.getLogger().info("Restart success") 
         else:
-            logging.getLogger.info("Restart failed")
+            logging.getLogger().info("Restart failed")
         # assert row count again
         status, res = connect.count_entities(collection)
         logging.getLogger().info(status)
