@@ -22,6 +22,10 @@
 namespace milvus {
 namespace tracing {
 
+const char* TRACER_LIBRARY_CONFIG_NAME = "tracer_library";
+const char* TRACER_CONFIGURATION_CONFIG_NAME = "tracer_configuration";
+const char* TRACE_CONTEXT_HEADER_CONFIG_NAME = "TraceContextHeaderName";
+
 const char* TracerUtil::tracer_context_header_name_;
 
 void

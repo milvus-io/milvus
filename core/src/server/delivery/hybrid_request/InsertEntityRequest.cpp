@@ -132,7 +132,7 @@ InsertEntityRequest::OnExecute() {
         // TODO(yukun): check dimension and metric_type
 
         // step 5: insert entities
-        auto vec_count = static_cast<uint64_t>(vector_datas_it->second.vector_count_);
+        // auto vec_count = static_cast<uint64_t>(vector_datas_it->second.vector_count_);
 
         engine::Entity entity;
         entity.entity_count_ = row_num_;
