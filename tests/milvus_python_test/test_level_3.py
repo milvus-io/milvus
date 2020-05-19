@@ -49,7 +49,8 @@ class TestCreateBase:
         else:
             logging.getLogger().info("Restart failed")
         # assert row count again
-        status, res = connect.count_entities(collection)
+        new_connect = get_milvus(args["ip"], args["port"], handler=args["handler"]) 
+        status, res = new_connect.count_entities(collection)
         logging.getLogger().info(status)
         logging.getLogger().info(res)
         assert status.OK()

@@ -639,7 +639,7 @@ def restart_server(helm_release_name):
             logging.error("Helm upgrade to %d failed" % replica_num)
         else:
             res = True
-        time.sleep(15)
+            time.sleep(15)
         if res is False:
             return res
     logging.error(res)
