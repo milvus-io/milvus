@@ -4,6 +4,7 @@ Please mark all change in change log and use the issue from GitHub
 # Milvus 0.10.0 (TBD)
 
 ## Bug
+-   \#2378 Duplicate data after server restart
 
 ## Feature
 -   \#2363 Update branch version
