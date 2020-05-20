@@ -673,6 +673,7 @@ def restart_server(helm_release_name):
                     logging.error("Restart pod: %s timeout" % pod_name_tmp)
                     res = False
                     return res
+        time.sleep(600)
     else:
         logging.error("Pod: %s not found" % helm_release_name)
         res = False
