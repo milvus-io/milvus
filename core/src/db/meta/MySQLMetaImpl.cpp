@@ -1535,8 +1535,8 @@ MySQLMetaImpl::ShowPartitions(const std::string& collection_id,
 
             mysqlpp::Query statement = connectionPtr->query();
             statement << "SELECT table_id, id, state, dimension, created_on, flag, index_file_size,"
-                      << " engine_type, index_params, metric_type, partition_tag, version FROM " << META_TABLES
-                      << " WHERE owner_table = " << mysqlpp::quote << collection_id << " AND state <> "
+                      << " engine_type, index_params, metric_type, partition_tag, version, flush_lsn FROM "
+                      << META_TABLES << " WHERE owner_table = " << mysqlpp::quote << collection_id << " AND state <> "
                       << std::to_string(CollectionSchema::TO_DELETE) << ";";
 
             LOG_ENGINE_DEBUG_ << "ShowPartitions: " << statement.str();
@@ -1559,6 +1559,7 @@ MySQLMetaImpl::ShowPartitions(const std::string& collection_id,
             partition_schema.owner_collection_ = collection_id;
             resRow["partition_tag"].to_string(partition_schema.partition_tag_);
             resRow["version"].to_string(partition_schema.version_);
+            partition_schema.flush_lsn_ = resRow["flush_lsn"];
 
             partition_schema_array.emplace_back(partition_schema);
         }
