@@ -51,7 +51,6 @@ class TestCreateBase:
         # assert row count again
 
         # debug
-        time.sleep(600)
         new_connect = get_milvus(args["ip"], args["port"], handler=args["handler"]) 
         status, res = new_connect.count_entities(collection)
         logging.getLogger().info(status)

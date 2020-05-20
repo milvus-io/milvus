@@ -629,18 +629,46 @@ def assert_equal_vector(v1, v2):
 
 def restart_server(helm_release_name):
     res = False
-    chart_file = "../../milvus-helm/"
+    timeout = 120
+    from kubernetes import client, config
+    client.rest.logger.setLevel(logging.WARNING)
+
     namespace = "milvus"
-    # reset replica: 0
-    for replica_num in [0, 1]:
-        cmd = "helm upgrade %s %s --set replicas=%d -n %s" % (helm_release_name, chart_file, replica_num, namespace)
-        logging.error(cmd)
-        if os.system(cmd):
-            logging.error("Helm upgrade to %d failed" % replica_num)
-        else:
-            res = True
-            time.sleep(15)
-        if res is False:
+    # service_name = "%s.%s.svc.cluster.local" % (helm_release_name, namespace)
+    config.load_kube_config()
+    v1 = client.CoreV1Api()
+    pod_name = None
+    # config_map_names = v1.list_namespaced_config_map(namespace, pretty='true')
+    # body = {"replicas": 0}
+    pods = v1.list_namespaced_pod(namespace)
+    for i in pods.items:
+        if i.metadata.name.find(helm_release_name) != -1 and i.metadata.name.find("mysql") == -1:
+            pod_name = i.metadata.name
+            # v1.patch_namespaced_config_map(config_map_name, namespace, body, pretty='true')
+    # status_res = v1.read_namespaced_service_status(helm_release_name, namespace, pretty='true')
+    # print(status_res)
+    if pod_name is not None:
+        try:
+            v1.delete_namespaced_pod(pod_name, namespace)
+        except Exception as e:
+            logging.error(str(e))
+            logging.error("Exception when calling CoreV1Api->delete_namespaced_pod")
             return res
-    logging.error(res)
-    return res
+        time.sleep(5)
+        # check if restart successfully
+        pods = v1.list_namespaced_pod(namespace)
+        for i in pods.items:
+            pod_name_tmp = i.metadata.name
+            if pod_name_tmp.find(helm_release_name) != -1:
+                logging.debug(pod_name_tmp)
+                start_time = time.time()
+                while time.time() - start_time > timeout:
+                    status_res = v1.read_namespaced_pod_status(pod_name_tmp, namespace, pretty='true')
+                    if status_res.status.phase == "Running":
+                        break
+                    time.sleep(1)
+                if time.time() - start_time > timeout:
+                    logging.error("Restart pod: %s timeout" % pod_name_tmp)
+    else:
+        logging.error("Pod: %s not found" % helm_release_name)
+        return res
