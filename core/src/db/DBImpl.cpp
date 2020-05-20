@@ -1223,6 +1223,11 @@ DBImpl::GetEntitiesByID(const std::string& collection_id, const milvus::engine::
 
     std::vector<meta::CollectionSchema> partition_array;
     status = meta_ptr_->ShowPartitions(collection_id, partition_array);
+    if (!status.ok()) {
+        std::string err_msg = "Failed to get partitions for GetEntitiesByID: " + status.message();
+        LOG_ENGINE_ERROR_ << err_msg;
+        return status;
+    }
     for (auto& schema : partition_array) {
         status = meta_ptr_->FilesByType(schema.collection_id_, file_types, files_holder);
         if (!status.ok()) {

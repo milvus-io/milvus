@@ -102,7 +102,9 @@ HybridSearchRequest::OnExecute() {
             }
         } else {
             for (auto& field_schema : fields_schema.fields_schema_) {
-                field_names_.emplace_back(field_schema.field_name_);
+                if (field_schema.field_type_ != (int32_t)engine::DataType::VECTOR) {
+                    field_names_.emplace_back(field_schema.field_name_);
+                }
             }
         }
 

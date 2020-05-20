@@ -99,7 +99,6 @@ CopyRowRecords(const google::protobuf::RepeatedPtrField<::milvus::grpc::RowRecor
                engine::VectorsData& vectors) {
     // step 1: copy vector data
     int64_t float_data_size = 0, binary_data_size = 0;
-    auto size = grpc_records.size();
     for (auto& record : grpc_records) {
         float_data_size += record.float_data_size();
         binary_data_size += record.binary_data().size();
