@@ -12,6 +12,10 @@
 #include "CompoundOperations.h"
 #include "Snapshots.h"
 
+namespace milvus {
+namespace engine {
+namespace snapshot {
+
 BuildOperation::BuildOperation(const OperationContext& context, ScopedSnapshotT prev_ss)
     : BaseT(context, prev_ss) {};
 BuildOperation::BuildOperation(const OperationContext& context, ID_TYPE collection_id, ID_TYPE commit_id)
@@ -215,3 +219,7 @@ MergeOperation::DoExecute() {
     std::any_cast<CollectionCommitPtr>(steps_[i++])->Activate();
     return true;
 }
+
+} // snapshot
+} // engine
+} // milvus

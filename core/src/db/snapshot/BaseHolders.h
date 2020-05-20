@@ -20,6 +20,10 @@
 #include <mutex>
 #include <thread>
 
+namespace milvus {
+namespace engine {
+namespace snapshot {
+
 template <typename ResourceT, typename Derived>
 class ResourceHolder {
 public:
@@ -56,5 +60,9 @@ protected:
     std::mutex mutex_;
     IdMapT id_map_;
 };
+
+} // snapshot
+} // engine
+} // milvus
 
 #include "BaseHolders.inl"

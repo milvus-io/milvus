@@ -25,6 +25,10 @@
 
 using milvus::engine::utils::GetMicroSecTimeStamp;
 
+namespace milvus {
+namespace engine {
+namespace snapshot {
+
 class MappingsField {
 public:
     MappingsField(const MappingT& mappings = {}) : mappings_(mappings) {
@@ -388,3 +392,7 @@ public:
 };
 
 using SegmentFilePtr = SegmentFile::Ptr;
+
+} // snapshot
+} // engine
+} // milvus

@@ -14,6 +14,10 @@
 #include "ResourceOperations.h"
 #include "Snapshot.h"
 
+namespace milvus {
+namespace engine {
+namespace snapshot {
+
 class BuildOperation : public Operations {
 public:
     using BaseT = Operations;
@@ -56,3 +60,7 @@ public:
     SegmentPtr NewSegment();
     SegmentFilePtr NewSegmentFile(const SegmentFileContext& context);
 };
+
+} // snapshot
+} // engine
+} // milvus

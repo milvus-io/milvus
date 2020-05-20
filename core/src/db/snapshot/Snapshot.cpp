@@ -2,6 +2,10 @@
 #include "Store.h"
 #include "ResourceHolders.h"
 
+namespace milvus {
+namespace engine {
+namespace snapshot {
+
 
 void
 Snapshot::DumpSegments(const std::string& tag) {
@@ -187,3 +191,7 @@ Snapshot::Snapshot(ID_TYPE id) {
 
     RefAll();
 };
+
+} // snapshot
+} // engine
+} // milvus

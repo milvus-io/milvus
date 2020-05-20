@@ -24,6 +24,10 @@
 #include <atomic>
 #include <chrono>
 
+namespace milvus {
+namespace engine {
+namespace snapshot {
+
 
 class Snapshot : public ReferenceProxy {
 public:
@@ -196,3 +200,7 @@ private:
 
 using ScopedSnapshotT = ScopedResource<Snapshot>;
 using GCHandler = std::function<void(Snapshot::Ptr)>;
+
+} // snapshot
+} // engine
+} // milvus

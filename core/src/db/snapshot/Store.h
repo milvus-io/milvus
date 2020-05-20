@@ -24,6 +24,10 @@
 #include <functional>
 #include <iomanip>
 
+namespace milvus {
+namespace engine {
+namespace snapshot {
+
 template <class T, class Tuple>
 struct Index;
 
@@ -417,3 +421,7 @@ private:
     std::map<std::string, CollectionPtr> name_collections_;
     std::unordered_map<std::type_index, std::function<ID_TYPE(std::any const&)>> any_vistors_;
 };
+
+} // snapshot
+} // engine
+} // milvus

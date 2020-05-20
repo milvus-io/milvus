@@ -13,6 +13,10 @@
 #include "Store.h"
 #include "ResourceHolders.h"
 
+namespace milvus {
+namespace engine {
+namespace snapshot {
+
 SnapshotHolder::SnapshotHolder(ID_TYPE collection_id, GCHandler gc_handler, size_t num_versions)
     : collection_id_(collection_id),
       num_versions_(num_versions),
@@ -128,3 +132,7 @@ SnapshotHolder::LoadNoLock(ID_TYPE collection_commit_id) {
     if (!entry) return;
     AddNoLock(collection_commit_id);
 }
+
+} // snapshot
+} // engine
+} // milvus

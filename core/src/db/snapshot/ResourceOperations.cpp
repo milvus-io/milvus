@@ -11,6 +11,10 @@
 
 #include "ResourceOperations.h"
 
+namespace milvus {
+namespace engine {
+namespace snapshot {
+
 bool
 CollectionCommitOperation::DoExecute() {
     auto prev_resource = GetPrevResource();
@@ -88,3 +92,7 @@ SegmentFileOperation::DoExecute() {
     AddStep(*resource_);
     return true;
 }
+
+} // snapshot
+} // engine
+} // milvus

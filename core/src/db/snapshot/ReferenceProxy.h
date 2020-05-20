@@ -15,6 +15,9 @@
 #include <memory>
 #include <any>
 
+namespace milvus {
+namespace engine {
+namespace snapshot {
 
 using OnNoRefCBF = std::function<void(void)>;
 
@@ -38,3 +41,7 @@ protected:
 };
 
 using ReferenceResourcePtr = std::shared_ptr<ReferenceProxy>;
+
+} // snapshot
+} // engine
+} // milvus

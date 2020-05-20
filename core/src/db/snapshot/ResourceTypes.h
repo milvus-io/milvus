@@ -15,6 +15,10 @@
 #include <vector>
 #include <set>
 
+namespace milvus {
+namespace engine {
+namespace snapshot {
+
 using ID_TYPE = int64_t;
 using NUM_TYPE = int64_t;
 using FTYPE_TYPE = int64_t;
@@ -28,3 +32,7 @@ enum State {
     ACTIVE = 1,
     DEACTIVE = 2
 };
+
+} // snapshot
+} // engine
+} // milvus

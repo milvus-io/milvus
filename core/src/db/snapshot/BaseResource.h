@@ -13,6 +13,10 @@
 #include "ReferenceProxy.h"
 #include <string>
 
+namespace milvus {
+namespace engine {
+namespace snapshot {
+
 template <typename ...Fields>
 class DBBaseResource : public ReferenceProxy,
                        public Fields... {
@@ -35,3 +39,7 @@ DBBaseResource<Fields...>::DBBaseResource(const Fields&... fields) : Fields(fiel
 template <typename ...Fields>
 std::string DBBaseResource<Fields...>::ToString() const {
 }
+
+} // snapshot
+} // engine
+} // milvus

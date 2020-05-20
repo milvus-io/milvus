@@ -13,6 +13,10 @@
 #include "Store.h"
 #include <iostream>
 
+namespace milvus {
+namespace engine {
+namespace snapshot {
+
 template <typename ResourceT, typename Derived>
 void ResourceHolder<ResourceT, Derived>::Dump(const std::string& tag) {
     std::unique_lock<std::mutex> lock(mutex_);
@@ -104,3 +108,7 @@ bool ResourceHolder<ResourceT, Derived>::Add(typename ResourceHolder<ResourceT, 
     std::unique_lock<std::mutex> lock(mutex_);
     return AddNoLock(resource);
 }
+
+} // snapshot
+} // engine
+} // milvus

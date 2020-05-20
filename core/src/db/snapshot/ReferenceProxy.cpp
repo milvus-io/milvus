@@ -13,6 +13,10 @@
 #include <assert.h>
 #include <iostream>
 
+namespace milvus {
+namespace engine {
+namespace snapshot {
+
 
 void ReferenceProxy::Ref() {
     refcnt_ += 1;
@@ -37,3 +41,7 @@ void ReferenceProxy::RegisterOnNoRefCB(OnNoRefCBF cb) {
 ReferenceProxy::~ReferenceProxy() {
     /* OnDeRef(); */
 }
+
+} // snapshot
+} // engine
+} // milvus

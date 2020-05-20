@@ -12,6 +12,10 @@
 #pragma once
 #include "Operations.h"
 
+namespace milvus {
+namespace engine {
+namespace snapshot {
+
 class CollectionCommitOperation : public CommitOperation<CollectionCommit> {
 public:
     using BaseT = CommitOperation<CollectionCommit>;
@@ -102,3 +106,7 @@ public:
 protected:
     SegmentFileContext context_;
 };
+
+} // snapshot
+} // engine
+} // milvus

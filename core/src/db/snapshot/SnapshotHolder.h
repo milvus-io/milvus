@@ -12,6 +12,10 @@
 #pragma once
 #include "Snapshot.h"
 
+namespace milvus {
+namespace engine {
+namespace snapshot {
+
 class SnapshotHolder {
 public:
     using ScopedPtr = std::shared_ptr<ScopedSnapshotT>;
@@ -62,3 +66,7 @@ private:
 };
 
 using SnapshotHolderPtr = std::shared_ptr<SnapshotHolder>;
+
+} // snapshot
+} // engine
+} // milvus

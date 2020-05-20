@@ -18,6 +18,10 @@
 #include <vector>
 #include <any>
 
+namespace milvus {
+namespace engine {
+namespace snapshot {
+
 using StepsT = std::vector<std::any>;
 
 enum OpStatus {
@@ -98,3 +102,7 @@ public:
 protected:
     typename ResourceT::Ptr resource_;
 };
+
+} // snapshot
+} // engine
+} // milvus

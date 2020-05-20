@@ -17,6 +17,10 @@
 #include <vector>
 #include <set>
 
+namespace milvus {
+namespace engine {
+namespace snapshot {
+
 using CollectionScopedT = ScopedResource<Collection>;
 using CollectionCommitScopedT = ScopedResource<CollectionCommit>;
 
@@ -41,3 +45,7 @@ using SegmentFileScopedT = ScopedResource<SegmentFile>;
 using SegmentsT = std::map<ID_TYPE, SegmentScopedT>;
 using SegmentCommitsT = std::map<ID_TYPE, SegmentCommitScopedT>;
 using SegmentFilesT = std::map<ID_TYPE, SegmentFileScopedT>;
+
+} // snapshot
+} // engine
+} // milvus

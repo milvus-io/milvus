@@ -13,6 +13,10 @@
 
 #include <memory>
 
+namespace milvus {
+namespace engine {
+namespace snapshot {
+
 template <typename ResourceT>
 class ScopedResource {
 public:
@@ -88,3 +92,7 @@ ScopedResource<ResourceT>::~ScopedResource() {
         res_->UnRef();
     }
 }
+
+} // snapshot
+} // engine
+} // milvus

@@ -12,6 +12,10 @@
 #include "Operations.h"
 #include "Snapshots.h"
 
+namespace milvus {
+namespace engine {
+namespace snapshot {
+
 Operations::Operations(const OperationContext& context, ScopedSnapshotT prev_ss)
     : context_(context), prev_ss_(prev_ss) {}
 
@@ -74,3 +78,7 @@ Operations::PostExecute() {
     if (!ok) status_ = OP_FAIL_FLUSH_META;
     return ok;
 }
+
+} // snapshot
+} // engine
+} // milvus

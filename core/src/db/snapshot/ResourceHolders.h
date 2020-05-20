@@ -11,6 +11,10 @@
 #include <mutex>
 #include <thread>
 
+namespace milvus {
+namespace engine {
+namespace snapshot {
+
 
 class CollectionsHolder : public ResourceHolder<Collection, CollectionsHolder> {
 public:
@@ -49,3 +53,7 @@ class SegmentsHolder : public ResourceHolder<Segment, SegmentsHolder> {};
 class SegmentCommitsHolder : public ResourceHolder<SegmentCommit, SegmentCommitsHolder> {};
 
 class SegmentFilesHolder : public ResourceHolder<SegmentFile, SegmentFilesHolder> {};
+
+} // snapshot
+} // engine
+} // milvus

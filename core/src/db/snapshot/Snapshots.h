@@ -20,6 +20,10 @@
 #include <thread>
 #include <atomic>
 
+namespace milvus {
+namespace engine {
+namespace snapshot {
+
 
 class Snapshots {
 public:
@@ -57,3 +61,7 @@ private:
     std::map<std::string, ID_TYPE> name_id_map_;
     std::vector<Snapshot::Ptr> to_release_;
 };
+
+} // snapshot
+} // engine
+} // milvus

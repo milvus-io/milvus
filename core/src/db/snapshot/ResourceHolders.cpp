@@ -14,6 +14,10 @@
 #include <sstream>
 #include <iostream>
 
+namespace milvus {
+namespace engine {
+namespace snapshot {
+
 CollectionsHolder::ResourcePtr
 CollectionsHolder::Load(const std::string& name) {
     auto& store = Store::GetInstance();
@@ -66,3 +70,7 @@ bool CollectionsHolder::Release(ID_TYPE id) {
     name_map_.erase(it->second->GetName());
     return true;
 }
+
+} // snapshot
+} // engine
+} // milvus

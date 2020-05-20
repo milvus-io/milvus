@@ -5,6 +5,10 @@
 #include <iostream>
 #include <vector>
 
+namespace milvus {
+namespace engine {
+namespace snapshot {
+
 struct SegmentFileContext {
     std::string field_name;
     std::string field_element_name;
@@ -32,3 +36,7 @@ struct OperationContext {
 
     SegmentFile::VecT new_segment_files;
 };
+
+} // snapshot
+} // engine
+} // milvus

@@ -1,6 +1,10 @@
 #include "Snapshots.h"
 #include "Store.h"
 
+namespace milvus {
+namespace engine {
+namespace snapshot {
+
 template<typename ...ResourceT>
 bool Snapshots::Flush(ResourceT&&... resources) {
     auto t = std::make_tuple(resources...);
@@ -125,3 +129,7 @@ Snapshots::SnapshotGCCallback(Snapshot::Ptr ss_ptr) {
     ss_ptr->UnRef();
     std::cout << &(*ss_ptr) << " Snapshot " << ss_ptr->GetID() << " RefCnt = " << ss_ptr->RefCnt() << " To be removed" << std::endl;
 }
+
+} // snapshot
+} // engine
+} // milvus

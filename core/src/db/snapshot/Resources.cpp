@@ -14,6 +14,10 @@
 #include <sstream>
 #include <iostream>
 
+namespace milvus {
+namespace engine {
+namespace snapshot {
+
 
 Collection::Collection(const std::string& name, ID_TYPE id, State status, TS_TYPE created_on) :
     BaseT(name, id, status, created_on) {
@@ -118,3 +122,7 @@ SegmentFile::SegmentFile(ID_TYPE partition_id, ID_TYPE segment_id, ID_TYPE field
             State status, TS_TYPE created_on) :
     BaseT(partition_id, segment_id, field_element_id, id, status, created_on) {
 }
+
+} // snapshot
+} // engine
+} // milvus
