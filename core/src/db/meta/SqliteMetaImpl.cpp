@@ -1246,7 +1246,7 @@ SqliteMetaImpl::FilesToMerge(const std::string& collection_id, FilesHolder& file
         for (auto& file : selected) {
             SegmentSchema collection_file;
             collection_file.file_size_ = std::get<5>(file);
-            if (collection_file.file_size_ >= collection_schema.index_file_size_) {
+            if (collection_file.file_size_ >= (size_t)(collection_schema.index_file_size_)) {
                 continue;  // skip large file
             }
 

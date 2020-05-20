@@ -204,7 +204,7 @@ PrometheusMetrics::CPUCoreUsagePercentSet() {
 
     std::vector<double> cpu_core_percent = server::SystemInfo::GetInstance().CPUCorePercent();
 
-    for (int i = 0; i < cpu_core_percent.size(); ++i) {
+    for (size_t i = 0; i < cpu_core_percent.size(); ++i) {
         prometheus::Gauge& core_percent = CPU_.Add({{"CPU", std::to_string(i)}});
         core_percent.Set(cpu_core_percent[i]);
     }
@@ -218,7 +218,7 @@ PrometheusMetrics::GPUTemperature() {
 
     std::vector<int64_t> GPU_temperatures = server::SystemInfo::GetInstance().GPUTemperature();
 
-    for (int i = 0; i < GPU_temperatures.size(); ++i) {
+    for (size_t i = 0; i < GPU_temperatures.size(); ++i) {
         prometheus::Gauge& gpu_temp = GPU_temperature_.Add({{"GPU", std::to_string(i)}});
         gpu_temp.Set(GPU_temperatures[i]);
     }
@@ -233,7 +233,7 @@ PrometheusMetrics::CPUTemperature() {
     std::vector<float> CPU_temperatures = server::SystemInfo::GetInstance().CPUTemperature();
 
     float avg_cpu_temp = 0;
-    for (int i = 0; i < CPU_temperatures.size(); ++i) {
+    for (size_t i = 0; i < CPU_temperatures.size(); ++i) {
         avg_cpu_temp += CPU_temperatures[i];
     }
     avg_cpu_temp /= CPU_temperatures.size();

@@ -52,10 +52,6 @@ TEST_F(ConfigTest, CONFIG_TEST) {
 
     milvus::server::ConfigNode& root_config = config_mgr->GetRootNode();
     milvus::server::ConfigNode& server_config = root_config.GetChild("server_config");
-    milvus::server::ConfigNode& db_config = root_config.GetChild("db_config");
-    milvus::server::ConfigNode& metric_config = root_config.GetChild("metric_config");
-    milvus::server::ConfigNode& cache_config = root_config.GetChild("cache_config");
-    milvus::server::ConfigNode& wal_config = root_config.GetChild("wal_config");
     milvus::server::ConfigNode invalid_config = root_config.GetChild("invalid_config");
 
     const auto& im_config_mgr = *static_cast<milvus::server::YamlConfigMgr*>(config_mgr);

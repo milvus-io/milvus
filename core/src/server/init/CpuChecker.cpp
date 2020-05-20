@@ -29,8 +29,6 @@ Status
 CpuChecker::CheckCpuInstructionSet() {
     std::vector<std::string> instruction_sets;
 
-    auto& instruction_set_inst = faiss::InstructionSet::GetInstance();
-
     bool support_avx512 = faiss::support_avx512();
     fiu_do_on("CpuChecker.CheckCpuInstructionSet.not_support_avx512", support_avx512 = false);
     if (support_avx512) {

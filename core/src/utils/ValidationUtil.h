@@ -72,7 +72,7 @@ class ValidationUtil {
 
 #ifdef MILVUS_GPU_VERSION
     static Status
-    GetGpuMemory(int32_t gpu_index, size_t& memory);
+    GetGpuMemory(int32_t gpu_index, int64_t& memory);
 #endif
 
     static Status

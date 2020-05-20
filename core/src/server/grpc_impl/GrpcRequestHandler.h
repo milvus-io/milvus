@@ -57,7 +57,7 @@ namespace grpc {
 ::milvus::grpc::ErrorCode
 ErrorMap(ErrorCode code);
 
-static const char* EXTRA_PARAM_KEY = "params";
+extern const char* EXTRA_PARAM_KEY;
 
 class GrpcRequestHandler final : public ::milvus::grpc::MilvusService::Service, public GrpcInterceptorHookHandler {
  public:
@@ -385,7 +385,7 @@ class GrpcRequestHandler final : public ::milvus::grpc::MilvusService::Service, 
     //                       const ::milvus::grpc::HDeleteByIDParam* request,
     //                       ::milvus::grpc::Status* response) override;
 
-    GrpcRequestHandler&
+    void
     RegisterRequestHandler(const RequestHandler& handler) {
         request_handler_ = handler;
     }

@@ -87,7 +87,7 @@ Vectors::Erase(std::vector<int32_t>& offsets) {
     auto loop_size = uids_.size();
 
     for (size_t i = 0; i < loop_size;) {
-        while (i == *skip && skip != offsets.cend()) {
+        while (i == (size_t)(*skip) && skip != offsets.cend()) {
             ++i;
             ++skip;
         }

@@ -32,6 +32,8 @@ namespace milvus {
 namespace server {
 namespace grpc {
 
+const char* EXTRA_PARAM_KEY = "params";
+
 ::milvus::grpc::ErrorCode
 ErrorMap(ErrorCode code) {
     static const std::map<ErrorCode, ::milvus::grpc::ErrorCode> code_map = {
@@ -897,7 +899,7 @@ GrpcRequestHandler::CreateHybridCollection(::grpc::ServerContext* context, const
     std::vector<std::pair<std::string, engine::meta::hybrid::DataType>> field_types;
     std::vector<std::pair<std::string, uint64_t>> vector_dimensions;
     std::vector<std::pair<std::string, std::string>> field_params;
-    for (uint64_t i = 0; i < request->fields_size(); ++i) {
+    for (int i = 0; i < request->fields_size(); ++i) {
         if (request->fields(i).type().has_vector_param()) {
             auto vector_dimension =
                 std::make_pair(request->fields(i).name(), request->fields(i).type().vector_param().dimension());
@@ -933,6 +935,7 @@ GrpcRequestHandler::DescribeHybridCollection(::grpc::ServerContext* context,
     LOG_SERVER_INFO_ << LogOut("Request [%s] %s begin.", GetContext(context)->RequestID().c_str(), __func__);
     CHECK_NULLPTR_RETURN(request);
     LOG_SERVER_INFO_ << LogOut("Request [%s] %s end.", GetContext(context)->RequestID().c_str(), __func__);
+    return ::grpc::Status::OK;
 }
 
 ::grpc::Status
@@ -952,12 +955,12 @@ GrpcRequestHandler::InsertEntity(::grpc::ServerContext* context, const ::milvus:
     std::vector<std::string> field_names;
     auto field_size = request->entities().field_names_size();
     field_names.resize(field_size - 1);
-    for (uint64_t i = 0; i < field_size - 1; ++i) {
+    for (int i = 0; i < field_size - 1; ++i) {
         field_names[i] = request->entities().field_names(i);
     }
 
     auto vector_size = request->entities().result_values_size();
-    for (uint64_t i = 0; i < vector_size; ++i) {
+    for (int i = 0; i < vector_size; ++i) {
         engine::VectorsData vectors;
         CopyRowRecords(request->entities().result_values(i).vector_value().value(), request->entity_id_array(),
                        vectors);
@@ -983,7 +986,7 @@ void
 DeSerialization(const ::milvus::grpc::GeneralQuery& general_query, query::BooleanQueryPtr& boolean_clause) {
     if (general_query.has_boolean_query()) {
         boolean_clause->SetOccur((query::Occur)general_query.boolean_query().occur());
-        for (uint64_t i = 0; i < general_query.boolean_query().general_query_size(); ++i) {
+        for (int i = 0; i < general_query.boolean_query().general_query_size(); ++i) {
             if (general_query.boolean_query().general_query(i).has_boolean_query()) {
                 query::BooleanQueryPtr query = std::make_shared<query::BooleanQuery>();
                 DeSerialization(general_query.boolean_query().general_query(i), query);
@@ -1006,7 +1009,7 @@ DeSerialization(const ::milvus::grpc::GeneralQuery& general_query, query::Boolea
                     range_query->field_name = query.range_query().field_name();
                     range_query->boost = query.range_query().boost();
                     range_query->compare_expr.resize(query.range_query().operand_size());
-                    for (uint64_t j = 0; j < query.range_query().operand_size(); ++j) {
+                    for (int j = 0; j < query.range_query().operand_size(); ++j) {
                         range_query->compare_expr[j].compare_operator =
                             query::CompareOperator(query.range_query().operand(j).operator_());
                         range_query->compare_expr[j].operand = query.range_query().operand(j).operand();
@@ -1070,7 +1073,7 @@ GrpcRequestHandler::HybridSearch(::grpc::ServerContext* context, const ::milvus:
 
     std::vector<std::string> partition_list;
     partition_list.resize(request->partition_tag_array_size());
-    for (uint64_t i = 0; i < request->partition_tag_array_size(); ++i) {
+    for (int i = 0; i < request->partition_tag_array_size(); ++i) {
         partition_list[i] = request->partition_tag_array(i);
     }
 

@@ -216,7 +216,7 @@ ValidationUtil::ValidateIndexParams(const milvus::json& index_params,
             // special check for 'm' parameter
             std::vector<int64_t> resset;
             milvus::knowhere::IVFPQConfAdapter::GetValidMList(collection_schema.dimension_, resset);
-            int64_t m_value = index_params[index_params, knowhere::IndexParams::m];
+            int64_t m_value = index_params[knowhere::IndexParams::m];
             if (resset.empty()) {
                 std::string msg = "Invalid collection dimension, unable to get reasonable values for 'm'";
                 LOG_SERVER_ERROR_ << msg;
@@ -504,7 +504,7 @@ ValidationUtil::ValidateGpuIndex(int32_t gpu_index) {
 #ifdef MILVUS_GPU_VERSION
 
 Status
-ValidationUtil::GetGpuMemory(int32_t gpu_index, size_t& memory) {
+ValidationUtil::GetGpuMemory(int32_t gpu_index, int64_t& memory) {
     fiu_return_on("ValidationUtil.GetGpuMemory.return_error", Status(SERVER_UNEXPECTED_ERROR, ""));
 
     cudaDeviceProp deviceProp;
