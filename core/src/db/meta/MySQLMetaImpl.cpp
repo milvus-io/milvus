@@ -582,7 +582,7 @@ MySQLMetaImpl::HasCollection(const std::string& collection_id, bool& has_or_not,
 }
 
 Status
-MySQLMetaImpl::AllCollections(std::vector<CollectionSchema>& collection_schema_array) {
+MySQLMetaImpl::AllCollections(std::vector<CollectionSchema>& collection_schema_array, bool is_root) {
     try {
         server::MetricCollector metric;
         mysqlpp::StoreQueryResult res;
@@ -599,8 +599,12 @@ MySQLMetaImpl::AllCollections(std::vector<CollectionSchema>& collection_schema_a
             mysqlpp::Query statement = connectionPtr->query();
             statement << "SELECT id, table_id, dimension, engine_type, index_params, index_file_size, metric_type"
                       << " ,owner_table, partition_tag, version, flush_lsn"
-                      << " FROM " << META_TABLES << " WHERE state <> " << std::to_string(CollectionSchema::TO_DELETE)
-                      << " AND owner_table = \"\";";
+                      << " FROM " << META_TABLES << " WHERE state <> " << std::to_string(CollectionSchema::TO_DELETE);
+            if (is_root) {
+                statement << " AND owner_table = \"\";";
+            } else {
+                statement << ";";
+            }
 
             LOG_ENGINE_DEBUG_ << "AllCollections: " << statement.str();
 
