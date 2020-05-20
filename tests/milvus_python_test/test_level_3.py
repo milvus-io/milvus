@@ -41,6 +41,7 @@ class TestCreateBase:
         status = connect.flush([collection])
         assert status.OK()
         status, res = connect.count_entities(collection)
+        logging.getLogger().info(res)
         assert res == nq
 
         # restart server
