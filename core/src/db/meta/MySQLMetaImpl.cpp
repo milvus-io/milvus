@@ -2755,6 +2755,7 @@ MySQLMetaImpl::SetGlobalLastLSN(uint64_t lsn) {
             }
 
             bool first_create = false;
+            uint64_t last_lsn = 0;
             {
                 mysqlpp::StoreQueryResult res;
                 mysqlpp::Query statement = connectionPtr->query();
@@ -2762,6 +2763,8 @@ MySQLMetaImpl::SetGlobalLastLSN(uint64_t lsn) {
                 res = statement.store();
                 if (res.num_rows() == 0) {
                     first_create = true;
+                } else {
+                    last_lsn = res[0]["global_lsn"];
                 }
             }
 
@@ -2773,7 +2776,7 @@ MySQLMetaImpl::SetGlobalLastLSN(uint64_t lsn) {
                 if (!statement.exec()) {
                     return HandleException("QUERY ERROR WHEN SET GLOBAL LSN", statement.error());
                 }
-            } else {
+            } else if (lsn > last_lsn) {
                 mysqlpp::Query statement = connectionPtr->query();
                 statement << "UPDATE " << META_ENVIRONMENT << " SET global_lsn = " << lsn << ";";
                 LOG_ENGINE_DEBUG_ << "SetGlobalLastLSN: " << statement.str();
@@ -2783,8 +2786,6 @@ MySQLMetaImpl::SetGlobalLastLSN(uint64_t lsn) {
                 }
             }
         }  // Scoped Connection
-
-        LOG_ENGINE_DEBUG_ << "Successfully update global_lsn: " << lsn;
     } catch (std::exception& e) {
         return HandleException("Failed to set global lsn", e.what());
     }

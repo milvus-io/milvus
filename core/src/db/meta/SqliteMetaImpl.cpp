@@ -1941,7 +1941,7 @@ SqliteMetaImpl::SetGlobalLastLSN(uint64_t lsn) {
             ConnectorPtr->insert(env);
         } else {
             uint64_t last_lsn = std::get<0>(selected[0]);
-            if (lsn == last_lsn) {
+            if (lsn <= last_lsn) {
                 return Status::OK();
             }
 

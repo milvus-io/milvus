@@ -895,7 +895,7 @@ DBImpl::Flush(const std::string& collection_id) {
             swn_wal_.Notify();
             flush_req_swn_.Wait();
         }
-
+        StartMergeTask();
     } else {
         LOG_ENGINE_DEBUG_ << "MemTable flush";
         InternalFlush(collection_id);
@@ -922,6 +922,7 @@ DBImpl::Flush() {
             swn_wal_.Notify();
             flush_req_swn_.Wait();
         }
+        StartMergeTask();
     } else {
         LOG_ENGINE_DEBUG_ << "MemTable flush";
         InternalFlush();
@@ -1425,7 +1426,9 @@ DBImpl::DropIndex(const std::string& collection_id) {
     }
 
     LOG_ENGINE_DEBUG_ << "Drop index for collection: " << collection_id;
-    return DropCollectionIndexRecursively(collection_id);
+    auto status = DropCollectionIndexRecursively(collection_id);
+    StartMergeTask();  // merge small files after drop index
+    return status;
 }
 
 Status
@@ -2411,7 +2414,8 @@ Status
 DBImpl::ExecWalRecord(const wal::MXLogRecord& record) {
     fiu_return_on("DBImpl.ExexWalRecord.return", Status(););
 
-    auto collections_flushed = [&](const std::string collection_id, const std::set<std::string>& target_collection_names) -> uint64_t {
+    auto collections_flushed = [&](const std::string collection_id,
+                                   const std::set<std::string>& target_collection_names) -> uint64_t {
         uint64_t max_lsn = 0;
         if (options_.wal_enable_) {
             uint64_t lsn = 0;
