@@ -1734,6 +1734,8 @@ MySQLMetaImpl::FilesToSearchEx(const std::string& root_collection, const std::se
                 mysqlpp::ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab_);
 
                 bool is_null_connection = (connectionPtr == nullptr);
+                fiu_do_on("MySQLMetaImpl.FilesToSearch.null_connection", is_null_connection = true);
+                fiu_do_on("MySQLMetaImpl.FilesToSearch.throw_exception", throw std::exception(););
                 if (is_null_connection) {
                     return Status(DB_ERROR, "Failed to connect to meta server(mysql)");
                 }

@@ -415,6 +415,9 @@ DBImpl::PreloadCollection(const std::string& collection_id) {
     }
 
     status = meta_ptr_->FilesToSearchEx(collection_id, partition_ids, files_holder);
+    if (!status.ok()) {
+        return status;
+    }
 #endif
 
     int64_t size = 0;
@@ -1665,6 +1668,9 @@ DBImpl::Query(const std::shared_ptr<server::Context>& context, const std::string
         }
 
         status = meta_ptr_->FilesToSearchEx(collection_id, partition_ids, files_holder);
+        if (!status.ok()) {
+            return status;
+        }
 #endif
 
         if (files_holder.HoldFiles().empty()) {

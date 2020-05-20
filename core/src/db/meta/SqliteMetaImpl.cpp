@@ -1125,6 +1125,7 @@ SqliteMetaImpl::FilesToSearchEx(const std::string& root_collection,
                                 FilesHolder& files_holder) {
     try {
         server::MetricCollector metric;
+        fiu_do_on("SqliteMetaImpl.FilesToSearch.throw_exception", throw std::exception());
 
         // get root collection information
         CollectionSchema collection_schema;
