@@ -636,7 +636,6 @@ class TestCompactJAC:
                      'index_file_size': index_file_size,
                      'metric_type': MetricType.JACCARD}
             connect.create_collection(param)
-        time.sleep(6)
         for i in range(num_collections):
             status, ids = connect.insert(collection_name=collection_list[i], records=vectors)
             assert status.OK()
@@ -645,6 +644,8 @@ class TestCompactJAC:
             status = connect.flush([collection_list[i]])
             assert status.OK()
             status = connect.compact(collection_list[i])
+            assert status.OK()
+            status = connect.drop_collection(collection_list[i])
             assert status.OK()
 
     @pytest.mark.timeout(COMPACT_TIMEOUT)
