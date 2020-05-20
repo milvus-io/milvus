@@ -1535,10 +1535,6 @@ DBImpl::GetEntitiesByIdHelper(const std::string& collection_id, const milvus::en
                                 LOG_ENGINE_ERROR_ << status.message();
                                 return status;
                             }
-                            float f2;
-                            memcpy(&f2, raw_attr.data(), sizeof(float));
-                            int64_t f1;
-                            memcpy(&f1, raw_attr.data(), sizeof(int64_t));
                             raw_attrs.insert(std::make_pair(attr_it->first, raw_attr));
                         }
 
@@ -2057,8 +2053,14 @@ DBImpl::HybridQueryAsync(const std::shared_ptr<server::Context>& context, const 
     }
 
     // step 5: filter entities by field names
-    for (auto& name : field_names) {
-        for (auto attr : result.attrs_) {
+    std::vector<engine::AttrsData> filter_attrs;
+    for (auto attr : result.attrs_) {
+        AttrsData attrs_data;
+        attrs_data.attr_type_ = attr.attr_type_;
+        attrs_data.attr_count_ = attr.attr_count_;
+        attrs_data.id_array_ = attr.id_array_;
+        for (auto& name : field_names) {
+            attrs_data.attr_data_.insert(std::make_pair(name, attr.attr_data_.at(name)));
         }
     }
 

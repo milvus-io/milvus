@@ -34,12 +34,12 @@ static constexpr int64_t COLLECTION_DIM = 128;
 static constexpr int64_t SECONDS_EACH_HOUR = 3600;
 static constexpr int64_t FIELD_NUM = 4;
 static constexpr int64_t NQ = 10;
-static constexpr int64_t TOPK = 100;
+static constexpr int64_t TOPK = 10;
 
 void
 BuildCollectionSchema(milvus::engine::meta::CollectionSchema& collection_schema,
-                 milvus::engine::meta::hybrid::FieldsSchema& fields_schema,
-                 std::unordered_map<std::string, milvus::engine::meta::hybrid::DataType>& attr_type) {
+                      milvus::engine::meta::hybrid::FieldsSchema& fields_schema,
+                      std::unordered_map<std::string, milvus::engine::meta::hybrid::DataType>& attr_type) {
     collection_schema.dimension_ = COLLECTION_DIM;
     collection_schema.collection_id_ = COLLECTION_NAME;
 
@@ -47,7 +47,7 @@ BuildCollectionSchema(milvus::engine::meta::CollectionSchema& collection_schema,
     fields.resize(FIELD_NUM);
     for (uint64_t i = 0; i < FIELD_NUM; ++i) {
         fields[i].collection_id_ = COLLECTION_NAME;
-        fields[i].field_name_ = "field_" + std::to_string(i + 1);
+        fields[i].field_name_ = "field_" + std::to_string(i);
     }
     fields[0].field_type_ = (int)milvus::engine::meta::hybrid::DataType::INT32;
     fields[1].field_type_ = (int)milvus::engine::meta::hybrid::DataType::INT64;
@@ -94,10 +94,13 @@ BuildEntity(uint64_t n, uint64_t batch_index, milvus::engine::Entity& entity) {
     value_0.resize(n);
     value_1.resize(n);
     value_2.resize(n);
+
+    std::default_random_engine e;
+    std::uniform_real_distribution<float> u(0, 1);
     for (uint64_t i = 0; i < n; ++i) {
         value_0[i] = i;
         value_1[i] = i + n;
-        value_2[i] = (double)((i + 100) / (n + 1));
+        value_2[i] = u(e);
     }
     entity.entity_count_ = n;
     size_t attr_size = n * (sizeof(int64_t) + sizeof(double) + sizeof(int64_t));
@@ -143,7 +146,7 @@ ConstructGeneralQuery(milvus::query::GeneralQueryPtr& general_query) {
 
     auto vector_query = std::make_shared<milvus::query::VectorQuery>();
     vector_query->field_name = "field_3";
-    vector_query->topk = 100;
+    vector_query->topk = TOPK;
     vector_query->boost = 3;
     milvus::json json_params = {{"nprobe", 10}};
     vector_query->extra_params = json_params;
@@ -204,7 +207,6 @@ TEST_F(DBTest, HYBRID_DB_TEST) {
 }
 
 TEST_F(DBTest, HYBRID_SEARCH_TEST) {
-    //#ifndef MILVUS_GPU_VERSION
     milvus::engine::meta::CollectionSchema collection_info;
     milvus::engine::meta::hybrid::FieldsSchema fields_info;
     std::unordered_map<std::string, milvus::engine::meta::hybrid::DataType> attr_type;
@@ -237,13 +239,12 @@ TEST_F(DBTest, HYBRID_SEARCH_TEST) {
 
     std::vector<std::string> tags;
     milvus::context::HybridSearchContextPtr hybrid_context = std::make_shared<milvus::context::HybridSearchContext>();
-    milvus::engine::ResultIds result_ids;
-    milvus::engine::ResultDistances result_distances;
-    uint64_t nq;
-    stat = db_->HybridQuery(dummy_context_, COLLECTION_NAME, tags, hybrid_context, general_query, attr_type, nq, result_ids,
-                            result_distances);
+    milvus::engine::QueryResult result;
+    stat = db_->HybridQuery(dummy_context_, COLLECTION_NAME, tags, hybrid_context, general_query, field_names,
+                            attr_type, result);
     ASSERT_TRUE(stat.ok());
-    //#endif
+    ASSERT_EQ(result.row_num_, NQ);
+    ASSERT_EQ(result.result_ids_.size(), NQ * TOPK);
 }
 
 TEST_F(DBTest, COMPACT_TEST) {
@@ -292,20 +293,14 @@ TEST_F(DBTest, COMPACT_TEST) {
     milvus::engine::ResultIds result_ids;
     milvus::engine::ResultDistances result_distances;
 
-    stat = db_->QueryByIDs(dummy_context_,
-                           collection_info.collection_id_,
-                           tags,
-                           topk,
-                           json_params,
-                           ids_to_delete,
-                           result_ids,
-                           result_distances);
+    stat = db_->QueryByIDs(dummy_context_, collection_info.collection_id_, tags, topk, json_params, ids_to_delete,
+                           result_ids, result_distances);
     ASSERT_TRUE(stat.ok());
     ASSERT_EQ(result_ids[0], -1);
     ASSERT_EQ(result_distances[0], std::numeric_limits<float>::max());
 }
 
-TEST_F(DBTest2, GET_VECTOR_IDS_TEST) {
+TEST_F(DBTest2, GET_ENTITY_BY_ID_TEST) {
     milvus::engine::meta::CollectionSchema collection_schema;
     milvus::engine::meta::hybrid::FieldsSchema fields_schema;
     std::unordered_map<std::string, milvus::engine::meta::hybrid::DataType> attr_type;
@@ -332,13 +327,15 @@ TEST_F(DBTest2, GET_VECTOR_IDS_TEST) {
     ASSERT_TRUE(stat.ok());
     ASSERT_EQ(vectors.size(), entity.id_array_.size());
     ASSERT_EQ(vectors[0].float_data_.size(), COLLECTION_DIM);
-    ASSERT_EQ(attrs[0].attr_data_.at("field_0").size(), vector_count * sizeof(int64_t));
-    
+    ASSERT_EQ(attrs[0].attr_data_.at("field_0").size(), sizeof(int32_t));
+
     for (int64_t i = 0; i < COLLECTION_DIM; i++) {
-        ASSERT_FLOAT_EQ(vectors[0].float_data_[i], entity.vector_data_.at("field_4").float_data_[i]);
+        ASSERT_FLOAT_EQ(vectors[0].float_data_[i], entity.vector_data_.at("field_3").float_data_[i]);
     }
 
     std::vector<int64_t> empty_array;
+    vectors.clear();
+    attrs.clear();
     stat = db_->GetEntitiesByID(COLLECTION_NAME, empty_array, vectors, attrs);
     ASSERT_TRUE(stat.ok());
     for (auto& vector : vectors) {

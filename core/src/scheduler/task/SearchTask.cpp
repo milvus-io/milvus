@@ -215,11 +215,6 @@ XSearchTask::Load(LoadType type, uint8_t device_id) {
 }
 
 void
-XSearchTask::HybridExecute() {
-
-}
-
-void
 XSearchTask::Execute() {
     milvus::server::ContextFollower tracer(context_, "XSearchTask::Execute " + std::to_string(index_id_));
 

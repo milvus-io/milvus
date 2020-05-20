@@ -994,25 +994,29 @@ TEST_F(RpcHandlerTest, HYBRID_TEST) {
     auto field_name_1 = entity->add_field_names();
     *field_name_1 = "field_1";
 
-    auto attr_record = entity.add_attr_data();
+    auto attr_record = entity->add_attr_data();
     entity->set_row_num(row_num);
     std::vector<int64_t> field_value(row_num, 0);
     for (uint64_t i = 0; i < row_num; i++) {
         field_value[i] = i;
     }
-    attr_record->set_int_value(field_value.data(), row_num * sizeof(int64_t));
+    attr_record->mutable_int_value()->Resize(static_cast<int>(row_num), 0);
+    memcpy(attr_record->mutable_int_value()->mutable_data(), field_value.data(), row_num * sizeof(int64_t));
 
     std::vector<std::vector<float>> vector_field;
     vector_field.resize(row_num);
+
+    std::default_random_engine e;
+    std::uniform_real_distribution<float> u(0, 1);
     for (uint64_t i = 0; i < row_num; ++i) {
         vector_field[i].resize(dimension);
         for (uint64_t j = 0; j < dimension; ++j) {
-            vector_field[i][j] = (float)((i + 10) / (j + 20));
+            vector_field[i][j] = u(e);
         }
     }
-    auto vector_record = entity->add_result_values();
+    auto vector_record = entity->add_vector_data();
     for (uint64_t i = 0; i < row_num; ++i) {
-        auto record = vector_record->mutable_vector_value()->add_value();
+        auto record = vector_record->add_value();
         auto vector_data = record->mutable_float_data();
         vector_data->Resize(static_cast<int>(vector_field[i].size()), 0.0);
         memcpy(vector_data->mutable_data(), vector_field[i].data(), vector_field[i].size() * sizeof(float));
@@ -1035,7 +1039,8 @@ TEST_F(RpcHandlerTest, HYBRID_TEST) {
         term_value[i] = i + nq;
     }
     term_query->set_value_num(nq);
-    term_query->set_values(term_value.data(), nq * sizeof(int64_t));
+    term_query->mutable_int_value()->Resize(static_cast<int>(nq), 0);
+    memcpy(term_query->mutable_int_value()->mutable_data(), term_value.data(), nq * sizeof(int64_t));
 
     auto vector_query = boolean_query_2->add_general_query()->mutable_vector_query();
     vector_query->set_field_name("field_1");
@@ -1046,7 +1051,7 @@ TEST_F(RpcHandlerTest, HYBRID_TEST) {
     for (uint64_t i = 0; i < nq; ++i) {
         query_vector[i].resize(dimension);
         for (uint64_t j = 0; j < dimension; ++j) {
-            query_vector[i][j] = (float)((j + 1) / (i + dimension));
+            query_vector[i][j] = u(e);
         }
     }
     for (auto record : query_vector) {
@@ -1063,8 +1068,8 @@ TEST_F(RpcHandlerTest, HYBRID_TEST) {
     search_extra_param->set_key("params");
     search_extra_param->set_value("");
 
-    milvus::grpc::TopKQueryResult topk_query_result;
-//    handler->HybridSearch(&context, &search_param, &topk_query_result);
+    milvus::grpc::HQueryResult topk_query_result;
+    handler->HybridSearch(&context, &search_param, &topk_query_result);
 }
 
 //////////////////////////////////////////////////////////////////////

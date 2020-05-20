@@ -365,8 +365,7 @@ class GrpcRequestHandler final : public ::milvus::grpc::MilvusService::Service, 
                  ::milvus::grpc::HQueryResult* response) override;
 
     ::grpc::Status
-    GetEntityByID(::grpc::ServerContext* context,
-                  const ::milvus::grpc::VectorsIdentity* request,
+    GetEntityByID(::grpc::ServerContext* context, const ::milvus::grpc::VectorsIdentity* request,
                   ::milvus::grpc::HEntity* response) override;
     //
     //    ::grpc::Status

@@ -74,7 +74,8 @@ SegmentReader::LoadVectors(off_t offset, size_t num_bytes, std::vector<uint8_t>&
 }
 
 Status
-SegmentReader::LoadAttrs(const std::string& field_name, off_t offset, size_t num_bytes, std::vector<uint8_t>& raw_attrs) {
+SegmentReader::LoadAttrs(const std::string& field_name, off_t offset, size_t num_bytes,
+                         std::vector<uint8_t>& raw_attrs) {
     codec::DefaultCodec default_codec;
     try {
         fs_ptr_->operation_ptr_->CreateDirectory();
@@ -84,6 +85,7 @@ SegmentReader::LoadAttrs(const std::string& field_name, off_t offset, size_t num
         LOG_ENGINE_ERROR_ << err_msg;
         return Status(DB_ERROR, err_msg);
     }
+    return Status::OK();
 }
 
 Status
