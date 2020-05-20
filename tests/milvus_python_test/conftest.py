@@ -49,7 +49,7 @@ def connect(request):
         pytest.exit("Milvus server can not connected, exit pytest ...")
     def fin():
         try:
-            # milvus.disconnect()
+            milvus.close()
             pass
         except Exception as e:
             logging.getLogger().info(str(e))
@@ -112,10 +112,10 @@ def collection(request, connect):
         pytest.exit("collection can not be created, exit pytest ...")
 
     def teardown():
-        # status, collection_names = connect.list_collections()
-        # for collection_name in collection_names:
-        #     connect.drop_collection(collection_name)
-        connect.drop_collection(collection_name)
+        status, collection_names = connect.list_collections()
+        for collection_name in collection_names:
+            connect.drop_collection(collection_name)
+        # connect.drop_collection(collection_name)
 
     request.addfinalizer(teardown)
 
@@ -139,10 +139,10 @@ def ip_collection(request, connect):
         pytest.exit("collection can not be created, exit pytest ...")
 
     def teardown():
-        # status, collection_names = connect.list_collections()
-        # for collection_name in collection_names:
-        #     connect.drop_collection(collection_name)
-        connect.drop_collection(collection_name)
+        status, collection_names = connect.list_collections()
+        for collection_name in collection_names:
+            connect.drop_collection(collection_name)
+        # connect.drop_collection(collection_name)
 
     request.addfinalizer(teardown)
 
@@ -166,10 +166,10 @@ def jac_collection(request, connect):
         pytest.exit("collection can not be created, exit pytest ...")
 
     def teardown():
-        # status, collection_names = connect.list_collections()
-        # for collection_name in collection_names:
-        #     connect.drop_collection(collection_name)
-        connect.drop_collection(collection_name)
+        status, collection_names = connect.list_collections()
+        for collection_name in collection_names:
+            connect.drop_collection(collection_name)
+        # connect.drop_collection(collection_name)
 
     request.addfinalizer(teardown)
 
@@ -192,10 +192,10 @@ def ham_collection(request, connect):
         pytest.exit("collection can not be created, exit pytest ...")
 
     def teardown():
-        # status, collection_names = connect.list_collections()
-        # for collection_name in collection_names:
-        #     connect.drop_collection(collection_name)
-        connect.drop_collection(collection_name)
+        status, collection_names = connect.list_collections()
+        for collection_name in collection_names:
+            connect.drop_collection(collection_name)
+        # connect.drop_collection(collection_name)
 
     request.addfinalizer(teardown)
 
@@ -218,10 +218,10 @@ def tanimoto_collection(request, connect):
         pytest.exit("collection can not be created, exit pytest ...")
 
     def teardown():
-        # status, collection_names = connect.list_collections()
-        # for collection_name in collection_names:
-        #     connect.drop_collection(collection_name)
-        connect.drop_collection(collection_name)
+        status, collection_names = connect.list_collections()
+        for collection_name in collection_names:
+            connect.drop_collection(collection_name)
+        # connect.drop_collection(collection_name)
 
     request.addfinalizer(teardown)
     return collection_name
@@ -243,10 +243,10 @@ def substructure_collection(request, connect):
         pytest.exit("collection can not be created, exit pytest ...")
 
     def teardown():
-        # status, collection_names = connect.list_collections()
-        # for collection_name in collection_names:
-        #     connect.drop_collection(collection_name)
-        connect.drop_collection(collection_name)
+        status, collection_names = connect.list_collections()
+        for collection_name in collection_names:
+            connect.drop_collection(collection_name)
+        # connect.drop_collection(collection_name)
 
     request.addfinalizer(teardown)
     return collection_name
@@ -268,10 +268,10 @@ def superstructure_collection(request, connect):
         pytest.exit("collection can not be created, exit pytest ...")
 
     def teardown():
-        # status, collection_names = connect.list_collections()
-        # for collection_name in collection_names:
-        #     connect.drop_collection(collection_name)
-        connect.drop_collection(collection_name)
+        status, collection_names = connect.list_collections()
+        for collection_name in collection_names:
+            connect.drop_collection(collection_name)
+        # connect.drop_collection(collection_name)
 
     request.addfinalizer(teardown)
     return collection_name

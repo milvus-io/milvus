@@ -22,7 +22,7 @@ timeout(time: 120, unit: 'MINUTES') {
     dir ("tests/milvus_python_test") {
         // sh 'python3 -m pip install -r requirements.txt -i http://pypi.douban.com/simple --trusted-host pypi.douban.com'
         sh 'python3 -m pip install -r requirements.txt'
-        // sh "pytest . --alluredir=\"test_out/dev/single/mysql\" --level=3 --ip ${env.HELM_RELEASE_NAME}.milvus.svc.cluster.local --service ${env.HELM_RELEASE_NAME}"
-        sh "pytest test_level_3.py --alluredir=\"test_out/dev/single/mysql\" --level=3 --ip ${env.HELM_RELEASE_NAME}.milvus.svc.cluster.local --service ${env.HELM_RELEASE_NAME}"
+        sh "pytest . --alluredir=\"test_out/dev/single/mysql\" --level=1 --ip ${env.HELM_RELEASE_NAME}.milvus.svc.cluster.local --service ${env.HELM_RELEASE_NAME}"
+        // sh "pytest test_restart.py --alluredir=\"test_out/dev/single/mysql\" --level=3 --ip ${env.HELM_RELEASE_NAME}.milvus.svc.cluster.local --service ${env.HELM_RELEASE_NAME}"
     }
 }

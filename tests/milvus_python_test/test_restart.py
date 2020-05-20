@@ -11,21 +11,28 @@ from utils import *
 
 dim = 128
 index_file_size = 10
-collection_id = "test_partition_level_3"
+collection_id = "test_partition_restart"
 nprobe = 1
 tag = "1970-01-01"
 
 
-class TestCreateBase:
+class TestRestartBase:
 
     """
     ******************************************************************
       The following cases are used to test `create_partition` function 
     ******************************************************************
     """
+    @pytest.fixture(scope="function", autouse=True)
+    def skip_check(self, connect, args):
+        if args["server_name"].find("shards") != -1:
+            reason = "Skip restart cases in shards mode"
+            logging.getLogger().info(reason)
+            pytest.skip(reason)
 
-    @pytest.mark.level(3)
-    def test_create_partition_insert(self, connect, collection, args):
+
+    @pytest.mark.level(2)
+    def test_create_partition_insert_restart(self, connect, collection, args):
         '''
         target: return the same row count after server restart
         method: call function: create partition, then insert, restart server and assert row count
