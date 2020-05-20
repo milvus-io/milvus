@@ -647,7 +647,6 @@ WalManager::Flush(const std::string& collection_id) {
                 auto flush_lsn = part.second.flush_lsn;
                 if (wal_lsn > flush_lsn && wal_lsn > lsn) {
                     lsn = wal_lsn;
-                    break;
                 }
             }
         }

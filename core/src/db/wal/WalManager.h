@@ -106,7 +106,7 @@ class WalManager {
     DropPartition(const std::string& collection_id, const std::string& partition_tag);
 
     /*
-     * Collection is flushed
+     * Collection is flushed (update flushed_lsn)
      * @param collection_id: collection id
      * @param lsn: flushed lsn
      */
@@ -114,7 +114,7 @@ class WalManager {
     CollectionFlushed(const std::string& collection_id, uint64_t lsn);
 
     /*
-     * Partition is flushed
+     * Partition is flushed (update flushed_lsn)
      * @param collection_id: collection id
      * @param partition_tag: partition_tag
      * @param lsn: flushed lsn
@@ -123,7 +123,7 @@ class WalManager {
     PartitionFlushed(const std::string& collection_id, const std::string& partition_tag, uint64_t lsn);
 
     /*
-     * Collection is updated
+     * Collection is updated (update wal_lsn)
      * @param collection_id: collection id
      * @param partition_tag: partition_tag
      * @param lsn: flushed lsn
@@ -132,13 +132,14 @@ class WalManager {
     CollectionUpdated(const std::string& collection_id, uint64_t lsn);
 
     /*
-     * Partition is updated
+     * Partition is updated (update wal_lsn)
      * @param collection_id: collection id
      * @param partition_tag: partition_tag
      * @param lsn: flushed lsn
      */
     void
     PartitionUpdated(const std::string& collection_id, const std::string& partition_tag, uint64_t lsn);
+
     /*
      * Insert
      * @param collection_id: collection id

@@ -549,6 +549,10 @@ DBImpl::DropPartitionByTag(const std::string& collection_id, const std::string& 
         return status;
     }
 
+    if (options_.wal_enable_) {
+        wal_mgr_->DropPartition(collection_id, partition_tag);
+    }
+
     return DropPartition(partition_name);
 }
 
