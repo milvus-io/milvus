@@ -289,7 +289,7 @@ SegmentWriter::Merge(const std::string& dir_to_merge, const std::string& name) {
     }
     SegmentPtr segment_to_merge;
     segment_reader_to_merge.GetSegment(segment_to_merge);
-    auto& uids = segment_to_merge->vectors_ptr_->GetUids();
+    // auto& uids = segment_to_merge->vectors_ptr_->GetUids();
 
     recorder.RecordSection("Loading segment");
 

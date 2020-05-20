@@ -125,7 +125,6 @@ XBuildIndexTask::Execute() {
         }
 
         std::string location = file_->location_;
-        EngineType engine_type = (EngineType)file_->engine_type_;
         std::shared_ptr<engine::ExecutionEngine> index;
 
         // step 1: create collection file

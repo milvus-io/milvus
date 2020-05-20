@@ -1062,7 +1062,7 @@ ExecutionEngineImpl::ExecBinaryQuery(milvus::query::GeneralQueryPtr general_quer
             faiss::ConcurrentBitsetPtr list;
             list = index_->GetBlacklist();
             // Do OR
-            for (uint64_t i = 0; i < vector_count_; ++i) {
+            for (int64_t i = 0; i < vector_count_; ++i) {
                 if (list->test(i) || bitset->test(i)) {
                     bitset->set(i);
                 }
