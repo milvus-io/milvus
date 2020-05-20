@@ -628,7 +628,7 @@ def assert_equal_vector(v1, v2):
 
 
 def restart_server(helm_release_name):
-    res = False
+    res = True
     timeout = 120
     from kubernetes import client, config
     client.rest.logger.setLevel(logging.WARNING)
@@ -644,6 +644,7 @@ def restart_server(helm_release_name):
     for i in pods.items:
         if i.metadata.name.find(helm_release_name) != -1 and i.metadata.name.find("mysql") == -1:
             pod_name = i.metadata.name
+            break
             # v1.patch_namespaced_config_map(config_map_name, namespace, body, pretty='true')
     # status_res = v1.read_namespaced_service_status(helm_release_name, namespace, pretty='true')
     # print(status_res)
@@ -653,6 +654,7 @@ def restart_server(helm_release_name):
         except Exception as e:
             logging.error(str(e))
             logging.error("Exception when calling CoreV1Api->delete_namespaced_pod")
+            res = False
             return res
         time.sleep(5)
         # check if restart successfully
@@ -669,6 +671,9 @@ def restart_server(helm_release_name):
                     time.sleep(1)
                 if time.time() - start_time > timeout:
                     logging.error("Restart pod: %s timeout" % pod_name_tmp)
+                    res = False
+                    return res
     else:
         logging.error("Pod: %s not found" % helm_release_name)
-        return res
+        res = False
+    return res
