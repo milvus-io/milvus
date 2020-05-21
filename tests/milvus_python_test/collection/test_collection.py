@@ -1049,6 +1049,7 @@ class TestCollectionLogic(object):
             self.execute(logic_seq, connect)
         else:
             self.execute_with_error(logic_seq, connect)
+        self.tear_down(connect)
 
     def is_right(self, seq):
         if sorted(seq) == seq:
@@ -1088,6 +1089,11 @@ class TestCollectionLogic(object):
                 error_flag = True
                 break
         assert error_flag == True
+
+    def tear_down(self, connect):
+        names = connect.list_collections()[1]
+        for name in names:
+            connect.drop_collection(name)
 
     def gen_params(self):
         collection_name = gen_unique_str("test_collection")
