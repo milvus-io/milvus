@@ -59,6 +59,7 @@ class FlatIndex {
                                                      cudaStream_t stream);
 
   void query(Tensor<float, 2, true>& vecs,
+             Tensor<uint8_t, 1, true>& bitset,
              int k,
              faiss::MetricType metric,
              float metricArg,
@@ -67,6 +68,7 @@ class FlatIndex {
              bool exactDistance);
 
   void query(Tensor<half, 2, true>& vecs,
+             Tensor<uint8_t, 1, true>& bitset,
              int k,
              faiss::MetricType metric,
              float metricArg,

@@ -22,6 +22,7 @@
 
 #include <faiss/Clustering.h>
 #include <faiss/IndexFlat.h>
+#include <faiss/FaissHook.h>
 
 #include <faiss/utils/hamming.h>
 
@@ -800,11 +801,12 @@ struct KnnSearchResults {
 
     size_t nup;
 
-    inline void add (idx_t j, float dis) {
+    inline void add (idx_t j, float dis, ConcurrentBitsetPtr bitset = nullptr) {
         if (C::cmp (heap_sim[0], dis)) {
-            heap_pop<C> (k, heap_sim, heap_ids);
             idx_t id = ids ? ids[j] : lo_build (key, j);
-            heap_push<C> (k, heap_sim, heap_ids, dis, id);
+            if (bitset != nullptr && bitset->test((faiss::ConcurrentBitset::id_type_t)id))
+                return;
+            heap_swap_top<C> (k, heap_sim, heap_ids, dis, id);
             nup++;
         }
     }
@@ -820,7 +822,7 @@ struct RangeSearchResults {
     float radius;
     RangeQueryResult & rres;
 
-    inline void add (idx_t j, float dis) {
+    inline void add (idx_t j, float dis, faiss::ConcurrentBitsetPtr bitset = nullptr) {
         if (C::cmp (radius, dis)) {
             idx_t id = ids ? ids[j] : lo_build (key, j);
             rres.add (dis, id);
@@ -869,7 +871,8 @@ struct IVFPQScannerT: QueryTables {
     /// version of the scan where we use precomputed tables
     template<class SearchResultType>
     void scan_list_with_table (size_t ncode, const uint8_t *codes,
-                               SearchResultType & res) const
+                               SearchResultType & res,
+                               ConcurrentBitsetPtr bitset = nullptr) const
     {
         for (size_t j = 0; j < ncode; j++) {
             PQDecoder decoder(codes, pq.nbits);
@@ -882,7 +885,7 @@ struct IVFPQScannerT: QueryTables {
                 tab += pq.ksub;
             }
 
-            res.add(j, dis);
+            res.add(j, dis, bitset);
         }
     }
 
@@ -891,7 +894,8 @@ struct IVFPQScannerT: QueryTables {
     /// relevant X_c|x_r tables
     template<class SearchResultType>
     void scan_list_with_pointer (size_t ncode, const uint8_t *codes,
-                                 SearchResultType & res) const
+                                 SearchResultType & res,
+                                 faiss::ConcurrentBitsetPtr bitset = nullptr) const
     {
         for (size_t j = 0; j < ncode; j++) {
             PQDecoder decoder(codes, pq.nbits);
@@ -905,7 +909,7 @@ struct IVFPQScannerT: QueryTables {
                 dis += sim_table_ptrs [m][ci] - 2 * tab [ci];
                 tab += pq.ksub;
             }
-            res.add (j, dis);
+            res.add (j, dis, bitset);
         }
     }
 
@@ -913,7 +917,8 @@ struct IVFPQScannerT: QueryTables {
     /// nothing is precomputed: access residuals on-the-fly
     template<class SearchResultType>
     void scan_on_the_fly_dist (size_t ncode, const uint8_t *codes,
-                                 SearchResultType &res) const
+                               SearchResultType &res,
+                               faiss::ConcurrentBitsetPtr bitset = nullptr) const
     {
         const float *dvec;
         float dis0 = 0;
@@ -941,7 +946,7 @@ struct IVFPQScannerT: QueryTables {
             } else {
                 dis = fvec_L2sqr (decoded_vec, dvec, d);
             }
-            res.add (j, dis);
+            res.add (j, dis, bitset);
         }
     }
 
@@ -952,7 +957,8 @@ struct IVFPQScannerT: QueryTables {
     template <class HammingComputer, class SearchResultType>
     void scan_list_polysemous_hc (
              size_t ncode, const uint8_t *codes,
-             SearchResultType & res) const
+             SearchResultType & res,
+             faiss::ConcurrentBitsetPtr bitset = nullptr) const
     {
         int ht = ivfpq.polysemous_ht;
         size_t n_hamming_pass = 0, nup = 0;
@@ -976,7 +982,7 @@ struct IVFPQScannerT: QueryTables {
                     tab += pq.ksub;
                 }
 
-                res.add (j, dis);
+                res.add (j, dis, bitset);
             }
             codes += code_size;
         }
@@ -989,14 +995,15 @@ struct IVFPQScannerT: QueryTables {
     template<class SearchResultType>
     void scan_list_polysemous (
              size_t ncode, const uint8_t *codes,
-             SearchResultType &res) const
+             SearchResultType &res,
+             faiss::ConcurrentBitsetPtr bitset = nullptr) const
     {
         switch (pq.code_size) {
 #define HANDLE_CODE_SIZE(cs)                                            \
         case cs:                                                        \
             scan_list_polysemous_hc \
             <HammingComputer ## cs, SearchResultType>   \
-                (ncode, codes, res);             \
+                (ncode, codes, res, bitset);            \
             break
         HANDLE_CODE_SIZE(4);
         HANDLE_CODE_SIZE(8);
@@ -1009,11 +1016,11 @@ struct IVFPQScannerT: QueryTables {
             if (pq.code_size % 8 == 0)
                 scan_list_polysemous_hc
                     <HammingComputerM8, SearchResultType>
-                    (ncode, codes, res);
+                    (ncode, codes, res, bitset);
             else
                 scan_list_polysemous_hc
                     <HammingComputerM4, SearchResultType>
-                    (ncode, codes, res);
+                    (ncode, codes, res, bitset);
             break;
         }
     }
@@ -1067,7 +1074,8 @@ struct IVFPQScanner:
                        const uint8_t *codes,
                        const idx_t *ids,
                        float *heap_sim, idx_t *heap_ids,
-                       size_t k) const override
+                       size_t k,
+                       faiss::ConcurrentBitsetPtr bitset) const override
     {
         KnnSearchResults<C> res = {
             /* key */      this->key,
@@ -1080,13 +1088,13 @@ struct IVFPQScanner:
 
         if (this->polysemous_ht > 0) {
             assert(precompute_mode == 2);
-            this->scan_list_polysemous (ncode, codes, res);
+            this->scan_list_polysemous (ncode, codes, res, bitset);
         } else if (precompute_mode == 2) {
-            this->scan_list_with_table (ncode, codes, res);
+            this->scan_list_with_table (ncode, codes, res, bitset);
         } else if (precompute_mode == 1) {
-            this->scan_list_with_pointer (ncode, codes, res);
+            this->scan_list_with_pointer (ncode, codes, res, bitset);
         } else if (precompute_mode == 0) {
-            this->scan_on_the_fly_dist (ncode, codes, res);
+            this->scan_on_the_fly_dist (ncode, codes, res, bitset);
         } else {
             FAISS_THROW_MSG("bad precomp mode");
         }
@@ -1097,7 +1105,8 @@ struct IVFPQScanner:
                            const uint8_t *codes,
                            const idx_t *ids,
                            float radius,
-                           RangeQueryResult & rres) const override
+                           RangeQueryResult & rres,
+                           faiss::ConcurrentBitsetPtr bitset = nullptr) const override
     {
         RangeSearchResults<C> res = {
             /* key */      this->key,
@@ -1108,13 +1117,13 @@ struct IVFPQScanner:
 
         if (this->polysemous_ht > 0) {
             assert(precompute_mode == 2);
-            this->scan_list_polysemous (ncode, codes, res);
+            this->scan_list_polysemous (ncode, codes, res, bitset);
         } else if (precompute_mode == 2) {
-            this->scan_list_with_table (ncode, codes, res);
+            this->scan_list_with_table (ncode, codes, res, bitset);
         } else if (precompute_mode == 1) {
-            this->scan_list_with_pointer (ncode, codes, res);
+            this->scan_list_with_pointer (ncode, codes, res, bitset);
         } else if (precompute_mode == 0) {
-            this->scan_on_the_fly_dist (ncode, codes, res);
+            this->scan_on_the_fly_dist (ncode, codes, res, bitset);
         } else {
             FAISS_THROW_MSG("bad precomp mode");
         }

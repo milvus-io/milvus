@@ -35,6 +35,11 @@ struct GpuClonerOptions {
   /// For GpuIndexFlat, store data in transposed layout?
   bool storeTransposed;
 
+  bool storeInCpu;
+
+  /// For IndexIVFScalarQuantizer
+  bool allInGpu;
+
   /// Set verbose options on the index
   bool verbose;
 };

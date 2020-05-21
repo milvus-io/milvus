@@ -130,7 +130,8 @@ void IndexLSH::search (
         const float *x,
         idx_t k,
         float *distances,
-        idx_t *labels) const
+        idx_t *labels,
+        ConcurrentBitsetPtr bitset) const
 {
     FAISS_THROW_IF_NOT (is_trained);
     const float *xt = apply_preprocess (n, x);

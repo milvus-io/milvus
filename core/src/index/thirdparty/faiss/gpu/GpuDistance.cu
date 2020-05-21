@@ -58,6 +58,9 @@ void bfKnnConvert(GpuResources* resources, const GpuDistanceParams& args) {
   DeviceTensor<int, 2, true>
     tOutIntIndices(mem, {args.numQueries, args.k}, stream);
 
+  // Empty bitset
+  auto bitsetDevice = toDevice<uint8_t, 1>(resources, device, nullptr, stream, {0});
+
   // Since we've guaranteed that all arguments are on device, call the
   // implementation
   bfKnnOnDevice<T>(resources,
@@ -68,6 +71,7 @@ void bfKnnConvert(GpuResources* resources, const GpuDistanceParams& args) {
                    args.vectorNorms ? &tVectorNorms : nullptr,
                    tQueries,
                    args.queriesRowMajor,
+                   bitsetDevice,
                    args.k,
                    args.metric,
                    args.metricArg,

@@ -8,6 +8,8 @@
 
 #pragma once
 
+#include <cuda.h>
+
 namespace faiss { namespace gpu {
 
 #ifdef __CUDA_ARCH__

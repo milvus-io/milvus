@@ -7,6 +7,8 @@
 
 HEADERS     = $(wildcard *.h impl/*.h utils/*.h)
 SRC         = $(wildcard *.cpp impl/*.cpp utils/*.cpp)
+AVX_SRC     = $(wildcard *avx.cpp impl/*avx.cpp utils/*avx.cpp)
+AVX512_SRC  = $(wildcard *avx512.cpp impl/*avx512.cpp utils/*avx512.cpp)
 OBJ         = $(SRC:.cpp=.o)
 INSTALLDIRS = $(DESTDIR)$(libdir) $(DESTDIR)$(includedir)/faiss
 
@@ -41,8 +43,16 @@ libfaiss.$(SHAREDEXT): $(OBJ)
 %.o: %.cpp
 	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(CPUFLAGS) -c $< -o $@
 
+# support avx
+%avx.o: %avx.cpp
+	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(CPUFLAGS) -mavx2 -c $< -o $@
+
+# support avx512
+%avx512.o: %avx512.cpp
+	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(CPUFLAGS) -mavx512f -mavx512dq -mavx512bw -c $< -o $@
+
 %.o: %.cu
-	$(NVCC) $(NVCCFLAGS) -g -O3 -c $< -o $@
+	$(NVCC) $(NVCCFLAGS) -c $< -o $@
 
 clean:
 	rm -f libfaiss.a libfaiss.$(SHAREDEXT)

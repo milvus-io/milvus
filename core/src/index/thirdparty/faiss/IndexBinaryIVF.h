@@ -63,6 +63,8 @@ struct IndexBinaryIVF : IndexBinary {
      */
     IndexBinaryIVF(IndexBinary *quantizer, size_t d, size_t nlist);
 
+    IndexBinaryIVF(IndexBinary *quantizer, size_t d, size_t nlist, MetricType metric);
+
     IndexBinaryIVF();
 
     ~IndexBinaryIVF() override;
@@ -102,7 +104,8 @@ struct IndexBinaryIVF : IndexBinary {
                             const int32_t *centroid_dis,
                             int32_t *distances, idx_t *labels,
                             bool store_pairs,
-                            const IVFSearchParameters *params=nullptr
+                            const IVFSearchParameters *params=nullptr,
+                            ConcurrentBitsetPtr bitset = nullptr
                             ) const;
 
     virtual BinaryInvertedListScanner *get_InvertedListScanner (
@@ -110,7 +113,13 @@ struct IndexBinaryIVF : IndexBinary {
 
     /** assign the vectors, then call search_preassign */
     void search(idx_t n, const uint8_t *x, idx_t k,
-                int32_t *distances, idx_t *labels) const override;
+                int32_t *distances, idx_t *labels, ConcurrentBitsetPtr bitset = nullptr) const override;
+
+    /** get raw vectors by ids */
+    void get_vector_by_id(idx_t n, const idx_t *xid, uint8_t *x, ConcurrentBitsetPtr bitset = nullptr) override;
+
+    void search_by_id (idx_t n, const idx_t *xid, idx_t k, int32_t *distances, idx_t *labels,
+                       ConcurrentBitsetPtr bitset = nullptr) override;
 
     void range_search(idx_t n, const uint8_t *x, int radius,
                       RangeSearchResult *result) const override;
@@ -203,7 +212,8 @@ struct BinaryInvertedListScanner {
                                const uint8_t *codes,
                                const idx_t *ids,
                                int32_t *distances, idx_t *labels,
-                               size_t k) const = 0;
+                               size_t k,
+                               ConcurrentBitsetPtr bitset = nullptr) const = 0;
 
     virtual void scan_codes_range (size_t n,
                                    const uint8_t *codes,

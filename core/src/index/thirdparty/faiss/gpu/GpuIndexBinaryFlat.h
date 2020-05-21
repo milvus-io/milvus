@@ -54,7 +54,8 @@ class GpuIndexBinaryFlat : public IndexBinary {
               const uint8_t* x,
               faiss::IndexBinary::idx_t k,
               int32_t* distances,
-              faiss::IndexBinary::idx_t* labels) const override;
+              faiss::IndexBinary::idx_t* labels,
+              ConcurrentBitsetPtr bitset = nullptr) const override;
 
   void reconstruct(faiss::IndexBinary::idx_t key,
                    uint8_t* recons) const override;

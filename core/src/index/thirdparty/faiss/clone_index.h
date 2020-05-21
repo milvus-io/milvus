@@ -19,9 +19,18 @@ struct Index;
 struct IndexIVF;
 struct VectorTransform;
 
+namespace gpu {
+struct GpuIndexFlat;
+}
 
 /* cloning functions */
 Index *clone_index (const Index *);
+
+struct IndexComposition {
+    Index *index = nullptr;
+    gpu::GpuIndexFlat *quantizer = nullptr;
+    long mode = 0; // 0: all data, 1: copy quantizer, 2: copy data
+};
 
 /** Cloner class, useful to override classes with other cloning
  * functions. The cloning function above just calls
@@ -29,6 +38,7 @@ Index *clone_index (const Index *);
 struct Cloner {
     virtual VectorTransform *clone_VectorTransform (const VectorTransform *);
     virtual Index *clone_Index (const Index *);
+    virtual Index *clone_Index (IndexComposition* index_composition);
     virtual IndexIVF *clone_IndexIVF (const IndexIVF *);
     virtual ~Cloner() {}
 };

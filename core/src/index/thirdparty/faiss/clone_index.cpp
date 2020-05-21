@@ -27,6 +27,7 @@
 #include <faiss/IndexIVFSpectralHash.h>
 #include <faiss/MetaIndexes.h>
 #include <faiss/IndexScalarQuantizer.h>
+#include <faiss/IndexSQHybrid.h>
 #include <faiss/IndexHNSW.h>
 #include <faiss/IndexLattice.h>
 #include <faiss/Index2Layer.h>
@@ -73,10 +74,15 @@ IndexIVF * Cloner::clone_IndexIVF (const IndexIVF *ivf)
     TRYCLONE (IndexIVFPQ, ivf)
     TRYCLONE (IndexIVFFlat, ivf)
     TRYCLONE (IndexIVFScalarQuantizer, ivf)
+    TRYCLONE (IndexIVFSQHybrid, ivf)
     {
       FAISS_THROW_MSG("clone not supported for this type of IndexIVF");
     }
     return nullptr;
+}
+
+Index *Cloner::clone_Index (IndexComposition* index_composition) {
+    FAISS_THROW_MSG( "Not implemented");
 }
 
 Index *Cloner::clone_Index (const Index *index)
@@ -96,6 +102,9 @@ Index *Cloner::clone_Index (const Index *index)
         } else if (auto *ails = dynamic_cast<const ArrayInvertedLists*>
                    (ivf->invlists)) {
             res->invlists = new ArrayInvertedLists(*ails);
+            res->own_invlists = true;
+        } else if (auto *ails = dynamic_cast<const ReadOnlyArrayInvertedLists*>(ivf->invlists)) {
+            res->invlists = new ReadOnlyArrayInvertedLists(*ails);
             res->own_invlists = true;
         } else {
             FAISS_THROW_MSG( "clone not supported for this type of inverted lists");

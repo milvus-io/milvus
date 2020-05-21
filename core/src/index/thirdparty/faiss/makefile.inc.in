@@ -17,11 +17,12 @@ NVCC         = @NVCC@
 CUDA_ROOT    = @CUDA_PREFIX@
 CUDA_ARCH    = @CUDA_ARCH@
 NVCCFLAGS    = -I $(CUDA_ROOT)/targets/x86_64-linux/include/ \
+-O3
 -Xcompiler -fPIC \
 -Xcudafe --diag_suppress=unrecognized_attribute \
 $(CUDA_ARCH) \
 -lineinfo \
--ccbin $(CXX) -DFAISS_USE_FLOAT16
+-ccbin $(CXX)
 
 OS = $(shell uname -s)
 

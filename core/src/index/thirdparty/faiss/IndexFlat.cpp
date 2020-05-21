@@ -16,7 +16,7 @@
 #include <faiss/utils/Heap.h>
 #include <faiss/impl/FaissAssert.h>
 #include <faiss/impl/AuxIndexStructures.h>
-
+#include <faiss/FaissHook.h>
 
 namespace faiss {
 
@@ -40,29 +40,58 @@ void IndexFlat::reset() {
 
 
 void IndexFlat::search (idx_t n, const float *x, idx_t k,
-                               float *distances, idx_t *labels) const
+                        float *distances, idx_t *labels,
+                        ConcurrentBitsetPtr bitset) const
 {
     // we see the distances and labels as heaps
 
     if (metric_type == METRIC_INNER_PRODUCT) {
         float_minheap_array_t res = {
             size_t(n), size_t(k), labels, distances};
-        knn_inner_product (x, xb.data(), d, n, ntotal, &res);
+        knn_inner_product (x, xb.data(), d, n, ntotal, &res, bitset);
     } else if (metric_type == METRIC_L2) {
         float_maxheap_array_t res = {
             size_t(n), size_t(k), labels, distances};
-        knn_L2sqr (x, xb.data(), d, n, ntotal, &res);
+        knn_L2sqr (x, xb.data(), d, n, ntotal, &res, bitset);
+    } else if (metric_type == METRIC_Jaccard) {
+        float_maxheap_array_t res = {
+                size_t(n), size_t(k), labels, distances};
+        knn_jaccard(x, xb.data(), d, n, ntotal, &res, bitset);
     } else {
         float_maxheap_array_t res = {
             size_t(n), size_t(k), labels, distances};
         knn_extra_metrics (x, xb.data(), d, n, ntotal,
                            metric_type, metric_arg,
-                           &res);
+                           &res, bitset);
+    }
+}
+
+void IndexFlat::assign(idx_t n, const float * x, idx_t * labels, float* distances)
+{
+    // usually used in IVF k-means algorithm
+    float *dis_inner = (distances == nullptr) ? new float[n] : distances;
+    switch (metric_type) {
+        case METRIC_INNER_PRODUCT:
+        case METRIC_L2: {
+            // ignore the metric_type, both use L2
+            elkan_L2_sse(x, xb.data(), d, n, ntotal, labels, dis_inner);
+            break;
+        }
+        default: {
+            // binary metrics
+            // There may be something wrong, but maintain the original logic now.
+            Index::assign(n, x, labels, dis_inner);
+            break;
+        }
+    }
+    if (distances == nullptr) {
+        delete[] dis_inner;
     }
 }
 
 void IndexFlat::range_search (idx_t n, const float *x, float radius,
-                              RangeSearchResult *result) const
+                              RangeSearchResult *result,
+                              ConcurrentBitsetPtr bitset) const
 {
     switch (metric_type) {
     case METRIC_INNER_PRODUCT:
@@ -241,7 +270,8 @@ void IndexFlatL2BaseShift::search (
             const float *x,
             idx_t k,
             float *distances,
-            idx_t *labels) const
+            idx_t *labels,
+            ConcurrentBitsetPtr bitset) const
 {
     FAISS_THROW_IF_NOT (shift.size() == ntotal);
 
@@ -324,7 +354,8 @@ static void reorder_2_heaps (
 
 void IndexRefineFlat::search (
               idx_t n, const float *x, idx_t k,
-              float *distances, idx_t *labels) const
+              float *distances, idx_t *labels,
+              ConcurrentBitsetPtr bitset) const
 {
     FAISS_THROW_IF_NOT (is_trained);
     idx_t k_base = idx_t (k * k_factor);
@@ -417,7 +448,8 @@ void IndexFlat1D::search (
             const float *x,
             idx_t k,
             float *distances,
-            idx_t *labels) const
+            idx_t *labels,
+            ConcurrentBitsetPtr bitset) const
 {
     FAISS_THROW_IF_NOT_MSG (perm.size() == ntotal,
                     "Call update_permutation before search");

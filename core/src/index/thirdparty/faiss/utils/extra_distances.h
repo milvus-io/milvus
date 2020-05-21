@@ -38,7 +38,8 @@ void knn_extra_metrics (
         const float * y,
         size_t d, size_t nx, size_t ny,
         MetricType mt, float metric_arg,
-        float_maxheap_array_t * res);
+        float_maxheap_array_t * res,
+        ConcurrentBitsetPtr bitset = nullptr);
 
 
 /** get a DistanceComputer that refers to this type of distance and

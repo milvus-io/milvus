@@ -115,6 +115,7 @@ FlatIndex::getVectorsFloat32Copy(int from, int num, cudaStream_t stream) {
 
 void
 FlatIndex::query(Tensor<float, 2, true>& input,
+                 Tensor<uint8_t, 1, true>& bitset,
                  int k,
                  faiss::MetricType metric,
                  float metricArg,
@@ -129,7 +130,7 @@ FlatIndex::query(Tensor<float, 2, true>& input,
     auto inputHalf =
       convertTensor<float, half, 2>(resources_, stream, input);
 
-    query(inputHalf, k, metric, metricArg,
+    query(inputHalf, bitset, k, metric, metricArg,
           outDistances, outIndices, exactDistance);
   } else {
     bfKnnOnDevice(resources_,
@@ -140,6 +141,7 @@ FlatIndex::query(Tensor<float, 2, true>& input,
                   &norms_,
                   input,
                   true, // input is row major
+                  bitset,
                   k,
                   metric,
                   metricArg,
@@ -151,6 +153,7 @@ FlatIndex::query(Tensor<float, 2, true>& input,
 
 void
 FlatIndex::query(Tensor<half, 2, true>& input,
+                 Tensor<uint8_t, 1, true>& bitset,
                  int k,
                  faiss::MetricType metric,
                  float metricArg,
@@ -167,6 +170,7 @@ FlatIndex::query(Tensor<half, 2, true>& input,
                 &norms_,
                 input,
                 true, // input is row major
+                bitset,
                 k,
                 metric,
                 metricArg,

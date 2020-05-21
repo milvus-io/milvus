@@ -46,8 +46,7 @@ void HeapArray<C>::addn (size_t nj, const T *vin, TI j0,
         for (size_t j = 0; j < nj; j++) {
             T ip = ip_line [j];
             if (C::cmp(simi[0], ip)) {
-                heap_pop<C> (k, simi, idxi);
-                heap_push<C> (k, simi, idxi, ip, j + j0);
+                heap_swap_top<C> (k, simi, idxi, ip, j + j0);
             }
         }
     }
@@ -74,8 +73,7 @@ void HeapArray<C>::addn_with_ids (
         for (size_t j = 0; j < nj; j++) {
             T ip = ip_line [j];
             if (C::cmp(simi[0], ip)) {
-                heap_pop<C> (k, simi, idxi);
-                heap_push<C> (k, simi, idxi, ip, id_line [j]);
+                heap_swap_top<C> (k, simi, idxi, ip, id_line [j]);
             }
         }
     }

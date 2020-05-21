@@ -8,7 +8,9 @@
 
 #pragma once
 
+#include <vector>
 #include <faiss/gpu/GpuIndex.h>
+#include <faiss/utils/ConcurrentBitset.h>
 
 namespace faiss {
 
@@ -25,7 +27,8 @@ struct FlatIndex;
 struct GpuIndexFlatConfig : public GpuIndexConfig {
   inline GpuIndexFlatConfig()
       : useFloat16(false),
-        storeTransposed(false) {
+        storeTransposed(false),
+        storeInCpu(false) {
   }
 
   /// Whether or not data is stored as float16
@@ -38,6 +41,8 @@ struct GpuIndexFlatConfig : public GpuIndexConfig {
   /// be transposed, and will increase storage requirements (we store
   /// data in both transposed and non-transposed layouts).
   bool storeTransposed;
+
+  bool storeInCpu;
 };
 
 /// Wrapper around the GPU implementation that looks like
@@ -116,7 +121,8 @@ class GpuIndexFlat : public GpuIndex {
                    const float* x,
                    int k,
                    float* distances,
-                   faiss::Index::idx_t* labels) const override;
+                   faiss::Index::idx_t* labels,
+                   ConcurrentBitsetPtr bitset = nullptr) const override;
 
  protected:
   /// Our config object
@@ -125,6 +131,8 @@ class GpuIndexFlat : public GpuIndex {
   /// Holds our GPU data containing the list of vectors; is managed via raw
   /// pointer so as to allow non-CUDA compilers to see this header
   FlatIndex* data_;
+
+  std::vector<float> xb_;
 };
 
 /// Wrapper around the GPU implementation that looks like

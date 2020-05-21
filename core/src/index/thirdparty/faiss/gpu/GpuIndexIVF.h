@@ -51,6 +51,8 @@ class GpuIndexIVF : public GpuIndex {
   /// Copy what we need from the CPU equivalent
   void copyFrom(const faiss::IndexIVF* index);
 
+  void copyFrom(faiss::IndexIVF* index, gpu::GpuIndexFlat *&qt, int64_t mode);
+
   /// Copy what we have to the CPU equivalent
   void copyTo(faiss::IndexIVF* index) const;
 
@@ -82,6 +84,8 @@ class GpuIndexIVF : public GpuIndex {
 
   /// Exposeing this like the CPU version for query
   GpuIndexFlat* quantizer;
+
+  int remove_quantizer = 1;
 
  protected:
   GpuIndexIVFConfig ivfConfig_;

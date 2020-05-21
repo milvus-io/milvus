@@ -24,6 +24,11 @@ enum MetricType {
     METRIC_Linf,               ///< infinity distance
     METRIC_Lp,                 ///< L_p distance, p is given by a faiss::Index
                                /// metric_arg
+    METRIC_Jaccard,
+    METRIC_Tanimoto,
+    METRIC_Hamming,
+    METRIC_Substructure,       ///< Tversky case alpha = 0, beta = 1
+    METRIC_Superstructure,     ///< Tversky case alpha = 1, beta = 0
 
     /// some additional metrics defined in scipy.spatial.distance
     METRIC_Canberra = 20,

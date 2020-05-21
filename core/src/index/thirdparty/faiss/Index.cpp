@@ -12,6 +12,7 @@
 #include <faiss/impl/AuxIndexStructures.h>
 #include <faiss/impl/FaissAssert.h>
 #include <faiss/utils/distances.h>
+#include <faiss/FaissHook.h>
 
 #include <cstring>
 
@@ -29,16 +30,19 @@ void Index::train(idx_t /*n*/, const float* /*x*/) {
 
 
 void Index::range_search (idx_t , const float *, float,
-                          RangeSearchResult *) const
+                          RangeSearchResult *,
+                          ConcurrentBitsetPtr) const
 {
   FAISS_THROW_MSG ("range search not implemented");
 }
 
-void Index::assign (idx_t n, const float * x, idx_t * labels, idx_t k)
+void Index::assign (idx_t n, const float* x, idx_t* labels, float* distance)
 {
-  float * distances = new float[n * k];
-  ScopeDeleter<float> del(distances);
-  search (n, x, k, distances, labels);
+  float *dis_inner = (distance == nullptr) ? new float[n] : distance;
+  search (n, x, 1, dis_inner, labels);
+  if (distance == nullptr) {
+    delete[] dis_inner;
+  }
 }
 
 void Index::add_with_ids(
@@ -46,6 +50,15 @@ void Index::add_with_ids(
     const float* /*x*/,
     const idx_t* /*xids*/) {
   FAISS_THROW_MSG ("add_with_ids not implemented for this type of index");
+}
+
+void Index::get_vector_by_id (idx_t n, const idx_t *xid, float *x, ConcurrentBitsetPtr bitset) {
+  FAISS_THROW_MSG ("get_vector_by_id not implemented for this type of index");
+}
+
+void Index::search_by_id (idx_t n, const idx_t *xid, idx_t k, float *distances, idx_t *labels,
+                          ConcurrentBitsetPtr bitset) {
+  FAISS_THROW_MSG ("search_by_id not implemented for this type of index");
 }
 
 size_t Index::remove_ids(const IDSelector& /*sel*/) {

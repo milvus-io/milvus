@@ -51,6 +51,7 @@ int main(int argc, char** argv) {
     limitK = GPU_MAX_SELECTION_K;
   }
 
+  faiss::gpu::DeviceTensor<uint8_t, 1, true> bitset(nullptr, {0});
   for (int k = startK; k <= limitK; k *= 2) {
     faiss::gpu::DeviceTensor<float, 2, true> gpuOutVal({FLAGS_rows, k});
     faiss::gpu::DeviceTensor<int, 2, true> gpuOutInd({FLAGS_rows, k});
@@ -60,7 +61,7 @@ int main(int argc, char** argv) {
         faiss::gpu::runWarpSelect(gpuVal, gpuOutVal, gpuOutInd,
                                   FLAGS_dir, k, 0);
       } else {
-        faiss::gpu::runBlockSelect(gpuVal, gpuOutVal, gpuOutInd,
+        faiss::gpu::runBlockSelect(gpuVal, bitset, gpuOutVal, gpuOutInd,
                                    FLAGS_dir, k, 0);
       }
     }
