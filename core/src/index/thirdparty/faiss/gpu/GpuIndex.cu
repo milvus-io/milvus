@@ -275,7 +275,8 @@ GpuIndex::searchNonPaged_(int n,
                           const float* x,
                           int k,
                           float* outDistancesData,
-                          Index::idx_t* outIndicesData) const {
+                          Index::idx_t* outIndicesData,
+                          ConcurrentBitsetPtr bitset) const {
   auto stream = resources_->getDefaultStream(device_);
 
   // Make sure arguments are on the device we desire; use temporary

@@ -725,10 +725,10 @@ IVFPQ::runPQNoPrecomputedCodesT_(
   auto& coarseCentroids = quantizer_->template getVectorsRef<CentroidT>();
 
   runPQScanMultiPassNoPrecomputed(queries,
-                                  bitset,
                                   coarseCentroids,
                                   pqCentroidsInnermostCode_,
                                   coarseIndices,
+                                  bitset,
                                   useFloat16LookupTables_,
                                   bytesPerVector_,
                                   numSubQuantizers_,

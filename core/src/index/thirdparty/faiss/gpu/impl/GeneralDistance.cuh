@@ -251,6 +251,7 @@ template <typename T, typename DistanceOp, bool InnerContig>
 void runGeneralDistance(GpuResources* resources,
                         Tensor<T, 2, InnerContig>& centroids,
                         Tensor<T, 2, InnerContig>& queries,
+                        Tensor<uint8_t, 1, true>& bitset,
                         int k,
                         const DistanceOp& op,
                         Tensor<float, 2, true>& outDistances,
@@ -386,12 +387,14 @@ void runGeneralDistance(GpuResources* resources,
       if (tileCols == numCentroids) {
         // Write into the final output
         runBlockSelect(distanceBufView,
+                       bitset,
                        outDistanceView,
                        outIndexView,
                        DistanceOp::kDirection, k, streams[curStream]);
       } else {
         // Write into the intermediate output
         runBlockSelect(distanceBufView,
+                       bitset,
                        outDistanceBufColView,
                        outIndexBufColView,
                        DistanceOp::kDirection, k, streams[curStream]);
@@ -407,6 +410,7 @@ void runGeneralDistance(GpuResources* resources,
 
       runBlockSelectPair(outDistanceBufRowView,
                          outIndexBufRowView,
+                         bitset,
                          outDistanceView,
                          outIndexView,
                          DistanceOp::kDirection, k, streams[curStream]);

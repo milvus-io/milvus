@@ -228,6 +228,11 @@ GpuIndexFlat::searchImpl_(int n,
 void
 GpuIndexFlat::reconstruct(faiss::Index::idx_t key,
                           float* out) const {
+  if (config_.storeInCpu && xb_.size() > 0) {
+    memcpy (out, &(this->xb_[key * this->d]), sizeof(*out) * this->d);
+    return;
+  }
+
   DeviceScope scope(device_);
 
   FAISS_THROW_IF_NOT_MSG(key < this->ntotal, "index out of bounds");
@@ -247,11 +252,6 @@ void
 GpuIndexFlat::reconstruct_n(faiss::Index::idx_t i0,
                             faiss::Index::idx_t num,
                             float* out) const {
-  if (config_.storeInCpu && xb_.size() > 0) {
-    memcpy (out, &(this->xb_[key * this->d]), sizeof(*out) * this->d);
-    return;
-  }
-
   DeviceScope scope(device_);
 
   FAISS_THROW_IF_NOT_MSG(i0 < this->ntotal, "index out of bounds");
