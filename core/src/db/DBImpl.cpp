@@ -1671,6 +1671,14 @@ DBImpl::Query(const std::shared_ptr<server::Context>& context, const std::string
             status = meta_ptr_->FilesToSearch(schema.collection_id_, files_holder);
         }
 #else
+        // no partition tag specified, means search in whole collection
+        // get files from root collection
+        status = meta_ptr_->FilesToSearch(collection_id, files_holder);
+        if (!status.ok()) {
+            return status;
+        }
+
+        // get files from partitions
         std::set<std::string> partition_ids;
         std::vector<meta::CollectionSchema> partition_array;
         status = meta_ptr_->ShowPartitions(collection_id, partition_array);
