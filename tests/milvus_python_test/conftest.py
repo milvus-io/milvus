@@ -9,6 +9,7 @@ from utils import *
 
 index_file_size = 10
 timeout = 1 
+delete_timeout = 60
 
 
 def pytest_addoption(parser):
@@ -114,7 +115,7 @@ def collection(request, connect):
     def teardown():
         status, collection_names = connect.list_collections()
         for collection_name in collection_names:
-            connect.drop_collection(collection_name)
+            connect.drop_collection(collection_name, timeout=delete_timeout)
         # connect.drop_collection(collection_name)
 
     request.addfinalizer(teardown)
@@ -141,7 +142,7 @@ def ip_collection(request, connect):
     def teardown():
         status, collection_names = connect.list_collections()
         for collection_name in collection_names:
-            connect.drop_collection(collection_name)
+            connect.drop_collection(collection_name, timeout=delete_timeout)
         # connect.drop_collection(collection_name)
 
     request.addfinalizer(teardown)
@@ -168,7 +169,7 @@ def jac_collection(request, connect):
     def teardown():
         status, collection_names = connect.list_collections()
         for collection_name in collection_names:
-            connect.drop_collection(collection_name)
+            connect.drop_collection(collection_name, timeout=delete_timeout)
         # connect.drop_collection(collection_name)
 
     request.addfinalizer(teardown)
@@ -194,7 +195,7 @@ def ham_collection(request, connect):
     def teardown():
         status, collection_names = connect.list_collections()
         for collection_name in collection_names:
-            connect.drop_collection(collection_name)
+            connect.drop_collection(collection_name, timeout=delete_timeout)
         # connect.drop_collection(collection_name)
 
     request.addfinalizer(teardown)
@@ -220,7 +221,7 @@ def tanimoto_collection(request, connect):
     def teardown():
         status, collection_names = connect.list_collections()
         for collection_name in collection_names:
-            connect.drop_collection(collection_name)
+            connect.drop_collection(collection_name, timeout=delete_timeout)
         # connect.drop_collection(collection_name)
 
     request.addfinalizer(teardown)
@@ -245,7 +246,7 @@ def substructure_collection(request, connect):
     def teardown():
         status, collection_names = connect.list_collections()
         for collection_name in collection_names:
-            connect.drop_collection(collection_name)
+            connect.drop_collection(collection_name, timeout=delete_timeout)
         # connect.drop_collection(collection_name)
 
     request.addfinalizer(teardown)
@@ -270,7 +271,7 @@ def superstructure_collection(request, connect):
     def teardown():
         status, collection_names = connect.list_collections()
         for collection_name in collection_names:
-            connect.drop_collection(collection_name)
+            connect.drop_collection(collection_name, timeout=delete_timeout)
         # connect.drop_collection(collection_name)
 
     request.addfinalizer(teardown)
