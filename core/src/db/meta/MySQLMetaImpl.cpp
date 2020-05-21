@@ -582,7 +582,7 @@ MySQLMetaImpl::HasCollection(const std::string& collection_id, bool& has_or_not,
 }
 
 Status
-MySQLMetaImpl::AllCollections(std::vector<CollectionSchema>& collection_schema_array) {
+MySQLMetaImpl::AllCollections(std::vector<CollectionSchema>& collection_schema_array, bool is_root) {
     try {
         server::MetricCollector metric;
         mysqlpp::StoreQueryResult res;
@@ -599,8 +599,12 @@ MySQLMetaImpl::AllCollections(std::vector<CollectionSchema>& collection_schema_a
             mysqlpp::Query statement = connectionPtr->query();
             statement << "SELECT id, table_id, dimension, engine_type, index_params, index_file_size, metric_type"
                       << " ,owner_table, partition_tag, version, flush_lsn"
-                      << " FROM " << META_TABLES << " WHERE state <> " << std::to_string(CollectionSchema::TO_DELETE)
-                      << " AND owner_table = \"\";";
+                      << " FROM " << META_TABLES << " WHERE state <> " << std::to_string(CollectionSchema::TO_DELETE);
+            if (is_root) {
+                statement << " AND owner_table = \"\";";
+            } else {
+                statement << ";";
+            }
 
             LOG_ENGINE_DEBUG_ << "AllCollections: " << statement.str();
 
@@ -1535,8 +1539,8 @@ MySQLMetaImpl::ShowPartitions(const std::string& collection_id,
 
             mysqlpp::Query statement = connectionPtr->query();
             statement << "SELECT table_id, id, state, dimension, created_on, flag, index_file_size,"
-                      << " engine_type, index_params, metric_type, partition_tag, version FROM " << META_TABLES
-                      << " WHERE owner_table = " << mysqlpp::quote << collection_id << " AND state <> "
+                      << " engine_type, index_params, metric_type, partition_tag, version, flush_lsn FROM "
+                      << META_TABLES << " WHERE owner_table = " << mysqlpp::quote << collection_id << " AND state <> "
                       << std::to_string(CollectionSchema::TO_DELETE) << ";";
 
             LOG_ENGINE_DEBUG_ << "ShowPartitions: " << statement.str();
@@ -1559,6 +1563,7 @@ MySQLMetaImpl::ShowPartitions(const std::string& collection_id,
             partition_schema.owner_collection_ = collection_id;
             resRow["partition_tag"].to_string(partition_schema.partition_tag_);
             resRow["version"].to_string(partition_schema.version_);
+            partition_schema.flush_lsn_ = resRow["flush_lsn"];
 
             partition_schema_array.emplace_back(partition_schema);
         }
@@ -2755,6 +2760,7 @@ MySQLMetaImpl::SetGlobalLastLSN(uint64_t lsn) {
             }
 
             bool first_create = false;
+            uint64_t last_lsn = 0;
             {
                 mysqlpp::StoreQueryResult res;
                 mysqlpp::Query statement = connectionPtr->query();
@@ -2762,6 +2768,8 @@ MySQLMetaImpl::SetGlobalLastLSN(uint64_t lsn) {
                 res = statement.store();
                 if (res.num_rows() == 0) {
                     first_create = true;
+                } else {
+                    last_lsn = res[0]["global_lsn"];
                 }
             }
 
@@ -2773,7 +2781,7 @@ MySQLMetaImpl::SetGlobalLastLSN(uint64_t lsn) {
                 if (!statement.exec()) {
                     return HandleException("QUERY ERROR WHEN SET GLOBAL LSN", statement.error());
                 }
-            } else {
+            } else if (lsn > last_lsn) {
                 mysqlpp::Query statement = connectionPtr->query();
                 statement << "UPDATE " << META_ENVIRONMENT << " SET global_lsn = " << lsn << ";";
                 LOG_ENGINE_DEBUG_ << "SetGlobalLastLSN: " << statement.str();
@@ -2783,8 +2791,6 @@ MySQLMetaImpl::SetGlobalLastLSN(uint64_t lsn) {
                 }
             }
         }  // Scoped Connection
-
-        LOG_ENGINE_DEBUG_ << "Successfully update global_lsn: " << lsn;
     } catch (std::exception& e) {
         return HandleException("Failed to set global lsn", e.what());
     }

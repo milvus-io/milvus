@@ -487,7 +487,11 @@ DBImpl::CreatePartition(const std::string& collection_id, const std::string& par
     }
 
     uint64_t lsn = 0;
-    meta_ptr_->GetCollectionFlushLSN(collection_id, lsn);
+    if (options_.wal_enable_) {
+        lsn = wal_mgr_->CreatePartition(collection_id, partition_tag);
+    } else {
+        meta_ptr_->GetCollectionFlushLSN(collection_id, lsn);
+    }
     return meta_ptr_->CreatePartition(collection_id, partition_name, partition_tag, lsn);
 }
 
@@ -543,6 +547,10 @@ DBImpl::DropPartitionByTag(const std::string& collection_id, const std::string& 
     if (!status.ok()) {
         LOG_ENGINE_ERROR_ << status.message();
         return status;
+    }
+
+    if (options_.wal_enable_) {
+        wal_mgr_->DropPartition(collection_id, partition_tag);
     }
 
     return DropPartition(partition_name);
@@ -891,7 +899,7 @@ DBImpl::Flush(const std::string& collection_id) {
             swn_wal_.Notify();
             flush_req_swn_.Wait();
         }
-
+        StartMergeTask();
     } else {
         LOG_ENGINE_DEBUG_ << "MemTable flush";
         InternalFlush(collection_id);
@@ -918,6 +926,7 @@ DBImpl::Flush() {
             swn_wal_.Notify();
             flush_req_swn_.Wait();
         }
+        StartMergeTask();
     } else {
         LOG_ENGINE_DEBUG_ << "MemTable flush";
         InternalFlush();
@@ -1421,7 +1430,9 @@ DBImpl::DropIndex(const std::string& collection_id) {
     }
 
     LOG_ENGINE_DEBUG_ << "Drop index for collection: " << collection_id;
-    return DropCollectionIndexRecursively(collection_id);
+    auto status = DropCollectionIndexRecursively(collection_id);
+    StartMergeTask();  // merge small files after drop index
+    return status;
 }
 
 Status
@@ -2407,28 +2418,37 @@ Status
 DBImpl::ExecWalRecord(const wal::MXLogRecord& record) {
     fiu_return_on("DBImpl.ExexWalRecord.return", Status(););
 
-    auto collections_flushed = [&](const std::set<std::string>& collection_ids) -> uint64_t {
-        if (collection_ids.empty()) {
-            return 0;
-        }
-
+    auto collections_flushed = [&](const std::string collection_id,
+                                   const std::set<std::string>& target_collection_names) -> uint64_t {
         uint64_t max_lsn = 0;
         if (options_.wal_enable_) {
-            for (auto& collection : collection_ids) {
-                uint64_t lsn = 0;
+            uint64_t lsn = 0;
+            for (auto& collection : target_collection_names) {
                 meta_ptr_->GetCollectionFlushLSN(collection, lsn);
-                wal_mgr_->CollectionFlushed(collection, lsn);
                 if (lsn > max_lsn) {
                     max_lsn = lsn;
                 }
             }
+            wal_mgr_->CollectionFlushed(collection_id, lsn);
         }
 
         std::lock_guard<std::mutex> lck(merge_result_mutex_);
-        for (auto& collection : collection_ids) {
+        for (auto& collection : target_collection_names) {
             merge_collection_ids_.insert(collection);
         }
         return max_lsn;
+    };
+
+    auto partition_flushed = [&](const std::string& collection_id, const std::string& partition,
+                                 const std::string& target_collection_name) {
+        if (options_.wal_enable_) {
+            uint64_t lsn = 0;
+            meta_ptr_->GetCollectionFlushLSN(target_collection_name, lsn);
+            wal_mgr_->PartitionFlushed(collection_id, partition, lsn);
+        }
+
+        std::lock_guard<std::mutex> lck(merge_result_mutex_);
+        merge_collection_ids_.insert(target_collection_name);
     };
 
     Status status;
@@ -2447,7 +2467,9 @@ DBImpl::ExecWalRecord(const wal::MXLogRecord& record) {
                                               (record.data_size / record.length / sizeof(float)),
                                               (const float*)record.data, record.attr_nbytes, record.attr_data_size,
                                               record.attr_data, record.lsn, flushed_collections);
-            collections_flushed(flushed_collections);
+            if (!flushed_collections.empty()) {
+                partition_flushed(record.collection_id, record.partition_tag, target_collection_name);
+            }
 
             milvus::server::CollectInsertMetrics metrics(record.length, status);
             break;
@@ -2465,7 +2487,9 @@ DBImpl::ExecWalRecord(const wal::MXLogRecord& record) {
                                              (record.data_size / record.length / sizeof(uint8_t)),
                                              (const u_int8_t*)record.data, record.lsn, flushed_collections);
             // even though !status.ok, run
-            collections_flushed(flushed_collections);
+            if (!flushed_collections.empty()) {
+                partition_flushed(record.collection_id, record.partition_tag, target_collection_name);
+            }
 
             // metrics
             milvus::server::CollectInsertMetrics metrics(record.length, status);
@@ -2485,7 +2509,9 @@ DBImpl::ExecWalRecord(const wal::MXLogRecord& record) {
                                              (record.data_size / record.length / sizeof(float)),
                                              (const float*)record.data, record.lsn, flushed_collections);
             // even though !status.ok, run
-            collections_flushed(flushed_collections);
+            if (!flushed_collections.empty()) {
+                partition_flushed(record.collection_id, record.partition_tag, target_collection_name);
+            }
 
             // metrics
             milvus::server::CollectInsertMetrics metrics(record.length, status);
@@ -2548,7 +2574,7 @@ DBImpl::ExecWalRecord(const wal::MXLogRecord& record) {
                     flushed_collections.insert(collection_id);
                 }
 
-                collections_flushed(flushed_collections);
+                collections_flushed(record.collection_id, flushed_collections);
 
             } else {
                 // flush all collections
@@ -2558,7 +2584,7 @@ DBImpl::ExecWalRecord(const wal::MXLogRecord& record) {
                     status = mem_mgr_->Flush(collection_ids);
                 }
 
-                uint64_t lsn = collections_flushed(collection_ids);
+                uint64_t lsn = collections_flushed("", collection_ids);
                 if (options_.wal_enable_) {
                     wal_mgr_->RemoveOldFiles(lsn);
                 }

@@ -44,7 +44,7 @@ class SqliteMetaImpl : public Meta {
     HasCollection(const std::string& collection_id, bool& has_or_not, bool is_root = false) override;
 
     Status
-    AllCollections(std::vector<CollectionSchema>& collection_schema_array) override;
+    AllCollections(std::vector<CollectionSchema>& collection_schema_array, bool is_root = false) override;
 
     Status
     DropCollection(const std::string& collection_id) override;
