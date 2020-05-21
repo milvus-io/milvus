@@ -62,35 +62,55 @@ WalManager::Init(const meta::MetaPtr& meta) {
     if (meta != nullptr) {
         meta->GetGlobalLastLSN(recovery_start);
 
-        std::vector<meta::CollectionSchema> table_schema_array;
-        auto status = meta->AllCollections(table_schema_array);
+        std::vector<meta::CollectionSchema> collention_schema_array;
+        auto status = meta->AllCollections(collention_schema_array);
         if (!status.ok()) {
             return WAL_META_ERROR;
         }
 
-        if (!table_schema_array.empty()) {
-            // get min and max flushed lsn
-            uint64_t min_flused_lsn = table_schema_array[0].flush_lsn_;
-            uint64_t max_flused_lsn = table_schema_array[0].flush_lsn_;
-            for (size_t i = 1; i < table_schema_array.size(); i++) {
-                if (min_flused_lsn > table_schema_array[i].flush_lsn_) {
-                    min_flused_lsn = table_schema_array[i].flush_lsn_;
-                } else if (max_flused_lsn < table_schema_array[i].flush_lsn_) {
-                    max_flused_lsn = table_schema_array[i].flush_lsn_;
+        if (!collention_schema_array.empty()) {
+            u_int64_t min_flushed_lsn = ~(u_int64_t)0;
+            u_int64_t max_flushed_lsn = 0;
+            auto update_limit_lsn = [&](u_int64_t lsn) {
+                if (min_flushed_lsn > lsn) {
+                    min_flushed_lsn = lsn;
+                }
+                if (max_flushed_lsn < lsn) {
+                    max_flushed_lsn = lsn;
+                }
+            };
+
+            for (auto& col_schema : collention_schema_array) {
+                auto& collection = collections_[col_schema.collection_id_];
+                auto& default_part = collection[""];
+                default_part.flush_lsn = col_schema.flush_lsn_;
+                update_limit_lsn(default_part.flush_lsn);
+
+                std::vector<meta::CollectionSchema> partition_schema_array;
+                status = meta->ShowPartitions(col_schema.collection_id_, partition_schema_array);
+                if (!status.ok()) {
+                    return WAL_META_ERROR;
+                }
+                for (auto& par_schema : partition_schema_array) {
+                    auto& partition = collection[par_schema.partition_tag_];
+                    partition.flush_lsn = par_schema.flush_lsn_;
+                    update_limit_lsn(partition.flush_lsn);
                 }
             }
-            if (applied_lsn < max_flused_lsn) {
+
+            if (applied_lsn < max_flushed_lsn) {
                 // a new WAL folder?
-                applied_lsn = max_flused_lsn;
+                applied_lsn = max_flushed_lsn;
             }
-            if (recovery_start < min_flused_lsn) {
+            if (recovery_start < min_flushed_lsn) {
                 // not flush all yet
-                recovery_start = min_flused_lsn;
+                recovery_start = min_flushed_lsn;
             }
 
-            for (auto& schema : table_schema_array) {
-                TableLsn tb_lsn = {schema.flush_lsn_, applied_lsn};
-                tables_[schema.collection_id_] = tb_lsn;
+            for (auto& col : collections_) {
+                for (auto& part : col.second) {
+                    part.second.wal_lsn = applied_lsn;
+                }
             }
         }
     }
@@ -141,9 +161,10 @@ WalManager::GetNextRecovery(MXLogRecord& record) {
 
         // background thread has not started.
         // so, needn't lock here.
-        auto it = tables_.find(record.collection_id);
-        if (it != tables_.end()) {
-            if (it->second.flush_lsn < record.lsn) {
+        auto it_col = collections_.find(record.collection_id);
+        if (it_col != collections_.end()) {
+            auto it_part = it_col->second.find(record.partition_tag);
+            if (it_part->second.flush_lsn < record.lsn) {
                 break;
             }
         }
@@ -179,9 +200,10 @@ WalManager::GetNextEntityRecovery(milvus::engine::wal::MXLogRecord& record) {
 
         // background thread has not started.
         // so, needn't lock here.
-        auto it = tables_.find(record.collection_id);
-        if (it != tables_.end()) {
-            if (it->second.flush_lsn < record.lsn) {
+        auto it_col = collections_.find(record.collection_id);
+        if (it_col != collections_.end()) {
+            auto it_part = it_col->second.find(record.partition_tag);
+            if (it_part->second.flush_lsn < record.lsn) {
                 break;
             }
         }
@@ -229,9 +251,10 @@ WalManager::GetNextRecord(MXLogRecord& record) {
         }
 
         std::lock_guard<std::mutex> lck(mutex_);
-        auto it = tables_.find(record.collection_id);
-        if (it != tables_.end()) {
-            if (it->second.flush_lsn < record.lsn) {
+        auto it_col = collections_.find(record.collection_id);
+        if (it_col != collections_.end()) {
+            auto it_part = it_col->second.find(record.partition_tag);
+            if (it_part->second.flush_lsn < record.lsn) {
                 break;
             }
         }
@@ -275,9 +298,10 @@ WalManager::GetNextEntityRecord(milvus::engine::wal::MXLogRecord& record) {
         }
 
         std::lock_guard<std::mutex> lck(mutex_);
-        auto it = tables_.find(record.collection_id);
-        if (it != tables_.end()) {
-            if (it->second.flush_lsn < record.lsn) {
+        auto it_col = collections_.find(record.collection_id);
+        if (it_col != collections_.end()) {
+            auto it_part = it_col->second.find(record.partition_tag);
+            if (it_part->second.flush_lsn < record.lsn) {
                 break;
             }
         }
@@ -293,7 +317,16 @@ WalManager::CreateCollection(const std::string& collection_id) {
     LOG_WAL_INFO_ << "create collection " << collection_id << " " << last_applied_lsn_;
     std::lock_guard<std::mutex> lck(mutex_);
     uint64_t applied_lsn = last_applied_lsn_;
-    tables_[collection_id] = {applied_lsn, applied_lsn};
+    collections_[collection_id][""] = {applied_lsn, applied_lsn};
+    return applied_lsn;
+}
+
+uint64_t
+WalManager::CreatePartition(const std::string& collection_id, const std::string& partition_tag) {
+    LOG_WAL_INFO_ << "create collection " << collection_id << " " << partition_tag << " " << last_applied_lsn_;
+    std::lock_guard<std::mutex> lck(mutex_);
+    uint64_t applied_lsn = last_applied_lsn_;
+    collections_[collection_id][partition_tag] = {applied_lsn, applied_lsn};
     return applied_lsn;
 }
 
@@ -302,7 +335,7 @@ WalManager::CreateHybridCollection(const std::string& collection_id) {
     LOG_WAL_INFO_ << "create hybrid collection " << collection_id << " " << last_applied_lsn_;
     std::lock_guard<std::mutex> lck(mutex_);
     uint64_t applied_lsn = last_applied_lsn_;
-    tables_[collection_id] = {applied_lsn, applied_lsn};
+    collections_[collection_id][""] = {applied_lsn, applied_lsn};
     return applied_lsn;
 }
 
@@ -310,19 +343,82 @@ void
 WalManager::DropCollection(const std::string& collection_id) {
     LOG_WAL_INFO_ << "drop collection " << collection_id;
     std::lock_guard<std::mutex> lck(mutex_);
-    tables_.erase(collection_id);
+    collections_.erase(collection_id);
+}
+
+void
+WalManager::DropPartition(const std::string& collection_id, const std::string& partition_tag) {
+    LOG_WAL_INFO_ << collection_id << " drop partition " << partition_tag;
+    std::lock_guard<std::mutex> lck(mutex_);
+    auto it = collections_.find(collection_id);
+    if (it != collections_.end()) {
+        it->second.erase(partition_tag);
+    }
 }
 
 void
 WalManager::CollectionFlushed(const std::string& collection_id, uint64_t lsn) {
     std::unique_lock<std::mutex> lck(mutex_);
-    auto it = tables_.find(collection_id);
-    if (it != tables_.end()) {
-        it->second.flush_lsn = lsn;
+    if (collection_id.empty()) {
+        // all collections
+        for (auto& col : collections_) {
+            for (auto& part : col.second) {
+                part.second.flush_lsn = lsn;
+            }
+        }
+
+    } else {
+        // one collection
+        auto it_col = collections_.find(collection_id);
+        if (it_col != collections_.end()) {
+            for (auto& part : it_col->second) {
+                part.second.flush_lsn = lsn;
+            }
+        }
     }
     lck.unlock();
 
     LOG_WAL_INFO_ << collection_id << " is flushed by lsn " << lsn;
+}
+
+void
+WalManager::PartitionFlushed(const std::string& collection_id, const std::string& partition_tag, uint64_t lsn) {
+    std::unique_lock<std::mutex> lck(mutex_);
+    auto it_col = collections_.find(collection_id);
+    if (it_col != collections_.end()) {
+        auto it_part = it_col->second.find(partition_tag);
+        if (it_part != it_col->second.end()) {
+            it_part->second.flush_lsn = lsn;
+        }
+    }
+    lck.unlock();
+
+    LOG_WAL_INFO_ << collection_id << "    " << partition_tag << " is flushed by lsn " << lsn;
+}
+
+void
+WalManager::CollectionUpdated(const std::string& collection_id, uint64_t lsn) {
+    std::unique_lock<std::mutex> lck(mutex_);
+    auto it_col = collections_.find(collection_id);
+    if (it_col != collections_.end()) {
+        for (auto& part : it_col->second) {
+            part.second.wal_lsn = lsn;
+        }
+    }
+    lck.unlock();
+}
+
+void
+WalManager::PartitionUpdated(const std::string& collection_id, const std::string& partition_tag, uint64_t lsn) {
+    std::unique_lock<std::mutex> lck(mutex_);
+    auto it_col = collections_.find(collection_id);
+    if (it_col != collections_.end()) {
+        auto it_part = it_col->second.find(partition_tag);
+        if (it_part != it_col->second.end()) {
+            it_part->second.wal_lsn = lsn;
+        }
+    }
+    lck.unlock();
 }
 
 template <typename T>
@@ -380,13 +476,8 @@ WalManager::Insert(const std::string& collection_id, const std::string& partitio
         new_lsn = record.lsn;
     }
 
-    std::unique_lock<std::mutex> lck(mutex_);
     last_applied_lsn_ = new_lsn;
-    auto it = tables_.find(collection_id);
-    if (it != tables_.end()) {
-        it->second.wal_lsn = new_lsn;
-    }
-    lck.unlock();
+    PartitionUpdated(collection_id, partition_tag, new_lsn);
 
     LOG_WAL_INFO_ << LogOut("[%s][%ld]", "insert", 0) << collection_id << " insert in part " << partition_tag
                   << " with lsn " << new_lsn;
@@ -472,13 +563,8 @@ WalManager::InsertEntities(const std::string& collection_id, const std::string& 
         new_lsn = record.lsn;
     }
 
-    std::unique_lock<std::mutex> lck(mutex_);
     last_applied_lsn_ = new_lsn;
-    auto it = tables_.find(collection_id);
-    if (it != tables_.end()) {
-        it->second.wal_lsn = new_lsn;
-    }
-    lck.unlock();
+    PartitionUpdated(collection_id, partition_tag, new_lsn);
 
     LOG_WAL_INFO_ << LogOut("[%s][%ld]", "insert", 0) << collection_id << " insert in part " << partition_tag
                   << " with lsn " << new_lsn;
@@ -525,13 +611,8 @@ WalManager::DeleteById(const std::string& collection_id, const IDNumbers& vector
         new_lsn = record.lsn;
     }
 
-    std::unique_lock<std::mutex> lck(mutex_);
     last_applied_lsn_ = new_lsn;
-    auto it = tables_.find(collection_id);
-    if (it != tables_.end()) {
-        it->second.wal_lsn = new_lsn;
-    }
-    lck.unlock();
+    CollectionUpdated(collection_id, new_lsn);
 
     LOG_WAL_INFO_ << collection_id << " delete rows by id, lsn " << new_lsn;
 
@@ -548,19 +629,25 @@ WalManager::Flush(const std::string& collection_id) {
     uint64_t lsn = 0;
     if (collection_id.empty()) {
         // flush all tables
-        for (auto& it : tables_) {
-            if (it.second.wal_lsn > it.second.flush_lsn) {
-                lsn = last_applied_lsn_;
-                break;
+        for (auto& col : collections_) {
+            for (auto& part : col.second) {
+                if (part.second.wal_lsn > part.second.flush_lsn) {
+                    lsn = last_applied_lsn_;
+                    break;
+                }
             }
         }
 
     } else {
         // flush one collection
-        auto it = tables_.find(collection_id);
-        if (it != tables_.end()) {
-            if (it->second.wal_lsn > it->second.flush_lsn) {
-                lsn = it->second.wal_lsn;
+        auto it_col = collections_.find(collection_id);
+        if (it_col != collections_.end()) {
+            for (auto& part : it_col->second) {
+                auto wal_lsn = part.second.wal_lsn;
+                auto flush_lsn = part.second.flush_lsn;
+                if (wal_lsn > flush_lsn && wal_lsn > lsn) {
+                    lsn = wal_lsn;
+                }
             }
         }
     }
