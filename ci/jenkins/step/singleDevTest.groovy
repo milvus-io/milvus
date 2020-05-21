@@ -11,10 +11,8 @@ timeout(time: 120, unit: 'MINUTES') {
                 def helmStatusCMD = "helm get manifest --namespace milvus ${env.HELM_RELEASE_NAME} | kubectl describe -n milvus -f - && \
                                      kubectl logs --namespace milvus -l \"app=milvus,release=${env.HELM_RELEASE_NAME}\" -c milvus && \
                                      helm status -n milvus ${env.HELM_RELEASE_NAME}"
-                def helmResult = sh script: helmStatusCMD, returnStatus: true
-                if (!helmResult) {
-                    sh "helm uninstall -n milvus ${env.HELM_RELEASE_NAME} && sleep 1m"
-                }
+                sh script: helmStatusCMD, returnStatus: true
+                sh script: "helm uninstall -n milvus ${env.HELM_RELEASE_NAME} && sleep 1m", returnStatus: true
                 throw exc
             }
         }
