@@ -18,7 +18,10 @@
 
 #include "db/utils.h"
 #include "db/snapshot/ReferenceProxy.h"
+#include "db/snapshot/ScopedResource.h"
+#include "db/snapshot/WrappedTypes.h"
 
+using namespace milvus::engine;
 
 TEST_F(SnapshotTest, ReferenceProxyTest) {
     std::string status("raw");
@@ -27,7 +30,7 @@ TEST_F(SnapshotTest, ReferenceProxyTest) {
         status = CALLED;
     };
 
-    auto proxy = milvus::engine::snapshot::ReferenceProxy();
+    auto proxy = snapshot::ReferenceProxy();
     ASSERT_EQ(proxy.RefCnt(), 0);
 
     int refcnt = 3;
@@ -43,4 +46,57 @@ TEST_F(SnapshotTest, ReferenceProxyTest) {
     }
     ASSERT_EQ(proxy.RefCnt(), 0);
     ASSERT_EQ(status, CALLED);
+}
+
+TEST_F(SnapshotTest, ScopedResourceTest) {
+    auto inner = std::make_shared<snapshot::Collection>("c1");
+    ASSERT_EQ(inner->RefCnt(), 0);
+
+    {
+        auto not_scoped = snapshot::CollectionScopedT(inner, false);
+        ASSERT_EQ(not_scoped->RefCnt(), 0);
+        not_scoped->Ref();
+        ASSERT_EQ(not_scoped->RefCnt(), 1);
+        ASSERT_EQ(inner->RefCnt(), 1);
+
+        auto not_scoped_2 = not_scoped;
+        ASSERT_EQ(not_scoped_2->RefCnt(), 1);
+        ASSERT_EQ(not_scoped->RefCnt(), 1);
+        ASSERT_EQ(inner->RefCnt(), 1);
+    }
+    ASSERT_EQ(inner->RefCnt(), 1);
+
+    inner->UnRef();
+    ASSERT_EQ(inner->RefCnt(), 0);
+
+    {
+        // Test scoped construct
+        auto scoped = snapshot::CollectionScopedT(inner);
+        ASSERT_EQ(scoped->RefCnt(), 1);
+        ASSERT_EQ(inner->RefCnt(), 1);
+
+        {
+            // Test bool operator
+            decltype(scoped) other_scoped;
+            ASSERT_EQ(other_scoped, false);
+            // Test operator=
+            other_scoped = scoped;
+            ASSERT_EQ(other_scoped->RefCnt(), 2);
+            ASSERT_EQ(scoped->RefCnt(), 2);
+            ASSERT_EQ(inner->RefCnt(), 2);
+        }
+        ASSERT_EQ(scoped->RefCnt(), 1);
+        ASSERT_EQ(inner->RefCnt(), 1);
+
+        {
+            // Test copy
+            auto other_scoped(scoped);
+            ASSERT_EQ(other_scoped->RefCnt(), 2);
+            ASSERT_EQ(scoped->RefCnt(), 2);
+            ASSERT_EQ(inner->RefCnt(), 2);
+        }
+        ASSERT_EQ(scoped->RefCnt(), 1);
+        ASSERT_EQ(inner->RefCnt(), 1);
+    }
+    ASSERT_EQ(inner->RefCnt(), 0);
 }
