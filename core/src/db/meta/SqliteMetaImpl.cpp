@@ -309,29 +309,37 @@ SqliteMetaImpl::HasCollection(const std::string& collection_id, bool& has_or_not
 }
 
 Status
-SqliteMetaImpl::AllCollections(std::vector<CollectionSchema>& collection_schema_array) {
+SqliteMetaImpl::AllCollections(std::vector<CollectionSchema>& collection_schema_array, bool is_root) {
     try {
         fiu_do_on("SqliteMetaImpl.AllCollections.throw_exception", throw std::exception());
         server::MetricCollector metric;
 
         // multi-threads call sqlite update may get exception('bad logic', etc), so we add a lock here
         std::lock_guard<std::mutex> meta_lock(meta_mutex_);
-        auto selected = ConnectorPtr->select(
-            columns(&CollectionSchema::id_,
-                    &CollectionSchema::collection_id_,
-                    &CollectionSchema::dimension_,
-                    &CollectionSchema::created_on_,
-                    &CollectionSchema::flag_,
-                    &CollectionSchema::index_file_size_,
-                    &CollectionSchema::engine_type_,
-                    &CollectionSchema::index_params_,
-                    &CollectionSchema::metric_type_,
-                    &CollectionSchema::owner_collection_,
-                    &CollectionSchema::partition_tag_,
-                    &CollectionSchema::version_,
-                    &CollectionSchema::flush_lsn_),
-            where(c(&CollectionSchema::state_) != (int)CollectionSchema::TO_DELETE
-                  and c(&CollectionSchema::owner_collection_) == ""));
+        auto select_columns = columns(&CollectionSchema::id_,
+                                      &CollectionSchema::collection_id_,
+                                      &CollectionSchema::dimension_,
+                                      &CollectionSchema::created_on_,
+                                      &CollectionSchema::flag_,
+                                      &CollectionSchema::index_file_size_,
+                                      &CollectionSchema::engine_type_,
+                                      &CollectionSchema::index_params_,
+                                      &CollectionSchema::metric_type_,
+                                      &CollectionSchema::owner_collection_,
+                                      &CollectionSchema::partition_tag_,
+                                      &CollectionSchema::version_,
+                                      &CollectionSchema::flush_lsn_);
+        decltype(ConnectorPtr->select(select_columns)) selected;
+
+        if (is_root) {
+            selected = ConnectorPtr->select(select_columns,
+                                            where(c(&CollectionSchema::state_) != (int)CollectionSchema::TO_DELETE
+                                                  and c(&CollectionSchema::owner_collection_) == ""));
+        } else {
+            selected = ConnectorPtr->select(select_columns,
+                                            where(c(&CollectionSchema::state_) != (int)CollectionSchema::TO_DELETE));
+        }
+
         for (auto& collection : selected) {
             CollectionSchema schema;
             schema.id_ = std::get<0>(collection);
@@ -992,7 +1000,8 @@ SqliteMetaImpl::ShowPartitions(const std::string& collection_id,
                     &CollectionSchema::metric_type_,
                     &CollectionSchema::partition_tag_,
                     &CollectionSchema::version_,
-                    &CollectionSchema::collection_id_),
+                    &CollectionSchema::collection_id_,
+                    &CollectionSchema::flush_lsn_),
             where(c(&CollectionSchema::owner_collection_) == collection_id and
                   c(&CollectionSchema::state_) != (int)CollectionSchema::TO_DELETE));
 
@@ -1011,6 +1020,7 @@ SqliteMetaImpl::ShowPartitions(const std::string& collection_id,
             partition_schema.partition_tag_ = std::get<9>(partitions[i]);
             partition_schema.version_ = std::get<10>(partitions[i]);
             partition_schema.collection_id_ = std::get<11>(partitions[i]);
+            partition_schema.flush_lsn_ = std::get<12>(partitions[i]);
             partition_schema_array.emplace_back(partition_schema);
         }
     } catch (std::exception& e) {
@@ -1939,7 +1949,7 @@ SqliteMetaImpl::SetGlobalLastLSN(uint64_t lsn) {
             ConnectorPtr->insert(env);
         } else {
             uint64_t last_lsn = std::get<0>(selected[0]);
-            if (lsn == last_lsn) {
+            if (lsn <= last_lsn) {
                 return Status::OK();
             }
 
