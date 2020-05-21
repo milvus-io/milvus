@@ -60,7 +60,7 @@ class TestWalMeta : public SqliteMetaImpl {
     }
 
     Status
-    AllCollections(std::vector<CollectionSchema>& table_schema_array) override {
+    AllCollections(std::vector<CollectionSchema>& table_schema_array, bool is_root) override {
         table_schema_array = tables_;
         return Status::OK();
     }
@@ -88,7 +88,7 @@ class TestWalMetaError : public SqliteMetaImpl {
     }
 
     Status
-    AllCollections(std::vector<CollectionSchema>& table_schema_array) override {
+    AllCollections(std::vector<CollectionSchema>& table_schema_array, bool is_root) override {
         return Status(DB_ERROR, "error");
     }
 };
