@@ -262,11 +262,6 @@ ConstructHEntityResults(const std::vector<engine::AttrsData>& attrs, const std::
         }
     }
 
-    std::vector<int64_t> aaa(100);
-    memcpy(aaa.data(), response->attr_data(0).int_value().data(), 100 * sizeof(int64_t));
-    std::vector<double> bbb(100);
-    memcpy(bbb.data(), response->attr_data(1).double_value().data(), 100 * sizeof(double));
-
     ::milvus::grpc::VectorFieldRecord* grpc_vector_data = response->add_vector_data();
     for (auto& vector : vectors) {
         auto grpc_data = grpc_vector_data->add_value();

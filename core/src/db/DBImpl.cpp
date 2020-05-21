@@ -2065,9 +2065,14 @@ DBImpl::HybridQueryAsync(const std::shared_ptr<server::Context>& context, const 
         attrs_data.attr_count_ = attr.attr_count_;
         attrs_data.id_array_ = attr.id_array_;
         for (auto& name : field_names) {
-            attrs_data.attr_data_.insert(std::make_pair(name, attr.attr_data_.at(name)));
+            if (attr.attr_data_.find(name) != attr.attr_data_.end()) {
+                attrs_data.attr_data_.insert(std::make_pair(name, attr.attr_data_.at(name)));
+            }
         }
+        filter_attrs.emplace_back(attrs_data);
     }
+
+    result.attrs_ = filter_attrs;
 
     rc.ElapseFromBegin("Engine query totally cost");
 
