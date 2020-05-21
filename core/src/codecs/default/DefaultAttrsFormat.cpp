@@ -204,7 +204,7 @@ DefaultAttrsFormat::read_attrs(const milvus::storage::FSHandlerPtr& fs_ptr, cons
 
     for (; it != it_end; ++it) {
         const auto& path = it->path();
-        const auto& file_name = path.filename().string();
+        std::string file_name = path.filename().string();
         if (path.extension().string() == raw_attr_extension_ &&
             file_name.substr(0, file_name.size() - 3) == field_name) {
             size_t nbytes;
