@@ -25,7 +25,7 @@ class TestRestartBase:
     """
     @pytest.fixture(scope="function", autouse=True)
     def skip_check(self, connect, args):
-        if args["server_name"].find("shards") != -1:
+        if args["service_name"].find("shards") != -1:
             reason = "Skip restart cases in shards mode"
             logging.getLogger().info(reason)
             pytest.skip(reason)
