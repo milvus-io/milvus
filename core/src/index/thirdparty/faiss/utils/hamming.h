@@ -180,7 +180,8 @@ void hammings_knn_mc (
   size_t k,
   size_t ncodes,
   int32_t *distances,
-  int64_t *labels);
+  int64_t *labels,
+  ConcurrentBitsetPtr bitset = nullptr);
 
 /** same as hammings_knn except we are doing a range search with radius */
 void hamming_range_search (

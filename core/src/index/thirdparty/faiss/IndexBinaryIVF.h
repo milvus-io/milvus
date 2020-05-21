@@ -122,7 +122,8 @@ struct IndexBinaryIVF : IndexBinary {
                        ConcurrentBitsetPtr bitset = nullptr) override;
 
     void range_search(idx_t n, const uint8_t *x, int radius,
-                      RangeSearchResult *result) const override;
+                      RangeSearchResult *result,
+                      ConcurrentBitsetPtr bitset = nullptr) const override;
 
     void reconstruct(idx_t key, uint8_t *recons) const override;
 

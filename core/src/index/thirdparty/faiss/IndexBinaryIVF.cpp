@@ -53,7 +53,6 @@ IndexBinaryIVF::IndexBinaryIVF(IndexBinary *quantizer, size_t d, size_t nlist, M
       own_invlists(true),
       nprobe(1),
       max_codes(0),
-      maintain_direct_map(false),
       quantizer(quantizer),
       nlist(nlist),
       own_fields(false),
@@ -159,10 +158,7 @@ void IndexBinaryIVF::search(idx_t n, const uint8_t *x, idx_t k,
 }
 
 void IndexBinaryIVF::get_vector_by_id(idx_t n, const idx_t *xid, uint8_t *x, ConcurrentBitsetPtr bitset) {
-
-    if (!maintain_direct_map) {
-        make_direct_map(true);
-    }
+    make_direct_map(true);
 
     /* only get vector by 1 id */
     FAISS_ASSERT(n == 1);
@@ -175,9 +171,7 @@ void IndexBinaryIVF::get_vector_by_id(idx_t n, const idx_t *xid, uint8_t *x, Con
 
 void IndexBinaryIVF::search_by_id (idx_t n, const idx_t *xid, idx_t k, int32_t *distances, idx_t *labels,
                                    ConcurrentBitsetPtr bitset) {
-    if (!maintain_direct_map) {
-        make_direct_map(true);
-    }
+    make_direct_map(true);
 
     auto x = new uint8_t[n * d];
     for (idx_t i = 0; i < n; ++i) {
@@ -866,9 +860,9 @@ void IndexBinaryIVF::search_preassigned(idx_t n, const uint8_t *x, idx_t k,
 
 void IndexBinaryIVF::range_search(
         idx_t n, const uint8_t *x, int radius,
-        RangeSearchResult *res) const
+        RangeSearchResult *res,
+        ConcurrentBitsetPtr bitset) const
 {
-
     std::unique_ptr<idx_t[]> idx(new idx_t[n * nprobe]);
     std::unique_ptr<int32_t[]> coarse_dis(new int32_t[n * nprobe]);
 

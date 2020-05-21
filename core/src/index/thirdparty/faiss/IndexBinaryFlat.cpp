@@ -39,7 +39,8 @@ void IndexBinaryFlat::reset() {
 }
 
 void IndexBinaryFlat::search(idx_t n, const uint8_t *x, idx_t k,
-                             int32_t *distances, idx_t *labels) const {
+                             int32_t *distances, idx_t *labels,
+                             ConcurrentBitsetPtr bitset) const {
     const idx_t block_size = query_batch_size;
     if (metric_type == METRIC_Jaccard || metric_type == METRIC_Tanimoto) {
         float *D = reinterpret_cast<float*>(distances);
@@ -122,7 +123,8 @@ void IndexBinaryFlat::reconstruct(idx_t key, uint8_t *recons) const {
 }
 
 void IndexBinaryFlat::range_search(idx_t n, const uint8_t *x, int radius,
-                   RangeSearchResult *result) const
+                                   RangeSearchResult *result,
+                                   ConcurrentBitsetPtr bitset) const
 {
     hamming_range_search (x, xb.data(), n, ntotal, radius, code_size, result);
 }

@@ -98,6 +98,7 @@ struct IndexBinary {
   virtual void search(idx_t n, const uint8_t *x, idx_t k,
                       int32_t *distances, idx_t *labels,
                       ConcurrentBitsetPtr bitset = nullptr) const = 0;
+
   /** Query n raw vectors from the index by ids.
    *
    * return n raw vectors.

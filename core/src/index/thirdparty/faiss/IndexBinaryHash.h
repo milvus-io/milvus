@@ -51,10 +51,12 @@ struct IndexBinaryHash : IndexBinary {
     void add_with_ids(idx_t n, const uint8_t *x, const idx_t *xids) override;
 
     void range_search(idx_t n, const uint8_t *x, int radius,
-                      RangeSearchResult *result) const override;
+                      RangeSearchResult *result,
+                      ConcurrentBitsetPtr bitset = nullptr) const override;
 
     void search(idx_t n, const uint8_t *x, idx_t k,
-                int32_t *distances, idx_t *labels) const override;
+                int32_t *distances, idx_t *labels,
+                ConcurrentBitsetPtr bitset = nullptr) const override;
 
     void display() const;
     size_t hashtable_size() const;
@@ -102,10 +104,12 @@ struct IndexBinaryMultiHash: IndexBinary {
     void add(idx_t n, const uint8_t *x) override;
 
     void range_search(idx_t n, const uint8_t *x, int radius,
-                      RangeSearchResult *result) const override;
+                      RangeSearchResult *result,
+                      ConcurrentBitsetPtr bitset = nullptr) const override;
 
      void search(idx_t n, const uint8_t *x, idx_t k,
-                int32_t *distances, idx_t *labels) const override;
+                int32_t *distances, idx_t *labels,
+                ConcurrentBitsetPtr bitset = nullptr) const override;
 
     size_t hashtable_size() const;
 

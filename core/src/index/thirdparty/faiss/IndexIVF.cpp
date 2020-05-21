@@ -317,9 +317,7 @@ void IndexIVF::search (idx_t n, const float *x, idx_t k,
 }
 
 void IndexIVF::get_vector_by_id (idx_t n, const idx_t *xid, float *x, ConcurrentBitsetPtr bitset) {
-    if (!maintain_direct_map) {
-        make_direct_map(true);
-    }
+    make_direct_map(true);
 
     /* only get vector by 1 id */
     FAISS_ASSERT(n == 1);
@@ -332,9 +330,7 @@ void IndexIVF::get_vector_by_id (idx_t n, const idx_t *xid, float *x, Concurrent
 
 void IndexIVF::search_by_id (idx_t n, const idx_t *xid, idx_t k, float *distances, idx_t *labels,
                              ConcurrentBitsetPtr bitset) {
-    if (!maintain_direct_map) {
-        make_direct_map(true);
-    }
+    make_direct_map(true);
 
     auto x = new float[n * d];
     for (idx_t i = 0; i < n; ++i) {
