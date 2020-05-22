@@ -10,6 +10,7 @@ Please mark all change in change log and use the issue from GitHub
 -   \#2363 Update branch version
 
 ## Improvement
+-   \#2353 Remove log_config from code and scripts
 -   \#2370 Clean compile warning
 
 ## Task
