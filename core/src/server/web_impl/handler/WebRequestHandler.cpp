@@ -844,6 +844,10 @@ WebRequestHandler::HybridSearch(const std::string& collection_name, const nlohma
             }
             search_result_json.emplace_back(raw_result_json);
         }
+        nlohmann::json attr_json;
+        ConvertRowToColumnJson(result.attrs_, field_names, result.row_num_, attr_json);
+        std::string attr_json_result = attr_json.dump();
+        result_json["Entity"] = attr_json;
         result_json["result"] = search_result_json;
         result_str = result_json.dump();
     }
