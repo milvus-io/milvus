@@ -11,6 +11,7 @@
 
 #include "CompoundOperations.h"
 #include "Snapshots.h"
+#include "OperationExecutor.h"
 
 namespace milvus {
 namespace engine {
@@ -22,19 +23,19 @@ BuildOperation::BuildOperation(const OperationContext& context, ID_TYPE collecti
     : BaseT(context, collection_id, commit_id) {};
 
 bool
-BuildOperation::PreExecute() {
+BuildOperation::PreExecute(Store& store) {
     SegmentCommitOperation op(context_, prev_ss_);
-    op();
+    op(store);
     context_.new_segment_commit = op.GetResource();
     if (!context_.new_segment_commit) return false;
 
     PartitionCommitOperation pc_op(context_, prev_ss_);
-    pc_op();
+    pc_op(store);
 
     OperationContext cc_context;
     cc_context.new_partition_commit = pc_op.GetResource();
     CollectionCommitOperation cc_op(cc_context, prev_ss_);
-    cc_op();
+    cc_op(store);
 
     for (auto& new_segment_file : context_.new_segment_files) {
         AddStep(*new_segment_file);
@@ -46,7 +47,7 @@ BuildOperation::PreExecute() {
 }
 
 bool
-BuildOperation::DoExecute() {
+BuildOperation::DoExecute(Store& store) {
     if (status_ != OP_PENDING) {
         return false;
     }
@@ -78,11 +79,12 @@ BuildOperation::DoExecute() {
 }
 
 SegmentFilePtr
-BuildOperation::NewSegmentFile(const SegmentFileContext& context) {
-    SegmentFileOperation new_sf_op(context, prev_ss_);
-    new_sf_op();
-    context_.new_segment_files.push_back(new_sf_op.GetResource());
-    return new_sf_op.GetResource();
+BuildOperation::CommitNewSegmentFile(const SegmentFileContext& context) {
+    auto new_sf_op = std::make_shared<SegmentFileOperation>(context, prev_ss_);
+    OperationExecutor::GetInstance().Submit(new_sf_op);
+    new_sf_op->WaitToFinish();
+    context_.new_segment_files.push_back(new_sf_op->GetResource());
+    return new_sf_op->GetResource();
 }
 
 NewSegmentOperation::NewSegmentOperation(const OperationContext& context, ScopedSnapshotT prev_ss)
@@ -91,7 +93,7 @@ NewSegmentOperation::NewSegmentOperation(const OperationContext& context, ID_TYP
     : BaseT(context, collection_id, commit_id) {};
 
 bool
-NewSegmentOperation::DoExecute() {
+NewSegmentOperation::DoExecute(Store& store) {
     auto i = 0;
     for(; i<context_.new_segment_files.size(); ++i) {
         std::any_cast<SegmentFilePtr>(steps_[i])->Activate();
@@ -104,22 +106,22 @@ NewSegmentOperation::DoExecute() {
 }
 
 bool
-NewSegmentOperation::PreExecute() {
+NewSegmentOperation::PreExecute(Store& store) {
     // PXU TODO:
     // 1. Check all requried field elements have related segment files
     // 2. Check Stale and others
     SegmentCommitOperation op(context_, prev_ss_);
-    op();
+    op(store);
     context_.new_segment_commit = op.GetResource();
     if (!context_.new_segment_commit) return false;
 
     PartitionCommitOperation pc_op(context_, prev_ss_);
-    pc_op();
+    pc_op(store);
 
     OperationContext cc_context;
     cc_context.new_partition_commit = pc_op.GetResource();
     CollectionCommitOperation cc_op(cc_context, prev_ss_);
-    cc_op();
+    cc_op(store);
 
     for (auto& new_segment_file : context_.new_segment_files) {
         AddStep(*new_segment_file);
@@ -132,22 +134,24 @@ NewSegmentOperation::PreExecute() {
 }
 
 SegmentPtr
-NewSegmentOperation::NewSegment() {
-    SegmentOperation op(context_, prev_ss_);
-    op();
-    context_.new_segment = op.GetResource();
+NewSegmentOperation::CommitNewSegment() {
+    auto op = std::make_shared<SegmentOperation>(context_, prev_ss_);
+    OperationExecutor::GetInstance().Submit(op);
+    op->WaitToFinish();
+    context_.new_segment = op->GetResource();
     return context_.new_segment;
 }
 
 SegmentFilePtr
-NewSegmentOperation::NewSegmentFile(const SegmentFileContext& context) {
+NewSegmentOperation::CommitNewSegmentFile(const SegmentFileContext& context) {
     auto c = context;
     c.segment_id = context_.new_segment->GetID();
     c.partition_id = context_.new_segment->GetPartitionId();
-    SegmentFileOperation new_sf_op(c, prev_ss_);
-    new_sf_op();
-    context_.new_segment_files.push_back(new_sf_op.GetResource());
-    return new_sf_op.GetResource();
+    auto new_sf_op = std::make_shared<SegmentFileOperation>(c, prev_ss_);
+    OperationExecutor::GetInstance().Submit(new_sf_op);
+    new_sf_op->WaitToFinish();
+    context_.new_segment_files.push_back(new_sf_op->GetResource());
+    return new_sf_op->GetResource();
 }
 
 MergeOperation::MergeOperation(const OperationContext& context, ScopedSnapshotT prev_ss)
@@ -156,46 +160,48 @@ MergeOperation::MergeOperation(const OperationContext& context, ID_TYPE collecti
     : BaseT(context, collection_id, commit_id) {};
 
 SegmentPtr
-MergeOperation::NewSegment() {
+MergeOperation::CommitNewSegment() {
     if (context_.new_segment) return context_.new_segment;
-    SegmentOperation op(context_, prev_ss_);
-    op();
-    context_.new_segment = op.GetResource();
+    auto op = std::make_shared<SegmentOperation>(context_, prev_ss_);
+    OperationExecutor::GetInstance().Submit(op);
+    op->WaitToFinish();
+    context_.new_segment = op->GetResource();
     return context_.new_segment;
 }
 
 SegmentFilePtr
-MergeOperation::NewSegmentFile(const SegmentFileContext& context) {
+MergeOperation::CommitNewSegmentFile(const SegmentFileContext& context) {
     // PXU TODO: Check element type and segment file mapping rules
-    auto new_segment = NewSegment();
+    auto new_segment = CommitNewSegment();
     auto c = context;
     c.segment_id = new_segment->GetID();
     c.partition_id = new_segment->GetPartitionId();
-    SegmentFileOperation new_sf_op(c, prev_ss_);
-    new_sf_op();
-    context_.new_segment_files.push_back(new_sf_op.GetResource());
-    return new_sf_op.GetResource();
+    auto new_sf_op = std::make_shared<SegmentFileOperation>(c, prev_ss_);
+    OperationExecutor::GetInstance().Submit(new_sf_op);
+    new_sf_op->WaitToFinish();
+    context_.new_segment_files.push_back(new_sf_op->GetResource());
+    return new_sf_op->GetResource();
 }
 
 bool
-MergeOperation::PreExecute() {
+MergeOperation::PreExecute(Store& store) {
     // PXU TODO:
     // 1. Check all requried field elements have related segment files
     // 2. Check Stale and others
     SegmentCommitOperation op(context_, prev_ss_);
-    op();
+    op(store);
     context_.new_segment_commit = op.GetResource();
     if (!context_.new_segment_commit) return false;
 
     // PXU TODO: Check stale segments
 
     PartitionCommitOperation pc_op(context_, prev_ss_);
-    pc_op();
+    pc_op(store);
 
     OperationContext cc_context;
     cc_context.new_partition_commit = pc_op.GetResource();
     CollectionCommitOperation cc_op(cc_context, prev_ss_);
-    cc_op();
+    cc_op(store);
 
     for (auto& new_segment_file : context_.new_segment_files) {
         AddStep(*new_segment_file);
@@ -208,7 +214,7 @@ MergeOperation::PreExecute() {
 }
 
 bool
-MergeOperation::DoExecute() {
+MergeOperation::DoExecute(Store& store) {
     auto i = 0;
     for(; i<context_.new_segment_files.size(); ++i) {
         std::any_cast<SegmentFilePtr>(steps_[i])->Activate();
@@ -218,6 +224,39 @@ MergeOperation::DoExecute() {
     std::any_cast<PartitionCommitPtr>(steps_[i++])->Activate();
     std::any_cast<CollectionCommitPtr>(steps_[i++])->Activate();
     return true;
+}
+
+GetSnapshotIDsOperation::GetSnapshotIDsOperation(ID_TYPE collection_id, bool reversed)
+    : BaseT(OperationContext(), ScopedSnapshotT()),
+      collection_id_(collection_id),
+      reversed_(reversed) {
+}
+
+bool
+GetSnapshotIDsOperation::DoExecute(Store& store) {
+    ids_ = store.AllActiveCollectionCommitIds(collection_id_, reversed_);
+    return true;
+}
+
+const IDS_TYPE&
+GetSnapshotIDsOperation::GetIDs() const {
+    return ids_;
+}
+
+GetCollectionIDsOperation::GetCollectionIDsOperation(bool reversed)
+    : BaseT(OperationContext(), ScopedSnapshotT()),
+      reversed_(reversed) {
+}
+
+bool
+GetCollectionIDsOperation::DoExecute(Store& store) {
+    ids_ = store.AllActiveCollectionIds(reversed_);
+    return true;
+}
+
+const IDS_TYPE&
+GetCollectionIDsOperation::GetIDs() const {
+    return ids_;
 }
 
 } // snapshot

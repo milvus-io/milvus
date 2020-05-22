@@ -16,6 +16,12 @@ struct SegmentFileContext {
     ID_TYPE partition_id;
 };
 
+struct LoadOperationContext {
+    ID_TYPE id = 0;
+    State status = INVALID;
+    std::string name;
+};
+
 struct OperationContext {
     SegmentPtr new_segment = nullptr;
     SegmentCommitPtr new_segment_commit = nullptr;

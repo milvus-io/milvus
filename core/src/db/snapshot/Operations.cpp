@@ -11,6 +11,7 @@
 
 #include "Operations.h"
 #include "Snapshots.h"
+#include "OperationExecutor.h"
 
 namespace milvus {
 namespace engine {
@@ -24,8 +25,29 @@ Operations::Operations(const OperationContext& context, ID_TYPE collection_id, I
 }
 
 void
-Operations::operator()() {
-    return OnExecute();
+Operations::operator()(Store& store) {
+    return ApplyToStore(store);
+}
+
+bool
+Operations::WaitToFinish() {
+    std::unique_lock<std::mutex> lock(finish_mtx_);
+    finish_cond_.wait(lock, [this] {
+        return status_ != OP_PENDING;
+    });
+    return true;
+}
+
+void
+Operations::Done() {
+    status_ = OP_OK;
+    finish_cond_.notify_all();
+}
+
+void
+Operations::Push() {
+    OperationExecutor::GetInstance().Submit(shared_from_this());
+    this->WaitToFinish();
 }
 
 bool
@@ -46,34 +68,38 @@ Operations::GetSnapshot() const {
 }
 
 void
-Operations::OnExecute() {
-    auto r = PreExecute();
+Operations::ApplyToStore(Store& store) {
+    OnExecute(store);
+    Done();
+}
+
+void
+Operations::OnExecute(Store& store) {
+    auto r = PreExecute(store);
     if (!r) {
         status_ = OP_FAIL_FLUSH_META;
         return;
     }
-    r = DoExecute();
+    r = DoExecute(store);
     if (!r) {
         status_ = OP_FAIL_FLUSH_META;
         return;
     }
-    PostExecute();
+    PostExecute(store);
 }
 
 bool
-Operations::PreExecute() {
+Operations::PreExecute(Store& store) {
     return true;
 }
 
 bool
-Operations::DoExecute() {
+Operations::DoExecute(Store& store) {
     return true;
 }
 
 bool
-Operations::PostExecute() {
-    /* std::cout << "Operations " << Name << " is OnExecute with " << steps_.size() << " steps" << std::endl; */
-    auto& store = Store::GetInstance();
+Operations::PostExecute(Store& store) {
     auto ok = store.DoCommitOperation(*this);
     if (!ok) status_ = OP_FAIL_FLUSH_META;
     return ok;

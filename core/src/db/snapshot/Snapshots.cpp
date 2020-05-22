@@ -1,5 +1,5 @@
 #include "Snapshots.h"
-#include "Store.h"
+#include "CompoundOperations.h"
 
 namespace milvus {
 namespace engine {
@@ -69,8 +69,9 @@ Snapshots::Load(ID_TYPE collection_id) {
 
 SnapshotHolderPtr
 Snapshots::LoadNoLock(ID_TYPE collection_id) {
-    auto& store = Store::GetInstance();
-    auto collection_commit_ids = store.AllActiveCollectionCommitIds(collection_id, false);
+    auto op = std::make_shared<GetSnapshotIDsOperation>(collection_id, false);
+    op->Push();
+    auto& collection_commit_ids = op->GetIDs();
     if (collection_commit_ids.size() == 0) {
         return nullptr;
     }
@@ -86,8 +87,9 @@ Snapshots::LoadNoLock(ID_TYPE collection_id) {
 
 void
 Snapshots::Init() {
-    auto& store = Store::GetInstance();
-    auto collection_ids = store.AllActiveCollectionIds();
+    auto op = std::make_shared<GetCollectionIDsOperation>();
+    op->Push();
+    auto& collection_ids = op->GetIDs();
     for (auto collection_id : collection_ids) {
         Load(collection_id);
     }
@@ -102,8 +104,11 @@ Snapshots::GetHolder(const std::string& name) {
             return GetHolderNoLock(kv->second);
         }
     }
-    auto& store = Store::GetInstance();
-    auto c = store.GetCollection(name);
+    LoadOperationContext context;
+    context.name = name;
+    auto op = std::make_shared<LoadOperation<Collection>>(context);
+    op->Push();
+    auto c = op->GetResource();
     if (!c) return nullptr;
     return Load(c->GetID());
 }

@@ -16,7 +16,7 @@ namespace engine {
 namespace snapshot {
 
 bool
-CollectionCommitOperation::DoExecute() {
+CollectionCommitOperation::DoExecute(Store& store) {
     auto prev_resource = GetPrevResource();
     if (!prev_resource) return false;
     resource_ = std::make_shared<CollectionCommit>(*prev_resource);
@@ -34,8 +34,22 @@ CollectionCommitOperation::DoExecute() {
     return true;
 }
 
+PartitionCommitOperation::PartitionCommitOperation(const OperationContext& context, ScopedSnapshotT prev_ss)
+    : BaseT(context, prev_ss) {
+}
+
+PartitionCommitOperation::PartitionCommitOperation(const OperationContext& context, ID_TYPE collection_id, ID_TYPE commit_id)
+    : BaseT(context, collection_id, commit_id) {
+}
+
+PartitionCommitPtr
+PartitionCommitOperation::GetPrevResource() const {
+    auto& segment_commit = context_.new_segment_commit;
+    return prev_ss_->GetPartitionCommitByPartitionId(segment_commit->GetPartitionId());
+}
+
 bool
-PartitionCommitOperation::DoExecute() {
+PartitionCommitOperation::DoExecute(Store& store) {
     auto prev_resource = GetPrevResource();
     if (prev_resource) {
         resource_ = std::make_shared<PartitionCommit>(*prev_resource);
@@ -61,9 +75,43 @@ PartitionCommitOperation::DoExecute() {
     return true;
 }
 
+SegmentCommitOperation::SegmentCommitOperation(const OperationContext& context, ScopedSnapshotT prev_ss)
+    : BaseT(context, prev_ss) {
+}
+
+SegmentCommitOperation::SegmentCommitOperation(const OperationContext& context, ID_TYPE collection_id, ID_TYPE commit_id)
+    : BaseT(context, collection_id, commit_id) {
+}
+
+SegmentCommit::Ptr
+SegmentCommitOperation::GetPrevResource() const {
+    if (context_.new_segment_files.size() > 0) {
+        return prev_ss_->GetSegmentCommit(context_.new_segment_files[0]->GetSegmentId());
+    }
+    return nullptr;
+}
+
+SegmentOperation::SegmentOperation(const OperationContext& context, ScopedSnapshotT prev_ss)
+    : BaseT(context, prev_ss) {
+}
+
+SegmentOperation::SegmentOperation(const OperationContext& context, ID_TYPE collection_id, ID_TYPE commit_id)
+    : BaseT(context, collection_id, commit_id) {
+}
 
 bool
-SegmentCommitOperation::DoExecute() {
+SegmentOperation::DoExecute(Store& store) {
+    if (!context_.prev_partition) {
+        return false;
+    }
+    auto prev_num = prev_ss_->GetMaxSegmentNumByPartition(context_.prev_partition->GetID());
+    resource_ = std::make_shared<Segment>(context_.prev_partition->GetID(), prev_num+1);
+    AddStep(*resource_);
+    return true;
+}
+
+bool
+SegmentCommitOperation::DoExecute(Store& store) {
     auto prev_resource = GetPrevResource();
 
     if (prev_resource) {
@@ -85,8 +133,16 @@ SegmentCommitOperation::DoExecute() {
     return true;
 }
 
+SegmentFileOperation::SegmentFileOperation(const SegmentFileContext& sc, ScopedSnapshotT prev_ss)
+    : BaseT(OperationContext(), prev_ss), context_(sc) {
+}
+
+SegmentFileOperation::SegmentFileOperation(const SegmentFileContext& sc, ID_TYPE collection_id, ID_TYPE commit_id)
+    : BaseT(OperationContext(), collection_id, commit_id), context_(sc) {
+}
+
 bool
-SegmentFileOperation::DoExecute() {
+SegmentFileOperation::DoExecute(Store& store) {
     auto field_element_id = prev_ss_->GetFieldElementId(context_.field_name, context_.field_element_name);
     resource_ = std::make_shared<SegmentFile>(context_.partition_id, context_.segment_id, field_element_id);
     AddStep(*resource_);

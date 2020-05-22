@@ -10,8 +10,8 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
 #include "SnapshotHolder.h"
-#include "Store.h"
 #include "ResourceHolders.h"
+#include "Operations.h"
 
 namespace milvus {
 namespace engine {
@@ -128,7 +128,11 @@ SnapshotHolder::BackgroundGC() {
 void
 SnapshotHolder::LoadNoLock(ID_TYPE collection_commit_id) {
     assert(collection_commit_id > max_id_);
-    auto entry = Store::GetInstance().GetResource<CollectionCommit>(collection_commit_id);
+    LoadOperationContext context;
+    context.id = collection_commit_id;
+    auto op = std::make_shared<LoadOperation<CollectionCommit>>(context);
+    op->Push();
+    auto entry = op->GetResource();
     if (!entry) return;
     AddNoLock(collection_commit_id);
 }

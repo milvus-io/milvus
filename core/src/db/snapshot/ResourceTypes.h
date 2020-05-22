@@ -30,7 +30,8 @@ using IDS_TYPE = std::vector<ID_TYPE>;
 enum State {
     PENDING = 0,
     ACTIVE = 1,
-    DEACTIVE = 2
+    DEACTIVE = 2,
+    INVALID = 999
 };
 
 } // snapshot

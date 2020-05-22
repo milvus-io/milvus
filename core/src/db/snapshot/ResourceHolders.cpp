@@ -10,7 +10,7 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
 #include "ResourceHolders.h"
-#include "Store.h"
+#include "CompoundOperations.h"
 #include <sstream>
 #include <iostream>
 
@@ -20,8 +20,11 @@ namespace snapshot {
 
 CollectionsHolder::ResourcePtr
 CollectionsHolder::Load(const std::string& name) {
-    auto& store = Store::GetInstance();
-    auto c = store.GetCollection(name);
+    LoadOperationContext context;
+    context.name = name;
+    auto op = std::make_shared<LoadOperation<Collection>>(context);
+    op->Push();
+    auto c = op->GetResource();
     if (c) {
         BaseT::AddNoLock(c);
         return c;

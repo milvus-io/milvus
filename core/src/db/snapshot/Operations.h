@@ -17,6 +17,9 @@
 #include <assert.h>
 #include <vector>
 #include <any>
+#include <mutex>
+#include <thread>
+#include <condition_variable>
 
 namespace milvus {
 namespace engine {
@@ -35,7 +38,7 @@ enum OpStatus {
     OP_FAIL_FLUSH_META
 };
 
-class Operations {
+class Operations : public std::enable_shared_from_this<Operations> {
 public:
     /* static constexpr const char* Name = Derived::Name; */
     Operations(const OperationContext& context, ScopedSnapshotT prev_ss);
@@ -51,14 +54,21 @@ public:
 
     StepsT& GetSteps() { return steps_; }
 
-    virtual void OnExecute();
-    virtual bool PreExecute();
-    virtual bool DoExecute();
-    virtual bool PostExecute();
+    virtual void OnExecute(Store&);
+    virtual bool PreExecute(Store&);
+    virtual bool DoExecute(Store&);
+    virtual bool PostExecute(Store&);
 
     virtual ScopedSnapshotT GetSnapshot() const;
 
-    virtual void operator()();
+    virtual void operator()(Store& store);
+    virtual void Push();
+
+    virtual void ApplyToStore(Store& store);
+
+    bool WaitToFinish();
+
+    void Done();
 
     virtual ~Operations() {}
 
@@ -68,6 +78,8 @@ protected:
     StepsT steps_;
     std::vector<ID_TYPE> ids_;
     OpStatus status_ = OP_PENDING;
+    mutable std::mutex finish_mtx_;
+    std::condition_variable finish_cond_;
 };
 
 template<typename StepT>
@@ -102,6 +114,53 @@ public:
 protected:
     typename ResourceT::Ptr resource_;
 };
+
+template <typename ResourceT>
+class LoadOperation : public Operations {
+public:
+    LoadOperation(const LoadOperationContext& context) :
+       Operations(OperationContext(), ScopedSnapshotT()), context_(context) {}
+
+    void ApplyToStore(Store& store) override {
+        if (status_ != OP_PENDING) return;
+        resource_ = store.GetResource<ResourceT>(context_.id);
+        Done();
+    }
+
+    typename ResourceT::Ptr GetResource() const  {
+        if (status_ == OP_PENDING) return nullptr;
+        return resource_;
+    }
+
+protected:
+    LoadOperationContext context_;
+    typename ResourceT::Ptr resource_;
+};
+
+template <typename ResourceT>
+class HardDeleteOperation : public Operations {
+public:
+    HardDeleteOperation(ID_TYPE id) :
+       Operations(OperationContext(), ScopedSnapshotT()), id_(id) {}
+
+    void ApplyToStore(Store& store) override {
+        if (status_ != OP_PENDING) return;
+        ok_ = store.RemoveResource<ResourceT>(id_);
+        Done();
+    }
+
+    bool GetStatus() const  {
+        if (status_ == OP_PENDING) return false;
+        return ok_;
+    }
+
+protected:
+    ID_TYPE id_;
+    // PXU TODO: Replace all bool to Status type
+    bool ok_;
+};
+
+using OperationsPtr = std::shared_ptr<Operations>;
 
 } // snapshot
 } // engine

@@ -25,10 +25,10 @@ public:
     BuildOperation(const OperationContext& context, ScopedSnapshotT prev_ss);
     BuildOperation(const OperationContext& context, ID_TYPE collection_id, ID_TYPE commit_id = 0);
 
-    bool DoExecute() override;
-    bool PreExecute() override;
+    bool DoExecute(Store&) override;
+    bool PreExecute(Store&) override;
 
-    SegmentFilePtr NewSegmentFile(const SegmentFileContext& context);
+    SegmentFilePtr CommitNewSegmentFile(const SegmentFileContext& context);
 };
 
 class NewSegmentOperation : public Operations {
@@ -38,13 +38,13 @@ public:
     NewSegmentOperation(const OperationContext& context, ScopedSnapshotT prev_ss);
     NewSegmentOperation(const OperationContext& context, ID_TYPE collection_id, ID_TYPE commit_id = 0);
 
-    bool DoExecute() override;
+    bool DoExecute(Store&) override;
 
-    bool PreExecute() override;
+    bool PreExecute(Store&) override;
 
-    SegmentPtr NewSegment();
+    SegmentPtr CommitNewSegment();
 
-    SegmentFilePtr NewSegmentFile(const SegmentFileContext& context);
+    SegmentFilePtr CommitNewSegmentFile(const SegmentFileContext& context);
 };
 
 class MergeOperation : public Operations {
@@ -54,11 +54,42 @@ public:
     MergeOperation(const OperationContext& context, ScopedSnapshotT prev_ss);
     MergeOperation(const OperationContext& context, ID_TYPE collection_id, ID_TYPE commit_id = 0);
 
-    bool PreExecute() override;
-    bool DoExecute() override;
+    bool PreExecute(Store&) override;
+    bool DoExecute(Store&) override;
 
-    SegmentPtr NewSegment();
-    SegmentFilePtr NewSegmentFile(const SegmentFileContext& context);
+    SegmentPtr CommitNewSegment();
+    SegmentFilePtr CommitNewSegmentFile(const SegmentFileContext& context);
+};
+
+class GetSnapshotIDsOperation : public Operations {
+public:
+    using BaseT = Operations;
+
+    GetSnapshotIDsOperation(ID_TYPE collection_id, bool reversed = true);
+
+    bool DoExecute(Store& store) override;
+
+    const IDS_TYPE& GetIDs() const;
+
+protected:
+    ID_TYPE collection_id_;
+    bool reversed_;
+    IDS_TYPE ids_;
+};
+
+class GetCollectionIDsOperation : public Operations {
+public:
+    using BaseT = Operations;
+
+    GetCollectionIDsOperation(bool reversed = true);
+
+    bool DoExecute(Store& store) override;
+
+    const IDS_TYPE& GetIDs() const;
+
+protected:
+    bool reversed_;
+    IDS_TYPE ids_;
 };
 
 } // snapshot
