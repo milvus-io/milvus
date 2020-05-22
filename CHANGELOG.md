@@ -5,9 +5,11 @@ Please mark all change in change log and use the issue from GitHub
 
 ## Bug
 -   \#2378 Duplicate data after server restart
+-   \#2399 The nlist set by the user may not take effect
 
 ## Feature
 -   \#2363 Update branch version
+-   \#2381 Upgrade to faiss_1.6.3
 
 ## Improvement
 -   \#2370 Clean compile warning
