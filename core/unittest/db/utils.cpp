@@ -25,6 +25,7 @@
 #include "cache/GpuCacheMgr.h"
 #include "db/DBFactory.h"
 #include "db/Options.h"
+#include "db/snapshot/OperationExecutor.h"
 
 
 #ifdef MILVUS_GPU_VERSION
@@ -349,6 +350,20 @@ MySqlMetaTest::GetOptions() {
     options.meta_.backend_uri_ = test_env->getURI();
 
     return options;
+}
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+void
+SnapshotTest::SetUp() {
+    BaseTest::SetUp();
+    milvus::engine::snapshot::OperationExecutor::GetInstance().Start();
+    milvus::engine::snapshot::Store::GetInstance().Mock();
+}
+
+void
+SnapshotTest::TearDown() {
+    milvus::engine::snapshot::OperationExecutor::GetInstance().Stop();
+    BaseTest::TearDown();
 }
 
 /////////////////////////////////////////////////////////////////////////////////////////////////////////////////

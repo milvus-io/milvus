@@ -38,10 +38,11 @@ OperationExecutor::Submit(OperationsPtr operation) {
 
 void
 OperationExecutor::Start() {
-    if (executor_ || stopped_) return;
+    if (executor_) return;
     auto queue = std::make_shared<OperationQueueT>();
     auto t = std::make_shared<std::thread>(&OperationExecutor::ThreadMain, this, queue);
     executor_ = std::make_shared<Executor>(t, queue);
+    stopped_ = false;
     std::cout << "OperationExecutor Started" << std::endl;
 }
 
@@ -52,6 +53,7 @@ OperationExecutor::Stop() {
     executor_->execute_queue->Put(nullptr);
     executor_->execute_thread->join();
     stopped_ = true;
+    executor_ = nullptr;
     std::cout << "OperationExecutor Stopped" << std::endl;
 }
 

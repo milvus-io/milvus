@@ -23,6 +23,9 @@
 #include "db/snapshot/ResourceHolders.h"
 #include "db/snapshot/OperationExecutor.h"
 #include "db/snapshot/Store.h"
+#include "db/snapshot/Context.h"
+#include "db/snapshot/CompoundOperations.h"
+#include "db/snapshot/Snapshots.h"
 
 using namespace milvus::engine;
 
@@ -105,8 +108,6 @@ TEST_F(SnapshotTest, ScopedResourceTest) {
 }
 
 TEST_F(SnapshotTest, ResourceHoldersTest) {
-    snapshot::OperationExecutor::GetInstance().Start();
-    snapshot::Store::GetInstance().Mock();
     snapshot::ID_TYPE collection_id = 1;
     {
         auto collection = snapshot::CollectionsHolder::GetInstance().GetResource(collection_id, false);
@@ -124,6 +125,26 @@ TEST_F(SnapshotTest, ResourceHoldersTest) {
         auto collection = snapshot::CollectionsHolder::GetInstance().GetResource(collection_id, false);
         ASSERT_TRUE(!collection);
     }
+}
 
-    snapshot::OperationExecutor::GetInstance().Stop();
+TEST_F(SnapshotTest, OperationTest) {
+    {
+        snapshot::SegmentFileContext sf_context;
+        sf_context.field_name = "f_1_1";
+        sf_context.field_element_name = "fe_1_1";
+        sf_context.segment_id = 1;
+        sf_context.partition_id = 1;
+
+        {
+            auto ss = snapshot::Snapshots::GetInstance().GetSnapshot(1);
+            auto prev_ss_id = ss->GetID();
+            snapshot::OperationContext context;
+            auto build_op = std::make_shared<snapshot::BuildOperation>(context, ss);
+            auto seg_file = build_op->CommitNewSegmentFile(sf_context);
+            build_op->Push();
+            ss = build_op->GetSnapshot();
+            ASSERT_TRUE(ss->GetID() > prev_ss_id);
+        }
+
+    }
 }

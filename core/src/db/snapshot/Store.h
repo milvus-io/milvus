@@ -259,7 +259,10 @@ public:
     /*     return collection; */
     /* } */
 
-    void Mock() { DoMock(); }
+    void Mock() {
+        DoReset();
+        DoMock();
+    }
 
 private:
 
@@ -420,6 +423,12 @@ private:
                 r->Activate();
             }
         }
+    }
+
+    void DoReset() {
+        ids_ = MockIDST();
+        resources_ = MockResourcesT();
+        name_collections_.clear();
     }
 
     MockResourcesT resources_;

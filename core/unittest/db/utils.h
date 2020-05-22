@@ -158,4 +158,10 @@ class SearchByIdTest : public DBTest {};
 class GetVectorByIdTest : public DBTest {};
 //
 /////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-class SnapshotTest : public DBTest {};
+class SnapshotTest : public DBTest {
+protected:
+    void
+    SetUp() override;
+    void
+    TearDown() override;
+};
