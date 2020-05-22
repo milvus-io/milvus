@@ -20,6 +20,9 @@
 #include "db/snapshot/ReferenceProxy.h"
 #include "db/snapshot/ScopedResource.h"
 #include "db/snapshot/WrappedTypes.h"
+#include "db/snapshot/ResourceHolders.h"
+#include "db/snapshot/OperationExecutor.h"
+#include "db/snapshot/Store.h"
 
 using namespace milvus::engine;
 
@@ -99,4 +102,14 @@ TEST_F(SnapshotTest, ScopedResourceTest) {
         ASSERT_EQ(inner->RefCnt(), 1);
     }
     ASSERT_EQ(inner->RefCnt(), 0);
+}
+
+TEST_F(SnapshotTest, ResourceHoldersTest) {
+    snapshot::OperationExecutor::GetInstance().Start();
+    snapshot::Store::GetInstance().Mock();
+    snapshot::ID_TYPE collection_id = 1;
+    auto collection = snapshot::CollectionsHolder::GetInstance().GetResource(collection_id, false);
+    ASSERT_EQ(collection->GetID(), collection_id);
+
+    snapshot::OperationExecutor::GetInstance().Stop();
 }
