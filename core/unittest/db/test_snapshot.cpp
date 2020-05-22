@@ -141,6 +141,7 @@ TEST_F(SnapshotTest, OperationTest) {
         // Check snapshot
         {
             auto collection_commit = snapshot::CollectionCommitsHolder::GetInstance().GetResource(ss_id, false);
+            /* snapshot::SegmentCommitsHolder::GetInstance().GetResource(prev_segment_commit->GetID()); */
             ASSERT_TRUE(collection_commit);
         }
 
@@ -149,9 +150,19 @@ TEST_F(SnapshotTest, OperationTest) {
             snapshot::OperationContext context;
             auto build_op = std::make_shared<snapshot::BuildOperation>(context, ss);
             auto seg_file = build_op->CommitNewSegmentFile(sf_context);
+            ASSERT_TRUE(seg_file);
+            auto prev_segment_commit = ss->GetSegmentCommit(seg_file->GetSegmentId());
+            auto prev_segment_commit_mappings = prev_segment_commit->GetMappings();
+
             build_op->Push();
             ss = build_op->GetSnapshot();
             ASSERT_TRUE(ss->GetID() > ss_id);
+
+            auto segment_commit = ss->GetSegmentCommit(seg_file->GetSegmentId());
+            auto segment_commit_mappings = segment_commit->GetMappings();
+            snapshot::MappingT expected_mappings = prev_segment_commit_mappings;
+            expected_mappings.insert(seg_file->GetID());
+            ASSERT_EQ(expected_mappings, segment_commit_mappings);
         }
 
         // Check stale snapshot has been deleted from store
