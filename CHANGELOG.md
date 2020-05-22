@@ -6,12 +6,15 @@ Please mark all change in change log and use the issue from GitHub
 ## Bug
 -   \#2366 Reduce SQL execution times for collection contains lot of partitions
 -   \#2378 Duplicate data after server restart
+-   \#2399 The nlist set by the user may not take effect
+-   \#2403 MySQL max_idle_time is 10 by default
 
 ## Feature
 -   \#2363 Update branch version
 
 ## Improvement
 -   \#2370 Clean compile warning
+-   \#2381 Upgrade FAISS to 1.6.3
 
 ## Task
 
