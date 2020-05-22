@@ -26,6 +26,8 @@
 #include "db/DBFactory.h"
 #include "db/Options.h"
 #include "db/snapshot/OperationExecutor.h"
+#include "db/snapshot/Snapshots.h"
+#include "db/snapshot/ResourceHolders.h"
 
 
 #ifdef MILVUS_GPU_VERSION
@@ -357,11 +359,26 @@ void
 SnapshotTest::SetUp() {
     BaseTest::SetUp();
     milvus::engine::snapshot::OperationExecutor::GetInstance().Start();
+    milvus::engine::snapshot::CollectionCommitsHolder::GetInstance().Reset();
+    milvus::engine::snapshot::CollectionsHolder::GetInstance().Reset();
+    milvus::engine::snapshot::SchemaCommitsHolder::GetInstance().Reset();
+    milvus::engine::snapshot::FieldCommitsHolder::GetInstance().Reset();
+    milvus::engine::snapshot::FieldsHolder::GetInstance().Reset();
+    milvus::engine::snapshot::FieldElementsHolder::GetInstance().Reset();
+    milvus::engine::snapshot::PartitionsHolder::GetInstance().Reset();
+    milvus::engine::snapshot::PartitionCommitsHolder::GetInstance().Reset();
+    milvus::engine::snapshot::SegmentsHolder::GetInstance().Reset();
+    milvus::engine::snapshot::SegmentCommitsHolder::GetInstance().Reset();
+    milvus::engine::snapshot::SegmentFilesHolder::GetInstance().Reset();
+
+    milvus::engine::snapshot::Snapshots::GetInstance().Reset();
+
     milvus::engine::snapshot::Store::GetInstance().Mock();
 }
 
 void
 SnapshotTest::TearDown() {
+
     milvus::engine::snapshot::OperationExecutor::GetInstance().Stop();
     BaseTest::TearDown();
 }

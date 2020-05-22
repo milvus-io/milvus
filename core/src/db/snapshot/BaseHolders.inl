@@ -30,6 +30,11 @@ void ResourceHolder<ResourceT, Derived>::Dump(const std::string& tag) {
 }
 
 template <typename ResourceT, typename Derived>
+void ResourceHolder<ResourceT, Derived>::Reset() {
+    id_map_.clear();
+}
+
+template <typename ResourceT, typename Derived>
 typename ResourceHolder<ResourceT, Derived>::ResourcePtr
 ResourceHolder<ResourceT, Derived>::Load(ID_TYPE id) {
     LoadOperationContext context;

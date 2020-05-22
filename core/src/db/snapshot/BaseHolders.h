@@ -47,6 +47,8 @@ public:
         return holder;
     }
 
+    virtual void Reset();
+
     virtual void Dump(const std::string& tag = "");
 
 protected:

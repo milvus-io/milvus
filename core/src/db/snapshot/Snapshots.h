@@ -45,6 +45,8 @@ public:
     template<typename ...ResourceT>
     bool Flush(ResourceT&&... resources);
 
+    void Reset();
+
 private:
     void SnapshotGCCallback(Snapshot::Ptr ss_ptr);
     Snapshots() {

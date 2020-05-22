@@ -129,6 +129,14 @@ Snapshots::GetHolderNoLock(ID_TYPE collection_id) {
 }
 
 void
+Snapshots::Reset() {
+    std::unique_lock<std::shared_timed_mutex> lock(mutex_);
+    holders_.clear();
+    name_id_map_.clear();
+    to_release_.clear();
+}
+
+void
 Snapshots::SnapshotGCCallback(Snapshot::Ptr ss_ptr) {
     /* to_release_.push_back(ss_ptr); */
     ss_ptr->UnRef();

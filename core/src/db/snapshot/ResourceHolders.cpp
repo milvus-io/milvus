@@ -18,6 +18,12 @@ namespace milvus {
 namespace engine {
 namespace snapshot {
 
+void
+CollectionsHolder::Reset() {
+    BaseT::Reset();
+    name_map_.clear();
+}
+
 CollectionsHolder::ResourcePtr
 CollectionsHolder::Load(const std::string& name) {
     LoadOperationContext context;

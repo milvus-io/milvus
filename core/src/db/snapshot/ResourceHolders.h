@@ -28,6 +28,8 @@ public:
     bool Release(ID_TYPE id) override;
     bool Release(const std::string& name);
 
+    void Reset() override;
+
 private:
     ResourcePtr Load(const std::string& name) override;
 
