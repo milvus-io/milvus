@@ -23,8 +23,7 @@ class Server {
     GetInstance();
 
     void
-    Init(int64_t daemonized, const std::string& pid_filename, const std::string& config_filename,
-         const std::string& log_config_file);
+    Init(int64_t daemonized, const std::string& pid_filename, const std::string& config_filename);
 
     Status
     Start();
@@ -51,7 +50,6 @@ class Server {
     int pid_fd_ = -1;
     std::string pid_filename_;
     std::string config_filename_;
-    std::string log_config_file_;
 };  // Server
 
 }  // namespace server
