@@ -73,7 +73,7 @@ class MySQLConnectionPool : public mysqlpp::ConnectionPool {
 
     int max_pool_size_;
 
-    unsigned int max_idle_time_ = 0;  // 10 seconds
+    unsigned int max_idle_time_ = 10;  // 10 seconds
 };
 
 }  // namespace meta
