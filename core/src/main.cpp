@@ -64,7 +64,6 @@ main(int argc, char* argv[]) {
     print_banner();
 
     static struct option long_options[] = {{"conf_file", required_argument, nullptr, 'c'},
-                                           {"log_conf_file", required_argument, nullptr, 'l'},
                                            {"help", no_argument, nullptr, 'h'},
                                            {"daemon", no_argument, nullptr, 'd'},
                                            {"pid_file", required_argument, nullptr, 'p'},
@@ -73,7 +72,7 @@ main(int argc, char* argv[]) {
     int option_index = 0;
     int64_t start_daemonized = 0;
 
-    std::string config_filename, log_config_file;
+    std::string config_filename;
     std::string pid_filename;
     std::string app_name = argv[0];
     milvus::Status s;
@@ -86,20 +85,13 @@ main(int argc, char* argv[]) {
     }
 
     int value;
-    while ((value = getopt_long(argc, argv, "c:l:p:dh", long_options, &option_index)) != -1) {
+    while ((value = getopt_long(argc, argv, "c:p:dh", long_options, &option_index)) != -1) {
         switch (value) {
             case 'c': {
                 char* config_filename_ptr = strdup(optarg);
                 config_filename = config_filename_ptr;
                 free(config_filename_ptr);
                 std::cout << "Loading configuration from: " << config_filename << std::endl;
-                break;
-            }
-            case 'l': {
-                char* log_filename_ptr = strdup(optarg);
-                log_config_file = log_filename_ptr;
-                free(log_filename_ptr);
-                std::cout << "Initializing log config from: " << log_config_file << std::endl;
                 break;
             }
             case 'p': {
@@ -132,7 +124,7 @@ main(int argc, char* argv[]) {
     signal(SIGUSR2, milvus::server::SignalUtil::HandleSignal);
     signal(SIGTERM, milvus::server::SignalUtil::HandleSignal);
 
-    server.Init(start_daemonized, pid_filename, config_filename, log_config_file);
+    server.Init(start_daemonized, pid_filename, config_filename);
 
     s = server.Start();
     if (s.ok()) {

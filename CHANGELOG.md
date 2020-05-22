@@ -25,6 +25,7 @@ Please mark all change in change log and use the issue from GitHub
 
 ## Improvement
 -   \#2307 Disable index SPTAG by default
+-   \#2353 Remove log_config from code and scripts
 -   \#2370 Clean compile warning
 -   \#2381 Upgrade FAISS to 1.6.3
 
