@@ -5,6 +5,7 @@ Please mark all change in change log and use the issue from GitHub
 # Milvus 0.8.1 (TBD)
 
 ## Bug
+-   \#2399 The nlist set by the user may not take effect
 
 ## Feature
 
