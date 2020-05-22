@@ -29,7 +29,7 @@
 
 using namespace milvus::engine;
 
-#if 0
+#if 1
 TEST_F(SnapshotTest, ReferenceProxyTest) {
     std::string status("raw");
     const std::string CALLED = "CALLED";

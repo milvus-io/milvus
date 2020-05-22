@@ -43,8 +43,7 @@ public:
     }
 
 private:
-    void LoadNoLock(ID_TYPE collection_commit_id);
-    bool AddNoLock(ID_TYPE id);
+    CollectionCommitPtr LoadNoLock(ID_TYPE collection_commit_id);
 
     void ReadyForRelease(Snapshot::Ptr ss) {
         if (gc_handler_) {

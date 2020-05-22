@@ -26,6 +26,12 @@ SnapshotHolder::SnapshotHolder(ID_TYPE collection_id, GCHandler gc_handler, size
 
 ScopedSnapshotT
 SnapshotHolder::GetSnapshot(ID_TYPE id, bool scoped) {
+    if (id > max_id_) {
+        auto entry = LoadNoLock(id);
+        if (!entry) return ScopedSnapshotT();
+        Add(id);
+    }
+
     std::unique_lock<std::mutex> lock(mutex_);
     /* std::cout << "Holder " << collection_id_ << " actives num=" << active_.size() */
     /*     << " latest=" << active_[max_id_]->GetID() << " RefCnt=" << active_[max_id_]->RefCnt() <<  std::endl; */
@@ -37,10 +43,6 @@ SnapshotHolder::GetSnapshot(ID_TYPE id, bool scoped) {
         return ScopedSnapshotT();
     }
 
-    if (id > max_id_) {
-        LoadNoLock(id);
-    }
-
     auto it = active_.find(id);
     if (it == active_.end()) {
         return ScopedSnapshotT();
@@ -48,15 +50,15 @@ SnapshotHolder::GetSnapshot(ID_TYPE id, bool scoped) {
     return ScopedSnapshotT(it->second, scoped);
 }
 
-bool SnapshotHolder::Add(ID_TYPE id) {
-    std::unique_lock<std::mutex> lock(mutex_);
-    return AddNoLock(id);
-}
-
 bool
-SnapshotHolder::AddNoLock(ID_TYPE id) {
+SnapshotHolder::Add(ID_TYPE id) {
     {
+        std::unique_lock<std::mutex> lock(mutex_);
         if (active_.size() > 0 && id < max_id_) {
+            return false;
+        }
+        auto it = active_.find(id);
+        if (it != active_.end()) {
             return false;
         }
     }
@@ -67,10 +69,8 @@ SnapshotHolder::AddNoLock(ID_TYPE id) {
         if (done_) { return false; };
         ss->RegisterOnNoRefCB(std::bind(&Snapshot::UnRefAll, ss));
         ss->Ref();
-        auto it = active_.find(id);
-        if (it != active_.end()) {
-            return false;
-        }
+
+        std::unique_lock<std::mutex> lock(mutex_);
 
         if (min_id_ > id) {
             min_id_ = id;
@@ -125,16 +125,14 @@ SnapshotHolder::BackgroundGC() {
     }
 }
 
-void
+CollectionCommitPtr
 SnapshotHolder::LoadNoLock(ID_TYPE collection_commit_id) {
     assert(collection_commit_id > max_id_);
     LoadOperationContext context;
     context.id = collection_commit_id;
     auto op = std::make_shared<LoadOperation<CollectionCommit>>(context);
     op->Push();
-    auto entry = op->GetResource();
-    if (!entry) return;
-    AddNoLock(collection_commit_id);
+    return op->GetResource();
 }
 
 } // snapshot

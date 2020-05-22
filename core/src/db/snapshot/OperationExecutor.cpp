@@ -67,7 +67,9 @@ OperationExecutor::ThreadMain(OperationQueuePtr queue) {
     if (!queue) return;
 
     while (true) {
+        std::cout << "Pre Queue Size = " << queue->Size() << std::endl;
         OperationsPtr operation = queue->Take();
+        std::cout << "Post Queue Size = " << queue->Size() << std::endl;
         if (!operation) {
             std::cout << "Stopping operation executor thread " << std::this_thread::get_id() << std::endl;
             break;

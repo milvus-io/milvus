@@ -56,7 +56,7 @@ private:
 
     mutable std::shared_timed_mutex mutex_;
     SnapshotHolderPtr LoadNoLock(ID_TYPE collection_id);
-    SnapshotHolderPtr Load(ID_TYPE collection_id);
+    /* SnapshotHolderPtr Load(ID_TYPE collection_id); */
     SnapshotHolderPtr GetHolderNoLock(ID_TYPE collection_id);
 
     std::map<ID_TYPE, SnapshotHolderPtr> holders_;

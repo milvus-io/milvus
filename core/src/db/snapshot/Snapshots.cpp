@@ -61,11 +61,11 @@ Snapshots::Close(ID_TYPE collection_id) {
     return true;
 }
 
-SnapshotHolderPtr
-Snapshots::Load(ID_TYPE collection_id) {
-    std::unique_lock<std::shared_timed_mutex> lock(mutex_);
-    return LoadNoLock(collection_id);
-}
+/* SnapshotHolderPtr */
+/* Snapshots::Load(ID_TYPE collection_id) { */
+/*     std::unique_lock<std::shared_timed_mutex> lock(mutex_); */
+/*     return LoadNoLock(collection_id); */
+/* } */
 
 SnapshotHolderPtr
 Snapshots::LoadNoLock(ID_TYPE collection_id) {
@@ -80,8 +80,6 @@ Snapshots::LoadNoLock(ID_TYPE collection_id) {
     for (auto c_c_id : collection_commit_ids) {
         holder->Add(c_c_id);
     }
-    holders_[collection_id] = holder;
-    name_id_map_[holder->GetSnapshot()->GetName()] = collection_id;
     return holder;
 }
 
@@ -91,7 +89,7 @@ Snapshots::Init() {
     op->Push();
     auto& collection_ids = op->GetIDs();
     for (auto collection_id : collection_ids) {
-        Load(collection_id);
+        GetHolder(collection_id);
     }
 }
 
@@ -101,7 +99,8 @@ Snapshots::GetHolder(const std::string& name) {
         std::unique_lock<std::shared_timed_mutex> lock(mutex_);
         auto kv = name_id_map_.find(name);
         if (kv != name_id_map_.end()) {
-            return GetHolderNoLock(kv->second);
+            lock.unlock();
+            return GetHolder(kv->second);
         }
     }
     LoadOperationContext context;
@@ -110,20 +109,30 @@ Snapshots::GetHolder(const std::string& name) {
     op->Push();
     auto c = op->GetResource();
     if (!c) return nullptr;
-    return Load(c->GetID());
+    return GetHolder(c->GetID());
 }
 
 SnapshotHolderPtr
 Snapshots::GetHolder(ID_TYPE collection_id) {
+    {
+        std::unique_lock<std::shared_timed_mutex> lock(mutex_);
+        auto holder = GetHolderNoLock(collection_id);
+        if (holder) return holder;
+    }
+    auto holder = LoadNoLock(collection_id);
+    if (!holder) return nullptr;
+
     std::unique_lock<std::shared_timed_mutex> lock(mutex_);
-    return GetHolderNoLock(collection_id);
+    holders_[collection_id] = holder;
+    name_id_map_[holder->GetSnapshot()->GetName()] = collection_id;
+    return holder;
 }
 
 SnapshotHolderPtr
 Snapshots::GetHolderNoLock(ID_TYPE collection_id) {
     auto it = holders_.find(collection_id);
     if (it == holders_.end()) {
-        return LoadNoLock(collection_id);
+        return nullptr;
     }
     return it->second;
 }

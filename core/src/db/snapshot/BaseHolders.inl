@@ -43,7 +43,7 @@ ResourceHolder<ResourceT, Derived>::Load(ID_TYPE id) {
     op->Push();
     auto c = op->GetResource();
     if (c) {
-        AddNoLock(c);
+        Add(c);
         return c;
     }
     return nullptr;
@@ -58,14 +58,16 @@ ResourceHolder<ResourceT, Derived>::Load(const std::string& name) {
 template <typename ResourceT, typename Derived>
 typename ResourceHolder<ResourceT, Derived>::ScopedT
 ResourceHolder<ResourceT, Derived>::GetResource(ID_TYPE id, bool scoped) {
-    std::unique_lock<std::mutex> lock(mutex_);
-    auto cit = id_map_.find(id);
-    if (cit == id_map_.end()) {
-        auto ret = Load(id);
-        if (!ret) return ScopedT();
-        return ScopedT(ret, scoped);
+    {
+        std::unique_lock<std::mutex> lock(mutex_);
+        auto cit = id_map_.find(id);
+        if (cit != id_map_.end()) {
+            return ScopedT(cit->second, scoped);
+        }
     }
-    return ScopedT(cit->second, scoped);
+    auto ret = Load(id);
+    if (!ret) return ScopedT();
+    return ScopedT(ret, scoped);
 }
 
 template <typename ResourceT, typename Derived>
