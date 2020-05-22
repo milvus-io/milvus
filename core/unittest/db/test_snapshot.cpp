@@ -108,8 +108,22 @@ TEST_F(SnapshotTest, ResourceHoldersTest) {
     snapshot::OperationExecutor::GetInstance().Start();
     snapshot::Store::GetInstance().Mock();
     snapshot::ID_TYPE collection_id = 1;
-    auto collection = snapshot::CollectionsHolder::GetInstance().GetResource(collection_id, false);
-    ASSERT_EQ(collection->GetID(), collection_id);
+    {
+        auto collection = snapshot::CollectionsHolder::GetInstance().GetResource(collection_id, false);
+        ASSERT_EQ(collection->GetID(), collection_id);
+        ASSERT_EQ(collection->RefCnt(), 0);
+    }
+
+    {
+        auto collection = snapshot::CollectionsHolder::GetInstance().GetResource(collection_id, true);
+        ASSERT_EQ(collection->GetID(), collection_id);
+        ASSERT_EQ(collection->RefCnt(), 1);
+    }
+
+    {
+        auto collection = snapshot::CollectionsHolder::GetInstance().GetResource(collection_id, false);
+        ASSERT_TRUE(!collection);
+    }
 
     snapshot::OperationExecutor::GetInstance().Stop();
 }
