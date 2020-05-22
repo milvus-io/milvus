@@ -160,7 +160,7 @@ def matrix_slice_iterator(x, bs):
                     for i0 in range(0, nb, bs)]
 
     return rate_limited_imap(
-        lambda (i0, i1): x[i0:i1].astype('float32').copy(),
+        lambda i01: x[i01[0]:i01[1]].astype('float32').copy(),
         block_ranges)
 
 
@@ -203,6 +203,7 @@ xq = xq.astype('float32').copy()
 
 # a static C++ object that collects statistics about searches
 ivfpq_stats = faiss.cvar.indexIVFPQ_stats
+ivf_stats = faiss.cvar.indexIVF_stats
 
 
 if parametersets == ['autotune'] or parametersets == ['autotuneMT']:
@@ -243,10 +244,11 @@ else:
         ps.set_index_parameters(index, param)
         t0 = time.time()
         ivfpq_stats.reset()
+        ivf_stats.reset()
         D, I = index.search(xq, 100)
         t1 = time.time()
         for rank in 1, 10, 100:
             n_ok = (I[:, :rank] == gt[:, :1]).sum()
             print("%.4f" % (n_ok / float(nq)), end=' ')
         print("%8.3f  " % ((t1 - t0) * 1000.0 / nq), end=' ')
-        print("%5.2f" % (ivfpq_stats.n_hamming_pass * 100.0 / ivfpq_stats.ncode))
+        print("%5.2f" % (ivfpq_stats.n_hamming_pass * 100.0 / ivf_stats.ndis))

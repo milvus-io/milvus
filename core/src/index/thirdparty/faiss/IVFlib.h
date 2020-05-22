@@ -35,6 +35,10 @@ void check_compatible_for_merge (const Index * index1,
 const IndexIVF * extract_index_ivf (const Index * index);
 IndexIVF * extract_index_ivf (Index * index);
 
+/// same as above but returns nullptr instead of throwing on failure
+const IndexIVF * try_extract_index_ivf (const Index * index);
+IndexIVF * try_extract_index_ivf (Index * index);
+
 /** Merge index1 into index0. Works on IndexIVF's and IndexIVF's
  *  embedded in a IndexPreTransform. On output, the index1 is empty.
  *

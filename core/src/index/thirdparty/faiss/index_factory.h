@@ -19,7 +19,6 @@ namespace faiss {
 Index *index_factory (int d, const char *description,
                       MetricType metric = METRIC_L2);
 
-IndexBinary *index_binary_factory (int d, const char *description, MetricType metric = METRIC_L2);
-
+IndexBinary *index_binary_factory (int d, const char *description, MetricType metric);
 
 }

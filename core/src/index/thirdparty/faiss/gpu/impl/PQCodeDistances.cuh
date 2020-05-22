@@ -20,17 +20,20 @@ class DeviceMemory;
 /// Calculates the distance from the (query - centroid) residual to
 /// each sub-code vector, for the given list of query results in
 /// topQueryToCentroid
+template <typename CentroidT>
 void runPQCodeDistances(Tensor<float, 3, true>& pqCentroids,
                         Tensor<float, 2, true>& queries,
-                        Tensor<float, 2, true>& coarseCentroids,
+                        Tensor<CentroidT, 2, true>& coarseCentroids,
                         Tensor<int, 2, true>& topQueryToCentroid,
                         NoTypeTensor<4, true>& outCodeDistances,
+                        bool l2Distance,
                         bool useFloat16Lookup,
                         cudaStream_t stream);
 
+template <typename CentroidT>
 void runPQCodeDistancesMM(Tensor<float, 3, true>& pqCentroids,
                           Tensor<float, 2, true>& queries,
-                          Tensor<float, 2, true>& coarseCentroids,
+                          Tensor<CentroidT, 2, true>& coarseCentroids,
                           Tensor<int, 2, true>& topQueryToCentroid,
                           NoTypeTensor<4, true>& outCodeDistances,
                           bool useFloat16Lookup,
@@ -39,3 +42,5 @@ void runPQCodeDistancesMM(Tensor<float, 3, true>& pqCentroids,
                           cudaStream_t stream);
 
 } } // namespace
+
+#include <faiss/gpu/impl/PQCodeDistances-inl.cuh>

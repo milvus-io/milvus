@@ -20,7 +20,7 @@ void runL2Norm(Tensor<float, 2, true>& input,
 
 void runL2Norm(Tensor<half, 2, true>& input,
                bool inputRowMajor,
-               Tensor<half, 1, true>& output,
+               Tensor<float, 1, true>& output,
                bool normSquared,
                cudaStream_t stream);
 

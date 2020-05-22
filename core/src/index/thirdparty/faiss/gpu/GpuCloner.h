@@ -73,9 +73,9 @@ faiss::Index * index_cpu_to_gpu(
        const GpuClonerOptions *options = nullptr);
 
 faiss::Index * index_cpu_to_gpu(
-        GpuResources* resources, int device,
-        IndexComposition* index_composition,
-        const GpuClonerOptions *options = nullptr);
+       GpuResources* resources, int device,
+       IndexComposition* index_composition,
+       const GpuClonerOptions *options = nullptr);
 
 faiss::Index * index_cpu_to_gpu_multiple(
        std::vector<GpuResources*> & resources,

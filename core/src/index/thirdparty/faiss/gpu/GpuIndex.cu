@@ -9,7 +9,6 @@
 #include <faiss/gpu/GpuIndex.h>
 #include <faiss/impl/FaissAssert.h>
 #include <faiss/gpu/GpuResources.h>
-#include <faiss/gpu/impl/Metrics.cuh>
 #include <faiss/gpu/utils/CopyUtils.cuh>
 #include <faiss/gpu/utils/DeviceUtils.h>
 #include <faiss/gpu/utils/StaticUtils.h>
@@ -39,6 +38,7 @@ constexpr size_t kSearchVecSize = (size_t) 32 * 1024;
 GpuIndex::GpuIndex(GpuResources* resources,
                    int dims,
                    faiss::MetricType metric,
+                   float metricArg,
                    GpuIndexConfig config) :
     Index(dims, metric),
     resources_(resources),
@@ -62,11 +62,28 @@ GpuIndex::GpuIndex(GpuResources* resources,
                      "Must compile with CUDA 8+ for Unified Memory support");
 #endif
 
-  FAISS_THROW_IF_NOT_MSG(isMetricSupported(metric),
-                         "Unsupported metric type on GPU");
+  metric_arg = metricArg;
 
   FAISS_ASSERT(resources_);
   resources_->initializeForDevice(device_);
+}
+
+void
+GpuIndex::copyFrom(const faiss::Index* index) {
+  d = index->d;
+  metric_type = index->metric_type;
+  metric_arg = index->metric_arg;
+  ntotal = index->ntotal;
+  is_trained = index->is_trained;
+}
+
+void
+GpuIndex::copyTo(faiss::Index* index) const {
+  index->d = d;
+  index->metric_type = metric_type;
+  index->metric_arg = metric_arg;
+  index->ntotal = ntotal;
+  index->is_trained = is_trained;
 }
 
 void

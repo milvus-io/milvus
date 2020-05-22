@@ -64,8 +64,6 @@ PageLockMemory::PageLockMemory(PageLockMemory &&other) {
 
 namespace faiss {
 
-using ScopedIds = InvertedLists::ScopedIds;
-using ScopedCodes = InvertedLists::ScopedCodes;
 
 
 /*****************************************
