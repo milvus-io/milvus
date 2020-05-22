@@ -2124,10 +2124,12 @@ DBImpl::BackgroundBuildIndex() {
         }
 
         // step 3: wait build index finished and mark failed files
+        int64_t completed = 0;
         for (auto iter = job2file_map.begin(); iter != job2file_map.end(); ++iter) {
             scheduler::BuildIndexJobPtr job = iter->first;
             meta::SegmentSchema& file_schema = *(iter->second.get());
             job->WaitBuildIndexFinish();
+            LOG_ENGINE_INFO_ << "Build Index Progress: " << ++completed << " of " << job2file_map.size();
             if (!job->GetStatus().ok()) {
                 Status status = job->GetStatus();
                 LOG_ENGINE_ERROR_ << "Building index job " << job->id() << " failed: " << status.ToString();

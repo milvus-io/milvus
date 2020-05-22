@@ -14,6 +14,7 @@ Please mark all change in change log and use the issue from GitHub
 ## Improvement
 -   \#2370 Clean compile warning
 -   \#2381 Upgrade FAISS to 1.6.3
+-   \#2410 Logging build index progress
 
 ## Task
 
