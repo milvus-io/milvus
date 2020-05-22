@@ -98,8 +98,8 @@ template <typename ResourceT, typename Derived>
 bool
 ResourceHolder<ResourceT, Derived>::HardDelete(ID_TYPE id) {
     auto op = std::make_shared<HardDeleteOperation<ResourceT>>(id);
-    op->Push();
-    return op->GetStatus();
+    op->Push(false);
+    return true;
 }
 
 template <typename ResourceT, typename Derived>

@@ -30,10 +30,14 @@ OperationExecutor::GetInstance() {
 }
 
 bool
-OperationExecutor::Submit(OperationsPtr operation) {
+OperationExecutor::Submit(OperationsPtr operation, bool sync) {
     if (!operation) return true;
+    /* Store::GetInstance().Apply(*operation); */
+    /* return true; */
     Enqueue(operation);
-    return operation->WaitToFinish();
+    if (sync)
+        return operation->WaitToFinish();
+    return true;
 }
 
 void
@@ -43,7 +47,7 @@ OperationExecutor::Start() {
     auto t = std::make_shared<std::thread>(&OperationExecutor::ThreadMain, this, queue);
     executor_ = std::make_shared<Executor>(t, queue);
     stopped_ = false;
-    std::cout << "OperationExecutor Started" << std::endl;
+    /* std::cout << "OperationExecutor Started" << std::endl; */
 }
 
 void
@@ -59,6 +63,7 @@ OperationExecutor::Stop() {
 
 void
 OperationExecutor::Enqueue(OperationsPtr operation) {
+    /* std::cout << std::this_thread::get_id() << " Enqueue Operation " << operation->GetID() << std::endl; */
     executor_->execute_queue->Put(operation);
 }
 
@@ -67,13 +72,12 @@ OperationExecutor::ThreadMain(OperationQueuePtr queue) {
     if (!queue) return;
 
     while (true) {
-        std::cout << "Pre Queue Size = " << queue->Size() << std::endl;
         OperationsPtr operation = queue->Take();
-        std::cout << "Post Queue Size = " << queue->Size() << std::endl;
         if (!operation) {
             std::cout << "Stopping operation executor thread " << std::this_thread::get_id() << std::endl;
             break;
         }
+        /* std::cout << std::this_thread::get_id() << " Dequeue Operation " << operation->GetID() << std::endl; */
 
         Store::GetInstance().Apply(*operation);
     }

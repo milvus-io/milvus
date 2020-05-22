@@ -20,6 +20,7 @@
 #include <mutex>
 #include <thread>
 #include <condition_variable>
+#include <atomic>
 
 namespace milvus {
 namespace engine {
@@ -54,6 +55,8 @@ public:
 
     StepsT& GetSteps() { return steps_; }
 
+    ID_TYPE GetID() const;
+
     virtual void OnExecute(Store&);
     virtual bool PreExecute(Store&);
     virtual bool DoExecute(Store&);
@@ -62,7 +65,7 @@ public:
     virtual ScopedSnapshotT GetSnapshot() const;
 
     virtual void operator()(Store& store);
-    virtual void Push();
+    virtual void Push(bool sync = true);
 
     virtual void ApplyToStore(Store& store);
 
@@ -80,6 +83,7 @@ protected:
     OpStatus status_ = OP_PENDING;
     mutable std::mutex finish_mtx_;
     std::condition_variable finish_cond_;
+    ID_TYPE uid_;
 };
 
 template<typename StepT>
@@ -122,7 +126,10 @@ public:
        Operations(OperationContext(), ScopedSnapshotT()), context_(context) {}
 
     void ApplyToStore(Store& store) override {
-        if (status_ != OP_PENDING) return;
+        if (status_ != OP_PENDING) {
+            Done();
+            return;
+        }
         resource_ = store.GetResource<ResourceT>(context_.id);
         Done();
     }

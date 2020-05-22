@@ -41,7 +41,7 @@ public:
 
     static OperationExecutor& GetInstance();
 
-    bool Submit(OperationsPtr operation);
+    bool Submit(OperationsPtr operation, bool sync = true);
 
     void Start();
 

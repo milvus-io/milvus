@@ -12,16 +12,25 @@
 #include "Operations.h"
 #include "Snapshots.h"
 #include "OperationExecutor.h"
+#include <chrono>
 
 namespace milvus {
 namespace engine {
 namespace snapshot {
 
+static ID_TYPE UID = 1;
+
 Operations::Operations(const OperationContext& context, ScopedSnapshotT prev_ss)
-    : context_(context), prev_ss_(prev_ss) {}
+    : context_(context), prev_ss_(prev_ss), uid_(UID++) {}
 
 Operations::Operations(const OperationContext& context, ID_TYPE collection_id, ID_TYPE commit_id) :
-    context_(context), prev_ss_(Snapshots::GetInstance().GetSnapshot(collection_id, commit_id)) {
+    context_(context), prev_ss_(Snapshots::GetInstance().GetSnapshot(collection_id, commit_id)),
+    uid_(UID++) {
+}
+
+ID_TYPE
+Operations::GetID() const {
+    return uid_;
 }
 
 void
@@ -32,22 +41,25 @@ Operations::operator()(Store& store) {
 bool
 Operations::WaitToFinish() {
     std::unique_lock<std::mutex> lock(finish_mtx_);
+    /* std::cout << std::this_thread::get_id() << " Start Waiting Operation " << this->GetID() << std::endl; */
     finish_cond_.wait(lock, [this] {
-        return status_ != OP_PENDING;
+            return status_ != OP_PENDING;
     });
+    /* std::cout << std::this_thread::get_id() << " End   Waiting Operation " << this->GetID() << std::endl; */
     return true;
 }
 
 void
 Operations::Done() {
+    std::unique_lock<std::mutex> lock(finish_mtx_);
     status_ = OP_OK;
+    /* std::cout << std::this_thread::get_id() << " Done Operation " << this->GetID() << std::endl; */
     finish_cond_.notify_all();
 }
 
 void
-Operations::Push() {
-    OperationExecutor::GetInstance().Submit(shared_from_this());
-    this->WaitToFinish();
+Operations::Push(bool sync) {
+    OperationExecutor::GetInstance().Submit(shared_from_this(), sync);
 }
 
 bool
