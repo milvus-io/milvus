@@ -64,6 +64,12 @@ bool getFullUnifiedMemSupport(int device);
 /// Equivalent to getFullUnifiedMemSupport(getCurrentDevice())
 bool getFullUnifiedMemSupportCurrentDevice();
 
+/// Does the given device support tensor core operations?
+bool getTensorCoreSupport(int device);
+
+/// Equivalent to getTensorCoreSupport(getCurrentDevice())
+bool getTensorCoreSupportCurrentDevice();
+
 /// Returns the maximum k-selection value supported based on the CUDA SDK that
 /// we were compiled with. .cu files can use DeviceDefs.cuh, but this is for
 /// non-CUDA files

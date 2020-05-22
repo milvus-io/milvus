@@ -36,7 +36,8 @@ faiss.omp_set_num_threads(1)
 
 print("PQ baseline", end=' ')
 index.search_type = faiss.IndexPQ.ST_PQ
-evaluate()
+t, r = evaluate(index, xq, gt, 1)
+print("\t %7.3f ms per query, R@1 %.4f" % (t, r[1]))
 
 for ht in 64, 62, 58, 54, 50, 46, 42, 38, 34, 30:
     print("Polysemous", ht, end=' ')

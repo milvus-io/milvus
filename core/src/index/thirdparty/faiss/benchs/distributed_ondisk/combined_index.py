@@ -3,6 +3,8 @@
 # This source code is licensed under the MIT license found in the
 # LICENSE file in the root directory of this source tree.
 
+#!/usr/bin/env python3
+
 import os
 import faiss
 import numpy as np
@@ -29,7 +31,7 @@ class CombinedIndex:
                 indexes.append(index)
                 il = faiss.extract_index_ivf(index).invlists
             else:
-                assert False
+                raise AssertionError
             ilv.push_back(il)
         print()
 

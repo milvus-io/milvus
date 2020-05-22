@@ -3,7 +3,7 @@
 # This source code is licensed under the MIT license found in the
 # LICENSE file in the root directory of this source tree.
 
-#! /usr/bin/env python2
+from __future__ import absolute_import, division, print_function, unicode_literals
 # noqa E741
 # translation of test_knn.lua
 
@@ -445,7 +445,37 @@ class TestPQFlavors(unittest.TestCase):
             print('ndiff %d / %d' % (ndiff, ntot))
             assert ndiff < ntot * 0.02
 
+    def test_IVFPQ_non8bit(self):
+        d = 16
+        xt, xb, xq = get_dataset_2(d, 10000, 2000, 200)
+        nlist = 64
 
+        gt_index = faiss.IndexFlat(d)
+        gt_index.add(xb)
+        gt_D, gt_I = gt_index.search(xq, 10)
+
+        quantizer = faiss.IndexFlat(d)
+        ninter = {}
+        for v in '2x8', '8x2':
+            if v == '8x2':
+                index = faiss.IndexIVFPQ(
+                    quantizer, d, nlist, 2, 8)
+            else:
+                index = faiss.IndexIVFPQ(
+                    quantizer, d, nlist, 8, 2)
+            index.train(xt)
+            index.add(xb)
+            index.npobe = 16
+
+            D, I = index.search(xq, 10)
+            ninter[v] = faiss.eval_intersection(I, gt_I)
+        print('ninter=', ninter)
+        # this should be the case but we don't observe
+        # that... Probavly too few test points
+        #  assert ninter['2x8'] > ninter['8x2']
+        # ref numbers on 2019-11-02
+        assert abs(ninter['2x8'] - 458) < 4
+        assert abs(ninter['8x2'] - 465) < 4
 
 
 class TestFlat1D(unittest.TestCase):

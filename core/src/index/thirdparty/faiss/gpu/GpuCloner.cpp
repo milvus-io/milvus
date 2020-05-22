@@ -279,7 +279,6 @@ faiss::Index * index_cpu_to_gpu(
     return cl.clone_Index(index_composition);
 }
 
-
 /**********************************************************
  * Cloning to multiple GPUs
  **********************************************************/
@@ -372,6 +371,7 @@ Index * ToGpuClonerMultiple::clone_Index_to_shards (const Index *index)
                        index_ivfflat->quantizer, index->d,
                        index_ivfflat->nlist, index_ivfflat->metric_type);
             idx2.nprobe = index_ivfflat->nprobe;
+            idx2.is_trained = index->is_trained;
             copy_ivf_shard (index_ivfflat, &idx2, n, i);
             shards[i] = sub_cloners[i].clone_Index(&idx2);
         } else if (index_ivfsq) {
@@ -380,7 +380,10 @@ Index * ToGpuClonerMultiple::clone_Index_to_shards (const Index *index)
                        index_ivfsq->sq.qtype,
                        index_ivfsq->metric_type,
                        index_ivfsq->by_residual);
+
             idx2.nprobe = index_ivfsq->nprobe;
+            idx2.is_trained = index->is_trained;
+            idx2.sq = index_ivfsq->sq;
             copy_ivf_shard (index_ivfsq, &idx2, n, i);
             shards[i] = sub_cloners[i].clone_Index(&idx2);
         } else if (index_flat) {

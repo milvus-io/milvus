@@ -170,7 +170,8 @@ def dataset_iterator(x, preproc, bs):
     block_ranges = [(i0, min(nb, i0 + bs))
                     for i0 in range(0, nb, bs)]
 
-    def prepare_block((i0, i1)):
+    def prepare_block(i01):
+        i0, i1 = i01
         xb = sanitize(x[i0:i1])
         return i0, preproc.apply_py(xb)
 
@@ -575,7 +576,8 @@ def compute_populated_index_2(preproc):
     coarse_quantizer_gpu = faiss.index_cpu_to_gpu_multiple(
         vres, vdev, indexall.quantizer)
 
-    def quantize((i0, xs)):
+    def quantize(args):
+        (i0, xs) = args
         _, assign = coarse_quantizer_gpu.search(xs, 1)
         return i0, xs, assign.ravel()
 

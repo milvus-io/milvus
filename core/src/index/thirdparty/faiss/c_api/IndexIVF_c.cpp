@@ -87,6 +87,13 @@ void faiss_IndexIVF_print_stats (const FaissIndexIVF* index) {
     reinterpret_cast<const IndexIVF*>(index)->invlists->print_stats();
 }
 
+/// get inverted lists ids
+void faiss_IndexIVF_invlists_get_ids (const FaissIndexIVF* index, size_t list_no, idx_t* invlist) {
+    const idx_t* list = reinterpret_cast<const IndexIVF*>(index)->invlists->get_ids(list_no);
+    size_t list_size = reinterpret_cast<const IndexIVF*>(index)->get_list_size(list_no);
+    memcpy(invlist, list, list_size*sizeof(idx_t));
+}
+
 void faiss_IndexIVFStats_reset(FaissIndexIVFStats* stats) {
     reinterpret_cast<IndexIVFStats*>(stats)->reset();    
 }

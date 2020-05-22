@@ -40,10 +40,3 @@ int faiss_read_index_fname(const char *fname, int io_flags, FaissIndex **p_out) 
         *p_out = reinterpret_cast<FaissIndex*>(out);
     } CATCH_AND_HANDLE
 }
-
-int faiss_clone_index (const FaissIndex *idx, FaissIndex **p_out) {
-    try {
-        auto out = faiss::clone_index(reinterpret_cast<const Index*>(idx));
-        *p_out = reinterpret_cast<FaissIndex*>(out);
-    } CATCH_AND_HANDLE
-}

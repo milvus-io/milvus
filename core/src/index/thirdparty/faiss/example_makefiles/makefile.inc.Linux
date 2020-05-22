@@ -9,7 +9,7 @@
 
 CXX      = g++ -std=c++11
 CXXFLAGS = -fPIC -m64 -Wall -g -O3 -fopenmp -Wno-sign-compare
-CPUFLAGS = -mavx2 -mf16c -msse4 -mpopcnt
+CPUFLAGS = -mavx -msse4 -mpopcnt
 LDFLAGS  = -fPIC -fopenmp
 
 # common linux flags

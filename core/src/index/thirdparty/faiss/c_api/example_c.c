@@ -17,6 +17,7 @@
 #include "Index_c.h"
 #include "IndexFlat_c.h"
 #include "AutoTune_c.h"
+#include "clone_index_c.h"
 
 #define FAISS_TRY(C)                                       \
     {                                                      \

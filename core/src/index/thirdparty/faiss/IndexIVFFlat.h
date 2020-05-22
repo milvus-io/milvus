@@ -44,15 +44,6 @@ struct IndexIVFFlat: IndexIVF {
     InvertedListScanner *get_InvertedListScanner (bool store_pairs)
         const override;
 
-    /** Update a subset of vectors.
-     *
-     * The index must have a direct_map
-     *
-     * @param nv     nb of vectors to update
-     * @param idx    vector indices to update, size nv
-     * @param v      vectors of new values, size nv*d
-     */
-    virtual void update_vectors (int nv, idx_t *idx, const float *v);
 
     void reconstruct_from_offset (int64_t list_no, int64_t offset,
                                   float* recons) const override;
@@ -101,8 +92,7 @@ struct IndexIVFFlatDedup: IndexIVFFlat {
         ConcurrentBitsetPtr bitset = nullptr) const override;
 
     /// not implemented
-    void update_vectors (int nv, idx_t *idx, const float *v) override;
-
+    void update_vectors (int nv, const idx_t *idx, const float *v) override;
 
     /// not implemented
     void reconstruct_from_offset (int64_t list_no, int64_t offset,

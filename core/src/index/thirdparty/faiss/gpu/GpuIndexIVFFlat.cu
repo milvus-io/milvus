@@ -26,6 +26,7 @@ GpuIndexIVFFlat::GpuIndexIVFFlat(GpuResources* resources,
     GpuIndexIVF(resources,
                 index->d,
                 index->metric_type,
+                index->metric_arg,
                 index->nlist,
                 config),
     ivfFlatConfig_(config),
@@ -39,7 +40,7 @@ GpuIndexIVFFlat::GpuIndexIVFFlat(GpuResources* resources,
                                  int nlist,
                                  faiss::MetricType metric,
                                  GpuIndexIVFFlatConfig config) :
-    GpuIndexIVF(resources, dims, metric, nlist, config),
+    GpuIndexIVF(resources, dims, metric, 0, nlist, config),
     ivfFlatConfig_(config),
     reserveMemoryVecs_(0),
     index_(nullptr) {
@@ -59,6 +60,7 @@ void
 GpuIndexIVFFlat::reserveMemory(size_t numVecs) {
   reserveMemoryVecs_ = numVecs;
   if (index_) {
+    DeviceScope scope(device_);
     index_->reserveMemory(numVecs);
   }
 }
@@ -75,45 +77,47 @@ GpuIndexIVFFlat::copyFrom(const faiss::IndexIVFFlat* index) {
 
   // The other index might not be trained
   if (!index->is_trained) {
+    FAISS_ASSERT(!is_trained);
     return;
   }
 
   // Otherwise, we can populate ourselves from the other index
-  this->is_trained = true;
+  FAISS_ASSERT(is_trained);
 
   // Copy our lists as well
   index_ = new IVFFlat(resources_,
                        quantizer->getGpuData(),
                        index->metric_type,
+                       index->metric_arg,
                        false, // no residual
                        nullptr, // no scalar quantizer
                        ivfFlatConfig_.indicesOptions,
                        memorySpace_);
   InvertedLists *ivf = index->invlists;
 
-    if (ReadOnlyArrayInvertedLists* rol = dynamic_cast<ReadOnlyArrayInvertedLists*>(ivf)) {
-        index_->copyCodeVectorsFromCpu((const float* )(rol->pin_readonly_codes->data),
-                                       (const long *)(rol->pin_readonly_ids->data), rol->readonly_length);
-        /* double t0 = getmillisecs(); */
-        /* std::cout << "Readonly Takes " << getmillisecs() - t0 << " ms" << std::endl; */
-    } else {
-        for (size_t i = 0; i < ivf->nlist; ++i) {
-            auto numVecs = ivf->list_size(i);
+  if (ReadOnlyArrayInvertedLists* rol = dynamic_cast<ReadOnlyArrayInvertedLists*>(ivf)) {
+    index_->copyCodeVectorsFromCpu((const float* )(rol->pin_readonly_codes->data),
+                                   (const long *)(rol->pin_readonly_ids->data), rol->readonly_length);
+    /* double t0 = getmillisecs(); */
+    /* std::cout << "Readonly Takes " << getmillisecs() - t0 << " ms" << std::endl; */
+  } else {
+    for (size_t i = 0; i < ivf->nlist; ++i) {
+      auto numVecs = ivf->list_size(i);
 
-            // GPU index can only support max int entries per list
-            FAISS_THROW_IF_NOT_FMT(numVecs <=
-                                   (size_t) std::numeric_limits<int>::max(),
-                                   "GPU inverted list can only support "
-                                   "%zu entries; %zu found",
-                                   (size_t) std::numeric_limits<int>::max(),
-                                   numVecs);
+      // GPU index can only support max int entries per list
+      FAISS_THROW_IF_NOT_FMT(numVecs <=
+                             (size_t) std::numeric_limits<int>::max(),
+                             "GPU inverted list can only support "
+                             "%zu entries; %zu found",
+                             (size_t) std::numeric_limits<int>::max(),
+                             numVecs);
 
-            index_->addCodeVectorsFromCpu(i,
-                                          (const unsigned char*)(ivf->get_codes(i)),
-                                          ivf->get_ids(i),
-                                          numVecs);
-        }
+      index_->addCodeVectorsFromCpu(i,
+                                    (const unsigned char*)(ivf->get_codes(i)),
+                                    ivf->get_ids(i),
+                                    numVecs);
     }
+  }
 }
 
 void
@@ -187,6 +191,7 @@ GpuIndexIVFFlat::train(Index::idx_t n, const float* x) {
   index_ = new IVFFlat(resources_,
                        quantizer->getGpuData(),
                        this->metric_type,
+                       this->metric_arg,
                        false, // no residual
                        nullptr, // no scalar quantizer
                        ivfFlatConfig_.indicesOptions,

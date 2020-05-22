@@ -19,6 +19,7 @@ namespace faiss {
 
 /** Index that stores the full vectors and performs exhaustive search */
 struct IndexFlat: Index {
+
     /// database vectors, size ntotal * d
     std::vector<float> xb;
 
@@ -154,7 +155,7 @@ struct IndexRefineFlat: Index {
 };
 
 
-/// optimized version for 1D "vectors"
+/// optimized version for 1D "vectors".
 struct IndexFlat1D:IndexFlatL2 {
     bool continuous_update; ///< is the permutation updated continuously?
 

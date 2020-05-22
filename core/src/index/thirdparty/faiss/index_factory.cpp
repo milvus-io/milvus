@@ -14,8 +14,6 @@
 #include <faiss/AutoTune.h>
 
 #include <cmath>
-#include <stdarg.h>     /* va_list, va_start, va_arg, va_end */
-
 
 #include <faiss/impl/FaissAssert.h>
 #include <faiss/utils/utils.h>

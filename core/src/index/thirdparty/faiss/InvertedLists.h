@@ -19,7 +19,6 @@
 #include <vector>
 #include <faiss/Index.h>
 
-
 #ifndef USE_CPU
 namespace faiss {
 
@@ -276,6 +275,7 @@ struct ReadOnlyArrayInvertedLists: InvertedLists {
 
     bool is_valid();
 };
+
 /*****************************************************************
  * Meta-inverted lists
  *

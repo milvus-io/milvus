@@ -7,6 +7,7 @@
 
 
 #include <faiss/gpu/StandardGpuResources.h>
+#include <faiss/gpu/utils/DeviceUtils.h>
 #include <faiss/gpu/utils/MemorySpace.h>
 #include <faiss/impl/FaissAssert.h>
 #include <limits>
@@ -246,6 +247,13 @@ StandardGpuResources::initializeForDevice(int device) {
   auto blasStatus = cublasCreate(&blasHandle);
   FAISS_ASSERT(blasStatus == CUBLAS_STATUS_SUCCESS);
   blasHandles_[device] = blasHandle;
+
+  // Enable tensor core support if available
+#if CUDA_VERSION >= 9000
+  if (getTensorCoreSupport(device)) {
+    cublasSetMathMode(blasHandle, CUBLAS_TENSOR_OP_MATH);
+  }
+#endif
 
   FAISS_ASSERT(memory_.count(device) == 0);
 
