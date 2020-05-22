@@ -135,15 +135,29 @@ TEST_F(SnapshotTest, OperationTest) {
         sf_context.segment_id = 1;
         sf_context.partition_id = 1;
 
+        auto ss = snapshot::Snapshots::GetInstance().GetSnapshot(1);
+        auto ss_id = ss->GetID();
+
+        // Check snapshot
         {
-            auto ss = snapshot::Snapshots::GetInstance().GetSnapshot(1);
-            auto prev_ss_id = ss->GetID();
+            auto collection_commit = snapshot::CollectionCommitsHolder::GetInstance().GetResource(ss_id, false);
+            ASSERT_TRUE(collection_commit);
+        }
+
+        // Check build operation correctness
+        {
             snapshot::OperationContext context;
             auto build_op = std::make_shared<snapshot::BuildOperation>(context, ss);
             auto seg_file = build_op->CommitNewSegmentFile(sf_context);
             build_op->Push();
             ss = build_op->GetSnapshot();
-            ASSERT_TRUE(ss->GetID() > prev_ss_id);
+            ASSERT_TRUE(ss->GetID() > ss_id);
+        }
+
+        // Check stale snapshot has been deleted from store
+        {
+            auto collection_commit = snapshot::CollectionCommitsHolder::GetInstance().GetResource(ss_id, false);
+            ASSERT_TRUE(!collection_commit);
         }
 
     }
