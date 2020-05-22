@@ -152,7 +152,7 @@ MemTable::Serialize(uint64_t wal_lsn, bool apply_delete) {
         }
     }
 
-    // Update flush lsn
+    // Update meta files and flush lsn
     auto status = meta_->UpdateCollectionFiles(update_files);
     status = meta_->UpdateCollectionFlushLSN(collection_id_, wal_lsn);
     if (!status.ok()) {
