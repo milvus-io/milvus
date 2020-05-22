@@ -59,6 +59,9 @@ class MemTableFile : public server::CacheConfigHandler {
     const std::string&
     GetSegmentId() const;
 
+    meta::SegmentSchema
+    GetSegmentSchema() const;
+
  protected:
     void
     OnCacheInsertDataChanged(bool value) override;
