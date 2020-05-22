@@ -406,8 +406,13 @@ DBImpl::PreloadCollection(const std::string& collection_id) {
         status = meta_ptr_->FilesToSearch(schema.collection_id_, files_holder);
     }
 #else
+    auto status = meta_ptr_->FilesToSearch(collection_id, files_holder);
+    if (!status.ok()) {
+        return status;
+    }
+
     std::vector<meta::CollectionSchema> partition_array;
-    auto status = meta_ptr_->ShowPartitions(collection_id, partition_array);
+    status = meta_ptr_->ShowPartitions(collection_id, partition_array);
 
     std::set<std::string> partition_ids;
     for (auto& schema : partition_array) {
