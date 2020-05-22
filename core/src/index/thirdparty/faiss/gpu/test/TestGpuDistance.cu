@@ -19,7 +19,8 @@
 
 void testTransposition(bool colMajorVecs,
                        bool colMajorQueries,
-                       faiss::MetricType metric) {
+                       faiss::MetricType metric,
+                       float metricArg = 0) {
   int device = faiss::gpu::randVal(0, faiss::gpu::getNumDevices() - 1);
 
   faiss::gpu::StandardGpuResources res;
@@ -28,30 +29,39 @@ void testTransposition(bool colMajorVecs,
   int dim = faiss::gpu::randVal(20, 150);
   int numVecs = faiss::gpu::randVal(10, 30000);
   int numQuery = faiss::gpu::randVal(1, 1024);
-  int k = faiss::gpu::randVal(20, 70);
+  int k = std::min(numVecs, faiss::gpu::randVal(20, 70));
 
   // Input data for CPU
   std::vector<float> vecs = faiss::gpu::randVecs(numVecs, dim);
   std::vector<float> queries = faiss::gpu::randVecs(numQuery, dim);
 
+  if (metric == faiss::MetricType::METRIC_JensenShannon) {
+    // make values positive
+    for (auto& v : vecs) {
+      v = std::abs(v);
+      if (v == 0) {
+        v = 1e-6;
+      }
+    }
+
+    for (auto& q : queries) {
+      q = std::abs(q);
+      if (q == 0) {
+        q = 1e-6;
+      }
+    }
+  }
+
   // The CPU index is our reference for the results
-  faiss::IndexFlatL2 cpuIndexL2(dim);
-  cpuIndexL2.add(numVecs, vecs.data());
+  faiss::IndexFlat cpuIndex(dim, metric);
+  cpuIndex.metric_arg = metricArg;
+  cpuIndex.add(numVecs, vecs.data());
 
-  std::vector<float> cpuDistanceL2(numQuery * k, 0);
-  std::vector<faiss::Index::idx_t> cpuIndicesL2(numQuery * k, -1);
+  std::vector<float> cpuDistance(numQuery * k, 0);
+  std::vector<faiss::Index::idx_t> cpuIndices(numQuery * k, -1);
 
-  cpuIndexL2.search(numQuery, queries.data(), k,
-                    cpuDistanceL2.data(), cpuIndicesL2.data());
-
-  faiss::IndexFlatIP cpuIndexIP(dim);
-  cpuIndexIP.add(numVecs, vecs.data());
-
-  std::vector<float> cpuDistanceIP(numQuery * k, 0);
-  std::vector<faiss::Index::idx_t> cpuIndicesIP(numQuery * k, -1);
-
-  cpuIndexIP.search(numQuery, queries.data(), k,
-                    cpuDistanceIP.data(), cpuIndicesIP.data());
+  cpuIndex.search(numQuery, queries.data(), k,
+                    cpuDistance.data(), cpuIndices.data());
 
   // The transpose and distance code assumes the desired device is already set
   faiss::gpu::DeviceScope scope(device);
@@ -73,29 +83,29 @@ void testTransposition(bool colMajorVecs,
   std::vector<float> gpuDistance(numQuery * k, 0);
   std::vector<faiss::Index::idx_t> gpuIndices(numQuery * k, -1);
 
-  faiss::gpu::bruteForceKnn(
-    &res,
-    metric,
-    colMajorVecs ? vecsT.data() : gpuVecs.data(),
-    !colMajorVecs,
-    numVecs,
-    colMajorQueries ? queriesT.data() : gpuQueries.data(),
-    !colMajorQueries,
-    numQuery,
-    dim,
-    k,
-    gpuDistance.data(),
-    gpuIndices.data());
+  faiss::gpu::GpuDistanceParams args;
+  args.metric = metric;
+  args.metricArg = metricArg;
+  args.k = k;
+  args.dims = dim;
+  args.vectors = colMajorVecs ? vecsT.data() : gpuVecs.data();
+  args.vectorsRowMajor = !colMajorVecs;
+  args.numVectors = numVecs;
+  args.queries = colMajorQueries ? queriesT.data() : gpuQueries.data();
+  args.queriesRowMajor = !colMajorQueries;
+  args.numQueries = numQuery;
+  args.outDistances = gpuDistance.data();
+  args.outIndices = gpuIndices.data();
+
+  faiss::gpu::bfKnn(&res, args);
 
   std::stringstream str;
   str << "metric " << metric
       << " colMajorVecs " << colMajorVecs
       << " colMajorQueries " << colMajorQueries;
 
-  faiss::gpu::compareLists(metric == faiss::MetricType::METRIC_L2 ?
-                           cpuDistanceL2.data() : cpuDistanceIP.data(),
-                           metric == faiss::MetricType::METRIC_L2 ?
-                           cpuIndicesL2.data() : cpuIndicesIP.data(),
+  faiss::gpu::compareLists(cpuDistance.data(),
+                           cpuIndices.data(),
                            gpuDistance.data(),
                            gpuIndices.data(),
                            numQuery, k,
@@ -107,22 +117,57 @@ void testTransposition(bool colMajorVecs,
 // Test different memory layouts for brute-force k-NN
 TEST(TestGpuDistance, Transposition_RR) {
   testTransposition(false, false, faiss::MetricType::METRIC_L2);
-//  testTransposition(false, false, faiss::MetricType::METRIC_INNER_PRODUCT);
+  testTransposition(false, false, faiss::MetricType::METRIC_INNER_PRODUCT);
 }
 
 TEST(TestGpuDistance, Transposition_RC) {
   testTransposition(false, true, faiss::MetricType::METRIC_L2);
-//  testTransposition(false, true, faiss::MetricType::METRIC_INNER_PRODUCT);
 }
 
 TEST(TestGpuDistance, Transposition_CR) {
   testTransposition(true, false, faiss::MetricType::METRIC_L2);
-//  testTransposition(true, false, faiss::MetricType::METRIC_INNER_PRODUCT);
 }
 
 TEST(TestGpuDistance, Transposition_CC) {
   testTransposition(true, true, faiss::MetricType::METRIC_L2);
-//  testTransposition(true, true, faiss::MetricType::METRIC_INNER_PRODUCT);
+}
+
+TEST(TestGpuDistance, L1) {
+  testTransposition(false, false, faiss::MetricType::METRIC_L1);
+}
+
+// Test other transpositions with the general distance kernel
+TEST(TestGpuDistance, L1_RC) {
+  testTransposition(false, true, faiss::MetricType::METRIC_L1);
+}
+
+TEST(TestGpuDistance, L1_CR) {
+  testTransposition(true, false, faiss::MetricType::METRIC_L1);
+}
+
+TEST(TestGpuDistance, L1_CC) {
+  testTransposition(true, true, faiss::MetricType::METRIC_L1);
+}
+
+// Test remainder of metric types
+TEST(TestGpuDistance, Linf) {
+  testTransposition(false, false, faiss::MetricType::METRIC_Linf);
+}
+
+TEST(TestGpuDistance, Lp) {
+  testTransposition(false, false, faiss::MetricType::METRIC_Lp, 3);
+}
+
+TEST(TestGpuDistance, Canberra) {
+  testTransposition(false, false, faiss::MetricType::METRIC_Canberra);
+}
+
+TEST(TestGpuDistance, BrayCurtis) {
+  testTransposition(false, false, faiss::MetricType::METRIC_BrayCurtis);
+}
+
+TEST(TestGpuDistance, JensenShannon) {
+  testTransposition(false, false, faiss::MetricType::METRIC_JensenShannon);
 }
 
 int main(int argc, char** argv) {

@@ -101,13 +101,15 @@ int getDeviceForAddress(const void* p) {
 
   cudaPointerAttributes att;
   cudaError_t err = cudaPointerGetAttributes(&att, p);
-  FAISS_ASSERT(err == cudaSuccess ||
-         err == cudaErrorInvalidValue);
+  FAISS_ASSERT_FMT(err == cudaSuccess ||
+                   err == cudaErrorInvalidValue,
+                   "unknown error %d", (int) err);
 
   if (err == cudaErrorInvalidValue) {
     // Make sure the current thread error status has been reset
     err = cudaGetLastError();
-    FAISS_ASSERT(err == cudaErrorInvalidValue);
+    FAISS_ASSERT_FMT(err == cudaErrorInvalidValue,
+                     "unknown error %d", (int) err);
     return -1;
   } else if (att.memoryType == cudaMemoryTypeHost) {
     return -1;
@@ -123,6 +125,15 @@ bool getFullUnifiedMemSupport(int device) {
 
 bool getFullUnifiedMemSupportCurrentDevice() {
   return getFullUnifiedMemSupport(getCurrentDevice());
+}
+
+bool getTensorCoreSupport(int device) {
+  const auto& prop = getDeviceProperties(device);
+  return (prop.major >= 7);
+}
+
+bool getTensorCoreSupportCurrentDevice() {
+  return getTensorCoreSupport(getCurrentDevice());
 }
 
 int getMaxKSelection() {

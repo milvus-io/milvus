@@ -17,7 +17,6 @@
 #include <faiss/impl/ScalarQuantizer.h>
 #include <faiss/impl/ScalarQuantizerOp.h>
 
-
 namespace faiss {
 
 /**

@@ -8,14 +8,16 @@
 # not linting this file because it imports * form swigfaiss, which
 # causes a ton of useless warnings.
 
-from __future__ import print_function
-
 import numpy as np
 import sys
 import inspect
 import pdb
 import platform
 import subprocess
+import logging
+
+
+logger = logging.getLogger(__name__)
 
 
 def instruction_set():
@@ -26,7 +28,7 @@ def instruction_set():
             return "default"
     elif platform.system() == "Linux":
         import numpy.distutils.cpuinfo
-        if "avx2" in numpy.distutils.cpuinfo.cpu.info[0]['flags']:
+        if "avx2" in numpy.distutils.cpuinfo.cpu.info[0].get('flags', ""):
             return "AVX2"
         else:
             return "default"
@@ -35,15 +37,15 @@ def instruction_set():
 try:
     instr_set = instruction_set()
     if instr_set == "AVX2":
-        print("Loading faiss with AVX2 support.", file=sys.stderr)
+        logger.info("Loading faiss with AVX2 support.")
         from .swigfaiss_avx2 import *
     else:
-        print("Loading faiss.", file=sys.stderr)
+        logger.info("Loading faiss.")
         from .swigfaiss import *
 
 except ImportError:
     # we import * so that the symbol X can be accessed as faiss.X
-    print("Loading faiss.", file=sys.stderr)
+    logger.info("Loading faiss.")
     from .swigfaiss import *
 
 
@@ -73,12 +75,25 @@ def replace_method(the_class, name, replacement, ignore_missing=False):
 
 
 def handle_Clustering():
-    def replacement_train(self, x, index):
-        assert x.flags.contiguous
+    def replacement_train(self, x, index, weights=None):
         n, d = x.shape
         assert d == self.d
-        self.train_c(n, swig_ptr(x), index)
+        if weights is not None:
+            assert weights.shape == (n, )
+            self.train_c(n, swig_ptr(x), index, swig_ptr(weights))
+        else:
+            self.train_c(n, swig_ptr(x), index)
+    def replacement_train_encoded(self, x, codec, index, weights=None):
+        n, d = x.shape
+        assert d == codec.sa_code_size()
+        assert codec.d == index.d
+        if weights is not None:
+            assert weights.shape == (n, )
+            self.train_encoded_c(n, swig_ptr(x), codec, index, swig_ptr(weights))
+        else:
+            self.train_encoded_c(n, swig_ptr(x), codec, index)
     replace_method(Clustering, 'train', replacement_train)
+    replace_method(Clustering, 'train_encoded', replacement_train_encoded)
 
 
 handle_Clustering()
@@ -168,7 +183,11 @@ def handle_Index(the_class):
             sel = x
         else:
             assert x.ndim == 1
-            sel = IDSelectorBatch(x.size, swig_ptr(x))
+            index_ivf = try_extract_index_ivf (self)
+            if index_ivf and index_ivf.direct_map.type == DirectMap.Hashtable:
+                sel = IDSelectorArray(x.size, swig_ptr(x))
+            else:
+                sel = IDSelectorBatch(x.size, swig_ptr(x))
         return self.remove_ids_c(sel)
 
     def replacement_reconstruct(self, key):
@@ -264,6 +283,18 @@ def handle_IndexBinary(the_class):
                       swig_ptr(labels))
         return distances, labels
 
+    def replacement_range_search(self, x, thresh):
+        n, d = x.shape
+        assert d * 8 == self.d
+        res = RangeSearchResult(n)
+        self.range_search_c(n, swig_ptr(x), thresh, res)
+        # get pointers and copy them
+        lims = rev_swig_ptr(res.lims, n + 1).copy()
+        nd = int(lims[-1])
+        D = rev_swig_ptr(res.distances, nd).copy()
+        I = rev_swig_ptr(res.labels, nd).copy()
+        return lims, D, I
+
     def replacement_remove_ids(self, x):
         if isinstance(x, IDSelector):
             sel = x
@@ -276,6 +307,7 @@ def handle_IndexBinary(the_class):
     replace_method(the_class, 'add_with_ids', replacement_add_with_ids)
     replace_method(the_class, 'train', replacement_train)
     replace_method(the_class, 'search', replacement_search)
+    replace_method(the_class, 'range_search', replacement_range_search)
     replace_method(the_class, 'reconstruct', replacement_reconstruct)
     replace_method(the_class, 'remove_ids', replacement_remove_ids)
 
@@ -442,6 +474,9 @@ add_ref_in_constructor(IndexBinaryIDMap2, 0)
 add_ref_in_method(IndexReplicas, 'addIndex', 0)
 add_ref_in_method(IndexBinaryReplicas, 'addIndex', 0)
 
+add_ref_in_constructor(BufferedIOWriter, 0)
+add_ref_in_constructor(BufferedIOReader, 0)
+
 # seems really marginal...
 # remove_ref_from_method(IndexReplicas, 'removeIndex', 0)
 
@@ -463,25 +498,37 @@ if hasattr(this_module, 'GpuIndexFlat'):
 ###########################################
 
 
-def index_cpu_to_gpu_multiple_py(resources, index, co=None):
-    """builds the C++ vectors for the GPU indices and the
-    resources. Handles the common case where the resources are assigned to
-    the first len(resources) GPUs"""
+def index_cpu_to_gpu_multiple_py(resources, index, co=None, gpus=None):
+    """ builds the C++ vectors for the GPU indices and the
+    resources. Handles the case where the resources are assigned to
+    the list of GPUs """
+    if gpus is None:
+        gpus = range(len(resources))
     vres = GpuResourcesVector()
     vdev = IntVector()
-    for i, res in enumerate(resources):
+    for i, res in zip(gpus, resources):
         vdev.push_back(i)
         vres.push_back(res)
     index = index_cpu_to_gpu_multiple(vres, vdev, index, co)
     index.referenced_objects = resources
     return index
 
+
 def index_cpu_to_all_gpus(index, co=None, ngpu=-1):
-    if ngpu == -1:
-        ngpu = get_num_gpus()
-    res = [StandardGpuResources() for i in range(ngpu)]
-    index2 = index_cpu_to_gpu_multiple_py(res, index, co)
-    return index2
+    index_gpu = index_cpu_to_gpus_list(index, co=co, gpus=None, ngpu=ngpu)
+    return index_gpu
+
+
+def index_cpu_to_gpus_list(index, co=None, gpus=None, ngpu=-1):
+    """ Here we can pass list of GPU ids as a parameter or ngpu to
+    use first n GPU's. gpus mut be a list or None"""
+    if (gpus is None) and (ngpu == -1):  # All blank
+        gpus = range(get_num_gpus())
+    elif (gpus is None) and (ngpu != -1):  # Get number of GPU's only
+        gpus = range(ngpu)
+    res = [StandardGpuResources() for _ in gpus]
+    index_gpu = index_cpu_to_gpu_multiple_py(res, index, co, gpus)
+    return index_gpu
 
 
 ###########################################
@@ -670,7 +717,7 @@ class Kmeans:
                 setattr(self.cp, k, v)
         self.centroids = None
 
-    def train(self, x):
+    def train(self, x, weights=None):
         n, d = x.shape
         assert d == self.d
         clus = Clustering(d, self.k, self.cp)
@@ -684,10 +731,13 @@ class Kmeans:
             else:
                 ngpu = self.gpu
             self.index = index_cpu_to_all_gpus(self.index, ngpu=ngpu)
-        clus.train(x, self.index)
+        clus.train(x, self.index, weights)
         centroids = vector_float_to_array(clus.centroids)
         self.centroids = centroids.reshape(self.k, d)
-        self.obj = vector_float_to_array(clus.obj)
+        stats = clus.iteration_stats
+        self.obj = np.array([
+            stats.at(i).obj for i in range(stats.size())
+        ])
         return self.obj[-1] if self.obj.size > 0 else 0.0
 
     def assign(self, x):
@@ -716,3 +766,47 @@ def deserialize_index(data):
     reader = VectorIOReader()
     copy_array_to_vector(data, reader.data)
     return read_index(reader)
+
+def serialize_index_binary(index):
+    """ convert an index to a numpy uint8 array  """
+    writer = VectorIOWriter()
+    write_index_binary(index, writer)
+    return vector_to_array(writer.data)
+
+def deserialize_index_binary(data):
+    reader = VectorIOReader()
+    copy_array_to_vector(data, reader.data)
+    return read_index_binary(reader)
+
+
+###########################################
+# ResultHeap
+###########################################
+
+class ResultHeap:
+    """Accumulate query results from a sliced dataset. The final result will
+    be in self.D, self.I."""
+
+    def __init__(self, nq, k):
+        " nq: number of query vectors, k: number of results per query "
+        self.I = np.zeros((nq, k), dtype='int64')
+        self.D = np.zeros((nq, k), dtype='float32')
+        self.nq, self.k = nq, k
+        heaps = float_maxheap_array_t()
+        heaps.k = k
+        heaps.nh = nq
+        heaps.val = swig_ptr(self.D)
+        heaps.ids = swig_ptr(self.I)
+        heaps.heapify()
+        self.heaps = heaps
+
+    def add_result(self, D, I):
+        """D, I do not need to be in a particular order (heap or sorted)"""
+        assert D.shape == (self.nq, self.k)
+        assert I.shape == (self.nq, self.k)
+        self.heaps.addn_with_ids(
+            self.k, faiss.swig_ptr(D),
+            faiss.swig_ptr(I), self.k)
+
+    def finalize(self):
+        self.heaps.reorder()

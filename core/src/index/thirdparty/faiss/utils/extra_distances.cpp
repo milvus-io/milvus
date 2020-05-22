@@ -149,11 +149,6 @@ struct VectorDistanceTanimoto {
 
 
 
-
-
-
-
-
 namespace {
 
 template<class VD>
@@ -206,9 +201,8 @@ void knn_extra_metrics_template (
 
             maxheap_heapify (k, simi, idxi);
             for (j = 0; j < ny; j++) {
-                if(!bitset || !bitset->test(j)){
+                if (!bitset || !bitset->test(j)) {
                     float disij = vd (x_i, y_j);
-
                     if (disij < simi[0]) {
                         maxheap_pop (k, simi, idxi);
                         maxheap_push (k, simi, idxi, disij, j);
@@ -247,21 +241,6 @@ struct ExtraDistanceComputer : DistanceComputer {
         q = x;
     }
 };
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 } // anonymous namespace
 
@@ -355,7 +334,6 @@ void knn_extra_metrics (
         knn_extra_metrics_template(vd, x, y, nx, ny, res, bitset);
         break;
     }
-
     default:
         FAISS_THROW_MSG ("metric type not implemented");
     }

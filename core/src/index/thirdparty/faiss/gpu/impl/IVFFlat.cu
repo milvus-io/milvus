@@ -30,24 +30,25 @@ namespace faiss { namespace gpu {
 IVFFlat::IVFFlat(GpuResources* resources,
                  FlatIndex* quantizer,
                  faiss::MetricType metric,
+                 float metricArg,
                  bool useResidual,
                  faiss::ScalarQuantizer* scalarQ,
                  IndicesOptions indicesOptions,
                  MemorySpace space) :
     IVFBase(resources,
+            metric,
+            metricArg,
             quantizer,
             scalarQ ? scalarQ->code_size :
             sizeof(float) * quantizer->getDim(),
             indicesOptions,
             space),
-    metric_(metric),
     useResidual_(useResidual),
     scalarQ_(scalarQ ? new GpuScalarQuantizer(*scalarQ) : nullptr) {
 }
 
 IVFFlat::~IVFFlat() {
 }
-
 
 void
 IVFFlat::copyCodeVectorsFromCpu(const float* vecs,
@@ -176,7 +177,8 @@ IVFFlat::classifyAndAddVectors(Tensor<float, 2, true>& vecs,
 
   /* pseudo bitset */
   DeviceTensor<uint8_t, 1, true> bitset(mem, {0}, stream);
-  quantizer_->query(vecs, bitset, 1, listDistance2d, listIds2d, false);
+  quantizer_->query(vecs, bitset, 1, metric_, metricArg_,
+                    listDistance2d, listIds2d, false);
 
   // Calculate residuals for these vectors, if needed
   DeviceTensor<float, 2, true>
@@ -352,12 +354,14 @@ IVFFlat::query(Tensor<float, 2, true>& queries,
   DeviceTensor<int, 2, true>
     coarseIndices(mem, {queries.getSize(0), nprobe}, stream);
 
+  DeviceTensor<uint8_t, 1, true> coarseBitset(mem, {0}, stream);
   // Find the `nprobe` closest lists; we can use int indices both
   // internally and externally
-  DeviceTensor<uint8_t, 1, true> coarseBitset(mem, {0}, stream);
   quantizer_->query(queries,
                     coarseBitset,
                     nprobe,
+                    metric_,
+                    metricArg_,
                     coarseDistances,
                     coarseIndices,
                     false);

@@ -49,7 +49,7 @@ if __name__ == '__main__':
 
     index0 = None
 
-    for fname, index in pool.imap(load_index, args.inputs):
+    for _, index in pool.imap(load_index, args.inputs):
         if index is None:
             continue
         index_ivf = faiss.extract_index_ivf(index)

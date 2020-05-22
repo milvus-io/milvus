@@ -3,9 +3,8 @@
 # This source code is licensed under the MIT license found in the
 # LICENSE file in the root directory of this source tree.
 
-#! /usr/bin/env python2
+from __future__ import absolute_import, division, print_function, unicode_literals
 
-from __future__ import print_function
 import time
 import unittest
 import numpy as np
@@ -99,7 +98,9 @@ class EvalIVFPQAccuracy(unittest.TestCase):
 
             D, Inew = gpu_index.search(xq, 10)
 
-            self.assertGreaterEqual((Iref == Inew).sum(), Iref.size)
+            # 0.99: allow some tolerance in results otherwise test
+            # fails occasionally (not reproducible)
+            self.assertGreaterEqual((Iref == Inew).sum(), Iref.size * 0.99)
 
     def test_cpu_to_gpu_IVFPQ(self):
         self.do_cpu_to_gpu('IVF128,PQ4')
@@ -126,7 +127,7 @@ class ReferencedObject(unittest.TestCase):
 
     def test_proxy(self):
         index = faiss.IndexReplicas()
-        for i in range(3):
+        for _i in range(3):
             sub_index = faiss.IndexFlatL2(self.d)
             sub_index.add(self.xb)
             index.addIndex(sub_index)
@@ -196,7 +197,7 @@ class ReferencedObject(unittest.TestCase):
         index = faiss.IndexReplicas()
         size, dim = target.shape
         num_gpu = 4
-        for i in range(num_gpu):
+        for _i in range(num_gpu):
             config = faiss.GpuIndexFlatConfig()
             config.device = 0   # simulate on a single GPU
             sub_index = faiss.GpuIndexFlatIP(faiss.StandardGpuResources(), dim, config)
@@ -268,6 +269,45 @@ class TestGPUKmeans(unittest.TestCase):
         assert np.allclose(obj1, obj2)
 
 
+class TestAlternativeDistances(unittest.TestCase):
+
+    def do_test(self, metric, metric_arg=0):
+        res = faiss.StandardGpuResources()
+        d = 32
+        nb = 1000
+        nq = 100
+
+        rs = np.random.RandomState(123)
+        xb = rs.rand(nb, d).astype('float32')
+        xq = rs.rand(nq, d).astype('float32')
+
+        index_ref = faiss.IndexFlat(d, metric)
+        index_ref.metric_arg = metric_arg
+        index_ref.add(xb)
+        Dref, Iref = index_ref.search(xq, 10)
+
+        # build from other index
+        index = faiss.GpuIndexFlat(res, index_ref)
+        Dnew, Inew = index.search(xq, 10)
+        np.testing.assert_array_equal(Inew, Iref)
+        np.testing.assert_allclose(Dnew, Dref, rtol=1e-6)
+
+        #  build from scratch
+        index = faiss.GpuIndexFlat(res, d, metric)
+        index.metric_arg = metric_arg
+        index.add(xb)
+
+        Dnew, Inew = index.search(xq, 10)
+        np.testing.assert_array_equal(Inew, Iref)
+
+    def test_L1(self):
+        self.do_test(faiss.METRIC_L1)
+
+    def test_Linf(self):
+        self.do_test(faiss.METRIC_Linf)
+
+    def test_Lp(self):
+        self.do_test(faiss.METRIC_Lp, 0.7)
 
 
 if __name__ == '__main__':

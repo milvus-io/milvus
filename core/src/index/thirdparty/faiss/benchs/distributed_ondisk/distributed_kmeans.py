@@ -2,6 +2,7 @@
 #
 # This source code is licensed under the MIT license found in the
 # LICENSE file in the root directory of this source tree.
+
 #! /usr/bin/env python3
 
 """
@@ -356,7 +357,7 @@ def main():
         elif args.indata.endswith('.npy'):
             x = np.load(args.indata, mmap_mode='r')
         else:
-            assert False
+            raise AssertionError
 
         if args.i1 == -1:
             args.i1 = len(x)
@@ -386,7 +387,8 @@ def main():
             True
         )
     else:
-        assert False
+        raise AssertionError
+
 
     if args.server:
         print('starting server')

@@ -23,200 +23,200 @@
 
 namespace faiss { namespace gpu {
 
-// This must be kept in sync with PQCodeDistances.cu
-bool isSupportedNoPrecomputedSubDimSize(int dims) {
-  switch (dims) {
-    case 1:
-    case 2:
-    case 3:
-    case 4:
-    case 6:
-    case 8:
-    case 10:
-    case 12:
-    case 16:
-    case 20:
-    case 24:
-    case 28:
-    case 32:
-      return true;
-    default:
-      // FIXME: larger sizes require too many registers - we need the
-      // MM implementation working
-      return false;
-  }
-}
-
-template <typename LookupT, typename LookupVecT>
-struct LoadCodeDistances {
-  static inline __device__ void load(LookupT* smem,
-                                     LookupT* codes,
-                                     int numCodes) {
-    constexpr int kWordSize = sizeof(LookupVecT) / sizeof(LookupT);
-
-    // We can only use the vector type if the data is guaranteed to be
-    // aligned. The codes are innermost, so if it is evenly divisible,
-    // then any slice will be aligned.
-    if (numCodes % kWordSize == 0) {
-      // Load the data by float4 for efficiency, and then handle any remainder
-      // limitVec is the number of whole vec words we can load, in terms
-      // of whole blocks performing the load
-      constexpr int kUnroll = 2;
-      int limitVec = numCodes / (kUnroll * kWordSize * blockDim.x);
-      limitVec *= kUnroll * blockDim.x;
-
-      LookupVecT* smemV = (LookupVecT*) smem;
-      LookupVecT* codesV = (LookupVecT*) codes;
-
-      for (int i = threadIdx.x; i < limitVec; i += kUnroll * blockDim.x) {
-        LookupVecT vals[kUnroll];
-
-#pragma unroll
-        for (int j = 0; j < kUnroll; ++j) {
-          vals[j] =
-            LoadStore<LookupVecT>::load(&codesV[i + j * blockDim.x]);
-        }
-
-#pragma unroll
-        for (int j = 0; j < kUnroll; ++j) {
-          LoadStore<LookupVecT>::store(&smemV[i + j * blockDim.x], vals[j]);
-        }
-      }
-
-      // This is where we start loading the remainder that does not evenly
-      // fit into kUnroll x blockDim.x
-      int remainder = limitVec * kWordSize;
-
-      for (int i = remainder + threadIdx.x; i < numCodes; i += blockDim.x) {
-        smem[i] = codes[i];
-      }
-    } else {
-      // Potential unaligned load
-      constexpr int kUnroll = 4;
-
-      int limit = utils::roundDown(numCodes, kUnroll * blockDim.x);
-
-      int i = threadIdx.x;
-      for (; i < limit; i += kUnroll * blockDim.x) {
-        LookupT vals[kUnroll];
-
-#pragma unroll
-        for (int j = 0; j < kUnroll; ++j) {
-          vals[j] = codes[i + j * blockDim.x];
-        }
-
-#pragma unroll
-        for (int j = 0; j < kUnroll; ++j) {
-          smem[i + j * blockDim.x] = vals[j];
-        }
-      }
-
-      for (; i < numCodes; i += blockDim.x) {
-        smem[i] = codes[i];
-      }
-    }
-  }
-};
-
-template <int NumSubQuantizers, typename LookupT, typename LookupVecT>
-__global__ void
-pqScanNoPrecomputedMultiPass(Tensor<float, 2, true> queries,
-                             Tensor<float, 3, true> pqCentroids,
-                             Tensor<int, 2, true> topQueryToCentroid,
-                             Tensor<LookupT, 4, true> codeDistances,
-                             void** listCodes,
-                             int* listLengths,
-                             Tensor<int, 2, true> prefixSumOffsets,
-                             Tensor<float, 1, true> distance) {
-  const auto codesPerSubQuantizer = pqCentroids.getSize(2);
-
-  // Where the pq code -> residual distance is stored
-  extern __shared__ char smemCodeDistances[];
-  LookupT* codeDist = (LookupT*) smemCodeDistances;
-
-  // Each block handles a single query
-  auto queryId = blockIdx.y;
-  auto probeId = blockIdx.x;
-
-  // This is where we start writing out data
-  // We ensure that before the array (at offset -1), there is a 0 value
-  int outBase = *(prefixSumOffsets[queryId][probeId].data() - 1);
-  float* distanceOut = distance[outBase].data();
-
-  auto listId = topQueryToCentroid[queryId][probeId];
-  // Safety guard in case NaNs in input cause no list ID to be generated
-  if (listId == -1) {
-    return;
-  }
-
-  unsigned char* codeList = (unsigned char*) listCodes[listId];
-  int limit = listLengths[listId];
-
-  constexpr int kNumCode32 = NumSubQuantizers <= 4 ? 1 :
-    (NumSubQuantizers / 4);
-  unsigned int code32[kNumCode32];
-  unsigned int nextCode32[kNumCode32];
-
-  // We double-buffer the code loading, which improves memory utilization
-  if (threadIdx.x < limit) {
-    LoadCode32<NumSubQuantizers>::load(code32, codeList, threadIdx.x);
-  }
-
-  LoadCodeDistances<LookupT, LookupVecT>::load(
-    codeDist,
-    codeDistances[queryId][probeId].data(),
-    codeDistances.getSize(2) * codeDistances.getSize(3));
-
-  // Prevent WAR dependencies
-  __syncthreads();
-
-  // Each thread handles one code element in the list, with a
-  // block-wide stride
-  for (int codeIndex = threadIdx.x;
-       codeIndex < limit;
-       codeIndex += blockDim.x) {
-    // Prefetch next codes
-    if (codeIndex + blockDim.x < limit) {
-      LoadCode32<NumSubQuantizers>::load(
-        nextCode32, codeList, codeIndex + blockDim.x);
-    }
-
-    float dist = 0.0f;
-
-#pragma unroll
-    for (int word = 0; word < kNumCode32; ++word) {
-      constexpr int kBytesPerCode32 =
-        NumSubQuantizers < 4 ? NumSubQuantizers : 4;
-
-      if (kBytesPerCode32 == 1) {
-        auto code = code32[0];
-        dist = ConvertTo<float>::to(codeDist[code]);
-
-      } else {
-#pragma unroll
-        for (int byte = 0; byte < kBytesPerCode32; ++byte) {
-          auto code = getByte(code32[word], byte * 8, 8);
-
-          auto offset =
-            codesPerSubQuantizer * (word * kBytesPerCode32 + byte);
-
-          dist += ConvertTo<float>::to(codeDist[offset + code]);
-        }
-      }
-    }
-
-    // Write out intermediate distance result
-    // We do not maintain indices here, in order to reduce global
-    // memory traffic. Those are recovered in the final selection step.
-    distanceOut[codeIndex] = dist;
-
-    // Rotate buffers
-#pragma unroll
-    for (int word = 0; word < kNumCode32; ++word) {
-      code32[word] = nextCode32[word];
-    }
-  }
-}
+//// This must be kept in sync with PQCodeDistances.cu
+//bool isSupportedNoPrecomputedSubDimSize(int dims) {
+//  switch (dims) {
+//    case 1:
+//    case 2:
+//    case 3:
+//    case 4:
+//    case 6:
+//    case 8:
+//    case 10:
+//    case 12:
+//    case 16:
+//    case 20:
+//    case 24:
+//    case 28:
+//    case 32:
+//      return true;
+//    default:
+//      // FIXME: larger sizes require too many registers - we need the
+//      // MM implementation working
+//      return false;
+//  }
+//}
+//
+//template <typename LookupT, typename LookupVecT>
+//struct LoadCodeDistances {
+//  static inline __device__ void load(LookupT* smem,
+//                                     LookupT* codes,
+//                                     int numCodes) {
+//    constexpr int kWordSize = sizeof(LookupVecT) / sizeof(LookupT);
+//
+//    // We can only use the vector type if the data is guaranteed to be
+//    // aligned. The codes are innermost, so if it is evenly divisible,
+//    // then any slice will be aligned.
+//    if (numCodes % kWordSize == 0) {
+//      // Load the data by float4 for efficiency, and then handle any remainder
+//      // limitVec is the number of whole vec words we can load, in terms
+//      // of whole blocks performing the load
+//      constexpr int kUnroll = 2;
+//      int limitVec = numCodes / (kUnroll * kWordSize * blockDim.x);
+//      limitVec *= kUnroll * blockDim.x;
+//
+//      LookupVecT* smemV = (LookupVecT*) smem;
+//      LookupVecT* codesV = (LookupVecT*) codes;
+//
+//      for (int i = threadIdx.x; i < limitVec; i += kUnroll * blockDim.x) {
+//        LookupVecT vals[kUnroll];
+//
+//#pragma unroll
+//        for (int j = 0; j < kUnroll; ++j) {
+//          vals[j] =
+//            LoadStore<LookupVecT>::load(&codesV[i + j * blockDim.x]);
+//        }
+//
+//#pragma unroll
+//        for (int j = 0; j < kUnroll; ++j) {
+//          LoadStore<LookupVecT>::store(&smemV[i + j * blockDim.x], vals[j]);
+//        }
+//      }
+//
+//      // This is where we start loading the remainder that does not evenly
+//      // fit into kUnroll x blockDim.x
+//      int remainder = limitVec * kWordSize;
+//
+//      for (int i = remainder + threadIdx.x; i < numCodes; i += blockDim.x) {
+//        smem[i] = codes[i];
+//      }
+//    } else {
+//      // Potential unaligned load
+//      constexpr int kUnroll = 4;
+//
+//      int limit = utils::roundDown(numCodes, kUnroll * blockDim.x);
+//
+//      int i = threadIdx.x;
+//      for (; i < limit; i += kUnroll * blockDim.x) {
+//        LookupT vals[kUnroll];
+//
+//#pragma unroll
+//        for (int j = 0; j < kUnroll; ++j) {
+//          vals[j] = codes[i + j * blockDim.x];
+//        }
+//
+//#pragma unroll
+//        for (int j = 0; j < kUnroll; ++j) {
+//          smem[i + j * blockDim.x] = vals[j];
+//        }
+//      }
+//
+//      for (; i < numCodes; i += blockDim.x) {
+//        smem[i] = codes[i];
+//      }
+//    }
+//  }
+//};
+//
+//template <int NumSubQuantizers, typename LookupT, typename LookupVecT>
+//__global__ void
+//pqScanNoPrecomputedMultiPass(Tensor<float, 2, true> queries,
+//                             Tensor<float, 3, true> pqCentroids,
+//                             Tensor<int, 2, true> topQueryToCentroid,
+//                             Tensor<LookupT, 4, true> codeDistances,
+//                             void** listCodes,
+//                             int* listLengths,
+//                             Tensor<int, 2, true> prefixSumOffsets,
+//                             Tensor<float, 1, true> distance) {
+//  const auto codesPerSubQuantizer = pqCentroids.getSize(2);
+//
+//  // Where the pq code -> residual distance is stored
+//  extern __shared__ char smemCodeDistances[];
+//  LookupT* codeDist = (LookupT*) smemCodeDistances;
+//
+//  // Each block handles a single query
+//  auto queryId = blockIdx.y;
+//  auto probeId = blockIdx.x;
+//
+//  // This is where we start writing out data
+//  // We ensure that before the array (at offset -1), there is a 0 value
+//  int outBase = *(prefixSumOffsets[queryId][probeId].data() - 1);
+//  float* distanceOut = distance[outBase].data();
+//
+//  auto listId = topQueryToCentroid[queryId][probeId];
+//  // Safety guard in case NaNs in input cause no list ID to be generated
+//  if (listId == -1) {
+//    return;
+//  }
+//
+//  unsigned char* codeList = (unsigned char*) listCodes[listId];
+//  int limit = listLengths[listId];
+//
+//  constexpr int kNumCode32 = NumSubQuantizers <= 4 ? 1 :
+//    (NumSubQuantizers / 4);
+//  unsigned int code32[kNumCode32];
+//  unsigned int nextCode32[kNumCode32];
+//
+//  // We double-buffer the code loading, which improves memory utilization
+//  if (threadIdx.x < limit) {
+//    LoadCode32<NumSubQuantizers>::load(code32, codeList, threadIdx.x);
+//  }
+//
+//  LoadCodeDistances<LookupT, LookupVecT>::load(
+//    codeDist,
+//    codeDistances[queryId][probeId].data(),
+//    codeDistances.getSize(2) * codeDistances.getSize(3));
+//
+//  // Prevent WAR dependencies
+//  __syncthreads();
+//
+//  // Each thread handles one code element in the list, with a
+//  // block-wide stride
+//  for (int codeIndex = threadIdx.x;
+//       codeIndex < limit;
+//       codeIndex += blockDim.x) {
+//    // Prefetch next codes
+//    if (codeIndex + blockDim.x < limit) {
+//      LoadCode32<NumSubQuantizers>::load(
+//        nextCode32, codeList, codeIndex + blockDim.x);
+//    }
+//
+//    float dist = 0.0f;
+//
+//#pragma unroll
+//    for (int word = 0; word < kNumCode32; ++word) {
+//      constexpr int kBytesPerCode32 =
+//        NumSubQuantizers < 4 ? NumSubQuantizers : 4;
+//
+//      if (kBytesPerCode32 == 1) {
+//        auto code = code32[0];
+//        dist = ConvertTo<float>::to(codeDist[code]);
+//
+//      } else {
+//#pragma unroll
+//        for (int byte = 0; byte < kBytesPerCode32; ++byte) {
+//          auto code = getByte(code32[word], byte * 8, 8);
+//
+//          auto offset =
+//            codesPerSubQuantizer * (word * kBytesPerCode32 + byte);
+//
+//          dist += ConvertTo<float>::to(codeDist[offset + code]);
+//        }
+//      }
+//    }
+//
+//    // Write out intermediate distance result
+//    // We do not maintain indices here, in order to reduce global
+//    // memory traffic. Those are recovered in the final selection step.
+//    distanceOut[codeIndex] = dist;
+//
+//    // Rotate buffers
+//#pragma unroll
+//    for (int word = 0; word < kNumCode32; ++word) {
+//      code32[word] = nextCode32[word];
+//    }
+//  }
+//}
 
 void
 runMultiPassTile(Tensor<float, 2, true>& queries,
@@ -239,9 +239,16 @@ runMultiPassTile(Tensor<float, 2, true>& queries,
                  Tensor<float, 3, true>& heapDistances,
                  Tensor<int, 3, true>& heapIndices,
                  int k,
+                 faiss::MetricType metric,
                  Tensor<float, 2, true>& outDistances,
                  Tensor<long, 2, true>& outIndices,
                  cudaStream_t stream) {
+  // We only support two metrics at the moment
+  FAISS_ASSERT(metric == MetricType::METRIC_INNER_PRODUCT ||
+               metric == MetricType::METRIC_L2);
+
+  bool l2Distance = metric == MetricType::METRIC_L2;
+
   // Calculate offset lengths, so we know where to write out
   // intermediate results
   runCalcListOffsets(topQueryToCentroid, listLengths, prefixSumOffsets,
@@ -254,6 +261,7 @@ runMultiPassTile(Tensor<float, 2, true>& queries,
                      centroids,
                      topQueryToCentroid,
                      codeDistances,
+                     l2Distance,
                      useFloat16Lookup,
                      stream);
 
@@ -366,7 +374,7 @@ runMultiPassTile(Tensor<float, 2, true>& queries,
                       allDistances,
                       topQueryToCentroid.getSize(1),
                       k,
-                      false, // L2 distance chooses smallest
+                      !l2Distance, // L2 distance chooses smallest
                       heapDistances,
                       heapIndices,
                       stream);
@@ -382,7 +390,7 @@ runMultiPassTile(Tensor<float, 2, true>& queries,
                       prefixSumOffsets,
                       topQueryToCentroid,
                       k,
-                      false, // L2 distance chooses smallest
+                      !l2Distance, // L2 distance chooses smallest
                       outDistances,
                       outIndices,
                       stream);
@@ -403,6 +411,7 @@ void runPQScanMultiPassNoPrecomputed(Tensor<float, 2, true>& queries,
                                      thrust::device_vector<int>& listLengths,
                                      int maxListLength,
                                      int k,
+                                     faiss::MetricType metric,
                                      // output
                                      Tensor<float, 2, true>& outDistances,
                                      // output
@@ -581,6 +590,7 @@ void runPQScanMultiPassNoPrecomputed(Tensor<float, 2, true>& queries,
                      heapDistancesView,
                      heapIndicesView,
                      k,
+                     metric,
                      outDistanceView,
                      outIndicesView,
                      streams[curStream]);

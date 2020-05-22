@@ -2,6 +2,9 @@
 #
 # This source code is licensed under the MIT license found in the
 # LICENSE file in the root directory of this source tree.
+
+#!/usr/bin/env python3
+
 """
 Simplistic RPC implementation.
 Exposes all functions of a Server object.
@@ -163,7 +166,7 @@ class Server:
         except EOFError:
             self.log("EOF during communication")
             traceback.print_exc(50,self.logf)
-        except:
+        except BaseException:
             # unexpected
             traceback.print_exc(50,sys.stderr)
             sys.exit(1)
