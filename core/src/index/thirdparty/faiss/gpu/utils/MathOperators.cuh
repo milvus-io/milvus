@@ -8,6 +8,7 @@
 
 #pragma once
 
+#include <faiss/gpu/utils/ConversionOperators.cuh>
 #include <faiss/gpu/utils/Float16.cuh>
 
 //
@@ -39,8 +40,8 @@ struct Math {
   }
 
   /// For a vector type, this is a horizontal add, returning sum(v_i)
-  static inline __device__ T reduceAdd(T v) {
-    return v;
+  static inline __device__ float reduceAdd(T v) {
+    return ConvertTo<float>::to(v);
   }
 
   static inline __device__ bool lt(T a, T b) {
@@ -252,8 +253,8 @@ struct Math<half> {
 #endif
   }
 
-  static inline __device__ half reduceAdd(half v) {
-    return v;
+  static inline __device__ float reduceAdd(half v) {
+    return ConvertTo<float>::to(v);
   }
 
   static inline __device__ bool lt(half a, half b) {
@@ -394,18 +395,11 @@ struct Math<half2> {
 #endif
   }
 
-  static inline __device__ half reduceAdd(half2 v) {
-#ifdef FAISS_USE_FULL_FLOAT16
-  half hv = __high2half(v);
-  half lv = __low2half(v);
+  static inline __device__ float reduceAdd(half2 v) {
+    float2 vf = __half22float2(v);
+    vf.x += vf.y;
 
-  return __hadd(hv, lv);
-#else
-  float2 vf = __half22float2(v);
-  vf.x += vf.y;
-
-  return __float2half(vf.x);
-#endif
+    return vf.x;
   }
 
   // not implemented for vector types
@@ -471,10 +465,10 @@ struct Math<Half4> {
     return h;
   }
 
-  static inline __device__ half reduceAdd(Half4 v) {
-    half hx = Math<half2>::reduceAdd(v.a);
-    half hy = Math<half2>::reduceAdd(v.b);
-    return Math<half>::add(hx, hy);
+  static inline __device__ float reduceAdd(Half4 v) {
+    float x = Math<half2>::reduceAdd(v.a);
+    float y = Math<half2>::reduceAdd(v.b);
+    return x + y;
   }
 
   // not implemented for vector types
@@ -544,9 +538,9 @@ struct Math<Half8> {
   }
 
   static inline __device__ half reduceAdd(Half8 v) {
-    half hx = Math<Half4>::reduceAdd(v.a);
-    half hy = Math<Half4>::reduceAdd(v.b);
-    return Math<half>::add(hx, hy);
+    float x = Math<Half4>::reduceAdd(v.a);
+    float y = Math<Half4>::reduceAdd(v.b);
+    return x + y;
   }
 
   // not implemented for vector types

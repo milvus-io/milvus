@@ -8,6 +8,7 @@
 
 #pragma once
 
+#include <faiss/MetricType.h>
 #include <faiss/gpu/impl/IVFBase.cuh>
 #include <faiss/gpu/utils/Float16.cuh>
 
@@ -17,6 +18,8 @@ namespace faiss { namespace gpu {
 class IVFPQ : public IVFBase {
  public:
   IVFPQ(GpuResources* resources,
+        faiss::MetricType metric,
+        float metricArg,
         /// We do not own this reference
         FlatIndex* quantizer,
         int numSubQuantizers,
@@ -81,6 +84,11 @@ class IVFPQ : public IVFBase {
   /// Calculate precomputed residual distance information
   void precomputeCodes_();
 
+  /// Calculate precomputed residual distance information (for different coarse
+  /// centroid type)
+  template <typename CentroidT>
+  void precomputeCodesT_();
+
   /// Runs kernels for scanning inverted lists with precomputed codes
   void runPQPrecomputedCodes_(Tensor<float, 2, true>& queries,
                               Tensor<uint8_t, 1, true>& bitset,
@@ -98,6 +106,17 @@ class IVFPQ : public IVFBase {
                                 int k,
                                 Tensor<float, 2, true>& outDistances,
                                 Tensor<long, 2, true>& outIndices);
+
+  /// Runs kernels for scanning inverted lists without precomputed codes (for
+  /// different coarse centroid type)
+  template <typename CentroidT>
+  void runPQNoPrecomputedCodesT_(Tensor<float, 2, true>& queries,
+                                 Tensor<uint8_t, 1, true>& bitset,
+                                 DeviceTensor<float, 2, true>& coarseDistances,
+                                 DeviceTensor<int, 2, true>& coarseIndices,
+                                 int k,
+                                 Tensor<float, 2, true>& outDistances,
+                                 Tensor<long, 2, true>& outIndices);
 
  private:
   /// Number of sub-quantizers per vector

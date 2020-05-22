@@ -33,9 +33,9 @@ template <typename T, typename TVec, typename IndexType,
           int RowTileSize, bool NormLoop, bool NormSquared>
 __global__ void
 l2NormRowMajor(Tensor<TVec, 2, true, IndexType> input,
-               Tensor<T, 1, true, IndexType> output) {
+               Tensor<float, 1, true, IndexType> output) {
   extern __shared__ char smemByte[]; // #warps * RowTileSize elements
-  T* smem = (T*) smemByte;
+  float* smem = (float*) smemByte;
 
   IndexType numWarps = utils::divUp(blockDim.x, kWarpSize);
   IndexType laneId = getLaneId();
@@ -43,19 +43,20 @@ l2NormRowMajor(Tensor<TVec, 2, true, IndexType> input,
 
   bool lastRowTile = (blockIdx.x == (gridDim.x - 1));
   IndexType rowStart = RowTileSize * blockIdx.x;
-  T rowNorm[RowTileSize];
+  // accumulate in f32
+  float rowNorm[RowTileSize];
 
   if (lastRowTile) {
     // We are handling the very end of the input matrix rows
     for (IndexType row = 0; row < input.getSize(0) - rowStart; ++row) {
       if (NormLoop) {
-        rowNorm[0] = Math<T>::zero();
+        rowNorm[0] = 0;
 
         for (IndexType col = threadIdx.x;
              col < input.getSize(1); col += blockDim.x) {
           TVec val = input[rowStart + row][col];
           val = Math<TVec>::mul(val, val);
-          rowNorm[0] = Math<T>::add(rowNorm[0], Math<TVec>::reduceAdd(val));
+          rowNorm[0] = rowNorm[0] + Math<TVec>::reduceAdd(val);
         }
       } else {
         TVec val = input[rowStart + row][threadIdx.x];
@@ -79,7 +80,7 @@ l2NormRowMajor(Tensor<TVec, 2, true, IndexType> input,
 
 #pragma unroll
       for (int row = 0; row < RowTileSize; ++row) {
-        rowNorm[row] = Math<T>::zero();
+        rowNorm[row] = 0;
       }
 
       for (IndexType col = threadIdx.x;
@@ -96,8 +97,8 @@ l2NormRowMajor(Tensor<TVec, 2, true, IndexType> input,
 
 #pragma unroll
         for (int row = 0; row < RowTileSize; ++row) {
-          rowNorm[row] = Math<T>::add(rowNorm[row],
-                                      Math<TVec>::reduceAdd(tmp[row]));
+          rowNorm[row] = rowNorm[row] +
+            Math<TVec>::reduceAdd(tmp[row]);
         }
       }
     } else {
@@ -140,8 +141,7 @@ l2NormRowMajor(Tensor<TVec, 2, true, IndexType> input,
   if (warpId == 0) {
 #pragma unroll
     for (int row = 0; row < RowTileSize; ++row) {
-      rowNorm[row] = laneId < numWarps ?
-                              smem[row * numWarps + laneId] : Math<T>::zero();
+      rowNorm[row] = laneId < numWarps ? smem[row * numWarps + laneId] : 0;
     }
 
 #pragma unroll
@@ -158,15 +158,13 @@ l2NormRowMajor(Tensor<TVec, 2, true, IndexType> input,
         if (lastRowTile) {
           if (outCol < output.getSize(0)) {
             output[outCol] =
-              NormSquared ? rowNorm[row] :
-              ConvertTo<T>::to(
-                sqrtf(ConvertTo<float>::to(rowNorm[row])));
+              NormSquared ? ConvertTo<float>::to(rowNorm[row]) :
+              sqrtf(ConvertTo<float>::to(rowNorm[row]));
           }
         } else {
           output[outCol] =
-            NormSquared ? rowNorm[row] :
-            ConvertTo<T>::to(
-              sqrtf(ConvertTo<float>::to(rowNorm[row])));
+            NormSquared ? ConvertTo<float>::to(rowNorm[row]) :
+            sqrtf(ConvertTo<float>::to(rowNorm[row]));
         }
       }
     }
@@ -180,7 +178,7 @@ l2NormRowMajor(Tensor<TVec, 2, true, IndexType> input,
 template <typename T, typename IndexType, bool NormSquared>
 __global__ void
 l2NormColMajor(Tensor<T, 2, true, IndexType> input,
-               Tensor<T, 1, true, IndexType> output) {
+               Tensor<float, 1, true, IndexType> output) {
   // grid-stride loop to handle all batch elements
   for (IndexType batch = blockIdx.x * blockDim.x + threadIdx.x;
        batch < input.getSize(1);
@@ -198,14 +196,14 @@ l2NormColMajor(Tensor<T, 2, true, IndexType> input,
       sum = sqrtf(sum);
     }
 
-    output[batch] = ConvertTo<T>::to(sum);
+    output[batch] = ConvertTo<float>::to(sum);
   }
 }
 
 template <typename T, typename TVec, typename IndexType>
 void runL2Norm(Tensor<T, 2, true, IndexType>& input,
                bool inputRowMajor,
-               Tensor<T, 1, true, IndexType>& output,
+               Tensor<float, 1, true, IndexType>& output,
                bool normSquared,
                cudaStream_t stream) {
   IndexType maxThreads = (IndexType) getMaxThreadsCurrentDevice();
@@ -248,7 +246,7 @@ void runL2Norm(Tensor<T, 2, true, IndexType>& input,
       auto grid = dim3(utils::divUp(inputV.getSize(0), rowTileSize));
       auto block = dim3(numThreads);
 
-      auto smem = sizeof(T) * rowTileSize * utils::divUp(numThreads, kWarpSize);
+      auto smem = sizeof(float) * rowTileSize * utils::divUp(numThreads, kWarpSize);
 
       RUN_L2_ROW_MAJOR(T, TVec, inputV);
     } else {
@@ -261,7 +259,7 @@ void runL2Norm(Tensor<T, 2, true, IndexType>& input,
       auto grid = dim3(utils::divUp(input.getSize(0), rowTileSize));
       auto block = dim3(numThreads);
 
-      auto smem = sizeof(T) * rowTileSize * utils::divUp(numThreads, kWarpSize);
+      auto smem = sizeof(float) * rowTileSize * utils::divUp(numThreads, kWarpSize);
 
       RUN_L2_ROW_MAJOR(T, T, input);
     }
@@ -313,7 +311,7 @@ void runL2Norm(Tensor<float, 2, true>& input,
 
 void runL2Norm(Tensor<half, 2, true>& input,
                bool inputRowMajor,
-               Tensor<half, 1, true>& output,
+               Tensor<float, 1, true>& output,
                bool normSquared,
                cudaStream_t stream) {
   if (input.canUseIndexType<int>()) {

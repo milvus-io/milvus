@@ -38,7 +38,7 @@ for d in 3, 4, 12, 36, 64:
     distances = np.empty((xd, yd), dtype='float32')
 
     t0 = time.time()
-    for i in xrange(xd):
+    for i in range(xd):
         faiss.fvec_inner_products_ny(swig_ptr(distances[i]),
                                      swig_ptr(x[i]),
                                      swig_ptr(y),
@@ -66,7 +66,7 @@ for d in 3, 4, 12, 36, 64:
     distances = np.empty((xd, yd), dtype='float32')
 
     t0 = time.time()
-    for i in xrange(xd):
+    for i in range(xd):
         faiss.fvec_L2sqr_ny(swig_ptr(distances[i]),
                             swig_ptr(x[i]),
                             swig_ptr(y),

@@ -79,7 +79,7 @@ struct IndexHNSW : Index {
 
     ReconstructFromNeighbors *reconstruct_from_neighbors;
 
-    explicit IndexHNSW (int d = 0, int M = 32);
+    explicit IndexHNSW (int d = 0, int M = 32, MetricType metric = METRIC_L2);
     explicit IndexHNSW (Index *storage, int M = 32);
 
     ~IndexHNSW() override;
@@ -91,7 +91,8 @@ struct IndexHNSW : Index {
 
     /// entry point for search
     void search (idx_t n, const float *x, idx_t k,
-                 float *distances, idx_t *labels, ConcurrentBitsetPtr bitset = nullptr) const override;
+                 float *distances, idx_t *labels,
+                 ConcurrentBitsetPtr bitset = nullptr) const override;
 
     void reconstruct(idx_t key, float* recons) const override;
 
@@ -132,7 +133,7 @@ struct IndexHNSW : Index {
 
 struct IndexHNSWFlat : IndexHNSW {
     IndexHNSWFlat();
-    IndexHNSWFlat(int d, int M);
+    IndexHNSWFlat(int d, int M, MetricType metric = METRIC_L2);
 };
 
 /** PQ index topped with with a HNSW structure to access elements
@@ -149,7 +150,7 @@ struct IndexHNSWPQ : IndexHNSW {
  */
 struct IndexHNSWSQ : IndexHNSW {
     IndexHNSWSQ();
-    IndexHNSWSQ(int d, QuantizerType qtype, int M);
+    IndexHNSWSQ(int d, QuantizerType qtype, int M, MetricType metric = METRIC_L2);
 };
 
 /** 2-level code structure with fast random access
@@ -162,8 +163,8 @@ struct IndexHNSW2Level : IndexHNSW {
 
     /// entry point for search
     void search (idx_t n, const float *x, idx_t k,
-                 float *distances, idx_t *labels, ConcurrentBitsetPtr bitset = nullptr) const override;
-
+                 float *distances, idx_t *labels,
+                 ConcurrentBitsetPtr bitset = nullptr) const override;
 };
 
 

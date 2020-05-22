@@ -42,14 +42,14 @@ struct IndexIVFPQ: IndexIVF {
     int polysemous_ht;             ///< Hamming thresh for polysemous filtering
 
     /** Precompute table that speed up query preprocessing at some
-     * memory cost
+     * memory cost (used only for by_residual with L2 metric)
      * =-1: force disable
      * =0: decide heuristically (default: use tables only if they are
      *     < precomputed_tables_max_bytes)
      * =1: tables that work for all quantizers (size 256 * nlist * M)
      * =2: specific version for MultiIndexQuantizer (much more compact)
      */
-    int use_precomputed_table;     ///< if by_residual, build precompute tables
+    int use_precomputed_table;
     static size_t precomputed_table_max_bytes;
 
     /// if use_precompute_table
@@ -58,7 +58,7 @@ struct IndexIVFPQ: IndexIVF {
 
     IndexIVFPQ (
             Index * quantizer, size_t d, size_t nlist,
-            size_t M, size_t nbits_per_idx);
+            size_t M, size_t nbits_per_idx, MetricType metric = METRIC_L2);
 
     void add_with_ids(idx_t n, const float* x, const idx_t* xids = nullptr)
         override;
@@ -93,9 +93,9 @@ struct IndexIVFPQ: IndexIVF {
      * the duplicates are returned in pre-allocated arrays (see the
      * max sizes).
      *
-     * @params lims   limits between groups of duplicates
+     * @param lims   limits between groups of duplicates
      *                (max size ntotal / 2 + 1)
-     * @params ids    ids[lims[i]] : ids[lims[i+1]-1] is a group of
+     * @param ids    ids[lims[i]] : ids[lims[i+1]-1] is a group of
      *                duplicates (max size ntotal)
      * @return n      number of groups found
      */
@@ -135,15 +135,14 @@ struct IndexIVFPQ: IndexIVF {
 /// statistics are robust to internal threading, but not if
 /// IndexIVFPQ::search_preassigned is called by multiple threads
 struct IndexIVFPQStats {
-    size_t nrefine;  // nb of refines (IVFPQR)
+    size_t nrefine;  ///< nb of refines (IVFPQR)
 
     size_t n_hamming_pass;
-    // nb of passed Hamming distance tests (for polysemous)
+    ///< nb of passed Hamming distance tests (for polysemous)
 
-    // timings measured with the CPU RTC
-    // on all threads
+    // timings measured with the CPU RTC on all threads
     size_t search_cycles;
-    size_t refine_cycles; // only for IVFPQR
+    size_t refine_cycles; ///< only for IVFPQR
 
     IndexIVFPQStats () {reset (); }
     void reset ();

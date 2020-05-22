@@ -65,21 +65,6 @@ int fvec_madd_and_argmin (size_t n, const float *a,
 void reflection (const float * u, float * x, size_t n, size_t d, size_t nu);
 
 
-/** For k-means: update stage.
- *
- * @param x          training vectors, size n * d
- * @param centroids  centroid vectors, size k * d
- * @param assign     nearest centroid for each training vector, size n
- * @param k_frozen   do not update the k_frozen first centroids
- * @return           nb of spliting operations to fight empty clusters
- */
-int km_update_centroids (
-        const float * x,
-        float * centroids,
-        int64_t * assign,
-        size_t d, size_t k, size_t n,
-        size_t k_frozen);
-
 /** compute the Q of the QR decomposition for m > n
  * @param a   size n * m: input matrix and output Q
  */

@@ -3,7 +3,7 @@
 # This source code is licensed under the MIT license found in the
 # LICENSE file in the root directory of this source tree.
 
-#! /usr/bin/env python2
+from __future__ import absolute_import, division, print_function, unicode_literals
 
 import numpy as np
 import unittest
@@ -98,6 +98,12 @@ def search_raw_array_pytorch(res, xb, xq, k, D=None, I=None,
 
     return D, I
 
+def to_column_major(x):
+    if hasattr(torch, 'contiguous_format'):
+        return x.t().clone(memory_format=torch.contiguous_format).t()
+    else:
+        # was default setting before memory_format was introduced
+        return x.t().clone().t()
 
 class PytorchFaissInterop(unittest.TestCase):
 
@@ -165,11 +171,11 @@ class PytorchFaissInterop(unittest.TestCase):
                 xb_t = torch.from_numpy(xb).cuda()
 
                 if not xq_row_major:
-                    xq_t = xq_t.t().clone().t()
+                    xq_t = to_column_major(xq_t)
                     assert not xq_t.is_contiguous()
 
                 if not xb_row_major:
-                    xb_t = xb_t.t().clone().t()
+                    xb_t = to_column_major(xb_t)
                     assert not xb_t.is_contiguous()
 
                 D, I = search_raw_array_pytorch(res, xb_t, xq_t, k)

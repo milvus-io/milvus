@@ -37,8 +37,8 @@ namespace faiss {
  ******************************************/
 
 IndexIVFPQ::IndexIVFPQ (Index * quantizer, size_t d, size_t nlist,
-                        size_t M, size_t nbits_per_idx):
-    IndexIVF (quantizer, d, nlist, 0, METRIC_L2),
+                        size_t M, size_t nbits_per_idx, MetricType metric):
+    IndexIVF (quantizer, d, nlist, 0, metric),
     pq (d, M, nbits_per_idx)
 {
     FAISS_THROW_IF_NOT (nbits_per_idx <= 8);
@@ -279,6 +279,8 @@ void IndexIVFPQ::add_core_o (idx_t n, const float * x, const idx_t *xids,
 
     InterruptCallback::check();
 
+    direct_map.check_can_add (xids);
+
     FAISS_THROW_IF_NOT (is_trained);
     double t0 = getmillisecs ();
     const idx_t * idx;
@@ -313,13 +315,14 @@ void IndexIVFPQ::add_core_o (idx_t n, const float * x, const idx_t *xids,
     size_t n_ignore = 0;
     for (size_t i = 0; i < n; i++) {
         idx_t key = idx[i];
+        idx_t id = xids ? xids[i] : ntotal + i;
         if (key < 0) {
+            direct_map.add_single_id (id, -1, 0);
             n_ignore ++;
             if (residuals_2)
                 memset (residuals_2, 0, sizeof(*residuals_2) * d);
             continue;
         }
-        idx_t id = xids ? xids[i] : ntotal + i;
 
         uint8_t *code = xcodes + i * code_size;
         size_t offset = invlists->add_entry (key, id, code);
@@ -332,10 +335,8 @@ void IndexIVFPQ::add_core_o (idx_t n, const float * x, const idx_t *xids,
                 res2[j] = xi[j] - res2[j];
         }
 
-        if (maintain_direct_map)
-            direct_map.push_back (key << 32 | offset);
+        direct_map.add_single_id (id, key, offset);
     }
-
 
     double t3 = getmillisecs ();
     if(verbose) {
@@ -800,9 +801,9 @@ struct KnnSearchResults {
 
     size_t nup;
 
-    inline void add (idx_t j, float dis, faiss::ConcurrentBitsetPtr bitset = nullptr) {
+    inline void add (idx_t j, float dis, ConcurrentBitsetPtr bitset = nullptr) {
         if (C::cmp (heap_sim[0], dis)) {
-            idx_t id = ids ? ids[j] : (key << 32 | j);
+            idx_t id = ids ? ids[j] : lo_build (key, j);
             if (bitset != nullptr && bitset->test((faiss::ConcurrentBitset::id_type_t)id))
                 return;
             heap_swap_top<C> (k, heap_sim, heap_ids, dis, id);
@@ -823,7 +824,7 @@ struct RangeSearchResults {
 
     inline void add (idx_t j, float dis, faiss::ConcurrentBitsetPtr bitset = nullptr) {
         if (C::cmp (radius, dis)) {
-            idx_t id = ids ? ids[j] : (key << 32 | j);
+            idx_t id = ids ? ids[j] : lo_build (key, j);
             rres.add (dis, id);
         }
     }
@@ -836,7 +837,7 @@ struct RangeSearchResults {
  * The scanning functions call their favorite precompute_*
  * function to precompute the tables they need.
  *****************************************************/
-template <typename IDType, MetricType METRIC_TYPE>
+template <typename IDType, MetricType METRIC_TYPE, class PQDecoder>
 struct IVFPQScannerT: QueryTables {
 
     const uint8_t * list_codes;
@@ -846,7 +847,6 @@ struct IVFPQScannerT: QueryTables {
     IVFPQScannerT (const IndexIVFPQ & ivfpq, const IVFSearchParameters *params):
         QueryTables (ivfpq, params)
     {
-        FAISS_THROW_IF_NOT (pq.nbits == 8);
         assert(METRIC_TYPE == metric_type);
     }
 
@@ -872,15 +872,16 @@ struct IVFPQScannerT: QueryTables {
     template<class SearchResultType>
     void scan_list_with_table (size_t ncode, const uint8_t *codes,
                                SearchResultType & res,
-                               faiss::ConcurrentBitsetPtr bitset = nullptr) const
+                               ConcurrentBitsetPtr bitset = nullptr) const
     {
         for (size_t j = 0; j < ncode; j++) {
-
+            PQDecoder decoder(codes, pq.nbits);
+            codes += pq.code_size;
             float dis = dis0;
             const float *tab = sim_table;
 
             for (size_t m = 0; m < pq.M; m++) {
-                dis += tab[*codes++];
+                dis += tab[decoder.decode()];
                 tab += pq.ksub;
             }
 
@@ -897,12 +898,14 @@ struct IVFPQScannerT: QueryTables {
                                  faiss::ConcurrentBitsetPtr bitset = nullptr) const
     {
         for (size_t j = 0; j < ncode; j++) {
+            PQDecoder decoder(codes, pq.nbits);
+            codes += pq.code_size;
 
             float dis = dis0;
             const float *tab = sim_table_2;
 
             for (size_t m = 0; m < pq.M; m++) {
-                int ci = *codes++;
+                int ci = decoder.decode();
                 dis += sim_table_ptrs [m][ci] - 2 * tab [ci];
                 tab += pq.ksub;
             }
@@ -914,8 +917,8 @@ struct IVFPQScannerT: QueryTables {
     /// nothing is precomputed: access residuals on-the-fly
     template<class SearchResultType>
     void scan_on_the_fly_dist (size_t ncode, const uint8_t *codes,
-                                 SearchResultType &res,
-                                 faiss::ConcurrentBitsetPtr bitset = nullptr) const
+                               SearchResultType &res,
+                               faiss::ConcurrentBitsetPtr bitset = nullptr) const
     {
         const float *dvec;
         float dis0 = 0;
@@ -969,12 +972,13 @@ struct IVFPQScannerT: QueryTables {
             int hd = hc.hamming (b_code);
             if (hd < ht) {
                 n_hamming_pass ++;
+                PQDecoder decoder(codes, pq.nbits);
 
                 float dis = dis0;
                 const float *tab = sim_table;
 
                 for (size_t m = 0; m < pq.M; m++) {
-                    dis += tab[*b_code++];
+                    dis += tab[decoder.decode()];
                     tab += pq.ksub;
                 }
 
@@ -999,7 +1003,7 @@ struct IVFPQScannerT: QueryTables {
         case cs:                                                        \
             scan_list_polysemous_hc \
             <HammingComputer ## cs, SearchResultType>   \
-                (ncode, codes, res, bitset);             \
+                (ncode, codes, res, bitset);            \
             break
         HANDLE_CODE_SIZE(4);
         HANDLE_CODE_SIZE(8);
@@ -1030,16 +1034,18 @@ struct IVFPQScannerT: QueryTables {
  * much we precompute (2 = precompute distance tables, 1 = precompute
  * pointers to distances, 0 = compute distances one by one).
  * Currently only 2 is supported */
-template<MetricType METRIC_TYPE, class C, int precompute_mode>
+template<MetricType METRIC_TYPE, class C, class PQDecoder>
 struct IVFPQScanner:
-    IVFPQScannerT<Index::idx_t, METRIC_TYPE>,
+    IVFPQScannerT<Index::idx_t, METRIC_TYPE, PQDecoder>,
     InvertedListScanner
 {
     bool store_pairs;
+    int precompute_mode;
 
-    IVFPQScanner(const IndexIVFPQ & ivfpq, bool store_pairs):
-        IVFPQScannerT<Index::idx_t, METRIC_TYPE>(ivfpq, nullptr),
-        store_pairs(store_pairs)
+    IVFPQScanner(const IndexIVFPQ & ivfpq, bool store_pairs,
+                 int precompute_mode):
+        IVFPQScannerT<Index::idx_t, METRIC_TYPE, PQDecoder>(ivfpq, nullptr),
+        store_pairs(store_pairs), precompute_mode(precompute_mode)
     {
     }
 
@@ -1055,9 +1061,10 @@ struct IVFPQScanner:
         assert(precompute_mode == 2);
         float dis = this->dis0;
         const float *tab = this->sim_table;
+        PQDecoder decoder(code, this->pq.nbits);
 
         for (size_t m = 0; m < this->pq.M; m++) {
-            dis += tab[*code++];
+            dis += tab[decoder.decode()];
             tab += this->pq.ksub;
         }
         return dis;
@@ -1124,7 +1131,22 @@ struct IVFPQScanner:
     }
 };
 
+template<class PQDecoder>
+InvertedListScanner *get_InvertedListScanner1 (const IndexIVFPQ &index,
+                                               bool store_pairs)
+{
 
+   if (index.metric_type == METRIC_INNER_PRODUCT) {
+        return new IVFPQScanner
+            <METRIC_INNER_PRODUCT, CMin<float, idx_t>, PQDecoder>
+            (index, store_pairs, 2);
+    } else if (index.metric_type == METRIC_L2) {
+        return new IVFPQScanner
+            <METRIC_L2, CMax<float, idx_t>, PQDecoder>
+            (index, store_pairs, 2);
+    }
+    return nullptr;
+}
 
 
 } // anonymous namespace
@@ -1132,12 +1154,13 @@ struct IVFPQScanner:
 InvertedListScanner *
 IndexIVFPQ::get_InvertedListScanner (bool store_pairs) const
 {
-    if (metric_type == METRIC_INNER_PRODUCT) {
-        return new IVFPQScanner<METRIC_INNER_PRODUCT, CMin<float, idx_t>, 2>
-            (*this, store_pairs);
-    } else if (metric_type == METRIC_L2) {
-        return new IVFPQScanner<METRIC_L2, CMax<float, idx_t>, 2>
-            (*this, store_pairs);
+
+    if (pq.nbits == 8) {
+        return get_InvertedListScanner1<PQDecoder8> (*this, store_pairs);
+    } else if (pq.nbits == 16) {
+        return get_InvertedListScanner1<PQDecoder16> (*this, store_pairs);
+    } else {
+        return get_InvertedListScanner1<PQDecoderGeneric> (*this, store_pairs);
     }
     return nullptr;
 

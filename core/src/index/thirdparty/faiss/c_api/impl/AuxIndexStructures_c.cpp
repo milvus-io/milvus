@@ -9,8 +9,8 @@
 // -*- c++ -*-
 
 #include "AuxIndexStructures_c.h"
-#include "AuxIndexStructures.h"
-#include "macros_impl.h"
+#include "../../impl/AuxIndexStructures.h"
+#include "../macros_impl.h"
 #include <iostream>
 
 using faiss::BufferList;
@@ -20,6 +20,7 @@ using faiss::IDSelectorRange;
 using faiss::RangeSearchResult;
 using faiss::RangeSearchPartialResult;
 using faiss::RangeQueryResult;
+using faiss::DistanceComputer;
 
 DEFINE_GETTER(RangeSearchResult, size_t, nq)
 
@@ -190,4 +191,30 @@ int faiss_RangeSearchPartialResult_new_result(
         }
         return 0;
     } CATCH_AND_HANDLE
+}
+
+DEFINE_DESTRUCTOR(DistanceComputer)
+
+int faiss_DistanceComputer_set_query(FaissDistanceComputer *dc, const float *x) {
+    try {
+        reinterpret_cast<DistanceComputer*>(dc)->set_query(x);
+        return 0;
+    }
+    CATCH_AND_HANDLE
+}
+
+int faiss_DistanceComputer_vector_to_query_dis(FaissDistanceComputer *dc, idx_t i, float *qd) {
+    try {
+        *qd = reinterpret_cast<DistanceComputer*>(dc)->operator()(i);
+        return 0;
+    }
+    CATCH_AND_HANDLE
+}
+
+int faiss_DistanceComputer_symmetric_dis(FaissDistanceComputer *dc, idx_t i, idx_t j, float *vd) {
+    try {
+        *vd = reinterpret_cast<DistanceComputer*>(dc)->symmetric_dis(i, j);
+        return 0;
+    }
+    CATCH_AND_HANDLE
 }

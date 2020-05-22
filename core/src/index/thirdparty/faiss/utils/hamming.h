@@ -30,7 +30,6 @@
 #include <faiss/utils/Heap.h>
 #include <faiss/utils/ConcurrentBitset.h>
 
-
 /* The Hamming distance type */
 typedef int32_t hamdis_t;
 
@@ -40,6 +39,7 @@ namespace faiss {
  * General bit vector functions
  **************************************************/
 
+struct RangeSearchResult;
 
 void bitvec_print (const uint8_t * b, size_t d);
 
@@ -65,6 +65,14 @@ void bitvecs2fvecs (
 
 
 void fvec2bitvec (const float * x, uint8_t * b, size_t d);
+
+/** Shuffle the bits from b(i, j) := a(i, order[j])
+ */
+void bitvec_shuffle (size_t n, size_t da, size_t db,
+                     const int *order,
+                     const uint8_t *a,
+                     uint8_t *b);
+
 
 /***********************************************
  * Generic reader/writer for bit strings
@@ -149,7 +157,8 @@ void hammings_knn (
   const uint8_t * b,
   size_t nb,
   size_t ncodes,
-  int ordered);
+  int ordered,
+  ConcurrentBitsetPtr bitset = nullptr);
 
 /** Return the k smallest Hamming distances for a set of binary query vectors,
  * using counting max.
@@ -173,6 +182,17 @@ void hammings_knn_mc (
   int32_t *distances,
   int64_t *labels,
   ConcurrentBitsetPtr bitset = nullptr);
+
+/** same as hammings_knn except we are doing a range search with radius */
+void hamming_range_search (
+    const uint8_t * a,
+    const uint8_t * b,
+    size_t na,
+    size_t nb,
+    int radius,
+    size_t ncodes,
+    RangeSearchResult *result);
+
 
 /* Counting the number of matches or of cross-matches (without returning them)
    For use with function that assume pre-allocated memory */

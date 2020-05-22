@@ -27,18 +27,12 @@ struct FlatIndex;
 struct GpuIndexFlatConfig : public GpuIndexConfig {
   inline GpuIndexFlatConfig()
       : useFloat16(false),
-        useFloat16Accumulator(false),
         storeTransposed(false),
-        storeInCpu(false){
+        storeInCpu(false) {
   }
 
   /// Whether or not data is stored as float16
   bool useFloat16;
-
-  /// Whether or not all math is performed in float16, if useFloat16 is
-  /// specified. If true, we use cublasHgemm, supported only on CC
-  /// 5.3+. Otherwise, we use cublasSgemmEx.
-  bool useFloat16Accumulator;
 
   /// Whether or not data is stored (transparently) in a transposed
   /// layout, enabling use of the NN GEMM call, which is ~10% faster.
@@ -129,10 +123,6 @@ class GpuIndexFlat : public GpuIndex {
                    float* distances,
                    faiss::Index::idx_t* labels,
                    ConcurrentBitsetPtr bitset = nullptr) const override;
-
- private:
-  /// Checks user settings for consistency
-  void verifySettings_() const;
 
  protected:
   /// Our config object

@@ -204,8 +204,8 @@ DistanceComputer * IndexPQ::get_distance_computer() const {
 
 
 void IndexPQ::search (idx_t n, const float *x, idx_t k,
-                           float *distances, idx_t *labels,
-                           ConcurrentBitsetPtr bitset) const
+                      float *distances, idx_t *labels,
+                      ConcurrentBitsetPtr bitset) const
 {
     FAISS_THROW_IF_NOT (is_trained);
     if (search_type == ST_PQ) {  // Simple PQ search

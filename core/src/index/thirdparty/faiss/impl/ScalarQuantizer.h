@@ -12,7 +12,6 @@
 #include <faiss/IndexIVF.h>
 #include <faiss/impl/ScalarQuantizerOp.h>
 
-
 namespace faiss {
 
 /**

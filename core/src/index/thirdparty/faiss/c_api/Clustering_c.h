@@ -47,7 +47,7 @@ void faiss_ClusteringParameters_init(FaissClusteringParameters* params);
  * points to the centroids. Therefore, at each iteration the centroids
  * are added to the index.
  *
- * On output, the centoids table is set to the latest version
+ * On output, the centroids table is set to the latest version
  * of the centroids and they are also added to the index. If the
  * centroids table it is not empty on input, it is also used for
  * initialization.
@@ -75,14 +75,20 @@ FAISS_DECLARE_GETTER(Clustering, size_t, d)
 /// getter for k
 FAISS_DECLARE_GETTER(Clustering, size_t, k)
 
+FAISS_DECLARE_CLASS(ClusteringIterationStats)
+FAISS_DECLARE_GETTER(ClusteringIterationStats, float, obj)
+FAISS_DECLARE_GETTER(ClusteringIterationStats, double, time)
+FAISS_DECLARE_GETTER(ClusteringIterationStats, double, time_search)
+FAISS_DECLARE_GETTER(ClusteringIterationStats, double, imbalance_factor)
+FAISS_DECLARE_GETTER(ClusteringIterationStats, int, nsplit)
+
 /// getter for centroids (size = k * d)
 void faiss_Clustering_centroids(
     FaissClustering* clustering, float** centroids, size_t* size);
 
-/// getter for objective values (sum of distances reported by index)
-/// over iterations
-void faiss_Clustering_obj(
-    FaissClustering* clustering, float** obj, size_t* size);
+/// getter for iteration stats
+void faiss_Clustering_iteration_stats(
+    FaissClustering* clustering, FaissClusteringIterationStats** iteration_stats, size_t* size);
 
 /// the only mandatory parameters are k and d
 int faiss_Clustering_new(FaissClustering** p_clustering, int d, int k);
