@@ -1135,6 +1135,7 @@ SqliteMetaImpl::FilesToSearchEx(const std::string& root_collection,
                                 FilesHolder& files_holder) {
     try {
         server::MetricCollector metric;
+        fiu_do_on("SqliteMetaImpl.FilesToSearch.throw_exception", throw std::exception());
 
         // get root collection information
         CollectionSchema collection_schema;
@@ -1147,7 +1148,7 @@ SqliteMetaImpl::FilesToSearchEx(const std::string& root_collection,
         // distribute id array to batchs
         const int64_t batch_size = 50;
         std::vector<std::vector<std::string>> id_groups;
-        std::vector<std::string> temp_group = {root_collection};
+        std::vector<std::string> temp_group;
         int64_t count = 1;
         for (auto& id : partition_id_array) {
             temp_group.push_back(id);
