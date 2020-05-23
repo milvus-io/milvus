@@ -38,6 +38,10 @@ class DefaultAttrsFormat : public AttrsFormat {
     write(const storage::FSHandlerPtr& fs_ptr, const segment::AttrsPtr& attr) override;
 
     void
+    read_attrs(const storage::FSHandlerPtr& fs_ptr, const std::string& field_name, off_t offset, size_t num_bytes,
+               std::vector<uint8_t>& raw_attrs) override;
+
+    void
     read_uids(const storage::FSHandlerPtr& fs_ptr, std::vector<int64_t>& uids) override;
 
     // No copy and move

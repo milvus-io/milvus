@@ -16,6 +16,7 @@
 
 #include <iostream>
 #include <memory>
+#include <random>
 #include <utility>
 #include <vector>
 
@@ -136,11 +137,13 @@ Utils::BuildEntities(int64_t from, int64_t to, std::vector<milvus::Entity>& enti
 
     entity_array.clear();
     entity_ids.clear();
+    std::default_random_engine e;
+    std::uniform_real_distribution<float> u(0, 1);
     for (int64_t k = from; k < to; k++) {
         milvus::Entity entity;
         entity.float_data.resize(dimension);
         for (int64_t i = 0; i < dimension; i++) {
-            entity.float_data[i] = (float)((k + 100) % (i + 1));
+            entity.float_data[i] = (u(e));
         }
 
         entity_array.emplace_back(entity);
@@ -231,10 +234,12 @@ Utils::DoSearch(std::shared_ptr<milvus::Connection> conn, const std::string& col
 
 void ConstructVector(uint64_t nq, uint64_t dimension, std::vector<milvus::Entity>& query_vector) {
     query_vector.resize(nq);
+    std::default_random_engine e;
+    std::uniform_real_distribution<float> u(0, 1);
     for (uint64_t i = 0; i < nq; ++i) {
         query_vector[i].float_data.resize(dimension);
         for (uint64_t j = 0; j < dimension; ++j) {
-            query_vector[i].float_data[j] = (float)((i + 100) / (j + 1));
+            query_vector[i].float_data[j] = u(e);
         }
     }
 }
@@ -242,20 +247,18 @@ void ConstructVector(uint64_t nq, uint64_t dimension, std::vector<milvus::Entity
 std::vector<milvus::LeafQueryPtr>
 Utils::GenLeafQuery() {
     //Construct TermQuery
-    uint64_t row_num = 1000;
+    uint64_t row_num = 10000;
     std::vector<int64_t> field_value;
     field_value.resize(row_num);
     for (uint64_t i = 0; i < row_num; ++i) {
         field_value[i] = i;
     }
-    std::vector<int8_t> term_value(row_num * sizeof(int64_t));
-    memcpy(term_value.data(), field_value.data(), row_num * sizeof(int64_t));
     milvus::TermQueryPtr tq = std::make_shared<milvus::TermQuery>();
     tq->field_name = "field_1";
-    tq->field_value = term_value;
+    tq->int_value = field_value;
 
     //Construct RangeQuery
-    milvus::CompareExpr ce1 = {milvus::CompareOperator::LTE, "10000"}, ce2 = {milvus::CompareOperator::GTE, "1"};
+    milvus::CompareExpr ce1 = {milvus::CompareOperator::LTE, "100000"}, ce2 = {milvus::CompareOperator::GTE, "1"};
     std::vector<milvus::CompareExpr> ces{ce1, ce2};
     milvus::RangeQueryPtr rq = std::make_shared<milvus::RangeQuery>();
     rq->field_name = "field_2";

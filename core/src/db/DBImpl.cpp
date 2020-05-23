@@ -1179,6 +1179,77 @@ DBImpl::GetVectorsByID(const std::string& collection_id, const IDNumbers& id_arr
 }
 
 Status
+DBImpl::GetEntitiesByID(const std::string& collection_id, const milvus::engine::IDNumbers& id_array,
+                        std::vector<engine::VectorsData>& vectors, std::vector<engine::AttrsData>& attrs) {
+    if (!initialized_.load(std::memory_order_acquire)) {
+        return SHUTDOWN_ERROR;
+    }
+
+    bool has_collection;
+    auto status = HasCollection(collection_id, has_collection);
+    if (!has_collection) {
+        LOG_ENGINE_ERROR_ << "Collection " << collection_id << " does not exist: ";
+        return Status(DB_NOT_FOUND, "Collection does not exist");
+    }
+    if (!status.ok()) {
+        return status;
+    }
+
+    engine::meta::CollectionSchema collection_schema;
+    engine::meta::hybrid::FieldsSchema fields_schema;
+    collection_schema.collection_id_ = collection_id;
+    status = meta_ptr_->DescribeHybridCollection(collection_schema, fields_schema);
+    if (!status.ok()) {
+        return status;
+    }
+    std::unordered_map<std::string, engine::meta::hybrid::DataType> attr_type;
+    for (auto schema : fields_schema.fields_schema_) {
+        if (schema.field_type_ == (int32_t)engine::meta::hybrid::DataType::VECTOR) {
+            continue;
+        }
+        attr_type.insert(std::make_pair(schema.field_name_, (engine::meta::hybrid::DataType)schema.field_type_));
+    }
+
+    meta::FilesHolder files_holder;
+    std::vector<int> file_types{meta::SegmentSchema::FILE_TYPE::RAW, meta::SegmentSchema::FILE_TYPE::TO_INDEX,
+                                meta::SegmentSchema::FILE_TYPE::BACKUP};
+
+    status = meta_ptr_->FilesByType(collection_id, file_types, files_holder);
+    if (!status.ok()) {
+        std::string err_msg = "Failed to get files for GetEntitiesByID: " + status.message();
+        LOG_ENGINE_ERROR_ << err_msg;
+        return status;
+    }
+
+    std::vector<meta::CollectionSchema> partition_array;
+    status = meta_ptr_->ShowPartitions(collection_id, partition_array);
+    if (!status.ok()) {
+        std::string err_msg = "Failed to get partitions for GetEntitiesByID: " + status.message();
+        LOG_ENGINE_ERROR_ << err_msg;
+        return status;
+    }
+    for (auto& schema : partition_array) {
+        status = meta_ptr_->FilesByType(schema.collection_id_, file_types, files_holder);
+        if (!status.ok()) {
+            std::string err_msg = "Failed to get files for GetEntitiesByID: " + status.message();
+            LOG_ENGINE_ERROR_ << err_msg;
+            return status;
+        }
+    }
+
+    if (files_holder.HoldFiles().empty()) {
+        LOG_ENGINE_DEBUG_ << "No files to get vector by id from";
+        return Status(DB_NOT_FOUND, "Collection is empty");
+    }
+
+    cache::CpuCacheMgr::GetInstance()->PrintInfo();
+    status = GetEntitiesByIdHelper(collection_id, id_array, attr_type, vectors, attrs, files_holder);
+    cache::CpuCacheMgr::GetInstance()->PrintInfo();
+
+    return status;
+}
+
+Status
 DBImpl::GetVectorIDs(const std::string& collection_id, const std::string& segment_id, IDNumbers& vector_ids) {
     if (!initialized_.load(std::memory_order_acquire)) {
         return SHUTDOWN_ERROR;
@@ -1349,6 +1420,166 @@ DBImpl::GetVectorsByIdHelper(const std::string& collection_id, const IDNumbers& 
             data.binary_data_ = vector_ref.binary_data_;  // copy data since there could be duplicated id
         }
         vectors.emplace_back(data);
+    }
+
+    if (vectors.empty()) {
+        std::string msg = "Vectors not found in collection " + collection_id;
+        LOG_ENGINE_DEBUG_ << msg;
+    }
+
+    return Status::OK();
+}
+
+Status
+DBImpl::GetEntitiesByIdHelper(const std::string& collection_id, const milvus::engine::IDNumbers& id_array,
+                              std::unordered_map<std::string, engine::meta::hybrid::DataType>& attr_type,
+                              std::vector<engine::VectorsData>& vectors, std::vector<engine::AttrsData>& attrs,
+                              milvus::engine::meta::FilesHolder& files_holder) {
+    // attention: this is a copy, not a reference, since the files_holder.UnMarkFile will change the array internal
+    milvus::engine::meta::SegmentsSchema files = files_holder.HoldFiles();
+    LOG_ENGINE_DEBUG_ << "Getting vector by id in " << files.size() << " files, id count = " << id_array.size();
+
+    // sometimes not all of id_array can be found, we need to return empty vector for id not found
+    // for example:
+    // id_array = [1, -1, 2, -1, 3]
+    // vectors should return [valid_vector, empty_vector, valid_vector, empty_vector, valid_vector]
+    // the ID2RAW is to ensure returned vector sequence is consist with id_array
+    using ID2ATTR = std::map<int64_t, engine::AttrsData>;
+    using ID2VECTOR = std::map<int64_t, engine::VectorsData>;
+    ID2ATTR map_id2attr;
+    ID2VECTOR map_id2vector;
+
+    IDNumbers temp_ids = id_array;
+    for (auto& file : files) {
+        // Load bloom filter
+        std::string segment_dir;
+        engine::utils::GetParentPath(file.location_, segment_dir);
+        segment::SegmentReader segment_reader(segment_dir);
+        segment::IdBloomFilterPtr id_bloom_filter_ptr;
+        segment_reader.LoadBloomFilter(id_bloom_filter_ptr);
+
+        for (IDNumbers::iterator it = temp_ids.begin(); it != temp_ids.end();) {
+            int64_t vector_id = *it;
+            // each id must has a VectorsData
+            // if vector not found for an id, its VectorsData's vector_count = 0, else 1
+            AttrsData& attr_ref = map_id2attr[vector_id];
+            VectorsData& vector_ref = map_id2vector[vector_id];
+
+            // Check if the id is present in bloom filter.
+            if (id_bloom_filter_ptr->Check(vector_id)) {
+                // Load uids and check if the id is indeed present. If yes, find its offset.
+                std::vector<segment::doc_id_t> uids;
+                auto status = segment_reader.LoadUids(uids);
+                if (!status.ok()) {
+                    return status;
+                }
+
+                auto found = std::find(uids.begin(), uids.end(), vector_id);
+                if (found != uids.end()) {
+                    auto offset = std::distance(uids.begin(), found);
+
+                    // Check whether the id has been deleted
+                    segment::DeletedDocsPtr deleted_docs_ptr;
+                    status = segment_reader.LoadDeletedDocs(deleted_docs_ptr);
+                    if (!status.ok()) {
+                        LOG_ENGINE_ERROR_ << status.message();
+                        return status;
+                    }
+                    auto& deleted_docs = deleted_docs_ptr->GetDeletedDocs();
+
+                    auto deleted = std::find(deleted_docs.begin(), deleted_docs.end(), offset);
+                    if (deleted == deleted_docs.end()) {
+                        // Load raw vector
+                        bool is_binary = utils::IsBinaryMetricType(file.metric_type_);
+                        size_t single_vector_bytes = is_binary ? file.dimension_ / 8 : file.dimension_ * sizeof(float);
+                        std::vector<uint8_t> raw_vector;
+                        status =
+                            segment_reader.LoadVectors(offset * single_vector_bytes, single_vector_bytes, raw_vector);
+                        if (!status.ok()) {
+                            LOG_ENGINE_ERROR_ << status.message();
+                            return status;
+                        }
+
+                        std::unordered_map<std::string, std::vector<uint8_t>> raw_attrs;
+                        auto attr_it = attr_type.begin();
+                        for (; attr_it != attr_type.end(); attr_it++) {
+                            size_t num_bytes;
+                            switch (attr_it->second) {
+                                case engine::meta::hybrid::DataType::INT8: {
+                                    num_bytes = 1;
+                                    break;
+                                }
+                                case engine::meta::hybrid::DataType::INT16: {
+                                    num_bytes = 2;
+                                    break;
+                                }
+                                case engine::meta::hybrid::DataType::INT32: {
+                                    num_bytes = 4;
+                                    break;
+                                }
+                                case engine::meta::hybrid::DataType::INT64: {
+                                    num_bytes = 8;
+                                    break;
+                                }
+                                case engine::meta::hybrid::DataType::FLOAT: {
+                                    num_bytes = 4;
+                                    break;
+                                }
+                                case engine::meta::hybrid::DataType::DOUBLE: {
+                                    num_bytes = 8;
+                                    break;
+                                }
+                                default: {
+                                    std::string msg = "Field type of " + attr_it->first + " is wrong";
+                                    return Status{DB_ERROR, msg};
+                                }
+                            }
+                            std::vector<uint8_t> raw_attr;
+                            status = segment_reader.LoadAttrs(attr_it->first, offset * num_bytes, num_bytes, raw_attr);
+                            if (!status.ok()) {
+                                LOG_ENGINE_ERROR_ << status.message();
+                                return status;
+                            }
+                            raw_attrs.insert(std::make_pair(attr_it->first, raw_attr));
+                        }
+
+                        vector_ref.vector_count_ = 1;
+                        if (is_binary) {
+                            vector_ref.binary_data_.swap(raw_vector);
+                        } else {
+                            std::vector<float> float_vector;
+                            float_vector.resize(file.dimension_);
+                            memcpy(float_vector.data(), raw_vector.data(), single_vector_bytes);
+                            vector_ref.float_data_.swap(float_vector);
+                        }
+
+                        attr_ref.attr_count_ = 1;
+                        attr_ref.attr_data_ = raw_attrs;
+                        attr_ref.attr_type_ = attr_type;
+                        temp_ids.erase(it);
+                        continue;
+                    }
+                }
+            }
+            it++;
+        }
+
+        // unmark file, allow the file to be deleted
+        files_holder.UnmarkFile(file);
+    }
+
+    for (auto id : id_array) {
+        VectorsData& vector_ref = map_id2vector[id];
+
+        VectorsData data;
+        data.vector_count_ = vector_ref.vector_count_;
+        if (data.vector_count_ > 0) {
+            data.float_data_ = vector_ref.float_data_;    // copy data since there could be duplicated id
+            data.binary_data_ = vector_ref.binary_data_;  // copy data since there could be duplicated id
+        }
+        vectors.emplace_back(data);
+
+        attrs.emplace_back(map_id2attr[id]);
     }
 
     if (vectors.empty()) {
@@ -1554,8 +1785,9 @@ Status
 DBImpl::HybridQuery(const std::shared_ptr<server::Context>& context, const std::string& collection_id,
                     const std::vector<std::string>& partition_tags,
                     context::HybridSearchContextPtr hybrid_search_context, query::GeneralQueryPtr general_query,
-                    std::unordered_map<std::string, engine::meta::hybrid::DataType>& attr_type, uint64_t& nq,
-                    ResultIds& result_ids, ResultDistances& result_distances) {
+                    std::vector<std::string>& field_names,
+                    std::unordered_map<std::string, engine::meta::hybrid::DataType>& attr_type,
+                    engine::QueryResult& result) {
     auto query_ctx = context->Child("Query");
 
     if (!initialized_.load(std::memory_order_acquire)) {
@@ -1605,8 +1837,8 @@ DBImpl::HybridQuery(const std::shared_ptr<server::Context>& context, const std::
     }
 
     cache::CpuCacheMgr::GetInstance()->PrintInfo();  // print cache info before query
-    status = HybridQueryAsync(query_ctx, collection_id, files_holder, hybrid_search_context, general_query, attr_type,
-                              nq, result_ids, result_distances);
+    status = HybridQueryAsync(query_ctx, collection_id, files_holder, hybrid_search_context, general_query, field_names,
+                              attr_type, result);
     if (!status.ok()) {
         return status;
     }
@@ -1766,11 +1998,11 @@ DBImpl::QueryAsync(const std::shared_ptr<server::Context>& context, meta::FilesH
 }
 
 Status
-DBImpl::HybridQueryAsync(const std::shared_ptr<server::Context>& context, const std::string& table_id,
+DBImpl::HybridQueryAsync(const std::shared_ptr<server::Context>& context, const std::string& collection_id,
                          meta::FilesHolder& files_holder, context::HybridSearchContextPtr hybrid_search_context,
-                         query::GeneralQueryPtr general_query,
-                         std::unordered_map<std::string, engine::meta::hybrid::DataType>& attr_type, uint64_t& nq,
-                         ResultIds& result_ids, ResultDistances& result_distances) {
+                         query::GeneralQueryPtr general_query, std::vector<std::string>& field_names,
+                         std::unordered_map<std::string, engine::meta::hybrid::DataType>& attr_type,
+                         engine::QueryResult& result) {
     auto query_async_ctx = context->Child("Query Async");
 
 #if 0
@@ -1789,10 +2021,8 @@ DBImpl::HybridQueryAsync(const std::shared_ptr<server::Context>& context, const 
         search::TaskInst::GetInstance().load_cv().notify_one();
         hybrid_search_context->tasks_.emplace_back(task);
     }
-
 #endif
 
-    //#if 0
     TimeRecorder rc("");
 
     // step 1: construct search job
@@ -1816,13 +2046,37 @@ DBImpl::HybridQueryAsync(const std::shared_ptr<server::Context>& context, const 
     }
 
     // step 3: construct results
-    nq = job->vector_count();
-    result_ids = job->GetResultIds();
-    result_distances = job->GetResultDistances();
+    result.row_num_ = job->vector_count();
+    result.result_ids_ = job->GetResultIds();
+    result.result_distances_ = job->GetResultDistances();
+
+    // step 4: get entities by result ids
+    auto status = GetEntitiesByID(collection_id, result.result_ids_, result.vectors_, result.attrs_);
+    if (!status.ok()) {
+        query_async_ctx->GetTraceContext()->GetSpan()->Finish();
+        return status;
+    }
+
+    // step 5: filter entities by field names
+    std::vector<engine::AttrsData> filter_attrs;
+    for (auto attr : result.attrs_) {
+        AttrsData attrs_data;
+        attrs_data.attr_type_ = attr.attr_type_;
+        attrs_data.attr_count_ = attr.attr_count_;
+        attrs_data.id_array_ = attr.id_array_;
+        for (auto& name : field_names) {
+            if (attr.attr_data_.find(name) != attr.attr_data_.end()) {
+                attrs_data.attr_data_.insert(std::make_pair(name, attr.attr_data_.at(name)));
+            }
+        }
+        filter_attrs.emplace_back(attrs_data);
+    }
+
+    result.attrs_ = filter_attrs;
+
     rc.ElapseFromBegin("Engine query totally cost");
 
     query_async_ctx->GetTraceContext()->GetSpan()->Finish();
-    //#endif
 
     return Status::OK();
 }
