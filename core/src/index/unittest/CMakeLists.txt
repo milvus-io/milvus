@@ -201,7 +201,7 @@ install(TARGETS test_annoy DESTINATION unittest)
 ################################################################################
 #<STRUCTURED-INDEX-SORT-TEST>
 set(structured_index_sort_srcs
-        ${INDEX_SOURCE_DIR}/knowhere/knowhere/index/structured_index/StructuredIndexSort.cpp
+        ${INDEX_SOURCE_DIR}/knowhere/knowhere/index/structured_index/StructuredIndexSort-inl.h
         )
 if (NOT TARGET test_structured_index_sort)
     add_executable(test_structured_index_sort test_structured_index_sort.cpp ${structured_index_sort_srcs} ${util_srcs})

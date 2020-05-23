@@ -12,31 +12,35 @@
 #pragma once
 
 #include <algorithm>
-#include "knowhere/index/structured_index/StructuredIndex.h"
+#include <memory>
+#include <utility>
+#include <vector>
 #include "knowhere/common/Exception.h"
+#include "knowhere/index/structured_index/StructuredIndex.h"
 
 namespace milvus {
 namespace knowhere {
 
-constexpr double eps = 1e-8;
-
-template<typename T>
+template <typename T>
 struct IndexStructure {
-    IndexStructure():a_(0), idx_(0) {}
-    IndexStructure(const T a, const size_t idx) : a_(a), idx_(idx) {}
-    bool operator < (const IndexStructure& b)const {
-//        return (double)(a_ - b.a_) < eps;
+    IndexStructure() : a_(0), idx_(0) {
+    }
+    IndexStructure(const T a, const size_t idx) : a_(a), idx_(idx) {
+    }
+    bool
+    operator<(const IndexStructure& b) const {
+        //        return (double)(a_ - b.a_) < eps;
         return a_ < b.a_;
     }
     T a_;
     size_t idx_;
 };
 
-template<typename T>
+template <typename T>
 class StructuredIndexSort : public StructuredIndex<T> {
  public:
     StructuredIndexSort();
-    StructuredIndexSort(const size_t n, const T *values);
+    StructuredIndexSort(const size_t n, const T* values);
     ~StructuredIndexSort();
 
     BinarySet
@@ -46,22 +50,22 @@ class StructuredIndexSort : public StructuredIndex<T> {
     Load(const BinarySet& index_binary) override;
 
     void
-    Build(const size_t n, const T *values) override;
+    Build(const size_t n, const T* values) override;
 
     void
     build();
 
     size_t
-    lower_bound(const T &value);
+    lower_bound(const T& value);
 
     size_t
-    upper_bound(const T &value);
+    upper_bound(const T& value);
 
     const faiss::ConcurrentBitsetPtr
-    In(const size_t n, const T *values) override;
+    In(const size_t n, const T* values) override;
 
     const faiss::ConcurrentBitsetPtr
-    NotIn(const size_t n, const T *values) override;
+    NotIn(const size_t n, const T* values) override;
 
     const faiss::ConcurrentBitsetPtr
     Range(const T value, const OperatorType op) override;
@@ -75,20 +79,24 @@ class StructuredIndexSort : public StructuredIndex<T> {
     }
 
     int64_t
-    Size() override { return n_; }
+    Size() override {
+        return n_;
+    }
 
     const bool
-    IsBuilt() { return is_built_; }
+    IsBuilt() {
+        return is_built_;
+    }
 
  private:
     bool is_built_;
     size_t n_;
     std::vector<IndexStructure<T>> data_;
-
 };
 
-template<typename T>
+template <typename T>
 using StructuredIndexSortPtr = std::shared_ptr<StructuredIndexSort<T>>;
+}  // namespace knowhere
+}  // namespace milvus
 
-} // namespace knowhere
-} // namespace milvus
+#include "knowhere/index/structured_index/StructuredIndexSort-inl.h"

@@ -10,41 +10,36 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #pragma once
-#include "knowhere/index/Index.h"
+
+#include <memory>
 #include "faiss/utils/ConcurrentBitset.h"
+#include "knowhere/index/Index.h"
 
 namespace milvus {
 namespace knowhere {
 
-enum OperatorType {
-    LT = 0,
-    LE,
-    GT,
-    GE
-};
+enum OperatorType { LT = 0, LE, GT, GE };
 
-template<typename T>
+template <typename T>
 class StructuredIndex : public Index {
  public:
     virtual void
-    Build(const size_t n, const T *values) = 0;
+    Build(const size_t n, const T* values) = 0;
 
     virtual const faiss::ConcurrentBitsetPtr
-    In(const size_t n, const T *values) = 0;
+    In(const size_t n, const T* values) = 0;
 
     virtual const faiss::ConcurrentBitsetPtr
-    NotIn(const size_t n, const T *values) = 0;
+    NotIn(const size_t n, const T* values) = 0;
 
     virtual const faiss::ConcurrentBitsetPtr
     Range(const T value, const OperatorType op) = 0;
 
     virtual const faiss::ConcurrentBitsetPtr
     Range(const T lower_bound_value, bool lb_inclusive, const T upper_bound_value, bool ub_inclusive) = 0;
-
 };
 
-template<typename T>
+template <typename T>
 using StructuredIndexPtr = std::shared_ptr<StructuredIndex<T>>;
-
-} // namespace knowhere
-} // namespace milvus
+}  // namespace knowhere
+}  // namespace milvus

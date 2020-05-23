@@ -9,19 +9,20 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
+#include <algorithm>
+#include <memory>
+#include <utility>
 #include "knowhere/index/structured_index/StructuredIndexSort.h"
-#include <iostream>
 
 namespace milvus {
 namespace knowhere {
 
 template <typename T>
-StructuredIndexSort<T>::StructuredIndexSort(): is_built_(false), data_(nullptr), n_(0) {
-
+StructuredIndexSort<T>::StructuredIndexSort() : is_built_(false), data_(nullptr), n_(0) {
 }
 
 template <typename T>
-StructuredIndexSort<T>::StructuredIndexSort(const size_t n, const T *values) : is_built_(false), n_(n) {
+StructuredIndexSort<T>::StructuredIndexSort(const size_t n, const T* values) : is_built_(false), n_(n) {
     Build(n, values);
 }
 
@@ -30,19 +31,21 @@ StructuredIndexSort<T>::~StructuredIndexSort() {
 }
 
 template <typename T>
-void StructuredIndexSort<T>::Build(const size_t n, const T *values) {
+void
+StructuredIndexSort<T>::Build(const size_t n, const T* values) {
     data_.reserve(n);
-    T *p = const_cast<T*>(values);
-    for (auto i = 0; i < n; ++ i) {
-//        data_[i].a_ = *p ++;
-//        data_[i].idx_ = i;
-        data_.emplace_back(IndexStructure(*p ++, i));
+    T* p = const_cast<T*>(values);
+    for (auto i = 0; i < n; ++i) {
+        //        data_[i].a_ = *p ++;
+        //        data_[i].idx_ = i;
+        data_.emplace_back(IndexStructure(*p++, i));
     }
     build();
 }
 
 template <typename T>
-void StructuredIndexSort<T>::build() {
+void
+StructuredIndexSort<T>::build() {
     if (is_built_)
         return;
     if (data_.size() == 0 || n_ == 0) {
@@ -54,7 +57,8 @@ void StructuredIndexSort<T>::build() {
 }
 
 template <typename T>
-BinarySet StructuredIndexSort<T>::Serialize(const milvus::knowhere::Config &config) {
+BinarySet
+StructuredIndexSort<T>::Serialize(const milvus::knowhere::Config& config) {
     if (!is_built_) {
         build();
     }
@@ -73,7 +77,8 @@ BinarySet StructuredIndexSort<T>::Serialize(const milvus::knowhere::Config &conf
 }
 
 template <typename T>
-void StructuredIndexSort<T>::Load(const milvus::knowhere::BinarySet &index_binary) {
+void
+StructuredIndexSort<T>::Load(const milvus::knowhere::BinarySet& index_binary) {
     try {
         auto index_length = index_binary.GetByName("index_length");
         memcpy(&n_, index_length->data.get(), (size_t)index_length->size);
@@ -89,7 +94,8 @@ void StructuredIndexSort<T>::Load(const milvus::knowhere::BinarySet &index_binar
 
 // find the first element's offset which is no less than given value
 template <typename T>
-size_t StructuredIndexSort<T>::lower_bound(const T &value) {
+size_t
+StructuredIndexSort<T>::lower_bound(const T& value) {
     size_t low = 0, high = n_, mid;
     while (low < high) {
         mid = low + ((high - low) >> 1);
@@ -99,13 +105,14 @@ size_t StructuredIndexSort<T>::lower_bound(const T &value) {
             high = mid;
         }
     }
-//    return data_[low].a == value ? data_[low].idx : -1;
+    //    return data_[low].a == value ? data_[low].idx : -1;
     return low;
 }
 
 // find the first element's offset which is greater than given value
 template <typename T>
-size_t StructuredIndexSort<T>::upper_bound(const T &value) {
+size_t
+StructuredIndexSort<T>::upper_bound(const T& value) {
     size_t low = 0, high = n_, mid;
     while (low < high) {
         mid = low + ((high - low) >> 1);
@@ -115,20 +122,21 @@ size_t StructuredIndexSort<T>::upper_bound(const T &value) {
             high = mid;
         }
     }
-//    return data_[low].a == value ? data_[low].idx : -1;
+    //    return data_[low].a == value ? data_[low].idx : -1;
     return low;
 }
 
 template <typename T>
-const faiss::ConcurrentBitsetPtr StructuredIndexSort<T>::In(const size_t n, const T *values) {
+const faiss::ConcurrentBitsetPtr
+StructuredIndexSort<T>::In(const size_t n, const T* values) {
     if (!is_built_) {
         build();
     }
     faiss::ConcurrentBitsetPtr bitset = std::make_shared<faiss::ConcurrentBitset>(n_);
-    for (auto i = 0; i < n; ++ i) {
+    for (auto i = 0; i < n; ++i) {
         auto lb = lower_bound(*(values + i));
         auto ub = upper_bound(*(values + i));
-        for (auto j = lb; j < ub; ++ j) {
+        for (auto j = lb; j < ub; ++j) {
             assert(data_[j].a_ == *(values + i));
             bitset->set(data_[j].idx_);
         }
@@ -137,15 +145,16 @@ const faiss::ConcurrentBitsetPtr StructuredIndexSort<T>::In(const size_t n, cons
 }
 
 template <typename T>
-const faiss::ConcurrentBitsetPtr StructuredIndexSort<T>::NotIn(const size_t n, const T *values) {
+const faiss::ConcurrentBitsetPtr
+StructuredIndexSort<T>::NotIn(const size_t n, const T* values) {
     if (!is_built_) {
         build();
     }
     faiss::ConcurrentBitsetPtr bitset = std::make_shared<faiss::ConcurrentBitset>(n_, 255);
-    for (auto i = 0; i < n; ++ i) {
+    for (auto i = 0; i < n; ++i) {
         auto lb = lower_bound(*(values + i));
         auto ub = upper_bound(*(values + i));
-        for (auto j = lb; j < ub; ++ j) {
+        for (auto j = lb; j < ub; ++j) {
             assert(data_[j].a_ == *(values + i));
             bitset->clear(data_[j].idx_);
         }
@@ -154,7 +163,8 @@ const faiss::ConcurrentBitsetPtr StructuredIndexSort<T>::NotIn(const size_t n, c
 }
 
 template <typename T>
-const faiss::ConcurrentBitsetPtr StructuredIndexSort<T>::Range(const T value, const OperatorType op) {
+const faiss::ConcurrentBitsetPtr
+StructuredIndexSort<T>::Range(const T value, const OperatorType op) {
     if (!is_built_) {
         build();
     }
@@ -176,15 +186,15 @@ const faiss::ConcurrentBitsetPtr StructuredIndexSort<T>::Range(const T value, co
         default:
             KNOWHERE_THROW_MSG("Invalid OperatorType:" + std::to_string((int)op) + "!");
     }
-    for (auto i = lb; i < ub; ++ i) {
+    for (auto i = lb; i < ub; ++i) {
         bitset->set(data_[i].idx_);
     }
     return bitset;
 }
 
 template <typename T>
-const faiss::ConcurrentBitsetPtr StructuredIndexSort<T>::Range(T lower_bound_value, bool lb_inclusive,
-                                                         T upper_bound_value, bool ub_inclusive) {
+const faiss::ConcurrentBitsetPtr
+StructuredIndexSort<T>::Range(T lower_bound_value, bool lb_inclusive, T upper_bound_value, bool ub_inclusive) {
     if (!is_built_) {
         build();
     }
@@ -204,11 +214,11 @@ const faiss::ConcurrentBitsetPtr StructuredIndexSort<T>::Range(T lower_bound_val
     } else {
         ub = lower_bound(upper_bound_value);
     }
-    for (auto i = lb; i < ub; ++ i) {
+    for (auto i = lb; i < ub; ++i) {
         bitset->set(data_[i].idx_);
     }
     return bitset;
 }
 
-} // namespace knowhere
-} // namespace milvus
+}  // namespace knowhere
+}  // namespace milvus
