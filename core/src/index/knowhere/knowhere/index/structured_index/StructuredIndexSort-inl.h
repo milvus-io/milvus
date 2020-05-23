@@ -12,6 +12,7 @@
 #include <algorithm>
 #include <memory>
 #include <utility>
+#include <src/index/knowhere/knowhere/common/Log.h>
 #include "knowhere/index/structured_index/StructuredIndexSort.h"
 
 namespace milvus {
@@ -137,7 +138,10 @@ StructuredIndexSort<T>::In(const size_t n, const T* values) {
         auto lb = lower_bound(*(values + i));
         auto ub = upper_bound(*(values + i));
         for (auto j = lb; j < ub; ++j) {
-            assert(data_[j].a_ == *(values + i));
+            if (data_[j].a_ != *(values + i)) {
+                LOG_KNOWHERE_ERROR_ << "error happens in StructuredIndexSort<T>::In, experted value is: "
+                                    << *(values + i) << ", but real value is: " << data_[j].a_;
+            }
             bitset->set(data_[j].idx_);
         }
     }
@@ -155,7 +159,10 @@ StructuredIndexSort<T>::NotIn(const size_t n, const T* values) {
         auto lb = lower_bound(*(values + i));
         auto ub = upper_bound(*(values + i));
         for (auto j = lb; j < ub; ++j) {
-            assert(data_[j].a_ == *(values + i));
+            if (data_[j].a_ != *(values + i)) {
+                LOG_KNOWHERE_ERROR_ << "error happens in StructuredIndexSort<T>::NotIn, experted value is: "
+                                    << *(values + i) << ", but real value is: " << data_[j].a_;
+            }
             bitset->clear(data_[j].idx_);
         }
     }

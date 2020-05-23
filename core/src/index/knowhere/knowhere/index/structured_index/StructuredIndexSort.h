@@ -83,8 +83,8 @@ class StructuredIndexSort : public StructuredIndex<T> {
         return n_;
     }
 
-    const bool
-    IsBuilt() {
+    bool
+    IsBuilt() const {
         return is_built_;
     }
 
