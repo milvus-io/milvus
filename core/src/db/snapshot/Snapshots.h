@@ -26,7 +26,7 @@ namespace snapshot {
 
 
 class Snapshots {
-public:
+ public:
     static Snapshots& GetInstance() {
         static Snapshots sss;
         return sss;
@@ -64,6 +64,6 @@ private:
     std::vector<Snapshot::Ptr> to_release_;
 };
 
-} // snapshot
-} // engine
-} // milvus
+} // namespace snapshot
+} // namespace engine
+} // namespace milvus

@@ -22,7 +22,7 @@ namespace snapshot {
 using OnNoRefCBF = std::function<void(void)>;
 
 class ReferenceProxy {
-public:
+ public:
     void RegisterOnNoRefCB(OnNoRefCBF cb);
 
     virtual void Ref();
@@ -34,7 +34,7 @@ public:
 
     virtual ~ReferenceProxy();
 
-protected:
+ protected:
 
     int refcnt_ = 0;
     std::vector<OnNoRefCBF> on_no_ref_cbs_;
@@ -42,6 +42,6 @@ protected:
 
 using ReferenceResourcePtr = std::shared_ptr<ReferenceProxy>;
 
-} // snapshot
-} // engine
-} // milvus
+} // namespace snapshot
+} // namespace engine
+} // namespace milvus

@@ -192,6 +192,6 @@ Snapshot::Snapshot(ID_TYPE id) {
     RefAll();
 };
 
-} // snapshot
-} // engine
-} // milvus
+} // namespace snapshot
+} // namespace engine
+} // namespace milvus

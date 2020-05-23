@@ -80,6 +80,6 @@ bool CollectionsHolder::Release(ID_TYPE id) {
     return true;
 }
 
-} // snapshot
-} // engine
-} // milvus
+} // namespace snapshot
+} // namespace engine
+} // namespace milvus

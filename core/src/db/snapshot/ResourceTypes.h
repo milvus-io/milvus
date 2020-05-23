@@ -34,6 +34,6 @@ enum State {
     INVALID = 999
 };
 
-} // snapshot
-} // engine
-} // milvus
+} // namespace snapshot
+} // namespace engine
+} // namespace milvus

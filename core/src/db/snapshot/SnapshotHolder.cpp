@@ -66,7 +66,7 @@ SnapshotHolder::Add(ID_TYPE id) {
     {
         auto ss = std::make_shared<Snapshot>(id);
 
-        if (done_) { return false; };
+        if (done_) { return false; }
         ss->RegisterOnNoRefCB(std::bind(&Snapshot::UnRefAll, ss));
         ss->Ref();
 
@@ -121,7 +121,6 @@ SnapshotHolder::BackgroundGC() {
             ss->UnRef();
             /* std::cout << "BG Handling " << ss->GetID() << " RefCnt=" << ss->RefCnt() << std::endl; */
         }
-
     }
 }
 
@@ -135,6 +134,6 @@ SnapshotHolder::LoadNoLock(ID_TYPE collection_commit_id) {
     return op->GetResource();
 }
 
-} // snapshot
-} // engine
-} // milvus
+} // namespace snapshot
+} // namespace engine
+} // namespace milvus

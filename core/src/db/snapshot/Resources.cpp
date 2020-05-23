@@ -123,6 +123,6 @@ SegmentFile::SegmentFile(ID_TYPE partition_id, ID_TYPE segment_id, ID_TYPE field
     BaseT(partition_id, segment_id, field_element_id, id, status, created_on) {
 }
 
-} // snapshot
-} // engine
-} // milvus
+} // namespace snapshot
+} // namespace engine
+} // namespace milvus

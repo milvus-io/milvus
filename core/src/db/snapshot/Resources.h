@@ -30,18 +30,18 @@ namespace engine {
 namespace snapshot {
 
 class MappingsField {
-public:
+ public:
     MappingsField(const MappingT& mappings = {}) : mappings_(mappings) {
     }
     const MappingT& GetMappings() const { return mappings_; }
     MappingT& GetMappings() { return mappings_; }
 
-protected:
+ protected:
     MappingT mappings_;
 };
 
 class StatusField {
-public:
+ public:
     StatusField(State status = PENDING) : status_(status) {}
     State GetStatus() const {return status_;}
 
@@ -62,116 +62,116 @@ public:
         status_ = PENDING;
     }
 
-protected:
+ protected:
     State status_;
 };
 
 class CreatedOnField {
-public:
+ public:
     CreatedOnField(TS_TYPE created_on = GetMicroSecTimeStamp()) : created_on_(created_on) {}
     TS_TYPE GetCreatedTime() const {return created_on_;}
 
-protected:
+ protected:
     TS_TYPE created_on_;
 };
 
 class IdField {
-public:
+ public:
     IdField(ID_TYPE id) : id_(id) {}
     ID_TYPE GetID() const { return id_; };
     void SetID(ID_TYPE id) {id_ = id;}
     bool HasAssigned() { return id_ > 0; }
 
-protected:
+ protected:
     ID_TYPE id_;
 };
 
 class CollectionIdField {
-public:
+ public:
     CollectionIdField(ID_TYPE id) : collection_id_(id) {}
     ID_TYPE GetCollectionId() const { return collection_id_; };
 
-protected:
+ protected:
     ID_TYPE collection_id_;
 };
 
 class SchemaIdField {
-public:
+ public:
     SchemaIdField(ID_TYPE id) : schema_id_(id) {}
     ID_TYPE GetSchemaId() const { return schema_id_; };
     void SetSchemaId(ID_TYPE schema_id) { schema_id_ = schema_id; };
 
-protected:
+ protected:
     ID_TYPE schema_id_;
 };
 
 class NumField {
-public:
+ public:
     NumField(NUM_TYPE num) : num_(num) {}
     NUM_TYPE GetNum() const { return num_; };
     void SetNum(NUM_TYPE num) { num_ = num; }
 
-protected:
+ protected:
     NUM_TYPE num_;
 };
 
 class FtypeField {
-public:
+ public:
     FtypeField(FTYPE_TYPE type) : ftype_(type) {}
     FTYPE_TYPE GetFtype() const { return ftype_; };
 
-protected:
+ protected:
     FTYPE_TYPE ftype_;
 };
 
 class FieldIdField {
-public:
+ public:
     FieldIdField(ID_TYPE id) : field_id_(id) {}
     ID_TYPE GetFieldId() const { return field_id_; };
 
-protected:
+ protected:
     ID_TYPE field_id_;
 };
 
 class FieldElementIdField {
-public:
+ public:
     FieldElementIdField(ID_TYPE id) : field_element_id_(id) {}
     ID_TYPE GetFieldElementId() const { return field_element_id_; };
 
-protected:
+ protected:
     ID_TYPE field_element_id_;
 };
 
 class PartitionIdField {
-public:
+ public:
     PartitionIdField(ID_TYPE id) : partition_id_(id) {}
     ID_TYPE GetPartitionId() const { return partition_id_; };
 
-protected:
+ protected:
     ID_TYPE partition_id_;
 };
 
 class SegmentIdField {
-public:
+ public:
     SegmentIdField(ID_TYPE id) : segment_id_(id) {}
     ID_TYPE GetSegmentId() const { return segment_id_; };
 
-protected:
+ protected:
     ID_TYPE segment_id_;
 };
 
 class NameField {
-public:
+ public:
     NameField(const std::string& name) : name_(name) {}
     const std::string& GetName() const { return name_; };
 
-protected:
+ protected:
     std::string name_;
 };
 
 class Collection : public DBBaseResource<NameField, IdField, StatusField, CreatedOnField>
 {
-public:
+ public:
     using Ptr = std::shared_ptr<Collection>;
     using MapT = std::map<ID_TYPE, Ptr>;
     using VecT = std::vector<Ptr>;
@@ -191,7 +191,7 @@ class SchemaCommit : public DBBaseResource<CollectionIdField,
                                            StatusField,
                                            CreatedOnField>
 {
-public:
+ public:
     using Ptr = std::shared_ptr<SchemaCommit>;
     using MapT = std::map<ID_TYPE, Ptr>;
     using VecT = std::vector<Ptr>;
@@ -210,7 +210,7 @@ class Field : public DBBaseResource<NameField,
                                     StatusField,
                                     CreatedOnField>
 {
-public:
+ public:
     using Ptr = std::shared_ptr<Field>;
     using MapT = std::map<ID_TYPE, Ptr>;
     using VecT = std::vector<Ptr>;
@@ -230,7 +230,7 @@ class FieldCommit : public DBBaseResource<CollectionIdField,
                                           StatusField,
                                           CreatedOnField>
 {
-public:
+ public:
     using Ptr = std::shared_ptr<FieldCommit>;
     using MapT = std::map<ID_TYPE, Ptr>;
     using VecT = std::vector<Ptr>;
@@ -252,7 +252,7 @@ class FieldElement : public DBBaseResource<CollectionIdField,
                                            StatusField,
                                            CreatedOnField>
 {
-public:
+ public:
     using Ptr = std::shared_ptr<FieldElement>;
     using MapT = std::map<ID_TYPE, Ptr>;
     using VecT = std::vector<Ptr>;
@@ -272,7 +272,7 @@ class CollectionCommit : public DBBaseResource<CollectionIdField,
                                                StatusField,
                                                CreatedOnField>
 {
-public:
+ public:
     static constexpr const char* Name = "CollectionCommit";
     using Ptr = std::shared_ptr<CollectionCommit>;
     using MapT = std::map<ID_TYPE, Ptr>;
@@ -291,7 +291,7 @@ class Partition : public DBBaseResource<NameField,
                                         StatusField,
                                         CreatedOnField>
 {
-public:
+ public:
     using Ptr = std::shared_ptr<Partition>;
     using MapT = std::map<ID_TYPE, Ptr>;
     using VecT = std::vector<Ptr>;
@@ -311,7 +311,7 @@ class PartitionCommit : public DBBaseResource<CollectionIdField,
                                               StatusField,
                                               CreatedOnField>
 {
-public:
+ public:
     using Ptr = std::shared_ptr<PartitionCommit>;
     using MapT = std::map<ID_TYPE, Ptr>;
     using VecT = std::vector<Ptr>;
@@ -333,7 +333,7 @@ class Segment : public DBBaseResource<PartitionIdField,
                                       StatusField,
                                       CreatedOnField>
 {
-public:
+ public:
     using Ptr = std::shared_ptr<Segment>;
     using MapT = std::map<ID_TYPE, Ptr>;
     using VecT = std::vector<Ptr>;
@@ -356,7 +356,7 @@ class SegmentCommit : public DBBaseResource<SchemaIdField,
                                             StatusField,
                                             CreatedOnField>
 {
-public:
+ public:
     using Ptr = std::shared_ptr<SegmentCommit>;
     using MapT = std::map<ID_TYPE, Ptr>;
     using VecT = std::vector<Ptr>;
@@ -379,7 +379,7 @@ class SegmentFile : public DBBaseResource<PartitionIdField,
                                           StatusField,
                                           CreatedOnField>
 {
-public:
+ public:
     using Ptr = std::shared_ptr<SegmentFile>;
     using MapT = std::map<ID_TYPE, Ptr>;
     using VecT = std::vector<Ptr>;
@@ -393,6 +393,6 @@ public:
 
 using SegmentFilePtr = SegmentFile::Ptr;
 
-} // snapshot
-} // engine
-} // milvus
+} // namespace snapshot
+} // namespace engine
+} // namespace milvus

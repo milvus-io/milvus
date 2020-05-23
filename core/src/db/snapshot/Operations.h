@@ -40,7 +40,7 @@ enum OpStatus {
 };
 
 class Operations : public std::enable_shared_from_this<Operations> {
-public:
+ public:
     /* static constexpr const char* Name = Derived::Name; */
     Operations(const OperationContext& context, ScopedSnapshotT prev_ss);
     Operations(const OperationContext& context, ID_TYPE collection_id, ID_TYPE commit_id = 0);
@@ -75,7 +75,7 @@ public:
 
     virtual ~Operations() {}
 
-protected:
+ protected:
     OperationContext context_;
     ScopedSnapshotT prev_ss_;
     StepsT steps_;
@@ -94,12 +94,12 @@ Operations::AddStep(const StepT& step) {
 
 template <typename ResourceT>
 class CommitOperation : public Operations {
-public:
+ public:
     using BaseT = Operations;
     CommitOperation(const OperationContext& context, ScopedSnapshotT prev_ss)
-        : BaseT(context, prev_ss) {};
+        : BaseT(context, prev_ss) {}
     CommitOperation(const OperationContext& context, ID_TYPE collection_id, ID_TYPE commit_id = 0)
-        : BaseT(context, collection_id, commit_id) {};
+        : BaseT(context, collection_id, commit_id) {}
 
     virtual typename ResourceT::Ptr GetPrevResource() const {
         return nullptr;
@@ -115,13 +115,13 @@ public:
     // PXU TODO
     /* virtual void OnFailed() */
 
-protected:
+ protected:
     typename ResourceT::Ptr resource_;
 };
 
 template <typename ResourceT>
 class LoadOperation : public Operations {
-public:
+ public:
     LoadOperation(const LoadOperationContext& context) :
        Operations(OperationContext(), ScopedSnapshotT()), context_(context) {}
 
@@ -139,14 +139,14 @@ public:
         return resource_;
     }
 
-protected:
+ protected:
     LoadOperationContext context_;
     typename ResourceT::Ptr resource_;
 };
 
 template <typename ResourceT>
 class HardDeleteOperation : public Operations {
-public:
+ public:
     HardDeleteOperation(ID_TYPE id) :
        Operations(OperationContext(), ScopedSnapshotT()), id_(id) {}
 
@@ -161,7 +161,7 @@ public:
         return ok_;
     }
 
-protected:
+ protected:
     ID_TYPE id_;
     // PXU TODO: Replace all bool to Status type
     bool ok_;
@@ -169,6 +169,6 @@ protected:
 
 using OperationsPtr = std::shared_ptr<Operations>;
 
-} // snapshot
-} // engine
-} // milvus
+} // namespace snapshot
+} // namespace engine
+} // namespace milvus

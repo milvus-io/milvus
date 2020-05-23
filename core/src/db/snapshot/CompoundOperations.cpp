@@ -18,9 +18,9 @@ namespace engine {
 namespace snapshot {
 
 BuildOperation::BuildOperation(const OperationContext& context, ScopedSnapshotT prev_ss)
-    : BaseT(context, prev_ss) {};
+    : BaseT(context, prev_ss) {}
 BuildOperation::BuildOperation(const OperationContext& context, ID_TYPE collection_id, ID_TYPE commit_id)
-    : BaseT(context, collection_id, commit_id) {};
+    : BaseT(context, collection_id, commit_id) {}
 
 bool
 BuildOperation::PreExecute(Store& store) {
@@ -88,9 +88,9 @@ BuildOperation::CommitNewSegmentFile(const SegmentFileContext& context) {
 }
 
 NewSegmentOperation::NewSegmentOperation(const OperationContext& context, ScopedSnapshotT prev_ss)
-    : BaseT(context, prev_ss) {};
+    : BaseT(context, prev_ss) {}
 NewSegmentOperation::NewSegmentOperation(const OperationContext& context, ID_TYPE collection_id, ID_TYPE commit_id)
-    : BaseT(context, collection_id, commit_id) {};
+    : BaseT(context, collection_id, commit_id) {}
 
 bool
 NewSegmentOperation::DoExecute(Store& store) {
@@ -155,9 +155,9 @@ NewSegmentOperation::CommitNewSegmentFile(const SegmentFileContext& context) {
 }
 
 MergeOperation::MergeOperation(const OperationContext& context, ScopedSnapshotT prev_ss)
-    : BaseT(context, prev_ss) {};
+    : BaseT(context, prev_ss) {}
 MergeOperation::MergeOperation(const OperationContext& context, ID_TYPE collection_id, ID_TYPE commit_id)
-    : BaseT(context, collection_id, commit_id) {};
+    : BaseT(context, collection_id, commit_id) {}
 
 SegmentPtr
 MergeOperation::CommitNewSegment() {
@@ -259,6 +259,6 @@ GetCollectionIDsOperation::GetIDs() const {
     return ids_;
 }
 
-} // snapshot
-} // engine
-} // milvus
+} // namespace snapshot
+} // namespace engine
+} // namespace milvus

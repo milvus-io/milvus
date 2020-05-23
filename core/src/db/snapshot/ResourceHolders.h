@@ -17,7 +17,7 @@ namespace snapshot {
 
 
 class CollectionsHolder : public ResourceHolder<Collection, CollectionsHolder> {
-public:
+ public:
     using BaseT = ResourceHolder<Collection, CollectionsHolder>;
     using ResourcePtr = typename BaseT::ResourcePtr;
     using NameMapT = std::map<std::string, ResourcePtr>;
@@ -56,6 +56,6 @@ class SegmentCommitsHolder : public ResourceHolder<SegmentCommit, SegmentCommits
 
 class SegmentFilesHolder : public ResourceHolder<SegmentFile, SegmentFilesHolder> {};
 
-} // snapshot
-} // engine
-} // milvus
+} // namespace snapshot
+} // namespace engine
+} // namespace milvus

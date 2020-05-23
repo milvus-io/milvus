@@ -152,6 +152,6 @@ Snapshots::SnapshotGCCallback(Snapshot::Ptr ss_ptr) {
     std::cout << &(*ss_ptr) << " Snapshot " << ss_ptr->GetID() << " RefCnt = " << ss_ptr->RefCnt() << " To be removed" << std::endl;
 }
 
-} // snapshot
-} // engine
-} // milvus
+} // namespace snapshot
+} // namespace engine
+} // namespace milvus

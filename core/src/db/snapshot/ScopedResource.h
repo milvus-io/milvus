@@ -19,7 +19,7 @@ namespace snapshot {
 
 template <typename ResourceT>
 class ScopedResource {
-public:
+ public:
     using ThisT = ScopedResource<ResourceT>;
     using Ptr = std::shared_ptr<ThisT>;
     using ResourcePtr = std::shared_ptr<ResourceT>;
@@ -42,7 +42,7 @@ public:
 
     ~ScopedResource();
 
-protected:
+ protected:
     ResourcePtr res_;
     bool scoped_;
 };
@@ -93,6 +93,6 @@ ScopedResource<ResourceT>::~ScopedResource() {
     }
 }
 
-} // snapshot
-} // engine
-} // milvus
+} // namespace snapshot
+} // namespace engine
+} // namespace milvus

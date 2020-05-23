@@ -84,6 +84,6 @@ OperationExecutor::ThreadMain(OperationQueuePtr queue) {
 }
 
 
-} // snapshot
-} // engine
-} // milvus
+} // namespace snapshot
+} // namespace engine
+} // namespace milvus

@@ -30,7 +30,7 @@ namespace snapshot {
 
 
 class Snapshot : public ReferenceProxy {
-public:
+ public:
     using Ptr = std::shared_ptr<Snapshot>;
     Snapshot(ID_TYPE id);
 
@@ -201,6 +201,6 @@ private:
 using ScopedSnapshotT = ScopedResource<Snapshot>;
 using GCHandler = std::function<void(Snapshot::Ptr)>;
 
-} // snapshot
-} // engine
-} // milvus
+} // namespace snapshot
+} // namespace engine
+} // namespace milvus

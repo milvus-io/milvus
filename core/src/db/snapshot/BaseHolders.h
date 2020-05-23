@@ -26,7 +26,7 @@ namespace snapshot {
 
 template <typename ResourceT, typename Derived>
 class ResourceHolder {
-public:
+ public:
     using ResourcePtr = std::shared_ptr<ResourceT>;
     /* using ResourcePtr = typename ResourceT::Ptr; */
     using ScopedT = ScopedResource<ResourceT>;
@@ -51,7 +51,7 @@ public:
 
     virtual void Dump(const std::string& tag = "");
 
-protected:
+ protected:
     virtual void OnNoRefCallBack(ResourcePtr resource);
 
     virtual ResourcePtr Load(ID_TYPE id);
@@ -63,8 +63,8 @@ protected:
     IdMapT id_map_;
 };
 
-} // snapshot
-} // engine
-} // milvus
+} // namespace snapshot
+} // namespace engine
+} // namespace milvus
 
 #include "BaseHolders.inl"

@@ -117,6 +117,6 @@ Operations::PostExecute(Store& store) {
     return ok;
 }
 
-} // snapshot
-} // engine
-} // milvus
+} // namespace snapshot
+} // namespace engine
+} // namespace milvus

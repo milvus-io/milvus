@@ -42,6 +42,6 @@ ReferenceProxy::~ReferenceProxy() {
     /* OnDeRef(); */
 }
 
-} // snapshot
-} // engine
-} // milvus
+} // namespace snapshot
+} // namespace engine
+} // namespace milvus

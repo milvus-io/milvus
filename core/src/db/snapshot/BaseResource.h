@@ -20,7 +20,7 @@ namespace snapshot {
 template <typename ...Fields>
 class DBBaseResource : public ReferenceProxy,
                        public Fields... {
-public:
+ public:
     DBBaseResource(const Fields&... fields);
 
     virtual std::string ToString() const;
@@ -40,6 +40,6 @@ template <typename ...Fields>
 std::string DBBaseResource<Fields...>::ToString() const {
 }
 
-} // snapshot
-} // engine
-} // milvus
+} // namespace snapshot
+} // namespace engine
+} // namespace milvus

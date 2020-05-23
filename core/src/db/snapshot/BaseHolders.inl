@@ -120,6 +120,6 @@ bool ResourceHolder<ResourceT, Derived>::Add(typename ResourceHolder<ResourceT, 
     return AddNoLock(resource);
 }
 
-} // snapshot
-} // engine
-} // milvus
+} // namespace snapshot
+} // namespace engine
+} // namespace milvus

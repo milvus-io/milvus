@@ -44,7 +44,7 @@ struct Index<T, std::tuple<U, Types...>> {
 
 
 class Store {
-public:
+ public:
     using MockIDST = std::tuple<ID_TYPE, ID_TYPE, ID_TYPE, ID_TYPE, ID_TYPE, ID_TYPE, ID_TYPE,
                                 ID_TYPE, ID_TYPE, ID_TYPE, ID_TYPE>;
     using MockResourcesT = std::tuple<CollectionCommit::MapT,
@@ -438,6 +438,6 @@ private:
 };
 
 
-} // snapshot
-} // engine
-} // milvus
+} // namespace snapshot
+} // namespace engine
+} // namespace milvus

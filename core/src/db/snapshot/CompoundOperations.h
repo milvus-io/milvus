@@ -19,7 +19,7 @@ namespace engine {
 namespace snapshot {
 
 class BuildOperation : public Operations {
-public:
+ public:
     using BaseT = Operations;
 
     BuildOperation(const OperationContext& context, ScopedSnapshotT prev_ss);
@@ -32,7 +32,7 @@ public:
 };
 
 class NewSegmentOperation : public Operations {
-public:
+ public:
     using BaseT = Operations;
 
     NewSegmentOperation(const OperationContext& context, ScopedSnapshotT prev_ss);
@@ -48,7 +48,7 @@ public:
 };
 
 class MergeOperation : public Operations {
-public:
+ public:
     using BaseT = Operations;
 
     MergeOperation(const OperationContext& context, ScopedSnapshotT prev_ss);
@@ -62,36 +62,36 @@ public:
 };
 
 class GetSnapshotIDsOperation : public Operations {
-public:
+ public:
     using BaseT = Operations;
 
-    GetSnapshotIDsOperation(ID_TYPE collection_id, bool reversed = true);
+    explicit GetSnapshotIDsOperation(ID_TYPE collection_id, bool reversed = true);
 
     bool DoExecute(Store& store) override;
 
     const IDS_TYPE& GetIDs() const;
 
-protected:
+ protected:
     ID_TYPE collection_id_;
     bool reversed_;
     IDS_TYPE ids_;
 };
 
 class GetCollectionIDsOperation : public Operations {
-public:
+ public:
     using BaseT = Operations;
 
-    GetCollectionIDsOperation(bool reversed = true);
+    explicit GetCollectionIDsOperation(bool reversed = true);
 
     bool DoExecute(Store& store) override;
 
     const IDS_TYPE& GetIDs() const;
 
-protected:
+ protected:
     bool reversed_;
     IDS_TYPE ids_;
 };
 
-} // snapshot
-} // engine
-} // milvus
+} // namespace snapshot
+} // namespace engine
+} // namespace milvus

@@ -17,7 +17,7 @@ namespace engine {
 namespace snapshot {
 
 class SnapshotHolder {
-public:
+ public:
     using ScopedPtr = std::shared_ptr<ScopedSnapshotT>;
 
     SnapshotHolder(ID_TYPE collection_id, GCHandler gc_handler = nullptr, size_t num_versions = 1);
@@ -66,6 +66,6 @@ private:
 
 using SnapshotHolderPtr = std::shared_ptr<SnapshotHolder>;
 
-} // snapshot
-} // engine
-} // milvus
+} // namespace snapshot
+} // namespace engine
+} // namespace milvus

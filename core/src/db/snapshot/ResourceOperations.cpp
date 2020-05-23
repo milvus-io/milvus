@@ -149,6 +149,6 @@ SegmentFileOperation::DoExecute(Store& store) {
     return true;
 }
 
-} // snapshot
-} // engine
-} // milvus
+} // namespace snapshot
+} // namespace engine
+} // namespace milvus

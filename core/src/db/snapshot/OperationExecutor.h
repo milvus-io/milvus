@@ -34,7 +34,7 @@ struct Executor {
 using ExecutorPtr = std::shared_ptr<Executor>;
 
 class OperationExecutor {
-public:
+ public:
     using Ptr = std::shared_ptr<OperationExecutor>;
 
     OperationExecutor(const OperationExecutor&) = delete;
@@ -49,7 +49,7 @@ public:
 
     ~OperationExecutor();
 
-protected:
+ protected:
     OperationExecutor();
 
     void ThreadMain(OperationQueuePtr queue);
@@ -61,6 +61,6 @@ protected:
     ExecutorPtr executor_;
 };
 
-} // snapshot
-} // engine
-} // milvus
+} // namespace snapshot
+} // namespace engine
+} // namespace milvus

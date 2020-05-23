@@ -43,6 +43,6 @@ struct OperationContext {
     SegmentFile::VecT new_segment_files;
 };
 
-} // snapshot
-} // engine
-} // milvus
+} // namespace snapshot
+} // namespace engine
+} // namespace milvus

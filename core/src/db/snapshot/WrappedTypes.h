@@ -46,6 +46,6 @@ using SegmentsT = std::map<ID_TYPE, SegmentScopedT>;
 using SegmentCommitsT = std::map<ID_TYPE, SegmentCommitScopedT>;
 using SegmentFilesT = std::map<ID_TYPE, SegmentFileScopedT>;
 
-} // snapshot
-} // engine
-} // milvus
+} // namespace snapshot
+} // namespace engine
+} // namespace milvus
