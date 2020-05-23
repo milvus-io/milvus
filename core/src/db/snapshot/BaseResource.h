@@ -10,25 +10,26 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
 #pragma once
-#include "ReferenceProxy.h"
 #include <string>
+#include "ReferenceProxy.h"
 
 namespace milvus {
 namespace engine {
 namespace snapshot {
 
-template <typename ...Fields>
-class DBBaseResource : public ReferenceProxy,
-                       public Fields... {
+template <typename... Fields>
+class DBBaseResource : public ReferenceProxy, public Fields... {
  public:
     DBBaseResource(const Fields&... fields);
 
-    virtual std::string ToString() const;
+    virtual std::string
+    ToString() const;
 
-    virtual ~DBBaseResource() {}
+    virtual ~DBBaseResource() {
+    }
 };
 
-template <typename ...Fields>
+template <typename... Fields>
 DBBaseResource<Fields...>::DBBaseResource(const Fields&... fields) : Fields(fields)... {
     /* InstallField("id"); */
     /* InstallField("status"); */
@@ -36,10 +37,11 @@ DBBaseResource<Fields...>::DBBaseResource(const Fields&... fields) : Fields(fiel
     /* std::vector<std::string> attrs = {Fields::ATTR...}; */
 }
 
-template <typename ...Fields>
-std::string DBBaseResource<Fields...>::ToString() const {
+template <typename... Fields>
+std::string
+DBBaseResource<Fields...>::ToString() const {
 }
 
-} // namespace snapshot
-} // namespace engine
-} // namespace milvus
+}  // namespace snapshot
+}  // namespace engine
+}  // namespace milvus

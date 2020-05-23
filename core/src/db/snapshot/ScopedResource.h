@@ -28,15 +28,24 @@ class ScopedResource {
 
     ScopedResource(const ScopedResource<ResourceT>& res);
 
-    ScopedResource<ResourceT>& operator=(const ScopedResource<ResourceT>& res);
+    ScopedResource<ResourceT>&
+    operator=(const ScopedResource<ResourceT>& res);
 
-    ResourcePtr Get() { return res_; }
+    ResourcePtr
+    Get() {
+        return res_;
+    }
 
-    ResourceT operator*() const { return *res_; }
-    ResourcePtr operator->() const { return res_; }
+    ResourceT operator*() const {
+        return *res_;
+    }
+    ResourcePtr operator->() const {
+        return res_;
+    }
 
-    operator bool () const {
-        if (res_) return true;
+    operator bool() const {
+        if (res_)
+            return true;
         return false;
     }
 
@@ -52,19 +61,19 @@ ScopedResource<ResourceT>::ScopedResource() : res_(nullptr), scoped_(false) {
 }
 
 template <typename ResourceT>
-ScopedResource<ResourceT>::ScopedResource(ScopedResource<ResourceT>::ResourcePtr res,
-        bool scoped) : res_(res), scoped_(scoped) {
+ScopedResource<ResourceT>::ScopedResource(ScopedResource<ResourceT>::ResourcePtr res, bool scoped)
+    : res_(res), scoped_(scoped) {
     if (scoped) {
         /* std::cout << "Do Ref" << std::endl; */
         res_->Ref();
     }
 }
 
-
 template <typename ResourceT>
 ScopedResource<ResourceT>&
 ScopedResource<ResourceT>::operator=(const ScopedResource<ResourceT>& res) {
-    if (this->res_ == res.res_) return *this;
+    if (this->res_ == res.res_)
+        return *this;
     if (scoped_) {
         res_->UnRef();
     }
@@ -93,6 +102,6 @@ ScopedResource<ResourceT>::~ScopedResource() {
     }
 }
 
-} // namespace snapshot
-} // namespace engine
-} // namespace milvus
+}  // namespace snapshot
+}  // namespace engine
+}  // namespace milvus

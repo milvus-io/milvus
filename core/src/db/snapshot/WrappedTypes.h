@@ -10,12 +10,12 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
 #pragma once
+#include <map>
+#include <set>
+#include <vector>
+#include "ResourceTypes.h"
 #include "Resources.h"
 #include "ScopedResource.h"
-#include "ResourceTypes.h"
-#include <map>
-#include <vector>
-#include <set>
 
 namespace milvus {
 namespace engine {
@@ -46,6 +46,6 @@ using SegmentsT = std::map<ID_TYPE, SegmentScopedT>;
 using SegmentCommitsT = std::map<ID_TYPE, SegmentCommitScopedT>;
 using SegmentFilesT = std::map<ID_TYPE, SegmentFileScopedT>;
 
-} // namespace snapshot
-} // namespace engine
-} // namespace milvus
+}  // namespace snapshot
+}  // namespace engine
+}  // namespace milvus

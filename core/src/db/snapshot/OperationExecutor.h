@@ -10,12 +10,12 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
 #pragma once
-#include "Store.h"
-#include "Operations.h"
-#include "utils/BlockingQueue.h"
-#include <thread>
-#include <mutex>
 #include <memory>
+#include <mutex>
+#include <thread>
+#include "Operations.h"
+#include "Store.h"
+#include "utils/BlockingQueue.h"
 
 namespace milvus {
 namespace engine {
@@ -26,7 +26,8 @@ using OperationQueueT = server::BlockingQueue<OperationsPtr>;
 using OperationQueuePtr = std::shared_ptr<OperationQueueT>;
 
 struct Executor {
-    Executor(ThreadPtr t, OperationQueuePtr q) : execute_thread(t), execute_queue(q) {}
+    Executor(ThreadPtr t, OperationQueuePtr q) : execute_thread(t), execute_queue(q) {
+    }
     ThreadPtr execute_thread;
     OperationQueuePtr execute_queue;
 };
@@ -39,28 +40,34 @@ class OperationExecutor {
 
     OperationExecutor(const OperationExecutor&) = delete;
 
-    static OperationExecutor& GetInstance();
+    static OperationExecutor&
+    GetInstance();
 
-    bool Submit(OperationsPtr operation, bool sync = true);
+    bool
+    Submit(OperationsPtr operation, bool sync = true);
 
-    void Start();
+    void
+    Start();
 
-    void Stop();
+    void
+    Stop();
 
     ~OperationExecutor();
 
  protected:
     OperationExecutor();
 
-    void ThreadMain(OperationQueuePtr queue);
+    void
+    ThreadMain(OperationQueuePtr queue);
 
-    void Enqueue(OperationsPtr operation);
+    void
+    Enqueue(OperationsPtr operation);
 
     mutable std::mutex mtx_;
     bool stopped_ = false;
     ExecutorPtr executor_;
 };
 
-} // namespace snapshot
-} // namespace engine
-} // namespace milvus
+}  // namespace snapshot
+}  // namespace engine
+}  // namespace milvus

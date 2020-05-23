@@ -11,22 +11,21 @@
 
 #pragma once
 
-#include "db/snapshot/ResourceTypes.h"
-#include "db/snapshot/ScopedResource.h"
-#include "db/snapshot/Resources.h"
-#include "db/snapshot/BaseHolders.h"
-#include <string>
-#include <map>
-#include <vector>
-#include <memory>
 #include <condition_variable>
+#include <map>
+#include <memory>
 #include <mutex>
+#include <string>
 #include <thread>
+#include <vector>
+#include "db/snapshot/BaseHolders.h"
+#include "db/snapshot/ResourceTypes.h"
+#include "db/snapshot/Resources.h"
+#include "db/snapshot/ScopedResource.h"
 
 namespace milvus {
 namespace engine {
 namespace snapshot {
-
 
 class CollectionsHolder : public ResourceHolder<Collection, CollectionsHolder> {
  public:
@@ -34,16 +33,22 @@ class CollectionsHolder : public ResourceHolder<Collection, CollectionsHolder> {
     using ResourcePtr = typename BaseT::ResourcePtr;
     using NameMapT = std::map<std::string, ResourcePtr>;
 
-    ScopedT GetCollection(const std::string& name, bool scoped = true);
+    ScopedT
+    GetCollection(const std::string& name, bool scoped = true);
 
-    bool Add(ResourcePtr resource) override;
-    bool Release(ID_TYPE id) override;
-    bool Release(const std::string& name);
+    bool
+    Add(ResourcePtr resource) override;
+    bool
+    Release(ID_TYPE id) override;
+    bool
+    Release(const std::string& name);
 
-    void Reset() override;
+    void
+    Reset() override;
 
  private:
-    ResourcePtr Load(const std::string& name) override;
+    ResourcePtr
+    Load(const std::string& name) override;
 
     NameMapT name_map_;
 };
@@ -68,6 +73,6 @@ class SegmentCommitsHolder : public ResourceHolder<SegmentCommit, SegmentCommits
 
 class SegmentFilesHolder : public ResourceHolder<SegmentFile, SegmentFilesHolder> {};
 
-} // namespace snapshot
-} // namespace engine
-} // namespace milvus
+}  // namespace snapshot
+}  // namespace engine
+}  // namespace milvus

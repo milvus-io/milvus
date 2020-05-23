@@ -10,9 +10,9 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
 #include "db/snapshot/ResourceHolders.h"
-#include "db/snapshot/CompoundOperations.h"
-#include <sstream>
 #include <iostream>
+#include <sstream>
+#include "db/snapshot/CompoundOperations.h"
 
 namespace milvus {
 namespace engine {
@@ -44,19 +44,23 @@ CollectionsHolder::GetCollection(const std::string& name, bool scoped) {
     auto cit = name_map_.find(name);
     if (cit == name_map_.end()) {
         auto ret = Load(name);
-        if (!ret) return BaseT::ScopedT();
+        if (!ret)
+            return BaseT::ScopedT();
         return BaseT::ScopedT(ret, scoped);
     }
     return BaseT::ScopedT(cit->second, scoped);
 }
 
-bool CollectionsHolder::Add(CollectionsHolder::ResourcePtr resource) {
-    if (!resource) return false;
+bool
+CollectionsHolder::Add(CollectionsHolder::ResourcePtr resource) {
+    if (!resource)
+        return false;
     std::unique_lock<std::mutex> lock(BaseT::mutex_);
     return BaseT::AddNoLock(resource);
 }
 
-bool CollectionsHolder::Release(const std::string& name) {
+bool
+CollectionsHolder::Release(const std::string& name) {
     std::unique_lock<std::mutex> lock(BaseT::mutex_);
     auto it = name_map_.find(name);
     if (it == name_map_.end()) {
@@ -68,7 +72,8 @@ bool CollectionsHolder::Release(const std::string& name) {
     return true;
 }
 
-bool CollectionsHolder::Release(ID_TYPE id) {
+bool
+CollectionsHolder::Release(ID_TYPE id) {
     std::unique_lock<std::mutex> lock(mutex_);
     auto it = id_map_.find(id);
     if (it == id_map_.end()) {
@@ -80,6 +85,6 @@ bool CollectionsHolder::Release(ID_TYPE id) {
     return true;
 }
 
-} // namespace snapshot
-} // namespace engine
-} // namespace milvus
+}  // namespace snapshot
+}  // namespace engine
+}  // namespace milvus

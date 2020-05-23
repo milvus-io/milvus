@@ -11,17 +11,17 @@
 
 #pragma once
 
-#include "Snapshot.h"
-#include "Store.h"
-#include "Context.h"
 #include <assert.h>
-#include <vector>
 #include <any>
+#include <atomic>
+#include <condition_variable>
+#include <memory>
 #include <mutex>
 #include <thread>
-#include <condition_variable>
-#include <atomic>
-#include <memory>
+#include <vector>
+#include "Context.h"
+#include "Snapshot.h"
+#include "Store.h"
 
 namespace milvus {
 namespace engine {
@@ -46,35 +46,58 @@ class Operations : public std::enable_shared_from_this<Operations> {
     Operations(const OperationContext& context, ScopedSnapshotT prev_ss);
     Operations(const OperationContext& context, ID_TYPE collection_id, ID_TYPE commit_id = 0);
 
-    const ScopedSnapshotT& GetPrevSnapshot() const {return prev_ss_;}
+    const ScopedSnapshotT&
+    GetPrevSnapshot() const {
+        return prev_ss_;
+    }
 
-    virtual bool IsStale() const;
+    virtual bool
+    IsStale() const;
 
-    template<typename StepT>
-    void AddStep(const StepT& step);
-    void SetStepResult(ID_TYPE id) { ids_.push_back(id); }
+    template <typename StepT>
+    void
+    AddStep(const StepT& step);
+    void
+    SetStepResult(ID_TYPE id) {
+        ids_.push_back(id);
+    }
 
-    StepsT& GetSteps() { return steps_; }
+    StepsT&
+    GetSteps() {
+        return steps_;
+    }
 
-    ID_TYPE GetID() const;
+    ID_TYPE
+    GetID() const;
 
-    virtual void OnExecute(Store&);
-    virtual bool PreExecute(Store&);
-    virtual bool DoExecute(Store&);
-    virtual bool PostExecute(Store&);
+    virtual void
+    OnExecute(Store&);
+    virtual bool
+    PreExecute(Store&);
+    virtual bool
+    DoExecute(Store&);
+    virtual bool
+    PostExecute(Store&);
 
-    virtual ScopedSnapshotT GetSnapshot() const;
+    virtual ScopedSnapshotT
+    GetSnapshot() const;
 
-    virtual void operator()(Store& store);
-    virtual void Push(bool sync = true);
+    virtual void
+    operator()(Store& store);
+    virtual void
+    Push(bool sync = true);
 
-    virtual void ApplyToStore(Store& store);
+    virtual void
+    ApplyToStore(Store& store);
 
-    bool WaitToFinish();
+    bool
+    WaitToFinish();
 
-    void Done();
+    void
+    Done();
 
-    virtual ~Operations() {}
+    virtual ~Operations() {
+    }
 
  protected:
     OperationContext context_;
@@ -87,7 +110,7 @@ class Operations : public std::enable_shared_from_this<Operations> {
     ID_TYPE uid_;
 };
 
-template<typename StepT>
+template <typename StepT>
 void
 Operations::AddStep(const StepT& step) {
     steps_.push_back(std::make_shared<StepT>(step));
@@ -97,18 +120,23 @@ template <typename ResourceT>
 class CommitOperation : public Operations {
  public:
     using BaseT = Operations;
-    CommitOperation(const OperationContext& context, ScopedSnapshotT prev_ss)
-        : BaseT(context, prev_ss) {}
+    CommitOperation(const OperationContext& context, ScopedSnapshotT prev_ss) : BaseT(context, prev_ss) {
+    }
     CommitOperation(const OperationContext& context, ID_TYPE collection_id, ID_TYPE commit_id = 0)
-        : BaseT(context, collection_id, commit_id) {}
+        : BaseT(context, collection_id, commit_id) {
+    }
 
-    virtual typename ResourceT::Ptr GetPrevResource() const {
+    virtual typename ResourceT::Ptr
+    GetPrevResource() const {
         return nullptr;
     }
 
-    typename ResourceT::Ptr GetResource() const  {
-        if (status_ == OP_PENDING) return nullptr;
-        if (ids_.size() == 0) return nullptr;
+    typename ResourceT::Ptr
+    GetResource() const {
+        if (status_ == OP_PENDING)
+            return nullptr;
+        if (ids_.size() == 0)
+            return nullptr;
         resource_->SetID(ids_[0]);
         return resource_;
     }
@@ -123,10 +151,12 @@ class CommitOperation : public Operations {
 template <typename ResourceT>
 class LoadOperation : public Operations {
  public:
-    explicit LoadOperation(const LoadOperationContext& context) :
-       Operations(OperationContext(), ScopedSnapshotT()), context_(context) {}
+    explicit LoadOperation(const LoadOperationContext& context)
+        : Operations(OperationContext(), ScopedSnapshotT()), context_(context) {
+    }
 
-    void ApplyToStore(Store& store) override {
+    void
+    ApplyToStore(Store& store) override {
         if (status_ != OP_PENDING) {
             Done();
             return;
@@ -135,8 +165,10 @@ class LoadOperation : public Operations {
         Done();
     }
 
-    typename ResourceT::Ptr GetResource() const  {
-        if (status_ == OP_PENDING) return nullptr;
+    typename ResourceT::Ptr
+    GetResource() const {
+        if (status_ == OP_PENDING)
+            return nullptr;
         return resource_;
     }
 
@@ -148,17 +180,21 @@ class LoadOperation : public Operations {
 template <typename ResourceT>
 class HardDeleteOperation : public Operations {
  public:
-    explicit HardDeleteOperation(ID_TYPE id) :
-       Operations(OperationContext(), ScopedSnapshotT()), id_(id) {}
+    explicit HardDeleteOperation(ID_TYPE id) : Operations(OperationContext(), ScopedSnapshotT()), id_(id) {
+    }
 
-    void ApplyToStore(Store& store) override {
-        if (status_ != OP_PENDING) return;
+    void
+    ApplyToStore(Store& store) override {
+        if (status_ != OP_PENDING)
+            return;
         ok_ = store.RemoveResource<ResourceT>(id_);
         Done();
     }
 
-    bool GetStatus() const  {
-        if (status_ == OP_PENDING) return false;
+    bool
+    GetStatus() const {
+        if (status_ == OP_PENDING)
+            return false;
         return ok_;
     }
 
@@ -170,6 +206,6 @@ class HardDeleteOperation : public Operations {
 
 using OperationsPtr = std::shared_ptr<Operations>;
 
-} // namespace snapshot
-} // namespace engine
-} // namespace milvus
+}  // namespace snapshot
+}  // namespace engine
+}  // namespace milvus

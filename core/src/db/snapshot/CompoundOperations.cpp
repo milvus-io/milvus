@@ -10,25 +10,27 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
 #include "db/snapshot/CompoundOperations.h"
-#include "db/snapshot/Snapshots.h"
-#include "db/snapshot/OperationExecutor.h"
 #include <memory>
+#include "db/snapshot/OperationExecutor.h"
+#include "db/snapshot/Snapshots.h"
 
 namespace milvus {
 namespace engine {
 namespace snapshot {
 
-BuildOperation::BuildOperation(const OperationContext& context, ScopedSnapshotT prev_ss)
-    : BaseT(context, prev_ss) {}
+BuildOperation::BuildOperation(const OperationContext& context, ScopedSnapshotT prev_ss) : BaseT(context, prev_ss) {
+}
 BuildOperation::BuildOperation(const OperationContext& context, ID_TYPE collection_id, ID_TYPE commit_id)
-    : BaseT(context, collection_id, commit_id) {}
+    : BaseT(context, collection_id, commit_id) {
+}
 
 bool
 BuildOperation::PreExecute(Store& store) {
     SegmentCommitOperation op(context_, prev_ss_);
     op(store);
     context_.new_segment_commit = op.GetResource();
-    if (!context_.new_segment_commit) return false;
+    if (!context_.new_segment_commit)
+        return false;
 
     PartitionCommitOperation pc_op(context_, prev_ss_);
     pc_op(store);
@@ -89,9 +91,11 @@ BuildOperation::CommitNewSegmentFile(const SegmentFileContext& context) {
 }
 
 NewSegmentOperation::NewSegmentOperation(const OperationContext& context, ScopedSnapshotT prev_ss)
-    : BaseT(context, prev_ss) {}
+    : BaseT(context, prev_ss) {
+}
 NewSegmentOperation::NewSegmentOperation(const OperationContext& context, ID_TYPE collection_id, ID_TYPE commit_id)
-    : BaseT(context, collection_id, commit_id) {}
+    : BaseT(context, collection_id, commit_id) {
+}
 
 bool
 NewSegmentOperation::DoExecute(Store& store) {
@@ -114,7 +118,8 @@ NewSegmentOperation::PreExecute(Store& store) {
     SegmentCommitOperation op(context_, prev_ss_);
     op(store);
     context_.new_segment_commit = op.GetResource();
-    if (!context_.new_segment_commit) return false;
+    if (!context_.new_segment_commit)
+        return false;
 
     PartitionCommitOperation pc_op(context_, prev_ss_);
     pc_op(store);
@@ -155,14 +160,16 @@ NewSegmentOperation::CommitNewSegmentFile(const SegmentFileContext& context) {
     return new_sf_op->GetResource();
 }
 
-MergeOperation::MergeOperation(const OperationContext& context, ScopedSnapshotT prev_ss)
-    : BaseT(context, prev_ss) {}
+MergeOperation::MergeOperation(const OperationContext& context, ScopedSnapshotT prev_ss) : BaseT(context, prev_ss) {
+}
 MergeOperation::MergeOperation(const OperationContext& context, ID_TYPE collection_id, ID_TYPE commit_id)
-    : BaseT(context, collection_id, commit_id) {}
+    : BaseT(context, collection_id, commit_id) {
+}
 
 SegmentPtr
 MergeOperation::CommitNewSegment() {
-    if (context_.new_segment) return context_.new_segment;
+    if (context_.new_segment)
+        return context_.new_segment;
     auto op = std::make_shared<SegmentOperation>(context_, prev_ss_);
     OperationExecutor::GetInstance().Submit(op);
     op->WaitToFinish();
@@ -192,7 +199,8 @@ MergeOperation::PreExecute(Store& store) {
     SegmentCommitOperation op(context_, prev_ss_);
     op(store);
     context_.new_segment_commit = op.GetResource();
-    if (!context_.new_segment_commit) return false;
+    if (!context_.new_segment_commit)
+        return false;
 
     // PXU TODO: Check stale segments
 
@@ -228,9 +236,7 @@ MergeOperation::DoExecute(Store& store) {
 }
 
 GetSnapshotIDsOperation::GetSnapshotIDsOperation(ID_TYPE collection_id, bool reversed)
-    : BaseT(OperationContext(), ScopedSnapshotT()),
-      collection_id_(collection_id),
-      reversed_(reversed) {
+    : BaseT(OperationContext(), ScopedSnapshotT()), collection_id_(collection_id), reversed_(reversed) {
 }
 
 bool
@@ -245,8 +251,7 @@ GetSnapshotIDsOperation::GetIDs() const {
 }
 
 GetCollectionIDsOperation::GetCollectionIDsOperation(bool reversed)
-    : BaseT(OperationContext(), ScopedSnapshotT()),
-      reversed_(reversed) {
+    : BaseT(OperationContext(), ScopedSnapshotT()), reversed_(reversed) {
 }
 
 bool
@@ -260,6 +265,6 @@ GetCollectionIDsOperation::GetIDs() const {
     return ids_;
 }
 
-} // namespace snapshot
-} // namespace engine
-} // namespace milvus
+}  // namespace snapshot
+}  // namespace engine
+}  // namespace milvus

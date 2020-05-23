@@ -11,10 +11,10 @@
 
 #pragma once
 
-#include "db/snapshot/Resources.h"
-#include <string>
 #include <iostream>
+#include <string>
 #include <vector>
+#include "db/snapshot/Resources.h"
 
 namespace milvus {
 namespace engine {
@@ -54,6 +54,6 @@ struct OperationContext {
     SegmentFile::VecT new_segment_files;
 };
 
-} // namespace snapshot
-} // namespace engine
-} // namespace milvus
+}  // namespace snapshot
+}  // namespace engine
+}  // namespace milvus

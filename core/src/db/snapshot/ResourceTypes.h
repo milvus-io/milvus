@@ -11,9 +11,9 @@
 
 #pragma once
 
+#include <set>
 #include <string>
 #include <vector>
-#include <set>
 
 namespace milvus {
 namespace engine {
@@ -27,13 +27,8 @@ using MappingT = std::set<ID_TYPE>;
 
 using IDS_TYPE = std::vector<ID_TYPE>;
 
-enum State {
-    PENDING = 0,
-    ACTIVE = 1,
-    DEACTIVE = 2,
-    INVALID = 999
-};
+enum State { PENDING = 0, ACTIVE = 1, DEACTIVE = 2, INVALID = 999 };
 
-} // namespace snapshot
-} // namespace engine
-} // namespace milvus
+}  // namespace snapshot
+}  // namespace engine
+}  // namespace milvus

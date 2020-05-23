@@ -10,10 +10,10 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
 #pragma once
-#include <functional>
-#include <vector>
-#include <memory>
 #include <any>
+#include <functional>
+#include <memory>
+#include <vector>
 
 namespace milvus {
 namespace engine {
@@ -23,14 +23,23 @@ using OnNoRefCBF = std::function<void(void)>;
 
 class ReferenceProxy {
  public:
-    void RegisterOnNoRefCB(OnNoRefCBF cb);
+    void
+    RegisterOnNoRefCB(OnNoRefCBF cb);
 
-    virtual void Ref();
-    virtual void UnRef();
+    virtual void
+    Ref();
+    virtual void
+    UnRef();
 
-    int RefCnt() const { return refcnt_; }
+    int
+    RefCnt() const {
+        return refcnt_;
+    }
 
-    void ResetCnt() { refcnt_ = 0; }
+    void
+    ResetCnt() {
+        refcnt_ = 0;
+    }
 
     virtual ~ReferenceProxy();
 
@@ -41,6 +50,6 @@ class ReferenceProxy {
 
 using ReferenceResourcePtr = std::shared_ptr<ReferenceProxy>;
 
-} // namespace snapshot
-} // namespace engine
-} // namespace milvus
+}  // namespace snapshot
+}  // namespace engine
+}  // namespace milvus

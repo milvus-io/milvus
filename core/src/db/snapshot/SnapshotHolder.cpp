@@ -10,25 +10,23 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
 #include "db/snapshot/SnapshotHolder.h"
-#include "db/snapshot/ResourceHolders.h"
 #include "db/snapshot/Operations.h"
+#include "db/snapshot/ResourceHolders.h"
 
 namespace milvus {
 namespace engine {
 namespace snapshot {
 
 SnapshotHolder::SnapshotHolder(ID_TYPE collection_id, GCHandler gc_handler, size_t num_versions)
-    : collection_id_(collection_id),
-      num_versions_(num_versions),
-      gc_handler_(gc_handler),
-      done_(false) {
+    : collection_id_(collection_id), num_versions_(num_versions), gc_handler_(gc_handler), done_(false) {
 }
 
 ScopedSnapshotT
 SnapshotHolder::GetSnapshot(ID_TYPE id, bool scoped) {
     if (id > max_id_) {
         auto entry = LoadNoLock(id);
-        if (!entry) return ScopedSnapshotT();
+        if (!entry)
+            return ScopedSnapshotT();
         Add(id);
     }
 
@@ -66,7 +64,9 @@ SnapshotHolder::Add(ID_TYPE id) {
     {
         auto ss = std::make_shared<Snapshot>(id);
 
-        if (done_) { return false; }
+        if (done_) {
+            return false;
+        }
         ss->RegisterOnNoRefCB(std::bind(&Snapshot::UnRefAll, ss));
         ss->Ref();
 
@@ -89,7 +89,7 @@ SnapshotHolder::Add(ID_TYPE id) {
         active_.erase(oldest_it);
         min_id_ = active_.begin()->first;
     }
-    ReadyForRelease(oldest_ss); // TODO: Use different mutex
+    ReadyForRelease(oldest_ss);  // TODO: Use different mutex
     return true;
 }
 
@@ -109,7 +109,7 @@ SnapshotHolder::BackgroundGC() {
         std::vector<Snapshot::Ptr> sss;
         {
             std::unique_lock<std::mutex> lock(gcmutex_);
-            cv_.wait_for(lock, std::chrono::milliseconds(100), [this]() {return to_release_.size() > 0;});
+            cv_.wait_for(lock, std::chrono::milliseconds(100), [this]() { return to_release_.size() > 0; });
             if (to_release_.size() > 0) {
                 /* std::cout << "size = " << to_release_.size() << std::endl; */
                 sss = to_release_;
@@ -134,6 +134,6 @@ SnapshotHolder::LoadNoLock(ID_TYPE collection_commit_id) {
     return op->GetResource();
 }
 
-} // namespace snapshot
-} // namespace engine
-} // namespace milvus
+}  // namespace snapshot
+}  // namespace engine
+}  // namespace milvus

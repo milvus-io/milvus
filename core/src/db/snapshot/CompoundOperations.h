@@ -25,10 +25,13 @@ class BuildOperation : public Operations {
     BuildOperation(const OperationContext& context, ScopedSnapshotT prev_ss);
     BuildOperation(const OperationContext& context, ID_TYPE collection_id, ID_TYPE commit_id = 0);
 
-    bool DoExecute(Store&) override;
-    bool PreExecute(Store&) override;
+    bool
+    DoExecute(Store&) override;
+    bool
+    PreExecute(Store&) override;
 
-    SegmentFilePtr CommitNewSegmentFile(const SegmentFileContext& context);
+    SegmentFilePtr
+    CommitNewSegmentFile(const SegmentFileContext& context);
 };
 
 class NewSegmentOperation : public Operations {
@@ -38,13 +41,17 @@ class NewSegmentOperation : public Operations {
     NewSegmentOperation(const OperationContext& context, ScopedSnapshotT prev_ss);
     NewSegmentOperation(const OperationContext& context, ID_TYPE collection_id, ID_TYPE commit_id = 0);
 
-    bool DoExecute(Store&) override;
+    bool
+    DoExecute(Store&) override;
 
-    bool PreExecute(Store&) override;
+    bool
+    PreExecute(Store&) override;
 
-    SegmentPtr CommitNewSegment();
+    SegmentPtr
+    CommitNewSegment();
 
-    SegmentFilePtr CommitNewSegmentFile(const SegmentFileContext& context);
+    SegmentFilePtr
+    CommitNewSegmentFile(const SegmentFileContext& context);
 };
 
 class MergeOperation : public Operations {
@@ -54,11 +61,15 @@ class MergeOperation : public Operations {
     MergeOperation(const OperationContext& context, ScopedSnapshotT prev_ss);
     MergeOperation(const OperationContext& context, ID_TYPE collection_id, ID_TYPE commit_id = 0);
 
-    bool PreExecute(Store&) override;
-    bool DoExecute(Store&) override;
+    bool
+    PreExecute(Store&) override;
+    bool
+    DoExecute(Store&) override;
 
-    SegmentPtr CommitNewSegment();
-    SegmentFilePtr CommitNewSegmentFile(const SegmentFileContext& context);
+    SegmentPtr
+    CommitNewSegment();
+    SegmentFilePtr
+    CommitNewSegmentFile(const SegmentFileContext& context);
 };
 
 class GetSnapshotIDsOperation : public Operations {
@@ -67,9 +78,11 @@ class GetSnapshotIDsOperation : public Operations {
 
     explicit GetSnapshotIDsOperation(ID_TYPE collection_id, bool reversed = true);
 
-    bool DoExecute(Store& store) override;
+    bool
+    DoExecute(Store& store) override;
 
-    const IDS_TYPE& GetIDs() const;
+    const IDS_TYPE&
+    GetIDs() const;
 
  protected:
     ID_TYPE collection_id_;
@@ -83,15 +96,17 @@ class GetCollectionIDsOperation : public Operations {
 
     explicit GetCollectionIDsOperation(bool reversed = true);
 
-    bool DoExecute(Store& store) override;
+    bool
+    DoExecute(Store& store) override;
 
-    const IDS_TYPE& GetIDs() const;
+    const IDS_TYPE&
+    GetIDs() const;
 
  protected:
     bool reversed_;
     IDS_TYPE ids_;
 };
 
-} // namespace snapshot
-} // namespace engine
-} // namespace milvus
+}  // namespace snapshot
+}  // namespace engine
+}  // namespace milvus

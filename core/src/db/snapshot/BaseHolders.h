@@ -11,14 +11,14 @@
 
 #pragma once
 
-#include "ResourceTypes.h"
-#include "ScopedResource.h"
-#include <string>
+#include <condition_variable>
 #include <map>
 #include <memory>
-#include <condition_variable>
 #include <mutex>
+#include <string>
 #include <thread>
+#include "ResourceTypes.h"
+#include "ScopedResource.h"
 
 namespace milvus {
 namespace engine {
@@ -33,29 +33,41 @@ class ResourceHolder {
     using ScopedPtr = std::shared_ptr<ScopedT>;
     using IdMapT = std::map<ID_TYPE, ResourcePtr>;
     using Ptr = std::shared_ptr<Derived>;
-    ScopedT GetResource(ID_TYPE id, bool scoped = true);
+    ScopedT
+    GetResource(ID_TYPE id, bool scoped = true);
 
-    bool AddNoLock(ResourcePtr resource);
-    bool ReleaseNoLock(ID_TYPE id);
+    bool
+    AddNoLock(ResourcePtr resource);
+    bool
+    ReleaseNoLock(ID_TYPE id);
 
-    virtual bool Add(ResourcePtr resource);
-    virtual bool Release(ID_TYPE id);
-    virtual bool HardDelete(ID_TYPE id);
+    virtual bool
+    Add(ResourcePtr resource);
+    virtual bool
+    Release(ID_TYPE id);
+    virtual bool
+    HardDelete(ID_TYPE id);
 
-    static Derived& GetInstance() {
+    static Derived&
+    GetInstance() {
         static Derived holder;
         return holder;
     }
 
-    virtual void Reset();
+    virtual void
+    Reset();
 
-    virtual void Dump(const std::string& tag = "");
+    virtual void
+    Dump(const std::string& tag = "");
 
  protected:
-    virtual void OnNoRefCallBack(ResourcePtr resource);
+    virtual void
+    OnNoRefCallBack(ResourcePtr resource);
 
-    virtual ResourcePtr Load(ID_TYPE id);
-    virtual ResourcePtr Load(const std::string& name);
+    virtual ResourcePtr
+    Load(ID_TYPE id);
+    virtual ResourcePtr
+    Load(const std::string& name);
     ResourceHolder() = default;
     virtual ~ResourceHolder() = default;
 
@@ -63,8 +75,8 @@ class ResourceHolder {
     IdMapT id_map_;
 };
 
-} // namespace snapshot
-} // namespace engine
-} // namespace milvus
+}  // namespace snapshot
+}  // namespace engine
+}  // namespace milvus
 
 #include "BaseHolders.inl"

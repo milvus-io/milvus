@@ -19,12 +19,13 @@ namespace snapshot {
 bool
 CollectionCommitOperation::DoExecute(Store& store) {
     auto prev_resource = GetPrevResource();
-    if (!prev_resource) return false;
+    if (!prev_resource)
+        return false;
     resource_ = std::make_shared<CollectionCommit>(*prev_resource);
     resource_->ResetStatus();
     if (context_.new_partition_commit) {
-        auto prev_partition_commit = prev_ss_->GetPartitionCommitByPartitionId(
-                context_.new_partition_commit->GetPartitionId());
+        auto prev_partition_commit =
+            prev_ss_->GetPartitionCommitByPartitionId(context_.new_partition_commit->GetPartitionId());
         resource_->GetMappings().erase(prev_partition_commit->GetID());
         resource_->GetMappings().insert(context_.new_partition_commit->GetID());
     } else if (context_.new_schema_commit) {
@@ -39,8 +40,7 @@ PartitionCommitOperation::PartitionCommitOperation(const OperationContext& conte
     : BaseT(context, prev_ss) {
 }
 
-PartitionCommitOperation::PartitionCommitOperation(const OperationContext& context,
-                                                   ID_TYPE collection_id,
+PartitionCommitOperation::PartitionCommitOperation(const OperationContext& context, ID_TYPE collection_id,
                                                    ID_TYPE commit_id)
     : BaseT(context, collection_id, commit_id) {
 }
@@ -58,8 +58,7 @@ PartitionCommitOperation::DoExecute(Store& store) {
         resource_ = std::make_shared<PartitionCommit>(*prev_resource);
         resource_->SetID(0);
         resource_->ResetStatus();
-        auto prev_segment_commit = prev_ss_->GetSegmentCommit(
-                context_.new_segment_commit->GetSegmentId());
+        auto prev_segment_commit = prev_ss_->GetSegmentCommit(context_.new_segment_commit->GetSegmentId());
         if (prev_segment_commit)
             resource_->GetMappings().erase(prev_segment_commit->GetID());
         if (context_.stale_segments.size() > 0) {
@@ -82,8 +81,7 @@ SegmentCommitOperation::SegmentCommitOperation(const OperationContext& context, 
     : BaseT(context, prev_ss) {
 }
 
-SegmentCommitOperation::SegmentCommitOperation(const OperationContext& context,
-                                               ID_TYPE collection_id,
+SegmentCommitOperation::SegmentCommitOperation(const OperationContext& context, ID_TYPE collection_id,
                                                ID_TYPE commit_id)
     : BaseT(context, collection_id, commit_id) {
 }
@@ -96,8 +94,7 @@ SegmentCommitOperation::GetPrevResource() const {
     return nullptr;
 }
 
-SegmentOperation::SegmentOperation(const OperationContext& context, ScopedSnapshotT prev_ss)
-    : BaseT(context, prev_ss) {
+SegmentOperation::SegmentOperation(const OperationContext& context, ScopedSnapshotT prev_ss) : BaseT(context, prev_ss) {
 }
 
 SegmentOperation::SegmentOperation(const OperationContext& context, ID_TYPE collection_id, ID_TYPE commit_id)
@@ -110,7 +107,7 @@ SegmentOperation::DoExecute(Store& store) {
         return false;
     }
     auto prev_num = prev_ss_->GetMaxSegmentNumByPartition(context_.prev_partition->GetID());
-    resource_ = std::make_shared<Segment>(context_.prev_partition->GetID(), prev_num+1);
+    resource_ = std::make_shared<Segment>(context_.prev_partition->GetID(), prev_num + 1);
     AddStep(*resource_);
     return true;
 }
@@ -154,6 +151,6 @@ SegmentFileOperation::DoExecute(Store& store) {
     return true;
 }
 
-} // namespace snapshot
-} // namespace engine
-} // namespace milvus
+}  // namespace snapshot
+}  // namespace engine
+}  // namespace milvus

@@ -20,16 +20,19 @@ namespace snapshot {
 class CollectionCommitOperation : public CommitOperation<CollectionCommit> {
  public:
     using BaseT = CommitOperation<CollectionCommit>;
-    CollectionCommitOperation(OperationContext context, ScopedSnapshotT prev_ss)
-        : BaseT(context, prev_ss) {}
+    CollectionCommitOperation(OperationContext context, ScopedSnapshotT prev_ss) : BaseT(context, prev_ss) {
+    }
     CollectionCommitOperation(OperationContext context, ID_TYPE collection_id, ID_TYPE commit_id = 0)
-        : BaseT(context, collection_id, commit_id) {}
+        : BaseT(context, collection_id, commit_id) {
+    }
 
-    CollectionCommitPtr GetPrevResource() const override {
+    CollectionCommitPtr
+    GetPrevResource() const override {
         return prev_ss_->GetCollectionCommit();
     }
 
-    bool DoExecute(Store&) override;
+    bool
+    DoExecute(Store&) override;
 };
 
 /*
@@ -41,9 +44,11 @@ class PartitionCommitOperation : public CommitOperation<PartitionCommit> {
     PartitionCommitOperation(const OperationContext& context, ScopedSnapshotT prev_ss);
     PartitionCommitOperation(const OperationContext& context, ID_TYPE collection_id, ID_TYPE commit_id = 0);
 
-    PartitionCommitPtr GetPrevResource() const override;
+    PartitionCommitPtr
+    GetPrevResource() const override;
 
-    bool DoExecute(Store&) override;
+    bool
+    DoExecute(Store&) override;
 };
 
 /*
@@ -55,9 +60,11 @@ class SegmentCommitOperation : public CommitOperation<SegmentCommit> {
     SegmentCommitOperation(const OperationContext& context, ScopedSnapshotT prev_ss);
     SegmentCommitOperation(const OperationContext& context, ID_TYPE collection_id, ID_TYPE commit_id = 0);
 
-    SegmentCommit::Ptr GetPrevResource() const override;
+    SegmentCommit::Ptr
+    GetPrevResource() const override;
 
-    bool DoExecute(Store&) override;
+    bool
+    DoExecute(Store&) override;
 };
 
 /*
@@ -69,7 +76,8 @@ class SegmentOperation : public CommitOperation<Segment> {
     SegmentOperation(const OperationContext& context, ScopedSnapshotT prev_ss);
     SegmentOperation(const OperationContext& context, ID_TYPE collection_id, ID_TYPE commit_id = 0);
 
-    bool DoExecute(Store& store) override;
+    bool
+    DoExecute(Store& store) override;
 };
 
 class SegmentFileOperation : public CommitOperation<SegmentFile> {
@@ -78,7 +86,8 @@ class SegmentFileOperation : public CommitOperation<SegmentFile> {
     SegmentFileOperation(const SegmentFileContext& sc, ScopedSnapshotT prev_ss);
     SegmentFileOperation(const SegmentFileContext& sc, ID_TYPE collection_id, ID_TYPE commit_id = 0);
 
-    bool DoExecute(Store& store) override;
+    bool
+    DoExecute(Store& store) override;
 
  protected:
     SegmentFileContext context_;
@@ -87,11 +96,14 @@ class SegmentFileOperation : public CommitOperation<SegmentFile> {
 template <>
 class LoadOperation<Collection> : public Operations {
  public:
-    explicit LoadOperation(const LoadOperationContext& context) :
-       Operations(OperationContext(), ScopedSnapshotT()), context_(context) {}
+    explicit LoadOperation(const LoadOperationContext& context)
+        : Operations(OperationContext(), ScopedSnapshotT()), context_(context) {
+    }
 
-    void ApplyToStore(Store& store) override {
-        if (status_ != OP_PENDING) return;
+    void
+    ApplyToStore(Store& store) override {
+        if (status_ != OP_PENDING)
+            return;
         if (context_.id == 0 && context_.name != "") {
             resource_ = store.GetCollection(context_.name);
         } else {
@@ -100,8 +112,10 @@ class LoadOperation<Collection> : public Operations {
         Done();
     }
 
-    CollectionPtr GetResource() const  {
-        if (status_ == OP_PENDING) return nullptr;
+    CollectionPtr
+    GetResource() const {
+        if (status_ == OP_PENDING)
+            return nullptr;
         return resource_;
     }
 
@@ -110,6 +124,6 @@ class LoadOperation<Collection> : public Operations {
     CollectionPtr resource_;
 };
 
-} // namespace snapshot
-} // namespace engine
-} // namespace milvus
+}  // namespace snapshot
+}  // namespace engine
+}  // namespace milvus

@@ -11,25 +11,25 @@
 
 #pragma once
 
-#include "db/snapshot/Resources.h"
 #include "db/snapshot/ResourceTypes.h"
+#include "db/snapshot/Resources.h"
 
-#include <iostream>
 #include <stdlib.h>
 #include <time.h>
-#include <sstream>
 #include <any>
+#include <functional>
+#include <iomanip>
+#include <iostream>
+#include <map>
+#include <memory>
+#include <sstream>
+#include <string>
+#include <tuple>
 #include <typeindex>
 #include <typeinfo>
 #include <unordered_map>
-#include <functional>
-#include <iomanip>
-#include <map>
-#include <tuple>
-#include <vector>
-#include <memory>
-#include <string>
 #include <utility>
+#include <vector>
 
 namespace milvus {
 namespace engine {
@@ -48,41 +48,36 @@ struct Index<T, std::tuple<U, Types...>> {
     static const std::size_t value = 1 + Index<T, std::tuple<Types...>>::value;
 };
 
-
 class Store {
  public:
-    using MockIDST = std::tuple<ID_TYPE, ID_TYPE, ID_TYPE, ID_TYPE, ID_TYPE, ID_TYPE, ID_TYPE,
-                                ID_TYPE, ID_TYPE, ID_TYPE, ID_TYPE>;
-    using MockResourcesT = std::tuple<CollectionCommit::MapT,
-                                  Collection::MapT,
-                                  SchemaCommit::MapT,
-                                  FieldCommit::MapT,
-                                  Field::MapT,
-                                  FieldElement::MapT,
-                                  PartitionCommit::MapT,
-                                  Partition::MapT,
-                                  SegmentCommit::MapT,
-                                  Segment::MapT,
-                                  SegmentFile::MapT>;
+    using MockIDST =
+        std::tuple<ID_TYPE, ID_TYPE, ID_TYPE, ID_TYPE, ID_TYPE, ID_TYPE, ID_TYPE, ID_TYPE, ID_TYPE, ID_TYPE, ID_TYPE>;
+    using MockResourcesT = std::tuple<CollectionCommit::MapT, Collection::MapT, SchemaCommit::MapT, FieldCommit::MapT,
+                                      Field::MapT, FieldElement::MapT, PartitionCommit::MapT, Partition::MapT,
+                                      SegmentCommit::MapT, Segment::MapT, SegmentFile::MapT>;
 
-    static Store& GetInstance() {
+    static Store&
+    GetInstance() {
         static Store store;
         return store;
     }
 
-    template<typename ...ResourceT>
-    bool DoCommit(ResourceT&&... resources) {
+    template <typename... ResourceT>
+    bool
+    DoCommit(ResourceT&&... resources) {
         auto t = std::make_tuple(std::forward<ResourceT>(resources)...);
         auto& t_size = std::tuple_size<decltype(t)>::value;
-        if (t_size == 0) return false;
+        if (t_size == 0)
+            return false;
         StartTransanction();
-        std::apply([this](auto&&... resource) {((std::cout << CommitResource(resource) << "\n"), ...);}, t);
+        std::apply([this](auto&&... resource) { ((std::cout << CommitResource(resource) << "\n"), ...); }, t);
         FinishTransaction();
         return true;
     }
 
     template <typename OpT>
-    bool DoCommitOperation(OpT& op) {
+    bool
+    DoCommitOperation(OpT& op) {
         for (auto& step_v : op.GetSteps()) {
             auto id = ProcessOperationStep(step_v);
             op.SetStepResult(id);
@@ -90,27 +85,34 @@ class Store {
     }
 
     template <typename OpT>
-    void Apply(OpT& op) {
+    void
+    Apply(OpT& op) {
         op.ApplyToStore(*this);
     }
 
-    void StartTransanction() {}
-    void FinishTransaction() {}
+    void
+    StartTransanction() {
+    }
+    void
+    FinishTransaction() {
+    }
 
-    template<typename ResourceT>
-    bool CommitResource(ResourceT&& resource) {
+    template <typename ResourceT>
+    bool
+    CommitResource(ResourceT&& resource) {
         std::cout << "Commit " << resource.Name << " " << resource.GetID() << std::endl;
         auto res = CreateResource<typename std::remove_reference<ResourceT>::type>(std::move(resource));
-        if (!res) return false;
+        if (!res)
+            return false;
         return true;
     }
 
-    template<typename ResourceT>
+    template <typename ResourceT>
     std::shared_ptr<ResourceT>
     GetResource(ID_TYPE id) {
         auto& resources = std::get<Index<typename ResourceT::MapT, MockResourcesT>::value>(resources_);
         auto it = resources.find(id);
-        if (it== resources.end()) {
+        if (it == resources.end()) {
             return nullptr;
         }
         auto& c = it->second;
@@ -119,7 +121,8 @@ class Store {
         return ret;
     }
 
-    CollectionPtr GetCollection(const std::string& name) {
+    CollectionPtr
+    GetCollection(const std::string& name) {
         auto it = name_collections_.find(name);
         if (it == name_collections_.end()) {
             return nullptr;
@@ -130,7 +133,8 @@ class Store {
         return ret;
     }
 
-    bool RemoveCollection(ID_TYPE id) {
+    bool
+    RemoveCollection(ID_TYPE id) {
         auto& resources = std::get<Collection::MapT>(resources_);
         auto it = resources.find(id);
         if (it == resources.end()) {
@@ -144,8 +148,9 @@ class Store {
         return true;
     }
 
-    template<typename ResourceT>
-    bool RemoveResource(ID_TYPE id) {
+    template <typename ResourceT>
+    bool
+    RemoveResource(ID_TYPE id) {
         auto& resources = std::get<Index<typename ResourceT::MapT, MockResourcesT>::value>(resources_);
         auto it = resources.find(id);
         if (it == resources.end()) {
@@ -157,7 +162,8 @@ class Store {
         return true;
     }
 
-    IDS_TYPE AllActiveCollectionIds(bool reversed = true) const {
+    IDS_TYPE
+    AllActiveCollectionIds(bool reversed = true) const {
         IDS_TYPE ids;
         auto& resources = std::get<Collection::MapT>(resources_);
         if (!reversed) {
@@ -172,7 +178,8 @@ class Store {
         return ids;
     }
 
-    IDS_TYPE AllActiveCollectionCommitIds(ID_TYPE collection_id, bool reversed = true) const {
+    IDS_TYPE
+    AllActiveCollectionCommitIds(ID_TYPE collection_id, bool reversed = true) const {
         IDS_TYPE ids;
         auto& resources = std::get<CollectionCommit::MapT>(resources_);
         if (!reversed) {
@@ -191,7 +198,8 @@ class Store {
         return ids;
     }
 
-    CollectionPtr CreateCollection(Collection&& collection) {
+    CollectionPtr
+    CreateCollection(Collection&& collection) {
         auto& resources = std::get<Collection::MapT>(resources_);
         auto c = std::make_shared<Collection>(collection);
         auto& id = std::get<Index<Collection::MapT, MockResourcesT>::value>(ids_);
@@ -212,7 +220,6 @@ class Store {
         resources[res->GetID()] = res;
         return GetResource<ResourceT>(res->GetID());
     }
-
 
     template <typename ResourceT>
     typename ResourceT::Ptr
@@ -267,15 +274,16 @@ class Store {
     /*     return collection; */
     /* } */
 
-    void Mock() {
+    void
+    Mock() {
         DoReset();
         DoMock();
     }
 
  private:
-    ID_TYPE ProcessOperationStep(const std::any& step_v) {
-        if (const auto it = any_flush_vistors_.find(std::type_index(step_v.type()));
-                it != any_flush_vistors_.cend()) {
+    ID_TYPE
+    ProcessOperationStep(const std::any& step_v) {
+        if (const auto it = any_flush_vistors_.find(std::type_index(step_v.type())); it != any_flush_vistors_.cend()) {
             return it->second(step_v);
         } else {
             std::cerr << "Unregisted step type " << std::quoted(step_v.type().name());
@@ -283,24 +291,21 @@ class Store {
         }
     }
 
-    template<class T, class F>
+    template <class T, class F>
     inline std::pair<const std::type_index, std::function<ID_TYPE(std::any const&)>>
-        to_any_visitor(F const &f) {
-        return {
-            std::type_index(typeid(T)),
-            [g = f](std::any const &a) -> ID_TYPE {
-                if constexpr (std::is_void_v<T>)
-                    return g();
-                else
-                    return g(std::any_cast<T const&>(a));
-            }
-        };
+    to_any_visitor(F const& f) {
+        return {std::type_index(typeid(T)), [g = f](std::any const& a) -> ID_TYPE {
+                    if constexpr (std::is_void_v<T>)
+                        return g();
+                    else
+                        return g(std::any_cast<T const&>(a));
+                }};
     }
 
-    template<class T, class F>
-    inline void register_any_visitor(F const& f) {
-        std::cout << "Register visitor for type "
-                  << std::quoted(typeid(T).name()) << '\n';
+    template <class T, class F>
+    inline void
+    register_any_visitor(F const& f) {
+        std::cout << "Register visitor for type " << std::quoted(typeid(T).name()) << '\n';
         any_flush_vistors_.insert(to_any_visitor<T>(f));
     }
 
@@ -309,9 +314,8 @@ class Store {
             auto n = CreateResource<Collection>(Collection(*c));
             return n->GetID();
         });
-        register_any_visitor<CollectionCommit::Ptr>([this](auto c) {
-            return CreateResource<CollectionCommit>(CollectionCommit(*c))->GetID();
-        });
+        register_any_visitor<CollectionCommit::Ptr>(
+            [this](auto c) { return CreateResource<CollectionCommit>(CollectionCommit(*c))->GetID(); });
         /* register_any_visitor<SchemaCommit::Ptr>([this](auto c) { */
         /*     CreateResource<SchemaCommit>(SchemaCommit(*c)); */
         /* }); */
@@ -324,25 +328,22 @@ class Store {
         /* register_any_visitor<FieldElement::Ptr>([this](auto c) { */
         /*     CreateResource<FieldElement>(FieldElement(*c)); */
         /* }); */
-        register_any_visitor<PartitionCommit::Ptr>([this](auto c) {
-            return CreateResource<PartitionCommit>(PartitionCommit(*c))->GetID();
-        });
+        register_any_visitor<PartitionCommit::Ptr>(
+            [this](auto c) { return CreateResource<PartitionCommit>(PartitionCommit(*c))->GetID(); });
         /* register_any_visitor<Partition::Ptr>([this](auto c) { */
         /*     CreateResource<Partition>(Partition(*c)); */
         /* }); */
-        register_any_visitor<Segment::Ptr>([this](auto c) {
-            return CreateResource<Segment>(Segment(*c))->GetID();
-        });
-        register_any_visitor<SegmentCommit::Ptr>([this](auto c) {
-            return CreateResource<SegmentCommit>(SegmentCommit(*c))->GetID();
-        });
+        register_any_visitor<Segment::Ptr>([this](auto c) { return CreateResource<Segment>(Segment(*c))->GetID(); });
+        register_any_visitor<SegmentCommit::Ptr>(
+            [this](auto c) { return CreateResource<SegmentCommit>(SegmentCommit(*c))->GetID(); });
         register_any_visitor<SegmentFile::Ptr>([this](auto c) {
             auto n = CreateResource<SegmentFile>(SegmentFile(*c));
             return n->GetID();
         });
     }
 
-    void DoMock() {
+    void
+    DoMock() {
         unsigned int seed = 123;
         auto random = rand_r(&seed) % 2 + 4;
         std::vector<std::any> all_records;
@@ -368,8 +369,8 @@ class Store {
                     fename << "fe_" << fei << "_";
                     fename << std::get<Index<FieldElement::MapT, MockResourcesT>::value>(ids_) + 1;
 
-                    auto element = CreateResource<FieldElement>(FieldElement(c->GetID(),
-                                field->GetID(), fename.str(), fei));
+                    auto element =
+                        CreateResource<FieldElement>(FieldElement(c->GetID(), field->GetID(), fename.str(), fei));
                     all_records.push_back(element);
                     f_c_m.insert(element->GetID());
                 }
@@ -381,7 +382,6 @@ class Store {
             auto schema = CreateResource<SchemaCommit>(SchemaCommit(c->GetID(), schema_c_m));
             all_records.push_back(schema);
 
-
             auto random_partitions = rand_r(&seed) % 2 + 1;
             MappingT c_c_m;
             for (auto pi = 1; pi <= random_partitions; ++pi) {
@@ -389,7 +389,6 @@ class Store {
                 pname << "p_" << i << "_" << std::get<Index<Partition::MapT, MockResourcesT>::value>(ids_) + 1;
                 auto p = CreateResource<Partition>(Partition(pname.str(), c->GetID()));
                 all_records.push_back(p);
-
 
                 auto random_segments = rand_r(&seed) % 2 + 1;
                 MappingT p_c_m;
@@ -408,8 +407,8 @@ class Store {
                             s_c_m.insert(sf->GetID());
                         }
                     }
-                    auto s_c = CreateResource<SegmentCommit>(SegmentCommit(schema->GetID(),
-                                p->GetID(), s->GetID(), s_c_m));
+                    auto s_c =
+                        CreateResource<SegmentCommit>(SegmentCommit(schema->GetID(), p->GetID(), s->GetID(), s_c_m));
                     all_records.push_back(s_c);
                     p_c_m.insert(s_c->GetID());
                 }
@@ -431,7 +430,8 @@ class Store {
         }
     }
 
-    void DoReset() {
+    void
+    DoReset() {
         ids_ = MockIDST();
         resources_ = MockResourcesT();
         name_collections_.clear();
@@ -443,7 +443,6 @@ class Store {
     std::unordered_map<std::type_index, std::function<ID_TYPE(std::any const&)>> any_flush_vistors_;
 };
 
-
-} // namespace snapshot
-} // namespace engine
-} // namespace milvus
+}  // namespace snapshot
+}  // namespace engine
+}  // namespace milvus

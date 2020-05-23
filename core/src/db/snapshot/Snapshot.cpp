@@ -10,8 +10,8 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
 #include "db/snapshot/Snapshot.h"
-#include "db/snapshot/Store.h"
 #include "db/snapshot/ResourceHolders.h"
+#include "db/snapshot/Store.h"
 
 namespace milvus {
 namespace engine {
@@ -19,35 +19,36 @@ namespace snapshot {
 
 void
 Snapshot::DumpSegments(const std::string& tag) {
-    std::cout << typeid(*this).name() << " DumpSegments Start [" << tag <<  "]:" << segments_.size() << std::endl;
+    std::cout << typeid(*this).name() << " DumpSegments Start [" << tag << "]:" << segments_.size() << std::endl;
     for (auto& kv : segments_) {
         /* std::cout << "\t" << kv.first << " RefCnt " << kv.second->RefCnt() << std::endl; */
         std::cout << "\t" << kv.second->ToString() << std::endl;
     }
-    std::cout << typeid(*this).name() << " DumpSegments   End [" << tag <<  "]" << std::endl;
+    std::cout << typeid(*this).name() << " DumpSegments   End [" << tag << "]" << std::endl;
 }
 
 void
 Snapshot::DumpPartitionCommits(const std::string& tag) {
     std::cout << typeid(*this).name() << " DumpPartitionCommits Start [";
-    std::cout << tag <<  "]:" << partition_commits_.size() << std::endl;
+    std::cout << tag << "]:" << partition_commits_.size() << std::endl;
     for (auto& kv : partition_commits_) {
         std::cout << "\t" << kv.second->ToString() << std::endl;
     }
-    std::cout << typeid(*this).name() << " DumpPartitionCommits   End [" << tag <<  "]" << std::endl;
+    std::cout << typeid(*this).name() << " DumpPartitionCommits   End [" << tag << "]" << std::endl;
 }
 
 void
 Snapshot::DumpSegmentCommits(const std::string& tag) {
     std::cout << typeid(*this).name() << " DumpSegmentCommits Start [";
-    std::cout << tag <<  "]:" << segment_commits_.size() << std::endl;
+    std::cout << tag << "]:" << segment_commits_.size() << std::endl;
     for (auto& kv : segment_commits_) {
         std::cout << "\t" << kv.second->ToString() << std::endl;
     }
-    std::cout << typeid(*this).name() << " DumpSegmentCommits   End [" << tag <<  "]" << std::endl;
+    std::cout << typeid(*this).name() << " DumpSegmentCommits   End [" << tag << "]" << std::endl;
 }
 
-void Snapshot::RefAll() {
+void
+Snapshot::RefAll() {
     collection_commit_->Ref();
     for (auto& schema : schema_commits_) {
         schema.second->Ref();
@@ -79,7 +80,8 @@ void Snapshot::RefAll() {
     }
 }
 
-void Snapshot::UnRefAll() {
+void
+Snapshot::UnRefAll() {
     /* std::cout << this << " UnRefAll " << collection_commit_->GetID() << " RefCnt=" << RefCnt() << std::endl; */
     collection_commit_->UnRef();
     for (auto& schema : schema_commits_) {
@@ -115,7 +117,7 @@ void Snapshot::UnRefAll() {
 Snapshot::Snapshot(ID_TYPE id) {
     collection_commit_ = CollectionCommitsHolder::GetInstance().GetResource(id, false);
     assert(collection_commit_);
-    auto& schema_holder =  SchemaCommitsHolder::GetInstance();
+    auto& schema_holder = SchemaCommitsHolder::GetInstance();
     auto current_schema = schema_holder.GetResource(collection_commit_->GetSchemaId(), false);
     schema_commits_[current_schema->GetID()] = current_schema;
     current_schema_id_ = current_schema->GetID();
@@ -124,7 +126,7 @@ Snapshot::Snapshot(ID_TYPE id) {
     auto& field_elements_holder = FieldElementsHolder::GetInstance();
 
     collection_ = CollectionsHolder::GetInstance().GetResource(collection_commit_->GetCollectionId(), false);
-    auto& mappings =  collection_commit_->GetMappings();
+    auto& mappings = collection_commit_->GetMappings();
     auto& partition_commits_holder = PartitionCommitsHolder::GetInstance();
     auto& partitions_holder = PartitionsHolder::GetInstance();
     auto& segments_holder = SegmentsHolder::GetInstance();
@@ -159,8 +161,7 @@ Snapshot::Snapshot(ID_TYPE id) {
                 auto entry = element_segfiles_map_.find(segment_file->GetFieldElementId());
                 if (entry == element_segfiles_map_.end()) {
                     element_segfiles_map_[segment_file->GetFieldElementId()] = {
-                        {segment_file->GetSegmentId(), segment_file->GetID()}
-                    };
+                        {segment_file->GetSegmentId(), segment_file->GetID()}};
                 } else {
                     entry->second[segment_file->GetSegmentId()] = segment_file->GetID();
                 }
@@ -169,9 +170,10 @@ Snapshot::Snapshot(ID_TYPE id) {
     }
 
     for (auto& kv : schema_commits_) {
-        if (kv.first > latest_schema_commit_id_) latest_schema_commit_id_ = kv.first;
+        if (kv.first > latest_schema_commit_id_)
+            latest_schema_commit_id_ = kv.first;
         auto& schema_commit = kv.second;
-        auto& s_c_m =  current_schema->GetMappings();
+        auto& s_c_m = current_schema->GetMappings();
         for (auto field_commit_id : s_c_m) {
             auto field_commit = field_commits_holder.GetResource(field_commit_id, false);
             field_commits_[field_commit_id] = field_commit;
@@ -204,6 +206,6 @@ Snapshot::Snapshot(ID_TYPE id) {
     RefAll();
 }
 
-} // namespace snapshot
-} // namespace engine
-} // namespace milvus
+}  // namespace snapshot
+}  // namespace engine
+}  // namespace milvus

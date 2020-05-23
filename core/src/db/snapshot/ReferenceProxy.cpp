@@ -17,14 +17,16 @@ namespace milvus {
 namespace engine {
 namespace snapshot {
 
-
-void ReferenceProxy::Ref() {
+void
+ReferenceProxy::Ref() {
     refcnt_ += 1;
     /* std::cout << this << " refcnt = " << refcnt_ << std::endl; */
 }
 
-void ReferenceProxy::UnRef() {
-    if (refcnt_ == 0) return;
+void
+ReferenceProxy::UnRef() {
+    if (refcnt_ == 0)
+        return;
     refcnt_ -= 1;
     /* std::cout << this << " refcnt = " << refcnt_ << std::endl; */
     if (refcnt_ == 0) {
@@ -34,7 +36,8 @@ void ReferenceProxy::UnRef() {
     }
 }
 
-void ReferenceProxy::RegisterOnNoRefCB(OnNoRefCBF cb) {
+void
+ReferenceProxy::RegisterOnNoRefCB(OnNoRefCBF cb) {
     on_no_ref_cbs_.emplace_back(cb);
 }
 
@@ -42,6 +45,6 @@ ReferenceProxy::~ReferenceProxy() {
     /* OnDeRef(); */
 }
 
-} // namespace snapshot
-} // namespace engine
-} // namespace milvus
+}  // namespace snapshot
+}  // namespace engine
+}  // namespace milvus

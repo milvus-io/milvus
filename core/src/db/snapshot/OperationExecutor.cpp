@@ -16,8 +16,8 @@ namespace milvus {
 namespace engine {
 namespace snapshot {
 
-
-OperationExecutor::OperationExecutor() {}
+OperationExecutor::OperationExecutor() {
+}
 
 OperationExecutor::~OperationExecutor() {
     Stop();
@@ -31,7 +31,8 @@ OperationExecutor::GetInstance() {
 
 bool
 OperationExecutor::Submit(OperationsPtr operation, bool sync) {
-    if (!operation) return true;
+    if (!operation)
+        return true;
     /* Store::GetInstance().Apply(*operation); */
     /* return true; */
     Enqueue(operation);
@@ -42,7 +43,8 @@ OperationExecutor::Submit(OperationsPtr operation, bool sync) {
 
 void
 OperationExecutor::Start() {
-    if (executor_) return;
+    if (executor_)
+        return;
     auto queue = std::make_shared<OperationQueueT>();
     auto t = std::make_shared<std::thread>(&OperationExecutor::ThreadMain, this, queue);
     executor_ = std::make_shared<Executor>(t, queue);
@@ -52,7 +54,8 @@ OperationExecutor::Start() {
 
 void
 OperationExecutor::Stop() {
-    if (stopped_ || !executor_) return;
+    if (stopped_ || !executor_)
+        return;
 
     executor_->execute_queue->Put(nullptr);
     executor_->execute_thread->join();
@@ -69,7 +72,8 @@ OperationExecutor::Enqueue(OperationsPtr operation) {
 
 void
 OperationExecutor::ThreadMain(OperationQueuePtr queue) {
-    if (!queue) return;
+    if (!queue)
+        return;
 
     while (true) {
         OperationsPtr operation = queue->Take();
@@ -83,7 +87,6 @@ OperationExecutor::ThreadMain(OperationQueuePtr queue) {
     }
 }
 
-
-} // namespace snapshot
-} // namespace engine
-} // namespace milvus
+}  // namespace snapshot
+}  // namespace engine
+}  // namespace milvus

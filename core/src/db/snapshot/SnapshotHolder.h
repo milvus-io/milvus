@@ -11,11 +11,11 @@
 
 #pragma once
 
-#include "db/snapshot/Snapshot.h"
-#include <map>
-#include <vector>
-#include <memory>
 #include <limits>
+#include <map>
+#include <memory>
+#include <vector>
+#include "db/snapshot/Snapshot.h"
 
 namespace milvus {
 namespace engine {
@@ -27,30 +27,41 @@ class SnapshotHolder {
 
     explicit SnapshotHolder(ID_TYPE collection_id, GCHandler gc_handler = nullptr, size_t num_versions = 1);
 
-    ID_TYPE GetID() const { return collection_id_; }
-    bool Add(ID_TYPE id);
+    ID_TYPE
+    GetID() const {
+        return collection_id_;
+    }
+    bool
+    Add(ID_TYPE id);
 
-    void BackgroundGC();
+    void
+    BackgroundGC();
 
-    void NotifyDone();
+    void
+    NotifyDone();
 
-    ScopedSnapshotT GetSnapshot(ID_TYPE id = 0, bool scoped = true);
+    ScopedSnapshotT
+    GetSnapshot(ID_TYPE id = 0, bool scoped = true);
 
-    void GCHandlerTestCallBack(Snapshot::Ptr ss) {
+    void
+    GCHandlerTestCallBack(Snapshot::Ptr ss) {
         std::unique_lock<std::mutex> lock(gcmutex_);
         to_release_.push_back(ss);
         lock.unlock();
         cv_.notify_one();
     }
 
-    bool SetGCHandler(GCHandler gc_handler) {
+    bool
+    SetGCHandler(GCHandler gc_handler) {
         gc_handler_ = gc_handler;
     }
 
  private:
-    CollectionCommitPtr LoadNoLock(ID_TYPE collection_commit_id);
+    CollectionCommitPtr
+    LoadNoLock(ID_TYPE collection_commit_id);
 
-    void ReadyForRelease(Snapshot::Ptr ss) {
+    void
+    ReadyForRelease(Snapshot::Ptr ss) {
         if (gc_handler_) {
             gc_handler_(ss);
         }
@@ -71,6 +82,6 @@ class SnapshotHolder {
 
 using SnapshotHolderPtr = std::shared_ptr<SnapshotHolder>;
 
-} // namespace snapshot
-} // namespace engine
-} // namespace milvus
+}  // namespace snapshot
+}  // namespace engine
+}  // namespace milvus

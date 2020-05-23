@@ -10,9 +10,9 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
 #include "db/snapshot/Operations.h"
-#include "db/snapshot/Snapshots.h"
-#include "db/snapshot/OperationExecutor.h"
 #include <chrono>
+#include "db/snapshot/OperationExecutor.h"
+#include "db/snapshot/Snapshots.h"
 
 namespace milvus {
 namespace engine {
@@ -21,11 +21,11 @@ namespace snapshot {
 static ID_TYPE UID = 1;
 
 Operations::Operations(const OperationContext& context, ScopedSnapshotT prev_ss)
-    : context_(context), prev_ss_(prev_ss), uid_(UID++) {}
+    : context_(context), prev_ss_(prev_ss), uid_(UID++) {
+}
 
-Operations::Operations(const OperationContext& context, ID_TYPE collection_id, ID_TYPE commit_id) :
-    context_(context), prev_ss_(Snapshots::GetInstance().GetSnapshot(collection_id, commit_id)),
-    uid_(UID++) {
+Operations::Operations(const OperationContext& context, ID_TYPE collection_id, ID_TYPE commit_id)
+    : context_(context), prev_ss_(Snapshots::GetInstance().GetSnapshot(collection_id, commit_id)), uid_(UID++) {
 }
 
 ID_TYPE
@@ -42,9 +42,7 @@ bool
 Operations::WaitToFinish() {
     std::unique_lock<std::mutex> lock(finish_mtx_);
     /* std::cout << std::this_thread::get_id() << " Start Waiting Operation " << this->GetID() << std::endl; */
-    finish_cond_.wait(lock, [this] {
-            return status_ != OP_PENDING;
-    });
+    finish_cond_.wait(lock, [this] { return status_ != OP_PENDING; });
     /* std::cout << std::this_thread::get_id() << " End   Waiting Operation " << this->GetID() << std::endl; */
     return true;
 }
@@ -74,8 +72,9 @@ Operations::IsStale() const {
 
 ScopedSnapshotT
 Operations::GetSnapshot() const {
-    //PXU TODO: Check is result ready or valid
-    if (ids_.size() == 0) return ScopedSnapshotT();
+    // PXU TODO: Check is result ready or valid
+    if (ids_.size() == 0)
+        return ScopedSnapshotT();
     return Snapshots::GetInstance().GetSnapshot(prev_ss_->GetCollectionId(), ids_.back());
 }
 
@@ -113,10 +112,11 @@ Operations::DoExecute(Store& store) {
 bool
 Operations::PostExecute(Store& store) {
     auto ok = store.DoCommitOperation(*this);
-    if (!ok) status_ = OP_FAIL_FLUSH_META;
+    if (!ok)
+        status_ = OP_FAIL_FLUSH_META;
     return ok;
 }
 
-} // namespace snapshot
-} // namespace engine
-} // namespace milvus
+}  // namespace snapshot
+}  // namespace engine
+}  // namespace milvus

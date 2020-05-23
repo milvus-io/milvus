@@ -16,10 +16,11 @@ namespace milvus {
 namespace engine {
 namespace snapshot {
 
-template<typename ...ResourceT>
-bool Snapshots::Flush(ResourceT&&... resources) {
+template <typename... ResourceT>
+bool
+Snapshots::Flush(ResourceT&&... resources) {
     auto t = std::make_tuple(resources...);
-    std::apply([](auto&&... args) {((std::cout << args << "\n"), ...);}, t);
+    std::apply([](auto&&... args) { ((std::cout << args << "\n"), ...); }, t);
     return true;
 }
 
@@ -40,14 +41,16 @@ Snapshots::DropCollection(const std::string& name) {
 ScopedSnapshotT
 Snapshots::GetSnapshot(ID_TYPE collection_id, ID_TYPE id, bool scoped) {
     auto holder = GetHolder(collection_id);
-    if (!holder) return ScopedSnapshotT();
+    if (!holder)
+        return ScopedSnapshotT();
     return holder->GetSnapshot(id, scoped);
 }
 
 ScopedSnapshotT
 Snapshots::GetSnapshot(const std::string& name, ID_TYPE id, bool scoped) {
     auto holder = GetHolder(name);
-    if (!holder) return ScopedSnapshotT();
+    if (!holder)
+        return ScopedSnapshotT();
     return holder->GetSnapshot(id, scoped);
 }
 
@@ -64,7 +67,8 @@ Snapshots::GetCollectionIds() const {
 bool
 Snapshots::Close(ID_TYPE collection_id) {
     auto ss = GetSnapshot(collection_id);
-    if (!ss) return false;
+    if (!ss)
+        return false;
     auto name = ss->GetName();
     std::unique_lock<std::shared_timed_mutex> lock(mutex_);
     holders_.erase(collection_id);
@@ -86,8 +90,8 @@ Snapshots::LoadNoLock(ID_TYPE collection_id) {
     if (collection_commit_ids.size() == 0) {
         return nullptr;
     }
-    auto holder = std::make_shared<SnapshotHolder>(collection_id,
-            std::bind(&Snapshots::SnapshotGCCallback, this, std::placeholders::_1));
+    auto holder = std::make_shared<SnapshotHolder>(
+        collection_id, std::bind(&Snapshots::SnapshotGCCallback, this, std::placeholders::_1));
     for (auto c_c_id : collection_commit_ids) {
         holder->Add(c_c_id);
     }
@@ -119,7 +123,8 @@ Snapshots::GetHolder(const std::string& name) {
     auto op = std::make_shared<LoadOperation<Collection>>(context);
     op->Push();
     auto c = op->GetResource();
-    if (!c) return nullptr;
+    if (!c)
+        return nullptr;
     return GetHolder(c->GetID());
 }
 
@@ -128,10 +133,12 @@ Snapshots::GetHolder(ID_TYPE collection_id) {
     {
         std::unique_lock<std::shared_timed_mutex> lock(mutex_);
         auto holder = GetHolderNoLock(collection_id);
-        if (holder) return holder;
+        if (holder)
+            return holder;
     }
     auto holder = LoadNoLock(collection_id);
-    if (!holder) return nullptr;
+    if (!holder)
+        return nullptr;
 
     std::unique_lock<std::shared_timed_mutex> lock(mutex_);
     holders_[collection_id] = holder;
@@ -160,10 +167,10 @@ void
 Snapshots::SnapshotGCCallback(Snapshot::Ptr ss_ptr) {
     /* to_release_.push_back(ss_ptr); */
     ss_ptr->UnRef();
-    std::cout << &(*ss_ptr) << " Snapshot " << ss_ptr->GetID()
-        << " RefCnt = " << ss_ptr->RefCnt() << " To be removed" << std::endl;
+    std::cout << &(*ss_ptr) << " Snapshot " << ss_ptr->GetID() << " RefCnt = " << ss_ptr->RefCnt() << " To be removed"
+              << std::endl;
 }
 
-} // namespace snapshot
-} // namespace engine
-} // namespace milvus
+}  // namespace snapshot
+}  // namespace engine
+}  // namespace milvus
