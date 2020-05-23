@@ -679,6 +679,109 @@ WebRequestHandler::ProcessBoolQueryJson(const nlohmann::json& query_json, query:
     }
 }
 
+void
+ConvertRowToColumnJson(const std::vector<engine::AttrsData>& row_attrs, std::vector<std::string>& field_names,
+                       const int64_t row_num, nlohmann::json& column_attrs_json) {
+    if (field_names.size() == 0) {
+        if (row_attrs.size() > 0) {
+            auto attr_it = row_attrs[0].attr_type_.begin();
+            for (; attr_it != row_attrs[0].attr_type_.end(); attr_it++) {
+                field_names.emplace_back(attr_it->first);
+            }
+        }
+    }
+
+    for (uint64_t i = 0; i < field_names.size() - 1; i++) {
+        std::vector<int64_t> int_data;
+        std::vector<double> double_data;
+        for (auto& attr : row_attrs) {
+            int64_t int_value;
+            double double_value;
+            auto attr_data = attr.attr_data_.at(field_names[i]);
+            switch (attr.attr_type_.at(field_names[i])) {
+                case engine::meta::hybrid::DataType::INT8: {
+                    if (attr_data.size() == sizeof(int8_t)) {
+                        int_value = attr_data[0];
+                        int_data.emplace_back(int_value);
+                    }
+                    break;
+                }
+                case engine::meta::hybrid::DataType::INT16: {
+                    if (attr_data.size() == sizeof(int16_t)) {
+                        memcpy(&int_value, attr_data.data(), sizeof(int16_t));
+                        int_data.emplace_back(int_value);
+                    }
+                    break;
+                }
+                case engine::meta::hybrid::DataType::INT32: {
+                    if (attr_data.size() == sizeof(int32_t)) {
+                        memcpy(&int_value, attr_data.data(), sizeof(int32_t));
+                        int_data.emplace_back(int_value);
+                    }
+                    break;
+                }
+                case engine::meta::hybrid::DataType::INT64: {
+                    if (attr_data.size() == sizeof(int64_t)) {
+                        memcpy(&int_value, attr_data.data(), sizeof(int64_t));
+                        int_data.emplace_back(int_value);
+                    }
+                    break;
+                }
+                case engine::meta::hybrid::DataType::FLOAT: {
+                    if (attr_data.size() == sizeof(float)) {
+                        float float_value;
+                        memcpy(&float_value, attr_data.data(), sizeof(float));
+                        double_value = float_value;
+                        double_data.emplace_back(double_value);
+                    }
+                    break;
+                }
+                case engine::meta::hybrid::DataType::DOUBLE: {
+                    if (attr_data.size() == sizeof(double)) {
+                        memcpy(&double_value, attr_data.data(), sizeof(double));
+                        double_data.emplace_back(double_value);
+                    }
+                    break;
+                }
+                default: { return; }
+            }
+        }
+        if (int_data.size() > 0) {
+            if (row_num == -1) {
+                nlohmann::json int_data_json(int_data);
+                column_attrs_json[field_names[i]] = int_data_json;
+            } else {
+                nlohmann::json topk_int_result;
+                int64_t topk = int_data.size() / row_num;
+                for (int64_t j = 0; j < row_num; j++) {
+                    std::vector<int64_t> one_int_result(topk);
+                    memcpy(one_int_result.data(), int_data.data() + j * topk, sizeof(int64_t) * topk);
+                    nlohmann::json one_int_result_json(one_int_result);
+                    std::string tag = "top" + std::to_string(j);
+                    topk_int_result[tag] = one_int_result_json;
+                }
+                column_attrs_json[field_names[i]] = topk_int_result;
+            }
+        } else if (double_data.size() > 0) {
+            if (row_num == -1) {
+                nlohmann::json double_data_json(double_data);
+                column_attrs_json[field_names[i]] = double_data_json;
+            } else {
+                nlohmann::json topk_double_result;
+                int64_t topk = int_data.size() / row_num;
+                for (int64_t j = 0; j < row_num; j++) {
+                    std::vector<double> one_double_result(topk);
+                    memcpy(one_double_result.data(), double_data.data() + j * topk, sizeof(double) * topk);
+                    nlohmann::json one_double_result_json(one_double_result);
+                    std::string tag = "top" + std::to_string(j);
+                    topk_double_result[tag] = one_double_result_json;
+                }
+                column_attrs_json[field_names[i]] = topk_double_result;
+            }
+        }
+    }
+}
+
 Status
 WebRequestHandler::HybridSearch(const std::string& collection_name, const nlohmann::json& json,
                                 std::string& result_str) {
@@ -689,9 +792,17 @@ WebRequestHandler::HybridSearch(const std::string& collection_name, const nlohma
         return Status{UNEXPECTED_ERROR, "DescribeHybridCollection failed"};
     }
 
+    milvus::json extra_params;
+    if (json.contains("fields")) {
+        if (json["fields"].is_array()) {
+            extra_params["fields"] = json["fields"];
+        }
+    }
+    auto query_json = json["query"];
+
     std::vector<std::string> partition_tags;
-    if (json.contains("partition_tags")) {
-        auto tags = json["partition_tags"];
+    if (query_json.contains("partition_tags")) {
+        auto tags = query_json["partition_tags"];
         if (!tags.is_null() && !tags.is_array()) {
             return Status(BODY_PARSE_FAIL, "Field \"partition_tags\" must be a array");
         }
@@ -701,8 +812,8 @@ WebRequestHandler::HybridSearch(const std::string& collection_name, const nlohma
         }
     }
 
-    if (json.contains("bool")) {
-        auto boolean_query_json = json["bool"];
+    if (query_json.contains("bool")) {
+        auto boolean_query_json = query_json["bool"];
         query::BooleanQueryPtr boolean_query = std::make_shared<query::BooleanQuery>();
 
         status = ProcessBoolQueryJson(boolean_query_json, boolean_query);
@@ -713,9 +824,10 @@ WebRequestHandler::HybridSearch(const std::string& collection_name, const nlohma
         query::GenBinaryQuery(boolean_query, general_query->bin);
 
         context::HybridSearchContextPtr hybrid_search_context = std::make_shared<context::HybridSearchContext>();
-        TopKQueryResult result;
+        engine::QueryResult result;
+        std::vector<std::string> field_names;
         status = request_handler_.HybridSearch(context_ptr_, hybrid_search_context, collection_name, partition_tags,
-                                               general_query, result);
+                                               general_query, extra_params, field_names, result);
 
         if (!status.ok()) {
             return status;
@@ -729,18 +841,21 @@ WebRequestHandler::HybridSearch(const std::string& collection_name, const nlohma
             return Status::OK();
         }
 
-        auto step = result.id_list_.size() / result.row_num_;
+        auto step = result.result_ids_.size() / result.row_num_;
         nlohmann::json search_result_json;
         for (size_t i = 0; i < result.row_num_; i++) {
             nlohmann::json raw_result_json;
             for (size_t j = 0; j < step; j++) {
                 nlohmann::json one_result_json;
-                one_result_json["id"] = std::to_string(result.id_list_.at(i * step + j));
-                one_result_json["distance"] = std::to_string(result.distance_list_.at(i * step + j));
+                one_result_json["id"] = std::to_string(result.result_ids_.at(i * step + j));
+                one_result_json["distance"] = std::to_string(result.result_distances_.at(i * step + j));
                 raw_result_json.emplace_back(one_result_json);
             }
             search_result_json.emplace_back(raw_result_json);
         }
+        nlohmann::json attr_json;
+        ConvertRowToColumnJson(result.attrs_, field_names, result.row_num_, attr_json);
+        result_json["Entity"] = attr_json;
         result_json["result"] = search_result_json;
         result_str = result_json.dump();
     }
@@ -775,6 +890,39 @@ WebRequestHandler::DeleteByIDs(const std::string& collection_name, const nlohman
     result_str = result_json.dump();
 
     return status;
+}
+
+Status
+WebRequestHandler::GetEntityByIDs(const std::string& collection_name, const std::vector<int64_t>& ids,
+                                  nlohmann::json& json_out) {
+    std::vector<engine::VectorsData> vector_batch;
+    std::vector<engine::AttrsData> attr_batch;
+    auto status = request_handler_.GetEntityByID(context_ptr_, collection_name, ids, attr_batch, vector_batch);
+    if (!status.ok()) {
+        return status;
+    }
+
+    bool bin;
+    status = IsBinaryCollection(collection_name, bin);
+    if (!status.ok()) {
+        return status;
+    }
+
+    nlohmann::json vectors_json, attrs_json;
+    for (size_t i = 0; i < vector_batch.size(); i++) {
+        nlohmann::json vector_json;
+        if (bin) {
+            vector_json["vector"] = vector_batch.at(i).binary_data_;
+        } else {
+            vector_json["vector"] = vector_batch.at(i).float_data_;
+        }
+        vector_json["id"] = std::to_string(ids[i]);
+        vectors_json.push_back(vector_json);
+    }
+    std::vector<std::string> field_names;
+    ConvertRowToColumnJson(attr_batch, field_names, -1, attrs_json);
+    json_out["vectors"] = vectors_json;
+    json_out["attributes"] = attrs_json;
 }
 
 Status
@@ -1693,6 +1841,44 @@ WebRequestHandler::InsertEntity(const OString& collection_name, const milvus::se
 }
 
 StatusDto::ObjectWrapper
+WebRequestHandler::GetEntity(const milvus::server::web::OString& collection_name,
+                             const milvus::server::web::OQueryParams& query_params,
+                             milvus::server::web::OString& response) {
+    auto status = Status::OK();
+    try {
+        auto query_ids = query_params.get("ids");
+        if (query_ids == nullptr || query_ids.get() == nullptr) {
+            RETURN_STATUS_DTO(QUERY_PARAM_LOSS, "Query param ids is required.");
+        }
+
+        std::vector<std::string> ids;
+        StringHelpFunctions::SplitStringByDelimeter(query_ids->c_str(), ",", ids);
+        std::vector<int64_t> entity_ids;
+        for (auto& id : ids) {
+            entity_ids.push_back(std::stol(id));
+        }
+        nlohmann::json entity_result_json;
+        status = GetEntityByIDs(collection_name->std_str(), entity_ids, entity_result_json);
+        if (!status.ok()) {
+            response = "NULL";
+            ASSIGN_RETURN_STATUS_DTO(status)
+        }
+
+        nlohmann::json json;
+        AddStatusToJson(json, status.code(), status.message());
+        if (entity_result_json.empty()) {
+            json["entities"] = std::vector<int64_t>();
+        } else {
+            json["entities"] = entity_result_json;
+        }
+    } catch (std::exception& e) {
+        RETURN_STATUS_DTO(SERVER_UNEXPECTED_ERROR, e.what());
+    }
+
+    ASSIGN_RETURN_STATUS_DTO(status);
+}
+
+StatusDto::ObjectWrapper
 WebRequestHandler::GetVector(const OString& collection_name, const OQueryParams& query_params, OString& response) {
     auto status = Status::OK();
     try {
@@ -1744,7 +1930,7 @@ WebRequestHandler::VectorsOp(const OString& collection_name, const OString& payl
         } else if (payload_json.contains("search")) {
             status = Search(collection_name->std_str(), payload_json["search"], result_str);
         } else if (payload_json.contains("query")) {
-            status = HybridSearch(collection_name->c_str(), payload_json["query"], result_str);
+            status = HybridSearch(collection_name->c_str(), payload_json, result_str);
         } else {
             status = Status(ILLEGAL_BODY, "Unknown body");
         }

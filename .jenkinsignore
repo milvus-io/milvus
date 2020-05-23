@@ -1,0 +1,9 @@
+\.*
+*.yml
+*.md
+**/*.md
+.github/
+.mergify
+ci/docker/**
+docs/**
+shards/**

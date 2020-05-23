@@ -509,7 +509,7 @@ GrpcClient::InsertEntities(milvus::grpc::HInsertParam& entities, milvus::grpc::H
 }
 
 Status
-GrpcClient::HybridSearch(milvus::grpc::HSearchParam& search_param, milvus::grpc::TopKQueryResult& result) {
+GrpcClient::HybridSearch(milvus::grpc::HSearchParam& search_param, milvus::grpc::HQueryResult& result) {
     ClientContext context;
     ::grpc::Status grpc_status = stub_->HybridSearch(&context, search_param, &result);
 
@@ -521,6 +521,23 @@ GrpcClient::HybridSearch(milvus::grpc::HSearchParam& search_param, milvus::grpc:
     if (result.status().error_code() != grpc::SUCCESS) {
         std::cerr << result.status().reason() << std::endl;
         return Status(StatusCode::ServerFailed, result.status().reason());
+    }
+    return Status::OK();
+}
+
+Status
+GrpcClient::GetHEntityByID(milvus::grpc::VectorsIdentity& vectors_identity, milvus::grpc::HEntity& entity) {
+    ClientContext context;
+    ::grpc::Status grpc_status = stub_->GetEntityByID(&context, vectors_identity, &entity);
+
+    if (!grpc_status.ok()) {
+        std::cerr << "HybridSearch gRPC failed!" << std::endl;
+        return Status(StatusCode::RPCFailed, grpc_status.error_message());
+    }
+
+    if (entity.status().error_code() != grpc::SUCCESS) {
+        std::cerr << entity.status().reason() << std::endl;
+        return Status(StatusCode::ServerFailed, entity.status().reason());
     }
     return Status::OK();
 }

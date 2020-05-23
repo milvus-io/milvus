@@ -40,6 +40,7 @@ RequestGroup(BaseRequest::RequestType type) {
         {BaseRequest::kGetVectorByID, INFO_REQUEST_GROUP},
         {BaseRequest::kGetVectorIDs, INFO_REQUEST_GROUP},
         {BaseRequest::kInsertEntity, DDL_DML_REQUEST_GROUP},
+        {BaseRequest::kGetEntityByID, INFO_REQUEST_GROUP},
 
         // collection operations
         {BaseRequest::kShowCollections, INFO_REQUEST_GROUP},

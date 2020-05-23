@@ -74,6 +74,21 @@ SegmentReader::LoadVectors(off_t offset, size_t num_bytes, std::vector<uint8_t>&
 }
 
 Status
+SegmentReader::LoadAttrs(const std::string& field_name, off_t offset, size_t num_bytes,
+                         std::vector<uint8_t>& raw_attrs) {
+    codec::DefaultCodec default_codec;
+    try {
+        fs_ptr_->operation_ptr_->CreateDirectory();
+        default_codec.GetAttrsFormat()->read_attrs(fs_ptr_, field_name, offset, num_bytes, raw_attrs);
+    } catch (std::exception& e) {
+        std::string err_msg = "Failed to load raw attributes: " + std::string(e.what());
+        LOG_ENGINE_ERROR_ << err_msg;
+        return Status(DB_ERROR, err_msg);
+    }
+    return Status::OK();
+}
+
+Status
 SegmentReader::LoadUids(std::vector<doc_id_t>& uids) {
     codec::DefaultCodec default_codec;
     try {

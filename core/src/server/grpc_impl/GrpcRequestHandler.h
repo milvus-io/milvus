@@ -362,7 +362,11 @@ class GrpcRequestHandler final : public ::milvus::grpc::MilvusService::Service, 
 
     ::grpc::Status
     HybridSearch(::grpc::ServerContext* context, const ::milvus::grpc::HSearchParam* request,
-                 ::milvus::grpc::TopKQueryResult* response) override;
+                 ::milvus::grpc::HQueryResult* response) override;
+
+    ::grpc::Status
+    GetEntityByID(::grpc::ServerContext* context, const ::milvus::grpc::VectorsIdentity* request,
+                  ::milvus::grpc::HEntity* response) override;
     //
     //    ::grpc::Status
     //    HybridSearchInSegments(::grpc::ServerContext* context,
@@ -370,10 +374,7 @@ class GrpcRequestHandler final : public ::milvus::grpc::MilvusService::Service, 
     //                           grpc::HSearchInSegmentsParam* request,
     //                           ::milvus::grpc::HQueryResult* response) override;
     //
-    //    ::grpc::Status
-    //    GetEntityByID(::grpc::ServerContext* context,
-    //                  const ::milvus::grpc::HEntityIdentity* request,
-    //                  ::milvus::grpc::HEntity* response) override;
+
     //
     //    ::grpc::Status
     //    GetEntityIDs(::grpc::ServerContext* context,

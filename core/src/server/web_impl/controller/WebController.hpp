@@ -577,8 +577,8 @@ class WebController : public oatpp::web::server::api::ApiController {
      *
      * GetVectorByID ?id=
      */
-    ENDPOINT("GET", "/collections/{collection_name}/vectors", GetVectors,
-             PATH(String, collection_name), QUERIES(const QueryParams&, query_params)) {
+    ENDPOINT("GET", "/collections/{collection_name}/vectors", GetVectors, PATH(String, collection_name),
+             QUERIES(const QueryParams&, query_params)) {
         auto handler = WebRequestHandler();
         String response;
         auto status_dto = handler.GetVector(collection_name, query_params, response);
@@ -639,6 +639,36 @@ class WebController : public oatpp::web::server::api::ApiController {
         switch (status_dto->code->getValue()) {
             case StatusCode::SUCCESS:
                 response = createDtoResponse(Status::CODE_201, ids_dto);
+                break;
+            case StatusCode::COLLECTION_NOT_EXISTS:
+                response = createDtoResponse(Status::CODE_404, status_dto);
+                break;
+            default:
+                response = createDtoResponse(Status::CODE_400, status_dto);
+        }
+
+        tr.ElapseFromBegin("Done. Status: code = " + std::to_string(status_dto->code->getValue()) +
+                           ", reason = " + status_dto->message->std_str() + ". Total cost");
+
+        return response;
+    }
+
+    ADD_CORS(EntityOp)
+
+    ENDPOINT("PUT", "/hybrid_collections/{collection_name}/entities", EntityOp, PATH(String, collection_name),
+             BODY_STRING(String, body)) {
+        TimeRecorder tr(std::string(WEB_LOG_PREFIX) + "PUT \'/hybrid_collections/" + collection_name->std_str() +
+                        "/vectors\'");
+        tr.RecordSection("Received request.");
+
+        WebRequestHandler handler = WebRequestHandler();
+
+        OString result;
+        std::shared_ptr<OutgoingResponse> response;
+        auto status_dto = handler.VectorsOp(collection_name, body, result);
+        switch (status_dto->code->getValue()) {
+            case StatusCode::SUCCESS:
+                response = createResponse(Status::CODE_200, result);
                 break;
             case StatusCode::COLLECTION_NOT_EXISTS:
                 response = createDtoResponse(Status::CODE_404, status_dto);
