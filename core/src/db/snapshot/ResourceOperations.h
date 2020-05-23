@@ -10,7 +10,8 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
 #pragma once
-#include "Operations.h"
+
+#include "db/snapshot/Operations.h"
 
 namespace milvus {
 namespace engine {
@@ -20,9 +21,9 @@ class CollectionCommitOperation : public CommitOperation<CollectionCommit> {
  public:
     using BaseT = CommitOperation<CollectionCommit>;
     CollectionCommitOperation(OperationContext context, ScopedSnapshotT prev_ss)
-        : BaseT(context, prev_ss) {};
+        : BaseT(context, prev_ss) {}
     CollectionCommitOperation(OperationContext context, ID_TYPE collection_id, ID_TYPE commit_id = 0)
-        : BaseT(context, collection_id, commit_id) {};
+        : BaseT(context, collection_id, commit_id) {}
 
     CollectionCommitPtr GetPrevResource() const override {
         return prev_ss_->GetCollectionCommit();

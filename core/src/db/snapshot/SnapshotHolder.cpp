@@ -9,9 +9,9 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
-#include "SnapshotHolder.h"
-#include "ResourceHolders.h"
-#include "Operations.h"
+#include "db/snapshot/SnapshotHolder.h"
+#include "db/snapshot/ResourceHolders.h"
+#include "db/snapshot/Operations.h"
 
 namespace milvus {
 namespace engine {

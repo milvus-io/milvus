@@ -9,9 +9,10 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
-#include "CompoundOperations.h"
-#include "Snapshots.h"
-#include "OperationExecutor.h"
+#include "db/snapshot/CompoundOperations.h"
+#include "db/snapshot/Snapshots.h"
+#include "db/snapshot/OperationExecutor.h"
+#include <memory>
 
 namespace milvus {
 namespace engine {
@@ -95,7 +96,7 @@ NewSegmentOperation::NewSegmentOperation(const OperationContext& context, ID_TYP
 bool
 NewSegmentOperation::DoExecute(Store& store) {
     auto i = 0;
-    for(; i<context_.new_segment_files.size(); ++i) {
+    for (; i < context_.new_segment_files.size(); ++i) {
         std::any_cast<SegmentFilePtr>(steps_[i])->Activate();
     }
     std::any_cast<SegmentPtr>(steps_[i++])->Activate();
@@ -216,7 +217,7 @@ MergeOperation::PreExecute(Store& store) {
 bool
 MergeOperation::DoExecute(Store& store) {
     auto i = 0;
-    for(; i<context_.new_segment_files.size(); ++i) {
+    for (; i < context_.new_segment_files.size(); ++i) {
         std::any_cast<SegmentFilePtr>(steps_[i])->Activate();
     }
     std::any_cast<SegmentPtr>(steps_[i++])->Activate();

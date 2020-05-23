@@ -9,7 +9,8 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
-#include "ResourceOperations.h"
+#include "db/snapshot/ResourceOperations.h"
+#include <memory>
 
 namespace milvus {
 namespace engine {
@@ -38,7 +39,9 @@ PartitionCommitOperation::PartitionCommitOperation(const OperationContext& conte
     : BaseT(context, prev_ss) {
 }
 
-PartitionCommitOperation::PartitionCommitOperation(const OperationContext& context, ID_TYPE collection_id, ID_TYPE commit_id)
+PartitionCommitOperation::PartitionCommitOperation(const OperationContext& context,
+                                                   ID_TYPE collection_id,
+                                                   ID_TYPE commit_id)
     : BaseT(context, collection_id, commit_id) {
 }
 
@@ -79,7 +82,9 @@ SegmentCommitOperation::SegmentCommitOperation(const OperationContext& context, 
     : BaseT(context, prev_ss) {
 }
 
-SegmentCommitOperation::SegmentCommitOperation(const OperationContext& context, ID_TYPE collection_id, ID_TYPE commit_id)
+SegmentCommitOperation::SegmentCommitOperation(const OperationContext& context,
+                                               ID_TYPE collection_id,
+                                               ID_TYPE commit_id)
     : BaseT(context, collection_id, commit_id) {
 }
 
@@ -126,7 +131,7 @@ SegmentCommitOperation::DoExecute(Store& store) {
                                                     context_.new_segment_files[0]->GetPartitionId(),
                                                     context_.new_segment_files[0]->GetSegmentId());
     }
-    for(auto& new_segment_file : context_.new_segment_files) {
+    for (auto& new_segment_file : context_.new_segment_files) {
         resource_->GetMappings().insert(new_segment_file->GetID());
     }
     AddStep(*resource_);

@@ -9,8 +9,8 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
-#include "Resources.h"
-#include "Store.h"
+#include "db/snapshot/Resources.h"
+#include "db/snapshot/Store.h"
 #include <sstream>
 #include <iostream>
 
@@ -35,7 +35,6 @@ FieldCommit::FieldCommit(ID_TYPE collection_id, ID_TYPE field_id, const MappingT
 
 Field::Field(const std::string& name, NUM_TYPE num, ID_TYPE id, State status, TS_TYPE created_on) :
     BaseT(name, num, id, status, created_on) {
-
 }
 
 FieldElement::FieldElement(ID_TYPE collection_id, ID_TYPE field_id, const std::string& name,
@@ -64,8 +63,7 @@ CollectionCommit::CollectionCommit(ID_TYPE collection_id, ID_TYPE schema_id,
 
 Partition::Partition(const std::string& name, ID_TYPE collection_id, ID_TYPE id,
         State status, TS_TYPE created_on) :
-    BaseT(name, collection_id, id, status, created_on)
-{
+    BaseT(name, collection_id, id, status, created_on) {
 }
 
 PartitionCommit::PartitionCommit(ID_TYPE collection_id, ID_TYPE partition_id,
@@ -79,7 +77,7 @@ PartitionCommit::ToString() const {
     ss << "PartitionCommit [" << this << "]: ";
     ss << "id=" << GetID() << ", ";
     ss << "partition_id=" << GetPartitionId() << ", mappings=(";
-    for(auto sc_id : GetMappings()) {
+    for (auto sc_id : GetMappings()) {
         ss << sc_id << ", ";
     }
     ss << ") status=" << GetStatus() << " ";
@@ -87,8 +85,7 @@ PartitionCommit::ToString() const {
 }
 
 Segment::Segment(ID_TYPE partition_id, ID_TYPE num, ID_TYPE id, State status, TS_TYPE created_on) :
-    BaseT(partition_id, num, id, status, created_on)
-{
+    BaseT(partition_id, num, id, status, created_on) {
 }
 
 std::string

@@ -10,9 +10,9 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
 #pragma once
-#include "Resources.h"
-#include "ResourceTypes.h"
-/* #include "schema.pb.h" */
+
+#include "db/snapshot/Resources.h"
+#include "db/snapshot/ResourceTypes.h"
 
 #include <iostream>
 #include <stdlib.h>
@@ -24,6 +24,12 @@
 #include <unordered_map>
 #include <functional>
 #include <iomanip>
+#include <map>
+#include <tuple>
+#include <vector>
+#include <memory>
+#include <string>
+#include <utility>
 
 namespace milvus {
 namespace engine {
@@ -77,7 +83,7 @@ class Store {
 
     template <typename OpT>
     bool DoCommitOperation(OpT& op) {
-        for(auto& step_v : op.GetSteps()) {
+        for (auto& step_v : op.GetSteps()) {
             auto id = ProcessOperationStep(step_v);
             op.SetStepResult(id);
         }
@@ -339,11 +345,10 @@ private:
     }
 
     void DoMock() {
-        srand(time(0));
-        int random;
-        random = rand() % 2 + 4;
+        unsigned int seed = 123;
+        auto random = rand_r(&seed) % 2 + 4;
         std::vector<std::any> all_records;
-        for (auto i=1; i<=random; i++) {
+        for (auto i = 1; i <= random; i++) {
             std::stringstream name;
             name << "c_" << std::get<Index<Collection::MapT, MockResourcesT>::value>(ids_) + 1;
 
@@ -351,16 +356,16 @@ private:
             all_records.push_back(c);
 
             MappingT schema_c_m;
-            int random_fields = rand() % 2 + 1;
-            for (auto fi=1; fi<=random_fields; ++fi) {
+            auto random_fields = rand_r(&seed) % 2 + 1;
+            for (auto fi = 1; fi <= random_fields; ++fi) {
                 std::stringstream fname;
                 fname << "f_" << fi << "_" << std::get<Index<Field::MapT, MockResourcesT>::value>(ids_) + 1;
                 auto field = CreateResource<Field>(Field(fname.str(), fi));
                 all_records.push_back(field);
                 MappingT f_c_m = {};
 
-                int random_elements = rand() % 2 + 2;
-                for (auto fei=1; fei<=random_elements; ++fei) {
+                auto random_elements = rand_r(&seed) % 2 + 2;
+                for (auto fei = 1; fei <= random_elements; ++fei) {
                     std::stringstream fename;
                     fename << "fe_" << fei << "_" << std::get<Index<FieldElement::MapT, MockResourcesT>::value>(ids_) + 1;
 
@@ -377,18 +382,18 @@ private:
             all_records.push_back(schema);
 
 
-            int random_partitions = rand() % 2 + 1;
+            auto random_partitions = rand_r(&seed) % 2 + 1;
             MappingT c_c_m;
-            for (auto pi=1; pi<=random_partitions; ++pi) {
+            for (auto pi = 1; pi <= random_partitions; ++pi) {
                 std::stringstream pname;
                 pname << "p_" << i << "_" << std::get<Index<Partition::MapT, MockResourcesT>::value>(ids_) + 1;
                 auto p = CreateResource<Partition>(Partition(pname.str(), c->GetID()));
                 all_records.push_back(p);
 
 
-                int random_segments = rand() % 2 + 1;
+                auto random_segments = rand_r(&seed) % 2 + 1;
                 MappingT p_c_m;
-                for (auto si=1; si<=random_segments; ++si) {
+                for (auto si = 1; si <= random_segments; ++si) {
                     auto s = CreateResource<Segment>(Segment(p->GetID(), si));
                     all_records.push_back(s);
                     auto& schema_m = schema->GetMappings();
@@ -403,7 +408,8 @@ private:
                             s_c_m.insert(sf->GetID());
                         }
                     }
-                    auto s_c = CreateResource<SegmentCommit>(SegmentCommit(schema->GetID(), p->GetID(), s->GetID(), s_c_m));
+                    auto s_c = CreateResource<SegmentCommit>(SegmentCommit(schema->GetID(),
+                                p->GetID(), s->GetID(), s_c_m));
                     all_records.push_back(s_c);
                     p_c_m.insert(s_c->GetID());
                 }

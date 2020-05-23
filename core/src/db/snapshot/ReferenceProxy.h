@@ -35,7 +35,6 @@ class ReferenceProxy {
     virtual ~ReferenceProxy();
 
  protected:
-
     int refcnt_ = 0;
     std::vector<OnNoRefCBF> on_no_ref_cbs_;
 };

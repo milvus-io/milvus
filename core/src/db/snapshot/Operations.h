@@ -21,6 +21,7 @@
 #include <thread>
 #include <condition_variable>
 #include <atomic>
+#include <memory>
 
 namespace milvus {
 namespace engine {
@@ -122,7 +123,7 @@ class CommitOperation : public Operations {
 template <typename ResourceT>
 class LoadOperation : public Operations {
  public:
-    LoadOperation(const LoadOperationContext& context) :
+    explicit LoadOperation(const LoadOperationContext& context) :
        Operations(OperationContext(), ScopedSnapshotT()), context_(context) {}
 
     void ApplyToStore(Store& store) override {
@@ -147,7 +148,7 @@ class LoadOperation : public Operations {
 template <typename ResourceT>
 class HardDeleteOperation : public Operations {
  public:
-    HardDeleteOperation(ID_TYPE id) :
+    explicit HardDeleteOperation(ID_TYPE id) :
        Operations(OperationContext(), ScopedSnapshotT()), id_(id) {}
 
     void ApplyToStore(Store& store) override {
