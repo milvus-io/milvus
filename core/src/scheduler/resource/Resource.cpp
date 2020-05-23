@@ -153,7 +153,7 @@ Resource::pick_task_execute() {
 
 void
 Resource::loader_function() {
-    SetThreadName("taskloader_th");
+    SetThreadName("task_loader_th");
     while (running_) {
         std::unique_lock<std::mutex> lock(load_mutex_);
         load_cv_.wait(lock, [&] { return load_flag_; });
@@ -184,7 +184,7 @@ Resource::loader_function() {
 
 void
 Resource::executor_function() {
-    SetThreadName("taskexector_th");
+    SetThreadName("task_executor_th");
     if (subscriber_) {
         auto event = std::make_shared<StartUpEvent>(shared_from_this());
         subscriber_(std::static_pointer_cast<Event>(event));
