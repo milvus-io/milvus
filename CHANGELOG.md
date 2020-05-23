@@ -4,6 +4,7 @@ Please mark all change in change log and use the issue from GitHub
 # Milvus 0.10.0 (TBD)
 
 ## Bug
+-   \#2366 Reduce SQL execution times for collection contains lot of partitions
 -   \#2378 Duplicate data after server restart
 -   \#2395 Fix large nq cudaMalloc error
 -   \#2399 The nlist set by the user may not take effect
@@ -13,8 +14,10 @@ Please mark all change in change log and use the issue from GitHub
 -   \#2363 Update branch version
 
 ## Improvement
+-   \#2353 Remove log_config from code and scripts
 -   \#2370 Clean compile warning
 -   \#2381 Upgrade FAISS to 1.6.3
+-   \#2410 Logging build index progress
 
 ## Task
 

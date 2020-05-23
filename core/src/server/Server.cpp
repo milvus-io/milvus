@@ -47,12 +47,10 @@ Server::GetInstance() {
 }
 
 void
-Server::Init(int64_t daemonized, const std::string& pid_filename, const std::string& config_filename,
-             const std::string& log_config_file) {
+Server::Init(int64_t daemonized, const std::string& pid_filename, const std::string& config_filename) {
     daemonized_ = daemonized;
     pid_filename_ = pid_filename;
     config_filename_ = config_filename;
-    log_config_file_ = log_config_file;
 }
 
 void
@@ -62,10 +60,6 @@ Server::Daemonize() {
     }
 
     std::cout << "Milvus server run in daemonize mode";
-
-    //    std::string log_path(GetLogDirFullPath());
-    //    log_path += "zdb_server.(INFO/WARNNING/ERROR/CRITICAL)";
-    //    LOG_SERVER_INFO_ << "Log will be exported to: " + log_path);
 
     pid_t pid = 0;
 
