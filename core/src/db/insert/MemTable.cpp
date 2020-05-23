@@ -136,8 +136,10 @@ MemTable::Serialize(uint64_t wal_lsn, bool apply_delete) {
         }
     }
 
+    meta::SegmentsSchema update_files;
     for (auto mem_table_file = mem_table_file_list_.begin(); mem_table_file != mem_table_file_list_.end();) {
         auto status = (*mem_table_file)->Serialize(wal_lsn);
+        update_files.push_back((*mem_table_file)->GetSegmentSchema());
         if (!status.ok()) {
             return status;
         }
@@ -150,8 +152,13 @@ MemTable::Serialize(uint64_t wal_lsn, bool apply_delete) {
         }
     }
 
-    // Update flush lsn
-    auto status = meta_->UpdateCollectionFlushLSN(collection_id_, wal_lsn);
+    // Update meta files and flush lsn
+    auto status = meta_->UpdateCollectionFiles(update_files);
+    if (!status.ok()) {
+        return status;
+    }
+
+    status = meta_->UpdateCollectionFlushLSN(collection_id_, wal_lsn);
     if (!status.ok()) {
         std::string err_msg = "Failed to write flush lsn to meta: " + status.ToString();
         LOG_ENGINE_ERROR_ << err_msg;
