@@ -35,8 +35,8 @@ class SpecResLabel : public TaskLabel {
         return resource_;
     }
 
-    virtual inline std::string
-    name() {
+    inline std::string
+    name() const override {
         return resource_.lock()->name();
     }
 

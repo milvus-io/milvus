@@ -30,7 +30,7 @@ class TaskLabel {
     }
 
     virtual inline std::string
-    name() {
+    name() const {
         return "";
     }
 
