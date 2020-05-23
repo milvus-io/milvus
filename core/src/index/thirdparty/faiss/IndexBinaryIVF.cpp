@@ -449,11 +449,36 @@ struct IVFBinaryScannerJaccard: BinaryInvertedListScanner {
         }
         return nup;
     }
+
+    void scan_codes_range (size_t n,
+                           const uint8_t *codes,
+                           const idx_t *ids,
+                           int radius,
+                           RangeQueryResult &result) const override {
+        // not yet
+    }
 };
 
 template <bool store_pairs>
 BinaryInvertedListScanner *select_IVFBinaryScannerL2 (size_t code_size) {
-
+#define HC(name) return new IVFBinaryScannerL2<name> (code_size, store_pairs)
+    switch (code_size) {
+        case 4: HC(HammingComputer4);
+        case 8: HC(HammingComputer8);
+        case 16: HC(HammingComputer16);
+        case 20: HC(HammingComputer20);
+        case 32: HC(HammingComputer32);
+        case 64: HC(HammingComputer64);
+        default:
+            if (code_size % 8 == 0) {
+                HC(HammingComputerM8);
+            } else if (code_size % 4 == 0) {
+                HC(HammingComputerM4);
+            } else {
+                HC(HammingComputerDefault);
+            }
+    }
+#undef HC
 }
 
 template <bool store_pairs>
@@ -790,26 +815,25 @@ void search_knn_hamming_count_1 (
 BinaryInvertedListScanner *IndexBinaryIVF::get_InvertedListScanner
       (bool store_pairs) const
 {
-
-#define HC(name) return new IVFBinaryScannerL2<name> (code_size, store_pairs)
-    switch (code_size) {
-    case 4: HC(HammingComputer4);
-    case 8: HC(HammingComputer8);
-    case 16: HC(HammingComputer16);
-    case 20: HC(HammingComputer20);
-    case 32: HC(HammingComputer32);
-    case 64: HC(HammingComputer64);
-    default:
-        if (code_size % 8 == 0) {
-            HC(HammingComputerM8);
-        } else if (code_size % 4 == 0) {
-            HC(HammingComputerM4);
-        } else {
-            HC(HammingComputerDefault);
-        }
+    switch (metric_type) {
+        case METRIC_Jaccard:
+        case METRIC_Tanimoto:
+            if (store_pairs) {
+                return select_IVFBinaryScannerJaccard<true> (code_size);
+            } else {
+                return select_IVFBinaryScannerJaccard<false> (code_size);
+            }
+        case METRIC_Substructure:
+        case METRIC_Superstructure:
+            // unsupported
+            return nullptr;
+        default:
+            if (store_pairs) {
+                return select_IVFBinaryScannerL2<true>(code_size);
+            } else {
+                return select_IVFBinaryScannerL2<false>(code_size);
+            }
     }
-#undef HC
-
 }
 
 void IndexBinaryIVF::search_preassigned(idx_t n, const uint8_t *x, idx_t k,
