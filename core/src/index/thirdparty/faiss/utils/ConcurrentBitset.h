@@ -27,7 +27,7 @@ class ConcurrentBitset {
  public:
     using id_type_t = int64_t;
 
-    explicit ConcurrentBitset(id_type_t size);
+    explicit ConcurrentBitset(id_type_t size, int init_value = 0);
 
     //    ConcurrentBitset(const ConcurrentBitset&) = delete;
     //    ConcurrentBitset&
@@ -50,6 +50,9 @@ class ConcurrentBitset {
 
     const uint8_t*
     data();
+
+    uint8_t*
+    mutable_data();
 
  private:
     size_t capacity_;

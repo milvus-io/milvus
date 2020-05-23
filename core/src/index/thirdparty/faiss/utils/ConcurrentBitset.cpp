@@ -15,11 +15,19 @@
 // specific language governing permissions and limitations
 // under the License.
 
+#include <string.h>
+#include <memory.h>
 #include "ConcurrentBitset.h"
 
 namespace faiss {
 
-ConcurrentBitset::ConcurrentBitset(id_type_t capacity) : capacity_(capacity), bitset_((capacity + 8 - 1) >> 3) {
+ConcurrentBitset::ConcurrentBitset(id_type_t capacity, int init_value) : capacity_(capacity), bitset_(((capacity + 8 - 1) >> 3)) {
+    if (init_value) {
+//        for (auto i = 0; i < (capacity + 8 - 1) >> 3; ++ i) {
+//            bitset_[i].fetch_or(init_value);
+//        }
+        memset(mutable_data(), init_value, (capacity + 8 - 1) >> 3);
+    }
 }
 
 bool
@@ -52,4 +60,8 @@ ConcurrentBitset::data() {
     return reinterpret_cast<const uint8_t*>(bitset_.data());
 }
 
+uint8_t*
+ConcurrentBitset::mutable_data() {
+    return reinterpret_cast<uint8_t*>(bitset_.data());
+}
 }  // namespace faiss
