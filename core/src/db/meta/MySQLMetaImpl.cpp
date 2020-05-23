@@ -1714,7 +1714,7 @@ MySQLMetaImpl::FilesToSearchEx(const std::string& root_collection, const std::se
         // distribute id array to batchs
         const int64_t batch_size = 50;
         std::vector<std::vector<std::string>> id_groups;
-        std::vector<std::string> temp_group = {root_collection};
+        std::vector<std::string> temp_group;
         int64_t count = 1;
         for (auto& id : partition_id_array) {
             temp_group.push_back(id);
@@ -1739,6 +1739,8 @@ MySQLMetaImpl::FilesToSearchEx(const std::string& root_collection, const std::se
                 mysqlpp::ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab_);
 
                 bool is_null_connection = (connectionPtr == nullptr);
+                fiu_do_on("MySQLMetaImpl.FilesToSearch.null_connection", is_null_connection = true);
+                fiu_do_on("MySQLMetaImpl.FilesToSearch.throw_exception", throw std::exception(););
                 if (is_null_connection) {
                     return Status(DB_ERROR, "Failed to connect to meta server(mysql)");
                 }
