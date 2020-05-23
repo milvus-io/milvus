@@ -20,31 +20,36 @@ namespace snapshot {
 
 
 Collection::Collection(const std::string& name, ID_TYPE id, State status, TS_TYPE created_on) :
-    BaseT(name, id, status, created_on) {
+    NameField(name), IdField(id), StatusField(status), CreatedOnField(created_on) {
 }
 
 SchemaCommit::SchemaCommit(ID_TYPE collection_id, const MappingT& mappings,
        ID_TYPE id, State status, TS_TYPE created_on) :
-    BaseT(collection_id, mappings, id, status, created_on) {
+    CollectionIdField(collection_id),
+    MappingsField(mappings), IdField(id), StatusField(status), CreatedOnField(created_on) {
 }
 
 FieldCommit::FieldCommit(ID_TYPE collection_id, ID_TYPE field_id, const MappingT& mappings,
         ID_TYPE id, State status, TS_TYPE created_on) :
-    BaseT(collection_id, field_id, mappings, id, status, created_on) {
+    CollectionIdField(collection_id), FieldIdField(field_id),
+    MappingsField(mappings), IdField(id), StatusField(status), CreatedOnField(created_on) {
 }
 
 Field::Field(const std::string& name, NUM_TYPE num, ID_TYPE id, State status, TS_TYPE created_on) :
-    BaseT(name, num, id, status, created_on) {
+    NameField(name), NumField(num),
+    IdField(id), StatusField(status), CreatedOnField(created_on) {
 }
 
 FieldElement::FieldElement(ID_TYPE collection_id, ID_TYPE field_id, const std::string& name,
         FTYPE_TYPE ftype, ID_TYPE id, State status, TS_TYPE created_on) :
-    BaseT(collection_id, field_id, name, ftype, id, status, created_on) {
+    CollectionIdField(collection_id), FieldIdField(field_id), NameField(name), FtypeField(ftype),
+    IdField(id), StatusField(status), CreatedOnField(created_on) {
 }
 
 CollectionCommit::CollectionCommit(ID_TYPE collection_id, ID_TYPE schema_id,
         const MappingT& mappings, ID_TYPE id, State status, TS_TYPE created_on) :
-    BaseT(collection_id, schema_id, mappings, id, status, created_on) {
+    CollectionIdField(collection_id), SchemaIdField(schema_id),
+    MappingsField(mappings), IdField(id), StatusField(status), CreatedOnField(created_on) {
 }
 
 /* std::string CollectionCommit::ToString() const { */
@@ -63,12 +68,14 @@ CollectionCommit::CollectionCommit(ID_TYPE collection_id, ID_TYPE schema_id,
 
 Partition::Partition(const std::string& name, ID_TYPE collection_id, ID_TYPE id,
         State status, TS_TYPE created_on) :
-    BaseT(name, collection_id, id, status, created_on) {
+    NameField(name), CollectionIdField(collection_id),
+    IdField(id), StatusField(status), CreatedOnField(created_on) {
 }
 
 PartitionCommit::PartitionCommit(ID_TYPE collection_id, ID_TYPE partition_id,
         const MappingT& mappings, ID_TYPE id, State status, TS_TYPE created_on) :
-    BaseT(collection_id, partition_id, mappings, id, status, created_on) {
+    CollectionIdField(collection_id), PartitionIdField(partition_id),
+    MappingsField(mappings), IdField(id), StatusField(status), CreatedOnField(created_on) {
 }
 
 std::string
@@ -85,7 +92,8 @@ PartitionCommit::ToString() const {
 }
 
 Segment::Segment(ID_TYPE partition_id, ID_TYPE num, ID_TYPE id, State status, TS_TYPE created_on) :
-    BaseT(partition_id, num, id, status, created_on) {
+    PartitionIdField(partition_id), NumField(num),
+    IdField(id), StatusField(status), CreatedOnField(created_on) {
 }
 
 std::string
@@ -101,7 +109,8 @@ Segment::ToString() const {
 
 SegmentCommit::SegmentCommit(ID_TYPE schema_id, ID_TYPE partition_id, ID_TYPE segment_id,
         const MappingT& mappings, ID_TYPE id, State status, TS_TYPE created_on) :
-    BaseT(schema_id, partition_id, segment_id, mappings, id, status, created_on) {
+    SchemaIdField(schema_id), PartitionIdField(partition_id), SegmentIdField(segment_id),
+    MappingsField(mappings), IdField(id), StatusField(status), CreatedOnField(created_on) {
 }
 
 std::string
@@ -117,7 +126,8 @@ SegmentCommit::ToString() const {
 
 SegmentFile::SegmentFile(ID_TYPE partition_id, ID_TYPE segment_id, ID_TYPE field_element_id, ID_TYPE id,
             State status, TS_TYPE created_on) :
-    BaseT(partition_id, segment_id, field_element_id, id, status, created_on) {
+    PartitionIdField(partition_id), SegmentIdField(segment_id), FieldElementIdField(field_element_id),
+    IdField(id), StatusField(status), CreatedOnField(created_on) {
 }
 
 } // namespace snapshot
