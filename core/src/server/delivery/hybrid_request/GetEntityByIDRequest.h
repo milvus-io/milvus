@@ -17,33 +17,36 @@
 
 #pragma once
 
+#include "server/delivery/request/BaseRequest.h"
+
 #include <memory>
 #include <string>
 #include <vector>
 
-#include "segment/Attrs.h"
-#include "storage/FSHandler.h"
-
 namespace milvus {
-namespace codec {
+namespace server {
 
-class AttrsFormat {
+class GetEntityByIDRequest : public BaseRequest {
  public:
-    virtual void
-    read(const storage::FSHandlerPtr& fs_ptr, segment::AttrsPtr& attrs_read) = 0;
+    static BaseRequestPtr
+    Create(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name,
+           const std::vector<int64_t>& ids, std::vector<engine::AttrsData>& attrs,
+           std::vector<engine::VectorsData>& vectors);
 
-    virtual void
-    write(const storage::FSHandlerPtr& fs_ptr, const segment::AttrsPtr& attr) = 0;
+ protected:
+    GetEntityByIDRequest(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name,
+                         const std::vector<int64_t>& ids, std::vector<engine::AttrsData>& attrs,
+                         std::vector<engine::VectorsData>& vectors);
 
-    virtual void
-    read_uids(const storage::FSHandlerPtr& fs_ptr, std::vector<int64_t>& uids) = 0;
+    Status
+    OnExecute() override;
 
-    virtual void
-    read_attrs(const storage::FSHandlerPtr& fs_ptr, const std::string& field_name, off_t offset, size_t num_bytes,
-               std::vector<uint8_t>& raw_attrs) = 0;
+ private:
+    std::string collection_name_;
+    std::vector<int64_t> ids_;
+    std::vector<engine::AttrsData>& attrs_;
+    std::vector<engine::VectorsData>& vectors_;
 };
 
-using AttrsFormatPtr = std::shared_ptr<AttrsFormat>;
-
-}  // namespace codec
+}  // namespace server
 }  // namespace milvus

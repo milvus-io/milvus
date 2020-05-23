@@ -39,6 +39,17 @@ constexpr milvus::IndexType INDEX_TYPE = milvus::IndexType::IVFSQ8;
 constexpr int32_t NLIST = 16384;
 constexpr uint64_t FIELD_NUM = 3;
 
+void
+PrintHybridQueryResult(const std::vector<int64_t>& id_array, const milvus::HybridQueryResult& result) {
+    for (size_t i = 0; i < id_array.size(); i++) {
+        std::string prefix = "No." + std::to_string(i) + " id:" + std::to_string(id_array[i]);
+        std::cout<< prefix << "\t[";
+        for (size_t j = 0; j < result.attr_records.size(); i++) {
+
+        }
+    }
+}
+
 }  // namespace
 
 ClientTest::ClientTest(const std::string& address, const std::string& port) {
@@ -87,23 +98,19 @@ ClientTest::Flush(const std::string& collection_name) {
 
 void
 ClientTest::InsertHybridEntities(std::string& collection_name, int64_t row_num) {
-    std::unordered_map<std::string, std::vector<int8_t>> numerica_value;
+    std::unordered_map<std::string, std::vector<int64_t>> numerica_int_value;
+    std::unordered_map<std::string, std::vector<double>> numerica_double_value;
     std::vector<int64_t> value1;
     std::vector<double> value2;
     value1.resize(row_num);
     value2.resize(row_num);
     for (uint64_t i = 0; i < row_num; ++i) {
         value1[i] = i;
-        value2[i] = i + row_num;
+        value2[i] = (double)(i + row_num);
     }
 
-    std::vector<int8_t> numerica1(row_num * sizeof(int64_t), 0);
-    std::vector<int8_t> numerica2(row_num * sizeof(double), 0);
-    memcpy(numerica1.data(), value1.data(), row_num * sizeof(int64_t));
-    memcpy(numerica2.data(), value2.data(), row_num * sizeof(double));
-
-    numerica_value.insert(std::make_pair("field_1", numerica1));
-    numerica_value.insert(std::make_pair("field_2", numerica2));
+    numerica_int_value.insert(std::make_pair("field_1", value1));
+    numerica_double_value.insert(std::make_pair("field_2", value2));
 
     std::unordered_map<std::string, std::vector<milvus::Entity>> vector_value;
     std::vector<milvus::Entity> entity_array;
@@ -113,7 +120,7 @@ ClientTest::InsertHybridEntities(std::string& collection_name, int64_t row_num) 
     }
 
     vector_value.insert(std::make_pair("field_3", entity_array));
-    milvus::HEntity entity = {row_num, numerica_value, vector_value};
+    milvus::HEntity entity = {row_num, numerica_int_value, numerica_double_value, vector_value};
     std::vector<uint64_t> id_array;
     milvus::Status status = conn_->InsertEntity(collection_name, "", entity, id_array);
     std::cout << "InsertHybridEntities function call status: " << status.message() << std::endl;
@@ -122,7 +129,7 @@ ClientTest::InsertHybridEntities(std::string& collection_name, int64_t row_num) 
 void
 ClientTest::HybridSearch(std::string& collection_name) {
     std::vector<std::string> partition_tags;
-    milvus::TopKQueryResult topk_query_result;
+    milvus::TopKHybridQueryResult topk_query_result;
 
     auto leaf_queries = milvus_sdk::Utils::GenLeafQuery();
 
@@ -138,17 +145,46 @@ ClientTest::HybridSearch(std::string& collection_name) {
     std::string extra_params;
     milvus::Status status =
         conn_->HybridSearch(collection_name, partition_tags, query_clause, extra_params, topk_query_result);
+
+    for (uint64_t i = 0; i < topk_query_result.size(); i++) {
+        for (auto attr : topk_query_result[i].attr_records) {
+            std::cout << "Field: " << attr.first << std::endl;
+            if (attr.second.int_record.size() > 0) {
+                for (auto record : attr.second.int_record) {
+                    std::cout << record << "\t";
+                }
+            } else if (attr.second.double_record.size() > 0) {
+                for (auto record : attr.second.double_record) {
+                    std::cout << record << "\t";
+                }
+            }
+            std::cout << std::endl;
+        }
+    }
+
     for (uint64_t i = 0; i < topk_query_result.size(); ++i) {
-        std::cout << topk_query_result[i].ids[0] << "  ---------  " << topk_query_result[i].distances[0] << std::endl;
+        std::cout << topk_query_result[i].ids[1] << "  ---------  " << topk_query_result[i].distances[1] << std::endl;
     }
     std::cout << "HybridSearch function call status: " << status.message() << std::endl;
+}
+
+void
+ClientTest::GetHEntityByID(const std::string& collection_name, const std::vector<int64_t>& id_array) {
+    milvus::HybridQueryResult result;
+    {
+        milvus_sdk::TimeRecorder rc("GetHybridEntityByID");
+        milvus::Status stat = conn_->GetHEntityByID(collection_name, id_array, result);
+        std::cout << "GetEntitiesByID function call status: " << stat.message() << std::endl;
+    }
+
+    PrintHybridQueryResult(id_array, result);
 }
 
 void
 ClientTest::TestHybrid() {
     std::string collection_name = "HYBRID_TEST";
     CreateHybridCollection(collection_name);
-    InsertHybridEntities(collection_name, 1000);
+    InsertHybridEntities(collection_name, 10000);
     Flush(collection_name);
     sleep(2);
     HybridSearch(collection_name);

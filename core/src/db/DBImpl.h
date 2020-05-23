@@ -126,6 +126,10 @@ class DBImpl : public DB, public server::CacheConfigHandler, public server::Engi
                    std::vector<engine::VectorsData>& vectors) override;
 
     Status
+    GetEntitiesByID(const std::string& collection_id, const IDNumbers& id_array,
+                    std::vector<engine::VectorsData>& vectors, std::vector<engine::AttrsData>& attrs) override;
+
+    Status
     GetVectorIDs(const std::string& collection_id, const std::string& segment_id, IDNumbers& vector_ids) override;
 
     //    Status
@@ -157,9 +161,9 @@ class DBImpl : public DB, public server::CacheConfigHandler, public server::Engi
     Status
     HybridQuery(const std::shared_ptr<server::Context>& context, const std::string& collection_id,
                 const std::vector<std::string>& partition_tags, context::HybridSearchContextPtr hybrid_search_context,
-                query::GeneralQueryPtr general_query,
-                std::unordered_map<std::string, engine::meta::hybrid::DataType>& attr_type, uint64_t& nq,
-                ResultIds& result_ids, ResultDistances& result_distances) override;
+                query::GeneralQueryPtr general_query, std::vector<std::string>& field_names,
+                std::unordered_map<std::string, engine::meta::hybrid::DataType>& attr_type,
+                engine::QueryResult& result) override;
 
     Status
     QueryByIDs(const std::shared_ptr<server::Context>& context, const std::string& collection_id,
@@ -193,15 +197,21 @@ class DBImpl : public DB, public server::CacheConfigHandler, public server::Engi
                ResultDistances& result_distances);
 
     Status
-    HybridQueryAsync(const std::shared_ptr<server::Context>& context, const std::string& table_id,
+    HybridQueryAsync(const std::shared_ptr<server::Context>& context, const std::string& collection_id,
                      meta::FilesHolder& files_holder, context::HybridSearchContextPtr hybrid_search_context,
-                     query::GeneralQueryPtr general_query,
-                     std::unordered_map<std::string, engine::meta::hybrid::DataType>& attr_type, uint64_t& nq,
-                     ResultIds& result_ids, ResultDistances& result_distances);
+                     query::GeneralQueryPtr general_query, std::vector<std::string>& field_names,
+                     std::unordered_map<std::string, engine::meta::hybrid::DataType>& attr_type,
+                     engine::QueryResult& result);
 
     Status
     GetVectorsByIdHelper(const std::string& collection_id, const IDNumbers& id_array,
                          std::vector<engine::VectorsData>& vectors, meta::FilesHolder& files_holder);
+
+    Status
+    GetEntitiesByIdHelper(const std::string& collection_id, const IDNumbers& id_array,
+                          std::unordered_map<std::string, engine::meta::hybrid::DataType>& attr_type,
+                          std::vector<engine::VectorsData>& vectors, std::vector<engine::AttrsData>& attrs,
+                          meta::FilesHolder& files_holder);
 
     void
     InternalFlush(const std::string& collection_id = "");

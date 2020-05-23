@@ -733,63 +733,52 @@ MapAndCopyResult(const knowhere::DatasetPtr& dataset, const std::vector<milvus::
 
 template <typename T>
 void
-ProcessRangeQuery(std::vector<T> data, T value, query::CompareOperator type, faiss::ConcurrentBitsetPtr& bitset) {
+ExecutionEngineImpl::ProcessRangeQuery(std::vector<T> data, T value, query::CompareOperator type,
+                                       faiss::ConcurrentBitsetPtr& bitset) {
     switch (type) {
         case query::CompareOperator::LT: {
             for (uint64_t i = 0; i < data.size(); ++i) {
-                if (data[i] >= value) {
-                    if (!bitset->test(i)) {
-                        bitset->set(i);
-                    }
+                if (data[i] < value) {
+                    bitset->set(i);
                 }
             }
             break;
         }
         case query::CompareOperator::LTE: {
             for (uint64_t i = 0; i < data.size(); ++i) {
-                if (data[i] > value) {
-                    if (!bitset->test(i)) {
-                        bitset->set(i);
-                    }
+                if (data[i] <= value) {
+                    bitset->set(i);
                 }
             }
             break;
         }
         case query::CompareOperator::GT: {
             for (uint64_t i = 0; i < data.size(); ++i) {
-                if (data[i] <= value) {
-                    if (!bitset->test(i)) {
-                        bitset->set(i);
-                    }
+                if (data[i] > value) {
+                    bitset->set(i);
                 }
             }
             break;
         }
         case query::CompareOperator::GTE: {
             for (uint64_t i = 0; i < data.size(); ++i) {
-                if (data[i] < value) {
-                    if (!bitset->test(i)) {
-                        bitset->set(i);
-                    }
+                if (data[i] >= value) {
+                    bitset->set(i);
                 }
             }
             break;
         }
         case query::CompareOperator::EQ: {
             for (uint64_t i = 0; i < data.size(); ++i) {
-                if (data[i] != value) {
-                    if (!bitset->test(i)) {
-                        bitset->set(i);
-                    }
+                if (data[i] == value) {
+                    bitset->set(i);
                 }
             }
         }
         case query::CompareOperator::NE: {
             for (uint64_t i = 0; i < data.size(); ++i) {
-                if (data[i] == value) {
-                    if (!bitset->test(i)) {
-                        bitset->set(i);
-                    }
+                if (data[i] != value) {
+                    bitset->set(i);
                 }
             }
             break;
@@ -798,23 +787,90 @@ ProcessRangeQuery(std::vector<T> data, T value, query::CompareOperator type, fai
 }
 
 Status
-ExecutionEngineImpl::ExecBinaryQuery(milvus::query::GeneralQueryPtr general_query, faiss::ConcurrentBitsetPtr bitset,
-                                     std::unordered_map<std::string, DataType>& attr_type, uint64_t& nq, uint64_t& topk,
-                                     std::vector<float>& distances, std::vector<int64_t>& labels) {
-    if (bitset == nullptr) {
-        bitset = std::make_shared<faiss::ConcurrentBitset>(vector_count_);
+ExecutionEngineImpl::HybridSearch(milvus::query::GeneralQueryPtr general_query,
+                                  std::unordered_map<std::string, DataType>& attr_type, uint64_t& nq, uint64_t& topk,
+                                  std::vector<float>& distances, std::vector<int64_t>& search_ids) {
+    faiss::ConcurrentBitsetPtr bitset;
+    milvus::query::VectorQueryPtr vector_query;
+    auto status = ExecBinaryQuery(general_query, bitset, attr_type, vector_query);
+
+    // Do search
+    faiss::ConcurrentBitsetPtr list;
+    list = index_->GetBlacklist();
+    // Do AND
+    for (uint64_t i = 0; i < vector_count_; ++i) {
+        if (list->test(i) && !bitset->test(i)) {
+            list->clear(i);
+        }
+    }
+    index_->SetBlacklist(list);
+    topk = vector_query->topk;
+    nq = vector_query->query_vector.float_data.size() / dim_;
+
+    distances.resize(nq * topk);
+    search_ids.resize(nq * topk);
+
+    status = Search(nq, vector_query->query_vector.float_data.data(), topk, vector_query->extra_params,
+                    distances.data(), search_ids.data());
+    if (!status.ok()) {
+        return status;
     }
 
+    return Status::OK();
+}
+
+Status
+ExecutionEngineImpl::ExecBinaryQuery(milvus::query::GeneralQueryPtr general_query, faiss::ConcurrentBitsetPtr& bitset,
+                                     std::unordered_map<std::string, DataType>& attr_type,
+                                     milvus::query::VectorQueryPtr& vector_query) {
     if (general_query->leaf == nullptr) {
         Status status;
+        faiss::ConcurrentBitsetPtr left_bitset, right_bitset;
         if (general_query->bin->left_query != nullptr) {
-            status = ExecBinaryQuery(general_query->bin->left_query, bitset, attr_type, nq, topk, distances, labels);
+            status = ExecBinaryQuery(general_query->bin->left_query, left_bitset, attr_type, vector_query);
+            if (!status.ok()) {
+                return status;
+            }
         }
         if (general_query->bin->right_query != nullptr) {
-            status = ExecBinaryQuery(general_query->bin->right_query, bitset, attr_type, nq, topk, distances, labels);
+            status = ExecBinaryQuery(general_query->bin->right_query, right_bitset, attr_type, vector_query);
+            if (!status.ok()) {
+                return status;
+            }
+        }
+
+        if (left_bitset == nullptr || right_bitset == nullptr) {
+            bitset = left_bitset != nullptr ? left_bitset : right_bitset;
+        } else {
+            switch (general_query->bin->relation) {
+                case milvus::query::QueryRelation::AND:
+                case milvus::query::QueryRelation::R1: {
+                    bitset = (*left_bitset) & right_bitset;
+                    break;
+                }
+                case milvus::query::QueryRelation::OR:
+                case milvus::query::QueryRelation::R2:
+                case milvus::query::QueryRelation::R3: {
+                    bitset = (*left_bitset) | right_bitset;
+                    break;
+                }
+                case milvus::query::QueryRelation::R4: {
+                    for (uint64_t i = 0; i < vector_count_; ++i) {
+                        if (left_bitset->test(i) && !right_bitset->test(i)) {
+                            bitset->set(i);
+                        }
+                    }
+                    break;
+                }
+                default: {
+                    std::string msg = "Invalid QueryRelation in RangeQuery";
+                    return Status{SERVER_INVALID_ARGUMENT, msg};
+                }
+            }
         }
         return status;
     } else {
+        bitset = std::make_shared<faiss::ConcurrentBitset>(vector_count_);
         if (general_query->leaf->term_query != nullptr) {
             // process attrs_data
             auto field_name = general_query->leaf->term_query->field_name;
@@ -841,10 +897,8 @@ ExecutionEngineImpl::ExecBinaryQuery(milvus::query::GeneralQueryPtr general_quer
                                 break;
                             }
                         }
-                        if (!value_in_term) {
-                            if (!bitset->test(i)) {
-                                bitset->set(i);
-                            }
+                        if (value_in_term) {
+                            bitset->set(i);
                         }
                     }
                     break;
@@ -868,10 +922,8 @@ ExecutionEngineImpl::ExecBinaryQuery(milvus::query::GeneralQueryPtr general_quer
                                 break;
                             }
                         }
-                        if (!value_in_term) {
-                            if (!bitset->test(i)) {
-                                bitset->set(i);
-                            }
+                        if (value_in_term) {
+                            bitset->set(i);
                         }
                     }
                     break;
@@ -896,10 +948,8 @@ ExecutionEngineImpl::ExecBinaryQuery(milvus::query::GeneralQueryPtr general_quer
                                 break;
                             }
                         }
-                        if (!value_in_term) {
-                            if (!bitset->test(i)) {
-                                bitset->set(i);
-                            }
+                        if (value_in_term) {
+                            bitset->set(i);
                         }
                     }
                     break;
@@ -924,10 +974,8 @@ ExecutionEngineImpl::ExecBinaryQuery(milvus::query::GeneralQueryPtr general_quer
                                 break;
                             }
                         }
-                        if (!value_in_term) {
-                            if (!bitset->test(i)) {
-                                bitset->set(i);
-                            }
+                        if (value_in_term) {
+                            bitset->set(i);
                         }
                     }
                     break;
@@ -952,10 +1000,8 @@ ExecutionEngineImpl::ExecBinaryQuery(milvus::query::GeneralQueryPtr general_quer
                                 break;
                             }
                         }
-                        if (!value_in_term) {
-                            if (!bitset->test(i)) {
-                                bitset->set(i);
-                            }
+                        if (value_in_term) {
+                            bitset->set(i);
                         }
                     }
                     break;
@@ -980,10 +1026,8 @@ ExecutionEngineImpl::ExecBinaryQuery(milvus::query::GeneralQueryPtr general_quer
                                 break;
                             }
                         }
-                        if (!value_in_term) {
-                            if (!bitset->test(i)) {
-                                bitset->set(i);
-                            }
+                        if (value_in_term) {
+                            bitset->set(i);
                         }
                     }
                     break;
@@ -1056,25 +1100,10 @@ ExecutionEngineImpl::ExecBinaryQuery(milvus::query::GeneralQueryPtr general_quer
             return Status::OK();
         }
         if (general_query->leaf->vector_query != nullptr) {
-            // Do search
-            faiss::ConcurrentBitsetPtr list;
-            list = index_->GetBlacklist();
-            // Do OR
-            for (uint64_t i = 0; i < vector_count_; ++i) {
-                if (list->test(i) || bitset->test(i)) {
-                    bitset->set(i);
-                }
-            }
-            index_->SetBlacklist(bitset);
-            auto vector_query = general_query->leaf->vector_query;
-            topk = vector_query->topk;
-            nq = vector_query->query_vector.float_data.size() / dim_;
-
-            distances.resize(nq * topk);
-            labels.resize(nq * topk);
-
-            return Search(nq, vector_query->query_vector.float_data.data(), topk, vector_query->extra_params,
-                          distances.data(), labels.data());
+            // skip vector query
+            vector_query = general_query->leaf->vector_query;
+            bitset = nullptr;
+            return Status::OK();
         }
     }
 }
