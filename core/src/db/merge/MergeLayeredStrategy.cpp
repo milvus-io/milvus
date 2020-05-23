@@ -44,6 +44,10 @@ MergeLayeredStrategy::RegroupFiles(meta::FilesHolder& files_holder, MergeFilesGr
     };
 
     meta::SegmentsSchema sort_files = files_holder.HoldFiles();
+    // no need to merge single file
+    if (sort_files.size() < 2) {
+        return Status::OK();
+    }
 
     // arrange files by file size in descending order
     std::sort(sort_files.begin(), sort_files.end(), CompareSegment);
