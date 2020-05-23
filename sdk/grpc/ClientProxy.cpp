@@ -90,11 +90,6 @@ ConstructTopkHybridResult(const ::milvus::grpc::HQueryResult& result, TopKHybrid
     }
     topk_query_result.reserve(nq);
 
-    std::vector<int64_t> aaa(100);
-    memcpy(aaa.data(), result.entity().attr_data(0).int_value().data(), 100 * sizeof(int64_t));
-    std::vector<double> bbb(100);
-    memcpy(bbb.data(), result.entity().attr_data(1).double_value().data(), 100 * sizeof(double));
-
     auto grpc_entity = result.entity();
     int64_t topk = grpc_entity.entity_id().size() / nq;
     for (int64_t i = 0; i < result.row_num(); i++) {
