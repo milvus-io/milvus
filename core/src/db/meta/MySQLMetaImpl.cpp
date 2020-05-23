@@ -314,9 +314,9 @@ MySQLMetaImpl::Initialize() {
     }
 
     // step 3: connect mysql
-    int thread_hint = std::thread::hardware_concurrency();
-    int max_pool_size = (thread_hint == 0) ? 8 : thread_hint;
-    unsigned int port = 0;
+    unsigned int thread_hint = std::thread::hardware_concurrency();
+    int max_pool_size = (thread_hint > 8) ? thread_hint : 8;
+    int port = 0;
     if (!uri_info.port_.empty()) {
         port = std::stoi(uri_info.port_);
     }
