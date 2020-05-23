@@ -12,8 +12,10 @@ Please mark all change in change log and use the issue from GitHub
 -   \#2363 Update branch version
 
 ## Improvement
+-   \#2353 Remove log_config from code and scripts
 -   \#2370 Clean compile warning
 -   \#2381 Upgrade FAISS to 1.6.3
+-   \#2410 Logging build index progress
 
 ## Task
 

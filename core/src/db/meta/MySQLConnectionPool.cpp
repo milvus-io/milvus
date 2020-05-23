@@ -11,6 +11,7 @@
 
 #include "db/meta/MySQLConnectionPool.h"
 #include <fiu-local.h>
+#include <thread>
 
 namespace milvus {
 namespace engine {
@@ -24,7 +25,7 @@ namespace meta {
 mysqlpp::Connection*
 MySQLConnectionPool::grab() {
     while (conns_in_use_ > max_pool_size_) {
-        sleep(1);
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
     }
 
     ++conns_in_use_;
