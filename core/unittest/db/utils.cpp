@@ -378,7 +378,6 @@ SnapshotTest::SetUp() {
 
 void
 SnapshotTest::TearDown() {
-
     milvus::engine::snapshot::OperationExecutor::GetInstance().Stop();
     BaseTest::TearDown();
 }

@@ -159,7 +159,7 @@ class GetVectorByIdTest : public DBTest {};
 //
 /////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 class SnapshotTest : public DBTest {
-protected:
+ protected:
     void
     SetUp() override;
     void

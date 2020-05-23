@@ -41,14 +41,14 @@ TEST_F(SnapshotTest, ReferenceProxyTest) {
     ASSERT_EQ(proxy.RefCnt(), 0);
 
     int refcnt = 3;
-    for (auto i=0; i<refcnt; ++i) {
+    for (auto i = 0; i < refcnt; ++i) {
         proxy.Ref();
     }
     ASSERT_EQ(proxy.RefCnt(), refcnt);
 
     proxy.RegisterOnNoRefCB(callback);
 
-    for (auto i=0; i<refcnt; ++i) {
+    for (auto i = 0; i < refcnt; ++i) {
         proxy.UnRef();
     }
     ASSERT_EQ(proxy.RefCnt(), 0);
@@ -124,8 +124,7 @@ TEST_F(SnapshotTest, ResourceHoldersTest) {
         ASSERT_EQ(collection->RefCnt(), 1+prev_cnt);
     }
 
-    if (prev_cnt == 0)
-    {
+    if (prev_cnt == 0) {
         auto collection = snapshot::CollectionsHolder::GetInstance().GetResource(collection_id, false);
         ASSERT_TRUE(!collection);
     }
