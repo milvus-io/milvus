@@ -28,16 +28,19 @@ struct {
 
 Status
 MergeAdaptiveStrategy::RegroupFiles(meta::FilesHolder& files_holder, MergeFilesGroups& files_groups) {
-    meta::SegmentsSchema sort_files;
+    meta::SegmentsSchema sort_files, ignore_files;
     meta::SegmentsSchema& files = files_holder.HoldFiles();
     for (meta::SegmentsSchema::reverse_iterator iter = files.rbegin(); iter != files.rend(); ++iter) {
         meta::SegmentSchema& file = *iter;
         if (file.index_file_size_ > 0 && (int64_t)file.file_size_ > file.index_file_size_) {
             // file that no need to merge
+            ignore_files.push_back(file);
             continue;
         }
         sort_files.push_back(file);
     }
+
+    files_holder.UnmarkFiles(ignore_files);
 
     // no need to merge single file
     if (sort_files.size() < 2) {
