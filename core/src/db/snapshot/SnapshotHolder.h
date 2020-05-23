@@ -10,7 +10,12 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
 #pragma once
-#include "Snapshot.h"
+
+#include "db/snapshot/Snapshot.h"
+#include <map>
+#include <vector>
+#include <memory>
+#include <limits>
 
 namespace milvus {
 namespace engine {
@@ -20,7 +25,7 @@ class SnapshotHolder {
  public:
     using ScopedPtr = std::shared_ptr<ScopedSnapshotT>;
 
-    SnapshotHolder(ID_TYPE collection_id, GCHandler gc_handler = nullptr, size_t num_versions = 1);
+    explicit SnapshotHolder(ID_TYPE collection_id, GCHandler gc_handler = nullptr, size_t num_versions = 1);
 
     ID_TYPE GetID() const { return collection_id_; }
     bool Add(ID_TYPE id);
@@ -42,7 +47,7 @@ class SnapshotHolder {
         gc_handler_ = gc_handler;
     }
 
-private:
+ private:
     CollectionCommitPtr LoadNoLock(ID_TYPE collection_commit_id);
 
     void ReadyForRelease(Snapshot::Ptr ss) {

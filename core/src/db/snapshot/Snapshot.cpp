@@ -1,11 +1,21 @@
-#include "Snapshot.h"
-#include "Store.h"
-#include "ResourceHolders.h"
+// Copyright (C) 2019-2020 Zilliz. All rights reserved.
+//
+// Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance
+// with the License. You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software distributed under the License
+// is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
+// or implied. See the License for the specific language governing permissions and limitations under the License.
+
+#include "db/snapshot/Snapshot.h"
+#include "db/snapshot/Store.h"
+#include "db/snapshot/ResourceHolders.h"
 
 namespace milvus {
 namespace engine {
 namespace snapshot {
-
 
 void
 Snapshot::DumpSegments(const std::string& tag) {
@@ -19,7 +29,8 @@ Snapshot::DumpSegments(const std::string& tag) {
 
 void
 Snapshot::DumpPartitionCommits(const std::string& tag) {
-    std::cout << typeid(*this).name() << " DumpPartitionCommits Start [" << tag <<  "]:" << partition_commits_.size() << std::endl;
+    std::cout << typeid(*this).name() << " DumpPartitionCommits Start [";
+    std::cout << tag <<  "]:" << partition_commits_.size() << std::endl;
     for (auto& kv : partition_commits_) {
         std::cout << "\t" << kv.second->ToString() << std::endl;
     }
@@ -28,7 +39,8 @@ Snapshot::DumpPartitionCommits(const std::string& tag) {
 
 void
 Snapshot::DumpSegmentCommits(const std::string& tag) {
-    std::cout << typeid(*this).name() << " DumpSegmentCommits Start [" << tag <<  "]:" << segment_commits_.size() << std::endl;
+    std::cout << typeid(*this).name() << " DumpSegmentCommits Start [";
+    std::cout << tag <<  "]:" << segment_commits_.size() << std::endl;
     for (auto& kv : segment_commits_) {
         std::cout << "\t" << kv.second->ToString() << std::endl;
     }
@@ -190,7 +202,7 @@ Snapshot::Snapshot(ID_TYPE id) {
     /* } */
 
     RefAll();
-};
+}
 
 } // namespace snapshot
 } // namespace engine

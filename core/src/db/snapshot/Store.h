@@ -251,14 +251,16 @@ class Store {
     /*                         element_name, element_type)); */
     /*             element_ids.insert(element->GetID()); */
     /*         } */
-    /*         auto field_commit = CreateResource<FieldCommit>(FieldCommit(collection->GetID(), field->GetID(), element_ids)); */
+    /*         auto field_commit = CreateResource<FieldCommit>(FieldCommit(collection->GetID(),
+     *         field->GetID(), element_ids)); */
     /*         field_commit_ids.insert(field_commit->GetID()); */
     /*     } */
     /*     auto schema_commit = CreateResource<SchemaCommit>(SchemaCommit(collection->GetID(), field_commit_ids)); */
 
     /*     MappingT empty_mappings = {}; */
     /*     auto partition = CreateResource<Partition>(Partition("_default", collection->GetID())); */
-    /*     auto partition_commit = CreateResource<PartitionCommit>(PartitionCommit(collection->GetID(), partition->GetID(), */
+    /*     auto partition_commit = CreateResource<PartitionCommit>(PartitionCommit(collection->GetID(),
+     *     partition->GetID(), */
     /*                 empty_mappings)); */
     /*     auto collection_commit = CreateResource<CollectionCommit>(CollectionCommit(collection->GetID(), */
     /*                 schema_commit->GetID(), {partition_commit->GetID()})); */
@@ -270,8 +272,7 @@ class Store {
         DoMock();
     }
 
-private:
-
+ private:
     ID_TYPE ProcessOperationStep(const std::any& step_v) {
         if (const auto it = any_flush_vistors_.find(std::type_index(step_v.type()));
                 it != any_flush_vistors_.cend()) {
@@ -284,12 +285,10 @@ private:
 
     template<class T, class F>
     inline std::pair<const std::type_index, std::function<ID_TYPE(std::any const&)>>
-        to_any_visitor(F const &f)
-    {
+        to_any_visitor(F const &f) {
         return {
             std::type_index(typeid(T)),
-            [g = f](std::any const &a) -> ID_TYPE
-            {
+            [g = f](std::any const &a) -> ID_TYPE {
                 if constexpr (std::is_void_v<T>)
                     return g();
                 else
@@ -299,8 +298,7 @@ private:
     }
 
     template<class T, class F>
-    inline void register_any_visitor(F const& f)
-    {
+    inline void register_any_visitor(F const& f) {
         std::cout << "Register visitor for type "
                   << std::quoted(typeid(T).name()) << '\n';
         any_flush_vistors_.insert(to_any_visitor<T>(f));
@@ -367,9 +365,11 @@ private:
                 auto random_elements = rand_r(&seed) % 2 + 2;
                 for (auto fei = 1; fei <= random_elements; ++fei) {
                     std::stringstream fename;
-                    fename << "fe_" << fei << "_" << std::get<Index<FieldElement::MapT, MockResourcesT>::value>(ids_) + 1;
+                    fename << "fe_" << fei << "_";
+                    fename << std::get<Index<FieldElement::MapT, MockResourcesT>::value>(ids_) + 1;
 
-                    auto element = CreateResource<FieldElement>(FieldElement(c->GetID(), field->GetID(), fename.str(), fei));
+                    auto element = CreateResource<FieldElement>(FieldElement(c->GetID(),
+                                field->GetID(), fename.str(), fei));
                     all_records.push_back(element);
                     f_c_m.insert(element->GetID());
                 }

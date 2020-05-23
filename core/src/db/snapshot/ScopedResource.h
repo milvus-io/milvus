@@ -24,7 +24,7 @@ class ScopedResource {
     using Ptr = std::shared_ptr<ThisT>;
     using ResourcePtr = std::shared_ptr<ResourceT>;
     ScopedResource();
-    ScopedResource(ResourcePtr res, bool scoped = true);
+    explicit ScopedResource(ResourcePtr res, bool scoped = true);
 
     ScopedResource(const ScopedResource<ResourceT>& res);
 
@@ -37,7 +37,7 @@ class ScopedResource {
 
     operator bool () const {
         if (res_) return true;
-        else return false;
+        return false;
     }
 
     ~ScopedResource();

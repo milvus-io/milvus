@@ -87,7 +87,7 @@ class SegmentFileOperation : public CommitOperation<SegmentFile> {
 template <>
 class LoadOperation<Collection> : public Operations {
  public:
-    LoadOperation(const LoadOperationContext& context) :
+    explicit LoadOperation(const LoadOperationContext& context) :
        Operations(OperationContext(), ScopedSnapshotT()), context_(context) {}
 
     void ApplyToStore(Store& store) override {

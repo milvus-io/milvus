@@ -10,7 +10,8 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
 #pragma once
-#include "WrappedTypes.h"
+
+#include "db/snapshot/WrappedTypes.h"
 #include <memory>
 #include <string>
 #include <vector>
@@ -23,6 +24,8 @@
 #include <thread>
 #include <atomic>
 #include <chrono>
+#include <map>
+#include <utility>
 
 namespace milvus {
 namespace engine {
@@ -32,7 +35,7 @@ namespace snapshot {
 class Snapshot : public ReferenceProxy {
  public:
     using Ptr = std::shared_ptr<Snapshot>;
-    Snapshot(ID_TYPE id);
+    explicit Snapshot(ID_TYPE id);
 
     ID_TYPE GetID() const { return collection_commit_->GetID();}
     ID_TYPE GetCollectionId() const { return collection_->GetID(); }
@@ -82,7 +85,7 @@ class Snapshot : public ReferenceProxy {
 
     IDS_TYPE GetPartitionIds() const {
         IDS_TYPE ids;
-        for(auto& kv : partitions_) {
+        for (auto& kv : partitions_) {
             ids.push_back(kv.first);
         }
         return std::move(ids);
@@ -90,7 +93,7 @@ class Snapshot : public ReferenceProxy {
 
     std::vector<std::string> GetFieldNames() const {
         std::vector<std::string> names;
-        for(auto& kv : field_names_map_) {
+        for (auto& kv : field_names_map_) {
             names.emplace_back(kv.first);
         }
         return std::move(names);
@@ -139,7 +142,7 @@ class Snapshot : public ReferenceProxy {
 
     std::vector<std::string> GetFieldElementNames() const {
         std::vector<std::string> names;
-        for(auto& kv : field_elements_) {
+        for (auto& kv : field_elements_) {
             names.emplace_back(kv.second->GetName());
         }
 
@@ -148,7 +151,7 @@ class Snapshot : public ReferenceProxy {
 
     IDS_TYPE GetSegmentIds() const {
         IDS_TYPE ids;
-        for(auto& kv : segments_) {
+        for (auto& kv : segments_) {
             ids.push_back(kv.first);
         }
         return std::move(ids);
@@ -156,7 +159,7 @@ class Snapshot : public ReferenceProxy {
 
     IDS_TYPE GetSegmentFileIds() const {
         IDS_TYPE ids;
-        for(auto& kv : segment_files_) {
+        for (auto& kv : segment_files_) {
             ids.push_back(kv.first);
         }
         return std::move(ids);
@@ -175,7 +178,7 @@ class Snapshot : public ReferenceProxy {
     void DumpSegmentCommits(const std::string& tag = "");
     void DumpPartitionCommits(const std::string& tag = "");
 
-private:
+ private:
     // PXU TODO: Re-org below data structures to reduce memory usage
     CollectionScopedT collection_;
     ID_TYPE current_schema_id_;

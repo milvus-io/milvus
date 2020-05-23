@@ -9,9 +9,9 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
-#include "Operations.h"
-#include "Snapshots.h"
-#include "OperationExecutor.h"
+#include "db/snapshot/Operations.h"
+#include "db/snapshot/Snapshots.h"
+#include "db/snapshot/OperationExecutor.h"
 #include <chrono>
 
 namespace milvus {

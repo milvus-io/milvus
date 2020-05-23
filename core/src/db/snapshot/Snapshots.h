@@ -10,7 +10,8 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
 #pragma once
-#include "SnapshotHolder.h"
+
+#include "db/snapshot/SnapshotHolder.h"
 #include <map>
 #include <memory>
 #include <string>
@@ -47,7 +48,7 @@ class Snapshots {
 
     void Reset();
 
-private:
+ private:
     void SnapshotGCCallback(Snapshot::Ptr ss_ptr);
     Snapshots() {
         Init();

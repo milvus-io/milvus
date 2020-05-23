@@ -27,7 +27,6 @@
 #include "db/snapshot/CompoundOperations.h"
 #include "db/snapshot/Snapshots.h"
 
-using namespace milvus::engine;
 
 #if 1
 TEST_F(SnapshotTest, ReferenceProxyTest) {
@@ -37,7 +36,7 @@ TEST_F(SnapshotTest, ReferenceProxyTest) {
         status = CALLED;
     };
 
-    auto proxy = snapshot::ReferenceProxy();
+    auto proxy = milvus::engine::snapshot::ReferenceProxy();
     ASSERT_EQ(proxy.RefCnt(), 0);
 
     int refcnt = 3;
@@ -56,11 +55,11 @@ TEST_F(SnapshotTest, ReferenceProxyTest) {
 }
 
 TEST_F(SnapshotTest, ScopedResourceTest) {
-    auto inner = std::make_shared<snapshot::Collection>("c1");
+    auto inner = std::make_shared<milvus::engine::snapshot::Collection>("c1");
     ASSERT_EQ(inner->RefCnt(), 0);
 
     {
-        auto not_scoped = snapshot::CollectionScopedT(inner, false);
+        auto not_scoped = milvus::engine::snapshot::CollectionScopedT(inner, false);
         ASSERT_EQ(not_scoped->RefCnt(), 0);
         not_scoped->Ref();
         ASSERT_EQ(not_scoped->RefCnt(), 1);
@@ -78,7 +77,7 @@ TEST_F(SnapshotTest, ScopedResourceTest) {
 
     {
         // Test scoped construct
-        auto scoped = snapshot::CollectionScopedT(inner);
+        auto scoped = milvus::engine::snapshot::CollectionScopedT(inner);
         ASSERT_EQ(scoped->RefCnt(), 1);
         ASSERT_EQ(inner->RefCnt(), 1);
 
@@ -109,49 +108,51 @@ TEST_F(SnapshotTest, ScopedResourceTest) {
 }
 
 TEST_F(SnapshotTest, ResourceHoldersTest) {
-    snapshot::ID_TYPE collection_id = 1;
-    auto collection = snapshot::CollectionsHolder::GetInstance().GetResource(collection_id, false);
+    milvus::engine::snapshot::ID_TYPE collection_id = 1;
+    auto collection = milvus::engine::snapshot::CollectionsHolder::GetInstance().GetResource(collection_id, false);
     auto prev_cnt = collection->RefCnt();
     {
-        auto collection_2 = snapshot::CollectionsHolder::GetInstance().GetResource(collection_id, false);
+        auto collection_2 = milvus::engine::snapshot::CollectionsHolder::GetInstance().GetResource(
+                collection_id, false);
         ASSERT_EQ(collection->GetID(), collection_id);
         ASSERT_EQ(collection->RefCnt(), prev_cnt);
     }
 
     {
-        auto collection = snapshot::CollectionsHolder::GetInstance().GetResource(collection_id, true);
+        auto collection = milvus::engine::snapshot::CollectionsHolder::GetInstance().GetResource(collection_id, true);
         ASSERT_EQ(collection->GetID(), collection_id);
         ASSERT_EQ(collection->RefCnt(), 1+prev_cnt);
     }
 
     if (prev_cnt == 0) {
-        auto collection = snapshot::CollectionsHolder::GetInstance().GetResource(collection_id, false);
+        auto collection = milvus::engine::snapshot::CollectionsHolder::GetInstance().GetResource(collection_id, false);
         ASSERT_TRUE(!collection);
     }
 }
 
 TEST_F(SnapshotTest, OperationTest) {
     {
-        snapshot::SegmentFileContext sf_context;
+        milvus::engine::snapshot::SegmentFileContext sf_context;
         sf_context.field_name = "f_1_1";
         sf_context.field_element_name = "fe_1_1";
         sf_context.segment_id = 1;
         sf_context.partition_id = 1;
 
-        auto ss = snapshot::Snapshots::GetInstance().GetSnapshot(1);
+        auto ss = milvus::engine::snapshot::Snapshots::GetInstance().GetSnapshot(1);
         auto ss_id = ss->GetID();
 
         // Check snapshot
         {
-            auto collection_commit = snapshot::CollectionCommitsHolder::GetInstance().GetResource(ss_id, false);
+            auto collection_commit = milvus::engine::snapshot::CollectionCommitsHolder::GetInstance()
+                .GetResource(ss_id, false);
             /* snapshot::SegmentCommitsHolder::GetInstance().GetResource(prev_segment_commit->GetID()); */
             ASSERT_TRUE(collection_commit);
         }
 
         // Check build operation correctness
         {
-            snapshot::OperationContext context;
-            auto build_op = std::make_shared<snapshot::BuildOperation>(context, ss);
+            milvus::engine::snapshot::OperationContext context;
+            auto build_op = std::make_shared<milvus::engine::snapshot::BuildOperation>(context, ss);
             auto seg_file = build_op->CommitNewSegmentFile(sf_context);
             ASSERT_TRUE(seg_file);
             auto prev_segment_commit = ss->GetSegmentCommit(seg_file->GetSegmentId());
@@ -163,22 +164,23 @@ TEST_F(SnapshotTest, OperationTest) {
 
             auto segment_commit = ss->GetSegmentCommit(seg_file->GetSegmentId());
             auto segment_commit_mappings = segment_commit->GetMappings();
-            snapshot::MappingT expected_mappings = prev_segment_commit_mappings;
+            milvus::engine::snapshot::MappingT expected_mappings = prev_segment_commit_mappings;
             expected_mappings.insert(seg_file->GetID());
             ASSERT_EQ(expected_mappings, segment_commit_mappings);
         }
 
         // Check stale snapshot has been deleted from store
         {
-            auto collection_commit = snapshot::CollectionCommitsHolder::GetInstance().GetResource(ss_id, false);
+            auto collection_commit = milvus::engine::snapshot::CollectionCommitsHolder::GetInstance()
+                .GetResource(ss_id, false);
             ASSERT_TRUE(!collection_commit);
         }
 
         ss_id = ss->GetID();
         {
-            snapshot::OperationContext context;
+            milvus::engine::snapshot::OperationContext context;
             context.prev_partition = ss->GetPartition(1);
-            auto op = std::make_shared<snapshot::NewSegmentOperation>(context, ss);
+            auto op = std::make_shared<milvus::engine::snapshot::NewSegmentOperation>(context, ss);
             auto new_seg = op->CommitNewSegment();
             auto seg_file = op->CommitNewSegmentFile(sf_context);
             op->Push();
@@ -188,7 +190,7 @@ TEST_F(SnapshotTest, OperationTest) {
 
             auto segment_commit = ss->GetSegmentCommit(seg_file->GetSegmentId());
             auto segment_commit_mappings = segment_commit->GetMappings();
-            snapshot::MappingT expected_segment_mappings;
+            milvus::engine::snapshot::MappingT expected_segment_mappings;
             expected_segment_mappings.insert(seg_file->GetID());
             ASSERT_EQ(expected_segment_mappings, segment_commit_mappings);
         }
