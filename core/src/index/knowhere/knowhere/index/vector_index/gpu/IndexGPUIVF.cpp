@@ -145,7 +145,14 @@ GPUIVF::QueryImpl(int64_t n, const float* data, int64_t k, float* distances, int
     if (device_index) {
         device_index->nprobe = config[IndexParams::nprobe];
         ResScope rs(res_, gpu_id_);
-        device_index->search(n, (float*)data, k, distances, labels, bitset_);
+
+        // if query size > 2048 we search by blocks to avoid malloc issue
+        size_t block_size = 2048;
+        size_t dim = device_index->d;
+        for (size_t i = 0; i < n; i += block_size) {
+            size_t search_size = (n - i > block_size) ? block_size : (n - i);
+            device_index->search(search_size, (float*)data + i * dim, k, distances + i * k, labels + i * k, bitset_);
+        }
     } else {
         KNOWHERE_THROW_MSG("Not a GpuIndexIVF type.");
     }
