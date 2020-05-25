@@ -20,14 +20,6 @@
 
 namespace milvus {
 namespace engine {
-namespace {
-struct {
-    bool
-    operator()(meta::SegmentSchema& left, meta::SegmentSchema& right) const {
-        return left.file_size_ > right.file_size_;
-    }
-} CompareSegment;
-}  // namespace
 
 const int64_t FORCE_MERGE_THREASHOLD = 30;  // force merge files older this time(in second)
 
@@ -50,7 +42,10 @@ MergeLayeredStrategy::RegroupFiles(meta::FilesHolder& files_holder, MergeFilesGr
     }
 
     // arrange files by file size in descending order
-    std::sort(sort_files.begin(), sort_files.end(), CompareSegment);
+    std::sort(sort_files.begin(), sort_files.end(),
+              [](const meta::SegmentSchema& left, const meta::SegmentSchema& right) {
+                  return left.file_size_ > right.file_size_;
+              });
 
     // priority pick files that merge size greater than index_file_size
     // to avoid big files such as index_file_size = 1024, merged file size = 1280
