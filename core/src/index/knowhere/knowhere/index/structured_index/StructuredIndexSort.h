@@ -25,12 +25,17 @@ template <typename T>
 struct IndexStructure {
     IndexStructure() : a_(0), idx_(0) {
     }
+    IndexStructure(const T a) : a_(a), idx_(0) {
+    }
     IndexStructure(const T a, const size_t idx) : a_(a), idx_(idx) {
     }
     bool
     operator<(const IndexStructure& b) const {
-        //        return (double)(a_ - b.a_) < eps;
         return a_ < b.a_;
+    }
+    bool
+    operator==(const IndexStructure& b) const {
+        return a_ == b.a_;
     }
     T a_;
     size_t idx_;
@@ -80,7 +85,7 @@ class StructuredIndexSort : public StructuredIndex<T> {
 
     int64_t
     Size() override {
-        return n_;
+        return (int64_t)size_;
     }
 
     bool
@@ -90,7 +95,7 @@ class StructuredIndexSort : public StructuredIndex<T> {
 
  private:
     bool is_built_;
-    size_t n_;
+    size_t size_;
     std::vector<IndexStructure<T>> data_;
 };
 

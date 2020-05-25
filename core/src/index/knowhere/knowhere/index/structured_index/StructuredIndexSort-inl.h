@@ -19,11 +19,11 @@ namespace milvus {
 namespace knowhere {
 
 template <typename T>
-StructuredIndexSort<T>::StructuredIndexSort() : is_built_(false), data_(nullptr), n_(0) {
+StructuredIndexSort<T>::StructuredIndexSort() : is_built_(false), data_(nullptr), size_(0) {
 }
 
 template <typename T>
-StructuredIndexSort<T>::StructuredIndexSort(const size_t n, const T* values) : is_built_(false), n_(n) {
+StructuredIndexSort<T>::StructuredIndexSort(const size_t n, const T* values) : is_built_(false), size_(n) {
     Build(n, values);
 }
 
@@ -37,8 +37,6 @@ StructuredIndexSort<T>::Build(const size_t n, const T* values) {
     data_.reserve(n);
     T* p = const_cast<T*>(values);
     for (auto i = 0; i < n; ++i) {
-        //        data_[i].a_ = *p ++;
-        //        data_[i].idx_ = i;
         data_.emplace_back(IndexStructure(*p++, i));
     }
     build();
@@ -49,7 +47,7 @@ void
 StructuredIndexSort<T>::build() {
     if (is_built_)
         return;
-    if (data_.size() == 0 || n_ == 0) {
+    if (data_.size() == 0 || size_ == 0) {
         // todo: throw an exception
         KNOWHERE_THROW_MSG("StructuredIndexSort cannot build null values!");
     }
@@ -64,12 +62,12 @@ StructuredIndexSort<T>::Serialize(const milvus::knowhere::Config& config) {
         build();
     }
 
-    auto index_data_size = n_ * sizeof(IndexStructure<T>);
+    auto index_data_size = size_ * sizeof(IndexStructure<T>);
     std::shared_ptr<uint8_t[]> index_data(new uint8_t[index_data_size]);
     memcpy(index_data.get(), data_.data(), index_data_size);
 
     std::shared_ptr<uint8_t[]> index_length(new uint8_t[sizeof(size_t)]);
-    memcpy(index_length.get(), &n_, sizeof(size_t));
+    memcpy(index_length.get(), &size_, sizeof(size_t));
 
     BinarySet res_set;
     res_set.Append("index_data", index_data, index_data_size);
@@ -82,10 +80,10 @@ void
 StructuredIndexSort<T>::Load(const milvus::knowhere::BinarySet& index_binary) {
     try {
         auto index_length = index_binary.GetByName("index_length");
-        memcpy(&n_, index_length->data.get(), (size_t)index_length->size);
+        memcpy(&size_, index_length->data.get(), (size_t)index_length->size);
 
         auto index_data = index_binary.GetByName("index_data");
-        data_.reserve(n_);
+        data_.resize(size_);
         memcpy(data_.data(), index_data->data.get(), (size_t)index_data->size);
         is_built_ = true;
     } catch (...) {
@@ -97,7 +95,7 @@ StructuredIndexSort<T>::Load(const milvus::knowhere::BinarySet& index_binary) {
 template <typename T>
 size_t
 StructuredIndexSort<T>::lower_bound(const T& value) {
-    size_t low = 0, high = n_, mid;
+    size_t low = 0, high = size_, mid;
     while (low < high) {
         mid = low + ((high - low) >> 1);
         if (data_[mid].a_ < value) {
@@ -114,7 +112,7 @@ StructuredIndexSort<T>::lower_bound(const T& value) {
 template <typename T>
 size_t
 StructuredIndexSort<T>::upper_bound(const T& value) {
-    size_t low = 0, high = n_, mid;
+    size_t low = 0, high = size_, mid;
     while (low < high) {
         mid = low + ((high - low) >> 1);
         if (data_[mid].a_ <= value) {
@@ -133,16 +131,16 @@ StructuredIndexSort<T>::In(const size_t n, const T* values) {
     if (!is_built_) {
         build();
     }
-    faiss::ConcurrentBitsetPtr bitset = std::make_shared<faiss::ConcurrentBitset>(n_);
+    faiss::ConcurrentBitsetPtr bitset = std::make_shared<faiss::ConcurrentBitset>(size_);
     for (auto i = 0; i < n; ++i) {
-        auto lb = lower_bound(*(values + i));
-        auto ub = upper_bound(*(values + i));
-        for (auto j = lb; j < ub; ++j) {
-            if (data_[j].a_ != *(values + i)) {
+        auto lb = std::lower_bound(data_.begin(), data_.end(), IndexStructure<T>(*(values + i)));
+        auto ub = std::upper_bound(data_.begin(), data_.end(), IndexStructure<T>(*(values + i)));
+        for (; lb < ub; ++lb) {
+            if (lb->a_ != *(values + i)) {
                 LOG_KNOWHERE_ERROR_ << "error happens in StructuredIndexSort<T>::In, experted value is: "
-                                    << *(values + i) << ", but real value is: " << data_[j].a_;
+                                    << *(values + i) << ", but real value is: " << lb->a_;
             }
-            bitset->set(data_[j].idx_);
+            bitset->set(lb->idx_);
         }
     }
     return bitset;
@@ -154,16 +152,16 @@ StructuredIndexSort<T>::NotIn(const size_t n, const T* values) {
     if (!is_built_) {
         build();
     }
-    faiss::ConcurrentBitsetPtr bitset = std::make_shared<faiss::ConcurrentBitset>(n_, 255);
+    faiss::ConcurrentBitsetPtr bitset = std::make_shared<faiss::ConcurrentBitset>(size_, 255);
     for (auto i = 0; i < n; ++i) {
-        auto lb = lower_bound(*(values + i));
-        auto ub = upper_bound(*(values + i));
-        for (auto j = lb; j < ub; ++j) {
-            if (data_[j].a_ != *(values + i)) {
+        auto lb = std::lower_bound(data_.begin(), data_.end(), IndexStructure<T>(*(values + i)));
+        auto ub = std::upper_bound(data_.begin(), data_.end(), IndexStructure<T>(*(values + i)));
+        for (; lb < ub; ++lb) {
+            if (lb->a_ != *(values + i)) {
                 LOG_KNOWHERE_ERROR_ << "error happens in StructuredIndexSort<T>::NotIn, experted value is: "
-                                    << *(values + i) << ", but real value is: " << data_[j].a_;
+                                    << *(values + i) << ", but real value is: " << lb->a_;
             }
-            bitset->clear(data_[j].idx_);
+            bitset->clear(lb->idx_);
         }
     }
     return bitset;
@@ -175,26 +173,27 @@ StructuredIndexSort<T>::Range(const T value, const OperatorType op) {
     if (!is_built_) {
         build();
     }
-    faiss::ConcurrentBitsetPtr bitset = std::make_shared<faiss::ConcurrentBitset>(n_);
-    size_t lb = 0, ub = n_;
+    faiss::ConcurrentBitsetPtr bitset = std::make_shared<faiss::ConcurrentBitset>(size_);
+    auto lb = data_.begin();
+    auto ub = data_.end();
     switch (op) {
         case OperatorType::LT:
-            ub = lower_bound(value);
+            ub = std::lower_bound(data_.begin(), data_.end(), IndexStructure<T>(value));
             break;
         case OperatorType::LE:
-            ub = upper_bound(value);
+            ub = std::upper_bound(data_.begin(), data_.end(), IndexStructure<T>(value));
             break;
         case OperatorType::GT:
-            lb = upper_bound(value);
+            lb = std::upper_bound(data_.begin(), data_.end(), IndexStructure<T>(value));
             break;
         case OperatorType::GE:
-            lb = lower_bound(value);
+            lb = std::lower_bound(data_.begin(), data_.end(), IndexStructure<T>(value));
             break;
         default:
             KNOWHERE_THROW_MSG("Invalid OperatorType:" + std::to_string((int)op) + "!");
     }
-    for (auto i = lb; i < ub; ++i) {
-        bitset->set(data_[i].idx_);
+    for (; lb < ub; ++lb) {
+        bitset->set(lb->idx_);
     }
     return bitset;
 }
@@ -205,24 +204,25 @@ StructuredIndexSort<T>::Range(T lower_bound_value, bool lb_inclusive, T upper_bo
     if (!is_built_) {
         build();
     }
-    faiss::ConcurrentBitsetPtr bitset = std::make_shared<faiss::ConcurrentBitset>(n_);
+    faiss::ConcurrentBitsetPtr bitset = std::make_shared<faiss::ConcurrentBitset>(size_);
     if (lower_bound_value > upper_bound_value) {
         std::swap(lower_bound_value, upper_bound_value);
         std::swap(lb_inclusive, ub_inclusive);
     }
-    size_t lb = 0, ub = n_;
+    auto lb = data_.begin();
+    auto ub = data_.end();
     if (lb_inclusive) {
-        lb = lower_bound(lower_bound_value);
+        lb = std::lower_bound(data_.begin(), data_.end(), IndexStructure<T>(lower_bound_value));
     } else {
-        lb = upper_bound(lower_bound_value);
+        lb = std::upper_bound(data_.begin(), data_.end(), IndexStructure<T>(lower_bound_value));
     }
     if (ub_inclusive) {
-        ub = upper_bound(upper_bound_value);
+        ub = std::upper_bound(data_.begin(), data_.end(), IndexStructure<T>(upper_bound_value));
     } else {
-        ub = lower_bound(upper_bound_value);
+        ub = std::lower_bound(data_.begin(), data_.end(), IndexStructure<T>(upper_bound_value));
     }
-    for (auto i = lb; i < ub; ++i) {
-        bitset->set(data_[i].idx_);
+    for (; lb < ub; ++lb) {
+        bitset->set(lb->idx_);
     }
     return bitset;
 }
