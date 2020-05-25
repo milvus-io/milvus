@@ -60,12 +60,6 @@ class StructuredIndexSort : public StructuredIndex<T> {
     void
     build();
 
-    size_t
-    lower_bound(const T& value);
-
-    size_t
-    upper_bound(const T& value);
-
     const faiss::ConcurrentBitsetPtr
     In(const size_t n, const T* values) override;
 

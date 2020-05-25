@@ -36,7 +36,7 @@ void
 StructuredIndexSort<T>::Build(const size_t n, const T* values) {
     data_.reserve(n);
     T* p = const_cast<T*>(values);
-    for (auto i = 0; i < n; ++i) {
+    for (size_t i = 0; i < n; ++i) {
         data_.emplace_back(IndexStructure(*p++, i));
     }
     build();
@@ -91,40 +91,6 @@ StructuredIndexSort<T>::Load(const milvus::knowhere::BinarySet& index_binary) {
     }
 }
 
-// find the first element's offset which is no less than given value
-template <typename T>
-size_t
-StructuredIndexSort<T>::lower_bound(const T& value) {
-    size_t low = 0, high = size_, mid;
-    while (low < high) {
-        mid = low + ((high - low) >> 1);
-        if (data_[mid].a_ < value) {
-            low = mid + 1;
-        } else {
-            high = mid;
-        }
-    }
-    //    return data_[low].a == value ? data_[low].idx : -1;
-    return low;
-}
-
-// find the first element's offset which is greater than given value
-template <typename T>
-size_t
-StructuredIndexSort<T>::upper_bound(const T& value) {
-    size_t low = 0, high = size_, mid;
-    while (low < high) {
-        mid = low + ((high - low) >> 1);
-        if (data_[mid].a_ <= value) {
-            low = mid + 1;
-        } else {
-            high = mid;
-        }
-    }
-    //    return data_[low].a == value ? data_[low].idx : -1;
-    return low;
-}
-
 template <typename T>
 const faiss::ConcurrentBitsetPtr
 StructuredIndexSort<T>::In(const size_t n, const T* values) {
@@ -132,7 +98,7 @@ StructuredIndexSort<T>::In(const size_t n, const T* values) {
         build();
     }
     faiss::ConcurrentBitsetPtr bitset = std::make_shared<faiss::ConcurrentBitset>(size_);
-    for (auto i = 0; i < n; ++i) {
+    for (size_t i = 0; i < n; ++i) {
         auto lb = std::lower_bound(data_.begin(), data_.end(), IndexStructure<T>(*(values + i)));
         auto ub = std::upper_bound(data_.begin(), data_.end(), IndexStructure<T>(*(values + i)));
         for (; lb < ub; ++lb) {
@@ -152,8 +118,8 @@ StructuredIndexSort<T>::NotIn(const size_t n, const T* values) {
     if (!is_built_) {
         build();
     }
-    faiss::ConcurrentBitsetPtr bitset = std::make_shared<faiss::ConcurrentBitset>(size_, 255);
-    for (auto i = 0; i < n; ++i) {
+    faiss::ConcurrentBitsetPtr bitset = std::make_shared<faiss::ConcurrentBitset>(size_, 0xff);
+    for (size_t i = 0; i < n; ++i) {
         auto lb = std::lower_bound(data_.begin(), data_.end(), IndexStructure<T>(*(values + i)));
         auto ub = std::upper_bound(data_.begin(), data_.end(), IndexStructure<T>(*(values + i)));
         for (; lb < ub; ++lb) {

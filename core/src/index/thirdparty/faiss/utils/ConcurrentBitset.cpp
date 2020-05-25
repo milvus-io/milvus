@@ -20,11 +20,8 @@
 
 namespace faiss {
 
-ConcurrentBitset::ConcurrentBitset(id_type_t capacity, int init_value) : capacity_(capacity), bitset_(((capacity + 8 - 1) >> 3)) {
+ConcurrentBitset::ConcurrentBitset(id_type_t capacity, uint8_t init_value) : capacity_(capacity), bitset_(((capacity + 8 - 1) >> 3)) {
     if (init_value) {
-//        for (auto i = 0; i < (capacity + 8 - 1) >> 3; ++ i) {
-//            bitset_[i].fetch_or(init_value);
-//        }
         memset(mutable_data(), init_value, (capacity + 8 - 1) >> 3);
     }
 }
