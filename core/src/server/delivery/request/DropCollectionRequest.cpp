@@ -76,6 +76,9 @@ DropCollectionRequest::OnExecute() {
             return status;
         }
 
+        // step 4: flush to trigger CleanUpFilesWithTTL
+        status = DBWrapper::DB()->Flush();
+
         rc.ElapseFromBegin("total cost");
     } catch (std::exception& ex) {
         return Status(SERVER_UNEXPECTED_ERROR, ex.what());
