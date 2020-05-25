@@ -219,8 +219,6 @@ MemTableFile::Serialize(uint64_t wal_lsn) {
         table_file_schema_.file_type_ = meta::SegmentSchema::RAW;
     }
 
-    status = meta_->UpdateCollectionFile(table_file_schema_);
-
     LOG_ENGINE_DEBUG_ << "New " << ((table_file_schema_.file_type_ == meta::SegmentSchema::RAW) ? "raw" : "to_index")
                       << " file " << table_file_schema_.file_id_ << " of size " << size << " bytes, lsn = " << wal_lsn;
 
@@ -240,6 +238,11 @@ MemTableFile::Serialize(uint64_t wal_lsn) {
 const std::string&
 MemTableFile::GetSegmentId() const {
     return table_file_schema_.segment_id_;
+}
+
+meta::SegmentSchema
+MemTableFile::GetSegmentSchema() const {
+    return table_file_schema_;
 }
 
 void

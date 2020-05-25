@@ -238,10 +238,10 @@ TEST_F(MemManagerTest, MEM_TABLE_TEST) {
     status = mem_table.Add(source_10);
     ASSERT_TRUE(status.ok());
 
-    FIU_ENABLE_FIU("SqliteMetaImpl.UpdateCollectionFile.throw_exception");
+    FIU_ENABLE_FIU("SqliteMetaImpl.UpdateCollectionFiles.throw_exception");
     status = mem_table.Serialize(0);
     ASSERT_FALSE(status.ok());
-    fiu_disable("SqliteMetaImpl.UpdateCollectionFile.throw_exception");
+    fiu_disable("SqliteMetaImpl.UpdateCollectionFiles.throw_exception");
 }
 
 TEST_F(MemManagerTest2, SERIAL_INSERT_SEARCH_TEST) {
