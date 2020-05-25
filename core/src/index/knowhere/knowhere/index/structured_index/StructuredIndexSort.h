@@ -25,7 +25,7 @@ template <typename T>
 struct IndexStructure {
     IndexStructure() : a_(0), idx_(0) {
     }
-    IndexStructure(const T a) : a_(a), idx_(0) {
+    explicit IndexStructure(const T a) : a_(a), idx_(0) {
     }
     IndexStructure(const T a, const size_t idx) : a_(a), idx_(idx) {
     }
