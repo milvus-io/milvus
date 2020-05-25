@@ -17,7 +17,7 @@
 
 #include "grpc-gen/gen-milvus/milvus.grpc.pb.h"
 
-#define MILVUS_SDK_VERSION "0.9.0";
+#define MILVUS_SDK_VERSION "0.9.1";
 
 namespace milvus {
 
