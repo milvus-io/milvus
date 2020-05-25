@@ -39,6 +39,7 @@ aux_source_directory(${MILVUS_ENGINE_SRC}/db/insert db_insert_files)
 aux_source_directory(${MILVUS_ENGINE_SRC}/db/meta db_meta_files)
 aux_source_directory(${MILVUS_ENGINE_SRC}/db/merge db_merge_files)
 aux_source_directory(${MILVUS_ENGINE_SRC}/db/wal db_wal_files)
+aux_source_directory(${MILVUS_ENGINE_SRC}/db/snapshot db_snapshot_files)
 
 set(grpc_service_files
         ${MILVUS_ENGINE_SRC}/grpc/gen-milvus/milvus.grpc.pb.cc
@@ -146,6 +147,7 @@ set(engine_files
         ${db_meta_files}
         ${db_merge_files}
         ${db_wal_files}
+        ${db_snapshot_files}
         ${metrics_files}
         ${storage_files}
         ${thirdparty_files}
