@@ -11,8 +11,6 @@ Please mark all change in change log and use the issue from GitHub
 -   \#2403 MySQL max_idle_time is 10 by default
 
 ## Feature
--   \#2363 Update branch version to 0.9.1
--   \#2381 Upgrade to faiss_1.6.3
 
 ## Improvement
 -   \#2353 Remove log_config from code and scripts
