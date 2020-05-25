@@ -17,14 +17,6 @@
 
 namespace milvus {
 namespace engine {
-namespace {
-struct {
-    bool
-    operator()(meta::SegmentSchema& left, meta::SegmentSchema& right) const {
-        return left.file_size_ > right.file_size_;
-    }
-} CompareSegment;
-}  // namespace
 
 Status
 MergeAdaptiveStrategy::RegroupFiles(meta::FilesHolder& files_holder, MergeFilesGroups& files_groups) {
@@ -54,7 +46,10 @@ MergeAdaptiveStrategy::RegroupFiles(meta::FilesHolder& files_holder, MergeFilesG
     }
 
     // arrange files by file size in descending order
-    std::sort(sort_files.begin(), sort_files.end(), CompareSegment);
+    std::sort(sort_files.begin(), sort_files.end(),
+              [](const meta::SegmentSchema& left, const meta::SegmentSchema& right) {
+                  return left.file_size_ > right.file_size_;
+              });
 
     // pick files to merge
     int64_t index_file_size = sort_files[0].index_file_size_;
