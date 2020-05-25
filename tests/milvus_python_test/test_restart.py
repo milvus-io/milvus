@@ -65,3 +65,60 @@ class TestRestartBase:
         logging.getLogger().info(res)
         assert status.OK()
         assert res == nq
+
+    @pytest.mark.level(2)
+    def test_during_creating_index_restart(self, connect, collection, args, get_simple_index):
+        '''
+        target: return the same row count after server restart
+        method: call function: insert, flush, and create index, server do restart during creating index
+        expected: row count, vector-id, index info keep the same
+        '''
+        # reset auto_flush_interval
+        # auto_flush_interval = 100
+        get_ids_length = 500
+        index_param = get_simple_index["index_param"]
+        index_type = get_simple_index["index_type"]
+        # status, res_set = connect.set_config("db_config", "auto_flush_interval", auto_flush_interval)
+        # assert status.OK()
+        # status, res_get = connect.get_config("db_config", "auto_flush_interval")
+        # assert status.OK()
+        # assert res_get == str(auto_flush_interval)
+        # insert and create index
+        vectors = gen_vectors(big_nb, dim)
+        status, ids = connect.insert(collection, vectors, ids=[i for i in range(big_nb)])
+        status = connect.flush([collection])
+        assert status.OK()
+        status, res_count = connect.count_entities(collection)
+        logging.getLogger().info(res_count)
+        assert status.OK()
+        assert res_count == big_nb
+
+        def create_index():
+            milvus = get_milvus(args["ip"], args["port"], handler=args["handler"])
+            status = milvus.create_index(collection, index_type, index_param)
+            logging.getLogger().info(status)
+            assert status.OK()
+
+        p = Process(target=create_index, args=(collection, ))
+        p.start()
+        # restart server
+        if restart_server(args["service_name"]):
+            logging.getLogger().info("Restart success")
+        else:
+            logging.getLogger().info("Restart failed")
+        # check row count, index_type, vertor-id after server restart
+        new_connect = get_milvus(args["ip"], args["port"], handler=args["handler"])
+        status, res_count = new_connect.count_entities(collection)
+        assert status.OK()
+        assert res_count == big_nb
+        status, res_info = connect.get_index_info(collection)
+        logging.getLogger().info(res_info)
+        assert res_info._params == index_param
+        assert res_info._collection_name == collection
+        assert res_info._index_type == index_type
+        get_ids = random.sample(ids, get_ids_length)
+        status, res = connect.get_entity_by_id(collection, get_ids)
+        assert status.OK()
+        for index, item_id in enumerate(get_ids):
+            logging.getLogger().info(index)
+            assert_equal_vector(res[index], vectors[item_id])
