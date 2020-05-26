@@ -79,7 +79,7 @@ class StructuredIndexSort : public StructuredIndex<T> {
 
     int64_t
     Size() override {
-        return (int64_t)size_;
+        return (int64_t)data_.size();
     }
 
     bool
@@ -89,7 +89,6 @@ class StructuredIndexSort : public StructuredIndex<T> {
 
  private:
     bool is_built_;
-    size_t size_;
     std::vector<IndexStructure<T>> data_;
 };
 

@@ -19,11 +19,11 @@ namespace milvus {
 namespace knowhere {
 
 template <typename T>
-StructuredIndexSort<T>::StructuredIndexSort() : is_built_(false), data_(nullptr), size_(0) {
+StructuredIndexSort<T>::StructuredIndexSort() : is_built_(false), data_(nullptr) {
 }
 
 template <typename T>
-StructuredIndexSort<T>::StructuredIndexSort(const size_t n, const T* values) : is_built_(false), size_(n) {
+StructuredIndexSort<T>::StructuredIndexSort(const size_t n, const T* values) : is_built_(false) {
     Build(n, values);
 }
 
@@ -47,7 +47,7 @@ void
 StructuredIndexSort<T>::build() {
     if (is_built_)
         return;
-    if (data_.size() == 0 || size_ == 0) {
+    if (data_.size() == 0) {
         // todo: throw an exception
         KNOWHERE_THROW_MSG("StructuredIndexSort cannot build null values!");
     }
@@ -62,12 +62,13 @@ StructuredIndexSort<T>::Serialize(const milvus::knowhere::Config& config) {
         build();
     }
 
-    auto index_data_size = size_ * sizeof(IndexStructure<T>);
+    auto index_data_size = data_.size() * sizeof(IndexStructure<T>);
     std::shared_ptr<uint8_t[]> index_data(new uint8_t[index_data_size]);
     memcpy(index_data.get(), data_.data(), index_data_size);
 
     std::shared_ptr<uint8_t[]> index_length(new uint8_t[sizeof(size_t)]);
-    memcpy(index_length.get(), &size_, sizeof(size_t));
+    auto index_size = data_.size();
+    memcpy(index_length.get(), &index_size, sizeof(size_t));
 
     BinarySet res_set;
     res_set.Append("index_data", index_data, index_data_size);
@@ -79,11 +80,12 @@ template <typename T>
 void
 StructuredIndexSort<T>::Load(const milvus::knowhere::BinarySet& index_binary) {
     try {
+        size_t index_size;
         auto index_length = index_binary.GetByName("index_length");
-        memcpy(&size_, index_length->data.get(), (size_t)index_length->size);
+        memcpy(&index_size, index_length->data.get(), (size_t)index_length->size);
 
         auto index_data = index_binary.GetByName("index_data");
-        data_.resize(size_);
+        data_.resize(index_size);
         memcpy(data_.data(), index_data->data.get(), (size_t)index_data->size);
         is_built_ = true;
     } catch (...) {
@@ -97,7 +99,7 @@ StructuredIndexSort<T>::In(const size_t n, const T* values) {
     if (!is_built_) {
         build();
     }
-    faiss::ConcurrentBitsetPtr bitset = std::make_shared<faiss::ConcurrentBitset>(size_);
+    faiss::ConcurrentBitsetPtr bitset = std::make_shared<faiss::ConcurrentBitset>(data_.size());
     for (size_t i = 0; i < n; ++i) {
         auto lb = std::lower_bound(data_.begin(), data_.end(), IndexStructure<T>(*(values + i)));
         auto ub = std::upper_bound(data_.begin(), data_.end(), IndexStructure<T>(*(values + i)));
@@ -118,7 +120,7 @@ StructuredIndexSort<T>::NotIn(const size_t n, const T* values) {
     if (!is_built_) {
         build();
     }
-    faiss::ConcurrentBitsetPtr bitset = std::make_shared<faiss::ConcurrentBitset>(size_, 0xff);
+    faiss::ConcurrentBitsetPtr bitset = std::make_shared<faiss::ConcurrentBitset>(data_.size(), 0xff);
     for (size_t i = 0; i < n; ++i) {
         auto lb = std::lower_bound(data_.begin(), data_.end(), IndexStructure<T>(*(values + i)));
         auto ub = std::upper_bound(data_.begin(), data_.end(), IndexStructure<T>(*(values + i)));
@@ -139,7 +141,7 @@ StructuredIndexSort<T>::Range(const T value, const OperatorType op) {
     if (!is_built_) {
         build();
     }
-    faiss::ConcurrentBitsetPtr bitset = std::make_shared<faiss::ConcurrentBitset>(size_);
+    faiss::ConcurrentBitsetPtr bitset = std::make_shared<faiss::ConcurrentBitset>(data_.size());
     auto lb = data_.begin();
     auto ub = data_.end();
     switch (op) {
@@ -170,7 +172,7 @@ StructuredIndexSort<T>::Range(T lower_bound_value, bool lb_inclusive, T upper_bo
     if (!is_built_) {
         build();
     }
-    faiss::ConcurrentBitsetPtr bitset = std::make_shared<faiss::ConcurrentBitset>(size_);
+    faiss::ConcurrentBitsetPtr bitset = std::make_shared<faiss::ConcurrentBitset>(data_.size());
     if (lower_bound_value > upper_bound_value) {
         std::swap(lower_bound_value, upper_bound_value);
         std::swap(lb_inclusive, ub_inclusive);
