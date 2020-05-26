@@ -50,7 +50,7 @@ Snapshot::DumpSegmentCommits(const std::string& tag) {
 void
 Snapshot::RefAll() {
     collection_commit_->Ref();
-    for (auto& schema : schema_commits_) {
+    for (auto& schema : GetResources<SchemaCommit>()) {
         schema.second->Ref();
     }
     for (auto& element : field_elements_) {
@@ -63,7 +63,8 @@ Snapshot::RefAll() {
         field_commit.second->Ref();
     }
     collection_->Ref();
-    for (auto& partition : partitions_) {
+    auto& partitions = std::get<Index<typename Partition::ScopedMapT, ScopedResourcesT>::value>(resources_);
+    for (auto& partition : partitions) {
         partition.second->Ref();
     }
     for (auto& partition_commit : partition_commits_) {
@@ -84,7 +85,7 @@ void
 Snapshot::UnRefAll() {
     /* std::cout << this << " UnRefAll " << collection_commit_->GetID() << " RefCnt=" << RefCnt() << std::endl; */
     collection_commit_->UnRef();
-    for (auto& schema : schema_commits_) {
+    for (auto& schema : GetResources<SchemaCommit>()) {
         schema.second->UnRef();
     }
     for (auto& element : field_elements_) {
@@ -97,7 +98,8 @@ Snapshot::UnRefAll() {
         field_commit.second->UnRef();
     }
     collection_->UnRef();
-    for (auto& partition : partitions_) {
+    auto& partitions = std::get<Index<typename Partition::ScopedMapT, ScopedResourcesT>::value>(resources_);
+    for (auto& partition : partitions) {
         partition.second->UnRef();
     }
     for (auto& partition_commit : partition_commits_) {
@@ -119,7 +121,7 @@ Snapshot::Snapshot(ID_TYPE id) {
     assert(collection_commit_);
     auto& schema_holder = SchemaCommitsHolder::GetInstance();
     auto current_schema = schema_holder.GetResource(collection_commit_->GetSchemaId(), false);
-    schema_commits_[current_schema->GetID()] = current_schema;
+    AddResource<SchemaCommit>(current_schema);
     current_schema_id_ = current_schema->GetID();
     auto& field_commits_holder = FieldCommitsHolder::GetInstance();
     auto& fields_holder = FieldsHolder::GetInstance();
@@ -138,14 +140,14 @@ Snapshot::Snapshot(ID_TYPE id) {
         auto partition = partitions_holder.GetResource(partition_commit->GetPartitionId(), false);
         partition_commits_[partition_commit->GetID()] = partition_commit;
         p_pc_map_[partition_commit->GetPartitionId()] = partition_commit->GetID();
-        partitions_[partition_commit->GetPartitionId()] = partition;
+        AddResource<Partition>(partition);
         p_max_seg_num_[partition->GetID()] = 0;
         auto& s_c_mappings = partition_commit->GetMappings();
         for (auto& s_c_id : s_c_mappings) {
             auto segment_commit = segment_commits_holder.GetResource(s_c_id, false);
             auto segment = segments_holder.GetResource(segment_commit->GetSegmentId(), false);
             auto schema = schema_holder.GetResource(segment_commit->GetSchemaId(), false);
-            schema_commits_[schema->GetID()] = schema;
+            AddResource<SchemaCommit>(schema);
             segment_commits_[segment_commit->GetID()] = segment_commit;
             if (segment->GetNum() > p_max_seg_num_[segment->GetPartitionId()]) {
                 p_max_seg_num_[segment->GetPartitionId()] = segment->GetNum();
@@ -169,7 +171,7 @@ Snapshot::Snapshot(ID_TYPE id) {
         }
     }
 
-    for (auto& kv : schema_commits_) {
+    for (auto& kv : GetResources<SchemaCommit>()) {
         if (kv.first > latest_schema_commit_id_)
             latest_schema_commit_id_ = kv.first;
         auto& schema_commit = kv.second;

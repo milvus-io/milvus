@@ -189,7 +189,7 @@ TEST_F(SnapshotTest, OperationTest) {
         milvus::engine::snapshot::ID_TYPE partition_id;
         {
             milvus::engine::snapshot::OperationContext context;
-            context.prev_partition = ss->GetPartition(1);
+            context.prev_partition = ss->GetResource<milvus::engine::snapshot::Partition>(1);
             auto op = std::make_shared<milvus::engine::snapshot::NewSegmentOperation>(context, ss);
             auto new_seg = op->CommitNewSegment();
             auto seg_file = op->CommitNewSegmentFile(sf_context);
@@ -206,7 +206,7 @@ TEST_F(SnapshotTest, OperationTest) {
             merge_ctx.stale_segments.push_back(new_seg);
             partition_id = segment_commit->GetPartitionId();
             stale_segment_commit_ids.insert(segment_commit->GetID());
-            auto partition = ss->GetPartition(partition_id);
+            auto partition = ss->GetResource<milvus::engine::snapshot::Partition>(partition_id);
             merge_ctx.prev_partition = partition;
         }
 

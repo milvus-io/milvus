@@ -65,29 +65,29 @@ class Snapshot : public ReferenceProxy {
     GetCollectionCommit() {
         return collection_commit_.Get();
     }
-    std::vector<std::string>
-    GetPartitionNames() const {
-        std::vector<std::string> names;
-        for (auto& kv : partitions_) {
-            std::cout << "Partition: " << kv.second->GetName() << std::endl;
-            names.push_back(kv.second->GetName());
-        }
-        return names;
-    }
+    /* std::vector<std::string> */
+    /* GetPartitionNames() const { */
+    /*     std::vector<std::string> names; */
+    /*     for (auto& kv : partitions_) { */
+    /*         std::cout << "Partition: " << kv.second->GetName() << std::endl; */
+    /*         names.push_back(kv.second->GetName()); */
+    /*     } */
+    /*     return names; */
+    /* } */
 
     ID_TYPE
     GetLatestSchemaCommitId() const {
         return latest_schema_commit_id_;
     }
 
-    PartitionPtr
-    GetPartition(ID_TYPE partition_id) {
-        auto it = partitions_.find(partition_id);
-        if (it == partitions_.end()) {
-            return nullptr;
-        }
-        return it->second.Get();
-    }
+    /* PartitionPtr */
+    /* GetPartition(ID_TYPE partition_id) { */
+    /*     auto it = partitions_.find(partition_id); */
+    /*     if (it == partitions_.end()) { */
+    /*         return nullptr; */
+    /*     } */
+    /*     return it->second.Get(); */
+    /* } */
 
     SegmentPtr
     GetSegment(ID_TYPE segment_id) {
@@ -123,14 +123,14 @@ class Snapshot : public ReferenceProxy {
         return itpc->second.Get();
     }
 
-    IDS_TYPE
-    GetPartitionIds() const {
-        IDS_TYPE ids;
-        for (auto& kv : partitions_) {
-            ids.push_back(kv.first);
-        }
-        return std::move(ids);
-    }
+    /* IDS_TYPE */
+    /* GetPartitionIds() const { */
+    /*     IDS_TYPE ids; */
+    /*     for (auto& kv : partitions_) { */
+    /*         ids.push_back(kv.first); */
+    /*     } */
+    /*     return std::move(ids); */
+    /* } */
 
     std::vector<std::string>
     GetFieldNames() const {
@@ -235,9 +235,15 @@ class Snapshot : public ReferenceProxy {
     DumpPartitionCommits(const std::string& tag = "");
 
     template <typename ResourceT>
+    typename ResourceT::ScopedMapT&
+    GetResources() {
+        return std::get<Index<typename ResourceT::ScopedMapT, ScopedResourcesT>::value>(resources_);
+    }
+
+    template <typename ResourceT>
     typename ResourceT::Ptr
     GetResource(ID_TYPE id) {
-        auto& resources = std::get<Index<typename ResourceT::ScopedMapT, ScopedResourcesT>::value>(resources_);
+        auto& resources = GetResources<ResourceT>();
         auto it = resources.find(id);
         if (it == resources.end()) {
             return nullptr;
@@ -249,7 +255,7 @@ class Snapshot : public ReferenceProxy {
     template <typename ResourceT>
     void
     AddResource(ScopedResource<ResourceT>& resource) {
-        auto& resources = std::get<typename ResourceT::ScopedMapT>(resources_);
+        auto& resources = GetResources<ResourceT>();
         resources[resource->GetID()] = resource;
     }
 
@@ -258,12 +264,10 @@ class Snapshot : public ReferenceProxy {
     ScopedResourcesT resources_;
     CollectionScopedT collection_;
     ID_TYPE current_schema_id_;
-    SchemaCommitsT schema_commits_;
     FieldsT fields_;
     FieldCommitsT field_commits_;
     FieldElementsT field_elements_;
     CollectionCommitScopedT collection_commit_;
-    PartitionsT partitions_;
     PartitionCommitsT partition_commits_;
     SegmentsT segments_;
     SegmentCommitsT segment_commits_;
