@@ -110,10 +110,10 @@ class ExecutionEngine {
     //    Merge(const std::string& location) = 0;
 
     virtual Status
-    GetVectorByID(const int64_t& id, float* vector, bool hybrid) = 0;
+    GetVectorByID(const int64_t id, float* vector, bool hybrid) = 0;
 
     virtual Status
-    GetVectorByID(const int64_t& id, uint8_t* vector, bool hybrid) = 0;
+    GetVectorByID(const int64_t id, uint8_t* vector, bool hybrid) = 0;
 
     virtual Status
     ExecBinaryQuery(query::GeneralQueryPtr general_query, faiss::ConcurrentBitsetPtr bitset,

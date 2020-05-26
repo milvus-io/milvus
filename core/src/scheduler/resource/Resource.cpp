@@ -184,7 +184,7 @@ Resource::loader_function() {
 
 void
 Resource::executor_function() {
-    SetThreadName("taskexector_th");
+    SetThreadName("taskexecutor_th");
     if (subscriber_) {
         auto event = std::make_shared<StartUpEvent>(shared_from_this());
         subscriber_(std::static_pointer_cast<Event>(event));

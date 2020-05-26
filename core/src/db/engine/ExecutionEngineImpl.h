@@ -64,10 +64,10 @@ class ExecutionEngineImpl : public ExecutionEngine {
     CopyToCpu() override;
 
     Status
-    GetVectorByID(const int64_t& id, float* vector, bool hybrid) override;
+    GetVectorByID(const int64_t id, float* vector, bool hybrid) override;
 
     Status
-    GetVectorByID(const int64_t& id, uint8_t* vector, bool hybrid) override;
+    GetVectorByID(const int64_t id, uint8_t* vector, bool hybrid) override;
 
     Status
     ExecBinaryQuery(query::GeneralQueryPtr general_query, faiss::ConcurrentBitsetPtr bitset,
