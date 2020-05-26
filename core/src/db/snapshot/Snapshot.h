@@ -80,35 +80,13 @@ class Snapshot : public ReferenceProxy {
         return latest_schema_commit_id_;
     }
 
-    /* PartitionPtr */
-    /* GetPartition(ID_TYPE partition_id) { */
-    /*     auto it = partitions_.find(partition_id); */
-    /*     if (it == partitions_.end()) { */
-    /*         return nullptr; */
-    /*     } */
-    /*     return it->second.Get(); */
-    /* } */
-
-    SegmentPtr
-    GetSegment(ID_TYPE segment_id) {
-        auto it = segments_.find(segment_id);
-        if (it == segments_.end()) {
-            return nullptr;
-        }
-        return it->second.Get();
-    }
-
     // PXU TODO: add const. Need to change Scopedxxxx::Get
     SegmentCommitPtr
     GetSegmentCommit(ID_TYPE segment_id) {
         auto it = seg_segc_map_.find(segment_id);
         if (it == seg_segc_map_.end())
             return nullptr;
-        auto itsc = segment_commits_.find(it->second);
-        if (itsc == segment_commits_.end()) {
-            return nullptr;
-        }
-        return itsc->second.Get();
+        return GetResource<SegmentCommit>(it->second);
     }
 
     PartitionCommitPtr
@@ -116,21 +94,8 @@ class Snapshot : public ReferenceProxy {
         auto it = p_pc_map_.find(partition_id);
         if (it == p_pc_map_.end())
             return nullptr;
-        auto itpc = partition_commits_.find(it->second);
-        if (itpc == partition_commits_.end()) {
-            return nullptr;
-        }
-        return itpc->second.Get();
+        return GetResource<PartitionCommit>(it->second);
     }
-
-    /* IDS_TYPE */
-    /* GetPartitionIds() const { */
-    /*     IDS_TYPE ids; */
-    /*     for (auto& kv : partitions_) { */
-    /*         ids.push_back(kv.first); */
-    /*     } */
-    /*     return std::move(ids); */
-    /* } */
 
     std::vector<std::string>
     GetFieldNames() const {
@@ -186,34 +151,6 @@ class Snapshot : public ReferenceProxy {
         return itfe->second;
     }
 
-    std::vector<std::string>
-    GetFieldElementNames() const {
-        std::vector<std::string> names;
-        for (auto& kv : field_elements_) {
-            names.emplace_back(kv.second->GetName());
-        }
-
-        return std::move(names);
-    }
-
-    IDS_TYPE
-    GetSegmentIds() const {
-        IDS_TYPE ids;
-        for (auto& kv : segments_) {
-            ids.push_back(kv.first);
-        }
-        return std::move(ids);
-    }
-
-    IDS_TYPE
-    GetSegmentFileIds() const {
-        IDS_TYPE ids;
-        for (auto& kv : segment_files_) {
-            ids.push_back(kv.first);
-        }
-        return std::move(ids);
-    }
-
     NUM_TYPE
     GetMaxSegmentNumByPartition(ID_TYPE partition_id) {
         auto it = p_max_seg_num_.find(partition_id);
@@ -264,14 +201,7 @@ class Snapshot : public ReferenceProxy {
     ScopedResourcesT resources_;
     CollectionScopedT collection_;
     ID_TYPE current_schema_id_;
-    FieldsT fields_;
-    FieldCommitsT field_commits_;
-    FieldElementsT field_elements_;
     CollectionCommitScopedT collection_commit_;
-    PartitionCommitsT partition_commits_;
-    SegmentsT segments_;
-    SegmentCommitsT segment_commits_;
-    SegmentFilesT segment_files_;
     std::map<std::string, ID_TYPE> field_names_map_;
     std::map<std::string, std::map<std::string, ID_TYPE>> field_element_names_map_;
     std::map<ID_TYPE, std::map<ID_TYPE, ID_TYPE>> element_segfiles_map_;

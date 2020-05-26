@@ -172,7 +172,7 @@ TEST_F(SnapshotTest, OperationTest) {
             expected_mappings.insert(seg_file->GetID());
             ASSERT_EQ(expected_mappings, segment_commit_mappings);
 
-            auto seg = ss->GetSegment(seg_file->GetSegmentId());
+            auto seg = ss->GetResource<milvus::engine::snapshot::Segment>(seg_file->GetSegmentId());
             ASSERT_TRUE(seg);
             merge_ctx.stale_segments.push_back(seg);
             stale_segment_commit_ids.insert(segment_commit->GetID());

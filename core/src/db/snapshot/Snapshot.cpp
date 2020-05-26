@@ -19,8 +19,9 @@ namespace snapshot {
 
 void
 Snapshot::DumpSegments(const std::string& tag) {
-    std::cout << typeid(*this).name() << " DumpSegments Start [" << tag << "]:" << segments_.size() << std::endl;
-    for (auto& kv : segments_) {
+    auto& segments = GetResources<Segment>();
+    std::cout << typeid(*this).name() << " DumpSegments Start [" << tag << "]:" << segments.size() << std::endl;
+    for (auto& kv : segments) {
         /* std::cout << "\t" << kv.first << " RefCnt " << kv.second->RefCnt() << std::endl; */
         std::cout << "\t" << kv.second->ToString() << std::endl;
     }
@@ -29,9 +30,10 @@ Snapshot::DumpSegments(const std::string& tag) {
 
 void
 Snapshot::DumpPartitionCommits(const std::string& tag) {
+    auto& partition_commits = GetResources<PartitionCommit>();
     std::cout << typeid(*this).name() << " DumpPartitionCommits Start [";
-    std::cout << tag << "]:" << partition_commits_.size() << std::endl;
-    for (auto& kv : partition_commits_) {
+    std::cout << tag << "]:" << partition_commits.size() << std::endl;
+    for (auto& kv : partition_commits) {
         std::cout << "\t" << kv.second->ToString() << std::endl;
     }
     std::cout << typeid(*this).name() << " DumpPartitionCommits   End [" << tag << "]" << std::endl;
@@ -39,9 +41,10 @@ Snapshot::DumpPartitionCommits(const std::string& tag) {
 
 void
 Snapshot::DumpSegmentCommits(const std::string& tag) {
+    auto& segment_commits = GetResources<SegmentCommit>();
     std::cout << typeid(*this).name() << " DumpSegmentCommits Start [";
-    std::cout << tag << "]:" << segment_commits_.size() << std::endl;
-    for (auto& kv : segment_commits_) {
+    std::cout << tag << "]:" << segment_commits.size() << std::endl;
+    for (auto& kv : segment_commits) {
         std::cout << "\t" << kv.second->ToString() << std::endl;
     }
     std::cout << typeid(*this).name() << " DumpSegmentCommits   End [" << tag << "]" << std::endl;
@@ -53,30 +56,29 @@ Snapshot::RefAll() {
     for (auto& schema : GetResources<SchemaCommit>()) {
         schema.second->Ref();
     }
-    for (auto& element : field_elements_) {
+    for (auto& element : GetResources<FieldElement>()) {
         element.second->Ref();
     }
-    for (auto& field : fields_) {
+    for (auto& field : GetResources<Field>()) {
         field.second->Ref();
     }
-    for (auto& field_commit : field_commits_) {
+    for (auto& field_commit : GetResources<FieldCommit>()) {
         field_commit.second->Ref();
     }
     collection_->Ref();
-    auto& partitions = std::get<Index<typename Partition::ScopedMapT, ScopedResourcesT>::value>(resources_);
-    for (auto& partition : partitions) {
+    for (auto& partition : GetResources<Partition>()) {
         partition.second->Ref();
     }
-    for (auto& partition_commit : partition_commits_) {
+    for (auto& partition_commit : GetResources<PartitionCommit>()) {
         partition_commit.second->Ref();
     }
-    for (auto& segment : segments_) {
+    for (auto& segment : GetResources<Segment>()) {
         segment.second->Ref();
     }
-    for (auto& segment_commit : segment_commits_) {
+    for (auto& segment_commit : GetResources<SegmentCommit>()) {
         segment_commit.second->Ref();
     }
-    for (auto& segment_file : segment_files_) {
+    for (auto& segment_file : GetResources<SegmentFile>()) {
         segment_file.second->Ref();
     }
 }
@@ -88,30 +90,29 @@ Snapshot::UnRefAll() {
     for (auto& schema : GetResources<SchemaCommit>()) {
         schema.second->UnRef();
     }
-    for (auto& element : field_elements_) {
+    for (auto& element : GetResources<FieldElement>()) {
         element.second->UnRef();
     }
-    for (auto& field : fields_) {
+    for (auto& field : GetResources<Field>()) {
         field.second->UnRef();
     }
-    for (auto& field_commit : field_commits_) {
+    for (auto& field_commit : GetResources<FieldCommit>()) {
         field_commit.second->UnRef();
     }
     collection_->UnRef();
-    auto& partitions = std::get<Index<typename Partition::ScopedMapT, ScopedResourcesT>::value>(resources_);
-    for (auto& partition : partitions) {
+    for (auto& partition : GetResources<Partition>()) {
         partition.second->UnRef();
     }
-    for (auto& partition_commit : partition_commits_) {
+    for (auto& partition_commit : GetResources<PartitionCommit>()) {
         partition_commit.second->UnRef();
     }
-    for (auto& segment : segments_) {
+    for (auto& segment : GetResources<Segment>()) {
         segment.second->UnRef();
     }
-    for (auto& segment_commit : segment_commits_) {
+    for (auto& segment_commit : GetResources<SegmentCommit>()) {
         segment_commit.second->UnRef();
     }
-    for (auto& segment_file : segment_files_) {
+    for (auto& segment_file : GetResources<SegmentFile>()) {
         segment_file.second->UnRef();
     }
 }
@@ -138,7 +139,7 @@ Snapshot::Snapshot(ID_TYPE id) {
     for (auto& id : mappings) {
         auto partition_commit = partition_commits_holder.GetResource(id, false);
         auto partition = partitions_holder.GetResource(partition_commit->GetPartitionId(), false);
-        partition_commits_[partition_commit->GetID()] = partition_commit;
+        AddResource<PartitionCommit>(partition_commit);
         p_pc_map_[partition_commit->GetPartitionId()] = partition_commit->GetID();
         AddResource<Partition>(partition);
         p_max_seg_num_[partition->GetID()] = 0;
@@ -148,18 +149,18 @@ Snapshot::Snapshot(ID_TYPE id) {
             auto segment = segments_holder.GetResource(segment_commit->GetSegmentId(), false);
             auto schema = schema_holder.GetResource(segment_commit->GetSchemaId(), false);
             AddResource<SchemaCommit>(schema);
-            segment_commits_[segment_commit->GetID()] = segment_commit;
+            AddResource<SegmentCommit>(segment_commit);
             if (segment->GetNum() > p_max_seg_num_[segment->GetPartitionId()]) {
                 p_max_seg_num_[segment->GetPartitionId()] = segment->GetNum();
             }
-            segments_[segment->GetID()] = segment;
+            AddResource<Segment>(segment);
             seg_segc_map_[segment->GetID()] = segment_commit->GetID();
             auto& s_f_mappings = segment_commit->GetMappings();
             for (auto& s_f_id : s_f_mappings) {
                 auto segment_file = segment_files_holder.GetResource(s_f_id, false);
                 auto field_element = field_elements_holder.GetResource(segment_file->GetFieldElementId(), false);
-                field_elements_[field_element->GetID()] = field_element;
-                segment_files_[s_f_id] = segment_file;
+                AddResource<FieldElement>(field_element);
+                AddResource<SegmentFile>(segment_file);
                 auto entry = element_segfiles_map_.find(segment_file->GetFieldElementId());
                 if (entry == element_segfiles_map_.end()) {
                     element_segfiles_map_[segment_file->GetFieldElementId()] = {
@@ -178,14 +179,14 @@ Snapshot::Snapshot(ID_TYPE id) {
         auto& s_c_m = current_schema->GetMappings();
         for (auto field_commit_id : s_c_m) {
             auto field_commit = field_commits_holder.GetResource(field_commit_id, false);
-            field_commits_[field_commit_id] = field_commit;
+            AddResource<FieldCommit>(field_commit);
             auto field = fields_holder.GetResource(field_commit->GetFieldId(), false);
-            fields_[field->GetID()] = field;
+            AddResource<Field>(field);
             field_names_map_[field->GetName()] = field->GetID();
             auto& f_c_m = field_commit->GetMappings();
             for (auto field_element_id : f_c_m) {
                 auto field_element = field_elements_holder.GetResource(field_element_id, false);
-                field_elements_[field_element_id] = field_element;
+                AddResource<FieldElement>(field_element);
                 auto entry = field_element_names_map_.find(field->GetName());
                 if (entry == field_element_names_map_.end()) {
                     field_element_names_map_[field->GetName()] = {{field_element->GetName(), field_element->GetID()}};
