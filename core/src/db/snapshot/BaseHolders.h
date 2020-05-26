@@ -54,7 +54,8 @@ class ResourceHolder {
             }
         }
         auto ret = Load(id);
-        if (!ret) return ScopedT();
+        if (!ret)
+            return ScopedT();
         return ScopedT(ret, scoped);
     }
 
@@ -66,7 +67,8 @@ class ResourceHolder {
 
     bool
     AddNoLock(ResourcePtr resource) {
-        if (!resource) return false;
+        if (!resource)
+            return false;
         if (id_map_.find(resource->GetID()) != id_map_.end()) {
             return false;
         }
@@ -109,7 +111,7 @@ class ResourceHolder {
     Dump(const std::string& tag = "") {
         std::unique_lock<std::mutex> lock(mutex_);
         std::cout << typeid(*this).name() << " Dump Start [" << tag << "]:" << id_map_.size() << std::endl;
-        for (auto &kv : id_map_) {
+        for (auto& kv : id_map_) {
             /* std::cout << "\t" << kv.second->ToString() << std::endl; */
             std::cout << "\t" << kv.first << " RefCnt " << kv.second->RefCnt() << std::endl;
         }
@@ -127,8 +129,7 @@ class ResourceHolder {
     Load(ID_TYPE id) {
         LoadOperationContext context;
         context.id = id;
-        auto op = std::make_shared<LoadOperation < ResourceT>>
-        (context);
+        auto op = std::make_shared<LoadOperation<ResourceT>>(context);
         op->Push();
         auto c = op->GetResource();
         if (c) {
@@ -150,4 +151,3 @@ class ResourceHolder {
 }  // namespace snapshot
 }  // namespace engine
 }  // namespace milvus
-
