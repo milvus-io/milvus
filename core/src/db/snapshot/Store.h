@@ -36,7 +36,6 @@ namespace milvus {
 namespace engine {
 namespace snapshot {
 
-
 class Store {
  public:
     using MockIDST =

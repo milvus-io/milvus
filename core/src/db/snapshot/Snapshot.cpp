@@ -18,39 +18,6 @@ namespace engine {
 namespace snapshot {
 
 void
-Snapshot::DumpSegments(const std::string& tag) {
-    auto& segments = GetResources<Segment>();
-    std::cout << typeid(*this).name() << " DumpSegments Start [" << tag << "]:" << segments.size() << std::endl;
-    for (auto& kv : segments) {
-        /* std::cout << "\t" << kv.first << " RefCnt " << kv.second->RefCnt() << std::endl; */
-        std::cout << "\t" << kv.second->ToString() << std::endl;
-    }
-    std::cout << typeid(*this).name() << " DumpSegments   End [" << tag << "]" << std::endl;
-}
-
-void
-Snapshot::DumpPartitionCommits(const std::string& tag) {
-    auto& partition_commits = GetResources<PartitionCommit>();
-    std::cout << typeid(*this).name() << " DumpPartitionCommits Start [";
-    std::cout << tag << "]:" << partition_commits.size() << std::endl;
-    for (auto& kv : partition_commits) {
-        std::cout << "\t" << kv.second->ToString() << std::endl;
-    }
-    std::cout << typeid(*this).name() << " DumpPartitionCommits   End [" << tag << "]" << std::endl;
-}
-
-void
-Snapshot::DumpSegmentCommits(const std::string& tag) {
-    auto& segment_commits = GetResources<SegmentCommit>();
-    std::cout << typeid(*this).name() << " DumpSegmentCommits Start [";
-    std::cout << tag << "]:" << segment_commits.size() << std::endl;
-    for (auto& kv : segment_commits) {
-        std::cout << "\t" << kv.second->ToString() << std::endl;
-    }
-    std::cout << typeid(*this).name() << " DumpSegmentCommits   End [" << tag << "]" << std::endl;
-}
-
-void
 Snapshot::RefAll() {
     std::apply([this](auto&... resource) { ((DoRef(resource)), ...); }, resources_);
 }
@@ -71,8 +38,7 @@ Snapshot::Snapshot(ID_TYPE id) {
     auto& fields_holder = FieldsHolder::GetInstance();
     auto& field_elements_holder = FieldElementsHolder::GetInstance();
 
-    auto collection = CollectionsHolder::GetInstance().GetResource(collection_commit->GetCollectionId(),
-                false);
+    auto collection = CollectionsHolder::GetInstance().GetResource(collection_commit->GetCollectionId(), false);
     AddResource<Collection>(collection);
     auto& mappings = collection_commit->GetMappings();
     auto& partition_commits_holder = PartitionCommitsHolder::GetInstance();

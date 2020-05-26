@@ -23,26 +23,20 @@
 #include <shared_mutex>
 #include <string>
 #include <thread>
+#include <tuple>
 #include <utility>
 #include <vector>
-#include "db/snapshot/WrappedTypes.h"
 #include "db/snapshot/Utils.h"
+#include "db/snapshot/WrappedTypes.h"
 
 namespace milvus {
 namespace engine {
 namespace snapshot {
 
-using ScopedResourcesT = std::tuple<CollectionCommit::ScopedMapT,
-                                   Collection::ScopedMapT,
-                                   SchemaCommit::ScopedMapT,
-                                   FieldCommit::ScopedMapT,
-                                   Field::ScopedMapT,
-                                   FieldElement::ScopedMapT,
-                                   PartitionCommit::ScopedMapT,
-                                   Partition::ScopedMapT,
-                                   SegmentCommit::ScopedMapT,
-                                   Segment::ScopedMapT,
-                                   SegmentFile::ScopedMapT>;
+using ScopedResourcesT =
+    std::tuple<CollectionCommit::ScopedMapT, Collection::ScopedMapT, SchemaCommit::ScopedMapT, FieldCommit::ScopedMapT,
+               Field::ScopedMapT, FieldElement::ScopedMapT, PartitionCommit::ScopedMapT, Partition::ScopedMapT,
+               SegmentCommit::ScopedMapT, Segment::ScopedMapT, SegmentFile::ScopedMapT>;
 
 class Snapshot : public ReferenceProxy {
  public:
@@ -53,15 +47,18 @@ class Snapshot : public ReferenceProxy {
     GetID() {
         return GetCollectionCommit()->GetID();
     }
+
     ID_TYPE
     GetCollectionId() const {
         auto it = GetResources<Collection>().begin();
         return it->first;
     }
+
     const std::string&
     GetName() const {
         return GetResources<Collection>().begin()->second->GetName();
     }
+
     CollectionCommitPtr
     GetCollectionCommit() {
         return GetResources<CollectionCommit>().begin()->second.Get();
@@ -156,12 +153,18 @@ class Snapshot : public ReferenceProxy {
     void
     UnRefAll();
 
+    template <typename ResourceT>
     void
-    DumpSegments(const std::string& tag = "");
-    void
-    DumpSegmentCommits(const std::string& tag = "");
-    void
-    DumpPartitionCommits(const std::string& tag = "");
+    DumpResource(const std::string& tag = "") {
+        auto& resources = GetResources<ResourceT>();
+        std::cout << typeid(*this).name() << " Dump" << ResourceT::Name << " Start [" << tag << "]:" << resources.size()
+                  << std::endl;
+        for (auto& kv : resources) {
+            std::cout << "\t" << kv.second->ToString() << std::endl;
+        }
+        std::cout << typeid(*this).name() << " Dump" << ResourceT::Name << "  End [" << tag << "]:" << resources.size()
+                  << std::endl;
+    }
 
     template <typename T>
     void
