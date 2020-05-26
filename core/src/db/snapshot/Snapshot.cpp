@@ -52,76 +52,12 @@ Snapshot::DumpSegmentCommits(const std::string& tag) {
 
 void
 Snapshot::RefAll() {
-    for (auto& collection_commit : GetResources<CollectionCommit>()) {
-        collection_commit.second->Ref();
-    }
-    for (auto& schema : GetResources<SchemaCommit>()) {
-        schema.second->Ref();
-    }
-    for (auto& element : GetResources<FieldElement>()) {
-        element.second->Ref();
-    }
-    for (auto& field : GetResources<Field>()) {
-        field.second->Ref();
-    }
-    for (auto& field_commit : GetResources<FieldCommit>()) {
-        field_commit.second->Ref();
-    }
-    for (auto& collection : GetResources<Collection>()) {
-        collection.second->Ref();
-    }
-    for (auto& partition : GetResources<Partition>()) {
-        partition.second->Ref();
-    }
-    for (auto& partition_commit : GetResources<PartitionCommit>()) {
-        partition_commit.second->Ref();
-    }
-    for (auto& segment : GetResources<Segment>()) {
-        segment.second->Ref();
-    }
-    for (auto& segment_commit : GetResources<SegmentCommit>()) {
-        segment_commit.second->Ref();
-    }
-    for (auto& segment_file : GetResources<SegmentFile>()) {
-        segment_file.second->Ref();
-    }
+    std::apply([this](auto&... resource) { ((DoRef(resource)), ...); }, resources_);
 }
 
 void
 Snapshot::UnRefAll() {
-    for (auto& collection_commit : GetResources<CollectionCommit>()) {
-        collection_commit.second->UnRef();
-    }
-    for (auto& schema : GetResources<SchemaCommit>()) {
-        schema.second->UnRef();
-    }
-    for (auto& element : GetResources<FieldElement>()) {
-        element.second->UnRef();
-    }
-    for (auto& field : GetResources<Field>()) {
-        field.second->UnRef();
-    }
-    for (auto& field_commit : GetResources<FieldCommit>()) {
-        field_commit.second->UnRef();
-    }
-    for (auto& collection : GetResources<Collection>()) {
-        collection.second->UnRef();
-    }
-    for (auto& partition : GetResources<Partition>()) {
-        partition.second->UnRef();
-    }
-    for (auto& partition_commit : GetResources<PartitionCommit>()) {
-        partition_commit.second->UnRef();
-    }
-    for (auto& segment : GetResources<Segment>()) {
-        segment.second->UnRef();
-    }
-    for (auto& segment_commit : GetResources<SegmentCommit>()) {
-        segment_commit.second->UnRef();
-    }
-    for (auto& segment_file : GetResources<SegmentFile>()) {
-        segment_file.second->UnRef();
-    }
+    std::apply([this](auto&... resource) { ((DoUnRef(resource)), ...); }, resources_);
 }
 
 Snapshot::Snapshot(ID_TYPE id) {

@@ -57,7 +57,6 @@ class Snapshot : public ReferenceProxy {
     GetCollectionId() const {
         auto it = GetResources<Collection>().begin();
         return it->first;
-        /* return GetResources<Collection>().begin()->first; */
     }
     const std::string&
     GetName() const {
@@ -163,6 +162,22 @@ class Snapshot : public ReferenceProxy {
     DumpSegmentCommits(const std::string& tag = "");
     void
     DumpPartitionCommits(const std::string& tag = "");
+
+    template <typename T>
+    void
+    DoUnRef(T& resource_map) {
+        for (auto& kv : resource_map) {
+            kv.second->UnRef();
+        }
+    }
+
+    template <typename T>
+    void
+    DoRef(T& resource_map) {
+        for (auto& kv : resource_map) {
+            kv.second->Ref();
+        }
+    }
 
     template <typename ResourceT>
     typename ResourceT::ScopedMapT&
