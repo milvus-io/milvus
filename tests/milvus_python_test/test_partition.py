@@ -33,7 +33,7 @@ class TestCreateBase:
         status = connect.create_partition(collection, tag)
         assert status.OK()
 
-    @pytest.mark.level(2)
+    @pytest.mark.level(3)
     @pytest.mark.timeout(TIMEOUT)
     def test_create_partition_limit(self, connect, collection):
         '''
