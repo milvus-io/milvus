@@ -108,10 +108,11 @@ class DB {
     Flush() = 0;
 
     virtual Status
-    Compact(const std::string& collection_id, double threshold = 0.0) = 0;
+    Compact(const std::shared_ptr<server::Context>& context, const std::string& collection_id,
+            double threshold = 0.0) = 0;
 
     virtual Status
-    GetVectorsByID(const std::string& collection_id, const IDNumbers& id_array,
+    GetVectorsByID(const engine::meta::CollectionSchema& collection, const IDNumbers& id_array,
                    std::vector<engine::VectorsData>& vectors) = 0;
 
     virtual Status

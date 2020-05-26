@@ -119,10 +119,11 @@ class DBImpl : public DB, public server::CacheConfigHandler, public server::Engi
     Flush() override;
 
     Status
-    Compact(const std::string& collection_id, double threshold = 0.0) override;
+    Compact(const std::shared_ptr<server::Context>& context, const std::string& collection_id,
+            double threshold = 0.0) override;
 
     Status
-    GetVectorsByID(const std::string& collection_id, const IDNumbers& id_array,
+    GetVectorsByID(const engine::meta::CollectionSchema& collection, const IDNumbers& id_array,
                    std::vector<engine::VectorsData>& vectors) override;
 
     Status
@@ -200,8 +201,8 @@ class DBImpl : public DB, public server::CacheConfigHandler, public server::Engi
                      ResultIds& result_ids, ResultDistances& result_distances);
 
     Status
-    GetVectorsByIdHelper(const std::string& collection_id, const IDNumbers& id_array,
-                         std::vector<engine::VectorsData>& vectors, meta::FilesHolder& files_holder);
+    GetVectorsByIdHelper(const IDNumbers& id_array, std::vector<engine::VectorsData>& vectors,
+                         meta::FilesHolder& files_holder);
 
     void
     InternalFlush(const std::string& collection_id = "");
@@ -243,13 +244,7 @@ class DBImpl : public DB, public server::CacheConfigHandler, public server::Engi
     BackgroundBuildIndex();
 
     Status
-    CompactFile(const std::string& collection_id, double threshold, const meta::SegmentSchema& file,
-                meta::SegmentsSchema& files_to_update);
-
-    /*
-    Status
-    SyncMemData(std::set<std::string>& sync_collection_ids);
-    */
+    CompactFile(const meta::SegmentSchema& file, double threshold, meta::SegmentsSchema& files_to_update);
 
     Status
     GetFilesToBuildIndex(const std::string& collection_id, const std::vector<int>& file_types,

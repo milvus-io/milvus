@@ -535,12 +535,12 @@ TEST_F(DBTest, SHUTDOWN_TEST) {
     stat = db_->DeleteVectors(collection_info.collection_id_, ids_to_delete);
     ASSERT_FALSE(stat.ok());
 
-    stat = db_->Compact(collection_info.collection_id_);
+    stat = db_->Compact(dummy_context_, collection_info.collection_id_);
     ASSERT_FALSE(stat.ok());
 
     std::vector<milvus::engine::VectorsData> vectors;
     std::vector<int64_t> id_array = {0};
-    stat = db_->GetVectorsByID(collection_info.collection_id_, id_array, vectors);
+    stat = db_->GetVectorsByID(collection_info, id_array, vectors);
     ASSERT_FALSE(stat.ok());
 
     stat = db_->PreloadCollection(collection_info.collection_id_);
@@ -1183,7 +1183,9 @@ TEST_F(DBTest2, FLUSH_NON_EXISTING_COLLECTION) {
 TEST_F(DBTest2, GET_VECTOR_NON_EXISTING_COLLECTION) {
     std::vector<milvus::engine::VectorsData> vectors;
     std::vector<int64_t> id_array = {0};
-    auto status = db_->GetVectorsByID("non_existing", id_array, vectors);
+    milvus::engine::meta::CollectionSchema collection_info;
+    collection_info.collection_id_ = "non_existing";
+    auto status = db_->GetVectorsByID(collection_info, id_array, vectors);
     ASSERT_FALSE(status.ok());
 }
 
@@ -1203,7 +1205,7 @@ TEST_F(DBTest2, GET_VECTOR_BY_ID_TEST) {
 
     std::vector<milvus::engine::VectorsData> vectors;
     std::vector<int64_t> empty_array;
-    stat = db_->GetVectorsByID(COLLECTION_NAME, empty_array, vectors);
+    stat = db_->GetVectorsByID(collection_info, empty_array, vectors);
     ASSERT_FALSE(stat.ok());
 
     stat = db_->InsertVectors(collection_info.collection_id_, partition_tag, qxb);
@@ -1211,7 +1213,7 @@ TEST_F(DBTest2, GET_VECTOR_BY_ID_TEST) {
 
     db_->Flush(collection_info.collection_id_);
 
-    stat = db_->GetVectorsByID(COLLECTION_NAME, qxb.id_array_, vectors);
+    stat = db_->GetVectorsByID(collection_info, qxb.id_array_, vectors);
     ASSERT_TRUE(stat.ok());
     ASSERT_EQ(vectors.size(), qxb.id_array_.size());
     ASSERT_EQ(vectors[0].float_data_.size(), COLLECTION_DIM);
@@ -1221,7 +1223,7 @@ TEST_F(DBTest2, GET_VECTOR_BY_ID_TEST) {
     }
 
     std::vector<int64_t> invalid_array = {-1, -1};
-    stat = db_->GetVectorsByID(COLLECTION_NAME, empty_array, vectors);
+    stat = db_->GetVectorsByID(collection_info, empty_array, vectors);
     ASSERT_TRUE(stat.ok());
     for (auto& vector : vectors) {
         ASSERT_EQ(vector.vector_count_, 0);

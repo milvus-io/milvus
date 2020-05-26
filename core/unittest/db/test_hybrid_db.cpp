@@ -282,7 +282,7 @@ TEST_F(DBTest, COMPACT_TEST) {
     stat = db_->Flush();
     ASSERT_TRUE(stat.ok());
 
-    stat = db_->Compact(collection_info.collection_id_);
+    stat = db_->Compact(dummy_context_, collection_info.collection_id_);
     ASSERT_TRUE(stat.ok());
 
     const int topk = 1, nprobe = 1;
