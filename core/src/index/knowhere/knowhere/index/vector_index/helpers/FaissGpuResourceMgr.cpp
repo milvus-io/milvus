@@ -18,6 +18,8 @@
 namespace milvus {
 namespace knowhere {
 
+constexpr int64_t MB = 1LL << 20;
+
 FaissGpuResourceMgr&
 FaissGpuResourceMgr::GetInstance() {
     static FaissGpuResourceMgr instance;
@@ -45,8 +47,8 @@ FaissGpuResourceMgr::InitDevice(int64_t device_id, int64_t pin_mem_size, int64_t
     params.resource_num = res_num;
 
     devices_params_.emplace(device_id, params);
-    LOG_KNOWHERE_DEBUG_ << "DEVICEID " << device_id << ", pin_mem_size " << pin_mem_size << ", temp_mem_size "
-                        << temp_mem_size << ", resource count " << res_num;
+    LOG_KNOWHERE_DEBUG_ << "DEVICEID " << device_id << ", pin_mem_size " << pin_mem_size / MB << "MB, temp_mem_size "
+                        << temp_mem_size / MB << "MB, resource count " << res_num;
 }
 
 void
