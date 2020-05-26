@@ -50,30 +50,23 @@ class Snapshot : public ReferenceProxy {
     explicit Snapshot(ID_TYPE id);
 
     ID_TYPE
-    GetID() const {
-        return collection_commit_->GetID();
+    GetID() {
+        return GetCollectionCommit()->GetID();
     }
     ID_TYPE
     GetCollectionId() const {
-        return collection_->GetID();
+        auto it = GetResources<Collection>().begin();
+        return it->first;
+        /* return GetResources<Collection>().begin()->first; */
     }
     const std::string&
     GetName() const {
-        return collection_->GetName();
+        return GetResources<Collection>().begin()->second->GetName();
     }
     CollectionCommitPtr
     GetCollectionCommit() {
-        return collection_commit_.Get();
+        return GetResources<CollectionCommit>().begin()->second.Get();
     }
-    /* std::vector<std::string> */
-    /* GetPartitionNames() const { */
-    /*     std::vector<std::string> names; */
-    /*     for (auto& kv : partitions_) { */
-    /*         std::cout << "Partition: " << kv.second->GetName() << std::endl; */
-    /*         names.push_back(kv.second->GetName()); */
-    /*     } */
-    /*     return names; */
-    /* } */
 
     ID_TYPE
     GetLatestSchemaCommitId() const {
@@ -178,6 +171,12 @@ class Snapshot : public ReferenceProxy {
     }
 
     template <typename ResourceT>
+    const typename ResourceT::ScopedMapT&
+    GetResources() const {
+        return std::get<Index<typename ResourceT::ScopedMapT, ScopedResourcesT>::value>(resources_);
+    }
+
+    template <typename ResourceT>
     typename ResourceT::Ptr
     GetResource(ID_TYPE id) {
         auto& resources = GetResources<ResourceT>();
@@ -199,9 +198,7 @@ class Snapshot : public ReferenceProxy {
  private:
     // PXU TODO: Re-org below data structures to reduce memory usage
     ScopedResourcesT resources_;
-    CollectionScopedT collection_;
     ID_TYPE current_schema_id_;
-    CollectionCommitScopedT collection_commit_;
     std::map<std::string, ID_TYPE> field_names_map_;
     std::map<std::string, std::map<std::string, ID_TYPE>> field_element_names_map_;
     std::map<ID_TYPE, std::map<ID_TYPE, ID_TYPE>> element_segfiles_map_;

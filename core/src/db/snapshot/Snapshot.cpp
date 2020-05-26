@@ -52,7 +52,9 @@ Snapshot::DumpSegmentCommits(const std::string& tag) {
 
 void
 Snapshot::RefAll() {
-    collection_commit_->Ref();
+    for (auto& collection_commit : GetResources<CollectionCommit>()) {
+        collection_commit.second->Ref();
+    }
     for (auto& schema : GetResources<SchemaCommit>()) {
         schema.second->Ref();
     }
@@ -65,7 +67,9 @@ Snapshot::RefAll() {
     for (auto& field_commit : GetResources<FieldCommit>()) {
         field_commit.second->Ref();
     }
-    collection_->Ref();
+    for (auto& collection : GetResources<Collection>()) {
+        collection.second->Ref();
+    }
     for (auto& partition : GetResources<Partition>()) {
         partition.second->Ref();
     }
@@ -85,8 +89,9 @@ Snapshot::RefAll() {
 
 void
 Snapshot::UnRefAll() {
-    /* std::cout << this << " UnRefAll " << collection_commit_->GetID() << " RefCnt=" << RefCnt() << std::endl; */
-    collection_commit_->UnRef();
+    for (auto& collection_commit : GetResources<CollectionCommit>()) {
+        collection_commit.second->UnRef();
+    }
     for (auto& schema : GetResources<SchemaCommit>()) {
         schema.second->UnRef();
     }
@@ -99,7 +104,9 @@ Snapshot::UnRefAll() {
     for (auto& field_commit : GetResources<FieldCommit>()) {
         field_commit.second->UnRef();
     }
-    collection_->UnRef();
+    for (auto& collection : GetResources<Collection>()) {
+        collection.second->UnRef();
+    }
     for (auto& partition : GetResources<Partition>()) {
         partition.second->UnRef();
     }
@@ -118,18 +125,20 @@ Snapshot::UnRefAll() {
 }
 
 Snapshot::Snapshot(ID_TYPE id) {
-    collection_commit_ = CollectionCommitsHolder::GetInstance().GetResource(id, false);
-    assert(collection_commit_);
+    auto collection_commit = CollectionCommitsHolder::GetInstance().GetResource(id, false);
+    AddResource<CollectionCommit>(collection_commit);
     auto& schema_holder = SchemaCommitsHolder::GetInstance();
-    auto current_schema = schema_holder.GetResource(collection_commit_->GetSchemaId(), false);
+    auto current_schema = schema_holder.GetResource(collection_commit->GetSchemaId(), false);
     AddResource<SchemaCommit>(current_schema);
     current_schema_id_ = current_schema->GetID();
     auto& field_commits_holder = FieldCommitsHolder::GetInstance();
     auto& fields_holder = FieldsHolder::GetInstance();
     auto& field_elements_holder = FieldElementsHolder::GetInstance();
 
-    collection_ = CollectionsHolder::GetInstance().GetResource(collection_commit_->GetCollectionId(), false);
-    auto& mappings = collection_commit_->GetMappings();
+    auto collection = CollectionsHolder::GetInstance().GetResource(collection_commit->GetCollectionId(),
+                false);
+    AddResource<Collection>(collection);
+    auto& mappings = collection_commit->GetMappings();
     auto& partition_commits_holder = PartitionCommitsHolder::GetInstance();
     auto& partitions_holder = PartitionsHolder::GetInstance();
     auto& segments_holder = SegmentsHolder::GetInstance();
