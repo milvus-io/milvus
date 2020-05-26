@@ -22,7 +22,7 @@ timeout(time: 180, unit: 'MINUTES') {
     dir ("tests/milvus_python_test") {
         // sh 'python3 -m pip install -r requirements.txt -i http://pypi.douban.com/simple --trusted-host pypi.douban.com'
         sh 'python3 -m pip install -r requirements.txt'
-        sh "pytest . --alluredir=\"test_out/dev/single/mysql\" --ip ${env.HELM_RELEASE_NAME}.milvus.svc.cluster.local"
+        sh "pytest . --level=2 --alluredir=\"test_out/dev/single/mysql\" --ip ${env.HELM_RELEASE_NAME}.milvus.svc.cluster.local"
     }
     // sqlite database backend test
     load "ci/jenkins/step/cleanupSingleDev.groovy"
@@ -47,6 +47,6 @@ timeout(time: 180, unit: 'MINUTES') {
         }
     }
     dir ("tests/milvus_python_test") {
-        sh "pytest . --alluredir=\"test_out/dev/single/sqlite\" --ip ${env.HELM_RELEASE_NAME}.milvus.svc.cluster.local"
+        sh "pytest . --level=2 --alluredir=\"test_out/dev/single/sqlite\" --ip ${env.HELM_RELEASE_NAME}.milvus.svc.cluster.local"
     }
 }
