@@ -12,14 +12,11 @@
 #pragma once
 
 #include <condition_variable>
-#include <iostream>
 #include <map>
 #include <memory>
 #include <mutex>
 #include <string>
 #include <thread>
-
-#include "Operations.h"
 #include "ResourceTypes.h"
 #include "ScopedResource.h"
 
@@ -31,12 +28,25 @@ template <typename ResourceT, typename Derived>
 class ResourceHolder {
  public:
     using ResourcePtr = std::shared_ptr<ResourceT>;
+    /* using ResourcePtr = typename ResourceT::Ptr; */
     using ScopedT = ScopedResource<ResourceT>;
     using ScopedPtr = std::shared_ptr<ScopedT>;
     using IdMapT = std::map<ID_TYPE, ResourcePtr>;
+    using Ptr = std::shared_ptr<Derived>;
+    ScopedT
+    GetResource(ID_TYPE id, bool scoped = true);
 
-    ResourceHolder() = default;
-    virtual ~ResourceHolder() = default;
+    bool
+    AddNoLock(ResourcePtr resource);
+    bool
+    ReleaseNoLock(ID_TYPE id);
+
+    virtual bool
+    Add(ResourcePtr resource);
+    virtual bool
+    Release(ID_TYPE id);
+    virtual bool
+    HardDelete(ID_TYPE id);
 
     static Derived&
     GetInstance() {
@@ -44,105 +54,22 @@ class ResourceHolder {
         return holder;
     }
 
-    ScopedT
-    GetResource(ID_TYPE id, bool scoped = true) {
-        {
-            std::unique_lock<std::mutex> lock(mutex_);
-            auto cit = id_map_.find(id);
-            if (cit != id_map_.end()) {
-                return ScopedT(cit->second, scoped);
-            }
-        }
-        auto ret = Load(id);
-        if (!ret)
-            return ScopedT();
-        return ScopedT(ret, scoped);
-    }
-
-    virtual bool
-    Add(ResourcePtr resource) {
-        std::unique_lock<std::mutex> lock(mutex_);
-        return AddNoLock(resource);
-    }
-
-    bool
-    AddNoLock(ResourcePtr resource) {
-        if (!resource)
-            return false;
-        if (id_map_.find(resource->GetID()) != id_map_.end()) {
-            return false;
-        }
-
-        id_map_[resource->GetID()] = resource;
-        resource->RegisterOnNoRefCB(std::bind(&ResourceHolder::OnNoRefCallBack, this, resource));
-        return true;
-    }
-
-    virtual bool
-    Release(ID_TYPE id) {
-        std::unique_lock<std::mutex> lock(mutex_);
-        return ReleaseNoLock(id);
-    }
-
-    bool
-    ReleaseNoLock(ID_TYPE id) {
-        auto it = id_map_.find(id);
-        if (it == id_map_.end()) {
-            return false;
-        }
-
-        id_map_.erase(it);
-        return true;
-    }
-
-    virtual bool
-    HardDelete(ID_TYPE id) {
-        auto op = std::make_shared<HardDeleteOperation<ResourceT>>(id);
-        op->Push(false);
-        return true;
-    }
+    virtual void
+    Reset();
 
     virtual void
-    Reset() {
-        id_map_.clear();
-    }
-
-    virtual void
-    Dump(const std::string& tag = "") {
-        std::unique_lock<std::mutex> lock(mutex_);
-        std::cout << typeid(*this).name() << " Dump Start [" << tag << "]:" << id_map_.size() << std::endl;
-        for (auto& kv : id_map_) {
-            /* std::cout << "\t" << kv.second->ToString() << std::endl; */
-            std::cout << "\t" << kv.first << " RefCnt " << kv.second->RefCnt() << std::endl;
-        }
-        std::cout << typeid(*this).name() << " Dump   End [" << tag << "]" << std::endl;
-    }
+    Dump(const std::string& tag = "");
 
  protected:
     virtual void
-    OnNoRefCallBack(ResourcePtr resource) {
-        HardDelete(resource->GetID());
-        Release(resource->GetID());
-    }
+    OnNoRefCallBack(ResourcePtr resource);
 
     virtual ResourcePtr
-    Load(ID_TYPE id) {
-        LoadOperationContext context;
-        context.id = id;
-        auto op = std::make_shared<LoadOperation<ResourceT>>(context);
-        op->Push();
-        auto c = op->GetResource();
-        if (c) {
-            Add(c);
-            return c;
-        }
-        return nullptr;
-    }
-
+    Load(ID_TYPE id);
     virtual ResourcePtr
-    Load(const std::string& name) {
-        return nullptr;
-    }
+    Load(const std::string& name);
+    ResourceHolder() = default;
+    virtual ~ResourceHolder() = default;
 
     std::mutex mutex_;
     IdMapT id_map_;
@@ -151,3 +78,5 @@ class ResourceHolder {
 }  // namespace snapshot
 }  // namespace engine
 }  // namespace milvus
+
+#include "BaseHolders.inl"
