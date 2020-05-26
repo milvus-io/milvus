@@ -1490,14 +1490,10 @@ SqliteMetaImpl::FilesByID(const std::vector<size_t>& ids, FilesHolder& files_hol
                                       &SegmentSchema::file_id_, &SegmentSchema::file_type_, &SegmentSchema::file_size_,
                                       &SegmentSchema::row_count_, &SegmentSchema::date_, &SegmentSchema::engine_type_);
 
-        std::vector<int> file_types = {(int)SegmentSchema::RAW, (int)SegmentSchema::TO_INDEX,
-                                       (int)SegmentSchema::INDEX};
-        auto match_type = in(&SegmentSchema::file_type_, file_types);
-
         // perform query
         decltype(ConnectorPtr->select(select_columns)) selected;
         auto match_fileid = in(&SegmentSchema::id_, ids);
-        auto filter = where(match_fileid and match_type);
+        auto filter = where(match_fileid);
         {
             // multi-threads call sqlite update may get exception('bad logic', etc), so we add a lock here
             std::lock_guard<std::mutex> meta_lock(meta_mutex_);
