@@ -31,10 +31,12 @@ template <typename ResourceT>
 class ResourceHolder {
  public:
     using ResourcePtr = std::shared_ptr<ResourceT>;
-    /* using ResourcePtr = typename ResourceT::Ptr; */
     using ScopedT = ScopedResource<ResourceT>;
     using ScopedPtr = std::shared_ptr<ScopedT>;
     using IdMapT = std::map<ID_TYPE, ResourcePtr>;
+
+    ResourceHolder() = default;
+    virtual ~ResourceHolder() = default;
 
     static ResourceHolder&
     GetInstance() {
@@ -140,9 +142,6 @@ class ResourceHolder {
     Load(const std::string& name) {
         return nullptr;
     }
-
-    ResourceHolder() = default;
-    virtual ~ResourceHolder() = default;
 
     std::mutex mutex_;
     IdMapT id_map_;
