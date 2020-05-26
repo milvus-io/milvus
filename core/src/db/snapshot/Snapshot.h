@@ -76,6 +76,15 @@ class Snapshot : public ReferenceProxy {
         return it->second.Get();
     }
 
+    SegmentPtr
+    GetSegment(ID_TYPE segment_id) {
+        auto it = segments_.find(segment_id);
+        if (it == segments_.end()) {
+            return nullptr;
+        }
+        return it->second.Get();
+    }
+
     // PXU TODO: add const. Need to change Scopedxxxx::Get
     SegmentCommitPtr
     GetSegmentCommit(ID_TYPE segment_id) {

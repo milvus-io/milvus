@@ -15,6 +15,7 @@
 
 #include <random>
 #include <string>
+#include <set>
 
 #include "db/utils.h"
 #include "db/snapshot/ReferenceProxy.h"
@@ -149,6 +150,9 @@ TEST_F(SnapshotTest, OperationTest) {
             ASSERT_TRUE(collection_commit);
         }
 
+        milvus::engine::snapshot::OperationContext merge_ctx;
+        std::set<milvus::engine::snapshot::ID_TYPE> stale_segment_commit_ids;
+
         // Check build operation correctness
         {
             milvus::engine::snapshot::OperationContext context;
@@ -167,6 +171,11 @@ TEST_F(SnapshotTest, OperationTest) {
             milvus::engine::snapshot::MappingT expected_mappings = prev_segment_commit_mappings;
             expected_mappings.insert(seg_file->GetID());
             ASSERT_EQ(expected_mappings, segment_commit_mappings);
+
+            auto seg = ss->GetSegment(seg_file->GetSegmentId());
+            ASSERT_TRUE(seg);
+            merge_ctx.stale_segments.push_back(seg);
+            stale_segment_commit_ids.insert(segment_commit->GetID());
         }
 
         // Check stale snapshot has been deleted from store
@@ -177,6 +186,7 @@ TEST_F(SnapshotTest, OperationTest) {
         }
 
         ss_id = ss->GetID();
+        milvus::engine::snapshot::ID_TYPE partition_id;
         {
             milvus::engine::snapshot::OperationContext context;
             context.prev_partition = ss->GetPartition(1);
@@ -193,6 +203,34 @@ TEST_F(SnapshotTest, OperationTest) {
             milvus::engine::snapshot::MappingT expected_segment_mappings;
             expected_segment_mappings.insert(seg_file->GetID());
             ASSERT_EQ(expected_segment_mappings, segment_commit_mappings);
+            merge_ctx.stale_segments.push_back(new_seg);
+            partition_id = segment_commit->GetPartitionId();
+            stale_segment_commit_ids.insert(segment_commit->GetID());
+            auto partition = ss->GetPartition(partition_id);
+            merge_ctx.prev_partition = partition;
+        }
+
+        ss_id = ss->GetID();
+        {
+            auto prev_partition_commit = ss->GetPartitionCommitByPartitionId(partition_id);
+            auto op = std::make_shared<milvus::engine::snapshot::MergeOperation>(merge_ctx, ss);
+            auto new_seg = op->CommitNewSegment();
+            sf_context.segment_id = new_seg->GetID();
+            auto seg_file = op->CommitNewSegmentFile(sf_context);
+            op->Push();
+            ss = op->GetSnapshot();
+            ASSERT_TRUE(ss->GetID() > ss_id);
+
+            auto segment_commit = ss->GetSegmentCommit(new_seg->GetID());
+            auto new_partition_commit = ss->GetPartitionCommitByPartitionId(partition_id);
+            auto new_mappings = new_partition_commit->GetMappings();
+            auto prev_mappings = prev_partition_commit->GetMappings();
+            auto expected_mappings = prev_mappings;
+            for (auto id : stale_segment_commit_ids) {
+                expected_mappings.erase(id);
+            }
+            expected_mappings.insert(segment_commit->GetID());
+            ASSERT_EQ(expected_mappings, new_mappings);
         }
     }
 }
