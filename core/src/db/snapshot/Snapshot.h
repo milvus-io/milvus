@@ -26,10 +26,23 @@
 #include <utility>
 #include <vector>
 #include "db/snapshot/WrappedTypes.h"
+#include "db/snapshot/Utils.h"
 
 namespace milvus {
 namespace engine {
 namespace snapshot {
+
+using ScopedResourcesT = std::tuple<CollectionCommit::ScopedMapT,
+                                   Collection::ScopedMapT,
+                                   SchemaCommit::ScopedMapT,
+                                   FieldCommit::ScopedMapT,
+                                   Field::ScopedMapT,
+                                   FieldElement::ScopedMapT,
+                                   PartitionCommit::ScopedMapT,
+                                   Partition::ScopedMapT,
+                                   SegmentCommit::ScopedMapT,
+                                   Segment::ScopedMapT,
+                                   SegmentFile::ScopedMapT>;
 
 class Snapshot : public ReferenceProxy {
  public:
@@ -221,8 +234,28 @@ class Snapshot : public ReferenceProxy {
     void
     DumpPartitionCommits(const std::string& tag = "");
 
+    template <typename ResourceT>
+    typename ResourceT::Ptr
+    GetResource(ID_TYPE id) {
+        auto& resources = std::get<Index<typename ResourceT::ScopedMapT, ScopedResourcesT>::value>(resources_);
+        auto it = resources.find(id);
+        if (it == resources.end()) {
+            return nullptr;
+        }
+
+        return it->second.Get();
+    }
+
+    template <typename ResourceT>
+    void
+    AddResource(ScopedResource<ResourceT>& resource) {
+        auto& resources = std::get<typename ResourceT::ScopedMapT>(resources_);
+        resources[resource->GetID()] = resource;
+    }
+
  private:
     // PXU TODO: Re-org below data structures to reduce memory usage
+    ScopedResourcesT resources_;
     CollectionScopedT collection_;
     ID_TYPE current_schema_id_;
     SchemaCommitsT schema_commits_;

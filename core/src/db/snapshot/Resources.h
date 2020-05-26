@@ -267,6 +267,7 @@ class Collection : public DBBaseResource<>,
  public:
     using Ptr = std::shared_ptr<Collection>;
     using MapT = std::map<ID_TYPE, Ptr>;
+    using ScopedMapT = std::map<ID_TYPE, ScopedResource<Collection>>;
     using VecT = std::vector<Ptr>;
     static constexpr const char* Name = "Collection";
 
@@ -286,6 +287,7 @@ class SchemaCommit : public DBBaseResource<>,
  public:
     using Ptr = std::shared_ptr<SchemaCommit>;
     using MapT = std::map<ID_TYPE, Ptr>;
+    using ScopedMapT = std::map<ID_TYPE, ScopedResource<SchemaCommit>>;
     using VecT = std::vector<Ptr>;
     static constexpr const char* Name = "SchemaCommit";
 
@@ -305,6 +307,7 @@ class Field : public DBBaseResource<>,
  public:
     using Ptr = std::shared_ptr<Field>;
     using MapT = std::map<ID_TYPE, Ptr>;
+    using ScopedMapT = std::map<ID_TYPE, ScopedResource<Field>>;
     using VecT = std::vector<Ptr>;
     static constexpr const char* Name = "Field";
 
@@ -325,6 +328,7 @@ class FieldCommit : public DBBaseResource<>,
  public:
     using Ptr = std::shared_ptr<FieldCommit>;
     using MapT = std::map<ID_TYPE, Ptr>;
+    using ScopedMapT = std::map<ID_TYPE, ScopedResource<FieldCommit>>;
     using VecT = std::vector<Ptr>;
     static constexpr const char* Name = "FieldCommit";
 
@@ -347,6 +351,7 @@ class FieldElement : public DBBaseResource<>,
  public:
     using Ptr = std::shared_ptr<FieldElement>;
     using MapT = std::map<ID_TYPE, Ptr>;
+    using ScopedMapT = std::map<ID_TYPE, ScopedResource<FieldElement>>;
     using VecT = std::vector<Ptr>;
     static constexpr const char* Name = "FieldElement";
     FieldElement(ID_TYPE collection_id, ID_TYPE field_id, const std::string& name, FTYPE_TYPE ftype, ID_TYPE id = 0,
@@ -368,6 +373,7 @@ class CollectionCommit : public DBBaseResource<>,
     static constexpr const char* Name = "CollectionCommit";
     using Ptr = std::shared_ptr<CollectionCommit>;
     using MapT = std::map<ID_TYPE, Ptr>;
+    using ScopedMapT = std::map<ID_TYPE, ScopedResource<CollectionCommit>>;
     using VecT = std::vector<Ptr>;
     CollectionCommit(ID_TYPE collection_id, ID_TYPE schema_id, const MappingT& mappings = {}, ID_TYPE id = 0,
                      State status = PENDING, TS_TYPE created_on = GetMicroSecTimeStamp(),
@@ -386,6 +392,7 @@ class Partition : public DBBaseResource<>,
  public:
     using Ptr = std::shared_ptr<Partition>;
     using MapT = std::map<ID_TYPE, Ptr>;
+    using ScopedMapT = std::map<ID_TYPE, ScopedResource<Partition>>;
     using VecT = std::vector<Ptr>;
     static constexpr const char* Name = "Partition";
 
@@ -406,6 +413,7 @@ class PartitionCommit : public DBBaseResource<>,
  public:
     using Ptr = std::shared_ptr<PartitionCommit>;
     using MapT = std::map<ID_TYPE, Ptr>;
+    using ScopedMapT = std::map<ID_TYPE, ScopedResource<PartitionCommit>>;
     using VecT = std::vector<Ptr>;
     static constexpr const char* Name = "PartitionCommit";
 
@@ -429,6 +437,7 @@ class Segment : public DBBaseResource<>,
  public:
     using Ptr = std::shared_ptr<Segment>;
     using MapT = std::map<ID_TYPE, Ptr>;
+    using ScopedMapT = std::map<ID_TYPE, ScopedResource<Segment>>;
     using VecT = std::vector<Ptr>;
     static constexpr const char* Name = "Segment";
 
@@ -453,6 +462,7 @@ class SegmentCommit : public DBBaseResource<>,
  public:
     using Ptr = std::shared_ptr<SegmentCommit>;
     using MapT = std::map<ID_TYPE, Ptr>;
+    using ScopedMapT = std::map<ID_TYPE, ScopedResource<SegmentCommit>>;
     using VecT = std::vector<Ptr>;
     static constexpr const char* Name = "SegmentCommit";
 
@@ -477,6 +487,7 @@ class SegmentFile : public DBBaseResource<>,
  public:
     using Ptr = std::shared_ptr<SegmentFile>;
     using MapT = std::map<ID_TYPE, Ptr>;
+    using ScopedMapT = std::map<ID_TYPE, ScopedResource<SegmentFile>>;
     using VecT = std::vector<Ptr>;
     static constexpr const char* Name = "SegmentFile";
 
