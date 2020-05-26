@@ -27,9 +27,9 @@ namespace milvus {
 namespace engine {
 namespace snapshot {
 
-class CollectionsHolder : public ResourceHolder<Collection> {
+class CollectionsHolder : public ResourceHolder<Collection, CollectionsHolder> {
  public:
-    using BaseT = ResourceHolder<Collection>;
+    using BaseT = ResourceHolder<Collection, CollectionsHolder>;
     using ResourcePtr = typename BaseT::ResourcePtr;
     using NameMapT = std::map<std::string, ResourcePtr>;
 
@@ -53,25 +53,25 @@ class CollectionsHolder : public ResourceHolder<Collection> {
     NameMapT name_map_;
 };
 
-class SchemaCommitsHolder : public ResourceHolder<SchemaCommit> {};
+class SchemaCommitsHolder : public ResourceHolder<SchemaCommit, SchemaCommitsHolder> {};
 
-class FieldCommitsHolder : public ResourceHolder<FieldCommit> {};
+class FieldCommitsHolder : public ResourceHolder<FieldCommit, FieldCommitsHolder> {};
 
-class FieldsHolder : public ResourceHolder<Field> {};
+class FieldsHolder : public ResourceHolder<Field, FieldsHolder> {};
 
-class FieldElementsHolder : public ResourceHolder<FieldElement> {};
+class FieldElementsHolder : public ResourceHolder<FieldElement, FieldElementsHolder> {};
 
-class CollectionCommitsHolder : public ResourceHolder<CollectionCommit> {};
+class CollectionCommitsHolder : public ResourceHolder<CollectionCommit, CollectionCommitsHolder> {};
 
-class PartitionsHolder : public ResourceHolder<Partition> {};
+class PartitionsHolder : public ResourceHolder<Partition, PartitionsHolder> {};
 
-class PartitionCommitsHolder : public ResourceHolder<PartitionCommit> {};
+class PartitionCommitsHolder : public ResourceHolder<PartitionCommit, PartitionCommitsHolder> {};
 
-class SegmentsHolder : public ResourceHolder<Segment> {};
+class SegmentsHolder : public ResourceHolder<Segment, SegmentsHolder> {};
 
-class SegmentCommitsHolder : public ResourceHolder<SegmentCommit> {};
+class SegmentCommitsHolder : public ResourceHolder<SegmentCommit, SegmentCommitsHolder> {};
 
-class SegmentFilesHolder : public ResourceHolder<SegmentFile> {};
+class SegmentFilesHolder : public ResourceHolder<SegmentFile, SegmentFilesHolder> {};
 
 }  // namespace snapshot
 }  // namespace engine

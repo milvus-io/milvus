@@ -27,7 +27,7 @@ namespace milvus {
 namespace engine {
 namespace snapshot {
 
-template <typename ResourceT>
+template <typename ResourceT, typename Derived>
 class ResourceHolder {
  public:
     using ResourcePtr = std::shared_ptr<ResourceT>;
@@ -38,9 +38,9 @@ class ResourceHolder {
     ResourceHolder() = default;
     virtual ~ResourceHolder() = default;
 
-    static ResourceHolder&
+    static Derived&
     GetInstance() {
-        static ResourceHolder holder;
+        static Derived holder;
         return holder;
     }
 
