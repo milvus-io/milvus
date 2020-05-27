@@ -594,12 +594,12 @@ class TestAddBase:
             pytest.skip("Skip test in http mode")
         thread_num = 8
         threads = []
-        milvus = get_milvus(host=args["ip"], port=args["port"], handler=args["handler"])
+        milvus = get_milvus(host=args["ip"], port=args["port"], handler=args["handler"], try_connect=False)
         vectors = gen_vectors(nb, dim)
         def add(thread_i):
             logging.getLogger().info("In thread-%d" % thread_i)
-            milvus = get_milvus(host=args["ip"], port=args["port"], handler=args["handler"])
-            assert milvus
+            # milvus = get_milvus(host=args["ip"], port=args["port"], handler=args["handler"])
+            # assert milvus
             status, result = milvus.insert(collection, records=vectors)
             assert status.OK()
             status = milvus.flush([collection])
