@@ -104,8 +104,8 @@ HybridSearchRequest::OnExecute() {
             }
         }
 
-        status = DBWrapper::DB()->HybridQuery(context_, collection_name_, partition_list_,
-                                              general_query_, query_ptr_, field_names_, attr_type, result_);
+        status = DBWrapper::DB()->HybridQuery(context_, collection_name_, partition_list_, general_query_, query_ptr_,
+                                              field_names_, attr_type, result_);
 
 #ifdef ENABLE_CPU_PROFILING
         ProfilerStop();

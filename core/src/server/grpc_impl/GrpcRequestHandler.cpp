@@ -1261,7 +1261,6 @@ Status
 ParseTermQuery(const nlohmann::json& term_json,
                std::unordered_map<std::string, engine::meta::hybrid::DataType> field_type,
                query::TermQueryPtr& term_query) {
-
     std::string field_name = term_json["field_name"].get<std::string>();
     auto term_value_json = term_json["values"];
     if (!term_value_json.is_array()) {

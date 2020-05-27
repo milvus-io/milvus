@@ -117,8 +117,7 @@ class ExecutionEngine {
 
     virtual Status
     ExecBinaryQuery(query::GeneralQueryPtr general_query, faiss::ConcurrentBitsetPtr& bitset,
-                    std::unordered_map<std::string, DataType>& attr_type,
-                    std::string& vector_placeholder) = 0;
+                    std::unordered_map<std::string, DataType>& attr_type, std::string& vector_placeholder) = 0;
 
     virtual Status
     HybridSearch(query::GeneralQueryPtr general_query, std::unordered_map<std::string, DataType>& attr_type,
