@@ -20,8 +20,9 @@
 #include <thread>
 #include <vector>
 #include "Context.h"
-#include "Snapshot.h"
-#include "Store.h"
+#include "db/snapshot/Snapshot.h"
+#include "db/snapshot/Store.h"
+#include "utils/Status.h"
 
 namespace milvus {
 namespace engine {

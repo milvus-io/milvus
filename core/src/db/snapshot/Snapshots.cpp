@@ -24,18 +24,32 @@ Snapshots::Flush(ResourceT&&... resources) {
     return true;
 }
 
-bool
-Snapshots::DropCollection(const std::string& name) {
-    std::map<std::string, ID_TYPE>::iterator it;
-    {
-        std::unique_lock<std::shared_timed_mutex> lock(mutex_);
-        it = name_id_map_.find(name);
-        if (it == name_id_map_.end()) {
-            return false;
-        }
-    }
+Status
+Snapshots::DropCollection(ID_TYPE collection_id) {
+    auto ss = GetSnapshot(collection_id);
+    if (!ss) return Status(40004, "Collection not found");
+    return DoDropCollection(ss);
+}
 
-    return true;
+Status
+Snapshots::DropCollection(const std::string& name) {
+    auto ss = GetSnapshot(name);
+    if (!ss) return Status(40004, "Collection not found");
+    return DoDropCollection(ss);
+}
+
+Status
+Snapshots::DoDropCollection(ScopedSnapshotT& ss) {
+    OperationContext context;
+    context.collection = ss->GetCollection();
+    auto op = std::make_shared<SoftDeleteCollectionOperation>(context);
+    op->Push();
+    auto status = op->GetStatus();
+
+    std::unique_lock<std::shared_timed_mutex> lock(mutex_);
+    name_id_map_.erase(context.collection->GetName());
+    holders_.erase(context.collection->GetID());
+    return status;
 }
 
 ScopedSnapshotT

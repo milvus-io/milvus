@@ -323,10 +323,13 @@ CreateCollectionOperation::GetSnapshot() const {
 
 bool
 SoftDeleteCollectionOperation::DoExecute(Store& store) {
-    if (!context_.collection) return false;
+    if (!context_.collection) {
+        status_ = Status(40006, "Invalid Context");
+        return false;
+    }
     context_.collection->Deactivate();
     AddStep(*context_.collection);
-    success_ = true;
+    status_ = Status::OK();
     return true;
 }
 

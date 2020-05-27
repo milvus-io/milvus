@@ -125,16 +125,17 @@ class GetCollectionIDsOperation : public Operations {
 class SoftDeleteCollectionOperation : public Operations {
  public:
     using BaseT = Operations;
+    // TODO: Define error code and msg later
     explicit SoftDeleteCollectionOperation(const OperationContext& context)
-        : BaseT(context, ScopedSnapshotT()), success_(false) {}
+        : BaseT(context, ScopedSnapshotT()), status_(40005, "Operation Pending") {}
 
-    bool Success() const { return success_; }
+    Status GetStatus() const { return status_; }
     bool
     DoExecute(Store& store) override;
 
  private:
     ID_TYPE collection_id_;
-    bool success_;
+    Status status_;
 };
 
 }  // namespace snapshot

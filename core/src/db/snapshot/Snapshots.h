@@ -20,6 +20,7 @@
 #include <thread>
 #include <vector>
 #include "db/snapshot/SnapshotHolder.h"
+#include "utils/Status.h"
 
 namespace milvus {
 namespace engine {
@@ -45,8 +46,10 @@ class Snapshots {
     IDS_TYPE
     GetCollectionIds() const;
 
-    bool
+    Status
     DropCollection(const std::string& name);
+    Status
+    DropCollection(ID_TYPE collection_id);
 
     template <typename... ResourceT>
     bool
@@ -61,6 +64,8 @@ class Snapshots {
     Snapshots() {
         Init();
     }
+    Status
+    DoDropCollection(ScopedSnapshotT& ss);
     void
     Init();
 
