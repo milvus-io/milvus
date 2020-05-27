@@ -72,6 +72,21 @@ class MergeOperation : public Operations {
     CommitNewSegmentFile(const SegmentFileContext& context);
 };
 
+class CreateCollectionOperation : public Operations {
+ public:
+    using BaseT = Operations;
+    explicit CreateCollectionOperation(const CreateCollectionContext& context);
+
+    bool
+    DoExecute(Store&) override;
+
+    ScopedSnapshotT
+    GetSnapshot() const override;
+
+ private:
+    CreateCollectionContext context_;
+};
+
 class GetSnapshotIDsOperation : public Operations {
  public:
     using BaseT = Operations;

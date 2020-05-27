@@ -131,6 +131,22 @@ TEST_F(SnapshotTest, ResourceHoldersTest) {
     }
 }
 
+TEST_F(SnapshotTest, CreateCollectionOperationTest) {
+    milvus::engine::snapshot::CreateCollectionContext context;
+    auto collection_schema = std::make_shared<milvus::engine::snapshot::Collection>("test_c1");
+    context.collection = collection_schema;
+    auto vector_field = std::make_shared<milvus::engine::snapshot::Field>("vector", 0);
+    auto vector_field_element = std::make_shared<milvus::engine::snapshot::FieldElement>(0, 0, "ivfsq8",
+            milvus::engine::snapshot::FieldElementType::IVFSQ8);
+    auto int_field = std::make_shared<milvus::engine::snapshot::Field>("int", 0);
+    context.fields_schema[vector_field] = {vector_field_element};
+    context.fields_schema[int_field] = {};
+
+    auto op = std::make_shared<milvus::engine::snapshot::CreateCollectionOperation>(context);
+    op->Push();
+    auto ss = op->GetSnapshot();
+}
+
 TEST_F(SnapshotTest, OperationTest) {
     {
         milvus::engine::snapshot::SegmentFileContext sf_context;

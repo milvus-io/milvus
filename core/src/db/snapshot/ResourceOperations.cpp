@@ -32,7 +32,7 @@ CollectionCommitOperation::DoExecute(Store& store) {
         resource_->SetSchemaId(context_.new_schema_commit->GetID());
     }
     resource_->SetID(0);
-    AddStep(*BaseT::resource_);
+    AddStep(*BaseT::resource_, false);
     return true;
 }
 
@@ -73,7 +73,7 @@ PartitionCommitOperation::DoExecute(Store& store) {
     }
 
     resource_->GetMappings().insert(context_.new_segment_commit->GetID());
-    AddStep(*resource_);
+    AddStep(*resource_, false);
     return true;
 }
 
@@ -108,7 +108,7 @@ SegmentOperation::DoExecute(Store& store) {
     }
     auto prev_num = prev_ss_->GetMaxSegmentNumByPartition(context_.prev_partition->GetID());
     resource_ = std::make_shared<Segment>(context_.prev_partition->GetID(), prev_num + 1);
-    AddStep(*resource_);
+    AddStep(*resource_, false);
     return true;
 }
 
@@ -131,7 +131,7 @@ SegmentCommitOperation::DoExecute(Store& store) {
     for (auto& new_segment_file : context_.new_segment_files) {
         resource_->GetMappings().insert(new_segment_file->GetID());
     }
-    AddStep(*resource_);
+    AddStep(*resource_, false);
     return true;
 }
 
@@ -147,7 +147,7 @@ bool
 SegmentFileOperation::DoExecute(Store& store) {
     auto field_element_id = prev_ss_->GetFieldElementId(context_.field_name, context_.field_element_name);
     resource_ = std::make_shared<SegmentFile>(context_.partition_id, context_.segment_id, field_element_id);
-    AddStep(*resource_);
+    AddStep(*resource_, false);
     return true;
 }
 
