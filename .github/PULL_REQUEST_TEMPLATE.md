@@ -14,8 +14,5 @@ Fixes #
 **Special notes for your reviewer:**
 
 
-**Does this PR introduce a user-facing change?:**
-
-
 **Additional documentation (e.g. design docs, usage docs, etc.):**
 
