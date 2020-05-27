@@ -130,12 +130,8 @@ TEST_F(SnapshotTest, ResourceHoldersTest) {
     }
 }
 
-TEST_F(SnapshotTest, CreateCollectionOperationTest) {
-    milvus::engine::snapshot::Store::GetInstance().DoReset();
-    auto expect_null = milvus::engine::snapshot::Snapshots::GetInstance().GetSnapshot(100000);
-    ASSERT_TRUE(!expect_null);
-
-    std::string collection_name = "test_c1";
+milvus::engine::snapshot::ScopedSnapshotT
+CreateCollection(const std::string& collection_name) {
     milvus::engine::snapshot::CreateCollectionContext context;
     auto collection_schema = std::make_shared<milvus::engine::snapshot::Collection>(collection_name);
     context.collection = collection_schema;
@@ -149,6 +145,16 @@ TEST_F(SnapshotTest, CreateCollectionOperationTest) {
     auto op = std::make_shared<milvus::engine::snapshot::CreateCollectionOperation>(context);
     op->Push();
     auto ss = op->GetSnapshot();
+    return ss;
+}
+
+TEST_F(SnapshotTest, CreateCollectionOperationTest) {
+    milvus::engine::snapshot::Store::GetInstance().DoReset();
+    auto expect_null = milvus::engine::snapshot::Snapshots::GetInstance().GetSnapshot(100000);
+    ASSERT_TRUE(!expect_null);
+
+    std::string collection_name = "test_c1";
+    auto ss = CreateCollection(collection_name);
 
     auto latest_ss = milvus::engine::snapshot::Snapshots::GetInstance().GetSnapshot("xxxx");
     ASSERT_TRUE(!latest_ss);
@@ -171,6 +177,35 @@ TEST_F(SnapshotTest, CreateCollectionOperationTest) {
     ASSERT_TRUE(!latest_ss->GetCollection()->IsActive());
 
     milvus::engine::snapshot::Snapshots::GetInstance().Reset();
+}
+
+TEST_F(SnapshotTest, DropCollectionTest) {
+    {
+        milvus::engine::snapshot::Store::GetInstance().DoReset();
+        std::string collection_name = "test_c1";
+        auto ss = CreateCollection(collection_name);
+        ASSERT_TRUE(ss);
+        auto lss = milvus::engine::snapshot::Snapshots::GetInstance().GetSnapshot(collection_name);
+        ASSERT_TRUE(lss);
+        ASSERT_EQ(ss->GetID(), lss->GetID());
+        auto prev_ss_id = ss->GetID();
+        auto prev_c_id = ss->GetCollection()->GetID();
+        auto status = milvus::engine::snapshot::Snapshots::GetInstance().DropCollection(collection_name);
+        ASSERT_TRUE(status.ok());
+        lss = milvus::engine::snapshot::Snapshots::GetInstance().GetSnapshot(collection_name);
+        ASSERT_TRUE(!lss);
+
+        auto ss_2 = CreateCollection(collection_name);
+        lss = milvus::engine::snapshot::Snapshots::GetInstance().GetSnapshot(collection_name);
+        ASSERT_TRUE(lss);
+        ASSERT_EQ(ss_2->GetID(), lss->GetID());
+        ASSERT_TRUE(prev_ss_id != ss_2->GetID());
+        ASSERT_TRUE(prev_c_id != ss_2->GetCollection()->GetID());
+        status = milvus::engine::snapshot::Snapshots::GetInstance().DropCollection(collection_name);
+        ASSERT_TRUE(status.ok());
+        status = milvus::engine::snapshot::Snapshots::GetInstance().DropCollection(collection_name);
+        ASSERT_TRUE(!status.ok());
+    }
 }
 
 TEST_F(SnapshotTest, OperationTest) {
@@ -284,5 +319,4 @@ TEST_F(SnapshotTest, OperationTest) {
             milvus::engine::snapshot::CollectionCommitsHolder::GetInstance().Dump();
         }
     }
-    milvus::engine::snapshot::Snapshots::GetInstance().Reset();
 }
