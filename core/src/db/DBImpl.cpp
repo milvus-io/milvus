@@ -117,14 +117,13 @@ DBImpl::Start() {
 
     // server may be closed unexpected, these un-merge files need to be merged when server restart
     // and soft-delete files need to be deleted when server restart
-    if (merge_collection_ids_.empty()) {
-        std::vector<meta::CollectionSchema> collection_schema_array;
-        meta_ptr_->AllCollections(collection_schema_array);
-        for (auto& schema : collection_schema_array) {
-            merge_collection_ids_.insert(schema.collection_id_);
-        }
+    std::set<std::string> merge_collection_ids;
+    std::vector<meta::CollectionSchema> collection_schema_array;
+    meta_ptr_->AllCollections(collection_schema_array);
+    for (auto& schema : collection_schema_array) {
+        merge_collection_ids.insert(schema.collection_id_);
     }
-    StartMergeTask();
+    StartMergeTask(merge_collection_ids, true);
 
     // wal
     if (options_.wal_enable_) {
@@ -169,7 +168,9 @@ DBImpl::Start() {
     }
 
     // background metric thread
-    bg_metric_thread_ = std::thread(&DBImpl::BackgroundMetricThread, this);
+    if (options_.metric_enable_) {
+        bg_metric_thread_ = std::thread(&DBImpl::BackgroundMetricThread, this);
+    }
 
     return Status::OK();
 }
@@ -1395,12 +1396,17 @@ DBImpl::CreateIndex(const std::shared_ptr<server::Context>& context, const std::
         return SHUTDOWN_ERROR;
     }
 
+    // step 1: wait merge file thread finished to avoid duplicate data bug
     auto status = Flush();
+    WaitMergeFileFinish();  // let merge file thread finish
+    std::set<std::string> merge_collection_ids;
+    StartMergeTask(merge_collection_ids, true);  // start force-merge task
+    WaitMergeFileFinish();                       // let force-merge file thread finish
 
     {
         std::unique_lock<std::mutex> lock(build_index_mutex_);
 
-        // step 1: check index difference
+        // step 2: check index difference
         CollectionIndex old_index;
         status = DescribeIndex(collection_id, old_index);
         if (!status.ok()) {
@@ -1408,7 +1414,7 @@ DBImpl::CreateIndex(const std::shared_ptr<server::Context>& context, const std::
             return status;
         }
 
-        // step 2: update index info
+        // step 3: update index info
         CollectionIndex new_index = index;
         new_index.metric_type_ = old_index.metric_type_;  // dont change metric type, it was defined by CreateCollection
         if (!utils::IsSameIndex(old_index, new_index)) {
@@ -1418,11 +1424,6 @@ DBImpl::CreateIndex(const std::shared_ptr<server::Context>& context, const std::
             }
         }
     }
-
-    // step 3: wait merge file thread finished to avoid duplicate data bug
-    WaitMergeFileFinish();  // let merge file thread finish
-    StartMergeTask(true);   // start force-merge task
-    WaitMergeFileFinish();  // let force-merge file thread finish
 
     // step 4: wait and build index
     status = index_failed_checker_.CleanFailedIndexFileOfCollection(collection_id);
@@ -1448,7 +1449,8 @@ DBImpl::DropIndex(const std::string& collection_id) {
 
     LOG_ENGINE_DEBUG_ << "Drop index for collection: " << collection_id;
     auto status = DropCollectionIndexRecursively(collection_id);
-    StartMergeTask();  // merge small files after drop index
+    std::set<std::string> merge_collection_ids = {collection_id};
+    StartMergeTask(merge_collection_ids, true);  // merge small files after drop index
     return status;
 }
 
@@ -1963,7 +1965,7 @@ DBImpl::StartMetricTask() {
 }
 
 void
-DBImpl::StartMergeTask(bool force_merge_all) {
+DBImpl::StartMergeTask(const std::set<std::string>& merge_collection_ids, bool force_merge_all) {
     // LOG_ENGINE_DEBUG_ << "Begin StartMergeTask";
     // merge task has been finished?
     {
@@ -1982,8 +1984,7 @@ DBImpl::StartMergeTask(bool force_merge_all) {
         if (merge_thread_results_.empty()) {
             // start merge file thread
             merge_thread_results_.push_back(
-                merge_thread_pool_.enqueue(&DBImpl::BackgroundMerge, this, merge_collection_ids_, force_merge_all));
-            merge_collection_ids_.clear();
+                merge_thread_pool_.enqueue(&DBImpl::BackgroundMerge, this, merge_collection_ids, force_merge_all));
         }
     }
 
@@ -2477,14 +2478,11 @@ DBImpl::ExecWalRecord(const wal::MXLogRecord& record) {
             wal_mgr_->CollectionFlushed(collection_id, lsn);
         }
 
-        {
-            std::lock_guard<std::mutex> lck(merge_result_mutex_);
-            for (auto& collection : target_collection_names) {
-                merge_collection_ids_.insert(collection);
-            }
+        std::set<std::string> merge_collection_ids;
+        for (auto& collection : target_collection_names) {
+            merge_collection_ids.insert(collection);
         }
-
-        StartMergeTask();
+        StartMergeTask(merge_collection_ids);
         return max_lsn;
     };
 
@@ -2496,11 +2494,8 @@ DBImpl::ExecWalRecord(const wal::MXLogRecord& record) {
             wal_mgr_->PartitionFlushed(collection_id, partition, lsn);
         }
 
-        {
-            std::lock_guard<std::mutex> lck(merge_result_mutex_);
-            merge_collection_ids_.insert(target_collection_name);
-        }
-        StartMergeTask();
+        std::set<std::string> merge_collection_ids = {target_collection_name};
+        StartMergeTask(merge_collection_ids);
     };
 
     Status status;

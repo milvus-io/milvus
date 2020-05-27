@@ -229,7 +229,7 @@ class DBImpl : public DB, public server::CacheConfigHandler, public server::Engi
     StartMetricTask();
 
     void
-    StartMergeTask(bool force_merge_all = false);
+    StartMergeTask(const std::set<std::string>& merge_collection_ids, bool force_merge_all = false);
 
     void
     BackgroundMerge(std::set<std::string> collection_ids, bool force_merge_all);
@@ -350,7 +350,6 @@ class DBImpl : public DB, public server::CacheConfigHandler, public server::Engi
     ThreadPool merge_thread_pool_;
     std::mutex merge_result_mutex_;
     std::list<std::future<void>> merge_thread_results_;
-    std::set<std::string> merge_collection_ids_;
 
     ThreadPool index_thread_pool_;
     std::mutex index_result_mutex_;

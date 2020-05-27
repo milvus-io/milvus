@@ -70,6 +70,13 @@ DBWrapper::StartService() {
         return s;
     }
 
+    // metric config
+    s = config.GetMetricConfigEnableMonitor(opt.metric_enable_);
+    if (!s.ok()) {
+        std::cerr << s.ToString() << std::endl;
+        return s;
+    }
+
     // cache config
     s = config.GetCacheConfigCacheInsertData(opt.insert_cache_immediately_);
     if (!s.ok()) {
