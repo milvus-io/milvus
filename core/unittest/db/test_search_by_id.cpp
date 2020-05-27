@@ -86,7 +86,7 @@ TEST_F(SearchByIdTest, BASIC_TEST) {
     ASSERT_TRUE(stat.ok());
     ASSERT_EQ(collection_info_get.dimension_, COLLECTION_DIM);
 
-    int64_t nb = 100000;
+    int64_t nb = 10000;
     milvus::engine::VectorsData xb;
     BuildVectors(nb, xb);
 
@@ -185,7 +185,7 @@ TEST_F(SearchByIdTest, WITH_INDEX_TEST) {
     ASSERT_TRUE(stat.ok());
     ASSERT_EQ(collection_info_get.dimension_, COLLECTION_DIM);
 
-    int64_t nb = 10000;
+    int64_t nb = 5000;
     milvus::engine::VectorsData xb;
     BuildVectors(nb, xb);
 
@@ -246,7 +246,7 @@ TEST_F(SearchByIdTest, WITH_DELETE_TEST) {
     ASSERT_TRUE(stat.ok());
     ASSERT_EQ(collection_info_get.dimension_, COLLECTION_DIM);
 
-    int64_t nb = 100000;
+    int64_t nb = 10000;
     milvus::engine::VectorsData xb;
     BuildVectors(nb, xb);
 
@@ -315,7 +315,7 @@ TEST_F(GetVectorByIdTest, BASIC_TEST) {
     ASSERT_TRUE(stat.ok());
     ASSERT_EQ(collection_info_get.dimension_, COLLECTION_DIM);
 
-    int64_t nb = 100000;
+    int64_t nb = 10000;
     milvus::engine::VectorsData xb;
     BuildVectors(nb, xb);
 
@@ -349,7 +349,7 @@ TEST_F(GetVectorByIdTest, BASIC_TEST) {
     milvus::engine::ResultDistances result_distances;
 
     std::vector<milvus::engine::VectorsData> vectors;
-    stat = db_->GetVectorsByID(collection_info.collection_id_, ids_to_search, vectors);
+    stat = db_->GetVectorsByID(collection_info, ids_to_search, vectors);
     ASSERT_TRUE(stat.ok());
 
     stat = db_->Query(dummy_context_, collection_info.collection_id_, tags, topk, json_params, vectors[0], result_ids,
@@ -369,7 +369,7 @@ TEST_F(GetVectorByIdTest, WITH_INDEX_TEST) {
     ASSERT_TRUE(stat.ok());
     ASSERT_EQ(collection_info_get.dimension_, COLLECTION_DIM);
 
-    int64_t nb = 10000;
+    int64_t nb = 5000;
     milvus::engine::VectorsData xb;
     BuildVectors(nb, xb);
 
@@ -409,7 +409,7 @@ TEST_F(GetVectorByIdTest, WITH_INDEX_TEST) {
     milvus::engine::ResultDistances result_distances;
 
     std::vector<milvus::engine::VectorsData> vectors;
-    stat = db_->GetVectorsByID(collection_info.collection_id_, ids_to_search, vectors);
+    stat = db_->GetVectorsByID(collection_info, ids_to_search, vectors);
     ASSERT_TRUE(stat.ok());
 
     stat = db_->Query(dummy_context_, collection_info.collection_id_, tags, topk, json_params, vectors[0], result_ids,
@@ -429,7 +429,7 @@ TEST_F(GetVectorByIdTest, WITH_DELETE_TEST) {
     ASSERT_TRUE(stat.ok());
     ASSERT_EQ(collection_info_get.dimension_, COLLECTION_DIM);
 
-    int64_t nb = 100000;
+    int64_t nb = 10000;
     milvus::engine::VectorsData xb;
     BuildVectors(nb, xb);
 
@@ -469,7 +469,7 @@ TEST_F(GetVectorByIdTest, WITH_DELETE_TEST) {
     milvus::engine::ResultDistances result_distances;
 
     std::vector<milvus::engine::VectorsData> vectors;
-    stat = db_->GetVectorsByID(collection_info.collection_id_, ids_to_search, vectors);
+    stat = db_->GetVectorsByID(collection_info, ids_to_search, vectors);
     ASSERT_TRUE(stat.ok());
     for (auto& vector : vectors) {
         ASSERT_EQ(vector.vector_count_, 0);
@@ -541,7 +541,7 @@ TEST_F(SearchByIdTest, BINARY_TEST) {
     milvus::engine::ResultDistances result_distances;
 
     std::vector<milvus::engine::VectorsData> vectors;
-    stat = db_->GetVectorsByID(collection_info.collection_id_, ids_to_search, vectors);
+    stat = db_->GetVectorsByID(collection_info, ids_to_search, vectors);
     ASSERT_TRUE(stat.ok());
     ASSERT_EQ(vectors.size(), ids_to_search.size());
 

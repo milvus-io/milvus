@@ -71,7 +71,8 @@ class DB {
     GetCollectionRowCount(const std::string& collection_id, uint64_t& row_count) = 0;
 
     virtual Status
-    PreloadCollection(const std::string& collection_id) = 0;
+    PreloadCollection(const std::shared_ptr<server::Context>& context, const std::string& collection_id,
+                      bool force = false) = 0;
 
     virtual Status
     UpdateCollectionFlag(const std::string& collection_id, int64_t flag) = 0;
@@ -108,10 +109,11 @@ class DB {
     Flush() = 0;
 
     virtual Status
-    Compact(const std::string& collection_id, double threshold = 0.0) = 0;
+    Compact(const std::shared_ptr<server::Context>& context, const std::string& collection_id,
+            double threshold = 0.0) = 0;
 
     virtual Status
-    GetVectorsByID(const std::string& collection_id, const IDNumbers& id_array,
+    GetVectorsByID(const engine::meta::CollectionSchema& collection, const IDNumbers& id_array,
                    std::vector<engine::VectorsData>& vectors) = 0;
 
     virtual Status

@@ -27,6 +27,7 @@
 #include <sstream>
 #include <string>
 #include <thread>
+#include <unordered_map>
 #include <utility>
 
 #include "MetaConsts.h"
@@ -1637,7 +1638,8 @@ MySQLMetaImpl::FilesToSearch(const std::string& collection_id, FilesHolder& file
             std::lock_guard<std::mutex> meta_lock(meta_mutex_);
 
             mysqlpp::Query statement = connectionPtr->query();
-            statement << "SELECT id, table_id, segment_id, engine_type, file_id, file_type, file_size, row_count, date"
+            statement << "SELECT id, table_id, segment_id, file_id, file_type, file_size, row_count, date,"
+                      << " engine_type, created_on, updated_time"
                       << " FROM " << META_TABLEFILES << " WHERE table_id = " << mysqlpp::quote << collection_id;
 
             // End
@@ -1665,16 +1667,19 @@ MySQLMetaImpl::FilesToSearch(const std::string& collection_id, FilesHolder& file
             collection_file.id_ = resRow["id"];  // implicit conversion
             resRow["table_id"].to_string(collection_file.collection_id_);
             resRow["segment_id"].to_string(collection_file.segment_id_);
-            collection_file.index_file_size_ = collection_schema.index_file_size_;
-            collection_file.engine_type_ = resRow["engine_type"];
-            collection_file.index_params_ = collection_schema.index_params_;
-            collection_file.metric_type_ = collection_schema.metric_type_;
             resRow["file_id"].to_string(collection_file.file_id_);
             collection_file.file_type_ = resRow["file_type"];
             collection_file.file_size_ = resRow["file_size"];
             collection_file.row_count_ = resRow["row_count"];
             collection_file.date_ = resRow["date"];
+            collection_file.engine_type_ = resRow["engine_type"];
+            collection_file.created_on_ = resRow["created_on"];
+            collection_file.updated_time_ = resRow["updated_time"];
+
             collection_file.dimension_ = collection_schema.dimension_;
+            collection_file.index_file_size_ = collection_schema.index_file_size_;
+            collection_file.index_params_ = collection_schema.index_params_;
+            collection_file.metric_type_ = collection_schema.metric_type_;
 
             auto status = utils::GetCollectionFilePath(options_, collection_file);
             if (!status.ok()) {
@@ -1711,18 +1716,15 @@ MySQLMetaImpl::FilesToSearchEx(const std::string& root_collection, const std::se
             return status;
         }
 
-        // distribute id array to batchs
-        const int64_t batch_size = 50;
+        // distribute id array to batches
+        const uint64_t batch_size = 50;
         std::vector<std::vector<std::string>> id_groups;
         std::vector<std::string> temp_group;
-        int64_t count = 1;
         for (auto& id : partition_id_array) {
             temp_group.push_back(id);
-            count++;
-            if (count >= batch_size) {
+            if (temp_group.size() >= batch_size) {
                 id_groups.emplace_back(temp_group);
                 temp_group.clear();
-                count = 0;
             }
         }
 
@@ -1749,9 +1751,9 @@ MySQLMetaImpl::FilesToSearchEx(const std::string& root_collection, const std::se
                 std::lock_guard<std::mutex> meta_lock(meta_mutex_);
 
                 mysqlpp::Query statement = connectionPtr->query();
-                statement
-                    << "SELECT id, table_id, segment_id, engine_type, file_id, file_type, file_size, row_count, date"
-                    << " FROM " << META_TABLEFILES << " WHERE table_id in (";
+                statement << "SELECT id, table_id, segment_id, file_id, file_type, file_size, row_count, date,"
+                          << " engine_type, created_on, updated_time"
+                          << " FROM " << META_TABLEFILES << " WHERE table_id in (";
                 for (size_t i = 0; i < group.size(); i++) {
                     statement << mysqlpp::quote << group[i];
                     if (i != group.size() - 1) {
@@ -1776,16 +1778,19 @@ MySQLMetaImpl::FilesToSearchEx(const std::string& root_collection, const std::se
                 collection_file.id_ = resRow["id"];  // implicit conversion
                 resRow["table_id"].to_string(collection_file.collection_id_);
                 resRow["segment_id"].to_string(collection_file.segment_id_);
-                collection_file.index_file_size_ = collection_schema.index_file_size_;
-                collection_file.engine_type_ = resRow["engine_type"];
-                collection_file.index_params_ = collection_schema.index_params_;
-                collection_file.metric_type_ = collection_schema.metric_type_;
                 resRow["file_id"].to_string(collection_file.file_id_);
                 collection_file.file_type_ = resRow["file_type"];
                 collection_file.file_size_ = resRow["file_size"];
                 collection_file.row_count_ = resRow["row_count"];
                 collection_file.date_ = resRow["date"];
+                collection_file.engine_type_ = resRow["engine_type"];
+                collection_file.created_on_ = resRow["created_on"];
+                collection_file.updated_time_ = resRow["updated_time"];
+
                 collection_file.dimension_ = collection_schema.dimension_;
+                collection_file.index_file_size_ = collection_schema.index_file_size_;
+                collection_file.index_params_ = collection_schema.index_params_;
+                collection_file.metric_type_ = collection_schema.metric_type_;
 
                 auto status = utils::GetCollectionFilePath(options_, collection_file);
                 if (!status.ok()) {
@@ -1837,8 +1842,8 @@ MySQLMetaImpl::FilesToMerge(const std::string& collection_id, FilesHolder& files
             std::lock_guard<std::mutex> meta_lock(meta_mutex_);
 
             mysqlpp::Query statement = connectionPtr->query();
-            statement << "SELECT id, table_id, segment_id, file_id, file_type, file_size, row_count, date, "
-                         "engine_type, created_on"
+            statement << "SELECT id, table_id, segment_id, file_id, file_type, file_size, row_count, date,"
+                         " engine_type, created_on, updated_time"
                       << " FROM " << META_TABLEFILES << " WHERE table_id = " << mysqlpp::quote << collection_id
                       << " AND file_type = " << std::to_string(SegmentSchema::RAW) << " ORDER BY row_count DESC;";
 
@@ -1861,14 +1866,17 @@ MySQLMetaImpl::FilesToMerge(const std::string& collection_id, FilesHolder& files
             resRow["segment_id"].to_string(collection_file.segment_id_);
             resRow["file_id"].to_string(collection_file.file_id_);
             collection_file.file_type_ = resRow["file_type"];
+            collection_file.file_size_ = resRow["file_size"];
             collection_file.row_count_ = resRow["row_count"];
             collection_file.date_ = resRow["date"];
-            collection_file.index_file_size_ = collection_schema.index_file_size_;
             collection_file.engine_type_ = resRow["engine_type"];
+            collection_file.created_on_ = resRow["created_on"];
+            collection_file.updated_time_ = resRow["updated_time"];
+
+            collection_file.dimension_ = collection_schema.dimension_;
+            collection_file.index_file_size_ = collection_schema.index_file_size_;
             collection_file.index_params_ = collection_schema.index_params_;
             collection_file.metric_type_ = collection_schema.metric_type_;
-            collection_file.created_on_ = resRow["created_on"];
-            collection_file.dimension_ = collection_schema.dimension_;
 
             auto status = utils::GetCollectionFilePath(options_, collection_file);
             if (!status.ok()) {
@@ -1911,12 +1919,12 @@ MySQLMetaImpl::FilesToIndex(FilesHolder& files_holder) {
             std::lock_guard<std::mutex> meta_lock(meta_mutex_);
 
             mysqlpp::Query statement = connectionPtr->query();
-            statement << "SELECT id, table_id, segment_id, engine_type, file_id, file_type, file_size, "
-                         "row_count, date, created_on"
+            statement << "SELECT id, table_id, segment_id, file_id, file_type, file_size, row_count, date,"
+                      << " engine_type, created_on, updated_time"
                       << " FROM " << META_TABLEFILES << " WHERE file_type = " << std::to_string(SegmentSchema::TO_INDEX)
                       << ";";
 
-            LOG_ENGINE_DEBUG_ << "FilesToIndex: " << statement.str();
+            //            LOG_ENGINE_DEBUG_ << "FilesToIndex: " << statement.str();
 
             res = statement.store();
         }  // Scoped Connection
@@ -1929,13 +1937,14 @@ MySQLMetaImpl::FilesToIndex(FilesHolder& files_holder) {
             collection_file.id_ = resRow["id"];  // implicit conversion
             resRow["table_id"].to_string(collection_file.collection_id_);
             resRow["segment_id"].to_string(collection_file.segment_id_);
-            collection_file.engine_type_ = resRow["engine_type"];
             resRow["file_id"].to_string(collection_file.file_id_);
             collection_file.file_type_ = resRow["file_type"];
             collection_file.file_size_ = resRow["file_size"];
             collection_file.row_count_ = resRow["row_count"];
             collection_file.date_ = resRow["date"];
+            collection_file.engine_type_ = resRow["engine_type"];
             collection_file.created_on_ = resRow["created_on"];
+            collection_file.updated_time_ = resRow["updated_time"];
 
             auto groupItr = groups.find(collection_file.collection_id_);
             if (groupItr == groups.end()) {
@@ -2003,10 +2012,10 @@ MySQLMetaImpl::FilesByType(const std::string& collection_id, const std::vector<i
 
             mysqlpp::Query statement = connectionPtr->query();
             // since collection_id is a unique column we just need to check whether it exists or not
-            statement
-                << "SELECT id, segment_id, engine_type, file_id, file_type, file_size, row_count, date, created_on"
-                << " FROM " << META_TABLEFILES << " WHERE table_id = " << mysqlpp::quote << collection_id
-                << " AND file_type in (" << types << ");";
+            statement << "SELECT id, table_id, segment_id, file_id, file_type, file_size, row_count, date,"
+                      << " engine_type, created_on, updated_time"
+                      << " FROM " << META_TABLEFILES << " WHERE table_id = " << mysqlpp::quote << collection_id
+                      << " AND file_type in (" << types << ");";
 
             LOG_ENGINE_DEBUG_ << "FilesByType: " << statement.str();
 
@@ -2028,13 +2037,14 @@ MySQLMetaImpl::FilesByType(const std::string& collection_id, const std::vector<i
                 file_schema.id_ = resRow["id"];
                 file_schema.collection_id_ = collection_id;
                 resRow["segment_id"].to_string(file_schema.segment_id_);
-                file_schema.engine_type_ = resRow["engine_type"];
                 resRow["file_id"].to_string(file_schema.file_id_);
                 file_schema.file_type_ = resRow["file_type"];
                 file_schema.file_size_ = resRow["file_size"];
                 file_schema.row_count_ = resRow["row_count"];
                 file_schema.date_ = resRow["date"];
+                file_schema.engine_type_ = resRow["engine_type"];
                 file_schema.created_on_ = resRow["created_on"];
+                file_schema.updated_time_ = resRow["updated_time"];
 
                 file_schema.index_file_size_ = collection_schema.index_file_size_;
                 file_schema.index_params_ = collection_schema.index_params_;
@@ -2114,6 +2124,167 @@ MySQLMetaImpl::FilesByType(const std::string& collection_id, const std::vector<i
 }
 
 Status
+MySQLMetaImpl::FilesByTypeEx(const std::vector<meta::CollectionSchema>& collections, const std::vector<int>& file_types,
+                             FilesHolder& files_holder) {
+    try {
+        server::MetricCollector metric;
+
+        // distribute id array to batches
+        const uint64_t batch_size = 50;
+        std::vector<std::vector<std::string>> id_groups;
+        std::vector<std::string> temp_group;
+        std::unordered_map<std::string, meta::CollectionSchema> map_collections;
+        for (auto& collection : collections) {
+            map_collections.insert(std::make_pair(collection.collection_id_, collection));
+            temp_group.push_back(collection.collection_id_);
+            if (temp_group.size() >= batch_size) {
+                id_groups.emplace_back(temp_group);
+                temp_group.clear();
+            }
+        }
+
+        if (!temp_group.empty()) {
+            id_groups.emplace_back(temp_group);
+        }
+
+        // perform query batch by batch
+        Status ret;
+        int raw_count = 0, new_count = 0, new_merge_count = 0, new_index_count = 0;
+        int to_index_count = 0, index_count = 0, backup_count = 0;
+        for (auto group : id_groups) {
+            mysqlpp::StoreQueryResult res;
+            {
+                mysqlpp::ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab_);
+
+                bool is_null_connection = (connectionPtr == nullptr);
+                fiu_do_on("MySQLMetaImpl.FilesByType.null_connection", is_null_connection = true);
+                fiu_do_on("MySQLMetaImpl.FilesByType.throw_exception", throw std::exception(););
+                if (is_null_connection) {
+                    return Status(DB_ERROR, "Failed to connect to meta server(mysql)");
+                }
+
+                std::string types;
+                for (auto type : file_types) {
+                    if (!types.empty()) {
+                        types += ",";
+                    }
+                    types += std::to_string(type);
+                }
+
+                // to ensure UpdateCollectionFiles to be a atomic operation
+                std::lock_guard<std::mutex> meta_lock(meta_mutex_);
+
+                mysqlpp::Query statement = connectionPtr->query();
+                // since collection_id is a unique column we just need to check whether it exists or not
+                statement << "SELECT id, table_id, segment_id, file_id, file_type, file_size, row_count, date,"
+                          << " engine_type, created_on, updated_time"
+                          << " FROM " << META_TABLEFILES << " WHERE table_id in (";
+                for (size_t i = 0; i < group.size(); i++) {
+                    statement << mysqlpp::quote << group[i];
+                    if (i != group.size() - 1) {
+                        statement << ",";
+                    }
+                }
+                statement << ") AND file_type in (" << types << ");";
+
+                LOG_ENGINE_DEBUG_ << "FilesByType: " << statement.str();
+
+                res = statement.store();
+            }  // Scoped Connection
+
+            for (auto& resRow : res) {
+                SegmentSchema file_schema;
+                file_schema.id_ = resRow["id"];  // implicit conversion
+                resRow["table_id"].to_string(file_schema.collection_id_);
+                resRow["segment_id"].to_string(file_schema.segment_id_);
+                resRow["file_id"].to_string(file_schema.file_id_);
+                file_schema.file_type_ = resRow["file_type"];
+                file_schema.file_size_ = resRow["file_size"];
+                file_schema.row_count_ = resRow["row_count"];
+                file_schema.date_ = resRow["date"];
+                file_schema.engine_type_ = resRow["engine_type"];
+                file_schema.created_on_ = resRow["created_on"];
+                file_schema.updated_time_ = resRow["updated_time"];
+
+                auto& collection_schema = map_collections[file_schema.collection_id_];
+                file_schema.dimension_ = collection_schema.dimension_;
+                file_schema.index_file_size_ = collection_schema.index_file_size_;
+                file_schema.index_params_ = collection_schema.index_params_;
+                file_schema.metric_type_ = collection_schema.metric_type_;
+
+                auto status = utils::GetCollectionFilePath(options_, file_schema);
+                if (!status.ok()) {
+                    ret = status;
+                    continue;
+                }
+
+                files_holder.MarkFile(file_schema);
+
+                int32_t file_type = resRow["file_type"];
+                switch (file_type) {
+                    case (int)SegmentSchema::RAW:
+                        ++raw_count;
+                        break;
+                    case (int)SegmentSchema::NEW:
+                        ++new_count;
+                        break;
+                    case (int)SegmentSchema::NEW_MERGE:
+                        ++new_merge_count;
+                        break;
+                    case (int)SegmentSchema::NEW_INDEX:
+                        ++new_index_count;
+                        break;
+                    case (int)SegmentSchema::TO_INDEX:
+                        ++to_index_count;
+                        break;
+                    case (int)SegmentSchema::INDEX:
+                        ++index_count;
+                        break;
+                    case (int)SegmentSchema::BACKUP:
+                        ++backup_count;
+                        break;
+                    default:
+                        break;
+                }
+            }
+        }
+
+        std::string msg = "Get collection files by type.";
+        for (int file_type : file_types) {
+            switch (file_type) {
+                case (int)SegmentSchema::RAW:
+                    msg = msg + " raw files:" + std::to_string(raw_count);
+                    break;
+                case (int)SegmentSchema::NEW:
+                    msg = msg + " new files:" + std::to_string(new_count);
+                    break;
+                case (int)SegmentSchema::NEW_MERGE:
+                    msg = msg + " new_merge files:" + std::to_string(new_merge_count);
+                    break;
+                case (int)SegmentSchema::NEW_INDEX:
+                    msg = msg + " new_index files:" + std::to_string(new_index_count);
+                    break;
+                case (int)SegmentSchema::TO_INDEX:
+                    msg = msg + " to_index files:" + std::to_string(to_index_count);
+                    break;
+                case (int)SegmentSchema::INDEX:
+                    msg = msg + " index files:" + std::to_string(index_count);
+                    break;
+                case (int)SegmentSchema::BACKUP:
+                    msg = msg + " backup files:" + std::to_string(backup_count);
+                    break;
+                default:
+                    break;
+            }
+        }
+        LOG_ENGINE_DEBUG_ << msg;
+        return ret;
+    } catch (std::exception& e) {
+        return HandleException("Failed to get files by type", e.what());
+    }
+}
+
+Status
 MySQLMetaImpl::FilesByID(const std::vector<size_t>& ids, FilesHolder& files_holder) {
     if (ids.empty()) {
         return Status::OK();
@@ -2136,7 +2307,8 @@ MySQLMetaImpl::FilesByID(const std::vector<size_t>& ids, FilesHolder& files_hold
             std::lock_guard<std::mutex> meta_lock(meta_mutex_);
 
             mysqlpp::Query statement = connectionPtr->query();
-            statement << "SELECT id, table_id, segment_id, engine_type, file_id, file_type, file_size, row_count, date"
+            statement << "SELECT id, table_id, segment_id, file_id, file_type, file_size, row_count, date,"
+                      << " engine_type, created_on, updated_time"
                       << " FROM " << META_TABLEFILES;
 
             std::stringstream idSS;
@@ -2167,12 +2339,14 @@ MySQLMetaImpl::FilesByID(const std::vector<size_t>& ids, FilesHolder& files_hold
             collection_file.id_ = resRow["id"];  // implicit conversion
             resRow["table_id"].to_string(collection_file.collection_id_);
             resRow["segment_id"].to_string(collection_file.segment_id_);
-            collection_file.engine_type_ = resRow["engine_type"];
             resRow["file_id"].to_string(collection_file.file_id_);
             collection_file.file_type_ = resRow["file_type"];
             collection_file.file_size_ = resRow["file_size"];
             collection_file.row_count_ = resRow["row_count"];
             collection_file.date_ = resRow["date"];
+            collection_file.engine_type_ = resRow["engine_type"];
+            collection_file.created_on_ = resRow["created_on"];
+            collection_file.updated_time_ = resRow["updated_time"];
 
             if (collections.find(collection_file.collection_id_) == collections.end()) {
                 CollectionSchema collection_schema;
@@ -2390,7 +2564,7 @@ MySQLMetaImpl::CleanUpFilesWithTTL(uint64_t seconds /*, CleanUpFilter* filter*/)
                           << ")"
                           << " AND updated_time < " << std::to_string(now - seconds * US_PS) << ";";
 
-                LOG_ENGINE_DEBUG_ << "CleanUpFilesWithTTL: " << statement.str();
+                //                LOG_ENGINE_DEBUG_ << "CleanUpFilesWithTTL: " << statement.str();
 
                 res = statement.store();
             }
@@ -2481,7 +2655,7 @@ MySQLMetaImpl::CleanUpFilesWithTTL(uint64_t seconds /*, CleanUpFilter* filter*/)
                       << " FROM " << META_TABLES << " WHERE state = " << std::to_string(CollectionSchema::TO_DELETE)
                       << ";";
 
-            LOG_ENGINE_DEBUG_ << "CleanUpFilesWithTTL: " << statement.str();
+            //            LOG_ENGINE_DEBUG_ << "CleanUpFilesWithTTL: " << statement.str();
 
             mysqlpp::StoreQueryResult res = statement.store();
 
@@ -2539,7 +2713,7 @@ MySQLMetaImpl::CleanUpFilesWithTTL(uint64_t seconds /*, CleanUpFilter* filter*/)
                           << " FROM " << META_TABLEFILES << " WHERE table_id = " << mysqlpp::quote << collection_id
                           << ";";
 
-                LOG_ENGINE_DEBUG_ << "CleanUpFilesWithTTL: " << statement.str();
+                //                LOG_ENGINE_DEBUG_ << "CleanUpFilesWithTTL: " << statement.str();
 
                 mysqlpp::StoreQueryResult res = statement.store();
 

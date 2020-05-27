@@ -75,6 +75,8 @@ struct DBOptions {
     int64_t auto_flush_interval_ = 1;
     int64_t file_cleanup_timeout_ = 10;
 
+    bool metric_enable_ = false;
+
     // wal relative configurations
     bool wal_enable_ = true;
     bool recovery_error_ignore_ = true;
