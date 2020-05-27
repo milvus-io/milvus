@@ -49,6 +49,14 @@ TEST_P(BinaryIDMAPTest, binaryidmap_basic) {
         {milvus::knowhere::Metric::TYPE, MetricType},
     };
 
+    // null faiss index
+    {
+        ASSERT_ANY_THROW(index_->Serialize());
+        ASSERT_ANY_THROW(index_->Query(query_dataset, conf));
+        ASSERT_ANY_THROW(index_->Add(nullptr, conf));
+        ASSERT_ANY_THROW(index_->AddWithoutIds(nullptr, conf));
+    }
+
     index_->Train(base_dataset, conf);
     index_->Add(base_dataset, conf);
     EXPECT_EQ(index_->Count(), nb);
@@ -98,7 +106,7 @@ TEST_P(BinaryIDMAPTest, binaryidmap_serialize) {
     {
         // serialize index
         index_->Train(base_dataset, conf);
-        index_->Add(base_dataset, milvus::knowhere::Config());
+        index_->AddWithoutIds(base_dataset, milvus::knowhere::Config());
         auto re_result = index_->Query(query_dataset, conf);
         AssertAnns(re_result, nq, k);
         //        PrintResult(re_result, nq, k);

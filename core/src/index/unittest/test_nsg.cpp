@@ -80,12 +80,14 @@ TEST_F(NSGInterfaceTest, basic_test) {
     fiu_init(0);
     // untrained index
     {
-        ASSERT_ANY_THROW(index_->Query(query_dataset, search_conf));
         ASSERT_ANY_THROW(index_->Serialize());
+        ASSERT_ANY_THROW(index_->Query(query_dataset, search_conf));
+        ASSERT_ANY_THROW(index_->Add(base_dataset, search_conf));
+        ASSERT_ANY_THROW(index_->AddWithoutIds(base_dataset, search_conf));
     }
 
     train_conf[milvus::knowhere::meta::DEVICEID] = DEVICEID;
-    index_->Train(base_dataset, train_conf);
+    index_->BuildAll(base_dataset, train_conf);
     auto result = index_->Query(query_dataset, search_conf);
     AssertAnns(result, nq, k);
 
@@ -96,7 +98,7 @@ TEST_F(NSGInterfaceTest, basic_test) {
         fiu_disable("NSG.Serialize.throw_exception");
     }
 
-    auto new_index = std::make_shared<milvus::knowhere::NSG>();
+    auto new_index = std::make_shared<milvus::knowhere::NSG>(0);
     new_index->Load(binaryset);
     {
         fiu_enable("NSG.Load.throw_exception", 1, nullptr, 0);
