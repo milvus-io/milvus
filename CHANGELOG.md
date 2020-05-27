@@ -18,6 +18,7 @@ Please mark all change in change log and use the issue from GitHub
 -   \#2370 Clean compile warning
 -   \#2381 Upgrade FAISS to 1.6.3
 -   \#2410 Logging build index progress
+-   \#2441 Improve Knowhere code coverage
 
 ## Task
 
