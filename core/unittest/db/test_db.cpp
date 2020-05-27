@@ -32,7 +32,7 @@ namespace {
 
 static const char* COLLECTION_NAME = "test_group";
 static constexpr int64_t COLLECTION_DIM = 256;
-static constexpr int64_t VECTOR_COUNT = 25000;
+static constexpr int64_t VECTOR_COUNT = 5000;
 static constexpr int64_t INSERT_LOOP = 100;
 static constexpr int64_t SECONDS_EACH_HOUR = 3600;
 static constexpr int64_t DAY_SECONDS = 24 * 60 * 60;
@@ -180,7 +180,7 @@ TEST_F(DBTest, DB_TEST) {
         milvus::engine::ResultIds result_ids;
         milvus::engine::ResultDistances result_distances;
         int k = 10;
-        std::this_thread::sleep_for(std::chrono::seconds(2));
+        std::this_thread::sleep_for(std::chrono::seconds(1));
 
         INIT_TIMER;
         std::stringstream ss;
@@ -214,7 +214,7 @@ TEST_F(DBTest, DB_TEST) {
                 /* LOG(DEBUG) << ss.str(); */
             }
             ASSERT_TRUE(count >= prev_count);
-            std::this_thread::sleep_for(std::chrono::seconds(1));
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
         }
     });
 
@@ -236,7 +236,7 @@ TEST_F(DBTest, DB_TEST) {
         stat = db_->Flush();
         ASSERT_TRUE(stat.ok());
 
-        std::this_thread::sleep_for(std::chrono::microseconds(1));
+        std::this_thread::sleep_for(std::chrono::milliseconds(20));
     }
 
     search.join();
@@ -612,7 +612,6 @@ TEST_F(DBTest, BACK_TIMER_THREAD_1) {
             ASSERT_EQ(xb.id_array_.size(), nb);
         }
 
-        std::this_thread::sleep_for(std::chrono::seconds(2));
         db_->Stop();
         fiu_disable("DBImpl.StartMetricTask.InvalidTotalCache");
         fiu_disable("SqliteMetaImpl.FilesToMerge.throw_exception");
@@ -620,7 +619,6 @@ TEST_F(DBTest, BACK_TIMER_THREAD_1) {
 
     FIU_ENABLE_FIU("DBImpl.StartMetricTask.InvalidTotalCache");
     db_->Start();
-    std::this_thread::sleep_for(std::chrono::seconds(2));
     db_->Stop();
     fiu_disable("DBImpl.StartMetricTask.InvalidTotalCache");
 }
@@ -644,7 +642,6 @@ TEST_F(DBTest, BACK_TIMER_THREAD_2) {
     }
 
     FIU_ENABLE_FIU("SqliteMetaImpl.CreateCollectionFile.throw_exception");
-    std::this_thread::sleep_for(std::chrono::seconds(2));
     db_->Stop();
     fiu_disable("SqliteMetaImpl.CreateCollectionFile.throw_exception");
 }
@@ -669,7 +666,6 @@ TEST_F(DBTest, BACK_TIMER_THREAD_3) {
 
     FIU_ENABLE_FIU("DBImpl.MergeFiles.Serialize_ThrowException");
     db_->Start();
-    std::this_thread::sleep_for(std::chrono::seconds(2));
     db_->Stop();
     fiu_disable("DBImpl.MergeFiles.Serialize_ThrowException");
 }
@@ -694,7 +690,6 @@ TEST_F(DBTest, BACK_TIMER_THREAD_4) {
 
     FIU_ENABLE_FIU("DBImpl.MergeFiles.Serialize_ErrorStatus");
     db_->Start();
-    std::this_thread::sleep_for(std::chrono::seconds(2));
     db_->Stop();
     fiu_disable("DBImpl.MergeFiles.Serialize_ErrorStatus");
 }
@@ -934,11 +929,9 @@ TEST_F(DBTest2, ARHIVE_DISK_CHECK) {
         BuildVectors(nb, i, xb);
 
         db_->InsertVectors(COLLECTION_NAME, "", xb);
-        std::this_thread::sleep_for(std::chrono::microseconds(1));
     }
 
-    std::this_thread::sleep_for(std::chrono::seconds(1));
-
+    db_->Flush();
     db_->Size(size);
     LOG(DEBUG) << "size=" << size;
     ASSERT_LE(size, 1 * milvus::engine::GB);
@@ -981,8 +974,6 @@ TEST_F(DBTest2, DELETE_TEST) {
     fiu_disable("DBImpl.DropCollectionRecursively.failed");
 
     stat = db_->DropCollection(COLLECTION_NAME);
-
-    std::this_thread::sleep_for(std::chrono::seconds(2));
     ASSERT_TRUE(stat.ok());
 
     db_->HasCollection(COLLECTION_NAME, has_collection);

@@ -287,7 +287,7 @@ TEST_F(DeleteTest, delete_before_create_index) {
     ASSERT_TRUE(stat.ok());
     ASSERT_EQ(collection_info_get.dimension_, COLLECTION_DIM);
 
-    int64_t nb = 10000;
+    int64_t nb = 5000;
     milvus::engine::VectorsData xb;
     BuildVectors(nb, xb);
 
@@ -369,7 +369,7 @@ TEST_F(DeleteTest, delete_with_index) {
     ASSERT_TRUE(stat.ok());
     ASSERT_EQ(collection_info_get.dimension_, COLLECTION_DIM);
 
-    int64_t nb = 10000;
+    int64_t nb = 5000;
     milvus::engine::VectorsData xb;
     BuildVectors(nb, xb);
 
@@ -451,7 +451,7 @@ TEST_F(DeleteTest, delete_multiple_times_with_index) {
     ASSERT_TRUE(stat.ok());
     ASSERT_EQ(collection_info_get.dimension_, COLLECTION_DIM);
 
-    int64_t nb = 100000;
+    int64_t nb = 5000;
     milvus::engine::VectorsData xb;
     BuildVectors(nb, xb);
 

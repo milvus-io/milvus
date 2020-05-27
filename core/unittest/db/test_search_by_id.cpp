@@ -86,7 +86,7 @@ TEST_F(SearchByIdTest, BASIC_TEST) {
     ASSERT_TRUE(stat.ok());
     ASSERT_EQ(collection_info_get.dimension_, COLLECTION_DIM);
 
-    int64_t nb = 100000;
+    int64_t nb = 10000;
     milvus::engine::VectorsData xb;
     BuildVectors(nb, xb);
 
@@ -185,7 +185,7 @@ TEST_F(SearchByIdTest, WITH_INDEX_TEST) {
     ASSERT_TRUE(stat.ok());
     ASSERT_EQ(collection_info_get.dimension_, COLLECTION_DIM);
 
-    int64_t nb = 10000;
+    int64_t nb = 5000;
     milvus::engine::VectorsData xb;
     BuildVectors(nb, xb);
 
@@ -246,7 +246,7 @@ TEST_F(SearchByIdTest, WITH_DELETE_TEST) {
     ASSERT_TRUE(stat.ok());
     ASSERT_EQ(collection_info_get.dimension_, COLLECTION_DIM);
 
-    int64_t nb = 100000;
+    int64_t nb = 10000;
     milvus::engine::VectorsData xb;
     BuildVectors(nb, xb);
 
@@ -315,7 +315,7 @@ TEST_F(GetVectorByIdTest, BASIC_TEST) {
     ASSERT_TRUE(stat.ok());
     ASSERT_EQ(collection_info_get.dimension_, COLLECTION_DIM);
 
-    int64_t nb = 100000;
+    int64_t nb = 10000;
     milvus::engine::VectorsData xb;
     BuildVectors(nb, xb);
 
@@ -369,7 +369,7 @@ TEST_F(GetVectorByIdTest, WITH_INDEX_TEST) {
     ASSERT_TRUE(stat.ok());
     ASSERT_EQ(collection_info_get.dimension_, COLLECTION_DIM);
 
-    int64_t nb = 10000;
+    int64_t nb = 5000;
     milvus::engine::VectorsData xb;
     BuildVectors(nb, xb);
 
@@ -429,7 +429,7 @@ TEST_F(GetVectorByIdTest, WITH_DELETE_TEST) {
     ASSERT_TRUE(stat.ok());
     ASSERT_EQ(collection_info_get.dimension_, COLLECTION_DIM);
 
-    int64_t nb = 100000;
+    int64_t nb = 10000;
     milvus::engine::VectorsData xb;
     BuildVectors(nb, xb);
 
