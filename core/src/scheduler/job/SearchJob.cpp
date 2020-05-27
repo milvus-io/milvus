@@ -22,9 +22,15 @@ SearchJob::SearchJob(const std::shared_ptr<server::Context>& context, uint64_t t
 }
 
 SearchJob::SearchJob(const std::shared_ptr<server::Context>& context, milvus::query::GeneralQueryPtr general_query,
+                     query::QueryPtr query_ptr,
                      std::unordered_map<std::string, engine::meta::hybrid::DataType>& attr_type,
                      const engine::VectorsData& vectors)
-    : Job(JobType::SEARCH), context_(context), general_query_(general_query), attr_type_(attr_type), vectors_(vectors) {
+    : Job(JobType::SEARCH),
+      context_(context),
+      general_query_(general_query),
+      query_ptr_(query_ptr),
+      attr_type_(attr_type),
+      vectors_(vectors) {
 }
 
 bool

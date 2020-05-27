@@ -611,7 +611,10 @@ WebRequestHandler::ProcessLeafQueryJson(const nlohmann::json& json, milvus::quer
         vector_query->topk = vector_json["topk"].get<int64_t>();
         vector_query->extra_params = vector_json["extra_params"];
 
-        leaf_query->vector_query = vector_query;
+        // TODO(yukun): remove hardcode here
+        std::string vector_placeholder = "placeholder_1";
+        query_ptr_->vectors.insert(std::make_pair(vector_placeholder, vector_query));
+        leaf_query->vector_placeholder = vector_placeholder;
         query->AddLeafQuery(leaf_query);
     }
     return Status::OK();
@@ -814,20 +817,22 @@ WebRequestHandler::HybridSearch(const std::string& collection_name, const nlohma
 
     if (query_json.contains("bool")) {
         auto boolean_query_json = query_json["bool"];
-        query::BooleanQueryPtr boolean_query = std::make_shared<query::BooleanQuery>();
+        auto boolean_query = std::make_shared<query::BooleanQuery>();
+        query_ptr_ = std::make_shared<query::Query>();
 
         status = ProcessBoolQueryJson(boolean_query_json, boolean_query);
         if (!status.ok()) {
             return status;
         }
-        query::GeneralQueryPtr general_query = std::make_shared<query::GeneralQuery>();
+        auto general_query = std::make_shared<query::GeneralQuery>();
         query::GenBinaryQuery(boolean_query, general_query->bin);
 
-        context::HybridSearchContextPtr hybrid_search_context = std::make_shared<context::HybridSearchContext>();
+        query_ptr_->root = general_query->bin;
+
         engine::QueryResult result;
         std::vector<std::string> field_names;
-        status = request_handler_.HybridSearch(context_ptr_, hybrid_search_context, collection_name, partition_tags,
-                                               general_query, extra_params, field_names, result);
+        status = request_handler_.HybridSearch(context_ptr_, collection_name, partition_tags, general_query, query_ptr_,
+                                               extra_params, field_names, result);
 
         if (!status.ok()) {
             return status;

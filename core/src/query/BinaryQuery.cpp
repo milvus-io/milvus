@@ -67,7 +67,7 @@ GenBinaryQuery(BooleanQueryPtr query, BinaryQueryPtr& binary_query) {
             // Put VectorQuery to the end of leaf queries
             auto query_size = query->getLeafQueries().size();
             for (uint64_t i = 0; i < query_size; ++i) {
-                if (query->getLeafQueries()[i]->vector_query != nullptr) {
+                if (query->getLeafQueries()[i]->vector_placeholder.size() > 0) {
                     std::swap(query->getLeafQueries()[i], query->getLeafQueries()[0]);
                     break;
                 }

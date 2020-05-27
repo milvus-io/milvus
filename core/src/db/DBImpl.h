@@ -160,8 +160,8 @@ class DBImpl : public DB, public server::CacheConfigHandler, public server::Engi
 
     Status
     HybridQuery(const std::shared_ptr<server::Context>& context, const std::string& collection_id,
-                const std::vector<std::string>& partition_tags, context::HybridSearchContextPtr hybrid_search_context,
-                query::GeneralQueryPtr general_query, std::vector<std::string>& field_names,
+                const std::vector<std::string>& partition_tags, query::GeneralQueryPtr general_query,
+                query::QueryPtr query_ptr, std::vector<std::string>& field_names,
                 std::unordered_map<std::string, engine::meta::hybrid::DataType>& attr_type,
                 engine::QueryResult& result) override;
 
@@ -198,8 +198,8 @@ class DBImpl : public DB, public server::CacheConfigHandler, public server::Engi
 
     Status
     HybridQueryAsync(const std::shared_ptr<server::Context>& context, const std::string& collection_id,
-                     meta::FilesHolder& files_holder, context::HybridSearchContextPtr hybrid_search_context,
-                     query::GeneralQueryPtr general_query, std::vector<std::string>& field_names,
+                     meta::FilesHolder& files_holder, query::GeneralQueryPtr general_query, query::QueryPtr query_ptr,
+                     std::vector<std::string>& field_names,
                      std::unordered_map<std::string, engine::meta::hybrid::DataType>& attr_type,
                      engine::QueryResult& result);
 
