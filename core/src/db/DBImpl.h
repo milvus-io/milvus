@@ -78,7 +78,8 @@ class DBImpl : public DB, public server::CacheConfigHandler, public server::Engi
     GetCollectionInfo(const std::string& collection_id, std::string& collection_info) override;
 
     Status
-    PreloadCollection(const std::string& collection_id) override;
+    PreloadCollection(const std::shared_ptr<server::Context>& context, const std::string& collection_id,
+                      bool force = false) override;
 
     Status
     UpdateCollectionFlag(const std::string& collection_id, int64_t flag) override;

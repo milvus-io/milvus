@@ -455,34 +455,34 @@ TEST_F(DBTest, PRELOAD_TEST) {
     db_->CreateIndex(dummy_context_, COLLECTION_NAME, index);  // wait until build index finish
 
     int64_t prev_cache_usage = milvus::cache::CpuCacheMgr::GetInstance()->CacheUsage();
-    stat = db_->PreloadCollection(COLLECTION_NAME);
+    stat = db_->PreloadCollection(dummy_context_, COLLECTION_NAME);
     ASSERT_TRUE(stat.ok());
     int64_t cur_cache_usage = milvus::cache::CpuCacheMgr::GetInstance()->CacheUsage();
     ASSERT_TRUE(prev_cache_usage < cur_cache_usage);
 
     FIU_ENABLE_FIU("SqliteMetaImpl.FilesToSearch.throw_exception");
-    stat = db_->PreloadCollection(COLLECTION_NAME);
+    stat = db_->PreloadCollection(dummy_context_, COLLECTION_NAME);
     ASSERT_FALSE(stat.ok());
     fiu_disable("SqliteMetaImpl.FilesToSearch.throw_exception");
 
     // create a partition
     stat = db_->CreatePartition(COLLECTION_NAME, "part0", "0");
     ASSERT_TRUE(stat.ok());
-    stat = db_->PreloadCollection(COLLECTION_NAME);
+    stat = db_->PreloadCollection(dummy_context_, COLLECTION_NAME);
     ASSERT_TRUE(stat.ok());
 
     FIU_ENABLE_FIU("DBImpl.PreloadCollection.null_engine");
-    stat = db_->PreloadCollection(COLLECTION_NAME);
+    stat = db_->PreloadCollection(dummy_context_, COLLECTION_NAME);
     ASSERT_FALSE(stat.ok());
     fiu_disable("DBImpl.PreloadCollection.null_engine");
 
     FIU_ENABLE_FIU("DBImpl.PreloadCollection.exceed_cache");
-    stat = db_->PreloadCollection(COLLECTION_NAME);
+    stat = db_->PreloadCollection(dummy_context_, COLLECTION_NAME);
     ASSERT_FALSE(stat.ok());
     fiu_disable("DBImpl.PreloadCollection.exceed_cache");
 
     FIU_ENABLE_FIU("DBImpl.PreloadCollection.engine_throw_exception");
-    stat = db_->PreloadCollection(COLLECTION_NAME);
+    stat = db_->PreloadCollection(dummy_context_, COLLECTION_NAME);
     ASSERT_FALSE(stat.ok());
     fiu_disable("DBImpl.PreloadCollection.engine_throw_exception");
 }
@@ -543,7 +543,7 @@ TEST_F(DBTest, SHUTDOWN_TEST) {
     stat = db_->GetVectorsByID(collection_info, id_array, vectors);
     ASSERT_FALSE(stat.ok());
 
-    stat = db_->PreloadCollection(collection_info.collection_id_);
+    stat = db_->PreloadCollection(dummy_context_, collection_info.collection_id_);
     ASSERT_FALSE(stat.ok());
 
     uint64_t row_count = 0;
@@ -1346,7 +1346,7 @@ TEST_F(DBTest2, SEARCH_WITH_DIFFERENT_INDEX) {
     stat = db_->CreateIndex(dummy_context_, collection_info.collection_id_, index);
     ASSERT_TRUE(stat.ok());
 
-    stat = db_->PreloadCollection(collection_info.collection_id_);
+    stat = db_->PreloadCollection(dummy_context_, collection_info.collection_id_);
     ASSERT_TRUE(stat.ok());
 
     int topk = 10, nprobe = 10;
@@ -1371,7 +1371,7 @@ result_distances);
     stat = db_->CreateIndex(dummy_context_, collection_info.collection_id_, index);
     ASSERT_TRUE(stat.ok());
 
-    stat = db_->PreloadCollection(collection_info.collection_id_);
+    stat = db_->PreloadCollection(dummy_context_, collection_info.collection_id_);
     ASSERT_TRUE(stat.ok());
 
     for (auto id : ids_to_search) {

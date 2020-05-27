@@ -262,7 +262,7 @@ DBWrapper::PreloadCollections(const std::string& preload_collections) {
         db_->AllCollections(table_schema_array);
 
         for (auto& schema : table_schema_array) {
-            auto status = db_->PreloadCollection(schema.collection_id_);
+            auto status = db_->PreloadCollection(nullptr, schema.collection_id_);
             if (!status.ok()) {
                 return status;
             }
@@ -271,7 +271,7 @@ DBWrapper::PreloadCollections(const std::string& preload_collections) {
         std::vector<std::string> collection_names;
         StringHelpFunctions::SplitStringByDelimeter(preload_collections, ",", collection_names);
         for (auto& name : collection_names) {
-            auto status = db_->PreloadCollection(name);
+            auto status = db_->PreloadCollection(nullptr, name);
             if (!status.ok()) {
                 return status;
             }

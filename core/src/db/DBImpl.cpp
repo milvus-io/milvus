@@ -208,8 +208,10 @@ DBImpl::Stop() {
     }
 
     // wait metric thread exit
-    swn_metric_.Notify();
-    bg_metric_thread_.join();
+    if (options_.metric_enable_) {
+        swn_metric_.Notify();
+        bg_metric_thread_.join();
+    }
 
     // LOG_ENGINE_TRACE_ << "DB service stop";
     return Status::OK();
@@ -398,7 +400,8 @@ DBImpl::GetCollectionInfo(const std::string& collection_id, std::string& collect
 }
 
 Status
-DBImpl::PreloadCollection(const std::string& collection_id) {
+DBImpl::PreloadCollection(const std::shared_ptr<server::Context>& context, const std::string& collection_id,
+                          bool force) {
     if (!initialized_.load(std::memory_order_acquire)) {
         return SHUTDOWN_ERROR;
     }
@@ -448,6 +451,12 @@ DBImpl::PreloadCollection(const std::string& collection_id) {
                       << " files need to be pre-loaded";
     TimeRecorderAuto rc("Pre-load collection:" + collection_id);
     for (auto& file : files_array) {
+        // client break the connection, no need to continue
+        if (context && context->IsConnectionBroken()) {
+            LOG_ENGINE_DEBUG_ << "Client connection broken, stop load collection";
+            break;
+        }
+
         EngineType engine_type;
         if (file.file_type_ == meta::SegmentSchema::FILE_TYPE::RAW ||
             file.file_type_ == meta::SegmentSchema::FILE_TYPE::TO_INDEX ||
@@ -479,7 +488,7 @@ DBImpl::PreloadCollection(const std::string& collection_id) {
             }
 
             size += engine->Size();
-            if (size > available_size) {
+            if (!force && size > available_size) {
                 LOG_ENGINE_DEBUG_ << "Pre-load cancelled since cache is almost full";
                 return Status(SERVER_CACHE_FULL, "Cache is full");
             }
@@ -1019,8 +1028,8 @@ DBImpl::Compact(const std::shared_ptr<server::Context>& context, const std::stri
     milvus::engine::meta::SegmentsSchema files_to_compact = files_holder.HoldFiles();
     for (auto iter = files_to_compact.begin(); iter != files_to_compact.end();) {
         // client break the connection, no need to continue
-        if (context->IsConnectionBroken()) {
-            LOG_ENGINE_DEBUG_ << "Client connection broken, build index in background";
+        if (context && context->IsConnectionBroken()) {
+            LOG_ENGINE_DEBUG_ << "Client connection broken, stop compact operation";
             break;
         }
 
@@ -2151,7 +2160,7 @@ DBImpl::BackgroundBuildIndex() {
     meta::FilesHolder files_holder;
     meta_ptr_->FilesToIndex(files_holder);
 
-    milvus::engine::meta::SegmentsSchema& to_index_files = files_holder.HoldFiles();
+    milvus::engine::meta::SegmentsSchema to_index_files = files_holder.HoldFiles();
     Status status = index_failed_checker_.IgnoreFailedIndexFiles(to_index_files);
 
     if (!to_index_files.empty()) {
@@ -2371,7 +2380,7 @@ DBImpl::WaitCollectionIndexRecursively(const std::shared_ptr<server::Context>& c
             index_req_swn_.Wait_For(std::chrono::seconds(1));
 
             // client break the connection, no need to block, check every 1 second
-            if (context->IsConnectionBroken()) {
+            if (context && context->IsConnectionBroken()) {
                 LOG_ENGINE_DEBUG_ << "Client connection broken, build index in background";
                 break;  // just break, not return, continue to update partitions files to to_index
             }
