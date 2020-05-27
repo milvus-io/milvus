@@ -11,21 +11,55 @@
 
 #include "server/delivery/request/ReLoadSegments.h"
 
+#include "config/Config.h"
+#include "server/DBWrapper.h"
+#include "utils/TimeRecorder.h"
+#include "utils/ValidationUtil.h"
 
 namespace milvus {
 namespace server {
 
-ReLoadSegments::ReLoadSegments(const std::shared_ptr<milvus::server::Context> &context, const std::string &collection_name, const std::vector<std::string> &segment_names)
-    : BaseRequest(context, BaseRequest::kPreloadCollection), collection_name_(collection_name), segment_names_(segment_names) {
+ReLoadSegments::ReLoadSegments(const std::shared_ptr<milvus::server::Context>& context,
+                               const std::string& collection_name, const std::vector<int64_t>& segment_ids)
+    : BaseRequest(context, BaseRequest::kReloadSegments), collection_name_(collection_name), segment_ids_(segment_ids) {
 }
 
 BaseRequestPtr
-ReLoadSegments::Create(const std::shared_ptr<milvus::server::Context> &context, const std::string &collection_name, const std::vector<std::string>& segment_names) {
-    return std::shared_ptr<BaseRequest>(new ReLoadSegments(context, collection_name, segment_names));
+ReLoadSegments::Create(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name,
+                       const std::vector<int64_t>& segment_ids) {
+    return std::shared_ptr<BaseRequest>(new ReLoadSegments(context, collection_name, segment_ids));
 }
 
 Status
 ReLoadSegments::OnExecute() {
+    auto& config = Config::GetInstance();
+
+    std::string deploy_mode;
+    auto status = config.GetServerConfigDeployMode(deploy_mode);
+    if (!status.ok()) {
+        return status;
+    }
+
+    if (deploy_mode == "single" || deploy_mode == "cluster_writable") {
+        // TODO: No need to reload segment files
+        return Status(SERVER_SUCCESS, "");
+    }
+
+    try {
+        std::string hdr = "ReloadSegmentsRequest(collection=" + collection_name_ + ")";
+        TimeRecorderAuto rc(hdr);
+
+        // step 1: check arguments
+        auto status = ValidationUtil::ValidateCollectionName(collection_name_);
+        if (!status.ok()) {
+            return status;
+        }
+
+        return DBWrapper::DB()->ReLoadSegmentsDelDocs(collection_name_, segment_ids_);
+    } catch (std::exception& exp) {
+        return Status(SERVER_UNEXPECTED_ERROR, exp.what());
+    }
+
     return Status::OK();
 }
 

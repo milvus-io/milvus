@@ -115,6 +115,59 @@ MemTable::Delete(const std::vector<segment::doc_id_t>& doc_ids) {
     return Status::OK();
 }
 
+Status
+MemTable::UpdateDeletedDocs(const std::vector<int64_t>& segment_ids) {
+    //    std::vector<int> file_types{meta::SegmentSchema::FILE_TYPE::RAW, meta::SegmentSchema::FILE_TYPE::TO_INDEX,
+    //                                meta::SegmentSchema::FILE_TYPE::BACKUP};
+    auto status = Status::OK();
+
+    meta::FilesHolder files_holder;
+    std::vector<size_t> file_ids;
+    for (auto& id : segment_ids) {
+        file_ids.emplace_back(id);
+    }
+
+    status = meta_->FilesByID(file_ids, files_holder);
+    if (!status.ok()) {
+        std::string err_msg = "Failed get file holders by ids: " + status.ToString();
+        LOG_ENGINE_ERROR_ << err_msg;
+        return Status(DB_ERROR, err_msg);
+    }
+
+    milvus::engine::meta::SegmentsSchema hold_files = files_holder.HoldFiles();
+
+    for (auto& file : hold_files) {
+        std::string segment_dir;
+        utils::GetParentPath(file.location_, segment_dir);
+
+        segment::SegmentReader segment_reader(segment_dir);
+
+        segment::DeletedDocsPtr delete_docs = std::make_shared<segment::DeletedDocs>();
+        segment_reader.LoadDeletedDocs(delete_docs);
+        auto& docs_offsets = delete_docs->GetDeletedDocs();
+
+        auto data_obj_ptr = cache::CpuCacheMgr::GetInstance()->GetIndex(file.location_);
+        auto index = std::static_pointer_cast<knowhere::VecIndex>(data_obj_ptr);
+
+        if (nullptr == index) {
+            continue;
+        }
+
+        faiss::ConcurrentBitsetPtr blacklist = index->GetBlacklist();
+        if (nullptr == blacklist) {
+            continue;
+        }
+
+        for (auto& i : docs_offsets) {
+            if (!blacklist->test(i)) {
+                blacklist->set(i);
+            }
+        }
+    }
+
+    return Status::OK();
+}
+
 void
 MemTable::GetCurrentMemTableFile(MemTableFilePtr& mem_table_file) {
     mem_table_file = mem_table_file_list_.back();

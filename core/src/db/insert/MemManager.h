@@ -47,6 +47,9 @@ class MemManager {
     DeleteVectors(const std::string& collection_id, int64_t length, const IDNumber* vector_ids, uint64_t lsn) = 0;
 
     virtual Status
+    ReloadDeletedDocs(const std::string& collection_id, std::vector<int64_t> segment_ids) = 0;
+
+    virtual Status
     Flush(const std::string& collection_id, bool apply_delete = true) = 0;
 
     virtual Status

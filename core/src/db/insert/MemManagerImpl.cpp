@@ -172,6 +172,17 @@ MemManagerImpl::DeleteVectors(const std::string& collection_id, int64_t length, 
 }
 
 Status
+MemManagerImpl::ReloadDeletedDocs(const std::string& collection_id, std::vector<int64_t> segment_ids) {
+    std::unique_lock<std::mutex> lock(mutex_);
+
+    //    meta_->Fi
+    // TODO: Change table to collection
+    MemTablePtr mem = GetMemByTable(collection_id);
+    mem->UpdateDeletedDocs(segment_ids);
+    //
+}
+
+Status
 MemManagerImpl::Flush(const std::string& collection_id, bool apply_delete) {
     ToImmutable(collection_id);
     // TODO: There is actually only one memTable in the immutable list

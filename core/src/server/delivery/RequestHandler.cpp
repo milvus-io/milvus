@@ -196,8 +196,9 @@ RequestHandler::PreloadCollection(const std::shared_ptr<Context>& context, const
 }
 
 Status
-RequestHandler::ReLoadSegments(const std::shared_ptr<Context>& context, const std::string& collection_name, const std::vector<std::string>& segment_name) {
-    BaseRequestPtr request_ptr = ReLoadSegments::Create(context, collection_name, segment_name);
+RequestHandler::ReLoadSegments(const std::shared_ptr<Context>& context, const std::string& collection_name,
+                               const std::vector<int64_t>& segment_ids) {
+    BaseRequestPtr request_ptr = ReLoadSegments::Create(context, collection_name, segment_ids);
     RequestScheduler::ExecRequest(request_ptr);
 
     return request_ptr->status();

@@ -44,6 +44,9 @@ class MemTable : public server::CacheConfigHandler {
     Status
     Delete(const std::vector<segment::doc_id_t>& doc_ids);
 
+    Status
+    UpdateDeletedDocs(const std::vector<int64_t>& segment_ids);
+
     void
     GetCurrentMemTableFile(MemTableFilePtr& mem_table_file);
 
