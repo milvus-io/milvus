@@ -127,9 +127,13 @@ class SoftDeleteCollectionOperation : public Operations {
     using BaseT = Operations;
     // TODO: Define error code and msg later
     explicit SoftDeleteCollectionOperation(const OperationContext& context)
-        : BaseT(context, ScopedSnapshotT()), status_(40005, "Operation Pending") {}
+        : BaseT(context, ScopedSnapshotT()), status_(40005, "Operation Pending") {
+    }
 
-    Status GetStatus() const { return status_; }
+    Status
+    GetStatus() const {
+        return status_;
+    }
     bool
     DoExecute(Store& store) override;
 

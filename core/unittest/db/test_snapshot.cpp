@@ -240,7 +240,7 @@ TEST_F(SnapshotTest, OperationTest) {
             ASSERT_TRUE(seg_file);
             auto prev_segment_commit = ss->GetSegmentCommit(seg_file->GetSegmentId());
             auto prev_segment_commit_mappings = prev_segment_commit->GetMappings();
-            ASSERT_TRUE(prev_segment_commit->ToString() != "");
+            ASSERT_NE(prev_segment_commit->ToString(), "");
 
             build_op->Push();
             ss = build_op->GetSnapshot();
@@ -272,7 +272,7 @@ TEST_F(SnapshotTest, OperationTest) {
             context.prev_partition = ss->GetResource<milvus::engine::snapshot::Partition>(1);
             auto op = std::make_shared<milvus::engine::snapshot::NewSegmentOperation>(context, ss);
             auto new_seg = op->CommitNewSegment();
-            ASSERT_TRUE(new_seg->ToString() != "");
+            ASSERT_NE(new_seg->ToString(), "");
             auto seg_file = op->CommitNewSegmentFile(sf_context);
             op->Push();
 
@@ -296,7 +296,7 @@ TEST_F(SnapshotTest, OperationTest) {
             auto prev_partition_commit = ss->GetPartitionCommitByPartitionId(partition_id);
             auto expect_null = ss->GetPartitionCommitByPartitionId(11111111);
             ASSERT_TRUE(!expect_null);
-            ASSERT_TRUE(prev_partition_commit->ToString() != "");
+            ASSERT_NE(prev_partition_commit->ToString(), "");
             auto op = std::make_shared<milvus::engine::snapshot::MergeOperation>(merge_ctx, ss);
             auto new_seg = op->CommitNewSegment();
             sf_context.segment_id = new_seg->GetID();

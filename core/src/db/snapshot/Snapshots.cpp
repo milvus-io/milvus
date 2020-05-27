@@ -27,14 +27,16 @@ Snapshots::Flush(ResourceT&&... resources) {
 Status
 Snapshots::DropCollection(ID_TYPE collection_id) {
     auto ss = GetSnapshot(collection_id);
-    if (!ss) return Status(40004, "Collection not found");
+    if (!ss)
+        return Status(40004, "Collection not found");
     return DoDropCollection(ss);
 }
 
 Status
 Snapshots::DropCollection(const std::string& name) {
     auto ss = GetSnapshot(name);
-    if (!ss) return Status(40004, "Collection not found");
+    if (!ss)
+        return Status(40004, "Collection not found");
     return DoDropCollection(ss);
 }
 
