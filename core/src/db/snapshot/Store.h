@@ -340,7 +340,9 @@ class Store {
             std::stringstream name;
             name << "c_" << std::get<Index<Collection::MapT, MockResourcesT>::value>(ids_) + 1;
 
-            auto c = CreateCollection(Collection(name.str()));
+            auto tc = Collection(name.str());
+            tc.Activate();
+            auto c = CreateCollection(std::move(tc));
             all_records.push_back(c);
 
             MappingT schema_c_m;

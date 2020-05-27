@@ -31,18 +31,19 @@ class SnapshotHolder {
     GetID() const {
         return collection_id_;
     }
-    bool
+    Status
     Add(ID_TYPE id);
 
     ScopedSnapshotT
     GetSnapshot(ID_TYPE id = 0, bool scoped = true);
 
-    void Terminate();
-
     bool
     SetGCHandler(GCHandler gc_handler) {
         gc_handler_ = gc_handler;
     }
+
+    bool
+    IsActive(Snapshot::Ptr& ss);
 
  private:
     CollectionCommitPtr
@@ -63,7 +64,6 @@ class SnapshotHolder {
     std::vector<Snapshot::Ptr> to_release_;
     size_t num_versions_ = 1;
     GCHandler gc_handler_;
-    std::atomic<bool> done_;
 };
 
 using SnapshotHolderPtr = std::shared_ptr<SnapshotHolder>;
