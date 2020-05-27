@@ -509,6 +509,23 @@ GrpcClient::InsertEntities(milvus::grpc::HInsertParam& entities, milvus::grpc::H
 }
 
 Status
+GrpcClient::HybridSearchPB(milvus::grpc::HSearchParamPB& search_param, milvus::grpc::HQueryResult& result) {
+    ClientContext context;
+    ::grpc::Status grpc_status = stub_->HybridSearchPB(&context, search_param, &result);
+
+    if (!grpc_status.ok()) {
+        std::cerr << "HybridSearchPB gRPC failed!" << std::endl;
+        return Status(StatusCode::RPCFailed, grpc_status.error_message());
+    }
+
+    if (result.status().error_code() != grpc::SUCCESS) {
+        std::cerr << result.status().reason() << std::endl;
+        return Status(StatusCode::ServerFailed, result.status().reason());
+    }
+    return Status::OK();
+}
+
+Status
 GrpcClient::HybridSearch(milvus::grpc::HSearchParam& search_param, milvus::grpc::HQueryResult& result) {
     ClientContext context;
     ::grpc::Status grpc_status = stub_->HybridSearch(&context, search_param, &result);
