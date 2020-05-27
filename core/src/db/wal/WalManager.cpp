@@ -260,8 +260,10 @@ WalManager::GetNextRecord(MXLogRecord& record) {
         }
     }
 
-    LOG_WAL_INFO_ << "record type " << (int32_t)record.type << " collection " << record.collection_id << " lsn "
-                  << record.lsn;
+    if (record.type != MXLogType::None) {
+        LOG_WAL_INFO_ << "record type " << (int32_t)record.type << " collection " << record.collection_id << " lsn "
+                      << record.lsn;
+    }
     return error_code;
 }
 
