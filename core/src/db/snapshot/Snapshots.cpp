@@ -64,24 +64,6 @@ Snapshots::GetCollectionIds() const {
     return ids;
 }
 
-bool
-Snapshots::Close(ID_TYPE collection_id) {
-    auto ss = GetSnapshot(collection_id);
-    if (!ss)
-        return false;
-    auto name = ss->GetName();
-    std::unique_lock<std::shared_timed_mutex> lock(mutex_);
-    holders_.erase(collection_id);
-    name_id_map_.erase(name);
-    return true;
-}
-
-/* SnapshotHolderPtr */
-/* Snapshots::Load(ID_TYPE collection_id) { */
-/*     std::unique_lock<std::shared_timed_mutex> lock(mutex_); */
-/*     return LoadNoLock(collection_id); */
-/* } */
-
 SnapshotHolderPtr
 Snapshots::LoadNoLock(ID_TYPE collection_id) {
     auto op = std::make_shared<GetSnapshotIDsOperation>(collection_id, false);

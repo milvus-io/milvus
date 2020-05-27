@@ -32,8 +32,6 @@ class Snapshots {
         static Snapshots sss;
         return sss;
     }
-    bool
-    Close(ID_TYPE collection_id);
     SnapshotHolderPtr
     GetHolder(ID_TYPE collection_id);
     SnapshotHolderPtr

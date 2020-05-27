@@ -132,8 +132,12 @@ TEST_F(SnapshotTest, ResourceHoldersTest) {
 }
 
 TEST_F(SnapshotTest, CreateCollectionOperationTest) {
+    auto expect_null = milvus::engine::snapshot::Snapshots::GetInstance().GetSnapshot(100000);
+    ASSERT_TRUE(!expect_null);
+
+    std::string collection_name = "test_c1";
     milvus::engine::snapshot::CreateCollectionContext context;
-    auto collection_schema = std::make_shared<milvus::engine::snapshot::Collection>("test_c1");
+    auto collection_schema = std::make_shared<milvus::engine::snapshot::Collection>(collection_name);
     context.collection = collection_schema;
     auto vector_field = std::make_shared<milvus::engine::snapshot::Field>("vector", 0);
     auto vector_field_element = std::make_shared<milvus::engine::snapshot::FieldElement>(0, 0, "ivfsq8",
@@ -145,6 +149,13 @@ TEST_F(SnapshotTest, CreateCollectionOperationTest) {
     auto op = std::make_shared<milvus::engine::snapshot::CreateCollectionOperation>(context);
     op->Push();
     auto ss = op->GetSnapshot();
+
+    auto latest_ss = milvus::engine::snapshot::Snapshots::GetInstance().GetSnapshot("xxxx");
+    ASSERT_TRUE(!latest_ss);
+
+    latest_ss = milvus::engine::snapshot::Snapshots::GetInstance().GetSnapshot(collection_name);
+    ASSERT_TRUE(latest_ss);
+    ASSERT_TRUE(latest_ss->GetName() == collection_name);
 }
 
 TEST_F(SnapshotTest, OperationTest) {
