@@ -169,6 +169,8 @@ TEST_F(SnapshotTest, CreateCollectionOperationTest) {
     ASSERT_TRUE(sd_op->GetStatus().ok());
     ASSERT_TRUE(!sd_op_ctx.collection->IsActive());
     ASSERT_TRUE(!latest_ss->GetCollection()->IsActive());
+
+    milvus::engine::snapshot::Snapshots::GetInstance().Reset();
 }
 
 TEST_F(SnapshotTest, OperationTest) {
@@ -282,4 +284,5 @@ TEST_F(SnapshotTest, OperationTest) {
             milvus::engine::snapshot::CollectionCommitsHolder::GetInstance().Dump();
         }
     }
+    milvus::engine::snapshot::Snapshots::GetInstance().Reset();
 }

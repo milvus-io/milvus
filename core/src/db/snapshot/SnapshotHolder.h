@@ -45,6 +45,8 @@ class SnapshotHolder {
     bool
     IsActive(Snapshot::Ptr& ss);
 
+    ~SnapshotHolder();
+
  private:
     CollectionCommitPtr
     LoadNoLock(ID_TYPE collection_commit_id);

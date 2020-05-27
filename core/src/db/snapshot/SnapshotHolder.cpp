@@ -21,6 +21,20 @@ SnapshotHolder::SnapshotHolder(ID_TYPE collection_id, GCHandler gc_handler, size
     : collection_id_(collection_id), num_versions_(num_versions), gc_handler_(gc_handler) {
 }
 
+SnapshotHolder::~SnapshotHolder() {
+    bool release = false;
+    for (auto& ss_kv : active_) {
+        if (!ss_kv.second->GetCollection()->IsActive()) {
+            ReadyForRelease(ss_kv.second);
+            release = true;
+        }
+    }
+
+    if (release) {
+        active_.clear();
+    }
+}
+
 ScopedSnapshotT
 SnapshotHolder::GetSnapshot(ID_TYPE id, bool scoped) {
     if (id > max_id_) {
