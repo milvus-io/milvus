@@ -311,23 +311,17 @@ class Store {
         });
         register_any_visitor<CollectionCommit::Ptr>(
             [this](auto c) { return CreateResource<CollectionCommit>(CollectionCommit(*c))->GetID(); });
-        register_any_visitor<SchemaCommit::Ptr>([this](auto c) {
-            return CreateResource<SchemaCommit>(SchemaCommit(*c))->GetID();
-        });
-        register_any_visitor<FieldCommit::Ptr>([this](auto c) {
-            return CreateResource<FieldCommit>(FieldCommit(*c))->GetID();
-        });
-        register_any_visitor<Field::Ptr>([this](auto c) {
-            return CreateResource<Field>(Field(*c))->GetID();
-        });
-        register_any_visitor<FieldElement::Ptr>([this](auto c) {
-            return CreateResource<FieldElement>(FieldElement(*c))->GetID();
-        });
+        register_any_visitor<SchemaCommit::Ptr>(
+            [this](auto c) { return CreateResource<SchemaCommit>(SchemaCommit(*c))->GetID(); });
+        register_any_visitor<FieldCommit::Ptr>(
+            [this](auto c) { return CreateResource<FieldCommit>(FieldCommit(*c))->GetID(); });
+        register_any_visitor<Field::Ptr>([this](auto c) { return CreateResource<Field>(Field(*c))->GetID(); });
+        register_any_visitor<FieldElement::Ptr>(
+            [this](auto c) { return CreateResource<FieldElement>(FieldElement(*c))->GetID(); });
         register_any_visitor<PartitionCommit::Ptr>(
             [this](auto c) { return CreateResource<PartitionCommit>(PartitionCommit(*c))->GetID(); });
-        register_any_visitor<Partition::Ptr>([this](auto c) {
-            return CreateResource<Partition>(Partition(*c))->GetID();
-        });
+        register_any_visitor<Partition::Ptr>(
+            [this](auto c) { return CreateResource<Partition>(Partition(*c))->GetID(); });
         register_any_visitor<Segment::Ptr>([this](auto c) { return CreateResource<Segment>(Segment(*c))->GetID(); });
         register_any_visitor<SegmentCommit::Ptr>(
             [this](auto c) { return CreateResource<SegmentCommit>(SegmentCommit(*c))->GetID(); });
@@ -424,7 +418,6 @@ class Store {
             }
         }
     }
-
 
     MockResourcesT resources_;
     MockIDST ids_;

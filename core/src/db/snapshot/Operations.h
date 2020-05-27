@@ -114,7 +114,8 @@ template <typename StepT>
 void
 Operations::AddStep(const StepT& step, bool activate) {
     auto s = std::make_shared<StepT>(step);
-    if (activate) s->Activate();
+    if (activate)
+        s->Activate();
     steps_.push_back(s);
 }
 

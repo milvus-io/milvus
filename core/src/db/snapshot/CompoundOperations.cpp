@@ -283,18 +283,18 @@ CreateCollectionOperation::DoExecute(Store& store) {
         auto field = store.CreateResource<Field>(Field(field_schema->GetName(), field_idx));
         AddStep(*field);
         MappingT element_ids = {};
-        auto raw_element = store.CreateResource<FieldElement>(FieldElement(collection->GetID(), field->GetID(),
-                    "RAW", FieldElementType::RAW));
+        auto raw_element = store.CreateResource<FieldElement>(
+            FieldElement(collection->GetID(), field->GetID(), "RAW", FieldElementType::RAW));
         AddStep(*raw_element);
         element_ids.insert(raw_element->GetID());
         for (auto& element_schema : field_elements) {
-            auto element = store.CreateResource<FieldElement>(FieldElement(collection->GetID(), field->GetID(),
-                        element_schema->GetName(), element_schema->GetFtype()));
+            auto element = store.CreateResource<FieldElement>(FieldElement(
+                collection->GetID(), field->GetID(), element_schema->GetName(), element_schema->GetFtype()));
             AddStep(*element);
             element_ids.insert(element->GetID());
         }
-        auto field_commit = store.CreateResource<FieldCommit>(FieldCommit(collection->GetID(), field->GetID(),
-                    element_ids));
+        auto field_commit =
+            store.CreateResource<FieldCommit>(FieldCommit(collection->GetID(), field->GetID(), element_ids));
         AddStep(*field_commit);
         field_commit_ids.insert(field_commit->GetID());
     }
@@ -302,11 +302,11 @@ CreateCollectionOperation::DoExecute(Store& store) {
     AddStep(*schema_commit);
     auto partition = store.CreateResource<Partition>(Partition("_default", collection->GetID()));
     AddStep(*partition);
-    auto partition_commit = store.CreateResource<PartitionCommit>(PartitionCommit(collection->GetID(),
-                partition->GetID()));
+    auto partition_commit =
+        store.CreateResource<PartitionCommit>(PartitionCommit(collection->GetID(), partition->GetID()));
     AddStep(*partition_commit);
-    auto collection_commit = store.CreateResource<CollectionCommit>(CollectionCommit(collection->GetID(), schema_commit->GetID(),
-                {partition_commit->GetID()}));
+    auto collection_commit = store.CreateResource<CollectionCommit>(
+        CollectionCommit(collection->GetID(), schema_commit->GetID(), {partition_commit->GetID()}));
     AddStep(*collection_commit);
     context_.collection_commit = collection_commit;
     return true;
@@ -316,7 +316,8 @@ ScopedSnapshotT
 CreateCollectionOperation::GetSnapshot() const {
     if (ids_.size() == 0)
         return ScopedSnapshotT();
-    if (!context_.collection_commit) return ScopedSnapshotT();
+    if (!context_.collection_commit)
+        return ScopedSnapshotT();
     return Snapshots::GetInstance().GetSnapshot(context_.collection_commit->GetCollectionId());
 }
 

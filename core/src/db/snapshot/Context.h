@@ -12,10 +12,11 @@
 #pragma once
 
 #include <iostream>
+#include <map>
 #include <string>
 #include <vector>
-#include "db/snapshot/Resources.h"
 #include "db/meta/MetaTypes.h"
+#include "db/snapshot/Resources.h"
 
 namespace milvus {
 namespace engine {
