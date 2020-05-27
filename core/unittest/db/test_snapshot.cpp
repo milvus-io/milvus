@@ -29,7 +29,6 @@
 #include "db/snapshot/Snapshots.h"
 
 
-#if 1
 TEST_F(SnapshotTest, ReferenceProxyTest) {
     std::string status("raw");
     const std::string CALLED = "CALLED";
@@ -161,6 +160,15 @@ TEST_F(SnapshotTest, CreateCollectionOperationTest) {
     auto ids = milvus::engine::snapshot::Snapshots::GetInstance().GetCollectionIds();
     ASSERT_EQ(ids.size(), 1);
     ASSERT_EQ(ids[0], latest_ss->GetCollectionId());
+
+    milvus::engine::snapshot::OperationContext sd_op_ctx;
+    sd_op_ctx.collection = latest_ss->GetCollection();
+    ASSERT_TRUE(sd_op_ctx.collection->IsActive());
+    auto sd_op = std::make_shared<milvus::engine::snapshot::SoftDeleteCollectionOperation>(sd_op_ctx);
+    sd_op->Push();
+    ASSERT_TRUE(sd_op->Success());
+    ASSERT_TRUE(!sd_op_ctx.collection->IsActive());
+    ASSERT_TRUE(!latest_ss->GetCollection()->IsActive());
 }
 
 TEST_F(SnapshotTest, OperationTest) {
@@ -275,4 +283,3 @@ TEST_F(SnapshotTest, OperationTest) {
         }
     }
 }
-#endif

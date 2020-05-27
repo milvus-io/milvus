@@ -37,6 +37,8 @@ class SnapshotHolder {
     ScopedSnapshotT
     GetSnapshot(ID_TYPE id = 0, bool scoped = true);
 
+    void Terminate();
+
     bool
     SetGCHandler(GCHandler gc_handler) {
         gc_handler_ = gc_handler;

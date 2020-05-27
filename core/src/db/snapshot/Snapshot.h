@@ -54,6 +54,11 @@ class Snapshot : public ReferenceProxy {
         return it->first;
     }
 
+    CollectionPtr
+    GetCollection() {
+        return GetResources<Collection>().begin()->second.Get();
+    }
+
     const std::string&
     GetName() const {
         return GetResources<Collection>().begin()->second->GetName();

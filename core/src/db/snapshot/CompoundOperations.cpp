@@ -321,6 +321,15 @@ CreateCollectionOperation::GetSnapshot() const {
     return Snapshots::GetInstance().GetSnapshot(context_.collection_commit->GetCollectionId());
 }
 
+bool
+SoftDeleteCollectionOperation::DoExecute(Store& store) {
+    if (!context_.collection) return false;
+    context_.collection->Deactivate();
+    AddStep(*context_.collection);
+    success_ = true;
+    return true;
+}
+
 }  // namespace snapshot
 }  // namespace engine
 }  // namespace milvus

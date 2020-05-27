@@ -64,13 +64,12 @@ SnapshotHolder::Add(ID_TYPE id) {
     {
         auto ss = std::make_shared<Snapshot>(id);
 
+        std::unique_lock<std::mutex> lock(mutex_);
         if (done_) {
             return false;
         }
         ss->RegisterOnNoRefCB(std::bind(&Snapshot::UnRefAll, ss));
         ss->Ref();
-
-        std::unique_lock<std::mutex> lock(mutex_);
 
         if (min_id_ > id) {
             min_id_ = id;
@@ -91,6 +90,18 @@ SnapshotHolder::Add(ID_TYPE id) {
     }
     ReadyForRelease(oldest_ss);  // TODO: Use different mutex
     return true;
+}
+
+void
+SnapshotHolder::Terminate() {
+    /* if (done_) { */
+    /*     return; */
+    /* } */
+    /* std::unique_lock<std::mutex> lock(mutex_); */
+    /* for (auto& snapshot : active_) { */
+    /*     ReadyForRelease(snapshot); */
+    /* } */
+    /* active_.clear(); */
 }
 
 CollectionCommitPtr

@@ -54,6 +54,7 @@ struct OperationContext {
     CollectionCommitPtr prev_collection_commit = nullptr;
 
     SegmentFile::VecT new_segment_files;
+    CollectionPtr collection = nullptr;
 };
 
 struct CreateCollectionContext {

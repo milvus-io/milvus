@@ -28,7 +28,7 @@ bool
 Snapshots::DropCollection(const std::string& name) {
     std::map<std::string, ID_TYPE>::iterator it;
     {
-        std::shared_lock<std::shared_timed_mutex> lock(mutex_);
+        std::unique_lock<std::shared_timed_mutex> lock(mutex_);
         it = name_id_map_.find(name);
         if (it == name_id_map_.end()) {
             return false;

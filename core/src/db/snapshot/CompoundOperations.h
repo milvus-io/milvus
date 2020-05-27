@@ -122,6 +122,21 @@ class GetCollectionIDsOperation : public Operations {
     IDS_TYPE ids_;
 };
 
+class SoftDeleteCollectionOperation : public Operations {
+ public:
+    using BaseT = Operations;
+    explicit SoftDeleteCollectionOperation(const OperationContext& context)
+        : BaseT(context, ScopedSnapshotT()), success_(false) {}
+
+    bool Success() const { return success_; }
+    bool
+    DoExecute(Store& store) override;
+
+ private:
+    ID_TYPE collection_id_;
+    bool success_;
+};
+
 }  // namespace snapshot
 }  // namespace engine
 }  // namespace milvus
