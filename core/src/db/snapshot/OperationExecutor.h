@@ -22,17 +22,8 @@ namespace engine {
 namespace snapshot {
 
 using ThreadPtr = std::shared_ptr<std::thread>;
-using OperationQueueT = server::BlockingQueue<OperationsPtr>;
-using OperationQueuePtr = std::shared_ptr<OperationQueueT>;
-
-struct Executor {
-    Executor(ThreadPtr t, OperationQueuePtr q) : execute_thread(t), execute_queue(q) {
-    }
-    ThreadPtr execute_thread;
-    OperationQueuePtr execute_queue;
-};
-
-using ExecutorPtr = std::shared_ptr<Executor>;
+using OperationQueue = server::BlockingQueue<OperationsPtr>;
+using OperationQueuePtr = std::shared_ptr<OperationQueue>;
 
 class OperationExecutor {
  public:
@@ -58,14 +49,16 @@ class OperationExecutor {
     OperationExecutor();
 
     void
-    ThreadMain(OperationQueuePtr queue);
+    ThreadMain();
 
     void
     Enqueue(OperationsPtr operation);
 
+ protected:
     mutable std::mutex mtx_;
-    bool stopped_ = false;
-    ExecutorPtr executor_;
+    bool running_ = false;
+    std::thread thread_;
+    OperationQueue queue_;
 };
 
 }  // namespace snapshot

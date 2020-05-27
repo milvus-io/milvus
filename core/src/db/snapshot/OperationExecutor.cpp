@@ -43,40 +43,32 @@ OperationExecutor::Submit(OperationsPtr operation, bool sync) {
 
 void
 OperationExecutor::Start() {
-    if (executor_)
-        return;
-    auto queue = std::make_shared<OperationQueueT>();
-    auto t = std::make_shared<std::thread>(&OperationExecutor::ThreadMain, this, queue);
-    executor_ = std::make_shared<Executor>(t, queue);
-    stopped_ = false;
+    thread_ = std::thread(&OperationExecutor::ThreadMain, this);
+    running_ = true;
     /* std::cout << "OperationExecutor Started" << std::endl; */
 }
 
 void
 OperationExecutor::Stop() {
-    if (stopped_ || !executor_)
+    if (!running_)
         return;
 
-    executor_->execute_queue->Put(nullptr);
-    executor_->execute_thread->join();
-    stopped_ = true;
-    executor_ = nullptr;
+    Enqueue(nullptr);
+    thread_.join();
+    running_ = false;
     std::cout << "OperationExecutor Stopped" << std::endl;
 }
 
 void
 OperationExecutor::Enqueue(OperationsPtr operation) {
     /* std::cout << std::this_thread::get_id() << " Enqueue Operation " << operation->GetID() << std::endl; */
-    executor_->execute_queue->Put(operation);
+    queue_.Put(operation);
 }
 
 void
-OperationExecutor::ThreadMain(OperationQueuePtr queue) {
-    if (!queue)
-        return;
-
+OperationExecutor::ThreadMain() {
     while (true) {
-        OperationsPtr operation = queue->Take();
+        OperationsPtr operation = queue_.Take();
         if (!operation) {
             std::cout << "Stopping operation executor thread " << std::this_thread::get_id() << std::endl;
             break;
