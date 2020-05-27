@@ -125,6 +125,10 @@ class MySQLMetaImpl : public Meta {
                 FilesHolder& files_holder) override;
 
     Status
+    FilesByTypeEx(const std::vector<meta::CollectionSchema>& collections, const std::vector<int>& file_types,
+                  FilesHolder& files_holder) override;
+
+    Status
     FilesByID(const std::vector<size_t>& ids, FilesHolder& files_holder) override;
 
     Status

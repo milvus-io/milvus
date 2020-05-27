@@ -89,7 +89,7 @@ TEST_F(MetricTest, METRIC_TEST) {
 //        std::vector<std::string> tags;
 //        milvus::engine::ResultIds result_ids;
 //        milvus::engine::ResultDistances result_distances;
-        std::this_thread::sleep_for(std::chrono::seconds(2));
+        std::this_thread::sleep_for(std::chrono::seconds(1));
 
         INIT_TIMER;
         std::stringstream ss;
@@ -115,11 +115,11 @@ TEST_F(MetricTest, METRIC_TEST) {
 //                }
             }
             ASSERT_TRUE(count >= prev_count);
-            std::this_thread::sleep_for(std::chrono::seconds(1));
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
         }
     });
 
-    int loop = 10000;
+    int loop = 100;
 
     for (auto i = 0; i < loop; ++i) {
         if (i == 40) {
@@ -131,7 +131,7 @@ TEST_F(MetricTest, METRIC_TEST) {
             db_->InsertVectors(group_name, "", xb);
             ASSERT_EQ(xb.id_array_.size(), nb);
         }
-        std::this_thread::sleep_for(std::chrono::microseconds(2000));
+        std::this_thread::sleep_for(std::chrono::milliseconds(20));
     }
 
     search.join();

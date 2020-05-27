@@ -287,7 +287,7 @@ TEST_F(DeleteTest, delete_before_create_index) {
     ASSERT_TRUE(stat.ok());
     ASSERT_EQ(collection_info_get.dimension_, COLLECTION_DIM);
 
-    int64_t nb = 10000;
+    int64_t nb = 5000;
     milvus::engine::VectorsData xb;
     BuildVectors(nb, xb);
 
@@ -369,7 +369,7 @@ TEST_F(DeleteTest, delete_with_index) {
     ASSERT_TRUE(stat.ok());
     ASSERT_EQ(collection_info_get.dimension_, COLLECTION_DIM);
 
-    int64_t nb = 10000;
+    int64_t nb = 5000;
     milvus::engine::VectorsData xb;
     BuildVectors(nb, xb);
 
@@ -451,7 +451,7 @@ TEST_F(DeleteTest, delete_multiple_times_with_index) {
     ASSERT_TRUE(stat.ok());
     ASSERT_EQ(collection_info_get.dimension_, COLLECTION_DIM);
 
-    int64_t nb = 100000;
+    int64_t nb = 5000;
     milvus::engine::VectorsData xb;
     BuildVectors(nb, xb);
 
@@ -749,7 +749,7 @@ TEST_F(CompactTest, compact_basic) {
     ASSERT_TRUE(stat.ok());
     ASSERT_EQ(row_count, nb - 2);
 
-    stat = db_->Compact(collection_info.collection_id_);
+    stat = db_->Compact(dummy_context_, collection_info.collection_id_);
     ASSERT_TRUE(stat.ok());
 
     const int topk = 1, nprobe = 1;
@@ -834,7 +834,7 @@ TEST_F(CompactTest, compact_with_index) {
     ASSERT_TRUE(stat.ok());
     ASSERT_EQ(row_count, nb - ids_to_delete.size());
 
-    stat = db_->Compact(collection_info.collection_id_);
+    stat = db_->Compact(dummy_context_, collection_info.collection_id_);
     ASSERT_TRUE(stat.ok());
 
     stat = db_->GetCollectionRowCount(collection_info.collection_id_, row_count);
@@ -864,6 +864,6 @@ TEST_F(CompactTest, compact_with_index) {
 }
 
 TEST_F(CompactTest, compact_non_existing_table) {
-    auto status = db_->Compact("non_existing_table");
+    auto status = db_->Compact(dummy_context_, "non_existing_table");
     ASSERT_FALSE(status.ok());
 }

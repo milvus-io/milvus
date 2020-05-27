@@ -318,20 +318,15 @@ TEST_F(MemManagerTest2, INSERT_TEST) {
     ASSERT_TRUE(stat.ok());
     ASSERT_EQ(collection_info_get.dimension_, COLLECTION_DIM);
 
-    auto start_time = METRICS_NOW_TIME;
-
-    int insert_loop = 20;
+    int insert_loop = 10;
     for (int i = 0; i < insert_loop; ++i) {
-        int64_t nb = 40960;
+        int64_t nb = 4096;
         milvus::engine::VectorsData xb;
         BuildVectors(nb, xb);
         milvus::engine::IDNumbers vector_ids;
         stat = db_->InsertVectors(GetCollectionName(), "", xb);
         ASSERT_TRUE(stat.ok());
     }
-    auto end_time = METRICS_NOW_TIME;
-    auto total_time = METRICS_MICROSECONDS(start_time, end_time);
-    LOG(DEBUG) << "total_time spent in INSERT_TEST (ms) : " << total_time;
 }
 
 TEST_F(MemManagerTest2, INSERT_BINARY_TEST) {
