@@ -139,6 +139,10 @@ class Meta {
     FilesByType(const std::string& collection_id, const std::vector<int>& file_types, FilesHolder& files_holder) = 0;
 
     virtual Status
+    FilesByTypeEx(const std::vector<meta::CollectionSchema>& collections, const std::vector<int>& file_types,
+                  FilesHolder& files_holder) = 0;
+
+    virtual Status
     FilesByID(const std::vector<size_t>& ids, FilesHolder& files_holder) = 0;
 
     virtual Status

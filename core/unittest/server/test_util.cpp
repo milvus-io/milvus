@@ -813,7 +813,7 @@ TEST(UtilTest, ROLLOUTHANDLER_TEST) {
 TEST(UtilTest, THREADPOOL_TEST) {
     auto thread_pool_ptr = std::make_unique<milvus::ThreadPool>(3);
     auto fun = [](int i) {
-        sleep(1);
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
     };
     for (int i = 0; i < 10; ++i) {
         thread_pool_ptr->enqueue(fun, i);
