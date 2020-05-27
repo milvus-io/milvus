@@ -1924,7 +1924,7 @@ MySQLMetaImpl::FilesToIndex(FilesHolder& files_holder) {
                       << " FROM " << META_TABLEFILES << " WHERE file_type = " << std::to_string(SegmentSchema::TO_INDEX)
                       << ";";
 
-            LOG_ENGINE_DEBUG_ << "FilesToIndex: " << statement.str();
+            //            LOG_ENGINE_DEBUG_ << "FilesToIndex: " << statement.str();
 
             res = statement.store();
         }  // Scoped Connection
@@ -2564,7 +2564,7 @@ MySQLMetaImpl::CleanUpFilesWithTTL(uint64_t seconds /*, CleanUpFilter* filter*/)
                           << ")"
                           << " AND updated_time < " << std::to_string(now - seconds * US_PS) << ";";
 
-                LOG_ENGINE_DEBUG_ << "CleanUpFilesWithTTL: " << statement.str();
+                //                LOG_ENGINE_DEBUG_ << "CleanUpFilesWithTTL: " << statement.str();
 
                 res = statement.store();
             }
@@ -2655,7 +2655,7 @@ MySQLMetaImpl::CleanUpFilesWithTTL(uint64_t seconds /*, CleanUpFilter* filter*/)
                       << " FROM " << META_TABLES << " WHERE state = " << std::to_string(CollectionSchema::TO_DELETE)
                       << ";";
 
-            LOG_ENGINE_DEBUG_ << "CleanUpFilesWithTTL: " << statement.str();
+            //            LOG_ENGINE_DEBUG_ << "CleanUpFilesWithTTL: " << statement.str();
 
             mysqlpp::StoreQueryResult res = statement.store();
 
@@ -2713,7 +2713,7 @@ MySQLMetaImpl::CleanUpFilesWithTTL(uint64_t seconds /*, CleanUpFilter* filter*/)
                           << " FROM " << META_TABLEFILES << " WHERE table_id = " << mysqlpp::quote << collection_id
                           << ";";
 
-                LOG_ENGINE_DEBUG_ << "CleanUpFilesWithTTL: " << statement.str();
+                //                LOG_ENGINE_DEBUG_ << "CleanUpFilesWithTTL: " << statement.str();
 
                 mysqlpp::StoreQueryResult res = statement.store();
 
