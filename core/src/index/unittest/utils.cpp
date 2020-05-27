@@ -161,6 +161,7 @@ AssertAnns(const milvus::knowhere::DatasetPtr& result, const int nq, const int k
     }
 }
 
+#if 0
 void
 AssertVec(const milvus::knowhere::DatasetPtr& result, const milvus::knowhere::DatasetPtr& base_dataset,
           const milvus::knowhere::DatasetPtr& id_dataset, const int n, const int dim, const CheckMode check_mode) {
@@ -206,6 +207,7 @@ AssertBinVec(const milvus::knowhere::DatasetPtr& result, const milvus::knowhere:
         }
     }
 }
+#endif
 
 void
 PrintResult(const milvus::knowhere::DatasetPtr& result, const int& nq, const int& k) {

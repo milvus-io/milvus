@@ -50,9 +50,16 @@ INSTANTIATE_TEST_CASE_P(AnnoyParameters, AnnoyTest, Values("Annoy"));
 TEST_P(AnnoyTest, annoy_basic) {
     assert(!xb.empty());
 
-    ASSERT_ANY_THROW(index_->Train(base_dataset, conf));
-    ASSERT_ANY_THROW(index_->Add(base_dataset, conf));
-    ASSERT_ANY_THROW(index_->AddWithoutIds(base_dataset, conf));
+    // null faiss index
+    {
+        ASSERT_ANY_THROW(index_->Train(base_dataset, conf));
+        ASSERT_ANY_THROW(index_->Query(query_dataset, conf));
+        ASSERT_ANY_THROW(index_->Serialize(conf));
+        ASSERT_ANY_THROW(index_->Add(base_dataset, conf));
+        ASSERT_ANY_THROW(index_->AddWithoutIds(base_dataset, conf));
+        ASSERT_ANY_THROW(index_->Count());
+        ASSERT_ANY_THROW(index_->Dim());
+    }
 
     index_->BuildAll(base_dataset, conf);  // Train + Add
     ASSERT_EQ(index_->Count(), nb);

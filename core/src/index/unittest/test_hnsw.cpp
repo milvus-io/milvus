@@ -53,6 +53,8 @@ TEST_P(HNSWTest, HNSW_basic) {
         ASSERT_ANY_THROW(index_->Query(query_dataset, conf));
         ASSERT_ANY_THROW(index_->Add(nullptr, conf));
         ASSERT_ANY_THROW(index_->AddWithoutIds(nullptr, conf));
+        ASSERT_ANY_THROW(index_->Count());
+        ASSERT_ANY_THROW(index_->Dim());
     }
 
     index_->Train(base_dataset, conf);
