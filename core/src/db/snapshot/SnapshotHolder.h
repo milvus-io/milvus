@@ -34,22 +34,8 @@ class SnapshotHolder {
     bool
     Add(ID_TYPE id);
 
-    void
-    BackgroundGC();
-
-    void
-    NotifyDone();
-
     ScopedSnapshotT
     GetSnapshot(ID_TYPE id = 0, bool scoped = true);
-
-    void
-    GCHandlerTestCallBack(Snapshot::Ptr ss) {
-        std::unique_lock<std::mutex> lock(gcmutex_);
-        to_release_.push_back(ss);
-        lock.unlock();
-        cv_.notify_one();
-    }
 
     bool
     SetGCHandler(GCHandler gc_handler) {
@@ -68,8 +54,6 @@ class SnapshotHolder {
     }
 
     std::mutex mutex_;
-    std::mutex gcmutex_;
-    std::condition_variable cv_;
     ID_TYPE collection_id_;
     ID_TYPE min_id_ = std::numeric_limits<ID_TYPE>::max();
     ID_TYPE max_id_ = std::numeric_limits<ID_TYPE>::min();
