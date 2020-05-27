@@ -142,6 +142,7 @@ IVF::Query(const DatasetPtr& dataset_ptr, const Config& config) {
     }
 }
 
+#if 0
 DatasetPtr
 IVF::QueryById(const DatasetPtr& dataset_ptr, const Config& config) {
     if (!index_ || !index_->is_trained) {
@@ -214,6 +215,7 @@ IVF::GetVectorById(const DatasetPtr& dataset_ptr, const Config& config) {
         KNOWHERE_THROW_MSG(e.what());
     }
 }
+#endif
 
 void
 IVF::Seal() {

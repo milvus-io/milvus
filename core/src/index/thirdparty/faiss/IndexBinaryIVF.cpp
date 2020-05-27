@@ -157,6 +157,7 @@ void IndexBinaryIVF::search(idx_t n, const uint8_t *x, idx_t k,
   indexIVF_stats.search_time += getmillisecs() - t0;
 }
 
+#if 0
 void IndexBinaryIVF::get_vector_by_id(idx_t n, const idx_t *xid, uint8_t *x, ConcurrentBitsetPtr bitset) {
     make_direct_map(true);
 
@@ -181,6 +182,7 @@ void IndexBinaryIVF::search_by_id (idx_t n, const idx_t *xid, idx_t k, int32_t *
     search(n, x, k, distances, labels, bitset);
     delete []x;
 }
+#endif
 
 void IndexBinaryIVF::reconstruct(idx_t key, uint8_t *recons) const {
     idx_t lo = direct_map.get (key);

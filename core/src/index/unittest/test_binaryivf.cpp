@@ -77,11 +77,13 @@ TEST_P(BinaryIVFTest, binaryivf_basic) {
     auto result2 = index_->Query(query_dataset, conf);
     AssertAnns(result2, nq, k, CheckMode::CHECK_NOT_EQUAL);
 
+#if 0
     auto result3 = index_->QueryById(id_dataset, conf);
     AssertAnns(result3, nq, k, CheckMode::CHECK_NOT_EQUAL);
 
-    //    auto result4 = index_->GetVectorById(xid_dataset, conf);
-    //    AssertBinVeceq(result4, base_dataset, xid_dataset, nq, dim/8);
+    auto result4 = index_->GetVectorById(xid_dataset, conf);
+    AssertBinVeceq(result4, base_dataset, xid_dataset, nq, dim/8);
+#endif
 }
 
 TEST_P(BinaryIVFTest, binaryivf_serialize) {
@@ -93,28 +95,28 @@ TEST_P(BinaryIVFTest, binaryivf_serialize) {
         reader(ret, bin->size);
     };
 
-    //    {
-    //        // serialize index-model
-    //        auto model = index_->Train(base_dataset, conf);
-    //        auto binaryset = model->Serialize();
-    //        auto bin = binaryset.GetByName("BinaryIVF");
+    // {
+    //     // serialize index-model
+    //     auto model = index_->Train(base_dataset, conf);
+    //     auto binaryset = model->Serialize();
+    //     auto bin = binaryset.GetByName("BinaryIVF");
     //
-    //        std::string filename = "/tmp/binaryivf_test_model_serialize.bin";
-    //        auto load_data = new uint8_t[bin->size];
-    //        serialize(filename, bin, load_data);
+    //     std::string filename = "/tmp/binaryivf_test_model_serialize.bin";
+    //     auto load_data = new uint8_t[bin->size];
+    //     serialize(filename, bin, load_data);
     //
-    //        binaryset.clear();
-    //        auto data = std::make_shared<uint8_t>();
-    //        data.reset(load_data);
-    //        binaryset.Append("BinaryIVF", data, bin->size);
+    //     binaryset.clear();
+    //     auto data = std::make_shared<uint8_t>();
+    //     data.reset(load_data);
+    //     binaryset.Append("BinaryIVF", data, bin->size);
     //
-    //        model->Load(binaryset);
+    //     model->Load(binaryset);
     //
-    //        index_->set_index_model(model);
-    //        index_->Add(base_dataset, conf);
-    //        auto result = index_->Query(query_dataset, conf);
-    //        AssertAnns(result, nq, conf[milvus::knowhere::meta::TOPK]);
-    //    }
+    //     index_->set_index_model(model);
+    //     index_->Add(base_dataset, conf);
+    //     auto result = index_->Query(query_dataset, conf);
+    //     AssertAnns(result, nq, conf[milvus::knowhere::meta::TOPK]);
+    // }
 
     {
         // serialize index

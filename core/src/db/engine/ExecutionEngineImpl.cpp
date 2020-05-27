@@ -1212,6 +1212,7 @@ ExecutionEngineImpl::Search(int64_t n, const uint8_t* data, int64_t k, const mil
     return Status::OK();
 }
 
+#if 0
 Status
 ExecutionEngineImpl::GetVectorByID(const int64_t id, float* vector, bool hybrid) {
     if (index_ == nullptr) {
@@ -1263,6 +1264,7 @@ ExecutionEngineImpl::GetVectorByID(const int64_t id, uint8_t* vector, bool hybri
 
     return Status::OK();
 }
+#endif
 
 Status
 ExecutionEngineImpl::Cache() {

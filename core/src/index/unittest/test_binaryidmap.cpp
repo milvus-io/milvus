@@ -62,7 +62,7 @@ TEST_P(BinaryIDMAPTest, binaryidmap_basic) {
     auto binaryset = index_->Serialize();
     auto new_index = std::make_shared<milvus::knowhere::BinaryIDMAP>();
     new_index->Load(binaryset);
-    auto result2 = index_->Query(query_dataset, conf);
+    auto result2 = new_index->Query(query_dataset, conf);
     AssertAnns(result2, nq, k);
     // PrintResult(re_result, nq, k);
 
@@ -72,11 +72,11 @@ TEST_P(BinaryIDMAPTest, binaryidmap_basic) {
     }
     index_->SetBlacklist(concurrent_bitset_ptr);
 
-    auto result3 = index_->Query(query_dataset, conf);
-    AssertAnns(result3, nq, k, CheckMode::CHECK_NOT_EQUAL);
+    auto result_bs_1 = index_->Query(query_dataset, conf);
+    AssertAnns(result_bs_1, nq, k, CheckMode::CHECK_NOT_EQUAL);
 
-    //    auto result4 = index_->SearchById(id_dataset, conf);
-    //    AssertAneq(result4, nq, k);
+    // auto result4 = index_->SearchById(id_dataset, conf);
+    // AssertAneq(result4, nq, k);
 }
 
 TEST_P(BinaryIDMAPTest, binaryidmap_serialize) {
@@ -120,6 +120,6 @@ TEST_P(BinaryIDMAPTest, binaryidmap_serialize) {
         EXPECT_EQ(index_->Dim(), dim);
         auto result = index_->Query(query_dataset, conf);
         AssertAnns(result, nq, k);
-        //        PrintResult(result, nq, k);
+        // PrintResult(result, nq, k);
     }
 }

@@ -113,6 +113,7 @@ IDMAP::Query(const DatasetPtr& dataset_ptr, const Config& config) {
     return ret_ds;
 }
 
+#if 0
 DatasetPtr
 IDMAP::QueryById(const DatasetPtr& dataset_ptr, const Config& config) {
     if (!index_) {
@@ -139,6 +140,7 @@ IDMAP::QueryById(const DatasetPtr& dataset_ptr, const Config& config) {
     ret_ds->Set(meta::DISTANCE, p_dist);
     return ret_ds;
 }
+#endif
 
 VecIndexPtr
 IDMAP::CopyCpuToGpu(const int64_t device_id, const Config& config) {
@@ -179,6 +181,7 @@ IDMAP::GetRawIds() {
     }
 }
 
+#if 0
 DatasetPtr
 IDMAP::GetVectorById(const DatasetPtr& dataset_ptr, const Config& config) {
     if (!index_) {
@@ -198,6 +201,7 @@ IDMAP::GetVectorById(const DatasetPtr& dataset_ptr, const Config& config) {
     ret_ds->Set(meta::TENSOR, p_x);
     return ret_ds;
 }
+#endif
 
 void
 IDMAP::QueryImpl(int64_t n, const float* data, int64_t k, float* distances, int64_t* labels, const Config& config) {

@@ -36,6 +36,7 @@ void IndexBinary::add_with_ids(idx_t, const uint8_t *, const idx_t *) {
   FAISS_THROW_MSG("add_with_ids not implemented for this type of index");
 }
 
+#if 0
 void IndexBinary::get_vector_by_id (idx_t n, const idx_t *xid, uint8_t *x, ConcurrentBitsetPtr bitset) {
   FAISS_THROW_MSG("get_vector_by_id not implemented for this type of index");
 }
@@ -44,6 +45,7 @@ void IndexBinary::search_by_id (idx_t n, const idx_t *xid, idx_t k, int32_t *dis
                                 ConcurrentBitsetPtr bitset) {
   FAISS_THROW_MSG("search_by_id not implemented for this type of index");
 }
+#endif
 
 size_t IndexBinary::remove_ids(const IDSelector&) {
   FAISS_THROW_MSG("remove_ids not implemented for this type of index");

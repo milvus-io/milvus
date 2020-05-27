@@ -48,8 +48,10 @@ class IDMAP : public VecIndex, public FaissBaseIndex {
     DatasetPtr
     Query(const DatasetPtr&, const Config&) override;
 
+#if 0
     DatasetPtr
     QueryById(const DatasetPtr& dataset, const Config& config) override;
+#endif
 
     int64_t
     Count() override {
@@ -66,8 +68,10 @@ class IDMAP : public VecIndex, public FaissBaseIndex {
         return Count() * Dim() * sizeof(FloatType);
     }
 
+#if 0
     DatasetPtr
     GetVectorById(const DatasetPtr& dataset, const Config& config) override;
+#endif
 
     VecIndexPtr
     CopyCpuToGpu(const int64_t, const Config&);

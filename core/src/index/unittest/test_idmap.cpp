@@ -98,15 +98,17 @@ TEST_P(IDMAPTest, idmap_basic) {
     auto binaryset = index_->Serialize();
     auto new_index = std::make_shared<milvus::knowhere::IDMAP>();
     new_index->Load(binaryset);
-    auto result2 = index_->Query(query_dataset, conf);
+    auto result2 = new_index->Query(query_dataset, conf);
     AssertAnns(result2, nq, k);
     //    PrintResult(re_result, nq, k);
 
-    auto result3 = index_->QueryById(id_dataset, conf);
+#if 0
+    auto result3 = new_index->QueryById(id_dataset, conf);
     AssertAnns(result3, nq, k);
 
-    auto result4 = index_->GetVectorById(xid_dataset, conf);
+    auto result4 = new_index->GetVectorById(xid_dataset, conf);
     AssertVec(result4, base_dataset, xid_dataset, 1, dim);
+#endif
 
     faiss::ConcurrentBitsetPtr concurrent_bitset_ptr = std::make_shared<faiss::ConcurrentBitset>(nb);
     for (int64_t i = 0; i < nq; ++i) {
@@ -117,11 +119,13 @@ TEST_P(IDMAPTest, idmap_basic) {
     auto result_bs_1 = index_->Query(query_dataset, conf);
     AssertAnns(result_bs_1, nq, k, CheckMode::CHECK_NOT_EQUAL);
 
+#if 0
     auto result_bs_2 = index_->QueryById(id_dataset, conf);
     AssertAnns(result_bs_2, nq, k, CheckMode::CHECK_NOT_EQUAL);
 
     auto result_bs_3 = index_->GetVectorById(xid_dataset, conf);
     AssertVec(result_bs_3, base_dataset, xid_dataset, 1, dim, CheckMode::CHECK_NOT_EQUAL);
+#endif
 }
 
 TEST_P(IDMAPTest, idmap_serialize) {
