@@ -817,9 +817,14 @@ ClientProxy::HybridSearchPB(const std::string& collection_name, const std::vecto
 Status
 ClientProxy::HybridSearch(const std::string& collection_name, const std::vector<std::string>& partition_list,
                           const std::string& dsl, const std::string& vector_param,
-                          const std::vector<Entity>& entity_array, milvus::TopKHybridQueryResult& query_result) {
+                          const std::vector<Entity>& entity_array, milvus::TopKHybridQueryResult& topk_query_result) {
     try {
         ::milvus::grpc::HSearchParam search_param;
+        search_param.set_collection_name(collection_name);
+        for (auto partition : partition_list) {
+            auto value = search_param.add_partition_tag_array();
+            *value = partition;
+        }
         search_param.set_dsl(dsl);
         auto grpc_vector_param = search_param.add_vector_param();
         grpc_vector_param->set_json(vector_param);
@@ -830,6 +835,7 @@ ClientProxy::HybridSearch(const std::string& collection_name, const std::vector<
 
         ::milvus::grpc::HQueryResult result;
         Status status = client_ptr_->HybridSearch(search_param, result);
+        ConstructTopkHybridResult(result, topk_query_result);
         return status;
     } catch (std::exception& ex) {
         return Status(StatusCode::UnknownError, "Failed to search entities: " + std::string(ex.what()));

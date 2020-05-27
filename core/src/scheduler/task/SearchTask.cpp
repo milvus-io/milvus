@@ -273,7 +273,7 @@ XSearchTask::Execute() {
                 s = index_engine_->HybridSearch(general_query, types, query_ptr, output_distance, output_ids);
                 auto vector_query = query_ptr->vectors.begin()->second;
                 topk = vector_query->topk;
-                nq = vector_query->query_vector.float_data.size() / topk;
+                nq = vector_query->query_vector.float_data.size() / file_->dimension_;
 
                 if (!s.ok()) {
                     search_job->GetStatus() = s;

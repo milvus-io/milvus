@@ -209,7 +209,8 @@ Status
 ConnectionImpl::HybridSearchPB(const std::string& collection_name, const std::vector<std::string>& partition_list,
                                BooleanQueryPtr& boolean_query, const std::string& extra_params,
                                TopKHybridQueryResult& topk_query_result) {
-    return client_proxy_->HybridSearchPB(collection_name, partition_list, boolean_query, extra_params, topk_query_result);
+    return client_proxy_->HybridSearchPB(collection_name, partition_list, boolean_query, extra_params,
+                                         topk_query_result);
 }
 
 Status

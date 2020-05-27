@@ -18,15 +18,15 @@
 #include <unistd.h>
 #include <iostream>
 #include <memory>
+#include <unordered_map>
 #include <utility>
 #include <vector>
-#include <unordered_map>
 
 namespace {
 
 const char* COLLECTION_NAME = milvus_sdk::Utils::GenCollectionName().c_str();
 
-constexpr int64_t COLLECTION_DIMENSION = 512;
+constexpr int64_t COLLECTION_DIMENSION = 128;
 constexpr int64_t COLLECTION_INDEX_FILE_SIZE = 1024;
 constexpr milvus::MetricType COLLECTION_METRIC_TYPE = milvus::MetricType::L2;
 constexpr int64_t BATCH_ENTITY_COUNT = 100000;
@@ -43,9 +43,8 @@ void
 PrintHybridQueryResult(const std::vector<int64_t>& id_array, const milvus::HybridQueryResult& result) {
     for (size_t i = 0; i < id_array.size(); i++) {
         std::string prefix = "No." + std::to_string(i) + " id:" + std::to_string(id_array[i]);
-        std::cout<< prefix << "\t[";
+        std::cout << prefix << "\t[";
         for (size_t j = 0; j < result.attr_records.size(); i++) {
-
         }
     }
 }
@@ -127,7 +126,7 @@ ClientTest::InsertHybridEntities(std::string& collection_name, int64_t row_num) 
 }
 
 void
-ClientTest::HybridSearch(std::string& collection_name) {
+ClientTest::HybridSearchPB(std::string& collection_name) {
     std::vector<std::string> partition_tags;
     milvus::TopKHybridQueryResult topk_query_result;
 
@@ -144,27 +143,29 @@ ClientTest::HybridSearch(std::string& collection_name) {
 
     std::string extra_params;
     milvus::Status status =
-        conn_->HybridSearch(collection_name, partition_tags, query_clause, extra_params, topk_query_result);
+        conn_->HybridSearchPB(collection_name, partition_tags, query_clause, extra_params, topk_query_result);
 
-    for (uint64_t i = 0; i < topk_query_result.size(); i++) {
-        for (auto attr : topk_query_result[i].attr_records) {
-            std::cout << "Field: " << attr.first << std::endl;
-            if (attr.second.int_record.size() > 0) {
-                for (auto record : attr.second.int_record) {
-                    std::cout << record << "\t";
-                }
-            } else if (attr.second.double_record.size() > 0) {
-                for (auto record : attr.second.double_record) {
-                    std::cout << record << "\t";
-                }
-            }
-            std::cout << std::endl;
-        }
+    milvus_sdk::Utils::PrintTopKHybridQueryResult(topk_query_result);
+    std::cout << "HybridSearch function call status: " << status.message() << std::endl;
+}
+
+void
+ClientTest::HybridSearch(std::string& collection_name) {
+    nlohmann::json dsl_json, vector_param_json;
+    milvus_sdk::Utils::GenDSLJson(dsl_json, vector_param_json);
+
+    std::vector<milvus::Entity> entity_array;
+    std::vector<int64_t> record_ids;
+    {  // generate vectors
+        milvus_sdk::Utils::ConstructVector(NQ, COLLECTION_DIMENSION, entity_array);
     }
 
-    for (uint64_t i = 0; i < topk_query_result.size(); ++i) {
-        std::cout << topk_query_result[i].ids[1] << "  ---------  " << topk_query_result[i].distances[1] << std::endl;
-    }
+    std::vector<std::string> partition_tags;
+    milvus::TopKHybridQueryResult topk_query_result;
+    auto status = conn_->HybridSearch(collection_name, partition_tags, dsl_json.dump(), vector_param_json.dump(),
+                                      entity_array, topk_query_result);
+
+    milvus_sdk::Utils::PrintTopKHybridQueryResult(topk_query_result);
     std::cout << "HybridSearch function call status: " << status.message() << std::endl;
 }
 
@@ -187,5 +188,6 @@ ClientTest::TestHybrid() {
     InsertHybridEntities(collection_name, 10000);
     Flush(collection_name);
     sleep(2);
+    //    HybridSearchPB(collection_name);
     HybridSearch(collection_name);
 }
