@@ -92,7 +92,7 @@ class RequestHandler {
 
     Status
     ReLoadSegments(const std::shared_ptr<Context>& context, const std::string& collection_name,
-                   const std::vector<int64_t>& segment_ids);
+                   const std::vector<std::string>& segment_ids);
 
     Status
     DescribeIndex(const std::shared_ptr<Context>& context, const std::string& collection_name, IndexParam& param);

@@ -20,13 +20,13 @@ namespace milvus {
 namespace server {
 
 ReLoadSegments::ReLoadSegments(const std::shared_ptr<milvus::server::Context>& context,
-                               const std::string& collection_name, const std::vector<int64_t>& segment_ids)
+                               const std::string& collection_name, const std::vector<std::string>& segment_ids)
     : BaseRequest(context, BaseRequest::kReloadSegments), collection_name_(collection_name), segment_ids_(segment_ids) {
 }
 
 BaseRequestPtr
 ReLoadSegments::Create(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name,
-                       const std::vector<int64_t>& segment_ids) {
+                       const std::vector<std::string>& segment_ids) {
     return std::shared_ptr<BaseRequest>(new ReLoadSegments(context, collection_name, segment_ids));
 }
 
@@ -55,7 +55,13 @@ ReLoadSegments::OnExecute() {
             return status;
         }
 
-        return DBWrapper::DB()->ReLoadSegmentsDelDocs(collection_name_, segment_ids_);
+        std::vector<int64_t> segment_ids;
+        for (auto & id : segment_ids_) {
+            std::string::size_type sz;
+            segment_ids.push_back(std::stoul(id, &sz));
+        }
+
+        return DBWrapper::DB()->ReLoadSegmentsDelDocs(collection_name_, segment_ids);
     } catch (std::exception& exp) {
         return Status(SERVER_UNEXPECTED_ERROR, exp.what());
     }
