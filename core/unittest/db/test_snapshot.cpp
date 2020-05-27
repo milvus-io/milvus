@@ -132,6 +132,7 @@ TEST_F(SnapshotTest, ResourceHoldersTest) {
 }
 
 TEST_F(SnapshotTest, CreateCollectionOperationTest) {
+    milvus::engine::snapshot::Store::GetInstance().DoReset();
     auto expect_null = milvus::engine::snapshot::Snapshots::GetInstance().GetSnapshot(100000);
     ASSERT_TRUE(!expect_null);
 
@@ -156,6 +157,10 @@ TEST_F(SnapshotTest, CreateCollectionOperationTest) {
     latest_ss = milvus::engine::snapshot::Snapshots::GetInstance().GetSnapshot(collection_name);
     ASSERT_TRUE(latest_ss);
     ASSERT_TRUE(latest_ss->GetName() == collection_name);
+
+    auto ids = milvus::engine::snapshot::Snapshots::GetInstance().GetCollectionIds();
+    ASSERT_EQ(ids.size(), 1);
+    ASSERT_EQ(ids[0], latest_ss->GetCollectionId());
 }
 
 TEST_F(SnapshotTest, OperationTest) {
@@ -244,6 +249,8 @@ TEST_F(SnapshotTest, OperationTest) {
         ss_id = ss->GetID();
         {
             auto prev_partition_commit = ss->GetPartitionCommitByPartitionId(partition_id);
+            auto expect_null = ss->GetPartitionCommitByPartitionId(11111111);
+            ASSERT_TRUE(!expect_null);
             ASSERT_TRUE(prev_partition_commit->ToString() != "");
             auto op = std::make_shared<milvus::engine::snapshot::MergeOperation>(merge_ctx, ss);
             auto new_seg = op->CommitNewSegment();
@@ -263,6 +270,8 @@ TEST_F(SnapshotTest, OperationTest) {
             }
             expected_mappings.insert(segment_commit->GetID());
             ASSERT_EQ(expected_mappings, new_mappings);
+
+            milvus::engine::snapshot::CollectionCommitsHolder::GetInstance().Dump();
         }
     }
 }
