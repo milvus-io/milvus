@@ -24,13 +24,14 @@ all_index_types = [
 ]
 
 
-def get_milvus(host, port, uri=None, handler=None):
+def get_milvus(host, port, uri=None, handler=None, **kwargs):
     if handler is None:
         handler = "GRPC"
+    try_connect = kwargs.get("try_connect", True)
     if uri is not None:
-        milvus = Milvus(uri=uri, handler=handler)
+        milvus = Milvus(uri=uri, handler=handler, try_connect=try_connect)
     else:
-        milvus = Milvus(host=host, port=port, handler=handler)
+        milvus = Milvus(host=host, port=port, handler=handler, try_connect=try_connect)
     return milvus
 
 
