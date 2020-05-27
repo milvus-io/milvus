@@ -91,6 +91,9 @@ class RequestHandler {
     PreloadCollection(const std::shared_ptr<Context>& context, const std::string& collection_name);
 
     Status
+    ReLoadSegments(const std::shared_ptr<Context>& context, const std::string& collection_name, const std::vector<std::string>& segment_name);
+
+    Status
     DescribeIndex(const std::shared_ptr<Context>& context, const std::string& collection_name, IndexParam& param);
 
     Status
