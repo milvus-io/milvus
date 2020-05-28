@@ -4,6 +4,19 @@ Please mark all change in change log and use the issue from GitHub
 # Milvus 0.10.0 (TBD)
 
 ## Bug
+
+## Feature
+-   \#2363 Update branch version
+
+## Improvement
+-   \#2381 Upgrade FAISS to 1.6.3
+-   \#2441 Improve Knowhere code coverage
+
+## Task
+
+# Milvus 0.9.1 (TBD)
+
+## Bug
 -   \#2366 Reduce SQL execution times for collection contains lot of partitions
 -   \#2378 Duplicate data after server restart
 -   \#2395 Fix large nq cudaMalloc error
@@ -11,17 +24,11 @@ Please mark all change in change log and use the issue from GitHub
 -   \#2403 MySQL max_idle_time is 10 by default
 
 ## Feature
--   \#2363 Update branch version
 
 ## Improvement
 -   \#2353 Remove log_config from code and scripts
 -   \#2370 Clean compile warning
--   \#2381 Upgrade FAISS to 1.6.3
 -   \#2410 Logging build index progress
--   \#2441 Improve Knowhere code coverage
-
-## Task
-
 
 # Milvus 0.9.0 (2020-05-15)
 
