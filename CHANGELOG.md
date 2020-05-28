@@ -24,6 +24,7 @@ Please mark all change in change log and use the issue from GitHub
 -   \#2399 The nlist set by the user may not take effect
 -   \#2403 MySQL max_idle_time is 10 by default
 -   \#2450 The deleted vectors may be found on GPU
+-   \#2456 openblas library install failed
 
 ## Feature
 
