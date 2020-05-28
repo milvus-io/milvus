@@ -76,9 +76,9 @@ AssertVec(const milvus::knowhere::DatasetPtr& result, const milvus::knowhere::Da
           const CheckMode check_mode = CheckMode::CHECK_EQUAL);
 
 void
-AssertBinVeceq(const milvus::knowhere::DatasetPtr& result, const milvus::knowhere::DatasetPtr& base_dataset,
-               const milvus::knowhere::DatasetPtr& id_dataset, const int n, const int dim,
-               const CheckMode check_mode = CheckMode::CHECK_EQUAL);
+AssertBinVec(const milvus::knowhere::DatasetPtr& result, const milvus::knowhere::DatasetPtr& base_dataset,
+             const milvus::knowhere::DatasetPtr& id_dataset, const int n, const int dim,
+             const CheckMode check_mode = CheckMode::CHECK_EQUAL);
 
 void
 PrintResult(const milvus::knowhere::DatasetPtr& result, const int& nq, const int& k);

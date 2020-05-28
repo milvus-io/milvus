@@ -60,7 +60,13 @@ INSTANTIATE_TEST_CASE_P(SPTAGParameters, SPTAGTest, Values("KDT", "BKT"));
 TEST_P(SPTAGTest, sptag_basic) {
     assert(!xb.empty());
 
-    index_->Train(base_dataset, conf);
+    // null faiss index
+    {
+        ASSERT_ANY_THROW(index_->Add(nullptr, conf));
+        ASSERT_ANY_THROW(index_->AddWithoutIds(nullptr, conf));
+    }
+
+    index_->BuildAll(base_dataset, conf);
     // index_->Add(base_dataset, conf);
     auto result = index_->Query(query_dataset, conf);
     AssertAnns(result, nq, k);

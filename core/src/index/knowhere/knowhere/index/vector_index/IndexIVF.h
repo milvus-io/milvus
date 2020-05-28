@@ -53,8 +53,10 @@ class IVF : public VecIndex, public FaissBaseIndex {
     DatasetPtr
     Query(const DatasetPtr&, const Config&) override;
 
+#if 0
     DatasetPtr
     QueryById(const DatasetPtr& dataset, const Config& config) override;
+#endif
 
     int64_t
     Count() override {
@@ -66,8 +68,10 @@ class IVF : public VecIndex, public FaissBaseIndex {
         return index_->d;
     }
 
+#if 0
     DatasetPtr
     GetVectorById(const DatasetPtr& dataset, const Config& config) override;
+#endif
 
     virtual void
     Seal();

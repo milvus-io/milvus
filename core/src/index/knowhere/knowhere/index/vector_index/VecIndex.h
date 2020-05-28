@@ -45,10 +45,12 @@ class VecIndex : public Index {
     virtual DatasetPtr
     Query(const DatasetPtr& dataset, const Config& config) = 0;
 
+#if 0
     virtual DatasetPtr
     QueryById(const DatasetPtr& dataset, const Config& config) {
         return nullptr;
     }
+#endif
 
     // virtual DatasetPtr
     // QueryByRange(const DatasetPtr&, const Config&) = 0;
@@ -72,10 +74,12 @@ class VecIndex : public Index {
         return index_mode_;
     }
 
+#if 0
     virtual DatasetPtr
     GetVectorById(const DatasetPtr& dataset, const Config& config) {
         return nullptr;
     }
+#endif
 
     faiss::ConcurrentBitsetPtr
     GetBlacklist() {

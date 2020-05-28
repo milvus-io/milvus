@@ -161,6 +161,7 @@ AssertAnns(const milvus::knowhere::DatasetPtr& result, const int nq, const int k
     }
 }
 
+#if 0
 void
 AssertVec(const milvus::knowhere::DatasetPtr& result, const milvus::knowhere::DatasetPtr& base_dataset,
           const milvus::knowhere::DatasetPtr& id_dataset, const int n, const int dim, const CheckMode check_mode) {
@@ -194,18 +195,19 @@ AssertVec(const milvus::knowhere::DatasetPtr& result, const milvus::knowhere::Da
 }
 
 void
-AssertBinVeceq(const milvus::knowhere::DatasetPtr& result, const milvus::knowhere::DatasetPtr& base_dataset,
-               const milvus::knowhere::DatasetPtr& id_dataset, const int n, const int dim) {
-    auto base = base_dataset->Get<const uint8_t*>(milvus::knowhere::meta::TENSOR);
+AssertBinVec(const milvus::knowhere::DatasetPtr& result, const milvus::knowhere::DatasetPtr& base_dataset,
+             const milvus::knowhere::DatasetPtr& id_dataset, const int n, const int dim, const CheckMode check_mode) {
+    auto base = (uint8_t*)base_dataset->Get<const void*>(milvus::knowhere::meta::TENSOR);
     auto ids = id_dataset->Get<const int64_t*>(milvus::knowhere::meta::IDS);
-    auto x = result->Get<uint8_t*>(milvus::knowhere::meta::TENSOR);
+    auto x = result->Get<float*>(milvus::knowhere::meta::TENSOR);
     for (auto i = 0; i < 1; i++) {
         auto id = ids[i];
         for (auto j = 0; j < dim; j++) {
-            EXPECT_EQ(*(base + id * dim + j), *(x + i * dim + j));
+            ASSERT_EQ(*(base + id * dim + j), *(x + i * dim + j));
         }
     }
 }
+#endif
 
 void
 PrintResult(const milvus::knowhere::DatasetPtr& result, const int& nq, const int& k) {
