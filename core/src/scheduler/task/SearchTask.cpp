@@ -283,15 +283,6 @@ XSearchTask::Execute() {
 
                 {
                     std::unique_lock<std::mutex> lock(search_job->mutex());
-
-                    if (search_job->GetResultIds().size() > spec_k) {
-                        if (search_job->GetResultIds().front() == -1) {
-                            // initialized results set
-                            search_job->GetResultIds().resize(spec_k * nq);
-                            search_job->GetResultDistances().resize(spec_k * nq);
-                        }
-                    }
-
                     search_job->vector_count() = nq;
                     XSearchTask::MergeTopkToResultSet(output_ids, output_distance, spec_k, nq, topk, ascending_reduce,
                                                       search_job->GetResultIds(), search_job->GetResultDistances());
