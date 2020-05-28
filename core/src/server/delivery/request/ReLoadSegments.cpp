@@ -40,10 +40,10 @@ ReLoadSegments::OnExecute() {
         return status;
     }
 
-    if (deploy_mode == "single" || deploy_mode == "cluster_writable") {
-        // TODO: No need to reload segment files
-        return Status(SERVER_SUCCESS, "");
-    }
+//    if (deploy_mode == "single" || deploy_mode == "cluster_writable") {
+//        // TODO: No need to reload segment files
+//        return Status(SERVER_SUCCESS, "");
+//    }
 
     try {
         std::string hdr = "ReloadSegmentsRequest(collection=" + collection_name_ + ")";

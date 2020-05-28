@@ -178,7 +178,7 @@ MemManagerImpl::ReloadDeletedDocs(const std::string& collection_id, std::vector<
     //    meta_->Fi
     // TODO: Change table to collection
     MemTablePtr mem = GetMemByTable(collection_id);
-    mem->UpdateDeletedDocs(segment_ids);
+    return mem->UpdateDeletedDocs(segment_ids);
     //
 }
 
