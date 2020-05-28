@@ -11,6 +11,8 @@ from milvus import Milvus, IndexType, MetricType
 
 port = 19530
 epsilon = 0.000001
+default_flush_interval = 1
+big_flush_interval = 1000
 
 all_index_types = [
     IndexType.FLAT,
@@ -33,6 +35,20 @@ def get_milvus(host, port, uri=None, handler=None, **kwargs):
     else:
         milvus = Milvus(host=host, port=port, handler=handler, try_connect=try_connect)
     return milvus
+
+
+def disable_flush(connect):
+    status, reply = connect.set_config("db_config", "auto_flush_interval", big_flush_interval)
+    assert status.OK()
+
+
+def enable_flush(connect):
+    # reset auto_flush_interval=1
+    status, reply = connect.set_config("db_config", "auto_flush_interval", default_flush_interval)
+    assert status.OK()
+    status, config_value = connect.get_config("db_config", "auto_flush_interval")
+    assert status.OK()
+    assert config_value == str(default_flush_interval)
 
 
 def gen_inaccuracy(num):
