@@ -168,8 +168,8 @@ class DB {
 
     virtual Status
     HybridQuery(const std::shared_ptr<server::Context>& context, const std::string& collection_id,
-                const std::vector<std::string>& partition_tags, context::HybridSearchContextPtr hybrid_search_context,
-                query::GeneralQueryPtr general_query, std::vector<std::string>& field_name,
+                const std::vector<std::string>& partition_tags, query::GeneralQueryPtr general_query,
+                query::QueryPtr query_ptr, std::vector<std::string>& field_name,
                 std::unordered_map<std::string, engine::meta::hybrid::DataType>& attr_type,
                 engine::QueryResult& result) = 0;
 };  // DB

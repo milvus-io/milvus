@@ -361,6 +361,10 @@ class GrpcRequestHandler final : public ::milvus::grpc::MilvusService::Service, 
                  ::milvus::grpc::HEntityIDs* response) override;
 
     ::grpc::Status
+    HybridSearchPB(::grpc::ServerContext* context, const ::milvus::grpc::HSearchParamPB* request,
+                   ::milvus::grpc::HQueryResult* response) override;
+
+    ::grpc::Status
     HybridSearch(::grpc::ServerContext* context, const ::milvus::grpc::HSearchParam* request,
                  ::milvus::grpc::HQueryResult* response) override;
 
@@ -391,12 +395,24 @@ class GrpcRequestHandler final : public ::milvus::grpc::MilvusService::Service, 
         request_handler_ = handler;
     }
 
+    Status
+    DeserializeJsonToBoolQuery(const google::protobuf::RepeatedPtrField<::milvus::grpc::VectorParam>& vector_params,
+                               const std::string& dsl_string, query::BooleanQueryPtr& boolean_query,
+                               std::unordered_map<std::string, query::VectorQueryPtr>& query_ptr);
+
+    Status
+    ProcessBooleanQueryJson(const nlohmann::json& query_json, query::BooleanQueryPtr& boolean_query);
+
+    Status
+    ProcessLeafQueryJson(const nlohmann::json& json, query::BooleanQueryPtr& query);
+
  private:
     RequestHandler request_handler_;
 
     // std::unordered_map<::grpc::ServerContext*, std::shared_ptr<Context>> context_map_;
     std::unordered_map<std::string, std::shared_ptr<Context>> context_map_;
     std::shared_ptr<opentracing::Tracer> tracer_;
+    std::unordered_map<std::string, engine::meta::hybrid::DataType> field_type_;
     //    std::unordered_map<::grpc::ServerContext*, std::unique_ptr<opentracing::Span>> span_map_;
 
     mutable std::mt19937_64 random_num_generator_;

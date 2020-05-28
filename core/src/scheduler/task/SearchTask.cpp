@@ -267,7 +267,13 @@ XSearchTask::Execute() {
                 for (; type_it != attr_type.end(); type_it++) {
                     types.insert(std::make_pair(type_it->first, (engine::DataType)(type_it->second)));
                 }
-                s = index_engine_->HybridSearch(general_query, types, nq, topk, output_distance, output_ids);
+
+                auto query_ptr = search_job->query_ptr();
+
+                s = index_engine_->HybridSearch(general_query, types, query_ptr, output_distance, output_ids);
+                auto vector_query = query_ptr->vectors.begin()->second;
+                topk = vector_query->topk;
+                nq = vector_query->query_vector.float_data.size() / file_->dimension_;
 
                 if (!s.ok()) {
                     search_job->GetStatus() = s;

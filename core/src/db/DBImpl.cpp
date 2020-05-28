@@ -1783,9 +1783,8 @@ DBImpl::QueryByIDs(const std::shared_ptr<server::Context>& context, const std::s
 
 Status
 DBImpl::HybridQuery(const std::shared_ptr<server::Context>& context, const std::string& collection_id,
-                    const std::vector<std::string>& partition_tags,
-                    context::HybridSearchContextPtr hybrid_search_context, query::GeneralQueryPtr general_query,
-                    std::vector<std::string>& field_names,
+                    const std::vector<std::string>& partition_tags, query::GeneralQueryPtr general_query,
+                    query::QueryPtr query_ptr, std::vector<std::string>& field_names,
                     std::unordered_map<std::string, engine::meta::hybrid::DataType>& attr_type,
                     engine::QueryResult& result) {
     auto query_ctx = context->Child("Query");
@@ -1837,8 +1836,8 @@ DBImpl::HybridQuery(const std::shared_ptr<server::Context>& context, const std::
     }
 
     cache::CpuCacheMgr::GetInstance()->PrintInfo();  // print cache info before query
-    status = HybridQueryAsync(query_ctx, collection_id, files_holder, hybrid_search_context, general_query, field_names,
-                              attr_type, result);
+    status = HybridQueryAsync(query_ctx, collection_id, files_holder, general_query, query_ptr, field_names, attr_type,
+                              result);
     if (!status.ok()) {
         return status;
     }
@@ -1999,8 +1998,8 @@ DBImpl::QueryAsync(const std::shared_ptr<server::Context>& context, meta::FilesH
 
 Status
 DBImpl::HybridQueryAsync(const std::shared_ptr<server::Context>& context, const std::string& collection_id,
-                         meta::FilesHolder& files_holder, context::HybridSearchContextPtr hybrid_search_context,
-                         query::GeneralQueryPtr general_query, std::vector<std::string>& field_names,
+                         meta::FilesHolder& files_holder, query::GeneralQueryPtr general_query,
+                         query::QueryPtr query_ptr, std::vector<std::string>& field_names,
                          std::unordered_map<std::string, engine::meta::hybrid::DataType>& attr_type,
                          engine::QueryResult& result) {
     auto query_async_ctx = context->Child("Query Async");
@@ -2030,7 +2029,7 @@ DBImpl::HybridQueryAsync(const std::shared_ptr<server::Context>& context, const 
     milvus::engine::meta::SegmentsSchema& files = files_holder.HoldFiles();
     LOG_ENGINE_DEBUG_ << LogOut("Engine query begin, index file count: %ld", files_holder.HoldFiles().size());
     scheduler::SearchJobPtr job =
-        std::make_shared<scheduler::SearchJob>(query_async_ctx, general_query, attr_type, vectors);
+        std::make_shared<scheduler::SearchJob>(query_async_ctx, general_query, query_ptr, attr_type, vectors);
     for (auto& file : files) {
         scheduler::SegmentSchemaPtr file_ptr = std::make_shared<meta::SegmentSchema>(file);
         job->AddIndexFile(file_ptr);

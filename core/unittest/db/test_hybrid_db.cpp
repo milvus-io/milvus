@@ -116,7 +116,7 @@ BuildEntity(uint64_t n, uint64_t batch_index, milvus::engine::Entity& entity) {
 }
 
 void
-ConstructGeneralQuery(milvus::query::GeneralQueryPtr& general_query) {
+ConstructGeneralQuery(milvus::query::GeneralQueryPtr& general_query, milvus::query::QueryPtr& query_ptr) {
     general_query->bin->relation = milvus::query::QueryRelation::AND;
     general_query->bin->left_query = std::make_shared<milvus::query::GeneralQuery>();
     general_query->bin->right_query = std::make_shared<milvus::query::GeneralQuery>();
@@ -167,7 +167,12 @@ ConstructGeneralQuery(milvus::query::GeneralQueryPtr& general_query) {
     left->bin->right_query->leaf->range_query = range_query;
 
     right->leaf = std::make_shared<milvus::query::LeafQuery>();
-    right->leaf->vector_query = vector_query;
+
+    std::string vector_placeholder = "placeholder_1";
+
+    right->leaf->vector_placeholder = vector_placeholder;
+    query_ptr->root = general_query->bin;
+    query_ptr->vectors.insert(std::make_pair(vector_placeholder, vector_query));
 }
 }  // namespace
 
@@ -234,14 +239,14 @@ TEST_F(DBTest, HYBRID_SEARCH_TEST) {
     ASSERT_TRUE(stat.ok());
 
     // Construct general query
-    milvus::query::GeneralQueryPtr general_query = std::make_shared<milvus::query::GeneralQuery>();
-    ConstructGeneralQuery(general_query);
+    auto general_query = std::make_shared<milvus::query::GeneralQuery>();
+    auto query_ptr = std::make_shared<milvus::query::Query>();
+    ConstructGeneralQuery(general_query, query_ptr);
 
     std::vector<std::string> tags;
-    milvus::context::HybridSearchContextPtr hybrid_context = std::make_shared<milvus::context::HybridSearchContext>();
     milvus::engine::QueryResult result;
-    stat = db_->HybridQuery(dummy_context_, COLLECTION_NAME, tags, hybrid_context, general_query, field_names,
-                            attr_type, result);
+    stat = db_->HybridQuery(dummy_context_, COLLECTION_NAME, tags, general_query, query_ptr, field_names, attr_type,
+                            result);
     ASSERT_TRUE(stat.ok());
     ASSERT_EQ(result.row_num_, NQ);
     ASSERT_EQ(result.result_ids_.size(), NQ * TOPK);

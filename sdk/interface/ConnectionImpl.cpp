@@ -103,8 +103,7 @@ ConnectionImpl::Insert(const std::string& collection_name, const std::string& pa
 }
 
 Status
-ConnectionImpl::GetEntityByID(const std::string& collection_name,
-                              const std::vector<int64_t>& id_array,
+ConnectionImpl::GetEntityByID(const std::string& collection_name, const std::vector<int64_t>& id_array,
                               std::vector<Entity>& entities_data) {
     return client_proxy_->GetEntityByID(collection_name, id_array, entities_data);
 }
@@ -207,10 +206,18 @@ ConnectionImpl::InsertEntity(const std::string& collection_name, const std::stri
 }
 
 Status
+ConnectionImpl::HybridSearchPB(const std::string& collection_name, const std::vector<std::string>& partition_list,
+                               BooleanQueryPtr& boolean_query, const std::string& extra_params,
+                               TopKHybridQueryResult& topk_query_result) {
+    return client_proxy_->HybridSearchPB(collection_name, partition_list, boolean_query, extra_params,
+                                         topk_query_result);
+}
+
+Status
 ConnectionImpl::HybridSearch(const std::string& collection_name, const std::vector<std::string>& partition_list,
-                             BooleanQueryPtr& boolean_query, const std::string& extra_params,
-                             TopKHybridQueryResult& topk_query_result) {
-    return client_proxy_->HybridSearch(collection_name, partition_list, boolean_query, extra_params, topk_query_result);
+                             const std::string& dsl, const std::string& vector_param,
+                             const std::vector<Entity>& entity_array, milvus::TopKHybridQueryResult& query_result) {
+    return client_proxy_->HybridSearch(collection_name, partition_list, dsl, vector_param, entity_array, query_result);
 }
 
 Status

@@ -54,6 +54,7 @@ static const char* MilvusService_method_names[] = {
   "/milvus.grpc.MilvusService/ShowHybridCollectionInfo",
   "/milvus.grpc.MilvusService/PreloadHybridCollection",
   "/milvus.grpc.MilvusService/InsertEntity",
+  "/milvus.grpc.MilvusService/HybridSearchPB",
   "/milvus.grpc.MilvusService/HybridSearch",
   "/milvus.grpc.MilvusService/HybridSearchInSegments",
   "/milvus.grpc.MilvusService/GetEntityByID",
@@ -102,11 +103,12 @@ MilvusService::Stub::Stub(const std::shared_ptr< ::grpc::ChannelInterface>& chan
   , rpcmethod_ShowHybridCollectionInfo_(MilvusService_method_names[31], ::grpc::internal::RpcMethod::NORMAL_RPC, channel)
   , rpcmethod_PreloadHybridCollection_(MilvusService_method_names[32], ::grpc::internal::RpcMethod::NORMAL_RPC, channel)
   , rpcmethod_InsertEntity_(MilvusService_method_names[33], ::grpc::internal::RpcMethod::NORMAL_RPC, channel)
-  , rpcmethod_HybridSearch_(MilvusService_method_names[34], ::grpc::internal::RpcMethod::NORMAL_RPC, channel)
-  , rpcmethod_HybridSearchInSegments_(MilvusService_method_names[35], ::grpc::internal::RpcMethod::NORMAL_RPC, channel)
-  , rpcmethod_GetEntityByID_(MilvusService_method_names[36], ::grpc::internal::RpcMethod::NORMAL_RPC, channel)
-  , rpcmethod_GetEntityIDs_(MilvusService_method_names[37], ::grpc::internal::RpcMethod::NORMAL_RPC, channel)
-  , rpcmethod_DeleteEntitiesByID_(MilvusService_method_names[38], ::grpc::internal::RpcMethod::NORMAL_RPC, channel)
+  , rpcmethod_HybridSearchPB_(MilvusService_method_names[34], ::grpc::internal::RpcMethod::NORMAL_RPC, channel)
+  , rpcmethod_HybridSearch_(MilvusService_method_names[35], ::grpc::internal::RpcMethod::NORMAL_RPC, channel)
+  , rpcmethod_HybridSearchInSegments_(MilvusService_method_names[36], ::grpc::internal::RpcMethod::NORMAL_RPC, channel)
+  , rpcmethod_GetEntityByID_(MilvusService_method_names[37], ::grpc::internal::RpcMethod::NORMAL_RPC, channel)
+  , rpcmethod_GetEntityIDs_(MilvusService_method_names[38], ::grpc::internal::RpcMethod::NORMAL_RPC, channel)
+  , rpcmethod_DeleteEntitiesByID_(MilvusService_method_names[39], ::grpc::internal::RpcMethod::NORMAL_RPC, channel)
   {}
 
 ::grpc::Status MilvusService::Stub::CreateCollection(::grpc::ClientContext* context, const ::milvus::grpc::CollectionSchema& request, ::milvus::grpc::Status* response) {
@@ -1061,6 +1063,34 @@ void MilvusService::Stub::experimental_async::InsertEntity(::grpc::ClientContext
   return ::grpc_impl::internal::ClientAsyncResponseReaderFactory< ::milvus::grpc::HEntityIDs>::Create(channel_.get(), cq, rpcmethod_InsertEntity_, context, request, false);
 }
 
+::grpc::Status MilvusService::Stub::HybridSearchPB(::grpc::ClientContext* context, const ::milvus::grpc::HSearchParamPB& request, ::milvus::grpc::HQueryResult* response) {
+  return ::grpc::internal::BlockingUnaryCall(channel_.get(), rpcmethod_HybridSearchPB_, context, request, response);
+}
+
+void MilvusService::Stub::experimental_async::HybridSearchPB(::grpc::ClientContext* context, const ::milvus::grpc::HSearchParamPB* request, ::milvus::grpc::HQueryResult* response, std::function<void(::grpc::Status)> f) {
+  ::grpc_impl::internal::CallbackUnaryCall(stub_->channel_.get(), stub_->rpcmethod_HybridSearchPB_, context, request, response, std::move(f));
+}
+
+void MilvusService::Stub::experimental_async::HybridSearchPB(::grpc::ClientContext* context, const ::grpc::ByteBuffer* request, ::milvus::grpc::HQueryResult* response, std::function<void(::grpc::Status)> f) {
+  ::grpc_impl::internal::CallbackUnaryCall(stub_->channel_.get(), stub_->rpcmethod_HybridSearchPB_, context, request, response, std::move(f));
+}
+
+void MilvusService::Stub::experimental_async::HybridSearchPB(::grpc::ClientContext* context, const ::milvus::grpc::HSearchParamPB* request, ::milvus::grpc::HQueryResult* response, ::grpc::experimental::ClientUnaryReactor* reactor) {
+  ::grpc_impl::internal::ClientCallbackUnaryFactory::Create(stub_->channel_.get(), stub_->rpcmethod_HybridSearchPB_, context, request, response, reactor);
+}
+
+void MilvusService::Stub::experimental_async::HybridSearchPB(::grpc::ClientContext* context, const ::grpc::ByteBuffer* request, ::milvus::grpc::HQueryResult* response, ::grpc::experimental::ClientUnaryReactor* reactor) {
+  ::grpc_impl::internal::ClientCallbackUnaryFactory::Create(stub_->channel_.get(), stub_->rpcmethod_HybridSearchPB_, context, request, response, reactor);
+}
+
+::grpc::ClientAsyncResponseReader< ::milvus::grpc::HQueryResult>* MilvusService::Stub::AsyncHybridSearchPBRaw(::grpc::ClientContext* context, const ::milvus::grpc::HSearchParamPB& request, ::grpc::CompletionQueue* cq) {
+  return ::grpc_impl::internal::ClientAsyncResponseReaderFactory< ::milvus::grpc::HQueryResult>::Create(channel_.get(), cq, rpcmethod_HybridSearchPB_, context, request, true);
+}
+
+::grpc::ClientAsyncResponseReader< ::milvus::grpc::HQueryResult>* MilvusService::Stub::PrepareAsyncHybridSearchPBRaw(::grpc::ClientContext* context, const ::milvus::grpc::HSearchParamPB& request, ::grpc::CompletionQueue* cq) {
+  return ::grpc_impl::internal::ClientAsyncResponseReaderFactory< ::milvus::grpc::HQueryResult>::Create(channel_.get(), cq, rpcmethod_HybridSearchPB_, context, request, false);
+}
+
 ::grpc::Status MilvusService::Stub::HybridSearch(::grpc::ClientContext* context, const ::milvus::grpc::HSearchParam& request, ::milvus::grpc::HQueryResult* response) {
   return ::grpc::internal::BlockingUnaryCall(channel_.get(), rpcmethod_HybridSearch_, context, request, response);
 }
@@ -1375,25 +1405,30 @@ MilvusService::Service::Service() {
   AddMethod(new ::grpc::internal::RpcServiceMethod(
       MilvusService_method_names[34],
       ::grpc::internal::RpcMethod::NORMAL_RPC,
+      new ::grpc::internal::RpcMethodHandler< MilvusService::Service, ::milvus::grpc::HSearchParamPB, ::milvus::grpc::HQueryResult>(
+          std::mem_fn(&MilvusService::Service::HybridSearchPB), this)));
+  AddMethod(new ::grpc::internal::RpcServiceMethod(
+      MilvusService_method_names[35],
+      ::grpc::internal::RpcMethod::NORMAL_RPC,
       new ::grpc::internal::RpcMethodHandler< MilvusService::Service, ::milvus::grpc::HSearchParam, ::milvus::grpc::HQueryResult>(
           std::mem_fn(&MilvusService::Service::HybridSearch), this)));
   AddMethod(new ::grpc::internal::RpcServiceMethod(
-      MilvusService_method_names[35],
+      MilvusService_method_names[36],
       ::grpc::internal::RpcMethod::NORMAL_RPC,
       new ::grpc::internal::RpcMethodHandler< MilvusService::Service, ::milvus::grpc::HSearchInSegmentsParam, ::milvus::grpc::TopKQueryResult>(
           std::mem_fn(&MilvusService::Service::HybridSearchInSegments), this)));
   AddMethod(new ::grpc::internal::RpcServiceMethod(
-      MilvusService_method_names[36],
+      MilvusService_method_names[37],
       ::grpc::internal::RpcMethod::NORMAL_RPC,
       new ::grpc::internal::RpcMethodHandler< MilvusService::Service, ::milvus::grpc::VectorsIdentity, ::milvus::grpc::HEntity>(
           std::mem_fn(&MilvusService::Service::GetEntityByID), this)));
   AddMethod(new ::grpc::internal::RpcServiceMethod(
-      MilvusService_method_names[37],
+      MilvusService_method_names[38],
       ::grpc::internal::RpcMethod::NORMAL_RPC,
       new ::grpc::internal::RpcMethodHandler< MilvusService::Service, ::milvus::grpc::HGetEntityIDsParam, ::milvus::grpc::HEntityIDs>(
           std::mem_fn(&MilvusService::Service::GetEntityIDs), this)));
   AddMethod(new ::grpc::internal::RpcServiceMethod(
-      MilvusService_method_names[38],
+      MilvusService_method_names[39],
       ::grpc::internal::RpcMethod::NORMAL_RPC,
       new ::grpc::internal::RpcMethodHandler< MilvusService::Service, ::milvus::grpc::HDeleteByIDParam, ::milvus::grpc::Status>(
           std::mem_fn(&MilvusService::Service::DeleteEntitiesByID), this)));
@@ -1634,6 +1669,13 @@ MilvusService::Service::~Service() {
 }
 
 ::grpc::Status MilvusService::Service::InsertEntity(::grpc::ServerContext* context, const ::milvus::grpc::HInsertParam* request, ::milvus::grpc::HEntityIDs* response) {
+  (void) context;
+  (void) request;
+  (void) response;
+  return ::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "");
+}
+
+::grpc::Status MilvusService::Service::HybridSearchPB(::grpc::ServerContext* context, const ::milvus::grpc::HSearchParamPB* request, ::milvus::grpc::HQueryResult* response) {
   (void) context;
   (void) request;
   (void) response;

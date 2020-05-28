@@ -14,6 +14,7 @@
 #include <iostream>
 #include <memory>
 #include <string>
+#include <unordered_map>
 #include <vector>
 #include "utils/Json.h"
 
@@ -92,7 +93,7 @@ using GeneralQueryPtr = std::shared_ptr<GeneralQuery>;
 struct LeafQuery {
     TermQueryPtr term_query;
     RangeQueryPtr range_query;
-    VectorQueryPtr vector_query;
+    std::string vector_placeholder;
     float query_boost;
 };
 
@@ -102,6 +103,12 @@ struct BinaryQuery {
     QueryRelation relation;
     float query_boost;
 };
+
+struct Query {
+    BinaryQueryPtr root;
+    std::unordered_map<std::string, VectorQueryPtr> vectors;
+};
+using QueryPtr = std::shared_ptr<Query>;
 
 }  // namespace query
 }  // namespace milvus
