@@ -78,7 +78,8 @@ class DBImpl : public DB, public server::CacheConfigHandler, public server::Engi
     GetCollectionInfo(const std::string& collection_id, std::string& collection_info) override;
 
     Status
-    PreloadCollection(const std::string& collection_id) override;
+    PreloadCollection(const std::shared_ptr<server::Context>& context, const std::string& collection_id,
+                      bool force = false) override;
 
     Status
     UpdateCollectionFlag(const std::string& collection_id, int64_t flag) override;
@@ -119,10 +120,11 @@ class DBImpl : public DB, public server::CacheConfigHandler, public server::Engi
     Flush() override;
 
     Status
-    Compact(const std::string& collection_id, double threshold = 0.0) override;
+    Compact(const std::shared_ptr<server::Context>& context, const std::string& collection_id,
+            double threshold = 0.0) override;
 
     Status
-    GetVectorsByID(const std::string& collection_id, const IDNumbers& id_array,
+    GetVectorsByID(const engine::meta::CollectionSchema& collection, const IDNumbers& id_array,
                    std::vector<engine::VectorsData>& vectors) override;
 
     Status
@@ -200,8 +202,8 @@ class DBImpl : public DB, public server::CacheConfigHandler, public server::Engi
                      ResultIds& result_ids, ResultDistances& result_distances);
 
     Status
-    GetVectorsByIdHelper(const std::string& collection_id, const IDNumbers& id_array,
-                         std::vector<engine::VectorsData>& vectors, meta::FilesHolder& files_holder);
+    GetVectorsByIdHelper(const IDNumbers& id_array, std::vector<engine::VectorsData>& vectors,
+                         meta::FilesHolder& files_holder);
 
     void
     InternalFlush(const std::string& collection_id = "");
@@ -228,7 +230,7 @@ class DBImpl : public DB, public server::CacheConfigHandler, public server::Engi
     StartMetricTask();
 
     void
-    StartMergeTask(bool force_merge_all = false);
+    StartMergeTask(const std::set<std::string>& merge_collection_ids, bool force_merge_all = false);
 
     void
     BackgroundMerge(std::set<std::string> collection_ids, bool force_merge_all);
@@ -243,13 +245,7 @@ class DBImpl : public DB, public server::CacheConfigHandler, public server::Engi
     BackgroundBuildIndex();
 
     Status
-    CompactFile(const std::string& collection_id, double threshold, const meta::SegmentSchema& file,
-                meta::SegmentsSchema& files_to_update);
-
-    /*
-    Status
-    SyncMemData(std::set<std::string>& sync_collection_ids);
-    */
+    CompactFile(const meta::SegmentSchema& file, double threshold, meta::SegmentsSchema& files_to_update);
 
     Status
     GetFilesToBuildIndex(const std::string& collection_id, const std::vector<int>& file_types,
@@ -355,7 +351,6 @@ class DBImpl : public DB, public server::CacheConfigHandler, public server::Engi
     ThreadPool merge_thread_pool_;
     std::mutex merge_result_mutex_;
     std::list<std::future<void>> merge_thread_results_;
-    std::set<std::string> merge_collection_ids_;
 
     ThreadPool index_thread_pool_;
     std::mutex index_result_mutex_;

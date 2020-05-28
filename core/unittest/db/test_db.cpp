@@ -32,7 +32,7 @@ namespace {
 
 static const char* COLLECTION_NAME = "test_group";
 static constexpr int64_t COLLECTION_DIM = 256;
-static constexpr int64_t VECTOR_COUNT = 25000;
+static constexpr int64_t VECTOR_COUNT = 5000;
 static constexpr int64_t INSERT_LOOP = 100;
 static constexpr int64_t SECONDS_EACH_HOUR = 3600;
 static constexpr int64_t DAY_SECONDS = 24 * 60 * 60;
@@ -180,7 +180,7 @@ TEST_F(DBTest, DB_TEST) {
         milvus::engine::ResultIds result_ids;
         milvus::engine::ResultDistances result_distances;
         int k = 10;
-        std::this_thread::sleep_for(std::chrono::seconds(2));
+        std::this_thread::sleep_for(std::chrono::seconds(1));
 
         INIT_TIMER;
         std::stringstream ss;
@@ -214,7 +214,7 @@ TEST_F(DBTest, DB_TEST) {
                 /* LOG(DEBUG) << ss.str(); */
             }
             ASSERT_TRUE(count >= prev_count);
-            std::this_thread::sleep_for(std::chrono::seconds(1));
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
         }
     });
 
@@ -236,7 +236,7 @@ TEST_F(DBTest, DB_TEST) {
         stat = db_->Flush();
         ASSERT_TRUE(stat.ok());
 
-        std::this_thread::sleep_for(std::chrono::microseconds(1));
+        std::this_thread::sleep_for(std::chrono::milliseconds(20));
     }
 
     search.join();
@@ -455,34 +455,34 @@ TEST_F(DBTest, PRELOAD_TEST) {
     db_->CreateIndex(dummy_context_, COLLECTION_NAME, index);  // wait until build index finish
 
     int64_t prev_cache_usage = milvus::cache::CpuCacheMgr::GetInstance()->CacheUsage();
-    stat = db_->PreloadCollection(COLLECTION_NAME);
+    stat = db_->PreloadCollection(dummy_context_, COLLECTION_NAME);
     ASSERT_TRUE(stat.ok());
     int64_t cur_cache_usage = milvus::cache::CpuCacheMgr::GetInstance()->CacheUsage();
     ASSERT_TRUE(prev_cache_usage < cur_cache_usage);
 
     FIU_ENABLE_FIU("SqliteMetaImpl.FilesToSearch.throw_exception");
-    stat = db_->PreloadCollection(COLLECTION_NAME);
+    stat = db_->PreloadCollection(dummy_context_, COLLECTION_NAME);
     ASSERT_FALSE(stat.ok());
     fiu_disable("SqliteMetaImpl.FilesToSearch.throw_exception");
 
     // create a partition
     stat = db_->CreatePartition(COLLECTION_NAME, "part0", "0");
     ASSERT_TRUE(stat.ok());
-    stat = db_->PreloadCollection(COLLECTION_NAME);
+    stat = db_->PreloadCollection(dummy_context_, COLLECTION_NAME);
     ASSERT_TRUE(stat.ok());
 
     FIU_ENABLE_FIU("DBImpl.PreloadCollection.null_engine");
-    stat = db_->PreloadCollection(COLLECTION_NAME);
+    stat = db_->PreloadCollection(dummy_context_, COLLECTION_NAME);
     ASSERT_FALSE(stat.ok());
     fiu_disable("DBImpl.PreloadCollection.null_engine");
 
     FIU_ENABLE_FIU("DBImpl.PreloadCollection.exceed_cache");
-    stat = db_->PreloadCollection(COLLECTION_NAME);
+    stat = db_->PreloadCollection(dummy_context_, COLLECTION_NAME);
     ASSERT_FALSE(stat.ok());
     fiu_disable("DBImpl.PreloadCollection.exceed_cache");
 
     FIU_ENABLE_FIU("DBImpl.PreloadCollection.engine_throw_exception");
-    stat = db_->PreloadCollection(COLLECTION_NAME);
+    stat = db_->PreloadCollection(dummy_context_, COLLECTION_NAME);
     ASSERT_FALSE(stat.ok());
     fiu_disable("DBImpl.PreloadCollection.engine_throw_exception");
 }
@@ -535,15 +535,15 @@ TEST_F(DBTest, SHUTDOWN_TEST) {
     stat = db_->DeleteVectors(collection_info.collection_id_, ids_to_delete);
     ASSERT_FALSE(stat.ok());
 
-    stat = db_->Compact(collection_info.collection_id_);
+    stat = db_->Compact(dummy_context_, collection_info.collection_id_);
     ASSERT_FALSE(stat.ok());
 
     std::vector<milvus::engine::VectorsData> vectors;
     std::vector<int64_t> id_array = {0};
-    stat = db_->GetVectorsByID(collection_info.collection_id_, id_array, vectors);
+    stat = db_->GetVectorsByID(collection_info, id_array, vectors);
     ASSERT_FALSE(stat.ok());
 
-    stat = db_->PreloadCollection(collection_info.collection_id_);
+    stat = db_->PreloadCollection(dummy_context_, collection_info.collection_id_);
     ASSERT_FALSE(stat.ok());
 
     uint64_t row_count = 0;
@@ -612,7 +612,6 @@ TEST_F(DBTest, BACK_TIMER_THREAD_1) {
             ASSERT_EQ(xb.id_array_.size(), nb);
         }
 
-        std::this_thread::sleep_for(std::chrono::seconds(2));
         db_->Stop();
         fiu_disable("DBImpl.StartMetricTask.InvalidTotalCache");
         fiu_disable("SqliteMetaImpl.FilesToMerge.throw_exception");
@@ -620,7 +619,6 @@ TEST_F(DBTest, BACK_TIMER_THREAD_1) {
 
     FIU_ENABLE_FIU("DBImpl.StartMetricTask.InvalidTotalCache");
     db_->Start();
-    std::this_thread::sleep_for(std::chrono::seconds(2));
     db_->Stop();
     fiu_disable("DBImpl.StartMetricTask.InvalidTotalCache");
 }
@@ -644,7 +642,6 @@ TEST_F(DBTest, BACK_TIMER_THREAD_2) {
     }
 
     FIU_ENABLE_FIU("SqliteMetaImpl.CreateCollectionFile.throw_exception");
-    std::this_thread::sleep_for(std::chrono::seconds(2));
     db_->Stop();
     fiu_disable("SqliteMetaImpl.CreateCollectionFile.throw_exception");
 }
@@ -669,7 +666,6 @@ TEST_F(DBTest, BACK_TIMER_THREAD_3) {
 
     FIU_ENABLE_FIU("DBImpl.MergeFiles.Serialize_ThrowException");
     db_->Start();
-    std::this_thread::sleep_for(std::chrono::seconds(2));
     db_->Stop();
     fiu_disable("DBImpl.MergeFiles.Serialize_ThrowException");
 }
@@ -694,7 +690,6 @@ TEST_F(DBTest, BACK_TIMER_THREAD_4) {
 
     FIU_ENABLE_FIU("DBImpl.MergeFiles.Serialize_ErrorStatus");
     db_->Start();
-    std::this_thread::sleep_for(std::chrono::seconds(2));
     db_->Stop();
     fiu_disable("DBImpl.MergeFiles.Serialize_ErrorStatus");
 }
@@ -934,11 +929,9 @@ TEST_F(DBTest2, ARHIVE_DISK_CHECK) {
         BuildVectors(nb, i, xb);
 
         db_->InsertVectors(COLLECTION_NAME, "", xb);
-        std::this_thread::sleep_for(std::chrono::microseconds(1));
     }
 
-    std::this_thread::sleep_for(std::chrono::seconds(1));
-
+    db_->Flush();
     db_->Size(size);
     LOG(DEBUG) << "size=" << size;
     ASSERT_LE(size, 1 * milvus::engine::GB);
@@ -981,8 +974,6 @@ TEST_F(DBTest2, DELETE_TEST) {
     fiu_disable("DBImpl.DropCollectionRecursively.failed");
 
     stat = db_->DropCollection(COLLECTION_NAME);
-
-    std::this_thread::sleep_for(std::chrono::seconds(2));
     ASSERT_TRUE(stat.ok());
 
     db_->HasCollection(COLLECTION_NAME, has_collection);
@@ -1183,7 +1174,9 @@ TEST_F(DBTest2, FLUSH_NON_EXISTING_COLLECTION) {
 TEST_F(DBTest2, GET_VECTOR_NON_EXISTING_COLLECTION) {
     std::vector<milvus::engine::VectorsData> vectors;
     std::vector<int64_t> id_array = {0};
-    auto status = db_->GetVectorsByID("non_existing", id_array, vectors);
+    milvus::engine::meta::CollectionSchema collection_info;
+    collection_info.collection_id_ = "non_existing";
+    auto status = db_->GetVectorsByID(collection_info, id_array, vectors);
     ASSERT_FALSE(status.ok());
 }
 
@@ -1203,7 +1196,7 @@ TEST_F(DBTest2, GET_VECTOR_BY_ID_TEST) {
 
     std::vector<milvus::engine::VectorsData> vectors;
     std::vector<int64_t> empty_array;
-    stat = db_->GetVectorsByID(COLLECTION_NAME, empty_array, vectors);
+    stat = db_->GetVectorsByID(collection_info, empty_array, vectors);
     ASSERT_FALSE(stat.ok());
 
     stat = db_->InsertVectors(collection_info.collection_id_, partition_tag, qxb);
@@ -1211,7 +1204,7 @@ TEST_F(DBTest2, GET_VECTOR_BY_ID_TEST) {
 
     db_->Flush(collection_info.collection_id_);
 
-    stat = db_->GetVectorsByID(COLLECTION_NAME, qxb.id_array_, vectors);
+    stat = db_->GetVectorsByID(collection_info, qxb.id_array_, vectors);
     ASSERT_TRUE(stat.ok());
     ASSERT_EQ(vectors.size(), qxb.id_array_.size());
     ASSERT_EQ(vectors[0].float_data_.size(), COLLECTION_DIM);
@@ -1221,7 +1214,7 @@ TEST_F(DBTest2, GET_VECTOR_BY_ID_TEST) {
     }
 
     std::vector<int64_t> invalid_array = {-1, -1};
-    stat = db_->GetVectorsByID(COLLECTION_NAME, empty_array, vectors);
+    stat = db_->GetVectorsByID(collection_info, empty_array, vectors);
     ASSERT_TRUE(stat.ok());
     for (auto& vector : vectors) {
         ASSERT_EQ(vector.vector_count_, 0);
@@ -1344,7 +1337,7 @@ TEST_F(DBTest2, SEARCH_WITH_DIFFERENT_INDEX) {
     stat = db_->CreateIndex(dummy_context_, collection_info.collection_id_, index);
     ASSERT_TRUE(stat.ok());
 
-    stat = db_->PreloadCollection(collection_info.collection_id_);
+    stat = db_->PreloadCollection(dummy_context_, collection_info.collection_id_);
     ASSERT_TRUE(stat.ok());
 
     int topk = 10, nprobe = 10;
@@ -1369,7 +1362,7 @@ result_distances);
     stat = db_->CreateIndex(dummy_context_, collection_info.collection_id_, index);
     ASSERT_TRUE(stat.ok());
 
-    stat = db_->PreloadCollection(collection_info.collection_id_);
+    stat = db_->PreloadCollection(dummy_context_, collection_info.collection_id_);
     ASSERT_TRUE(stat.ok());
 
     for (auto id : ids_to_search) {
