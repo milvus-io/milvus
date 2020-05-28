@@ -93,6 +93,7 @@ void IndexIDMapTemplate<IndexT>::search
     }
 }
 
+#if 0
 template <typename IndexT>
 void IndexIDMapTemplate<IndexT>::get_vector_by_id(idx_t n, const idx_t *xid, component_t *x,
                                                   ConcurrentBitsetPtr bitset)
@@ -117,6 +118,7 @@ void IndexIDMapTemplate<IndexT>::search_by_id (idx_t n, const idx_t *xid, idx_t 
     index->search(n, x, k, distances, labels, bitset);
     delete []x;
 }
+#endif
 
 template <typename IndexT>
 void IndexIDMapTemplate<IndexT>::range_search

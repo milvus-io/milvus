@@ -102,7 +102,7 @@ TEST_P(IVFTest, ivf_basic_cpu) {
     ASSERT_ANY_THROW(index_->AddWithoutIds(base_dataset, conf_));
 
     index_->Train(base_dataset, conf_);
-    index_->Add(base_dataset, conf_);
+    index_->AddWithoutIds(base_dataset, conf_);
     EXPECT_EQ(index_->Count(), nb);
     EXPECT_EQ(index_->Dim(), dim);
 
@@ -111,6 +111,7 @@ TEST_P(IVFTest, ivf_basic_cpu) {
     // PrintResult(result, nq, k);
 
     if (index_type_ != milvus::knowhere::IndexEnum::INDEX_FAISS_IVFPQ) {
+#if 0
         auto result2 = index_->QueryById(id_dataset, conf_);
         AssertAnns(result2, nq, k);
 
@@ -122,6 +123,7 @@ TEST_P(IVFTest, ivf_basic_cpu) {
             /* for SQ8, sometimes the mean diff can bigger than 20% */
             // AssertVec(result3, base_dataset, xid_dataset, 1, dim, CheckMode::CHECK_APPROXIMATE_EQUAL);
         }
+#endif
 
         faiss::ConcurrentBitsetPtr concurrent_bitset_ptr = std::make_shared<faiss::ConcurrentBitset>(nb);
         for (int64_t i = 0; i < nq; ++i) {
@@ -133,12 +135,14 @@ TEST_P(IVFTest, ivf_basic_cpu) {
         AssertAnns(result_bs_1, nq, k, CheckMode::CHECK_NOT_EQUAL);
         // PrintResult(result, nq, k);
 
+#if 0
         auto result_bs_2 = index_->QueryById(id_dataset, conf_);
         AssertAnns(result_bs_2, nq, k, CheckMode::CHECK_NOT_EQUAL);
         // PrintResult(result, nq, k);
 
         auto result_bs_3 = index_->GetVectorById(xid_dataset, conf_);
         AssertVec(result_bs_3, base_dataset, xid_dataset, 1, dim, CheckMode::CHECK_NOT_EQUAL);
+#endif
     }
 
 #ifdef MILVUS_GPU_VERSION
@@ -157,8 +161,7 @@ TEST_P(IVFTest, ivf_basic_gpu) {
     ASSERT_ANY_THROW(index_->Add(base_dataset, conf_));
     ASSERT_ANY_THROW(index_->AddWithoutIds(base_dataset, conf_));
 
-    index_->Train(base_dataset, conf_);
-    index_->Add(base_dataset, conf_);
+    index_->BuildAll(base_dataset, conf_);
     EXPECT_EQ(index_->Count(), nb);
     EXPECT_EQ(index_->Dim(), dim);
 
