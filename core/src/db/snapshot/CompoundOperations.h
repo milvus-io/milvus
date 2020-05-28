@@ -72,6 +72,21 @@ class MergeOperation : public Operations {
     CommitNewSegmentFile(const SegmentFileContext& context);
 };
 
+class CreateCollectionOperation : public Operations {
+ public:
+    using BaseT = Operations;
+    explicit CreateCollectionOperation(const CreateCollectionContext& context);
+
+    bool
+    DoExecute(Store&) override;
+
+    ScopedSnapshotT
+    GetSnapshot() const override;
+
+ private:
+    CreateCollectionContext context_;
+};
+
 class GetSnapshotIDsOperation : public Operations {
  public:
     using BaseT = Operations;
@@ -105,6 +120,26 @@ class GetCollectionIDsOperation : public Operations {
  protected:
     bool reversed_;
     IDS_TYPE ids_;
+};
+
+class SoftDeleteCollectionOperation : public Operations {
+ public:
+    using BaseT = Operations;
+    // TODO: Define error code and msg later
+    explicit SoftDeleteCollectionOperation(const OperationContext& context)
+        : BaseT(context, ScopedSnapshotT()), status_(40005, "Operation Pending") {
+    }
+
+    Status
+    GetStatus() const {
+        return status_;
+    }
+    bool
+    DoExecute(Store& store) override;
+
+ private:
+    ID_TYPE collection_id_;
+    Status status_;
 };
 
 }  // namespace snapshot

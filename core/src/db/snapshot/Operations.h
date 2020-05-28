@@ -20,8 +20,9 @@
 #include <thread>
 #include <vector>
 #include "Context.h"
-#include "Snapshot.h"
-#include "Store.h"
+#include "db/snapshot/Snapshot.h"
+#include "db/snapshot/Store.h"
+#include "utils/Status.h"
 
 namespace milvus {
 namespace engine {
@@ -56,7 +57,7 @@ class Operations : public std::enable_shared_from_this<Operations> {
 
     template <typename StepT>
     void
-    AddStep(const StepT& step);
+    AddStep(const StepT& step, bool activate = true);
     void
     SetStepResult(ID_TYPE id) {
         ids_.push_back(id);
@@ -112,8 +113,11 @@ class Operations : public std::enable_shared_from_this<Operations> {
 
 template <typename StepT>
 void
-Operations::AddStep(const StepT& step) {
-    steps_.push_back(std::make_shared<StepT>(step));
+Operations::AddStep(const StepT& step, bool activate) {
+    auto s = std::make_shared<StepT>(step);
+    if (activate)
+        s->Activate();
+    steps_.push_back(s);
 }
 
 template <typename ResourceT>

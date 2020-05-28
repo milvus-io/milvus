@@ -29,7 +29,6 @@
 #include "db/snapshot/Snapshots.h"
 
 
-#if 1
 TEST_F(SnapshotTest, ReferenceProxyTest) {
     std::string status("raw");
     const std::string CALLED = "CALLED";
@@ -131,8 +130,87 @@ TEST_F(SnapshotTest, ResourceHoldersTest) {
     }
 }
 
+milvus::engine::snapshot::ScopedSnapshotT
+CreateCollection(const std::string& collection_name) {
+    milvus::engine::snapshot::CreateCollectionContext context;
+    auto collection_schema = std::make_shared<milvus::engine::snapshot::Collection>(collection_name);
+    context.collection = collection_schema;
+    auto vector_field = std::make_shared<milvus::engine::snapshot::Field>("vector", 0);
+    auto vector_field_element = std::make_shared<milvus::engine::snapshot::FieldElement>(0, 0, "ivfsq8",
+            milvus::engine::snapshot::FieldElementType::IVFSQ8);
+    auto int_field = std::make_shared<milvus::engine::snapshot::Field>("int", 0);
+    context.fields_schema[vector_field] = {vector_field_element};
+    context.fields_schema[int_field] = {};
+
+    auto op = std::make_shared<milvus::engine::snapshot::CreateCollectionOperation>(context);
+    op->Push();
+    auto ss = op->GetSnapshot();
+    return ss;
+}
+
+TEST_F(SnapshotTest, CreateCollectionOperationTest) {
+    milvus::engine::snapshot::Store::GetInstance().DoReset();
+    auto expect_null = milvus::engine::snapshot::Snapshots::GetInstance().GetSnapshot(100000);
+    ASSERT_TRUE(!expect_null);
+
+    std::string collection_name = "test_c1";
+    auto ss = CreateCollection(collection_name);
+
+    auto latest_ss = milvus::engine::snapshot::Snapshots::GetInstance().GetSnapshot("xxxx");
+    ASSERT_TRUE(!latest_ss);
+
+    latest_ss = milvus::engine::snapshot::Snapshots::GetInstance().GetSnapshot(collection_name);
+    ASSERT_TRUE(latest_ss);
+    ASSERT_TRUE(latest_ss->GetName() == collection_name);
+
+    auto ids = milvus::engine::snapshot::Snapshots::GetInstance().GetCollectionIds();
+    ASSERT_EQ(ids.size(), 1);
+    ASSERT_EQ(ids[0], latest_ss->GetCollectionId());
+
+    milvus::engine::snapshot::OperationContext sd_op_ctx;
+    sd_op_ctx.collection = latest_ss->GetCollection();
+    ASSERT_TRUE(sd_op_ctx.collection->IsActive());
+    auto sd_op = std::make_shared<milvus::engine::snapshot::SoftDeleteCollectionOperation>(sd_op_ctx);
+    sd_op->Push();
+    ASSERT_TRUE(sd_op->GetStatus().ok());
+    ASSERT_TRUE(!sd_op_ctx.collection->IsActive());
+    ASSERT_TRUE(!latest_ss->GetCollection()->IsActive());
+
+    milvus::engine::snapshot::Snapshots::GetInstance().Reset();
+}
+
+TEST_F(SnapshotTest, DropCollectionTest) {
+    {
+        milvus::engine::snapshot::Store::GetInstance().DoReset();
+        std::string collection_name = "test_c1";
+        auto ss = CreateCollection(collection_name);
+        ASSERT_TRUE(ss);
+        auto lss = milvus::engine::snapshot::Snapshots::GetInstance().GetSnapshot(collection_name);
+        ASSERT_TRUE(lss);
+        ASSERT_EQ(ss->GetID(), lss->GetID());
+        auto prev_ss_id = ss->GetID();
+        auto prev_c_id = ss->GetCollection()->GetID();
+        auto status = milvus::engine::snapshot::Snapshots::GetInstance().DropCollection(collection_name);
+        ASSERT_TRUE(status.ok());
+        lss = milvus::engine::snapshot::Snapshots::GetInstance().GetSnapshot(collection_name);
+        ASSERT_TRUE(!lss);
+
+        auto ss_2 = CreateCollection(collection_name);
+        lss = milvus::engine::snapshot::Snapshots::GetInstance().GetSnapshot(collection_name);
+        ASSERT_TRUE(lss);
+        ASSERT_EQ(ss_2->GetID(), lss->GetID());
+        ASSERT_TRUE(prev_ss_id != ss_2->GetID());
+        ASSERT_TRUE(prev_c_id != ss_2->GetCollection()->GetID());
+        status = milvus::engine::snapshot::Snapshots::GetInstance().DropCollection(collection_name);
+        ASSERT_TRUE(status.ok());
+        status = milvus::engine::snapshot::Snapshots::GetInstance().DropCollection(collection_name);
+        ASSERT_TRUE(!status.ok());
+    }
+}
+
 TEST_F(SnapshotTest, OperationTest) {
     {
+        std::string to_string;
         milvus::engine::snapshot::SegmentFileContext sf_context;
         sf_context.field_name = "f_1_1";
         sf_context.field_element_name = "fe_1_1";
@@ -148,6 +226,7 @@ TEST_F(SnapshotTest, OperationTest) {
                 .GetResource(ss_id, false);
             /* snapshot::SegmentCommitsHolder::GetInstance().GetResource(prev_segment_commit->GetID()); */
             ASSERT_TRUE(collection_commit);
+            to_string = collection_commit->ToString();
         }
 
         milvus::engine::snapshot::OperationContext merge_ctx;
@@ -161,6 +240,7 @@ TEST_F(SnapshotTest, OperationTest) {
             ASSERT_TRUE(seg_file);
             auto prev_segment_commit = ss->GetSegmentCommit(seg_file->GetSegmentId());
             auto prev_segment_commit_mappings = prev_segment_commit->GetMappings();
+            ASSERT_NE(prev_segment_commit->ToString(), "");
 
             build_op->Push();
             ss = build_op->GetSnapshot();
@@ -192,6 +272,7 @@ TEST_F(SnapshotTest, OperationTest) {
             context.prev_partition = ss->GetResource<milvus::engine::snapshot::Partition>(1);
             auto op = std::make_shared<milvus::engine::snapshot::NewSegmentOperation>(context, ss);
             auto new_seg = op->CommitNewSegment();
+            ASSERT_NE(new_seg->ToString(), "");
             auto seg_file = op->CommitNewSegmentFile(sf_context);
             op->Push();
 
@@ -213,6 +294,9 @@ TEST_F(SnapshotTest, OperationTest) {
         ss_id = ss->GetID();
         {
             auto prev_partition_commit = ss->GetPartitionCommitByPartitionId(partition_id);
+            auto expect_null = ss->GetPartitionCommitByPartitionId(11111111);
+            ASSERT_TRUE(!expect_null);
+            ASSERT_NE(prev_partition_commit->ToString(), "");
             auto op = std::make_shared<milvus::engine::snapshot::MergeOperation>(merge_ctx, ss);
             auto new_seg = op->CommitNewSegment();
             sf_context.segment_id = new_seg->GetID();
@@ -231,7 +315,8 @@ TEST_F(SnapshotTest, OperationTest) {
             }
             expected_mappings.insert(segment_commit->GetID());
             ASSERT_EQ(expected_mappings, new_mappings);
+
+            milvus::engine::snapshot::CollectionCommitsHolder::GetInstance().Dump();
         }
     }
 }
-#endif

@@ -263,6 +263,13 @@ class Store {
     /* } */
 
     void
+    DoReset() {
+        ids_ = MockIDST();
+        resources_ = MockResourcesT();
+        name_collections_.clear();
+    }
+
+    void
     Mock() {
         DoReset();
         DoMock();
@@ -304,23 +311,17 @@ class Store {
         });
         register_any_visitor<CollectionCommit::Ptr>(
             [this](auto c) { return CreateResource<CollectionCommit>(CollectionCommit(*c))->GetID(); });
-        /* register_any_visitor<SchemaCommit::Ptr>([this](auto c) { */
-        /*     CreateResource<SchemaCommit>(SchemaCommit(*c)); */
-        /* }); */
-        /* register_any_visitor<FieldCommit::Ptr>([this](auto c) { */
-        /*     CreateResource<FieldCommit>(FieldCommit(*c)); */
-        /* }); */
-        /* register_any_visitor<Field::Ptr>([this](auto c) { */
-        /*     CreateResource<Field>(Field(*c)); */
-        /* }); */
-        /* register_any_visitor<FieldElement::Ptr>([this](auto c) { */
-        /*     CreateResource<FieldElement>(FieldElement(*c)); */
-        /* }); */
+        register_any_visitor<SchemaCommit::Ptr>(
+            [this](auto c) { return CreateResource<SchemaCommit>(SchemaCommit(*c))->GetID(); });
+        register_any_visitor<FieldCommit::Ptr>(
+            [this](auto c) { return CreateResource<FieldCommit>(FieldCommit(*c))->GetID(); });
+        register_any_visitor<Field::Ptr>([this](auto c) { return CreateResource<Field>(Field(*c))->GetID(); });
+        register_any_visitor<FieldElement::Ptr>(
+            [this](auto c) { return CreateResource<FieldElement>(FieldElement(*c))->GetID(); });
         register_any_visitor<PartitionCommit::Ptr>(
             [this](auto c) { return CreateResource<PartitionCommit>(PartitionCommit(*c))->GetID(); });
-        /* register_any_visitor<Partition::Ptr>([this](auto c) { */
-        /*     CreateResource<Partition>(Partition(*c)); */
-        /* }); */
+        register_any_visitor<Partition::Ptr>(
+            [this](auto c) { return CreateResource<Partition>(Partition(*c))->GetID(); });
         register_any_visitor<Segment::Ptr>([this](auto c) { return CreateResource<Segment>(Segment(*c))->GetID(); });
         register_any_visitor<SegmentCommit::Ptr>(
             [this](auto c) { return CreateResource<SegmentCommit>(SegmentCommit(*c))->GetID(); });
@@ -339,7 +340,9 @@ class Store {
             std::stringstream name;
             name << "c_" << std::get<Index<Collection::MapT, MockResourcesT>::value>(ids_) + 1;
 
-            auto c = CreateCollection(Collection(name.str()));
+            auto tc = Collection(name.str());
+            tc.Activate();
+            auto c = CreateCollection(std::move(tc));
             all_records.push_back(c);
 
             MappingT schema_c_m;
@@ -416,13 +419,6 @@ class Store {
                 r->Activate();
             }
         }
-    }
-
-    void
-    DoReset() {
-        ids_ = MockIDST();
-        resources_ = MockResourcesT();
-        name_collections_.clear();
     }
 
     MockResourcesT resources_;

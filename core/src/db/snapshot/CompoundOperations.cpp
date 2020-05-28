@@ -265,6 +265,74 @@ GetCollectionIDsOperation::GetIDs() const {
     return ids_;
 }
 
+CreateCollectionOperation::CreateCollectionOperation(const CreateCollectionContext& context)
+    : BaseT(OperationContext(), ScopedSnapshotT()), context_(context) {
+}
+
+bool
+CreateCollectionOperation::DoExecute(Store& store) {
+    // TODO: Do some checks
+    auto collection = store.CreateCollection(Collection(context_.collection->GetName()));
+    AddStep(*collection);
+    MappingT field_commit_ids = {};
+    auto field_idx = 0;
+    for (auto& field_kv : context_.fields_schema) {
+        field_idx++;
+        auto& field_schema = field_kv.first;
+        auto& field_elements = field_kv.second;
+        auto field = store.CreateResource<Field>(Field(field_schema->GetName(), field_idx));
+        AddStep(*field);
+        MappingT element_ids = {};
+        auto raw_element = store.CreateResource<FieldElement>(
+            FieldElement(collection->GetID(), field->GetID(), "RAW", FieldElementType::RAW));
+        AddStep(*raw_element);
+        element_ids.insert(raw_element->GetID());
+        for (auto& element_schema : field_elements) {
+            auto element = store.CreateResource<FieldElement>(FieldElement(
+                collection->GetID(), field->GetID(), element_schema->GetName(), element_schema->GetFtype()));
+            AddStep(*element);
+            element_ids.insert(element->GetID());
+        }
+        auto field_commit =
+            store.CreateResource<FieldCommit>(FieldCommit(collection->GetID(), field->GetID(), element_ids));
+        AddStep(*field_commit);
+        field_commit_ids.insert(field_commit->GetID());
+    }
+    auto schema_commit = store.CreateResource<SchemaCommit>(SchemaCommit(collection->GetID(), field_commit_ids));
+    AddStep(*schema_commit);
+    auto partition = store.CreateResource<Partition>(Partition("_default", collection->GetID()));
+    AddStep(*partition);
+    auto partition_commit =
+        store.CreateResource<PartitionCommit>(PartitionCommit(collection->GetID(), partition->GetID()));
+    AddStep(*partition_commit);
+    auto collection_commit = store.CreateResource<CollectionCommit>(
+        CollectionCommit(collection->GetID(), schema_commit->GetID(), {partition_commit->GetID()}));
+    AddStep(*collection_commit);
+    context_.collection_commit = collection_commit;
+    return true;
+}
+
+ScopedSnapshotT
+CreateCollectionOperation::GetSnapshot() const {
+    if (ids_.size() == 0)
+        return ScopedSnapshotT();
+    if (!context_.collection_commit)
+        return ScopedSnapshotT();
+    return Snapshots::GetInstance().GetSnapshot(context_.collection_commit->GetCollectionId());
+}
+
+bool
+SoftDeleteCollectionOperation::DoExecute(Store& store) {
+    if (!context_.collection) {
+        status_ = Status(40006, "Invalid Context");
+        return false;
+    }
+    context_.collection->Deactivate();
+    AddStep(*context_.collection);
+    status_ = Status::OK();
+    return true;
+}
+
 }  // namespace snapshot
 }  // namespace engine
 }  // namespace milvus

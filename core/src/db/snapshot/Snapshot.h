@@ -28,6 +28,7 @@
 #include <vector>
 #include "db/snapshot/Utils.h"
 #include "db/snapshot/WrappedTypes.h"
+#include "utils/Status.h"
 
 namespace milvus {
 namespace engine {
@@ -52,6 +53,11 @@ class Snapshot : public ReferenceProxy {
     GetCollectionId() const {
         auto it = GetResources<Collection>().begin();
         return it->first;
+    }
+
+    CollectionPtr
+    GetCollection() {
+        return GetResources<Collection>().begin()->second.Get();
     }
 
     const std::string&

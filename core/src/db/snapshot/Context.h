@@ -12,8 +12,10 @@
 #pragma once
 
 #include <iostream>
+#include <map>
 #include <string>
 #include <vector>
+#include "db/meta/MetaTypes.h"
 #include "db/snapshot/Resources.h"
 
 namespace milvus {
@@ -52,6 +54,13 @@ struct OperationContext {
     CollectionCommitPtr prev_collection_commit = nullptr;
 
     SegmentFile::VecT new_segment_files;
+    CollectionPtr collection = nullptr;
+};
+
+struct CreateCollectionContext {
+    CollectionPtr collection = nullptr;
+    std::map<FieldPtr, std::vector<FieldElementPtr>> fields_schema;
+    CollectionCommitPtr collection_commit = nullptr;
 };
 
 }  // namespace snapshot
