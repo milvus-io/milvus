@@ -83,6 +83,7 @@ BinaryIVF::Query(const DatasetPtr& dataset_ptr, const Config& config) {
     }
 }
 
+#if 0
 DatasetPtr
 BinaryIVF::QueryById(const DatasetPtr& dataset_ptr, const Config& config) {
     if (!index_ || !index_->is_trained) {
@@ -126,6 +127,7 @@ BinaryIVF::QueryById(const DatasetPtr& dataset_ptr, const Config& config) {
         KNOWHERE_THROW_MSG(e.what());
     }
 }
+#endif
 
 void
 BinaryIVF::Train(const DatasetPtr& dataset_ptr, const Config& config) {
@@ -140,13 +142,14 @@ BinaryIVF::Train(const DatasetPtr& dataset_ptr, const Config& config) {
     index_ = index;
 }
 
+#if 0
 DatasetPtr
 BinaryIVF::GetVectorById(const DatasetPtr& dataset_ptr, const Config& config) {
     if (!index_ || !index_->is_trained) {
         KNOWHERE_THROW_MSG("index not initialize or trained");
     }
 
-    //    GETBINARYTENSOR(dataset_ptr)
+    // GETBINARYTENSOR(dataset_ptr)
     // auto rows = dataset_ptr->Get<int64_t>(meta::ROWS);
     auto p_data = dataset_ptr->Get<const int64_t*>(meta::IDS);
     auto elems = dataset_ptr->Get<int64_t>(meta::DIM);
@@ -166,6 +169,7 @@ BinaryIVF::GetVectorById(const DatasetPtr& dataset_ptr, const Config& config) {
         KNOWHERE_THROW_MSG(e.what());
     }
 }
+#endif
 
 std::shared_ptr<faiss::IVFSearchParameters>
 BinaryIVF::GenParams(const Config& config) {

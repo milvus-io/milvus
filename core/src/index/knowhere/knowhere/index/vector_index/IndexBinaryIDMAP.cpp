@@ -72,6 +72,7 @@ BinaryIDMAP::Query(const DatasetPtr& dataset_ptr, const Config& config) {
     return ret_ds;
 }
 
+#if 0
 DatasetPtr
 BinaryIDMAP::QueryById(const DatasetPtr& dataset_ptr, const Config& config) {
     if (!index_) {
@@ -109,6 +110,7 @@ BinaryIDMAP::QueryById(const DatasetPtr& dataset_ptr, const Config& config) {
 
     return ret_ds;
 }
+#endif
 
 void
 BinaryIDMAP::Add(const DatasetPtr& dataset_ptr, const Config& config) {
@@ -169,6 +171,7 @@ BinaryIDMAP::AddWithoutIds(const DatasetPtr& dataset_ptr, const Config& config) 
     index_->add_with_ids(rows, (uint8_t*)p_data, new_ids.data());
 }
 
+#if 0
 DatasetPtr
 BinaryIDMAP::GetVectorById(const DatasetPtr& dataset_ptr, const Config& config) {
     if (!index_) {
@@ -189,6 +192,7 @@ BinaryIDMAP::GetVectorById(const DatasetPtr& dataset_ptr, const Config& config) 
     ret_ds->Set(meta::TENSOR, p_x);
     return ret_ds;
 }
+#endif
 
 void
 BinaryIDMAP::QueryImpl(int64_t n, const uint8_t* data, int64_t k, float* distances, int64_t* labels,

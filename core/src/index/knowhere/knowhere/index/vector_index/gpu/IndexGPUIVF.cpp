@@ -147,10 +147,10 @@ GPUIVF::QueryImpl(int64_t n, const float* data, int64_t k, float* distances, int
         ResScope rs(res_, gpu_id_);
 
         // if query size > 2048 we search by blocks to avoid malloc issue
-        size_t block_size = 2048;
-        size_t dim = device_index->d;
-        for (size_t i = 0; i < n; i += block_size) {
-            size_t search_size = (n - i > block_size) ? block_size : (n - i);
+        const int64_t block_size = 2048;
+        int64_t dim = device_index->d;
+        for (int64_t i = 0; i < n; i += block_size) {
+            int64_t search_size = (n - i > block_size) ? block_size : (n - i);
             device_index->search(search_size, (float*)data + i * dim, k, distances + i * k, labels + i * k, bitset_);
         }
     } else {

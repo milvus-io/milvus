@@ -82,20 +82,20 @@ TEST_F(SingleIndexTest, IVFSQHybrid) {
         ASSERT_ANY_THROW(cpu_idx->CopyCpuToGpuWithQuantizer(-1, conf));
         auto pair = cpu_idx->CopyCpuToGpuWithQuantizer(DEVICEID, conf);
         auto gpu_idx = pair.first;
-        auto quantization = pair.second;
 
         auto result = gpu_idx->Query(query_dataset, conf);
         AssertAnns(result, nq, conf[milvus::knowhere::meta::TOPK]);
-        //        PrintResult(result, nq, k);
+        // PrintResult(result, nq, k);
 
         milvus::json quantizer_conf{{milvus::knowhere::meta::DEVICEID, DEVICEID}, {"mode", 2}};
         for (int i = 0; i < 2; ++i) {
             auto hybrid_idx = std::make_shared<milvus::knowhere::IVFSQHybrid>(DEVICEID);
             hybrid_idx->Load(binaryset);
+            auto quantization = hybrid_idx->LoadQuantizer(quantizer_conf);
             auto new_idx = hybrid_idx->LoadData(quantization, quantizer_conf);
             auto result = new_idx->Query(query_dataset, conf);
             AssertAnns(result, nq, conf[milvus::knowhere::meta::TOPK]);
-            //            PrintResult(result, nq, k);
+            // PrintResult(result, nq, k);
         }
     }
 
