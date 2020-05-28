@@ -105,20 +105,46 @@ class TestCollection:
         status = connect.create_collection(param)
         assert status.OK()
 
-    # @pytest.mark.level(2)
-    # def test_create_collection_without_connection(self, dis_connect):
-    #     '''
-    #     target: test create collection, without connection
-    #     method: create collection with correct params, with a disconnected instance
-    #     expected: create raise exception
-    #     '''
-    #     collection_name = gen_unique_str("test_collection")
-    #     param = {'collection_name': collection_name,
-    #              'dimension': dim,
-    #              'index_file_size': index_file_size, 
-    #              'metric_type': MetricType.L2}
-    #     with pytest.raises(Exception) as e:
-    #         status = dis_connect.create_collection(param)
+    def test_create_collection_auto_flush_disabled(self, connect):
+        '''
+        target: test create normal collection, with large auto_flush_interval
+        method: create collection with corrent params
+        expected: create status return ok
+        '''
+        disable_flush(connect)
+        collection_name = gen_unique_str("test_collection")
+        try:
+            param = {'collection_name': collection_name,
+                     'dimension': dim,
+                     'index_file_size': index_file_size,
+                     'metric_type': MetricType.SUPERSTRUCTURE}
+            status = connect.create_collection(param)
+            assert status.OK()
+            status = connect.drop_collection(collection_name,)
+            assert status.OK()
+            time.sleep(2)
+            ## recreate collection
+            status = connect.create_collection(param)
+            assert status.OK()
+        except Exception as e:
+            pass
+        finally:
+            enable_flush(connect)
+
+    @pytest.mark.level(2)
+    def test_create_collection_without_connection(self, dis_connect):
+        '''
+        target: test create collection, without connection
+        method: create collection with correct params, with a disconnected instance
+        expected: create raise exception
+        '''
+        collection_name = gen_unique_str("test_collection")
+        param = {'collection_name': collection_name,
+                 'dimension': dim,
+                 'index_file_size': index_file_size,
+                 'metric_type': MetricType.L2}
+        with pytest.raises(Exception) as e:
+            status = dis_connect.create_collection(param)
 
     def test_create_collection_existed(self, connect):
         '''

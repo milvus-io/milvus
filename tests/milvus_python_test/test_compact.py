@@ -171,6 +171,41 @@ class TestCompactBase:
         logging.getLogger().info(info["partitions"])
         assert not info["partitions"][0]["segments"]
 
+    @pytest.mark.timeout(COMPACT_TIMEOUT)
+    def test_insert_partition_delete_half_and_compact(self, connect, collection):
+        '''
+        target: test add vectors into partition, delete them and compact 
+        method: add vectors, delete half of vectors in partition and compact collection
+        expected: status ok, data_size less than the older version
+        '''
+        vectors = gen_vector(nb, dim)
+        status = connect.create_partition(collection, tag)
+        assert status.OK()
+        status, ids = connect.insert(collection, vectors, partition_tag=tag)
+        assert status.OK()
+        status = connect.flush([collection])
+        assert status.OK()
+        status, info = connect.get_collection_stats(collection)
+        assert status.OK()
+        logging.getLogger().info(info["partitions"])
+
+        delete_ids = ids[:3000]
+        status = connect.delete_entity_by_id(collection, delete_ids)
+        assert status.OK()
+        status = connect.flush([collection])
+        assert status.OK()
+        # get collection info before compact
+        status, info = connect.get_collection_stats(collection)
+        assert status.OK()
+        logging.getLogger().info(info["partitions"])
+        status = connect.compact(collection)
+        assert status.OK()
+        # get collection info after compact
+        status, info_after = connect.get_collection_stats(collection)
+        assert status.OK()
+        logging.getLogger().info(info_after["partitions"])
+        assert info["partitions"][1]["segments"][0]["data_size"] > info_after["partitions"][1]["segments"][0]["data_size"]
+
     @pytest.fixture(
         scope="function",
         params=gen_simple_index()
