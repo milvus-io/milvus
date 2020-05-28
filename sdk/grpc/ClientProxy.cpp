@@ -784,12 +784,12 @@ WriteQueryToProto(::milvus::grpc::GeneralQuery* general_query, BooleanQueryPtr b
 }
 
 Status
-ClientProxy::HybridSearch(const std::string& collection_name, const std::vector<std::string>& partition_list,
-                          BooleanQueryPtr& boolean_query, const std::string& extra_params,
-                          TopKHybridQueryResult& topk_query_result) {
+ClientProxy::HybridSearchPB(const std::string& collection_name, const std::vector<std::string>& partition_list,
+                            BooleanQueryPtr& boolean_query, const std::string& extra_params,
+                            TopKHybridQueryResult& topk_query_result) {
     try {
         // convert boolean_query to proto
-        ::milvus::grpc::HSearchParam search_param;
+        ::milvus::grpc::HSearchParamPB search_param;
         search_param.set_collection_name(collection_name);
         for (auto partition : partition_list) {
             auto value = search_param.add_partition_tag_array();
@@ -804,9 +804,37 @@ ClientProxy::HybridSearch(const std::string& collection_name, const std::vector<
 
         // step 2: search vectors
         ::milvus::grpc::HQueryResult result;
-        Status status = client_ptr_->HybridSearch(search_param, result);
+        Status status = client_ptr_->HybridSearchPB(search_param, result);
 
         // step 3: convert result array
+        ConstructTopkHybridResult(result, topk_query_result);
+        return status;
+    } catch (std::exception& ex) {
+        return Status(StatusCode::UnknownError, "Failed to search entities: " + std::string(ex.what()));
+    }
+}
+
+Status
+ClientProxy::HybridSearch(const std::string& collection_name, const std::vector<std::string>& partition_list,
+                          const std::string& dsl, const std::string& vector_param,
+                          const std::vector<Entity>& entity_array, milvus::TopKHybridQueryResult& topk_query_result) {
+    try {
+        ::milvus::grpc::HSearchParam search_param;
+        search_param.set_collection_name(collection_name);
+        for (auto partition : partition_list) {
+            auto value = search_param.add_partition_tag_array();
+            *value = partition;
+        }
+        search_param.set_dsl(dsl);
+        auto grpc_vector_param = search_param.add_vector_param();
+        grpc_vector_param->set_json(vector_param);
+        for (auto& entity : entity_array) {
+            auto row_record = grpc_vector_param->add_row_record();
+            CopyRowRecord(row_record, entity);
+        }
+
+        ::milvus::grpc::HQueryResult result;
+        Status status = client_ptr_->HybridSearch(search_param, result);
         ConstructTopkHybridResult(result, topk_query_result);
         return status;
     } catch (std::exception& ex) {

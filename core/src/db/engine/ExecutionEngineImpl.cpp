@@ -787,12 +787,15 @@ ExecutionEngineImpl::ProcessRangeQuery(std::vector<T> data, T value, query::Comp
 }
 
 Status
-ExecutionEngineImpl::HybridSearch(milvus::query::GeneralQueryPtr general_query,
-                                  std::unordered_map<std::string, DataType>& attr_type, uint64_t& nq, uint64_t& topk,
+ExecutionEngineImpl::HybridSearch(query::GeneralQueryPtr general_query,
+                                  std::unordered_map<std::string, DataType>& attr_type, query::QueryPtr query_ptr,
                                   std::vector<float>& distances, std::vector<int64_t>& search_ids) {
     faiss::ConcurrentBitsetPtr bitset;
-    milvus::query::VectorQueryPtr vector_query;
-    auto status = ExecBinaryQuery(general_query, bitset, attr_type, vector_query);
+    std::string vector_placeholder;
+    auto status = ExecBinaryQuery(general_query, bitset, attr_type, vector_placeholder);
+    if (!status.ok()) {
+        return status;
+    }
 
     // Do search
     faiss::ConcurrentBitsetPtr list;
@@ -804,8 +807,10 @@ ExecutionEngineImpl::HybridSearch(milvus::query::GeneralQueryPtr general_query,
         }
     }
     index_->SetBlacklist(list);
-    topk = vector_query->topk;
-    nq = vector_query->query_vector.float_data.size() / dim_;
+
+    auto vector_query = query_ptr->vectors.at(vector_placeholder);
+    int64_t topk = vector_query->topk;
+    int64_t nq = vector_query->query_vector.float_data.size() / dim_;
 
     distances.resize(nq * topk);
     search_ids.resize(nq * topk);
@@ -822,18 +827,18 @@ ExecutionEngineImpl::HybridSearch(milvus::query::GeneralQueryPtr general_query,
 Status
 ExecutionEngineImpl::ExecBinaryQuery(milvus::query::GeneralQueryPtr general_query, faiss::ConcurrentBitsetPtr& bitset,
                                      std::unordered_map<std::string, DataType>& attr_type,
-                                     milvus::query::VectorQueryPtr& vector_query) {
+                                     std::string& vector_placeholder) {
     if (general_query->leaf == nullptr) {
         Status status;
         faiss::ConcurrentBitsetPtr left_bitset, right_bitset;
         if (general_query->bin->left_query != nullptr) {
-            status = ExecBinaryQuery(general_query->bin->left_query, left_bitset, attr_type, vector_query);
+            status = ExecBinaryQuery(general_query->bin->left_query, left_bitset, attr_type, vector_placeholder);
             if (!status.ok()) {
                 return status;
             }
         }
         if (general_query->bin->right_query != nullptr) {
-            status = ExecBinaryQuery(general_query->bin->right_query, right_bitset, attr_type, vector_query);
+            status = ExecBinaryQuery(general_query->bin->right_query, right_bitset, attr_type, vector_placeholder);
             if (!status.ok()) {
                 return status;
             }
@@ -1099,9 +1104,9 @@ ExecutionEngineImpl::ExecBinaryQuery(milvus::query::GeneralQueryPtr general_quer
             }
             return Status::OK();
         }
-        if (general_query->leaf->vector_query != nullptr) {
+        if (general_query->leaf->vector_placeholder.size() > 0) {
             // skip vector query
-            vector_query = general_query->leaf->vector_query;
+            vector_placeholder = general_query->leaf->vector_placeholder;
             bitset = nullptr;
             return Status::OK();
         }

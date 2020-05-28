@@ -37,6 +37,9 @@ class ClientTest {
     InsertHybridEntities(std::string&, int64_t);
 
     void
+    HybridSearchPB(std::string&);
+
+    void
     HybridSearch(std::string&);
 
     void

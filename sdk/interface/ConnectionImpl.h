@@ -69,8 +69,7 @@ class ConnectionImpl : public Connection {
            const std::vector<Entity>& entity_array, std::vector<int64_t>& id_array) override;
 
     Status
-    GetEntityByID(const std::string& collection_name,
-                  const std::vector<int64_t>& id_array,
+    GetEntityByID(const std::string& collection_name, const std::vector<int64_t>& id_array,
                   std::vector<Entity>& entities_data) override;
 
     Status
@@ -134,9 +133,14 @@ class ConnectionImpl : public Connection {
                  std::vector<uint64_t>& id_array) override;
 
     Status
+    HybridSearchPB(const std::string& collection_name, const std::vector<std::string>& partition_list,
+                   BooleanQueryPtr& boolean_query, const std::string& extra_params,
+                   TopKHybridQueryResult& topk_query_result) override;
+
+    Status
     HybridSearch(const std::string& collection_name, const std::vector<std::string>& partition_list,
-                 BooleanQueryPtr& boolean_query, const std::string& extra_params,
-                 TopKHybridQueryResult& topk_query_result) override;
+                 const std::string& dsl, const std::string& vector_param, const std::vector<Entity>& entity_array,
+                 TopKHybridQueryResult& query_result) override;
 
     Status
     GetHEntityByID(const std::string& collection_name, const std::vector<int64_t>& id_array,

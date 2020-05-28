@@ -1026,7 +1026,7 @@ TEST_F(RpcHandlerTest, HYBRID_TEST) {
 
     uint64_t nq = 10;
     uint64_t topk = 10;
-    milvus::grpc::HSearchParam search_param;
+    milvus::grpc::HSearchParamPB search_param;
     auto general_query = search_param.mutable_general_query();
     auto boolean_query_1 = general_query->mutable_boolean_query();
     boolean_query_1->set_occur(milvus::grpc::Occur::MUST);
@@ -1069,7 +1069,46 @@ TEST_F(RpcHandlerTest, HYBRID_TEST) {
     search_extra_param->set_value("");
 
     milvus::grpc::HQueryResult topk_query_result;
-    handler->HybridSearch(&context, &search_param, &topk_query_result);
+    handler->HybridSearchPB(&context, &search_param, &topk_query_result);
+
+    // Test new HybridSearch
+    milvus::grpc::HSearchParam new_search_param;
+    new_search_param.set_collection_name("test_hybrid");
+
+    nlohmann::json dsl_json, bool_json, term_json, range_json, vector_json;
+    term_json["term"]["field_name"] = "field_0";
+    term_json["term"]["values"] = term_value;
+    bool_json["must"].push_back(term_json);
+
+    range_json["range"]["field_name"] = "field_0";
+    nlohmann::json comp_json;
+    comp_json["gte"] = "0";
+    comp_json["lte"] = "100000";
+    range_json["range"]["values"] = comp_json;
+    bool_json["must"].push_back(range_json);
+
+    std::string placeholder = "placeholder_1";
+    vector_json["vector"] = placeholder;
+    bool_json["must"].push_back(vector_json);
+
+    dsl_json["bool"] = bool_json;
+
+    nlohmann::json vector_param_json, vector_extra_params;
+    vector_param_json[placeholder]["field_name"] = "field_1";
+    vector_param_json[placeholder]["topk"] = topk;
+    vector_extra_params["nprobe"] = 64;
+    vector_param_json[placeholder]["params"] = vector_extra_params;
+
+    new_search_param.set_dsl(dsl_json.dump());
+    auto vector_param = new_search_param.add_vector_param();
+    for (auto record : query_vector) {
+        auto row_record = vector_param->add_row_record();
+        CopyRowRecord(row_record, record);
+    }
+    vector_param->set_json(vector_param_json.dump());
+
+    milvus::grpc::HQueryResult new_query_result;
+    handler->HybridSearch(&context, &new_search_param, &new_query_result);
 }
 
 //////////////////////////////////////////////////////////////////////

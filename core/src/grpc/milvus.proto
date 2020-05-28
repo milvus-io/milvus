@@ -342,7 +342,20 @@ message GeneralQuery {
     }
 }
 
+message VectorParam {
+    string json = 1;
+    repeated RowRecord row_record = 2;
+}
+
 message HSearchParam {
+    string collection_name = 1;
+    repeated string partition_tag_array = 2;
+    repeated VectorParam vector_param = 3;
+    string dsl = 4;
+    repeated KeyValuePair extra_params = 5;
+}
+
+message HSearchParamPB {
     string collection_name = 1;
     repeated string partition_tag_array = 2;
     GeneralQuery general_query = 3;
@@ -351,7 +364,7 @@ message HSearchParam {
 
 message HSearchInSegmentsParam {
     repeated string segment_id_array = 1;
-    HSearchParam search_param = 2;
+    HSearchParamPB search_param = 2;
 }
 
 ///////////////////////////////////////////////////////////////////
@@ -664,15 +677,17 @@ service MilvusService {
 
     ///////////////////////////////////////////////////////////////////
 
-//    rpc CreateIndex(IndexParam) returns (Status) {}
-//
-//    rpc DescribeIndex(CollectionName) returns (IndexParam) {}
-//
-//    rpc DropIndex(CollectionName) returns (Status) {}
+    //    rpc CreateIndex(IndexParam) returns (Status) {}
+    //
+    //    rpc DescribeIndex(CollectionName) returns (IndexParam) {}
+    //
+    //    rpc DropIndex(CollectionName) returns (Status) {}
 
     ///////////////////////////////////////////////////////////////////
 
     rpc InsertEntity(HInsertParam) returns (HEntityIDs) {}
+
+    rpc HybridSearchPB(HSearchParamPB) returns (HQueryResult) {}
 
     rpc HybridSearch(HSearchParam) returns (HQueryResult) {}
 

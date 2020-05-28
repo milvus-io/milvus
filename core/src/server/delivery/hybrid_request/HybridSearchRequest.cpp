@@ -31,28 +31,26 @@ namespace milvus {
 namespace server {
 
 HybridSearchRequest::HybridSearchRequest(const std::shared_ptr<milvus::server::Context>& context,
-                                         context::HybridSearchContextPtr& hybrid_search_context,
                                          const std::string& collection_name, std::vector<std::string>& partition_list,
-                                         milvus::query::GeneralQueryPtr& general_query, milvus::json& json_params,
-                                         std::vector<std::string>& field_names, engine::QueryResult& result)
+                                         query::GeneralQueryPtr& general_query, query::QueryPtr& query_ptr,
+                                         milvus::json& json_params, std::vector<std::string>& field_names,
+                                         engine::QueryResult& result)
     : BaseRequest(context, BaseRequest::kHybridSearch),
-      hybrid_search_context_(hybrid_search_context),
       collection_name_(collection_name),
       partition_list_(partition_list),
       general_query_(general_query),
+      query_ptr_(query_ptr),
       field_names_(field_names),
       result_(result) {
 }
 
 BaseRequestPtr
-HybridSearchRequest::Create(const std::shared_ptr<milvus::server::Context>& context,
-                            context::HybridSearchContextPtr& hybrid_search_context, const std::string& collection_name,
-                            std::vector<std::string>& partition_list, milvus::query::GeneralQueryPtr& general_query,
-                            milvus::json& json_params, std::vector<std::string>& field_names,
-                            engine::QueryResult& result) {
-    return std::shared_ptr<BaseRequest>(new HybridSearchRequest(context, hybrid_search_context, collection_name,
-                                                                partition_list, general_query, json_params, field_names,
-                                                                result));
+HybridSearchRequest::Create(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name,
+                            std::vector<std::string>& partition_list, query::GeneralQueryPtr& general_query,
+                            query::QueryPtr& query_ptr, milvus::json& json_params,
+                            std::vector<std::string>& field_names, engine::QueryResult& result) {
+    return std::shared_ptr<BaseRequest>(new HybridSearchRequest(context, collection_name, partition_list, general_query,
+                                                                query_ptr, json_params, field_names, result));
 }
 
 Status
@@ -106,8 +104,8 @@ HybridSearchRequest::OnExecute() {
             }
         }
 
-        status = DBWrapper::DB()->HybridQuery(context_, collection_name_, partition_list_, hybrid_search_context_,
-                                              general_query_, field_names_, attr_type, result_);
+        status = DBWrapper::DB()->HybridQuery(context_, collection_name_, partition_list_, general_query_, query_ptr_,
+                                              field_names_, attr_type, result_);
 
 #ifdef ENABLE_CPU_PROFILING
         ProfilerStop();
