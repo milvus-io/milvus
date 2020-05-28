@@ -99,6 +99,19 @@ class CreatedOnField {
     TS_TYPE created_on_;
 };
 
+class UpdatedOnField {
+ public:
+    explicit UpdatedOnField(TS_TYPE updated_on = GetMicroSecTimeStamp()) : updated_on_(updated_on) {
+    }
+    TS_TYPE
+    GetUpdatedTime() const {
+        return updated_on_;
+    }
+
+ protected:
+    TS_TYPE updated_on_;
+};
+
 class IdField {
  public:
     explicit IdField(ID_TYPE id) : id_(id) {
@@ -249,15 +262,17 @@ class Collection : public DBBaseResource<>,
                    public NameField,
                    public IdField,
                    public StatusField,
-                   public CreatedOnField {
+                   public CreatedOnField,
+                   public UpdatedOnField {
  public:
     using Ptr = std::shared_ptr<Collection>;
     using MapT = std::map<ID_TYPE, Ptr>;
+    using ScopedMapT = std::map<ID_TYPE, ScopedResource<Collection>>;
     using VecT = std::vector<Ptr>;
     static constexpr const char* Name = "Collection";
 
     Collection(const std::string& name, ID_TYPE id = 0, State status = PENDING,
-               TS_TYPE created_on = GetMicroSecTimeStamp());
+               TS_TYPE created_on = GetMicroSecTimeStamp(), TS_TYPE UpdatedOnField = GetMicroSecTimeStamp());
 };
 
 using CollectionPtr = Collection::Ptr;
@@ -267,15 +282,17 @@ class SchemaCommit : public DBBaseResource<>,
                      public MappingsField,
                      public IdField,
                      public StatusField,
-                     public CreatedOnField {
+                     public CreatedOnField,
+                     public UpdatedOnField {
  public:
     using Ptr = std::shared_ptr<SchemaCommit>;
     using MapT = std::map<ID_TYPE, Ptr>;
+    using ScopedMapT = std::map<ID_TYPE, ScopedResource<SchemaCommit>>;
     using VecT = std::vector<Ptr>;
     static constexpr const char* Name = "SchemaCommit";
 
     SchemaCommit(ID_TYPE collection_id, const MappingT& mappings = {}, ID_TYPE id = 0, State status = PENDING,
-                 TS_TYPE created_on = GetMicroSecTimeStamp());
+                 TS_TYPE created_on = GetMicroSecTimeStamp(), TS_TYPE UpdatedOnField = GetMicroSecTimeStamp());
 };
 
 using SchemaCommitPtr = SchemaCommit::Ptr;
@@ -285,15 +302,17 @@ class Field : public DBBaseResource<>,
               public NumField,
               public IdField,
               public StatusField,
-              public CreatedOnField {
+              public CreatedOnField,
+              public UpdatedOnField {
  public:
     using Ptr = std::shared_ptr<Field>;
     using MapT = std::map<ID_TYPE, Ptr>;
+    using ScopedMapT = std::map<ID_TYPE, ScopedResource<Field>>;
     using VecT = std::vector<Ptr>;
     static constexpr const char* Name = "Field";
 
     Field(const std::string& name, NUM_TYPE num, ID_TYPE id = 0, State status = PENDING,
-          TS_TYPE created_on = GetMicroSecTimeStamp());
+          TS_TYPE created_on = GetMicroSecTimeStamp(), TS_TYPE UpdatedOnField = GetMicroSecTimeStamp());
 };
 
 using FieldPtr = Field::Ptr;
@@ -304,15 +323,18 @@ class FieldCommit : public DBBaseResource<>,
                     public MappingsField,
                     public IdField,
                     public StatusField,
-                    public CreatedOnField {
+                    public CreatedOnField,
+                    public UpdatedOnField {
  public:
     using Ptr = std::shared_ptr<FieldCommit>;
     using MapT = std::map<ID_TYPE, Ptr>;
+    using ScopedMapT = std::map<ID_TYPE, ScopedResource<FieldCommit>>;
     using VecT = std::vector<Ptr>;
     static constexpr const char* Name = "FieldCommit";
 
     FieldCommit(ID_TYPE collection_id, ID_TYPE field_id, const MappingT& mappings = {}, ID_TYPE id = 0,
-                State status = PENDING, TS_TYPE created_on = GetMicroSecTimeStamp());
+                State status = PENDING, TS_TYPE created_on = GetMicroSecTimeStamp(),
+                TS_TYPE UpdatedOnField = GetMicroSecTimeStamp());
 };
 
 using FieldCommitPtr = FieldCommit::Ptr;
@@ -324,14 +346,17 @@ class FieldElement : public DBBaseResource<>,
                      public FtypeField,
                      public IdField,
                      public StatusField,
-                     public CreatedOnField {
+                     public CreatedOnField,
+                     public UpdatedOnField {
  public:
     using Ptr = std::shared_ptr<FieldElement>;
     using MapT = std::map<ID_TYPE, Ptr>;
+    using ScopedMapT = std::map<ID_TYPE, ScopedResource<FieldElement>>;
     using VecT = std::vector<Ptr>;
     static constexpr const char* Name = "FieldElement";
     FieldElement(ID_TYPE collection_id, ID_TYPE field_id, const std::string& name, FTYPE_TYPE ftype, ID_TYPE id = 0,
-                 State status = PENDING, TS_TYPE created_on = GetMicroSecTimeStamp());
+                 State status = PENDING, TS_TYPE created_on = GetMicroSecTimeStamp(),
+                 TS_TYPE UpdatedOnField = GetMicroSecTimeStamp());
 };
 
 using FieldElementPtr = FieldElement::Ptr;
@@ -342,14 +367,17 @@ class CollectionCommit : public DBBaseResource<>,
                          public MappingsField,
                          public IdField,
                          public StatusField,
-                         public CreatedOnField {
+                         public CreatedOnField,
+                         public UpdatedOnField {
  public:
     static constexpr const char* Name = "CollectionCommit";
     using Ptr = std::shared_ptr<CollectionCommit>;
     using MapT = std::map<ID_TYPE, Ptr>;
+    using ScopedMapT = std::map<ID_TYPE, ScopedResource<CollectionCommit>>;
     using VecT = std::vector<Ptr>;
     CollectionCommit(ID_TYPE collection_id, ID_TYPE schema_id, const MappingT& mappings = {}, ID_TYPE id = 0,
-                     State status = PENDING, TS_TYPE created_on = GetMicroSecTimeStamp());
+                     State status = PENDING, TS_TYPE created_on = GetMicroSecTimeStamp(),
+                     TS_TYPE UpdatedOnField = GetMicroSecTimeStamp());
 };
 
 using CollectionCommitPtr = CollectionCommit::Ptr;
@@ -359,15 +387,17 @@ class Partition : public DBBaseResource<>,
                   public CollectionIdField,
                   public IdField,
                   public StatusField,
-                  public CreatedOnField {
+                  public CreatedOnField,
+                  public UpdatedOnField {
  public:
     using Ptr = std::shared_ptr<Partition>;
     using MapT = std::map<ID_TYPE, Ptr>;
+    using ScopedMapT = std::map<ID_TYPE, ScopedResource<Partition>>;
     using VecT = std::vector<Ptr>;
     static constexpr const char* Name = "Partition";
 
     Partition(const std::string& name, ID_TYPE collection_id, ID_TYPE id = 0, State status = PENDING,
-              TS_TYPE created_on = GetMicroSecTimeStamp());
+              TS_TYPE created_on = GetMicroSecTimeStamp(), TS_TYPE UpdatedOnField = GetMicroSecTimeStamp());
 };
 
 using PartitionPtr = Partition::Ptr;
@@ -378,15 +408,18 @@ class PartitionCommit : public DBBaseResource<>,
                         public MappingsField,
                         public IdField,
                         public StatusField,
-                        public CreatedOnField {
+                        public CreatedOnField,
+                        public UpdatedOnField {
  public:
     using Ptr = std::shared_ptr<PartitionCommit>;
     using MapT = std::map<ID_TYPE, Ptr>;
+    using ScopedMapT = std::map<ID_TYPE, ScopedResource<PartitionCommit>>;
     using VecT = std::vector<Ptr>;
     static constexpr const char* Name = "PartitionCommit";
 
     PartitionCommit(ID_TYPE collection_id, ID_TYPE partition_id, const MappingT& mappings = {}, ID_TYPE id = 0,
-                    State status = PENDING, TS_TYPE created_on = GetMicroSecTimeStamp());
+                    State status = PENDING, TS_TYPE created_on = GetMicroSecTimeStamp(),
+                    TS_TYPE UpdatedOnField = GetMicroSecTimeStamp());
 
     std::string
     ToString() const override;
@@ -399,15 +432,17 @@ class Segment : public DBBaseResource<>,
                 public NumField,
                 public IdField,
                 public StatusField,
-                public CreatedOnField {
+                public CreatedOnField,
+                public UpdatedOnField {
  public:
     using Ptr = std::shared_ptr<Segment>;
     using MapT = std::map<ID_TYPE, Ptr>;
+    using ScopedMapT = std::map<ID_TYPE, ScopedResource<Segment>>;
     using VecT = std::vector<Ptr>;
     static constexpr const char* Name = "Segment";
 
     Segment(ID_TYPE partition_id, ID_TYPE num = 0, ID_TYPE id = 0, State status = PENDING,
-            TS_TYPE created_on = GetMicroSecTimeStamp());
+            TS_TYPE created_on = GetMicroSecTimeStamp(), TS_TYPE UpdatedOnField = GetMicroSecTimeStamp());
 
     std::string
     ToString() const override;
@@ -422,15 +457,18 @@ class SegmentCommit : public DBBaseResource<>,
                       public MappingsField,
                       public IdField,
                       public StatusField,
-                      public CreatedOnField {
+                      public CreatedOnField,
+                      public UpdatedOnField {
  public:
     using Ptr = std::shared_ptr<SegmentCommit>;
     using MapT = std::map<ID_TYPE, Ptr>;
+    using ScopedMapT = std::map<ID_TYPE, ScopedResource<SegmentCommit>>;
     using VecT = std::vector<Ptr>;
     static constexpr const char* Name = "SegmentCommit";
 
     SegmentCommit(ID_TYPE schema_id, ID_TYPE partition_id, ID_TYPE segment_id, const MappingT& mappings = {},
-                  ID_TYPE id = 0, State status = PENDING, TS_TYPE created_on = GetMicroSecTimeStamp());
+                  ID_TYPE id = 0, State status = PENDING, TS_TYPE created_on = GetMicroSecTimeStamp(),
+                  TS_TYPE UpdatedOnField = GetMicroSecTimeStamp());
 
     std::string
     ToString() const override;
@@ -444,15 +482,18 @@ class SegmentFile : public DBBaseResource<>,
                     public FieldElementIdField,
                     public IdField,
                     public StatusField,
-                    public CreatedOnField {
+                    public CreatedOnField,
+                    public UpdatedOnField {
  public:
     using Ptr = std::shared_ptr<SegmentFile>;
     using MapT = std::map<ID_TYPE, Ptr>;
+    using ScopedMapT = std::map<ID_TYPE, ScopedResource<SegmentFile>>;
     using VecT = std::vector<Ptr>;
     static constexpr const char* Name = "SegmentFile";
 
     SegmentFile(ID_TYPE partition_id, ID_TYPE segment_id, ID_TYPE field_element_id, ID_TYPE id = 0,
-                State status = PENDING, TS_TYPE created_on = GetMicroSecTimeStamp());
+                State status = PENDING, TS_TYPE created_on = GetMicroSecTimeStamp(),
+                TS_TYPE UpdatedOnField = GetMicroSecTimeStamp());
 };
 
 using SegmentFilePtr = SegmentFile::Ptr;

@@ -23,13 +23,20 @@
 #include <shared_mutex>
 #include <string>
 #include <thread>
+#include <tuple>
 #include <utility>
 #include <vector>
+#include "db/snapshot/Utils.h"
 #include "db/snapshot/WrappedTypes.h"
 
 namespace milvus {
 namespace engine {
 namespace snapshot {
+
+using ScopedResourcesT =
+    std::tuple<CollectionCommit::ScopedMapT, Collection::ScopedMapT, SchemaCommit::ScopedMapT, FieldCommit::ScopedMapT,
+               Field::ScopedMapT, FieldElement::ScopedMapT, PartitionCommit::ScopedMapT, Partition::ScopedMapT,
+               SegmentCommit::ScopedMapT, Segment::ScopedMapT, SegmentFile::ScopedMapT>;
 
 class Snapshot : public ReferenceProxy {
  public:
@@ -37,43 +44,29 @@ class Snapshot : public ReferenceProxy {
     explicit Snapshot(ID_TYPE id);
 
     ID_TYPE
-    GetID() const {
-        return collection_commit_->GetID();
+    GetID() {
+        return GetCollectionCommit()->GetID();
     }
+
     ID_TYPE
     GetCollectionId() const {
-        return collection_->GetID();
+        auto it = GetResources<Collection>().begin();
+        return it->first;
     }
+
     const std::string&
     GetName() const {
-        return collection_->GetName();
+        return GetResources<Collection>().begin()->second->GetName();
     }
+
     CollectionCommitPtr
     GetCollectionCommit() {
-        return collection_commit_.Get();
-    }
-    std::vector<std::string>
-    GetPartitionNames() const {
-        std::vector<std::string> names;
-        for (auto& kv : partitions_) {
-            std::cout << "Partition: " << kv.second->GetName() << std::endl;
-            names.push_back(kv.second->GetName());
-        }
-        return names;
+        return GetResources<CollectionCommit>().begin()->second.Get();
     }
 
     ID_TYPE
     GetLatestSchemaCommitId() const {
         return latest_schema_commit_id_;
-    }
-
-    PartitionPtr
-    GetPartition(ID_TYPE partition_id) {
-        auto it = partitions_.find(partition_id);
-        if (it == partitions_.end()) {
-            return nullptr;
-        }
-        return it->second.Get();
     }
 
     // PXU TODO: add const. Need to change Scopedxxxx::Get
@@ -82,11 +75,7 @@ class Snapshot : public ReferenceProxy {
         auto it = seg_segc_map_.find(segment_id);
         if (it == seg_segc_map_.end())
             return nullptr;
-        auto itsc = segment_commits_.find(it->second);
-        if (itsc == segment_commits_.end()) {
-            return nullptr;
-        }
-        return itsc->second.Get();
+        return GetResource<SegmentCommit>(it->second);
     }
 
     PartitionCommitPtr
@@ -94,20 +83,7 @@ class Snapshot : public ReferenceProxy {
         auto it = p_pc_map_.find(partition_id);
         if (it == p_pc_map_.end())
             return nullptr;
-        auto itpc = partition_commits_.find(it->second);
-        if (itpc == partition_commits_.end()) {
-            return nullptr;
-        }
-        return itpc->second.Get();
-    }
-
-    IDS_TYPE
-    GetPartitionIds() const {
-        IDS_TYPE ids;
-        for (auto& kv : partitions_) {
-            ids.push_back(kv.first);
-        }
-        return std::move(ids);
+        return GetResource<PartitionCommit>(it->second);
     }
 
     std::vector<std::string>
@@ -164,34 +140,6 @@ class Snapshot : public ReferenceProxy {
         return itfe->second;
     }
 
-    std::vector<std::string>
-    GetFieldElementNames() const {
-        std::vector<std::string> names;
-        for (auto& kv : field_elements_) {
-            names.emplace_back(kv.second->GetName());
-        }
-
-        return std::move(names);
-    }
-
-    IDS_TYPE
-    GetSegmentIds() const {
-        IDS_TYPE ids;
-        for (auto& kv : segments_) {
-            ids.push_back(kv.first);
-        }
-        return std::move(ids);
-    }
-
-    IDS_TYPE
-    GetSegmentFileIds() const {
-        IDS_TYPE ids;
-        for (auto& kv : segment_files_) {
-            ids.push_back(kv.first);
-        }
-        return std::move(ids);
-    }
-
     NUM_TYPE
     GetMaxSegmentNumByPartition(ID_TYPE partition_id) {
         auto it = p_max_seg_num_.find(partition_id);
@@ -205,27 +153,70 @@ class Snapshot : public ReferenceProxy {
     void
     UnRefAll();
 
+    template <typename ResourceT>
     void
-    DumpSegments(const std::string& tag = "");
+    DumpResource(const std::string& tag = "") {
+        auto& resources = GetResources<ResourceT>();
+        std::cout << typeid(*this).name() << " Dump" << ResourceT::Name << " Start [" << tag << "]:" << resources.size()
+                  << std::endl;
+        for (auto& kv : resources) {
+            std::cout << "\t" << kv.second->ToString() << std::endl;
+        }
+        std::cout << typeid(*this).name() << " Dump" << ResourceT::Name << "  End [" << tag << "]:" << resources.size()
+                  << std::endl;
+    }
+
+    template <typename T>
     void
-    DumpSegmentCommits(const std::string& tag = "");
+    DoUnRef(T& resource_map) {
+        for (auto& kv : resource_map) {
+            kv.second->UnRef();
+        }
+    }
+
+    template <typename T>
     void
-    DumpPartitionCommits(const std::string& tag = "");
+    DoRef(T& resource_map) {
+        for (auto& kv : resource_map) {
+            kv.second->Ref();
+        }
+    }
+
+    template <typename ResourceT>
+    typename ResourceT::ScopedMapT&
+    GetResources() {
+        return std::get<Index<typename ResourceT::ScopedMapT, ScopedResourcesT>::value>(resources_);
+    }
+
+    template <typename ResourceT>
+    const typename ResourceT::ScopedMapT&
+    GetResources() const {
+        return std::get<Index<typename ResourceT::ScopedMapT, ScopedResourcesT>::value>(resources_);
+    }
+
+    template <typename ResourceT>
+    typename ResourceT::Ptr
+    GetResource(ID_TYPE id) {
+        auto& resources = GetResources<ResourceT>();
+        auto it = resources.find(id);
+        if (it == resources.end()) {
+            return nullptr;
+        }
+
+        return it->second.Get();
+    }
+
+    template <typename ResourceT>
+    void
+    AddResource(ScopedResource<ResourceT>& resource) {
+        auto& resources = GetResources<ResourceT>();
+        resources[resource->GetID()] = resource;
+    }
 
  private:
     // PXU TODO: Re-org below data structures to reduce memory usage
-    CollectionScopedT collection_;
+    ScopedResourcesT resources_;
     ID_TYPE current_schema_id_;
-    SchemaCommitsT schema_commits_;
-    FieldsT fields_;
-    FieldCommitsT field_commits_;
-    FieldElementsT field_elements_;
-    CollectionCommitScopedT collection_commit_;
-    PartitionsT partitions_;
-    PartitionCommitsT partition_commits_;
-    SegmentsT segments_;
-    SegmentCommitsT segment_commits_;
-    SegmentFilesT segment_files_;
     std::map<std::string, ID_TYPE> field_names_map_;
     std::map<std::string, std::map<std::string, ID_TYPE>> field_element_names_map_;
     std::map<ID_TYPE, std::map<ID_TYPE, ID_TYPE>> element_segfiles_map_;
