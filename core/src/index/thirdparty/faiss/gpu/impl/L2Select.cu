@@ -161,20 +161,17 @@ __global__ void l2SelectMinK(Tensor<T, 2, true> productDistances,
     if (bitsetEmpty || (!(bitset[i >> 3] & (0x1 << (i & 0x7))))) {
       v = Math<T>::add(centroidDistances[i],
                         productDistances[row][i]);
-    } else {
-      v = (T)(1.0 / 0.0);
+      heap.addThreadQ(v, i);
     }
-    heap.add(v, i);
+    heap.checkThreadQ();
   }
 
   if (i < productDistances.getSize(1)) {
     if (bitsetEmpty || (!(bitset[i >> 3] & (0x1 << (i & 0x7))))) {
       v = Math<T>::add(centroidDistances[i],
                         productDistances[row][i]);
-    } else {
-      v = (T)(1.0 / 0.0);
+      heap.addThreadQ(v, i);
     }
-    heap.addThreadQ(v, i);
   }
 
   heap.reduce();
