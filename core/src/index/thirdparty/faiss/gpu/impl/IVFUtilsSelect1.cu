@@ -75,10 +75,9 @@ pass1SelectLists(void** listIndices,
                          topQueryToCentroid,
                          opt);
     if (bitsetEmpty || (!(bitset[index >> 3] & (0x1 << (index & 0x7))))) {
-      heap.add(distanceStart[i], start + i);
-    } else {
-      heap.add((1.0 / 0.0), start + i);
+      heap.addThreadQ(distanceStart[i], start + i);
     }
+    heap.checkThreadQ();
   }
 
   // Handle warp divergence separately
@@ -91,8 +90,6 @@ pass1SelectLists(void** listIndices,
                          opt);
     if (bitsetEmpty || (!(bitset[index >> 3] & (0x1 << (index & 0x7))))) {
       heap.addThreadQ(distanceStart[i], start + i);
-    } else {
-      heap.addThreadQ((1.0 / 0.0), start + i);
     }
   }
 
