@@ -63,7 +63,7 @@ class MemManagerImpl : public MemManager, public server::CacheConfigHandler {
     DeleteVectors(const std::string& collection_id, int64_t length, const IDNumber* vector_ids, uint64_t lsn) override;
 
     Status
-    ReloadDeletedDocs(const std::string& collection_id, std::vector<int64_t> segment_ids) override;
+    ReloadDeletedDocs(const std::string& collection_id, const std::vector<int64_t>& segment_ids) override;
 
     Status
     Flush(const std::string& collection_id, bool apply_delete = true) override;

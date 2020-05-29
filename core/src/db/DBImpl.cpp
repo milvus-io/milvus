@@ -503,7 +503,7 @@ DBImpl::PreloadCollection(const std::shared_ptr<server::Context>& context, const
 }
 
 Status
-DBImpl::ReLoadSegmentsDelDocs(const std::string& collection_id, const std::vector<int64_t>& segment_ids) {
+DBImpl::ReLoadSegmentsDeletedDocs(const std::string& collection_id, const std::vector<int64_t>& segment_ids) {
     if (!initialized_.load(std::memory_order_acquire)) {
         return SHUTDOWN_ERROR;
     }

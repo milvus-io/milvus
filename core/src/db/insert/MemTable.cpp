@@ -117,15 +117,13 @@ MemTable::Delete(const std::vector<segment::doc_id_t>& doc_ids) {
 
 Status
 MemTable::UpdateDeletedDocs(const std::vector<int64_t>& segment_ids) {
-    auto status = Status::OK();
-
     meta::FilesHolder files_holder;
     std::vector<size_t> file_ids;
     for (auto& id : segment_ids) {
         file_ids.emplace_back(id);
     }
 
-    status = meta_->FilesByID(file_ids, files_holder);
+    auto status = meta_->FilesByID(file_ids, files_holder);
     if (!status.ok()) {
         std::string err_msg = "Failed get file holders by ids: " + status.ToString();
         LOG_ENGINE_ERROR_ << err_msg;

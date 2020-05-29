@@ -172,7 +172,7 @@ MemManagerImpl::DeleteVectors(const std::string& collection_id, int64_t length, 
 }
 
 Status
-MemManagerImpl::ReloadDeletedDocs(const std::string& collection_id, std::vector<int64_t> segment_ids) {
+MemManagerImpl::ReloadDeletedDocs(const std::string& collection_id, const std::vector<int64_t>& segment_ids) {
     std::unique_lock<std::mutex> lock(mutex_);
 
     MemTablePtr mem = GetMemByTable(collection_id);
