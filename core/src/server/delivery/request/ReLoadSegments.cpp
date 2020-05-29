@@ -61,7 +61,7 @@ ReLoadSegments::OnExecute() {
             segment_ids.push_back(std::stoul(id, &sz));
         }
 
-        return DBWrapper::DB()->ReLoadSegmentsDelDocs(collection_name_, segment_ids);
+        return DBWrapper::DB()->ReLoadSegmentsDeletedDocs(collection_name_, segment_ids);
     } catch (std::exception& exp) {
         return Status(SERVER_UNEXPECTED_ERROR, exp.what());
     }
