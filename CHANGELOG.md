@@ -12,6 +12,7 @@ Please mark all change in change log and use the issue from GitHub
 ## Improvement
 -   \#2381 Upgrade FAISS to 1.6.3
 -   \#2441 Improve Knowhere code coverage
+-   \#2466 optimize k-selection implemention of faiss gpu version
 
 ## Task
 
@@ -31,7 +32,6 @@ Please mark all change in change log and use the issue from GitHub
 -   \#2353 Remove log_config from code and scripts
 -   \#2370 Clean compile warning
 -   \#2410 Logging build index progress
--   \#2466 optimize k-selection implemention of faiss gpu version
 
 # Milvus 0.9.0 (2020-05-15)
 
