@@ -46,7 +46,7 @@ class IVFSQHybrid : public GPUIVFSQ {
         gpu_mode_ = 0;
     }
 
-    explicit IVFSQHybrid(std::shared_ptr<faiss::Index> index, const int64_t& device_id, ResPtr& resource)
+    explicit IVFSQHybrid(std::shared_ptr<faiss::Index> index, const int64_t device_id, ResPtr& resource)
         : GPUIVFSQ(index, device_id, resource) {
         index_type_ = IndexEnum::INDEX_FAISS_IVFSQ8H;
         gpu_mode_ = 2;

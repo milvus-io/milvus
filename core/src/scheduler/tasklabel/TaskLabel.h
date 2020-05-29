@@ -12,6 +12,7 @@
 #pragma once
 
 #include <memory>
+#include <string>
 
 namespace milvus {
 namespace scheduler {
@@ -26,6 +27,11 @@ class TaskLabel {
     inline TaskLabelType
     Type() const {
         return type_;
+    }
+
+    virtual inline std::string
+    name() const {
+        return "";
     }
 
  protected:

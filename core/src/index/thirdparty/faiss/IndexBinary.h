@@ -99,6 +99,7 @@ struct IndexBinary {
                       int32_t *distances, idx_t *labels,
                       ConcurrentBitsetPtr bitset = nullptr) const = 0;
 
+#if 0
   /** Query n raw vectors from the index by ids.
    *
    * return n raw vectors.
@@ -122,6 +123,7 @@ struct IndexBinary {
    */
   virtual void search_by_id (idx_t n, const idx_t *xid, idx_t k, int32_t *distances, idx_t *labels,
                              ConcurrentBitsetPtr bitset = nullptr);
+#endif
 
   /** Query n vectors of dimension d to the index.
    *

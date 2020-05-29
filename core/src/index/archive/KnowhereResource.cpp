@@ -70,8 +70,8 @@ KnowhereResource::Initialize() {
         return Status::OK();
 
     struct GpuResourceSetting {
-        int64_t pinned_memory = 300 * M_BYTE;
-        int64_t temp_memory = 300 * M_BYTE;
+        int64_t pinned_memory = 256 * M_BYTE;
+        int64_t temp_memory = 256 * M_BYTE;
         int64_t resource_num = 2;
     };
     using GpuResourcesArray = std::map<int64_t, GpuResourceSetting>;

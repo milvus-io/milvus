@@ -72,7 +72,7 @@ TEST_F(MySqlDBTest, DB_TEST) {
         milvus::engine::ResultIds result_ids;
         milvus::engine::ResultDistances result_distances;
         int k = 10;
-        std::this_thread::sleep_for(std::chrono::seconds(2));
+        std::this_thread::sleep_for(std::chrono::seconds(1));
 
         INIT_TIMER;
         std::stringstream ss;
@@ -106,7 +106,7 @@ TEST_F(MySqlDBTest, DB_TEST) {
                 /* LOG(DEBUG) << ss.str(); */
             }
             ASSERT_TRUE(count >= prev_count);
-            std::this_thread::sleep_for(std::chrono::seconds(1));
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
         }
     });
 
@@ -128,7 +128,7 @@ TEST_F(MySqlDBTest, DB_TEST) {
         stat = db_->Flush();
         ASSERT_TRUE(stat.ok());
 
-        std::this_thread::sleep_for(std::chrono::microseconds(1));
+        std::this_thread::sleep_for(std::chrono::milliseconds(20));
     }
 
     search.join();
@@ -183,7 +183,6 @@ TEST_F(MySqlDBTest, SEARCH_TEST) {
     stat = db_->InsertVectors(COLLECTION_NAME, "", xb);
     ASSERT_TRUE(stat.ok());
 
-    //    sleep(2);  // wait until build index finish
     stat = db_->Flush();
     ASSERT_TRUE(stat.ok());
 
@@ -241,10 +240,8 @@ TEST_F(MySqlDBTest, ARHIVE_DISK_CHECK) {
         milvus::engine::VectorsData xb;
         BuildVectors(nb, i, xb);
         db_->InsertVectors(COLLECTION_NAME, "", xb);
-        std::this_thread::sleep_for(std::chrono::microseconds(1));
     }
 
-    //    std::this_thread::sleep_for(std::chrono::seconds(1));
     stat = db_->Flush();
     ASSERT_TRUE(stat.ok());
 
@@ -288,16 +285,12 @@ TEST_F(MySqlDBTest, DELETE_TEST) {
         milvus::engine::VectorsData xb;
         BuildVectors(nb, i, xb);
         db_->InsertVectors(COLLECTION_NAME, "", xb);
-        std::this_thread::sleep_for(std::chrono::microseconds(1));
     }
 
     stat = db_->Flush();
     ASSERT_TRUE(stat.ok());
 
     stat = db_->DropCollection(COLLECTION_NAME);
-    ////    std::cout << "5 sec start" << std::endl;
-    //    std::this_thread::sleep_for(std::chrono::seconds(5));
-    ////    std::cout << "5 sec finish" << std::endl;
     ASSERT_TRUE(stat.ok());
     //
     db_->HasCollection(COLLECTION_NAME, has_collection);

@@ -35,14 +35,13 @@ class SpecResLabel : public TaskLabel {
         return resource_;
     }
 
-    inline std::string&
-    resource_name() {
-        return resource_name_;
+    inline std::string
+    name() const override {
+        return resource_.lock()->name();
     }
 
  private:
     ResourceWPtr resource_;
-    std::string resource_name_;
 };
 
 using SpecResLabelPtr = std::shared_ptr<SpecResLabel>();

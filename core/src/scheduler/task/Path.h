@@ -62,6 +62,15 @@ class Path {
         }
     }
 
+    std::string
+    ToString() {
+        std::string str = path_[index_];
+        for (int64_t i = index_; i > 0; i--) {
+            str += "->" + path_[i - 1];
+        }
+        return str;
+    }
+
  public:
     std::string& operator[](uint64_t index) {
         return path_[index];

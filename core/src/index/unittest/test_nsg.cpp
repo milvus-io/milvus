@@ -33,7 +33,7 @@ using ::testing::Combine;
 using ::testing::TestWithParam;
 using ::testing::Values;
 
-constexpr int64_t DEVICEID = 0;
+constexpr int64_t DEVICE_GPU0 = 0;
 
 class NSGInterfaceTest : public DataGen, public ::testing::Test {
  protected:
@@ -41,10 +41,10 @@ class NSGInterfaceTest : public DataGen, public ::testing::Test {
     SetUp() override {
 #ifdef MILVUS_GPU_VERSION
         int64_t MB = 1024 * 1024;
-        milvus::knowhere::FaissGpuResourceMgr::GetInstance().InitDevice(DEVICEID, MB * 200, MB * 600, 1);
+        milvus::knowhere::FaissGpuResourceMgr::GetInstance().InitDevice(DEVICE_GPU0, MB * 200, MB * 600, 1);
 #endif
         int nsg_dim = 256;
-        Generate(nsg_dim, nb, nq);
+        Generate(nsg_dim, 20000, nq);
         index_ = std::make_shared<milvus::knowhere::NSG>();
 
         train_conf = milvus::knowhere::Config{{milvus::knowhere::meta::DIM, 256},
@@ -80,12 +80,14 @@ TEST_F(NSGInterfaceTest, basic_test) {
     fiu_init(0);
     // untrained index
     {
-        ASSERT_ANY_THROW(index_->Query(query_dataset, search_conf));
         ASSERT_ANY_THROW(index_->Serialize());
+        ASSERT_ANY_THROW(index_->Query(query_dataset, search_conf));
+        ASSERT_ANY_THROW(index_->Add(base_dataset, search_conf));
+        ASSERT_ANY_THROW(index_->AddWithoutIds(base_dataset, search_conf));
     }
 
-    train_conf[milvus::knowhere::meta::DEVICEID] = DEVICEID;
-    index_->Train(base_dataset, train_conf);
+    train_conf[milvus::knowhere::meta::DEVICEID] = -1;
+    index_->BuildAll(base_dataset, train_conf);
     auto result = index_->Query(query_dataset, search_conf);
     AssertAnns(result, nq, k);
 
@@ -96,16 +98,24 @@ TEST_F(NSGInterfaceTest, basic_test) {
         fiu_disable("NSG.Serialize.throw_exception");
     }
 
-    auto new_index = std::make_shared<milvus::knowhere::NSG>();
-    new_index->Load(binaryset);
+    /* test NSG GPU train */
+    auto new_index_1 = std::make_shared<milvus::knowhere::NSG>(DEVICE_GPU0);
+    train_conf[milvus::knowhere::meta::DEVICEID] = DEVICE_GPU0;
+    new_index_1->BuildAll(base_dataset, train_conf);
+    auto new_result_1 = new_index_1->Query(query_dataset, search_conf);
+    AssertAnns(new_result_1, nq, k);
+
+    /* test NSG index load */
+    auto new_index_2 = std::make_shared<milvus::knowhere::NSG>();
+    new_index_2->Load(binaryset);
     {
         fiu_enable("NSG.Load.throw_exception", 1, nullptr, 0);
-        ASSERT_ANY_THROW(new_index->Load(binaryset));
+        ASSERT_ANY_THROW(new_index_2->Load(binaryset));
         fiu_disable("NSG.Load.throw_exception");
     }
 
-    auto new_result = new_index->Query(query_dataset, search_conf);
-    AssertAnns(result, nq, k);
+    auto new_result_2 = new_index_2->Query(query_dataset, search_conf);
+    AssertAnns(new_result_2, nq, k);
 
     ASSERT_EQ(index_->Count(), nb);
     ASSERT_EQ(index_->Dim(), dim);
@@ -129,7 +139,7 @@ TEST_F(NSGInterfaceTest, compare_test) {
 TEST_F(NSGInterfaceTest, delete_test) {
     assert(!xb.empty());
 
-    train_conf[milvus::knowhere::meta::DEVICEID] = DEVICEID;
+    train_conf[milvus::knowhere::meta::DEVICEID] = DEVICE_GPU0;
     index_->Train(base_dataset, train_conf);
 
     auto result = index_->Query(query_dataset, search_conf);
