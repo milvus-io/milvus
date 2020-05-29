@@ -132,7 +132,7 @@ class ServiceHandler(milvus_pb2_grpc.MilvusServiceServicer):
                 futures = []
                 for addr, files_tuple in routing.items():
                     search_file_ids, ud_file_ids = files_tuple
-                    logger.warning(f"<{addr}> needed update segment ids {ud_file_ids}")
+                    logger.info(f"<{addr}> needed update segment ids {ud_file_ids}")
                     conn = self.router.query_conn(addr, metadata=metadata)
                     start = time.time()
                     ud_file_ids and conn.reload_segments(collection_id, ud_file_ids)
@@ -579,6 +579,9 @@ class ServiceHandler(milvus_pb2_grpc.MilvusServiceServicer):
         return status_pb2.Status(error_code=_status.code,
                                  reason=_status.message)
 
+    def ReloadSegments(self, request, context):
+        raise NotImplemented("Not implemented in mishards")
+
     def _describe_index(self, collection_name, metadata=None):
         return self.router.connection(metadata=metadata).get_index_info(collection_name)
 
@@ -666,7 +669,7 @@ class ServiceHandler(milvus_pb2_grpc.MilvusServiceServicer):
         )
 
     def _delete_by_id(self, collection_name, id_array):
-        return self.router.connection().delete_entity_by_id(collection_name, id_array, timeout=None)
+        return self.router.connection().delete_entity_by_id(collection_name, id_array)
 
     @mark_grpc_method
     def DeleteByID(self, request, context):

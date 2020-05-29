@@ -3,13 +3,11 @@ services:
     milvus-mysql:
       restart: always
       image: mysql:5.7
-      ports:
-        - "0.0.0.0:3306:3306"
       volumes:
         - ./mysqld.cnf:/etc/mysql/mysql.conf.d/mysqld.cnf
         - ./metadata:/var/lib/mysql
       environment:
-        MYSQL_ROOT_PASSWORD: '123456'
+        MYSQL_ROOT_PASSWORD: 'milvusroot'
         MYSQL_DATABASE: 'milvus'
       healthcheck:
         test: ["CMD", "sleep", "5"]
@@ -31,7 +29,7 @@ services:
     milvus_ro:
         runtime: nvidia
         restart: always
-        image: milvusdb/milvus:0.9.1-gpu-d052920-e04ed5
+        image: milvusdb/milvus:0.9.0-gpu-d051520-cb92b1
         volumes:
             - /tmp/milvus/db:/var/lib/milvus/db
             - ./ro_server.yml:/var/lib/milvus/conf/server_config.yaml
