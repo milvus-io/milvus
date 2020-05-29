@@ -68,8 +68,8 @@ db_config:
 # secondary_path       | A semicolon-separated list of secondary directories used   | Path       |                 |
 #                      | to save vector data and index data.                        |            |                 |
 #----------------------+------------------------------------------------------------+------------+-----------------+
-# file_cleanup_timeout | time gap between soft-delete and hard-delete               | Integer    | 10 (s)          |
-#                      | range [0, 3600]                                            |            |                 |
+# file_cleanup_timeout | The time gap between marking a file as 'deleted' and       | Integer    | 10 (s)          |
+#                      | physically deleting this file from disk, range [0, 3600]   |            |                 |
 #----------------------+------------------------------------------------------------+------------+-----------------+
 storage_config:
   primary_path: /var/lib/milvus
@@ -223,5 +223,4 @@ logs:
   path: /var/lib/milvus/logs
   max_log_file_size: 1024
   log_rotate_num: 0
-
 
