@@ -140,6 +140,8 @@ MemTable::UpdateDeletedDocs(const std::vector<int64_t>& segment_ids) {
         std::string segment_dir;
         utils::GetParentPath(file.location_, segment_dir);
 
+        std::cout << "Check segment file: " << file.location_ << std::endl;
+
         segment::SegmentReader segment_reader(segment_dir);
 
         segment::DeletedDocsPtr delete_docs = std::make_shared<segment::DeletedDocs>();
@@ -158,6 +160,7 @@ MemTable::UpdateDeletedDocs(const std::vector<int64_t>& segment_ids) {
             continue;
         }
 
+        std::cout << "Update segment file: " << file.location_ << std::endl;
         for (auto& i : docs_offsets) {
             if (!blacklist->test(i)) {
                 blacklist->set(i);

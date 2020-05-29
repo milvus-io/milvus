@@ -3,11 +3,13 @@ services:
     milvus-mysql:
       restart: always
       image: mysql:5.7
+      ports:
+        - "0.0.0.0:3306:3306"
       volumes:
         - ./mysqld.cnf:/etc/mysql/mysql.conf.d/mysqld.cnf
         - ./metadata:/var/lib/mysql
       environment:
-        MYSQL_ROOT_PASSWORD: 'milvusroot'
+        MYSQL_ROOT_PASSWORD: '123456'
         MYSQL_DATABASE: 'milvus'
       healthcheck:
         test: ["CMD", "sleep", "5"]

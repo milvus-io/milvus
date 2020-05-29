@@ -508,8 +508,7 @@ DBImpl::ReLoadSegmentsDelDocs(const std::string& collection_id, const std::vecto
         return SHUTDOWN_ERROR;
     }
 
-    mem_mgr_->ReloadDeletedDocs(collection_id, segment_ids);
-    return Status();
+    return mem_mgr_->ReloadDeletedDocs(collection_id, segment_ids);
 }
 
 Status
