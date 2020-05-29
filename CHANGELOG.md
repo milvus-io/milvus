@@ -5,6 +5,7 @@ Please mark all change in change log and use the issue from GitHub
 
 ## Bug
 -   \#2367 Fix inconsistent reading and writing when using mishards
+-   \#2368 Make read node detect delete behavior
 
 ## Feature
 -   \#2363 Update branch version
