@@ -15,7 +15,7 @@ Please mark all change in change log and use the issue from GitHub
 
 ## Task
 
-# Milvus 0.9.1 (TBD)
+# Milvus 0.9.1 (2020-05-29)
 
 ## Bug
 -   \#2366 Reduce SQL execution times for collection contains lot of partitions
