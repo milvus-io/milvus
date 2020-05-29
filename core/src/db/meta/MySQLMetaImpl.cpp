@@ -2320,12 +2320,6 @@ MySQLMetaImpl::FilesByID(const std::vector<size_t>& ids, FilesHolder& files_hold
 
             statement << " WHERE (" << idStr << ")";
 
-            // End
-            statement << " AND"
-                      << " (file_type = " << std::to_string(SegmentSchema::RAW)
-                      << " OR file_type = " << std::to_string(SegmentSchema::TO_INDEX)
-                      << " OR file_type = " << std::to_string(SegmentSchema::INDEX) << ");";
-
             LOG_ENGINE_DEBUG_ << "FilesToSearch: " << statement.str();
 
             res = statement.store();
