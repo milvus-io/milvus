@@ -32,6 +32,7 @@ Please mark all change in change log and use the issue from GitHub
 -   \#2353 Remove log_config from code and scripts
 -   \#2370 Clean compile warning
 -   \#2410 Logging build index progress
+-   \#2461 Upgrade mishards for milvus 0.9.1
 
 # Milvus 0.9.0 (2020-05-15)
 
