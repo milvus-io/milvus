@@ -117,8 +117,6 @@ MemTable::Delete(const std::vector<segment::doc_id_t>& doc_ids) {
 
 Status
 MemTable::UpdateDeletedDocs(const std::vector<int64_t>& segment_ids) {
-    //    std::vector<int> file_types{meta::SegmentSchema::FILE_TYPE::RAW, meta::SegmentSchema::FILE_TYPE::TO_INDEX,
-    //                                meta::SegmentSchema::FILE_TYPE::BACKUP};
     auto status = Status::OK();
 
     meta::FilesHolder files_holder;
@@ -140,8 +138,6 @@ MemTable::UpdateDeletedDocs(const std::vector<int64_t>& segment_ids) {
         std::string segment_dir;
         utils::GetParentPath(file.location_, segment_dir);
 
-        std::cout << "Check segment file: " << file.location_ << std::endl;
-
         segment::SegmentReader segment_reader(segment_dir);
 
         segment::DeletedDocsPtr delete_docs = std::make_shared<segment::DeletedDocs>();
@@ -152,15 +148,19 @@ MemTable::UpdateDeletedDocs(const std::vector<int64_t>& segment_ids) {
         auto index = std::static_pointer_cast<knowhere::VecIndex>(data_obj_ptr);
 
         if (nullptr == index) {
+            LOG_ENGINE_WARNING_ << "Index " << file.location_ << " not found";
             continue;
         }
 
         faiss::ConcurrentBitsetPtr blacklist = index->GetBlacklist();
         if (nullptr == blacklist) {
-            continue;
+            LOG_ENGINE_WARNING_ << "Index " << file.location_ << " is empty";
+            faiss::ConcurrentBitsetPtr concurrent_bitset_ptr =
+                std::make_shared<faiss::ConcurrentBitset>(index->Count());
+            index->SetBlacklist(concurrent_bitset_ptr);
+            blacklist = concurrent_bitset_ptr;
         }
 
-        std::cout << "Update segment file: " << file.location_ << std::endl;
         for (auto& i : docs_offsets) {
             if (!blacklist->test(i)) {
                 blacklist->set(i);

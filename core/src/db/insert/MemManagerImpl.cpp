@@ -175,7 +175,6 @@ Status
 MemManagerImpl::ReloadDeletedDocs(const std::string& collection_id, std::vector<int64_t> segment_ids) {
     std::unique_lock<std::mutex> lock(mutex_);
 
-    // TODO: Change table to collection
     MemTablePtr mem = GetMemByTable(collection_id);
     return mem->UpdateDeletedDocs(segment_ids);
 }
