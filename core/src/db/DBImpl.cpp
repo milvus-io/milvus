@@ -1408,7 +1408,14 @@ DBImpl::CreateIndex(const std::shared_ptr<server::Context>& context, const std::
     // step 1: wait merge file thread finished to avoid duplicate data bug
     auto status = Flush();
     WaitMergeFileFinish();  // let merge file thread finish
-    std::set<std::string> merge_collection_ids;
+
+    // merge all files for this collection, including its partitions
+    std::set<std::string> merge_collection_ids = {collection_id};
+    std::vector<meta::CollectionSchema> partition_array;
+    status = meta_ptr_->ShowPartitions(collection_id, partition_array);
+    for (auto& schema : partition_array) {
+        merge_collection_ids.insert(schema.collection_id_);
+    }
     StartMergeTask(merge_collection_ids, true);  // start force-merge task
     WaitMergeFileFinish();                       // let force-merge file thread finish
 
