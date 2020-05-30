@@ -279,9 +279,7 @@ XSearchTask::Execute() {
                 auto spec_k = file_->row_count_ < topk ? file_->row_count_ : topk;
                 if (spec_k == 0) {
                     LOG_ENGINE_WARNING_ << "Searching in an empty file. file location = " << file_->location_;
-                }
-
-                {
+                } else {
                     std::unique_lock<std::mutex> lock(search_job->mutex());
                     search_job->vector_count() = nq;
                     XSearchTask::MergeTopkToResultSet(output_ids, output_distance, spec_k, nq, topk, ascending_reduce,
@@ -315,19 +313,8 @@ XSearchTask::Execute() {
             if (spec_k == 0) {
                 LOG_ENGINE_WARNING_ << LogOut("[%s][%ld] Searching in an empty file. file location = %s", "search", 0,
                                               file_->location_.c_str());
-            }
-
-            {
+            } else {
                 std::unique_lock<std::mutex> lock(search_job->mutex());
-
-                if (search_job->GetResultIds().size() > spec_k) {
-                    if (search_job->GetResultIds().front() == -1) {
-                        // initialized results set
-                        search_job->GetResultIds().resize(spec_k * nq);
-                        search_job->GetResultDistances().resize(spec_k * nq);
-                    }
-                }
-
                 XSearchTask::MergeTopkToResultSet(output_ids, output_distance, spec_k, nq, topk, ascending_reduce,
                                                   search_job->GetResultIds(), search_job->GetResultDistances());
             }
