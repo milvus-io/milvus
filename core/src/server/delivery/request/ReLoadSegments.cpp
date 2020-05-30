@@ -56,7 +56,7 @@ ReLoadSegments::OnExecute() {
         }
 
         std::vector<int64_t> segment_ids;
-        for (auto & id : segment_ids_) {
+        for (auto& id : segment_ids_) {
             std::string::size_type sz;
             segment_ids.push_back(std::stoul(id, &sz));
         }

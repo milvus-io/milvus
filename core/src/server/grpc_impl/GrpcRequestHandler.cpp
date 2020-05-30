@@ -758,8 +758,8 @@ GrpcRequestHandler::PreloadCollection(::grpc::ServerContext* context, const ::mi
 }
 
 ::grpc::Status
-GrpcRequestHandler::ReloadSegments(::grpc::ServerContext *context, const ::milvus::grpc::ReLoadSegmentsParam *request,
-                                   ::milvus::grpc::Status *response) {
+GrpcRequestHandler::ReloadSegments(::grpc::ServerContext* context, const ::milvus::grpc::ReLoadSegmentsParam* request,
+                                   ::milvus::grpc::Status* response) {
     CHECK_NULLPTR_RETURN(request);
     LOG_SERVER_INFO_ << LogOut("Request [%s] %s begin.", GetContext(context)->RequestID().c_str(), __func__);
 

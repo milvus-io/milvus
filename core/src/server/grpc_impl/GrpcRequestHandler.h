@@ -300,7 +300,7 @@ class GrpcRequestHandler final : public ::milvus::grpc::MilvusService::Service, 
     // *
     ::grpc::Status
     ReloadSegments(::grpc::ServerContext* context, const ::milvus::grpc::ReLoadSegmentsParam* request,
-        ::milvus::grpc::Status* response) override;
+                   ::milvus::grpc::Status* response) override;
 
     // *
     // @brief This method is used to flush buffer into storage.
