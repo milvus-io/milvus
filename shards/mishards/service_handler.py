@@ -580,7 +580,7 @@ class ServiceHandler(milvus_pb2_grpc.MilvusServiceServicer):
                                  reason=_status.message)
 
     def ReloadSegments(self, request, context):
-        raise NotImplemented("Not implemented in mishards")
+        raise NotImplementedError("Not implemented in mishards")
 
     def _describe_index(self, collection_name, metadata=None):
         return self.router.connection(metadata=metadata).get_index_info(collection_name)

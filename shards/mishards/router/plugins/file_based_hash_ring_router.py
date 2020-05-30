@@ -19,10 +19,13 @@ def filter_file_to_update(files_list):
     for fl in files_list:
         file_id, update_time = fl
         pre_update_time = file_updatetime_map[file_id]
-        if pre_update_time == 0:
-            file_updatetime_map[file_id] = update_time
-        elif pre_update_time < update_time:
-            file_need_update_list.append(file_id)
+
+        if pre_update_time >= update_time:
+            continue
+
+        file_updatetime_map[file_id] = update_time
+        # if pre_update_time > 0:
+        file_need_update_list.append(file_id)
 
     return file_need_update_list
 
