@@ -47,6 +47,26 @@ using namespace sqlite_orm;
 
 namespace {
 
+constexpr uint64_t SQL_BATCH_SIZE = 50;
+
+template<typename T>
+void
+DistributeBatch(const T& id_array, std::vector<std::vector<std::string>>& id_groups) {
+    std::vector<std::string> temp_group;
+    constexpr uint64_t SQL_BATCH_SIZE = 50;
+    for (auto& id : id_array) {
+        temp_group.push_back(id);
+        if (temp_group.size() >= SQL_BATCH_SIZE) {
+            id_groups.emplace_back(temp_group);
+            temp_group.clear();
+        }
+    }
+
+    if (!temp_group.empty()) {
+        id_groups.emplace_back(temp_group);
+    }
+}
+
 Status
 HandleException(const std::string& desc, const char* what = nullptr) {
     if (what == nullptr) {
@@ -367,22 +387,32 @@ SqliteMetaImpl::AllCollections(std::vector<CollectionSchema>& collection_schema_
 }
 
 Status
-SqliteMetaImpl::DropCollection(const std::string& collection_id) {
+SqliteMetaImpl::DropCollections(const std::vector<std::string>& collection_id_array) {
     try {
         fiu_do_on("SqliteMetaImpl.DropCollection.throw_exception", throw std::exception());
 
+        // distribute id array to batches
+        std::vector<std::vector<std::string>> id_groups;
+        DistributeBatch(collection_id_array, id_groups);
+
         server::MetricCollector metric;
 
-        // multi-threads call sqlite update may get exception('bad logic', etc), so we add a lock here
-        std::lock_guard<std::mutex> meta_lock(meta_mutex_);
+        {
+            // multi-threads call sqlite update may get exception('bad logic', etc), so we add a lock here
+            std::lock_guard<std::mutex> meta_lock(meta_mutex_);
 
-        // soft delete collection
-        ConnectorPtr->update_all(
-            set(c(&CollectionSchema::state_) = (int)CollectionSchema::TO_DELETE),
-            where(c(&CollectionSchema::collection_id_) == collection_id
-                  and c(&CollectionSchema::state_) != (int)CollectionSchema::TO_DELETE));
+            for (auto group : id_groups) {
+                // soft delete collection
+                ConnectorPtr->update_all(
+                    set(c(&CollectionSchema::state_) = (int)CollectionSchema::TO_DELETE),
+                    where(in(&CollectionSchema::collection_id_, group)
+                          and c(&CollectionSchema::state_) != (int)CollectionSchema::TO_DELETE));
+            }
+        }
 
-        LOG_ENGINE_DEBUG_ << "Successfully delete collection, collection id = " << collection_id;
+        auto status = DeleteCollectionFiles(collection_id_array);
+        LOG_ENGINE_DEBUG_ << "Successfully delete collections";
+        return status;
     } catch (std::exception& e) {
         return HandleException("Encounter exception when delete collection", e.what());
     }
@@ -391,22 +421,28 @@ SqliteMetaImpl::DropCollection(const std::string& collection_id) {
 }
 
 Status
-SqliteMetaImpl::DeleteCollectionFiles(const std::string& collection_id) {
+SqliteMetaImpl::DeleteCollectionFiles(const std::vector<std::string>& collection_id_array) {
     try {
         fiu_do_on("SqliteMetaImpl.DeleteCollectionFiles.throw_exception", throw std::exception());
+
+        // distribute id array to batches
+        std::vector<std::vector<std::string>> id_groups;
+        DistributeBatch(collection_id_array, id_groups);
 
         server::MetricCollector metric;
 
         // multi-threads call sqlite update may get exception('bad logic', etc), so we add a lock here
         std::lock_guard<std::mutex> meta_lock(meta_mutex_);
 
-        // soft delete collection files
-        ConnectorPtr->update_all(set(c(&SegmentSchema::file_type_) = (int)SegmentSchema::TO_DELETE,
-                                     c(&SegmentSchema::updated_time_) = utils::GetMicroSecTimeStamp()),
-                                 where(c(&SegmentSchema::collection_id_) == collection_id and
-                                       c(&SegmentSchema::file_type_) != (int)SegmentSchema::TO_DELETE));
+        for (auto group : id_groups) {
+            // soft delete collection files
+            ConnectorPtr->update_all(set(c(&SegmentSchema::file_type_) = (int)SegmentSchema::TO_DELETE,
+                                         c(&SegmentSchema::updated_time_) = utils::GetMicroSecTimeStamp()),
+                                     where(in(&SegmentSchema::collection_id_, group) and
+                                           c(&SegmentSchema::file_type_) != (int)SegmentSchema::TO_DELETE));
+        }
 
-        LOG_ENGINE_DEBUG_ << "Successfully delete collection files, collection id = " << collection_id;
+        LOG_ENGINE_DEBUG_ << "Successfully delete collection files";
     } catch (std::exception& e) {
         return HandleException("Encounter exception when delete collection files", e.what());
     }
@@ -979,7 +1015,7 @@ SqliteMetaImpl::HasPartition(const std::string& collection_id, const std::string
 
 Status
 SqliteMetaImpl::DropPartition(const std::string& partition_name) {
-    return DropCollection(partition_name);
+    return DropCollections({partition_name});
 }
 
 Status
