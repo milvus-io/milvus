@@ -31,30 +31,21 @@ class SnapshotHolder {
     GetID() const {
         return collection_id_;
     }
-    bool
+    Status
     Add(ID_TYPE id);
-
-    void
-    BackgroundGC();
-
-    void
-    NotifyDone();
 
     ScopedSnapshotT
     GetSnapshot(ID_TYPE id = 0, bool scoped = true);
-
-    void
-    GCHandlerTestCallBack(Snapshot::Ptr ss) {
-        std::unique_lock<std::mutex> lock(gcmutex_);
-        to_release_.push_back(ss);
-        lock.unlock();
-        cv_.notify_one();
-    }
 
     bool
     SetGCHandler(GCHandler gc_handler) {
         gc_handler_ = gc_handler;
     }
+
+    bool
+    IsActive(Snapshot::Ptr& ss);
+
+    ~SnapshotHolder();
 
  private:
     CollectionCommitPtr
@@ -68,8 +59,6 @@ class SnapshotHolder {
     }
 
     std::mutex mutex_;
-    std::mutex gcmutex_;
-    std::condition_variable cv_;
     ID_TYPE collection_id_;
     ID_TYPE min_id_ = std::numeric_limits<ID_TYPE>::max();
     ID_TYPE max_id_ = std::numeric_limits<ID_TYPE>::min();
@@ -77,7 +66,6 @@ class SnapshotHolder {
     std::vector<Snapshot::Ptr> to_release_;
     size_t num_versions_ = 1;
     GCHandler gc_handler_;
-    std::atomic<bool> done_;
 };
 
 using SnapshotHolderPtr = std::shared_ptr<SnapshotHolder>;

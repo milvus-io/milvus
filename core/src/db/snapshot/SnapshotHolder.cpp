@@ -18,7 +18,21 @@ namespace engine {
 namespace snapshot {
 
 SnapshotHolder::SnapshotHolder(ID_TYPE collection_id, GCHandler gc_handler, size_t num_versions)
-    : collection_id_(collection_id), num_versions_(num_versions), gc_handler_(gc_handler), done_(false) {
+    : collection_id_(collection_id), num_versions_(num_versions), gc_handler_(gc_handler) {
+}
+
+SnapshotHolder::~SnapshotHolder() {
+    bool release = false;
+    for (auto& ss_kv : active_) {
+        if (!ss_kv.second->GetCollection()->IsActive()) {
+            ReadyForRelease(ss_kv.second);
+            release = true;
+        }
+    }
+
+    if (release) {
+        active_.clear();
+    }
 }
 
 ScopedSnapshotT
@@ -49,28 +63,36 @@ SnapshotHolder::GetSnapshot(ID_TYPE id, bool scoped) {
 }
 
 bool
+SnapshotHolder::IsActive(Snapshot::Ptr& ss) {
+    auto collection = ss->GetCollection();
+    if (collection && collection->IsActive()) {
+        return true;
+    }
+    return false;
+}
+
+Status
 SnapshotHolder::Add(ID_TYPE id) {
     {
         std::unique_lock<std::mutex> lock(mutex_);
         if (active_.size() > 0 && id < max_id_) {
-            return false;
+            return Status(40007, "Invalid ID");
         }
         auto it = active_.find(id);
         if (it != active_.end()) {
-            return false;
+            return Status(40008, "Duplicated ID");
         }
     }
     Snapshot::Ptr oldest_ss;
     {
         auto ss = std::make_shared<Snapshot>(id);
 
-        if (done_) {
-            return false;
+        std::unique_lock<std::mutex> lock(mutex_);
+        if (!IsActive(ss)) {
+            return Status(40009, "Specified collection is not active now");
         }
         ss->RegisterOnNoRefCB(std::bind(&Snapshot::UnRefAll, ss));
         ss->Ref();
-
-        std::unique_lock<std::mutex> lock(mutex_);
 
         if (min_id_ > id) {
             min_id_ = id;
@@ -82,7 +104,7 @@ SnapshotHolder::Add(ID_TYPE id) {
 
         active_[id] = ss;
         if (active_.size() <= num_versions_)
-            return true;
+            return Status::OK();
 
         auto oldest_it = active_.find(min_id_);
         oldest_ss = oldest_it->second;
@@ -90,38 +112,7 @@ SnapshotHolder::Add(ID_TYPE id) {
         min_id_ = active_.begin()->first;
     }
     ReadyForRelease(oldest_ss);  // TODO: Use different mutex
-    return true;
-}
-
-void
-SnapshotHolder::NotifyDone() {
-    std::unique_lock<std::mutex> lock(gcmutex_);
-    done_ = true;
-    cv_.notify_all();
-}
-
-void
-SnapshotHolder::BackgroundGC() {
-    while (true) {
-        if (done_.load(std::memory_order_acquire)) {
-            break;
-        }
-        std::vector<Snapshot::Ptr> sss;
-        {
-            std::unique_lock<std::mutex> lock(gcmutex_);
-            cv_.wait_for(lock, std::chrono::milliseconds(100), [this]() { return to_release_.size() > 0; });
-            if (to_release_.size() > 0) {
-                /* std::cout << "size = " << to_release_.size() << std::endl; */
-                sss = to_release_;
-                to_release_.clear();
-            }
-        }
-
-        for (auto& ss : sss) {
-            ss->UnRef();
-            /* std::cout << "BG Handling " << ss->GetID() << " RefCnt=" << ss->RefCnt() << std::endl; */
-        }
-    }
+    return Status::OK();
 }
 
 CollectionCommitPtr

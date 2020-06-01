@@ -25,6 +25,8 @@ using FTYPE_TYPE = int64_t;
 using TS_TYPE = int64_t;
 using MappingT = std::set<ID_TYPE>;
 
+enum FieldElementType { RAW, IVFSQ8 };
+
 using IDS_TYPE = std::vector<ID_TYPE>;
 
 enum State { PENDING = 0, ACTIVE = 1, DEACTIVE = 2, INVALID = 999 };
