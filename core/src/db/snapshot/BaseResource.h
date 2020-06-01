@@ -40,6 +40,7 @@ DBBaseResource<Fields...>::DBBaseResource(const Fields&... fields) : Fields(fiel
 template <typename... Fields>
 std::string
 DBBaseResource<Fields...>::ToString() const {
+    return "";
 }
 
 }  // namespace snapshot

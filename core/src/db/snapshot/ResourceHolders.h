@@ -27,31 +27,7 @@ namespace milvus {
 namespace engine {
 namespace snapshot {
 
-class CollectionsHolder : public ResourceHolder<Collection, CollectionsHolder> {
- public:
-    using BaseT = ResourceHolder<Collection, CollectionsHolder>;
-    using ResourcePtr = typename BaseT::ResourcePtr;
-    using NameMapT = std::map<std::string, ResourcePtr>;
-
-    ScopedT
-    GetCollection(const std::string& name, bool scoped = true);
-
-    bool
-    Add(ResourcePtr resource) override;
-    bool
-    Release(ID_TYPE id) override;
-    bool
-    Release(const std::string& name);
-
-    void
-    Reset() override;
-
- private:
-    ResourcePtr
-    Load(const std::string& name) override;
-
-    NameMapT name_map_;
-};
+class CollectionsHolder : public ResourceHolder<Collection, CollectionsHolder> {};
 
 class SchemaCommitsHolder : public ResourceHolder<SchemaCommit, SchemaCommitsHolder> {};
 
