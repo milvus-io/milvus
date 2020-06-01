@@ -136,14 +136,14 @@ MemTable::UpdateDeletedDocs(const std::vector<int64_t>& segment_ids) {
         std::string segment_dir;
         utils::GetParentPath(file.location_, segment_dir);
 
+        auto data_obj_ptr = cache::CpuCacheMgr::GetInstance()->GetIndex(file.location_);
+        auto index = std::static_pointer_cast<knowhere::VecIndex>(data_obj_ptr);
+
         segment::SegmentReader segment_reader(segment_dir);
 
         segment::DeletedDocsPtr delete_docs = std::make_shared<segment::DeletedDocs>();
         segment_reader.LoadDeletedDocs(delete_docs);
         auto& docs_offsets = delete_docs->GetDeletedDocs();
-
-        auto data_obj_ptr = cache::CpuCacheMgr::GetInstance()->GetIndex(file.location_);
-        auto index = std::static_pointer_cast<knowhere::VecIndex>(data_obj_ptr);
 
         if (nullptr == index) {
             LOG_ENGINE_WARNING_ << "Index " << file.location_ << " not found";

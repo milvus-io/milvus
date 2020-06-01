@@ -20,15 +20,15 @@
 namespace milvus {
 namespace server {
 
-class ReLoadSegments : public BaseRequest {
+class ReLoadSegmentsRequest : public BaseRequest {
  public:
     static BaseRequestPtr
     Create(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name,
            const std::vector<std::string>& segment_ids);
 
  protected:
-    ReLoadSegments(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name,
-                   const std::vector<std::string>& segment_ids);
+    ReLoadSegmentsRequest(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name,
+                          const std::vector<std::string>& segment_ids);
 
     Status
     OnExecute() override;
