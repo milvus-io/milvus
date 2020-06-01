@@ -259,9 +259,6 @@ class DBImpl : public DB, public server::CacheConfigHandler, public server::Engi
                         std::set<std::string>& partition_name_array);
 
     Status
-    DropCollectionRecursively(const std::string& collection_id);
-
-    Status
     UpdateCollectionIndexRecursively(const std::string& collection_id, const CollectionIndex& index);
 
     Status

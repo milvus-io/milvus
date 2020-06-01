@@ -5,6 +5,7 @@ Please mark all change in change log and use the issue from GitHub
 
 ## Bug
 -   \#2367 Fix inconsistent reading and writing when using mishards
+-   \#2394 Drop collection timeout if too many partitions created on collection
 
 ## Feature
 -   \#2363 Update branch version
