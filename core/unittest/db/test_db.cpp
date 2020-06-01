@@ -968,10 +968,6 @@ TEST_F(DBTest2, DELETE_TEST) {
 
     // fail drop collection
     fiu_init(0);
-    FIU_ENABLE_FIU("DBImpl.DropCollectionRecursively.failed");
-    stat = db_->DropCollection(COLLECTION_NAME);
-    ASSERT_FALSE(stat.ok());
-    fiu_disable("DBImpl.DropCollectionRecursively.failed");
 
     stat = db_->DropCollection(COLLECTION_NAME);
     ASSERT_TRUE(stat.ok());

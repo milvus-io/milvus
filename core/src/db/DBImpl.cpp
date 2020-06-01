@@ -269,11 +269,37 @@ DBImpl::DropCollection(const std::string& collection_id) {
         return SHUTDOWN_ERROR;
     }
 
+    // dates partly delete files of the collection but currently we don't support
+    LOG_ENGINE_DEBUG_ << "Prepare to delete collection " << collection_id;
+
+    Status status;
     if (options_.wal_enable_) {
         wal_mgr_->DropCollection(collection_id);
     }
 
-    return DropCollectionRecursively(collection_id);
+    status = mem_mgr_->EraseMemVector(collection_id);      // not allow insert
+    status = meta_ptr_->DropCollections({collection_id});  // soft delete collection
+    index_failed_checker_.CleanFailedIndexFileOfCollection(collection_id);
+
+    std::vector<meta::CollectionSchema> partition_array;
+    status = meta_ptr_->ShowPartitions(collection_id, partition_array);
+    std::vector<std::string> partition_id_array;
+    for (auto& schema : partition_array) {
+        if (options_.wal_enable_) {
+            wal_mgr_->DropCollection(schema.collection_id_);
+        }
+        status = mem_mgr_->EraseMemVector(schema.collection_id_);
+        index_failed_checker_.CleanFailedIndexFileOfCollection(schema.collection_id_);
+        partition_id_array.push_back(schema.collection_id_);
+    }
+
+    status = meta_ptr_->DropCollections(partition_id_array);
+    fiu_do_on("DBImpl.DropCollection.failed", status = Status(DB_ERROR, ""));
+    if (!status.ok()) {
+        return status;
+    }
+
+    return Status::OK();
 }
 
 Status
@@ -2285,39 +2311,6 @@ DBImpl::GetPartitionsByTags(const std::string& collection_id, const std::vector<
 
     if (partition_name_array.empty()) {
         return Status(DB_PARTITION_NOT_FOUND, "The specified partiton does not exist");
-    }
-
-    return Status::OK();
-}
-
-Status
-DBImpl::DropCollectionRecursively(const std::string& collection_id) {
-    // dates partly delete files of the collection but currently we don't support
-    LOG_ENGINE_DEBUG_ << "Prepare to delete collection " << collection_id;
-
-    Status status;
-    if (options_.wal_enable_) {
-        wal_mgr_->DropCollection(collection_id);
-    }
-
-    status = mem_mgr_->EraseMemVector(collection_id);   // not allow insert
-    status = meta_ptr_->DropCollection(collection_id);  // soft delete collection
-    index_failed_checker_.CleanFailedIndexFileOfCollection(collection_id);
-
-    // scheduler will determine when to delete collection files
-    auto nres = scheduler::ResMgrInst::GetInstance()->GetNumOfComputeResource();
-    scheduler::DeleteJobPtr job = std::make_shared<scheduler::DeleteJob>(collection_id, meta_ptr_, nres);
-    scheduler::JobMgrInst::GetInstance()->Put(job);
-    job->WaitAndDelete();
-
-    std::vector<meta::CollectionSchema> partition_array;
-    status = meta_ptr_->ShowPartitions(collection_id, partition_array);
-    for (auto& schema : partition_array) {
-        status = DropCollectionRecursively(schema.collection_id_);
-        fiu_do_on("DBImpl.DropCollectionRecursively.failed", status = Status(DB_ERROR, ""));
-        if (!status.ok()) {
-            return status;
-        }
     }
 
     return Status::OK();
