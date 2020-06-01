@@ -20,13 +20,14 @@ namespace milvus {
 namespace server {
 
 ReLoadSegmentsRequest::ReLoadSegmentsRequest(const std::shared_ptr<milvus::server::Context>& context,
-                                             const std::string& collection_name, const std::vector<std::string>& segment_ids)
+                                             const std::string& collection_name,
+                                             const std::vector<std::string>& segment_ids)
     : BaseRequest(context, BaseRequest::kReloadSegments), collection_name_(collection_name), segment_ids_(segment_ids) {
 }
 
 BaseRequestPtr
-ReLoadSegmentsRequest::Create(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name,
-                              const std::vector<std::string>& segment_ids) {
+ReLoadSegmentsRequest::Create(const std::shared_ptr<milvus::server::Context>& context,
+                              const std::string& collection_name, const std::vector<std::string>& segment_ids) {
     return std::shared_ptr<BaseRequest>(new ReLoadSegmentsRequest(context, collection_name, segment_ids));
 }
 

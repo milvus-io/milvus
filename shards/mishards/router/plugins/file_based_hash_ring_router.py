@@ -11,19 +11,22 @@ from mishards.hash_ring import HashRing
 logger = logging.getLogger(__name__)
 
 
-file_updatetime_map = defaultdict(lambda: 0)
+file_updatetime_map = defaultdict(dict)
 
 
-def filter_file_to_update(files_list):
+def filter_file_to_update(host, files_list):
+    host_files = file_updatetime_map[host]
+
     file_need_update_list = []
     for fl in files_list:
         file_id, update_time = fl
-        pre_update_time = file_updatetime_map[file_id]
+        pre_update_time = host_files.get(file_id, 0)
 
         if pre_update_time >= update_time:
             continue
-
-        file_updatetime_map[file_id] = update_time
+        logger.debug("[{}] file id: {}.  pre update time {} is small than {}"
+                     .format(host, file_id, pre_update_time, update_time))
+        host_files[file_id] = update_time
         # if pre_update_time > 0:
         file_need_update_list.append(file_id)
 
@@ -117,7 +120,7 @@ class Factory(RouterMixin):
 
         filter_routing = {}
         for host, filess in routing.items():
-            ud_files = filter_file_to_update(filess)
+            ud_files = filter_file_to_update(host, filess)
             search_files = [f[0] for f in filess]
             filter_routing[host] = (search_files, ud_files)
 

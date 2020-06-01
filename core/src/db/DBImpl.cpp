@@ -529,17 +529,16 @@ DBImpl::ReLoadSegmentsDeletedDocs(const std::string& collection_id, const std::v
 
         auto data_obj_ptr = cache::CpuCacheMgr::GetInstance()->GetIndex(file.location_);
         auto index = std::static_pointer_cast<knowhere::VecIndex>(data_obj_ptr);
+        if (nullptr == index) {
+            LOG_ENGINE_WARNING_ << "Index " << file.location_ << " not found";
+            continue;
+        }
 
         segment::SegmentReader segment_reader(segment_dir);
 
         segment::DeletedDocsPtr delete_docs = std::make_shared<segment::DeletedDocs>();
         segment_reader.LoadDeletedDocs(delete_docs);
         auto& docs_offsets = delete_docs->GetDeletedDocs();
-
-        if (nullptr == index) {
-            LOG_ENGINE_WARNING_ << "Index " << file.location_ << " not found";
-            continue;
-        }
 
         faiss::ConcurrentBitsetPtr blacklist = index->GetBlacklist();
         if (nullptr == blacklist) {
@@ -558,7 +557,6 @@ DBImpl::ReLoadSegmentsDeletedDocs(const std::string& collection_id, const std::v
     }
 
     return Status::OK();
-//    return mem_mgr_->ReloadDeletedDocs(collection_id, segment_ids);
 }
 
 Status
