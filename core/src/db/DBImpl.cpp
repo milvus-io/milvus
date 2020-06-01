@@ -2377,17 +2377,16 @@ DBImpl::WaitCollectionIndexRecursively(const std::shared_ptr<server::Context>& c
                 }
             }
 
-            index_req_swn_.Wait_For(std::chrono::seconds(1));
-
+            auto ret = index_req_swn_.Wait_For(std::chrono::seconds(1));
             // client break the connection, no need to block, check every 1 second
             if (context && context->IsConnectionBroken()) {
                 LOG_ENGINE_DEBUG_ << "Client connection broken, build index in background";
                 break;  // just break, not return, continue to update partitions files to to_index
             }
 
-            // check to_index files every 5 seconds
+            // check to_index files every 5 seconds or background index thread finished
             repeat++;
-            if (repeat % WAIT_BUILD_INDEX_INTERVAL == 0) {
+            if ((ret == std::cv_status::no_timeout) || (repeat % WAIT_BUILD_INDEX_INTERVAL == 0)) {
                 GetFilesToBuildIndex(collection_id, file_types, files_holder);
                 ++times;
             }

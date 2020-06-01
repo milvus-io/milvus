@@ -310,22 +310,26 @@ class DBImpl : public DB, public server::CacheConfigHandler, public server::Engi
             notified_ = false;
         }
 
-        void
+        std::cv_status
         Wait_Until(const std::chrono::system_clock::time_point& tm_pint) {
             std::unique_lock<std::mutex> lck(mutex_);
+            std::cv_status ret = std::cv_status::timeout;
             if (!notified_) {
-                cv_.wait_until(lck, tm_pint);
+                ret = cv_.wait_until(lck, tm_pint);
             }
             notified_ = false;
+            return ret;
         }
 
-        void
+        std::cv_status
         Wait_For(const std::chrono::system_clock::duration& tm_dur) {
             std::unique_lock<std::mutex> lck(mutex_);
+            std::cv_status ret = std::cv_status::timeout;
             if (!notified_) {
-                cv_.wait_for(lck, tm_dur);
+                ret = cv_.wait_for(lck, tm_dur);
             }
             notified_ = false;
+            return ret;
         }
 
         void
