@@ -34,12 +34,13 @@ class SnapshotHolder {
     Status
     Add(ID_TYPE id);
 
-    ScopedSnapshotT
-    GetSnapshot(ID_TYPE id = 0, bool scoped = true);
+    Status
+    GetSnapshot(ScopedSnapshotT& ss, ID_TYPE id = 0, bool scoped = true, bool load = true);
 
-    bool
+    Status
     SetGCHandler(GCHandler gc_handler) {
         gc_handler_ = gc_handler;
+        return Status::OK();
     }
 
     bool
@@ -48,8 +49,8 @@ class SnapshotHolder {
     ~SnapshotHolder();
 
  private:
-    CollectionCommitPtr
-    LoadNoLock(ID_TYPE collection_commit_id);
+    Status
+    LoadNoLock(ID_TYPE collection_commit_id, CollectionCommitPtr& cc);
 
     void
     ReadyForRelease(Snapshot::Ptr ss) {

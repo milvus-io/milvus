@@ -11,6 +11,7 @@
 
 #pragma once
 
+#include <string>
 #include "ResourceOperations.h"
 #include "Snapshot.h"
 
@@ -25,13 +26,18 @@ class BuildOperation : public Operations {
     BuildOperation(const OperationContext& context, ScopedSnapshotT prev_ss);
     BuildOperation(const OperationContext& context, ID_TYPE collection_id, ID_TYPE commit_id = 0);
 
-    bool
+    Status
     DoExecute(Store&) override;
-    bool
-    PreExecute(Store&) override;
 
-    SegmentFilePtr
-    CommitNewSegmentFile(const SegmentFileContext& context);
+    Status
+    CommitNewSegmentFile(const SegmentFileContext& context, SegmentFilePtr& created);
+
+    std::string
+    OperationRepr() const override;
+
+ protected:
+    Status
+    CheckSegmentStale(ScopedSnapshotT& latest_snapshot, ID_TYPE segment_id) const;
 };
 
 class NewSegmentOperation : public Operations {
@@ -41,17 +47,14 @@ class NewSegmentOperation : public Operations {
     NewSegmentOperation(const OperationContext& context, ScopedSnapshotT prev_ss);
     NewSegmentOperation(const OperationContext& context, ID_TYPE collection_id, ID_TYPE commit_id = 0);
 
-    bool
+    Status
     DoExecute(Store&) override;
 
-    bool
-    PreExecute(Store&) override;
+    Status
+    CommitNewSegment(SegmentPtr& created);
 
-    SegmentPtr
-    CommitNewSegment();
-
-    SegmentFilePtr
-    CommitNewSegmentFile(const SegmentFileContext& context);
+    Status
+    CommitNewSegmentFile(const SegmentFileContext& context, SegmentFilePtr& created);
 };
 
 class MergeOperation : public Operations {
@@ -61,15 +64,16 @@ class MergeOperation : public Operations {
     MergeOperation(const OperationContext& context, ScopedSnapshotT prev_ss);
     MergeOperation(const OperationContext& context, ID_TYPE collection_id, ID_TYPE commit_id = 0);
 
-    bool
-    PreExecute(Store&) override;
-    bool
+    Status
     DoExecute(Store&) override;
 
-    SegmentPtr
-    CommitNewSegment();
-    SegmentFilePtr
-    CommitNewSegmentFile(const SegmentFileContext& context);
+    Status
+    CommitNewSegment(SegmentPtr&);
+    Status
+    CommitNewSegmentFile(const SegmentFileContext& context, SegmentFilePtr&);
+
+    std::string
+    OperationRepr() const override;
 };
 
 class CreateCollectionOperation : public Operations {
@@ -77,14 +81,42 @@ class CreateCollectionOperation : public Operations {
     using BaseT = Operations;
     explicit CreateCollectionOperation(const CreateCollectionContext& context);
 
-    bool
+    Status
     DoExecute(Store&) override;
 
-    ScopedSnapshotT
-    GetSnapshot() const override;
+    Status
+    GetSnapshot(ScopedSnapshotT& ss) const override;
 
  private:
     CreateCollectionContext context_;
+};
+
+class CreatePartitionOperation : public Operations {
+ public:
+    using BaseT = Operations;
+    CreatePartitionOperation(const OperationContext& context, ScopedSnapshotT prev_ss);
+    CreatePartitionOperation(const OperationContext& context, ID_TYPE collection_id, ID_TYPE commit_id = 0);
+
+    Status
+    CommitNewPartition(const PartitionContext& context, PartitionPtr& partition);
+
+    Status
+    DoExecute(Store&) override;
+
+    Status
+    PreCheck() override;
+};
+
+class DropPartitionOperation : public Operations {
+ public:
+    using BaseT = Operations;
+    DropPartitionOperation(const PartitionContext& context, ScopedSnapshotT prev_ss);
+
+    Status
+    DoExecute(Store&) override;
+
+ protected:
+    PartitionContext context_;
 };
 
 class GetSnapshotIDsOperation : public Operations {
@@ -93,7 +125,7 @@ class GetSnapshotIDsOperation : public Operations {
 
     explicit GetSnapshotIDsOperation(ID_TYPE collection_id, bool reversed = true);
 
-    bool
+    Status
     DoExecute(Store& store) override;
 
     const IDS_TYPE&
@@ -111,7 +143,7 @@ class GetCollectionIDsOperation : public Operations {
 
     explicit GetCollectionIDsOperation(bool reversed = true);
 
-    bool
+    Status
     DoExecute(Store& store) override;
 
     const IDS_TYPE&
@@ -125,21 +157,14 @@ class GetCollectionIDsOperation : public Operations {
 class SoftDeleteCollectionOperation : public Operations {
  public:
     using BaseT = Operations;
-    // TODO: Define error code and msg later
-    explicit SoftDeleteCollectionOperation(const OperationContext& context)
-        : BaseT(context, ScopedSnapshotT()), status_(40005, "Operation Pending") {
+    explicit SoftDeleteCollectionOperation(const OperationContext& context) : BaseT(context, ScopedSnapshotT()) {
     }
 
     Status
-    GetStatus() const {
-        return status_;
-    }
-    bool
     DoExecute(Store& store) override;
 
  private:
     ID_TYPE collection_id_;
-    Status status_;
 };
 
 }  // namespace snapshot

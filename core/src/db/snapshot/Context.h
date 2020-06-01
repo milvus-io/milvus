@@ -22,6 +22,11 @@ namespace milvus {
 namespace engine {
 namespace snapshot {
 
+struct PartitionContext {
+    std::string name;
+    ID_TYPE id = 0;
+};
+
 struct SegmentFileContext {
     std::string field_name;
     std::string field_element_name;
@@ -38,6 +43,7 @@ struct LoadOperationContext {
 struct OperationContext {
     SegmentPtr new_segment = nullptr;
     SegmentCommitPtr new_segment_commit = nullptr;
+    PartitionPtr new_partition = nullptr;
     PartitionCommitPtr new_partition_commit = nullptr;
     SchemaCommitPtr new_schema_commit = nullptr;
 
@@ -52,6 +58,7 @@ struct OperationContext {
     PartitionPtr prev_partition = nullptr;
     PartitionCommitPtr prev_partition_commit = nullptr;
     CollectionCommitPtr prev_collection_commit = nullptr;
+    PartitionCommitPtr stale_partition_commit = nullptr;
 
     SegmentFile::VecT new_segment_files;
     CollectionPtr collection = nullptr;
