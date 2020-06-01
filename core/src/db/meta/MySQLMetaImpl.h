@@ -45,10 +45,10 @@ class MySQLMetaImpl : public Meta {
     AllCollections(std::vector<CollectionSchema>& collection_schema_array, bool is_root = false) override;
 
     Status
-    DropCollection(const std::string& collection_id) override;
+    DropCollections(const std::vector<std::string>& collection_id_array) override;
 
     Status
-    DeleteCollectionFiles(const std::string& collection_id) override;
+    DeleteCollectionFiles(const std::vector<std::string>& collection_id_array) override;
 
     Status
     CreateCollectionFile(SegmentSchema& file_schema) override;
