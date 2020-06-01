@@ -138,6 +138,9 @@ class ExecutionEngine {
     Cache() = 0;
 
     virtual Status
+    AttrCache() = 0;
+
+    virtual Status
     Init() = 0;
 
     virtual EngineType
@@ -148,6 +151,9 @@ class ExecutionEngine {
 
     virtual std::string
     GetLocation() const = 0;
+
+    virtual std::string
+    GetAttrLocation() const = 0;
 };
 
 using ExecutionEnginePtr = std::shared_ptr<ExecutionEngine>;

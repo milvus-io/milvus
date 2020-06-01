@@ -20,6 +20,7 @@
 #include <vector>
 
 #include "ExecutionEngine.h"
+#include "db/attr/Attr.h"
 #include "knowhere/index/vector_index/VecIndex.h"
 
 namespace milvus {
@@ -92,6 +93,9 @@ class ExecutionEngineImpl : public ExecutionEngine {
     Cache() override;
 
     Status
+    AttrCache() override;
+
+    Status
     Init() override;
 
     EngineType
@@ -109,6 +113,11 @@ class ExecutionEngineImpl : public ExecutionEngine {
         return location_;
     }
 
+    std::string
+    GetAttrLocation() const override {
+        return attr_location_;
+    }
+
  private:
     knowhere::VecIndexPtr
     CreatetVecIndex(EngineType type);
@@ -123,6 +132,9 @@ class ExecutionEngineImpl : public ExecutionEngine {
     void
     HybridLoad() const;
 
+    Status
+    LoadAttr(bool to_cache);
+
     void
     HybridUnset() const;
 
@@ -133,10 +145,9 @@ class ExecutionEngineImpl : public ExecutionEngine {
     EngineType index_type_;
     MetricType metric_type_;
 
-    std::unordered_map<std::string, std::vector<uint8_t>> attr_data_;
-    std::unordered_map<std::string, size_t> attr_size_;
-    std::vector<int64_t> entity_ids_;
-    int64_t vector_count_;
+    Attr::AttrPtr attr_ = nullptr;
+
+    std::string attr_location_;
 
     milvus::json index_params_;
     int64_t gpu_num_ = 0;
