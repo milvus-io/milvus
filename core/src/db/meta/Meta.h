@@ -71,10 +71,10 @@ class Meta {
     GetCollectionFlushLSN(const std::string& collection_id, uint64_t& flush_lsn) = 0;
 
     virtual Status
-    DropCollection(const std::string& collection_id) = 0;
+    DropCollections(const std::vector<std::string>& collection_id_array) = 0;
 
     virtual Status
-    DeleteCollectionFiles(const std::string& collection_id) = 0;
+    DeleteCollectionFiles(const std::vector<std::string>& collection_id_array) = 0;
 
     virtual Status
     CreateCollectionFile(SegmentSchema& file_schema) = 0;

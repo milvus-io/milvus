@@ -46,6 +46,26 @@ namespace meta {
 
 namespace {
 
+constexpr uint64_t SQL_BATCH_SIZE = 50;
+
+template <typename T>
+void
+DistributeBatch(const T& id_array, std::vector<std::vector<std::string>>& id_groups) {
+    std::vector<std::string> temp_group;
+    constexpr uint64_t SQL_BATCH_SIZE = 50;
+    for (auto& id : id_array) {
+        temp_group.push_back(id);
+        if (temp_group.size() >= SQL_BATCH_SIZE) {
+            id_groups.emplace_back(temp_group);
+            temp_group.clear();
+        }
+    }
+
+    if (!temp_group.empty()) {
+        id_groups.emplace_back(temp_group);
+    }
+}
+
 Status
 HandleException(const std::string& desc, const char* what = nullptr) {
     if (what == nullptr) {
@@ -636,10 +656,15 @@ MySQLMetaImpl::AllCollections(std::vector<CollectionSchema>& collection_schema_a
 }
 
 Status
-MySQLMetaImpl::DropCollection(const std::string& collection_id) {
+MySQLMetaImpl::DropCollections(const std::vector<std::string>& collection_id_array) {
     try {
+        // distribute id array to batches
+        std::vector<std::vector<std::string>> id_groups;
+        DistributeBatch(collection_id_array, id_groups);
+
         server::MetricCollector metric;
-        {
+
+        for (auto group : id_groups) {
             mysqlpp::ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab_);
 
             bool is_null_connection = (connectionPtr == nullptr);
@@ -650,26 +675,32 @@ MySQLMetaImpl::DropCollection(const std::string& collection_id) {
                 return Status(DB_ERROR, "Failed to connect to meta server(mysql)");
             }
 
+            // to ensure UpdateCollectionFiles to be a atomic operation
+            std::lock_guard<std::mutex> meta_lock(meta_mutex_);
+
             // soft delete collection
             mysqlpp::Query statement = connectionPtr->query();
             //
             statement << "UPDATE " << META_TABLES << " SET state = " << std::to_string(CollectionSchema::TO_DELETE)
-                      << " WHERE table_id = " << mysqlpp::quote << collection_id << ";";
+                      << " WHERE table_id in(";
+            for (size_t i = 0; i < group.size(); i++) {
+                statement << mysqlpp::quote << group[i];
+                if (i != group.size() - 1) {
+                    statement << ",";
+                }
+            }
+            statement << ")";
 
-            LOG_ENGINE_DEBUG_ << "DeleteCollection: " << statement.str();
+            LOG_ENGINE_DEBUG_ << "DropCollections: " << statement.str();
 
             if (!statement.exec()) {
-                return HandleException("Failed to drop collection", statement.error());
+                return HandleException("Failed to drop collections", statement.error());
             }
         }  // Scoped Connection
 
-        bool is_writable_mode{mode_ == DBOptions::MODE::CLUSTER_WRITABLE};
-        fiu_do_on("MySQLMetaImpl.DropCollection.CLUSTER_WRITABLE_MODE", is_writable_mode = true);
-        if (is_writable_mode) {
-            DeleteCollectionFiles(collection_id);
-        }
-
-        LOG_ENGINE_DEBUG_ << "Successfully delete collection: " << collection_id;
+        auto status = DeleteCollectionFiles(collection_id_array);
+        LOG_ENGINE_DEBUG_ << "Successfully delete collections";
+        return status;
     } catch (std::exception& e) {
         return HandleException("Failed to drop collection", e.what());
     }
@@ -678,10 +709,14 @@ MySQLMetaImpl::DropCollection(const std::string& collection_id) {
 }
 
 Status
-MySQLMetaImpl::DeleteCollectionFiles(const std::string& collection_id) {
+MySQLMetaImpl::DeleteCollectionFiles(const std::vector<std::string>& collection_id_array) {
     try {
+        // distribute id array to batches
+        std::vector<std::vector<std::string>> id_groups;
+        DistributeBatch(collection_id_array, id_groups);
+
         server::MetricCollector metric;
-        {
+        for (auto group : id_groups) {
             mysqlpp::ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab_);
 
             bool is_null_connection = (connectionPtr == nullptr);
@@ -699,9 +734,14 @@ MySQLMetaImpl::DeleteCollectionFiles(const std::string& collection_id) {
             mysqlpp::Query statement = connectionPtr->query();
             //
             statement << "UPDATE " << META_TABLEFILES << " SET file_type = " << std::to_string(SegmentSchema::TO_DELETE)
-                      << " ,updated_time = " << std::to_string(utils::GetMicroSecTimeStamp())
-                      << " WHERE table_id = " << mysqlpp::quote << collection_id << " AND file_type <> "
-                      << std::to_string(SegmentSchema::TO_DELETE) << ";";
+                      << " ,updated_time = " << std::to_string(utils::GetMicroSecTimeStamp()) << " WHERE table_id in (";
+            for (size_t i = 0; i < group.size(); i++) {
+                statement << mysqlpp::quote << group[i];
+                if (i != group.size() - 1) {
+                    statement << ",";
+                }
+            }
+            statement << ") AND file_type <> " << std::to_string(SegmentSchema::TO_DELETE) << ";";
 
             LOG_ENGINE_DEBUG_ << "DeleteCollectionFiles: " << statement.str();
 
@@ -710,7 +750,7 @@ MySQLMetaImpl::DeleteCollectionFiles(const std::string& collection_id) {
             }
         }  // Scoped Connection
 
-        LOG_ENGINE_DEBUG_ << "Successfully delete collection files from " << collection_id;
+        LOG_ENGINE_DEBUG_ << "Successfully delete collection files";
     } catch (std::exception& e) {
         return HandleException("Failed to delete colletion files", e.what());
     }
@@ -1519,7 +1559,7 @@ MySQLMetaImpl::HasPartition(const std::string& collection_id, const std::string&
 
 Status
 MySQLMetaImpl::DropPartition(const std::string& partition_name) {
-    return DropCollection(partition_name);
+    return DropCollections({partition_name});
 }
 
 Status
@@ -1717,20 +1757,8 @@ MySQLMetaImpl::FilesToSearchEx(const std::string& root_collection, const std::se
         }
 
         // distribute id array to batches
-        const uint64_t batch_size = 50;
         std::vector<std::vector<std::string>> id_groups;
-        std::vector<std::string> temp_group;
-        for (auto& id : partition_id_array) {
-            temp_group.push_back(id);
-            if (temp_group.size() >= batch_size) {
-                id_groups.emplace_back(temp_group);
-                temp_group.clear();
-            }
-        }
-
-        if (!temp_group.empty()) {
-            id_groups.emplace_back(temp_group);
-        }
+        DistributeBatch(partition_id_array, id_groups);
 
         // perform query batch by batch
         int64_t files_count = 0;
@@ -2130,14 +2158,13 @@ MySQLMetaImpl::FilesByTypeEx(const std::vector<meta::CollectionSchema>& collecti
         server::MetricCollector metric;
 
         // distribute id array to batches
-        const uint64_t batch_size = 50;
         std::vector<std::vector<std::string>> id_groups;
         std::vector<std::string> temp_group;
         std::unordered_map<std::string, meta::CollectionSchema> map_collections;
         for (auto& collection : collections) {
             map_collections.insert(std::make_pair(collection.collection_id_, collection));
             temp_group.push_back(collection.collection_id_);
-            if (temp_group.size() >= batch_size) {
+            if (temp_group.size() >= SQL_BATCH_SIZE) {
                 id_groups.emplace_back(temp_group);
                 temp_group.clear();
             }
