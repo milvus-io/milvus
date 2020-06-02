@@ -224,7 +224,7 @@ rule_1(BooleanQueryPtr& boolean_query, std::stack<BooleanQueryPtr>& path_stack) 
     auto status = Status::OK();
     if (boolean_query != nullptr) {
         path_stack.push(boolean_query);
-        for (auto leaf_query : boolean_query->getLeafQueries()) {
+        for (const auto& leaf_query : boolean_query->getLeafQueries()) {
             if (!leaf_query->vector_placeholder.empty()) {
                 while (!path_stack.empty()) {
                     auto query = path_stack.top();
