@@ -4,6 +4,7 @@ timeout(time: 180, unit: 'MINUTES') {
         sh 'helm repo add stable https://kubernetes.oss-cn-hangzhou.aliyuncs.com/charts'
         sh 'helm repo update'
         checkout([$class: 'GitSCM', branches: [[name: "nightly"]], userRemoteConfigs: [[url: "https://github.com/milvus-io/milvus-helm.git", name: 'origin', refspec: "+refs/heads/nightly:refs/remotes/origin/nightly"]]])
+        sh 'helm dep update'
         retry(3) {
             try {
                 sh "helm install --wait --timeout 300s --set mishards.enabled=true --set persistence.enabled=true --set image.repository=registry.zilliz.com/milvus/engine --set mishards.image.tag=0.9.0-rc --set image.tag=${DOCKER_VERSION} --set image.pullPolicy=Always --set service.type=ClusterIP -f ci/db_backend/mysql_${BINARY_VERSION}_values.yaml --namespace milvus ${env.SHARDS_HELM_RELEASE_NAME} ."
