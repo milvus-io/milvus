@@ -114,6 +114,14 @@ message SearchByIDParam {
 }
 
 /**
+ * @brief Params for reloading segments
+ */
+message ReLoadSegmentsParam {
+    string collection_name = 1;
+    repeated string segment_id_array = 2;
+}
+
+/**
  * @brief Query result params
  */
 message TopKQueryResult {
@@ -623,6 +631,15 @@ service MilvusService {
      * @return Status
      */
     rpc PreloadCollection(CollectionName) returns (Status) {}
+
+    /**
+     * @brief This method is used to reload collection segments
+     *
+     * @param ReLoadSegmentsParam, target segments information.
+     *
+     * @return Status
+     */
+    rpc ReloadSegments(ReLoadSegmentsParam) returns (Status) {}
 
     /**
      * @brief This method is used to flush buffer into storage.

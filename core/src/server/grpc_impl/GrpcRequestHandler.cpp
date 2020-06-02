@@ -758,6 +758,25 @@ GrpcRequestHandler::PreloadCollection(::grpc::ServerContext* context, const ::mi
 }
 
 ::grpc::Status
+GrpcRequestHandler::ReloadSegments(::grpc::ServerContext* context, const ::milvus::grpc::ReLoadSegmentsParam* request,
+                                   ::milvus::grpc::Status* response) {
+    CHECK_NULLPTR_RETURN(request);
+    LOG_SERVER_INFO_ << LogOut("Request [%s] %s begin.", GetContext(context)->RequestID().c_str(), __func__);
+
+    std::vector<std::string> file_ids;
+    for (size_t i = 0; i < request->segment_id_array_size(); i++) {
+        file_ids.push_back(request->segment_id_array(i));
+    }
+
+    Status status = request_handler_.ReLoadSegments(GetContext(context), request->collection_name(), file_ids);
+
+    LOG_SERVER_INFO_ << LogOut("Request [%s] %s end.", GetContext(context)->RequestID().c_str(), __func__);
+    SET_RESPONSE(response, status, context);
+
+    return ::grpc::Status::OK;
+}
+
+::grpc::Status
 GrpcRequestHandler::DescribeIndex(::grpc::ServerContext* context, const ::milvus::grpc::CollectionName* request,
                                   ::milvus::grpc::IndexParam* response) {
     CHECK_NULLPTR_RETURN(request);

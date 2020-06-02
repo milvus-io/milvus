@@ -52,6 +52,7 @@ RequestGroup(BaseRequest::RequestType type) {
         {BaseRequest::kPreloadCollection, DQL_REQUEST_GROUP},
         {BaseRequest::kCreateHybridCollection, DDL_DML_REQUEST_GROUP},
         {BaseRequest::kDescribeHybridCollection, INFO_REQUEST_GROUP},
+        {BaseRequest::kReloadSegments, DQL_REQUEST_GROUP},
 
         // partition operations
         {BaseRequest::kCreatePartition, DDL_DML_REQUEST_GROUP},
