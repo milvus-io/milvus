@@ -294,8 +294,6 @@ MergeOperation::DoExecute(Store& store) {
         return status;
     AddStep(*context_.new_segment_commit);
 
-    // PXU TODO: Check stale segments
-
     PartitionCommitOperation pc_op(context_, prev_ss_);
     status = pc_op(store);
     if (!status.ok())
