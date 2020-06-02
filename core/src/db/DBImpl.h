@@ -82,6 +82,9 @@ class DBImpl : public DB, public server::CacheConfigHandler, public server::Engi
                       bool force = false) override;
 
     Status
+    ReLoadSegmentsDeletedDocs(const std::string& collection_id, const std::vector<int64_t>& segment_ids) override;
+
+    Status
     UpdateCollectionFlag(const std::string& collection_id, int64_t flag) override;
 
     Status
