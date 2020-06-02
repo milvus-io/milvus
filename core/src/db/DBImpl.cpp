@@ -529,6 +529,63 @@ DBImpl::PreloadCollection(const std::shared_ptr<server::Context>& context, const
 }
 
 Status
+DBImpl::ReLoadSegmentsDeletedDocs(const std::string& collection_id, const std::vector<int64_t>& segment_ids) {
+    if (!initialized_.load(std::memory_order_acquire)) {
+        return SHUTDOWN_ERROR;
+    }
+
+    meta::FilesHolder files_holder;
+    std::vector<size_t> file_ids;
+    for (auto& id : segment_ids) {
+        file_ids.emplace_back(id);
+    }
+
+    auto status = meta_ptr_->FilesByID(file_ids, files_holder);
+    if (!status.ok()) {
+        std::string err_msg = "Failed get file holders by ids: " + status.ToString();
+        LOG_ENGINE_ERROR_ << err_msg;
+        return Status(DB_ERROR, err_msg);
+    }
+
+    milvus::engine::meta::SegmentsSchema hold_files = files_holder.HoldFiles();
+
+    for (auto& file : hold_files) {
+        std::string segment_dir;
+        utils::GetParentPath(file.location_, segment_dir);
+
+        auto data_obj_ptr = cache::CpuCacheMgr::GetInstance()->GetIndex(file.location_);
+        auto index = std::static_pointer_cast<knowhere::VecIndex>(data_obj_ptr);
+        if (nullptr == index) {
+            LOG_ENGINE_WARNING_ << "Index " << file.location_ << " not found";
+            continue;
+        }
+
+        segment::SegmentReader segment_reader(segment_dir);
+
+        segment::DeletedDocsPtr delete_docs = std::make_shared<segment::DeletedDocs>();
+        segment_reader.LoadDeletedDocs(delete_docs);
+        auto& docs_offsets = delete_docs->GetDeletedDocs();
+
+        faiss::ConcurrentBitsetPtr blacklist = index->GetBlacklist();
+        if (nullptr == blacklist) {
+            LOG_ENGINE_WARNING_ << "Index " << file.location_ << " is empty";
+            faiss::ConcurrentBitsetPtr concurrent_bitset_ptr =
+                std::make_shared<faiss::ConcurrentBitset>(index->Count());
+            index->SetBlacklist(concurrent_bitset_ptr);
+            blacklist = concurrent_bitset_ptr;
+        }
+
+        for (auto& i : docs_offsets) {
+            if (!blacklist->test(i)) {
+                blacklist->set(i);
+            }
+        }
+    }
+
+    return Status::OK();
+}
+
+Status
 DBImpl::UpdateCollectionFlag(const std::string& collection_id, int64_t flag) {
     if (!initialized_.load(std::memory_order_acquire)) {
         return SHUTDOWN_ERROR;

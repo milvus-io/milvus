@@ -4,7 +4,6 @@ import json
 import ujson
 
 import multiprocessing
-from concurrent.futures import ThreadPoolExecutor
 from milvus.grpc_gen import milvus_pb2, milvus_pb2_grpc, status_pb2
 from milvus.client import types as Types
 from milvus import MetricType
@@ -126,24 +125,25 @@ class ServiceHandler(milvus_pb2_grpc.MilvusServiceServicer):
 
         with self.tracer.start_span('do_search', child_of=p_span) as span:
             if len(routing) == 0:
-                logger.warning('SearchVector: partition_tags = {}'.format(partition_tags))
                 ft = self.router.connection().search(collection_id, topk, vectors, list(partition_tags), search_params, _async=True)
                 ret = ft.result(raw=True)
                 all_topk_results.append(ret)
             else:
                 futures = []
-                for addr, file_ids in routing.items():
+                for addr, files_tuple in routing.items():
+                    search_file_ids, ud_file_ids = files_tuple
+                    logger.info(f"<{addr}> needed update segment ids {ud_file_ids}")
                     conn = self.router.query_conn(addr, metadata=metadata)
                     start = time.time()
+                    ud_file_ids and conn.reload_segments(collection_id, ud_file_ids)
                     span = kwargs.get('span', None)
                     span = span if span else (None if self.tracer.empty else
                                               context.get_active_span().context)
 
                     with self.tracer.start_span('search_{}'.format(addr),
                                                 child_of=span):
-                        logger.warning("Search file ids is {}".format(file_ids))
                         future = conn.search_in_segment(collection_name=collection_id,
-                                                              file_ids=file_ids,
+                                                              file_ids=search_file_ids,
                                                               query_records=vectors,
                                                               top_k=topk,
                                                               params=search_params, _async=True)
@@ -578,6 +578,9 @@ class ServiceHandler(milvus_pb2_grpc.MilvusServiceServicer):
         _status = self._preload_collection(_collection_name)
         return status_pb2.Status(error_code=_status.code,
                                  reason=_status.message)
+
+    def ReloadSegments(self, request, context):
+        raise NotImplementedError("Not implemented in mishards")
 
     def _describe_index(self, collection_name, metadata=None):
         return self.router.connection(metadata=metadata).get_index_info(collection_name)
