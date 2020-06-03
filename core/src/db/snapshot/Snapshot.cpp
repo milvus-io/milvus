@@ -53,6 +53,7 @@ Snapshot::Snapshot(ID_TYPE id) {
         AddResource<PartitionCommit>(partition_commit);
         p_pc_map_[partition_commit->GetPartitionId()] = partition_commit->GetID();
         AddResource<Partition>(partition);
+        partition_names_map_[partition->GetName()] = partition->GetID();
         p_max_seg_num_[partition->GetID()] = 0;
         auto& s_c_mappings = partition_commit->GetMappings();
         for (auto& s_c_id : s_c_mappings) {

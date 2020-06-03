@@ -51,6 +51,14 @@ ToWalErrorCode(const ErrorCode error_code) {
     return WAL_ERROR_CODE_BASE + error_code;
 }
 
+constexpr ErrorCode SS_SUCCESS = 0;
+constexpr ErrorCode SS_ERROR_CODE_BASE = 70000;
+
+constexpr ErrorCode
+ToSSErrorCode(const ErrorCode error_code) {
+    return SS_ERROR_CODE_BASE + error_code;
+}
+
 // server error code
 constexpr ErrorCode SERVER_UNEXPECTED_ERROR = ToServerErrorCode(1);
 constexpr ErrorCode SERVER_UNSUPPORTED_ERROR = ToServerErrorCode(2);
@@ -110,6 +118,16 @@ constexpr ErrorCode WAL_ERROR = ToWalErrorCode(1);
 constexpr ErrorCode WAL_META_ERROR = ToWalErrorCode(2);
 constexpr ErrorCode WAL_FILE_ERROR = ToWalErrorCode(3);
 constexpr ErrorCode WAL_PATH_ERROR = ToWalErrorCode(4);
+
+// Snapshot error code
+constexpr ErrorCode SS_ERROR = ToSSErrorCode(1);
+constexpr ErrorCode SS_STALE_ERROR = ToSSErrorCode(2);
+constexpr ErrorCode SS_NOT_FOUND_ERROR = ToSSErrorCode(3);
+constexpr ErrorCode SS_INVALID_CONTEX_ERROR = ToSSErrorCode(4);
+constexpr ErrorCode SS_DUPLICATED_ERROR = ToSSErrorCode(5);
+constexpr ErrorCode SS_NOT_ACTIVE_ERROR = ToSSErrorCode(6);
+constexpr ErrorCode SS_CONSTRAINT_CHECK_ERROR = ToSSErrorCode(7);
+constexpr ErrorCode SS_INVALID_ARGUMENT_ERROR = ToSSErrorCode(8);
 
 namespace server {
 class ServerException : public std::exception {

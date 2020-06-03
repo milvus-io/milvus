@@ -11,6 +11,7 @@
 
 #include "db/snapshot/CompoundOperations.h"
 #include <memory>
+#include <sstream>
 #include "db/snapshot/OperationExecutor.h"
 #include "db/snapshot/Snapshots.h"
 
@@ -24,70 +25,94 @@ BuildOperation::BuildOperation(const OperationContext& context, ID_TYPE collecti
     : BaseT(context, collection_id, commit_id) {
 }
 
-bool
-BuildOperation::PreExecute(Store& store) {
+std::string
+BuildOperation::OperationRepr() const {
+    std::stringstream ss;
+    ss << "<BO(SS=" << prev_ss_->GetID() << ",SEG=";
+    if (context_.new_segment_files.size() == 0) {
+        ss << "?";
+    } else {
+        ss << context_.new_segment_files[0]->GetSegmentId();
+        ss << ",NSF=[";
+        bool first = true;
+        for (auto& f : context_.new_segment_files) {
+            if (!first) {
+                ss << ",";
+            }
+            ss << f->GetID();
+            first = false;
+        }
+        ss << "]";
+    }
+    ss << ")>";
+    return ss.str();
+}
+
+Status
+BuildOperation::DoExecute(Store& store) {
+    auto status = CheckStale(std::bind(&BuildOperation::CheckSegmentStale, this, std::placeholders::_1,
+                                       context_.new_segment_files[0]->GetSegmentId()));
+    if (!status.ok())
+        return status;
+
     SegmentCommitOperation op(context_, prev_ss_);
     op(store);
-    context_.new_segment_commit = op.GetResource();
-    if (!context_.new_segment_commit)
-        return false;
+    status = op.GetResource(context_.new_segment_commit);
+    if (!status.ok())
+        return status;
+    AddStep(*context_.new_segment_commit);
 
     PartitionCommitOperation pc_op(context_, prev_ss_);
     pc_op(store);
 
     OperationContext cc_context;
-    cc_context.new_partition_commit = pc_op.GetResource();
+    status = pc_op.GetResource(cc_context.new_partition_commit);
+    if (!status.ok())
+        return status;
+    AddStep(*cc_context.new_partition_commit);
+
+    PartitionCommitPtr pc;
+    status = pc_op.GetResource(pc);
+    if (!status.ok())
+        return status;
+    AddStep(*pc);
+
     CollectionCommitOperation cc_op(cc_context, prev_ss_);
     cc_op(store);
+    CollectionCommitPtr cc;
+    status = cc_op.GetResource(cc);
+    if (!status.ok())
+        return status;
+    AddStep(*cc);
 
-    for (auto& new_segment_file : context_.new_segment_files) {
-        AddStep(*new_segment_file);
-    }
-    AddStep(*context_.new_segment_commit);
-    AddStep(*pc_op.GetResource());
-    AddStep(*cc_op.GetResource());
-    return true;
+    return status;
 }
 
-bool
-BuildOperation::DoExecute(Store& store) {
-    if (status_ != OP_PENDING) {
-        return false;
+Status
+BuildOperation::CheckSegmentStale(ScopedSnapshotT& latest_snapshot, ID_TYPE segment_id) const {
+    auto segment = latest_snapshot->GetResource<Segment>(segment_id);
+    if (!segment) {
+        return Status(SS_STALE_ERROR, "BuildOperation target segment is stale");
     }
-    if (IsStale()) {
-        status_ = OP_STALE_CANCEL;
-        return false;
-    }
-    /* if (!prev_ss_->HasFieldElement(context_.field_name, context_.field_element_name)) { */
-    /*     status_ = OP_FAIL_INVALID_PARAMS; */
-    /*     return false; */
-    /* } */
-
-    // PXU TODO: Temp comment below check for test
-    /* if (prev_ss_->HasSegmentFile(context_.field_name, context_.field_element_name, context_.segment_id)) { */
-    /*     status_ = OP_FAIL_DUPLICATED; */
-    /*     return; */
-    /* } */
-
-    if (IsStale()) {
-        status_ = OP_STALE_CANCEL;
-        // PXU TODO: Produce cleanup job
-        return false;
-    }
-    std::any_cast<SegmentFilePtr>(steps_[0])->Activate();
-    std::any_cast<SegmentCommitPtr>(steps_[1])->Activate();
-    std::any_cast<PartitionCommitPtr>(steps_[2])->Activate();
-    std::any_cast<CollectionCommitPtr>(steps_[3])->Activate();
-    return true;
+    return Status::OK();
 }
 
-SegmentFilePtr
-BuildOperation::CommitNewSegmentFile(const SegmentFileContext& context) {
+Status
+BuildOperation::CommitNewSegmentFile(const SegmentFileContext& context, SegmentFilePtr& created) {
+    auto status =
+        CheckStale(std::bind(&BuildOperation::CheckSegmentStale, this, std::placeholders::_1, context.segment_id));
+    if (!status.ok())
+        return status;
     auto new_sf_op = std::make_shared<SegmentFileOperation>(context, prev_ss_);
-    OperationExecutor::GetInstance().Submit(new_sf_op);
-    new_sf_op->WaitToFinish();
-    context_.new_segment_files.push_back(new_sf_op->GetResource());
-    return new_sf_op->GetResource();
+    status = new_sf_op->Push();
+    if (!status.ok())
+        return status;
+    status = new_sf_op->GetResource(created);
+    if (!status.ok())
+        return status;
+    context_.new_segment_files.push_back(created);
+    AddStep(*created);
+    return status;
 }
 
 NewSegmentOperation::NewSegmentOperation(const OperationContext& context, ScopedSnapshotT prev_ss)
@@ -97,67 +122,76 @@ NewSegmentOperation::NewSegmentOperation(const OperationContext& context, ID_TYP
     : BaseT(context, collection_id, commit_id) {
 }
 
-bool
+Status
 NewSegmentOperation::DoExecute(Store& store) {
-    auto i = 0;
-    for (; i < context_.new_segment_files.size(); ++i) {
-        std::any_cast<SegmentFilePtr>(steps_[i])->Activate();
-    }
-    std::any_cast<SegmentPtr>(steps_[i++])->Activate();
-    std::any_cast<SegmentCommitPtr>(steps_[i++])->Activate();
-    std::any_cast<PartitionCommitPtr>(steps_[i++])->Activate();
-    std::any_cast<CollectionCommitPtr>(steps_[i++])->Activate();
-    return true;
-}
-
-bool
-NewSegmentOperation::PreExecute(Store& store) {
     // PXU TODO:
     // 1. Check all requried field elements have related segment files
     // 2. Check Stale and others
+    /* auto status = PrevSnapshotRequried(); */
+    /* if (!status.ok()) return status; */
+    // TODO: Check Context
     SegmentCommitOperation op(context_, prev_ss_);
-    op(store);
-    context_.new_segment_commit = op.GetResource();
-    if (!context_.new_segment_commit)
-        return false;
-
-    PartitionCommitOperation pc_op(context_, prev_ss_);
-    pc_op(store);
+    auto status = op(store);
+    if (!status.ok())
+        return status;
+    status = op.GetResource(context_.new_segment_commit);
+    if (!status.ok())
+        return status;
+    AddStep(*context_.new_segment_commit);
 
     OperationContext cc_context;
-    cc_context.new_partition_commit = pc_op.GetResource();
+
+    PartitionCommitOperation pc_op(context_, prev_ss_);
+    status = pc_op(store);
+    if (!status.ok())
+        return status;
+    status = pc_op.GetResource(cc_context.new_partition_commit);
+    if (!status.ok())
+        return status;
+    AddStep(*cc_context.new_partition_commit);
+
     CollectionCommitOperation cc_op(cc_context, prev_ss_);
-    cc_op(store);
+    status = cc_op(store);
+    if (!status.ok())
+        return status;
+    CollectionCommitPtr cc;
+    status = cc_op.GetResource(cc);
+    if (!status.ok())
+        return status;
+    AddStep(*cc);
 
-    for (auto& new_segment_file : context_.new_segment_files) {
-        AddStep(*new_segment_file);
-    }
-    AddStep(*context_.new_segment);
-    AddStep(*context_.new_segment_commit);
-    AddStep(*pc_op.GetResource());
-    AddStep(*cc_op.GetResource());
-    return true;
+    return status;
 }
 
-SegmentPtr
-NewSegmentOperation::CommitNewSegment() {
+Status
+NewSegmentOperation::CommitNewSegment(SegmentPtr& created) {
     auto op = std::make_shared<SegmentOperation>(context_, prev_ss_);
-    OperationExecutor::GetInstance().Submit(op);
-    op->WaitToFinish();
-    context_.new_segment = op->GetResource();
-    return context_.new_segment;
+    auto status = op->Push();
+    if (!status.ok())
+        return status;
+    status = op->GetResource(context_.new_segment);
+    if (!status.ok())
+        return status;
+    created = context_.new_segment;
+    AddStep(*created);
+    return status;
 }
 
-SegmentFilePtr
-NewSegmentOperation::CommitNewSegmentFile(const SegmentFileContext& context) {
+Status
+NewSegmentOperation::CommitNewSegmentFile(const SegmentFileContext& context, SegmentFilePtr& created) {
     auto c = context;
     c.segment_id = context_.new_segment->GetID();
     c.partition_id = context_.new_segment->GetPartitionId();
     auto new_sf_op = std::make_shared<SegmentFileOperation>(c, prev_ss_);
-    OperationExecutor::GetInstance().Submit(new_sf_op);
-    new_sf_op->WaitToFinish();
-    context_.new_segment_files.push_back(new_sf_op->GetResource());
-    return new_sf_op->GetResource();
+    auto status = new_sf_op->Push();
+    if (!status.ok())
+        return status;
+    status = new_sf_op->GetResource(created);
+    if (!status.ok())
+        return status;
+    AddStep(*created);
+    context_.new_segment_files.push_back(created);
+    return status;
 }
 
 MergeOperation::MergeOperation(const OperationContext& context, ScopedSnapshotT prev_ss) : BaseT(context, prev_ss) {
@@ -166,83 +200,132 @@ MergeOperation::MergeOperation(const OperationContext& context, ID_TYPE collecti
     : BaseT(context, collection_id, commit_id) {
 }
 
-SegmentPtr
-MergeOperation::CommitNewSegment() {
-    if (context_.new_segment)
-        return context_.new_segment;
-    auto op = std::make_shared<SegmentOperation>(context_, prev_ss_);
-    OperationExecutor::GetInstance().Submit(op);
-    op->WaitToFinish();
-    context_.new_segment = op->GetResource();
-    return context_.new_segment;
+std::string
+MergeOperation::OperationRepr() const {
+    std::stringstream ss;
+    ss << "<MO(SS=" << prev_ss_->GetID() << ",SSEG=[";
+    {
+        bool first = true;
+        for (auto& r : context_.stale_segments) {
+            if (!first) {
+                ss << ",";
+            }
+            ss << r->GetID();
+            first = false;
+        }
+    }
+    ss << "]";
+    ss << ",NSEG=";
+    if (context_.new_segment) {
+        ss << context_.new_segment->GetID();
+    } else {
+        ss << "?";
+    }
+    ss << ",NSF=[";
+    {
+        bool first = true;
+        for (auto& f : context_.new_segment_files) {
+            if (!first) {
+                ss << ",";
+            }
+            ss << f->GetID();
+            first = false;
+        }
+    }
+    ss << "]";
+
+    ss << ")>";
+    return ss.str();
 }
 
-SegmentFilePtr
-MergeOperation::CommitNewSegmentFile(const SegmentFileContext& context) {
+Status
+MergeOperation::CommitNewSegment(SegmentPtr& created) {
+    Status status;
+    if (context_.new_segment) {
+        created = context_.new_segment;
+        return status;
+    }
+    auto op = std::make_shared<SegmentOperation>(context_, prev_ss_);
+    status = op->Push();
+    if (!status.ok())
+        return status;
+    status = op->GetResource(context_.new_segment);
+    if (!status.ok())
+        return status;
+    created = context_.new_segment;
+    AddStep(*created);
+    return status;
+}
+
+Status
+MergeOperation::CommitNewSegmentFile(const SegmentFileContext& context, SegmentFilePtr& created) {
     // PXU TODO: Check element type and segment file mapping rules
-    auto new_segment = CommitNewSegment();
+    SegmentPtr new_segment;
+    auto status = CommitNewSegment(new_segment);
+    if (!status.ok())
+        return status;
     auto c = context;
     c.segment_id = new_segment->GetID();
     c.partition_id = new_segment->GetPartitionId();
     auto new_sf_op = std::make_shared<SegmentFileOperation>(c, prev_ss_);
-    OperationExecutor::GetInstance().Submit(new_sf_op);
-    new_sf_op->WaitToFinish();
-    context_.new_segment_files.push_back(new_sf_op->GetResource());
-    return new_sf_op->GetResource();
+    status = new_sf_op->Push();
+    if (!status.ok())
+        return status;
+    status = new_sf_op->GetResource(created);
+    if (!status.ok())
+        return status;
+    context_.new_segment_files.push_back(created);
+    AddStep(*created);
+    return status;
 }
 
-bool
-MergeOperation::PreExecute(Store& store) {
+Status
+MergeOperation::DoExecute(Store& store) {
     // PXU TODO:
     // 1. Check all requried field elements have related segment files
     // 2. Check Stale and others
     SegmentCommitOperation op(context_, prev_ss_);
-    op(store);
-    context_.new_segment_commit = op.GetResource();
-    if (!context_.new_segment_commit)
-        return false;
+    auto status = op(store);
+    if (!status.ok())
+        return status;
 
-    // PXU TODO: Check stale segments
+    status = op.GetResource(context_.new_segment_commit);
+    if (!status.ok())
+        return status;
+    AddStep(*context_.new_segment_commit);
 
     PartitionCommitOperation pc_op(context_, prev_ss_);
-    pc_op(store);
+    status = pc_op(store);
+    if (!status.ok())
+        return status;
 
     OperationContext cc_context;
-    cc_context.new_partition_commit = pc_op.GetResource();
+    status = pc_op.GetResource(cc_context.new_partition_commit);
+    if (!status.ok())
+        return status;
+    AddStep(*cc_context.new_partition_commit);
+
     CollectionCommitOperation cc_op(cc_context, prev_ss_);
-    cc_op(store);
+    status = cc_op(store);
+    if (!status.ok())
+        return status;
+    CollectionCommitPtr cc;
+    status = cc_op.GetResource(cc);
+    if (!status.ok())
+        return status;
+    AddStep(*cc);
 
-    for (auto& new_segment_file : context_.new_segment_files) {
-        AddStep(*new_segment_file);
-    }
-    AddStep(*context_.new_segment);
-    AddStep(*context_.new_segment_commit);
-    AddStep(*pc_op.GetResource());
-    AddStep(*cc_op.GetResource());
-    return true;
-}
-
-bool
-MergeOperation::DoExecute(Store& store) {
-    auto i = 0;
-    for (; i < context_.new_segment_files.size(); ++i) {
-        std::any_cast<SegmentFilePtr>(steps_[i])->Activate();
-    }
-    std::any_cast<SegmentPtr>(steps_[i++])->Activate();
-    std::any_cast<SegmentCommitPtr>(steps_[i++])->Activate();
-    std::any_cast<PartitionCommitPtr>(steps_[i++])->Activate();
-    std::any_cast<CollectionCommitPtr>(steps_[i++])->Activate();
-    return true;
+    return status;
 }
 
 GetSnapshotIDsOperation::GetSnapshotIDsOperation(ID_TYPE collection_id, bool reversed)
     : BaseT(OperationContext(), ScopedSnapshotT()), collection_id_(collection_id), reversed_(reversed) {
 }
 
-bool
+Status
 GetSnapshotIDsOperation::DoExecute(Store& store) {
     ids_ = store.AllActiveCollectionCommitIds(collection_id_, reversed_);
-    return true;
+    return Status::OK();
 }
 
 const IDS_TYPE&
@@ -254,10 +337,10 @@ GetCollectionIDsOperation::GetCollectionIDsOperation(bool reversed)
     : BaseT(OperationContext(), ScopedSnapshotT()), reversed_(reversed) {
 }
 
-bool
+Status
 GetCollectionIDsOperation::DoExecute(Store& store) {
     ids_ = store.AllActiveCollectionIds(reversed_);
-    return true;
+    return Status::OK();
 }
 
 const IDS_TYPE&
@@ -265,14 +348,122 @@ GetCollectionIDsOperation::GetIDs() const {
     return ids_;
 }
 
+DropPartitionOperation::DropPartitionOperation(const PartitionContext& context, ScopedSnapshotT prev_ss)
+    : BaseT(OperationContext(), prev_ss), context_(context) {
+}
+
+Status
+DropPartitionOperation::DoExecute(Store& store) {
+    Status status;
+    PartitionPtr p;
+    auto id = context_.id;
+    if (id == 0) {
+        status = prev_ss_->GetPartitionId(context_.name, id);
+        context_.id = id;
+    }
+    if (!status.ok())
+        return status;
+    auto p_c = prev_ss_->GetPartitionCommitByPartitionId(id);
+    if (!p_c)
+        return Status(SS_NOT_FOUND_ERROR, "No partition commit found");
+
+    OperationContext op_ctx;
+    op_ctx.stale_partition_commit = p_c;
+    auto op = CollectionCommitOperation(op_ctx, prev_ss_);
+    status = op(store);
+    if (!status.ok())
+        return status;
+    CollectionCommitPtr cc;
+    status = op.GetResource(cc);
+    if (!status.ok())
+        return status;
+
+    AddStep(*cc);
+    return status;
+}
+
+CreatePartitionOperation::CreatePartitionOperation(const OperationContext& context, ScopedSnapshotT prev_ss)
+    : BaseT(context, prev_ss) {
+}
+CreatePartitionOperation::CreatePartitionOperation(const OperationContext& context, ID_TYPE collection_id,
+                                                   ID_TYPE commit_id)
+    : BaseT(context, collection_id, commit_id) {
+}
+
+Status
+CreatePartitionOperation::PreCheck() {
+    Status status;
+    if (!context_.new_partition) {
+        status = Status(SS_INVALID_CONTEX_ERROR, "No partition specified before push partition");
+    }
+    return status;
+}
+
+Status
+CreatePartitionOperation::CommitNewPartition(const PartitionContext& context, PartitionPtr& partition) {
+    Status status;
+    auto op = std::make_shared<PartitionOperation>(context, prev_ss_);
+    status = op->Push();
+    if (!status.ok())
+        return status;
+    status = op->GetResource(partition);
+    if (!status.ok())
+        return status;
+    context_.new_partition = partition;
+    AddStep(*partition);
+    return status;
+}
+
+Status
+CreatePartitionOperation::DoExecute(Store& store) {
+    Status status;
+    status = CheckStale();
+    if (!status.ok())
+        return status;
+
+    auto collection = prev_ss_->GetCollection();
+    auto partition = context_.new_partition;
+
+    PartitionCommitPtr pc;
+    OperationContext pc_context;
+    pc_context.new_partition = partition;
+    auto pc_op = PartitionCommitOperation(pc_context, prev_ss_);
+    status = pc_op(store);
+    if (!status.ok())
+        return status;
+    status = pc_op.GetResource(pc);
+    if (!status.ok())
+        return status;
+    /* status = store.CreateResource<PartitionCommit>(PartitionCommit(collection->GetID(), partition->GetID()), pc); */
+    AddStep(*pc);
+    OperationContext cc_context;
+    cc_context.new_partition_commit = pc;
+    auto cc_op = CollectionCommitOperation(cc_context, prev_ss_);
+    status = cc_op(store);
+    if (!status.ok())
+        return status;
+    CollectionCommitPtr cc;
+    status = cc_op.GetResource(cc);
+    if (!status.ok())
+        return status;
+    AddStep(*cc);
+
+    return status;
+}
+
 CreateCollectionOperation::CreateCollectionOperation(const CreateCollectionContext& context)
     : BaseT(OperationContext(), ScopedSnapshotT()), context_(context) {
 }
 
-bool
+Status
 CreateCollectionOperation::DoExecute(Store& store) {
     // TODO: Do some checks
-    auto collection = store.CreateCollection(Collection(context_.collection->GetName()));
+    CollectionPtr collection;
+    auto status = store.CreateCollection(Collection(context_.collection->GetName()), collection);
+    if (!status.ok()) {
+        std::cerr << status.ToString() << std::endl;
+        return status;
+    }
     AddStep(*collection);
     MappingT field_commit_ids = {};
     auto field_idx = 0;
@@ -280,57 +471,70 @@ CreateCollectionOperation::DoExecute(Store& store) {
         field_idx++;
         auto& field_schema = field_kv.first;
         auto& field_elements = field_kv.second;
-        auto field = store.CreateResource<Field>(Field(field_schema->GetName(), field_idx));
+        FieldPtr field;
+        status = store.CreateResource<Field>(Field(field_schema->GetName(), field_idx), field);
         AddStep(*field);
         MappingT element_ids = {};
-        auto raw_element = store.CreateResource<FieldElement>(
-            FieldElement(collection->GetID(), field->GetID(), "RAW", FieldElementType::RAW));
+        FieldElementPtr raw_element;
+        status = store.CreateResource<FieldElement>(
+            FieldElement(collection->GetID(), field->GetID(), "RAW", FieldElementType::RAW), raw_element);
         AddStep(*raw_element);
         element_ids.insert(raw_element->GetID());
         for (auto& element_schema : field_elements) {
-            auto element = store.CreateResource<FieldElement>(FieldElement(
-                collection->GetID(), field->GetID(), element_schema->GetName(), element_schema->GetFtype()));
+            FieldElementPtr element;
+            status =
+                store.CreateResource<FieldElement>(FieldElement(collection->GetID(), field->GetID(),
+                                                                element_schema->GetName(), element_schema->GetFtype()),
+                                                   element);
             AddStep(*element);
             element_ids.insert(element->GetID());
         }
-        auto field_commit =
-            store.CreateResource<FieldCommit>(FieldCommit(collection->GetID(), field->GetID(), element_ids));
+        FieldCommitPtr field_commit;
+        status = store.CreateResource<FieldCommit>(FieldCommit(collection->GetID(), field->GetID(), element_ids),
+                                                   field_commit);
         AddStep(*field_commit);
         field_commit_ids.insert(field_commit->GetID());
     }
-    auto schema_commit = store.CreateResource<SchemaCommit>(SchemaCommit(collection->GetID(), field_commit_ids));
+    SchemaCommitPtr schema_commit;
+    status = store.CreateResource<SchemaCommit>(SchemaCommit(collection->GetID(), field_commit_ids), schema_commit);
     AddStep(*schema_commit);
-    auto partition = store.CreateResource<Partition>(Partition("_default", collection->GetID()));
+    PartitionPtr partition;
+    status = store.CreateResource<Partition>(Partition("_default", collection->GetID()), partition);
     AddStep(*partition);
-    auto partition_commit =
-        store.CreateResource<PartitionCommit>(PartitionCommit(collection->GetID(), partition->GetID()));
+    PartitionCommitPtr partition_commit;
+    status = store.CreateResource<PartitionCommit>(PartitionCommit(collection->GetID(), partition->GetID()),
+                                                   partition_commit);
     AddStep(*partition_commit);
-    auto collection_commit = store.CreateResource<CollectionCommit>(
-        CollectionCommit(collection->GetID(), schema_commit->GetID(), {partition_commit->GetID()}));
+    CollectionCommitPtr collection_commit;
+    status = store.CreateResource<CollectionCommit>(
+        CollectionCommit(collection->GetID(), schema_commit->GetID(), {partition_commit->GetID()}), collection_commit);
     AddStep(*collection_commit);
     context_.collection_commit = collection_commit;
-    return true;
+    return Status::OK();
 }
 
-ScopedSnapshotT
-CreateCollectionOperation::GetSnapshot() const {
-    if (ids_.size() == 0)
-        return ScopedSnapshotT();
+Status
+CreateCollectionOperation::GetSnapshot(ScopedSnapshotT& ss) const {
+    auto status = DoneRequired();
+    if (!status.ok())
+        return status;
+    status = IDSNotEmptyRequried();
+    if (!status.ok())
+        return status;
     if (!context_.collection_commit)
-        return ScopedSnapshotT();
-    return Snapshots::GetInstance().GetSnapshot(context_.collection_commit->GetCollectionId());
+        return Status(SS_CONSTRAINT_CHECK_ERROR, "No Snapshot is available");
+    status = Snapshots::GetInstance().GetSnapshot(ss, context_.collection_commit->GetCollectionId());
+    return status;
 }
 
-bool
+Status
 SoftDeleteCollectionOperation::DoExecute(Store& store) {
     if (!context_.collection) {
-        status_ = Status(40006, "Invalid Context");
-        return false;
+        return Status(SS_INVALID_CONTEX_ERROR, "Invalid Context");
     }
     context_.collection->Deactivate();
     AddStep(*context_.collection);
-    status_ = Status::OK();
-    return true;
+    return Status::OK();
 }
 
 }  // namespace snapshot

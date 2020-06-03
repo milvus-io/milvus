@@ -60,9 +60,30 @@ class Snapshot : public ReferenceProxy {
         return GetResources<Collection>().begin()->second.Get();
     }
 
+    SchemaCommitPtr
+    GetSchemaCommit() {
+        auto id = GetLatestSchemaCommitId();
+        return GetResource<SchemaCommit>(id);
+    }
+
     const std::string&
     GetName() const {
         return GetResources<Collection>().begin()->second->GetName();
+    }
+
+    size_t
+    NumberOfPartitions() const {
+        return GetResources<Partition>().size();
+    }
+
+    Status
+    GetPartitionId(const std::string& name, ID_TYPE& id) const {
+        auto it = partition_names_map_.find(name);
+        if (it == partition_names_map_.end()) {
+            return Status(SS_NOT_FOUND_ERROR, "Specified partition name not found");
+        }
+        id = it->second;
+        return Status::OK();
     }
 
     CollectionCommitPtr
@@ -224,6 +245,7 @@ class Snapshot : public ReferenceProxy {
     ScopedResourcesT resources_;
     ID_TYPE current_schema_id_;
     std::map<std::string, ID_TYPE> field_names_map_;
+    std::map<std::string, ID_TYPE> partition_names_map_;
     std::map<std::string, std::map<std::string, ID_TYPE>> field_element_names_map_;
     std::map<ID_TYPE, std::map<ID_TYPE, ID_TYPE>> element_segfiles_map_;
     std::map<ID_TYPE, ID_TYPE> seg_segc_map_;

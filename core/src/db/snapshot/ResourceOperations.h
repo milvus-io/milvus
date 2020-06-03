@@ -31,13 +31,10 @@ class CollectionCommitOperation : public CommitOperation<CollectionCommit> {
         return prev_ss_->GetCollectionCommit();
     }
 
-    bool
+    Status
     DoExecute(Store&) override;
 };
 
-/*
- * Context: new_segment_commit@requried stale_segments@optional
- */
 class PartitionCommitOperation : public CommitOperation<PartitionCommit> {
  public:
     using BaseT = CommitOperation<PartitionCommit>;
@@ -47,13 +44,29 @@ class PartitionCommitOperation : public CommitOperation<PartitionCommit> {
     PartitionCommitPtr
     GetPrevResource() const override;
 
-    bool
+    Status
     DoExecute(Store&) override;
+
+    Status
+    PreCheck() override;
 };
 
-/*
- * Context: new_segment_files@requried stale_segment_file@optional
- */
+class PartitionOperation : public CommitOperation<Partition> {
+ public:
+    using BaseT = CommitOperation<Partition>;
+    PartitionOperation(const PartitionContext& context, ScopedSnapshotT prev_ss);
+    PartitionOperation(const PartitionContext& context, ID_TYPE collection_id, ID_TYPE commit_id = 0);
+
+    Status
+    DoExecute(Store& store) override;
+
+    Status
+    PreCheck() override;
+
+ protected:
+    PartitionContext context_;
+};
+
 class SegmentCommitOperation : public CommitOperation<SegmentCommit> {
  public:
     using BaseT = CommitOperation<SegmentCommit>;
@@ -63,21 +76,24 @@ class SegmentCommitOperation : public CommitOperation<SegmentCommit> {
     SegmentCommit::Ptr
     GetPrevResource() const override;
 
-    bool
+    Status
     DoExecute(Store&) override;
+
+    Status
+    PreCheck() override;
 };
 
-/*
- * Context: prev_partition@requried
- */
 class SegmentOperation : public CommitOperation<Segment> {
  public:
     using BaseT = CommitOperation<Segment>;
     SegmentOperation(const OperationContext& context, ScopedSnapshotT prev_ss);
     SegmentOperation(const OperationContext& context, ID_TYPE collection_id, ID_TYPE commit_id = 0);
 
-    bool
+    Status
     DoExecute(Store& store) override;
+
+    Status
+    PreCheck() override;
 };
 
 class SegmentFileOperation : public CommitOperation<SegmentFile> {
@@ -86,7 +102,7 @@ class SegmentFileOperation : public CommitOperation<SegmentFile> {
     SegmentFileOperation(const SegmentFileContext& sc, ScopedSnapshotT prev_ss);
     SegmentFileOperation(const SegmentFileContext& sc, ID_TYPE collection_id, ID_TYPE commit_id = 0);
 
-    bool
+    Status
     DoExecute(Store& store) override;
 
  protected:
@@ -100,23 +116,36 @@ class LoadOperation<Collection> : public Operations {
         : Operations(OperationContext(), ScopedSnapshotT()), context_(context) {
     }
 
-    void
+    Status
     ApplyToStore(Store& store) override {
-        if (status_ != OP_PENDING)
-            return;
-        if (context_.id == 0 && context_.name != "") {
-            resource_ = store.GetCollection(context_.name);
-        } else {
-            resource_ = store.GetResource<Collection>(context_.id);
+        if (done_) {
+            Done();
+            return status_;
         }
+        Status status;
+        if (context_.id == 0 && context_.name != "") {
+            status = store.GetCollection(context_.name, resource_);
+        } else {
+            status = store.GetResource<Collection>(context_.id, resource_);
+        }
+        SetStatus(status);
         Done();
+        return status_;
     }
 
-    CollectionPtr
-    GetResource() const {
-        if (status_ == OP_PENDING)
-            return nullptr;
-        return resource_;
+    Status
+    GetResource(CollectionPtr& res, bool wait = true) {
+        if (wait) {
+            WaitToFinish();
+        }
+        auto status = DoneRequired();
+        if (!status.ok())
+            return status;
+        if (!resource_) {
+            return Status(SS_NOT_FOUND_ERROR, "No specified resource");
+        }
+        res = resource_;
+        return status;
     }
 
  protected:
