@@ -17,11 +17,13 @@
 #include <condition_variable>
 #include <memory>
 #include <mutex>
+#include <string>
 #include <thread>
 #include <vector>
 #include "Context.h"
 #include "db/snapshot/Snapshot.h"
 #include "db/snapshot/Store.h"
+#include "utils/Error.h"
 #include "utils/Status.h"
 
 namespace milvus {
@@ -29,21 +31,10 @@ namespace engine {
 namespace snapshot {
 
 using StepsT = std::vector<std::any>;
-
-enum OpStatus {
-    OP_PENDING = 0,
-    OP_OK,
-    OP_STALE_OK,
-    OP_STALE_CANCEL,
-    OP_STALE_RESCHEDULE,
-    OP_FAIL_INVALID_PARAMS,
-    OP_FAIL_DUPLICATED,
-    OP_FAIL_FLUSH_META
-};
+using CheckStaleFunc = std::function<Status(ScopedSnapshotT&)>;
 
 class Operations : public std::enable_shared_from_this<Operations> {
  public:
-    /* static constexpr const char* Name = Derived::Name; */
     Operations(const OperationContext& context, ScopedSnapshotT prev_ss);
     Operations(const OperationContext& context, ID_TYPE collection_id, ID_TYPE commit_id = 0);
 
@@ -52,8 +43,10 @@ class Operations : public std::enable_shared_from_this<Operations> {
         return prev_ss_;
     }
 
-    virtual bool
-    IsStale() const;
+    virtual Status
+    CheckStale(const CheckStaleFunc& checker = nullptr) const;
+    virtual Status
+    DoCheckStale(ScopedSnapshotT& latest_snapshot) const;
 
     template <typename StepT>
     void
@@ -71,41 +64,75 @@ class Operations : public std::enable_shared_from_this<Operations> {
     ID_TYPE
     GetID() const;
 
-    virtual void
+    virtual Status
     OnExecute(Store&);
-    virtual bool
+    virtual Status
     PreExecute(Store&);
-    virtual bool
+    virtual Status
     DoExecute(Store&);
-    virtual bool
+    virtual Status
     PostExecute(Store&);
 
-    virtual ScopedSnapshotT
-    GetSnapshot() const;
+    virtual Status
+    GetSnapshot(ScopedSnapshotT& ss) const;
 
-    virtual void
+    virtual Status
     operator()(Store& store);
-    virtual void
+    virtual Status
     Push(bool sync = true);
 
-    virtual void
+    virtual Status
+    PreCheck();
+
+    virtual Status
     ApplyToStore(Store& store);
 
-    bool
+    Status
     WaitToFinish();
 
     void
     Done();
 
+    void
+    SetStatus(const Status& status);
+
+    Status
+    GetStatus() const {
+        return status_;
+    }
+
+    std::string
+    OperationName() const {
+        return typeid(*this).name();
+    }
+    virtual std::string
+    OperationRepr() const;
+
+    virtual std::string
+    ToString() const;
+
     virtual ~Operations() {
     }
 
  protected:
+    virtual std::string
+    SuccessString() const;
+    virtual std::string
+    FailureString() const;
+
+    Status
+    DoneRequired() const;
+    Status
+    IDSNotEmptyRequried() const;
+    Status
+    PrevSnapshotRequried() const;
+
     OperationContext context_;
     ScopedSnapshotT prev_ss_;
     StepsT steps_;
     std::vector<ID_TYPE> ids_;
-    OpStatus status_ = OP_PENDING;
+    bool done_ = false;
+    Status status_;
     mutable std::mutex finish_mtx_;
     std::condition_variable finish_cond_;
     ID_TYPE uid_;
@@ -135,20 +162,31 @@ class CommitOperation : public Operations {
         return nullptr;
     }
 
-    typename ResourceT::Ptr
-    GetResource() const {
-        if (status_ == OP_PENDING)
-            return nullptr;
-        if (ids_.size() == 0)
-            return nullptr;
+    Status
+    GetResource(typename ResourceT::Ptr& res, bool wait = false) {
+        if (wait) {
+            WaitToFinish();
+        }
+        auto status = DoneRequired();
+        if (!status.ok())
+            return status;
+        status = IDSNotEmptyRequried();
+        if (!status.ok())
+            return status;
         resource_->SetID(ids_[0]);
-        return resource_;
+        res = resource_;
+        return status;
     }
 
-    // PXU TODO
-    /* virtual void OnFailed() */
-
  protected:
+    Status
+    ResourceNotNullRequired() const {
+        Status status;
+        if (!resource_)
+            return Status(SS_CONSTRAINT_CHECK_ERROR, "No specified resource");
+        return status;
+    }
+
     typename ResourceT::Ptr resource_;
 };
 
@@ -159,24 +197,42 @@ class LoadOperation : public Operations {
         : Operations(OperationContext(), ScopedSnapshotT()), context_(context) {
     }
 
-    void
+    Status
     ApplyToStore(Store& store) override {
-        if (status_ != OP_PENDING) {
+        if (done_) {
             Done();
-            return;
+            return status_;
         }
-        resource_ = store.GetResource<ResourceT>(context_.id);
+        auto status = store.GetResource<ResourceT>(context_.id, resource_);
+        SetStatus(status);
         Done();
+        return status_;
     }
 
-    typename ResourceT::Ptr
-    GetResource() const {
-        if (status_ == OP_PENDING)
-            return nullptr;
-        return resource_;
+    Status
+    GetResource(typename ResourceT::Ptr& res, bool wait = false) {
+        if (wait) {
+            WaitToFinish();
+        }
+        auto status = DoneRequired();
+        if (!status.ok())
+            return status;
+        status = ResourceNotNullRequired();
+        if (!status.ok())
+            return status;
+        res = resource_;
+        return status;
     }
 
  protected:
+    Status
+    ResourceNotNullRequired() const {
+        Status status;
+        if (!resource_)
+            return Status(SS_CONSTRAINT_CHECK_ERROR, "No specified resource");
+        return status;
+    }
+
     LoadOperationContext context_;
     typename ResourceT::Ptr resource_;
 };
@@ -187,25 +243,40 @@ class HardDeleteOperation : public Operations {
     explicit HardDeleteOperation(ID_TYPE id) : Operations(OperationContext(), ScopedSnapshotT()), id_(id) {
     }
 
-    void
+    Status
     ApplyToStore(Store& store) override {
-        if (status_ != OP_PENDING)
-            return;
-        ok_ = store.RemoveResource<ResourceT>(id_);
+        if (done_)
+            return status_;
+        auto status = store.RemoveResource<ResourceT>(id_);
+        SetStatus(status);
         Done();
-    }
-
-    bool
-    GetStatus() const {
-        if (status_ == OP_PENDING)
-            return false;
-        return ok_;
+        return status_;
     }
 
  protected:
     ID_TYPE id_;
-    // PXU TODO: Replace all bool to Status type
-    bool ok_;
+};
+
+template <>
+class HardDeleteOperation<Collection> : public Operations {
+ public:
+    explicit HardDeleteOperation(ID_TYPE id) : Operations(OperationContext(), ScopedSnapshotT()), id_(id) {
+    }
+
+    Status
+    ApplyToStore(Store& store) override {
+        if (done_) {
+            Done();
+            return status_;
+        }
+        auto status = store.RemoveCollection(id_);
+        SetStatus(status);
+        Done();
+        return status_;
+    }
+
+ protected:
+    ID_TYPE id_;
 };
 
 using OperationsPtr = std::shared_ptr<Operations>;
