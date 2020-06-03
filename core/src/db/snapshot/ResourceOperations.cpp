@@ -73,9 +73,6 @@ PartitionCommitOperation::PartitionCommitOperation(const OperationContext& conte
 
 Status
 PartitionCommitOperation::PreCheck() {
-    /* if (!context_.new_segment_commit) { */
-    /*     return Status(SS_INVALID_CONTEX_ERROR, "Invalid PartitionCommitOperation Context"); */
-    /* } */
     return Status::OK();
 }
 
