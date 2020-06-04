@@ -49,7 +49,7 @@ InstanceLockCheck::Check(const std::string& path) {
             // Not using locking for nfs mounted lock file
             msg += "using nfs. ";
         } else {
-            msg += strerror(errno) + ". "
+            msg += std::string(strerror(errno)) + ". ";
         }
         close(fd);
         return Status(SERVER_UNEXPECTED_ERROR, msg);
