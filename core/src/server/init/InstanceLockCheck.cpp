@@ -14,8 +14,9 @@
 
 #include <errno.h>
 #include <fcntl.h>
-#include <unistd.h>
 #include <string.h>
+#include <unistd.h>
+
 
 namespace milvus {
 namespace server {
