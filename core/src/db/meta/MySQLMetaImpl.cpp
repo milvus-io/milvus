@@ -52,7 +52,7 @@ template <typename T>
 void
 DistributeBatch(const T& id_array, std::vector<std::vector<std::string>>& id_groups) {
     std::vector<std::string> temp_group;
-//    constexpr uint64_t SQL_BATCH_SIZE = 50; // duplicate variable
+    //    constexpr uint64_t SQL_BATCH_SIZE = 50; // duplicate variable
     for (auto& id : id_array) {
         temp_group.push_back(id);
         if (temp_group.size() >= SQL_BATCH_SIZE) {

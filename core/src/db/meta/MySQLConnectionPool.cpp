@@ -82,4 +82,4 @@ MySQLConnectionPool::max_idle_time() {
     return max_idle_time_;
 }
 
-}  // namespace milvus
+}  // namespace milvus::engine::meta
