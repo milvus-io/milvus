@@ -38,7 +38,7 @@ MySQLConnectionPool::release(const mysqlpp::Connection* pc) {
         LOG_ENGINE_WARNING_ << "MySQLConnetionPool::release: conns_in_use_ is less than zero.  conns_in_use_ = "
                             << conns_in_use_;
     } else {
-        --conns_in_use_;
+        -- conns_in_use_;
     }
 }
 
