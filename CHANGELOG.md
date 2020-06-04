@@ -16,6 +16,7 @@ Please mark all change in change log and use the issue from GitHub
 -   \#2381 Upgrade FAISS to 1.6.3
 -   \#2441 Improve Knowhere code coverage
 -   \#2466 optimize k-selection implemention of faiss gpu version
+-   \#2495 Add creating lock file failure reason.
 
 ## Task
 
