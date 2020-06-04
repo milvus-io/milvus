@@ -17,7 +17,6 @@
 #include <string.h>
 #include <unistd.h>
 
-
 namespace milvus {
 namespace server {
 
