@@ -54,16 +54,16 @@ Operations::FailureString() const {
 }
 
 std::string
-Operations::OperationRepr() const {
+Operations::GetRepr() const {
     std::stringstream ss;
-    ss << "<" << OperationName() << ":" << GetID() << ">";
+    ss << "<" << GetName() << ":" << GetID() << ">";
     return ss.str();
 }
 
 std::string
 Operations::ToString() const {
     std::stringstream ss;
-    ss << OperationRepr();
+    ss << GetRepr();
     ss << (done_ ? " | DONE" : " | PENDING");
     if (done_) {
         if (status_.ok()) {

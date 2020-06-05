@@ -19,17 +19,17 @@ namespace milvus {
 namespace engine {
 namespace snapshot {
 
-CommonOperation::CommonOperation(const OperationContext& context, ScopedSnapshotT prev_ss)
+CompoundBaseOperation::CompoundBaseOperation(const OperationContext& context, ScopedSnapshotT prev_ss)
     : BaseT(context, prev_ss, OperationsType::W_Compound) {
 }
-CommonOperation::CommonOperation(const OperationContext& context, ID_TYPE collection_id, ID_TYPE commit_id)
+CompoundBaseOperation::CompoundBaseOperation(const OperationContext& context, ID_TYPE collection_id, ID_TYPE commit_id)
     : BaseT(context, collection_id, commit_id, OperationsType::W_Compound) {
 }
 
 std::string
-CommonOperation::OperationRepr() const {
+CompoundBaseOperation::GetRepr() const {
     std::stringstream ss;
-    ss << "<" << OperationName() << "(";
+    ss << "<" << GetName() << "(";
     if (prev_ss_) {
         ss << "SS=" << prev_ss_ << GetID();
     }
@@ -40,7 +40,7 @@ CommonOperation::OperationRepr() const {
 }
 
 Status
-CommonOperation::PreCheck() {
+CompoundBaseOperation::PreCheck() {
     if (GetContextLsn() <= prev_ss_->GetMaxLsn()) {
         return Status(SS_INVALID_CONTEX_ERROR, "Invalid LSN found in operation");
     }
@@ -322,7 +322,7 @@ DropPartitionOperation::DropPartitionOperation(const PartitionContext& context, 
 }
 
 std::string
-DropPartitionOperation::OperationRepr() const {
+DropPartitionOperation::GetRepr() const {
     std::stringstream ss;
     ss << "<DPO(SS=" << prev_ss_->GetID();
     ss << "," << c_context_.ToString();
@@ -446,7 +446,7 @@ CreateCollectionOperation::PreCheck() {
 }
 
 std::string
-CreateCollectionOperation::OperationRepr() const {
+CreateCollectionOperation::GetRepr() const {
     std::stringstream ss;
     ss << "<CCO(";
     ss << c_context_.ToString();

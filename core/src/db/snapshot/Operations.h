@@ -119,11 +119,11 @@ class Operations : public std::enable_shared_from_this<Operations> {
     }
 
     virtual std::string
-    OperationName() const {
+    GetName() const {
         return typeid(*this).name();
     }
     virtual std::string
-    OperationRepr() const;
+    GetRepr() const;
 
     virtual std::string
     ToString() const;
