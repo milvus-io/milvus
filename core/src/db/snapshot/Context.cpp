@@ -20,9 +20,9 @@ std::string
 PartitionContext::ToString() const {
     std::stringstream ss;
     if (id != 0) {
-        ss << ",N_PID=" << id;
+        ss << "PID=" << id;
     } else if (name != "") {
-        ss << ",N_PNAME=\"" << name << "\"";
+        ss << "PNAME=\"" << name << "\"";
     }
 
     return ss.str();
@@ -89,11 +89,8 @@ std::string
 CreateCollectionContext::ToString() const {
     std::stringstream ss;
     if (collection) {
-        ss << ",N_CID=" << collection->GetID();
-        ss << ",N_CNAME=\"" << collection->GetName() << "\"";
-    }
-    if (collection_commit) {
-        ss << ",N_CC=" << collection_commit->GetID();
+        ss << "CID=" << collection->GetID();
+        ss << ",CNAME=\"" << collection->GetName() << "\"";
     }
     return ss.str();
 }

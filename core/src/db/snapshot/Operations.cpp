@@ -27,12 +27,17 @@ operator<<(std::ostream& out, const Operations& operation) {
     return out;
 }
 
-Operations::Operations(const OperationContext& context, ScopedSnapshotT prev_ss)
-    : context_(context), prev_ss_(prev_ss), uid_(UID++), status_(SS_OPERATION_PENDING, "Operation Pending") {
+Operations::Operations(const OperationContext& context, ScopedSnapshotT prev_ss, const OperationsType& type)
+    : context_(context),
+      prev_ss_(prev_ss),
+      uid_(UID++),
+      status_(SS_OPERATION_PENDING, "Operation Pending"),
+      type_(type) {
 }
 
-Operations::Operations(const OperationContext& context, ID_TYPE collection_id, ID_TYPE commit_id)
-    : context_(context), uid_(UID++), status_(SS_OPERATION_PENDING, "Operation Pending") {
+Operations::Operations(const OperationContext& context, ID_TYPE collection_id, ID_TYPE commit_id,
+                       const OperationsType& type)
+    : context_(context), uid_(UID++), status_(SS_OPERATION_PENDING, "Operation Pending"), type_(type) {
     auto status = Snapshots::GetInstance().GetSnapshot(prev_ss_, collection_id, commit_id);
     if (!status.ok())
         prev_ss_ = ScopedSnapshotT();
@@ -99,7 +104,9 @@ void
 Operations::Done() {
     std::unique_lock<std::mutex> lock(finish_mtx_);
     done_ = true;
-    std::cout << ToString() << std::endl;
+    if (GetType() == OperationsType::W_Compound) {
+        std::cout << ToString() << std::endl;
+    }
     finish_cond_.notify_all();
 }
 
@@ -180,7 +187,9 @@ Operations::GetSnapshot(ScopedSnapshotT& ss) const {
 
 Status
 Operations::ApplyToStore(Store& store) {
-    std::cout << ToString() << std::endl;
+    if (GetType() == OperationsType::W_Compound) {
+        std::cout << ToString() << std::endl;
+    }
     if (done_) {
         Done();
         return status_;
@@ -235,7 +244,6 @@ Operations::ApplyRollBack(Store& store) {
 Operations::~Operations() {
     // TODO: Prefer to submit a rollback operation if status is not ok
 }
-
 
 }  // namespace snapshot
 }  // namespace engine

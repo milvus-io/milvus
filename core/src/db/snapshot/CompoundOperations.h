@@ -26,6 +26,9 @@ class CommonOperation : public Operations {
     CommonOperation(const OperationContext& context, ScopedSnapshotT prev_ss);
     CommonOperation(const OperationContext& context, ID_TYPE collection_id, ID_TYPE commit_id = 0);
 
+    std::string
+    OperationRepr() const override;
+
     Status
     PreCheck() override;
 };
@@ -33,6 +36,7 @@ class CommonOperation : public Operations {
 class BuildOperation : public CommonOperation {
  public:
     using BaseT = CommonOperation;
+    static constexpr const char* Name = "BO";
 
     BuildOperation(const OperationContext& context, ScopedSnapshotT prev_ss);
     BuildOperation(const OperationContext& context, ID_TYPE collection_id, ID_TYPE commit_id = 0);
@@ -44,7 +48,9 @@ class BuildOperation : public CommonOperation {
     CommitNewSegmentFile(const SegmentFileContext& context, SegmentFilePtr& created);
 
     std::string
-    OperationRepr() const override;
+    OperationName() const override {
+        return Name;
+    }
 
  protected:
     Status
@@ -54,6 +60,7 @@ class BuildOperation : public CommonOperation {
 class NewSegmentOperation : public CommonOperation {
  public:
     using BaseT = CommonOperation;
+    static constexpr const char* Name = "NSO";
 
     NewSegmentOperation(const OperationContext& context, ScopedSnapshotT prev_ss);
     NewSegmentOperation(const OperationContext& context, ID_TYPE collection_id, ID_TYPE commit_id = 0);
@@ -66,11 +73,17 @@ class NewSegmentOperation : public CommonOperation {
 
     Status
     CommitNewSegmentFile(const SegmentFileContext& context, SegmentFilePtr& created);
+
+    std::string
+    OperationName() const override {
+        return Name;
+    }
 };
 
 class MergeOperation : public CommonOperation {
  public:
     using BaseT = CommonOperation;
+    static constexpr const char* Name = "MO";
 
     MergeOperation(const OperationContext& context, ScopedSnapshotT prev_ss);
     MergeOperation(const OperationContext& context, ID_TYPE collection_id, ID_TYPE commit_id = 0);
@@ -84,12 +97,16 @@ class MergeOperation : public CommonOperation {
     CommitNewSegmentFile(const SegmentFileContext& context, SegmentFilePtr&);
 
     std::string
-    OperationRepr() const override;
+    OperationName() const override {
+        return Name;
+    }
 };
 
 class CreateCollectionOperation : public CommonOperation {
  public:
     using BaseT = CommonOperation;
+    static constexpr const char* Name = "CCO";
+
     explicit CreateCollectionOperation(const CreateCollectionContext& context);
 
     Status
@@ -103,16 +120,26 @@ class CreateCollectionOperation : public CommonOperation {
 
     const LSN_TYPE&
     GetContextLsn() const override {
-        return context_.lsn;
+        return c_context_.lsn;
+    }
+
+    std::string
+    OperationRepr() const override;
+
+    std::string
+    OperationName() const override {
+        return Name;
     }
 
  private:
-    CreateCollectionContext context_;
+    CreateCollectionContext c_context_;
 };
 
 class CreatePartitionOperation : public CommonOperation {
  public:
     using BaseT = CommonOperation;
+    static constexpr const char* Name = "CPO";
+
     CreatePartitionOperation(const OperationContext& context, ScopedSnapshotT prev_ss);
     CreatePartitionOperation(const OperationContext& context, ID_TYPE collection_id, ID_TYPE commit_id = 0);
 
@@ -126,12 +153,15 @@ class CreatePartitionOperation : public CommonOperation {
     PreCheck() override;
 
     std::string
-    OperationRepr() const override;
+    OperationName() const override {
+        return Name;
+    }
 };
 
 class DropPartitionOperation : public CommonOperation {
  public:
     using BaseT = CommonOperation;
+    static constexpr const char* Name = "DPO";
     DropPartitionOperation(const PartitionContext& context, ScopedSnapshotT prev_ss);
 
     Status
@@ -139,14 +169,19 @@ class DropPartitionOperation : public CommonOperation {
 
     const LSN_TYPE&
     GetContextLsn() const override {
-        return context_.lsn;
+        return c_context_.lsn;
     }
 
     std::string
     OperationRepr() const override;
 
+    std::string
+    OperationName() const override {
+        return Name;
+    }
+
  protected:
-    PartitionContext context_;
+    PartitionContext c_context_;
 };
 
 class GetSnapshotIDsOperation : public Operations {
@@ -187,12 +222,19 @@ class GetCollectionIDsOperation : public Operations {
 class SoftDeleteCollectionOperation : public CommonOperation {
  public:
     using BaseT = CommonOperation;
+    static constexpr const char* Name = "DCO";
+
     explicit SoftDeleteCollectionOperation(const OperationContext& context, ScopedSnapshotT prev_ss)
         : BaseT(context, prev_ss) {
     }
 
     Status
     DoExecute(Store& store) override;
+
+    std::string
+    OperationName() const override {
+        return Name;
+    }
 
  private:
     ID_TYPE collection_id_;

@@ -113,7 +113,7 @@ template <>
 class LoadOperation<Collection> : public Operations {
  public:
     explicit LoadOperation(const LoadOperationContext& context)
-        : Operations(OperationContext(), ScopedSnapshotT()), context_(context) {
+        : Operations(OperationContext(), ScopedSnapshotT(), OperationsType::O_Leaf), context_(context) {
     }
 
     Status
