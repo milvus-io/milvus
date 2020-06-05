@@ -76,6 +76,11 @@ class Snapshot : public ReferenceProxy {
         return GetResources<Partition>().size();
     }
 
+    const LSN_TYPE&
+    GetMaxLsn() const {
+        return max_lsn_;
+    }
+
     Status
     GetPartitionId(const std::string& name, ID_TYPE& id) const {
         auto it = partition_names_map_.find(name);
@@ -252,6 +257,7 @@ class Snapshot : public ReferenceProxy {
     std::map<ID_TYPE, ID_TYPE> p_pc_map_;
     ID_TYPE latest_schema_commit_id_ = 0;
     std::map<ID_TYPE, NUM_TYPE> p_max_seg_num_;
+    LSN_TYPE max_lsn_;
 };
 
 using ScopedSnapshotT = ScopedResource<Snapshot>;

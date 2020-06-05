@@ -19,6 +19,20 @@ namespace milvus {
 namespace engine {
 namespace snapshot {
 
+Status
+CommonOperation::PreCheck() {
+    if (GetContextLsn() < prev_ss_->GetMaxLsn()) {
+        return Status(SS_INVALID_CONTEX_ERROR, "Invalid LSN found in operation");
+    }
+    return Status::OK();
+}
+
+CommonOperation::CommonOperation(const OperationContext& context, ScopedSnapshotT prev_ss) : BaseT(context, prev_ss) {
+}
+CommonOperation::CommonOperation(const OperationContext& context, ID_TYPE collection_id, ID_TYPE commit_id)
+    : BaseT(context, collection_id, commit_id) {
+}
+
 BuildOperation::BuildOperation(const OperationContext& context, ScopedSnapshotT prev_ss) : BaseT(context, prev_ss) {
 }
 BuildOperation::BuildOperation(const OperationContext& context, ID_TYPE collection_id, ID_TYPE commit_id)
@@ -44,6 +58,7 @@ BuildOperation::OperationRepr() const {
         }
         ss << "]";
     }
+    ss << ",LSN=" << GetContextLsn();
     ss << ")>";
     return ss.str();
 }
@@ -233,7 +248,7 @@ MergeOperation::OperationRepr() const {
         }
     }
     ss << "]";
-
+    ss << ",LSN=" << GetContextLsn();
     ss << ")>";
     return ss.str();
 }
@@ -392,7 +407,10 @@ CreatePartitionOperation::CreatePartitionOperation(const OperationContext& conte
 
 Status
 CreatePartitionOperation::PreCheck() {
-    Status status;
+    Status status = BaseT::PreCheck();
+    if (!status.ok()) {
+        return status;
+    }
     if (!context_.new_partition) {
         status = Status(SS_INVALID_CONTEX_ERROR, "No partition specified before push partition");
     }
@@ -453,6 +471,12 @@ CreatePartitionOperation::DoExecute(Store& store) {
 
 CreateCollectionOperation::CreateCollectionOperation(const CreateCollectionContext& context)
     : BaseT(OperationContext(), ScopedSnapshotT()), context_(context) {
+}
+
+Status
+CreateCollectionOperation::PreCheck() {
+    // TODO
+    return Status::OK();
 }
 
 Status

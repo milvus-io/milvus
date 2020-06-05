@@ -49,9 +49,9 @@ class Snapshots {
     GetCollectionIds(IDS_TYPE& ids) const;
 
     Status
-    DropCollection(const std::string& name);
+    DropCollection(const std::string& name, const LSN_TYPE& lsn);
     Status
-    DropCollection(ID_TYPE collection_id);
+    DropCollection(ID_TYPE collection_id, const LSN_TYPE& lsn);
 
     Status
     Reset();
@@ -63,7 +63,7 @@ class Snapshots {
         Init();
     }
     Status
-    DoDropCollection(ScopedSnapshotT& ss);
+    DoDropCollection(ScopedSnapshotT& ss, const LSN_TYPE& lsn);
     void
     Init();
 

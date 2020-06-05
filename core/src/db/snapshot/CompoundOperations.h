@@ -19,9 +19,20 @@ namespace milvus {
 namespace engine {
 namespace snapshot {
 
-class BuildOperation : public Operations {
+class CommonOperation : public Operations {
  public:
     using BaseT = Operations;
+
+    CommonOperation(const OperationContext& context, ScopedSnapshotT prev_ss);
+    CommonOperation(const OperationContext& context, ID_TYPE collection_id, ID_TYPE commit_id = 0);
+
+    Status
+    PreCheck() override;
+};
+
+class BuildOperation : public CommonOperation {
+ public:
+    using BaseT = CommonOperation;
 
     BuildOperation(const OperationContext& context, ScopedSnapshotT prev_ss);
     BuildOperation(const OperationContext& context, ID_TYPE collection_id, ID_TYPE commit_id = 0);
@@ -40,9 +51,9 @@ class BuildOperation : public Operations {
     CheckSegmentStale(ScopedSnapshotT& latest_snapshot, ID_TYPE segment_id) const;
 };
 
-class NewSegmentOperation : public Operations {
+class NewSegmentOperation : public CommonOperation {
  public:
-    using BaseT = Operations;
+    using BaseT = CommonOperation;
 
     NewSegmentOperation(const OperationContext& context, ScopedSnapshotT prev_ss);
     NewSegmentOperation(const OperationContext& context, ID_TYPE collection_id, ID_TYPE commit_id = 0);
@@ -57,9 +68,9 @@ class NewSegmentOperation : public Operations {
     CommitNewSegmentFile(const SegmentFileContext& context, SegmentFilePtr& created);
 };
 
-class MergeOperation : public Operations {
+class MergeOperation : public CommonOperation {
  public:
-    using BaseT = Operations;
+    using BaseT = CommonOperation;
 
     MergeOperation(const OperationContext& context, ScopedSnapshotT prev_ss);
     MergeOperation(const OperationContext& context, ID_TYPE collection_id, ID_TYPE commit_id = 0);
@@ -76,9 +87,9 @@ class MergeOperation : public Operations {
     OperationRepr() const override;
 };
 
-class CreateCollectionOperation : public Operations {
+class CreateCollectionOperation : public CommonOperation {
  public:
-    using BaseT = Operations;
+    using BaseT = CommonOperation;
     explicit CreateCollectionOperation(const CreateCollectionContext& context);
 
     Status
@@ -87,13 +98,21 @@ class CreateCollectionOperation : public Operations {
     Status
     GetSnapshot(ScopedSnapshotT& ss) const override;
 
+    Status
+    PreCheck() override;
+
+    const LSN_TYPE&
+    GetContextLsn() const override {
+        return context_.lsn;
+    }
+
  private:
     CreateCollectionContext context_;
 };
 
-class CreatePartitionOperation : public Operations {
+class CreatePartitionOperation : public CommonOperation {
  public:
-    using BaseT = Operations;
+    using BaseT = CommonOperation;
     CreatePartitionOperation(const OperationContext& context, ScopedSnapshotT prev_ss);
     CreatePartitionOperation(const OperationContext& context, ID_TYPE collection_id, ID_TYPE commit_id = 0);
 
@@ -107,13 +126,18 @@ class CreatePartitionOperation : public Operations {
     PreCheck() override;
 };
 
-class DropPartitionOperation : public Operations {
+class DropPartitionOperation : public CommonOperation {
  public:
-    using BaseT = Operations;
+    using BaseT = CommonOperation;
     DropPartitionOperation(const PartitionContext& context, ScopedSnapshotT prev_ss);
 
     Status
     DoExecute(Store&) override;
+
+    const LSN_TYPE&
+    GetContextLsn() const override {
+        return context_.lsn;
+    }
 
  protected:
     PartitionContext context_;
@@ -154,10 +178,10 @@ class GetCollectionIDsOperation : public Operations {
     IDS_TYPE ids_;
 };
 
-class SoftDeleteCollectionOperation : public Operations {
+class SoftDeleteCollectionOperation : public CommonOperation {
  public:
-    using BaseT = Operations;
-    explicit SoftDeleteCollectionOperation(const OperationContext& context) : BaseT(context, ScopedSnapshotT()) {
+    using BaseT = CommonOperation;
+    explicit SoftDeleteCollectionOperation(const OperationContext& context, ScopedSnapshotT prev_ss) : BaseT(context, prev_ss) {
     }
 
     Status

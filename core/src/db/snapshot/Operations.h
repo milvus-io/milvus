@@ -43,6 +43,11 @@ class Operations : public std::enable_shared_from_this<Operations> {
         return prev_ss_;
     }
 
+    virtual const LSN_TYPE&
+    GetContextLsn() const {
+        return context_.lsn;
+    }
+
     virtual Status
     CheckStale(const CheckStaleFunc& checker = nullptr) const;
     virtual Status

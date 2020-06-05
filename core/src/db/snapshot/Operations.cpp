@@ -71,6 +71,9 @@ Operations::GetID() const {
 
 Status
 Operations::operator()(Store& store) {
+    auto status = PreCheck();
+    if (!status.ok())
+        return status;
     return ApplyToStore(store);
 }
 
