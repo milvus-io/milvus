@@ -42,22 +42,8 @@ BuildOperation::BuildOperation(const OperationContext& context, ID_TYPE collecti
 std::string
 BuildOperation::OperationRepr() const {
     std::stringstream ss;
-    ss << "<BO(SS=" << prev_ss_->GetID() << ",SEG=";
-    if (context_.new_segment_files.size() == 0) {
-        ss << "?";
-    } else {
-        ss << context_.new_segment_files[0]->GetSegmentId();
-        ss << ",NSF=[";
-        bool first = true;
-        for (auto& f : context_.new_segment_files) {
-            if (!first) {
-                ss << ",";
-            }
-            ss << f->GetID();
-            first = false;
-        }
-        ss << "]";
-    }
+    ss << "<BO(SS=" << prev_ss_->GetID();
+    ss << "," << context_.ToString();
     ss << ",LSN=" << GetContextLsn();
     ss << ")>";
     return ss.str();
@@ -82,23 +68,23 @@ BuildOperation::DoExecute(Store& store) {
 
     OperationContext cc_context;
     status = pc_op.GetResource(cc_context.new_partition_commit);
+
     if (!status.ok())
         return status;
     AddStepWithLsn(*cc_context.new_partition_commit, context_.lsn);
+    context_.new_partition_commit = cc_context.new_partition_commit;
 
-    PartitionCommitPtr pc;
-    status = pc_op.GetResource(pc);
+    status = pc_op.GetResource(context_.new_partition_commit);
     if (!status.ok())
         return status;
-    AddStepWithLsn(*pc, context_.lsn);
+    AddStepWithLsn(*context_.new_partition_commit, context_.lsn);
 
     CollectionCommitOperation cc_op(cc_context, prev_ss_);
     cc_op(store);
-    CollectionCommitPtr cc;
-    status = cc_op.GetResource(cc);
+    status = cc_op.GetResource(context_.new_collection_commit);
     if (!status.ok())
         return status;
-    AddStepWithLsn(*cc, context_.lsn);
+    AddStepWithLsn(*context_.new_collection_commit, context_.lsn);
 
     return status;
 }
@@ -164,16 +150,16 @@ NewSegmentOperation::DoExecute(Store& store) {
     if (!status.ok())
         return status;
     AddStepWithLsn(*cc_context.new_partition_commit, context_.lsn);
+    context_.new_partition_commit = cc_context.new_partition_commit;
 
     CollectionCommitOperation cc_op(cc_context, prev_ss_);
     status = cc_op(store);
     if (!status.ok())
         return status;
-    CollectionCommitPtr cc;
-    status = cc_op.GetResource(cc);
+    status = cc_op.GetResource(context_.new_collection_commit);
     if (!status.ok())
         return status;
-    AddStepWithLsn(*cc, context_.lsn);
+    AddStepWithLsn(*context_.new_collection_commit, context_.lsn);
 
     return status;
 }
@@ -218,36 +204,8 @@ MergeOperation::MergeOperation(const OperationContext& context, ID_TYPE collecti
 std::string
 MergeOperation::OperationRepr() const {
     std::stringstream ss;
-    ss << "<MO(SS=" << prev_ss_->GetID() << ",SSEG=[";
-    {
-        bool first = true;
-        for (auto& r : context_.stale_segments) {
-            if (!first) {
-                ss << ",";
-            }
-            ss << r->GetID();
-            first = false;
-        }
-    }
-    ss << "]";
-    ss << ",NSEG=";
-    if (context_.new_segment) {
-        ss << context_.new_segment->GetID();
-    } else {
-        ss << "?";
-    }
-    ss << ",NSF=[";
-    {
-        bool first = true;
-        for (auto& f : context_.new_segment_files) {
-            if (!first) {
-                ss << ",";
-            }
-            ss << f->GetID();
-            first = false;
-        }
-    }
-    ss << "]";
+    ss << "<MO(SS=" << prev_ss_->GetID();
+    ss << "," << context_.ToString();
     ss << ",LSN=" << GetContextLsn();
     ss << ")>";
     return ss.str();
@@ -319,16 +277,16 @@ MergeOperation::DoExecute(Store& store) {
     if (!status.ok())
         return status;
     AddStepWithLsn(*cc_context.new_partition_commit, context_.lsn);
+    context_.new_partition_commit = cc_context.new_partition_commit;
 
     CollectionCommitOperation cc_op(cc_context, prev_ss_);
     status = cc_op(store);
     if (!status.ok())
         return status;
-    CollectionCommitPtr cc;
-    status = cc_op.GetResource(cc);
+    status = cc_op.GetResource(context_.new_collection_commit);
     if (!status.ok())
         return status;
-    AddStepWithLsn(*cc, context_.lsn);
+    AddStepWithLsn(*context_.new_collection_commit, context_.lsn);
 
     return status;
 }
@@ -371,14 +329,8 @@ std::string
 DropPartitionOperation::OperationRepr() const {
     std::stringstream ss;
     ss << "<DPO(SS=" << prev_ss_->GetID();
-    if (context_.id != 0) {
-        ss << ",SP_ID=" << context_.id;
-    } else if (context_.name != "") {
-        ss << ",SP_NAME=\"" << context_.name << "\"";
-    } else {
-        ss << "SP=?";
-    }
-    ss << ",LSN=" << context_.lsn;
+    ss << "," << context_.ToString();
+    ss << ",LSN=" << GetContextLsn();
     ss << ")>";
     return ss.str();
 }
@@ -425,16 +377,8 @@ std::string
 CreatePartitionOperation::OperationRepr() const {
     std::stringstream ss;
     ss << "<CPO(SS=" << prev_ss_->GetID();
-    if (context_.new_partition) {
-        ss << ",NP=" << context_.new_partition->GetID();
-    }
-
-    if (context_.new_partition_commit) {
-        ss << ",NPC=" << context_.new_partition_commit->GetID();
-    }
-    if (context_.new_collection_commit) {
-        ss << ",NSS=" << context_.new_collection_commit->GetID();
-    }
+    ss << "," << context_.ToString();
+    ss << ",LSN=" << GetContextLsn();
     ss << ")>";
     return ss.str();
 }

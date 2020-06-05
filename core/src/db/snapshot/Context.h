@@ -26,6 +26,9 @@ struct PartitionContext {
     std::string name;
     ID_TYPE id = 0;
     LSN_TYPE lsn = 0;
+
+    std::string
+    ToString() const;
 };
 
 struct SegmentFileContext {
@@ -48,6 +51,7 @@ struct OperationContext {
     PartitionCommitPtr new_partition_commit = nullptr;
     SchemaCommitPtr new_schema_commit = nullptr;
     CollectionCommitPtr new_collection_commit = nullptr;
+    CollectionPtr new_collection = nullptr;
 
     SegmentFilePtr stale_segment_file = nullptr;
     std::vector<SegmentPtr> stale_segments;
@@ -65,6 +69,9 @@ struct OperationContext {
     SegmentFile::VecT new_segment_files;
     CollectionPtr collection = nullptr;
     LSN_TYPE lsn = 0;
+
+    std::string
+    ToString() const;
 };
 
 struct CreateCollectionContext {
@@ -72,6 +79,9 @@ struct CreateCollectionContext {
     std::map<FieldPtr, std::vector<FieldElementPtr>> fields_schema;
     CollectionCommitPtr collection_commit = nullptr;
     LSN_TYPE lsn = 0;
+
+    std::string
+    ToString() const;
 };
 
 }  // namespace snapshot
