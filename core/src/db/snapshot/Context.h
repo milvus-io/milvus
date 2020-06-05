@@ -47,6 +47,7 @@ struct OperationContext {
     PartitionPtr new_partition = nullptr;
     PartitionCommitPtr new_partition_commit = nullptr;
     SchemaCommitPtr new_schema_commit = nullptr;
+    CollectionCommitPtr new_collection_commit = nullptr;
 
     SegmentFilePtr stale_segment_file = nullptr;
     std::vector<SegmentPtr> stale_segments;

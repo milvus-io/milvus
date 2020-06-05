@@ -367,6 +367,22 @@ DropPartitionOperation::DropPartitionOperation(const PartitionContext& context, 
     : BaseT(OperationContext(), prev_ss), context_(context) {
 }
 
+std::string
+DropPartitionOperation::OperationRepr() const {
+    std::stringstream ss;
+    ss << "<DPO(SS=" << prev_ss_->GetID();
+    if (context_.id != 0) {
+        ss << ",SP_ID=" << context_.id;
+    } else if (context_.name != "") {
+        ss << ",SP_NAME=\"" << context_.name << "\"";
+    } else {
+        ss << "SP=?";
+    }
+    ss << ",LSN=" << context_.lsn;
+    ss << ")>";
+    return ss.str();
+}
+
 Status
 DropPartitionOperation::DoExecute(Store& store) {
     Status status;
@@ -403,6 +419,24 @@ CreatePartitionOperation::CreatePartitionOperation(const OperationContext& conte
 CreatePartitionOperation::CreatePartitionOperation(const OperationContext& context, ID_TYPE collection_id,
                                                    ID_TYPE commit_id)
     : BaseT(context, collection_id, commit_id) {
+}
+
+std::string
+CreatePartitionOperation::OperationRepr() const {
+    std::stringstream ss;
+    ss << "<CPO(SS=" << prev_ss_->GetID();
+    if (context_.new_partition) {
+        ss << ",NP=" << context_.new_partition->GetID();
+    }
+
+    if (context_.new_partition_commit) {
+        ss << ",NPC=" << context_.new_partition_commit->GetID();
+    }
+    if (context_.new_collection_commit) {
+        ss << ",NSS=" << context_.new_collection_commit->GetID();
+    }
+    ss << ")>";
+    return ss.str();
 }
 
 Status
@@ -452,10 +486,10 @@ CreatePartitionOperation::DoExecute(Store& store) {
     status = pc_op.GetResource(pc);
     if (!status.ok())
         return status;
-    /* status = store.CreateResource<PartitionCommit>(PartitionCommit(collection->GetID(), partition->GetID()), pc); */
     AddStepWithLsn(*pc, context_.lsn);
     OperationContext cc_context;
     cc_context.new_partition_commit = pc;
+    context_.new_partition_commit = pc;
     auto cc_op = CollectionCommitOperation(cc_context, prev_ss_);
     status = cc_op(store);
     if (!status.ok())
@@ -465,6 +499,7 @@ CreatePartitionOperation::DoExecute(Store& store) {
     if (!status.ok())
         return status;
     AddStepWithLsn(*cc, context_.lsn);
+    context_.new_collection_commit = cc;
 
     return status;
 }

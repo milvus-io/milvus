@@ -124,6 +124,9 @@ class CreatePartitionOperation : public CommonOperation {
 
     Status
     PreCheck() override;
+
+    std::string
+    OperationRepr() const override;
 };
 
 class DropPartitionOperation : public CommonOperation {
@@ -138,6 +141,9 @@ class DropPartitionOperation : public CommonOperation {
     GetContextLsn() const override {
         return context_.lsn;
     }
+
+    std::string
+    OperationRepr() const override;
 
  protected:
     PartitionContext context_;
