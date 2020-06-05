@@ -21,7 +21,7 @@ namespace snapshot {
 
 Status
 CommonOperation::PreCheck() {
-    if (GetContextLsn() < prev_ss_->GetMaxLsn()) {
+    if (GetContextLsn() <= prev_ss_->GetMaxLsn()) {
         return Status(SS_INVALID_CONTEX_ERROR, "Invalid LSN found in operation");
     }
     return Status::OK();

@@ -325,6 +325,34 @@ TEST_F(SnapshotTest, PartitionTest) {
     std::cout << status.ToString() << std::endl;
 }
 
+TEST_F(SnapshotTest, PartitionTest2) {
+    milvus::engine::snapshot::Store::GetInstance().DoReset();
+    std::string collection_name("c1");
+    milvus::engine::snapshot::LSN_TYPE lsn = 1;
+    milvus::Status status;
+
+    auto ss = CreateCollection(collection_name, ++lsn);
+    ASSERT_TRUE(ss);
+    ASSERT_EQ(lsn, ss->GetMaxLsn());
+
+    milvus::engine::snapshot::OperationContext context;
+    context.lsn = lsn;
+    auto cp_op = std::make_shared<milvus::engine::snapshot::CreatePartitionOperation>(context, ss);
+    std::string partition_name("p1");
+    milvus::engine::snapshot::PartitionContext p_ctx;
+    p_ctx.name = partition_name;
+    milvus::engine::snapshot::PartitionPtr partition;
+    status = cp_op->CommitNewPartition(p_ctx, partition);
+    ASSERT_TRUE(status.ok());
+    ASSERT_TRUE(partition);
+    ASSERT_EQ(partition->GetName(), partition_name);
+    ASSERT_TRUE(!partition->IsActive());
+    ASSERT_TRUE(partition->HasAssigned());
+
+    status = cp_op->Push();
+    ASSERT_TRUE(!status.ok());
+}
+
 TEST_F(SnapshotTest, OperationTest) {
     milvus::Status status;
     std::string to_string;
