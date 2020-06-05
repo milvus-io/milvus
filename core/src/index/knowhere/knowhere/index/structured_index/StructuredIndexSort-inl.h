@@ -19,7 +19,7 @@ namespace milvus {
 namespace knowhere {
 
 template <typename T>
-StructuredIndexSort<T>::StructuredIndexSort() : is_built_(false), data_(nullptr) {
+StructuredIndexSort<T>::StructuredIndexSort() : is_built_(false), data_() {
 }
 
 template <typename T>

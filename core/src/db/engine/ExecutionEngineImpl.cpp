@@ -923,6 +923,11 @@ ExecutionEngineImpl::ExecBinaryQuery(milvus::query::GeneralQueryPtr general_quer
             auto size = attr_->attr_size().at(field_name);
             switch (type) {
                 case DataType::INT8: {
+//                    auto a = std::dynamic_pointer_cast<StructuredIndex<int8_t>>(index);
+//                    if (not a) {
+//                        // throw exception
+//                    }
+
                     std::vector<int8_t> data;
                     data.resize(size / sizeof(int8_t));
                     memcpy(data.data(), attr_->attr_data().at(field_name).data(), size);

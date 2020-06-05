@@ -150,6 +150,10 @@ class RequestHandler {
                  std::vector<std::string>& partition_list, query::GeneralQueryPtr& general_query,
                  query::QueryPtr& query_ptr, milvus::json& json_params, std::vector<std::string>& field_names,
                  engine::QueryResult& result);
+
+    Status
+    CreateHybridIndex(const std::shared_ptr<Context>& context, const std::string& collection_name, const std::vector<std::string>& field_names,
+                      const milvus::json& json_params);
 };
 
 }  // namespace server

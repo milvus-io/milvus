@@ -43,6 +43,19 @@ enum class EngineType {
     MAX_VALUE = ANNOY,
 };
 
+static std::map<std::string, EngineType> s_map_engine_type = {
+    {"FLAT", EngineType::FAISS_IDMAP},
+    {"IVFFLAT", EngineType::FAISS_IVFFLAT},
+    {"IVFSQ8", EngineType::FAISS_IVFSQ8},
+    {"RNSG", EngineType::NSG_MIX},
+    {"IVFSQ8H", EngineType::FAISS_IVFSQ8H},
+    {"IVFPQ", EngineType::FAISS_PQ},
+    {"SPTAGKDT", EngineType::SPTAG_KDT},
+    {"SPTAGBKT", EngineType::SPTAG_BKT},
+    {"HNSW", EngineType::HNSW},
+    {"ANNOY", EngineType::ANNOY},
+};
+
 enum class MetricType {
     L2 = 1,              // Euclidean Distance
     IP = 2,              // Cosine Similarity

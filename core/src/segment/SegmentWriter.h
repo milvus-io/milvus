@@ -47,6 +47,9 @@ class SegmentWriter {
     SetVectorIndex(const knowhere::VecIndexPtr& index);
 
     Status
+    SetAttrIndex(const knowhere::IndexPtr& index, const std::string& field_name);
+
+    Status
     WriteBloomFilter(const IdBloomFilterPtr& bloom_filter_ptr);
 
     Status
@@ -72,6 +75,9 @@ class SegmentWriter {
 
     Status
     WriteVectorIndex(const std::string& location);
+
+    Status
+    WriteAttrIndex(const std::string& location);
 
  private:
     Status

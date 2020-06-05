@@ -24,6 +24,7 @@
 #include "segment/IdBloomFilter.h"
 #include "segment/VectorIndex.h"
 #include "segment/Vectors.h"
+#include "segment/AttrIndex.h"
 
 namespace milvus {
 namespace segment {
@@ -34,6 +35,7 @@ struct Segment {
     VectorsPtr vectors_ptr_ = std::make_shared<Vectors>();
     AttrsPtr attrs_ptr_ = std::make_shared<Attrs>();
     VectorIndexPtr vector_index_ptr_ = std::make_shared<VectorIndex>();
+    AttrIndexPtr attr_index_ptr_ = std::make_shared<AttrIndex>();
     DeletedDocsPtr deleted_docs_ptr_ = nullptr;
     IdBloomFilterPtr id_bloom_filter_ptr_ = nullptr;
 };

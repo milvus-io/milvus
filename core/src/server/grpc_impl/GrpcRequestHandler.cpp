@@ -1619,6 +1619,34 @@ GrpcRequestHandler::GetEntityByID(::grpc::ServerContext* context, const ::milvus
     return ::grpc::Status::OK;
 }
 
+::grpc::Status
+GrpcRequestHandler::CreateHybridIndex(::grpc::ServerContext* context,
+                                      const ::milvus::grpc::HIndexParam* request,
+                                      ::milvus::grpc::Status* response) {
+    CHECK_NULLPTR_RETURN(request);
+    LOG_SERVER_INFO_ << LogOut("Request [%s] %s begin.", GetContext(context)->RequestID().c_str(), __func__);
+
+    milvus::json json_params;
+    for (int i = 0; i < request->extra_params_size(); i++) {
+        const ::milvus::grpc::KeyValuePair& extra = request->extra_params(i);
+        if (extra.key() == EXTRA_PARAM_KEY) {
+            json_params = json::parse(extra.value());
+        }
+    }
+
+    std::vector<std::string> field_names;
+    for (int64_t i = 0; i < request->field_names_size(); i++) {
+        field_names.emplace_back(request->field_names(i));
+    }
+
+    Status status = request_handler_.CreateHybridIndex(GetContext(context), request->collection_name(), field_names,
+                                                 json_params);
+
+    LOG_SERVER_INFO_ << LogOut("Request [%s] %s end.", GetContext(context)->RequestID().c_str(), __func__);
+    SET_RESPONSE(response, status, context);
+    return ::grpc::Status::OK;
+}
+
 }  // namespace grpc
 }  // namespace server
 }  // namespace milvus

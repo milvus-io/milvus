@@ -17,26 +17,45 @@
 
 #pragma once
 
-#include <memory>
+#include <mutex>
 #include <string>
+#include <vector>
 
+#include "codecs/AttrsIndexFormat.h"
 #include "segment/AttrIndex.h"
-#include "storage/FSHandler.h"
 
 namespace milvus {
 namespace codec {
 
-class AttrsIndexFormat {
+class DefaultAttrsIndexFormat : public AttrsIndexFormat {
  public:
-    virtual void
-    read(const storage::FSHandlerPtr& fd_ptr, const std::string& location, segment::AttrIndexPtr& attr_index) = 0;
+    DefaultAttrsIndexFormat() = default;
 
-    virtual void
+    void
+    read(const storage::FSHandlerPtr& fs_ptr, const std::string& location, segment::AttrIndexPtr& attr_index) override;
+
+    void
     write(const storage::FSHandlerPtr& fs_ptr, const std::string& location,
-          const segment::AttrIndexPtr& attr_index) = 0;
-};
+          const segment::AttrIndexPtr& attr_index) override;
 
-using AttrsIndexFormatPtr = std::shared_ptr<AttrsIndexFormat>;
+    // No copy and move
+    DefaultAttrsIndexFormat(const DefaultAttrsIndexFormat&) = delete;
+    DefaultAttrsIndexFormat(DefaultAttrsIndexFormat&&) = delete;
+
+    DefaultAttrsIndexFormat&
+    operator=(const DefaultAttrsIndexFormat&) = delete;
+    DefaultAttrsIndexFormat&
+    operator=(DefaultAttrsIndexFormat&&) = delete;
+
+ private:
+    knowhere::IndexPtr
+    read_internal(const storage::FSHandlerPtr& fs_ptr, const std::string& path);
+
+ private:
+    std::mutex mutex_;
+
+    const std::string attr_index_extension_ = ".idx";
+};
 
 }  // namespace codec
 }  // namespace milvus

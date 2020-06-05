@@ -89,6 +89,13 @@ SegmentWriter::SetVectorIndex(const milvus::knowhere::VecIndexPtr& index) {
 }
 
 Status
+SegmentWriter::SetAttrIndex(const milvus::knowhere::IndexPtr& index, const std::string& field_name) {
+    segment_ptr_->attr_index_ptr_->SetAttrIndex(index);
+    segment_ptr_->attr_index_ptr_->SetFieldName(field_name);
+    return Status::OK();
+}
+
+Status
 SegmentWriter::Serialize() {
     TimeRecorder recorder("SegmentWriter::Serialize");
 
@@ -163,6 +170,26 @@ SegmentWriter::WriteVectorIndex(const std::string& location) {
     try {
         fs_ptr_->operation_ptr_->CreateDirectory();
         default_codec.GetVectorIndexFormat()->write(fs_ptr_, location, segment_ptr_->vector_index_ptr_);
+    } catch (std::exception& e) {
+        std::string err_msg = "Failed to write vector index: " + std::string(e.what());
+        LOG_ENGINE_ERROR_ << err_msg;
+
+        engine::utils::SendExitSignal();
+        return Status(SERVER_WRITE_ERROR, err_msg);
+    }
+    return Status::OK();
+}
+
+Status
+SegmentWriter::WriteAttrIndex(const std::string& location) {
+    if (location.empty()) {
+        return Status(SERVER_WRITE_ERROR, "Invalid parameter of WriteVectorIndex");
+    }
+
+    codec::DefaultCodec default_codec;
+    try {
+        fs_ptr_->operation_ptr_->CreateDirectory();
+        default_codec.GetAttrIndexFormat()->write(fs_ptr_, location, segment_ptr_->attr_index_ptr_);
     } catch (std::exception& e) {
         std::string err_msg = "Failed to write vector index: " + std::string(e.what());
         LOG_ENGINE_ERROR_ << err_msg;

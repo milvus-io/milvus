@@ -140,6 +140,10 @@ class DBImpl : public DB, public server::CacheConfigHandler, public server::Engi
                 const CollectionIndex& index) override;
 
     Status
+    CreateStructuredIndex(const std::shared_ptr<server::Context>& context, const std::string& collection_id,
+                          const std::vector<std::string>& field_names) override;
+
+    Status
     DescribeIndex(const std::string& collection_id, CollectionIndex& index) override;
 
     Status
@@ -296,6 +300,11 @@ class DBImpl : public DB, public server::CacheConfigHandler, public server::Engi
 
     void
     ResumeIfLast();
+
+    Status
+    SerializeStructuredIndex(const milvus::engine::meta::SegmentsSchema& to_index_files,
+                             const std::unordered_map<std::string, engine::meta::hybrid::DataType>& attr_type,
+                             const std::vector<std::string>& field_names);
 
  private:
     DBOptions options_;

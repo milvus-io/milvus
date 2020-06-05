@@ -19,16 +19,40 @@
 
 #include <memory>
 #include <string>
+#include "knowhere/index/structured_index/StructuredIndex.h"
 
 namespace milvus {
 namespace segment {
 
 class AttrIndex {
  public:
-    explicit AttrIndex(AttrIndexWrapper attr_index_wrapper);
+    explicit AttrIndex(knowhere::IndexPtr index_ptr, const std::string& field_name)
+        : index_ptr_(index_ptr),
+          field_name_(field_name){
+
+          };
+
+    AttrIndex() = default;
+
+    knowhere::IndexPtr
+    GetAttrIndex() const {
+        return index_ptr_;
+    }
+
+    const std::string&
+    GetFieldName() const {
+        return field_name_;
+    }
 
     void
-    Get(AttrIndexWrapper& attr_index_wrapper);
+    SetAttrIndex(const knowhere::IndexPtr& index_ptr) {
+        index_ptr_ = index_ptr;
+    }
+
+    void
+    SetFieldName(const std::string& field_name) {
+        field_name_ = field_name;
+    }
 
     // No copy and move
     AttrIndex(const AttrIndex&) = delete;
@@ -40,7 +64,8 @@ class AttrIndex {
     operator=(AttrIndex&&) = delete;
 
  private:
-    AttrIndexWrapper attr_index_wrapper_;
+    knowhere::IndexPtr index_ptr_;
+    std::string field_name_;
 };
 
 using AttrIndexPtr = std::shared_ptr<AttrIndex>;
