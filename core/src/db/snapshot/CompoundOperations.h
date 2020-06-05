@@ -181,7 +181,8 @@ class GetCollectionIDsOperation : public Operations {
 class SoftDeleteCollectionOperation : public CommonOperation {
  public:
     using BaseT = CommonOperation;
-    explicit SoftDeleteCollectionOperation(const OperationContext& context, ScopedSnapshotT prev_ss) : BaseT(context, prev_ss) {
+    explicit SoftDeleteCollectionOperation(const OperationContext& context, ScopedSnapshotT prev_ss)
+        : BaseT(context, prev_ss) {
     }
 
     Status

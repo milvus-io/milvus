@@ -33,7 +33,6 @@ namespace snapshot {
 using StepsT = std::vector<std::any>;
 using CheckStaleFunc = std::function<Status(ScopedSnapshotT&)>;
 
-
 class Operations : public std::enable_shared_from_this<Operations> {
  public:
     Operations(const OperationContext& context, ScopedSnapshotT prev_ss);
