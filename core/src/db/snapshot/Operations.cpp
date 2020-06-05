@@ -21,6 +21,12 @@ namespace snapshot {
 
 static ID_TYPE UID = 1;
 
+std::ostream&
+operator<<(std::ostream& out, const Operations& operation) {
+    out << operation.ToString();
+    return out;
+}
+
 Operations::Operations(const OperationContext& context, ScopedSnapshotT prev_ss)
     : context_(context), prev_ss_(prev_ss), uid_(UID++), status_(40005, "Operation Pending") {
 }
