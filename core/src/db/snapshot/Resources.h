@@ -86,6 +86,24 @@ class StatusField {
     State status_;
 };
 
+class LsnField {
+ public:
+    explicit LsnField(LSN_TYPE lsn = 0) : lsn_(lsn) {
+    }
+    const LSN_TYPE&
+    GetLsn() const {
+        return lsn_;
+    }
+
+    void
+    SetLsn(const LSN_TYPE& lsn) {
+        lsn_ = lsn;
+    }
+
+ protected:
+    LSN_TYPE lsn_;
+};
+
 class CreatedOnField {
  public:
     explicit CreatedOnField(TS_TYPE created_on = GetMicroSecTimeStamp()) : created_on_(created_on) {
@@ -261,6 +279,7 @@ class NameField {
 class Collection : public DBBaseResource<>,
                    public NameField,
                    public IdField,
+                   public LsnField,
                    public StatusField,
                    public CreatedOnField,
                    public UpdatedOnField {
@@ -271,7 +290,7 @@ class Collection : public DBBaseResource<>,
     using VecT = std::vector<Ptr>;
     static constexpr const char* Name = "Collection";
 
-    Collection(const std::string& name, ID_TYPE id = 0, State status = PENDING,
+    Collection(const std::string& name, ID_TYPE id = 0, LSN_TYPE lsn = 0, State status = PENDING,
                TS_TYPE created_on = GetMicroSecTimeStamp(), TS_TYPE UpdatedOnField = GetMicroSecTimeStamp());
 };
 
@@ -281,6 +300,7 @@ class SchemaCommit : public DBBaseResource<>,
                      public CollectionIdField,
                      public MappingsField,
                      public IdField,
+                     public LsnField,
                      public StatusField,
                      public CreatedOnField,
                      public UpdatedOnField {
@@ -291,8 +311,9 @@ class SchemaCommit : public DBBaseResource<>,
     using VecT = std::vector<Ptr>;
     static constexpr const char* Name = "SchemaCommit";
 
-    SchemaCommit(ID_TYPE collection_id, const MappingT& mappings = {}, ID_TYPE id = 0, State status = PENDING,
-                 TS_TYPE created_on = GetMicroSecTimeStamp(), TS_TYPE UpdatedOnField = GetMicroSecTimeStamp());
+    SchemaCommit(ID_TYPE collection_id, const MappingT& mappings = {}, ID_TYPE id = 0, LSN_TYPE lsn = 0,
+            State status = PENDING, TS_TYPE created_on = GetMicroSecTimeStamp(),
+            TS_TYPE UpdatedOnField = GetMicroSecTimeStamp());
 };
 
 using SchemaCommitPtr = SchemaCommit::Ptr;
@@ -301,6 +322,7 @@ class Field : public DBBaseResource<>,
               public NameField,
               public NumField,
               public IdField,
+              public LsnField,
               public StatusField,
               public CreatedOnField,
               public UpdatedOnField {
@@ -311,8 +333,9 @@ class Field : public DBBaseResource<>,
     using VecT = std::vector<Ptr>;
     static constexpr const char* Name = "Field";
 
-    Field(const std::string& name, NUM_TYPE num, ID_TYPE id = 0, State status = PENDING,
-          TS_TYPE created_on = GetMicroSecTimeStamp(), TS_TYPE UpdatedOnField = GetMicroSecTimeStamp());
+    Field(const std::string& name, NUM_TYPE num, ID_TYPE id = 0, LSN_TYPE lsn = 0,
+            State status = PENDING, TS_TYPE created_on = GetMicroSecTimeStamp(),
+            TS_TYPE UpdatedOnField = GetMicroSecTimeStamp());
 };
 
 using FieldPtr = Field::Ptr;
@@ -322,6 +345,7 @@ class FieldCommit : public DBBaseResource<>,
                     public FieldIdField,
                     public MappingsField,
                     public IdField,
+                    public LsnField,
                     public StatusField,
                     public CreatedOnField,
                     public UpdatedOnField {
@@ -333,7 +357,7 @@ class FieldCommit : public DBBaseResource<>,
     static constexpr const char* Name = "FieldCommit";
 
     FieldCommit(ID_TYPE collection_id, ID_TYPE field_id, const MappingT& mappings = {}, ID_TYPE id = 0,
-                State status = PENDING, TS_TYPE created_on = GetMicroSecTimeStamp(),
+                LSN_TYPE lsn = 0, State status = PENDING, TS_TYPE created_on = GetMicroSecTimeStamp(),
                 TS_TYPE UpdatedOnField = GetMicroSecTimeStamp());
 };
 
@@ -345,6 +369,7 @@ class FieldElement : public DBBaseResource<>,
                      public NameField,
                      public FtypeField,
                      public IdField,
+                     public LsnField,
                      public StatusField,
                      public CreatedOnField,
                      public UpdatedOnField {
@@ -355,7 +380,7 @@ class FieldElement : public DBBaseResource<>,
     using VecT = std::vector<Ptr>;
     static constexpr const char* Name = "FieldElement";
     FieldElement(ID_TYPE collection_id, ID_TYPE field_id, const std::string& name, FTYPE_TYPE ftype, ID_TYPE id = 0,
-                 State status = PENDING, TS_TYPE created_on = GetMicroSecTimeStamp(),
+                 LSN_TYPE lsn = 0, State status = PENDING, TS_TYPE created_on = GetMicroSecTimeStamp(),
                  TS_TYPE UpdatedOnField = GetMicroSecTimeStamp());
 };
 
@@ -366,6 +391,7 @@ class CollectionCommit : public DBBaseResource<>,
                          public SchemaIdField,
                          public MappingsField,
                          public IdField,
+                         public LsnField,
                          public StatusField,
                          public CreatedOnField,
                          public UpdatedOnField {
@@ -376,7 +402,7 @@ class CollectionCommit : public DBBaseResource<>,
     using ScopedMapT = std::map<ID_TYPE, ScopedResource<CollectionCommit>>;
     using VecT = std::vector<Ptr>;
     CollectionCommit(ID_TYPE collection_id, ID_TYPE schema_id, const MappingT& mappings = {}, ID_TYPE id = 0,
-                     State status = PENDING, TS_TYPE created_on = GetMicroSecTimeStamp(),
+                     LSN_TYPE lsn = 0, State status = PENDING, TS_TYPE created_on = GetMicroSecTimeStamp(),
                      TS_TYPE UpdatedOnField = GetMicroSecTimeStamp());
 };
 
@@ -386,6 +412,7 @@ class Partition : public DBBaseResource<>,
                   public NameField,
                   public CollectionIdField,
                   public IdField,
+                  public LsnField,
                   public StatusField,
                   public CreatedOnField,
                   public UpdatedOnField {
@@ -396,8 +423,9 @@ class Partition : public DBBaseResource<>,
     using VecT = std::vector<Ptr>;
     static constexpr const char* Name = "Partition";
 
-    Partition(const std::string& name, ID_TYPE collection_id, ID_TYPE id = 0, State status = PENDING,
-              TS_TYPE created_on = GetMicroSecTimeStamp(), TS_TYPE UpdatedOnField = GetMicroSecTimeStamp());
+    Partition(const std::string& name, ID_TYPE collection_id, ID_TYPE id = 0,
+            LSN_TYPE lsn = 0, State status = PENDING, TS_TYPE created_on = GetMicroSecTimeStamp(),
+            TS_TYPE UpdatedOnField = GetMicroSecTimeStamp());
 };
 
 using PartitionPtr = Partition::Ptr;
@@ -407,6 +435,7 @@ class PartitionCommit : public DBBaseResource<>,
                         public PartitionIdField,
                         public MappingsField,
                         public IdField,
+                        public LsnField,
                         public StatusField,
                         public CreatedOnField,
                         public UpdatedOnField {
@@ -418,7 +447,7 @@ class PartitionCommit : public DBBaseResource<>,
     static constexpr const char* Name = "PartitionCommit";
 
     PartitionCommit(ID_TYPE collection_id, ID_TYPE partition_id, const MappingT& mappings = {}, ID_TYPE id = 0,
-                    State status = PENDING, TS_TYPE created_on = GetMicroSecTimeStamp(),
+                    LSN_TYPE lsn = 0, State status = PENDING, TS_TYPE created_on = GetMicroSecTimeStamp(),
                     TS_TYPE UpdatedOnField = GetMicroSecTimeStamp());
 
     std::string
@@ -431,6 +460,7 @@ class Segment : public DBBaseResource<>,
                 public PartitionIdField,
                 public NumField,
                 public IdField,
+                public LsnField,
                 public StatusField,
                 public CreatedOnField,
                 public UpdatedOnField {
@@ -441,8 +471,9 @@ class Segment : public DBBaseResource<>,
     using VecT = std::vector<Ptr>;
     static constexpr const char* Name = "Segment";
 
-    Segment(ID_TYPE partition_id, ID_TYPE num = 0, ID_TYPE id = 0, State status = PENDING,
-            TS_TYPE created_on = GetMicroSecTimeStamp(), TS_TYPE UpdatedOnField = GetMicroSecTimeStamp());
+    Segment(ID_TYPE partition_id, ID_TYPE num = 0, ID_TYPE id = 0, LSN_TYPE lsn = 0,
+            State status = PENDING, TS_TYPE created_on = GetMicroSecTimeStamp(),
+            TS_TYPE UpdatedOnField = GetMicroSecTimeStamp());
 
     std::string
     ToString() const override;
@@ -456,6 +487,7 @@ class SegmentCommit : public DBBaseResource<>,
                       public SegmentIdField,
                       public MappingsField,
                       public IdField,
+                      public LsnField,
                       public StatusField,
                       public CreatedOnField,
                       public UpdatedOnField {
@@ -467,7 +499,8 @@ class SegmentCommit : public DBBaseResource<>,
     static constexpr const char* Name = "SegmentCommit";
 
     SegmentCommit(ID_TYPE schema_id, ID_TYPE partition_id, ID_TYPE segment_id, const MappingT& mappings = {},
-                  ID_TYPE id = 0, State status = PENDING, TS_TYPE created_on = GetMicroSecTimeStamp(),
+                  ID_TYPE id = 0, LSN_TYPE lsn = 0, State status = PENDING,
+                  TS_TYPE created_on = GetMicroSecTimeStamp(),
                   TS_TYPE UpdatedOnField = GetMicroSecTimeStamp());
 
     std::string
@@ -481,6 +514,7 @@ class SegmentFile : public DBBaseResource<>,
                     public SegmentIdField,
                     public FieldElementIdField,
                     public IdField,
+                    public LsnField,
                     public StatusField,
                     public CreatedOnField,
                     public UpdatedOnField {
@@ -492,8 +526,8 @@ class SegmentFile : public DBBaseResource<>,
     static constexpr const char* Name = "SegmentFile";
 
     SegmentFile(ID_TYPE partition_id, ID_TYPE segment_id, ID_TYPE field_element_id, ID_TYPE id = 0,
-                State status = PENDING, TS_TYPE created_on = GetMicroSecTimeStamp(),
-                TS_TYPE UpdatedOnField = GetMicroSecTimeStamp());
+            LSN_TYPE lsn = 0, State status = PENDING, TS_TYPE created_on = GetMicroSecTimeStamp(),
+            TS_TYPE UpdatedOnField = GetMicroSecTimeStamp());
 };
 
 using SegmentFilePtr = SegmentFile::Ptr;
