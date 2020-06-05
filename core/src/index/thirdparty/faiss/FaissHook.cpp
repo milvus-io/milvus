@@ -59,21 +59,20 @@ bool hook_init(std::string& cpu_flag) {
     static std::mutex hook_mutex;
     std::lock_guard<std::mutex> lock(hook_mutex);
 
-//    if (support_avx512()) {
-//        /* for IVFFLAT */
-//        fvec_inner_product = fvec_inner_product_avx512;
-//        fvec_L2sqr = fvec_L2sqr_avx512;
-//        fvec_L1 = fvec_L1_avx512;
-//        fvec_Linf = fvec_Linf_avx512;
-//
-//        /* for IVFSQ */
-//        sq_get_distance_computer = sq_get_distance_computer_avx512;
-//        sq_sel_quantizer = sq_select_quantizer_avx512;
-//        sq_sel_inv_list_scanner = sq_select_inverted_list_scanner_avx512;
-//
-//        cpu_flag = "AVX512";
-//    } else
-      if (support_avx2()) {
+    if (support_avx512()) {
+        /* for IVFFLAT */
+        fvec_inner_product = fvec_inner_product_avx512;
+        fvec_L2sqr = fvec_L2sqr_avx512;
+        fvec_L1 = fvec_L1_avx512;
+        fvec_Linf = fvec_Linf_avx512;
+
+        /* for IVFSQ */
+        sq_get_distance_computer = sq_get_distance_computer_avx512;
+        sq_sel_quantizer = sq_select_quantizer_avx512;
+        sq_sel_inv_list_scanner = sq_select_inverted_list_scanner_avx512;
+
+        cpu_flag = "AVX512";
+    } else if (support_avx2()) {
         /* for IVFFLAT */
         fvec_inner_product = fvec_inner_product_avx;
         fvec_L2sqr = fvec_L2sqr_avx;

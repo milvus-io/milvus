@@ -48,5 +48,15 @@ sq_select_quantizer_avx512 (QuantizerType qtype, size_t dim, const std::vector<f
     }
 }
 
+InvertedListScanner*
+sq_select_inverted_list_scanner_avx512 (MetricType mt, const ScalarQuantizer *sq, const Index *quantizer, size_t dim, bool store_pairs, bool by_residual) {
+    if (dim % 16 == 0) {
+        return sel0_InvertedListScanner_avx512<16> (mt, sq, quantizer, store_pairs, by_residual);
+    } else if (dim % 8 == 0) {
+        return sel0_InvertedListScanner_avx512<8> (mt, sq, quantizer, store_pairs, by_residual);
+    } else {
+        return sel0_InvertedListScanner_avx512<1> (mt, sq, quantizer, store_pairs, by_residual);
+    }
+}
 
 } // namespace faiss
