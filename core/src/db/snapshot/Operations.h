@@ -119,8 +119,10 @@ class Operations : public std::enable_shared_from_this<Operations> {
     virtual std::string
     ToString() const;
 
-    virtual ~Operations() {
-    }
+    Status
+    RollBack();
+
+    virtual ~Operations();
 
     friend std::ostream&
     operator<<(std::ostream& out, const Operations& operation);
@@ -137,6 +139,9 @@ class Operations : public std::enable_shared_from_this<Operations> {
     IDSNotEmptyRequried() const;
     Status
     PrevSnapshotRequried() const;
+
+    Status
+    ApplyRollBack(Store&);
 
     OperationContext context_;
     ScopedSnapshotT prev_ss_;

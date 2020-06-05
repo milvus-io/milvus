@@ -219,6 +219,24 @@ Operations::PostExecute(Store& store) {
     return store.DoCommitOperation(*this);
 }
 
+Status
+Operations::RollBack() {
+    // TODO: Implement here
+    // Spwarn a rollback operation or re-use this operation
+    return Status::OK();
+}
+
+Status
+Operations::ApplyRollBack(Store& store) {
+    // TODO: Implement rollback to remove all resources in steps_
+    return Status::OK();
+}
+
+Operations::~Operations() {
+    // TODO: Prefer to submit a rollback operation if status is not ok
+}
+
+
 }  // namespace snapshot
 }  // namespace engine
 }  // namespace milvus
