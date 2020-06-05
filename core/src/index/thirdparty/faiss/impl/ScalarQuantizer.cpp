@@ -160,11 +160,7 @@ ScalarQuantizer::get_distance_computer (MetricType metric) const
 {
     FAISS_THROW_IF_NOT(metric == METRIC_L2 || metric == METRIC_INNER_PRODUCT);
     /* use hook to decide use AVX512 or not */
-    if (metric == METRIC_L2) {
-        return sq_get_distance_computer_L2(qtype, d, trained);
-    } else {
-        return sq_get_distance_computer_IP(qtype, d, trained);
-    }
+    return sq_get_distance_computer(metric, qtype, d, trained);
 }
 
 

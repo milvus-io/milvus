@@ -11,15 +11,13 @@
 
 #include <vector>
 #include <faiss/impl/ScalarQuantizerOp.h>
+#include <faiss/MetricType.h>
 
 namespace faiss {
 
 
 SQDistanceComputer *
-sq_get_distance_computer_L2_avx(QuantizerType qtype, size_t dim, const std::vector<float>& trained);
-
-SQDistanceComputer *
-sq_get_distance_computer_IP_avx(QuantizerType qtype, size_t dim, const std::vector<float>& trained);
+sq_get_distance_computer_avx(MetricType metric, QuantizerType qtype, size_t dim, const std::vector<float>& trained);
 
 Quantizer *
 sq_select_quantizer_avx(QuantizerType qtype, size_t dim, const std::vector<float>& trained);
