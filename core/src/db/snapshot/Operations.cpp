@@ -28,11 +28,11 @@ operator<<(std::ostream& out, const Operations& operation) {
 }
 
 Operations::Operations(const OperationContext& context, ScopedSnapshotT prev_ss)
-    : context_(context), prev_ss_(prev_ss), uid_(UID++), status_(40005, "Operation Pending") {
+    : context_(context), prev_ss_(prev_ss), uid_(UID++), status_(SS_OPERATION_PENDING, "Operation Pending") {
 }
 
 Operations::Operations(const OperationContext& context, ID_TYPE collection_id, ID_TYPE commit_id)
-    : context_(context), uid_(UID++), status_(40005, "Operation Pending") {
+    : context_(context), uid_(UID++), status_(SS_OPERATION_PENDING, "Operation Pending") {
     auto status = Snapshots::GetInstance().GetSnapshot(prev_ss_, collection_id, commit_id);
     if (!status.ok())
         prev_ss_ = ScopedSnapshotT();
