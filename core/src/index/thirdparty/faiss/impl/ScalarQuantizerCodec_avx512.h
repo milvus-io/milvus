@@ -21,6 +21,7 @@
 #include <faiss/utils/utils.h>
 #include <faiss/impl/FaissAssert.h>
 #include <faiss/impl/ScalarQuantizer.h>
+#include <faiss/impl/ScalarQuantizerCodec_avx.h>
 #include <faiss/impl/ScalarQuantizerOp.h>
 
 namespace faiss {
@@ -55,32 +56,7 @@ namespace faiss {
  * index).
  */
 
-struct Codec8bit_avx512 {
-    static void encode_component (float x, uint8_t *code, int i) {
-        code[i] = (int)(255 * x);
-    }
-
-    static float decode_component (const uint8_t *code, int i) {
-        return (code[i] + 0.5f) / 255.0f;
-    }
-
-#ifdef USE_AVX
-    static __m256 decode_8_components (const uint8_t *code, int i) {
-        uint64_t c8 = *(uint64_t*)(code + i);
-        __m128i c4lo = _mm_cvtepu8_epi32 (_mm_set1_epi32(c8));
-        __m128i c4hi = _mm_cvtepu8_epi32 (_mm_set1_epi32(c8 >> 32));
-        // __m256i i8 = _mm256_set_m128i(c4lo, c4hi);
-        __m256i i8 = _mm256_castsi128_si256 (c4lo);
-        i8 = _mm256_insertf128_si256 (i8, c4hi, 1);
-        __m256 f8 = _mm256_cvtepi32_ps (i8);
-        __m256 half = _mm256_set1_ps (0.5f);
-        f8 += half;
-        __m256 one_255 = _mm256_set1_ps (1.f / 255.f);
-        return f8 * one_255;
-    }
-#endif
-
-#ifdef USE_AVX_512
+struct Codec8bit_avx512 : Codec8bit_avx {
     static __m512 decode_16_components (const uint8_t *code, int i) {
         uint64_t c8 = *(uint64_t*)(code + i);
         __m256i c8lo = _mm256_cvtepu8_epi32 (_mm_set1_epi64x(c8));
@@ -95,42 +71,10 @@ struct Codec8bit_avx512 {
         __m512 one_255 = _mm512_set1_ps (1.f / 255.f);
         return f16 * one_255;
     }
-#endif
 };
 
 
-struct Codec4bit_avx512 {
-    static void encode_component (float x, uint8_t *code, int i) {
-        code [i / 2] |= (int)(x * 15.0) << ((i & 1) << 2);
-    }
-
-    static float decode_component (const uint8_t *code, int i) {
-        return (((code[i / 2] >> ((i & 1) << 2)) & 0xf) + 0.5f) / 15.0f;
-    }
-
-#ifdef USE_AVX
-    static __m256 decode_8_components (const uint8_t *code, int i) {
-        uint32_t c4 = *(uint32_t*)(code + (i >> 1));
-        uint32_t mask = 0x0f0f0f0f;
-        uint32_t c4ev = c4 & mask;
-        uint32_t c4od = (c4 >> 4) & mask;
-
-        // the 8 lower bytes of c8 contain the values
-        __m128i c8 = _mm_unpacklo_epi8 (_mm_set1_epi32(c4ev),
-                                        _mm_set1_epi32(c4od));
-        __m128i c4lo = _mm_cvtepu8_epi32 (c8);
-        __m128i c4hi = _mm_cvtepu8_epi32 (_mm_srli_si128(c8, 4));
-        __m256i i8 = _mm256_castsi128_si256 (c4lo);
-        i8 = _mm256_insertf128_si256 (i8, c4hi, 1);
-        __m256 f8 = _mm256_cvtepi32_ps (i8);
-        __m256 half = _mm256_set1_ps (0.5f);
-        f8 += half;
-        __m256 one_255 = _mm256_set1_ps (1.f / 15.f);
-        return f8 * one_255;
-    }
-#endif
-
-#ifdef USE_AVX_512
+struct Codec4bit_avx512 : public Codec4bit_avx {
     static __m512 decode_16_components (const uint8_t *code, int i) {
         uint64_t c8 = *(uint64_t*)(code + (i >> 1));
         uint64_t mask = 0x0f0f0f0f0f0f0f0f;
@@ -150,68 +94,9 @@ struct Codec4bit_avx512 {
         __m512 one_255 = _mm512_set1_ps (1.f / 15.f);
         return f16 * one_255;
     }
-#endif
 };
 
-struct Codec6bit_avx512 {
-    static void encode_component (float x, uint8_t *code, int i) {
-        int bits = (int)(x * 63.0);
-        code += (i >> 2) * 3;
-        switch(i & 3) {
-        case 0:
-            code[0] |= bits;
-            break;
-        case 1:
-            code[0] |= bits << 6;
-            code[1] |= bits >> 2;
-            break;
-        case 2:
-            code[1] |= bits << 4;
-            code[2] |= bits >> 4;
-            break;
-        case 3:
-            code[2] |= bits << 2;
-            break;
-        }
-    }
-
-    static float decode_component (const uint8_t *code, int i) {
-        uint8_t bits;
-        code += (i >> 2) * 3;
-        switch(i & 3) {
-        case 0:
-            bits = code[0] & 0x3f;
-            break;
-        case 1:
-            bits = code[0] >> 6;
-            bits |= (code[1] & 0xf) << 2;
-            break;
-        case 2:
-            bits = code[1] >> 4;
-            bits |= (code[2] & 3) << 4;
-            break;
-        case 3:
-            bits = code[2] >> 2;
-            break;
-        }
-        return (bits + 0.5f) / 63.0f;
-    }
-
-#ifdef USE_AVX
-    static __m256 decode_8_components (const uint8_t *code, int i) {
-        return _mm256_set_ps
-            (decode_component(code, i + 7),
-             decode_component(code, i + 6),
-             decode_component(code, i + 5),
-             decode_component(code, i + 4),
-             decode_component(code, i + 3),
-             decode_component(code, i + 2),
-             decode_component(code, i + 1),
-             decode_component(code, i + 0));
-    }
-#endif
-
-#ifdef USE_AVX_512
+struct Codec6bit_avx512 : public Codec6bit_avx {
     static __m512 decode_16_components (const uint8_t *code, int i) {
         return _mm512_set_ps
             (decode_component(code, i + 15),
@@ -231,9 +116,7 @@ struct Codec6bit_avx512 {
              decode_component(code, i + 1),
              decode_component(code, i + 0));
     }
-#endif
 };
-
 
 
 /*******************************************************************

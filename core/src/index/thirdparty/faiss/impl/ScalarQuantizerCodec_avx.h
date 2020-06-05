@@ -21,15 +21,14 @@
 #include <faiss/utils/utils.h>
 #include <faiss/impl/FaissAssert.h>
 #include <faiss/impl/ScalarQuantizer.h>
+#include <faiss/impl/ScalarQuantizerCodec.h>
 #include <faiss/impl/ScalarQuantizerOp.h>
 
 namespace faiss {
 
-
 #ifdef __AVX__
 #define USE_AVX
 #endif
-
 
 /*******************************************************************
  * Codec: converts between values in [0, 1] and an index in a code
@@ -37,16 +36,7 @@ namespace faiss {
  * index).
  */
 
-struct Codec8bit_avx {
-    static void encode_component (float x, uint8_t *code, int i) {
-        code[i] = (int)(255 * x);
-    }
-
-    static float decode_component (const uint8_t *code, int i) {
-        return (code[i] + 0.5f) / 255.0f;
-    }
-
-#ifdef USE_AVX
+struct Codec8bit_avx : public Codec8bit {
     static __m256 decode_8_components (const uint8_t *code, int i) {
         uint64_t c8 = *(uint64_t*)(code + i);
         __m128i c4lo = _mm_cvtepu8_epi32 (_mm_set1_epi32(c8));
@@ -60,20 +50,10 @@ struct Codec8bit_avx {
         __m256 one_255 = _mm256_set1_ps (1.f / 255.f);
         return f8 * one_255;
     }
-#endif
 };
 
 
-struct Codec4bit_avx {
-    static void encode_component (float x, uint8_t *code, int i) {
-        code [i / 2] |= (int)(x * 15.0) << ((i & 1) << 2);
-    }
-
-    static float decode_component (const uint8_t *code, int i) {
-        return (((code[i / 2] >> ((i & 1) << 2)) & 0xf) + 0.5f) / 15.0f;
-    }
-
-#ifdef USE_AVX
+struct Codec4bit_avx : public Codec4bit {
     static __m256 decode_8_components (const uint8_t *code, int i) {
         uint32_t c4 = *(uint32_t*)(code + (i >> 1));
         uint32_t mask = 0x0f0f0f0f;
@@ -93,54 +73,9 @@ struct Codec4bit_avx {
         __m256 one_255 = _mm256_set1_ps (1.f / 15.f);
         return f8 * one_255;
     }
-#endif
 };
 
-struct Codec6bit_avx {
-    static void encode_component (float x, uint8_t *code, int i) {
-        int bits = (int)(x * 63.0);
-        code += (i >> 2) * 3;
-        switch(i & 3) {
-        case 0:
-            code[0] |= bits;
-            break;
-        case 1:
-            code[0] |= bits << 6;
-            code[1] |= bits >> 2;
-            break;
-        case 2:
-            code[1] |= bits << 4;
-            code[2] |= bits >> 4;
-            break;
-        case 3:
-            code[2] |= bits << 2;
-            break;
-        }
-    }
-
-    static float decode_component (const uint8_t *code, int i) {
-        uint8_t bits;
-        code += (i >> 2) * 3;
-        switch(i & 3) {
-        case 0:
-            bits = code[0] & 0x3f;
-            break;
-        case 1:
-            bits = code[0] >> 6;
-            bits |= (code[1] & 0xf) << 2;
-            break;
-        case 2:
-            bits = code[1] >> 4;
-            bits |= (code[2] & 3) << 4;
-            break;
-        case 3:
-            bits = code[2] >> 2;
-            break;
-        }
-        return (bits + 0.5f) / 63.0f;
-    }
-
-#ifdef USE_AVX
+struct Codec6bit_avx : public Codec6bit {
     static __m256 decode_8_components (const uint8_t *code, int i) {
         return _mm256_set_ps
             (decode_component(code, i + 7),
@@ -152,9 +87,7 @@ struct Codec6bit_avx {
              decode_component(code, i + 1),
              decode_component(code, i + 0));
     }
-#endif
 };
-
 
 
 /*******************************************************************
@@ -481,13 +414,6 @@ struct SimilarityL2_avx<8> {
     }
 };
 
-/* as same as SimilarityL2<8>, let build pass */
-template<>
-struct SimilarityL2_avx<16> : SimilarityL2_avx<8>{
-    static constexpr int simdwidth = 8;
-    static constexpr MetricType metric_type = METRIC_L2;
-    explicit SimilarityL2_avx (const float * y) : SimilarityL2_avx<8>(y) {}
-};
 #endif
 
 
@@ -565,13 +491,6 @@ struct SimilarityIP_avx<8> {
     }
 };
 
-/* as same as SimilarityIP<8>, let build pass */
-template<>
-struct SimilarityIP_avx<16> : SimilarityIP_avx<8> {
-    static constexpr int simdwidth = 8;
-    static constexpr MetricType metric_type = METRIC_INNER_PRODUCT;
-    explicit SimilarityIP_avx (const float * y) : SimilarityIP_avx<8>(y) {}
-};
 #endif
 
 

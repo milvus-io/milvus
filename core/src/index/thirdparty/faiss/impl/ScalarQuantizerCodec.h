@@ -312,22 +312,6 @@ struct SimilarityL2<1> {
     }
 };
 
-/* as same as SimilarityL2<1>, let build pass */
-template<>
-struct SimilarityL2<8> : SimilarityL2<1> {
-    static constexpr int simdwidth = 1;
-    static constexpr MetricType metric_type = METRIC_L2;
-    explicit SimilarityL2 (const float * y) : SimilarityL2<1>(y) {}
-};
-
-/* as same as SimilarityL2<1>, let build pass */
-template<>
-struct SimilarityL2<16> : SimilarityL2<1> {
-    static constexpr int simdwidth = 1;
-    static constexpr MetricType metric_type = METRIC_L2;
-    explicit SimilarityL2 (const float * y) : SimilarityL2<1>(y) {}
-};
-
 
 template<int SIMDWIDTH>
 struct SimilarityIP {};
@@ -359,22 +343,6 @@ struct SimilarityIP<1> {
     float result () {
         return accu;
     }
-};
-
-/* as same as SimilarityIP<1>, let build pass */
-template<>
-struct SimilarityIP<8> : SimilarityIP<1> {
-    static constexpr int simdwidth = 1;
-    static constexpr MetricType metric_type = METRIC_INNER_PRODUCT;
-    explicit SimilarityIP (const float * y) : SimilarityIP<1>(y) {}
-};
-
-/* as same as SimilarityIP<1>, let build pass */
-template<>
-struct SimilarityIP<16> : SimilarityIP<1> {
-    static constexpr int simdwidth = 1;
-    static constexpr MetricType metric_type = METRIC_INNER_PRODUCT;
-    explicit SimilarityIP (const float * y) : SimilarityIP<1>(y) {}
 };
 
 
