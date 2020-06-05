@@ -60,7 +60,7 @@ BuildOperation::DoExecute(Store& store) {
     status = op.GetResource(context_.new_segment_commit);
     if (!status.ok())
         return status;
-    AddStep(*context_.new_segment_commit);
+    AddStepWithLsn(*context_.new_segment_commit, context_.lsn);
 
     PartitionCommitOperation pc_op(context_, prev_ss_);
     pc_op(store);
@@ -69,13 +69,13 @@ BuildOperation::DoExecute(Store& store) {
     status = pc_op.GetResource(cc_context.new_partition_commit);
     if (!status.ok())
         return status;
-    AddStep(*cc_context.new_partition_commit);
+    AddStepWithLsn(*cc_context.new_partition_commit, context_.lsn);
 
     PartitionCommitPtr pc;
     status = pc_op.GetResource(pc);
     if (!status.ok())
         return status;
-    AddStep(*pc);
+    AddStepWithLsn(*pc, context_.lsn);
 
     CollectionCommitOperation cc_op(cc_context, prev_ss_);
     cc_op(store);
@@ -83,7 +83,7 @@ BuildOperation::DoExecute(Store& store) {
     status = cc_op.GetResource(cc);
     if (!status.ok())
         return status;
-    AddStep(*cc);
+    AddStepWithLsn(*cc, context_.lsn);
 
     return status;
 }
@@ -111,7 +111,7 @@ BuildOperation::CommitNewSegmentFile(const SegmentFileContext& context, SegmentF
     if (!status.ok())
         return status;
     context_.new_segment_files.push_back(created);
-    AddStep(*created);
+    AddStepWithLsn(*created, context_.lsn);
     return status;
 }
 
@@ -137,7 +137,7 @@ NewSegmentOperation::DoExecute(Store& store) {
     status = op.GetResource(context_.new_segment_commit);
     if (!status.ok())
         return status;
-    AddStep(*context_.new_segment_commit);
+    AddStepWithLsn(*context_.new_segment_commit, context_.lsn);
 
     OperationContext cc_context;
 
@@ -148,7 +148,7 @@ NewSegmentOperation::DoExecute(Store& store) {
     status = pc_op.GetResource(cc_context.new_partition_commit);
     if (!status.ok())
         return status;
-    AddStep(*cc_context.new_partition_commit);
+    AddStepWithLsn(*cc_context.new_partition_commit, context_.lsn);
 
     CollectionCommitOperation cc_op(cc_context, prev_ss_);
     status = cc_op(store);
@@ -158,7 +158,7 @@ NewSegmentOperation::DoExecute(Store& store) {
     status = cc_op.GetResource(cc);
     if (!status.ok())
         return status;
-    AddStep(*cc);
+    AddStepWithLsn(*cc, context_.lsn);
 
     return status;
 }
@@ -173,7 +173,7 @@ NewSegmentOperation::CommitNewSegment(SegmentPtr& created) {
     if (!status.ok())
         return status;
     created = context_.new_segment;
-    AddStep(*created);
+    AddStepWithLsn(*created, context_.lsn);
     return status;
 }
 
@@ -189,7 +189,7 @@ NewSegmentOperation::CommitNewSegmentFile(const SegmentFileContext& context, Seg
     status = new_sf_op->GetResource(created);
     if (!status.ok())
         return status;
-    AddStep(*created);
+    AddStepWithLsn(*created, context_.lsn);
     context_.new_segment_files.push_back(created);
     return status;
 }
@@ -253,7 +253,7 @@ MergeOperation::CommitNewSegment(SegmentPtr& created) {
     if (!status.ok())
         return status;
     created = context_.new_segment;
-    AddStep(*created);
+    AddStepWithLsn(*created, context_.lsn);
     return status;
 }
 
@@ -275,7 +275,7 @@ MergeOperation::CommitNewSegmentFile(const SegmentFileContext& context, SegmentF
     if (!status.ok())
         return status;
     context_.new_segment_files.push_back(created);
-    AddStep(*created);
+    AddStepWithLsn(*created, context_.lsn);
     return status;
 }
 
@@ -292,7 +292,7 @@ MergeOperation::DoExecute(Store& store) {
     status = op.GetResource(context_.new_segment_commit);
     if (!status.ok())
         return status;
-    AddStep(*context_.new_segment_commit);
+    AddStepWithLsn(*context_.new_segment_commit, context_.lsn);
 
     PartitionCommitOperation pc_op(context_, prev_ss_);
     status = pc_op(store);
@@ -303,7 +303,7 @@ MergeOperation::DoExecute(Store& store) {
     status = pc_op.GetResource(cc_context.new_partition_commit);
     if (!status.ok())
         return status;
-    AddStep(*cc_context.new_partition_commit);
+    AddStepWithLsn(*cc_context.new_partition_commit, context_.lsn);
 
     CollectionCommitOperation cc_op(cc_context, prev_ss_);
     status = cc_op(store);
@@ -313,7 +313,7 @@ MergeOperation::DoExecute(Store& store) {
     status = cc_op.GetResource(cc);
     if (!status.ok())
         return status;
-    AddStep(*cc);
+    AddStepWithLsn(*cc, context_.lsn);
 
     return status;
 }
@@ -378,7 +378,7 @@ DropPartitionOperation::DoExecute(Store& store) {
     if (!status.ok())
         return status;
 
-    AddStep(*cc);
+    AddStepWithLsn(*cc, context_.lsn);
     return status;
 }
 
@@ -410,7 +410,7 @@ CreatePartitionOperation::CommitNewPartition(const PartitionContext& context, Pa
     if (!status.ok())
         return status;
     context_.new_partition = partition;
-    AddStep(*partition);
+    AddStepWithLsn(*partition, context_.lsn);
     return status;
 }
 
@@ -435,7 +435,7 @@ CreatePartitionOperation::DoExecute(Store& store) {
     if (!status.ok())
         return status;
     /* status = store.CreateResource<PartitionCommit>(PartitionCommit(collection->GetID(), partition->GetID()), pc); */
-    AddStep(*pc);
+    AddStepWithLsn(*pc, context_.lsn);
     OperationContext cc_context;
     cc_context.new_partition_commit = pc;
     auto cc_op = CollectionCommitOperation(cc_context, prev_ss_);
@@ -446,7 +446,7 @@ CreatePartitionOperation::DoExecute(Store& store) {
     status = cc_op.GetResource(cc);
     if (!status.ok())
         return status;
-    AddStep(*cc);
+    AddStepWithLsn(*cc, context_.lsn);
 
     return status;
 }
@@ -464,7 +464,7 @@ CreateCollectionOperation::DoExecute(Store& store) {
         std::cerr << status.ToString() << std::endl;
         return status;
     }
-    AddStep(*collection);
+    AddStepWithLsn(*collection, context_.lsn);
     MappingT field_commit_ids = {};
     auto field_idx = 0;
     for (auto& field_kv : context_.fields_schema) {
@@ -473,12 +473,12 @@ CreateCollectionOperation::DoExecute(Store& store) {
         auto& field_elements = field_kv.second;
         FieldPtr field;
         status = store.CreateResource<Field>(Field(field_schema->GetName(), field_idx), field);
-        AddStep(*field);
+        AddStepWithLsn(*field, context_.lsn);
         MappingT element_ids = {};
         FieldElementPtr raw_element;
         status = store.CreateResource<FieldElement>(
             FieldElement(collection->GetID(), field->GetID(), "RAW", FieldElementType::RAW), raw_element);
-        AddStep(*raw_element);
+        AddStepWithLsn(*raw_element, context_.lsn);
         element_ids.insert(raw_element->GetID());
         for (auto& element_schema : field_elements) {
             FieldElementPtr element;
@@ -486,29 +486,29 @@ CreateCollectionOperation::DoExecute(Store& store) {
                 store.CreateResource<FieldElement>(FieldElement(collection->GetID(), field->GetID(),
                                                                 element_schema->GetName(), element_schema->GetFtype()),
                                                    element);
-            AddStep(*element);
+            AddStepWithLsn(*element, context_.lsn);
             element_ids.insert(element->GetID());
         }
         FieldCommitPtr field_commit;
         status = store.CreateResource<FieldCommit>(FieldCommit(collection->GetID(), field->GetID(), element_ids),
                                                    field_commit);
-        AddStep(*field_commit);
+        AddStepWithLsn(*field_commit, context_.lsn);
         field_commit_ids.insert(field_commit->GetID());
     }
     SchemaCommitPtr schema_commit;
     status = store.CreateResource<SchemaCommit>(SchemaCommit(collection->GetID(), field_commit_ids), schema_commit);
-    AddStep(*schema_commit);
+    AddStepWithLsn(*schema_commit, context_.lsn);
     PartitionPtr partition;
     status = store.CreateResource<Partition>(Partition("_default", collection->GetID()), partition);
-    AddStep(*partition);
+    AddStepWithLsn(*partition, context_.lsn);
     PartitionCommitPtr partition_commit;
     status = store.CreateResource<PartitionCommit>(PartitionCommit(collection->GetID(), partition->GetID()),
                                                    partition_commit);
-    AddStep(*partition_commit);
+    AddStepWithLsn(*partition_commit, context_.lsn);
     CollectionCommitPtr collection_commit;
     status = store.CreateResource<CollectionCommit>(
         CollectionCommit(collection->GetID(), schema_commit->GetID(), {partition_commit->GetID()}), collection_commit);
-    AddStep(*collection_commit);
+    AddStepWithLsn(*collection_commit, context_.lsn);
     context_.collection_commit = collection_commit;
     return Status::OK();
 }
@@ -533,7 +533,7 @@ SoftDeleteCollectionOperation::DoExecute(Store& store) {
         return Status(SS_INVALID_CONTEX_ERROR, "Invalid Context");
     }
     context_.collection->Deactivate();
-    AddStep(*context_.collection);
+    AddStepWithLsn(*context_.collection, context_.lsn);
     return Status::OK();
 }
 

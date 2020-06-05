@@ -51,6 +51,9 @@ class Operations : public std::enable_shared_from_this<Operations> {
     template <typename StepT>
     void
     AddStep(const StepT& step, bool activate = true);
+    template <typename StepT>
+    void
+    AddStepWithLsn(const StepT& step, const LSN_TYPE& lsn, bool activate = true);
     void
     SetStepResult(ID_TYPE id) {
         ids_.push_back(id);
@@ -144,6 +147,16 @@ Operations::AddStep(const StepT& step, bool activate) {
     auto s = std::make_shared<StepT>(step);
     if (activate)
         s->Activate();
+    steps_.push_back(s);
+}
+
+template <typename StepT>
+void
+Operations::AddStepWithLsn(const StepT& step, const LSN_TYPE& lsn, bool activate) {
+    auto s = std::make_shared<StepT>(step);
+    if (activate)
+        s->Activate();
+    s->SetLsn(lsn);
     steps_.push_back(s);
 }
 

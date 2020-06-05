@@ -25,6 +25,7 @@ namespace snapshot {
 struct PartitionContext {
     std::string name;
     ID_TYPE id = 0;
+    LSN_TYPE lsn = 0;
 };
 
 struct SegmentFileContext {
@@ -62,12 +63,14 @@ struct OperationContext {
 
     SegmentFile::VecT new_segment_files;
     CollectionPtr collection = nullptr;
+    LSN_TYPE lsn = 0;
 };
 
 struct CreateCollectionContext {
     CollectionPtr collection = nullptr;
     std::map<FieldPtr, std::vector<FieldElementPtr>> fields_schema;
     CollectionCommitPtr collection_commit = nullptr;
+    LSN_TYPE lsn = 0;
 };
 
 }  // namespace snapshot
