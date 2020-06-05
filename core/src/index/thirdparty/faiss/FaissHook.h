@@ -16,7 +16,7 @@ typedef float (*fvec_func_ptr)(const float*, const float*, size_t);
 
 typedef SQDistanceComputer* (*sq_get_distance_computer_func_ptr)(MetricType, QuantizerType, size_t, const std::vector<float>&);
 typedef Quantizer* (*sq_sel_quantizer_func_ptr)(QuantizerType, size_t, const std::vector<float>&);
-typedef InvertedListScanner* (*sq_sel_inv_list_scanner_func_ptr)(MetricType, const ScalarQuantizer*, const Index*, bool, bool);
+typedef InvertedListScanner* (*sq_sel_inv_list_scanner_func_ptr)(MetricType, const ScalarQuantizer*, const Index*, size_t, bool, bool);
 
 extern bool faiss_use_avx512;
 extern bool faiss_use_avx2;

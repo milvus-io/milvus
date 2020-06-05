@@ -34,6 +34,7 @@ sq_select_inverted_list_scanner_ref(
         MetricType mt,
         const ScalarQuantizer *sq,
         const Index *quantizer,
+        size_t dim,
         bool store_pairs,
         bool by_residual);
 

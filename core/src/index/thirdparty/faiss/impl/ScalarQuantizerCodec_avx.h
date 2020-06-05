@@ -20,6 +20,7 @@
 
 #include <faiss/utils/utils.h>
 #include <faiss/impl/FaissAssert.h>
+#include <faiss/impl/ScalarQuantizer.h>
 #include <faiss/impl/ScalarQuantizerOp.h>
 
 namespace faiss {
@@ -870,5 +871,91 @@ SQDistanceComputer *select_distance_computer_avx (
     return nullptr;
 }
 
+template<class DCClass>
+InvertedListScanner* sel2_InvertedListScanner_avx
+      (const ScalarQuantizer *sq,
+       const Index *quantizer, bool store_pairs, bool r)
+{
+    if (DCClass::Sim::metric_type == METRIC_L2) {
+        return new IVFSQScannerL2<DCClass>(sq->d, sq->trained, sq->code_size,
+                                           quantizer, store_pairs, r);
+    } else if (DCClass::Sim::metric_type == METRIC_INNER_PRODUCT) {
+        return new IVFSQScannerIP<DCClass>(sq->d, sq->trained, sq->code_size,
+                                           store_pairs, r);
+    } else {
+        FAISS_THROW_MSG("unsupported metric type");
+    }
+}
+
+template<class Similarity, class Codec, bool uniform>
+InvertedListScanner* sel12_InvertedListScanner_avx
+        (const ScalarQuantizer *sq,
+         const Index *quantizer, bool store_pairs, bool r)
+{
+    constexpr int SIMDWIDTH = Similarity::simdwidth;
+    using QuantizerClass = QuantizerTemplate_avx<Codec, uniform, SIMDWIDTH>;
+    using DCClass = DCTemplate_avx<QuantizerClass, Similarity, SIMDWIDTH>;
+    return sel2_InvertedListScanner_avx<DCClass> (sq, quantizer, store_pairs, r);
+}
+
+
+template<class Similarity>
+InvertedListScanner* sel1_InvertedListScanner_avx
+        (const ScalarQuantizer *sq, const Index *quantizer,
+         bool store_pairs, bool r)
+{
+    constexpr int SIMDWIDTH = Similarity::simdwidth;
+    switch(sq->qtype) {
+    case QuantizerType::QT_8bit_uniform:
+        return sel12_InvertedListScanner_avx
+            <Similarity, Codec8bit_avx, true>(sq, quantizer, store_pairs, r);
+    case QuantizerType::QT_4bit_uniform:
+        return sel12_InvertedListScanner_avx
+            <Similarity, Codec4bit_avx, true>(sq, quantizer, store_pairs, r);
+    case QuantizerType::QT_8bit:
+        return sel12_InvertedListScanner_avx
+            <Similarity, Codec8bit_avx, false>(sq, quantizer, store_pairs, r);
+    case QuantizerType::QT_4bit:
+        return sel12_InvertedListScanner_avx
+            <Similarity, Codec4bit_avx, false>(sq, quantizer, store_pairs, r);
+    case QuantizerType::QT_6bit:
+        return sel12_InvertedListScanner_avx
+            <Similarity, Codec6bit_avx, false>(sq, quantizer, store_pairs, r);
+    case QuantizerType::QT_fp16:
+        return sel2_InvertedListScanner_avx
+            <DCTemplate_avx<QuantizerFP16_avx<SIMDWIDTH>, Similarity, SIMDWIDTH> >
+            (sq, quantizer, store_pairs, r);
+    case QuantizerType::QT_8bit_direct:
+        if (sq->d % 16 == 0) {
+            return sel2_InvertedListScanner_avx
+                <DistanceComputerByte_avx<Similarity, SIMDWIDTH> >
+                (sq, quantizer, store_pairs, r);
+        } else {
+            return sel2_InvertedListScanner_avx
+                <DCTemplate_avx<Quantizer8bitDirect_avx<SIMDWIDTH>,
+                            Similarity, SIMDWIDTH> >
+                (sq, quantizer, store_pairs, r);
+        }
+    }
+
+    FAISS_THROW_MSG ("unknown qtype");
+    return nullptr;
+}
+
+template<int SIMDWIDTH>
+InvertedListScanner* sel0_InvertedListScanner_avx
+        (MetricType mt, const ScalarQuantizer *sq,
+         const Index *quantizer, bool store_pairs, bool by_residual)
+{
+    if (mt == METRIC_L2) {
+        return sel1_InvertedListScanner_avx<SimilarityL2_avx<SIMDWIDTH> >
+            (sq, quantizer, store_pairs, by_residual);
+    } else if (mt == METRIC_INNER_PRODUCT) {
+        return sel1_InvertedListScanner_avx<SimilarityIP_avx<SIMDWIDTH> >
+            (sq, quantizer, store_pairs, by_residual);
+    } else {
+        FAISS_THROW_MSG("unsupported metric type");
+    }
+}
 
 } // namespace faiss

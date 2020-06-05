@@ -439,7 +439,7 @@ InvertedListScanner* ScalarQuantizer::select_InvertedListScanner
 //        return sel0_InvertedListScanner<1>
 //            (mt, this, quantizer, store_pairs, by_residual);
 //    }
-      sq_sel_inv_list_scanner(mt, this, quantizer, store_pairs, by_residual);
+      return sq_sel_inv_list_scanner(mt, this, quantizer, d, store_pairs, by_residual);
 }
 
 
