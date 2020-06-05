@@ -31,4 +31,9 @@ sq_select_quantizer_ref (QuantizerType qtype, size_t dim, const std::vector<floa
     return select_quantizer_1<1> (qtype, dim, trained);
 }
 
+InvertedListScanner*
+sq_select_inverted_list_scanner_ref (MetricType mt, const ScalarQuantizer *sq, const Index *quantizer, bool store_pairs, bool by_residual) {
+    return sel0_InvertedListScanner<1> (mt, sq, quantizer, store_pairs, by_residual);
+}
+
 } // namespace faiss
