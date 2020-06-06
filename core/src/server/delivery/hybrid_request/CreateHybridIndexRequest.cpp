@@ -124,14 +124,15 @@ CreateHybridIndexRequest::OnExecute() {
 
         rc.RecordSection("check validation");
 
-        // step 3: create structured index
-
-
         // step 3: create index
         engine::CollectionIndex index;
         index.engine_type_ = adapter_index_type;
         index.extra_params_ = extra_params_;
         status = DBWrapper::DB()->CreateIndex(context_, collection_name_, index);
+        if (!status.ok()) {
+            return status;
+        }
+        status = DBWrapper::DB()->CreateStructuredIndex(context_, collection_name_, field_names_);
         fiu_do_on("CreateIndexRequest.OnExecute.create_index_fail",
                   status = Status(milvus::SERVER_UNEXPECTED_ERROR, ""));
         if (!status.ok()) {

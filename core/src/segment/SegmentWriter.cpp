@@ -89,8 +89,9 @@ SegmentWriter::SetVectorIndex(const milvus::knowhere::VecIndexPtr& index) {
 }
 
 Status
-SegmentWriter::SetAttrIndex(const milvus::knowhere::IndexPtr& index, const std::string& field_name) {
+SegmentWriter::SetAttrIndex(const milvus::knowhere::IndexPtr& index, const engine::meta::hybrid::DataType data_type, const std::string& field_name) {
     segment_ptr_->attr_index_ptr_->SetAttrIndex(index);
+    segment_ptr_->attr_index_ptr_->SetDataType(data_type);
     segment_ptr_->attr_index_ptr_->SetFieldName(field_name);
     return Status::OK();
 }

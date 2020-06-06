@@ -21,6 +21,7 @@
 #include <string>
 #include <unordered_map>
 #include <vector>
+#include <src/db/meta/MetaTypes.h>
 
 #include "segment/Types.h"
 #include "storage/FSHandler.h"
@@ -47,7 +48,7 @@ class SegmentWriter {
     SetVectorIndex(const knowhere::VecIndexPtr& index);
 
     Status
-    SetAttrIndex(const knowhere::IndexPtr& index, const std::string& field_name);
+    SetAttrIndex(const knowhere::IndexPtr& index, const engine::meta::hybrid::DataType data_type, const std::string& field_name);
 
     Status
     WriteBloomFilter(const IdBloomFilterPtr& bloom_filter_ptr);

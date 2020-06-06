@@ -22,8 +22,10 @@
 #include <algorithm>
 #include <memory>
 
-#include <boost/filesystem.hpp>
+#include <src/db/engine/ExecutionEngine.h>
+#include <src/db/meta/MetaTypes.h>
 #include <src/index/knowhere/knowhere/index/structured_index/StructuredIndexSort.h>
+#include <boost/filesystem.hpp>
 
 #include "utils/Exception.h"
 #include "utils/Log.h"
@@ -33,8 +35,43 @@ namespace milvus {
 namespace codec {
 
 knowhere::IndexPtr
-DefaultAttrsIndexFormat::read_internal(const milvus::storage::FSHandlerPtr& fs_ptr,
-                                       const std::string& path) {
+DefaultAttrsIndexFormat::create_structured_index(const milvus::engine::meta::hybrid::DataType data_type) {
+    knowhere::IndexPtr index = nullptr;
+    switch (data_type) {
+        case engine::meta::hybrid::DataType::INT8: {
+            index = std::make_shared<knowhere::StructuredIndexSort<int8_t>>();
+            break;
+        }
+        case engine::meta::hybrid::DataType::INT16: {
+            index = std::make_shared<knowhere::StructuredIndexSort<int16_t>>();
+            break;
+        }
+        case engine::meta::hybrid::DataType::INT32: {
+            index = std::make_shared<knowhere::StructuredIndexSort<int32_t>>();
+            break;
+        }
+        case engine::meta::hybrid::DataType::INT64: {
+            index = std::make_shared<knowhere::StructuredIndexSort<int64_t>>();
+            break;
+        }
+        case engine::meta::hybrid::DataType::FLOAT: {
+            index = std::make_shared<knowhere::StructuredIndexSort<float>>();
+            break;
+        }
+        case engine::meta::hybrid::DataType::DOUBLE: {
+            index = std::make_shared<knowhere::StructuredIndexSort<double >>();
+            break;
+        }
+        default: {
+            LOG_ENGINE_ERROR_ << "Invalid field type";
+            return nullptr;
+        }
+    }
+    return index;
+}
+
+knowhere::IndexPtr
+DefaultAttrsIndexFormat::read_internal(const milvus::storage::FSHandlerPtr& fs_ptr, const std::string& path) {
     milvus::TimeRecorder recorder("read_index");
     knowhere::BinarySet load_data_list;
 
@@ -51,6 +88,11 @@ DefaultAttrsIndexFormat::read_internal(const milvus::storage::FSHandlerPtr& fs_p
 
     size_t rp = 0;
     fs_ptr->reader_ptr_->seekg(0);
+
+    int32_t data_type = data_type = 0;
+    fs_ptr->reader_ptr_->read(&data_type, sizeof(data_type));
+    rp += sizeof(data_type);
+    fs_ptr->reader_ptr_->seekg(rp);
 
     LOG_ENGINE_DEBUG_ << "Start to read_index(" << path << ") length: " << length << " bytes";
     while (rp < length) {
@@ -84,15 +126,15 @@ DefaultAttrsIndexFormat::read_internal(const milvus::storage::FSHandlerPtr& fs_p
     double rate = length * 1000000.0 / span / 1024 / 1024;
     LOG_ENGINE_DEBUG_ << "read_index(" << path << ") rate " << rate << "MB/s";
 
-    knowhere::IndexPtr index = std::make_shared<knowhere::StructuredIndexSort<int64_t>>();
+    knowhere::IndexPtr index = create_structured_index((engine::meta::hybrid::DataType)data_type);
+
     index->Load(load_data_list);
 
     return index;
 }
 
 void
-DefaultAttrsIndexFormat::read(const milvus::storage::FSHandlerPtr& fs_ptr,
-                              const std::string& location,
+DefaultAttrsIndexFormat::read(const milvus::storage::FSHandlerPtr& fs_ptr, const std::string& location,
                               milvus::segment::AttrIndexPtr& attr_index) {
     const std::lock_guard<std::mutex> lock(mutex_);
 
@@ -107,16 +149,16 @@ DefaultAttrsIndexFormat::read(const milvus::storage::FSHandlerPtr& fs_ptr,
     attr_index->SetAttrIndex(index);
 }
 
-
 void
-DefaultAttrsIndexFormat::write(const milvus::storage::FSHandlerPtr& fs_ptr,
-                               const std::string& location,
+DefaultAttrsIndexFormat::write(const milvus::storage::FSHandlerPtr& fs_ptr, const std::string& location,
                                const milvus::segment::AttrIndexPtr& attr_index) {
     const std::lock_guard<std::mutex> lock(mutex_);
 
     milvus::TimeRecorder recorder("write_index");
 
     knowhere::IndexPtr index = attr_index->GetAttrIndex();
+
+    int32_t data_type = (int64_t)attr_index->GetDataType();
 
     auto binaryset = index->Serialize(knowhere::Config());
 
@@ -126,7 +168,7 @@ DefaultAttrsIndexFormat::write(const milvus::storage::FSHandlerPtr& fs_ptr,
         return;
     }
 
-//    fs_ptr->writer_ptr_->write()
+    fs_ptr->writer_ptr_->write(&data_type, sizeof(data_type));
 
     for (auto& iter : binaryset.binary_map_) {
         auto meta = iter.first.length();

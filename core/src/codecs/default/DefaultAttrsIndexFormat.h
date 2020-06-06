@@ -20,6 +20,7 @@
 #include <mutex>
 #include <string>
 #include <vector>
+#include <src/db/meta/MetaTypes.h>
 
 #include "codecs/AttrsIndexFormat.h"
 #include "segment/AttrIndex.h"
@@ -50,6 +51,9 @@ class DefaultAttrsIndexFormat : public AttrsIndexFormat {
  private:
     knowhere::IndexPtr
     read_internal(const storage::FSHandlerPtr& fs_ptr, const std::string& path);
+
+    knowhere::IndexPtr
+    create_structured_index(const engine::meta::hybrid::DataType data_type);
 
  private:
     std::mutex mutex_;
