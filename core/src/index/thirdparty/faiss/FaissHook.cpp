@@ -26,10 +26,9 @@ fvec_func_ptr fvec_L2sqr = fvec_L2sqr_avx;
 fvec_func_ptr fvec_L1 = fvec_L1_avx;
 fvec_func_ptr fvec_Linf = fvec_Linf_avx;
 
-sq_get_func_ptr sq_get_distance_computer_L2 = sq_get_distance_computer_L2_avx;
-sq_get_func_ptr sq_get_distance_computer_IP = sq_get_distance_computer_IP_avx;
-sq_sel_func_ptr sq_sel_quantizer = sq_select_quantizer_avx;
-
+sq_get_distance_computer_func_ptr sq_get_distance_computer = sq_get_distance_computer_avx;
+sq_sel_quantizer_func_ptr sq_sel_quantizer = sq_select_quantizer_avx;
+sq_sel_inv_list_scanner_func_ptr sq_sel_inv_list_scanner = sq_select_inverted_list_scanner_avx;
 
 /*****************************************************************************/
 
@@ -68,9 +67,9 @@ bool hook_init(std::string& cpu_flag) {
         fvec_Linf = fvec_Linf_avx512;
 
         /* for IVFSQ */
-        sq_get_distance_computer_L2 = sq_get_distance_computer_L2_avx512;
-        sq_get_distance_computer_IP = sq_get_distance_computer_IP_avx512;
+        sq_get_distance_computer = sq_get_distance_computer_avx512;
         sq_sel_quantizer = sq_select_quantizer_avx512;
+        sq_sel_inv_list_scanner = sq_select_inverted_list_scanner_avx512;
 
         cpu_flag = "AVX512";
     } else if (support_avx2()) {
@@ -81,9 +80,9 @@ bool hook_init(std::string& cpu_flag) {
         fvec_Linf = fvec_Linf_avx;
 
         /* for IVFSQ */
-        sq_get_distance_computer_L2 = sq_get_distance_computer_L2_avx;
-        sq_get_distance_computer_IP = sq_get_distance_computer_IP_avx;
+        sq_get_distance_computer = sq_get_distance_computer_avx;
         sq_sel_quantizer = sq_select_quantizer_avx;
+        sq_sel_inv_list_scanner = sq_select_inverted_list_scanner_avx;
 
         cpu_flag = "AVX2";
     } else if (support_sse()) {
@@ -94,9 +93,9 @@ bool hook_init(std::string& cpu_flag) {
         fvec_Linf = fvec_Linf_sse;
 
         /* for IVFSQ */
-        sq_get_distance_computer_L2 = sq_get_distance_computer_L2_sse;
-        sq_get_distance_computer_IP = sq_get_distance_computer_IP_sse;
-        sq_sel_quantizer = sq_select_quantizer_sse;
+        sq_get_distance_computer = sq_get_distance_computer_ref;
+        sq_sel_quantizer = sq_select_quantizer_ref;
+        sq_sel_inv_list_scanner = sq_select_inverted_list_scanner_ref;
 
         cpu_flag = "SSE42";
     } else {
