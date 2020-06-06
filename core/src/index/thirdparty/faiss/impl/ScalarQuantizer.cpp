@@ -16,7 +16,6 @@
 #include <faiss/FaissHook.h>
 #include <faiss/utils/utils.h>
 #include <faiss/impl/FaissAssert.h>
-//#include <faiss/impl/ScalarQuantizerCodec.h>
 
 namespace faiss {
 
