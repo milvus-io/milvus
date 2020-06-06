@@ -11,12 +11,8 @@
 
 #include <cstdio>
 #include <algorithm>
-
 #include <omp.h>
-
-#ifdef __SSE__
 #include <immintrin.h>
-#endif
 
 #include <faiss/utils/utils.h>
 #include <faiss/impl/FaissAssert.h>
@@ -25,10 +21,6 @@
 #include <faiss/impl/ScalarQuantizerOp.h>
 
 namespace faiss {
-
-#ifdef __AVX__
-#define USE_AVX
-#endif
 
 /*******************************************************************
  * Codec: converts between values in [0, 1] and an index in a code
@@ -51,7 +43,6 @@ struct Codec8bit_avx : public Codec8bit {
         return f8 * one_255;
     }
 };
-
 
 struct Codec4bit_avx : public Codec4bit {
     static __m256 decode_8_components (const uint8_t *code, int i) {
@@ -95,7 +86,6 @@ struct Codec6bit_avx : public Codec6bit {
  * through a codec
  *******************************************************************/
 
-
 template<class Codec, bool uniform, int SIMD>
 struct QuantizerTemplate_avx {};
 
@@ -124,7 +114,7 @@ struct QuantizerTemplate_avx<Codec, false, 1> : public QuantizerTemplate<Codec, 
 
 template<class Codec>
 struct QuantizerTemplate_avx<Codec, false, 8>: QuantizerTemplate_avx<Codec, false, 1> {
-    QuantizerTemplate_avx (size_t d, const std::vector<float> &trained):
+    QuantizerTemplate_avx (size_t d, const std::vector<float> &trained) :
         QuantizerTemplate_avx<Codec, false, 1> (d, trained) {}
 
     __m256 reconstruct_8_components (const uint8_t * code, int i) const {
@@ -144,7 +134,7 @@ struct QuantizerFP16_avx {};
 template<>
 struct QuantizerFP16_avx<1> : public QuantizerFP16<1> {
     QuantizerFP16_avx(size_t d, const std::vector<float> &unused) :
-        QuantizerFP16<1>(d, unused) {}
+        QuantizerFP16<1> (d, unused) {}
 };
 
 template<>
@@ -174,7 +164,7 @@ struct Quantizer8bitDirect_avx<1> : public Quantizer8bitDirect<1> {
 
 template<>
 struct Quantizer8bitDirect_avx<8>: Quantizer8bitDirect_avx<1> {
-    Quantizer8bitDirect_avx (size_t d, const std::vector<float> &trained):
+    Quantizer8bitDirect_avx (size_t d, const std::vector<float> &trained) :
         Quantizer8bitDirect_avx<1> (d, trained) {}
 
     __m256 reconstruct_8_components (const uint8_t * code, int i) const {
@@ -184,27 +174,24 @@ struct Quantizer8bitDirect_avx<8>: Quantizer8bitDirect_avx<1> {
     }
 };
 
-
 template<int SIMDWIDTH>
-Quantizer *select_quantizer_1_avx (
-          QuantizerType qtype,
-          size_t d, const std::vector<float> & trained)
-{
+Quantizer *select_quantizer_1_avx (QuantizerType qtype, size_t d,
+                                   const std::vector<float> & trained) {
     switch(qtype) {
-    case QuantizerType::QT_8bit:
-        return new QuantizerTemplate_avx<Codec8bit_avx, false, SIMDWIDTH>(d, trained);
-    case QuantizerType::QT_6bit:
-        return new QuantizerTemplate_avx<Codec6bit_avx, false, SIMDWIDTH>(d, trained);
-    case QuantizerType::QT_4bit:
-        return new QuantizerTemplate_avx<Codec4bit_avx, false, SIMDWIDTH>(d, trained);
-    case QuantizerType::QT_8bit_uniform:
-        return new QuantizerTemplate_avx<Codec8bit_avx, true, SIMDWIDTH>(d, trained);
-    case QuantizerType::QT_4bit_uniform:
-        return new QuantizerTemplate_avx<Codec4bit_avx, true, SIMDWIDTH>(d, trained);
-    case QuantizerType::QT_fp16:
-        return new QuantizerFP16_avx<SIMDWIDTH> (d, trained);
-    case QuantizerType::QT_8bit_direct:
-        return new Quantizer8bitDirect_avx<SIMDWIDTH> (d, trained);
+        case QuantizerType::QT_8bit:
+            return new QuantizerTemplate_avx<Codec8bit_avx, false, SIMDWIDTH>(d, trained);
+        case QuantizerType::QT_6bit:
+            return new QuantizerTemplate_avx<Codec6bit_avx, false, SIMDWIDTH>(d, trained);
+        case QuantizerType::QT_4bit:
+            return new QuantizerTemplate_avx<Codec4bit_avx, false, SIMDWIDTH>(d, trained);
+        case QuantizerType::QT_8bit_uniform:
+            return new QuantizerTemplate_avx<Codec8bit_avx, true, SIMDWIDTH>(d, trained);
+        case QuantizerType::QT_4bit_uniform:
+            return new QuantizerTemplate_avx<Codec4bit_avx, true, SIMDWIDTH>(d, trained);
+        case QuantizerType::QT_fp16:
+            return new QuantizerFP16_avx<SIMDWIDTH>(d, trained);
+        case QuantizerType::QT_8bit_direct:
+            return new Quantizer8bitDirect_avx<SIMDWIDTH>(d, trained);
     }
     FAISS_THROW_MSG ("unknown qtype");
 }
@@ -219,7 +206,6 @@ Quantizer *select_quantizer_1_avx (
 template<int SIMDWIDTH>
 struct SimilarityL2_avx {};
 
-
 template<>
 struct SimilarityL2_avx<1> : public SimilarityL2<1> {
     static constexpr int simdwidth = 1;
@@ -227,7 +213,6 @@ struct SimilarityL2_avx<1> : public SimilarityL2<1> {
 
     explicit SimilarityL2_avx (const float * y) : SimilarityL2<1>(y) {}
 };
-
 
 template<>
 struct SimilarityL2_avx<8> {
@@ -270,7 +255,6 @@ struct SimilarityL2_avx<8> {
 template<int SIMDWIDTH>
 struct SimilarityIP_avx {};
 
-
 template<>
 struct SimilarityIP_avx<1> : public SimilarityIP<1> {
     static constexpr int simdwidth = 1;
@@ -278,7 +262,6 @@ struct SimilarityIP_avx<1> : public SimilarityIP<1> {
 
     explicit SimilarityIP_avx (const float * y) : SimilarityIP<1>(y) {}
 };
-
 
 template<>
 struct SimilarityIP_avx<8> {
@@ -341,8 +324,7 @@ struct DCTemplate_avx<Quantizer, Similarity, 8> : SQDistanceComputer {
     Quantizer quant;
 
     DCTemplate_avx(size_t d, const std::vector<float> &trained):
-        quant(d, trained)
-    {}
+        quant(d, trained) {}
 
     float compute_distance(const float* x, const uint8_t* code) const {
         Similarity sim(x);
@@ -406,8 +388,7 @@ struct DistanceComputerByte_avx<Similarity, 8> : SQDistanceComputer {
     int d;
     std::vector<uint8_t> tmp;
 
-    DistanceComputerByte_avx(int d, const std::vector<float> &): d(d), tmp(d) {
-    }
+    DistanceComputerByte_avx(int d, const std::vector<float> &): d(d), tmp(d) {}
 
     int compute_code_distance(const uint8_t* code1, const uint8_t* code2)
         const {
@@ -479,37 +460,37 @@ SQDistanceComputer *select_distance_computer_avx (
 {
     constexpr int SIMDWIDTH = Sim::simdwidth;
     switch(qtype) {
-    case QuantizerType::QT_8bit_uniform:
-        return new DCTemplate_avx<QuantizerTemplate_avx<Codec8bit_avx, true, SIMDWIDTH>,
-                              Sim, SIMDWIDTH>(d, trained);
+        case QuantizerType::QT_8bit_uniform:
+            return new DCTemplate_avx<QuantizerTemplate_avx<Codec8bit_avx, true, SIMDWIDTH>,
+                    Sim, SIMDWIDTH>(d, trained);
 
-    case QuantizerType::QT_4bit_uniform:
-        return new DCTemplate_avx<QuantizerTemplate_avx<Codec4bit_avx, true, SIMDWIDTH>,
-                              Sim, SIMDWIDTH>(d, trained);
+        case QuantizerType::QT_4bit_uniform:
+            return new DCTemplate_avx<QuantizerTemplate_avx<Codec4bit_avx, true, SIMDWIDTH>,
+                    Sim, SIMDWIDTH>(d, trained);
 
-    case QuantizerType::QT_8bit:
-        return new DCTemplate_avx<QuantizerTemplate_avx<Codec8bit_avx, false, SIMDWIDTH>,
-                              Sim, SIMDWIDTH>(d, trained);
+        case QuantizerType::QT_8bit:
+            return new DCTemplate_avx<QuantizerTemplate_avx<Codec8bit_avx, false, SIMDWIDTH>,
+                    Sim, SIMDWIDTH>(d, trained);
 
-    case QuantizerType::QT_6bit:
-        return new DCTemplate_avx<QuantizerTemplate_avx<Codec6bit_avx, false, SIMDWIDTH>,
-                              Sim, SIMDWIDTH>(d, trained);
+        case QuantizerType::QT_6bit:
+            return new DCTemplate_avx<QuantizerTemplate_avx<Codec6bit_avx, false, SIMDWIDTH>,
+                    Sim, SIMDWIDTH>(d, trained);
 
-    case QuantizerType::QT_4bit:
-        return new DCTemplate_avx<QuantizerTemplate_avx<Codec4bit_avx, false, SIMDWIDTH>,
-                              Sim, SIMDWIDTH>(d, trained);
+        case QuantizerType::QT_4bit:
+            return new DCTemplate_avx<QuantizerTemplate_avx<Codec4bit_avx, false, SIMDWIDTH>,
+                    Sim, SIMDWIDTH>(d, trained);
 
-    case QuantizerType::QT_fp16:
-        return new DCTemplate_avx
-            <QuantizerFP16_avx<SIMDWIDTH>, Sim, SIMDWIDTH>(d, trained);
-
-    case QuantizerType::QT_8bit_direct:
-        if (d % 16 == 0) {
-            return new DistanceComputerByte_avx<Sim, SIMDWIDTH>(d, trained);
-        } else {
+        case QuantizerType::QT_fp16:
             return new DCTemplate_avx
-                <Quantizer8bitDirect_avx<SIMDWIDTH>, Sim, SIMDWIDTH>(d, trained);
-        }
+                    <QuantizerFP16_avx<SIMDWIDTH>, Sim, SIMDWIDTH>(d, trained);
+
+        case QuantizerType::QT_8bit_direct:
+            if (d % 16 == 0) {
+                return new DistanceComputerByte_avx<Sim, SIMDWIDTH>(d, trained);
+            } else {
+                return new DCTemplate_avx
+                        <Quantizer8bitDirect_avx<SIMDWIDTH>, Sim, SIMDWIDTH>(d, trained);
+            }
     }
     FAISS_THROW_MSG ("unknown qtype");
     return nullptr;
