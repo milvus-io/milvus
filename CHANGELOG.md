@@ -14,6 +14,7 @@ Please mark all change in change log and use the issue from GitHub
 
 ## Improvement
 -   \#2381 Upgrade FAISS to 1.6.3
+-   \#2429 Fix Milvus 0.9.1 performance degrade issue
 -   \#2441 Improve Knowhere code coverage
 -   \#2466 optimize k-selection implemention of faiss gpu version
 -   \#2495 Add creating lock file failure reason.
