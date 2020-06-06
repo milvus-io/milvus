@@ -90,15 +90,15 @@ template<class Codec, bool uniform, int SIMD>
 struct QuantizerTemplate_avx {};
 
 template<class Codec>
-struct QuantizerTemplate_avx<Codec, true, 1> : QuantizerTemplate<Codec, true, 1> {
+struct QuantizerTemplate_avx<Codec, true, 1> : public QuantizerTemplate<Codec, true, 1> {
     QuantizerTemplate_avx(size_t d, const std::vector<float> &trained) :
-        QuantizerTemplate<Codec, true, 1>(d, trained) {}
+        QuantizerTemplate<Codec, true, 1> (d, trained) {}
 };
 
 template<class Codec>
-struct QuantizerTemplate_avx<Codec, true, 8>: QuantizerTemplate_avx<Codec, true, 1> {
+struct QuantizerTemplate_avx<Codec, true, 8> : public QuantizerTemplate<Codec, true, 1> {
     QuantizerTemplate_avx (size_t d, const std::vector<float> &trained) :
-        QuantizerTemplate_avx<Codec, true, 1> (d, trained) {}
+        QuantizerTemplate<Codec, true, 1> (d, trained) {}
 
     __m256 reconstruct_8_components (const uint8_t * code, int i) const {
         __m256 xi = Codec::decode_8_components (code, i);
@@ -109,13 +109,13 @@ struct QuantizerTemplate_avx<Codec, true, 8>: QuantizerTemplate_avx<Codec, true,
 template<class Codec>
 struct QuantizerTemplate_avx<Codec, false, 1> : public QuantizerTemplate<Codec, false, 1> {
     QuantizerTemplate_avx (size_t d, const std::vector<float> &trained) :
-        QuantizerTemplate<Codec, false, 1>(d, trained) {}
+        QuantizerTemplate<Codec, false, 1> (d, trained) {}
 };
 
 template<class Codec>
-struct QuantizerTemplate_avx<Codec, false, 8>: QuantizerTemplate_avx<Codec, false, 1> {
+struct QuantizerTemplate_avx<Codec, false, 8>: public QuantizerTemplate<Codec, false, 1> {
     QuantizerTemplate_avx (size_t d, const std::vector<float> &trained) :
-        QuantizerTemplate_avx<Codec, false, 1> (d, trained) {}
+        QuantizerTemplate<Codec, false, 1> (d, trained) {}
 
     __m256 reconstruct_8_components (const uint8_t * code, int i) const {
         __m256 xi = Codec::decode_8_components (code, i);
@@ -133,14 +133,14 @@ struct QuantizerFP16_avx {};
 
 template<>
 struct QuantizerFP16_avx<1> : public QuantizerFP16<1> {
-    QuantizerFP16_avx(size_t d, const std::vector<float> &unused) :
+    QuantizerFP16_avx (size_t d, const std::vector<float> &unused) :
         QuantizerFP16<1> (d, unused) {}
 };
 
 template<>
-struct QuantizerFP16_avx<8>: QuantizerFP16_avx<1> {
+struct QuantizerFP16_avx<8>: public QuantizerFP16<1> {
     QuantizerFP16_avx (size_t d, const std::vector<float> &trained):
-        QuantizerFP16_avx<1> (d, trained) {}
+        QuantizerFP16<1> (d, trained) {}
 
     __m256 reconstruct_8_components (const uint8_t * code, int i) const {
         __m128i codei = _mm_loadu_si128 ((const __m128i*)(code + 2 * i));
@@ -158,14 +158,14 @@ struct Quantizer8bitDirect_avx {};
 
 template<>
 struct Quantizer8bitDirect_avx<1> : public Quantizer8bitDirect<1> {
-    Quantizer8bitDirect_avx(size_t d, const std::vector<float> &unused) :
+    Quantizer8bitDirect_avx (size_t d, const std::vector<float> &unused) :
         Quantizer8bitDirect(d, unused) {}
 };
 
 template<>
-struct Quantizer8bitDirect_avx<8>: Quantizer8bitDirect_avx<1> {
+struct Quantizer8bitDirect_avx<8>: public Quantizer8bitDirect<1> {
     Quantizer8bitDirect_avx (size_t d, const std::vector<float> &trained) :
-        Quantizer8bitDirect_avx<1> (d, trained) {}
+        Quantizer8bitDirect<1> (d, trained) {}
 
     __m256 reconstruct_8_components (const uint8_t * code, int i) const {
         __m128i x8 = _mm_loadl_epi64((__m128i*)(code + i)); // 8 * int8
@@ -272,8 +272,7 @@ struct SimilarityIP_avx<8> {
 
     float accu;
 
-    explicit SimilarityIP_avx (const float * y):
-        y (y) {}
+    explicit SimilarityIP_avx (const float * y): y (y) {}
 
     __m256 accu8;
 
@@ -390,8 +389,7 @@ struct DistanceComputerByte_avx<Similarity, 8> : SQDistanceComputer {
 
     DistanceComputerByte_avx(int d, const std::vector<float> &): d(d), tmp(d) {}
 
-    int compute_code_distance(const uint8_t* code1, const uint8_t* code2)
-        const {
+    int compute_code_distance(const uint8_t* code1, const uint8_t* code2) const {
         // __m256i accu = _mm256_setzero_ps ();
         __m256i accu = _mm256_setzero_si256 ();
         for (int i = 0; i < d; i += 16) {
@@ -497,25 +495,17 @@ SQDistanceComputer *select_distance_computer_avx (
 }
 
 template<class DCClass>
-InvertedListScanner* sel2_InvertedListScanner_avx
-      (const ScalarQuantizer *sq,
-       const Index *quantizer, bool store_pairs, bool r)
+InvertedListScanner* sel2_InvertedListScanner_avx (
+        const ScalarQuantizer *sq,
+        const Index *quantizer, bool store_pairs, bool r)
 {
-    if (DCClass::Sim::metric_type == METRIC_L2) {
-        return new IVFSQScannerL2<DCClass>(sq->d, sq->trained, sq->code_size,
-                                           quantizer, store_pairs, r);
-    } else if (DCClass::Sim::metric_type == METRIC_INNER_PRODUCT) {
-        return new IVFSQScannerIP<DCClass>(sq->d, sq->trained, sq->code_size,
-                                           store_pairs, r);
-    } else {
-        FAISS_THROW_MSG("unsupported metric type");
-    }
+    return sel2_InvertedListScanner<DCClass> (sq, quantizer, store_pairs, r);
 }
 
 template<class Similarity, class Codec, bool uniform>
-InvertedListScanner* sel12_InvertedListScanner_avx
-        (const ScalarQuantizer *sq,
-         const Index *quantizer, bool store_pairs, bool r)
+InvertedListScanner* sel12_InvertedListScanner_avx (
+        const ScalarQuantizer *sq,
+        const Index *quantizer, bool store_pairs, bool r)
 {
     constexpr int SIMDWIDTH = Similarity::simdwidth;
     using QuantizerClass = QuantizerTemplate_avx<Codec, uniform, SIMDWIDTH>;
@@ -525,9 +515,9 @@ InvertedListScanner* sel12_InvertedListScanner_avx
 
 
 template<class Similarity>
-InvertedListScanner* sel1_InvertedListScanner_avx
-        (const ScalarQuantizer *sq, const Index *quantizer,
-         bool store_pairs, bool r)
+InvertedListScanner* sel1_InvertedListScanner_avx (
+        const ScalarQuantizer *sq, const Index *quantizer,
+        bool store_pairs, bool r)
 {
     constexpr int SIMDWIDTH = Similarity::simdwidth;
     switch(sq->qtype) {
@@ -568,9 +558,9 @@ InvertedListScanner* sel1_InvertedListScanner_avx
 }
 
 template<int SIMDWIDTH>
-InvertedListScanner* sel0_InvertedListScanner_avx
-        (MetricType mt, const ScalarQuantizer *sq,
-         const Index *quantizer, bool store_pairs, bool by_residual)
+InvertedListScanner* sel0_InvertedListScanner_avx (
+        MetricType mt, const ScalarQuantizer *sq,
+        const Index *quantizer, bool store_pairs, bool by_residual)
 {
     if (mt == METRIC_L2) {
         return sel1_InvertedListScanner_avx<SimilarityL2_avx<SIMDWIDTH> >

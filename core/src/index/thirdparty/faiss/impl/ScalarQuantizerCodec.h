@@ -514,9 +514,9 @@ SQDistanceComputer *select_distance_computer (
 }
 
 template<class DCClass>
-InvertedListScanner* sel2_InvertedListScanner
-      (const ScalarQuantizer *sq,
-       const Index *quantizer, bool store_pairs, bool r)
+InvertedListScanner* sel2_InvertedListScanner (
+        const ScalarQuantizer *sq,
+        const Index *quantizer, bool store_pairs, bool r)
 {
     if (DCClass::Sim::metric_type == METRIC_L2) {
         return new IVFSQScannerL2<DCClass>(sq->d, sq->trained, sq->code_size,
@@ -530,9 +530,9 @@ InvertedListScanner* sel2_InvertedListScanner
 }
 
 template<class Similarity, class Codec, bool uniform>
-InvertedListScanner* sel12_InvertedListScanner
-        (const ScalarQuantizer *sq,
-         const Index *quantizer, bool store_pairs, bool r)
+InvertedListScanner* sel12_InvertedListScanner (
+        const ScalarQuantizer *sq,
+        const Index *quantizer, bool store_pairs, bool r)
 {
     constexpr int SIMDWIDTH = Similarity::simdwidth;
     using QuantizerClass = QuantizerTemplate<Codec, uniform, SIMDWIDTH>;
@@ -542,9 +542,9 @@ InvertedListScanner* sel12_InvertedListScanner
 
 
 template<class Similarity>
-InvertedListScanner* sel1_InvertedListScanner
-        (const ScalarQuantizer *sq, const Index *quantizer,
-         bool store_pairs, bool r)
+InvertedListScanner* sel1_InvertedListScanner (
+        const ScalarQuantizer *sq, const Index *quantizer,
+        bool store_pairs, bool r)
 {
     constexpr int SIMDWIDTH = Similarity::simdwidth;
     switch(sq->qtype) {
@@ -585,9 +585,9 @@ InvertedListScanner* sel1_InvertedListScanner
 }
 
 template<int SIMDWIDTH>
-InvertedListScanner* sel0_InvertedListScanner
-        (MetricType mt, const ScalarQuantizer *sq,
-         const Index *quantizer, bool store_pairs, bool by_residual)
+InvertedListScanner* sel0_InvertedListScanner (
+        MetricType mt, const ScalarQuantizer *sq,
+        const Index *quantizer, bool store_pairs, bool by_residual)
 {
     if (mt == METRIC_L2) {
         return sel1_InvertedListScanner<SimilarityL2<SIMDWIDTH> >
