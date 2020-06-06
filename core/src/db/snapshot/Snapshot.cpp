@@ -30,6 +30,7 @@ Snapshot::UnRefAll() {
 Snapshot::Snapshot(ID_TYPE id) {
     auto collection_commit = CollectionCommitsHolder::GetInstance().GetResource(id, false);
     AddResource<CollectionCommit>(collection_commit);
+    max_lsn_ = collection_commit->GetLsn();
     auto& schema_holder = SchemaCommitsHolder::GetInstance();
     auto current_schema = schema_holder.GetResource(collection_commit->GetSchemaId(), false);
     AddResource<SchemaCommit>(current_schema);

@@ -21,12 +21,23 @@ namespace snapshot {
 
 static ID_TYPE UID = 1;
 
-Operations::Operations(const OperationContext& context, ScopedSnapshotT prev_ss)
-    : context_(context), prev_ss_(prev_ss), uid_(UID++), status_(40005, "Operation Pending") {
+std::ostream&
+operator<<(std::ostream& out, const Operations& operation) {
+    out << operation.ToString();
+    return out;
 }
 
-Operations::Operations(const OperationContext& context, ID_TYPE collection_id, ID_TYPE commit_id)
-    : context_(context), uid_(UID++), status_(40005, "Operation Pending") {
+Operations::Operations(const OperationContext& context, ScopedSnapshotT prev_ss, const OperationsType& type)
+    : context_(context),
+      prev_ss_(prev_ss),
+      uid_(UID++),
+      status_(SS_OPERATION_PENDING, "Operation Pending"),
+      type_(type) {
+}
+
+Operations::Operations(const OperationContext& context, ID_TYPE collection_id, ID_TYPE commit_id,
+                       const OperationsType& type)
+    : context_(context), uid_(UID++), status_(SS_OPERATION_PENDING, "Operation Pending"), type_(type) {
     auto status = Snapshots::GetInstance().GetSnapshot(prev_ss_, collection_id, commit_id);
     if (!status.ok())
         prev_ss_ = ScopedSnapshotT();
@@ -43,16 +54,16 @@ Operations::FailureString() const {
 }
 
 std::string
-Operations::OperationRepr() const {
+Operations::GetRepr() const {
     std::stringstream ss;
-    ss << "<" << OperationName() << ":" << GetID() << ">";
+    ss << "<" << GetName() << ":" << GetID() << ">";
     return ss.str();
 }
 
 std::string
 Operations::ToString() const {
     std::stringstream ss;
-    ss << OperationRepr();
+    ss << GetRepr();
     ss << (done_ ? " | DONE" : " | PENDING");
     if (done_) {
         if (status_.ok()) {
@@ -71,6 +82,9 @@ Operations::GetID() const {
 
 Status
 Operations::operator()(Store& store) {
+    auto status = PreCheck();
+    if (!status.ok())
+        return status;
     return ApplyToStore(store);
 }
 
@@ -90,7 +104,9 @@ void
 Operations::Done() {
     std::unique_lock<std::mutex> lock(finish_mtx_);
     done_ = true;
-    std::cout << ToString() << std::endl;
+    if (GetType() == OperationsType::W_Compound) {
+        std::cout << ToString() << std::endl;
+    }
     finish_cond_.notify_all();
 }
 
@@ -171,7 +187,9 @@ Operations::GetSnapshot(ScopedSnapshotT& ss) const {
 
 Status
 Operations::ApplyToStore(Store& store) {
-    std::cout << ToString() << std::endl;
+    if (GetType() == OperationsType::W_Compound) {
+        std::cout << ToString() << std::endl;
+    }
     if (done_) {
         Done();
         return status_;
@@ -208,6 +226,23 @@ Operations::DoExecute(Store& store) {
 Status
 Operations::PostExecute(Store& store) {
     return store.DoCommitOperation(*this);
+}
+
+Status
+Operations::RollBack() {
+    // TODO: Implement here
+    // Spwarn a rollback operation or re-use this operation
+    return Status::OK();
+}
+
+Status
+Operations::ApplyRollBack(Store& store) {
+    // TODO: Implement rollback to remove all resources in steps_
+    return Status::OK();
+}
+
+Operations::~Operations() {
+    // TODO: Prefer to submit a rollback operation if status is not ok
 }
 
 }  // namespace snapshot

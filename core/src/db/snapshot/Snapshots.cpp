@@ -17,28 +17,29 @@ namespace engine {
 namespace snapshot {
 
 Status
-Snapshots::DropCollection(ID_TYPE collection_id) {
+Snapshots::DropCollection(ID_TYPE collection_id, const LSN_TYPE& lsn) {
     ScopedSnapshotT ss;
     auto status = GetSnapshot(ss, collection_id);
     if (!status.ok())
         return status;
-    return DoDropCollection(ss);
+    return DoDropCollection(ss, lsn);
 }
 
 Status
-Snapshots::DropCollection(const std::string& name) {
+Snapshots::DropCollection(const std::string& name, const LSN_TYPE& lsn) {
     ScopedSnapshotT ss;
     auto status = GetSnapshot(ss, name);
     if (!status.ok())
         return status;
-    return DoDropCollection(ss);
+    return DoDropCollection(ss, lsn);
 }
 
 Status
-Snapshots::DoDropCollection(ScopedSnapshotT& ss) {
+Snapshots::DoDropCollection(ScopedSnapshotT& ss, const LSN_TYPE& lsn) {
     OperationContext context;
+    context.lsn = lsn;
     context.collection = ss->GetCollection();
-    auto op = std::make_shared<SoftDeleteCollectionOperation>(context);
+    auto op = std::make_shared<SoftDeleteCollectionOperation>(context, ss);
     op->Push();
     auto status = op->GetStatus();
 
