@@ -378,6 +378,8 @@ SnapshotTest::SetUp() {
 
 void
 SnapshotTest::TearDown() {
+    // TODO: Temp to delay some time. OperationExecutor should wait all resources be destructed before stop
+    std::this_thread::sleep_for(std::chrono::milliseconds(20));
     milvus::engine::snapshot::OperationExecutor::GetInstance().Stop();
     BaseTest::TearDown();
 }

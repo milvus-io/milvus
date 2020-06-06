@@ -33,14 +33,23 @@ namespace snapshot {
 using StepsT = std::vector<std::any>;
 using CheckStaleFunc = std::function<Status(ScopedSnapshotT&)>;
 
+enum OperationsType { Invalid, W_Leaf, O_Leaf, W_Compound, O_Compound };
+
 class Operations : public std::enable_shared_from_this<Operations> {
  public:
-    Operations(const OperationContext& context, ScopedSnapshotT prev_ss);
-    Operations(const OperationContext& context, ID_TYPE collection_id, ID_TYPE commit_id = 0);
+    Operations(const OperationContext& context, ScopedSnapshotT prev_ss,
+               const OperationsType& type = OperationsType::Invalid);
+    Operations(const OperationContext& context, ID_TYPE collection_id, ID_TYPE commit_id = 0,
+               const OperationsType& type = OperationsType::Invalid);
 
     const ScopedSnapshotT&
     GetPrevSnapshot() const {
         return prev_ss_;
+    }
+
+    virtual const LSN_TYPE&
+    GetContextLsn() const {
+        return context_.lsn;
     }
 
     virtual Status
@@ -51,6 +60,9 @@ class Operations : public std::enable_shared_from_this<Operations> {
     template <typename StepT>
     void
     AddStep(const StepT& step, bool activate = true);
+    template <typename StepT>
+    void
+    AddStepWithLsn(const StepT& step, const LSN_TYPE& lsn, bool activate = true);
     void
     SetStepResult(ID_TYPE id) {
         ids_.push_back(id);
@@ -63,6 +75,11 @@ class Operations : public std::enable_shared_from_this<Operations> {
 
     ID_TYPE
     GetID() const;
+
+    virtual const OperationsType&
+    GetType() const {
+        return type_;
+    }
 
     virtual Status
     OnExecute(Store&);
@@ -101,18 +118,23 @@ class Operations : public std::enable_shared_from_this<Operations> {
         return status_;
     }
 
-    std::string
-    OperationName() const {
+    virtual std::string
+    GetName() const {
         return typeid(*this).name();
     }
     virtual std::string
-    OperationRepr() const;
+    GetRepr() const;
 
     virtual std::string
     ToString() const;
 
-    virtual ~Operations() {
-    }
+    Status
+    RollBack();
+
+    virtual ~Operations();
+
+    friend std::ostream&
+    operator<<(std::ostream& out, const Operations& operation);
 
  protected:
     virtual std::string
@@ -127,6 +149,9 @@ class Operations : public std::enable_shared_from_this<Operations> {
     Status
     PrevSnapshotRequried() const;
 
+    Status
+    ApplyRollBack(Store&);
+
     OperationContext context_;
     ScopedSnapshotT prev_ss_;
     StepsT steps_;
@@ -136,6 +161,7 @@ class Operations : public std::enable_shared_from_this<Operations> {
     mutable std::mutex finish_mtx_;
     std::condition_variable finish_cond_;
     ID_TYPE uid_;
+    OperationsType type_;
 };
 
 template <typename StepT>
@@ -147,14 +173,25 @@ Operations::AddStep(const StepT& step, bool activate) {
     steps_.push_back(s);
 }
 
+template <typename StepT>
+void
+Operations::AddStepWithLsn(const StepT& step, const LSN_TYPE& lsn, bool activate) {
+    auto s = std::make_shared<StepT>(step);
+    if (activate)
+        s->Activate();
+    s->SetLsn(lsn);
+    steps_.push_back(s);
+}
+
 template <typename ResourceT>
 class CommitOperation : public Operations {
  public:
     using BaseT = Operations;
-    CommitOperation(const OperationContext& context, ScopedSnapshotT prev_ss) : BaseT(context, prev_ss) {
+    CommitOperation(const OperationContext& context, ScopedSnapshotT prev_ss)
+        : BaseT(context, prev_ss, OperationsType::W_Leaf) {
     }
     CommitOperation(const OperationContext& context, ID_TYPE collection_id, ID_TYPE commit_id = 0)
-        : BaseT(context, collection_id, commit_id) {
+        : BaseT(context, collection_id, commit_id, OperationsType::W_Leaf) {
     }
 
     virtual typename ResourceT::Ptr
@@ -194,7 +231,7 @@ template <typename ResourceT>
 class LoadOperation : public Operations {
  public:
     explicit LoadOperation(const LoadOperationContext& context)
-        : Operations(OperationContext(), ScopedSnapshotT()), context_(context) {
+        : Operations(OperationContext(), ScopedSnapshotT(), OperationsType::O_Leaf), context_(context) {
     }
 
     Status
@@ -240,7 +277,8 @@ class LoadOperation : public Operations {
 template <typename ResourceT>
 class HardDeleteOperation : public Operations {
  public:
-    explicit HardDeleteOperation(ID_TYPE id) : Operations(OperationContext(), ScopedSnapshotT()), id_(id) {
+    explicit HardDeleteOperation(ID_TYPE id)
+        : Operations(OperationContext(), ScopedSnapshotT(), OperationsType::W_Leaf), id_(id) {
     }
 
     Status
@@ -260,7 +298,8 @@ class HardDeleteOperation : public Operations {
 template <>
 class HardDeleteOperation<Collection> : public Operations {
  public:
-    explicit HardDeleteOperation(ID_TYPE id) : Operations(OperationContext(), ScopedSnapshotT()), id_(id) {
+    explicit HardDeleteOperation(ID_TYPE id)
+        : Operations(OperationContext(), ScopedSnapshotT(), OperationsType::W_Leaf), id_(id) {
     }
 
     Status
