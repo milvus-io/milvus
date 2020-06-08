@@ -13,9 +13,7 @@
 #include <fiu-local.h>
 #include <thread>
 
-namespace milvus {
-namespace engine {
-namespace meta {
+namespace milvus::engine::meta {
 
 // Do a simple form of in-use connection limiting: wait to return
 // a connection until there are a reasonably low number in use
@@ -84,6 +82,4 @@ MySQLConnectionPool::max_idle_time() {
     return max_idle_time_;
 }
 
-}  // namespace meta
-}  // namespace engine
-}  // namespace milvus
+}  // namespace milvus::engine::meta
