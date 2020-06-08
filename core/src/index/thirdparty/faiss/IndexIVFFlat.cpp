@@ -154,19 +154,33 @@ struct IVFFlatScanner: InvertedListScanner {
     {
         const float *list_vecs = (const float*)codes;
         size_t nup = 0;
-        for (size_t j = 0; j < list_size; j++) {
-            if (!bitset || !bitset->test(ids[j])) {
-                const float * yj = list_vecs + d * j;
-                float dis = metric == METRIC_INNER_PRODUCT ?
-                            fvec_inner_product (xi, yj, d) : fvec_L2sqr (xi, yj, d);
-                if (C::cmp (simi[0], dis)) {
-                    int64_t id = store_pairs ? (list_no << 32 | j) : ids[j];
-                    heap_swap_top<C> (k, simi, idxi, dis, id);
-                    nup++;
+        if (metric == METRIC_INNER_PRODUCT) {
+            for (size_t j = 0; j < list_size; j++) {
+                int64_t cid = ids[j];
+                if (!bitset || !bitset->test(cid)) {
+                    const float * yj = list_vecs + d * j;
+                    float dis = fvec_inner_product (xi, yj, d);
+                    if (C::cmp (simi[0], dis)) {
+                        heap_swap_top<C> (k, simi, idxi, dis, cid);
+                        nup++;
+                    }
                 }
             }
+            return nup;
+        } else {
+            for (size_t j = 0; j < list_size; j++) {
+                int64_t cid = ids[j];
+                if (!bitset || !bitset->test(cid)) {
+                    const float * yj = list_vecs + d * j;
+                    float dis = fvec_L2sqr (xi, yj, d);
+                    if (C::cmp (simi[0], dis)) {
+                        heap_swap_top<C> (k, simi, idxi, dis, cid);
+                        nup++;
+                    }
+                }
+            }
+            return nup;
         }
-        return nup;
     }
 
     void scan_codes_range (size_t list_size,
@@ -285,11 +299,7 @@ void IndexIVFFlatDedup::add_with_ids(
         InvertedLists::ScopedCodes codes (invlists, list_no);
 
         int64_t n = invlists->list_size (list_no);
-        int64_t offset = -1;
-        for (int64_t o = 0; o < n; o++) {
-            if (!memcmp (codes.get() + o * code_size,
-                         xi, code_size)) {
-                offset = o;
+search_and_reconstruct
                 break;
             }
         }
