@@ -90,15 +90,13 @@ const char* CONFIG_DB_ARCHIVE_DAYS_THRESHOLD = "archive_days_threshold";
 const char* CONFIG_DB_ARCHIVE_DAYS_THRESHOLD_DEFAULT = "0";
 const char* CONFIG_DB_PRELOAD_COLLECTION = "preload_collection";
 const char* CONFIG_DB_PRELOAD_COLLECTION_DEFAULT = "";
-const char* CONFIG_DB_AUTO_FLUSH_INTERVAL = "auto_flush_interval";
-const char* CONFIG_DB_AUTO_FLUSH_INTERVAL_DEFAULT = "1";
 
 /* storage config */
-const char* CONFIG_STORAGE = "storage_config";
-const char* CONFIG_STORAGE_PRIMARY_PATH = "primary_path";
-const char* CONFIG_STORAGE_PRIMARY_PATH_DEFAULT = "/tmp/milvus";
-const char* CONFIG_STORAGE_SECONDARY_PATH = "secondary_path";
-const char* CONFIG_STORAGE_SECONDARY_PATH_DEFAULT = "";
+const char* CONFIG_STORAGE = "storage";
+const char* CONFIG_STORAGE_PATH = "path";
+const char* CONFIG_STORAGE_PATH_DEFAULT = "/tmp/milvus";
+const char* CONFIG_STORAGE_AUTO_FLUSH_INTERVAL = "auto_flush_interval";
+const char* CONFIG_STORAGE_AUTO_FLUSH_INTERVAL_DEFAULT = "1";
 const char* CONFIG_STORAGE_FILE_CLEANUP_TIMEOUT = "file_cleanup_timeout";
 const char* CONFIG_STORAGE_FILE_CLEANUP_TIMEOUT_DEFAULT = "10";
 const int64_t CONFIG_STORAGE_FILE_CLEANUP_TIMEOUT_MIN = 0;
@@ -340,15 +338,12 @@ Config::ValidateConfig() {
     int64_t db_archive_days_threshold;
     STATUS_CHECK(GetDBConfigArchiveDaysThreshold(db_archive_days_threshold));
 
-    int64_t auto_flush_interval;
-    STATUS_CHECK(GetDBConfigAutoFlushInterval(auto_flush_interval));
-
     /* storage config */
-    std::string storage_primary_path;
-    STATUS_CHECK(GetStorageConfigPrimaryPath(storage_primary_path));
+    std::string storage_path;
+    STATUS_CHECK(GetStorageConfigPath(storage_path));
 
-    std::string storage_secondary_path;
-    STATUS_CHECK(GetStorageConfigSecondaryPath(storage_secondary_path));
+    int64_t auto_flush_interval;
+    STATUS_CHECK(GetStorageConfigAutoFlushInterval(auto_flush_interval));
 
     // bool storage_s3_enable;
     // STATUS_CHECK(GetStorageConfigS3Enable(storage_s3_enable));
@@ -505,11 +500,10 @@ Config::ResetDefaultConfig() {
     STATUS_CHECK(SetDBConfigPreloadCollection(CONFIG_DB_PRELOAD_COLLECTION_DEFAULT));
     STATUS_CHECK(SetDBConfigArchiveDiskThreshold(CONFIG_DB_ARCHIVE_DISK_THRESHOLD_DEFAULT));
     STATUS_CHECK(SetDBConfigArchiveDaysThreshold(CONFIG_DB_ARCHIVE_DAYS_THRESHOLD_DEFAULT));
-    STATUS_CHECK(SetDBConfigAutoFlushInterval(CONFIG_DB_AUTO_FLUSH_INTERVAL_DEFAULT));
 
     /* storage config */
-    STATUS_CHECK(SetStorageConfigPrimaryPath(CONFIG_STORAGE_PRIMARY_PATH_DEFAULT));
-    STATUS_CHECK(SetStorageConfigSecondaryPath(CONFIG_STORAGE_SECONDARY_PATH_DEFAULT));
+    STATUS_CHECK(SetStorageConfigPath(CONFIG_STORAGE_PATH_DEFAULT));
+    STATUS_CHECK(SetStorageConfigAutoFlushInterval(CONFIG_STORAGE_AUTO_FLUSH_INTERVAL_DEFAULT));
     STATUS_CHECK(SetStorageConfigFileCleanupTimeout(CONFIG_STORAGE_FILE_CLEANUP_TIMEOUT_DEFAULT));
     // STATUS_CHECK(SetStorageConfigS3Enable(CONFIG_STORAGE_S3_ENABLE_DEFAULT));
     // STATUS_CHECK(SetStorageConfigS3Address(CONFIG_STORAGE_S3_ADDRESS_DEFAULT));
@@ -625,16 +619,14 @@ Config::SetConfigCli(const std::string& parent_key, const std::string& child_key
         // } else if (child_key == CONFIG_DB_PRELOAD_COLLECTION) {
         if (child_key == CONFIG_DB_PRELOAD_COLLECTION) {
             status = SetDBConfigPreloadCollection(value);
-        } else if (child_key == CONFIG_DB_AUTO_FLUSH_INTERVAL) {
-            status = SetDBConfigAutoFlushInterval(value);
         } else {
             status = Status(SERVER_UNEXPECTED_ERROR, invalid_node_str);
         }
     } else if (parent_key == CONFIG_STORAGE) {
-        if (child_key == CONFIG_STORAGE_PRIMARY_PATH) {
-            status = SetStorageConfigPrimaryPath(value);
-        } else if (child_key == CONFIG_STORAGE_SECONDARY_PATH) {
-            status = SetStorageConfigSecondaryPath(value);
+        if (child_key == CONFIG_STORAGE_PATH) {
+            status = SetStorageConfigPath(value);
+        } else if (child_key == CONFIG_STORAGE_AUTO_FLUSH_INTERVAL) {
+            status = SetStorageConfigAutoFlushInterval(value);
             // } else if (child_key == CONFIG_STORAGE_S3_ENABLE) {
             //     status = SetStorageConfigS3Enable(value);
             // } else if (child_key == CONFIG_STORAGE_S3_ADDRESS) {
@@ -1247,56 +1239,26 @@ Config::CheckDBConfigArchiveDaysThreshold(const std::string& value) {
     return Status::OK();
 }
 
-Status
-Config::CheckDBConfigAutoFlushInterval(const std::string& value) {
-    auto exist_error = !ValidationUtil::ValidateStringIsNumber(value).ok();
-    fiu_do_on("check_config_auto_flush_interval_fail", exist_error = true);
-
-    if (exist_error) {
-        std::string msg = "Invalid db configuration auto_flush_interval: " + value +
-                          ". Possible reason: db.auto_flush_interval is not a natural number.";
-        return Status(SERVER_INVALID_ARGUMENT, msg);
-    }
-
-    return Status::OK();
-}
-
 /* storage config */
 Status
-Config::CheckStorageConfigPrimaryPath(const std::string& value) {
-    fiu_return_on("check_config_primary_path_fail", Status(SERVER_INVALID_ARGUMENT, ""));
+Config::CheckStorageConfigPath(const std::string& value) {
+    fiu_return_on("check_config_path_fail", Status(SERVER_INVALID_ARGUMENT, ""));
     if (value.empty()) {
-        return Status(SERVER_INVALID_ARGUMENT, "storage_config.db_path is empty.");
+        return Status(SERVER_INVALID_ARGUMENT, "storage.path is empty.");
     }
 
     return ValidationUtil::ValidateStoragePath(value);
 }
 
 Status
-Config::CheckStorageConfigSecondaryPath(const std::string& value) {
-    fiu_return_on("check_config_secondary_path_fail", Status(SERVER_INVALID_ARGUMENT, ""));
+Config::CheckStorageConfigAutoFlushInterval(const std::string& value) {
+    auto exist_error = !ValidationUtil::ValidateStringIsNumber(value).ok();
+    fiu_do_on("check_config_auto_flush_interval_fail", exist_error = true);
 
-    auto status = Status::OK();
-
-    if (value.empty()) {
-        return status;
-    }
-
-    std::vector<std::string> vec;
-    StringHelpFunctions::SplitStringByDelimeter(value, ",", vec);
-    std::unordered_set<std::string> path_set;
-    for (auto& path : vec) {
-        StringHelpFunctions::TrimStringBlank(path);
-        status = ValidationUtil::ValidateStoragePath(path);
-        if (!status.ok()) {
-            return status;
-        }
-
-        path_set.insert(path);
-    }
-
-    if (path_set.size() != vec.size()) {
-        return Status(SERVER_INVALID_ARGUMENT, "Path value is duplicated");
+    if (exist_error) {
+        std::string msg = "Invalid storage configuration auto_flush_interval: " + value +
+                          ". Possible reason: storage.auto_flush_interval is not a natural number.";
+        return Status(SERVER_INVALID_ARGUMENT, msg);
     }
 
     return Status::OK();
@@ -1306,14 +1268,14 @@ Status
 Config::CheckStorageConfigFileCleanupTimeout(const std::string& value) {
     if (!ValidationUtil::ValidateStringIsNumber(value).ok()) {
         std::string msg = "Invalid file_cleanup_timeout: " + value +
-                          ". Possible reason: storage_config.file_cleanup_timeout is not a positive integer.";
+                          ". Possible reason: storage.file_cleanup_timeout is not a positive integer.";
         return Status(SERVER_INVALID_ARGUMENT, msg);
     } else {
         int64_t file_cleanup_timeout = std::stoll(value);
         if (file_cleanup_timeout < CONFIG_STORAGE_FILE_CLEANUP_TIMEOUT_MIN ||
             file_cleanup_timeout > CONFIG_STORAGE_FILE_CLEANUP_TIMEOUT_MAX) {
             std::string msg = "Invalid file_cleanup_timeout: " + value +
-                              ". Possible reason: storage_config.file_cleanup_timeout is not in range [" +
+                              ". Possible reason: storage.file_cleanup_timeout is not in range [" +
                               std::to_string(CONFIG_STORAGE_FILE_CLEANUP_TIMEOUT_MIN) + ", " +
                               std::to_string(CONFIG_STORAGE_FILE_CLEANUP_TIMEOUT_MIN) + "].";
             return Status(SERVER_INVALID_ARGUMENT, msg);
@@ -2141,25 +2103,20 @@ Config::GetDBConfigPreloadCollection(std::string& value) {
     return Status::OK();
 }
 
-Status
-Config::GetDBConfigAutoFlushInterval(int64_t& value) {
-    std::string str = GetConfigStr(CONFIG_DB, CONFIG_DB_AUTO_FLUSH_INTERVAL, CONFIG_DB_AUTO_FLUSH_INTERVAL_DEFAULT);
-    STATUS_CHECK(CheckDBConfigAutoFlushInterval(str));
-    value = std::stoll(str);
-    return Status::OK();
-}
-
 /* storage config */
 Status
-Config::GetStorageConfigPrimaryPath(std::string& value) {
-    value = GetConfigStr(CONFIG_STORAGE, CONFIG_STORAGE_PRIMARY_PATH, CONFIG_STORAGE_PRIMARY_PATH_DEFAULT);
-    return CheckStorageConfigPrimaryPath(value);
+Config::GetStorageConfigPath(std::string& value) {
+    value = GetConfigStr(CONFIG_STORAGE, CONFIG_STORAGE_PATH, CONFIG_STORAGE_PATH_DEFAULT);
+    return CheckStorageConfigPath(value);
 }
 
 Status
-Config::GetStorageConfigSecondaryPath(std::string& value) {
-    value = GetConfigStr(CONFIG_STORAGE, CONFIG_STORAGE_SECONDARY_PATH, CONFIG_STORAGE_SECONDARY_PATH_DEFAULT);
-    return CheckStorageConfigSecondaryPath(value);
+Config::GetStorageConfigAutoFlushInterval(int64_t& value) {
+    std::string str =
+        GetConfigStr(CONFIG_STORAGE, CONFIG_STORAGE_AUTO_FLUSH_INTERVAL, CONFIG_STORAGE_AUTO_FLUSH_INTERVAL_DEFAULT);
+    STATUS_CHECK(CheckStorageConfigAutoFlushInterval(str));
+    value = std::stoll(str);
+    return Status::OK();
 }
 
 Status
@@ -2637,23 +2594,17 @@ Config::SetDBConfigArchiveDaysThreshold(const std::string& value) {
     return SetConfigValueInMem(CONFIG_DB, CONFIG_DB_ARCHIVE_DAYS_THRESHOLD, value);
 }
 
-Status
-Config::SetDBConfigAutoFlushInterval(const std::string& value) {
-    STATUS_CHECK(CheckDBConfigAutoFlushInterval(value));
-    return SetConfigValueInMem(CONFIG_DB, CONFIG_DB_AUTO_FLUSH_INTERVAL, value);
-}
-
 /* storage config */
 Status
-Config::SetStorageConfigPrimaryPath(const std::string& value) {
-    STATUS_CHECK(CheckStorageConfigPrimaryPath(value));
-    return SetConfigValueInMem(CONFIG_STORAGE, CONFIG_STORAGE_PRIMARY_PATH, value);
+Config::SetStorageConfigPath(const std::string& value) {
+    STATUS_CHECK(CheckStorageConfigPath(value));
+    return SetConfigValueInMem(CONFIG_STORAGE, CONFIG_STORAGE_PATH, value);
 }
 
 Status
-Config::SetStorageConfigSecondaryPath(const std::string& value) {
-    STATUS_CHECK(CheckStorageConfigSecondaryPath(value));
-    return SetConfigValueInMem(CONFIG_STORAGE, CONFIG_STORAGE_SECONDARY_PATH, value);
+Config::SetStorageConfigAutoFlushInterval(const std::string& value) {
+    STATUS_CHECK(CheckStorageConfigAutoFlushInterval(value));
+    return SetConfigValueInMem(CONFIG_DB, CONFIG_STORAGE_AUTO_FLUSH_INTERVAL, value);
 }
 
 Status

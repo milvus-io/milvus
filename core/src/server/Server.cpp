@@ -227,7 +227,7 @@ Server::Start() {
         // if (deploy_mode == "single" || deploy_mode == "cluster_writable") {
         if ((not cluster_enable) || cluster_role == "rw") {
             std::string db_path;
-            STATUS_CHECK(config.GetStorageConfigPrimaryPath(db_path));
+            STATUS_CHECK(config.GetStorageConfigPath(db_path));
 
             try {
                 // True if a new directory was created, otherwise false.

@@ -78,15 +78,13 @@ extern const char* CONFIG_DB_ARCHIVE_DAYS_THRESHOLD;
 extern const char* CONFIG_DB_ARCHIVE_DAYS_THRESHOLD_DEFAULT;
 extern const char* CONFIG_DB_PRELOAD_COLLECTION;
 extern const char* CONFIG_DB_PRELOAD_COLLECTION_DEFAULT;
-extern const char* CONFIG_DB_AUTO_FLUSH_INTERVAL;
-extern const char* CONFIG_DB_AUTO_FLUSH_INTERVAL_DEFAULT;
 
 /* storage config */
 extern const char* CONFIG_STORAGE;
-extern const char* CONFIG_STORAGE_PRIMARY_PATH;
-extern const char* CONFIG_STORAGE_PRIMARY_PATH_DEFAULT;
-extern const char* CONFIG_STORAGE_SECONDARY_PATH;
-extern const char* CONFIG_STORAGE_SECONDARY_PATH_DEFAULT;
+extern const char* CONFIG_STORAGE_PATH;
+extern const char* CONFIG_STORAGE_PATH_DEFAULT;
+extern const char* CONFIG_STORAGE_AUTO_FLUSH_INTERVAL;
+extern const char* CONFIG_STORAGE_AUTO_FLUSH_INTERVAL_DEFAULT;
 extern const char* CONFIG_STORAGE_FILE_CLEANUP_TIMEOUT;
 extern const int64_t CONFIG_STORAGE_FILE_CLEANUP_TIMEOUT_MIN;
 extern const int64_t CONFIG_STORAGE_FILE_CLEANUP_TIMEOUT_MAX;
@@ -285,14 +283,12 @@ class Config {
     CheckDBConfigArchiveDiskThreshold(const std::string& value);
     Status
     CheckDBConfigArchiveDaysThreshold(const std::string& value);
-    Status
-    CheckDBConfigAutoFlushInterval(const std::string& value);
 
     /* storage config */
     Status
-    CheckStorageConfigPrimaryPath(const std::string& value);
+    CheckStorageConfigPath(const std::string& value);
     Status
-    CheckStorageConfigSecondaryPath(const std::string& value);
+    CheckStorageConfigAutoFlushInterval(const std::string& value);
     Status
     CheckStorageConfigFileCleanupTimeout(const std::string& value);
     // Status
@@ -442,14 +438,12 @@ class Config {
     GetDBConfigArchiveDaysThreshold(int64_t& value);
     Status
     GetDBConfigPreloadCollection(std::string& value);
-    Status
-    GetDBConfigAutoFlushInterval(int64_t& value);
 
     /* storage config */
     Status
-    GetStorageConfigPrimaryPath(std::string& value);
+    GetStorageConfigPath(std::string& value);
     Status
-    GetStorageConfigSecondaryPath(std::string& value);
+    GetStorageConfigAutoFlushInterval(int64_t& value);
     Status
     GetStorageConfigFileCleanupTimeup(int64_t& value);
     // Status
@@ -591,14 +585,12 @@ class Config {
     SetDBConfigArchiveDiskThreshold(const std::string& value);
     Status
     SetDBConfigArchiveDaysThreshold(const std::string& value);
-    Status
-    SetDBConfigAutoFlushInterval(const std::string& value);
 
     /* storage config */
     Status
-    SetStorageConfigPrimaryPath(const std::string& value);
+    SetStorageConfigPath(const std::string& value);
     Status
-    SetStorageConfigSecondaryPath(const std::string& value);
+    SetStorageConfigAutoFlushInterval(const std::string& value);
     Status
     SetStorageConfigFileCleanupTimeout(const std::string& value);
     // Status

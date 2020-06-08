@@ -40,29 +40,19 @@ DBWrapper::StartService() {
         return s;
     }
 
-    s = config.GetDBConfigAutoFlushInterval(opt.auto_flush_interval_);
-    if (!s.ok()) {
-        std::cerr << s.ToString() << std::endl;
-        return s;
-    }
-
     std::string path;
-    s = config.GetStorageConfigPrimaryPath(path);
+    s = config.GetStorageConfigPath(path);
     if (!s.ok()) {
         std::cerr << s.ToString() << std::endl;
         return s;
     }
-
     opt.meta_.path_ = path + "/db";
 
-    std::string db_slave_path;
-    s = config.GetStorageConfigSecondaryPath(db_slave_path);
+    s = config.GetStorageConfigAutoFlushInterval(opt.auto_flush_interval_);
     if (!s.ok()) {
         std::cerr << s.ToString() << std::endl;
         return s;
     }
-
-    StringHelpFunctions::SplitStringByDelimeter(db_slave_path, ";", opt.meta_.slave_paths_);
 
     s = config.GetStorageConfigFileCleanupTimeup(opt.file_cleanup_timeout_);
     if (!s.ok()) {
