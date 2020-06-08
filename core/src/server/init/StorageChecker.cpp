@@ -44,6 +44,16 @@ StorageChecker::CheckStoragePermission() {
         return Status(SERVER_UNEXPECTED_ERROR, err_msg);
     }
 
+#if 1
+    bool cluster_enable = false;
+    std::string cluster_role;
+    STATUS_CHECK(config.GetClusterConfigEnable(cluster_enable));
+    STATUS_CHECK(config.GetClusterConfigRole(cluster_role));
+
+    if (cluster_enable && cluster_role == "ro") {
+        return Status::OK();
+    }
+#else
     std::string deploy_mode;
     status = config.GetServerConfigDeployMode(deploy_mode);
     if (!status.ok()) {
@@ -53,6 +63,7 @@ StorageChecker::CheckStoragePermission() {
     if (deploy_mode == "cluster_readonly") {
         return Status::OK();
     }
+#endif
 
     /* Check db directory write permission */
     std::string primary_path;

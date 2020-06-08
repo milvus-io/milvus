@@ -92,6 +92,23 @@ DBWrapper::StartService() {
     }
     opt.insert_buffer_size_ = insert_buffer_size * engine::GB;
 
+#if 1
+    bool cluster_enable = false;
+    std::string cluster_role;
+    STATUS_CHECK(config.GetClusterConfigEnable(cluster_enable));
+    STATUS_CHECK(config.GetClusterConfigRole(cluster_role));
+    if (not cluster_enable) {
+        opt.mode_ = engine::DBOptions::MODE::SINGLE;
+    } else if (cluster_role == "ro") {
+        opt.mode_ = engine::DBOptions::MODE::CLUSTER_READONLY;
+    } else if (cluster_role == "rw") {
+        opt.mode_ = engine::DBOptions::MODE::CLUSTER_WRITABLE;
+    } else {
+        std::cerr << "Error: cluster.role is not one of rw and ro." << std::endl;
+        kill(0, SIGUSR1);
+    }
+
+#else
     std::string mode;
     s = config.GetServerConfigDeployMode(mode);
     if (!s.ok()) {
@@ -110,6 +127,7 @@ DBWrapper::StartService() {
                   << "single, cluster_readonly, and cluster_writable." << std::endl;
         kill(0, SIGUSR1);
     }
+#endif
 
     // get wal configurations
     s = config.GetWalConfigEnable(opt.wal_enable_);

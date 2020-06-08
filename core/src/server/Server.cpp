@@ -216,10 +216,16 @@ Server::Start() {
                     max_log_file_size, delete_exceeds);
         }
 
-        std::string deploy_mode;
-        STATUS_CHECK(config.GetServerConfigDeployMode(deploy_mode));
+        bool cluster_enable = false;
+        std::string cluster_role;
+        STATUS_CHECK(config.GetClusterConfigEnable(cluster_enable));
+        STATUS_CHECK(config.GetClusterConfigRole(cluster_role));
 
-        if (deploy_mode == "single" || deploy_mode == "cluster_writable") {
+        // std::string deploy_mode;
+        // STATUS_CHECK(config.GetServerConfigDeployMode(deploy_mode));
+
+        // if (deploy_mode == "single" || deploy_mode == "cluster_writable") {
+        if ((not cluster_enable) || cluster_role == "rw") {
             std::string db_path;
             STATUS_CHECK(config.GetStorageConfigPrimaryPath(db_path));
 
@@ -232,7 +238,11 @@ Server::Start() {
 
             s = InstanceLockCheck::Check(db_path);
             if (!s.ok()) {
-                std::cerr << "deploy_mode: " << deploy_mode << " instance lock db path failed." << std::endl;
+                if (not cluster_enable) {
+                    std::cerr << "single instance lock db path failed." << std::endl;
+                } else {
+                    std::cerr << cluster_role << " instance lock db path failed." << std::endl;
+                }
                 return s;
             }
 
@@ -251,7 +261,11 @@ Server::Start() {
                 }
                 s = InstanceLockCheck::Check(wal_path);
                 if (!s.ok()) {
-                    std::cerr << "deploy_mode: " << deploy_mode << " instance lock wal path failed." << std::endl;
+                    if (not cluster_enable) {
+                        std::cerr << "single instance lock wal path failed." << std::endl;
+                    } else {
+                        std::cerr << cluster_role << " instance lock wal path failed." << std::endl;
+                    }
                     return s;
                 }
             }

@@ -28,14 +28,21 @@ using ConfigCallBackF = std::function<Status(const std::string&)>;
 extern const char* CONFIG_NODE_DELIMITER;
 extern const char* CONFIG_VERSION;
 
+/* cluster config */
+extern const char* CONFIG_CLUSTER;
+extern const char* CONFIG_CLUSTER_ENABLE;
+extern const char* CONFIG_CLUSTER_ENABLE_DEFAULT;
+extern const char* CONFIG_CLUSTER_ROLE;
+extern const char* CONFIG_CLUSTER_ROLE_DEFAULT;
+
 /* server config */
 extern const char* CONFIG_SERVER;
 extern const char* CONFIG_SERVER_ADDRESS;
 extern const char* CONFIG_SERVER_ADDRESS_DEFAULT;
 extern const char* CONFIG_SERVER_PORT;
 extern const char* CONFIG_SERVER_PORT_DEFAULT;
-extern const char* CONFIG_SERVER_DEPLOY_MODE;
-extern const char* CONFIG_SERVER_DEPLOY_MODE_DEFAULT;
+// extern const char* CONFIG_SERVER_DEPLOY_MODE;
+// extern const char* CONFIG_SERVER_DEPLOY_MODE_DEFAULT;
 extern const char* CONFIG_SERVER_TIME_ZONE;
 extern const char* CONFIG_SERVER_TIME_ZONE_DEFAULT;
 extern const char* CONFIG_SERVER_WEB_ENABLE;
@@ -215,13 +222,19 @@ class Config {
     Status
     CheckConfigVersion(const std::string& value);
 
+    /* cluster config */
+    Status
+    CheckClusterConfigEnable(const std::string& value);
+    Status
+    CheckClusterConfigRole(const std::string& value);
+
     /* server config */
     Status
     CheckServerConfigAddress(const std::string& value);
     Status
     CheckServerConfigPort(const std::string& value);
-    Status
-    CheckServerConfigDeployMode(const std::string& value);
+    //    Status
+    //    CheckServerConfigDeployMode(const std::string& value);
     Status
     CheckServerConfigTimeZone(const std::string& value);
     Status
@@ -350,13 +363,19 @@ class Config {
     ExecCallBacks(const std::string& node, const std::string& sub_node, const std::string& value);
 
  public:
+    /* cluster config */
+    Status
+    GetClusterConfigEnable(bool& value);
+    Status
+    GetClusterConfigRole(std::string& value);
+
     /* server config */
     Status
     GetServerConfigAddress(std::string& value);
     Status
     GetServerConfigPort(std::string& value);
-    Status
-    GetServerConfigDeployMode(std::string& value);
+    //    Status
+    //    GetServerConfigDeployMode(std::string& value);
     Status
     GetServerConfigTimeZone(std::string& value);
     Status
@@ -477,13 +496,19 @@ class Config {
     GetServerRestartRequired(bool& required);
 
  public:
+    /* cluster config */
+    Status
+    SetClusterConfigEnable(const std::string& value);
+    Status
+    SetClusterConfigRole(const std::string& value);
+
     /* server config */
     Status
     SetServerConfigAddress(const std::string& value);
     Status
     SetServerConfigPort(const std::string& value);
-    Status
-    SetServerConfigDeployMode(const std::string& value);
+    //    Status
+    //    SetServerConfigDeployMode(const std::string& value);
     Status
     SetServerConfigTimeZone(const std::string& value);
     Status

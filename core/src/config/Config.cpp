@@ -40,14 +40,21 @@ namespace server {
 const char* CONFIG_NODE_DELIMITER = ".";
 const char* CONFIG_VERSION = "version";
 
+/* cluster config */
+const char* CONFIG_CLUSTER = "cluster";
+const char* CONFIG_CLUSTER_ENABLE = "enable";
+const char* CONFIG_CLUSTER_ENABLE_DEFAULT = "true";
+const char* CONFIG_CLUSTER_ROLE = "role";
+const char* CONFIG_CLUSTER_ROLE_DEFAULT = "rw";
+
 /* server config */
 const char* CONFIG_SERVER = "server_config";
 const char* CONFIG_SERVER_ADDRESS = "address";
 const char* CONFIG_SERVER_ADDRESS_DEFAULT = "127.0.0.1";
 const char* CONFIG_SERVER_PORT = "port";
 const char* CONFIG_SERVER_PORT_DEFAULT = "19530";
-const char* CONFIG_SERVER_DEPLOY_MODE = "deploy_mode";
-const char* CONFIG_SERVER_DEPLOY_MODE_DEFAULT = "single";
+// const char* CONFIG_SERVER_DEPLOY_MODE = "deploy_mode";
+// const char* CONFIG_SERVER_DEPLOY_MODE_DEFAULT = "single";
 const char* CONFIG_SERVER_TIME_ZONE = "time_zone";
 const char* CONFIG_SERVER_TIME_ZONE_DEFAULT = "UTC+8";
 const char* CONFIG_SERVER_WEB_ENABLE = "web_enable";
@@ -256,6 +263,13 @@ Config::ValidateConfig() {
     std::string config_version;
     STATUS_CHECK(GetConfigVersion(config_version));
 
+    /* cluster config */
+    bool cluster_enable;
+    STATUS_CHECK(GetClusterConfigEnable(cluster_enable));
+
+    std::string cluster_role;
+    STATUS_CHECK(GetClusterConfigRole(cluster_role));
+
     /* server config */
     std::string server_addr;
     STATUS_CHECK(GetServerConfigAddress(server_addr));
@@ -263,8 +277,8 @@ Config::ValidateConfig() {
     std::string server_port;
     STATUS_CHECK(GetServerConfigPort(server_port));
 
-    std::string server_mode;
-    STATUS_CHECK(GetServerConfigDeployMode(server_mode));
+    //    std::string server_mode;
+    //    STATUS_CHECK(GetServerConfigDeployMode(server_mode));
 
     std::string server_time_zone;
     STATUS_CHECK(GetServerConfigTimeZone(server_time_zone));
@@ -426,10 +440,14 @@ Config::ValidateConfig() {
 
 Status
 Config::ResetDefaultConfig() {
+    /* cluster config */
+    STATUS_CHECK(SetClusterConfigEnable(CONFIG_CLUSTER_ENABLE_DEFAULT));
+    STATUS_CHECK(SetClusterConfigRole(CONFIG_CLUSTER_ROLE_DEFAULT));
+
     /* server config */
     STATUS_CHECK(SetServerConfigAddress(CONFIG_SERVER_ADDRESS_DEFAULT));
     STATUS_CHECK(SetServerConfigPort(CONFIG_SERVER_PORT_DEFAULT));
-    STATUS_CHECK(SetServerConfigDeployMode(CONFIG_SERVER_DEPLOY_MODE_DEFAULT));
+    //    STATUS_CHECK(SetServerConfigDeployMode(CONFIG_SERVER_DEPLOY_MODE_DEFAULT));
     STATUS_CHECK(SetServerConfigTimeZone(CONFIG_SERVER_TIME_ZONE_DEFAULT));
     STATUS_CHECK(SetServerConfigWebEnable(CONFIG_SERVER_WEB_ENABLE_DEFAULT));
     STATUS_CHECK(SetServerConfigWebPort(CONFIG_SERVER_WEB_PORT_DEFAULT));
@@ -523,11 +541,19 @@ Config::SetConfigCli(const std::string& parent_key, const std::string& child_key
         return Status(SERVER_UNEXPECTED_ERROR, invalid_node_str);
     }
     auto status = Status::OK();
-    if (parent_key == CONFIG_SERVER) {
+    if (parent_key == CONFIG_CLUSTER) {
+        if (child_key == CONFIG_CLUSTER_ENABLE) {
+            status = SetClusterConfigEnable(value);
+        } else if (child_key == CONFIG_CLUSTER_ROLE) {
+            status = SetClusterConfigRole(value);
+        } else {
+            status = Status(SERVER_UNEXPECTED_ERROR, invalid_node_str);
+        }
+    } else if (parent_key == CONFIG_SERVER) {
         if (child_key == CONFIG_SERVER_ADDRESS) {
             status = SetServerConfigAddress(value);
-        } else if (child_key == CONFIG_SERVER_DEPLOY_MODE) {
-            status = SetServerConfigDeployMode(value);
+            //        } else if (child_key == CONFIG_SERVER_DEPLOY_MODE) {
+            //            status = SetServerConfigDeployMode(value);
         } else if (child_key == CONFIG_SERVER_PORT) {
             status = SetServerConfigPort(value);
         } else if (child_key == CONFIG_SERVER_TIME_ZONE) {
@@ -882,6 +908,23 @@ Config::CheckConfigVersion(const std::string& value) {
     return Status::OK();
 }
 
+/* cluster config */
+Status
+Config::CheckClusterConfigEnable(const std::string& value) {
+    return ValidationUtil::ValidateStringIsBool(value);
+}
+
+Status
+Config::CheckClusterConfigRole(const std::string& value) {
+    fiu_return_on("check_config_cluster_role_fail",
+                  Status(SERVER_INVALID_ARGUMENT, "cluster.role is not one of rw and ro."));
+
+    if (value != "rw" && value != "ro") {
+        return Status(SERVER_INVALID_ARGUMENT, "cluster.role is not one of rw and ro.");
+    }
+    return Status::OK();
+}
+
 /* server config */
 Status
 Config::CheckServerConfigAddress(const std::string& value) {
@@ -919,18 +962,18 @@ Config::CheckServerConfigPort(const std::string& value) {
     return Status::OK();
 }
 
-Status
-Config::CheckServerConfigDeployMode(const std::string& value) {
-    fiu_return_on("check_config_deploy_mode_fail",
-                  Status(SERVER_INVALID_ARGUMENT,
-                         "server_config.deploy_mode is not one of single, cluster_readonly, and cluster_writable."));
-
-    if (value != "single" && value != "cluster_readonly" && value != "cluster_writable") {
-        return Status(SERVER_INVALID_ARGUMENT,
-                      "server_config.deploy_mode is not one of single, cluster_readonly, and cluster_writable.");
-    }
-    return Status::OK();
-}
+// Status
+// Config::CheckServerConfigDeployMode(const std::string& value) {
+//    fiu_return_on("check_config_deploy_mode_fail",
+//                  Status(SERVER_INVALID_ARGUMENT,
+//                         "server_config.deploy_mode is not one of single, cluster_readonly, and cluster_writable."));
+//
+//    if (value != "single" && value != "cluster_readonly" && value != "cluster_writable") {
+//        return Status(SERVER_INVALID_ARGUMENT,
+//                      "server_config.deploy_mode is not one of single, cluster_readonly, and cluster_writable.");
+//    }
+//    return Status::OK();
+//}
 
 Status
 Config::CheckServerConfigTimeZone(const std::string& value) {
@@ -1825,6 +1868,20 @@ Config::ExecCallBacks(const std::string& node, const std::string& sub_node, cons
     return status;
 }
 
+/* cluster config */
+Status
+Config::GetClusterConfigEnable(bool& value) {
+    std::string str = GetConfigStr(CONFIG_CLUSTER, CONFIG_CLUSTER_ENABLE, CONFIG_CLUSTER_ENABLE_DEFAULT);
+    STATUS_CHECK(CheckClusterConfigEnable(str));
+    return StringHelpFunctions::ConvertToBoolean(str, value);
+}
+
+Status
+Config::GetClusterConfigRole(std::string& value) {
+    value = GetConfigStr(CONFIG_CLUSTER, CONFIG_CLUSTER_ROLE, CONFIG_CLUSTER_ROLE_DEFAULT);
+    return CheckClusterConfigRole(value);
+}
+
 /* server config */
 Status
 Config::GetServerConfigAddress(std::string& value) {
@@ -1838,11 +1895,11 @@ Config::GetServerConfigPort(std::string& value) {
     return CheckServerConfigPort(value);
 }
 
-Status
-Config::GetServerConfigDeployMode(std::string& value) {
-    value = GetConfigStr(CONFIG_SERVER, CONFIG_SERVER_DEPLOY_MODE, CONFIG_SERVER_DEPLOY_MODE_DEFAULT);
-    return CheckServerConfigDeployMode(value);
-}
+// Status
+// Config::GetServerConfigDeployMode(std::string& value) {
+//     value = GetConfigStr(CONFIG_SERVER, CONFIG_SERVER_DEPLOY_MODE, CONFIG_SERVER_DEPLOY_MODE_DEFAULT);
+//     return CheckServerConfigDeployMode(value);
+// }
 
 Status
 Config::GetServerConfigTimeZone(std::string& value) {
@@ -2277,6 +2334,18 @@ Config::GetServerRestartRequired(bool& required) {
 }
 
 ///////////////////////////////////////////////////////////////////////////////
+/* cluster config */
+Status
+Config::SetClusterConfigEnable(const std::string& value) {
+    STATUS_CHECK(CheckClusterConfigEnable(value));
+    return SetConfigValueInMem(CONFIG_CLUSTER, CONFIG_CLUSTER_ENABLE, value);
+}
+Status
+Config::SetClusterConfigRole(const std::string& value) {
+    STATUS_CHECK(CheckClusterConfigRole(value));
+    return SetConfigValueInMem(CONFIG_CLUSTER, CONFIG_CLUSTER_ROLE, value);
+}
+
 /* server config */
 Status
 Config::SetServerConfigAddress(const std::string& value) {
@@ -2290,11 +2359,11 @@ Config::SetServerConfigPort(const std::string& value) {
     return SetConfigValueInMem(CONFIG_SERVER, CONFIG_SERVER_PORT, value);
 }
 
-Status
-Config::SetServerConfigDeployMode(const std::string& value) {
-    STATUS_CHECK(CheckServerConfigDeployMode(value));
-    return SetConfigValueInMem(CONFIG_SERVER, CONFIG_SERVER_DEPLOY_MODE, value);
-}
+// Status
+// Config::SetServerConfigDeployMode(const std::string& value) {
+//     STATUS_CHECK(CheckServerConfigDeployMode(value));
+//     return SetConfigValueInMem(CONFIG_SERVER, CONFIG_SERVER_DEPLOY_MODE, value);
+// }
 
 Status
 Config::SetServerConfigTimeZone(const std::string& value) {
