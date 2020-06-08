@@ -153,7 +153,7 @@ SqliteMetaImpl::ValidateMetaSchema() {
     bool is_null_connector{ConnectorPtr == nullptr};
     fiu_do_on("SqliteMetaImpl.ValidateMetaSchema.NullConnection", is_null_connector = true);
     if (is_null_connector) {
-        return;
+        throw Exception(DB_ERROR, "Connector is null pointer");
     }
 
     // old meta could be recreated since schema changed, throw exception if meta schema is not compatible
