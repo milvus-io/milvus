@@ -129,8 +129,6 @@ extern const char* CONFIG_ENGINE_OMP_THREAD_NUM;
 extern const char* CONFIG_ENGINE_OMP_THREAD_NUM_DEFAULT;
 extern const char* CONFIG_ENGINE_SIMD_TYPE;
 extern const char* CONFIG_ENGINE_SIMD_TYPE_DEFAULT;
-extern const char* CONFIG_ENGINE_GPU_SEARCH_THRESHOLD;
-extern const char* CONFIG_ENGINE_GPU_SEARCH_THRESHOLD_DEFAULT;
 
 /* gpu resource config */
 extern const char* CONFIG_GPU_RESOURCE;
@@ -140,6 +138,8 @@ extern const char* CONFIG_GPU_RESOURCE_CACHE_CAPACITY;
 extern const char* CONFIG_GPU_RESOURCE_CACHE_CAPACITY_DEFAULT;
 extern const char* CONFIG_GPU_RESOURCE_CACHE_THRESHOLD;
 extern const char* CONFIG_GPU_RESOURCE_CACHE_THRESHOLD_DEFAULT;
+extern const char* CONFIG_GPU_RESOURCE_GPU_SEARCH_THRESHOLD;
+extern const char* CONFIG_GPU_RESOURCE_GPU_SEARCH_THRESHOLD_DEFAULT;
 extern const char* CONFIG_GPU_RESOURCE_DELIMITER;
 extern const char* CONFIG_GPU_RESOURCE_SEARCH_RESOURCES;
 extern const char* CONFIG_GPU_RESOURCE_SEARCH_RESOURCES_DEFAULT;
@@ -331,9 +331,6 @@ class Config {
     CheckEngineConfigSimdType(const std::string& value);
 
 #ifdef MILVUS_GPU_VERSION
-    Status
-    CheckEngineConfigGpuSearchThreshold(const std::string& value);
-
     /* gpu resource config */
     Status
     CheckGpuResourceConfigEnable(const std::string& value);
@@ -341,6 +338,8 @@ class Config {
     CheckGpuResourceConfigCacheCapacity(const std::string& value);
     Status
     CheckGpuResourceConfigCacheThreshold(const std::string& value);
+    Status
+    CheckGpuResourceConfigGpuSearchThreshold(const std::string& value);
     Status
     CheckGpuResourceConfigSearchResources(const std::vector<std::string>& value);
     Status
@@ -486,9 +485,6 @@ class Config {
     GetEngineConfigSimdType(std::string& value);
 
 #ifdef MILVUS_GPU_VERSION
-    Status
-    GetEngineConfigGpuSearchThreshold(int64_t& value);
-
     /* gpu resource config */
     Status
     GetGpuResourceConfigEnable(bool& value);
@@ -496,6 +492,8 @@ class Config {
     GetGpuResourceConfigCacheCapacity(int64_t& value);
     Status
     GetGpuResourceConfigCacheThreshold(float& value);
+    Status
+    GetGpuResourceConfigGpuSearchThreshold(int64_t& value);
     Status
     GetGpuResourceConfigSearchResources(std::vector<int64_t>& value);
     Status
@@ -632,8 +630,6 @@ class Config {
     Status
     SetEngineConfigSimdType(const std::string& value);
 #ifdef MILVUS_GPU_VERSION
-    Status
-    SetEngineConfigGpuSearchThreshold(const std::string& value);
 
     /* gpu resource config */
     Status
@@ -642,6 +638,8 @@ class Config {
     SetGpuResourceConfigCacheCapacity(const std::string& value);
     Status
     SetGpuResourceConfigCacheThreshold(const std::string& value);
+    Status
+    SetGpuResourceConfigGpuSearchThreshold(const std::string& value);
     Status
     SetGpuResourceConfigSearchResources(const std::string& value);
     Status
