@@ -165,18 +165,10 @@ extern const char* CONFIG_WAL_WAL_PATH_DEFAULT;
 
 /* logs config */
 extern const char* CONFIG_LOGS;
+extern const char* CONFIG_LOGS_LEVEL;
+extern const char* CONFIG_LOGS_LEVEL_DEFAULT;
 extern const char* CONFIG_LOGS_TRACE_ENABLE;
 extern const char* CONFIG_LOGS_TRACE_ENABLE_DEFAULT;
-extern const char* CONFIG_LOGS_DEBUG_ENABLE;
-extern const char* CONFIG_LOGS_DEBUG_ENABLE_DEFAULT;
-extern const char* CONFIG_LOGS_INFO_ENABLE;
-extern const char* CONFIG_LOGS_INFO_ENABLE_DEFAULT;
-extern const char* CONFIG_LOGS_WARNING_ENABLE;
-extern const char* CONFIG_LOGS_WARNING_ENABLE_DEFAULT;
-extern const char* CONFIG_LOGS_ERROR_ENABLE;
-extern const char* CONFIG_LOGS_ERROR_ENABLE_DEFAULT;
-extern const char* CONFIG_LOGS_FATAL_ENABLE;
-extern const char* CONFIG_LOGS_FATAL_ENABLE_DEFAULT;
 extern const char* CONFIG_LOGS_PATH;
 extern const char* CONFIG_LOGS_MAX_LOG_FILE_SIZE;
 extern const char* CONFIG_LOGS_MAX_LOG_FILE_SIZE_DEFAULT;
@@ -362,17 +354,9 @@ class Config {
 
     /* logs config */
     Status
+    CheckLogsLevel(const std::string& level);
+    Status
     CheckLogsTraceEnable(const std::string& value);
-    Status
-    CheckLogsDebugEnable(const std::string& value);
-    Status
-    CheckLogsInfoEnable(const std::string& value);
-    Status
-    CheckLogsWarningEnable(const std::string& value);
-    Status
-    CheckLogsErrorEnable(const std::string& value);
-    Status
-    CheckLogsFatalEnable(const std::string& value);
     Status
     CheckLogsPath(const std::string& value);
     Status
@@ -516,17 +500,9 @@ class Config {
 
     /* logs config */
     Status
+    GetLogsLevel(std::string& value);
+    Status
     GetLogsTraceEnable(bool& value);
-    Status
-    GetLogsDebugEnable(bool& value);
-    Status
-    GetLogsInfoEnable(bool& value);
-    Status
-    GetLogsWarningEnable(bool& value);
-    Status
-    GetLogsErrorEnable(bool& value);
-    Status
-    GetLogsFatalEnable(bool& value);
     Status
     GetLogsPath(std::string& value);
     Status
@@ -662,17 +638,9 @@ class Config {
 
     /* logs config */
     Status
+    SetLogsLevel(const std::string& value);
+    Status
     SetLogsTraceEnable(const std::string& value);
-    Status
-    SetLogsDebugEnable(const std::string& value);
-    Status
-    SetLogsInfoEnable(const std::string& value);
-    Status
-    SetLogsWarningEnable(const std::string& value);
-    Status
-    SetLogsErrorEnable(const std::string& value);
-    Status
-    SetLogsFatalEnable(const std::string& value);
     Status
     SetLogsPath(const std::string& value);
     Status

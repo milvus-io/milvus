@@ -93,6 +93,9 @@ class ValidationUtil {
     static Status
     ValidateStoragePath(const std::string& path);
 
+    static Status
+    ValidateLogLevel(const std::string& level);
+
     static bool
     IsNumber(const std::string& s);
 };

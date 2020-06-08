@@ -16,6 +16,7 @@
 #include <unistd.h>
 #include <boost/filesystem.hpp>
 #include <cstring>
+#include <unordered_map>
 
 #include "config/Config.h"
 #include "index/archive/KnowhereResource.h"
@@ -194,6 +195,11 @@ Server::Start() {
         tzset();
 
         {
+            std::unordered_map<std::string, int64_t> level_to_int{
+                {"debug", 5}, {"info", 4}, {"warning", 3}, {"error", 2}, {"fatal", 1},
+            };
+
+            std::string level;
             bool trace_enable = false;
             bool debug_enable = false;
             bool info_enable = false;
@@ -203,12 +209,25 @@ Server::Start() {
             std::string logs_path;
             int64_t max_log_file_size = 0;
             int64_t delete_exceeds = 0;
+
+            STATUS_CHECK(config.GetLogsLevel(level));
+            switch (level_to_int[level]) {
+                case 5:
+                    debug_enable = true;
+                case 4:
+                    info_enable = true;
+                case 3:
+                    warning_enable = true;
+                case 2:
+                    error_enable = true;
+                case 1:
+                    fatal_enable = true;
+                    break;
+                default:
+                    return Status(SERVER_UNEXPECTED_ERROR, "invalid log level");
+            }
+
             STATUS_CHECK(config.GetLogsTraceEnable(trace_enable));
-            STATUS_CHECK(config.GetLogsDebugEnable(debug_enable));
-            STATUS_CHECK(config.GetLogsInfoEnable(info_enable));
-            STATUS_CHECK(config.GetLogsWarningEnable(warning_enable));
-            STATUS_CHECK(config.GetLogsErrorEnable(error_enable));
-            STATUS_CHECK(config.GetLogsFatalEnable(fatal_enable));
             STATUS_CHECK(config.GetLogsPath(logs_path));
             STATUS_CHECK(config.GetLogsMaxLogFileSize(max_log_file_size));
             STATUS_CHECK(config.GetLogsLogRotateNum(delete_exceeds));

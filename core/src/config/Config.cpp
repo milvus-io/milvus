@@ -182,18 +182,10 @@ const char* CONFIG_WAL_WAL_PATH_DEFAULT = "/tmp/milvus/wal";
 
 /* logs config */
 const char* CONFIG_LOGS = "logs";
+const char* CONFIG_LOGS_LEVEL = "level";
+const char* CONFIG_LOGS_LEVEL_DEFAULT = "debug";
 const char* CONFIG_LOGS_TRACE_ENABLE = "trace.enable";
 const char* CONFIG_LOGS_TRACE_ENABLE_DEFAULT = "true";
-const char* CONFIG_LOGS_DEBUG_ENABLE = "debug.enable";
-const char* CONFIG_LOGS_DEBUG_ENABLE_DEFAULT = "true";
-const char* CONFIG_LOGS_INFO_ENABLE = "info.enable";
-const char* CONFIG_LOGS_INFO_ENABLE_DEFAULT = "true";
-const char* CONFIG_LOGS_WARNING_ENABLE = "warning.enable";
-const char* CONFIG_LOGS_WARNING_ENABLE_DEFAULT = "true";
-const char* CONFIG_LOGS_ERROR_ENABLE = "error.enable";
-const char* CONFIG_LOGS_ERROR_ENABLE_DEFAULT = "true";
-const char* CONFIG_LOGS_FATAL_ENABLE = "fatal.enable";
-const char* CONFIG_LOGS_FATAL_ENABLE_DEFAULT = "true";
 const char* CONFIG_LOGS_PATH = "path";
 const char* CONFIG_LOGS_PATH_DEFAULT = "/tmp/milvus/logs";
 const char* CONFIG_LOGS_MAX_LOG_FILE_SIZE = "max_log_file_size";
@@ -439,23 +431,11 @@ Config::ValidateConfig() {
     STATUS_CHECK(GetWalConfigWalPath(wal_path));
 
     /* logs config */
+    std::string logs_level;
+    STATUS_CHECK(GetLogsLevel(logs_level));
+
     bool trace_enable;
     STATUS_CHECK(GetLogsTraceEnable(trace_enable));
-
-    bool debug_enable;
-    STATUS_CHECK(GetLogsDebugEnable(debug_enable));
-
-    bool info_enable;
-    STATUS_CHECK(GetLogsInfoEnable(info_enable));
-
-    bool warning_enable;
-    STATUS_CHECK(GetLogsWarningEnable(warning_enable));
-
-    bool error_enable;
-    STATUS_CHECK(GetLogsErrorEnable(error_enable));
-
-    bool fatal_enable;
-    STATUS_CHECK(GetLogsFatalEnable(fatal_enable));
 
     std::string logs_path;
     STATUS_CHECK(GetLogsPath(logs_path));
@@ -543,12 +523,8 @@ Config::ResetDefaultConfig() {
     STATUS_CHECK(SetWalConfigWalPath(CONFIG_WAL_WAL_PATH_DEFAULT));
 
     /* logs config */
+    STATUS_CHECK(SetLogsLevel(CONFIG_LOGS_LEVEL_DEFAULT));
     STATUS_CHECK(SetLogsTraceEnable(CONFIG_LOGS_TRACE_ENABLE_DEFAULT));
-    STATUS_CHECK(SetLogsDebugEnable(CONFIG_LOGS_DEBUG_ENABLE_DEFAULT));
-    STATUS_CHECK(SetLogsInfoEnable(CONFIG_LOGS_INFO_ENABLE_DEFAULT));
-    STATUS_CHECK(SetLogsWarningEnable(CONFIG_LOGS_WARNING_ENABLE_DEFAULT));
-    STATUS_CHECK(SetLogsErrorEnable(CONFIG_LOGS_ERROR_ENABLE_DEFAULT));
-    STATUS_CHECK(SetLogsFatalEnable(CONFIG_LOGS_FATAL_ENABLE_DEFAULT));
     STATUS_CHECK(SetLogsPath(CONFIG_LOGS_PATH_DEFAULT));
     STATUS_CHECK(SetLogsMaxLogFileSize(CONFIG_LOGS_MAX_LOG_FILE_SIZE_DEFAULT));
     STATUS_CHECK(SetLogsLogRotateNum(CONFIG_LOGS_LOG_ROTATE_NUM_DEFAULT));
@@ -709,18 +685,10 @@ Config::SetConfigCli(const std::string& parent_key, const std::string& child_key
             status = Status(SERVER_UNEXPECTED_ERROR, invalid_node_str);
         }
     } else if (parent_key == CONFIG_LOGS) {
-        if (child_key == CONFIG_LOGS_TRACE_ENABLE) {
+        if (child_key == CONFIG_LOGS_LEVEL) {
+            status = SetLogsLevel(value);
+        } else if (child_key == CONFIG_LOGS_TRACE_ENABLE) {
             status = SetLogsTraceEnable(value);
-        } else if (child_key == CONFIG_LOGS_DEBUG_ENABLE) {
-            status = SetLogsDebugEnable(value);
-        } else if (child_key == CONFIG_LOGS_INFO_ENABLE) {
-            status = SetLogsInfoEnable(value);
-        } else if (child_key == CONFIG_LOGS_WARNING_ENABLE) {
-            status = SetLogsWarningEnable(value);
-        } else if (child_key == CONFIG_LOGS_ERROR_ENABLE) {
-            status = SetLogsErrorEnable(value);
-        } else if (child_key == CONFIG_LOGS_FATAL_ENABLE) {
-            status = SetLogsFatalEnable(value);
         } else if (child_key == CONFIG_LOGS_PATH) {
             status = SetLogsPath(value);
         } else if (child_key == CONFIG_LOGS_MAX_LOG_FILE_SIZE) {
@@ -1752,72 +1720,21 @@ Config::CheckWalConfigWalPath(const std::string& value) {
 
 /* logs config */
 Status
+Config::CheckLogsLevel(const std::string& value) {
+    fiu_return_on("check_logs_level_fail", Status(SERVER_INVALID_ARGUMENT, ""));
+    if (value.empty()) {
+        return Status(SERVER_INVALID_ARGUMENT, "logs.level is empty!");
+    }
+    return ValidationUtil::ValidateLogLevel(value);
+}
+
+Status
 Config::CheckLogsTraceEnable(const std::string& value) {
     auto exist_error = !ValidationUtil::ValidateStringIsBool(value).ok();
     fiu_do_on("check_logs_trace_enable_fail", exist_error = true);
 
     if (exist_error) {
         std::string msg = "Invalid logs config: " + value + ". Possible reason: logs.trace.enable is not a boolean.";
-        return Status(SERVER_INVALID_ARGUMENT, msg);
-    }
-    return Status::OK();
-}
-
-Status
-Config::CheckLogsDebugEnable(const std::string& value) {
-    auto exist_error = !ValidationUtil::ValidateStringIsBool(value).ok();
-    fiu_do_on("check_logs_debug_enable_fail", exist_error = true);
-
-    if (exist_error) {
-        std::string msg = "Invalid logs config: " + value + ". Possible reason: logs.debug.enable is not a boolean.";
-        return Status(SERVER_INVALID_ARGUMENT, msg);
-    }
-    return Status::OK();
-}
-
-Status
-Config::CheckLogsInfoEnable(const std::string& value) {
-    auto exist_error = !ValidationUtil::ValidateStringIsBool(value).ok();
-    fiu_do_on("check_logs_info_enable_fail", exist_error = true);
-
-    if (exist_error) {
-        std::string msg = "Invalid logs config: " + value + ". Possible reason: logs.info.enable is not a boolean.";
-        return Status(SERVER_INVALID_ARGUMENT, msg);
-    }
-    return Status::OK();
-}
-
-Status
-Config::CheckLogsWarningEnable(const std::string& value) {
-    auto exist_error = !ValidationUtil::ValidateStringIsBool(value).ok();
-    fiu_do_on("check_logs_warning_enable_fail", exist_error = true);
-
-    if (exist_error) {
-        std::string msg = "Invalid logs config: " + value + ". Possible reason: logs.warning.enable is not a boolean.";
-        return Status(SERVER_INVALID_ARGUMENT, msg);
-    }
-    return Status::OK();
-}
-
-Status
-Config::CheckLogsErrorEnable(const std::string& value) {
-    auto exist_error = !ValidationUtil::ValidateStringIsBool(value).ok();
-    fiu_do_on("check_logs_error_enable_fail", exist_error = true);
-
-    if (exist_error) {
-        std::string msg = "Invalid logs config: " + value + ". Possible reason: logs.error.enable is not a boolean.";
-        return Status(SERVER_INVALID_ARGUMENT, msg);
-    }
-    return Status::OK();
-}
-
-Status
-Config::CheckLogsFatalEnable(const std::string& value) {
-    auto exist_error = !ValidationUtil::ValidateStringIsBool(value).ok();
-    fiu_do_on("check_logs_fatal_enable_fail", exist_error = true);
-
-    if (exist_error) {
-        std::string msg = "Invalid logs config: " + value + ". Possible reason: logs.fatal.enable is not a boolean.";
         return Status(SERVER_INVALID_ARGUMENT, msg);
     }
     return Status::OK();
@@ -2396,49 +2313,16 @@ Config::GetWalConfigWalPath(std::string& wal_path) {
 
 /* logs config */
 Status
+Config::GetLogsLevel(std::string& value) {
+    value = GetConfigStr(CONFIG_LOGS, CONFIG_LOGS_LEVEL, CONFIG_LOGS_LEVEL_DEFAULT);
+    STATUS_CHECK(CheckLogsLevel(value));
+    return Status::OK();
+}
+
+Status
 Config::GetLogsTraceEnable(bool& value) {
     std::string str = GetConfigStr(CONFIG_LOGS, CONFIG_LOGS_TRACE_ENABLE, CONFIG_LOGS_TRACE_ENABLE_DEFAULT);
     STATUS_CHECK(CheckLogsTraceEnable(str));
-    STATUS_CHECK(StringHelpFunctions::ConvertToBoolean(str, value));
-    return Status::OK();
-}
-
-Status
-Config::GetLogsDebugEnable(bool& value) {
-    std::string str = GetConfigStr(CONFIG_LOGS, CONFIG_LOGS_DEBUG_ENABLE, CONFIG_LOGS_DEBUG_ENABLE_DEFAULT);
-    STATUS_CHECK(CheckLogsDebugEnable(str));
-    STATUS_CHECK(StringHelpFunctions::ConvertToBoolean(str, value));
-    return Status::OK();
-}
-
-Status
-Config::GetLogsInfoEnable(bool& value) {
-    std::string str = GetConfigStr(CONFIG_LOGS, CONFIG_LOGS_INFO_ENABLE, CONFIG_LOGS_INFO_ENABLE_DEFAULT);
-    STATUS_CHECK(CheckLogsInfoEnable(str));
-    STATUS_CHECK(StringHelpFunctions::ConvertToBoolean(str, value));
-    return Status::OK();
-}
-
-Status
-Config::GetLogsWarningEnable(bool& value) {
-    std::string str = GetConfigStr(CONFIG_LOGS, CONFIG_LOGS_WARNING_ENABLE, CONFIG_LOGS_WARNING_ENABLE_DEFAULT);
-    STATUS_CHECK(CheckLogsWarningEnable(str));
-    STATUS_CHECK(StringHelpFunctions::ConvertToBoolean(str, value));
-    return Status::OK();
-}
-
-Status
-Config::GetLogsErrorEnable(bool& value) {
-    std::string str = GetConfigStr(CONFIG_LOGS, CONFIG_LOGS_ERROR_ENABLE, CONFIG_LOGS_ERROR_ENABLE_DEFAULT);
-    STATUS_CHECK(CheckLogsErrorEnable(str));
-    STATUS_CHECK(StringHelpFunctions::ConvertToBoolean(str, value));
-    return Status::OK();
-}
-
-Status
-Config::GetLogsFatalEnable(bool& value) {
-    std::string str = GetConfigStr(CONFIG_LOGS, CONFIG_LOGS_FATAL_ENABLE, CONFIG_LOGS_FATAL_ENABLE_DEFAULT);
-    STATUS_CHECK(CheckLogsFatalEnable(str));
     STATUS_CHECK(StringHelpFunctions::ConvertToBoolean(str, value));
     return Status::OK();
 }
@@ -2790,39 +2674,15 @@ Config::SetWalConfigWalPath(const std::string& value) {
 
 /* logs config */
 Status
+Config::SetLogsLevel(const std::string& value) {
+    STATUS_CHECK(CheckLogsLevel(value));
+    return SetConfigValueInMem(CONFIG_LOGS, CONFIG_LOGS_LEVEL, value);
+}
+
+Status
 Config::SetLogsTraceEnable(const std::string& value) {
     STATUS_CHECK(CheckLogsTraceEnable(value));
     return SetConfigValueInMem(CONFIG_LOGS, CONFIG_LOGS_TRACE_ENABLE, value);
-}
-
-Status
-Config::SetLogsDebugEnable(const std::string& value) {
-    STATUS_CHECK(CheckLogsDebugEnable(value));
-    return SetConfigValueInMem(CONFIG_LOGS, CONFIG_LOGS_DEBUG_ENABLE, value);
-}
-
-Status
-Config::SetLogsInfoEnable(const std::string& value) {
-    STATUS_CHECK(CheckLogsInfoEnable(value));
-    return SetConfigValueInMem(CONFIG_LOGS, CONFIG_LOGS_INFO_ENABLE, value);
-}
-
-Status
-Config::SetLogsWarningEnable(const std::string& value) {
-    STATUS_CHECK(CheckLogsWarningEnable(value));
-    return SetConfigValueInMem(CONFIG_LOGS, CONFIG_LOGS_WARNING_ENABLE, value);
-}
-
-Status
-Config::SetLogsErrorEnable(const std::string& value) {
-    STATUS_CHECK(CheckLogsErrorEnable(value));
-    return SetConfigValueInMem(CONFIG_LOGS, CONFIG_LOGS_ERROR_ENABLE, value);
-}
-
-Status
-Config::SetLogsFatalEnable(const std::string& value) {
-    STATUS_CHECK(CheckLogsFatalEnable(value));
-    return SetConfigValueInMem(CONFIG_LOGS, CONFIG_LOGS_FATAL_ENABLE, value);
 }
 
 Status
