@@ -168,7 +168,7 @@ const char* CONFIG_TRACING = "tracing_config";
 const char* CONFIG_TRACING_JSON_CONFIG_PATH = "json_config_path";
 
 /* wal config */
-const char* CONFIG_WAL = "wal_config";
+const char* CONFIG_WAL = "wal";
 const char* CONFIG_WAL_ENABLE = "enable";
 const char* CONFIG_WAL_ENABLE_DEFAULT = "true";
 const char* CONFIG_WAL_RECOVERY_ERROR_IGNORE = "recovery_error_ignore";
@@ -177,7 +177,7 @@ const char* CONFIG_WAL_BUFFER_SIZE = "buffer_size";
 const char* CONFIG_WAL_BUFFER_SIZE_DEFAULT = "256";
 const int64_t CONFIG_WAL_BUFFER_SIZE_MIN = 64;
 const int64_t CONFIG_WAL_BUFFER_SIZE_MAX = 4096;
-const char* CONFIG_WAL_WAL_PATH = "wal_path";
+const char* CONFIG_WAL_WAL_PATH = "path";
 const char* CONFIG_WAL_WAL_PATH_DEFAULT = "/tmp/milvus/wal";
 
 /* logs config */
@@ -1714,7 +1714,7 @@ Config::CheckWalConfigEnable(const std::string& value) {
     fiu_do_on("check_config_wal_enable_fail", exist_error = true);
 
     if (exist_error) {
-        std::string msg = "Invalid wal config: " + value + ". Possible reason: wal_config.enable is not a boolean.";
+        std::string msg = "Invalid wal config: " + value + ". Possible reason: wal.enable is not a boolean.";
         return Status(SERVER_INVALID_ARGUMENT, msg);
     }
     return Status::OK();
@@ -1727,7 +1727,7 @@ Config::CheckWalConfigRecoveryErrorIgnore(const std::string& value) {
 
     if (exist_error) {
         std::string msg =
-            "Invalid wal config: " + value + ". Possible reason: wal_config.recovery_error_ignore is not a boolean.";
+            "Invalid wal config: " + value + ". Possible reason: wal.recovery_error_ignore is not a boolean.";
         return Status(SERVER_INVALID_ARGUMENT, msg);
     }
     return Status::OK();
@@ -1739,8 +1739,8 @@ Config::CheckWalConfigBufferSize(const std::string& value) {
     fiu_do_on("check_config_wal_buffer_size_fail", exist_error = true);
 
     if (exist_error) {
-        std::string msg = "Invalid wal buffer size: " + value +
-                          ". Possible reason: wal_config.buffer_size is not a positive integer.";
+        std::string msg =
+            "Invalid wal buffer size: " + value + ". Possible reason: wal.buffer_size is not a positive integer.";
         return Status(SERVER_INVALID_ARGUMENT, msg);
     }
     return Status::OK();
@@ -1750,7 +1750,7 @@ Status
 Config::CheckWalConfigWalPath(const std::string& value) {
     fiu_return_on("check_wal_path_fail", Status(SERVER_INVALID_ARGUMENT, ""));
     if (value.empty()) {
-        return Status(SERVER_INVALID_ARGUMENT, "wal_config.wal_path is empty!");
+        return Status(SERVER_INVALID_ARGUMENT, "wal.path is empty!");
     }
 
     return ValidationUtil::ValidateStoragePath(value);
