@@ -235,7 +235,7 @@ DBWrapper::StartService() {
 
     // preload collection
     std::string preload_collections;
-    s = config.GetDBConfigPreloadCollection(preload_collections);
+    s = config.GetCacheConfigPreloadCollection(preload_collections);
     if (!s.ok()) {
         std::cerr << s.ToString() << std::endl;
         return s;

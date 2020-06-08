@@ -76,8 +76,6 @@ extern const char* CONFIG_DB_ARCHIVE_DISK_THRESHOLD;
 extern const char* CONFIG_DB_ARCHIVE_DISK_THRESHOLD_DEFAULT;
 extern const char* CONFIG_DB_ARCHIVE_DAYS_THRESHOLD;
 extern const char* CONFIG_DB_ARCHIVE_DAYS_THRESHOLD_DEFAULT;
-extern const char* CONFIG_DB_PRELOAD_COLLECTION;
-extern const char* CONFIG_DB_PRELOAD_COLLECTION_DEFAULT;
 
 /* storage config */
 extern const char* CONFIG_STORAGE;
@@ -111,6 +109,8 @@ extern const char* CONFIG_CACHE_INSERT_BUFFER_SIZE;
 extern const char* CONFIG_CACHE_INSERT_BUFFER_SIZE_DEFAULT;
 extern const char* CONFIG_CACHE_CACHE_INSERT_DATA;
 extern const char* CONFIG_CACHE_CACHE_INSERT_DATA_DEFAULT;
+extern const char* CONFIG_CACHE_PRELOAD_COLLECTION;
+extern const char* CONFIG_CACHE_PRELOAD_COLLECTION_DEFAULT;
 
 /* metric config */
 extern const char* CONFIG_METRIC;
@@ -278,8 +278,6 @@ class Config {
     // Status
     // CheckDBConfigBackendUrl(const std::string& value);
     Status
-    CheckDBConfigPreloadCollection(const std::string& value);
-    Status
     CheckDBConfigArchiveDiskThreshold(const std::string& value);
     Status
     CheckDBConfigArchiveDaysThreshold(const std::string& value);
@@ -321,6 +319,8 @@ class Config {
     CheckCacheConfigInsertBufferSize(const std::string& value);
     Status
     CheckCacheConfigCacheInsertData(const std::string& value);
+    Status
+    CheckCacheConfigPreloadCollection(const std::string& value);
 
     /* engine config */
     Status
@@ -436,8 +436,6 @@ class Config {
     GetDBConfigArchiveDiskThreshold(int64_t& value);
     Status
     GetDBConfigArchiveDaysThreshold(int64_t& value);
-    Status
-    GetDBConfigPreloadCollection(std::string& value);
 
     /* storage config */
     Status
@@ -476,6 +474,8 @@ class Config {
     GetCacheConfigInsertBufferSize(int64_t& value);
     Status
     GetCacheConfigCacheInsertData(bool& value);
+    Status
+    GetCacheConfigPreloadCollection(std::string& value);
 
     /* engine config */
     Status
@@ -580,8 +580,6 @@ class Config {
     // Status
     // SetDBConfigBackendUrl(const std::string& value);
     Status
-    SetDBConfigPreloadCollection(const std::string& value);
-    Status
     SetDBConfigArchiveDiskThreshold(const std::string& value);
     Status
     SetDBConfigArchiveDaysThreshold(const std::string& value);
@@ -623,6 +621,8 @@ class Config {
     SetCacheConfigInsertBufferSize(const std::string& value);
     Status
     SetCacheConfigCacheInsertData(const std::string& value);
+    Status
+    SetCacheConfigPreloadCollection(const std::string& value);
 
     /* engine config */
     Status

@@ -88,8 +88,6 @@ const char* CONFIG_DB_ARCHIVE_DISK_THRESHOLD = "archive_disk_threshold";
 const char* CONFIG_DB_ARCHIVE_DISK_THRESHOLD_DEFAULT = "0";
 const char* CONFIG_DB_ARCHIVE_DAYS_THRESHOLD = "archive_days_threshold";
 const char* CONFIG_DB_ARCHIVE_DAYS_THRESHOLD_DEFAULT = "0";
-const char* CONFIG_DB_PRELOAD_COLLECTION = "preload_collection";
-const char* CONFIG_DB_PRELOAD_COLLECTION_DEFAULT = "";
 
 /* storage config */
 const char* CONFIG_STORAGE = "storage";
@@ -115,8 +113,8 @@ const int64_t CONFIG_STORAGE_FILE_CLEANUP_TIMEOUT_MAX = 3600;
 // const char* CONFIG_STORAGE_S3_BUCKET_DEFAULT = "milvus-bucket";
 
 /* cache config */
-const char* CONFIG_CACHE = "cache_config";
-const char* CONFIG_CACHE_CPU_CACHE_CAPACITY = "cpu_cache_capacity";
+const char* CONFIG_CACHE = "cache";
+const char* CONFIG_CACHE_CPU_CACHE_CAPACITY = "cache_size";
 const char* CONFIG_CACHE_CPU_CACHE_CAPACITY_DEFAULT = "4";
 const char* CONFIG_CACHE_CPU_CACHE_THRESHOLD = "cpu_cache_threshold";
 const char* CONFIG_CACHE_CPU_CACHE_THRESHOLD_DEFAULT = "0.7";
@@ -124,6 +122,8 @@ const char* CONFIG_CACHE_INSERT_BUFFER_SIZE = "insert_buffer_size";
 const char* CONFIG_CACHE_INSERT_BUFFER_SIZE_DEFAULT = "1";
 const char* CONFIG_CACHE_CACHE_INSERT_DATA = "cache_insert_data";
 const char* CONFIG_CACHE_CACHE_INSERT_DATA_DEFAULT = "false";
+const char* CONFIG_CACHE_PRELOAD_COLLECTION = "preload_collection";
+const char* CONFIG_CACHE_PRELOAD_COLLECTION_DEFAULT = "";
 
 /* metric config */
 const char* CONFIG_METRIC = "metric_config";
@@ -329,9 +329,6 @@ Config::ValidateConfig() {
     // std::string db_backend_url;
     // STATUS_CHECK(GetDBConfigBackendUrl(db_backend_url));
 
-    std::string db_preload_collection;
-    STATUS_CHECK(GetDBConfigPreloadCollection(db_preload_collection));
-
     int64_t db_archive_disk_threshold;
     STATUS_CHECK(GetDBConfigArchiveDiskThreshold(db_archive_disk_threshold));
 
@@ -386,6 +383,9 @@ Config::ValidateConfig() {
 
     bool cache_insert_data;
     STATUS_CHECK(GetCacheConfigCacheInsertData(cache_insert_data));
+
+    std::string cache_preload_collection;
+    STATUS_CHECK(GetCacheConfigPreloadCollection(cache_preload_collection));
 
     /* engine config */
     int64_t engine_use_blas_threshold;
@@ -497,7 +497,6 @@ Config::ResetDefaultConfig() {
 
     /* db config */
     // STATUS_CHECK(SetDBConfigBackendUrl(CONFIG_DB_BACKEND_URL_DEFAULT));
-    STATUS_CHECK(SetDBConfigPreloadCollection(CONFIG_DB_PRELOAD_COLLECTION_DEFAULT));
     STATUS_CHECK(SetDBConfigArchiveDiskThreshold(CONFIG_DB_ARCHIVE_DISK_THRESHOLD_DEFAULT));
     STATUS_CHECK(SetDBConfigArchiveDaysThreshold(CONFIG_DB_ARCHIVE_DAYS_THRESHOLD_DEFAULT));
 
@@ -522,6 +521,7 @@ Config::ResetDefaultConfig() {
     STATUS_CHECK(SetCacheConfigCpuCacheThreshold(CONFIG_CACHE_CPU_CACHE_THRESHOLD_DEFAULT));
     STATUS_CHECK(SetCacheConfigInsertBufferSize(CONFIG_CACHE_INSERT_BUFFER_SIZE_DEFAULT));
     STATUS_CHECK(SetCacheConfigCacheInsertData(CONFIG_CACHE_CACHE_INSERT_DATA_DEFAULT));
+    STATUS_CHECK(SetCacheConfigPreloadCollection(CONFIG_CACHE_PRELOAD_COLLECTION_DEFAULT));
 
     /* engine config */
     STATUS_CHECK(SetEngineConfigUseBlasThreshold(CONFIG_ENGINE_USE_BLAS_THRESHOLD_DEFAULT));
@@ -617,11 +617,11 @@ Config::SetConfigCli(const std::string& parent_key, const std::string& child_key
         // if (child_key == CONFIG_DB_BACKEND_URL) {
         //     status = SetDBConfigBackendUrl(value);
         // } else if (child_key == CONFIG_DB_PRELOAD_COLLECTION) {
-        if (child_key == CONFIG_DB_PRELOAD_COLLECTION) {
-            status = SetDBConfigPreloadCollection(value);
-        } else {
-            status = Status(SERVER_UNEXPECTED_ERROR, invalid_node_str);
-        }
+        // if (child_key == CONFIG_DB_PRELOAD_COLLECTION) {
+        //     status = SetDBConfigPreloadCollection(value);
+        // } else {
+        //     status = Status(SERVER_UNEXPECTED_ERROR, invalid_node_str);
+        // }
     } else if (parent_key == CONFIG_STORAGE) {
         if (child_key == CONFIG_STORAGE_PATH) {
             status = SetStorageConfigPath(value);
@@ -661,6 +661,8 @@ Config::SetConfigCli(const std::string& parent_key, const std::string& child_key
             status = SetCacheConfigCacheInsertData(value);
         } else if (child_key == CONFIG_CACHE_INSERT_BUFFER_SIZE) {
             status = SetCacheConfigInsertBufferSize(value);
+        } else if (child_key == CONFIG_CACHE_PRELOAD_COLLECTION) {
+            status = SetCacheConfigPreloadCollection(value);
         } else {
             status = Status(SERVER_UNEXPECTED_ERROR, invalid_node_str);
         }
@@ -1179,41 +1181,6 @@ Config::CheckNetworkConfigHTTPPort(const std::string& value) {
 // }
 
 Status
-Config::CheckDBConfigPreloadCollection(const std::string& value) {
-    fiu_return_on("check_config_preload_collection_fail", Status(SERVER_INVALID_ARGUMENT, ""));
-
-    if (value.empty() || value == "*") {
-        return Status::OK();
-    }
-
-    std::vector<std::string> tables;
-    StringHelpFunctions::SplitStringByDelimeter(value, ",", tables);
-
-    std::unordered_set<std::string> table_set;
-
-    for (auto& collection : tables) {
-        if (!ValidationUtil::ValidateCollectionName(collection).ok()) {
-            return Status(SERVER_INVALID_ARGUMENT, "Invalid collection name: " + collection);
-        }
-        bool exist = false;
-        auto status = DBWrapper::DB()->HasNativeCollection(collection, exist);
-        if (!(status.ok() && exist)) {
-            return Status(SERVER_COLLECTION_NOT_EXIST, "Collection " + collection + " not exist");
-        }
-        table_set.insert(collection);
-    }
-
-    if (table_set.size() != tables.size()) {
-        std::string msg =
-            "Invalid preload tables. "
-            "Possible reason: db_config.preload_collection contains duplicate collection.";
-        return Status(SERVER_INVALID_ARGUMENT, msg);
-    }
-
-    return Status::OK();
-}
-
-Status
 Config::CheckDBConfigArchiveDiskThreshold(const std::string& value) {
     auto exist_error = !ValidationUtil::ValidateStringIsNumber(value).ok();
     fiu_do_on("check_config_archive_disk_threshold_fail", exist_error = true);
@@ -1490,6 +1457,41 @@ Config::CheckCacheConfigCacheInsertData(const std::string& value) {
                           ". Possible reason: cache_config.cache_insert_data is not a boolean.";
         return Status(SERVER_INVALID_ARGUMENT, msg);
     }
+    return Status::OK();
+}
+
+Status
+Config::CheckCacheConfigPreloadCollection(const std::string& value) {
+    fiu_return_on("check_config_preload_collection_fail", Status(SERVER_INVALID_ARGUMENT, ""));
+
+    if (value.empty() || value == "*") {
+        return Status::OK();
+    }
+
+    std::vector<std::string> tables;
+    StringHelpFunctions::SplitStringByDelimeter(value, ",", tables);
+
+    std::unordered_set<std::string> table_set;
+
+    for (auto& collection : tables) {
+        if (!ValidationUtil::ValidateCollectionName(collection).ok()) {
+            return Status(SERVER_INVALID_ARGUMENT, "Invalid collection name: " + collection);
+        }
+        bool exist = false;
+        auto status = DBWrapper::DB()->HasNativeCollection(collection, exist);
+        if (!(status.ok() && exist)) {
+            return Status(SERVER_COLLECTION_NOT_EXIST, "Collection " + collection + " not exist");
+        }
+        table_set.insert(collection);
+    }
+
+    if (table_set.size() != tables.size()) {
+        std::string msg =
+            "Invalid preload tables. "
+            "Possible reason: cache.preload_collection contains duplicate collection.";
+        return Status(SERVER_INVALID_ARGUMENT, msg);
+    }
+
     return Status::OK();
 }
 
@@ -2097,12 +2099,6 @@ Config::GetDBConfigArchiveDaysThreshold(int64_t& value) {
     return Status::OK();
 }
 
-Status
-Config::GetDBConfigPreloadCollection(std::string& value) {
-    value = GetConfigStr(CONFIG_DB, CONFIG_DB_PRELOAD_COLLECTION);
-    return Status::OK();
-}
-
 /* storage config */
 Status
 Config::GetStorageConfigPath(std::string& value) {
@@ -2222,6 +2218,12 @@ Config::GetCacheConfigCacheInsertData(bool& value) {
     STATUS_CHECK(CheckCacheConfigCacheInsertData(str));
     std::transform(str.begin(), str.end(), str.begin(), ::tolower);
     value = (str == "true" || str == "on" || str == "yes" || str == "1");
+    return Status::OK();
+}
+
+Status
+Config::GetCacheConfigPreloadCollection(std::string& value) {
+    value = GetConfigStr(CONFIG_CACHE, CONFIG_CACHE_PRELOAD_COLLECTION);
     return Status::OK();
 }
 
@@ -2576,13 +2578,6 @@ Config::SetNetworkConfigHTTPPort(const std::string& value) {
 // }
 
 Status
-Config::SetDBConfigPreloadCollection(const std::string& value) {
-    STATUS_CHECK(CheckDBConfigPreloadCollection(value));
-    std::string cor_value = value == "*" ? "\'*\'" : value;
-    return SetConfigValueInMem(CONFIG_DB, CONFIG_DB_PRELOAD_COLLECTION, cor_value);
-}
-
-Status
 Config::SetDBConfigArchiveDiskThreshold(const std::string& value) {
     STATUS_CHECK(CheckDBConfigArchiveDiskThreshold(value));
     return SetConfigValueInMem(CONFIG_DB, CONFIG_DB_ARCHIVE_DISK_THRESHOLD, value);
@@ -2694,6 +2689,13 @@ Config::SetCacheConfigCacheInsertData(const std::string& value) {
     STATUS_CHECK(CheckCacheConfigCacheInsertData(value));
     STATUS_CHECK(SetConfigValueInMem(CONFIG_CACHE, CONFIG_CACHE_CACHE_INSERT_DATA, value));
     return ExecCallBacks(CONFIG_CACHE, CONFIG_CACHE_CACHE_INSERT_DATA, value);
+}
+
+Status
+Config::SetCacheConfigPreloadCollection(const std::string& value) {
+    STATUS_CHECK(CheckCacheConfigPreloadCollection(value));
+    std::string cor_value = value == "*" ? "\'*\'" : value;
+    return SetConfigValueInMem(CONFIG_CACHE, CONFIG_CACHE_PRELOAD_COLLECTION, cor_value);
 }
 
 /* engine config */
