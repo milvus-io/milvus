@@ -42,20 +42,31 @@ extern const char* CONFIG_GENERAL_TIMEZONE_DEFAULT;
 extern const char* CONFIG_GENERAL_METAURI;
 extern const char* CONFIG_GENERAL_METAURI_DEFAULT;
 
+/* network config */
+extern const char* CONFIG_NETWORK;
+extern const char* CONFIG_NETWORK_BIND_ADDRESS;
+extern const char* CONFIG_NETWORK_BIND_ADDRESS_DEFAULT;
+extern const char* CONFIG_NETWORK_BIND_PORT;
+extern const char* CONFIG_NETWORK_BIND_PORT_DEFAULT;
+extern const char* CONFIG_NETWORK_HTTP_ENABLE;
+extern const char* CONFIG_NETWORK_HTTP_ENABLE_DEFAULT;
+extern const char* CONFIG_NETWORK_HTTP_PORT;
+extern const char* CONFIG_NETWORK_HTTP_PORT_DEFAULT;
+
 /* server config */
-extern const char* CONFIG_SERVER;
-extern const char* CONFIG_SERVER_ADDRESS;
-extern const char* CONFIG_SERVER_ADDRESS_DEFAULT;
-extern const char* CONFIG_SERVER_PORT;
-extern const char* CONFIG_SERVER_PORT_DEFAULT;
+// extern const char* CONFIG_SERVER;
+// extern const char* CONFIG_SERVER_ADDRESS;
+// extern const char* CONFIG_SERVER_ADDRESS_DEFAULT;
+// extern const char* CONFIG_SERVER_PORT;
+// extern const char* CONFIG_SERVER_PORT_DEFAULT;
 // extern const char* CONFIG_SERVER_DEPLOY_MODE;
 // extern const char* CONFIG_SERVER_DEPLOY_MODE_DEFAULT;
 // extern const char* CONFIG_SERVER_TIME_ZONE;
 // extern const char* CONFIG_SERVER_TIME_ZONE_DEFAULT;
-extern const char* CONFIG_SERVER_WEB_ENABLE;
-extern const char* CONFIG_SERVER_WEB_ENABLE_DEFAULT;
-extern const char* CONFIG_SERVER_WEB_PORT;
-extern const char* CONFIG_SERVER_WEB_PORT_DEFAULT;
+// extern const char* CONFIG_SERVER_WEB_ENABLE;
+// extern const char* CONFIG_SERVER_WEB_ENABLE_DEFAULT;
+// extern const char* CONFIG_SERVER_WEB_PORT;
+// extern const char* CONFIG_SERVER_WEB_PORT_DEFAULT;
 
 /* db config */
 extern const char* CONFIG_DB;
@@ -241,19 +252,29 @@ class Config {
     Status
     CheckGeneralConfigMetaURI(const std::string& value);
 
+    /* network config */
+    Status
+    CheckNetworkConfigBindAddress(const std::string& value);
+    Status
+    CheckNetworkConfigBindPort(const std::string& value);
+    Status
+    CheckNetworkConfigHTTPEnable(const std::string& value);
+    Status
+    CheckNetworkConfigHTTPPort(const std::string& value);
+
     /* server config */
-    Status
-    CheckServerConfigAddress(const std::string& value);
-    Status
-    CheckServerConfigPort(const std::string& value);
+    // Status
+    // CheckServerConfigAddress(const std::string& value);
+    // Status
+    // CheckServerConfigPort(const std::string& value);
     //    Status
     //    CheckServerConfigDeployMode(const std::string& value);
     // Status
     // CheckServerConfigTimeZone(const std::string& value);
-    Status
-    CheckServerConfigWebEnable(const std::string& value);
-    Status
-    CheckServerConfigWebPort(const std::string& value);
+    // Status
+    // CheckServerConfigWebEnable(const std::string& value);
+    // Status
+    // CheckServerConfigWebPort(const std::string& value);
 
     /* db config */
     // Status
@@ -388,19 +409,29 @@ class Config {
     Status
     GetGeneralConfigMetaURI(std::string& value);
 
+    /* network config */
+    Status
+    GetNetworkConfigBindAddress(std::string& value);
+    Status
+    GetNetworkConfigBindPort(std::string& value);
+    Status
+    GetNetworkConfigHTTPEnable(bool& value);
+    Status
+    GetNetworkConfigHTTPPort(std::string& value);
+
     /* server config */
-    Status
-    GetServerConfigAddress(std::string& value);
-    Status
-    GetServerConfigPort(std::string& value);
+    // Status
+    // GetServerConfigAddress(std::string& value);
+    // Status
+    // GetServerConfigPort(std::string& value);
     //    Status
     //    GetServerConfigDeployMode(std::string& value);
     // Status
     // GetServerConfigTimeZone(std::string& value);
-    Status
-    GetServerConfigWebEnable(bool& value);
-    Status
-    GetServerConfigWebPort(std::string& value);
+    // Status
+    // GetServerConfigWebEnable(bool& value);
+    // Status
+    // GetServerConfigWebPort(std::string& value);
 
     /* db config */
     // Status
@@ -527,19 +558,29 @@ class Config {
     Status
     SetGeneralConfigMetaURI(const std::string& value);
 
+    /* network config */
+    Status
+    SetNetworkConfigBindAddress(const std::string& value);
+    Status
+    SetNetworkConfigBindPort(const std::string& value);
+    Status
+    SetNetworkConfigHTTPEnable(const std::string& value);
+    Status
+    SetNetworkConfigHTTPPort(const std::string& value);
+
     /* server config */
-    Status
-    SetServerConfigAddress(const std::string& value);
-    Status
-    SetServerConfigPort(const std::string& value);
+    // Status
+    // SetServerConfigAddress(const std::string& value);
+    // Status
+    // SetServerConfigPort(const std::string& value);
     //    Status
     //    SetServerConfigDeployMode(const std::string& value);
     // Status
     // SetServerConfigTimeZone(const std::string& value);
-    Status
-    SetServerConfigWebEnable(const std::string& value);
-    Status
-    SetServerConfigWebPort(const std::string& value);
+    // Status
+    // SetServerConfigWebEnable(const std::string& value);
+    // Status
+    // SetServerConfigWebPort(const std::string& value);
 
     /* db config */
     // Status

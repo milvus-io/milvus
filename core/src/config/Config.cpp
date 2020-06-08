@@ -54,20 +54,31 @@ const char* CONFIG_GENERAL_TIMEZONE_DEFAULT = "UTC+8";
 const char* CONFIG_GENERAL_METAURI = "meta_uri";
 const char* CONFIG_GENERAL_METAURI_DEFAULT = "sqlite://:@:/";
 
+/* network config */
+const char* CONFIG_NETWORK = "network";
+const char* CONFIG_NETWORK_BIND_ADDRESS = "bind.address";
+const char* CONFIG_NETWORK_BIND_ADDRESS_DEFAULT = "127.0.0.1";
+const char* CONFIG_NETWORK_BIND_PORT = "bind.port";
+const char* CONFIG_NETWORK_BIND_PORT_DEFAULT = "19530";
+const char* CONFIG_NETWORK_HTTP_ENABLE = "http.enable";
+const char* CONFIG_NETWORK_HTTP_ENABLE_DEFAULT = "true";
+const char* CONFIG_NETWORK_HTTP_PORT = "http.port";
+const char* CONFIG_NETWORK_HTTP_PORT_DEFAULT = "19121";
+
 /* server config */
-const char* CONFIG_SERVER = "server_config";
-const char* CONFIG_SERVER_ADDRESS = "address";
-const char* CONFIG_SERVER_ADDRESS_DEFAULT = "127.0.0.1";
-const char* CONFIG_SERVER_PORT = "port";
-const char* CONFIG_SERVER_PORT_DEFAULT = "19530";
+// const char* CONFIG_SERVER = "server_config";
+// const char* CONFIG_SERVER_ADDRESS = "address";
+// const char* CONFIG_SERVER_ADDRESS_DEFAULT = "127.0.0.1";
+// const char* CONFIG_SERVER_PORT = "port";
+// const char* CONFIG_SERVER_PORT_DEFAULT = "19530";
 // const char* CONFIG_SERVER_DEPLOY_MODE = "deploy_mode";
 // const char* CONFIG_SERVER_DEPLOY_MODE_DEFAULT = "single";
 // const char* CONFIG_SERVER_TIME_ZONE = "time_zone";
 // const char* CONFIG_SERVER_TIME_ZONE_DEFAULT = "UTC+8";
-const char* CONFIG_SERVER_WEB_ENABLE = "web_enable";
-const char* CONFIG_SERVER_WEB_ENABLE_DEFAULT = "true";
-const char* CONFIG_SERVER_WEB_PORT = "web_port";
-const char* CONFIG_SERVER_WEB_PORT_DEFAULT = "19121";
+// const char* CONFIG_SERVER_WEB_ENABLE = "web_enable";
+// const char* CONFIG_SERVER_WEB_ENABLE_DEFAULT = "true";
+// const char* CONFIG_SERVER_WEB_PORT = "web_port";
+// const char* CONFIG_SERVER_WEB_PORT_DEFAULT = "19121";
 
 /* db config */
 const char* CONFIG_DB = "db_config";
@@ -284,12 +295,25 @@ Config::ValidateConfig() {
     std::string general_metauri;
     STATUS_CHECK(GetGeneralConfigMetaURI(general_metauri));
 
-    /* server config */
-    std::string server_addr;
-    STATUS_CHECK(GetServerConfigAddress(server_addr));
+    /* network config */
+    std::string bind_address;
+    STATUS_CHECK(GetNetworkConfigBindAddress(bind_address));
 
-    std::string server_port;
-    STATUS_CHECK(GetServerConfigPort(server_port));
+    std::string bind_port;
+    STATUS_CHECK(GetNetworkConfigBindPort(bind_port));
+
+    bool http_enable = false;
+    STATUS_CHECK(GetNetworkConfigHTTPEnable(http_enable));
+
+    std::string http_port;
+    STATUS_CHECK(GetNetworkConfigHTTPPort(http_port));
+
+    /* server config */
+    // std::string server_addr;
+    // STATUS_CHECK(GetServerConfigAddress(server_addr));
+
+    // std::string server_port;
+    // STATUS_CHECK(GetServerConfigPort(server_port));
 
     //    std::string server_mode;
     //    STATUS_CHECK(GetServerConfigDeployMode(server_mode));
@@ -297,11 +321,11 @@ Config::ValidateConfig() {
     // std::string server_time_zone;
     // STATUS_CHECK(GetServerConfigTimeZone(server_time_zone));
 
-    bool server_web_enable;
-    STATUS_CHECK(GetServerConfigWebEnable(server_web_enable));
+    // bool server_web_enable;
+    // STATUS_CHECK(GetServerConfigWebEnable(server_web_enable));
 
-    std::string server_web_port;
-    STATUS_CHECK(GetServerConfigWebPort(server_web_port));
+    // std::string server_web_port;
+    // STATUS_CHECK(GetServerConfigWebPort(server_web_port));
 
     /* db config */
     // std::string db_backend_url;
@@ -462,13 +486,19 @@ Config::ResetDefaultConfig() {
     STATUS_CHECK(SetGeneralConfigTimezone(CONFIG_GENERAL_TIMEZONE_DEFAULT));
     STATUS_CHECK(SetGeneralConfigMetaURI(CONFIG_GENERAL_METAURI_DEFAULT));
 
+    /* network config */
+    STATUS_CHECK(SetNetworkConfigBindAddress(CONFIG_NETWORK_BIND_ADDRESS_DEFAULT));
+    STATUS_CHECK(SetNetworkConfigBindPort(CONFIG_NETWORK_BIND_PORT_DEFAULT));
+    STATUS_CHECK(SetNetworkConfigHTTPEnable(CONFIG_NETWORK_HTTP_ENABLE_DEFAULT));
+    STATUS_CHECK(SetNetworkConfigHTTPPort(CONFIG_NETWORK_HTTP_PORT_DEFAULT));
+
     /* server config */
-    STATUS_CHECK(SetServerConfigAddress(CONFIG_SERVER_ADDRESS_DEFAULT));
-    STATUS_CHECK(SetServerConfigPort(CONFIG_SERVER_PORT_DEFAULT));
+    // STATUS_CHECK(SetServerConfigAddress(CONFIG_SERVER_ADDRESS_DEFAULT));
+    // STATUS_CHECK(SetServerConfigPort(CONFIG_SERVER_PORT_DEFAULT));
     //    STATUS_CHECK(SetServerConfigDeployMode(CONFIG_SERVER_DEPLOY_MODE_DEFAULT));
     // STATUS_CHECK(SetServerConfigTimeZone(CONFIG_SERVER_TIME_ZONE_DEFAULT));
-    STATUS_CHECK(SetServerConfigWebEnable(CONFIG_SERVER_WEB_ENABLE_DEFAULT));
-    STATUS_CHECK(SetServerConfigWebPort(CONFIG_SERVER_WEB_PORT_DEFAULT));
+    // STATUS_CHECK(SetServerConfigWebEnable(CONFIG_SERVER_WEB_ENABLE_DEFAULT));
+    // STATUS_CHECK(SetServerConfigWebPort(CONFIG_SERVER_WEB_PORT_DEFAULT));
 
     /* db config */
     // STATUS_CHECK(SetDBConfigBackendUrl(CONFIG_DB_BACKEND_URL_DEFAULT));
@@ -575,20 +605,20 @@ Config::SetConfigCli(const std::string& parent_key, const std::string& child_key
         } else {
             status = Status(SERVER_UNEXPECTED_ERROR, invalid_node_str);
         }
-    } else if (parent_key == CONFIG_SERVER) {
-        if (child_key == CONFIG_SERVER_ADDRESS) {
-            status = SetServerConfigAddress(value);
-            //        } else if (child_key == CONFIG_SERVER_DEPLOY_MODE) {
-            //            status = SetServerConfigDeployMode(value);
-        } else if (child_key == CONFIG_SERVER_PORT) {
-            status = SetServerConfigPort(value);
-            // } else if (child_key == CONFIG_SERVER_TIME_ZONE) {
-            //     status = SetServerConfigTimeZone(value);
-        } else if (child_key == CONFIG_SERVER_WEB_PORT) {
-            status = SetServerConfigWebPort(value);
-        } else {
-            status = Status(SERVER_UNEXPECTED_ERROR, invalid_node_str);
-        }
+        //    } else if (parent_key == CONFIG_SERVER) {
+        //        if (child_key == CONFIG_SERVER_ADDRESS) {
+        //            status = SetServerConfigAddress(value);
+        //            //        } else if (child_key == CONFIG_SERVER_DEPLOY_MODE) {
+        //            //            status = SetServerConfigDeployMode(value);
+        //        } else if (child_key == CONFIG_SERVER_PORT) {
+        //            status = SetServerConfigPort(value);
+        //            // } else if (child_key == CONFIG_SERVER_TIME_ZONE) {
+        //            //     status = SetServerConfigTimeZone(value);
+        //        } else if (child_key == CONFIG_SERVER_WEB_PORT) {
+        //            status = SetServerConfigWebPort(value);
+        //        } else {
+        //            status = Status(SERVER_UNEXPECTED_ERROR, invalid_node_str);
+        //        }
     } else if (parent_key == CONFIG_DB) {
         // if (child_key == CONFIG_DB_BACKEND_URL) {
         //     status = SetDBConfigBackendUrl(value);
@@ -985,42 +1015,103 @@ Config::CheckGeneralConfigMetaURI(const std::string& value) {
     return Status::OK();
 }
 
-/* server config */
+/* network config */
 Status
-Config::CheckServerConfigAddress(const std::string& value) {
+Config::CheckNetworkConfigBindAddress(const std::string& value) {
     auto exist_error = !ValidationUtil::ValidateIpAddress(value).ok();
-    fiu_do_on("check_config_address_fail", exist_error = true);
+    fiu_do_on("check_config_bind_address_fail", exist_error = true);
 
     if (exist_error) {
-        std::string msg =
-            "Invalid server IP address: " + value + ". Possible reason: server_config.address is invalid.";
+        std::string msg = "Invalid server IP address: " + value + ". Possible reason: network.bind.address is invalid.";
         return Status(SERVER_INVALID_ARGUMENT, msg);
     }
     return Status::OK();
 }
 
 Status
-Config::CheckServerConfigPort(const std::string& value) {
+Config::CheckNetworkConfigBindPort(const std::string& value) {
     auto exist_error = !ValidationUtil::ValidateStringIsNumber(value).ok();
-    fiu_do_on("check_config_port_fail", exist_error = true);
+    fiu_do_on("check_config_bind_port_fail", exist_error = true);
 
     if (exist_error) {
-        std::string msg = "Invalid server port: " + value + ". Possible reason: server_config.port is not a number.";
+        std::string msg = "Invalid server port: " + value + ". Possible reason: network.bind.port is not a number.";
         return Status(SERVER_INVALID_ARGUMENT, msg);
     } else {
         try {
             int32_t port = std::stoi(value);
             if (!(port > PORT_NUMBER_MIN && port < PORT_NUMBER_MAX)) {
                 std::string msg = "Invalid server port: " + value +
-                                  ". Possible reason: server_config.port is not in range (1024, 65535).";
+                                  ". Possible reason: network.bind.port is not in range (1024, 65535).";
                 return Status(SERVER_INVALID_ARGUMENT, msg);
             }
         } catch (...) {
-            return Status(SERVER_INVALID_ARGUMENT, "Invalid server_config.port: " + value);
+            return Status(SERVER_INVALID_ARGUMENT, "Invalid network.bind.port: " + value);
         }
     }
     return Status::OK();
 }
+
+Status
+Config::CheckNetworkConfigHTTPEnable(const std::string& value) {
+    return ValidationUtil::ValidateStringIsBool(value);
+}
+
+Status
+Config::CheckNetworkConfigHTTPPort(const std::string& value) {
+    if (!ValidationUtil::ValidateStringIsNumber(value).ok()) {
+        std::string msg = "Invalid web server port: " + value + ". Possible reason: network.http.port is not a number.";
+        return Status(SERVER_INVALID_ARGUMENT, msg);
+    } else {
+        try {
+            int32_t port = std::stoi(value);
+            if (!(port > PORT_NUMBER_MIN && port < PORT_NUMBER_MAX)) {
+                std::string msg = "Invalid web server port: " + value +
+                                  ". Possible reason: network.http.port is not in range (1024, 65535).";
+                return Status(SERVER_INVALID_ARGUMENT, msg);
+            }
+        } catch (...) {
+            return Status(SERVER_INVALID_ARGUMENT, "Invalid network.http.port: " + value);
+        }
+    }
+    return Status::OK();
+}
+
+/* server config */
+// Status
+// Config::CheckServerConfigAddress(const std::string& value) {
+//     auto exist_error = !ValidationUtil::ValidateIpAddress(value).ok();
+//     fiu_do_on("check_config_address_fail", exist_error = true);
+//
+//     if (exist_error) {
+//         std::string msg =
+//             "Invalid server IP address: " + value + ". Possible reason: server_config.address is invalid.";
+//         return Status(SERVER_INVALID_ARGUMENT, msg);
+//     }
+//     return Status::OK();
+// }
+
+// Status
+// Config::CheckServerConfigPort(const std::string& value) {
+//     auto exist_error = !ValidationUtil::ValidateStringIsNumber(value).ok();
+//     fiu_do_on("check_config_port_fail", exist_error = true);
+//
+//     if (exist_error) {
+//         std::string msg = "Invalid server port: " + value + ". Possible reason: server_config.port is not a number.";
+//         return Status(SERVER_INVALID_ARGUMENT, msg);
+//     } else {
+//         try {
+//             int32_t port = std::stoi(value);
+//             if (!(port > PORT_NUMBER_MIN && port < PORT_NUMBER_MAX)) {
+//                 std::string msg = "Invalid server port: " + value +
+//                                   ". Possible reason: server_config.port is not in range (1024, 65535).";
+//                 return Status(SERVER_INVALID_ARGUMENT, msg);
+//             }
+//         } catch (...) {
+//             return Status(SERVER_INVALID_ARGUMENT, "Invalid server_config.port: " + value);
+//         }
+//     }
+//     return Status::OK();
+// }
 
 // Status
 // Config::CheckServerConfigDeployMode(const std::string& value) {
@@ -1054,31 +1145,31 @@ Config::CheckServerConfigPort(const std::string& value) {
 //     return Status::OK();
 // }
 
-Status
-Config::CheckServerConfigWebEnable(const std::string& value) {
-    return ValidationUtil::ValidateStringIsBool(value);
-}
+// Status
+// Config::CheckServerConfigWebEnable(const std::string& value) {
+//     return ValidationUtil::ValidateStringIsBool(value);
+// }
 
-Status
-Config::CheckServerConfigWebPort(const std::string& value) {
-    if (!ValidationUtil::ValidateStringIsNumber(value).ok()) {
-        std::string msg =
-            "Invalid web server port: " + value + ". Possible reason: server_config.web_port is not a number.";
-        return Status(SERVER_INVALID_ARGUMENT, msg);
-    } else {
-        try {
-            int32_t port = std::stoi(value);
-            if (!(port > PORT_NUMBER_MIN && port < PORT_NUMBER_MAX)) {
-                std::string msg = "Invalid web server port: " + value +
-                                  ". Possible reason: server_config.web_port is not in range (1024, 65535).";
-                return Status(SERVER_INVALID_ARGUMENT, msg);
-            }
-        } catch (...) {
-            return Status(SERVER_INVALID_ARGUMENT, "Invalid server_config.web_port: " + value);
-        }
-    }
-    return Status::OK();
-}
+// Status
+// Config::CheckServerConfigWebPort(const std::string& value) {
+//     if (!ValidationUtil::ValidateStringIsNumber(value).ok()) {
+//         std::string msg =
+//             "Invalid web server port: " + value + ". Possible reason: server_config.web_port is not a number.";
+//         return Status(SERVER_INVALID_ARGUMENT, msg);
+//     } else {
+//         try {
+//             int32_t port = std::stoi(value);
+//             if (!(port > PORT_NUMBER_MIN && port < PORT_NUMBER_MAX)) {
+//                 std::string msg = "Invalid web server port: " + value +
+//                                   ". Possible reason: server_config.web_port is not in range (1024, 65535).";
+//                 return Status(SERVER_INVALID_ARGUMENT, msg);
+//             }
+//         } catch (...) {
+//             return Status(SERVER_INVALID_ARGUMENT, "Invalid server_config.web_port: " + value);
+//         }
+//     }
+//     return Status::OK();
+// }
 
 /* DB config */
 // Status
@@ -1955,18 +2046,44 @@ Config::GetGeneralConfigMetaURI(std::string& value) {
     return CheckGeneralConfigMetaURI(value);
 }
 
-/* server config */
+/* network config */
 Status
-Config::GetServerConfigAddress(std::string& value) {
-    value = GetConfigStr(CONFIG_SERVER, CONFIG_SERVER_ADDRESS, CONFIG_SERVER_ADDRESS_DEFAULT);
-    return CheckServerConfigAddress(value);
+Config::GetNetworkConfigBindAddress(std::string& value) {
+    value = GetConfigStr(CONFIG_NETWORK, CONFIG_NETWORK_BIND_ADDRESS, CONFIG_NETWORK_BIND_ADDRESS_DEFAULT);
+    return CheckNetworkConfigBindAddress(value);
 }
 
 Status
-Config::GetServerConfigPort(std::string& value) {
-    value = GetConfigStr(CONFIG_SERVER, CONFIG_SERVER_PORT, CONFIG_SERVER_PORT_DEFAULT);
-    return CheckServerConfigPort(value);
+Config::GetNetworkConfigBindPort(std::string& value) {
+    value = GetConfigStr(CONFIG_NETWORK, CONFIG_NETWORK_BIND_PORT, CONFIG_NETWORK_BIND_PORT_DEFAULT);
+    return CheckNetworkConfigBindPort(value);
 }
+
+Status
+Config::GetNetworkConfigHTTPEnable(bool& value) {
+    std::string str = GetConfigStr(CONFIG_NETWORK, CONFIG_NETWORK_HTTP_ENABLE, CONFIG_NETWORK_HTTP_ENABLE_DEFAULT);
+    STATUS_CHECK(CheckNetworkConfigHTTPEnable(str));
+    return StringHelpFunctions::ConvertToBoolean(str, value);
+}
+
+Status
+Config::GetNetworkConfigHTTPPort(std::string& value) {
+    value = GetConfigStr(CONFIG_NETWORK, CONFIG_NETWORK_HTTP_PORT, CONFIG_NETWORK_HTTP_PORT_DEFAULT);
+    return CheckNetworkConfigHTTPPort(value);
+}
+
+/* server config */
+// Status
+// Config::GetServerConfigAddress(std::string& value) {
+//     value = GetConfigStr(CONFIG_SERVER, CONFIG_SERVER_ADDRESS, CONFIG_SERVER_ADDRESS_DEFAULT);
+//     return CheckServerConfigAddress(value);
+// }
+
+// Status
+// Config::GetServerConfigPort(std::string& value) {
+//     value = GetConfigStr(CONFIG_SERVER, CONFIG_SERVER_PORT, CONFIG_SERVER_PORT_DEFAULT);
+//     return CheckServerConfigPort(value);
+// }
 
 // Status
 // Config::GetServerConfigDeployMode(std::string& value) {
@@ -1980,18 +2097,18 @@ Config::GetServerConfigPort(std::string& value) {
 //     return CheckServerConfigTimeZone(value);
 // }
 
-Status
-Config::GetServerConfigWebEnable(bool& value) {
-    std::string str = GetConfigStr(CONFIG_SERVER, CONFIG_SERVER_WEB_ENABLE, CONFIG_SERVER_WEB_ENABLE_DEFAULT);
-    STATUS_CHECK(CheckServerConfigWebEnable(str));
-    return StringHelpFunctions::ConvertToBoolean(str, value);
-}
+// Status
+// Config::GetServerConfigWebEnable(bool& value) {
+//     std::string str = GetConfigStr(CONFIG_SERVER, CONFIG_SERVER_WEB_ENABLE, CONFIG_SERVER_WEB_ENABLE_DEFAULT);
+//     STATUS_CHECK(CheckServerConfigWebEnable(str));
+//     return StringHelpFunctions::ConvertToBoolean(str, value);
+// }
 
-Status
-Config::GetServerConfigWebPort(std::string& value) {
-    value = GetConfigStr(CONFIG_SERVER, CONFIG_SERVER_WEB_PORT, CONFIG_SERVER_WEB_PORT_DEFAULT);
-    return CheckServerConfigWebPort(value);
-}
+// Status
+// Config::GetServerConfigWebPort(std::string& value) {
+//     value = GetConfigStr(CONFIG_SERVER, CONFIG_SERVER_WEB_PORT, CONFIG_SERVER_WEB_PORT_DEFAULT);
+//     return CheckServerConfigWebPort(value);
+// }
 
 /* DB config */
 // Status
@@ -2432,18 +2549,43 @@ Config::SetGeneralConfigMetaURI(const std::string& value) {
     return SetConfigValueInMem(CONFIG_GENERAL, CONFIG_GENERAL_METAURI, value);
 }
 
-/* server config */
+/* network config */
 Status
-Config::SetServerConfigAddress(const std::string& value) {
-    STATUS_CHECK(CheckServerConfigAddress(value));
-    return SetConfigValueInMem(CONFIG_SERVER, CONFIG_SERVER_ADDRESS, value);
+Config::SetNetworkConfigBindAddress(const std::string& value) {
+    STATUS_CHECK(CheckNetworkConfigBindAddress(value));
+    return SetConfigValueInMem(CONFIG_NETWORK, CONFIG_NETWORK_BIND_ADDRESS, value);
 }
 
 Status
-Config::SetServerConfigPort(const std::string& value) {
-    STATUS_CHECK(CheckServerConfigPort(value));
-    return SetConfigValueInMem(CONFIG_SERVER, CONFIG_SERVER_PORT, value);
+Config::SetNetworkConfigBindPort(const std::string& value) {
+    STATUS_CHECK(CheckNetworkConfigBindPort(value));
+    return SetConfigValueInMem(CONFIG_NETWORK, CONFIG_NETWORK_BIND_PORT, value);
 }
+
+Status
+Config::SetNetworkConfigHTTPEnable(const std::string& value) {
+    STATUS_CHECK(CheckNetworkConfigHTTPEnable(value));
+    return SetConfigValueInMem(CONFIG_NETWORK, CONFIG_NETWORK_HTTP_ENABLE, value);
+}
+
+Status
+Config::SetNetworkConfigHTTPPort(const std::string& value) {
+    STATUS_CHECK(CheckNetworkConfigHTTPPort(value));
+    return SetConfigValueInMem(CONFIG_NETWORK, CONFIG_NETWORK_HTTP_PORT, value);
+}
+
+/* server config */
+// Status
+// Config::SetServerConfigAddress(const std::string& value) {
+//     STATUS_CHECK(CheckServerConfigAddress(value));
+//     return SetConfigValueInMem(CONFIG_SERVER, CONFIG_SERVER_ADDRESS, value);
+// }
+
+// Status
+// Config::SetServerConfigPort(const std::string& value) {
+//     STATUS_CHECK(CheckServerConfigPort(value));
+//     return SetConfigValueInMem(CONFIG_SERVER, CONFIG_SERVER_PORT, value);
+// }
 
 // Status
 // Config::SetServerConfigDeployMode(const std::string& value) {
@@ -2457,17 +2599,17 @@ Config::SetServerConfigPort(const std::string& value) {
 //     return SetConfigValueInMem(CONFIG_SERVER, CONFIG_SERVER_TIME_ZONE, value);
 // }
 
-Status
-Config::SetServerConfigWebEnable(const std::string& value) {
-    STATUS_CHECK(CheckServerConfigWebEnable(value));
-    return SetConfigValueInMem(CONFIG_SERVER, CONFIG_SERVER_WEB_ENABLE, value);
-}
+// Status
+// Config::SetServerConfigWebEnable(const std::string& value) {
+//     STATUS_CHECK(CheckServerConfigWebEnable(value));
+//     return SetConfigValueInMem(CONFIG_SERVER, CONFIG_SERVER_WEB_ENABLE, value);
+// }
 
-Status
-Config::SetServerConfigWebPort(const std::string& value) {
-    STATUS_CHECK(CheckServerConfigWebPort(value));
-    return SetConfigValueInMem(CONFIG_SERVER, CONFIG_SERVER_WEB_PORT, value);
-}
+// Status
+// Config::SetServerConfigWebPort(const std::string& value) {
+//     STATUS_CHECK(CheckServerConfigWebPort(value));
+//     return SetConfigValueInMem(CONFIG_SERVER, CONFIG_SERVER_WEB_PORT, value);
+// }
 
 /* db config */
 // Status
