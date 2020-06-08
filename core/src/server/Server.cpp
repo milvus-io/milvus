@@ -154,7 +154,7 @@ Server::Start() {
         Config& config = Config::GetInstance();
 
         std::string meta_uri;
-        STATUS_CHECK(config.GetDBConfigBackendUrl(meta_uri));
+        STATUS_CHECK(config.GetGeneralConfigMetaURI(meta_uri));
         if (meta_uri.length() > 6 && strcasecmp("sqlite", meta_uri.substr(0, 6).c_str()) == 0) {
             std::cout << "WARNNING: You are using SQLite as the meta data management, "
                          "which can't be used in production. Please change it to MySQL!"
@@ -169,7 +169,7 @@ Server::Start() {
 
         /* log path is defined in Config file, so InitLog must be called after LoadConfig */
         std::string time_zone;
-        s = config.GetServerConfigTimeZone(time_zone);
+        s = config.GetGeneralConfigTimezone(time_zone);
         if (!s.ok()) {
             std::cerr << "Fail to get server config timezone" << std::endl;
             return s;

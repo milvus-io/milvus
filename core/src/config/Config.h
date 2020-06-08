@@ -35,6 +35,13 @@ extern const char* CONFIG_CLUSTER_ENABLE_DEFAULT;
 extern const char* CONFIG_CLUSTER_ROLE;
 extern const char* CONFIG_CLUSTER_ROLE_DEFAULT;
 
+/* general config */
+extern const char* CONFIG_GENERAL;
+extern const char* CONFIG_GENERAL_TIMEZONE;
+extern const char* CONFIG_GENERAL_TIMEZONE_DEFAULT;
+extern const char* CONFIG_GENERAL_METAURI;
+extern const char* CONFIG_GENERAL_METAURI_DEFAULT;
+
 /* server config */
 extern const char* CONFIG_SERVER;
 extern const char* CONFIG_SERVER_ADDRESS;
@@ -43,8 +50,8 @@ extern const char* CONFIG_SERVER_PORT;
 extern const char* CONFIG_SERVER_PORT_DEFAULT;
 // extern const char* CONFIG_SERVER_DEPLOY_MODE;
 // extern const char* CONFIG_SERVER_DEPLOY_MODE_DEFAULT;
-extern const char* CONFIG_SERVER_TIME_ZONE;
-extern const char* CONFIG_SERVER_TIME_ZONE_DEFAULT;
+// extern const char* CONFIG_SERVER_TIME_ZONE;
+// extern const char* CONFIG_SERVER_TIME_ZONE_DEFAULT;
 extern const char* CONFIG_SERVER_WEB_ENABLE;
 extern const char* CONFIG_SERVER_WEB_ENABLE_DEFAULT;
 extern const char* CONFIG_SERVER_WEB_PORT;
@@ -52,8 +59,8 @@ extern const char* CONFIG_SERVER_WEB_PORT_DEFAULT;
 
 /* db config */
 extern const char* CONFIG_DB;
-extern const char* CONFIG_DB_BACKEND_URL;
-extern const char* CONFIG_DB_BACKEND_URL_DEFAULT;
+// extern const char* CONFIG_DB_BACKEND_URL;
+// extern const char* CONFIG_DB_BACKEND_URL_DEFAULT;
 extern const char* CONFIG_DB_ARCHIVE_DISK_THRESHOLD;
 extern const char* CONFIG_DB_ARCHIVE_DISK_THRESHOLD_DEFAULT;
 extern const char* CONFIG_DB_ARCHIVE_DAYS_THRESHOLD;
@@ -228,6 +235,12 @@ class Config {
     Status
     CheckClusterConfigRole(const std::string& value);
 
+    /* general config */
+    Status
+    CheckGeneralConfigTimezone(const std::string& value);
+    Status
+    CheckGeneralConfigMetaURI(const std::string& value);
+
     /* server config */
     Status
     CheckServerConfigAddress(const std::string& value);
@@ -235,16 +248,16 @@ class Config {
     CheckServerConfigPort(const std::string& value);
     //    Status
     //    CheckServerConfigDeployMode(const std::string& value);
-    Status
-    CheckServerConfigTimeZone(const std::string& value);
+    // Status
+    // CheckServerConfigTimeZone(const std::string& value);
     Status
     CheckServerConfigWebEnable(const std::string& value);
     Status
     CheckServerConfigWebPort(const std::string& value);
 
     /* db config */
-    Status
-    CheckDBConfigBackendUrl(const std::string& value);
+    // Status
+    // CheckDBConfigBackendUrl(const std::string& value);
     Status
     CheckDBConfigPreloadCollection(const std::string& value);
     Status
@@ -369,6 +382,12 @@ class Config {
     Status
     GetClusterConfigRole(std::string& value);
 
+    /* general config */
+    Status
+    GetGeneralConfigTimezone(std::string& value);
+    Status
+    GetGeneralConfigMetaURI(std::string& value);
+
     /* server config */
     Status
     GetServerConfigAddress(std::string& value);
@@ -376,16 +395,16 @@ class Config {
     GetServerConfigPort(std::string& value);
     //    Status
     //    GetServerConfigDeployMode(std::string& value);
-    Status
-    GetServerConfigTimeZone(std::string& value);
+    // Status
+    // GetServerConfigTimeZone(std::string& value);
     Status
     GetServerConfigWebEnable(bool& value);
     Status
     GetServerConfigWebPort(std::string& value);
 
     /* db config */
-    Status
-    GetDBConfigBackendUrl(std::string& value);
+    // Status
+    // GetDBConfigBackendUrl(std::string& value);
     Status
     GetDBConfigArchiveDiskThreshold(int64_t& value);
     Status
@@ -502,6 +521,12 @@ class Config {
     Status
     SetClusterConfigRole(const std::string& value);
 
+    /* general config */
+    Status
+    SetGeneralConfigTimezone(const std::string& value);
+    Status
+    SetGeneralConfigMetaURI(const std::string& value);
+
     /* server config */
     Status
     SetServerConfigAddress(const std::string& value);
@@ -509,16 +534,16 @@ class Config {
     SetServerConfigPort(const std::string& value);
     //    Status
     //    SetServerConfigDeployMode(const std::string& value);
-    Status
-    SetServerConfigTimeZone(const std::string& value);
+    // Status
+    // SetServerConfigTimeZone(const std::string& value);
     Status
     SetServerConfigWebEnable(const std::string& value);
     Status
     SetServerConfigWebPort(const std::string& value);
 
     /* db config */
-    Status
-    SetDBConfigBackendUrl(const std::string& value);
+    // Status
+    // SetDBConfigBackendUrl(const std::string& value);
     Status
     SetDBConfigPreloadCollection(const std::string& value);
     Status

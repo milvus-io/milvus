@@ -34,7 +34,7 @@ DBWrapper::StartService() {
 
     // db config
     engine::DBOptions opt;
-    s = config.GetDBConfigBackendUrl(opt.meta_.backend_uri_);
+    s = config.GetGeneralConfigTimezone(opt.meta_.backend_uri_);
     if (!s.ok()) {
         std::cerr << s.ToString() << std::endl;
         return s;

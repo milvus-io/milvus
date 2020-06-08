@@ -47,6 +47,13 @@ const char* CONFIG_CLUSTER_ENABLE_DEFAULT = "true";
 const char* CONFIG_CLUSTER_ROLE = "role";
 const char* CONFIG_CLUSTER_ROLE_DEFAULT = "rw";
 
+/* general config */
+const char* CONFIG_GENERAL = "general";
+const char* CONFIG_GENERAL_TIMEZONE = "timezone";
+const char* CONFIG_GENERAL_TIMEZONE_DEFAULT = "UTC+8";
+const char* CONFIG_GENERAL_METAURI = "meta_uri";
+const char* CONFIG_GENERAL_METAURI_DEFAULT = "sqlite://:@:/";
+
 /* server config */
 const char* CONFIG_SERVER = "server_config";
 const char* CONFIG_SERVER_ADDRESS = "address";
@@ -55,8 +62,8 @@ const char* CONFIG_SERVER_PORT = "port";
 const char* CONFIG_SERVER_PORT_DEFAULT = "19530";
 // const char* CONFIG_SERVER_DEPLOY_MODE = "deploy_mode";
 // const char* CONFIG_SERVER_DEPLOY_MODE_DEFAULT = "single";
-const char* CONFIG_SERVER_TIME_ZONE = "time_zone";
-const char* CONFIG_SERVER_TIME_ZONE_DEFAULT = "UTC+8";
+// const char* CONFIG_SERVER_TIME_ZONE = "time_zone";
+// const char* CONFIG_SERVER_TIME_ZONE_DEFAULT = "UTC+8";
 const char* CONFIG_SERVER_WEB_ENABLE = "web_enable";
 const char* CONFIG_SERVER_WEB_ENABLE_DEFAULT = "true";
 const char* CONFIG_SERVER_WEB_PORT = "web_port";
@@ -64,8 +71,8 @@ const char* CONFIG_SERVER_WEB_PORT_DEFAULT = "19121";
 
 /* db config */
 const char* CONFIG_DB = "db_config";
-const char* CONFIG_DB_BACKEND_URL = "backend_url";
-const char* CONFIG_DB_BACKEND_URL_DEFAULT = "sqlite://:@:/";
+// const char* CONFIG_DB_BACKEND_URL = "backend_url";
+// const char* CONFIG_DB_BACKEND_URL_DEFAULT = "sqlite://:@:/";
 const char* CONFIG_DB_ARCHIVE_DISK_THRESHOLD = "archive_disk_threshold";
 const char* CONFIG_DB_ARCHIVE_DISK_THRESHOLD_DEFAULT = "0";
 const char* CONFIG_DB_ARCHIVE_DAYS_THRESHOLD = "archive_days_threshold";
@@ -270,6 +277,13 @@ Config::ValidateConfig() {
     std::string cluster_role;
     STATUS_CHECK(GetClusterConfigRole(cluster_role));
 
+    /* general config */
+    std::string general_timezone;
+    STATUS_CHECK(GetGeneralConfigTimezone(general_timezone));
+
+    std::string general_metauri;
+    STATUS_CHECK(GetGeneralConfigMetaURI(general_metauri));
+
     /* server config */
     std::string server_addr;
     STATUS_CHECK(GetServerConfigAddress(server_addr));
@@ -280,8 +294,8 @@ Config::ValidateConfig() {
     //    std::string server_mode;
     //    STATUS_CHECK(GetServerConfigDeployMode(server_mode));
 
-    std::string server_time_zone;
-    STATUS_CHECK(GetServerConfigTimeZone(server_time_zone));
+    // std::string server_time_zone;
+    // STATUS_CHECK(GetServerConfigTimeZone(server_time_zone));
 
     bool server_web_enable;
     STATUS_CHECK(GetServerConfigWebEnable(server_web_enable));
@@ -290,8 +304,8 @@ Config::ValidateConfig() {
     STATUS_CHECK(GetServerConfigWebPort(server_web_port));
 
     /* db config */
-    std::string db_backend_url;
-    STATUS_CHECK(GetDBConfigBackendUrl(db_backend_url));
+    // std::string db_backend_url;
+    // STATUS_CHECK(GetDBConfigBackendUrl(db_backend_url));
 
     std::string db_preload_collection;
     STATUS_CHECK(GetDBConfigPreloadCollection(db_preload_collection));
@@ -444,16 +458,20 @@ Config::ResetDefaultConfig() {
     STATUS_CHECK(SetClusterConfigEnable(CONFIG_CLUSTER_ENABLE_DEFAULT));
     STATUS_CHECK(SetClusterConfigRole(CONFIG_CLUSTER_ROLE_DEFAULT));
 
+    /* general config */
+    STATUS_CHECK(SetGeneralConfigTimezone(CONFIG_GENERAL_TIMEZONE_DEFAULT));
+    STATUS_CHECK(SetGeneralConfigMetaURI(CONFIG_GENERAL_METAURI_DEFAULT));
+
     /* server config */
     STATUS_CHECK(SetServerConfigAddress(CONFIG_SERVER_ADDRESS_DEFAULT));
     STATUS_CHECK(SetServerConfigPort(CONFIG_SERVER_PORT_DEFAULT));
     //    STATUS_CHECK(SetServerConfigDeployMode(CONFIG_SERVER_DEPLOY_MODE_DEFAULT));
-    STATUS_CHECK(SetServerConfigTimeZone(CONFIG_SERVER_TIME_ZONE_DEFAULT));
+    // STATUS_CHECK(SetServerConfigTimeZone(CONFIG_SERVER_TIME_ZONE_DEFAULT));
     STATUS_CHECK(SetServerConfigWebEnable(CONFIG_SERVER_WEB_ENABLE_DEFAULT));
     STATUS_CHECK(SetServerConfigWebPort(CONFIG_SERVER_WEB_PORT_DEFAULT));
 
     /* db config */
-    STATUS_CHECK(SetDBConfigBackendUrl(CONFIG_DB_BACKEND_URL_DEFAULT));
+    // STATUS_CHECK(SetDBConfigBackendUrl(CONFIG_DB_BACKEND_URL_DEFAULT));
     STATUS_CHECK(SetDBConfigPreloadCollection(CONFIG_DB_PRELOAD_COLLECTION_DEFAULT));
     STATUS_CHECK(SetDBConfigArchiveDiskThreshold(CONFIG_DB_ARCHIVE_DISK_THRESHOLD_DEFAULT));
     STATUS_CHECK(SetDBConfigArchiveDaysThreshold(CONFIG_DB_ARCHIVE_DAYS_THRESHOLD_DEFAULT));
@@ -549,6 +567,14 @@ Config::SetConfigCli(const std::string& parent_key, const std::string& child_key
         } else {
             status = Status(SERVER_UNEXPECTED_ERROR, invalid_node_str);
         }
+    } else if (parent_key == CONFIG_GENERAL) {
+        if (child_key == CONFIG_GENERAL_TIMEZONE) {
+            status = SetGeneralConfigTimezone(value);
+        } else if (child_key == CONFIG_GENERAL_METAURI) {
+            status = SetGeneralConfigMetaURI(value);
+        } else {
+            status = Status(SERVER_UNEXPECTED_ERROR, invalid_node_str);
+        }
     } else if (parent_key == CONFIG_SERVER) {
         if (child_key == CONFIG_SERVER_ADDRESS) {
             status = SetServerConfigAddress(value);
@@ -556,17 +582,18 @@ Config::SetConfigCli(const std::string& parent_key, const std::string& child_key
             //            status = SetServerConfigDeployMode(value);
         } else if (child_key == CONFIG_SERVER_PORT) {
             status = SetServerConfigPort(value);
-        } else if (child_key == CONFIG_SERVER_TIME_ZONE) {
-            status = SetServerConfigTimeZone(value);
+            // } else if (child_key == CONFIG_SERVER_TIME_ZONE) {
+            //     status = SetServerConfigTimeZone(value);
         } else if (child_key == CONFIG_SERVER_WEB_PORT) {
             status = SetServerConfigWebPort(value);
         } else {
             status = Status(SERVER_UNEXPECTED_ERROR, invalid_node_str);
         }
     } else if (parent_key == CONFIG_DB) {
-        if (child_key == CONFIG_DB_BACKEND_URL) {
-            status = SetDBConfigBackendUrl(value);
-        } else if (child_key == CONFIG_DB_PRELOAD_COLLECTION) {
+        // if (child_key == CONFIG_DB_BACKEND_URL) {
+        //     status = SetDBConfigBackendUrl(value);
+        // } else if (child_key == CONFIG_DB_PRELOAD_COLLECTION) {
+        if (child_key == CONFIG_DB_PRELOAD_COLLECTION) {
             status = SetDBConfigPreloadCollection(value);
         } else if (child_key == CONFIG_DB_AUTO_FLUSH_INTERVAL) {
             status = SetDBConfigAutoFlushInterval(value);
@@ -925,6 +952,39 @@ Config::CheckClusterConfigRole(const std::string& value) {
     return Status::OK();
 }
 
+/* general config */
+Status
+Config::CheckGeneralConfigTimezone(const std::string& value) {
+    fiu_return_on("check_config_timezone_fail", Status(SERVER_INVALID_ARGUMENT, "Invalid general.timezone: " + value));
+
+    if (value.length() <= 3) {
+        return Status(SERVER_INVALID_ARGUMENT, "Invalid general.timezone: " + value);
+    } else {
+        if (value.substr(0, 3) != "UTC") {
+            return Status(SERVER_INVALID_ARGUMENT, "Invalid general.timezone: " + value);
+        } else {
+            if (!ValidationUtil::IsNumber(value.substr(4))) {
+                return Status(SERVER_INVALID_ARGUMENT, "Invalid general.timezone: " + value);
+            }
+        }
+    }
+    return Status::OK();
+}
+
+Status
+Config::CheckGeneralConfigMetaURI(const std::string& value) {
+    auto exist_error = !ValidationUtil::ValidateDbURI(value).ok();
+    fiu_do_on("check_config_meta_uri_fail", exist_error = true);
+
+    if (exist_error) {
+        std::string msg =
+            "Invalid meta uri: " + value + ". Possible reason: general.meta_uri is invalid. " +
+            "The correct format should be like sqlite://:@:/ or mysql://root:123456@127.0.0.1:3306/milvus.";
+        return Status(SERVER_INVALID_ARGUMENT, msg);
+    }
+    return Status::OK();
+}
+
 /* server config */
 Status
 Config::CheckServerConfigAddress(const std::string& value) {
@@ -975,24 +1035,24 @@ Config::CheckServerConfigPort(const std::string& value) {
 //    return Status::OK();
 //}
 
-Status
-Config::CheckServerConfigTimeZone(const std::string& value) {
-    fiu_return_on("check_config_time_zone_fail",
-                  Status(SERVER_INVALID_ARGUMENT, "Invalid server_config.time_zone: " + value));
-
-    if (value.length() <= 3) {
-        return Status(SERVER_INVALID_ARGUMENT, "Invalid server_config.time_zone: " + value);
-    } else {
-        if (value.substr(0, 3) != "UTC") {
-            return Status(SERVER_INVALID_ARGUMENT, "Invalid server_config.time_zone: " + value);
-        } else {
-            if (!ValidationUtil::IsNumber(value.substr(4))) {
-                return Status(SERVER_INVALID_ARGUMENT, "Invalid server_config.time_zone: " + value);
-            }
-        }
-    }
-    return Status::OK();
-}
+// Status
+// Config::CheckServerConfigTimeZone(const std::string& value) {
+//     fiu_return_on("check_config_time_zone_fail",
+//                   Status(SERVER_INVALID_ARGUMENT, "Invalid server_config.time_zone: " + value));
+//
+//     if (value.length() <= 3) {
+//         return Status(SERVER_INVALID_ARGUMENT, "Invalid server_config.time_zone: " + value);
+//     } else {
+//         if (value.substr(0, 3) != "UTC") {
+//             return Status(SERVER_INVALID_ARGUMENT, "Invalid server_config.time_zone: " + value);
+//         } else {
+//             if (!ValidationUtil::IsNumber(value.substr(4))) {
+//                 return Status(SERVER_INVALID_ARGUMENT, "Invalid server_config.time_zone: " + value);
+//             }
+//         }
+//     }
+//     return Status::OK();
+// }
 
 Status
 Config::CheckServerConfigWebEnable(const std::string& value) {
@@ -1021,19 +1081,19 @@ Config::CheckServerConfigWebPort(const std::string& value) {
 }
 
 /* DB config */
-Status
-Config::CheckDBConfigBackendUrl(const std::string& value) {
-    auto exist_error = !ValidationUtil::ValidateDbURI(value).ok();
-    fiu_do_on("check_config_backend_url_fail", exist_error = true);
-
-    if (exist_error) {
-        std::string msg =
-            "Invalid backend url: " + value + ". Possible reason: db_config.db_backend_url is invalid. " +
-            "The correct format should be like sqlite://:@:/ or mysql://root:123456@127.0.0.1:3306/milvus.";
-        return Status(SERVER_INVALID_ARGUMENT, msg);
-    }
-    return Status::OK();
-}
+// Status
+// Config::CheckDBConfigBackendUrl(const std::string& value) {
+//     auto exist_error = !ValidationUtil::ValidateDbURI(value).ok();
+//     fiu_do_on("check_config_backend_url_fail", exist_error = true);
+//
+//     if (exist_error) {
+//         std::string msg =
+//             "Invalid backend url: " + value + ". Possible reason: db_config.db_backend_url is invalid. " +
+//             "The correct format should be like sqlite://:@:/ or mysql://root:123456@127.0.0.1:3306/milvus.";
+//         return Status(SERVER_INVALID_ARGUMENT, msg);
+//     }
+//     return Status::OK();
+// }
 
 Status
 Config::CheckDBConfigPreloadCollection(const std::string& value) {
@@ -1882,6 +1942,19 @@ Config::GetClusterConfigRole(std::string& value) {
     return CheckClusterConfigRole(value);
 }
 
+/* general config */
+Status
+Config::GetGeneralConfigTimezone(std::string& value) {
+    value = GetConfigStr(CONFIG_GENERAL, CONFIG_GENERAL_TIMEZONE, CONFIG_GENERAL_TIMEZONE_DEFAULT);
+    return CheckGeneralConfigTimezone(value);
+}
+
+Status
+Config::GetGeneralConfigMetaURI(std::string& value) {
+    value = GetConfigStr(CONFIG_GENERAL, CONFIG_GENERAL_METAURI, CONFIG_GENERAL_METAURI_DEFAULT);
+    return CheckGeneralConfigMetaURI(value);
+}
+
 /* server config */
 Status
 Config::GetServerConfigAddress(std::string& value) {
@@ -1901,11 +1974,11 @@ Config::GetServerConfigPort(std::string& value) {
 //     return CheckServerConfigDeployMode(value);
 // }
 
-Status
-Config::GetServerConfigTimeZone(std::string& value) {
-    value = GetConfigStr(CONFIG_SERVER, CONFIG_SERVER_TIME_ZONE, CONFIG_SERVER_TIME_ZONE_DEFAULT);
-    return CheckServerConfigTimeZone(value);
-}
+// Status
+// Config::GetServerConfigTimeZone(std::string& value) {
+//     value = GetConfigStr(CONFIG_SERVER, CONFIG_SERVER_TIME_ZONE, CONFIG_SERVER_TIME_ZONE_DEFAULT);
+//     return CheckServerConfigTimeZone(value);
+// }
 
 Status
 Config::GetServerConfigWebEnable(bool& value) {
@@ -1921,11 +1994,11 @@ Config::GetServerConfigWebPort(std::string& value) {
 }
 
 /* DB config */
-Status
-Config::GetDBConfigBackendUrl(std::string& value) {
-    value = GetConfigStr(CONFIG_DB, CONFIG_DB_BACKEND_URL, CONFIG_DB_BACKEND_URL_DEFAULT);
-    return CheckDBConfigBackendUrl(value);
-}
+// Status
+// Config::GetDBConfigBackendUrl(std::string& value) {
+//     value = GetConfigStr(CONFIG_DB, CONFIG_DB_BACKEND_URL, CONFIG_DB_BACKEND_URL_DEFAULT);
+//     return CheckDBConfigBackendUrl(value);
+// }
 
 Status
 Config::GetDBConfigArchiveDiskThreshold(int64_t& value) {
@@ -2346,6 +2419,19 @@ Config::SetClusterConfigRole(const std::string& value) {
     return SetConfigValueInMem(CONFIG_CLUSTER, CONFIG_CLUSTER_ROLE, value);
 }
 
+/* general config */
+Status
+Config::SetGeneralConfigTimezone(const std::string& value) {
+    STATUS_CHECK(CheckGeneralConfigTimezone(value));
+    return SetConfigValueInMem(CONFIG_GENERAL, CONFIG_GENERAL_TIMEZONE, value);
+}
+
+Status
+Config::SetGeneralConfigMetaURI(const std::string& value) {
+    STATUS_CHECK(CheckGeneralConfigMetaURI(value));
+    return SetConfigValueInMem(CONFIG_GENERAL, CONFIG_GENERAL_METAURI, value);
+}
+
 /* server config */
 Status
 Config::SetServerConfigAddress(const std::string& value) {
@@ -2365,11 +2451,11 @@ Config::SetServerConfigPort(const std::string& value) {
 //     return SetConfigValueInMem(CONFIG_SERVER, CONFIG_SERVER_DEPLOY_MODE, value);
 // }
 
-Status
-Config::SetServerConfigTimeZone(const std::string& value) {
-    STATUS_CHECK(CheckServerConfigTimeZone(value));
-    return SetConfigValueInMem(CONFIG_SERVER, CONFIG_SERVER_TIME_ZONE, value);
-}
+// Status
+// Config::SetServerConfigTimeZone(const std::string& value) {
+//     STATUS_CHECK(CheckServerConfigTimeZone(value));
+//     return SetConfigValueInMem(CONFIG_SERVER, CONFIG_SERVER_TIME_ZONE, value);
+// }
 
 Status
 Config::SetServerConfigWebEnable(const std::string& value) {
@@ -2384,11 +2470,11 @@ Config::SetServerConfigWebPort(const std::string& value) {
 }
 
 /* db config */
-Status
-Config::SetDBConfigBackendUrl(const std::string& value) {
-    STATUS_CHECK(CheckDBConfigBackendUrl(value));
-    return SetConfigValueInMem(CONFIG_DB, CONFIG_DB_BACKEND_URL, value);
-}
+// Status
+// Config::SetDBConfigBackendUrl(const std::string& value) {
+//     STATUS_CHECK(CheckDBConfigBackendUrl(value));
+//     return SetConfigValueInMem(CONFIG_DB, CONFIG_DB_BACKEND_URL, value);
+// }
 
 Status
 Config::SetDBConfigPreloadCollection(const std::string& value) {
