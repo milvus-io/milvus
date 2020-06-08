@@ -34,6 +34,7 @@
 #include "server/delivery/request/HasPartitionRequest.h"
 #include "server/delivery/request/InsertRequest.h"
 #include "server/delivery/request/PreloadCollectionRequest.h"
+#include "server/delivery/request/ReLoadSegmentsRequest.h"
 #include "server/delivery/request/SearchByIDRequest.h"
 #include "server/delivery/request/SearchRequest.h"
 #include "server/delivery/request/ShowCollectionInfoRequest.h"
@@ -189,6 +190,15 @@ RequestHandler::DeleteByID(const std::shared_ptr<Context>& context, const std::s
 Status
 RequestHandler::PreloadCollection(const std::shared_ptr<Context>& context, const std::string& collection_name) {
     BaseRequestPtr request_ptr = PreloadCollectionRequest::Create(context, collection_name);
+    RequestScheduler::ExecRequest(request_ptr);
+
+    return request_ptr->status();
+}
+
+Status
+RequestHandler::ReLoadSegments(const std::shared_ptr<Context>& context, const std::string& collection_name,
+                               const std::vector<std::string>& segment_ids) {
+    BaseRequestPtr request_ptr = ReLoadSegmentsRequest::Create(context, collection_name, segment_ids);
     RequestScheduler::ExecRequest(request_ptr);
 
     return request_ptr->status();

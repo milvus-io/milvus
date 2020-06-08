@@ -14,6 +14,7 @@
 
 #include <errno.h>
 #include <fcntl.h>
+#include <string.h>
 #include <unistd.h>
 
 namespace milvus {
@@ -29,7 +30,7 @@ InstanceLockCheck::Check(const std::string& path) {
             // Not using locking for read-only lock file
             msg += "Lock file is read-only.";
         }
-        msg += "Could not open lock file.";
+        msg += "Could not open file: " + lock_path + ", " + strerror(errno);
         return Status(SERVER_UNEXPECTED_ERROR, msg);
     }
 
@@ -41,15 +42,16 @@ InstanceLockCheck::Check(const std::string& path) {
     fl.l_start = 0;
     fl.l_len = 0;
     if (fcntl(fd, F_SETLK, &fl) == -1) {
-        std::string msg;
+        std::string msg = "Can't lock file: " + lock_path + ", due to ";
         if (errno == EACCES || errno == EAGAIN) {
-            msg += "Permission denied. ";
+            msg += "permission denied. ";
         } else if (errno == ENOLCK) {
             // Not using locking for nfs mounted lock file
-            msg += "Using nfs. ";
+            msg += "using nfs. ";
+        } else {
+            msg += std::string(strerror(errno)) + ". ";
         }
         close(fd);
-        msg += "Could not get lock.";
         return Status(SERVER_UNEXPECTED_ERROR, msg);
     }
 

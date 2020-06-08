@@ -183,10 +183,10 @@ XSearchTask::Load(LoadType type, uint8_t device_id) {
     if (!stat.ok()) {
         Status s;
         if (stat.ToString().find("out of memory") != std::string::npos) {
-            error_msg = "out of memory: " + type_str;
+            error_msg = "out of memory: " + type_str + " : " + stat.message();
             s = Status(SERVER_OUT_OF_MEMORY, error_msg);
         } else {
-            error_msg = "Failed to load index file: " + type_str;
+            error_msg = "Failed to load index file: " + type_str + " : " + stat.message();
             s = Status(SERVER_UNEXPECTED_ERROR, error_msg);
         }
 

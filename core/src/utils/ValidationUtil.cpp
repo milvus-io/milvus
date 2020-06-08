@@ -112,7 +112,7 @@ ValidationUtil::ValidateCollectionName(const std::string& collection_name) {
     }
 
     std::string invalid_msg = "Invalid collection name: " + collection_name + ". ";
-    // Collection name size shouldn't exceed 16384.
+    // Collection name size shouldn't exceed 255.
     if (collection_name.size() > COLLECTION_NAME_SIZE_LIMIT) {
         std::string msg = invalid_msg + "The length of a collection name must be less than 255 characters.";
         LOG_SERVER_ERROR_ << msg;
@@ -426,7 +426,7 @@ ValidationUtil::ValidatePartitionName(const std::string& partition_name) {
     }
 
     std::string invalid_msg = "Invalid partition name: " + partition_name + ". ";
-    // Collection name size shouldn't exceed 16384.
+    // Collection name size shouldn't exceed 255.
     if (partition_name.size() > COLLECTION_NAME_SIZE_LIMIT) {
         std::string msg = invalid_msg + "The length of a partition name must be less than 255 characters.";
         LOG_SERVER_ERROR_ << msg;

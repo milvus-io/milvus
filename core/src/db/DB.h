@@ -75,6 +75,9 @@ class DB {
                       bool force = false) = 0;
 
     virtual Status
+    ReLoadSegmentsDeletedDocs(const std::string& collection_id, const std::vector<int64_t>& segment_ids) = 0;
+
+    virtual Status
     UpdateCollectionFlag(const std::string& collection_id, int64_t flag) = 0;
 
     virtual Status
