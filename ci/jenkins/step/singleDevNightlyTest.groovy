@@ -53,5 +53,6 @@ timeout(time: 180, unit: 'MINUTES') {
     }
     dir ("tests/milvus_python_test") {
         sh "pytest . --level=2 --alluredir=\"test_out/dev/single/sqlite\" --ip ${env.HELM_RELEASE_NAME}.milvus.svc.cluster.local"
+        sh "pytest . --level=1 --ip ${env.HELM_RELEASE_NAME}.milvus.svc.cluster.local --port=19121 --handler=HTTP"
     }
 }

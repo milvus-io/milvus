@@ -755,9 +755,11 @@ class TestIndexIP:
         index_param = get_simple_index["index_param"]
         index_type = get_simple_index["index_type"]
         logging.getLogger().info(get_simple_index)
+        logging.getLogger().info(connect.get_collection_info(ip_collection))
         status, ids = connect.insert(ip_collection, vectors)
         status = connect.create_index(ip_collection, index_type, index_param)
         logging.getLogger().info(connect.get_index_info(ip_collection))
+        logging.getLogger().info(connect.get_collection_stats(ip_collection))
         query_vecs = [vectors[0], vectors[1], vectors[2]]
         top_k = 5
         search_param = get_search_param(index_type)
