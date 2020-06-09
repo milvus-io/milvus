@@ -66,21 +66,6 @@ const char* CONFIG_NETWORK_HTTP_ENABLE_DEFAULT = "true";
 const char* CONFIG_NETWORK_HTTP_PORT = "http.port";
 const char* CONFIG_NETWORK_HTTP_PORT_DEFAULT = "19121";
 
-/* server config */
-// const char* CONFIG_SERVER = "server_config";
-// const char* CONFIG_SERVER_ADDRESS = "address";
-// const char* CONFIG_SERVER_ADDRESS_DEFAULT = "127.0.0.1";
-// const char* CONFIG_SERVER_PORT = "port";
-// const char* CONFIG_SERVER_PORT_DEFAULT = "19530";
-// const char* CONFIG_SERVER_DEPLOY_MODE = "deploy_mode";
-// const char* CONFIG_SERVER_DEPLOY_MODE_DEFAULT = "single";
-// const char* CONFIG_SERVER_TIME_ZONE = "time_zone";
-// const char* CONFIG_SERVER_TIME_ZONE_DEFAULT = "UTC+8";
-// const char* CONFIG_SERVER_WEB_ENABLE = "web_enable";
-// const char* CONFIG_SERVER_WEB_ENABLE_DEFAULT = "true";
-// const char* CONFIG_SERVER_WEB_PORT = "web_port";
-// const char* CONFIG_SERVER_WEB_PORT_DEFAULT = "19121";
-
 /* db config */
 const char* CONFIG_DB = "db_config";
 // const char* CONFIG_DB_BACKEND_URL = "backend_url";
@@ -100,18 +85,6 @@ const char* CONFIG_STORAGE_FILE_CLEANUP_TIMEOUT = "file_cleanup_timeout";
 const char* CONFIG_STORAGE_FILE_CLEANUP_TIMEOUT_DEFAULT = "10";
 const int64_t CONFIG_STORAGE_FILE_CLEANUP_TIMEOUT_MIN = 0;
 const int64_t CONFIG_STORAGE_FILE_CLEANUP_TIMEOUT_MAX = 3600;
-// const char* CONFIG_STORAGE_S3_ENABLE = "s3_enable";
-// const char* CONFIG_STORAGE_S3_ENABLE_DEFAULT = "false";
-// const char* CONFIG_STORAGE_S3_ADDRESS = "s3_address";
-// const char* CONFIG_STORAGE_S3_ADDRESS_DEFAULT = "127.0.0.1";
-// const char* CONFIG_STORAGE_S3_PORT = "s3_port";
-// const char* CONFIG_STORAGE_S3_PORT_DEFAULT = "9000";
-// const char* CONFIG_STORAGE_S3_ACCESS_KEY = "s3_access_key";
-// const char* CONFIG_STORAGE_S3_ACCESS_KEY_DEFAULT = "minioadmin";
-// const char* CONFIG_STORAGE_S3_SECRET_KEY = "s3_secret_key";
-// const char* CONFIG_STORAGE_S3_SECRET_KEY_DEFAULT = "minioadmin";
-// const char* CONFIG_STORAGE_S3_BUCKET = "s3_bucket";
-// const char* CONFIG_STORAGE_S3_BUCKET_DEFAULT = "milvus-bucket";
 
 /* cache config */
 const char* CONFIG_CACHE = "cache";
@@ -120,7 +93,7 @@ const char* CONFIG_CACHE_CPU_CACHE_CAPACITY_DEFAULT = "4294967296";
 const char* CONFIG_CACHE_CPU_CACHE_THRESHOLD = "cpu_cache_threshold";
 const char* CONFIG_CACHE_CPU_CACHE_THRESHOLD_DEFAULT = "0.7";
 const char* CONFIG_CACHE_INSERT_BUFFER_SIZE = "insert_buffer_size";
-const char* CONFIG_CACHE_INSERT_BUFFER_SIZE_DEFAULT = "1073741824";
+const char* CONFIG_CACHE_INSERT_BUFFER_SIZE_DEFAULT = "1073741824";  // 1024 * 1024 * 1024
 const char* CONFIG_CACHE_CACHE_INSERT_DATA = "cache_insert_data";
 const char* CONFIG_CACHE_CACHE_INSERT_DATA_DEFAULT = "false";
 const char* CONFIG_CACHE_PRELOAD_COLLECTION = "preload_collection";
@@ -153,7 +126,7 @@ const char* CONFIG_GPU_RESOURCE_ENABLE_DEFAULT = "true";
 const char* CONFIG_GPU_RESOURCE_ENABLE_DEFAULT = "false";
 #endif
 const char* CONFIG_GPU_RESOURCE_CACHE_CAPACITY = "cache_size";
-const char* CONFIG_GPU_RESOURCE_CACHE_CAPACITY_DEFAULT = "1073741824";
+const char* CONFIG_GPU_RESOURCE_CACHE_CAPACITY_DEFAULT = "1073741824";  // 1024 * 1024 * 1024
 const char* CONFIG_GPU_RESOURCE_CACHE_THRESHOLD = "cache_threshold";
 const char* CONFIG_GPU_RESOURCE_CACHE_THRESHOLD_DEFAULT = "0.7";
 const char* CONFIG_GPU_RESOURCE_GPU_SEARCH_THRESHOLD = "gpu_search_threshold";

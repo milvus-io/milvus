@@ -53,21 +53,6 @@ extern const char* CONFIG_NETWORK_HTTP_ENABLE_DEFAULT;
 extern const char* CONFIG_NETWORK_HTTP_PORT;
 extern const char* CONFIG_NETWORK_HTTP_PORT_DEFAULT;
 
-/* server config */
-// extern const char* CONFIG_SERVER;
-// extern const char* CONFIG_SERVER_ADDRESS;
-// extern const char* CONFIG_SERVER_ADDRESS_DEFAULT;
-// extern const char* CONFIG_SERVER_PORT;
-// extern const char* CONFIG_SERVER_PORT_DEFAULT;
-// extern const char* CONFIG_SERVER_DEPLOY_MODE;
-// extern const char* CONFIG_SERVER_DEPLOY_MODE_DEFAULT;
-// extern const char* CONFIG_SERVER_TIME_ZONE;
-// extern const char* CONFIG_SERVER_TIME_ZONE_DEFAULT;
-// extern const char* CONFIG_SERVER_WEB_ENABLE;
-// extern const char* CONFIG_SERVER_WEB_ENABLE_DEFAULT;
-// extern const char* CONFIG_SERVER_WEB_PORT;
-// extern const char* CONFIG_SERVER_WEB_PORT_DEFAULT;
-
 /* db config */
 extern const char* CONFIG_DB;
 // extern const char* CONFIG_DB_BACKEND_URL;
@@ -86,18 +71,6 @@ extern const char* CONFIG_STORAGE_AUTO_FLUSH_INTERVAL_DEFAULT;
 extern const char* CONFIG_STORAGE_FILE_CLEANUP_TIMEOUT;
 extern const int64_t CONFIG_STORAGE_FILE_CLEANUP_TIMEOUT_MIN;
 extern const int64_t CONFIG_STORAGE_FILE_CLEANUP_TIMEOUT_MAX;
-// extern const char* CONFIG_STORAGE_S3_ENABLE;
-// extern const char* CONFIG_STORAGE_S3_ENABLE_DEFAULT;
-// extern const char* CONFIG_STORAGE_S3_ADDRESS;
-// extern const char* CONFIG_STORAGE_S3_ADDRESS_DEFAULT;
-// extern const char* CONFIG_STORAGE_S3_PORT;
-// extern const char* CONFIG_STORAGE_S3_PORT_DEFAULT;
-// extern const char* CONFIG_STORAGE_S3_ACCESS_KEY;
-// extern const char* CONFIG_STORAGE_S3_ACCESS_KEY_DEFAULT;
-// extern const char* CONFIG_STORAGE_S3_SECRET_KEY;
-// extern const char* CONFIG_STORAGE_S3_SECRET_KEY_DEFAULT;
-// extern const char* CONFIG_STORAGE_S3_BUCKET;
-// extern const char* CONFIG_STORAGE_S3_BUCKET_DEFAULT;
 
 /* cache config */
 extern const char* CONFIG_CACHE;
@@ -252,20 +225,6 @@ class Config {
     Status
     CheckNetworkConfigHTTPPort(const std::string& value);
 
-    /* server config */
-    // Status
-    // CheckServerConfigAddress(const std::string& value);
-    // Status
-    // CheckServerConfigPort(const std::string& value);
-    //    Status
-    //    CheckServerConfigDeployMode(const std::string& value);
-    // Status
-    // CheckServerConfigTimeZone(const std::string& value);
-    // Status
-    // CheckServerConfigWebEnable(const std::string& value);
-    // Status
-    // CheckServerConfigWebPort(const std::string& value);
-
     /* db config */
     // Status
     // CheckDBConfigBackendUrl(const std::string& value);
@@ -281,18 +240,6 @@ class Config {
     CheckStorageConfigAutoFlushInterval(const std::string& value);
     Status
     CheckStorageConfigFileCleanupTimeout(const std::string& value);
-    // Status
-    // CheckStorageConfigS3Enable(const std::string& value);
-    // Status
-    // CheckStorageConfigS3Address(const std::string& value);
-    // Status
-    // CheckStorageConfigS3Port(const std::string& value);
-    // Status
-    // CheckStorageConfigS3AccessKey(const std::string& value);
-    // Status
-    // CheckStorageConfigS3SecretKey(const std::string& value);
-    // Status
-    // CheckStorageConfigS3Bucket(const std::string& value);
 
     /* metric config */
     Status
@@ -398,20 +345,6 @@ class Config {
     Status
     GetNetworkConfigHTTPPort(std::string& value);
 
-    /* server config */
-    // Status
-    // GetServerConfigAddress(std::string& value);
-    // Status
-    // GetServerConfigPort(std::string& value);
-    //    Status
-    //    GetServerConfigDeployMode(std::string& value);
-    // Status
-    // GetServerConfigTimeZone(std::string& value);
-    // Status
-    // GetServerConfigWebEnable(bool& value);
-    // Status
-    // GetServerConfigWebPort(std::string& value);
-
     /* db config */
     // Status
     // GetDBConfigBackendUrl(std::string& value);
@@ -427,18 +360,6 @@ class Config {
     GetStorageConfigAutoFlushInterval(int64_t& value);
     Status
     GetStorageConfigFileCleanupTimeup(int64_t& value);
-    // Status
-    // GetStorageConfigS3Enable(bool& value);
-    // Status
-    // GetStorageConfigS3Address(std::string& value);
-    // Status
-    // GetStorageConfigS3Port(std::string& value);
-    // Status
-    // GetStorageConfigS3AccessKey(std::string& value);
-    // Status
-    // GetStorageConfigS3SecretKey(std::string& value);
-    // Status
-    // GetStorageConfigS3Bucket(std::string& value);
 
     /* metric config */
     Status
@@ -536,20 +457,6 @@ class Config {
     Status
     SetNetworkConfigHTTPPort(const std::string& value);
 
-    /* server config */
-    // Status
-    // SetServerConfigAddress(const std::string& value);
-    // Status
-    // SetServerConfigPort(const std::string& value);
-    //    Status
-    //    SetServerConfigDeployMode(const std::string& value);
-    // Status
-    // SetServerConfigTimeZone(const std::string& value);
-    // Status
-    // SetServerConfigWebEnable(const std::string& value);
-    // Status
-    // SetServerConfigWebPort(const std::string& value);
-
     /* db config */
     // Status
     // SetDBConfigBackendUrl(const std::string& value);
@@ -565,18 +472,6 @@ class Config {
     SetStorageConfigAutoFlushInterval(const std::string& value);
     Status
     SetStorageConfigFileCleanupTimeout(const std::string& value);
-    // Status
-    // SetStorageConfigS3Enable(const std::string& value);
-    // Status
-    // SetStorageConfigS3Address(const std::string& value);
-    // Status
-    // SetStorageConfigS3Port(const std::string& value);
-    // Status
-    // SetStorageConfigS3AccessKey(const std::string& value);
-    // Status
-    // SetStorageConfigS3SecretKey(const std::string& value);
-    // Status
-    // SetStorageConfigS3Bucket(const std::string& value);
 
     /* metric config */
     Status
