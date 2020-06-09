@@ -138,34 +138,34 @@ TEST_F(ConfigTest, SERVER_CONFIG_VALID_TEST) {
 
     /* server config */
     std::string server_addr = "192.168.1.155";
-    ASSERT_TRUE(config.SetServerConfigAddress(server_addr).ok());
-    ASSERT_TRUE(config.GetServerConfigAddress(str_val).ok());
+    ASSERT_TRUE(config.SetNetworkConfigBindAddress(server_addr).ok());
+    ASSERT_TRUE(config.GetNetworkConfigBindAddress(str_val).ok());
     ASSERT_TRUE(str_val == server_addr);
 
     std::string server_port = "12345";
-    ASSERT_TRUE(config.SetServerConfigPort(server_port).ok());
-    ASSERT_TRUE(config.GetServerConfigPort(str_val).ok());
+    ASSERT_TRUE(config.SetNetworkConfigBindPort(server_port).ok());
+    ASSERT_TRUE(config.GetNetworkConfigBindPort(str_val).ok());
     ASSERT_TRUE(str_val == server_port);
 
     std::string web_port = "19999";
-    ASSERT_TRUE(config.SetServerConfigWebPort(web_port).ok());
-    ASSERT_TRUE(config.GetServerConfigWebPort(str_val).ok());
+    ASSERT_TRUE(config.SetNetworkConfigHTTPPort(web_port).ok());
+    ASSERT_TRUE(config.GetNetworkConfigHTTPPort(str_val).ok());
     ASSERT_TRUE(str_val == web_port);
 
-    std::string server_mode = "cluster_readonly";
-    ASSERT_TRUE(config.SetServerConfigDeployMode(server_mode).ok());
-    ASSERT_TRUE(config.GetServerConfigDeployMode(str_val).ok());
+    std::string server_mode = "ro";
+    ASSERT_TRUE(config.SetClusterConfigRole(server_mode).ok());
+    ASSERT_TRUE(config.GetClusterConfigRole(str_val).ok());
     ASSERT_TRUE(str_val == server_mode);
 
     std::string server_time_zone = "UTC+6";
-    ASSERT_TRUE(config.SetServerConfigTimeZone(server_time_zone).ok());
-    ASSERT_TRUE(config.GetServerConfigTimeZone(str_val).ok());
+    ASSERT_TRUE(config.SetGeneralConfigTimezone(server_time_zone).ok());
+    ASSERT_TRUE(config.GetGeneralConfigTimezone(str_val).ok());
     ASSERT_TRUE(str_val == server_time_zone);
 
     /* db config */
     std::string db_backend_url = "mysql://root:123456@127.0.0.1:19530/milvus";
-    ASSERT_TRUE(config.SetDBConfigBackendUrl(db_backend_url).ok());
-    ASSERT_TRUE(config.GetDBConfigBackendUrl(str_val).ok());
+    ASSERT_TRUE(config.SetGeneralConfigMetaURI(db_backend_url).ok());
+    ASSERT_TRUE(config.GetGeneralConfigMetaURI(str_val).ok());
     ASSERT_TRUE(str_val == db_backend_url);
 
     int64_t db_archive_disk_threshold = 100;
@@ -179,30 +179,15 @@ TEST_F(ConfigTest, SERVER_CONFIG_VALID_TEST) {
     ASSERT_TRUE(int64_val == db_archive_days_threshold);
 
     int64_t db_auto_flush_interval = 1;
-    ASSERT_TRUE(config.SetDBConfigAutoFlushInterval(std::to_string(db_auto_flush_interval)).ok());
-    ASSERT_TRUE(config.GetDBConfigAutoFlushInterval(int64_val).ok());
+    ASSERT_TRUE(config.SetStorageConfigAutoFlushInterval(std::to_string(db_auto_flush_interval)).ok());
+    ASSERT_TRUE(config.GetStorageConfigAutoFlushInterval(int64_val).ok());
     ASSERT_TRUE(int64_val == db_auto_flush_interval);
 
     /* storage config */
     std::string storage_primary_path = "/home/zilliz";
-    ASSERT_TRUE(config.SetStorageConfigPrimaryPath(storage_primary_path).ok());
-    ASSERT_TRUE(config.GetStorageConfigPrimaryPath(str_val).ok());
+    ASSERT_TRUE(config.SetStorageConfigPath(storage_primary_path).ok());
+    ASSERT_TRUE(config.GetStorageConfigPath(str_val).ok());
     ASSERT_TRUE(str_val == storage_primary_path);
-
-    std::string storage_secondary_path = "/home/zilliz";
-    ASSERT_TRUE(config.SetStorageConfigSecondaryPath(storage_secondary_path).ok());
-    ASSERT_TRUE(config.GetStorageConfigSecondaryPath(str_val).ok());
-    ASSERT_TRUE(str_val == storage_secondary_path);
-
-    storage_secondary_path = "/home/zilliz,/tmp/milvus";
-    ASSERT_TRUE(config.SetStorageConfigSecondaryPath(storage_secondary_path).ok());
-    ASSERT_TRUE(config.GetStorageConfigSecondaryPath(str_val).ok());
-    ASSERT_TRUE(str_val == storage_secondary_path);
-
-    storage_secondary_path = "";
-    ASSERT_TRUE(config.SetStorageConfigSecondaryPath(storage_secondary_path).ok());
-    ASSERT_TRUE(config.GetStorageConfigSecondaryPath(str_val).ok());
-    ASSERT_TRUE(str_val == storage_secondary_path);
 
 //    bool storage_s3_enable = true;
 //    ASSERT_TRUE(config.SetStorageConfigS3Enable(std::to_string(storage_s3_enable)).ok());
@@ -356,35 +341,15 @@ TEST_F(ConfigTest, SERVER_CONFIG_VALID_TEST) {
     ASSERT_TRUE(str_val == wal_path);
 
     /* logs config */
+    std::string logs_level = "debug";
+    ASSERT_TRUE(config.SetLogsLevel(logs_level).ok());
+    ASSERT_TRUE(config.GetLogsLevel(str_val).ok());
+    ASSERT_TRUE(str_val == logs_level);
+
     bool logs_trace_enable = false;
     ASSERT_TRUE(config.SetLogsTraceEnable(std::to_string(logs_trace_enable)).ok());
     ASSERT_TRUE(config.GetLogsTraceEnable(bool_val).ok());
     ASSERT_TRUE(bool_val == logs_trace_enable);
-
-    bool logs_debug_enable = false;
-    ASSERT_TRUE(config.SetLogsDebugEnable(std::to_string(logs_debug_enable)).ok());
-    ASSERT_TRUE(config.GetLogsDebugEnable(bool_val).ok());
-    ASSERT_TRUE(bool_val == logs_debug_enable);
-
-    bool logs_info_enable = false;
-    ASSERT_TRUE(config.SetLogsTraceEnable(std::to_string(logs_info_enable)).ok());
-    ASSERT_TRUE(config.GetLogsTraceEnable(bool_val).ok());
-    ASSERT_TRUE(bool_val == logs_info_enable);
-
-    bool logs_warning_enable = false;
-    ASSERT_TRUE(config.SetLogsDebugEnable(std::to_string(logs_warning_enable)).ok());
-    ASSERT_TRUE(config.GetLogsDebugEnable(bool_val).ok());
-    ASSERT_TRUE(bool_val == logs_warning_enable);
-
-    bool logs_error_enable = false;
-    ASSERT_TRUE(config.SetLogsTraceEnable(std::to_string(logs_error_enable)).ok());
-    ASSERT_TRUE(config.GetLogsTraceEnable(bool_val).ok());
-    ASSERT_TRUE(bool_val == logs_error_enable);
-
-    bool logs_fatal_enable = false;
-    ASSERT_TRUE(config.SetLogsDebugEnable(std::to_string(logs_fatal_enable)).ok());
-    ASSERT_TRUE(config.GetLogsDebugEnable(bool_val).ok());
-    ASSERT_TRUE(bool_val == logs_fatal_enable);
 
     std::string logs_path = "/tmp/aaa/logs";
     ASSERT_TRUE(config.SetLogsPath(logs_path).ok());
@@ -431,8 +396,8 @@ TEST_F(ConfigTest, SERVER_CONFIG_CLI_TEST) {
 
     /* server config */
     std::string server_addr = "192.168.1.155";
-    get_cmd = gen_get_command(ms::CONFIG_SERVER, ms::CONFIG_SERVER_ADDRESS);
-    set_cmd = gen_set_command(ms::CONFIG_SERVER, ms::CONFIG_SERVER_ADDRESS, server_addr);
+    get_cmd = gen_get_command(ms::CONFIG_GENERAL, ms::CONFIG_NETWORK_BIND_ADDRESS);
+    set_cmd = gen_set_command(ms::CONFIG_GENERAL, ms::CONFIG_NETWORK_BIND_ADDRESS, server_addr);
     s = config.ProcessConfigCli(dummy, set_cmd);
     ASSERT_TRUE(s.ok());
     s = config.ProcessConfigCli(result, get_cmd);
@@ -440,8 +405,8 @@ TEST_F(ConfigTest, SERVER_CONFIG_CLI_TEST) {
 
     /* db config */
     std::string db_backend_url = "sqlite://milvus:zilliz@:/";
-    get_cmd = gen_get_command(ms::CONFIG_DB, ms::CONFIG_DB_BACKEND_URL);
-    set_cmd = gen_set_command(ms::CONFIG_DB, ms::CONFIG_DB_BACKEND_URL, db_backend_url);
+    get_cmd = gen_get_command(ms::CONFIG_GENERAL, ms::CONFIG_GENERAL_METAURI);
+    set_cmd = gen_set_command(ms::CONFIG_GENERAL, ms::CONFIG_GENERAL_METAURI, db_backend_url);
     s = config.ProcessConfigCli(dummy, set_cmd);
     ASSERT_TRUE(s.ok());
     s = config.ProcessConfigCli(result, get_cmd);
@@ -458,8 +423,8 @@ TEST_F(ConfigTest, SERVER_CONFIG_CLI_TEST) {
 
     /* storage config */
     std::string storage_primary_path = "/tmp/milvus1";
-    get_cmd = gen_get_command(ms::CONFIG_STORAGE, ms::CONFIG_STORAGE_PRIMARY_PATH);
-    set_cmd = gen_set_command(ms::CONFIG_STORAGE, ms::CONFIG_STORAGE_PRIMARY_PATH, storage_primary_path);
+    get_cmd = gen_get_command(ms::CONFIG_STORAGE, ms::CONFIG_STORAGE_PATH);
+    set_cmd = gen_set_command(ms::CONFIG_STORAGE, ms::CONFIG_STORAGE_PATH, storage_primary_path);
     s = config.ProcessConfigCli(dummy, set_cmd);
     ASSERT_TRUE(s.ok());
     s = config.ProcessConfigCli(result, get_cmd);
@@ -620,42 +585,40 @@ TEST_F(ConfigTest, SERVER_CONFIG_INVALID_TEST) {
     ASSERT_FALSE(config.LoadConfigFile(config_path + "dummy.yaml").ok());
 
     /* server config */
-    ASSERT_FALSE(config.SetServerConfigAddress("0.0.0").ok());
-    ASSERT_FALSE(config.SetServerConfigAddress("0.0.0.256").ok());
+    ASSERT_FALSE(config.SetNetworkConfigBindAddress("0.0.0").ok());
+    ASSERT_FALSE(config.SetNetworkConfigBindAddress("0.0.0.256").ok());
 
-    ASSERT_FALSE(config.SetServerConfigPort("a").ok());
-    ASSERT_FALSE(config.SetServerConfigPort("99999").ok());
+    ASSERT_FALSE(config.SetNetworkConfigBindPort("a").ok());
+    ASSERT_FALSE(config.SetNetworkConfigBindPort("99999").ok());
 
-    ASSERT_FALSE(config.SetServerConfigWebPort("a").ok());
-    ASSERT_FALSE(config.SetServerConfigWebPort("99999").ok());
-    ASSERT_FALSE(config.SetServerConfigWebPort("-1").ok());
+    ASSERT_FALSE(config.SetNetworkConfigHTTPPort("a").ok());
+    ASSERT_FALSE(config.SetNetworkConfigHTTPPort("99999").ok());
+    ASSERT_FALSE(config.SetNetworkConfigHTTPPort("-1").ok());
 
-    ASSERT_FALSE(config.SetServerConfigDeployMode("cluster").ok());
+    ASSERT_FALSE(config.SetClusterConfigRole("cluster").ok());
 
-    ASSERT_FALSE(config.SetServerConfigTimeZone("GM").ok());
-    ASSERT_FALSE(config.SetServerConfigTimeZone("GMT8").ok());
-    ASSERT_FALSE(config.SetServerConfigTimeZone("UTCA").ok());
+    ASSERT_FALSE(config.SetGeneralConfigTimezone("GM").ok());
+    ASSERT_FALSE(config.SetGeneralConfigTimezone("GMT8").ok());
+    ASSERT_FALSE(config.SetGeneralConfigTimezone("UTCA").ok());
 
     /* db config */
-    ASSERT_FALSE(config.SetDBConfigBackendUrl("http://www.google.com").ok());
-    ASSERT_FALSE(config.SetDBConfigBackendUrl("sqlite://:@:").ok());
-    ASSERT_FALSE(config.SetDBConfigBackendUrl("mysql://root:123456@127.0.0.1/milvus").ok());
+    ASSERT_FALSE(config.SetGeneralConfigMetaURI("http://www.google.com").ok());
+    ASSERT_FALSE(config.SetGeneralConfigMetaURI("sqlite://:@:").ok());
+    ASSERT_FALSE(config.SetGeneralConfigMetaURI("mysql://root:123456@127.0.0.1/milvus").ok());
 
     ASSERT_FALSE(config.SetDBConfigArchiveDiskThreshold("0x10").ok());
 
     ASSERT_FALSE(config.SetDBConfigArchiveDaysThreshold("0x10").ok());
 
-    ASSERT_FALSE(config.SetDBConfigAutoFlushInterval("0.1").ok());
 
     /* storage config */
-    ASSERT_FALSE(config.SetStorageConfigPrimaryPath("").ok());
-    ASSERT_FALSE(config.SetStorageConfigPrimaryPath("./milvus").ok());
-    ASSERT_FALSE(config.SetStorageConfigPrimaryPath("../milvus").ok());
-    ASSERT_FALSE(config.SetStorageConfigPrimaryPath("/**milvus").ok());
-    ASSERT_FALSE(config.SetStorageConfigPrimaryPath("/milvus--/path").ok());
+    ASSERT_FALSE(config.SetStorageConfigPath("").ok());
+    ASSERT_FALSE(config.SetStorageConfigPath("./milvus").ok());
+    ASSERT_FALSE(config.SetStorageConfigPath("../milvus").ok());
+    ASSERT_FALSE(config.SetStorageConfigPath("/**milvus").ok());
+    ASSERT_FALSE(config.SetStorageConfigPath("/milvus--/path").ok());
 
-    ASSERT_FALSE(config.SetStorageConfigSecondaryPath("../milvus,./zilliz").ok());
-    ASSERT_FALSE(config.SetStorageConfigSecondaryPath("/home/^^__^^,/zilliz").ok());
+    ASSERT_FALSE(config.SetStorageConfigAutoFlushInterval("0.1").ok());
 
 //    ASSERT_FALSE(config.SetStorageConfigS3Enable("10").ok());
 //
@@ -734,12 +697,8 @@ TEST_F(ConfigTest, SERVER_CONFIG_INVALID_TEST) {
     ASSERT_FALSE(config.SetWalConfigBufferSize("a").ok());
 
     /* wal config */
+    ASSERT_FALSE(config.SetLogsLevel("invalid").ok());
     ASSERT_FALSE(config.SetLogsTraceEnable("invalid").ok());
-    ASSERT_FALSE(config.SetLogsDebugEnable("invalid").ok());
-    ASSERT_FALSE(config.SetLogsInfoEnable("invalid").ok());
-    ASSERT_FALSE(config.SetLogsWarningEnable("invalid").ok());
-    ASSERT_FALSE(config.SetLogsErrorEnable("invalid").ok());
-    ASSERT_FALSE(config.SetLogsFatalEnable("invalid").ok());
     ASSERT_FALSE(config.SetLogsPath("").ok());
     ASSERT_FALSE(config.SetLogsMaxLogFileSize("-1").ok());
     ASSERT_FALSE(config.SetLogsMaxLogFileSize("511").ok());
@@ -1358,17 +1317,11 @@ TEST_F(ConfigTest, SERVER_CONFIG_UPDATE_TEST) {
     ASSERT_EQ("false", yaml_value);
 
     // test path
-    cmd_set = gen_set_command(ms::CONFIG_STORAGE, ms::CONFIG_STORAGE_PRIMARY_PATH, "/tmp/milvus_config_unittest");
+    cmd_set = gen_set_command(ms::CONFIG_STORAGE, ms::CONFIG_STORAGE_PATH, "/tmp/milvus_config_unittest");
     ASSERT_TRUE(config.ProcessConfigCli(reply_set, cmd_set).ok());
-    ASSERT_TRUE(lambda(ms::CONFIG_STORAGE, ms::CONFIG_STORAGE_PRIMARY_PATH,
-        ms::CONFIG_STORAGE_PRIMARY_PATH_DEFAULT, yaml_value).ok());
+    ASSERT_TRUE(lambda(ms::CONFIG_STORAGE, ms::CONFIG_STORAGE_PATH,
+        ms::CONFIG_STORAGE_PATH_DEFAULT, yaml_value).ok());
     ASSERT_EQ("/tmp/milvus_config_unittest", yaml_value);
-
-    cmd_set = gen_set_command(ms::CONFIG_STORAGE, ms::CONFIG_STORAGE_SECONDARY_PATH, "/home/zilliz,/home/milvus");
-    ASSERT_TRUE(config.ProcessConfigCli(reply_set, cmd_set).ok());
-    ASSERT_TRUE(lambda(ms::CONFIG_STORAGE, ms::CONFIG_STORAGE_SECONDARY_PATH,
-        ms::CONFIG_STORAGE_SECONDARY_PATH_DEFAULT, yaml_value).ok());
-    ASSERT_EQ("/home/zilliz,/home/milvus", yaml_value);
 
 #ifdef MILVUS_GPU_VERSION
     cmd_set = gen_set_command(ms::CONFIG_GPU_RESOURCE, ms::CONFIG_GPU_RESOURCE_BUILD_INDEX_RESOURCES, "gpu0");

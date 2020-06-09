@@ -380,13 +380,13 @@ class WebControllerTest : public ::testing::Test {
 
         milvus::engine::DBOptions opt;
 
-        milvus::server::Config::GetInstance().SetDBConfigBackendUrl("sqlite://:@:/");
+        milvus::server::Config::GetInstance().SetGeneralConfigMetaURI("sqlite://:@:/");
         boost::filesystem::remove_all(CONTROLLER_TEST_CONFIG_DIR);
-        milvus::server::Config::GetInstance().SetStorageConfigPrimaryPath(CONTROLLER_TEST_CONFIG_DIR);
+        milvus::server::Config::GetInstance().SetStorageConfigPath(CONTROLLER_TEST_CONFIG_DIR);
 
         milvus::server::DBWrapper::GetInstance().StartService();
 
-        milvus::server::Config::GetInstance().SetServerConfigWebPort("29999");
+        milvus::server::Config::GetInstance().SetNetworkConfigHTTPPort("29999");
 
         milvus::server::web::WebServer::GetInstance().Start();
 
