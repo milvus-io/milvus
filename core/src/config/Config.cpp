@@ -26,6 +26,7 @@
 #include <fiu-local.h>
 
 #include "config/Config.h"
+#include "config/Utils.h"
 #include "config/YamlConfigMgr.h"
 #include "server/DBWrapper.h"
 #include "thirdparty/nlohmann/json.hpp"
@@ -115,11 +116,11 @@ const int64_t CONFIG_STORAGE_FILE_CLEANUP_TIMEOUT_MAX = 3600;
 /* cache config */
 const char* CONFIG_CACHE = "cache";
 const char* CONFIG_CACHE_CPU_CACHE_CAPACITY = "cache_size";
-const char* CONFIG_CACHE_CPU_CACHE_CAPACITY_DEFAULT = "4";
+const char* CONFIG_CACHE_CPU_CACHE_CAPACITY_DEFAULT = "4294967296";
 const char* CONFIG_CACHE_CPU_CACHE_THRESHOLD = "cpu_cache_threshold";
 const char* CONFIG_CACHE_CPU_CACHE_THRESHOLD_DEFAULT = "0.7";
 const char* CONFIG_CACHE_INSERT_BUFFER_SIZE = "insert_buffer_size";
-const char* CONFIG_CACHE_INSERT_BUFFER_SIZE_DEFAULT = "1";
+const char* CONFIG_CACHE_INSERT_BUFFER_SIZE_DEFAULT = "1073741824";
 const char* CONFIG_CACHE_CACHE_INSERT_DATA = "cache_insert_data";
 const char* CONFIG_CACHE_CACHE_INSERT_DATA_DEFAULT = "false";
 const char* CONFIG_CACHE_PRELOAD_COLLECTION = "preload_collection";
@@ -152,7 +153,7 @@ const char* CONFIG_GPU_RESOURCE_ENABLE_DEFAULT = "true";
 const char* CONFIG_GPU_RESOURCE_ENABLE_DEFAULT = "false";
 #endif
 const char* CONFIG_GPU_RESOURCE_CACHE_CAPACITY = "cache_size";
-const char* CONFIG_GPU_RESOURCE_CACHE_CAPACITY_DEFAULT = "1";
+const char* CONFIG_GPU_RESOURCE_CACHE_CAPACITY_DEFAULT = "1073741824";
 const char* CONFIG_GPU_RESOURCE_CACHE_THRESHOLD = "cache_threshold";
 const char* CONFIG_GPU_RESOURCE_CACHE_THRESHOLD_DEFAULT = "0.7";
 const char* CONFIG_GPU_RESOURCE_GPU_SEARCH_THRESHOLD = "gpu_search_threshold";
@@ -174,9 +175,9 @@ const char* CONFIG_WAL_ENABLE_DEFAULT = "true";
 const char* CONFIG_WAL_RECOVERY_ERROR_IGNORE = "recovery_error_ignore";
 const char* CONFIG_WAL_RECOVERY_ERROR_IGNORE_DEFAULT = "true";
 const char* CONFIG_WAL_BUFFER_SIZE = "buffer_size";
-const char* CONFIG_WAL_BUFFER_SIZE_DEFAULT = "256";
-const int64_t CONFIG_WAL_BUFFER_SIZE_MIN = 64;
-const int64_t CONFIG_WAL_BUFFER_SIZE_MAX = 4096;
+const char* CONFIG_WAL_BUFFER_SIZE_DEFAULT = "268435456";
+const int64_t CONFIG_WAL_BUFFER_SIZE_MIN = 67108864;
+const int64_t CONFIG_WAL_BUFFER_SIZE_MAX = 4294967296;
 const char* CONFIG_WAL_WAL_PATH = "path";
 const char* CONFIG_WAL_WAL_PATH_DEFAULT = "/tmp/milvus/wal";
 
@@ -189,9 +190,9 @@ const char* CONFIG_LOGS_TRACE_ENABLE_DEFAULT = "true";
 const char* CONFIG_LOGS_PATH = "path";
 const char* CONFIG_LOGS_PATH_DEFAULT = "/tmp/milvus/logs";
 const char* CONFIG_LOGS_MAX_LOG_FILE_SIZE = "max_log_file_size";
-const char* CONFIG_LOGS_MAX_LOG_FILE_SIZE_DEFAULT = "1024";
-const int64_t CONFIG_LOGS_MAX_LOG_FILE_SIZE_MIN = 512;
-const int64_t CONFIG_LOGS_MAX_LOG_FILE_SIZE_MAX = 4096;
+const char* CONFIG_LOGS_MAX_LOG_FILE_SIZE_DEFAULT = "1073741824";
+const int64_t CONFIG_LOGS_MAX_LOG_FILE_SIZE_MIN = 536870912;
+const int64_t CONFIG_LOGS_MAX_LOG_FILE_SIZE_MAX = 4294967296;
 const char* CONFIG_LOGS_LOG_ROTATE_NUM = "log_rotate_num";
 const char* CONFIG_LOGS_LOG_ROTATE_NUM_DEFAULT = "0";
 const int64_t CONFIG_LOGS_LOG_ROTATE_NUM_MIN = 0;
@@ -1322,8 +1323,42 @@ Config::CheckMetricConfigPort(const std::string& value) {
 /* cache config */
 Status
 Config::CheckCacheConfigCpuCacheCapacity(const std::string& value) {
-    fiu_return_on("check_config_cpu_cache_capacity_fail", Status(SERVER_INVALID_ARGUMENT, ""));
+    fiu_return_on("check_config_cache_size_fail", Status(SERVER_INVALID_ARGUMENT, ""));
 
+#if 1
+    std::string err;
+    int64_t cache_size = parse_bytes(value, err);
+    if (not err.empty()) {
+        return Status(SERVER_INVALID_ARGUMENT, err);
+    } else {
+        if (cache_size <= 0) {
+            std::string msg = "Invalid cpu cache capacity: " + value +
+                              ". Possible reason: cache.cache_size is not a positive integer.";
+            return Status(SERVER_INVALID_ARGUMENT, msg);
+        }
+
+        int64_t total_mem = 0, free_mem = 0;
+        CommonUtil::GetSystemMemInfo(total_mem, free_mem);
+        if (cache_size >= total_mem) {
+            std::string msg = "Invalid cpu cache size: " + value +
+                              ". Possible reason: cache.cache_size exceeds system memory.";
+            return Status(SERVER_INVALID_ARGUMENT, msg);
+        } else if (static_cast<double>(cache_size) > static_cast<double>(total_mem * 0.9)) {
+            std::cerr << "WARNING: cpu cache size value is too big" << std::endl;
+        }
+
+        std::string str = GetConfigStr(CONFIG_CACHE, CONFIG_CACHE_INSERT_BUFFER_SIZE, "0");
+
+        int64_t insert_buffer_size = parse_bytes(value, err);
+        fiu_do_on("Config.CheckCacheConfigCpuCacheCapacity.large_insert_buffer", insert_buffer_size = total_mem + 1);
+        if (insert_buffer_size + cache_size >= total_mem) {
+            std::string msg = "Invalid cpu cache size: " + value +
+                              ". Possible reason: sum of cache.cache_size and "
+                              "cache.insert_buffer_size exceeds system memory.";
+            return Status(SERVER_INVALID_ARGUMENT, msg);
+        }
+    }
+#else
     if (!ValidationUtil::ValidateStringIsNumber(value).ok()) {
         std::string msg = "Invalid cpu cache capacity: " + value +
                           ". Possible reason: cache_config.cpu_cache_capacity is not a positive integer.";
@@ -1358,6 +1393,7 @@ Config::CheckCacheConfigCpuCacheCapacity(const std::string& value) {
             return Status(SERVER_INVALID_ARGUMENT, msg);
         }
     }
+#endif
     return Status::OK();
 }
 
@@ -1383,6 +1419,33 @@ Config::CheckCacheConfigCpuCacheThreshold(const std::string& value) {
 Status
 Config::CheckCacheConfigInsertBufferSize(const std::string& value) {
     fiu_return_on("check_config_insert_buffer_size_fail", Status(SERVER_INVALID_ARGUMENT, ""));
+
+#if 1
+    std::string err;
+    int64_t buffer_size = parse_bytes(value, err);
+    if (not err.empty()) {
+        return Status(SERVER_INVALID_ARGUMENT, err);
+    } else {
+        if (buffer_size <= 0) {
+            std::string msg = "Invalid insert buffer size: " + value +
+                              ". Possible reason: cache.insert_buffer_size is not a positive integer.";
+            return Status(SERVER_INVALID_ARGUMENT, msg);
+        }
+
+        std::string str = GetConfigStr(CONFIG_CACHE, CONFIG_CACHE_CPU_CACHE_CAPACITY, "0");
+        std::string err;
+        int64_t cache_size = parse_bytes(str, err);
+
+        int64_t total_mem = 0, free_mem = 0;
+        CommonUtil::GetSystemMemInfo(total_mem, free_mem);
+        if (buffer_size + cache_size >= total_mem) {
+            std::string msg = "Invalid insert buffer size: " + value +
+                              ". Possible reason: sum of cache.cache_size and "
+                              "cache.insert_buffer_size exceeds system memory.";
+            return Status(SERVER_INVALID_ARGUMENT, msg);
+        }
+    }
+#else
     if (!ValidationUtil::ValidateStringIsNumber(value).ok()) {
         std::string msg = "Invalid insert buffer size: " + value +
                           ". Possible reason: cache_config.insert_buffer_size is not a positive integer.";
@@ -1396,7 +1459,8 @@ Config::CheckCacheConfigInsertBufferSize(const std::string& value) {
         }
 
         std::string str = GetConfigStr(CONFIG_CACHE, CONFIG_CACHE_CPU_CACHE_CAPACITY, "0");
-        int64_t cache_size = std::stoll(str) * GB;
+        std::string err;
+        int64_t cache_size = parse_bytes(str, err);
 
         int64_t total_mem = 0, free_mem = 0;
         CommonUtil::GetSystemMemInfo(total_mem, free_mem);
@@ -1406,6 +1470,7 @@ Config::CheckCacheConfigInsertBufferSize(const std::string& value) {
             return Status(SERVER_INVALID_ARGUMENT, msg);
         }
     }
+#endif
     return Status::OK();
 }
 
@@ -1517,8 +1582,32 @@ Config::CheckGpuResourceConfigEnable(const std::string& value) {
 
 Status
 Config::CheckGpuResourceConfigCacheCapacity(const std::string& value) {
-    fiu_return_on("check_gpu_cache_capacity_fail", Status(SERVER_INVALID_ARGUMENT, ""));
+    fiu_return_on("check_gpu_cache_size_fail", Status(SERVER_INVALID_ARGUMENT, ""));
 
+#if 1
+    std::string err;
+    int64_t gpu_cache_size = parse_bytes(value, err);
+    if (not err.empty()) {
+        return Status(SERVER_INVALID_ARGUMENT, err);
+    } else {
+        std::vector<int64_t> gpu_ids;
+        STATUS_CHECK(GetGpuResourceConfigBuildIndexResources(gpu_ids));
+
+        for (int64_t gpu_id : gpu_ids) {
+            int64_t gpu_memory;
+            if (!ValidationUtil::GetGpuMemory(gpu_id, gpu_memory).ok()) {
+                std::string msg = "Fail to get GPU memory for GPU device: " + std::to_string(gpu_id);
+                return Status(SERVER_UNEXPECTED_ERROR, msg);
+            } else if (gpu_cache_size >= gpu_memory) {
+                std::string msg = "Invalid gpu cache capacity: " + value +
+                                  ". Possible reason: gpu.cache_size exceeds GPU memory.";
+                return Status(SERVER_INVALID_ARGUMENT, msg);
+            } else if (gpu_cache_size > (double)gpu_memory * 0.9) {
+                std::cerr << "Warning: gpu cache size value is too big" << std::endl;
+            }
+        }
+    }
+#else
     if (!ValidationUtil::ValidateStringIsNumber(value).ok()) {
         std::string msg =
             "Invalid gpu cache capacity: " + value + ". Possible reason: gpu.cache_capacity is not a positive integer.";
@@ -1542,6 +1631,7 @@ Config::CheckGpuResourceConfigCacheCapacity(const std::string& value) {
             }
         }
     }
+#endif
     return Status::OK();
 }
 
@@ -1697,7 +1787,9 @@ Config::CheckWalConfigRecoveryErrorIgnore(const std::string& value) {
 
 Status
 Config::CheckWalConfigBufferSize(const std::string& value) {
-    auto exist_error = !ValidationUtil::ValidateStringIsNumber(value).ok();
+    std::string err;
+    parse_bytes(value, err);
+    auto exist_error = not err.empty();
     fiu_do_on("check_config_wal_buffer_size_fail", exist_error = true);
 
     if (exist_error) {
@@ -1752,7 +1844,9 @@ Config::CheckLogsPath(const std::string& value) {
 
 Status
 Config::CheckLogsMaxLogFileSize(const std::string& value) {
-    auto exist_error = !ValidationUtil::ValidateStringIsNumber(value).ok();
+    std::string err;
+    int64_t max_log_file_size = parse_bytes(value, err);
+    auto exist_error = not err.empty();
     fiu_do_on("check_logs_max_log_file_size_fail", exist_error = true);
 
     if (exist_error) {
@@ -1760,7 +1854,6 @@ Config::CheckLogsMaxLogFileSize(const std::string& value) {
                           ". Possible reason: logs.max_log_file_size is not a positive integer.";
         return Status(SERVER_INVALID_ARGUMENT, msg);
     } else {
-        int64_t max_log_file_size = std::stoll(value);
         if (max_log_file_size < CONFIG_LOGS_MAX_LOG_FILE_SIZE_MIN ||
             max_log_file_size > CONFIG_LOGS_MAX_LOG_FILE_SIZE_MAX) {
             std::string msg = "Invalid max_log_file_size: " + value +
@@ -2098,7 +2191,9 @@ Config::GetCacheConfigCpuCacheCapacity(int64_t& value) {
     std::string str =
         GetConfigStr(CONFIG_CACHE, CONFIG_CACHE_CPU_CACHE_CAPACITY, CONFIG_CACHE_CPU_CACHE_CAPACITY_DEFAULT);
     STATUS_CHECK(CheckCacheConfigCpuCacheCapacity(str));
-    value = std::stoll(str);
+    std::string err;
+    value = parse_bytes(str, err);
+    // value = std::stoll(str);
     return Status::OK();
 }
 
@@ -2116,7 +2211,9 @@ Config::GetCacheConfigInsertBufferSize(int64_t& value) {
     std::string str =
         GetConfigStr(CONFIG_CACHE, CONFIG_CACHE_INSERT_BUFFER_SIZE, CONFIG_CACHE_INSERT_BUFFER_SIZE_DEFAULT);
     STATUS_CHECK(CheckCacheConfigInsertBufferSize(str));
-    value = std::stoll(str);
+    std::string err;
+    value = parse_bytes(str, err);
+    // value = std::stoll(str);
     return Status::OK();
 }
 
@@ -2183,7 +2280,9 @@ Config::GetGpuResourceConfigCacheCapacity(int64_t& value) {
     std::string str = GetConfigStr(CONFIG_GPU_RESOURCE, CONFIG_GPU_RESOURCE_CACHE_CAPACITY,
                                    CONFIG_GPU_RESOURCE_CACHE_CAPACITY_DEFAULT);
     STATUS_CHECK(CheckGpuResourceConfigCacheCapacity(str));
-    value = std::stoll(str);
+    std::string err;
+    value = parse_bytes(str, err);
+    // value = std::stoll(str);
     return Status::OK();
 }
 
@@ -2295,7 +2394,9 @@ Status
 Config::GetWalConfigBufferSize(int64_t& buffer_size) {
     std::string str = GetConfigStr(CONFIG_WAL, CONFIG_WAL_BUFFER_SIZE, CONFIG_WAL_BUFFER_SIZE_DEFAULT);
     STATUS_CHECK(CheckWalConfigBufferSize(str));
-    buffer_size = std::stoll(str);
+    std::string err;
+    buffer_size = parse_bytes(str, err);
+    // buffer_size = std::stoll(str);
     if (buffer_size > CONFIG_WAL_BUFFER_SIZE_MAX) {
         buffer_size = CONFIG_WAL_BUFFER_SIZE_MAX;
     } else if (buffer_size < CONFIG_WAL_BUFFER_SIZE_MIN) {
@@ -2338,7 +2439,9 @@ Status
 Config::GetLogsMaxLogFileSize(int64_t& value) {
     std::string str = GetConfigStr(CONFIG_LOGS, CONFIG_LOGS_MAX_LOG_FILE_SIZE, CONFIG_LOGS_MAX_LOG_FILE_SIZE_DEFAULT);
     STATUS_CHECK(CheckLogsMaxLogFileSize(str));
-    value = std::stoll(str);
+    std::string err;
+    value = parse_bytes(str, err);
+    // value = std::stoll(str);
     return Status::OK();
 }
 

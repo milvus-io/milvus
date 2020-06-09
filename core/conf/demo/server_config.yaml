@@ -65,7 +65,7 @@ network:
 #                      | 0 means disable the regular flush.                         |            |                 |
 #----------------------+------------------------------------------------------------+------------+-----------------+
 storage:
-  path: /tmp/milvus
+  path: /var/lib/milvus
   auto_flush_interval: 1
 
 #----------------------+------------------------------------------------------------+------------+-----------------+
@@ -96,7 +96,7 @@ wal:
   enable: true
   recovery_error_ignore: false
   buffer_size: 256
-  path: /tmp/milvus/wal
+  path: /var/lib/milvus/wal
 
 #----------------------+------------------------------------------------------------+------------+-----------------+
 # Cache Config         | Description                                                | Type       | Default         |
@@ -167,7 +167,7 @@ gpu:
 logs:
   level: debug
   trace.enable: true
-  path: /tmp/milvus/logs
+  path: /var/lib/milvus/logs
   max_log_file_size: 1024
   log_rotate_num: 0
 
