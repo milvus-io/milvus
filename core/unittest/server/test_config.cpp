@@ -498,7 +498,7 @@ TEST_F(ConfigTest, SERVER_CONFIG_CLI_TEST) {
 #ifdef MILVUS_GPU_VERSION
     std::string engine_gpu_search_threshold = "800";
     get_cmd = gen_get_command(ms::CONFIG_GPU_RESOURCE, ms::CONFIG_GPU_RESOURCE_GPU_SEARCH_THRESHOLD);
-    set_cmd = gen_set_command(ms::CONFIG_GPU_RESOURCE, ms::CONFIG_GPU_RESOURCE_GPU_SEARCH_THRESHOLD, 
+    set_cmd = gen_set_command(ms::CONFIG_GPU_RESOURCE, ms::CONFIG_GPU_RESOURCE_GPU_SEARCH_THRESHOLD,
             engine_gpu_search_threshold);
     s = config.ProcessConfigCli(dummy, set_cmd);
     ASSERT_TRUE(s.ok());

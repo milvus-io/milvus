@@ -94,7 +94,7 @@ GpuResourceConfigHandler::AddGpuSearchThresholdListener() {
     ConfigCallBackF lambda_gpu_threshold = [this](const std::string& value) -> Status {
         if (!gpu_enable_) {
             std::string msg =
-                std::string("GPU resources is disable. Cannot set config ") + CONFIG_GPU_RESOURCE_GPU_SEARCH_THRESHOLD;
+                std::string("GPU resources is disabled. Cannot set config ") + CONFIG_GPU_RESOURCE_GPU_SEARCH_THRESHOLD;
             return Status(SERVER_UNEXPECTED_ERROR, msg);
         }
 
