@@ -135,12 +135,15 @@ DBWrapper::StartService() {
             kill(0, SIGUSR1);
         }
 
-        s = config.GetWalConfigBufferSize(opt.buffer_size_);
+        int64_t wal_buffer_size = 0;
+        s = config.GetWalConfigBufferSize(wal_buffer_size);
         if (!s.ok()) {
             std::cerr << "ERROR! Failed to get buffer_size configuration." << std::endl;
             std::cerr << s.ToString() << std::endl;
             kill(0, SIGUSR1);
         }
+        wal_buffer_size /= (1024 * 1024);
+        opt.buffer_size_ = wal_buffer_size;
 
         s = config.GetWalConfigWalPath(opt.mxlog_path_);
         if (!s.ok()) {

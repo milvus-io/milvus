@@ -39,7 +39,7 @@ ParserLsn(uint64_t lsn, uint32_t& file_no, uint32_t& offset) {
 }
 
 MXLogBuffer::MXLogBuffer(const std::string& mxlog_path, const uint32_t buffer_size)
-    : mxlog_buffer_size_(buffer_size * UNIT_B), mxlog_writer_(mxlog_path) {
+    : mxlog_buffer_size_(buffer_size * UNIT_MB), mxlog_writer_(mxlog_path) {
 }
 
 MXLogBuffer::~MXLogBuffer() {
