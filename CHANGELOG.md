@@ -11,6 +11,7 @@ Please mark all change in change log and use the issue from GitHub
 
 ## Feature
 -   \#2363 Update branch version
+-   \#2510 Upgrade Milvus config
 
 ## Improvement
 -   \#2381 Upgrade FAISS to 1.6.3
