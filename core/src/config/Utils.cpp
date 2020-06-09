@@ -27,20 +27,17 @@ std::unordered_map<std::string, int64_t> BYTE_UNITS = {
 
 bool
 is_number(const std::string& s) {
-    return !s.empty() &&
-        std::find_if(s.begin(), s.end(), [](unsigned char c) { return !std::isdigit(c); }) == s.end();
+    return !s.empty() && std::find_if(s.begin(), s.end(), [](unsigned char c) { return !std::isdigit(c); }) == s.end();
 }
 
 bool
 is_alpha(const std::string& s) {
-    return !s.empty() &&
-        std::find_if(s.begin(), s.end(), [](unsigned char c) { return !std::isalpha(c); }) == s.end();
+    return !s.empty() && std::find_if(s.begin(), s.end(), [](unsigned char c) { return !std::isalpha(c); }) == s.end();
 }
 
-std::string str_tolower(std::string s) {
-    std::transform(s.begin(), s.end(), s.begin(),
-                   [](unsigned char c){ return std::tolower(c); }
-                  );
+std::string
+str_tolower(std::string s) {
+    std::transform(s.begin(), s.end(), s.begin(), [](unsigned char c) { return std::tolower(c); });
     return s;
 }
 
@@ -74,7 +71,7 @@ parse_bytes(const std::string& str, std::string& err) {
     } else {
         std::stringstream ss;
         ss << "The specified value for memory (" << str << ") should specify the units."
-        << "The postfix should be one of the `b` `k` `m` `g` characters";
+           << "The postfix should be one of the `b` `k` `m` `g` characters";
         err = ss.str();
     }
     return 0;
@@ -82,4 +79,3 @@ parse_bytes(const std::string& str, std::string& err) {
 
 }  // namespace server
 }  // namespace milvus
-

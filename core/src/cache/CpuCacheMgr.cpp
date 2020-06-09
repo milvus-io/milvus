@@ -24,7 +24,7 @@ namespace cache {
 namespace {
 // constexpr int64_t unit = 1024 * 1024 * 1024;
 constexpr int64_t unit = 1;
-}
+}  // namespace
 
 CpuCacheMgr::CpuCacheMgr() {
     // All config values have been checked in Config::ValidateConfig()

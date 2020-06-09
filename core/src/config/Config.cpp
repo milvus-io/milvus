@@ -1340,8 +1340,8 @@ Config::CheckCacheConfigCpuCacheCapacity(const std::string& value) {
         int64_t total_mem = 0, free_mem = 0;
         CommonUtil::GetSystemMemInfo(total_mem, free_mem);
         if (cache_size >= total_mem) {
-            std::string msg = "Invalid cpu cache size: " + value +
-                              ". Possible reason: cache.cache_size exceeds system memory.";
+            std::string msg =
+                "Invalid cpu cache size: " + value + ". Possible reason: cache.cache_size exceeds system memory.";
             return Status(SERVER_INVALID_ARGUMENT, msg);
         } else if (static_cast<double>(cache_size) > static_cast<double>(total_mem * 0.9)) {
             std::cerr << "WARNING: cpu cache size value is too big" << std::endl;
@@ -1599,8 +1599,8 @@ Config::CheckGpuResourceConfigCacheCapacity(const std::string& value) {
                 std::string msg = "Fail to get GPU memory for GPU device: " + std::to_string(gpu_id);
                 return Status(SERVER_UNEXPECTED_ERROR, msg);
             } else if (gpu_cache_size >= gpu_memory) {
-                std::string msg = "Invalid gpu cache capacity: " + value +
-                                  ". Possible reason: gpu.cache_size exceeds GPU memory.";
+                std::string msg =
+                    "Invalid gpu cache capacity: " + value + ". Possible reason: gpu.cache_size exceeds GPU memory.";
                 return Status(SERVER_INVALID_ARGUMENT, msg);
             } else if (gpu_cache_size > (double)gpu_memory * 0.9) {
                 std::cerr << "Warning: gpu cache size value is too big" << std::endl;
