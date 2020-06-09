@@ -182,7 +182,7 @@ class MySQLMetaImpl : public Meta {
     const int mode_;
 
     std::shared_ptr<MySQLConnectionPool> mysql_connection_pool_;
-    bool safe_grab_ = false;
+    bool safe_grab_ = false;  // Safely graps a connection from mysql pool
 
     std::mutex meta_mutex_;
     std::mutex genid_mutex_;
