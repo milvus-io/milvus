@@ -32,7 +32,7 @@ class TestRestartBase:
 
 
     @pytest.mark.level(2)
-    def test_create_partition_insert_restart(self, connect, collection, args):
+    def _test_create_partition_insert_restart(self, connect, collection, args):
         '''
         target: return the same row count after server restart
         method: call function: create partition, then insert, restart server and assert row count
@@ -67,7 +67,7 @@ class TestRestartBase:
         assert res == nq
 
     @pytest.mark.level(2)
-    def test_during_creating_index_restart(self, connect, collection, args):
+    def _test_during_creating_index_restart(self, connect, collection, args):
         '''
         target: return the same row count after server restart
         method: call function: insert, flush, and create index, server do restart during creating index

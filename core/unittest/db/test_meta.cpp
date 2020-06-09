@@ -56,7 +56,7 @@ TEST_F(MetaTest, COLLECTION_TEST) {
     ASSERT_TRUE(status.ok());
 }
 
-TEST_F(MetaTest, FALID_TEST) {
+TEST_F(MetaTest, FAILED_TEST) {
     fiu_init(0);
     auto options = GetOptions();
     auto collection_id = "meta_test_table";
@@ -66,7 +66,7 @@ TEST_F(MetaTest, FALID_TEST) {
 
     {
         FIU_ENABLE_FIU("SqliteMetaImpl.ValidateMetaSchema.NullConnection");
-        milvus::engine::meta::SqliteMetaImpl impl(options.meta_);
+        ASSERT_ANY_THROW(milvus::engine::meta::SqliteMetaImpl impl(options.meta_));
         fiu_disable("SqliteMetaImpl.ValidateMetaSchema.NullConnection");
     }
     {

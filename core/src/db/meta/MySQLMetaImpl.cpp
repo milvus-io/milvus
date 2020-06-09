@@ -52,7 +52,7 @@ template <typename T>
 void
 DistributeBatch(const T& id_array, std::vector<std::vector<std::string>>& id_groups) {
     std::vector<std::string> temp_group;
-    constexpr uint64_t SQL_BATCH_SIZE = 50;
+    //    constexpr uint64_t SQL_BATCH_SIZE = 50; // duplicate variable
     for (auto& id : id_array) {
         temp_group.push_back(id);
         if (temp_group.size() >= SQL_BATCH_SIZE) {
@@ -246,12 +246,14 @@ MySQLMetaImpl::NextFileId(std::string& file_id) {
 
 void
 MySQLMetaImpl::ValidateMetaSchema() {
-    if (nullptr == mysql_connection_pool_) {
+    if (mysql_connection_pool_ == nullptr) {
+        throw Exception(DB_ERROR, "MySQL connection pool is invalid");
         return;
     }
 
     mysqlpp::ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab_);
     if (connectionPtr == nullptr) {
+        throw Exception(DB_ERROR, "Can't construct MySQL connection");
         return;
     }
 
@@ -336,7 +338,7 @@ MySQLMetaImpl::Initialize() {
 
     // step 3: connect mysql
     unsigned int thread_hint = std::thread::hardware_concurrency();
-    int max_pool_size = (thread_hint > 8) ? thread_hint : 8;
+    int max_pool_size = (thread_hint > 8) ? static_cast<int>(thread_hint) : 8;
     int port = 0;
     if (!uri_info.port_.empty()) {
         port = std::stoi(uri_info.port_);
