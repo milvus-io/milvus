@@ -271,6 +271,35 @@ TEST_F(SnapshotTest, ConCurrentCollectionOperation) {
     ASSERT_TRUE(!c_c);
 }
 
+milvus::engine::snapshot::ScopedSnapshotT
+CreatePartition(const std::string& collection_name, const milvus::engine::snapshot::PartitionContext p_context,
+        const milvus::engine::snapshot::LSN_TYPE& lsn) {
+    milvus::engine::snapshot::ScopedSnapshotT curr_ss;
+    milvus::engine::snapshot::ScopedSnapshotT ss;
+    auto status = milvus::engine::snapshot::Snapshots::GetInstance().GetSnapshot(ss, collection_name);
+    if (!status.ok()) {
+        return curr_ss;
+    }
+
+    milvus::engine::snapshot::OperationContext context;
+    context.lsn = lsn;
+    auto op = std::make_shared<milvus::engine::snapshot::CreatePartitionOperation>(context, ss);
+
+    milvus::engine::snapshot::PartitionPtr partition;
+    status = op->CommitNewPartition(p_context, partition);
+    if (!status.ok()) {
+        return curr_ss;
+    }
+
+    status = op->Push();
+    if (!status.ok()) {
+        return curr_ss;
+    }
+
+    status = op->GetSnapshot(curr_ss);
+    return curr_ss;
+}
+
 TEST_F(SnapshotTest, PartitionTest) {
     milvus::engine::snapshot::Store::GetInstance().DoReset();
     std::string collection_name("c1");
@@ -323,6 +352,45 @@ TEST_F(SnapshotTest, PartitionTest) {
     status = drop_op->Push();
     ASSERT_TRUE(!status.ok());
     std::cout << status.ToString() << std::endl;
+
+    milvus::engine::snapshot::PartitionContext pp_ctx;
+    pp_ctx.name = "p2";
+    curr_ss = CreatePartition(collection_name, pp_ctx, lsn-1);
+    ASSERT_FALSE(curr_ss);
+
+    std::stringstream p_name_stream;
+
+    std::random_device dev;
+    std::mt19937 rng(dev());
+    std::uniform_int_distribution<std::mt19937::result_type> dist(20,30);
+    auto num = dist(rng);
+    for (auto i = 0; i < num; ++i) {
+        p_name_stream.str("");
+        p_name_stream << "partition_" << i;
+        pp_ctx.name = p_name_stream.str();
+        curr_ss = CreatePartition(collection_name, pp_ctx, ++lsn);
+        ASSERT_TRUE(curr_ss);
+        ASSERT_EQ(curr_ss->NumberOfPartitions(), 2 + i);
+    }
+
+    auto total_partition_num = curr_ss->NumberOfPartitions();
+
+    milvus::engine::snapshot::ID_TYPE partition_id;
+    for (auto i = 0; i < num; ++i) {
+        p_name_stream.str("");
+        p_name_stream << "partition_" << i;
+
+        status = curr_ss->GetPartitionId(p_name_stream.str(), partition_id);
+        ASSERT_TRUE(status.ok());
+        status = milvus::engine::snapshot::Snapshots::GetInstance().DropPartition(
+                curr_ss->GetCollectionId(), partition_id, ++lsn);
+        ASSERT_TRUE(status.ok());
+        status = milvus::engine::snapshot::Snapshots::GetInstance().GetSnapshot(
+                curr_ss, curr_ss->GetCollectionId());
+        ASSERT_TRUE(status.ok());
+        ASSERT_EQ(curr_ss->NumberOfPartitions(), total_partition_num - i -1);
+    }
+
 }
 
 TEST_F(SnapshotTest, PartitionTest2) {

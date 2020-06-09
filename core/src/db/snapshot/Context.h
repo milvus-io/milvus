@@ -46,6 +46,8 @@ struct LoadOperationContext {
 };
 
 struct OperationContext {
+    explicit OperationContext(const ScopedSnapshotT& ss = ScopedSnapshotT()) : prev_ss(ss) {}
+
     ScopedSnapshotT prev_ss;
     SegmentPtr new_segment = nullptr;
     SegmentCommitPtr new_segment_commit = nullptr;

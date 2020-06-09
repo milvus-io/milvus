@@ -288,7 +288,10 @@ DropPartitionOperation::DropPartitionOperation(const PartitionContext& context, 
 std::string
 DropPartitionOperation::GetRepr() const {
     std::stringstream ss;
-    ss << "<DPO(SS=" << prev_ss_->GetID();
+    ss << "<" << GetName() << "(";
+    if (prev_ss_) {
+        ss << "SS=" << prev_ss_ << GetID();
+    }
     ss << "," << c_context_.ToString();
     ss << "," << context_.ToString();
     ss << ",LSN=" << GetContextLsn();
@@ -408,7 +411,10 @@ CreateCollectionOperation::PreCheck() {
 std::string
 CreateCollectionOperation::GetRepr() const {
     std::stringstream ss;
-    ss << "<CCO(";
+    ss << "<" << GetName() << "(";
+    if (prev_ss_) {
+        ss << "SS=" << prev_ss_ << GetID();
+    }
     ss << c_context_.ToString();
     ss << "," << context_.ToString();
     ss << ",LSN=" << GetContextLsn();

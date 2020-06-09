@@ -54,6 +54,9 @@ class Snapshots {
     DropCollection(ID_TYPE collection_id, const LSN_TYPE& lsn);
 
     Status
+    DropPartition(const ID_TYPE& collection_id, const ID_TYPE& partition_id, const LSN_TYPE& lsn);
+
+    Status
     Reset();
 
  private:

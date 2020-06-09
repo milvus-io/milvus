@@ -50,6 +50,33 @@ Snapshots::DoDropCollection(ScopedSnapshotT& ss, const LSN_TYPE& lsn) {
 }
 
 Status
+Snapshots::DropPartition(const ID_TYPE& collection_id, const ID_TYPE& partition_id,
+        const LSN_TYPE& lsn) {
+    ScopedSnapshotT ss;
+    auto status = GetSnapshot(ss, collection_id);
+    if (!status.ok()) {
+        return status;
+    }
+
+    PartitionContext context;
+    context.id = partition_id;
+    context.lsn = lsn;
+
+    auto op = std::make_shared<DropPartitionOperation>(context, ss);
+    status = op->Push();
+    if (!status.ok()) {
+        return status;
+    }
+
+    status = op->GetSnapshot(ss);
+    if (!status.ok()) {
+        return status;
+    }
+
+    return op->GetStatus();
+}
+
+Status
 Snapshots::GetSnapshotNoLoad(ScopedSnapshotT& ss, ID_TYPE collection_id, bool scoped) {
     SnapshotHolderPtr holder;
     auto status = GetHolder(collection_id, holder, false);
