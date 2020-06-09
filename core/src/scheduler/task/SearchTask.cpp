@@ -217,11 +217,6 @@ XSearchTask::Load(LoadType type, uint8_t device_id) {
 void
 XSearchTask::Execute() {
     milvus::server::ContextFollower tracer(context_, "XSearchTask::Execute " + std::to_string(index_id_));
-
-    //    LOG_ENGINE_DEBUG_ << "Searching in file id:" << index_id_ << " with "
-    //                     << search_contexts_.size() << " tasks";
-
-    //    TimeRecorder rc("DoSearch file id:" + std::to_string(index_id_));
     TimeRecorder rc(LogOut("[%s][%ld] DoSearch file id:%ld", "search", 0, index_id_));
 
     server::CollectDurationMetrics metrics(index_type_);
@@ -237,7 +232,7 @@ XSearchTask::Execute() {
             return;
         }
 
-        // step 1: allocate memory
+        /* step 1: allocate memory */
         query::GeneralQueryPtr general_query = search_job->general_query();
 
         uint64_t nq = search_job->nq();
@@ -248,12 +243,13 @@ XSearchTask::Execute() {
 
         output_ids.resize(topk * nq);
         output_distance.resize(topk * nq);
-        std::string hdr =
-            "job " + std::to_string(search_job->id()) + " nq " + std::to_string(nq) + " topk " + std::to_string(topk);
+        // std::string hdr = "job " + std::to_string(search_job->id()) + " nq " + std::to_string(nq) + " topk " +
+        //                   std::to_string(topk);
+
+        fiu_do_on("XSearchTask.Execute.throw_std_exception", throw std::exception());
 
         try {
-            fiu_do_on("XSearchTask.Execute.throw_std_exception", throw std::exception());
-            // step 2: search
+            /* step 2: search */
             bool hybrid = false;
             if (index_engine_->IndexEngineType() == engine::EngineType::FAISS_IVFSQ8H &&
                 ResMgrInst::GetInstance()->GetResource(path().Last())->type() == ResourceType::CPU) {
@@ -267,37 +263,19 @@ XSearchTask::Execute() {
                 for (; type_it != attr_type.end(); type_it++) {
                     types.insert(std::make_pair(type_it->first, (engine::DataType)(type_it->second)));
                 }
-                faiss::ConcurrentBitsetPtr bitset;
-                s = index_engine_->ExecBinaryQuery(general_query, bitset, types, nq, topk, output_distance, output_ids);
-
-                if (!s.ok()) {
-                    search_job->GetStatus() = s;
-                    search_job->SearchDone(index_id_);
-                    return;
+                s = index_engine_->ExecBinaryQuery(general_query, nullptr, types, nq, topk, output_distance, output_ids);
+            } else {
+                if (!vectors.float_data_.empty()) {
+                    s = index_engine_->Search(nq, vectors.float_data_.data(), topk, extra_params,
+                                              output_distance.data(),
+                                              output_ids.data(), hybrid);
+                } else if (!vectors.binary_data_.empty()) {
+                    s = index_engine_->Search(nq, vectors.binary_data_.data(), topk, extra_params,
+                                              output_distance.data(),
+                                              output_ids.data(), hybrid);
                 }
-
-                auto spec_k = file_->row_count_ < topk ? file_->row_count_ : topk;
-                if (spec_k == 0) {
-                    LOG_ENGINE_WARNING_ << "Searching in an empty file. file location = " << file_->location_;
-                } else {
-                    std::unique_lock<std::mutex> lock(search_job->mutex());
-                    search_job->vector_count() = nq;
-                    XSearchTask::MergeTopkToResultSet(output_ids, output_distance, spec_k, nq, topk, ascending_reduce,
-                                                      search_job->GetResultIds(), search_job->GetResultDistances());
-                }
-                search_job->SearchDone(index_id_);
-                index_engine_ = nullptr;
-                return;
+                fiu_do_on("XSearchTask.Execute.search_fail", s = Status(SERVER_UNEXPECTED_ERROR, ""));
             }
-            if (!vectors.float_data_.empty()) {
-                s = index_engine_->Search(nq, vectors.float_data_.data(), topk, extra_params, output_distance.data(),
-                                          output_ids.data(), hybrid);
-            } else if (!vectors.binary_data_.empty()) {
-                s = index_engine_->Search(nq, vectors.binary_data_.data(), topk, extra_params, output_distance.data(),
-                                          output_ids.data(), hybrid);
-            }
-
-            fiu_do_on("XSearchTask.Execute.search_fail", s = Status(SERVER_UNEXPECTED_ERROR, ""));
 
             if (!s.ok()) {
                 search_job->GetStatus() = s;
@@ -305,28 +283,31 @@ XSearchTask::Execute() {
                 return;
             }
 
-            // double span = rc.RecordSection(hdr + ", do search");
+            rc.RecordSection("search");
             // search_job->AccumSearchCost(span);
 
-            // step 3: pick up topk result
+            /* step 3: pick up topk result */
             auto spec_k = file_->row_count_ < topk ? file_->row_count_ : topk;
             if (spec_k == 0) {
                 LOG_ENGINE_WARNING_ << LogOut("[%s][%ld] Searching in an empty file. file location = %s", "search", 0,
                                               file_->location_.c_str());
             } else {
                 std::unique_lock<std::mutex> lock(search_job->mutex());
+                if (general_query != nullptr) {
+                    search_job->vector_count() = nq;
+                }
                 XSearchTask::MergeTopkToResultSet(output_ids, output_distance, spec_k, nq, topk, ascending_reduce,
                                                   search_job->GetResultIds(), search_job->GetResultDistances());
             }
 
-            // span = rc.RecordSection(hdr + ", reduce topk");
+            rc.RecordSection("reduce topk");
             // search_job->AccumReduceCost(span);
         } catch (std::exception& ex) {
             LOG_ENGINE_ERROR_ << LogOut("[%s][%ld] SearchTask encounter exception: %s", "search", 0, ex.what());
-            //            search_job->IndexSearchDone(index_id_);//mark as done avoid dead lock, even search failed
+            // search_job->IndexSearchDone(index_id_);  //mark as done avoid dead lock, even search failed
         }
 
-        // step 4: notify to send result to client
+        /* step 4: notify to send result to client */
         search_job->SearchDone(index_id_);
     }
 
