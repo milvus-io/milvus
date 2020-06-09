@@ -299,7 +299,11 @@ void IndexIVFFlatDedup::add_with_ids(
         InvertedLists::ScopedCodes codes (invlists, list_no);
 
         int64_t n = invlists->list_size (list_no);
-search_and_reconstruct
+        int64_t offset = -1;
+        for (int64_t o = 0; o < n; o++) {
+            if (!memcmp (codes.get() + o * code_size,
+                         xi, code_size)) {
+                offset = o;
                 break;
             }
         }
