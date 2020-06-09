@@ -19,38 +19,8 @@ namespace milvus {
 namespace engine {
 namespace snapshot {
 
-CompoundBaseOperation::CompoundBaseOperation(const OperationContext& context, ScopedSnapshotT prev_ss)
-    : BaseT(context, prev_ss, OperationsType::W_Compound) {
-}
-CompoundBaseOperation::CompoundBaseOperation(const OperationContext& context, ID_TYPE collection_id, ID_TYPE commit_id)
-    : BaseT(context, collection_id, commit_id, OperationsType::W_Compound) {
-}
-
-std::string
-CompoundBaseOperation::GetRepr() const {
-    std::stringstream ss;
-    ss << "<" << GetName() << "(";
-    if (prev_ss_) {
-        ss << "SS=" << prev_ss_ << GetID();
-    }
-    ss << "," << context_.ToString();
-    ss << ",LSN=" << GetContextLsn();
-    ss << ")>";
-    return ss.str();
-}
-
-Status
-CompoundBaseOperation::PreCheck() {
-    if (GetContextLsn() <= prev_ss_->GetMaxLsn()) {
-        return Status(SS_INVALID_CONTEX_ERROR, "Invalid LSN found in operation");
-    }
-    return Status::OK();
-}
 
 BuildOperation::BuildOperation(const OperationContext& context, ScopedSnapshotT prev_ss) : BaseT(context, prev_ss) {
-}
-BuildOperation::BuildOperation(const OperationContext& context, ID_TYPE collection_id, ID_TYPE commit_id)
-    : BaseT(context, collection_id, commit_id) {
 }
 
 Status
@@ -122,9 +92,6 @@ BuildOperation::CommitNewSegmentFile(const SegmentFileContext& context, SegmentF
 
 NewSegmentOperation::NewSegmentOperation(const OperationContext& context, ScopedSnapshotT prev_ss)
     : BaseT(context, prev_ss) {
-}
-NewSegmentOperation::NewSegmentOperation(const OperationContext& context, ID_TYPE collection_id, ID_TYPE commit_id)
-    : BaseT(context, collection_id, commit_id) {
 }
 
 Status
@@ -200,9 +167,6 @@ NewSegmentOperation::CommitNewSegmentFile(const SegmentFileContext& context, Seg
 }
 
 MergeOperation::MergeOperation(const OperationContext& context, ScopedSnapshotT prev_ss) : BaseT(context, prev_ss) {
-}
-MergeOperation::MergeOperation(const OperationContext& context, ID_TYPE collection_id, ID_TYPE commit_id)
-    : BaseT(context, collection_id, commit_id) {
 }
 
 Status
@@ -364,10 +328,6 @@ DropPartitionOperation::DoExecute(Store& store) {
 
 CreatePartitionOperation::CreatePartitionOperation(const OperationContext& context, ScopedSnapshotT prev_ss)
     : BaseT(context, prev_ss) {
-}
-CreatePartitionOperation::CreatePartitionOperation(const OperationContext& context, ID_TYPE collection_id,
-                                                   ID_TYPE commit_id)
-    : BaseT(context, collection_id, commit_id) {
 }
 
 Status

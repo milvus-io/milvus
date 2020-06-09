@@ -19,27 +19,48 @@ namespace milvus {
 namespace engine {
 namespace snapshot {
 
+template <typename DerivedT>
 class CompoundBaseOperation : public Operations {
  public:
     using BaseT = Operations;
 
-    CompoundBaseOperation(const OperationContext& context, ScopedSnapshotT prev_ss);
-    CompoundBaseOperation(const OperationContext& context, ID_TYPE collection_id, ID_TYPE commit_id = 0);
+    CompoundBaseOperation(const OperationContext& context, ScopedSnapshotT prev_ss)
+        : BaseT(context, prev_ss, OperationsType::W_Compound) {
+    }
 
     std::string
-    GetRepr() const override;
+    GetRepr() const override {
+        std::stringstream ss;
+        ss << "<" << GetName() << "(";
+        if (prev_ss_) {
+            ss << "SS=" << prev_ss_ << GetID();
+        }
+        ss << "," << context_.ToString();
+        ss << ",LSN=" << GetContextLsn();
+        ss << ")>";
+        return ss.str();
+    }
 
     Status
-    PreCheck() override;
+    PreCheck() override {
+        if (GetContextLsn() <= prev_ss_->GetMaxLsn()) {
+            return Status(SS_INVALID_CONTEX_ERROR, "Invalid LSN found in operation");
+        }
+        return Status::OK();
+    }
+
+    std::string
+    GetName() const override {
+        return DerivedT::Name;
+    }
 };
 
-class BuildOperation : public CompoundBaseOperation {
+class BuildOperation : public CompoundBaseOperation<BuildOperation> {
  public:
-    using BaseT = CompoundBaseOperation;
+    using BaseT = CompoundBaseOperation<BuildOperation>;
     static constexpr const char* Name = "BO";
 
     BuildOperation(const OperationContext& context, ScopedSnapshotT prev_ss);
-    BuildOperation(const OperationContext& context, ID_TYPE collection_id, ID_TYPE commit_id = 0);
 
     Status
     DoExecute(Store&) override;
@@ -47,23 +68,17 @@ class BuildOperation : public CompoundBaseOperation {
     Status
     CommitNewSegmentFile(const SegmentFileContext& context, SegmentFilePtr& created);
 
-    std::string
-    GetName() const override {
-        return Name;
-    }
-
  protected:
     Status
     CheckSegmentStale(ScopedSnapshotT& latest_snapshot, ID_TYPE segment_id) const;
 };
 
-class NewSegmentOperation : public CompoundBaseOperation {
+class NewSegmentOperation : public CompoundBaseOperation<NewSegmentOperation> {
  public:
-    using BaseT = CompoundBaseOperation;
+    using BaseT = CompoundBaseOperation<NewSegmentOperation>;
     static constexpr const char* Name = "NSO";
 
     NewSegmentOperation(const OperationContext& context, ScopedSnapshotT prev_ss);
-    NewSegmentOperation(const OperationContext& context, ID_TYPE collection_id, ID_TYPE commit_id = 0);
 
     Status
     DoExecute(Store&) override;
@@ -73,20 +88,14 @@ class NewSegmentOperation : public CompoundBaseOperation {
 
     Status
     CommitNewSegmentFile(const SegmentFileContext& context, SegmentFilePtr& created);
-
-    std::string
-    GetName() const override {
-        return Name;
-    }
 };
 
-class MergeOperation : public CompoundBaseOperation {
+class MergeOperation : public CompoundBaseOperation<MergeOperation> {
  public:
-    using BaseT = CompoundBaseOperation;
+    using BaseT = CompoundBaseOperation<MergeOperation>;
     static constexpr const char* Name = "MO";
 
     MergeOperation(const OperationContext& context, ScopedSnapshotT prev_ss);
-    MergeOperation(const OperationContext& context, ID_TYPE collection_id, ID_TYPE commit_id = 0);
 
     Status
     DoExecute(Store&) override;
@@ -95,16 +104,11 @@ class MergeOperation : public CompoundBaseOperation {
     CommitNewSegment(SegmentPtr&);
     Status
     CommitNewSegmentFile(const SegmentFileContext& context, SegmentFilePtr&);
-
-    std::string
-    GetName() const override {
-        return Name;
-    }
 };
 
-class CreateCollectionOperation : public CompoundBaseOperation {
+class CreateCollectionOperation : public CompoundBaseOperation<CreateCollectionOperation> {
  public:
-    using BaseT = CompoundBaseOperation;
+    using BaseT = CompoundBaseOperation<CreateCollectionOperation>;
     static constexpr const char* Name = "CCO";
 
     explicit CreateCollectionOperation(const CreateCollectionContext& context);
@@ -126,22 +130,16 @@ class CreateCollectionOperation : public CompoundBaseOperation {
     std::string
     GetRepr() const override;
 
-    std::string
-    GetName() const override {
-        return Name;
-    }
-
  private:
     CreateCollectionContext c_context_;
 };
 
-class CreatePartitionOperation : public CompoundBaseOperation {
+class CreatePartitionOperation : public CompoundBaseOperation<CreatePartitionOperation> {
  public:
-    using BaseT = CompoundBaseOperation;
+    using BaseT = CompoundBaseOperation<CreatePartitionOperation>;
     static constexpr const char* Name = "CPO";
 
     CreatePartitionOperation(const OperationContext& context, ScopedSnapshotT prev_ss);
-    CreatePartitionOperation(const OperationContext& context, ID_TYPE collection_id, ID_TYPE commit_id = 0);
 
     Status
     CommitNewPartition(const PartitionContext& context, PartitionPtr& partition);
@@ -151,16 +149,11 @@ class CreatePartitionOperation : public CompoundBaseOperation {
 
     Status
     PreCheck() override;
-
-    std::string
-    GetName() const override {
-        return Name;
-    }
 };
 
-class DropPartitionOperation : public CompoundBaseOperation {
+class DropPartitionOperation : public CompoundBaseOperation<DropPartitionOperation> {
  public:
-    using BaseT = CompoundBaseOperation;
+    using BaseT = CompoundBaseOperation<DropPartitionOperation>;
     static constexpr const char* Name = "DPO";
     DropPartitionOperation(const PartitionContext& context, ScopedSnapshotT prev_ss);
 
@@ -174,11 +167,6 @@ class DropPartitionOperation : public CompoundBaseOperation {
 
     std::string
     GetRepr() const override;
-
-    std::string
-    GetName() const override {
-        return Name;
-    }
 
  protected:
     PartitionContext c_context_;
@@ -219,9 +207,9 @@ class GetCollectionIDsOperation : public Operations {
     IDS_TYPE ids_;
 };
 
-class SoftDeleteCollectionOperation : public CompoundBaseOperation {
+class SoftDeleteCollectionOperation : public CompoundBaseOperation<SoftDeleteCollectionOperation> {
  public:
-    using BaseT = CompoundBaseOperation;
+    using BaseT = CompoundBaseOperation<SoftDeleteCollectionOperation>;
     static constexpr const char* Name = "DCO";
 
     explicit SoftDeleteCollectionOperation(const OperationContext& context, ScopedSnapshotT prev_ss)
@@ -230,11 +218,6 @@ class SoftDeleteCollectionOperation : public CompoundBaseOperation {
 
     Status
     DoExecute(Store& store) override;
-
-    std::string
-    GetName() const override {
-        return Name;
-    }
 
  private:
     ID_TYPE collection_id_;
