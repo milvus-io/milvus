@@ -258,9 +258,9 @@ Server::Start() {
             s = InstanceLockCheck::Check(db_path);
             if (!s.ok()) {
                 if (not cluster_enable) {
-                    std::cerr << "single instance lock db path failed." << std::endl;
+                    std::cerr << "single instance lock db path failed." << s.message() << std::endl;
                 } else {
-                    std::cerr << cluster_role << " instance lock db path failed." << std::endl;
+                    std::cerr << cluster_role << " instance lock db path failed." << s.message() << std::endl;
                 }
                 return s;
             }
@@ -281,9 +281,9 @@ Server::Start() {
                 s = InstanceLockCheck::Check(wal_path);
                 if (!s.ok()) {
                     if (not cluster_enable) {
-                        std::cerr << "single instance lock wal path failed." << std::endl;
+                        std::cerr << "single instance lock wal path failed." << s.message() << std::endl;
                     } else {
-                        std::cerr << cluster_role << " instance lock wal path failed." << std::endl;
+                        std::cerr << cluster_role << " instance lock wal path failed." << s.message() << std::endl;
                     }
                     return s;
                 }
