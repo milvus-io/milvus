@@ -9,11 +9,14 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
+#include <fiu-control.h>
+#include <fiu-local.h>
 #include <gtest/gtest.h>
 
 #include "easyloggingpp/easylogging++.h"
 #include "storage/disk/DiskIOReader.h"
 #include "storage/disk/DiskIOWriter.h"
+#include "storage/disk/DiskOperation.h"
 #include "storage/utils.h"
 
 INITIALIZE_EASYLOGGINGPP
@@ -59,4 +62,15 @@ TEST_F(StorageTest, DISK_RW_TEST) {
         ASSERT_TRUE(content == content_out);
         reader.close();
     }
+}
+
+TEST_F(StorageTest, DISK_OPERATION_TEST) {
+    auto disk_operation = milvus::storage::DiskOperation("/tmp/milvus_test/milvus_disk_operation_test");
+
+    fiu_init(0);
+    fiu_enable("DiskOperation.CreateDirectory.is_directory", 1, NULL, 0);
+    fiu_enable("DiskOperation.CreateDirectory.create_directory", 1, NULL, 0);
+    ASSERT_ANY_THROW(disk_operation.CreateDirectory());
+    fiu_disable("DiskOperation.CreateDirectory.create_directory");
+    fiu_disable("DiskOperation.CreateDirectory.is_directory");
 }

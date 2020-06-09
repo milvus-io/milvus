@@ -11,6 +11,8 @@
 
 #include "server/delivery/request/ReLoadSegmentsRequest.h"
 
+#include <fiu-local.h>
+
 #include "config/Config.h"
 #include "server/DBWrapper.h"
 #include "utils/TimeRecorder.h"
@@ -41,6 +43,7 @@ ReLoadSegmentsRequest::OnExecute() {
         return status;
     }
 
+    fiu_do_on("ReLoadSegmentsRequest.OnExecute.readonly", deploy_mode = "cluster_readonly");
     if (deploy_mode == "single" || deploy_mode == "cluster_writable") {
         // TODO: No need to reload segment files
         return Status(SERVER_SUCCESS, "");
