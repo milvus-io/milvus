@@ -39,8 +39,6 @@ class Operations : public std::enable_shared_from_this<Operations> {
  public:
     Operations(const OperationContext& context, ScopedSnapshotT prev_ss,
                const OperationsType& type = OperationsType::Invalid);
-    Operations(const OperationContext& context, ID_TYPE collection_id, ID_TYPE commit_id = 0,
-               const OperationsType& type = OperationsType::Invalid);
 
     const ScopedSnapshotT&
     GetPrevSnapshot() const {
@@ -189,9 +187,6 @@ class CommitOperation : public Operations {
     using BaseT = Operations;
     CommitOperation(const OperationContext& context, ScopedSnapshotT prev_ss)
         : BaseT(context, prev_ss, OperationsType::W_Leaf) {
-    }
-    CommitOperation(const OperationContext& context, ID_TYPE collection_id, ID_TYPE commit_id = 0)
-        : BaseT(context, collection_id, commit_id, OperationsType::W_Leaf) {
     }
 
     virtual typename ResourceT::Ptr

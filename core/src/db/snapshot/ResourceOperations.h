@@ -22,9 +22,6 @@ class CollectionCommitOperation : public CommitOperation<CollectionCommit> {
     using BaseT = CommitOperation<CollectionCommit>;
     CollectionCommitOperation(OperationContext context, ScopedSnapshotT prev_ss) : BaseT(context, prev_ss) {
     }
-    CollectionCommitOperation(OperationContext context, ID_TYPE collection_id, ID_TYPE commit_id = 0)
-        : BaseT(context, collection_id, commit_id) {
-    }
 
     CollectionCommitPtr
     GetPrevResource() const override {
@@ -39,7 +36,6 @@ class PartitionCommitOperation : public CommitOperation<PartitionCommit> {
  public:
     using BaseT = CommitOperation<PartitionCommit>;
     PartitionCommitOperation(const OperationContext& context, ScopedSnapshotT prev_ss);
-    PartitionCommitOperation(const OperationContext& context, ID_TYPE collection_id, ID_TYPE commit_id = 0);
 
     PartitionCommitPtr
     GetPrevResource() const override;
@@ -55,7 +51,6 @@ class PartitionOperation : public CommitOperation<Partition> {
  public:
     using BaseT = CommitOperation<Partition>;
     PartitionOperation(const PartitionContext& context, ScopedSnapshotT prev_ss);
-    PartitionOperation(const PartitionContext& context, ID_TYPE collection_id, ID_TYPE commit_id = 0);
 
     Status
     DoExecute(Store& store) override;
@@ -71,7 +66,6 @@ class SegmentCommitOperation : public CommitOperation<SegmentCommit> {
  public:
     using BaseT = CommitOperation<SegmentCommit>;
     SegmentCommitOperation(const OperationContext& context, ScopedSnapshotT prev_ss);
-    SegmentCommitOperation(const OperationContext& context, ID_TYPE collection_id, ID_TYPE commit_id = 0);
 
     SegmentCommit::Ptr
     GetPrevResource() const override;
@@ -87,7 +81,6 @@ class SegmentOperation : public CommitOperation<Segment> {
  public:
     using BaseT = CommitOperation<Segment>;
     SegmentOperation(const OperationContext& context, ScopedSnapshotT prev_ss);
-    SegmentOperation(const OperationContext& context, ID_TYPE collection_id, ID_TYPE commit_id = 0);
 
     Status
     DoExecute(Store& store) override;
@@ -100,7 +93,6 @@ class SegmentFileOperation : public CommitOperation<SegmentFile> {
  public:
     using BaseT = CommitOperation<SegmentFile>;
     SegmentFileOperation(const SegmentFileContext& sc, ScopedSnapshotT prev_ss);
-    SegmentFileOperation(const SegmentFileContext& sc, ID_TYPE collection_id, ID_TYPE commit_id = 0);
 
     Status
     DoExecute(Store& store) override;

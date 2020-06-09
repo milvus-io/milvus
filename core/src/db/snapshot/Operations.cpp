@@ -35,14 +35,6 @@ Operations::Operations(const OperationContext& context, ScopedSnapshotT prev_ss,
       type_(type) {
 }
 
-Operations::Operations(const OperationContext& context, ID_TYPE collection_id, ID_TYPE commit_id,
-                       const OperationsType& type)
-    : context_(context), uid_(UID++), status_(SS_OPERATION_PENDING, "Operation Pending"), type_(type) {
-    auto status = Snapshots::GetInstance().GetSnapshot(prev_ss_, collection_id, commit_id);
-    if (!status.ok())
-        prev_ss_ = ScopedSnapshotT();
-}
-
 std::string
 Operations::SuccessString() const {
     return status_.ToString();

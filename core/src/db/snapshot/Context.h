@@ -17,6 +17,7 @@
 #include <vector>
 #include "db/meta/MetaTypes.h"
 #include "db/snapshot/Resources.h"
+#include "db/snapshot/Snapshot.h"
 
 namespace milvus {
 namespace engine {
@@ -45,6 +46,7 @@ struct LoadOperationContext {
 };
 
 struct OperationContext {
+    ScopedSnapshotT prev_ss;
     SegmentPtr new_segment = nullptr;
     SegmentCommitPtr new_segment_commit = nullptr;
     PartitionPtr new_partition = nullptr;

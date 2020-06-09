@@ -43,10 +43,6 @@ PartitionOperation::PartitionOperation(const PartitionContext& context, ScopedSn
     : BaseT(OperationContext(), prev_ss), context_(context) {
 }
 
-PartitionOperation::PartitionOperation(const PartitionContext& context, ID_TYPE collection_id, ID_TYPE commit_id)
-    : BaseT(OperationContext(), collection_id, commit_id), context_(context) {
-}
-
 Status
 PartitionOperation::PreCheck() {
     return Status::OK();
@@ -64,11 +60,6 @@ PartitionOperation::DoExecute(Store& store) {
 
 PartitionCommitOperation::PartitionCommitOperation(const OperationContext& context, ScopedSnapshotT prev_ss)
     : BaseT(context, prev_ss) {
-}
-
-PartitionCommitOperation::PartitionCommitOperation(const OperationContext& context, ID_TYPE collection_id,
-                                                   ID_TYPE commit_id)
-    : BaseT(context, collection_id, commit_id) {
 }
 
 Status
@@ -118,11 +109,6 @@ SegmentCommitOperation::SegmentCommitOperation(const OperationContext& context, 
     : BaseT(context, prev_ss) {
 }
 
-SegmentCommitOperation::SegmentCommitOperation(const OperationContext& context, ID_TYPE collection_id,
-                                               ID_TYPE commit_id)
-    : BaseT(context, collection_id, commit_id) {
-}
-
 SegmentCommit::Ptr
 SegmentCommitOperation::GetPrevResource() const {
     if (context_.new_segment_files.size() > 0) {
@@ -132,10 +118,6 @@ SegmentCommitOperation::GetPrevResource() const {
 }
 
 SegmentOperation::SegmentOperation(const OperationContext& context, ScopedSnapshotT prev_ss) : BaseT(context, prev_ss) {
-}
-
-SegmentOperation::SegmentOperation(const OperationContext& context, ID_TYPE collection_id, ID_TYPE commit_id)
-    : BaseT(context, collection_id, commit_id) {
 }
 
 Status
@@ -189,10 +171,6 @@ SegmentCommitOperation::PreCheck() {
 
 SegmentFileOperation::SegmentFileOperation(const SegmentFileContext& sc, ScopedSnapshotT prev_ss)
     : BaseT(OperationContext(), prev_ss), context_(sc) {
-}
-
-SegmentFileOperation::SegmentFileOperation(const SegmentFileContext& sc, ID_TYPE collection_id, ID_TYPE commit_id)
-    : BaseT(OperationContext(), collection_id, commit_id), context_(sc) {
 }
 
 Status
