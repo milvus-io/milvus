@@ -178,7 +178,7 @@ TEST_F(SnapshotTest, CreateCollectionOperationTest) {
     sd_op_ctx.collection = latest_ss->GetCollection();
     sd_op_ctx.lsn = latest_ss->GetMaxLsn() + 1;
     ASSERT_TRUE(sd_op_ctx.collection->IsActive());
-    auto sd_op = std::make_shared<milvus::engine::snapshot::SoftDeleteCollectionOperation>(sd_op_ctx, latest_ss);
+    auto sd_op = std::make_shared<milvus::engine::snapshot::DropCollectionOperation>(sd_op_ctx, latest_ss);
     status = sd_op->Push();
     ASSERT_TRUE(status.ok());
     ASSERT_TRUE(sd_op->GetStatus().ok());

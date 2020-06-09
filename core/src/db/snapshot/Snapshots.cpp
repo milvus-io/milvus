@@ -39,7 +39,7 @@ Snapshots::DoDropCollection(ScopedSnapshotT& ss, const LSN_TYPE& lsn) {
     OperationContext context;
     context.lsn = lsn;
     context.collection = ss->GetCollection();
-    auto op = std::make_shared<SoftDeleteCollectionOperation>(context, ss);
+    auto op = std::make_shared<DropCollectionOperation>(context, ss);
     op->Push();
     auto status = op->GetStatus();
 

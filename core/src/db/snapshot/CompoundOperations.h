@@ -58,7 +58,7 @@ class CompoundBaseOperation : public Operations {
 class BuildOperation : public CompoundBaseOperation<BuildOperation> {
  public:
     using BaseT = CompoundBaseOperation<BuildOperation>;
-    static constexpr const char* Name = "BO";
+    static constexpr const char* Name = "B";
 
     BuildOperation(const OperationContext& context, ScopedSnapshotT prev_ss);
 
@@ -76,7 +76,7 @@ class BuildOperation : public CompoundBaseOperation<BuildOperation> {
 class NewSegmentOperation : public CompoundBaseOperation<NewSegmentOperation> {
  public:
     using BaseT = CompoundBaseOperation<NewSegmentOperation>;
-    static constexpr const char* Name = "NSO";
+    static constexpr const char* Name = "NS";
 
     NewSegmentOperation(const OperationContext& context, ScopedSnapshotT prev_ss);
 
@@ -93,7 +93,7 @@ class NewSegmentOperation : public CompoundBaseOperation<NewSegmentOperation> {
 class MergeOperation : public CompoundBaseOperation<MergeOperation> {
  public:
     using BaseT = CompoundBaseOperation<MergeOperation>;
-    static constexpr const char* Name = "MO";
+    static constexpr const char* Name = "M";
 
     MergeOperation(const OperationContext& context, ScopedSnapshotT prev_ss);
 
@@ -109,7 +109,7 @@ class MergeOperation : public CompoundBaseOperation<MergeOperation> {
 class CreateCollectionOperation : public CompoundBaseOperation<CreateCollectionOperation> {
  public:
     using BaseT = CompoundBaseOperation<CreateCollectionOperation>;
-    static constexpr const char* Name = "CCO";
+    static constexpr const char* Name = "CC";
 
     explicit CreateCollectionOperation(const CreateCollectionContext& context);
 
@@ -137,7 +137,7 @@ class CreateCollectionOperation : public CompoundBaseOperation<CreateCollectionO
 class CreatePartitionOperation : public CompoundBaseOperation<CreatePartitionOperation> {
  public:
     using BaseT = CompoundBaseOperation<CreatePartitionOperation>;
-    static constexpr const char* Name = "CPO";
+    static constexpr const char* Name = "CP";
 
     CreatePartitionOperation(const OperationContext& context, ScopedSnapshotT prev_ss);
 
@@ -154,7 +154,7 @@ class CreatePartitionOperation : public CompoundBaseOperation<CreatePartitionOpe
 class DropPartitionOperation : public CompoundBaseOperation<DropPartitionOperation> {
  public:
     using BaseT = CompoundBaseOperation<DropPartitionOperation>;
-    static constexpr const char* Name = "DPO";
+    static constexpr const char* Name = "DP";
     DropPartitionOperation(const PartitionContext& context, ScopedSnapshotT prev_ss);
 
     Status
@@ -207,12 +207,12 @@ class GetCollectionIDsOperation : public Operations {
     IDS_TYPE ids_;
 };
 
-class SoftDeleteCollectionOperation : public CompoundBaseOperation<SoftDeleteCollectionOperation> {
+class DropCollectionOperation : public CompoundBaseOperation<DropCollectionOperation> {
  public:
-    using BaseT = CompoundBaseOperation<SoftDeleteCollectionOperation>;
-    static constexpr const char* Name = "DCO";
+    using BaseT = CompoundBaseOperation<DropCollectionOperation>;
+    static constexpr const char* Name = "DC";
 
-    explicit SoftDeleteCollectionOperation(const OperationContext& context, ScopedSnapshotT prev_ss)
+    explicit DropCollectionOperation(const OperationContext& context, ScopedSnapshotT prev_ss)
         : BaseT(context, prev_ss) {
     }
 

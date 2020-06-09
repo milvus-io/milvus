@@ -493,7 +493,7 @@ CreateCollectionOperation::GetSnapshot(ScopedSnapshotT& ss) const {
 }
 
 Status
-SoftDeleteCollectionOperation::DoExecute(Store& store) {
+DropCollectionOperation::DoExecute(Store& store) {
     if (!context_.collection) {
         return Status(SS_INVALID_CONTEX_ERROR, "Invalid Context");
     }
