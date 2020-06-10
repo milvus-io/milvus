@@ -43,36 +43,40 @@ str_tolower(std::string s) {
 
 int64_t
 parse_bytes(const std::string& str, std::string& err) {
-    std::string s = str;
-    if (is_number(s))
-        return std::stoll(s);
-    if (s.length() == 0)
-        return 0;
+    try {
+        std::string s = str;
+        if (is_number(s))
+            return std::stoll(s);
+        if (s.length() == 0)
+            return 0;
 
-    auto last_two = s.substr(s.length() - 2, 2);
-    auto last_one = s.substr(s.length() - 1);
-    if (is_alpha(last_two) && is_alpha(last_one))
-        if (last_one == "b" or last_one == "B")
-            s = s.substr(0, s.length() - 1);
-    auto& units = BYTE_UNITS;
-    auto suffix = str_tolower(s.substr(s.length() - 1));
+        auto last_two = s.substr(s.length() - 2, 2);
+        auto last_one = s.substr(s.length() - 1);
+        if (is_alpha(last_two) && is_alpha(last_one))
+            if (last_one == "b" or last_one == "B")
+                s = s.substr(0, s.length() - 1);
+        auto& units = BYTE_UNITS;
+        auto suffix = str_tolower(s.substr(s.length() - 1));
 
-    std::string digits_part;
-    if (is_number(suffix)) {
-        digits_part = s;
-        suffix = 'b';
-    } else {
-        digits_part = s.substr(0, s.length() - 1);
-    }
+        std::string digits_part;
+        if (is_number(suffix)) {
+            digits_part = s;
+            suffix = 'b';
+        } else {
+            digits_part = s.substr(0, s.length() - 1);
+        }
 
-    if (units.find(suffix) != units.end() or is_number(suffix)) {
-        auto digits = std::stoll(digits_part);
-        return digits * units[suffix];
-    } else {
-        std::stringstream ss;
-        ss << "The specified value for memory (" << str << ") should specify the units."
-           << "The postfix should be one of the `b` `k` `m` `g` characters";
-        err = ss.str();
+        if (units.find(suffix) != units.end() or is_number(suffix)) {
+            auto digits = std::stoll(digits_part);
+            return digits * units[suffix];
+        } else {
+            std::stringstream ss;
+            ss << "The specified value for memory (" << str << ") should specify the units."
+               << "The postfix should be one of the `b` `k` `m` `g` characters";
+            err = ss.str();
+        }
+    } catch (...) {
+        err = "Unknown error happened on parse bytes.";
     }
     return 0;
 }

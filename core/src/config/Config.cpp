@@ -197,14 +197,15 @@ Config::Config() {
     config_callback_[node_blas_threshold] = empty_map;
 
     // gpu resources config
-    std::string node_gpu_search_threshold = std::string(CONFIG_ENGINE) + "." + CONFIG_GPU_RESOURCE_GPU_SEARCH_THRESHOLD;
-    config_callback_[node_gpu_search_threshold] = empty_map;
-
     std::string node_gpu_enable = std::string(CONFIG_GPU_RESOURCE) + "." + CONFIG_GPU_RESOURCE_ENABLE;
     config_callback_[node_gpu_enable] = empty_map;
 
     std::string node_gpu_cache_capacity = std::string(CONFIG_GPU_RESOURCE) + "." + CONFIG_GPU_RESOURCE_CACHE_CAPACITY;
     config_callback_[node_gpu_cache_capacity] = empty_map;
+
+    std::string node_gpu_search_threshold =
+        std::string(CONFIG_GPU_RESOURCE) + "." + CONFIG_GPU_RESOURCE_GPU_SEARCH_THRESHOLD;
+    config_callback_[node_gpu_search_threshold] = empty_map;
 
     std::string node_gpu_search_res = std::string(CONFIG_GPU_RESOURCE) + "." + CONFIG_GPU_RESOURCE_SEARCH_RESOURCES;
     config_callback_[node_gpu_search_res] = empty_map;
@@ -545,20 +546,16 @@ Config::SetConfigCli(const std::string& parent_key, const std::string& child_key
         } else {
             status = Status(SERVER_UNEXPECTED_ERROR, invalid_node_str);
         }
-        //    } else if (parent_key == CONFIG_SERVER) {
-        //        if (child_key == CONFIG_SERVER_ADDRESS) {
-        //            status = SetServerConfigAddress(value);
-        //            //        } else if (child_key == CONFIG_SERVER_DEPLOY_MODE) {
-        //            //            status = SetServerConfigDeployMode(value);
-        //        } else if (child_key == CONFIG_SERVER_PORT) {
-        //            status = SetServerConfigPort(value);
-        //            // } else if (child_key == CONFIG_SERVER_TIME_ZONE) {
-        //            //     status = SetServerConfigTimeZone(value);
-        //        } else if (child_key == CONFIG_SERVER_WEB_PORT) {
-        //            status = SetServerConfigWebPort(value);
-        //        } else {
-        //            status = Status(SERVER_UNEXPECTED_ERROR, invalid_node_str);
-        //        }
+    } else if (parent_key == CONFIG_NETWORK) {
+        if (child_key == CONFIG_NETWORK_BIND_ADDRESS) {
+            status = SetNetworkConfigBindAddress(value);
+        } else if (child_key == CONFIG_NETWORK_BIND_PORT) {
+            status = SetNetworkConfigBindPort(value);
+        } else if (child_key == CONFIG_NETWORK_HTTP_PORT) {
+            status = SetNetworkConfigHTTPPort(value);
+        } else {
+            status = Status(SERVER_UNEXPECTED_ERROR, invalid_node_str);
+        }
     } else if (parent_key == CONFIG_DB) {
         // if (child_key == CONFIG_DB_BACKEND_URL) {
         //     status = SetDBConfigBackendUrl(value);
@@ -1563,6 +1560,10 @@ Config::CheckGpuResourceConfigCacheCapacity(const std::string& value) {
     if (not err.empty()) {
         return Status(SERVER_INVALID_ARGUMENT, err);
     } else {
+        if (gpu_cache_size < 0) {
+            std::string msg = "gpu.cache_size must greater than 0, now is " + std::to_string(gpu_cache_size) + ".";
+            return Status(SERVER_INVALID_ARGUMENT, msg);
+        }
         std::vector<int64_t> gpu_ids;
         STATUS_CHECK(GetGpuResourceConfigBuildIndexResources(gpu_ids));
 
