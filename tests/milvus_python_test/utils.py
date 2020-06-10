@@ -470,7 +470,7 @@ def gen_invalid_cache_config():
     return invalid_configs
 
 
-def gen_invalid_engine_config():
+def gen_invalid_gpu_config():
     invalid_configs = [
             -1,
             [1,2,3],
