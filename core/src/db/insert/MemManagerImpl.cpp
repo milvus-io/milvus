@@ -11,6 +11,7 @@
 
 #include "db/insert/MemManagerImpl.h"
 
+#include <fiu-local.h>
 #include <thread>
 
 #include "VectorSource.h"
@@ -36,9 +37,9 @@ MemManagerImpl::InsertVectors(const std::string& collection_id, int64_t length, 
                               const float* vectors, uint64_t lsn, std::set<std::string>& flushed_tables) {
     flushed_tables.clear();
     if (GetCurrentMem() > options_.insert_buffer_size_) {
-        LOG_ENGINE_DEBUG_ << "Insert buffer size exceeds limit. Performing force flush";
         // TODO(zhiru): Don't apply delete here in order to avoid possible concurrency issues with Merge
         auto status = Flush(flushed_tables, false);
+        fiu_do_on("MemManagerImpl::InsertVectors_flush_fail", status = Status(milvus::SERVER_UNEXPECTED_ERROR, ""));
         if (!status.ok()) {
             return status;
         }

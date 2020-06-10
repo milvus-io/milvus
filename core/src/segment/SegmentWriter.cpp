@@ -69,15 +69,20 @@ SegmentWriter::AddAttrs(const std::string& name, const std::unordered_map<std::s
     auto attr_data_it = attr_data.begin();
     auto attrs = segment_ptr_->attrs_ptr_->attrs;
     for (; attr_data_it != attr_data.end(); ++attr_data_it) {
-        if (attrs.find(attr_data_it->first) != attrs.end()) {
-            segment_ptr_->attrs_ptr_->attrs.at(attr_data_it->first)
-                ->AddAttr(attr_data_it->second, attr_nbytes.at(attr_data_it->first));
-            segment_ptr_->attrs_ptr_->attrs.at(attr_data_it->first)->AddUids(uids);
-        } else {
-            AttrPtr attr = std::make_shared<Attr>(attr_data_it->second, attr_nbytes.at(attr_data_it->first), uids,
-                                                  attr_data_it->first);
-            segment_ptr_->attrs_ptr_->attrs.insert(std::make_pair(attr_data_it->first, attr));
-        }
+        AttrPtr attr = std::make_shared<Attr>(attr_data_it->second, attr_nbytes.at(attr_data_it->first), uids,
+                                              attr_data_it->first);
+        segment_ptr_->attrs_ptr_->attrs.insert(std::make_pair(attr_data_it->first, attr));
+
+        //        if (attrs.find(attr_data_it->first) != attrs.end()) {
+        //            segment_ptr_->attrs_ptr_->attrs.at(attr_data_it->first)
+        //                ->AddAttr(attr_data_it->second, attr_nbytes.at(attr_data_it->first));
+        //            segment_ptr_->attrs_ptr_->attrs.at(attr_data_it->first)->AddUids(uids);
+        //        } else {
+        //            AttrPtr attr = std::make_shared<Attr>(attr_data_it->second, attr_nbytes.at(attr_data_it->first),
+        //            uids,
+        //                                                  attr_data_it->first);
+        //            segment_ptr_->attrs_ptr_->attrs.insert(std::make_pair(attr_data_it->first, attr));
+        //        }
     }
     return Status::OK();
 }

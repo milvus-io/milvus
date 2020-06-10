@@ -11,6 +11,7 @@
 
 #include "utils/LogUtil.h"
 
+#include <fiu-local.h>
 #include <libgen.h>
 #include <cctype>
 #include <string>

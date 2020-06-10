@@ -174,9 +174,6 @@ class Meta {
 
     virtual Status
     DescribeHybridCollection(CollectionSchema& collection_schema, hybrid::FieldsSchema& fields_schema) = 0;
-
-    virtual Status
-    CreateHybridCollectionFile(SegmentSchema& file_schema) = 0;
 };  // MetaData
 
 using MetaPtr = std::shared_ptr<Meta>;

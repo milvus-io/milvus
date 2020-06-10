@@ -30,14 +30,14 @@ class Attr {
 
     Attr();
 
-    void
-    AddAttr(const std::vector<uint8_t>& data, size_t nbytes);
-
-    void
-    AddUids(const std::vector<int64_t>& uids);
-
-    void
-    SetName(const std::string& name);
+    //    void
+    //    AddAttr(const std::vector<uint8_t>& data, size_t nbytes);
+    //
+    //    void
+    //    AddUids(const std::vector<int64_t>& uids);
+    //
+    //    void
+    //    SetName(const std::string& name);
 
     const std::vector<uint8_t>&
     GetData() const;
@@ -60,8 +60,8 @@ class Attr {
     size_t
     GetCodeLength() const;
 
-    void
-    Erase(int32_t offset);
+    //    void
+    //    Erase(int32_t offset);
 
     void
     Erase(std::vector<int32_t>& offsets);
