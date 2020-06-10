@@ -2443,7 +2443,7 @@ DBImpl::WaitCollectionIndexRecursively(const std::shared_ptr<server::Context>& c
 
             // check to_index files every 5 seconds or background index thread finished
             repeat++;
-            if ((ret == std::cv_status::no_timeout) || (repeat % WAIT_BUILD_INDEX_INTERVAL == 0)) {
+            if (repeat % WAIT_BUILD_INDEX_INTERVAL == 0) {
                 GetFilesToBuildIndex(collection_id, file_types, files_holder);
                 ++times;
             }
