@@ -763,9 +763,17 @@ TEST_F(SnapshotTest, CompoundTest1) {
     t1.join();
     t2.join();
 
-    /* for (auto sid : all_segments) { */
-    /*     std::cout << "seg " << sid << std::endl; */
-    /* } */
+    for (auto sid : all_segments) {
+        std::cout << "no seg " << sid << std::endl;
+    }
+
+    for (auto& kv : merged_segs) {
+        std::cout << "merged: (";
+        for (auto i : kv.second) {
+            std::cout << i << ",";
+        }
+        std::cout << ") -> " << kv.first << std::endl;
+    }
 
     w_l.Wait();
 }
