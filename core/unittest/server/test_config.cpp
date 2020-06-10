@@ -51,7 +51,7 @@ TEST_F(ConfigTest, CONFIG_TEST) {
     config_mgr->DumpString();
 
     milvus::server::ConfigNode& root_config = config_mgr->GetRootNode();
-    milvus::server::ConfigNode& server_config = root_config.GetChild("server_config");
+    milvus::server::ConfigNode& server_config = root_config.GetChild("network");
     milvus::server::ConfigNode invalid_config = root_config.GetChild("invalid_config");
 
     const auto& im_config_mgr = *static_cast<milvus::server::YamlConfigMgr*>(config_mgr);
@@ -74,9 +74,9 @@ TEST_F(ConfigTest, CONFIG_TEST) {
     bool not_exit_bool = server_config.GetBoolValue("not_exit", false);
     ASSERT_FALSE(not_exit_bool);
 
-    std::string address = server_config.GetValue("address");
+    std::string address = server_config.GetValue("bind.address");
     ASSERT_TRUE(!address.empty());
-    int64_t port = server_config.GetInt64Value("port");
+    int64_t port = server_config.GetInt64Value("bind.port");
     ASSERT_NE(port, 0);
 
     server_config.SetValue("float_test", "2.5");
@@ -274,7 +274,8 @@ TEST_F(ConfigTest, SERVER_CONFIG_VALID_TEST) {
 
 #ifdef MILVUS_GPU_VERSION
     int64_t engine_gpu_search_threshold = 800;
-    ASSERT_TRUE(config.SetGpuResourceConfigGpuSearchThreshold(std::to_string(engine_gpu_search_threshold)).ok());
+    auto status = config.SetGpuResourceConfigGpuSearchThreshold(std::to_string(engine_gpu_search_threshold));
+    ASSERT_TRUE(status.ok()) << status.message();
     ASSERT_TRUE(config.GetGpuResourceConfigGpuSearchThreshold(int64_val).ok());
     ASSERT_TRUE(int64_val == engine_gpu_search_threshold);
 #endif
@@ -330,7 +331,7 @@ TEST_F(ConfigTest, SERVER_CONFIG_VALID_TEST) {
     ASSERT_TRUE(config.GetWalConfigRecoveryErrorIgnore(bool_val).ok());
     ASSERT_TRUE(bool_val == wal_recovery_ignore);
 
-    int64_t wal_buffer_size = 128;
+    int64_t wal_buffer_size = 128 * 1024 * 1024; // 128 M
     ASSERT_TRUE(config.SetWalConfigBufferSize(std::to_string(wal_buffer_size)).ok());
     ASSERT_TRUE(config.GetWalConfigBufferSize(int64_val).ok());
     ASSERT_TRUE(int64_val == wal_buffer_size);
@@ -356,10 +357,11 @@ TEST_F(ConfigTest, SERVER_CONFIG_VALID_TEST) {
     ASSERT_TRUE(config.GetLogsPath(str_val).ok());
     ASSERT_TRUE(str_val == logs_path);
 
-    int64_t logs_max_log_file_size = 1000;
-    ASSERT_TRUE(config.SetLogsMaxLogFileSize(std::to_string(logs_max_log_file_size)).ok());
+    std::string logs_max_log_file_size = "1000MB";
+    auto s = config.SetLogsMaxLogFileSize(logs_max_log_file_size);
+    ASSERT_TRUE(s.ok()) << s.message();
     ASSERT_TRUE(config.GetLogsMaxLogFileSize(int64_val).ok());
-    ASSERT_TRUE(int64_val == logs_max_log_file_size);
+    ASSERT_TRUE(int64_val == 1000 * 1024 * 1024); // 1000MB
 
     int64_t logs_log_rotate_num = 100;
     ASSERT_TRUE(config.SetLogsLogRotateNum(std::to_string(logs_log_rotate_num)).ok());
@@ -386,7 +388,7 @@ TEST_F(ConfigTest, SERVER_CONFIG_CLI_TEST) {
     auto s = config.LoadConfigFile(conf_file);
     ASSERT_TRUE(s.ok()) << s.message();
     s = config.ResetDefaultConfig();
-    ASSERT_TRUE(s.ok());
+    ASSERT_TRUE(s.ok()) << s.message();
 
     std::string get_cmd, set_cmd;
     std::string result, dummy;
@@ -396,8 +398,8 @@ TEST_F(ConfigTest, SERVER_CONFIG_CLI_TEST) {
 
     /* server config */
     std::string server_addr = "192.168.1.155";
-    get_cmd = gen_get_command(ms::CONFIG_GENERAL, ms::CONFIG_NETWORK_BIND_ADDRESS);
-    set_cmd = gen_set_command(ms::CONFIG_GENERAL, ms::CONFIG_NETWORK_BIND_ADDRESS, server_addr);
+    get_cmd = gen_get_command(ms::CONFIG_NETWORK, ms::CONFIG_NETWORK_BIND_ADDRESS);
+    set_cmd = gen_set_command(ms::CONFIG_NETWORK, ms::CONFIG_NETWORK_BIND_ADDRESS, server_addr);
     s = config.ProcessConfigCli(dummy, set_cmd);
     ASSERT_TRUE(s.ok());
     s = config.ProcessConfigCli(result, get_cmd);
@@ -644,7 +646,7 @@ TEST_F(ConfigTest, SERVER_CONFIG_INVALID_TEST) {
     /* cache config */
     ASSERT_FALSE(config.SetCacheConfigCpuCacheCapacity("a").ok());
     ASSERT_FALSE(config.SetCacheConfigCpuCacheCapacity("0").ok());
-    ASSERT_FALSE(config.SetCacheConfigCpuCacheCapacity("2048").ok());
+    ASSERT_FALSE(config.SetCacheConfigCpuCacheCapacity("2048G").ok());
     ASSERT_FALSE(config.SetCacheConfigCpuCacheCapacity("-1").ok());
 
     ASSERT_FALSE(config.SetCacheConfigCpuCacheThreshold("a").ok());
@@ -653,7 +655,7 @@ TEST_F(ConfigTest, SERVER_CONFIG_INVALID_TEST) {
 
     ASSERT_FALSE(config.SetCacheConfigInsertBufferSize("a").ok());
     ASSERT_FALSE(config.SetCacheConfigInsertBufferSize("0").ok());
-    ASSERT_FALSE(config.SetCacheConfigInsertBufferSize("2048").ok());
+    ASSERT_FALSE(config.SetCacheConfigInsertBufferSize("2048GB").ok());
     ASSERT_FALSE(config.SetCacheConfigInsertBufferSize("-1").ok());
 
     ASSERT_FALSE(config.SetCacheConfigCacheInsertData("N").ok());
@@ -676,7 +678,7 @@ TEST_F(ConfigTest, SERVER_CONFIG_INVALID_TEST) {
     ASSERT_FALSE(config.SetGpuResourceConfigEnable("ok").ok());
 
     ASSERT_FALSE(config.SetGpuResourceConfigCacheCapacity("a").ok());
-    ASSERT_FALSE(config.SetGpuResourceConfigCacheCapacity("128").ok());
+    ASSERT_FALSE(config.SetGpuResourceConfigCacheCapacity("128GB").ok());
     ASSERT_FALSE(config.SetGpuResourceConfigCacheCapacity("-1").ok());
 
     ASSERT_FALSE(config.SetGpuResourceConfigCacheThreshold("a").ok());
@@ -702,7 +704,7 @@ TEST_F(ConfigTest, SERVER_CONFIG_INVALID_TEST) {
     ASSERT_FALSE(config.SetLogsTraceEnable("invalid").ok());
     ASSERT_FALSE(config.SetLogsPath("").ok());
     ASSERT_FALSE(config.SetLogsMaxLogFileSize("-1").ok());
-    ASSERT_FALSE(config.SetLogsMaxLogFileSize("511").ok());
+    ASSERT_FALSE(config.SetLogsMaxLogFileSize("511MB").ok());
     ASSERT_FALSE(config.SetLogsLogRotateNum("-1").ok());
     ASSERT_FALSE(config.SetLogsLogRotateNum("1025").ok());
 }
@@ -719,7 +721,8 @@ TEST_F(ConfigTest, SERVER_CONFIG_TEST) {
     config.GetConfigJsonStr(config_json_str);
     std::cout << config_json_str << std::endl;
 
-    ASSERT_TRUE(config.ResetDefaultConfig().ok());
+    auto s = config.ResetDefaultConfig();
+    ASSERT_TRUE(s.ok()) << s.message();
 }
 
 TEST_F(ConfigTest, SERVER_CONFIG_VALID_FAIL_TEST) {
@@ -736,41 +739,36 @@ TEST_F(ConfigTest, SERVER_CONFIG_VALID_FAIL_TEST) {
     fiu_disable("check_config_version_fail");
 
     /* server config */
-    fiu_enable("check_config_address_fail", 1, NULL, 0);
+    fiu_enable("check_config_bind_address_fail", 1, NULL, 0);
     s = config.ValidateConfig();
     ASSERT_FALSE(s.ok());
-    fiu_disable("check_config_address_fail");
+    fiu_disable("check_config_bind_address_fail");
 
-    fiu_enable("check_config_port_fail", 1, NULL, 0);
+    fiu_enable("check_config_bind_port_fail", 1, NULL, 0);
     s = config.ValidateConfig();
     ASSERT_FALSE(s.ok());
-    fiu_disable("check_config_port_fail");
+    fiu_disable("check_config_bind_port_fail");
 
-    fiu_enable("check_config_deploy_mode_fail", 1, NULL, 0);
+    fiu_enable("check_config_cluster_role_fail", 1, NULL, 0);
     s = config.ValidateConfig();
     ASSERT_FALSE(s.ok());
-    fiu_disable("check_config_deploy_mode_fail");
+    fiu_disable("check_config_cluster_role_fail");
 
-    fiu_enable("check_config_time_zone_fail", 1, NULL, 0);
+    fiu_enable("check_config_timezone_fail", 1, NULL, 0);
     s = config.ValidateConfig();
     ASSERT_FALSE(s.ok());
-    fiu_disable("check_config_time_zone_fail");
+    fiu_disable("check_config_timezone_fail");
 
     /* db config */
-    fiu_enable("check_config_primary_path_fail", 1, NULL, 0);
+    fiu_enable("check_config_path_fail", 1, NULL, 0);
     s = config.ValidateConfig();
     ASSERT_FALSE(s.ok());
-    fiu_disable("check_config_primary_path_fail");
+    fiu_disable("check_config_path_fail");
 
-    fiu_enable("check_config_secondary_path_fail", 1, NULL, 0);
+    fiu_enable("check_config_meta_uri_fail", 1, NULL, 0);
     s = config.ValidateConfig();
     ASSERT_FALSE(s.ok());
-    fiu_disable("check_config_secondary_path_fail");
-
-    fiu_enable("check_config_backend_url_fail", 1, NULL, 0);
-    s = config.ValidateConfig();
-    ASSERT_FALSE(s.ok());
-    fiu_disable("check_config_backend_url_fail");
+    fiu_disable("check_config_meta_uri_fail");
 
     fiu_enable("check_config_archive_disk_threshold_fail", 1, NULL, 0);
     s = config.ValidateConfig();
@@ -795,10 +793,10 @@ TEST_F(ConfigTest, SERVER_CONFIG_VALID_FAIL_TEST) {
     fiu_disable("check_config_enable_monitor_fail");
 
     /* cache config */
-    fiu_enable("check_config_cpu_cache_capacity_fail", 1, NULL, 0);
+    fiu_enable("check_config_cache_size_fail", 1, NULL, 0);
     s = config.ValidateConfig();
     ASSERT_FALSE(s.ok());
-    fiu_disable("check_config_cpu_cache_capacity_fail");
+    fiu_disable("check_config_cache_size_fail");
 
     fiu_enable("check_config_cpu_cache_threshold_fail", 1, NULL, 0);
     s = config.ValidateConfig();
@@ -837,25 +835,25 @@ TEST_F(ConfigTest, SERVER_CONFIG_VALID_FAIL_TEST) {
     ASSERT_FALSE(s.ok());
     fiu_disable("check_config_gpu_resource_enable_fail");
 
-    fiu_enable("check_gpu_resource_config_cache_capacity_fail", 1, NULL, 0);
+    fiu_enable("check_gpu_cache_size_fail", 1, NULL, 0);
     s = config.ValidateConfig();
     ASSERT_FALSE(s.ok());
-    fiu_disable("check_gpu_resource_config_cache_capacity_fail");
+    fiu_disable("check_gpu_cache_size_fail");
 
     fiu_enable("check_config_gpu_resource_cache_threshold_fail", 1, NULL, 0);
     s = config.ValidateConfig();
     ASSERT_FALSE(s.ok());
     fiu_disable("check_config_gpu_resource_cache_threshold_fail");
 
-    fiu_enable("check_gpu_resource_config_search_fail", 1, NULL, 0);
+    fiu_enable("check_gpu_search_fail", 1, NULL, 0);
     s = config.ValidateConfig();
     ASSERT_FALSE(s.ok());
-    fiu_disable("check_gpu_resource_config_search_fail");
+    fiu_disable("check_gpu_search_fail");
 
-    fiu_enable("check_gpu_resource_config_build_index_fail", 1, NULL, 0);
+    fiu_enable("check_gpu_build_index_fail", 1, NULL, 0);
     s = config.ValidateConfig();
     ASSERT_FALSE(s.ok());
-    fiu_disable("check_gpu_resource_config_build_index_fail");
+    fiu_disable("check_gpu_build_index_fail");
 #endif
 
     fiu_enable("get_config_json_config_path_fail", 1, NULL, 0);
@@ -952,35 +950,15 @@ TEST_F(ConfigTest, SERVER_CONFIG_VALID_FAIL_TEST) {
     fiu_disable("check_wal_path_fail");
 
     /* logs config */
+    fiu_enable("check_logs_level_fail", 1, NULL, 0);
+    s = config.ValidateConfig();
+    ASSERT_FALSE(s.ok());
+    fiu_disable("check_logs_level_fail");
+
     fiu_enable("check_logs_trace_enable_fail", 1, NULL, 0);
     s = config.ValidateConfig();
     ASSERT_FALSE(s.ok());
     fiu_disable("check_logs_trace_enable_fail");
-
-    fiu_enable("check_logs_debug_enable_fail", 1, NULL, 0);
-    s = config.ValidateConfig();
-    ASSERT_FALSE(s.ok());
-    fiu_disable("check_logs_debug_enable_fail");
-
-    fiu_enable("check_logs_info_enable_fail", 1, NULL, 0);
-    s = config.ValidateConfig();
-    ASSERT_FALSE(s.ok());
-    fiu_disable("check_logs_info_enable_fail");
-
-    fiu_enable("check_logs_warning_enable_fail", 1, NULL, 0);
-    s = config.ValidateConfig();
-    ASSERT_FALSE(s.ok());
-    fiu_disable("check_logs_warning_enable_fail");
-
-    fiu_enable("check_logs_error_enable_fail", 1, NULL, 0);
-    s = config.ValidateConfig();
-    ASSERT_FALSE(s.ok());
-    fiu_disable("check_logs_error_enable_fail");
-
-    fiu_enable("check_logs_fatal_enable_fail", 1, NULL, 0);
-    s = config.ValidateConfig();
-    ASSERT_FALSE(s.ok());
-    fiu_disable("check_logs_fatal_enable_fail");
 
     fiu_enable("check_logs_path_fail", 1, NULL, 0);
     s = config.ValidateConfig();
@@ -1010,41 +988,36 @@ TEST_F(ConfigTest, SERVER_CONFIG_RESET_DEFAULT_CONFIG_FAIL_TEST) {
     ASSERT_TRUE(s.ok());
 
     /* server config */
-    fiu_enable("check_config_address_fail", 1, NULL, 0);
+    fiu_enable("check_config_bind_address_fail", 1, NULL, 0);
     s = config.ResetDefaultConfig();
     ASSERT_FALSE(s.ok());
-    fiu_disable("check_config_address_fail");
+    fiu_disable("check_config_bind_address_fail");
 
-    fiu_enable("check_config_port_fail", 1, NULL, 0);
+    fiu_enable("check_config_bind_port_fail", 1, NULL, 0);
     s = config.ResetDefaultConfig();
     ASSERT_FALSE(s.ok());
-    fiu_disable("check_config_port_fail");
+    fiu_disable("check_config_bind_port_fail");
 
-    fiu_enable("check_config_deploy_mode_fail", 1, NULL, 0);
+    fiu_enable("check_config_cluster_role_fail", 1, NULL, 0);
     s = config.ResetDefaultConfig();
     ASSERT_FALSE(s.ok());
-    fiu_disable("check_config_deploy_mode_fail");
+    fiu_disable("check_config_cluster_role_fail");
 
-    fiu_enable("check_config_time_zone_fail", 1, NULL, 0);
+    fiu_enable("check_config_timezone_fail", 1, NULL, 0);
     s = config.ResetDefaultConfig();
     ASSERT_FALSE(s.ok());
-    fiu_disable("check_config_time_zone_fail");
+    fiu_disable("check_config_timezone_fail");
 
     /* db config */
-    fiu_enable("check_config_primary_path_fail", 1, NULL, 0);
+    fiu_enable("check_config_path_fail", 1, NULL, 0);
     s = config.ResetDefaultConfig();
     ASSERT_FALSE(s.ok());
-    fiu_disable("check_config_primary_path_fail");
+    fiu_disable("check_config_path_fail");
 
-    fiu_enable("check_config_secondary_path_fail", 1, NULL, 0);
+    fiu_enable("check_config_meta_uri_fail", 1, NULL, 0);
     s = config.ResetDefaultConfig();
     ASSERT_FALSE(s.ok());
-    fiu_disable("check_config_secondary_path_fail");
-
-    fiu_enable("check_config_backend_url_fail", 1, NULL, 0);
-    s = config.ResetDefaultConfig();
-    ASSERT_FALSE(s.ok());
-    fiu_disable("check_config_backend_url_fail");
+    fiu_disable("check_config_meta_uri_fail");
 
     fiu_enable("check_config_preload_collection_fail", 1, NULL, 0);
     s = config.ResetDefaultConfig();
@@ -1079,10 +1052,10 @@ TEST_F(ConfigTest, SERVER_CONFIG_RESET_DEFAULT_CONFIG_FAIL_TEST) {
     fiu_disable("check_config_enable_monitor_fail");
 
     /* cache config */
-    fiu_enable("check_config_cpu_cache_capacity_fail", 1, NULL, 0);
+    fiu_enable("check_config_cache_size_fail", 1, NULL, 0);
     s = config.ResetDefaultConfig();
     ASSERT_FALSE(s.ok());
-    fiu_disable("check_config_cpu_cache_capacity_fail");
+    fiu_disable("check_config_cache_size_fail");
 
     fiu_enable("check_config_cpu_cache_threshold_fail", 1, NULL, 0);
     s = config.ResetDefaultConfig();
@@ -1121,25 +1094,25 @@ TEST_F(ConfigTest, SERVER_CONFIG_RESET_DEFAULT_CONFIG_FAIL_TEST) {
     ASSERT_FALSE(s.ok());
     fiu_disable("check_config_gpu_resource_enable_fail");
 
-    fiu_enable("check_gpu_resource_config_cache_capacity_fail", 1, NULL, 0);
+    fiu_enable("check_gpu_cache_size_fail", 1, NULL, 0);
     s = config.ResetDefaultConfig();
     ASSERT_FALSE(s.ok());
-    fiu_disable("check_gpu_resource_config_cache_capacity_fail");
+    fiu_disable("check_gpu_cache_size_fail");
 
     fiu_enable("check_config_gpu_resource_cache_threshold_fail", 1, NULL, 0);
     s = config.ResetDefaultConfig();
     ASSERT_FALSE(s.ok());
     fiu_disable("check_config_gpu_resource_cache_threshold_fail");
 
-    fiu_enable("check_gpu_resource_config_search_fail", 1, NULL, 0);
+    fiu_enable("check_gpu_search_fail", 1, NULL, 0);
     s = config.ResetDefaultConfig();
     ASSERT_FALSE(s.ok());
-    fiu_disable("check_gpu_resource_config_search_fail");
+    fiu_disable("check_gpu_search_fail");
 
-    fiu_enable("check_gpu_resource_config_build_index_fail", 1, NULL, 0);
+    fiu_enable("check_gpu_build_index_fail", 1, NULL, 0);
     s = config.ResetDefaultConfig();
     ASSERT_FALSE(s.ok());
-    fiu_disable("check_gpu_resource_config_build_index_fail");
+    fiu_disable("check_gpu_build_index_fail");
 #endif
 
     s = config.ResetDefaultConfig();
@@ -1167,35 +1140,15 @@ TEST_F(ConfigTest, SERVER_CONFIG_RESET_DEFAULT_CONFIG_FAIL_TEST) {
     fiu_disable("check_wal_path_fail");
 
     /* logs config */
+    fiu_enable("check_logs_level_fail", 1, NULL, 0);
+    s = config.ResetDefaultConfig();
+    ASSERT_FALSE(s.ok());
+    fiu_disable("check_logs_level_fail");
+
     fiu_enable("check_logs_trace_enable_fail", 1, NULL, 0);
     s = config.ResetDefaultConfig();
     ASSERT_FALSE(s.ok());
     fiu_disable("check_logs_trace_enable_fail");
-
-    fiu_enable("check_logs_debug_enable_fail", 1, NULL, 0);
-    s = config.ResetDefaultConfig();
-    ASSERT_FALSE(s.ok());
-    fiu_disable("check_logs_debug_enable_fail");
-
-    fiu_enable("check_logs_info_enable_fail", 1, NULL, 0);
-    s = config.ResetDefaultConfig();
-    ASSERT_FALSE(s.ok());
-    fiu_disable("check_logs_info_enable_fail");
-
-    fiu_enable("check_logs_warning_enable_fail", 1, NULL, 0);
-    s = config.ResetDefaultConfig();
-    ASSERT_FALSE(s.ok());
-    fiu_disable("check_logs_warning_enable_fail");
-
-    fiu_enable("check_logs_error_enable_fail", 1, NULL, 0);
-    s = config.ResetDefaultConfig();
-    ASSERT_FALSE(s.ok());
-    fiu_disable("check_logs_error_enable_fail");
-
-    fiu_enable("check_logs_fatal_enable_fail", 1, NULL, 0);
-    s = config.ResetDefaultConfig();
-    ASSERT_FALSE(s.ok());
-    fiu_disable("check_logs_fatal_enable_fail");
 
     fiu_enable("check_logs_path_fail", 1, NULL, 0);
     s = config.ResetDefaultConfig();

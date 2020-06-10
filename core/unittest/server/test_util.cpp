@@ -246,8 +246,9 @@ TEST(UtilTest, BLOCKINGQUEUE_TEST) {
 }
 
 TEST(UtilTest, LOG_TEST) {
-    auto status = milvus::server::InitLog(true, true, true, true, true, true, "/tmp/test_util", 1024, 10);
-    ASSERT_TRUE(status.ok());
+    auto status = milvus::server::InitLog(true, true, true, true, true, true,
+            "/tmp/test_util", 1024 * 1024 * 1024, 10); // 1024 MB
+    ASSERT_TRUE(status.ok()) << status.message();
 
     EXPECT_FALSE(el::Loggers::hasFlag(el::LoggingFlag::NewLineForContainer));
     EXPECT_FALSE(el::Loggers::hasFlag(el::LoggingFlag::LogDetailedCrashReason));
