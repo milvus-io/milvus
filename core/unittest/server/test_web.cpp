@@ -37,7 +37,7 @@
 #include "utils/CommonUtil.h"
 #include "utils/StringHelpFunctions.h"
 
-static const char* COLLECTION_NAME = "test_web";
+static const char* COLLECTION_NAME = "test_web_collection";
 
 using OStatus = oatpp::web::protocol::http::Status;
 using OString = milvus::server::web::OString;
