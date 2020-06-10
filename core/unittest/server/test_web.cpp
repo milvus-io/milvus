@@ -197,6 +197,7 @@ static const char* CONTROLLER_TEST_VALID_CONFIG_STR =
 
 static const char* CONTROLLER_TEST_COLLECTION_NAME = "controller_unit_test";
 static const char* CONTROLLER_TEST_CONFIG_DIR = "/tmp/milvus_web_controller_test/";
+static const char* CONTROLLER_TEST_CONFIG_WAL_DIR = "/tmp/milvus_web_controller_test/wal";
 static const char* CONTROLLER_TEST_CONFIG_FILE = "config.yaml";
 
 class TestClient : public oatpp::web::client::ApiClient {
@@ -337,6 +338,7 @@ class WebControllerTest : public ::testing::Test {
         milvus::server::Config::GetInstance().SetGeneralConfigMetaURI("sqlite://:@:/");
         boost::filesystem::remove_all(CONTROLLER_TEST_CONFIG_DIR);
         milvus::server::Config::GetInstance().SetStorageConfigPath(CONTROLLER_TEST_CONFIG_DIR);
+        milvus::server::Config::GetInstance().SetWalConfigWalPath(CONTROLLER_TEST_CONFIG_WAL_DIR);
 
         milvus::server::DBWrapper::GetInstance().StartService();
 
@@ -1408,7 +1410,7 @@ TEST_F(WebControllerTest, ADVANCED_CONFIG) {
 
     auto config_dto = milvus::server::web::AdvancedConfigDto::createShared();
     response = client_ptr->setAdvanced(config_dto, conncetion_ptr);
-    ASSERT_EQ(OStatus::CODE_200.code, response->getStatusCode());
+    ASSERT_EQ(OStatus::CODE_200.code, response->getStatusCode()) << response->readBodyToString()->c_str();
 
     config_dto->cpu_cache_capacity = 3;
     response = client_ptr->setAdvanced(config_dto, conncetion_ptr);
@@ -1430,7 +1432,7 @@ TEST_F(WebControllerTest, ADVANCED_CONFIG) {
 
     // test fault
     // cpu cache capacity exceed total memory
-    config_dto->cpu_cache_capacity = 10000000;
+    config_dto->cpu_cache_capacity = 10000 * (1024 * 1024 * 1024); // 10000 GB
     response = client_ptr->setAdvanced(config_dto, conncetion_ptr);
     ASSERT_EQ(OStatus::CODE_400.code, response->getStatusCode());
 }
@@ -1484,10 +1486,10 @@ TEST_F(WebControllerTest, GPU_CONFIG) {
     ASSERT_EQ(OStatus::CODE_200.code, response->getStatusCode());
 
     //// test fault config
-    // cache capacity exceed GPU mem size
-    gpu_config_dto->cache_capacity = 100000;
+    // cache capacity exceed GPU mem size (GiB)
+    gpu_config_dto->cache_capacity = 100000L * 1024 * 1024 * 1024; // 100000 GiB
     response = client_ptr->setGPUConfig(gpu_config_dto, conncetion_ptr);
-    ASSERT_EQ(OStatus::CODE_400.code, response->getStatusCode());
+    ASSERT_EQ(OStatus::CODE_400.code, response->getStatusCode()) << response->readBodyToString()->c_str();
     gpu_config_dto->cache_capacity = 1;
 
     // duplicate resources

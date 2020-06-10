@@ -697,9 +697,18 @@ Config::ProcessConfigCli(std::string& result, const std::string& cmd) {
             return Status::OK();
         } else {
             server::StringHelpFunctions::SplitStringByDelimeter(tokens[1], CONFIG_NODE_DELIMITER, nodes);
-            if (nodes.size() != 2) {
+            if (nodes.size() < 2) {
                 return Status(SERVER_UNEXPECTED_ERROR, "Invalid command: " + cmd);
+            } else if (nodes.size() > 2) {
+                // to support case likes network.bind.address
+                std::string result;
+                std::vector<std::string> nodes_s(nodes.begin() + 1, nodes.end());
+                StringHelpFunctions::MergeStringWithDelimeter(nodes_s, CONFIG_NODE_DELIMITER, result);
+                nodes[1] = result;
             }
+            //            if (nodes.size() != 2) {
+            //                return Status(SERVER_UNEXPECTED_ERROR, "Invalid command: " + cmd);
+            //            }
             return GetConfigCli(result, nodes[0], nodes[1]);
         }
     } else if (tokens[0] == "set_config") {
@@ -707,8 +716,14 @@ Config::ProcessConfigCli(std::string& result, const std::string& cmd) {
             return Status(SERVER_UNEXPECTED_ERROR, "Invalid command: " + cmd);
         }
         server::StringHelpFunctions::SplitStringByDelimeter(tokens[1], CONFIG_NODE_DELIMITER, nodes);
-        if (nodes.size() != 2) {
+        if (nodes.size() < 2) {
             return Status(SERVER_UNEXPECTED_ERROR, "Invalid command: " + cmd);
+        } else if (nodes.size() > 2) {
+            // to support case likes network.bind.address
+            std::string result;
+            std::vector<std::string> nodes_s(nodes.begin() + 1, nodes.end());
+            StringHelpFunctions::MergeStringWithDelimeter(nodes_s, CONFIG_NODE_DELIMITER, result);
+            nodes[1] = result;
         }
         return SetConfigCli(nodes[0], nodes[1], tokens[2]);
     } else {
@@ -1762,11 +1777,11 @@ Config::CheckWalConfigRecoveryErrorIgnore(const std::string& value) {
 Status
 Config::CheckWalConfigBufferSize(const std::string& value) {
     std::string err;
-    parse_bytes(value, err);
+    auto buffer_size = parse_bytes(value, err);
     auto exist_error = not err.empty();
     fiu_do_on("check_config_wal_buffer_size_fail", exist_error = true);
 
-    if (exist_error) {
+    if (exist_error || buffer_size < 0) {
         std::string msg =
             "Invalid wal buffer size: " + value + ". Possible reason: wal.buffer_size is not a positive integer.";
         return Status(SERVER_INVALID_ARGUMENT, msg);

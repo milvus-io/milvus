@@ -80,7 +80,7 @@ DBWrapper::StartService() {
         std::cerr << s.ToString() << std::endl;
         return s;
     }
-    opt.insert_buffer_size_ = insert_buffer_size * engine::GB;
+    opt.insert_buffer_size_ = insert_buffer_size;
 
 #if 1
     bool cluster_enable = false;

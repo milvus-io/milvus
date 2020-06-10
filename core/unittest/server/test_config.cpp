@@ -401,9 +401,9 @@ TEST_F(ConfigTest, SERVER_CONFIG_CLI_TEST) {
     get_cmd = gen_get_command(ms::CONFIG_NETWORK, ms::CONFIG_NETWORK_BIND_ADDRESS);
     set_cmd = gen_set_command(ms::CONFIG_NETWORK, ms::CONFIG_NETWORK_BIND_ADDRESS, server_addr);
     s = config.ProcessConfigCli(dummy, set_cmd);
-    ASSERT_TRUE(s.ok());
+    ASSERT_TRUE(s.ok()) << s.message();
     s = config.ProcessConfigCli(result, get_cmd);
-    ASSERT_TRUE(s.ok());
+    ASSERT_TRUE(s.ok()) << s.message();
 
     /* db config */
     std::string db_backend_url = "sqlite://milvus:zilliz@:/";
