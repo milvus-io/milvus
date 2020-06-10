@@ -1,5 +1,5 @@
-![Milvuslogo](https://github.com/milvus-io/docs/blob/v0.9.1/assets/milvus_logo.png)
 
+![Milvuslogo](https://github.com/milvus-io/docs/blob/v0.9.1/assets/milvus_logo.png)
 [![Slack](https://img.shields.io/badge/Join-Slack-orange)](https://join.slack.com/t/milvusio/shared_invite/zt-e0u4qu3k-bI2GDNys3ZqX1YCJ9OM~GQ)
 
 ![GitHub](https://img.shields.io/github/license/milvus-io/milvus)
