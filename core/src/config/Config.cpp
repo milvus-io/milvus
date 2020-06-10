@@ -130,9 +130,9 @@ const char* CONFIG_GPU_RESOURCE_CACHE_THRESHOLD_DEFAULT = "0.7";
 const char* CONFIG_GPU_RESOURCE_GPU_SEARCH_THRESHOLD = "gpu_search_threshold";
 const char* CONFIG_GPU_RESOURCE_GPU_SEARCH_THRESHOLD_DEFAULT = "1000";
 const char* CONFIG_GPU_RESOURCE_DELIMITER = ",";
-const char* CONFIG_GPU_RESOURCE_SEARCH_RESOURCES = "search_resources";
+const char* CONFIG_GPU_RESOURCE_SEARCH_RESOURCES = "search_devices";
 const char* CONFIG_GPU_RESOURCE_SEARCH_RESOURCES_DEFAULT = "gpu0";
-const char* CONFIG_GPU_RESOURCE_BUILD_INDEX_RESOURCES = "build_index_resources";
+const char* CONFIG_GPU_RESOURCE_BUILD_INDEX_RESOURCES = "build_index_devices";
 const char* CONFIG_GPU_RESOURCE_BUILD_INDEX_RESOURCES_DEFAULT = "gpu0";
 
 /* tracing config */
@@ -2563,7 +2563,7 @@ Config::SetStorageConfigPath(const std::string& value) {
 Status
 Config::SetStorageConfigAutoFlushInterval(const std::string& value) {
     STATUS_CHECK(CheckStorageConfigAutoFlushInterval(value));
-    return SetConfigValueInMem(CONFIG_DB, CONFIG_STORAGE_AUTO_FLUSH_INTERVAL, value);
+    return SetConfigValueInMem(CONFIG_STORAGE, CONFIG_STORAGE_AUTO_FLUSH_INTERVAL, value);
 }
 
 Status

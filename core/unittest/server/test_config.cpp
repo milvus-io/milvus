@@ -432,6 +432,16 @@ TEST_F(ConfigTest, SERVER_CONFIG_CLI_TEST) {
     s = config.ProcessConfigCli(result, get_cmd);
     ASSERT_TRUE(s.ok());
 
+    std::string storage_auto_flush_interval = "42";
+    get_cmd = gen_get_command(ms::CONFIG_STORAGE, ms::CONFIG_STORAGE_AUTO_FLUSH_INTERVAL);
+    set_cmd = gen_set_command(ms::CONFIG_STORAGE, ms::CONFIG_STORAGE_AUTO_FLUSH_INTERVAL, storage_auto_flush_interval);
+    s = config.ProcessConfigCli(dummy, set_cmd);
+    ASSERT_TRUE(s.ok());
+    s = config.ProcessConfigCli(result, get_cmd);
+    ASSERT_TRUE(s.ok());
+
+
+
     /* cache config */
     std::string cache_cpu_cache_capacity = "1";
     get_cmd = gen_get_command(ms::CONFIG_CACHE, ms::CONFIG_CACHE_CPU_CACHE_CAPACITY);

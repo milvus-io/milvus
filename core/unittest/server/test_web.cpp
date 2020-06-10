@@ -1432,7 +1432,7 @@ TEST_F(WebControllerTest, ADVANCED_CONFIG) {
 
     // test fault
     // cpu cache capacity exceed total memory
-    config_dto->cpu_cache_capacity = 10000 * (1024 * 1024 * 1024); // 10000 GB
+    config_dto->cpu_cache_capacity = 10000L * (1024L * 1024 * 1024); // 10000 GB
     response = client_ptr->setAdvanced(config_dto, conncetion_ptr);
     ASSERT_EQ(OStatus::CODE_400.code, response->getStatusCode());
 }
