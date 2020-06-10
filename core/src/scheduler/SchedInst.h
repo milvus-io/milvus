@@ -106,7 +106,7 @@ class OptimizerInst {
                     int64_t gpu_search_threshold;
                     config.GetGpuResourceConfigBuildIndexResources(build_gpus);
                     config.GetGpuResourceConfigSearchResources(search_gpus);
-                    config.GetEngineConfigGpuSearchThreshold(gpu_search_threshold);
+                    config.GetGpuResourceConfigGpuSearchThreshold(gpu_search_threshold);
                     std::string build_msg = "Build index gpu:";
                     for (auto build_id : build_gpus) {
                         build_msg.append(" gpu" + std::to_string(build_id));

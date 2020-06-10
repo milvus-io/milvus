@@ -25,7 +25,7 @@ namespace scheduler {
 void
 FaissFlatPass::Init() {
     server::Config& config = server::Config::GetInstance();
-    Status s = config.GetEngineConfigGpuSearchThreshold(threshold_);
+    Status s = config.GetGpuResourceConfigGpuSearchThreshold(threshold_);
     if (!s.ok()) {
         threshold_ = std::numeric_limits<int32_t>::max();
     }
