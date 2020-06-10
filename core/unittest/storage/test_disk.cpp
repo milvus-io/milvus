@@ -73,4 +73,11 @@ TEST_F(StorageTest, DISK_OPERATION_TEST) {
     ASSERT_ANY_THROW(disk_operation.CreateDirectory());
     fiu_disable("DiskOperation.CreateDirectory.create_directory");
     fiu_disable("DiskOperation.CreateDirectory.is_directory");
+
+    std::vector<std::string> file_paths;
+    ASSERT_NO_THROW(disk_operation.ListDirectory(file_paths));
+
+    for (auto & path : file_paths) {
+        ASSERT_TRUE(disk_operation.DeleteFile(path));
+    }
 }

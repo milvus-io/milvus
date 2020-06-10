@@ -434,7 +434,7 @@ TEST_F(RpcHandlerTest, COMBINE_SEARCH_TEST) {
     handler->RegisterRequestHandler(milvus::server::RequestHandler());
 
     // create collection
-    std::string collection_name = "combine";
+    std::string collection_name = "search_combines";
     ::milvus::grpc::CollectionSchema collection_schema;
     collection_schema.set_collection_name(collection_name);
     collection_schema.set_dimension(COLLECTION_DIM);
@@ -442,7 +442,7 @@ TEST_F(RpcHandlerTest, COMBINE_SEARCH_TEST) {
     collection_schema.set_metric_type(1);  // L2 metric
     ::milvus::grpc::Status status;
     handler->CreateCollection(&context, &collection_schema, &status);
-    ASSERT_EQ(status.error_code(), 0);
+    ASSERT_EQ(status.error_code(), 0) << status.reason();
 
     // insert vectors
     std::vector<std::vector<float>> record_array;

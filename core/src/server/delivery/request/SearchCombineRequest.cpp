@@ -21,6 +21,8 @@
 #include <memory>
 #include <set>
 
+#include <fiu-local.h>
+
 namespace milvus {
 namespace server {
 

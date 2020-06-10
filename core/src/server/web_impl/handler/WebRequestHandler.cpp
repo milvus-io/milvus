@@ -12,11 +12,12 @@
 #include "server/web_impl/handler/WebRequestHandler.h"
 
 #include <algorithm>
-#include <cmath>
 #include <ctime>
 #include <string>
 #include <unordered_map>
 #include <vector>
+
+#include <fiu-local.h>
 
 #include "config/Config.h"
 #include "metrics/SystemInfo.h"
@@ -1806,6 +1807,9 @@ WebRequestHandler::SystemOp(const OString& op, const OString& body_str, OString&
     Status status = Status::OK();
     std::string result_str;
     try {
+        fiu_do_on("WebRequestHandler.SystemOp.raise_parse_error",
+                  throw nlohmann::detail::parse_error::create(0, 0, ""));
+        fiu_do_on("WebRequestHandler.SystemOp.raise_type_error", throw nlohmann::detail::type_error::create(0, ""));
         nlohmann::json j = nlohmann::json::parse(body_str->c_str());
         if (op->equals("task")) {
             if (j.contains("load")) {
