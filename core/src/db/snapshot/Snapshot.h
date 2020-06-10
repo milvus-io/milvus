@@ -28,6 +28,7 @@
 #include <vector>
 #include "db/snapshot/Utils.h"
 #include "db/snapshot/WrappedTypes.h"
+#include "db/snapshot/Store.h"
 #include "utils/Status.h"
 
 namespace milvus {

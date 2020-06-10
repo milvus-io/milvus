@@ -36,14 +36,11 @@ SnapshotHolder::~SnapshotHolder() {
 }
 
 Status
-SnapshotHolder::GetSnapshot(ScopedSnapshotT& ss, ID_TYPE id, bool scoped, bool load) {
+SnapshotHolder::Load(Store& store, ScopedSnapshotT& ss, ID_TYPE id, bool scoped) {
     Status status;
     if (id > max_id_) {
-        if (!load) {
-            return Status(SS_NOT_FOUND_ERROR, "Specified Snapshot not found");
-        }
         CollectionCommitPtr cc;
-        status = LoadNoLock(id, cc);
+        status = LoadNoLock(id, cc, store);
         if (!status.ok())
             return status;
         status = Add(id);
@@ -52,8 +49,31 @@ SnapshotHolder::GetSnapshot(ScopedSnapshotT& ss, ID_TYPE id, bool scoped, bool l
     }
 
     std::unique_lock<std::mutex> lock(mutex_);
-    /* std::cout << "Holder " << collection_id_ << " actives num=" << active_.size() */
-    /*     << " latest=" << active_[max_id_]->GetID() << " RefCnt=" << active_[max_id_]->RefCnt() <<  std::endl; */
+    if (id == 0 || id == max_id_) {
+        auto raw = active_[max_id_];
+        ss = ScopedSnapshotT(raw, scoped);
+        return status;
+    }
+    if (id < min_id_) {
+        return Status(SS_STALE_ERROR, "Get stale snapshot");
+    }
+
+    auto it = active_.find(id);
+    if (it == active_.end()) {
+        return Status(SS_NOT_FOUND_ERROR, "Specified Snapshot not found");
+    }
+    ss = ScopedSnapshotT(it->second, scoped);
+    return status;
+}
+
+Status
+SnapshotHolder::Get(ScopedSnapshotT& ss, ID_TYPE id, bool scoped) {
+    Status status;
+    if (id > max_id_) {
+        return Status(SS_NOT_FOUND_ERROR, "Specified Snapshot not found");
+    }
+
+    std::unique_lock<std::mutex> lock(mutex_);
     if (id == 0 || id == max_id_) {
         auto raw = active_[max_id_];
         ss = ScopedSnapshotT(raw, scoped);
@@ -126,14 +146,24 @@ SnapshotHolder::Add(ID_TYPE id) {
 }
 
 Status
-SnapshotHolder::LoadNoLock(ID_TYPE collection_commit_id, CollectionCommitPtr& cc) {
+SnapshotHolder::LoadNoLock(ID_TYPE collection_commit_id, CollectionCommitPtr& cc, Store& store) {
     assert(collection_commit_id > max_id_);
     LoadOperationContext context;
     context.id = collection_commit_id;
     auto op = std::make_shared<LoadOperation<CollectionCommit>>(context);
-    op->Push();
+    (*op)(store);
     return op->GetResource(cc);
 }
+
+/* Status */
+/* SnapshotHolder::LoadNoLock(ID_TYPE collection_commit_id, CollectionCommitPtr& cc) { */
+/*     assert(collection_commit_id > max_id_); */
+/*     LoadOperationContext context; */
+/*     context.id = collection_commit_id; */
+/*     auto op = std::make_shared<LoadOperation<CollectionCommit>>(context); */
+/*     op->Push(); */
+/*     return op->GetResource(cc); */
+/* } */
 
 }  // namespace snapshot
 }  // namespace engine

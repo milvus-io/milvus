@@ -111,7 +111,7 @@ class LoadOperation<Collection> : public Operations {
     Status
     ApplyToStore(Store& store) override {
         if (done_) {
-            Done();
+            Done(store);
             return status_;
         }
         Status status;
@@ -121,7 +121,7 @@ class LoadOperation<Collection> : public Operations {
             status = store.GetResource<Collection>(context_.id, resource_);
         }
         SetStatus(status);
-        Done();
+        Done(store);
         return status_;
     }
 

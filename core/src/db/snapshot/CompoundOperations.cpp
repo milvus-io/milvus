@@ -290,7 +290,7 @@ DropPartitionOperation::GetRepr() const {
     std::stringstream ss;
     ss << "<" << GetName() << "(";
     if (prev_ss_) {
-        ss << "SS=" << prev_ss_ << GetID();
+        ss << "SS=" << prev_ss_->GetID();
     }
     ss << "," << c_context_.ToString();
     ss << "," << context_.ToString();
@@ -413,7 +413,7 @@ CreateCollectionOperation::GetRepr() const {
     std::stringstream ss;
     ss << "<" << GetName() << "(";
     if (prev_ss_) {
-        ss << "SS=" << prev_ss_ << GetID();
+        ss << "SS=" << prev_ss_->GetID();
     }
     ss << c_context_.ToString();
     ss << "," << context_.ToString();
@@ -481,6 +481,7 @@ CreateCollectionOperation::DoExecute(Store& store) {
     AddStepWithLsn(*collection_commit, c_context_.lsn);
     context_.new_collection_commit = collection_commit;
     c_context_.collection_commit = collection_commit;
+    context_.new_collection_commit = collection_commit;
     return Status::OK();
 }
 
@@ -494,7 +495,8 @@ CreateCollectionOperation::GetSnapshot(ScopedSnapshotT& ss) const {
         return status;
     if (!c_context_.collection_commit)
         return Status(SS_CONSTRAINT_CHECK_ERROR, "No Snapshot is available");
-    status = Snapshots::GetInstance().GetSnapshot(ss, c_context_.collection_commit->GetCollectionId());
+    /* status = Snapshots::GetInstance().GetSnapshot(ss, c_context_.collection_commit->GetCollectionId()); */
+    ss = context_.latest_ss;
     return status;
 }
 

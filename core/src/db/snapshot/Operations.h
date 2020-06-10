@@ -106,7 +106,7 @@ class Operations : public std::enable_shared_from_this<Operations> {
     WaitToFinish();
 
     void
-    Done();
+    Done(Store& store);
 
     void
     SetStatus(const Status& status);
@@ -232,12 +232,12 @@ class LoadOperation : public Operations {
     Status
     ApplyToStore(Store& store) override {
         if (done_) {
-            Done();
+            Done(store);
             return status_;
         }
         auto status = store.GetResource<ResourceT>(context_.id, resource_);
         SetStatus(status);
-        Done();
+        Done(store);
         return status_;
     }
 
@@ -282,7 +282,7 @@ class HardDeleteOperation : public Operations {
             return status_;
         auto status = store.RemoveResource<ResourceT>(id_);
         SetStatus(status);
-        Done();
+        Done(store);
         return status_;
     }
 
@@ -300,12 +300,12 @@ class HardDeleteOperation<Collection> : public Operations {
     Status
     ApplyToStore(Store& store) override {
         if (done_) {
-            Done();
+            Done(store);
             return status_;
         }
         auto status = store.RemoveCollection(id_);
         SetStatus(status);
-        Done();
+        Done(store);
         return status_;
     }
 

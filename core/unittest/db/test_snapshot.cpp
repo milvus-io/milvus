@@ -28,6 +28,12 @@
 #include "db/snapshot/CompoundOperations.h"
 #include "db/snapshot/Snapshots.h"
 
+int RandomInt(int start, int end) {
+    std::random_device dev;
+    std::mt19937 rng(dev());
+    std::uniform_int_distribution<std::mt19937::result_type> dist(start, end);
+    return dist(rng);
+}
 
 TEST_F(SnapshotTest, ReferenceProxyTest) {
     std::string status("raw");
@@ -147,11 +153,11 @@ CreateCollection(const std::string& collection_name, milvus::engine::snapshot::L
     op->Push();
     milvus::engine::snapshot::ScopedSnapshotT ss;
     auto status = op->GetSnapshot(ss);
+    std::cout << status.ToString() << std::endl;
     return ss;
 }
 
 TEST_F(SnapshotTest, CreateCollectionOperationTest) {
-    milvus::engine::snapshot::Store::GetInstance().DoReset();
     milvus::engine::snapshot::ScopedSnapshotT expect_null;
     auto status = milvus::engine::snapshot::Snapshots::GetInstance().GetSnapshot(expect_null, 100000);
     ASSERT_TRUE(!expect_null);
@@ -171,8 +177,8 @@ TEST_F(SnapshotTest, CreateCollectionOperationTest) {
 
     milvus::engine::snapshot::IDS_TYPE ids;
     status = milvus::engine::snapshot::Snapshots::GetInstance().GetCollectionIds(ids);
-    ASSERT_EQ(ids.size(), 1);
-    ASSERT_EQ(ids[0], latest_ss->GetCollectionId());
+    ASSERT_EQ(ids.size(), 6);
+    ASSERT_EQ(ids[5], latest_ss->GetCollectionId());
 
     milvus::engine::snapshot::OperationContext sd_op_ctx;
     sd_op_ctx.collection = latest_ss->GetCollection();
@@ -189,13 +195,13 @@ TEST_F(SnapshotTest, CreateCollectionOperationTest) {
 }
 
 TEST_F(SnapshotTest, DropCollectionTest) {
-    milvus::engine::snapshot::Store::GetInstance().DoReset();
     std::string collection_name = "test_c1";
     milvus::engine::snapshot::LSN_TYPE lsn = 1;
     auto ss = CreateCollection(collection_name, lsn);
     ASSERT_TRUE(ss);
     milvus::engine::snapshot::ScopedSnapshotT lss;
     auto status = milvus::engine::snapshot::Snapshots::GetInstance().GetSnapshot(lss, collection_name);
+    std::cout << status.ToString() << std::endl;
     ASSERT_TRUE(status.ok());
     ASSERT_TRUE(lss);
     ASSERT_EQ(ss->GetID(), lss->GetID());
@@ -220,7 +226,6 @@ TEST_F(SnapshotTest, DropCollectionTest) {
 }
 
 TEST_F(SnapshotTest, ConCurrentCollectionOperation) {
-    milvus::engine::snapshot::Store::GetInstance().DoReset();
     std::string collection_name("c1");
     milvus::engine::snapshot::LSN_TYPE lsn = 1;
 
@@ -301,7 +306,6 @@ CreatePartition(const std::string& collection_name, const milvus::engine::snapsh
 }
 
 TEST_F(SnapshotTest, PartitionTest) {
-    milvus::engine::snapshot::Store::GetInstance().DoReset();
     std::string collection_name("c1");
     milvus::engine::snapshot::LSN_TYPE lsn = 1;
     auto ss = CreateCollection(collection_name, ++lsn);
@@ -360,10 +364,7 @@ TEST_F(SnapshotTest, PartitionTest) {
 
     std::stringstream p_name_stream;
 
-    std::random_device dev;
-    std::mt19937 rng(dev());
-    std::uniform_int_distribution<std::mt19937::result_type> dist(20,30);
-    auto num = dist(rng);
+    auto num = RandomInt(20, 30);
     for (auto i = 0; i < num; ++i) {
         p_name_stream.str("");
         p_name_stream << "partition_" << i;
@@ -394,7 +395,6 @@ TEST_F(SnapshotTest, PartitionTest) {
 }
 
 TEST_F(SnapshotTest, PartitionTest2) {
-    milvus::engine::snapshot::Store::GetInstance().DoReset();
     std::string collection_name("c1");
     milvus::engine::snapshot::LSN_TYPE lsn = 1;
     milvus::Status status;
@@ -433,6 +433,8 @@ TEST_F(SnapshotTest, OperationTest) {
 
     milvus::engine::snapshot::ScopedSnapshotT ss;
     status = milvus::engine::snapshot::Snapshots::GetInstance().GetSnapshot(ss, 1);
+    std::cout << status.ToString() << std::endl;
+    ASSERT_TRUE(status.ok());
     auto ss_id = ss->GetID();
     lsn = ss->GetMaxLsn() + 1;
     ASSERT_TRUE(status.ok());
@@ -599,4 +601,171 @@ TEST_F(SnapshotTest, OperationTest) {
         std::cout << build_op->ToString() << std::endl;
     }
     milvus::engine::snapshot::Snapshots::GetInstance().Reset();
+}
+
+struct WaitableObj {
+    bool notified_ = false;
+    std::mutex mutex_;
+    std::condition_variable cv_;
+
+    void
+    Wait() {
+        std::unique_lock<std::mutex> lck(mutex_);
+        if (!notified_) {
+            cv_.wait(lck);
+        }
+        notified_ = false;
+    }
+
+    void
+    Notify() {
+        std::unique_lock<std::mutex> lck(mutex_);
+        notified_ = true;
+        lck.unlock();
+        cv_.notify_one();
+    }
+};
+
+
+TEST_F(SnapshotTest, CompoundTest1) {
+    milvus::Status status;
+    milvus::engine::snapshot::LSN_TYPE lsn = 0;
+    auto next_lsn = [&]() -> decltype(lsn) {
+        return ++lsn;
+    };
+    std::string collection_name("c1");
+    auto ss = CreateCollection(collection_name, next_lsn());
+    ASSERT_TRUE(ss);
+    ASSERT_EQ(lsn, ss->GetMaxLsn());
+
+    using ID_TYPE = milvus::engine::snapshot::ID_TYPE;
+    using SegmentFileContext = milvus::engine::snapshot::SegmentFileContext;
+    using OperationContext =  milvus::engine::snapshot::OperationContext;
+    using NewSegmentOperation = milvus::engine::snapshot::NewSegmentOperation;
+    using Queue = milvus::server::BlockingQueue<ID_TYPE>;
+    using Partition = milvus::engine::snapshot::Partition;
+    using SegmentPtr = milvus::engine::snapshot::SegmentPtr;
+    using SegmentFilePtr = milvus::engine::snapshot::SegmentFilePtr;
+    Queue merge_queue;
+
+    std::set<ID_TYPE> all_segments;
+    std::set<ID_TYPE> segment_in_building;
+    std::set<ID_TYPE> merge_segs;
+    std::map<ID_TYPE, std::set<ID_TYPE>> merged_segs;
+
+    std::mutex all_mtx;
+    std::mutex building_mtx;
+    std::mutex merging_mtx;
+
+    WaitableObj w_l;
+
+    SegmentFileContext sf_context;
+    sf_context.field_name = "vector";
+    sf_context.field_element_name = "ivfsq8";
+    sf_context.segment_id = 1;
+    sf_context.partition_id = 1;
+
+    auto do_merge = [&] (std::set<ID_TYPE>& seg_ids) {
+        if (seg_ids.size() == 0) {
+            return;
+        }
+        decltype(ss) latest_ss;
+        auto status = milvus::engine::snapshot::Snapshots::GetInstance().GetSnapshot(latest_ss, collection_name);
+        ASSERT_TRUE(status.ok());
+
+        OperationContext context;
+        for (auto& id : seg_ids) {
+            auto seg = latest_ss->GetResource<milvus::engine::snapshot::Segment>(id);
+            context.stale_segments.push_back(seg);
+            if (!context.prev_partition) {
+                context.prev_partition = latest_ss->GetResource<milvus::engine::snapshot::Partition>(
+                        seg->GetPartitionId());
+            }
+        }
+
+        context.lsn = next_lsn();
+        auto op = std::make_shared<milvus::engine::snapshot::MergeOperation>(context, latest_ss);
+        milvus::engine::snapshot::SegmentPtr new_seg;
+        status = op->CommitNewSegment(new_seg);
+        ASSERT_TRUE(status.ok());
+        sf_context.segment_id = new_seg->GetID();
+        milvus::engine::snapshot::SegmentFilePtr seg_file;
+        status = op->CommitNewSegmentFile(sf_context, seg_file);
+        ASSERT_TRUE(status.ok());
+        status = op->Push();
+        ASSERT_TRUE(status.ok());
+        std::cout << op->ToString() << std::endl;
+        ID_TYPE ss_id = latest_ss->GetID();
+        status = op->GetSnapshot(latest_ss);
+        ASSERT_TRUE(status.ok());
+        ASSERT_TRUE(latest_ss->GetID() > ss_id);
+        merged_segs[new_seg->GetID()] = seg_ids;
+    };
+
+    auto normal_worker = [&] {
+        auto to_build_segments = RandomInt(3, 5);
+        decltype(ss) latest_ss;
+        milvus::engine::snapshot::Snapshots::GetInstance().GetSnapshot(latest_ss, collection_name);
+
+        for (auto i=0; i<to_build_segments; ++i) {
+            OperationContext context;
+            context.lsn = next_lsn();
+            context.prev_partition = latest_ss->GetResource<Partition>(8);
+            auto op = std::make_shared<NewSegmentOperation>(context, latest_ss);
+            SegmentPtr new_seg;
+            status = op->CommitNewSegment(new_seg);
+            std::cout << status.ToString() << std::endl;
+            ASSERT_TRUE(status.ok());
+            SegmentFilePtr seg_file;
+            sf_context.segment_id = new_seg->GetID();
+            op->CommitNewSegmentFile(sf_context, seg_file);
+            op->Push();
+            status = op->GetSnapshot(latest_ss);
+            ASSERT_TRUE(status.ok());
+
+            {
+                std::unique_lock<std::mutex> lock(all_mtx);
+                all_segments.insert(new_seg->GetID());
+            }
+            merge_queue.Put(new_seg->GetID());
+        }
+
+        merge_queue.Put(0);
+    };
+
+    auto merge_worker = [&] {
+        while (true) {
+            auto seg_id = merge_queue.Take();
+            if (seg_id == 0) {
+                std::cout << "Exiting Merge Worker" << std::endl;
+                break;
+            }
+            std::cout << "Merge Worker Receiving: " << seg_id << std::endl;
+            merge_segs.insert(seg_id);
+            if ((merge_segs.size() >= 2) && (RandomInt(0, 10) >= 5)) {
+                std::cout << "Merging (";
+                for (auto seg : merge_segs) {
+                    std::cout << seg << ",";
+                }
+                std::cout << ")" << std::endl;
+                do_merge(merge_segs);
+                merge_segs.clear();
+
+            } else {
+                continue;
+            }
+        }
+        w_l.Notify();
+    };
+
+    std::thread t1 = std::thread(normal_worker);
+    std::thread t2 = std::thread(merge_worker);
+    t1.join();
+    t2.join();
+
+    /* for (auto sid : all_segments) { */
+    /*     std::cout << "seg " << sid << std::endl; */
+    /* } */
+
+    w_l.Wait();
 }

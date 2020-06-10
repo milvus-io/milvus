@@ -93,10 +93,14 @@ Operations::WaitToFinish() {
 }
 
 void
-Operations::Done() {
+Operations::Done(Store& store) {
     std::unique_lock<std::mutex> lock(finish_mtx_);
     done_ = true;
     if (GetType() == OperationsType::W_Compound) {
+        if (!context_.latest_ss && ids_.size() > 0 && context_.new_collection_commit) {
+            Snapshots::GetInstance().LoadSnapshot(store, context_.latest_ss,
+                    context_.new_collection_commit->GetCollectionId(), ids_.back());
+        }
         std::cout << ToString() << std::endl;
     }
     finish_cond_.notify_all();
@@ -123,7 +127,7 @@ Operations::DoCheckStale(ScopedSnapshotT& latest_snapshot) const {
 Status
 Operations::CheckStale(const CheckStaleFunc& checker) const {
     decltype(prev_ss_) latest_ss;
-    auto status = Snapshots::GetInstance().GetSnapshotNoLoad(latest_ss, prev_ss_->GetCollection()->GetID());
+    auto status = Snapshots::GetInstance().GetSnapshot(latest_ss, prev_ss_->GetCollection()->GetID());
     if (!status.ok())
         return status;
     if (prev_ss_->GetID() != latest_ss->GetID()) {
@@ -173,7 +177,8 @@ Operations::GetSnapshot(ScopedSnapshotT& ss) const {
     status = IDSNotEmptyRequried();
     if (!status.ok())
         return status;
-    status = Snapshots::GetInstance().GetSnapshot(ss, prev_ss_->GetCollectionId(), ids_.back());
+    /* status = Snapshots::GetInstance().GetSnapshot(ss, prev_ss_->GetCollectionId(), ids_.back()); */
+    ss = context_.latest_ss;
     return status;
 }
 
@@ -183,12 +188,12 @@ Operations::ApplyToStore(Store& store) {
         std::cout << ToString() << std::endl;
     }
     if (done_) {
-        Done();
+        Done(store);
         return status_;
     }
     auto status = OnExecute(store);
     SetStatus(status);
-    Done();
+    Done(store);
     return status_;
 }
 

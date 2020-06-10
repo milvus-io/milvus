@@ -33,7 +33,7 @@ class CompoundBaseOperation : public Operations {
         std::stringstream ss;
         ss << "<" << GetName() << "(";
         if (prev_ss_) {
-            ss << "SS=" << prev_ss_ << GetID();
+            ss << "SS=" << prev_ss_->GetID();
         }
         ss << "," << context_.ToString();
         ss << ",LSN=" << GetContextLsn();
