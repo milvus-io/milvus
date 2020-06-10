@@ -44,8 +44,8 @@ void
 SearchJob::WaitResult() {
     std::unique_lock<std::mutex> lock(mutex_);
     cv_.wait(lock, [this] { return index_files_.empty(); });
-    LOG_SERVER_DEBUG_ << LogOut("[%s][%ld] SearchJob %ld: query_time %f, map_uids_time %f, reduce_time %f", "search",
-                                0, id(), this->time_stat().query_time, this->time_stat().map_uids_time,
+    LOG_SERVER_DEBUG_ << LogOut("[%s][%ld] SearchJob %ld: query_time %f, map_uids_time %f, reduce_time %f", "search", 0,
+                                id(), this->time_stat().query_time, this->time_stat().map_uids_time,
                                 this->time_stat().reduce_time);
     LOG_SERVER_DEBUG_ << LogOut("[%s][%ld] SearchJob %ld all done", "search", 0, id());
 }

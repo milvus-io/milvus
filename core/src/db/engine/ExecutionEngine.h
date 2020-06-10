@@ -27,7 +27,7 @@ namespace milvus {
 namespace scheduler {
 class SearchJob;
 using SearchJobPtr = std::shared_ptr<SearchJob>;
-}
+}  // namespace scheduler
 
 namespace engine {
 
@@ -123,14 +123,13 @@ class ExecutionEngine {
     GetVectorByID(const int64_t id, uint8_t* vector, bool hybrid) = 0;
 #endif
 
-//    virtual Status
-//    ExecBinaryQuery(query::GeneralQueryPtr general_query, faiss::ConcurrentBitsetPtr bitset,
-//                    std::unordered_map<std::string, DataType>& attr_type, uint64_t& nq, uint64_t& topk,
-//                    std::vector<float>& distances, std::vector<int64_t>& labels) = 0;
+    //    virtual Status
+    //    ExecBinaryQuery(query::GeneralQueryPtr general_query, faiss::ConcurrentBitsetPtr bitset,
+    //                    std::unordered_map<std::string, DataType>& attr_type, uint64_t& nq, uint64_t& topk,
+    //                    std::vector<float>& distances, std::vector<int64_t>& labels) = 0;
 
     virtual Status
-    Search(std::vector<int64_t>& ids, std::vector<float>& distances, scheduler::SearchJobPtr job,
-           bool hybrid) = 0;
+    Search(std::vector<int64_t>& ids, std::vector<float>& distances, scheduler::SearchJobPtr job, bool hybrid) = 0;
 
     virtual std::shared_ptr<ExecutionEngine>
     BuildIndex(const std::string& location, EngineType engine_type) = 0;

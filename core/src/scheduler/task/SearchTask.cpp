@@ -256,7 +256,8 @@ XSearchTask::Execute() {
                 for (; type_it != attr_type.end(); type_it++) {
                     types.insert(std::make_pair(type_it->first, (engine::DataType)(type_it->second)));
                 }
-                //s = index_engine_->ExecBinaryQuery(general_query, nullptr, types, nq, topk, output_distance, output_ids);
+                // s = index_engine_->ExecBinaryQuery(general_query, nullptr, types, nq, topk, output_distance,
+                // output_ids);
             } else {
                 s = index_engine_->Search(output_ids, output_distance, search_job, hybrid);
                 fiu_do_on("XSearchTask.Execute.search_fail", s = Status(SERVER_UNEXPECTED_ERROR, ""));

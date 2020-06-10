@@ -39,8 +39,8 @@
 #endif
 #include "knowhere/index/vector_index/helpers/IndexParameter.h"
 #include "metrics/Metrics.h"
-#include "scheduler/job/SearchJob.h"
 #include "scheduler/Utils.h"
+#include "scheduler/job/SearchJob.h"
 #include "segment/SegmentReader.h"
 #include "segment/SegmentWriter.h"
 #include "utils/CommonUtil.h"
@@ -796,10 +796,10 @@ ProcessRangeQuery(std::vector<T> data, T value, query::CompareOperator type, fai
     }
 }
 
-//Status
-//ExecutionEngineImpl::ExecBinaryQuery(milvus::query::GeneralQueryPtr general_query, faiss::ConcurrentBitsetPtr bitset,
-//                                     std::unordered_map<std::string, DataType>& attr_type, uint64_t& nq, uint64_t& topk,
-//                                     std::vector<float>& distances, std::vector<int64_t>& labels) {
+// Status
+// ExecutionEngineImpl::ExecBinaryQuery(milvus::query::GeneralQueryPtr general_query, faiss::ConcurrentBitsetPtr bitset,
+//                                     std::unordered_map<std::string, DataType>& attr_type, uint64_t& nq, uint64_t&
+//                                     topk, std::vector<float>& distances, std::vector<int64_t>& labels) {
 //    if (bitset == nullptr) {
 //        bitset = std::make_shared<faiss::ConcurrentBitset>(vector_count_);
 //    }
