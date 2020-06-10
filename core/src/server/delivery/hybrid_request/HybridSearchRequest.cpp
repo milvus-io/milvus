@@ -54,7 +54,7 @@ HybridSearchRequest::Create(const std::shared_ptr<milvus::server::Context>& cont
 Status
 HybridSearchRequest::OnExecute() {
     try {
-        fiu_do_on("SearchRequest.OnExecute.throw_std_exception", throw std::exception());
+        fiu_do_on("HybridSearchRequest.OnExecute.throw_std_exception", throw std::exception());
         std::string hdr = "SearchRequest(table=" + collection_name_;
 
         TimeRecorder rc(hdr);
