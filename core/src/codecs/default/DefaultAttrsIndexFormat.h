@@ -17,13 +17,13 @@
 
 #pragma once
 
+#include <src/db/meta/MetaTypes.h>
 #include <mutex>
 #include <string>
 #include <vector>
-#include <src/db/meta/MetaTypes.h>
 
 #include "codecs/AttrsIndexFormat.h"
-#include "segment/AttrIndex.h"
+#include "segment/AttrsIndex.h"
 
 namespace milvus {
 namespace codec {
@@ -33,11 +33,10 @@ class DefaultAttrsIndexFormat : public AttrsIndexFormat {
     DefaultAttrsIndexFormat() = default;
 
     void
-    read(const storage::FSHandlerPtr& fs_ptr, const std::string& location, segment::AttrIndexPtr& attr_index) override;
+    read(const storage::FSHandlerPtr& fs_ptr, segment::AttrsIndexPtr& attr_index) override;
 
     void
-    write(const storage::FSHandlerPtr& fs_ptr, const std::string& location,
-          const segment::AttrIndexPtr& attr_index) override;
+    write(const storage::FSHandlerPtr& fs_ptr, const segment::AttrsIndexPtr& attr_index) override;
 
     // No copy and move
     DefaultAttrsIndexFormat(const DefaultAttrsIndexFormat&) = delete;
@@ -49,8 +48,9 @@ class DefaultAttrsIndexFormat : public AttrsIndexFormat {
     operator=(DefaultAttrsIndexFormat&&) = delete;
 
  private:
-    knowhere::IndexPtr
-    read_internal(const storage::FSHandlerPtr& fs_ptr, const std::string& path);
+    void
+    read_internal(const milvus::storage::FSHandlerPtr& fs_ptr, const std::string& path, knowhere::IndexPtr& index,
+                  engine::meta::hybrid::DataType& attr_type);
 
     knowhere::IndexPtr
     create_structured_index(const engine::meta::hybrid::DataType data_type);

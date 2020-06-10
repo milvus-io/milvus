@@ -36,7 +36,7 @@ class CreateHybridIndexRequest : public BaseRequest {
 
  private:
     const std::string collection_name_;
-    const std::vector<std::string> field_names_;
+    std::vector<std::string> field_names_;
     const milvus::json& extra_params_;
 };
 

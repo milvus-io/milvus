@@ -20,7 +20,7 @@
 #include <memory>
 #include <string>
 
-#include "segment/AttrIndex.h"
+#include "segment/AttrsIndex.h"
 #include "storage/FSHandler.h"
 
 namespace milvus {
@@ -29,11 +29,10 @@ namespace codec {
 class AttrsIndexFormat {
  public:
     virtual void
-    read(const storage::FSHandlerPtr& fd_ptr, const std::string& location, segment::AttrIndexPtr& attr_index) = 0;
+    read(const storage::FSHandlerPtr& fd_ptr, segment::AttrsIndexPtr& attr_index) = 0;
 
     virtual void
-    write(const storage::FSHandlerPtr& fs_ptr, const std::string& location,
-          const segment::AttrIndexPtr& attr_index) = 0;
+    write(const storage::FSHandlerPtr& fs_ptr, const segment::AttrsIndexPtr& attr_index) = 0;
 };
 
 using AttrsIndexFormatPtr = std::shared_ptr<AttrsIndexFormat>;

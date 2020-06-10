@@ -21,6 +21,7 @@
 
 #include "ExecutionEngine.h"
 #include "db/attr/Attr.h"
+#include "db/attr/AttrIndex.h"
 #include "knowhere/index/vector_index/VecIndex.h"
 
 namespace milvus {
@@ -125,6 +126,10 @@ class ExecutionEngineImpl : public ExecutionEngine {
     knowhere::VecIndexPtr
     Load(const std::string& location);
 
+    Status
+    ProcessTermQuery(faiss::ConcurrentBitsetPtr& bitset, query::GeneralQueryPtr general_query,
+                     std::unordered_map<std::string, DataType>& attr_type);
+
     template <typename T>
     void
     ProcessRangeQuery(std::vector<T> data, T value, query::CompareOperator type, faiss::ConcurrentBitsetPtr& bitset);
@@ -144,6 +149,8 @@ class ExecutionEngineImpl : public ExecutionEngine {
     int64_t dim_;
     EngineType index_type_;
     MetricType metric_type_;
+
+    Attr::AttrIndexPtr attr_index_ = nullptr;
 
     Attr::AttrPtr attr_ = nullptr;
 

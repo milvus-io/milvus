@@ -26,8 +26,10 @@ namespace milvus {
 namespace segment {
 
 struct AttrsIndex {
-    std::unordered_map<std::string, AttrIndex> attr_indexes;
+    std::unordered_map<std::string, AttrIndexPtr> attr_indexes;
 };
+
+using AttrsIndexPtr = std::shared_ptr<AttrsIndex>;
 
 }  // namespace segment
 }  // namespace milvus

@@ -1659,12 +1659,14 @@ DBImpl::SerializeStructuredIndex(const milvus::engine::meta::SegmentsSchema& to_
             attrs.insert(std::make_pair(file.location_, attrs_ptr));
         }
 
-        for (auto& field_name : field_names) {
-            for (auto& file : to_index_files) {
-                std::string segment_dir;
-                utils::GetParentPath(file.location_, segment_dir);
-                auto segment_writer_ptr = std::make_shared<segment::SegmentWriter>(segment_dir);
+        for (auto& file : to_index_files) {
+            std::unordered_map<std::string, knowhere::IndexPtr> attr_indexes;
+            std::unordered_map<std::string, int64_t> attr_sizes;
+            std::string segment_dir;
+            utils::GetParentPath(file.location_, segment_dir);
+            auto segment_writer_ptr = std::make_shared<segment::SegmentWriter>(segment_dir);
 
+            for (auto& field_name : field_names) {
                 knowhere::IndexPtr index_ptr = nullptr;
                 switch (attr_type.at(field_name)) {
                     case engine::meta::hybrid::DataType::INT8: {
@@ -1675,12 +1677,9 @@ DBImpl::SerializeStructuredIndex(const milvus::engine::meta::SegmentsSchema& to_
                         auto int8_index_ptr = std::make_shared<knowhere::StructuredIndexSort<int8_t>>(
                             (size_t)attr_size, reinterpret_cast<const signed char*>(attr_data.data()));
                         index_ptr = std::static_pointer_cast<knowhere::Index>(int8_index_ptr);
-                        segment_writer_ptr->SetAttrIndex(index_ptr, engine::meta::hybrid::DataType::INT8, field_name);
-                        status = segment_writer_ptr->WriteAttrIndex(file.location_);
-                        if (!status.ok()) {
-                            return status;
-                        }
-                        break;
+
+                        attr_indexes.insert(std::make_pair(field_name, index_ptr));
+                        attr_sizes.insert(std::make_pair(field_name, attr_size * sizeof(int8_t)));
                     }
                     case engine::meta::hybrid::DataType::INT16: {
                         auto attr = attrs.at(file.location_)->attrs.at(field_name);
@@ -1690,11 +1689,9 @@ DBImpl::SerializeStructuredIndex(const milvus::engine::meta::SegmentsSchema& to_
                         auto int16_index_ptr = std::make_shared<knowhere::StructuredIndexSort<int16_t>>(
                             (size_t)attr_size, reinterpret_cast<const int16_t*>(attr_data.data()));
                         index_ptr = std::static_pointer_cast<knowhere::Index>(int16_index_ptr);
-                        segment_writer_ptr->SetAttrIndex(index_ptr, engine::meta::hybrid::DataType::INT16, field_name);
-                        status = segment_writer_ptr->WriteAttrIndex(file.location_);
-                        if (!status.ok()) {
-                            return status;
-                        }
+
+                        attr_indexes.insert(std::make_pair(field_name, index_ptr));
+                        attr_sizes.insert(std::make_pair(field_name, attr_size * sizeof(int16_t)));
                         break;
                     }
                     case engine::meta::hybrid::DataType::INT32: {
@@ -1705,11 +1702,9 @@ DBImpl::SerializeStructuredIndex(const milvus::engine::meta::SegmentsSchema& to_
                         auto int32_index_ptr = std::make_shared<knowhere::StructuredIndexSort<int32_t>>(
                             (size_t)attr_size, reinterpret_cast<const int32_t*>(attr_data.data()));
                         index_ptr = std::static_pointer_cast<knowhere::Index>(int32_index_ptr);
-                        segment_writer_ptr->SetAttrIndex(index_ptr, engine::meta::hybrid::DataType::INT32, field_name);
-                        status = segment_writer_ptr->WriteAttrIndex(file.location_);
-                        if (!status.ok()) {
-                            return status;
-                        }
+
+                        attr_indexes.insert(std::make_pair(field_name, index_ptr));
+                        attr_sizes.insert(std::make_pair(field_name, attr_size * sizeof(int32_t)));
                         break;
                     }
                     case engine::meta::hybrid::DataType::INT64: {
@@ -1720,11 +1715,9 @@ DBImpl::SerializeStructuredIndex(const milvus::engine::meta::SegmentsSchema& to_
                         auto int64_index_ptr = std::make_shared<knowhere::StructuredIndexSort<int64_t>>(
                             (size_t)attr_size, reinterpret_cast<const int64_t*>(attr_data.data()));
                         index_ptr = std::static_pointer_cast<knowhere::Index>(int64_index_ptr);
-                        segment_writer_ptr->SetAttrIndex(index_ptr, engine::meta::hybrid::DataType::INT64, field_name);
-                        status = segment_writer_ptr->WriteAttrIndex(file.location_);
-                        if (!status.ok()) {
-                            return status;
-                        }
+
+                        attr_indexes.insert(std::make_pair(field_name, index_ptr));
+                        attr_sizes.insert(std::make_pair(field_name, attr_size * sizeof(int64_t)));
                         break;
                     }
                     case engine::meta::hybrid::DataType::FLOAT: {
@@ -1735,11 +1728,9 @@ DBImpl::SerializeStructuredIndex(const milvus::engine::meta::SegmentsSchema& to_
                         auto float_index_ptr = std::make_shared<knowhere::StructuredIndexSort<float>>(
                             (size_t)attr_size, reinterpret_cast<const float*>(attr_data.data()));
                         index_ptr = std::static_pointer_cast<knowhere::Index>(float_index_ptr);
-                        segment_writer_ptr->SetAttrIndex(index_ptr, engine::meta::hybrid::DataType::FLOAT, field_name);
-                        status = segment_writer_ptr->WriteAttrIndex(file.location_);
-                        if (!status.ok()) {
-                            return status;
-                        }
+
+                        attr_indexes.insert(std::make_pair(field_name, index_ptr));
+                        attr_sizes.insert(std::make_pair(field_name, attr_size * sizeof(float)));
                         break;
                     }
                     case engine::meta::hybrid::DataType::DOUBLE: {
@@ -1750,15 +1741,21 @@ DBImpl::SerializeStructuredIndex(const milvus::engine::meta::SegmentsSchema& to_
                         auto double_index_ptr = std::make_shared<knowhere::StructuredIndexSort<double>>(
                             (size_t)attr_size, reinterpret_cast<const double*>(attr_data.data()));
                         index_ptr = std::static_pointer_cast<knowhere::Index>(double_index_ptr);
-                        segment_writer_ptr->SetAttrIndex(index_ptr, engine::meta::hybrid::DataType::DOUBLE, field_name);
-                        status = segment_writer_ptr->WriteAttrIndex(file.location_);
-                        if (!status.ok()) {
-                            return status;
-                        }
+
+                        attr_indexes.insert(std::make_pair(field_name, index_ptr));
+                        attr_sizes.insert(std::make_pair(field_name, attr_size * sizeof(double)));
                         break;
                     }
                     default: {}
                 }
+            }
+            status = segment_writer_ptr->SetAttrsIndex(attr_indexes, attr_sizes, attr_type);
+            if (!status.ok()) {
+                return status;
+            }
+            status = segment_writer_ptr->WriteAttrsIndex();
+            if (!status.ok()) {
+                return status;
             }
         }
     }

@@ -24,6 +24,7 @@
 #include "config/Config.h"
 #include "db/Utils.h"
 #include "knowhere/common/Config.h"
+#include "knowhere/index/structured_index/StructuredIndexSort.h"
 #include "knowhere/index/vector_index/ConfAdapter.h"
 #include "knowhere/index/vector_index/ConfAdapterMgr.h"
 #include "knowhere/index/vector_index/IndexBinaryIDMAP.h"
@@ -512,33 +513,30 @@ ExecutionEngineImpl::Load(bool to_cache) {
 
 Status
 ExecutionEngineImpl::LoadAttr(bool to_cache) {
-    attr_ = std::static_pointer_cast<Attr::Attr>(cache::CpuCacheMgr::GetInstance()->GetIndex(attr_location_));
-    bool already_in_cache = (attr_ != nullptr);
+    attr_index_ =
+        std::static_pointer_cast<Attr::AttrIndex>(cache::CpuCacheMgr::GetInstance()->GetIndex(attr_location_));
+    bool already_in_cache = (attr_index_ != nullptr);
     if (!already_in_cache) {
         std::string segment_dir;
         utils::GetParentPath(location_, segment_dir);
         auto segment_reader_ptr = std::make_shared<segment::SegmentReader>(segment_dir);
 
-        attr_ = std::make_shared<Attr::Attr>();
+        attr_index_ = std::make_shared<Attr::AttrIndex>();
 
         auto status = segment_reader_ptr->Load();
         segment::SegmentPtr segment_ptr;
         segment_reader_ptr->GetSegment(segment_ptr);
-        auto attrs = segment_ptr->attrs_ptr_;
+        auto attrs_index = segment_ptr->attrs_index_ptr_;
 
-        std::unordered_map<std::string, std::vector<uint8_t>> attr_data;
+        std::unordered_map<std::string, knowhere::IndexPtr> attr_indexes;
         std::unordered_map<std::string, int64_t> attr_size;
 
-        auto attrs_it = attrs->attrs.begin();
-        for (; attrs_it != attrs->attrs.end(); ++attrs_it) {
-            attr_data.insert(std::pair(attrs_it->first, attrs_it->second->GetData()));
-            attr_size.insert(std::pair(attrs_it->first, attrs_it->second->GetNbytes()));
+        auto attr_it = attrs_index->attr_indexes.begin();
+        for (; attr_it != attrs_index->attr_indexes.end(); attr_it++) {
+            attr_indexes.insert(std::make_pair(attr_it->first, attr_it->second->GetAttrIndex()));
         }
-
-        int64_t entity_count = index_->GetUids().size();
-        attr_->SetAttrData(attr_data);
-        attr_->SetAttrSize(attr_size);
-        attr_->SetEntityCount(entity_count);
+        attr_index_->SetIndexData(attr_indexes);
+        attr_index_->SetIndexSize(attr_size);
     }
 
     if (!already_in_cache && to_cache) {
@@ -768,6 +766,113 @@ MapAndCopyResult(const knowhere::DatasetPtr& dataset, const std::vector<milvus::
     free(res_dist);
 }
 
+Status
+ExecutionEngineImpl::ProcessTermQuery(faiss::ConcurrentBitsetPtr& bitset, query::GeneralQueryPtr general_query,
+                                      std::unordered_map<std::string, DataType>& attr_type) {
+    auto field_name = general_query->leaf->term_query->field_name;
+    auto type = attr_type.at(field_name);
+    if (attr_->attr_size().find(field_name) == attr_->attr_size().end()) {
+        return Status{SERVER_INVALID_BINARY_QUERY, "Attribute's field_name is wrong"};
+    }
+    auto size = attr_->attr_size().at(field_name);
+
+    switch (type) {
+        case DataType::INT8: {
+            auto int8_index = std::dynamic_pointer_cast<knowhere::StructuredIndexSort<int8_t>>(
+                attr_index_->attr_index_data().at(field_name));
+            if (not int8_index) {
+                return Status{SERVER_INVALID_ARGUMENT, "Attribute's type is wrong"};
+            }
+
+            std::vector<int8_t> term_value;
+            auto term_size = general_query->leaf->term_query->field_value.size() * (sizeof(int8_t)) / sizeof(int8_t);
+            term_value.resize(term_size);
+            memcpy(term_value.data(), general_query->leaf->term_query->field_value.data(), term_size * sizeof(int8_t));
+
+            bitset = int8_index->In(term_size, term_value.data());
+            break;
+        }
+        case DataType::INT16: {
+            auto int16_index = std::dynamic_pointer_cast<knowhere::StructuredIndexSort<int16_t>>(
+                attr_index_->attr_index_data().at(field_name));
+            if (not int16_index) {
+                return Status{SERVER_INVALID_ARGUMENT, "Attribute's type is wrong"};
+            }
+
+            std::vector<int16_t> term_value;
+            auto term_size = general_query->leaf->term_query->field_value.size() * (sizeof(int8_t)) / sizeof(int16_t);
+            term_value.resize(term_size);
+            memcpy(term_value.data(), general_query->leaf->term_query->field_value.data(), term_size * sizeof(int16_t));
+
+            bitset = int16_index->In(term_size, term_value.data());
+            break;
+        }
+        case DataType::INT32: {
+            auto int32_index = std::dynamic_pointer_cast<knowhere::StructuredIndexSort<int32_t>>(
+                attr_index_->attr_index_data().at(field_name));
+            if (not int32_index) {
+                return Status{SERVER_INVALID_ARGUMENT, "Attribute's type is wrong"};
+            }
+
+            std::vector<int32_t> term_value;
+            auto term_size = general_query->leaf->term_query->field_value.size() * (sizeof(int8_t)) / sizeof(int32_t);
+            term_value.resize(term_size);
+            memcpy(term_value.data(), general_query->leaf->term_query->field_value.data(), term_size * sizeof(int32_t));
+
+            bitset = int32_index->In(term_size, term_value.data());
+            break;
+        }
+        case DataType::INT64: {
+            auto int64_index = std::dynamic_pointer_cast<knowhere::StructuredIndexSort<int64_t>>(
+                attr_index_->attr_index_data().at(field_name));
+            if (not int64_index) {
+                return Status{SERVER_INVALID_ARGUMENT, "Attribute's type is wrong"};
+            }
+
+            std::vector<int64_t> term_value;
+            auto term_size = general_query->leaf->term_query->field_value.size() * (sizeof(int8_t)) / sizeof(int64_t);
+            term_value.resize(term_size);
+            memcpy(term_value.data(), general_query->leaf->term_query->field_value.data(), term_size * sizeof(int64_t));
+
+            bitset = int64_index->In(term_size, term_value.data());
+            break;
+        }
+        case DataType::FLOAT: {
+            auto float_index = std::dynamic_pointer_cast<knowhere::StructuredIndexSort<float>>(
+                attr_index_->attr_index_data().at(field_name));
+            if (not float_index) {
+                return Status{SERVER_INVALID_ARGUMENT, "Attribute's type is wrong"};
+            }
+
+            std::vector<float> term_value;
+            auto term_size = general_query->leaf->term_query->field_value.size() * (sizeof(int8_t)) / sizeof(float);
+            term_value.resize(term_size);
+            memcpy(term_value.data(), general_query->leaf->term_query->field_value.data(), term_size * sizeof(int64_t));
+
+            bitset = float_index->In(term_size, term_value.data());
+            break;
+        }
+        case DataType::DOUBLE: {
+            auto double_index = std::dynamic_pointer_cast<knowhere::StructuredIndexSort<double>>(
+                attr_index_->attr_index_data().at(field_name));
+            if (not double_index) {
+                return Status{SERVER_INVALID_ARGUMENT, "Attribute's type is wrong"};
+            }
+
+            std::vector<double> term_value;
+            auto term_size = general_query->leaf->term_query->field_value.size() * (sizeof(int8_t)) / sizeof(double);
+            term_value.resize(term_size);
+            memcpy(term_value.data(), general_query->leaf->term_query->field_value.data(), term_size * sizeof(double));
+
+            bitset = double_index->In(term_size, term_value.data());
+            break;
+        }
+        default:
+            break;
+    }
+    return Status::OK();
+}
+
 template <typename T>
 void
 ExecutionEngineImpl::ProcessRangeQuery(std::vector<T> data, T value, query::CompareOperator type,
@@ -915,19 +1020,17 @@ ExecutionEngineImpl::ExecBinaryQuery(milvus::query::GeneralQueryPtr general_quer
         bitset = std::make_shared<faiss::ConcurrentBitset>(attr_->entity_count());
         if (general_query->leaf->term_query != nullptr) {
             // process attrs_data
+            ProcessTermQuery(bitset, general_query, attr_type);
+#if 0
             auto field_name = general_query->leaf->term_query->field_name;
             auto type = attr_type.at(field_name);
             if (attr_->attr_size().find(field_name) == attr_->attr_size().end()) {
                 return Status{SERVER_INVALID_BINARY_QUERY, "Attribute's field_name is wrong"};
             }
             auto size = attr_->attr_size().at(field_name);
+
             switch (type) {
                 case DataType::INT8: {
-//                    auto a = std::dynamic_pointer_cast<StructuredIndex<int8_t>>(index);
-//                    if (not a) {
-//                        // throw exception
-//                    }
-
                     std::vector<int8_t> data;
                     data.resize(size / sizeof(int8_t));
                     memcpy(data.data(), attr_->attr_data().at(field_name).data(), size);
@@ -1086,6 +1189,7 @@ ExecutionEngineImpl::ExecBinaryQuery(milvus::query::GeneralQueryPtr general_quer
                     break;
             }
             return Status::OK();
+#endif
         }
         if (general_query->leaf->range_query != nullptr) {
             auto field_name = general_query->leaf->range_query->field_name;

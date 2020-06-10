@@ -559,4 +559,21 @@ GrpcClient::GetHEntityByID(milvus::grpc::VectorsIdentity& vectors_identity, milv
     return Status::OK();
 }
 
+Status
+GrpcClient::CreateHybridIndex(milvus::grpc::HIndexParam& index_param, milvus::grpc::Status& status) {
+    ClientContext context;
+    ::grpc::Status grpc_status = stub_->CreateHybridIndex(&context, index_param, &status);
+
+    if (!grpc_status.ok()) {
+        std::cerr << "HybridSearch gRPC failed!" << std::endl;
+        return Status(StatusCode::RPCFailed, grpc_status.error_message());
+    }
+
+    if (status.error_code() != grpc::SUCCESS) {
+        std::cerr << status.reason() << std::endl;
+        return Status(StatusCode::ServerFailed, status.reason());
+    }
+    return Status::OK();
+}
+
 }  // namespace milvus

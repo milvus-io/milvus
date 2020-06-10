@@ -182,6 +182,14 @@ ClientTest::GetHEntityByID(const std::string& collection_name, const std::vector
 }
 
 void
+ClientTest::CreateHybridIndex(const std::string& collection_name) {
+    milvus::HIndexParam index_param;
+    index_param.collection_name = collection_name;
+    JSON json_params = {{"nlist", NLIST}, {"index_type", }};
+
+}
+
+void
 ClientTest::TestHybrid() {
     std::string collection_name = "HYBRID_TEST";
     CreateHybridCollection(collection_name);
@@ -189,5 +197,6 @@ ClientTest::TestHybrid() {
     Flush(collection_name);
     sleep(2);
     //    HybridSearchPB(collection_name);
+    CreateHybridIndex(collection_name);
     HybridSearch(collection_name);
 }

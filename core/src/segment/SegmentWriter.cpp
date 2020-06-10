@@ -83,16 +83,26 @@ SegmentWriter::AddAttrs(const std::string& name, const std::unordered_map<std::s
 }
 
 Status
-SegmentWriter::SetVectorIndex(const milvus::knowhere::VecIndexPtr& index) {
-    segment_ptr_->vector_index_ptr_->SetVectorIndex(index);
+SegmentWriter::SetAttrsIndex(const std::unordered_map<std::string, knowhere::IndexPtr>& attr_indexes,
+                             const std::unordered_map<std::string, int64_t>& attr_sizes,
+                             const std::unordered_map<std::string, engine::meta::hybrid::DataType>& attr_type) {
+    auto attrs_index = std::make_shared<AttrsIndex>();
+    auto attr_it = attr_indexes.begin();
+    for (; attr_it != attr_indexes.end(); attr_it++) {
+        auto attr_index = std::make_shared<AttrIndex>();
+        attr_index->SetFieldName(attr_it->first);
+        attr_index->SetDataType(attr_type.at(attr_it->first));
+        attr_index->SetAttrIndex(attr_it->second);
+        attrs_index->attr_indexes.insert(std::make_pair(attr_it->first, attr_index));
+    }
+    segment_ptr_->attrs_index_ptr_ = attrs_index;
     return Status::OK();
 }
 
+
 Status
-SegmentWriter::SetAttrIndex(const milvus::knowhere::IndexPtr& index, const engine::meta::hybrid::DataType data_type, const std::string& field_name) {
-    segment_ptr_->attr_index_ptr_->SetAttrIndex(index);
-    segment_ptr_->attr_index_ptr_->SetDataType(data_type);
-    segment_ptr_->attr_index_ptr_->SetFieldName(field_name);
+SegmentWriter::SetVectorIndex(const milvus::knowhere::VecIndexPtr& index) {
+    segment_ptr_->vector_index_ptr_->SetVectorIndex(index);
     return Status::OK();
 }
 
@@ -182,15 +192,11 @@ SegmentWriter::WriteVectorIndex(const std::string& location) {
 }
 
 Status
-SegmentWriter::WriteAttrIndex(const std::string& location) {
-    if (location.empty()) {
-        return Status(SERVER_WRITE_ERROR, "Invalid parameter of WriteVectorIndex");
-    }
-
+SegmentWriter::WriteAttrsIndex() {
     codec::DefaultCodec default_codec;
     try {
         fs_ptr_->operation_ptr_->CreateDirectory();
-        default_codec.GetAttrIndexFormat()->write(fs_ptr_, location, segment_ptr_->attr_index_ptr_);
+        default_codec.GetAttrIndexFormat()->write(fs_ptr_, segment_ptr_->attrs_index_ptr_);
     } catch (std::exception& e) {
         std::string err_msg = "Failed to write vector index: " + std::string(e.what());
         LOG_ENGINE_ERROR_ << err_msg;
