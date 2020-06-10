@@ -1,4 +1,4 @@
-![Milvuslogo](https://github.com/milvus-io/docs/blob/master/assets/milvus_logo.png)
+![Milvuslogo](milvus_logo.png)
 
 [![Slack](https://img.shields.io/badge/Join-Slack-orange)](https://join.slack.com/t/milvusio/shared_invite/zt-e0u4qu3k-bI2GDNys3ZqX1YCJ9OM~GQ)
 ![GitHub](https://img.shields.io/github/license/milvus-io/milvus)
@@ -19,7 +19,7 @@ As an open source vector similarity search engine, Milvus is easy-to-use, highly
 
 Milvus has the following architecture:
 
-![arch](https://github.com/milvus-io/docs/blob/v0.7.1/assets/milvus_arch.png)
+![arch](milvus_arch.png)
 
 For more detailed introduction of Milvus and its architecture, see [Milvus overview](https://www.milvus.io/docs/about_milvus/overview.md). Keep up-to-date with newest releases and latest updates by reading Milvus [release notes](https://www.milvus.io/docs/releases/release_notes.md).
 
