@@ -68,8 +68,6 @@ const char* CONFIG_NETWORK_HTTP_PORT_DEFAULT = "19121";
 
 /* db config */
 const char* CONFIG_DB = "db_config";
-// const char* CONFIG_DB_BACKEND_URL = "backend_url";
-// const char* CONFIG_DB_BACKEND_URL_DEFAULT = "sqlite://:@:/";
 const char* CONFIG_DB_ARCHIVE_DISK_THRESHOLD = "archive_disk_threshold";
 const char* CONFIG_DB_ARCHIVE_DISK_THRESHOLD_DEFAULT = "0";
 const char* CONFIG_DB_ARCHIVE_DAYS_THRESHOLD = "archive_days_threshold";
