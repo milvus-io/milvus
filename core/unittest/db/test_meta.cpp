@@ -296,6 +296,20 @@ TEST_F(MetaTest, FAILED_TEST) {
         fiu_disable("SqliteMetaImpl.FilesByType.throw_exception");
     }
     {
+        milvus::engine::meta::FilesHolder files_holder;
+        std::vector<milvus::engine::meta::CollectionSchema> collection_array;
+        milvus::engine::meta::CollectionSchema schema;
+        schema.collection_id_ = collection_id;
+        collection_array.emplace_back(schema);
+        std::vector<int> file_types;
+        file_types.push_back(milvus::engine::meta::SegmentSchema::INDEX);
+        FIU_ENABLE_FIU("SqliteMetaImpl.FilesByTypeEx.throw_exception");
+        status = impl_->FilesByTypeEx(collection_array, file_types, files_holder);
+        ASSERT_EQ(status.code(), milvus::DB_META_TRANSACTION_FAILED);
+        fiu_disable("SqliteMetaImpl.FilesByTypeEx.throw_exception");
+        status = impl_->FilesByTypeEx(collection_array, file_types, files_holder);
+    }
+    {
         uint64_t size = 0;
         FIU_ENABLE_FIU("SqliteMetaImpl.Size.throw_exception");
         status = impl_->Size(size);
@@ -566,6 +580,9 @@ TEST_F(MetaTest, ARCHIVE_TEST_DISK) {
         }
         ++i;
     }
+
+    status = impl.GetCollectionFilesBySegmentId(table_file.segment_id_, files_holder);
+    ASSERT_TRUE(status.ok());
 
     impl.DropAll();
 }

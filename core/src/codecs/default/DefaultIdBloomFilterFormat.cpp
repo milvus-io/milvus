@@ -17,6 +17,7 @@
 
 #include "codecs/default/DefaultIdBloomFilterFormat.h"
 
+#include <fiu-local.h>
 #include <memory>
 #include <string>
 
@@ -37,6 +38,7 @@ DefaultIdBloomFilterFormat::read(const storage::FSHandlerPtr& fs_ptr, segment::I
     const std::string bloom_filter_file_path = dir_path + "/" + bloom_filter_filename_;
     scaling_bloom_t* bloom_filter =
         new_scaling_bloom_from_file(bloom_filter_capacity, bloom_filter_error_rate, bloom_filter_file_path.c_str());
+    fiu_do_on("bloom_filter_nullptr", bloom_filter = nullptr);
     if (bloom_filter == nullptr) {
         std::string err_msg =
             "Failed to read bloom filter from file: " + bloom_filter_file_path + ". " + std::strerror(errno);

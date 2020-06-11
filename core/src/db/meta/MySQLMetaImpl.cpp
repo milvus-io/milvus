@@ -2186,8 +2186,8 @@ MySQLMetaImpl::FilesByTypeEx(const std::vector<meta::CollectionSchema>& collecti
                 mysqlpp::ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab_);
 
                 bool is_null_connection = (connectionPtr == nullptr);
-                fiu_do_on("MySQLMetaImpl.FilesByType.null_connection", is_null_connection = true);
-                fiu_do_on("MySQLMetaImpl.FilesByType.throw_exception", throw std::exception(););
+                fiu_do_on("MySQLMetaImpl.FilesByTypeEx.null_connection", is_null_connection = true);
+                fiu_do_on("MySQLMetaImpl.FilesByTypeEx.throw_exception", throw std::exception(););
                 if (is_null_connection) {
                     return Status(DB_ERROR, "Failed to connect to meta server(mysql)");
                 }
@@ -3201,11 +3201,6 @@ MySQLMetaImpl::DescribeHybridCollection(CollectionSchema& collection_schema, hyb
         return HandleException("Failed to describe collection", e.what());
     }
 
-    return Status::OK();
-}
-
-Status
-MySQLMetaImpl::CreateHybridCollectionFile(milvus::engine::meta::SegmentSchema& file_schema) {
     return Status::OK();
 }
 
