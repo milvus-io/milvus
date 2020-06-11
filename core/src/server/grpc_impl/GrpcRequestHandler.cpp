@@ -27,7 +27,6 @@
 #include "tracing/TracerUtil.h"
 #include "utils/Log.h"
 #include "utils/LogUtil.h"
-#include "utils/TimeRecorder.h"
 
 namespace milvus {
 namespace server {
