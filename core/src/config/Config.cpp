@@ -810,7 +810,7 @@ Config::UpdateFileConfigFromMem(const std::string& parent_key, const std::string
         }
 
         if (line.find_first_of('#') == 0) {
-            status = Status(SERVER_UNEXPECTED_ERROR, "Cannot find child key: " + child_key);
+            status = Status(SERVER_UNEXPECTED_ERROR, "Cannot find child key: " + child_key + ", line is " + line);
             break;
         }
 
