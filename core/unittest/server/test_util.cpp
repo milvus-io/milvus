@@ -278,7 +278,6 @@ TEST(UtilTest, LOG_TEST) {
 
     status = milvus::server::InitLog(true, true, true, true, true, true,
             "/tmp/test_util", 1024 * 1024 * 1024, 10); // 1024 MB
-    ASSERT_FALSE(status.ok());
     ASSERT_TRUE(status.ok()) << status.message();
 
     EXPECT_FALSE(el::Loggers::hasFlag(el::LoggingFlag::NewLineForContainer));
