@@ -16,7 +16,6 @@
 #include <cctype>
 #include <string>
 
-#include <fiu-local.h>
 #include <yaml-cpp/yaml.h>
 #include <boost/filesystem.hpp>
 
