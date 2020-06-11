@@ -271,13 +271,6 @@ Config::ValidateConfig() {
     std::string http_port;
     STATUS_CHECK(GetNetworkConfigHTTPPort(http_port));
 
-    /* server config */
-    // std::string server_addr;
-    // STATUS_CHECK(GetServerConfigAddress(server_addr));
-
-    // std::string server_port;
-    // STATUS_CHECK(GetServerConfigPort(server_port));
-
     //    std::string server_mode;
     //    STATUS_CHECK(GetServerConfigDeployMode(server_mode));
 
