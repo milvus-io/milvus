@@ -29,14 +29,14 @@ BuildOperation::DoExecute(Store& store) {
     if (!status.ok())
         return status;
 
-    SegmentCommitOperation op(context_, prev_ss_);
+    SegmentCommitOperation op(context_, context_.prev_ss);
     op(store);
     status = op.GetResource(context_.new_segment_commit);
     if (!status.ok())
         return status;
     AddStepWithLsn(*context_.new_segment_commit, context_.lsn);
 
-    PartitionCommitOperation pc_op(context_, prev_ss_);
+    PartitionCommitOperation pc_op(context_, context_.prev_ss);
     pc_op(store);
 
     OperationContext cc_context;
@@ -52,7 +52,7 @@ BuildOperation::DoExecute(Store& store) {
         return status;
     AddStepWithLsn(*context_.new_partition_commit, context_.lsn);
 
-    CollectionCommitOperation cc_op(cc_context, prev_ss_);
+    CollectionCommitOperation cc_op(cc_context, context_.prev_ss);
     cc_op(store);
     status = cc_op.GetResource(context_.new_collection_commit);
     if (!status.ok())

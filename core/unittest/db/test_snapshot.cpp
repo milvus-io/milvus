@@ -646,17 +646,19 @@ TEST_F(SnapshotTest, CompoundTest1) {
     using SegmentPtr = milvus::engine::snapshot::SegmentPtr;
     using SegmentFilePtr = milvus::engine::snapshot::SegmentFilePtr;
     Queue merge_queue;
+    Queue build_queue;
 
     std::set<ID_TYPE> all_segments;
     std::set<ID_TYPE> segment_in_building;
     std::set<ID_TYPE> merge_segs;
     std::map<ID_TYPE, std::set<ID_TYPE>> merged_segs;
+    std::set<ID_TYPE> built_segs;
 
     std::mutex all_mtx;
     std::mutex building_mtx;
-    std::mutex merging_mtx;
 
-    WaitableObj w_l;
+    WaitableObj merge_waiter;
+    WaitableObj build_waiter;
 
     SegmentFileContext sf_context;
     sf_context.field_name = "vector";
@@ -664,7 +666,28 @@ TEST_F(SnapshotTest, CompoundTest1) {
     sf_context.segment_id = 1;
     sf_context.partition_id = 1;
 
-    auto do_merge = [&] (std::set<ID_TYPE>& seg_ids) {
+    auto do_build = [&] (const ID_TYPE& seg_id) {
+        decltype(ss) latest_ss;
+        auto status = milvus::engine::snapshot::Snapshots::GetInstance().GetSnapshot(latest_ss, collection_name);
+        ASSERT_TRUE(status.ok());
+
+        auto build_sf_context = sf_context;
+
+        milvus::engine::snapshot::OperationContext context;
+        context.lsn = next_lsn();
+        auto build_op = std::make_shared<milvus::engine::snapshot::BuildOperation>(context, latest_ss);
+        milvus::engine::snapshot::SegmentFilePtr seg_file;
+        build_sf_context.segment_id = seg_id;
+        status = build_op->CommitNewSegmentFile(build_sf_context, seg_file);
+        ASSERT_TRUE(status.ok());
+        status = build_op->Push();
+        ASSERT_TRUE(status.ok());
+        status = build_op->GetSnapshot(latest_ss);
+        ASSERT_TRUE(status.ok());
+        built_segs.insert(seg_id);
+    };
+
+    auto do_merge = [&] (std::set<ID_TYPE>& seg_ids, ID_TYPE& new_seg_id) {
         if (seg_ids.size() == 0) {
             return;
         }
@@ -702,11 +725,12 @@ TEST_F(SnapshotTest, CompoundTest1) {
         ASSERT_TRUE(status.ok());
         ASSERT_TRUE(latest_ss->GetID() > ss_id);
         merged_segs[new_seg->GetID()] = seg_ids;
+        new_seg_id = new_seg->GetID();
     };
 
     // TODO: If any Compound Operation find larger Snapshot. This Operation should be rollback to latest
     auto normal_worker = [&] {
-        auto to_build_segments = RandomInt(20, 25);
+        auto to_build_segments = RandomInt(80, 85);
         decltype(ss) latest_ss;
 
         for (auto i = 0; i < to_build_segments; ++i) {
@@ -749,20 +773,43 @@ TEST_F(SnapshotTest, CompoundTest1) {
                     std::cout << seg << ",";
                 }
                 std::cout << ")" << std::endl;
-                do_merge(merge_segs);
+                ID_TYPE new_seg_id = 0;
+                do_merge(merge_segs, new_seg_id);
                 merge_segs.clear();
+                ASSERT_NE(new_seg_id, 0);
+                if (RandomInt(0, 10) >= 5) {
+                    build_queue.Put(new_seg_id);
+                }
 
             } else {
                 continue;
             }
         }
-        w_l.Notify();
+        merge_waiter.Notify();
+        build_queue.Put(0);
+        build_waiter.Wait();
+    };
+
+    auto build_worker = [&] {
+        while (true) {
+            auto seg_id = build_queue.Take();
+            if (seg_id == 0) {
+                std::cout << "Exiting Build Worker" << std::endl;
+                break;
+            }
+
+            std::cout << "Building " << seg_id << std::endl;
+            do_build(seg_id);
+        }
+        build_waiter.Notify();
     };
 
     std::thread t1 = std::thread(normal_worker);
     std::thread t2 = std::thread(merge_worker);
+    std::thread t3 = std::thread(build_worker);
     t1.join();
     t2.join();
+    t3.join();
 
     for (auto& kv : merged_segs) {
         std::cout << "merged: (";
@@ -772,5 +819,9 @@ TEST_F(SnapshotTest, CompoundTest1) {
         std::cout << ") -> " << kv.first << std::endl;
     }
 
-    w_l.Wait();
+    for (auto& id : built_segs) {
+        std::cout << "built: " << id << std::endl;
+    }
+
+    merge_waiter.Wait();
 }
