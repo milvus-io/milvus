@@ -627,6 +627,7 @@ struct WaitableObj {
 };
 
 
+#if 1
 TEST_F(SnapshotTest, CompoundTest1) {
     milvus::Status status;
     milvus::engine::snapshot::LSN_TYPE lsn = 0;
@@ -676,7 +677,6 @@ TEST_F(SnapshotTest, CompoundTest1) {
         OperationContext context;
         for (auto& id : seg_ids) {
             auto seg = latest_ss->GetResource<milvus::engine::snapshot::Segment>(id);
-            latest_ss->DumpResource<milvus::engine::snapshot::Segment>("do_merge");
             if (!seg) {
                 std::cout << "Error seg=" << id << std::endl;
                 ASSERT_TRUE(seg);
@@ -703,6 +703,7 @@ TEST_F(SnapshotTest, CompoundTest1) {
         status = op->GetSnapshot(latest_ss);
         ASSERT_TRUE(status.ok());
         ASSERT_TRUE(latest_ss->GetID() > ss_id);
+        latest_ss->DumpResource<milvus::engine::snapshot::Segment>("do_merge");
         merged_segs[new_seg->GetID()] = seg_ids;
     };
 
@@ -781,3 +782,4 @@ TEST_F(SnapshotTest, CompoundTest1) {
 
     w_l.Wait();
 }
+#endif

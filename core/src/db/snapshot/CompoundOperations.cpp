@@ -102,7 +102,7 @@ NewSegmentOperation::DoExecute(Store& store) {
     /* auto status = PrevSnapshotRequried(); */
     /* if (!status.ok()) return status; */
     // TODO: Check Context
-    SegmentCommitOperation op(context_, prev_ss_);
+    SegmentCommitOperation op(context_, context_.prev_ss);
     auto status = op(store);
     if (!status.ok())
         return status;
@@ -113,7 +113,7 @@ NewSegmentOperation::DoExecute(Store& store) {
 
     OperationContext cc_context;
 
-    PartitionCommitOperation pc_op(context_, prev_ss_);
+    PartitionCommitOperation pc_op(context_, context_.prev_ss);
     status = pc_op(store);
     if (!status.ok())
         return status;
@@ -123,7 +123,7 @@ NewSegmentOperation::DoExecute(Store& store) {
     AddStepWithLsn(*cc_context.new_partition_commit, context_.lsn);
     context_.new_partition_commit = cc_context.new_partition_commit;
 
-    CollectionCommitOperation cc_op(cc_context, prev_ss_);
+    CollectionCommitOperation cc_op(cc_context, context_.prev_ss);
     status = cc_op(store);
     if (!status.ok())
         return status;
@@ -215,7 +215,7 @@ MergeOperation::DoExecute(Store& store) {
     // PXU TODO:
     // 1. Check all requried field elements have related segment files
     // 2. Check Stale and others
-    SegmentCommitOperation op(context_, prev_ss_);
+    SegmentCommitOperation op(context_, context_.prev_ss);
     auto status = op(store);
     if (!status.ok())
         return status;
@@ -225,7 +225,7 @@ MergeOperation::DoExecute(Store& store) {
         return status;
     AddStepWithLsn(*context_.new_segment_commit, context_.lsn);
 
-    PartitionCommitOperation pc_op(context_, prev_ss_);
+    PartitionCommitOperation pc_op(context_, context_.prev_ss);
     status = pc_op(store);
     if (!status.ok())
         return status;
@@ -237,7 +237,7 @@ MergeOperation::DoExecute(Store& store) {
     AddStepWithLsn(*cc_context.new_partition_commit, context_.lsn);
     context_.new_partition_commit = cc_context.new_partition_commit;
 
-    CollectionCommitOperation cc_op(cc_context, prev_ss_);
+    CollectionCommitOperation cc_op(cc_context, context_.prev_ss);
     status = cc_op(store);
     if (!status.ok())
         return status;

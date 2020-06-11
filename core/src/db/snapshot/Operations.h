@@ -129,6 +129,11 @@ class Operations : public std::enable_shared_from_this<Operations> {
     Status
     RollBack();
 
+    virtual Status
+    OnSnapshotStale();
+    virtual Status
+    OnSnapshotDropped();
+
     virtual ~Operations();
 
     friend std::ostream&

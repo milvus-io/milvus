@@ -198,6 +198,17 @@ Operations::ApplyToStore(Store& store) {
 }
 
 Status
+Operations::OnSnapshotDropped() {
+    return Status::OK();
+}
+
+Status
+Operations::OnSnapshotStale() {
+    std::cout << "Stale SS " << prev_ss_->GetID() << " Curr SS " << context_.prev_ss->GetID() << std::endl;
+    return Status::OK();
+}
+
+Status
 Operations::OnExecute(Store& store) {
     auto status = PreExecute(store);
     if (!status.ok()) {
@@ -212,7 +223,16 @@ Operations::OnExecute(Store& store) {
 
 Status
 Operations::PreExecute(Store& store) {
-    return Status::OK();
+    Status status;
+    if (prev_ss_) {
+        Snapshots::GetInstance().GetSnapshot(context_.prev_ss, prev_ss_->GetCollectionId());
+        if (!context_.prev_ss) {
+            status = OnSnapshotDropped();
+        } else if (prev_ss_->GetID() != context_.prev_ss->GetID()) {
+            status = OnSnapshotStale();
+        }
+    }
+    return status;
 }
 
 Status
