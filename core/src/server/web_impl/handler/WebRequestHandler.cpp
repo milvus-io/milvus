@@ -130,7 +130,7 @@ WebRequestHandler::CopyRecordsFromJson(const nlohmann::json& json, engine::Vecto
     return Status::OK();
 }
 
-////////////////////////// WebRequestHandler methods ///////////////////////////////////////
+///////////////////////// WebRequestHandler methods ///////////////////////////////////////
 Status
 WebRequestHandler::GetCollectionMetaInfo(const std::string& collection_name, nlohmann::json& json_out) {
     CollectionSchema schema;

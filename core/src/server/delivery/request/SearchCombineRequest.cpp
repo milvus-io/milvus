@@ -277,7 +277,7 @@ SearchCombineRequest::OnExecute() {
 
             status = ValidationUtil::ValidateSearchParams(extra_params_, collection_schema, request->TopK());
             if (!status.ok()) {
-                // check failed, erase request and return error status
+                // check failed, erase request and let it return error status
                 FreeRequest(request, status);
                 iter = request_list_.erase(iter);
                 continue;
