@@ -107,7 +107,7 @@ class Store {
         }
         auto& c = it->second;
         return_v = std::make_shared<ResourceT>(*c);
-        std::cout << "<<< [Load] " << ResourceT::Name << " " << id << " IsActive=" << return_v->IsActive() << std::endl;
+        /* std::cout << "<<< [Load] " << ResourceT::Name << " " << id << " IsActive=" << return_v->IsActive() << std::endl; */
         return Status::OK();
     }
 
@@ -132,7 +132,7 @@ class Store {
         auto name = it->second->GetName();
         resources.erase(it);
         name_ids_.erase(name);
-        std::cout << ">>> [Remove] Collection " << id << std::endl;
+        /* std::cout << ">>> [Remove] Collection " << id << std::endl; */
         return Status::OK();
     }
 
@@ -146,7 +146,7 @@ class Store {
         }
 
         resources.erase(it);
-        std::cout << ">>> [Remove] " << ResourceT::Name << " " << id << std::endl;
+        /* std::cout << ">>> [Remove] " << ResourceT::Name << " " << id << std::endl; */
         return Status::OK();
     }
 

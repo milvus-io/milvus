@@ -190,13 +190,13 @@ class Snapshot : public ReferenceProxy {
     void
     DumpResource(const std::string& tag = "") {
         auto& resources = GetResources<ResourceT>();
-        std::cout << typeid(*this).name() << " Dump" << ResourceT::Name << " Start [" << tag << "]:" << resources.size()
-                  << std::endl;
+        std::cout << typeid(*this).name() << " Dump " << GetID() << " " << ResourceT::Name
+            << " Start [" << tag << "]:" << resources.size() << std::endl;
         for (auto& kv : resources) {
             std::cout << "\t" << kv.second->ToString() << std::endl;
         }
-        std::cout << typeid(*this).name() << " Dump" << ResourceT::Name << "  End [" << tag << "]:" << resources.size()
-                  << std::endl;
+        std::cout << typeid(*this).name() << " Dump " << GetID() << " " << ResourceT::Name
+            << "  End [" << tag << "]:" << resources.size() << std::endl;
     }
 
     template <typename T>

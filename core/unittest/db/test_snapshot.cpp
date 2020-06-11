@@ -676,6 +676,11 @@ TEST_F(SnapshotTest, CompoundTest1) {
         OperationContext context;
         for (auto& id : seg_ids) {
             auto seg = latest_ss->GetResource<milvus::engine::snapshot::Segment>(id);
+            latest_ss->DumpResource<milvus::engine::snapshot::Segment>("do_merge");
+            if (!seg) {
+                std::cout << "Error seg=" << id << std::endl;
+                ASSERT_TRUE(seg);
+            }
             context.stale_segments.push_back(seg);
             if (!context.prev_partition) {
                 context.prev_partition = latest_ss->GetResource<milvus::engine::snapshot::Partition>(
@@ -694,7 +699,6 @@ TEST_F(SnapshotTest, CompoundTest1) {
         ASSERT_TRUE(status.ok());
         status = op->Push();
         ASSERT_TRUE(status.ok());
-        std::cout << op->ToString() << std::endl;
         ID_TYPE ss_id = latest_ss->GetID();
         status = op->GetSnapshot(latest_ss);
         ASSERT_TRUE(status.ok());
@@ -702,19 +706,19 @@ TEST_F(SnapshotTest, CompoundTest1) {
         merged_segs[new_seg->GetID()] = seg_ids;
     };
 
+    // TODO: If any Compound Operation find larger Snapshot. This Operation should be rollback to latest
     auto normal_worker = [&] {
-        auto to_build_segments = RandomInt(3, 5);
+        auto to_build_segments = RandomInt(10, 11);
         decltype(ss) latest_ss;
-        milvus::engine::snapshot::Snapshots::GetInstance().GetSnapshot(latest_ss, collection_name);
 
         for (auto i=0; i<to_build_segments; ++i) {
+            milvus::engine::snapshot::Snapshots::GetInstance().GetSnapshot(latest_ss, collection_name);
             OperationContext context;
             context.lsn = next_lsn();
             context.prev_partition = latest_ss->GetResource<Partition>(8);
             auto op = std::make_shared<NewSegmentOperation>(context, latest_ss);
             SegmentPtr new_seg;
             status = op->CommitNewSegment(new_seg);
-            std::cout << status.ToString() << std::endl;
             ASSERT_TRUE(status.ok());
             SegmentFilePtr seg_file;
             sf_context.segment_id = new_seg->GetID();
@@ -722,6 +726,7 @@ TEST_F(SnapshotTest, CompoundTest1) {
             op->Push();
             status = op->GetSnapshot(latest_ss);
             ASSERT_TRUE(status.ok());
+            latest_ss->DumpResource<milvus::engine::snapshot::Segment>("normal_worker");
 
             {
                 std::unique_lock<std::mutex> lock(all_mtx);
@@ -740,7 +745,6 @@ TEST_F(SnapshotTest, CompoundTest1) {
                 std::cout << "Exiting Merge Worker" << std::endl;
                 break;
             }
-            std::cout << "Merge Worker Receiving: " << seg_id << std::endl;
             merge_segs.insert(seg_id);
             if ((merge_segs.size() >= 2) && (RandomInt(0, 10) >= 5)) {
                 std::cout << "Merging (";
