@@ -116,8 +116,8 @@ HybridSearchRequest::OnExecute() {
         if (!status.ok()) {
             return status;
         }
-        fiu_do_on("HybridSearchRequest.OnExecute.empty_result_ids", result_ids.clear());
-        if (result_ids.empty()) {
+        fiu_do_on("HybridSearchRequest.OnExecute.empty_result_ids", result_.result_ids_.clear());
+        if (result_.result_ids_.empty()) {
             return Status::OK();  // empty table
         }
 
