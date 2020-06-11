@@ -25,7 +25,7 @@ cluster:
 #----------------------+------------------------------------------------------------+------------+-----------------+
 # General Config       | Description                                                | Type       | Default         |
 #----------------------+------------------------------------------------------------+------------+-----------------+
-# time_zone            | Use UTC-x or UTC+x to specify a time zone.                 | Timezone   | UTC+8           |
+# timezone            | Use UTC-x or UTC+x to specify a time zone.                 | Timezone   | UTC+8           |
 #----------------------+------------------------------------------------------------+------------+-----------------+
 # meta_uri             | URI for metadata storage, using SQLite (for single server  | URL        | sqlite://:@:/   |
 #                      | Milvus) or MySQL (for distributed cluster Milvus).         |            |                 |
