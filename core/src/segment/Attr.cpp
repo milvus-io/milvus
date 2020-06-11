@@ -34,23 +34,23 @@ Attr::Attr(const std::vector<uint8_t>& data, size_t nbytes, const std::vector<in
     : data_(std::move(data)), nbytes_(nbytes), uids_(std::move(uids)), name_(name) {
 }
 
-void
-Attr::AddAttr(const std::vector<uint8_t>& data, size_t nbytes) {
-    data_.reserve(data_.size() + data.size());
-    data_.insert(data_.end(), std::make_move_iterator(data.begin()), std::make_move_iterator(data.end()));
-    nbytes_ += nbytes;
-}
+// void
+// Attr::AddAttr(const std::vector<uint8_t>& data, size_t nbytes) {
+//    data_.reserve(data_.size() + data.size());
+//    data_.insert(data_.end(), std::make_move_iterator(data.begin()), std::make_move_iterator(data.end()));
+//    nbytes_ += nbytes;
+//}
+//
+// void
+// Attr::AddUids(const std::vector<int64_t>& uids) {
+//    uids_.reserve(uids_.size() + uids.size());
+//    uids_.insert(uids_.end(), std::make_move_iterator(uids.begin()), std::make_move_iterator(uids.end()));
+//}
 
-void
-Attr::AddUids(const std::vector<int64_t>& uids) {
-    uids_.reserve(uids_.size() + uids.size());
-    uids_.insert(uids_.end(), std::make_move_iterator(uids.begin()), std::make_move_iterator(uids.end()));
-}
-
-void
-Attr::SetName(const std::string& name) {
-    name_ = name;
-}
+// void
+// Attr::SetName(const std::string& name) {
+//    name_ = name;
+//}
 
 const std::vector<uint8_t>&
 Attr::GetData() const {
@@ -87,15 +87,15 @@ Attr::GetCodeLength() const {
     return uids_.size() == 0 ? 0 : nbytes_ / uids_.size();
 }
 
-void
-Attr::Erase(int32_t offset) {
-    auto code_length = GetCodeLength();
-    if (code_length != 0) {
-        auto step = offset * code_length;
-        data_.erase(data_.begin() + step, data_.begin() + step + code_length);
-        uids_.erase(uids_.begin() + offset, uids_.begin() + offset + 1);
-    }
-}
+// void
+// Attr::Erase(int32_t offset) {
+//    auto code_length = GetCodeLength();
+//    if (code_length != 0) {
+//        auto step = offset * code_length;
+//        data_.erase(data_.begin() + step, data_.begin() + step + code_length);
+//        uids_.erase(uids_.begin() + offset, uids_.begin() + offset + 1);
+//    }
+//}
 
 void
 Attr::Erase(std::vector<int32_t>& offsets) {
