@@ -26,20 +26,6 @@ class VectorIdsDto : public oatpp::data::mapping::type::Object {
     DTO_FIELD(List<String>::ObjectWrapper, ids);
 };
 
-class ResultDto : public oatpp::data::mapping::type::Object {
-    DTO_INIT(ResultDto, Object)
-
-    DTO_FIELD(String, id);
-    DTO_FIELD(String, dit, "distance");
-};
-
-class TopkResultsDto : public OObject {
-    DTO_INIT(TopkResultsDto, Object);
-
-    DTO_FIELD(Int64, num);
-    DTO_FIELD(List<List<ResultDto::ObjectWrapper>::ObjectWrapper>::ObjectWrapper, results);
-};
-
 #include OATPP_CODEGEN_END(DTO)
 
 } // namespace web

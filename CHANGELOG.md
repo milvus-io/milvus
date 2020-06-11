@@ -7,7 +7,6 @@ Please mark all change in change log and use the issue from GitHub
 ## Bug
 -   \#2367 Fix inconsistent reading and writing when using mishards
 -   \#2368 Make read node detect delete behavior
--   \#2373 Build index for small segment waste time on waiting background index thread finish
 -   \#2394 Drop collection timeout if too many partitions created on collection
 
 ## Feature
@@ -21,6 +20,7 @@ Please mark all change in change log and use the issue from GitHub
 -   \#2466 Optimize k-selection implemention of faiss gpu version
 -   \#2489 Add exception throw on mysql meta error
 -   \#2495 Add creating lock file failure reason.
+-   \#2516 Improve unit test coverage
 
 ## Task
 
