@@ -104,7 +104,7 @@ def collection(request, connect):
              'dimension': dim,
              'index_file_size': index_file_size,
              'metric_type': MetricType.L2}
-    result = connect.create_collection(param, timeout=timeout)
+    result = connect.create_collection(param)
     status = result
     if isinstance(result, tuple):
         status = result[0]
