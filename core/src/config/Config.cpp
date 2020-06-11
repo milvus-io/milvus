@@ -804,8 +804,10 @@ Config::UpdateFileConfigFromMem(const std::string& parent_key, const std::string
     while (getline(conf_fin, line)) {
         if (!parent_key_read) {
             conf_str += line + "\n";
-            if (!(line.empty() || line.find_first_of('#') == 0 || line.find(parent_key) == std::string::npos))
-                parent_key_read = true;
+            // TODO: danger
+            if (not(line.empty() || line.find_first_of('#') == 0))
+                if (line.find(parent_key) == 0)
+                    parent_key_read = true;
             continue;
         }
 
