@@ -18,6 +18,7 @@ Please mark all change in change log and use the issue from GitHub
 -   \#2466 optimize k-selection implemention of faiss gpu version
 -   \#2489 Add exception throw on mysql meta error
 -   \#2495 Add creating lock file failure reason.
+-   \#2516 Improve unit test coverage
 
 ## Task
 

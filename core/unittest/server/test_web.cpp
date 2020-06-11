@@ -15,6 +15,8 @@
 #include <thread>
 
 #include <boost/filesystem.hpp>
+#include <fiu-control.h>
+#include <fiu-local.h>
 #include <gtest/gtest.h>
 #include <oatpp/core/macro/component.hpp>
 #include <oatpp/network/client/SimpleTCPConnectionProvider.hpp>
@@ -35,7 +37,7 @@
 #include "utils/CommonUtil.h"
 #include "utils/StringHelpFunctions.h"
 
-static const char* COLLECTION_NAME = "test_web";
+static const char* COLLECTION_NAME = "test_milvus_web_collection";
 
 using OStatus = oatpp::web::protocol::http::Status;
 using OString = milvus::server::web::OString;
@@ -1435,6 +1437,17 @@ TEST_F(WebControllerTest, CONFIG) {
     auto get_result_json = nlohmann::json::parse(response->readBodyToString()->c_str());
     ASSERT_TRUE(get_result_json.contains("restart_required"));
     ASSERT_EQ(true, get_result_json["restart_required"].get<bool>());
+
+    fiu_init(0);
+    fiu_enable("WebRequestHandler.SystemOp.raise_parse_error", 1, NULL, 0);
+    response = client_ptr->op("config", body_str, conncetion_ptr);
+    ASSERT_NE(OStatus::CODE_200.code, response->getStatusCode());
+    fiu_disable("WebRequestHandler.SystemOp.raise_parse_error");
+
+    fiu_enable("WebRequestHandler.SystemOp.raise_type_error", 1, NULL, 0);
+    response = client_ptr->op("config", body_str, conncetion_ptr);
+    ASSERT_NE(OStatus::CODE_200.code, response->getStatusCode());
+    fiu_disable("WebRequestHandler.SystemOp.raise_type_error");
 }
 
 TEST_F(WebControllerTest, ADVANCED_CONFIG) {

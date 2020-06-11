@@ -1320,7 +1320,7 @@ TEST_F(DBTest2, INSERT_DUPLICATE_ID) {
 
     milvus::engine::meta::CollectionSchema collection_schema = BuildCollectionSchema();
     auto stat = db_->CreateCollection(collection_schema);
-    ASSERT_TRUE(stat.ok());
+    ASSERT_TRUE(stat.ok()) << " CreateCollection: " << stat.message();
 
     uint64_t size = 20;
     milvus::engine::VectorsData vector;
@@ -1331,10 +1331,10 @@ TEST_F(DBTest2, INSERT_DUPLICATE_ID) {
     }
 
     stat = db_->InsertVectors(COLLECTION_NAME, "", vector);
-    ASSERT_TRUE(stat.ok());
+    ASSERT_TRUE(stat.ok()) << " InsertVectors: " << stat.message();
 
     stat = db_->Flush(COLLECTION_NAME);
-    ASSERT_TRUE(stat.ok());
+    ASSERT_TRUE(stat.ok()) << " Flush: " << stat.message();
 }
 
 /*
