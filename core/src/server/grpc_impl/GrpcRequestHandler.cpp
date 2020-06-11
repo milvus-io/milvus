@@ -12,6 +12,7 @@
 #include "server/grpc_impl/GrpcRequestHandler.h"
 
 #include <fiu-local.h>
+#include <unistd.h>
 #include <algorithm>
 #include <memory>
 #include <string>
