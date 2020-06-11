@@ -19,7 +19,6 @@ namespace milvus {
 namespace engine {
 namespace snapshot {
 
-
 BuildOperation::BuildOperation(const OperationContext& context, ScopedSnapshotT prev_ss) : BaseT(context, prev_ss) {
 }
 
@@ -110,6 +109,11 @@ NewSegmentOperation::DoExecute(Store& store) {
     if (!status.ok())
         return status;
     AddStepWithLsn(*context_.new_segment_commit, context_.lsn);
+    /* std::cout << GetRepr() << " POST_SC_MAP=("; */
+    /* for (auto id : context_.new_segment_commit->GetMappings()) { */
+    /*     std::cout << id << ","; */
+    /* } */
+    /* std::cout << ")" << std::endl; */
 
     OperationContext cc_context;
 
@@ -122,6 +126,11 @@ NewSegmentOperation::DoExecute(Store& store) {
         return status;
     AddStepWithLsn(*cc_context.new_partition_commit, context_.lsn);
     context_.new_partition_commit = cc_context.new_partition_commit;
+    /* std::cout << GetRepr() << " POST_PC_MAP=("; */
+    /* for (auto id : cc_context.new_partition_commit->GetMappings()) { */
+    /*     std::cout << id << ","; */
+    /* } */
+    /* std::cout << ")" << std::endl; */
 
     CollectionCommitOperation cc_op(cc_context, context_.prev_ss);
     status = cc_op(store);
@@ -224,6 +233,11 @@ MergeOperation::DoExecute(Store& store) {
     if (!status.ok())
         return status;
     AddStepWithLsn(*context_.new_segment_commit, context_.lsn);
+    /* std::cout << GetRepr() << " POST_SC_MAP=("; */
+    /* for (auto id : context_.new_segment_commit->GetMappings()) { */
+    /*     std::cout << id << ","; */
+    /* } */
+    /* std::cout << ")" << std::endl; */
 
     PartitionCommitOperation pc_op(context_, context_.prev_ss);
     status = pc_op(store);
@@ -236,6 +250,12 @@ MergeOperation::DoExecute(Store& store) {
         return status;
     AddStepWithLsn(*cc_context.new_partition_commit, context_.lsn);
     context_.new_partition_commit = cc_context.new_partition_commit;
+
+    /* std::cout << GetRepr() << " POST_PC_MAP=("; */
+    /* for (auto id : cc_context.new_partition_commit->GetMappings()) { */
+    /*     std::cout << id << ","; */
+    /* } */
+    /* std::cout << ")" << std::endl; */
 
     CollectionCommitOperation cc_op(cc_context, context_.prev_ss);
     status = cc_op(store);

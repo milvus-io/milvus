@@ -46,7 +46,8 @@ struct LoadOperationContext {
 };
 
 struct OperationContext {
-    explicit OperationContext(const ScopedSnapshotT& ss = ScopedSnapshotT()) : prev_ss(ss) {}
+    explicit OperationContext(const ScopedSnapshotT& ss = ScopedSnapshotT()) : prev_ss(ss) {
+    }
 
     ScopedSnapshotT latest_ss;
     ScopedSnapshotT prev_ss;

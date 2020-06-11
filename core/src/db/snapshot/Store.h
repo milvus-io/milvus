@@ -24,8 +24,10 @@
 #include <iostream>
 #include <map>
 #include <memory>
+#include <shared_mutex>
 #include <sstream>
 #include <string>
+#include <thread>
 #include <tuple>
 #include <typeindex>
 #include <typeinfo>
@@ -100,29 +102,39 @@ class Store {
     template <typename ResourceT>
     Status
     GetResource(ID_TYPE id, typename ResourceT::Ptr& return_v) {
+        std::shared_lock<std::shared_timed_mutex> lock(mutex_);
         auto& resources = std::get<Index<typename ResourceT::MapT, MockResourcesT>::value>(resources_);
         auto it = resources.find(id);
         if (it == resources.end()) {
+            /* std::cout << "Can't find " << ResourceT::Name << " " << id << " in ("; */
+            /* for (auto& i : resources) { */
+            /*     std::cout << i.first << ","; */
+            /* } */
+            /* std::cout << ")"; */
             return Status(SS_NOT_FOUND_ERROR, "DB resource not found");
         }
         auto& c = it->second;
         return_v = std::make_shared<ResourceT>(*c);
-        /* std::cout << "<<< [Load] " << ResourceT::Name << " " << id << " IsActive=" << return_v->IsActive() << std::endl; */
+        /* std::cout << "<<< [Load] " << ResourceT::Name << " " << id
+         * << " IsActive=" << return_v->IsActive() << std::endl; */
         return Status::OK();
     }
 
     Status
     GetCollection(const std::string& name, CollectionPtr& return_v) {
+        std::shared_lock<std::shared_timed_mutex> lock(mutex_);
         auto it = name_ids_.find(name);
         if (it == name_ids_.end()) {
             return Status(SS_NOT_FOUND_ERROR, "DB resource not found");
         }
         auto& id = it->second;
+        lock.unlock();
         return GetResource<Collection>(id, return_v);
     }
 
     Status
     RemoveCollection(ID_TYPE id) {
+        std::unique_lock<std::shared_timed_mutex> lock(mutex_);
         auto& resources = std::get<Collection::MapT>(resources_);
         auto it = resources.find(id);
         if (it == resources.end()) {
@@ -139,6 +151,7 @@ class Store {
     template <typename ResourceT>
     Status
     RemoveResource(ID_TYPE id) {
+        std::unique_lock<std::shared_timed_mutex> lock(mutex_);
         auto& resources = std::get<Index<typename ResourceT::MapT, MockResourcesT>::value>(resources_);
         auto it = resources.find(id);
         if (it == resources.end()) {
@@ -152,6 +165,7 @@ class Store {
 
     IDS_TYPE
     AllActiveCollectionIds(bool reversed = true) const {
+        std::shared_lock<std::shared_timed_mutex> lock(mutex_);
         IDS_TYPE ids;
         auto& resources = std::get<Collection::MapT>(resources_);
         if (!reversed) {
@@ -168,6 +182,7 @@ class Store {
 
     IDS_TYPE
     AllActiveCollectionCommitIds(ID_TYPE collection_id, bool reversed = true) const {
+        std::shared_lock<std::shared_timed_mutex> lock(mutex_);
         IDS_TYPE ids;
         auto& resources = std::get<CollectionCommit::MapT>(resources_);
         if (!reversed) {
@@ -188,6 +203,7 @@ class Store {
 
     Status
     CreateCollection(Collection&& collection, CollectionPtr& return_v) {
+        std::unique_lock<std::shared_timed_mutex> lock(mutex_);
         auto& resources = std::get<Collection::MapT>(resources_);
         if (!collection.HasAssigned() && (name_ids_.find(collection.GetName()) != name_ids_.end()) &&
             (resources[name_ids_[collection.GetName()]]->IsActive()) && !collection.IsDeactive()) {
@@ -199,6 +215,7 @@ class Store {
         c->ResetCnt();
         resources[c->GetID()] = c;
         name_ids_[c->GetName()] = c->GetID();
+        lock.unlock();
         GetResource<Collection>(c->GetID(), return_v);
         return Status::OK();
     }
@@ -206,11 +223,13 @@ class Store {
     template <typename ResourceT>
     Status
     UpdateResource(ResourceT&& resource, typename ResourceT::Ptr& return_v) {
+        std::unique_lock<std::shared_timed_mutex> lock(mutex_);
         auto& resources = std::get<typename ResourceT::MapT>(resources_);
         auto res = std::make_shared<ResourceT>(resource);
         auto& id = std::get<Index<typename ResourceT::MapT, MockResourcesT>::value>(ids_);
         res->ResetCnt();
         resources[res->GetID()] = res;
+        lock.unlock();
         GetResource<ResourceT>(res->GetID(), return_v);
         return Status::OK();
     }
@@ -221,13 +240,16 @@ class Store {
         if (resource.HasAssigned()) {
             return UpdateResource<ResourceT>(std::move(resource), return_v);
         }
+        std::unique_lock<std::shared_timed_mutex> lock(mutex_);
         auto& resources = std::get<typename ResourceT::MapT>(resources_);
         auto res = std::make_shared<ResourceT>(resource);
         auto& id = std::get<Index<typename ResourceT::MapT, MockResourcesT>::value>(ids_);
         res->SetID(++id);
         res->ResetCnt();
         resources[res->GetID()] = res;
-        GetResource<ResourceT>(res->GetID(), return_v);
+        lock.unlock();
+        auto status = GetResource<ResourceT>(res->GetID(), return_v);
+        /* std::cout << ">>> [Create] " << ResourceT::Name << " " << id << std::endl; */
         return Status::OK();
     }
 
@@ -455,6 +477,7 @@ class Store {
     MockIDST ids_;
     std::map<std::string, ID_TYPE> name_ids_;
     std::unordered_map<std::type_index, std::function<ID_TYPE(std::any const&)>> any_flush_vistors_;
+    mutable std::shared_timed_mutex mutex_;
 };
 
 }  // namespace snapshot

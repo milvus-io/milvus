@@ -19,17 +19,22 @@ namespace snapshot {
 
 void
 ReferenceProxy::Ref() {
+    /* std::unique_lock<std::shared_timed_mutex> lock(mutex_); */
     refcnt_ += 1;
     /* std::cout << this << " refcnt = " << refcnt_ << std::endl; */
 }
 
 void
 ReferenceProxy::UnRef() {
-    if (refcnt_ == 0)
-        return;
+    {
+        /* std::shared_lock<std::shared_timed_mutex> lock(mutex_); */
+        if (refcnt_ == 0)
+            return;
+    }
+    /* std::unique_lock<std::shared_timed_mutex> lock(mutex_); */
     refcnt_ -= 1;
-    /* std::cout << this << " refcnt = " << refcnt_ << std::endl; */
     if (refcnt_ == 0) {
+        /* lock.unlock(); */
         for (auto& cb : on_no_ref_cbs_) {
             cb();
         }

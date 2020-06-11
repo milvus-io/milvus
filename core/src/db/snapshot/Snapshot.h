@@ -26,9 +26,9 @@
 #include <tuple>
 #include <utility>
 #include <vector>
+#include "db/snapshot/Store.h"
 #include "db/snapshot/Utils.h"
 #include "db/snapshot/WrappedTypes.h"
-#include "db/snapshot/Store.h"
 #include "utils/Status.h"
 
 namespace milvus {
@@ -190,13 +190,13 @@ class Snapshot : public ReferenceProxy {
     void
     DumpResource(const std::string& tag = "") {
         auto& resources = GetResources<ResourceT>();
-        std::cout << typeid(*this).name() << " Dump " << GetID() << " " << ResourceT::Name
-            << " Start [" << tag << "]:" << resources.size() << std::endl;
+        std::cout << typeid(*this).name() << " Dump " << GetID() << " " << ResourceT::Name << " Start [" << tag
+                  << "]:" << resources.size() << std::endl;
         for (auto& kv : resources) {
             std::cout << "\t" << kv.second->ToString() << std::endl;
         }
-        std::cout << typeid(*this).name() << " Dump " << GetID() << " " << ResourceT::Name
-            << "  End [" << tag << "]:" << resources.size() << std::endl;
+        std::cout << typeid(*this).name() << " Dump " << GetID() << " " << ResourceT::Name << "  End [" << tag
+                  << "]:" << resources.size() << std::endl;
     }
 
     template <typename T>
@@ -247,6 +247,10 @@ class Snapshot : public ReferenceProxy {
     }
 
  private:
+    Snapshot(const Snapshot&) = delete;
+    Snapshot&
+    operator=(const Snapshot&) = delete;
+
     // PXU TODO: Re-org below data structures to reduce memory usage
     ScopedResourcesT resources_;
     ID_TYPE current_schema_id_;

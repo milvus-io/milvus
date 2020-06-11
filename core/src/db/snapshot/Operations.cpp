@@ -99,7 +99,7 @@ Operations::Done(Store& store) {
     if (GetType() == OperationsType::W_Compound) {
         if (!context_.latest_ss && ids_.size() > 0 && context_.new_collection_commit) {
             Snapshots::GetInstance().LoadSnapshot(store, context_.latest_ss,
-                    context_.new_collection_commit->GetCollectionId(), ids_.back());
+                                                  context_.new_collection_commit->GetCollectionId(), ids_.back());
         }
         std::cout << ToString() << std::endl;
     }
@@ -185,7 +185,7 @@ Operations::GetSnapshot(ScopedSnapshotT& ss) const {
 Status
 Operations::ApplyToStore(Store& store) {
     if (GetType() == OperationsType::W_Compound) {
-        std::cout << ToString() << std::endl;
+        /* std::cout << ToString() << std::endl; */
     }
     if (done_) {
         Done(store);
@@ -204,7 +204,8 @@ Operations::OnSnapshotDropped() {
 
 Status
 Operations::OnSnapshotStale() {
-    std::cout << "Stale SS " << prev_ss_->GetID() << " Curr SS " << context_.prev_ss->GetID() << std::endl;
+    /* std::cout << GetRepr() << " Stale SS " << prev_ss_->GetID() << " RefCnt=" << prev_ss_->RefCnt() \ */
+    /*     << " Curr SS " << context_.prev_ss->GetID() << " RefCnt=" << context_.prev_ss->RefCnt() << std::endl; */
     return Status::OK();
 }
 
@@ -224,7 +225,7 @@ Operations::OnExecute(Store& store) {
 Status
 Operations::PreExecute(Store& store) {
     Status status;
-    if (prev_ss_) {
+    if (prev_ss_ && type_ == OperationsType::W_Compound) {
         Snapshots::GetInstance().GetSnapshot(context_.prev_ss, prev_ss_->GetCollectionId());
         if (!context_.prev_ss) {
             status = OnSnapshotDropped();

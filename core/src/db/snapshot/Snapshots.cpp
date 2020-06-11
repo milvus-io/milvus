@@ -50,8 +50,7 @@ Snapshots::DoDropCollection(ScopedSnapshotT& ss, const LSN_TYPE& lsn) {
 }
 
 Status
-Snapshots::DropPartition(const ID_TYPE& collection_id, const ID_TYPE& partition_id,
-        const LSN_TYPE& lsn) {
+Snapshots::DropPartition(const ID_TYPE& collection_id, const ID_TYPE& partition_id, const LSN_TYPE& lsn) {
     ScopedSnapshotT ss;
     auto status = GetSnapshot(ss, collection_id);
     if (!status.ok()) {
@@ -212,8 +211,7 @@ void
 Snapshots::SnapshotGCCallback(Snapshot::Ptr ss_ptr) {
     /* to_release_.push_back(ss_ptr); */
     ss_ptr->UnRef();
-    std::cout << &(*ss_ptr) << " Snapshot " << ss_ptr->GetID() << " RefCnt = " << ss_ptr->RefCnt() << " To be removed"
-              << std::endl;
+    std::cout << "Snapshot " << ss_ptr->GetID() << " RefCnt = " << ss_ptr->RefCnt() << " To be removed" << std::endl;
 }
 
 }  // namespace snapshot

@@ -391,7 +391,6 @@ TEST_F(SnapshotTest, PartitionTest) {
         ASSERT_TRUE(status.ok());
         ASSERT_EQ(curr_ss->NumberOfPartitions(), total_partition_num - i -1);
     }
-
 }
 
 TEST_F(SnapshotTest, PartitionTest2) {
@@ -627,7 +626,6 @@ struct WaitableObj {
 };
 
 
-#if 1
 TEST_F(SnapshotTest, CompoundTest1) {
     milvus::Status status;
     milvus::engine::snapshot::LSN_TYPE lsn = 0;
@@ -703,16 +701,15 @@ TEST_F(SnapshotTest, CompoundTest1) {
         status = op->GetSnapshot(latest_ss);
         ASSERT_TRUE(status.ok());
         ASSERT_TRUE(latest_ss->GetID() > ss_id);
-        latest_ss->DumpResource<milvus::engine::snapshot::Segment>("do_merge");
         merged_segs[new_seg->GetID()] = seg_ids;
     };
 
     // TODO: If any Compound Operation find larger Snapshot. This Operation should be rollback to latest
     auto normal_worker = [&] {
-        auto to_build_segments = RandomInt(10, 11);
+        auto to_build_segments = RandomInt(20, 25);
         decltype(ss) latest_ss;
 
-        for (auto i=0; i<to_build_segments; ++i) {
+        for (auto i = 0; i < to_build_segments; ++i) {
             milvus::engine::snapshot::Snapshots::GetInstance().GetSnapshot(latest_ss, collection_name);
             OperationContext context;
             context.lsn = next_lsn();
@@ -727,7 +724,6 @@ TEST_F(SnapshotTest, CompoundTest1) {
             op->Push();
             status = op->GetSnapshot(latest_ss);
             ASSERT_TRUE(status.ok());
-            latest_ss->DumpResource<milvus::engine::snapshot::Segment>("normal_worker");
 
             {
                 std::unique_lock<std::mutex> lock(all_mtx);
@@ -768,10 +764,6 @@ TEST_F(SnapshotTest, CompoundTest1) {
     t1.join();
     t2.join();
 
-    for (auto sid : all_segments) {
-        std::cout << "no seg " << sid << std::endl;
-    }
-
     for (auto& kv : merged_segs) {
         std::cout << "merged: (";
         for (auto i : kv.second) {
@@ -782,4 +774,3 @@ TEST_F(SnapshotTest, CompoundTest1) {
 
     w_l.Wait();
 }
-#endif

@@ -17,31 +17,16 @@ namespace milvus {
 namespace engine {
 namespace snapshot {
 
-template <typename... Fields>
-class DBBaseResource : public ReferenceProxy, public Fields... {
+class DBBaseResource : public ReferenceProxy {
  public:
-    DBBaseResource(const Fields&... fields);
-
     virtual std::string
-    ToString() const;
+    ToString() const {
+        return "";
+    }
 
     virtual ~DBBaseResource() {
     }
 };
-
-template <typename... Fields>
-DBBaseResource<Fields...>::DBBaseResource(const Fields&... fields) : Fields(fields)... {
-    /* InstallField("id"); */
-    /* InstallField("status"); */
-    /* InstallField("created_on"); */
-    /* std::vector<std::string> attrs = {Fields::ATTR...}; */
-}
-
-template <typename... Fields>
-std::string
-DBBaseResource<Fields...>::ToString() const {
-    return "";
-}
 
 }  // namespace snapshot
 }  // namespace engine
