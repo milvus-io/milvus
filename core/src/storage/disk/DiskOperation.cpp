@@ -17,6 +17,8 @@
 
 #include <boost/filesystem.hpp>
 
+#include <fiu-local.h>
+
 #include "storage/disk/DiskOperation.h"
 #include "utils/Exception.h"
 #include "utils/Log.h"
@@ -29,8 +31,11 @@ DiskOperation::DiskOperation(const std::string& dir_path) : dir_path_(dir_path) 
 
 void
 DiskOperation::CreateDirectory() {
-    if (!boost::filesystem::is_directory(dir_path_)) {
+    bool is_dir = boost::filesystem::is_directory(dir_path_);
+    fiu_do_on("DiskOperation.CreateDirectory.is_directory", is_dir = false);
+    if (!is_dir) {
         auto ret = boost::filesystem::create_directory(dir_path_);
+        fiu_do_on("DiskOperation.CreateDirectory.create_directory", ret = false);
         if (!ret) {
             std::string err_msg = "Failed to create directory: " + dir_path_;
             LOG_ENGINE_ERROR_ << err_msg;

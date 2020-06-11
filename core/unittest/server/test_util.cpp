@@ -246,14 +246,53 @@ TEST(UtilTest, BLOCKINGQUEUE_TEST) {
 }
 
 TEST(UtilTest, LOG_TEST) {
+    fiu_init(0);
+
+    fiu_enable("LogUtil.InitLog.set_max_log_size_small_than_min", 1, NULL, 0);
     auto status = milvus::server::InitLog(true, true, true, true, true, true, "/tmp/test_util", 1024, 10);
-    ASSERT_TRUE(status.ok());
+    ASSERT_FALSE(status.ok());
+    fiu_disable("LogUtil.InitLog.set_max_log_size_small_than_min");
+
+    fiu_enable("LogUtil.InitLog.delete_exceeds_small_than_min", 1, NULL, 0);
+    status = milvus::server::InitLog(true, true, true, true, true, true, "/tmp/test_util", 1024, 10);
+    ASSERT_FALSE(status.ok());
+    fiu_disable("LogUtil.InitLog.delete_exceeds_small_than_min");
+
+    fiu_enable("LogUtil.InitLog.info_enable_to_false", 1, NULL, 0);
+    fiu_enable("LogUtil.InitLog.debug_enable_to_false", 1, NULL, 0);
+    fiu_enable("LogUtil.InitLog.warning_enable_to_false", 1, NULL, 0);
+    fiu_enable("LogUtil.InitLog.trace_enable_to_false", 1, NULL, 0);
+    fiu_enable("LogUtil.InitLog.error_enable_to_false", 1, NULL, 0);
+    fiu_enable("LogUtil.InitLog.fatal_enable_to_false", 1, NULL, 0);
+    status = milvus::server::InitLog(true, true, true, true, true, true, "/tmp/test_util", 1024, 10);
+    ASSERT_TRUE(status.ok()) << status.message();
+    fiu_disable("LogUtil.InitLog.fatal_enable_to_false");
+    fiu_disable("LogUtil.InitLog.error_enable_to_false");
+    fiu_disable("LogUtil.InitLog.trace_enable_to_false");
+    fiu_disable("LogUtil.InitLog.warning_enable_to_false");
+    fiu_disable("LogUtil.InitLog.debug_enable_to_false");
+    fiu_disable("LogUtil.InitLog.info_enable_to_false");
+
+    status = milvus::server::InitLog(true, true, true, true, true, true, "/tmp/test_util", 1024, 10);
+    ASSERT_TRUE(status.ok()) << status.message();
 
     EXPECT_FALSE(el::Loggers::hasFlag(el::LoggingFlag::NewLineForContainer));
     EXPECT_FALSE(el::Loggers::hasFlag(el::LoggingFlag::LogDetailedCrashReason));
 
     std::string fname = milvus::server::CommonUtil::GetFileName(LOG_FILE_PATH);
     ASSERT_EQ(fname, "log_config.conf");
+
+    ASSERT_NO_THROW(milvus::server::LogConfigInMem());
+    ASSERT_NO_THROW(milvus::server::LogCpuInfo());
+
+    // test log config file
+    ASSERT_ANY_THROW(milvus::server::LogConfigInFile("log_config.conf"));
+    const char * config_str = "server_config:\n  address: 0.0.0.0\n  port: 19530";
+    std::fstream fs("/tmp/config.yaml", std::ios_base::out);
+    fs << config_str;
+    fs.close();
+    ASSERT_NO_THROW(milvus::server::LogConfigInFile("/tmp/config.yaml"));
+    boost::filesystem::remove("/tmp/config.yaml");
 }
 
 TEST(UtilTest, TIMERECORDER_TEST) {

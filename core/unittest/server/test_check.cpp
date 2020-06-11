@@ -17,6 +17,7 @@
 
 #include "config/Config.h"
 #include "server/init/CpuChecker.h"
+#include "server/init/InstanceLockCheck.h"
 #ifdef MILVUS_GPU_VERSION
 #include "server/init/GpuChecker.h"
 #endif
@@ -193,6 +194,22 @@ TEST_F(ServerCheckerTest, GPU_FAIL_TEST) {
     fiu_enable("GpuChecker.CheckGpuEnvironment.nvml_shutdown_fail", 1, NULL, 0);
     ASSERT_FALSE(ms::GpuChecker::CheckGpuEnvironment().ok());
     fiu_disable("GpuChecker.CheckGpuEnvironment.nvml_shutdown_fail");
+}
+
+TEST_F(ServerCheckerTest, LOCK_TEST) {
+    fiu_init(0);
+    fiu_enable("InstanceLockCheck.Check.fd", 1, NULL, 0);
+    auto status = milvus::server::InstanceLockCheck::Check(db_primary_path);
+    ASSERT_FALSE(status.ok());
+    fiu_disable("InstanceLockCheck.Check.fd");
+
+    fiu_enable("InstanceLockCheck.Check.fcntl", 1, NULL, 0);
+    status = milvus::server::InstanceLockCheck::Check(db_primary_path);
+    ASSERT_FALSE(status.ok());
+    fiu_disable("InstanceLockCheck.Check.fcntl");
+
+    status = milvus::server::InstanceLockCheck::Check(db_primary_path);
+    ASSERT_TRUE(status.ok()) << status.message();
 }
 
 #endif

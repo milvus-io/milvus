@@ -54,7 +54,7 @@ HybridSearchRequest::Create(const std::shared_ptr<milvus::server::Context>& cont
 Status
 HybridSearchRequest::OnExecute() {
     try {
-        fiu_do_on("SearchRequest.OnExecute.throw_std_exception", throw std::exception());
+        fiu_do_on("HybridSearchRequest.OnExecute.throw_std_exception", throw std::exception());
         std::string hdr = "SearchRequest(table=" + collection_name_;
 
         TimeRecorder rc(hdr);
@@ -71,7 +71,8 @@ HybridSearchRequest::OnExecute() {
         engine::meta::hybrid::FieldsSchema fields_schema;
         collection_schema.collection_id_ = collection_name_;
         status = DBWrapper::DB()->DescribeHybridCollection(collection_schema, fields_schema);
-        fiu_do_on("SearchRequest.OnExecute.describe_table_fail", status = Status(milvus::SERVER_UNEXPECTED_ERROR, ""));
+        fiu_do_on("HybridSearchRequest.OnExecute.describe_table_fail",
+                  status = Status(milvus::SERVER_UNEXPECTED_ERROR, ""));
         if (!status.ok()) {
             if (status.code() == DB_NOT_FOUND) {
                 return Status(SERVER_COLLECTION_NOT_EXIST, CollectionNotExistMsg(collection_name_));
@@ -102,11 +103,11 @@ HybridSearchRequest::OnExecute() {
         ProfilerStop();
 #endif
 
-        fiu_do_on("SearchRequest.OnExecute.query_fail", status = Status(milvus::SERVER_UNEXPECTED_ERROR, ""));
+        fiu_do_on("HybridSearchRequest.OnExecute.query_fail", status = Status(milvus::SERVER_UNEXPECTED_ERROR, ""));
         if (!status.ok()) {
             return status;
         }
-        fiu_do_on("SearchRequest.OnExecute.empty_result_ids", result_ids.clear());
+        fiu_do_on("HybridSearchRequest.OnExecute.empty_result_ids", result_ids.clear());
         if (result_ids.empty()) {
             return Status::OK();  // empty table
         }

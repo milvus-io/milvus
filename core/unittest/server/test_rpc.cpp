@@ -434,7 +434,7 @@ TEST_F(RpcHandlerTest, COMBINE_SEARCH_TEST) {
     handler->RegisterRequestHandler(milvus::server::RequestHandler());
 
     // create collection
-    std::string collection_name = "combine";
+    std::string collection_name = "search_combines";
     ::milvus::grpc::CollectionSchema collection_schema;
     collection_schema.set_collection_name(collection_name);
     collection_schema.set_dimension(COLLECTION_DIM);
@@ -442,7 +442,7 @@ TEST_F(RpcHandlerTest, COMBINE_SEARCH_TEST) {
     collection_schema.set_metric_type(1);  // L2 metric
     ::milvus::grpc::Status status;
     handler->CreateCollection(&context, &collection_schema, &status);
-    ASSERT_EQ(status.error_code(), 0);
+    ASSERT_EQ(status.error_code(), 0) << status.reason();
 
     // insert vectors
     std::vector<std::vector<float>> record_array;
@@ -844,6 +844,128 @@ TEST_F(RpcHandlerTest, TABLES_TEST) {
     }
 }
 
+TEST_F(RpcHandlerTest, GET_VECTOR_BY_ID_TEST) {
+    ::grpc::ServerContext context;
+    handler->SetContext(&context, dummy_context);
+    handler->RegisterRequestHandler(milvus::server::RequestHandler());
+
+    ::milvus::grpc::Status response;
+
+    ::milvus::grpc::InsertParam request;
+    request.set_collection_name(COLLECTION_NAME);
+    std::vector<std::vector<float>> record_array;
+    BuildVectors(0, VECTOR_COUNT, record_array);
+    ::milvus::grpc::VectorIds vector_ids;
+    for (auto& record : record_array) {
+        ::milvus::grpc::RowRecord* grpc_record = request.add_row_record_array();
+        CopyRowRecord(grpc_record, record);
+    }
+    handler->Insert(&context, &request, &vector_ids);
+    ASSERT_EQ(vector_ids.vector_id_array_size(), VECTOR_COUNT);
+
+    ::milvus::grpc::FlushParam flush_param;
+    flush_param.add_collection_name_array(COLLECTION_NAME);
+    handler->Flush(&context, &flush_param, &response);
+
+    ::milvus::grpc::VectorsIdentity vectors_identity;
+    vectors_identity.set_collection_name(COLLECTION_NAME);
+    for (size_t i = 0; i < 10; i++) {
+        vectors_identity.mutable_id_array()->Add(vector_ids.vector_id_array(i));
+    }
+
+    ::milvus::grpc::VectorsData vectors_data;
+    handler->GetVectorsByID(&context, &vectors_identity, &vectors_data);
+    ASSERT_EQ(10, vectors_data.vectors_data_size());
+}
+
+TEST_F(RpcHandlerTest, GET_BIN_VECTORS_BY_IDS_TEST) {
+    ::grpc::ServerContext context;
+    handler->SetContext(&context, dummy_context);
+    handler->RegisterRequestHandler(milvus::server::RequestHandler());
+
+    ::milvus::grpc::CollectionSchema collection_schema;
+    ::milvus::grpc::Status response;
+    std::string str_collection_name = "tbl_get_bin_vector_by_ids";
+    collection_schema.set_collection_name(str_collection_name);
+    collection_schema.set_dimension(COLLECTION_DIM);
+    collection_schema.set_index_file_size(INDEX_FILE_SIZE);
+    collection_schema.set_metric_type(3);
+    handler->CreateCollection(&context, &collection_schema, &response);
+
+    ::milvus::grpc::InsertParam request;
+    request.set_collection_name(str_collection_name);
+    std::vector<std::vector<uint8_t>> bin_record_array;
+    BuildBinVectors(0, VECTOR_COUNT, bin_record_array);
+    ::milvus::grpc::VectorIds vector_ids;
+    for (auto& record : bin_record_array) {
+        ::milvus::grpc::RowRecord* grpc_record = request.add_row_record_array();
+        CopyBinRowRecord(grpc_record, record);
+    }
+    handler->Insert(&context, &request, &vector_ids);
+    ASSERT_EQ(vector_ids.vector_id_array_size(), VECTOR_COUNT);
+
+    ::milvus::grpc::FlushParam flush_param;
+    flush_param.add_collection_name_array(str_collection_name);
+    handler->Flush(&context, &flush_param, &response);
+
+    ::milvus::grpc::VectorsIdentity vectors_identity;
+    vectors_identity.set_collection_name(str_collection_name);
+    for (size_t i = 0; i < 10; i++) {
+        vectors_identity.mutable_id_array()->Add(vector_ids.vector_id_array(i));
+    }
+
+    ::milvus::grpc::VectorsData vectors_data;
+    handler->GetVectorsByID(&context, &vectors_identity, &vectors_data);
+    ASSERT_EQ(10, vectors_data.vectors_data_size());
+}
+
+TEST_F(RpcHandlerTest, GET_VECTOR_IDS_TEST) {
+    ::grpc::ServerContext context;
+    handler->SetContext(&context, dummy_context);
+    handler->RegisterRequestHandler(milvus::server::RequestHandler());
+
+    ::milvus::grpc::CollectionSchema collection_schema;
+    ::milvus::grpc::Status response;
+    std::string str_collection_name = "tbl_get_vector_ids";
+    collection_schema.set_collection_name(str_collection_name);
+    collection_schema.set_dimension(COLLECTION_DIM);
+    collection_schema.set_index_file_size(INDEX_FILE_SIZE);
+    collection_schema.set_metric_type(1);
+    handler->CreateCollection(&context, &collection_schema, &response);
+
+    ::milvus::grpc::InsertParam request;
+    request.set_collection_name(str_collection_name);
+    std::vector<std::vector<float>> record_array;
+    BuildVectors(0, VECTOR_COUNT, record_array);
+    ::milvus::grpc::VectorIds vector_ids;
+    for (auto& record : record_array) {
+        ::milvus::grpc::RowRecord* grpc_record = request.add_row_record_array();
+        CopyRowRecord(grpc_record, record);
+    }
+    handler->Insert(&context, &request, &vector_ids);
+    ASSERT_EQ(vector_ids.vector_id_array_size(), VECTOR_COUNT);
+
+    ::milvus::grpc::FlushParam flush_param;
+    flush_param.add_collection_name_array(str_collection_name);
+    handler->Flush(&context, &flush_param, &response);
+
+    ::milvus::grpc::CollectionName collection_name;
+    collection_name.set_collection_name(str_collection_name);
+    ::milvus::grpc::CollectionInfo collection_info;
+    handler->ShowCollectionInfo(&context, &collection_name, &collection_info);
+
+    std::string json_info = collection_info.json_info();
+    auto info_json = nlohmann::json::parse(json_info);
+    std::string segment0 = info_json["partitions"][0]["segments"][0]["name"];
+
+    ::milvus::grpc::GetVectorIDsParam vector_ids_param;
+    vector_ids_param.set_collection_name(str_collection_name);
+    vector_ids_param.set_segment_name(segment0);
+    ::milvus::grpc::VectorIds vectors_ids;
+    handler->GetVectorIDs(&context, &vector_ids_param, &vectors_ids);
+    ASSERT_EQ(0, vectors_ids.status().error_code());
+}
+
 TEST_F(RpcHandlerTest, PARTITION_TEST) {
     ::grpc::ServerContext context;
     handler->SetContext(&context, dummy_context);
@@ -911,6 +1033,15 @@ TEST_F(RpcHandlerTest, PARTITION_TEST) {
     ASSERT_NE(response.error_code(), ::grpc::Status::OK.error_code());
     fiu_disable("CreatePartitionRequest.OnExecute.throw_std_exception");
 
+    // test has partition
+    ::milvus::grpc::PartitionParam has_partition_param;
+    has_partition_param.set_collection_name(str_collection_name);
+    has_partition_param.set_tag(partition_tag);
+    ::milvus::grpc::BoolReply reply;
+    handler->HasPartition(&context, &has_partition_param, &reply);
+    ASSERT_EQ(0, reply.status().error_code());
+    ASSERT_EQ(true, reply.bool_reply());
+
     ::milvus::grpc::PartitionParam partition_parm;
     partition_parm.set_collection_name(str_collection_name);
     partition_parm.set_tag(partition_tag);
@@ -922,6 +1053,114 @@ TEST_F(RpcHandlerTest, PARTITION_TEST) {
 
     handler->DropPartition(&context, &partition_parm, &response);
     ASSERT_EQ(response.error_code(), ::grpc::Status::OK.error_code());
+}
+
+TEST_F(RpcHandlerTest, RELOAD_SEGMENTS_TEST) {
+    ::grpc::ServerContext context;
+    handler->SetContext(&context, dummy_context);
+    handler->RegisterRequestHandler(milvus::server::RequestHandler());
+
+    ::milvus::grpc::CollectionSchema collection_schema;
+    ::milvus::grpc::Status response;
+    std::string str_collection_name = "tbl_reload_segments";
+    collection_schema.set_collection_name(str_collection_name);
+    collection_schema.set_dimension(COLLECTION_DIM);
+    collection_schema.set_index_file_size(INDEX_FILE_SIZE);
+    collection_schema.set_metric_type(1);
+    handler->CreateCollection(&context, &collection_schema, &response);
+
+    ::milvus::grpc::InsertParam request;
+    request.set_collection_name(str_collection_name);
+    std::vector<std::vector<float>> record_array;
+    BuildVectors(0, VECTOR_COUNT, record_array);
+    ::milvus::grpc::VectorIds vector_ids;
+    for (auto& record : record_array) {
+        ::milvus::grpc::RowRecord* grpc_record = request.add_row_record_array();
+        CopyRowRecord(grpc_record, record);
+    }
+    handler->Insert(&context, &request, &vector_ids);
+    ASSERT_EQ(vector_ids.vector_id_array_size(), VECTOR_COUNT);
+
+    ::milvus::grpc::FlushParam flush_param;
+    flush_param.add_collection_name_array(str_collection_name);
+    handler->Flush(&context, &flush_param, &response);
+
+    ::milvus::grpc::DeleteByIDParam delete_param;
+    delete_param.set_collection_name(str_collection_name);
+
+    for (size_t i = 0; i < 10; i++) {
+        delete_param.mutable_id_array()->Add(vector_ids.vector_id_array(i));
+    }
+
+    handler->DeleteByID(&context, &delete_param, &response);
+    ASSERT_EQ(0, response.error_code()) << response.reason();
+
+//    ::milvus::grpc::FlushParam flush_param;
+    flush_param.clear_collection_name_array();
+    flush_param.add_collection_name_array(str_collection_name);
+    handler->Flush(&context, &flush_param, &response);
+
+    fiu_enable("ReLoadSegmentsRequest.OnExecute.readonly", 1, NULL, 0);
+    ::milvus::grpc::ReLoadSegmentsParam reload_request;
+    reload_request.set_collection_name(str_collection_name);
+    ::milvus::grpc::Status reload_response;
+
+    bool found = false;
+    for (size_t i = 0; i < 5000; i++) {
+        reload_request.clear_segment_id_array();
+        reload_request.add_segment_id_array(std::to_string(i));
+        handler->ReloadSegments(&context, &reload_request, &reload_response);
+        if (reload_response.error_code() == 0) {
+            found = true;
+            break;
+        }
+    }
+
+    fiu_disable("ReLoadSegmentsRequest.OnExecute.readonly");
+
+    ASSERT_TRUE(found) << reload_response.reason();
+}
+
+TEST_F(RpcHandlerTest, COMPACT) {
+    ::grpc::ServerContext context;
+    handler->SetContext(&context, dummy_context);
+    handler->RegisterRequestHandler(milvus::server::RequestHandler());
+
+    ::milvus::grpc::CollectionSchema collection_schema;
+    ::milvus::grpc::Status response;
+    std::string str_collection_name = "tbl_rpc_compact";
+    collection_schema.set_collection_name(str_collection_name);
+    collection_schema.set_dimension(COLLECTION_DIM);
+    collection_schema.set_index_file_size(INDEX_FILE_SIZE);
+    collection_schema.set_metric_type(1);
+    handler->CreateCollection(&context, &collection_schema, &response);
+
+    ::milvus::grpc::InsertParam request;
+    request.set_collection_name(str_collection_name);
+    std::vector<std::vector<float>> bin_record_array;
+    BuildVectors(0, VECTOR_COUNT, bin_record_array);
+    ::milvus::grpc::VectorIds vector_ids;
+    for (auto& record : bin_record_array) {
+        ::milvus::grpc::RowRecord* grpc_record = request.add_row_record_array();
+        CopyRowRecord(grpc_record, record);
+    }
+    handler->Insert(&context, &request, &vector_ids);
+    ASSERT_EQ(vector_ids.vector_id_array_size(), VECTOR_COUNT);
+
+    ::milvus::grpc::DeleteByIDParam delete_param;
+    delete_param.set_collection_name(str_collection_name);
+
+    for (size_t i = 0; i < 10; i++) {
+        delete_param.mutable_id_array()->Add(vector_ids.vector_id_array(i));
+    }
+
+    handler->DeleteByID(&context, &delete_param, &response);
+    ASSERT_EQ(0, response.error_code()) << response.reason();
+
+    ::milvus::grpc::CollectionName collection_name;
+    collection_name.set_collection_name(str_collection_name);
+    handler->Compact(&context, &collection_name, &response);
+    ASSERT_EQ(0, response.error_code());
 }
 
 TEST_F(RpcHandlerTest, CMD_TEST) {
