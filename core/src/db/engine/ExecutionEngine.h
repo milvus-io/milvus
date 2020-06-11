@@ -23,6 +23,12 @@
 #include "utils/Status.h"
 
 namespace milvus {
+
+namespace scheduler {
+class SearchJob;
+using SearchJobPtr = std::shared_ptr<SearchJob>;
+}  // namespace scheduler
+
 namespace engine {
 
 // TODO(linxj): replace with VecIndex::IndexType
@@ -115,6 +121,7 @@ class ExecutionEngine {
     virtual Status
     GetVectorByID(const int64_t id, uint8_t* vector, bool hybrid) = 0;
 
+#if 0
     virtual Status
     ExecBinaryQuery(query::GeneralQueryPtr general_query, faiss::ConcurrentBitsetPtr& bitset,
                     std::unordered_map<std::string, DataType>& attr_type, std::string& vector_placeholder) = 0;
@@ -122,14 +129,10 @@ class ExecutionEngine {
     virtual Status
     HybridSearch(query::GeneralQueryPtr general_query, std::unordered_map<std::string, DataType>& attr_type,
                  query::QueryPtr query_ptr, std::vector<float>& distances, std::vector<int64_t>& search_ids) = 0;
+#endif
 
     virtual Status
-    Search(int64_t n, const float* data, int64_t k, const milvus::json& extra_params, float* distances, int64_t* labels,
-           bool hybrid) = 0;
-
-    virtual Status
-    Search(int64_t n, const uint8_t* data, int64_t k, const milvus::json& extra_params, float* distances,
-           int64_t* labels, bool hybrid) = 0;
+    Search(std::vector<int64_t>& ids, std::vector<float>& distances, scheduler::SearchJobPtr job, bool hybrid) = 0;
 
     virtual std::shared_ptr<ExecutionEngine>
     BuildIndex(const std::string& location, EngineType engine_type) = 0;

@@ -217,17 +217,13 @@ XSearchTask::Load(LoadType type, uint8_t device_id) {
 void
 XSearchTask::Execute() {
     milvus::server::ContextFollower tracer(context_, "XSearchTask::Execute " + std::to_string(index_id_));
-
-    //    LOG_ENGINE_DEBUG_ << "Searching in file id:" << index_id_ << " with "
-    //                     << search_contexts_.size() << " tasks";
-
-    //    TimeRecorder rc("DoSearch file id:" + std::to_string(index_id_));
     TimeRecorder rc(LogOut("[%s][%ld] DoSearch file id:%ld", "search", 0, index_id_));
 
     server::CollectDurationMetrics metrics(index_type_);
 
     std::vector<int64_t> output_ids;
     std::vector<float> output_distance;
+    double span;
 
     if (auto job = job_.lock()) {
         auto search_job = std::static_pointer_cast<scheduler::SearchJob>(job);
@@ -242,14 +238,6 @@ XSearchTask::Execute() {
 
         uint64_t nq = search_job->nq();
         uint64_t topk = search_job->topk();
-
-        const milvus::json& extra_params = search_job->extra_params();
-        const engine::VectorsData& vectors = search_job->vectors();
-
-        output_ids.resize(topk * nq);
-        output_distance.resize(topk * nq);
-        std::string hdr =
-            "job " + std::to_string(search_job->id()) + " nq " + std::to_string(nq) + " topk " + std::to_string(topk);
 
         fiu_do_on("XSearchTask.Execute.throw_std_exception", throw std::exception());
 
@@ -271,21 +259,13 @@ XSearchTask::Execute() {
 
                 auto query_ptr = search_job->query_ptr();
 
-                s = index_engine_->HybridSearch(general_query, types, query_ptr, output_distance, output_ids);
+                // s = index_engine_->HybridSearch(general_query, types, query_ptr, output_distance, output_ids);
                 auto vector_query = query_ptr->vectors.begin()->second;
                 topk = vector_query->topk;
                 nq = vector_query->query_vector.float_data.size() / file_->dimension_;
                 search_job->vector_count() = nq;
             } else {
-                if (!vectors.float_data_.empty()) {
-                    s = index_engine_->Search(nq, vectors.float_data_.data(), topk, extra_params,
-                                              output_distance.data(),
-                                              output_ids.data(), hybrid);
-                } else if (!vectors.binary_data_.empty()) {
-                    s = index_engine_->Search(nq, vectors.binary_data_.data(), topk, extra_params,
-                                              output_distance.data(),
-                                              output_ids.data(), hybrid);
-                }
+                s = index_engine_->Search(output_ids, output_distance, search_job, hybrid);
             }
 
             fiu_do_on("XSearchTask.Execute.search_fail", s = Status(SERVER_UNEXPECTED_ERROR, ""));
@@ -295,8 +275,7 @@ XSearchTask::Execute() {
                 return;
             }
 
-            // double span = rc.RecordSection(hdr + ", do search");
-            // search_job->AccumSearchCost(span);
+            span = rc.RecordSection("search done");
 
             /* step 3: pick up topk result */
             auto spec_k = file_->row_count_ < topk ? file_->row_count_ : topk;
@@ -320,12 +299,11 @@ XSearchTask::Execute() {
                                                   search_job->GetResultIds(), search_job->GetResultDistances());
             }
 
-            // span = rc.RecordSection(hdr + ", reduce topk");
-            // search_job->AccumReduceCost(span);
-
+            span = rc.RecordSection("reduce topk done");
+            search_job->time_stat().reduce_time += span / 1000;
         } catch (std::exception& ex) {
             LOG_ENGINE_ERROR_ << LogOut("[%s][%ld] SearchTask encounter exception: %s", "search", 0, ex.what());
-            //            search_job->IndexSearchDone(index_id_);//mark as done avoid dead lock, even search failed
+            // search_job->IndexSearchDone(index_id_);  //mark as done avoid dead lock, even search failed
         }
 
         /* step 4: notify to send result to client */
