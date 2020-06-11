@@ -268,7 +268,6 @@ TEST(UtilTest, LOG_TEST) {
     fiu_enable("LogUtil.InitLog.fatal_enable_to_false", 1, NULL, 0);
     status = milvus::server::InitLog(true, true, true, true, true, true,
             "/tmp/test_util", 1024 * 1024 * 1024, 10); // 1024 MB
-    ASSERT_FALSE(status.ok());
     ASSERT_TRUE(status.ok()) << status.message();
     fiu_disable("LogUtil.InitLog.fatal_enable_to_false");
     fiu_disable("LogUtil.InitLog.error_enable_to_false");
