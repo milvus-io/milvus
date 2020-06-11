@@ -1764,7 +1764,7 @@ DBImpl::SerializeStructuredIndex(const milvus::engine::meta::SegmentsSchema& to_
 
 Status
 DBImpl::CreateStructuredIndex(const std::shared_ptr<server::Context>& context, const std::string& collection_id,
-                              const std::vector<std::string>& field_names) {
+                              std::vector<std::string>& field_names) {
     if (!initialized_.load(std::memory_order_acquire)) {
         return SHUTDOWN_ERROR;
     }
@@ -1774,10 +1774,18 @@ DBImpl::CreateStructuredIndex(const std::shared_ptr<server::Context>& context, c
         std::unordered_map<std::string, engine::meta::hybrid::DataType> attr_type;
         engine::meta::CollectionSchema collection_schema;
         engine::meta::hybrid::FieldsSchema fields_schema;
+        collection_schema.collection_id_ = collection_id;
         status = meta_ptr_->DescribeHybridCollection(collection_schema, fields_schema);
         if (!status.ok()) {
             return status;
         }
+
+        if (field_names.empty()) {
+            for (auto& schema : fields_schema.fields_schema_) {
+                field_names.emplace_back(schema.collection_id_);
+            }
+        }
+
         for (auto& schema : fields_schema.fields_schema_) {
             attr_type.insert(std::make_pair(schema.field_name_, (engine::meta::hybrid::DataType)schema.field_type_));
         }

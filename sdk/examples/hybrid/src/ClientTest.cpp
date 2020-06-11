@@ -185,8 +185,9 @@ void
 ClientTest::CreateHybridIndex(const std::string& collection_name) {
     milvus::HIndexParam index_param;
     index_param.collection_name = collection_name;
-    JSON json_params = {{"nlist", NLIST}, {"index_type", }};
-
+    JSON json_params = {{"nlist", NLIST}, {"index_type", "IVFFLAT"}};
+    index_param.extra_params = json_params.dump();
+    auto status = conn_->CreateHybridIndex(index_param);
 }
 
 void

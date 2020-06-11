@@ -141,7 +141,7 @@ class DBImpl : public DB, public server::CacheConfigHandler, public server::Engi
 
     Status
     CreateStructuredIndex(const std::shared_ptr<server::Context>& context, const std::string& collection_id,
-                          const std::vector<std::string>& field_names) override;
+                          std::vector<std::string>& field_names) override;
 
     Status
     DescribeIndex(const std::string& collection_id, CollectionIndex& index) override;

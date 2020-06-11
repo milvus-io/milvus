@@ -60,13 +60,6 @@ CreateHybridIndexRequest::OnExecute() {
         collection_schema.collection_id_ = collection_name_;
         status = DBWrapper::DB()->DescribeHybridCollection(collection_schema, fields_schema);
 
-        if (field_names_.empty()) {
-            for (const auto& schema : fields_schema.fields_schema_) {
-                if (schema.field_type_ != (int32_t)engine::meta::hybrid::DataType::VECTOR) {
-                    field_names_.emplace_back(schema.field_name_);
-                }
-            }
-        }
         std::unordered_map<std::string, engine::meta::hybrid::DataType> attr_types;
         for (const auto& schema : fields_schema.fields_schema_) {
             attr_types.insert(std::make_pair(schema.field_name_, (engine::meta::hybrid::DataType)schema.field_type_));
@@ -132,16 +125,17 @@ CreateHybridIndexRequest::OnExecute() {
         rc.RecordSection("check validation");
 
         // step 3: create index
+        status = DBWrapper::DB()->CreateStructuredIndex(context_, collection_name_, field_names_);
+        fiu_do_on("CreateIndexRequest.OnExecute.create_index_fail",
+                  status = Status(milvus::SERVER_UNEXPECTED_ERROR, ""));
+        if (!status.ok()) {
+            return status;
+        }
+
         engine::CollectionIndex index;
         index.engine_type_ = adapter_index_type;
         index.extra_params_ = extra_params_;
         status = DBWrapper::DB()->CreateIndex(context_, collection_name_, index);
-        if (!status.ok()) {
-            return status;
-        }
-        status = DBWrapper::DB()->CreateStructuredIndex(context_, collection_name_, field_names_);
-        fiu_do_on("CreateIndexRequest.OnExecute.create_index_fail",
-                  status = Status(milvus::SERVER_UNEXPECTED_ERROR, ""));
         if (!status.ok()) {
             return status;
         }

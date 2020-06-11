@@ -57,6 +57,9 @@ class ExecutionEngineImpl : public ExecutionEngine {
     Load(bool to_cache) override;
 
     Status
+    LoadAttr(bool to_cache) override;
+
+    Status
     CopyToGpu(uint64_t device_id, bool hybrid = false) override;
 
     Status
@@ -136,9 +139,6 @@ class ExecutionEngineImpl : public ExecutionEngine {
 
     void
     HybridLoad() const;
-
-    Status
-    LoadAttr(bool to_cache);
 
     void
     HybridUnset() const;

@@ -175,7 +175,7 @@ class DB {
 
     virtual Status
     CreateStructuredIndex(const std::shared_ptr<server::Context>& context, const std::string& collection_id,
-                          const std::vector<std::string>& field_names) = 0;
+                          std::vector<std::string>& field_names) = 0;
 };  // DB
 
 using DBPtr = std::shared_ptr<DB>;

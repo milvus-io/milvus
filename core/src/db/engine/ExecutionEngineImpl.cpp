@@ -503,10 +503,10 @@ ExecutionEngineImpl::Load(bool to_cache) {
         Cache();
     }
 
-    auto status = LoadAttr(to_cache);
-    if (!status.ok()) {
-        return status;
-    }
+    //    auto status = LoadAttr(to_cache);
+    //    if (!status.ok()) {
+    //        return status;
+    //    }
 
     return Status::OK();
 }  // namespace engine

@@ -157,6 +157,7 @@ XSearchTask::Load(LoadType type, uint8_t device_id) {
         fiu_do_on("XSearchTask.Load.throw_std_exception", throw std::exception());
         if (type == LoadType::DISK2CPU) {
             stat = index_engine_->Load();
+//            stat = index_engine_->LoadAttr();
             type_str = "DISK2CPU";
         } else if (type == LoadType::CPU2GPU) {
             bool hybrid = false;

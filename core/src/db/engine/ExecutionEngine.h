@@ -108,6 +108,9 @@ class ExecutionEngine {
     Load(bool to_cache = true) = 0;
 
     virtual Status
+    LoadAttr(bool to_cache = true) = 0;
+
+    virtual Status
     CopyToGpu(uint64_t device_id, bool hybrid) = 0;
 
     virtual Status

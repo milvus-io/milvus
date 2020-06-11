@@ -607,7 +607,7 @@ class Connection {
                    HybridQueryResult& result) = 0;
 
     virtual Status
-    CreateHybridIndex(const HIndexParam& index_param);
+    CreateHybridIndex(const HIndexParam& index_param) = 0;
 };
 
 }  // namespace milvus
