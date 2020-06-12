@@ -5,6 +5,7 @@ Please mark all change in change log and use the issue from GitHub
 # Milvus 0.11.0 (TBD)
 
 ## Bug
+\#2487 Remove timeout when creating collection in dev test
 
 ## Feature
 - \#2319 Redo metadata to support MVCC
