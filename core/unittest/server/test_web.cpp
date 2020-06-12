@@ -354,7 +354,7 @@ class WebControllerTest : public ::testing::Test {
     static void
     SetUpTestCase() {
         mkdir(CONTROLLER_TEST_CONFIG_DIR, S_IRWXU);
-        // Basic config
+        // Load basic config
         std::string config_path = std::string(CONTROLLER_TEST_CONFIG_DIR).append(CONTROLLER_TEST_CONFIG_FILE);
         std::fstream fs(config_path.c_str(), std::ios_base::out);
         fs << CONTROLLER_TEST_VALID_CONFIG_STR;

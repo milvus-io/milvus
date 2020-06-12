@@ -37,11 +37,6 @@ class ToIndexData : public milvus::cache::DataObj {
     explicit ToIndexData(int64_t size) : size_(size) {
     }
 
-    int64_t
-    Size() override {
-        return size_;
-    }
-
  private:
     int64_t size_ = 0;
 };

@@ -47,10 +47,10 @@ class SqliteMetaImpl : public Meta {
     AllCollections(std::vector<CollectionSchema>& collection_schema_array, bool is_root = false) override;
 
     Status
-    DropCollection(const std::string& collection_id) override;
+    DropCollections(const std::vector<std::string>& collection_id_array) override;
 
     Status
-    DeleteCollectionFiles(const std::string& collection_id) override;
+    DeleteCollectionFiles(const std::vector<std::string>& collection_id_array) override;
 
     Status
     CreateCollectionFile(SegmentSchema& file_schema) override;
@@ -125,6 +125,10 @@ class SqliteMetaImpl : public Meta {
     Status
     FilesByType(const std::string& collection_id, const std::vector<int>& file_types,
                 FilesHolder& files_holder) override;
+
+    Status
+    FilesByTypeEx(const std::vector<meta::CollectionSchema>& collections, const std::vector<int>& file_types,
+                  FilesHolder& files_holder) override;
 
     Status
     FilesByID(const std::vector<size_t>& ids, FilesHolder& files_holder) override;

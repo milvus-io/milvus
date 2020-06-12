@@ -151,7 +151,6 @@ IndexAnnoy::Count() {
     if (!index_) {
         KNOWHERE_THROW_MSG("index not initialize");
     }
-
     return index_->get_n_items();
 }
 
@@ -160,17 +159,8 @@ IndexAnnoy::Dim() {
     if (!index_) {
         KNOWHERE_THROW_MSG("index not initialize");
     }
-
     return index_->get_dim();
 }
 
-int64_t
-IndexAnnoy::IndexSize() {
-    if (index_size_ != -1) {
-        return index_size_;
-    }
-
-    return index_size_ = Dim() * Count() * sizeof(float);
-}
 }  // namespace knowhere
 }  // namespace milvus

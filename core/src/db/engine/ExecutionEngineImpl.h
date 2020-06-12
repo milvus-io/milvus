@@ -63,11 +63,13 @@ class ExecutionEngineImpl : public ExecutionEngine {
     Status
     CopyToCpu() override;
 
+#if 0
     Status
     GetVectorByID(const int64_t id, float* vector, bool hybrid) override;
 
     Status
     GetVectorByID(const int64_t id, uint8_t* vector, bool hybrid) override;
+#endif
 
 #if 0
     Status

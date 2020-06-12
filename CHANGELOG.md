@@ -17,23 +17,38 @@ Please mark all change in change log and use the issue from GitHub
 # Milvus 0.10.0 (2020-6-15)
 
 ## Bug
--   \#2366 Reduce SQL execution times for collection contains lot of partitions
--   \#2378 Duplicate data after server restart
--   \#2395 Fix large nq cudaMalloc error
--   \#2399 The nlist set by the user may not take effect
--   \#2403 MySQL max_idle_time is 10 by default
+-   \#2367 Fix inconsistent reading and writing when using mishards
+-   \#2394 Drop collection timeout if too many partitions created on collection
 
 ## Feature
 -   \#2363 Update branch version
 
 ## Improvement
+-   \#2381 Upgrade FAISS to 1.6.3
+-   \#2441 Improve Knowhere code coverage
+-   \#2466 optimize k-selection implemention of faiss gpu version
+
+## Task
+
+# Milvus 0.9.1 (2020-05-29)
+
+## Bug
+-   \#2366 Reduce SQL execution times for collection contains lot of partitions
+-   \#2378 Duplicate data after server restart
+-   \#2395 Fix large nq cudaMalloc error
+-   \#2399 The nlist set by the user may not take effect
+-   \#2403 MySQL max_idle_time is 10 by default
+-   \#2450 The deleted vectors may be found on GPU
+-   \#2456 openblas library install failed
+
+## Feature
+
+## Improvement
 -   \#2307 Disable index SPTAG by default
 -   \#2353 Remove log_config from code and scripts
 -   \#2370 Clean compile warning
--   \#2381 Upgrade FAISS to 1.6.3
 -   \#2410 Logging build index progress
-
-## Task
+-   \#2461 Upgrade mishards for milvus 0.9.1
 
 # Milvus 0.9.0 (2020-05-15)
 

@@ -61,7 +61,7 @@ class TestDeleteBase:
         status, res = connect.search(collection, top_k, vector, params=search_param)
         logging.getLogger().info(res)
         assert status.OK()
-        assert len(res) == 0
+        assert len(res[0]) == 0
 
     def test_delete_vector_multi_same_ids(self, connect, collection, get_simple_index):
         '''
@@ -83,7 +83,7 @@ class TestDeleteBase:
         status, res = connect.search(collection, top_k, [vectors[0]], params=search_param)
         logging.getLogger().info(res)
         assert status.OK()
-        assert len(res) == 0
+        assert len(res[0]) == 0
 
     def test_delete_vector_collection_count(self, connect, collection):
         '''
@@ -327,7 +327,7 @@ class TestDeleteIndexedVectors:
         status, res = connect.search(collection, top_k, vector, params=search_param)
         logging.getLogger().info(res)
         assert status.OK()
-        assert len(res) == 0
+        assert len(res[0]) == 0
 
     def test_insert_delete_vector(self, connect, collection, get_simple_index):
         '''
@@ -399,9 +399,7 @@ class TestDeleteBinary:
         status, res = connect.search(jac_collection, top_k, vector, params=search_param)
         logging.getLogger().info(res)
         assert status.OK()
-        assert len(res) == 0
-        assert status.OK()
-        assert len(res) == 0
+        assert len(res[0]) == 0
 
     # TODO: soft delete
     def test_delete_vector_collection_count(self, connect, jac_collection):

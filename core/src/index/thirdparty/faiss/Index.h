@@ -117,6 +117,7 @@ struct Index {
                          float *distances, idx_t *labels,
                          ConcurrentBitsetPtr bitset = nullptr) const = 0;
 
+#if 0
     /** query n raw vectors from the index by ids.
      *
      * return n raw vectors.
@@ -140,6 +141,7 @@ struct Index {
      */
      virtual void search_by_id (idx_t n, const idx_t *xid, idx_t k, float *distances, idx_t *labels,
                                 ConcurrentBitsetPtr bitset = nullptr);
+#endif
 
     /** query n vectors of dimension d to the index.
      *

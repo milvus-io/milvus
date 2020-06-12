@@ -27,7 +27,7 @@ void
 DeleteJob::WaitAndDelete() {
     std::unique_lock<std::mutex> lock(mutex_);
     cv_.wait(lock, [&] { return done_resource == num_resource_; });
-    meta_ptr_->DeleteCollectionFiles(collection_id_);
+    meta_ptr_->DeleteCollectionFiles({collection_id_});
 }
 
 void
