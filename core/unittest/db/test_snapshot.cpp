@@ -754,8 +754,8 @@ TEST_F(SnapshotTest, CompoundTest1) {
     };
 
     // TODO: If any Compound Operation find larger Snapshot. This Operation should be rollback to latest
-    auto normal_worker = [&] {
-        auto to_build_segments = RandomInt(80, 85);
+    auto handler_worker = [&] {
+        auto to_build_segments = RandomInt(50, 60);
         decltype(ss) latest_ss;
 
         for (auto i = 0; i < to_build_segments; ++i) {
@@ -781,7 +781,6 @@ TEST_F(SnapshotTest, CompoundTest1) {
             merge_queue.Put(new_seg->GetID());
         }
 
-        merge_queue.Put(0);
     };
 
     auto merge_worker = [&] {
@@ -828,25 +827,33 @@ TEST_F(SnapshotTest, CompoundTest1) {
         }
         build_waiter.Notify();
     };
+    std::vector<std::thread> handlers;
+    auto num_handlers = RandomInt(8, 9);
+    for (auto i = 0; i < num_handlers; ++i) {
+        handlers.emplace_back(handler_worker);
+    }
+    std::thread t3 = std::thread(merge_worker);
+    std::thread t4 = std::thread(build_worker);
 
-    std::thread t1 = std::thread(normal_worker);
-    std::thread t2 = std::thread(merge_worker);
-    std::thread t3 = std::thread(build_worker);
-    t1.join();
-    t2.join();
+    for (auto& handler : handlers) {
+        handler.join();
+    }
+
+    merge_queue.Put(0);
     t3.join();
+    t4.join();
 
-    for (auto& kv : merged_segs) {
-        std::cout << "merged: (";
-        for (auto i : kv.second) {
-            std::cout << i << ",";
-        }
-        std::cout << ") -> " << kv.first << std::endl;
-    }
+    /* for (auto& kv : merged_segs) { */
+    /*     std::cout << "merged: ("; */
+    /*     for (auto i : kv.second) { */
+    /*         std::cout << i << ","; */
+    /*     } */
+    /*     std::cout << ") -> " << kv.first << std::endl; */
+    /* } */
 
-    for (auto& id : built_segs) {
-        std::cout << "built: " << id << std::endl;
-    }
+    /* for (auto& id : built_segs) { */
+    /*     std::cout << "built: " << id << std::endl; */
+    /* } */
 
     merge_waiter.Wait();
 
