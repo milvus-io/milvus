@@ -77,8 +77,8 @@ GrpcServer::StartService() {
     Config& config = Config::GetInstance();
     std::string address, port;
 
-    STATUS_CHECK(config.GetServerConfigAddress(address));
-    STATUS_CHECK(config.GetServerConfigPort(port));
+    STATUS_CHECK(config.GetNetworkConfigBindAddress(address));
+    STATUS_CHECK(config.GetNetworkConfigBindPort(port));
 
     std::string server_address(address + ":" + port);
 

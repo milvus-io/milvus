@@ -37,6 +37,17 @@ Status
 ReLoadSegmentsRequest::OnExecute() {
     auto& config = Config::GetInstance();
 
+#if 1
+    bool cluster_enable = false;
+    std::string cluster_role;
+    STATUS_CHECK(config.GetClusterConfigEnable(cluster_enable));
+    STATUS_CHECK(config.GetClusterConfigRole(cluster_role));
+
+    if ((not cluster_enable) || cluster_role == "rw") {
+        // TODO: No need to reload segment files
+        return Status(SERVER_SUCCESS, "");
+    }
+#else
     std::string deploy_mode;
     auto status = config.GetServerConfigDeployMode(deploy_mode);
     if (!status.ok()) {
@@ -48,6 +59,7 @@ ReLoadSegmentsRequest::OnExecute() {
         // TODO: No need to reload segment files
         return Status(SERVER_SUCCESS, "");
     }
+#endif
 
     try {
         std::string hdr = "ReloadSegmentsRequest(collection=" + collection_name_ + ")";
