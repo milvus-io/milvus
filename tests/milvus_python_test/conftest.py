@@ -131,7 +131,7 @@ def ip_collection(request, connect):
              'dimension': dim,
              'index_file_size': index_file_size,
              'metric_type': MetricType.IP}
-    result = connect.create_collection(param, timeout=timeout)
+    result = connect.create_collection(param)
     status = result
     if isinstance(result, tuple):
         status = result[0]
@@ -158,7 +158,7 @@ def jac_collection(request, connect):
              'dimension': dim,
              'index_file_size': index_file_size,
              'metric_type': MetricType.JACCARD}
-    result = connect.create_collection(param, timeout=timeout)
+    result = connect.create_collection(param)
     status = result
     if isinstance(result, tuple):
         status = result[0]
@@ -184,7 +184,7 @@ def ham_collection(request, connect):
              'dimension': dim,
              'index_file_size': index_file_size,
              'metric_type': MetricType.HAMMING}
-    result = connect.create_collection(param, timeout=timeout)
+    result = connect.create_collection(param)
     status = result
     if isinstance(result, tuple):
         status = result[0]
@@ -210,7 +210,7 @@ def tanimoto_collection(request, connect):
              'dimension': dim,
              'index_file_size': index_file_size,
              'metric_type': MetricType.TANIMOTO}
-    result = connect.create_collection(param, timeout=timeout)
+    result = connect.create_collection(param)
     status = result
     if isinstance(result, tuple):
         status = result[0]
@@ -235,7 +235,7 @@ def substructure_collection(request, connect):
              'dimension': dim,
              'index_file_size': index_file_size,
              'metric_type': MetricType.SUBSTRUCTURE}
-    result = connect.create_collection(param, timeout=timeout)
+    result = connect.create_collection(param)
     status = result
     if isinstance(result, tuple):
         status = result[0]
@@ -260,7 +260,7 @@ def superstructure_collection(request, connect):
              'dimension': dim,
              'index_file_size': index_file_size,
              'metric_type': MetricType.SUPERSTRUCTURE}
-    result = connect.create_collection(param, timeout=timeout)
+    result = connect.create_collection(param)
     status = result
     if isinstance(result, tuple):
         status = result[0]
