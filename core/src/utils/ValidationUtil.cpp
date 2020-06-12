@@ -31,6 +31,7 @@
 #include <cmath>
 #include <limits>
 #include <regex>
+#include <set>
 #include <string>
 
 namespace milvus {
@@ -649,6 +650,15 @@ ValidationUtil::ValidateStoragePath(const std::string& path) {
     std::regex regex(path_pattern);
 
     return std::regex_match(path, regex) ? Status::OK() : Status(SERVER_INVALID_ARGUMENT, "Invalid file path");
+}
+
+Status
+ValidationUtil::ValidateLogLevel(const std::string& level) {
+    std::set<std::string> supported_level{"debug", "info", "warning", "error", "fatal"};
+
+    return supported_level.find(level) != supported_level.end()
+               ? Status::OK()
+               : Status(SERVER_INVALID_ARGUMENT, "Log level must be one of debug, info, warning, error and fatal.");
 }
 
 bool

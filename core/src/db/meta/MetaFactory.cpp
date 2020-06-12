@@ -48,6 +48,7 @@ MetaFactory::Build(const DBMetaOptions& meta_options, const int& mode) {
     std::string uri = meta_options.backend_uri_;
 
     utils::MetaUriInfo uri_info;
+    LOG_ENGINE_DEBUG_ << "MetaUri: " << uri << std::endl;
     auto status = utils::ParseMetaUri(uri, uri_info);
     if (!status.ok()) {
         LOG_ENGINE_ERROR_ << "Wrong URI format: URI = " << uri;

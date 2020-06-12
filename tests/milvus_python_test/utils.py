@@ -38,15 +38,15 @@ def get_milvus(host, port, uri=None, handler=None, **kwargs):
 
 
 def disable_flush(connect):
-    status, reply = connect.set_config("db_config", "auto_flush_interval", big_flush_interval)
+    status, reply = connect.set_config("storage", "auto_flush_interval", big_flush_interval)
     assert status.OK()
 
 
 def enable_flush(connect):
     # reset auto_flush_interval=1
-    status, reply = connect.set_config("db_config", "auto_flush_interval", default_flush_interval)
+    status, reply = connect.set_config("storage", "auto_flush_interval", default_flush_interval)
     assert status.OK()
-    status, config_value = connect.get_config("db_config", "auto_flush_interval")
+    status, config_value = connect.get_config("storage", "auto_flush_interval")
     assert status.OK()
     assert config_value == str(default_flush_interval)
 
@@ -470,7 +470,7 @@ def gen_invalid_cache_config():
     return invalid_configs
 
 
-def gen_invalid_engine_config():
+def gen_invalid_gpu_config():
     invalid_configs = [
             -1,
             [1,2,3],
