@@ -866,7 +866,7 @@ WebRequestHandler::GetAdvancedConfig(AdvancedConfigDto::ObjectWrapper& advanced_
     advanced_config->use_blas_threshold = std::stol(reply);
 
 #ifdef MILVUS_GPU_VERSION
-    engine_cmd_string = engine_cmd_prefix + std::string(CONFIG_ENGINE_GPU_SEARCH_THRESHOLD);
+    engine_cmd_string = engine_cmd_prefix + std::string(CONFIG_GPU_RESOURCE_GPU_SEARCH_THRESHOLD);
     CommandLine(engine_cmd_string, reply);
     if (!status.ok()) {
         ASSIGN_RETURN_STATUS_DTO(status)
@@ -924,9 +924,10 @@ WebRequestHandler::SetAdvancedConfig(const AdvancedConfigDto::ObjectWrapper& adv
     }
 
 #ifdef MILVUS_GPU_VERSION
-    engine_cmd_string = engine_cmd_prefix + std::string(CONFIG_ENGINE_GPU_SEARCH_THRESHOLD) + " " +
-                        std::to_string(advanced_config->gpu_search_threshold->getValue());
-    status = CommandLine(engine_cmd_string, reply);
+    auto gpu_cmd_prefix = "set_config " + std::string(CONFIG_GPU_RESOURCE) + ".";
+    auto gpu_cmd_string = gpu_cmd_prefix + std::string(CONFIG_GPU_RESOURCE_GPU_SEARCH_THRESHOLD) + " " +
+                          std::to_string(advanced_config->gpu_search_threshold->getValue());
+    status = CommandLine(gpu_cmd_string, reply);
     if (!status.ok()) {
         ASSIGN_RETURN_STATUS_DTO(status)
     }

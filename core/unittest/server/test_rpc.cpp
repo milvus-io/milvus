@@ -84,14 +84,13 @@ class RpcHandlerTest : public testing::Test {
 
         milvus::engine::DBOptions opt;
 
-        milvus::server::Config::GetInstance().SetDBConfigBackendUrl("sqlite://:@:/");
+        milvus::server::Config::GetInstance().SetGeneralConfigMetaURI("sqlite://:@:/");
         milvus::server::Config::GetInstance().SetDBConfigArchiveDiskThreshold("");
         milvus::server::Config::GetInstance().SetDBConfigArchiveDaysThreshold("");
-        milvus::server::Config::GetInstance().SetStorageConfigPrimaryPath("/tmp/milvus_test");
-        milvus::server::Config::GetInstance().SetStorageConfigSecondaryPath("");
+        milvus::server::Config::GetInstance().SetStorageConfigPath("/tmp/milvus_test");
         milvus::server::Config::GetInstance().SetCacheConfigCacheInsertData("");
         milvus::server::Config::GetInstance().SetEngineConfigOmpThreadNum("");
-        milvus::server::Config::GetInstance().SetServerConfigPort("19531");
+        milvus::server::Config::GetInstance().SetNetworkConfigBindPort("19531");
 
         //        serverConfig.SetValue(server::CONFIG_CLUSTER_MODE, "cluster");
         //        DBWrapper::GetInstance().GetInstance().StartService();
