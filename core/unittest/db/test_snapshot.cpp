@@ -780,7 +780,6 @@ TEST_F(SnapshotTest, CompoundTest1) {
             }
             merge_queue.Put(new_seg->GetID());
         }
-
     };
 
     auto merge_worker = [&] {
