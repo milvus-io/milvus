@@ -215,7 +215,7 @@ bool
 ValidateBinaryQuery(BinaryQueryPtr& binary_query) {
     // Only for one layer BooleanQuery
     uint64_t height = BinaryQueryHeight(binary_query);
-    return height > 1 && height < 4;
+    return height > 1;
 }
 
 }  // namespace query

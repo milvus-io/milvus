@@ -238,8 +238,8 @@ class DBImpl : public DB, public server::CacheConfigHandler, public server::Engi
     void
     BackgroundMerge(std::set<std::string> collection_ids, bool force_merge_all);
 
-    Status
-    MergeHybridFiles(const std::string& table_id, meta::FilesHolder& files_holder);
+    //    Status
+    //    MergeHybridFiles(const std::string& table_id, meta::FilesHolder& files_holder);
 
     void
     StartBuildIndexTask();
