@@ -32,8 +32,8 @@ class CompoundBaseOperation : public Operations {
     GetRepr() const override {
         std::stringstream ss;
         ss << "<" << GetName() << "(";
-        if (prev_ss_) {
-            ss << "SS=" << prev_ss_->GetID();
+        if (context_.prev_ss) {
+            ss << "SS=" << context_.prev_ss->GetID();
         }
         ss << "," << context_.ToString();
         ss << ",LSN=" << GetContextLsn();
