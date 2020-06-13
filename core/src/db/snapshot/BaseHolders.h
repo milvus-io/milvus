@@ -17,8 +17,9 @@
 #include <mutex>
 #include <string>
 #include <thread>
-#include "ResourceTypes.h"
-#include "ScopedResource.h"
+#include "db/snapshot/ResourceTypes.h"
+#include "db/snapshot/ScopedResource.h"
+#include "db/snapshot/Store.h"
 
 namespace milvus {
 namespace engine {
@@ -33,6 +34,9 @@ class ResourceHolder {
     using ScopedPtr = std::shared_ptr<ScopedT>;
     using IdMapT = std::map<ID_TYPE, ResourcePtr>;
     using Ptr = std::shared_ptr<Derived>;
+    // TODO: Resource should be loaded into holder in OperationExecutor thread
+    ScopedT
+    Load(Store& store, ID_TYPE id, bool scoped = true);
     ScopedT
     GetResource(ID_TYPE id, bool scoped = true);
 
@@ -65,9 +69,7 @@ class ResourceHolder {
     OnNoRefCallBack(ResourcePtr resource);
 
     virtual ResourcePtr
-    Load(ID_TYPE id);
-    virtual ResourcePtr
-    Load(const std::string& name);
+    DoLoad(Store& store, ID_TYPE id);
     ResourceHolder() = default;
     virtual ~ResourceHolder() = default;
 

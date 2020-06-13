@@ -372,8 +372,8 @@ SnapshotTest::SetUp() {
     milvus::engine::snapshot::SegmentFilesHolder::GetInstance().Reset();
 
     milvus::engine::snapshot::Snapshots::GetInstance().Reset();
-
     milvus::engine::snapshot::Store::GetInstance().Mock();
+    milvus::engine::snapshot::Snapshots::GetInstance().Init();
 }
 
 void
