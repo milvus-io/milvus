@@ -8,6 +8,7 @@ Please mark all change in change log and use the issue from GitHub
 -   \#2367 Fix inconsistent reading and writing when using mishards
 -   \#2368 Make read node detect delete behavior
 -   \#2394 Drop collection timeout if too many partitions created on collection
+-   \#2549 Launch server fail using demo config
 
 ## Feature
 -   \#2363 Update branch version

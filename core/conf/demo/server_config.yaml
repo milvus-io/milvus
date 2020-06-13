@@ -95,7 +95,7 @@ storage:
 wal:
   enable: true
   recovery_error_ignore: false
-  buffer_size: 256
+  buffer_size: 256MB
   path: /var/lib/milvus/wal
 
 #----------------------+------------------------------------------------------------+------------+-----------------+
@@ -115,8 +115,8 @@ wal:
 #                      | double-quote required).                                    |            |                 |
 #----------------------+------------------------------------------------------------+------------+-----------------+
 cache:
-  cache_size: 4
-  insert_buffer_size: 1
+  cache_size: 4GB
+  insert_buffer_size: 1GB
   preload_collection:
 
 #----------------------+------------------------------------------------------------+------------+-----------------+
@@ -142,7 +142,7 @@ cache:
 #----------------------+------------------------------------------------------------+------------+-----------------+
 gpu:
   enable: false
-  cache_size: 1
+  cache_size: 1GB
   gpu_search_threshold: 1000
   search_devices:
     - gpu0
@@ -168,7 +168,7 @@ logs:
   level: debug
   trace.enable: true
   path: /var/lib/milvus/logs
-  max_log_file_size: 1024
+  max_log_file_size: 1024MB
   log_rotate_num: 0
 
 #----------------------+------------------------------------------------------------+------------+-----------------+

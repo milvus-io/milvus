@@ -1,3 +1,4 @@
+import copy
 import time
 import json
 import logging
@@ -5,7 +6,6 @@ import threading
 from functools import wraps
 from collections import defaultdict
 from milvus import Milvus
-# from milvus.client.hooks import BaseSearchHook
 
 from mishards import (settings, exceptions, topology)
 from utils import singleton
@@ -254,6 +254,8 @@ class ConnectionGroup(topology.TopoGroup):
         uri = kwargs.get('uri', None)
         if not uri:
             raise RuntimeError('\"uri\" is required to create connection pool')
+        milvus_args = copy.deepcopy(kwargs)
+        milvus_args["max_retry"] = settings.MAX_RETRY
         pool = Milvus(name=name, **kwargs)
         status = self.add(pool)
         if status != topology.StatusType.OK:
