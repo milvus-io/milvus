@@ -256,7 +256,7 @@ class ConnectionGroup(topology.TopoGroup):
             raise RuntimeError('\"uri\" is required to create connection pool')
         milvus_args = copy.deepcopy(kwargs)
         milvus_args["max_retry"] = settings.MAX_RETRY
-        pool = Milvus(name=name, **kwargs)
+        pool = Milvus(name=name, **milvus_args)
         status = self.add(pool)
         if status != topology.StatusType.OK:
             pool = None

@@ -91,7 +91,6 @@ class TestConnect:
         milvus = get_milvus(args["ip"], args["port"], uri=uri_value, handler=args["handler"])
         # assert milvus.connected()
 
-    @pytest.mark.skip
     def test_connect_uri_null(self, args):
         '''
         target: test connect with null uri
