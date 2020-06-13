@@ -13,7 +13,9 @@ FROM milvusdb/milvus-dev:amd64-centos-7-core AS openblas
 
 FROM centos:centos7
 
-RUN yum install -y epel-release && \
+RUN yum install -y wget && \
+    wget -P /etc/yum.repos.d/ http://mirrors.aliyun.com/repo/epel-7.repo && \
+    yum clean all && yum makecache && \
     yum install -y libgomp libgfortran4 mysql-devel && \
     rm -rf /var/cache/yum/*
 
