@@ -11,9 +11,9 @@
 
 FROM centos:centos7
 
-RUN yum install -y wget &&
-    wget -P /etc/yum.repos.d/ http://mirrors.aliyun.com/repo/epel-7.repo &&
-    yum clean all && yum makecache &&
+RUN yum install -y wget && \
+    wget -P /etc/yum.repos.d/ http://mirrors.aliyun.com/repo/epel-7.repo && \
+    yum clean all && yum makecache && \
     yum install -y libgomp libgfortran4 mysql-devel openblas-devel lapack-devel && \
     rm -rf /var/cache/yum/*
 
