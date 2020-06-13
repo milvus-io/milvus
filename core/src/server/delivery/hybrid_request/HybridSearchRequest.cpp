@@ -116,10 +116,10 @@ HybridSearchRequest::OnExecute() {
         if (!status.ok()) {
             return status;
         }
-        fiu_do_on("HybridSearchRequest.OnExecute.empty_result_ids", result_.result_ids_.clear());
-        if (result_.result_ids_.empty()) {
-            return Status::OK();  // empty table
-        }
+        //        fiu_do_on("HybridSearchRequest.OnExecute.empty_result_ids", result_.result_ids_.clear());
+        //        if (result_.result_ids_.empty()) {
+        //            return Status::OK();  // empty table
+        //        }
 
         auto post_query_ctx = context_->Child("Constructing result");
 
