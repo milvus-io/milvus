@@ -14,9 +14,9 @@ version: 0.5
 #----------------------+------------------------------------------------------------+------------+-----------------+
 # Cluster Config       | Description                                                | Type       | Default         |
 #----------------------+------------------------------------------------------------+------------+-----------------+
-# enable               | If runinng with Mishards, set true, otherwise false.       | Boolean    | false           |
+# enable               | If running with Mishards, set true, otherwise false.       | Boolean    | false           |
 #----------------------+------------------------------------------------------------+------------+-----------------+
-# role                 | Milvus deployment role: rw / ro                            | role       | rw              |
+# role                 | Milvus deployment role: rw / ro                            | Role       | rw              |
 #----------------------+------------------------------------------------------------+------------+-----------------+
 cluster:
   enable: false
@@ -25,9 +25,9 @@ cluster:
 #----------------------+------------------------------------------------------------+------------+-----------------+
 # General Config       | Description                                                | Type       | Default         |
 #----------------------+------------------------------------------------------------+------------+-----------------+
-# timezone            | Use UTC-x or UTC+x to specify a time zone.                 | Timezone   | UTC+8           |
+# timezone             | Use UTC-x or UTC+x to specify a time zone.                 | Timezone   | UTC+8           |
 #----------------------+------------------------------------------------------------+------------+-----------------+
-# meta_uri             | URI for metadata storage, using SQLite (for single server  | URL        | sqlite://:@:/   |
+# meta_uri             | URI for metadata storage, using SQLite (for single server  | URI        | sqlite://:@:/   |
 #                      | Milvus) or MySQL (for distributed cluster Milvus).         |            |                 |
 #                      | Format: dialect://username:password@host:port/database     |            |                 |
 #                      | Keep 'dialect://:@:/', 'dialect' can be either 'sqlite' or |            |                 |
@@ -44,9 +44,9 @@ general:
 #----------------------+------------------------------------------------------------+------------+-----------------+
 # bind.port            | Port that Milvus server monitors. Port range (1024, 65535) | Integer    | 19530           |
 #----------------------+------------------------------------------------------------+------------+-----------------+
-# http.enable          | Enable web server or not.                                  | Boolean    | true            |
+# http.enable          | Enable HTTP server or not.                                 | Boolean    | true            |
 #----------------------+------------------------------------------------------------+------------+-----------------+
-# http.port            | Port that Milvus web server monitors.                      | Integer    | 19121           |
+# http.port            | Port that Milvus HTTP server monitors.                     | Integer    | 19121           |
 #                      | Port range (1024, 65535)                                   |            |                 |
 #----------------------+------------------------------------------------------------+------------+-----------------+
 network: 
@@ -102,11 +102,11 @@ wal:
 # Cache Config         | Description                                                | Type       | Default         |
 #----------------------+------------------------------------------------------------+------------+-----------------+
 # cache_size           | The size of CPU memory used for caching data for faster    | String     | 4GB             |
-#                      | query. The sum of 'cpu_cache_capacity' and                 |            |                 |
-#                      | 'insert_buffer_size' must be less than system memory size. |            |                 |
+#                      | query. The sum of 'cache_size' and 'insert_buffer_size'    |            |                 |
+#                      | must be less than system memory size.                      |            |                 |
 #----------------------+------------------------------------------------------------+------------+-----------------+
 # insert_buffer_size   | Buffer size used for data insertion.                       | String     | 1GB             |
-#                      | The sum of 'insert_buffer_size' and 'cpu_cache_capacity'   |            |                 |
+#                      | The sum of 'insert_buffer_size' and 'cache_size'           |            |                 |
 #                      | must be less than system memory size.                      |            |                 |
 #----------------------+------------------------------------------------------------+------------+-----------------+
 # preload_collection   | A comma-separated list of collection names that need to    | StringList |                 |
@@ -122,7 +122,7 @@ cache:
 #----------------------+------------------------------------------------------------+------------+-----------------+
 # GPU Config           | Description                                                | Type       | Default         |
 #----------------------+------------------------------------------------------------+------------+-----------------+
-# enable               | Enable GPU resources or not.                               | Boolean    | false           |
+# enable               | Use GPU devices or not.                                    | Boolean    | false           |
 #----------------------+------------------------------------------------------------+------------+-----------------+
 # cache_size           | The size of GPU memory per card used for cache.            | String     | 1GB             |
 #----------------------+------------------------------------------------------------+------------+-----------------+
@@ -134,10 +134,10 @@ cache:
 #                      | if nq < gpu_search_threshold, the search computation will  |            |                 |
 #                      | be executed on both CPUs and GPUs.                         |            |                 |
 #----------------------+------------------------------------------------------------+------------+-----------------+
-# search_resources     | The list of GPU devices used for search computation.       | DeviceList | gpu0            |
+# search_devices       | The list of GPU devices used for search computation.       | DeviceList | gpu0            |
 #                      | Must be in format gpux.                                    |            |                 |
 #----------------------+------------------------------------------------------------+------------+-----------------+
-# build_index_resources| The list of GPU devices used for index building.           | DeviceList | gpu0            |
+# build_index_devices  | The list of GPU devices used for index building.           | DeviceList | gpu0            |
 #                      | Must be in format gpux.                                    |            |                 |
 #----------------------+------------------------------------------------------------+------------+-----------------+
 gpu:
