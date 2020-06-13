@@ -16,6 +16,8 @@ namespace milvus {
 namespace engine {
 namespace snapshot {
 
+static constexpr const char* INNER_DELIMITER = ":";
+
 std::string
 PartitionContext::ToString() const {
     std::stringstream ss;
@@ -59,7 +61,7 @@ OperationContext::ToString() const {
         bool first = true;
         for (auto& f : stale_segments) {
             if (!first) {
-                ss << ",";
+                ss << INNER_DELIMITER;
             }
             ss << f->GetID();
             first = false;
@@ -74,7 +76,7 @@ OperationContext::ToString() const {
         bool first = true;
         for (auto& f : new_segment_files) {
             if (!first) {
-                ss << ",";
+                ss << INNER_DELIMITER;
             }
             ss << f->GetID();
             first = false;
