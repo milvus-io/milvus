@@ -21,6 +21,7 @@ Please mark all change in change log and use the issue from GitHub
 -   \#2368 Make read node detect delete behavior
 -   \#2373 Build index for small segment waste time on waiting background index thread finish
 -   \#2394 Drop collection timeout if too many partitions created on collection
+-   \#2549 Launch server fail using demo config
 
 ## Feature
 -   \#2363 Update branch version
@@ -34,6 +35,7 @@ Please mark all change in change log and use the issue from GitHub
 -   \#2489 Add exception throw on mysql meta error
 -   \#2495 Add creating lock file failure reason.
 -   \#2516 Improve unit test coverage
+-   \#2548 Upgrade mishards for milvus v0.10.0
 
 ## Task
 
