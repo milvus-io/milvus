@@ -32,7 +32,7 @@ namespace {
 static const char* COLLECTION_NAME = "test_hybrid";
 static constexpr int64_t COLLECTION_DIM = 128;
 static constexpr int64_t SECONDS_EACH_HOUR = 3600;
-static constexpr int64_t FIELD_NUM = 4;
+static constexpr int64_t FIELD_NUM = 3;
 static constexpr int64_t NQ = 10;
 static constexpr int64_t TOPK = 10;
 
@@ -49,9 +49,18 @@ BuildCollectionSchema(milvus::engine::meta::CollectionSchema& collection_schema,
         fields[i].collection_id_ = COLLECTION_NAME;
         fields[i].field_name_ = "field_" + std::to_string(i);
     }
+    fields[0].field_type_ = (int)milvus::engine::meta::hybrid::DataType::INT32;
+    fields[1].field_type_ = (int)milvus::engine::meta::hybrid::DataType::INT64;
+    fields[2].field_type_ = (int)milvus::engine::meta::hybrid::DataType::FLOAT;
+
+    for (uint64_t i = 0; i < FIELD_NUM; ++i) {
+        attr_type.insert(
+            std::make_pair(fields[i].field_name_, (milvus::engine::meta::hybrid::DataType)fields[i].field_type_));
+    }
+
     milvus::engine::meta::hybrid::FieldSchema schema;
-    schema.field_name_ = "field_vector";
-    schema.collection_id_ = TABLE_NAME;
+    schema.field_name_ = "field_3";
+    schema.collection_id_ = COLLECTION_NAME;
     schema.field_type_ = (int)(milvus::engine::meta::hybrid::DataType::VECTOR);
     fields.emplace_back(schema);
 
@@ -85,7 +94,7 @@ BuildEntity(uint64_t n, uint64_t batch_index, milvus::engine::Entity& entity) {
 
         vectors.id_array_.push_back(n * batch_index + i);
     }
-    entity.vector_data_.insert(std::make_pair("field_vector", vectors));
+    entity.vector_data_.insert(std::make_pair("field_3", vectors));
     std::vector<int64_t> value_0;
     std::vector<int64_t> value_1;
     std::vector<double> value_2;
@@ -227,9 +236,9 @@ TEST_F(DBTest, HYBRID_SEARCH_TEST) {
 
     uint64_t qb = 1000;
     milvus::engine::Entity entity;
-    BuildComplexEntity(qb, 0, entity);
+    BuildEntity(qb, 0, entity);
 
-    std::vector<std::string> field_names = {"field_0", "field_1", "field_2", "field_3", "field_4", "field_5"};
+    std::vector<std::string> field_names = {"field_0", "field_1", "field_2"};
 
     stat = db_->InsertEntities(COLLECTION_NAME, "", field_names, entity, attr_type);
     ASSERT_TRUE(stat.ok());
@@ -346,3 +355,5 @@ TEST_F(DBTest2, GET_ENTITY_BY_ID_TEST) {
         ASSERT_EQ(vector.vector_count_, 0);
         ASSERT_TRUE(vector.float_data_.empty());
         ASSERT_TRUE(vector.binary_data_.empty());
+    }
+}
