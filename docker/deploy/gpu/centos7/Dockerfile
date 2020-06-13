@@ -13,7 +13,9 @@ FROM nvidia/cuda:10.1-devel-centos7
 
 ENV NVIDIA_DRIVER_CAPABILITIES compute,utility
 
-RUN yum --disablerepo=cuda install -y epel-release && \
+RUN yum --disablerepo=cuda install -y wget &&
+    wget -P /etc/yum.repos.d/ http://mirrors.aliyun.com/repo/epel-7.repo &&
+    yum clean all && yum makecache &&
     yum --disablerepo=cuda install -y libgomp libgfortran4 mysql-devel openblas-devel lapack-devel && \
     rm -rf /var/cache/yum/*
 
