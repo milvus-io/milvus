@@ -5,6 +5,7 @@ Please mark all change in change log and use the issue from GitHub
 # Milvus 0.11.0 (TBD)
 
 ## Bug
+- \#2551 Fix test_hybrid_db and test_rpc error
 
 ## Feature
 - \#2319 Redo metadata to support MVCC
