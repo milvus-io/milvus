@@ -246,6 +246,9 @@ class Snapshot : public ReferenceProxy {
         resources[resource->GetID()] = resource;
     }
 
+    const std::string
+    ToString();
+
  private:
     Snapshot(const Snapshot&) = delete;
     Snapshot&

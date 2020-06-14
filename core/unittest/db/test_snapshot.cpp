@@ -879,4 +879,5 @@ TEST_F(SnapshotTest, CompoundTest1) {
     expect_segment_file_cnt = expect_segments.size();
     expect_segment_file_cnt += built_segs.size();
     ASSERT_EQ(expect_segment_file_cnt, final_segment_file_cnt);
+    std::cout << latest_ss->ToString() << std::endl;
 }
