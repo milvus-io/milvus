@@ -118,15 +118,6 @@ Snapshot::Snapshot(ID_TYPE id) {
         }
     }
 
-    /* for(auto kv : partition_commits_) { */
-    /*     std::cout << this << " Snapshot " << collection_commit_->GetID() << " PartitionCommit " << */
-    /*         kv.first << " Partition " << kv.second->GetPartitionId() << std::endl; */
-    /* } */
-    /* for(auto kv : p_pc_map_) { */
-    /*     std::cout << this << " Snapshot " << collection_commit_->GetID() << " P " << */
-    /*         kv.first << " PC " << kv.second << std::endl; */
-    /* } */
-
     RefAll();
 }
 
@@ -182,7 +173,7 @@ Snapshot::ToString() {
         for (auto& sc_id : pc_m) {
             auto sc = GetResource<SegmentCommit>(sc_id);
             auto se = GetResource<Segment>(sc->GetSegmentId());
-            ss << "\nSegment: id=" << se->GetID();
+            ss << "\n  Segment: id=" << se->GetID();
             ss << ", SegmentCommit: id=" << sc->GetID();
             ss << ",mappings=";
             auto& sc_m = sc->GetMappings();

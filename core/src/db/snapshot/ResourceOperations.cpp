@@ -87,6 +87,9 @@ PartitionCommitOperation::DoExecute(Store& store) {
             resource_->GetMappings().erase(prev_segment_commit->GetID());
         if (context_.stale_segments.size() > 0) {
             for (auto& stale_segment : context_.stale_segments) {
+                if (stale_segment->GetPartitionId() != prev_resource->GetPartitionId()) {
+                    return Status(SS_INVALID_CONTEX_ERROR, "All stale segments should from specified partition");
+                }
                 auto stale_segment_commit = prev_ss_->GetSegmentCommit(stale_segment->GetID());
                 resource_->GetMappings().erase(stale_segment_commit->GetID());
             }

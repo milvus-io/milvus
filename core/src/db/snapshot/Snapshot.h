@@ -82,6 +82,16 @@ class Snapshot : public ReferenceProxy {
         return max_lsn_;
     }
 
+    PartitionPtr
+    GetPartition(const std::string& name) {
+        ID_TYPE id;
+        auto status = GetPartitionId(name, id);
+        if (!status.ok()) {
+            return nullptr;
+        }
+        return GetResource<Partition>(id);
+    }
+
     Status
     GetPartitionId(const std::string& name, ID_TYPE& id) const {
         auto it = partition_names_map_.find(name);

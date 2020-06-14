@@ -387,13 +387,13 @@ CreatePartitionOperation::DoExecute(Store& store) {
     if (!status.ok())
         return status;
 
-    auto collection = prev_ss_->GetCollection();
+    auto collection = context_.prev_ss->GetCollection();
     auto partition = context_.new_partition;
 
     PartitionCommitPtr pc;
     OperationContext pc_context;
     pc_context.new_partition = partition;
-    auto pc_op = PartitionCommitOperation(pc_context, prev_ss_);
+    auto pc_op = PartitionCommitOperation(pc_context, context_.prev_ss);
     status = pc_op(store);
     if (!status.ok())
         return status;
@@ -404,7 +404,7 @@ CreatePartitionOperation::DoExecute(Store& store) {
     OperationContext cc_context;
     cc_context.new_partition_commit = pc;
     context_.new_partition_commit = pc;
-    auto cc_op = CollectionCommitOperation(cc_context, prev_ss_);
+    auto cc_op = CollectionCommitOperation(cc_context, context_.prev_ss);
     status = cc_op(store);
     if (!status.ok())
         return status;
