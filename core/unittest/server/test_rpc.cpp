@@ -1202,6 +1202,133 @@ TEST_F(RpcHandlerTest, CMD_TEST) {
     handler->Cmd(&context, &command, &reply);
 }
 
+void
+ConstructHybridSearchParam_1(milvus::grpc::HSearchParam& search_param, const std::string& collection_name,
+                             int64_t dimension, int64_t nq, int64_t topk) {
+    search_param.set_collection_name(collection_name);
+    std::vector<int64_t> term_value(nq, 0);
+    for (uint64_t i = 0; i < nq; ++i) {
+        term_value[i] = i + nq;
+    }
+
+    std::default_random_engine e;
+    std::uniform_real_distribution<float> u(0, 1);
+    std::vector<std::vector<float>> query_vector;
+    query_vector.resize(nq);
+    for (uint64_t i = 0; i < nq; ++i) {
+        query_vector[i].resize(dimension);
+        for (uint64_t j = 0; j < dimension; ++j) {
+            query_vector[i][j] = u(e);
+        }
+    }
+
+    nlohmann::json dsl_json, bool_json, term_json, range_json, vector_json;
+    term_json["term"]["field_name"] = "field_0";
+    term_json["term"]["values"] = term_value;
+    bool_json["must"].push_back(term_json);
+
+    range_json["range"]["field_name"] = "field_0";
+    nlohmann::json comp_json;
+    comp_json["gte"] = "0";
+    comp_json["lte"] = "100000";
+    range_json["range"]["values"] = comp_json;
+    bool_json["must"].push_back(range_json);
+
+    std::string placeholder = "placeholder_1";
+    vector_json["vector"] = placeholder;
+    bool_json["must"].push_back(vector_json);
+
+    dsl_json["bool"] = bool_json;
+
+    nlohmann::json vector_param_json, vector_extra_params;
+    vector_param_json[placeholder]["field_name"] = "field_1";
+    vector_param_json[placeholder]["topk"] = topk;
+    vector_extra_params["nprobe"] = 64;
+    vector_param_json[placeholder]["params"] = vector_extra_params;
+
+    search_param.set_dsl(dsl_json.dump());
+    auto vector_param = search_param.add_vector_param();
+    for (auto record : query_vector) {
+        auto row_record = vector_param->add_row_record();
+        CopyRowRecord(row_record, record);
+    }
+    vector_param->set_json(vector_param_json.dump());
+}
+
+void
+ConstructHybridSearchParam_2(milvus::grpc::HSearchParam& search_param, const std::string& collection_name,
+                             int64_t dimension, int64_t nq, int64_t topk) {
+    search_param.set_collection_name(collection_name);
+    std::vector<int64_t> term_value(nq, 0);
+    for (uint64_t i = 0; i < nq; ++i) {
+        term_value[i] = i + nq;
+    }
+
+    std::default_random_engine e;
+    std::uniform_real_distribution<float> u(0, 1);
+    std::vector<std::vector<float>> query_vector;
+    query_vector.resize(nq);
+    for (uint64_t i = 0; i < nq; ++i) {
+        query_vector[i].resize(dimension);
+        for (uint64_t j = 0; j < dimension; ++j) {
+            query_vector[i][j] = u(e);
+        }
+    }
+
+    nlohmann::json dsl_json, bool_json, term_json, range_json, vector_json;
+    std::string placeholder = "placeholder_1";
+
+    std::string dsl_string = R"({
+        "bool": {
+            "must": [
+                {
+                    "must": [
+                        {
+                            "should": [
+                                {
+                                    "term": {
+                                        "field_name": "field_0",
+                                        "values": [10, 11, 12 ,13, 14 ,15]
+                                    }
+                                },
+                                {
+                                    "range": {
+                                        "field_name": "field_0",
+                                        "values": {"gte": "0", "lte": "100000"}
+                                    }
+                                }
+                            ]
+                        }
+                    ]
+                },
+                {
+                    "must": [
+                        {
+                            "vector" : "placeholder_1"
+                        }
+                    ]
+                }
+            ]
+        }
+    })";
+
+    dsl_json = nlohmann::json::parse(dsl_string);
+
+    nlohmann::json vector_param_json, vector_extra_params;
+    vector_param_json[placeholder]["field_name"] = "field_1";
+    vector_param_json[placeholder]["topk"] = topk;
+    vector_extra_params["nprobe"] = 64;
+    vector_param_json[placeholder]["params"] = vector_extra_params;
+
+    search_param.set_dsl(dsl_json.dump());
+    auto vector_param = search_param.add_vector_param();
+    for (auto record : query_vector) {
+        auto row_record = vector_param->add_row_record();
+        CopyRowRecord(row_record, record);
+    }
+    vector_param->set_json(vector_param_json.dump());
+}
+
 TEST_F(RpcHandlerTest, HYBRID_TEST) {
     ::grpc::ServerContext context;
     milvus::grpc::Mapping mapping;
@@ -1210,8 +1337,10 @@ TEST_F(RpcHandlerTest, HYBRID_TEST) {
     uint64_t row_num = 1000;
     uint64_t dimension = 128;
 
+    std::string collection_name = "test_hybrid";
+
     // Create Hybrid Collection
-    mapping.set_collection_name("test_hybrid");
+    mapping.set_collection_name(collection_name);
     auto field_0 = mapping.add_fields();
     field_0->set_name("field_0");
     field_0->mutable_type()->set_data_type(::milvus::grpc::DataType::INT64);
@@ -1220,17 +1349,12 @@ TEST_F(RpcHandlerTest, HYBRID_TEST) {
     field_1->mutable_type()->mutable_vector_param()->set_dimension(128);
     field_1->set_name("field_1");
 
-    milvus::json json_param = {{"metric_type", 1}, {"engine_type", 1}};
-    auto extra_param = field_1->add_extra_params();
-    extra_param->set_key("params");
-    extra_param->set_value(json_param.dump());
-
     handler->CreateHybridCollection(&context, &mapping, &response);
 
     // Insert Entities
     milvus::grpc::HInsertParam insert_param;
     milvus::grpc::HEntityIDs entity_ids;
-    insert_param.set_collection_name("test_hybrid");
+    insert_param.set_collection_name(collection_name);
 
     auto entity = insert_param.mutable_entity();
     auto field_name_0 = entity->add_field_names();
@@ -1286,15 +1410,6 @@ TEST_F(RpcHandlerTest, HYBRID_TEST) {
     term_query->mutable_int_value()->Resize(static_cast<int>(nq), 0);
     memcpy(term_query->mutable_int_value()->mutable_data(), term_value.data(), nq * sizeof(int64_t));
 
-    auto range_query = boolean_query_2->add_general_query()->mutable_range_query();
-    range_query->set_field_name("field_0");
-    auto comp1 = range_query->add_operand();
-    comp1->set_operator_(::milvus::grpc::CompareOperator::GTE);
-    comp1->set_operand("0");
-    auto comp2 = range_query->add_operand();
-    comp2->set_operator_(::milvus::grpc::CompareOperator::LTE);
-    comp2->set_operand("100000");
-
     auto vector_query = boolean_query_2->add_general_query()->mutable_vector_query();
     vector_query->set_field_name("field_1");
     vector_query->set_topk(topk);
@@ -1311,194 +1426,202 @@ TEST_F(RpcHandlerTest, HYBRID_TEST) {
         auto row_record = vector_query->add_records();
         CopyRowRecord(row_record, record);
     }
-    auto extra_param_1 = vector_query->add_extra_params();
-    extra_param_1->set_key("params");
-    milvus::json param = {{"nprobe", 16}};
-    extra_param_1->set_value(param.dump());
-
-    search_param.set_collection_name("test_hybrid");
-    auto search_extra_param = search_param.add_extra_params();
-    search_extra_param->set_key("params");
-    search_extra_param->set_value("");
-
-    milvus::grpc::TopKQueryResult topk_query_result;
-    handler->HybridSearch(&context, &search_param, &topk_query_result);
-}
-
-TEST_F(RpcHandlerTest, HYBRID_INVALID_TEST) {
-    fiu_init(0);
-
-    ::grpc::ServerContext context;
-    milvus::grpc::Mapping mapping;
-    milvus::grpc::Status response;
-
-    uint64_t row_num = 1000;
-    uint64_t dimension = 128;
-
-    // Create Hybrid Collection
-    mapping.set_collection_name("test_hybrid");
-    auto field_0 = mapping.add_fields();
-    field_0->set_name("field_0");
-    field_0->mutable_type()->set_data_type(::milvus::grpc::DataType::INT64);
-
-    auto field_1 = mapping.add_fields();
-    field_1->mutable_type()->mutable_vector_param()->set_dimension(128);
-    field_1->set_name("field_1");
-
-    milvus::json json_param = {{"metric_type", 1}, {"engine_type", 1}};
-    auto extra_param = field_1->add_extra_params();
+    auto extra_param = vector_query->add_extra_params();
     extra_param->set_key("params");
-    extra_param->set_value(json_param.dump());
-
-    fiu_enable("CreateHybridCollectionRequest.OnExecute.invalid_collection_name", 1, NULL, 0);
-    handler->CreateHybridCollection(&context, &mapping, &response);
-    fiu_disable("CreateHybridCollectionRequest.OnExecute.invalid_collection_name");
-
-    fiu_enable("CreateHybridCollectionRequest.OnExecute.invalid_db_execute", 1, NULL, 0);
-    handler->CreateHybridCollection(&context, &mapping, &response);
-    fiu_disable("CreateHybridCollectionRequest.OnExecute.invalid_db_execute");
-
-    handler->CreateHybridCollection(&context, &mapping, &response);
-    milvus::grpc::CollectionName grpc_collection_name;
-    grpc_collection_name.set_collection_name("test_hybrid");
-    fiu_enable("DescribeHybridCollectionRequest.OnExecute.invalid_db_execute", 1, NULL, 0);
-    handler->DescribeHybridCollection(&context, &grpc_collection_name, &mapping);
-    fiu_disable("DescribeHybridCollectionRequest.OnExecute.invalid_db_execute");
-    handler->DescribeHybridCollection(&context, &grpc_collection_name, &mapping);
-
-    // Insert Entities
-    milvus::grpc::HInsertParam insert_param;
-    milvus::grpc::HEntityIDs entity_ids;
-    insert_param.set_collection_name("test_hybrid");
-
-    auto entity = insert_param.mutable_entities();
-    auto field_name_0 = entity->add_field_names();
-    *field_name_0 = "field_0";
-    auto field_name_1 = entity->add_field_names();
-    *field_name_1 = "field_1";
-
-    entity->set_row_num(row_num);
-    std::vector<int64_t> field_value(row_num, 0);
-    for (uint64_t i = 0; i < row_num; i++) {
-        field_value[i] = i;
-    }
-    entity->set_attr_records(field_value.data(), row_num * sizeof(int64_t));
-
-    std::vector<std::vector<float>> vector_field;
-    vector_field.resize(row_num);
-    for (uint64_t i = 0; i < row_num; ++i) {
-        vector_field[i].resize(dimension);
-        for (uint64_t j = 0; j < dimension; ++j) {
-            vector_field[i][j] = (float)((i + 10) / (j + 20));
-        }
-    }
-    auto vector_record = entity->add_result_values();
-    for (uint64_t i = 0; i < row_num; ++i) {
-        auto record = vector_record->mutable_vector_value()->add_value();
-        auto vector_data = record->mutable_float_data();
-        vector_data->Resize(static_cast<int>(vector_field[i].size()), 0.0);
-        memcpy(vector_data->mutable_data(), vector_field[i].data(), vector_field[i].size() * sizeof(float));
-    }
-
-    fiu_enable("InsertEntityRequest.OnExecute.throw_std_exception", 1, NULL, 0);
-    handler->InsertEntity(&context, &insert_param, &entity_ids);
-    fiu_disable("InsertEntityRequest.OnExecute.throw_std_exception");
-    handler->InsertEntity(&context, &insert_param, &entity_ids);
-
-    uint64_t nq = 10;
-    uint64_t topk = 10;
-    milvus::grpc::HSearchParam search_param;
-    auto general_query = search_param.mutable_general_query();
-    auto boolean_query_1 = general_query->mutable_boolean_query();
-    boolean_query_1->set_occur(milvus::grpc::Occur::MUST);
-    auto general_query_1 = boolean_query_1->add_general_query();
-    auto boolean_query_2 = general_query_1->mutable_boolean_query();
-    auto term_query = boolean_query_2->add_general_query()->mutable_term_query();
-    term_query->set_field_name("field_0");
-    std::vector<int64_t> term_value(nq, 0);
-    for (uint64_t i = 0; i < nq; ++i) {
-        term_value[i] = i + nq;
-    }
-    term_query->set_value_num(nq);
-    term_query->set_values(term_value.data(), nq * sizeof(int64_t));
-
-    auto range_query = boolean_query_2->add_general_query()->mutable_range_query();
-    range_query->set_field_name("field_0");
-    auto comp1 = range_query->add_operand();
-    comp1->set_operator_(::milvus::grpc::CompareOperator::GTE);
-    comp1->set_operand("0");
-    auto comp2 = range_query->add_operand();
-    comp2->set_operator_(::milvus::grpc::CompareOperator::LTE);
-    comp2->set_operand("100000");
-
-    auto vector_query = boolean_query_2->add_general_query()->mutable_vector_query();
-    vector_query->set_field_name("field_1");
-    vector_query->set_topk(topk);
-    vector_query->set_query_boost(2);
-    std::vector<std::vector<float>> query_vector;
-    query_vector.resize(nq);
-    for (uint64_t i = 0; i < nq; ++i) {
-        query_vector[i].resize(dimension);
-        for (uint64_t j = 0; j < dimension; ++j) {
-            query_vector[i][j] = (float)((j + 1) / (i + dimension));
-        }
-    }
-    for (auto record : query_vector) {
-        auto row_record = vector_query->add_records();
-        CopyRowRecord(row_record, record);
-    }
-    auto extra_param_1 = vector_query->add_extra_params();
-    extra_param_1->set_key("params");
     milvus::json param = {{"nprobe", 16}};
-    extra_param_1->set_value(param.dump());
+    extra_param->set_value(param.dump());
 
-    search_param.set_collection_name("test_hybrid");
+    search_param.set_collection_name(collection_name);
     auto search_extra_param = search_param.add_extra_params();
     search_extra_param->set_key("params");
-    search_extra_param->set_value(param.dump());
+    milvus::json value;
+    search_extra_param->set_value(value.dump());
 
     milvus::grpc::HQueryResult topk_query_result;
     handler->HybridSearchPB(&context, &search_param, &topk_query_result);
 
     // Test new HybridSearch
     milvus::grpc::HSearchParam new_search_param;
-    new_search_param.set_collection_name("test_hybrid");
-
-    nlohmann::json dsl_json, bool_json, term_json, range_json, vector_json;
-    term_json["term"]["field_name"] = "field_0";
-    term_json["term"]["values"] = term_value;
-    bool_json["must"].push_back(term_json);
-
-    range_json["range"]["field_name"] = "field_0";
-    nlohmann::json comp_json;
-    comp_json["gte"] = "0";
-    comp_json["lte"] = "100000";
-    range_json["range"]["values"] = comp_json;
-    bool_json["must"].push_back(range_json);
-
-    std::string placeholder = "placeholder_1";
-    vector_json["vector"] = placeholder;
-    bool_json["must"].push_back(vector_json);
-
-    dsl_json["bool"] = bool_json;
-
-    nlohmann::json vector_param_json, vector_extra_params;
-    vector_param_json[placeholder]["field_name"] = "field_1";
-    vector_param_json[placeholder]["topk"] = topk;
-    vector_extra_params["nprobe"] = 64;
-    vector_param_json[placeholder]["params"] = vector_extra_params;
-
-    new_search_param.set_dsl(dsl_json.dump());
-    auto vector_param = new_search_param.add_vector_param();
-    for (auto record : query_vector) {
-        auto row_record = vector_param->add_row_record();
-        CopyRowRecord(row_record, record);
-    }
-    vector_param->set_json(vector_param_json.dump());
+    ConstructHybridSearchParam_2(new_search_param, collection_name, dimension, nq, topk);
 
     milvus::grpc::HQueryResult new_query_result;
     handler->HybridSearch(&context, &new_search_param, &new_query_result);
 }
+
+//TEST_F(RpcHandlerTest, HYBRID_INVALID_TEST) {
+//    fiu_init(0);
+//
+//    ::grpc::ServerContext context;
+//    milvus::grpc::Mapping mapping;
+//    milvus::grpc::Status response;
+//
+//    uint64_t row_num = 1000;
+//    uint64_t dimension = 128;
+//
+//    // Create Hybrid Collection
+//    mapping.set_collection_name("test_hybrid");
+//    auto field_0 = mapping.add_fields();
+//    field_0->set_name("field_0");
+//    field_0->mutable_type()->set_data_type(::milvus::grpc::DataType::INT64);
+//
+//    auto field_1 = mapping.add_fields();
+//    field_1->mutable_type()->mutable_vector_param()->set_dimension(128);
+//    field_1->set_name("field_1");
+//
+//    milvus::json json_param = {{"metric_type", 1}, {"engine_type", 1}};
+//    auto extra_param = field_1->add_extra_params();
+//    extra_param->set_key("params");
+//    extra_param->set_value(json_param.dump());
+//
+//    fiu_enable("CreateHybridCollectionRequest.OnExecute.invalid_collection_name", 1, NULL, 0);
+//    handler->CreateHybridCollection(&context, &mapping, &response);
+//    fiu_disable("CreateHybridCollectionRequest.OnExecute.invalid_collection_name");
+//
+//    fiu_enable("CreateHybridCollectionRequest.OnExecute.invalid_db_execute", 1, NULL, 0);
+//    handler->CreateHybridCollection(&context, &mapping, &response);
+//    fiu_disable("CreateHybridCollectionRequest.OnExecute.invalid_db_execute");
+//
+//    handler->CreateHybridCollection(&context, &mapping, &response);
+//    milvus::grpc::CollectionName grpc_collection_name;
+//    grpc_collection_name.set_collection_name("test_hybrid");
+//    fiu_enable("DescribeHybridCollectionRequest.OnExecute.invalid_db_execute", 1, NULL, 0);
+//    handler->DescribeHybridCollection(&context, &grpc_collection_name, &mapping);
+//    fiu_disable("DescribeHybridCollectionRequest.OnExecute.invalid_db_execute");
+//    handler->DescribeHybridCollection(&context, &grpc_collection_name, &mapping);
+//
+//    // Insert Entities
+//    milvus::grpc::HInsertParam insert_param;
+//    milvus::grpc::HEntityIDs entity_ids;
+//    insert_param.set_collection_name("test_hybrid");
+//
+//    auto entity = insert_param.mutable_entities();
+//    auto field_name_0 = entity->add_field_names();
+//    *field_name_0 = "field_0";
+//    auto field_name_1 = entity->add_field_names();
+//    *field_name_1 = "field_1";
+//
+//    entity->set_row_num(row_num);
+//    std::vector<int64_t> field_value(row_num, 0);
+//    for (uint64_t i = 0; i < row_num; i++) {
+//        field_value[i] = i;
+//    }
+//    entity->set_attr_records(field_value.data(), row_num * sizeof(int64_t));
+//
+//    std::vector<std::vector<float>> vector_field;
+//    vector_field.resize(row_num);
+//    for (uint64_t i = 0; i < row_num; ++i) {
+//        vector_field[i].resize(dimension);
+//        for (uint64_t j = 0; j < dimension; ++j) {
+//            vector_field[i][j] = (float)((i + 10) / (j + 20));
+//        }
+//    }
+//    auto vector_record = entity->add_result_values();
+//    for (uint64_t i = 0; i < row_num; ++i) {
+//        auto record = vector_record->mutable_vector_value()->add_value();
+//        auto vector_data = record->mutable_float_data();
+//        vector_data->Resize(static_cast<int>(vector_field[i].size()), 0.0);
+//        memcpy(vector_data->mutable_data(), vector_field[i].data(), vector_field[i].size() * sizeof(float));
+//    }
+//
+//    fiu_enable("InsertEntityRequest.OnExecute.throw_std_exception", 1, NULL, 0);
+//    handler->InsertEntity(&context, &insert_param, &entity_ids);
+//    fiu_disable("InsertEntityRequest.OnExecute.throw_std_exception");
+//    handler->InsertEntity(&context, &insert_param, &entity_ids);
+//
+//    uint64_t nq = 10;
+//    uint64_t topk = 10;
+//    milvus::grpc::HSearchParam search_param;
+//    auto general_query = search_param.mutable_general_query();
+//    auto boolean_query_1 = general_query->mutable_boolean_query();
+//    boolean_query_1->set_occur(milvus::grpc::Occur::MUST);
+//    auto general_query_1 = boolean_query_1->add_general_query();
+//    auto boolean_query_2 = general_query_1->mutable_boolean_query();
+//    auto term_query = boolean_query_2->add_general_query()->mutable_term_query();
+//    term_query->set_field_name("field_0");
+//    std::vector<int64_t> term_value(nq, 0);
+//    for (uint64_t i = 0; i < nq; ++i) {
+//        term_value[i] = i + nq;
+//    }
+//    term_query->set_value_num(nq);
+//    term_query->set_values(term_value.data(), nq * sizeof(int64_t));
+//
+//    auto range_query = boolean_query_2->add_general_query()->mutable_range_query();
+//    range_query->set_field_name("field_0");
+//    auto comp1 = range_query->add_operand();
+//    comp1->set_operator_(::milvus::grpc::CompareOperator::GTE);
+//    comp1->set_operand("0");
+//    auto comp2 = range_query->add_operand();
+//    comp2->set_operator_(::milvus::grpc::CompareOperator::LTE);
+//    comp2->set_operand("100000");
+//
+//    auto vector_query = boolean_query_2->add_general_query()->mutable_vector_query();
+//    vector_query->set_field_name("field_1");
+//    vector_query->set_topk(topk);
+//    vector_query->set_query_boost(2);
+//    std::vector<std::vector<float>> query_vector;
+//    query_vector.resize(nq);
+//    for (uint64_t i = 0; i < nq; ++i) {
+//        query_vector[i].resize(dimension);
+//        for (uint64_t j = 0; j < dimension; ++j) {
+//            query_vector[i][j] = (float)((j + 1) / (i + dimension));
+//        }
+//    }
+//    for (auto record : query_vector) {
+//        auto row_record = vector_query->add_records();
+//        CopyRowRecord(row_record, record);
+//    }
+//    auto extra_param_1 = vector_query->add_extra_params();
+//    extra_param_1->set_key("params");
+//    milvus::json param = {{"nprobe", 16}};
+//    extra_param_1->set_value(param.dump());
+//
+//    search_param.set_collection_name("test_hybrid");
+//    auto search_extra_param = search_param.add_extra_params();
+//    search_extra_param->set_key("params");
+//    search_extra_param->set_value(param.dump());
+//
+//    milvus::grpc::HQueryResult topk_query_result;
+//    handler->HybridSearchPB(&context, &search_param, &topk_query_result);
+//
+//    // Test new HybridSearch
+//    milvus::grpc::HSearchParam new_search_param;
+//    new_search_param.set_collection_name("test_hybrid");
+//
+//    nlohmann::json dsl_json, bool_json, term_json, range_json, vector_json;
+//    term_json["term"]["field_name"] = "field_0";
+//    term_json["term"]["values"] = term_value;
+//    bool_json["must"].push_back(term_json);
+//
+//    range_json["range"]["field_name"] = "field_0";
+//    nlohmann::json comp_json;
+//    comp_json["gte"] = "0";
+//    comp_json["lte"] = "100000";
+//    range_json["range"]["values"] = comp_json;
+//    bool_json["must"].push_back(range_json);
+//
+//    std::string placeholder = "placeholder_1";
+//    vector_json["vector"] = placeholder;
+//    bool_json["must"].push_back(vector_json);
+//
+//    dsl_json["bool"] = bool_json;
+//
+//    nlohmann::json vector_param_json, vector_extra_params;
+//    vector_param_json[placeholder]["field_name"] = "field_1";
+//    vector_param_json[placeholder]["topk"] = topk;
+//    vector_extra_params["nprobe"] = 64;
+//    vector_param_json[placeholder]["params"] = vector_extra_params;
+//
+//    new_search_param.set_dsl(dsl_json.dump());
+//    auto vector_param = new_search_param.add_vector_param();
+//    for (auto record : query_vector) {
+//        auto row_record = vector_param->add_row_record();
+//        CopyRowRecord(row_record, record);
+//    }
+//    vector_param->set_json(vector_param_json.dump());
+//
+//    milvus::grpc::HQueryResult new_query_result;
+//    handler->HybridSearch(&context, &new_search_param, &new_query_result);
+//}
 
 //////////////////////////////////////////////////////////////////////
 namespace {
