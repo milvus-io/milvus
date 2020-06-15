@@ -240,14 +240,18 @@ TEST_F(EngineTest, ENGINE_IMPL_NULL_INDEX_TEST) {
     auto build_index = engine_ptr->BuildIndex("/tmp/milvus_index_2", milvus::engine::EngineType::FAISS_IDMAP);
     ASSERT_EQ(build_index, nullptr);
 
-    int64_t n = 0;
-    const float* data = nullptr;
-    int64_t k = 10;
-    int64_t nprobe = 0;
-    float* distances = nullptr;
-    int64_t* labels = nullptr;
-    bool hybrid = false;
-    auto status = engine_ptr->Search(n, data, k, nprobe, distances, labels, hybrid);
+//    int64_t n = 0;
+//    const float* data = nullptr;
+//    int64_t k = 10;
+//    int64_t nprobe = 0;
+//    float* distances = nullptr;
+//    int64_t* labels = nullptr;
+//    bool hybrid = false;
+//    auto status = engine_ptr->Search(n, data, k, nprobe, distances, labels, hybrid);
+    std::vector<int64_t> ids;
+    std::vector<float> distances;
+    milvus::scheduler::SearchJobPtr job;
+    auto status = engine_ptr->Search(ids, distances, nullptr, false);
     ASSERT_FALSE(status.ok());
 
     fiu_disable("read_null_index");
