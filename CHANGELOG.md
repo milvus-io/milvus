@@ -25,6 +25,7 @@ Please mark all change in change log and use the issue from GitHub
 -   \#2373 Build index for small segment waste time on waiting background index thread finish
 -   \#2394 Drop collection timeout if too many partitions created on collection
 -   \#2549 Launch server fail using demo config
+-   \#2564 cache.cache_size range check error
 
 ## Feature
 -   \#2363 Update branch version
