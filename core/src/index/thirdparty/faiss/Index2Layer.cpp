@@ -42,7 +42,6 @@
 
 namespace faiss {
 
-using idx_t = Index::idx_t;
 
 /*************************************
  * Index2Layer implementation
@@ -167,7 +166,7 @@ void Index2Layer::search(
     idx_t /*k*/,
     float* /*distances*/,
     idx_t* /*labels*/,
-    ConcurrentBitsetPtr bitset) const {
+    ConcurrentBitsetPtr) const {
   FAISS_THROW_MSG("not implemented");
 }
 

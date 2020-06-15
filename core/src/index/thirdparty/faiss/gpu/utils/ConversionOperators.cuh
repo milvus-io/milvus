@@ -8,11 +8,11 @@
 
 #pragma once
 
-#include <cuda.h>
-#include <faiss/Index.h>
-#include <faiss/gpu/utils/Float16.cuh>
+#include <faiss/MetricType.h>
 #include <faiss/gpu/utils/DeviceTensor.cuh>
+#include <faiss/gpu/utils/Float16.cuh>
 
+#include <cuda.h>
 #include <thrust/execution_policy.h>
 #include <thrust/transform.h>
 

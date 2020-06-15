@@ -8,10 +8,10 @@
 
 #pragma once
 
-#include <faiss/gpu/impl/GpuScalarQuantizer.cuh>
+#include <faiss/MetricType.h>
 #include <faiss/gpu/GpuIndicesOptions.h>
+#include <faiss/gpu/impl/GpuScalarQuantizer.cuh>
 #include <faiss/gpu/utils/Tensor.cuh>
-#include <faiss/Index.h>
 #include <thrust/device_vector.h>
 
 namespace faiss { namespace gpu {

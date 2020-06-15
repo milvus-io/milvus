@@ -45,13 +45,13 @@ TEST(PQEncoderGeneric, encode) {
 
     // NOTE(hoss): Necessary scope to ensure trailing bits are flushed to mem.
     {
-      faiss::ProductQuantizer::PQEncoderGeneric encoder(codes.get(), nbits);
+      faiss::PQEncoderGeneric encoder(codes.get(), nbits);
       for (const auto& v : values) {
         encoder.encode(v & mask);
       }
     }
 
-    faiss::ProductQuantizer::PQDecoderGeneric decoder(codes.get(), nbits);
+    faiss::PQDecoderGeneric decoder(codes.get(), nbits);
     for (int i = 0; i < nsubcodes; ++i) {
       uint64_t v = decoder.decode();
       EXPECT_EQ(values[i] & mask, v);
@@ -66,12 +66,12 @@ TEST(PQEncoder8, encode) {
   const uint64_t mask = 0xFF;
   std::unique_ptr<uint8_t[]> codes(new uint8_t[nsubcodes]);
 
-  faiss::ProductQuantizer::PQEncoder8 encoder(codes.get(), 8);
+  faiss::PQEncoder8 encoder(codes.get(), 8);
   for (const auto& v : values) {
     encoder.encode(v & mask);
   }
 
-  faiss::ProductQuantizer::PQDecoder8 decoder(codes.get(), 8);
+  faiss::PQDecoder8 decoder(codes.get(), 8);
   for (int i = 0; i < nsubcodes; ++i) {
     uint64_t v = decoder.decode();
     EXPECT_EQ(values[i] & mask, v);
@@ -85,12 +85,12 @@ TEST(PQEncoder16, encode) {
   const uint64_t mask = 0xFFFF;
   std::unique_ptr<uint8_t[]> codes(new uint8_t[2 * nsubcodes]);
 
-  faiss::ProductQuantizer::PQEncoder16 encoder(codes.get(), 16);
+  faiss::PQEncoder16 encoder(codes.get(), 16);
   for (const auto& v : values) {
     encoder.encode(v & mask);
   }
 
-  faiss::ProductQuantizer::PQDecoder16 decoder(codes.get(), 16);
+  faiss::PQDecoder16 decoder(codes.get(), 16);
   for (int i = 0; i < nsubcodes; ++i) {
     uint64_t v = decoder.decode();
     EXPECT_EQ(values[i] & mask, v);

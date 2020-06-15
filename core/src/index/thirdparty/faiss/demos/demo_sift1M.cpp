@@ -20,7 +20,7 @@
 #include <sys/time.h>
 
 #include <faiss/AutoTune.h>
-
+#include <faiss/index_factory.h>
 
 /**
  * To run this demo, please download the ANN_SIFT1M dataset from

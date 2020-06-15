@@ -20,6 +20,8 @@
 #include <thread>
 #include <vector>
 #include "db/snapshot/SnapshotHolder.h"
+#include "db/snapshot/Store.h"
+#include "utils/Status.h"
 
 namespace milvus {
 namespace engine {
@@ -32,30 +34,36 @@ class Snapshots {
         static Snapshots sss;
         return sss;
     }
-    bool
-    Close(ID_TYPE collection_id);
-    SnapshotHolderPtr
-    GetHolder(ID_TYPE collection_id);
-    SnapshotHolderPtr
-    GetHolder(const std::string& name);
+    Status
+    GetHolder(const ID_TYPE& collection_id, SnapshotHolderPtr& holder);
+    Status
+    GetHolder(const std::string& name, SnapshotHolderPtr& holder);
+    Status
+    LoadHolder(Store& store, const ID_TYPE& collection_id, SnapshotHolderPtr& holder);
 
-    ScopedSnapshotT
-    GetSnapshot(ID_TYPE collection_id, ID_TYPE id = 0, bool scoped = true);
-    ScopedSnapshotT
-    GetSnapshot(const std::string& name, ID_TYPE id = 0, bool scoped = true);
+    Status
+    GetSnapshot(ScopedSnapshotT& ss, ID_TYPE collection_id, ID_TYPE id = 0, bool scoped = true);
+    Status
+    GetSnapshot(ScopedSnapshotT& ss, const std::string& name, ID_TYPE id = 0, bool scoped = true);
+    Status
+    LoadSnapshot(Store& store, ScopedSnapshotT& ss, ID_TYPE collection_id, ID_TYPE id, bool scoped = true);
 
-    IDS_TYPE
-    GetCollectionIds() const;
+    Status
+    GetCollectionIds(IDS_TYPE& ids) const;
 
-    bool
-    DropCollection(const std::string& name);
+    Status
+    DropCollection(const std::string& name, const LSN_TYPE& lsn);
+    Status
+    DropCollection(ID_TYPE collection_id, const LSN_TYPE& lsn);
 
-    template <typename... ResourceT>
-    bool
-    Flush(ResourceT&&... resources);
+    Status
+    DropPartition(const ID_TYPE& collection_id, const ID_TYPE& partition_id, const LSN_TYPE& lsn);
+
+    Status
+    Reset();
 
     void
-    Reset();
+    Init();
 
  private:
     void
@@ -63,16 +71,15 @@ class Snapshots {
     Snapshots() {
         Init();
     }
-    void
-    Init();
+    Status
+    DoDropCollection(ScopedSnapshotT& ss, const LSN_TYPE& lsn);
+
+    Status
+    LoadNoLock(Store& store, ID_TYPE collection_id, SnapshotHolderPtr& holder);
+    Status
+    GetHolderNoLock(ID_TYPE collection_id, SnapshotHolderPtr& holder);
 
     mutable std::shared_timed_mutex mutex_;
-    SnapshotHolderPtr
-    LoadNoLock(ID_TYPE collection_id);
-    /* SnapshotHolderPtr Load(ID_TYPE collection_id); */
-    SnapshotHolderPtr
-    GetHolderNoLock(ID_TYPE collection_id);
-
     std::map<ID_TYPE, SnapshotHolderPtr> holders_;
     std::map<std::string, ID_TYPE> name_id_map_;
     std::vector<Snapshot::Ptr> to_release_;

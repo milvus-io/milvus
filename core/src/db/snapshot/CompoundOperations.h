@@ -11,6 +11,7 @@
 
 #pragma once
 
+#include <string>
 #include "ResourceOperations.h"
 #include "Snapshot.h"
 
@@ -18,58 +19,157 @@ namespace milvus {
 namespace engine {
 namespace snapshot {
 
-class BuildOperation : public Operations {
+template <typename DerivedT>
+class CompoundBaseOperation : public Operations {
  public:
     using BaseT = Operations;
+
+    CompoundBaseOperation(const OperationContext& context, ScopedSnapshotT prev_ss)
+        : BaseT(context, prev_ss, OperationsType::W_Compound) {
+    }
+
+    std::string
+    GetRepr() const override {
+        std::stringstream ss;
+        ss << "<" << GetName() << "(";
+        if (context_.prev_ss) {
+            ss << "SS=" << context_.prev_ss->GetID();
+        }
+        ss << "," << context_.ToString();
+        ss << ",LSN=" << GetContextLsn();
+        ss << ")>";
+        return ss.str();
+    }
+
+    Status
+    PreCheck() override {
+        if (GetContextLsn() <= prev_ss_->GetMaxLsn()) {
+            return Status(SS_INVALID_CONTEX_ERROR, "Invalid LSN found in operation");
+        }
+        return Status::OK();
+    }
+
+    std::string
+    GetName() const override {
+        return DerivedT::Name;
+    }
+};
+
+class BuildOperation : public CompoundBaseOperation<BuildOperation> {
+ public:
+    using BaseT = CompoundBaseOperation<BuildOperation>;
+    static constexpr const char* Name = "B";
 
     BuildOperation(const OperationContext& context, ScopedSnapshotT prev_ss);
-    BuildOperation(const OperationContext& context, ID_TYPE collection_id, ID_TYPE commit_id = 0);
 
-    bool
+    Status
     DoExecute(Store&) override;
-    bool
-    PreExecute(Store&) override;
 
-    SegmentFilePtr
-    CommitNewSegmentFile(const SegmentFileContext& context);
+    Status
+    CommitNewSegmentFile(const SegmentFileContext& context, SegmentFilePtr& created);
+
+ protected:
+    Status
+    CheckSegmentStale(ScopedSnapshotT& latest_snapshot, ID_TYPE segment_id) const;
 };
 
-class NewSegmentOperation : public Operations {
+class NewSegmentOperation : public CompoundBaseOperation<NewSegmentOperation> {
  public:
-    using BaseT = Operations;
+    using BaseT = CompoundBaseOperation<NewSegmentOperation>;
+    static constexpr const char* Name = "NS";
 
     NewSegmentOperation(const OperationContext& context, ScopedSnapshotT prev_ss);
-    NewSegmentOperation(const OperationContext& context, ID_TYPE collection_id, ID_TYPE commit_id = 0);
 
-    bool
+    Status
     DoExecute(Store&) override;
 
-    bool
-    PreExecute(Store&) override;
+    Status
+    CommitNewSegment(SegmentPtr& created);
 
-    SegmentPtr
-    CommitNewSegment();
-
-    SegmentFilePtr
-    CommitNewSegmentFile(const SegmentFileContext& context);
+    Status
+    CommitNewSegmentFile(const SegmentFileContext& context, SegmentFilePtr& created);
 };
 
-class MergeOperation : public Operations {
+class MergeOperation : public CompoundBaseOperation<MergeOperation> {
  public:
-    using BaseT = Operations;
+    using BaseT = CompoundBaseOperation<MergeOperation>;
+    static constexpr const char* Name = "M";
 
     MergeOperation(const OperationContext& context, ScopedSnapshotT prev_ss);
-    MergeOperation(const OperationContext& context, ID_TYPE collection_id, ID_TYPE commit_id = 0);
 
-    bool
-    PreExecute(Store&) override;
-    bool
+    Status
     DoExecute(Store&) override;
 
-    SegmentPtr
-    CommitNewSegment();
-    SegmentFilePtr
-    CommitNewSegmentFile(const SegmentFileContext& context);
+    Status
+    CommitNewSegment(SegmentPtr&);
+    Status
+    CommitNewSegmentFile(const SegmentFileContext& context, SegmentFilePtr&);
+};
+
+class CreateCollectionOperation : public CompoundBaseOperation<CreateCollectionOperation> {
+ public:
+    using BaseT = CompoundBaseOperation<CreateCollectionOperation>;
+    static constexpr const char* Name = "CC";
+
+    explicit CreateCollectionOperation(const CreateCollectionContext& context);
+
+    Status
+    DoExecute(Store&) override;
+
+    Status
+    GetSnapshot(ScopedSnapshotT& ss) const override;
+
+    Status
+    PreCheck() override;
+
+    const LSN_TYPE&
+    GetContextLsn() const override {
+        return c_context_.lsn;
+    }
+
+    std::string
+    GetRepr() const override;
+
+ private:
+    CreateCollectionContext c_context_;
+};
+
+class CreatePartitionOperation : public CompoundBaseOperation<CreatePartitionOperation> {
+ public:
+    using BaseT = CompoundBaseOperation<CreatePartitionOperation>;
+    static constexpr const char* Name = "CP";
+
+    CreatePartitionOperation(const OperationContext& context, ScopedSnapshotT prev_ss);
+
+    Status
+    CommitNewPartition(const PartitionContext& context, PartitionPtr& partition);
+
+    Status
+    DoExecute(Store&) override;
+
+    Status
+    PreCheck() override;
+};
+
+class DropPartitionOperation : public CompoundBaseOperation<DropPartitionOperation> {
+ public:
+    using BaseT = CompoundBaseOperation<DropPartitionOperation>;
+    static constexpr const char* Name = "DP";
+    DropPartitionOperation(const PartitionContext& context, ScopedSnapshotT prev_ss);
+
+    Status
+    DoExecute(Store&) override;
+
+    const LSN_TYPE&
+    GetContextLsn() const override {
+        return c_context_.lsn;
+    }
+
+    std::string
+    GetRepr() const override;
+
+ protected:
+    PartitionContext c_context_;
 };
 
 class GetSnapshotIDsOperation : public Operations {
@@ -78,7 +178,7 @@ class GetSnapshotIDsOperation : public Operations {
 
     explicit GetSnapshotIDsOperation(ID_TYPE collection_id, bool reversed = true);
 
-    bool
+    Status
     DoExecute(Store& store) override;
 
     const IDS_TYPE&
@@ -96,7 +196,7 @@ class GetCollectionIDsOperation : public Operations {
 
     explicit GetCollectionIDsOperation(bool reversed = true);
 
-    bool
+    Status
     DoExecute(Store& store) override;
 
     const IDS_TYPE&
@@ -105,6 +205,22 @@ class GetCollectionIDsOperation : public Operations {
  protected:
     bool reversed_;
     IDS_TYPE ids_;
+};
+
+class DropCollectionOperation : public CompoundBaseOperation<DropCollectionOperation> {
+ public:
+    using BaseT = CompoundBaseOperation<DropCollectionOperation>;
+    static constexpr const char* Name = "DC";
+
+    explicit DropCollectionOperation(const OperationContext& context, ScopedSnapshotT prev_ss)
+        : BaseT(context, prev_ss) {
+    }
+
+    Status
+    DoExecute(Store& store) override;
+
+ private:
+    ID_TYPE collection_id_;
 };
 
 }  // namespace snapshot

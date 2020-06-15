@@ -11,10 +11,9 @@
 
 #include "db/meta/MySQLConnectionPool.h"
 #include <fiu-local.h>
+#include <thread>
 
-namespace milvus {
-namespace engine {
-namespace meta {
+namespace milvus::engine::meta {
 
 // Do a simple form of in-use connection limiting: wait to return
 // a connection until there are a reasonably low number in use
@@ -24,7 +23,7 @@ namespace meta {
 mysqlpp::Connection*
 MySQLConnectionPool::grab() {
     while (conns_in_use_ > max_pool_size_) {
-        sleep(1);
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
     }
 
     ++conns_in_use_;
@@ -83,6 +82,4 @@ MySQLConnectionPool::max_idle_time() {
     return max_idle_time_;
 }
 
-}  // namespace meta
-}  // namespace engine
-}  // namespace milvus
+}  // namespace milvus::engine::meta

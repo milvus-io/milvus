@@ -11,8 +11,8 @@
 #ifndef FAISS_AUX_INDEX_STRUCTURES_C_H
 #define FAISS_AUX_INDEX_STRUCTURES_C_H
 
-#include "Index_c.h"
-#include "faiss_c.h"
+#include "../Index_c.h"
+#include "../faiss_c.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -125,6 +125,22 @@ int faiss_RangeSearchPartialResult_set_lims(
 
 int faiss_RangeSearchPartialResult_new_result(
     FaissRangeSearchPartialResult* res, idx_t qno, FaissRangeQueryResult** qr);
+
+
+FAISS_DECLARE_CLASS(DistanceComputer)
+/// called before computing distances
+int faiss_DistanceComputer_set_query(FaissDistanceComputer *dc, const float *x);
+
+/**
+ * Compute distance of vector i to current query.
+ * This function corresponds to the function call operator: DistanceComputer::operator()
+ */
+int faiss_DistanceComputer_vector_to_query_dis( FaissDistanceComputer *dc, idx_t i, float *qd);
+/// compute distance between two stored vectors
+int faiss_DistanceComputer_symmetric_dis(FaissDistanceComputer *dc, idx_t i, idx_t j, float *vd);
+
+FAISS_DECLARE_DESTRUCTOR(DistanceComputer)
+
 
 #ifdef __cplusplus
 }

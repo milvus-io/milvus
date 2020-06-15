@@ -22,7 +22,6 @@ namespace faiss {
 
 namespace {
 
-typedef Index::idx_t idx_t;
 
 } // namespace
 
@@ -83,9 +82,10 @@ void IndexIDMapTemplate<IndexT>::add_with_ids
 template <typename IndexT>
 void IndexIDMapTemplate<IndexT>::search
     (idx_t n, const typename IndexT::component_t *x, idx_t k,
-     typename IndexT::distance_t *distances, typename IndexT::idx_t *labels, ConcurrentBitsetPtr bitset) const
+     typename IndexT::distance_t *distances, typename IndexT::idx_t *labels,
+     ConcurrentBitsetPtr bitset) const
 {
-    index->search(n, x, k, distances, labels, bitset);
+    index->search (n, x, k, distances, labels, bitset);
     idx_t *li = labels;
 #pragma omp parallel for
     for (idx_t i = 0; i < n * k; i++) {
@@ -93,6 +93,7 @@ void IndexIDMapTemplate<IndexT>::search
     }
 }
 
+#if 0
 template <typename IndexT>
 void IndexIDMapTemplate<IndexT>::get_vector_by_id(idx_t n, const idx_t *xid, component_t *x,
                                                   ConcurrentBitsetPtr bitset)
@@ -117,11 +118,13 @@ void IndexIDMapTemplate<IndexT>::search_by_id (idx_t n, const idx_t *xid, idx_t 
     index->search(n, x, k, distances, labels, bitset);
     delete []x;
 }
+#endif
 
 template <typename IndexT>
 void IndexIDMapTemplate<IndexT>::range_search
     (typename IndexT::idx_t n, const typename IndexT::component_t *x,
-     typename IndexT::distance_t radius, RangeSearchResult *result, ConcurrentBitsetPtr bitset) const
+     typename IndexT::distance_t radius, RangeSearchResult *result,
+     ConcurrentBitsetPtr bitset) const
 {
   index->range_search(n, x, radius, result, bitset);
 #pragma omp parallel for

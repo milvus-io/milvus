@@ -9,7 +9,7 @@
 # brew install llvm
 CXX      = /usr/local/opt/llvm/bin/clang++ -std=c++11
 CXXFLAGS = -fPIC -m64 -Wall -g -O3 -fopenmp -Wno-sign-compare -I/usr/local/opt/llvm/include
-CPUFLAGS = -mavx2 -mf16c -msse4 -mpopcnt
+CPUFLAGS = -msse4 -mpopcnt
 LLVM_VERSION_PATH=$(shell ls -rt /usr/local/Cellar/llvm/ | tail -n1)
 LDFLAGS  = -fPIC -fopenmp -L/usr/local/opt/llvm/lib -L/usr/local/Cellar/llvm/${LLVM_VERSION_PATH}/lib
 

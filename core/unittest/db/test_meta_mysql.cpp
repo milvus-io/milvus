@@ -103,10 +103,6 @@ TEST_F(MySqlMetaTest, COLLECTION_TEST) {
     ASSERT_FALSE(has_collection);
     fiu_disable("MySQLMetaImpl.HasCollection.throw_exception");
 
-    FIU_ENABLE_FIU("MySQLMetaImpl.DropCollection.CLUSTER_WRITABLE_MODE");
-    stat = impl_->DropCollection(collection_id);
-    fiu_disable("MySQLMetaImpl.DropCollection.CLUSTER_WRITABLE_MODE");
-
     FIU_ENABLE_FIU("MySQLMetaImpl.DropAll.null_connection");
     status = impl_->DropAll();
     ASSERT_FALSE(status.ok());
@@ -298,7 +294,7 @@ TEST_F(MySqlMetaTest, COLLECTION_FILE_TEST) {
     status = impl_->CleanUpFilesWithTTL(1UL);
     ASSERT_TRUE(status.ok());
 
-    status = impl_->DropCollection(table_file.collection_id_);
+    status = impl_->DropCollections({table_file.collection_id_});
     ASSERT_TRUE(status.ok());
     status = impl_->UpdateCollectionFile(table_file);
     ASSERT_TRUE(status.ok());
@@ -502,6 +498,9 @@ TEST_F(MySqlMetaTest, ARCHIVE_TEST_DISK) {
         }
         ++i;
     }
+
+    status = impl.GetCollectionFilesBySegmentId(table_file.segment_id_, files_holder);
+    ASSERT_TRUE(status.ok());
 
     status = impl.DropAll();
     ASSERT_TRUE(status.ok());
@@ -713,20 +712,31 @@ TEST_F(MySqlMetaTest, COLLECTION_FILES_TEST) {
                          to_index_files_cnt + index_files_cnt;
     ASSERT_EQ(files_holder.HoldFiles().size(), total_cnt);
 
+    std::vector<milvus::engine::meta::CollectionSchema> collection_array;
+    milvus::engine::meta::CollectionSchema schema;
+    schema.collection_id_ = collection_id;
+    status = impl_->FilesByTypeEx(collection_array, file_types, files_holder);
+    ASSERT_TRUE(status.ok());
+
+    //    FIU_ENABLE_FIU("MySQLMetaImpl.FilesByTypeEx.throw_exception");
+    //    status = impl_->FilesByTypeEx(collection_array, file_types, files_holder);
+    //    ASSERT_FALSE(status.ok());
+    //    fiu_disable("MySQLMetaImpl.FilesByTypeEx.throw_exception");
+
     FIU_ENABLE_FIU("MySQLMetaImpl.DeleteCollectionFiles.null_connection");
-    status = impl_->DeleteCollectionFiles(collection_id);
+    status = impl_->DeleteCollectionFiles({collection_id});
     ASSERT_FALSE(status.ok());
     fiu_disable("MySQLMetaImpl.DeleteCollectionFiles.null_connection");
 
     FIU_ENABLE_FIU("MySQLMetaImpl.DeleteCollectionFiles.throw_exception");
-    status = impl_->DeleteCollectionFiles(collection_id);
+    status = impl_->DeleteCollectionFiles({collection_id});
     ASSERT_FALSE(status.ok());
     fiu_disable("MySQLMetaImpl.DeleteCollectionFiles.throw_exception");
 
-    status = impl_->DeleteCollectionFiles(collection_id);
+    status = impl_->DeleteCollectionFiles({collection_id});
     ASSERT_TRUE(status.ok());
 
-    status = impl_->DropCollection(collection_id);
+    status = impl_->DropCollections({collection_id});
     ASSERT_TRUE(status.ok());
 
     status = impl_->CleanUpFilesWithTTL(0UL);

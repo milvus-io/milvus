@@ -40,6 +40,12 @@ using Id2IndexMap = std::unordered_map<size_t, SegmentSchemaPtr>;
 using ResultIds = engine::ResultIds;
 using ResultDistances = engine::ResultDistances;
 
+struct SearchTimeStat {
+    double query_time = 0.0;
+    double map_uids_time = 0.0;
+    double reduce_time = 0.0;
+};
+
 class SearchJob : public Job {
  public:
     SearchJob(const std::shared_ptr<server::Context>& context, uint64_t topk, const milvus::json& extra_params,
@@ -125,6 +131,11 @@ class SearchJob : public Job {
         return vector_count_;
     }
 
+    SearchTimeStat&
+    time_stat() {
+        return time_stat_;
+    }
+
  private:
     const std::shared_ptr<server::Context> context_;
 
@@ -146,6 +157,8 @@ class SearchJob : public Job {
 
     std::mutex mutex_;
     std::condition_variable cv_;
+
+    SearchTimeStat time_stat_;
 };
 
 using SearchJobPtr = std::shared_ptr<SearchJob>;

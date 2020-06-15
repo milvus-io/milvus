@@ -34,7 +34,7 @@ class OperationExecutor {
     static OperationExecutor&
     GetInstance();
 
-    bool
+    Status
     Submit(OperationsPtr operation, bool sync = true);
 
     void

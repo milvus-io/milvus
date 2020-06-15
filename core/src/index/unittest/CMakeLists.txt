@@ -80,6 +80,7 @@ if (NOT TARGET test_instructionset)
     add_executable(test_instructionset test_instructionset.cpp)
 endif ()
 target_link_libraries(test_instructionset ${depend_libs} ${unittest_libs})
+install(TARGETS test_instructionset DESTINATION unittest)
 
 ################################################################################
 #<KNOWHERE-COMMON-TEST>

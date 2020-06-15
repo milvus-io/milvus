@@ -57,7 +57,7 @@ namespace grpc {
 ::milvus::grpc::ErrorCode
 ErrorMap(ErrorCode code);
 
-static const char* EXTRA_PARAM_KEY = "params";
+extern const char* EXTRA_PARAM_KEY;
 
 class GrpcRequestHandler final : public ::milvus::grpc::MilvusService::Service, public GrpcInterceptorHookHandler {
  public:
@@ -298,6 +298,11 @@ class GrpcRequestHandler final : public ::milvus::grpc::MilvusService::Service, 
                       ::milvus::grpc::Status* response) override;
 
     // *
+    ::grpc::Status
+    ReloadSegments(::grpc::ServerContext* context, const ::milvus::grpc::ReLoadSegmentsParam* request,
+                   ::milvus::grpc::Status* response) override;
+
+    // *
     // @brief This method is used to flush buffer into storage.
     //
     // @param FlushParam, flush parameters
@@ -395,7 +400,7 @@ class GrpcRequestHandler final : public ::milvus::grpc::MilvusService::Service, 
     //                       const ::milvus::grpc::HDeleteByIDParam* request,
     //                       ::milvus::grpc::Status* response) override;
 
-    GrpcRequestHandler&
+    void
     RegisterRequestHandler(const RequestHandler& handler) {
         request_handler_ = handler;
     }

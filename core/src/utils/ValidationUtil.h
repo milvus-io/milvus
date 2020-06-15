@@ -72,7 +72,7 @@ class ValidationUtil {
 
 #ifdef MILVUS_GPU_VERSION
     static Status
-    GetGpuMemory(int32_t gpu_index, size_t& memory);
+    GetGpuMemory(int32_t gpu_index, int64_t& memory);
 #endif
 
     static Status
@@ -92,6 +92,9 @@ class ValidationUtil {
 
     static Status
     ValidateStoragePath(const std::string& path);
+
+    static Status
+    ValidateLogLevel(const std::string& level);
 
     static bool
     IsNumber(const std::string& s);

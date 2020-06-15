@@ -47,6 +47,16 @@ INSTANTIATE_TEST_CASE_P(HNSWParameters, HNSWTest, Values("HNSW"));
 TEST_P(HNSWTest, HNSW_basic) {
     assert(!xb.empty());
 
+    // null faiss index
+    {
+        ASSERT_ANY_THROW(index_->Serialize());
+        ASSERT_ANY_THROW(index_->Query(query_dataset, conf));
+        ASSERT_ANY_THROW(index_->Add(nullptr, conf));
+        ASSERT_ANY_THROW(index_->AddWithoutIds(nullptr, conf));
+        ASSERT_ANY_THROW(index_->Count());
+        ASSERT_ANY_THROW(index_->Dim());
+    }
+
     index_->Train(base_dataset, conf);
     index_->Add(base_dataset, conf);
     EXPECT_EQ(index_->Count(), nb);

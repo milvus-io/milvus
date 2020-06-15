@@ -25,7 +25,7 @@ namespace scheduler {
 void
 FaissFlatPass::Init() {
     server::Config& config = server::Config::GetInstance();
-    Status s = config.GetEngineConfigGpuSearchThreshold(threshold_);
+    Status s = config.GetGpuResourceConfigGpuSearchThreshold(threshold_);
     if (!s.ok()) {
         threshold_ = std::numeric_limits<int32_t>::max();
     }
@@ -56,7 +56,7 @@ FaissFlatPass::Run(const TaskPtr& task) {
     if (!gpu_enable_) {
         LOG_SERVER_DEBUG_ << LogOut("[%s][%d] FaissFlatPass: gpu disable, specify cpu to search!", "search", 0);
         res_ptr = ResMgrInst::GetInstance()->GetResource("cpu");
-    } else if (search_job->nq() < threshold_) {
+    } else if (search_job->nq() < (uint64_t)threshold_) {
         LOG_SERVER_DEBUG_ << LogOut("[%s][%d] FaissFlatPass: nq < gpu_search_threshold, specify cpu to search!",
                                     "search", 0);
         res_ptr = ResMgrInst::GetInstance()->GetResource("cpu");

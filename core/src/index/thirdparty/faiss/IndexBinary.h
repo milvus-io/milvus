@@ -95,10 +95,12 @@ struct IndexBinary {
    * @param distances   output pairwise distances, size n*k
    * @param bitset      flags to check the validity of vectors
    */
-  virtual void search (idx_t n, const uint8_t *x, idx_t k, int32_t *distances, idx_t *labels,
-                       ConcurrentBitsetPtr bitset = nullptr) const = 0;
+  virtual void search(idx_t n, const uint8_t *x, idx_t k,
+                      int32_t *distances, idx_t *labels,
+                      ConcurrentBitsetPtr bitset = nullptr) const = 0;
 
-  /** query n raw vectors from the index by ids.
+#if 0
+  /** Query n raw vectors from the index by ids.
    *
    * return n raw vectors.
    *
@@ -121,13 +123,17 @@ struct IndexBinary {
    */
   virtual void search_by_id (idx_t n, const idx_t *xid, idx_t k, int32_t *distances, idx_t *labels,
                              ConcurrentBitsetPtr bitset = nullptr);
+#endif
 
-
-    /** Query n vectors of dimension d to the index.
+  /** Query n vectors of dimension d to the index.
    *
-   * return all vectors with distance < radius. Note that many
-   * indexes do not implement the range_search (only the k-NN search
-   * is mandatory).
+   * return all vectors with distance < radius. Note that many indexes
+   * do not implement the range_search (only the k-NN search is
+   * mandatory). The distances are converted to float to reuse the
+   * RangeSearchResult structure, but they are integer. By convention,
+   * only distances < radius (strict comparison) are returned,
+   * ie. radius = 0 does not return any result and 1 returns only
+   * exact same vectors.
    *
    * @param x           input vectors to search, size n * d / 8
    * @param radius      search radius

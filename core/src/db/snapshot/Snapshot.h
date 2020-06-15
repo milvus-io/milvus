@@ -26,8 +26,10 @@
 #include <tuple>
 #include <utility>
 #include <vector>
+#include "db/snapshot/Store.h"
 #include "db/snapshot/Utils.h"
 #include "db/snapshot/WrappedTypes.h"
+#include "utils/Status.h"
 
 namespace milvus {
 namespace engine {
@@ -54,9 +56,40 @@ class Snapshot : public ReferenceProxy {
         return it->first;
     }
 
+    CollectionPtr
+    GetCollection() {
+        return GetResources<Collection>().begin()->second.Get();
+    }
+
+    SchemaCommitPtr
+    GetSchemaCommit() {
+        auto id = GetLatestSchemaCommitId();
+        return GetResource<SchemaCommit>(id);
+    }
+
     const std::string&
     GetName() const {
         return GetResources<Collection>().begin()->second->GetName();
+    }
+
+    size_t
+    NumberOfPartitions() const {
+        return GetResources<Partition>().size();
+    }
+
+    const LSN_TYPE&
+    GetMaxLsn() const {
+        return max_lsn_;
+    }
+
+    Status
+    GetPartitionId(const std::string& name, ID_TYPE& id) const {
+        auto it = partition_names_map_.find(name);
+        if (it == partition_names_map_.end()) {
+            return Status(SS_NOT_FOUND_ERROR, "Specified partition name not found");
+        }
+        id = it->second;
+        return Status::OK();
     }
 
     CollectionCommitPtr
@@ -157,13 +190,13 @@ class Snapshot : public ReferenceProxy {
     void
     DumpResource(const std::string& tag = "") {
         auto& resources = GetResources<ResourceT>();
-        std::cout << typeid(*this).name() << " Dump" << ResourceT::Name << " Start [" << tag << "]:" << resources.size()
-                  << std::endl;
+        std::cout << typeid(*this).name() << " Dump " << GetID() << " " << ResourceT::Name << " Start [" << tag
+                  << "]:" << resources.size() << std::endl;
         for (auto& kv : resources) {
             std::cout << "\t" << kv.second->ToString() << std::endl;
         }
-        std::cout << typeid(*this).name() << " Dump" << ResourceT::Name << "  End [" << tag << "]:" << resources.size()
-                  << std::endl;
+        std::cout << typeid(*this).name() << " Dump " << GetID() << " " << ResourceT::Name << "  End [" << tag
+                  << "]:" << resources.size() << std::endl;
     }
 
     template <typename T>
@@ -214,16 +247,22 @@ class Snapshot : public ReferenceProxy {
     }
 
  private:
+    Snapshot(const Snapshot&) = delete;
+    Snapshot&
+    operator=(const Snapshot&) = delete;
+
     // PXU TODO: Re-org below data structures to reduce memory usage
     ScopedResourcesT resources_;
     ID_TYPE current_schema_id_;
     std::map<std::string, ID_TYPE> field_names_map_;
+    std::map<std::string, ID_TYPE> partition_names_map_;
     std::map<std::string, std::map<std::string, ID_TYPE>> field_element_names_map_;
     std::map<ID_TYPE, std::map<ID_TYPE, ID_TYPE>> element_segfiles_map_;
     std::map<ID_TYPE, ID_TYPE> seg_segc_map_;
     std::map<ID_TYPE, ID_TYPE> p_pc_map_;
     ID_TYPE latest_schema_commit_id_ = 0;
     std::map<ID_TYPE, NUM_TYPE> p_max_seg_num_;
+    LSN_TYPE max_lsn_;
 };
 
 using ScopedSnapshotT = ScopedResource<Snapshot>;

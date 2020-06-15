@@ -45,7 +45,7 @@ TEST_F(MetaTest, COLLECTION_TEST) {
     status = impl_->CreateCollection(collection);
     ASSERT_EQ(status.code(), milvus::DB_ALREADY_EXIST);
 
-    status = impl_->DropCollection(collection.collection_id_);
+    status = impl_->DropCollections({collection.collection_id_});
     ASSERT_TRUE(status.ok());
 
     status = impl_->CreateCollection(collection);
@@ -56,7 +56,7 @@ TEST_F(MetaTest, COLLECTION_TEST) {
     ASSERT_TRUE(status.ok());
 }
 
-TEST_F(MetaTest, FALID_TEST) {
+TEST_F(MetaTest, FAILED_TEST) {
     fiu_init(0);
     auto options = GetOptions();
     auto collection_id = "meta_test_table";
@@ -66,7 +66,7 @@ TEST_F(MetaTest, FALID_TEST) {
 
     {
         FIU_ENABLE_FIU("SqliteMetaImpl.ValidateMetaSchema.NullConnection");
-        milvus::engine::meta::SqliteMetaImpl impl(options.meta_);
+        ASSERT_ANY_THROW(milvus::engine::meta::SqliteMetaImpl impl(options.meta_));
         fiu_disable("SqliteMetaImpl.ValidateMetaSchema.NullConnection");
     }
     {
@@ -124,7 +124,7 @@ TEST_F(MetaTest, FALID_TEST) {
     }
     {
         FIU_ENABLE_FIU("SqliteMetaImpl.DropCollection.throw_exception");
-        status = impl_->DropCollection(collection.collection_id_);
+        status = impl_->DropCollections({collection.collection_id_});
         ASSERT_FALSE(status.ok());
         fiu_disable("SqliteMetaImpl.DropCollection.throw_exception");
     }
@@ -142,7 +142,7 @@ TEST_F(MetaTest, FALID_TEST) {
     }
     {
         FIU_ENABLE_FIU("SqliteMetaImpl.DeleteCollectionFiles.throw_exception");
-        status = impl_->DeleteCollectionFiles(collection.collection_id_);
+        status = impl_->DeleteCollectionFiles({collection.collection_id_});
         ASSERT_FALSE(status.ok());
         fiu_disable("SqliteMetaImpl.DeleteCollectionFiles.throw_exception");
     }
@@ -294,6 +294,20 @@ TEST_F(MetaTest, FALID_TEST) {
         status = impl_->FilesByType(collection_id, file_types, files_holder);
         ASSERT_EQ(status.code(), milvus::DB_META_TRANSACTION_FAILED);
         fiu_disable("SqliteMetaImpl.FilesByType.throw_exception");
+    }
+    {
+        milvus::engine::meta::FilesHolder files_holder;
+        std::vector<milvus::engine::meta::CollectionSchema> collection_array;
+        milvus::engine::meta::CollectionSchema schema;
+        schema.collection_id_ = collection_id;
+        collection_array.emplace_back(schema);
+        std::vector<int> file_types;
+        file_types.push_back(milvus::engine::meta::SegmentSchema::INDEX);
+        FIU_ENABLE_FIU("SqliteMetaImpl.FilesByTypeEx.throw_exception");
+        status = impl_->FilesByTypeEx(collection_array, file_types, files_holder);
+        ASSERT_EQ(status.code(), milvus::DB_META_TRANSACTION_FAILED);
+        fiu_disable("SqliteMetaImpl.FilesByTypeEx.throw_exception");
+        status = impl_->FilesByTypeEx(collection_array, file_types, files_holder);
     }
     {
         uint64_t size = 0;
@@ -567,6 +581,9 @@ TEST_F(MetaTest, ARCHIVE_TEST_DISK) {
         ++i;
     }
 
+    status = impl.GetCollectionFilesBySegmentId(table_file.segment_id_, files_holder);
+    ASSERT_TRUE(status.ok());
+
     impl.DropAll();
 }
 
@@ -687,7 +704,7 @@ TEST_F(MetaTest, COLLECTION_FILES_TEST) {
                          to_index_files_cnt + index_files_cnt;
     ASSERT_EQ(files_holder.HoldFiles().size(), total_cnt);
 
-    status = impl_->DeleteCollectionFiles(collection_id);
+    status = impl_->DeleteCollectionFiles({collection_id});
     ASSERT_TRUE(status.ok());
 
     status = impl_->CreateCollectionFile(table_file);
@@ -712,7 +729,7 @@ TEST_F(MetaTest, COLLECTION_FILES_TEST) {
     status = impl_->CleanUpFilesWithTTL(1UL);
     ASSERT_TRUE(status.ok());
 
-    status = impl_->DropCollection(collection_id);
+    status = impl_->DropCollections({collection_id});
     ASSERT_TRUE(status.ok());
 }
 

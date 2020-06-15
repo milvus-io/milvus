@@ -15,7 +15,6 @@
 
 namespace faiss {
 
-using idx_t = Index::idx_t;
 
 /**************************************************************
  * HNSW structure implementation

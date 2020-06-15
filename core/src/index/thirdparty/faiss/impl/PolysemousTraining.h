@@ -123,15 +123,15 @@ struct PolysemousTraining: SimulatedAnnealingParameters {
     enum Optimization_type_t {
         OT_None,
         OT_ReproduceDistances_affine,  ///< default
-        OT_Ranking_weighted_diff  /// same as _2, but use rank of y+ - rank of y-
+        OT_Ranking_weighted_diff       ///< same as _2, but use rank of y+ - rank of y-
     };
     Optimization_type_t optimization_type;
 
-    // use 1/4 of the training points for the optimization, with
-    // max. ntrain_permutation. If ntrain_permutation == 0: train on
-    // centroids
+    /** use 1/4 of the training points for the optimization, with
+     * max. ntrain_permutation. If ntrain_permutation == 0: train on
+     * centroids */
     int ntrain_permutation;
-    double dis_weight_factor; // decay of exp that weights distance loss
+    double dis_weight_factor; ///< decay of exp that weights distance loss
 
     // filename pattern for the logging of iterations
     std::string log_pattern;

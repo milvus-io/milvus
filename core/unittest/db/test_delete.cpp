@@ -287,7 +287,7 @@ TEST_F(DeleteTest, delete_before_create_index) {
     ASSERT_TRUE(stat.ok());
     ASSERT_EQ(collection_info_get.dimension_, COLLECTION_DIM);
 
-    int64_t nb = 10000;
+    int64_t nb = 5000;
     milvus::engine::VectorsData xb;
     BuildVectors(nb, xb);
 
@@ -369,7 +369,7 @@ TEST_F(DeleteTest, delete_with_index) {
     ASSERT_TRUE(stat.ok());
     ASSERT_EQ(collection_info_get.dimension_, COLLECTION_DIM);
 
-    int64_t nb = 10000;
+    int64_t nb = 5000;
     milvus::engine::VectorsData xb;
     BuildVectors(nb, xb);
 
@@ -451,7 +451,7 @@ TEST_F(DeleteTest, delete_multiple_times_with_index) {
     ASSERT_TRUE(stat.ok());
     ASSERT_EQ(collection_info_get.dimension_, COLLECTION_DIM);
 
-    int64_t nb = 100000;
+    int64_t nb = 5000;
     milvus::engine::VectorsData xb;
     BuildVectors(nb, xb);
 
@@ -565,11 +565,7 @@ TEST_F(DeleteTest, delete_single_vector) {
     milvus::engine::ResultDistances result_distances;
     stat = db_->Query(dummy_context_,
                       collection_info.collection_id_, tags, topk, json_params, xb, result_ids, result_distances);
-    ASSERT_TRUE(result_ids.empty());
-    ASSERT_TRUE(result_distances.empty());
-    // ASSERT_EQ(result_ids[0], -1);
-    //        ASSERT_LT(result_distances[0], 1e-4);
-    // ASSERT_EQ(result_distances[0], std::numeric_limits<float>::max());
+    ASSERT_TRUE(result_ids.empty() || (result_ids[0] == -1));
 }
 
 TEST_F(DeleteTest, delete_add_create_index) {
@@ -749,7 +745,7 @@ TEST_F(CompactTest, compact_basic) {
     ASSERT_TRUE(stat.ok());
     ASSERT_EQ(row_count, nb - 2);
 
-    stat = db_->Compact(collection_info.collection_id_);
+    stat = db_->Compact(dummy_context_, collection_info.collection_id_);
     ASSERT_TRUE(stat.ok());
 
     const int topk = 1, nprobe = 1;
@@ -834,7 +830,7 @@ TEST_F(CompactTest, compact_with_index) {
     ASSERT_TRUE(stat.ok());
     ASSERT_EQ(row_count, nb - ids_to_delete.size());
 
-    stat = db_->Compact(collection_info.collection_id_);
+    stat = db_->Compact(dummy_context_, collection_info.collection_id_);
     ASSERT_TRUE(stat.ok());
 
     stat = db_->GetCollectionRowCount(collection_info.collection_id_, row_count);
@@ -864,6 +860,6 @@ TEST_F(CompactTest, compact_with_index) {
 }
 
 TEST_F(CompactTest, compact_non_existing_table) {
-    auto status = db_->Compact("non_existing_table");
+    auto status = db_->Compact(dummy_context_, "non_existing_table");
     ASSERT_FALSE(status.ok());
 }

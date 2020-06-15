@@ -14,8 +14,8 @@ py==1.8.0
 pyasn1==0.4.7
 pyasn1-modules==0.2.6
 pylint==2.5.0
-#pymilvus==0.2.11
-pymilvus-test==0.3.17
+pymilvus==0.2.13
+#pymilvus-test==0.3.25
 pyparsing==2.4.0
 pytest==4.6.3
 pytest-level==0.1.1
@@ -27,7 +27,7 @@ python-dotenv==0.10.3
 pytz==2019.1
 requests==2.22.0
 requests-oauthlib==1.2.0
-rsa==4.0
+rsa==4.1
 six==1.12.0
 SQLAlchemy==1.3.5
 ujson==2.0.1

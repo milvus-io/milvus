@@ -60,8 +60,9 @@ PreloadCollectionRequest::OnExecute() {
             }
         }
 
-        // step 2: check collection existence
-        status = DBWrapper::DB()->PreloadCollection(collection_name_);
+        // step 2: force load collection data into cache
+        // load each segment and insert into cache even cache capacity is not enough
+        status = DBWrapper::DB()->PreloadCollection(context_, collection_name_, true);
         fiu_do_on("PreloadCollectionRequest.OnExecute.preload_collection_fail",
                   status = Status(milvus::SERVER_UNEXPECTED_ERROR, ""));
         fiu_do_on("PreloadCollectionRequest.OnExecute.throw_std_exception", throw std::exception());

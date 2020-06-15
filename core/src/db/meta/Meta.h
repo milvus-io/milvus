@@ -59,7 +59,7 @@ class Meta {
     HasCollection(const std::string& collection_id, bool& has_or_not, bool is_root = false) = 0;
 
     virtual Status
-    AllCollections(std::vector<CollectionSchema>& table_schema_array) = 0;
+    AllCollections(std::vector<CollectionSchema>& table_schema_array, bool is_root = false) = 0;
 
     virtual Status
     UpdateCollectionFlag(const std::string& collection_id, int64_t flag) = 0;
@@ -71,10 +71,10 @@ class Meta {
     GetCollectionFlushLSN(const std::string& collection_id, uint64_t& flush_lsn) = 0;
 
     virtual Status
-    DropCollection(const std::string& collection_id) = 0;
+    DropCollections(const std::vector<std::string>& collection_id_array) = 0;
 
     virtual Status
-    DeleteCollectionFiles(const std::string& collection_id) = 0;
+    DeleteCollectionFiles(const std::vector<std::string>& collection_id_array) = 0;
 
     virtual Status
     CreateCollectionFile(SegmentSchema& file_schema) = 0;
@@ -139,6 +139,10 @@ class Meta {
     FilesByType(const std::string& collection_id, const std::vector<int>& file_types, FilesHolder& files_holder) = 0;
 
     virtual Status
+    FilesByTypeEx(const std::vector<meta::CollectionSchema>& collections, const std::vector<int>& file_types,
+                  FilesHolder& files_holder) = 0;
+
+    virtual Status
     FilesByID(const std::vector<size_t>& ids, FilesHolder& files_holder) = 0;
 
     virtual Status
@@ -170,9 +174,6 @@ class Meta {
 
     virtual Status
     DescribeHybridCollection(CollectionSchema& collection_schema, hybrid::FieldsSchema& fields_schema) = 0;
-
-    virtual Status
-    CreateHybridCollectionFile(SegmentSchema& file_schema) = 0;
 };  // MetaData
 
 using MetaPtr = std::shared_ptr<Meta>;

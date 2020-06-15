@@ -28,7 +28,6 @@ class AnnoyTest : public DataGen, public TestWithParam<std::string> {
     void
     SetUp() override {
         IndexType = GetParam();
-        //        std::cout << "IndexType from GetParam() is: " << IndexType << std::endl;
         Generate(128, 10000, 10);
         index_ = std::make_shared<milvus::knowhere::IndexAnnoy>();
         conf = milvus::knowhere::Config{
@@ -38,8 +37,6 @@ class AnnoyTest : public DataGen, public TestWithParam<std::string> {
             {milvus::knowhere::IndexParams::search_k, 100},
             {milvus::knowhere::Metric::TYPE, milvus::knowhere::Metric::L2},
         };
-
-        //        Init_with_default();
     }
 
  protected:
@@ -53,10 +50,20 @@ INSTANTIATE_TEST_CASE_P(AnnoyParameters, AnnoyTest, Values("Annoy"));
 TEST_P(AnnoyTest, annoy_basic) {
     assert(!xb.empty());
 
-    //    index_->Train(base_dataset, conf);
+    // null faiss index
+    {
+        ASSERT_ANY_THROW(index_->Train(base_dataset, conf));
+        ASSERT_ANY_THROW(index_->Query(query_dataset, conf));
+        ASSERT_ANY_THROW(index_->Serialize(conf));
+        ASSERT_ANY_THROW(index_->Add(base_dataset, conf));
+        ASSERT_ANY_THROW(index_->AddWithoutIds(base_dataset, conf));
+        ASSERT_ANY_THROW(index_->Count());
+        ASSERT_ANY_THROW(index_->Dim());
+    }
+
     index_->BuildAll(base_dataset, conf);  // Train + Add
-    EXPECT_EQ(index_->Count(), nb);
-    EXPECT_EQ(index_->Dim(), dim);
+    ASSERT_EQ(index_->Count(), nb);
+    ASSERT_EQ(index_->Dim(), dim);
 
     auto result = index_->Query(query_dataset, conf);
     AssertAnns(result, nq, k);
@@ -89,8 +96,8 @@ TEST_P(AnnoyTest, annoy_delete) {
     assert(!xb.empty());
 
     index_->BuildAll(base_dataset, conf);  // Train + Add
-    EXPECT_EQ(index_->Count(), nb);
-    EXPECT_EQ(index_->Dim(), dim);
+    ASSERT_EQ(index_->Count(), nb);
+    ASSERT_EQ(index_->Dim(), dim);
 
     faiss::ConcurrentBitsetPtr bitset = std::make_shared<faiss::ConcurrentBitset>(nb);
     for (auto i = 0; i < nq; ++i) {
@@ -191,8 +198,8 @@ TEST_P(AnnoyTest, annoy_serialize) {
         binaryset.Append("annoy_dim", dim_data, bin_dim->size);
 
         index_->Load(binaryset);
-        EXPECT_EQ(index_->Count(), nb);
-        EXPECT_EQ(index_->Dim(), dim);
+        ASSERT_EQ(index_->Count(), nb);
+        ASSERT_EQ(index_->Dim(), dim);
         auto result = index_->Query(query_dataset, conf);
         AssertAnns(result, nq, conf[milvus::knowhere::meta::TOPK]);
     }

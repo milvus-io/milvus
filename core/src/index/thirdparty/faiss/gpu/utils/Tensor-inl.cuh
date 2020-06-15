@@ -452,7 +452,7 @@ template <typename T, int Dim, bool InnerContig,
           typename IndexT, template <typename U> class PtrTraits>
 __host__ __device__ Tensor<T, Dim, InnerContig, IndexT, PtrTraits>
 Tensor<T, Dim, InnerContig, IndexT, PtrTraits>::transpose(int dim1,
-                                                     int dim2) const {
+                                                          int dim2) const {
   GPU_FAISS_ASSERT(dim1 >= 0 && dim1 < Dim);
   GPU_FAISS_ASSERT(dim1 >= 0 && dim2 < Dim);
 
@@ -478,7 +478,36 @@ Tensor<T, Dim, InnerContig, IndexT, PtrTraits>::transpose(int dim1,
   newStride[dim1] = newStride[dim2];
   newStride[dim2] = tmp;
 
-  return Tensor<T, Dim, InnerContig, IndexT, PtrTraits>(data_, newSize, newStride);
+  return Tensor<T, Dim, true, IndexT, PtrTraits>(data_, newSize, newStride);
+}
+
+template <typename T, int Dim, bool InnerContig,
+          typename IndexT, template <typename U> class PtrTraits>
+__host__ __device__ Tensor<T, Dim, false, IndexT, PtrTraits>
+Tensor<T, Dim, InnerContig, IndexT, PtrTraits>::transposeInnermost(
+  int dim1) const {
+  GPU_FAISS_ASSERT(dim1 >= 0 && dim1 < Dim);
+
+  // We are exchanging with the innermost dimension
+  int dim2 = 1;
+
+  IndexT newSize[Dim];
+  IndexT newStride[Dim];
+
+  for (int i = 0; i < Dim; ++i) {
+    newSize[i] = size_[i];
+    newStride[i] = stride_[i];
+  }
+
+  IndexT tmp = newSize[dim1];
+  newSize[dim1] = newSize[dim2];
+  newSize[dim2] = tmp;
+
+  tmp = newStride[dim1];
+  newStride[dim1] = newStride[dim2];
+  newStride[dim2] = tmp;
+
+  return Tensor<T, Dim, false, IndexT, PtrTraits>(data_, newSize, newStride);
 }
 
 template <typename T, int Dim, bool InnerContig,

@@ -44,11 +44,6 @@ int faiss_read_index(FILE *f, int io_flags, FaissIndex **p_out);
  */
 int faiss_read_index_fname(const char *fname, int io_flags, FaissIndex **p_out);
 
-/* cloning functions */
-
-/** Clone an index. This is equivalent to `faiss::clone_index` */
-int faiss_clone_index (const FaissIndex *, FaissIndex ** p_out);
-
 #ifdef __cplusplus
 }
 #endif

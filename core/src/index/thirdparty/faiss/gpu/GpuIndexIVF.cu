@@ -19,29 +19,36 @@ namespace faiss { namespace gpu {
 GpuIndexIVF::GpuIndexIVF(GpuResources* resources,
                          int dims,
                          faiss::MetricType metric,
+                         float metricArg,
                          int nlistIn,
                          GpuIndexIVFConfig config) :
-    GpuIndex(resources, dims, metric, config),
+    GpuIndex(resources, dims, metric, metricArg, config),
     ivfConfig_(std::move(config)),
     nlist(nlistIn),
     nprobe(1),
     quantizer(nullptr) {
   init_();
+
+  // Only IP and L2 are supported for now
+  if (!(metric_type == faiss::METRIC_L2 ||
+        metric_type == faiss::METRIC_INNER_PRODUCT)) {
+    FAISS_THROW_FMT("unsupported metric type %d", (int) metric_type);
+  }
 }
 
 void
 GpuIndexIVF::init_() {
-  FAISS_ASSERT(nlist > 0);
+  FAISS_THROW_IF_NOT_MSG(nlist > 0, "nlist must be > 0");
 
   // Spherical by default if the metric is inner_product
-  if (this->metric_type == faiss::METRIC_INNER_PRODUCT) {
-    this->cp.spherical = true;
+  if (metric_type == faiss::METRIC_INNER_PRODUCT) {
+    cp.spherical = true;
   }
 
   // here we set a low # iterations because this is typically used
   // for large clusterings
-  this->cp.niter = 10;
-  this->cp.verbose = this->verbose;
+  cp.niter = 10;
+  cp.verbose = verbose;
 
   if (!quantizer) {
     // Construct an empty quantizer
@@ -49,20 +56,21 @@ GpuIndexIVF::init_() {
     // FIXME: inherit our same device
     config.device = device_;
 
-    if (this->metric_type == faiss::METRIC_L2) {
-      quantizer = new GpuIndexFlatL2(resources_, this->d, config);
-    } else if (this->metric_type == faiss::METRIC_INNER_PRODUCT) {
-      quantizer = new GpuIndexFlatIP(resources_, this->d, config);
+    if (metric_type == faiss::METRIC_L2) {
+      quantizer = new GpuIndexFlatL2(resources_, d, config);
+    } else if (metric_type == faiss::METRIC_INNER_PRODUCT) {
+      quantizer = new GpuIndexFlatIP(resources_, d, config);
     } else {
       // unknown metric type
-      FAISS_THROW_IF_NOT_MSG(false, "unsupported metric type");
+      FAISS_THROW_FMT("unsupported metric type %d", (int) metric_type);
     }
   }
 }
 
 GpuIndexIVF::~GpuIndexIVF() {
-    if(remove_quantizer == 1)
-        delete quantizer;
+  if (remove_quantizer == 1) {
+    delete quantizer;
+  }
 }
 
 GpuIndexFlat*
@@ -74,8 +82,7 @@ void
 GpuIndexIVF::copyFrom(const faiss::IndexIVF* index) {
   DeviceScope scope(device_);
 
-  this->d = index->d;
-  this->metric_type = index->metric_type;
+  GpuIndex::copyFrom(index);
 
   FAISS_ASSERT(index->nlist > 0);
   FAISS_THROW_IF_NOT_FMT(index->nlist <=
@@ -113,17 +120,15 @@ GpuIndexIVF::copyFrom(const faiss::IndexIVF* index) {
   }
 
   if (!index->is_trained) {
-    this->is_trained = false;
-    this->ntotal = 0;
+    // copied in GpuIndex::copyFrom
+    FAISS_ASSERT(!is_trained && ntotal == 0);
     return;
   }
 
-  // Otherwise, we can populate ourselves from the other index
-  this->is_trained = true;
-
+  // copied in GpuIndex::copyFrom
   // ntotal can exceed max int, but the number of vectors per inverted
   // list cannot exceed this. We check this in the subclasses.
-  this->ntotal = index->ntotal;
+  FAISS_ASSERT(is_trained && (ntotal == index->ntotal));
 
   // Since we're trained, the quantizer must have data
   FAISS_ASSERT(index->quantizer->ntotal > 0);
@@ -222,10 +227,7 @@ GpuIndexIVF::copyTo(faiss::IndexIVF* index) const {
   //
   // Index information
   //
-  index->ntotal = this->ntotal;
-  index->d = this->d;
-  index->metric_type = this->metric_type;
-  index->is_trained = this->is_trained;
+  GpuIndex::copyTo(index);
 
   //
   // IndexIVF information
@@ -258,8 +260,7 @@ GpuIndexIVF::copyTo(faiss::IndexIVF* index) const {
   index->quantizer_trains_alone = 0;
   index->own_fields = true;
   index->cp = this->cp;
-  index->maintain_direct_map = false;
-  index->direct_map.clear();
+  index->make_direct_map(false);
 }
 
 int

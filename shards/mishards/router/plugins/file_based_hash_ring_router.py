@@ -1,3 +1,4 @@
+from collections import defaultdict
 import logging
 import re
 from sqlalchemy import exc as sqlalchemy_exc
@@ -8,6 +9,28 @@ from mishards import exceptions, db
 from mishards.hash_ring import HashRing
 
 logger = logging.getLogger(__name__)
+
+
+file_updatetime_map = defaultdict(dict)
+
+
+def filter_file_to_update(host, files_list):
+    host_files = file_updatetime_map[host]
+
+    file_need_update_list = []
+    for fl in files_list:
+        file_id, update_time = fl
+        pre_update_time = host_files.get(file_id, 0)
+
+        if pre_update_time >= update_time:
+            continue
+        logger.debug("[{}] file id: {}.  pre update time {} is small than {}"
+                     .format(host, file_id, pre_update_time, update_time))
+        host_files[file_id] = update_time
+        # if pre_update_time > 0:
+        file_need_update_list.append(file_id)
+
+    return file_need_update_list
 
 
 class Factory(RouterMixin):
@@ -92,9 +115,16 @@ class Factory(RouterMixin):
             if not sub:
                 sub = []
                 routing[target_host] = sub
-            routing[target_host].append(str(f.id))
+            # routing[target_host].append({"id": str(f.id), "update_time": int(f.updated_time)})
+            routing[target_host].append((str(f.id), int(f.updated_time)))
 
-        return routing
+        filter_routing = {}
+        for host, filess in routing.items():
+            ud_files = filter_file_to_update(host, filess)
+            search_files = [f[0] for f in filess]
+            filter_routing[host] = (search_files, ud_files)
+
+        return filter_routing
 
     @classmethod
     def Create(cls, **kwargs):

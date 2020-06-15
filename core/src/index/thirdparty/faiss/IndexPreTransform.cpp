@@ -14,7 +14,6 @@
 #include <cstring>
 #include <memory>
 
-#include <faiss/utils/utils.h>
 #include <faiss/impl/FaissAssert.h>
 
 namespace faiss {
@@ -181,7 +180,8 @@ void IndexPreTransform::add_with_ids (idx_t n, const float * x,
 
 
 void IndexPreTransform::search (idx_t n, const float *x, idx_t k,
-                               float *distances, idx_t *labels, ConcurrentBitsetPtr bitset) const
+                               float *distances, idx_t *labels,
+                               ConcurrentBitsetPtr bitset) const
 {
     FAISS_THROW_IF_NOT (is_trained);
     const float *xt = apply_chain (n, x);

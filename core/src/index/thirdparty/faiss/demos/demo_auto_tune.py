@@ -25,14 +25,9 @@ import faiss
 #################################################################
 
 def ivecs_read(fname):
-    f = open(fname)
-    d, = np.fromfile(f, count = 1, dtype = 'int32')
-    sz = os.stat(fname).st_size
-    assert sz % (4 * (d + 1)) == 0
-    n = sz / (4 * (d + 1))
-    f.seek(0)
-    a = np.fromfile(f, count = n * (d +1), dtype = 'int32').reshape(n, d + 1)
-    return a[:, 1:].copy()
+    a = np.fromfile(fname, dtype="int32")
+    d = a[0]
+    return a.reshape(-1, d + 1)[:, 1:].copy()
 
 def fvecs_read(fname):
     return ivecs_read(fname).view('float32')
@@ -41,8 +36,8 @@ def fvecs_read(fname):
 def plot_OperatingPoints(ops, nq, **kwargs):
     ops = ops.optimal_pts
     n = ops.size() * 2 - 1
-    pyplot.plot([ops.at( i      / 2).perf for i in range(n)],
-                [ops.at((i + 1) / 2).t / nq * 1000 for i in range(n)],
+    pyplot.plot([ops.at( i      // 2).perf for i in range(n)],
+                [ops.at((i + 1) // 2).t / nq * 1000 for i in range(n)],
                 **kwargs)
 
 

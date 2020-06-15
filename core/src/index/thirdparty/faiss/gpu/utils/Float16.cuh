@@ -12,9 +12,9 @@
 #include <faiss/gpu/GpuResources.h>
 #include <faiss/gpu/utils/DeviceTensor.cuh>
 
-// We require at least CUDA 7.5 for compilation
-#if CUDA_VERSION < 7050
-#error "CUDA >= 7.5 is required"
+// We require at least CUDA 8.0 for compilation
+#if CUDA_VERSION < 8000
+#error "CUDA >= 8.0 is required"
 #endif
 
 // Some compute capabilities have full float16 ALUs.

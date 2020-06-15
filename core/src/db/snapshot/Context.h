@@ -12,13 +12,25 @@
 #pragma once
 
 #include <iostream>
+#include <map>
 #include <string>
 #include <vector>
+#include "db/meta/MetaTypes.h"
 #include "db/snapshot/Resources.h"
+#include "db/snapshot/Snapshot.h"
 
 namespace milvus {
 namespace engine {
 namespace snapshot {
+
+struct PartitionContext {
+    std::string name;
+    ID_TYPE id = 0;
+    LSN_TYPE lsn = 0;
+
+    std::string
+    ToString() const;
+};
 
 struct SegmentFileContext {
     std::string field_name;
@@ -34,10 +46,18 @@ struct LoadOperationContext {
 };
 
 struct OperationContext {
+    explicit OperationContext(const ScopedSnapshotT& ss = ScopedSnapshotT()) : prev_ss(ss) {
+    }
+
+    ScopedSnapshotT latest_ss;
+    ScopedSnapshotT prev_ss;
     SegmentPtr new_segment = nullptr;
     SegmentCommitPtr new_segment_commit = nullptr;
+    PartitionPtr new_partition = nullptr;
     PartitionCommitPtr new_partition_commit = nullptr;
     SchemaCommitPtr new_schema_commit = nullptr;
+    CollectionCommitPtr new_collection_commit = nullptr;
+    CollectionPtr new_collection = nullptr;
 
     SegmentFilePtr stale_segment_file = nullptr;
     std::vector<SegmentPtr> stale_segments;
@@ -50,8 +70,24 @@ struct OperationContext {
     PartitionPtr prev_partition = nullptr;
     PartitionCommitPtr prev_partition_commit = nullptr;
     CollectionCommitPtr prev_collection_commit = nullptr;
+    PartitionCommitPtr stale_partition_commit = nullptr;
 
     SegmentFile::VecT new_segment_files;
+    CollectionPtr collection = nullptr;
+    LSN_TYPE lsn = 0;
+
+    std::string
+    ToString() const;
+};
+
+struct CreateCollectionContext {
+    CollectionPtr collection = nullptr;
+    std::map<FieldPtr, std::vector<FieldElementPtr>> fields_schema;
+    CollectionCommitPtr collection_commit = nullptr;
+    LSN_TYPE lsn = 0;
+
+    std::string
+    ToString() const;
 };
 
 }  // namespace snapshot

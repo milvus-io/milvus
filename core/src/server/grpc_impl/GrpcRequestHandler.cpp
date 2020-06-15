@@ -32,6 +32,8 @@ namespace milvus {
 namespace server {
 namespace grpc {
 
+const char* EXTRA_PARAM_KEY = "params";
+
 ::milvus::grpc::ErrorCode
 ErrorMap(ErrorCode code) {
     static const std::map<ErrorCode, ::milvus::grpc::ErrorCode> code_map = {
@@ -963,6 +965,25 @@ GrpcRequestHandler::PreloadCollection(::grpc::ServerContext* context, const ::mi
 }
 
 ::grpc::Status
+GrpcRequestHandler::ReloadSegments(::grpc::ServerContext* context, const ::milvus::grpc::ReLoadSegmentsParam* request,
+                                   ::milvus::grpc::Status* response) {
+    CHECK_NULLPTR_RETURN(request);
+    LOG_SERVER_INFO_ << LogOut("Request [%s] %s begin.", GetContext(context)->RequestID().c_str(), __func__);
+
+    std::vector<std::string> file_ids;
+    for (size_t i = 0; i < request->segment_id_array_size(); i++) {
+        file_ids.push_back(request->segment_id_array(i));
+    }
+
+    Status status = request_handler_.ReLoadSegments(GetContext(context), request->collection_name(), file_ids);
+
+    LOG_SERVER_INFO_ << LogOut("Request [%s] %s end.", GetContext(context)->RequestID().c_str(), __func__);
+    SET_RESPONSE(response, status, context);
+
+    return ::grpc::Status::OK;
+}
+
+::grpc::Status
 GrpcRequestHandler::DescribeIndex(::grpc::ServerContext* context, const ::milvus::grpc::CollectionName* request,
                                   ::milvus::grpc::IndexParam* response) {
     CHECK_NULLPTR_RETURN(request);
@@ -1104,7 +1125,7 @@ GrpcRequestHandler::CreateHybridCollection(::grpc::ServerContext* context, const
     std::vector<std::pair<std::string, engine::meta::hybrid::DataType>> field_types;
     std::vector<std::pair<std::string, uint64_t>> vector_dimensions;
     std::vector<std::pair<std::string, std::string>> field_params;
-    for (uint64_t i = 0; i < request->fields_size(); ++i) {
+    for (int i = 0; i < request->fields_size(); ++i) {
         if (request->fields(i).type().has_vector_param()) {
             auto vector_dimension =
                 std::make_pair(request->fields(i).name(), request->fields(i).type().vector_param().dimension());
@@ -1138,8 +1159,23 @@ GrpcRequestHandler::DescribeHybridCollection(::grpc::ServerContext* context,
                                              const ::milvus::grpc::CollectionName* request,
                                              ::milvus::grpc::Mapping* response) {
     LOG_SERVER_INFO_ << LogOut("Request [%s] %s begin.", GetContext(context)->RequestID().c_str(), __func__);
+    std::unordered_map<std::string, engine::meta::hybrid::DataType> field_types;
+    Status status =
+        request_handler_.DescribeHybridCollection(GetContext(context), request->collection_name(), field_types);
+
+    response->mutable_status()->set_error_code((milvus::grpc::ErrorCode)status.code());
+    response->mutable_status()->set_reason(status.message());
+    response->set_collection_name(request->collection_name());
+    auto field_it = field_types.begin();
+    for (; field_it != field_types.end(); field_it++) {
+        auto field = response->add_fields();
+        field->set_name(field_it->first);
+        field->mutable_type()->set_data_type((milvus::grpc::DataType)field_it->second);
+    }
+
     CHECK_NULLPTR_RETURN(request);
     LOG_SERVER_INFO_ << LogOut("Request [%s] %s end.", GetContext(context)->RequestID().c_str(), __func__);
+    return ::grpc::Status::OK;
 }
 
 ::grpc::Status
@@ -1558,7 +1594,7 @@ GrpcRequestHandler::HybridSearch(::grpc::ServerContext* context, const ::milvus:
 
     std::vector<std::string> partition_list;
     partition_list.resize(request->partition_tag_array_size());
-    for (uint64_t i = 0; i < request->partition_tag_array_size(); ++i) {
+    for (int i = 0; i < request->partition_tag_array_size(); ++i) {
         partition_list[i] = request->partition_tag_array(i);
     }
 

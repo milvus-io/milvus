@@ -53,6 +53,8 @@ DescribeHybridCollectionRequest::OnExecute() {
         engine::meta::hybrid::FieldsSchema fields_schema;
         collection_schema.collection_id_ = collection_name_;
         auto status = DBWrapper::DB()->DescribeHybridCollection(collection_schema, fields_schema);
+        fiu_do_on("DescribeHybridCollectionRequest.OnExecute.invalid_db_execute",
+                  status = Status(milvus::SERVER_UNEXPECTED_ERROR, ""));
         if (!status.ok()) {
             return status;
         }

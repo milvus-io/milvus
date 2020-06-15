@@ -19,17 +19,20 @@ namespace snapshot {
 
 void
 Snapshot::RefAll() {
+    /* std::cout << this << " RefAll SS=" << GetID() << " SS RefCnt=" << RefCnt() << std::endl; */
     std::apply([this](auto&... resource) { ((DoRef(resource)), ...); }, resources_);
 }
 
 void
 Snapshot::UnRefAll() {
+    /* std::cout << this << " UnRefAll SS=" << GetID() << " SS RefCnt=" << RefCnt() << std::endl; */
     std::apply([this](auto&... resource) { ((DoUnRef(resource)), ...); }, resources_);
 }
 
 Snapshot::Snapshot(ID_TYPE id) {
     auto collection_commit = CollectionCommitsHolder::GetInstance().GetResource(id, false);
     AddResource<CollectionCommit>(collection_commit);
+    max_lsn_ = collection_commit->GetLsn();
     auto& schema_holder = SchemaCommitsHolder::GetInstance();
     auto current_schema = schema_holder.GetResource(collection_commit->GetSchemaId(), false);
     AddResource<SchemaCommit>(current_schema);
@@ -47,14 +50,21 @@ Snapshot::Snapshot(ID_TYPE id) {
     auto& segment_commits_holder = SegmentCommitsHolder::GetInstance();
     auto& segment_files_holder = SegmentFilesHolder::GetInstance();
 
+    auto ssid = id;
     for (auto& id : mappings) {
         auto partition_commit = partition_commits_holder.GetResource(id, false);
         auto partition = partitions_holder.GetResource(partition_commit->GetPartitionId(), false);
         AddResource<PartitionCommit>(partition_commit);
         p_pc_map_[partition_commit->GetPartitionId()] = partition_commit->GetID();
         AddResource<Partition>(partition);
+        partition_names_map_[partition->GetName()] = partition->GetID();
         p_max_seg_num_[partition->GetID()] = 0;
         auto& s_c_mappings = partition_commit->GetMappings();
+        /* std::cout << "SS-" << ssid << "PC_MAP=("; */
+        /* for (auto id : s_c_mappings) { */
+        /*     std::cout << id << ","; */
+        /* } */
+        /* std::cout << ")" << std::endl; */
         for (auto& s_c_id : s_c_mappings) {
             auto segment_commit = segment_commits_holder.GetResource(s_c_id, false);
             auto segment = segments_holder.GetResource(segment_commit->GetSegmentId(), false);

@@ -17,6 +17,7 @@
 
 #include "config/Config.h"
 #include "server/init/CpuChecker.h"
+#include "server/init/InstanceLockCheck.h"
 #ifdef MILVUS_GPU_VERSION
 #include "server/init/GpuChecker.h"
 #endif
@@ -36,11 +37,7 @@ class ServerCheckerTest : public testing::Test {
 
         db_primary_path = "/tmp/milvus-test/db";
         boost::filesystem::create_directories(db_primary_path);
-        config.SetStorageConfigPrimaryPath(db_primary_path);
-
-        db_secondary_path = "/tmp/milvus-test/db-secondary";
-        boost::filesystem::create_directories(db_secondary_path);
-        config.SetStorageConfigSecondaryPath(db_secondary_path);
+        config.SetStorageConfigPath(db_primary_path);
 
         wal_path = "/tmp/milvus-test/wal";
         boost::filesystem::create_directories(wal_path);
@@ -75,15 +72,6 @@ TEST_F(ServerCheckerTest, STORAGE_FAIL_TEST) {
     fiu_enable("StorageChecker.CheckStoragePermission.db_primary_path_access_fail", 1, NULL, 0);
     ASSERT_FALSE(ms::StorageChecker::CheckStoragePermission().ok());
     fiu_disable("StorageChecker.CheckStoragePermission.db_primary_path_access_fail");
-
-    auto& config = ms::Config::GetInstance();
-    std::string storage_secondary_path;
-    ASSERT_TRUE(config.GetStorageConfigSecondaryPath(storage_secondary_path).ok());
-    ASSERT_TRUE(config.SetStorageConfigSecondaryPath("/tmp/milvus-test01,/tmp/milvus-test02").ok());
-    fiu_enable("StorageChecker.CheckStoragePermission.db_secondary_path_access_fail", 1, NULL, 0);
-    ASSERT_FALSE(ms::StorageChecker::CheckStoragePermission().ok());
-    fiu_disable("StorageChecker.CheckStoragePermission.db_secondary_path_access_fail");
-    ASSERT_TRUE(config.SetStorageConfigSecondaryPath(storage_secondary_path).ok());
 
     fiu_enable("StorageChecker.CheckStoragePermission.wal_path_access_fail", 1, NULL, 0);
     ASSERT_FALSE(ms::StorageChecker::CheckStoragePermission().ok());
@@ -193,6 +181,22 @@ TEST_F(ServerCheckerTest, GPU_FAIL_TEST) {
     fiu_enable("GpuChecker.CheckGpuEnvironment.nvml_shutdown_fail", 1, NULL, 0);
     ASSERT_FALSE(ms::GpuChecker::CheckGpuEnvironment().ok());
     fiu_disable("GpuChecker.CheckGpuEnvironment.nvml_shutdown_fail");
+}
+
+TEST_F(ServerCheckerTest, LOCK_TEST) {
+    fiu_init(0);
+    fiu_enable("InstanceLockCheck.Check.fd", 1, NULL, 0);
+    auto status = milvus::server::InstanceLockCheck::Check(db_primary_path);
+    ASSERT_FALSE(status.ok());
+    fiu_disable("InstanceLockCheck.Check.fd");
+
+    fiu_enable("InstanceLockCheck.Check.fcntl", 1, NULL, 0);
+    status = milvus::server::InstanceLockCheck::Check(db_primary_path);
+    ASSERT_FALSE(status.ok());
+    fiu_disable("InstanceLockCheck.Check.fcntl");
+
+    status = milvus::server::InstanceLockCheck::Check(db_primary_path);
+    ASSERT_TRUE(status.ok()) << status.message();
 }
 
 #endif

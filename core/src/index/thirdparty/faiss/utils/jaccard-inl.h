@@ -1,7 +1,3 @@
-//
-// Created by czr on 2019/12/19.
-//
-
 namespace faiss {
 
     struct JaccardComputer8 {

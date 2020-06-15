@@ -39,7 +39,8 @@ void IndexBinaryFlat::reset() {
 }
 
 void IndexBinaryFlat::search(idx_t n, const uint8_t *x, idx_t k,
-                             int32_t *distances, idx_t *labels, ConcurrentBitsetPtr bitset) const {
+                             int32_t *distances, idx_t *labels,
+                             ConcurrentBitsetPtr bitset) const {
     const idx_t block_size = query_batch_size;
     if (metric_type == METRIC_Jaccard || metric_type == METRIC_Tanimoto) {
         float *D = reinterpret_cast<float*>(distances);
@@ -63,7 +64,6 @@ void IndexBinaryFlat::search(idx_t n, const uint8_t *x, idx_t k,
                 D[i] = -log2(1-D[i]);
             }
         }
-
     } else if (metric_type == METRIC_Substructure || metric_type == METRIC_Superstructure) {
         float *D = reinterpret_cast<float*>(distances);
         for (idx_t s = 0; s < n; s += block_size) {
@@ -76,7 +76,6 @@ void IndexBinaryFlat::search(idx_t n, const uint8_t *x, idx_t k,
             binary_distence_knn_mc(metric_type, x + s * code_size, xb.data(), nn, ntotal, k, code_size,
                     D + s * k, labels + s * k, bitset);
         }
-
     } else {
         for (idx_t s = 0; s < n; s += block_size) {
             idx_t nn = block_size;
@@ -123,5 +122,11 @@ void IndexBinaryFlat::reconstruct(idx_t key, uint8_t *recons) const {
   memcpy(recons, &(xb[code_size * key]), sizeof(*recons) * code_size);
 }
 
+void IndexBinaryFlat::range_search(idx_t n, const uint8_t *x, int radius,
+                                   RangeSearchResult *result,
+                                   ConcurrentBitsetPtr bitset) const
+{
+    hamming_range_search (x, xb.data(), n, ntotal, radius, code_size, result);
+}
 
 }  // namespace faiss

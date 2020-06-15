@@ -11,6 +11,7 @@
 
 #include "db/snapshot/Operations.h"
 #include <chrono>
+#include <sstream>
 #include "db/snapshot/OperationExecutor.h"
 #include "db/snapshot/Snapshots.h"
 
@@ -20,12 +21,50 @@ namespace snapshot {
 
 static ID_TYPE UID = 1;
 
-Operations::Operations(const OperationContext& context, ScopedSnapshotT prev_ss)
-    : context_(context), prev_ss_(prev_ss), uid_(UID++) {
+std::ostream&
+operator<<(std::ostream& out, const Operations& operation) {
+    out << operation.ToString();
+    return out;
 }
 
-Operations::Operations(const OperationContext& context, ID_TYPE collection_id, ID_TYPE commit_id)
-    : context_(context), prev_ss_(Snapshots::GetInstance().GetSnapshot(collection_id, commit_id)), uid_(UID++) {
+Operations::Operations(const OperationContext& context, ScopedSnapshotT prev_ss, const OperationsType& type)
+    : context_(context),
+      prev_ss_(prev_ss),
+      uid_(UID++),
+      status_(SS_OPERATION_PENDING, "Operation Pending"),
+      type_(type) {
+}
+
+std::string
+Operations::SuccessString() const {
+    return status_.ToString();
+}
+
+std::string
+Operations::FailureString() const {
+    return status_.ToString();
+}
+
+std::string
+Operations::GetRepr() const {
+    std::stringstream ss;
+    ss << "<" << GetName() << ":" << GetID() << ">";
+    return ss.str();
+}
+
+std::string
+Operations::ToString() const {
+    std::stringstream ss;
+    ss << GetRepr();
+    ss << (done_ ? " | DONE" : " | PENDING");
+    if (done_) {
+        if (status_.ok()) {
+            ss << " | " << SuccessString();
+        } else {
+            ss << " | " << FailureString();
+        }
+    }
+    return ss.str();
 }
 
 ID_TYPE
@@ -33,88 +72,195 @@ Operations::GetID() const {
     return uid_;
 }
 
-void
+Status
 Operations::operator()(Store& store) {
+    auto status = PreCheck();
+    if (!status.ok())
+        return status;
     return ApplyToStore(store);
 }
 
-bool
+void
+Operations::SetStatus(const Status& status) {
+    status_ = status;
+}
+
+Status
 Operations::WaitToFinish() {
     std::unique_lock<std::mutex> lock(finish_mtx_);
-    /* std::cout << std::this_thread::get_id() << " Start Waiting Operation " << this->GetID() << std::endl; */
-    finish_cond_.wait(lock, [this] { return status_ != OP_PENDING; });
-    /* std::cout << std::this_thread::get_id() << " End   Waiting Operation " << this->GetID() << std::endl; */
-    return true;
+    finish_cond_.wait(lock, [this] { return done_; });
+    return status_;
 }
 
 void
-Operations::Done() {
+Operations::Done(Store& store) {
     std::unique_lock<std::mutex> lock(finish_mtx_);
-    status_ = OP_OK;
-    /* std::cout << std::this_thread::get_id() << " Done Operation " << this->GetID() << std::endl; */
+    done_ = true;
+    if (GetType() == OperationsType::W_Compound) {
+        if (!context_.latest_ss && ids_.size() > 0 && context_.new_collection_commit) {
+            Snapshots::GetInstance().LoadSnapshot(store, context_.latest_ss,
+                                                  context_.new_collection_commit->GetCollectionId(), ids_.back());
+        }
+        std::cout << ToString() << std::endl;
+    }
     finish_cond_.notify_all();
 }
 
-void
+Status
+Operations::PreCheck() {
+    return Status::OK();
+}
+
+Status
 Operations::Push(bool sync) {
-    OperationExecutor::GetInstance().Submit(shared_from_this(), sync);
+    auto status = PreCheck();
+    if (!status.ok())
+        return status;
+    return OperationExecutor::GetInstance().Submit(shared_from_this(), sync);
 }
 
-bool
-Operations::IsStale() const {
-    auto curr_ss = Snapshots::GetInstance().GetSnapshot(prev_ss_->GetCollectionId());
-    if (prev_ss_->GetID() == curr_ss->GetID()) {
-        return false;
+Status
+Operations::DoCheckStale(ScopedSnapshotT& latest_snapshot) const {
+    return Status::OK();
+}
+
+Status
+Operations::CheckStale(const CheckStaleFunc& checker) const {
+    decltype(prev_ss_) latest_ss;
+    auto status = Snapshots::GetInstance().GetSnapshot(latest_ss, prev_ss_->GetCollection()->GetID());
+    if (!status.ok())
+        return status;
+    if (prev_ss_->GetID() != latest_ss->GetID()) {
+        if (checker) {
+            status = checker(latest_ss);
+        } else {
+            status = DoCheckStale(latest_ss);
+        }
     }
-
-    return true;
+    return status;
 }
 
-ScopedSnapshotT
-Operations::GetSnapshot() const {
-    // PXU TODO: Check is result ready or valid
+Status
+Operations::DoneRequired() const {
+    Status status;
+    if (!done_) {
+        status = Status(SS_CONSTRAINT_CHECK_ERROR, "Operation is expected to be done");
+    }
+    return status;
+}
+
+Status
+Operations::IDSNotEmptyRequried() const {
+    Status status;
     if (ids_.size() == 0)
-        return ScopedSnapshotT();
-    return Snapshots::GetInstance().GetSnapshot(prev_ss_->GetCollectionId(), ids_.back());
+        status = Status(SS_CONSTRAINT_CHECK_ERROR, "No Snapshot is available");
+    return status;
 }
 
-void
+Status
+Operations::PrevSnapshotRequried() const {
+    Status status;
+    if (!prev_ss_) {
+        status = Status(SS_CONSTRAINT_CHECK_ERROR, "Prev snapshot is requried");
+    }
+    return status;
+}
+
+Status
+Operations::GetSnapshot(ScopedSnapshotT& ss) const {
+    auto status = PrevSnapshotRequried();
+    if (!status.ok())
+        return status;
+    status = DoneRequired();
+    if (!status.ok())
+        return status;
+    status = IDSNotEmptyRequried();
+    if (!status.ok())
+        return status;
+    /* status = Snapshots::GetInstance().GetSnapshot(ss, prev_ss_->GetCollectionId(), ids_.back()); */
+    ss = context_.latest_ss;
+    return status;
+}
+
+Status
 Operations::ApplyToStore(Store& store) {
-    OnExecute(store);
-    Done();
+    if (GetType() == OperationsType::W_Compound) {
+        /* std::cout << ToString() << std::endl; */
+    }
+    if (done_) {
+        Done(store);
+        return status_;
+    }
+    auto status = OnExecute(store);
+    SetStatus(status);
+    Done(store);
+    return status_;
 }
 
-void
+Status
+Operations::OnSnapshotDropped() {
+    return Status::OK();
+}
+
+Status
+Operations::OnSnapshotStale() {
+    /* std::cout << GetRepr() << " Stale SS " << prev_ss_->GetID() << " RefCnt=" << prev_ss_->RefCnt() \ */
+    /*     << " Curr SS " << context_.prev_ss->GetID() << " RefCnt=" << context_.prev_ss->RefCnt() << std::endl; */
+    return Status::OK();
+}
+
+Status
 Operations::OnExecute(Store& store) {
-    auto r = PreExecute(store);
-    if (!r) {
-        status_ = OP_FAIL_FLUSH_META;
-        return;
+    auto status = PreExecute(store);
+    if (!status.ok()) {
+        return status;
     }
-    r = DoExecute(store);
-    if (!r) {
-        status_ = OP_FAIL_FLUSH_META;
-        return;
+    status = DoExecute(store);
+    if (!status.ok()) {
+        return status;
     }
-    PostExecute(store);
+    return PostExecute(store);
 }
 
-bool
+Status
 Operations::PreExecute(Store& store) {
-    return true;
+    Status status;
+    if (prev_ss_ && type_ == OperationsType::W_Compound) {
+        Snapshots::GetInstance().GetSnapshot(context_.prev_ss, prev_ss_->GetCollectionId());
+        if (!context_.prev_ss) {
+            status = OnSnapshotDropped();
+        } else if (prev_ss_->GetID() != context_.prev_ss->GetID()) {
+            status = OnSnapshotStale();
+        }
+    }
+    return status;
 }
 
-bool
+Status
 Operations::DoExecute(Store& store) {
-    return true;
+    return Status::OK();
 }
 
-bool
+Status
 Operations::PostExecute(Store& store) {
-    auto ok = store.DoCommitOperation(*this);
-    if (!ok)
-        status_ = OP_FAIL_FLUSH_META;
-    return ok;
+    return store.DoCommitOperation(*this);
+}
+
+Status
+Operations::RollBack() {
+    // TODO: Implement here
+    // Spwarn a rollback operation or re-use this operation
+    return Status::OK();
+}
+
+Status
+Operations::ApplyRollBack(Store& store) {
+    // TODO: Implement rollback to remove all resources in steps_
+    return Status::OK();
+}
+
+Operations::~Operations() {
+    // TODO: Prefer to submit a rollback operation if status is not ok
 }
 
 }  // namespace snapshot

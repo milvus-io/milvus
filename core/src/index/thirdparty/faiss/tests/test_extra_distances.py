@@ -106,6 +106,12 @@ class TestKNN(unittest.TestCase):
         for q in range(nq):
             assert np.all(D[q] == dis[q, I[q]])
 
+        index2 = faiss.deserialize_index(faiss.serialize_index(index))
+
+        D2, I2 = index2.search(xq, 10)
+
+        self.assertTrue(np.all(I == I2))
+
     def test_L1(self):
         self.do_test_knn(faiss.METRIC_L1)
 

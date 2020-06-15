@@ -19,17 +19,14 @@ namespace snapshot {
 
 void
 ReferenceProxy::Ref() {
-    refcnt_ += 1;
-    /* std::cout << this << " refcnt = " << refcnt_ << std::endl; */
+    ++refcnt_;
 }
 
 void
 ReferenceProxy::UnRef() {
     if (refcnt_ == 0)
         return;
-    refcnt_ -= 1;
-    /* std::cout << this << " refcnt = " << refcnt_ << std::endl; */
-    if (refcnt_ == 0) {
+    if (refcnt_.fetch_sub(1) == 1) {
         for (auto& cb : on_no_ref_cbs_) {
             cb();
         }

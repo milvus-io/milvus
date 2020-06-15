@@ -11,7 +11,6 @@ index_file_size = 10
 timeout = 1 
 delete_timeout = 60
 
-
 def pytest_addoption(parser):
     parser.addoption("--ip", action="store", default="localhost")
     parser.addoption("--service", action="store", default="")

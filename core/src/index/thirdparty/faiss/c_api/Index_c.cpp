@@ -97,10 +97,9 @@ int faiss_Index_compute_residual(const FaissIndex* index, const float* x, float*
     } CATCH_AND_HANDLE
 }
 
-int faiss_Index_display(const FaissIndex* index) {
+int faiss_Index_compute_residual_n(const FaissIndex* index, idx_t n, const float* x, float* residuals, const idx_t* keys) {
     try {
-        reinterpret_cast<const faiss::Index*>(index)->display();
+        reinterpret_cast<const faiss::Index *>(index)->compute_residual_n(n, x, residuals, keys);
     } CATCH_AND_HANDLE
 }
-
 }

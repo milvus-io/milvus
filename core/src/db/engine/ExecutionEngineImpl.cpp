@@ -41,6 +41,7 @@
 #include "knowhere/index/vector_index/helpers/IndexParameter.h"
 #include "metrics/Metrics.h"
 #include "scheduler/Utils.h"
+#include "scheduler/job/SearchJob.h"
 #include "segment/SegmentReader.h"
 #include "segment/SegmentWriter.h"
 #include "utils/CommonUtil.h"
@@ -931,6 +932,7 @@ ExecutionEngineImpl::ProcessRangeQuery(const engine::DataType data_type, const s
     }
 }
 
+#if 0
 Status
 ExecutionEngineImpl::HybridSearch(query::GeneralQueryPtr general_query,
                                   std::unordered_map<std::string, DataType>& attr_type, query::QueryPtr query_ptr,
@@ -1220,71 +1222,29 @@ ExecutionEngineImpl::ExecBinaryQuery(milvus::query::GeneralQueryPtr general_quer
     }
     return Status::OK();
 }
-
-Status
-ExecutionEngineImpl::Search(int64_t n, const float* data, int64_t k, const milvus::json& extra_params, float* distances,
-                            int64_t* labels, bool hybrid) {
-#if 0
-    if (index_type_ == EngineType::FAISS_IVFSQ8H) {
-        if (!hybrid) {
-            const std::string key = location_ + ".quantizer";
-            std::vector<uint64_t> gpus = scheduler::get_gpu_pool();
-
-            const int64_t NOT_FOUND = -1;
-            int64_t device_id = NOT_FOUND;
-
-            // cache hit
-            {
-                knowhere::QuantizerPtr quantizer = nullptr;
-
-                for (auto& gpu : gpus) {
-                    auto cache = cache::GpuCacheMgr::GetInstance(gpu);
-                    if (auto cached_quantizer = cache->GetIndex(key)) {
-                        device_id = gpu;
-                        quantizer = std::static_pointer_cast<CachedQuantizer>(cached_quantizer)->Data();
-                    }
-                }
-
-                if (device_id != NOT_FOUND) {
-                    // cache hit
-                    milvus::json quantizer_conf{{knowhere::meta::DEVICEID : device_id}, {"mode" : 2}};
-                    auto new_index = index_->LoadData(quantizer, config);
-                    index_ = new_index;
-                }
-            }
-
-            if (device_id == NOT_FOUND) {
-                // cache miss
-                std::vector<int64_t> all_free_mem;
-                for (auto& gpu : gpus) {
-                    auto cache = cache::GpuCacheMgr::GetInstance(gpu);
-                    auto free_mem = cache->CacheCapacity() - cache->CacheUsage();
-                    all_free_mem.push_back(free_mem);
-                }
-
-                auto max_e = std::max_element(all_free_mem.begin(), all_free_mem.end());
-                auto best_index = std::distance(all_free_mem.begin(), max_e);
-                device_id = gpus[best_index];
-
-                auto pair = index_->CopyToGpuWithQuantizer(device_id);
-                index_ = pair.first;
-
-                // cache
-                auto cached_quantizer = std::make_shared<CachedQuantizer>(pair.second);
-                cache::GpuCacheMgr::GetInstance(device_id)->InsertItem(key, cached_quantizer);
-            }
-        }
-    }
 #endif
-    TimeRecorder rc(LogOut("[%s][%ld] ExecutionEngineImpl::Search float", "search", 0));
+
+Status
+ExecutionEngineImpl::Search(std::vector<int64_t>& ids, std::vector<float>& distances, scheduler::SearchJobPtr job,
+                            bool hybrid) {
+    TimeRecorder rc(LogOut("[%s][%ld] ExecutionEngineImpl::Search", "search", 0));
 
     if (index_ == nullptr) {
         LOG_ENGINE_ERROR_ << LogOut("[%s][%ld] ExecutionEngineImpl: index is null, failed to search", "search", 0);
         return Status(DB_ERROR, "index is null");
     }
 
-    milvus::json conf = extra_params;
-    conf[knowhere::meta::TOPK] = k;
+    double span;
+    uint64_t nq = job->nq();
+    uint64_t topk = job->topk();
+
+    const engine::VectorsData& vectors = job->vectors();
+
+    ids.resize(topk * nq);
+    distances.resize(topk * nq);
+
+    milvus::json conf = job->extra_params();
+    conf[knowhere::meta::TOPK] = topk;
     auto adapter = knowhere::AdapterMgr::GetInstance().GetAdapter(index_->index_type());
     if (!adapter->CheckSearch(conf, index_->index_type(), index_->index_mode())) {
         LOG_ENGINE_ERROR_ << LogOut("[%s][%ld] Illegal search params", "search", 0);
@@ -1296,14 +1256,21 @@ ExecutionEngineImpl::Search(int64_t n, const float* data, int64_t k, const milvu
     }
 
     rc.RecordSection("query prepare");
-    auto dataset = knowhere::GenDataset(n, index_->Dim(), data);
+    knowhere::DatasetPtr dataset;
+    if (!vectors.float_data_.empty()) {
+        dataset = knowhere::GenDataset(nq, index_->Dim(), vectors.float_data_.data());
+    } else {
+        dataset = knowhere::GenDataset(nq, index_->Dim(), vectors.binary_data_.data());
+    }
     auto result = index_->Query(dataset, conf);
-    rc.RecordSection("query done");
+    span = rc.RecordSection("query done");
+    job->time_stat().query_time += span / 1000;
 
     LOG_ENGINE_DEBUG_ << LogOut("[%s][%ld] get %ld uids from index %s", "search", 0, index_->GetUids().size(),
                                 location_.c_str());
-    MapAndCopyResult(result, index_->GetUids(), n, k, distances, labels);
-    rc.RecordSection("map uids " + std::to_string(n * k));
+    MapAndCopyResult(result, index_->GetUids(), nq, topk, distances.data(), ids.data());
+    span = rc.RecordSection("map uids " + std::to_string(nq * topk));
+    job->time_stat().map_uids_time += span / 1000;
 
     if (hybrid) {
         HybridUnset();
@@ -1312,47 +1279,9 @@ ExecutionEngineImpl::Search(int64_t n, const float* data, int64_t k, const milvu
     return Status::OK();
 }
 
+#if 0
 Status
-ExecutionEngineImpl::Search(int64_t n, const uint8_t* data, int64_t k, const milvus::json& extra_params,
-                            float* distances, int64_t* labels, bool hybrid) {
-    TimeRecorder rc(LogOut("[%s][%ld] ExecutionEngineImpl::Search uint8", "search", 0));
-
-    if (index_ == nullptr) {
-        LOG_ENGINE_ERROR_ << LogOut("[%s][%ld] ExecutionEngineImpl: index is null, failed to search", "search", 0);
-        return Status(DB_ERROR, "index is null");
-    }
-
-    milvus::json conf = extra_params;
-    conf[knowhere::meta::TOPK] = k;
-    auto adapter = knowhere::AdapterMgr::GetInstance().GetAdapter(index_->index_type());
-    if (!adapter->CheckSearch(conf, index_->index_type(), index_->index_mode())) {
-        LOG_ENGINE_ERROR_ << LogOut("[%s][%ld] Illegal search params", "search", 0);
-        throw Exception(DB_ERROR, "Illegal search params");
-    }
-
-    if (hybrid) {
-        HybridLoad();
-    }
-
-    rc.RecordSection("query prepare");
-    auto dataset = knowhere::GenDataset(n, index_->Dim(), data);
-    auto result = index_->Query(dataset, conf);
-    rc.RecordSection("query done");
-
-    LOG_ENGINE_DEBUG_ << LogOut("[%s][%ld] get %ld uids from index %s", "search", 0, index_->GetUids().size(),
-                                location_.c_str());
-    MapAndCopyResult(result, index_->GetUids(), n, k, distances, labels);
-    rc.RecordSection("map uids " + std::to_string(n * k));
-
-    if (hybrid) {
-        HybridUnset();
-    }
-
-    return Status::OK();
-}
-
-Status
-ExecutionEngineImpl::GetVectorByID(const int64_t& id, float* vector, bool hybrid) {
+ExecutionEngineImpl::GetVectorByID(const int64_t id, float* vector, bool hybrid) {
     if (index_ == nullptr) {
         LOG_ENGINE_ERROR_ << "ExecutionEngineImpl: index is null, failed to search";
         return Status(DB_ERROR, "index is null");
@@ -1377,7 +1306,7 @@ ExecutionEngineImpl::GetVectorByID(const int64_t& id, float* vector, bool hybrid
 }
 
 Status
-ExecutionEngineImpl::GetVectorByID(const int64_t& id, uint8_t* vector, bool hybrid) {
+ExecutionEngineImpl::GetVectorByID(const int64_t id, uint8_t* vector, bool hybrid) {
     if (index_ == nullptr) {
         LOG_ENGINE_ERROR_ << "ExecutionEngineImpl: index is null, failed to search";
         return Status(DB_ERROR, "index is null");
@@ -1402,6 +1331,7 @@ ExecutionEngineImpl::GetVectorByID(const int64_t& id, uint8_t* vector, bool hybr
 
     return Status::OK();
 }
+#endif
 
 Status
 ExecutionEngineImpl::Cache() {

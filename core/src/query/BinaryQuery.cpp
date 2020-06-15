@@ -85,6 +85,8 @@ GenBinaryQuery(BooleanQueryPtr query, BinaryQueryPtr& binary_query) {
                     binary_query->relation = QueryRelation::OR;
                     return GenBinaryQuery(query, binary_query);
                 }
+                default:
+                    return Status::OK();
             }
         }
     }
@@ -95,15 +97,15 @@ GenBinaryQuery(BooleanQueryPtr query, BinaryQueryPtr& binary_query) {
         switch (bc->getOccur()) {
             case Occur::MUST: {
                 binary_query->relation = QueryRelation::AND;
-                Status s = GenBinaryQuery(bc, binary_query);
-                return s;
+                return GenBinaryQuery(bc, binary_query);
             }
             case Occur::MUST_NOT:
             case Occur::SHOULD: {
                 binary_query->relation = QueryRelation::OR;
-                Status s = GenBinaryQuery(bc, binary_query);
-                return s;
+                return GenBinaryQuery(bc, binary_query);
             }
+            default:
+                return Status::OK();
         }
     }
 

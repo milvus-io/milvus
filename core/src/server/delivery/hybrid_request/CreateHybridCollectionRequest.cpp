@@ -57,6 +57,8 @@ CreateHybridCollectionRequest::OnExecute() {
     try {
         // step 1: check arguments
         auto status = ValidationUtil::ValidateCollectionName(collection_name_);
+        fiu_do_on("CreateHybridCollectionRequest.OnExecute.invalid_collection_name",
+                  status = Status(milvus::SERVER_UNEXPECTED_ERROR, ""));
         if (!status.ok()) {
             return status;
         }
@@ -98,6 +100,8 @@ CreateHybridCollectionRequest::OnExecute() {
 
         // step 3: create collection
         status = DBWrapper::DB()->CreateHybridCollection(collection_info, fields_schema);
+        fiu_do_on("CreateHybridCollectionRequest.OnExecute.invalid_db_execute",
+                  status = Status(milvus::SERVER_UNEXPECTED_ERROR, ""));
         if (!status.ok()) {
             // collection could exist
             if (status.code() == DB_ALREADY_EXIST) {

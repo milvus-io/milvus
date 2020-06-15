@@ -87,19 +87,19 @@ class FaissGpuResourceMgr {
 
 class ResScope {
  public:
-    ResScope(ResPtr& res, const int64_t& device_id, const bool& isown)
+    ResScope(ResPtr& res, const int64_t device_id, const bool isown)
         : resource(res), device_id(device_id), move(true), own(isown) {
         Lock();
     }
 
-    ResScope(ResWPtr& res, const int64_t& device_id, const bool& isown)
+    ResScope(ResWPtr& res, const int64_t device_id, const bool isown)
         : resource(res), device_id(device_id), move(true), own(isown) {
         Lock();
     }
 
     // specif for search
     // get the ownership of gpuresource and gpu
-    ResScope(ResWPtr& res, const int64_t& device_id) : device_id(device_id), move(false), own(true) {
+    ResScope(ResWPtr& res, const int64_t device_id) : device_id(device_id), move(false), own(true) {
         resource = res.lock();
         Lock();
     }

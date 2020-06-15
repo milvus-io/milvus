@@ -20,7 +20,8 @@
 #include <gtest/gtest.h>
 #include <iostream>
 
-TEST(InstructionSetTest, INSTRUCTION_SET_TEST) {
+void
+ShowInstructionSet() {
     auto& outstream = std::cout;
 
     auto support_message = [&outstream](const std::string& isa_feature, bool is_supported) {
@@ -87,4 +88,8 @@ TEST(InstructionSetTest, INSTRUCTION_SET_TEST) {
     support_message("TBM", instruction_set_inst.TBM());
     support_message("XOP", instruction_set_inst.XOP());
     support_message("XSAVE", instruction_set_inst.XSAVE());
+}
+
+TEST(InstructionSetTest, INSTRUCTION_SET_TEST) {
+    ASSERT_NO_FATAL_FAILURE(ShowInstructionSet());
 }

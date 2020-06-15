@@ -43,7 +43,7 @@ ToString(ResourceType type) {
 }
 
 Resource::Resource(std::string name, ResourceType type, uint64_t device_id, bool enable_executor)
-    : name_(std::move(name)), type_(type), device_id_(device_id), enable_executor_(enable_executor) {
+    : device_id_(device_id), name_(std::move(name)), type_(type), enable_executor_(enable_executor) {
     // register subscriber in tasktable
     task_table_.RegisterSubscriber([&] {
         if (subscriber_) {
@@ -184,7 +184,7 @@ Resource::loader_function() {
 
 void
 Resource::executor_function() {
-    SetThreadName("taskexector_th");
+    SetThreadName("taskexecutor_th");
     if (subscriber_) {
         auto event = std::make_shared<StartUpEvent>(shared_from_this());
         subscriber_(std::static_pointer_cast<Event>(event));

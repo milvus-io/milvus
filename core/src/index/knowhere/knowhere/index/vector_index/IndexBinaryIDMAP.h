@@ -50,8 +50,10 @@ class BinaryIDMAP : public VecIndex, public FaissBaseBinaryIndex {
     DatasetPtr
     Query(const DatasetPtr&, const Config&) override;
 
+#if 0
     DatasetPtr
     QueryById(const DatasetPtr& dataset_ptr, const Config& config) override;
+#endif
 
     int64_t
     Count() override {
@@ -68,8 +70,10 @@ class BinaryIDMAP : public VecIndex, public FaissBaseBinaryIndex {
         return Count() * Dim() / 8;
     }
 
+#if 0
     DatasetPtr
     GetVectorById(const DatasetPtr& dataset_ptr, const Config& config) override;
+#endif
 
     virtual const uint8_t*
     GetRawVectors();

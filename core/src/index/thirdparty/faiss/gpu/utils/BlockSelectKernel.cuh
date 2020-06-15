@@ -146,11 +146,10 @@ __global__ void blockSelect(Tensor<K, 2, true> in,
 
   for (; i < limit; i += ThreadsPerBlock) {
     if (bitsetEmpty || (!(bitset[i >> 3] & (0x1 << (i & 0x7))))) {
-      heap.add(*inStart, (IndexType) i);
-    } else {
-      heap.add(-1.0, (IndexType) i);
+      heap.addThreadQ(*inStart, (IndexType) i);
     }
-      
+    heap.checkThreadQ();
+
     inStart += ThreadsPerBlock;
   }
 
@@ -158,8 +157,6 @@ __global__ void blockSelect(Tensor<K, 2, true> in,
   if (i < in.getSize(1)) {
     if (bitsetEmpty || (!(bitset[i >> 3] & (0x1 << (i & 0x7))))) {
       heap.addThreadQ(*inStart, (IndexType) i);
-    } else {
-      heap.addThreadQ(-1.0, (IndexType) i);
     }
   }
 
@@ -208,10 +205,9 @@ __global__ void blockSelectPair(Tensor<K, 2, true> inK,
 
   for (; i < limit; i += ThreadsPerBlock) {
     if (bitsetEmpty || (!(bitset[i >> 3] & (0x1 << (i & 0x7))))) {
-      heap.add(*inKStart, *inVStart);
-    } else {
-      heap.add(-1.0, *inVStart);
+      heap.addThreadQ(*inKStart, *inVStart);
     }
+    heap.checkThreadQ();
 
     inKStart += ThreadsPerBlock;
     inVStart += ThreadsPerBlock;
@@ -221,8 +217,6 @@ __global__ void blockSelectPair(Tensor<K, 2, true> inK,
   if (i < inK.getSize(1)) {
     if (bitsetEmpty || (!(bitset[i >> 3] & (0x1 << (i & 0x7))))) {
       heap.addThreadQ(*inKStart, *inVStart);
-    } else {
-      heap.addThreadQ(-1.0, *inVStart);
     }
   }
 

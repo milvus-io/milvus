@@ -2,17 +2,63 @@
 
 Please mark all change in change log and use the issue from GitHub
 
-# Milvus 0.10.0 (TBD)
+# Milvus 0.11.0 (TBD)
 
 ## Bug
+- \#2551 Fix test_hybrid_db and test_rpc error
+
+## Feature
+- \#2319 Redo metadata to support MVCC
+- \#2509 Count up query statistics for debug ease
+
+## Improvement
+
+## Task
+
+# Milvus 0.10.0 (2020-6-15)
+
+## Bug
+-   \#2367 Fix inconsistent reading and writing when using mishards
+-   \#2368 Make read node detect delete behavior
+-   \#2373 Build index for small segment waste time on waiting background index thread finish
+-   \#2394 Drop collection timeout if too many partitions created on collection
+-   \#2549 Launch server fail using demo config
+
+## Feature
+-   \#2363 Update branch version
+-   \#2510 Upgrade Milvus config
+
+## Improvement
+-   \#2381 Upgrade FAISS to 1.6.3
+-   \#2429 Fix Milvus 0.9.1 performance degrade issue
+-   \#2441 Improve Knowhere code coverage
+-   \#2466 Optimize k-selection implemention of faiss gpu version
+-   \#2489 Add exception throw on mysql meta error
+-   \#2495 Add creating lock file failure reason.
+-   \#2516 Improve unit test coverage
+-   \#2548 Upgrade mishards for milvus v0.10.0
+
+## Task
+
+# Milvus 0.9.1 (2020-05-29)
+
+## Bug
+-   \#2366 Reduce SQL execution times for collection contains lot of partitions
+-   \#2378 Duplicate data after server restart
+-   \#2395 Fix large nq cudaMalloc error
+-   \#2399 The nlist set by the user may not take effect
+-   \#2403 MySQL max_idle_time is 10 by default
+-   \#2450 The deleted vectors may be found on GPU
+-   \#2456 openblas library install failed
 
 ## Feature
 
 ## Improvement
 -   \#2307 Disable index SPTAG by default
+-   \#2353 Remove log_config from code and scripts
 -   \#2370 Clean compile warning
-
-## Task
+-   \#2410 Logging build index progress
+-   \#2461 Upgrade mishards for milvus 0.9.1
 
 # Milvus 0.9.0 (2020-05-15)
 
@@ -77,10 +123,10 @@ Please mark all change in change log and use the issue from GitHub
 -   \#2252 Upgrade mishards APIs and requirements
 -   \#2256 k-means clustering algorithm use only Euclidean distance metric
 -   \#2300 Upgrade mishrads configuration to version 0.4
--   \#2311 Update mishards methods 
+-   \#2311 Update mishards methods
 -   \#2330 Change url for behavior 'get_entities_by_id'
 -   \#2347 Update http document for v0.9.0
--   \#2358 Upgrade mishards for v0.9.0 
+-   \#2358 Upgrade mishards for v0.9.0
 
 ## Task
 
@@ -137,9 +183,9 @@ Please mark all change in change log and use the issue from GitHub
 -   \#1724 Remove unused unittests
 -   \#1728 Optimize request handler to combine similar query
 -   \#1734 Opentracing for combined search request
--   \#1735 Fix search out of memory with ivf_flat 
+-   \#1735 Fix search out of memory with ivf_flat
 -   \#1747 Expected error status if search with partition_tag not existed
--   \#1756 Fix memory exhausted during searching 
+-   \#1756 Fix memory exhausted during searching
 -   \#1781 Fix search hang with SQ8H
 -   \#1812 Fix incorrect request method in search example in http readme
 -   \#1818 Duplicate data generated after restart milvus server
@@ -156,9 +202,9 @@ Please mark all change in change log and use the issue from GitHub
 -   \#1548 Move store/Directory to storage/Operation and add FSHandler
 -   \#1572 Optimize config cpu/gpu cache_capacity setter
 -   \#1619 Improve compact performance
--   \#1649 Fix Milvus crash on old CPU 
+-   \#1649 Fix Milvus crash on old CPU
 -   \#1653 IndexFlat (SSE) and IndexBinaryFlat performance improvement for small NQ
--   \#1678 Remove CUSTOMIZATION macro 
+-   \#1678 Remove CUSTOMIZATION macro
 -   \#1698 Upgrade mishards to v0.7.0
 -   \#1719 Improve Milvus log
 -   \#1754 Optimize behavior to get file ids from metadata in mishards
@@ -204,7 +250,7 @@ Please mark all change in change log and use the issue from GitHub
 -   \#1507 set_config for insert_buffer_size is wrong
 -   \#1510 Add set interfaces for WAL configurations
 -   \#1511 Fix big integer cannot pass to server correctly
--   \#1517 Result is not correct when search vectors in multi partition, index type is RNSG 
+-   \#1517 Result is not correct when search vectors in multi partition, index type is RNSG
 -   \#1518 Table count did not match after deleting vectors and compact
 -   \#1521 Make cache_insert_data take effect in-service
 -   \#1525 Add setter API for config preload_table
@@ -271,7 +317,7 @@ Please mark all change in change log and use the issue from GitHub
 -   \#1320 Remove debug logging from faiss
 -   \#1426 Support to configure whether to enabled autoflush and the autoflush interval
 -   \#1444 Improve delete
--   \#1448 General proto api for NNS libraries 
+-   \#1448 General proto api for NNS libraries
 -   \#1480 Add return code for AVX512 selection
 -   \#1524 Update config "preload_table" description
 -   \#1544 Update resources name in HTTP module

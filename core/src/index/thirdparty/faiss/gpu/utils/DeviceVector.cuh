@@ -46,9 +46,10 @@ class DeviceVector {
       num_ = num;
       capacity_ = capacity_;
   }
+
   // Clear all allocated memory; reset to zero size
   void clear() {
-    if(owner) {
+    if (owner) {
         freeMemorySpace(space_, data_);
     }
     data_ = nullptr;

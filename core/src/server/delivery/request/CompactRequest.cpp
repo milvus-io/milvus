@@ -70,7 +70,7 @@ CompactRequest::OnExecute() {
         rc.RecordSection("check validation");
 
         // step 2: check collection existence
-        status = DBWrapper::DB()->Compact(collection_name_, compact_threshold_);
+        status = DBWrapper::DB()->Compact(context_, collection_name_, compact_threshold_);
         if (!status.ok()) {
             return status;
         }

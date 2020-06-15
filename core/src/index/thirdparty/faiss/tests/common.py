@@ -3,9 +3,9 @@
 # This source code is licensed under the MIT license found in the
 # LICENSE file in the root directory of this source tree.
 
-#! /usr/bin/env python2
-
 # a few common functions for the tests
+
+from __future__ import absolute_import, division, print_function, unicode_literals
 
 import numpy as np
 import faiss
@@ -97,3 +97,32 @@ def get_dataset_2(d, nt, nb, nq):
     x = np.sin(x)
     x = x.astype('float32')
     return x[:nt], x[nt:nt + nb], x[nt + nb:]
+
+
+def make_binary_dataset(d, nt, nb, nq):
+    assert d % 8 == 0
+    rs = np.random.RandomState(123)
+    x = rs.randint(256, size=(nb + nq + nt, int(d / 8))).astype('uint8')
+    return x[:nt], x[nt:-nq], x[-nq:]
+
+
+def compare_binary_result_lists(D1, I1, D2, I2):
+    """comparing result lists is difficult because there are many
+    ties. Here we sort by (distance, index) pairs and ignore the largest
+    distance of each result. Compatible result lists should pass this."""
+    assert D1.shape == I1.shape == D2.shape == I2.shape
+    n, k = D1.shape
+    ndiff = (D1 != D2).sum()
+    assert ndiff == 0, '%d differences in distance matrix %s' % (
+        ndiff, D1.shape)
+
+    def normalize_DI(D, I):
+        norm = I.max() + 1.0
+        Dr = D.astype('float64') + I / norm
+        # ignore -1s and elements on last column
+        Dr[I1 == -1] = 1e20
+        Dr[D == D[:, -1:]] = 1e20
+        Dr.sort(axis=1)
+        return Dr
+    ndiff = (normalize_DI(D1, I1) != normalize_DI(D2, I2)).sum()
+    assert ndiff == 0, '%d differences in normalized D matrix' % ndiff

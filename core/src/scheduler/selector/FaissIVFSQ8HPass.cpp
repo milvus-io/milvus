@@ -25,7 +25,7 @@ namespace scheduler {
 void
 FaissIVFSQ8HPass::Init() {
     server::Config& config = server::Config::GetInstance();
-    Status s = config.GetEngineConfigGpuSearchThreshold(threshold_);
+    Status s = config.GetGpuResourceConfigGpuSearchThreshold(threshold_);
     if (!s.ok()) {
         threshold_ = std::numeric_limits<int64_t>::max();
     }
@@ -57,7 +57,7 @@ FaissIVFSQ8HPass::Run(const TaskPtr& task) {
         LOG_SERVER_DEBUG_ << LogOut("[%s][%d] FaissIVFSQ8HPass: gpu disable, specify cpu to search!", "search", 0);
         res_ptr = ResMgrInst::GetInstance()->GetResource("cpu");
     }
-    if (search_job->nq() < threshold_) {
+    if (search_job->nq() < (uint64_t)threshold_) {
         LOG_SERVER_DEBUG_ << LogOut("[%s][%d] FaissIVFSQ8HPass: nq < gpu_search_threshold, specify cpu to search!",
                                     "search", 0);
         res_ptr = ResMgrInst::GetInstance()->GetResource("cpu");
