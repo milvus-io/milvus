@@ -240,10 +240,6 @@ Server::Start() {
         STATUS_CHECK(config.GetClusterConfigEnable(cluster_enable));
         STATUS_CHECK(config.GetClusterConfigRole(cluster_role));
 
-        // std::string deploy_mode;
-        // STATUS_CHECK(config.GetServerConfigDeployMode(deploy_mode));
-
-        // if (deploy_mode == "single" || deploy_mode == "cluster_writable") {
         if ((not cluster_enable) || cluster_role == "rw") {
             std::string db_path;
             STATUS_CHECK(config.GetStorageConfigPath(db_path));
