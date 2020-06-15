@@ -133,9 +133,10 @@ class ExecutionEngineImpl : public ExecutionEngine {
     ProcessTermQuery(faiss::ConcurrentBitsetPtr& bitset, query::GeneralQueryPtr general_query,
                      std::unordered_map<std::string, DataType>& attr_type);
 
-    template <typename T>
-    void
-    ProcessRangeQuery(std::vector<T> data, T value, query::CompareOperator type, faiss::ConcurrentBitsetPtr& bitset);
+    Status
+    ProcessRangeQuery(const engine::DataType data_type, const std::string& operand,
+                      const query::CompareOperator& com_operator, knowhere::IndexPtr& index_ptr,
+                      faiss::ConcurrentBitsetPtr& bitset);
 
     void
     HybridLoad() const;

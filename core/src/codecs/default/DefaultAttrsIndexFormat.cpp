@@ -157,7 +157,7 @@ DefaultAttrsIndexFormat::read(const milvus::storage::FSHandlerPtr& fs_ptr,
         const auto& path = it->path();
         if (path.extension().string() == attr_index_extension_) {
             auto file_name = path.filename().string();
-            auto field_name = file_name.substr(0, file_name.size() - 3);
+            auto field_name = file_name.substr(0, file_name.size() - 4);
             knowhere::IndexPtr index = nullptr;
             engine::meta::hybrid::DataType data_type;
             read_internal(fs_ptr, path.string(), index, data_type);
@@ -195,7 +195,7 @@ DefaultAttrsIndexFormat::write(const milvus::storage::FSHandlerPtr& fs_ptr,
         fs_ptr->writer_ptr_->write(&data_type, sizeof(data_type));
 
         for (auto& iter : binaryset.binary_map_) {
-            auto meta = iter.first.length();
+            auto meta = iter.first.c_str();
             size_t meta_length = iter.first.length();
             fs_ptr->writer_ptr_->write(&meta_length, sizeof(meta_length));
             fs_ptr->writer_ptr_->write((void*)meta, meta_length);

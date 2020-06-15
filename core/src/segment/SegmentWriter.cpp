@@ -201,7 +201,7 @@ SegmentWriter::WriteAttrsIndex() {
     codec::DefaultCodec default_codec;
     try {
         fs_ptr_->operation_ptr_->CreateDirectory();
-        default_codec.GetAttrIndexFormat()->write(fs_ptr_, segment_ptr_->attrs_index_ptr_);
+        default_codec.GetAttrsIndexFormat()->write(fs_ptr_, segment_ptr_->attrs_index_ptr_);
     } catch (std::exception& e) {
         std::string err_msg = "Failed to write vector index: " + std::string(e.what());
         LOG_ENGINE_ERROR_ << err_msg;

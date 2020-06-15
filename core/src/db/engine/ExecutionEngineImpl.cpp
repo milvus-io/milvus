@@ -529,7 +529,7 @@ ExecutionEngineImpl::LoadAttr(bool to_cache) {
         auto attrs_index = segment_ptr->attrs_index_ptr_;
 
         std::unordered_map<std::string, knowhere::IndexPtr> attr_indexes;
-        std::unordered_map<std::string, int64_t> attr_size;
+        std::unordered_map<std::string, int64_t> attr_sizes;
 
         auto attr_it = attrs_index->attr_indexes.begin();
         if (attr_it == attrs_index->attr_indexes.end()) {
@@ -539,8 +539,10 @@ ExecutionEngineImpl::LoadAttr(bool to_cache) {
         for (; attr_it != attrs_index->attr_indexes.end(); attr_it++) {
             attr_indexes.insert(std::make_pair(attr_it->first, attr_it->second->GetAttrIndex()));
         }
+
+        auto count = segment_ptr->attrs_ptr_->attrs.begin()->second->GetUids().size();
         attr_index_->SetIndexData(attr_indexes);
-        attr_index_->SetIndexSize(attr_size);
+        attr_index_->SetEntityCount(count);
     }
 
     if (!already_in_cache && to_cache) {
@@ -775,10 +777,6 @@ ExecutionEngineImpl::ProcessTermQuery(faiss::ConcurrentBitsetPtr& bitset, query:
                                       std::unordered_map<std::string, DataType>& attr_type) {
     auto field_name = general_query->leaf->term_query->field_name;
     auto type = attr_type.at(field_name);
-    if (attr_->attr_size().find(field_name) == attr_->attr_size().end()) {
-        return Status{SERVER_INVALID_BINARY_QUERY, "Attribute's field_name is wrong"};
-    }
-    auto size = attr_->attr_size().at(field_name);
 
     switch (type) {
         case DataType::INT8: {
@@ -877,58 +875,59 @@ ExecutionEngineImpl::ProcessTermQuery(faiss::ConcurrentBitsetPtr& bitset, query:
     return Status::OK();
 }
 
-template <typename T>
-void
-ExecutionEngineImpl::ProcessRangeQuery(std::vector<T> data, T value, query::CompareOperator type,
+Status
+ExecutionEngineImpl::ProcessRangeQuery(const engine::DataType data_type, const std::string& operand,
+                                       const query::CompareOperator& com_operator, knowhere::IndexPtr& index_ptr,
                                        faiss::ConcurrentBitsetPtr& bitset) {
-    switch (type) {
-        case query::CompareOperator::LT: {
-            for (uint64_t i = 0; i < data.size(); ++i) {
-                if (data[i] < value) {
-                    bitset->set(i);
-                }
-            }
+    switch (data_type) {
+        case DataType::INT8: {
+            auto int8_index = std::dynamic_pointer_cast<knowhere::StructuredIndexSort<int8_t>>(index_ptr);
+
+            int8_t value = atoi(operand.c_str());
+            bitset = int8_index->Range(value, (knowhere::OperatorType)com_operator);
             break;
         }
-        case query::CompareOperator::LTE: {
-            for (uint64_t i = 0; i < data.size(); ++i) {
-                if (data[i] <= value) {
-                    bitset->set(i);
-                }
-            }
+        case DataType::INT16: {
+            auto int16_index = std::dynamic_pointer_cast<knowhere::StructuredIndexSort<int16_t>>(index_ptr);
+
+            int16_t value = atoi(operand.c_str());
+            bitset = int16_index->Range(value, (knowhere::OperatorType)com_operator);
             break;
         }
-        case query::CompareOperator::GT: {
-            for (uint64_t i = 0; i < data.size(); ++i) {
-                if (data[i] > value) {
-                    bitset->set(i);
-                }
-            }
+        case DataType::INT32: {
+            auto int32_index = std::dynamic_pointer_cast<knowhere::StructuredIndexSort<int32_t>>(index_ptr);
+
+            int32_t value = atoi(operand.c_str());
+            bitset = int32_index->Range(value, (knowhere::OperatorType)com_operator);
             break;
         }
-        case query::CompareOperator::GTE: {
-            for (uint64_t i = 0; i < data.size(); ++i) {
-                if (data[i] >= value) {
-                    bitset->set(i);
-                }
-            }
+        case DataType::INT64: {
+            auto int64_index = std::dynamic_pointer_cast<knowhere::StructuredIndexSort<int64_t>>(index_ptr);
+
+            int64_t value = atoi(operand.c_str());
+            bitset = int64_index->Range(value, (knowhere::OperatorType)com_operator);
             break;
         }
-        case query::CompareOperator::EQ: {
-            for (uint64_t i = 0; i < data.size(); ++i) {
-                if (data[i] == value) {
-                    bitset->set(i);
-                }
-            }
-        }
-        case query::CompareOperator::NE: {
-            for (uint64_t i = 0; i < data.size(); ++i) {
-                if (data[i] != value) {
-                    bitset->set(i);
-                }
-            }
+        case DataType::FLOAT: {
+            auto float_index = std::dynamic_pointer_cast<knowhere::StructuredIndexSort<float>>(index_ptr);
+
+            std::istringstream iss(operand);
+            float value;
+            iss >> value;
+            bitset = float_index->Range(value, (knowhere::OperatorType)com_operator);
             break;
         }
+        case DataType::DOUBLE: {
+            auto double_index = std::dynamic_pointer_cast<knowhere::StructuredIndexSort<double>>(index_ptr);
+
+            std::istringstream iss(operand);
+            double value;
+            iss >> value;
+            bitset = double_index->Range(value, (knowhere::OperatorType)com_operator);
+            break;
+        }
+        default:
+            break;
     }
 }
 
@@ -947,7 +946,7 @@ ExecutionEngineImpl::HybridSearch(query::GeneralQueryPtr general_query,
     faiss::ConcurrentBitsetPtr list;
     list = index_->GetBlacklist();
     // Do AND
-    for (uint64_t i = 0; i < attr_->entity_count(); ++i) {
+    for (uint64_t i = 0; i < attr_index_->entity_count(); ++i) {
         if (list->test(i) && !bitset->test(i)) {
             list->clear(i);
         }
@@ -974,8 +973,8 @@ Status
 ExecutionEngineImpl::ExecBinaryQuery(milvus::query::GeneralQueryPtr general_query, faiss::ConcurrentBitsetPtr& bitset,
                                      std::unordered_map<std::string, DataType>& attr_type,
                                      std::string& vector_placeholder) {
+    Status status = Status::OK();
     if (general_query->leaf == nullptr) {
-        Status status = Status::OK();
         faiss::ConcurrentBitsetPtr left_bitset, right_bitset;
         if (general_query->bin->left_query != nullptr) {
             status = ExecBinaryQuery(general_query->bin->left_query, left_bitset, attr_type, vector_placeholder);
@@ -1021,10 +1020,13 @@ ExecutionEngineImpl::ExecBinaryQuery(milvus::query::GeneralQueryPtr general_quer
         }
         return status;
     } else {
-        bitset = std::make_shared<faiss::ConcurrentBitset>(attr_->entity_count());
+        bitset = std::make_shared<faiss::ConcurrentBitset>(attr_index_->entity_count());
         if (general_query->leaf->term_query != nullptr) {
             // process attrs_data
-            ProcessTermQuery(bitset, general_query, attr_type);
+            status = ProcessTermQuery(bitset, general_query, attr_type);
+            if (!status.ok()) {
+                return status;
+            }
 #if 0
             auto field_name = general_query->leaf->term_query->field_name;
             auto type = attr_type.at(field_name);
@@ -1199,73 +1201,21 @@ ExecutionEngineImpl::ExecBinaryQuery(milvus::query::GeneralQueryPtr general_quer
             auto field_name = general_query->leaf->range_query->field_name;
             auto com_expr = general_query->leaf->range_query->compare_expr;
             auto type = attr_type.at(field_name);
-            auto size = attr_->attr_size().at(field_name);
             for (uint64_t j = 0; j < com_expr.size(); ++j) {
                 auto operand = com_expr[j].operand;
-                switch (type) {
-                    case DataType::INT8: {
-                        std::vector<int8_t> data;
-                        data.resize(size / sizeof(int8_t));
-                        memcpy(data.data(), attr_->attr_data().at(field_name).data(), size);
-                        int8_t value = atoi(operand.c_str());
-                        ProcessRangeQuery<int8_t>(data, value, com_expr[j].compare_operator, bitset);
-                        break;
-                    }
-                    case DataType::INT16: {
-                        std::vector<int16_t> data;
-                        data.resize(size / sizeof(int16_t));
-                        memcpy(data.data(), attr_->attr_data().at(field_name).data(), size);
-                        int16_t value = atoi(operand.c_str());
-                        ProcessRangeQuery<int16_t>(data, value, com_expr[j].compare_operator, bitset);
-                        break;
-                    }
-                    case DataType::INT32: {
-                        std::vector<int32_t> data;
-                        data.resize(size / sizeof(int32_t));
-                        memcpy(data.data(), attr_->attr_data().at(field_name).data(), size);
-                        int32_t value = atoi(operand.c_str());
-                        ProcessRangeQuery<int32_t>(data, value, com_expr[j].compare_operator, bitset);
-                        break;
-                    }
-                    case DataType::INT64: {
-                        std::vector<int64_t> data;
-                        data.resize(size / sizeof(int64_t));
-                        memcpy(data.data(), attr_->attr_data().at(field_name).data(), size);
-                        int64_t value = atoi(operand.c_str());
-                        ProcessRangeQuery<int64_t>(data, value, com_expr[j].compare_operator, bitset);
-                        break;
-                    }
-                    case DataType::FLOAT: {
-                        std::vector<float> data;
-                        data.resize(size / sizeof(float));
-                        memcpy(data.data(), attr_->attr_data().at(field_name).data(), size);
-                        std::istringstream iss(operand);
-                        double value;
-                        iss >> value;
-                        ProcessRangeQuery<float>(data, value, com_expr[j].compare_operator, bitset);
-                        break;
-                    }
-                    case DataType::DOUBLE: {
-                        std::vector<double> data;
-                        data.resize(size / sizeof(double));
-                        memcpy(data.data(), attr_->attr_data().at(field_name).data(), size);
-                        std::istringstream iss(operand);
-                        double value;
-                        iss >> value;
-                        ProcessRangeQuery<double>(data, value, com_expr[j].compare_operator, bitset);
-                        break;
-                    }
-                    default:
-                        break;
+                auto com_operator = com_expr[j].compare_operator;
+
+                status = ProcessRangeQuery(type, operand, com_operator, attr_index_->attr_index_data().at(field_name),
+                                           bitset);
+                if (!status.ok()) {
+                    return status;
                 }
             }
-            return Status::OK();
         }
         if (general_query->leaf->vector_placeholder.size() > 0) {
             // skip vector query
             vector_placeholder = general_query->leaf->vector_placeholder;
             bitset = nullptr;
-            return Status::OK();
         }
     }
     return Status::OK();

@@ -1644,7 +1644,9 @@ DBImpl::SerializeStructuredIndex(const meta::SegmentSchema& segment_schema,
                                  const std::unordered_map<std::string, meta::hybrid::DataType>& attr_types) {
     auto status = Status::OK();
 
-    auto segment_writer_ptr = std::make_shared<segment::SegmentWriter>(segment_schema.location_);
+    std::string segment_dir;
+    utils::GetParentPath(segment_schema.location_, segment_dir);
+    auto segment_writer_ptr = std::make_shared<segment::SegmentWriter>(segment_dir);
     status = segment_writer_ptr->SetAttrsIndex(attr_indexes, attr_sizes, attr_types);
     if (!status.ok()) {
         return status;
@@ -1674,10 +1676,7 @@ DBImpl::FlushAttrsIndex(const std::string& collection_id) {
     collection_schema.collection_id_ = collection_id;
     status = meta_ptr_->DescribeHybridCollection(collection_schema, fields_schema);
     if (!status.ok()) {
-        return status;
-    }
-    if (fields_schema.fields_schema_.empty()) {
-        return status;
+        return Status::OK();
     }
 
     std::unordered_map<std::string, std::vector<uint8_t>> attr_datas;
@@ -1710,8 +1709,7 @@ DBImpl::FlushAttrsIndex(const std::string& collection_id) {
         auto attr_it = attrs.begin();
         for (; attr_it != attrs.end(); attr_it++) {
             attr_datas.insert(std::make_pair(attr_it->first, attr_it->second->GetMutableData()));
-            attr_sizes.insert(
-                std::make_pair(attr_it->first, attr_it->second->GetCount() * attr_it->second->GetCount()));
+            attr_sizes.insert(std::make_pair(attr_it->first, attr_it->second->GetCount()));
         }
 
         std::unordered_map<std::string, knowhere::IndexPtr> attr_indexes;
@@ -1731,7 +1729,7 @@ Status
 DBImpl::CreateStructuredIndex(const std::string& collection_id, const std::vector<std::string>& field_names,
                               const std::unordered_map<std::string, meta::hybrid::DataType>& attr_types,
                               const std::unordered_map<std::string, std::vector<uint8_t>>& attr_datas,
-                              const std::unordered_map<std::string, int64_t>& attr_sizes,
+                              std::unordered_map<std::string, int64_t>& attr_sizes,
                               std::unordered_map<std::string, knowhere::IndexPtr>& attr_indexes) {
     if (!initialized_.load(std::memory_order_acquire)) {
         return SHUTDOWN_ERROR;
@@ -1741,8 +1739,8 @@ DBImpl::CreateStructuredIndex(const std::string& collection_id, const std::vecto
         knowhere::IndexPtr index_ptr = nullptr;
         switch (attr_types.at(field_name)) {
             case engine::meta::hybrid::DataType::INT8: {
-                std::vector<int8_t> attr_data;
                 auto attr_size = attr_sizes.at(field_name);
+                std::vector<int8_t> attr_data(attr_size);
                 memcpy(attr_data.data(), attr_datas.at(field_name).data(), attr_size);
 
                 auto int8_index_ptr = std::make_shared<knowhere::StructuredIndexSort<int8_t>>(
@@ -1750,10 +1748,12 @@ DBImpl::CreateStructuredIndex(const std::string& collection_id, const std::vecto
                 index_ptr = std::static_pointer_cast<knowhere::Index>(int8_index_ptr);
 
                 attr_indexes.insert(std::make_pair(field_name, index_ptr));
+                attr_sizes.at(field_name) *= sizeof(int8_t);
+                break;
             }
             case engine::meta::hybrid::DataType::INT16: {
-                std::vector<int16_t> attr_data;
                 auto attr_size = attr_sizes.at(field_name);
+                std::vector<int16_t> attr_data(attr_size);
                 memcpy(attr_data.data(), attr_datas.at(field_name).data(), attr_size);
 
                 auto int16_index_ptr = std::make_shared<knowhere::StructuredIndexSort<int16_t>>(
@@ -1761,11 +1761,12 @@ DBImpl::CreateStructuredIndex(const std::string& collection_id, const std::vecto
                 index_ptr = std::static_pointer_cast<knowhere::Index>(int16_index_ptr);
 
                 attr_indexes.insert(std::make_pair(field_name, index_ptr));
+                attr_sizes.at(field_name) *= sizeof(int16_t);
                 break;
             }
             case engine::meta::hybrid::DataType::INT32: {
-                std::vector<int32_t> attr_data;
                 auto attr_size = attr_sizes.at(field_name);
+                std::vector<int32_t> attr_data(attr_size);
                 memcpy(attr_data.data(), attr_datas.at(field_name).data(), attr_size);
 
                 auto int32_index_ptr = std::make_shared<knowhere::StructuredIndexSort<int32_t>>(
@@ -1773,11 +1774,12 @@ DBImpl::CreateStructuredIndex(const std::string& collection_id, const std::vecto
                 index_ptr = std::static_pointer_cast<knowhere::Index>(int32_index_ptr);
 
                 attr_indexes.insert(std::make_pair(field_name, index_ptr));
+                attr_sizes.at(field_name) *= sizeof(int32_t);
                 break;
             }
             case engine::meta::hybrid::DataType::INT64: {
-                std::vector<int64_t> attr_data;
                 auto attr_size = attr_sizes.at(field_name);
+                std::vector<int64_t> attr_data(attr_size);
                 memcpy(attr_data.data(), attr_datas.at(field_name).data(), attr_size);
 
                 auto int64_index_ptr = std::make_shared<knowhere::StructuredIndexSort<int64_t>>(
@@ -1785,11 +1787,12 @@ DBImpl::CreateStructuredIndex(const std::string& collection_id, const std::vecto
                 index_ptr = std::static_pointer_cast<knowhere::Index>(int64_index_ptr);
 
                 attr_indexes.insert(std::make_pair(field_name, index_ptr));
+                attr_sizes.at(field_name) *= sizeof(int64_t);
                 break;
             }
             case engine::meta::hybrid::DataType::FLOAT: {
-                std::vector<float> attr_data;
                 auto attr_size = attr_sizes.at(field_name);
+                std::vector<float> attr_data(attr_size);
                 memcpy(attr_data.data(), attr_datas.at(field_name).data(), attr_size);
 
                 auto float_index_ptr = std::make_shared<knowhere::StructuredIndexSort<float>>(
@@ -1797,11 +1800,12 @@ DBImpl::CreateStructuredIndex(const std::string& collection_id, const std::vecto
                 index_ptr = std::static_pointer_cast<knowhere::Index>(float_index_ptr);
 
                 attr_indexes.insert(std::make_pair(field_name, index_ptr));
+                attr_sizes.at(field_name) *= sizeof(float);
                 break;
             }
             case engine::meta::hybrid::DataType::DOUBLE: {
-                std::vector<double> attr_data;
                 auto attr_size = attr_sizes.at(field_name);
+                std::vector<double> attr_data(attr_size);
                 memcpy(attr_data.data(), attr_datas.at(field_name).data(), attr_size);
 
                 auto double_index_ptr = std::make_shared<knowhere::StructuredIndexSort<double>>(
@@ -1809,6 +1813,7 @@ DBImpl::CreateStructuredIndex(const std::string& collection_id, const std::vecto
                 index_ptr = std::static_pointer_cast<knowhere::Index>(double_index_ptr);
 
                 attr_indexes.insert(std::make_pair(field_name, index_ptr));
+                attr_sizes.at(field_name) *= sizeof(double);
                 break;
             }
             default: {}

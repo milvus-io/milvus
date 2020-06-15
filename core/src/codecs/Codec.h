@@ -40,7 +40,7 @@ class Codec {
     GetVectorIndexFormat() = 0;
 
     virtual AttrsIndexFormatPtr
-    GetAttrIndexFormat() = 0;
+    GetAttrsIndexFormat() = 0;
 
     virtual DeletedDocsFormatPtr
     GetDeletedDocsFormat() = 0;

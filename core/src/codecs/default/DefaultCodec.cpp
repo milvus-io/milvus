@@ -33,7 +33,7 @@ DefaultCodec::DefaultCodec() {
     vectors_format_ptr_ = std::make_shared<DefaultVectorsFormat>();
     attrs_format_ptr_ = std::make_shared<DefaultAttrsFormat>();
     vector_index_format_ptr_ = std::make_shared<DefaultVectorIndexFormat>();
-    attr_index_format_ptr_ = std::make_shared<DefaultAttrsIndexFormat>();
+    attrs_index_format_ptr_ = std::make_shared<DefaultAttrsIndexFormat>();
     deleted_docs_format_ptr_ = std::make_shared<DefaultDeletedDocsFormat>();
     id_bloom_filter_format_ptr_ = std::make_shared<DefaultIdBloomFilterFormat>();
 }
@@ -54,8 +54,8 @@ DefaultCodec::GetVectorIndexFormat() {
 }
 
 AttrsIndexFormatPtr
-DefaultCodec::GetAttrIndexFormat() {
-    return attr_index_format_ptr_;
+DefaultCodec::GetAttrsIndexFormat() {
+    return attrs_index_format_ptr_;
 }
 
 DeletedDocsFormatPtr

@@ -143,7 +143,7 @@ class DBImpl : public DB, public server::CacheConfigHandler, public server::Engi
     CreateStructuredIndex(const std::string& collection_id, const std::vector<std::string>& field_names,
                           const std::unordered_map<std::string, meta::hybrid::DataType>& attr_types,
                           const std::unordered_map<std::string, std::vector<uint8_t>>& attr_data,
-                          const std::unordered_map<std::string, int64_t>& attr_size,
+                          std::unordered_map<std::string, int64_t>& attr_size,
                           std::unordered_map<std::string, knowhere::IndexPtr>& attr_indexes) override;
 
     Status
@@ -190,6 +190,9 @@ class DBImpl : public DB, public server::CacheConfigHandler, public server::Engi
     Status
     Size(uint64_t& result) override;
 
+    Status
+    FlushAttrsIndex(const std::string& collection_id) override;
+
  protected:
     void
     OnCacheInsertDataChanged(bool value) override;
@@ -219,9 +222,6 @@ class DBImpl : public DB, public server::CacheConfigHandler, public server::Engi
                           std::unordered_map<std::string, engine::meta::hybrid::DataType>& attr_type,
                           std::vector<engine::VectorsData>& vectors, std::vector<engine::AttrsData>& attrs,
                           meta::FilesHolder& files_holder);
-
-    Status
-    FlushAttrsIndex(const std::string& collection_id);
 
     void
     InternalFlush(const std::string& collection_id = "");
