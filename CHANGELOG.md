@@ -9,12 +9,13 @@ Please mark all change in change log and use the issue from GitHub
 
 ## Feature
 - \#2319 Redo metadata to support MVCC
+- \#2509 Count up query statistics for debug ease
 
 ## Improvement
 
 ## Task
 
-# Milvus 0.10.0 (TBD)
+# Milvus 0.10.0 (2020-6-15)
 
 ## Bug
 -   \#2367 Fix inconsistent reading and writing when using mishards
