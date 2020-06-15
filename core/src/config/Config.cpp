@@ -87,11 +87,11 @@ const int64_t CONFIG_STORAGE_FILE_CLEANUP_TIMEOUT_MAX = 3600;
 /* cache config */
 const char* CONFIG_CACHE = "cache";
 const char* CONFIG_CACHE_CPU_CACHE_CAPACITY = "cache_size";
-const char* CONFIG_CACHE_CPU_CACHE_CAPACITY_DEFAULT = "4294967296";
+const char* CONFIG_CACHE_CPU_CACHE_CAPACITY_DEFAULT = "4294967296"; /* 4 GB */
 const char* CONFIG_CACHE_CPU_CACHE_THRESHOLD = "cpu_cache_threshold";
 const char* CONFIG_CACHE_CPU_CACHE_THRESHOLD_DEFAULT = "0.7";
 const char* CONFIG_CACHE_INSERT_BUFFER_SIZE = "insert_buffer_size";
-const char* CONFIG_CACHE_INSERT_BUFFER_SIZE_DEFAULT = "1073741824";  // 1024 * 1024 * 1024
+const char* CONFIG_CACHE_INSERT_BUFFER_SIZE_DEFAULT = "1073741824"; /* 1 GB */
 const char* CONFIG_CACHE_CACHE_INSERT_DATA = "cache_insert_data";
 const char* CONFIG_CACHE_CACHE_INSERT_DATA_DEFAULT = "false";
 const char* CONFIG_CACHE_PRELOAD_COLLECTION = "preload_collection";
@@ -124,7 +124,7 @@ const char* CONFIG_GPU_RESOURCE_ENABLE_DEFAULT = "true";
 const char* CONFIG_GPU_RESOURCE_ENABLE_DEFAULT = "false";
 #endif
 const char* CONFIG_GPU_RESOURCE_CACHE_CAPACITY = "cache_size";
-const char* CONFIG_GPU_RESOURCE_CACHE_CAPACITY_DEFAULT = "1073741824";  // 1024 * 1024 * 1024
+const char* CONFIG_GPU_RESOURCE_CACHE_CAPACITY_DEFAULT = "1073741824"; /* 1 GB */
 const char* CONFIG_GPU_RESOURCE_CACHE_THRESHOLD = "cache_threshold";
 const char* CONFIG_GPU_RESOURCE_CACHE_THRESHOLD_DEFAULT = "0.7";
 const char* CONFIG_GPU_RESOURCE_GPU_SEARCH_THRESHOLD = "gpu_search_threshold";
@@ -146,9 +146,9 @@ const char* CONFIG_WAL_ENABLE_DEFAULT = "true";
 const char* CONFIG_WAL_RECOVERY_ERROR_IGNORE = "recovery_error_ignore";
 const char* CONFIG_WAL_RECOVERY_ERROR_IGNORE_DEFAULT = "true";
 const char* CONFIG_WAL_BUFFER_SIZE = "buffer_size";
-const char* CONFIG_WAL_BUFFER_SIZE_DEFAULT = "268435456";
-const int64_t CONFIG_WAL_BUFFER_SIZE_MIN = 67108864;
-const int64_t CONFIG_WAL_BUFFER_SIZE_MAX = 4294967296;
+const char* CONFIG_WAL_BUFFER_SIZE_DEFAULT = "268435456"; /* 256 MB */
+const int64_t CONFIG_WAL_BUFFER_SIZE_MIN = 67108864;      /* 64 MB */
+const int64_t CONFIG_WAL_BUFFER_SIZE_MAX = 4294967296;    /* 4 GB */
 const char* CONFIG_WAL_WAL_PATH = "path";
 const char* CONFIG_WAL_WAL_PATH_DEFAULT = "/tmp/milvus/wal";
 
@@ -161,9 +161,9 @@ const char* CONFIG_LOGS_TRACE_ENABLE_DEFAULT = "true";
 const char* CONFIG_LOGS_PATH = "path";
 const char* CONFIG_LOGS_PATH_DEFAULT = "/tmp/milvus/logs";
 const char* CONFIG_LOGS_MAX_LOG_FILE_SIZE = "max_log_file_size";
-const char* CONFIG_LOGS_MAX_LOG_FILE_SIZE_DEFAULT = "1073741824";
-const int64_t CONFIG_LOGS_MAX_LOG_FILE_SIZE_MIN = 536870912;
-const int64_t CONFIG_LOGS_MAX_LOG_FILE_SIZE_MAX = 4294967296;
+const char* CONFIG_LOGS_MAX_LOG_FILE_SIZE_DEFAULT = "1073741824"; /* 1 GB */
+const int64_t CONFIG_LOGS_MAX_LOG_FILE_SIZE_MIN = 536870912;      /* 512 MB */
+const int64_t CONFIG_LOGS_MAX_LOG_FILE_SIZE_MAX = 4294967296;     /* 4 GB */
 const char* CONFIG_LOGS_LOG_ROTATE_NUM = "log_rotate_num";
 const char* CONFIG_LOGS_LOG_ROTATE_NUM_DEFAULT = "0";
 const int64_t CONFIG_LOGS_LOG_ROTATE_NUM_MIN = 0;
@@ -276,22 +276,7 @@ Config::ValidateConfig() {
     std::string http_port;
     STATUS_CHECK(GetNetworkConfigHTTPPort(http_port));
 
-    //    std::string server_mode;
-    //    STATUS_CHECK(GetServerConfigDeployMode(server_mode));
-
-    // std::string server_time_zone;
-    // STATUS_CHECK(GetServerConfigTimeZone(server_time_zone));
-
-    // bool server_web_enable;
-    // STATUS_CHECK(GetServerConfigWebEnable(server_web_enable));
-
-    // std::string server_web_port;
-    // STATUS_CHECK(GetServerConfigWebPort(server_web_port));
-
     /* db config */
-    // std::string db_backend_url;
-    // STATUS_CHECK(GetDBConfigBackendUrl(db_backend_url));
-
     int64_t db_archive_disk_threshold;
     STATUS_CHECK(GetDBConfigArchiveDiskThreshold(db_archive_disk_threshold));
 
@@ -436,16 +421,7 @@ Config::ResetDefaultConfig() {
     STATUS_CHECK(SetNetworkConfigHTTPEnable(CONFIG_NETWORK_HTTP_ENABLE_DEFAULT));
     STATUS_CHECK(SetNetworkConfigHTTPPort(CONFIG_NETWORK_HTTP_PORT_DEFAULT));
 
-    /* server config */
-    // STATUS_CHECK(SetServerConfigAddress(CONFIG_SERVER_ADDRESS_DEFAULT));
-    // STATUS_CHECK(SetServerConfigPort(CONFIG_SERVER_PORT_DEFAULT));
-    //    STATUS_CHECK(SetServerConfigDeployMode(CONFIG_SERVER_DEPLOY_MODE_DEFAULT));
-    // STATUS_CHECK(SetServerConfigTimeZone(CONFIG_SERVER_TIME_ZONE_DEFAULT));
-    // STATUS_CHECK(SetServerConfigWebEnable(CONFIG_SERVER_WEB_ENABLE_DEFAULT));
-    // STATUS_CHECK(SetServerConfigWebPort(CONFIG_SERVER_WEB_PORT_DEFAULT));
-
     /* db config */
-    // STATUS_CHECK(SetDBConfigBackendUrl(CONFIG_DB_BACKEND_URL_DEFAULT));
     STATUS_CHECK(SetDBConfigArchiveDiskThreshold(CONFIG_DB_ARCHIVE_DISK_THRESHOLD_DEFAULT));
     STATUS_CHECK(SetDBConfigArchiveDaysThreshold(CONFIG_DB_ARCHIVE_DAYS_THRESHOLD_DEFAULT));
 
@@ -552,15 +528,6 @@ Config::SetConfigCli(const std::string& parent_key, const std::string& child_key
         } else {
             status = Status(SERVER_UNEXPECTED_ERROR, invalid_node_str);
         }
-    } else if (parent_key == CONFIG_DB) {
-        // if (child_key == CONFIG_DB_BACKEND_URL) {
-        //     status = SetDBConfigBackendUrl(value);
-        // } else if (child_key == CONFIG_DB_PRELOAD_COLLECTION) {
-        // if (child_key == CONFIG_DB_PRELOAD_COLLECTION) {
-        //     status = SetDBConfigPreloadCollection(value);
-        // } else {
-        //     status = Status(SERVER_UNEXPECTED_ERROR, invalid_node_str);
-        // }
     } else if (parent_key == CONFIG_STORAGE) {
         if (child_key == CONFIG_STORAGE_PATH) {
             status = SetStorageConfigPath(value);
@@ -702,9 +669,9 @@ Config::ProcessConfigCli(std::string& result, const std::string& cmd) {
                 StringHelpFunctions::MergeStringWithDelimeter(nodes_s, CONFIG_NODE_DELIMITER, result);
                 nodes[1] = result;
             }
-            //            if (nodes.size() != 2) {
-            //                return Status(SERVER_UNEXPECTED_ERROR, "Invalid command: " + cmd);
-            //            }
+            // if (nodes.size() != 2) {
+            //     return Status(SERVER_UNEXPECTED_ERROR, "Invalid command: " + cmd);
+            // }
             return GetConfigCli(result, nodes[0], nodes[1]);
         }
     } else if (tokens[0] == "set_config") {
@@ -1016,116 +983,7 @@ Config::CheckNetworkConfigHTTPPort(const std::string& value) {
     return Status::OK();
 }
 
-/* server config */
-// Status
-// Config::CheckServerConfigAddress(const std::string& value) {
-//     auto exist_error = !ValidationUtil::ValidateIpAddress(value).ok();
-//     fiu_do_on("check_config_address_fail", exist_error = true);
-//
-//     if (exist_error) {
-//         std::string msg =
-//             "Invalid server IP address: " + value + ". Possible reason: server_config.address is invalid.";
-//         return Status(SERVER_INVALID_ARGUMENT, msg);
-//     }
-//     return Status::OK();
-// }
-
-// Status
-// Config::CheckServerConfigPort(const std::string& value) {
-//     auto exist_error = !ValidationUtil::ValidateStringIsNumber(value).ok();
-//     fiu_do_on("check_config_port_fail", exist_error = true);
-//
-//     if (exist_error) {
-//         std::string msg = "Invalid server port: " + value + ". Possible reason: server_config.port is not a number.";
-//         return Status(SERVER_INVALID_ARGUMENT, msg);
-//     } else {
-//         try {
-//             int32_t port = std::stoi(value);
-//             if (!(port > PORT_NUMBER_MIN && port < PORT_NUMBER_MAX)) {
-//                 std::string msg = "Invalid server port: " + value +
-//                                   ". Possible reason: server_config.port is not in range (1024, 65535).";
-//                 return Status(SERVER_INVALID_ARGUMENT, msg);
-//             }
-//         } catch (...) {
-//             return Status(SERVER_INVALID_ARGUMENT, "Invalid server_config.port: " + value);
-//         }
-//     }
-//     return Status::OK();
-// }
-
-// Status
-// Config::CheckServerConfigDeployMode(const std::string& value) {
-//    fiu_return_on("check_config_deploy_mode_fail",
-//                  Status(SERVER_INVALID_ARGUMENT,
-//                         "server_config.deploy_mode is not one of single, cluster_readonly, and cluster_writable."));
-//
-//    if (value != "single" && value != "cluster_readonly" && value != "cluster_writable") {
-//        return Status(SERVER_INVALID_ARGUMENT,
-//                      "server_config.deploy_mode is not one of single, cluster_readonly, and cluster_writable.");
-//    }
-//    return Status::OK();
-//}
-
-// Status
-// Config::CheckServerConfigTimeZone(const std::string& value) {
-//     fiu_return_on("check_config_time_zone_fail",
-//                   Status(SERVER_INVALID_ARGUMENT, "Invalid server_config.time_zone: " + value));
-//
-//     if (value.length() <= 3) {
-//         return Status(SERVER_INVALID_ARGUMENT, "Invalid server_config.time_zone: " + value);
-//     } else {
-//         if (value.substr(0, 3) != "UTC") {
-//             return Status(SERVER_INVALID_ARGUMENT, "Invalid server_config.time_zone: " + value);
-//         } else {
-//             if (!ValidationUtil::IsNumber(value.substr(4))) {
-//                 return Status(SERVER_INVALID_ARGUMENT, "Invalid server_config.time_zone: " + value);
-//             }
-//         }
-//     }
-//     return Status::OK();
-// }
-
-// Status
-// Config::CheckServerConfigWebEnable(const std::string& value) {
-//     return ValidationUtil::ValidateStringIsBool(value);
-// }
-
-// Status
-// Config::CheckServerConfigWebPort(const std::string& value) {
-//     if (!ValidationUtil::ValidateStringIsNumber(value).ok()) {
-//         std::string msg =
-//             "Invalid web server port: " + value + ". Possible reason: server_config.web_port is not a number.";
-//         return Status(SERVER_INVALID_ARGUMENT, msg);
-//     } else {
-//         try {
-//             int32_t port = std::stoi(value);
-//             if (!(port > PORT_NUMBER_MIN && port < PORT_NUMBER_MAX)) {
-//                 std::string msg = "Invalid web server port: " + value +
-//                                   ". Possible reason: server_config.web_port is not in range (1024, 65535).";
-//                 return Status(SERVER_INVALID_ARGUMENT, msg);
-//             }
-//         } catch (...) {
-//             return Status(SERVER_INVALID_ARGUMENT, "Invalid server_config.web_port: " + value);
-//         }
-//     }
-//     return Status::OK();
-// }
-
 /* DB config */
-// Status
-// Config::CheckDBConfigBackendUrl(const std::string& value) {
-//     auto exist_error = !ValidationUtil::ValidateDbURI(value).ok();
-//     fiu_do_on("check_config_backend_url_fail", exist_error = true);
-//
-//     if (exist_error) {
-//         std::string msg =
-//             "Invalid backend url: " + value + ". Possible reason: db_config.db_backend_url is invalid. " +
-//             "The correct format should be like sqlite://:@:/ or mysql://root:123456@127.0.0.1:3306/milvus.";
-//         return Status(SERVER_INVALID_ARGUMENT, msg);
-//     }
-//     return Status::OK();
-// }
-
 Status
 Config::CheckDBConfigArchiveDiskThreshold(const std::string& value) {
     auto exist_error = !ValidationUtil::ValidateStringIsNumber(value).ok();
@@ -1308,7 +1166,6 @@ Status
 Config::CheckCacheConfigCpuCacheCapacity(const std::string& value) {
     fiu_return_on("check_config_cache_size_fail", Status(SERVER_INVALID_ARGUMENT, ""));
 
-#if 1
     std::string err;
     int64_t cache_size = parse_bytes(value, err);
     if (not err.empty()) {
@@ -1341,42 +1198,6 @@ Config::CheckCacheConfigCpuCacheCapacity(const std::string& value) {
             return Status(SERVER_INVALID_ARGUMENT, msg);
         }
     }
-#else
-    if (!ValidationUtil::ValidateStringIsNumber(value).ok()) {
-        std::string msg = "Invalid cpu cache capacity: " + value +
-                          ". Possible reason: cache_config.cpu_cache_capacity is not a positive integer.";
-        return Status(SERVER_INVALID_ARGUMENT, msg);
-    } else {
-        int64_t cpu_cache_capacity = std::stoll(value) * GB;
-        if (cpu_cache_capacity <= 0) {
-            std::string msg = "Invalid cpu cache capacity: " + value +
-                              ". Possible reason: cache_config.cpu_cache_capacity is not a positive integer.";
-            return Status(SERVER_INVALID_ARGUMENT, msg);
-        }
-
-        int64_t total_mem = 0, free_mem = 0;
-        CommonUtil::GetSystemMemInfo(total_mem, free_mem);
-        if (cpu_cache_capacity >= total_mem) {
-            std::string msg = "Invalid cpu cache capacity: " + value +
-                              ". Possible reason: cache_config.cpu_cache_capacity exceeds system memory.";
-            return Status(SERVER_INVALID_ARGUMENT, msg);
-        } else if (static_cast<double>(cpu_cache_capacity) > static_cast<double>(total_mem * 0.9)) {
-            std::cerr << "WARNING: cpu cache capacity value is too big" << std::endl;
-        }
-
-        std::string str = GetConfigStr(CONFIG_CACHE, CONFIG_CACHE_INSERT_BUFFER_SIZE, "0");
-        int64_t buffer_value = std::stoll(str);
-
-        int64_t insert_buffer_size = buffer_value * GB;
-        fiu_do_on("Config.CheckCacheConfigCpuCacheCapacity.large_insert_buffer", insert_buffer_size = total_mem + 1);
-        if (insert_buffer_size + cpu_cache_capacity >= total_mem) {
-            std::string msg = "Invalid cpu cache capacity: " + value +
-                              ". Possible reason: sum of cache_config.cpu_cache_capacity and "
-                              "cache_config.insert_buffer_size exceeds system memory.";
-            return Status(SERVER_INVALID_ARGUMENT, msg);
-        }
-    }
-#endif
     return Status::OK();
 }
 
@@ -1403,7 +1224,6 @@ Status
 Config::CheckCacheConfigInsertBufferSize(const std::string& value) {
     fiu_return_on("check_config_insert_buffer_size_fail", Status(SERVER_INVALID_ARGUMENT, ""));
 
-#if 1
     std::string err;
     int64_t buffer_size = parse_bytes(value, err);
     if (not err.empty()) {
@@ -1428,32 +1248,6 @@ Config::CheckCacheConfigInsertBufferSize(const std::string& value) {
             return Status(SERVER_INVALID_ARGUMENT, msg);
         }
     }
-#else
-    if (!ValidationUtil::ValidateStringIsNumber(value).ok()) {
-        std::string msg = "Invalid insert buffer size: " + value +
-                          ". Possible reason: cache_config.insert_buffer_size is not a positive integer.";
-        return Status(SERVER_INVALID_ARGUMENT, msg);
-    } else {
-        int64_t buffer_size = std::stoll(value) * GB;
-        if (buffer_size <= 0) {
-            std::string msg = "Invalid insert buffer size: " + value +
-                              ". Possible reason: cache_config.insert_buffer_size is not a positive integer.";
-            return Status(SERVER_INVALID_ARGUMENT, msg);
-        }
-
-        std::string str = GetConfigStr(CONFIG_CACHE, CONFIG_CACHE_CPU_CACHE_CAPACITY, "0");
-        std::string err;
-        int64_t cache_size = parse_bytes(str, err);
-
-        int64_t total_mem = 0, free_mem = 0;
-        CommonUtil::GetSystemMemInfo(total_mem, free_mem);
-        if (buffer_size + cache_size >= total_mem) {
-            std::string msg = "Invalid insert buffer size: " + value +
-                              ". Possible reason: cache_config.insert_buffer_size exceeds system memory.";
-            return Status(SERVER_INVALID_ARGUMENT, msg);
-        }
-    }
-#endif
     return Status::OK();
 }
 
@@ -1549,9 +1343,8 @@ Config::CheckEngineConfigSimdType(const std::string& value) {
     return Status::OK();
 }
 
-#ifdef MILVUS_GPU_VERSION
-
 /* gpu resource config */
+#ifdef MILVUS_GPU_VERSION
 Status
 Config::CheckGpuResourceConfigEnable(const std::string& value) {
     fiu_return_on("check_config_gpu_resource_enable_fail", Status(SERVER_INVALID_ARGUMENT, ""));
@@ -1567,7 +1360,6 @@ Status
 Config::CheckGpuResourceConfigCacheCapacity(const std::string& value) {
     fiu_return_on("check_gpu_cache_size_fail", Status(SERVER_INVALID_ARGUMENT, ""));
 
-#if 1
     std::string err;
     int64_t gpu_cache_size = parse_bytes(value, err);
     if (not err.empty()) {
@@ -1594,31 +1386,6 @@ Config::CheckGpuResourceConfigCacheCapacity(const std::string& value) {
             }
         }
     }
-#else
-    if (!ValidationUtil::ValidateStringIsNumber(value).ok()) {
-        std::string msg =
-            "Invalid gpu cache capacity: " + value + ". Possible reason: gpu.cache_capacity is not a positive integer.";
-        return Status(SERVER_INVALID_ARGUMENT, msg);
-    } else {
-        int64_t gpu_cache_capacity = std::stoll(value) * GB;
-        std::vector<int64_t> gpu_ids;
-        STATUS_CHECK(GetGpuResourceConfigBuildIndexResources(gpu_ids));
-
-        for (int64_t gpu_id : gpu_ids) {
-            int64_t gpu_memory;
-            if (!ValidationUtil::GetGpuMemory(gpu_id, gpu_memory).ok()) {
-                std::string msg = "Fail to get GPU memory for GPU device: " + std::to_string(gpu_id);
-                return Status(SERVER_UNEXPECTED_ERROR, msg);
-            } else if (gpu_cache_capacity >= gpu_memory) {
-                std::string msg = "Invalid gpu cache capacity: " + value +
-                                  ". Possible reason: gpu.cache_capacity exceeds GPU memory.";
-                return Status(SERVER_INVALID_ARGUMENT, msg);
-            } else if (gpu_cache_capacity > (double)gpu_memory * 0.9) {
-                std::cerr << "Warning: gpu cache capacity value is too big" << std::endl;
-            }
-        }
-    }
-#endif
     return Status::OK();
 }
 
@@ -1735,7 +1502,6 @@ Config::CheckGpuResourceConfigBuildIndexResources(const std::vector<std::string>
 
     return Status::OK();
 }
-
 #endif
 
 /* tracing config */
@@ -2025,51 +1791,7 @@ Config::GetNetworkConfigHTTPPort(std::string& value) {
     return CheckNetworkConfigHTTPPort(value);
 }
 
-/* server config */
-// Status
-// Config::GetServerConfigAddress(std::string& value) {
-//     value = GetConfigStr(CONFIG_SERVER, CONFIG_SERVER_ADDRESS, CONFIG_SERVER_ADDRESS_DEFAULT);
-//     return CheckServerConfigAddress(value);
-// }
-
-// Status
-// Config::GetServerConfigPort(std::string& value) {
-//     value = GetConfigStr(CONFIG_SERVER, CONFIG_SERVER_PORT, CONFIG_SERVER_PORT_DEFAULT);
-//     return CheckServerConfigPort(value);
-// }
-
-// Status
-// Config::GetServerConfigDeployMode(std::string& value) {
-//     value = GetConfigStr(CONFIG_SERVER, CONFIG_SERVER_DEPLOY_MODE, CONFIG_SERVER_DEPLOY_MODE_DEFAULT);
-//     return CheckServerConfigDeployMode(value);
-// }
-
-// Status
-// Config::GetServerConfigTimeZone(std::string& value) {
-//     value = GetConfigStr(CONFIG_SERVER, CONFIG_SERVER_TIME_ZONE, CONFIG_SERVER_TIME_ZONE_DEFAULT);
-//     return CheckServerConfigTimeZone(value);
-// }
-
-// Status
-// Config::GetServerConfigWebEnable(bool& value) {
-//     std::string str = GetConfigStr(CONFIG_SERVER, CONFIG_SERVER_WEB_ENABLE, CONFIG_SERVER_WEB_ENABLE_DEFAULT);
-//     STATUS_CHECK(CheckServerConfigWebEnable(str));
-//     return StringHelpFunctions::ConvertToBoolean(str, value);
-// }
-
-// Status
-// Config::GetServerConfigWebPort(std::string& value) {
-//     value = GetConfigStr(CONFIG_SERVER, CONFIG_SERVER_WEB_PORT, CONFIG_SERVER_WEB_PORT_DEFAULT);
-//     return CheckServerConfigWebPort(value);
-// }
-
 /* DB config */
-// Status
-// Config::GetDBConfigBackendUrl(std::string& value) {
-//     value = GetConfigStr(CONFIG_DB, CONFIG_DB_BACKEND_URL, CONFIG_DB_BACKEND_URL_DEFAULT);
-//     return CheckDBConfigBackendUrl(value);
-// }
-
 Status
 Config::GetDBConfigArchiveDiskThreshold(int64_t& value) {
     std::string str =
@@ -2246,7 +1968,6 @@ Config::GetEngineConfigSimdType(std::string& value) {
 
 /* gpu resource config */
 #ifdef MILVUS_GPU_VERSION
-
 Status
 Config::GetGpuResourceConfigEnable(bool& value) {
     std::string str = GetConfigStr(CONFIG_GPU_RESOURCE, CONFIG_GPU_RESOURCE_ENABLE, CONFIG_GPU_RESOURCE_ENABLE_DEFAULT);
@@ -2340,7 +2061,6 @@ Config::GetGpuResourceConfigBuildIndexResources(std::vector<int64_t>& value) {
     }
     return Status::OK();
 }
-
 #endif
 
 /* tracing config */
@@ -2453,6 +2173,7 @@ Config::SetClusterConfigEnable(const std::string& value) {
     STATUS_CHECK(CheckClusterConfigEnable(value));
     return SetConfigValueInMem(CONFIG_CLUSTER, CONFIG_CLUSTER_ENABLE, value);
 }
+
 Status
 Config::SetClusterConfigRole(const std::string& value) {
     STATUS_CHECK(CheckClusterConfigRole(value));
@@ -2497,50 +2218,7 @@ Config::SetNetworkConfigHTTPPort(const std::string& value) {
     return SetConfigValueInMem(CONFIG_NETWORK, CONFIG_NETWORK_HTTP_PORT, value);
 }
 
-/* server config */
-// Status
-// Config::SetServerConfigAddress(const std::string& value) {
-//     STATUS_CHECK(CheckServerConfigAddress(value));
-//     return SetConfigValueInMem(CONFIG_SERVER, CONFIG_SERVER_ADDRESS, value);
-// }
-
-// Status
-// Config::SetServerConfigPort(const std::string& value) {
-//     STATUS_CHECK(CheckServerConfigPort(value));
-//     return SetConfigValueInMem(CONFIG_SERVER, CONFIG_SERVER_PORT, value);
-// }
-
-// Status
-// Config::SetServerConfigDeployMode(const std::string& value) {
-//     STATUS_CHECK(CheckServerConfigDeployMode(value));
-//     return SetConfigValueInMem(CONFIG_SERVER, CONFIG_SERVER_DEPLOY_MODE, value);
-// }
-
-// Status
-// Config::SetServerConfigTimeZone(const std::string& value) {
-//     STATUS_CHECK(CheckServerConfigTimeZone(value));
-//     return SetConfigValueInMem(CONFIG_SERVER, CONFIG_SERVER_TIME_ZONE, value);
-// }
-
-// Status
-// Config::SetServerConfigWebEnable(const std::string& value) {
-//     STATUS_CHECK(CheckServerConfigWebEnable(value));
-//     return SetConfigValueInMem(CONFIG_SERVER, CONFIG_SERVER_WEB_ENABLE, value);
-// }
-
-// Status
-// Config::SetServerConfigWebPort(const std::string& value) {
-//     STATUS_CHECK(CheckServerConfigWebPort(value));
-//     return SetConfigValueInMem(CONFIG_SERVER, CONFIG_SERVER_WEB_PORT, value);
-// }
-
 /* db config */
-// Status
-// Config::SetDBConfigBackendUrl(const std::string& value) {
-//     STATUS_CHECK(CheckDBConfigBackendUrl(value));
-//     return SetConfigValueInMem(CONFIG_DB, CONFIG_DB_BACKEND_URL, value);
-// }
-
 Status
 Config::SetDBConfigArchiveDiskThreshold(const std::string& value) {
     STATUS_CHECK(CheckDBConfigArchiveDiskThreshold(value));

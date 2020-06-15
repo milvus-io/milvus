@@ -57,7 +57,6 @@ struct ArchiveConf {
 
 struct DBMetaOptions {
     std::string path_;
-    std::vector<std::string> slave_paths_;
     std::string backend_uri_;
     ArchiveConf archive_conf_ = ArchiveConf("delete");
 };  // DBMetaOptions

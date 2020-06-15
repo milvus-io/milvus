@@ -12,6 +12,7 @@ Please mark all change in change log and use the issue from GitHub
 - \#2509 Count up query statistics for debug ease
 
 ## Improvement
+- \#2543 Remove secondary_path related code
 
 ## Task
 
