@@ -34,13 +34,15 @@ class TestCreateBase:
         assert status.OK()
 
     @pytest.mark.level(3)
-    @pytest.mark.timeout(TIMEOUT)
-    def test_create_partition_limit(self, connect, collection):
+    def test_create_partition_limit(self, connect, collection, args):
         '''
         target: test create partitions, check status returned
         method: call function: create_partition for 4097 times
         expected: status not ok
         '''
+        if args["handler"] == "HTTP":
+            pytest.skip("skip in http mode")
+
         for i in range(4096):
             tag_tmp = gen_unique_str()
             status = connect.create_partition(collection, tag_tmp)
