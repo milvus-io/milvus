@@ -256,6 +256,30 @@ TEST_F(ConfigTest, SERVER_CONFIG_VALID_TEST) {
     ASSERT_TRUE(config.GetCacheConfigCacheInsertData(bool_val).ok());
     ASSERT_TRUE(bool_val == cache_insert_data);
 
+    {
+        // #2564
+        int64_t total_mem = 0, free_mem = 0;
+        milvus::server::CommonUtil::GetSystemMemInfo(total_mem, free_mem);
+        ASSERT_TRUE(config.SetCacheConfigInsertBufferSize("1GB").ok());
+        int64_t cache_cpu_cache_size = total_mem / 2;
+        float cache_cpu_cache_threshold = 0.7;
+        ASSERT_TRUE(config.SetCacheConfigCpuCacheThreshold(std::to_string(cache_cpu_cache_threshold)).ok());
+        ASSERT_TRUE(config.SetCacheConfigCpuCacheCapacity(std::to_string(cache_cpu_cache_size)).ok());
+        ASSERT_TRUE(config.GetCacheConfigCpuCacheCapacity(int64_val).ok());
+        ASSERT_TRUE(int64_val == cache_cpu_cache_size);
+    }
+
+    {
+        int64_t total_mem = 0, free_mem = 0;
+        milvus::server::CommonUtil::GetSystemMemInfo(total_mem, free_mem);
+        ASSERT_TRUE(config.SetCacheConfigInsertBufferSize("1GB").ok());
+        int64_t cache_cpu_cache_size = total_mem - 1073741824 - 1; // total_size - 1GB - 1
+        ASSERT_TRUE(config.SetCacheConfigCpuCacheCapacity(std::to_string(cache_cpu_cache_size)).ok());
+        ASSERT_TRUE(config.GetCacheConfigCpuCacheCapacity(int64_val).ok());
+        ASSERT_TRUE(int64_val == cache_cpu_cache_size);
+    }
+
+
     /* engine config */
     int64_t engine_use_blas_threshold = 50;
     ASSERT_TRUE(config.SetEngineConfigUseBlasThreshold(std::to_string(engine_use_blas_threshold)).ok());

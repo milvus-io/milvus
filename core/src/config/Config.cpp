@@ -1327,7 +1327,7 @@ Config::CheckCacheConfigCpuCacheCapacity(const std::string& value) {
 
         std::string str = GetConfigStr(CONFIG_CACHE, CONFIG_CACHE_INSERT_BUFFER_SIZE, "0");
 
-        int64_t insert_buffer_size = parse_bytes(value, err);
+        int64_t insert_buffer_size = parse_bytes(str, err);
         fiu_do_on("Config.CheckCacheConfigCpuCacheCapacity.large_insert_buffer", insert_buffer_size = total_mem + 1);
         if (insert_buffer_size + cache_size >= total_mem) {
             std::string msg = "Invalid cpu cache size: " + value +
