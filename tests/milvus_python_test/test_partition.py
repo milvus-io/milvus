@@ -34,7 +34,6 @@ class TestCreateBase:
         assert status.OK()
 
     @pytest.mark.level(3)
-    @pytest.mark.timeout(TIMEOUT)
     def test_create_partition_limit(self, connect, collection):
         '''
         target: test create partitions, check status returned
