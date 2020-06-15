@@ -104,6 +104,9 @@ class MergeOperation : public CompoundBaseOperation<MergeOperation> {
     CommitNewSegment(SegmentPtr&);
     Status
     CommitNewSegmentFile(const SegmentFileContext& context, SegmentFilePtr&);
+
+    Status
+    OnSnapshotStale() override;
 };
 
 class CreateCollectionOperation : public CompoundBaseOperation<CreateCollectionOperation> {

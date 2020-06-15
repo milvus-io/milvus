@@ -77,7 +77,13 @@ BuildOperation::CommitNewSegmentFile(const SegmentFileContext& context, SegmentF
         CheckStale(std::bind(&BuildOperation::CheckSegmentStale, this, std::placeholders::_1, context.segment_id));
     if (!status.ok())
         return status;
-    auto new_sf_op = std::make_shared<SegmentFileOperation>(context, prev_ss_);
+    auto segment = prev_ss_->GetResource<Segment>(context.segment_id);
+    if (!segment) {
+        return Status(SS_INVALID_CONTEX_ERROR, "Invalid segment_id in context");
+    }
+    auto ctx = context;
+    ctx.partition_id = segment->GetPartitionId();
+    auto new_sf_op = std::make_shared<SegmentFileOperation>(ctx, prev_ss_);
     status = new_sf_op->Push();
     if (!status.ok())
         return status;
@@ -176,6 +182,18 @@ NewSegmentOperation::CommitNewSegmentFile(const SegmentFileContext& context, Seg
 }
 
 MergeOperation::MergeOperation(const OperationContext& context, ScopedSnapshotT prev_ss) : BaseT(context, prev_ss) {
+}
+
+Status
+MergeOperation::OnSnapshotStale() {
+    for (auto& stale_seg : context_.stale_segments) {
+        auto expect_sc = prev_ss_->GetSegmentCommit(stale_seg->GetID());
+        auto latest_sc = context_.prev_ss->GetSegmentCommit(stale_seg->GetID());
+        if (!latest_sc || (latest_sc->GetID() != expect_sc->GetID())) {
+            return Status(SS_STALE_ERROR, "MergeOperation on stale segments");
+        }
+    }
+    return Status::OK();
 }
 
 Status

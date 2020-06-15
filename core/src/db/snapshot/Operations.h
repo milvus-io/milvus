@@ -201,6 +201,8 @@ class CommitOperation : public Operations {
 
     Status
     GetResource(typename ResourceT::Ptr& res, bool wait = false) {
+        if (!status_.ok())
+            return status_;
         if (wait) {
             WaitToFinish();
         }
@@ -248,6 +250,8 @@ class LoadOperation : public Operations {
 
     Status
     GetResource(typename ResourceT::Ptr& res, bool wait = false) {
+        if (!status_.ok())
+            return status_;
         if (wait) {
             WaitToFinish();
         }
