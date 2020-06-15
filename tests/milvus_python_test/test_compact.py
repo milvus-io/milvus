@@ -378,7 +378,6 @@ class TestCompactBase:
         assert status.OK()
 
     @pytest.mark.timeout(COMPACT_TIMEOUT)
-    @pytest.mark.repeat(10)
     def test_index_creation_after_compact(self, connect, collection, get_simple_index):
         '''
         target: test index creation after compact

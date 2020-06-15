@@ -64,6 +64,9 @@ class TestGetBase:
         method: add vector, and get, limit > 1000
         expected: status ok, vector returned
         '''
+        if args["handler"] == "HTTP":
+            pytest.skip("skip in http mode")
+
         vectors = gen_vectors(nb, dim)
         status, ids = connect.insert(collection, vectors)
         assert status.OK()
