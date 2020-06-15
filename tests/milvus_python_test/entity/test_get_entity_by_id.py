@@ -58,7 +58,7 @@ class TestGetBase:
         for i in range(length):
             assert_equal_vector(res[i], vectors[i])
 
-    def test_get_vector_C_limit(self, connect, collection):
+    def test_get_vector_C_limit(self, connect, collection, args):
         '''
         target: test.get_entity_by_id
         method: add vector, and get, limit > 1000
