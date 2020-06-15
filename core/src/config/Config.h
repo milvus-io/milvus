@@ -55,8 +55,6 @@ extern const char* CONFIG_NETWORK_HTTP_PORT_DEFAULT;
 
 /* db config */
 extern const char* CONFIG_DB;
-// extern const char* CONFIG_DB_BACKEND_URL;
-// extern const char* CONFIG_DB_BACKEND_URL_DEFAULT;
 extern const char* CONFIG_DB_ARCHIVE_DISK_THRESHOLD;
 extern const char* CONFIG_DB_ARCHIVE_DISK_THRESHOLD_DEFAULT;
 extern const char* CONFIG_DB_ARCHIVE_DAYS_THRESHOLD;
@@ -226,8 +224,6 @@ class Config {
     CheckNetworkConfigHTTPPort(const std::string& value);
 
     /* db config */
-    // Status
-    // CheckDBConfigBackendUrl(const std::string& value);
     Status
     CheckDBConfigArchiveDiskThreshold(const std::string& value);
     Status
@@ -269,8 +265,8 @@ class Config {
     Status
     CheckEngineConfigSimdType(const std::string& value);
 
-#ifdef MILVUS_GPU_VERSION
     /* gpu resource config */
+#ifdef MILVUS_GPU_VERSION
     Status
     CheckGpuResourceConfigEnable(const std::string& value);
     Status
@@ -346,8 +342,6 @@ class Config {
     GetNetworkConfigHTTPPort(std::string& value);
 
     /* db config */
-    // Status
-    // GetDBConfigBackendUrl(std::string& value);
     Status
     GetDBConfigArchiveDiskThreshold(int64_t& value);
     Status
@@ -389,8 +383,8 @@ class Config {
     Status
     GetEngineConfigSimdType(std::string& value);
 
-#ifdef MILVUS_GPU_VERSION
     /* gpu resource config */
+#ifdef MILVUS_GPU_VERSION
     Status
     GetGpuResourceConfigEnable(bool& value);
     Status
@@ -458,8 +452,6 @@ class Config {
     SetNetworkConfigHTTPPort(const std::string& value);
 
     /* db config */
-    // Status
-    // SetDBConfigBackendUrl(const std::string& value);
     Status
     SetDBConfigArchiveDiskThreshold(const std::string& value);
     Status
@@ -500,9 +492,9 @@ class Config {
     SetEngineConfigOmpThreadNum(const std::string& value);
     Status
     SetEngineConfigSimdType(const std::string& value);
-#ifdef MILVUS_GPU_VERSION
 
     /* gpu resource config */
+#ifdef MILVUS_GPU_VERSION
     Status
     SetGpuResourceConfigEnable(const std::string& value);
     Status
