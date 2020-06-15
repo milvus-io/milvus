@@ -37,14 +37,12 @@ Status
 ReLoadSegmentsRequest::OnExecute() {
     auto& config = Config::GetInstance();
 
-    std::string deploy_mode;
-    auto status = config.GetServerConfigDeployMode(deploy_mode);
-    if (!status.ok()) {
-        return status;
-    }
+    bool cluster_enable = false;
+    std::string cluster_role;
+    STATUS_CHECK(config.GetClusterConfigEnable(cluster_enable));
+    STATUS_CHECK(config.GetClusterConfigRole(cluster_role));
 
-    fiu_do_on("ReLoadSegmentsRequest.OnExecute.readonly", deploy_mode = "cluster_readonly");
-    if (deploy_mode == "single" || deploy_mode == "cluster_writable") {
+    if ((not cluster_enable) || cluster_role == "rw") {
         // TODO: No need to reload segment files
         return Status(SERVER_SUCCESS, "");
     }

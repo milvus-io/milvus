@@ -33,7 +33,7 @@ PrometheusMetrics::Init() {
 
         // Following should be read from config file.
         std::string server_port, push_port, push_address;
-        STATUS_CHECK(config.GetServerConfigPort(server_port));
+        STATUS_CHECK(config.GetNetworkConfigBindPort(server_port));
         STATUS_CHECK(config.GetMetricConfigPort(push_port));
         STATUS_CHECK(config.GetMetricConfigAddress(push_address));
 

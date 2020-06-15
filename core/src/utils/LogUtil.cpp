@@ -199,7 +199,6 @@ InitLog(bool trace_enable, bool debug_enable, bool info_enable, bool warning_ena
                                                    std::to_string(CONFIG_LOGS_MAX_LOG_FILE_SIZE_MAX) + "], now is " +
                                                    std::to_string(max_log_file_size));
     }
-    max_log_file_size *= 1024 * 1024;
     defaultConf.setGlobally(el::ConfigurationType::MaxLogFileSize, std::to_string(max_log_file_size));
     el::Loggers::addFlag(el::LoggingFlag::StrictLogFileSizeCheck);
     el::Helpers::installPreRollOutCallback(RolloutHandler);

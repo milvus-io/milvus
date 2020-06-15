@@ -35,40 +35,11 @@ namespace {
 
 const char* TABLES_FOLDER = "/tables/";
 
-uint64_t index_file_counter = 0;
-std::mutex index_file_counter_mutex;
-
 static std::string
 ConstructParentFolder(const std::string& db_path, const meta::SegmentSchema& table_file) {
     std::string table_path = db_path + TABLES_FOLDER + table_file.collection_id_;
     std::string partition_path = table_path + "/" + table_file.segment_id_;
     return partition_path;
-}
-
-static std::string
-GetCollectionFileParentFolder(const DBMetaOptions& options, const meta::SegmentSchema& table_file) {
-    uint64_t path_count = options.slave_paths_.size() + 1;
-    std::string target_path = options.path_;
-    uint64_t index = 0;
-
-    if (meta::SegmentSchema::NEW_INDEX == table_file.file_type_) {
-        // index file is large file and to be persisted permanently
-        // we need to distribute index files to each db_path averagely
-        // round robin according to a file counter
-        std::lock_guard<std::mutex> lock(index_file_counter_mutex);
-        index = index_file_counter % path_count;
-        ++index_file_counter;
-    } else {
-        // for other type files, they could be merged or deleted
-        // so we round robin according to their file id
-        index = table_file.id_ % path_count;
-    }
-
-    if (index > 0) {
-        target_path = options.slave_paths_[index - 1];
-    }
-
-    return ConstructParentFolder(target_path, table_file);
 }
 
 }  // namespace
@@ -90,34 +61,18 @@ CreateCollectionPath(const DBMetaOptions& options, const std::string& collection
         LOG_ENGINE_ERROR_ << status.message();
         return status;
     }
-
-    for (auto& path : options.slave_paths_) {
-        table_path = path + TABLES_FOLDER + collection_id;
-        status = server::CommonUtil::CreateDirectory(table_path);
-        fiu_do_on("CreateCollectionPath.creat_slave_path", status = Status(DB_INVALID_PATH, ""));
-        if (!status.ok()) {
-            LOG_ENGINE_ERROR_ << status.message();
-            return status;
-        }
-    }
-
     return Status::OK();
 }
 
 Status
 DeleteCollectionPath(const DBMetaOptions& options, const std::string& collection_id, bool force) {
-    std::vector<std::string> paths = options.slave_paths_;
-    paths.push_back(options.path_);
-
-    for (auto& path : paths) {
-        std::string table_path = path + TABLES_FOLDER + collection_id;
-        if (force) {
-            boost::filesystem::remove_all(table_path);
-            LOG_ENGINE_DEBUG_ << "Remove collection folder: " << table_path;
-        } else if (boost::filesystem::exists(table_path) && boost::filesystem::is_empty(table_path)) {
-            boost::filesystem::remove_all(table_path);
-            LOG_ENGINE_DEBUG_ << "Remove collection folder: " << table_path;
-        }
+    std::string table_path = options.path_ + TABLES_FOLDER + collection_id;
+    if (force) {
+        boost::filesystem::remove_all(table_path);
+        LOG_ENGINE_DEBUG_ << "Remove collection folder: " << table_path;
+    } else if (boost::filesystem::exists(table_path) && boost::filesystem::is_empty(table_path)) {
+        boost::filesystem::remove_all(table_path);
+        LOG_ENGINE_DEBUG_ << "Remove collection folder: " << table_path;
     }
 
     // bool s3_enable = false;
@@ -139,7 +94,7 @@ DeleteCollectionPath(const DBMetaOptions& options, const std::string& collection
 
 Status
 CreateCollectionFilePath(const DBMetaOptions& options, meta::SegmentSchema& table_file) {
-    std::string parent_path = GetCollectionFileParentFolder(options, table_file);
+    std::string parent_path = ConstructParentFolder(options.path_, table_file);
 
     auto status = server::CommonUtil::CreateDirectory(parent_path);
     fiu_do_on("CreateCollectionFilePath.fail_create", status = Status(DB_INVALID_PATH, ""));
@@ -171,15 +126,6 @@ GetCollectionFilePath(const DBMetaOptions& options, meta::SegmentSchema& table_f
     if (boost::filesystem::exists(parent_path)) {
         table_file.location_ = file_path;
         return Status::OK();
-    }
-
-    for (auto& path : options.slave_paths_) {
-        parent_path = ConstructParentFolder(path, table_file);
-        file_path = parent_path + "/" + table_file.file_id_;
-        if (boost::filesystem::exists(parent_path)) {
-            table_file.location_ = file_path;
-            return Status::OK();
-        }
     }
 
     std::string msg = "Collection file doesn't exist: " + file_path;

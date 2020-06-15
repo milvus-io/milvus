@@ -24,7 +24,7 @@ void
 WebServer::Start() {
     auto& config = Config::GetInstance();
     bool enable = true;
-    config.GetServerConfigWebEnable(enable);
+    config.GetNetworkConfigHTTPEnable(enable);
     if (enable && nullptr == thread_ptr_) {
         thread_ptr_ = std::make_shared<std::thread>(&WebServer::StartService, this);
     }
@@ -47,7 +47,7 @@ WebServer::StartService() {
 
     Config& config = Config::GetInstance();
     std::string port;
-    STATUS_CHECK(config.GetServerConfigWebPort(port));
+    STATUS_CHECK(config.GetNetworkConfigHTTPPort(port));
 
     {
         AppComponent components = AppComponent(std::stoi(port));

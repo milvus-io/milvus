@@ -86,8 +86,6 @@ TEST(DBMiscTest, META_TEST) {
 TEST(DBMiscTest, UTILS_TEST) {
     milvus::engine::DBMetaOptions options;
     options.path_ = "/tmp/milvus_test/main";
-    options.slave_paths_.push_back("/tmp/milvus_test/slave_1");
-    options.slave_paths_.push_back("/tmp/milvus_test/slave_2");
 
     const std::string COLLECTION_NAME = "test_tbl";
 
@@ -98,25 +96,9 @@ TEST(DBMiscTest, UTILS_TEST) {
     ASSERT_FALSE(status.ok());
     fiu_disable("CommonUtil.CreateDirectory.create_parent_fail");
 
-    FIU_ENABLE_FIU("CreateCollectionPath.creat_slave_path");
-    status = milvus::engine::utils::CreateCollectionPath(options, COLLECTION_NAME);
-    ASSERT_FALSE(status.ok());
-    fiu_disable("CreateCollectionPath.creat_slave_path");
-
     status = milvus::engine::utils::CreateCollectionPath(options, COLLECTION_NAME);
     ASSERT_TRUE(status.ok());
     ASSERT_TRUE(boost::filesystem::exists(options.path_));
-    for (auto& path : options.slave_paths_) {
-        ASSERT_TRUE(boost::filesystem::exists(path));
-    }
-
-    //    options.slave_paths.push_back("/");
-    //    status =  engine::utils::CreateCollectionPath(options, COLLECTION_NAME);
-    //    ASSERT_FALSE(status.ok());
-    //
-    //    options.path = "/";
-    //    status =  engine::utils::CreateCollectionPath(options, COLLECTION_NAME);
-    //    ASSERT_FALSE(status.ok());
 
     milvus::engine::meta::SegmentSchema file;
     file.id_ = 50;

@@ -10,30 +10,35 @@ Please mark all change in change log and use the issue from GitHub
 
 ## Feature
 -   \#2319 Redo metadata to support MVCC
+-   \#2509 Count up query statistics for debug ease
 
 ## Improvement
+-   \#2543 Remove secondary_path related code
 
 ## Task
 
-# Milvus 0.10.0 (TBD)
+# Milvus 0.10.0 (2020-6-15)
 
 ## Bug
 -   \#2367 Fix inconsistent reading and writing when using mishards
 -   \#2368 Make read node detect delete behavior
 -   \#2373 Build index for small segment waste time on waiting background index thread finish
 -   \#2394 Drop collection timeout if too many partitions created on collection
+-   \#2549 Launch server fail using demo config
 
 ## Feature
 -   \#2363 Update branch version
+-   \#2510 Upgrade Milvus config
 
 ## Improvement
 -   \#2381 Upgrade FAISS to 1.6.3
 -   \#2429 Fix Milvus 0.9.1 performance degrade issue
 -   \#2441 Improve Knowhere code coverage
--   \#2466 optimize k-selection implemention of faiss gpu version
+-   \#2466 Optimize k-selection implemention of faiss gpu version
 -   \#2489 Add exception throw on mysql meta error
 -   \#2495 Add creating lock file failure reason.
 -   \#2516 Improve unit test coverage
+-   \#2548 Upgrade mishards for milvus v0.10.0
 
 ## Task
 

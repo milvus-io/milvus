@@ -28,55 +28,47 @@ using ConfigCallBackF = std::function<Status(const std::string&)>;
 extern const char* CONFIG_NODE_DELIMITER;
 extern const char* CONFIG_VERSION;
 
-/* server config */
-extern const char* CONFIG_SERVER;
-extern const char* CONFIG_SERVER_ADDRESS;
-extern const char* CONFIG_SERVER_ADDRESS_DEFAULT;
-extern const char* CONFIG_SERVER_PORT;
-extern const char* CONFIG_SERVER_PORT_DEFAULT;
-extern const char* CONFIG_SERVER_DEPLOY_MODE;
-extern const char* CONFIG_SERVER_DEPLOY_MODE_DEFAULT;
-extern const char* CONFIG_SERVER_TIME_ZONE;
-extern const char* CONFIG_SERVER_TIME_ZONE_DEFAULT;
-extern const char* CONFIG_SERVER_WEB_ENABLE;
-extern const char* CONFIG_SERVER_WEB_ENABLE_DEFAULT;
-extern const char* CONFIG_SERVER_WEB_PORT;
-extern const char* CONFIG_SERVER_WEB_PORT_DEFAULT;
+/* cluster config */
+extern const char* CONFIG_CLUSTER;
+extern const char* CONFIG_CLUSTER_ENABLE;
+extern const char* CONFIG_CLUSTER_ENABLE_DEFAULT;
+extern const char* CONFIG_CLUSTER_ROLE;
+extern const char* CONFIG_CLUSTER_ROLE_DEFAULT;
+
+/* general config */
+extern const char* CONFIG_GENERAL;
+extern const char* CONFIG_GENERAL_TIMEZONE;
+extern const char* CONFIG_GENERAL_TIMEZONE_DEFAULT;
+extern const char* CONFIG_GENERAL_METAURI;
+extern const char* CONFIG_GENERAL_METAURI_DEFAULT;
+
+/* network config */
+extern const char* CONFIG_NETWORK;
+extern const char* CONFIG_NETWORK_BIND_ADDRESS;
+extern const char* CONFIG_NETWORK_BIND_ADDRESS_DEFAULT;
+extern const char* CONFIG_NETWORK_BIND_PORT;
+extern const char* CONFIG_NETWORK_BIND_PORT_DEFAULT;
+extern const char* CONFIG_NETWORK_HTTP_ENABLE;
+extern const char* CONFIG_NETWORK_HTTP_ENABLE_DEFAULT;
+extern const char* CONFIG_NETWORK_HTTP_PORT;
+extern const char* CONFIG_NETWORK_HTTP_PORT_DEFAULT;
 
 /* db config */
 extern const char* CONFIG_DB;
-extern const char* CONFIG_DB_BACKEND_URL;
-extern const char* CONFIG_DB_BACKEND_URL_DEFAULT;
 extern const char* CONFIG_DB_ARCHIVE_DISK_THRESHOLD;
 extern const char* CONFIG_DB_ARCHIVE_DISK_THRESHOLD_DEFAULT;
 extern const char* CONFIG_DB_ARCHIVE_DAYS_THRESHOLD;
 extern const char* CONFIG_DB_ARCHIVE_DAYS_THRESHOLD_DEFAULT;
-extern const char* CONFIG_DB_PRELOAD_COLLECTION;
-extern const char* CONFIG_DB_PRELOAD_COLLECTION_DEFAULT;
-extern const char* CONFIG_DB_AUTO_FLUSH_INTERVAL;
-extern const char* CONFIG_DB_AUTO_FLUSH_INTERVAL_DEFAULT;
 
 /* storage config */
 extern const char* CONFIG_STORAGE;
-extern const char* CONFIG_STORAGE_PRIMARY_PATH;
-extern const char* CONFIG_STORAGE_PRIMARY_PATH_DEFAULT;
-extern const char* CONFIG_STORAGE_SECONDARY_PATH;
-extern const char* CONFIG_STORAGE_SECONDARY_PATH_DEFAULT;
+extern const char* CONFIG_STORAGE_PATH;
+extern const char* CONFIG_STORAGE_PATH_DEFAULT;
+extern const char* CONFIG_STORAGE_AUTO_FLUSH_INTERVAL;
+extern const char* CONFIG_STORAGE_AUTO_FLUSH_INTERVAL_DEFAULT;
 extern const char* CONFIG_STORAGE_FILE_CLEANUP_TIMEOUT;
 extern const int64_t CONFIG_STORAGE_FILE_CLEANUP_TIMEOUT_MIN;
 extern const int64_t CONFIG_STORAGE_FILE_CLEANUP_TIMEOUT_MAX;
-// extern const char* CONFIG_STORAGE_S3_ENABLE;
-// extern const char* CONFIG_STORAGE_S3_ENABLE_DEFAULT;
-// extern const char* CONFIG_STORAGE_S3_ADDRESS;
-// extern const char* CONFIG_STORAGE_S3_ADDRESS_DEFAULT;
-// extern const char* CONFIG_STORAGE_S3_PORT;
-// extern const char* CONFIG_STORAGE_S3_PORT_DEFAULT;
-// extern const char* CONFIG_STORAGE_S3_ACCESS_KEY;
-// extern const char* CONFIG_STORAGE_S3_ACCESS_KEY_DEFAULT;
-// extern const char* CONFIG_STORAGE_S3_SECRET_KEY;
-// extern const char* CONFIG_STORAGE_S3_SECRET_KEY_DEFAULT;
-// extern const char* CONFIG_STORAGE_S3_BUCKET;
-// extern const char* CONFIG_STORAGE_S3_BUCKET_DEFAULT;
 
 /* cache config */
 extern const char* CONFIG_CACHE;
@@ -88,6 +80,8 @@ extern const char* CONFIG_CACHE_INSERT_BUFFER_SIZE;
 extern const char* CONFIG_CACHE_INSERT_BUFFER_SIZE_DEFAULT;
 extern const char* CONFIG_CACHE_CACHE_INSERT_DATA;
 extern const char* CONFIG_CACHE_CACHE_INSERT_DATA_DEFAULT;
+extern const char* CONFIG_CACHE_PRELOAD_COLLECTION;
+extern const char* CONFIG_CACHE_PRELOAD_COLLECTION_DEFAULT;
 
 /* metric config */
 extern const char* CONFIG_METRIC;
@@ -106,8 +100,6 @@ extern const char* CONFIG_ENGINE_OMP_THREAD_NUM;
 extern const char* CONFIG_ENGINE_OMP_THREAD_NUM_DEFAULT;
 extern const char* CONFIG_ENGINE_SIMD_TYPE;
 extern const char* CONFIG_ENGINE_SIMD_TYPE_DEFAULT;
-extern const char* CONFIG_ENGINE_GPU_SEARCH_THRESHOLD;
-extern const char* CONFIG_ENGINE_GPU_SEARCH_THRESHOLD_DEFAULT;
 
 /* gpu resource config */
 extern const char* CONFIG_GPU_RESOURCE;
@@ -117,6 +109,8 @@ extern const char* CONFIG_GPU_RESOURCE_CACHE_CAPACITY;
 extern const char* CONFIG_GPU_RESOURCE_CACHE_CAPACITY_DEFAULT;
 extern const char* CONFIG_GPU_RESOURCE_CACHE_THRESHOLD;
 extern const char* CONFIG_GPU_RESOURCE_CACHE_THRESHOLD_DEFAULT;
+extern const char* CONFIG_GPU_RESOURCE_GPU_SEARCH_THRESHOLD;
+extern const char* CONFIG_GPU_RESOURCE_GPU_SEARCH_THRESHOLD_DEFAULT;
 extern const char* CONFIG_GPU_RESOURCE_DELIMITER;
 extern const char* CONFIG_GPU_RESOURCE_SEARCH_RESOURCES;
 extern const char* CONFIG_GPU_RESOURCE_SEARCH_RESOURCES_DEFAULT;
@@ -142,18 +136,10 @@ extern const char* CONFIG_WAL_WAL_PATH_DEFAULT;
 
 /* logs config */
 extern const char* CONFIG_LOGS;
+extern const char* CONFIG_LOGS_LEVEL;
+extern const char* CONFIG_LOGS_LEVEL_DEFAULT;
 extern const char* CONFIG_LOGS_TRACE_ENABLE;
 extern const char* CONFIG_LOGS_TRACE_ENABLE_DEFAULT;
-extern const char* CONFIG_LOGS_DEBUG_ENABLE;
-extern const char* CONFIG_LOGS_DEBUG_ENABLE_DEFAULT;
-extern const char* CONFIG_LOGS_INFO_ENABLE;
-extern const char* CONFIG_LOGS_INFO_ENABLE_DEFAULT;
-extern const char* CONFIG_LOGS_WARNING_ENABLE;
-extern const char* CONFIG_LOGS_WARNING_ENABLE_DEFAULT;
-extern const char* CONFIG_LOGS_ERROR_ENABLE;
-extern const char* CONFIG_LOGS_ERROR_ENABLE_DEFAULT;
-extern const char* CONFIG_LOGS_FATAL_ENABLE;
-extern const char* CONFIG_LOGS_FATAL_ENABLE_DEFAULT;
 extern const char* CONFIG_LOGS_PATH;
 extern const char* CONFIG_LOGS_MAX_LOG_FILE_SIZE;
 extern const char* CONFIG_LOGS_MAX_LOG_FILE_SIZE_DEFAULT;
@@ -215,51 +201,41 @@ class Config {
     Status
     CheckConfigVersion(const std::string& value);
 
-    /* server config */
+    /* cluster config */
     Status
-    CheckServerConfigAddress(const std::string& value);
+    CheckClusterConfigEnable(const std::string& value);
     Status
-    CheckServerConfigPort(const std::string& value);
+    CheckClusterConfigRole(const std::string& value);
+
+    /* general config */
     Status
-    CheckServerConfigDeployMode(const std::string& value);
+    CheckGeneralConfigTimezone(const std::string& value);
     Status
-    CheckServerConfigTimeZone(const std::string& value);
+    CheckGeneralConfigMetaURI(const std::string& value);
+
+    /* network config */
     Status
-    CheckServerConfigWebEnable(const std::string& value);
+    CheckNetworkConfigBindAddress(const std::string& value);
     Status
-    CheckServerConfigWebPort(const std::string& value);
+    CheckNetworkConfigBindPort(const std::string& value);
+    Status
+    CheckNetworkConfigHTTPEnable(const std::string& value);
+    Status
+    CheckNetworkConfigHTTPPort(const std::string& value);
 
     /* db config */
-    Status
-    CheckDBConfigBackendUrl(const std::string& value);
-    Status
-    CheckDBConfigPreloadCollection(const std::string& value);
     Status
     CheckDBConfigArchiveDiskThreshold(const std::string& value);
     Status
     CheckDBConfigArchiveDaysThreshold(const std::string& value);
-    Status
-    CheckDBConfigAutoFlushInterval(const std::string& value);
 
     /* storage config */
     Status
-    CheckStorageConfigPrimaryPath(const std::string& value);
+    CheckStorageConfigPath(const std::string& value);
     Status
-    CheckStorageConfigSecondaryPath(const std::string& value);
+    CheckStorageConfigAutoFlushInterval(const std::string& value);
     Status
     CheckStorageConfigFileCleanupTimeout(const std::string& value);
-    // Status
-    // CheckStorageConfigS3Enable(const std::string& value);
-    // Status
-    // CheckStorageConfigS3Address(const std::string& value);
-    // Status
-    // CheckStorageConfigS3Port(const std::string& value);
-    // Status
-    // CheckStorageConfigS3AccessKey(const std::string& value);
-    // Status
-    // CheckStorageConfigS3SecretKey(const std::string& value);
-    // Status
-    // CheckStorageConfigS3Bucket(const std::string& value);
 
     /* metric config */
     Status
@@ -278,6 +254,8 @@ class Config {
     CheckCacheConfigInsertBufferSize(const std::string& value);
     Status
     CheckCacheConfigCacheInsertData(const std::string& value);
+    Status
+    CheckCacheConfigPreloadCollection(const std::string& value);
 
     /* engine config */
     Status
@@ -287,17 +265,16 @@ class Config {
     Status
     CheckEngineConfigSimdType(const std::string& value);
 
-#ifdef MILVUS_GPU_VERSION
-    Status
-    CheckEngineConfigGpuSearchThreshold(const std::string& value);
-
     /* gpu resource config */
+#ifdef MILVUS_GPU_VERSION
     Status
     CheckGpuResourceConfigEnable(const std::string& value);
     Status
     CheckGpuResourceConfigCacheCapacity(const std::string& value);
     Status
     CheckGpuResourceConfigCacheThreshold(const std::string& value);
+    Status
+    CheckGpuResourceConfigGpuSearchThreshold(const std::string& value);
     Status
     CheckGpuResourceConfigSearchResources(const std::vector<std::string>& value);
     Status
@@ -320,17 +297,9 @@ class Config {
 
     /* logs config */
     Status
+    CheckLogsLevel(const std::string& level);
+    Status
     CheckLogsTraceEnable(const std::string& value);
-    Status
-    CheckLogsDebugEnable(const std::string& value);
-    Status
-    CheckLogsInfoEnable(const std::string& value);
-    Status
-    CheckLogsWarningEnable(const std::string& value);
-    Status
-    CheckLogsErrorEnable(const std::string& value);
-    Status
-    CheckLogsFatalEnable(const std::string& value);
     Status
     CheckLogsPath(const std::string& value);
     Status
@@ -350,51 +319,41 @@ class Config {
     ExecCallBacks(const std::string& node, const std::string& sub_node, const std::string& value);
 
  public:
-    /* server config */
+    /* cluster config */
     Status
-    GetServerConfigAddress(std::string& value);
+    GetClusterConfigEnable(bool& value);
     Status
-    GetServerConfigPort(std::string& value);
+    GetClusterConfigRole(std::string& value);
+
+    /* general config */
     Status
-    GetServerConfigDeployMode(std::string& value);
+    GetGeneralConfigTimezone(std::string& value);
     Status
-    GetServerConfigTimeZone(std::string& value);
+    GetGeneralConfigMetaURI(std::string& value);
+
+    /* network config */
     Status
-    GetServerConfigWebEnable(bool& value);
+    GetNetworkConfigBindAddress(std::string& value);
     Status
-    GetServerConfigWebPort(std::string& value);
+    GetNetworkConfigBindPort(std::string& value);
+    Status
+    GetNetworkConfigHTTPEnable(bool& value);
+    Status
+    GetNetworkConfigHTTPPort(std::string& value);
 
     /* db config */
-    Status
-    GetDBConfigBackendUrl(std::string& value);
     Status
     GetDBConfigArchiveDiskThreshold(int64_t& value);
     Status
     GetDBConfigArchiveDaysThreshold(int64_t& value);
-    Status
-    GetDBConfigPreloadCollection(std::string& value);
-    Status
-    GetDBConfigAutoFlushInterval(int64_t& value);
 
     /* storage config */
     Status
-    GetStorageConfigPrimaryPath(std::string& value);
+    GetStorageConfigPath(std::string& value);
     Status
-    GetStorageConfigSecondaryPath(std::string& value);
+    GetStorageConfigAutoFlushInterval(int64_t& value);
     Status
     GetStorageConfigFileCleanupTimeup(int64_t& value);
-    // Status
-    // GetStorageConfigS3Enable(bool& value);
-    // Status
-    // GetStorageConfigS3Address(std::string& value);
-    // Status
-    // GetStorageConfigS3Port(std::string& value);
-    // Status
-    // GetStorageConfigS3AccessKey(std::string& value);
-    // Status
-    // GetStorageConfigS3SecretKey(std::string& value);
-    // Status
-    // GetStorageConfigS3Bucket(std::string& value);
 
     /* metric config */
     Status
@@ -413,6 +372,8 @@ class Config {
     GetCacheConfigInsertBufferSize(int64_t& value);
     Status
     GetCacheConfigCacheInsertData(bool& value);
+    Status
+    GetCacheConfigPreloadCollection(std::string& value);
 
     /* engine config */
     Status
@@ -422,17 +383,16 @@ class Config {
     Status
     GetEngineConfigSimdType(std::string& value);
 
-#ifdef MILVUS_GPU_VERSION
-    Status
-    GetEngineConfigGpuSearchThreshold(int64_t& value);
-
     /* gpu resource config */
+#ifdef MILVUS_GPU_VERSION
     Status
     GetGpuResourceConfigEnable(bool& value);
     Status
     GetGpuResourceConfigCacheCapacity(int64_t& value);
     Status
     GetGpuResourceConfigCacheThreshold(float& value);
+    Status
+    GetGpuResourceConfigGpuSearchThreshold(int64_t& value);
     Status
     GetGpuResourceConfigSearchResources(std::vector<int64_t>& value);
     Status
@@ -455,17 +415,9 @@ class Config {
 
     /* logs config */
     Status
+    GetLogsLevel(std::string& value);
+    Status
     GetLogsTraceEnable(bool& value);
-    Status
-    GetLogsDebugEnable(bool& value);
-    Status
-    GetLogsInfoEnable(bool& value);
-    Status
-    GetLogsWarningEnable(bool& value);
-    Status
-    GetLogsErrorEnable(bool& value);
-    Status
-    GetLogsFatalEnable(bool& value);
     Status
     GetLogsPath(std::string& value);
     Status
@@ -477,51 +429,41 @@ class Config {
     GetServerRestartRequired(bool& required);
 
  public:
-    /* server config */
+    /* cluster config */
     Status
-    SetServerConfigAddress(const std::string& value);
+    SetClusterConfigEnable(const std::string& value);
     Status
-    SetServerConfigPort(const std::string& value);
+    SetClusterConfigRole(const std::string& value);
+
+    /* general config */
     Status
-    SetServerConfigDeployMode(const std::string& value);
+    SetGeneralConfigTimezone(const std::string& value);
     Status
-    SetServerConfigTimeZone(const std::string& value);
+    SetGeneralConfigMetaURI(const std::string& value);
+
+    /* network config */
     Status
-    SetServerConfigWebEnable(const std::string& value);
+    SetNetworkConfigBindAddress(const std::string& value);
     Status
-    SetServerConfigWebPort(const std::string& value);
+    SetNetworkConfigBindPort(const std::string& value);
+    Status
+    SetNetworkConfigHTTPEnable(const std::string& value);
+    Status
+    SetNetworkConfigHTTPPort(const std::string& value);
 
     /* db config */
-    Status
-    SetDBConfigBackendUrl(const std::string& value);
-    Status
-    SetDBConfigPreloadCollection(const std::string& value);
     Status
     SetDBConfigArchiveDiskThreshold(const std::string& value);
     Status
     SetDBConfigArchiveDaysThreshold(const std::string& value);
-    Status
-    SetDBConfigAutoFlushInterval(const std::string& value);
 
     /* storage config */
     Status
-    SetStorageConfigPrimaryPath(const std::string& value);
+    SetStorageConfigPath(const std::string& value);
     Status
-    SetStorageConfigSecondaryPath(const std::string& value);
+    SetStorageConfigAutoFlushInterval(const std::string& value);
     Status
     SetStorageConfigFileCleanupTimeout(const std::string& value);
-    // Status
-    // SetStorageConfigS3Enable(const std::string& value);
-    // Status
-    // SetStorageConfigS3Address(const std::string& value);
-    // Status
-    // SetStorageConfigS3Port(const std::string& value);
-    // Status
-    // SetStorageConfigS3AccessKey(const std::string& value);
-    // Status
-    // SetStorageConfigS3SecretKey(const std::string& value);
-    // Status
-    // SetStorageConfigS3Bucket(const std::string& value);
 
     /* metric config */
     Status
@@ -540,6 +482,8 @@ class Config {
     SetCacheConfigInsertBufferSize(const std::string& value);
     Status
     SetCacheConfigCacheInsertData(const std::string& value);
+    Status
+    SetCacheConfigPreloadCollection(const std::string& value);
 
     /* engine config */
     Status
@@ -548,17 +492,17 @@ class Config {
     SetEngineConfigOmpThreadNum(const std::string& value);
     Status
     SetEngineConfigSimdType(const std::string& value);
-#ifdef MILVUS_GPU_VERSION
-    Status
-    SetEngineConfigGpuSearchThreshold(const std::string& value);
 
     /* gpu resource config */
+#ifdef MILVUS_GPU_VERSION
     Status
     SetGpuResourceConfigEnable(const std::string& value);
     Status
     SetGpuResourceConfigCacheCapacity(const std::string& value);
     Status
     SetGpuResourceConfigCacheThreshold(const std::string& value);
+    Status
+    SetGpuResourceConfigGpuSearchThreshold(const std::string& value);
     Status
     SetGpuResourceConfigSearchResources(const std::string& value);
     Status
@@ -581,17 +525,9 @@ class Config {
 
     /* logs config */
     Status
+    SetLogsLevel(const std::string& value);
+    Status
     SetLogsTraceEnable(const std::string& value);
-    Status
-    SetLogsDebugEnable(const std::string& value);
-    Status
-    SetLogsInfoEnable(const std::string& value);
-    Status
-    SetLogsWarningEnable(const std::string& value);
-    Status
-    SetLogsErrorEnable(const std::string& value);
-    Status
-    SetLogsFatalEnable(const std::string& value);
     Status
     SetLogsPath(const std::string& value);
     Status
