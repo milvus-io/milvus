@@ -357,7 +357,7 @@ func TestCmd(t *testing.T) {
 	}
 
 	// test SetConfig and GetConfig
-	nodeName := "cache_config.cpu_cache_capacity"
+	nodeName := "cache.cache_size"
 	nodeValue := "2"
 	status, err = client.SetConfig(nodeName, nodeValue)
 	if err != nil {
