@@ -52,7 +52,7 @@ template <typename T>
 void
 DistributeBatch(const T& id_array, std::vector<std::vector<std::string>>& id_groups) {
     std::vector<std::string> temp_group;
-    constexpr uint64_t SQL_BATCH_SIZE = 50;
+    //    constexpr uint64_t SQL_BATCH_SIZE = 50; // duplicate variable
     for (auto& id : id_array) {
         temp_group.push_back(id);
         if (temp_group.size() >= SQL_BATCH_SIZE) {
@@ -246,12 +246,14 @@ MySQLMetaImpl::NextFileId(std::string& file_id) {
 
 void
 MySQLMetaImpl::ValidateMetaSchema() {
-    if (nullptr == mysql_connection_pool_) {
+    if (mysql_connection_pool_ == nullptr) {
+        throw Exception(DB_ERROR, "MySQL connection pool is invalid");
         return;
     }
 
     mysqlpp::ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab_);
     if (connectionPtr == nullptr) {
+        throw Exception(DB_ERROR, "Can't construct MySQL connection");
         return;
     }
 
@@ -336,7 +338,7 @@ MySQLMetaImpl::Initialize() {
 
     // step 3: connect mysql
     unsigned int thread_hint = std::thread::hardware_concurrency();
-    int max_pool_size = (thread_hint > 8) ? thread_hint : 8;
+    int max_pool_size = (thread_hint > 8) ? static_cast<int>(thread_hint) : 8;
     int port = 0;
     if (!uri_info.port_.empty()) {
         port = std::stoi(uri_info.port_);
@@ -2184,8 +2186,8 @@ MySQLMetaImpl::FilesByTypeEx(const std::vector<meta::CollectionSchema>& collecti
                 mysqlpp::ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab_);
 
                 bool is_null_connection = (connectionPtr == nullptr);
-                fiu_do_on("MySQLMetaImpl.FilesByType.null_connection", is_null_connection = true);
-                fiu_do_on("MySQLMetaImpl.FilesByType.throw_exception", throw std::exception(););
+                fiu_do_on("MySQLMetaImpl.FilesByTypeEx.null_connection", is_null_connection = true);
+                fiu_do_on("MySQLMetaImpl.FilesByTypeEx.throw_exception", throw std::exception(););
                 if (is_null_connection) {
                     return Status(DB_ERROR, "Failed to connect to meta server(mysql)");
                 }
@@ -3199,11 +3201,6 @@ MySQLMetaImpl::DescribeHybridCollection(CollectionSchema& collection_schema, hyb
         return HandleException("Failed to describe collection", e.what());
     }
 
-    return Status::OK();
-}
-
-Status
-MySQLMetaImpl::CreateHybridCollectionFile(milvus::engine::meta::SegmentSchema& file_schema) {
     return Status::OK();
 }
 

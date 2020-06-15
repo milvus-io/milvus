@@ -499,6 +499,9 @@ TEST_F(MySqlMetaTest, ARCHIVE_TEST_DISK) {
         ++i;
     }
 
+    status = impl.GetCollectionFilesBySegmentId(table_file.segment_id_, files_holder);
+    ASSERT_TRUE(status.ok());
+
     status = impl.DropAll();
     ASSERT_TRUE(status.ok());
 }
@@ -708,6 +711,17 @@ TEST_F(MySqlMetaTest, COLLECTION_FILES_TEST) {
     uint64_t total_cnt = new_index_files_cnt + new_merge_files_cnt + backup_files_cnt + new_files_cnt + raw_files_cnt +
                          to_index_files_cnt + index_files_cnt;
     ASSERT_EQ(files_holder.HoldFiles().size(), total_cnt);
+
+    std::vector<milvus::engine::meta::CollectionSchema> collection_array;
+    milvus::engine::meta::CollectionSchema schema;
+    schema.collection_id_ = collection_id;
+    status = impl_->FilesByTypeEx(collection_array, file_types, files_holder);
+    ASSERT_TRUE(status.ok());
+
+    //    FIU_ENABLE_FIU("MySQLMetaImpl.FilesByTypeEx.throw_exception");
+    //    status = impl_->FilesByTypeEx(collection_array, file_types, files_holder);
+    //    ASSERT_FALSE(status.ok());
+    //    fiu_disable("MySQLMetaImpl.FilesByTypeEx.throw_exception");
 
     FIU_ENABLE_FIU("MySQLMetaImpl.DeleteCollectionFiles.null_connection");
     status = impl_->DeleteCollectionFiles({collection_id});

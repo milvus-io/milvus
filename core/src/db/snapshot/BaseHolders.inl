@@ -36,11 +36,11 @@ void ResourceHolder<ResourceT, Derived>::Reset() {
 
 template <typename ResourceT, typename Derived>
 typename ResourceHolder<ResourceT, Derived>::ResourcePtr
-ResourceHolder<ResourceT, Derived>::Load(ID_TYPE id) {
+ResourceHolder<ResourceT, Derived>::DoLoad(Store& store, ID_TYPE id) {
     LoadOperationContext context;
     context.id = id;
     auto op = std::make_shared<LoadOperation<ResourceT>>(context);
-    op->Push();
+    (*op)(store);
     typename ResourceT::Ptr c;
     auto status = op->GetResource(c);
     if (status.ok()) {
@@ -51,14 +51,8 @@ ResourceHolder<ResourceT, Derived>::Load(ID_TYPE id) {
 }
 
 template <typename ResourceT, typename Derived>
-typename ResourceHolder<ResourceT, Derived>::ResourcePtr
-ResourceHolder<ResourceT, Derived>::Load(const std::string& name) {
-    return nullptr;
-}
-
-template <typename ResourceT, typename Derived>
 typename ResourceHolder<ResourceT, Derived>::ScopedT
-ResourceHolder<ResourceT, Derived>::GetResource(ID_TYPE id, bool scoped) {
+ResourceHolder<ResourceT, Derived>::Load(Store& store, ID_TYPE id, bool scoped) {
     {
         std::unique_lock<std::mutex> lock(mutex_);
         auto cit = id_map_.find(id);
@@ -66,9 +60,26 @@ ResourceHolder<ResourceT, Derived>::GetResource(ID_TYPE id, bool scoped) {
             return ScopedT(cit->second, scoped);
         }
     }
-    auto ret = Load(id);
+    auto ret = DoLoad(store, id);
     if (!ret) return ScopedT();
     return ScopedT(ret, scoped);
+}
+
+template <typename ResourceT, typename Derived>
+typename ResourceHolder<ResourceT, Derived>::ScopedT
+ResourceHolder<ResourceT, Derived>::GetResource(ID_TYPE id, bool scoped) {
+    // TODO: Temp to use Load here. Will be removed when resource is loaded just post Compound
+    // Operations.
+    return Load(Store::GetInstance(), id, scoped);
+
+    {
+        std::unique_lock<std::mutex> lock(mutex_);
+        auto cit = id_map_.find(id);
+        if (cit != id_map_.end()) {
+            return ScopedT(cit->second, scoped);
+        }
+    }
+    return ScopedT();
 }
 
 template <typename ResourceT, typename Derived>
@@ -99,7 +110,8 @@ template <typename ResourceT, typename Derived>
 bool
 ResourceHolder<ResourceT, Derived>::HardDelete(ID_TYPE id) {
     auto op = std::make_shared<HardDeleteOperation<ResourceT>>(id);
-    op->Push();
+    // TODO:
+    (*op)(Store::GetInstance());
     return true;
 }
 

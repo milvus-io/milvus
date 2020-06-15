@@ -11,6 +11,7 @@
 
 #pragma once
 #include <any>
+#include <atomic>
 #include <functional>
 #include <memory>
 #include <vector>
@@ -23,6 +24,13 @@ using OnNoRefCBF = std::function<void(void)>;
 
 class ReferenceProxy {
  public:
+    ReferenceProxy() {
+    }
+    // TODO: Copy constructor is used in Mock Test. Should never be used. To be removed
+    ReferenceProxy(const ReferenceProxy& o) {
+        refcnt_ = 0;
+    }
+
     void
     RegisterOnNoRefCB(OnNoRefCBF cb);
 
@@ -44,12 +52,11 @@ class ReferenceProxy {
     virtual ~ReferenceProxy();
 
  protected:
-    int refcnt_ = 0;
+    std::atomic_long refcnt_ = {0};
     std::vector<OnNoRefCBF> on_no_ref_cbs_;
 };
 
 using ReferenceResourcePtr = std::shared_ptr<ReferenceProxy>;
-
 }  // namespace snapshot
 }  // namespace engine
 }  // namespace milvus

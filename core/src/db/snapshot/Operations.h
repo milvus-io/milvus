@@ -39,8 +39,6 @@ class Operations : public std::enable_shared_from_this<Operations> {
  public:
     Operations(const OperationContext& context, ScopedSnapshotT prev_ss,
                const OperationsType& type = OperationsType::Invalid);
-    Operations(const OperationContext& context, ID_TYPE collection_id, ID_TYPE commit_id = 0,
-               const OperationsType& type = OperationsType::Invalid);
 
     const ScopedSnapshotT&
     GetPrevSnapshot() const {
@@ -108,7 +106,7 @@ class Operations : public std::enable_shared_from_this<Operations> {
     WaitToFinish();
 
     void
-    Done();
+    Done(Store& store);
 
     void
     SetStatus(const Status& status);
@@ -130,6 +128,11 @@ class Operations : public std::enable_shared_from_this<Operations> {
 
     Status
     RollBack();
+
+    virtual Status
+    OnSnapshotStale();
+    virtual Status
+    OnSnapshotDropped();
 
     virtual ~Operations();
 
@@ -190,9 +193,6 @@ class CommitOperation : public Operations {
     CommitOperation(const OperationContext& context, ScopedSnapshotT prev_ss)
         : BaseT(context, prev_ss, OperationsType::W_Leaf) {
     }
-    CommitOperation(const OperationContext& context, ID_TYPE collection_id, ID_TYPE commit_id = 0)
-        : BaseT(context, collection_id, commit_id, OperationsType::W_Leaf) {
-    }
 
     virtual typename ResourceT::Ptr
     GetPrevResource() const {
@@ -237,12 +237,12 @@ class LoadOperation : public Operations {
     Status
     ApplyToStore(Store& store) override {
         if (done_) {
-            Done();
+            Done(store);
             return status_;
         }
         auto status = store.GetResource<ResourceT>(context_.id, resource_);
         SetStatus(status);
-        Done();
+        Done(store);
         return status_;
     }
 
@@ -287,7 +287,7 @@ class HardDeleteOperation : public Operations {
             return status_;
         auto status = store.RemoveResource<ResourceT>(id_);
         SetStatus(status);
-        Done();
+        Done(store);
         return status_;
     }
 
@@ -305,12 +305,12 @@ class HardDeleteOperation<Collection> : public Operations {
     Status
     ApplyToStore(Store& store) override {
         if (done_) {
-            Done();
+            Done(store);
             return status_;
         }
         auto status = store.RemoveCollection(id_);
         SetStatus(status);
-        Done();
+        Done(store);
         return status_;
     }
 

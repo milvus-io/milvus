@@ -621,6 +621,11 @@ TEST_F(DBTest, BACK_TIMER_THREAD_1) {
     db_->Start();
     db_->Stop();
     fiu_disable("DBImpl.StartMetricTask.InvalidTotalCache");
+
+    FIU_ENABLE_FIU("options_metric_enable");
+    db_->Start();
+    db_->Stop();
+    fiu_disable("options_metric_enable");
 }
 
 TEST_F(DBTest, BACK_TIMER_THREAD_2) {
@@ -1219,6 +1224,39 @@ TEST_F(DBTest2, GET_VECTOR_BY_ID_TEST) {
     }
 }
 
+TEST_F(DBTest2, GET_VECTOR_BY_ID_INVALID_TEST) {
+    fiu_init(0);
+
+    milvus::engine::meta::CollectionSchema collection_info = BuildCollectionSchema();
+    auto stat = db_->CreateCollection(collection_info);
+    ASSERT_TRUE(stat.ok());
+
+    uint64_t qb = 1000;
+    milvus::engine::VectorsData qxb;
+    BuildVectors(qb, 0, qxb);
+
+    std::string partition_name = "part_name";
+    std::string partition_tag = "part_tag";
+    stat = db_->CreatePartition(collection_info.collection_id_, partition_name, partition_tag);
+    ASSERT_TRUE(stat.ok());
+
+    std::vector<milvus::engine::VectorsData> vectors;
+    std::vector<int64_t> empty_array;
+    stat = db_->GetVectorsByID(collection_info, empty_array, vectors);
+    ASSERT_FALSE(stat.ok());
+
+    stat = db_->InsertVectors(collection_info.collection_id_, partition_tag, qxb);
+    ASSERT_TRUE(stat.ok());
+
+    db_->Flush(collection_info.collection_id_);
+
+    fiu_enable("bloom_filter_nullptr", 1, NULL, 0);
+    stat = db_->GetVectorsByID(collection_info, qxb.id_array_, vectors);
+    ASSERT_FALSE(stat.ok());
+    fiu_disable("bloom_filter_nullptr");
+}
+
+
 TEST_F(DBTest2, GET_VECTOR_IDS_TEST) {
     milvus::engine::meta::CollectionSchema collection_schema = BuildCollectionSchema();
     auto stat = db_->CreateCollection(collection_schema);
@@ -1282,7 +1320,7 @@ TEST_F(DBTest2, INSERT_DUPLICATE_ID) {
 
     milvus::engine::meta::CollectionSchema collection_schema = BuildCollectionSchema();
     auto stat = db_->CreateCollection(collection_schema);
-    ASSERT_TRUE(stat.ok());
+    ASSERT_TRUE(stat.ok()) << " CreateCollection: " << stat.message();
 
     uint64_t size = 20;
     milvus::engine::VectorsData vector;
@@ -1293,10 +1331,10 @@ TEST_F(DBTest2, INSERT_DUPLICATE_ID) {
     }
 
     stat = db_->InsertVectors(COLLECTION_NAME, "", vector);
-    ASSERT_TRUE(stat.ok());
+    ASSERT_TRUE(stat.ok()) << " InsertVectors: " << stat.message();
 
     stat = db_->Flush(COLLECTION_NAME);
-    ASSERT_TRUE(stat.ok());
+    ASSERT_TRUE(stat.ok()) << " Flush: " << stat.message();
 }
 
 /*

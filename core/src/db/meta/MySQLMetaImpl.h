@@ -161,9 +161,6 @@ class MySQLMetaImpl : public Meta {
     Status
     DescribeHybridCollection(CollectionSchema& collection_schema, hybrid::FieldsSchema& fields_schema) override;
 
-    Status
-    CreateHybridCollectionFile(SegmentSchema& file_schema) override;
-
  private:
     Status
     NextFileId(std::string& file_id);
@@ -182,7 +179,7 @@ class MySQLMetaImpl : public Meta {
     const int mode_;
 
     std::shared_ptr<MySQLConnectionPool> mysql_connection_pool_;
-    bool safe_grab_ = false;
+    bool safe_grab_ = false;  // Safely graps a connection from mysql pool
 
     std::mutex meta_mutex_;
     std::mutex genid_mutex_;

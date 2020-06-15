@@ -20,6 +20,7 @@
 #include <thread>
 #include <vector>
 #include "db/snapshot/SnapshotHolder.h"
+#include "db/snapshot/Store.h"
 #include "utils/Status.h"
 
 namespace milvus {
@@ -34,16 +35,18 @@ class Snapshots {
         return sss;
     }
     Status
-    GetHolder(ID_TYPE collection_id, SnapshotHolderPtr& holder, bool load = true);
+    GetHolder(const ID_TYPE& collection_id, SnapshotHolderPtr& holder);
     Status
     GetHolder(const std::string& name, SnapshotHolderPtr& holder);
+    Status
+    LoadHolder(Store& store, const ID_TYPE& collection_id, SnapshotHolderPtr& holder);
 
     Status
     GetSnapshot(ScopedSnapshotT& ss, ID_TYPE collection_id, ID_TYPE id = 0, bool scoped = true);
     Status
     GetSnapshot(ScopedSnapshotT& ss, const std::string& name, ID_TYPE id = 0, bool scoped = true);
     Status
-    GetSnapshotNoLoad(ScopedSnapshotT& ss, ID_TYPE collection_id, bool scoped = true);
+    LoadSnapshot(Store& store, ScopedSnapshotT& ss, ID_TYPE collection_id, ID_TYPE id, bool scoped = true);
 
     Status
     GetCollectionIds(IDS_TYPE& ids) const;
@@ -54,7 +57,13 @@ class Snapshots {
     DropCollection(ID_TYPE collection_id, const LSN_TYPE& lsn);
 
     Status
+    DropPartition(const ID_TYPE& collection_id, const ID_TYPE& partition_id, const LSN_TYPE& lsn);
+
+    Status
     Reset();
+
+    void
+    Init();
 
  private:
     void
@@ -64,11 +73,9 @@ class Snapshots {
     }
     Status
     DoDropCollection(ScopedSnapshotT& ss, const LSN_TYPE& lsn);
-    void
-    Init();
 
     Status
-    LoadNoLock(ID_TYPE collection_id, SnapshotHolderPtr& holder);
+    LoadNoLock(Store& store, ID_TYPE collection_id, SnapshotHolderPtr& holder);
     Status
     GetHolderNoLock(ID_TYPE collection_id, SnapshotHolderPtr& holder);
 

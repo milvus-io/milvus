@@ -82,6 +82,9 @@ class DBImpl : public DB, public server::CacheConfigHandler, public server::Engi
                       bool force = false) override;
 
     Status
+    ReLoadSegmentsDeletedDocs(const std::string& collection_id, const std::vector<int64_t>& segment_ids) override;
+
+    Status
     UpdateCollectionFlag(const std::string& collection_id, int64_t flag) override;
 
     Status
@@ -245,8 +248,8 @@ class DBImpl : public DB, public server::CacheConfigHandler, public server::Engi
     void
     BackgroundMerge(std::set<std::string> collection_ids, bool force_merge_all);
 
-    Status
-    MergeHybridFiles(const std::string& table_id, meta::FilesHolder& files_holder);
+    //    Status
+    //    MergeHybridFiles(const std::string& table_id, meta::FilesHolder& files_holder);
 
     void
     StartBuildIndexTask();

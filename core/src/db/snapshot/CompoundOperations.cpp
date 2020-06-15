@@ -19,38 +19,7 @@ namespace milvus {
 namespace engine {
 namespace snapshot {
 
-CompoundBaseOperation::CompoundBaseOperation(const OperationContext& context, ScopedSnapshotT prev_ss)
-    : BaseT(context, prev_ss, OperationsType::W_Compound) {
-}
-CompoundBaseOperation::CompoundBaseOperation(const OperationContext& context, ID_TYPE collection_id, ID_TYPE commit_id)
-    : BaseT(context, collection_id, commit_id, OperationsType::W_Compound) {
-}
-
-std::string
-CompoundBaseOperation::GetRepr() const {
-    std::stringstream ss;
-    ss << "<" << GetName() << "(";
-    if (prev_ss_) {
-        ss << "SS=" << prev_ss_ << GetID();
-    }
-    ss << "," << context_.ToString();
-    ss << ",LSN=" << GetContextLsn();
-    ss << ")>";
-    return ss.str();
-}
-
-Status
-CompoundBaseOperation::PreCheck() {
-    if (GetContextLsn() <= prev_ss_->GetMaxLsn()) {
-        return Status(SS_INVALID_CONTEX_ERROR, "Invalid LSN found in operation");
-    }
-    return Status::OK();
-}
-
 BuildOperation::BuildOperation(const OperationContext& context, ScopedSnapshotT prev_ss) : BaseT(context, prev_ss) {
-}
-BuildOperation::BuildOperation(const OperationContext& context, ID_TYPE collection_id, ID_TYPE commit_id)
-    : BaseT(context, collection_id, commit_id) {
 }
 
 Status
@@ -60,14 +29,14 @@ BuildOperation::DoExecute(Store& store) {
     if (!status.ok())
         return status;
 
-    SegmentCommitOperation op(context_, prev_ss_);
+    SegmentCommitOperation op(context_, context_.prev_ss);
     op(store);
     status = op.GetResource(context_.new_segment_commit);
     if (!status.ok())
         return status;
     AddStepWithLsn(*context_.new_segment_commit, context_.lsn);
 
-    PartitionCommitOperation pc_op(context_, prev_ss_);
+    PartitionCommitOperation pc_op(context_, context_.prev_ss);
     pc_op(store);
 
     OperationContext cc_context;
@@ -83,7 +52,7 @@ BuildOperation::DoExecute(Store& store) {
         return status;
     AddStepWithLsn(*context_.new_partition_commit, context_.lsn);
 
-    CollectionCommitOperation cc_op(cc_context, prev_ss_);
+    CollectionCommitOperation cc_op(cc_context, context_.prev_ss);
     cc_op(store);
     status = cc_op.GetResource(context_.new_collection_commit);
     if (!status.ok())
@@ -123,9 +92,6 @@ BuildOperation::CommitNewSegmentFile(const SegmentFileContext& context, SegmentF
 NewSegmentOperation::NewSegmentOperation(const OperationContext& context, ScopedSnapshotT prev_ss)
     : BaseT(context, prev_ss) {
 }
-NewSegmentOperation::NewSegmentOperation(const OperationContext& context, ID_TYPE collection_id, ID_TYPE commit_id)
-    : BaseT(context, collection_id, commit_id) {
-}
 
 Status
 NewSegmentOperation::DoExecute(Store& store) {
@@ -135,7 +101,7 @@ NewSegmentOperation::DoExecute(Store& store) {
     /* auto status = PrevSnapshotRequried(); */
     /* if (!status.ok()) return status; */
     // TODO: Check Context
-    SegmentCommitOperation op(context_, prev_ss_);
+    SegmentCommitOperation op(context_, context_.prev_ss);
     auto status = op(store);
     if (!status.ok())
         return status;
@@ -143,10 +109,15 @@ NewSegmentOperation::DoExecute(Store& store) {
     if (!status.ok())
         return status;
     AddStepWithLsn(*context_.new_segment_commit, context_.lsn);
+    /* std::cout << GetRepr() << " POST_SC_MAP=("; */
+    /* for (auto id : context_.new_segment_commit->GetMappings()) { */
+    /*     std::cout << id << ","; */
+    /* } */
+    /* std::cout << ")" << std::endl; */
 
     OperationContext cc_context;
 
-    PartitionCommitOperation pc_op(context_, prev_ss_);
+    PartitionCommitOperation pc_op(context_, context_.prev_ss);
     status = pc_op(store);
     if (!status.ok())
         return status;
@@ -155,8 +126,13 @@ NewSegmentOperation::DoExecute(Store& store) {
         return status;
     AddStepWithLsn(*cc_context.new_partition_commit, context_.lsn);
     context_.new_partition_commit = cc_context.new_partition_commit;
+    /* std::cout << GetRepr() << " POST_PC_MAP=("; */
+    /* for (auto id : cc_context.new_partition_commit->GetMappings()) { */
+    /*     std::cout << id << ","; */
+    /* } */
+    /* std::cout << ")" << std::endl; */
 
-    CollectionCommitOperation cc_op(cc_context, prev_ss_);
+    CollectionCommitOperation cc_op(cc_context, context_.prev_ss);
     status = cc_op(store);
     if (!status.ok())
         return status;
@@ -200,9 +176,6 @@ NewSegmentOperation::CommitNewSegmentFile(const SegmentFileContext& context, Seg
 }
 
 MergeOperation::MergeOperation(const OperationContext& context, ScopedSnapshotT prev_ss) : BaseT(context, prev_ss) {
-}
-MergeOperation::MergeOperation(const OperationContext& context, ID_TYPE collection_id, ID_TYPE commit_id)
-    : BaseT(context, collection_id, commit_id) {
 }
 
 Status
@@ -251,7 +224,7 @@ MergeOperation::DoExecute(Store& store) {
     // PXU TODO:
     // 1. Check all requried field elements have related segment files
     // 2. Check Stale and others
-    SegmentCommitOperation op(context_, prev_ss_);
+    SegmentCommitOperation op(context_, context_.prev_ss);
     auto status = op(store);
     if (!status.ok())
         return status;
@@ -260,8 +233,13 @@ MergeOperation::DoExecute(Store& store) {
     if (!status.ok())
         return status;
     AddStepWithLsn(*context_.new_segment_commit, context_.lsn);
+    /* std::cout << GetRepr() << " POST_SC_MAP=("; */
+    /* for (auto id : context_.new_segment_commit->GetMappings()) { */
+    /*     std::cout << id << ","; */
+    /* } */
+    /* std::cout << ")" << std::endl; */
 
-    PartitionCommitOperation pc_op(context_, prev_ss_);
+    PartitionCommitOperation pc_op(context_, context_.prev_ss);
     status = pc_op(store);
     if (!status.ok())
         return status;
@@ -273,7 +251,13 @@ MergeOperation::DoExecute(Store& store) {
     AddStepWithLsn(*cc_context.new_partition_commit, context_.lsn);
     context_.new_partition_commit = cc_context.new_partition_commit;
 
-    CollectionCommitOperation cc_op(cc_context, prev_ss_);
+    /* std::cout << GetRepr() << " POST_PC_MAP=("; */
+    /* for (auto id : cc_context.new_partition_commit->GetMappings()) { */
+    /*     std::cout << id << ","; */
+    /* } */
+    /* std::cout << ")" << std::endl; */
+
+    CollectionCommitOperation cc_op(cc_context, context_.prev_ss);
     status = cc_op(store);
     if (!status.ok())
         return status;
@@ -324,7 +308,10 @@ DropPartitionOperation::DropPartitionOperation(const PartitionContext& context, 
 std::string
 DropPartitionOperation::GetRepr() const {
     std::stringstream ss;
-    ss << "<DPO(SS=" << prev_ss_->GetID();
+    ss << "<" << GetName() << "(";
+    if (prev_ss_) {
+        ss << "SS=" << prev_ss_->GetID();
+    }
     ss << "," << c_context_.ToString();
     ss << "," << context_.ToString();
     ss << ",LSN=" << GetContextLsn();
@@ -364,10 +351,6 @@ DropPartitionOperation::DoExecute(Store& store) {
 
 CreatePartitionOperation::CreatePartitionOperation(const OperationContext& context, ScopedSnapshotT prev_ss)
     : BaseT(context, prev_ss) {
-}
-CreatePartitionOperation::CreatePartitionOperation(const OperationContext& context, ID_TYPE collection_id,
-                                                   ID_TYPE commit_id)
-    : BaseT(context, collection_id, commit_id) {
 }
 
 Status
@@ -448,7 +431,10 @@ CreateCollectionOperation::PreCheck() {
 std::string
 CreateCollectionOperation::GetRepr() const {
     std::stringstream ss;
-    ss << "<CCO(";
+    ss << "<" << GetName() << "(";
+    if (prev_ss_) {
+        ss << "SS=" << prev_ss_->GetID();
+    }
     ss << c_context_.ToString();
     ss << "," << context_.ToString();
     ss << ",LSN=" << GetContextLsn();
@@ -515,6 +501,7 @@ CreateCollectionOperation::DoExecute(Store& store) {
     AddStepWithLsn(*collection_commit, c_context_.lsn);
     context_.new_collection_commit = collection_commit;
     c_context_.collection_commit = collection_commit;
+    context_.new_collection_commit = collection_commit;
     return Status::OK();
 }
 
@@ -528,12 +515,13 @@ CreateCollectionOperation::GetSnapshot(ScopedSnapshotT& ss) const {
         return status;
     if (!c_context_.collection_commit)
         return Status(SS_CONSTRAINT_CHECK_ERROR, "No Snapshot is available");
-    status = Snapshots::GetInstance().GetSnapshot(ss, c_context_.collection_commit->GetCollectionId());
+    /* status = Snapshots::GetInstance().GetSnapshot(ss, c_context_.collection_commit->GetCollectionId()); */
+    ss = context_.latest_ss;
     return status;
 }
 
 Status
-SoftDeleteCollectionOperation::DoExecute(Store& store) {
+DropCollectionOperation::DoExecute(Store& store) {
     if (!context_.collection) {
         return Status(SS_INVALID_CONTEX_ERROR, "Invalid Context");
     }

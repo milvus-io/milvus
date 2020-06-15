@@ -965,6 +965,25 @@ GrpcRequestHandler::PreloadCollection(::grpc::ServerContext* context, const ::mi
 }
 
 ::grpc::Status
+GrpcRequestHandler::ReloadSegments(::grpc::ServerContext* context, const ::milvus::grpc::ReLoadSegmentsParam* request,
+                                   ::milvus::grpc::Status* response) {
+    CHECK_NULLPTR_RETURN(request);
+    LOG_SERVER_INFO_ << LogOut("Request [%s] %s begin.", GetContext(context)->RequestID().c_str(), __func__);
+
+    std::vector<std::string> file_ids;
+    for (size_t i = 0; i < request->segment_id_array_size(); i++) {
+        file_ids.push_back(request->segment_id_array(i));
+    }
+
+    Status status = request_handler_.ReLoadSegments(GetContext(context), request->collection_name(), file_ids);
+
+    LOG_SERVER_INFO_ << LogOut("Request [%s] %s end.", GetContext(context)->RequestID().c_str(), __func__);
+    SET_RESPONSE(response, status, context);
+
+    return ::grpc::Status::OK;
+}
+
+::grpc::Status
 GrpcRequestHandler::DescribeIndex(::grpc::ServerContext* context, const ::milvus::grpc::CollectionName* request,
                                   ::milvus::grpc::IndexParam* response) {
     CHECK_NULLPTR_RETURN(request);
@@ -1140,6 +1159,20 @@ GrpcRequestHandler::DescribeHybridCollection(::grpc::ServerContext* context,
                                              const ::milvus::grpc::CollectionName* request,
                                              ::milvus::grpc::Mapping* response) {
     LOG_SERVER_INFO_ << LogOut("Request [%s] %s begin.", GetContext(context)->RequestID().c_str(), __func__);
+    std::unordered_map<std::string, engine::meta::hybrid::DataType> field_types;
+    Status status =
+        request_handler_.DescribeHybridCollection(GetContext(context), request->collection_name(), field_types);
+
+    response->mutable_status()->set_error_code((milvus::grpc::ErrorCode)status.code());
+    response->mutable_status()->set_reason(status.message());
+    response->set_collection_name(request->collection_name());
+    auto field_it = field_types.begin();
+    for (; field_it != field_types.end(); field_it++) {
+        auto field = response->add_fields();
+        field->set_name(field_it->first);
+        field->mutable_type()->set_data_type((milvus::grpc::DataType)field_it->second);
+    }
+
     CHECK_NULLPTR_RETURN(request);
     LOG_SERVER_INFO_ << LogOut("Request [%s] %s end.", GetContext(context)->RequestID().c_str(), __func__);
     return ::grpc::Status::OK;
