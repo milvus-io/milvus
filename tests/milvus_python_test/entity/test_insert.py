@@ -582,7 +582,6 @@ class TestAddBase:
 
     @pytest.mark.level(2)
     @pytest.mark.timeout(30)
-    @pytest.mark.repeat(2)
     def test_collection_add_rows_count_multi_threading(self, args, collection):
         '''
         target: test collection rows_count is correct or not with multi threading
