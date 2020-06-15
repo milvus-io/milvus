@@ -129,6 +129,11 @@ SegmentWriter::Serialize() {
         return status;
     }
 
+    status = WriteAttrsIndex();
+    if (!status.ok()) {
+        return status;
+    }
+
     recorder.RecordSection("Writing vectors and uids done");
 
     // Write an empty deleted doc

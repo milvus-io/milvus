@@ -532,6 +532,10 @@ ExecutionEngineImpl::LoadAttr(bool to_cache) {
         std::unordered_map<std::string, int64_t> attr_size;
 
         auto attr_it = attrs_index->attr_indexes.begin();
+        if (attr_it == attrs_index->attr_indexes.end()) {
+            return Status::OK();
+        }
+
         for (; attr_it != attrs_index->attr_indexes.end(); attr_it++) {
             attr_indexes.insert(std::make_pair(attr_it->first, attr_it->second->GetAttrIndex()));
         }

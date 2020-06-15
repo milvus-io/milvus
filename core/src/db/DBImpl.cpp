@@ -1638,138 +1638,184 @@ DBImpl::CreateIndex(const std::shared_ptr<server::Context>& context, const std::
 }
 
 Status
-DBImpl::SerializeStructuredIndex(const milvus::engine::meta::SegmentsSchema& to_index_files,
-                                 const std::unordered_map<std::string, engine::meta::hybrid::DataType>& attr_type,
-                                 const std::vector<std::string>& field_names) {
+DBImpl::SerializeStructuredIndex(const meta::SegmentSchema& segment_schema,
+                                 const std::unordered_map<std::string, knowhere::IndexPtr>& attr_indexes,
+                                 const std::unordered_map<std::string, int64_t>& attr_sizes,
+                                 const std::unordered_map<std::string, meta::hybrid::DataType>& attr_types) {
     auto status = Status::OK();
-    if (!to_index_files.empty()) {
-        std::unordered_map<std::string, segment::AttrsPtr> attrs;
-        for (auto& file : to_index_files) {
-            std::string segment_dir;
-            utils::GetParentPath(file.location_, segment_dir);
-            auto segment_reader_ptr = std::make_shared<segment::SegmentReader>(segment_dir);
-            status = segment_reader_ptr->Load();
-            if (!status.ok()) {
-                return status;
-            }
 
-            segment::SegmentPtr segment_ptr;
-            segment_reader_ptr->GetSegment(segment_ptr);
-            auto attrs_ptr = segment_ptr->attrs_ptr_;
-            attrs.insert(std::make_pair(file.location_, attrs_ptr));
-        }
-
-        for (auto& file : to_index_files) {
-            std::unordered_map<std::string, knowhere::IndexPtr> attr_indexes;
-            std::unordered_map<std::string, int64_t> attr_sizes;
-            std::string segment_dir;
-            utils::GetParentPath(file.location_, segment_dir);
-            auto segment_writer_ptr = std::make_shared<segment::SegmentWriter>(segment_dir);
-
-            for (auto& field_name : field_names) {
-                knowhere::IndexPtr index_ptr = nullptr;
-                switch (attr_type.at(field_name)) {
-                    case engine::meta::hybrid::DataType::INT8: {
-                        auto attr = attrs.at(file.location_)->attrs.at(field_name);
-                        auto attr_data = attr->GetData();
-                        auto attr_size = attr->GetCount();
-
-                        auto int8_index_ptr = std::make_shared<knowhere::StructuredIndexSort<int8_t>>(
-                            (size_t)attr_size, reinterpret_cast<const signed char*>(attr_data.data()));
-                        index_ptr = std::static_pointer_cast<knowhere::Index>(int8_index_ptr);
-
-                        attr_indexes.insert(std::make_pair(field_name, index_ptr));
-                        attr_sizes.insert(std::make_pair(field_name, attr_size * sizeof(int8_t)));
-                    }
-                    case engine::meta::hybrid::DataType::INT16: {
-                        auto attr = attrs.at(file.location_)->attrs.at(field_name);
-                        auto attr_data = attr->GetData();
-                        auto attr_size = attr->GetCount();
-
-                        auto int16_index_ptr = std::make_shared<knowhere::StructuredIndexSort<int16_t>>(
-                            (size_t)attr_size, reinterpret_cast<const int16_t*>(attr_data.data()));
-                        index_ptr = std::static_pointer_cast<knowhere::Index>(int16_index_ptr);
-
-                        attr_indexes.insert(std::make_pair(field_name, index_ptr));
-                        attr_sizes.insert(std::make_pair(field_name, attr_size * sizeof(int16_t)));
-                        break;
-                    }
-                    case engine::meta::hybrid::DataType::INT32: {
-                        auto attr = attrs.at(file.location_)->attrs.at(field_name);
-                        auto attr_data = attr->GetData();
-                        auto attr_size = attr->GetCount();
-
-                        auto int32_index_ptr = std::make_shared<knowhere::StructuredIndexSort<int32_t>>(
-                            (size_t)attr_size, reinterpret_cast<const int32_t*>(attr_data.data()));
-                        index_ptr = std::static_pointer_cast<knowhere::Index>(int32_index_ptr);
-
-                        attr_indexes.insert(std::make_pair(field_name, index_ptr));
-                        attr_sizes.insert(std::make_pair(field_name, attr_size * sizeof(int32_t)));
-                        break;
-                    }
-                    case engine::meta::hybrid::DataType::INT64: {
-                        auto attr = attrs.at(file.location_)->attrs.at(field_name);
-                        auto attr_data = attr->GetData();
-                        auto attr_size = attr->GetCount();
-
-                        auto int64_index_ptr = std::make_shared<knowhere::StructuredIndexSort<int64_t>>(
-                            (size_t)attr_size, reinterpret_cast<const int64_t*>(attr_data.data()));
-                        index_ptr = std::static_pointer_cast<knowhere::Index>(int64_index_ptr);
-
-                        attr_indexes.insert(std::make_pair(field_name, index_ptr));
-                        attr_sizes.insert(std::make_pair(field_name, attr_size * sizeof(int64_t)));
-                        break;
-                    }
-                    case engine::meta::hybrid::DataType::FLOAT: {
-                        auto attr = attrs.at(file.location_)->attrs.at(field_name);
-                        auto attr_data = attr->GetData();
-                        auto attr_size = attr->GetCount();
-
-                        auto float_index_ptr = std::make_shared<knowhere::StructuredIndexSort<float>>(
-                            (size_t)attr_size, reinterpret_cast<const float*>(attr_data.data()));
-                        index_ptr = std::static_pointer_cast<knowhere::Index>(float_index_ptr);
-
-                        attr_indexes.insert(std::make_pair(field_name, index_ptr));
-                        attr_sizes.insert(std::make_pair(field_name, attr_size * sizeof(float)));
-                        break;
-                    }
-                    case engine::meta::hybrid::DataType::DOUBLE: {
-                        auto attr = attrs.at(file.location_)->attrs.at(field_name);
-                        auto attr_data = attr->GetData();
-                        auto attr_size = attr->GetCount();
-
-                        auto double_index_ptr = std::make_shared<knowhere::StructuredIndexSort<double>>(
-                            (size_t)attr_size, reinterpret_cast<const double*>(attr_data.data()));
-                        index_ptr = std::static_pointer_cast<knowhere::Index>(double_index_ptr);
-
-                        attr_indexes.insert(std::make_pair(field_name, index_ptr));
-                        attr_sizes.insert(std::make_pair(field_name, attr_size * sizeof(double)));
-                        break;
-                    }
-                    default: {}
-                }
-            }
-            status = segment_writer_ptr->SetAttrsIndex(attr_indexes, attr_sizes, attr_type);
-            if (!status.ok()) {
-                return status;
-            }
-            status = segment_writer_ptr->WriteAttrsIndex();
-            if (!status.ok()) {
-                return status;
-            }
-        }
+    auto segment_writer_ptr = std::make_shared<segment::SegmentWriter>(segment_schema.location_);
+    status = segment_writer_ptr->SetAttrsIndex(attr_indexes, attr_sizes, attr_types);
+    if (!status.ok()) {
+        return status;
     }
+    status = segment_writer_ptr->WriteAttrsIndex();
+    if (!status.ok()) {
+        return status;
+    }
+
     return status;
 }
 
 Status
-DBImpl::CreateStructuredIndex(const std::shared_ptr<server::Context>& context, const std::string& collection_id,
-                              std::vector<std::string>& field_names) {
+DBImpl::FlushAttrsIndex(const std::string& collection_id) {
+    std::vector<int> file_types = {
+        milvus::engine::meta::SegmentSchema::RAW,
+        milvus::engine::meta::SegmentSchema::TO_INDEX,
+    };
+    meta::FilesHolder files_holder;
+    auto status = meta_ptr_->FilesByType(collection_id, file_types, files_holder);
+    if (!status.ok()) {
+        return status;
+    }
+
+    meta::CollectionSchema collection_schema;
+    meta::hybrid::FieldsSchema fields_schema;
+    collection_schema.collection_id_ = collection_id;
+    status = meta_ptr_->DescribeHybridCollection(collection_schema, fields_schema);
+    if (!status.ok()) {
+        return status;
+    }
+    if (fields_schema.fields_schema_.empty()) {
+        return status;
+    }
+
+    std::unordered_map<std::string, std::vector<uint8_t>> attr_datas;
+    std::unordered_map<std::string, int64_t> attr_sizes;
+    std::unordered_map<std::string, meta::hybrid::DataType> attr_types;
+    std::vector<std::string> field_names;
+
+    for (auto& segment_schema : files_holder.HoldFiles()) {
+        std::string segment_dir;
+        utils::GetParentPath(segment_schema.location_, segment_dir);
+        auto segment_reader_ptr = std::make_shared<segment::SegmentReader>(segment_dir);
+        segment::SegmentPtr segment_ptr;
+        segment_reader_ptr->GetSegment(segment_ptr);
+        status = segment_reader_ptr->Load();
+
+        if (!status.ok()) {
+            return status;
+        }
+
+        for (auto& field_schema : fields_schema.fields_schema_) {
+            if (field_schema.field_type_ != (int32_t)meta::hybrid::DataType::VECTOR) {
+                attr_types.insert(
+                    std::make_pair(field_schema.field_name_, (meta::hybrid::DataType)field_schema.field_type_));
+                field_names.emplace_back(field_schema.field_name_);
+            }
+        }
+
+        auto attrs = segment_ptr->attrs_ptr_->attrs;
+
+        auto attr_it = attrs.begin();
+        for (; attr_it != attrs.end(); attr_it++) {
+            attr_datas.insert(std::make_pair(attr_it->first, attr_it->second->GetMutableData()));
+            attr_sizes.insert(
+                std::make_pair(attr_it->first, attr_it->second->GetCount() * attr_it->second->GetCount()));
+        }
+
+        std::unordered_map<std::string, knowhere::IndexPtr> attr_indexes;
+        status = CreateStructuredIndex(collection_id, field_names, attr_types, attr_datas, attr_sizes, attr_indexes);
+        if (!status.ok()) {
+            return status;
+        }
+
+        status = SerializeStructuredIndex(segment_schema, attr_indexes, attr_sizes, attr_types);
+        if (!status.ok()) {
+            return status;
+        }
+    }
+}
+
+Status
+DBImpl::CreateStructuredIndex(const std::string& collection_id, const std::vector<std::string>& field_names,
+                              const std::unordered_map<std::string, meta::hybrid::DataType>& attr_types,
+                              const std::unordered_map<std::string, std::vector<uint8_t>>& attr_datas,
+                              const std::unordered_map<std::string, int64_t>& attr_sizes,
+                              std::unordered_map<std::string, knowhere::IndexPtr>& attr_indexes) {
     if (!initialized_.load(std::memory_order_acquire)) {
         return SHUTDOWN_ERROR;
     }
 
-    auto status = Flush();
+    for (auto& field_name : field_names) {
+        knowhere::IndexPtr index_ptr = nullptr;
+        switch (attr_types.at(field_name)) {
+            case engine::meta::hybrid::DataType::INT8: {
+                std::vector<int8_t> attr_data;
+                auto attr_size = attr_sizes.at(field_name);
+                memcpy(attr_data.data(), attr_datas.at(field_name).data(), attr_size);
+
+                auto int8_index_ptr = std::make_shared<knowhere::StructuredIndexSort<int8_t>>(
+                    (size_t)attr_size, reinterpret_cast<const signed char*>(attr_data.data()));
+                index_ptr = std::static_pointer_cast<knowhere::Index>(int8_index_ptr);
+
+                attr_indexes.insert(std::make_pair(field_name, index_ptr));
+            }
+            case engine::meta::hybrid::DataType::INT16: {
+                std::vector<int16_t> attr_data;
+                auto attr_size = attr_sizes.at(field_name);
+                memcpy(attr_data.data(), attr_datas.at(field_name).data(), attr_size);
+
+                auto int16_index_ptr = std::make_shared<knowhere::StructuredIndexSort<int16_t>>(
+                    (size_t)attr_size, reinterpret_cast<const int16_t*>(attr_data.data()));
+                index_ptr = std::static_pointer_cast<knowhere::Index>(int16_index_ptr);
+
+                attr_indexes.insert(std::make_pair(field_name, index_ptr));
+                break;
+            }
+            case engine::meta::hybrid::DataType::INT32: {
+                std::vector<int32_t> attr_data;
+                auto attr_size = attr_sizes.at(field_name);
+                memcpy(attr_data.data(), attr_datas.at(field_name).data(), attr_size);
+
+                auto int32_index_ptr = std::make_shared<knowhere::StructuredIndexSort<int32_t>>(
+                    (size_t)attr_size, reinterpret_cast<const int32_t*>(attr_data.data()));
+                index_ptr = std::static_pointer_cast<knowhere::Index>(int32_index_ptr);
+
+                attr_indexes.insert(std::make_pair(field_name, index_ptr));
+                break;
+            }
+            case engine::meta::hybrid::DataType::INT64: {
+                std::vector<int64_t> attr_data;
+                auto attr_size = attr_sizes.at(field_name);
+                memcpy(attr_data.data(), attr_datas.at(field_name).data(), attr_size);
+
+                auto int64_index_ptr = std::make_shared<knowhere::StructuredIndexSort<int64_t>>(
+                    (size_t)attr_size, reinterpret_cast<const int64_t*>(attr_data.data()));
+                index_ptr = std::static_pointer_cast<knowhere::Index>(int64_index_ptr);
+
+                attr_indexes.insert(std::make_pair(field_name, index_ptr));
+                break;
+            }
+            case engine::meta::hybrid::DataType::FLOAT: {
+                std::vector<float> attr_data;
+                auto attr_size = attr_sizes.at(field_name);
+                memcpy(attr_data.data(), attr_datas.at(field_name).data(), attr_size);
+
+                auto float_index_ptr = std::make_shared<knowhere::StructuredIndexSort<float>>(
+                    (size_t)attr_size, reinterpret_cast<const float*>(attr_data.data()));
+                index_ptr = std::static_pointer_cast<knowhere::Index>(float_index_ptr);
+
+                attr_indexes.insert(std::make_pair(field_name, index_ptr));
+                break;
+            }
+            case engine::meta::hybrid::DataType::DOUBLE: {
+                std::vector<double> attr_data;
+                auto attr_size = attr_sizes.at(field_name);
+                memcpy(attr_data.data(), attr_datas.at(field_name).data(), attr_size);
+
+                auto double_index_ptr = std::make_shared<knowhere::StructuredIndexSort<double>>(
+                    (size_t)attr_size, reinterpret_cast<const double*>(attr_data.data()));
+                index_ptr = std::static_pointer_cast<knowhere::Index>(double_index_ptr);
+
+                attr_indexes.insert(std::make_pair(field_name, index_ptr));
+                break;
+            }
+            default: {}
+        }
+    }
+
+#if 0
     {
         std::unordered_map<std::string, engine::meta::hybrid::DataType> attr_type;
         engine::meta::CollectionSchema collection_schema;
@@ -1804,7 +1850,8 @@ DBImpl::CreateStructuredIndex(const std::shared_ptr<server::Context>& context, c
             return status;
         }
     }
-    return status;
+#endif
+    return Status::OK();
 }
 
 Status
@@ -2970,6 +3017,11 @@ DBImpl::ExecWalRecord(const wal::MXLogRecord& record) {
                         break;
                     }
                     flushed_collections.insert(collection_id);
+
+                    status = FlushAttrsIndex(collection_id);
+                    if (!status.ok()) {
+                        return status;
+                    }
                 }
 
                 collections_flushed(flushed_collections);

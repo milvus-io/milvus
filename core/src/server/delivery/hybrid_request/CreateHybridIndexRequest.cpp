@@ -124,21 +124,21 @@ CreateHybridIndexRequest::OnExecute() {
 
         rc.RecordSection("check validation");
 
-        // step 3: create index
-        status = DBWrapper::DB()->CreateStructuredIndex(context_, collection_name_, field_names_);
-        fiu_do_on("CreateIndexRequest.OnExecute.create_index_fail",
-                  status = Status(milvus::SERVER_UNEXPECTED_ERROR, ""));
-        if (!status.ok()) {
-            return status;
-        }
-
-        engine::CollectionIndex index;
-        index.engine_type_ = adapter_index_type;
-        index.extra_params_ = extra_params_;
-        status = DBWrapper::DB()->CreateIndex(context_, collection_name_, index);
-        if (!status.ok()) {
-            return status;
-        }
+        //        // step 3: create index
+        //        status = DBWrapper::DB()->CreateStructuredIndex(context_, collection_name_, field_names_);
+        //        fiu_do_on("CreateIndexRequest.OnExecute.create_index_fail",
+        //                  status = Status(milvus::SERVER_UNEXPECTED_ERROR, ""));
+        //        if (!status.ok()) {
+        //            return status;
+        //        }
+        //
+        //        engine::CollectionIndex index;
+        //        index.engine_type_ = adapter_index_type;
+        //        index.extra_params_ = extra_params_;
+        //        status = DBWrapper::DB()->CreateIndex(context_, collection_name_, index);
+        //        if (!status.ok()) {
+        //            return status;
+        //        }
     } catch (std::exception& ex) {
         return Status(SERVER_UNEXPECTED_ERROR, ex.what());
     }

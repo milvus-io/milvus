@@ -57,6 +57,11 @@ Attr::GetData() const {
     return data_;
 }
 
+std::vector<uint8_t>&
+Attr::GetMutableData() {
+    return data_;
+}
+
 const std::string&
 Attr::GetName() const {
     return name_;

@@ -174,8 +174,11 @@ class DB {
                 engine::QueryResult& result) = 0;
 
     virtual Status
-    CreateStructuredIndex(const std::shared_ptr<server::Context>& context, const std::string& collection_id,
-                          std::vector<std::string>& field_names) = 0;
+    CreateStructuredIndex(const std::string& collection_id, const std::vector<std::string>& field_names,
+                          const std::unordered_map<std::string, meta::hybrid::DataType>& attr_types,
+                          const std::unordered_map<std::string, std::vector<uint8_t>>& attr_data,
+                          const std::unordered_map<std::string, int64_t>& attr_size,
+                          std::unordered_map<std::string, knowhere::IndexPtr>& attr_indexes) = 0;
 };  // DB
 
 using DBPtr = std::shared_ptr<DB>;

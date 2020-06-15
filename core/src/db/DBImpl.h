@@ -140,8 +140,11 @@ class DBImpl : public DB, public server::CacheConfigHandler, public server::Engi
                 const CollectionIndex& index) override;
 
     Status
-    CreateStructuredIndex(const std::shared_ptr<server::Context>& context, const std::string& collection_id,
-                          std::vector<std::string>& field_names) override;
+    CreateStructuredIndex(const std::string& collection_id, const std::vector<std::string>& field_names,
+                          const std::unordered_map<std::string, meta::hybrid::DataType>& attr_types,
+                          const std::unordered_map<std::string, std::vector<uint8_t>>& attr_data,
+                          const std::unordered_map<std::string, int64_t>& attr_size,
+                          std::unordered_map<std::string, knowhere::IndexPtr>& attr_indexes) override;
 
     Status
     DescribeIndex(const std::string& collection_id, CollectionIndex& index) override;
@@ -216,6 +219,9 @@ class DBImpl : public DB, public server::CacheConfigHandler, public server::Engi
                           std::unordered_map<std::string, engine::meta::hybrid::DataType>& attr_type,
                           std::vector<engine::VectorsData>& vectors, std::vector<engine::AttrsData>& attrs,
                           meta::FilesHolder& files_holder);
+
+    Status
+    FlushAttrsIndex(const std::string& collection_id);
 
     void
     InternalFlush(const std::string& collection_id = "");
@@ -302,9 +308,10 @@ class DBImpl : public DB, public server::CacheConfigHandler, public server::Engi
     ResumeIfLast();
 
     Status
-    SerializeStructuredIndex(const milvus::engine::meta::SegmentsSchema& to_index_files,
-                             const std::unordered_map<std::string, engine::meta::hybrid::DataType>& attr_type,
-                             const std::vector<std::string>& field_names);
+    SerializeStructuredIndex(const meta::SegmentSchema& segment_schema,
+                             const std::unordered_map<std::string, knowhere::IndexPtr>& attr_indexes,
+                             const std::unordered_map<std::string, int64_t>& attr_sizes,
+                             const std::unordered_map<std::string, meta::hybrid::DataType>& attr_types);
 
  private:
     DBOptions options_;

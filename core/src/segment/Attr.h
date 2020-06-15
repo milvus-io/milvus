@@ -42,6 +42,9 @@ class Attr {
     const std::vector<uint8_t>&
     GetData() const;
 
+    std::vector<uint8_t>&
+    GetMutableData();
+
     const std::string&
     GetName() const;
 

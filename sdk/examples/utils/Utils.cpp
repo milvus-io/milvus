@@ -162,7 +162,7 @@ Utils::BuildEntities(int64_t from, int64_t to, std::vector<milvus::Entity>& enti
         milvus::Entity entity;
         entity.float_data.resize(dimension);
         for (int64_t i = 0; i < dimension; i++) {
-            entity.float_data[i] = (u(e));
+            entity.float_data[i] = (float)((k + 100) % (i + 1));
         }
 
         entity_array.emplace_back(entity);
