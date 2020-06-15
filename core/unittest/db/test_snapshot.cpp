@@ -501,7 +501,7 @@ TEST_F(SnapshotTest, OperationTest) {
         status = build_op->CommitNewSegmentFile(sf_context, seg_file);
         ASSERT_TRUE(status.ok());
         ASSERT_TRUE(seg_file);
-        auto prev_segment_commit = ss->GetSegmentCommit(seg_file->GetSegmentId());
+        auto prev_segment_commit = ss->GetSegmentCommitBySegmentId(seg_file->GetSegmentId());
         auto prev_segment_commit_mappings = prev_segment_commit->GetMappings();
         ASSERT_NE(prev_segment_commit->ToString(), "");
 
@@ -509,7 +509,7 @@ TEST_F(SnapshotTest, OperationTest) {
         status = build_op->GetSnapshot(ss);
         ASSERT_TRUE(ss->GetID() > ss_id);
 
-        auto segment_commit = ss->GetSegmentCommit(seg_file->GetSegmentId());
+        auto segment_commit = ss->GetSegmentCommitBySegmentId(seg_file->GetSegmentId());
         auto segment_commit_mappings = segment_commit->GetMappings();
         MappingT expected_mappings = prev_segment_commit_mappings;
         expected_mappings.insert(seg_file->GetID());
@@ -550,7 +550,7 @@ TEST_F(SnapshotTest, OperationTest) {
         ASSERT_TRUE(ss->GetID() > ss_id);
         ASSERT_TRUE(status.ok());
 
-        auto segment_commit = ss->GetSegmentCommit(seg_file->GetSegmentId());
+        auto segment_commit = ss->GetSegmentCommitBySegmentId(seg_file->GetSegmentId());
         auto segment_commit_mappings = segment_commit->GetMappings();
         MappingT expected_segment_mappings;
         expected_segment_mappings.insert(seg_file->GetID());
@@ -586,7 +586,7 @@ TEST_F(SnapshotTest, OperationTest) {
         ASSERT_TRUE(ss->GetID() > ss_id);
         ASSERT_TRUE(status.ok());
 
-        auto segment_commit = ss->GetSegmentCommit(new_seg->GetID());
+        auto segment_commit = ss->GetSegmentCommitBySegmentId(new_seg->GetID());
         auto new_partition_commit = ss->GetPartitionCommitByPartitionId(partition_id);
         auto new_mappings = new_partition_commit->GetMappings();
         auto prev_mappings = prev_partition_commit->GetMappings();
@@ -788,12 +788,12 @@ TEST_F(SnapshotTest, CompoundTest1) {
             lock.unlock();
             std::unique_lock<std::mutex> blk(built_mtx);
             std::cout << status.ToString() << std::endl;
-            for (auto id : built_segs) {
-                std::cout << "builted " << id << std::endl;
-            }
-            for (auto id : seg_ids) {
-                std::cout << "to_merge " << id << std::endl;
-            }
+            /* for (auto id : built_segs) { */
+            /*     std::cout << "builted " << id << std::endl; */
+            /* } */
+            /* for (auto id : seg_ids) { */
+            /*     std::cout << "to_merge " << id << std::endl; */
+            /* } */
             bool stale_found = false;
             for (auto& seg_id : seg_ids) {
                 auto it = built_segs.find(seg_id);

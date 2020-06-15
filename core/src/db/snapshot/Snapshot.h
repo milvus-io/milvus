@@ -114,7 +114,7 @@ class Snapshot : public ReferenceProxy {
 
     // PXU TODO: add const. Need to change Scopedxxxx::Get
     SegmentCommitPtr
-    GetSegmentCommit(ID_TYPE segment_id) {
+    GetSegmentCommitBySegmentId(ID_TYPE segment_id) {
         auto it = seg_segc_map_.find(segment_id);
         if (it == seg_segc_map_.end())
             return nullptr;

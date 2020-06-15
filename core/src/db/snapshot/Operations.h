@@ -41,8 +41,13 @@ class Operations : public std::enable_shared_from_this<Operations> {
                const OperationsType& type = OperationsType::Invalid);
 
     const ScopedSnapshotT&
-    GetPrevSnapshot() const {
+    GetStartedSS() const {
         return prev_ss_;
+    }
+
+    const ScopedSnapshotT&
+    GetAdjustedSS() const {
+        return context_.prev_ss;
     }
 
     virtual const LSN_TYPE&
