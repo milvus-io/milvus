@@ -18,6 +18,7 @@
 #include "codecs/default/DefaultAttrsFormat.h"
 
 #include <fcntl.h>
+#include <fiu-local.h>
 #include <unistd.h>
 #include <algorithm>
 #include <memory>
@@ -34,7 +35,9 @@ namespace codec {
 void
 DefaultAttrsFormat::read_attrs_internal(const storage::FSHandlerPtr& fs_ptr, const std::string& file_path, off_t offset,
                                         size_t num, std::vector<uint8_t>& raw_attrs, size_t& nbytes) {
-    if (!fs_ptr->reader_ptr_->open(file_path.c_str())) {
+    auto open_res = fs_ptr->reader_ptr_->open(file_path.c_str());
+    fiu_do_on("read_attrs_internal_open_file_fail", open_res = false);
+    if (!open_res) {
         std::string err_msg = "Failed to open file: " + file_path + ", error: " + std::strerror(errno);
         LOG_ENGINE_ERROR_ << err_msg;
         throw Exception(SERVER_CANNOT_CREATE_FILE, err_msg);
@@ -56,7 +59,9 @@ DefaultAttrsFormat::read_attrs_internal(const storage::FSHandlerPtr& fs_ptr, con
 void
 DefaultAttrsFormat::read_uids_internal(const storage::FSHandlerPtr& fs_ptr, const std::string& file_path,
                                        std::vector<int64_t>& uids) {
-    if (!fs_ptr->reader_ptr_->open(file_path.c_str())) {
+    auto open_res = fs_ptr->reader_ptr_->open(file_path.c_str());
+    fiu_do_on("read_uids_internal_open_file_fail", open_res = false);
+    if (!open_res) {
         std::string err_msg = "Failed to open file: " + file_path + ", error: " + std::strerror(errno);
         LOG_ENGINE_ERROR_ << err_msg;
         throw Exception(SERVER_CANNOT_CREATE_FILE, err_msg);
@@ -76,7 +81,9 @@ DefaultAttrsFormat::read(const milvus::storage::FSHandlerPtr& fs_ptr, milvus::se
     const std::lock_guard<std::mutex> lock(mutex_);
 
     std::string dir_path = fs_ptr->operation_ptr_->GetDirectory();
-    if (!boost::filesystem::is_directory(dir_path)) {
+    auto is_directory = boost::filesystem::is_directory(dir_path);
+    fiu_do_on("read_id_directory_false", is_directory = false);
+    if (!is_directory) {
         std::string err_msg = "Directory: " + dir_path + "does not exist";
         LOG_ENGINE_ERROR_ << err_msg;
         throw Exception(SERVER_INVALID_ARGUMENT, err_msg);
@@ -190,7 +197,9 @@ DefaultAttrsFormat::read_uids(const milvus::storage::FSHandlerPtr& fs_ptr, std::
     const std::lock_guard<std::mutex> lock(mutex_);
 
     std::string dir_path = fs_ptr->operation_ptr_->GetDirectory();
-    if (!boost::filesystem::is_directory(dir_path)) {
+    auto is_directory = boost::filesystem::is_directory(dir_path);
+    fiu_do_on("is_directory_false", is_directory = false);
+    if (!is_directory) {
         std::string err_msg = "Directory: " + dir_path + "does not exist";
         LOG_ENGINE_ERROR_ << err_msg;
         throw Exception(SERVER_INVALID_ARGUMENT, err_msg);

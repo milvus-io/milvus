@@ -12,11 +12,12 @@
 #include "server/web_impl/handler/WebRequestHandler.h"
 
 #include <algorithm>
-#include <cmath>
 #include <ctime>
 #include <string>
 #include <unordered_map>
 #include <vector>
+
+#include <fiu-local.h>
 
 #include "config/Config.h"
 #include "metrics/SystemInfo.h"
@@ -865,7 +866,7 @@ WebRequestHandler::GetAdvancedConfig(AdvancedConfigDto::ObjectWrapper& advanced_
     advanced_config->use_blas_threshold = std::stol(reply);
 
 #ifdef MILVUS_GPU_VERSION
-    engine_cmd_string = engine_cmd_prefix + std::string(CONFIG_ENGINE_GPU_SEARCH_THRESHOLD);
+    engine_cmd_string = engine_cmd_prefix + std::string(CONFIG_GPU_RESOURCE_GPU_SEARCH_THRESHOLD);
     CommandLine(engine_cmd_string, reply);
     if (!status.ok()) {
         ASSIGN_RETURN_STATUS_DTO(status)
@@ -923,9 +924,10 @@ WebRequestHandler::SetAdvancedConfig(const AdvancedConfigDto::ObjectWrapper& adv
     }
 
 #ifdef MILVUS_GPU_VERSION
-    engine_cmd_string = engine_cmd_prefix + std::string(CONFIG_ENGINE_GPU_SEARCH_THRESHOLD) + " " +
-                        std::to_string(advanced_config->gpu_search_threshold->getValue());
-    status = CommandLine(engine_cmd_string, reply);
+    auto gpu_cmd_prefix = "set_config " + std::string(CONFIG_GPU_RESOURCE) + ".";
+    auto gpu_cmd_string = gpu_cmd_prefix + std::string(CONFIG_GPU_RESOURCE_GPU_SEARCH_THRESHOLD) + " " +
+                          std::to_string(advanced_config->gpu_search_threshold->getValue());
+    status = CommandLine(gpu_cmd_string, reply);
     if (!status.ok()) {
         ASSIGN_RETURN_STATUS_DTO(status)
     }
@@ -1806,6 +1808,9 @@ WebRequestHandler::SystemOp(const OString& op, const OString& body_str, OString&
     Status status = Status::OK();
     std::string result_str;
     try {
+        fiu_do_on("WebRequestHandler.SystemOp.raise_parse_error",
+                  throw nlohmann::detail::parse_error::create(0, 0, ""));
+        fiu_do_on("WebRequestHandler.SystemOp.raise_type_error", throw nlohmann::detail::type_error::create(0, ""));
         nlohmann::json j = nlohmann::json::parse(body_str->c_str());
         if (op->equals("task")) {
             if (j.contains("load")) {

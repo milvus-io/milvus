@@ -11,6 +11,8 @@
 
 #include "server/delivery/request/ReLoadSegmentsRequest.h"
 
+#include <fiu-local.h>
+
 #include "config/Config.h"
 #include "server/DBWrapper.h"
 #include "utils/TimeRecorder.h"
@@ -35,16 +37,29 @@ Status
 ReLoadSegmentsRequest::OnExecute() {
     auto& config = Config::GetInstance();
 
+#if 1
+    bool cluster_enable = false;
+    std::string cluster_role;
+    STATUS_CHECK(config.GetClusterConfigEnable(cluster_enable));
+    STATUS_CHECK(config.GetClusterConfigRole(cluster_role));
+
+    if ((not cluster_enable) || cluster_role == "rw") {
+        // TODO: No need to reload segment files
+        return Status(SERVER_SUCCESS, "");
+    }
+#else
     std::string deploy_mode;
     auto status = config.GetServerConfigDeployMode(deploy_mode);
     if (!status.ok()) {
         return status;
     }
 
+    fiu_do_on("ReLoadSegmentsRequest.OnExecute.readonly", deploy_mode = "cluster_readonly");
     if (deploy_mode == "single" || deploy_mode == "cluster_writable") {
         // TODO: No need to reload segment files
         return Status(SERVER_SUCCESS, "");
     }
+#endif
 
     try {
         std::string hdr = "ReloadSegmentsRequest(collection=" + collection_name_ + ")";

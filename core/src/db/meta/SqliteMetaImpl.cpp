@@ -49,7 +49,7 @@ namespace {
 
 constexpr uint64_t SQL_BATCH_SIZE = 50;
 
-template<typename T>
+template <typename T>
 void
 DistributeBatch(const T& id_array, std::vector<std::vector<std::string>>& id_groups) {
     std::vector<std::string> temp_group;
@@ -86,8 +86,7 @@ StoragePrototype(const std::string& path) {
     return make_storage(
         path,
         make_table(META_ENVIRONMENT, make_column("global_lsn", &EnvironmentSchema::global_lsn_, default_value(0))),
-        make_table(META_TABLES,
-                   make_column("id", &CollectionSchema::id_, primary_key()),
+        make_table(META_TABLES, make_column("id", &CollectionSchema::id_, primary_key()),
                    make_column("table_id", &CollectionSchema::collection_id_, unique()),
                    make_column("state", &CollectionSchema::state_),
                    make_column("dimension", &CollectionSchema::dimension_),
@@ -210,9 +209,9 @@ SqliteMetaImpl::CreateCollection(CollectionSchema& collection_schema) {
             NextCollectionId(collection_schema.collection_id_);
         } else {
             fiu_do_on("SqliteMetaImpl.CreateCollection.throw_exception", throw std::exception());
-            auto collection = ConnectorPtr->select(columns(&CollectionSchema::state_),
-                                                   where(c(&CollectionSchema::collection_id_)
-                                                         == collection_schema.collection_id_));
+            auto collection =
+                ConnectorPtr->select(columns(&CollectionSchema::state_),
+                                     where(c(&CollectionSchema::collection_id_) == collection_schema.collection_id_));
             if (collection.size() == 1) {
                 if (CollectionSchema::TO_DELETE == std::get<0>(collection[0])) {
                     return Status(DB_ERROR,
@@ -252,19 +251,11 @@ SqliteMetaImpl::DescribeCollection(CollectionSchema& collection_schema) {
         std::lock_guard<std::mutex> meta_lock(meta_mutex_);
         fiu_do_on("SqliteMetaImpl.DescribeCollection.throw_exception", throw std::exception());
         auto groups = ConnectorPtr->select(
-            columns(&CollectionSchema::id_,
-                    &CollectionSchema::state_,
-                    &CollectionSchema::dimension_,
-                    &CollectionSchema::created_on_,
-                    &CollectionSchema::flag_,
-                    &CollectionSchema::index_file_size_,
-                    &CollectionSchema::engine_type_,
-                    &CollectionSchema::index_params_,
-                    &CollectionSchema::metric_type_,
-                    &CollectionSchema::owner_collection_,
-                    &CollectionSchema::partition_tag_,
-                    &CollectionSchema::version_,
-                    &CollectionSchema::flush_lsn_),
+            columns(&CollectionSchema::id_, &CollectionSchema::state_, &CollectionSchema::dimension_,
+                    &CollectionSchema::created_on_, &CollectionSchema::flag_, &CollectionSchema::index_file_size_,
+                    &CollectionSchema::engine_type_, &CollectionSchema::index_params_, &CollectionSchema::metric_type_,
+                    &CollectionSchema::owner_collection_, &CollectionSchema::partition_tag_,
+                    &CollectionSchema::version_, &CollectionSchema::flush_lsn_),
             where(c(&CollectionSchema::collection_id_) == collection_schema.collection_id_ and
                   c(&CollectionSchema::state_) != (int)CollectionSchema::TO_DELETE));
 
@@ -307,14 +298,13 @@ SqliteMetaImpl::HasCollection(const std::string& collection_id, bool& has_or_not
         decltype(ConnectorPtr->select(select_columns)) selected;
         if (is_root) {
             selected = ConnectorPtr->select(select_columns,
-                                            where(c(&CollectionSchema::collection_id_) == collection_id
-                                                  and c(&CollectionSchema::state_) != (int)CollectionSchema::TO_DELETE
-                                                  and c(&CollectionSchema::owner_collection_) == ""));
+                                            where(c(&CollectionSchema::collection_id_) == collection_id and
+                                                  c(&CollectionSchema::state_) != (int)CollectionSchema::TO_DELETE and
+                                                  c(&CollectionSchema::owner_collection_) == ""));
         } else {
             selected = ConnectorPtr->select(select_columns,
-                                            where(c(&CollectionSchema::collection_id_) == collection_id
-                                                  and c(&CollectionSchema::state_)
-                                                      != (int)CollectionSchema::TO_DELETE));
+                                            where(c(&CollectionSchema::collection_id_) == collection_id and
+                                                  c(&CollectionSchema::state_) != (int)CollectionSchema::TO_DELETE));
         }
 
         if (selected.size() == 1) {
@@ -337,25 +327,18 @@ SqliteMetaImpl::AllCollections(std::vector<CollectionSchema>& collection_schema_
 
         // multi-threads call sqlite update may get exception('bad logic', etc), so we add a lock here
         std::lock_guard<std::mutex> meta_lock(meta_mutex_);
-        auto select_columns = columns(&CollectionSchema::id_,
-                                      &CollectionSchema::collection_id_,
-                                      &CollectionSchema::dimension_,
-                                      &CollectionSchema::created_on_,
-                                      &CollectionSchema::flag_,
-                                      &CollectionSchema::index_file_size_,
-                                      &CollectionSchema::engine_type_,
-                                      &CollectionSchema::index_params_,
-                                      &CollectionSchema::metric_type_,
-                                      &CollectionSchema::owner_collection_,
-                                      &CollectionSchema::partition_tag_,
-                                      &CollectionSchema::version_,
-                                      &CollectionSchema::flush_lsn_);
+        auto select_columns =
+            columns(&CollectionSchema::id_, &CollectionSchema::collection_id_, &CollectionSchema::dimension_,
+                    &CollectionSchema::created_on_, &CollectionSchema::flag_, &CollectionSchema::index_file_size_,
+                    &CollectionSchema::engine_type_, &CollectionSchema::index_params_, &CollectionSchema::metric_type_,
+                    &CollectionSchema::owner_collection_, &CollectionSchema::partition_tag_,
+                    &CollectionSchema::version_, &CollectionSchema::flush_lsn_);
         decltype(ConnectorPtr->select(select_columns)) selected;
 
         if (is_root) {
             selected = ConnectorPtr->select(select_columns,
-                                            where(c(&CollectionSchema::state_) != (int)CollectionSchema::TO_DELETE
-                                                  and c(&CollectionSchema::owner_collection_) == ""));
+                                            where(c(&CollectionSchema::state_) != (int)CollectionSchema::TO_DELETE and
+                                                  c(&CollectionSchema::owner_collection_) == ""));
         } else {
             selected = ConnectorPtr->select(select_columns,
                                             where(c(&CollectionSchema::state_) != (int)CollectionSchema::TO_DELETE));
@@ -403,10 +386,9 @@ SqliteMetaImpl::DropCollections(const std::vector<std::string>& collection_id_ar
 
             for (auto group : id_groups) {
                 // soft delete collection
-                ConnectorPtr->update_all(
-                    set(c(&CollectionSchema::state_) = (int)CollectionSchema::TO_DELETE),
-                    where(in(&CollectionSchema::collection_id_, group)
-                          and c(&CollectionSchema::state_) != (int)CollectionSchema::TO_DELETE));
+                ConnectorPtr->update_all(set(c(&CollectionSchema::state_) = (int)CollectionSchema::TO_DELETE),
+                                         where(in(&CollectionSchema::collection_id_, group) and
+                                               c(&CollectionSchema::state_) != (int)CollectionSchema::TO_DELETE));
             }
         }
 
@@ -509,23 +491,18 @@ SqliteMetaImpl::GetCollectionFiles(const std::string& collection_id, const std::
             return status;
         }
 
-        auto select_columns = columns(&SegmentSchema::id_,
-                                      &SegmentSchema::segment_id_,
-                                      &SegmentSchema::file_id_,
-                                      &SegmentSchema::file_type_,
-                                      &SegmentSchema::file_size_,
-                                      &SegmentSchema::row_count_,
-                                      &SegmentSchema::date_,
-                                      &SegmentSchema::engine_type_,
-                                      &SegmentSchema::created_on_);
+        auto select_columns =
+            columns(&SegmentSchema::id_, &SegmentSchema::segment_id_, &SegmentSchema::file_id_,
+                    &SegmentSchema::file_type_, &SegmentSchema::file_size_, &SegmentSchema::row_count_,
+                    &SegmentSchema::date_, &SegmentSchema::engine_type_, &SegmentSchema::created_on_);
         decltype(ConnectorPtr->select(select_columns)) selected;
         {
             // multi-threads call sqlite update may get exception('bad logic', etc), so we add a lock here
             std::lock_guard<std::mutex> meta_lock(meta_mutex_);
-            selected = ConnectorPtr->select(select_columns,
-                                            where(c(&SegmentSchema::collection_id_) == collection_id
-                                                  and in(&SegmentSchema::id_, ids) and
-                                                  c(&SegmentSchema::file_type_) != (int)SegmentSchema::TO_DELETE));
+            selected = ConnectorPtr->select(
+                select_columns,
+                where(c(&SegmentSchema::collection_id_) == collection_id and in(&SegmentSchema::id_, ids) and
+                      c(&SegmentSchema::file_type_) != (int)SegmentSchema::TO_DELETE));
         }
 
         Status result;
@@ -559,8 +536,7 @@ SqliteMetaImpl::GetCollectionFiles(const std::string& collection_id, const std::
 }
 
 Status
-SqliteMetaImpl::GetCollectionFilesBySegmentId(const std::string& segment_id,
-                                              FilesHolder& files_holder) {
+SqliteMetaImpl::GetCollectionFilesBySegmentId(const std::string& segment_id, FilesHolder& files_holder) {
     try {
         auto select_columns = columns(&SegmentSchema::id_, &SegmentSchema::collection_id_, &SegmentSchema::segment_id_,
                                       &SegmentSchema::file_id_, &SegmentSchema::file_type_, &SegmentSchema::file_size_,
@@ -661,9 +637,8 @@ SqliteMetaImpl::GetCollectionFlushLSN(const std::string& collection_id, uint64_t
         // multi-threads call sqlite update may get exception('bad logic', etc), so we add a lock here
         std::lock_guard<std::mutex> meta_lock(meta_mutex_);
 
-        auto selected =
-            ConnectorPtr->select(columns(&CollectionSchema::flush_lsn_),
-                                 where(c(&CollectionSchema::collection_id_) == collection_id));
+        auto selected = ConnectorPtr->select(columns(&CollectionSchema::flush_lsn_),
+                                             where(c(&CollectionSchema::collection_id_) == collection_id));
 
         if (selected.size() > 0) {
             flush_lsn = std::get<0>(selected[0]);
@@ -688,9 +663,9 @@ SqliteMetaImpl::UpdateCollectionFile(SegmentSchema& file_schema) {
         // multi-threads call sqlite update may get exception('bad logic', etc), so we add a lock here
         std::lock_guard<std::mutex> meta_lock(meta_mutex_);
 
-        auto collections = ConnectorPtr->select(columns(&CollectionSchema::state_),
-                                                where(c(&CollectionSchema::collection_id_)
-                                                      == file_schema.collection_id_));
+        auto collections =
+            ConnectorPtr->select(columns(&CollectionSchema::state_),
+                                 where(c(&CollectionSchema::collection_id_) == file_schema.collection_id_));
 
         // if the collection has been deleted, just mark the collection file as TO_DELETE
         // clean thread will delete the file later
@@ -702,9 +677,8 @@ SqliteMetaImpl::UpdateCollectionFile(SegmentSchema& file_schema) {
 
         LOG_ENGINE_DEBUG_ << "Update single collection file, file id = " << file_schema.file_id_;
     } catch (std::exception& e) {
-        std::string msg =
-            "Exception update collection file: collection_id = " + file_schema.collection_id_ + " file_id = "
-            + file_schema.file_id_;
+        std::string msg = "Exception update collection file: collection_id = " + file_schema.collection_id_ +
+                          " file_id = " + file_schema.file_id_;
         return HandleException(msg, e.what());
     }
     return Status::OK();
@@ -724,11 +698,10 @@ SqliteMetaImpl::UpdateCollectionFiles(SegmentsSchema& files) {
             if (has_collections.find(file.collection_id_) != has_collections.end()) {
                 continue;
             }
-            auto collections = ConnectorPtr->select(columns(&CollectionSchema::id_),
-                                                    where(
-                                                        c(&CollectionSchema::collection_id_) == file.collection_id_ and
-                                                        c(&CollectionSchema::state_)
-                                                        != (int)CollectionSchema::TO_DELETE));
+            auto collections =
+                ConnectorPtr->select(columns(&CollectionSchema::id_),
+                                     where(c(&CollectionSchema::collection_id_) == file.collection_id_ and
+                                           c(&CollectionSchema::state_) != (int)CollectionSchema::TO_DELETE));
             if (collections.size() >= 1) {
                 has_collections[file.collection_id_] = true;
             } else {
@@ -791,18 +764,12 @@ SqliteMetaImpl::UpdateCollectionIndex(const std::string& collection_id, const Co
 
         auto collections = ConnectorPtr->select(
 
-            columns(&CollectionSchema::id_,
-                    &CollectionSchema::state_,
-                    &CollectionSchema::dimension_,
-                    &CollectionSchema::created_on_,
-                    &CollectionSchema::flag_,
-                    &CollectionSchema::index_file_size_,
-                    &CollectionSchema::owner_collection_,
-                    &CollectionSchema::partition_tag_,
-                    &CollectionSchema::version_,
-                    &CollectionSchema::flush_lsn_),
-            where(c(&CollectionSchema::collection_id_) == collection_id
-                  and c(&CollectionSchema::state_) != (int)CollectionSchema::TO_DELETE));
+            columns(&CollectionSchema::id_, &CollectionSchema::state_, &CollectionSchema::dimension_,
+                    &CollectionSchema::created_on_, &CollectionSchema::flag_, &CollectionSchema::index_file_size_,
+                    &CollectionSchema::owner_collection_, &CollectionSchema::partition_tag_,
+                    &CollectionSchema::version_, &CollectionSchema::flush_lsn_),
+            where(c(&CollectionSchema::collection_id_) == collection_id and
+                  c(&CollectionSchema::state_) != (int)CollectionSchema::TO_DELETE));
 
         if (collections.size() > 0) {
             meta::CollectionSchema collection_schema;
@@ -871,8 +838,8 @@ SqliteMetaImpl::DescribeCollectionIndex(const std::string& collection_id, Collec
 
         auto groups = ConnectorPtr->select(
             columns(&CollectionSchema::engine_type_, &CollectionSchema::index_params_, &CollectionSchema::metric_type_),
-            where(c(&CollectionSchema::collection_id_) == collection_id
-                  and c(&CollectionSchema::state_) != (int)CollectionSchema::TO_DELETE));
+            where(c(&CollectionSchema::collection_id_) == collection_id and
+                  c(&CollectionSchema::state_) != (int)CollectionSchema::TO_DELETE));
 
         if (groups.size() == 1) {
             index.engine_type_ = std::get<0>(groups[0]);
@@ -933,10 +900,8 @@ SqliteMetaImpl::DropCollectionIndex(const std::string& collection_id) {
 }
 
 Status
-SqliteMetaImpl::CreatePartition(const std::string& collection_id,
-                                const std::string& partition_name,
-                                const std::string& tag,
-                                uint64_t lsn) {
+SqliteMetaImpl::CreatePartition(const std::string& collection_id, const std::string& partition_name,
+                                const std::string& tag, uint64_t lsn) {
     USING_SQLITE_WARNING
     server::MetricCollector metric;
 
@@ -996,11 +961,10 @@ SqliteMetaImpl::HasPartition(const std::string& collection_id, const std::string
         std::string valid_tag = tag;
         server::StringHelpFunctions::TrimStringBlank(valid_tag);
 
-        auto name = ConnectorPtr->select(
-            columns(&CollectionSchema::collection_id_),
-            where(c(&CollectionSchema::owner_collection_) == collection_id
-                  and c(&CollectionSchema::partition_tag_) == valid_tag and
-                  c(&CollectionSchema::state_) != (int)CollectionSchema::TO_DELETE));
+        auto name = ConnectorPtr->select(columns(&CollectionSchema::collection_id_),
+                                         where(c(&CollectionSchema::owner_collection_) == collection_id and
+                                               c(&CollectionSchema::partition_tag_) == valid_tag and
+                                               c(&CollectionSchema::state_) != (int)CollectionSchema::TO_DELETE));
         if (name.size() > 0) {
             has_or_not = true;
         } else {
@@ -1026,18 +990,10 @@ SqliteMetaImpl::ShowPartitions(const std::string& collection_id,
         fiu_do_on("SqliteMetaImpl.ShowPartitions.throw_exception", throw std::exception());
 
         auto partitions = ConnectorPtr->select(
-            columns(&CollectionSchema::id_,
-                    &CollectionSchema::state_,
-                    &CollectionSchema::dimension_,
-                    &CollectionSchema::created_on_,
-                    &CollectionSchema::flag_,
-                    &CollectionSchema::index_file_size_,
-                    &CollectionSchema::engine_type_,
-                    &CollectionSchema::index_params_,
-                    &CollectionSchema::metric_type_,
-                    &CollectionSchema::partition_tag_,
-                    &CollectionSchema::version_,
-                    &CollectionSchema::collection_id_,
+            columns(&CollectionSchema::id_, &CollectionSchema::state_, &CollectionSchema::dimension_,
+                    &CollectionSchema::created_on_, &CollectionSchema::flag_, &CollectionSchema::index_file_size_,
+                    &CollectionSchema::engine_type_, &CollectionSchema::index_params_, &CollectionSchema::metric_type_,
+                    &CollectionSchema::partition_tag_, &CollectionSchema::version_, &CollectionSchema::collection_id_,
                     &CollectionSchema::flush_lsn_),
             where(c(&CollectionSchema::owner_collection_) == collection_id and
                   c(&CollectionSchema::state_) != (int)CollectionSchema::TO_DELETE));
@@ -1068,8 +1024,7 @@ SqliteMetaImpl::ShowPartitions(const std::string& collection_id,
 }
 
 Status
-SqliteMetaImpl::GetPartitionName(const std::string& collection_id,
-                                 const std::string& tag,
+SqliteMetaImpl::GetPartitionName(const std::string& collection_id, const std::string& tag,
                                  std::string& partition_name) {
     try {
         server::MetricCollector metric;
@@ -1080,11 +1035,10 @@ SqliteMetaImpl::GetPartitionName(const std::string& collection_id,
         std::string valid_tag = tag;
         server::StringHelpFunctions::TrimStringBlank(valid_tag);
 
-        auto name = ConnectorPtr->select(
-            columns(&CollectionSchema::collection_id_),
-            where(c(&CollectionSchema::owner_collection_) == collection_id
-                  and c(&CollectionSchema::partition_tag_) == valid_tag and
-                  c(&CollectionSchema::state_) != (int)CollectionSchema::TO_DELETE));
+        auto name = ConnectorPtr->select(columns(&CollectionSchema::collection_id_),
+                                         where(c(&CollectionSchema::owner_collection_) == collection_id and
+                                               c(&CollectionSchema::partition_tag_) == valid_tag and
+                                               c(&CollectionSchema::state_) != (int)CollectionSchema::TO_DELETE));
         if (name.size() > 0) {
             partition_name = std::get<0>(name[0]);
         } else {
@@ -1171,8 +1125,7 @@ SqliteMetaImpl::FilesToSearch(const std::string& collection_id, FilesHolder& fil
 }
 
 Status
-SqliteMetaImpl::FilesToSearchEx(const std::string& root_collection,
-                                const std::set<std::string>& partition_id_array,
+SqliteMetaImpl::FilesToSearchEx(const std::string& root_collection, const std::set<std::string>& partition_id_array,
                                 FilesHolder& files_holder) {
     try {
         server::MetricCollector metric;
@@ -1280,11 +1233,10 @@ SqliteMetaImpl::FilesToMerge(const std::string& collection_id, FilesHolder& file
         }
 
         // get files to merge
-        auto select_columns =
-            columns(&SegmentSchema::id_, &SegmentSchema::collection_id_, &SegmentSchema::segment_id_,
-                    &SegmentSchema::file_id_, &SegmentSchema::file_type_, &SegmentSchema::file_size_,
-                    &SegmentSchema::row_count_, &SegmentSchema::date_, &SegmentSchema::engine_type_,
-                    &SegmentSchema::created_on_, &SegmentSchema::updated_time_);
+        auto select_columns = columns(&SegmentSchema::id_, &SegmentSchema::collection_id_, &SegmentSchema::segment_id_,
+                                      &SegmentSchema::file_id_, &SegmentSchema::file_type_, &SegmentSchema::file_size_,
+                                      &SegmentSchema::row_count_, &SegmentSchema::date_, &SegmentSchema::engine_type_,
+                                      &SegmentSchema::created_on_, &SegmentSchema::updated_time_);
         decltype(ConnectorPtr->select(select_columns)) selected;
         {
             // multi-threads call sqlite update may get exception('bad logic', etc), so we add a lock here
@@ -1348,11 +1300,10 @@ SqliteMetaImpl::FilesToIndex(FilesHolder& files_holder) {
 
         server::MetricCollector metric;
 
-        auto select_columns =
-            columns(&SegmentSchema::id_, &SegmentSchema::collection_id_, &SegmentSchema::segment_id_,
-                    &SegmentSchema::file_id_, &SegmentSchema::file_type_, &SegmentSchema::file_size_,
-                    &SegmentSchema::row_count_, &SegmentSchema::date_, &SegmentSchema::engine_type_,
-                    &SegmentSchema::created_on_, &SegmentSchema::updated_time_);
+        auto select_columns = columns(&SegmentSchema::id_, &SegmentSchema::collection_id_, &SegmentSchema::segment_id_,
+                                      &SegmentSchema::file_id_, &SegmentSchema::file_type_, &SegmentSchema::file_size_,
+                                      &SegmentSchema::row_count_, &SegmentSchema::date_, &SegmentSchema::engine_type_,
+                                      &SegmentSchema::created_on_, &SegmentSchema::updated_time_);
         decltype(ConnectorPtr->select(select_columns)) selected;
         {
             // multi-threads call sqlite update may get exception('bad logic', etc), so we add a lock here
@@ -1413,8 +1364,7 @@ SqliteMetaImpl::FilesToIndex(FilesHolder& files_holder) {
 }
 
 Status
-SqliteMetaImpl::FilesByType(const std::string& collection_id,
-                            const std::vector<int>& file_types,
+SqliteMetaImpl::FilesByType(const std::string& collection_id, const std::vector<int>& file_types,
                             FilesHolder& files_holder) {
     if (file_types.empty()) {
         return Status(DB_ERROR, "file types array is empty");
@@ -1433,18 +1383,16 @@ SqliteMetaImpl::FilesByType(const std::string& collection_id,
         }
 
         // get files by type
-        auto select_columns =
-            columns(&SegmentSchema::id_, &SegmentSchema::segment_id_, &SegmentSchema::file_id_,
-                    &SegmentSchema::file_type_, &SegmentSchema::file_size_, &SegmentSchema::row_count_,
-                    &SegmentSchema::date_, &SegmentSchema::engine_type_, &SegmentSchema::created_on_,
-                    &SegmentSchema::updated_time_);
+        auto select_columns = columns(&SegmentSchema::id_, &SegmentSchema::segment_id_, &SegmentSchema::file_id_,
+                                      &SegmentSchema::file_type_, &SegmentSchema::file_size_,
+                                      &SegmentSchema::row_count_, &SegmentSchema::date_, &SegmentSchema::engine_type_,
+                                      &SegmentSchema::created_on_, &SegmentSchema::updated_time_);
         decltype(ConnectorPtr->select(select_columns)) selected;
         {
             // multi-threads call sqlite update may get exception('bad logic', etc), so we add a lock here
             std::lock_guard<std::mutex> meta_lock(meta_mutex_);
-            selected = ConnectorPtr->select(select_columns,
-                                            where(in(&SegmentSchema::file_type_, file_types)
-                                                  and c(&SegmentSchema::collection_id_) == collection_id));
+            selected = ConnectorPtr->select(select_columns, where(in(&SegmentSchema::file_type_, file_types) and
+                                                                  c(&SegmentSchema::collection_id_) == collection_id));
         }
 
         if (selected.size() >= 1) {
@@ -1470,21 +1418,29 @@ SqliteMetaImpl::FilesByType(const std::string& collection_id,
                 file_schema.metric_type_ = collection_schema.metric_type_;
 
                 switch (file_schema.file_type_) {
-                    case (int)SegmentSchema::RAW:++raw_count;
+                    case (int)SegmentSchema::RAW:
+                        ++raw_count;
                         break;
-                    case (int)SegmentSchema::NEW:++new_count;
+                    case (int)SegmentSchema::NEW:
+                        ++new_count;
                         break;
-                    case (int)SegmentSchema::NEW_MERGE:++new_merge_count;
+                    case (int)SegmentSchema::NEW_MERGE:
+                        ++new_merge_count;
                         break;
-                    case (int)SegmentSchema::NEW_INDEX:++new_index_count;
+                    case (int)SegmentSchema::NEW_INDEX:
+                        ++new_index_count;
                         break;
-                    case (int)SegmentSchema::TO_INDEX:++to_index_count;
+                    case (int)SegmentSchema::TO_INDEX:
+                        ++to_index_count;
                         break;
-                    case (int)SegmentSchema::INDEX:++index_count;
+                    case (int)SegmentSchema::INDEX:
+                        ++index_count;
                         break;
-                    case (int)SegmentSchema::BACKUP:++backup_count;
+                    case (int)SegmentSchema::BACKUP:
+                        ++backup_count;
                         break;
-                    default:break;
+                    default:
+                        break;
                 }
 
                 auto status = utils::GetCollectionFilePath(options_, file_schema);
@@ -1498,9 +1454,11 @@ SqliteMetaImpl::FilesByType(const std::string& collection_id,
             std::string msg = "Get collection files by type.";
             for (int file_type : file_types) {
                 switch (file_type) {
-                    case (int)SegmentSchema::RAW:msg = msg + " raw files:" + std::to_string(raw_count);
+                    case (int)SegmentSchema::RAW:
+                        msg = msg + " raw files:" + std::to_string(raw_count);
                         break;
-                    case (int)SegmentSchema::NEW:msg = msg + " new files:" + std::to_string(new_count);
+                    case (int)SegmentSchema::NEW:
+                        msg = msg + " new files:" + std::to_string(new_count);
                         break;
                     case (int)SegmentSchema::NEW_MERGE:
                         msg = msg + " new_merge files:" + std::to_string(new_merge_count);
@@ -1508,13 +1466,17 @@ SqliteMetaImpl::FilesByType(const std::string& collection_id,
                     case (int)SegmentSchema::NEW_INDEX:
                         msg = msg + " new_index files:" + std::to_string(new_index_count);
                         break;
-                    case (int)SegmentSchema::TO_INDEX:msg = msg + " to_index files:" + std::to_string(to_index_count);
+                    case (int)SegmentSchema::TO_INDEX:
+                        msg = msg + " to_index files:" + std::to_string(to_index_count);
                         break;
-                    case (int)SegmentSchema::INDEX:msg = msg + " index files:" + std::to_string(index_count);
+                    case (int)SegmentSchema::INDEX:
+                        msg = msg + " index files:" + std::to_string(index_count);
                         break;
-                    case (int)SegmentSchema::BACKUP:msg = msg + " backup files:" + std::to_string(backup_count);
+                    case (int)SegmentSchema::BACKUP:
+                        msg = msg + " backup files:" + std::to_string(backup_count);
                         break;
-                    default:break;
+                    default:
+                        break;
                 }
             }
             LOG_ENGINE_DEBUG_ << msg;
@@ -1528,8 +1490,7 @@ SqliteMetaImpl::FilesByType(const std::string& collection_id,
 
 Status
 SqliteMetaImpl::FilesByTypeEx(const std::vector<meta::CollectionSchema>& collections,
-                              const std::vector<int>& file_types,
-                              FilesHolder& files_holder) {
+                              const std::vector<int>& file_types, FilesHolder& files_holder) {
     if (file_types.empty()) {
         return Status(DB_ERROR, "file types array is empty");
     }
@@ -1537,7 +1498,7 @@ SqliteMetaImpl::FilesByTypeEx(const std::vector<meta::CollectionSchema>& collect
     Status ret = Status::OK();
 
     try {
-        fiu_do_on("SqliteMetaImpl.FilesByType.throw_exception", throw std::exception());
+        fiu_do_on("SqliteMetaImpl.FilesByTypeEx.throw_exception", throw std::exception());
 
         // distribute id array to batches
         const uint64_t batch_size = 50;
@@ -1563,17 +1524,10 @@ SqliteMetaImpl::FilesByTypeEx(const std::vector<meta::CollectionSchema>& collect
         int to_index_count = 0, index_count = 0, backup_count = 0;
         for (auto group : id_groups) {
             auto select_columns =
-                columns(&SegmentSchema::id_,
-                        &SegmentSchema::collection_id_,
-                        &SegmentSchema::segment_id_,
-                        &SegmentSchema::file_id_,
-                        &SegmentSchema::file_type_,
-                        &SegmentSchema::file_size_,
-                        &SegmentSchema::row_count_,
-                        &SegmentSchema::date_,
-                        &SegmentSchema::engine_type_,
-                        &SegmentSchema::created_on_,
-                        &SegmentSchema::updated_time_);
+                columns(&SegmentSchema::id_, &SegmentSchema::collection_id_, &SegmentSchema::segment_id_,
+                        &SegmentSchema::file_id_, &SegmentSchema::file_type_, &SegmentSchema::file_size_,
+                        &SegmentSchema::row_count_, &SegmentSchema::date_, &SegmentSchema::engine_type_,
+                        &SegmentSchema::created_on_, &SegmentSchema::updated_time_);
             decltype(ConnectorPtr->select(select_columns)) selected;
 
             auto match_collectionid = in(&SegmentSchema::collection_id_, group);
@@ -1609,21 +1563,29 @@ SqliteMetaImpl::FilesByTypeEx(const std::vector<meta::CollectionSchema>& collect
                 file_schema.metric_type_ = collection_schema.metric_type_;
 
                 switch (file_schema.file_type_) {
-                    case (int)SegmentSchema::RAW:++raw_count;
+                    case (int)SegmentSchema::RAW:
+                        ++raw_count;
                         break;
-                    case (int)SegmentSchema::NEW:++new_count;
+                    case (int)SegmentSchema::NEW:
+                        ++new_count;
                         break;
-                    case (int)SegmentSchema::NEW_MERGE:++new_merge_count;
+                    case (int)SegmentSchema::NEW_MERGE:
+                        ++new_merge_count;
                         break;
-                    case (int)SegmentSchema::NEW_INDEX:++new_index_count;
+                    case (int)SegmentSchema::NEW_INDEX:
+                        ++new_index_count;
                         break;
-                    case (int)SegmentSchema::TO_INDEX:++to_index_count;
+                    case (int)SegmentSchema::TO_INDEX:
+                        ++to_index_count;
                         break;
-                    case (int)SegmentSchema::INDEX:++index_count;
+                    case (int)SegmentSchema::INDEX:
+                        ++index_count;
                         break;
-                    case (int)SegmentSchema::BACKUP:++backup_count;
+                    case (int)SegmentSchema::BACKUP:
+                        ++backup_count;
                         break;
-                    default:break;
+                    default:
+                        break;
                 }
 
                 auto status = utils::GetCollectionFilePath(options_, file_schema);
@@ -1638,9 +1600,11 @@ SqliteMetaImpl::FilesByTypeEx(const std::vector<meta::CollectionSchema>& collect
         std::string msg = "Get collection files by type.";
         for (int file_type : file_types) {
             switch (file_type) {
-                case (int)SegmentSchema::RAW:msg = msg + " raw files:" + std::to_string(raw_count);
+                case (int)SegmentSchema::RAW:
+                    msg = msg + " raw files:" + std::to_string(raw_count);
                     break;
-                case (int)SegmentSchema::NEW:msg = msg + " new files:" + std::to_string(new_count);
+                case (int)SegmentSchema::NEW:
+                    msg = msg + " new files:" + std::to_string(new_count);
                     break;
                 case (int)SegmentSchema::NEW_MERGE:
                     msg = msg + " new_merge files:" + std::to_string(new_merge_count);
@@ -1651,11 +1615,14 @@ SqliteMetaImpl::FilesByTypeEx(const std::vector<meta::CollectionSchema>& collect
                 case (int)SegmentSchema::TO_INDEX:
                     msg = msg + " to_index files:" + std::to_string(to_index_count);
                     break;
-                case (int)SegmentSchema::INDEX:msg = msg + " index files:" + std::to_string(index_count);
+                case (int)SegmentSchema::INDEX:
+                    msg = msg + " index files:" + std::to_string(index_count);
                     break;
-                case (int)SegmentSchema::BACKUP:msg = msg + " backup files:" + std::to_string(backup_count);
+                case (int)SegmentSchema::BACKUP:
+                    msg = msg + " backup files:" + std::to_string(backup_count);
                     break;
-                default:break;
+                default:
+                    break;
             }
         }
         LOG_ENGINE_DEBUG_ << msg;
@@ -1676,17 +1643,10 @@ SqliteMetaImpl::FilesByID(const std::vector<size_t>& ids, FilesHolder& files_hol
         server::MetricCollector metric;
         fiu_do_on("SqliteMetaImpl.FilesByID.throw_exception", throw std::exception());
 
-        auto select_columns = columns(&SegmentSchema::id_,
-                                      &SegmentSchema::collection_id_,
-                                      &SegmentSchema::segment_id_,
-                                      &SegmentSchema::file_id_,
-                                      &SegmentSchema::file_type_,
-                                      &SegmentSchema::file_size_,
-                                      &SegmentSchema::row_count_,
-                                      &SegmentSchema::date_,
-                                      &SegmentSchema::engine_type_,
-                                      &SegmentSchema::created_on_,
-                                      &SegmentSchema::updated_time_);
+        auto select_columns = columns(&SegmentSchema::id_, &SegmentSchema::collection_id_, &SegmentSchema::segment_id_,
+                                      &SegmentSchema::file_id_, &SegmentSchema::file_type_, &SegmentSchema::file_size_,
+                                      &SegmentSchema::row_count_, &SegmentSchema::date_, &SegmentSchema::engine_type_,
+                                      &SegmentSchema::created_on_, &SegmentSchema::updated_time_);
 
         // perform query
         decltype(ConnectorPtr->select(select_columns)) selected;
@@ -1917,8 +1877,8 @@ SqliteMetaImpl::CleanUpFilesWithTTL(uint64_t seconds /*, CleanUpFilter* filter*/
                     // delete file from disk storage
                     utils::DeleteCollectionFilePath(options_, collection_file);
 
-                    LOG_ENGINE_DEBUG_ << "Remove file id:" << collection_file.file_id_ << " location:"
-                                      << collection_file.location_;
+                    LOG_ENGINE_DEBUG_ << "Remove file id:" << collection_file.file_id_
+                                      << " location:" << collection_file.location_;
                     collection_ids.insert(collection_file.collection_id_);
                     segment_ids.insert(std::make_pair(collection_file.segment_id_, collection_file));
 
@@ -1948,9 +1908,9 @@ SqliteMetaImpl::CleanUpFilesWithTTL(uint64_t seconds /*, CleanUpFilter* filter*/
         // multi-threads call sqlite update may get exception('bad logic', etc), so we add a lock here
         std::lock_guard<std::mutex> meta_lock(meta_mutex_);
 
-        auto collections = ConnectorPtr->select(columns(&CollectionSchema::id_, &CollectionSchema::collection_id_),
-                                                where(
-                                                    c(&CollectionSchema::state_) == (int)CollectionSchema::TO_DELETE));
+        auto collections =
+            ConnectorPtr->select(columns(&CollectionSchema::id_, &CollectionSchema::collection_id_),
+                                 where(c(&CollectionSchema::state_) == (int)CollectionSchema::TO_DELETE));
 
         auto commited = ConnectorPtr->transaction([&]() mutable {
             for (auto& collection : collections) {
@@ -2039,9 +1999,8 @@ SqliteMetaImpl::Count(const std::string& collection_id, uint64_t& result) {
         {
             // multi-threads call sqlite update may get exception('bad logic', etc), so we add a lock here
             std::lock_guard<std::mutex> meta_lock(meta_mutex_);
-            selected = ConnectorPtr->select(select_columns,
-                                            where(in(&SegmentSchema::file_type_, file_types)
-                                                  and c(&SegmentSchema::collection_id_) == collection_id));
+            selected = ConnectorPtr->select(select_columns, where(in(&SegmentSchema::file_type_, file_types) and
+                                                                  c(&SegmentSchema::collection_id_) == collection_id));
         }
 
         CollectionSchema collection_schema;
@@ -2251,19 +2210,11 @@ SqliteMetaImpl::DescribeHybridCollection(milvus::engine::meta::CollectionSchema&
         server::MetricCollector metric;
         fiu_do_on("SqliteMetaImpl.DescriCollection.throw_exception", throw std::exception());
         auto groups = ConnectorPtr->select(
-            columns(&CollectionSchema::id_,
-                    &CollectionSchema::state_,
-                    &CollectionSchema::dimension_,
-                    &CollectionSchema::created_on_,
-                    &CollectionSchema::flag_,
-                    &CollectionSchema::index_file_size_,
-                    &CollectionSchema::engine_type_,
-                    &CollectionSchema::index_params_,
-                    &CollectionSchema::metric_type_,
-                    &CollectionSchema::owner_collection_,
-                    &CollectionSchema::partition_tag_,
-                    &CollectionSchema::version_,
-                    &CollectionSchema::flush_lsn_),
+            columns(&CollectionSchema::id_, &CollectionSchema::state_, &CollectionSchema::dimension_,
+                    &CollectionSchema::created_on_, &CollectionSchema::flag_, &CollectionSchema::index_file_size_,
+                    &CollectionSchema::engine_type_, &CollectionSchema::index_params_, &CollectionSchema::metric_type_,
+                    &CollectionSchema::owner_collection_, &CollectionSchema::partition_tag_,
+                    &CollectionSchema::version_, &CollectionSchema::flush_lsn_),
             where(c(&CollectionSchema::collection_id_) == collection_schema.collection_id_ and
                   c(&CollectionSchema::state_) != (int)CollectionSchema::TO_DELETE));
 
@@ -2304,57 +2255,6 @@ SqliteMetaImpl::DescribeHybridCollection(milvus::engine::meta::CollectionSchema&
 
     } catch (std::exception& e) {
         return HandleException("Encounter exception when describe collection", e.what());
-    }
-
-    return Status::OK();
-}
-
-Status
-SqliteMetaImpl::CreateHybridCollectionFile(SegmentSchema& file_schema) {
-    USING_SQLITE_WARNING
-    if (file_schema.date_ == EmptyDate) {
-        file_schema.date_ = utils::GetDate();
-    }
-    CollectionSchema collection_schema;
-    hybrid::FieldsSchema fields_schema;
-    collection_schema.collection_id_ = file_schema.collection_id_;
-    auto status = DescribeHybridCollection(collection_schema, fields_schema);
-    if (!status.ok()) {
-        return status;
-    }
-
-    try {
-        fiu_do_on("SqliteMetaImpl.CreateCollectionFile.throw_exception", throw std::exception());
-        server::MetricCollector metric;
-
-        NextFileId(file_schema.file_id_);
-        if (file_schema.segment_id_.empty()) {
-            file_schema.segment_id_ = file_schema.file_id_;
-        }
-        file_schema.dimension_ = collection_schema.dimension_;
-        file_schema.file_size_ = 0;
-        file_schema.row_count_ = 0;
-        file_schema.created_on_ = utils::GetMicroSecTimeStamp();
-        file_schema.updated_time_ = file_schema.created_on_;
-        file_schema.index_file_size_ = collection_schema.index_file_size_;
-        file_schema.index_params_ = collection_schema.index_params_;
-        file_schema.engine_type_ = collection_schema.engine_type_;
-        file_schema.metric_type_ = collection_schema.metric_type_;
-
-        // multi-threads call sqlite update may get exception('bad logic', etc), so we add a lock here
-        std::lock_guard<std::mutex> meta_lock(meta_mutex_);
-
-        auto id = ConnectorPtr->insert(file_schema);
-        file_schema.id_ = id;
-
-        for (auto field_schema : fields_schema.fields_schema_) {
-            ConnectorPtr->insert(field_schema);
-        }
-
-        LOG_ENGINE_DEBUG_ << "Successfully create collection file, file id = " << file_schema.file_id_;
-        return utils::CreateCollectionFilePath(options_, file_schema);
-    } catch (std::exception& e) {
-        return HandleException("Encounter exception when create collection file", e.what());
     }
 
     return Status::OK();

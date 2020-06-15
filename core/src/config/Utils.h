@@ -11,23 +11,13 @@
 
 #pragma once
 
-#include "server/web_impl/dto/Dto.h"
-#include "server/web_impl/Constants.h"
+#include <string>
 
 namespace milvus {
 namespace server {
-namespace web {
 
-#include OATPP_CODEGEN_BEGIN(DTO)
+int64_t
+parse_bytes(const std::string& str, std::string& err);
 
-class VectorIdsDto : public oatpp::data::mapping::type::Object {
-    DTO_INIT(VectorIdsDto, Object)
-
-    DTO_FIELD(List<String>::ObjectWrapper, ids);
-};
-
-#include OATPP_CODEGEN_END(DTO)
-
-} // namespace web
-} // namespace server
-} // namespace milvus
+}  // namespace server
+}  // namespace milvus
