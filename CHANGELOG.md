@@ -5,14 +5,15 @@ Please mark all change in change log and use the issue from GitHub
 # Milvus 0.11.0 (TBD)
 
 ## Bug
-- \#2551 Fix test_hybrid_db and test_rpc error
+-   \#2487 Remove timeout when creating collection in dev test
+-   \#2551 Fix test_hybrid_db and test_rpc error
 
 ## Feature
-- \#2319 Redo metadata to support MVCC
-- \#2509 Count up query statistics for debug ease
+-   \#2319 Redo metadata to support MVCC
+-   \#2509 Count up query statistics for debug ease
 
 ## Improvement
-- \#2543 Remove secondary_path related code
+-   \#2543 Remove secondary_path related code
 
 ## Task
 
