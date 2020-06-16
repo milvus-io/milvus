@@ -1,7 +1,7 @@
 #!/usr/bin/env groovy
 
 String cron_timezone = "TZ=Asia/Shanghai"
-String cron_string = BRANCH_NAME == "master" ? "H 0 * * * " : ""
+String cron_string = BRANCH_NAME == "master" ? "50 22 * * * " : ""
 
 pipeline {
     agent none
@@ -17,6 +17,7 @@ pipeline {
 
     parameters{
         choice choices: ['Release', 'Debug'], description: 'Build Type', name: 'BUILD_TYPE'
+        choice choices: ['False', 'True'], description: 'Is Manual Trigger Or Not', name: 'IS_MANUAL_TRIGGER_TYPE'
         string defaultValue: 'registry.zilliz.com', description: 'DOCKER REGISTRY URL', name: 'DOKCER_REGISTRY_URL', trim: true
         string defaultValue: 'ba070c98-c8cc-4f7c-b657-897715f359fc', description: 'DOCKER CREDENTIALS ID', name: 'DOCKER_CREDENTIALS_ID', trim: true
         string defaultValue: 'http://192.168.1.201/artifactory/milvus', description: 'JFROG ARTFACTORY URL', name: 'JFROG_ARTFACTORY_URL', trim: true
@@ -172,7 +173,7 @@ pipeline {
                                     container('milvus-test-env') {
                                         script {
                                             boolean isNightlyTest = isTimeTriggeredBuild()
-                                            if (isNightlyTest) {
+                                            if (isNightlyTest || "${params.IS_MANUAL_TRIGGER_TYPE}" == "True") {
                                                 load "${env.WORKSPACE}/ci/jenkins/step/singleDevNightlyTest.groovy"
                                                 load "${env.WORKSPACE}/ci/jenkins/step/shardsDevNightlyTest.groovy"
                                             } else {
@@ -190,7 +191,7 @@ pipeline {
                                     script {
                                         load "${env.WORKSPACE}/ci/jenkins/step/cleanupSingleDev.groovy"
                                         boolean isNightlyTest = isTimeTriggeredBuild()
-                                        if (isNightlyTest) {
+                                        if (isNightlyTest || "${params.IS_MANUAL_TRIGGER_TYPE}" == "True") {
                                             load "${env.WORKSPACE}/ci/jenkins/step/cleanupShardsDev.groovy"
                                         }
                                     }

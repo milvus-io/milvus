@@ -8,7 +8,7 @@ from milvus import Milvus, IndexType, MetricType
 from utils import *
 
 index_file_size = 10
-timeout = 1 
+timeout = 60
 delete_timeout = 60
 
 def pytest_addoption(parser):
