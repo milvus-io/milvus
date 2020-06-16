@@ -16,7 +16,7 @@
 #include "utils/CommonUtil.h"
 #include "utils/Error.h"
 #include "utils/LogUtil.h"
-#include "utils/SignalUtil.h"
+#include "utils/SignalHandler.h"
 #include "utils/StringHelpFunctions.h"
 #include "utils/TimeRecorder.h"
 #include "utils/ThreadPool.h"
@@ -61,8 +61,10 @@ TEST(UtilTest, EXCEPTION_TEST) {
     ASSERT_NE(msg, empty_err_msg);
 }
 
+milvus::server::func_ptr milvus::server::SignalHandler::routine_func_ = nullptr;
+
 TEST(UtilTest, SIGNAL_TEST) {
-    milvus::server::SignalUtil::PrintStacktrace();
+    milvus::server::SignalHandler::PrintStacktrace();
 }
 
 TEST(UtilTest, COMMON_TEST) {
