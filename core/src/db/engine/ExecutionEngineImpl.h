@@ -76,15 +76,13 @@ class ExecutionEngineImpl : public ExecutionEngine {
     GetVectorByID(const int64_t id, uint8_t* vector, bool hybrid) override;
 #endif
 
-#if 0
     Status
     ExecBinaryQuery(query::GeneralQueryPtr general_query, faiss::ConcurrentBitsetPtr& bitset,
                     std::unordered_map<std::string, DataType>& attr_type, std::string& vector_placeholder) override;
 
     Status
-    HybridSearch(query::GeneralQueryPtr general_query, std::unordered_map<std::string, DataType>& attr_type,
-                 query::QueryPtr query_ptr, std::vector<float>& distances, std::vector<int64_t>& search_ids) override;
-#endif
+    HybridSearch(scheduler::SearchJobPtr job, std::unordered_map<std::string, DataType>& attr_type,
+                 std::vector<float>& distances, std::vector<int64_t>& search_ids, bool hybrid) override;
 
     Status
     Search(std::vector<int64_t>& ids, std::vector<float>& distances, scheduler::SearchJobPtr job, bool hybrid) override;

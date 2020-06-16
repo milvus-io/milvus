@@ -137,11 +137,11 @@ class DB {
     virtual Status
     Query(const std::shared_ptr<server::Context>& context, const std::string& collection_id,
           const std::vector<std::string>& partition_tags, uint64_t k, const milvus::json& extra_params,
-          const VectorsData& vectors, ResultIds& result_ids, ResultDistances& result_distances) = 0;
+          VectorsData& vectors, ResultIds& result_ids, ResultDistances& result_distances) = 0;
 
     virtual Status
     QueryByFileID(const std::shared_ptr<server::Context>& context, const std::vector<std::string>& file_ids, uint64_t k,
-                  const milvus::json& extra_params, const VectorsData& vectors, ResultIds& result_ids,
+                  const milvus::json& extra_params, VectorsData& vectors, ResultIds& result_ids,
                   ResultDistances& result_distances) = 0;
 
     virtual Status

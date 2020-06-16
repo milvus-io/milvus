@@ -2209,7 +2209,7 @@ DBImpl::HybridQuery(const std::shared_ptr<server::Context>& context, const std::
 Status
 DBImpl::Query(const std::shared_ptr<server::Context>& context, const std::string& collection_id,
               const std::vector<std::string>& partition_tags, uint64_t k, const milvus::json& extra_params,
-              const VectorsData& vectors, ResultIds& result_ids, ResultDistances& result_distances) {
+              VectorsData& vectors, ResultIds& result_ids, ResultDistances& result_distances) {
     milvus::server::ContextChild tracer(context, "Query");
 
     if (!initialized_.load(std::memory_order_acquire)) {
@@ -2297,7 +2297,7 @@ DBImpl::Query(const std::shared_ptr<server::Context>& context, const std::string
 
 Status
 DBImpl::QueryByFileID(const std::shared_ptr<server::Context>& context, const std::vector<std::string>& file_ids,
-                      uint64_t k, const milvus::json& extra_params, const VectorsData& vectors, ResultIds& result_ids,
+                      uint64_t k, const milvus::json& extra_params, VectorsData& vectors, ResultIds& result_ids,
                       ResultDistances& result_distances) {
     milvus::server::ContextChild tracer(context, "Query by file id");
 
@@ -2344,7 +2344,7 @@ DBImpl::Size(uint64_t& result) {
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 Status
 DBImpl::QueryAsync(const std::shared_ptr<server::Context>& context, meta::FilesHolder& files_holder, uint64_t k,
-                   const milvus::json& extra_params, const VectorsData& vectors, ResultIds& result_ids,
+                   const milvus::json& extra_params, VectorsData& vectors, ResultIds& result_ids,
                    ResultDistances& result_distances) {
     milvus::server::ContextChild tracer(context, "Query Async");
     server::CollectQueryMetrics metrics(vectors.vector_count_);

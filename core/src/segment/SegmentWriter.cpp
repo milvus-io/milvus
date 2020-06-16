@@ -104,7 +104,6 @@ SegmentWriter::SetAttrsIndex(const std::unordered_map<std::string, knowhere::Ind
     return Status::OK();
 }
 
-
 Status
 SegmentWriter::SetVectorIndex(const milvus::knowhere::VecIndexPtr& index) {
     segment_ptr_->vector_index_ptr_->SetVectorIndex(index);

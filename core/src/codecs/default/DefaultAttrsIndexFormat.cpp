@@ -20,12 +20,12 @@
 #include <fcntl.h>
 #include <unistd.h>
 #include <algorithm>
-#include <memory>
-
-#include <src/db/engine/ExecutionEngine.h>
-#include <src/db/meta/MetaTypes.h>
-#include <src/index/knowhere/knowhere/index/structured_index/StructuredIndexSort.h>
 #include <boost/filesystem.hpp>
+#include <memory>
+#include <utility>
+
+#include "db/meta/MetaTypes.h"
+#include "knowhere/index/structured_index/StructuredIndexSort.h"
 
 #include "utils/Exception.h"
 #include "utils/Log.h"
@@ -161,8 +161,7 @@ DefaultAttrsIndexFormat::read(const milvus::storage::FSHandlerPtr& fs_ptr,
             knowhere::IndexPtr index = nullptr;
             engine::meta::hybrid::DataType data_type;
             read_internal(fs_ptr, path.string(), index, data_type);
-            auto attr_index =
-                std::make_shared<milvus::segment::AttrIndex>(index, data_type, field_name);
+            auto attr_index = std::make_shared<milvus::segment::AttrIndex>(index, data_type, field_name);
             attrs_index->attr_indexes.insert(std::make_pair(field_name, attr_index));
         }
     }

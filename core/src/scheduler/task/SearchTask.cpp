@@ -260,7 +260,7 @@ XSearchTask::Execute() {
 
                 auto query_ptr = search_job->query_ptr();
 
-                // s = index_engine_->HybridSearch(general_query, types, query_ptr, output_distance, output_ids);
+                s = index_engine_->HybridSearch(search_job, types, output_distance, output_ids, hybrid);
                 auto vector_query = query_ptr->vectors.begin()->second;
                 topk = vector_query->topk;
                 nq = vector_query->query_vector.float_data.size() / file_->dimension_;

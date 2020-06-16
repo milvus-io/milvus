@@ -20,6 +20,7 @@
 #include <fiu-local.h>
 #include <memory>
 #include <string>
+#include <unordered_map>
 
 namespace milvus {
 namespace server {

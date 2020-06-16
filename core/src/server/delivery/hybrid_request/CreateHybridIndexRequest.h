@@ -28,8 +28,9 @@ class CreateHybridIndexRequest : public BaseRequest {
            const std::vector<std::string>& field_names, const milvus::json& extra_params);
 
  protected:
-    CreateHybridIndexRequest(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name,
-                                  const std::vector<std::string>& field_names, const milvus::json& extra_params);
+    CreateHybridIndexRequest(const std::shared_ptr<milvus::server::Context>& context,
+                             const std::string& collection_name, const std::vector<std::string>& field_names,
+                             const milvus::json& extra_params);
 
     Status
     OnExecute() override;

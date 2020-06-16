@@ -231,7 +231,8 @@ rule_1(BooleanQueryPtr& boolean_query, std::stack<BooleanQueryPtr>& path_stack) 
                 while (!path_stack.empty()) {
                     auto query = path_stack.top();
                     if (query->getOccur() == Occur::SHOULD || query->getOccur() == Occur::MUST_NOT) {
-                        std::string msg = "The child node of 'should' and 'must_not' can only be 'term query' and 'range query'.";
+                        std::string msg =
+                            "The child node of 'should' and 'must_not' can only be 'term query' and 'range query'.";
                         return Status{SERVER_INVALID_DSL_PARAMETER, msg};
                     }
                     path_stack.pop();
@@ -246,7 +247,6 @@ rule_1(BooleanQueryPtr& boolean_query, std::stack<BooleanQueryPtr>& path_stack) 
         }
     }
 }
-
 
 Status
 rule_2(BooleanQueryPtr& boolean_query) {

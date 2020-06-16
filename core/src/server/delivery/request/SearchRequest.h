@@ -24,7 +24,7 @@ class SearchRequest : public BaseRequest {
  public:
     static BaseRequestPtr
     Create(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name,
-           const engine::VectorsData& vectors, int64_t topk, const milvus::json& extra_params,
+           engine::VectorsData& vectors, int64_t topk, const milvus::json& extra_params,
            const std::vector<std::string>& partition_list, const std::vector<std::string>& file_id_list,
            TopKQueryResult& result);
 
@@ -70,7 +70,7 @@ class SearchRequest : public BaseRequest {
 
  protected:
     SearchRequest(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name,
-                  const engine::VectorsData& vectors, int64_t topk, const milvus::json& extra_params,
+                  engine::VectorsData& vectors, int64_t topk, const milvus::json& extra_params,
                   const std::vector<std::string>& partition_list, const std::vector<std::string>& file_id_list,
                   TopKQueryResult& result);
 
@@ -82,7 +82,7 @@ class SearchRequest : public BaseRequest {
 
  private:
     const std::string collection_name_;
-    const engine::VectorsData vectors_data_;
+    engine::VectorsData vectors_data_;
     int64_t topk_;
     milvus::json extra_params_;
     const std::vector<std::string> partition_list_;

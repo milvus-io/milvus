@@ -19,6 +19,7 @@
 
 #include <memory>
 #include <string>
+#include <utility>
 #include "db/meta/MetaTypes.h"
 #include "knowhere/index/Index.h"
 
@@ -29,11 +30,8 @@ class AttrIndex {
  public:
     explicit AttrIndex(knowhere::IndexPtr index_ptr, engine::meta::hybrid::DataType& data_type,
                        const std::string& field_name)
-        : index_ptr_(std::move(index_ptr)),
-          data_type_(data_type),
-          field_name_(std::move(field_name)){
-
-          };
+        : index_ptr_(std::move(index_ptr)), data_type_(data_type), field_name_(std::move(field_name)) {
+    }
 
     AttrIndex() = default;
 

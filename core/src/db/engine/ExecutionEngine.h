@@ -11,6 +11,7 @@
 
 #pragma once
 
+#include <map>
 #include <memory>
 #include <string>
 #include <unordered_map>
@@ -50,15 +51,9 @@ enum class EngineType {
 };
 
 static std::map<std::string, EngineType> s_map_engine_type = {
-    {"FLAT", EngineType::FAISS_IDMAP},
-    {"IVFFLAT", EngineType::FAISS_IVFFLAT},
-    {"IVFSQ8", EngineType::FAISS_IVFSQ8},
-    {"RNSG", EngineType::NSG_MIX},
-    {"IVFSQ8H", EngineType::FAISS_IVFSQ8H},
-    {"IVFPQ", EngineType::FAISS_PQ},
-    {"SPTAGKDT", EngineType::SPTAG_KDT},
-    {"SPTAGBKT", EngineType::SPTAG_BKT},
-    {"HNSW", EngineType::HNSW},
+    {"FLAT", EngineType::FAISS_IDMAP},   {"IVFFLAT", EngineType::FAISS_IVFFLAT}, {"IVFSQ8", EngineType::FAISS_IVFSQ8},
+    {"RNSG", EngineType::NSG_MIX},       {"IVFSQ8H", EngineType::FAISS_IVFSQ8H}, {"IVFPQ", EngineType::FAISS_PQ},
+    {"SPTAGKDT", EngineType::SPTAG_KDT}, {"SPTAGBKT", EngineType::SPTAG_BKT},    {"HNSW", EngineType::HNSW},
     {"ANNOY", EngineType::ANNOY},
 };
 
@@ -139,15 +134,13 @@ class ExecutionEngine {
     GetVectorByID(const int64_t id, uint8_t* vector, bool hybrid) = 0;
 #endif
 
-#if 0
     virtual Status
     ExecBinaryQuery(query::GeneralQueryPtr general_query, faiss::ConcurrentBitsetPtr& bitset,
                     std::unordered_map<std::string, DataType>& attr_type, std::string& vector_placeholder) = 0;
 
     virtual Status
-    HybridSearch(query::GeneralQueryPtr general_query, std::unordered_map<std::string, DataType>& attr_type,
-                 query::QueryPtr query_ptr, std::vector<float>& distances, std::vector<int64_t>& search_ids) = 0;
-#endif
+    HybridSearch(scheduler::SearchJobPtr job, std::unordered_map<std::string, DataType>& attr_type,
+                 std::vector<float>& distances, std::vector<int64_t>& search_ids, bool hybrid) = 0;
 
     virtual Status
     Search(std::vector<int64_t>& ids, std::vector<float>& distances, scheduler::SearchJobPtr job, bool hybrid) = 0;

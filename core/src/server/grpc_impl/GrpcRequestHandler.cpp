@@ -1656,8 +1656,7 @@ GrpcRequestHandler::GetEntityByID(::grpc::ServerContext* context, const ::milvus
 }
 
 ::grpc::Status
-GrpcRequestHandler::CreateHybridIndex(::grpc::ServerContext* context,
-                                      const ::milvus::grpc::HIndexParam* request,
+GrpcRequestHandler::CreateHybridIndex(::grpc::ServerContext* context, const ::milvus::grpc::HIndexParam* request,
                                       ::milvus::grpc::Status* response) {
     CHECK_NULLPTR_RETURN(request);
     LOG_SERVER_INFO_ << LogOut("Request [%s] %s begin.", GetContext(context)->RequestID().c_str(), __func__);
@@ -1675,8 +1674,8 @@ GrpcRequestHandler::CreateHybridIndex(::grpc::ServerContext* context,
         field_names.emplace_back(request->field_names(i));
     }
 
-    Status status = request_handler_.CreateHybridIndex(GetContext(context), request->collection_name(), field_names,
-                                                 json_params);
+    Status status =
+        request_handler_.CreateHybridIndex(GetContext(context), request->collection_name(), field_names, json_params);
 
     LOG_SERVER_INFO_ << LogOut("Request [%s] %s end.", GetContext(context)->RequestID().c_str(), __func__);
     SET_RESPONSE(response, status, context);

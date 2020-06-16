@@ -930,16 +930,16 @@ ExecutionEngineImpl::ProcessRangeQuery(const engine::DataType data_type, const s
         default:
             break;
     }
+    return Status::OK();
 }
 
-#if 0
 Status
-ExecutionEngineImpl::HybridSearch(query::GeneralQueryPtr general_query,
-                                  std::unordered_map<std::string, DataType>& attr_type, query::QueryPtr query_ptr,
-                                  std::vector<float>& distances, std::vector<int64_t>& search_ids) {
+ExecutionEngineImpl::HybridSearch(scheduler::SearchJobPtr search_job,
+                                  std::unordered_map<std::string, DataType>& attr_type, std::vector<float>& distances,
+                                  std::vector<int64_t>& search_ids, bool hybrid) {
     faiss::ConcurrentBitsetPtr bitset;
     std::string vector_placeholder;
-    auto status = ExecBinaryQuery(general_query, bitset, attr_type, vector_placeholder);
+    auto status = ExecBinaryQuery(search_job->general_query(), bitset, attr_type, vector_placeholder);
     if (!status.ok()) {
         return status;
     }
@@ -955,22 +955,26 @@ ExecutionEngineImpl::HybridSearch(query::GeneralQueryPtr general_query,
     }
     index_->SetBlacklist(list);
 
-    auto vector_query = query_ptr->vectors.at(vector_placeholder);
+    auto vector_query = search_job->query_ptr()->vectors.at(vector_placeholder);
     int64_t topk = vector_query->topk;
     int64_t nq = vector_query->query_vector.float_data.size() / dim_;
 
-    distances.resize(nq * topk);
-    search_ids.resize(nq * topk);
+    engine::VectorsData vectors;
+    vectors.vector_count_ = nq;
+    vectors.float_data_ = vector_query->query_vector.float_data;
+    vectors.binary_data_ = vector_query->query_vector.binary_data;
 
-    status = Search(nq, vector_query->query_vector.float_data.data(), topk, vector_query->extra_params,
-                    distances.data(), search_ids.data());
+    search_job->SetVectors(vectors);
+    search_job->vector_count() = nq;
+    search_job->topk() = topk;
+
+    status = Search(search_ids, distances, search_job, hybrid);
     if (!status.ok()) {
         return status;
     }
 
     return Status::OK();
 }
-
 Status
 ExecutionEngineImpl::ExecBinaryQuery(milvus::query::GeneralQueryPtr general_query, faiss::ConcurrentBitsetPtr& bitset,
                                      std::unordered_map<std::string, DataType>& attr_type,
@@ -1220,9 +1224,8 @@ ExecutionEngineImpl::ExecBinaryQuery(milvus::query::GeneralQueryPtr general_quer
             bitset = nullptr;
         }
     }
-    return Status::OK();
+    return status;
 }
-#endif
 
 Status
 ExecutionEngineImpl::Search(std::vector<int64_t>& ids, std::vector<float>& distances, scheduler::SearchJobPtr job,

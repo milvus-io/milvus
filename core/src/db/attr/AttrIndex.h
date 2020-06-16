@@ -27,7 +27,7 @@ class AttrIndex : public milvus::cache::DataObj {
     AttrIndex() = default;
 
     AttrIndex(std::unordered_map<std::string, knowhere::IndexPtr> index_data,
-         std::unordered_map<std::string, int64_t> index_size, int64_t entity_count)
+              std::unordered_map<std::string, int64_t> index_size, int64_t entity_count)
         : index_data_(std::move(index_data)), index_size_(std::move(index_size)), entity_count_(entity_count) {
     }
 
