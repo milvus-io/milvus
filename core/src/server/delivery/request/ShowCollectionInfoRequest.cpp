@@ -17,9 +17,9 @@
 
 #include "server/delivery/request/ShowCollectionInfoRequest.h"
 #include "server/DBWrapper.h"
+#include "server/ValidationUtil.h"
 #include "utils/Log.h"
 #include "utils/TimeRecorder.h"
-#include "utils/ValidationUtil.h"
 
 #include <memory>
 #include <vector>
@@ -46,7 +46,7 @@ ShowCollectionInfoRequest::OnExecute() {
     TimeRecorderAuto rc(hdr);
 
     // step 1: check collection name
-    auto status = ValidationUtil::ValidateCollectionName(collection_name_);
+    auto status = ValidateCollectionName(collection_name_);
     if (!status.ok()) {
         return status;
     }

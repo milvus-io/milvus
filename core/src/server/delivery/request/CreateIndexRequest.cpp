@@ -13,9 +13,9 @@
 #include "config/Config.h"
 #include "db/Utils.h"
 #include "server/DBWrapper.h"
+#include "server/ValidationUtil.h"
 #include "utils/Log.h"
 #include "utils/TimeRecorder.h"
-#include "utils/ValidationUtil.h"
 
 #include <fiu-local.h>
 #include <memory>
@@ -46,7 +46,7 @@ CreateIndexRequest::OnExecute() {
         TimeRecorderAuto rc(hdr);
 
         // step 1: check arguments
-        auto status = ValidationUtil::ValidateCollectionName(collection_name_);
+        auto status = ValidateCollectionName(collection_name_);
         if (!status.ok()) {
             return status;
         }
@@ -70,12 +70,12 @@ CreateIndexRequest::OnExecute() {
             }
         }
 
-        status = ValidationUtil::ValidateCollectionIndexType(index_type_);
+        status = ValidateCollectionIndexType(index_type_);
         if (!status.ok()) {
             return status;
         }
 
-        status = ValidationUtil::ValidateIndexParams(json_params_, collection_schema, index_type_);
+        status = ValidateIndexParams(json_params_, collection_schema, index_type_);
         if (!status.ok()) {
             return status;
         }

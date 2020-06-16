@@ -17,10 +17,10 @@
 
 #include "db/Utils.h"
 #include "server/DBWrapper.h"
+#include "server/ValidationUtil.h"
 #include "utils/CommonUtil.h"
 #include "utils/Log.h"
 #include "utils/TimeRecorder.h"
-#include "utils/ValidationUtil.h"
 
 #ifdef ENABLE_CPU_PROFILING
 #include <gperftools/profiler.h>
@@ -60,21 +60,21 @@ SearchRequest::OnPreExecute() {
 
     milvus::server::ContextChild tracer_pre(context_, "Pre Query");
     // step 1: check collection name
-    auto status = ValidationUtil::ValidateCollectionName(collection_name_);
+    auto status = ValidateCollectionName(collection_name_);
     if (!status.ok()) {
         LOG_SERVER_ERROR_ << LogOut("[%s][%ld] %s", "search", 0, status.message().c_str());
         return status;
     }
 
     // step 2: check search topk
-    status = ValidationUtil::ValidateSearchTopk(topk_);
+    status = ValidateSearchTopk(topk_);
     if (!status.ok()) {
         LOG_SERVER_ERROR_ << LogOut("[%s][%ld] %s", "search", 0, status.message().c_str());
         return status;
     }
 
     // step 3: check partition tags
-    status = ValidationUtil::ValidatePartitionTags(partition_list_);
+    status = ValidatePartitionTags(partition_list_);
     fiu_do_on("SearchRequest.OnExecute.invalid_partition_tags", status = Status(milvus::SERVER_UNEXPECTED_ERROR, ""));
     if (!status.ok()) {
         LOG_SERVER_ERROR_ << LogOut("[%s][%ld] %s", "search", 0, status.message().c_str());
@@ -120,14 +120,14 @@ SearchRequest::OnExecute() {
         }
 
         // step 5: check search parameters
-        status = ValidationUtil::ValidateSearchParams(extra_params_, collection_schema_, topk_);
+        status = ValidateSearchParams(extra_params_, collection_schema_, topk_);
         if (!status.ok()) {
             LOG_SERVER_ERROR_ << LogOut("[%s][%ld] Invalid search params: %s", "search", 0, status.message().c_str());
             return status;
         }
 
         // step 6: check vector data according to metric type
-        status = ValidationUtil::ValidateVectorData(vectors_data_, collection_schema_);
+        status = ValidateVectorData(vectors_data_, collection_schema_);
         if (!status.ok()) {
             LOG_SERVER_ERROR_ << LogOut("[%s][%ld] Invalid vector data: %s", "search", 0, status.message().c_str());
             return status;

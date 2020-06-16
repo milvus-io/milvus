@@ -22,11 +22,6 @@ namespace server {
 class CommonUtil {
  public:
     static bool
-    GetSystemMemInfo(int64_t& total_mem, int64_t& free_mem);
-    static bool
-    GetSystemAvailableThreads(int64_t& thread_count);
-
-    static bool
     IsFileExist(const std::string& path);
     static uint64_t
     GetFileSize(const std::string& path);
@@ -55,9 +50,6 @@ class CommonUtil {
     static std::string
     GetCurrentTimeStr();
 #endif
-
-    static void
-    EraseFromCache(const std::string& item_key);
 };
 
 }  // namespace server

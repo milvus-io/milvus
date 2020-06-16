@@ -18,7 +18,7 @@
 #include "easyloggingpp/easylogging++.h"
 #include "server/Server.h"
 #include "src/version.h"
-#include "utils/SignalUtil.h"
+#include "utils/SignalHandler.h"
 #include "utils/Status.h"
 
 INITIALIZE_EASYLOGGINGPP
@@ -58,6 +58,11 @@ print_banner() {
     std::cout << "Last commit id: " << LAST_COMMIT_ID << std::endl;
     std::cout << std::endl;
 }
+
+/* register signal handler routine */
+milvus::server::func_ptr milvus::server::SignalHandler::routine_func_ = []() {
+    milvus::server::Server::GetInstance().Stop();
+};
 
 int
 main(int argc, char* argv[]) {
@@ -117,12 +122,12 @@ main(int argc, char* argv[]) {
     }
 
     /* Handle Signal */
-    signal(SIGHUP, milvus::server::SignalUtil::HandleSignal);
-    signal(SIGINT, milvus::server::SignalUtil::HandleSignal);
-    signal(SIGUSR1, milvus::server::SignalUtil::HandleSignal);
-    signal(SIGSEGV, milvus::server::SignalUtil::HandleSignal);
-    signal(SIGUSR2, milvus::server::SignalUtil::HandleSignal);
-    signal(SIGTERM, milvus::server::SignalUtil::HandleSignal);
+    signal(SIGHUP, milvus::server::SignalHandler::HandleSignal);
+    signal(SIGINT, milvus::server::SignalHandler::HandleSignal);
+    signal(SIGUSR1, milvus::server::SignalHandler::HandleSignal);
+    signal(SIGSEGV, milvus::server::SignalHandler::HandleSignal);
+    signal(SIGUSR2, milvus::server::SignalHandler::HandleSignal);
+    signal(SIGTERM, milvus::server::SignalHandler::HandleSignal);
 
     server.Init(start_daemonized, pid_filename, config_filename);
 

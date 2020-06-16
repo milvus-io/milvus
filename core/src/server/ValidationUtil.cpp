@@ -9,35 +9,22 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
-#include "utils/ValidationUtil.h"
-#include "Log.h"
-#include "db/Types.h"
+#include "server/ValidationUtil.h"
 #include "db/Utils.h"
-#include "db/engine/ExecutionEngine.h"
 #include "knowhere/index/vector_index/ConfAdapter.h"
 #include "knowhere/index/vector_index/helpers/IndexParameter.h"
+#include "utils/Log.h"
 #include "utils/StringHelpFunctions.h"
 
-#include <arpa/inet.h>
-
-#ifdef MILVUS_GPU_VERSION
-
-#include <cuda_runtime.h>
-
-#endif
-
 #include <fiu-local.h>
-#include <algorithm>
-#include <cmath>
 #include <limits>
-#include <regex>
-#include <set>
 #include <string>
 
 namespace milvus {
 namespace server {
 
 namespace {
+
 constexpr size_t COLLECTION_NAME_SIZE_LIMIT = 255;
 constexpr int64_t COLLECTION_DIMENSION_LIMIT = 32768;
 constexpr int32_t INDEX_FILE_SIZE_LIMIT = 4096;  // index trigger size max = 4096 MB
@@ -104,7 +91,7 @@ CheckParameterExistence(const milvus::json& json_params, const std::string& para
 }  // namespace
 
 Status
-ValidationUtil::ValidateCollectionName(const std::string& collection_name) {
+ValidateCollectionName(const std::string& collection_name) {
     // Collection name shouldn't be empty.
     if (collection_name.empty()) {
         std::string msg = "Collection name should not be empty.";
@@ -142,7 +129,7 @@ ValidationUtil::ValidateCollectionName(const std::string& collection_name) {
 }
 
 Status
-ValidationUtil::ValidateTableDimension(int64_t dimension, int64_t metric_type) {
+ValidateTableDimension(int64_t dimension, int64_t metric_type) {
     if (dimension <= 0 || dimension > COLLECTION_DIMENSION_LIMIT) {
         std::string msg = "Invalid collection dimension: " + std::to_string(dimension) + ". " +
                           "The collection dimension must be within the range of 1 ~ " +
@@ -164,7 +151,7 @@ ValidationUtil::ValidateTableDimension(int64_t dimension, int64_t metric_type) {
 }
 
 Status
-ValidationUtil::ValidateCollectionIndexType(int32_t index_type) {
+ValidateCollectionIndexType(int32_t index_type) {
     int engine_type = static_cast<int>(engine::EngineType(index_type));
     if (engine_type <= 0 || engine_type > static_cast<int>(engine::EngineType::MAX_VALUE)) {
         std::string msg = "Invalid index type: " + std::to_string(index_type) + ". " +
@@ -186,8 +173,8 @@ ValidationUtil::ValidateCollectionIndexType(int32_t index_type) {
 }
 
 Status
-ValidationUtil::ValidateIndexParams(const milvus::json& index_params,
-                                    const engine::meta::CollectionSchema& collection_schema, int32_t index_type) {
+ValidateIndexParams(const milvus::json& index_params, const engine::meta::CollectionSchema& collection_schema,
+                    int32_t index_type) {
     switch (index_type) {
         case (int32_t)engine::EngineType::FAISS_IDMAP:
         case (int32_t)engine::EngineType::FAISS_BIN_IDMAP: {
@@ -283,8 +270,8 @@ ValidationUtil::ValidateIndexParams(const milvus::json& index_params,
 }
 
 Status
-ValidationUtil::ValidateSearchParams(const milvus::json& search_params,
-                                     const engine::meta::CollectionSchema& collection_schema, int64_t topk) {
+ValidateSearchParams(const milvus::json& search_params, const engine::meta::CollectionSchema& collection_schema,
+                     int64_t topk) {
     switch (collection_schema.engine_type_) {
         case (int32_t)engine::EngineType::FAISS_IDMAP:
         case (int32_t)engine::EngineType::FAISS_BIN_IDMAP: {
@@ -328,8 +315,7 @@ ValidationUtil::ValidateSearchParams(const milvus::json& search_params,
 }
 
 Status
-ValidationUtil::ValidateVectorData(const engine::VectorsData& vectors,
-                                   const engine::meta::CollectionSchema& collection_schema) {
+ValidateVectorData(const engine::VectorsData& vectors, const engine::meta::CollectionSchema& collection_schema) {
     uint64_t vector_count = vectors.vector_count_;
     if ((vectors.float_data_.empty() && vectors.binary_data_.empty()) || vector_count == 0) {
         return Status(SERVER_INVALID_ROWRECORD_ARRAY,
@@ -364,8 +350,7 @@ ValidationUtil::ValidateVectorData(const engine::VectorsData& vectors,
 }
 
 Status
-ValidationUtil::ValidateVectorDataSize(const engine::VectorsData& vectors,
-                                       const engine::meta::CollectionSchema& collection_schema) {
+ValidateVectorDataSize(const engine::VectorsData& vectors, const engine::meta::CollectionSchema& collection_schema) {
     std::string msg =
         "The amount of data inserted each time cannot exceed " + std::to_string(MAX_INSERT_DATA_SIZE / M_BYTE) + " MB";
     if (engine::utils::IsBinaryMetricType(collection_schema.metric_type_)) {
@@ -383,7 +368,7 @@ ValidationUtil::ValidateVectorDataSize(const engine::VectorsData& vectors,
 }
 
 Status
-ValidationUtil::ValidateCollectionIndexFileSize(int64_t index_file_size) {
+ValidateCollectionIndexFileSize(int64_t index_file_size) {
     if (index_file_size <= 0 || index_file_size > INDEX_FILE_SIZE_LIMIT) {
         std::string msg = "Invalid index file size: " + std::to_string(index_file_size) + ". " +
                           "The index file size must be within the range of 1 ~ " +
@@ -396,7 +381,7 @@ ValidationUtil::ValidateCollectionIndexFileSize(int64_t index_file_size) {
 }
 
 Status
-ValidationUtil::ValidateCollectionIndexMetricType(int32_t metric_type) {
+ValidateCollectionIndexMetricType(int32_t metric_type) {
     if (metric_type <= 0 || metric_type > static_cast<int32_t>(engine::MetricType::MAX_VALUE)) {
         std::string msg = "Invalid index metric type: " + std::to_string(metric_type) + ". " +
                           "Make sure the metric type is in MetricType list.";
@@ -407,7 +392,7 @@ ValidationUtil::ValidateCollectionIndexMetricType(int32_t metric_type) {
 }
 
 Status
-ValidationUtil::ValidateSearchTopk(int64_t top_k) {
+ValidateSearchTopk(int64_t top_k) {
     if (top_k <= 0 || top_k > QUERY_MAX_TOPK) {
         std::string msg =
             "Invalid topk: " + std::to_string(top_k) + ". " + "The topk must be within the range of 1 ~ 2048.";
@@ -419,7 +404,7 @@ ValidationUtil::ValidateSearchTopk(int64_t top_k) {
 }
 
 Status
-ValidationUtil::ValidatePartitionName(const std::string& partition_name) {
+ValidatePartitionName(const std::string& partition_name) {
     if (partition_name.empty()) {
         std::string msg = "Partition name should not be empty.";
         LOG_SERVER_ERROR_ << msg;
@@ -456,7 +441,7 @@ ValidationUtil::ValidatePartitionName(const std::string& partition_name) {
 }
 
 Status
-ValidationUtil::ValidatePartitionTags(const std::vector<std::string>& partition_tags) {
+ValidatePartitionTags(const std::vector<std::string>& partition_tags) {
     for (const std::string& tag : partition_tags) {
         // trim side-blank of tag, only compare valid characters
         // for example: " ab cd " is treated as "ab cd"
@@ -477,193 +462,6 @@ ValidationUtil::ValidatePartitionTags(const std::vector<std::string>& partition_
     }
 
     return Status::OK();
-}
-
-Status
-ValidationUtil::ValidateGpuIndex(int32_t gpu_index) {
-#ifdef MILVUS_GPU_VERSION
-    int num_devices = 0;
-    auto cuda_err = cudaGetDeviceCount(&num_devices);
-    fiu_do_on("ValidationUtil.ValidateGpuIndex.get_device_count_fail", cuda_err = cudaError::cudaErrorUnknown);
-
-    if (cuda_err != cudaSuccess) {
-        std::string msg = "Failed to get gpu card number, cuda error:" + std::to_string(cuda_err);
-        LOG_SERVER_ERROR_ << msg;
-        return Status(SERVER_UNEXPECTED_ERROR, msg);
-    }
-
-    if (gpu_index >= num_devices) {
-        std::string msg = "Invalid gpu index: " + std::to_string(gpu_index);
-        LOG_SERVER_ERROR_ << msg;
-        return Status(SERVER_INVALID_ARGUMENT, msg);
-    }
-#endif
-
-    return Status::OK();
-}
-
-#ifdef MILVUS_GPU_VERSION
-
-Status
-ValidationUtil::GetGpuMemory(int32_t gpu_index, int64_t& memory) {
-    fiu_return_on("ValidationUtil.GetGpuMemory.return_error", Status(SERVER_UNEXPECTED_ERROR, ""));
-
-    cudaDeviceProp deviceProp;
-    auto cuda_err = cudaGetDeviceProperties(&deviceProp, gpu_index);
-    if (cuda_err) {
-        std::string msg = "Failed to get gpu properties for gpu" + std::to_string(gpu_index) +
-                          " , cuda error:" + std::to_string(cuda_err);
-        LOG_SERVER_ERROR_ << msg;
-        return Status(SERVER_UNEXPECTED_ERROR, msg);
-    }
-
-    memory = deviceProp.totalGlobalMem;
-    return Status::OK();
-}
-
-#endif
-
-Status
-ValidationUtil::ValidateIpAddress(const std::string& ip_address) {
-    struct in_addr address;
-
-    int result = inet_pton(AF_INET, ip_address.c_str(), &address);
-    fiu_do_on("ValidationUtil.ValidateIpAddress.error_ip_result", result = 2);
-
-    switch (result) {
-        case 1:
-            return Status::OK();
-        case 0: {
-            std::string msg = "Invalid IP address: " + ip_address;
-            LOG_SERVER_ERROR_ << msg;
-            return Status(SERVER_INVALID_ARGUMENT, msg);
-        }
-        default: {
-            std::string msg = "IP address conversion error: " + ip_address;
-            LOG_SERVER_ERROR_ << msg;
-            return Status(SERVER_UNEXPECTED_ERROR, msg);
-        }
-    }
-}
-
-Status
-ValidationUtil::ValidateStringIsNumber(const std::string& str) {
-    if (str.empty() || !std::all_of(str.begin(), str.end(), ::isdigit)) {
-        return Status(SERVER_INVALID_ARGUMENT, "Invalid number");
-    }
-    try {
-        int64_t value = std::stol(str);
-        fiu_do_on("ValidationUtil.ValidateStringIsNumber.throw_exception", throw std::exception());
-        if (value < 0) {
-            return Status(SERVER_INVALID_ARGUMENT, "Negative number");
-        }
-    } catch (...) {
-        return Status(SERVER_INVALID_ARGUMENT, "Invalid number");
-    }
-    return Status::OK();
-}
-
-Status
-ValidationUtil::ValidateStringIsBool(const std::string& str) {
-    fiu_return_on("ValidateStringNotBool", Status(SERVER_INVALID_ARGUMENT, "Invalid boolean: " + str));
-    std::string s = str;
-    std::transform(s.begin(), s.end(), s.begin(), ::tolower);
-    if (s == "true" || s == "on" || s == "yes" || s == "1" || s == "false" || s == "off" || s == "no" || s == "0" ||
-        s.empty()) {
-        return Status::OK();
-    }
-    return Status(SERVER_INVALID_ARGUMENT, "Invalid boolean: " + str);
-}
-
-Status
-ValidationUtil::ValidateStringIsFloat(const std::string& str) {
-    try {
-        float val = std::stof(str);
-        if (val < 0.0) {
-            return Status(SERVER_INVALID_ARGUMENT, "Negative float: " + str);
-        }
-    } catch (...) {
-        return Status(SERVER_INVALID_ARGUMENT, "Invalid float: " + str);
-    }
-    return Status::OK();
-}
-
-Status
-ValidationUtil::ValidateDbURI(const std::string& uri) {
-    std::string dialectRegex = "(.*)";
-    std::string usernameRegex = "(.*)";
-    std::string passwordRegex = "(.*)";
-    std::string hostRegex = "(.*)";
-    std::string portRegex = "(.*)";
-    std::string dbNameRegex = "(.*)";
-    std::string uriRegexStr = dialectRegex + "\\:\\/\\/" + usernameRegex + "\\:" + passwordRegex + "\\@" + hostRegex +
-                              "\\:" + portRegex + "\\/" + dbNameRegex;
-    std::regex uriRegex(uriRegexStr);
-    std::smatch pieces_match;
-
-    bool okay = true;
-
-    if (std::regex_match(uri, pieces_match, uriRegex)) {
-        std::string dialect = pieces_match[1].str();
-        std::transform(dialect.begin(), dialect.end(), dialect.begin(), ::tolower);
-        if (dialect.find("mysql") == std::string::npos && dialect.find("sqlite") == std::string::npos) {
-            LOG_SERVER_ERROR_ << "Invalid dialect in URI: dialect = " << dialect;
-            okay = false;
-        }
-
-        /*
-         *      Could be DNS, skip checking
-         *
-                std::string host = pieces_match[4].str();
-                if (!host.empty() && host != "localhost") {
-                    if (ValidateIpAddress(host) != SERVER_SUCCESS) {
-                        LOG_SERVER_ERROR_ << "Invalid host ip address in uri = " << host;
-                        okay = false;
-                    }
-                }
-        */
-
-        std::string port = pieces_match[5].str();
-        if (!port.empty()) {
-            auto status = ValidateStringIsNumber(port);
-            if (!status.ok()) {
-                LOG_SERVER_ERROR_ << "Invalid port in uri = " << port;
-                okay = false;
-            }
-        }
-    } else {
-        LOG_SERVER_ERROR_ << "Wrong URI format: URI = " << uri;
-        okay = false;
-    }
-
-    return (okay ? Status::OK() : Status(SERVER_INVALID_ARGUMENT, "Invalid db backend uri"));
-}
-
-Status
-ValidationUtil::ValidateStoragePath(const std::string& path) {
-    // Validate storage path if is valid, only correct absolute path will be validated pass
-    // Invalid path only contain character[a-zA-Z], number[0-9], '-', and '_',
-    // and path must start with '/'.
-    // examples below are invalid
-    // '/a//a', '/a--/a', '/-a/a', '/a@#/a', 'aaa/sfs'
-    std::string path_pattern = "^\\/(\\w+-?\\/?)+$";
-    std::regex regex(path_pattern);
-
-    return std::regex_match(path, regex) ? Status::OK() : Status(SERVER_INVALID_ARGUMENT, "Invalid file path");
-}
-
-Status
-ValidationUtil::ValidateLogLevel(const std::string& level) {
-    std::set<std::string> supported_level{"debug", "info", "warning", "error", "fatal"};
-
-    return supported_level.find(level) != supported_level.end()
-               ? Status::OK()
-               : Status(SERVER_INVALID_ARGUMENT, "Log level must be one of debug, info, warning, error and fatal.");
-}
-
-bool
-ValidationUtil::IsNumber(const std::string& s) {
-    return !s.empty() && std::all_of(s.begin(), s.end(), ::isdigit);
 }
 
 }  // namespace server

@@ -12,11 +12,11 @@
 #include "server/delivery/hybrid_request/CreateHybridCollectionRequest.h"
 #include "db/Utils.h"
 #include "server/DBWrapper.h"
+#include "server/ValidationUtil.h"
 #include "server/delivery/request/BaseRequest.h"
 #include "server/web_impl/Constants.h"
 #include "utils/Log.h"
 #include "utils/TimeRecorder.h"
-#include "utils/ValidationUtil.h"
 
 #include <fiu-local.h>
 #include <memory>
@@ -56,7 +56,7 @@ CreateHybridCollectionRequest::OnExecute() {
 
     try {
         // step 1: check arguments
-        auto status = ValidationUtil::ValidateCollectionName(collection_name_);
+        auto status = ValidateCollectionName(collection_name_);
         fiu_do_on("CreateHybridCollectionRequest.OnExecute.invalid_collection_name",
                   status = Status(milvus::SERVER_UNEXPECTED_ERROR, ""));
         if (!status.ok()) {

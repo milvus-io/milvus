@@ -11,9 +11,9 @@
 
 #include "server/delivery/request/HasPartitionRequest.h"
 #include "server/DBWrapper.h"
+#include "server/ValidationUtil.h"
 #include "utils/Log.h"
 #include "utils/TimeRecorder.h"
-#include "utils/ValidationUtil.h"
 
 #include <fiu-local.h>
 #include <memory>
@@ -46,7 +46,7 @@ HasPartitionRequest::OnExecute() {
         has_partition_ = false;
 
         // step 1: check arguments
-        auto status = ValidationUtil::ValidateCollectionName(collection_name_);
+        auto status = ValidateCollectionName(collection_name_);
         if (!status.ok()) {
             return status;
         }

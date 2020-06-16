@@ -133,7 +133,6 @@ set(helper_files
         ${MILVUS_ENGINE_SRC}/utils/TimeRecorder.cpp
         ${MILVUS_ENGINE_SRC}/utils/Status.cpp
         ${MILVUS_ENGINE_SRC}/utils/StringHelpFunctions.cpp
-        ${MILVUS_ENGINE_SRC}/utils/ValidationUtil.cpp
         ${MILVUS_THIRDPARTY_SRC}/easyloggingpp/easylogging++.cc
         )
 

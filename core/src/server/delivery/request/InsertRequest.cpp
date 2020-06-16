@@ -12,10 +12,10 @@
 #include "server/delivery/request/InsertRequest.h"
 #include "db/Utils.h"
 #include "server/DBWrapper.h"
+#include "server/ValidationUtil.h"
 #include "utils/CommonUtil.h"
 #include "utils/Log.h"
 #include "utils/TimeRecorder.h"
-#include "utils/ValidationUtil.h"
 
 #include <fiu-local.h>
 #include <memory>
@@ -55,7 +55,7 @@ InsertRequest::OnExecute() {
         TimeRecorder rc(LogOut("[%s][%ld] %s", "insert", 0, hdr.c_str()));
 
         // step 1: check arguments
-        auto status = ValidationUtil::ValidateCollectionName(collection_name_);
+        auto status = ValidateCollectionName(collection_name_);
         if (!status.ok()) {
             LOG_SERVER_ERROR_ << LogOut("[%s][%ld] Invalid collection name: %s", "insert", 0, status.message().c_str());
             return status;
@@ -129,14 +129,14 @@ InsertRequest::OnExecute() {
         ProfilerStart(fname.c_str());
 #endif
         // step 4: some metric type doesn't support float vectors
-        status = ValidationUtil::ValidateVectorData(vectors_data_, collection_schema);
+        status = ValidateVectorData(vectors_data_, collection_schema);
         if (!status.ok()) {
             LOG_SERVER_ERROR_ << LogOut("[%s][%d] Invalid vector data: %s", "insert", 0, status.message().c_str());
             return status;
         }
 
         // step 5: check insert data limitation
-        status = ValidationUtil::ValidateVectorDataSize(vectors_data_, collection_schema);
+        status = ValidateVectorDataSize(vectors_data_, collection_schema);
         if (!status.ok()) {
             LOG_SERVER_ERROR_ << LogOut("[%s][%d] Invalid vector data: %s", "insert", 0, status.message().c_str());
             return status;

@@ -21,10 +21,10 @@
 
 #include "config/Config.h"
 #include "server/DBWrapper.h"
+#include "server/ValidationUtil.h"
 #include "utils/CommonUtil.h"
 #include "utils/Log.h"
 #include "utils/TimeRecorder.h"
-#include "utils/ValidationUtil.h"
 
 #ifdef ENABLE_CPU_PROFILING
 #include <gperftools/profiler.h>
@@ -70,13 +70,13 @@ SearchByIDRequest::OnExecute() {
         }
 
         // step 2: check collection name
-        auto status = ValidationUtil::ValidateCollectionName(collection_name_);
+        auto status = ValidateCollectionName(collection_name_);
         if (!status.ok()) {
             return status;
         }
 
         // step 3: check search topk
-        status = ValidationUtil::ValidateSearchTopk(topk_);
+        status = ValidateSearchTopk(topk_);
         if (!status.ok()) {
             return status;
         }
@@ -99,7 +99,7 @@ SearchByIDRequest::OnExecute() {
         }
 
         // step 5: check search parameters
-        status = ValidationUtil::ValidateSearchParams(extra_params_, collection_schema, topk_);
+        status = ValidateSearchParams(extra_params_, collection_schema, topk_);
         if (!status.ok()) {
             return status;
         }

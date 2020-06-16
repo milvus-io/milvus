@@ -12,11 +12,11 @@
 #include "server/delivery/request/SearchCombineRequest.h"
 #include "db/Utils.h"
 #include "server/DBWrapper.h"
+#include "server/ValidationUtil.h"
 #include "server/context/Context.h"
 #include "utils/CommonUtil.h"
 #include "utils/Log.h"
 #include "utils/TimeRecorder.h"
-#include "utils/ValidationUtil.h"
 
 #include <memory>
 #include <set>
@@ -106,12 +106,12 @@ SearchCombineRequest::Combine(const SearchRequestPtr& request) {
     // reset some parameters in necessary
     if (request_list_.empty()) {
         // validate first request input
-        auto status = ValidationUtil::ValidateCollectionName(request->CollectionName());
+        auto status = ValidateCollectionName(request->CollectionName());
         if (!status.ok()) {
             return status;
         }
 
-        status = ValidationUtil::ValidateSearchTopk(request->TopK());
+        status = ValidateSearchTopk(request->TopK());
         if (!status.ok()) {
             return status;
         }
@@ -267,7 +267,7 @@ SearchCombineRequest::OnExecute() {
         std::vector<SearchRequestPtr>::iterator iter = request_list_.begin();
         for (; iter != request_list_.end();) {
             SearchRequestPtr& request = *iter;
-            status = ValidationUtil::ValidateSearchTopk(request->TopK());
+            status = ValidateSearchTopk(request->TopK());
             if (!status.ok()) {
                 // check failed, erase request and let it return error status
                 FreeRequest(request, status);
@@ -275,7 +275,7 @@ SearchCombineRequest::OnExecute() {
                 continue;
             }
 
-            status = ValidationUtil::ValidateSearchParams(extra_params_, collection_schema, request->TopK());
+            status = ValidateSearchParams(extra_params_, collection_schema, request->TopK());
             if (!status.ok()) {
                 // check failed, erase request and let it return error status
                 FreeRequest(request, status);
@@ -283,7 +283,7 @@ SearchCombineRequest::OnExecute() {
                 continue;
             }
 
-            status = ValidationUtil::ValidateVectorData(request->VectorsData(), collection_schema);
+            status = ValidateVectorData(request->VectorsData(), collection_schema);
             if (!status.ok()) {
                 // check failed, erase request and let it return error status
                 FreeRequest(request, status);
@@ -291,7 +291,7 @@ SearchCombineRequest::OnExecute() {
                 continue;
             }
 
-            status = ValidationUtil::ValidatePartitionTags(request->PartitionList());
+            status = ValidatePartitionTags(request->PartitionList());
             if (!status.ok()) {
                 // check failed, erase request and let it return error status
                 FreeRequest(request, status);
