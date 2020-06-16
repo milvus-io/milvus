@@ -11,9 +11,9 @@
 
 #include "server/delivery/request/ShowPartitionsRequest.h"
 #include "server/DBWrapper.h"
+#include "server/ValidationUtil.h"
 #include "utils/Log.h"
 #include "utils/TimeRecorder.h"
-#include "utils/ValidationUtil.h"
 
 #include <fiu-local.h>
 #include <memory>
@@ -42,7 +42,7 @@ ShowPartitionsRequest::OnExecute() {
     TimeRecorderAuto rc(hdr);
 
     // step 1: check collection name
-    auto status = ValidationUtil::ValidateCollectionName(collection_name_);
+    auto status = ValidateCollectionName(collection_name_);
     fiu_do_on("ShowPartitionsRequest.OnExecute.invalid_collection_name",
               status = Status(milvus::SERVER_UNEXPECTED_ERROR, ""));
     if (!status.ok()) {

@@ -22,51 +22,11 @@
 namespace milvus {
 namespace server {
 
-constexpr int64_t QUERY_MAX_TOPK = 2048;
-
 class ValidationUtil {
  private:
     ValidationUtil() = default;
 
  public:
-    static Status
-    ValidateCollectionName(const std::string& collection_name);
-
-    static Status
-    ValidateTableDimension(int64_t dimension, int64_t metric_type);
-
-    static Status
-    ValidateCollectionIndexType(int32_t index_type);
-
-    static Status
-    ValidateIndexParams(const milvus::json& index_params, const engine::meta::CollectionSchema& collection_schema,
-                        int32_t index_type);
-
-    static Status
-    ValidateSearchParams(const milvus::json& search_params, const engine::meta::CollectionSchema& collection_schema,
-                         int64_t topk);
-
-    static Status
-    ValidateVectorData(const engine::VectorsData& vectors, const engine::meta::CollectionSchema& collection_schema);
-
-    static Status
-    ValidateVectorDataSize(const engine::VectorsData& vectors, const engine::meta::CollectionSchema& collection_schema);
-
-    static Status
-    ValidateCollectionIndexFileSize(int64_t index_file_size);
-
-    static Status
-    ValidateCollectionIndexMetricType(int32_t metric_type);
-
-    static Status
-    ValidateSearchTopk(int64_t top_k);
-
-    static Status
-    ValidatePartitionName(const std::string& partition_name);
-
-    static Status
-    ValidatePartitionTags(const std::vector<std::string>& partition_tags);
-
     static Status
     ValidateGpuIndex(int32_t gpu_index);
 

@@ -11,9 +11,9 @@
 
 #include "server/delivery/request/CreatePartitionRequest.h"
 #include "server/DBWrapper.h"
+#include "server/ValidationUtil.h"
 #include "utils/Log.h"
 #include "utils/TimeRecorder.h"
-#include "utils/ValidationUtil.h"
 
 #include <fiu-local.h>
 #include <memory>
@@ -43,7 +43,7 @@ CreatePartitionRequest::OnExecute() {
 
     try {
         // step 1: check arguments
-        auto status = ValidationUtil::ValidateCollectionName(collection_name_);
+        auto status = ValidateCollectionName(collection_name_);
         fiu_do_on("CreatePartitionRequest.OnExecute.invalid_collection_name",
                   status = Status(milvus::SERVER_UNEXPECTED_ERROR, ""));
         if (!status.ok()) {
@@ -54,7 +54,7 @@ CreatePartitionRequest::OnExecute() {
             return Status(SERVER_INVALID_PARTITION_TAG, "'_default' is built-in partition tag");
         }
 
-        status = ValidationUtil::ValidatePartitionTags({tag_});
+        status = ValidatePartitionTags({tag_});
         fiu_do_on("CreatePartitionRequest.OnExecute.invalid_partition_name",
                   status = Status(milvus::SERVER_UNEXPECTED_ERROR, ""));
         if (!status.ok()) {

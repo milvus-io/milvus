@@ -12,10 +12,10 @@
 #include "server/delivery/request/CreateCollectionRequest.h"
 #include "db/Utils.h"
 #include "server/DBWrapper.h"
+#include "server/ValidationUtil.h"
 #include "server/delivery/request/BaseRequest.h"
 #include "utils/Log.h"
 #include "utils/TimeRecorder.h"
-#include "utils/ValidationUtil.h"
 
 #include <fiu-local.h>
 #include <memory>
@@ -50,24 +50,24 @@ CreateCollectionRequest::OnExecute() {
 
     try {
         // step 1: check arguments
-        auto status = ValidationUtil::ValidateCollectionName(collection_name_);
+        auto status = ValidateCollectionName(collection_name_);
         if (!status.ok()) {
             return status;
         }
 
-        status = ValidationUtil::ValidateTableDimension(dimension_, metric_type_);
+        status = ValidateTableDimension(dimension_, metric_type_);
         if (!status.ok()) {
             return status;
         }
 
-        status = ValidationUtil::ValidateCollectionIndexFileSize(index_file_size_);
+        status = ValidateCollectionIndexFileSize(index_file_size_);
         fiu_do_on("CreateCollectionRequest.OnExecute.invalid_index_file_size",
                   status = Status(milvus::SERVER_UNEXPECTED_ERROR, ""));
         if (!status.ok()) {
             return status;
         }
 
-        status = ValidationUtil::ValidateCollectionIndexMetricType(metric_type_);
+        status = ValidateCollectionIndexMetricType(metric_type_);
         if (!status.ok()) {
             return status;
         }
