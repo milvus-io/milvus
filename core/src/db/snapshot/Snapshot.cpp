@@ -118,16 +118,75 @@ Snapshot::Snapshot(ID_TYPE id) {
         }
     }
 
-    /* for(auto kv : partition_commits_) { */
-    /*     std::cout << this << " Snapshot " << collection_commit_->GetID() << " PartitionCommit " << */
-    /*         kv.first << " Partition " << kv.second->GetPartitionId() << std::endl; */
-    /* } */
-    /* for(auto kv : p_pc_map_) { */
-    /*     std::cout << this << " Snapshot " << collection_commit_->GetID() << " P " << */
-    /*         kv.first << " PC " << kv.second << std::endl; */
-    /* } */
-
     RefAll();
+}
+
+const std::string
+Snapshot::ToString() {
+    auto to_matrix_string = [](const MappingT& mappings, int line_length, size_t ident = 0) -> std::string {
+        std::stringstream ss;
+        std::string l1_spaces;
+        for (auto i = 0; i < ident; ++i) {
+            l1_spaces += " ";
+        }
+        auto l2_spaces = l1_spaces + l1_spaces;
+        std::string prefix = "";
+        if (mappings.size() > line_length) {
+            prefix = "\n" + l1_spaces;
+        }
+        ss << prefix << "[";
+        auto pos = 0;
+        for (auto id : mappings) {
+            if (pos > line_length) {
+                pos = 0;
+                ss << "\n" << l2_spaces;
+            } else if (pos == 0) {
+                if (prefix != "") {
+                    ss << "\n" << l2_spaces;
+                }
+            } else {
+                ss << ", ";
+            }
+            ss << id;
+            pos++;
+        }
+        ss << prefix << "]";
+        return ss.str();
+    };
+
+    int row_element_size = 8;
+    std::stringstream ss;
+    ss << "****************************** Snapshot " << GetID() << " ******************************";
+    ss << "\nCollection: id=" << GetCollectionId() << ",name=\"" << GetName() << "\"";
+    ss << ", CollectionCommit: id=" << GetCollectionCommit()->GetID();
+    ss << ",mappings=";
+    auto& cc_m = GetCollectionCommit()->GetMappings();
+    ss << to_matrix_string(cc_m, row_element_size, 2);
+    for (auto& p_c_id : cc_m) {
+        auto p_c = GetResource<PartitionCommit>(p_c_id);
+        auto p = GetResource<Partition>(p_c->GetPartitionId());
+        ss << "\nPartition: id=" << p->GetID() << ",name=\"" << p->GetName() << "\"";
+        ss << ", PartitionCommit: id=" << p_c->GetID();
+        ss << ",mappings=";
+        auto& pc_m = p_c->GetMappings();
+        ss << to_matrix_string(pc_m, row_element_size, 2);
+        for (auto& sc_id : pc_m) {
+            auto sc = GetResource<SegmentCommit>(sc_id);
+            auto se = GetResource<Segment>(sc->GetSegmentId());
+            ss << "\n  Segment: id=" << se->GetID();
+            ss << ", SegmentCommit: id=" << sc->GetID();
+            ss << ",mappings=";
+            auto& sc_m = sc->GetMappings();
+            ss << to_matrix_string(sc_m, row_element_size, 2);
+            for (auto& sf_id : sc_m) {
+                auto sf = GetResource<SegmentFile>(sf_id);
+                ss << "\n\tSegmentFile: id=" << sf_id << ",field_element_id=" << sf->GetFieldElementId();
+            }
+        }
+    }
+    ss << "\n----------------------------------------------------------------------------------------";
+
+    return ss.str();
 }
 
 }  // namespace snapshot

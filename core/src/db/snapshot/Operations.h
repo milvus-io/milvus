@@ -41,8 +41,13 @@ class Operations : public std::enable_shared_from_this<Operations> {
                const OperationsType& type = OperationsType::Invalid);
 
     const ScopedSnapshotT&
-    GetPrevSnapshot() const {
+    GetStartedSS() const {
         return prev_ss_;
+    }
+
+    const ScopedSnapshotT&
+    GetAdjustedSS() const {
+        return context_.prev_ss;
     }
 
     virtual const LSN_TYPE&
@@ -201,6 +206,8 @@ class CommitOperation : public Operations {
 
     Status
     GetResource(typename ResourceT::Ptr& res, bool wait = false) {
+        if (!status_.ok())
+            return status_;
         if (wait) {
             WaitToFinish();
         }
@@ -248,6 +255,8 @@ class LoadOperation : public Operations {
 
     Status
     GetResource(typename ResourceT::Ptr& res, bool wait = false) {
+        if (!status_.ok())
+            return status_;
         if (wait) {
             WaitToFinish();
         }
