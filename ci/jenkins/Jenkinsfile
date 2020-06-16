@@ -29,7 +29,6 @@ pipeline {
         MILVUS_ROOT_PATH="/var/lib"
         MILVUS_INSTALL_PREFIX="${env.MILVUS_ROOT_PATH}/${env.PROJECT_NAME}"
         LOWER_BUILD_TYPE = params.BUILD_TYPE.toLowerCase()
-        IS_MANUAL_TRIGGER_TYPE = params.IS_MANUAL_TRIGGER_TYPE
         SEMVER = "${BRANCH_NAME.contains('/') ? BRANCH_NAME.substring(BRANCH_NAME.lastIndexOf('/') + 1) : BRANCH_NAME}"
         PIPELINE_NAME = "milvus-ci"
         HELM_BRANCH = "0.10.0"
@@ -174,7 +173,7 @@ pipeline {
                                     container('milvus-test-env') {
                                         script {
                                             boolean isNightlyTest = isTimeTriggeredBuild()
-                                            if (isNightlyTest || "${env.IS_MANUAL_TRIGGER_TYPE}" == "True") {
+                                            if (isNightlyTest || "${params.IS_MANUAL_TRIGGER_TYPE}" == "True") {
                                                 load "${env.WORKSPACE}/ci/jenkins/step/singleDevNightlyTest.groovy"
                                                 load "${env.WORKSPACE}/ci/jenkins/step/shardsDevNightlyTest.groovy"
                                             } else {
@@ -192,7 +191,7 @@ pipeline {
                                     script {
                                         load "${env.WORKSPACE}/ci/jenkins/step/cleanupSingleDev.groovy"
                                         boolean isNightlyTest = isTimeTriggeredBuild()
-                                        if (isNightlyTest || "${env.IS_MANUAL_TRIGGER_TYPE}" == "True") {
+                                        if (isNightlyTest || "${params.IS_MANUAL_TRIGGER_TYPE}" == "True") {
                                             load "${env.WORKSPACE}/ci/jenkins/step/cleanupShardsDev.groovy"
                                         }
                                     }
