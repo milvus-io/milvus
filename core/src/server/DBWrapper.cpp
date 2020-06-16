@@ -19,6 +19,7 @@
 #include <faiss/utils/distances.h>
 
 #include "config/Config.h"
+#include "config/Utils.h"
 #include "db/DBFactory.h"
 #include "utils/CommonUtil.h"
 #include "utils/Log.h"
@@ -144,7 +145,7 @@ DBWrapper::StartService() {
         LOG_SERVER_DEBUG_ << "Specify openmp thread number: " << omp_thread;
     } else {
         int64_t sys_thread_cnt = 8;
-        if (CommonUtil::GetSystemAvailableThreads(sys_thread_cnt)) {
+        if (GetSystemAvailableThreads(sys_thread_cnt)) {
             omp_thread = static_cast<int32_t>(ceil(sys_thread_cnt * 0.5));
             omp_set_num_threads(omp_thread);
         }

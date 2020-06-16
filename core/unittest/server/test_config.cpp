@@ -19,8 +19,8 @@
 
 #include "config/Config.h"
 #include "config/YamlConfigMgr.h"
+#include "config/Utils.h"
 #include "server/utils.h"
-#include "utils/CommonUtil.h"
 #include "utils/StringHelpFunctions.h"
 
 namespace {
@@ -258,7 +258,7 @@ TEST_F(ConfigTest, SERVER_CONFIG_VALID_TEST) {
     {
         // #2564
         int64_t total_mem = 0, free_mem = 0;
-        milvus::server::CommonUtil::GetSystemMemInfo(total_mem, free_mem);
+        milvus::server::GetSystemMemInfo(total_mem, free_mem);
         ASSERT_TRUE(config.SetCacheConfigInsertBufferSize("1GB").ok());
         int64_t cache_cpu_cache_size = total_mem / 2;
         float cache_cpu_cache_threshold = 0.7;
@@ -270,7 +270,7 @@ TEST_F(ConfigTest, SERVER_CONFIG_VALID_TEST) {
 
     {
         int64_t total_mem = 0, free_mem = 0;
-        milvus::server::CommonUtil::GetSystemMemInfo(total_mem, free_mem);
+        milvus::server::GetSystemMemInfo(total_mem, free_mem);
         ASSERT_TRUE(config.SetCacheConfigInsertBufferSize("1GB").ok());
         int64_t cache_cpu_cache_size = total_mem - 1073741824 - 1; // total_size - 1GB - 1
         ASSERT_TRUE(config.SetCacheConfigCpuCacheCapacity(std::to_string(cache_cpu_cache_size)).ok());

@@ -30,7 +30,6 @@
 #include "config/YamlConfigMgr.h"
 #include "server/DBWrapper.h"
 #include "thirdparty/nlohmann/json.hpp"
-#include "utils/CommonUtil.h"
 #include "utils/Log.h"
 #include "utils/StringHelpFunctions.h"
 
@@ -1177,7 +1176,7 @@ Config::CheckCacheConfigCpuCacheCapacity(const std::string& value) {
         }
 
         int64_t total_mem = 0, free_mem = 0;
-        CommonUtil::GetSystemMemInfo(total_mem, free_mem);
+        GetSystemMemInfo(total_mem, free_mem);
         if (cache_size >= total_mem) {
             std::string msg =
                 "Invalid cpu cache size: " + value + ". Possible reason: cache.cache_size exceeds system memory.";
@@ -1239,7 +1238,7 @@ Config::CheckCacheConfigInsertBufferSize(const std::string& value) {
         int64_t cache_size = parse_bytes(str, err);
 
         int64_t total_mem = 0, free_mem = 0;
-        CommonUtil::GetSystemMemInfo(total_mem, free_mem);
+        GetSystemMemInfo(total_mem, free_mem);
         if (buffer_size + cache_size >= total_mem) {
             std::string msg = "Invalid insert buffer size: " + value +
                               ". Possible reason: sum of cache.cache_size and "
@@ -1319,7 +1318,7 @@ Config::CheckEngineConfigOmpThreadNum(const std::string& value) {
 
     int64_t omp_thread = std::stoll(value);
     int64_t sys_thread_cnt = 8;
-    CommonUtil::GetSystemAvailableThreads(sys_thread_cnt);
+    GetSystemAvailableThreads(sys_thread_cnt);
     if (omp_thread > sys_thread_cnt) {
         std::string msg = "Invalid omp thread num: " + value +
                           ". Possible reason: engine_config.omp_thread_num exceeds system cpu cores.";

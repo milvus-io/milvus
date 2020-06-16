@@ -16,56 +16,20 @@
 #include "utils/Log.h"
 
 #include <dirent.h>
+#include <fiu-local.h>
 #include <pwd.h>
 #include <string.h>
 #include <sys/stat.h>
-#include <sys/sysinfo.h>
 #include <time.h>
 #include <unistd.h>
+#include <boost/filesystem.hpp>
 #include <iostream>
-#include <thread>
 #include <vector>
-
-#include "boost/filesystem.hpp"
-
-#if defined(__x86_64__)
-#define THREAD_MULTIPLY_CPU 1
-#elif defined(__powerpc64__)
-#define THREAD_MULTIPLY_CPU 4
-#else
-#define THREAD_MULTIPLY_CPU 1
-#endif
-
-#include <fiu-local.h>
 
 namespace milvus {
 namespace server {
 
 namespace fs = boost::filesystem;
-
-bool
-CommonUtil::GetSystemMemInfo(int64_t& total_mem, int64_t& free_mem) {
-    struct sysinfo info;
-    int ret = sysinfo(&info);
-    total_mem = info.totalram;
-    free_mem = info.freeram;
-
-    return ret == 0;  // succeed 0, failed -1
-}
-
-bool
-CommonUtil::GetSystemAvailableThreads(int64_t& thread_count) {
-    // threadCnt = std::thread::hardware_concurrency();
-    thread_count = sysconf(_SC_NPROCESSORS_CONF);
-    thread_count *= THREAD_MULTIPLY_CPU;
-    fiu_do_on("CommonUtil.GetSystemAvailableThreads.zero_thread", thread_count = 0);
-
-    if (thread_count == 0) {
-        thread_count = 8;
-    }
-
-    return true;
-}
 
 bool
 CommonUtil::IsDirectoryExist(const std::string& path) {

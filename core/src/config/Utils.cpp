@@ -13,18 +13,28 @@
 #include "utils/Log.h"
 #include "utils/StringHelpFunctions.h"
 
-#include <algorithm>
 #include <arpa/inet.h>
+#include <algorithm>
 #include <cmath>
 #ifdef MILVUS_GPU_VERSION
 #include <cuda_runtime.h>
 #endif
 #include <fiu-local.h>
+#include <sys/stat.h>
+#include <sys/sysinfo.h>
+#include <unistd.h>
 #include <limits>
 #include <regex>
 #include <set>
-#include <string>
 #include <unordered_map>
+
+#if defined(__x86_64__)
+#define THREAD_MULTIPLY_CPU 1
+#elif defined(__powerpc64__)
+#define THREAD_MULTIPLY_CPU 4
+#else
+#define THREAD_MULTIPLY_CPU 1
+#endif
 
 namespace milvus {
 namespace server {
@@ -90,6 +100,30 @@ parse_bytes(const std::string& str, std::string& err) {
         err = "Unknown error happened on parse bytes.";
     }
     return 0;
+}
+
+bool
+GetSystemMemInfo(int64_t& total_mem, int64_t& free_mem) {
+    struct sysinfo info;
+    int ret = sysinfo(&info);
+    total_mem = info.totalram;
+    free_mem = info.freeram;
+
+    return ret == 0;  // succeed 0, failed -1
+}
+
+bool
+GetSystemAvailableThreads(int64_t& thread_count) {
+    // threadCnt = std::thread::hardware_concurrency();
+    thread_count = sysconf(_SC_NPROCESSORS_CONF);
+    thread_count *= THREAD_MULTIPLY_CPU;
+    fiu_do_on("CommonUtil.GetSystemAvailableThreads.zero_thread", thread_count = 0);
+
+    if (thread_count == 0) {
+        thread_count = 8;
+    }
+
+    return true;
 }
 
 Status

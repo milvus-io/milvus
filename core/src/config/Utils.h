@@ -14,9 +14,6 @@
 #include <string>
 #include <vector>
 
-#include "db/Types.h"
-#include "db/meta/MetaTypes.h"
-#include "utils/Json.h"
 #include "utils/Status.h"
 
 namespace milvus {
@@ -24,6 +21,12 @@ namespace server {
 
 extern int64_t
 parse_bytes(const std::string& str, std::string& err);
+
+extern bool
+GetSystemMemInfo(int64_t& total_mem, int64_t& free_mem);
+
+extern bool
+GetSystemAvailableThreads(int64_t& thread_count);
 
 extern Status
 ValidateGpuIndex(int32_t gpu_index);

@@ -67,17 +67,17 @@ TEST(UtilTest, SIGNAL_TEST) {
 
 TEST(UtilTest, COMMON_TEST) {
     int64_t total_mem = 0, free_mem = 0;
-    milvus::server::CommonUtil::GetSystemMemInfo(total_mem, free_mem);
+    milvus::server::GetSystemMemInfo(total_mem, free_mem);
     ASSERT_GT(total_mem, 0);
     ASSERT_GT(free_mem, 0);
 
     int64_t thread_cnt = 0;
-    milvus::server::CommonUtil::GetSystemAvailableThreads(thread_cnt);
+    milvus::server::GetSystemAvailableThreads(thread_cnt);
     ASSERT_GT(thread_cnt, 0);
 
     fiu_init(0);
     fiu_enable("CommonUtil.GetSystemAvailableThreads.zero_thread", 1, NULL, 0);
-    milvus::server::CommonUtil::GetSystemAvailableThreads(thread_cnt);
+    milvus::server::GetSystemAvailableThreads(thread_cnt);
     ASSERT_GT(thread_cnt, 0);
     fiu_disable("CommonUtil.GetSystemAvailableThreads.zero_thread");
 
