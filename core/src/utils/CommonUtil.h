@@ -50,9 +50,6 @@ class CommonUtil {
     static std::string
     GetCurrentTimeStr();
 #endif
-
-    static void
-    EraseFromCache(const std::string& item_key);
 };
 
 }  // namespace server

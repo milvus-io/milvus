@@ -10,17 +10,13 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
 #include "utils/CommonUtil.h"
-#include "cache/CpuCacheMgr.h"
-#include "cache/GpuCacheMgr.h"
 #include "config/Config.h"
 #include "utils/Log.h"
 
 #include <dirent.h>
 #include <fiu-local.h>
 #include <pwd.h>
-#include <string.h>
 #include <sys/stat.h>
-#include <time.h>
 #include <unistd.h>
 #include <boost/filesystem.hpp>
 #include <iostream>
@@ -207,25 +203,6 @@ CommonUtil::GetCurrentTimeStr() {
     return str;
 }
 #endif
-
-void
-CommonUtil::EraseFromCache(const std::string& item_key) {
-    if (item_key.empty()) {
-        LOG_SERVER_ERROR_ << "Empty key cannot be erased from cache";
-        return;
-    }
-
-    cache::CpuCacheMgr::GetInstance()->EraseItem(item_key);
-
-#ifdef MILVUS_GPU_VERSION
-    server::Config& config = server::Config::GetInstance();
-    std::vector<int64_t> gpus;
-    config.GetGpuResourceConfigSearchResources(gpus);
-    for (auto& gpu : gpus) {
-        cache::GpuCacheMgr::GetInstance(gpu)->EraseItem(item_key);
-    }
-#endif
-}
 
 }  // namespace server
 }  // namespace milvus

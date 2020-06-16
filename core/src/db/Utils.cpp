@@ -20,6 +20,10 @@
 #include <regex>
 #include <vector>
 
+#include "cache/CpuCacheMgr.h"
+#ifdef MILVUS_GPU_VERSION
+#include "cache/GpuCacheMgr.h"
+#endif
 #include "config/Config.h"
 //#include "storage/s3/S3ClientWrapper.h"
 #include "utils/CommonUtil.h"
@@ -275,6 +279,25 @@ ExitOnWriteError(Status& status) {
     if (status.code() == SERVER_WRITE_ERROR) {
         utils::SendExitSignal();
     }
+}
+
+void
+EraseFromCache(const std::string& item_key) {
+    if (item_key.empty()) {
+        LOG_SERVER_ERROR_ << "Empty key cannot be erased from cache";
+        return;
+    }
+
+    cache::CpuCacheMgr::GetInstance()->EraseItem(item_key);
+
+#ifdef MILVUS_GPU_VERSION
+    server::Config& config = server::Config::GetInstance();
+    std::vector<int64_t> gpus;
+    config.GetGpuResourceConfigSearchResources(gpus);
+    for (auto& gpu : gpus) {
+        cache::GpuCacheMgr::GetInstance(gpu)->EraseItem(item_key);
+    }
+#endif
 }
 
 }  // namespace utils
