@@ -29,14 +29,14 @@ BuildOperation::DoExecute(Store& store) {
     if (!status.ok())
         return status;
 
-    SegmentCommitOperation op(context_, context_.prev_ss);
+    SegmentCommitOperation op(context_, GetAdjustedSS());
     op(store);
     status = op.GetResource(context_.new_segment_commit);
     if (!status.ok())
         return status;
     AddStepWithLsn(*context_.new_segment_commit, context_.lsn);
 
-    PartitionCommitOperation pc_op(context_, context_.prev_ss);
+    PartitionCommitOperation pc_op(context_, GetAdjustedSS());
     pc_op(store);
 
     OperationContext cc_context;
@@ -52,7 +52,7 @@ BuildOperation::DoExecute(Store& store) {
         return status;
     AddStepWithLsn(*context_.new_partition_commit, context_.lsn);
 
-    CollectionCommitOperation cc_op(cc_context, context_.prev_ss);
+    CollectionCommitOperation cc_op(cc_context, GetAdjustedSS());
     cc_op(store);
     status = cc_op.GetResource(context_.new_collection_commit);
     if (!status.ok())
@@ -77,7 +77,13 @@ BuildOperation::CommitNewSegmentFile(const SegmentFileContext& context, SegmentF
         CheckStale(std::bind(&BuildOperation::CheckSegmentStale, this, std::placeholders::_1, context.segment_id));
     if (!status.ok())
         return status;
-    auto new_sf_op = std::make_shared<SegmentFileOperation>(context, prev_ss_);
+    auto segment = GetStartedSS()->GetResource<Segment>(context.segment_id);
+    if (!segment) {
+        return Status(SS_INVALID_CONTEX_ERROR, "Invalid segment_id in context");
+    }
+    auto ctx = context;
+    ctx.partition_id = segment->GetPartitionId();
+    auto new_sf_op = std::make_shared<SegmentFileOperation>(ctx, GetStartedSS());
     status = new_sf_op->Push();
     if (!status.ok())
         return status;
@@ -101,7 +107,7 @@ NewSegmentOperation::DoExecute(Store& store) {
     /* auto status = PrevSnapshotRequried(); */
     /* if (!status.ok()) return status; */
     // TODO: Check Context
-    SegmentCommitOperation op(context_, context_.prev_ss);
+    SegmentCommitOperation op(context_, GetAdjustedSS());
     auto status = op(store);
     if (!status.ok())
         return status;
@@ -117,7 +123,7 @@ NewSegmentOperation::DoExecute(Store& store) {
 
     OperationContext cc_context;
 
-    PartitionCommitOperation pc_op(context_, context_.prev_ss);
+    PartitionCommitOperation pc_op(context_, GetAdjustedSS());
     status = pc_op(store);
     if (!status.ok())
         return status;
@@ -132,7 +138,7 @@ NewSegmentOperation::DoExecute(Store& store) {
     /* } */
     /* std::cout << ")" << std::endl; */
 
-    CollectionCommitOperation cc_op(cc_context, context_.prev_ss);
+    CollectionCommitOperation cc_op(cc_context, GetAdjustedSS());
     status = cc_op(store);
     if (!status.ok())
         return status;
@@ -146,7 +152,7 @@ NewSegmentOperation::DoExecute(Store& store) {
 
 Status
 NewSegmentOperation::CommitNewSegment(SegmentPtr& created) {
-    auto op = std::make_shared<SegmentOperation>(context_, prev_ss_);
+    auto op = std::make_shared<SegmentOperation>(context_, GetStartedSS());
     auto status = op->Push();
     if (!status.ok())
         return status;
@@ -163,7 +169,7 @@ NewSegmentOperation::CommitNewSegmentFile(const SegmentFileContext& context, Seg
     auto c = context;
     c.segment_id = context_.new_segment->GetID();
     c.partition_id = context_.new_segment->GetPartitionId();
-    auto new_sf_op = std::make_shared<SegmentFileOperation>(c, prev_ss_);
+    auto new_sf_op = std::make_shared<SegmentFileOperation>(c, GetStartedSS());
     auto status = new_sf_op->Push();
     if (!status.ok())
         return status;
@@ -179,13 +185,25 @@ MergeOperation::MergeOperation(const OperationContext& context, ScopedSnapshotT 
 }
 
 Status
+MergeOperation::OnSnapshotStale() {
+    for (auto& stale_seg : context_.stale_segments) {
+        auto expect_sc = GetStartedSS()->GetSegmentCommitBySegmentId(stale_seg->GetID());
+        auto latest_sc = GetAdjustedSS()->GetSegmentCommitBySegmentId(stale_seg->GetID());
+        if (!latest_sc || (latest_sc->GetID() != expect_sc->GetID())) {
+            return Status(SS_STALE_ERROR, "MergeOperation on stale segments");
+        }
+    }
+    return Status::OK();
+}
+
+Status
 MergeOperation::CommitNewSegment(SegmentPtr& created) {
     Status status;
     if (context_.new_segment) {
         created = context_.new_segment;
         return status;
     }
-    auto op = std::make_shared<SegmentOperation>(context_, prev_ss_);
+    auto op = std::make_shared<SegmentOperation>(context_, GetStartedSS());
     status = op->Push();
     if (!status.ok())
         return status;
@@ -207,7 +225,7 @@ MergeOperation::CommitNewSegmentFile(const SegmentFileContext& context, SegmentF
     auto c = context;
     c.segment_id = new_segment->GetID();
     c.partition_id = new_segment->GetPartitionId();
-    auto new_sf_op = std::make_shared<SegmentFileOperation>(c, prev_ss_);
+    auto new_sf_op = std::make_shared<SegmentFileOperation>(c, GetStartedSS());
     status = new_sf_op->Push();
     if (!status.ok())
         return status;
@@ -224,7 +242,7 @@ MergeOperation::DoExecute(Store& store) {
     // PXU TODO:
     // 1. Check all requried field elements have related segment files
     // 2. Check Stale and others
-    SegmentCommitOperation op(context_, context_.prev_ss);
+    SegmentCommitOperation op(context_, GetAdjustedSS());
     auto status = op(store);
     if (!status.ok())
         return status;
@@ -239,7 +257,7 @@ MergeOperation::DoExecute(Store& store) {
     /* } */
     /* std::cout << ")" << std::endl; */
 
-    PartitionCommitOperation pc_op(context_, context_.prev_ss);
+    PartitionCommitOperation pc_op(context_, GetAdjustedSS());
     status = pc_op(store);
     if (!status.ok())
         return status;
@@ -257,7 +275,7 @@ MergeOperation::DoExecute(Store& store) {
     /* } */
     /* std::cout << ")" << std::endl; */
 
-    CollectionCommitOperation cc_op(cc_context, context_.prev_ss);
+    CollectionCommitOperation cc_op(cc_context, GetAdjustedSS());
     status = cc_op(store);
     if (!status.ok())
         return status;
@@ -309,8 +327,8 @@ std::string
 DropPartitionOperation::GetRepr() const {
     std::stringstream ss;
     ss << "<" << GetName() << "(";
-    if (prev_ss_) {
-        ss << "SS=" << prev_ss_->GetID();
+    if (GetAdjustedSS()) {
+        ss << "SS=" << GetAdjustedSS()->GetID();
     }
     ss << "," << c_context_.ToString();
     ss << "," << context_.ToString();
@@ -325,19 +343,19 @@ DropPartitionOperation::DoExecute(Store& store) {
     PartitionPtr p;
     auto id = c_context_.id;
     if (id == 0) {
-        status = prev_ss_->GetPartitionId(c_context_.name, id);
+        status = GetAdjustedSS()->GetPartitionId(c_context_.name, id);
         c_context_.id = id;
     }
     if (!status.ok())
         return status;
-    auto p_c = prev_ss_->GetPartitionCommitByPartitionId(id);
+    auto p_c = GetAdjustedSS()->GetPartitionCommitByPartitionId(id);
     if (!p_c)
         return Status(SS_NOT_FOUND_ERROR, "No partition commit found");
     context_.stale_partition_commit = p_c;
 
     OperationContext op_ctx;
     op_ctx.stale_partition_commit = p_c;
-    auto op = CollectionCommitOperation(op_ctx, prev_ss_);
+    auto op = CollectionCommitOperation(op_ctx, GetAdjustedSS());
     status = op(store);
     if (!status.ok())
         return status;
@@ -368,7 +386,7 @@ CreatePartitionOperation::PreCheck() {
 Status
 CreatePartitionOperation::CommitNewPartition(const PartitionContext& context, PartitionPtr& partition) {
     Status status;
-    auto op = std::make_shared<PartitionOperation>(context, prev_ss_);
+    auto op = std::make_shared<PartitionOperation>(context, GetStartedSS());
     status = op->Push();
     if (!status.ok())
         return status;
@@ -387,13 +405,13 @@ CreatePartitionOperation::DoExecute(Store& store) {
     if (!status.ok())
         return status;
 
-    auto collection = prev_ss_->GetCollection();
+    auto collection = GetAdjustedSS()->GetCollection();
     auto partition = context_.new_partition;
 
     PartitionCommitPtr pc;
     OperationContext pc_context;
     pc_context.new_partition = partition;
-    auto pc_op = PartitionCommitOperation(pc_context, prev_ss_);
+    auto pc_op = PartitionCommitOperation(pc_context, GetAdjustedSS());
     status = pc_op(store);
     if (!status.ok())
         return status;
@@ -404,7 +422,7 @@ CreatePartitionOperation::DoExecute(Store& store) {
     OperationContext cc_context;
     cc_context.new_partition_commit = pc;
     context_.new_partition_commit = pc;
-    auto cc_op = CollectionCommitOperation(cc_context, prev_ss_);
+    auto cc_op = CollectionCommitOperation(cc_context, GetAdjustedSS());
     status = cc_op(store);
     if (!status.ok())
         return status;
@@ -432,8 +450,8 @@ std::string
 CreateCollectionOperation::GetRepr() const {
     std::stringstream ss;
     ss << "<" << GetName() << "(";
-    if (prev_ss_) {
-        ss << "SS=" << prev_ss_->GetID();
+    if (GetAdjustedSS()) {
+        ss << "SS=" << GetAdjustedSS()->GetID();
     }
     ss << c_context_.ToString();
     ss << "," << context_.ToString();
