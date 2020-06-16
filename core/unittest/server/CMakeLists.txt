@@ -26,7 +26,7 @@ link_directories("${CUDA_TOOLKIT_ROOT_DIR}/lib64")
 set(util_files
         ${MILVUS_ENGINE_SRC}/utils/StringHelpFunctions.cpp
         ${MILVUS_ENGINE_SRC}/utils/LogUtil.cpp
-        ${MILVUS_ENGINE_SRC}/utils/SignalUtil.cpp)
+        ${MILVUS_ENGINE_SRC}/utils/SignalHandler.cpp)
 
 set(server_test_files
         ${common_files}

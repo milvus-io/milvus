@@ -14,12 +14,18 @@
 namespace milvus {
 namespace server {
 
-class SignalUtil {
+typedef void (*func_ptr)(void);
+
+class SignalHandler {
  public:
     static void
     HandleSignal(int signum);
+
     static void
     PrintStacktrace();
+
+ private:
+    static func_ptr routine_func_;
 };
 
 }  // namespace server

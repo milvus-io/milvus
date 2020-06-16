@@ -31,6 +31,7 @@
 #include "Utils.h"
 #include "cache/CpuCacheMgr.h"
 #include "cache/GpuCacheMgr.h"
+#include "config/Utils.h"
 #include "db/IDGenerator.h"
 #include "db/merge/MergeManagerFactory.h"
 #include "engine/EngineFactory.h"
@@ -52,7 +53,6 @@
 #include "utils/Log.h"
 #include "utils/StringHelpFunctions.h"
 #include "utils/TimeRecorder.h"
-#include "utils/ValidationUtil.h"
 #include "wal/WalDefinations.h"
 
 #include "search/TaskInst.h"

@@ -29,7 +29,6 @@
 #include "utils/CommonUtil.h"
 #include "utils/Log.h"
 #include "utils/TimeRecorder.h"
-#include "utils/ValidationUtil.h"
 
 namespace milvus {
 namespace scheduler {

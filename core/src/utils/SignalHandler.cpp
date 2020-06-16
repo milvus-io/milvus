@@ -9,8 +9,7 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
-#include "utils/SignalUtil.h"
-#include "src/server/Server.h"
+#include "utils/SignalHandler.h"
 #include "utils/Log.h"
 
 #include <execinfo.h>
@@ -21,31 +20,29 @@ namespace milvus {
 namespace server {
 
 void
-SignalUtil::HandleSignal(int signum) {
+SignalHandler::HandleSignal(int signum) {
     switch (signum) {
         case SIGINT:
         case SIGUSR2: {
             LOG_SERVER_INFO_ << "Server received signal: " << signum;
-
-            server::Server& server = server::Server::GetInstance();
-            server.Stop();
-
+            if (routine_func_ != nullptr) {
+                (*routine_func_)();
+            }
             exit(0);
         }
         default: {
             LOG_SERVER_INFO_ << "Server received critical signal: " << signum;
-            SignalUtil::PrintStacktrace();
-
-            server::Server& server = server::Server::GetInstance();
-            server.Stop();
-
+            SignalHandler::PrintStacktrace();
+            if (routine_func_ != nullptr) {
+                (*routine_func_)();
+            }
             exit(1);
         }
     }
 }
 
 void
-SignalUtil::PrintStacktrace() {
+SignalHandler::PrintStacktrace() {
     LOG_SERVER_INFO_ << "Call stack:";
 
     const int size = 32;

@@ -11,7 +11,7 @@
 
 #include "server/web_impl/utils/Util.h"
 
-#include "utils/ValidationUtil.h"
+#include "config/Utils.h"
 
 namespace milvus {
 namespace server {
@@ -22,7 +22,7 @@ ParseQueryInteger(const OQueryParams& query_params, const std::string& key, int6
     auto query = query_params.get(key.c_str());
     if (nullptr != query.get() && query->getSize() > 0) {
         std::string value_str = query->std_str();
-        if (!ValidationUtil::ValidateStringIsNumber(value_str).ok()) {
+        if (!ValidateStringIsNumber(value_str).ok()) {
             return Status(ILLEGAL_QUERY_PARAM,
                           "Query param \'offset\' is illegal, only non-negative integer supported");
         }
@@ -52,7 +52,7 @@ ParseQueryBool(const OQueryParams& query_params, const std::string& key, bool& v
     auto query = query_params.get(key.c_str());
     if (nullptr != query.get() && query->getSize() > 0) {
         std::string value_str = query->std_str();
-        if (!ValidationUtil::ValidateStringIsBool(value_str).ok()) {
+        if (!ValidateStringIsBool(value_str).ok()) {
             return Status(ILLEGAL_QUERY_PARAM, "Query param \'all_required\' must be a bool");
         }
         value = value_str == "True" || value_str == "true";

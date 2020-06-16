@@ -1,6 +1,6 @@
 # Changelog
 
-Please mark all change in change log and use the issue from GitHub
+Please mark all changes in change log and use the issue from GitHub
 
 # Milvus 0.11.0 (TBD)
 
@@ -14,6 +14,7 @@ Please mark all change in change log and use the issue from GitHub
 
 ## Improvement
 -   \#2543 Remove secondary_path related code
+-   \#2561 Clean util dependencies with other modules
 
 ## Task
 

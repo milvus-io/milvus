@@ -79,6 +79,9 @@ SendExitSignal();
 void
 ExitOnWriteError(Status& status);
 
+void
+EraseFromCache(const std::string& item_key);
+
 }  // namespace utils
 }  // namespace engine
 }  // namespace milvus

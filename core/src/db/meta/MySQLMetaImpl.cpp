@@ -34,11 +34,9 @@
 #include "db/IDGenerator.h"
 #include "db/Utils.h"
 #include "metrics/Metrics.h"
-#include "utils/CommonUtil.h"
 #include "utils/Exception.h"
 #include "utils/Log.h"
 #include "utils/StringHelpFunctions.h"
-#include "utils/ValidationUtil.h"
 
 namespace milvus {
 namespace engine {
@@ -2615,7 +2613,7 @@ MySQLMetaImpl::CleanUpFilesWithTTL(uint64_t seconds /*, CleanUpFilter* filter*/)
                 // erase file data from cache
                 // because GetCollectionFilePath won't able to generate file path after the file is deleted
                 utils::GetCollectionFilePath(options_, collection_file);
-                server::CommonUtil::EraseFromCache(collection_file.location_);
+                utils::EraseFromCache(collection_file.location_);
 
                 if (collection_file.file_type_ == (int)SegmentSchema::TO_DELETE) {
                     // delete file from disk storage
