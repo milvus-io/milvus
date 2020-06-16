@@ -5,16 +5,19 @@ Please mark all change in change log and use the issue from GitHub
 # Milvus 0.11.0 (TBD)
 
 ## Bug
-- \#2551 Fix test_hybrid_db and test_rpc error
+-   \#2487 Remove timeout when creating collection in dev test
+-   \#2551 Fix test_hybrid_db and test_rpc error
 
 ## Feature
-- \#2319 Redo metadata to support MVCC
+-   \#2319 Redo metadata to support MVCC
+-   \#2509 Count up query statistics for debug ease
 
 ## Improvement
+-   \#2543 Remove secondary_path related code
 
 ## Task
 
-# Milvus 0.10.0 (TBD)
+# Milvus 0.10.0 (2020-6-15)
 
 ## Bug
 -   \#2367 Fix inconsistent reading and writing when using mishards
@@ -22,6 +25,7 @@ Please mark all change in change log and use the issue from GitHub
 -   \#2373 Build index for small segment waste time on waiting background index thread finish
 -   \#2394 Drop collection timeout if too many partitions created on collection
 -   \#2549 Launch server fail using demo config
+-   \#2564 cache.cache_size range check error
 
 ## Feature
 -   \#2363 Update branch version
