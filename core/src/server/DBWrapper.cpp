@@ -82,7 +82,6 @@ DBWrapper::StartService() {
     }
     opt.insert_buffer_size_ = insert_buffer_size;
 
-#if 1
     bool cluster_enable = false;
     std::string cluster_role;
     STATUS_CHECK(config.GetClusterConfigEnable(cluster_enable));
@@ -97,27 +96,6 @@ DBWrapper::StartService() {
         std::cerr << "Error: cluster.role is not one of rw and ro." << std::endl;
         kill(0, SIGUSR1);
     }
-
-#else
-    std::string mode;
-    s = config.GetServerConfigDeployMode(mode);
-    if (!s.ok()) {
-        std::cerr << s.ToString() << std::endl;
-        return s;
-    }
-
-    if (mode == "single") {
-        opt.mode_ = engine::DBOptions::MODE::SINGLE;
-    } else if (mode == "cluster_readonly") {
-        opt.mode_ = engine::DBOptions::MODE::CLUSTER_READONLY;
-    } else if (mode == "cluster_writable") {
-        opt.mode_ = engine::DBOptions::MODE::CLUSTER_WRITABLE;
-    } else {
-        std::cerr << "Error: server_config.deploy_mode in server_config.yaml is not one of "
-                  << "single, cluster_readonly, and cluster_writable." << std::endl;
-        kill(0, SIGUSR1);
-    }
-#endif
 
     // get wal configurations
     s = config.GetWalConfigEnable(opt.wal_enable_);
@@ -212,16 +190,6 @@ DBWrapper::StartService() {
                   << ". Possible reason: db_config.primary_path is wrong in server_config.yaml or not available."
                   << std::endl;
         kill(0, SIGUSR1);
-    }
-
-    for (auto& path : opt.meta_.slave_paths_) {
-        s = CommonUtil::CreateDirectory(path);
-        if (!s.ok()) {
-            std::cerr << "Error: Failed to create database secondary path: " << path
-                      << ". Possible reason: db_config.secondary_path is wrong in server_config.yaml or not available."
-                      << std::endl;
-            kill(0, SIGUSR1);
-        }
     }
 
     // create db instance
