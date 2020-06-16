@@ -25,15 +25,14 @@
 #include <sstream>
 #include <unordered_map>
 
-#include "MetaConsts.h"
 #include "db/IDGenerator.h"
 #include "db/Utils.h"
+#include "db/meta/MetaConsts.h"
 #include "metrics/Metrics.h"
 #include "utils/CommonUtil.h"
 #include "utils/Exception.h"
 #include "utils/Log.h"
 #include "utils/StringHelpFunctions.h"
-#include "utils/ValidationUtil.h"
 
 #define USING_SQLITE_WARNING                                                                                       \
     LOG_ENGINE_WARNING_ << "You are using SQLite as the meta data management, which can't be used in production. " \

@@ -33,7 +33,6 @@
 #include "utils/CommonUtil.h"
 #include "utils/Log.h"
 #include "utils/StringHelpFunctions.h"
-#include "utils/ValidationUtil.h"
 
 namespace milvus {
 namespace server {
@@ -875,7 +874,7 @@ Config::CheckConfigVersion(const std::string& value) {
 /* cluster config */
 Status
 Config::CheckClusterConfigEnable(const std::string& value) {
-    return ValidationUtil::ValidateStringIsBool(value);
+    return ValidateStringIsBool(value);
 }
 
 Status
@@ -900,7 +899,7 @@ Config::CheckGeneralConfigTimezone(const std::string& value) {
         if (value.substr(0, 3) != "UTC") {
             return Status(SERVER_INVALID_ARGUMENT, "Invalid general.timezone: " + value);
         } else {
-            if (!ValidationUtil::IsNumber(value.substr(4))) {
+            if (!IsNumber(value.substr(4))) {
                 return Status(SERVER_INVALID_ARGUMENT, "Invalid general.timezone: " + value);
             }
         }
@@ -910,7 +909,7 @@ Config::CheckGeneralConfigTimezone(const std::string& value) {
 
 Status
 Config::CheckGeneralConfigMetaURI(const std::string& value) {
-    auto exist_error = !ValidationUtil::ValidateDbURI(value).ok();
+    auto exist_error = !ValidateDbURI(value).ok();
     fiu_do_on("check_config_meta_uri_fail", exist_error = true);
 
     if (exist_error) {
@@ -925,7 +924,7 @@ Config::CheckGeneralConfigMetaURI(const std::string& value) {
 /* network config */
 Status
 Config::CheckNetworkConfigBindAddress(const std::string& value) {
-    auto exist_error = !ValidationUtil::ValidateIpAddress(value).ok();
+    auto exist_error = !ValidateIpAddress(value).ok();
     fiu_do_on("check_config_bind_address_fail", exist_error = true);
 
     if (exist_error) {
@@ -937,7 +936,7 @@ Config::CheckNetworkConfigBindAddress(const std::string& value) {
 
 Status
 Config::CheckNetworkConfigBindPort(const std::string& value) {
-    auto exist_error = !ValidationUtil::ValidateStringIsNumber(value).ok();
+    auto exist_error = !ValidateStringIsNumber(value).ok();
     fiu_do_on("check_config_bind_port_fail", exist_error = true);
 
     if (exist_error) {
@@ -960,12 +959,12 @@ Config::CheckNetworkConfigBindPort(const std::string& value) {
 
 Status
 Config::CheckNetworkConfigHTTPEnable(const std::string& value) {
-    return ValidationUtil::ValidateStringIsBool(value);
+    return ValidateStringIsBool(value);
 }
 
 Status
 Config::CheckNetworkConfigHTTPPort(const std::string& value) {
-    if (!ValidationUtil::ValidateStringIsNumber(value).ok()) {
+    if (!ValidateStringIsNumber(value).ok()) {
         std::string msg = "Invalid web server port: " + value + ". Possible reason: network.http.port is not a number.";
         return Status(SERVER_INVALID_ARGUMENT, msg);
     } else {
@@ -986,7 +985,7 @@ Config::CheckNetworkConfigHTTPPort(const std::string& value) {
 /* DB config */
 Status
 Config::CheckDBConfigArchiveDiskThreshold(const std::string& value) {
-    auto exist_error = !ValidationUtil::ValidateStringIsNumber(value).ok();
+    auto exist_error = !ValidateStringIsNumber(value).ok();
     fiu_do_on("check_config_archive_disk_threshold_fail", exist_error = true);
 
     if (exist_error) {
@@ -999,7 +998,7 @@ Config::CheckDBConfigArchiveDiskThreshold(const std::string& value) {
 
 Status
 Config::CheckDBConfigArchiveDaysThreshold(const std::string& value) {
-    auto exist_error = !ValidationUtil::ValidateStringIsNumber(value).ok();
+    auto exist_error = !ValidateStringIsNumber(value).ok();
     fiu_do_on("check_config_archive_days_threshold_fail", exist_error = true);
 
     if (exist_error) {
@@ -1018,12 +1017,12 @@ Config::CheckStorageConfigPath(const std::string& value) {
         return Status(SERVER_INVALID_ARGUMENT, "storage.path is empty.");
     }
 
-    return ValidationUtil::ValidateStoragePath(value);
+    return ValidateStoragePath(value);
 }
 
 Status
 Config::CheckStorageConfigAutoFlushInterval(const std::string& value) {
-    auto exist_error = !ValidationUtil::ValidateStringIsNumber(value).ok();
+    auto exist_error = !ValidateStringIsNumber(value).ok();
     fiu_do_on("check_config_auto_flush_interval_fail", exist_error = true);
 
     if (exist_error) {
@@ -1037,7 +1036,7 @@ Config::CheckStorageConfigAutoFlushInterval(const std::string& value) {
 
 Status
 Config::CheckStorageConfigFileCleanupTimeout(const std::string& value) {
-    if (!ValidationUtil::ValidateStringIsNumber(value).ok()) {
+    if (!ValidateStringIsNumber(value).ok()) {
         std::string msg = "Invalid file_cleanup_timeout: " + value +
                           ". Possible reason: storage.file_cleanup_timeout is not a positive integer.";
         return Status(SERVER_INVALID_ARGUMENT, msg);
@@ -1058,7 +1057,7 @@ Config::CheckStorageConfigFileCleanupTimeout(const std::string& value) {
 
 // Status
 // Config::CheckStorageConfigS3Enable(const std::string& value) {
-//    if (!ValidationUtil::ValidateStringIsBool(value).ok()) {
+//    if (!ValidateStringIsBool(value).ok()) {
 //        std::string msg =
 //            "Invalid storage config: " + value + ". Possible reason: storage_config.s3_enable is not a boolean.";
 //        return Status(SERVER_INVALID_ARGUMENT, msg);
@@ -1068,7 +1067,7 @@ Config::CheckStorageConfigFileCleanupTimeout(const std::string& value) {
 //
 // Status
 // Config::CheckStorageConfigS3Address(const std::string& value) {
-//    if (!ValidationUtil::ValidateIpAddress(value).ok()) {
+//    if (!ValidateIpAddress(value).ok()) {
 //        std::string msg = "Invalid s3 address: " + value + ". Possible reason: storage_config.s3_address is invalid.";
 //        return Status(SERVER_INVALID_ARGUMENT, msg);
 //    }
@@ -1077,7 +1076,7 @@ Config::CheckStorageConfigFileCleanupTimeout(const std::string& value) {
 //
 // Status
 // Config::CheckStorageConfigS3Port(const std::string& value) {
-//    if (!ValidationUtil::ValidateStringIsNumber(value).ok()) {
+//    if (!ValidateStringIsNumber(value).ok()) {
 //        std::string msg = "Invalid s3 port: " + value + ". Possible reason: storage_config.s3_port is not a number.";
 //        return Status(SERVER_INVALID_ARGUMENT, msg);
 //    } else {
@@ -1122,7 +1121,7 @@ Config::CheckStorageConfigFileCleanupTimeout(const std::string& value) {
 /* metric config */
 Status
 Config::CheckMetricConfigEnableMonitor(const std::string& value) {
-    auto exist_error = !ValidationUtil::ValidateStringIsBool(value).ok();
+    auto exist_error = !ValidateStringIsBool(value).ok();
     fiu_do_on("check_config_enable_monitor_fail", exist_error = true);
 
     if (exist_error) {
@@ -1134,7 +1133,7 @@ Config::CheckMetricConfigEnableMonitor(const std::string& value) {
 
 Status
 Config::CheckMetricConfigAddress(const std::string& value) {
-    if (!ValidationUtil::ValidateIpAddress(value).ok()) {
+    if (!ValidateIpAddress(value).ok()) {
         std::string msg = "Invalid metric ip: " + value + ". Possible reason: metric.ip is invalid.";
         return Status(SERVER_INVALID_ARGUMENT, msg);
     }
@@ -1143,7 +1142,7 @@ Config::CheckMetricConfigAddress(const std::string& value) {
 
 Status
 Config::CheckMetricConfigPort(const std::string& value) {
-    if (!ValidationUtil::ValidateStringIsNumber(value).ok()) {
+    if (!ValidateStringIsNumber(value).ok()) {
         std::string msg = "Invalid metric port: " + value + ". Possible reason: metric.port is not a number.";
         return Status(SERVER_INVALID_ARGUMENT, msg);
     } else {
@@ -1205,7 +1204,7 @@ Status
 Config::CheckCacheConfigCpuCacheThreshold(const std::string& value) {
     fiu_return_on("check_config_cpu_cache_threshold_fail", Status(SERVER_INVALID_ARGUMENT, ""));
 
-    if (!ValidationUtil::ValidateStringIsFloat(value).ok()) {
+    if (!ValidateStringIsFloat(value).ok()) {
         std::string msg = "Invalid cpu cache threshold: " + value +
                           ". Possible reason: cache_config.cpu_cache_threshold is not in range (0.0, 1.0].";
         return Status(SERVER_INVALID_ARGUMENT, msg);
@@ -1255,7 +1254,7 @@ Status
 Config::CheckCacheConfigCacheInsertData(const std::string& value) {
     fiu_return_on("check_config_cache_insert_data_fail", Status(SERVER_INVALID_ARGUMENT, ""));
 
-    if (!ValidationUtil::ValidateStringIsBool(value).ok()) {
+    if (!ValidateStringIsBool(value).ok()) {
         std::string msg = "Invalid cache insert data option: " + value +
                           ". Possible reason: cache_config.cache_insert_data is not a boolean.";
         return Status(SERVER_INVALID_ARGUMENT, msg);
@@ -1300,7 +1299,7 @@ Status
 Config::CheckEngineConfigUseBlasThreshold(const std::string& value) {
     fiu_return_on("check_config_use_blas_threshold_fail", Status(SERVER_INVALID_ARGUMENT, ""));
 
-    if (!ValidationUtil::ValidateStringIsNumber(value).ok()) {
+    if (!ValidateStringIsNumber(value).ok()) {
         std::string msg = "Invalid use blas threshold: " + value +
                           ". Possible reason: engine_config.use_blas_threshold is not a positive integer.";
         return Status(SERVER_INVALID_ARGUMENT, msg);
@@ -1312,7 +1311,7 @@ Status
 Config::CheckEngineConfigOmpThreadNum(const std::string& value) {
     fiu_return_on("check_config_omp_thread_num_fail", Status(SERVER_INVALID_ARGUMENT, ""));
 
-    if (!ValidationUtil::ValidateStringIsNumber(value).ok()) {
+    if (!ValidateStringIsNumber(value).ok()) {
         std::string msg = "Invalid omp thread num: " + value +
                           ". Possible reason: engine_config.omp_thread_num is not a positive integer.";
         return Status(SERVER_INVALID_ARGUMENT, msg);
@@ -1346,7 +1345,7 @@ Status
 Config::CheckGpuResourceConfigEnable(const std::string& value) {
     fiu_return_on("check_config_gpu_resource_enable_fail", Status(SERVER_INVALID_ARGUMENT, ""));
 
-    if (!ValidationUtil::ValidateStringIsBool(value).ok()) {
+    if (!ValidateStringIsBool(value).ok()) {
         std::string msg = "Invalid gpu resource config: " + value + ". Possible reason: gpu.enable is not a boolean.";
         return Status(SERVER_INVALID_ARGUMENT, msg);
     }
@@ -1371,7 +1370,7 @@ Config::CheckGpuResourceConfigCacheCapacity(const std::string& value) {
 
         for (int64_t gpu_id : gpu_ids) {
             int64_t gpu_memory;
-            if (!ValidationUtil::GetGpuMemory(gpu_id, gpu_memory).ok()) {
+            if (!GetGpuMemory(gpu_id, gpu_memory).ok()) {
                 std::string msg = "Fail to get GPU memory for GPU device: " + std::to_string(gpu_id);
                 return Status(SERVER_UNEXPECTED_ERROR, msg);
             } else if (gpu_cache_size >= gpu_memory) {
@@ -1390,7 +1389,7 @@ Status
 Config::CheckGpuResourceConfigCacheThreshold(const std::string& value) {
     fiu_return_on("check_config_gpu_resource_cache_threshold_fail", Status(SERVER_INVALID_ARGUMENT, ""));
 
-    if (!ValidationUtil::ValidateStringIsFloat(value).ok()) {
+    if (!ValidateStringIsFloat(value).ok()) {
         std::string msg = "Invalid gpu cache threshold: " + value +
                           ". Possible reason: gpu.cache_threshold is not in range (0.0, 1.0].";
         return Status(SERVER_INVALID_ARGUMENT, msg);
@@ -1409,7 +1408,7 @@ Status
 Config::CheckGpuResourceConfigGpuSearchThreshold(const std::string& value) {
     fiu_return_on("check_config_gpu_search_threshold_fail", Status(SERVER_INVALID_ARGUMENT, ""));
 
-    if (!ValidationUtil::ValidateStringIsNumber(value).ok()) {
+    if (!ValidateStringIsNumber(value).ok()) {
         std::string msg = "Invalid gpu search threshold: " + value +
                           ". Possible reason: gpu.gpu_search_threshold is not a positive integer.";
         return Status(SERVER_INVALID_ARGUMENT, msg);
@@ -1433,7 +1432,7 @@ CheckGpuResource(const std::string& value) {
     if (s.compare(0, 3, "gpu") == 0) {
         try {
             int32_t gpu_index = std::stoi(s.substr(3));
-            if (!ValidationUtil::ValidateGpuIndex(gpu_index).ok()) {
+            if (!ValidateGpuIndex(gpu_index).ok()) {
                 std::string msg =
                     "Invalid gpu resource: " + value + ". Possible reason: gpu does not match with the hardware.";
                 return Status(SERVER_INVALID_ARGUMENT, msg);
@@ -1512,7 +1511,7 @@ Config::CheckTracingConfigJsonConfigPath(const std::string& value) {
 /* wal config */
 Status
 Config::CheckWalConfigEnable(const std::string& value) {
-    auto exist_error = !ValidationUtil::ValidateStringIsBool(value).ok();
+    auto exist_error = !ValidateStringIsBool(value).ok();
     fiu_do_on("check_config_wal_enable_fail", exist_error = true);
 
     if (exist_error) {
@@ -1524,7 +1523,7 @@ Config::CheckWalConfigEnable(const std::string& value) {
 
 Status
 Config::CheckWalConfigRecoveryErrorIgnore(const std::string& value) {
-    auto exist_error = !ValidationUtil::ValidateStringIsBool(value).ok();
+    auto exist_error = !ValidateStringIsBool(value).ok();
     fiu_do_on("check_config_wal_recovery_error_ignore_fail", exist_error = true);
 
     if (exist_error) {
@@ -1557,7 +1556,7 @@ Config::CheckWalConfigWalPath(const std::string& value) {
         return Status(SERVER_INVALID_ARGUMENT, "wal.path is empty!");
     }
 
-    return ValidationUtil::ValidateStoragePath(value);
+    return ValidateStoragePath(value);
 }
 
 /* logs config */
@@ -1567,12 +1566,12 @@ Config::CheckLogsLevel(const std::string& value) {
     if (value.empty()) {
         return Status(SERVER_INVALID_ARGUMENT, "logs.level is empty!");
     }
-    return ValidationUtil::ValidateLogLevel(value);
+    return ValidateLogLevel(value);
 }
 
 Status
 Config::CheckLogsTraceEnable(const std::string& value) {
-    auto exist_error = !ValidationUtil::ValidateStringIsBool(value).ok();
+    auto exist_error = !ValidateStringIsBool(value).ok();
     fiu_do_on("check_logs_trace_enable_fail", exist_error = true);
 
     if (exist_error) {
@@ -1589,7 +1588,7 @@ Config::CheckLogsPath(const std::string& value) {
         return Status(SERVER_INVALID_ARGUMENT, "logs.path is empty!");
     }
 
-    return ValidationUtil::ValidateStoragePath(value);
+    return ValidateStoragePath(value);
 }
 
 Status
@@ -1618,7 +1617,7 @@ Config::CheckLogsMaxLogFileSize(const std::string& value) {
 
 Status
 Config::CheckLogsLogRotateNum(const std::string& value) {
-    auto exist_error = !ValidationUtil::ValidateStringIsNumber(value).ok();
+    auto exist_error = !ValidateStringIsNumber(value).ok();
     fiu_do_on("check_logs_log_rotate_num_fail", exist_error = true);
 
     if (exist_error) {
