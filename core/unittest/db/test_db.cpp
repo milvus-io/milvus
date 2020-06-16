@@ -1116,14 +1116,10 @@ TEST_F(DBTestWALRecovery, RECOVERY_WITH_NO_ERROR) {
     milvus::engine::ResultDistances result_distances;
     milvus::engine::VectorsData qxb;
     BuildVectors(qb, 0, qxb);
-    stat = db_->Query(dummy_context_,
-            collection_info.collection_id_, {}, topk, json_params, qxb, result_ids, result_distances);
-    ASSERT_TRUE(stat.ok());
-    ASSERT_NE(result_ids.size() / topk, qb);
 
     fiu_init(0);
     fiu_enable("DBImpl.ExexWalRecord.return", 1, nullptr, 0);
-    FreeDB();
+    db_ = nullptr;
     fiu_disable("DBImpl.ExexWalRecord.return");
     auto options = GetOptions();
     BuildDB(options);
