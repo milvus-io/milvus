@@ -1119,7 +1119,7 @@ TEST_F(DBTestWALRecovery, RECOVERY_WITH_NO_ERROR) {
 
     fiu_init(0);
     fiu_enable("DBImpl.ExexWalRecord.return", 1, nullptr, 0);
-    db_ = nullptr;
+    db_ = nullptr; // don't use FreeDB(), this case needs keep the meta
     fiu_disable("DBImpl.ExexWalRecord.return");
     auto options = GetOptions();
     BuildDB(options);
