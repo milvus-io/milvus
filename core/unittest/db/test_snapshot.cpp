@@ -921,7 +921,7 @@ TEST_F(SnapshotTest, CompoundTest1) {
                 if (new_seg_id == 0) {
                     continue;
                 }
-                if (RandomInt(0, 10) >= 5) {
+                if (RandomInt(0, 10) >= 6) {
                     build_queue.Put(new_seg_id);
                 }
 
