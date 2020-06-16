@@ -246,6 +246,7 @@ rule_1(BooleanQueryPtr& boolean_query, std::stack<BooleanQueryPtr>& path_stack) 
             }
         }
     }
+    return status;
 }
 
 Status

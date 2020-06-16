@@ -1567,6 +1567,10 @@ GrpcRequestHandler::HybridSearch(::grpc::ServerContext* context, const ::milvus:
     Status status;
 
     status = request_handler_.DescribeHybridCollection(GetContext(context), request->collection_name(), field_type_);
+    if (!status.ok()) {
+        SET_RESPONSE(response->mutable_status(), status, context);
+        return ::grpc::Status::OK;
+    }
 
     query::BooleanQueryPtr boolean_query = std::make_shared<query::BooleanQuery>();
     query::QueryPtr query_ptr = std::make_shared<query::Query>();

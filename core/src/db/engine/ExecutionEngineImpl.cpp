@@ -525,6 +525,10 @@ ExecutionEngineImpl::LoadAttr(bool to_cache) {
         attr_index_ = std::make_shared<Attr::AttrIndex>();
 
         auto status = segment_reader_ptr->Load();
+        if (!status.ok()) {
+            return status;
+        }
+
         segment::SegmentPtr segment_ptr;
         segment_reader_ptr->GetSegment(segment_ptr);
         auto attrs_index = segment_ptr->attrs_index_ptr_;
