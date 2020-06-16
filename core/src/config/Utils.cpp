@@ -117,7 +117,7 @@ GetSystemAvailableThreads(int64_t& thread_count) {
     // threadCnt = std::thread::hardware_concurrency();
     thread_count = sysconf(_SC_NPROCESSORS_CONF);
     thread_count *= THREAD_MULTIPLY_CPU;
-    fiu_do_on("CommonUtil.GetSystemAvailableThreads.zero_thread", thread_count = 0);
+    fiu_do_on("GetSystemAvailableThreads.zero_thread", thread_count = 0);
 
     if (thread_count == 0) {
         thread_count = 8;
@@ -131,7 +131,7 @@ ValidateGpuIndex(int32_t gpu_index) {
 #ifdef MILVUS_GPU_VERSION
     int num_devices = 0;
     auto cuda_err = cudaGetDeviceCount(&num_devices);
-    fiu_do_on("ValidationUtil.ValidateGpuIndex.get_device_count_fail", cuda_err = cudaError::cudaErrorUnknown);
+    fiu_do_on("config.ValidateGpuIndex.get_device_count_fail", cuda_err = cudaError::cudaErrorUnknown);
 
     if (cuda_err != cudaSuccess) {
         std::string msg = "Failed to get gpu card number, cuda error:" + std::to_string(cuda_err);
@@ -150,10 +150,9 @@ ValidateGpuIndex(int32_t gpu_index) {
 }
 
 #ifdef MILVUS_GPU_VERSION
-
 Status
 GetGpuMemory(int32_t gpu_index, int64_t& memory) {
-    fiu_return_on("ValidationUtil.GetGpuMemory.return_error", Status(SERVER_UNEXPECTED_ERROR, ""));
+    fiu_return_on("config.GetGpuMemory.return_error", Status(SERVER_UNEXPECTED_ERROR, ""));
 
     cudaDeviceProp deviceProp;
     auto cuda_err = cudaGetDeviceProperties(&deviceProp, gpu_index);
@@ -167,7 +166,6 @@ GetGpuMemory(int32_t gpu_index, int64_t& memory) {
     memory = deviceProp.totalGlobalMem;
     return Status::OK();
 }
-
 #endif
 
 Status
@@ -175,7 +173,7 @@ ValidateIpAddress(const std::string& ip_address) {
     struct in_addr address;
 
     int result = inet_pton(AF_INET, ip_address.c_str(), &address);
-    fiu_do_on("ValidationUtil.ValidateIpAddress.error_ip_result", result = 2);
+    fiu_do_on("config.ValidateIpAddress.error_ip_result", result = 2);
 
     switch (result) {
         case 1:
@@ -200,7 +198,7 @@ ValidateStringIsNumber(const std::string& str) {
     }
     try {
         int64_t value = std::stol(str);
-        fiu_do_on("ValidationUtil.ValidateStringIsNumber.throw_exception", throw std::exception());
+        fiu_do_on("config.ValidateStringIsNumber.throw_exception", throw std::exception());
         if (value < 0) {
             return Status(SERVER_INVALID_ARGUMENT, "Negative number");
         }

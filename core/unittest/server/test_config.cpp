@@ -934,10 +934,10 @@ TEST_F(ConfigTest, SERVER_CONFIG_VALID_FAIL_TEST) {
     ASSERT_FALSE(s.ok());
     fiu_disable("Config.GetGpuResourceConfigCacheCapacity.diable_gpu_resource");
 
-    fiu_enable("ValidationUtil.GetGpuMemory.return_error", 1, NULL, 0);
+    fiu_enable("config.GetGpuMemory.return_error", 1, NULL, 0);
     s = config.GetGpuResourceConfigCacheCapacity(value);
     ASSERT_FALSE(s.ok());
-    fiu_disable("ValidationUtil.GetGpuMemory.return_error");
+    fiu_disable("config.GetGpuMemory.return_error");
 
     // fiu_enable("check_config_insert_buffer_size_fail", 1, NULL, 0);
     // s = config.GetCacheConfigCpuCacheCapacity(value);

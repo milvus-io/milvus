@@ -78,10 +78,10 @@ TEST(UtilTest, COMMON_TEST) {
     ASSERT_GT(thread_cnt, 0);
 
     fiu_init(0);
-    fiu_enable("CommonUtil.GetSystemAvailableThreads.zero_thread", 1, NULL, 0);
+    fiu_enable("GetSystemAvailableThreads.zero_thread", 1, NULL, 0);
     milvus::server::GetSystemAvailableThreads(thread_cnt);
     ASSERT_GT(thread_cnt, 0);
-    fiu_disable("CommonUtil.GetSystemAvailableThreads.zero_thread");
+    fiu_disable("GetSystemAvailableThreads.zero_thread");
 
     std::string empty_path = "";
     std::string path1 = "/tmp/milvus_test/";
@@ -727,15 +727,14 @@ TEST(ValidationUtilTest, VALIDATE_GPU_TEST) {
     ASSERT_NE(milvus::server::ValidateGpuIndex(100).code(), milvus::SERVER_SUCCESS);
 
     fiu_init(0);
-    fiu_enable("ValidationUtil.ValidateGpuIndex.get_device_count_fail", 1, NULL, 0);
+    fiu_enable("config.ValidateGpuIndex.get_device_count_fail", 1, NULL, 0);
     ASSERT_NE(milvus::server::ValidateGpuIndex(0).code(), milvus::SERVER_SUCCESS);
-    fiu_disable("ValidationUtil.ValidateGpuIndex.get_device_count_fail");
+    fiu_disable("config.ValidateGpuIndex.get_device_count_fail");
 
     int64_t memory = 0;
     ASSERT_EQ(milvus::server::GetGpuMemory(0, memory).code(), milvus::SERVER_SUCCESS);
     ASSERT_NE(milvus::server::GetGpuMemory(100, memory).code(), milvus::SERVER_SUCCESS);
 }
-
 #endif
 
 TEST(ValidationUtilTest, VALIDATE_IPADDRESS_TEST) {
@@ -743,9 +742,9 @@ TEST(ValidationUtilTest, VALIDATE_IPADDRESS_TEST) {
     ASSERT_NE(milvus::server::ValidateIpAddress("not ip").code(), milvus::SERVER_SUCCESS);
 
     fiu_init(0);
-    fiu_enable("ValidationUtil.ValidateIpAddress.error_ip_result", 1, NULL, 0);
+    fiu_enable("config.ValidateIpAddress.error_ip_result", 1, NULL, 0);
     ASSERT_NE(milvus::server::ValidateIpAddress("not ip").code(), milvus::SERVER_SUCCESS);
-    fiu_disable("ValidationUtil.ValidateIpAddress.error_ip_result");
+    fiu_disable("config.ValidateIpAddress.error_ip_result");
 }
 
 TEST(ValidationUtilTest, VALIDATE_NUMBER_TEST) {
@@ -753,9 +752,9 @@ TEST(ValidationUtilTest, VALIDATE_NUMBER_TEST) {
     ASSERT_NE(milvus::server::ValidateStringIsNumber("not number").code(), milvus::SERVER_SUCCESS);
 
     fiu_init(0);
-    fiu_enable("ValidationUtil.ValidateStringIsNumber.throw_exception", 1, NULL, 0);
+    fiu_enable("config.ValidateStringIsNumber.throw_exception", 1, NULL, 0);
     ASSERT_NE(milvus::server::ValidateStringIsNumber("122").code(), milvus::SERVER_SUCCESS);
-    fiu_disable("ValidationUtil.ValidateStringIsNumber.throw_exception");
+    fiu_disable("config.ValidateStringIsNumber.throw_exception");
 }
 
 TEST(ValidationUtilTest, VALIDATE_BOOL_TEST) {

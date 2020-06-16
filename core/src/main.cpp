@@ -60,8 +60,9 @@ print_banner() {
 }
 
 /* register signal handler routine */
-milvus::server::func_ptr milvus::server::SignalHandler::routine_func_ =
-    []() { milvus::server::Server::GetInstance().Stop(); };
+milvus::server::func_ptr milvus::server::SignalHandler::routine_func_ = []() {
+    milvus::server::Server::GetInstance().Stop();
+};
 
 int
 main(int argc, char* argv[]) {
