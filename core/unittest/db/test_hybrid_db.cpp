@@ -251,14 +251,13 @@ TEST_F(DBTest, HYBRID_SEARCH_TEST) {
     auto query_ptr = std::make_shared<milvus::query::Query>();
     ConstructGeneralQuery(general_query, query_ptr);
 
-    // TODO: kunyu
-//    std::vector<std::string> tags;
-//    milvus::engine::QueryResult result;
-//    stat = db_->HybridQuery(dummy_context_, COLLECTION_NAME, tags, general_query, query_ptr, field_names, attr_type,
-//                            result);
-//    ASSERT_TRUE(stat.ok());
-//    ASSERT_EQ(result.row_num_, NQ);
-//    ASSERT_EQ(result.result_ids_.size(), NQ * TOPK);
+    std::vector<std::string> tags;
+    milvus::engine::QueryResult result;
+    stat = db_->HybridQuery(dummy_context_, COLLECTION_NAME, tags, general_query, query_ptr, field_names, attr_type,
+                            result);
+    ASSERT_TRUE(stat.ok());
+    //    ASSERT_EQ(result.row_num_, NQ);
+    //    ASSERT_EQ(result.result_ids_.size(), NQ * TOPK);
 }
 
 TEST_F(DBTest, COMPACT_TEST) {
