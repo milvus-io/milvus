@@ -16,6 +16,7 @@ jobs:
         centos: [7]
     env:
       CENTOS: ${{ matrix.centos }}
+      MILVUS_INSTALL_PREFIX: "/milvus/docker/deploy/milvus"
       SOURCE_REPO: "milvusdb/milvus"
       TARGET_REPO: "milvusdb/milvus"
       SOURCE_TAG: "cpu-latest"
@@ -34,7 +35,7 @@ jobs:
         shell: bash
         run: |
           docker-compose run --use-aliases -d db
-          docker-compose run -e MILVUS_INSTALL_PREFIX=/milvus/docker/deploy/milvus centos-core
+          docker-compose run centos-core
       - name: Docker Build
         shell: bash
         run: |
@@ -66,6 +67,7 @@ jobs:
         centos: [7]
     env:
       CENTOS: ${{ matrix.centos }}
+      MILVUS_INSTALL_PREFIX: "/milvus/docker/deploy/milvus"
       SOURCE_REPO: "milvusdb/milvus"
       TARGET_REPO: "milvusdb/milvus"
       SOURCE_TAG: "gpu-latest"
@@ -84,7 +86,7 @@ jobs:
         shell: bash
         run: |
           docker-compose run --use-aliases -d db
-          docker-compose run -e MILVUS_INSTALL_PREFIX=/milvus/docker/deploy/milvus centos-cuda-core
+          docker-compose run centos-cuda-core
       - name: Docker Build
         shell: bash
         run: |
