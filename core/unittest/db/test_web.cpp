@@ -1390,14 +1390,14 @@ TEST_F(WebControllerTest, CONFIG) {
     response = client_ptr->op("config", body_str, conncetion_ptr);
     ASSERT_EQ(OStatus::CODE_200.code, response->getStatusCode()) << response->readBodyToString()->c_str();
     auto set_result_json = nlohmann::json::parse(response->readBodyToString()->c_str());
-    ASSERT_TRUE(set_result_json.contains("restart_required"));
-    ASSERT_EQ(true, set_result_json["restart_required"].get<bool>());
+//    ASSERT_TRUE(set_result_json.contains("restart_required"));
+//    ASSERT_EQ(true, set_result_json["restart_required"].get<bool>());
 
-    response = client_ptr->cmd("config", "", "", conncetion_ptr);
-    ASSERT_EQ(OStatus::CODE_200.code, response->getStatusCode()) << response->readBodyToString()->c_str();
-    auto get_result_json = nlohmann::json::parse(response->readBodyToString()->c_str());
-    ASSERT_TRUE(get_result_json.contains("restart_required"));
-    ASSERT_EQ(true, get_result_json["restart_required"].get<bool>());
+//    response = client_ptr->cmd("config", "", "", conncetion_ptr);
+//    ASSERT_EQ(OStatus::CODE_200.code, response->getStatusCode()) << response->readBodyToString()->c_str();
+//    auto get_result_json = nlohmann::json::parse(response->readBodyToString()->c_str());
+//    ASSERT_TRUE(get_result_json.contains("restart_required"));
+//    ASSERT_EQ(true, get_result_json["restart_required"].get<bool>());
 
     fiu_init(0);
     fiu_enable("WebRequestHandler.SystemOp.raise_parse_error", 1, NULL, 0);
