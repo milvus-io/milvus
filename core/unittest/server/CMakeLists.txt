@@ -35,26 +35,17 @@ set(server_test_files
         ${cache_files}
         ${config_files}
         ${config_handler_files}
-#        ${grpc_server_files}
-#        ${server_files}
         ${server_init_files}
-#        ${server_delivery_files}
-#        ${web_server_files}
         ${util_files}
-        ${test_files}
-        )
+        ${test_files})
 
 add_executable(test_server ${server_test_files})
-
-
 
 target_link_libraries(test_server
         knowhere
         metrics
         stdc++
-        # ${grpc_lib}
         ${unittest_libs}
-        oatpp
-        )
+        oatpp)
 
 install(TARGETS test_server DESTINATION unittest)
