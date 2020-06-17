@@ -139,7 +139,7 @@ DBImpl::Start() {
         // recovery
         while (1) {
             wal::MXLogRecord record;
-            auto error_code = wal_mgr_->GetNextRecovery(record);
+            auto error_code = wal_mgr_->GetNextEntityRecovery(record);
             if (error_code != WAL_SUCCESS) {
                 throw Exception(error_code, "Wal recovery error!");
             }
@@ -897,6 +897,7 @@ DBImpl::InsertEntities(const std::string& collection_id, const std::string& part
         return status;
     }
 
+#if 0
     wal::MXLogRecord record;
     record.lsn = 0;
     record.collection_id = collection_id;
@@ -919,8 +920,8 @@ DBImpl::InsertEntities(const std::string& collection_id, const std::string& part
     }
 
     status = ExecWalRecord(record);
+#endif
 
-#if 0
     if (options_.wal_enable_) {
         std::string target_collection_name;
         status = GetPartitionByTag(collection_id, partition_tag, target_collection_name);
@@ -963,7 +964,7 @@ DBImpl::InsertEntities(const std::string& collection_id, const std::string& part
 
         status = ExecWalRecord(record);
     }
-#endif
+
 
     return status;
 }
@@ -3229,9 +3230,9 @@ DBImpl::BackgroundWalThread() {
         }
 
         wal::MXLogRecord record;
-        auto error_code = wal_mgr_->GetNextRecord(record);
+        auto error_code = wal_mgr_->GetNextEntityRecord(record);
         if (error_code != WAL_SUCCESS) {
-            LOG_ENGINE_ERROR_ << "WAL background GetNextRecord error";
+            LOG_ENGINE_ERROR_ << "WAL background GetNextEntityRecord error";
             break;
         }
 
