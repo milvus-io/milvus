@@ -42,6 +42,7 @@
 #include "server/delivery/request/ShowPartitionsRequest.h"
 
 #include "server/delivery/hybrid_request/CreateHybridCollectionRequest.h"
+#include "server/delivery/hybrid_request/CreateHybridIndexRequest.h"
 #include "server/delivery/hybrid_request/DescribeHybridCollectionRequest.h"
 #include "server/delivery/hybrid_request/GetEntityByIDRequest.h"
 #include "server/delivery/hybrid_request/HybridSearchRequest.h"
@@ -132,7 +133,7 @@ RequestHandler::ShowCollectionInfo(const std::shared_ptr<Context>& context, cons
 
 Status
 RequestHandler::Search(const std::shared_ptr<Context>& context, const std::string& collection_name,
-                       const engine::VectorsData& vectors, int64_t topk, const milvus::json& extra_params,
+                       engine::VectorsData& vectors, int64_t topk, const milvus::json& extra_params,
                        const std::vector<std::string>& partition_list, const std::vector<std::string>& file_id_list,
                        TopKQueryResult& result) {
     BaseRequestPtr request_ptr = SearchRequest::Create(context, collection_name, vectors, topk, extra_params,
@@ -336,6 +337,15 @@ RequestHandler::HybridSearch(const std::shared_ptr<Context>& context, const std:
 
     RequestScheduler::ExecRequest(request_ptr);
 
+    return request_ptr->status();
+}
+
+Status
+RequestHandler::CreateHybridIndex(const std::shared_ptr<Context>& context, const std::string& collection_name,
+                                  const std::vector<std::string>& field_names, const milvus::json& json_params) {
+    BaseRequestPtr request_ptr = CreateHybridIndexRequest::Create(context, collection_name, field_names, json_params);
+
+    RequestScheduler::ExecRequest(request_ptr);
     return request_ptr->status();
 }
 

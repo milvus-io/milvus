@@ -8514,11 +8514,28 @@ class HIndexParam :
   // accessors -------------------------------------------------------
 
   enum : int {
+    kFieldNamesFieldNumber = 3,
     kExtraParamsFieldNumber = 4,
     kCollectionNameFieldNumber = 2,
     kStatusFieldNumber = 1,
-    kIndexTypeFieldNumber = 3,
   };
+  // repeated string field_names = 3;
+  int field_names_size() const;
+  void clear_field_names();
+  const std::string& field_names(int index) const;
+  std::string* mutable_field_names(int index);
+  void set_field_names(int index, const std::string& value);
+  void set_field_names(int index, std::string&& value);
+  void set_field_names(int index, const char* value);
+  void set_field_names(int index, const char* value, size_t size);
+  std::string* add_field_names();
+  void add_field_names(const std::string& value);
+  void add_field_names(std::string&& value);
+  void add_field_names(const char* value);
+  void add_field_names(const char* value, size_t size);
+  const ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField<std::string>& field_names() const;
+  ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField<std::string>* mutable_field_names();
+
   // repeated .milvus.grpc.KeyValuePair extra_params = 4;
   int extra_params_size() const;
   void clear_extra_params();
@@ -8549,20 +8566,15 @@ class HIndexParam :
   ::milvus::grpc::Status* mutable_status();
   void set_allocated_status(::milvus::grpc::Status* status);
 
-  // int32 index_type = 3;
-  void clear_index_type();
-  ::PROTOBUF_NAMESPACE_ID::int32 index_type() const;
-  void set_index_type(::PROTOBUF_NAMESPACE_ID::int32 value);
-
   // @@protoc_insertion_point(class_scope:milvus.grpc.HIndexParam)
  private:
   class _Internal;
 
   ::PROTOBUF_NAMESPACE_ID::internal::InternalMetadataWithArena _internal_metadata_;
+  ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField<std::string> field_names_;
   ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField< ::milvus::grpc::KeyValuePair > extra_params_;
   ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr collection_name_;
   ::milvus::grpc::Status* status_;
-  ::PROTOBUF_NAMESPACE_ID::int32 index_type_;
   mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
   friend struct ::TableStruct_milvus_2eproto;
 };
@@ -14603,18 +14615,69 @@ inline void HIndexParam::set_allocated_collection_name(std::string* collection_n
   // @@protoc_insertion_point(field_set_allocated:milvus.grpc.HIndexParam.collection_name)
 }
 
-// int32 index_type = 3;
-inline void HIndexParam::clear_index_type() {
-  index_type_ = 0;
+// repeated string field_names = 3;
+inline int HIndexParam::field_names_size() const {
+  return field_names_.size();
 }
-inline ::PROTOBUF_NAMESPACE_ID::int32 HIndexParam::index_type() const {
-  // @@protoc_insertion_point(field_get:milvus.grpc.HIndexParam.index_type)
-  return index_type_;
+inline void HIndexParam::clear_field_names() {
+  field_names_.Clear();
 }
-inline void HIndexParam::set_index_type(::PROTOBUF_NAMESPACE_ID::int32 value) {
-  
-  index_type_ = value;
-  // @@protoc_insertion_point(field_set:milvus.grpc.HIndexParam.index_type)
+inline const std::string& HIndexParam::field_names(int index) const {
+  // @@protoc_insertion_point(field_get:milvus.grpc.HIndexParam.field_names)
+  return field_names_.Get(index);
+}
+inline std::string* HIndexParam::mutable_field_names(int index) {
+  // @@protoc_insertion_point(field_mutable:milvus.grpc.HIndexParam.field_names)
+  return field_names_.Mutable(index);
+}
+inline void HIndexParam::set_field_names(int index, const std::string& value) {
+  // @@protoc_insertion_point(field_set:milvus.grpc.HIndexParam.field_names)
+  field_names_.Mutable(index)->assign(value);
+}
+inline void HIndexParam::set_field_names(int index, std::string&& value) {
+  // @@protoc_insertion_point(field_set:milvus.grpc.HIndexParam.field_names)
+  field_names_.Mutable(index)->assign(std::move(value));
+}
+inline void HIndexParam::set_field_names(int index, const char* value) {
+  GOOGLE_DCHECK(value != nullptr);
+  field_names_.Mutable(index)->assign(value);
+  // @@protoc_insertion_point(field_set_char:milvus.grpc.HIndexParam.field_names)
+}
+inline void HIndexParam::set_field_names(int index, const char* value, size_t size) {
+  field_names_.Mutable(index)->assign(
+    reinterpret_cast<const char*>(value), size);
+  // @@protoc_insertion_point(field_set_pointer:milvus.grpc.HIndexParam.field_names)
+}
+inline std::string* HIndexParam::add_field_names() {
+  // @@protoc_insertion_point(field_add_mutable:milvus.grpc.HIndexParam.field_names)
+  return field_names_.Add();
+}
+inline void HIndexParam::add_field_names(const std::string& value) {
+  field_names_.Add()->assign(value);
+  // @@protoc_insertion_point(field_add:milvus.grpc.HIndexParam.field_names)
+}
+inline void HIndexParam::add_field_names(std::string&& value) {
+  field_names_.Add(std::move(value));
+  // @@protoc_insertion_point(field_add:milvus.grpc.HIndexParam.field_names)
+}
+inline void HIndexParam::add_field_names(const char* value) {
+  GOOGLE_DCHECK(value != nullptr);
+  field_names_.Add()->assign(value);
+  // @@protoc_insertion_point(field_add_char:milvus.grpc.HIndexParam.field_names)
+}
+inline void HIndexParam::add_field_names(const char* value, size_t size) {
+  field_names_.Add()->assign(reinterpret_cast<const char*>(value), size);
+  // @@protoc_insertion_point(field_add_pointer:milvus.grpc.HIndexParam.field_names)
+}
+inline const ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField<std::string>&
+HIndexParam::field_names() const {
+  // @@protoc_insertion_point(field_list:milvus.grpc.HIndexParam.field_names)
+  return field_names_;
+}
+inline ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField<std::string>*
+HIndexParam::mutable_field_names() {
+  // @@protoc_insertion_point(field_mutable_list:milvus.grpc.HIndexParam.field_names)
+  return &field_names_;
 }
 
 // repeated .milvus.grpc.KeyValuePair extra_params = 4;

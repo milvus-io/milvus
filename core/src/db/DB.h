@@ -137,11 +137,11 @@ class DB {
     virtual Status
     Query(const std::shared_ptr<server::Context>& context, const std::string& collection_id,
           const std::vector<std::string>& partition_tags, uint64_t k, const milvus::json& extra_params,
-          const VectorsData& vectors, ResultIds& result_ids, ResultDistances& result_distances) = 0;
+          VectorsData& vectors, ResultIds& result_ids, ResultDistances& result_distances) = 0;
 
     virtual Status
     QueryByFileID(const std::shared_ptr<server::Context>& context, const std::vector<std::string>& file_ids, uint64_t k,
-                  const milvus::json& extra_params, const VectorsData& vectors, ResultIds& result_ids,
+                  const milvus::json& extra_params, VectorsData& vectors, ResultIds& result_ids,
                   ResultDistances& result_distances) = 0;
 
     virtual Status
@@ -177,6 +177,15 @@ class DB {
                 query::QueryPtr query_ptr, std::vector<std::string>& field_name,
                 std::unordered_map<std::string, engine::meta::hybrid::DataType>& attr_type,
                 engine::QueryResult& result) = 0;
+    virtual Status
+    FlushAttrsIndex(const std::string& collection_id) = 0;
+
+    virtual Status
+    CreateStructuredIndex(const std::string& collection_id, const std::vector<std::string>& field_names,
+                          const std::unordered_map<std::string, meta::hybrid::DataType>& attr_types,
+                          const std::unordered_map<std::string, std::vector<uint8_t>>& attr_data,
+                          std::unordered_map<std::string, int64_t>& attr_size,
+                          std::unordered_map<std::string, knowhere::IndexPtr>& attr_indexes) = 0;
 };  // DB
 
 using DBPtr = std::shared_ptr<DB>;

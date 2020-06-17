@@ -145,6 +145,7 @@ class BaseRequest {
         kCreateIndex = 500,
         kDescribeIndex,
         kDropIndex,
+        kCreateHybridIndex,
 
         // search operations
         kSearchByID = 600,

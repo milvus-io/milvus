@@ -17,6 +17,7 @@
 
 #pragma once
 
+#include <src/db/meta/MetaTypes.h>
 #include <memory>
 #include <string>
 #include <unordered_map>
@@ -47,6 +48,11 @@ class SegmentWriter {
     SetVectorIndex(const knowhere::VecIndexPtr& index);
 
     Status
+    SetAttrsIndex(const std::unordered_map<std::string, knowhere::IndexPtr>& attr_index,
+                  const std::unordered_map<std::string, int64_t>& attr_nbytes,
+                  const std::unordered_map<std::string, engine::meta::hybrid::DataType>& attr_type);
+
+    Status
     WriteBloomFilter(const IdBloomFilterPtr& bloom_filter_ptr);
 
     Status
@@ -72,6 +78,9 @@ class SegmentWriter {
 
     Status
     WriteVectorIndex(const std::string& location);
+
+    Status
+    WriteAttrsIndex();
 
  private:
     Status

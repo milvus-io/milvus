@@ -11,6 +11,7 @@
 
 #pragma once
 
+#include <map>
 #include <memory>
 #include <string>
 #include <unordered_map>
@@ -47,6 +48,13 @@ enum class EngineType {
     HNSW,
     ANNOY,
     MAX_VALUE = ANNOY,
+};
+
+static std::map<std::string, EngineType> s_map_engine_type = {
+    {"FLAT", EngineType::FAISS_IDMAP},   {"IVFFLAT", EngineType::FAISS_IVFFLAT}, {"IVFSQ8", EngineType::FAISS_IVFSQ8},
+    {"RNSG", EngineType::NSG_MIX},       {"IVFSQ8H", EngineType::FAISS_IVFSQ8H}, {"IVFPQ", EngineType::FAISS_PQ},
+    {"SPTAGKDT", EngineType::SPTAG_KDT}, {"SPTAGBKT", EngineType::SPTAG_BKT},    {"HNSW", EngineType::HNSW},
+    {"ANNOY", EngineType::ANNOY},
 };
 
 enum class MetricType {
@@ -101,6 +109,9 @@ class ExecutionEngine {
     Load(bool to_cache = true) = 0;
 
     virtual Status
+    LoadAttr(bool to_cache = true) = 0;
+
+    virtual Status
     CopyToGpu(uint64_t device_id, bool hybrid) = 0;
 
     virtual Status
@@ -123,15 +134,13 @@ class ExecutionEngine {
     GetVectorByID(const int64_t id, uint8_t* vector, bool hybrid) = 0;
 #endif
 
-#if 0
     virtual Status
     ExecBinaryQuery(query::GeneralQueryPtr general_query, faiss::ConcurrentBitsetPtr& bitset,
                     std::unordered_map<std::string, DataType>& attr_type, std::string& vector_placeholder) = 0;
 
     virtual Status
-    HybridSearch(query::GeneralQueryPtr general_query, std::unordered_map<std::string, DataType>& attr_type,
-                 query::QueryPtr query_ptr, std::vector<float>& distances, std::vector<int64_t>& search_ids) = 0;
-#endif
+    HybridSearch(scheduler::SearchJobPtr job, std::unordered_map<std::string, DataType>& attr_type,
+                 std::vector<float>& distances, std::vector<int64_t>& search_ids, bool hybrid) = 0;
 
     virtual Status
     Search(std::vector<int64_t>& ids, std::vector<float>& distances, scheduler::SearchJobPtr job, bool hybrid) = 0;
@@ -141,6 +150,9 @@ class ExecutionEngine {
 
     virtual Status
     Cache() = 0;
+
+    virtual Status
+    AttrCache() = 0;
 
     virtual Status
     Init() = 0;
@@ -153,6 +165,9 @@ class ExecutionEngine {
 
     virtual std::string
     GetLocation() const = 0;
+
+    virtual std::string
+    GetAttrLocation() const = 0;
 };
 
 using ExecutionEnginePtr = std::shared_ptr<ExecutionEngine>;

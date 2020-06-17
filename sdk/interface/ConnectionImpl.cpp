@@ -226,4 +226,9 @@ ConnectionImpl::GetHEntityByID(const std::string& collection_name, const std::ve
     return client_proxy_->GetHEntityByID(collection_name, id_array, result);
 }
 
+Status
+ConnectionImpl::CreateHybridIndex(const milvus::HIndexParam& index_param) {
+    return client_proxy_->CreateHybridIndex(index_param);
+}
+
 }  // namespace milvus

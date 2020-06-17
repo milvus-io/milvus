@@ -577,12 +577,13 @@ TEST_F(DBTest, SHUTDOWN_TEST) {
                               result_distances);
     ASSERT_FALSE(stat.ok());
 
+    auto vectors_data = milvus::engine::VectorsData();
     stat = db_->Query(dummy_context_,
                       collection_info.collection_id_,
                       tags,
                       1,
                       json_params,
-                      milvus::engine::VectorsData(),
+                      vectors_data,
                       result_ids,
                       result_distances);
     ASSERT_FALSE(stat.ok());

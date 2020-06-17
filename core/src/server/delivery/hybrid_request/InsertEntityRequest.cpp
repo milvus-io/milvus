@@ -69,7 +69,7 @@ InsertEntityRequest::OnExecute() {
         auto vector_datas_it = vector_datas_.begin();
         if (vector_datas_it->second.float_data_.empty() && vector_datas_it->second.binary_data_.empty()) {
             return Status(SERVER_INVALID_ROWRECORD_ARRAY,
-                          "The vector array is emp ty. Make sure you have entered vector records.");
+                          "The vector array is empty. Make sure you have entered vector records.");
         }
 
         // step 2: check table existence
@@ -92,7 +92,7 @@ InsertEntityRequest::OnExecute() {
 
         std::unordered_map<std::string, engine::meta::hybrid::DataType> field_types;
         auto size = fields_schema.fields_schema_.size();
-        for (auto field_name : field_names_) {
+        for (const auto& field_name : field_names_) {
             for (uint64_t i = 0; i < size; ++i) {
                 if (fields_schema.fields_schema_[i].field_name_ == field_name) {
                     field_types.insert(std::make_pair(
