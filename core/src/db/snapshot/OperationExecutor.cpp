@@ -12,12 +12,9 @@
 #include "db/snapshot/OperationExecutor.h"
 #include <iostream>
 
-namespace milvus {
-namespace engine {
-namespace snapshot {
+namespace milvus::engine::snapshot {
 
-OperationExecutor::OperationExecutor() {
-}
+OperationExecutor::OperationExecutor() = default;
 
 OperationExecutor::~OperationExecutor() {
     Stop();
@@ -30,7 +27,7 @@ OperationExecutor::GetInstance() {
 }
 
 Status
-OperationExecutor::Submit(OperationsPtr operation, bool sync) {
+OperationExecutor::Submit(const OperationsPtr& operation, bool sync) {
     if (!operation)
         return Status(SS_INVALID_ARGUMENT_ERROR, "Invalid Operation");
     /* Store::GetInstance().Apply(*operation); */
@@ -60,7 +57,7 @@ OperationExecutor::Stop() {
 }
 
 void
-OperationExecutor::Enqueue(OperationsPtr operation) {
+OperationExecutor::Enqueue(const OperationsPtr& operation) {
     /* std::cout << std::this_thread::get_id() << " Enqueue Operation " << operation->GetID() << std::endl; */
     queue_.Put(operation);
 }
@@ -79,6 +76,4 @@ OperationExecutor::ThreadMain() {
     }
 }
 
-}  // namespace snapshot
-}  // namespace engine
-}  // namespace milvus
+}  // namespace milvus::engine::snapshot

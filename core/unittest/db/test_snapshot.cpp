@@ -109,7 +109,13 @@ TEST_F(SnapshotTest, ScopedResourceTest) {
         ASSERT_EQ(not_scoped_2->ref_count(), 1);
         ASSERT_EQ(not_scoped->ref_count(), 1);
         ASSERT_EQ(inner->ref_count(), 1);
+
+        not_scoped_2->Ref();
+        ASSERT_EQ(not_scoped_2->ref_count(), 2);
+        ASSERT_EQ(not_scoped->ref_count(), 2);
+        ASSERT_EQ(inner->ref_count(), 2);
     }
+    inner->UnRef();
     ASSERT_EQ(inner->ref_count(), 1);
 
     inner->UnRef();
@@ -159,14 +165,14 @@ TEST_F(SnapshotTest, ResourceHoldersTest) {
     }
 
     {
-        auto collection = CollectionsHolder::GetInstance().GetResource(collection_id, true);
-        ASSERT_EQ(collection->GetID(), collection_id);
-        ASSERT_EQ(collection->ref_count(), 1+prev_cnt);
+        auto collection_3 = CollectionsHolder::GetInstance().GetResource(collection_id, true);
+        ASSERT_EQ(collection_3->GetID(), collection_id);
+        ASSERT_EQ(collection_3->ref_count(), 1+prev_cnt);
     }
 
     if (prev_cnt == 0) {
-        auto collection = CollectionsHolder::GetInstance().GetResource(collection_id, false);
-        ASSERT_TRUE(!collection);
+        auto collection_4 = CollectionsHolder::GetInstance().GetResource(collection_id, false);
+        ASSERT_TRUE(!collection_4);
     }
 }
 
