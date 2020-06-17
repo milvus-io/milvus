@@ -59,11 +59,6 @@ print_banner() {
     std::cout << std::endl;
 }
 
-/* register signal handler routine */
-milvus::server::func_ptr milvus::server::SignalHandler::routine_func_ = []() {
-    milvus::server::Server::GetInstance().Stop();
-};
-
 int
 main(int argc, char* argv[]) {
     print_banner();
@@ -122,12 +117,16 @@ main(int argc, char* argv[]) {
     }
 
     /* Handle Signal */
-    signal(SIGHUP, milvus::server::SignalHandler::HandleSignal);
-    signal(SIGINT, milvus::server::SignalHandler::HandleSignal);
-    signal(SIGUSR1, milvus::server::SignalHandler::HandleSignal);
-    signal(SIGSEGV, milvus::server::SignalHandler::HandleSignal);
-    signal(SIGUSR2, milvus::server::SignalHandler::HandleSignal);
-    signal(SIGTERM, milvus::server::SignalHandler::HandleSignal);
+    milvus::server::signal_routine_func = [](int32_t exit_code) {
+        milvus::server::Server::GetInstance().Stop();
+        exit(exit_code);
+    };
+    signal(SIGHUP, milvus::server::HandleSignal);
+    signal(SIGINT, milvus::server::HandleSignal);
+    signal(SIGUSR1, milvus::server::HandleSignal);
+    signal(SIGSEGV, milvus::server::HandleSignal);
+    signal(SIGUSR2, milvus::server::HandleSignal);
+    signal(SIGTERM, milvus::server::HandleSignal);
 
     server.Init(start_daemonized, pid_filename, config_filename);
 

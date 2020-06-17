@@ -15,6 +15,7 @@
 #include "utils/BlockingQueue.h"
 #include "utils/CommonUtil.h"
 #include "utils/Error.h"
+#include "utils/Exception.h"
 #include "utils/LogUtil.h"
 #include "utils/SignalHandler.h"
 #include "utils/StringHelpFunctions.h"
@@ -26,7 +27,6 @@
 #include <sys/types.h>
 #include <boost/filesystem.hpp>
 #include <thread>
-#include <src/utils/Exception.h>
 
 #include <fiu-local.h>
 #include <fiu-control.h>
@@ -61,10 +61,9 @@ TEST(UtilTest, EXCEPTION_TEST) {
     ASSERT_NE(msg, empty_err_msg);
 }
 
-milvus::server::func_ptr milvus::server::SignalHandler::routine_func_ = nullptr;
-
 TEST(UtilTest, SIGNAL_TEST) {
-    milvus::server::SignalHandler::PrintStacktrace();
+    milvus::server::HandleSignal(SIGINT);
+    milvus::server::HandleSignal(SIGABRT);
 }
 
 TEST(UtilTest, COMMON_TEST) {
