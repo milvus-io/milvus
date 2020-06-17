@@ -13,9 +13,9 @@
 #include "config/Config.h"
 #include "db/Utils.h"
 #include "server/DBWrapper.h"
+#include "server/ValidationUtil.h"
 #include "utils/Log.h"
 #include "utils/TimeRecorder.h"
-#include "utils/ValidationUtil.h"
 
 #include <fiu-local.h>
 #include <memory>
@@ -50,7 +50,7 @@ CreateHybridIndexRequest::OnExecute() {
         TimeRecorderAuto rc(hdr);
 
         // step 1: check arguments
-        auto status = ValidationUtil::ValidateCollectionName(collection_name_);
+        auto status = ValidateCollectionName(collection_name_);
         if (!status.ok()) {
             return status;
         }
@@ -87,12 +87,12 @@ CreateHybridIndexRequest::OnExecute() {
             index_type = (int32_t)engine::s_map_engine_type.at(index_type_str);
         }
 
-        status = ValidationUtil::ValidateCollectionIndexType(index_type);
+        status = ValidateCollectionIndexType(index_type);
         if (!status.ok()) {
             return status;
         }
 
-        status = ValidationUtil::ValidateIndexParams(extra_params_, collection_schema, index_type);
+        status = ValidateIndexParams(extra_params_, collection_schema, index_type);
         if (!status.ok()) {
             return status;
         }
