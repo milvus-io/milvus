@@ -123,6 +123,9 @@ class GrpcClient {
     Status
     GetHEntityByID(milvus::grpc::VectorsIdentity& vectors_identity, milvus::grpc::HEntity& entity);
 
+    Status
+    CreateHybridIndex(milvus::grpc::HIndexParam& index_param, milvus::grpc::Status& status);
+
  private:
     std::unique_ptr<grpc::MilvusService::Stub> stub_;
 };

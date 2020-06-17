@@ -902,4 +902,28 @@ ClientProxy::GetHEntityByID(const std::string& collection_name, const std::vecto
     }
 }
 
+Status
+ClientProxy::CreateHybridIndex(const milvus::HIndexParam& index_param) {
+    try {
+        milvus::grpc::HIndexParam grpc_param;
+        grpc_param.set_collection_name(index_param.collection_name);
+
+        for (auto& field_name : index_param.field_names) {
+            grpc_param.add_field_names(field_name);
+        }
+        if (index_param.extra_params.size() > 0) {
+            auto extra_param = grpc_param.add_extra_params();
+            extra_param->set_key("params");
+            extra_param->set_value(index_param.extra_params);
+        }
+
+        grpc::Status grpc_status;
+        auto status = client_ptr_->CreateHybridIndex(grpc_param, grpc_status);
+
+        return status;
+    } catch (std::exception& ex) {
+        return Status(StatusCode::UnknownError, "Failed to create hybrid index" + std::string(ex.what()));
+    }
+}
+
 }  // namespace milvus

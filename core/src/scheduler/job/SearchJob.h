@@ -49,11 +49,11 @@ struct SearchTimeStat {
 class SearchJob : public Job {
  public:
     SearchJob(const std::shared_ptr<server::Context>& context, uint64_t topk, const milvus::json& extra_params,
-              const engine::VectorsData& vectors);
+              engine::VectorsData& vectors);
 
     SearchJob(const std::shared_ptr<server::Context>& context, query::GeneralQueryPtr general_query,
               query::QueryPtr query_ptr, std::unordered_map<std::string, engine::meta::hybrid::DataType>& attr_type,
-              const engine::VectorsData& vectorsData);
+              engine::VectorsData& vectorsData);
 
  public:
     bool
@@ -71,6 +71,11 @@ class SearchJob : public Job {
     ResultDistances&
     GetResultDistances();
 
+    void
+    SetVectors(engine::VectorsData& vectors) {
+        vectors_ = vectors;
+    }
+
     Status&
     GetStatus();
 
@@ -81,8 +86,8 @@ class SearchJob : public Job {
     const std::shared_ptr<server::Context>&
     GetContext() const;
 
-    uint64_t
-    topk() const {
+    uint64_t&
+    topk() {
         return topk_;
     }
 
@@ -142,7 +147,7 @@ class SearchJob : public Job {
     uint64_t topk_ = 0;
     milvus::json extra_params_;
     // TODO: smart pointer
-    const engine::VectorsData& vectors_;
+    engine::VectorsData& vectors_;
 
     Id2IndexMap index_files_;
     // TODO: column-base better ?

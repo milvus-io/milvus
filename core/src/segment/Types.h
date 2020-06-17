@@ -20,6 +20,7 @@
 #include <memory>
 
 #include "segment/Attrs.h"
+#include "segment/AttrsIndex.h"
 #include "segment/DeletedDocs.h"
 #include "segment/IdBloomFilter.h"
 #include "segment/VectorIndex.h"
@@ -34,6 +35,7 @@ struct Segment {
     VectorsPtr vectors_ptr_ = std::make_shared<Vectors>();
     AttrsPtr attrs_ptr_ = std::make_shared<Attrs>();
     VectorIndexPtr vector_index_ptr_ = std::make_shared<VectorIndex>();
+    AttrsIndexPtr attrs_index_ptr_ = std::make_shared<AttrsIndex>();
     DeletedDocsPtr deleted_docs_ptr_ = nullptr;
     IdBloomFilterPtr id_bloom_filter_ptr_ = nullptr;
 };

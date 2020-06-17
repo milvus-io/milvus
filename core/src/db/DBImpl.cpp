@@ -14,6 +14,7 @@
 #include <assert.h>
 #include <fiu-local.h>
 
+#include <knowhere/index/structured_index/StructuredIndexSort.h>
 #include <algorithm>
 #include <boost/filesystem.hpp>
 #include <chrono>
@@ -1768,6 +1769,228 @@ DBImpl::CreateIndex(const std::shared_ptr<server::Context>& context, const std::
 }
 
 Status
+DBImpl::SerializeStructuredIndex(const meta::SegmentSchema& segment_schema,
+                                 const std::unordered_map<std::string, knowhere::IndexPtr>& attr_indexes,
+                                 const std::unordered_map<std::string, int64_t>& attr_sizes,
+                                 const std::unordered_map<std::string, meta::hybrid::DataType>& attr_types) {
+    auto status = Status::OK();
+
+    std::string segment_dir;
+    utils::GetParentPath(segment_schema.location_, segment_dir);
+    auto segment_writer_ptr = std::make_shared<segment::SegmentWriter>(segment_dir);
+    status = segment_writer_ptr->SetAttrsIndex(attr_indexes, attr_sizes, attr_types);
+    if (!status.ok()) {
+        return status;
+    }
+    status = segment_writer_ptr->WriteAttrsIndex();
+    if (!status.ok()) {
+        return status;
+    }
+
+    return status;
+}
+
+Status
+DBImpl::FlushAttrsIndex(const std::string& collection_id) {
+    std::vector<int> file_types = {
+        milvus::engine::meta::SegmentSchema::RAW,
+        milvus::engine::meta::SegmentSchema::TO_INDEX,
+    };
+    meta::FilesHolder files_holder;
+    auto status = meta_ptr_->FilesByType(collection_id, file_types, files_holder);
+    if (!status.ok()) {
+        return status;
+    }
+
+    meta::CollectionSchema collection_schema;
+    meta::hybrid::FieldsSchema fields_schema;
+    collection_schema.collection_id_ = collection_id;
+    status = meta_ptr_->DescribeHybridCollection(collection_schema, fields_schema);
+    if (!status.ok()) {
+        return Status::OK();
+    }
+
+    std::unordered_map<std::string, std::vector<uint8_t>> attr_datas;
+    std::unordered_map<std::string, int64_t> attr_sizes;
+    std::unordered_map<std::string, meta::hybrid::DataType> attr_types;
+    std::vector<std::string> field_names;
+
+    for (auto& segment_schema : files_holder.HoldFiles()) {
+        std::string segment_dir;
+        utils::GetParentPath(segment_schema.location_, segment_dir);
+        auto segment_reader_ptr = std::make_shared<segment::SegmentReader>(segment_dir);
+        segment::SegmentPtr segment_ptr;
+        segment_reader_ptr->GetSegment(segment_ptr);
+        status = segment_reader_ptr->Load();
+
+        if (!status.ok()) {
+            return status;
+        }
+
+        for (auto& field_schema : fields_schema.fields_schema_) {
+            if (field_schema.field_type_ != (int32_t)meta::hybrid::DataType::VECTOR) {
+                attr_types.insert(
+                    std::make_pair(field_schema.field_name_, (meta::hybrid::DataType)field_schema.field_type_));
+                field_names.emplace_back(field_schema.field_name_);
+            }
+        }
+
+        auto attrs = segment_ptr->attrs_ptr_->attrs;
+
+        auto attr_it = attrs.begin();
+        for (; attr_it != attrs.end(); attr_it++) {
+            attr_datas.insert(std::make_pair(attr_it->first, attr_it->second->GetMutableData()));
+            attr_sizes.insert(std::make_pair(attr_it->first, attr_it->second->GetCount()));
+        }
+
+        std::unordered_map<std::string, knowhere::IndexPtr> attr_indexes;
+        status = CreateStructuredIndex(collection_id, field_names, attr_types, attr_datas, attr_sizes, attr_indexes);
+        if (!status.ok()) {
+            return status;
+        }
+
+        status = SerializeStructuredIndex(segment_schema, attr_indexes, attr_sizes, attr_types);
+        if (!status.ok()) {
+            return status;
+        }
+    }
+}
+
+Status
+DBImpl::CreateStructuredIndex(const std::string& collection_id, const std::vector<std::string>& field_names,
+                              const std::unordered_map<std::string, meta::hybrid::DataType>& attr_types,
+                              const std::unordered_map<std::string, std::vector<uint8_t>>& attr_datas,
+                              std::unordered_map<std::string, int64_t>& attr_sizes,
+                              std::unordered_map<std::string, knowhere::IndexPtr>& attr_indexes) {
+    if (!initialized_.load(std::memory_order_acquire)) {
+        return SHUTDOWN_ERROR;
+    }
+
+    for (auto& field_name : field_names) {
+        knowhere::IndexPtr index_ptr = nullptr;
+        switch (attr_types.at(field_name)) {
+            case engine::meta::hybrid::DataType::INT8: {
+                auto attr_size = attr_sizes.at(field_name);
+                std::vector<int8_t> attr_data(attr_size);
+                memcpy(attr_data.data(), attr_datas.at(field_name).data(), attr_size);
+
+                auto int8_index_ptr = std::make_shared<knowhere::StructuredIndexSort<int8_t>>(
+                    (size_t)attr_size, reinterpret_cast<const signed char*>(attr_data.data()));
+                index_ptr = std::static_pointer_cast<knowhere::Index>(int8_index_ptr);
+
+                attr_indexes.insert(std::make_pair(field_name, index_ptr));
+                attr_sizes.at(field_name) *= sizeof(int8_t);
+                break;
+            }
+            case engine::meta::hybrid::DataType::INT16: {
+                auto attr_size = attr_sizes.at(field_name);
+                std::vector<int16_t> attr_data(attr_size);
+                memcpy(attr_data.data(), attr_datas.at(field_name).data(), attr_size);
+
+                auto int16_index_ptr = std::make_shared<knowhere::StructuredIndexSort<int16_t>>(
+                    (size_t)attr_size, reinterpret_cast<const int16_t*>(attr_data.data()));
+                index_ptr = std::static_pointer_cast<knowhere::Index>(int16_index_ptr);
+
+                attr_indexes.insert(std::make_pair(field_name, index_ptr));
+                attr_sizes.at(field_name) *= sizeof(int16_t);
+                break;
+            }
+            case engine::meta::hybrid::DataType::INT32: {
+                auto attr_size = attr_sizes.at(field_name);
+                std::vector<int32_t> attr_data(attr_size);
+                memcpy(attr_data.data(), attr_datas.at(field_name).data(), attr_size);
+
+                auto int32_index_ptr = std::make_shared<knowhere::StructuredIndexSort<int32_t>>(
+                    (size_t)attr_size, reinterpret_cast<const int32_t*>(attr_data.data()));
+                index_ptr = std::static_pointer_cast<knowhere::Index>(int32_index_ptr);
+
+                attr_indexes.insert(std::make_pair(field_name, index_ptr));
+                attr_sizes.at(field_name) *= sizeof(int32_t);
+                break;
+            }
+            case engine::meta::hybrid::DataType::INT64: {
+                auto attr_size = attr_sizes.at(field_name);
+                std::vector<int64_t> attr_data(attr_size);
+                memcpy(attr_data.data(), attr_datas.at(field_name).data(), attr_size);
+
+                auto int64_index_ptr = std::make_shared<knowhere::StructuredIndexSort<int64_t>>(
+                    (size_t)attr_size, reinterpret_cast<const int64_t*>(attr_data.data()));
+                index_ptr = std::static_pointer_cast<knowhere::Index>(int64_index_ptr);
+
+                attr_indexes.insert(std::make_pair(field_name, index_ptr));
+                attr_sizes.at(field_name) *= sizeof(int64_t);
+                break;
+            }
+            case engine::meta::hybrid::DataType::FLOAT: {
+                auto attr_size = attr_sizes.at(field_name);
+                std::vector<float> attr_data(attr_size);
+                memcpy(attr_data.data(), attr_datas.at(field_name).data(), attr_size);
+
+                auto float_index_ptr = std::make_shared<knowhere::StructuredIndexSort<float>>(
+                    (size_t)attr_size, reinterpret_cast<const float*>(attr_data.data()));
+                index_ptr = std::static_pointer_cast<knowhere::Index>(float_index_ptr);
+
+                attr_indexes.insert(std::make_pair(field_name, index_ptr));
+                attr_sizes.at(field_name) *= sizeof(float);
+                break;
+            }
+            case engine::meta::hybrid::DataType::DOUBLE: {
+                auto attr_size = attr_sizes.at(field_name);
+                std::vector<double> attr_data(attr_size);
+                memcpy(attr_data.data(), attr_datas.at(field_name).data(), attr_size);
+
+                auto double_index_ptr = std::make_shared<knowhere::StructuredIndexSort<double>>(
+                    (size_t)attr_size, reinterpret_cast<const double*>(attr_data.data()));
+                index_ptr = std::static_pointer_cast<knowhere::Index>(double_index_ptr);
+
+                attr_indexes.insert(std::make_pair(field_name, index_ptr));
+                attr_sizes.at(field_name) *= sizeof(double);
+                break;
+            }
+            default: {}
+        }
+    }
+
+#if 0
+    {
+        std::unordered_map<std::string, engine::meta::hybrid::DataType> attr_type;
+        engine::meta::CollectionSchema collection_schema;
+        engine::meta::hybrid::FieldsSchema fields_schema;
+        collection_schema.collection_id_ = collection_id;
+        status = meta_ptr_->DescribeHybridCollection(collection_schema, fields_schema);
+        if (!status.ok()) {
+            return status;
+        }
+
+        if (field_names.empty()) {
+            for (auto& schema : fields_schema.fields_schema_) {
+                field_names.emplace_back(schema.collection_id_);
+            }
+        }
+
+        for (auto& schema : fields_schema.fields_schema_) {
+            attr_type.insert(std::make_pair(schema.field_name_, (engine::meta::hybrid::DataType)schema.field_type_));
+        }
+
+        meta::FilesHolder files_holder;
+        meta_ptr_->FilesToIndex(files_holder);
+
+        milvus::engine::meta::SegmentsSchema& to_index_files = files_holder.HoldFiles();
+        status = index_failed_checker_.IgnoreFailedIndexFiles(to_index_files);
+        if (!status.ok()) {
+            return status;
+        }
+
+        status = SerializeStructuredIndex(to_index_files, attr_type, field_names);
+        if (!status.ok()) {
+            return status;
+        }
+    }
+#endif
+    return Status::OK();
+}
+
+Status
 DBImpl::DescribeIndex(const std::string& collection_id, CollectionIndex& index) {
     if (!initialized_.load(std::memory_order_acquire)) {
         return SHUTDOWN_ERROR;
@@ -1986,7 +2209,7 @@ DBImpl::HybridQuery(const std::shared_ptr<server::Context>& context, const std::
 Status
 DBImpl::Query(const std::shared_ptr<server::Context>& context, const std::string& collection_id,
               const std::vector<std::string>& partition_tags, uint64_t k, const milvus::json& extra_params,
-              const VectorsData& vectors, ResultIds& result_ids, ResultDistances& result_distances) {
+              VectorsData& vectors, ResultIds& result_ids, ResultDistances& result_distances) {
     milvus::server::ContextChild tracer(context, "Query");
 
     if (!initialized_.load(std::memory_order_acquire)) {
@@ -2074,7 +2297,7 @@ DBImpl::Query(const std::shared_ptr<server::Context>& context, const std::string
 
 Status
 DBImpl::QueryByFileID(const std::shared_ptr<server::Context>& context, const std::vector<std::string>& file_ids,
-                      uint64_t k, const milvus::json& extra_params, const VectorsData& vectors, ResultIds& result_ids,
+                      uint64_t k, const milvus::json& extra_params, VectorsData& vectors, ResultIds& result_ids,
                       ResultDistances& result_distances) {
     milvus::server::ContextChild tracer(context, "Query by file id");
 
@@ -2121,7 +2344,7 @@ DBImpl::Size(uint64_t& result) {
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 Status
 DBImpl::QueryAsync(const std::shared_ptr<server::Context>& context, meta::FilesHolder& files_holder, uint64_t k,
-                   const milvus::json& extra_params, const VectorsData& vectors, ResultIds& result_ids,
+                   const milvus::json& extra_params, VectorsData& vectors, ResultIds& result_ids,
                    ResultDistances& result_distances) {
     milvus::server::ContextChild tracer(context, "Query Async");
     server::CollectQueryMetrics metrics(vectors.vector_count_);
@@ -2944,6 +3167,11 @@ DBImpl::ExecWalRecord(const wal::MXLogRecord& record) {
                         break;
                     }
                     flushed_collections.insert(collection_id);
+
+                    status = FlushAttrsIndex(collection_id);
+                    if (!status.ok()) {
+                        return status;
+                    }
                 }
 
                 collections_flushed(record.collection_id, flushed_collections);

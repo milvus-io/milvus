@@ -18,7 +18,7 @@
 namespace milvus {
 namespace knowhere {
 
-enum OperatorType { LT = 0, LE, GT, GE };
+enum OperatorType { LT = 0, LE = 1, GT = 3, GE = 4 };
 
 template <typename T>
 class StructuredIndex : public Index {

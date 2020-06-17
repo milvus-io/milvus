@@ -20,6 +20,8 @@
 #include <vector>
 
 #include "ExecutionEngine.h"
+#include "db/attr/Attr.h"
+#include "db/attr/AttrIndex.h"
 #include "knowhere/index/vector_index/VecIndex.h"
 
 namespace milvus {
@@ -55,6 +57,9 @@ class ExecutionEngineImpl : public ExecutionEngine {
     Load(bool to_cache) override;
 
     Status
+    LoadAttr(bool to_cache) override;
+
+    Status
     CopyToGpu(uint64_t device_id, bool hybrid = false) override;
 
     Status
@@ -71,15 +76,13 @@ class ExecutionEngineImpl : public ExecutionEngine {
     GetVectorByID(const int64_t id, uint8_t* vector, bool hybrid) override;
 #endif
 
-#if 0
     Status
     ExecBinaryQuery(query::GeneralQueryPtr general_query, faiss::ConcurrentBitsetPtr& bitset,
                     std::unordered_map<std::string, DataType>& attr_type, std::string& vector_placeholder) override;
 
     Status
-    HybridSearch(query::GeneralQueryPtr general_query, std::unordered_map<std::string, DataType>& attr_type,
-                 query::QueryPtr query_ptr, std::vector<float>& distances, std::vector<int64_t>& search_ids) override;
-#endif
+    HybridSearch(scheduler::SearchJobPtr job, std::unordered_map<std::string, DataType>& attr_type,
+                 std::vector<float>& distances, std::vector<int64_t>& search_ids, bool hybrid) override;
 
     Status
     Search(std::vector<int64_t>& ids, std::vector<float>& distances, scheduler::SearchJobPtr job, bool hybrid) override;
@@ -89,6 +92,9 @@ class ExecutionEngineImpl : public ExecutionEngine {
 
     Status
     Cache() override;
+
+    Status
+    AttrCache() override;
 
     Status
     Init() override;
@@ -108,6 +114,11 @@ class ExecutionEngineImpl : public ExecutionEngine {
         return location_;
     }
 
+    std::string
+    GetAttrLocation() const override {
+        return attr_location_;
+    }
+
  private:
     knowhere::VecIndexPtr
     CreatetVecIndex(EngineType type);
@@ -115,9 +126,14 @@ class ExecutionEngineImpl : public ExecutionEngine {
     knowhere::VecIndexPtr
     Load(const std::string& location);
 
-    template <typename T>
-    void
-    ProcessRangeQuery(std::vector<T> data, T value, query::CompareOperator type, faiss::ConcurrentBitsetPtr& bitset);
+    Status
+    ProcessTermQuery(faiss::ConcurrentBitsetPtr& bitset, query::GeneralQueryPtr general_query,
+                     std::unordered_map<std::string, DataType>& attr_type);
+
+    Status
+    ProcessRangeQuery(const engine::DataType data_type, const std::string& operand,
+                      const query::CompareOperator& com_operator, knowhere::IndexPtr& index_ptr,
+                      faiss::ConcurrentBitsetPtr& bitset);
 
     void
     HybridLoad() const;
@@ -132,10 +148,11 @@ class ExecutionEngineImpl : public ExecutionEngine {
     EngineType index_type_;
     MetricType metric_type_;
 
-    std::unordered_map<std::string, std::vector<uint8_t>> attr_data_;
-    std::unordered_map<std::string, size_t> attr_size_;
-    std::vector<int64_t> entity_ids_;
-    int64_t vector_count_;
+    Attr::AttrIndexPtr attr_index_ = nullptr;
+
+    Attr::AttrPtr attr_ = nullptr;
+
+    std::string attr_location_;
 
     milvus::json index_params_;
     int64_t gpu_num_ = 0;
