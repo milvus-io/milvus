@@ -16,7 +16,6 @@
 #include "server/web_impl/Constants.h"
 #include "utils/Log.h"
 #include "utils/TimeRecorder.h"
-#include "utils/ValidationUtil.h"
 
 #include <fiu-local.h>
 #include <memory>

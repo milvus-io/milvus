@@ -225,8 +225,8 @@ Operations::OnExecute(Store& store) {
 Status
 Operations::PreExecute(Store& store) {
     Status status;
-    if (prev_ss_ && type_ == OperationsType::W_Compound) {
-        Snapshots::GetInstance().GetSnapshot(context_.prev_ss, prev_ss_->GetCollectionId());
+    if (GetStartedSS() && type_ == OperationsType::W_Compound) {
+        Snapshots::GetInstance().GetSnapshot(context_.prev_ss, GetStartedSS()->GetCollectionId());
         if (!context_.prev_ss) {
             status = OnSnapshotDropped();
         } else if (prev_ss_->GetID() != context_.prev_ss->GetID()) {

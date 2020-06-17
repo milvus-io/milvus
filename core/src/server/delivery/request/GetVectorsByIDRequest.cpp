@@ -17,9 +17,9 @@
 
 #include "server/delivery/request/GetVectorsByIDRequest.h"
 #include "server/DBWrapper.h"
+#include "server/ValidationUtil.h"
 #include "utils/Log.h"
 #include "utils/TimeRecorder.h"
-#include "utils/ValidationUtil.h"
 
 #include <memory>
 #include <vector>
@@ -61,7 +61,7 @@ GetVectorsByIDRequest::OnExecute() {
             return Status(SERVER_INVALID_ARGUMENT, msg);
         }
 
-        auto status = ValidationUtil::ValidateCollectionName(collection_name_);
+        auto status = ValidateCollectionName(collection_name_);
         if (!status.ok()) {
             return status;
         }

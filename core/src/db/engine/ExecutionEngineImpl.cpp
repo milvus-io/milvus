@@ -49,7 +49,6 @@
 #include "utils/Log.h"
 #include "utils/Status.h"
 #include "utils/TimeRecorder.h"
-#include "utils/ValidationUtil.h"
 
 namespace milvus {
 namespace engine {
