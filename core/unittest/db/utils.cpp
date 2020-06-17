@@ -26,7 +26,6 @@
 #include "db/DBFactory.h"
 #include "db/Options.h"
 
-
 #ifdef MILVUS_GPU_VERSION
 #include "knowhere/index/vector_index/helpers/FaissGpuResourceMgr.h"
 #endif
@@ -255,7 +254,7 @@ DBTest::SetUp() {
 
     auto options = GetOptions();
     options.insert_cache_immediately_ = true;
-    db_ = milvus::engine::DBFactory::Build(options);
+    BuildDB(options);
 
     std::string config_path(options.meta_.path_ + CONFIG_FILE);
     WriteToFile(config_path, CONFIG_STR);
@@ -263,10 +262,7 @@ DBTest::SetUp() {
 
 void
 DBTest::TearDown() {
-    if (db_) {
-        db_->Stop();
-        db_->DropAll();
-    }
+    FreeDB();
 
     milvus::scheduler::JobMgrInst::GetInstance()->Stop();
     milvus::scheduler::SchedInst::GetInstance()->Stop();
@@ -278,6 +274,21 @@ DBTest::TearDown() {
 
     auto options = GetOptions();
     boost::filesystem::remove_all(options.meta_.path_);
+}
+
+void
+DBTest::BuildDB(const milvus::engine::DBOptions& options) {
+    FreeDB();
+    db_ = milvus::engine::DBFactory::Build(options);
+}
+
+void
+DBTest::FreeDB() {
+    if (db_) {
+        db_->Stop();
+        db_->DropAll();
+        db_ = nullptr;
+    }
 }
 
 /////////////////////////////////////////////////////////////////////////////////////////////////////////////////
