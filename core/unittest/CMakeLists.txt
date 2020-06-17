@@ -135,6 +135,7 @@ set(common_files
 
 set(log_files
         ${MILVUS_ENGINE_SRC}/utils/Log.cpp
+        ${MILVUS_ENGINE_SRC}/utils/LogUtil.cpp
         ${MILVUS_THIRDPARTY_SRC}/easyloggingpp/easylogging++.cc
         )
 

@@ -92,13 +92,13 @@ class RpcHandlerTest : public testing::Test {
         milvus::server::Config::GetInstance().SetEngineConfigOmpThreadNum("");
         milvus::server::Config::GetInstance().SetNetworkConfigBindPort("19531");
 
-        //        serverConfig.SetValue(server::CONFIG_CLUSTER_MODE, "cluster");
-        //        DBWrapper::GetInstance().GetInstance().StartService();
-        //        DBWrapper::GetInstance().GetInstance().StopService();
+        // serverConfig.SetValue(server::CONFIG_CLUSTER_MODE, "cluster");
+        // DBWrapper::GetInstance().GetInstance().StartService();
+        // DBWrapper::GetInstance().GetInstance().StopService();
         //
-        //        serverConfig.SetValue(server::CONFIG_CLUSTER_MODE, "read_only");
-        //        DBWrapper::GetInstance().GetInstance().StartService();
-        //        DBWrapper::GetInstance().GetInstance().StopService();
+        // serverConfig.SetValue(server::CONFIG_CLUSTER_MODE, "read_only");
+        // DBWrapper::GetInstance().GetInstance().StartService();
+        // DBWrapper::GetInstance().GetInstance().StopService();
 
         milvus::server::DBWrapper::GetInstance().StartService();
 
