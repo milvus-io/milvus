@@ -16,47 +16,42 @@
 #include <memory>
 #include <vector>
 
-namespace milvus {
-namespace engine {
-namespace snapshot {
+namespace milvus::engine::snapshot {
 
 using OnNoRefCBF = std::function<void(void)>;
 
 class ReferenceProxy {
  public:
-    ReferenceProxy() {
-    }
+    ReferenceProxy() = default;
+
     // TODO: Copy constructor is used in Mock Test. Should never be used. To be removed
     ReferenceProxy(const ReferenceProxy& o) {
-        refcnt_ = 0;
+        ref_count_ = 0;
     }
 
     void
-    RegisterOnNoRefCB(OnNoRefCBF cb);
+    RegisterOnNoRefCB(const OnNoRefCBF& cb);
 
     virtual void
     Ref();
+
     virtual void
     UnRef();
 
-    int
-    RefCnt() const {
-        return refcnt_;
+    [[nodiscard]] int64_t
+    ref_count() const { return ref_count_; }
+
+    void ResetCnt() {
+        ref_count_ = 0;
     }
 
-    void
-    ResetCnt() {
-        refcnt_ = 0;
-    }
-
-    virtual ~ReferenceProxy();
+    virtual ~ReferenceProxy() = default;
 
  protected:
-    std::atomic_long refcnt_ = {0};
+    std::atomic<int64_t> ref_count_ = {0};
     std::vector<OnNoRefCBF> on_no_ref_cbs_;
 };
 
 using ReferenceResourcePtr = std::shared_ptr<ReferenceProxy>;
-}  // namespace snapshot
-}  // namespace engine
-}  // namespace milvus
+
+}  // namespace milvus::engine::snapshot

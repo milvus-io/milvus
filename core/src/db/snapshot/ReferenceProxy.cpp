@@ -10,23 +10,19 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
 #include "db/snapshot/ReferenceProxy.h"
-#include <assert.h>
-#include <iostream>
 
-namespace milvus {
-namespace engine {
-namespace snapshot {
+namespace milvus::engine::snapshot {
 
 void
 ReferenceProxy::Ref() {
-    ++refcnt_;
+    ++ref_count_;
 }
 
 void
 ReferenceProxy::UnRef() {
-    if (refcnt_ == 0)
+    if (ref_count_ == 0)
         return;
-    if (refcnt_.fetch_sub(1) == 1) {
+    if (ref_count_.fetch_sub(1) == 1) {
         for (auto& cb : on_no_ref_cbs_) {
             cb();
         }
@@ -34,14 +30,8 @@ ReferenceProxy::UnRef() {
 }
 
 void
-ReferenceProxy::RegisterOnNoRefCB(OnNoRefCBF cb) {
+ReferenceProxy::RegisterOnNoRefCB(const OnNoRefCBF& cb) {
     on_no_ref_cbs_.emplace_back(cb);
 }
 
-ReferenceProxy::~ReferenceProxy() {
-    /* OnDeRef(); */
-}
-
-}  // namespace snapshot
-}  // namespace engine
-}  // namespace milvus
+}  // namespace milvus::engine::snapshot

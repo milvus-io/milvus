@@ -16,7 +16,7 @@ FAISS_ROOT="" #FAISS root path
 FAISS_SOURCE="BUNDLED"
 WITH_PROMETHEUS="ON"
 FIU_ENABLE="OFF"
-BUILD_OPENBLAS="ON"
+# BUILD_OPENBLAS="ON" # not used any more
 
 while getopts "p:d:t:f:ulrcghzmei" arg; do
   case $arg in

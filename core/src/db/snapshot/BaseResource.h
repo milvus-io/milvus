@@ -13,21 +13,16 @@
 #include <string>
 #include "ReferenceProxy.h"
 
-namespace milvus {
-namespace engine {
-namespace snapshot {
+namespace milvus::engine::snapshot {
 
 class DBBaseResource : public ReferenceProxy {
  public:
-    virtual std::string
+    [[nodiscard]] virtual std::string
     ToString() const {
-        return "";
+        return std::string();
     }
 
-    virtual ~DBBaseResource() {
-    }
+    ~DBBaseResource() override = default;
 };
 
-}  // namespace snapshot
-}  // namespace engine
-}  // namespace milvus
+}  // namespace milvus::engine::snapshot

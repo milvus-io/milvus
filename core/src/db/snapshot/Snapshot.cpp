@@ -19,13 +19,13 @@ namespace snapshot {
 
 void
 Snapshot::RefAll() {
-    /* std::cout << this << " RefAll SS=" << GetID() << " SS RefCnt=" << RefCnt() << std::endl; */
+    /* std::cout << this << " RefAll SS=" << GetID() << " SS RefCnt=" << ref_count() << std::endl; */
     std::apply([this](auto&... resource) { ((DoRef(resource)), ...); }, resources_);
 }
 
 void
 Snapshot::UnRefAll() {
-    /* std::cout << this << " UnRefAll SS=" << GetID() << " SS RefCnt=" << RefCnt() << std::endl; */
+    /* std::cout << this << " UnRefAll SS=" << GetID() << " SS RefCnt=" << ref_count() << std::endl; */
     std::apply([this](auto&... resource) { ((DoUnRef(resource)), ...); }, resources_);
 }
 
