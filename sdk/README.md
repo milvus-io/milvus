@@ -32,7 +32,7 @@ Run C++ example:
 
 ### Create your own C++ client project
 
-Create a folder for the project, and copy C++ SDK header and library files into it.
+- Create a folder for the project, and copy C++ SDK header and library files into it.
 
 ```shell
  # create project folder
@@ -41,15 +41,14 @@ Create a folder for the project, and copy C++ SDK header and library files into 
  
  # copy necessary files
  $ cp [Milvus root path]/sdk/cmake_build/libmilvus_sdk.so .
- $ cp [Milvus root path]/sdk/include/MilvusApi.h .
- $ cp [Milvus root path]/sdk/include/Status.h .
+ $ cp -r [Milvus root path]/sdk/include .
 ```
 
-Create file `main.cpp` in the project folder, and copy the following code into it:
+- Create file `main.cpp` in the project folder, and copy the following code into it:
 
 ```c++
-#include "./MilvusApi.h"
-#include "./Status.h"
+#include "./include/MilvusApi.h"
+#include "./include/Status.h"
 
 int main() {
   // connect to milvus server
@@ -64,7 +63,7 @@ int main() {
 }
 ```
 
-Create file `CMakeLists.txt` in the project folder, and copy the following code into it:
+- Create file `CMakeLists.txt` in the project folder, and copy the following code into it:
 
 ```bash
  cmake_minimum_required(VERSION 3.14)
@@ -77,18 +76,20 @@ Create file `CMakeLists.txt` in the project folder, and copy the following code 
          pthread)
 ```
 
-Now there are 5 files in your project:
+- Now the file structure of your project:
 
 ```shell
 MyMilvusClient
  |-CMakeLists.txt
  |-main.cpp
  |-libmilvus_sdk.so
- |-MilvusApi.h
- |-Status.h
+ |-include
+     |-MilvusApi.h
+     |-Status.h
+     |-......
 ```
 
-Build the project:
+- Build the project:
 
 ```shell
  $ mkdir cmake_build
@@ -97,8 +98,15 @@ Build the project:
  $ make
 ```
 
-Run your client program:
+- Run your client program:
 
 ```shell
  $ ./milvus_client
+```
+
+### Troubleshooting
+
+- compile error "cannot find -lz"
+```shell
+ $ apt-get install zlib1g-dev.
 ```

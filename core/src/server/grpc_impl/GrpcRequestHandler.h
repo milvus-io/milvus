@@ -376,6 +376,11 @@ class GrpcRequestHandler final : public ::milvus::grpc::MilvusService::Service, 
     ::grpc::Status
     GetEntityByID(::grpc::ServerContext* context, const ::milvus::grpc::VectorsIdentity* request,
                   ::milvus::grpc::HEntity* response) override;
+
+    ::grpc::Status
+    CreateHybridIndex(::grpc::ServerContext* context, const ::milvus::grpc::HIndexParam* request,
+                      ::milvus::grpc::Status* response) override;
+
     //
     //    ::grpc::Status
     //    HybridSearchInSegments(::grpc::ServerContext* context,

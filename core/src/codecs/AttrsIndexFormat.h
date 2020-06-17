@@ -17,17 +17,25 @@
 
 #pragma once
 
+#include <memory>
+#include <string>
+
+#include "segment/AttrsIndex.h"
+#include "storage/FSHandler.h"
+
 namespace milvus {
 namespace codec {
 
 class AttrsIndexFormat {
-    // public:
-    //    virtual AttrsIndex
-    //    read() = 0;
-    //
-    //    virtual void
-    //    write(AttrsIndex attrs_index) = 0;
+ public:
+    virtual void
+    read(const storage::FSHandlerPtr& fd_ptr, segment::AttrsIndexPtr& attr_index) = 0;
+
+    virtual void
+    write(const storage::FSHandlerPtr& fs_ptr, const segment::AttrsIndexPtr& attr_index) = 0;
 };
+
+using AttrsIndexFormatPtr = std::shared_ptr<AttrsIndexFormat>;
 
 }  // namespace codec
 }  // namespace milvus

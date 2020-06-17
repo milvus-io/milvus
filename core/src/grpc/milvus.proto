@@ -434,7 +434,7 @@ message HDeleteByIDParam {
 message HIndexParam {
     Status status = 1;
     string collection_name = 2;
-    int32 index_type = 3;
+    repeated string field_names = 3;
     repeated KeyValuePair extra_params = 4;
 }
 
@@ -694,7 +694,7 @@ service MilvusService {
 
     ///////////////////////////////////////////////////////////////////
 
-    //    rpc CreateIndex(IndexParam) returns (Status) {}
+    rpc CreateHybridIndex(HIndexParam) returns (Status) {}
     //
     //    rpc DescribeIndex(CollectionName) returns (IndexParam) {}
     //

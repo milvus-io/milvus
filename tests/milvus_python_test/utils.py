@@ -129,6 +129,11 @@ def gen_binary_super_vectors(vectors, length):
 def gen_single_vector(dim):
     return [[random.random() for _ in range(dim)]]
 
+def gen_int_attr(row_num):
+    return [random.randint(0, 255) for _ in range(row_num)]
+
+def gen_float_attr(row_num):
+    return [random.uniform(0, 255) for _ in range(row_num)]
 
 def gen_vector(nb, d, seed=np.random.RandomState(1234)):
     xb = seed.rand(nb, d).astype("float32")

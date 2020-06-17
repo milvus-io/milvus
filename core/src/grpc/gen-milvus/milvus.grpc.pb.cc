@@ -54,6 +54,7 @@ static const char* MilvusService_method_names[] = {
   "/milvus.grpc.MilvusService/ShowHybridCollections",
   "/milvus.grpc.MilvusService/ShowHybridCollectionInfo",
   "/milvus.grpc.MilvusService/PreloadHybridCollection",
+  "/milvus.grpc.MilvusService/CreateHybridIndex",
   "/milvus.grpc.MilvusService/InsertEntity",
   "/milvus.grpc.MilvusService/HybridSearchPB",
   "/milvus.grpc.MilvusService/HybridSearch",
@@ -104,13 +105,14 @@ MilvusService::Stub::Stub(const std::shared_ptr< ::grpc::ChannelInterface>& chan
   , rpcmethod_ShowHybridCollections_(MilvusService_method_names[31], ::grpc::internal::RpcMethod::NORMAL_RPC, channel)
   , rpcmethod_ShowHybridCollectionInfo_(MilvusService_method_names[32], ::grpc::internal::RpcMethod::NORMAL_RPC, channel)
   , rpcmethod_PreloadHybridCollection_(MilvusService_method_names[33], ::grpc::internal::RpcMethod::NORMAL_RPC, channel)
-  , rpcmethod_InsertEntity_(MilvusService_method_names[34], ::grpc::internal::RpcMethod::NORMAL_RPC, channel)
-  , rpcmethod_HybridSearchPB_(MilvusService_method_names[35], ::grpc::internal::RpcMethod::NORMAL_RPC, channel)
-  , rpcmethod_HybridSearch_(MilvusService_method_names[36], ::grpc::internal::RpcMethod::NORMAL_RPC, channel)
-  , rpcmethod_HybridSearchInSegments_(MilvusService_method_names[37], ::grpc::internal::RpcMethod::NORMAL_RPC, channel)
-  , rpcmethod_GetEntityByID_(MilvusService_method_names[38], ::grpc::internal::RpcMethod::NORMAL_RPC, channel)
-  , rpcmethod_GetEntityIDs_(MilvusService_method_names[39], ::grpc::internal::RpcMethod::NORMAL_RPC, channel)
-  , rpcmethod_DeleteEntitiesByID_(MilvusService_method_names[40], ::grpc::internal::RpcMethod::NORMAL_RPC, channel)
+  , rpcmethod_CreateHybridIndex_(MilvusService_method_names[34], ::grpc::internal::RpcMethod::NORMAL_RPC, channel)
+  , rpcmethod_InsertEntity_(MilvusService_method_names[35], ::grpc::internal::RpcMethod::NORMAL_RPC, channel)
+  , rpcmethod_HybridSearchPB_(MilvusService_method_names[36], ::grpc::internal::RpcMethod::NORMAL_RPC, channel)
+  , rpcmethod_HybridSearch_(MilvusService_method_names[37], ::grpc::internal::RpcMethod::NORMAL_RPC, channel)
+  , rpcmethod_HybridSearchInSegments_(MilvusService_method_names[38], ::grpc::internal::RpcMethod::NORMAL_RPC, channel)
+  , rpcmethod_GetEntityByID_(MilvusService_method_names[39], ::grpc::internal::RpcMethod::NORMAL_RPC, channel)
+  , rpcmethod_GetEntityIDs_(MilvusService_method_names[40], ::grpc::internal::RpcMethod::NORMAL_RPC, channel)
+  , rpcmethod_DeleteEntitiesByID_(MilvusService_method_names[41], ::grpc::internal::RpcMethod::NORMAL_RPC, channel)
   {}
 
 ::grpc::Status MilvusService::Stub::CreateCollection(::grpc::ClientContext* context, const ::milvus::grpc::CollectionSchema& request, ::milvus::grpc::Status* response) {
@@ -1065,6 +1067,34 @@ void MilvusService::Stub::experimental_async::PreloadHybridCollection(::grpc::Cl
   return ::grpc_impl::internal::ClientAsyncResponseReaderFactory< ::milvus::grpc::Status>::Create(channel_.get(), cq, rpcmethod_PreloadHybridCollection_, context, request, false);
 }
 
+::grpc::Status MilvusService::Stub::CreateHybridIndex(::grpc::ClientContext* context, const ::milvus::grpc::HIndexParam& request, ::milvus::grpc::Status* response) {
+  return ::grpc::internal::BlockingUnaryCall(channel_.get(), rpcmethod_CreateHybridIndex_, context, request, response);
+}
+
+void MilvusService::Stub::experimental_async::CreateHybridIndex(::grpc::ClientContext* context, const ::milvus::grpc::HIndexParam* request, ::milvus::grpc::Status* response, std::function<void(::grpc::Status)> f) {
+  ::grpc_impl::internal::CallbackUnaryCall(stub_->channel_.get(), stub_->rpcmethod_CreateHybridIndex_, context, request, response, std::move(f));
+}
+
+void MilvusService::Stub::experimental_async::CreateHybridIndex(::grpc::ClientContext* context, const ::grpc::ByteBuffer* request, ::milvus::grpc::Status* response, std::function<void(::grpc::Status)> f) {
+  ::grpc_impl::internal::CallbackUnaryCall(stub_->channel_.get(), stub_->rpcmethod_CreateHybridIndex_, context, request, response, std::move(f));
+}
+
+void MilvusService::Stub::experimental_async::CreateHybridIndex(::grpc::ClientContext* context, const ::milvus::grpc::HIndexParam* request, ::milvus::grpc::Status* response, ::grpc::experimental::ClientUnaryReactor* reactor) {
+  ::grpc_impl::internal::ClientCallbackUnaryFactory::Create(stub_->channel_.get(), stub_->rpcmethod_CreateHybridIndex_, context, request, response, reactor);
+}
+
+void MilvusService::Stub::experimental_async::CreateHybridIndex(::grpc::ClientContext* context, const ::grpc::ByteBuffer* request, ::milvus::grpc::Status* response, ::grpc::experimental::ClientUnaryReactor* reactor) {
+  ::grpc_impl::internal::ClientCallbackUnaryFactory::Create(stub_->channel_.get(), stub_->rpcmethod_CreateHybridIndex_, context, request, response, reactor);
+}
+
+::grpc::ClientAsyncResponseReader< ::milvus::grpc::Status>* MilvusService::Stub::AsyncCreateHybridIndexRaw(::grpc::ClientContext* context, const ::milvus::grpc::HIndexParam& request, ::grpc::CompletionQueue* cq) {
+  return ::grpc_impl::internal::ClientAsyncResponseReaderFactory< ::milvus::grpc::Status>::Create(channel_.get(), cq, rpcmethod_CreateHybridIndex_, context, request, true);
+}
+
+::grpc::ClientAsyncResponseReader< ::milvus::grpc::Status>* MilvusService::Stub::PrepareAsyncCreateHybridIndexRaw(::grpc::ClientContext* context, const ::milvus::grpc::HIndexParam& request, ::grpc::CompletionQueue* cq) {
+  return ::grpc_impl::internal::ClientAsyncResponseReaderFactory< ::milvus::grpc::Status>::Create(channel_.get(), cq, rpcmethod_CreateHybridIndex_, context, request, false);
+}
+
 ::grpc::Status MilvusService::Stub::InsertEntity(::grpc::ClientContext* context, const ::milvus::grpc::HInsertParam& request, ::milvus::grpc::HEntityIDs* response) {
   return ::grpc::internal::BlockingUnaryCall(channel_.get(), rpcmethod_InsertEntity_, context, request, response);
 }
@@ -1435,35 +1465,40 @@ MilvusService::Service::Service() {
   AddMethod(new ::grpc::internal::RpcServiceMethod(
       MilvusService_method_names[34],
       ::grpc::internal::RpcMethod::NORMAL_RPC,
+      new ::grpc::internal::RpcMethodHandler< MilvusService::Service, ::milvus::grpc::HIndexParam, ::milvus::grpc::Status>(
+          std::mem_fn(&MilvusService::Service::CreateHybridIndex), this)));
+  AddMethod(new ::grpc::internal::RpcServiceMethod(
+      MilvusService_method_names[35],
+      ::grpc::internal::RpcMethod::NORMAL_RPC,
       new ::grpc::internal::RpcMethodHandler< MilvusService::Service, ::milvus::grpc::HInsertParam, ::milvus::grpc::HEntityIDs>(
           std::mem_fn(&MilvusService::Service::InsertEntity), this)));
   AddMethod(new ::grpc::internal::RpcServiceMethod(
-      MilvusService_method_names[35],
+      MilvusService_method_names[36],
       ::grpc::internal::RpcMethod::NORMAL_RPC,
       new ::grpc::internal::RpcMethodHandler< MilvusService::Service, ::milvus::grpc::HSearchParamPB, ::milvus::grpc::HQueryResult>(
           std::mem_fn(&MilvusService::Service::HybridSearchPB), this)));
   AddMethod(new ::grpc::internal::RpcServiceMethod(
-      MilvusService_method_names[36],
+      MilvusService_method_names[37],
       ::grpc::internal::RpcMethod::NORMAL_RPC,
       new ::grpc::internal::RpcMethodHandler< MilvusService::Service, ::milvus::grpc::HSearchParam, ::milvus::grpc::HQueryResult>(
           std::mem_fn(&MilvusService::Service::HybridSearch), this)));
   AddMethod(new ::grpc::internal::RpcServiceMethod(
-      MilvusService_method_names[37],
+      MilvusService_method_names[38],
       ::grpc::internal::RpcMethod::NORMAL_RPC,
       new ::grpc::internal::RpcMethodHandler< MilvusService::Service, ::milvus::grpc::HSearchInSegmentsParam, ::milvus::grpc::TopKQueryResult>(
           std::mem_fn(&MilvusService::Service::HybridSearchInSegments), this)));
   AddMethod(new ::grpc::internal::RpcServiceMethod(
-      MilvusService_method_names[38],
+      MilvusService_method_names[39],
       ::grpc::internal::RpcMethod::NORMAL_RPC,
       new ::grpc::internal::RpcMethodHandler< MilvusService::Service, ::milvus::grpc::VectorsIdentity, ::milvus::grpc::HEntity>(
           std::mem_fn(&MilvusService::Service::GetEntityByID), this)));
   AddMethod(new ::grpc::internal::RpcServiceMethod(
-      MilvusService_method_names[39],
+      MilvusService_method_names[40],
       ::grpc::internal::RpcMethod::NORMAL_RPC,
       new ::grpc::internal::RpcMethodHandler< MilvusService::Service, ::milvus::grpc::HGetEntityIDsParam, ::milvus::grpc::HEntityIDs>(
           std::mem_fn(&MilvusService::Service::GetEntityIDs), this)));
   AddMethod(new ::grpc::internal::RpcServiceMethod(
-      MilvusService_method_names[40],
+      MilvusService_method_names[41],
       ::grpc::internal::RpcMethod::NORMAL_RPC,
       new ::grpc::internal::RpcMethodHandler< MilvusService::Service, ::milvus::grpc::HDeleteByIDParam, ::milvus::grpc::Status>(
           std::mem_fn(&MilvusService::Service::DeleteEntitiesByID), this)));
@@ -1704,6 +1739,13 @@ MilvusService::Service::~Service() {
 }
 
 ::grpc::Status MilvusService::Service::PreloadHybridCollection(::grpc::ServerContext* context, const ::milvus::grpc::CollectionName* request, ::milvus::grpc::Status* response) {
+  (void) context;
+  (void) request;
+  (void) response;
+  return ::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "");
+}
+
+::grpc::Status MilvusService::Service::CreateHybridIndex(::grpc::ServerContext* context, const ::milvus::grpc::HIndexParam* request, ::milvus::grpc::Status* response) {
   (void) context;
   (void) request;
   (void) response;

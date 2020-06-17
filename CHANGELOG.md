@@ -7,10 +7,12 @@ Please mark all changes in change log and use the issue from GitHub
 ## Bug
 -   \#2487 Remove timeout when creating collection in dev test
 -   \#2551 Fix test_hybrid_db and test_rpc error
+-   \#2582 CreateHybridIndex.cpp compile error
 
 ## Feature
 -   \#2319 Redo metadata to support MVCC
 -   \#2509 Count up query statistics for debug ease
+-   \#2572 Support structured data index
 
 ## Improvement
 -   \#2543 Remove secondary_path related code

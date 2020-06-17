@@ -17,14 +17,14 @@ namespace milvus {
 namespace scheduler {
 
 SearchJob::SearchJob(const std::shared_ptr<server::Context>& context, uint64_t topk, const milvus::json& extra_params,
-                     const engine::VectorsData& vectors)
+                     engine::VectorsData& vectors)
     : Job(JobType::SEARCH), context_(context), topk_(topk), extra_params_(extra_params), vectors_(vectors) {
 }
 
 SearchJob::SearchJob(const std::shared_ptr<server::Context>& context, milvus::query::GeneralQueryPtr general_query,
                      query::QueryPtr query_ptr,
                      std::unordered_map<std::string, engine::meta::hybrid::DataType>& attr_type,
-                     const engine::VectorsData& vectors)
+                     engine::VectorsData& vectors)
     : Job(JobType::SEARCH),
       context_(context),
       general_query_(general_query),
