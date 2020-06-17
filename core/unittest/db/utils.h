@@ -72,6 +72,12 @@ class DBTest : public BaseTest {
     SetUp() override;
     void
     TearDown() override;
+
+    void
+    BuildDB(const milvus::engine::DBOptions& options);
+
+    void
+    FreeDB();
 };
 
 /////////////////////////////////////////////////////////////////////////////////////////////////////////////////
