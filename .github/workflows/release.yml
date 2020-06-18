@@ -1,0 +1,134 @@
+name: Release Build
+
+# This workflow is triggered on pushes or pull request to the repository.
+on:
+  release:
+    # Only use the types keyword to narrow down the activity types that will trigger your workflow.
+    types: [prereleased, released]
+
+jobs:
+  centos-docker-release:
+    name: AMD64 CentOS ${{ matrix.centos }} Docker Images Release
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        centos: [7]
+    env:
+      CENTOS: ${{ matrix.centos }}
+      MILVUS_INSTALL_PREFIX: "/milvus/docker/deploy/milvus"
+      SOURCE_REPO: "milvusdb/milvus"
+      TARGET_REPO: "milvusdb/milvus"
+      SOURCE_TAG: "cpu-latest"
+    steps:
+      # This step checks out a copy of your repository.
+      - name: Checkout Milvus
+        uses: actions/checkout@v1
+      - name: Check Dockerfile
+        uses: mgrachev/action-hadolint@v1
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          reporter: github-pr-check # Default is github-pr-check
+      - name: Prebuild
+        shell: bash
+        run: |
+          mkdir -p _env
+          SEMVER=${GITHUB_REF##*/} && SEMVER=${SEMVER#*v}
+          echo "export SEMVER=${SEMVER}" >> _env/milvus-build.sh
+          SUB_SHA=${GITHUB_SHA:0:6}
+          echo "export SUB_SHA=${SUB_SHA}" >> _env/milvus-build.sh
+          SHOW_DATE=`date +%Y-%m-%d` && SHOW_DATE=d${SHOW_DATE:5:2}${SHOW_DATE:8:2}${SHOW_DATE:2:2}
+          echo "export SHOW_DATE=${SHOW_DATE}" >> _env/milvus-build.sh
+          echo "export TARGET_TAG=${SEMVER}-cpu-${SHOW_DATE}-${SUB_SHA}" >> _env/milvus-build.sh
+          docker-compose pull --ignore-pull-failures db
+          docker-compose pull --ignore-pull-failures centos-core
+          docker-compose build centos-core
+          docker rmi $(docker images | grep '<none>' | awk '{print $3}') || exit 0
+      - name: Build Milvus
+        shell: bash
+        run: |
+          docker-compose run --use-aliases -d db
+          docker-compose run centos-core
+      - name: Docker Build
+        shell: bash
+        run: |
+          sudo rm -rf docker/deploy/milvus/unittest || true
+          source _env/milvus-build.sh
+          cd docker/deploy && docker-compose build --force-rm cpu_centos7
+      - name: Docker Test
+        shell: bash
+        run: |
+          source _env/milvus-build.sh
+          cd docker/deploy && docker-compose up -d cpu_centos7 && docker-compose down
+      - name: Docker Push
+        if: success() && github.repository == 'milvus-io/milvus'
+        shell: bash
+        run: |
+          docker login -u ${{ secrets.DOCKERHUB_USER }} \
+                       -p ${{ secrets.DOCKERHUB_TOKEN }}
+          docker-compose push centos-core
+          source _env/milvus-build.sh
+          cd docker/deploy && docker-compose push cpu_centos7
+
+
+  centos-cuda-docker-release:
+    name: AMD64 CentOS ${{ matrix.centos }} CUDA Docker Images Release
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        centos: [7]
+    env:
+      CENTOS: ${{ matrix.centos }}
+      MILVUS_INSTALL_PREFIX: "/milvus/docker/deploy/milvus"
+      SOURCE_REPO: "milvusdb/milvus"
+      TARGET_REPO: "milvusdb/milvus"
+      SOURCE_TAG: "gpu-latest"
+    steps:
+      # This step checks out a copy of your repository.
+      - name: Checkout Milvus
+        uses: actions/checkout@v1
+      - name: Check Dockerfile
+        uses: mgrachev/action-hadolint@v1
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          reporter: github-pr-check # Default is github-pr-check
+      - name: Prebuild
+        shell: bash
+        run: |
+          mkdir -p _env
+          SEMVER=${GITHUB_REF##*/} && SEMVER=${SEMVER#*v}
+          echo "export SEMVER=${SEMVER}" >> _env/milvus-build.sh
+          SUB_SHA=${GITHUB_SHA:0:6}
+          echo "export SUB_SHA=${SUB_SHA}" >> _env/milvus-build.sh
+          SHOW_DATE=`date +%Y-%m-%d` && SHOW_DATE=d${SHOW_DATE:5:2}${SHOW_DATE:8:2}${SHOW_DATE:2:2}
+          echo "export SHOW_DATE=${SHOW_DATE}" >> _env/milvus-build.sh
+          echo "export TARGET_TAG=${SEMVER}-gpu-${SHOW_DATE}-${SUB_SHA}" >> _env/milvus-build.sh
+          docker-compose pull --ignore-pull-failures db
+          docker-compose pull --ignore-pull-failures centos-cuda-core
+          docker-compose build centos-cuda-core
+          docker rmi $(docker images | grep '<none>' | awk '{print $3}') || exit 0
+      - name: Build Milvus
+        shell: bash
+        run: |
+          docker-compose run --use-aliases -d db
+          docker-compose run centos-cuda-core
+      - name: Docker Build
+        shell: bash
+        run: |
+          source _env/milvus-build.sh
+          cd docker/deploy && docker-compose build --force-rm gpu_centos7
+      - name: Docker Test
+        shell: bash
+        run: |
+          source _env/milvus-build.sh
+          cd docker/deploy && docker-compose up -d gpu_centos7 && docker-compose down
+      - name: Docker Push
+        if: success() && github.repository == 'milvus-io/milvus'
+        shell: bash
+        run: |
+          docker login -u ${{ secrets.DOCKERHUB_USER }} \
+                       -p ${{ secrets.DOCKERHUB_TOKEN }}
+          docker-compose push centos-cuda-core
+          source _env/milvus-build.sh
+          cd docker/deploy && docker-compose push gpu_centos7
