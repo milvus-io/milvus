@@ -1,0 +1,4 @@
+export SEMVER=0.10.0
+export SUB_SHA=050e7b
+export SHOW_DATE=d061820
+export TARGET_TAG=0.10.0-gpu-d061820-050e7b
