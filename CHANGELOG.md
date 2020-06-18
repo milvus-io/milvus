@@ -5,6 +5,9 @@ Please mark all change in change log and use the issue from GitHub
 # Milvus 0.10.1 (TBD)
 
 ## Bug
+-   \#2585 IVF_PQ on GPU with using metric_type IP
+-   \#2578 Result count doesn't match target vectors count
+-   \#2557 fix random crash of INSERT_DUPLICATE_ID case
 
 ## Feature
 
