@@ -19,10 +19,9 @@
 
 #include "config/Config.h"
 #include "config/YamlConfigMgr.h"
+#include "config/Utils.h"
 #include "server/utils.h"
-#include "utils/CommonUtil.h"
 #include "utils/StringHelpFunctions.h"
-#include "utils/ValidationUtil.h"
 
 namespace {
 
@@ -259,7 +258,7 @@ TEST_F(ConfigTest, SERVER_CONFIG_VALID_TEST) {
     {
         // #2564
         int64_t total_mem = 0, free_mem = 0;
-        milvus::server::CommonUtil::GetSystemMemInfo(total_mem, free_mem);
+        milvus::server::GetSystemMemInfo(total_mem, free_mem);
         ASSERT_TRUE(config.SetCacheConfigInsertBufferSize("1GB").ok());
         int64_t cache_cpu_cache_size = total_mem / 2;
         float cache_cpu_cache_threshold = 0.7;
@@ -271,7 +270,7 @@ TEST_F(ConfigTest, SERVER_CONFIG_VALID_TEST) {
 
     {
         int64_t total_mem = 0, free_mem = 0;
-        milvus::server::CommonUtil::GetSystemMemInfo(total_mem, free_mem);
+        milvus::server::GetSystemMemInfo(total_mem, free_mem);
         ASSERT_TRUE(config.SetCacheConfigInsertBufferSize("1GB").ok());
         int64_t cache_cpu_cache_size = total_mem - 1073741824 - 1; // total_size - 1GB - 1
         ASSERT_TRUE(config.SetCacheConfigCpuCacheCapacity(std::to_string(cache_cpu_cache_size)).ok());
@@ -935,10 +934,10 @@ TEST_F(ConfigTest, SERVER_CONFIG_VALID_FAIL_TEST) {
     ASSERT_FALSE(s.ok());
     fiu_disable("Config.GetGpuResourceConfigCacheCapacity.diable_gpu_resource");
 
-    fiu_enable("ValidationUtil.GetGpuMemory.return_error", 1, NULL, 0);
+    fiu_enable("config.GetGpuMemory.return_error", 1, NULL, 0);
     s = config.GetGpuResourceConfigCacheCapacity(value);
     ASSERT_FALSE(s.ok());
-    fiu_disable("ValidationUtil.GetGpuMemory.return_error");
+    fiu_disable("config.GetGpuMemory.return_error");
 
     // fiu_enable("check_config_insert_buffer_size_fail", 1, NULL, 0);
     // s = config.GetCacheConfigCpuCacheCapacity(value);

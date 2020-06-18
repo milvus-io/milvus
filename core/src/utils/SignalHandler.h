@@ -11,16 +11,20 @@
 
 #pragma once
 
+#include <cstdint>
+
 namespace milvus {
 namespace server {
 
-class SignalUtil {
- public:
-    static void
-    HandleSignal(int signum);
-    static void
-    PrintStacktrace();
-};
+typedef void (*signal_func_ptr)(int32_t);
+
+extern signal_func_ptr signal_routine_func;
+
+extern void
+HandleSignal(int signum);
+
+extern void
+PrintStacktrace();
 
 }  // namespace server
 }  // namespace milvus

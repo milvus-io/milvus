@@ -20,14 +20,12 @@ set(test_files
 include_directories("${CUDA_TOOLKIT_ROOT_DIR}/include")
 link_directories("${CUDA_TOOLKIT_ROOT_DIR}/lib64")
 
-set(util_files
-        ${MILVUS_THIRDPARTY_SRC}/easyloggingpp/easylogging++.cc
-        ${MILVUS_ENGINE_SRC}/utils/Status.cpp)
-
 add_executable(test_storage
-        ${test_files}
-        ${util_files}
         ${common_files}
+        ${log_files}
+        ${config_files}
+        ${storage_files}
+        ${test_files}
         )
 
 target_link_libraries(test_storage

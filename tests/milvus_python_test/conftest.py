@@ -123,6 +123,31 @@ def collection(request, connect):
 
 
 @pytest.fixture(scope="function")
+def hybrid_collection(request, connect):
+    ori_collection_name = getattr(request.module, "collection_id", "test")
+    collection_name = gen_unique_str(ori_collection_name)
+    dim = getattr(request.module, "dim", "128")
+    collection_fields = [
+        {"field_name": "A", "data_type": DataType.INT32},
+        {"field_name": "B", "data_type": DataType.INT64},
+        {"field_name": "C", "data_type": DataType.FLOAT},
+        {"field_name": "Vec", "dimension": dim, "extra_params": {"index_file_size": index_file_size, "metric_type": MetricType.L2}}
+    ]
+    result = milvus.create_hybrid_collection(collection_name, collection_fields)
+    status = result
+    if isinstance(result, tuple):
+        status = result[0]
+    if not status.OK():
+        pytest.exit("hybrid collection can not be created, exit pytest ...")
+
+    def teardown():
+        connect.drop_collection(collection_name)
+
+    request.addfinalizer(teardown())
+
+    return collection_name
+
+@pytest.fixture(scope="function")
 def ip_collection(request, connect):
     ori_collection_name = getattr(request.module, "collection_id", "test")
     collection_name = gen_unique_str(ori_collection_name)

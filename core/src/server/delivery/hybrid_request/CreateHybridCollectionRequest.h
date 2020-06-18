@@ -34,7 +34,7 @@ class CreateHybridCollectionRequest : public BaseRequest {
                                   const std::string& collection_name,
                                   std::vector<std::pair<std::string, engine::meta::hybrid::DataType>>& field_types,
                                   std::vector<std::pair<std::string, uint64_t>>& vector_dimensions,
-                                  std::vector<std::pair<std::string, std::string>>& field_arams);
+                                  std::vector<std::pair<std::string, std::string>>& field_params);
 
     Status
     OnExecute() override;

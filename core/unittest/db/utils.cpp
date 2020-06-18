@@ -29,7 +29,6 @@
 #include "db/snapshot/Snapshots.h"
 #include "db/snapshot/ResourceHolders.h"
 
-
 #ifdef MILVUS_GPU_VERSION
 #include "knowhere/index/vector_index/helpers/FaissGpuResourceMgr.h"
 #endif
@@ -94,70 +93,6 @@ static const char* CONFIG_STR =
     "  address: 127.0.0.1\n"
     "  port: 9091\n"
     "\n";
-
-/*static const char* CONFIG_STR =
-    "version: 0.4\n"
-    "server_config:\n"
-    "  address: 0.0.0.0\n"
-    "  port: 19530\n"
-    "  deploy_mode: single\n"
-    "  time_zone: UTC+8\n"
-    "  web_enable: true\n"
-    "  web_port: 19121\n"
-    "\n"
-    "db_config:\n"
-    "  backend_url: sqlite://:@:/\n"
-    "  preload_collection:\n"
-    "  auto_flush_interval: 1\n"
-    "\n"
-    "storage_config:\n"
-    "  primary_path: /tmp/milvus\n"
-    "  secondary_path:\n"
-    "  file_cleanup_timeout: 10\n"
-    "\n"
-    "metric_config:\n"
-    "  enable_monitor: false\n"
-    "  address: 127.0.0.1\n"
-    "  port: 9091\n"
-    "\n"
-    "cache_config:\n"
-    "  cpu_cache_capacity: 4\n"
-    "  insert_buffer_size: 1\n"
-    "  cache_insert_data: false\n"
-    "\n"
-    "engine_config:\n"
-    "  use_blas_threshold: 1100\n"
-    "  gpu_search_threshold: 1000\n"
-    "\n"
-    "gpu_resource_config:\n"
-    "  enable: true\n"
-    "  cache_capacity: 1\n"
-    "  search_resources:\n"
-    "    - gpu0\n"
-    "  build_index_resources:\n"
-    "    - gpu0\n"
-    "\n"
-    "tracing_config:\n"
-    "  json_config_path:\n"
-    "\n"
-    "wal_config:\n"
-    "  enable: true\n"
-    "  recovery_error_ignore: true\n"
-    "  buffer_size: 256\n"
-    "  wal_path: /tmp/milvus/wal\n"
-    "\n"
-    "logs:\n"
-    "  trace.enable: true\n"
-    "  debug.enable: true\n"
-    "  info.enable: true\n"
-    "  warning.enable: true\n"
-    "  error.enable: true\n"
-    "  fatal.enable: true\n"
-    "  path: /tmp/milvus/logs\n"
-    "  max_log_file_size: 256\n"
-    "  delete_exceeds: 10\n"
-    "";
-*/
 
 void
 WriteToFile(const std::string &file_path, const char *content) {
@@ -258,7 +193,7 @@ DBTest::SetUp() {
 
     auto options = GetOptions();
     options.insert_cache_immediately_ = true;
-    db_ = milvus::engine::DBFactory::Build(options);
+    BuildDB(options);
 
     std::string config_path(options.meta_.path_ + CONFIG_FILE);
     WriteToFile(config_path, CONFIG_STR);
@@ -266,10 +201,7 @@ DBTest::SetUp() {
 
 void
 DBTest::TearDown() {
-    if (db_) {
-        db_->Stop();
-        db_->DropAll();
-    }
+    FreeDB();
 
     milvus::scheduler::JobMgrInst::GetInstance()->Stop();
     milvus::scheduler::SchedInst::GetInstance()->Stop();
@@ -281,6 +213,21 @@ DBTest::TearDown() {
 
     auto options = GetOptions();
     boost::filesystem::remove_all(options.meta_.path_);
+}
+
+void
+DBTest::BuildDB(const milvus::engine::DBOptions& options) {
+    FreeDB();
+    db_ = milvus::engine::DBFactory::Build(options);
+}
+
+void
+DBTest::FreeDB() {
+    if (db_) {
+        db_->Stop();
+        db_->DropAll();
+        db_ = nullptr;
+    }
 }
 
 /////////////////////////////////////////////////////////////////////////////////////////////////////////////////

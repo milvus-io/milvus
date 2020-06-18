@@ -89,16 +89,9 @@ class RpcHandlerTest : public testing::Test {
         milvus::server::Config::GetInstance().SetDBConfigArchiveDaysThreshold("");
         milvus::server::Config::GetInstance().SetStorageConfigPath("/tmp/milvus_test");
         milvus::server::Config::GetInstance().SetCacheConfigCacheInsertData("");
+        milvus::server::Config::GetInstance().SetCacheConfigInsertBufferSize("1GB");
         milvus::server::Config::GetInstance().SetEngineConfigOmpThreadNum("");
         milvus::server::Config::GetInstance().SetNetworkConfigBindPort("19531");
-
-        //        serverConfig.SetValue(server::CONFIG_CLUSTER_MODE, "cluster");
-        //        DBWrapper::GetInstance().GetInstance().StartService();
-        //        DBWrapper::GetInstance().GetInstance().StopService();
-        //
-        //        serverConfig.SetValue(server::CONFIG_CLUSTER_MODE, "read_only");
-        //        DBWrapper::GetInstance().GetInstance().StartService();
-        //        DBWrapper::GetInstance().GetInstance().StopService();
 
         milvus::server::DBWrapper::GetInstance().StartService();
 
@@ -1094,7 +1087,7 @@ TEST_F(RpcHandlerTest, RELOAD_SEGMENTS_TEST) {
     handler->DeleteByID(&context, &delete_param, &response);
     ASSERT_EQ(0, response.error_code()) << response.reason();
 
-//    ::milvus::grpc::FlushParam flush_param;
+    //    ::milvus::grpc::FlushParam flush_param;
     flush_param.clear_collection_name_array();
     flush_param.add_collection_name_array(str_collection_name);
     handler->Flush(&context, &flush_param, &response);
@@ -1443,11 +1436,11 @@ TEST_F(RpcHandlerTest, HYBRID_TEST) {
     milvus::grpc::HSearchParam new_search_param;
     ConstructHybridSearchParam_2(new_search_param, collection_name, dimension, nq, topk);
 
-    milvus::grpc::HQueryResult new_query_result;
-    handler->HybridSearch(&context, &new_search_param, &new_query_result);
+    //    milvus::grpc::HQueryResult new_query_result;
+    //    handler->HybridSearch(&context, &new_search_param, &new_query_result);
 }
 
-//TEST_F(RpcHandlerTest, HYBRID_INVALID_TEST) {
+// TEST_F(RpcHandlerTest, HYBRID_INVALID_TEST) {
 //    fiu_init(0);
 //
 //    ::grpc::ServerContext context;

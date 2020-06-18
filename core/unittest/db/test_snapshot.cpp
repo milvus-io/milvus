@@ -16,6 +16,7 @@
 #include <random>
 #include <string>
 #include <set>
+#include <algorithm>
 
 #include "db/utils.h"
 #include "db/snapshot/ReferenceProxy.h"
@@ -186,7 +187,6 @@ CreateCollection(const std::string& collection_name, const LSN_TYPE& lsn) {
     op->Push();
     ScopedSnapshotT ss;
     auto status = op->GetSnapshot(ss);
-    std::cout << status.ToString() << std::endl;
     return ss;
 }
 
@@ -234,7 +234,6 @@ TEST_F(SnapshotTest, DropCollectionTest) {
     ASSERT_TRUE(ss);
     ScopedSnapshotT lss;
     auto status = Snapshots::GetInstance().GetSnapshot(lss, collection_name);
-    std::cout << status.ToString() << std::endl;
     ASSERT_TRUE(status.ok());
     ASSERT_TRUE(lss);
     ASSERT_EQ(ss->GetID(), lss->GetID());
@@ -316,6 +315,7 @@ CreatePartition(const std::string& collection_name, const PartitionContext& p_co
     ScopedSnapshotT ss;
     auto status = Snapshots::GetInstance().GetSnapshot(ss, collection_name);
     if (!status.ok()) {
+        std::cout << status.ToString() << std::endl;
         return curr_ss;
     }
 
@@ -326,15 +326,21 @@ CreatePartition(const std::string& collection_name, const PartitionContext& p_co
     PartitionPtr partition;
     status = op->CommitNewPartition(p_context, partition);
     if (!status.ok()) {
+        std::cout << status.ToString() << std::endl;
         return curr_ss;
     }
 
     status = op->Push();
     if (!status.ok()) {
+        std::cout << status.ToString() << std::endl;
         return curr_ss;
     }
 
     status = op->GetSnapshot(curr_ss);
+    if (!status.ok()) {
+        std::cout << status.ToString() << std::endl;
+        return curr_ss;
+    }
     return curr_ss;
 }
 
@@ -387,8 +393,8 @@ TEST_F(SnapshotTest, PartitionTest) {
     p_ctx.lsn = ++lsn;
     drop_op = std::make_shared<DropPartitionOperation>(p_ctx, latest_ss);
     status = drop_op->Push();
-    ASSERT_TRUE(!status.ok());
     std::cout << status.ToString() << std::endl;
+    ASSERT_TRUE(!status.ok());
 
     PartitionContext pp_ctx;
     pp_ctx.name = "p2";
@@ -495,7 +501,7 @@ TEST_F(SnapshotTest, OperationTest) {
         status = build_op->CommitNewSegmentFile(sf_context, seg_file);
         ASSERT_TRUE(status.ok());
         ASSERT_TRUE(seg_file);
-        auto prev_segment_commit = ss->GetSegmentCommit(seg_file->GetSegmentId());
+        auto prev_segment_commit = ss->GetSegmentCommitBySegmentId(seg_file->GetSegmentId());
         auto prev_segment_commit_mappings = prev_segment_commit->GetMappings();
         ASSERT_NE(prev_segment_commit->ToString(), "");
 
@@ -503,7 +509,7 @@ TEST_F(SnapshotTest, OperationTest) {
         status = build_op->GetSnapshot(ss);
         ASSERT_TRUE(ss->GetID() > ss_id);
 
-        auto segment_commit = ss->GetSegmentCommit(seg_file->GetSegmentId());
+        auto segment_commit = ss->GetSegmentCommitBySegmentId(seg_file->GetSegmentId());
         auto segment_commit_mappings = segment_commit->GetMappings();
         MappingT expected_mappings = prev_segment_commit_mappings;
         expected_mappings.insert(seg_file->GetID());
@@ -515,6 +521,7 @@ TEST_F(SnapshotTest, OperationTest) {
         stale_segment_commit_ids.insert(segment_commit->GetID());
     }
 
+    std::this_thread::sleep_for(std::chrono::milliseconds(1));
     // Check stale snapshot has been deleted from store
     {
         auto collection_commit = CollectionCommitsHolder::GetInstance()
@@ -543,7 +550,7 @@ TEST_F(SnapshotTest, OperationTest) {
         ASSERT_TRUE(ss->GetID() > ss_id);
         ASSERT_TRUE(status.ok());
 
-        auto segment_commit = ss->GetSegmentCommit(seg_file->GetSegmentId());
+        auto segment_commit = ss->GetSegmentCommitBySegmentId(seg_file->GetSegmentId());
         auto segment_commit_mappings = segment_commit->GetMappings();
         MappingT expected_segment_mappings;
         expected_segment_mappings.insert(seg_file->GetID());
@@ -579,7 +586,7 @@ TEST_F(SnapshotTest, OperationTest) {
         ASSERT_TRUE(ss->GetID() > ss_id);
         ASSERT_TRUE(status.ok());
 
-        auto segment_commit = ss->GetSegmentCommit(new_seg->GetID());
+        auto segment_commit = ss->GetSegmentCommitBySegmentId(new_seg->GetID());
         auto new_partition_commit = ss->GetPartitionCommitByPartitionId(partition_id);
         auto new_mappings = new_partition_commit->GetMappings();
         auto prev_mappings = prev_partition_commit->GetMappings();
@@ -628,6 +635,7 @@ TEST_F(SnapshotTest, OperationTest) {
                 ++lsn);
         ASSERT_TRUE(status.ok());
         status = build_op->Push();
+        std::cout << status.ToString() << std::endl;
         ASSERT_TRUE(!status.ok());
         ASSERT_TRUE(!(build_op->GetStatus()).ok());
         std::cout << build_op->ToString() << std::endl;
@@ -665,6 +673,10 @@ TEST_F(SnapshotTest, CompoundTest1) {
     auto next_lsn = [&]() -> decltype(lsn) {
         return ++lsn;
     };
+    LSN_TYPE pid = 0;
+    auto next_pid = [&]() -> decltype(pid) {
+        return ++pid;
+    };
     std::string collection_name("c1");
     auto ss = CreateCollection(collection_name, next_lsn());
     ASSERT_TRUE(ss);
@@ -675,12 +687,15 @@ TEST_F(SnapshotTest, CompoundTest1) {
 
     std::set<ID_TYPE> all_segments;
     std::set<ID_TYPE> segment_in_building;
-    std::set<ID_TYPE> merge_segs;
-    std::map<ID_TYPE, std::set<ID_TYPE>> merged_segs;
+    std::map<ID_TYPE, std::set<ID_TYPE>> merged_segs_history;
+    std::set<ID_TYPE> merged_segs;
     std::set<ID_TYPE> built_segs;
+    std::set<ID_TYPE> build_stale_segs;
 
     std::mutex all_mtx;
-    std::mutex building_mtx;
+    std::mutex merge_mtx;
+    std::mutex built_mtx;
+    std::mutex partition_mtx;
 
     WaitableObj merge_waiter;
     WaitableObj build_waiter;
@@ -690,6 +705,8 @@ TEST_F(SnapshotTest, CompoundTest1) {
     sf_context.field_element_name = "ivfsq8";
     sf_context.segment_id = 1;
     sf_context.partition_id = 1;
+
+    IDS_TYPE partitions = {ss->GetResources<Partition>().begin()->second->GetID()};
 
     auto do_build = [&] (const ID_TYPE& seg_id) {
         decltype(ss) latest_ss;
@@ -704,11 +721,26 @@ TEST_F(SnapshotTest, CompoundTest1) {
         SegmentFilePtr seg_file;
         build_sf_context.segment_id = seg_id;
         status = build_op->CommitNewSegmentFile(build_sf_context, seg_file);
-        ASSERT_TRUE(status.ok());
+        if (!status.ok()) {
+            std::cout << status.ToString() << std::endl;
+            std::unique_lock<std::mutex> lock(merge_mtx);
+            auto it = merged_segs.find(seg_id);
+            ASSERT_NE(it, merged_segs.end());
+            return;
+        }
+        std::unique_lock<std::mutex> lock(built_mtx);
         status = build_op->Push();
+        if (!status.ok()) {
+            std::cout << status.ToString() << std::endl;
+            std::unique_lock<std::mutex> lock(merge_mtx);
+            auto it = merged_segs.find(seg_id);
+            ASSERT_NE(it, merged_segs.end());
+            return;
+        }
         ASSERT_TRUE(status.ok());
         status = build_op->GetSnapshot(latest_ss);
         ASSERT_TRUE(status.ok());
+
         built_segs.insert(seg_id);
     };
 
@@ -720,12 +752,19 @@ TEST_F(SnapshotTest, CompoundTest1) {
         auto status = Snapshots::GetInstance().GetSnapshot(latest_ss, collection_name);
         ASSERT_TRUE(status.ok());
 
+        PartitionPtr partition;
         OperationContext context;
         for (auto& id : seg_ids) {
             auto seg = latest_ss->GetResource<Segment>(id);
             if (!seg) {
                 std::cout << "Error seg=" << id << std::endl;
                 ASSERT_TRUE(seg);
+            }
+            if (!partition) {
+                partition = latest_ss->GetResource<Partition>(seg->GetPartitionId());
+                ASSERT_TRUE(partition);
+            } else {
+                ASSERT_EQ(seg->GetPartitionId(), partition->GetID());
             }
             context.stale_segments.push_back(seg);
             if (!context.prev_partition) {
@@ -743,29 +782,64 @@ TEST_F(SnapshotTest, CompoundTest1) {
         SegmentFilePtr seg_file;
         status = op->CommitNewSegmentFile(sf_context, seg_file);
         ASSERT_TRUE(status.ok());
+        std::unique_lock<std::mutex> lock(merge_mtx);
         status = op->Push();
-        ASSERT_TRUE(status.ok());
+        if (!status.ok()) {
+            lock.unlock();
+            std::unique_lock<std::mutex> blk(built_mtx);
+            std::cout << status.ToString() << std::endl;
+            /* for (auto id : built_segs) { */
+            /*     std::cout << "builted " << id << std::endl; */
+            /* } */
+            /* for (auto id : seg_ids) { */
+            /*     std::cout << "to_merge " << id << std::endl; */
+            /* } */
+            bool stale_found = false;
+            for (auto& seg_id : seg_ids) {
+                auto it = built_segs.find(seg_id);
+                if (it != built_segs.end()) {
+                    stale_found = true;
+                    break;
+                }
+            }
+            ASSERT_TRUE(stale_found);
+            return;
+        }
         ID_TYPE ss_id = latest_ss->GetID();
         status = op->GetSnapshot(latest_ss);
         ASSERT_TRUE(status.ok());
         ASSERT_TRUE(latest_ss->GetID() > ss_id);
-        merged_segs[new_seg->GetID()] = seg_ids;
+
+        merged_segs_history[new_seg->GetID()] = seg_ids;
+        for (auto& seg_id : seg_ids) {
+            merged_segs.insert(seg_id);
+        }
         new_seg_id = new_seg->GetID();
+        ASSERT_EQ(new_seg->GetPartitionId(), partition->GetID());
     };
 
     // TODO: If any Compound Operation find larger Snapshot. This Operation should be rollback to latest
     auto handler_worker = [&] {
-        auto to_build_segments = RandomInt(50, 60);
+        auto loop_cnt = RandomInt(10, 20);
         decltype(ss) latest_ss;
 
-        for (auto i = 0; i < to_build_segments; ++i) {
+        auto create_new_segment = [&]() {
+            ID_TYPE partition_id;
+            {
+                std::unique_lock<std::mutex> lock(partition_mtx);
+                auto idx = RandomInt(0, partitions.size() - 1);
+                partition_id = partitions[idx];
+            }
             Snapshots::GetInstance().GetSnapshot(latest_ss, collection_name);
             OperationContext context;
+            context.prev_partition = latest_ss->GetResource<Partition>(partition_id);
             context.lsn = next_lsn();
-            context.prev_partition = latest_ss->GetResource<Partition>(8);
             auto op = std::make_shared<NewSegmentOperation>(context, latest_ss);
             SegmentPtr new_seg;
             status = op->CommitNewSegment(new_seg);
+            if (!status.ok()) {
+                std::cout << status.ToString() << std::endl;
+            }
             ASSERT_TRUE(status.ok());
             SegmentFilePtr seg_file;
             sf_context.segment_id = new_seg->GetID();
@@ -778,10 +852,39 @@ TEST_F(SnapshotTest, CompoundTest1) {
                 std::unique_lock<std::mutex> lock(all_mtx);
                 all_segments.insert(new_seg->GetID());
             }
+            if (RandomInt(0, 10) >= 7) {
+                build_queue.Put(new_seg->GetID());
+            }
             merge_queue.Put(new_seg->GetID());
+        };
+
+        auto create_partition = [&]() {
+            std::stringstream ss;
+            ss << "fake_partition_" << next_pid();
+            PartitionContext context;
+            context.name = ss.str();
+            std::unique_lock<std::mutex> lock(partition_mtx);
+            auto latest_ss = CreatePartition(collection_name, context, next_lsn());
+            ASSERT_TRUE(latest_ss);
+            auto partition = latest_ss->GetPartition(ss.str());
+            partitions.push_back(partition->GetID());
+            if (latest_ss->NumberOfPartitions() != partitions.size()) {
+                for (auto& pid : partitions) {
+                    std::cout << "PartitionId=" << pid << std::endl;
+                }
+            }
+            ASSERT_EQ(latest_ss->NumberOfPartitions(), partitions.size());
+        };
+
+        for (auto i = 0; i < loop_cnt; ++i) {
+            if (RandomInt(0, 10) > 7) {
+                create_partition();
+            }
+            create_new_segment();
         }
     };
 
+    std::map<ID_TYPE, std::set<ID_TYPE>> merge_segs;
     auto merge_worker = [&] {
         while (true) {
             auto seg_id = merge_queue.Take();
@@ -789,18 +892,36 @@ TEST_F(SnapshotTest, CompoundTest1) {
                 std::cout << "Exiting Merge Worker" << std::endl;
                 break;
             }
-            merge_segs.insert(seg_id);
-            if ((merge_segs.size() >= 2) && (RandomInt(0, 10) >= 5)) {
-                std::cout << "Merging (";
-                for (auto seg : merge_segs) {
+            decltype(ss) latest_ss;
+            auto status = Snapshots::GetInstance().GetSnapshot(latest_ss, collection_name);
+            ASSERT_TRUE(status.ok());
+            auto seg = latest_ss->GetResource<Segment>(seg_id);
+            if (!seg) {
+                std::cout << "SegID=" << seg_id << std::endl;
+                std::cout << latest_ss->ToString() << std::endl;
+                ASSERT_TRUE(seg);
+            }
+
+            auto it_segs = merge_segs.find(seg->GetPartitionId());
+            if (it_segs == merge_segs.end()) {
+                merge_segs[seg->GetPartitionId()] = {seg->GetID()};
+            } else {
+                merge_segs[seg->GetPartitionId()].insert(seg->GetID());
+            }
+            auto& segs = merge_segs[seg->GetPartitionId()];
+            if ((segs.size() >= 2) && (RandomInt(0, 10) >= 2)) {
+                std::cout << "Merging partition " << seg->GetPartitionId() << " segs (";
+                for (auto seg : segs) {
                     std::cout << seg << ",";
                 }
                 std::cout << ")" << std::endl;
                 ID_TYPE new_seg_id = 0;
-                do_merge(merge_segs, new_seg_id);
-                merge_segs.clear();
-                ASSERT_NE(new_seg_id, 0);
-                if (RandomInt(0, 10) >= 5) {
+                do_merge(segs, new_seg_id);
+                segs.clear();
+                if (new_seg_id == 0) {
+                    continue;
+                }
+                if (RandomInt(0, 10) >= 6) {
                     build_queue.Put(new_seg_id);
                 }
 
@@ -842,7 +963,7 @@ TEST_F(SnapshotTest, CompoundTest1) {
     t3.join();
     t4.join();
 
-    /* for (auto& kv : merged_segs) { */
+    /* for (auto& kv : merged_segs_history) { */
     /*     std::cout << "merged: ("; */
     /*     for (auto i : kv.second) { */
     /*         std::cout << i << ","; */
@@ -860,7 +981,7 @@ TEST_F(SnapshotTest, CompoundTest1) {
     status = Snapshots::GetInstance().GetSnapshot(latest_ss, collection_name);
     ASSERT_TRUE(status.ok());
     auto expect_segments = all_segments;
-    for (auto& kv : merged_segs) {
+    for (auto& kv : merged_segs_history) {
         expect_segments.insert(kv.first);
         for (auto& id : kv.second) {
             expect_segments.erase(id);
@@ -878,5 +999,10 @@ TEST_F(SnapshotTest, CompoundTest1) {
     decltype(final_segment_file_cnt) expect_segment_file_cnt;
     expect_segment_file_cnt = expect_segments.size();
     expect_segment_file_cnt += built_segs.size();
+    std::cout << latest_ss->ToString() << std::endl;
+    std::vector<int> common_ids;
+    std::set_intersection(merged_segs.begin(), merged_segs.end(), built_segs.begin(), built_segs.end(),
+            std::back_inserter(common_ids));
+    expect_segment_file_cnt -= common_ids.size();
     ASSERT_EQ(expect_segment_file_cnt, final_segment_file_cnt);
 }

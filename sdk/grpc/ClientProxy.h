@@ -144,6 +144,9 @@ class ClientProxy : public Connection {
     GetHEntityByID(const std::string& collection_name, const std::vector<int64_t>& id_array,
                    HybridQueryResult& result) override;
 
+    Status
+    CreateHybridIndex(const HIndexParam& index_param) override;
+
  private:
     std::shared_ptr<::grpc::Channel> channel_;
     std::shared_ptr<GrpcClient> client_ptr_;

@@ -11,9 +11,9 @@
 
 #include "server/delivery/request/HasCollectionRequest.h"
 #include "server/DBWrapper.h"
+#include "server/ValidationUtil.h"
 #include "utils/Log.h"
 #include "utils/TimeRecorder.h"
-#include "utils/ValidationUtil.h"
 
 #include <fiu-local.h>
 #include <memory>
@@ -41,7 +41,7 @@ HasCollectionRequest::OnExecute() {
         TimeRecorderAuto rc(hdr);
 
         // step 1: check arguments
-        auto status = ValidationUtil::ValidateCollectionName(collection_name_);
+        auto status = ValidateCollectionName(collection_name_);
         if (!status.ok()) {
             return status;
         }

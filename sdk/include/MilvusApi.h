@@ -121,6 +121,12 @@ struct IndexParam {
     std::string extra_params;     ///< Extra parameters according to different index type, must be json format
 };
 
+struct HIndexParam {
+    std::string collection_name;
+    std::vector<std::string> field_names;
+    std::string extra_params;
+};
+
 /**
  * @brief partition parameters
  */
@@ -599,6 +605,9 @@ class Connection {
     virtual Status
     GetHEntityByID(const std::string& collection_name, const std::vector<int64_t>& id_array,
                    HybridQueryResult& result) = 0;
+
+    virtual Status
+    CreateHybridIndex(const HIndexParam& index_param) = 0;
 };
 
 }  // namespace milvus

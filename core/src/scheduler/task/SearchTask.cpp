@@ -29,7 +29,6 @@
 #include "utils/CommonUtil.h"
 #include "utils/Log.h"
 #include "utils/TimeRecorder.h"
-#include "utils/ValidationUtil.h"
 
 namespace milvus {
 namespace scheduler {
@@ -157,6 +156,7 @@ XSearchTask::Load(LoadType type, uint8_t device_id) {
         fiu_do_on("XSearchTask.Load.throw_std_exception", throw std::exception());
         if (type == LoadType::DISK2CPU) {
             stat = index_engine_->Load();
+            stat = index_engine_->LoadAttr();
             type_str = "DISK2CPU";
         } else if (type == LoadType::CPU2GPU) {
             bool hybrid = false;
@@ -259,7 +259,7 @@ XSearchTask::Execute() {
 
                 auto query_ptr = search_job->query_ptr();
 
-                // s = index_engine_->HybridSearch(general_query, types, query_ptr, output_distance, output_ids);
+                s = index_engine_->HybridSearch(search_job, types, output_distance, output_ids, hybrid);
                 auto vector_query = query_ptr->vectors.begin()->second;
                 topk = vector_query->topk;
                 nq = vector_query->query_vector.float_data.size() / file_->dimension_;

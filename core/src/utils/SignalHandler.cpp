@@ -9,8 +9,7 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
-#include "utils/SignalUtil.h"
-#include "src/server/Server.h"
+#include "utils/SignalHandler.h"
 #include "utils/Log.h"
 
 #include <execinfo.h>
@@ -20,40 +19,41 @@
 namespace milvus {
 namespace server {
 
+signal_func_ptr signal_routine_func = nullptr;
+
 void
-SignalUtil::HandleSignal(int signum) {
+HandleSignal(int signum) {
+    int32_t exit_code = 1; /* 0: normal exit; 1: exception */
     switch (signum) {
         case SIGINT:
-        case SIGUSR2: {
-            LOG_SERVER_INFO_ << "Server received signal: " << signum;
-
-            server::Server& server = server::Server::GetInstance();
-            server.Stop();
-
-            exit(0);
-        }
+        case SIGUSR2:
+            exit_code = 0;
+            /* no break */
         default: {
-            LOG_SERVER_INFO_ << "Server received critical signal: " << signum;
-            SignalUtil::PrintStacktrace();
-
-            server::Server& server = server::Server::GetInstance();
-            server.Stop();
-
-            exit(1);
+            if (exit_code == 0) {
+                LOG_SERVER_INFO_ << "Server received signal: " << signum;
+            } else {
+                LOG_SERVER_INFO_ << "Server received critical signal: " << signum;
+                PrintStacktrace();
+            }
+            if (signal_routine_func != nullptr) {
+                (*signal_routine_func)(exit_code);
+            }
         }
     }
 }
 
 void
-SignalUtil::PrintStacktrace() {
-    LOG_SERVER_INFO_ << "Call stack:";
-
-    const int size = 32;
-    void* array[size];
-    int stack_num = backtrace(array, size);
+PrintStacktrace() {
+    const int bt_depth = 128;
+    void* array[bt_depth];
+    int stack_num = backtrace(array, bt_depth);
     char** stacktrace = backtrace_symbols(array, stack_num);
+
+    LOG_SERVER_INFO_ << "Call stack:";
     for (int i = 0; i < stack_num; ++i) {
         std::string info = stacktrace[i];
+        std::cout << "No." << i << ": " << info << std::endl;
         LOG_SERVER_INFO_ << info;
     }
     free(stacktrace);

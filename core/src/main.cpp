@@ -18,7 +18,7 @@
 #include "easyloggingpp/easylogging++.h"
 #include "server/Server.h"
 #include "src/version.h"
-#include "utils/SignalUtil.h"
+#include "utils/SignalHandler.h"
 #include "utils/Status.h"
 
 INITIALIZE_EASYLOGGINGPP
@@ -117,12 +117,16 @@ main(int argc, char* argv[]) {
     }
 
     /* Handle Signal */
-    signal(SIGHUP, milvus::server::SignalUtil::HandleSignal);
-    signal(SIGINT, milvus::server::SignalUtil::HandleSignal);
-    signal(SIGUSR1, milvus::server::SignalUtil::HandleSignal);
-    signal(SIGSEGV, milvus::server::SignalUtil::HandleSignal);
-    signal(SIGUSR2, milvus::server::SignalUtil::HandleSignal);
-    signal(SIGTERM, milvus::server::SignalUtil::HandleSignal);
+    milvus::server::signal_routine_func = [](int32_t exit_code) {
+        milvus::server::Server::GetInstance().Stop();
+        exit(exit_code);
+    };
+    signal(SIGHUP, milvus::server::HandleSignal);
+    signal(SIGINT, milvus::server::HandleSignal);
+    signal(SIGUSR1, milvus::server::HandleSignal);
+    signal(SIGSEGV, milvus::server::HandleSignal);
+    signal(SIGUSR2, milvus::server::HandleSignal);
+    signal(SIGTERM, milvus::server::HandleSignal);
 
     server.Init(start_daemonized, pid_filename, config_filename);
 

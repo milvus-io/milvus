@@ -250,13 +250,13 @@ TEST_F(DBTest, DB_TEST) {
     {
         auto options = GetOptions();
         options.meta_.backend_uri_ = "dummy";
-        ASSERT_ANY_THROW(milvus::engine::DBFactory::Build(options));
+        ASSERT_ANY_THROW(BuildDB(options));
 
         options.meta_.backend_uri_ = "mysql://root:123456@127.0.0.1:3306/test";
-        ASSERT_ANY_THROW(milvus::engine::DBFactory::Build(options));
+        ASSERT_ANY_THROW(BuildDB(options));
 
         options.meta_.backend_uri_ = "dummy://root:123456@127.0.0.1:3306/test";
-        ASSERT_ANY_THROW(milvus::engine::DBFactory::Build(options));
+        ASSERT_ANY_THROW(BuildDB(options));
     }
 }
 
@@ -577,12 +577,13 @@ TEST_F(DBTest, SHUTDOWN_TEST) {
                               result_distances);
     ASSERT_FALSE(stat.ok());
 
+    auto vectors_data = milvus::engine::VectorsData();
     stat = db_->Query(dummy_context_,
                       collection_info.collection_id_,
                       tags,
                       1,
                       json_params,
-                      milvus::engine::VectorsData(),
+                      vectors_data,
                       result_ids,
                       result_distances);
     ASSERT_FALSE(stat.ok());
@@ -1116,17 +1117,13 @@ TEST_F(DBTestWALRecovery, RECOVERY_WITH_NO_ERROR) {
     milvus::engine::ResultDistances result_distances;
     milvus::engine::VectorsData qxb;
     BuildVectors(qb, 0, qxb);
-    stat = db_->Query(dummy_context_,
-            collection_info.collection_id_, {}, topk, json_params, qxb, result_ids, result_distances);
-    ASSERT_TRUE(stat.ok());
-    ASSERT_NE(result_ids.size() / topk, qb);
 
     fiu_init(0);
     fiu_enable("DBImpl.ExexWalRecord.return", 1, nullptr, 0);
-    db_ = nullptr;
+    db_ = nullptr; // don't use FreeDB(), this case needs keep the meta
     fiu_disable("DBImpl.ExexWalRecord.return");
     auto options = GetOptions();
-    db_ = milvus::engine::DBFactory::Build(options);
+    BuildDB(options);
 
     result_ids.clear();
     result_distances.clear();
@@ -1158,13 +1155,13 @@ TEST_F(DBTestWALRecovery_Error, RECOVERY_WITH_INVALID_LOG_FILE) {
 
     fiu_init(0);
     fiu_enable("DBImpl.ExexWalRecord.return", 1, nullptr, 0);
-    db_ = nullptr;
+    FreeDB();
     fiu_disable("DBImpl.ExexWalRecord.return");
 
     auto options = GetOptions();
     // delete wal log file so that recovery will failed when start db next time.
     boost::filesystem::remove(options.mxlog_path_ + "0.wal");
-    ASSERT_ANY_THROW(db_ = milvus::engine::DBFactory::Build(options));
+    ASSERT_ANY_THROW(BuildDB(options));
 }
 
 TEST_F(DBTest2, FLUSH_NON_EXISTING_COLLECTION) {
@@ -1256,7 +1253,6 @@ TEST_F(DBTest2, GET_VECTOR_BY_ID_INVALID_TEST) {
     fiu_disable("bloom_filter_nullptr");
 }
 
-
 TEST_F(DBTest2, GET_VECTOR_IDS_TEST) {
     milvus::engine::meta::CollectionSchema collection_schema = BuildCollectionSchema();
     auto stat = db_->CreateCollection(collection_schema);
@@ -1316,11 +1312,11 @@ TEST_F(DBTest2, GET_VECTOR_IDS_TEST) {
 TEST_F(DBTest2, INSERT_DUPLICATE_ID) {
     auto options = GetOptions();
     options.wal_enable_ = false;
-    db_ = milvus::engine::DBFactory::Build(options);
+    BuildDB(options);
 
     milvus::engine::meta::CollectionSchema collection_schema = BuildCollectionSchema();
     auto stat = db_->CreateCollection(collection_schema);
-    ASSERT_TRUE(stat.ok()) << " CreateCollection: " << stat.message();
+    ASSERT_TRUE(stat.ok());
 
     uint64_t size = 20;
     milvus::engine::VectorsData vector;
@@ -1331,10 +1327,10 @@ TEST_F(DBTest2, INSERT_DUPLICATE_ID) {
     }
 
     stat = db_->InsertVectors(COLLECTION_NAME, "", vector);
-    ASSERT_TRUE(stat.ok()) << " InsertVectors: " << stat.message();
+    ASSERT_TRUE(stat.ok());
 
     stat = db_->Flush(COLLECTION_NAME);
-    ASSERT_TRUE(stat.ok()) << " Flush: " << stat.message();
+    ASSERT_TRUE(stat.ok());
 }
 
 /*

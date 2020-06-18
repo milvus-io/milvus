@@ -20,6 +20,7 @@
 #include <fiu-local.h>
 
 #include "config/Config.h"
+#include "config/Utils.h"
 #include "metrics/SystemInfo.h"
 #include "server/delivery/request/BaseRequest.h"
 #include "server/web_impl/Constants.h"
@@ -28,7 +29,6 @@
 #include "server/web_impl/utils/Util.h"
 #include "thirdparty/nlohmann/json.hpp"
 #include "utils/StringHelpFunctions.h"
-#include "utils/ValidationUtil.h"
 
 namespace milvus {
 namespace server {
@@ -885,7 +885,7 @@ WebRequestHandler::DeleteByIDs(const std::string& collection_name, const nlohman
 
     for (auto& id : ids) {
         auto id_str = id.get<std::string>();
-        if (!ValidationUtil::ValidateStringIsNumber(id_str).ok()) {
+        if (!ValidateStringIsNumber(id_str).ok()) {
             return Status(ILLEGAL_BODY, "Members in \"ids\" must be integer string");
         }
         vector_ids.emplace_back(std::stol(id_str));
@@ -1520,7 +1520,7 @@ WebRequestHandler::ShowPartitions(const OString& collection_name, const OQueryPa
     auto required = query_params.get("all_required");
     if (nullptr != required.get()) {
         auto required_str = required->std_str();
-        if (!ValidationUtil::ValidateStringIsBool(required_str).ok()) {
+        if (!ValidateStringIsBool(required_str).ok()) {
             RETURN_STATUS_DTO(ILLEGAL_QUERY_PARAM, "Query param \'all_required\' must be a bool")
         }
         all_required = required_str == "True" || required_str == "true";
@@ -1596,7 +1596,7 @@ WebRequestHandler::ShowSegments(const OString& collection_name, const OQueryPara
     auto required = query_params.get("all_required");
     if (nullptr != required.get()) {
         auto required_str = required->std_str();
-        if (!ValidationUtil::ValidateStringIsBool(required_str).ok()) {
+        if (!ValidateStringIsBool(required_str).ok()) {
             RETURN_STATUS_DTO(ILLEGAL_QUERY_PARAM, "Query param \'all_required\' must be a bool")
         }
         all_required = required_str == "True" || required_str == "true";

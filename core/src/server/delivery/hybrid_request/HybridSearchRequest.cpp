@@ -12,10 +12,10 @@
 #include "server/delivery/hybrid_request/HybridSearchRequest.h"
 #include "db/Utils.h"
 #include "server/DBWrapper.h"
+#include "server/ValidationUtil.h"
 #include "utils/CommonUtil.h"
 #include "utils/Log.h"
 #include "utils/TimeRecorder.h"
-#include "utils/ValidationUtil.h"
 
 #include <fiu-local.h>
 #include <memory>
@@ -62,7 +62,7 @@ HybridSearchRequest::OnExecute() {
         TimeRecorder rc(hdr);
 
         // step 1: check table name
-        auto status = ValidationUtil::ValidateCollectionName(collection_name_);
+        auto status = ValidateCollectionName(collection_name_);
         if (!status.ok()) {
             return status;
         }

@@ -10,62 +10,22 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
 #include "utils/CommonUtil.h"
-#include "cache/CpuCacheMgr.h"
-#include "cache/GpuCacheMgr.h"
 #include "config/Config.h"
 #include "utils/Log.h"
 
 #include <dirent.h>
-#include <pwd.h>
-#include <string.h>
-#include <sys/stat.h>
-#include <sys/sysinfo.h>
-#include <time.h>
-#include <unistd.h>
-#include <iostream>
-#include <thread>
-#include <vector>
-
-#include "boost/filesystem.hpp"
-
-#if defined(__x86_64__)
-#define THREAD_MULTIPLY_CPU 1
-#elif defined(__powerpc64__)
-#define THREAD_MULTIPLY_CPU 4
-#else
-#define THREAD_MULTIPLY_CPU 1
-#endif
-
 #include <fiu-local.h>
+#include <pwd.h>
+#include <sys/stat.h>
+#include <unistd.h>
+#include <boost/filesystem.hpp>
+#include <iostream>
+#include <vector>
 
 namespace milvus {
 namespace server {
 
 namespace fs = boost::filesystem;
-
-bool
-CommonUtil::GetSystemMemInfo(int64_t& total_mem, int64_t& free_mem) {
-    struct sysinfo info;
-    int ret = sysinfo(&info);
-    total_mem = info.totalram;
-    free_mem = info.freeram;
-
-    return ret == 0;  // succeed 0, failed -1
-}
-
-bool
-CommonUtil::GetSystemAvailableThreads(int64_t& thread_count) {
-    // threadCnt = std::thread::hardware_concurrency();
-    thread_count = sysconf(_SC_NPROCESSORS_CONF);
-    thread_count *= THREAD_MULTIPLY_CPU;
-    fiu_do_on("CommonUtil.GetSystemAvailableThreads.zero_thread", thread_count = 0);
-
-    if (thread_count == 0) {
-        thread_count = 8;
-    }
-
-    return true;
-}
 
 bool
 CommonUtil::IsDirectoryExist(const std::string& path) {
@@ -243,25 +203,6 @@ CommonUtil::GetCurrentTimeStr() {
     return str;
 }
 #endif
-
-void
-CommonUtil::EraseFromCache(const std::string& item_key) {
-    if (item_key.empty()) {
-        LOG_SERVER_ERROR_ << "Empty key cannot be erased from cache";
-        return;
-    }
-
-    cache::CpuCacheMgr::GetInstance()->EraseItem(item_key);
-
-#ifdef MILVUS_GPU_VERSION
-    server::Config& config = server::Config::GetInstance();
-    std::vector<int64_t> gpus;
-    config.GetGpuResourceConfigSearchResources(gpus);
-    for (auto& gpu : gpus) {
-        cache::GpuCacheMgr::GetInstance(gpu)->EraseItem(item_key);
-    }
-#endif
-}
 
 }  // namespace server
 }  // namespace milvus

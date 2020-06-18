@@ -15,8 +15,8 @@
 
 #include "config/Config.h"
 #include "server/DBWrapper.h"
+#include "server/ValidationUtil.h"
 #include "utils/TimeRecorder.h"
-#include "utils/ValidationUtil.h"
 
 namespace milvus {
 namespace server {
@@ -52,7 +52,7 @@ ReLoadSegmentsRequest::OnExecute() {
         TimeRecorderAuto rc(hdr);
 
         // step 1: check arguments
-        auto status = ValidationUtil::ValidateCollectionName(collection_name_);
+        auto status = ValidateCollectionName(collection_name_);
         if (!status.ok()) {
             return status;
         }

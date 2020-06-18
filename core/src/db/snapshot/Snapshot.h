@@ -82,6 +82,16 @@ class Snapshot : public ReferenceProxy {
         return max_lsn_;
     }
 
+    PartitionPtr
+    GetPartition(const std::string& name) {
+        ID_TYPE id;
+        auto status = GetPartitionId(name, id);
+        if (!status.ok()) {
+            return nullptr;
+        }
+        return GetResource<Partition>(id);
+    }
+
     Status
     GetPartitionId(const std::string& name, ID_TYPE& id) const {
         auto it = partition_names_map_.find(name);
@@ -104,7 +114,7 @@ class Snapshot : public ReferenceProxy {
 
     // PXU TODO: add const. Need to change Scopedxxxx::Get
     SegmentCommitPtr
-    GetSegmentCommit(ID_TYPE segment_id) {
+    GetSegmentCommitBySegmentId(ID_TYPE segment_id) {
         auto it = seg_segc_map_.find(segment_id);
         if (it == seg_segc_map_.end())
             return nullptr;
@@ -245,6 +255,9 @@ class Snapshot : public ReferenceProxy {
         auto& resources = GetResources<ResourceT>();
         resources[resource->GetID()] = resource;
     }
+
+    const std::string
+    ToString();
 
  private:
     Snapshot(const Snapshot&) = delete;

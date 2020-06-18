@@ -63,10 +63,9 @@ class RequestHandler {
                        std::string& collection_info);
 
     Status
-    Search(const std::shared_ptr<Context>& context, const std::string& collection_name,
-           const engine::VectorsData& vectors, int64_t topk, const milvus::json& extra_params,
-           const std::vector<std::string>& partition_list, const std::vector<std::string>& file_id_list,
-           TopKQueryResult& result);
+    Search(const std::shared_ptr<Context>& context, const std::string& collection_name, engine::VectorsData& vectors,
+           int64_t topk, const milvus::json& extra_params, const std::vector<std::string>& partition_list,
+           const std::vector<std::string>& file_id_list, TopKQueryResult& result);
 
     Status
     SearchByID(const std::shared_ptr<Context>& context, const std::string& collection_name,
@@ -154,6 +153,10 @@ class RequestHandler {
                  std::vector<std::string>& partition_list, query::GeneralQueryPtr& general_query,
                  query::QueryPtr& query_ptr, milvus::json& json_params, std::vector<std::string>& field_names,
                  engine::QueryResult& result);
+
+    Status
+    CreateHybridIndex(const std::shared_ptr<Context>& context, const std::string& collection_name,
+                      const std::vector<std::string>& field_names, const milvus::json& json_params);
 };
 
 }  // namespace server

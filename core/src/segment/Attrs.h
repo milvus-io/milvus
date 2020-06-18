@@ -27,8 +27,6 @@ namespace milvus {
 namespace segment {
 
 struct Attrs {
-    //    Attrs() = default;
-
     std::unordered_map<std::string, AttrPtr> attrs;
 };
 
