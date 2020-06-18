@@ -27,36 +27,44 @@ namespace snapshot {
 
 template <typename ResourceT, typename Derived>
 class ResourceHolder {
- public:
     using ResourcePtr = std::shared_ptr<ResourceT>;
-    /* using ResourcePtr = typename ResourceT::Ptr; */
     using ScopedT = ScopedResource<ResourceT>;
     using ScopedPtr = std::shared_ptr<ScopedT>;
     using IdMapT = std::map<ID_TYPE, ResourcePtr>;
     using Ptr = std::shared_ptr<Derived>;
-    // TODO: Resource should be loaded into holder in OperationExecutor thread
-    ScopedT
-    Load(Store& store, ID_TYPE id, bool scoped = true);
-    ScopedT
-    GetResource(ID_TYPE id, bool scoped = true);
 
-    bool
-    AddNoLock(ResourcePtr resource);
-    bool
-    ReleaseNoLock(ID_TYPE id);
+ protected:
+    ResourceHolder() = default;
+    virtual ~ResourceHolder() = default;
 
-    virtual bool
-    Add(ResourcePtr resource);
-    virtual bool
-    Release(ID_TYPE id);
-    virtual bool
-    HardDelete(ID_TYPE id);
-
+ public:
     static Derived&
     GetInstance() {
         static Derived holder;
         return holder;
     }
+
+    // TODO: Resource should be loaded into holder in OperationExecutor thread
+    ScopedT
+    Load(Store& store, ID_TYPE id, bool scoped = true);
+
+    ScopedT
+    GetResource(ID_TYPE id, bool scoped = true);
+
+    bool
+    AddNoLock(ResourcePtr resource);
+
+    bool
+    ReleaseNoLock(ID_TYPE id);
+
+    virtual bool
+    Add(ResourcePtr resource);
+
+    virtual bool
+    Release(ID_TYPE id);
+
+    virtual bool
+    HardDelete(ID_TYPE id);
 
     virtual void
     Reset();
@@ -70,8 +78,6 @@ class ResourceHolder {
 
     virtual ResourcePtr
     DoLoad(Store& store, ID_TYPE id);
-    ResourceHolder() = default;
-    virtual ~ResourceHolder() = default;
 
     std::mutex mutex_;
     IdMapT id_map_;
@@ -81,4 +87,4 @@ class ResourceHolder {
 }  // namespace engine
 }  // namespace milvus
 
-#include "BaseHolders.inl"
+#include "ResourceHolder.inl"
