@@ -24,7 +24,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends wget ca-certifi
     g++ git gfortran lsb-core \
     libboost-serialization-dev libboost-filesystem-dev libboost-system-dev libboost-regex-dev \
     curl libtool automake libssl-dev pkg-config libcurl4-openssl-dev python3-pip \
-    clang-format-6.0 clang-tidy-6.0 \
+    clang-format-7.0 clang-tidy-7.0 \
     lcov mysql-client libmysqlclient-dev intel-mkl-gnu-2019.5-281 intel-mkl-core-2019.5-281 && \
     apt-get remove --purge -y && \
     rm -rf /var/lib/apt/lists/*
