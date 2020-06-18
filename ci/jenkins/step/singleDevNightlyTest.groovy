@@ -23,7 +23,7 @@ timeout(time: 180, unit: 'MINUTES') {
     dir ("tests/milvus_python_test") {
         // sh 'python3 -m pip install -r requirements.txt -i http://pypi.douban.com/simple --trusted-host pypi.douban.com'
         sh 'python3 -m pip install -r requirements.txt'
-        sh "pytest . --level=2 --alluredir=\"test_out/dev/single/mysql\" --ip ${env.HELM_RELEASE_NAME}.milvus.svc.cluster.local"
+        sh "pytest . --level=2 --alluredir=\"test_out/dev/single/mysql\" --ip ${env.HELM_RELEASE_NAME}.milvus.svc.cluster.local >> ${WORKSPACE}/${env.DEV_TEST_ARTIFACTS}/milvus_mysql_dev_test.log"
     }
     // sqlite database backend test
     load "ci/jenkins/step/cleanupSingleDev.groovy"
@@ -48,7 +48,7 @@ timeout(time: 180, unit: 'MINUTES') {
         }
     }
     dir ("tests/milvus_python_test") {
-        sh "pytest . --level=2 --alluredir=\"test_out/dev/single/sqlite\" --ip ${env.HELM_RELEASE_NAME}.milvus.svc.cluster.local"
+        sh "pytest . --level=2 --alluredir=\"test_out/dev/single/sqlite\" --ip ${env.HELM_RELEASE_NAME}.milvus.svc.cluster.local >> ${WORKSPACE}/${env.DEV_TEST_ARTIFACTS}/milvus_sqlite_dev_test.log"
         sh "pytest . --level=1 --ip ${env.HELM_RELEASE_NAME}.milvus.svc.cluster.local --port=19121 --handler=HTTP"
     }
 }
