@@ -17,14 +17,14 @@ namespace milvus {
 namespace engine {
 namespace snapshot {
 
-class DBBaseResource : public ReferenceProxy {
+class BaseResource : public ReferenceProxy {
  public:
     virtual std::string
     ToString() const {
         return "";
     }
 
-    virtual ~DBBaseResource() {
+    virtual ~BaseResource() {
     }
 };
 
