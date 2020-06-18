@@ -44,9 +44,7 @@ class ScopedResource {
     }
 
     operator bool() const {
-        if (res_)
-            return true;
-        return false;
+        return (res_ != nullptr);
     }
 
     ~ScopedResource();
