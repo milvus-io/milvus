@@ -32,14 +32,15 @@ jobs:
       - name: Prebuild
         shell: bash
         run: |
+          mkdir -p _scripts
+          SEMVER=${GITHUB_REF##*/} && echo "export SEMVER=${SEMVER#*v}" >> _scripts/milvus-build.sh
+          echo "export SUB_SHA=${GITHUB_SHA:0:6}" >> _scripts/milvus-build.sh
+          SHOW_DATE=`date +%Y-%m-%d` && echo "SHOW_DATE=d${SHOW_DATE:5:2}${SHOW_DATE:8:2}${SHOW_DATE:2:2}" >> _scripts/milvus-build.sh
+          echo "export TARGET_TAG=${SEMVER}-cpu-${SHOW_DATE}-${SUB_SHA}" >> _scripts/milvus-build.sh
           docker-compose pull --ignore-pull-failures db
           docker-compose pull --ignore-pull-failures centos-core
           docker-compose build centos-core
           docker rmi $(docker images | grep '<none>' | awk '{print $3}') || exit 0
-          SEMVER=${GITHUB_REF##*/} && echo "export SEMVER=${SEMVER#*v}" >> /etc/profile.d/milvus-build.sh
-          echo "export SUB_SHA=${GITHUB_SHA:0:6}" >> /etc/profile.d/milvus-build.sh
-          SHOW_DATE=`date +%Y-%m-%d` && echo "SHOW_DATE=d${SHOW_DATE:5:2}${SHOW_DATE:8:2}${SHOW_DATE:2:2}" >> /etc/profile.d/milvus-build.sh
-          echo "export TARGET_TAG=${SEMVER}-cpu-${SHOW_DATE}-${SUB_SHA}" >> /etc/profile.d/milvus-build.sh
       - name: Build Milvus
         shell: bash
         run: |
@@ -48,13 +49,13 @@ jobs:
       - name: Docker Build
         shell: bash
         run: |
-          rm -rf docker/deploy/milvus/unittest || true
-          source /etc/profile.d/milvus-build.sh
+          sudo rm -rf docker/deploy/milvus/unittest || true
+          source _scripts/milvus-build.sh
           cd docker/deploy && docker-compose build --force-rm cpu_centos7
       - name: Docker Test
         shell: bash
         run: |
-          source /etc/profile.d/milvus-build.sh
+          source _scripts/milvus-build.sh
           cd docker/deploy && docker-compose up -d cpu_centos7 && docker-compose down
       - name: Docker Push
         if: success() && github.repository == 'milvus-io/milvus'
@@ -63,7 +64,7 @@ jobs:
           docker login -u ${{ secrets.DOCKERHUB_USER }} \
                        -p ${{ secrets.DOCKERHUB_TOKEN }}
           docker-compose push centos-core
-          source /etc/profile.d/milvus-build.sh
+          source _scripts/milvus-build.sh
           cd docker/deploy && docker-compose push cpu_centos7
 
 
@@ -92,14 +93,15 @@ jobs:
       - name: Prebuild
         shell: bash
         run: |
+          mkdir -p _scripts
+          SEMVER=${GITHUB_REF##*/} && echo "export SEMVER=${SEMVER#*v}" >> _scripts/milvus-build.sh
+          echo "export SUB_SHA=${GITHUB_SHA:0:6}" >> _scripts/milvus-build.sh
+          SHOW_DATE=`date +%Y-%m-%d` && echo "SHOW_DATE=d${SHOW_DATE:5:2}${SHOW_DATE:8:2}${SHOW_DATE:2:2}" >> _scripts/milvus-build.sh
+          echo "export TARGET_TAG=${SEMVER}-gpu-${SHOW_DATE}-${SUB_SHA}" >> _scripts/milvus-build.sh
           docker-compose pull --ignore-pull-failures db
           docker-compose pull --ignore-pull-failures centos-cuda-core
           docker-compose build centos-cuda-core
           docker rmi $(docker images | grep '<none>' | awk '{print $3}') || exit 0
-          SEMVER=${GITHUB_REF##*/} && echo "export SEMVER=${SEMVER#*v}" >> /etc/profile.d/milvus-build.sh
-          echo "export SUB_SHA=${GITHUB_SHA:0:6}" >> /etc/profile.d/milvus-build.sh
-          SHOW_DATE=`date +%Y-%m-%d` && echo "SHOW_DATE=d${SHOW_DATE:5:2}${SHOW_DATE:8:2}${SHOW_DATE:2:2}" >> /etc/profile.d/milvus-build.sh
-          echo "export TARGET_TAG=${SEMVER}-gpu-${SHOW_DATE}-${SUB_SHA}" >> /etc/profile.d/milvus-build.sh
       - name: Build Milvus
         shell: bash
         run: |
@@ -108,12 +110,12 @@ jobs:
       - name: Docker Build
         shell: bash
         run: |
-          source /etc/profile.d/milvus-build.sh
+          source _scripts/milvus-build.sh
           cd docker/deploy && docker-compose build --force-rm gpu_centos7
       - name: Docker Test
         shell: bash
         run: |
-          source /etc/profile.d/milvus-build.sh
+          source _scripts/milvus-build.sh
           cd docker/deploy && docker-compose up -d gpu_centos7 && docker-compose down
       - name: Docker Push
         if: success() && github.repository == 'milvus-io/milvus'
@@ -122,5 +124,5 @@ jobs:
           docker login -u ${{ secrets.DOCKERHUB_USER }} \
                        -p ${{ secrets.DOCKERHUB_TOKEN }}
           docker-compose push centos-cuda-core
-          source /etc/profile.d/milvus-build.sh
+          source _scripts/milvus-build.sh
           cd docker/deploy && docker-compose push gpu_centos7
