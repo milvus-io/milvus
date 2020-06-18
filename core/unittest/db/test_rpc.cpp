@@ -1379,7 +1379,8 @@ TEST_F(RpcHandlerTest, HYBRID_TEST) {
         auto record = vector_record->add_value();
         auto vector_data = record->mutable_float_data();
         vector_data->Resize(static_cast<int>(vector_field[i].size()), 0.0);
-        memcpy(vector_data->mutable_data(), vector_field[i].data(), vector_field[i].size() * sizeof(float));
+        memcpy(vector_data->mutable_data(),
+            vector_field[i].data(), vector_field[i].size() * sizeof(float));
     }
     handler->InsertEntity(&context, &insert_param, &entity_ids);
     ASSERT_EQ(entity_ids.entity_id_array_size(), row_num);
@@ -1436,8 +1437,8 @@ TEST_F(RpcHandlerTest, HYBRID_TEST) {
     milvus::grpc::HSearchParam new_search_param;
     ConstructHybridSearchParam_2(new_search_param, collection_name, dimension, nq, topk);
 
-    //    milvus::grpc::HQueryResult new_query_result;
-    //    handler->HybridSearch(&context, &new_search_param, &new_query_result);
+    milvus::grpc::HQueryResult new_query_result;
+    handler->HybridSearch(&context, &new_search_param, &new_query_result);
 }
 
 // TEST_F(RpcHandlerTest, HYBRID_INVALID_TEST) {

@@ -965,7 +965,6 @@ DBImpl::InsertEntities(const std::string& collection_id, const std::string& part
         status = ExecWalRecord(record);
     }
 
-
     return status;
 }
 
@@ -3169,10 +3168,10 @@ DBImpl::ExecWalRecord(const wal::MXLogRecord& record) {
                     }
                     flushed_collections.insert(collection_id);
 
-                    status = FlushAttrsIndex(collection_id);
-                    if (!status.ok()) {
-                        return status;
-                    }
+                    //                    status = FlushAttrsIndex(collection_id);
+                    //                    if (!status.ok()) {
+                    //                        return status;
+                    //                    }
                 }
 
                 collections_flushed(record.collection_id, flushed_collections);

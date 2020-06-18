@@ -211,12 +211,12 @@ TEST_F(DBTest, HYBRID_DB_TEST) {
     stat = db_->Flush();
     ASSERT_TRUE(stat.ok());
 
-    //    milvus::engine::CollectionIndex index;
-    //    index.engine_type_ = (int)milvus::engine::EngineType::FAISS_IDMAP;
-    //    index.extra_params_ = {{"nlist", 16384}};
-    //
+    milvus::engine::CollectionIndex index;
+    index.engine_type_ = (int)milvus::engine::EngineType::FAISS_IDMAP;
+    index.extra_params_ = {{"nlist", 16384}};
+
     //    stat = db_->CreateIndex(COLLECTION_NAME, index);
-    //    ASSERT_TRUE(stat.ok());
+    ASSERT_TRUE(stat.ok());
 }
 
 TEST_F(DBTest, HYBRID_SEARCH_TEST) {
@@ -243,7 +243,7 @@ TEST_F(DBTest, HYBRID_SEARCH_TEST) {
     stat = db_->InsertEntities(COLLECTION_NAME, "", field_names, entity, attr_type);
     ASSERT_TRUE(stat.ok());
 
-    stat = db_->Flush();
+    stat = db_->Flush(COLLECTION_NAME);
     ASSERT_TRUE(stat.ok());
 
     // Construct general query
@@ -256,8 +256,8 @@ TEST_F(DBTest, HYBRID_SEARCH_TEST) {
     stat = db_->HybridQuery(dummy_context_, COLLECTION_NAME, tags, general_query, query_ptr, field_names, attr_type,
                             result);
     ASSERT_TRUE(stat.ok());
-    //    ASSERT_EQ(result.row_num_, NQ);
-    //    ASSERT_EQ(result.result_ids_.size(), NQ * TOPK);
+    ASSERT_EQ(result.row_num_, NQ);
+    ASSERT_EQ(result.result_ids_.size(), NQ * TOPK);
 }
 
 TEST_F(DBTest, COMPACT_TEST) {

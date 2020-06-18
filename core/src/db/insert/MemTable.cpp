@@ -16,6 +16,7 @@
 #include <unordered_map>
 
 #include "cache/CpuCacheMgr.h"
+#include "db/attr/InstanceStructuredIndex.h"
 #include "db/Utils.h"
 #include "db/insert/MemTable.h"
 #include "db/meta/FilesHolder.h"
@@ -156,6 +157,13 @@ MemTable::Serialize(uint64_t wal_lsn, bool apply_delete) {
     auto status = meta_->UpdateCollectionFiles(update_files);
     if (!status.ok()) {
         return status;
+    }
+
+    {
+        status = Attr::InstanceStructuredIndex::CreateStructuredIndex(collection_id_, meta_);
+        if (!status.ok()) {
+            return status;
+        }
     }
 
     status = meta_->UpdateCollectionFlushLSN(collection_id_, wal_lsn);
