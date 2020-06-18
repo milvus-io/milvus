@@ -30,12 +30,11 @@ namespace milvus::engine::snapshot {
 
 class MappingsField {
  public:
-    explicit MappingsField(MappingT mappings = {})
-        : mappings_(std::move(mappings)) {}
+    explicit MappingsField(MappingT mappings = {}) : mappings_(std::move(mappings)) {
+    }
 
-        const MappingT
-          &
-          GetMappings() const {
+    const MappingT&
+    GetMappings() const {
         return mappings_;
     }
     MappingT&
@@ -49,17 +48,18 @@ class MappingsField {
 
 class StatusField {
  public:
-    explicit StatusField(State status = PENDING)
-        : status_(status) {}
+    explicit StatusField(State status = PENDING) : status_(status) {
+    }
 
-        State GetStatus() const {
+    State
+    GetStatus() const {
         return status_;
     }
 
     [[nodiscard]] bool
     IsActive() const { return status_ == ACTIVE; }
 
-  bool IsDeactive() const {
+    bool IsDeactive() const {
         return status_ == DEACTIVE;
     }
 
@@ -87,12 +87,11 @@ class StatusField {
 
 class LsnField {
  public:
-    explicit LsnField(LSN_TYPE lsn = 0)
-        : lsn_(lsn) {}
+    explicit LsnField(LSN_TYPE lsn = 0) : lsn_(lsn) {
+    }
 
-        const LSN_TYPE
-          &
-          GetLsn() const {
+    const LSN_TYPE&
+    GetLsn() const {
         return lsn_;
     }
 
@@ -107,10 +106,11 @@ class LsnField {
 
 class CreatedOnField {
  public:
-    explicit CreatedOnField(TS_TYPE created_on = GetMicroSecTimeStamp())
-        : created_on_(created_on) {}
+    explicit CreatedOnField(TS_TYPE created_on = GetMicroSecTimeStamp()) : created_on_(created_on) {
+    }
 
-        TS_TYPE GetCreatedTime() const {
+    TS_TYPE
+    GetCreatedTime() const {
         return created_on_;
     }
 
@@ -120,10 +120,11 @@ class CreatedOnField {
 
 class UpdatedOnField {
  public:
-    explicit UpdatedOnField(TS_TYPE updated_on = GetMicroSecTimeStamp())
-        : updated_on_(updated_on) {}
+    explicit UpdatedOnField(TS_TYPE updated_on = GetMicroSecTimeStamp()) : updated_on_(updated_on) {
+    }
 
-        TS_TYPE GetUpdatedTime() const {
+    TS_TYPE
+    GetUpdatedTime() const {
         return updated_on_;
     }
 
@@ -133,10 +134,11 @@ class UpdatedOnField {
 
 class IdField {
  public:
-    explicit IdField(ID_TYPE id)
-        : id_(id) {}
+    explicit IdField(ID_TYPE id) : id_(id) {
+    }
 
-        ID_TYPE GetID() const {
+    ID_TYPE
+    GetID() const {
         return id_;
     }
     void
@@ -154,10 +156,11 @@ class IdField {
 
 class CollectionIdField {
  public:
-    explicit CollectionIdField(ID_TYPE id)
-        : collection_id_(id) {}
+    explicit CollectionIdField(ID_TYPE id) : collection_id_(id) {
+    }
 
-        ID_TYPE GetCollectionId() const {
+    ID_TYPE
+    GetCollectionId() const {
         return collection_id_;
     }
 
@@ -167,10 +170,11 @@ class CollectionIdField {
 
 class SchemaIdField {
  public:
-    explicit SchemaIdField(ID_TYPE id)
-        : schema_id_(id) {}
+    explicit SchemaIdField(ID_TYPE id) : schema_id_(id) {
+    }
 
-        ID_TYPE GetSchemaId() const {
+    ID_TYPE
+    GetSchemaId() const {
         return schema_id_;
     }
     void
@@ -184,10 +188,11 @@ class SchemaIdField {
 
 class NumField {
  public:
-    explicit NumField(NUM_TYPE num)
-        : num_(num) {}
+    explicit NumField(NUM_TYPE num) : num_(num) {
+    }
 
-        NUM_TYPE GetNum() const {
+    NUM_TYPE
+    GetNum() const {
         return num_;
     }
     void
@@ -201,10 +206,11 @@ class NumField {
 
 class FtypeField {
  public:
-    explicit FtypeField(FTYPE_TYPE type)
-        : ftype_(type) {}
+    explicit FtypeField(FTYPE_TYPE type) : ftype_(type) {
+    }
 
-        FTYPE_TYPE GetFtype() const {
+    FTYPE_TYPE
+    GetFtype() const {
         return ftype_;
     }
 
@@ -214,10 +220,11 @@ class FtypeField {
 
 class FieldIdField {
  public:
-    explicit FieldIdField(ID_TYPE id)
-        : field_id_(id) {}
+    explicit FieldIdField(ID_TYPE id) : field_id_(id) {
+    }
 
-        ID_TYPE GetFieldId() const {
+    ID_TYPE
+    GetFieldId() const {
         return field_id_;
     }
 
@@ -227,10 +234,11 @@ class FieldIdField {
 
 class FieldElementIdField {
  public:
-    explicit FieldElementIdField(ID_TYPE id)
-        : field_element_id_(id) {}
+    explicit FieldElementIdField(ID_TYPE id) : field_element_id_(id) {
+    }
 
-        ID_TYPE GetFieldElementId() const {
+    ID_TYPE
+    GetFieldElementId() const {
         return field_element_id_;
     }
 
@@ -240,10 +248,11 @@ class FieldElementIdField {
 
 class PartitionIdField {
  public:
-    explicit PartitionIdField(ID_TYPE id)
-        : partition_id_(id) {}
+    explicit PartitionIdField(ID_TYPE id) : partition_id_(id) {
+    }
 
-        ID_TYPE GetPartitionId() const {
+    ID_TYPE
+    GetPartitionId() const {
         return partition_id_;
     }
 
@@ -253,10 +262,11 @@ class PartitionIdField {
 
 class SegmentIdField {
  public:
-    explicit SegmentIdField(ID_TYPE id)
-        : segment_id_(id) {}
+    explicit SegmentIdField(ID_TYPE id) : segment_id_(id) {
+    }
 
-        ID_TYPE GetSegmentId() const {
+    ID_TYPE
+    GetSegmentId() const {
         return segment_id_;
     }
 
@@ -266,12 +276,11 @@ class SegmentIdField {
 
 class NameField {
  public:
-    explicit NameField(std::string name)
-        : name_(std::move(name)) {}
+    explicit NameField(std::string name) : name_(std::move(name)) {
+    }
 
-        const std::string
-          &
-          GetName() const {
+    const std::string&
+    GetName() const {
         return name_;
     }
 
