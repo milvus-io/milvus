@@ -57,9 +57,12 @@ class StatusField {
     }
 
     [[nodiscard]] bool
-    IsActive() const { return status_ == ACTIVE; }
+    IsActive() const {
+        return status_ == ACTIVE;
+    }
 
-    bool IsDeactive() const {
+    bool
+    IsDeactive() const {
         return status_ == DEACTIVE;
     }
 
