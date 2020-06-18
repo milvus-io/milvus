@@ -138,16 +138,11 @@ IVFPQConfAdapter::CheckTrain(Config& oricfg, const IndexMode mode) {
     static int64_t DEFAULT_NBITS = 8;
     static int64_t MAX_NLIST = 999999;
     static int64_t MIN_NLIST = 1;
-    static std::vector<std::string> CPU_METRICS{knowhere::Metric::L2, knowhere::Metric::IP};
-    static std::vector<std::string> GPU_METRICS{knowhere::Metric::L2};
+    static std::vector<std::string> METRICS{knowhere::Metric::L2, knowhere::Metric::IP};
 
     oricfg[knowhere::IndexParams::nbits] = DEFAULT_NBITS;
 
-    if (mode == IndexMode::MODE_GPU) {
-        CheckStrByValues(knowhere::Metric::TYPE, GPU_METRICS);
-    } else {
-        CheckStrByValues(knowhere::Metric::TYPE, CPU_METRICS);
-    }
+    CheckStrByValues(knowhere::Metric::TYPE, METRICS);
     CheckIntByRange(knowhere::meta::DIM, DEFAULT_MIN_DIM, DEFAULT_MAX_DIM);
     CheckIntByRange(knowhere::meta::ROWS, DEFAULT_MIN_ROWS, DEFAULT_MAX_ROWS);
     CheckIntByRange(knowhere::IndexParams::nlist, MIN_NLIST, MAX_NLIST);

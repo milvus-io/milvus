@@ -96,20 +96,6 @@ CreateIndexRequest::OnExecute() {
             }
         }
 
-#ifdef MILVUS_GPU_VERSION
-        Status s;
-        bool enable_gpu = false;
-        server::Config& config = server::Config::GetInstance();
-        s = config.GetGpuResourceConfigEnable(enable_gpu);
-        fiu_do_on("CreateIndexRequest.OnExecute.ip_meteric",
-                  collection_info.metric_type_ = static_cast<int>(engine::MetricType::IP));
-
-        if (s.ok() && adapter_index_type == (int)engine::EngineType::FAISS_PQ &&
-            collection_info.metric_type_ == (int)engine::MetricType::IP) {
-            return Status(SERVER_UNEXPECTED_ERROR, "PQ not support IP in GPU version!");
-        }
-#endif
-
         rc.RecordSection("check validation");
 
         // step 3: create index
