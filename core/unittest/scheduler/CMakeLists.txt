@@ -26,6 +26,25 @@ set(test_files
 
 add_executable(test_scheduler
         ${common_files}
+        ${log_files}
+        ${cache_files}
+        ${codecs_files}
+        ${codecs_default_files}
+        ${config_files}
+        ${config_handler_files}
+        ${db_main_files}
+        ${db_engine_files}
+        ${db_insert_files}
+        ${db_meta_files}
+        ${db_merge_files}
+        ${db_wal_files}
+        ${scheduler_files}
+        ${segment_files}
+        ${server_init_files}
+        ${server_context_files}
+        ${storage_files}
+        ${tracing_files}
+        ${thirdparty_files}
         ${entry_file}
         ${test_files}
         )

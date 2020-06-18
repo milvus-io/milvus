@@ -6,6 +6,7 @@ Please mark all changes in change log and use the issue from GitHub
 
 ## Bug
 -   \#2487 Remove timeout when creating collection in dev test
+-   \#2532 Fix Milvus docker image report illegal instruction
 -   \#2551 Fix test_hybrid_db and test_rpc error
 -   \#2582 CreateHybridIndex.cpp compile error
 
@@ -13,9 +14,11 @@ Please mark all changes in change log and use the issue from GitHub
 -   \#2319 Redo metadata to support MVCC
 -   \#2509 Count up query statistics for debug ease
 -   \#2572 Support structured data index
+-   \#2585 Support IVF_PQ on GPU with using metric_type IP
 
 ## Improvement
 -   \#2543 Remove secondary_path related code
+-   \#2544 Optimize unittest build
 -   \#2561 Clean util dependencies with other modules
 
 ## Task

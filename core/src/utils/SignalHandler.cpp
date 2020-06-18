@@ -19,38 +19,41 @@
 namespace milvus {
 namespace server {
 
+signal_func_ptr signal_routine_func = nullptr;
+
 void
-SignalHandler::HandleSignal(int signum) {
+HandleSignal(int signum) {
+    int32_t exit_code = 1; /* 0: normal exit; 1: exception */
     switch (signum) {
         case SIGINT:
-        case SIGUSR2: {
-            LOG_SERVER_INFO_ << "Server received signal: " << signum;
-            if (routine_func_ != nullptr) {
-                (*routine_func_)();
-            }
-            exit(0);
-        }
+        case SIGUSR2:
+            exit_code = 0;
+            /* no break */
         default: {
-            LOG_SERVER_INFO_ << "Server received critical signal: " << signum;
-            SignalHandler::PrintStacktrace();
-            if (routine_func_ != nullptr) {
-                (*routine_func_)();
+            if (exit_code == 0) {
+                LOG_SERVER_INFO_ << "Server received signal: " << signum;
+            } else {
+                LOG_SERVER_INFO_ << "Server received critical signal: " << signum;
+                PrintStacktrace();
             }
-            exit(1);
+            if (signal_routine_func != nullptr) {
+                (*signal_routine_func)(exit_code);
+            }
         }
     }
 }
 
 void
-SignalHandler::PrintStacktrace() {
-    LOG_SERVER_INFO_ << "Call stack:";
-
-    const int size = 32;
-    void* array[size];
-    int stack_num = backtrace(array, size);
+PrintStacktrace() {
+    const int bt_depth = 128;
+    void* array[bt_depth];
+    int stack_num = backtrace(array, bt_depth);
     char** stacktrace = backtrace_symbols(array, stack_num);
+
+    LOG_SERVER_INFO_ << "Call stack:";
     for (int i = 0; i < stack_num; ++i) {
         std::string info = stacktrace[i];
+        std::cout << "No." << i << ": " << info << std::endl;
         LOG_SERVER_INFO_ << info;
     }
     free(stacktrace);
