@@ -199,7 +199,7 @@ CreateCollection(const std::string& collection_name, const LSN_TYPE& lsn) {
 TEST_F(SnapshotTest, CreateCollectionOperationTest) {
     ScopedSnapshotT expect_null;
     auto status = Snapshots::GetInstance().GetSnapshot(expect_null, 100000);
-    ASSERT_TRUE(!expect_null);
+    ASSERT_FALSE(expect_null);
 
     std::string collection_name = "test_c1";
     LSN_TYPE lsn = 1;
@@ -208,7 +208,7 @@ TEST_F(SnapshotTest, CreateCollectionOperationTest) {
 
     ScopedSnapshotT latest_ss;
     status = Snapshots::GetInstance().GetSnapshot(latest_ss, "xxxx");
-    ASSERT_TRUE(!status.ok());
+    ASSERT_FALSE(status.ok());
 
     status = Snapshots::GetInstance().GetSnapshot(latest_ss, collection_name);
     ASSERT_TRUE(latest_ss);
@@ -217,7 +217,7 @@ TEST_F(SnapshotTest, CreateCollectionOperationTest) {
     IDS_TYPE ids;
     status = Snapshots::GetInstance().GetCollectionIds(ids);
     ASSERT_EQ(ids.size(), 6);
-    ASSERT_EQ(ids[5], latest_ss->GetCollectionId());
+    ASSERT_EQ(ids.back(), latest_ss->GetCollectionId());
 
     OperationContext sd_op_ctx;
     sd_op_ctx.collection = latest_ss->GetCollection();
@@ -249,18 +249,18 @@ TEST_F(SnapshotTest, DropCollectionTest) {
     status = Snapshots::GetInstance().DropCollection(collection_name, lsn);
     ASSERT_TRUE(status.ok());
     status = Snapshots::GetInstance().GetSnapshot(lss, collection_name);
-    ASSERT_TRUE(!status.ok());
+    ASSERT_FALSE(status.ok());
 
     auto ss_2 = CreateCollection(collection_name, ++lsn);
     status = Snapshots::GetInstance().GetSnapshot(lss, collection_name);
     ASSERT_TRUE(status.ok());
     ASSERT_EQ(ss_2->GetID(), lss->GetID());
-    ASSERT_TRUE(prev_ss_id != ss_2->GetID());
-    ASSERT_TRUE(prev_c_id != ss_2->GetCollection()->GetID());
+    ASSERT_FALSE(prev_ss_id == ss_2->GetID());
+    ASSERT_FALSE(prev_c_id == ss_2->GetCollection()->GetID());
     status = Snapshots::GetInstance().DropCollection(collection_name, ++lsn);
     ASSERT_TRUE(status.ok());
     status = Snapshots::GetInstance().DropCollection(collection_name, ++lsn);
-    ASSERT_TRUE(!status.ok());
+    ASSERT_FALSE(status.ok());
 }
 
 TEST_F(SnapshotTest, ConCurrentCollectionOperation) {
@@ -278,9 +278,9 @@ TEST_F(SnapshotTest, ConCurrentCollectionOperation) {
         status = Snapshots::GetInstance().GetSnapshot(a_ss, collection_name);
         ASSERT_TRUE(status.ok());
         std::this_thread::sleep_for(std::chrono::milliseconds(80));
-        ASSERT_TRUE(!ss->GetCollection()->IsActive());
+        ASSERT_FALSE(ss->GetCollection()->IsActive());
         status = Snapshots::GetInstance().GetSnapshot(a_ss, collection_name);
-        ASSERT_TRUE(!status.ok());
+        ASSERT_FALSE(status.ok());
 
         auto c_c = CollectionCommitsHolder::GetInstance().GetResource(stale_ss_id, false);
         ASSERT_TRUE(c_c);
@@ -292,12 +292,12 @@ TEST_F(SnapshotTest, ConCurrentCollectionOperation) {
         ASSERT_TRUE(status.ok());
         ScopedSnapshotT a_ss;
         status = Snapshots::GetInstance().GetSnapshot(a_ss, collection_name);
-        ASSERT_TRUE(!status.ok());
+        ASSERT_FALSE(status.ok());
     };
     auto worker3 = [&] {
         std::this_thread::sleep_for(std::chrono::milliseconds(20));
         auto ss = CreateCollection(collection_name, ++lsn);
-        ASSERT_TRUE(!ss);
+        ASSERT_FALSE(ss);
         std::this_thread::sleep_for(std::chrono::milliseconds(80));
         ss = CreateCollection(collection_name, ++lsn);
         ASSERT_TRUE(ss);
@@ -311,7 +311,7 @@ TEST_F(SnapshotTest, ConCurrentCollectionOperation) {
     t3.join();
 
     auto c_c = CollectionCommitsHolder::GetInstance().GetResource(stale_ss_id, false);
-    ASSERT_TRUE(!c_c);
+    ASSERT_FALSE(c_c);
 }
 
 ScopedSnapshotT
