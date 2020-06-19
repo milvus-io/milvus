@@ -25,6 +25,7 @@
 #include "cache/GpuCacheMgr.h"
 #include "db/DBFactory.h"
 #include "db/Options.h"
+#include "db/snapshot/GarbageCollector.h"
 #include "db/snapshot/OperationExecutor.h"
 #include "db/snapshot/Snapshots.h"
 #include "db/snapshot/ResourceHolders.h"
@@ -361,6 +362,7 @@ void
 SnapshotTest::SetUp() {
     BaseTest::SetUp();
     milvus::engine::snapshot::OperationExecutor::GetInstance().Start();
+    milvus::engine::snapshot::GarbageCollector::GetInstance().Start();
     milvus::engine::snapshot::CollectionCommitsHolder::GetInstance().Reset();
     milvus::engine::snapshot::CollectionsHolder::GetInstance().Reset();
     milvus::engine::snapshot::SchemaCommitsHolder::GetInstance().Reset();
@@ -382,6 +384,7 @@ void
 SnapshotTest::TearDown() {
     // TODO: Temp to delay some time. OperationExecutor should wait all resources be destructed before stop
     std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    milvus::engine::snapshot::GarbageCollector::GetInstance().Stop();
     milvus::engine::snapshot::OperationExecutor::GetInstance().Stop();
     BaseTest::TearDown();
 }

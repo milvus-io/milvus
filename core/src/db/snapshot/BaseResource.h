@@ -10,7 +10,10 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
 #pragma once
+
+#include <memory>
 #include <string>
+
 #include "ReferenceProxy.h"
 
 namespace milvus {
@@ -24,9 +27,10 @@ class BaseResource : public ReferenceProxy {
         return "";
     }
 
-    virtual ~BaseResource() {
-    }
+    virtual ~BaseResource() = default;
 };
+
+using BaseResourcePtr = std::shared_ptr<BaseResource>;
 
 }  // namespace snapshot
 }  // namespace engine

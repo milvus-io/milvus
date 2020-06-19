@@ -28,36 +28,67 @@ using OperationQueuePtr = std::shared_ptr<OperationQueue>;
 
 class OperationExecutor {
  public:
-    using Ptr = std::shared_ptr<OperationExecutor>;
-
+    OperationExecutor() = default;
     OperationExecutor(const OperationExecutor&) = delete;
 
+    ~OperationExecutor() {
+        Stop();
+    }
+
     static OperationExecutor&
-    GetInstance();
+    GetInstance() {
+        static OperationExecutor executor;
+        return executor;
+    }
 
     Status
-    Submit(OperationsPtr operation, bool sync = true);
+    Submit(OperationsPtr operation, bool sync = true) {
+        if (!operation) {
+            return Status(SS_INVALID_ARGUMENT_ERROR, "Invalid Operation");
+        }
+        /* Store::GetInstance().Apply(*operation); */
+        /* return true; */
+        Enqueue(operation);
+        if (sync) {
+            return operation->WaitToFinish();
+        }
+        return Status::OK();
+    }
 
     void
-    Start();
+    Start() {
+        thread_ = std::thread(&OperationExecutor::ThreadMain, this);
+        /* std::cout << "OperationExecutor Started" << std::endl; */
+    }
 
     void
-    Stop();
+    Stop() {
+        Enqueue(nullptr);
+        thread_.join();
+        std::cout << "OperationExecutor Stopped" << std::endl;
+    }
 
-    ~OperationExecutor();
-
- protected:
-    OperationExecutor();
+ private:
+    void
+    ThreadMain() {
+        while (true) {
+            OperationsPtr operation = queue_.Take();
+            if (!operation) {
+                std::cout << "Stopping operation executor thread " << std::this_thread::get_id() << std::endl;
+                break;
+            }
+            /* std::cout << std::this_thread::get_id() << " Dequeue Operation " << operation->GetID() << std::endl; */
+            Store::GetInstance().Apply(*operation);
+        }
+    }
 
     void
-    ThreadMain();
+    Enqueue(OperationsPtr operation) {
+        /* std::cout << std::this_thread::get_id() << " Enqueue Operation " << operation->GetID() << std::endl; */
+        queue_.Put(operation);
+    }
 
-    void
-    Enqueue(OperationsPtr operation);
-
- protected:
-    mutable std::mutex mtx_;
-    bool running_ = false;
+ private:
     std::thread thread_;
     OperationQueue queue_;
 };
