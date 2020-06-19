@@ -60,8 +60,8 @@ using FieldElement = milvus::engine::snapshot::FieldElement;
 using Snapshots = milvus::engine::snapshot::Snapshots;
 using ScopedSnapshotT = milvus::engine::snapshot::ScopedSnapshotT;
 using ReferenceProxy = milvus::engine::snapshot::ReferenceProxy;
-using Queue = milvus::server::BlockingQueue<ID_TYPE>;
-using TQueue = milvus::server::BlockingQueue<std::tuple<ID_TYPE, ID_TYPE>>;
+using Queue = milvus::BlockingQueue<ID_TYPE>;
+using TQueue = milvus::BlockingQueue<std::tuple<ID_TYPE, ID_TYPE>>;
 
 int RandomInt(int start, int end) {
     std::random_device dev;

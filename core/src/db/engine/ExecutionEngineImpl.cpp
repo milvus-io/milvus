@@ -371,7 +371,7 @@ ExecutionEngineImpl::Serialize() {
 
     // here we reset index size by file size,
     // since some index type(such as SQ8) data size become smaller after serialized
-    index_->SetIndexSize(server::CommonUtil::GetFileSize(location_));
+    index_->SetIndexSize(CommonUtil::GetFileSize(location_));
     LOG_ENGINE_DEBUG_ << "Finish serialize index file: " << location_ << " size: " << index_->Size();
 
     if (index_->Size() == 0) {

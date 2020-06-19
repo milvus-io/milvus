@@ -10,6 +10,7 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
 #pragma once
+
 #include <memory>
 #include <mutex>
 #include <thread>
@@ -20,7 +21,7 @@
 namespace milvus::engine::snapshot {
 
 using ThreadPtr = std::shared_ptr<std::thread>;
-using OperationQueue = server::BlockingQueue<OperationsPtr>;
+using OperationQueue = BlockingQueue<OperationsPtr>;
 using OperationQueuePtr = std::shared_ptr<OperationQueue>;
 
 class OperationExecutor {

@@ -28,7 +28,7 @@ services:
     image: ${REPO}:${ARCH}-ubuntu-${UBUNTU}-core
     build:
       context: .
-      dockerfile: ci/docker/ubuntu-${UBUNTU}-core.dockerfile
+      dockerfile: docker/build_env/cpu/ubuntu${UBUNTU}/Dockerfile
       cache_from:
         - ${REPO}:${ARCH}-ubuntu-${UBUNTU}-core
     shm_size: 2G
@@ -48,7 +48,7 @@ services:
     image: ${REPO}:${ARCH}-centos-${CENTOS}-core
     build:
       context: .
-      dockerfile: ci/docker/centos-${CENTOS}-core.dockerfile
+      dockerfile: docker/build_env/cpu/centos${CENTOS}/Dockerfile
       cache_from:
         - ${REPO}:${ARCH}-centos-${CENTOS}-core
     shm_size: 2G
@@ -68,7 +68,7 @@ services:
     image: ${REPO}:${ARCH}-centos-${CENTOS}-cuda-core
     build:
       context: .
-      dockerfile: ci/docker/centos-${CENTOS}-cuda-core.dockerfile
+      dockerfile: docker/build_env/gpu/centos${CENTOS}/Dockerfile
       cache_from:
         - ${REPO}:${ARCH}-centos-${CENTOS}-cuda-core
     shm_size: 2G
