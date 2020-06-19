@@ -11,9 +11,11 @@
 
 FROM ubuntu:18.04
 
-ENV DEBIAN_FRONTEND noninteractive
-
+# pipefail is enabled for proper error detection in the `wget | apt-key add`
+# step
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
+
+ENV DEBIAN_FRONTEND noninteractive
 
 RUN apt-get update && apt-get install -y --no-install-recommends wget ca-certificates gnupg2 && \
     wget -P /tmp https://apt.repos.intel.com/intel-gpg-keys/GPG-PUB-KEY-INTEL-SW-PRODUCTS-2019.PUB && \
@@ -44,9 +46,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends ccache && \
     apt-get remove --purge -y && \
     rm -rf /var/lib/apt/lists/*
 
-COPY docker-entrypoint.sh /app/docker-entrypoint.sh
+# use login shell to activate environment un the RUN commands
+SHELL [ "/bin/bash", "-c", "-l" ]
 
-WORKDIR /root
-
-ENTRYPOINT [ "/app/docker-entrypoint.sh" ]
-CMD [ "start" ]
+# use login shell when running the container
+ENTRYPOINT [ "/bin/bash", "-c", "-l" ]
