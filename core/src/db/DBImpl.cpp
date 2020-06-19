@@ -630,7 +630,7 @@ DBImpl::HasPartition(const std::string& collection_id, const std::string& tag, b
     // trim side-blank of tag, only compare valid characters
     // for example: " ab cd " is treated as "ab cd"
     std::string valid_tag = tag;
-    server::StringHelpFunctions::TrimStringBlank(valid_tag);
+    StringHelpFunctions::TrimStringBlank(valid_tag);
 
     if (valid_tag == milvus::engine::DEFAULT_PARTITON_TAG) {
         has_or_not = true;
@@ -2808,7 +2808,7 @@ DBImpl::GetPartitionByTag(const std::string& collection_id, const std::string& p
         // trim side-blank of tag, only compare valid characters
         // for example: " ab cd " is treated as "ab cd"
         std::string valid_tag = partition_tag;
-        server::StringHelpFunctions::TrimStringBlank(valid_tag);
+        StringHelpFunctions::TrimStringBlank(valid_tag);
 
         if (valid_tag == milvus::engine::DEFAULT_PARTITON_TAG) {
             partition_name = collection_id;
@@ -2834,7 +2834,7 @@ DBImpl::GetPartitionsByTags(const std::string& collection_id, const std::vector<
         // trim side-blank of tag, only compare valid characters
         // for example: " ab cd " is treated as "ab cd"
         std::string valid_tag = tag;
-        server::StringHelpFunctions::TrimStringBlank(valid_tag);
+        StringHelpFunctions::TrimStringBlank(valid_tag);
 
         if (valid_tag == milvus::engine::DEFAULT_PARTITON_TAG) {
             partition_name_array.insert(collection_id);
@@ -2842,7 +2842,7 @@ DBImpl::GetPartitionsByTags(const std::string& collection_id, const std::vector<
         }
 
         for (auto& schema : partition_array) {
-            if (server::StringHelpFunctions::IsRegexMatch(schema.partition_tag_, valid_tag)) {
+            if (StringHelpFunctions::IsRegexMatch(schema.partition_tag_, valid_tag)) {
                 partition_name_array.insert(schema.collection_id_);
             }
         }

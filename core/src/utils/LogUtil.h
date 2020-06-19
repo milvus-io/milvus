@@ -18,7 +18,6 @@
 #include <string>
 
 namespace milvus {
-namespace server {
 
 Status
 InitLog(bool trace_enable, bool debug_enable, bool info_enable, bool warning_enable, bool error_enable,
@@ -43,5 +42,4 @@ LogConfigInMem();
 void
 LogCpuInfo();
 
-}  // namespace server
 }  // namespace milvus

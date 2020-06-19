@@ -122,59 +122,6 @@ namespace milvus {
 #define LOG_WAL_ERROR_ LOG(ERROR) << WAL_MODULE_FUNCTION
 #define LOG_WAL_FATAL_ LOG(FATAL) << WAL_MODULE_FUNCTION
 
-/*
- * Deprecated
- */
-
-/////////////////////////////////////////////////////////////////////////////////////////////////
-// #define SERVER_DOMAIN_NAME "[SERVER]"
-
-// #define LOG_SERVER_TRACE_ LOG(TRACE) << SERVER_DOMAIN_NAME
-// #define LOG_SERVER_DEBUG_ LOG(DEBUG) << SERVER_DOMAIN_NAME
-// #define LOG_SERVER_INFO_ LOG(INFO) << SERVER_DOMAIN_NAME
-// #define LOG_SERVER_WARNING_ LOG(WARNING) << SERVER_DOMAIN_NAME
-// #define LOG_SERVER_ERROR_ LOG(ERROR) << SERVER_DOMAIN_NAME
-// #define LOG_SERVER_FATAL_ LOG(FATAL) << SERVER_DOMAIN_NAME
-
-/////////////////////////////////////////////////////////////////////////////////////////////////
-// #define ENGINE_DOMAIN_NAME "[ENGINE]"
-
-// #define LOG_ENGINE_TRACE_ LOG(TRACE) << ENGINE_DOMAIN_NAME
-// #define LOG_ENGINE_DEBUG_ LOG(DEBUG) << ENGINE_DOMAIN_NAME
-// #define LOG_ENGINE_INFO_ LOG(INFO) << ENGINE_DOMAIN_NAME
-// #define LOG_ENGINE_WARNING_ LOG(WARNING) << ENGINE_DOMAIN_NAME
-// #define LOG_ENGINE_ERROR_ LOG(ERROR) << ENGINE_DOMAIN_NAME
-// #define LOG_ENGINE_FATAL_ LOG(FATAL) << ENGINE_DOMAIN_NAME
-
-/////////////////////////////////////////////////////////////////////////////////////////////////
-// #define WRAPPER_DOMAIN_NAME "[WRAPPER]"
-
-// #define WRAPPER_LOG_TRACE LOG(TRACE) << WRAPPER_DOMAIN_NAME
-// #define WRAPPER_LOG_DEBUG LOG(DEBUG) << WRAPPER_DOMAIN_NAME
-// #define WRAPPER_LOG_INFO LOG(INFO) << WRAPPER_DOMAIN_NAME
-// #define WRAPPER_LOG_WARNING LOG(WARNING) << WRAPPER_DOMAIN_NAME
-// #define WRAPPER_LOG_ERROR LOG(ERROR) << WRAPPER_DOMAIN_NAME
-// #define WRAPPER_LOG_FATAL LOG(FATAL) << WRAPPER_DOMAIN_NAME
-
-/////////////////////////////////////////////////////////////////////////////////////////////////
-// #define STORAGE_DOMAIN_NAME "[STORAGE]"
-
-// #define LOG_STORAGE_TRACE_ LOG(TRACE) << STORAGE_DOMAIN_NAME
-// #define LOG_STORAGE_DEBUG_ LOG(DEBUG) << STORAGE_DOMAIN_NAME
-// #define LOG_STORAGE_INFO_ LOG(INFO) << STORAGE_DOMAIN_NAME
-// #define LOG_STORAGE_WARNING_ LOG(WARNING) << STORAGE_DOMAIN_NAME
-// #define LOG_STORAGE_ERROR_ LOG(ERROR) << STORAGE_DOMAIN_NAME
-// #define LOG_STORAGE_FATAL_ LOG(FATAL) << STORAGE_DOMAIN_NAME
-
-// #define WAL_DOMAIN_NAME "[WAL]"
-
-// #define LOG_WAL_TRACE_ LOG(TRACE) << WAL_DOMAIN_NAME
-// #define LOG_WAL_DEBUG_ LOG(DEBUG) << WAL_DOMAIN_NAME
-// #define LOG_WAL_INFO_ LOG(INFO) << WAL_DOMAIN_NAME
-// #define LOG_WAL_WARNING_ LOG(WARNING) << WAL_DOMAIN_NAME
-// #define LOG_WAL_ERROR_ LOG(ERROR) << WAL_DOMAIN_NAME
-// #define LOG_WAL_FATAL_ LOG(FATAL) << WAL_DOMAIN_NAME
-
 /////////////////////////////////////////////////////////////////////////////////////////////////////
 std::string
 LogOut(const char* pattern, ...);

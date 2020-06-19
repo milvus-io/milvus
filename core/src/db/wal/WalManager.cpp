@@ -39,7 +39,7 @@ WalManager::WalManager(const MXLogConfiguration& config) {
         mxlog_config_.mxlog_path += '/';
     }
     // check path exist
-    auto status = server::CommonUtil::CreateDirectory(mxlog_config_.mxlog_path);
+    auto status = CommonUtil::CreateDirectory(mxlog_config_.mxlog_path);
     if (!status.ok()) {
         std::string msg = "failed to create wal directory " + mxlog_config_.mxlog_path;
         LOG_ENGINE_ERROR_ << msg;

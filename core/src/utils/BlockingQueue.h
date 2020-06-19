@@ -18,7 +18,6 @@
 #include <vector>
 
 namespace milvus {
-namespace server {
 
 template <typename T>
 class BlockingQueue {
@@ -63,7 +62,6 @@ class BlockingQueue {
     size_t capacity_ = 32;
 };
 
-}  // namespace server
 }  // namespace milvus
 
 #include "./BlockingQueue.inl"
