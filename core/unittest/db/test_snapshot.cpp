@@ -78,49 +78,55 @@ TEST_F(SnapshotTest, ReferenceProxyTest) {
     };
 
     auto proxy = ReferenceProxy();
-    ASSERT_EQ(proxy.RefCnt(), 0);
+    ASSERT_EQ(proxy.ref_count(), 0);
 
     int refcnt = 3;
     for (auto i = 0; i < refcnt; ++i) {
         proxy.Ref();
     }
-    ASSERT_EQ(proxy.RefCnt(), refcnt);
+    ASSERT_EQ(proxy.ref_count(), refcnt);
 
     proxy.RegisterOnNoRefCB(callback);
 
     for (auto i = 0; i < refcnt; ++i) {
         proxy.UnRef();
     }
-    ASSERT_EQ(proxy.RefCnt(), 0);
+    ASSERT_EQ(proxy.ref_count(), 0);
     ASSERT_EQ(status, CALLED);
 }
 
 TEST_F(SnapshotTest, ScopedResourceTest) {
     auto inner = std::make_shared<Collection>("c1");
-    ASSERT_EQ(inner->RefCnt(), 0);
+    ASSERT_EQ(inner->ref_count(), 0);
 
     {
         auto not_scoped = CollectionScopedT(inner, false);
-        ASSERT_EQ(not_scoped->RefCnt(), 0);
+        ASSERT_EQ(not_scoped->ref_count(), 0);
         not_scoped->Ref();
-        ASSERT_EQ(not_scoped->RefCnt(), 1);
-        ASSERT_EQ(inner->RefCnt(), 1);
+        ASSERT_EQ(not_scoped->ref_count(), 1);
+        ASSERT_EQ(inner->ref_count(), 1);
 
         auto not_scoped_2 = not_scoped;
-        ASSERT_EQ(not_scoped_2->RefCnt(), 1);
-        ASSERT_EQ(not_scoped->RefCnt(), 1);
-        ASSERT_EQ(inner->RefCnt(), 1);
+        ASSERT_EQ(not_scoped_2->ref_count(), 1);
+        ASSERT_EQ(not_scoped->ref_count(), 1);
+        ASSERT_EQ(inner->ref_count(), 1);
+
+        not_scoped_2->Ref();
+        ASSERT_EQ(not_scoped_2->ref_count(), 2);
+        ASSERT_EQ(not_scoped->ref_count(), 2);
+        ASSERT_EQ(inner->ref_count(), 2);
     }
-    ASSERT_EQ(inner->RefCnt(), 1);
+    inner->UnRef();
+    ASSERT_EQ(inner->ref_count(), 1);
 
     inner->UnRef();
-    ASSERT_EQ(inner->RefCnt(), 0);
+    ASSERT_EQ(inner->ref_count(), 0);
 
     {
         // Test scoped construct
         auto scoped = CollectionScopedT(inner);
-        ASSERT_EQ(scoped->RefCnt(), 1);
-        ASSERT_EQ(inner->RefCnt(), 1);
+        ASSERT_EQ(scoped->ref_count(), 1);
+        ASSERT_EQ(inner->ref_count(), 1);
 
         {
             // Test bool operator
@@ -128,45 +134,45 @@ TEST_F(SnapshotTest, ScopedResourceTest) {
             ASSERT_EQ(other_scoped, false);
             // Test operator=
             other_scoped = scoped;
-            ASSERT_EQ(other_scoped->RefCnt(), 2);
-            ASSERT_EQ(scoped->RefCnt(), 2);
-            ASSERT_EQ(inner->RefCnt(), 2);
+            ASSERT_EQ(other_scoped->ref_count(), 2);
+            ASSERT_EQ(scoped->ref_count(), 2);
+            ASSERT_EQ(inner->ref_count(), 2);
         }
-        ASSERT_EQ(scoped->RefCnt(), 1);
-        ASSERT_EQ(inner->RefCnt(), 1);
+        ASSERT_EQ(scoped->ref_count(), 1);
+        ASSERT_EQ(inner->ref_count(), 1);
 
         {
             // Test copy
             auto other_scoped(scoped);
-            ASSERT_EQ(other_scoped->RefCnt(), 2);
-            ASSERT_EQ(scoped->RefCnt(), 2);
-            ASSERT_EQ(inner->RefCnt(), 2);
+            ASSERT_EQ(other_scoped->ref_count(), 2);
+            ASSERT_EQ(scoped->ref_count(), 2);
+            ASSERT_EQ(inner->ref_count(), 2);
         }
-        ASSERT_EQ(scoped->RefCnt(), 1);
-        ASSERT_EQ(inner->RefCnt(), 1);
+        ASSERT_EQ(scoped->ref_count(), 1);
+        ASSERT_EQ(inner->ref_count(), 1);
     }
-    ASSERT_EQ(inner->RefCnt(), 0);
+    ASSERT_EQ(inner->ref_count(), 0);
 }
 
 TEST_F(SnapshotTest, ResourceHoldersTest) {
     ID_TYPE collection_id = 1;
     auto collection = CollectionsHolder::GetInstance().GetResource(collection_id, false);
-    auto prev_cnt = collection->RefCnt();
+    auto prev_cnt = collection->ref_count();
     {
         auto collection_2 = CollectionsHolder::GetInstance().GetResource(collection_id, false);
         ASSERT_EQ(collection->GetID(), collection_id);
-        ASSERT_EQ(collection->RefCnt(), prev_cnt);
+        ASSERT_EQ(collection->ref_count(), prev_cnt);
     }
 
     {
-        auto collection = CollectionsHolder::GetInstance().GetResource(collection_id, true);
-        ASSERT_EQ(collection->GetID(), collection_id);
-        ASSERT_EQ(collection->RefCnt(), 1+prev_cnt);
+        auto collection_3 = CollectionsHolder::GetInstance().GetResource(collection_id, true);
+        ASSERT_EQ(collection_3->GetID(), collection_id);
+        ASSERT_EQ(collection_3->ref_count(), 1+prev_cnt);
     }
 
     if (prev_cnt == 0) {
-        auto collection = CollectionsHolder::GetInstance().GetResource(collection_id, false);
-        ASSERT_TRUE(!collection);
+        auto collection_4 = CollectionsHolder::GetInstance().GetResource(collection_id, false);
+        ASSERT_TRUE(!collection_4);
     }
 }
 
@@ -211,7 +217,7 @@ TEST_F(SnapshotTest, CreateCollectionOperationTest) {
     IDS_TYPE ids;
     status = Snapshots::GetInstance().GetCollectionIds(ids);
     ASSERT_EQ(ids.size(), 6);
-    ASSERT_EQ(ids[5], latest_ss->GetCollectionId());
+    ASSERT_EQ(ids.back(), latest_ss->GetCollectionId());
 
     OperationContext sd_op_ctx;
     sd_op_ctx.collection = latest_ss->GetCollection();

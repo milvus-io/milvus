@@ -14,9 +14,7 @@
 #include <sstream>
 #include "db/snapshot/Store.h"
 
-namespace milvus {
-namespace engine {
-namespace snapshot {
+namespace milvus::engine::snapshot {
 
 Collection::Collection(const std::string& name, ID_TYPE id, LSN_TYPE lsn, State status, TS_TYPE created_on,
                        TS_TYPE updated_on)
@@ -59,7 +57,7 @@ Field::Field(const std::string& name, NUM_TYPE num, ID_TYPE id, LSN_TYPE lsn, St
       LsnField(lsn),
       StatusField(status),
       CreatedOnField(created_on),
-      UpdatedOnField(updated_on_) {
+      UpdatedOnField(updated_on) {
 }
 
 FieldElement::FieldElement(ID_TYPE collection_id, ID_TYPE field_id, const std::string& name, FTYPE_TYPE ftype,
@@ -181,6 +179,4 @@ SegmentFile::SegmentFile(ID_TYPE partition_id, ID_TYPE segment_id, ID_TYPE field
       UpdatedOnField(updated_on) {
 }
 
-}  // namespace snapshot
-}  // namespace engine
-}  // namespace milvus
+}  // namespace milvus::engine::snapshot

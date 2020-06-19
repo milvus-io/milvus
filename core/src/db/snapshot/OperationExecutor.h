@@ -18,9 +18,7 @@
 #include "Store.h"
 #include "utils/BlockingQueue.h"
 
-namespace milvus {
-namespace engine {
-namespace snapshot {
+namespace milvus::engine::snapshot {
 
 using ThreadPtr = std::shared_ptr<std::thread>;
 using OperationQueue = BlockingQueue<OperationsPtr>;
@@ -36,7 +34,7 @@ class OperationExecutor {
     GetInstance();
 
     Status
-    Submit(OperationsPtr operation, bool sync = true);
+    Submit(const OperationsPtr& operation, bool sync = true);
 
     void
     Start();
@@ -53,15 +51,12 @@ class OperationExecutor {
     ThreadMain();
 
     void
-    Enqueue(OperationsPtr operation);
+    Enqueue(const OperationsPtr& operation);
 
  protected:
-    mutable std::mutex mtx_;
     bool running_ = false;
     std::thread thread_;
     OperationQueue queue_;
 };
 
-}  // namespace snapshot
-}  // namespace engine
-}  // namespace milvus
+}  // namespace milvus::engine::snapshot
