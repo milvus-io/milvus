@@ -648,7 +648,7 @@ Status
 Config::ProcessConfigCli(std::string& result, const std::string& cmd) {
     std::vector<std::string> tokens;
     std::vector<std::string> nodes;
-    server::StringHelpFunctions::SplitStringByDelimeter(cmd, " ", tokens);
+    StringHelpFunctions::SplitStringByDelimeter(cmd, " ", tokens);
     if (tokens[0] == "get_config") {
         if (tokens.size() != 2) {
             return Status(SERVER_UNEXPECTED_ERROR, "Invalid command: " + cmd);
@@ -657,7 +657,7 @@ Config::ProcessConfigCli(std::string& result, const std::string& cmd) {
             GetConfigJsonStr(result);
             return Status::OK();
         } else {
-            server::StringHelpFunctions::SplitStringByDelimeter(tokens[1], CONFIG_NODE_DELIMITER, nodes);
+            StringHelpFunctions::SplitStringByDelimeter(tokens[1], CONFIG_NODE_DELIMITER, nodes);
             if (nodes.size() < 2) {
                 return Status(SERVER_UNEXPECTED_ERROR, "Invalid command: " + cmd);
             } else if (nodes.size() > 2) {
@@ -676,7 +676,7 @@ Config::ProcessConfigCli(std::string& result, const std::string& cmd) {
         if (tokens.size() != 3) {
             return Status(SERVER_UNEXPECTED_ERROR, "Invalid command: " + cmd);
         }
-        server::StringHelpFunctions::SplitStringByDelimeter(tokens[1], CONFIG_NODE_DELIMITER, nodes);
+        StringHelpFunctions::SplitStringByDelimeter(tokens[1], CONFIG_NODE_DELIMITER, nodes);
         if (nodes.size() < 2) {
             return Status(SERVER_UNEXPECTED_ERROR, "Invalid command: " + cmd);
         } else if (nodes.size() > 2) {
@@ -1694,7 +1694,7 @@ Config::GetConfigSequenceStr(const std::string& parent_key, const std::string& c
         if (sequence.empty()) {
             value = default_value;
         } else {
-            server::StringHelpFunctions::MergeStringWithDelimeter(sequence, delim, value);
+            StringHelpFunctions::MergeStringWithDelimeter(sequence, delim, value);
         }
         SetConfigValueInMem(parent_key, child_key, value);
     }
@@ -2026,7 +2026,7 @@ Config::GetGpuResourceConfigSearchResources(std::vector<int64_t>& value) {
     std::string str = GetConfigSequenceStr(CONFIG_GPU_RESOURCE, CONFIG_GPU_RESOURCE_SEARCH_RESOURCES,
                                            CONFIG_GPU_RESOURCE_DELIMITER, CONFIG_GPU_RESOURCE_SEARCH_RESOURCES_DEFAULT);
     std::vector<std::string> res_vec;
-    server::StringHelpFunctions::SplitStringByDelimeter(str, CONFIG_GPU_RESOURCE_DELIMITER, res_vec);
+    StringHelpFunctions::SplitStringByDelimeter(str, CONFIG_GPU_RESOURCE_DELIMITER, res_vec);
     STATUS_CHECK(CheckGpuResourceConfigSearchResources(res_vec));
     value.clear();
     for (std::string& res : res_vec) {
@@ -2048,7 +2048,7 @@ Config::GetGpuResourceConfigBuildIndexResources(std::vector<int64_t>& value) {
         GetConfigSequenceStr(CONFIG_GPU_RESOURCE, CONFIG_GPU_RESOURCE_BUILD_INDEX_RESOURCES,
                              CONFIG_GPU_RESOURCE_DELIMITER, CONFIG_GPU_RESOURCE_BUILD_INDEX_RESOURCES_DEFAULT);
     std::vector<std::string> res_vec;
-    server::StringHelpFunctions::SplitStringByDelimeter(str, CONFIG_GPU_RESOURCE_DELIMITER, res_vec);
+    StringHelpFunctions::SplitStringByDelimeter(str, CONFIG_GPU_RESOURCE_DELIMITER, res_vec);
     STATUS_CHECK(CheckGpuResourceConfigBuildIndexResources(res_vec));
     value.clear();
     for (std::string& res : res_vec) {
@@ -2387,7 +2387,7 @@ Config::SetGpuResourceConfigGpuSearchThreshold(const std::string& value) {
 Status
 Config::SetGpuResourceConfigSearchResources(const std::string& value) {
     std::vector<std::string> res_vec;
-    server::StringHelpFunctions::SplitStringByDelimeter(value, CONFIG_GPU_RESOURCE_DELIMITER, res_vec);
+    StringHelpFunctions::SplitStringByDelimeter(value, CONFIG_GPU_RESOURCE_DELIMITER, res_vec);
     STATUS_CHECK(CheckGpuResourceConfigSearchResources(res_vec));
     STATUS_CHECK(SetConfigValueInMem(CONFIG_GPU_RESOURCE, CONFIG_GPU_RESOURCE_SEARCH_RESOURCES, value));
     return ExecCallBacks(CONFIG_GPU_RESOURCE, CONFIG_GPU_RESOURCE_SEARCH_RESOURCES, value);
@@ -2396,7 +2396,7 @@ Config::SetGpuResourceConfigSearchResources(const std::string& value) {
 Status
 Config::SetGpuResourceConfigBuildIndexResources(const std::string& value) {
     std::vector<std::string> res_vec;
-    server::StringHelpFunctions::SplitStringByDelimeter(value, CONFIG_GPU_RESOURCE_DELIMITER, res_vec);
+    StringHelpFunctions::SplitStringByDelimeter(value, CONFIG_GPU_RESOURCE_DELIMITER, res_vec);
     STATUS_CHECK(CheckGpuResourceConfigBuildIndexResources(res_vec));
     STATUS_CHECK(SetConfigValueInMem(CONFIG_GPU_RESOURCE, CONFIG_GPU_RESOURCE_BUILD_INDEX_RESOURCES, value));
     return ExecCallBacks(CONFIG_GPU_RESOURCE, CONFIG_GPU_RESOURCE_BUILD_INDEX_RESOURCES, value);

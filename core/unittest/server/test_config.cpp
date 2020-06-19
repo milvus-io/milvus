@@ -323,7 +323,7 @@ TEST_F(ConfigTest, SERVER_CONFIG_VALID_TEST) {
     std::vector<std::string> search_resources = {"gpu0"};
     std::vector<int64_t> search_res_vec;
     std::string search_res_str;
-    milvus::server::StringHelpFunctions::MergeStringWithDelimeter(
+    milvus::StringHelpFunctions::MergeStringWithDelimeter(
         search_resources, milvus::server::CONFIG_GPU_RESOURCE_DELIMITER, search_res_str);
     ASSERT_TRUE(config.SetGpuResourceConfigSearchResources(search_res_str).ok());
     ASSERT_TRUE(config.GetGpuResourceConfigSearchResources(search_res_vec).ok());
@@ -334,7 +334,7 @@ TEST_F(ConfigTest, SERVER_CONFIG_VALID_TEST) {
     std::vector<std::string> build_index_resources = {"gpu0"};
     std::vector<int64_t> build_index_res_vec;
     std::string build_index_res_str;
-    milvus::server::StringHelpFunctions::MergeStringWithDelimeter(
+    milvus::StringHelpFunctions::MergeStringWithDelimeter(
         build_index_resources, milvus::server::CONFIG_GPU_RESOURCE_DELIMITER, build_index_res_str);
     ASSERT_TRUE(config.SetGpuResourceConfigBuildIndexResources(build_index_res_str).ok());
     ASSERT_TRUE(config.GetGpuResourceConfigBuildIndexResources(build_index_res_vec).ok());
