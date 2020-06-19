@@ -492,8 +492,8 @@ TEST_F(SearchByIdTest, BINARY_TEST) {
         ASSERT_TRUE(stat.ok());
         ASSERT_EQ(vectors.size(), ids_to_search.size());
 
-        stat = db_->Query(dummy_context_, collection_info.collection_id_, tags, topk, json_params, vectors[0], result_ids,
-                          result_distances);
+        stat = db_->Query(dummy_context_, collection_info.collection_id_, tags,
+			topk, json_params, vectors[0], result_ids, result_distances);
         ASSERT_TRUE(stat.ok());
         ASSERT_EQ(result_ids[0], id);
         ASSERT_LT(result_distances[0], 1e-4);

@@ -308,7 +308,7 @@ MemTable::ApplyDeletes() {
         }
 
         ENGINE_LOG_DEBUG << "Finding " << ids_to_check.size() << " uids in " << uids.size() << " uids took "
-                          << find_diff.count() << " s in total";
+                         << find_diff.count() << " s in total";
         ENGINE_LOG_DEBUG << "Setting deleted docs and bloom filter took " << set_diff.count() << " s in total";
 
         rec.RecordSection("Find uids and set deleted docs and bloom filter");

@@ -1248,8 +1248,8 @@ DBImpl::Size(uint64_t& result) {
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 Status
 DBImpl::QueryAsync(const std::shared_ptr<server::Context>& context, meta::FilesHolder& files_holder, uint64_t k,
-           const milvus::json& extra_params, const VectorsData& vectors, ResultIds& result_ids,
-           ResultDistances& result_distances) {
+                   const milvus::json& extra_params, const VectorsData& vectors, ResultIds& result_ids,
+                   ResultDistances& result_distances) {
     milvus::server::ContextChild tracer(context, "Query Async");
     server::CollectQueryMetrics metrics(vectors.vector_count_);
 
@@ -1463,7 +1463,7 @@ DBImpl::MergeFiles(const std::string& collection_id, meta::FilesHolder& files_ho
         collection_file.file_type_ = meta::SegmentSchema::TO_DELETE;
         status = meta_ptr_->UpdateCollectionFile(collection_file);
         ENGINE_LOG_DEBUG << "Failed to update file to index, mark file: " << collection_file.file_id_
-                          << " to to_delete";
+                         << " to to_delete";
 
         return status;
     }
@@ -1473,8 +1473,8 @@ DBImpl::MergeFiles(const std::string& collection_id, meta::FilesHolder& files_ho
     // else set file type to RAW, no need to build index
     if (!utils::IsRawIndexType(collection_file.engine_type_)) {
         collection_file.file_type_ = (segment_writer_ptr->Size() >= collection_file.index_file_size_)
-                                     ? meta::SegmentSchema::TO_INDEX
-                                     : meta::SegmentSchema::RAW;
+                                         ? meta::SegmentSchema::TO_INDEX
+                                         : meta::SegmentSchema::RAW;
     } else {
         collection_file.file_type_ = meta::SegmentSchema::RAW;
     }
@@ -1483,7 +1483,7 @@ DBImpl::MergeFiles(const std::string& collection_id, meta::FilesHolder& files_ho
     updated.push_back(collection_file);
     status = meta_ptr_->UpdateCollectionFiles(updated);
     ENGINE_LOG_DEBUG << "New merged segment " << collection_file.segment_id_ << " of size "
-                      << segment_writer_ptr->Size() << " bytes";
+                     << segment_writer_ptr->Size() << " bytes";
 
     if (options_.insert_cache_immediately_) {
         segment_writer_ptr->Cache();
@@ -1779,7 +1779,7 @@ DBImpl::WaitCollectionIndexRecursively(const std::string& collection_id, const C
 
         while (!files_holder.HoldFiles().empty()) {
             ENGINE_LOG_DEBUG << files_holder.HoldFiles().size() << " non-index files detected! Will build index "
-                              << times;
+                             << times;
             if (!utils::IsRawIndexType(index.engine_type_)) {
                 status = meta_ptr_->UpdateCollectionFilesToIndex(collection_id);
             }

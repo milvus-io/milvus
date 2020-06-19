@@ -112,7 +112,8 @@ class SqliteMetaImpl : public Meta {
     FilesToIndex(FilesHolder& files_holder) override;
 
     Status
-    FilesByType(const std::string& collection_id, const std::vector<int>& file_types, FilesHolder& files_holder) override;
+    FilesByType(const std::string& collection_id, const std::vector<int>& file_types,
+                FilesHolder& files_holder) override;
 
     Status
     FilesByID(const std::vector<size_t>& ids, FilesHolder& files_holder) override;

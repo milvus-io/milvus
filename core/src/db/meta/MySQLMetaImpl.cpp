@@ -146,43 +146,43 @@ class MetaSchema {
 
 // Environment schema
 static const MetaSchema ENVIRONMENT_SCHEMA(META_ENVIRONMENT, {
-    MetaField("global_lsn", "BIGINT", "NOT NULL"),
-});
+                                                                 MetaField("global_lsn", "BIGINT", "NOT NULL"),
+                                                             });
 
 // Tables schema
 static const MetaSchema TABLES_SCHEMA(META_TABLES, {
-    MetaField("id", "BIGINT", "PRIMARY KEY AUTO_INCREMENT"),
-    MetaField("table_id", "VARCHAR(255)", "UNIQUE NOT NULL"),
-    MetaField("state", "INT", "NOT NULL"),
-    MetaField("dimension", "SMALLINT", "NOT NULL"),
-    MetaField("created_on", "BIGINT", "NOT NULL"),
-    MetaField("flag", "BIGINT", "DEFAULT 0 NOT NULL"),
-    MetaField("index_file_size", "BIGINT", "DEFAULT 1024 NOT NULL"),
-    MetaField("engine_type", "INT", "DEFAULT 1 NOT NULL"),
-    MetaField("index_params", "VARCHAR(512)", "NOT NULL"),
-    MetaField("metric_type", "INT", "DEFAULT 1 NOT NULL"),
-    MetaField("owner_table", "VARCHAR(255)", "NOT NULL"),
-    MetaField("partition_tag", "VARCHAR(255)", "NOT NULL"),
-    MetaField("version", "VARCHAR(64)",
-              std::string("DEFAULT '") + CURRENT_VERSION + "'"),
-    MetaField("flush_lsn", "BIGINT", "DEFAULT 0 NOT NULL"),
-});
+                                                       MetaField("id", "BIGINT", "PRIMARY KEY AUTO_INCREMENT"),
+                                                       MetaField("table_id", "VARCHAR(255)", "UNIQUE NOT NULL"),
+                                                       MetaField("state", "INT", "NOT NULL"),
+                                                       MetaField("dimension", "SMALLINT", "NOT NULL"),
+                                                       MetaField("created_on", "BIGINT", "NOT NULL"),
+                                                       MetaField("flag", "BIGINT", "DEFAULT 0 NOT NULL"),
+                                                       MetaField("index_file_size", "BIGINT", "DEFAULT 1024 NOT NULL"),
+                                                       MetaField("engine_type", "INT", "DEFAULT 1 NOT NULL"),
+                                                       MetaField("index_params", "VARCHAR(512)", "NOT NULL"),
+                                                       MetaField("metric_type", "INT", "DEFAULT 1 NOT NULL"),
+                                                       MetaField("owner_table", "VARCHAR(255)", "NOT NULL"),
+                                                       MetaField("partition_tag", "VARCHAR(255)", "NOT NULL"),
+                                                       MetaField("version", "VARCHAR(64)",
+                                                                 std::string("DEFAULT '") + CURRENT_VERSION + "'"),
+                                                       MetaField("flush_lsn", "BIGINT", "DEFAULT 0 NOT NULL"),
+                                                   });
 
 // TableFiles schema
 static const MetaSchema TABLEFILES_SCHEMA(META_TABLEFILES, {
-    MetaField("id", "BIGINT", "PRIMARY KEY AUTO_INCREMENT"),
-    MetaField("table_id", "VARCHAR(255)", "NOT NULL"),
-    MetaField("segment_id", "VARCHAR(255)", "NOT NULL"),
-    MetaField("engine_type", "INT", "DEFAULT 1 NOT NULL"),
-    MetaField("file_id", "VARCHAR(255)", "NOT NULL"),
-    MetaField("file_type", "INT", "DEFAULT 0 NOT NULL"),
-    MetaField("file_size", "BIGINT", "DEFAULT 0 NOT NULL"),
-    MetaField("row_count", "BIGINT", "DEFAULT 0 NOT NULL"),
-    MetaField("updated_time", "BIGINT", "NOT NULL"),
-    MetaField("created_on", "BIGINT", "NOT NULL"),
-    MetaField("date", "INT", "DEFAULT -1 NOT NULL"),
-    MetaField("flush_lsn", "BIGINT", "DEFAULT 0 NOT NULL"),
-});
+                                                               MetaField("id", "BIGINT", "PRIMARY KEY AUTO_INCREMENT"),
+                                                               MetaField("table_id", "VARCHAR(255)", "NOT NULL"),
+                                                               MetaField("segment_id", "VARCHAR(255)", "NOT NULL"),
+                                                               MetaField("engine_type", "INT", "DEFAULT 1 NOT NULL"),
+                                                               MetaField("file_id", "VARCHAR(255)", "NOT NULL"),
+                                                               MetaField("file_type", "INT", "DEFAULT 0 NOT NULL"),
+                                                               MetaField("file_size", "BIGINT", "DEFAULT 0 NOT NULL"),
+                                                               MetaField("row_count", "BIGINT", "DEFAULT 0 NOT NULL"),
+                                                               MetaField("updated_time", "BIGINT", "NOT NULL"),
+                                                               MetaField("created_on", "BIGINT", "NOT NULL"),
+                                                               MetaField("date", "INT", "DEFAULT -1 NOT NULL"),
+                                                               MetaField("flush_lsn", "BIGINT", "DEFAULT 0 NOT NULL"),
+                                                           });
 
 }  // namespace
 
@@ -1114,7 +1114,7 @@ MySQLMetaImpl::UpdateCollectionFile(SegmentSchema& file_schema) {
 
             if (!statement.exec()) {
                 ENGINE_LOG_DEBUG << "collection_id= " << file_schema.collection_id_
-                                  << " file_id=" << file_schema.file_id_;
+                                 << " file_id=" << file_schema.file_id_;
                 return HandleException("Failed to update collection file", statement.error());
             }
         }  // Scoped Connection
@@ -2222,7 +2222,7 @@ MySQLMetaImpl::CleanUpFilesWithTTL(uint64_t seconds /*, CleanUpFilter* filter*/)
                 // check if the file can be deleted
                 if (!FilesHolder::CanBeDeleted(collection_file)) {
                     ENGINE_LOG_DEBUG << "File:" << collection_file.file_id_
-                                      << " currently is in use, not able to delete now";
+                                     << " currently is in use, not able to delete now";
                     continue;  // ignore this file, don't delete it
                 }
 
@@ -2235,7 +2235,7 @@ MySQLMetaImpl::CleanUpFilesWithTTL(uint64_t seconds /*, CleanUpFilter* filter*/)
                     // delete file from disk storage
                     utils::DeleteCollectionFilePath(options_, collection_file);
                     ENGINE_LOG_DEBUG << "Remove file id:" << collection_file.id_
-                                      << " location:" << collection_file.location_;
+                                     << " location:" << collection_file.location_;
 
                     delete_ids.emplace_back(std::to_string(collection_file.id_));
                     collection_ids.insert(collection_file.collection_id_);
@@ -2536,7 +2536,7 @@ MySQLMetaImpl::DiscardFiles(int64_t to_discard_size) {
                 collection_file.file_size_ = resRow["file_size"];
                 idsToDiscardSS << "id = " << std::to_string(collection_file.id_) << " OR ";
                 ENGINE_LOG_DEBUG << "Discard file id=" << collection_file.file_id_
-                                  << " file size=" << collection_file.file_size_;
+                                 << " file size=" << collection_file.file_size_;
                 to_discard_size -= collection_file.file_size_;
             }
 
