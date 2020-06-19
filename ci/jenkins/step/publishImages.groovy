@@ -39,8 +39,7 @@ boolean deleteImages(String imageName, boolean force) {
     if (isExistImage == 0) {
         def deleteImageStatus = 0
         if (force) {
-            def imageID = sh(returnStdout: true, script: "docker inspect --type=image --format \"{{.ID}}\" ${imageNameStr}")
-            deleteImageStatus = sh(returnStatus: true, script: "docker rmi -f ${imageID}")
+            deleteImageStatus = sh(returnStatus: true, script: "docker rmi -f \$(docker inspect --type=image --format \"{{.ID}}\" ${imageNameStr})")
         } else {
             deleteImageStatus = sh(returnStatus: true, script: "docker rmi ${imageNameStr}")
         }
