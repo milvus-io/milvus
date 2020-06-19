@@ -2,6 +2,16 @@
 
 Please mark all change in change log and use the issue from GitHub
 
+# Milvus 0.8.1 (TBD)
+
+## Bug
+
+## Feature
+
+## Improvement
+
+## Task
+
 # Milvus 0.8.0 (2020-04-15)
 
 ## Bug
