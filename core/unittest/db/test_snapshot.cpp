@@ -830,7 +830,7 @@ TEST_F(SnapshotTest, CompoundTest1) {
             context.lsn = next_lsn();
             auto op = std::make_shared<NewSegmentOperation>(context, latest_ss);
             SegmentPtr new_seg;
-            status = op->CommitNewSegment(new_seg);
+            auto status = op->CommitNewSegment(new_seg);
             if (!status.ok()) {
                 std::cout << status.ToString() << std::endl;
             }
@@ -1112,8 +1112,12 @@ TEST_F(SnapshotTest, CompoundTest2) {
         for (auto& id : seg_ids) {
             auto seg = latest_ss->GetResource<Segment>(id);
             if (!seg) {
-                std::cout << "Error seg=" << id << std::endl;
-                ASSERT_TRUE(seg);
+                std::cout << "Stale seg=" << id << std::endl;
+                std::unique_lock<std::mutex> lock(partition_mtx);
+                std::cout << ((stale_partitions.find(p_id) != stale_partitions.end()) ? " due stale partition"
+                        : " unexpected") << std::endl;
+                ASSERT_TRUE(stale_partitions.find(p_id) != stale_partitions.end());
+                return;
             }
             if (!partition) {
                 partition = latest_ss->GetResource<Partition>(seg->GetPartitionId());
@@ -1203,7 +1207,7 @@ TEST_F(SnapshotTest, CompoundTest2) {
             context.lsn = next_lsn();
             auto op = std::make_shared<NewSegmentOperation>(context, latest_ss);
             SegmentPtr new_seg;
-            status = op->CommitNewSegment(new_seg);
+            auto status = op->CommitNewSegment(new_seg);
             if (!status.ok()) {
                 std::cout << status.ToString() << std::endl;
                 std::unique_lock<std::mutex> lock(partition_mtx);
@@ -1220,8 +1224,13 @@ TEST_F(SnapshotTest, CompoundTest2) {
             }
             status = op->Push();
             if (!status.ok()) {
-                std::cout << status.ToString() << std::endl;
                 std::unique_lock<std::mutex> lock(partition_mtx);
+                /* if (stale_partitions.find(partition_id) == stale_partitions.end()) { */
+                /*     for (auto p : stale_partitions) { */
+                /*         std::cout << "stale p: " << p << std::endl; */
+                /*     } */
+                /*     ASSERT_TRUE(false); */
+                /* } */
                 ASSERT_TRUE(stale_partitions.find(partition_id) != stale_partitions.end());
                 return;
             }
@@ -1280,10 +1289,10 @@ TEST_F(SnapshotTest, CompoundTest2) {
         };
 
         for (auto i = 0; i < loop_cnt; ++i) {
-            if (RandomInt(0, 10) > 6) {
+            if (RandomInt(0, 10) > 5) {
                 create_partition();
             }
-            if (RandomInt(0, 10) > 8) {
+            if (RandomInt(0, 10) > 7) {
                 drop_partition();
             }
             create_new_segment();
