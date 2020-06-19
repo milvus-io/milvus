@@ -11,9 +11,11 @@
 
 FROM ubuntu:18.04
 
-ENV DEBIAN_FRONTEND noninteractive
-
+# pipefail is enabled for proper error detection in the `wget | apt-key add`
+# step
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
+
+ENV DEBIAN_FRONTEND noninteractive
 
 RUN apt-get update && apt-get install -y --no-install-recommends wget ca-certificates gnupg2 && \
     wget -P /tmp https://apt.repos.intel.com/intel-gpg-keys/GPG-PUB-KEY-INTEL-SW-PRODUCTS-2019.PUB && \
