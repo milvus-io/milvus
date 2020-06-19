@@ -39,7 +39,7 @@ using ResWPtr = std::weak_ptr<Resource>;
 class FaissGpuResourceMgr {
  public:
     friend class ResScope;
-    using ResBQ = milvus::server::BlockingQueue<ResPtr>;
+    using ResBQ = BlockingQueue<ResPtr>;
 
  public:
     struct DeviceParams {

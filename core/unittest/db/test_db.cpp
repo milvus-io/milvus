@@ -81,11 +81,11 @@ ConvertTimeRangeToDBDates(const std::string& start_value, const std::string& end
 
     time_t tt_start, tt_end;
     tm tm_start, tm_end;
-    if (!milvus::server::CommonUtil::TimeStrToTime(start_value, tt_start, tm_start)) {
+    if (!milvus::CommonUtil::TimeStrToTime(start_value, tt_start, tm_start)) {
         return;
     }
 
-    if (!milvus::server::CommonUtil::TimeStrToTime(end_value, tt_end, tm_end)) {
+    if (!milvus::CommonUtil::TimeStrToTime(end_value, tt_end, tm_end)) {
         return;
     }
 
@@ -97,7 +97,7 @@ ConvertTimeRangeToDBDates(const std::string& start_value, const std::string& end
     for (int64_t i = 0; i < days; i++) {
         time_t tt_day = tt_start + DAY_SECONDS * i;
         tm tm_day;
-        milvus::server::CommonUtil::ConvertTime(tt_day, tm_day);
+        milvus::CommonUtil::ConvertTime(tt_day, tm_day);
 
         int64_t date = tm_day.tm_year * 10000 + tm_day.tm_mon * 100 + tm_day.tm_mday;  // according to db logic
         dates.push_back(date);
