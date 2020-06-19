@@ -291,7 +291,7 @@ class NameField {
     std::string name_;
 };
 
-class Collection : public DBBaseResource,
+class Collection : public BaseResource,
                    public NameField,
                    public IdField,
                    public LsnField,
@@ -311,7 +311,7 @@ class Collection : public DBBaseResource,
 
 using CollectionPtr = Collection::Ptr;
 
-class SchemaCommit : public DBBaseResource,
+class SchemaCommit : public BaseResource,
                      public CollectionIdField,
                      public MappingsField,
                      public IdField,
@@ -333,7 +333,7 @@ class SchemaCommit : public DBBaseResource,
 
 using SchemaCommitPtr = SchemaCommit::Ptr;
 
-class Field : public DBBaseResource,
+class Field : public BaseResource,
               public NameField,
               public NumField,
               public IdField,
@@ -354,7 +354,7 @@ class Field : public DBBaseResource,
 
 using FieldPtr = Field::Ptr;
 
-class FieldCommit : public DBBaseResource,
+class FieldCommit : public BaseResource,
                     public CollectionIdField,
                     public FieldIdField,
                     public MappingsField,
@@ -377,7 +377,7 @@ class FieldCommit : public DBBaseResource,
 
 using FieldCommitPtr = FieldCommit::Ptr;
 
-class FieldElement : public DBBaseResource,
+class FieldElement : public BaseResource,
                      public CollectionIdField,
                      public FieldIdField,
                      public NameField,
@@ -400,7 +400,7 @@ class FieldElement : public DBBaseResource,
 
 using FieldElementPtr = FieldElement::Ptr;
 
-class CollectionCommit : public DBBaseResource,
+class CollectionCommit : public BaseResource,
                          public CollectionIdField,
                          public SchemaIdField,
                          public MappingsField,
@@ -422,7 +422,7 @@ class CollectionCommit : public DBBaseResource,
 
 using CollectionCommitPtr = CollectionCommit::Ptr;
 
-class Partition : public DBBaseResource,
+class Partition : public BaseResource,
                   public NameField,
                   public CollectionIdField,
                   public IdField,
@@ -443,7 +443,7 @@ class Partition : public DBBaseResource,
 
 using PartitionPtr = Partition::Ptr;
 
-class PartitionCommit : public DBBaseResource,
+class PartitionCommit : public BaseResource,
                         public CollectionIdField,
                         public PartitionIdField,
                         public MappingsField,
@@ -469,7 +469,7 @@ class PartitionCommit : public DBBaseResource,
 
 using PartitionCommitPtr = PartitionCommit::Ptr;
 
-class Segment : public DBBaseResource,
+class Segment : public BaseResource,
                 public PartitionIdField,
                 public NumField,
                 public IdField,
@@ -493,7 +493,7 @@ class Segment : public DBBaseResource,
 
 using SegmentPtr = Segment::Ptr;
 
-class SegmentCommit : public DBBaseResource,
+class SegmentCommit : public BaseResource,
                       public SchemaIdField,
                       public PartitionIdField,
                       public SegmentIdField,
@@ -520,7 +520,7 @@ class SegmentCommit : public DBBaseResource,
 
 using SegmentCommitPtr = SegmentCommit::Ptr;
 
-class SegmentFile : public DBBaseResource,
+class SegmentFile : public BaseResource,
                     public PartitionIdField,
                     public SegmentIdField,
                     public FieldElementIdField,

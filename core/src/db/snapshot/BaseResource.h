@@ -15,7 +15,7 @@
 
 namespace milvus::engine::snapshot {
 
-class DBBaseResource : public ReferenceProxy {
+class BaseResource : public ReferenceProxy {
  public:
     [[nodiscard]] virtual std::string
     ToString() const {
