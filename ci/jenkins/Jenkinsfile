@@ -53,6 +53,12 @@ pipeline {
                         values 'gpu', 'cpu'
                     }
                 }
+                when {
+                    not {
+                        expression {return OS_NAME == "ubuntu18.04" && !isTimeTriggeredBuild()}
+                    }
+                }
+
                 environment {
                     PACKAGE_VERSION = VersionNumber([
                         versionNumberString : '${SEMVER}-${BINARY_VERSION}-${OS_NAME}-${CPU_ARCH}-${LOWER_BUILD_TYPE}-${BUILD_DATE_FORMATTED, "yyyyMMdd"}-${BUILDS_TODAY}'
