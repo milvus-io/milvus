@@ -173,8 +173,14 @@ constexpr int64_t GB = 1UL << 30;
 constexpr int32_t PORT_NUMBER_MIN = 1024;
 constexpr int32_t PORT_NUMBER_MAX = 65535;
 
-static const std::unordered_map<std::string, std::string> milvus_config_version_map(
-    {{"0.6.0", "0.1"}, {"0.7.0", "0.2"}, {"0.7.1", "0.2"}, {"0.8.0", "0.3"}, {"0.9.0", "0.4"}, {"0.10.0", "0.5"}});
+static const std::unordered_map<std::string, std::string> milvus_config_version_map({{"0.6.0", "0.1"},
+                                                                                     {"0.7.0", "0.2"},
+                                                                                     {"0.7.1", "0.2"},
+                                                                                     {"0.8.0", "0.3"},
+                                                                                     {"0.9.0", "0.4"},
+                                                                                     {"0.9.1", "0.4"},
+                                                                                     {"0.10.0", "0.5"},
+                                                                                     {"0.10.1", "0.5"}});
 
 /////////////////////////////////////////////////////////////
 Config::Config() {

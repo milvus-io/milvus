@@ -2,7 +2,17 @@
 
 Please mark all change in change log and use the issue from GitHub
 
-# Milvus 0.10.0 (TBD)
+# Milvus 0.10.1 (TBD)
+
+## Bug
+
+## Feature
+
+## Improvement
+
+## Task
+
+# Milvus 0.10.0 (2020-06-15)
 
 ## Bug
 -   \#2367 Fix inconsistent reading and writing when using mishards
