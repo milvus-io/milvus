@@ -117,16 +117,16 @@ main(int argc, char* argv[]) {
     }
 
     /* Handle Signal */
-    milvus::server::signal_routine_func = [](int32_t exit_code) {
+    milvus::signal_routine_func = [](int32_t exit_code) {
         milvus::server::Server::GetInstance().Stop();
         exit(exit_code);
     };
-    signal(SIGHUP, milvus::server::HandleSignal);
-    signal(SIGINT, milvus::server::HandleSignal);
-    signal(SIGUSR1, milvus::server::HandleSignal);
-    signal(SIGSEGV, milvus::server::HandleSignal);
-    signal(SIGUSR2, milvus::server::HandleSignal);
-    signal(SIGTERM, milvus::server::HandleSignal);
+    signal(SIGHUP, milvus::HandleSignal);
+    signal(SIGINT, milvus::HandleSignal);
+    signal(SIGUSR1, milvus::HandleSignal);
+    signal(SIGSEGV, milvus::HandleSignal);
+    signal(SIGUSR2, milvus::HandleSignal);
+    signal(SIGTERM, milvus::HandleSignal);
 
     server.Init(start_daemonized, pid_filename, config_filename);
 

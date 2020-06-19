@@ -60,7 +60,7 @@ Status
 CreateCollectionPath(const DBMetaOptions& options, const std::string& collection_id) {
     std::string db_path = options.path_;
     std::string table_path = db_path + TABLES_FOLDER + collection_id;
-    auto status = server::CommonUtil::CreateDirectory(table_path);
+    auto status = CommonUtil::CreateDirectory(table_path);
     if (!status.ok()) {
         LOG_ENGINE_ERROR_ << status.message();
         return status;
@@ -100,7 +100,7 @@ Status
 CreateCollectionFilePath(const DBMetaOptions& options, meta::SegmentSchema& table_file) {
     std::string parent_path = ConstructParentFolder(options.path_, table_file);
 
-    auto status = server::CommonUtil::CreateDirectory(parent_path);
+    auto status = CommonUtil::CreateDirectory(parent_path);
     fiu_do_on("CreateCollectionFilePath.fail_create", status = Status(DB_INVALID_PATH, ""));
     if (!status.ok()) {
         LOG_ENGINE_ERROR_ << status.message();
