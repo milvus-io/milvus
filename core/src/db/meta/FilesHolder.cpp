@@ -80,9 +80,9 @@ void
 FilesHolder::OngoingFileChecker::PrintInfo() {
     std::lock_guard<std::mutex> lck(mutex_);
     if (!ongoing_files_.empty()) {
-        LOG_ENGINE_DEBUG_ << "File reference information:";
+        ENGINE_LOG_DEBUG << "File reference information:";
         for (meta::Table2FileRef::iterator iter = ongoing_files_.begin(); iter != ongoing_files_.end(); ++iter) {
-            LOG_ENGINE_DEBUG_ << "\t" << iter->first << ": " << iter->second.size() << " files in use";
+            ENGINE_LOG_DEBUG << "\t" << iter->first << ": " << iter->second.size() << " files in use";
         }
     }
 }
@@ -107,7 +107,7 @@ FilesHolder::OngoingFileChecker::MarkOngoingFileNoLock(const meta::SegmentSchema
         }
     }
 
-    LOG_ENGINE_DEBUG_ << "Mark ongoing file:" << table_file.file_id_
+    ENGINE_LOG_DEBUG << "Mark ongoing file:" << table_file.file_id_
                       << " refcount:" << ongoing_files_[table_file.collection_id_][table_file.id_];
 
     return Status::OK();
@@ -125,7 +125,7 @@ FilesHolder::OngoingFileChecker::UnmarkOngoingFileNoLock(const meta::SegmentSche
         if (it_file != iter->second.end()) {
             it_file->second--;
 
-            LOG_ENGINE_DEBUG_ << "Unmark ongoing file:" << table_file.file_id_ << " refcount:" << it_file->second;
+            ENGINE_LOG_DEBUG << "Unmark ongoing file:" << table_file.file_id_ << " refcount:" << it_file->second;
 
             if (it_file->second <= 0) {
                 iter->second.erase(table_file.id_);

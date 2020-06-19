@@ -37,7 +37,7 @@ std::string
 GetCollectionName() {
     auto now = std::chrono::system_clock::now();
     auto micros = std::chrono::duration_cast<std::chrono::microseconds>(now.time_since_epoch()).count();
-    static std::string collection_name = std::to_string(micros);
+    std::string collection_name = std::to_string(micros);
     return collection_name;
 }
 
@@ -61,9 +61,22 @@ BuildVectors(uint64_t n, milvus::engine::VectorsData& vectors) {
         for (int j = 0; j < COLLECTION_DIM; j++) data[COLLECTION_DIM * i + j] = drand48();
     }
 }
+
+void
+CheckQueryResult(const std::vector<int64_t>& target_ids, int64_t topk, milvus::engine::ResultIds result_ids,
+                 milvus::engine::ResultDistances result_distances) {
+    ASSERT_EQ(result_ids.size(), target_ids.size() * topk);
+    ASSERT_EQ(result_distances.size(), target_ids.size() * topk);
+
+    for (size_t i = 0; i < target_ids.size(); i++) {
+        ASSERT_EQ(result_ids[topk * i], target_ids[i]);
+        ASSERT_LT(result_distances[topk * i], 1e-3);
+    }
+}
+
 }  // namespace
 
-TEST_F(SearchByIdTest, basic) {
+TEST_F(SearchByIdTest, BASIC_TEST) {
     milvus::engine::meta::CollectionSchema collection_info = BuildCollectionSchema();
     auto stat = db_->CreateCollection(collection_info);
 
@@ -115,7 +128,7 @@ TEST_F(SearchByIdTest, basic) {
     }
 }
 
-TEST_F(SearchByIdTest, with_index) {
+TEST_F(SearchByIdTest, WITH_INDEX_TEST) {
     milvus::engine::meta::CollectionSchema collection_info = BuildCollectionSchema();
     auto stat = db_->CreateCollection(collection_info);
 
@@ -173,7 +186,7 @@ TEST_F(SearchByIdTest, with_index) {
     }
 }
 
-TEST_F(SearchByIdTest, with_delete) {
+TEST_F(SearchByIdTest, WITH_DELETE_TEST) {
     milvus::engine::meta::CollectionSchema collection_info = BuildCollectionSchema();
     auto stat = db_->CreateCollection(collection_info);
 
@@ -234,7 +247,7 @@ TEST_F(SearchByIdTest, with_delete) {
     }
 }
 
-TEST_F(GetVectorByIdTest, basic) {
+TEST_F(GetVectorByIdTest, BASIC_TEST) {
     milvus::engine::meta::CollectionSchema collection_info = BuildCollectionSchema();
     auto stat = db_->CreateCollection(collection_info);
 
@@ -270,28 +283,25 @@ TEST_F(GetVectorByIdTest, basic) {
     stat = db_->Flush();
     ASSERT_TRUE(stat.ok());
 
-    const int topk = 10, nprobe = 10;
+    const int64_t topk = 10, nprobe = 10;
     milvus::json json_params = {{"nprobe", nprobe}};
 
-    for (auto id : ids_to_search) {
-        //        std::cout << "xxxxxxxxxxxxxxxxxxxx " << i << std::endl;
-        std::vector<std::string> tags;
-        milvus::engine::ResultIds result_ids;
-        milvus::engine::ResultDistances result_distances;
+    std::vector<std::string> tags;
+    milvus::engine::ResultIds result_ids;
+    milvus::engine::ResultDistances result_distances;
 
-        milvus::engine::VectorsData vector;
-        stat = db_->GetVectorByID(collection_info.collection_id_, id, vector);
-        ASSERT_TRUE(stat.ok());
+    std::vector<milvus::engine::VectorsData> vectors;
+    stat = db_->GetVectorsByID(collection_info.collection_id_, ids_to_search, vectors);
+    ASSERT_TRUE(stat.ok());
 
-        stat = db_->Query(dummy_context_, collection_info.collection_id_, tags, topk, json_params, vector, result_ids,
-                          result_distances);
-        ASSERT_TRUE(stat.ok());
-        ASSERT_EQ(result_ids[0], id);
-        ASSERT_LT(result_distances[0], 1e-4);
-    }
+    stat = db_->Query(dummy_context_, collection_info.collection_id_, tags, topk, json_params, vectors[0], result_ids,
+                      result_distances);
+    ASSERT_TRUE(stat.ok());
+    ASSERT_EQ(result_ids[0], ids_to_search[0]);
+    ASSERT_LT(result_distances[0], 1e-4);
 }
 
-TEST_F(GetVectorByIdTest, with_index) {
+TEST_F(GetVectorByIdTest, WITH_INDEX_TEST) {
     milvus::engine::meta::CollectionSchema collection_info = BuildCollectionSchema();
     auto stat = db_->CreateCollection(collection_info);
 
@@ -333,27 +343,25 @@ TEST_F(GetVectorByIdTest, with_index) {
     stat = db_->CreateIndex(collection_info.collection_id_, index);
     ASSERT_TRUE(stat.ok());
 
-    const int topk = 10, nprobe = 10;
+    const int64_t topk = 10, nprobe = 10;
     milvus::json json_params = {{"nprobe", nprobe}};
 
-    for (auto id : ids_to_search) {
-        //        std::cout << "xxxxxxxxxxxxxxxxxxxx " << i << std::endl;
-        std::vector<std::string> tags;
-        milvus::engine::ResultIds result_ids;
-        milvus::engine::ResultDistances result_distances;
+    std::vector<std::string> tags;
+    milvus::engine::ResultIds result_ids;
+    milvus::engine::ResultDistances result_distances;
 
-        milvus::engine::VectorsData vector;
-        stat = db_->GetVectorByID(collection_info.collection_id_, id, vector);
-        ASSERT_TRUE(stat.ok());
+    std::vector<milvus::engine::VectorsData> vectors;
+    stat = db_->GetVectorsByID(collection_info.collection_id_, ids_to_search, vectors);
+    ASSERT_TRUE(stat.ok());
 
-        stat = db_->Query(dummy_context_, collection_info.collection_id_, tags, topk, json_params, vector, result_ids,
-                          result_distances);
-        ASSERT_EQ(result_ids[0], id);
-        ASSERT_LT(result_distances[0], 1e-3);
-    }
+    stat = db_->Query(dummy_context_, collection_info.collection_id_, tags, topk, json_params, vectors[0], result_ids,
+                      result_distances);
+    ASSERT_TRUE(stat.ok());
+    ASSERT_EQ(result_ids[0], ids_to_search[0]);
+    ASSERT_LT(result_distances[0], 1e-3);
 }
 
-TEST_F(GetVectorByIdTest, with_delete) {
+TEST_F(GetVectorByIdTest, WITH_DELETE_TEST) {
     milvus::engine::meta::CollectionSchema collection_info = BuildCollectionSchema();
     auto stat = db_->CreateCollection(collection_info);
 
@@ -398,21 +406,19 @@ TEST_F(GetVectorByIdTest, with_delete) {
     stat = db_->Flush();
     ASSERT_TRUE(stat.ok());
 
-    for (auto id : ids_to_search) {
-        //        std::cout << "xxxxxxxxxxxxxxxxxxxx " << i << std::endl;
-        std::vector<std::string> tags;
-        milvus::engine::ResultIds result_ids;
-        milvus::engine::ResultDistances result_distances;
+    std::vector<std::string> tags;
+    milvus::engine::ResultIds result_ids;
+    milvus::engine::ResultDistances result_distances;
 
-        milvus::engine::VectorsData vector;
-        stat = db_->GetVectorByID(collection_info.collection_id_, id, vector);
-        ASSERT_TRUE(stat.ok());
-        ASSERT_TRUE(vector.float_data_.empty());
+    std::vector<milvus::engine::VectorsData> vectors;
+    stat = db_->GetVectorsByID(collection_info.collection_id_, ids_to_search, vectors);
+    ASSERT_TRUE(stat.ok());
+    for (auto& vector : vectors) {
         ASSERT_EQ(vector.vector_count_, 0);
     }
 }
 
-TEST_F(SearchByIdTest, BINARY) {
+TEST_F(SearchByIdTest, BINARY_TEST) {
     milvus::engine::meta::CollectionSchema collection_info;
     collection_info.dimension_ = COLLECTION_DIM;
     collection_info.collection_id_ = GetCollectionName();
@@ -481,12 +487,12 @@ TEST_F(SearchByIdTest, BINARY) {
         milvus::engine::ResultIds result_ids;
         milvus::engine::ResultDistances result_distances;
 
-        milvus::engine::VectorsData vector;
-        stat = db_->GetVectorByID(collection_info.collection_id_, id, vector);
+        std::vector<milvus::engine::VectorsData> vectors;
+        stat = db_->GetVectorsByID(collection_info.collection_id_, ids_to_search, vectors);
         ASSERT_TRUE(stat.ok());
-        ASSERT_EQ(vector.vector_count_, 1);
+        ASSERT_EQ(vectors.size(), ids_to_search.size());
 
-        stat = db_->Query(dummy_context_, collection_info.collection_id_, tags, topk, json_params, vector, result_ids,
+        stat = db_->Query(dummy_context_, collection_info.collection_id_, tags, topk, json_params, vectors[0], result_ids,
                           result_distances);
         ASSERT_TRUE(stat.ok());
         ASSERT_EQ(result_ids[0], id);
