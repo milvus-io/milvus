@@ -20,7 +20,7 @@ Please mark all changes in change log and use the issue from GitHub
 -   \#2543 Remove secondary_path related code
 -   \#2544 Optimize unittest build
 -   \#2561 Clean util dependencies with other modules
--   \#2612 Move all APIs in utils into namespace milvus
+-   \#2612 Move all APIs in utils into namespace milvus 
 
 ## Task
 
