@@ -108,7 +108,7 @@ class LoadOperation<Collection> : public Operations {
         : Operations(OperationContext(), ScopedSnapshotT(), OperationsType::O_Leaf), context_(context) {
     }
 
-    Status
+    const Status&
     ApplyToStore(Store& store) override {
         if (done_) {
             Done(store);

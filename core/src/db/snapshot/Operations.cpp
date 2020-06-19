@@ -82,10 +82,11 @@ Operations::operator()(Store& store) {
 
 void
 Operations::SetStatus(const Status& status) {
+    std::unique_lock<std::mutex> lock(finish_mtx_);
     status_ = status;
 }
 
-Status
+const Status&
 Operations::WaitToFinish() {
     std::unique_lock<std::mutex> lock(finish_mtx_);
     finish_cond_.wait(lock, [this] { return done_; });
@@ -182,7 +183,7 @@ Operations::GetSnapshot(ScopedSnapshotT& ss) const {
     return status;
 }
 
-Status
+const Status&
 Operations::ApplyToStore(Store& store) {
     if (GetType() == OperationsType::W_Compound) {
         /* std::cout << ToString() << std::endl; */
