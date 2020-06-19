@@ -1,7 +1,7 @@
 #!/usr/bin/env groovy
 
 String cron_timezone = "TZ=Asia/Shanghai"
-String cron_string = BRANCH_NAME == "master" ? "H 0 * * * " : ""
+String cron_string = BRANCH_NAME == "0.8.1" ? "H 0 * * * " : ""
 
 pipeline {
     agent none
@@ -53,6 +53,12 @@ pipeline {
                         values 'gpu', 'cpu'
                     }
                 }
+                when {
+                    not {
+                        expression {return OS_NAME == "ubuntu18.04" && !isTimeTriggeredBuild()}
+                    }
+                }
+
                 environment {
                     PACKAGE_VERSION = VersionNumber([
                         versionNumberString : '${SEMVER}-${BINARY_VERSION}-${OS_NAME}-${CPU_ARCH}-${LOWER_BUILD_TYPE}-${BUILD_DATE_FORMATTED, "yyyyMMdd"}-${BUILDS_TODAY}'
