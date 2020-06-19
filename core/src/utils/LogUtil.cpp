@@ -193,11 +193,10 @@ InitLog(bool trace_enable, bool debug_enable, bool info_enable, bool warning_ena
               max_log_file_size = server::CONFIG_LOGS_MAX_LOG_FILE_SIZE_MIN - 1);
     if (max_log_file_size < server::CONFIG_LOGS_MAX_LOG_FILE_SIZE_MIN ||
         max_log_file_size > server::CONFIG_LOGS_MAX_LOG_FILE_SIZE_MAX) {
-        return Status(SERVER_UNEXPECTED_ERROR,
-                      "max_log_file_size must in range[" +
-                      std::to_string(server::CONFIG_LOGS_MAX_LOG_FILE_SIZE_MIN) + ", " +
-                      std::to_string(server::CONFIG_LOGS_MAX_LOG_FILE_SIZE_MAX) + "], now is " +
-                      std::to_string(max_log_file_size));
+        return Status(SERVER_UNEXPECTED_ERROR, "max_log_file_size must in range[" +
+                                                   std::to_string(server::CONFIG_LOGS_MAX_LOG_FILE_SIZE_MIN) + ", " +
+                                                   std::to_string(server::CONFIG_LOGS_MAX_LOG_FILE_SIZE_MAX) +
+                                                   "], now is " + std::to_string(max_log_file_size));
     }
     defaultConf.setGlobally(el::ConfigurationType::MaxLogFileSize, std::to_string(max_log_file_size));
     el::Loggers::addFlag(el::LoggingFlag::StrictLogFileSizeCheck);
@@ -210,11 +209,10 @@ InitLog(bool trace_enable, bool debug_enable, bool info_enable, bool warning_ena
                   delete_exceeds = server::CONFIG_LOGS_LOG_ROTATE_NUM_MIN - 1);
         if (delete_exceeds < server::CONFIG_LOGS_LOG_ROTATE_NUM_MIN ||
             delete_exceeds > server::CONFIG_LOGS_LOG_ROTATE_NUM_MAX) {
-            return Status(SERVER_UNEXPECTED_ERROR,
-                          "delete_exceeds must in range[" +
-                          std::to_string(server::CONFIG_LOGS_LOG_ROTATE_NUM_MIN) + ", " +
-                          std::to_string(server::CONFIG_LOGS_LOG_ROTATE_NUM_MAX) + "], now is " +
-                          std::to_string(delete_exceeds));
+            return Status(SERVER_UNEXPECTED_ERROR, "delete_exceeds must in range[" +
+                                                       std::to_string(server::CONFIG_LOGS_LOG_ROTATE_NUM_MIN) + ", " +
+                                                       std::to_string(server::CONFIG_LOGS_LOG_ROTATE_NUM_MAX) +
+                                                       "], now is " + std::to_string(delete_exceeds));
         }
         enable_log_delete = true;
         logs_delete_exceeds = delete_exceeds;

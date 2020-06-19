@@ -17,4 +17,4 @@ namespace milvus {
 
 using json = nlohmann::json;
 
-} // namespace milvus
+}  // namespace milvus
