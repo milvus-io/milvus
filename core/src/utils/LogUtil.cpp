@@ -119,7 +119,6 @@ RolloutHandler(const char* filename, std::size_t size, el::Level level) {
     }
 }
 
-
 Status
 InitLog(const std::string& log_config_file) {
     el::Configurations conf(log_config_file);
