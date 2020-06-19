@@ -34,25 +34,55 @@ class BlockingQueue {
     operator=(const BlockingQueue& rhs) = delete;
 
     void
-    Put(const T& task);
+    Put(const T& task) {
+        std::unique_lock<std::mutex> lock(mtx);
+        full_.wait(lock, [this] { return (queue_.size() < capacity_); });
+        queue_.push(task);
+        empty_.notify_all();
+    }
 
     T
-    Take();
+    Take() {
+        std::unique_lock<std::mutex> lock(mtx);
+        empty_.wait(lock, [this] { return !queue_.empty(); });
+        T front(queue_.front());
+        queue_.pop();
+        full_.notify_all();
+        return front;
+    }
 
     T
-    Front();
+    Front() {
+        std::unique_lock<std::mutex> lock(mtx);
+        empty_.wait(lock, [this] { return !queue_.empty(); });
+        T front(queue_.front());
+        return front;
+    }
 
     T
-    Back();
+    Back() {
+        std::unique_lock<std::mutex> lock(mtx);
+        empty_.wait(lock, [this] { return !queue_.empty(); });
+        T back(queue_.back());
+        return back;
+    }
 
     size_t
-    Size();
+    Size() {
+        std::lock_guard<std::mutex> lock(mtx);
+        return queue_.size();
+    }
 
     bool
-    Empty();
+    Empty() {
+        std::unique_lock<std::mutex> lock(mtx);
+        return queue_.empty();
+    }
 
     void
-    SetCapacity(const size_t capacity);
+    SetCapacity(const size_t capacity) {
+        capacity_ = (capacity > 0 ? capacity : capacity_);
+    }
 
  protected:
     mutable std::mutex mtx;
@@ -63,5 +93,3 @@ class BlockingQueue {
 };
 
 }  // namespace milvus
-
-#include "./BlockingQueue.inl"
