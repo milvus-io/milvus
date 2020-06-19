@@ -22,7 +22,7 @@ class BaseResource : public ReferenceProxy {
         return std::string();
     }
 
-    ~DBBaseResource() override = default;
+    ~BaseResource() override = default;
 };
 
 }  // namespace milvus::engine::snapshot
