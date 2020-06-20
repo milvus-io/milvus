@@ -24,12 +24,12 @@ services:
           - "mysql"
 
   ubuntu-core:
-    image: ${REPO}:${ARCH}-ubuntu-${UBUNTU}-core
+    image: ${REPO}:${ARCH}-ubuntu-${UBUNTU}-0.8.1-core
     build:
       context: .
       dockerfile: ci/docker/ubuntu-${UBUNTU}-core.dockerfile
       cache_from:
-        - ${REPO}:${ARCH}-ubuntu-${UBUNTU}-core
+        - ${REPO}:${ARCH}-ubuntu-${UBUNTU}-0.8.1-core
     shm_size: 2G
     environment:
       <<: *ccache
@@ -44,12 +44,12 @@ services:
         /milvus/ci/scripts/coverage.sh"]
 
   centos-core:
-    image: ${REPO}:${ARCH}-centos-${CENTOS}-core
+    image: ${REPO}:${ARCH}-centos-${CENTOS}-0.8.1-core
     build:
       context: .
       dockerfile: ci/docker/centos-${CENTOS}-core.dockerfile
       cache_from:
-        - ${REPO}:${ARCH}-centos-${CENTOS}-core
+        - ${REPO}:${ARCH}-centos-${CENTOS}-0.8.1-core
     shm_size: 2G
     environment:
       <<: *ccache
