@@ -70,14 +70,15 @@ class GarbageCollector {
                 break;
             }
             std::cout << std::this_thread::get_id() << " Dequeue Resource " << res->ToString() << std::endl;
-            //Store::GetInstance().Apply(*operation);
         }
     }
 
     void
     Enqueue(BaseResourcePtr res) {
-        //std::cout << std::this_thread::get_id() << " Enqueue Resource " << res->ToString() << std::endl;
         queue_.Put(res);
+        if (res != nullptr) {
+            std::cout << std::this_thread::get_id() << " Enqueue Resource " << res->ToString() << std::endl;
+        }
     }
 
  private:
