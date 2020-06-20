@@ -615,7 +615,7 @@ TEST_F(MetaTest, COLLECTION_FILES_TEST) {
     status = impl_->FilesToIndex(files_holder);
     ASSERT_EQ(files_holder.HoldFiles().size(), to_index_files_cnt);
 
-    milvus::engine::meta::SegmentsSchema table_files;
+    files_holder.ReleaseFiles();
     status = impl_->FilesToMerge(collection.collection_id_, files_holder);
     ASSERT_EQ(files_holder.HoldFiles().size(), raw_files_cnt);
 
@@ -632,14 +632,14 @@ TEST_F(MetaTest, COLLECTION_FILES_TEST) {
         ids.push_back(file.id_);
     }
     size_t cnt = files_holder.HoldFiles().size();
-    table_files.clear();
+    files_holder.ReleaseFiles();
     status = impl_->FilesByID(ids, files_holder);
     ASSERT_EQ(files_holder.HoldFiles().size(), cnt);
 
     files_holder.ReleaseFiles();
     ids = {9999999999UL};
     status = impl_->FilesByID(ids, files_holder);
-    ASSERT_EQ(table_files.size(), 0);
+    ASSERT_EQ(files_holder.HoldFiles().size(), 0);
 
     files_holder.ReleaseFiles();
     std::vector<int> file_types;

@@ -481,31 +481,18 @@ TEST_F(SearchByIdTest, BINARY_TEST) {
     const int topk = 10, nprobe = 10;
     milvus::json json_params = {{"nprobe", nprobe}};
 
-    for (auto id : ids_to_search) {
-        //        std::cout << "xxxxxxxxxxxxxxxxxxxx " << i << std::endl;
-        std::vector<std::string> tags;
-        milvus::engine::ResultIds result_ids;
-        milvus::engine::ResultDistances result_distances;
+    std::vector<std::string> tags;
+    milvus::engine::ResultIds result_ids;
+    milvus::engine::ResultDistances result_distances;
 
-        std::vector<milvus::engine::VectorsData> vectors;
-        stat = db_->GetVectorsByID(collection_info.collection_id_, ids_to_search, vectors);
-        ASSERT_TRUE(stat.ok());
-        ASSERT_EQ(vectors.size(), ids_to_search.size());
+    std::vector<milvus::engine::VectorsData> vectors;
+    stat = db_->GetVectorsByID(collection_info.collection_id_, ids_to_search, vectors);
+    ASSERT_TRUE(stat.ok());
+    ASSERT_EQ(vectors.size(), ids_to_search.size());
 
-        stat = db_->Query(dummy_context_, collection_info.collection_id_, tags,
-			topk, json_params, vectors[0], result_ids, result_distances);
-        ASSERT_TRUE(stat.ok());
-        ASSERT_EQ(result_ids[0], id);
-        ASSERT_LT(result_distances[0], 1e-4);
-
-        tags.clear();
-        result_ids.clear();
-        result_distances.clear();
-
-        stat = db_->QueryByID(dummy_context_, collection_info.collection_id_, tags, topk, json_params, id, result_ids,
-                              result_distances);
-        ASSERT_TRUE(stat.ok());
-        ASSERT_EQ(result_ids[0], id);
-        ASSERT_LT(result_distances[0], 1e-4);
-    }
+    stat = db_->Query(dummy_context_, collection_info.collection_id_, tags, topk, json_params, vectors[0], result_ids,
+                      result_distances);
+    ASSERT_TRUE(stat.ok());
+    ASSERT_EQ(result_ids[0], ids_to_search[0]);
+    ASSERT_LT(result_distances[0], 1e-4);
 }

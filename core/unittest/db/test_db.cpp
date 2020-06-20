@@ -1215,7 +1215,7 @@ TEST_F(DBTest2, GET_VECTOR_BY_ID_TEST) {
 
     db_->Flush(collection_info.collection_id_);
 
-    stat = db_->GetVectorsByID(COLLECTION_NAME, empty_array, vectors);
+    stat = db_->GetVectorsByID(COLLECTION_NAME, qxb.id_array_, vectors);
     ASSERT_TRUE(stat.ok());
     ASSERT_EQ(vectors.size(), qxb.id_array_.size());
     ASSERT_EQ(vectors[0].float_data_.size(), COLLECTION_DIM);

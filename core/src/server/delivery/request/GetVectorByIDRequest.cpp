@@ -76,7 +76,8 @@ GetVectorByIDRequest::OnExecute() {
         }
 
         // step 2: get vector data, now only support get one id
-        return DBWrapper::DB()->GetVectorByID(collection_name_, ids_[0], vectors_);
+        std::vector<engine::VectorsData> vectors = {vectors_};
+        return DBWrapper::DB()->GetVectorsByID(collection_name_, ids_, vectors);
     } catch (std::exception& ex) {
         return Status(SERVER_UNEXPECTED_ERROR, ex.what());
     }
