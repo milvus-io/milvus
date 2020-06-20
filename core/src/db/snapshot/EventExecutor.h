@@ -10,8 +10,10 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
 #pragma once
+
 #include <memory>
 #include <mutex>
+#include <string>
 #include <thread>
 #include "ResourceTypes.h"
 #include "utils/BlockingQueue.h"
@@ -34,9 +36,10 @@ struct Event {
     EventType type;
     EventContext context;
 
-    std::string ToString() {
+    std::string
+    ToString() {
         return context.res_type + "_" + std::to_string(context.id);
-    };
+    }
 };
 
 using EventPtr = std::shared_ptr<Event>;
