@@ -72,18 +72,19 @@ class EventExecutor {
 
     void
     Start() {
-        thread_ptr_ = std::make_shared<std::thread>(&EventExecutor::ThreadMain, this);
+        if (thread_ptr_ == nullptr) {
+            thread_ptr_ = std::make_shared<std::thread>(&EventExecutor::ThreadMain, this);
+        }
     }
 
     void
     Stop() {
-        if (thread_ptr_ == nullptr) {
-            return;
+        if (thread_ptr_ != nullptr) {
+            Enqueue(nullptr);
+            thread_ptr_->join();
+            thread_ptr_ = nullptr;
+            std::cout << "EventExecutor Stopped" << std::endl;
         }
-        Enqueue(nullptr);
-        thread_ptr_->join();
-        thread_ptr_ = nullptr;
-        std::cout << "EventExecutor Stopped" << std::endl;
     }
 
  private:
@@ -92,7 +93,6 @@ class EventExecutor {
         while (true) {
             EventPtr evt = queue_.Take();
             if (evt == nullptr) {
-                std::cout << "Stopping EventExecutor thread " << std::this_thread::get_id() << std::endl;
                 break;
             }
             std::cout << std::this_thread::get_id() << " Dequeue Event " << evt->ToString() << std::endl;

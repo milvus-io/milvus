@@ -54,19 +54,19 @@ class OperationExecutor {
 
     void
     Start() {
-        thread_ptr_ = std::make_shared<std::thread>(&OperationExecutor::ThreadMain, this);
-        /* std::cout << "OperationExecutor Started" << std::endl; */
+        if (thread_ptr_ == nullptr) {
+            thread_ptr_ = std::make_shared<std::thread>(&OperationExecutor::ThreadMain, this);
+        }
     }
 
     void
     Stop() {
-        if (thread_ptr_ == nullptr) {
-            return;
+        if (thread_ptr_ != nullptr) {
+            Enqueue(nullptr);
+            thread_ptr_->join();
+            thread_ptr_ = nullptr;
+            std::cout << "OperationExecutor Stopped" << std::endl;
         }
-        Enqueue(nullptr);
-        thread_ptr_->join();
-        thread_ptr_ = nullptr;
-        std::cout << "OperationExecutor Stopped" << std::endl;
     }
 
  private:
@@ -75,7 +75,6 @@ class OperationExecutor {
         while (true) {
             OperationsPtr operation = queue_.Take();
             if (!operation) {
-                std::cout << "Stopping operation executor thread " << std::this_thread::get_id() << std::endl;
                 break;
             }
             /* std::cout << std::this_thread::get_id() << " Dequeue Operation " << operation->GetID() << std::endl; */
