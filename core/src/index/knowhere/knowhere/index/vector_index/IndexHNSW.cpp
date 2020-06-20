@@ -49,7 +49,7 @@ IndexHNSW::Serialize(const Config& config) {
         std::shared_ptr<uint8_t[]> data(writer.data_);
 
         BinarySet res_set;
-        res_set.Append("HNSW", data, writer.total);
+        res_set.Append("HNSW", data, writer.rp);
         return res_set;
     } catch (std::exception& e) {
         KNOWHERE_THROW_MSG(e.what());
