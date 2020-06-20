@@ -320,6 +320,7 @@ SystemInfo::CPUTemperature() {
                     float temp;
                     fscanf(file, "%f", &temp);
                     result.push_back(temp / 1000);
+                    fclose(file);
                 }
             }
         }

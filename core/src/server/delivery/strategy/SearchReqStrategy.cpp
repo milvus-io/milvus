@@ -48,7 +48,7 @@ SearchReqStrategy::ReScheduleQueue(const BaseRequestPtr& request, std::queue<Bas
             SearchCombineRequestPtr combine_request = std::make_shared<SearchCombineRequest>();
             combine_request->Combine(last_search_req);
             combine_request->Combine(new_search_req);
-            queue.push(combine_request);
+            queue.back() = combine_request;  // replace the last request to combine request
             SERVER_LOG_DEBUG << "Combine 2 search request";
         } else {
             // directly put to queue
