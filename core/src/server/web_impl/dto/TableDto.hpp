@@ -53,7 +53,7 @@ class TableListFieldsDto : public OObject {
     DTO_INIT(TableListFieldsDto, Object)
 
     DTO_FIELD(List<TableFieldsDto::ObjectWrapper>::ObjectWrapper, collections);
-    DTO_FIELD(Int64, count) = 0;
+    DTO_FIELD(Int64, count) = 0L;
 };
 
 #include OATPP_CODEGEN_END(DTO)
