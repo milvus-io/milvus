@@ -11,6 +11,7 @@
 
 #include <cmath>
 #include <limits>
+#include <thread>
 
 #include <fiu-control.h>
 #include <fiu-local.h>
@@ -19,6 +20,7 @@
 
 #include "config/Config.h"
 #include "config/YamlConfigMgr.h"
+#include "config/handler/CacheConfigHandler.h"
 #include "server/utils.h"
 #include "utils/CommonUtil.h"
 #include "utils/StringHelpFunctions.h"
@@ -30,9 +32,41 @@ static constexpr uint64_t KB = 1024;
 static constexpr uint64_t MB = KB * 1024;
 static constexpr uint64_t GB = MB * 1024;
 
+class TestConfigHandler : public milvus::server::CacheConfigHandler {
+ public:
+    TestConfigHandler() {
+        SetIdentity("MemTableFile");
+        AddInsertBufferSizeListener();
+    }
+};
+
 }  // namespace
 
 namespace ms = milvus::server;
+
+TEST_F(ConfigTest, CONFIG_HANDLER_TEST) {
+    auto test_func = [&]() {
+        uint64_t count = 10000, index = 0;
+        while (true) {
+            if (index++ == count) {
+                break;
+            }
+
+            // register callback
+            TestConfigHandler ttt;
+
+            // trigger callback
+            auto& config = milvus::server::Config::GetInstance();
+            config.SetCacheConfigInsertBufferSize("1GB");
+        }
+    };
+
+    using ThreadPtr = std::shared_ptr<std::thread>;
+    ThreadPtr thread_1 = std::make_shared<std::thread>(test_func);
+    ThreadPtr thread_2 = std::make_shared<std::thread>(test_func);
+    thread_1->join();
+    thread_2->join();
+}
 
 TEST_F(ConfigTest, CONFIG_TEST) {
     milvus::server::ConfigMgr* config_mgr = milvus::server::YamlConfigMgr::GetInstance();
@@ -535,7 +569,7 @@ TEST_F(ConfigTest, SERVER_CONFIG_CLI_TEST) {
     std::string engine_gpu_search_threshold = "800";
     get_cmd = gen_get_command(ms::CONFIG_GPU_RESOURCE, ms::CONFIG_GPU_RESOURCE_GPU_SEARCH_THRESHOLD);
     set_cmd = gen_set_command(ms::CONFIG_GPU_RESOURCE, ms::CONFIG_GPU_RESOURCE_GPU_SEARCH_THRESHOLD,
-            engine_gpu_search_threshold);
+                              engine_gpu_search_threshold);
     s = config.ProcessConfigCli(dummy, set_cmd);
     ASSERT_TRUE(s.ok());
     s = config.ProcessConfigCli(result, get_cmd);
@@ -584,7 +618,7 @@ TEST_F(ConfigTest, SERVER_CONFIG_CLI_TEST) {
     std::string build_index_resources = "gpu0";
     get_cmd = gen_get_command(ms::CONFIG_GPU_RESOURCE, ms::CONFIG_GPU_RESOURCE_BUILD_INDEX_RESOURCES);
     set_cmd =
-      gen_set_command(ms::CONFIG_GPU_RESOURCE, ms::CONFIG_GPU_RESOURCE_BUILD_INDEX_RESOURCES, build_index_resources);
+        gen_set_command(ms::CONFIG_GPU_RESOURCE, ms::CONFIG_GPU_RESOURCE_BUILD_INDEX_RESOURCES, build_index_resources);
     s = config.ProcessConfigCli(dummy, set_cmd);
     ASSERT_TRUE(s.ok());
     s = config.ProcessConfigCli(result, get_cmd);
@@ -1255,8 +1289,8 @@ TEST_F(ConfigTest, SERVER_CONFIG_UPDATE_TEST) {
     std::string cmd_set, cmd_get;
 
     auto lambda = [&conf_file](const std::string& key, const std::string& child_key,
-        const std::string& default_value, std::string& value) {
-        auto * ymgr = milvus::server::YamlConfigMgr::GetInstance();
+                               const std::string& default_value, std::string& value) {
+        auto* ymgr = milvus::server::YamlConfigMgr::GetInstance();
         auto status = ymgr->LoadConfigFile(conf_file);
 
         if (status.ok())
@@ -1276,52 +1310,52 @@ TEST_F(ConfigTest, SERVER_CONFIG_UPDATE_TEST) {
     ASSERT_TRUE(config.ProcessConfigCli(reply_set, cmd_set).ok());
 
     ASSERT_TRUE(lambda(ms::CONFIG_CACHE, ms::CONFIG_CACHE_INSERT_BUFFER_SIZE,
-        ms::CONFIG_CACHE_INSERT_BUFFER_SIZE_DEFAULT, yaml_value).ok());
+                       ms::CONFIG_CACHE_INSERT_BUFFER_SIZE_DEFAULT, yaml_value).ok());
     ASSERT_EQ("2", yaml_value);
 
     // test boolean config value
     cmd_set = gen_set_command(ms::CONFIG_METRIC, ms::CONFIG_METRIC_ENABLE_MONITOR, "True");
     ASSERT_TRUE(config.ProcessConfigCli(reply_set, cmd_set).ok());
     ASSERT_TRUE(lambda(ms::CONFIG_METRIC, ms::CONFIG_METRIC_ENABLE_MONITOR,
-        ms::CONFIG_METRIC_ENABLE_MONITOR_DEFAULT, yaml_value).ok());
+                       ms::CONFIG_METRIC_ENABLE_MONITOR_DEFAULT, yaml_value).ok());
     ASSERT_EQ("true", yaml_value);
 
     cmd_set = gen_set_command(ms::CONFIG_METRIC, ms::CONFIG_METRIC_ENABLE_MONITOR, "On");
     ASSERT_TRUE(config.ProcessConfigCli(reply_set, cmd_set).ok());
     ASSERT_TRUE(lambda(ms::CONFIG_METRIC, ms::CONFIG_METRIC_ENABLE_MONITOR,
-        ms::CONFIG_METRIC_ENABLE_MONITOR_DEFAULT, yaml_value).ok());
+                       ms::CONFIG_METRIC_ENABLE_MONITOR_DEFAULT, yaml_value).ok());
     ASSERT_EQ("true", yaml_value);
 
     cmd_set = gen_set_command(ms::CONFIG_METRIC, ms::CONFIG_METRIC_ENABLE_MONITOR, "False");
     ASSERT_TRUE(config.ProcessConfigCli(reply_set, cmd_set).ok());
     ASSERT_TRUE(lambda(ms::CONFIG_METRIC, ms::CONFIG_METRIC_ENABLE_MONITOR,
-        ms::CONFIG_METRIC_ENABLE_MONITOR_DEFAULT, yaml_value).ok());
+                       ms::CONFIG_METRIC_ENABLE_MONITOR_DEFAULT, yaml_value).ok());
     ASSERT_EQ("false", yaml_value);
 
     cmd_set = gen_set_command(ms::CONFIG_METRIC, ms::CONFIG_METRIC_ENABLE_MONITOR, "Off");
     ASSERT_TRUE(config.ProcessConfigCli(reply_set, cmd_set).ok());
     ASSERT_TRUE(lambda(ms::CONFIG_METRIC, ms::CONFIG_METRIC_ENABLE_MONITOR,
-        ms::CONFIG_METRIC_ENABLE_MONITOR_DEFAULT, yaml_value).ok());
+                       ms::CONFIG_METRIC_ENABLE_MONITOR_DEFAULT, yaml_value).ok());
     ASSERT_EQ("false", yaml_value);
 
     // test path
     cmd_set = gen_set_command(ms::CONFIG_STORAGE, ms::CONFIG_STORAGE_PATH, "/tmp/milvus_config_unittest");
     ASSERT_TRUE(config.ProcessConfigCli(reply_set, cmd_set).ok());
     ASSERT_TRUE(lambda(ms::CONFIG_STORAGE, ms::CONFIG_STORAGE_PATH,
-        ms::CONFIG_STORAGE_PATH_DEFAULT, yaml_value).ok());
+                       ms::CONFIG_STORAGE_PATH_DEFAULT, yaml_value).ok());
     ASSERT_EQ("/tmp/milvus_config_unittest", yaml_value);
 
 #ifdef MILVUS_GPU_VERSION
     cmd_set = gen_set_command(ms::CONFIG_GPU_RESOURCE, ms::CONFIG_GPU_RESOURCE_BUILD_INDEX_RESOURCES, "gpu0");
     ASSERT_TRUE(config.ProcessConfigCli(reply_set, cmd_set).ok());
     ASSERT_TRUE(lambda(ms::CONFIG_GPU_RESOURCE, ms::CONFIG_GPU_RESOURCE_BUILD_INDEX_RESOURCES,
-        ms::CONFIG_GPU_RESOURCE_BUILD_INDEX_RESOURCES_DEFAULT, yaml_value).ok());
+                       ms::CONFIG_GPU_RESOURCE_BUILD_INDEX_RESOURCES_DEFAULT, yaml_value).ok());
     ASSERT_EQ("gpu0", yaml_value);
 
     cmd_set = gen_set_command(ms::CONFIG_GPU_RESOURCE, ms::CONFIG_GPU_RESOURCE_BUILD_INDEX_RESOURCES, "GPU0");
     ASSERT_TRUE(config.ProcessConfigCli(reply_set, cmd_set).ok());
     ASSERT_TRUE(lambda(ms::CONFIG_GPU_RESOURCE, ms::CONFIG_GPU_RESOURCE_BUILD_INDEX_RESOURCES,
-        ms::CONFIG_GPU_RESOURCE_BUILD_INDEX_RESOURCES_DEFAULT, yaml_value).ok());
+                       ms::CONFIG_GPU_RESOURCE_BUILD_INDEX_RESOURCES_DEFAULT, yaml_value).ok());
     ASSERT_EQ("gpu0", yaml_value);
 #endif
 }
