@@ -42,7 +42,6 @@ struct Event {
 using EventPtr = std::shared_ptr<Event>;
 using ThreadPtr = std::shared_ptr<std::thread>;
 using EventQueue = BlockingQueue<EventPtr>;
-using EventQueuePtr = std::shared_ptr<EventQueue>;
 
 class EventExecutor {
  public:
@@ -70,13 +69,17 @@ class EventExecutor {
 
     void
     Start() {
-        thread_ = std::thread(&EventExecutor::ThreadMain, this);
+        thread_ptr_ = std::make_shared<std::thread>(&EventExecutor::ThreadMain, this);
     }
 
     void
     Stop() {
+        if (thread_ptr_ == nullptr) {
+            return;
+        }
         Enqueue(nullptr);
-        thread_.join();
+        thread_ptr_->join();
+        thread_ptr_ = nullptr;
         std::cout << "EventExecutor Stopped" << std::endl;
     }
 
@@ -108,7 +111,7 @@ class EventExecutor {
     }
 
  private:
-    std::thread thread_;
+    ThreadPtr thread_ptr_ = nullptr;
     EventQueue queue_;
 };
 

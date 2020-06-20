@@ -22,7 +22,6 @@ namespace milvus::engine::snapshot {
 
 using ThreadPtr = std::shared_ptr<std::thread>;
 using OperationQueue = BlockingQueue<OperationsPtr>;
-using OperationQueuePtr = std::shared_ptr<OperationQueue>;
 
 class OperationExecutor {
  public:
@@ -55,14 +54,18 @@ class OperationExecutor {
 
     void
     Start() {
-        thread_ = std::thread(&OperationExecutor::ThreadMain, this);
+        thread_ptr_ = std::make_shared<std::thread>(&OperationExecutor::ThreadMain, this);
         /* std::cout << "OperationExecutor Started" << std::endl; */
     }
 
     void
     Stop() {
+        if (thread_ptr_ == nullptr) {
+            return;
+        }
         Enqueue(nullptr);
-        thread_.join();
+        thread_ptr_->join();
+        thread_ptr_ = nullptr;
         std::cout << "OperationExecutor Stopped" << std::endl;
     }
 
@@ -87,7 +90,7 @@ class OperationExecutor {
     }
 
  private:
-    std::thread thread_;
+    ThreadPtr thread_ptr_ = nullptr;
     OperationQueue queue_;
 };
 
