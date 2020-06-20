@@ -21,7 +21,7 @@
 #include "db/utils.h"
 #include "db/snapshot/CompoundOperations.h"
 #include "db/snapshot/Context.h"
-#include "db/snapshot/GarbageCollector.h"
+#include "db/snapshot/EventExecutor.h"
 #include "db/snapshot/OperationExecutor.h"
 #include "db/snapshot/ReferenceProxy.h"
 #include "db/snapshot/ResourceHolders.h"
