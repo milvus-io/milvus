@@ -1538,7 +1538,7 @@ DBImpl::BackgroundMerge(std::set<std::string> collection_ids) {
     {
         uint64_t ttl = 10 * meta::SECOND;  // default: file will be hard-deleted few seconds after soft-deleted
         if (options_.mode_ == DBOptions::MODE::CLUSTER_WRITABLE) {
-            ttl = meta::HOUR;
+            ttl = 5 * meta::MINUTE;
         }
 
         meta_ptr_->CleanUpFilesWithTTL(ttl);
