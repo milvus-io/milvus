@@ -631,6 +631,7 @@ Status
 Config::RegisterCallBack(const std::string& node, const std::string& sub_node, const std::string& key,
                          ConfigCallBackF& cb) {
     std::string cb_node = node + "." + sub_node;
+    std::lock_guard<std::mutex> lock(callback_mutex_);
     if (config_callback_.find(cb_node) == config_callback_.end()) {
         return Status(SERVER_UNEXPECTED_ERROR, cb_node + " is not supported changed in mem");
     }
@@ -644,6 +645,7 @@ Config::RegisterCallBack(const std::string& node, const std::string& sub_node, c
 
 Status
 Config::CancelCallBack(const std::string& node, const std::string& sub_node, const std::string& key) {
+    std::lock_guard<std::mutex> lock(callback_mutex_);
     if (config_callback_.empty() || key.empty()) {
         return Status::OK();
     }
@@ -1421,7 +1423,7 @@ Config::GetConfigVersion(std::string& value) {
 Status
 Config::ExecCallBacks(const std::string& node, const std::string& sub_node, const std::string& value) {
     auto status = Status::OK();
-
+    std::lock_guard<std::mutex> lock(callback_mutex_);
     if (config_callback_.empty()) {
         return Status(SERVER_UNEXPECTED_ERROR, "Callback map is empty. Cannot take effect in-service");
     }
