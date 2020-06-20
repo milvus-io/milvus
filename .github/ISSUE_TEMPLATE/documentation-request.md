@@ -7,7 +7,7 @@ assignees: ''
 
 ---
 
-## Report incorrect documentation
+**Please state you issue using the following template and, most importantly, in English.**
 
 **Location of incorrect documentation**
 Provide links and line numbers if applicable.
