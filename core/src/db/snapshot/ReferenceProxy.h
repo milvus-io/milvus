@@ -41,19 +41,16 @@ class ReferenceProxy {
             return;
         }
         if (ref_count_.fetch_sub(1) == 1) {
-            for (auto &cb : on_no_ref_cbs_) {
+            for (auto& cb : on_no_ref_cbs_) {
                 cb();
             }
         }
     }
 
     [[nodiscard]] int64_t
-    ref_count() const {
-        return ref_count_;
-    }
+    ref_count() const { return ref_count_; }
 
-    void
-    ResetCnt() {
+    void ResetCnt() {
         ref_count_ = 0;
     }
 
