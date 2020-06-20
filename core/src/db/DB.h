@@ -105,7 +105,8 @@ class DB {
     Compact(const std::string& collection_id) = 0;
 
     virtual Status
-    GetVectorByID(const std::string& collection_id, const IDNumber& vector_id, VectorsData& vector) = 0;
+    GetVectorsByID(const std::string& collection_id, const IDNumbers& id_array,
+                   std::vector<engine::VectorsData>& vectors) = 0;
 
     virtual Status
     GetVectorIDs(const std::string& collection_id, const std::string& segment_id, IDNumbers& vector_ids) = 0;
