@@ -17,6 +17,7 @@
 #include <mutex>
 #include <string>
 #include <thread>
+#include <utility>
 #include <vector>
 #include "db/Utils.h"
 #include "db/snapshot/BaseResource.h"
@@ -25,14 +26,13 @@
 
 using milvus::engine::utils::GetMicroSecTimeStamp;
 
-namespace milvus {
-namespace engine {
-namespace snapshot {
+namespace milvus::engine::snapshot {
 
 class MappingsField {
  public:
-    explicit MappingsField(const MappingT& mappings = {}) : mappings_(mappings) {
+    explicit MappingsField(MappingT mappings = {}) : mappings_(std::move(mappings)) {
     }
+
     const MappingT&
     GetMappings() const {
         return mappings_;
@@ -50,15 +50,17 @@ class StatusField {
  public:
     explicit StatusField(State status = PENDING) : status_(status) {
     }
+
     State
     GetStatus() const {
         return status_;
     }
 
-    bool
+    [[nodiscard]] bool
     IsActive() const {
         return status_ == ACTIVE;
     }
+
     bool
     IsDeactive() const {
         return status_ == DEACTIVE;
@@ -90,6 +92,7 @@ class LsnField {
  public:
     explicit LsnField(LSN_TYPE lsn = 0) : lsn_(lsn) {
     }
+
     const LSN_TYPE&
     GetLsn() const {
         return lsn_;
@@ -108,6 +111,7 @@ class CreatedOnField {
  public:
     explicit CreatedOnField(TS_TYPE created_on = GetMicroSecTimeStamp()) : created_on_(created_on) {
     }
+
     TS_TYPE
     GetCreatedTime() const {
         return created_on_;
@@ -121,6 +125,7 @@ class UpdatedOnField {
  public:
     explicit UpdatedOnField(TS_TYPE updated_on = GetMicroSecTimeStamp()) : updated_on_(updated_on) {
     }
+
     TS_TYPE
     GetUpdatedTime() const {
         return updated_on_;
@@ -134,6 +139,7 @@ class IdField {
  public:
     explicit IdField(ID_TYPE id) : id_(id) {
     }
+
     ID_TYPE
     GetID() const {
         return id_;
@@ -155,6 +161,7 @@ class CollectionIdField {
  public:
     explicit CollectionIdField(ID_TYPE id) : collection_id_(id) {
     }
+
     ID_TYPE
     GetCollectionId() const {
         return collection_id_;
@@ -168,6 +175,7 @@ class SchemaIdField {
  public:
     explicit SchemaIdField(ID_TYPE id) : schema_id_(id) {
     }
+
     ID_TYPE
     GetSchemaId() const {
         return schema_id_;
@@ -185,6 +193,7 @@ class NumField {
  public:
     explicit NumField(NUM_TYPE num) : num_(num) {
     }
+
     NUM_TYPE
     GetNum() const {
         return num_;
@@ -202,6 +211,7 @@ class FtypeField {
  public:
     explicit FtypeField(FTYPE_TYPE type) : ftype_(type) {
     }
+
     FTYPE_TYPE
     GetFtype() const {
         return ftype_;
@@ -215,6 +225,7 @@ class FieldIdField {
  public:
     explicit FieldIdField(ID_TYPE id) : field_id_(id) {
     }
+
     ID_TYPE
     GetFieldId() const {
         return field_id_;
@@ -228,6 +239,7 @@ class FieldElementIdField {
  public:
     explicit FieldElementIdField(ID_TYPE id) : field_element_id_(id) {
     }
+
     ID_TYPE
     GetFieldElementId() const {
         return field_element_id_;
@@ -241,6 +253,7 @@ class PartitionIdField {
  public:
     explicit PartitionIdField(ID_TYPE id) : partition_id_(id) {
     }
+
     ID_TYPE
     GetPartitionId() const {
         return partition_id_;
@@ -254,6 +267,7 @@ class SegmentIdField {
  public:
     explicit SegmentIdField(ID_TYPE id) : segment_id_(id) {
     }
+
     ID_TYPE
     GetSegmentId() const {
         return segment_id_;
@@ -265,8 +279,9 @@ class SegmentIdField {
 
 class NameField {
  public:
-    explicit NameField(const std::string& name) : name_(name) {
+    explicit NameField(std::string name) : name_(std::move(name)) {
     }
+
     const std::string&
     GetName() const {
         return name_;
@@ -290,8 +305,8 @@ class Collection : public BaseResource,
     using VecT = std::vector<Ptr>;
     static constexpr const char* Name = "Collection";
 
-    Collection(const std::string& name, ID_TYPE id = 0, LSN_TYPE lsn = 0, State status = PENDING,
-               TS_TYPE created_on = GetMicroSecTimeStamp(), TS_TYPE UpdatedOnField = GetMicroSecTimeStamp());
+    explicit Collection(const std::string& name, ID_TYPE id = 0, LSN_TYPE lsn = 0, State status = PENDING,
+                        TS_TYPE created_on = GetMicroSecTimeStamp(), TS_TYPE UpdatedOnField = GetMicroSecTimeStamp());
 };
 
 using CollectionPtr = Collection::Ptr;
@@ -311,9 +326,9 @@ class SchemaCommit : public BaseResource,
     using VecT = std::vector<Ptr>;
     static constexpr const char* Name = "SchemaCommit";
 
-    SchemaCommit(ID_TYPE collection_id, const MappingT& mappings = {}, ID_TYPE id = 0, LSN_TYPE lsn = 0,
-                 State status = PENDING, TS_TYPE created_on = GetMicroSecTimeStamp(),
-                 TS_TYPE UpdatedOnField = GetMicroSecTimeStamp());
+    explicit SchemaCommit(ID_TYPE collection_id, const MappingT& mappings = {}, ID_TYPE id = 0, LSN_TYPE lsn = 0,
+                          State status = PENDING, TS_TYPE created_on = GetMicroSecTimeStamp(),
+                          TS_TYPE UpdatedOnField = GetMicroSecTimeStamp());
 };
 
 using SchemaCommitPtr = SchemaCommit::Ptr;
@@ -448,7 +463,7 @@ class PartitionCommit : public BaseResource,
                     LSN_TYPE lsn = 0, State status = PENDING, TS_TYPE created_on = GetMicroSecTimeStamp(),
                     TS_TYPE UpdatedOnField = GetMicroSecTimeStamp());
 
-    std::string
+    [[nodiscard]] std::string
     ToString() const override;
 };
 
@@ -469,10 +484,10 @@ class Segment : public BaseResource,
     using VecT = std::vector<Ptr>;
     static constexpr const char* Name = "Segment";
 
-    Segment(ID_TYPE partition_id, ID_TYPE num = 0, ID_TYPE id = 0, LSN_TYPE lsn = 0, State status = PENDING,
-            TS_TYPE created_on = GetMicroSecTimeStamp(), TS_TYPE UpdatedOnField = GetMicroSecTimeStamp());
+    explicit Segment(ID_TYPE partition_id, ID_TYPE num = 0, ID_TYPE id = 0, LSN_TYPE lsn = 0, State status = PENDING,
+                     TS_TYPE created_on = GetMicroSecTimeStamp(), TS_TYPE UpdatedOnField = GetMicroSecTimeStamp());
 
-    std::string
+    [[nodiscard]] std::string
     ToString() const override;
 };
 
@@ -499,7 +514,7 @@ class SegmentCommit : public BaseResource,
                   ID_TYPE id = 0, LSN_TYPE lsn = 0, State status = PENDING, TS_TYPE created_on = GetMicroSecTimeStamp(),
                   TS_TYPE UpdatedOnField = GetMicroSecTimeStamp());
 
-    std::string
+    [[nodiscard]] std::string
     ToString() const override;
 };
 
@@ -528,6 +543,4 @@ class SegmentFile : public BaseResource,
 
 using SegmentFilePtr = SegmentFile::Ptr;
 
-}  // namespace snapshot
-}  // namespace engine
-}  // namespace milvus
+}  // namespace milvus::engine::snapshot

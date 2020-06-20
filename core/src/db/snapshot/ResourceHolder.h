@@ -109,7 +109,7 @@ class ResourceHolder {
         std::cout << typeid(*this).name() << " Dump Start [" << tag << "]:" << id_map_.size() << std::endl;
         for (auto& kv : id_map_) {
             /* std::cout << "\t" << kv.second->ToString() << std::endl; */
-            std::cout << "\t" << kv.first << " RefCnt " << kv.second->RefCnt() << std::endl;
+            std::cout << "\t" << kv.first << " RefCnt " << kv.second->ref_count() << std::endl;
         }
         std::cout << typeid(*this).name() << " Dump   End [" << tag << "]" << std::endl;
     }
