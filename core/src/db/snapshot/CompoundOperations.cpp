@@ -66,7 +66,9 @@ Status
 BuildOperation::CheckSegmentStale(ScopedSnapshotT& latest_snapshot, ID_TYPE segment_id) const {
     auto segment = latest_snapshot->GetResource<Segment>(segment_id);
     if (!segment) {
-        return Status(SS_STALE_ERROR, "BuildOperation target segment is stale");
+        std::stringstream emsg;
+        emsg << GetRepr() << ". Target segment " << segment_id << " is stale";
+        return Status(SS_STALE_ERROR, emsg.str());
     }
     return Status::OK();
 }
@@ -79,7 +81,9 @@ BuildOperation::CommitNewSegmentFile(const SegmentFileContext& context, SegmentF
         return status;
     auto segment = GetStartedSS()->GetResource<Segment>(context.segment_id);
     if (!segment) {
-        return Status(SS_INVALID_CONTEX_ERROR, "Invalid segment_id in context");
+        std::stringstream emsg;
+        emsg << GetRepr() << ". Invalid segment " << context.segment_id << " in context";
+        return Status(SS_INVALID_CONTEX_ERROR, emsg.str());
     }
     auto ctx = context;
     ctx.partition_id = segment->GetPartitionId();
@@ -190,7 +194,9 @@ MergeOperation::OnSnapshotStale() {
         auto expect_sc = GetStartedSS()->GetSegmentCommitBySegmentId(stale_seg->GetID());
         auto latest_sc = GetAdjustedSS()->GetSegmentCommitBySegmentId(stale_seg->GetID());
         if (!latest_sc || (latest_sc->GetID() != expect_sc->GetID())) {
-            return Status(SS_STALE_ERROR, "MergeOperation on stale segments");
+            std::stringstream emsg;
+            emsg << GetRepr() << ". Stale segment " << stale_seg->GetID() << " in context";
+            return Status(SS_STALE_ERROR, emsg.str());
         }
     }
     return Status::OK();
@@ -349,8 +355,11 @@ DropPartitionOperation::DoExecute(Store& store) {
     if (!status.ok())
         return status;
     auto p_c = GetAdjustedSS()->GetPartitionCommitByPartitionId(id);
-    if (!p_c)
-        return Status(SS_NOT_FOUND_ERROR, "No partition commit found");
+    if (!p_c) {
+        std::stringstream emsg;
+        emsg << GetRepr() << ". PartitionCommit " << id << " not found";
+        return Status(SS_NOT_FOUND_ERROR, emsg.str());
+    }
     context_.stale_partition_commit = p_c;
 
     OperationContext op_ctx;
@@ -378,7 +387,9 @@ CreatePartitionOperation::PreCheck() {
         return status;
     }
     if (!context_.new_partition) {
-        status = Status(SS_INVALID_CONTEX_ERROR, "No partition specified before push partition");
+        std::stringstream emsg;
+        emsg << GetRepr() << ". Partition is missing";
+        status = Status(SS_INVALID_CONTEX_ERROR, emsg.str());
     }
     return status;
 }
@@ -531,8 +542,11 @@ CreateCollectionOperation::GetSnapshot(ScopedSnapshotT& ss) const {
     status = IDSNotEmptyRequried();
     if (!status.ok())
         return status;
-    if (!c_context_.collection_commit)
-        return Status(SS_CONSTRAINT_CHECK_ERROR, "No Snapshot is available");
+    if (!c_context_.collection_commit) {
+        std::stringstream emsg;
+        emsg << GetRepr() << ". No snapshot is available";
+        return Status(SS_CONSTRAINT_CHECK_ERROR, emsg.str());
+    }
     /* status = Snapshots::GetInstance().GetSnapshot(ss, c_context_.collection_commit->GetCollectionId()); */
     ss = context_.latest_ss;
     return status;
@@ -541,7 +555,9 @@ CreateCollectionOperation::GetSnapshot(ScopedSnapshotT& ss) const {
 Status
 DropCollectionOperation::DoExecute(Store& store) {
     if (!context_.collection) {
-        return Status(SS_INVALID_CONTEX_ERROR, "Invalid Context");
+        std::stringstream emsg;
+        emsg << GetRepr() << ". Collection is missing in context";
+        return Status(SS_INVALID_CONTEX_ERROR, emsg.str());
     }
     context_.collection->Deactivate();
     AddStepWithLsn(*context_.collection, context_.lsn);
