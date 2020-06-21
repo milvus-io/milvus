@@ -27,7 +27,6 @@ namespace server {
 namespace {
 
 constexpr int64_t MAX_TOPK_GAP = 200;
-constexpr uint64_t MAX_NQ = 200;
 
 void
 GetUniqueList(const std::vector<std::string>& list, std::set<std::string>& unique_list) {
@@ -93,7 +92,8 @@ class TracingContextList {
 
 }  // namespace
 
-SearchCombineRequest::SearchCombineRequest() : BaseRequest(nullptr, BaseRequest::kSearchCombine) {
+SearchCombineRequest::SearchCombineRequest(int64_t max_nq)
+    : BaseRequest(nullptr, BaseRequest::kSearchCombine), combine_max_nq_(max_nq) {
 }
 
 Status
@@ -133,6 +133,8 @@ SearchCombineRequest::Combine(const SearchRequestPtr& request) {
     }
 
     request_list_.push_back(request);
+    vectors_data_.vector_count_ += request->VectorsData().vector_count_;
+
     return Status::OK();
 }
 
@@ -152,11 +154,11 @@ SearchCombineRequest::CanCombine(const SearchRequestPtr& request) {
     }
 
     // sum of nq must less-equal than MAX_NQ
-    if (vectors_data_.vector_count_ > MAX_NQ || request->VectorsData().vector_count_ > MAX_NQ) {
+    if (vectors_data_.vector_count_ > combine_max_nq_ || request->VectorsData().vector_count_ > combine_max_nq_) {
         return false;
     }
     uint64_t total_nq = vectors_data_.vector_count_ + request->VectorsData().vector_count_;
-    if (total_nq > MAX_NQ) {
+    if (total_nq > combine_max_nq_) {
         return false;
     }
 
@@ -178,7 +180,7 @@ SearchCombineRequest::CanCombine(const SearchRequestPtr& request) {
 }
 
 bool
-SearchCombineRequest::CanCombine(const SearchRequestPtr& left, const SearchRequestPtr& right) {
+SearchCombineRequest::CanCombine(const SearchRequestPtr& left, const SearchRequestPtr& right, int64_t max_nq) {
     if (left->CollectionName() != right->CollectionName()) {
         return false;
     }
@@ -193,11 +195,11 @@ SearchCombineRequest::CanCombine(const SearchRequestPtr& left, const SearchReque
     }
 
     // sum of nq must less-equal than MAX_NQ
-    if (left->VectorsData().vector_count_ > MAX_NQ || right->VectorsData().vector_count_ > MAX_NQ) {
+    if (left->VectorsData().vector_count_ > max_nq || right->VectorsData().vector_count_ > max_nq) {
         return false;
     }
     uint64_t total_nq = left->VectorsData().vector_count_ + right->VectorsData().vector_count_;
-    if (total_nq > MAX_NQ) {
+    if (total_nq > max_nq) {
         return false;
     }
 
