@@ -22,40 +22,74 @@ namespace milvus::engine::snapshot {
 
 using ThreadPtr = std::shared_ptr<std::thread>;
 using OperationQueue = BlockingQueue<OperationsPtr>;
-using OperationQueuePtr = std::shared_ptr<OperationQueue>;
 
 class OperationExecutor {
  public:
-    using Ptr = std::shared_ptr<OperationExecutor>;
-
+    OperationExecutor() = default;
     OperationExecutor(const OperationExecutor&) = delete;
 
+    ~OperationExecutor() {
+        Stop();
+    }
+
     static OperationExecutor&
-    GetInstance();
+    GetInstance() {
+        static OperationExecutor executor;
+        return executor;
+    }
 
     Status
-    Submit(const OperationsPtr& operation, bool sync = true);
+    Submit(const OperationsPtr& operation, bool sync = true) {
+        if (!operation) {
+            return Status(SS_INVALID_ARGUMENT_ERROR, "Invalid Operation");
+        }
+        /* Store::GetInstance().Apply(*operation); */
+        /* return true; */
+        Enqueue(operation);
+        if (sync) {
+            return operation->WaitToFinish();
+        }
+        return Status::OK();
+    }
 
     void
-    Start();
+    Start() {
+        if (thread_ptr_ == nullptr) {
+            thread_ptr_ = std::make_shared<std::thread>(&OperationExecutor::ThreadMain, this);
+        }
+    }
 
     void
-    Stop();
+    Stop() {
+        if (thread_ptr_ != nullptr) {
+            Enqueue(nullptr);
+            thread_ptr_->join();
+            thread_ptr_ = nullptr;
+            std::cout << "OperationExecutor Stopped" << std::endl;
+        }
+    }
 
-    ~OperationExecutor();
-
- protected:
-    OperationExecutor();
+ private:
+    void
+    ThreadMain() {
+        while (true) {
+            OperationsPtr operation = queue_.Take();
+            if (!operation) {
+                break;
+            }
+            /* std::cout << std::this_thread::get_id() << " Dequeue Operation " << operation->GetID() << std::endl; */
+            Store::GetInstance().Apply(*operation);
+        }
+    }
 
     void
-    ThreadMain();
+    Enqueue(const OperationsPtr& operation) {
+        /* std::cout << std::this_thread::get_id() << " Enqueue Operation " << operation->GetID() << std::endl; */
+        queue_.Put(operation);
+    }
 
-    void
-    Enqueue(const OperationsPtr& operation);
-
- protected:
-    bool running_ = false;
-    std::thread thread_;
+ private:
+    ThreadPtr thread_ptr_ = nullptr;
     OperationQueue queue_;
 };
 

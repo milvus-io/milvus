@@ -291,6 +291,8 @@ class NameField {
     std::string name_;
 };
 
+///////////////////////////////////////////////////////////////////////////////
+
 class Collection : public BaseResource,
                    public NameField,
                    public IdField,
@@ -310,95 +312,6 @@ class Collection : public BaseResource,
 };
 
 using CollectionPtr = Collection::Ptr;
-
-class SchemaCommit : public BaseResource,
-                     public CollectionIdField,
-                     public MappingsField,
-                     public IdField,
-                     public LsnField,
-                     public StatusField,
-                     public CreatedOnField,
-                     public UpdatedOnField {
- public:
-    using Ptr = std::shared_ptr<SchemaCommit>;
-    using MapT = std::map<ID_TYPE, Ptr>;
-    using ScopedMapT = std::map<ID_TYPE, ScopedResource<SchemaCommit>>;
-    using VecT = std::vector<Ptr>;
-    static constexpr const char* Name = "SchemaCommit";
-
-    explicit SchemaCommit(ID_TYPE collection_id, const MappingT& mappings = {}, ID_TYPE id = 0, LSN_TYPE lsn = 0,
-                          State status = PENDING, TS_TYPE created_on = GetMicroSecTimeStamp(),
-                          TS_TYPE UpdatedOnField = GetMicroSecTimeStamp());
-};
-
-using SchemaCommitPtr = SchemaCommit::Ptr;
-
-class Field : public BaseResource,
-              public NameField,
-              public NumField,
-              public IdField,
-              public LsnField,
-              public StatusField,
-              public CreatedOnField,
-              public UpdatedOnField {
- public:
-    using Ptr = std::shared_ptr<Field>;
-    using MapT = std::map<ID_TYPE, Ptr>;
-    using ScopedMapT = std::map<ID_TYPE, ScopedResource<Field>>;
-    using VecT = std::vector<Ptr>;
-    static constexpr const char* Name = "Field";
-
-    Field(const std::string& name, NUM_TYPE num, ID_TYPE id = 0, LSN_TYPE lsn = 0, State status = PENDING,
-          TS_TYPE created_on = GetMicroSecTimeStamp(), TS_TYPE UpdatedOnField = GetMicroSecTimeStamp());
-};
-
-using FieldPtr = Field::Ptr;
-
-class FieldCommit : public BaseResource,
-                    public CollectionIdField,
-                    public FieldIdField,
-                    public MappingsField,
-                    public IdField,
-                    public LsnField,
-                    public StatusField,
-                    public CreatedOnField,
-                    public UpdatedOnField {
- public:
-    using Ptr = std::shared_ptr<FieldCommit>;
-    using MapT = std::map<ID_TYPE, Ptr>;
-    using ScopedMapT = std::map<ID_TYPE, ScopedResource<FieldCommit>>;
-    using VecT = std::vector<Ptr>;
-    static constexpr const char* Name = "FieldCommit";
-
-    FieldCommit(ID_TYPE collection_id, ID_TYPE field_id, const MappingT& mappings = {}, ID_TYPE id = 0,
-                LSN_TYPE lsn = 0, State status = PENDING, TS_TYPE created_on = GetMicroSecTimeStamp(),
-                TS_TYPE UpdatedOnField = GetMicroSecTimeStamp());
-};
-
-using FieldCommitPtr = FieldCommit::Ptr;
-
-class FieldElement : public BaseResource,
-                     public CollectionIdField,
-                     public FieldIdField,
-                     public NameField,
-                     public FtypeField,
-                     public IdField,
-                     public LsnField,
-                     public StatusField,
-                     public CreatedOnField,
-                     public UpdatedOnField {
- public:
-    using Ptr = std::shared_ptr<FieldElement>;
-    using MapT = std::map<ID_TYPE, Ptr>;
-    using ScopedMapT = std::map<ID_TYPE, ScopedResource<FieldElement>>;
-    using VecT = std::vector<Ptr>;
-    static constexpr const char* Name = "FieldElement";
-    FieldElement(ID_TYPE collection_id, ID_TYPE field_id, const std::string& name, FTYPE_TYPE ftype, ID_TYPE id = 0,
-                 LSN_TYPE lsn = 0, State status = PENDING, TS_TYPE created_on = GetMicroSecTimeStamp(),
-                 TS_TYPE UpdatedOnField = GetMicroSecTimeStamp());
-};
-
-using FieldElementPtr = FieldElement::Ptr;
 
 class CollectionCommit : public BaseResource,
                          public CollectionIdField,
@@ -421,6 +334,8 @@ class CollectionCommit : public BaseResource,
 };
 
 using CollectionCommitPtr = CollectionCommit::Ptr;
+
+///////////////////////////////////////////////////////////////////////////////
 
 class Partition : public BaseResource,
                   public NameField,
@@ -468,6 +383,8 @@ class PartitionCommit : public BaseResource,
 };
 
 using PartitionCommitPtr = PartitionCommit::Ptr;
+
+///////////////////////////////////////////////////////////////////////////////
 
 class Segment : public BaseResource,
                 public PartitionIdField,
@@ -520,6 +437,8 @@ class SegmentCommit : public BaseResource,
 
 using SegmentCommitPtr = SegmentCommit::Ptr;
 
+///////////////////////////////////////////////////////////////////////////////
+
 class SegmentFile : public BaseResource,
                     public PartitionIdField,
                     public SegmentIdField,
@@ -542,5 +461,100 @@ class SegmentFile : public BaseResource,
 };
 
 using SegmentFilePtr = SegmentFile::Ptr;
+
+///////////////////////////////////////////////////////////////////////////////
+
+class SchemaCommit : public BaseResource,
+                     public CollectionIdField,
+                     public MappingsField,
+                     public IdField,
+                     public LsnField,
+                     public StatusField,
+                     public CreatedOnField,
+                     public UpdatedOnField {
+ public:
+    using Ptr = std::shared_ptr<SchemaCommit>;
+    using MapT = std::map<ID_TYPE, Ptr>;
+    using ScopedMapT = std::map<ID_TYPE, ScopedResource<SchemaCommit>>;
+    using VecT = std::vector<Ptr>;
+    static constexpr const char* Name = "SchemaCommit";
+
+    explicit SchemaCommit(ID_TYPE collection_id, const MappingT& mappings = {}, ID_TYPE id = 0, LSN_TYPE lsn = 0,
+                          State status = PENDING, TS_TYPE created_on = GetMicroSecTimeStamp(),
+                          TS_TYPE UpdatedOnField = GetMicroSecTimeStamp());
+};
+
+using SchemaCommitPtr = SchemaCommit::Ptr;
+
+///////////////////////////////////////////////////////////////////////////////
+
+class Field : public BaseResource,
+              public NameField,
+              public NumField,
+              public IdField,
+              public LsnField,
+              public StatusField,
+              public CreatedOnField,
+              public UpdatedOnField {
+ public:
+    using Ptr = std::shared_ptr<Field>;
+    using MapT = std::map<ID_TYPE, Ptr>;
+    using ScopedMapT = std::map<ID_TYPE, ScopedResource<Field>>;
+    using VecT = std::vector<Ptr>;
+    static constexpr const char* Name = "Field";
+
+    Field(const std::string& name, NUM_TYPE num, ID_TYPE id = 0, LSN_TYPE lsn = 0, State status = PENDING,
+          TS_TYPE created_on = GetMicroSecTimeStamp(), TS_TYPE UpdatedOnField = GetMicroSecTimeStamp());
+};
+
+using FieldPtr = Field::Ptr;
+
+class FieldCommit : public BaseResource,
+                    public CollectionIdField,
+                    public FieldIdField,
+                    public MappingsField,
+                    public IdField,
+                    public LsnField,
+                    public StatusField,
+                    public CreatedOnField,
+                    public UpdatedOnField {
+ public:
+    using Ptr = std::shared_ptr<FieldCommit>;
+    using MapT = std::map<ID_TYPE, Ptr>;
+    using ScopedMapT = std::map<ID_TYPE, ScopedResource<FieldCommit>>;
+    using VecT = std::vector<Ptr>;
+    static constexpr const char* Name = "FieldCommit";
+
+    FieldCommit(ID_TYPE collection_id, ID_TYPE field_id, const MappingT& mappings = {}, ID_TYPE id = 0,
+                LSN_TYPE lsn = 0, State status = PENDING, TS_TYPE created_on = GetMicroSecTimeStamp(),
+                TS_TYPE UpdatedOnField = GetMicroSecTimeStamp());
+};
+
+using FieldCommitPtr = FieldCommit::Ptr;
+
+///////////////////////////////////////////////////////////////////////////////
+
+class FieldElement : public BaseResource,
+                     public CollectionIdField,
+                     public FieldIdField,
+                     public NameField,
+                     public FtypeField,
+                     public IdField,
+                     public LsnField,
+                     public StatusField,
+                     public CreatedOnField,
+                     public UpdatedOnField {
+ public:
+    using Ptr = std::shared_ptr<FieldElement>;
+    using MapT = std::map<ID_TYPE, Ptr>;
+    using ScopedMapT = std::map<ID_TYPE, ScopedResource<FieldElement>>;
+    using VecT = std::vector<Ptr>;
+    static constexpr const char* Name = "FieldElement";
+    FieldElement(ID_TYPE collection_id, ID_TYPE field_id, const std::string& name, FTYPE_TYPE ftype, ID_TYPE id = 0,
+                 LSN_TYPE lsn = 0, State status = PENDING, TS_TYPE created_on = GetMicroSecTimeStamp(),
+                 TS_TYPE UpdatedOnField = GetMicroSecTimeStamp());
+};
+
+using FieldElementPtr = FieldElement::Ptr;
 
 }  // namespace milvus::engine::snapshot

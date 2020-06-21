@@ -19,15 +19,16 @@
 #include <algorithm>
 
 #include "db/utils.h"
-#include "db/snapshot/ReferenceProxy.h"
-#include "db/snapshot/ScopedResource.h"
-#include "db/snapshot/WrappedTypes.h"
-#include "db/snapshot/ResourceHolders.h"
-#include "db/snapshot/OperationExecutor.h"
-#include "db/snapshot/Store.h"
-#include "db/snapshot/Context.h"
 #include "db/snapshot/CompoundOperations.h"
+#include "db/snapshot/Context.h"
+#include "db/snapshot/EventExecutor.h"
+#include "db/snapshot/OperationExecutor.h"
+#include "db/snapshot/ReferenceProxy.h"
+#include "db/snapshot/ResourceHolders.h"
+#include "db/snapshot/ScopedResource.h"
 #include "db/snapshot/Snapshots.h"
+#include "db/snapshot/Store.h"
+#include "db/snapshot/WrappedTypes.h"
 
 using ID_TYPE = milvus::engine::snapshot::ID_TYPE;
 using IDS_TYPE = milvus::engine::snapshot::IDS_TYPE;

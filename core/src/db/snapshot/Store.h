@@ -58,9 +58,10 @@ class Store {
     DoCommit(ResourceT&&... resources) {
         auto t = std::make_tuple(std::forward<ResourceT>(resources)...);
         auto& t_size = std::tuple_size<decltype(t)>::value;
-        if (t_size == 0)
+        if (t_size == 0) {
             return false;
-        StartTransanction();
+        }
+        StartTransaction();
         std::apply([this](auto&&... resource) { ((std::cout << CommitResource(resource) << "\n"), ...); }, t);
         FinishTransaction();
         return true;
@@ -83,8 +84,9 @@ class Store {
     }
 
     void
-    StartTransanction() {
+    StartTransaction() {
     }
+
     void
     FinishTransaction() {
     }

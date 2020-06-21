@@ -23,20 +23,29 @@ using OnNoRefCBF = std::function<void(void)>;
 class ReferenceProxy {
  public:
     ReferenceProxy() = default;
+    virtual ~ReferenceProxy() = default;
 
     // TODO: Copy constructor is used in Mock Test. Should never be used. To be removed
     ReferenceProxy(const ReferenceProxy& o) {
         ref_count_ = 0;
     }
 
-    void
-    RegisterOnNoRefCB(const OnNoRefCBF& cb);
+    virtual void
+    Ref() {
+        ++ref_count_;
+    }
 
     virtual void
-    Ref();
-
-    virtual void
-    UnRef();
+    UnRef() {
+        if (ref_count_ == 0) {
+            return;
+        }
+        if (ref_count_.fetch_sub(1) == 1) {
+            for (auto& cb : on_no_ref_cbs_) {
+                cb();
+            }
+        }
+    }
 
     [[nodiscard]] int64_t
     ref_count() const {
@@ -48,7 +57,10 @@ class ReferenceProxy {
         ref_count_ = 0;
     }
 
-    virtual ~ReferenceProxy() = default;
+    void
+    RegisterOnNoRefCB(const OnNoRefCBF& cb) {
+        on_no_ref_cbs_.emplace_back(cb);
+    }
 
  protected:
     std::atomic<int64_t> ref_count_ = {0};
