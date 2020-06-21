@@ -1004,8 +1004,8 @@ macro(build_fiu)
             ${FIU_SHARED_LIB}
             )
 
-        file(MAKE_DIRECTORY "${FIU_INCLUDE_DIR}")
-        add_library(fiu SHARED IMPORTED)
+    file(MAKE_DIRECTORY "${FIU_INCLUDE_DIR}")
+    add_library(fiu SHARED IMPORTED)
     set_target_properties(fiu
         PROPERTIES IMPORTED_LOCATION "${FIU_SHARED_LIB}"
         INTERFACE_INCLUDE_DIRECTORIES "${FIU_INCLUDE_DIR}")
