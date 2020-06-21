@@ -26,7 +26,7 @@ constexpr int64_t COMBINE_MAX_NQ = 64;
 
 class SearchCombineRequest : public BaseRequest {
  public:
-    SearchCombineRequest(int64_t max_nq = COMBINE_MAX_NQ);
+    explicit SearchCombineRequest(int64_t max_nq = COMBINE_MAX_NQ);
 
     Status
     Combine(const SearchRequestPtr& request);
