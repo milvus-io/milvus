@@ -1870,10 +1870,6 @@ DBImpl::ExecWalRecord(const wal::MXLogRecord& record) {
     fiu_return_on("DBImpl.ExexWalRecord.return", Status(););
 
     auto collections_flushed = [&](const std::set<std::string>& collection_ids) -> uint64_t {
-        if (collection_ids.empty()) {
-            return 0;
-        }
-
         uint64_t max_lsn = 0;
         if (options_.wal_enable_) {
             for (auto& collection : collection_ids) {
@@ -1886,10 +1882,14 @@ DBImpl::ExecWalRecord(const wal::MXLogRecord& record) {
             }
         }
 
-        std::lock_guard<std::mutex> lck(merge_result_mutex_);
-        for (auto& collection : collection_ids) {
-            merge_collection_ids_.insert(collection);
+        {
+            std::lock_guard<std::mutex> lck(merge_result_mutex_);
+            for (auto& collection : collection_ids) {
+                merge_collection_ids_.insert(collection);
+            }
         }
+        StartMergeTask();
+
         return max_lsn;
     };
 
@@ -2020,8 +2020,6 @@ DBImpl::InternalFlush(const std::string& collection_id) {
     record.type = wal::MXLogType::Flush;
     record.collection_id = collection_id;
     ExecWalRecord(record);
-
-    StartMergeTask();
 }
 
 void
