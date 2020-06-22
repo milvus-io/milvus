@@ -333,7 +333,7 @@ if (DEFINED ENV{MILVUS_OATPP_URL})
     set(MILVUS_OATPP_URL "$ENV{MILVUS_OATPP_URL}")
 else ()
     # set(OATPP_SOURCE_URL "https://github.com/oatpp/oatpp/archive/${OATPP_VERSION}.tar.gz")
-    set(OATPP_SOURCE_URL "https://github.com/BossZou/oatpp/archive/master.zip")
+    set(OATPP_SOURCE_URL "https://github.com/BossZou/oatpp/archive/${OATPP_VERSION}.zip")
 endif ()
 
 if (DEFINED ENV{MILVUS_AWS_URL})
@@ -1004,8 +1004,8 @@ macro(build_fiu)
             ${FIU_SHARED_LIB}
             )
 
-        file(MAKE_DIRECTORY "${FIU_INCLUDE_DIR}")
-        add_library(fiu SHARED IMPORTED)
+    file(MAKE_DIRECTORY "${FIU_INCLUDE_DIR}")
+    add_library(fiu SHARED IMPORTED)
     set_target_properties(fiu
         PROPERTIES IMPORTED_LOCATION "${FIU_SHARED_LIB}"
         INTERFACE_INCLUDE_DIRECTORIES "${FIU_INCLUDE_DIR}")
@@ -1033,6 +1033,9 @@ macro(build_oatpp)
             -DCMAKE_INSTALL_LIBDIR=lib
             -DBUILD_SHARED_LIBS=OFF
             -DOATPP_BUILD_TESTS=OFF
+            -DOATPP_DISABLE_LOGV=ON
+            -DOATPP_DISABLE_LOGD=ON
+            -DOATPP_DISABLE_LOGI=ON
             )
 
 

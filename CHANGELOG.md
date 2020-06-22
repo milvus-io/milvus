@@ -2,9 +2,12 @@
 
 Please mark all change in change log and use the issue from GitHub
 
-# Milvus 0.8.1 (TBD)
+# Milvus 0.8.1 (2020-06-22)
 
 ## Bug
+
+-   \#2450 The deleted vectors may be found on GPU
+-   \#2399 The nlist set by the user may not take effect
 
 ## Feature
 
@@ -717,7 +720,7 @@ Please mark all change in change log and use the issue from GitHub
 -   MS-47 Add query vps metrics
 -   MS-37 Add query, cache usage, disk write speed and file data size metrics
 -   MS-30 Use faiss v1.5.2
--   MS-54 cmake: Change Thrift third party URL to github.com
+-   MS-54 CMake: Change Thrift third party URL to github.com
 -   MS-69 Prometheus: add all proposed metrics
 
 ## Task
