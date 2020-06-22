@@ -10,24 +10,24 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
 #pragma once
+
+#include <memory>
 #include <string>
+
 #include "ReferenceProxy.h"
 
-namespace milvus {
-namespace engine {
-namespace snapshot {
+namespace milvus::engine::snapshot {
 
-class DBBaseResource : public ReferenceProxy {
+class BaseResource : public ReferenceProxy {
  public:
-    virtual std::string
+    [[nodiscard]] virtual std::string
     ToString() const {
-        return "";
+        return std::string();
     }
 
-    virtual ~DBBaseResource() {
-    }
+    ~BaseResource() override = default;
 };
 
-}  // namespace snapshot
-}  // namespace engine
-}  // namespace milvus
+using BaseResourcePtr = std::shared_ptr<BaseResource>;
+
+}  // namespace milvus::engine::snapshot

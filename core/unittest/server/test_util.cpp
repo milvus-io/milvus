@@ -44,14 +44,9 @@ CopyStatus(milvus::Status& st1, milvus::Status& st2) {
 
 TEST(UtilTest, EXCEPTION_TEST) {
     std::string err_msg = "failed";
-    milvus::server::ServerException ex(milvus::SERVER_UNEXPECTED_ERROR, err_msg);
-    ASSERT_EQ(ex.error_code(), milvus::SERVER_UNEXPECTED_ERROR);
+    milvus::Exception ex(milvus::SERVER_UNEXPECTED_ERROR, err_msg);
+    ASSERT_EQ(ex.code(), milvus::SERVER_UNEXPECTED_ERROR);
     std::string msg = ex.what();
-    ASSERT_EQ(msg, err_msg);
-
-    milvus::Exception ex1(milvus::SERVER_UNEXPECTED_ERROR, err_msg);
-    ASSERT_EQ(ex1.code(), milvus::SERVER_UNEXPECTED_ERROR);
-    msg = ex1.what();
     ASSERT_EQ(msg, err_msg);
 
     std::string empty_err_msg;
@@ -62,8 +57,8 @@ TEST(UtilTest, EXCEPTION_TEST) {
 }
 
 TEST(UtilTest, SIGNAL_TEST) {
-    milvus::server::HandleSignal(SIGINT);
-    milvus::server::HandleSignal(SIGABRT);
+    milvus::HandleSignal(SIGINT);
+    milvus::HandleSignal(SIGABRT);
 }
 
 TEST(UtilTest, COMMON_TEST) {
@@ -86,50 +81,50 @@ TEST(UtilTest, COMMON_TEST) {
     std::string path1 = "/tmp/milvus_test/";
     std::string path2 = path1 + "common_test_12345/";
     std::string path3 = path2 + "abcdef";
-    milvus::Status status = milvus::server::CommonUtil::CreateDirectory(path3);
+    milvus::Status status = milvus::CommonUtil::CreateDirectory(path3);
     ASSERT_TRUE(status.ok());
 
-    status = milvus::server::CommonUtil::CreateDirectory(empty_path);
+    status = milvus::CommonUtil::CreateDirectory(empty_path);
     ASSERT_TRUE(status.ok());
 
     // test again
-    status = milvus::server::CommonUtil::CreateDirectory(path3);
+    status = milvus::CommonUtil::CreateDirectory(path3);
     ASSERT_TRUE(status.ok());
 
-    ASSERT_TRUE(milvus::server::CommonUtil::IsDirectoryExist(path3));
+    ASSERT_TRUE(milvus::CommonUtil::IsDirectoryExist(path3));
 
-    status = milvus::server::CommonUtil::DeleteDirectory(empty_path);
+    status = milvus::CommonUtil::DeleteDirectory(empty_path);
     ASSERT_TRUE(status.ok());
 
-    status = milvus::server::CommonUtil::DeleteDirectory(path1);
+    status = milvus::CommonUtil::DeleteDirectory(path1);
     ASSERT_TRUE(status.ok());
     // test again
-    status = milvus::server::CommonUtil::DeleteDirectory(path1);
+    status = milvus::CommonUtil::DeleteDirectory(path1);
     ASSERT_TRUE(status.ok());
 
-    ASSERT_FALSE(milvus::server::CommonUtil::IsDirectoryExist(path1));
-    ASSERT_FALSE(milvus::server::CommonUtil::IsFileExist(path1));
+    ASSERT_FALSE(milvus::CommonUtil::IsDirectoryExist(path1));
+    ASSERT_FALSE(milvus::CommonUtil::IsFileExist(path1));
 
-    std::string exe_path = milvus::server::CommonUtil::GetExePath();
+    std::string exe_path = milvus::CommonUtil::GetExePath();
     ASSERT_FALSE(exe_path.empty());
 
     fiu_enable("CommonUtil.GetExePath.readlink_fail", 1, NULL, 0);
-    exe_path = milvus::server::CommonUtil::GetExePath();
+    exe_path = milvus::CommonUtil::GetExePath();
     ASSERT_FALSE(!exe_path.empty());
     fiu_disable("CommonUtil.GetExePath.readlink_fail");
 
     fiu_enable("CommonUtil.GetExePath.exe_path_error", 1, NULL, 0);
-    exe_path = milvus::server::CommonUtil::GetExePath();
+    exe_path = milvus::CommonUtil::GetExePath();
     ASSERT_FALSE(exe_path.empty());
     fiu_disable("CommonUtil.GetExePath.exe_path_error");
 
     fiu_enable("CommonUtil.CreateDirectory.create_parent_fail", 1, NULL, 0);
-    status = milvus::server::CommonUtil::CreateDirectory(path3);
+    status = milvus::CommonUtil::CreateDirectory(path3);
     ASSERT_FALSE(status.ok());
     fiu_disable("CommonUtil.CreateDirectory.create_parent_fail");
 
     fiu_enable("CommonUtil.CreateDirectory.create_dir_fail", 1, NULL, 0);
-    status = milvus::server::CommonUtil::CreateDirectory(path3);
+    status = milvus::CommonUtil::CreateDirectory(path3);
     ASSERT_FALSE(status.ok());
     fiu_disable("CommonUtil.CreateDirectory.create_dir_fail");
 
@@ -137,14 +132,14 @@ TEST(UtilTest, COMMON_TEST) {
     time(&tt);
     tm time_struct;
     memset(&time_struct, 0, sizeof(tm));
-    milvus::server::CommonUtil::ConvertTime(tt, time_struct);
+    milvus::CommonUtil::ConvertTime(tt, time_struct);
     ASSERT_GE(time_struct.tm_year, 0);
     ASSERT_GE(time_struct.tm_mon, 0);
     ASSERT_GE(time_struct.tm_mday, 0);
-    milvus::server::CommonUtil::ConvertTime(time_struct, tt);
+    milvus::CommonUtil::ConvertTime(time_struct, tt);
     ASSERT_GT(tt, 0);
 
-    bool res = milvus::server::CommonUtil::TimeStrToTime("2019-03-23", tt, time_struct);
+    bool res = milvus::CommonUtil::TimeStrToTime("2019-03-23", tt, time_struct);
     ASSERT_EQ(time_struct.tm_year, 119);
     ASSERT_EQ(time_struct.tm_mon, 2);
     ASSERT_EQ(time_struct.tm_mday, 23);
@@ -154,72 +149,72 @@ TEST(UtilTest, COMMON_TEST) {
 
 TEST(UtilTest, STRINGFUNCTIONS_TEST) {
     std::string str = " test str";
-    milvus::server::StringHelpFunctions::TrimStringBlank(str);
+    milvus::StringHelpFunctions::TrimStringBlank(str);
     ASSERT_EQ(str, "test str");
 
     str = "\"test str\"";
-    milvus::server::StringHelpFunctions::TrimStringQuote(str, "\"");
+    milvus::StringHelpFunctions::TrimStringQuote(str, "\"");
     ASSERT_EQ(str, "test str");
 
     str = "a,b,c";
     std::vector<std::string> result;
-    milvus::server::StringHelpFunctions::SplitStringByDelimeter(str, ",", result);
+    milvus::StringHelpFunctions::SplitStringByDelimeter(str, ",", result);
     ASSERT_EQ(result.size(), 3UL);
 
     std::string merge_str;
-    milvus::server::StringHelpFunctions::MergeStringWithDelimeter(result, ",", merge_str);
+    milvus::StringHelpFunctions::MergeStringWithDelimeter(result, ",", merge_str);
     ASSERT_EQ(merge_str, "a,b,c");
     result.clear();
-    milvus::server::StringHelpFunctions::MergeStringWithDelimeter(result, ",", merge_str);
+    milvus::StringHelpFunctions::MergeStringWithDelimeter(result, ",", merge_str);
     ASSERT_TRUE(merge_str.empty());
 
-    auto status = milvus::server::StringHelpFunctions::SplitStringByQuote(str, ",", "\"", result);
+    auto status = milvus::StringHelpFunctions::SplitStringByQuote(str, ",", "\"", result);
     ASSERT_TRUE(status.ok());
     ASSERT_EQ(result.size(), 3UL);
 
     result.clear();
-    status = milvus::server::StringHelpFunctions::SplitStringByQuote(str, ",", "", result);
+    status = milvus::StringHelpFunctions::SplitStringByQuote(str, ",", "", result);
     ASSERT_TRUE(status.ok());
     ASSERT_EQ(result.size(), 3UL);
 
     str = "55,\"aa,gg,yy\",b";
     result.clear();
-    status = milvus::server::StringHelpFunctions::SplitStringByQuote(str, ",", "\"", result);
+    status = milvus::StringHelpFunctions::SplitStringByQuote(str, ",", "\"", result);
     ASSERT_TRUE(status.ok());
     ASSERT_EQ(result.size(), 3UL);
 
     fiu_init(0);
     fiu_enable("StringHelpFunctions.SplitStringByQuote.invalid_index", 1, NULL, 0);
     result.clear();
-    status = milvus::server::StringHelpFunctions::SplitStringByQuote(str, ",", "\"", result);
+    status = milvus::StringHelpFunctions::SplitStringByQuote(str, ",", "\"", result);
     ASSERT_FALSE(status.ok());
     fiu_disable("StringHelpFunctions.SplitStringByQuote.invalid_index");
 
     fiu_enable("StringHelpFunctions.SplitStringByQuote.index_gt_last", 1, NULL, 0);
     result.clear();
-    status = milvus::server::StringHelpFunctions::SplitStringByQuote(str, ",", "\"", result);
+    status = milvus::StringHelpFunctions::SplitStringByQuote(str, ",", "\"", result);
     ASSERT_TRUE(status.ok());
     fiu_disable("StringHelpFunctions.SplitStringByQuote.index_gt_last");
 
     fiu_enable("StringHelpFunctions.SplitStringByQuote.invalid_index2", 1, NULL, 0);
     result.clear();
-    status = milvus::server::StringHelpFunctions::SplitStringByQuote(str, ",", "\"", result);
+    status = milvus::StringHelpFunctions::SplitStringByQuote(str, ",", "\"", result);
     ASSERT_FALSE(status.ok());
     fiu_disable("StringHelpFunctions.SplitStringByQuote.invalid_index2");
 
     fiu_enable("StringHelpFunctions.SplitStringByQuote.last_is_end", 1, NULL, 0);
     result.clear();
-    status = milvus::server::StringHelpFunctions::SplitStringByQuote(str, ",", "\"", result);
+    status = milvus::StringHelpFunctions::SplitStringByQuote(str, ",", "\"", result);
     ASSERT_TRUE(status.ok());
     fiu_disable("StringHelpFunctions.SplitStringByQuote.last_is_end2");
 
-    ASSERT_TRUE(milvus::server::StringHelpFunctions::IsRegexMatch("abc", "abc"));
-    ASSERT_TRUE(milvus::server::StringHelpFunctions::IsRegexMatch("a8c", "a\\d."));
-    ASSERT_FALSE(milvus::server::StringHelpFunctions::IsRegexMatch("abc", "a\\dc"));
+    ASSERT_TRUE(milvus::StringHelpFunctions::IsRegexMatch("abc", "abc"));
+    ASSERT_TRUE(milvus::StringHelpFunctions::IsRegexMatch("a8c", "a\\d."));
+    ASSERT_FALSE(milvus::StringHelpFunctions::IsRegexMatch("abc", "a\\dc"));
 }
 
 TEST(UtilTest, BLOCKINGQUEUE_TEST) {
-    milvus::server::BlockingQueue<std::string> bq;
+    milvus::BlockingQueue<std::string> bq;
 
     static const size_t count = 10;
     bq.SetCapacity(count);
@@ -251,13 +246,13 @@ TEST(UtilTest, LOG_TEST) {
     fiu_init(0);
 
     fiu_enable("LogUtil.InitLog.set_max_log_size_small_than_min", 1, NULL, 0);
-    auto status = milvus::server::InitLog(true, true, true, true, true, true,
+    auto status = milvus::InitLog(true, true, true, true, true, true,
             "/tmp/test_util", 1024 * 1024 * 1024, 10); // 1024 MB
     ASSERT_FALSE(status.ok());
     fiu_disable("LogUtil.InitLog.set_max_log_size_small_than_min");
 
     fiu_enable("LogUtil.InitLog.delete_exceeds_small_than_min", 1, NULL, 0);
-    status = milvus::server::InitLog(true, true, true, true, true, true,
+    status = milvus::InitLog(true, true, true, true, true, true,
             "/tmp/test_util", 1024 * 1024 * 1024, 10); // 1024 MB
     ASSERT_FALSE(status.ok());
     fiu_disable("LogUtil.InitLog.delete_exceeds_small_than_min");
@@ -268,7 +263,7 @@ TEST(UtilTest, LOG_TEST) {
     fiu_enable("LogUtil.InitLog.trace_enable_to_false", 1, NULL, 0);
     fiu_enable("LogUtil.InitLog.error_enable_to_false", 1, NULL, 0);
     fiu_enable("LogUtil.InitLog.fatal_enable_to_false", 1, NULL, 0);
-    status = milvus::server::InitLog(true, true, true, true, true, true,
+    status = milvus::InitLog(true, true, true, true, true, true,
             "/tmp/test_util", 1024 * 1024 * 1024, 10); // 1024 MB
     ASSERT_TRUE(status.ok()) << status.message();
     fiu_disable("LogUtil.InitLog.fatal_enable_to_false");
@@ -278,26 +273,26 @@ TEST(UtilTest, LOG_TEST) {
     fiu_disable("LogUtil.InitLog.debug_enable_to_false");
     fiu_disable("LogUtil.InitLog.info_enable_to_false");
 
-    status = milvus::server::InitLog(true, true, true, true, true, true,
+    status = milvus::InitLog(true, true, true, true, true, true,
             "/tmp/test_util", 1024 * 1024 * 1024, 10); // 1024 MB
     ASSERT_TRUE(status.ok()) << status.message();
 
     EXPECT_FALSE(el::Loggers::hasFlag(el::LoggingFlag::NewLineForContainer));
     EXPECT_FALSE(el::Loggers::hasFlag(el::LoggingFlag::LogDetailedCrashReason));
 
-    std::string fname = milvus::server::CommonUtil::GetFileName(LOG_FILE_PATH);
+    std::string fname = milvus::CommonUtil::GetFileName(LOG_FILE_PATH);
     ASSERT_EQ(fname, "log_config.conf");
 
-    ASSERT_NO_THROW(milvus::server::LogConfigInMem());
-    ASSERT_NO_THROW(milvus::server::LogCpuInfo());
+    ASSERT_NO_THROW(milvus::LogConfigInMem());
+    ASSERT_NO_THROW(milvus::LogCpuInfo());
 
     // test log config file
-    ASSERT_ANY_THROW(milvus::server::LogConfigInFile("log_config.conf"));
+    ASSERT_ANY_THROW(milvus::LogConfigInFile("log_config.conf"));
     const char * config_str = "server_config:\n  address: 0.0.0.0\n  port: 19530";
     std::fstream fs("/tmp/config.yaml", std::ios_base::out);
     fs << config_str;
     fs.close();
-    ASSERT_NO_THROW(milvus::server::LogConfigInFile("/tmp/config.yaml"));
+    ASSERT_NO_THROW(milvus::LogConfigInFile("/tmp/config.yaml"));
     boost::filesystem::remove("/tmp/config.yaml");
 }
 
@@ -826,7 +821,7 @@ TEST(UtilTest, ROLLOUTHANDLER_TEST) {
         file.open(tmp.c_str());
         file << "test" << std::endl;
 
-        milvus::server::RolloutHandler(tmp.c_str(), 0, list[i]);
+        milvus::RolloutHandler(tmp.c_str(), 0, list[i]);
 
         tmp.append(".1");
         std::ifstream file2;
@@ -842,7 +837,7 @@ TEST(UtilTest, ROLLOUTHANDLER_TEST) {
         std::ofstream file;
         file.open(tmp.c_str());
         file << "test" << std::endl;
-        milvus::server::RolloutHandler(tmp.c_str(), 0, el::Level::Unknown);
+        milvus::RolloutHandler(tmp.c_str(), 0, el::Level::Unknown);
         tmp.append(".1");
         std::ifstream file2;
         file2.open(tmp);
