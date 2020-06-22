@@ -145,7 +145,9 @@ Status
 Operations::DoneRequired() const {
     Status status;
     if (!done_) {
-        status = Status(SS_CONSTRAINT_CHECK_ERROR, "Operation is expected to be done");
+        std::stringstream emsg;
+        emsg << GetRepr() << ". Should be done";
+        status = Status(SS_CONSTRAINT_CHECK_ERROR, emsg.str());
     }
     return status;
 }
@@ -153,8 +155,11 @@ Operations::DoneRequired() const {
 Status
 Operations::IDSNotEmptyRequried() const {
     Status status;
-    if (ids_.size() == 0)
-        status = Status(SS_CONSTRAINT_CHECK_ERROR, "No Snapshot is available");
+    if (ids_.size() == 0) {
+        std::stringstream emsg;
+        emsg << GetRepr() << ". No rsource is available";
+        status = Status(SS_CONSTRAINT_CHECK_ERROR, emsg.str());
+    }
     return status;
 }
 
@@ -162,7 +167,9 @@ Status
 Operations::PrevSnapshotRequried() const {
     Status status;
     if (!prev_ss_) {
-        status = Status(SS_CONSTRAINT_CHECK_ERROR, "Prev snapshot is requried");
+        std::stringstream emsg;
+        emsg << GetRepr() << ". Prev snapshot is requried";
+        status = Status(SS_CONSTRAINT_CHECK_ERROR, emsg.str());
     }
     return status;
 }

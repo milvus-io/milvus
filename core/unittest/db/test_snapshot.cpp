@@ -34,6 +34,7 @@ using ID_TYPE = milvus::engine::snapshot::ID_TYPE;
 using IDS_TYPE = milvus::engine::snapshot::IDS_TYPE;
 using LSN_TYPE = milvus::engine::snapshot::LSN_TYPE;
 using MappingT = milvus::engine::snapshot::MappingT;
+using LoadOperationContext = milvus::engine::snapshot::LoadOperationContext;
 using CreateCollectionContext = milvus::engine::snapshot::CreateCollectionContext;
 using SegmentFileContext = milvus::engine::snapshot::SegmentFileContext;
 using OperationContext = milvus::engine::snapshot::OperationContext;
@@ -63,6 +64,7 @@ using ScopedSnapshotT = milvus::engine::snapshot::ScopedSnapshotT;
 using ReferenceProxy = milvus::engine::snapshot::ReferenceProxy;
 using Queue = milvus::BlockingQueue<ID_TYPE>;
 using TQueue = milvus::BlockingQueue<std::tuple<ID_TYPE, ID_TYPE>>;
+using SoftDeleteCollectionOperation = milvus::engine::snapshot::SoftDeleteOperation<Collection>;
 
 int RandomInt(int start, int end) {
     std::random_device dev;
@@ -195,6 +197,70 @@ CreateCollection(const std::string& collection_name, const LSN_TYPE& lsn) {
     ScopedSnapshotT ss;
     auto status = op->GetSnapshot(ss);
     return ss;
+}
+
+TEST_F(SnapshotTest, DeleteOperationTest) {
+    std::string collection_name = "test_c1";
+    LSN_TYPE lsn = 1;
+    auto ss = CreateCollection(collection_name, lsn);
+    ASSERT_TRUE(ss);
+
+    auto collection = CollectionsHolder::GetInstance().GetResource(ss->GetCollectionId());
+    ASSERT_EQ(collection->GetName(), collection_name);
+
+    {
+        auto soft_op = std::make_shared<SoftDeleteCollectionOperation>(collection->GetID());
+        auto status = soft_op->Push();
+        ASSERT_TRUE(status.ok());
+        CollectionPtr soft_deleted;
+        status = soft_op->GetResource(soft_deleted);
+        ASSERT_TRUE(status.ok());
+        ASSERT_TRUE(soft_deleted);
+        ASSERT_EQ(soft_deleted->GetID(), collection->GetID());
+        ASSERT_TRUE(soft_deleted->IsDeactive());
+    }
+
+    {
+        CollectionPtr loaded;
+        LoadOperationContext context;
+        context.id = collection->GetID();
+        auto load_op = std::make_shared<milvus::engine::snapshot::LoadOperation<Collection>>(context);
+        auto status = load_op->Push();
+        ASSERT_TRUE(status.ok());
+        status = load_op->GetResource(loaded);
+        ASSERT_TRUE(status.ok());
+        ASSERT_TRUE(loaded);
+        ASSERT_EQ(loaded->GetID(), collection->GetID());
+        ASSERT_TRUE(loaded->IsDeactive());
+    }
+
+    {
+        auto hard_op = std::make_shared<milvus::engine::snapshot::HardDeleteOperation<Collection>
+            >(collection->GetID());
+        auto status = hard_op->Push();
+        ASSERT_TRUE(status.ok());
+    }
+
+    {
+        CollectionPtr loaded;
+        LoadOperationContext context;
+        context.id = collection->GetID();
+        auto load_op = std::make_shared<milvus::engine::snapshot::LoadOperation<Collection>>(context);
+        auto status = load_op->Push();
+        if (!status.ok()) {
+            std::cout << status.ToString() << std::endl;
+        }
+        ASSERT_FALSE(status.ok());
+    }
+
+    {
+        auto soft_op = std::make_shared<SoftDeleteCollectionOperation>(collection->GetID());
+        auto status = soft_op->Push();
+        if (!status.ok()) {
+            std::cout << status.ToString() << std::endl;
+        }
+        ASSERT_FALSE(status.ok());
+    }
 }
 
 TEST_F(SnapshotTest, CreateCollectionOperationTest) {
