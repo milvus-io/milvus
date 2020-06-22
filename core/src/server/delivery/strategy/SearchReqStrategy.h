@@ -11,6 +11,7 @@
 
 #pragma once
 
+#include "config/handler/EngineConfigHandler.h"
 #include "server/delivery/strategy/RequestStrategy.h"
 #include "utils/Status.h"
 
@@ -20,7 +21,7 @@
 namespace milvus {
 namespace server {
 
-class SearchReqStrategy : public RequestStrategy {
+class SearchReqStrategy : public RequestStrategy, public EngineConfigHandler {
  public:
     SearchReqStrategy();
 

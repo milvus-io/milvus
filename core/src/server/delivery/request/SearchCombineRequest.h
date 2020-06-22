@@ -22,9 +22,11 @@
 namespace milvus {
 namespace server {
 
+constexpr int64_t COMBINE_MAX_NQ = 64;
+
 class SearchCombineRequest : public BaseRequest {
  public:
-    SearchCombineRequest();
+    explicit SearchCombineRequest(int64_t max_nq = COMBINE_MAX_NQ);
 
     Status
     Combine(const SearchRequestPtr& request);
@@ -33,7 +35,7 @@ class SearchCombineRequest : public BaseRequest {
     CanCombine(const SearchRequestPtr& request);
 
     static bool
-    CanCombine(const SearchRequestPtr& left, const SearchRequestPtr& right);
+    CanCombine(const SearchRequestPtr& left, const SearchRequestPtr& right, int64_t max_nq = COMBINE_MAX_NQ);
 
  protected:
     Status
@@ -54,6 +56,8 @@ class SearchCombineRequest : public BaseRequest {
     std::set<std::string> file_id_list_;
 
     std::vector<SearchRequestPtr> request_list_;
+
+    int64_t combine_max_nq_ = COMBINE_MAX_NQ;
 };
 
 using SearchCombineRequestPtr = std::shared_ptr<SearchCombineRequest>;
