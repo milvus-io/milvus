@@ -121,7 +121,9 @@ Snapshots::LoadNoLock(Store& store, ID_TYPE collection_id, SnapshotHolderPtr& ho
     (*op)(store);
     auto& collection_commit_ids = op->GetIDs();
     if (collection_commit_ids.size() == 0) {
-        return Status(SS_NOT_FOUND_ERROR, "No collection commit found");
+        std::stringstream emsg;
+        emsg << "Snapshots::LoadNoLock: No collection commit is found for collection " << collection_id;
+        return Status(SS_NOT_FOUND_ERROR, emsg.str());
     }
     holder = std::make_shared<SnapshotHolder>(collection_id,
                                               std::bind(&Snapshots::SnapshotGCCallback, this, std::placeholders::_1));
@@ -153,7 +155,11 @@ Snapshots::GetHolder(const std::string& name, SnapshotHolderPtr& holder) {
         lock.unlock();
         return GetHolder(kv->second, holder);
     }
-    return Status(SS_NOT_FOUND_ERROR, "Specified snapshot holder not found");
+    std::stringstream emsg;
+    emsg << "Snapshots::GetHolderNoLock: Specified snapshot holder for collection ";
+    emsg << "\"" << name << "\""
+         << " not found";
+    return Status(SS_NOT_FOUND_ERROR, emsg.str());
 }
 
 Status
@@ -192,7 +198,10 @@ Status
 Snapshots::GetHolderNoLock(ID_TYPE collection_id, SnapshotHolderPtr& holder) {
     auto it = holders_.find(collection_id);
     if (it == holders_.end()) {
-        return Status(SS_NOT_FOUND_ERROR, "Specified snapshot holder not found");
+        std::stringstream emsg;
+        emsg << "Snapshots::GetHolderNoLock: Specified snapshot holder for collection " << collection_id;
+        emsg << " not found";
+        return Status(SS_NOT_FOUND_ERROR, emsg.str());
     }
     holder = it->second;
     return Status::OK();

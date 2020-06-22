@@ -285,6 +285,51 @@ class LoadOperation : public Operations {
 };
 
 template <typename ResourceT>
+class SoftDeleteOperation : public Operations {
+ public:
+    using BaseT = Operations;
+    explicit SoftDeleteOperation(ID_TYPE id) : BaseT(OperationContext(), ScopedSnapshotT()), id_(id) {
+    }
+
+    Status
+    GetResource(typename ResourceT::Ptr& res, bool wait = false) {
+        if (!status_.ok())
+            return status_;
+        if (wait) {
+            WaitToFinish();
+        }
+        auto status = DoneRequired();
+        if (!status.ok())
+            return status;
+        status = IDSNotEmptyRequried();
+        if (!status.ok())
+            return status;
+        res = resource_;
+        return status;
+    }
+
+    Status
+    DoExecute(Store& store) override {
+        auto status = store.GetResource<ResourceT>(id_, resource_);
+        if (!status.ok()) {
+            return status;
+        }
+        if (!resource_) {
+            std::stringstream emsg;
+            emsg << "Specified " << typeid(ResourceT).name() << " id=" << id_ << " not found";
+            return Status(SS_NOT_FOUND_ERROR, emsg.str());
+        }
+        resource_->Deactivate();
+        AddStep(*resource_, false);
+        return status;
+    }
+
+ protected:
+    ID_TYPE id_;
+    typename ResourceT::Ptr resource_;
+};
+
+template <typename ResourceT>
 class HardDeleteOperation : public Operations {
  public:
     explicit HardDeleteOperation(ID_TYPE id)
