@@ -548,6 +548,7 @@ class Config {
     std::string config_file_;
     std::unordered_map<std::string, std::unordered_map<std::string, std::string>> config_map_;
     std::unordered_map<std::string, std::unordered_map<std::string, ConfigCallBackF>> config_callback_;
+    std::mutex callback_mutex_;
     std::mutex mutex_;
 };
 
