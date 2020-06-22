@@ -13,34 +13,14 @@
 
 #include <memory>
 #include <mutex>
-#include <string>
 #include <thread>
-#include "ResourceTypes.h"
+
+#include "db/snapshot/Event.h"
 #include "utils/BlockingQueue.h"
 
 namespace milvus {
 namespace engine {
 namespace snapshot {
-
-enum class EventType {
-    EVENT_INVALID = 0,
-    EVENT_GC = 1,
-};
-
-struct EventContext {
-    ID_TYPE id;
-    std::string res_type;
-};
-
-struct Event {
-    EventType type;
-    EventContext context;
-
-    std::string
-    ToString() {
-        return context.res_type + "_" + std::to_string(context.id);
-    }
-};
 
 using EventPtr = std::shared_ptr<Event>;
 using ThreadPtr = std::shared_ptr<std::thread>;
@@ -96,12 +76,7 @@ class EventExecutor {
                 break;
             }
             std::cout << std::this_thread::get_id() << " Dequeue Event " << evt->ToString() << std::endl;
-            switch (evt->type) {
-                case EventType::EVENT_GC:
-                    break;
-                default:
-                    break;
-            }
+            evt->Process();
         }
     }
 
