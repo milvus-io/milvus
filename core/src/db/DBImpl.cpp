@@ -1937,7 +1937,7 @@ DBImpl::QueryAsync(const std::shared_ptr<server::Context>& context, meta::FilesH
 }
 
 Status
-DBImpl::HybridQueryAsync(const std::shared_ptr<server::Context>& context, const std::string& table_id,
+DBImpl::HybridQueryAsync(const std::shared_ptr<server::Context>& context, const std::string& collection_id,
                          meta::FilesHolder& files_holder, context::HybridSearchContextPtr hybrid_search_context,
                          query::GeneralQueryPtr general_query,
                          std::unordered_map<std::string, engine::meta::hybrid::DataType>& attr_type, uint64_t& nq,
