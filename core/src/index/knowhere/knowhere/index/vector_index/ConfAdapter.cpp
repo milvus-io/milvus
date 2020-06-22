@@ -230,10 +230,10 @@ NSGConfAdapter::CheckSearch(Config& oricfg, const IndexType type, const IndexMod
 
 bool
 HNSWConfAdapter::CheckTrain(Config& oricfg, const IndexMode mode) {
-    static int64_t MIN_EFCONSTRUCTION = 100;
-    static int64_t MAX_EFCONSTRUCTION = 800;
-    static int64_t MIN_M = 5;
-    static int64_t MAX_M = 48;
+    static int64_t MIN_EFCONSTRUCTION = 8;
+    static int64_t MAX_EFCONSTRUCTION = 512;
+    static int64_t MIN_M = 4;
+    static int64_t MAX_M = 64;
 
     CheckIntByRange(knowhere::meta::ROWS, DEFAULT_MIN_ROWS, DEFAULT_MAX_ROWS);
     CheckIntByRange(knowhere::IndexParams::efConstruction, MIN_EFCONSTRUCTION, MAX_EFCONSTRUCTION);

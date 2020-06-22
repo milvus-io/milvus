@@ -102,6 +102,8 @@ extern const char* CONFIG_ENGINE_OMP_THREAD_NUM;
 extern const char* CONFIG_ENGINE_OMP_THREAD_NUM_DEFAULT;
 extern const char* CONFIG_ENGINE_SIMD_TYPE;
 extern const char* CONFIG_ENGINE_SIMD_TYPE_DEFAULT;
+extern const char* CONFIG_ENGINE_SEARCH_COMBINE_MAX_NQ;
+extern const char* CONFIG_ENGINE_SEARCH_COMBINE_MAX_NQ_DEFAULT;
 
 /* gpu resource config */
 extern const char* CONFIG_GPU_RESOURCE;
@@ -268,6 +270,8 @@ class Config {
     CheckEngineConfigOmpThreadNum(const std::string& value);
     Status
     CheckEngineConfigSimdType(const std::string& value);
+    Status
+    CheckEngineSearchCombineMaxNq(const std::string& value);
 
 #ifdef MILVUS_GPU_VERSION
     /* gpu resource config */
@@ -388,6 +392,8 @@ class Config {
     GetEngineConfigOmpThreadNum(int64_t& value);
     Status
     GetEngineConfigSimdType(std::string& value);
+    Status
+    GetEngineSearchCombineMaxNq(int64_t& value);
 
 #ifdef MILVUS_GPU_VERSION
     /* gpu resource config */
@@ -500,6 +506,8 @@ class Config {
     SetEngineConfigOmpThreadNum(const std::string& value);
     Status
     SetEngineConfigSimdType(const std::string& value);
+    Status
+    SetEngineSearchCombineMaxNq(const std::string& value);
 #ifdef MILVUS_GPU_VERSION
 
     /* gpu resource config */

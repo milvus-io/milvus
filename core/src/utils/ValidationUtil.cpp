@@ -261,11 +261,11 @@ ValidationUtil::ValidateIndexParams(const milvus::json& index_params,
             break;
         }
         case (int32_t)engine::EngineType::HNSW: {
-            auto status = CheckParameterRange(index_params, knowhere::IndexParams::M, 5, 48);
+            auto status = CheckParameterRange(index_params, knowhere::IndexParams::M, 4, 64);
             if (!status.ok()) {
                 return status;
             }
-            status = CheckParameterRange(index_params, knowhere::IndexParams::efConstruction, 100, 500);
+            status = CheckParameterRange(index_params, knowhere::IndexParams::efConstruction, 8, 512);
             if (!status.ok()) {
                 return status;
             }
