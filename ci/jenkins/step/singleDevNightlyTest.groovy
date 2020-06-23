@@ -4,7 +4,7 @@ timeout(time: 180, unit: 'MINUTES') {
         sh 'helm repo add stable https://kubernetes.oss-cn-hangzhou.aliyuncs.com/charts'
         sh 'helm repo update'
         checkout([$class: 'GitSCM', branches: [[name: "${env.HELM_BRANCH}"]], userRemoteConfigs: [[url: "https://github.com/milvus-io/milvus-helm.git", name: 'origin', refspec: "+refs/heads/${env.HELM_BRANCH}:refs/remotes/origin/${env.HELM_BRANCH}"]]])
-        sh 'helm dep update'
+        // sh 'helm dep update'
 
         retry(3) {
             try {
@@ -23,7 +23,7 @@ timeout(time: 180, unit: 'MINUTES') {
     dir ("tests/milvus_python_test") {
         // sh 'python3 -m pip install -r requirements.txt -i http://pypi.douban.com/simple --trusted-host pypi.douban.com'
         sh 'python3 -m pip install -r requirements.txt'
-        sh "pytest . --level=2 --alluredir=\"test_out/dev/single/mysql\" --ip ${env.HELM_RELEASE_NAME}.milvus.svc.cluster.local"
+        sh "pytest . --level=2 --alluredir=\"test_out/dev/single/mysql\" --ip ${env.HELM_RELEASE_NAME}.milvus.svc.cluster.local >> ${WORKSPACE}/${env.DEV_TEST_ARTIFACTS}/milvus_mysql_dev_test.log"
     }
     // sqlite database backend test
     load "ci/jenkins/step/cleanupSingleDev.groovy"
@@ -48,7 +48,7 @@ timeout(time: 180, unit: 'MINUTES') {
         }
     }
     dir ("tests/milvus_python_test") {
-        sh "pytest . --level=2 --alluredir=\"test_out/dev/single/sqlite\" --ip ${env.HELM_RELEASE_NAME}.milvus.svc.cluster.local"
+        sh "pytest . --level=2 --alluredir=\"test_out/dev/single/sqlite\" --ip ${env.HELM_RELEASE_NAME}.milvus.svc.cluster.local >> ${WORKSPACE}/${env.DEV_TEST_ARTIFACTS}/milvus_sqlite_dev_test.log"
         sh "pytest . --level=1 --ip ${env.HELM_RELEASE_NAME}.milvus.svc.cluster.local --port=19121 --handler=HTTP"
     }
 }

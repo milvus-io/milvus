@@ -17,7 +17,6 @@
 #include <string>
 
 namespace milvus {
-namespace server {
 
 signal_func_ptr signal_routine_func = nullptr;
 
@@ -59,5 +58,4 @@ PrintStacktrace() {
     free(stacktrace);
 }
 
-}  // namespace server
 }  // namespace milvus

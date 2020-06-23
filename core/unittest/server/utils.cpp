@@ -92,7 +92,7 @@ WriteToFile(const std::string& file_path, const char* content) {
 void
 ConfigTest::SetUp() {
     std::string config_path(CONFIG_PATH);
-    milvus::server::CommonUtil::CreateDirectory(config_path);
+    milvus::CommonUtil::CreateDirectory(config_path);
     WriteToFile(config_path + VALID_CONFIG_FILE, VALID_CONFIG_STR);
     WriteToFile(config_path + INVALID_CONFIG_FILE, INVALID_CONFIG_STR);
 }
@@ -100,5 +100,5 @@ ConfigTest::SetUp() {
 void
 ConfigTest::TearDown() {
     std::string config_path(CONFIG_PATH);
-    milvus::server::CommonUtil::DeleteDirectory(config_path);
+    milvus::CommonUtil::DeleteDirectory(config_path);
 }

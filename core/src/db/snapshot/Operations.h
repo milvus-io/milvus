@@ -104,10 +104,10 @@ class Operations : public std::enable_shared_from_this<Operations> {
     virtual Status
     PreCheck();
 
-    virtual Status
+    virtual const Status&
     ApplyToStore(Store& store);
 
-    Status
+    const Status&
     WaitToFinish();
 
     void
@@ -116,8 +116,9 @@ class Operations : public std::enable_shared_from_this<Operations> {
     void
     SetStatus(const Status& status);
 
-    Status
+    const Status&
     GetStatus() const {
+        std::unique_lock<std::mutex> lock(finish_mtx_);
         return status_;
     }
 
@@ -241,7 +242,7 @@ class LoadOperation : public Operations {
         : Operations(OperationContext(), ScopedSnapshotT(), OperationsType::O_Leaf), context_(context) {
     }
 
-    Status
+    const Status&
     ApplyToStore(Store& store) override {
         if (done_) {
             Done(store);
@@ -290,7 +291,7 @@ class HardDeleteOperation : public Operations {
         : Operations(OperationContext(), ScopedSnapshotT(), OperationsType::W_Leaf), id_(id) {
     }
 
-    Status
+    const Status&
     ApplyToStore(Store& store) override {
         if (done_)
             return status_;
@@ -311,7 +312,7 @@ class HardDeleteOperation<Collection> : public Operations {
         : Operations(OperationContext(), ScopedSnapshotT(), OperationsType::W_Leaf), id_(id) {
     }
 
-    Status
+    const Status&
     ApplyToStore(Store& store) override {
         if (done_) {
             Done(store);

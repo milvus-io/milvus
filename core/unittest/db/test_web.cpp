@@ -1268,7 +1268,7 @@ TEST_F(WebControllerTest, GET_VECTORS_BY_IDS) {
     }
 
     std::string query_ids;
-    milvus::server::StringHelpFunctions::MergeStringWithDelimeter(vector_ids, ",", query_ids);
+    milvus::StringHelpFunctions::MergeStringWithDelimeter(vector_ids, ",", query_ids);
     auto response = client_ptr->getVectors(collection_name, query_ids.c_str(), conncetion_ptr);
     ASSERT_EQ(OStatus::CODE_200.code, response->getStatusCode()) << response->readBodyToString()->c_str();
 

@@ -130,28 +130,4 @@ constexpr ErrorCode SS_CONSTRAINT_CHECK_ERROR = ToSSErrorCode(7);
 constexpr ErrorCode SS_INVALID_ARGUMENT_ERROR = ToSSErrorCode(8);
 constexpr ErrorCode SS_OPERATION_PENDING = ToSSErrorCode(9);
 
-namespace server {
-class ServerException : public std::exception {
- public:
-    explicit ServerException(ErrorCode error_code, const std::string& message = std::string())
-        : error_code_(error_code), message_(message) {
-    }
-
- public:
-    ErrorCode
-    error_code() const {
-        return error_code_;
-    }
-
-    virtual const char*
-    what() const noexcept {
-        return message_.c_str();
-    }
-
- private:
-    ErrorCode error_code_;
-    std::string message_;
-};
-}  // namespace server
-
 }  // namespace milvus
