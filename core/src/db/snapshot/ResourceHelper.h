@@ -19,15 +19,15 @@
 
 namespace milvus::engine::snapshot {
 
-template<class ResourceT>
+template <class ResourceT>
 inline Status
-GetResFiles(std::vector<std::string> &file_list, typename ResourceT::Ptr &res_ptr) {
+GetResFiles(std::vector<std::string>& file_list, typename ResourceT::Ptr& res_ptr) {
     return Status::OK();
 }
 
-template<>
+template <>
 inline Status
-GetResFiles<Collection>(std::vector<std::string> &file_list, Collection::Ptr &res_ptr) {
+GetResFiles<Collection>(std::vector<std::string>& file_list, Collection::Ptr& res_ptr) {
     std::stringstream ss;
     ss << res_ptr->GetID();
 
@@ -72,5 +72,3 @@ GetResFiles<SegmentFile>(std::vector<std::string>& file_list, SegmentFile::Ptr& 
 }
 
 }  // namespace milvus::engine::snapshot
-
-
