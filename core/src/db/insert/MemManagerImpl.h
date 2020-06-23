@@ -50,7 +50,7 @@ class MemManagerImpl : public MemManager, public server::CacheConfigHandler {
                   const uint8_t* vectors, uint64_t lsn, std::set<std::string>& flushed_tables) override;
 
     Status
-    InsertEntities(const std::string& table_id, int64_t length, const IDNumber* vector_ids, int64_t dim,
+    InsertEntities(const std::string& collection_id, int64_t length, const IDNumber* vector_ids, int64_t dim,
                    const float* vectors, const std::unordered_map<std::string, uint64_t>& attr_nbytes,
                    const std::unordered_map<std::string, uint64_t>& attr_size,
                    const std::unordered_map<std::string, std::vector<uint8_t>>& attr_data, uint64_t lsn,
@@ -66,7 +66,7 @@ class MemManagerImpl : public MemManager, public server::CacheConfigHandler {
     Flush(const std::string& collection_id, bool apply_delete = true) override;
 
     Status
-    Flush(std::set<std::string>& table_ids, bool apply_delete = true) override;
+    Flush(std::set<std::string>& collection_ids, bool apply_delete = true) override;
 
     //    Status
     //    Serialize(std::set<std::string>& table_ids) override;
