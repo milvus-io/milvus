@@ -2568,7 +2568,7 @@ DBImpl::ExecWalRecord(const wal::MXLogRecord& record) {
     auto force_flush_if_mem_full = [&]() -> uint64_t {
         if (mem_mgr_->GetCurrentMem() > options_.insert_buffer_size_) {
             LOG_ENGINE_DEBUG_ << LogOut("[%s][%ld] ", "insert", 0)
-                              << "Insert buffer size exceeds limit. Performing force flush";
+                              << "Insert buffer size exceeds limit. Force flush";
             InternalFlush();
         }
     };
