@@ -68,6 +68,16 @@ enum class MetricType {
     MAX_VALUE = SUPERSTRUCTURE
 };
 
+static std::map<std::string, MetricType> s_map_metric_type = {
+    {"L2", MetricType::L2},
+    {"IP", MetricType::IP},
+    {"HAMMING", MetricType::HAMMING},
+    {"JACCARD", MetricType::JACCARD},
+    {"TANIMOTO", MetricType::TANIMOTO},
+    {"SUBSTRUCTURE", MetricType::SUBSTRUCTURE},
+    {"SUPERSTRUCTURE", MetricType::SUPERSTRUCTURE},
+};
+
 enum class DataType {
     INT8 = 1,
     INT16 = 2,

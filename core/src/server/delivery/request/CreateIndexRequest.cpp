@@ -25,18 +25,21 @@ namespace milvus {
 namespace server {
 
 CreateIndexRequest::CreateIndexRequest(const std::shared_ptr<milvus::server::Context>& context,
-                                       const std::string& collection_name, int64_t index_type,
-                                       const milvus::json& json_params)
+                                       const std::string& collection_name, const std::string& field_name,
+                                       const std::string& index_name, const milvus::json& json_params)
     : BaseRequest(context, BaseRequest::kCreateIndex),
       collection_name_(collection_name),
-      index_type_(index_type),
+      field_name_(field_name),
+      index_name_(index_name),
       json_params_(json_params) {
 }
 
 BaseRequestPtr
 CreateIndexRequest::Create(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name,
-                           int64_t index_type, const milvus::json& json_params) {
-    return std::shared_ptr<BaseRequest>(new CreateIndexRequest(context, collection_name, index_type, json_params));
+                           const std::string& field_name, const std::string& index_name,
+                           const milvus::json& json_params) {
+    return std::shared_ptr<BaseRequest>(
+        new CreateIndexRequest(context, collection_name, field_name, index_name, json_params));
 }
 
 Status
@@ -70,12 +73,17 @@ CreateIndexRequest::OnExecute() {
             }
         }
 
-        status = ValidateCollectionIndexType(index_type_);
+        int32_t index_type;
+        if (json_params_.contains("index_type")) {
+            index_type = json_params_["index_type"].get<int32_t>();
+        }
+
+        status = ValidateCollectionIndexType(index_type);
         if (!status.ok()) {
             return status;
         }
 
-        status = ValidateIndexParams(json_params_, collection_schema, index_type_);
+        status = ValidateIndexParams(json_params_, collection_schema, index_type);
         if (!status.ok()) {
             return status;
         }
@@ -85,7 +93,7 @@ CreateIndexRequest::OnExecute() {
         collection_info.collection_id_ = collection_name_;
         status = DBWrapper::DB()->DescribeCollection(collection_info);
 
-        int32_t adapter_index_type = index_type_;
+        int32_t adapter_index_type = index_type;
         if (engine::utils::IsBinaryMetricType(collection_info.metric_type_)) {  // binary vector not allow
             if (adapter_index_type == static_cast<int32_t>(engine::EngineType::FAISS_IDMAP)) {
                 adapter_index_type = static_cast<int32_t>(engine::EngineType::FAISS_BIN_IDMAP);

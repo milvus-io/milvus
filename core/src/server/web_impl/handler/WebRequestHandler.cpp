@@ -793,7 +793,8 @@ WebRequestHandler::HybridSearch(const std::string& collection_name, const nlohma
                                 std::string& result_str) {
     Status status;
 
-    status = request_handler_.DescribeHybridCollection(context_ptr_, collection_name, field_type_);
+    std::unordered_map<std::string, milvus::json> index_params;
+    status = request_handler_.DescribeHybridCollection(context_ptr_, collection_name, field_type_, index_params);
     if (!status.ok()) {
         return Status{UNEXPECTED_ERROR, "DescribeHybridCollection failed"};
     }
@@ -1300,8 +1301,9 @@ WebRequestHandler::CreateHybridCollection(const milvus::server::web::OString& bo
         }
     }
 
-    auto status = request_handler_.CreateHybridCollection(context_ptr_, collection_name, field_types, vector_dimensions,
-                                                          field_extra_params);
+    auto status = Status::OK();
+//    auto status = request_handler_.CreateHybridCollection(context_ptr_, collection_name, field_types, vector_dimensions,
+//                                                          field_extra_params);
 
     ASSIGN_RETURN_STATUS_DTO(status)
 }
@@ -1420,8 +1422,11 @@ WebRequestHandler::CreateIndex(const OString& collection_name, const OString& bo
         if (!request_json.contains("params")) {
             RETURN_STATUS_DTO(BODY_FIELD_LOSS, "Field \'params\' is required")
         }
-        auto status =
-            request_handler_.CreateIndex(context_ptr_, collection_name->std_str(), index, request_json["params"]);
+
+        auto status = Status::OK();
+
+//        auto status =
+//            request_handler_.CreateIndex(context_ptr_, collection_name->std_str(), index, request_json["params"]);
         ASSIGN_RETURN_STATUS_DTO(status);
     } catch (nlohmann::detail::parse_error& e) {
         RETURN_STATUS_DTO(BODY_PARSE_FAIL, e.what())
@@ -1761,7 +1766,8 @@ WebRequestHandler::InsertEntity(const OString& collection_name, const milvus::se
     uint64_t row_num = body_json["row_num"];
 
     std::unordered_map<std::string, engine::meta::hybrid::DataType> field_types;
-    auto status = request_handler_.DescribeHybridCollection(context_ptr_, collection_name->c_str(), field_types);
+    auto status = Status::OK();
+//    status = request_handler_.DescribeHybridCollection(context_ptr_, collection_name->c_str(), field_types);
 
     auto entities = body_json["entity"];
     if (!entities.is_array()) {
@@ -1813,7 +1819,7 @@ WebRequestHandler::InsertEntity(const OString& collection_name, const milvus::se
                 attr_values.emplace_back(attr_value);
                 break;
             }
-            case engine::meta::hybrid::DataType::VECTOR: {
+            case engine::meta::hybrid::DataType::FLOAT_VECTOR: {
                 bool bin_flag;
                 status = IsBinaryCollection(collection_name->c_str(), bin_flag);
                 if (!status.ok()) {

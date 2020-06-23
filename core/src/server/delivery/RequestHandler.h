@@ -40,8 +40,8 @@ class RequestHandler {
     DropCollection(const std::shared_ptr<Context>& context, const std::string& collection_name);
 
     Status
-    CreateIndex(const std::shared_ptr<Context>& context, const std::string& collection_name, int64_t index_type,
-                const milvus::json& json_params);
+    CreateIndex(const std::shared_ptr<Context>& context, const std::string& collection_name,
+                const std::string& field_name, const std::string& index_name, const milvus::json& json_params);
 
     Status
     Insert(const std::shared_ptr<Context>& context, const std::string& collection_name, engine::VectorsData& vectors,
@@ -124,13 +124,14 @@ class RequestHandler {
 
     Status
     CreateHybridCollection(const std::shared_ptr<Context>& context, const std::string& collection_name,
-                           std::vector<std::pair<std::string, engine::meta::hybrid::DataType>>& field_types,
-                           std::vector<std::pair<std::string, uint64_t>>& vector_dimensions,
-                           std::vector<std::pair<std::string, std::string>>& field_extra_params);
+                           std::unordered_map<std::string, engine::meta::hybrid::DataType>& field_types,
+                           std::unordered_map<std::string, milvus::json>& field_index_params,
+                           std::unordered_map<std::string, std::string>& field_params, milvus::json& json_params);
 
     Status
     DescribeHybridCollection(const std::shared_ptr<Context>& context, const std::string& collection_name,
-                             std::unordered_map<std::string, engine::meta::hybrid::DataType>& field_types);
+                             std::unordered_map<std::string, engine::meta::hybrid::DataType>& field_types,
+                             std::unordered_map<std::string, milvus::json>& index_params);
 
     Status
     HasHybridCollection(const std::shared_ptr<Context>& context, std::string& collection_name, bool& has_collection);

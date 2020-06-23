@@ -29,24 +29,25 @@ namespace server {
 
 CreateHybridCollectionRequest::CreateHybridCollectionRequest(
     const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name,
-    std::vector<std::pair<std::string, engine::meta::hybrid::DataType>>& field_types,
-    std::vector<std::pair<std::string, uint64_t>>& vector_dimensions,
-    std::vector<std::pair<std::string, std::string>>& field_params)
+    std::unordered_map<std::string, engine::meta::hybrid::DataType>& field_types,
+    std::unordered_map<std::string, milvus::json>& field_index_params,
+    std::unordered_map<std::string, std::string>& field_params, milvus::json& extra_params)
     : BaseRequest(context, BaseRequest::kCreateHybridCollection),
       collection_name_(collection_name),
       field_types_(field_types),
-      vector_dimensions_(vector_dimensions),
+      field_index_params_(field_index_params),
       field_params_(field_params) {
 }
 
 BaseRequestPtr
 CreateHybridCollectionRequest::Create(const std::shared_ptr<milvus::server::Context>& context,
                                       const std::string& collection_name,
-                                      std::vector<std::pair<std::string, engine::meta::hybrid::DataType>>& field_types,
-                                      std::vector<std::pair<std::string, uint64_t>>& vector_dimensions,
-                                      std::vector<std::pair<std::string, std::string>>& field_params) {
-    return std::shared_ptr<BaseRequest>(
-        new CreateHybridCollectionRequest(context, collection_name, field_types, vector_dimensions, field_params));
+                                      std::unordered_map<std::string, engine::meta::hybrid::DataType>& field_types,
+                                      std::unordered_map<std::string, milvus::json>& field_index_params,
+                                      std::unordered_map<std::string, std::string>& field_params,
+                                      milvus::json& extra_params) {
+    return std::shared_ptr<BaseRequest>(new CreateHybridCollectionRequest(
+        context, collection_name, field_types, field_index_params, field_params, extra_params));
 }
 
 Status
@@ -69,33 +70,47 @@ CreateHybridCollectionRequest::OnExecute() {
         engine::meta::CollectionSchema collection_info;
         engine::meta::hybrid::FieldsSchema fields_schema;
 
-        auto size = field_types_.size();
-        collection_info.collection_id_ = collection_name_;
-        fields_schema.fields_schema_.resize(size + 1);
-        for (uint64_t i = 0; i < size; ++i) {
-            fields_schema.fields_schema_[i].collection_id_ = collection_name_;
-            fields_schema.fields_schema_[i].field_name_ = field_types_[i].first;
-            fields_schema.fields_schema_[i].field_type_ = (int32_t)field_types_[i].second;
-            fields_schema.fields_schema_[i].field_params_ = field_params_[i].second;
+        uint16_t dimension = 0;
+        milvus::json vector_param;
+        for (auto& field_type : field_types_) {
+            engine::meta::hybrid::FieldSchema schema;
+            auto field_name = field_type.first;
+            auto index_params = field_index_params_.at(field_name);
+            schema.collection_id_ = collection_name_;
+            schema.field_name_ = field_name;
+            schema.field_type_ = (int32_t)field_type.second;
+            if (index_params.contains("name")) {
+                schema.index_name_ = index_params["name"];
+                schema.index_type_ = index_params["type"].get<int32_t>();
+            }
+
+            auto field_param = field_params_.at(field_name);
+            schema.field_params_ = field_param;
+            fields_schema.fields_schema_.emplace_back(schema);
+
+            if (field_type.second == engine::meta::hybrid::DataType::FLOAT_VECTOR ||
+                field_type.second == engine::meta::hybrid::DataType::BINARY_VECTOR) {
+                vector_param = milvus::json::parse(field_param);
+                if (vector_param.contains("dimension")) {
+                    dimension = vector_param["dimension"].get<uint16_t>();
+                }
+            }
         }
-        fields_schema.fields_schema_[size].collection_id_ = collection_name_;
-        fields_schema.fields_schema_[size].field_name_ = vector_dimensions_[0].first;
-        fields_schema.fields_schema_[size].field_type_ = (int32_t)engine::meta::hybrid::DataType::VECTOR;
-        auto vector_param = field_params_[size].second;
-        fields_schema.fields_schema_[size].field_params_ = vector_param;
 
-        collection_info.dimension_ = vector_dimensions_[0].second;
+        collection_info.collection_id_ = collection_name_;
+        collection_info.dimension_ = dimension;
+        if (extra_params_.contains("segment_size")) {
+            collection_info.index_file_size_ = extra_params_["segment_size"].get<int64_t>();
+        }
 
-        if (vector_param != "") {
-            auto json_param = nlohmann::json::parse(vector_param);
-            if (json_param.contains("metric_type")) {
-                int32_t metric_type = json_param["metric_type"];
-                collection_info.metric_type_ = metric_type;
-            }
-            if (json_param.contains("index_type")) {
-                int32_t engine_type = json_param["index_type"];
-                collection_info.engine_type_ = engine_type;
-            }
+        if (vector_param.contains("metric_type")) {
+            int32_t metric_type = (int32_t)milvus::engine::s_map_metric_type.at(vector_param["metric_type"]);
+            collection_info.metric_type_ = metric_type;
+        }
+
+        if (vector_param.contains("index_type")) {
+            int32_t engine_type = (int32_t)milvus::engine::s_map_engine_type.at(vector_param["index_type"]);
+            collection_info.engine_type_ = engine_type;
         }
 
         // step 3: create collection

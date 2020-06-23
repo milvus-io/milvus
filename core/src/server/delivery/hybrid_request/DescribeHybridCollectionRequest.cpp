@@ -29,17 +29,21 @@ namespace server {
 
 DescribeHybridCollectionRequest::DescribeHybridCollectionRequest(
     const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name,
-    std::unordered_map<std::string, engine::meta::hybrid::DataType>& field_types)
+    std::unordered_map<std::string, engine::meta::hybrid::DataType>& field_types,
+    std::unordered_map<std::string, milvus::json>& index_params)
     : BaseRequest(context, BaseRequest::kDescribeHybridCollection),
       collection_name_(collection_name),
-      field_types_(field_types) {
+      field_types_(field_types),
+      index_params_(index_params) {
 }
 
 BaseRequestPtr
 DescribeHybridCollectionRequest::Create(const std::shared_ptr<milvus::server::Context>& context,
                                         const std::string& collection_name,
-                                        std::unordered_map<std::string, engine::meta::hybrid::DataType>& field_types) {
-    return std::shared_ptr<BaseRequest>(new DescribeHybridCollectionRequest(context, collection_name, field_types));
+                                        std::unordered_map<std::string, engine::meta::hybrid::DataType>& field_types,
+                                        std::unordered_map<std::string, milvus::json>& index_params) {
+    return std::shared_ptr<BaseRequest>(
+        new DescribeHybridCollectionRequest(context, collection_name, field_types, index_params));
 }
 
 Status

@@ -1331,7 +1331,8 @@ DBImpl::GetEntitiesByID(const std::string& collection_id, const milvus::engine::
     }
     std::unordered_map<std::string, engine::meta::hybrid::DataType> attr_type;
     for (auto schema : fields_schema.fields_schema_) {
-        if (schema.field_type_ == (int32_t)engine::meta::hybrid::DataType::VECTOR) {
+        if (schema.field_type_ == (int32_t)engine::meta::hybrid::DataType::FLOAT_VECTOR ||
+            schema.field_type_ == (int32_t)engine::meta::hybrid::DataType::BINARY_VECTOR) {
             continue;
         }
         attr_type.insert(std::make_pair(schema.field_name_, (engine::meta::hybrid::DataType)schema.field_type_));
@@ -1828,7 +1829,7 @@ DBImpl::FlushAttrsIndex(const std::string& collection_id) {
         }
 
         for (auto& field_schema : fields_schema.fields_schema_) {
-            if (field_schema.field_type_ != (int32_t)meta::hybrid::DataType::VECTOR) {
+            if (field_schema.field_type_ != (int32_t)meta::hybrid::DataType::FLOAT_VECTOR) {
                 attr_types.insert(
                     std::make_pair(field_schema.field_name_, (meta::hybrid::DataType)field_schema.field_type_));
                 field_names.emplace_back(field_schema.field_name_);
