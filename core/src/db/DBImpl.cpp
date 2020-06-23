@@ -1023,6 +1023,10 @@ DBImpl::Flush(const std::string& collection_id) {
         if (lsn != 0) {
             swn_wal_.Notify();
             flush_req_swn_.Wait();
+        } else {
+            // no collection flushed, call merge task to cleanup files
+            std::set<std::string> merge_collection_ids;
+            StartMergeTask(merge_collection_ids);
         }
     } else {
         LOG_ENGINE_DEBUG_ << "MemTable flush";
@@ -1050,6 +1054,10 @@ DBImpl::Flush() {
         if (lsn != 0) {
             swn_wal_.Notify();
             flush_req_swn_.Wait();
+        } else {
+            // no collection flushed, call merge task to cleanup files
+            std::set<std::string> merge_collection_ids;
+            StartMergeTask(merge_collection_ids);
         }
     } else {
         LOG_ENGINE_DEBUG_ << "MemTable flush";
