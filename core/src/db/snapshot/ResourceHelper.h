@@ -14,12 +14,63 @@
 #include <string>
 #include <vector>
 
+#include "db/snapshot/Resources.h"
 #include "utils/Status.h"
 
 namespace milvus::engine::snapshot {
 
-template <class ResourceT>
-Status
-GetResFiles(std::vector<std::string>& file_list, class ResourceT::Ptr& res_ptr);
+template<class ResourceT>
+inline Status
+GetResFiles(std::vector<std::string> &file_list, typename ResourceT::Ptr &res_ptr) {
+    return Status::OK();
+}
+
+template<>
+inline Status
+GetResFiles<Collection>(std::vector<std::string> &file_list, Collection::Ptr &res_ptr) {
+    std::stringstream ss;
+    ss << res_ptr->GetID();
+
+    file_list.push_back(ss.str());
+    return Status::OK();
+}
+
+template <>
+inline Status
+GetResFiles<Partition>(std::vector<std::string>& file_list, Partition::Ptr& res_ptr) {
+    std::stringstream ss;
+    ss << res_ptr->GetCollectionId() << "/";
+    ss << res_ptr->GetID();
+
+    file_list.push_back(ss.str());
+    return Status::OK();
+}
+
+template <>
+inline Status
+GetResFiles<Segment>(std::vector<std::string>& file_list, Segment::Ptr& res_ptr) {
+    std::stringstream ss;
+    ss << res_ptr->GetCollectionId() << "/";
+    ss << res_ptr->GetPartitionId() << "/";
+    ss << res_ptr->GetID();
+
+    file_list.push_back(ss.str());
+    return Status::OK();
+}
+
+template <>
+inline Status
+GetResFiles<SegmentFile>(std::vector<std::string>& file_list, SegmentFile::Ptr& res_ptr) {
+    std::stringstream ss;
+    ss << res_ptr->GetCollectionId() << "/";
+    ss << res_ptr->GetPartitionId() << "/";
+    ss << res_ptr->GetSegmentId() << "/";
+    ss << res_ptr->GetID();
+
+    file_list.push_back(ss.str());
+    return Status::OK();
+}
 
 }  // namespace milvus::engine::snapshot
+
+

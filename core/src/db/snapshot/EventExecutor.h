@@ -42,7 +42,7 @@ class EventExecutor {
     }
 
     Status
-    Submit(EventPtr& evt) {
+    Submit(const EventPtr& evt) {
         if (evt == nullptr) {
             return Status(SS_INVALID_ARGUMENT_ERROR, "Invalid Resource");
         }
@@ -81,7 +81,7 @@ class EventExecutor {
     }
 
     void
-    Enqueue(EventPtr evt) {
+    Enqueue(const EventPtr& evt) {
         queue_.Put(evt);
         if (evt != nullptr) {
             std::cout << std::this_thread::get_id() << " Enqueue Event " << std::endl;

@@ -33,6 +33,8 @@ class Event {
 template <class ResourceT>
 class ResourceGCEvent : public Event {
  public:
+    using Ptr = std::shared_ptr<ResourceGCEvent>;
+
     explicit ResourceGCEvent(class ResourceT::Ptr res) : res_(res) {
     }
 
