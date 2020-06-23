@@ -444,8 +444,8 @@ class Store {
                         auto& f_c_m = field_commit->GetMappings();
                         for (auto field_element_id : f_c_m) {
                             SegmentFilePtr sf;
-                            CreateResource<SegmentFile>(SegmentFile(c->GetID(), p->GetID(), s->GetID(),
-                                                                    field_commit_id), sf);
+                            CreateResource<SegmentFile>(
+                                SegmentFile(c->GetID(), p->GetID(), s->GetID(), field_commit_id), sf);
                             all_records.push_back(sf);
 
                             s_c_m.insert(sf->GetID());

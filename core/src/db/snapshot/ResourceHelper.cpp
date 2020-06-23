@@ -9,46 +9,62 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
+#include <sstream>
+
 #include "db/snapshot/ResourceHelper.h"
 #include "db/snapshot/Resources.h"
 
 namespace milvus::engine::snapshot {
 
-template<class ResourceT>
+template <class ResourceT>
 Status
 GetResFiles(std::vector<std::string>& file_list, class ResourceT::Ptr& res_ptr) {
     return Status::OK();
 }
 
-////////////////////////////////////////////////////////////////////////////////
-template<>
+template <>
 Status
 GetResFiles<Collection>(std::vector<std::string>& file_list, Collection::Ptr& res_ptr) {
-    file_list.push_back(res_ptr->GetName());
+    std::stringstream ss;
+    ss << res_ptr->GetID();
+
+    file_list.push_back(ss.str());
     return Status::OK();
 }
 
-////////////////////////////////////////////////////////////////////////////////
-template<>
+template <>
 Status
 GetResFiles<Partition>(std::vector<std::string>& file_list, Partition::Ptr& res_ptr) {
-    file_list.push_back(res_ptr->GetName());
+    std::stringstream ss;
+    ss << res_ptr->GetCollectionId() << "/";
+    ss << res_ptr->GetID();
+
+    file_list.push_back(ss.str());
     return Status::OK();
 }
 
-////////////////////////////////////////////////////////////////////////////////
-template<>
+template <>
 Status
 GetResFiles<Segment>(std::vector<std::string>& file_list, Segment::Ptr& res_ptr) {
-    file_list.push_back(std::to_string(res_ptr->GetID()));
+    std::stringstream ss;
+    ss << res_ptr->GetCollectionId() << "/";
+    ss << res_ptr->GetPartitionId() << "/";
+    ss << res_ptr->GetID();
+
+    file_list.push_back(ss.str());
     return Status::OK();
 }
 
-////////////////////////////////////////////////////////////////////////////////
-template<>
+template <>
 Status
 GetResFiles<SegmentFile>(std::vector<std::string>& file_list, SegmentFile::Ptr& res_ptr) {
-    file_list.push_back(std::to_string(res_ptr->GetID()));
+    std::stringstream ss;
+    ss << res_ptr->GetCollectionId() << "/";
+    ss << res_ptr->GetPartitionId() << "/";
+    ss << res_ptr->GetSegmentId() << "/";
+    ss << res_ptr->GetID();
+
+    file_list.push_back(ss.str());
     return Status::OK();
 }
 

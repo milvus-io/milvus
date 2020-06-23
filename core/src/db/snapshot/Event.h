@@ -14,6 +14,7 @@
 #include <boost/filesystem.hpp>
 #include <memory>
 #include <string>
+#include <vector>
 
 #include "db/snapshot/Operations.h"
 #include "db/snapshot/ResourceHelper.h"
