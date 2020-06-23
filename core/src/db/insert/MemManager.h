@@ -34,7 +34,7 @@ class MemManager {
                   const uint8_t* vectors, uint64_t lsn) = 0;
 
     virtual Status
-    InsertEntities(const std::string& table_id, int64_t length, const IDNumber* vector_ids, int64_t dim,
+    InsertEntities(const std::string& collection_id, int64_t length, const IDNumber* vector_ids, int64_t dim,
                    const float* vectors, const std::unordered_map<std::string, uint64_t>& attr_nbytes,
                    const std::unordered_map<std::string, uint64_t>& attr_size,
                    const std::unordered_map<std::string, std::vector<uint8_t>>& attr_data, uint64_t lsn) = 0;
@@ -49,7 +49,8 @@ class MemManager {
     Flush(const std::string& collection_id) = 0;
 
     virtual Status
-    Flush(std::set<std::string>& table_ids) = 0;
+
+    Flush(std::set<std::string>& collection_ids) = 0;
 
     //    virtual Status
     //    Serialize(std::set<std::string>& table_ids) = 0;
