@@ -24,12 +24,7 @@ GetResFiles(std::vector<std::string>& file_list, class ResourceT::Ptr& res_ptr) 
 template<>
 Status
 GetResFiles<Collection>(std::vector<std::string>& file_list, Collection::Ptr& res_ptr) {
-    return Status::OK();
-}
-
-template<>
-Status
-GetResFiles<CollectionCommit>(std::vector<std::string>& file_list, CollectionCommit::Ptr& res_ptr) {
+    file_list.push_back(res_ptr->GetName());
     return Status::OK();
 }
 
@@ -37,12 +32,7 @@ GetResFiles<CollectionCommit>(std::vector<std::string>& file_list, CollectionCom
 template<>
 Status
 GetResFiles<Partition>(std::vector<std::string>& file_list, Partition::Ptr& res_ptr) {
-    return Status::OK();
-}
-
-template<>
-Status
-GetResFiles<PartitionCommit>(std::vector<std::string>& file_list, PartitionCommit::Ptr& res_ptr) {
+    file_list.push_back(res_ptr->GetName());
     return Status::OK();
 }
 
@@ -50,12 +40,7 @@ GetResFiles<PartitionCommit>(std::vector<std::string>& file_list, PartitionCommi
 template<>
 Status
 GetResFiles<Segment>(std::vector<std::string>& file_list, Segment::Ptr& res_ptr) {
-    return Status::OK();
-}
-
-template<>
-Status
-GetResFiles<SegmentCommit>(std::vector<std::string>& file_list, SegmentCommit::Ptr& res_ptr) {
+    file_list.push_back(std::to_string(res_ptr->GetID()));
     return Status::OK();
 }
 
@@ -63,6 +48,7 @@ GetResFiles<SegmentCommit>(std::vector<std::string>& file_list, SegmentCommit::P
 template<>
 Status
 GetResFiles<SegmentFile>(std::vector<std::string>& file_list, SegmentFile::Ptr& res_ptr) {
+    file_list.push_back(std::to_string(res_ptr->GetID()));
     return Status::OK();
 }
 
