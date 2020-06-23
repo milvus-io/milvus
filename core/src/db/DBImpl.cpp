@@ -2538,7 +2538,7 @@ DBImpl::ExecWalRecord(const wal::MXLogRecord& record) {
     auto collections_flushed = [&](const std::string collection_id,
                                    const std::set<std::string>& target_collection_names) -> uint64_t {
         uint64_t max_lsn = 0;
-        if (options_.wal_enable_) {
+        if (options_.wal_enable_ && !target_collection_names.empty()) {
             uint64_t lsn = 0;
             for (auto& collection : target_collection_names) {
                 meta_ptr_->GetCollectionFlushLSN(collection, lsn);
@@ -2737,7 +2737,7 @@ DBImpl::BackgroundWalThread() {
     if (options_.auto_flush_interval_ > 0) {
         next_auto_flush_time = get_next_auto_flush_time();
     }
-
+    InternalFlush();
     while (true) {
         if (options_.auto_flush_interval_ > 0) {
             if (std::chrono::system_clock::now() >= next_auto_flush_time) {
