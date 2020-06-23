@@ -121,9 +121,10 @@ PartitionCommit::ToString() const {
     return ss.str();
 }
 
-Segment::Segment(ID_TYPE partition_id, ID_TYPE num, ID_TYPE id, LSN_TYPE lsn, State status, TS_TYPE created_on,
-                 TS_TYPE updated_on)
-    : PartitionIdField(partition_id),
+Segment::Segment(ID_TYPE collection_id, ID_TYPE partition_id, ID_TYPE num, ID_TYPE id, LSN_TYPE lsn, State status,
+                 TS_TYPE created_on, TS_TYPE updated_on)
+    : CollectionIdField(collection_id),
+      PartitionIdField(partition_id),
       NumField(num),
       IdField(id),
       LsnField(lsn),
@@ -138,6 +139,7 @@ Segment::ToString() const {
     ss << "Segment [" << this << "]: ";
     ss << "id=" << GetID() << ", ";
     ss << "partition_id=" << GetPartitionId() << ", ";
+    ss << "collection_id=" << GetCollectionId() << ", ";
     ss << "num=" << (NUM_TYPE)GetNum() << ", ";
     ss << "status=" << GetStatus() << ", ";
     return ss.str();

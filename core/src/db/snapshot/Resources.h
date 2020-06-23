@@ -56,7 +56,7 @@ class StatusField {
         return status_;
     }
 
-    [[nodiscard]] bool
+    bool
     IsActive() const {
         return status_ == ACTIVE;
     }
@@ -378,7 +378,7 @@ class PartitionCommit : public BaseResource,
                     LSN_TYPE lsn = 0, State status = PENDING, TS_TYPE created_on = GetMicroSecTimeStamp(),
                     TS_TYPE UpdatedOnField = GetMicroSecTimeStamp());
 
-    [[nodiscard]] std::string
+    std::string
     ToString() const override;
 };
 
@@ -387,6 +387,7 @@ using PartitionCommitPtr = PartitionCommit::Ptr;
 ///////////////////////////////////////////////////////////////////////////////
 
 class Segment : public BaseResource,
+                public CollectionIdField,
                 public PartitionIdField,
                 public NumField,
                 public IdField,
@@ -401,10 +402,11 @@ class Segment : public BaseResource,
     using VecT = std::vector<Ptr>;
     static constexpr const char* Name = "Segment";
 
-    explicit Segment(ID_TYPE partition_id, ID_TYPE num = 0, ID_TYPE id = 0, LSN_TYPE lsn = 0, State status = PENDING,
-                     TS_TYPE created_on = GetMicroSecTimeStamp(), TS_TYPE UpdatedOnField = GetMicroSecTimeStamp());
+    explicit Segment(ID_TYPE collection_id, ID_TYPE partition_id, ID_TYPE num = 0, ID_TYPE id = 0, LSN_TYPE lsn = 0,
+                     State status = PENDING, TS_TYPE created_on = GetMicroSecTimeStamp(),
+                     TS_TYPE UpdatedOnField = GetMicroSecTimeStamp());
 
-    [[nodiscard]] std::string
+    std::string
     ToString() const override;
 };
 
@@ -431,7 +433,7 @@ class SegmentCommit : public BaseResource,
                   ID_TYPE id = 0, LSN_TYPE lsn = 0, State status = PENDING, TS_TYPE created_on = GetMicroSecTimeStamp(),
                   TS_TYPE UpdatedOnField = GetMicroSecTimeStamp());
 
-    [[nodiscard]] std::string
+    std::string
     ToString() const override;
 };
 

@@ -435,7 +435,7 @@ class Store {
                 MappingT p_c_m;
                 for (auto si = 1; si <= random_segments; ++si) {
                     SegmentPtr s;
-                    CreateResource<Segment>(Segment(p->GetID(), si), s);
+                    CreateResource<Segment>(Segment(c->GetID(), p->GetID(), si), s);
                     all_records.push_back(s);
                     auto& schema_m = schema->GetMappings();
                     MappingT s_c_m;

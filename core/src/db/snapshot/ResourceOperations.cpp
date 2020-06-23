@@ -151,7 +151,8 @@ SegmentOperation::DoExecute(Store& store) {
         return Status(SS_INVALID_CONTEX_ERROR, emsg.str());
     }
     auto prev_num = GetStartedSS()->GetMaxSegmentNumByPartition(context_.prev_partition->GetID());
-    resource_ = std::make_shared<Segment>(context_.prev_partition->GetID(), prev_num + 1);
+    resource_ = std::make_shared<Segment>(context_.prev_partition->GetCollectionId(),
+                                          context_.prev_partition->GetID(), prev_num + 1);
     AddStep(*resource_, false);
     return Status::OK();
 }
