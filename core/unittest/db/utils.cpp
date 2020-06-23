@@ -174,6 +174,23 @@ BaseTest::GetOptions() {
 void
 DBTest::SetUp() {
     BaseTest::SetUp();
+    milvus::engine::snapshot::OperationExecutor::GetInstance().Start();
+    milvus::engine::snapshot::EventExecutor::GetInstance().Start();
+    milvus::engine::snapshot::CollectionCommitsHolder::GetInstance().Reset();
+    milvus::engine::snapshot::CollectionsHolder::GetInstance().Reset();
+    milvus::engine::snapshot::SchemaCommitsHolder::GetInstance().Reset();
+    milvus::engine::snapshot::FieldCommitsHolder::GetInstance().Reset();
+    milvus::engine::snapshot::FieldsHolder::GetInstance().Reset();
+    milvus::engine::snapshot::FieldElementsHolder::GetInstance().Reset();
+    milvus::engine::snapshot::PartitionsHolder::GetInstance().Reset();
+    milvus::engine::snapshot::PartitionCommitsHolder::GetInstance().Reset();
+    milvus::engine::snapshot::SegmentsHolder::GetInstance().Reset();
+    milvus::engine::snapshot::SegmentCommitsHolder::GetInstance().Reset();
+    milvus::engine::snapshot::SegmentFilesHolder::GetInstance().Reset();
+
+    milvus::engine::snapshot::Store::GetInstance().DoReset();
+    milvus::engine::snapshot::Snapshots::GetInstance().Reset();
+    milvus::engine::snapshot::Snapshots::GetInstance().Init();
 
     auto res_mgr = milvus::scheduler::ResMgrInst::GetInstance();
     res_mgr->Clear();
@@ -209,6 +226,10 @@ DBTest::TearDown() {
     milvus::scheduler::CPUBuilderInst::GetInstance()->Stop();
     milvus::scheduler::ResMgrInst::GetInstance()->Stop();
     milvus::scheduler::ResMgrInst::GetInstance()->Clear();
+
+    std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    milvus::engine::snapshot::EventExecutor::GetInstance().Stop();
+    milvus::engine::snapshot::OperationExecutor::GetInstance().Stop();
 
     BaseTest::TearDown();
 

@@ -33,6 +33,7 @@
 #include "db/meta/FilesHolder.h"
 #include "utils/ThreadPool.h"
 #include "wal/WalManager.h"
+#include "db/snapshot/ResourceTypes.h"
 
 namespace milvus {
 namespace engine {
@@ -73,6 +74,8 @@ class DBImpl : public DB, public server::CacheConfigHandler, public server::Engi
 
     Status
     AllCollections(std::vector<meta::CollectionSchema>& collection_schema_array) override;
+    Status
+    AllCollections(snapshot::IDS_TYPE& collection_ids);
 
     Status
     GetCollectionInfo(const std::string& collection_id, std::string& collection_info) override;

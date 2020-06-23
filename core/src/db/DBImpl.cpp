@@ -55,6 +55,8 @@
 #include "utils/StringHelpFunctions.h"
 #include "utils/TimeRecorder.h"
 #include "wal/WalDefinations.h"
+#include "db/snapshot/Snapshots.h"
+#include "db/snapshot/CompoundOperations.h"
 
 #include "search/TaskInst.h"
 
@@ -230,6 +232,46 @@ DBImpl::CreateCollection(meta::CollectionSchema& collection_schema) {
         return SHUTDOWN_ERROR;
     }
 
+    // SS TODO START
+    {
+        snapshot::CreateCollectionContext context;
+        if (options_.wal_enable_) {
+            context.lsn = wal_mgr_->CreateCollection(collection_schema.collection_id_);
+        }
+
+        auto collection = std::make_shared<snapshot::Collection>(collection_schema.collection_id_);
+        context.collection = collection;
+
+        auto vector_field = std::make_shared<snapshot::Field>("_vector", 0);
+        context.fields_schema[vector_field] = {};
+        auto op = std::make_shared<snapshot::CreateCollectionOperation>(context);
+        auto status = op->Push();
+        if (!status.ok()) {
+            return status;
+        }
+
+        snapshot::ScopedSnapshotT ss;
+        status = op->GetSnapshot(ss);
+        if (!status.ok()) {
+            return status;
+        }
+
+        std::cout << "Create Collection " << collection_schema.collection_id_ << std::endl;
+
+        /* snapshot::CollectionPtr loaded; */
+        /* snapshot::LoadOperationContext load_ctx; */
+        /* load_ctx.id = ss->GetCollection()->GetID(); */
+
+        /* auto load_op = std::make_shared<snapshot::LoadOperation<snapshot::Collection>>(load_ctx); */
+        /* status = load_op->Push(); */
+        /* if (!status.ok()) { */
+        /*     return status; */
+        /* } */
+        /* status = load_op->GetResource(loaded); */
+        /* std::cout << "Loaded Collection " << loaded->GetName() << std::endl; */
+    }
+    // SS TODO END
+
     meta::CollectionSchema temp_schema = collection_schema;
     temp_schema.index_file_size_ *= MB;  // store as MB
     if (options_.wal_enable_) {
@@ -278,6 +320,14 @@ DBImpl::DropCollection(const std::string& collection_id) {
     if (options_.wal_enable_) {
         wal_mgr_->DropCollection(collection_id);
     }
+
+    // SS TODO START
+    {
+        auto status = snapshot::Snapshots::GetInstance().DropCollection(collection_id,
+                std::numeric_limits<snapshot::LSN_TYPE>::max());
+        /* std::cout << "Drop collection " << collection_id << " " << status.ToString() << std::endl; */
+    }
+    // SS TODO END
 
     status = mem_mgr_->EraseMemVector(collection_id);      // not allow insert
     status = meta_ptr_->DropCollections({collection_id});  // soft delete collection
@@ -334,9 +384,28 @@ DBImpl::HasNativeCollection(const std::string& collection_id, bool& has_or_not) 
 }
 
 Status
+DBImpl::AllCollections(snapshot::IDS_TYPE& collection_ids) {
+    if (!initialized_.load(std::memory_order_acquire)) {
+        return SHUTDOWN_ERROR;
+    }
+
+    /* return Status::OK(); */
+    return snapshot::Snapshots::GetInstance().GetCollectionIds(collection_ids);
+}
+
+// SS TODO: remove
+Status
 DBImpl::AllCollections(std::vector<meta::CollectionSchema>& collection_schema_array) {
     if (!initialized_.load(std::memory_order_acquire)) {
         return SHUTDOWN_ERROR;
+    }
+
+    {
+        snapshot::IDS_TYPE ids;
+        auto status = AllCollections(ids);
+        for (auto& id : ids) {
+            std::cout << "Collection_" << id << std::endl;
+        }
     }
 
     std::vector<meta::CollectionSchema> all_collections;

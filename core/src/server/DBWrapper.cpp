@@ -21,6 +21,7 @@
 #include "config/Config.h"
 #include "config/Utils.h"
 #include "db/DBFactory.h"
+#include "db/snapshot/OperationExecutor.h"
 #include "utils/CommonUtil.h"
 #include "utils/Log.h"
 #include "utils/StringHelpFunctions.h"
@@ -193,6 +194,8 @@ DBWrapper::StartService() {
         kill(0, SIGUSR1);
     }
 
+    engine::snapshot::OperationExecutor::GetInstance().Start();
+
     // create db instance
     try {
         db_ = engine::DBFactory::Build(opt);
@@ -228,7 +231,7 @@ DBWrapper::StopService() {
     if (db_) {
         db_->Stop();
     }
-
+    engine::snapshot::OperationExecutor::GetInstance().Stop();
     return Status::OK();
 }
 
