@@ -12,6 +12,7 @@ Please mark all change in change log and use the issue from GitHub
 -   \#2598 fix Milvus docker image report illegal instruction
 -   \#2617 Fix HNSW and RNSG index files size
 -   \#2637 Suit the range of HNSW parameters
+-   \#2649 search parameter of annoy has conflict with document
 
 ## Feature
 
