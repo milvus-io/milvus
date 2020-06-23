@@ -1269,41 +1269,38 @@ WebRequestHandler::CreateHybridCollection(const milvus::server::web::OString& bo
     std::string collection_name = json_str["collection_name"];
 
     // TODO(yukun): do checking
-    std::vector<std::pair<std::string, engine::meta::hybrid::DataType>> field_types;
-    std::vector<std::pair<std::string, std::string>> field_extra_params;
-    std::vector<std::pair<std::string, uint64_t>> vector_dimensions;
+    std::unordered_map<std::string, engine::meta::hybrid::DataType> field_types;
+    std::unordered_map<std::string, milvus::json> field_index_params;
+    std::unordered_map<std::string, std::string> field_extra_params;
     for (auto& field : json_str["fields"]) {
         std::string field_name = field["field_name"];
         std::string field_type = field["field_type"];
         auto extra_params = field["extra_params"];
         if (field_type == "int8") {
-            field_types.emplace_back(std::make_pair(field_name, engine::meta::hybrid::DataType::INT8));
+            field_types.insert(std::make_pair(field_name, engine::meta::hybrid::DataType::INT8));
         } else if (field_type == "int16") {
-            field_types.emplace_back(std::make_pair(field_name, engine::meta::hybrid::DataType::INT16));
+            field_types.insert(std::make_pair(field_name, engine::meta::hybrid::DataType::INT16));
         } else if (field_type == "int32") {
-            field_types.emplace_back(std::make_pair(field_name, engine::meta::hybrid::DataType::INT32));
+            field_types.insert(std::make_pair(field_name, engine::meta::hybrid::DataType::INT32));
         } else if (field_type == "int64") {
-            field_types.emplace_back(std::make_pair(field_name, engine::meta::hybrid::DataType::INT64));
+            field_types.insert(std::make_pair(field_name, engine::meta::hybrid::DataType::INT64));
         } else if (field_type == "float") {
-            field_types.emplace_back(std::make_pair(field_name, engine::meta::hybrid::DataType::FLOAT));
+            field_types.insert(std::make_pair(field_name, engine::meta::hybrid::DataType::FLOAT));
         } else if (field_type == "double") {
-            field_types.emplace_back(std::make_pair(field_name, engine::meta::hybrid::DataType::DOUBLE));
+            field_types.insert(std::make_pair(field_name, engine::meta::hybrid::DataType::DOUBLE));
         } else if (field_type == "vector") {
         } else {
             std::string msg = field_name + " has wrong field_type";
             RETURN_STATUS_DTO(BODY_PARSE_FAIL, msg.c_str());
         }
 
-        field_extra_params.emplace_back(std::make_pair(field_name, extra_params.dump()));
-
-        if (extra_params.contains("dimension")) {
-            vector_dimensions.emplace_back(std::make_pair(field_name, extra_params["dimension"].get<uint64_t>()));
-        }
+        field_extra_params.insert(std::make_pair(field_name, extra_params.dump()));
     }
 
-    auto status = Status::OK();
-//    auto status = request_handler_.CreateHybridCollection(context_ptr_, collection_name, field_types, vector_dimensions,
-//                                                          field_extra_params);
+    milvus::json json_params;
+
+    auto status = request_handler_.CreateHybridCollection(context_ptr_, collection_name, field_types,
+                                                          field_index_params, field_extra_params, json_params);
 
     ASSIGN_RETURN_STATUS_DTO(status)
 }
@@ -1410,6 +1407,7 @@ StatusDto::ObjectWrapper
 WebRequestHandler::CreateIndex(const OString& collection_name, const OString& body) {
     try {
         auto request_json = nlohmann::json::parse(body->std_str());
+        std::string field_name, index_name;
         if (!request_json.contains("index_type")) {
             RETURN_STATUS_DTO(BODY_FIELD_LOSS, "Field \'index_type\' is required");
         }
@@ -1424,7 +1422,6 @@ WebRequestHandler::CreateIndex(const OString& collection_name, const OString& bo
         }
 
         auto status = Status::OK();
-
 //        auto status =
 //            request_handler_.CreateIndex(context_ptr_, collection_name->std_str(), index, request_json["params"]);
         ASSIGN_RETURN_STATUS_DTO(status);
@@ -1767,7 +1764,7 @@ WebRequestHandler::InsertEntity(const OString& collection_name, const milvus::se
 
     std::unordered_map<std::string, engine::meta::hybrid::DataType> field_types;
     auto status = Status::OK();
-//    status = request_handler_.DescribeHybridCollection(context_ptr_, collection_name->c_str(), field_types);
+//    auto status = request_handler_.DescribeHybridCollection(context_ptr_, collection_name->c_str(), field_types);
 
     auto entities = body_json["entity"];
     if (!entities.is_array()) {

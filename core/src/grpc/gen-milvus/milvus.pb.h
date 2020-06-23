@@ -3470,13 +3470,14 @@ class QueryResult :
   // accessors -------------------------------------------------------
 
   enum : int {
-    kScoresFieldNumber = 3,
-    kDistancesFieldNumber = 4,
-    kExtraParamsFieldNumber = 5,
-    kEntitiesFieldNumber = 1,
-    kRowNumFieldNumber = 2,
+    kScoresFieldNumber = 4,
+    kDistancesFieldNumber = 5,
+    kExtraParamsFieldNumber = 6,
+    kStatusFieldNumber = 1,
+    kEntitiesFieldNumber = 2,
+    kRowNumFieldNumber = 3,
   };
-  // repeated float scores = 3;
+  // repeated float scores = 4;
   int scores_size() const;
   void clear_scores();
   float scores(int index) const;
@@ -3487,7 +3488,7 @@ class QueryResult :
   ::PROTOBUF_NAMESPACE_ID::RepeatedField< float >*
       mutable_scores();
 
-  // repeated float distances = 4;
+  // repeated float distances = 5;
   int distances_size() const;
   void clear_distances();
   float distances(int index) const;
@@ -3498,7 +3499,7 @@ class QueryResult :
   ::PROTOBUF_NAMESPACE_ID::RepeatedField< float >*
       mutable_distances();
 
-  // repeated .milvus.grpc.KeyValuePair extra_params = 5;
+  // repeated .milvus.grpc.KeyValuePair extra_params = 6;
   int extra_params_size() const;
   void clear_extra_params();
   ::milvus::grpc::KeyValuePair* mutable_extra_params(int index);
@@ -3509,7 +3510,15 @@ class QueryResult :
   const ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField< ::milvus::grpc::KeyValuePair >&
       extra_params() const;
 
-  // .milvus.grpc.Entities entities = 1;
+  // .milvus.grpc.Status status = 1;
+  bool has_status() const;
+  void clear_status();
+  const ::milvus::grpc::Status& status() const;
+  ::milvus::grpc::Status* release_status();
+  ::milvus::grpc::Status* mutable_status();
+  void set_allocated_status(::milvus::grpc::Status* status);
+
+  // .milvus.grpc.Entities entities = 2;
   bool has_entities() const;
   void clear_entities();
   const ::milvus::grpc::Entities& entities() const;
@@ -3517,7 +3526,7 @@ class QueryResult :
   ::milvus::grpc::Entities* mutable_entities();
   void set_allocated_entities(::milvus::grpc::Entities* entities);
 
-  // int64 row_num = 2;
+  // int64 row_num = 3;
   void clear_row_num();
   ::PROTOBUF_NAMESPACE_ID::int64 row_num() const;
   void set_row_num(::PROTOBUF_NAMESPACE_ID::int64 value);
@@ -3532,6 +3541,7 @@ class QueryResult :
   ::PROTOBUF_NAMESPACE_ID::RepeatedField< float > distances_;
   mutable std::atomic<int> _distances_cached_byte_size_;
   ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField< ::milvus::grpc::KeyValuePair > extra_params_;
+  ::milvus::grpc::Status* status_;
   ::milvus::grpc::Entities* entities_;
   ::PROTOBUF_NAMESPACE_ID::int64 row_num_;
   mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
@@ -9163,7 +9173,52 @@ Entities::fields() const {
 
 // QueryResult
 
-// .milvus.grpc.Entities entities = 1;
+// .milvus.grpc.Status status = 1;
+inline bool QueryResult::has_status() const {
+  return this != internal_default_instance() && status_ != nullptr;
+}
+inline const ::milvus::grpc::Status& QueryResult::status() const {
+  const ::milvus::grpc::Status* p = status_;
+  // @@protoc_insertion_point(field_get:milvus.grpc.QueryResult.status)
+  return p != nullptr ? *p : *reinterpret_cast<const ::milvus::grpc::Status*>(
+      &::milvus::grpc::_Status_default_instance_);
+}
+inline ::milvus::grpc::Status* QueryResult::release_status() {
+  // @@protoc_insertion_point(field_release:milvus.grpc.QueryResult.status)
+  
+  ::milvus::grpc::Status* temp = status_;
+  status_ = nullptr;
+  return temp;
+}
+inline ::milvus::grpc::Status* QueryResult::mutable_status() {
+  
+  if (status_ == nullptr) {
+    auto* p = CreateMaybeMessage<::milvus::grpc::Status>(GetArenaNoVirtual());
+    status_ = p;
+  }
+  // @@protoc_insertion_point(field_mutable:milvus.grpc.QueryResult.status)
+  return status_;
+}
+inline void QueryResult::set_allocated_status(::milvus::grpc::Status* status) {
+  ::PROTOBUF_NAMESPACE_ID::Arena* message_arena = GetArenaNoVirtual();
+  if (message_arena == nullptr) {
+    delete reinterpret_cast< ::PROTOBUF_NAMESPACE_ID::MessageLite*>(status_);
+  }
+  if (status) {
+    ::PROTOBUF_NAMESPACE_ID::Arena* submessage_arena = nullptr;
+    if (message_arena != submessage_arena) {
+      status = ::PROTOBUF_NAMESPACE_ID::internal::GetOwnedMessage(
+          message_arena, status, submessage_arena);
+    }
+    
+  } else {
+    
+  }
+  status_ = status;
+  // @@protoc_insertion_point(field_set_allocated:milvus.grpc.QueryResult.status)
+}
+
+// .milvus.grpc.Entities entities = 2;
 inline bool QueryResult::has_entities() const {
   return this != internal_default_instance() && entities_ != nullptr;
 }
@@ -9214,7 +9269,7 @@ inline void QueryResult::set_allocated_entities(::milvus::grpc::Entities* entiti
   // @@protoc_insertion_point(field_set_allocated:milvus.grpc.QueryResult.entities)
 }
 
-// int64 row_num = 2;
+// int64 row_num = 3;
 inline void QueryResult::clear_row_num() {
   row_num_ = PROTOBUF_LONGLONG(0);
 }
@@ -9228,7 +9283,7 @@ inline void QueryResult::set_row_num(::PROTOBUF_NAMESPACE_ID::int64 value) {
   // @@protoc_insertion_point(field_set:milvus.grpc.QueryResult.row_num)
 }
 
-// repeated float scores = 3;
+// repeated float scores = 4;
 inline int QueryResult::scores_size() const {
   return scores_.size();
 }
@@ -9258,7 +9313,7 @@ QueryResult::mutable_scores() {
   return &scores_;
 }
 
-// repeated float distances = 4;
+// repeated float distances = 5;
 inline int QueryResult::distances_size() const {
   return distances_.size();
 }
@@ -9288,7 +9343,7 @@ QueryResult::mutable_distances() {
   return &distances_;
 }
 
-// repeated .milvus.grpc.KeyValuePair extra_params = 5;
+// repeated .milvus.grpc.KeyValuePair extra_params = 6;
 inline int QueryResult::extra_params_size() const {
   return extra_params_.size();
 }

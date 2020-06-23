@@ -1233,7 +1233,7 @@ GrpcRequestHandler::SearchPB(::grpc::ServerContext* context, const ::milvus::grp
 
     if (!query::ValidateBinaryQuery(general_query->bin)) {
         status = Status{SERVER_INVALID_BINARY_QUERY, "Generate wrong binary query tree"};
-        SET_RESPONSE(response->mutable_entities()->mutable_status(), status, context)
+        SET_RESPONSE(response->mutable_status(), status, context)
         return ::grpc::Status::OK;
     }
 
@@ -1269,7 +1269,7 @@ GrpcRequestHandler::SearchPB(::grpc::ServerContext* context, const ::milvus::grp
            result.result_distances_.size() * sizeof(float));
 
     LOG_SERVER_INFO_ << LogOut("Request [%s] %s end.", GetContext(context)->RequestID().c_str(), __func__);
-    SET_RESPONSE(grpc_entity->mutable_status(), status, context);
+    SET_RESPONSE(response->mutable_status(), status, context);
 
     return ::grpc::Status::OK;
 }
@@ -1553,7 +1553,7 @@ GrpcRequestHandler::Search(::grpc::ServerContext* context, const ::milvus::grpc:
 
     auto grpc_entity = response->mutable_entities();
     if (!status.ok()) {
-        SET_RESPONSE(grpc_entity->mutable_status(), status, context);
+        SET_RESPONSE(response->mutable_status(), status, context);
         return ::grpc::Status::OK;
     }
 
@@ -1565,7 +1565,7 @@ GrpcRequestHandler::Search(::grpc::ServerContext* context, const ::milvus::grpc:
 
     status = query::ValidateBooleanQuery(boolean_query);
     if (!status.ok()) {
-        SET_RESPONSE(grpc_entity->mutable_status(), status, context);
+        SET_RESPONSE(response->mutable_status(), status, context);
         return ::grpc::Status::OK;
     }
 
@@ -1613,7 +1613,7 @@ GrpcRequestHandler::Search(::grpc::ServerContext* context, const ::milvus::grpc:
            result.result_distances_.size() * sizeof(float));
 
     LOG_SERVER_INFO_ << LogOut("Request [%s] %s end.", GetContext(context)->RequestID().c_str(), __func__);
-    SET_RESPONSE(grpc_entity->mutable_status(), status, context);
+    SET_RESPONSE(response->mutable_status(), status, context);
 
     return ::grpc::Status::OK;
 }

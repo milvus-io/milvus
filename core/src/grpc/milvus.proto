@@ -196,11 +196,12 @@ message Entities {
  * @brief Query result params
  */
 message QueryResult {
-    Entities entities = 1;
-    int64 row_num = 2;
-    repeated float scores = 3;
-    repeated float distances = 4;
-    repeated KeyValuePair extra_params = 5;
+    Status status = 1;
+    Entities entities = 2;
+    int64 row_num = 3;
+    repeated float scores = 4;
+    repeated float distances = 5;
+    repeated KeyValuePair extra_params = 6;
 }
 
 /**
@@ -459,7 +460,7 @@ service MilvusService {
      *
      * @return IndexParam
      */
-    rpc DescribeIndex(CollectionName) returns (IndexParam) {}
+    rpc DescribeIndex(IndexParam) returns (IndexParam) {}
 
     /**
      * @brief This method is used to drop index
@@ -468,7 +469,7 @@ service MilvusService {
      *
      * @return Status
      */
-    rpc DropIndex(IndexParam) returns (Status) {}
+    rpc DropIndex(CollectionName) returns (Status) {}
 
     /**
      * @brief This method is used to create partition
