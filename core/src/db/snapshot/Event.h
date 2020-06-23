@@ -11,57 +11,61 @@
 
 #pragma once
 
+#include <boost/filesystem.hpp>
 #include <memory>
 #include <string>
 
 #include "db/snapshot/Operations.h"
+#include "db/snapshot/ResourceHelper.h"
+#include "utils/Status.h"
 
 namespace milvus {
 namespace engine {
 namespace snapshot {
 
-enum class EventType {
-    EVENT_INVALID = 0,
-    EVENT_GC = 1,
-};
-
-struct EventContext {
-    ID_TYPE id_;
-    std::string res_type_;
-};
-
 class Event {
  public:
-    Event() = default;
-    ~Event() = default;
-
-    virtual void
+    virtual Status
     Process() = 0;
-
-    std::string
-    ToString() {
-        return (context_.res_type_ + std::to_string(context_.id_));
-    }
-
- protected:
-    EventType type_;
-    EventContext context_;
 };
 
-template <typename ResourceT>
+template <class ResourceT>
 class ResourceGCEvent : public Event {
  public:
-    ResourceGCEvent(ID_TYPE id) {
-        type_ = EventType::EVENT_GC;
-        context_.id_ = id;
+    explicit ResourceGCEvent(class ResourceT::Ptr res) : res_(res) {
     }
 
     ~ResourceGCEvent() = default;
 
-    void Process() override {
-        auto op = std::make_shared<HardDeleteOperation<ResourceT>>(context_.id_);
-        op->Push();
+    Status
+    Process() override {
+        /* mark resource as 'deleted' in meta */
+        auto sd_op = std::make_shared<SoftDeleteOperation<ResourceT>>(res_->GetID());
+        STATUS_CHECK(sd_op->Push());
+
+        /* TODO: physically clean resource */
+        std::vector<std::string> res_file_list;
+        STATUS_CHECK(GetResFiles<ResourceT>(res_file_list, res_));
+        for (auto& res_file : res_file_list) {
+            if (!boost::filesystem::exists(res_file)) {
+                continue;
+            }
+            if (boost::filesystem::is_directory(res_file)) {
+                boost::filesystem::remove_all(res_file);
+            } else {
+                boost::filesystem::remove(res_file);
+            }
+        }
+
+        /* remove resource from meta */
+        auto hd_op = std::make_shared<HardDeleteOperation<ResourceT>>(res_->GetID());
+        STATUS_CHECK(hd_op->Push());
+
+        return Status::OK();
     }
+
+ private:
+    class ResourceT::Ptr res_;
 };
 
 }  // namespace snapshot
