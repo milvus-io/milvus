@@ -681,6 +681,35 @@ DBImpl::CreatePartition(const std::string& collection_id, const std::string& par
         return SHUTDOWN_ERROR;
     }
 
+    {
+        uint64_t lsn = 0;
+        snapshot::ScopedSnapshotT ss;
+        auto status = snapshot::Snapshots::GetInstance().GetSnapshot(ss, collection_id);
+        if (!status.ok()) {
+            return status;
+        }
+
+        if (options_.wal_enable_) {
+            lsn = wal_mgr_->CreatePartition(collection_id, partition_tag);
+        } else {
+            lsn = ss->GetCollection()->GetLsn();
+        }
+
+        snapshot::OperationContext context;
+        context.lsn = lsn;
+        auto op = std::make_shared<snapshot::CreatePartitionOperation>(context, ss);
+
+        snapshot::PartitionContext p_ctx;
+        p_ctx.name = partition_tag;
+        snapshot::PartitionPtr partition;
+        status = op->CommitNewPartition(p_ctx, partition);
+        if (!status.ok()) {
+            return status;
+        }
+
+        status = op->Push();
+    }
+
     uint64_t lsn = 0;
     if (options_.wal_enable_) {
         lsn = wal_mgr_->CreatePartition(collection_id, partition_tag);
@@ -747,6 +776,24 @@ DBImpl::DropPartitionByTag(const std::string& collection_id, const std::string& 
     if (options_.wal_enable_) {
         wal_mgr_->DropPartition(collection_id, partition_tag);
     }
+
+    // SS TODO START
+    {
+        snapshot::ScopedSnapshotT ss;
+        auto status = snapshot::Snapshots::GetInstance().GetSnapshot(ss, collection_id);
+        if (!status.ok()) {
+            return status;
+        }
+
+        snapshot::PartitionContext context;
+        context.name = partition_tag;
+        auto op = std::make_shared<snapshot::DropPartitionOperation>(context, ss);
+        status = op->Push();
+        if (!status.ok()) {
+            return status;
+        }
+    }
+    // SS TODO END
 
     return DropPartition(partition_name);
 }
