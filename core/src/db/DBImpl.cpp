@@ -384,38 +384,25 @@ DBImpl::HasNativeCollection(const std::string& collection_id, bool& has_or_not) 
 }
 
 Status
-DBImpl::AllCollections(snapshot::IDS_TYPE& collection_ids) {
+DBImpl::AllCollections(std::vector<std::string>& names) {
     if (!initialized_.load(std::memory_order_acquire)) {
         return SHUTDOWN_ERROR;
     }
 
-    /* return Status::OK(); */
-    return snapshot::Snapshots::GetInstance().GetCollectionIds(collection_ids);
-}
-
-// SS TODO: remove
-Status
-DBImpl::AllCollections(std::vector<meta::CollectionSchema>& collection_schema_array) {
-    if (!initialized_.load(std::memory_order_acquire)) {
-        return SHUTDOWN_ERROR;
-    }
+    names.clear();
 
     {
-        snapshot::IDS_TYPE ids;
-        auto status = AllCollections(ids);
-        for (auto& id : ids) {
-            std::cout << "Collection_" << id << std::endl;
-        }
+        // SS TODO
+        /* snapshot::Snapshots::GetInstance().GetCollectionNames(names); */
     }
 
     std::vector<meta::CollectionSchema> all_collections;
     auto status = meta_ptr_->AllCollections(all_collections);
 
     // only return real collections, dont return partition collections
-    collection_schema_array.clear();
     for (auto& schema : all_collections) {
         if (schema.owner_collection_.empty()) {
-            collection_schema_array.push_back(schema);
+            names.push_back(schema.collection_id_);
         }
     }
 

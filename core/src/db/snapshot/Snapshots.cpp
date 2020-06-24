@@ -115,6 +115,15 @@ Snapshots::GetCollectionIds(IDS_TYPE& ids) const {
 }
 
 Status
+Snapshots::GetCollectionNames(std::vector<std::string>& names) const {
+    std::shared_lock<std::shared_timed_mutex> lock(mutex_);
+    for (auto& kv : name_id_map_) {
+        names.push_back(kv.first);
+    }
+    return Status::OK();
+}
+
+Status
 Snapshots::LoadNoLock(Store& store, ID_TYPE collection_id, SnapshotHolderPtr& holder) {
     auto op = std::make_shared<GetSnapshotIDsOperation>(collection_id, false);
     /* op->Push(); */

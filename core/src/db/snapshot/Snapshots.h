@@ -50,6 +50,8 @@ class Snapshots {
 
     Status
     GetCollectionIds(IDS_TYPE& ids) const;
+    Status
+    GetCollectionNames(std::vector<std::string>& names) const;
 
     Status
     DropCollection(const std::string& name, const LSN_TYPE& lsn);

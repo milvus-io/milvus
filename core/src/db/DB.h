@@ -23,6 +23,7 @@
 #include "query/GeneralQuery.h"
 #include "server/context/Context.h"
 #include "utils/Status.h"
+#include "db/snapshot/WrappedTypes.h"
 
 namespace milvus {
 namespace engine {
@@ -62,7 +63,7 @@ class DB {
     HasNativeCollection(const std::string& collection_id, bool& has_or_not) = 0;
 
     virtual Status
-    AllCollections(std::vector<meta::CollectionSchema>& table_schema_array) = 0;
+    AllCollections(std::vector<std::string>& names) = 0;
 
     virtual Status
     GetCollectionInfo(const std::string& collection_id, std::string& collection_info) = 0;
