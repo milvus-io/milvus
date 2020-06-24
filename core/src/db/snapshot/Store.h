@@ -435,7 +435,7 @@ class Store {
                 MappingT p_c_m;
                 for (auto si = 1; si <= random_segments; ++si) {
                     SegmentPtr s;
-                    CreateResource<Segment>(Segment(p->GetID(), si), s);
+                    CreateResource<Segment>(Segment(c->GetID(), p->GetID(), si), s);
                     all_records.push_back(s);
                     auto& schema_m = schema->GetMappings();
                     MappingT s_c_m;
@@ -444,7 +444,8 @@ class Store {
                         auto& f_c_m = field_commit->GetMappings();
                         for (auto field_element_id : f_c_m) {
                             SegmentFilePtr sf;
-                            CreateResource<SegmentFile>(SegmentFile(p->GetID(), s->GetID(), field_commit_id), sf);
+                            CreateResource<SegmentFile>(
+                                SegmentFile(c->GetID(), p->GetID(), s->GetID(), field_commit_id), sf);
                             all_records.push_back(sf);
 
                             s_c_m.insert(sf->GetID());

@@ -26,53 +26,6 @@ Collection::Collection(const std::string& name, ID_TYPE id, LSN_TYPE lsn, State 
       UpdatedOnField(updated_on) {
 }
 
-SchemaCommit::SchemaCommit(ID_TYPE collection_id, const MappingT& mappings, ID_TYPE id, LSN_TYPE lsn, State status,
-                           TS_TYPE created_on, TS_TYPE updated_on)
-    : CollectionIdField(collection_id),
-      MappingsField(mappings),
-      IdField(id),
-      LsnField(lsn),
-      StatusField(status),
-      CreatedOnField(created_on),
-      UpdatedOnField(updated_on) {
-}
-
-FieldCommit::FieldCommit(ID_TYPE collection_id, ID_TYPE field_id, const MappingT& mappings, ID_TYPE id, LSN_TYPE lsn,
-                         State status, TS_TYPE created_on, TS_TYPE updated_on)
-    : CollectionIdField(collection_id),
-      FieldIdField(field_id),
-      MappingsField(mappings),
-      IdField(id),
-      LsnField(lsn),
-      StatusField(status),
-      CreatedOnField(created_on),
-      UpdatedOnField(updated_on) {
-}
-
-Field::Field(const std::string& name, NUM_TYPE num, ID_TYPE id, LSN_TYPE lsn, State status, TS_TYPE created_on,
-             TS_TYPE updated_on)
-    : NameField(name),
-      NumField(num),
-      IdField(id),
-      LsnField(lsn),
-      StatusField(status),
-      CreatedOnField(created_on),
-      UpdatedOnField(updated_on) {
-}
-
-FieldElement::FieldElement(ID_TYPE collection_id, ID_TYPE field_id, const std::string& name, FTYPE_TYPE ftype,
-                           ID_TYPE id, LSN_TYPE lsn, State status, TS_TYPE created_on, TS_TYPE updated_on)
-    : CollectionIdField(collection_id),
-      FieldIdField(field_id),
-      NameField(name),
-      FtypeField(ftype),
-      IdField(id),
-      LsnField(lsn),
-      StatusField(status),
-      CreatedOnField(created_on),
-      UpdatedOnField(updated_on) {
-}
-
 CollectionCommit::CollectionCommit(ID_TYPE collection_id, ID_TYPE schema_id, const MappingT& mappings, ID_TYPE id,
                                    LSN_TYPE lsn, State status, TS_TYPE created_on, TS_TYPE updated_on)
     : CollectionIdField(collection_id),
@@ -121,9 +74,10 @@ PartitionCommit::ToString() const {
     return ss.str();
 }
 
-Segment::Segment(ID_TYPE partition_id, ID_TYPE num, ID_TYPE id, LSN_TYPE lsn, State status, TS_TYPE created_on,
-                 TS_TYPE updated_on)
-    : PartitionIdField(partition_id),
+Segment::Segment(ID_TYPE collection_id, ID_TYPE partition_id, ID_TYPE num, ID_TYPE id, LSN_TYPE lsn, State status,
+                 TS_TYPE created_on, TS_TYPE updated_on)
+    : CollectionIdField(collection_id),
+      PartitionIdField(partition_id),
       NumField(num),
       IdField(id),
       LsnField(lsn),
@@ -138,6 +92,7 @@ Segment::ToString() const {
     ss << "Segment [" << this << "]: ";
     ss << "id=" << GetID() << ", ";
     ss << "partition_id=" << GetPartitionId() << ", ";
+    ss << "collection_id=" << GetCollectionId() << ", ";
     ss << "num=" << (NUM_TYPE)GetNum() << ", ";
     ss << "status=" << GetStatus() << ", ";
     return ss.str();
@@ -167,11 +122,59 @@ SegmentCommit::ToString() const {
     return ss.str();
 }
 
-SegmentFile::SegmentFile(ID_TYPE partition_id, ID_TYPE segment_id, ID_TYPE field_element_id, ID_TYPE id, LSN_TYPE lsn,
-                         State status, TS_TYPE created_on, TS_TYPE updated_on)
-    : PartitionIdField(partition_id),
+SegmentFile::SegmentFile(ID_TYPE collection_id, ID_TYPE partition_id, ID_TYPE segment_id, ID_TYPE field_element_id,
+                         ID_TYPE id, LSN_TYPE lsn, State status, TS_TYPE created_on, TS_TYPE updated_on)
+    : CollectionIdField(collection_id),
+      PartitionIdField(partition_id),
       SegmentIdField(segment_id),
       FieldElementIdField(field_element_id),
+      IdField(id),
+      LsnField(lsn),
+      StatusField(status),
+      CreatedOnField(created_on),
+      UpdatedOnField(updated_on) {
+}
+
+SchemaCommit::SchemaCommit(ID_TYPE collection_id, const MappingT& mappings, ID_TYPE id, LSN_TYPE lsn, State status,
+                           TS_TYPE created_on, TS_TYPE updated_on)
+    : CollectionIdField(collection_id),
+      MappingsField(mappings),
+      IdField(id),
+      LsnField(lsn),
+      StatusField(status),
+      CreatedOnField(created_on),
+      UpdatedOnField(updated_on) {
+}
+
+Field::Field(const std::string& name, NUM_TYPE num, ID_TYPE id, LSN_TYPE lsn, State status, TS_TYPE created_on,
+             TS_TYPE updated_on)
+    : NameField(name),
+      NumField(num),
+      IdField(id),
+      LsnField(lsn),
+      StatusField(status),
+      CreatedOnField(created_on),
+      UpdatedOnField(updated_on) {
+}
+
+FieldCommit::FieldCommit(ID_TYPE collection_id, ID_TYPE field_id, const MappingT& mappings, ID_TYPE id, LSN_TYPE lsn,
+                         State status, TS_TYPE created_on, TS_TYPE updated_on)
+    : CollectionIdField(collection_id),
+      FieldIdField(field_id),
+      MappingsField(mappings),
+      IdField(id),
+      LsnField(lsn),
+      StatusField(status),
+      CreatedOnField(created_on),
+      UpdatedOnField(updated_on) {
+}
+
+FieldElement::FieldElement(ID_TYPE collection_id, ID_TYPE field_id, const std::string& name, FTYPE_TYPE ftype,
+                           ID_TYPE id, LSN_TYPE lsn, State status, TS_TYPE created_on, TS_TYPE updated_on)
+    : CollectionIdField(collection_id),
+      FieldIdField(field_id),
+      NameField(name),
+      FtypeField(ftype),
       IdField(id),
       LsnField(lsn),
       StatusField(status),

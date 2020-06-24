@@ -151,7 +151,8 @@ SegmentOperation::DoExecute(Store& store) {
         return Status(SS_INVALID_CONTEX_ERROR, emsg.str());
     }
     auto prev_num = GetStartedSS()->GetMaxSegmentNumByPartition(context_.prev_partition->GetID());
-    resource_ = std::make_shared<Segment>(context_.prev_partition->GetID(), prev_num + 1);
+    resource_ = std::make_shared<Segment>(context_.prev_partition->GetCollectionId(), context_.prev_partition->GetID(),
+                                          prev_num + 1);
     AddStep(*resource_, false);
     return Status::OK();
 }
@@ -196,7 +197,8 @@ SegmentFileOperation::SegmentFileOperation(const SegmentFileContext& sc, ScopedS
 Status
 SegmentFileOperation::DoExecute(Store& store) {
     auto field_element_id = GetStartedSS()->GetFieldElementId(context_.field_name, context_.field_element_name);
-    resource_ = std::make_shared<SegmentFile>(context_.partition_id, context_.segment_id, field_element_id);
+    resource_ = std::make_shared<SegmentFile>(context_.collection_id, context_.partition_id, context_.segment_id,
+                                              field_element_id);
     AddStep(*resource_, false);
     return Status::OK();
 }
