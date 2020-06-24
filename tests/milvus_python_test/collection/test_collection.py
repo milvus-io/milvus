@@ -8,9 +8,11 @@ from milvus import IndexType, MetricType
 from utils import *
 
 dim = 128
+default_segment_size = 1024
 drop_collection_interval_time = 3
-index_file_size = 10
+segment_size = 10
 vectors = gen_vectors(100, dim)
+default_fields = gen_default_fields() 
 
 
 class TestCollection:
@@ -20,219 +22,26 @@ class TestCollection:
       The following cases are used to test `create_collection` function
     ******************************************************************
     """
+    @pytest.fixture(
+        scope="function",
+        params=gen_single_filter_fields()
+    )
+    def get_filter_field(self, request):
+        yield request.param
 
-    def test_create_collection(self, connect):
-        '''
-        target: test create normal collection 
-        method: create collection with corrent params
-        expected: create status return ok
-        '''
-        collection_name = gen_unique_str("test_collection")
-        param = {'collection_name': collection_name,
-                 'dimension': dim,
-                 'index_file_size': index_file_size, 
-                 'metric_type': MetricType.L2}
-        status = connect.create_collection(param)
-        assert status.OK()
+    @pytest.fixture(
+        scope="function",
+        params=gen_single_vector_fields()
+    )
+    def get_vector_field(self, request):
+        yield request.param
 
-    def test_create_collection_ip(self, connect):
-        '''
-        target: test create normal collection 
-        method: create collection with corrent params
-        expected: create status return ok
-        '''
-        collection_name = gen_unique_str("test_collection")
-        param = {'collection_name': collection_name,
-                 'dimension': dim,
-                 'index_file_size': index_file_size, 
-                 'metric_type': MetricType.IP}
-        status = connect.create_collection(param)
-        assert status.OK()
-
-    def test_create_collection_jaccard(self, connect):
-        '''
-        target: test create normal collection 
-        method: create collection with corrent params
-        expected: create status return ok
-        '''
-        collection_name = gen_unique_str("test_collection")
-        param = {'collection_name': collection_name,
-                 'dimension': dim,
-                 'index_file_size': index_file_size, 
-                 'metric_type': MetricType.JACCARD}
-        status = connect.create_collection(param)
-        assert status.OK()
-
-    def test_create_collection_hamming(self, connect):
-        '''
-        target: test create normal collection
-        method: create collection with corrent params
-        expected: create status return ok
-        '''
-        collection_name = gen_unique_str("test_collection")
-        param = {'collection_name': collection_name,
-                 'dimension': dim,
-                 'index_file_size': index_file_size,
-                 'metric_type': MetricType.HAMMING}
-        status = connect.create_collection(param)
-        assert status.OK()
-
-    def test_create_collection_substructure(self, connect):
-        '''
-        target: test create normal collection
-        method: create collection with corrent params
-        expected: create status return ok
-        '''
-        collection_name = gen_unique_str("test_collection")
-        param = {'collection_name': collection_name,
-                 'dimension': dim,
-                 'index_file_size': index_file_size,
-                 'metric_type': MetricType.SUBSTRUCTURE}
-        status = connect.create_collection(param)
-        assert status.OK()
-
-    def test_create_collection_superstructure(self, connect):
-        '''
-        target: test create normal collection
-        method: create collection with corrent params
-        expected: create status return ok
-        '''
-        collection_name = gen_unique_str("test_collection")
-        param = {'collection_name': collection_name,
-                 'dimension': dim,
-                 'index_file_size': index_file_size,
-                 'metric_type': MetricType.SUPERSTRUCTURE}
-        status = connect.create_collection(param)
-        assert status.OK()
-
-    def test_create_collection_auto_flush_disabled(self, connect):
-        '''
-        target: test create normal collection, with large auto_flush_interval
-        method: create collection with corrent params
-        expected: create status return ok
-        '''
-        disable_flush(connect)
-        collection_name = gen_unique_str("test_collection")
-        try:
-            param = {'collection_name': collection_name,
-                     'dimension': dim,
-                     'index_file_size': index_file_size,
-                     'metric_type': MetricType.SUPERSTRUCTURE}
-            status = connect.create_collection(param)
-            assert status.OK()
-            status = connect.drop_collection(collection_name,)
-            assert status.OK()
-            time.sleep(2)
-            ## recreate collection
-            status = connect.create_collection(param)
-            assert status.OK()
-        except Exception as e:
-            pass
-        finally:
-            enable_flush(connect)
-
-    @pytest.mark.level(2)
-    def test_create_collection_without_connection(self, dis_connect):
-        '''
-        target: test create collection, without connection
-        method: create collection with correct params, with a disconnected instance
-        expected: create raise exception
-        '''
-        collection_name = gen_unique_str("test_collection")
-        param = {'collection_name': collection_name,
-                 'dimension': dim,
-                 'index_file_size': index_file_size,
-                 'metric_type': MetricType.L2}
-        with pytest.raises(Exception) as e:
-            status = dis_connect.create_collection(param)
-
-    def test_create_collection_existed(self, connect):
-        '''
-        target: test create collection but the collection name have already existed
-        method: create collection with the same collection_name
-        expected: create status return not ok
-        '''
-        collection_name = gen_unique_str("test_collection")
-        param = {'collection_name': collection_name,
-                 'dimension': dim,
-                 'index_file_size': index_file_size, 
-                 'metric_type': MetricType.L2}
-        status = connect.create_collection(param)
-        status = connect.create_collection(param)
-        assert not status.OK()
-
-    @pytest.mark.level(2)
-    def test_create_collection_existed_ip(self, connect):
-        '''
-        target: test create collection but the collection name have already existed
-        method: create collection with the same collection_name
-        expected: create status return not ok
-        '''
-        collection_name = gen_unique_str("test_collection")
-        param = {'collection_name': collection_name,
-                 'dimension': dim,
-                 'index_file_size': index_file_size, 
-                 'metric_type': MetricType.IP}
-        status = connect.create_collection(param)
-        status = connect.create_collection(param)
-        assert not status.OK()
-
-    def test_create_collection_None(self, connect):
-        '''
-        target: test create collection but the collection name is None
-        method: create collection, param collection_name is None
-        expected: create raise error
-        '''
-        param = {'collection_name': None,
-                 'dimension': dim,
-                 'index_file_size': index_file_size, 
-                 'metric_type': MetricType.L2}
-        with pytest.raises(Exception) as e:
-            status = connect.create_collection(param)
-
-    def test_create_collection_no_dimension(self, connect):
-        '''
-        target: test create collection with no dimension params
-        method: create collection with corrent params
-        expected: create status return ok
-        '''
-        collection_name = gen_unique_str("test_collection")
-        param = {'collection_name': collection_name,
-                 'index_file_size': index_file_size,
-                 'metric_type': MetricType.L2}
-        with pytest.raises(Exception) as e:
-            status = connect.create_collection(param)
-
-    def test_create_collection_no_file_size(self, connect):
-        '''
-        target: test create collection with no index_file_size params
-        method: create collection with corrent params
-        expected: create status return ok, use default 1024
-        '''
-        collection_name = gen_unique_str("test_collection")
-        param = {'collection_name': collection_name,
-                 'dimension': dim,
-                 'metric_type': MetricType.L2}
-        status = connect.create_collection(param)
-        logging.getLogger().info(status)
-        status, result = connect.get_collection_info(collection_name)
-        logging.getLogger().info(result)
-        assert result.index_file_size == 1024
-
-    def test_create_collection_no_metric_type(self, connect):
-        '''
-        target: test create collection with no metric_type params
-        method: create collection with corrent params
-        expected: create status return ok, use default L2
-        '''
-        collection_name = gen_unique_str("test_collection")
-        param = {'collection_name': collection_name,
-                 'dimension': dim,
-                 'index_file_size': index_file_size}
-        status = connect.create_collection(param)
-        status, result = connect.get_collection_info(collection_name)
-        logging.getLogger().info(result)
-        assert result.metric_type == MetricType.L2
+    @pytest.fixture(
+        scope="function",
+        params=gen_segment_sizes()
+    )
+    def get_segment_size(self, request):
+        yield request.param
 
     """
     ******************************************************************
@@ -249,7 +58,7 @@ class TestCollection:
         collection_name = gen_unique_str("test_collection")
         param = {'collection_name': collection_name,
                  'dimension': dim,
-                 'index_file_size': index_file_size,
+                 'segment_size': segment_size,
                  'metric_type': MetricType.L2}
         connect.create_collection(param)
         status, res = connect.get_collection_info(collection_name)
@@ -266,7 +75,7 @@ class TestCollection:
         collection_name = gen_unique_str("test_collection")
         param = {'collection_name': collection_name,
                  'dimension': dim,
-                 'index_file_size': index_file_size,
+                 'segment_size': segment_size,
                  'metric_type': MetricType.IP}
         connect.create_collection(param)
         status, res = connect.get_collection_info(collection_name)
@@ -283,7 +92,7 @@ class TestCollection:
         collection_name = gen_unique_str("test_collection")
         param = {'collection_name': collection_name,
                  'dimension': dim,
-                 'index_file_size': index_file_size,
+                 'segment_size': segment_size,
                  'metric_type': MetricType.JACCARD}
         connect.create_collection(param)
         status, res = connect.get_collection_info(collection_name)
@@ -300,7 +109,7 @@ class TestCollection:
         collection_name = gen_unique_str("test_collection")
         param = {'collection_name': collection_name,
                  'dimension': dim,
-                 'index_file_size': index_file_size,
+                 'segment_size': segment_size,
                  'metric_type': MetricType.HAMMING}
         connect.create_collection(param)
         status, res = connect.get_collection_info(collection_name)
@@ -316,7 +125,7 @@ class TestCollection:
         collection_name = gen_unique_str("test_collection")
         param = {'collection_name': collection_name,
                  'dimension': dim,
-                 'index_file_size': index_file_size,
+                 'segment_size': segment_size,
                  'metric_type': MetricType.SUBSTRUCTURE}
         connect.create_collection(param)
         status, res = connect.get_collection_info(collection_name)
@@ -332,7 +141,7 @@ class TestCollection:
         collection_name = gen_unique_str("test_collection")
         param = {'collection_name': collection_name,
                  'dimension': dim,
-                 'index_file_size': index_file_size,
+                 'segment_size': segment_size,
                  'metric_type': MetricType.SUPERSTRUCTURE}
         connect.create_collection(param)
         status, res = connect.get_collection_info(collection_name)
@@ -350,7 +159,7 @@ class TestCollection:
         collection_name = gen_unique_str("test_collection")
         param = {'collection_name': collection_name,
                  'dimension': dim,
-                 'index_file_size': index_file_size, 
+                 'segment_size': segment_size, 
                  'metric_type': MetricType.L2}
         connect.create_collection(param)
 
@@ -368,16 +177,6 @@ class TestCollection:
         for p in processes:
             p.join()
     
-    # @pytest.mark.level(2)
-    # def test_collection_describe_without_connection(self, collection, dis_connect):
-    #     '''
-    #     target: test describe collection, without connection
-    #     method: describe collection with correct params, with a disconnected instance
-    #     expected: describe raise exception
-    #     '''
-    #     with pytest.raises(Exception) as e:
-    #         status = dis_connect.get_collection_info(collection)
-
     def test_collection_describe_dimension(self, connect):
         '''
         target: test describe collection created with correct params 
@@ -387,7 +186,7 @@ class TestCollection:
         collection_name = gen_unique_str("test_collection")
         param = {'collection_name': collection_name,
                  'dimension': dim+1,
-                 'index_file_size': index_file_size,
+                 'segment_size': segment_size,
                  'metric_type': MetricType.L2}
         connect.create_collection(param)
         status, res = connect.get_collection_info(collection_name)
@@ -476,7 +275,7 @@ class TestCollection:
             collection_name = "test_collection"
             param = {'collection_name': collection_name,
                  'dimension': dim,
-                 'index_file_size': index_file_size,
+                 'segment_size': segment_size,
                  'metric_type': MetricType.L2}
             connect.create_collection(param)
             status = None
@@ -534,7 +333,7 @@ class TestCollection:
             collection.append(collection_name)
             param = {'collection_name': collection_name,
                  'dimension': dim,
-                 'index_file_size': index_file_size,
+                 'segment_size': segment_size,
                  'metric_type': MetricType.L2}
             connect.create_collection(param)
             j = j + 1
@@ -551,247 +350,6 @@ class TestCollection:
         for i in range(process_num):
             ids = i
             p = Process(target=delete, args=(connect,ids))
-            processes.append(p)
-            p.start()
-        for p in processes:
-            p.join()
-
-    """
-    ******************************************************************
-      The following cases are used to test `has_collection` function
-    ******************************************************************
-    """
-
-    def test_has_collection(self, connect):
-        '''
-        target: test if the created collection existed
-        method: create collection, assert the value returned by has_collection method
-        expected: True
-        '''
-        collection_name = gen_unique_str("test_collection")
-        param = {'collection_name': collection_name,
-                 'dimension': dim,
-                 'index_file_size': index_file_size,
-                 'metric_type': MetricType.L2}
-        connect.create_collection(param)
-        assert assert_has_collection(connect, collection_name)
-
-    def test_has_collection_ip(self, connect):
-        '''
-        target: test if the created collection existed
-        method: create collection, assert the value returned by has_collection method
-        expected: True
-        '''
-        collection_name = gen_unique_str("test_collection")
-        param = {'collection_name': collection_name,
-                 'dimension': dim,
-                 'index_file_size': index_file_size,
-                 'metric_type': MetricType.IP}
-        connect.create_collection(param)
-        assert assert_has_collection(connect, collection_name)
-
-    def test_has_collection_jaccard(self, connect):
-        '''
-        target: test if the created collection existed
-        method: create collection, assert the value returned by has_collection method
-        expected: True
-        '''
-        collection_name = gen_unique_str("test_collection")
-        param = {'collection_name': collection_name,
-                 'dimension': dim,
-                 'index_file_size': index_file_size,
-                 'metric_type': MetricType.JACCARD}
-        connect.create_collection(param)
-        assert assert_has_collection(connect, collection_name)
-
-    def test_has_collection_hamming(self, connect):
-        '''
-        target: test if the created collection existed
-        method: create collection, assert the value returned by has_collection method
-        expected: True
-        '''
-        collection_name = gen_unique_str("test_collection")
-        param = {'collection_name': collection_name,
-                 'dimension': dim,
-                 'index_file_size': index_file_size,
-                 'metric_type': MetricType.HAMMING}
-        connect.create_collection(param)
-        assert assert_has_collection(connect, collection_name)
-
-    # @pytest.mark.level(2)
-    # def test_has_collection_without_connection(self, collection, dis_connect):
-    #     '''
-    #     target: test has collection, without connection
-    #     method: calling has collection with correct params, with a disconnected instance
-    #     expected: has collection raise exception
-    #     '''
-    #     with pytest.raises(Exception) as e:
-    #         assert_has_collection(dis_connect, collection)
-
-    def test_has_collection_not_existed(self, connect):
-        '''
-        target: test if collection not created
-        method: random a collection name, which not existed in db, 
-            assert the value returned by has_collection method
-        expected: False
-        '''
-        collection_name = gen_unique_str("test_collection")
-        assert not assert_has_collection(connect, collection_name)
-
-    """
-    ******************************************************************
-      The following cases are used to test `list_collections` function
-    ******************************************************************
-    """
-
-    def test_list_collections(self, connect):
-        '''
-        target: test show collections is correct or not, if collection created
-        method: create collection, assert the value returned by list_collections method is equal to 0
-        expected: collection_name in show collections   
-        '''
-        collection_name = gen_unique_str("test_collection")
-        param = {'collection_name': collection_name,
-                 'dimension': dim,
-                 'index_file_size': index_file_size,
-                 'metric_type': MetricType.L2}
-        connect.create_collection(param)    
-        status, result = connect.list_collections()
-        assert status.OK()
-        assert collection_name in result
-
-    def test_list_collections_ip(self, connect):
-        '''
-        target: test show collections is correct or not, if collection created
-        method: create collection, assert the value returned by list_collections method is equal to 0
-        expected: collection_name in show collections   
-        '''
-        collection_name = gen_unique_str("test_collection")
-        param = {'collection_name': collection_name,
-                 'dimension': dim,
-                 'index_file_size': index_file_size,
-                 'metric_type': MetricType.IP}
-        connect.create_collection(param)    
-        status, result = connect.list_collections()
-        assert status.OK()
-        assert collection_name in result
-
-    def test_list_collections_jaccard(self, connect):
-        '''
-        target: test show collections is correct or not, if collection created
-        method: create collection, assert the value returned by list_collections method is equal to 0
-        expected: collection_name in show collections   
-        '''
-        collection_name = gen_unique_str("test_collection")
-        param = {'collection_name': collection_name,
-                 'dimension': dim,
-                 'index_file_size': index_file_size,
-                 'metric_type': MetricType.JACCARD}
-        connect.create_collection(param)    
-        status, result = connect.list_collections()
-        assert status.OK()
-        assert collection_name in result
-
-    def test_list_collections_hamming(self, connect):
-        '''
-        target: test show collections is correct or not, if collection created
-        method: create collection, assert the value returned by list_collections method is equal to 0
-        expected: collection_name in show collections
-        '''
-        collection_name = gen_unique_str("test_collection")
-        param = {'collection_name': collection_name,
-                 'dimension': dim,
-                 'index_file_size': index_file_size,
-                 'metric_type': MetricType.HAMMING}
-        connect.create_collection(param)
-        status, result = connect.list_collections()
-        assert status.OK()
-        assert collection_name in result
-
-    def test_list_collections_substructure(self, connect):
-        '''
-        target: test show collections is correct or not, if collection created
-        method: create collection, assert the value returned by list_collections method is equal to 0
-        expected: collection_name in show collections
-        '''
-        collection_name = gen_unique_str("test_collection")
-        param = {'collection_name': collection_name,
-                 'dimension': dim,
-                 'index_file_size': index_file_size,
-                 'metric_type': MetricType.SUBSTRUCTURE}
-        connect.create_collection(param)
-        status, result = connect.list_collections()
-        assert status.OK()
-        assert collection_name in result
-
-    def test_list_collections_superstructure(self, connect):
-        '''
-        target: test show collections is correct or not, if collection created
-        method: create collection, assert the value returned by list_collections method is equal to 0
-        expected: collection_name in show collections
-        '''
-        collection_name = gen_unique_str("test_collection")
-        param = {'collection_name': collection_name,
-                 'dimension': dim,
-                 'index_file_size': index_file_size,
-                 'metric_type': MetricType.SUPERSTRUCTURE}
-        connect.create_collection(param)
-        status, result = connect.list_collections()
-        assert status.OK()
-        assert collection_name in result
-
-    # @pytest.mark.level(2)
-    # def test_list_collections_without_connection(self, dis_connect):
-    #     '''
-    #     target: test list_collections, without connection
-    #     method: calling list_collections with correct params, with a disconnected instance
-    #     expected: list_collections raise exception
-    #     '''
-    #     with pytest.raises(Exception) as e:
-    #         status = dis_connect.list_collections()
-
-    @pytest.mark.level(2)
-    def test_list_collections_no_collection(self, connect):
-        '''
-        target: test show collections is correct or not, if no collection in db
-        method: delete all collections,
-            assert the value returned by list_collections method is equal to []
-        expected: the status is ok, and the result is equal to []      
-        '''
-        status, result = connect.list_collections()
-        if result:
-            for collection_name in result:
-                connect.drop_collection(collection_name)
-        time.sleep(drop_collection_interval_time)
-        status, result = connect.list_collections()
-        assert status.OK()
-        assert len(result) == 0
-
-    # TODO: enable
-    @pytest.mark.level(2)
-    def _test_list_collections_multiprocessing(self, connect, args):
-        '''
-        target: test show collections is correct or not with processes
-        method: create collection, assert the value returned by list_collections method is equal to 0
-        expected: collection_name in show collections
-        '''
-        collection_name = gen_unique_str("test_collection")
-        param = {'collection_name': collection_name,
-                 'dimension': dim,
-                 'index_file_size': index_file_size,
-                 'metric_type': MetricType.L2}
-        connect.create_collection(param)
-        def showcollections(milvus):
-            status, result = milvus.list_collections()
-            assert status.OK()
-            assert collection_name in result
-
-        process_num = 8
-        processes = []
-
-        for i in range(process_num):
-            milvus = get_milvus(args["ip"], args["port"], handler=args["handler"])
-            p = Process(target=showcollections, args=(milvus,))
             processes.append(p)
             p.start()
         for p in processes:
@@ -890,123 +448,10 @@ class TestCollection:
         pass
 
 
-class TestCollectionInvalid(object):
-    """
-    Test creating collection with invalid collection names
-    """
-    @pytest.fixture(
-        scope="function",
-        params=gen_invalid_collection_names()
-    )
-    def get_collection_name(self, request):
-        yield request.param
-
-    @pytest.mark.level(2)
-    def test_create_collection_with_invalid_collectionname(self, connect, get_collection_name):
-        collection_name = get_collection_name
-        param = {'collection_name': collection_name,
-                 'dimension': dim,
-                 'index_file_size': index_file_size,
-                 'metric_type': MetricType.L2}
-        status = connect.create_collection(param)
-        assert not status.OK()
-
-    def test_create_collection_with_empty_collectionname(self, connect):
-        collection_name = ''
-        param = {'collection_name': collection_name,
-                 'dimension': dim,
-                 'index_file_size': index_file_size,
-                 'metric_type': MetricType.L2}
-        with pytest.raises(Exception) as e:
-            status = connect.create_collection(param)
-
-    def test_load_collection_with_invalid_collectionname(self, connect):
-        collection_name = ''
-        with pytest.raises(Exception) as e:
-            status = connect.load_collection(collection_name)
-
-
-class TestCreateCollectionDimInvalid(object):
-    """
-    Test creating collection with invalid dimension
-    """
-    @pytest.fixture(
-        scope="function",
-        params=gen_invalid_dims()
-    )
-    def get_dim(self, request):
-        yield request.param
-
-    @pytest.mark.level(2)
-    @pytest.mark.timeout(5)
-    def test_create_collection_with_invalid_dimension(self, connect, get_dim):
-        dimension = get_dim
-        collection = gen_unique_str("test_create_collection_with_invalid_dimension")
-        param = {'collection_name': collection,
-                 'dimension': dimension,
-                 'index_file_size': index_file_size,
-                 'metric_type': MetricType.L2}
-        if isinstance(dimension, int):
-            status = connect.create_collection(param)
-            assert not status.OK()
-        else:
-            with pytest.raises(Exception) as e:
-                status = connect.create_collection(param)
-            
-
-# TODO: max / min index file size
-class TestCreateCollectionIndexSizeInvalid(object):
-    """
-    Test creating collections with invalid index_file_size
-    """
-    @pytest.fixture(
-        scope="function",
-        params=gen_invalid_file_sizes()
-    )
-    def get_file_size(self, request):
-        yield request.param
-
-    @pytest.mark.level(2)
-    def test_create_collection_with_invalid_file_size(self, connect, collection, get_file_size):
-        file_size = get_file_size
-        param = {'collection_name': collection,
-                 'dimension': dim,
-                 'index_file_size': file_size,
-                 'metric_type': MetricType.L2}
-        if isinstance(file_size, int):
-            status = connect.create_collection(param)
-            assert not status.OK()
-        else:
-            with pytest.raises(Exception) as e:
-                status = connect.create_collection(param)
-
-
-class TestCreateMetricTypeInvalid(object):
-    """
-    Test creating collections with invalid metric_type
-    """
-    @pytest.fixture(
-        scope="function",
-        params=gen_invalid_metric_types()
-    )
-    def get_metric_type(self, request):
-        yield request.param
-
-    @pytest.mark.level(2)
-    def test_create_collection_with_invalid_file_size(self, connect, collection, get_metric_type):
-        metric_type = get_metric_type
-        param = {'collection_name': collection,
-                 'dimension': dim,
-                 'index_file_size': 10,
-                 'metric_type': metric_type}
-        with pytest.raises(Exception) as e:
-            status = connect.create_collection(param)
-
-
 def create_collection(connect, **params):
     param = {'collection_name': params["collection_name"],
              'dimension': params["dimension"],
-             'index_file_size': index_file_size,
+             'segment_size': segment_size,
              'metric_type': MetricType.L2}
     status = connect.create_collection(param)
     return status
