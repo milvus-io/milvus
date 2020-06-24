@@ -17,6 +17,8 @@
 #include <mutex>
 #include <string>
 #include <thread>
+#include "db/snapshot/Event.h"
+#include "db/snapshot/EventExecutor.h"
 #include "db/snapshot/Operations.h"
 #include "db/snapshot/ResourceTypes.h"
 #include "db/snapshot/ScopedResource.h"
@@ -140,7 +142,8 @@ class ResourceHolder {
 
     virtual void
     OnNoRefCallBack(ResourcePtr resource) {
-        HardDelete(resource->GetID());
+        auto evt_ptr = std::make_shared<ResourceGCEvent<ResourceT>>(resource);
+        EventExecutor::GetInstance().Submit(evt_ptr);
         Release(resource->GetID());
     }
 
