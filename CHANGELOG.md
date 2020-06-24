@@ -53,8 +53,6 @@ Please mark all changes in change log and use the issue from GitHub
 -   \#2516 Improve unit test coverage
 -   \#2548 Upgrade mishards for milvus v0.10.0
 
-## Task
-
 # Milvus 0.9.1 (2020-05-29)
 
 ## Bug
