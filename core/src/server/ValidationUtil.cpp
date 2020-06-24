@@ -303,8 +303,8 @@ ValidateSearchParams(const milvus::json& search_params, const engine::meta::Coll
             break;
         }
         case (int32_t)engine::EngineType::ANNOY: {
-            auto status = CheckParameterRange(search_params, knowhere::IndexParams::search_k, topk,
-                                              std::numeric_limits<int64_t>::max());
+            auto status = CheckParameterRange(search_params, knowhere::IndexParams::search_k,
+                                              std::numeric_limits<int64_t>::min(), std::numeric_limits<int64_t>::max());
             if (!status.ok()) {
                 return status;
             }
