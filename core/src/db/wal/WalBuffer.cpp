@@ -242,7 +242,7 @@ MXLogBuffer::Append(MXLogRecord& record) {
     MXLogRecordHeader head;
     BuildLsn(mxlog_buffer_writer_.file_no, mxlog_buffer_writer_.buf_offset + (uint32_t)record_size, head.mxl_lsn);
     head.mxl_type = (uint8_t)record.type;
-    head.table_id_size = (uint16_t)record.collection_id.size();
+    head.collection_id_size = (uint16_t)record.collection_id.size();
     head.partition_tag_size = (uint16_t)record.partition_tag.size();
     head.vector_num = record.length;
     head.data_size = record.data_size;
@@ -320,7 +320,7 @@ MXLogBuffer::AppendEntity(milvus::engine::wal::MXLogRecord& record) {
     MXLogRecordHeader head;
     BuildLsn(mxlog_buffer_writer_.file_no, mxlog_buffer_writer_.buf_offset + (uint32_t)record_size, head.mxl_lsn);
     head.mxl_type = (uint8_t)record.type;
-    head.table_id_size = (uint16_t)record.collection_id.size();
+    head.collection_id_size = (uint16_t)record.collection_id.size();
     head.partition_tag_size = (uint16_t)record.partition_tag.size();
     head.vector_num = record.length;
     head.data_size = record.data_size;
@@ -440,9 +440,9 @@ MXLogBuffer::Next(const uint64_t last_applied_lsn, MXLogRecord& record) {
 
     current_read_offset += SizeOfMXLogRecordHeader;
 
-    if (head->table_id_size != 0) {
-        record.collection_id.assign(current_read_buf + current_read_offset, head->table_id_size);
-        current_read_offset += head->table_id_size;
+    if (head->collection_id_size != 0) {
+        record.collection_id.assign(current_read_buf + current_read_offset, head->collection_id_size);
+        current_read_offset += head->collection_id_size;
     } else {
         record.collection_id = "";
     }
@@ -539,9 +539,9 @@ MXLogBuffer::NextEntity(const uint64_t last_applied_lsn, milvus::engine::wal::MX
     memcpy(attr_head.attr_nbytes.data(), current_read_buf + current_read_offset, sizeof(uint64_t) * attr_head.attr_num);
     current_read_offset += sizeof(uint64_t) * attr_head.attr_num;
 
-    if (head->table_id_size != 0) {
-        record.collection_id.assign(current_read_buf + current_read_offset, head->table_id_size);
-        current_read_offset += head->table_id_size;
+    if (head->collection_id_size != 0) {
+        record.collection_id.assign(current_read_buf + current_read_offset, head->collection_id_size);
+        current_read_offset += head->collection_id_size;
     } else {
         record.collection_id = "";
     }
