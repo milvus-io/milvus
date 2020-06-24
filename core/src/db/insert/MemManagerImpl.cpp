@@ -87,8 +87,9 @@ MemManagerImpl::InsertVectors(const std::string& collection_id, int64_t length, 
 }
 
 Status
-MemManagerImpl::InsertEntities(const std::string& table_id, int64_t length, const IDNumber* vector_ids, int64_t dim,
-                               const float* vectors, const std::unordered_map<std::string, uint64_t>& attr_nbytes,
+MemManagerImpl::InsertEntities(const std::string& collection_id, int64_t length, const IDNumber* vector_ids,
+                               int64_t dim, const float* vectors,
+                               const std::unordered_map<std::string, uint64_t>& attr_nbytes,
                                const std::unordered_map<std::string, uint64_t>& attr_size,
                                const std::unordered_map<std::string, std::vector<uint8_t>>& attr_data, uint64_t lsn,
                                std::set<std::string>& flushed_tables) {
@@ -114,7 +115,7 @@ MemManagerImpl::InsertEntities(const std::string& table_id, int64_t length, cons
 
     std::unique_lock<std::mutex> lock(mutex_);
 
-    return InsertEntitiesNoLock(table_id, source, lsn);
+    return InsertEntitiesNoLock(collection_id, source, lsn);
 }
 
 Status
@@ -198,7 +199,7 @@ MemManagerImpl::Flush(const std::string& collection_id, bool apply_delete) {
 }
 
 Status
-MemManagerImpl::Flush(std::set<std::string>& table_ids, bool apply_delete) {
+MemManagerImpl::Flush(std::set<std::string>& collection_ids, bool apply_delete) {
     ToImmutable();
 
     MemList temp_immutable_list;
@@ -208,7 +209,7 @@ MemManagerImpl::Flush(std::set<std::string>& table_ids, bool apply_delete) {
     }
 
     std::unique_lock<std::mutex> lock(serialization_mtx_);
-    table_ids.clear();
+    collection_ids.clear();
     auto max_lsn = GetMaxLSN(temp_immutable_list);
     for (auto& mem : temp_immutable_list) {
         LOG_ENGINE_DEBUG_ << "Flushing collection: " << mem->GetTableId();
@@ -217,7 +218,7 @@ MemManagerImpl::Flush(std::set<std::string>& table_ids, bool apply_delete) {
             LOG_ENGINE_ERROR_ << "Flush collection " << mem->GetTableId() << " failed";
             return status;
         }
-        table_ids.insert(mem->GetTableId());
+        collection_ids.insert(mem->GetTableId());
         LOG_ENGINE_DEBUG_ << "Flushed collection: " << mem->GetTableId();
     }
 
