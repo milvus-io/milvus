@@ -46,46 +46,46 @@ class MappingsField {
     MappingT mappings_;
 };
 
-class StatusField {
+class StateField {
  public:
-    explicit StatusField(State status = PENDING) : status_(status) {
+    explicit StateField(State state = PENDING) : state_(state) {
     }
 
     State
-    GetStatus() const {
-        return status_;
+    GetState() const {
+        return state_;
     }
 
     bool
     IsActive() const {
-        return status_ == ACTIVE;
+        return state_ == ACTIVE;
     }
 
     bool
     IsDeactive() const {
-        return status_ == DEACTIVE;
+        return state_ == DEACTIVE;
     }
 
     bool
     Activate() {
         if (IsDeactive())
             return false;
-        status_ = ACTIVE;
+        state_ = ACTIVE;
         return true;
     }
 
     void
     Deactivate() {
-        status_ = DEACTIVE;
+        state_ = DEACTIVE;
     }
 
     void
     ResetStatus() {
-        status_ = PENDING;
+        state_ = PENDING;
     }
 
  protected:
-    State status_;
+    State state_;
 };
 
 class LsnField {
@@ -297,7 +297,7 @@ class Collection : public BaseResource,
                    public NameField,
                    public IdField,
                    public LsnField,
-                   public StatusField,
+                   public StateField,
                    public CreatedOnField,
                    public UpdatedOnField {
  public:
@@ -319,7 +319,7 @@ class CollectionCommit : public BaseResource,
                          public MappingsField,
                          public IdField,
                          public LsnField,
-                         public StatusField,
+                         public StateField,
                          public CreatedOnField,
                          public UpdatedOnField {
  public:
@@ -342,7 +342,7 @@ class Partition : public BaseResource,
                   public CollectionIdField,
                   public IdField,
                   public LsnField,
-                  public StatusField,
+                  public StateField,
                   public CreatedOnField,
                   public UpdatedOnField {
  public:
@@ -364,7 +364,7 @@ class PartitionCommit : public BaseResource,
                         public MappingsField,
                         public IdField,
                         public LsnField,
-                        public StatusField,
+                        public StateField,
                         public CreatedOnField,
                         public UpdatedOnField {
  public:
@@ -392,7 +392,7 @@ class Segment : public BaseResource,
                 public NumField,
                 public IdField,
                 public LsnField,
-                public StatusField,
+                public StateField,
                 public CreatedOnField,
                 public UpdatedOnField {
  public:
@@ -419,7 +419,7 @@ class SegmentCommit : public BaseResource,
                       public MappingsField,
                       public IdField,
                       public LsnField,
-                      public StatusField,
+                      public StateField,
                       public CreatedOnField,
                       public UpdatedOnField {
  public:
@@ -448,7 +448,7 @@ class SegmentFile : public BaseResource,
                     public FieldElementIdField,
                     public IdField,
                     public LsnField,
-                    public StatusField,
+                    public StateField,
                     public CreatedOnField,
                     public UpdatedOnField {
  public:
@@ -472,7 +472,7 @@ class SchemaCommit : public BaseResource,
                      public MappingsField,
                      public IdField,
                      public LsnField,
-                     public StatusField,
+                     public StateField,
                      public CreatedOnField,
                      public UpdatedOnField {
  public:
@@ -496,7 +496,7 @@ class Field : public BaseResource,
               public NumField,
               public IdField,
               public LsnField,
-              public StatusField,
+              public StateField,
               public CreatedOnField,
               public UpdatedOnField {
  public:
@@ -518,7 +518,7 @@ class FieldCommit : public BaseResource,
                     public MappingsField,
                     public IdField,
                     public LsnField,
-                    public StatusField,
+                    public StateField,
                     public CreatedOnField,
                     public UpdatedOnField {
  public:
@@ -544,7 +544,7 @@ class FieldElement : public BaseResource,
                      public FtypeField,
                      public IdField,
                      public LsnField,
-                     public StatusField,
+                     public StateField,
                      public CreatedOnField,
                      public UpdatedOnField {
  public:
