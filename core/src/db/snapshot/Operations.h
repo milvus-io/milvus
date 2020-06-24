@@ -152,11 +152,11 @@ class Operations : public std::enable_shared_from_this<Operations> {
     FailureString() const;
 
     Status
-    DoneRequired() const;
+    CheckDone() const;
     Status
-    IDSNotEmptyRequried() const;
+    CheckIDSNotEmpty() const;
     Status
-    PrevSnapshotRequried() const;
+    CheckPrevSnapshot() const;
 
     Status
     ApplyRollBack(Store&);
@@ -212,20 +212,16 @@ class CommitOperation : public Operations {
         if (wait) {
             WaitToFinish();
         }
-        auto status = DoneRequired();
-        if (!status.ok())
-            return status;
-        status = IDSNotEmptyRequried();
-        if (!status.ok())
-            return status;
+        STATUS_CHECK(CheckDone());
+        STATUS_CHECK(CheckIDSNotEmpty());
         resource_->SetID(ids_[0]);
         res = resource_;
-        return status;
+        return Status::OK();
     }
 
  protected:
     Status
-    ResourceNotNullRequired() const {
+    CheckResource() const {
         Status status;
         if (!resource_)
             return Status(SS_CONSTRAINT_CHECK_ERROR, "No specified resource");
@@ -261,19 +257,15 @@ class LoadOperation : public Operations {
         if (wait) {
             WaitToFinish();
         }
-        auto status = DoneRequired();
-        if (!status.ok())
-            return status;
-        status = ResourceNotNullRequired();
-        if (!status.ok())
-            return status;
+        STATUS_CHECK(CheckDone());
+        STATUS_CHECK(CheckResource());
         res = resource_;
-        return status;
+        return Status::OK();
     }
 
  protected:
     Status
-    ResourceNotNullRequired() const {
+    CheckResource() const {
         Status status;
         if (!resource_)
             return Status(SS_CONSTRAINT_CHECK_ERROR, "No specified resource");
@@ -298,14 +290,10 @@ class SoftDeleteOperation : public Operations {
         if (wait) {
             WaitToFinish();
         }
-        auto status = DoneRequired();
-        if (!status.ok())
-            return status;
-        status = IDSNotEmptyRequried();
-        if (!status.ok())
-            return status;
+        STATUS_CHECK(CheckDone());
+        STATUS_CHECK(CheckIDSNotEmpty());
         res = resource_;
-        return status;
+        return Status::OK();
     }
 
     Status

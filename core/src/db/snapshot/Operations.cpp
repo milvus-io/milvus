@@ -74,9 +74,7 @@ Operations::GetID() const {
 
 Status
 Operations::operator()(Store& store) {
-    auto status = PreCheck();
-    if (!status.ok())
-        return status;
+    STATUS_CHECK(PreCheck());
     return ApplyToStore(store);
 }
 
@@ -114,9 +112,7 @@ Operations::PreCheck() {
 
 Status
 Operations::Push(bool sync) {
-    auto status = PreCheck();
-    if (!status.ok())
-        return status;
+    STATUS_CHECK(PreCheck());
     return OperationExecutor::GetInstance().Submit(shared_from_this(), sync);
 }
 
@@ -128,66 +124,55 @@ Operations::DoCheckStale(ScopedSnapshotT& latest_snapshot) const {
 Status
 Operations::CheckStale(const CheckStaleFunc& checker) const {
     decltype(prev_ss_) latest_ss;
-    auto status = Snapshots::GetInstance().GetSnapshot(latest_ss, prev_ss_->GetCollection()->GetID());
-    if (!status.ok())
-        return status;
+    STATUS_CHECK(Snapshots::GetInstance().GetSnapshot(latest_ss, prev_ss_->GetCollection()->GetID()));
     if (prev_ss_->GetID() != latest_ss->GetID()) {
         if (checker) {
-            status = checker(latest_ss);
+            STATUS_CHECK(checker(latest_ss));
         } else {
-            status = DoCheckStale(latest_ss);
+            STATUS_CHECK(DoCheckStale(latest_ss));
         }
     }
-    return status;
+    return Status::OK();
 }
 
 Status
-Operations::DoneRequired() const {
-    Status status;
+Operations::CheckDone() const {
     if (!done_) {
         std::stringstream emsg;
         emsg << GetRepr() << ". Should be done";
-        status = Status(SS_CONSTRAINT_CHECK_ERROR, emsg.str());
+        return Status(SS_CONSTRAINT_CHECK_ERROR, emsg.str());
     }
-    return status;
+    return Status::OK();
 }
 
 Status
-Operations::IDSNotEmptyRequried() const {
-    Status status;
+Operations::CheckIDSNotEmpty() const {
     if (ids_.size() == 0) {
         std::stringstream emsg;
         emsg << GetRepr() << ". No resource available";
-        status = Status(SS_CONSTRAINT_CHECK_ERROR, emsg.str());
+        return Status(SS_CONSTRAINT_CHECK_ERROR, emsg.str());
     }
-    return status;
+    return Status::OK();
 }
 
 Status
-Operations::PrevSnapshotRequried() const {
-    Status status;
+Operations::CheckPrevSnapshot() const {
     if (!prev_ss_) {
         std::stringstream emsg;
         emsg << GetRepr() << ". Previous snapshot required";
-        status = Status(SS_CONSTRAINT_CHECK_ERROR, emsg.str());
+        return Status(SS_CONSTRAINT_CHECK_ERROR, emsg.str());
     }
-    return status;
+    return Status::OK();
 }
 
 Status
 Operations::GetSnapshot(ScopedSnapshotT& ss) const {
-    auto status = PrevSnapshotRequried();
-    if (!status.ok())
-        return status;
-    status = DoneRequired();
-    if (!status.ok())
-        return status;
-    status = IDSNotEmptyRequried();
-    if (!status.ok())
-        return status;
+    STATUS_CHECK(CheckPrevSnapshot());
+    STATUS_CHECK(CheckDone());
+    STATUS_CHECK(CheckIDSNotEmpty());
     /* status = Snapshots::GetInstance().GetSnapshot(ss, prev_ss_->GetCollectionId(), ids_.back()); */
     ss = context_.latest_ss;
-    return status;
+    return Status::OK();
 }
 
 const Status&
@@ -219,29 +204,23 @@ Operations::OnSnapshotStale() {
 
 Status
 Operations::OnExecute(Store& store) {
-    auto status = PreExecute(store);
-    if (!status.ok()) {
-        return status;
-    }
-    status = DoExecute(store);
-    if (!status.ok()) {
-        return status;
-    }
-    return PostExecute(store);
+    STATUS_CHECK(PreExecute(store));
+    STATUS_CHECK(DoExecute(store));
+    STATUS_CHECK(PostExecute(store));
+    return Status::OK();
 }
 
 Status
 Operations::PreExecute(Store& store) {
-    Status status;
     if (GetStartedSS() && type_ == OperationsType::W_Compound) {
-        Snapshots::GetInstance().GetSnapshot(context_.prev_ss, GetStartedSS()->GetCollectionId());
+        STATUS_CHECK(Snapshots::GetInstance().GetSnapshot(context_.prev_ss, GetStartedSS()->GetCollectionId()));
         if (!context_.prev_ss) {
-            status = OnSnapshotDropped();
+            STATUS_CHECK(OnSnapshotDropped());
         } else if (prev_ss_->GetID() != context_.prev_ss->GetID()) {
-            status = OnSnapshotStale();
+            STATUS_CHECK(OnSnapshotStale());
         }
     }
-    return status;
+    return Status::OK();
 }
 
 Status
