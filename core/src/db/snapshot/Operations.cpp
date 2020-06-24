@@ -157,7 +157,7 @@ Operations::IDSNotEmptyRequried() const {
     Status status;
     if (ids_.size() == 0) {
         std::stringstream emsg;
-        emsg << GetRepr() << ". No rsource is available";
+        emsg << GetRepr() << ". No resource available";
         status = Status(SS_CONSTRAINT_CHECK_ERROR, emsg.str());
     }
     return status;
@@ -168,7 +168,7 @@ Operations::PrevSnapshotRequried() const {
     Status status;
     if (!prev_ss_) {
         std::stringstream emsg;
-        emsg << GetRepr() << ". Prev snapshot is requried";
+        emsg << GetRepr() << ". Previous snapshot required";
         status = Status(SS_CONSTRAINT_CHECK_ERROR, emsg.str());
     }
     return status;
