@@ -65,8 +65,9 @@ MemManagerImpl::InsertVectors(const std::string& collection_id, int64_t length, 
 }
 
 Status
-MemManagerImpl::InsertEntities(const std::string& table_id, int64_t length, const IDNumber* vector_ids, int64_t dim,
-                               const float* vectors, const std::unordered_map<std::string, uint64_t>& attr_nbytes,
+MemManagerImpl::InsertEntities(const std::string& collection_id, int64_t length, const IDNumber* vector_ids,
+                               int64_t dim, const float* vectors,
+                               const std::unordered_map<std::string, uint64_t>& attr_nbytes,
                                const std::unordered_map<std::string, uint64_t>& attr_size,
                                const std::unordered_map<std::string, std::vector<uint8_t>>& attr_data, uint64_t lsn) {
     VectorsData vectors_data;
@@ -80,7 +81,7 @@ MemManagerImpl::InsertEntities(const std::string& table_id, int64_t length, cons
 
     std::unique_lock<std::mutex> lock(mutex_);
 
-    return InsertEntitiesNoLock(table_id, source, lsn);
+    return InsertEntitiesNoLock(collection_id, source, lsn);
 }
 
 Status
