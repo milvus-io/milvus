@@ -42,9 +42,11 @@ class ResourceGCEvent : public Event {
 
     Status
     Process() override {
+        auto& store = Store::GetInstance();
+
         /* mark resource as 'deleted' in meta */
         auto sd_op = std::make_shared<SoftDeleteOperation<ResourceT>>(res_->GetID());
-        STATUS_CHECK(sd_op->Push());
+        STATUS_CHECK((*sd_op)(store));
 
         /* TODO: physically clean resource */
         std::vector<std::string> res_file_list;
@@ -62,7 +64,7 @@ class ResourceGCEvent : public Event {
 
         /* remove resource from meta */
         auto hd_op = std::make_shared<HardDeleteOperation<ResourceT>>(res_->GetID());
-        STATUS_CHECK(hd_op->Push());
+        STATUS_CHECK((*hd_op)(store));
 
         return Status::OK();
     }
