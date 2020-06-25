@@ -291,10 +291,25 @@ class NameField {
     std::string name_;
 };
 
+class ParamsField {
+ public:
+    explicit ParamsField(std::string params) : params_(std::move(params)) {
+    }
+
+    const std::string&
+    GetParams() const {
+        return params_;
+    }
+
+ protected:
+    std::string params_;
+};
+
 ///////////////////////////////////////////////////////////////////////////////
 
 class Collection : public BaseResource,
                    public NameField,
+                   public ParamsField,
                    public IdField,
                    public LsnField,
                    public StateField,
@@ -307,8 +322,9 @@ class Collection : public BaseResource,
     using VecT = std::vector<Ptr>;
     static constexpr const char* Name = "Collection";
 
-    explicit Collection(const std::string& name, ID_TYPE id = 0, LSN_TYPE lsn = 0, State status = PENDING,
-                        TS_TYPE created_on = GetMicroSecTimeStamp(), TS_TYPE UpdatedOnField = GetMicroSecTimeStamp());
+    explicit Collection(const std::string& name, const std::string& params = "",
+            ID_TYPE id = 0, LSN_TYPE lsn = 0, State status = PENDING,
+            TS_TYPE created_on = GetMicroSecTimeStamp(), TS_TYPE UpdatedOnField = GetMicroSecTimeStamp());
 };
 
 using CollectionPtr = Collection::Ptr;
@@ -494,6 +510,7 @@ using SchemaCommitPtr = SchemaCommit::Ptr;
 class Field : public BaseResource,
               public NameField,
               public NumField,
+              public ParamsField,
               public IdField,
               public LsnField,
               public StateField,
@@ -506,7 +523,8 @@ class Field : public BaseResource,
     using VecT = std::vector<Ptr>;
     static constexpr const char* Name = "Field";
 
-    Field(const std::string& name, NUM_TYPE num, ID_TYPE id = 0, LSN_TYPE lsn = 0, State status = PENDING,
+    Field(const std::string& name, NUM_TYPE num, const std::string& params = "",
+          ID_TYPE id = 0, LSN_TYPE lsn = 0, State status = PENDING,
           TS_TYPE created_on = GetMicroSecTimeStamp(), TS_TYPE UpdatedOnField = GetMicroSecTimeStamp());
 };
 
@@ -542,6 +560,7 @@ class FieldElement : public BaseResource,
                      public FieldIdField,
                      public NameField,
                      public FtypeField,
+                     public ParamsField,
                      public IdField,
                      public LsnField,
                      public StateField,
@@ -553,8 +572,9 @@ class FieldElement : public BaseResource,
     using ScopedMapT = std::map<ID_TYPE, ScopedResource<FieldElement>>;
     using VecT = std::vector<Ptr>;
     static constexpr const char* Name = "FieldElement";
-    FieldElement(ID_TYPE collection_id, ID_TYPE field_id, const std::string& name, FTYPE_TYPE ftype, ID_TYPE id = 0,
-                 LSN_TYPE lsn = 0, State status = PENDING, TS_TYPE created_on = GetMicroSecTimeStamp(),
+    FieldElement(ID_TYPE collection_id, ID_TYPE field_id, const std::string& name, FTYPE_TYPE ftype,
+                 const std::string& params = "", ID_TYPE id = 0, LSN_TYPE lsn = 0, State status = PENDING,
+                 TS_TYPE created_on = GetMicroSecTimeStamp(),
                  TS_TYPE UpdatedOnField = GetMicroSecTimeStamp());
 };
 

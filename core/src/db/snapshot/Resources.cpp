@@ -16,9 +16,10 @@
 
 namespace milvus::engine::snapshot {
 
-Collection::Collection(const std::string& name, ID_TYPE id, LSN_TYPE lsn, State state, TS_TYPE created_on,
-                       TS_TYPE updated_on)
+Collection::Collection(const std::string& name, const std::string& params, ID_TYPE id, LSN_TYPE lsn,
+        State state, TS_TYPE created_on, TS_TYPE updated_on)
     : NameField(name),
+      ParamsField(params),
       IdField(id),
       LsnField(lsn),
       StateField(state),
@@ -146,10 +147,11 @@ SchemaCommit::SchemaCommit(ID_TYPE collection_id, const MappingT& mappings, ID_T
       UpdatedOnField(updated_on) {
 }
 
-Field::Field(const std::string& name, NUM_TYPE num, ID_TYPE id, LSN_TYPE lsn, State state, TS_TYPE created_on,
-             TS_TYPE updated_on)
+Field::Field(const std::string& name, NUM_TYPE num, const std::string& params, ID_TYPE id, LSN_TYPE lsn,
+        State state, TS_TYPE created_on, TS_TYPE updated_on)
     : NameField(name),
       NumField(num),
+      ParamsField(params),
       IdField(id),
       LsnField(lsn),
       StateField(state),
@@ -170,11 +172,13 @@ FieldCommit::FieldCommit(ID_TYPE collection_id, ID_TYPE field_id, const MappingT
 }
 
 FieldElement::FieldElement(ID_TYPE collection_id, ID_TYPE field_id, const std::string& name, FTYPE_TYPE ftype,
-                           ID_TYPE id, LSN_TYPE lsn, State state, TS_TYPE created_on, TS_TYPE updated_on)
+                           const std::string& params, ID_TYPE id, LSN_TYPE lsn, State state, TS_TYPE created_on,
+                           TS_TYPE updated_on)
     : CollectionIdField(collection_id),
       FieldIdField(field_id),
       NameField(name),
       FtypeField(ftype),
+      ParamsField(params),
       IdField(id),
       LsnField(lsn),
       StateField(state),
