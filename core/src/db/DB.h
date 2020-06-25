@@ -67,6 +67,8 @@ class DB {
 
     virtual Status
     HasCollection(const std::string& collection_id, bool& has_or_not) = 0;
+    virtual Status
+    SSTODOHasCollection(const std::string& collection_name, bool& has_or_not) = 0;
 
     virtual Status
     HasNativeCollection(const std::string& collection_id, bool& has_or_not) = 0;

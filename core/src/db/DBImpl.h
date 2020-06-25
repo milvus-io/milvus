@@ -77,6 +77,8 @@ class DBImpl : public DB, public server::CacheConfigHandler, public server::Engi
 
     Status
     HasCollection(const std::string& collection_id, bool& has_or_not) override;
+    Status
+    SSTODOHasCollection(const std::string& collection_name, bool& has_or_not) override;
 
     Status
     HasNativeCollection(const std::string& collection_id, bool& has_or_not_) override;

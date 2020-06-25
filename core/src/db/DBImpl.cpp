@@ -378,6 +378,23 @@ DBImpl::DescribeCollection(meta::CollectionSchema& collection_schema) {
 }
 
 Status
+DBImpl::SSTODOHasCollection(const std::string& collection_name, bool& has_or_not) {
+    if (!initialized_.load(std::memory_order_acquire)) {
+        return SHUTDOWN_ERROR;
+    }
+
+    snapshot::ScopedSnapshotT ss;
+    auto status = snapshot::Snapshots::GetInstance().GetSnapshot(ss, collection_name);
+    if (!status.ok()) {
+        has_or_not = false;
+    } else {
+        has_or_not = true;
+    }
+
+    return status;
+}
+
+Status
 DBImpl::HasCollection(const std::string& collection_id, bool& has_or_not) {
     if (!initialized_.load(std::memory_order_acquire)) {
         return SHUTDOWN_ERROR;
