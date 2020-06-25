@@ -397,7 +397,7 @@ class Store {
                 std::stringstream fname;
                 fname << "f_" << fi << "_" << std::get<Index<Field::MapT, MockResourcesT>::value>(ids_) + 1;
                 FieldPtr field;
-                CreateResource<Field>(Field(fname.str(), fi), field);
+                CreateResource<Field>(Field(fname.str(), fi, FieldType::VECTOR), field);
                 all_records.push_back(field);
                 MappingT f_c_m = {};
 

@@ -197,10 +197,12 @@ CreateCollection(const std::string& collection_name, const LSN_TYPE& lsn) {
     context.lsn = lsn;
     auto collection_schema = std::make_shared<Collection>(collection_name);
     context.collection = collection_schema;
-    auto vector_field = std::make_shared<Field>("vector", 0);
+    auto vector_field = std::make_shared<Field>("vector", 0,
+            milvus::engine::snapshot::FieldType::VECTOR);
     auto vector_field_element = std::make_shared<FieldElement>(0, 0, "ivfsq8",
             milvus::engine::snapshot::FieldElementType::IVFSQ8);
-    auto int_field = std::make_shared<Field>("int", 0);
+    auto int_field = std::make_shared<Field>("int", 0,
+            milvus::engine::snapshot::FieldType::INT32);
     context.fields_schema[vector_field] = {vector_field_element};
     context.fields_schema[int_field] = {};
 

@@ -147,10 +147,11 @@ SchemaCommit::SchemaCommit(ID_TYPE collection_id, const MappingT& mappings, ID_T
       UpdatedOnField(updated_on) {
 }
 
-Field::Field(const std::string& name, NUM_TYPE num, const std::string& params, ID_TYPE id, LSN_TYPE lsn,
-        State state, TS_TYPE created_on, TS_TYPE updated_on)
+Field::Field(const std::string& name, NUM_TYPE num, FTYPE_TYPE ftype, const std::string& params, ID_TYPE id,
+        LSN_TYPE lsn, State state, TS_TYPE created_on, TS_TYPE updated_on)
     : NameField(name),
       NumField(num),
+      FtypeField(ftype),
       ParamsField(params),
       IdField(id),
       LsnField(lsn),

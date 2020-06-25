@@ -521,6 +521,7 @@ using SchemaCommitPtr = SchemaCommit::Ptr;
 class Field : public BaseResource,
               public NameField,
               public NumField,
+              public FtypeField,
               public ParamsField,
               public IdField,
               public LsnField,
@@ -534,7 +535,7 @@ class Field : public BaseResource,
     using VecT = std::vector<Ptr>;
     static constexpr const char* Name = "Field";
 
-    Field(const std::string& name, NUM_TYPE num, const std::string& params = JEmpty,
+    Field(const std::string& name, NUM_TYPE num, FTYPE_TYPE ftype, const std::string& params = JEmpty,
           ID_TYPE id = 0, LSN_TYPE lsn = 0, State status = PENDING,
           TS_TYPE created_on = GetMicroSecTimeStamp(), TS_TYPE UpdatedOnField = GetMicroSecTimeStamp());
 };
