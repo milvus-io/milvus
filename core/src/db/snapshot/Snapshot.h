@@ -121,6 +121,16 @@ class Snapshot : public ReferenceProxy {
         return GetResource<SegmentCommit>(it->second);
     }
 
+    std::vector<std::string>
+    GetPartitionNames() const {
+        std::vector<std::string> names;
+        for (auto& kv : partition_names_map_) {
+            names.emplace_back(kv.first);
+        }
+
+        return std::move(names);
+    }
+
     PartitionCommitPtr
     GetPartitionCommitByPartitionId(ID_TYPE partition_id) {
         auto it = p_pc_map_.find(partition_id);
@@ -181,6 +191,20 @@ class Snapshot : public ReferenceProxy {
         }
 
         return itfe->second;
+    }
+
+    std::vector<FieldElementPtr>
+    GetFieldElementsByField(const std::string& field_name) {
+        auto it = field_element_names_map_.find(field_name);
+        if (it == field_element_names_map_.end()) {
+            return {};
+        }
+        std::vector<FieldElementPtr> elements;
+        for (auto& kv : it->second) {
+            elements.push_back(GetResource<FieldElement>(kv.second));
+        }
+
+        return std::move(elements);
     }
 
     NUM_TYPE

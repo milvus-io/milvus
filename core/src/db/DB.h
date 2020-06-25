@@ -25,6 +25,7 @@
 #include "utils/Status.h"
 #include "db/snapshot/WrappedTypes.h"
 #include "db/snapshot/Context.h"
+#include "db/snapshot/Resources.h"
 
 namespace milvus {
 namespace engine {
@@ -60,6 +61,9 @@ class DB {
 
     virtual Status
     DescribeCollection(meta::CollectionSchema& table_schema_) = 0;
+    virtual Status
+    SSTODODescribeCollection(const std::string& collection_name, snapshot::CollectionPtr& collection,
+            std::map<snapshot::FieldPtr, std::vector<snapshot::FieldElementPtr>>& fields_schema) = 0;
 
     virtual Status
     HasCollection(const std::string& collection_id, bool& has_or_not) = 0;
@@ -108,6 +112,9 @@ class DB {
 
     virtual Status
     ShowPartitions(const std::string& collection_id, std::vector<meta::CollectionSchema>& partition_schema_array) = 0;
+    virtual Status
+    SSTODOShowPartitions(const std::string& collection_name,
+                std::vector<std::string>& partition_names) = 0;
 
     virtual Status
     InsertVectors(const std::string& collection_id, const std::string& partition_tag, VectorsData& vectors) = 0;

@@ -269,6 +269,28 @@ DBImpl::CreateHybridCollection(meta::CollectionSchema& collection_schema, meta::
 }
 
 Status
+DBImpl::SSTODODescribeCollection(const std::string& collection_name, snapshot::CollectionPtr& collection,
+        std::map<snapshot::FieldPtr, std::vector<snapshot::FieldElementPtr>>& fields_schema) {
+    if (!initialized_.load(std::memory_order_acquire)) {
+        return SHUTDOWN_ERROR;
+    }
+
+    snapshot::ScopedSnapshotT ss;
+    auto status = snapshot::Snapshots::GetInstance().GetSnapshot(ss, collection_name);
+    if (!status.ok()) {
+        return status;
+    }
+
+    collection = ss->GetCollection();
+
+    auto& fields = ss->GetResources<snapshot::Field>();
+    for (auto& kv : fields) {
+        fields_schema[kv.second.Get()] = ss->GetFieldElementsByField(kv.second->GetName());
+    }
+    return status;
+}
+
+Status
 DBImpl::DescribeHybridCollection(meta::CollectionSchema& collection_schema,
                                  milvus::engine::meta::hybrid::FieldsSchema& fields_schema) {
     if (!initialized_.load(std::memory_order_acquire)) {
@@ -789,6 +811,23 @@ DBImpl::SSTODODropPartition(const std::string& collection_name, const std::strin
     auto op = std::make_shared<snapshot::DropPartitionOperation>(context, ss);
     status = op->Push();
 
+    return status;
+}
+
+Status
+DBImpl::SSTODOShowPartitions(const std::string& collection_name,
+        std::vector<std::string>& partition_names) {
+    if (!initialized_.load(std::memory_order_acquire)) {
+        return SHUTDOWN_ERROR;
+    }
+
+    snapshot::ScopedSnapshotT ss;
+    auto status = snapshot::Snapshots::GetInstance().GetSnapshot(ss, collection_name);
+    if (!status.ok()) {
+        return status;
+    }
+
+    partition_names = std::move(ss->GetPartitionNames());
     return status;
 }
 
