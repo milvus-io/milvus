@@ -517,6 +517,59 @@ DBImpl::GetCollectionInfo(const std::string& collection_id, std::string& collect
     return Status::OK();
 }
 
+struct VectorFieldHandler : public snapshot::IterateHandler<snapshot::Field> {
+    using ResourceT = snapshot::Field;
+    VectorFieldHandler(const std::shared_ptr<server::Context>& context,
+            snapshot::ScopedSnapshotT ss) : context_(context), ss_(ss) {}
+
+    Status
+    Handle(const snapshot::FieldPtr& field) override {
+        if (field->GetFtype() != snapshot::FieldType::VECTOR) {
+            return Status::OK();
+        }
+        if (context_ && context_->IsConnectionBroken()) {
+            LOG_ENGINE_DEBUG_ << "Client connection broken, stop load collection";
+            return Status(DB_ERROR, "Connection broken");
+        }
+
+        // SS TODO
+        /* auto element_handler = std::make_shared<VectorFieldElementHandler>(context_, ss_, field); */
+        /* ss->IterateFieldElement(element_handler); */
+
+        return Status::OK();
+    }
+
+    const std::shared_ptr<server::Context>& context_;
+    snapshot::ScopedSnapshotT ss_;
+};
+
+/* Status */
+/* DBImpl::SSTODOPreloadCollection(const std::shared_ptr<server::Context>& context, const std::string& collection_name, */
+/*                           bool force) { */
+/*     if (!initialized_.load(std::memory_order_acquire)) { */
+/*         return SHUTDOWN_ERROR; */
+/*     } */
+
+/*     snapshot::ScopedSnapshotT ss; */
+/*     auto status = snapshot::Snapshots::GetInstance().GetSnapshot(ss, collection_name); */
+/*     if (!status.ok()) { */
+/*         return status; */
+/*     } */
+
+/*     int64_t size = 0; */
+/*     int64_t cache_total = cache::CpuCacheMgr::GetInstance()->CacheCapacity(); */
+/*     int64_t cache_usage = cache::CpuCacheMgr::GetInstance()->CacheUsage(); */
+/*     int64_t available_size = cache_total - cache_usage; */
+
+/*     /1* LOG_ENGINE_DEBUG_ << "Begin pre-load collection:" + collection_name + ", totally " << files_array.size() *1/ */
+/*     /1*                   << " files need to be pre-loaded"; *1/ */
+/*     /1* TimeRecorderAuto rc("Pre-load collection:" + collection_id); *1/ */
+
+/*     ss->GetFieldsByType() */
+
+/*     return status; */
+/* } */
+
 Status
 DBImpl::PreloadCollection(const std::shared_ptr<server::Context>& context, const std::string& collection_id,
                           bool force) {

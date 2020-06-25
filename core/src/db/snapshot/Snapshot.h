@@ -40,6 +40,24 @@ using ScopedResourcesT =
                Field::ScopedMapT, FieldElement::ScopedMapT, PartitionCommit::ScopedMapT, Partition::ScopedMapT,
                SegmentCommit::ScopedMapT, Segment::ScopedMapT, SegmentFile::ScopedMapT>;
 
+template <typename ResourceT>
+struct IterateHandler {
+    using ThisT = IterateHandler<ResourceT>;
+    using Ptr = std::shared_ptr<ThisT>;
+
+    virtual Status
+    Handle(const typename ResourceT::Ptr& resource) = 0;
+
+    void
+    SetStatus(Status status) {
+        status_ = status;
+    }
+    Status
+    GetStatus() const { return status_; }
+
+    Status status_;
+};
+
 class Snapshot : public ReferenceProxy {
  public:
     using Ptr = std::shared_ptr<Snapshot>;
@@ -137,6 +155,19 @@ class Snapshot : public ReferenceProxy {
         if (it == p_pc_map_.end())
             return nullptr;
         return GetResource<PartitionCommit>(it->second);
+    }
+
+    template <typename ResourceT>
+    void IterateResources(const typename IterateHandler<ResourceT>::Ptr& handler) {
+        auto& resources = GetResources<ResourceT>();
+        Status status;
+        for (auto& kv : resources) {
+            status = handler->Handle(kv.second.Get());
+            if (!status.ok()) {
+                break;
+            }
+        }
+        handler->SetStatus(status);
     }
 
     [[nodiscard]] std::vector<std::string>
