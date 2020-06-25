@@ -65,12 +65,24 @@ using ReferenceProxy = milvus::engine::snapshot::ReferenceProxy;
 using Queue = milvus::BlockingQueue<ID_TYPE>;
 using TQueue = milvus::BlockingQueue<std::tuple<ID_TYPE, ID_TYPE>>;
 using SoftDeleteCollectionOperation = milvus::engine::snapshot::SoftDeleteOperation<Collection>;
+using ParamsField = milvus::engine::snapshot::ParamsField;
 
 int RandomInt(int start, int end) {
     std::random_device dev;
     std::mt19937 rng(dev());
     std::uniform_int_distribution<std::mt19937::result_type> dist(start, end);
     return dist(rng);
+}
+
+TEST_F(SnapshotTest, ResourcesTest) {
+    int nprobe = 16;
+    milvus::json params = {{"nprobe", nprobe}};
+    ParamsField p_field(params.dump());
+    ASSERT_EQ(params.dump(), p_field.GetParams());
+    ASSERT_EQ(params, p_field.GetParamsJson());
+
+    auto nprobe_real = p_field.GetParamsJson().at("nprobe").get<int>();
+    ASSERT_EQ(nprobe, nprobe_real);
 }
 
 TEST_F(SnapshotTest, ReferenceProxyTest) {
