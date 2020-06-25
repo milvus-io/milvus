@@ -49,7 +49,7 @@ class NoReusePortOption : public ::grpc::ServerBuilderOption {
     void
     UpdateArguments(::grpc::ChannelArguments* args) override {
         args->SetInt(GRPC_ARG_ALLOW_REUSEPORT, 0);
-	unsigned int grpc_concurrency = 4 * std::thread::hardware_concurrency();
+        unsigned int grpc_concurrency = 4 * std::thread::hardware_concurrency();
         args->SetInt(GRPC_ARG_MAX_CONCURRENT_STREAMS, grpc_concurrency);
     }
 
