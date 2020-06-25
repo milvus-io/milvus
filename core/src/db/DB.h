@@ -24,6 +24,7 @@
 #include "server/context/Context.h"
 #include "utils/Status.h"
 #include "db/snapshot/WrappedTypes.h"
+#include "db/snapshot/Context.h"
 
 namespace milvus {
 namespace engine {
@@ -49,9 +50,13 @@ class DB {
 
     virtual Status
     CreateCollection(meta::CollectionSchema& table_schema_) = 0;
+    virtual Status
+    SSTODOCreateCollection(const snapshot::CreateCollectionContext& context) = 0;
 
     virtual Status
     DropCollection(const std::string& collection_id) = 0;
+    virtual Status
+    SSTODODropCollection(const std::string& name) = 0;
 
     virtual Status
     DescribeCollection(meta::CollectionSchema& table_schema_) = 0;
@@ -64,6 +69,8 @@ class DB {
 
     virtual Status
     AllCollections(std::vector<std::string>& names) = 0;
+    virtual Status
+    SSTODOAllCollections(std::vector<std::string>& names) = 0;
 
     virtual Status
     GetCollectionInfo(const std::string& collection_id, std::string& collection_info) = 0;
@@ -84,6 +91,9 @@ class DB {
     virtual Status
     CreatePartition(const std::string& collection_id, const std::string& partition_name,
                     const std::string& partition_tag) = 0;
+    virtual Status
+    SSTODOCreatePartition(const std::string& collection_name,
+            const std::string& partition_name) = 0;
 
     virtual Status
     HasPartition(const std::string& collection_id, const std::string& tag, bool& has_or_not) = 0;
@@ -93,6 +103,8 @@ class DB {
 
     virtual Status
     DropPartitionByTag(const std::string& collection_id, const std::string& partition_tag) = 0;
+    virtual Status
+    SSTODODropPartition(const std::string& collection_name, const std::string& partition_name) = 0;
 
     virtual Status
     ShowPartitions(const std::string& collection_id, std::vector<meta::CollectionSchema>& partition_schema_array) = 0;

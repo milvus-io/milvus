@@ -232,46 +232,6 @@ DBImpl::CreateCollection(meta::CollectionSchema& collection_schema) {
         return SHUTDOWN_ERROR;
     }
 
-    // SS TODO START
-    {
-        snapshot::CreateCollectionContext context;
-        if (options_.wal_enable_) {
-            context.lsn = wal_mgr_->CreateCollection(collection_schema.collection_id_);
-        }
-
-        auto collection = std::make_shared<snapshot::Collection>(collection_schema.collection_id_);
-        context.collection = collection;
-
-        auto vector_field = std::make_shared<snapshot::Field>("_vector", 0);
-        context.fields_schema[vector_field] = {};
-        auto op = std::make_shared<snapshot::CreateCollectionOperation>(context);
-        auto status = op->Push();
-        if (!status.ok()) {
-            return status;
-        }
-
-        snapshot::ScopedSnapshotT ss;
-        status = op->GetSnapshot(ss);
-        if (!status.ok()) {
-            return status;
-        }
-
-        std::cout << "Create Collection " << collection_schema.collection_id_ << std::endl;
-
-        /* snapshot::CollectionPtr loaded; */
-        /* snapshot::LoadOperationContext load_ctx; */
-        /* load_ctx.id = ss->GetCollection()->GetID(); */
-
-        /* auto load_op = std::make_shared<snapshot::LoadOperation<snapshot::Collection>>(load_ctx); */
-        /* status = load_op->Push(); */
-        /* if (!status.ok()) { */
-        /*     return status; */
-        /* } */
-        /* status = load_op->GetResource(loaded); */
-        /* std::cout << "Loaded Collection " << loaded->GetName() << std::endl; */
-    }
-    // SS TODO END
-
     meta::CollectionSchema temp_schema = collection_schema;
     temp_schema.index_file_size_ *= MB;  // store as MB
     if (options_.wal_enable_) {
@@ -279,6 +239,18 @@ DBImpl::CreateCollection(meta::CollectionSchema& collection_schema) {
     }
 
     return meta_ptr_->CreateCollection(temp_schema);
+}
+
+Status
+DBImpl::SSTODOCreateCollection(const snapshot::CreateCollectionContext& context) {
+    if (!initialized_.load(std::memory_order_acquire)) {
+        return SHUTDOWN_ERROR;
+    }
+
+    auto op = std::make_shared<snapshot::CreateCollectionOperation>(context);
+    auto status = op->Push();
+
+    return status;
 }
 
 Status
@@ -308,6 +280,32 @@ DBImpl::DescribeHybridCollection(meta::CollectionSchema& collection_schema,
 }
 
 Status
+DBImpl::SSTODODropCollection(const std::string& name) {
+    if (!initialized_.load(std::memory_order_acquire)) {
+        return SHUTDOWN_ERROR;
+    }
+
+    // dates partly delete files of the collection but currently we don't support
+    LOG_ENGINE_DEBUG_ << "Prepare to delete collection " << name;
+
+    snapshot::ScopedSnapshotT ss;
+    auto& snapshots = snapshot::Snapshots::GetInstance();
+    auto status = snapshots.GetSnapshot(ss, name);
+    if (!status.ok()) {
+        return status;
+    }
+
+    if (options_.wal_enable_) {
+        // SS TODO
+        /* wal_mgr_->DropCollection(ss->GetCollectionId()); */
+    }
+
+    status = snapshots.DropCollection(ss->GetCollectionId(),
+            std::numeric_limits<snapshot::LSN_TYPE>::max());
+    return status;
+}
+
+Status
 DBImpl::DropCollection(const std::string& collection_id) {
     if (!initialized_.load(std::memory_order_acquire)) {
         return SHUTDOWN_ERROR;
@@ -320,14 +318,6 @@ DBImpl::DropCollection(const std::string& collection_id) {
     if (options_.wal_enable_) {
         wal_mgr_->DropCollection(collection_id);
     }
-
-    // SS TODO START
-    {
-        auto status = snapshot::Snapshots::GetInstance().DropCollection(collection_id,
-                std::numeric_limits<snapshot::LSN_TYPE>::max());
-        /* std::cout << "Drop collection " << collection_id << " " << status.ToString() << std::endl; */
-    }
-    // SS TODO END
 
     status = mem_mgr_->EraseMemVector(collection_id);      // not allow insert
     status = meta_ptr_->DropCollections({collection_id});  // soft delete collection
@@ -384,17 +374,22 @@ DBImpl::HasNativeCollection(const std::string& collection_id, bool& has_or_not) 
 }
 
 Status
+DBImpl::SSTODOAllCollections(std::vector<std::string>& names) {
+    if (!initialized_.load(std::memory_order_acquire)) {
+        return SHUTDOWN_ERROR;
+    }
+
+    names.clear();
+    return snapshot::Snapshots::GetInstance().GetCollectionNames(names);
+}
+
+Status
 DBImpl::AllCollections(std::vector<std::string>& names) {
     if (!initialized_.load(std::memory_order_acquire)) {
         return SHUTDOWN_ERROR;
     }
 
     names.clear();
-
-    {
-        // SS TODO
-        /* snapshot::Snapshots::GetInstance().GetCollectionNames(names); */
-    }
 
     std::vector<meta::CollectionSchema> all_collections;
     auto status = meta_ptr_->AllCollections(all_collections);
@@ -662,39 +657,46 @@ DBImpl::GetCollectionRowCount(const std::string& collection_id, uint64_t& row_co
 }
 
 Status
-DBImpl::CreatePartition(const std::string& collection_id, const std::string& partition_name,
-                        const std::string& partition_tag) {
+DBImpl::SSTODOCreatePartition(const std::string& collection_name, const std::string& partition_name) {
     if (!initialized_.load(std::memory_order_acquire)) {
         return SHUTDOWN_ERROR;
     }
 
-    {
-        uint64_t lsn = 0;
-        snapshot::ScopedSnapshotT ss;
-        auto status = snapshot::Snapshots::GetInstance().GetSnapshot(ss, collection_id);
-        if (!status.ok()) {
-            return status;
-        }
+    uint64_t lsn = 0;
+    snapshot::ScopedSnapshotT ss;
+    auto status = snapshot::Snapshots::GetInstance().GetSnapshot(ss, collection_name);
+    if (!status.ok()) {
+        return status;
+    }
 
-        if (options_.wal_enable_) {
-            lsn = wal_mgr_->CreatePartition(collection_id, partition_tag);
-        } else {
-            lsn = ss->GetCollection()->GetLsn();
-        }
+    if (options_.wal_enable_) {
+        // SS TODO
+        /* lsn = wal_mgr_->CreatePartition(collection_id, partition_tag); */
+    } else {
+        lsn = ss->GetCollection()->GetLsn();
+    }
 
-        snapshot::OperationContext context;
-        context.lsn = lsn;
-        auto op = std::make_shared<snapshot::CreatePartitionOperation>(context, ss);
+    snapshot::OperationContext context;
+    context.lsn = lsn;
+    auto op = std::make_shared<snapshot::CreatePartitionOperation>(context, ss);
 
-        snapshot::PartitionContext p_ctx;
-        p_ctx.name = partition_tag;
-        snapshot::PartitionPtr partition;
-        status = op->CommitNewPartition(p_ctx, partition);
-        if (!status.ok()) {
-            return status;
-        }
+    snapshot::PartitionContext p_ctx;
+    p_ctx.name = partition_name;
+    snapshot::PartitionPtr partition;
+    status = op->CommitNewPartition(p_ctx, partition);
+    if (!status.ok()) {
+        return status;
+    }
 
-        status = op->Push();
+    status = op->Push();
+    return status;
+}
+
+Status
+DBImpl::CreatePartition(const std::string& collection_id, const std::string& partition_name,
+                        const std::string& partition_tag) {
+    if (!initialized_.load(std::memory_order_acquire)) {
+        return SHUTDOWN_ERROR;
     }
 
     uint64_t lsn = 0;
@@ -764,25 +766,30 @@ DBImpl::DropPartitionByTag(const std::string& collection_id, const std::string& 
         wal_mgr_->DropPartition(collection_id, partition_tag);
     }
 
-    // SS TODO START
-    {
-        snapshot::ScopedSnapshotT ss;
-        auto status = snapshot::Snapshots::GetInstance().GetSnapshot(ss, collection_id);
-        if (!status.ok()) {
-            return status;
-        }
-
-        snapshot::PartitionContext context;
-        context.name = partition_tag;
-        auto op = std::make_shared<snapshot::DropPartitionOperation>(context, ss);
-        status = op->Push();
-        if (!status.ok()) {
-            return status;
-        }
-    }
-    // SS TODO END
-
     return DropPartition(partition_name);
+}
+
+Status
+DBImpl::SSTODODropPartition(const std::string& collection_name, const std::string& partition_name) {
+    if (!initialized_.load(std::memory_order_acquire)) {
+        return SHUTDOWN_ERROR;
+    }
+
+    snapshot::ScopedSnapshotT ss;
+    auto status = snapshot::Snapshots::GetInstance().GetSnapshot(ss, collection_name);
+    if (!status.ok()) {
+        return status;
+    }
+
+    // SS TODO: Is below step needed? Or How to implement it?
+    /* mem_mgr_->EraseMemVector(partition_name); */
+
+    snapshot::PartitionContext context;
+    context.name = partition_name;
+    auto op = std::make_shared<snapshot::DropPartitionOperation>(context, ss);
+    status = op->Push();
+
+    return status;
 }
 
 Status

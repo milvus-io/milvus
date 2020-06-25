@@ -34,6 +34,7 @@
 #include "utils/ThreadPool.h"
 #include "wal/WalManager.h"
 #include "db/snapshot/ResourceTypes.h"
+#include "db/snapshot/Context.h"
 
 namespace milvus {
 namespace engine {
@@ -59,9 +60,13 @@ class DBImpl : public DB, public server::CacheConfigHandler, public server::Engi
 
     Status
     CreateCollection(meta::CollectionSchema& collection_schema) override;
+    Status
+    SSTODOCreateCollection(const snapshot::CreateCollectionContext& context) override;
 
     Status
     DropCollection(const std::string& collection_id) override;
+    Status
+    SSTODODropCollection(const std::string& name) override;
 
     Status
     DescribeCollection(meta::CollectionSchema& collection_schema) override;
@@ -74,6 +79,8 @@ class DBImpl : public DB, public server::CacheConfigHandler, public server::Engi
 
     Status
     AllCollections(std::vector<std::string>& names) override;
+    Status
+    SSTODOAllCollections(std::vector<std::string>& names) override;
 
     Status
     GetCollectionInfo(const std::string& collection_id, std::string& collection_info) override;
@@ -94,6 +101,9 @@ class DBImpl : public DB, public server::CacheConfigHandler, public server::Engi
     Status
     CreatePartition(const std::string& collection_id, const std::string& partition_name,
                     const std::string& partition_tag) override;
+    Status
+    SSTODOCreatePartition(const std::string& collection_name,
+            const std::string& partition_name) override;
 
     Status
     HasPartition(const std::string& collection_id, const std::string& tag, bool& has_or_not) override;
@@ -103,6 +113,8 @@ class DBImpl : public DB, public server::CacheConfigHandler, public server::Engi
 
     Status
     DropPartitionByTag(const std::string& collection_id, const std::string& partition_tag) override;
+    Status
+    SSTODODropPartition(const std::string& collection_name, const std::string& partition_name) override;
 
     Status
     ShowPartitions(const std::string& collection_id,
