@@ -242,18 +242,6 @@ DBImpl::CreateCollection(meta::CollectionSchema& collection_schema) {
 }
 
 Status
-DBImpl::SSTODOCreateCollection(const snapshot::CreateCollectionContext& context) {
-    if (!initialized_.load(std::memory_order_acquire)) {
-        return SHUTDOWN_ERROR;
-    }
-
-    auto op = std::make_shared<snapshot::CreateCollectionOperation>(context);
-    auto status = op->Push();
-
-    return status;
-}
-
-Status
 DBImpl::CreateHybridCollection(meta::CollectionSchema& collection_schema, meta::hybrid::FieldsSchema& fields_schema) {
     if (!initialized_.load(std::memory_order_acquire)) {
         return SHUTDOWN_ERROR;
@@ -269,28 +257,6 @@ DBImpl::CreateHybridCollection(meta::CollectionSchema& collection_schema, meta::
 }
 
 Status
-DBImpl::SSTODODescribeCollection(const std::string& collection_name, snapshot::CollectionPtr& collection,
-        std::map<snapshot::FieldPtr, std::vector<snapshot::FieldElementPtr>>& fields_schema) {
-    if (!initialized_.load(std::memory_order_acquire)) {
-        return SHUTDOWN_ERROR;
-    }
-
-    snapshot::ScopedSnapshotT ss;
-    auto status = snapshot::Snapshots::GetInstance().GetSnapshot(ss, collection_name);
-    if (!status.ok()) {
-        return status;
-    }
-
-    collection = ss->GetCollection();
-
-    auto& fields = ss->GetResources<snapshot::Field>();
-    for (auto& kv : fields) {
-        fields_schema[kv.second.Get()] = ss->GetFieldElementsByField(kv.second->GetName());
-    }
-    return status;
-}
-
-Status
 DBImpl::DescribeHybridCollection(meta::CollectionSchema& collection_schema,
                                  milvus::engine::meta::hybrid::FieldsSchema& fields_schema) {
     if (!initialized_.load(std::memory_order_acquire)) {
@@ -299,32 +265,6 @@ DBImpl::DescribeHybridCollection(meta::CollectionSchema& collection_schema,
 
     auto stat = meta_ptr_->DescribeHybridCollection(collection_schema, fields_schema);
     return stat;
-}
-
-Status
-DBImpl::SSTODODropCollection(const std::string& name) {
-    if (!initialized_.load(std::memory_order_acquire)) {
-        return SHUTDOWN_ERROR;
-    }
-
-    // dates partly delete files of the collection but currently we don't support
-    LOG_ENGINE_DEBUG_ << "Prepare to delete collection " << name;
-
-    snapshot::ScopedSnapshotT ss;
-    auto& snapshots = snapshot::Snapshots::GetInstance();
-    auto status = snapshots.GetSnapshot(ss, name);
-    if (!status.ok()) {
-        return status;
-    }
-
-    if (options_.wal_enable_) {
-        // SS TODO
-        /* wal_mgr_->DropCollection(ss->GetCollectionId()); */
-    }
-
-    status = snapshots.DropCollection(ss->GetCollectionId(),
-            std::numeric_limits<snapshot::LSN_TYPE>::max());
-    return status;
 }
 
 Status
@@ -378,23 +318,6 @@ DBImpl::DescribeCollection(meta::CollectionSchema& collection_schema) {
 }
 
 Status
-DBImpl::SSTODOHasCollection(const std::string& collection_name, bool& has_or_not) {
-    if (!initialized_.load(std::memory_order_acquire)) {
-        return SHUTDOWN_ERROR;
-    }
-
-    snapshot::ScopedSnapshotT ss;
-    auto status = snapshot::Snapshots::GetInstance().GetSnapshot(ss, collection_name);
-    if (!status.ok()) {
-        has_or_not = false;
-    } else {
-        has_or_not = true;
-    }
-
-    return status;
-}
-
-Status
 DBImpl::HasCollection(const std::string& collection_id, bool& has_or_not) {
     if (!initialized_.load(std::memory_order_acquire)) {
         return SHUTDOWN_ERROR;
@@ -410,16 +333,6 @@ DBImpl::HasNativeCollection(const std::string& collection_id, bool& has_or_not) 
     }
 
     return meta_ptr_->HasCollection(collection_id, has_or_not, true);
-}
-
-Status
-DBImpl::SSTODOAllCollections(std::vector<std::string>& names) {
-    if (!initialized_.load(std::memory_order_acquire)) {
-        return SHUTDOWN_ERROR;
-    }
-
-    names.clear();
-    return snapshot::Snapshots::GetInstance().GetCollectionNames(names);
 }
 
 Status
@@ -516,59 +429,6 @@ DBImpl::GetCollectionInfo(const std::string& collection_id, std::string& collect
 
     return Status::OK();
 }
-
-struct VectorFieldHandler : public snapshot::IterateHandler<snapshot::Field> {
-    using ResourceT = snapshot::Field;
-    VectorFieldHandler(const std::shared_ptr<server::Context>& context,
-            snapshot::ScopedSnapshotT ss) : context_(context), ss_(ss) {}
-
-    Status
-    Handle(const snapshot::FieldPtr& field) override {
-        if (field->GetFtype() != snapshot::FieldType::VECTOR) {
-            return Status::OK();
-        }
-        if (context_ && context_->IsConnectionBroken()) {
-            LOG_ENGINE_DEBUG_ << "Client connection broken, stop load collection";
-            return Status(DB_ERROR, "Connection broken");
-        }
-
-        // SS TODO
-        /* auto element_handler = std::make_shared<VectorFieldElementHandler>(context_, ss_, field); */
-        /* ss->IterateFieldElement(element_handler); */
-
-        return Status::OK();
-    }
-
-    const std::shared_ptr<server::Context>& context_;
-    snapshot::ScopedSnapshotT ss_;
-};
-
-/* Status */
-/* DBImpl::SSTODOPreloadCollection(const std::shared_ptr<server::Context>& context, const std::string& collection_name, */
-/*                           bool force) { */
-/*     if (!initialized_.load(std::memory_order_acquire)) { */
-/*         return SHUTDOWN_ERROR; */
-/*     } */
-
-/*     snapshot::ScopedSnapshotT ss; */
-/*     auto status = snapshot::Snapshots::GetInstance().GetSnapshot(ss, collection_name); */
-/*     if (!status.ok()) { */
-/*         return status; */
-/*     } */
-
-/*     int64_t size = 0; */
-/*     int64_t cache_total = cache::CpuCacheMgr::GetInstance()->CacheCapacity(); */
-/*     int64_t cache_usage = cache::CpuCacheMgr::GetInstance()->CacheUsage(); */
-/*     int64_t available_size = cache_total - cache_usage; */
-
-/*     /1* LOG_ENGINE_DEBUG_ << "Begin pre-load collection:" + collection_name + ", totally " << files_array.size() *1/ */
-/*     /1*                   << " files need to be pre-loaded"; *1/ */
-/*     /1* TimeRecorderAuto rc("Pre-load collection:" + collection_id); *1/ */
-
-/*     ss->GetFieldsByType() */
-
-/*     return status; */
-/* } */
 
 Status
 DBImpl::PreloadCollection(const std::shared_ptr<server::Context>& context, const std::string& collection_id,
@@ -749,42 +609,6 @@ DBImpl::GetCollectionRowCount(const std::string& collection_id, uint64_t& row_co
 }
 
 Status
-DBImpl::SSTODOCreatePartition(const std::string& collection_name, const std::string& partition_name) {
-    if (!initialized_.load(std::memory_order_acquire)) {
-        return SHUTDOWN_ERROR;
-    }
-
-    uint64_t lsn = 0;
-    snapshot::ScopedSnapshotT ss;
-    auto status = snapshot::Snapshots::GetInstance().GetSnapshot(ss, collection_name);
-    if (!status.ok()) {
-        return status;
-    }
-
-    if (options_.wal_enable_) {
-        // SS TODO
-        /* lsn = wal_mgr_->CreatePartition(collection_id, partition_tag); */
-    } else {
-        lsn = ss->GetCollection()->GetLsn();
-    }
-
-    snapshot::OperationContext context;
-    context.lsn = lsn;
-    auto op = std::make_shared<snapshot::CreatePartitionOperation>(context, ss);
-
-    snapshot::PartitionContext p_ctx;
-    p_ctx.name = partition_name;
-    snapshot::PartitionPtr partition;
-    status = op->CommitNewPartition(p_ctx, partition);
-    if (!status.ok()) {
-        return status;
-    }
-
-    status = op->Push();
-    return status;
-}
-
-Status
 DBImpl::CreatePartition(const std::string& collection_id, const std::string& partition_name,
                         const std::string& partition_tag) {
     if (!initialized_.load(std::memory_order_acquire)) {
@@ -859,46 +683,6 @@ DBImpl::DropPartitionByTag(const std::string& collection_id, const std::string& 
     }
 
     return DropPartition(partition_name);
-}
-
-Status
-DBImpl::SSTODODropPartition(const std::string& collection_name, const std::string& partition_name) {
-    if (!initialized_.load(std::memory_order_acquire)) {
-        return SHUTDOWN_ERROR;
-    }
-
-    snapshot::ScopedSnapshotT ss;
-    auto status = snapshot::Snapshots::GetInstance().GetSnapshot(ss, collection_name);
-    if (!status.ok()) {
-        return status;
-    }
-
-    // SS TODO: Is below step needed? Or How to implement it?
-    /* mem_mgr_->EraseMemVector(partition_name); */
-
-    snapshot::PartitionContext context;
-    context.name = partition_name;
-    auto op = std::make_shared<snapshot::DropPartitionOperation>(context, ss);
-    status = op->Push();
-
-    return status;
-}
-
-Status
-DBImpl::SSTODOShowPartitions(const std::string& collection_name,
-        std::vector<std::string>& partition_names) {
-    if (!initialized_.load(std::memory_order_acquire)) {
-        return SHUTDOWN_ERROR;
-    }
-
-    snapshot::ScopedSnapshotT ss;
-    auto status = snapshot::Snapshots::GetInstance().GetSnapshot(ss, collection_name);
-    if (!status.ok()) {
-        return status;
-    }
-
-    partition_names = std::move(ss->GetPartitionNames());
-    return status;
 }
 
 Status
@@ -3540,6 +3324,222 @@ DBImpl::ResumeIfLast() {
         knowhere::BuildResume();
     }
 }
+
+Status
+DBImpl::SSTODOCreateCollection(const snapshot::CreateCollectionContext& context) {
+    if (!initialized_.load(std::memory_order_acquire)) {
+        return SHUTDOWN_ERROR;
+    }
+
+    auto op = std::make_shared<snapshot::CreateCollectionOperation>(context);
+    auto status = op->Push();
+
+    return status;
+}
+
+Status
+DBImpl::SSTODODescribeCollection(const std::string& collection_name, snapshot::CollectionPtr& collection,
+        std::map<snapshot::FieldPtr, std::vector<snapshot::FieldElementPtr>>& fields_schema) {
+    if (!initialized_.load(std::memory_order_acquire)) {
+        return SHUTDOWN_ERROR;
+    }
+
+    snapshot::ScopedSnapshotT ss;
+    auto status = snapshot::Snapshots::GetInstance().GetSnapshot(ss, collection_name);
+    if (!status.ok()) {
+        return status;
+    }
+
+    collection = ss->GetCollection();
+
+    auto& fields = ss->GetResources<snapshot::Field>();
+    for (auto& kv : fields) {
+        fields_schema[kv.second.Get()] = ss->GetFieldElementsByField(kv.second->GetName());
+    }
+    return status;
+}
+
+Status
+DBImpl::SSTODODropCollection(const std::string& name) {
+    if (!initialized_.load(std::memory_order_acquire)) {
+        return SHUTDOWN_ERROR;
+    }
+
+    // dates partly delete files of the collection but currently we don't support
+    LOG_ENGINE_DEBUG_ << "Prepare to delete collection " << name;
+
+    snapshot::ScopedSnapshotT ss;
+    auto& snapshots = snapshot::Snapshots::GetInstance();
+    auto status = snapshots.GetSnapshot(ss, name);
+    if (!status.ok()) {
+        return status;
+    }
+
+    if (options_.wal_enable_) {
+        // SS TODO
+        /* wal_mgr_->DropCollection(ss->GetCollectionId()); */
+    }
+
+    status = snapshots.DropCollection(ss->GetCollectionId(),
+            std::numeric_limits<snapshot::LSN_TYPE>::max());
+    return status;
+}
+
+Status
+DBImpl::SSTODOHasCollection(const std::string& collection_name, bool& has_or_not) {
+    if (!initialized_.load(std::memory_order_acquire)) {
+        return SHUTDOWN_ERROR;
+    }
+
+    snapshot::ScopedSnapshotT ss;
+    auto status = snapshot::Snapshots::GetInstance().GetSnapshot(ss, collection_name);
+    if (!status.ok()) {
+        has_or_not = false;
+    } else {
+        has_or_not = true;
+    }
+
+    return status;
+}
+
+Status
+DBImpl::SSTODOAllCollections(std::vector<std::string>& names) {
+    if (!initialized_.load(std::memory_order_acquire)) {
+        return SHUTDOWN_ERROR;
+    }
+
+    names.clear();
+    return snapshot::Snapshots::GetInstance().GetCollectionNames(names);
+}
+
+Status
+DBImpl::SSTODOCreatePartition(const std::string& collection_name, const std::string& partition_name) {
+    if (!initialized_.load(std::memory_order_acquire)) {
+        return SHUTDOWN_ERROR;
+    }
+
+    uint64_t lsn = 0;
+    snapshot::ScopedSnapshotT ss;
+    auto status = snapshot::Snapshots::GetInstance().GetSnapshot(ss, collection_name);
+    if (!status.ok()) {
+        return status;
+    }
+
+    if (options_.wal_enable_) {
+        // SS TODO
+        /* lsn = wal_mgr_->CreatePartition(collection_id, partition_tag); */
+    } else {
+        lsn = ss->GetCollection()->GetLsn();
+    }
+
+    snapshot::OperationContext context;
+    context.lsn = lsn;
+    auto op = std::make_shared<snapshot::CreatePartitionOperation>(context, ss);
+
+    snapshot::PartitionContext p_ctx;
+    p_ctx.name = partition_name;
+    snapshot::PartitionPtr partition;
+    status = op->CommitNewPartition(p_ctx, partition);
+    if (!status.ok()) {
+        return status;
+    }
+
+    status = op->Push();
+    return status;
+}
+
+Status
+DBImpl::SSTODODropPartition(const std::string& collection_name, const std::string& partition_name) {
+    if (!initialized_.load(std::memory_order_acquire)) {
+        return SHUTDOWN_ERROR;
+    }
+
+    snapshot::ScopedSnapshotT ss;
+    auto status = snapshot::Snapshots::GetInstance().GetSnapshot(ss, collection_name);
+    if (!status.ok()) {
+        return status;
+    }
+
+    // SS TODO: Is below step needed? Or How to implement it?
+    /* mem_mgr_->EraseMemVector(partition_name); */
+
+    snapshot::PartitionContext context;
+    context.name = partition_name;
+    auto op = std::make_shared<snapshot::DropPartitionOperation>(context, ss);
+    status = op->Push();
+
+    return status;
+}
+
+Status
+DBImpl::SSTODOShowPartitions(const std::string& collection_name,
+        std::vector<std::string>& partition_names) {
+    if (!initialized_.load(std::memory_order_acquire)) {
+        return SHUTDOWN_ERROR;
+    }
+
+    snapshot::ScopedSnapshotT ss;
+    auto status = snapshot::Snapshots::GetInstance().GetSnapshot(ss, collection_name);
+    if (!status.ok()) {
+        return status;
+    }
+
+    partition_names = std::move(ss->GetPartitionNames());
+    return status;
+}
+
+struct VectorFieldHandler : public snapshot::IterateHandler<snapshot::Field> {
+    using ResourceT = snapshot::Field;
+    VectorFieldHandler(const std::shared_ptr<server::Context>& context,
+            snapshot::ScopedSnapshotT ss) : context_(context), ss_(ss) {}
+
+    Status
+    Handle(const snapshot::FieldPtr& field) override {
+        if (field->GetFtype() != snapshot::FieldType::VECTOR) {
+            return Status::OK();
+        }
+        if (context_ && context_->IsConnectionBroken()) {
+            LOG_ENGINE_DEBUG_ << "Client connection broken, stop load collection";
+            return Status(DB_ERROR, "Connection broken");
+        }
+
+        // SS TODO
+        /* auto element_handler = std::make_shared<VectorFieldElementHandler>(context_, ss_, field); */
+        /* ss->IterateFieldElement(element_handler); */
+
+        return Status::OK();
+    }
+
+    const std::shared_ptr<server::Context>& context_;
+    snapshot::ScopedSnapshotT ss_;
+};
+
+/* Status */
+/* DBImpl::SSTODOPreloadCollection(const std::shared_ptr<server::Context>& context, const std::string& collection_name, */
+/*                           bool force) { */
+/*     if (!initialized_.load(std::memory_order_acquire)) { */
+/*         return SHUTDOWN_ERROR; */
+/*     } */
+
+/*     snapshot::ScopedSnapshotT ss; */
+/*     auto status = snapshot::Snapshots::GetInstance().GetSnapshot(ss, collection_name); */
+/*     if (!status.ok()) { */
+/*         return status; */
+/*     } */
+
+/*     int64_t size = 0; */
+/*     int64_t cache_total = cache::CpuCacheMgr::GetInstance()->CacheCapacity(); */
+/*     int64_t cache_usage = cache::CpuCacheMgr::GetInstance()->CacheUsage(); */
+/*     int64_t available_size = cache_total - cache_usage; */
+
+/*     /1* LOG_ENGINE_DEBUG_ << "Begin pre-load collection:" + collection_name + ", totally " << files_array.size() *1/ */
+/*     /1*                   << " files need to be pre-loaded"; *1/ */
+/*     /1* TimeRecorderAuto rc("Pre-load collection:" + collection_id); *1/ */
+
+/*     ss->GetFieldsByType() */
+
+/*     return status; */
+/* } */
 
 }  // namespace engine
 }  // namespace milvus
