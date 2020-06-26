@@ -1,0 +1,65 @@
+// Copyright (C) 2019-2020 Zilliz. All rights reserved.
+//
+// Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance
+// with the License. You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software distributed under the License
+// is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
+// or implied. See the License for the specific language governing permissions and limitations under the License.
+
+#include "db/SnapshotHandlers.h"
+
+namespace milvus {
+namespace engine {
+
+LoadVectorFieldElementHandler::LoadVectorFieldElementHandler(const std::shared_ptr<server::Context>& context,
+                                                             snapshot::ScopedSnapshotT ss,
+                                                             const snapshot::FieldPtr& field)
+    : context_(context), ss_(ss), field_(field) {
+}
+
+Status
+LoadVectorFieldElementHandler::Handle(const snapshot::FieldElementPtr& field_element) {
+    if (field_->GetFtype() != snapshot::FieldType::VECTOR) {
+        return Status(DB_ERROR, "Should be VECTOR field");
+    }
+    if (field_->GetID() != field_element->GetFieldId()) {
+        return Status::OK();
+    }
+    // SS TODO
+    return Status::OK();
+}
+
+LoadVectorFieldHandler::LoadVectorFieldHandler(const std::shared_ptr<server::Context>& context,
+                                               snapshot::ScopedSnapshotT ss)
+    : context_(context), ss_(ss) {
+}
+
+Status
+LoadVectorFieldHandler::Handle(const snapshot::FieldPtr& field) {
+    if (field->GetFtype() != snapshot::FieldType::VECTOR) {
+        return Status::OK();
+    }
+    if (context_ && context_->IsConnectionBroken()) {
+        LOG_ENGINE_DEBUG_ << "Client connection broken, stop load collection";
+        return Status(DB_ERROR, "Connection broken");
+    }
+
+    // SS TODO
+    auto element_handler = std::make_shared<LoadVectorFieldElementHandler>(context_, ss_, field);
+    ss_->IterateResources<snapshot::FieldElement>(element_handler);
+
+    auto status = element_handler->GetStatus();
+    if (!status.ok()) {
+        return status;
+    }
+
+    // SS TODO: Do Load
+
+    return status;
+}
+
+}  // namespace engine
+}  // namespace milvus

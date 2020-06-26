@@ -27,6 +27,7 @@
 #include "config/handler/EngineConfigHandler.h"
 #include "db/DB.h"
 #include "db/IndexFailedChecker.h"
+#include "db/SnapshotHandlers.h"
 #include "db/Types.h"
 #include "db/insert/MemManager.h"
 #include "db/merge/MergeManager.h"
@@ -95,6 +96,9 @@ class DBImpl : public DB, public server::CacheConfigHandler, public server::Engi
     Status
     PreloadCollection(const std::shared_ptr<server::Context>& context, const std::string& collection_id,
                       bool force = false) override;
+    Status
+    SSTODOPreloadCollection(const std::shared_ptr<server::Context>& context, const std::string& collection_name,
+                            bool force = false) override;
 
     Status
     ReLoadSegmentsDeletedDocs(const std::string& collection_id, const std::vector<int64_t>& segment_ids) override;
