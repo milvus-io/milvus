@@ -31,11 +31,11 @@
 #include "db/insert/MemManager.h"
 #include "db/merge/MergeManager.h"
 #include "db/meta/FilesHolder.h"
+#include "db/snapshot/Context.h"
+#include "db/snapshot/ResourceTypes.h"
+#include "db/snapshot/Resources.h"
 #include "utils/ThreadPool.h"
 #include "wal/WalManager.h"
-#include "db/snapshot/ResourceTypes.h"
-#include "db/snapshot/Context.h"
-#include "db/snapshot/Resources.h"
 
 namespace milvus {
 namespace engine {
@@ -72,8 +72,9 @@ class DBImpl : public DB, public server::CacheConfigHandler, public server::Engi
     Status
     DescribeCollection(meta::CollectionSchema& collection_schema) override;
     Status
-    SSTODODescribeCollection(const std::string& collection_name, snapshot::CollectionPtr& collection,
-            std::map<snapshot::FieldPtr, std::vector<snapshot::FieldElementPtr>>& fields_schema) override;
+    SSTODODescribeCollection(
+        const std::string& collection_name, snapshot::CollectionPtr& collection,
+        std::map<snapshot::FieldPtr, std::vector<snapshot::FieldElementPtr>>& fields_schema) override;
 
     Status
     HasCollection(const std::string& collection_id, bool& has_or_not) override;
@@ -108,8 +109,7 @@ class DBImpl : public DB, public server::CacheConfigHandler, public server::Engi
     CreatePartition(const std::string& collection_id, const std::string& partition_name,
                     const std::string& partition_tag) override;
     Status
-    SSTODOCreatePartition(const std::string& collection_name,
-            const std::string& partition_name) override;
+    SSTODOCreatePartition(const std::string& collection_name, const std::string& partition_name) override;
 
     Status
     HasPartition(const std::string& collection_id, const std::string& tag, bool& has_or_not) override;
@@ -126,8 +126,7 @@ class DBImpl : public DB, public server::CacheConfigHandler, public server::Engi
     ShowPartitions(const std::string& collection_id,
                    std::vector<meta::CollectionSchema>& partition_schema_array) override;
     Status
-    SSTODOShowPartitions(const std::string& collection_name,
-                std::vector<std::string>& partition_names) override;
+    SSTODOShowPartitions(const std::string& collection_name, std::vector<std::string>& partition_names) override;
 
     Status
     InsertVectors(const std::string& collection_id, const std::string& partition_tag, VectorsData& vectors) override;

@@ -26,7 +26,7 @@ using TS_TYPE = int64_t;
 using LSN_TYPE = uint64_t;
 using MappingT = std::set<ID_TYPE>;
 
-enum FieldType {VECTOR, INT32};
+enum FieldType { VECTOR, INT32 };
 enum FieldElementType { RAW, IVFSQ8 };
 
 using IDS_TYPE = std::vector<ID_TYPE>;

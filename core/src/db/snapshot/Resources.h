@@ -19,11 +19,11 @@
 #include <thread>
 #include <utility>
 #include <vector>
-#include "utils/Json.h"
 #include "db/Utils.h"
 #include "db/snapshot/BaseResource.h"
 #include "db/snapshot/ResourceTypes.h"
 #include "db/snapshot/ScopedResource.h"
+#include "utils/Json.h"
 
 using milvus::engine::utils::GetMicroSecTimeStamp;
 
@@ -296,9 +296,7 @@ class NameField {
 
 class ParamsField {
  public:
-    explicit ParamsField(std::string params)
-        : params_(std::move(params)),
-          json_params_(json::parse(params_)) {
+    explicit ParamsField(std::string params) : params_(std::move(params)), json_params_(json::parse(params_)) {
     }
 
     const std::string&
@@ -333,9 +331,9 @@ class Collection : public BaseResource,
     using VecT = std::vector<Ptr>;
     static constexpr const char* Name = "Collection";
 
-    explicit Collection(const std::string& name, const std::string& params = JEmpty,
-            ID_TYPE id = 0, LSN_TYPE lsn = 0, State status = PENDING,
-            TS_TYPE created_on = GetMicroSecTimeStamp(), TS_TYPE UpdatedOnField = GetMicroSecTimeStamp());
+    explicit Collection(const std::string& name, const std::string& params = JEmpty, ID_TYPE id = 0, LSN_TYPE lsn = 0,
+                        State status = PENDING, TS_TYPE created_on = GetMicroSecTimeStamp(),
+                        TS_TYPE UpdatedOnField = GetMicroSecTimeStamp());
 };
 
 using CollectionPtr = Collection::Ptr;
@@ -535,9 +533,9 @@ class Field : public BaseResource,
     using VecT = std::vector<Ptr>;
     static constexpr const char* Name = "Field";
 
-    Field(const std::string& name, NUM_TYPE num, FTYPE_TYPE ftype, const std::string& params = JEmpty,
-          ID_TYPE id = 0, LSN_TYPE lsn = 0, State status = PENDING,
-          TS_TYPE created_on = GetMicroSecTimeStamp(), TS_TYPE UpdatedOnField = GetMicroSecTimeStamp());
+    Field(const std::string& name, NUM_TYPE num, FTYPE_TYPE ftype, const std::string& params = JEmpty, ID_TYPE id = 0,
+          LSN_TYPE lsn = 0, State status = PENDING, TS_TYPE created_on = GetMicroSecTimeStamp(),
+          TS_TYPE UpdatedOnField = GetMicroSecTimeStamp());
 };
 
 using FieldPtr = Field::Ptr;
@@ -586,8 +584,7 @@ class FieldElement : public BaseResource,
     static constexpr const char* Name = "FieldElement";
     FieldElement(ID_TYPE collection_id, ID_TYPE field_id, const std::string& name, FTYPE_TYPE ftype,
                  const std::string& params = JEmpty, ID_TYPE id = 0, LSN_TYPE lsn = 0, State status = PENDING,
-                 TS_TYPE created_on = GetMicroSecTimeStamp(),
-                 TS_TYPE UpdatedOnField = GetMicroSecTimeStamp());
+                 TS_TYPE created_on = GetMicroSecTimeStamp(), TS_TYPE UpdatedOnField = GetMicroSecTimeStamp());
 };
 
 using FieldElementPtr = FieldElement::Ptr;

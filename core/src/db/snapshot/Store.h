@@ -293,7 +293,7 @@ class Store {
     template <class T, class F>
     inline void
     register_any_visitor(F const& f) {
-        std::cout << "Register visitor for type " << std::quoted(typeid(T).name()) << '\n';
+        /* std::cout << "Register visitor for type " << std::quoted(typeid(T).name()) << '\n'; */
         any_flush_vistors_.insert(to_any_visitor<T>(f));
     }
 

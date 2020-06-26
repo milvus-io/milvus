@@ -53,7 +53,9 @@ struct IterateHandler {
         status_ = status;
     }
     Status
-    GetStatus() const { return status_; }
+    GetStatus() const {
+        return status_;
+    }
 
     Status status_;
 };
@@ -158,7 +160,8 @@ class Snapshot : public ReferenceProxy {
     }
 
     template <typename ResourceT>
-    void IterateResources(const typename IterateHandler<ResourceT>::Ptr& handler) {
+    void
+    IterateResources(const typename IterateHandler<ResourceT>::Ptr& handler) {
         auto& resources = GetResources<ResourceT>();
         Status status;
         for (auto& kv : resources) {

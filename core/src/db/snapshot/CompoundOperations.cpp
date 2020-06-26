@@ -402,7 +402,8 @@ CreateCollectionOperation::DoExecute(Store& store) {
         auto& field_schema = field_kv.first;
         auto& field_elements = field_kv.second;
         FieldPtr field;
-        status = store.CreateResource<Field>(Field(field_schema->GetName(), field_idx, field_schema->GetFtype()), field);
+        status =
+            store.CreateResource<Field>(Field(field_schema->GetName(), field_idx, field_schema->GetFtype()), field);
         AddStepWithLsn(*field, c_context_.lsn);
         MappingT element_ids = {};
         FieldElementPtr raw_element;

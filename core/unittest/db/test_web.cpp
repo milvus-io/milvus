@@ -39,7 +39,6 @@
 #include "db/snapshot/Snapshots.h"
 #include "db/snapshot/OperationExecutor.h"
 #include "db/snapshot/EventExecutor.h"
-#include "db/snapshot/Snapshots.h"
 #include "db/snapshot/ResourceHolders.h"
 
 

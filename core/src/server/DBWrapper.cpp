@@ -194,7 +194,8 @@ DBWrapper::StartService() {
         kill(0, SIGUSR1);
     }
 
-    engine::snapshot::OperationExecutor::GetInstance().Start();
+    // SS TODO
+    /* engine::snapshot::OperationExecutor::GetInstance().Start(); */
 
     // create db instance
     try {
@@ -231,7 +232,9 @@ DBWrapper::StopService() {
     if (db_) {
         db_->Stop();
     }
-    engine::snapshot::OperationExecutor::GetInstance().Stop();
+
+    // SS TODO
+    /* engine::snapshot::OperationExecutor::GetInstance().Stop(); */
     return Status::OK();
 }
 

@@ -16,8 +16,8 @@
 
 namespace milvus::engine::snapshot {
 
-Collection::Collection(const std::string& name, const std::string& params, ID_TYPE id, LSN_TYPE lsn,
-        State state, TS_TYPE created_on, TS_TYPE updated_on)
+Collection::Collection(const std::string& name, const std::string& params, ID_TYPE id, LSN_TYPE lsn, State state,
+                       TS_TYPE created_on, TS_TYPE updated_on)
     : NameField(name),
       ParamsField(params),
       IdField(id),
@@ -148,7 +148,7 @@ SchemaCommit::SchemaCommit(ID_TYPE collection_id, const MappingT& mappings, ID_T
 }
 
 Field::Field(const std::string& name, NUM_TYPE num, FTYPE_TYPE ftype, const std::string& params, ID_TYPE id,
-        LSN_TYPE lsn, State state, TS_TYPE created_on, TS_TYPE updated_on)
+             LSN_TYPE lsn, State state, TS_TYPE created_on, TS_TYPE updated_on)
     : NameField(name),
       NumField(num),
       FtypeField(ftype),
