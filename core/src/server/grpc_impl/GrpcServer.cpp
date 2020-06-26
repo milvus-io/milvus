@@ -21,6 +21,7 @@
 #include <grpcpp/create_channel.h>
 #include <grpcpp/security/credentials.h>
 
+#include <algorithm>
 #include <chrono>
 #include <iostream>
 #include <memory>
@@ -49,7 +50,10 @@ class NoReusePortOption : public ::grpc::ServerBuilderOption {
     void
     UpdateArguments(::grpc::ChannelArguments* args) override {
         args->SetInt(GRPC_ARG_ALLOW_REUSEPORT, 0);
-        args->SetInt(GRPC_ARG_MAX_CONCURRENT_STREAMS, 20);
+        int grpc_concurrency = 4 * std::thread::hardware_concurrency();
+        grpc_concurrency = std::max(32, grpc_concurrency);
+        grpc_concurrency = std::min(256, grpc_concurrency);
+        args->SetInt(GRPC_ARG_MAX_CONCURRENT_STREAMS, grpc_concurrency);
     }
 
     void
