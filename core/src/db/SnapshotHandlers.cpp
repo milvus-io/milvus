@@ -18,7 +18,7 @@ namespace engine {
 LoadVectorFieldElementHandler::LoadVectorFieldElementHandler(const std::shared_ptr<server::Context>& context,
                                                              snapshot::ScopedSnapshotT ss,
                                                              const snapshot::FieldPtr& field)
-    : context_(context), ss_(ss), field_(field) {
+    : BaseT(ss), context_(context), field_(field) {
 }
 
 Status
@@ -35,7 +35,7 @@ LoadVectorFieldElementHandler::Handle(const snapshot::FieldElementPtr& field_ele
 
 LoadVectorFieldHandler::LoadVectorFieldHandler(const std::shared_ptr<server::Context>& context,
                                                snapshot::ScopedSnapshotT ss)
-    : context_(context), ss_(ss) {
+    : BaseT(ss), context_(context) {
 }
 
 Status
@@ -64,7 +64,7 @@ LoadVectorFieldHandler::Handle(const snapshot::FieldPtr& field) {
 
 SegmentsToSearchCollector::SegmentsToSearchCollector(snapshot::ScopedSnapshotT ss,
         meta::FilesHolder& holder)
-    : ss_(ss), holder_(holder) {
+    : BaseT(ss), holder_(holder) {
 }
 
 Status

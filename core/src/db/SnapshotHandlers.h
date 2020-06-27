@@ -23,6 +23,7 @@ namespace engine {
 
 struct LoadVectorFieldElementHandler : public snapshot::IterateHandler<snapshot::FieldElement> {
     using ResourceT = snapshot::FieldElement;
+    using BaseT = snapshot::IterateHandler<ResourceT>;
     LoadVectorFieldElementHandler(const std::shared_ptr<server::Context>& context, snapshot::ScopedSnapshotT ss,
                                   const snapshot::FieldPtr& field);
 
@@ -30,29 +31,28 @@ struct LoadVectorFieldElementHandler : public snapshot::IterateHandler<snapshot:
     Handle(const typename ResourceT::Ptr&) override;
 
     const std::shared_ptr<server::Context>& context_;
-    snapshot::ScopedSnapshotT ss_;
     const snapshot::FieldPtr& field_;
 };
 
 struct LoadVectorFieldHandler : public snapshot::IterateHandler<snapshot::Field> {
     using ResourceT = snapshot::Field;
+    using BaseT = snapshot::IterateHandler<ResourceT>;
     LoadVectorFieldHandler(const std::shared_ptr<server::Context>& context, snapshot::ScopedSnapshotT ss);
 
     Status
     Handle(const typename ResourceT::Ptr&) override;
 
     const std::shared_ptr<server::Context>& context_;
-    snapshot::ScopedSnapshotT ss_;
 };
 
 struct SegmentsToSearchCollector : public snapshot::IterateHandler<snapshot::SegmentCommit> {
     using ResourceT = snapshot::SegmentCommit;
+    using BaseT = snapshot::IterateHandler<ResourceT>;
     SegmentsToSearchCollector(snapshot::ScopedSnapshotT ss, meta::FilesHolder& holder);
 
     Status
     Handle(const typename ResourceT::Ptr&) override;
 
-    snapshot::ScopedSnapshotT ss_;
     meta::FilesHolder& holder_;
 };
 

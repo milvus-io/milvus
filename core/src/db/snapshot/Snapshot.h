@@ -40,10 +40,15 @@ using ScopedResourcesT =
                Field::ScopedMapT, FieldElement::ScopedMapT, PartitionCommit::ScopedMapT, Partition::ScopedMapT,
                SegmentCommit::ScopedMapT, Segment::ScopedMapT, SegmentFile::ScopedMapT>;
 
+class Snapshot;
+using ScopedSnapshotT = ScopedResource<Snapshot>;
+
 template <typename ResourceT>
 struct IterateHandler {
     using ThisT = IterateHandler<ResourceT>;
     using Ptr = std::shared_ptr<ThisT>;
+
+    IterateHandler(ScopedSnapshotT ss) : ss_(ss) {}
 
     virtual Status
     Handle(const typename ResourceT::Ptr& resource) = 0;
@@ -57,6 +62,7 @@ struct IterateHandler {
         return status_;
     }
 
+    ScopedSnapshotT ss_;
     Status status_;
 };
 
@@ -336,7 +342,6 @@ class Snapshot : public ReferenceProxy {
     LSN_TYPE max_lsn_;
 };
 
-using ScopedSnapshotT = ScopedResource<Snapshot>;
 using GCHandler = std::function<void(Snapshot::Ptr)>;
 
 }  // namespace snapshot
