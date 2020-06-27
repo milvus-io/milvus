@@ -34,7 +34,7 @@ SnapshotVisitor::SegmentsToSearch(meta::FilesHolder& files_holder) {
     STATUS_CHECK(status_);
 
     auto handler = std::make_shared<SegmentsToSearchCollector>(ss_, files_holder);
-    ss_->IterateResources<snapshot::SegmentCommit>(handler);
+    handler->Iterate();
 
     return handler->GetStatus();
 }

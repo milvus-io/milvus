@@ -40,31 +40,6 @@ using ScopedResourcesT =
                Field::ScopedMapT, FieldElement::ScopedMapT, PartitionCommit::ScopedMapT, Partition::ScopedMapT,
                SegmentCommit::ScopedMapT, Segment::ScopedMapT, SegmentFile::ScopedMapT>;
 
-class Snapshot;
-using ScopedSnapshotT = ScopedResource<Snapshot>;
-
-template <typename ResourceT>
-struct IterateHandler {
-    using ThisT = IterateHandler<ResourceT>;
-    using Ptr = std::shared_ptr<ThisT>;
-
-    IterateHandler(ScopedSnapshotT ss) : ss_(ss) {}
-
-    virtual Status
-    Handle(const typename ResourceT::Ptr& resource) = 0;
-
-    void
-    SetStatus(Status status) {
-        status_ = status;
-    }
-    Status
-    GetStatus() const {
-        return status_;
-    }
-
-    ScopedSnapshotT ss_;
-    Status status_;
-};
 
 class Snapshot : public ReferenceProxy {
  public:
@@ -165,10 +140,10 @@ class Snapshot : public ReferenceProxy {
         return GetResource<PartitionCommit>(it->second);
     }
 
-    template <typename ResourceT>
+    template <typename HandlerT>
     void
-    IterateResources(const typename IterateHandler<ResourceT>::Ptr& handler) {
-        auto& resources = GetResources<ResourceT>();
+    IterateResources(const typename HandlerT::Ptr& handler) {
+        auto& resources = GetResources<typename HandlerT::ResourceT>();
         Status status;
         for (auto& kv : resources) {
             status = handler->Handle(kv.second.Get());
@@ -343,6 +318,36 @@ class Snapshot : public ReferenceProxy {
 };
 
 using GCHandler = std::function<void(Snapshot::Ptr)>;
+using ScopedSnapshotT = ScopedResource<Snapshot>;
+
+template <typename T>
+struct IterateHandler : public std::enable_shared_from_this<IterateHandler<T>> {
+    using ResourceT = T;
+    using ThisT = IterateHandler<ResourceT>;
+    using Ptr = std::shared_ptr<ThisT>;
+
+    IterateHandler(ScopedSnapshotT ss) : ss_(ss) {}
+
+    virtual Status
+    Handle(const typename ResourceT::Ptr& resource) = 0;
+
+    void
+    SetStatus(Status status) {
+        status_ = status;
+    }
+    Status
+    GetStatus() const {
+        return status_;
+    }
+
+    virtual void
+    Iterate() {
+        ss_->IterateResources<ThisT>(this->shared_from_this());
+    }
+
+    ScopedSnapshotT ss_;
+    Status status_;
+};
 
 }  // namespace snapshot
 }  // namespace engine

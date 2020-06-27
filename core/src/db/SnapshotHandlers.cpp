@@ -50,7 +50,7 @@ LoadVectorFieldHandler::Handle(const snapshot::FieldPtr& field) {
 
     // SS TODO
     auto element_handler = std::make_shared<LoadVectorFieldElementHandler>(context_, ss_, field);
-    ss_->IterateResources<snapshot::FieldElement>(element_handler);
+    element_handler->Iterate();
 
     auto status = element_handler->GetStatus();
     if (!status.ok()) {
