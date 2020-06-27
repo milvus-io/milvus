@@ -314,6 +314,20 @@ class ParamsField {
     json json_params_;
 };
 
+class SizeField {
+ public:
+    explicit SizeField(SIZE_TYPE size) : size_(size) {
+    }
+
+    SIZE_TYPE
+    GetSize() const {
+        return size_;
+    }
+
+ protected:
+    SIZE_TYPE size_;
+};
+
 ///////////////////////////////////////////////////////////////////////////////
 
 class Collection : public BaseResource,
@@ -342,6 +356,7 @@ class CollectionCommit : public BaseResource,
                          public CollectionIdField,
                          public SchemaIdField,
                          public MappingsField,
+                         public SizeField,
                          public IdField,
                          public LsnField,
                          public StateField,
@@ -353,8 +368,9 @@ class CollectionCommit : public BaseResource,
     using MapT = std::map<ID_TYPE, Ptr>;
     using ScopedMapT = std::map<ID_TYPE, ScopedResource<CollectionCommit>>;
     using VecT = std::vector<Ptr>;
-    CollectionCommit(ID_TYPE collection_id, ID_TYPE schema_id, const MappingT& mappings = {}, ID_TYPE id = 0,
-                     LSN_TYPE lsn = 0, State status = PENDING, TS_TYPE created_on = GetMicroSecTimeStamp(),
+    CollectionCommit(ID_TYPE collection_id, ID_TYPE schema_id, const MappingT& mappings = {}, SIZE_TYPE size = 0,
+                     ID_TYPE id = 0, LSN_TYPE lsn = 0, State status = PENDING,
+                     TS_TYPE created_on = GetMicroSecTimeStamp(),
                      TS_TYPE UpdatedOnField = GetMicroSecTimeStamp());
 };
 
@@ -387,6 +403,7 @@ class PartitionCommit : public BaseResource,
                         public CollectionIdField,
                         public PartitionIdField,
                         public MappingsField,
+                        public SizeField,
                         public IdField,
                         public LsnField,
                         public StateField,
@@ -399,8 +416,9 @@ class PartitionCommit : public BaseResource,
     using VecT = std::vector<Ptr>;
     static constexpr const char* Name = "PartitionCommit";
 
-    PartitionCommit(ID_TYPE collection_id, ID_TYPE partition_id, const MappingT& mappings = {}, ID_TYPE id = 0,
-                    LSN_TYPE lsn = 0, State status = PENDING, TS_TYPE created_on = GetMicroSecTimeStamp(),
+    PartitionCommit(ID_TYPE collection_id, ID_TYPE partition_id, const MappingT& mappings = {}, SIZE_TYPE size = 0,
+                    ID_TYPE id = 0, LSN_TYPE lsn = 0, State status = PENDING,
+                    TS_TYPE created_on = GetMicroSecTimeStamp(),
                     TS_TYPE UpdatedOnField = GetMicroSecTimeStamp());
 
     std::string
@@ -442,6 +460,7 @@ class SegmentCommit : public BaseResource,
                       public PartitionIdField,
                       public SegmentIdField,
                       public MappingsField,
+                      public SizeField,
                       public IdField,
                       public LsnField,
                       public StateField,
@@ -455,7 +474,8 @@ class SegmentCommit : public BaseResource,
     static constexpr const char* Name = "SegmentCommit";
 
     SegmentCommit(ID_TYPE schema_id, ID_TYPE partition_id, ID_TYPE segment_id, const MappingT& mappings = {},
-                  ID_TYPE id = 0, LSN_TYPE lsn = 0, State status = PENDING, TS_TYPE created_on = GetMicroSecTimeStamp(),
+                  SIZE_TYPE size = 0, ID_TYPE id = 0, LSN_TYPE lsn = 0, State status = PENDING,
+                  TS_TYPE created_on = GetMicroSecTimeStamp(),
                   TS_TYPE UpdatedOnField = GetMicroSecTimeStamp());
 
     std::string
@@ -471,6 +491,7 @@ class SegmentFile : public BaseResource,
                     public PartitionIdField,
                     public SegmentIdField,
                     public FieldElementIdField,
+                    public SizeField,
                     public IdField,
                     public LsnField,
                     public StateField,
@@ -484,7 +505,8 @@ class SegmentFile : public BaseResource,
     static constexpr const char* Name = "SegmentFile";
 
     SegmentFile(ID_TYPE collection_id, ID_TYPE partition_id, ID_TYPE segment_id, ID_TYPE field_element_id,
-                ID_TYPE id = 0, LSN_TYPE lsn = 0, State status = PENDING, TS_TYPE created_on = GetMicroSecTimeStamp(),
+                SIZE_TYPE size = 0, ID_TYPE id = 0, LSN_TYPE lsn = 0, State status = PENDING,
+                TS_TYPE created_on = GetMicroSecTimeStamp(),
                 TS_TYPE UpdatedOnField = GetMicroSecTimeStamp());
 };
 

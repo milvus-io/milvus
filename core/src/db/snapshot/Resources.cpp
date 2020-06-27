@@ -27,11 +27,12 @@ Collection::Collection(const std::string& name, const std::string& params, ID_TY
       UpdatedOnField(updated_on) {
 }
 
-CollectionCommit::CollectionCommit(ID_TYPE collection_id, ID_TYPE schema_id, const MappingT& mappings, ID_TYPE id,
-                                   LSN_TYPE lsn, State state, TS_TYPE created_on, TS_TYPE updated_on)
+CollectionCommit::CollectionCommit(ID_TYPE collection_id, ID_TYPE schema_id, const MappingT& mappings, SIZE_TYPE size,
+                                   ID_TYPE id, LSN_TYPE lsn, State state, TS_TYPE created_on, TS_TYPE updated_on)
     : CollectionIdField(collection_id),
       SchemaIdField(schema_id),
       MappingsField(mappings),
+      SizeField(size),
       IdField(id),
       LsnField(lsn),
       StateField(state),
@@ -50,11 +51,12 @@ Partition::Partition(const std::string& name, ID_TYPE collection_id, ID_TYPE id,
       UpdatedOnField(updated_on) {
 }
 
-PartitionCommit::PartitionCommit(ID_TYPE collection_id, ID_TYPE partition_id, const MappingT& mappings, ID_TYPE id,
-                                 LSN_TYPE lsn, State state, TS_TYPE created_on, TS_TYPE updated_on)
+PartitionCommit::PartitionCommit(ID_TYPE collection_id, ID_TYPE partition_id, const MappingT& mappings, SIZE_TYPE size,
+                                 ID_TYPE id, LSN_TYPE lsn, State state, TS_TYPE created_on, TS_TYPE updated_on)
     : CollectionIdField(collection_id),
       PartitionIdField(partition_id),
       MappingsField(mappings),
+      SizeField(size),
       IdField(id),
       LsnField(lsn),
       StateField(state),
@@ -100,11 +102,13 @@ Segment::ToString() const {
 }
 
 SegmentCommit::SegmentCommit(ID_TYPE schema_id, ID_TYPE partition_id, ID_TYPE segment_id, const MappingT& mappings,
-                             ID_TYPE id, LSN_TYPE lsn, State state, TS_TYPE created_on, TS_TYPE updated_on)
+                             SIZE_TYPE size, ID_TYPE id, LSN_TYPE lsn, State state, TS_TYPE created_on,
+                             TS_TYPE updated_on)
     : SchemaIdField(schema_id),
       PartitionIdField(partition_id),
       SegmentIdField(segment_id),
       MappingsField(mappings),
+      SizeField(size),
       IdField(id),
       LsnField(lsn),
       StateField(state),
@@ -124,11 +128,13 @@ SegmentCommit::ToString() const {
 }
 
 SegmentFile::SegmentFile(ID_TYPE collection_id, ID_TYPE partition_id, ID_TYPE segment_id, ID_TYPE field_element_id,
-                         ID_TYPE id, LSN_TYPE lsn, State state, TS_TYPE created_on, TS_TYPE updated_on)
+                         SIZE_TYPE size, ID_TYPE id, LSN_TYPE lsn, State state,
+                         TS_TYPE created_on, TS_TYPE updated_on)
     : CollectionIdField(collection_id),
       PartitionIdField(partition_id),
       SegmentIdField(segment_id),
       FieldElementIdField(field_element_id),
+      SizeField(size),
       IdField(id),
       LsnField(lsn),
       StateField(state),
