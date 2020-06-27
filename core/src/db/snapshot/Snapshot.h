@@ -144,13 +144,23 @@ class Snapshot : public ReferenceProxy {
     void
     IterateResources(const typename HandlerT::Ptr& handler) {
         auto& resources = GetResources<typename HandlerT::ResourceT>();
-        Status status;
+        auto status = handler->PreIterate();
+        if (!status.ok()) {
+            handler->SetStatus(status);
+            return;
+        }
         for (auto& kv : resources) {
             status = handler->Handle(kv.second.Get());
             if (!status.ok()) {
                 break;
             }
         }
+        if (!status.ok()) {
+            handler->SetStatus(status);
+            return;
+        }
+
+        status = handler->PostIterate();
         handler->SetStatus(status);
     }
 
@@ -329,14 +339,24 @@ struct IterateHandler : public std::enable_shared_from_this<IterateHandler<T>> {
     IterateHandler(ScopedSnapshotT ss) : ss_(ss) {}
 
     virtual Status
+    PreIterate() {
+        return Status::OK();
+    }
+    virtual Status
     Handle(const typename ResourceT::Ptr& resource) = 0;
+    virtual Status
+    PostIterate() {
+        return Status::OK();
+    }
 
     void
     SetStatus(Status status) {
+        std::unique_lock<std::mutex> lock(mtx_);
         status_ = status;
     }
     Status
     GetStatus() const {
+        std::unique_lock<std::mutex> lock(mtx_);
         return status_;
     }
 
@@ -347,6 +367,7 @@ struct IterateHandler : public std::enable_shared_from_this<IterateHandler<T>> {
 
     ScopedSnapshotT ss_;
     Status status_;
+    mutable std::mutex mtx_;
 };
 
 }  // namespace snapshot
