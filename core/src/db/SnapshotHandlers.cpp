@@ -10,6 +10,7 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
 #include "db/SnapshotHandlers.h"
+#include "db/meta/MetaTypes.h"
 
 namespace milvus {
 namespace engine {
@@ -59,6 +60,38 @@ LoadVectorFieldHandler::Handle(const snapshot::FieldPtr& field) {
     // SS TODO: Do Load
 
     return status;
+}
+
+SegmentsToSearchCollector::SegmentsToSearchCollector(snapshot::ScopedSnapshotT ss,
+        meta::FilesHolder& holder)
+    : ss_(ss), holder_(holder) {
+}
+
+Status
+SegmentsToSearchCollector::Handle(const snapshot::SegmentCommitPtr& segment_commit) {
+    // SS TODO
+    meta::SegmentSchema schema;
+    /* schema.id_ = segment_commit->GetSegmentId(); */
+    /* schema.file_type_ = resRow["file_type"]; */
+    /* schema.file_size_ = resRow["file_size"]; */
+    /* schema.row_count_ = resRow["row_count"]; */
+    /* schema.date_ = resRow["date"]; */
+    /* schema.engine_type_ = resRow["engine_type"]; */
+    /* schema.created_on_ = resRow["created_on"]; */
+    /* schema.updated_time_ = resRow["updated_time"]; */
+
+    /* schema.dimension_ = collection_schema.dimension_; */
+    /* schema.index_file_size_ = collection_schema.index_file_size_; */
+    /* schema.index_params_ = collection_schema.index_params_; */
+    /* schema.metric_type_ = collection_schema.metric_type_; */
+
+    /* auto status = utils::GetCollectionFilePath(options_, schema); */
+    /* if (!status.ok()) { */
+    /*     ret = status; */
+    /*     continue; */
+    /* } */
+
+    holder_.MarkFile(schema);
 }
 
 }  // namespace engine

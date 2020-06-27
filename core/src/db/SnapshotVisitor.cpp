@@ -11,6 +11,8 @@
 
 #include "db/SnapshotVisitor.h"
 #include "db/snapshot/Snapshots.h"
+#include "db/meta/MetaTypes.h"
+#include "db/SnapshotHandlers.h"
 
 namespace milvus {
 namespace engine {
@@ -25,6 +27,16 @@ SnapshotVisitor::SnapshotVisitor(const std::string& collection_name) {
 
 SnapshotVisitor::SnapshotVisitor(snapshot::ID_TYPE collection_id) {
     status_ = snapshot::Snapshots::GetInstance().GetSnapshot(ss_, collection_id);
+}
+
+Status
+SnapshotVisitor::SegmentsToSearch(meta::FilesHolder& files_holder) {
+    STATUS_CHECK(status_);
+
+    auto handler = std::make_shared<SegmentsToSearchCollector>(ss_, files_holder);
+    ss_->IterateResources<snapshot::SegmentCommit>(handler);
+
+    return handler->GetStatus();
 }
 
 }  // namespace engine

@@ -12,6 +12,7 @@
 #pragma once
 
 #include "db/snapshot/Snapshot.h"
+#include "db/meta/FilesHolder.h"
 
 #include <memory>
 #include <string>
@@ -24,6 +25,9 @@ class SnapshotVisitor {
     explicit SnapshotVisitor(snapshot::ScopedSnapshotT ss);
     explicit SnapshotVisitor(const std::string& collection_name);
     explicit SnapshotVisitor(snapshot::ID_TYPE collection_id);
+
+    Status
+    SegmentsToSearch(meta::FilesHolder& files_holder);
 
  protected:
     snapshot::ScopedSnapshotT ss_;

@@ -13,6 +13,7 @@
 
 #include "db/snapshot/Snapshot.h"
 #include "server/context/Context.h"
+#include "db/meta/FilesHolder.h"
 #include "utils/Log.h"
 
 #include <memory>
@@ -42,6 +43,17 @@ struct LoadVectorFieldHandler : public snapshot::IterateHandler<snapshot::Field>
 
     const std::shared_ptr<server::Context>& context_;
     snapshot::ScopedSnapshotT ss_;
+};
+
+struct SegmentsToSearchCollector : public snapshot::IterateHandler<snapshot::SegmentCommit> {
+    using ResourceT = snapshot::SegmentCommit;
+    SegmentsToSearchCollector(snapshot::ScopedSnapshotT ss, meta::FilesHolder& holder);
+
+    Status
+    Handle(const typename ResourceT::Ptr&) override;
+
+    snapshot::ScopedSnapshotT ss_;
+    meta::FilesHolder& holder_;
 };
 
 }  // namespace engine
