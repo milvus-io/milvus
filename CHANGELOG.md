@@ -8,13 +8,13 @@ Please mark all changes in change log and use the issue from GitHub
 -   \#2487 Remove timeout when creating collection in dev test
 -   \#2532 Fix Milvus docker image report illegal instruction
 -   \#2551 Fix test_hybrid_db and test_rpc error
--   \#2557 fix random crash of INSERT_DUPLICATE_ID case
+-   \#2557 Fix random crash of INSERT_DUPLICATE_ID case
 -   \#2578 Result count doesn't match target vectors count
 -   \#2582 CreateHybridIndex.cpp compile error
--   \#2598 fix Milvus docker image report illegal instruction
+-   \#2598 Fix Milvus docker image report illegal instruction
 -   \#2617 Fix HNSW and RNSG index files size
 -   \#2637 Suit the range of HNSW parameters
--   \#2649 search parameter of annoy has conflict with document
+-   \#2649 Search parameter of annoy has conflict with document
 
 ## Feature
 -   \#2319 Redo metadata to support MVCC
