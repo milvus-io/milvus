@@ -14,8 +14,7 @@
 namespace milvus {
 namespace engine {
 
-SSDBImpl::SSDBImpl(const DBOptions& options)
-    : options_(options), initialized_(false) {
+SSDBImpl::SSDBImpl(const DBOptions& options) : options_(options), initialized_(false) {
     Start();
 }
 
