@@ -32,7 +32,7 @@ timeout(time: 180, unit: 'MINUTES') {
     // sqlite database backend test
     load "ci/jenkins/step/cleanupSingleDev.groovy"
     
-    if (!fileExists('milvus-helm')) {
+    if (!fileExists('milvus-helm/charts/milvus')) {
         dir ("milvus-helm") {
             checkout([$class: 'GitSCM', branches: [[name:"${env.HELM_BRANCH}"]], userRemoteConfigs: [[url: "https://github.com/milvus-io/milvus-helm.git", name: 'origin', refspec: "+refs/heads/${env.HELM_BRANCH}:refs/remotes/origin/${env.HELM_BRANCH}"]]])
         }
