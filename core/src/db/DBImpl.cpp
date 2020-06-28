@@ -3334,7 +3334,13 @@ Status
 DBImpl::SSTODOCreateCollection(const snapshot::CreateCollectionContext& context) {
     CHECK_INITIALIZED;
 
-    auto op = std::make_shared<snapshot::CreateCollectionOperation>(context);
+    auto ctx = context;
+
+    if (options_.wal_enable_) {
+        ctx.lsn = wal_mgr_->CreateCollection(context.collection->GetName());
+    }
+
+    auto op = std::make_shared<snapshot::CreateCollectionOperation>(ctx);
     auto status = op->Push();
 
     return status;
