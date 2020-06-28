@@ -22,6 +22,7 @@
 #include "knowhere/index/vector_index/IndexIVFPQ.h"
 #include "knowhere/index/vector_index/IndexIVFSQ.h"
 #include "knowhere/index/vector_index/IndexNSG.h"
+#include "knowhere/index/non_materialized_index/IndexIVF_NM.h"
 #ifdef MILVUS_SUPPORT_SPTAG
 #include "knowhere/index/vector_index/IndexSPTAG.h"
 #endif
@@ -33,6 +34,7 @@
 #include "knowhere/index/vector_index/gpu/IndexGPUIVFPQ.h"
 #include "knowhere/index/vector_index/gpu/IndexGPUIVFSQ.h"
 #include "knowhere/index/vector_index/gpu/IndexIVFSQHybrid.h"
+#include "knowhere/index/non_materialized_index/gpu/IndexGPUIVF_NM.h"
 #include "knowhere/index/vector_index/helpers/Cloner.h"
 #endif
 
@@ -47,10 +49,10 @@ VecIndexFactory::CreateVecIndex(const IndexType& type, const IndexMode mode) {
     } else if (type == IndexEnum::INDEX_FAISS_IVFFLAT) {
 #ifdef MILVUS_GPU_VERSION
         if (mode == IndexMode::MODE_GPU) {
-            return std::make_shared<knowhere::GPUIVF>(gpu_device);
+            return std::make_shared<knowhere::GPUIVF_NM>(gpu_device);
         }
 #endif
-        return std::make_shared<knowhere::IVF>();
+        return std::make_shared<knowhere::IVF_NM>();
     } else if (type == IndexEnum::INDEX_FAISS_IVFPQ) {
 #ifdef MILVUS_GPU_VERSION
         if (mode == IndexMode::MODE_GPU) {
