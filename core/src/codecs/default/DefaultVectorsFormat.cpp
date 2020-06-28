@@ -54,6 +54,30 @@ DefaultVectorsFormat::read_vectors_internal(const storage::FSHandlerPtr& fs_ptr,
 }
 
 void
+DefaultVectorsFormat::read_vectors_internal(const storage::FSHandlerPtr& fs_ptr, const std::string& file_path,
+                                            knowhere::BinaryPtr& raw_vectors) {
+    if (!fs_ptr->reader_ptr_->open(file_path.c_str())) {
+        std::string err_msg = "Failed to open file: " + file_path + ", error: " + std::strerror(errno);
+        LOG_ENGINE_ERROR_ << err_msg;
+        throw Exception(SERVER_CANNOT_OPEN_FILE, err_msg);
+    }
+
+    size_t num_bytes;
+    fs_ptr->reader_ptr_->read(&num_bytes, sizeof(size_t));
+
+    raw_vectors = std::make_shared<knowhere::Binary>();
+    raw_vectors->size = num_bytes;
+    raw_vectors->data = std::shared_ptr<uint8_t[]>(new uint8_t[num_bytes]);
+
+    // Beginning of file is num_bytes
+    fs_ptr->reader_ptr_->seekg(sizeof(size_t));
+
+    fs_ptr->reader_ptr_->read(raw_vectors->data.get(), num_bytes);
+
+    fs_ptr->reader_ptr_->close();
+}
+
+void
 DefaultVectorsFormat::read_uids_internal(const storage::FSHandlerPtr& fs_ptr, const std::string& file_path,
                                          std::vector<segment::doc_id_t>& uids) {
     if (!fs_ptr->reader_ptr_->open(file_path.c_str())) {
@@ -157,6 +181,32 @@ DefaultVectorsFormat::read_uids(const storage::FSHandlerPtr& fs_ptr, std::vector
         const auto& path = it->path();
         if (path.extension().string() == user_id_extension_) {
             read_uids_internal(fs_ptr, path.string(), uids);
+            break;
+        }
+    }
+}
+
+void
+DefaultVectorsFormat::read_vectors(const storage::FSHandlerPtr& fs_ptr, knowhere::BinaryPtr& raw_vectors) {
+    const std::lock_guard<std::mutex> lock(mutex_);
+
+    std::string dir_path = fs_ptr->operation_ptr_->GetDirectory();
+    if (!boost::filesystem::is_directory(dir_path)) {
+        std::string err_msg = "Directory: " + dir_path + "does not exist";
+        LOG_ENGINE_ERROR_ << err_msg;
+        throw Exception(SERVER_INVALID_ARGUMENT, err_msg);
+    }
+
+    boost::filesystem::path target_path(dir_path);
+    typedef boost::filesystem::directory_iterator d_it;
+    d_it it_end;
+    d_it it(target_path);
+    //    for (auto& it : boost::filesystem::directory_iterator(dir_path)) {
+    for (; it != it_end; ++it) {
+        const auto& path = it->path();
+        if (path.extension().string() == raw_vector_extension_) {
+            read_vectors_internal(fs_ptr, path.string(), raw_vectors);
+            break;
         }
     }
 }
@@ -182,6 +232,7 @@ DefaultVectorsFormat::read_vectors(const storage::FSHandlerPtr& fs_ptr, off_t of
         const auto& path = it->path();
         if (path.extension().string() == raw_vector_extension_) {
             read_vectors_internal(fs_ptr, path.string(), offset, num_bytes, raw_vectors);
+            break;
         }
     }
 }

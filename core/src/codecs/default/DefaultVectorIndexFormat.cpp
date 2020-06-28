@@ -32,7 +32,7 @@ namespace codec {
 
 knowhere::VecIndexPtr
 DefaultVectorIndexFormat::read_internal(const storage::FSHandlerPtr& fs_ptr, const std::string& path,
-                                        knowhere::BinaryPtr row_data) {
+                                        knowhere::BinaryPtr raw_data) {
     milvus::TimeRecorder recorder("read_index");
     knowhere::BinarySet load_data_list;
 
@@ -92,8 +92,8 @@ DefaultVectorIndexFormat::read_internal(const storage::FSHandlerPtr& fs_ptr, con
     auto index =
         vec_index_factory.CreateVecIndex(knowhere::OldIndexTypeToStr(current_type), knowhere::IndexMode::MODE_CPU);
     if (index != nullptr) {
-        if (row_data != nullptr) {
-            load_data_list.Append(RAW_DATA, row_data);
+        if (raw_data != nullptr) {
+            load_data_list.Append(RAW_DATA, raw_data);
         }
 
         index->Load(load_data_list);
@@ -123,7 +123,7 @@ DefaultVectorIndexFormat::read(const storage::FSHandlerPtr& fs_ptr, const std::s
 
 void
 DefaultVectorIndexFormat::read(const storage::FSHandlerPtr& fs_ptr, const std::string& location,
-                               knowhere::BinaryPtr row_data, segment::VectorIndexPtr& vector_index) {
+                               knowhere::BinaryPtr raw_data, segment::VectorIndexPtr& vector_index) {
     const std::lock_guard<std::mutex> lock(mutex_);
 
     std::string dir_path = fs_ptr->operation_ptr_->GetDirectory();
@@ -133,7 +133,7 @@ DefaultVectorIndexFormat::read(const storage::FSHandlerPtr& fs_ptr, const std::s
         throw Exception(SERVER_INVALID_ARGUMENT, err_msg);
     }
 
-    knowhere::VecIndexPtr index = read_internal(fs_ptr, location, row_data);
+    knowhere::VecIndexPtr index = read_internal(fs_ptr, location, raw_data);
     vector_index->SetVectorIndex(index);
 }
 

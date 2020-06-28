@@ -124,21 +124,13 @@ SegmentReader::LoadVectorIndex(const std::string& location, segment::VectorIndex
 }
 
 Status
-SegmentReader::LoadVectorIndexWithRowData(const std::string& location, segment::VectorIndexPtr& vector_index_ptr) {
+SegmentReader::LoadVectorIndexWithRawData(const std::string& location, segment::VectorIndexPtr& vector_index_ptr) {
     codec::DefaultCodec default_codec;
     try {
         fs_ptr_->operation_ptr_->CreateDirectory();
-        // TODO: not to copy data?
-        default_codec.GetVectorsFormat()->read(fs_ptr_, segment_ptr_->vectors_ptr_);
-
-
-        auto &vector_data = segment_ptr_->vectors_ptr_->GetData();
-        knowhere::BinaryPtr row_data = std::make_shared<knowhere::Binary>();
-        row_data->size = vector_data.size();
-        row_data->data = std::shared_ptr<uint8_t[]>(new uint8_t[row_data->size]);
-        memcpy(row_data->data.get(), vector_data.data(), row_data->size);
-
-        default_codec.GetVectorIndexFormat()->read(fs_ptr_, location, row_data, vector_index_ptr);
+        knowhere::BinaryPtr raw_data = nullptr;
+        default_codec.GetVectorsFormat()->read_vectors(fs_ptr_, raw_data);
+        default_codec.GetVectorIndexFormat()->read(fs_ptr_, location, raw_data, vector_index_ptr);
     } catch (std::exception& e) {
         std::string err_msg = "Failed to load vector index with row data: " + std::string(e.what());
         LOG_ENGINE_ERROR_ << err_msg;

@@ -52,7 +52,7 @@ class SegmentReader {
     LoadVectorIndex(const std::string& location, segment::VectorIndexPtr& vector_index_ptr);
 
     Status
-    LoadVectorIndexWithRowData(const std::string& location, segment::VectorIndexPtr& vector_index_ptr);
+    LoadVectorIndexWithRawData(const std::string& location, segment::VectorIndexPtr& vector_index_ptr);
 
     Status
     LoadBloomFilter(segment::IdBloomFilterPtr& id_bloom_filter_ptr);

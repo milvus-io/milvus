@@ -37,7 +37,7 @@ class VectorIndexFormat {
 
     virtual void
     read(const storage::FSHandlerPtr& fs_ptr, const std::string& location,
-         knowhere::BinaryPtr row_data, segment::VectorIndexPtr& vector_index) {
+         knowhere::BinaryPtr raw_data, segment::VectorIndexPtr& vector_index) {
     }
 };
 
