@@ -16,8 +16,8 @@
 #include <unordered_map>
 
 #include "cache/CpuCacheMgr.h"
-#include "db/attr/InstanceStructuredIndex.h"
 #include "db/Utils.h"
+#include "db/attr/InstanceStructuredIndex.h"
 #include "db/insert/MemTable.h"
 #include "db/meta/FilesHolder.h"
 #include "knowhere/index/vector_index/VecIndex.h"

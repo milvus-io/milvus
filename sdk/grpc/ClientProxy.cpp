@@ -34,7 +34,6 @@ void
 ConstructSearchParam(const std::string& collection_name, const std::vector<std::string>& partition_tag_array,
                      int64_t topk, const std::string& extra_params, T& search_param) {
     search_param.set_collection_name(collection_name);
-    search_param.set_topk(topk);
     milvus::grpc::KeyValuePair* kv = search_param.add_extra_params();
     kv->set_key(EXTRA_PARAM_KEY);
     kv->set_value(extra_params);
@@ -58,7 +57,7 @@ CopyRowRecord(::milvus::grpc::RowRecord* target, const Entity& src) {
 }
 
 void
-ConstructTopkResult(const ::milvus::grpc::TopKQueryResult& grpc_result, TopKQueryResult& topk_query_result) {
+ConstructTopkResult(const ::milvus::grpc::QueryResult& grpc_result, TopKQueryResult& topk_query_result) {
     topk_query_result.reserve(grpc_result.row_num());
     int64_t nq = grpc_result.row_num();
     int64_t topk = grpc_result.ids().size() / nq;
@@ -242,15 +241,23 @@ ClientProxy::SetConfig(const std::string& node_name, const std::string& value) c
 }
 
 Status
-ClientProxy::CreateCollection(const CollectionParam& param) {
+ClientProxy::CreateCollection(const std::string& collection_name, std::vector<FieldPtr>& fields) {
     try {
-        ::milvus::grpc::CollectionSchema schema;
-        schema.set_collection_name(param.collection_name);
-        schema.set_dimension(param.dimension);
-        schema.set_index_file_size(param.index_file_size);
-        schema.set_metric_type(static_cast<int32_t>(param.metric_type));
+        ::milvus::grpc::Mapping mapping;
+        mapping.set_collection_name(collection_name);
+        for (auto& field : fields) {
+            auto grpc_field = mapping.add_fields();
+            grpc_field->set_name(field->field_name);
+            auto grpc_index_param = grpc_field->add_index_params();
+            grpc_index_param->set_key(field->index_name);
+            grpc_index_param->set_value(field->index_param);
 
-        return client_ptr_->CreateCollection(schema);
+            auto grpc_extra_param = grpc_field->add_index_params();
+            grpc_extra_param->set_key(EXTRA_PARAM_KEY);
+            grpc_extra_param->set_value(field->extram_params);
+        }
+
+        return client_ptr_->CreateCollection(mapping);
     } catch (std::exception& ex) {
         return Status(StatusCode::UnknownError, "Failed to create collection: " + std::string(ex.what()));
     }
@@ -280,14 +287,16 @@ ClientProxy::DropCollection(const std::string& collection_name) {
 }
 
 Status
-ClientProxy::CreateIndex(const IndexParam& index_param) {
+ClientProxy::CreateIndex(const std::string& collection_name, const std::string& field_name,
+                         const std::string& index_name, const std::string& index_params) {
     try {
         ::milvus::grpc::IndexParam grpc_index_param;
-        grpc_index_param.set_collection_name(index_param.collection_name);
-        grpc_index_param.set_index_type(static_cast<int32_t>(index_param.index_type));
+        grpc_index_param.set_collection_name(collection_name);
+        grpc_index_param.set_field_name(field_name);
         milvus::grpc::KeyValuePair* kv = grpc_index_param.add_extra_params();
+        grpc_index_param.set_index_name(index_name);
         kv->set_key(EXTRA_PARAM_KEY);
-        kv->set_value(index_param.extra_params);
+        kv->set_value(index_params);
         return client_ptr_->CreateIndex(grpc_index_param);
     } catch (std::exception& ex) {
         return Status(StatusCode::UnknownError, "Failed to build index: " + std::string(ex.what()));
@@ -296,20 +305,24 @@ ClientProxy::CreateIndex(const IndexParam& index_param) {
 
 Status
 ClientProxy::Insert(const std::string& collection_name, const std::string& partition_tag,
-                    const std::vector<Entity>& entity_array, std::vector<int64_t>& id_array) {
+                    const FieldValue& field_value, std::vector<int64_t>& id_array) {
     Status status = Status::OK();
     try {
         ::milvus::grpc::InsertParam insert_param;
         insert_param.set_collection_name(collection_name);
         insert_param.set_partition_tag(partition_tag);
 
-        for (auto& entity : entity_array) {
-            ::milvus::grpc::RowRecord* grpc_record = insert_param.add_row_record_array();
-            CopyRowRecord(grpc_record, entity);
+        if (!field_value.int8_value.empty()) {
+            auto grpc_field = insert_param.add_fields();
+            for (auto& field_it : field_value.int8_value) {
+
+            }
+        } else if (!field_value.int16_value.empty()) {
+
         }
 
         // Single thread
-        ::milvus::grpc::VectorIds vector_ids;
+        ::milvus::grpc::EntityIds entity_ids;
         if (!id_array.empty()) {
             /* set user's ids */
             auto row_ids = insert_param.mutable_row_id_array();
@@ -330,7 +343,7 @@ ClientProxy::Insert(const std::string& collection_name, const std::string& parti
 
 Status
 ClientProxy::GetEntityByID(const std::string& collection_name, const std::vector<int64_t>& id_array,
-                           std::vector<Entity>& entities_data) {
+                           QueryResult& result) {
     try {
         entities_data.clear();
 

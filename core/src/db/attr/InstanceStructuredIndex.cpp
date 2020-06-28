@@ -17,9 +17,9 @@
 #include <utility>
 #include <vector>
 
+#include "db/Utils.h"
 #include "db/attr/InstanceStructuredIndex.h"
 #include "db/meta/FilesHolder.h"
-#include "db/Utils.h"
 #include "segment/SegmentReader.h"
 #include "segment/SegmentWriter.h"
 
@@ -226,7 +226,8 @@ InstanceStructuredIndex::GenStructuredIndex(
 
 Status
 InstanceStructuredIndex::SerializeStructuredIndex(
-    const engine::meta::SegmentSchema& segment_schema, const std::unordered_map<std::string, knowhere::IndexPtr>& attr_indexes,
+    const engine::meta::SegmentSchema& segment_schema,
+    const std::unordered_map<std::string, knowhere::IndexPtr>& attr_indexes,
     const std::unordered_map<std::string, int64_t>& attr_sizes,
     const std::unordered_map<std::string, engine::meta::hybrid::DataType>& attr_types) {
     auto status = Status::OK();

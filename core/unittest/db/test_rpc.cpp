@@ -47,7 +47,7 @@ static constexpr int64_t TOPK = 128;
 constexpr int64_t SECONDS_EACH_HOUR = 3600;
 
 void
-ConstructMapping(::milvus::grpc::Mapping* request, const std::strignng& collection_name) {
+ConstructMapping(::milvus::grpc::Mapping* request, const std::string& collection_name) {
     auto field0 = request->add_fields();
     field0->set_name("field_0");
     field0->set_type(::milvus::grpc::DataType::INT64);
@@ -499,26 +499,26 @@ TEST_F(RpcHandlerTest, INDEX_TEST) {
 
     ::milvus::grpc::Status status;
     collection_name.Clear();
-    handler->DropIndex(&context, &collection_name, &status);
+    handler->DropIndex(&context, &index_param, &status);
     collection_name.set_collection_name("test5");
-    handler->DropIndex(&context, &collection_name, &status);
+    handler->DropIndex(&context, &index_param, &status);
 
     collection_name.set_collection_name(COLLECTION_NAME);
 
     fiu_init(0);
     fiu_enable("DropIndexRequest.OnExecute.collection_not_exist", 1, NULL, 0);
-    handler->DropIndex(&context, &collection_name, &status);
+    handler->DropIndex(&context, &index_param, &status);
     fiu_disable("DropIndexRequest.OnExecute.collection_not_exist");
 
     fiu_enable("DropIndexRequest.OnExecute.drop_index_fail", 1, NULL, 0);
-    handler->DropIndex(&context, &collection_name, &status);
+    handler->DropIndex(&context, &index_param, &status);
     fiu_disable("DropIndexRequest.OnExecute.drop_index_fail");
 
     fiu_enable("DropIndexRequest.OnExecute.throw_std_exception", 1, NULL, 0);
-    handler->DropIndex(&context, &collection_name, &status);
+    handler->DropIndex(&context, &index_param, &status);
     fiu_disable("DropIndexRequest.OnExecute.throw_std_exception");
 
-    handler->DropIndex(&context, &collection_name, &status);
+    handler->DropIndex(&context, &index_param, &status);
 }
 
 TEST_F(RpcHandlerTest, INSERT_TEST) {

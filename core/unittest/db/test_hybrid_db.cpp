@@ -61,7 +61,7 @@ BuildCollectionSchema(milvus::engine::meta::CollectionSchema& collection_schema,
     milvus::engine::meta::hybrid::FieldSchema schema;
     schema.field_name_ = "field_3";
     schema.collection_id_ = COLLECTION_NAME;
-    schema.field_type_ = (int)(milvus::engine::meta::hybrid::DataType::VECTOR);
+    schema.field_type_ = (int)(milvus::engine::meta::hybrid::DataType::FLOAT_VECTOR);
     fields.emplace_back(schema);
 
     fields_schema.fields_schema_ = fields;

@@ -13,6 +13,7 @@
 
 #include <memory>
 #include <string>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -27,8 +28,7 @@ class CreateHybridCollectionRequest : public BaseRequest {
     Create(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name,
            std::unordered_map<std::string, engine::meta::hybrid::DataType>& field_types,
            std::unordered_map<std::string, milvus::json>& field_index_params,
-           std::unordered_map<std::string, std::string>& field_params,
-           milvus::json& extra_params);
+           std::unordered_map<std::string, std::string>& field_params, milvus::json& extra_params);
 
  protected:
     CreateHybridCollectionRequest(const std::shared_ptr<milvus::server::Context>& context,

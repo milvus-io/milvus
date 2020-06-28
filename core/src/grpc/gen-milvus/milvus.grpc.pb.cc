@@ -309,11 +309,11 @@ void MilvusService::Stub::experimental_async::CreateIndex(::grpc::ClientContext*
   return ::grpc_impl::internal::ClientAsyncResponseReaderFactory< ::milvus::grpc::Status>::Create(channel_.get(), cq, rpcmethod_CreateIndex_, context, request, false);
 }
 
-::grpc::Status MilvusService::Stub::DescribeIndex(::grpc::ClientContext* context, const ::milvus::grpc::IndexParam& request, ::milvus::grpc::IndexParam* response) {
+::grpc::Status MilvusService::Stub::DescribeIndex(::grpc::ClientContext* context, const ::milvus::grpc::CollectionName& request, ::milvus::grpc::IndexParam* response) {
   return ::grpc::internal::BlockingUnaryCall(channel_.get(), rpcmethod_DescribeIndex_, context, request, response);
 }
 
-void MilvusService::Stub::experimental_async::DescribeIndex(::grpc::ClientContext* context, const ::milvus::grpc::IndexParam* request, ::milvus::grpc::IndexParam* response, std::function<void(::grpc::Status)> f) {
+void MilvusService::Stub::experimental_async::DescribeIndex(::grpc::ClientContext* context, const ::milvus::grpc::CollectionName* request, ::milvus::grpc::IndexParam* response, std::function<void(::grpc::Status)> f) {
   ::grpc_impl::internal::CallbackUnaryCall(stub_->channel_.get(), stub_->rpcmethod_DescribeIndex_, context, request, response, std::move(f));
 }
 
@@ -321,7 +321,7 @@ void MilvusService::Stub::experimental_async::DescribeIndex(::grpc::ClientContex
   ::grpc_impl::internal::CallbackUnaryCall(stub_->channel_.get(), stub_->rpcmethod_DescribeIndex_, context, request, response, std::move(f));
 }
 
-void MilvusService::Stub::experimental_async::DescribeIndex(::grpc::ClientContext* context, const ::milvus::grpc::IndexParam* request, ::milvus::grpc::IndexParam* response, ::grpc::experimental::ClientUnaryReactor* reactor) {
+void MilvusService::Stub::experimental_async::DescribeIndex(::grpc::ClientContext* context, const ::milvus::grpc::CollectionName* request, ::milvus::grpc::IndexParam* response, ::grpc::experimental::ClientUnaryReactor* reactor) {
   ::grpc_impl::internal::ClientCallbackUnaryFactory::Create(stub_->channel_.get(), stub_->rpcmethod_DescribeIndex_, context, request, response, reactor);
 }
 
@@ -329,19 +329,19 @@ void MilvusService::Stub::experimental_async::DescribeIndex(::grpc::ClientContex
   ::grpc_impl::internal::ClientCallbackUnaryFactory::Create(stub_->channel_.get(), stub_->rpcmethod_DescribeIndex_, context, request, response, reactor);
 }
 
-::grpc::ClientAsyncResponseReader< ::milvus::grpc::IndexParam>* MilvusService::Stub::AsyncDescribeIndexRaw(::grpc::ClientContext* context, const ::milvus::grpc::IndexParam& request, ::grpc::CompletionQueue* cq) {
+::grpc::ClientAsyncResponseReader< ::milvus::grpc::IndexParam>* MilvusService::Stub::AsyncDescribeIndexRaw(::grpc::ClientContext* context, const ::milvus::grpc::CollectionName& request, ::grpc::CompletionQueue* cq) {
   return ::grpc_impl::internal::ClientAsyncResponseReaderFactory< ::milvus::grpc::IndexParam>::Create(channel_.get(), cq, rpcmethod_DescribeIndex_, context, request, true);
 }
 
-::grpc::ClientAsyncResponseReader< ::milvus::grpc::IndexParam>* MilvusService::Stub::PrepareAsyncDescribeIndexRaw(::grpc::ClientContext* context, const ::milvus::grpc::IndexParam& request, ::grpc::CompletionQueue* cq) {
+::grpc::ClientAsyncResponseReader< ::milvus::grpc::IndexParam>* MilvusService::Stub::PrepareAsyncDescribeIndexRaw(::grpc::ClientContext* context, const ::milvus::grpc::CollectionName& request, ::grpc::CompletionQueue* cq) {
   return ::grpc_impl::internal::ClientAsyncResponseReaderFactory< ::milvus::grpc::IndexParam>::Create(channel_.get(), cq, rpcmethod_DescribeIndex_, context, request, false);
 }
 
-::grpc::Status MilvusService::Stub::DropIndex(::grpc::ClientContext* context, const ::milvus::grpc::CollectionName& request, ::milvus::grpc::Status* response) {
+::grpc::Status MilvusService::Stub::DropIndex(::grpc::ClientContext* context, const ::milvus::grpc::IndexParam& request, ::milvus::grpc::Status* response) {
   return ::grpc::internal::BlockingUnaryCall(channel_.get(), rpcmethod_DropIndex_, context, request, response);
 }
 
-void MilvusService::Stub::experimental_async::DropIndex(::grpc::ClientContext* context, const ::milvus::grpc::CollectionName* request, ::milvus::grpc::Status* response, std::function<void(::grpc::Status)> f) {
+void MilvusService::Stub::experimental_async::DropIndex(::grpc::ClientContext* context, const ::milvus::grpc::IndexParam* request, ::milvus::grpc::Status* response, std::function<void(::grpc::Status)> f) {
   ::grpc_impl::internal::CallbackUnaryCall(stub_->channel_.get(), stub_->rpcmethod_DropIndex_, context, request, response, std::move(f));
 }
 
@@ -349,7 +349,7 @@ void MilvusService::Stub::experimental_async::DropIndex(::grpc::ClientContext* c
   ::grpc_impl::internal::CallbackUnaryCall(stub_->channel_.get(), stub_->rpcmethod_DropIndex_, context, request, response, std::move(f));
 }
 
-void MilvusService::Stub::experimental_async::DropIndex(::grpc::ClientContext* context, const ::milvus::grpc::CollectionName* request, ::milvus::grpc::Status* response, ::grpc::experimental::ClientUnaryReactor* reactor) {
+void MilvusService::Stub::experimental_async::DropIndex(::grpc::ClientContext* context, const ::milvus::grpc::IndexParam* request, ::milvus::grpc::Status* response, ::grpc::experimental::ClientUnaryReactor* reactor) {
   ::grpc_impl::internal::ClientCallbackUnaryFactory::Create(stub_->channel_.get(), stub_->rpcmethod_DropIndex_, context, request, response, reactor);
 }
 
@@ -357,11 +357,11 @@ void MilvusService::Stub::experimental_async::DropIndex(::grpc::ClientContext* c
   ::grpc_impl::internal::ClientCallbackUnaryFactory::Create(stub_->channel_.get(), stub_->rpcmethod_DropIndex_, context, request, response, reactor);
 }
 
-::grpc::ClientAsyncResponseReader< ::milvus::grpc::Status>* MilvusService::Stub::AsyncDropIndexRaw(::grpc::ClientContext* context, const ::milvus::grpc::CollectionName& request, ::grpc::CompletionQueue* cq) {
+::grpc::ClientAsyncResponseReader< ::milvus::grpc::Status>* MilvusService::Stub::AsyncDropIndexRaw(::grpc::ClientContext* context, const ::milvus::grpc::IndexParam& request, ::grpc::CompletionQueue* cq) {
   return ::grpc_impl::internal::ClientAsyncResponseReaderFactory< ::milvus::grpc::Status>::Create(channel_.get(), cq, rpcmethod_DropIndex_, context, request, true);
 }
 
-::grpc::ClientAsyncResponseReader< ::milvus::grpc::Status>* MilvusService::Stub::PrepareAsyncDropIndexRaw(::grpc::ClientContext* context, const ::milvus::grpc::CollectionName& request, ::grpc::CompletionQueue* cq) {
+::grpc::ClientAsyncResponseReader< ::milvus::grpc::Status>* MilvusService::Stub::PrepareAsyncDropIndexRaw(::grpc::ClientContext* context, const ::milvus::grpc::IndexParam& request, ::grpc::CompletionQueue* cq) {
   return ::grpc_impl::internal::ClientAsyncResponseReaderFactory< ::milvus::grpc::Status>::Create(channel_.get(), cq, rpcmethod_DropIndex_, context, request, false);
 }
 
@@ -885,12 +885,12 @@ MilvusService::Service::Service() {
   AddMethod(new ::grpc::internal::RpcServiceMethod(
       MilvusService_method_names[8],
       ::grpc::internal::RpcMethod::NORMAL_RPC,
-      new ::grpc::internal::RpcMethodHandler< MilvusService::Service, ::milvus::grpc::IndexParam, ::milvus::grpc::IndexParam>(
+      new ::grpc::internal::RpcMethodHandler< MilvusService::Service, ::milvus::grpc::CollectionName, ::milvus::grpc::IndexParam>(
           std::mem_fn(&MilvusService::Service::DescribeIndex), this)));
   AddMethod(new ::grpc::internal::RpcServiceMethod(
       MilvusService_method_names[9],
       ::grpc::internal::RpcMethod::NORMAL_RPC,
-      new ::grpc::internal::RpcMethodHandler< MilvusService::Service, ::milvus::grpc::CollectionName, ::milvus::grpc::Status>(
+      new ::grpc::internal::RpcMethodHandler< MilvusService::Service, ::milvus::grpc::IndexParam, ::milvus::grpc::Status>(
           std::mem_fn(&MilvusService::Service::DropIndex), this)));
   AddMethod(new ::grpc::internal::RpcServiceMethod(
       MilvusService_method_names[10],
@@ -1038,14 +1038,14 @@ MilvusService::Service::~Service() {
   return ::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "");
 }
 
-::grpc::Status MilvusService::Service::DescribeIndex(::grpc::ServerContext* context, const ::milvus::grpc::IndexParam* request, ::milvus::grpc::IndexParam* response) {
+::grpc::Status MilvusService::Service::DescribeIndex(::grpc::ServerContext* context, const ::milvus::grpc::CollectionName* request, ::milvus::grpc::IndexParam* response) {
   (void) context;
   (void) request;
   (void) response;
   return ::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "");
 }
 
-::grpc::Status MilvusService::Service::DropIndex(::grpc::ServerContext* context, const ::milvus::grpc::CollectionName* request, ::milvus::grpc::Status* response) {
+::grpc::Status MilvusService::Service::DropIndex(::grpc::ServerContext* context, const ::milvus::grpc::IndexParam* request, ::milvus::grpc::Status* response) {
   (void) context;
   (void) request;
   (void) response;

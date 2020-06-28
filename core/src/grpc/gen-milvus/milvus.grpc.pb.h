@@ -157,11 +157,11 @@ class MilvusService final {
     // @param CollectionName, target collection name.
     //
     // @return IndexParam
-    virtual ::grpc::Status DescribeIndex(::grpc::ClientContext* context, const ::milvus::grpc::IndexParam& request, ::milvus::grpc::IndexParam* response) = 0;
-    std::unique_ptr< ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::IndexParam>> AsyncDescribeIndex(::grpc::ClientContext* context, const ::milvus::grpc::IndexParam& request, ::grpc::CompletionQueue* cq) {
+    virtual ::grpc::Status DescribeIndex(::grpc::ClientContext* context, const ::milvus::grpc::CollectionName& request, ::milvus::grpc::IndexParam* response) = 0;
+    std::unique_ptr< ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::IndexParam>> AsyncDescribeIndex(::grpc::ClientContext* context, const ::milvus::grpc::CollectionName& request, ::grpc::CompletionQueue* cq) {
       return std::unique_ptr< ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::IndexParam>>(AsyncDescribeIndexRaw(context, request, cq));
     }
-    std::unique_ptr< ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::IndexParam>> PrepareAsyncDescribeIndex(::grpc::ClientContext* context, const ::milvus::grpc::IndexParam& request, ::grpc::CompletionQueue* cq) {
+    std::unique_ptr< ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::IndexParam>> PrepareAsyncDescribeIndex(::grpc::ClientContext* context, const ::milvus::grpc::CollectionName& request, ::grpc::CompletionQueue* cq) {
       return std::unique_ptr< ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::IndexParam>>(PrepareAsyncDescribeIndexRaw(context, request, cq));
     }
     // *
@@ -170,11 +170,11 @@ class MilvusService final {
     // @param CollectionName, target collection name.
     //
     // @return Status
-    virtual ::grpc::Status DropIndex(::grpc::ClientContext* context, const ::milvus::grpc::CollectionName& request, ::milvus::grpc::Status* response) = 0;
-    std::unique_ptr< ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::Status>> AsyncDropIndex(::grpc::ClientContext* context, const ::milvus::grpc::CollectionName& request, ::grpc::CompletionQueue* cq) {
+    virtual ::grpc::Status DropIndex(::grpc::ClientContext* context, const ::milvus::grpc::IndexParam& request, ::milvus::grpc::Status* response) = 0;
+    std::unique_ptr< ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::Status>> AsyncDropIndex(::grpc::ClientContext* context, const ::milvus::grpc::IndexParam& request, ::grpc::CompletionQueue* cq) {
       return std::unique_ptr< ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::Status>>(AsyncDropIndexRaw(context, request, cq));
     }
-    std::unique_ptr< ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::Status>> PrepareAsyncDropIndex(::grpc::ClientContext* context, const ::milvus::grpc::CollectionName& request, ::grpc::CompletionQueue* cq) {
+    std::unique_ptr< ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::Status>> PrepareAsyncDropIndex(::grpc::ClientContext* context, const ::milvus::grpc::IndexParam& request, ::grpc::CompletionQueue* cq) {
       return std::unique_ptr< ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::Status>>(PrepareAsyncDropIndexRaw(context, request, cq));
     }
     // *
@@ -483,9 +483,9 @@ class MilvusService final {
       // @param CollectionName, target collection name.
       //
       // @return IndexParam
-      virtual void DescribeIndex(::grpc::ClientContext* context, const ::milvus::grpc::IndexParam* request, ::milvus::grpc::IndexParam* response, std::function<void(::grpc::Status)>) = 0;
+      virtual void DescribeIndex(::grpc::ClientContext* context, const ::milvus::grpc::CollectionName* request, ::milvus::grpc::IndexParam* response, std::function<void(::grpc::Status)>) = 0;
       virtual void DescribeIndex(::grpc::ClientContext* context, const ::grpc::ByteBuffer* request, ::milvus::grpc::IndexParam* response, std::function<void(::grpc::Status)>) = 0;
-      virtual void DescribeIndex(::grpc::ClientContext* context, const ::milvus::grpc::IndexParam* request, ::milvus::grpc::IndexParam* response, ::grpc::experimental::ClientUnaryReactor* reactor) = 0;
+      virtual void DescribeIndex(::grpc::ClientContext* context, const ::milvus::grpc::CollectionName* request, ::milvus::grpc::IndexParam* response, ::grpc::experimental::ClientUnaryReactor* reactor) = 0;
       virtual void DescribeIndex(::grpc::ClientContext* context, const ::grpc::ByteBuffer* request, ::milvus::grpc::IndexParam* response, ::grpc::experimental::ClientUnaryReactor* reactor) = 0;
       // *
       // @brief This method is used to drop index
@@ -493,9 +493,9 @@ class MilvusService final {
       // @param CollectionName, target collection name.
       //
       // @return Status
-      virtual void DropIndex(::grpc::ClientContext* context, const ::milvus::grpc::CollectionName* request, ::milvus::grpc::Status* response, std::function<void(::grpc::Status)>) = 0;
+      virtual void DropIndex(::grpc::ClientContext* context, const ::milvus::grpc::IndexParam* request, ::milvus::grpc::Status* response, std::function<void(::grpc::Status)>) = 0;
       virtual void DropIndex(::grpc::ClientContext* context, const ::grpc::ByteBuffer* request, ::milvus::grpc::Status* response, std::function<void(::grpc::Status)>) = 0;
-      virtual void DropIndex(::grpc::ClientContext* context, const ::milvus::grpc::CollectionName* request, ::milvus::grpc::Status* response, ::grpc::experimental::ClientUnaryReactor* reactor) = 0;
+      virtual void DropIndex(::grpc::ClientContext* context, const ::milvus::grpc::IndexParam* request, ::milvus::grpc::Status* response, ::grpc::experimental::ClientUnaryReactor* reactor) = 0;
       virtual void DropIndex(::grpc::ClientContext* context, const ::grpc::ByteBuffer* request, ::milvus::grpc::Status* response, ::grpc::experimental::ClientUnaryReactor* reactor) = 0;
       // *
       // @brief This method is used to create partition
@@ -682,10 +682,10 @@ class MilvusService final {
     virtual ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::Status>* PrepareAsyncDropCollectionRaw(::grpc::ClientContext* context, const ::milvus::grpc::CollectionName& request, ::grpc::CompletionQueue* cq) = 0;
     virtual ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::Status>* AsyncCreateIndexRaw(::grpc::ClientContext* context, const ::milvus::grpc::IndexParam& request, ::grpc::CompletionQueue* cq) = 0;
     virtual ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::Status>* PrepareAsyncCreateIndexRaw(::grpc::ClientContext* context, const ::milvus::grpc::IndexParam& request, ::grpc::CompletionQueue* cq) = 0;
-    virtual ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::IndexParam>* AsyncDescribeIndexRaw(::grpc::ClientContext* context, const ::milvus::grpc::IndexParam& request, ::grpc::CompletionQueue* cq) = 0;
-    virtual ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::IndexParam>* PrepareAsyncDescribeIndexRaw(::grpc::ClientContext* context, const ::milvus::grpc::IndexParam& request, ::grpc::CompletionQueue* cq) = 0;
-    virtual ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::Status>* AsyncDropIndexRaw(::grpc::ClientContext* context, const ::milvus::grpc::CollectionName& request, ::grpc::CompletionQueue* cq) = 0;
-    virtual ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::Status>* PrepareAsyncDropIndexRaw(::grpc::ClientContext* context, const ::milvus::grpc::CollectionName& request, ::grpc::CompletionQueue* cq) = 0;
+    virtual ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::IndexParam>* AsyncDescribeIndexRaw(::grpc::ClientContext* context, const ::milvus::grpc::CollectionName& request, ::grpc::CompletionQueue* cq) = 0;
+    virtual ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::IndexParam>* PrepareAsyncDescribeIndexRaw(::grpc::ClientContext* context, const ::milvus::grpc::CollectionName& request, ::grpc::CompletionQueue* cq) = 0;
+    virtual ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::Status>* AsyncDropIndexRaw(::grpc::ClientContext* context, const ::milvus::grpc::IndexParam& request, ::grpc::CompletionQueue* cq) = 0;
+    virtual ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::Status>* PrepareAsyncDropIndexRaw(::grpc::ClientContext* context, const ::milvus::grpc::IndexParam& request, ::grpc::CompletionQueue* cq) = 0;
     virtual ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::Status>* AsyncCreatePartitionRaw(::grpc::ClientContext* context, const ::milvus::grpc::PartitionParam& request, ::grpc::CompletionQueue* cq) = 0;
     virtual ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::Status>* PrepareAsyncCreatePartitionRaw(::grpc::ClientContext* context, const ::milvus::grpc::PartitionParam& request, ::grpc::CompletionQueue* cq) = 0;
     virtual ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::BoolReply>* AsyncHasPartitionRaw(::grpc::ClientContext* context, const ::milvus::grpc::PartitionParam& request, ::grpc::CompletionQueue* cq) = 0;
@@ -780,18 +780,18 @@ class MilvusService final {
     std::unique_ptr< ::grpc::ClientAsyncResponseReader< ::milvus::grpc::Status>> PrepareAsyncCreateIndex(::grpc::ClientContext* context, const ::milvus::grpc::IndexParam& request, ::grpc::CompletionQueue* cq) {
       return std::unique_ptr< ::grpc::ClientAsyncResponseReader< ::milvus::grpc::Status>>(PrepareAsyncCreateIndexRaw(context, request, cq));
     }
-    ::grpc::Status DescribeIndex(::grpc::ClientContext* context, const ::milvus::grpc::IndexParam& request, ::milvus::grpc::IndexParam* response) override;
-    std::unique_ptr< ::grpc::ClientAsyncResponseReader< ::milvus::grpc::IndexParam>> AsyncDescribeIndex(::grpc::ClientContext* context, const ::milvus::grpc::IndexParam& request, ::grpc::CompletionQueue* cq) {
+    ::grpc::Status DescribeIndex(::grpc::ClientContext* context, const ::milvus::grpc::CollectionName& request, ::milvus::grpc::IndexParam* response) override;
+    std::unique_ptr< ::grpc::ClientAsyncResponseReader< ::milvus::grpc::IndexParam>> AsyncDescribeIndex(::grpc::ClientContext* context, const ::milvus::grpc::CollectionName& request, ::grpc::CompletionQueue* cq) {
       return std::unique_ptr< ::grpc::ClientAsyncResponseReader< ::milvus::grpc::IndexParam>>(AsyncDescribeIndexRaw(context, request, cq));
     }
-    std::unique_ptr< ::grpc::ClientAsyncResponseReader< ::milvus::grpc::IndexParam>> PrepareAsyncDescribeIndex(::grpc::ClientContext* context, const ::milvus::grpc::IndexParam& request, ::grpc::CompletionQueue* cq) {
+    std::unique_ptr< ::grpc::ClientAsyncResponseReader< ::milvus::grpc::IndexParam>> PrepareAsyncDescribeIndex(::grpc::ClientContext* context, const ::milvus::grpc::CollectionName& request, ::grpc::CompletionQueue* cq) {
       return std::unique_ptr< ::grpc::ClientAsyncResponseReader< ::milvus::grpc::IndexParam>>(PrepareAsyncDescribeIndexRaw(context, request, cq));
     }
-    ::grpc::Status DropIndex(::grpc::ClientContext* context, const ::milvus::grpc::CollectionName& request, ::milvus::grpc::Status* response) override;
-    std::unique_ptr< ::grpc::ClientAsyncResponseReader< ::milvus::grpc::Status>> AsyncDropIndex(::grpc::ClientContext* context, const ::milvus::grpc::CollectionName& request, ::grpc::CompletionQueue* cq) {
+    ::grpc::Status DropIndex(::grpc::ClientContext* context, const ::milvus::grpc::IndexParam& request, ::milvus::grpc::Status* response) override;
+    std::unique_ptr< ::grpc::ClientAsyncResponseReader< ::milvus::grpc::Status>> AsyncDropIndex(::grpc::ClientContext* context, const ::milvus::grpc::IndexParam& request, ::grpc::CompletionQueue* cq) {
       return std::unique_ptr< ::grpc::ClientAsyncResponseReader< ::milvus::grpc::Status>>(AsyncDropIndexRaw(context, request, cq));
     }
-    std::unique_ptr< ::grpc::ClientAsyncResponseReader< ::milvus::grpc::Status>> PrepareAsyncDropIndex(::grpc::ClientContext* context, const ::milvus::grpc::CollectionName& request, ::grpc::CompletionQueue* cq) {
+    std::unique_ptr< ::grpc::ClientAsyncResponseReader< ::milvus::grpc::Status>> PrepareAsyncDropIndex(::grpc::ClientContext* context, const ::milvus::grpc::IndexParam& request, ::grpc::CompletionQueue* cq) {
       return std::unique_ptr< ::grpc::ClientAsyncResponseReader< ::milvus::grpc::Status>>(PrepareAsyncDropIndexRaw(context, request, cq));
     }
     ::grpc::Status CreatePartition(::grpc::ClientContext* context, const ::milvus::grpc::PartitionParam& request, ::milvus::grpc::Status* response) override;
@@ -948,13 +948,13 @@ class MilvusService final {
       void CreateIndex(::grpc::ClientContext* context, const ::grpc::ByteBuffer* request, ::milvus::grpc::Status* response, std::function<void(::grpc::Status)>) override;
       void CreateIndex(::grpc::ClientContext* context, const ::milvus::grpc::IndexParam* request, ::milvus::grpc::Status* response, ::grpc::experimental::ClientUnaryReactor* reactor) override;
       void CreateIndex(::grpc::ClientContext* context, const ::grpc::ByteBuffer* request, ::milvus::grpc::Status* response, ::grpc::experimental::ClientUnaryReactor* reactor) override;
-      void DescribeIndex(::grpc::ClientContext* context, const ::milvus::grpc::IndexParam* request, ::milvus::grpc::IndexParam* response, std::function<void(::grpc::Status)>) override;
+      void DescribeIndex(::grpc::ClientContext* context, const ::milvus::grpc::CollectionName* request, ::milvus::grpc::IndexParam* response, std::function<void(::grpc::Status)>) override;
       void DescribeIndex(::grpc::ClientContext* context, const ::grpc::ByteBuffer* request, ::milvus::grpc::IndexParam* response, std::function<void(::grpc::Status)>) override;
-      void DescribeIndex(::grpc::ClientContext* context, const ::milvus::grpc::IndexParam* request, ::milvus::grpc::IndexParam* response, ::grpc::experimental::ClientUnaryReactor* reactor) override;
+      void DescribeIndex(::grpc::ClientContext* context, const ::milvus::grpc::CollectionName* request, ::milvus::grpc::IndexParam* response, ::grpc::experimental::ClientUnaryReactor* reactor) override;
       void DescribeIndex(::grpc::ClientContext* context, const ::grpc::ByteBuffer* request, ::milvus::grpc::IndexParam* response, ::grpc::experimental::ClientUnaryReactor* reactor) override;
-      void DropIndex(::grpc::ClientContext* context, const ::milvus::grpc::CollectionName* request, ::milvus::grpc::Status* response, std::function<void(::grpc::Status)>) override;
+      void DropIndex(::grpc::ClientContext* context, const ::milvus::grpc::IndexParam* request, ::milvus::grpc::Status* response, std::function<void(::grpc::Status)>) override;
       void DropIndex(::grpc::ClientContext* context, const ::grpc::ByteBuffer* request, ::milvus::grpc::Status* response, std::function<void(::grpc::Status)>) override;
-      void DropIndex(::grpc::ClientContext* context, const ::milvus::grpc::CollectionName* request, ::milvus::grpc::Status* response, ::grpc::experimental::ClientUnaryReactor* reactor) override;
+      void DropIndex(::grpc::ClientContext* context, const ::milvus::grpc::IndexParam* request, ::milvus::grpc::Status* response, ::grpc::experimental::ClientUnaryReactor* reactor) override;
       void DropIndex(::grpc::ClientContext* context, const ::grpc::ByteBuffer* request, ::milvus::grpc::Status* response, ::grpc::experimental::ClientUnaryReactor* reactor) override;
       void CreatePartition(::grpc::ClientContext* context, const ::milvus::grpc::PartitionParam* request, ::milvus::grpc::Status* response, std::function<void(::grpc::Status)>) override;
       void CreatePartition(::grpc::ClientContext* context, const ::grpc::ByteBuffer* request, ::milvus::grpc::Status* response, std::function<void(::grpc::Status)>) override;
@@ -1051,10 +1051,10 @@ class MilvusService final {
     ::grpc::ClientAsyncResponseReader< ::milvus::grpc::Status>* PrepareAsyncDropCollectionRaw(::grpc::ClientContext* context, const ::milvus::grpc::CollectionName& request, ::grpc::CompletionQueue* cq) override;
     ::grpc::ClientAsyncResponseReader< ::milvus::grpc::Status>* AsyncCreateIndexRaw(::grpc::ClientContext* context, const ::milvus::grpc::IndexParam& request, ::grpc::CompletionQueue* cq) override;
     ::grpc::ClientAsyncResponseReader< ::milvus::grpc::Status>* PrepareAsyncCreateIndexRaw(::grpc::ClientContext* context, const ::milvus::grpc::IndexParam& request, ::grpc::CompletionQueue* cq) override;
-    ::grpc::ClientAsyncResponseReader< ::milvus::grpc::IndexParam>* AsyncDescribeIndexRaw(::grpc::ClientContext* context, const ::milvus::grpc::IndexParam& request, ::grpc::CompletionQueue* cq) override;
-    ::grpc::ClientAsyncResponseReader< ::milvus::grpc::IndexParam>* PrepareAsyncDescribeIndexRaw(::grpc::ClientContext* context, const ::milvus::grpc::IndexParam& request, ::grpc::CompletionQueue* cq) override;
-    ::grpc::ClientAsyncResponseReader< ::milvus::grpc::Status>* AsyncDropIndexRaw(::grpc::ClientContext* context, const ::milvus::grpc::CollectionName& request, ::grpc::CompletionQueue* cq) override;
-    ::grpc::ClientAsyncResponseReader< ::milvus::grpc::Status>* PrepareAsyncDropIndexRaw(::grpc::ClientContext* context, const ::milvus::grpc::CollectionName& request, ::grpc::CompletionQueue* cq) override;
+    ::grpc::ClientAsyncResponseReader< ::milvus::grpc::IndexParam>* AsyncDescribeIndexRaw(::grpc::ClientContext* context, const ::milvus::grpc::CollectionName& request, ::grpc::CompletionQueue* cq) override;
+    ::grpc::ClientAsyncResponseReader< ::milvus::grpc::IndexParam>* PrepareAsyncDescribeIndexRaw(::grpc::ClientContext* context, const ::milvus::grpc::CollectionName& request, ::grpc::CompletionQueue* cq) override;
+    ::grpc::ClientAsyncResponseReader< ::milvus::grpc::Status>* AsyncDropIndexRaw(::grpc::ClientContext* context, const ::milvus::grpc::IndexParam& request, ::grpc::CompletionQueue* cq) override;
+    ::grpc::ClientAsyncResponseReader< ::milvus::grpc::Status>* PrepareAsyncDropIndexRaw(::grpc::ClientContext* context, const ::milvus::grpc::IndexParam& request, ::grpc::CompletionQueue* cq) override;
     ::grpc::ClientAsyncResponseReader< ::milvus::grpc::Status>* AsyncCreatePartitionRaw(::grpc::ClientContext* context, const ::milvus::grpc::PartitionParam& request, ::grpc::CompletionQueue* cq) override;
     ::grpc::ClientAsyncResponseReader< ::milvus::grpc::Status>* PrepareAsyncCreatePartitionRaw(::grpc::ClientContext* context, const ::milvus::grpc::PartitionParam& request, ::grpc::CompletionQueue* cq) override;
     ::grpc::ClientAsyncResponseReader< ::milvus::grpc::BoolReply>* AsyncHasPartitionRaw(::grpc::ClientContext* context, const ::milvus::grpc::PartitionParam& request, ::grpc::CompletionQueue* cq) override;
@@ -1185,14 +1185,14 @@ class MilvusService final {
     // @param CollectionName, target collection name.
     //
     // @return IndexParam
-    virtual ::grpc::Status DescribeIndex(::grpc::ServerContext* context, const ::milvus::grpc::IndexParam* request, ::milvus::grpc::IndexParam* response);
+    virtual ::grpc::Status DescribeIndex(::grpc::ServerContext* context, const ::milvus::grpc::CollectionName* request, ::milvus::grpc::IndexParam* response);
     // *
     // @brief This method is used to drop index
     //
     // @param CollectionName, target collection name.
     //
     // @return Status
-    virtual ::grpc::Status DropIndex(::grpc::ServerContext* context, const ::milvus::grpc::CollectionName* request, ::milvus::grpc::Status* response);
+    virtual ::grpc::Status DropIndex(::grpc::ServerContext* context, const ::milvus::grpc::IndexParam* request, ::milvus::grpc::Status* response);
     // *
     // @brief This method is used to create partition
     //
@@ -1481,11 +1481,11 @@ class MilvusService final {
       BaseClassMustBeDerivedFromService(this);
     }
     // disable synchronous version of this method
-    ::grpc::Status DescribeIndex(::grpc::ServerContext* /*context*/, const ::milvus::grpc::IndexParam* /*request*/, ::milvus::grpc::IndexParam* /*response*/) override {
+    ::grpc::Status DescribeIndex(::grpc::ServerContext* /*context*/, const ::milvus::grpc::CollectionName* /*request*/, ::milvus::grpc::IndexParam* /*response*/) override {
       abort();
       return ::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "");
     }
-    void RequestDescribeIndex(::grpc::ServerContext* context, ::milvus::grpc::IndexParam* request, ::grpc::ServerAsyncResponseWriter< ::milvus::grpc::IndexParam>* response, ::grpc::CompletionQueue* new_call_cq, ::grpc::ServerCompletionQueue* notification_cq, void *tag) {
+    void RequestDescribeIndex(::grpc::ServerContext* context, ::milvus::grpc::CollectionName* request, ::grpc::ServerAsyncResponseWriter< ::milvus::grpc::IndexParam>* response, ::grpc::CompletionQueue* new_call_cq, ::grpc::ServerCompletionQueue* notification_cq, void *tag) {
       ::grpc::Service::RequestAsyncUnary(8, context, request, response, new_call_cq, notification_cq, tag);
     }
   };
@@ -1501,11 +1501,11 @@ class MilvusService final {
       BaseClassMustBeDerivedFromService(this);
     }
     // disable synchronous version of this method
-    ::grpc::Status DropIndex(::grpc::ServerContext* /*context*/, const ::milvus::grpc::CollectionName* /*request*/, ::milvus::grpc::Status* /*response*/) override {
+    ::grpc::Status DropIndex(::grpc::ServerContext* /*context*/, const ::milvus::grpc::IndexParam* /*request*/, ::milvus::grpc::Status* /*response*/) override {
       abort();
       return ::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "");
     }
-    void RequestDropIndex(::grpc::ServerContext* context, ::milvus::grpc::CollectionName* request, ::grpc::ServerAsyncResponseWriter< ::milvus::grpc::Status>* response, ::grpc::CompletionQueue* new_call_cq, ::grpc::ServerCompletionQueue* notification_cq, void *tag) {
+    void RequestDropIndex(::grpc::ServerContext* context, ::milvus::grpc::IndexParam* request, ::grpc::ServerAsyncResponseWriter< ::milvus::grpc::Status>* response, ::grpc::CompletionQueue* new_call_cq, ::grpc::ServerCompletionQueue* notification_cq, void *tag) {
       ::grpc::Service::RequestAsyncUnary(9, context, request, response, new_call_cq, notification_cq, tag);
     }
   };
@@ -2105,17 +2105,17 @@ class MilvusService final {
    public:
     ExperimentalWithCallbackMethod_DescribeIndex() {
       ::grpc::Service::experimental().MarkMethodCallback(8,
-        new ::grpc_impl::internal::CallbackUnaryHandler< ::milvus::grpc::IndexParam, ::milvus::grpc::IndexParam>(
+        new ::grpc_impl::internal::CallbackUnaryHandler< ::milvus::grpc::CollectionName, ::milvus::grpc::IndexParam>(
           [this](::grpc::ServerContext* context,
-                 const ::milvus::grpc::IndexParam* request,
+                 const ::milvus::grpc::CollectionName* request,
                  ::milvus::grpc::IndexParam* response,
                  ::grpc::experimental::ServerCallbackRpcController* controller) {
                    return this->DescribeIndex(context, request, response, controller);
                  }));
     }
     void SetMessageAllocatorFor_DescribeIndex(
-        ::grpc::experimental::MessageAllocator< ::milvus::grpc::IndexParam, ::milvus::grpc::IndexParam>* allocator) {
-      static_cast<::grpc_impl::internal::CallbackUnaryHandler< ::milvus::grpc::IndexParam, ::milvus::grpc::IndexParam>*>(
+        ::grpc::experimental::MessageAllocator< ::milvus::grpc::CollectionName, ::milvus::grpc::IndexParam>* allocator) {
+      static_cast<::grpc_impl::internal::CallbackUnaryHandler< ::milvus::grpc::CollectionName, ::milvus::grpc::IndexParam>*>(
           ::grpc::Service::experimental().GetHandler(8))
               ->SetMessageAllocator(allocator);
     }
@@ -2123,11 +2123,11 @@ class MilvusService final {
       BaseClassMustBeDerivedFromService(this);
     }
     // disable synchronous version of this method
-    ::grpc::Status DescribeIndex(::grpc::ServerContext* /*context*/, const ::milvus::grpc::IndexParam* /*request*/, ::milvus::grpc::IndexParam* /*response*/) override {
+    ::grpc::Status DescribeIndex(::grpc::ServerContext* /*context*/, const ::milvus::grpc::CollectionName* /*request*/, ::milvus::grpc::IndexParam* /*response*/) override {
       abort();
       return ::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "");
     }
-    virtual void DescribeIndex(::grpc::ServerContext* /*context*/, const ::milvus::grpc::IndexParam* /*request*/, ::milvus::grpc::IndexParam* /*response*/, ::grpc::experimental::ServerCallbackRpcController* controller) { controller->Finish(::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "")); }
+    virtual void DescribeIndex(::grpc::ServerContext* /*context*/, const ::milvus::grpc::CollectionName* /*request*/, ::milvus::grpc::IndexParam* /*response*/, ::grpc::experimental::ServerCallbackRpcController* controller) { controller->Finish(::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "")); }
   };
   template <class BaseClass>
   class ExperimentalWithCallbackMethod_DropIndex : public BaseClass {
@@ -2136,17 +2136,17 @@ class MilvusService final {
    public:
     ExperimentalWithCallbackMethod_DropIndex() {
       ::grpc::Service::experimental().MarkMethodCallback(9,
-        new ::grpc_impl::internal::CallbackUnaryHandler< ::milvus::grpc::CollectionName, ::milvus::grpc::Status>(
+        new ::grpc_impl::internal::CallbackUnaryHandler< ::milvus::grpc::IndexParam, ::milvus::grpc::Status>(
           [this](::grpc::ServerContext* context,
-                 const ::milvus::grpc::CollectionName* request,
+                 const ::milvus::grpc::IndexParam* request,
                  ::milvus::grpc::Status* response,
                  ::grpc::experimental::ServerCallbackRpcController* controller) {
                    return this->DropIndex(context, request, response, controller);
                  }));
     }
     void SetMessageAllocatorFor_DropIndex(
-        ::grpc::experimental::MessageAllocator< ::milvus::grpc::CollectionName, ::milvus::grpc::Status>* allocator) {
-      static_cast<::grpc_impl::internal::CallbackUnaryHandler< ::milvus::grpc::CollectionName, ::milvus::grpc::Status>*>(
+        ::grpc::experimental::MessageAllocator< ::milvus::grpc::IndexParam, ::milvus::grpc::Status>* allocator) {
+      static_cast<::grpc_impl::internal::CallbackUnaryHandler< ::milvus::grpc::IndexParam, ::milvus::grpc::Status>*>(
           ::grpc::Service::experimental().GetHandler(9))
               ->SetMessageAllocator(allocator);
     }
@@ -2154,11 +2154,11 @@ class MilvusService final {
       BaseClassMustBeDerivedFromService(this);
     }
     // disable synchronous version of this method
-    ::grpc::Status DropIndex(::grpc::ServerContext* /*context*/, const ::milvus::grpc::CollectionName* /*request*/, ::milvus::grpc::Status* /*response*/) override {
+    ::grpc::Status DropIndex(::grpc::ServerContext* /*context*/, const ::milvus::grpc::IndexParam* /*request*/, ::milvus::grpc::Status* /*response*/) override {
       abort();
       return ::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "");
     }
-    virtual void DropIndex(::grpc::ServerContext* /*context*/, const ::milvus::grpc::CollectionName* /*request*/, ::milvus::grpc::Status* /*response*/, ::grpc::experimental::ServerCallbackRpcController* controller) { controller->Finish(::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "")); }
+    virtual void DropIndex(::grpc::ServerContext* /*context*/, const ::milvus::grpc::IndexParam* /*request*/, ::milvus::grpc::Status* /*response*/, ::grpc::experimental::ServerCallbackRpcController* controller) { controller->Finish(::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "")); }
   };
   template <class BaseClass>
   class ExperimentalWithCallbackMethod_CreatePartition : public BaseClass {
@@ -2836,7 +2836,7 @@ class MilvusService final {
       BaseClassMustBeDerivedFromService(this);
     }
     // disable synchronous version of this method
-    ::grpc::Status DescribeIndex(::grpc::ServerContext* /*context*/, const ::milvus::grpc::IndexParam* /*request*/, ::milvus::grpc::IndexParam* /*response*/) override {
+    ::grpc::Status DescribeIndex(::grpc::ServerContext* /*context*/, const ::milvus::grpc::CollectionName* /*request*/, ::milvus::grpc::IndexParam* /*response*/) override {
       abort();
       return ::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "");
     }
@@ -2853,7 +2853,7 @@ class MilvusService final {
       BaseClassMustBeDerivedFromService(this);
     }
     // disable synchronous version of this method
-    ::grpc::Status DropIndex(::grpc::ServerContext* /*context*/, const ::milvus::grpc::CollectionName* /*request*/, ::milvus::grpc::Status* /*response*/) override {
+    ::grpc::Status DropIndex(::grpc::ServerContext* /*context*/, const ::milvus::grpc::IndexParam* /*request*/, ::milvus::grpc::Status* /*response*/) override {
       abort();
       return ::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "");
     }
@@ -3319,7 +3319,7 @@ class MilvusService final {
       BaseClassMustBeDerivedFromService(this);
     }
     // disable synchronous version of this method
-    ::grpc::Status DescribeIndex(::grpc::ServerContext* /*context*/, const ::milvus::grpc::IndexParam* /*request*/, ::milvus::grpc::IndexParam* /*response*/) override {
+    ::grpc::Status DescribeIndex(::grpc::ServerContext* /*context*/, const ::milvus::grpc::CollectionName* /*request*/, ::milvus::grpc::IndexParam* /*response*/) override {
       abort();
       return ::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "");
     }
@@ -3339,7 +3339,7 @@ class MilvusService final {
       BaseClassMustBeDerivedFromService(this);
     }
     // disable synchronous version of this method
-    ::grpc::Status DropIndex(::grpc::ServerContext* /*context*/, const ::milvus::grpc::CollectionName* /*request*/, ::milvus::grpc::Status* /*response*/) override {
+    ::grpc::Status DropIndex(::grpc::ServerContext* /*context*/, const ::milvus::grpc::IndexParam* /*request*/, ::milvus::grpc::Status* /*response*/) override {
       abort();
       return ::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "");
     }
@@ -3906,7 +3906,7 @@ class MilvusService final {
       BaseClassMustBeDerivedFromService(this);
     }
     // disable synchronous version of this method
-    ::grpc::Status DescribeIndex(::grpc::ServerContext* /*context*/, const ::milvus::grpc::IndexParam* /*request*/, ::milvus::grpc::IndexParam* /*response*/) override {
+    ::grpc::Status DescribeIndex(::grpc::ServerContext* /*context*/, const ::milvus::grpc::CollectionName* /*request*/, ::milvus::grpc::IndexParam* /*response*/) override {
       abort();
       return ::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "");
     }
@@ -3931,7 +3931,7 @@ class MilvusService final {
       BaseClassMustBeDerivedFromService(this);
     }
     // disable synchronous version of this method
-    ::grpc::Status DropIndex(::grpc::ServerContext* /*context*/, const ::milvus::grpc::CollectionName* /*request*/, ::milvus::grpc::Status* /*response*/) override {
+    ::grpc::Status DropIndex(::grpc::ServerContext* /*context*/, const ::milvus::grpc::IndexParam* /*request*/, ::milvus::grpc::Status* /*response*/) override {
       abort();
       return ::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "");
     }
@@ -4529,18 +4529,18 @@ class MilvusService final {
    public:
     WithStreamedUnaryMethod_DescribeIndex() {
       ::grpc::Service::MarkMethodStreamed(8,
-        new ::grpc::internal::StreamedUnaryHandler< ::milvus::grpc::IndexParam, ::milvus::grpc::IndexParam>(std::bind(&WithStreamedUnaryMethod_DescribeIndex<BaseClass>::StreamedDescribeIndex, this, std::placeholders::_1, std::placeholders::_2)));
+        new ::grpc::internal::StreamedUnaryHandler< ::milvus::grpc::CollectionName, ::milvus::grpc::IndexParam>(std::bind(&WithStreamedUnaryMethod_DescribeIndex<BaseClass>::StreamedDescribeIndex, this, std::placeholders::_1, std::placeholders::_2)));
     }
     ~WithStreamedUnaryMethod_DescribeIndex() override {
       BaseClassMustBeDerivedFromService(this);
     }
     // disable regular version of this method
-    ::grpc::Status DescribeIndex(::grpc::ServerContext* /*context*/, const ::milvus::grpc::IndexParam* /*request*/, ::milvus::grpc::IndexParam* /*response*/) override {
+    ::grpc::Status DescribeIndex(::grpc::ServerContext* /*context*/, const ::milvus::grpc::CollectionName* /*request*/, ::milvus::grpc::IndexParam* /*response*/) override {
       abort();
       return ::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "");
     }
     // replace default version of method with streamed unary
-    virtual ::grpc::Status StreamedDescribeIndex(::grpc::ServerContext* context, ::grpc::ServerUnaryStreamer< ::milvus::grpc::IndexParam,::milvus::grpc::IndexParam>* server_unary_streamer) = 0;
+    virtual ::grpc::Status StreamedDescribeIndex(::grpc::ServerContext* context, ::grpc::ServerUnaryStreamer< ::milvus::grpc::CollectionName,::milvus::grpc::IndexParam>* server_unary_streamer) = 0;
   };
   template <class BaseClass>
   class WithStreamedUnaryMethod_DropIndex : public BaseClass {
@@ -4549,18 +4549,18 @@ class MilvusService final {
    public:
     WithStreamedUnaryMethod_DropIndex() {
       ::grpc::Service::MarkMethodStreamed(9,
-        new ::grpc::internal::StreamedUnaryHandler< ::milvus::grpc::CollectionName, ::milvus::grpc::Status>(std::bind(&WithStreamedUnaryMethod_DropIndex<BaseClass>::StreamedDropIndex, this, std::placeholders::_1, std::placeholders::_2)));
+        new ::grpc::internal::StreamedUnaryHandler< ::milvus::grpc::IndexParam, ::milvus::grpc::Status>(std::bind(&WithStreamedUnaryMethod_DropIndex<BaseClass>::StreamedDropIndex, this, std::placeholders::_1, std::placeholders::_2)));
     }
     ~WithStreamedUnaryMethod_DropIndex() override {
       BaseClassMustBeDerivedFromService(this);
     }
     // disable regular version of this method
-    ::grpc::Status DropIndex(::grpc::ServerContext* /*context*/, const ::milvus::grpc::CollectionName* /*request*/, ::milvus::grpc::Status* /*response*/) override {
+    ::grpc::Status DropIndex(::grpc::ServerContext* /*context*/, const ::milvus::grpc::IndexParam* /*request*/, ::milvus::grpc::Status* /*response*/) override {
       abort();
       return ::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "");
     }
     // replace default version of method with streamed unary
-    virtual ::grpc::Status StreamedDropIndex(::grpc::ServerContext* context, ::grpc::ServerUnaryStreamer< ::milvus::grpc::CollectionName,::milvus::grpc::Status>* server_unary_streamer) = 0;
+    virtual ::grpc::Status StreamedDropIndex(::grpc::ServerContext* context, ::grpc::ServerUnaryStreamer< ::milvus::grpc::IndexParam,::milvus::grpc::Status>* server_unary_streamer) = 0;
   };
   template <class BaseClass>
   class WithStreamedUnaryMethod_CreatePartition : public BaseClass {

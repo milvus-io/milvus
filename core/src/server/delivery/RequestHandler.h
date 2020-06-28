@@ -97,7 +97,8 @@ class RequestHandler {
     DescribeIndex(const std::shared_ptr<Context>& context, const std::string& collection_name, IndexParam& param);
 
     Status
-    DropIndex(const std::shared_ptr<Context>& context, const std::string& collection_name);
+    DropIndex(const std::shared_ptr<Context>& context, const std::string& collection_name,
+              const std::string& field_name, const std::string& index_name);
 
     Status
     CreatePartition(const std::shared_ptr<Context>& context, const std::string& collection_name,

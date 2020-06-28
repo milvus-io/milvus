@@ -11,12 +11,12 @@
 
 #pragma once
 
+#include <src/db/meta/Meta.h>
 #include <memory>
 #include <string>
 #include <unordered_map>
 #include <utility>
 #include <vector>
-#include <src/db/meta/Meta.h>
 
 #include "db/meta/MetaTypes.h"
 #include "knowhere/index/structured_index/StructuredIndexSort.h"

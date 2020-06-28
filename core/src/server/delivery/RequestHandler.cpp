@@ -218,8 +218,9 @@ RequestHandler::DescribeIndex(const std::shared_ptr<Context>& context, const std
 }
 
 Status
-RequestHandler::DropIndex(const std::shared_ptr<Context>& context, const std::string& collection_name) {
-    BaseRequestPtr request_ptr = DropIndexRequest::Create(context, collection_name);
+RequestHandler::DropIndex(const std::shared_ptr<Context>& context, const std::string& collection_name,
+                          const std::string& field_name, const std::string& index_name) {
+    BaseRequestPtr request_ptr = DropIndexRequest::Create(context, collection_name, index_name, field_name);
     RequestScheduler::ExecRequest(request_ptr);
 
     return request_ptr->status();

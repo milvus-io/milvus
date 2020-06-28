@@ -21,7 +21,7 @@
 #include <fiu-local.h>
 #include <memory>
 #include <string>
-#include <utility>
+#include <unordered_map>
 #include <vector>
 
 namespace milvus {
@@ -81,8 +81,8 @@ CreateHybridCollectionRequest::OnExecute() {
             schema.field_type_ = (int32_t)field_type.second;
             if (index_params.contains("name")) {
                 schema.index_name_ = index_params["name"];
-                schema.index_type_ = index_params["type"].get<int32_t>();
             }
+            schema.index_param_ = index_params.dump();
 
             auto field_param = field_params_.at(field_name);
             schema.field_params_ = field_param;

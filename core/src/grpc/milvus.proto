@@ -460,7 +460,7 @@ service MilvusService {
      *
      * @return IndexParam
      */
-    rpc DescribeIndex(IndexParam) returns (IndexParam) {}
+    rpc DescribeIndex(CollectionName) returns (IndexParam) {}
 
     /**
      * @brief This method is used to drop index
@@ -469,7 +469,7 @@ service MilvusService {
      *
      * @return Status
      */
-    rpc DropIndex(CollectionName) returns (Status) {}
+    rpc DropIndex(IndexParam) returns (Status) {}
 
     /**
      * @brief This method is used to create partition
