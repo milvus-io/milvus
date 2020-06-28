@@ -65,6 +65,8 @@ set(index_srcs
         knowhere/index/vector_index/IndexType.cpp
         knowhere/index/vector_index/VecIndexFactory.cpp
         knowhere/index/vector_index/IndexAnnoy.cpp
+        knowhere/index/non_materialized_index/IndexIVF_NM.cpp
+        knowhere/index/non_materialized_index/OffsetBaseIndex.cpp
         )
 
 if (MILVUS_SUPPORT_SPTAG)
@@ -125,6 +127,7 @@ if (MILVUS_GPU_VERSION)
             knowhere/index/vector_index/gpu/IndexIVFSQHybrid.cpp
             knowhere/index/vector_index/helpers/Cloner.cpp
             knowhere/index/vector_index/helpers/FaissGpuResourceMgr.cpp
+            knowhere/index/non_materialized_index/gpu/IndexGPUIVF_NM.cpp
             )
 endif ()
 

@@ -62,7 +62,7 @@ IVF_NM::Load(const BinarySet& binary_set) {
     LoadImpl(binary_set, index_type_);
 
     // Construct arranged data from original data
-    auto binary = binary_set.GetByName("RAWDATA");
+    auto binary = binary_set.GetByName(RAW_DATA);
     const float* original_data = (const float*) binary->data.get();
     auto ivf_index = dynamic_cast<faiss::IndexIVF*>(index_.get());
     auto invlists = ivf_index->invlists;
@@ -127,8 +127,8 @@ IVF_NM::Query(const DatasetPtr& dataset_ptr, const Config& config) {
     GETTENSOR(dataset_ptr)
 
     try {
-        fiu_do_on("IVF.Search.throw_std_exception", throw std::exception());
-        fiu_do_on("IVF.Search.throw_faiss_exception", throw faiss::FaissException(""));
+        fiu_do_on("IVF_NM.Search.throw_std_exception", throw std::exception());
+        fiu_do_on("IVF_NM.Search.throw_faiss_exception", throw faiss::FaissException(""));
         int64_t k = config[meta::TOPK].get<int64_t>();
         auto elems = rows * k;
 
@@ -249,7 +249,7 @@ IVF_NM::CopyCpuToGpu(const int64_t device_id, const Config& config) {
     }
 
 #else
-    KNOWHERE_THROW_MSG("Calling IVF::CopyCpuToGpu when we are using CPU version");
+    KNOWHERE_THROW_MSG("Calling IVF_NM::CopyCpuToGpu when we are using CPU version");
 #endif
 }
 
@@ -313,7 +313,7 @@ IVF_NM::QueryImpl(int64_t n, const float* data, int64_t k, float* distances, int
                                     bitset_);
     stdclock::time_point after = stdclock::now();
     double search_cost = (std::chrono::duration<double, std::micro>(after - before)).count();
-    LOG_KNOWHERE_DEBUG_ << "IVF search cost: " << search_cost
+    LOG_KNOWHERE_DEBUG_ << "IVF_NM search cost: " << search_cost
                         << ", quantization cost: " << faiss::indexIVF_stats.quantization_time
                         << ", data search cost: " << faiss::indexIVF_stats.search_time;
     faiss::indexIVF_stats.quantization_time = 0;
