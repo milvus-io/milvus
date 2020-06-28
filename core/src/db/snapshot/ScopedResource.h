@@ -35,6 +35,10 @@ class ScopedResource {
     Get() {
         return res_;
     }
+    const ResourcePtr&
+    Get() const {
+        return res_;
+    }
 
     ResourceT operator*() const {
         return *res_;
