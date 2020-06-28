@@ -80,6 +80,11 @@ static const Status SHUTDOWN_ERROR = Status(DB_ERROR, "Milvus server is shutdown
 
 }  // namespace
 
+#define CHECK_INITIALIZED \
+    if (!initialized_.load(std::memory_order_acquire)) { \
+        return SHUTDOWN_ERROR;   \
+    }
+
 DBImpl::DBImpl(const DBOptions& options)
     : options_(options), initialized_(false), merge_thread_pool_(1, 1), index_thread_pool_(1, 1) {
     meta_ptr_ = MetaFactory::Build(options.meta_, options.mode_);
@@ -3327,9 +3332,7 @@ DBImpl::ResumeIfLast() {
 
 Status
 DBImpl::SSTODOCreateCollection(const snapshot::CreateCollectionContext& context) {
-    if (!initialized_.load(std::memory_order_acquire)) {
-        return SHUTDOWN_ERROR;
-    }
+    CHECK_INITIALIZED;
 
     auto op = std::make_shared<snapshot::CreateCollectionOperation>(context);
     auto status = op->Push();
@@ -3340,9 +3343,7 @@ DBImpl::SSTODOCreateCollection(const snapshot::CreateCollectionContext& context)
 Status
 DBImpl::SSTODODescribeCollection(const std::string& collection_name, snapshot::CollectionPtr& collection,
                                  std::map<snapshot::FieldPtr, std::vector<snapshot::FieldElementPtr>>& fields_schema) {
-    if (!initialized_.load(std::memory_order_acquire)) {
-        return SHUTDOWN_ERROR;
-    }
+    CHECK_INITIALIZED;
 
     snapshot::ScopedSnapshotT ss;
     auto status = snapshot::Snapshots::GetInstance().GetSnapshot(ss, collection_name);
@@ -3361,9 +3362,7 @@ DBImpl::SSTODODescribeCollection(const std::string& collection_name, snapshot::C
 
 Status
 DBImpl::SSTODODropCollection(const std::string& name) {
-    if (!initialized_.load(std::memory_order_acquire)) {
-        return SHUTDOWN_ERROR;
-    }
+    CHECK_INITIALIZED;
 
     // dates partly delete files of the collection but currently we don't support
     LOG_ENGINE_DEBUG_ << "Prepare to delete collection " << name;
@@ -3386,26 +3385,18 @@ DBImpl::SSTODODropCollection(const std::string& name) {
 
 Status
 DBImpl::SSTODOHasCollection(const std::string& collection_name, bool& has_or_not) {
-    if (!initialized_.load(std::memory_order_acquire)) {
-        return SHUTDOWN_ERROR;
-    }
+    CHECK_INITIALIZED;
 
     snapshot::ScopedSnapshotT ss;
     auto status = snapshot::Snapshots::GetInstance().GetSnapshot(ss, collection_name);
-    if (!status.ok()) {
-        has_or_not = false;
-    } else {
-        has_or_not = true;
-    }
+    has_or_not = status.ok();
 
     return status;
 }
 
 Status
 DBImpl::SSTODOAllCollections(std::vector<std::string>& names) {
-    if (!initialized_.load(std::memory_order_acquire)) {
-        return SHUTDOWN_ERROR;
-    }
+    CHECK_INITIALIZED;
 
     names.clear();
     return snapshot::Snapshots::GetInstance().GetCollectionNames(names);
@@ -3413,9 +3404,7 @@ DBImpl::SSTODOAllCollections(std::vector<std::string>& names) {
 
 Status
 DBImpl::SSTODOCreatePartition(const std::string& collection_name, const std::string& partition_name) {
-    if (!initialized_.load(std::memory_order_acquire)) {
-        return SHUTDOWN_ERROR;
-    }
+    CHECK_INITIALIZED;
 
     uint64_t lsn = 0;
     snapshot::ScopedSnapshotT ss;
@@ -3449,9 +3438,7 @@ DBImpl::SSTODOCreatePartition(const std::string& collection_name, const std::str
 
 Status
 DBImpl::SSTODODropPartition(const std::string& collection_name, const std::string& partition_name) {
-    if (!initialized_.load(std::memory_order_acquire)) {
-        return SHUTDOWN_ERROR;
-    }
+    CHECK_INITIALIZED;
 
     snapshot::ScopedSnapshotT ss;
     auto status = snapshot::Snapshots::GetInstance().GetSnapshot(ss, collection_name);
@@ -3472,9 +3459,7 @@ DBImpl::SSTODODropPartition(const std::string& collection_name, const std::strin
 
 Status
 DBImpl::SSTODOShowPartitions(const std::string& collection_name, std::vector<std::string>& partition_names) {
-    if (!initialized_.load(std::memory_order_acquire)) {
-        return SHUTDOWN_ERROR;
-    }
+    CHECK_INITIALIZED;
 
     snapshot::ScopedSnapshotT ss;
     auto status = snapshot::Snapshots::GetInstance().GetSnapshot(ss, collection_name);
@@ -3489,9 +3474,7 @@ DBImpl::SSTODOShowPartitions(const std::string& collection_name, std::vector<std
 Status
 DBImpl::SSTODOPreloadCollection(const std::shared_ptr<server::Context>& context, const std::string& collection_name,
                                 bool force) {
-    if (!initialized_.load(std::memory_order_acquire)) {
-        return SHUTDOWN_ERROR;
-    }
+    CHECK_INITIALIZED;
 
     snapshot::ScopedSnapshotT ss;
     auto status = snapshot::Snapshots::GetInstance().GetSnapshot(ss, collection_name);
