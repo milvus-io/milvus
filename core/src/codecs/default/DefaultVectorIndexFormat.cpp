@@ -31,7 +31,8 @@ namespace milvus {
 namespace codec {
 
 knowhere::VecIndexPtr
-DefaultVectorIndexFormat::read_internal(const storage::FSHandlerPtr& fs_ptr, const std::string& path) {
+DefaultVectorIndexFormat::read_internal(const storage::FSHandlerPtr& fs_ptr, const std::string& path,
+                                        knowhere::BinaryPtr row_data) {
     milvus::TimeRecorder recorder("read_index");
     knowhere::BinarySet load_data_list;
 
@@ -91,6 +92,10 @@ DefaultVectorIndexFormat::read_internal(const storage::FSHandlerPtr& fs_ptr, con
     auto index =
         vec_index_factory.CreateVecIndex(knowhere::OldIndexTypeToStr(current_type), knowhere::IndexMode::MODE_CPU);
     if (index != nullptr) {
+        if (row_data != nullptr) {
+            load_data_list.Append("ROW_DATA", row_data);
+        }
+
         index->Load(load_data_list);
         index->SetIndexSize(length);
     } else {
@@ -113,6 +118,22 @@ DefaultVectorIndexFormat::read(const storage::FSHandlerPtr& fs_ptr, const std::s
     }
 
     knowhere::VecIndexPtr index = read_internal(fs_ptr, location);
+    vector_index->SetVectorIndex(index);
+}
+
+void
+DefaultVectorIndexFormat::read(const storage::FSHandlerPtr& fs_ptr, const std::string& location,
+                               knowhere::BinaryPtr row_data, segment::VectorIndexPtr& vector_index) {
+    const std::lock_guard<std::mutex> lock(mutex_);
+
+    std::string dir_path = fs_ptr->operation_ptr_->GetDirectory();
+    if (!boost::filesystem::is_directory(dir_path)) {
+        std::string err_msg = "Directory: " + dir_path + "does not exist";
+        LOG_ENGINE_ERROR_ << err_msg;
+        throw Exception(SERVER_INVALID_ARGUMENT, err_msg);
+    }
+
+    knowhere::VecIndexPtr index = read_internal(fs_ptr, location, row_data);
     vector_index->SetVectorIndex(index);
 }
 

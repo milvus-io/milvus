@@ -448,7 +448,11 @@ ExecutionEngineImpl::Load(bool to_cache) {
             try {
                 segment::SegmentPtr segment_ptr;
                 segment_reader_ptr->GetSegment(segment_ptr);
-                auto status = segment_reader_ptr->LoadVectorIndex(location_, segment_ptr->vector_index_ptr_);
+                if (1) {
+                    auto status = segment_reader_ptr->LoadVectorIndex(location_, segment_ptr->vector_index_ptr_);
+                } else {
+                    auto status = segment_reader_ptr->LoadVectorIndexWithRowData(location_, segment_ptr->vector_index_ptr_);
+                }
                 index_ = segment_ptr->vector_index_ptr_->GetVectorIndex();
 
                 if (index_ == nullptr) {
