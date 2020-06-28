@@ -152,11 +152,11 @@ DefaultVectorsFormat::read_uids(const storage::FSHandlerPtr& fs_ptr, std::vector
     typedef boost::filesystem::directory_iterator d_it;
     d_it it_end;
     d_it it(target_path);
-    //    for (auto& it : boost::filesystem::directory_iterator(dir_path)) {
     for (; it != it_end; ++it) {
         const auto& path = it->path();
         if (path.extension().string() == user_id_extension_) {
             read_uids_internal(fs_ptr, path.string(), uids);
+            break;
         }
     }
 }
@@ -177,11 +177,11 @@ DefaultVectorsFormat::read_vectors(const storage::FSHandlerPtr& fs_ptr, off_t of
     typedef boost::filesystem::directory_iterator d_it;
     d_it it_end;
     d_it it(target_path);
-    //    for (auto& it : boost::filesystem::directory_iterator(dir_path)) {
     for (; it != it_end; ++it) {
         const auto& path = it->path();
         if (path.extension().string() == raw_vector_extension_) {
             read_vectors_internal(fs_ptr, path.string(), offset, num_bytes, raw_vectors);
+            break;
         }
     }
 }
