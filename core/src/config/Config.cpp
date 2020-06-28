@@ -17,6 +17,7 @@
 #include <fstream>
 #include <iostream>
 #include <regex>
+#include <sstream>
 #include <string>
 #include <thread>
 #include <unordered_map>
@@ -1172,30 +1173,32 @@ Config::CheckCacheConfigCpuCacheCapacity(const std::string& value) {
         return Status(SERVER_INVALID_ARGUMENT, err);
     } else {
         if (cache_size <= 0) {
-            std::string msg = "Invalid cpu cache capacity: " + value +
-                              ". Possible reason: cache.cache_size is not a positive integer.";
+            std::string msg =
+                "Invalid cpu cache size: " + value + ". Possible reason: cache.cache_size is not a positive integer.";
             return Status(SERVER_INVALID_ARGUMENT, msg);
         }
 
         int64_t total_mem = 0, free_mem = 0;
         GetSystemMemInfo(total_mem, free_mem);
         if (cache_size >= total_mem) {
-            std::string msg =
-                "Invalid cpu cache size: " + value + ". Possible reason: cache.cache_size exceeds system memory.";
-            return Status(SERVER_INVALID_ARGUMENT, msg);
+            std::stringstream ss;
+            ss << "Invalid cpu cache size: " << value << ". ";
+            ss << "Possible reason: cache.cache_size exceeds system memory (" << (total_mem >> 30) << "GB).";
+            return Status(SERVER_INVALID_ARGUMENT, ss.str());
         } else if (static_cast<double>(cache_size) > static_cast<double>(total_mem * 0.9)) {
             std::cerr << "WARNING: cpu cache size value is too big" << std::endl;
         }
 
-        std::string str = GetConfigStr(CONFIG_CACHE, CONFIG_CACHE_INSERT_BUFFER_SIZE, "0");
+        std::string bs_str = GetConfigStr(CONFIG_CACHE, CONFIG_CACHE_INSERT_BUFFER_SIZE, "0");
+        int64_t insert_buffer_size = parse_bytes(bs_str, err);
 
-        int64_t insert_buffer_size = parse_bytes(str, err);
         fiu_do_on("Config.CheckCacheConfigCpuCacheCapacity.large_insert_buffer", insert_buffer_size = total_mem + 1);
         if (insert_buffer_size + cache_size >= total_mem) {
-            std::string msg = "Invalid cpu cache size: " + value +
-                              ". Possible reason: sum of cache.cache_size and "
-                              "cache.insert_buffer_size exceeds system memory.";
-            return Status(SERVER_INVALID_ARGUMENT, msg);
+            std::stringstream ss;
+            ss << "Invalid cpu cache size: " << value << ". ";
+            ss << "Possible reason: sum of cache.cache_size and cache.insert_buffer_size (" << bs_str << ") ";
+            ss << "exceeds system memory (" << (total_mem >> 30) << "GB).";
+            return Status(SERVER_INVALID_ARGUMENT, ss.str());
         }
     }
     return Status::OK();
@@ -1235,17 +1238,18 @@ Config::CheckCacheConfigInsertBufferSize(const std::string& value) {
             return Status(SERVER_INVALID_ARGUMENT, msg);
         }
 
-        std::string str = GetConfigStr(CONFIG_CACHE, CONFIG_CACHE_CPU_CACHE_CAPACITY, "0");
+        std::string cs_str = GetConfigStr(CONFIG_CACHE, CONFIG_CACHE_CPU_CACHE_CAPACITY, "0");
         std::string err;
-        int64_t cache_size = parse_bytes(str, err);
+        int64_t cache_size = parse_bytes(cs_str, err);
 
         int64_t total_mem = 0, free_mem = 0;
         GetSystemMemInfo(total_mem, free_mem);
         if (buffer_size + cache_size >= total_mem) {
-            std::string msg = "Invalid insert buffer size: " + value +
-                              ". Possible reason: sum of cache.cache_size and "
-                              "cache.insert_buffer_size exceeds system memory.";
-            return Status(SERVER_INVALID_ARGUMENT, msg);
+            std::stringstream ss;
+            ss << "Invalid insert buffer size: " << value << ". ";
+            ss << "Possible reason: sum of cache.cache_size (" << cs_str << ") and cache.insert_buffer_size ";
+            ss << "exceeds system memory (" << (total_mem >> 30) << "GB).";
+            return Status(SERVER_INVALID_ARGUMENT, ss.str());
         }
     }
     return Status::OK();
