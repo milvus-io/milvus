@@ -24,7 +24,6 @@ set(test_files
         ${CMAKE_CURRENT_SOURCE_DIR}/test_search.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/test_delete.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/test_search_by_id.cpp
-        ${CMAKE_CURRENT_SOURCE_DIR}/test_snapshot.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/test_rpc.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/test_web.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/utils.cpp)
@@ -43,7 +42,6 @@ add_executable(test_db
         ${db_meta_files}
         ${db_merge_files}
         ${db_wal_files}
-        ${db_snapshot_files}
         ${grpc_server_files}
         ${grpc_service_files}
         ${metrics_files}

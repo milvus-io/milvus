@@ -18,7 +18,7 @@
 #include <set>
 #include <algorithm>
 
-#include "db/utils.h"
+#include "ssdb/utils.h"
 #include "db/snapshot/CompoundOperations.h"
 #include "db/snapshot/Context.h"
 #include "db/snapshot/EventExecutor.h"
