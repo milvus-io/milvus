@@ -920,7 +920,7 @@ SqliteMetaImpl::CreatePartition(const std::string& collection_id, const std::str
     // trim side-blank of tag, only compare valid characters
     // for example: " ab cd " is treated as "ab cd"
     std::string valid_tag = tag;
-    server::StringHelpFunctions::TrimStringBlank(valid_tag);
+    StringHelpFunctions::TrimStringBlank(valid_tag);
 
     // not allow duplicated partition
     std::string exist_partition;
@@ -959,7 +959,7 @@ SqliteMetaImpl::HasPartition(const std::string& collection_id, const std::string
         // trim side-blank of tag, only compare valid characters
         // for example: " ab cd " is treated as "ab cd"
         std::string valid_tag = tag;
-        server::StringHelpFunctions::TrimStringBlank(valid_tag);
+        StringHelpFunctions::TrimStringBlank(valid_tag);
 
         auto name = ConnectorPtr->select(columns(&CollectionSchema::collection_id_),
                                          where(c(&CollectionSchema::owner_collection_) == collection_id and
@@ -1033,7 +1033,7 @@ SqliteMetaImpl::GetPartitionName(const std::string& collection_id, const std::st
         // trim side-blank of tag, only compare valid characters
         // for example: " ab cd " is treated as "ab cd"
         std::string valid_tag = tag;
-        server::StringHelpFunctions::TrimStringBlank(valid_tag);
+        StringHelpFunctions::TrimStringBlank(valid_tag);
 
         auto name = ConnectorPtr->select(columns(&CollectionSchema::collection_id_),
                                          where(c(&CollectionSchema::owner_collection_) == collection_id and

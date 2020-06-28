@@ -101,7 +101,7 @@ class MetaField {
 
         // only check field type, don't check field width, for example: VARCHAR(255) and VARCHAR(100) is equal
         std::vector<std::string> type_split;
-        milvus::server::StringHelpFunctions::SplitStringByDelimeter(type_, "(", type_split);
+        milvus::StringHelpFunctions::SplitStringByDelimeter(type_, "(", type_split);
         if (!type_split.empty()) {
             type_len_min = type_split[0].length() > type_len_min ? type_len_min : type_split[0].length();
         }
@@ -1486,7 +1486,7 @@ MySQLMetaImpl::CreatePartition(const std::string& collection_id, const std::stri
     // trim side-blank of tag, only compare valid characters
     // for example: " ab cd " is treated as "ab cd"
     std::string valid_tag = tag;
-    server::StringHelpFunctions::TrimStringBlank(valid_tag);
+    StringHelpFunctions::TrimStringBlank(valid_tag);
 
     // not allow duplicated partition
     std::string exist_partition;
@@ -1527,7 +1527,7 @@ MySQLMetaImpl::HasPartition(const std::string& collection_id, const std::string&
         // trim side-blank of tag, only compare valid characters
         // for example: " ab cd " is treated as "ab cd"
         std::string valid_tag = tag;
-        server::StringHelpFunctions::TrimStringBlank(valid_tag);
+        StringHelpFunctions::TrimStringBlank(valid_tag);
 
         {
             mysqlpp::ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab_);
@@ -1626,7 +1626,7 @@ MySQLMetaImpl::GetPartitionName(const std::string& collection_id, const std::str
         // trim side-blank of tag, only compare valid characters
         // for example: " ab cd " is treated as "ab cd"
         std::string valid_tag = tag;
-        server::StringHelpFunctions::TrimStringBlank(valid_tag);
+        StringHelpFunctions::TrimStringBlank(valid_tag);
 
         {
             mysqlpp::ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab_);

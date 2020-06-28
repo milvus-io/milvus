@@ -23,7 +23,6 @@
 #include <vector>
 
 namespace milvus {
-namespace server {
 
 namespace fs = boost::filesystem;
 
@@ -204,5 +203,4 @@ CommonUtil::GetCurrentTimeStr() {
 }
 #endif
 
-}  // namespace server
 }  // namespace milvus

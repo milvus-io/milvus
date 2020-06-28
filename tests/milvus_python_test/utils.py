@@ -7,12 +7,15 @@ import logging
 import time, datetime
 import copy
 import numpy as np
-from milvus import Milvus, IndexType, MetricType
+from milvus import Milvus, IndexType, MetricType, DataType
 
 port = 19530
 epsilon = 0.000001
 default_flush_interval = 1
 big_flush_interval = 1000
+dimension = 128
+segment_size = 10
+
 
 all_index_types = [
     IndexType.FLAT,
@@ -152,6 +155,47 @@ def gen_long_str(num):
         string += char
 
 
+def gen_single_filter_fields():
+    fields = []
+    for data_type in [i.value for i in DataType]:
+        fields.append({"field": data_type.name, "type": data_type})
+    return fields
+
+
+def gen_single_vector_fields():
+    fields = []
+    for metric_type in MetricType:
+        for data_type in [DataType.FLOAT_VECTOR, DataType.BINARY_VECTOR]:
+            if metric_type in [MetricType.L2, MetricType.IP] and data_type == DataType.BINARY_VECTOR:
+                continue
+            field = {"field": data_type.name, "type": data_type, "dimension": dimension, "extra_params": {"metric_type": metric_type}}
+            fields.append(field)
+    return fields
+
+
+def gen_default_fields():
+    default_fields = {
+        "fields": [
+            {"field": "int8", "type": DataType.INT8},
+            {"field": "int64", "type": DataType.INT64},
+            {"field": "float", "type": DataType.FLOAT},
+            {"field": "float_vector", "type": DataType.FLOAT_VECTOR, "dimension": dimension, "extra_params": {"metric_type": MetricType.L2}
+        ],
+        "segment_size": segment_size
+    }
+    return default_fields
+
+
+def gen_segment_sizes():
+    sizes = [
+            1,
+            2,
+            1024,
+            4096
+    ]
+    return sizes
+
+
 def gen_invalid_ips():
     ips = [
             # "255.0.0.0",
@@ -237,7 +281,7 @@ def gen_invalid_collection_names():
     return collection_names
 
 
-def gen_invalid_top_ks():
+def gen_invalid_ints():
     top_ks = [
             0,
             -1,
@@ -638,8 +682,8 @@ def get_search_param(index_type):
 
 
 def assert_has_collection(conn, collection_name):
-    status, ok = conn.has_collection(collection_name)
-    return status.OK() and ok
+    res = conn.has_collection(collection_name)
+    return res
 
 
 def assert_equal_vector(v1, v2):
