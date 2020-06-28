@@ -86,7 +86,7 @@ Snapshots::LoadSnapshot(Store& store, ScopedSnapshotT& ss, ID_TYPE collection_id
 }
 
 Status
-Snapshots::GetSnapshot(ScopedSnapshotT& ss, ID_TYPE collection_id, ID_TYPE id, bool scoped) {
+Snapshots::GetSnapshot(ScopedSnapshotT& ss, ID_TYPE collection_id, ID_TYPE id, bool scoped) const {
     SnapshotHolderPtr holder;
     auto status = GetHolder(collection_id, holder);
     if (!status.ok())
@@ -96,7 +96,7 @@ Snapshots::GetSnapshot(ScopedSnapshotT& ss, ID_TYPE collection_id, ID_TYPE id, b
 }
 
 Status
-Snapshots::GetSnapshot(ScopedSnapshotT& ss, const std::string& name, ID_TYPE id, bool scoped) {
+Snapshots::GetSnapshot(ScopedSnapshotT& ss, const std::string& name, ID_TYPE id, bool scoped) const {
     SnapshotHolderPtr holder;
     auto status = GetHolder(name, holder);
     if (!status.ok())
@@ -157,7 +157,7 @@ Snapshots::Init() {
 }
 
 Status
-Snapshots::GetHolder(const std::string& name, SnapshotHolderPtr& holder) {
+Snapshots::GetHolder(const std::string& name, SnapshotHolderPtr& holder) const {
     std::shared_lock<std::shared_timed_mutex> lock(mutex_);
     auto kv = name_id_map_.find(name);
     if (kv != name_id_map_.end()) {
@@ -172,7 +172,7 @@ Snapshots::GetHolder(const std::string& name, SnapshotHolderPtr& holder) {
 }
 
 Status
-Snapshots::GetHolder(const ID_TYPE& collection_id, SnapshotHolderPtr& holder) {
+Snapshots::GetHolder(const ID_TYPE& collection_id, SnapshotHolderPtr& holder) const {
     Status status;
     std::shared_lock<std::shared_timed_mutex> lock(mutex_);
     status = GetHolderNoLock(collection_id, holder);
@@ -204,7 +204,7 @@ Snapshots::LoadHolder(Store& store, const ID_TYPE& collection_id, SnapshotHolder
 }
 
 Status
-Snapshots::GetHolderNoLock(ID_TYPE collection_id, SnapshotHolderPtr& holder) {
+Snapshots::GetHolderNoLock(ID_TYPE collection_id, SnapshotHolderPtr& holder) const {
     auto it = holders_.find(collection_id);
     if (it == holders_.end()) {
         std::stringstream emsg;

@@ -35,18 +35,19 @@ class Snapshots {
         return sss;
     }
     Status
-    GetHolder(const ID_TYPE& collection_id, SnapshotHolderPtr& holder);
+    GetHolder(const ID_TYPE& collection_id, SnapshotHolderPtr& holder) const;
     Status
-    GetHolder(const std::string& name, SnapshotHolderPtr& holder);
+    GetHolder(const std::string& name, SnapshotHolderPtr& holder) const;
     Status
     LoadHolder(Store& store, const ID_TYPE& collection_id, SnapshotHolderPtr& holder);
 
     Status
-    GetSnapshot(ScopedSnapshotT& ss, ID_TYPE collection_id, ID_TYPE id = 0, bool scoped = true);
+    GetSnapshot(ScopedSnapshotT& ss, ID_TYPE collection_id, ID_TYPE id = 0, bool scoped = true) const;
     Status
-    GetSnapshot(ScopedSnapshotT& ss, const std::string& name, ID_TYPE id = 0, bool scoped = true);
+    GetSnapshot(ScopedSnapshotT& ss, const std::string& name, ID_TYPE id = 0, bool scoped = true) const;
     Status
-    LoadSnapshot(Store& store, ScopedSnapshotT& ss, ID_TYPE collection_id, ID_TYPE id, bool scoped = true);
+    LoadSnapshot(Store& store, ScopedSnapshotT& ss, ID_TYPE collection_id, ID_TYPE id,
+            bool scoped = true);
 
     Status
     GetCollectionIds(IDS_TYPE& ids) const;
@@ -79,7 +80,7 @@ class Snapshots {
     Status
     LoadNoLock(Store& store, ID_TYPE collection_id, SnapshotHolderPtr& holder);
     Status
-    GetHolderNoLock(ID_TYPE collection_id, SnapshotHolderPtr& holder);
+    GetHolderNoLock(ID_TYPE collection_id, SnapshotHolderPtr& holder) const;
 
     mutable std::shared_timed_mutex mutex_;
     std::map<ID_TYPE, SnapshotHolderPtr> holders_;
