@@ -43,18 +43,17 @@ class MemManagerImpl : public MemManager, public server::CacheConfigHandler {
 
     Status
     InsertVectors(const std::string& collection_id, int64_t length, const IDNumber* vector_ids, int64_t dim,
-                  const float* vectors, uint64_t lsn, std::set<std::string>& flushed_tables) override;
+                  const float* vectors, uint64_t lsn) override;
 
     Status
     InsertVectors(const std::string& collection_id, int64_t length, const IDNumber* vector_ids, int64_t dim,
-                  const uint8_t* vectors, uint64_t lsn, std::set<std::string>& flushed_tables) override;
+                  const uint8_t* vectors, uint64_t lsn) override;
 
     Status
     InsertEntities(const std::string& collection_id, int64_t length, const IDNumber* vector_ids, int64_t dim,
                    const float* vectors, const std::unordered_map<std::string, uint64_t>& attr_nbytes,
                    const std::unordered_map<std::string, uint64_t>& attr_size,
-                   const std::unordered_map<std::string, std::vector<uint8_t>>& attr_data, uint64_t lsn,
-                   std::set<std::string>& flushed_tables) override;
+                   const std::unordered_map<std::string, std::vector<uint8_t>>& attr_data, uint64_t lsn) override;
 
     Status
     DeleteVector(const std::string& collection_id, IDNumber vector_id, uint64_t lsn) override;
@@ -63,10 +62,10 @@ class MemManagerImpl : public MemManager, public server::CacheConfigHandler {
     DeleteVectors(const std::string& collection_id, int64_t length, const IDNumber* vector_ids, uint64_t lsn) override;
 
     Status
-    Flush(const std::string& collection_id, bool apply_delete = true) override;
+    Flush(const std::string& collection_id) override;
 
     Status
-    Flush(std::set<std::string>& collection_ids, bool apply_delete = true) override;
+    Flush(std::set<std::string>& collection_ids) override;
 
     //    Status
     //    Serialize(std::set<std::string>& table_ids) override;
