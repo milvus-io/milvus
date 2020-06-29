@@ -10,8 +10,6 @@
 [![CodeFactor Grade](https://www.codefactor.io/repository/github/milvus-io/milvus/badge)](https://www.codefactor.io/repository/github/milvus-io/milvus)
 [![Codacy Badge](https://api.codacy.com/project/badge/Grade/c4bb2ccfb51b47f99e43bfd1705edd95)](https://app.codacy.com/gh/milvus-io/milvus?utm_source=github.com&utm_medium=referral&utm_content=milvus-io/milvus&utm_campaign=Badge_Grade_Dashboard)
 
-English | [中文版](README_CN.md) 
-
 ## What is Milvus
 
 As an open source vector similarity search engine, Milvus is easy-to-use, highly reliable, scalable, robust, and blazing fast. Adopted by over 100 organizations and institutions worldwide, Milvus empowers applications in a variety of fields, including image processing, computer vision, natural language processing, voice recognition, recommender systems, drug discovery, etc. 
@@ -19,7 +17,7 @@ As an open source vector similarity search engine, Milvus is easy-to-use, highly
 Milvus has the following architecture:
 
 ![arch](https://github.com/milvus-io/docs/blob/v0.9.1/assets/milvus_arch.png)
-For more detailed introduction of Milvus and its architecture, see [Milvus overview](https://www.milvus.io/docs/about_milvus/overview.md). Keep up-to-date with newest releases and latest updates by reading Milvus [release notes](https://www.milvus.io/docs/releases/release_notes.md).
+For more detailed introduction of Milvus and its architecture, see [Milvus overview](https://www.milvus.io/docs/overview.md). Keep up-to-date with newest releases and latest updates by reading Milvus [release notes](https://www.milvus.io/docs/v0.10.0/release_notes.md).
 
 Milvus is an [LF AI Foundation](https://lfai.foundation/) incubation project. Learn more at [lfai.foundation](https://lfai.foundation/).
 
@@ -27,11 +25,11 @@ Milvus is an [LF AI Foundation](https://lfai.foundation/) incubation project. Le
 
 ### Install Milvus
 
-See the [Milvus install guide](https://www.milvus.io/docs/guides/get_started/install_milvus/install_milvus.md) to install Milvus using Docker. To install Milvus from source code, see [build from source](INSTALL.md).
+See the [Milvus install guide](https://www.milvus.io/docs/v0.10.0/install_milvus.md) to install Milvus using Docker. To install Milvus from source code, see [build from source](INSTALL.md).
 
 ### Try example programs
 
-Try an example program with Milvus using [Python](https://www.milvus.io/docs/guides/get_started/example_code.md), [Java](https://github.com/milvus-io/milvus-sdk-java/tree/master/examples), [Go](https://github.com/milvus-io/milvus-sdk-go/tree/master/examples), or [C++ example code](https://github.com/milvus-io/milvus/tree/master/sdk/examples).
+Try an example program with Milvus using [Python](https://www.milvus.io/docs/v0.10.0/example_code.md), [Java](https://github.com/milvus-io/milvus-sdk-java/tree/master/examples), [Go](https://github.com/milvus-io/milvus-sdk-go/tree/master/examples), or [C++ example code](https://github.com/milvus-io/milvus/tree/master/sdk/examples).
 
 ## Supported clients
 
@@ -52,7 +50,7 @@ See our [test reports](https://github.com/milvus-io/milvus/tree/master/docs) for
 
 ## Roadmap
 
-To learn what's coming up soon in Milvus, read our [Roadmap](https://github.com/milvus-io/milvus/projects).
+To learn what's coming up soon in Milvus, read our [Roadmap](https://github.com/milvus-io/milvus/milestones).
 
 It is a Work in Progress, and is subject to reasonable adjustments when necessary. And we greatly welcome any comments/requirements/suggestions regarding Milvus roadmap.:clap:
 
