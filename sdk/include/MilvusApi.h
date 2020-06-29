@@ -11,6 +11,7 @@
 
 #pragma once
 
+#include <any>
 #include <memory>
 #include <string>
 #include <unordered_map>
@@ -77,16 +78,9 @@ struct AttrRecord {
     std::vector<double> double_record;
 };
 
-struct Entity {
-    int8_t int8_value;
-    int16_t int16_value;
-    int32_t int32_value;
-    int64_t int64_value;
-    float float_value;
-    double double_value;
-    VectorData vector_value;
-};
-
+/**
+ * @brief field value
+ */
 struct FieldValue {
     int64_t row_num;
     std::unordered_map<std::string, std::vector<int8_t>> int8_value;
@@ -102,8 +96,8 @@ struct FieldValue {
  * @brief query result
  */
 struct QueryResult {
-    std::vector<int64_t> ids;                                                     ///< Query entity ids result
-    std::vector<float> distances;                                                 ///< Query distances result
+    std::vector<int64_t> ids;      ///< Query entity ids result
+    std::vector<float> distances;  ///< Query distances result
     FieldValue field_value;
 };
 using TopKQueryResult = std::vector<QueryResult>;  ///< Topk hybrid query result
@@ -365,8 +359,7 @@ class Connection {
      * @return Indicate if the operation is succeed.
      */
     virtual Status
-    GetEntityByID(const std::string& collection_name, const std::vector<int64_t>& id_array,
-                  QueryResult& result) = 0;
+    GetEntityByID(const std::string& collection_name, const std::vector<int64_t>& id_array, std::string& entities) = 0;
 
     /**
      * @brief List entity ids from a segment

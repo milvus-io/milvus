@@ -71,7 +71,7 @@ class ConnectionImpl : public Connection {
 
     Status
     GetEntityByID(const std::string& collection_name, const std::vector<int64_t>& id_array,
-                  QueryResult& result) override;
+                  std::string& entities) override;
 
     Status
     ListIDInSegment(const std::string& collection_name, const std::string& segment_name,

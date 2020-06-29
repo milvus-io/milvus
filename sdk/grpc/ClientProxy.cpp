@@ -10,6 +10,7 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
 #include "grpc/ClientProxy.h"
+#include "thirdparty/nlohmann/json.hpp"
 
 #include <memory>
 #include <string>
@@ -21,6 +22,7 @@
 
 namespace milvus {
 
+using JSON = nlohmann::json;
 static const char* EXTRA_PARAM_KEY = "params";
 
 bool
@@ -303,36 +305,114 @@ ClientProxy::CreateIndex(const std::string& collection_name, const std::string& 
     }
 }
 
+void
+CopyFieldValue(const FieldValue& field_value, ::milvus::grpc::InsertParam& insert_param) {
+    if (!field_value.int8_value.empty()) {
+        for (auto& field_it : field_value.int8_value) {
+            auto grpc_field = insert_param.add_fields();
+            grpc_field->set_field_name(field_it.first);
+            auto grpc_attr_record = grpc_field->mutable_attr_record();
+            auto grpc_int32_value = grpc_attr_record->mutable_int32_value();
+            auto field_data = field_it.second;
+            auto data_size = field_data.size();
+            std::vector<int32_t> int32_value(data_size);
+            for (int i = 0; i < data_size; i++) {
+                int32_value[i] = field_data[i];
+            }
+
+            grpc_int32_value->Resize(static_cast<int>(data_size), 0);
+            memcpy(grpc_int32_value->mutable_data(), int32_value.data(), data_size * sizeof(int32_value));
+        }
+    } else if (!field_value.int16_value.empty()) {
+        for (auto& field_it : field_value.int16_value) {
+            auto grpc_field = insert_param.add_fields();
+            grpc_field->set_field_name(field_it.first);
+            auto grpc_attr_record = grpc_field->mutable_attr_record();
+            auto grpc_int32_value = grpc_attr_record->mutable_int32_value();
+            auto field_data = field_it.second;
+            auto data_size = field_data.size();
+            std::vector<int32_t> int32_value(data_size);
+            for (int i = 0; i < data_size; i++) {
+                int32_value[i] = field_data[i];
+            }
+
+            grpc_int32_value->Resize(static_cast<int>(data_size), 0);
+            memcpy(grpc_int32_value->mutable_data(), int32_value.data(), data_size * sizeof(int32_value));
+        }
+    } else if (!field_value.int32_value.empty()) {
+        for (auto& field_it : field_value.int32_value) {
+            auto grpc_field = insert_param.add_fields();
+            grpc_field->set_field_name(field_it.first);
+            auto grpc_attr_record = grpc_field->mutable_attr_record();
+            auto grpc_int32_value = grpc_attr_record->mutable_int32_value();
+            auto field_data = field_it.second;
+            auto data_size = field_data.size();
+
+            grpc_int32_value->Resize(static_cast<int>(data_size), 0);
+            memcpy(grpc_int32_value->mutable_data(), field_data.data(), data_size * sizeof(field_data));
+        }
+    } else if (!field_value.int64_value.empty()) {
+        for (auto& field_it : field_value.int64_value) {
+            auto grpc_field = insert_param.add_fields();
+            grpc_field->set_field_name(field_it.first);
+            auto grpc_attr_record = grpc_field->mutable_attr_record();
+            auto grpc_int64_value = grpc_attr_record->mutable_int64_value();
+            auto field_data = field_it.second;
+            auto data_size = field_data.size();
+
+            grpc_int64_value->Resize(static_cast<int>(data_size), 0);
+            memcpy(grpc_int64_value->mutable_data(), field_data.data(), data_size * sizeof(field_data));
+        }
+    } else if (!field_value.float_value.empty()) {
+        for (auto& field_it : field_value.float_value) {
+            auto grpc_field = insert_param.add_fields();
+            grpc_field->set_field_name(field_it.first);
+            auto grpc_attr_record = grpc_field->mutable_attr_record();
+            auto grpc_float_value = grpc_attr_record->mutable_float_value();
+            auto field_data = field_it.second;
+            auto data_size = field_data.size();
+
+            grpc_float_value->Resize(static_cast<int>(data_size), 0.0);
+            memcpy(grpc_float_value->mutable_data(), field_data.data(), data_size * sizeof(field_data));
+        }
+    } else if (!field_value.double_value.empty()) {
+        for (auto& field_it : field_value.double_value) {
+            auto grpc_field = insert_param.add_fields();
+            grpc_field->set_field_name(field_it.first);
+            auto grpc_attr_record = grpc_field->mutable_attr_record();
+            auto grpc_double_value = grpc_attr_record->mutable_double_value();
+            auto field_data = field_it.second;
+            auto data_size = field_data.size();
+
+            grpc_double_value->Resize(static_cast<int>(data_size), 0.0);
+            memcpy(grpc_double_value->mutable_data(), field_data.data(), data_size * sizeof(field_data));
+        }
+    }
+}
+
 Status
-ClientProxy::Insert(const std::string& collection_name, const std::string& partition_tag,
-                    const FieldValue& field_value, std::vector<int64_t>& id_array) {
+ClientProxy::Insert(const std::string& collection_name, const std::string& partition_tag, const FieldValue& field_value,
+                    std::vector<int64_t>& id_array) {
     Status status = Status::OK();
     try {
         ::milvus::grpc::InsertParam insert_param;
         insert_param.set_collection_name(collection_name);
         insert_param.set_partition_tag(partition_tag);
 
-        if (!field_value.int8_value.empty()) {
-            auto grpc_field = insert_param.add_fields();
-            for (auto& field_it : field_value.int8_value) {
-
-            }
-        } else if (!field_value.int16_value.empty()) {
-
-        }
+        CopyFieldValue(field_value, insert_param);
 
         // Single thread
         ::milvus::grpc::EntityIds entity_ids;
         if (!id_array.empty()) {
             /* set user's ids */
-            auto row_ids = insert_param.mutable_row_id_array();
+            auto row_ids = insert_param.mutable_entity_id_array();
             row_ids->Resize(static_cast<int>(id_array.size()), -1);
             memcpy(row_ids->mutable_data(), id_array.data(), id_array.size() * sizeof(int64_t));
-            status = client_ptr_->Insert(insert_param, vector_ids);
+            status = client_ptr_->Insert(insert_param, entity_ids);
         } else {
-            status = client_ptr_->Insert(insert_param, vector_ids);
+            status = client_ptr_->Insert(insert_param, entity_ids);
             /* return Milvus generated ids back to user */
-            id_array.insert(id_array.end(), vector_ids.vector_id_array().begin(), vector_ids.vector_id_array().end());
+            id_array.insert(id_array.end(), entity_ids.entity_id_array().begin(), entity_ids.entity_id_array().end());
         }
     } catch (std::exception& ex) {
         return Status(StatusCode::UnknownError, "Failed to add entities: " + std::string(ex.what()));
@@ -341,20 +421,83 @@ ClientProxy::Insert(const std::string& collection_name, const std::string& parti
     return status;
 }
 
+void
+SerializeEntityToJson(::milvus::grpc::Entities& grpc_entities, JSON& json_entity) {
+    for (int i = 0; i < grpc_entities.fields_size(); i++) {
+        auto grpc_attr_record = grpc_entities.fields(i).attr_record();
+        auto grpc_vector_record = grpc_entities.fields(i).vector_record();
+
+    }
+}
+
 Status
 ClientProxy::GetEntityByID(const std::string& collection_name, const std::vector<int64_t>& id_array,
-                           QueryResult& result) {
+                           std::string& entities) {
     try {
-        entities_data.clear();
-
-        ::milvus::grpc::VectorsIdentity vectors_identity;
-        vectors_identity.set_collection_name(collection_name);
+        ::milvus::grpc::EntityIdentity entity_identity;
+        entity_identity.set_collection_name(collection_name);
         for (auto id : id_array) {
-            vectors_identity.add_id_array(id);
+            entity_identity.add_id_array(id);
+        }
+        ::milvus::grpc::Entities grpc_entities;
+
+        Status status = client_ptr_->GetEntityByID(entity_identity, grpc_entities);
+        if (!status.ok()) {
+            return status;
         }
 
-        ::milvus::grpc::VectorsData grpc_data;
-        Status status = client_ptr_->GetEntityByID(vectors_identity, grpc_data);
+        JSON entity_json;
+
+        int i;
+        for (i = 0; i < grpc_entities.fields_size(); i++) {
+            auto grpc_int_size = grpc_entities.attr_data(i).int_value_size();
+            auto grpc_double_size = grpc_entity.attr_data(i).double_value_size();
+            if (grpc_int_size > 0) {
+                attr_record.int_record.resize(grpc_int_size);
+                memcpy(attr_record.int_record.data(), grpc_entity.attr_data(i).int_value().data(),
+                       grpc_int_size * sizeof(int64_t));
+            } else if (grpc_double_size > 0) {
+                attr_record.double_record.resize(grpc_double_size);
+                memcpy(attr_record.double_record.data(), grpc_entity.attr_data(i).double_value().data(),
+                       grpc_double_size * sizeof(double));
+            }
+            entities.attr_records.emplace_back(std::make_pair(grpc_entity.field_names(i), attr_record));
+        }
+        auto grpc_vector_data = grpc_entity.vector_data(0);
+        std::vector<Entity> entities;
+        for (int j = 0; j < grpc_vector_data.value_size(); j++) {
+            const ::milvus::grpc::RowRecord& record = grpc_vector_data.value(j);
+            Entity entity;
+
+            int float_size = record.float_data_size();
+            if (float_size > 0) {
+                entity.float_data.resize(float_size);
+                memcpy(entity.float_data.data(), record.float_data().data(), float_size * sizeof(float));
+            }
+
+            auto byte_size = record.binary_data().length();
+            if (byte_size > 0) {
+                entity.binary_data.resize(byte_size);
+                memcpy(entity.binary_data.data(), record.binary_data().data(), byte_size);
+            }
+            entities.emplace_back(entity);
+        }
+        result.vector_records.emplace_back(std::make_pair(grpc_entity.field_names(i), entities));
+
+        return status;
+    } catch (std::exception& ex) {
+        return Status(StatusCode::UnknownError, "Failed to get entity by id: " + std::string(ex.what()));
+    }
+
+    try {
+        ::milvus::grpc::EntityIdentity entity_identity;
+        entity_identity.set_collection_name(collection_name);
+        for (auto id : id_array) {
+            entity_identity.add_id_array(id);
+        }
+
+        ::milvus::grpc::Entities entities;
+        Status status = client_ptr_->GetEntityByID(entity_identity, entities);
         if (!status.ok()) {
             return status;
         }
@@ -857,7 +1000,7 @@ ClientProxy::HybridSearch(const std::string& collection_name, const std::vector<
 
 Status
 ClientProxy::GetHEntityByID(const std::string& collection_name, const std::vector<int64_t>& id_array,
-                            milvus::HybridQueryResult& result) {
+                            milvus::QueryResult& result) {
     try {
         ::milvus::grpc::VectorsIdentity vectors_identity;
         vectors_identity.set_collection_name(collection_name);

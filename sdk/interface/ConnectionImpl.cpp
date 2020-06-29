@@ -105,8 +105,8 @@ ConnectionImpl::Insert(const std::string& collection_name, const std::string& pa
 
 Status
 ConnectionImpl::GetEntityByID(const std::string& collection_name, const std::vector<int64_t>& id_array,
-                              QueryResult& result) {
-    return client_proxy_->GetEntityByID(collection_name, id_array, result);
+                              std::string& entities) {
+    return client_proxy_->GetEntityByID(collection_name, id_array, entities);
 }
 
 Status
