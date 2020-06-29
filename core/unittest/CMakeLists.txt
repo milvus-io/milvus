@@ -204,7 +204,7 @@ if (MILVUS_GPU_VERSION)
             )
 endif ()
 
-add_subdirectory(db)
+#add_subdirectory(db)
 add_subdirectory(metrics)
 add_subdirectory(scheduler)
 add_subdirectory(server)

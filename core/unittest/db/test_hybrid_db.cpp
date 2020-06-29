@@ -336,7 +336,7 @@ TEST_F(DBTest2, GET_ENTITY_BY_ID_TEST) {
 
     std::vector<milvus::engine::AttrsData> attrs;
     std::vector<milvus::engine::VectorsData> vectors;
-    stat = db_->GetEntitiesByID(COLLECTION_NAME, entity.id_array_, vectors, attrs);
+    stat = db_->GetEntitiesByID(COLLECTION_NAME, entity.id_array_, field_names, vectors, attrs);
     ASSERT_TRUE(stat.ok());
     ASSERT_EQ(vectors.size(), entity.id_array_.size());
     ASSERT_EQ(vectors[0].float_data_.size(), COLLECTION_DIM);
@@ -349,7 +349,8 @@ TEST_F(DBTest2, GET_ENTITY_BY_ID_TEST) {
     std::vector<int64_t> empty_array;
     vectors.clear();
     attrs.clear();
-    stat = db_->GetEntitiesByID(COLLECTION_NAME, empty_array, vectors, attrs);
+    field_names.clear();
+    stat = db_->GetEntitiesByID(COLLECTION_NAME, empty_array, field_names, vectors, attrs);
     ASSERT_TRUE(stat.ok());
     for (auto& vector : vectors) {
         ASSERT_EQ(vector.vector_count_, 0);

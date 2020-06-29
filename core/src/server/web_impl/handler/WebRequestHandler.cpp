@@ -686,16 +686,16 @@ WebRequestHandler::ProcessBoolQueryJson(const nlohmann::json& query_json, query:
 }
 
 void
-ConvertRowToColumnJson(const std::vector<engine::AttrsData>& row_attrs, std::vector<std::string>& field_names,
+ConvertRowToColumnJson(const std::vector<engine::AttrsData>& row_attrs, const std::vector<std::string>& field_names,
                        const int64_t row_num, nlohmann::json& column_attrs_json) {
-    if (field_names.size() == 0) {
-        if (row_attrs.size() > 0) {
-            auto attr_it = row_attrs[0].attr_type_.begin();
-            for (; attr_it != row_attrs[0].attr_type_.end(); attr_it++) {
-                field_names.emplace_back(attr_it->first);
-            }
-        }
-    }
+    //    if (field_names.size() == 0) {
+    //        if (row_attrs.size() > 0) {
+    //            auto attr_it = row_attrs[0].attr_type_.begin();
+    //            for (; attr_it != row_attrs[0].attr_type_.end(); attr_it++) {
+    //                field_names.emplace_back(attr_it->first);
+    //            }
+    //        }
+    //    }
 
     for (uint64_t i = 0; i < field_names.size() - 1; i++) {
         std::vector<int64_t> int_data;
@@ -903,10 +903,11 @@ WebRequestHandler::DeleteByIDs(const std::string& collection_name, const nlohman
 
 Status
 WebRequestHandler::GetEntityByIDs(const std::string& collection_name, const std::vector<int64_t>& ids,
-                                  nlohmann::json& json_out) {
+                                  const std::vector<std::string>& field_names, nlohmann::json& json_out) {
     std::vector<engine::VectorsData> vector_batch;
     std::vector<engine::AttrsData> attr_batch;
-    auto status = request_handler_.GetEntityByID(context_ptr_, collection_name, ids, attr_batch, vector_batch);
+    auto status =
+        request_handler_.GetEntityByID(context_ptr_, collection_name, field_names, ids, attr_batch, vector_batch);
     if (!status.ok()) {
         return status;
     }
@@ -928,7 +929,6 @@ WebRequestHandler::GetEntityByIDs(const std::string& collection_name, const std:
         vector_json["id"] = std::to_string(ids[i]);
         vectors_json.push_back(vector_json);
     }
-    std::vector<std::string> field_names;
     ConvertRowToColumnJson(attr_batch, field_names, -1, attrs_json);
     json_out["vectors"] = vectors_json;
     json_out["attributes"] = attrs_json;
@@ -1870,8 +1870,15 @@ WebRequestHandler::GetEntity(const milvus::server::web::OString& collection_name
         for (auto& id : ids) {
             entity_ids.push_back(std::stol(id));
         }
+
+        std::vector<std::string> field_names;
+        auto query_fields = query_params.get("fields");
+        if (query_fields != nullptr && query_fields.get() != nullptr) {
+            StringHelpFunctions::SplitStringByDelimeter(query_fields->c_str(), ",", field_names);
+        }
+
         nlohmann::json entity_result_json;
-        status = GetEntityByIDs(collection_name->std_str(), entity_ids, entity_result_json);
+        status = GetEntityByIDs(collection_name->std_str(), entity_ids, field_names, entity_result_json);
         if (!status.ok()) {
             response = "NULL";
             ASSIGN_RETURN_STATUS_DTO(status)

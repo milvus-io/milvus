@@ -238,14 +238,14 @@ ConstructEntityResults(const std::vector<engine::AttrsData>& attrs, const std::v
         return;
     }
 
-    if (field_names.empty()) {
-        if (attrs.size() > 0) {
-            auto attr_it = attrs[0].attr_type_.begin();
-            for (; attr_it != attrs[0].attr_type_.end(); attr_it++) {
-                field_names.emplace_back(attr_it->first);
-            }
-        }
-    }
+    //    if (field_names.empty()) {
+    //        if (attrs.size() > 0) {
+    //            auto attr_it = attrs[0].attr_type_.begin();
+    //            for (; attr_it != attrs[0].attr_type_.end(); attr_it++) {
+    //                field_names.emplace_back(attr_it->first);
+    //            }
+    //        }
+    //    }
 
     for (uint64_t i = 0; i < field_names.size() - 1; i++) {
         auto field_name = field_names[i];
@@ -673,12 +673,16 @@ GrpcRequestHandler::GetEntityByID(::grpc::ServerContext* context, const ::milvus
         vector_ids.push_back(request->id_array(i));
     }
 
+    std::vector<std::string> field_names(request->field_names_size());
+    for (int i = 0; i < request->field_names_size(); i++) {
+        field_names[i] = request->field_names(i);
+    }
+
     std::vector<engine::AttrsData> attrs;
     std::vector<engine::VectorsData> vectors;
-    Status status =
-        request_handler_.GetEntityByID(GetContext(context), request->collection_name(), vector_ids, attrs, vectors);
+    Status status = request_handler_.GetEntityByID(GetContext(context), request->collection_name(), field_names,
+                                                   vector_ids, attrs, vectors);
 
-    std::vector<std::string> field_names;
     ConstructEntityResults(attrs, vectors, field_names, response);
 
     LOG_SERVER_INFO_ << LogOut("Request [%s] %s end.", GetContext(context)->RequestID().c_str(), __func__);

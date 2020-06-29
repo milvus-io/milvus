@@ -1279,7 +1279,7 @@ const char descriptor_table_protodef_milvus_2eproto[] PROTOBUF_SECTION_VARIABLE(
   "\"H\n\023ReLoadSegmentsParam\022\027\n\017collection_na"
   "me\030\001 \001(\t\022\030\n\020segment_id_array\030\002 \003(\t\"e\n\010En"
   "tities\022#\n\006status\030\001 \001(\0132\023.milvus.grpc.Sta"
-  "tus\022\013\n\003ids\030\002 \003(\003\022\'\n\006Fields\030\003 \003(\0132\027.milvu"
+  "tus\022\013\n\003ids\030\002 \003(\003\022\'\n\006fields\030\003 \003(\0132\027.milvu"
   "s.grpc.FieldValue\"\300\001\n\013QueryResult\022#\n\006sta"
   "tus\030\001 \001(\0132\023.milvus.grpc.Status\022\'\n\010entiti"
   "es\030\002 \001(\0132\025.milvus.grpc.Entities\022\017\n\007row_n"
@@ -8319,7 +8319,7 @@ const char* Entities::_InternalParse(const char* ptr, ::PROTOBUF_NAMESPACE_ID::i
           CHK_(ptr);
         } else goto handle_unusual;
         continue;
-      // repeated .milvus.grpc.FieldValue Fields = 3;
+      // repeated .milvus.grpc.FieldValue fields = 3;
       case 3:
         if (PROTOBUF_PREDICT_TRUE(static_cast<::PROTOBUF_NAMESPACE_ID::uint8>(tag) == 26)) {
           ptr -= 1;
@@ -8388,7 +8388,7 @@ bool Entities::MergePartialFromCodedStream(
         break;
       }
 
-      // repeated .milvus.grpc.FieldValue Fields = 3;
+      // repeated .milvus.grpc.FieldValue fields = 3;
       case 3: {
         if (static_cast< ::PROTOBUF_NAMESPACE_ID::uint8>(tag) == (26 & 0xFF)) {
           DO_(::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::ReadMessage(
@@ -8443,7 +8443,7 @@ void Entities::SerializeWithCachedSizes(
       this->ids(i), output);
   }
 
-  // repeated .milvus.grpc.FieldValue Fields = 3;
+  // repeated .milvus.grpc.FieldValue fields = 3;
   for (unsigned int i = 0,
       n = static_cast<unsigned int>(this->fields_size()); i < n; i++) {
     ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteMessageMaybeToArray(
@@ -8485,7 +8485,7 @@ void Entities::SerializeWithCachedSizes(
       WriteInt64NoTagToArray(this->ids_, target);
   }
 
-  // repeated .milvus.grpc.FieldValue Fields = 3;
+  // repeated .milvus.grpc.FieldValue fields = 3;
   for (unsigned int i = 0,
       n = static_cast<unsigned int>(this->fields_size()); i < n; i++) {
     target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::
@@ -8529,7 +8529,7 @@ size_t Entities::ByteSizeLong() const {
     total_size += data_size;
   }
 
-  // repeated .milvus.grpc.FieldValue Fields = 3;
+  // repeated .milvus.grpc.FieldValue fields = 3;
   {
     unsigned int count = static_cast<unsigned int>(this->fields_size());
     total_size += 1UL * count;

@@ -189,7 +189,7 @@ message ReLoadSegmentsParam {
 message Entities {
     Status status = 1;
     repeated int64 ids = 2;
-    repeated FieldValue Fields = 3;
+    repeated FieldValue fields = 3;
 }
 
 /**

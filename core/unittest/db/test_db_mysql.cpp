@@ -54,7 +54,8 @@ BuildVectors(uint64_t n, uint64_t batch_index, milvus::engine::VectorsData& vect
 
 }  // namespace
 
-TEST_F(MySqlDBTest, DB_TEST) {
+TEST_F(MySqlDBTest, DB_TEST)
+{
     milvus::engine::meta::CollectionSchema collection_info = BuildCollectionSchema();
     auto stat = db_->CreateCollection(collection_info);
 

@@ -3324,7 +3324,7 @@ class Entities :
   ::PROTOBUF_NAMESPACE_ID::RepeatedField< ::PROTOBUF_NAMESPACE_ID::int64 >*
       mutable_ids();
 
-  // repeated .milvus.grpc.FieldValue Fields = 3;
+  // repeated .milvus.grpc.FieldValue fields = 3;
   int fields_size() const;
   void clear_fields();
   ::milvus::grpc::FieldValue* mutable_fields(int index);
@@ -9139,7 +9139,7 @@ Entities::mutable_ids() {
   return &ids_;
 }
 
-// repeated .milvus.grpc.FieldValue Fields = 3;
+// repeated .milvus.grpc.FieldValue fields = 3;
 inline int Entities::fields_size() const {
   return fields_.size();
 }
@@ -9147,25 +9147,25 @@ inline void Entities::clear_fields() {
   fields_.Clear();
 }
 inline ::milvus::grpc::FieldValue* Entities::mutable_fields(int index) {
-  // @@protoc_insertion_point(field_mutable:milvus.grpc.Entities.Fields)
+  // @@protoc_insertion_point(field_mutable:milvus.grpc.Entities.fields)
   return fields_.Mutable(index);
 }
 inline ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField< ::milvus::grpc::FieldValue >*
 Entities::mutable_fields() {
-  // @@protoc_insertion_point(field_mutable_list:milvus.grpc.Entities.Fields)
+  // @@protoc_insertion_point(field_mutable_list:milvus.grpc.Entities.fields)
   return &fields_;
 }
 inline const ::milvus::grpc::FieldValue& Entities::fields(int index) const {
-  // @@protoc_insertion_point(field_get:milvus.grpc.Entities.Fields)
+  // @@protoc_insertion_point(field_get:milvus.grpc.Entities.fields)
   return fields_.Get(index);
 }
 inline ::milvus::grpc::FieldValue* Entities::add_fields() {
-  // @@protoc_insertion_point(field_add:milvus.grpc.Entities.Fields)
+  // @@protoc_insertion_point(field_add:milvus.grpc.Entities.fields)
   return fields_.Add();
 }
 inline const ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField< ::milvus::grpc::FieldValue >&
 Entities::fields() const {
-  // @@protoc_insertion_point(field_list:milvus.grpc.Entities.Fields)
+  // @@protoc_insertion_point(field_list:milvus.grpc.Entities.fields)
   return fields_;
 }
 
