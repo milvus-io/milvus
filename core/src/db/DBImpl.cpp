@@ -1024,6 +1024,10 @@ DBImpl::Flush(const std::string& collection_id) {
         if (lsn != 0) {
             swn_wal_.Notify();
             flush_req_swn_.Wait();
+        } else {
+            // no collection flushed, call merge task to cleanup files
+            std::set<std::string> merge_collection_ids;
+            StartMergeTask(merge_collection_ids);
         }
     } else {
         LOG_ENGINE_DEBUG_ << "MemTable flush";
@@ -1051,6 +1055,10 @@ DBImpl::Flush() {
         if (lsn != 0) {
             swn_wal_.Notify();
             flush_req_swn_.Wait();
+        } else {
+            // no collection flushed, call merge task to cleanup files
+            std::set<std::string> merge_collection_ids;
+            StartMergeTask(merge_collection_ids);
         }
     } else {
         LOG_ENGINE_DEBUG_ << "MemTable flush";
@@ -3015,7 +3023,7 @@ DBImpl::ExecWalRecord(const wal::MXLogRecord& record) {
     auto collections_flushed = [&](const std::string collection_id,
                                    const std::set<std::string>& target_collection_names) -> uint64_t {
         uint64_t max_lsn = 0;
-        if (options_.wal_enable_) {
+        if (options_.wal_enable_ && !target_collection_names.empty()) {
             uint64_t lsn = 0;
             for (auto& collection : target_collection_names) {
                 meta_ptr_->GetCollectionFlushLSN(collection, lsn);
@@ -3034,16 +3042,11 @@ DBImpl::ExecWalRecord(const wal::MXLogRecord& record) {
         return max_lsn;
     };
 
-    auto partition_flushed = [&](const std::string& collection_id, const std::string& partition,
-                                 const std::string& target_collection_name) {
-        if (options_.wal_enable_) {
-            uint64_t lsn = 0;
-            meta_ptr_->GetCollectionFlushLSN(target_collection_name, lsn);
-            wal_mgr_->PartitionFlushed(collection_id, partition, lsn);
+    auto force_flush_if_mem_full = [&]() -> uint64_t {
+        if (mem_mgr_->GetCurrentMem() > options_.insert_buffer_size_) {
+            LOG_ENGINE_DEBUG_ << LogOut("[%s][%ld] ", "insert", 0) << "Insert buffer size exceeds limit. Force flush";
+            InternalFlush();
         }
-
-        std::set<std::string> merge_collection_ids = {target_collection_name};
-        StartMergeTask(merge_collection_ids);
     };
 
     Status status;
@@ -3057,15 +3060,12 @@ DBImpl::ExecWalRecord(const wal::MXLogRecord& record) {
                 return status;
             }
 
-            std::set<std::string> flushed_collections;
-            status = mem_mgr_->InsertEntities(target_collection_name, record.length, record.ids,
-                                              (record.data_size / record.length / sizeof(float)),
-                                              (const float*)record.data, record.attr_nbytes, record.attr_data_size,
-                                              record.attr_data, record.lsn, flushed_collections);
-            if (!flushed_collections.empty()) {
-                partition_flushed(record.collection_id, record.partition_tag, target_collection_name);
-            }
+            status = mem_mgr_->InsertEntities(
+                target_collection_name, record.length, record.ids, (record.data_size / record.length / sizeof(float)),
+                (const float*)record.data, record.attr_nbytes, record.attr_data_size, record.attr_data, record.lsn);
+            force_flush_if_mem_full();
 
+            // metrics
             milvus::server::CollectInsertMetrics metrics(record.length, status);
             break;
         }
@@ -3077,14 +3077,10 @@ DBImpl::ExecWalRecord(const wal::MXLogRecord& record) {
                 return status;
             }
 
-            std::set<std::string> flushed_collections;
             status = mem_mgr_->InsertVectors(target_collection_name, record.length, record.ids,
                                              (record.data_size / record.length / sizeof(uint8_t)),
-                                             (const u_int8_t*)record.data, record.lsn, flushed_collections);
-            // even though !status.ok, run
-            if (!flushed_collections.empty()) {
-                partition_flushed(record.collection_id, record.partition_tag, target_collection_name);
-            }
+                                             (const u_int8_t*)record.data, record.lsn);
+            force_flush_if_mem_full();
 
             // metrics
             milvus::server::CollectInsertMetrics metrics(record.length, status);
@@ -3099,14 +3095,10 @@ DBImpl::ExecWalRecord(const wal::MXLogRecord& record) {
                 return status;
             }
 
-            std::set<std::string> flushed_collections;
             status = mem_mgr_->InsertVectors(target_collection_name, record.length, record.ids,
                                              (record.data_size / record.length / sizeof(float)),
-                                             (const float*)record.data, record.lsn, flushed_collections);
-            // even though !status.ok, run
-            if (!flushed_collections.empty()) {
-                partition_flushed(record.collection_id, record.partition_tag, target_collection_name);
-            }
+                                             (const float*)record.data, record.lsn);
+            force_flush_if_mem_full();
 
             // metrics
             milvus::server::CollectInsertMetrics metrics(record.length, status);
@@ -3220,6 +3212,7 @@ DBImpl::BackgroundWalThread() {
         next_auto_flush_time = get_next_auto_flush_time();
     }
 
+    InternalFlush();
     while (true) {
         if (options_.auto_flush_interval_ > 0) {
             if (std::chrono::system_clock::now() >= next_auto_flush_time) {
