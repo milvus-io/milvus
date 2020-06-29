@@ -46,8 +46,7 @@ class Snapshots {
     Status
     GetSnapshot(ScopedSnapshotT& ss, const std::string& name, ID_TYPE id = 0, bool scoped = true) const;
     Status
-    LoadSnapshot(Store& store, ScopedSnapshotT& ss, ID_TYPE collection_id, ID_TYPE id,
-            bool scoped = true);
+    LoadSnapshot(Store& store, ScopedSnapshotT& ss, ID_TYPE collection_id, ID_TYPE id, bool scoped = true);
 
     Status
     GetCollectionIds(IDS_TYPE& ids) const;

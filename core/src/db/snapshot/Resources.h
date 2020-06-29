@@ -370,8 +370,7 @@ class CollectionCommit : public BaseResource,
     using VecT = std::vector<Ptr>;
     CollectionCommit(ID_TYPE collection_id, ID_TYPE schema_id, const MappingT& mappings = {}, SIZE_TYPE size = 0,
                      ID_TYPE id = 0, LSN_TYPE lsn = 0, State status = PENDING,
-                     TS_TYPE created_on = GetMicroSecTimeStamp(),
-                     TS_TYPE UpdatedOnField = GetMicroSecTimeStamp());
+                     TS_TYPE created_on = GetMicroSecTimeStamp(), TS_TYPE UpdatedOnField = GetMicroSecTimeStamp());
 };
 
 using CollectionCommitPtr = CollectionCommit::Ptr;
@@ -418,8 +417,7 @@ class PartitionCommit : public BaseResource,
 
     PartitionCommit(ID_TYPE collection_id, ID_TYPE partition_id, const MappingT& mappings = {}, SIZE_TYPE size = 0,
                     ID_TYPE id = 0, LSN_TYPE lsn = 0, State status = PENDING,
-                    TS_TYPE created_on = GetMicroSecTimeStamp(),
-                    TS_TYPE UpdatedOnField = GetMicroSecTimeStamp());
+                    TS_TYPE created_on = GetMicroSecTimeStamp(), TS_TYPE UpdatedOnField = GetMicroSecTimeStamp());
 
     std::string
     ToString() const override;
@@ -475,8 +473,7 @@ class SegmentCommit : public BaseResource,
 
     SegmentCommit(ID_TYPE schema_id, ID_TYPE partition_id, ID_TYPE segment_id, const MappingT& mappings = {},
                   SIZE_TYPE size = 0, ID_TYPE id = 0, LSN_TYPE lsn = 0, State status = PENDING,
-                  TS_TYPE created_on = GetMicroSecTimeStamp(),
-                  TS_TYPE UpdatedOnField = GetMicroSecTimeStamp());
+                  TS_TYPE created_on = GetMicroSecTimeStamp(), TS_TYPE UpdatedOnField = GetMicroSecTimeStamp());
 
     std::string
     ToString() const override;
@@ -506,8 +503,7 @@ class SegmentFile : public BaseResource,
 
     SegmentFile(ID_TYPE collection_id, ID_TYPE partition_id, ID_TYPE segment_id, ID_TYPE field_element_id,
                 SIZE_TYPE size = 0, ID_TYPE id = 0, LSN_TYPE lsn = 0, State status = PENDING,
-                TS_TYPE created_on = GetMicroSecTimeStamp(),
-                TS_TYPE UpdatedOnField = GetMicroSecTimeStamp());
+                TS_TYPE created_on = GetMicroSecTimeStamp(), TS_TYPE UpdatedOnField = GetMicroSecTimeStamp());
 };
 
 using SegmentFilePtr = SegmentFile::Ptr;

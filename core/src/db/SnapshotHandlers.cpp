@@ -62,8 +62,7 @@ LoadVectorFieldHandler::Handle(const snapshot::FieldPtr& field) {
     return status;
 }
 
-SegmentsToSearchCollector::SegmentsToSearchCollector(snapshot::ScopedSnapshotT ss,
-        meta::FilesHolder& holder)
+SegmentsToSearchCollector::SegmentsToSearchCollector(snapshot::ScopedSnapshotT ss, meta::FilesHolder& holder)
     : BaseT(ss), holder_(holder) {
 }
 

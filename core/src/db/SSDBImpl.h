@@ -12,13 +12,17 @@
 #pragma once
 
 #include <atomic>
+#include <map>
+#include <memory>
+#include <string>
+#include <vector>
 
 #include "db/Options.h"
-#include "utils/Status.h"
 #include "db/SnapshotHandlers.h"
 #include "db/snapshot/Context.h"
 #include "db/snapshot/ResourceTypes.h"
 #include "db/snapshot/Resources.h"
+#include "utils/Status.h"
 #include "wal/WalManager.h"
 
 namespace milvus {
@@ -35,9 +39,8 @@ class SSDBImpl {
     DropCollection(const std::string& name);
 
     Status
-    DescribeCollection(
-        const std::string& collection_name, snapshot::CollectionPtr& collection,
-        std::map<snapshot::FieldPtr, std::vector<snapshot::FieldElementPtr>>& fields_schema);
+    DescribeCollection(const std::string& collection_name, snapshot::CollectionPtr& collection,
+                       std::map<snapshot::FieldPtr, std::vector<snapshot::FieldElementPtr>>& fields_schema);
 
     Status
     HasCollection(const std::string& collection_name, bool& has_or_not);
@@ -47,7 +50,7 @@ class SSDBImpl {
 
     Status
     PreloadCollection(const std::shared_ptr<server::Context>& context, const std::string& collection_name,
-                bool force = false);
+                      bool force = false);
 
     Status
     CreatePartition(const std::string& collection_name, const std::string& partition_name);

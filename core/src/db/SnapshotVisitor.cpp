@@ -10,15 +10,14 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
 #include "db/SnapshotVisitor.h"
-#include "db/snapshot/Snapshots.h"
-#include "db/meta/MetaTypes.h"
 #include "db/SnapshotHandlers.h"
+#include "db/meta/MetaTypes.h"
+#include "db/snapshot/Snapshots.h"
 
 namespace milvus {
 namespace engine {
 
-SnapshotVisitor::SnapshotVisitor(snapshot::ScopedSnapshotT ss)
-    : ss_(ss) {
+SnapshotVisitor::SnapshotVisitor(snapshot::ScopedSnapshotT ss) : ss_(ss) {
 }
 
 SnapshotVisitor::SnapshotVisitor(const std::string& collection_name) {

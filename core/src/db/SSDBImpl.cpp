@@ -14,6 +14,9 @@
 #include "db/snapshot/Snapshots.h"
 #include "wal/WalDefinations.h"
 
+#include <limits>
+#include <utility>
+
 namespace milvus {
 namespace engine {
 
@@ -21,9 +24,9 @@ namespace {
 static const Status SHUTDOWN_ERROR = Status(DB_ERROR, "Milvus server is shutdown!");
 }  // namespace
 
-#define CHECK_INITIALIZED \
+#define CHECK_INITIALIZED                                \
     if (!initialized_.load(std::memory_order_acquire)) { \
-        return SHUTDOWN_ERROR;   \
+        return SHUTDOWN_ERROR;                           \
     }
 
 SSDBImpl::SSDBImpl(const DBOptions& options) : options_(options), initialized_(false) {
@@ -87,7 +90,7 @@ SSDBImpl::CreateCollection(const snapshot::CreateCollectionContext& context) {
 
 Status
 SSDBImpl::DescribeCollection(const std::string& collection_name, snapshot::CollectionPtr& collection,
-                                 std::map<snapshot::FieldPtr, std::vector<snapshot::FieldElementPtr>>& fields_schema) {
+                             std::map<snapshot::FieldPtr, std::vector<snapshot::FieldElementPtr>>& fields_schema) {
     CHECK_INITIALIZED;
 
     snapshot::ScopedSnapshotT ss;
@@ -218,7 +221,7 @@ SSDBImpl::ShowPartitions(const std::string& collection_name, std::vector<std::st
 
 Status
 SSDBImpl::PreloadCollection(const std::shared_ptr<server::Context>& context, const std::string& collection_name,
-                                bool force) {
+                            bool force) {
     CHECK_INITIALIZED;
 
     snapshot::ScopedSnapshotT ss;

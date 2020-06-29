@@ -78,7 +78,7 @@ int RandomInt(int start, int end) {
 struct PartitionCollector : public IteratePartitionHandler {
     using ResourceT = Partition;
     using BaseT = IteratePartitionHandler;
-    PartitionCollector(ScopedSnapshotT ss) : BaseT(ss) {}
+    explicit PartitionCollector(ScopedSnapshotT ss) : BaseT(ss) {}
 
     milvus::Status
     PreIterate() override {

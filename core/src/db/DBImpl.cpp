@@ -78,7 +78,6 @@ static const Status SHUTDOWN_ERROR = Status(DB_ERROR, "Milvus server is shutdown
 
 }  // namespace
 
-
 DBImpl::DBImpl(const DBOptions& options)
     : options_(options), initialized_(false), merge_thread_pool_(1, 1), index_thread_pool_(1, 1) {
     meta_ptr_ = MetaFactory::Build(options.meta_, options.mode_);

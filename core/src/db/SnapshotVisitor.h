@@ -11,8 +11,8 @@
 
 #pragma once
 
-#include "db/snapshot/Snapshot.h"
 #include "db/meta/FilesHolder.h"
+#include "db/snapshot/Snapshot.h"
 
 #include <memory>
 #include <string>

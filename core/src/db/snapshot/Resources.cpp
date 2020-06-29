@@ -128,8 +128,7 @@ SegmentCommit::ToString() const {
 }
 
 SegmentFile::SegmentFile(ID_TYPE collection_id, ID_TYPE partition_id, ID_TYPE segment_id, ID_TYPE field_element_id,
-                         SIZE_TYPE size, ID_TYPE id, LSN_TYPE lsn, State state,
-                         TS_TYPE created_on, TS_TYPE updated_on)
+                         SIZE_TYPE size, ID_TYPE id, LSN_TYPE lsn, State state, TS_TYPE created_on, TS_TYPE updated_on)
     : CollectionIdField(collection_id),
       PartitionIdField(partition_id),
       SegmentIdField(segment_id),

@@ -40,7 +40,6 @@ using ScopedResourcesT =
                Field::ScopedMapT, FieldElement::ScopedMapT, PartitionCommit::ScopedMapT, Partition::ScopedMapT,
                SegmentCommit::ScopedMapT, Segment::ScopedMapT, SegmentFile::ScopedMapT>;
 
-
 class Snapshot : public ReferenceProxy {
  public:
     using Ptr = std::shared_ptr<Snapshot>;
@@ -336,7 +335,8 @@ struct IterateHandler : public std::enable_shared_from_this<IterateHandler<T>> {
     using ThisT = IterateHandler<ResourceT>;
     using Ptr = std::shared_ptr<ThisT>;
 
-    IterateHandler(ScopedSnapshotT ss) : ss_(ss) {}
+    explicit IterateHandler(ScopedSnapshotT ss) : ss_(ss) {
+    }
 
     virtual Status
     PreIterate() {
