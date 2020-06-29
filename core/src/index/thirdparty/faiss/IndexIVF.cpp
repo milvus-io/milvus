@@ -278,6 +278,13 @@ void IndexIVF::to_readonly() {
     this->replace_invlists(readonly_lists, true);
 }
 
+void IndexIVF::to_readonly_without_codes() {
+    if (is_readonly()) return;
+    auto readonly_lists = this->invlists->to_readonly_without_codes();
+    if (!readonly_lists) return;
+    this->replace_invlists(readonly_lists, true);
+}
+
 bool IndexIVF::is_readonly() const {
     return this->invlists->is_readonly();
 }

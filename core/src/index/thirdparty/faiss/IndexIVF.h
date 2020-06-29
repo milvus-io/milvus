@@ -309,6 +309,7 @@ struct IndexIVF: Index, Level1Quantizer {
                                  idx_t a1, idx_t a2) const;
 
     virtual void to_readonly();
+    virtual void to_readonly_without_codes();
     virtual bool is_readonly() const;
 
     virtual void backup_quantizer();

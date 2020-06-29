@@ -20,6 +20,7 @@
 
 #include "knowhere/common/Exception.h"
 #include "knowhere/index/non_materialized_index/gpu/IndexGPUIVF_NM.h"
+#include "knowhere/index/non_materialized_index/IndexIVF_NM.h"
 #include "knowhere/index/vector_index/adapter/VectorAdapter.h"
 #include "knowhere/index/vector_index/helpers/Cloner.h"
 #include "knowhere/index/vector_index/helpers/FaissIO.h"
@@ -66,24 +67,22 @@ GPUIVF_NM::Add(const DatasetPtr& dataset_ptr, const Config& config) {
 
 void
 GPUIVF_NM::Load(const BinarySet& binary_set) {
+    /*
     std::lock_guard<std::mutex> lk(mutex_);
     auto binary = binary_set.GetByName("IVF");
-
     MemoryIOReader reader;
     reader.total = binary->size;
     reader.data_ = binary->data.get();
-
     faiss::Index* index = faiss::read_index_nm(&reader);
     index_.reset(index);
-
     // Construct arranged data from original data
-    auto binary = binary_set.GetByName("RAWDATA");
-    const float* original_data = (const float*) binary->data.get();
+    auto binary_data = binary_set.GetByName(RAW_DATA);
+    const float* original_data = (const float*) binary_data->data.get();
     auto ivf_index = dynamic_cast<faiss::IndexIVF*>(index_.get());
     auto invlists = ivf_index->invlists;
     auto ails = dynamic_cast<faiss::ArrayInvertedLists*>(invlists);
     auto d = ivf_index->d;
-    auto nb = (size_t) (binary->size / ails->code_size);
+    auto nb = (size_t) (binary_data->size / ails->code_size);
     arranged_data = new uint8_t[d * sizeof(float) * nb];
     size_t curr_index = 0;
     for (int i = 0; i < ails->nlist; i++) {
@@ -94,7 +93,6 @@ GPUIVF_NM::Load(const BinarySet& binary_set) {
         }
         curr_index += list_size;
     }
-
     if (auto temp_res = FaissGpuResourceMgr::GetInstance().GetRes(gpu_id_)) {
         ResScope rs(temp_res, gpu_id_, false);
         auto device_index =
@@ -104,8 +102,10 @@ GPUIVF_NM::Load(const BinarySet& binary_set) {
     } else {
         KNOWHERE_THROW_MSG("Load error, can't get gpu resource");
     }
-
     delete index;
+    */
+
+   // not supported
 }
 
 VecIndexPtr
@@ -118,9 +118,9 @@ GPUIVF_NM::CopyGpuToCpu(const Config& config) {
 
         std::shared_ptr<faiss::Index> new_index;
         new_index.reset(host_index);
-        return std::make_shared<IVF>(new_index);
+        return std::make_shared<IVF_NM>(new_index);
     } else {
-        return std::make_shared<IVF>(index_);
+        return std::make_shared<IVF_NM>(index_);
     }
 }
 
@@ -141,8 +141,7 @@ GPUIVF_NM::SerializeImpl(const IndexType& type) {
         MemoryIOWriter writer;
         {
             faiss::Index* index = index_.get();
-            faiss::Index* host_index = faiss::gpu::index_gpu_to_cpu(index);
-
+            faiss::Index* host_index = faiss::gpu::index_gpu_to_cpu_without_codes(index);
             faiss::write_index_nm(host_index, &writer);
             delete host_index;
         }

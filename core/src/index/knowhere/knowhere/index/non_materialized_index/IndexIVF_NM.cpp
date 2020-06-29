@@ -66,13 +66,15 @@ IVF_NM::Load(const BinarySet& binary_set) {
     const float* original_data = (const float*) binary->data.get();
     auto ivf_index = dynamic_cast<faiss::IndexIVF*>(index_.get());
     auto invlists = ivf_index->invlists;
+
+#ifdef USE_CPU
     auto ails = dynamic_cast<faiss::ArrayInvertedLists*>(invlists);
     auto d = ivf_index->d;
-    auto nb = (size_t) (binary->size / ails->code_size);
+    auto nb = (size_t) (binary->size / invlists->code_size);
     arranged_data = new uint8_t[d * sizeof(float) * nb];
-    prefix_sum.resize(ails->nlist);
+    prefix_sum.resize(invlists->nlist);
     size_t curr_index = 0;
-    for (int i = 0; i < ails->nlist; i++) {
+    for (int i = 0; i < invlists->nlist; i++) {
         auto list_size = ails->ids[i].size();
         for (int j = 0; j < list_size; j++) {
             memcpy(arranged_data + d * sizeof(float) * (curr_index + j), original_data + d * ails->ids[i][j],
@@ -81,6 +83,26 @@ IVF_NM::Load(const BinarySet& binary_set) {
         prefix_sum[i] = curr_index;
         curr_index += list_size;
     }
+#else
+    auto rol = dynamic_cast<faiss::ReadOnlyArrayInvertedLists*>(invlists);
+    auto d = ivf_index->d;
+    auto nb = (size_t) (binary->size / invlists->code_size);
+    auto lengths = rol->readonly_length;
+    // auto rol_data = (const float *) rol->pin_readonly_codes->data;
+    auto rol_ids = (const long *) rol->pin_readonly_ids->data;
+    arranged_data = new uint8_t[d * sizeof(float) * nb];
+    prefix_sum.resize(invlists->nlist);
+    size_t curr_index = 0;
+    for (int i = 0; i < invlists->nlist; i++) {
+        auto list_size = lengths[i];
+        for (int j = 0; j < list_size; j++) {
+            memcpy(arranged_data + d * sizeof(float) * (curr_index + j), original_data + d * rol_ids[curr_index + j],
+                   d * sizeof(float));
+        }
+        prefix_sum[i] = curr_index;
+        curr_index += list_size;
+    }
+#endif
 }
 
 void
@@ -173,19 +195,6 @@ IVF_NM::QueryById(const DatasetPtr& dataset_ptr, const Config& config) {
         //        auto blacklist = dataset_ptr->Get<faiss::ConcurrentBitsetPtr>("bitset");
         auto index_ivf = std::static_pointer_cast<faiss::IndexIVF>(index_);
         index_ivf->search_by_id(rows, p_data, k, p_dist, p_id, bitset_);
-
-        //    std::stringstream ss_res_id, ss_res_dist;
-        //    for (int i = 0; i < 10; ++i) {
-        //        printf("%llu", res_ids[i]);
-        //        printf("\n");
-        //        printf("%.6f", res_dis[i]);
-        //        printf("\n");
-        //        ss_res_id << res_ids[i] << " ";
-        //        ss_res_dist << res_dis[i] << " ";
-        //    }
-        //    std::cout << std::endl << "after search: " << std::endl;
-        //    std::cout << ss_res_id.str() << std::endl;
-        //    std::cout << ss_res_dist.str() << std::endl << std::endl;
 
         auto ret_ds = std::make_shared<Dataset>();
         ret_ds->Set(meta::IDS, p_id);
@@ -326,7 +335,7 @@ IVF_NM::SealImpl() {
     faiss::Index* index = index_.get();
     auto idx = dynamic_cast<faiss::IndexIVF*>(index);
     if (idx != nullptr) {
-        idx->to_readonly();
+        idx->to_readonly_without_codes();
     }
 #endif
 }

@@ -129,6 +129,8 @@ struct InvertedLists {
 
     virtual InvertedLists* to_readonly();
 
+    virtual InvertedLists* to_readonly_without_codes();
+
     virtual bool is_readonly() const;
 
     /// move all entries from oivf (empty on output)
@@ -245,6 +247,8 @@ struct ArrayInvertedLists: InvertedLists {
 
     InvertedLists* to_readonly() override;
 
+    InvertedLists* to_readonly_without_codes() override;
+
     virtual ~ArrayInvertedLists ();
 };
 
@@ -263,6 +267,7 @@ struct ReadOnlyArrayInvertedLists: InvertedLists {
 
     ReadOnlyArrayInvertedLists(size_t nlist, size_t code_size, const std::vector<size_t>& list_length);
     explicit ReadOnlyArrayInvertedLists(const ArrayInvertedLists& other);
+    explicit ReadOnlyArrayInvertedLists(const ArrayInvertedLists& other, bool offset);
 
     // Use default copy construct, just copy pointer, DON'T COPY pin_readonly_codes AND pin_readonly_ids
 //    explicit ReadOnlyArrayInvertedLists(const ReadOnlyArrayInvertedLists &);

@@ -358,24 +358,20 @@ InvertedLists *read_InvertedLists_nm (IOReader *f, int io_flags) {
         READ1 (ails->nlist);
         READ1 (ails->code_size);
         ails->ids.resize (ails->nlist);
-        ails->codes.resize (ails->nlist);
         std::vector<size_t> sizes (ails->nlist);
         read_ArrayInvertedLists_sizes (f, sizes);
         for (size_t i = 0; i < ails->nlist; i++) {
             ails->ids[i].resize (sizes[i]);
-            ails->codes[i].resize (sizes[i] * ails->code_size);
         }
         for (size_t i = 0; i < ails->nlist; i++) {
             size_t n = ails->ids[i].size();
             if (n > 0) {
-                // READANDCHECK (ails->codes[i].data(), n * ails->code_size);
                 READANDCHECK (ails->ids[i].data(), n);
             }
         }
         return ails;
     } else if (h == fourcc ("ilar") && (io_flags & IO_FLAG_MMAP)) {
         // then we load it as an OnDiskInvertedLists
-
         FileIOReader *reader = dynamic_cast<FileIOReader*>(f);
         FAISS_THROW_IF_NOT_MSG(reader, "mmap only supported for File objects");
         FILE *fdesc = reader->f;

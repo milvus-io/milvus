@@ -127,6 +127,10 @@ InvertedLists* InvertedLists::to_readonly() {
     return nullptr;
 }
 
+InvertedLists* InvertedLists::to_readonly_without_codes() {
+    return nullptr;
+}
+
 bool InvertedLists::is_readonly() const {
     return false;
 }
@@ -271,6 +275,11 @@ InvertedLists* ArrayInvertedLists::to_readonly() {
     return readonly;
 }
 
+InvertedLists* ArrayInvertedLists::to_readonly_without_codes() {
+    ReadOnlyArrayInvertedLists* readonly = new ReadOnlyArrayInvertedLists(*this, true);
+    return readonly;
+}
+
 ArrayInvertedLists::~ArrayInvertedLists ()
 {}
 
@@ -346,26 +355,43 @@ ReadOnlyArrayInvertedLists::ReadOnlyArrayInvertedLists(const ArrayInvertedLists&
     valid = true;
 }
 
-//ReadOnlyArrayInvertedLists::ReadOnlyArrayInvertedLists(const ReadOnlyArrayInvertedLists &other)
-//    : InvertedLists (other.nlist, other.code_size) {
-//    readonly_length = other.readonly_length;
-//    readonly_offset = other.readonly_offset;
-//    pin_readonly_codes = std::make_shared<PageLockMemory>(*other.pin_readonly_codes);
-//    pin_readonly_ids = std::make_shared<PageLockMemory>(*other.pin_readonly_ids);
-//    valid = true;
-//}
+ReadOnlyArrayInvertedLists::ReadOnlyArrayInvertedLists(const ArrayInvertedLists& other, bool offset_only)
+        : InvertedLists (other.nlist, other.code_size) {
+    readonly_length.resize(nlist);
+    readonly_offset.resize(nlist);
+    size_t offset = 0;
+    for (auto i = 0; i < other.ids.size(); i++) {
+        auto& list_ids = other.ids[i];
+        readonly_length[i] = list_ids.size();
+        readonly_offset[i] = offset;
+        offset += list_ids.size();
+    }
 
-//ReadOnlyArrayInvertedLists::ReadOnlyArrayInvertedLists(ReadOnlyArrayInvertedLists &&other)
-//    : InvertedLists (other.nlist, other.code_size) {
-//    readonly_length = std::move(other.readonly_length);
-//    readonly_offset = std::move(other.readonly_offset);
-//    pin_readonly_codes = other.pin_readonly_codes;
-//    pin_readonly_ids = other.pin_readonly_ids;
-//
-//    other.pin_readonly_codes = nullptr;
-//    other.pin_readonly_ids = nullptr;
-//    valid = true;
-//}
+#ifdef USE_CPU
+    for (auto i = 0; i < other.ids.size(); i++) {
+        auto& list_ids = other.ids[i];
+        readonly_ids.insert(readonly_ids.end(), list_ids.begin(), list_ids.end());
+    }
+#else
+    size_t ids_size = offset * sizeof(idx_t);
+    size_t codes_size = offset * (this->code_size) * sizeof(uint8_t);
+    pin_readonly_codes = std::make_shared<PageLockMemory>(codes_size);
+    pin_readonly_ids = std::make_shared<PageLockMemory>(ids_size);
+
+    offset = 0;
+    for (auto i = 0; i < other.ids.size(); i++) {
+        auto& list_ids = other.ids[i];
+
+        uint8_t* ids_ptr = (uint8_t*)(pin_readonly_ids->data) + offset * sizeof(idx_t);
+        memcpy(ids_ptr, list_ids.data(), list_ids.size() * sizeof(idx_t));
+
+        offset += list_ids.size();
+    }
+#endif
+
+    valid = true;
+}
+
 
 ReadOnlyArrayInvertedLists::~ReadOnlyArrayInvertedLists() {
 }
