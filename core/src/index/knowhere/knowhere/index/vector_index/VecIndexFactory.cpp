@@ -23,6 +23,7 @@
 #include "knowhere/index/vector_index/IndexIVFSQ.h"
 #include "knowhere/index/vector_index/IndexNSG.h"
 #include "knowhere/index/non_materialized_index/IndexIVF_NM.h"
+#include "knowhere/index/non_materialized_index/IndexHNSW_NM.h"
 #ifdef MILVUS_SUPPORT_SPTAG
 #include "knowhere/index/vector_index/IndexSPTAG.h"
 #endif
@@ -84,7 +85,7 @@ VecIndexFactory::CreateVecIndex(const IndexType& type, const IndexMode mode) {
         return std::make_shared<knowhere::CPUSPTAGRNG>("BKT");
 #endif
     } else if (type == IndexEnum::INDEX_HNSW) {
-        return std::make_shared<knowhere::IndexHNSW>();
+        return std::make_shared<knowhere::IndexHNSW_NM>();
     } else if (type == IndexEnum::INDEX_ANNOY) {
         return std::make_shared<knowhere::IndexAnnoy>();
     } else {
