@@ -66,6 +66,72 @@ using TQueue = milvus::BlockingQueue<std::tuple<ID_TYPE, ID_TYPE>>;
 using SoftDeleteCollectionOperation = milvus::engine::snapshot::SoftDeleteOperation<Collection>;
 using ParamsField = milvus::engine::snapshot::ParamsField;
 using IteratePartitionHandler = milvus::engine::snapshot::IterateHandler<Partition>;
+using SSDBImpl = milvus::engine::SSDBImpl;
 
-TEST_F(SSDBTest, CreateCollection) {
+milvus::Status
+CreateCollection(std::shared_ptr<SSDBImpl> db, const std::string& collection_name, const LSN_TYPE& lsn) {
+    CreateCollectionContext context;
+    context.lsn = lsn;
+    auto collection_schema = std::make_shared<Collection>(collection_name);
+    context.collection = collection_schema;
+    auto vector_field = std::make_shared<Field>("vector", 0,
+            milvus::engine::snapshot::FieldType::VECTOR);
+    auto vector_field_element = std::make_shared<FieldElement>(0, 0, "ivfsq8",
+            milvus::engine::snapshot::FieldElementType::IVFSQ8);
+    auto int_field = std::make_shared<Field>("int", 0,
+            milvus::engine::snapshot::FieldType::INT32);
+    context.fields_schema[vector_field] = {vector_field_element};
+    context.fields_schema[int_field] = {};
+
+    return db->CreateCollection(context);
+}
+
+TEST_F(SSDBTest, CollectionTest) {
+    LSN_TYPE lsn = 0;
+    auto next_lsn = [&]() -> decltype(lsn) {
+        return ++lsn;
+    };
+    std::string c1 = "c1";
+    auto status = CreateCollection(db_, c1, next_lsn());
+    ASSERT_TRUE(status.ok());
+
+    ScopedSnapshotT ss;
+    status = Snapshots::GetInstance().GetSnapshot(ss, c1);
+    ASSERT_TRUE(status.ok());
+    ASSERT_TRUE(ss);
+    ASSERT_EQ(ss->GetName(), c1);
+
+    bool has;
+    status = db_->HasCollection(c1, has);
+    ASSERT_TRUE(has);
+    ASSERT_TRUE(status.ok());
+
+    std::vector<std::string> names;
+    status = db_->AllCollections(names);
+    ASSERT_TRUE(status.ok());
+    ASSERT_EQ(names.size(), 1);
+    ASSERT_EQ(names[0], c1);
+
+    std::string c1_1 = "c1";
+    status = CreateCollection(db_, c1_1, next_lsn());
+    ASSERT_FALSE(status.ok());
+
+    std::string c2 = "c2";
+    status = CreateCollection(db_, c2, next_lsn());
+    ASSERT_TRUE(status.ok());
+
+    status = db_->AllCollections(names);
+    ASSERT_TRUE(status.ok());
+    ASSERT_EQ(names.size(), 2);
+
+    status = db_->DropCollection(c1);
+    ASSERT_TRUE(status.ok());
+
+    status = db_->AllCollections(names);
+    ASSERT_TRUE(status.ok());
+    ASSERT_EQ(names.size(), 1);
+    ASSERT_EQ(names[0], c2);
+
+    status = db_->DropCollection(c1);
+    ASSERT_FALSE(status.ok());
 }

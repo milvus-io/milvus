@@ -13,6 +13,9 @@
 
 #include <gtest/gtest.h>
 #include <random>
+#include <memory>
+
+#include "db/SSDBImpl.h"
 
 inline int
 RandomInt(int start, int end) {
@@ -43,6 +46,8 @@ class SnapshotTest : public BaseTest {
 
 class SSDBTest : public BaseTest {
  protected:
+    std::shared_ptr<milvus::engine::SSDBImpl> db_;
+
     void
     SetUp() override;
     void
