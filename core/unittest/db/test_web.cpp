@@ -36,10 +36,6 @@
 #include "src/version.h"
 #include "utils/CommonUtil.h"
 #include "utils/StringHelpFunctions.h"
-#include "db/snapshot/Snapshots.h"
-#include "db/snapshot/OperationExecutor.h"
-#include "db/snapshot/EventExecutor.h"
-#include "db/snapshot/ResourceHolders.h"
 
 
 static const char* COLLECTION_NAME = "test_milvus_web_collection";
@@ -325,24 +321,6 @@ class WebControllerTest : public ::testing::Test {
         fs.flush();
         fs.close();
 
-        milvus::engine::snapshot::OperationExecutor::GetInstance().Start();
-        milvus::engine::snapshot::EventExecutor::GetInstance().Start();
-        milvus::engine::snapshot::CollectionCommitsHolder::GetInstance().Reset();
-        milvus::engine::snapshot::CollectionsHolder::GetInstance().Reset();
-        milvus::engine::snapshot::SchemaCommitsHolder::GetInstance().Reset();
-        milvus::engine::snapshot::FieldCommitsHolder::GetInstance().Reset();
-        milvus::engine::snapshot::FieldsHolder::GetInstance().Reset();
-        milvus::engine::snapshot::FieldElementsHolder::GetInstance().Reset();
-        milvus::engine::snapshot::PartitionsHolder::GetInstance().Reset();
-        milvus::engine::snapshot::PartitionCommitsHolder::GetInstance().Reset();
-        milvus::engine::snapshot::SegmentsHolder::GetInstance().Reset();
-        milvus::engine::snapshot::SegmentCommitsHolder::GetInstance().Reset();
-        milvus::engine::snapshot::SegmentFilesHolder::GetInstance().Reset();
-
-        milvus::engine::snapshot::Store::GetInstance().DoReset();
-        milvus::engine::snapshot::Snapshots::GetInstance().Reset();
-        milvus::engine::snapshot::Snapshots::GetInstance().Init();
-
         milvus::server::Config& config = milvus::server::Config::GetInstance();
         config.LoadConfigFile(config_path);
 
@@ -384,10 +362,6 @@ class WebControllerTest : public ::testing::Test {
         milvus::scheduler::JobMgrInst::GetInstance()->Stop();
         milvus::scheduler::ResMgrInst::GetInstance()->Stop();
         milvus::scheduler::SchedInst::GetInstance()->Stop();
-
-        std::this_thread::sleep_for(std::chrono::milliseconds(20));
-        milvus::engine::snapshot::EventExecutor::GetInstance().Stop();
-        milvus::engine::snapshot::OperationExecutor::GetInstance().Stop();
 
         boost::filesystem::remove_all(CONTROLLER_TEST_CONFIG_DIR);
     }

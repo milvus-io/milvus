@@ -20,9 +20,6 @@
 #include "Options.h"
 #include "Types.h"
 #include "context/HybridSearchContext.h"
-#include "db/snapshot/Context.h"
-#include "db/snapshot/Resources.h"
-#include "db/snapshot/WrappedTypes.h"
 #include "meta/Meta.h"
 #include "query/GeneralQuery.h"
 #include "server/context/Context.h"
@@ -52,32 +49,21 @@ class DB {
 
     virtual Status
     CreateCollection(meta::CollectionSchema& table_schema_) = 0;
-    virtual Status
-    SSTODOCreateCollection(const snapshot::CreateCollectionContext& context) = 0;
 
     virtual Status
     DropCollection(const std::string& collection_id) = 0;
-    virtual Status
-    SSTODODropCollection(const std::string& name) = 0;
 
     virtual Status
     DescribeCollection(meta::CollectionSchema& table_schema_) = 0;
-    virtual Status
-    SSTODODescribeCollection(const std::string& collection_name, snapshot::CollectionPtr& collection,
-                             std::map<snapshot::FieldPtr, std::vector<snapshot::FieldElementPtr>>& fields_schema) = 0;
 
     virtual Status
     HasCollection(const std::string& collection_id, bool& has_or_not) = 0;
-    virtual Status
-    SSTODOHasCollection(const std::string& collection_name, bool& has_or_not) = 0;
 
     virtual Status
     HasNativeCollection(const std::string& collection_id, bool& has_or_not) = 0;
 
     virtual Status
     AllCollections(std::vector<std::string>& names) = 0;
-    virtual Status
-    SSTODOAllCollections(std::vector<std::string>& names) = 0;
 
     virtual Status
     GetCollectionInfo(const std::string& collection_id, std::string& collection_info) = 0;
@@ -88,9 +74,6 @@ class DB {
     virtual Status
     PreloadCollection(const std::shared_ptr<server::Context>& context, const std::string& collection_id,
                       bool force = false) = 0;
-    virtual Status
-    SSTODOPreloadCollection(const std::shared_ptr<server::Context>& context, const std::string& collection_name,
-                            bool force = false) = 0;
 
     virtual Status
     ReLoadSegmentsDeletedDocs(const std::string& collection_id, const std::vector<int64_t>& segment_ids) = 0;
@@ -101,8 +84,6 @@ class DB {
     virtual Status
     CreatePartition(const std::string& collection_id, const std::string& partition_name,
                     const std::string& partition_tag) = 0;
-    virtual Status
-    SSTODOCreatePartition(const std::string& collection_name, const std::string& partition_name) = 0;
 
     virtual Status
     HasPartition(const std::string& collection_id, const std::string& tag, bool& has_or_not) = 0;
@@ -112,13 +93,9 @@ class DB {
 
     virtual Status
     DropPartitionByTag(const std::string& collection_id, const std::string& partition_tag) = 0;
-    virtual Status
-    SSTODODropPartition(const std::string& collection_name, const std::string& partition_name) = 0;
 
     virtual Status
     ShowPartitions(const std::string& collection_id, std::vector<meta::CollectionSchema>& partition_schema_array) = 0;
-    virtual Status
-    SSTODOShowPartitions(const std::string& collection_name, std::vector<std::string>& partition_names) = 0;
 
     virtual Status
     InsertVectors(const std::string& collection_id, const std::string& partition_tag, VectorsData& vectors) = 0;

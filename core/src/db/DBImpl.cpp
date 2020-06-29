@@ -35,8 +35,6 @@
 #include "config/Utils.h"
 #include "db/IDGenerator.h"
 #include "db/merge/MergeManagerFactory.h"
-#include "db/snapshot/CompoundOperations.h"
-#include "db/snapshot/Snapshots.h"
 #include "engine/EngineFactory.h"
 #include "index/knowhere/knowhere/index/vector_index/helpers/BuilderSuspend.h"
 #include "index/thirdparty/faiss/utils/distances.h"
@@ -80,10 +78,6 @@ static const Status SHUTDOWN_ERROR = Status(DB_ERROR, "Milvus server is shutdown
 
 }  // namespace
 
-#define CHECK_INITIALIZED \
-    if (!initialized_.load(std::memory_order_acquire)) { \
-        return SHUTDOWN_ERROR;   \
-    }
 
 DBImpl::DBImpl(const DBOptions& options)
     : options_(options), initialized_(false), merge_thread_pool_(1, 1), index_thread_pool_(1, 1) {
@@ -3328,170 +3322,6 @@ DBImpl::ResumeIfLast() {
         LOG_ENGINE_TRACE_ << "live_search_num_: " << live_search_num_;
         knowhere::BuildResume();
     }
-}
-
-Status
-DBImpl::SSTODOCreateCollection(const snapshot::CreateCollectionContext& context) {
-    CHECK_INITIALIZED;
-
-    auto ctx = context;
-
-    if (options_.wal_enable_) {
-        ctx.lsn = wal_mgr_->CreateCollection(context.collection->GetName());
-    }
-
-    auto op = std::make_shared<snapshot::CreateCollectionOperation>(ctx);
-    auto status = op->Push();
-
-    return status;
-}
-
-Status
-DBImpl::SSTODODescribeCollection(const std::string& collection_name, snapshot::CollectionPtr& collection,
-                                 std::map<snapshot::FieldPtr, std::vector<snapshot::FieldElementPtr>>& fields_schema) {
-    CHECK_INITIALIZED;
-
-    snapshot::ScopedSnapshotT ss;
-    auto status = snapshot::Snapshots::GetInstance().GetSnapshot(ss, collection_name);
-    if (!status.ok()) {
-        return status;
-    }
-
-    collection = ss->GetCollection();
-
-    auto& fields = ss->GetResources<snapshot::Field>();
-    for (auto& kv : fields) {
-        fields_schema[kv.second.Get()] = ss->GetFieldElementsByField(kv.second->GetName());
-    }
-    return status;
-}
-
-Status
-DBImpl::SSTODODropCollection(const std::string& name) {
-    CHECK_INITIALIZED;
-
-    // dates partly delete files of the collection but currently we don't support
-    LOG_ENGINE_DEBUG_ << "Prepare to delete collection " << name;
-
-    snapshot::ScopedSnapshotT ss;
-    auto& snapshots = snapshot::Snapshots::GetInstance();
-    auto status = snapshots.GetSnapshot(ss, name);
-    if (!status.ok()) {
-        return status;
-    }
-
-    if (options_.wal_enable_) {
-        // SS TODO
-        /* wal_mgr_->DropCollection(ss->GetCollectionId()); */
-    }
-
-    status = snapshots.DropCollection(ss->GetCollectionId(), std::numeric_limits<snapshot::LSN_TYPE>::max());
-    return status;
-}
-
-Status
-DBImpl::SSTODOHasCollection(const std::string& collection_name, bool& has_or_not) {
-    CHECK_INITIALIZED;
-
-    snapshot::ScopedSnapshotT ss;
-    auto status = snapshot::Snapshots::GetInstance().GetSnapshot(ss, collection_name);
-    has_or_not = status.ok();
-
-    return status;
-}
-
-Status
-DBImpl::SSTODOAllCollections(std::vector<std::string>& names) {
-    CHECK_INITIALIZED;
-
-    names.clear();
-    return snapshot::Snapshots::GetInstance().GetCollectionNames(names);
-}
-
-Status
-DBImpl::SSTODOCreatePartition(const std::string& collection_name, const std::string& partition_name) {
-    CHECK_INITIALIZED;
-
-    uint64_t lsn = 0;
-    snapshot::ScopedSnapshotT ss;
-    auto status = snapshot::Snapshots::GetInstance().GetSnapshot(ss, collection_name);
-    if (!status.ok()) {
-        return status;
-    }
-
-    if (options_.wal_enable_) {
-        // SS TODO
-        /* lsn = wal_mgr_->CreatePartition(collection_id, partition_tag); */
-    } else {
-        lsn = ss->GetCollection()->GetLsn();
-    }
-
-    snapshot::OperationContext context;
-    context.lsn = lsn;
-    auto op = std::make_shared<snapshot::CreatePartitionOperation>(context, ss);
-
-    snapshot::PartitionContext p_ctx;
-    p_ctx.name = partition_name;
-    snapshot::PartitionPtr partition;
-    status = op->CommitNewPartition(p_ctx, partition);
-    if (!status.ok()) {
-        return status;
-    }
-
-    status = op->Push();
-    return status;
-}
-
-Status
-DBImpl::SSTODODropPartition(const std::string& collection_name, const std::string& partition_name) {
-    CHECK_INITIALIZED;
-
-    snapshot::ScopedSnapshotT ss;
-    auto status = snapshot::Snapshots::GetInstance().GetSnapshot(ss, collection_name);
-    if (!status.ok()) {
-        return status;
-    }
-
-    // SS TODO: Is below step needed? Or How to implement it?
-    /* mem_mgr_->EraseMemVector(partition_name); */
-
-    snapshot::PartitionContext context;
-    context.name = partition_name;
-    auto op = std::make_shared<snapshot::DropPartitionOperation>(context, ss);
-    status = op->Push();
-
-    return status;
-}
-
-Status
-DBImpl::SSTODOShowPartitions(const std::string& collection_name, std::vector<std::string>& partition_names) {
-    CHECK_INITIALIZED;
-
-    snapshot::ScopedSnapshotT ss;
-    auto status = snapshot::Snapshots::GetInstance().GetSnapshot(ss, collection_name);
-    if (!status.ok()) {
-        return status;
-    }
-
-    partition_names = std::move(ss->GetPartitionNames());
-    return status;
-}
-
-Status
-DBImpl::SSTODOPreloadCollection(const std::shared_ptr<server::Context>& context, const std::string& collection_name,
-                                bool force) {
-    CHECK_INITIALIZED;
-
-    snapshot::ScopedSnapshotT ss;
-    auto status = snapshot::Snapshots::GetInstance().GetSnapshot(ss, collection_name);
-    if (!status.ok()) {
-        return status;
-    }
-
-    auto handler = std::make_shared<LoadVectorFieldHandler>(context, ss);
-    handler->Iterate();
-
-    return handler->GetStatus();
 }
 
 }  // namespace engine
