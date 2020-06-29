@@ -12,8 +12,9 @@
 #-------------------------------------------------------------------------------
 
 set(test_files
+        ${CMAKE_CURRENT_SOURCE_DIR}/utils.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/test_snapshot.cpp
-        ${CMAKE_CURRENT_SOURCE_DIR}/utils.cpp)
+        ${CMAKE_CURRENT_SOURCE_DIR}/test_db.cpp)
 
 set(util_files
         ${MILVUS_ENGINE_SRC}/db/Utils.cpp)

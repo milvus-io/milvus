@@ -12,6 +12,15 @@
 #pragma once
 
 #include <gtest/gtest.h>
+#include <random>
+
+inline int
+RandomInt(int start, int end) {
+    std::random_device dev;
+    std::mt19937 rng(dev());
+    std::uniform_int_distribution<std::mt19937::result_type> dist(start, end);
+    return dist(rng);
+}
 
 class BaseTest : public ::testing::Test {
  protected:
@@ -25,6 +34,14 @@ class BaseTest : public ::testing::Test {
 };
 
 class SnapshotTest : public BaseTest {
+ protected:
+    void
+    SetUp() override;
+    void
+    TearDown() override;
+};
+
+class SSDBTest : public BaseTest {
  protected:
     void
     SetUp() override;

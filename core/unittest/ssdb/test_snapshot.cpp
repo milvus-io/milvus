@@ -13,7 +13,6 @@
 #include <fiu-local.h>
 #include <gtest/gtest.h>
 
-#include <random>
 #include <string>
 #include <set>
 #include <algorithm>
@@ -67,13 +66,6 @@ using TQueue = milvus::BlockingQueue<std::tuple<ID_TYPE, ID_TYPE>>;
 using SoftDeleteCollectionOperation = milvus::engine::snapshot::SoftDeleteOperation<Collection>;
 using ParamsField = milvus::engine::snapshot::ParamsField;
 using IteratePartitionHandler = milvus::engine::snapshot::IterateHandler<Partition>;
-
-int RandomInt(int start, int end) {
-    std::random_device dev;
-    std::mt19937 rng(dev());
-    std::uniform_int_distribution<std::mt19937::result_type> dist(start, end);
-    return dist(rng);
-}
 
 struct PartitionCollector : public IteratePartitionHandler {
     using ResourceT = Partition;
