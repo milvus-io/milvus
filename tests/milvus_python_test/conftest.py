@@ -120,8 +120,9 @@ def ip_collection(request, connect):
     fields = gen_default_fields()
     fields["fields"][-1]["params"]["metric_type"] = "IP"
     try:
-        milvus.create_collection(collection_name, fields)
+        connect.create_collection(collection_name, fields)
     except Exception as e:
+        logging.getLogger().info(str(e))
         pytest.exit(str(e))
     def teardown():
         collection_names = connect.list_collections()
@@ -139,7 +140,7 @@ def jac_collection(request, connect):
     fields = gen_default_fields()
     fields["fields"][-1] = {"field": "binary_vector", "type": DataType.BINARY_VECTOR, "dimension": dimension, "params": {"metric_type": "JACCARD"}}
     try:
-        milvus.create_collection(collection_name, fields)
+        connect.create_collection(collection_name, fields)
     except Exception as e:
         pytest.exit(str(e))
     def teardown():
@@ -158,7 +159,7 @@ def ham_collection(request, connect):
     fields = gen_default_fields()
     fields["fields"][-1] = {"field": "binary_vector", "type": DataType.BINARY_VECTOR, "dimension": dimension, "params": {"metric_type": "HAMMING"}}
     try:
-        milvus.create_collection(collection_name, fields)
+        connect.create_collection(collection_name, fields)
     except Exception as e:
         pytest.exit(str(e))
     def teardown():
@@ -177,7 +178,7 @@ def tanimoto_collection(request, connect):
     fields = gen_default_fields()
     fields["fields"][-1] = {"field": "binary_vector", "type": DataType.BINARY_VECTOR, "dimension": dimension, "params": {"metric_type": "TANIMOTO"}}
     try:
-        milvus.create_collection(collection_name, fields)
+        connect.create_collection(collection_name, fields)
     except Exception as e:
         pytest.exit(str(e))
     def teardown():
@@ -196,7 +197,7 @@ def substructure_collection(request, connect):
     fields = gen_default_fields()
     fields["fields"][-1] = {"field": "binary_vector", "type": DataType.BINARY_VECTOR, "dimension": dimension, "params": {"metric_type": "SUBSTRUCTURE"}}
     try:
-        milvus.create_collection(collection_name, fields)
+        connect.create_collection(collection_name, fields)
     except Exception as e:
         pytest.exit(str(e))
     def teardown():
@@ -216,7 +217,7 @@ def superstructure_collection(request, connect):
     fields = gen_default_fields()
     fields["fields"][-1] = {"field": "binary_vector", "type": DataType.BINARY_VECTOR, "dimension": dimension, "params": {"metric_type": MetricType.SUPERSTRUCTURE}}
     try:
-        milvus.create_collection(collection_name, fields)
+        connect.create_collection(collection_name, fields)
     except Exception as e:
         pytest.exit(str(e))
     def teardown():

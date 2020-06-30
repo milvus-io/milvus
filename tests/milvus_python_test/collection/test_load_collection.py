@@ -28,7 +28,7 @@ class TestLoadCollection:
     )
     def get_simple_index(self, request, connect):
         if str(connect._cmd("mode")[1]) == "CPU":
-            if request.param["index_type"] == "IVF_SQ8H":
+            if request.param["index_type"] == "IVFSQ8H":
                 pytest.skip("sq8h not support in cpu mode")
         return request.param
 

@@ -10,8 +10,7 @@ from utils import *
 
 dim = 128
 segment_size = 10
-collection_id = "test_insert"
-ADD_TIMEOUT = 60
+collection_id = "search"
 tag = "1970-01-01"
 insert_interval_time = 1.5
 nb = 6000
@@ -24,23 +23,15 @@ entity = gen_entities(1, is_normal=True)
 binary_entity = gen_binary_entities(1)
 entities = gen_entities(nb, is_normal=True)
 raw_vectors, binary_entities = gen_binary_entities(nb)
-default_single_query = {
-    "bool": {
-        "must": [
-            {"vector": {field_name: {"topk": 10, "query": vectors, "params": {"index_name": default_index_name, "nprobe": 10}}}}
-        ]
-    }
-}
-
-query = {
-    "bool": {
-        "must": [
-            {"term": {"A": {"values": [1, 2, 5]}}},
-            {"range": {"B": {"ranges": {"GT": 1, "LT": 100}}}},
-            {"vector": {"Vec": {"topk": 10, "query": vec[: 1], "params": {"index_name": Indextype.IVF_FLAT, "nprobe": 10}}}}
-        ],
-    },
-}
+# query = {
+#     "bool": {
+#         "must": [
+#             {"term": {"A": {"values": [1, 2, 5]}}},
+#             {"range": {"B": {"ranges": {"GT": 1, "LT": 100}}}},
+#             {"vector": {"Vec": {"topk": 10, "query": vec[: 1], "params": {"index_name": "IVFFLAT", "nprobe": 10}}}}
+#         ],
+#     },
+# }
 
 def get_query_inside(entities, top_k, nq, search_params={"nprobe": 10}):
     query_vectors = entities[-1]["values"][:nq]
@@ -100,7 +91,7 @@ class TestSearchBase:
     )
     def get_index(self, request, connect):
         if str(connect._cmd("mode")[1]) == "CPU":
-            if request.param["index_type"] == IndexType.IVF_SQ8H:
+            if request.param["index_type"] == "IVFSQ8H":
                 pytest.skip("sq8h not support in CPU mode")
         return request.param
 
@@ -110,7 +101,7 @@ class TestSearchBase:
     )
     def get_simple_index(self, request, connect):
         if str(connect._cmd("mode")[1]) == "CPU":
-            if request.param["index_type"] == IndexType.IVF_SQ8H:
+            if request.param["index_type"] == "IVFSQ8H":
                 pytest.skip("sq8h not support in CPU mode")
         return request.param
 
@@ -120,7 +111,7 @@ class TestSearchBase:
     )
     def get_jaccard_index(self, request, connect):
         logging.getLogger().info(request.param)
-        if request.param["index_type"] in [IndexType.IVFLAT, IndexType.FLAT]:
+        if request.param["index_type"] in ["IVFFLAT", "FLAT"]:
             return request.param
         else:
             pytest.skip("Skip index Temporary")
@@ -131,7 +122,7 @@ class TestSearchBase:
     )
     def get_hamming_index(self, request, connect):
         logging.getLogger().info(request.param)
-        if request.param["index_type"] in [IndexType.IVFLAT, IndexType.FLAT]:
+        if request.param["index_type"] in ["IVFFLAT", "FLAT"]:
             return request.param
         else:
             pytest.skip("Skip index Temporary")
@@ -142,7 +133,7 @@ class TestSearchBase:
     )
     def get_structure_index(self, request, connect):
         logging.getLogger().info(request.param)
-        if request.param["index_type"] == IndexType.FLAT:
+        if request.param["index_type"] == "FLAT":
             return request.param
         else:
             pytest.skip("Skip index Temporary")
@@ -168,7 +159,9 @@ class TestSearchBase:
         entities, ids = self.init_data(connect, collection)
         query = get_query_inside(entities, top_k, 1)
         if top_k <= 2048:
+            logging.getLogger().info(query)
             res = connect.search(collection, query)
+            logging.getLogger().info(res)
             assert len(res[0]) == top_k
             assert res[0][0].distance <= epsilon
             assert check_result(res[0], ids[0])
@@ -602,7 +595,7 @@ class TestSearchBase:
         nb = 2
         nprobe = 1
         vectors, ids = self.init_data(connect, ip_collection, nb=nb)
-        index_type = IndexType.FLAT
+        index_type = "FLAT"
         index_param = {
             "nlist": 16384
         }
@@ -624,7 +617,7 @@ class TestSearchBase:
         # from scipy.spatial import distance
         nprobe = 512
         int_vectors, vectors, ids = self.init_binary_data(connect, jac_collection, nb=2)
-        index_type = IndexType.FLAT
+        index_type = "FLAT"
         index_param = {
             "nlist": 16384
         }
@@ -649,7 +642,7 @@ class TestSearchBase:
         # from scipy.spatial import distance
         nprobe = 512
         int_vectors, vectors, ids = self.init_binary_data(connect, ham_collection, nb=2)
-        index_type = IndexType.FLAT
+        index_type = "FLAT"
         index_param = {
             "nlist": 16384
         }
@@ -674,7 +667,7 @@ class TestSearchBase:
         # from scipy.spatial import distance
         nprobe = 512
         int_vectors, vectors, ids = self.init_binary_data(connect, substructure_collection, nb=2)
-        index_type = IndexType.FLAT
+        index_type = "FLAT"
         index_param = {
             "nlist": 16384
         }
@@ -700,7 +693,7 @@ class TestSearchBase:
         top_k = 3
         nprobe = 512
         int_vectors, vectors, ids = self.init_binary_data(connect, substructure_collection, nb=2)
-        index_type = IndexType.FLAT
+        index_type = "FLAT"
         index_param = {
             "nlist": 16384
         }
@@ -728,7 +721,7 @@ class TestSearchBase:
         # from scipy.spatial import distance
         nprobe = 512
         int_vectors, vectors, ids = self.init_binary_data(connect, superstructure_collection, nb=2)
-        index_type = IndexType.FLAT
+        index_type = "FLAT"
         index_param = {
             "nlist": 16384
         }
@@ -754,7 +747,7 @@ class TestSearchBase:
         top_k = 3
         nprobe = 512
         int_vectors, vectors, ids = self.init_binary_data(connect, superstructure_collection, nb=2)
-        index_type = IndexType.FLAT
+        index_type = "FLAT"
         index_param = {
             "nlist": 16384
         }
@@ -782,7 +775,7 @@ class TestSearchBase:
         # from scipy.spatial import distance
         nprobe = 512
         int_vectors, vectors, ids = self.init_binary_data(connect, tanimoto_collection, nb=2)
-        index_type = IndexType.FLAT
+        index_type = "FLAT"
         index_param = {
             "nlist": 16384
         }
@@ -861,7 +854,7 @@ class TestSearchBase:
         uri = "tcp://%s:%s" % (args["ip"], args["port"])
         param = {'collection_name': collection,
                  'dimension': dim,
-                 'index_type': IndexType.FLAT,
+                 'index_type': "FLAT",
                  'store_raw_vector': False}
         # create collection
         milvus = get_milvus(args["ip"], args["port"], handler=args["handler"])
@@ -900,7 +893,7 @@ class TestSearchBase:
         uri = "tcp://%s:%s" % (args["ip"], args["port"])
         param = {'collection_name': collection,
              'dimension': dim,
-             'index_type': IndexType.FLAT,
+             'index_type': "FLAT",
              'store_raw_vector': False}
         # create collection
         milvus = get_milvus(args["ip"], args["port"], handler=args["handler"])
@@ -1033,7 +1026,7 @@ class TestSearchParamsInvalid(object):
     """
     @pytest.fixture(
         scope="function",
-        params=gen_invalid_collection_names()
+        params=gen_invalid_strs()
     )
     def get_collection_name(self, request):
         yield request.param
@@ -1068,7 +1061,7 @@ class TestSearchParamsInvalid(object):
     """
     @pytest.fixture(
         scope="function",
-        params=gen_invalid_top_ks()
+        params=gen_invalid_ints()
     )
     def get_top_k(self, request):
         yield request.param
@@ -1113,7 +1106,7 @@ class TestSearchParamsInvalid(object):
     """
     @pytest.fixture(
         scope="function",
-        params=gen_invalid_nprobes()
+        params=gen_invalid_ints()
     )
     def get_nprobes(self, request):
         yield request.param
@@ -1167,7 +1160,7 @@ class TestSearchParamsInvalid(object):
     )
     def get_simple_index(self, request, connect):
         if str(connect._cmd("mode")[1]) == "CPU":
-            if request.param["index_type"] == IndexType.IVF_SQ8H:
+            if request.param["index_type"] == "IVFSQ8H":
                 pytest.skip("sq8h not support in CPU mode")
         if str(connect._cmd("mode")[1]) == "GPU":
             if request.param["index_type"] == IndexType.IVF_PQ:
@@ -1188,7 +1181,7 @@ class TestSearchParamsInvalid(object):
         query_vecs = gen_vectors(1, dim)
         status, result = connect.search(collection, top_k, query_vecs, params={})
 
-        if index_type == IndexType.FLAT:
+        if index_type == "FLAT":
             assert status.OK()
         else:
             assert not status.OK()
@@ -1199,7 +1192,7 @@ class TestSearchParamsInvalid(object):
     )
     def get_invalid_search_param(self, request, connect):
         if str(connect._cmd("mode")[1]) == "CPU":
-            if request.param["index_type"] == IndexType.IVF_SQ8H:
+            if request.param["index_type"] == "IVFSQ8H":
                 pytest.skip("sq8h not support in CPU mode")
         if str(connect._cmd("mode")[1]) == "GPU":
             if request.param["index_type"] == IndexType.IVF_PQ:

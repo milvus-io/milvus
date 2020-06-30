@@ -224,6 +224,15 @@ def add_vector_field(entities, is_normal=False):
     return entities
 
 
+def update_fields_metric_type(fields, metric_type):
+    if metric_type in ["L2", "IP"]:
+        fields["fields"][-1]["type"] = DataType.VECTOR
+    else:
+        fields["fields"][-1]["type"] = DataType.BINARY_VECTOR
+    fields["fields"][-1]["params"]["metric_type"] = metric_type
+    return fields
+
+
 def remove_field(entities):
     del entities[0]
     return entities
@@ -447,23 +456,23 @@ def gen_invaild_search_params():
     invalid_search_key = 100
     search_params = []
     for index_type in all_index_types:
-        if index_type == IndexType.FLAT:
+        if index_type == "FLAT":
             continue
         search_params.append({"index_type": index_type, "search_param": {"invalid_key": invalid_search_key}})
-        if index_type in [IndexType.IVFLAT, IndexType.IVF_SQ8, IndexType.IVF_SQ8H, IndexType.IVF_PQ]:
+        if index_type in ["IVFFLAT", "IVFSQ8", "IVFSQ8H", "IVFPQ"]:
             for nprobe in gen_invalid_params():
                 ivf_search_params = {"index_type": index_type, "search_param": {"nprobe": nprobe}}
                 search_params.append(ivf_search_params)
-        elif index_type == IndexType.HNSW:
+        elif index_type == "HNSW":
             for ef in gen_invalid_params():
                 hnsw_search_param = {"index_type": index_type, "search_param": {"ef": ef}}
                 search_params.append(hnsw_search_param)
-        elif index_type == IndexType.RNSG:
+        elif index_type == "RNSG":
             for search_length in gen_invalid_params():
                 nsg_search_param = {"index_type": index_type, "search_param": {"search_length": search_length}}
                 search_params.append(nsg_search_param)
             search_params.append({"index_type": index_type, "search_param": {"invalid_key": 100}})
-        elif index_type == IndexType.ANNOY:
+        elif index_type == "ANNOY":
             for search_k in gen_invalid_params():
                 if isinstance(search_k, int):
                     continue
@@ -478,36 +487,36 @@ def gen_invalid_index():
         index_param = {"index_type": index_type, "params": {"nlist": 1024}}
         index_params.append(index_param)
     for nlist in gen_invalid_params():
-        index_param = {"index_type": IndexType.IVFLAT, "params": {"nlist": nlist}}
+        index_param = {"index_type": "IVFFLAT", "params": {"nlist": nlist}}
         index_params.append(index_param)
     for M in gen_invalid_params():
-        index_param = {"index_type": IndexType.HNSW, "params": {"M": M, "efConstruction": 100}}
+        index_param = {"index_type": "HNSW", "params": {"M": M, "efConstruction": 100}}
         index_params.append(index_param)
     for efConstruction in gen_invalid_params():
-        index_param = {"index_type": IndexType.HNSW, "params": {"M": 16, "efConstruction": efConstruction}}
+        index_param = {"index_type": "HNSW", "params": {"M": 16, "efConstruction": efConstruction}}
         index_params.append(index_param)
     for search_length in gen_invalid_params():
-        index_param = {"index_type": IndexType.RNSG,
+        index_param = {"index_type": "RNSG",
                        "params": {"search_length": search_length, "out_degree": 40, "candidate_pool_size": 50,
                                        "knng": 100}}
         index_params.append(index_param)
     for out_degree in gen_invalid_params():
-        index_param = {"index_type": IndexType.RNSG,
+        index_param = {"index_type": "RNSG",
                        "params": {"search_length": 100, "out_degree": out_degree, "candidate_pool_size": 50,
                                        "knng": 100}}
         index_params.append(index_param)
     for candidate_pool_size in gen_invalid_params():
-        index_param = {"index_type": IndexType.RNSG, "params": {"search_length": 100, "out_degree": 40,
+        index_param = {"index_type": "RNSG", "params": {"search_length": 100, "out_degree": 40,
                                                                      "candidate_pool_size": candidate_pool_size,
                                                                      "knng": 100}}
         index_params.append(index_param)
-    index_params.append({"index_type": IndexType.IVF_FLAT, "params": {"invalid_key": 1024}})
-    index_params.append({"index_type": IndexType.HNSW, "params": {"invalid_key": 16, "efConstruction": 100}})
-    index_params.append({"index_type": IndexType.RNSG,
+    index_params.append({"index_type": "IVFFLAT", "params": {"invalid_key": 1024}})
+    index_params.append({"index_type": "HNSW", "params": {"invalid_key": 16, "efConstruction": 100}})
+    index_params.append({"index_type": "RNSG",
                          "params": {"invalid_key": 100, "out_degree": 40, "candidate_pool_size": 300,
                                          "knng": 100}})
     for invalid_n_trees in gen_invalid_params():
-        index_params.append({"index_type": IndexType.ANNOY, "params": {"n_trees": invalid_n_trees}})
+        index_params.append({"index_type": "ANNOY", "params": {"n_trees": invalid_n_trees}})
 
     return index_params
 
@@ -524,23 +533,23 @@ def gen_index():
 
     index_params = []
     for index_type in all_index_types:
-        if index_type == IndexType.FLAT:
+        if index_type == "FLAT":
             index_params.append({"index_type": index_type, "index_param": {"nlist": 1024}})
-        elif index_type in [IndexType.IVFLAT, IndexType.IVF_SQ8, IndexType.IVF_SQ8H]:
+        elif index_type in ["IVFFLAT", "IVFSQ8", "IVFSQ8H"]:
             ivf_params = [{"index_type": index_type, "index_param": {"nlist": nlist}} \
                           for nlist in nlists]
             index_params.extend(ivf_params)
-        elif index_type == IndexType.IVF_PQ:
-            ivf_pq_params = [{"index_type": index_type, "index_param": {"nlist": nlist, "m": m}} \
+        elif index_type == "IVFPQ":
+            IVFPQ_params = [{"index_type": index_type, "index_param": {"nlist": nlist, "m": m}} \
                         for nlist in nlists \
                         for m in pq_ms]
-            index_params.extend(ivf_pq_params)
-        elif index_type == IndexType.HNSW:
+            index_params.extend(IVFPQ_params)
+        elif index_type == "HNSW":
             hnsw_params = [{"index_type": index_type, "index_param": {"M": M, "efConstruction": efConstruction}} \
                            for M in Ms \
                            for efConstruction in efConstructions]
             index_params.extend(hnsw_params)
-        elif index_type == IndexType.RNSG:
+        elif index_type == "RNSG":
             nsg_params = [{"index_type": index_type,
                            "index_param": {"search_length": search_length, "out_degree": out_degree,
                                            "candidate_pool_size": candidate_pool_size, "knng": knng}} \
@@ -571,13 +580,13 @@ def gen_simple_index():
 
 
 def get_search_param(index_type):
-    if index_type in [IndexType.FLAT, IndexType.IVFLAT, IndexType.IVF_SQ8, IndexType.IVF_SQ8H, IndexType.IVF_PQ]:
+    if index_type in ["FLAT", "IVFFLAT", "IVFSQ8", "IVFSQ8H", "IVFPQ"]:
         return {"nprobe": 32}
-    elif index_type == IndexType.HNSW:
+    elif index_type == "HNSW":
         return {"ef": 64}
-    elif index_type == IndexType.RNSG:
+    elif index_type == "RNSG":
         return {"search_length": 100}
-    elif index_type == IndexType.ANNOY:
+    elif index_type == "ANNOY":
         return {"search_k": 100}
 
     else:
