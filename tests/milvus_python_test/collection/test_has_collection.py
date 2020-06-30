@@ -2,11 +2,13 @@ import pdb
 import pytest
 import logging
 import itertools
+import threading
 from time import sleep
 from multiprocessing import Process
 from milvus import IndexType, MetricType
 from utils import *
 
+collection_id = "has_collection"
 default_fields = gen_default_fields() 
 
 
@@ -23,7 +25,7 @@ class TestHasCollection:
         method: create collection, assert the value returned by has_collection method
         expected: True
         '''
-        assert assert_has_collection(connect, collection)
+        assert connect.has_collection(collection)
 
     @pytest.mark.level(2)
     def test_has_collection_without_connection(self, collection, dis_connect):
@@ -33,7 +35,7 @@ class TestHasCollection:
         expected: has collection raise exception
         '''
         with pytest.raises(Exception) as e:
-            assert_has_collection(dis_connect, collection)
+            assert connect.has_collection(collection)
 
     def test_has_collection_not_existed(self, connect):
         '''
@@ -43,7 +45,7 @@ class TestHasCollection:
         expected: False
         '''
         collection_name = gen_unique_str("test_collection")
-        assert not assert_has_collection(connect, collection_name)
+        assert not connect.has_collection(collection_name)
 
     @pytest.mark.level(2)
     def test_has_collection_multithread(self, connect):
@@ -54,8 +56,8 @@ class TestHasCollection:
         '''
         threads_num = 4 
         threads = []
-        collection_name = gen_unique_str("test_collection")
-        connect.create_collection(collection_name, fields)
+        collection_name = gen_unique_str(collection_id)
+        connect.create_collection(collection_name, default_fields)
 
         def has():
             assert not assert_collection(connect, collection_name)
@@ -74,7 +76,7 @@ class TestHasCollectionInvalid(object):
     """
     @pytest.fixture(
         scope="function",
-        params=gen_invalid_collection_names()
+        params=gen_invalid_strs()
     )
     def get_collection_name(self, request):
         yield request.param
