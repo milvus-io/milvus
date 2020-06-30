@@ -24,6 +24,7 @@
 #include "knowhere/index/vector_index/IndexNSG.h"
 #include "knowhere/index/non_materialized_index/IndexIVF_NM.h"
 #include "knowhere/index/non_materialized_index/IndexHNSW_NM.h"
+#include "knowhere/index/non_materialized_index/IndexNSG_NM.h"
 #ifdef MILVUS_SUPPORT_SPTAG
 #include "knowhere/index/vector_index/IndexSPTAG.h"
 #endif
@@ -77,7 +78,7 @@ VecIndexFactory::CreateVecIndex(const IndexType& type, const IndexMode mode) {
     } else if (type == IndexEnum::INDEX_FAISS_BIN_IVFFLAT) {
         return std::make_shared<knowhere::BinaryIVF>();
     } else if (type == IndexEnum::INDEX_NSG) {
-        return std::make_shared<knowhere::NSG>(-1);
+        return std::make_shared<knowhere::NSG_NM>(-1);
 #ifdef MILVUS_SUPPORT_SPTAG
     } else if (type == IndexEnum::INDEX_SPTAG_KDT_RNT) {
         return std::make_shared<knowhere::CPUSPTAGRNG>("KDT");

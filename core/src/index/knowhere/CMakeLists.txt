@@ -68,6 +68,7 @@ set(index_srcs
         knowhere/index/non_materialized_index/OffsetBaseIndex.cpp
         knowhere/index/non_materialized_index/IndexIVF_NM.cpp
         knowhere/index/non_materialized_index/IndexHNSW_NM.cpp
+        knowhere/index/non_materialized_index/IndexNSG_NM.cpp
         )
 
 if (MILVUS_SUPPORT_SPTAG)
