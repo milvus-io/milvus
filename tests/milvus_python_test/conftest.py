@@ -4,12 +4,13 @@ import logging
 
 import pytest
 from utils import gen_unique_str
-from milvus import Milvus, IndexType, MetricType
+from milvus import Milvus, IndexType, MetricType, DataType
 from utils import *
 
-index_file_size = 10
 timeout = 60
+dimension = 128
 delete_timeout = 60
+
 
 def pytest_addoption(parser):
     parser.addoption("--ip", action="store", default="localhost")
@@ -99,26 +100,15 @@ def milvus(request):
 def collection(request, connect):
     ori_collection_name = getattr(request.module, "collection_id", "test")
     collection_name = gen_unique_str(ori_collection_name)
-    dim = getattr(request.module, "dim", "128")
-    param = {'collection_name': collection_name,
-             'dimension': dim,
-             'index_file_size': index_file_size,
-             'metric_type': MetricType.L2}
-    result = connect.create_collection(param, timeout=timeout)
-    status = result
-    if isinstance(result, tuple):
-        status = result[0]
-    if not status.OK():
-        pytest.exit("collection can not be created, exit pytest ...")
-
+    try:
+        milvus.create_collection(collection_name, default_fields())
+    except Exception as e:
+        pytest.exit(str(e))
     def teardown():
         status, collection_names = connect.list_collections()
         for collection_name in collection_names:
             connect.drop_collection(collection_name, timeout=delete_timeout)
-        # connect.drop_collection(collection_name)
-
-    request.addfinalizer(teardown)
-
+    request.addfinalizer(teardown())
     return collection_name
 
 
@@ -126,26 +116,17 @@ def collection(request, connect):
 def ip_collection(request, connect):
     ori_collection_name = getattr(request.module, "collection_id", "test")
     collection_name = gen_unique_str(ori_collection_name)
-    dim = getattr(request.module, "dim", "128")
-    param = {'collection_name': collection_name,
-             'dimension': dim,
-             'index_file_size': index_file_size,
-             'metric_type': MetricType.IP}
-    result = connect.create_collection(param, timeout=timeout)
-    status = result
-    if isinstance(result, tuple):
-        status = result[0]
-    if not status.OK():
-        pytest.exit("collection can not be created, exit pytest ...")
-
+    fields = gen_default_fields()
+    fields["fields"][-1]["extra_params"]["metric_type"] = MetricType.IP
+    try:
+        milvus.create_collection(collection_name, fields)
+    except Exception as e:
+        pytest.exit(str(e))
     def teardown():
         status, collection_names = connect.list_collections()
         for collection_name in collection_names:
             connect.drop_collection(collection_name, timeout=delete_timeout)
-        # connect.drop_collection(collection_name)
-
-    request.addfinalizer(teardown)
-
+    request.addfinalizer(teardown())
     return collection_name
 
 
@@ -153,125 +134,88 @@ def ip_collection(request, connect):
 def jac_collection(request, connect):
     ori_collection_name = getattr(request.module, "collection_id", "test")
     collection_name = gen_unique_str(ori_collection_name)
-    dim = getattr(request.module, "dim", "128")
-    param = {'collection_name': collection_name,
-             'dimension': dim,
-             'index_file_size': index_file_size,
-             'metric_type': MetricType.JACCARD}
-    result = connect.create_collection(param, timeout=timeout)
-    status = result
-    if isinstance(result, tuple):
-        status = result[0]
-    if not status.OK():
-        pytest.exit("collection can not be created, exit pytest ...")
-
+    fields = gen_default_fields()
+    fields["fields"][-1] = {"field": "binary_vector", "type": DataType.BINARY_VECTOR, "dimension": dimension, "extra_params": {"metric_type": MetricType.JACCARD}}
+    try:
+        milvus.create_collection(collection_name, fields)
+    except Exception as e:
+        pytest.exit(str(e))
     def teardown():
         status, collection_names = connect.list_collections()
         for collection_name in collection_names:
             connect.drop_collection(collection_name, timeout=delete_timeout)
-        # connect.drop_collection(collection_name)
-
-    request.addfinalizer(teardown)
-
+    request.addfinalizer(teardown())
     return collection_name
+
 
 @pytest.fixture(scope="function")
 def ham_collection(request, connect):
     ori_collection_name = getattr(request.module, "collection_id", "test")
     collection_name = gen_unique_str(ori_collection_name)
-    dim = getattr(request.module, "dim", "128")
-    param = {'collection_name': collection_name,
-             'dimension': dim,
-             'index_file_size': index_file_size,
-             'metric_type': MetricType.HAMMING}
-    result = connect.create_collection(param, timeout=timeout)
-    status = result
-    if isinstance(result, tuple):
-        status = result[0]
-    if not status.OK():
-        pytest.exit("collection can not be created, exit pytest ...")
-
+    fields = gen_default_fields()
+    fields["fields"][-1] = {"field": "binary_vector", "type": DataType.BINARY_VECTOR, "dimension": dimension, "extra_params": {"metric_type": MetricType.HAMMING}}
+    try:
+        milvus.create_collection(collection_name, fields)
+    except Exception as e:
+        pytest.exit(str(e))
     def teardown():
         status, collection_names = connect.list_collections()
         for collection_name in collection_names:
             connect.drop_collection(collection_name, timeout=delete_timeout)
-        # connect.drop_collection(collection_name)
-
-    request.addfinalizer(teardown)
-
+    request.addfinalizer(teardown())
     return collection_name
+
 
 @pytest.fixture(scope="function")
 def tanimoto_collection(request, connect):
     ori_collection_name = getattr(request.module, "collection_id", "test")
     collection_name = gen_unique_str(ori_collection_name)
-    dim = getattr(request.module, "dim", "128")
-    param = {'collection_name': collection_name,
-             'dimension': dim,
-             'index_file_size': index_file_size,
-             'metric_type': MetricType.TANIMOTO}
-    result = connect.create_collection(param, timeout=timeout)
-    status = result
-    if isinstance(result, tuple):
-        status = result[0]
-    if not status.OK():
-        pytest.exit("collection can not be created, exit pytest ...")
-
+    fields = gen_default_fields()
+    fields["fields"][-1] = {"field": "binary_vector", "type": DataType.BINARY_VECTOR, "dimension": dimension, "extra_params": {"metric_type": MetricType.TANIMOTO}}
+    try:
+        milvus.create_collection(collection_name, fields)
+    except Exception as e:
+        pytest.exit(str(e))
     def teardown():
         status, collection_names = connect.list_collections()
         for collection_name in collection_names:
             connect.drop_collection(collection_name, timeout=delete_timeout)
-        # connect.drop_collection(collection_name)
-
-    request.addfinalizer(teardown)
+    request.addfinalizer(teardown())
     return collection_name
+
 
 @pytest.fixture(scope="function")
 def substructure_collection(request, connect):
     ori_collection_name = getattr(request.module, "collection_id", "test")
     collection_name = gen_unique_str(ori_collection_name)
-    dim = getattr(request.module, "dim", "128")
-    param = {'collection_name': collection_name,
-             'dimension': dim,
-             'index_file_size': index_file_size,
-             'metric_type': MetricType.SUBSTRUCTURE}
-    result = connect.create_collection(param, timeout=timeout)
-    status = result
-    if isinstance(result, tuple):
-        status = result[0]
-    if not status.OK():
-        pytest.exit("collection can not be created, exit pytest ...")
-
+    fields = gen_default_fields()
+    fields["fields"][-1] = {"field": "binary_vector", "type": DataType.BINARY_VECTOR, "dimension": dimension, "extra_params": {"metric_type": MetricType.SUBSTRUCTURE}}
+    try:
+        milvus.create_collection(collection_name, fields)
+    except Exception as e:
+        pytest.exit(str(e))
     def teardown():
         status, collection_names = connect.list_collections()
         for collection_name in collection_names:
             connect.drop_collection(collection_name, timeout=delete_timeout)
-        # connect.drop_collection(collection_name)
-
-    request.addfinalizer(teardown)
+    request.addfinalizer(teardown())
     return collection_name
+
 
 @pytest.fixture(scope="function")
 def superstructure_collection(request, connect):
+    dim = getattr(request.module, "dim", "128")
     ori_collection_name = getattr(request.module, "collection_id", "test")
     collection_name = gen_unique_str(ori_collection_name)
-    dim = getattr(request.module, "dim", "128")
-    param = {'collection_name': collection_name,
-             'dimension': dim,
-             'index_file_size': index_file_size,
-             'metric_type': MetricType.SUPERSTRUCTURE}
-    result = connect.create_collection(param, timeout=timeout)
-    status = result
-    if isinstance(result, tuple):
-        status = result[0]
-    if not status.OK():
-        pytest.exit("collection can not be created, exit pytest ...")
-
+    fields = gen_default_fields()
+    fields["fields"][-1] = {"field": "binary_vector", "type": DataType.BINARY_VECTOR, "dimension": dimension, "extra_params": {"metric_type": MetricType.SUPERSTRUCTURE}}
+    try:
+        milvus.create_collection(collection_name, fields)
+    except Exception as e:
+        pytest.exit(str(e))
     def teardown():
         status, collection_names = connect.list_collections()
         for collection_name in collection_names:
             connect.drop_collection(collection_name, timeout=delete_timeout)
-        # connect.drop_collection(collection_name)
-
-    request.addfinalizer(teardown)
+    request.addfinalizer(teardown())
     return collection_name

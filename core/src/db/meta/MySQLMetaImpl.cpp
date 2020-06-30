@@ -34,11 +34,9 @@
 #include "db/IDGenerator.h"
 #include "db/Utils.h"
 #include "metrics/Metrics.h"
-#include "utils/CommonUtil.h"
 #include "utils/Exception.h"
 #include "utils/Log.h"
 #include "utils/StringHelpFunctions.h"
-#include "utils/ValidationUtil.h"
 
 namespace milvus {
 namespace engine {
@@ -103,7 +101,7 @@ class MetaField {
 
         // only check field type, don't check field width, for example: VARCHAR(255) and VARCHAR(100) is equal
         std::vector<std::string> type_split;
-        milvus::server::StringHelpFunctions::SplitStringByDelimeter(type_, "(", type_split);
+        milvus::StringHelpFunctions::SplitStringByDelimeter(type_, "(", type_split);
         if (!type_split.empty()) {
             type_len_min = type_split[0].length() > type_len_min ? type_len_min : type_split[0].length();
         }
@@ -210,6 +208,8 @@ static const MetaSchema FIELDS_SCHEMA(META_FIELDS, {
                                                        MetaField("collection_id", "VARCHAR(255)", "NOT NULL"),
                                                        MetaField("field_name", "VARCHAR(255)", "NOT NULL"),
                                                        MetaField("field_type", "INT", "DEFAULT 0 NOT NULL"),
+                                                       MetaField("index_name", "VARCHAR(255)", "NOT NULL"),
+                                                       MetaField("index_param", "VARCHAR(255)", "NOT NULL"),
                                                        MetaField("field_params", "VARCHAR(255)", "NOT NULL"),
                                                    });
 
@@ -1486,7 +1486,7 @@ MySQLMetaImpl::CreatePartition(const std::string& collection_id, const std::stri
     // trim side-blank of tag, only compare valid characters
     // for example: " ab cd " is treated as "ab cd"
     std::string valid_tag = tag;
-    server::StringHelpFunctions::TrimStringBlank(valid_tag);
+    StringHelpFunctions::TrimStringBlank(valid_tag);
 
     // not allow duplicated partition
     std::string exist_partition;
@@ -1527,7 +1527,7 @@ MySQLMetaImpl::HasPartition(const std::string& collection_id, const std::string&
         // trim side-blank of tag, only compare valid characters
         // for example: " ab cd " is treated as "ab cd"
         std::string valid_tag = tag;
-        server::StringHelpFunctions::TrimStringBlank(valid_tag);
+        StringHelpFunctions::TrimStringBlank(valid_tag);
 
         {
             mysqlpp::ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab_);
@@ -1626,7 +1626,7 @@ MySQLMetaImpl::GetPartitionName(const std::string& collection_id, const std::str
         // trim side-blank of tag, only compare valid characters
         // for example: " ab cd " is treated as "ab cd"
         std::string valid_tag = tag;
-        server::StringHelpFunctions::TrimStringBlank(valid_tag);
+        StringHelpFunctions::TrimStringBlank(valid_tag);
 
         {
             mysqlpp::ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab_);
@@ -2615,7 +2615,7 @@ MySQLMetaImpl::CleanUpFilesWithTTL(uint64_t seconds /*, CleanUpFilter* filter*/)
                 // erase file data from cache
                 // because GetCollectionFilePath won't able to generate file path after the file is deleted
                 utils::GetCollectionFilePath(options_, collection_file);
-                server::CommonUtil::EraseFromCache(collection_file.location_);
+                utils::EraseFromCache(collection_file.location_);
 
                 if (collection_file.file_type_ == (int)SegmentSchema::TO_DELETE) {
                     // delete file from disk storage
@@ -3099,16 +3099,18 @@ MySQLMetaImpl::CreateHybridCollection(CollectionSchema& collection_schema, hybri
                 return HandleException("Failed to create collection", statement.error());
             }
 
-            for (auto schema : fields_schema.fields_schema_) {
-                std::string id = "NULL";
-                std::string collection_id = schema.collection_id_;
+            for (const auto& schema : fields_schema.fields_schema_) {
+                std::string field_id = "NULL";
+                std::string field_collection_id = schema.collection_id_;
                 std::string field_name = schema.field_name_;
                 std::string field_type = std::to_string(schema.field_type_);
+                std::string index_name = schema.index_name_;
+                std::string index_param = schema.index_param_;
                 std::string field_params = schema.field_params_;
 
-                statement << "INSERT INTO " << META_FIELDS << " VALUES(" << mysqlpp::quote << collection_id << ", "
-                          << mysqlpp::quote << field_name << ", " << field_type << ", " << mysqlpp::quote << ", "
-                          << field_params << ");";
+                statement << "INSERT INTO " << META_FIELDS << " VALUES(" << mysqlpp::quote << field_collection_id
+                          << ", " << mysqlpp::quote << field_name << ", " << field_type << ", " << mysqlpp::quote
+                          << ", " << field_params << ");";
 
                 LOG_ENGINE_DEBUG_ << "Create field: " << statement.str();
 
@@ -3156,7 +3158,7 @@ MySQLMetaImpl::DescribeHybridCollection(CollectionSchema& collection_schema, hyb
             res = statement.store();
 
             mysqlpp::Query field_statement = connectionPtr->query();
-            field_statement << "SELECT collection_id, field_name, field_type, field_params"
+            field_statement << "SELECT collection_id, field_name, field_type, index_name, index_param, field_params"
                             << " FROM " << META_FIELDS << " WHERE collection_id = " << mysqlpp::quote
                             << collection_schema.collection_id_ << ";";
 
@@ -3192,6 +3194,8 @@ MySQLMetaImpl::DescribeHybridCollection(CollectionSchema& collection_schema, hyb
                 resRow["collection_id"].to_string(fields_schema.fields_schema_[i].collection_id_);
                 resRow["field_name"].to_string(fields_schema.fields_schema_[i].field_name_);
                 fields_schema.fields_schema_[i].field_type_ = resRow["field_type"];
+                resRow["index_name"].to_string(fields_schema.fields_schema_[i].index_name_);
+                resRow["index_param"].to_string(fields_schema.fields_schema_[i].index_param_);
                 resRow["field_params"].to_string(fields_schema.fields_schema_[i].field_params_);
             }
         } else {

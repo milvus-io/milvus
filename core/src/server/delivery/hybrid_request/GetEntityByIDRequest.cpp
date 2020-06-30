@@ -17,9 +17,9 @@
 
 #include "server/delivery/hybrid_request/GetEntityByIDRequest.h"
 #include "server/DBWrapper.h"
+#include "server/ValidationUtil.h"
 #include "utils/Log.h"
 #include "utils/TimeRecorder.h"
-#include "utils/ValidationUtil.h"
 
 #include <memory>
 #include <vector>
@@ -30,11 +30,13 @@ namespace server {
 constexpr uint64_t MAX_COUNT_RETURNED = 1000;
 
 GetEntityByIDRequest::GetEntityByIDRequest(const std::shared_ptr<milvus::server::Context>& context,
-                                           const std::string& collection_name, const std::vector<int64_t>& ids,
+                                           const std::string& collection_name,
+                                           const std::vector<std::string>& field_names, const std::vector<int64_t>& ids,
                                            std::vector<engine::AttrsData>& attrs,
                                            std::vector<engine::VectorsData>& vectors)
     : BaseRequest(context, BaseRequest::kGetVectorByID),
       collection_name_(collection_name),
+      field_names_(field_names),
       ids_(ids),
       attrs_(attrs),
       vectors_(vectors) {
@@ -42,9 +44,11 @@ GetEntityByIDRequest::GetEntityByIDRequest(const std::shared_ptr<milvus::server:
 
 BaseRequestPtr
 GetEntityByIDRequest::Create(const std::shared_ptr<milvus::server::Context>& context,
-                             const std::string& collection_name, const std::vector<int64_t>& ids,
-                             std::vector<engine::AttrsData>& attrs, std::vector<engine::VectorsData>& vectors) {
-    return std::shared_ptr<BaseRequest>(new GetEntityByIDRequest(context, collection_name, ids, attrs, vectors));
+                             const std::string& collection_name, const std::vector<std::string>& field_names,
+                             const std::vector<int64_t>& ids, std::vector<engine::AttrsData>& attrs,
+                             std::vector<engine::VectorsData>& vectors) {
+    return std::shared_ptr<BaseRequest>(
+        new GetEntityByIDRequest(context, collection_name, field_names, ids, attrs, vectors));
 }
 
 Status
@@ -63,10 +67,12 @@ GetEntityByIDRequest::OnExecute() {
             return Status(SERVER_INVALID_ARGUMENT, msg);
         }
 
-        auto status = ValidationUtil::ValidateCollectionName(collection_name_);
+        auto status = ValidateCollectionName(collection_name_);
         if (!status.ok()) {
             return status;
         }
+
+        // TODO(yukun) ValidateFieldNames
 
         // only process root collection, ignore partition collection
         engine::meta::CollectionSchema collection_schema;
@@ -85,7 +91,7 @@ GetEntityByIDRequest::OnExecute() {
         }
 
         // step 2: get vector data, now only support get one id
-        return DBWrapper::DB()->GetEntitiesByID(collection_name_, ids_, vectors_, attrs_);
+        return DBWrapper::DB()->GetEntitiesByID(collection_name_, ids_, field_names_, vectors_, attrs_);
     } catch (std::exception& ex) {
         return Status(SERVER_UNEXPECTED_ERROR, ex.what());
     }

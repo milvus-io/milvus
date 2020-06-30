@@ -64,6 +64,7 @@ RequestGroup(BaseRequest::RequestType type) {
         {BaseRequest::kCreateIndex, DDL_DML_REQUEST_GROUP},
         {BaseRequest::kDescribeIndex, INFO_REQUEST_GROUP},
         {BaseRequest::kDropIndex, DDL_DML_REQUEST_GROUP},
+        {BaseRequest::kCreateHybridIndex, DDL_DML_REQUEST_GROUP},
 
         // search operations
         {BaseRequest::kSearchByID, DQL_REQUEST_GROUP},

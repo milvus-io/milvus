@@ -33,7 +33,7 @@
 #include "tracing/TracerUtil.h"
 #include "utils/Log.h"
 #include "utils/LogUtil.h"
-#include "utils/SignalUtil.h"
+#include "utils/SignalHandler.h"
 #include "utils/TimeRecorder.h"
 
 #include "search/TaskInst.h"

@@ -81,11 +81,11 @@ ConvertTimeRangeToDBDates(const std::string& start_value, const std::string& end
 
     time_t tt_start, tt_end;
     tm tm_start, tm_end;
-    if (!milvus::server::CommonUtil::TimeStrToTime(start_value, tt_start, tm_start)) {
+    if (!milvus::CommonUtil::TimeStrToTime(start_value, tt_start, tm_start)) {
         return;
     }
 
-    if (!milvus::server::CommonUtil::TimeStrToTime(end_value, tt_end, tm_end)) {
+    if (!milvus::CommonUtil::TimeStrToTime(end_value, tt_end, tm_end)) {
         return;
     }
 
@@ -97,7 +97,7 @@ ConvertTimeRangeToDBDates(const std::string& start_value, const std::string& end
     for (int64_t i = 0; i < days; i++) {
         time_t tt_day = tt_start + DAY_SECONDS * i;
         tm tm_day;
-        milvus::server::CommonUtil::ConvertTime(tt_day, tm_day);
+        milvus::CommonUtil::ConvertTime(tt_day, tm_day);
 
         int64_t date = tm_day.tm_year * 10000 + tm_day.tm_mon * 100 + tm_day.tm_mday;  // according to db logic
         dates.push_back(date);
@@ -250,13 +250,13 @@ TEST_F(DBTest, DB_TEST) {
     {
         auto options = GetOptions();
         options.meta_.backend_uri_ = "dummy";
-        ASSERT_ANY_THROW(milvus::engine::DBFactory::Build(options));
+        ASSERT_ANY_THROW(BuildDB(options));
 
         options.meta_.backend_uri_ = "mysql://root:123456@127.0.0.1:3306/test";
-        ASSERT_ANY_THROW(milvus::engine::DBFactory::Build(options));
+        ASSERT_ANY_THROW(BuildDB(options));
 
         options.meta_.backend_uri_ = "dummy://root:123456@127.0.0.1:3306/test";
-        ASSERT_ANY_THROW(milvus::engine::DBFactory::Build(options));
+        ASSERT_ANY_THROW(BuildDB(options));
     }
 }
 
@@ -577,12 +577,13 @@ TEST_F(DBTest, SHUTDOWN_TEST) {
                               result_distances);
     ASSERT_FALSE(stat.ok());
 
+    auto vectors_data = milvus::engine::VectorsData();
     stat = db_->Query(dummy_context_,
                       collection_info.collection_id_,
                       tags,
                       1,
                       json_params,
-                      milvus::engine::VectorsData(),
+                      vectors_data,
                       result_ids,
                       result_distances);
     ASSERT_FALSE(stat.ok());
@@ -1034,138 +1035,134 @@ TEST_F(DBTest2, SHOW_COLLECTION_INFO_TEST) {
     }
 }
 
-TEST_F(DBTestWAL, DB_INSERT_TEST) {
-    milvus::engine::meta::CollectionSchema collection_info = BuildCollectionSchema();
-    auto stat = db_->CreateCollection(collection_info);
-    ASSERT_TRUE(stat.ok());
-
-    uint64_t qb = 100;
-    milvus::engine::VectorsData qxb;
-    BuildVectors(qb, 0, qxb);
-
-    std::string partition_name = "part_name";
-    std::string partition_tag = "part_tag";
-    stat = db_->CreatePartition(collection_info.collection_id_, partition_name, partition_tag);
-    ASSERT_TRUE(stat.ok());
-
-    stat = db_->InsertVectors(collection_info.collection_id_, partition_tag, qxb);
-    ASSERT_TRUE(stat.ok());
-
-    stat = db_->InsertVectors(collection_info.collection_id_, "", qxb);
-    ASSERT_TRUE(stat.ok());
-
-    stat = db_->InsertVectors(collection_info.collection_id_, "not exist", qxb);
-    ASSERT_FALSE(stat.ok());
-
-    db_->Flush(collection_info.collection_id_);
-
-    stat = db_->DropCollection(collection_info.collection_id_);
-    ASSERT_TRUE(stat.ok());
-}
-
-TEST_F(DBTestWAL, DB_STOP_TEST) {
-    milvus::engine::meta::CollectionSchema collection_info = BuildCollectionSchema();
-    auto stat = db_->CreateCollection(collection_info);
-    ASSERT_TRUE(stat.ok());
-
-    uint64_t qb = 100;
-    for (int i = 0; i < 5; i++) {
-        milvus::engine::VectorsData qxb;
-        BuildVectors(qb, i, qxb);
-        stat = db_->InsertVectors(collection_info.collection_id_, "", qxb);
-        ASSERT_TRUE(stat.ok());
-    }
-
-    db_->Stop();
-    db_->Start();
-
-    const int64_t topk = 10;
-    const int64_t nprobe = 10;
-    milvus::json json_params = {{"nprobe", nprobe}};
-    milvus::engine::ResultIds result_ids;
-    milvus::engine::ResultDistances result_distances;
-    milvus::engine::VectorsData qxb;
-    BuildVectors(qb, 0, qxb);
-    stat = db_->Query(dummy_context_,
-            collection_info.collection_id_, {}, topk, json_params, qxb, result_ids, result_distances);
-    ASSERT_TRUE(stat.ok());
-    ASSERT_EQ(result_ids.size() / topk, qb);
-
-    stat = db_->DropCollection(collection_info.collection_id_);
-    ASSERT_TRUE(stat.ok());
-}
-
-TEST_F(DBTestWALRecovery, RECOVERY_WITH_NO_ERROR) {
-    milvus::engine::meta::CollectionSchema collection_info = BuildCollectionSchema();
-    auto stat = db_->CreateCollection(collection_info);
-    ASSERT_TRUE(stat.ok());
-
-    uint64_t qb = 100;
-
-    for (int i = 0; i < 5; i++) {
-        milvus::engine::VectorsData qxb;
-        BuildVectors(qb, i, qxb);
-        stat = db_->InsertVectors(collection_info.collection_id_, "", qxb);
-        ASSERT_TRUE(stat.ok());
-    }
-
-    const int64_t topk = 10;
-    const int64_t nprobe = 10;
-    milvus::json json_params = {{"nprobe", nprobe}};
-    milvus::engine::ResultIds result_ids;
-    milvus::engine::ResultDistances result_distances;
-    milvus::engine::VectorsData qxb;
-    BuildVectors(qb, 0, qxb);
-    stat = db_->Query(dummy_context_,
-            collection_info.collection_id_, {}, topk, json_params, qxb, result_ids, result_distances);
-    ASSERT_TRUE(stat.ok());
-    ASSERT_NE(result_ids.size() / topk, qb);
-
-    fiu_init(0);
-    fiu_enable("DBImpl.ExexWalRecord.return", 1, nullptr, 0);
-    db_ = nullptr;
-    fiu_disable("DBImpl.ExexWalRecord.return");
-    auto options = GetOptions();
-    db_ = milvus::engine::DBFactory::Build(options);
-
-    result_ids.clear();
-    result_distances.clear();
-    stat = db_->Query(dummy_context_,
-            collection_info.collection_id_, {}, topk, json_params, qxb, result_ids, result_distances);
-    ASSERT_TRUE(stat.ok());
-    ASSERT_EQ(result_ids.size(), 0);
-
-    db_->Flush();
-    result_ids.clear();
-    result_distances.clear();
-    stat = db_->Query(dummy_context_,
-            collection_info.collection_id_, {}, topk, json_params, qxb, result_ids, result_distances);
-    ASSERT_TRUE(stat.ok());
-    ASSERT_EQ(result_ids.size() / topk, qb);
-}
-
-TEST_F(DBTestWALRecovery_Error, RECOVERY_WITH_INVALID_LOG_FILE) {
-    milvus::engine::meta::CollectionSchema collection_info = BuildCollectionSchema();
-    auto stat = db_->CreateCollection(collection_info);
-    ASSERT_TRUE(stat.ok());
-
-    uint64_t qb = 100;
-    milvus::engine::VectorsData qxb;
-    BuildVectors(qb, 0, qxb);
-
-    stat = db_->InsertVectors(collection_info.collection_id_, "", qxb);
-    ASSERT_TRUE(stat.ok());
-
-    fiu_init(0);
-    fiu_enable("DBImpl.ExexWalRecord.return", 1, nullptr, 0);
-    db_ = nullptr;
-    fiu_disable("DBImpl.ExexWalRecord.return");
-
-    auto options = GetOptions();
-    // delete wal log file so that recovery will failed when start db next time.
-    boost::filesystem::remove(options.mxlog_path_ + "0.wal");
-    ASSERT_ANY_THROW(db_ = milvus::engine::DBFactory::Build(options));
-}
+//TEST_F(DBTestWAL, DB_INSERT_TEST) {
+//    milvus::engine::meta::CollectionSchema collection_info = BuildCollectionSchema();
+//    auto stat = db_->CreateCollection(collection_info);
+//    ASSERT_TRUE(stat.ok());
+//
+//    uint64_t qb = 100;
+//    milvus::engine::VectorsData qxb;
+//    BuildVectors(qb, 0, qxb);
+//
+//    std::string partition_name = "part_name";
+//    std::string partition_tag = "part_tag";
+//    stat = db_->CreatePartition(collection_info.collection_id_, partition_name, partition_tag);
+//    ASSERT_TRUE(stat.ok());
+//
+//    stat = db_->InsertVectors(collection_info.collection_id_, partition_tag, qxb);
+//    ASSERT_TRUE(stat.ok());
+//
+//    stat = db_->InsertVectors(collection_info.collection_id_, "", qxb);
+//    ASSERT_TRUE(stat.ok());
+//
+//    stat = db_->InsertVectors(collection_info.collection_id_, "not exist", qxb);
+//    ASSERT_FALSE(stat.ok());
+//
+//    db_->Flush(collection_info.collection_id_);
+//
+//    stat = db_->DropCollection(collection_info.collection_id_);
+//    ASSERT_TRUE(stat.ok());
+//}
+//
+//TEST_F(DBTestWAL, DB_STOP_TEST) {
+//    milvus::engine::meta::CollectionSchema collection_info = BuildCollectionSchema();
+//    auto stat = db_->CreateCollection(collection_info);
+//    ASSERT_TRUE(stat.ok());
+//
+//    uint64_t qb = 100;
+//    for (int i = 0; i < 5; i++) {
+//        milvus::engine::VectorsData qxb;
+//        BuildVectors(qb, i, qxb);
+//        stat = db_->InsertVectors(collection_info.collection_id_, "", qxb);
+//        ASSERT_TRUE(stat.ok());
+//    }
+//
+//    db_->Stop();
+//    db_->Start();
+//
+//    const int64_t topk = 10;
+//    const int64_t nprobe = 10;
+//    milvus::json json_params = {{"nprobe", nprobe}};
+//    milvus::engine::ResultIds result_ids;
+//    milvus::engine::ResultDistances result_distances;
+//    milvus::engine::VectorsData qxb;
+//    BuildVectors(qb, 0, qxb);
+//    stat = db_->Query(dummy_context_,
+//            collection_info.collection_id_, {}, topk, json_params, qxb, result_ids, result_distances);
+//    ASSERT_TRUE(stat.ok());
+//    ASSERT_EQ(result_ids.size() / topk, qb);
+//
+//    stat = db_->DropCollection(collection_info.collection_id_);
+//    ASSERT_TRUE(stat.ok());
+//}
+//
+//TEST_F(DBTestWALRecovery, RECOVERY_WITH_NO_ERROR) {
+//    milvus::engine::meta::CollectionSchema collection_info = BuildCollectionSchema();
+//    auto stat = db_->CreateCollection(collection_info);
+//    ASSERT_TRUE(stat.ok());
+//
+//    uint64_t qb = 100;
+//
+//    for (int i = 0; i < 5; i++) {
+//        milvus::engine::VectorsData qxb;
+//        BuildVectors(qb, i, qxb);
+//        stat = db_->InsertVectors(collection_info.collection_id_, "", qxb);
+//        ASSERT_TRUE(stat.ok());
+//    }
+//
+//    const int64_t topk = 10;
+//    const int64_t nprobe = 10;
+//    milvus::json json_params = {{"nprobe", nprobe}};
+//    milvus::engine::ResultIds result_ids;
+//    milvus::engine::ResultDistances result_distances;
+//    milvus::engine::VectorsData qxb;
+//    BuildVectors(qb, 0, qxb);
+//
+//    fiu_init(0);
+//    fiu_enable("DBImpl.ExexWalRecord.return", 1, nullptr, 0);
+//    db_ = nullptr; // don't use FreeDB(), this case needs keep the meta
+//    fiu_disable("DBImpl.ExexWalRecord.return");
+//    auto options = GetOptions();
+//    BuildDB(options);
+//
+//    result_ids.clear();
+//    result_distances.clear();
+//    stat = db_->Query(dummy_context_,
+//            collection_info.collection_id_, {}, topk, json_params, qxb, result_ids, result_distances);
+//    ASSERT_TRUE(stat.ok());
+//    ASSERT_EQ(result_ids.size(), 0);
+//
+//    db_->Flush();
+//    result_ids.clear();
+//    result_distances.clear();
+//    stat = db_->Query(dummy_context_,
+//            collection_info.collection_id_, {}, topk, json_params, qxb, result_ids, result_distances);
+//    ASSERT_TRUE(stat.ok());
+//    ASSERT_EQ(result_ids.size() / topk, qb);
+//}
+//
+//TEST_F(DBTestWALRecovery_Error, RECOVERY_WITH_INVALID_LOG_FILE) {
+//    milvus::engine::meta::CollectionSchema collection_info = BuildCollectionSchema();
+//    auto stat = db_->CreateCollection(collection_info);
+//    ASSERT_TRUE(stat.ok());
+//
+//    uint64_t qb = 100;
+//    milvus::engine::VectorsData qxb;
+//    BuildVectors(qb, 0, qxb);
+//
+//    stat = db_->InsertVectors(collection_info.collection_id_, "", qxb);
+//    ASSERT_TRUE(stat.ok());
+//
+//    fiu_init(0);
+//    fiu_enable("DBImpl.ExexWalRecord.return", 1, nullptr, 0);
+//    FreeDB();
+//    fiu_disable("DBImpl.ExexWalRecord.return");
+//
+//    auto options = GetOptions();
+//    // delete wal log file so that recovery will failed when start db next time.
+//    boost::filesystem::remove(options.mxlog_path_ + "0.wal");
+//    ASSERT_ANY_THROW(BuildDB(options));
+//}
 
 TEST_F(DBTest2, FLUSH_NON_EXISTING_COLLECTION) {
     auto status = db_->Flush("non_existing");
@@ -1256,7 +1253,6 @@ TEST_F(DBTest2, GET_VECTOR_BY_ID_INVALID_TEST) {
     fiu_disable("bloom_filter_nullptr");
 }
 
-
 TEST_F(DBTest2, GET_VECTOR_IDS_TEST) {
     milvus::engine::meta::CollectionSchema collection_schema = BuildCollectionSchema();
     auto stat = db_->CreateCollection(collection_schema);
@@ -1316,11 +1312,11 @@ TEST_F(DBTest2, GET_VECTOR_IDS_TEST) {
 TEST_F(DBTest2, INSERT_DUPLICATE_ID) {
     auto options = GetOptions();
     options.wal_enable_ = false;
-    db_ = milvus::engine::DBFactory::Build(options);
+    BuildDB(options);
 
     milvus::engine::meta::CollectionSchema collection_schema = BuildCollectionSchema();
     auto stat = db_->CreateCollection(collection_schema);
-    ASSERT_TRUE(stat.ok()) << " CreateCollection: " << stat.message();
+    ASSERT_TRUE(stat.ok());
 
     uint64_t size = 20;
     milvus::engine::VectorsData vector;
@@ -1331,10 +1327,10 @@ TEST_F(DBTest2, INSERT_DUPLICATE_ID) {
     }
 
     stat = db_->InsertVectors(COLLECTION_NAME, "", vector);
-    ASSERT_TRUE(stat.ok()) << " InsertVectors: " << stat.message();
+    ASSERT_TRUE(stat.ok());
 
     stat = db_->Flush(COLLECTION_NAME);
-    ASSERT_TRUE(stat.ok()) << " Flush: " << stat.message();
+    ASSERT_TRUE(stat.ok());
 }
 
 /*

@@ -14,6 +14,7 @@
 #include <assert.h>
 #include <fiu-local.h>
 
+#include <knowhere/index/structured_index/StructuredIndexSort.h>
 #include <algorithm>
 #include <boost/filesystem.hpp>
 #include <chrono>
@@ -31,6 +32,7 @@
 #include "Utils.h"
 #include "cache/CpuCacheMgr.h"
 #include "cache/GpuCacheMgr.h"
+#include "config/Utils.h"
 #include "db/IDGenerator.h"
 #include "db/merge/MergeManagerFactory.h"
 #include "engine/EngineFactory.h"
@@ -52,7 +54,6 @@
 #include "utils/Log.h"
 #include "utils/StringHelpFunctions.h"
 #include "utils/TimeRecorder.h"
-#include "utils/ValidationUtil.h"
 #include "wal/WalDefinations.h"
 
 #include "search/TaskInst.h"
@@ -138,7 +139,7 @@ DBImpl::Start() {
         // recovery
         while (1) {
             wal::MXLogRecord record;
-            auto error_code = wal_mgr_->GetNextRecovery(record);
+            auto error_code = wal_mgr_->GetNextEntityRecovery(record);
             if (error_code != WAL_SUCCESS) {
                 throw Exception(error_code, "Wal recovery error!");
             }
@@ -629,7 +630,7 @@ DBImpl::HasPartition(const std::string& collection_id, const std::string& tag, b
     // trim side-blank of tag, only compare valid characters
     // for example: " ab cd " is treated as "ab cd"
     std::string valid_tag = tag;
-    server::StringHelpFunctions::TrimStringBlank(valid_tag);
+    StringHelpFunctions::TrimStringBlank(valid_tag);
 
     if (valid_tag == milvus::engine::DEFAULT_PARTITON_TAG) {
         has_or_not = true;
@@ -748,16 +749,42 @@ DBImpl::InsertVectors(const std::string& collection_id, const std::string& parti
     return status;
 }
 
+// template <typename T>
+// Status
+// ConstructAttr(const uint8_t* record, int64_t row_num, const std::string& field_name,
+//              std::unordered_map<std::string, std::vector<uint8_t>>& attr_datas,
+//              std::unordered_map<std::string, uint64_t>& attr_nbytes,
+//              std::unordered_map<std::string, uint64_t>& attr_data_size) {
+//    std::vector<uint8_t> data;
+//    data.resize(row_num * sizeof(int8_t));
+//
+//    std::vector<int64_t> attr_value(row_num, 0);
+//    memcpy(attr_value.data(), record, row_num * sizeof(int64_t));
+//
+//    std::vector<T> raw_value(row_num, 0);
+//    for (int64_t i = 0; i < row_num; ++i) {
+//        raw_value[i] = attr_value[i];
+//    }
+//
+//    memcpy(data.data(), raw_value.data(), row_num * sizeof(T));
+//    attr_datas.insert(std::make_pair(field_name, data));
+//
+//    attr_nbytes.insert(std::make_pair(field_name, sizeof(T)));
+//    attr_data_size.insert(std::make_pair(field_name, row_num * sizeof(T)));
+//}
+
 Status
-CopyToAttr(std::vector<uint8_t>& record, uint64_t row_num, const std::vector<std::string>& field_names,
+CopyToAttr(const std::vector<uint8_t>& record, int64_t row_num, const std::vector<std::string>& field_names,
            std::unordered_map<std::string, meta::hybrid::DataType>& attr_types,
            std::unordered_map<std::string, std::vector<uint8_t>>& attr_datas,
            std::unordered_map<std::string, uint64_t>& attr_nbytes,
            std::unordered_map<std::string, uint64_t>& attr_data_size) {
-    uint64_t offset = 0;
+    int64_t offset = 0;
     for (auto name : field_names) {
         switch (attr_types.at(name)) {
             case meta::hybrid::DataType::INT8: {
+                //                ConstructAttr<int8_t>(record, row_num, name, attr_datas, attr_nbytes, attr_data_size);
+                //                offset += row_num * sizeof(int64_t);
                 std::vector<uint8_t> data;
                 data.resize(row_num * sizeof(int8_t));
 
@@ -896,6 +923,7 @@ DBImpl::InsertEntities(const std::string& collection_id, const std::string& part
         return status;
     }
 
+#if 0
     wal::MXLogRecord record;
     record.lsn = 0;
     record.collection_id = collection_id;
@@ -918,8 +946,8 @@ DBImpl::InsertEntities(const std::string& collection_id, const std::string& part
     }
 
     status = ExecWalRecord(record);
+#endif
 
-#if 0
     if (options_.wal_enable_) {
         std::string target_collection_name;
         status = GetPartitionByTag(collection_id, partition_tag, target_collection_name);
@@ -962,7 +990,6 @@ DBImpl::InsertEntities(const std::string& collection_id, const std::string& part
 
         status = ExecWalRecord(record);
     }
-#endif
 
     return status;
 }
@@ -1306,7 +1333,8 @@ DBImpl::GetVectorsByID(const engine::meta::CollectionSchema& collection, const I
 
 Status
 DBImpl::GetEntitiesByID(const std::string& collection_id, const milvus::engine::IDNumbers& id_array,
-                        std::vector<engine::VectorsData>& vectors, std::vector<engine::AttrsData>& attrs) {
+                        const std::vector<std::string>& field_names, std::vector<engine::VectorsData>& vectors,
+                        std::vector<engine::AttrsData>& attrs) {
     if (!initialized_.load(std::memory_order_acquire)) {
         return SHUTDOWN_ERROR;
     }
@@ -1330,10 +1358,16 @@ DBImpl::GetEntitiesByID(const std::string& collection_id, const milvus::engine::
     }
     std::unordered_map<std::string, engine::meta::hybrid::DataType> attr_type;
     for (auto schema : fields_schema.fields_schema_) {
-        if (schema.field_type_ == (int32_t)engine::meta::hybrid::DataType::VECTOR) {
+        if (schema.field_type_ == (int32_t)engine::meta::hybrid::DataType::FLOAT_VECTOR ||
+            schema.field_type_ == (int32_t)engine::meta::hybrid::DataType::BINARY_VECTOR) {
             continue;
         }
-        attr_type.insert(std::make_pair(schema.field_name_, (engine::meta::hybrid::DataType)schema.field_type_));
+        for (const auto& name : field_names) {
+            if (name == schema.field_name_) {
+                attr_type.insert(
+                    std::make_pair(schema.field_name_, (engine::meta::hybrid::DataType)schema.field_type_));
+            }
+        }
     }
 
     meta::FilesHolder files_holder;
@@ -1768,6 +1802,228 @@ DBImpl::CreateIndex(const std::shared_ptr<server::Context>& context, const std::
 }
 
 Status
+DBImpl::SerializeStructuredIndex(const meta::SegmentSchema& segment_schema,
+                                 const std::unordered_map<std::string, knowhere::IndexPtr>& attr_indexes,
+                                 const std::unordered_map<std::string, int64_t>& attr_sizes,
+                                 const std::unordered_map<std::string, meta::hybrid::DataType>& attr_types) {
+    auto status = Status::OK();
+
+    std::string segment_dir;
+    utils::GetParentPath(segment_schema.location_, segment_dir);
+    auto segment_writer_ptr = std::make_shared<segment::SegmentWriter>(segment_dir);
+    status = segment_writer_ptr->SetAttrsIndex(attr_indexes, attr_sizes, attr_types);
+    if (!status.ok()) {
+        return status;
+    }
+    status = segment_writer_ptr->WriteAttrsIndex();
+    if (!status.ok()) {
+        return status;
+    }
+
+    return status;
+}
+
+Status
+DBImpl::FlushAttrsIndex(const std::string& collection_id) {
+    std::vector<int> file_types = {
+        milvus::engine::meta::SegmentSchema::RAW,
+        milvus::engine::meta::SegmentSchema::TO_INDEX,
+    };
+    meta::FilesHolder files_holder;
+    auto status = meta_ptr_->FilesByType(collection_id, file_types, files_holder);
+    if (!status.ok()) {
+        return status;
+    }
+
+    meta::CollectionSchema collection_schema;
+    meta::hybrid::FieldsSchema fields_schema;
+    collection_schema.collection_id_ = collection_id;
+    status = meta_ptr_->DescribeHybridCollection(collection_schema, fields_schema);
+    if (!status.ok()) {
+        return Status::OK();
+    }
+
+    std::unordered_map<std::string, std::vector<uint8_t>> attr_datas;
+    std::unordered_map<std::string, int64_t> attr_sizes;
+    std::unordered_map<std::string, meta::hybrid::DataType> attr_types;
+    std::vector<std::string> field_names;
+
+    for (auto& segment_schema : files_holder.HoldFiles()) {
+        std::string segment_dir;
+        utils::GetParentPath(segment_schema.location_, segment_dir);
+        auto segment_reader_ptr = std::make_shared<segment::SegmentReader>(segment_dir);
+        segment::SegmentPtr segment_ptr;
+        segment_reader_ptr->GetSegment(segment_ptr);
+        status = segment_reader_ptr->Load();
+
+        if (!status.ok()) {
+            return status;
+        }
+
+        for (auto& field_schema : fields_schema.fields_schema_) {
+            if (field_schema.field_type_ != (int32_t)meta::hybrid::DataType::FLOAT_VECTOR) {
+                attr_types.insert(
+                    std::make_pair(field_schema.field_name_, (meta::hybrid::DataType)field_schema.field_type_));
+                field_names.emplace_back(field_schema.field_name_);
+            }
+        }
+
+        auto attrs = segment_ptr->attrs_ptr_->attrs;
+
+        auto attr_it = attrs.begin();
+        for (; attr_it != attrs.end(); attr_it++) {
+            attr_datas.insert(std::make_pair(attr_it->first, attr_it->second->GetMutableData()));
+            attr_sizes.insert(std::make_pair(attr_it->first, attr_it->second->GetCount()));
+        }
+
+        std::unordered_map<std::string, knowhere::IndexPtr> attr_indexes;
+        status = CreateStructuredIndex(collection_id, field_names, attr_types, attr_datas, attr_sizes, attr_indexes);
+        if (!status.ok()) {
+            return status;
+        }
+
+        status = SerializeStructuredIndex(segment_schema, attr_indexes, attr_sizes, attr_types);
+        if (!status.ok()) {
+            return status;
+        }
+    }
+}
+
+Status
+DBImpl::CreateStructuredIndex(const std::string& collection_id, const std::vector<std::string>& field_names,
+                              const std::unordered_map<std::string, meta::hybrid::DataType>& attr_types,
+                              const std::unordered_map<std::string, std::vector<uint8_t>>& attr_datas,
+                              std::unordered_map<std::string, int64_t>& attr_sizes,
+                              std::unordered_map<std::string, knowhere::IndexPtr>& attr_indexes) {
+    if (!initialized_.load(std::memory_order_acquire)) {
+        return SHUTDOWN_ERROR;
+    }
+
+    for (auto& field_name : field_names) {
+        knowhere::IndexPtr index_ptr = nullptr;
+        switch (attr_types.at(field_name)) {
+            case engine::meta::hybrid::DataType::INT8: {
+                auto attr_size = attr_sizes.at(field_name);
+                std::vector<int8_t> attr_data(attr_size);
+                memcpy(attr_data.data(), attr_datas.at(field_name).data(), attr_size);
+
+                auto int8_index_ptr = std::make_shared<knowhere::StructuredIndexSort<int8_t>>(
+                    (size_t)attr_size, reinterpret_cast<const signed char*>(attr_data.data()));
+                index_ptr = std::static_pointer_cast<knowhere::Index>(int8_index_ptr);
+
+                attr_indexes.insert(std::make_pair(field_name, index_ptr));
+                attr_sizes.at(field_name) *= sizeof(int8_t);
+                break;
+            }
+            case engine::meta::hybrid::DataType::INT16: {
+                auto attr_size = attr_sizes.at(field_name);
+                std::vector<int16_t> attr_data(attr_size);
+                memcpy(attr_data.data(), attr_datas.at(field_name).data(), attr_size);
+
+                auto int16_index_ptr = std::make_shared<knowhere::StructuredIndexSort<int16_t>>(
+                    (size_t)attr_size, reinterpret_cast<const int16_t*>(attr_data.data()));
+                index_ptr = std::static_pointer_cast<knowhere::Index>(int16_index_ptr);
+
+                attr_indexes.insert(std::make_pair(field_name, index_ptr));
+                attr_sizes.at(field_name) *= sizeof(int16_t);
+                break;
+            }
+            case engine::meta::hybrid::DataType::INT32: {
+                auto attr_size = attr_sizes.at(field_name);
+                std::vector<int32_t> attr_data(attr_size);
+                memcpy(attr_data.data(), attr_datas.at(field_name).data(), attr_size);
+
+                auto int32_index_ptr = std::make_shared<knowhere::StructuredIndexSort<int32_t>>(
+                    (size_t)attr_size, reinterpret_cast<const int32_t*>(attr_data.data()));
+                index_ptr = std::static_pointer_cast<knowhere::Index>(int32_index_ptr);
+
+                attr_indexes.insert(std::make_pair(field_name, index_ptr));
+                attr_sizes.at(field_name) *= sizeof(int32_t);
+                break;
+            }
+            case engine::meta::hybrid::DataType::INT64: {
+                auto attr_size = attr_sizes.at(field_name);
+                std::vector<int64_t> attr_data(attr_size);
+                memcpy(attr_data.data(), attr_datas.at(field_name).data(), attr_size);
+
+                auto int64_index_ptr = std::make_shared<knowhere::StructuredIndexSort<int64_t>>(
+                    (size_t)attr_size, reinterpret_cast<const int64_t*>(attr_data.data()));
+                index_ptr = std::static_pointer_cast<knowhere::Index>(int64_index_ptr);
+
+                attr_indexes.insert(std::make_pair(field_name, index_ptr));
+                attr_sizes.at(field_name) *= sizeof(int64_t);
+                break;
+            }
+            case engine::meta::hybrid::DataType::FLOAT: {
+                auto attr_size = attr_sizes.at(field_name);
+                std::vector<float> attr_data(attr_size);
+                memcpy(attr_data.data(), attr_datas.at(field_name).data(), attr_size);
+
+                auto float_index_ptr = std::make_shared<knowhere::StructuredIndexSort<float>>(
+                    (size_t)attr_size, reinterpret_cast<const float*>(attr_data.data()));
+                index_ptr = std::static_pointer_cast<knowhere::Index>(float_index_ptr);
+
+                attr_indexes.insert(std::make_pair(field_name, index_ptr));
+                attr_sizes.at(field_name) *= sizeof(float);
+                break;
+            }
+            case engine::meta::hybrid::DataType::DOUBLE: {
+                auto attr_size = attr_sizes.at(field_name);
+                std::vector<double> attr_data(attr_size);
+                memcpy(attr_data.data(), attr_datas.at(field_name).data(), attr_size);
+
+                auto double_index_ptr = std::make_shared<knowhere::StructuredIndexSort<double>>(
+                    (size_t)attr_size, reinterpret_cast<const double*>(attr_data.data()));
+                index_ptr = std::static_pointer_cast<knowhere::Index>(double_index_ptr);
+
+                attr_indexes.insert(std::make_pair(field_name, index_ptr));
+                attr_sizes.at(field_name) *= sizeof(double);
+                break;
+            }
+            default: {}
+        }
+    }
+
+#if 0
+    {
+        std::unordered_map<std::string, engine::meta::hybrid::DataType> attr_type;
+        engine::meta::CollectionSchema collection_schema;
+        engine::meta::hybrid::FieldsSchema fields_schema;
+        collection_schema.collection_id_ = collection_id;
+        status = meta_ptr_->DescribeHybridCollection(collection_schema, fields_schema);
+        if (!status.ok()) {
+            return status;
+        }
+
+        if (field_names.empty()) {
+            for (auto& schema : fields_schema.fields_schema_) {
+                field_names.emplace_back(schema.collection_id_);
+            }
+        }
+
+        for (auto& schema : fields_schema.fields_schema_) {
+            attr_type.insert(std::make_pair(schema.field_name_, (engine::meta::hybrid::DataType)schema.field_type_));
+        }
+
+        meta::FilesHolder files_holder;
+        meta_ptr_->FilesToIndex(files_holder);
+
+        milvus::engine::meta::SegmentsSchema& to_index_files = files_holder.HoldFiles();
+        status = index_failed_checker_.IgnoreFailedIndexFiles(to_index_files);
+        if (!status.ok()) {
+            return status;
+        }
+
+        status = SerializeStructuredIndex(to_index_files, attr_type, field_names);
+        if (!status.ok()) {
+            return status;
+        }
+    }
+#endif
+    return Status::OK();
+}
+
+Status
 DBImpl::DescribeIndex(const std::string& collection_id, CollectionIndex& index) {
     if (!initialized_.load(std::memory_order_acquire)) {
         return SHUTDOWN_ERROR;
@@ -1986,7 +2242,7 @@ DBImpl::HybridQuery(const std::shared_ptr<server::Context>& context, const std::
 Status
 DBImpl::Query(const std::shared_ptr<server::Context>& context, const std::string& collection_id,
               const std::vector<std::string>& partition_tags, uint64_t k, const milvus::json& extra_params,
-              const VectorsData& vectors, ResultIds& result_ids, ResultDistances& result_distances) {
+              VectorsData& vectors, ResultIds& result_ids, ResultDistances& result_distances) {
     milvus::server::ContextChild tracer(context, "Query");
 
     if (!initialized_.load(std::memory_order_acquire)) {
@@ -2074,7 +2330,7 @@ DBImpl::Query(const std::shared_ptr<server::Context>& context, const std::string
 
 Status
 DBImpl::QueryByFileID(const std::shared_ptr<server::Context>& context, const std::vector<std::string>& file_ids,
-                      uint64_t k, const milvus::json& extra_params, const VectorsData& vectors, ResultIds& result_ids,
+                      uint64_t k, const milvus::json& extra_params, VectorsData& vectors, ResultIds& result_ids,
                       ResultDistances& result_distances) {
     milvus::server::ContextChild tracer(context, "Query by file id");
 
@@ -2121,7 +2377,7 @@ DBImpl::Size(uint64_t& result) {
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 Status
 DBImpl::QueryAsync(const std::shared_ptr<server::Context>& context, meta::FilesHolder& files_holder, uint64_t k,
-                   const milvus::json& extra_params, const VectorsData& vectors, ResultIds& result_ids,
+                   const milvus::json& extra_params, VectorsData& vectors, ResultIds& result_ids,
                    ResultDistances& result_distances) {
     milvus::server::ContextChild tracer(context, "Query Async");
     server::CollectQueryMetrics metrics(vectors.vector_count_);
@@ -2221,28 +2477,28 @@ DBImpl::HybridQueryAsync(const std::shared_ptr<server::Context>& context, const 
     result.result_distances_ = job->GetResultDistances();
 
     // step 4: get entities by result ids
-    auto status = GetEntitiesByID(collection_id, result.result_ids_, result.vectors_, result.attrs_);
+    auto status = GetEntitiesByID(collection_id, result.result_ids_, field_names, result.vectors_, result.attrs_);
     if (!status.ok()) {
         query_async_ctx->GetTraceContext()->GetSpan()->Finish();
         return status;
     }
 
     // step 5: filter entities by field names
-    std::vector<engine::AttrsData> filter_attrs;
-    for (auto attr : result.attrs_) {
-        AttrsData attrs_data;
-        attrs_data.attr_type_ = attr.attr_type_;
-        attrs_data.attr_count_ = attr.attr_count_;
-        attrs_data.id_array_ = attr.id_array_;
-        for (auto& name : field_names) {
-            if (attr.attr_data_.find(name) != attr.attr_data_.end()) {
-                attrs_data.attr_data_.insert(std::make_pair(name, attr.attr_data_.at(name)));
-            }
-        }
-        filter_attrs.emplace_back(attrs_data);
-    }
-
-    result.attrs_ = filter_attrs;
+    //    std::vector<engine::AttrsData> filter_attrs;
+    //    for (auto attr : result.attrs_) {
+    //        AttrsData attrs_data;
+    //        attrs_data.attr_type_ = attr.attr_type_;
+    //        attrs_data.attr_count_ = attr.attr_count_;
+    //        attrs_data.id_array_ = attr.id_array_;
+    //        for (auto& name : field_names) {
+    //            if (attr.attr_data_.find(name) != attr.attr_data_.end()) {
+    //                attrs_data.attr_data_.insert(std::make_pair(name, attr.attr_data_.at(name)));
+    //            }
+    //        }
+    //        filter_attrs.emplace_back(attrs_data);
+    //    }
+    //
+    //    result.attrs_ = filter_attrs;
 
     rc.ElapseFromBegin("Engine query totally cost");
 
@@ -2585,7 +2841,7 @@ DBImpl::GetPartitionByTag(const std::string& collection_id, const std::string& p
         // trim side-blank of tag, only compare valid characters
         // for example: " ab cd " is treated as "ab cd"
         std::string valid_tag = partition_tag;
-        server::StringHelpFunctions::TrimStringBlank(valid_tag);
+        StringHelpFunctions::TrimStringBlank(valid_tag);
 
         if (valid_tag == milvus::engine::DEFAULT_PARTITON_TAG) {
             partition_name = collection_id;
@@ -2611,7 +2867,7 @@ DBImpl::GetPartitionsByTags(const std::string& collection_id, const std::vector<
         // trim side-blank of tag, only compare valid characters
         // for example: " ab cd " is treated as "ab cd"
         std::string valid_tag = tag;
-        server::StringHelpFunctions::TrimStringBlank(valid_tag);
+        StringHelpFunctions::TrimStringBlank(valid_tag);
 
         if (valid_tag == milvus::engine::DEFAULT_PARTITON_TAG) {
             partition_name_array.insert(collection_id);
@@ -2619,7 +2875,7 @@ DBImpl::GetPartitionsByTags(const std::string& collection_id, const std::vector<
         }
 
         for (auto& schema : partition_array) {
-            if (server::StringHelpFunctions::IsRegexMatch(schema.partition_tag_, valid_tag)) {
+            if (StringHelpFunctions::IsRegexMatch(schema.partition_tag_, valid_tag)) {
                 partition_name_array.insert(schema.collection_id_);
             }
         }
@@ -2944,6 +3200,11 @@ DBImpl::ExecWalRecord(const wal::MXLogRecord& record) {
                         break;
                     }
                     flushed_collections.insert(collection_id);
+
+                    //                    status = FlushAttrsIndex(collection_id);
+                    //                    if (!status.ok()) {
+                    //                        return status;
+                    //                    }
                 }
 
                 collections_flushed(record.collection_id, flushed_collections);
@@ -3001,9 +3262,9 @@ DBImpl::BackgroundWalThread() {
         }
 
         wal::MXLogRecord record;
-        auto error_code = wal_mgr_->GetNextRecord(record);
+        auto error_code = wal_mgr_->GetNextEntityRecord(record);
         if (error_code != WAL_SUCCESS) {
-            LOG_ENGINE_ERROR_ << "WAL background GetNextRecord error";
+            LOG_ENGINE_ERROR_ << "WAL background GetNextEntityRecord error";
             break;
         }
 

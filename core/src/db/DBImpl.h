@@ -132,7 +132,8 @@ class DBImpl : public DB, public server::CacheConfigHandler, public server::Engi
 
     Status
     GetEntitiesByID(const std::string& collection_id, const IDNumbers& id_array,
-                    std::vector<engine::VectorsData>& vectors, std::vector<engine::AttrsData>& attrs) override;
+                    const std::vector<std::string>& field_names, std::vector<engine::VectorsData>& vectors,
+                    std::vector<engine::AttrsData>& attrs) override;
 
     Status
     GetVectorIDs(const std::string& collection_id, const std::string& segment_id, IDNumbers& vector_ids) override;
@@ -143,6 +144,13 @@ class DBImpl : public DB, public server::CacheConfigHandler, public server::Engi
     Status
     CreateIndex(const std::shared_ptr<server::Context>& context, const std::string& collection_id,
                 const CollectionIndex& index) override;
+
+    Status
+    CreateStructuredIndex(const std::string& collection_id, const std::vector<std::string>& field_names,
+                          const std::unordered_map<std::string, meta::hybrid::DataType>& attr_types,
+                          const std::unordered_map<std::string, std::vector<uint8_t>>& attr_data,
+                          std::unordered_map<std::string, int64_t>& attr_size,
+                          std::unordered_map<std::string, knowhere::IndexPtr>& attr_indexes) override;
 
     Status
     DescribeIndex(const std::string& collection_id, CollectionIndex& index) override;
@@ -178,15 +186,18 @@ class DBImpl : public DB, public server::CacheConfigHandler, public server::Engi
     Status
     Query(const std::shared_ptr<server::Context>& context, const std::string& collection_id,
           const std::vector<std::string>& partition_tags, uint64_t k, const milvus::json& extra_params,
-          const VectorsData& vectors, ResultIds& result_ids, ResultDistances& result_distances) override;
+          VectorsData& vectors, ResultIds& result_ids, ResultDistances& result_distances) override;
 
     Status
     QueryByFileID(const std::shared_ptr<server::Context>& context, const std::vector<std::string>& file_ids, uint64_t k,
-                  const milvus::json& extra_params, const VectorsData& vectors, ResultIds& result_ids,
+                  const milvus::json& extra_params, VectorsData& vectors, ResultIds& result_ids,
                   ResultDistances& result_distances) override;
 
     Status
     Size(uint64_t& result) override;
+
+    Status
+    FlushAttrsIndex(const std::string& collection_id) override;
 
  protected:
     void
@@ -198,7 +209,7 @@ class DBImpl : public DB, public server::CacheConfigHandler, public server::Engi
  private:
     Status
     QueryAsync(const std::shared_ptr<server::Context>& context, meta::FilesHolder& files_holder, uint64_t k,
-               const milvus::json& extra_params, const VectorsData& vectors, ResultIds& result_ids,
+               const milvus::json& extra_params, VectorsData& vectors, ResultIds& result_ids,
                ResultDistances& result_distances);
 
     Status
@@ -292,6 +303,12 @@ class DBImpl : public DB, public server::CacheConfigHandler, public server::Engi
 
     void
     ResumeIfLast();
+
+    Status
+    SerializeStructuredIndex(const meta::SegmentSchema& segment_schema,
+                             const std::unordered_map<std::string, knowhere::IndexPtr>& attr_indexes,
+                             const std::unordered_map<std::string, int64_t>& attr_sizes,
+                             const std::unordered_map<std::string, meta::hybrid::DataType>& attr_types);
 
  private:
     DBOptions options_;

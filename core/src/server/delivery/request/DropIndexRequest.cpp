@@ -11,9 +11,9 @@
 
 #include "server/delivery/request/DropIndexRequest.h"
 #include "server/DBWrapper.h"
+#include "server/ValidationUtil.h"
 #include "utils/Log.h"
 #include "utils/TimeRecorder.h"
-#include "utils/ValidationUtil.h"
 
 #include <fiu-local.h>
 #include <memory>
@@ -22,13 +22,18 @@ namespace milvus {
 namespace server {
 
 DropIndexRequest::DropIndexRequest(const std::shared_ptr<milvus::server::Context>& context,
-                                   const std::string& collection_name)
-    : BaseRequest(context, BaseRequest::kDropIndex), collection_name_(collection_name) {
+                                   const std::string& collection_name, const std::string& field_name,
+                                   const std::string& index_name)
+    : BaseRequest(context, BaseRequest::kDropIndex),
+      collection_name_(collection_name),
+      field_name_(field_name),
+      index_name_(index_name) {
 }
 
 BaseRequestPtr
-DropIndexRequest::Create(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name) {
-    return std::shared_ptr<BaseRequest>(new DropIndexRequest(context, collection_name));
+DropIndexRequest::Create(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name,
+                         const std::string& field_name, const std::string& index_name) {
+    return std::shared_ptr<BaseRequest>(new DropIndexRequest(context, collection_name, field_name, index_name));
 }
 
 Status
@@ -39,14 +44,17 @@ DropIndexRequest::OnExecute() {
         TimeRecorderAuto rc(hdr);
 
         // step 1: check arguments
-        auto status = ValidationUtil::ValidateCollectionName(collection_name_);
+        auto status = ValidateCollectionName(collection_name_);
         if (!status.ok()) {
             return status;
         }
 
         // only process root collection, ignore partition collection
         engine::meta::CollectionSchema collection_schema;
+        engine::meta::hybrid::FieldsSchema fields_schema;
         collection_schema.collection_id_ = collection_name_;
+        status = DBWrapper::DB()->DescribeHybridCollection(collection_schema, fields_schema);
+
         status = DBWrapper::DB()->DescribeCollection(collection_schema);
         fiu_do_on("DropIndexRequest.OnExecute.collection_not_exist",
                   status = Status(milvus::SERVER_UNEXPECTED_ERROR, ""));

@@ -32,8 +32,8 @@ class CompoundBaseOperation : public Operations {
     GetRepr() const override {
         std::stringstream ss;
         ss << "<" << GetName() << "(";
-        if (context_.prev_ss) {
-            ss << "SS=" << context_.prev_ss->GetID();
+        if (GetAdjustedSS()) {
+            ss << "SS=" << GetAdjustedSS()->GetID();
         }
         ss << "," << context_.ToString();
         ss << ",LSN=" << GetContextLsn();
@@ -43,9 +43,10 @@ class CompoundBaseOperation : public Operations {
 
     Status
     PreCheck() override {
-        if (GetContextLsn() <= prev_ss_->GetMaxLsn()) {
-            return Status(SS_INVALID_CONTEX_ERROR, "Invalid LSN found in operation");
-        }
+        // TODO
+        /* if (GetContextLsn() <= GetStartedSS()->GetMaxLsn()) { */
+        /*     return Status(SS_INVALID_CONTEX_ERROR, "Invalid LSN found in operation"); */
+        /* } */
         return Status::OK();
     }
 
@@ -104,6 +105,9 @@ class MergeOperation : public CompoundBaseOperation<MergeOperation> {
     CommitNewSegment(SegmentPtr&);
     Status
     CommitNewSegmentFile(const SegmentFileContext& context, SegmentFilePtr&);
+
+    Status
+    OnSnapshotStale() override;
 };
 
 class CreateCollectionOperation : public CompoundBaseOperation<CreateCollectionOperation> {

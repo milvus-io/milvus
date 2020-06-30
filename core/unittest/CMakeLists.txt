@@ -28,6 +28,7 @@ aux_source_directory(${MILVUS_ENGINE_SRC}/config config_files)
 aux_source_directory(${MILVUS_ENGINE_SRC}/config/handler config_handler_files)
 aux_source_directory(${MILVUS_ENGINE_SRC}/metrics metrics_files)
 aux_source_directory(${MILVUS_ENGINE_SRC}/db db_main_files)
+aux_source_directory(${MILVUS_ENGINE_SRC}/db/attr db_attr_files)
 aux_source_directory(${MILVUS_ENGINE_SRC}/db/engine db_engine_files)
 aux_source_directory(${MILVUS_ENGINE_SRC}/db/insert db_insert_files)
 aux_source_directory(${MILVUS_ENGINE_SRC}/db/meta db_meta_files)
@@ -126,43 +127,17 @@ aux_source_directory(${MILVUS_ENGINE_SRC}/segment segment_files)
 set(entry_file
         ${CMAKE_CURRENT_SOURCE_DIR}/main.cpp)
 
-set(helper_files
-        ${MILVUS_ENGINE_SRC}/config/Config.cpp
+set(common_files
         ${MILVUS_ENGINE_SRC}/utils/CommonUtil.cpp
-        ${MILVUS_ENGINE_SRC}/utils/Log.cpp
         ${MILVUS_ENGINE_SRC}/utils/TimeRecorder.cpp
         ${MILVUS_ENGINE_SRC}/utils/Status.cpp
         ${MILVUS_ENGINE_SRC}/utils/StringHelpFunctions.cpp
-        ${MILVUS_ENGINE_SRC}/utils/ValidationUtil.cpp
-        ${MILVUS_THIRDPARTY_SRC}/easyloggingpp/easylogging++.cc
         )
 
-set(common_files
-        ${cache_files}
-        ${config_files}
-        ${config_handler_files}
-        ${db_main_files}
-        ${db_engine_files}
-        ${db_insert_files}
-        ${db_meta_files}
-        ${db_merge_files}
-        ${db_wal_files}
-        ${db_snapshot_files}
-        ${metrics_files}
-        ${thirdparty_files}
-        ${scheduler_files}
-        ${wrapper_files}
-        ${storage_files}
-        ${helper_files}
-        ${server_init_files}
-        ${server_context_files}
-        ${grpc_service_files}
-        ${tracing_files}
-        ${codecs_files}
-        ${codecs_default_files}
-        ${segment_files}
-        ${search_files}
-        ${query_files}
+set(log_files
+        ${MILVUS_ENGINE_SRC}/utils/Log.cpp
+        ${MILVUS_ENGINE_SRC}/utils/LogUtil.cpp
+        ${MILVUS_THIRDPARTY_SRC}/easyloggingpp/easylogging++.cc
         )
 
 set(grpc_lib
@@ -229,7 +204,7 @@ if (MILVUS_GPU_VERSION)
             )
 endif ()
 
-add_subdirectory(db)
+#add_subdirectory(db)
 add_subdirectory(metrics)
 add_subdirectory(scheduler)
 add_subdirectory(server)

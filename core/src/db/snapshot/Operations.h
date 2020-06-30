@@ -41,8 +41,13 @@ class Operations : public std::enable_shared_from_this<Operations> {
                const OperationsType& type = OperationsType::Invalid);
 
     const ScopedSnapshotT&
-    GetPrevSnapshot() const {
+    GetStartedSS() const {
         return prev_ss_;
+    }
+
+    const ScopedSnapshotT&
+    GetAdjustedSS() const {
+        return context_.prev_ss;
     }
 
     virtual const LSN_TYPE&
@@ -99,10 +104,10 @@ class Operations : public std::enable_shared_from_this<Operations> {
     virtual Status
     PreCheck();
 
-    virtual Status
+    virtual const Status&
     ApplyToStore(Store& store);
 
-    Status
+    const Status&
     WaitToFinish();
 
     void
@@ -111,8 +116,9 @@ class Operations : public std::enable_shared_from_this<Operations> {
     void
     SetStatus(const Status& status);
 
-    Status
+    const Status&
     GetStatus() const {
+        std::unique_lock<std::mutex> lock(finish_mtx_);
         return status_;
     }
 
@@ -201,6 +207,8 @@ class CommitOperation : public Operations {
 
     Status
     GetResource(typename ResourceT::Ptr& res, bool wait = false) {
+        if (!status_.ok())
+            return status_;
         if (wait) {
             WaitToFinish();
         }
@@ -234,7 +242,7 @@ class LoadOperation : public Operations {
         : Operations(OperationContext(), ScopedSnapshotT(), OperationsType::O_Leaf), context_(context) {
     }
 
-    Status
+    const Status&
     ApplyToStore(Store& store) override {
         if (done_) {
             Done(store);
@@ -248,6 +256,8 @@ class LoadOperation : public Operations {
 
     Status
     GetResource(typename ResourceT::Ptr& res, bool wait = false) {
+        if (!status_.ok())
+            return status_;
         if (wait) {
             WaitToFinish();
         }
@@ -281,7 +291,7 @@ class HardDeleteOperation : public Operations {
         : Operations(OperationContext(), ScopedSnapshotT(), OperationsType::W_Leaf), id_(id) {
     }
 
-    Status
+    const Status&
     ApplyToStore(Store& store) override {
         if (done_)
             return status_;
@@ -302,7 +312,7 @@ class HardDeleteOperation<Collection> : public Operations {
         : Operations(OperationContext(), ScopedSnapshotT(), OperationsType::W_Leaf), id_(id) {
     }
 
-    Status
+    const Status&
     ApplyToStore(Store& store) override {
         if (done_) {
             Done(store);

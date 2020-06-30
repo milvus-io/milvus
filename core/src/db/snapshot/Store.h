@@ -58,9 +58,10 @@ class Store {
     DoCommit(ResourceT&&... resources) {
         auto t = std::make_tuple(std::forward<ResourceT>(resources)...);
         auto& t_size = std::tuple_size<decltype(t)>::value;
-        if (t_size == 0)
+        if (t_size == 0) {
             return false;
-        StartTransanction();
+        }
+        StartTransaction();
         std::apply([this](auto&&... resource) { ((std::cout << CommitResource(resource) << "\n"), ...); }, t);
         FinishTransaction();
         return true;
@@ -83,8 +84,9 @@ class Store {
     }
 
     void
-    StartTransanction() {
+    StartTransaction() {
     }
+
     void
     FinishTransaction() {
     }
@@ -207,7 +209,7 @@ class Store {
         auto& resources = std::get<Collection::MapT>(resources_);
         if (!collection.HasAssigned() && (name_ids_.find(collection.GetName()) != name_ids_.end()) &&
             (resources[name_ids_[collection.GetName()]]->IsActive()) && !collection.IsDeactive()) {
-            return Status(SS_DUPLICATED_ERROR, "Duplcated");
+            return Status(SS_DUPLICATED_ERROR, "Duplicated");
         }
         auto c = std::make_shared<Collection>(collection);
         auto& id = std::get<Index<Collection::MapT, MockResourcesT>::value>(ids_);

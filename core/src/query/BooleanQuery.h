@@ -61,7 +61,7 @@ class BooleanQuery {
     }
 
     std::vector<std::shared_ptr<BooleanQuery>>
-    getBooleanQuerys() {
+    getBooleanQueries() {
         return boolean_clauses_;
     }
 

@@ -16,10 +16,7 @@
 #include <regex>
 #include <string>
 
-#include "utils/ValidationUtil.h"
-
 namespace milvus {
-namespace server {
 
 void
 StringHelpFunctions::TrimStringBlank(std::string& string) {
@@ -156,11 +153,6 @@ StringHelpFunctions::IsRegexMatch(const std::string& target_str, const std::stri
 
 Status
 StringHelpFunctions::ConvertToBoolean(const std::string& str, bool& value) {
-    auto status = ValidationUtil::ValidateStringIsBool(str);
-    if (!status.ok()) {
-        return status;
-    }
-
     std::string s = str;
     std::transform(s.begin(), s.end(), s.begin(), ::tolower);
     value = s == "true" || s == "on" || s == "yes" || s == "1";
@@ -168,5 +160,4 @@ StringHelpFunctions::ConvertToBoolean(const std::string& str, bool& value) {
     return Status::OK();
 }
 
-}  // namespace server
 }  // namespace milvus

@@ -53,6 +53,7 @@ SegmentReader::Load() {
         default_codec.GetAttrsFormat()->read(fs_ptr_, segment_ptr_->attrs_ptr_);
         // default_codec.GetVectorIndexFormat()->read(fs_ptr_, segment_ptr_->vector_index_ptr_);
         default_codec.GetDeletedDocsFormat()->read(fs_ptr_, segment_ptr_->deleted_docs_ptr_);
+        default_codec.GetAttrsIndexFormat()->read(fs_ptr_, segment_ptr_->attrs_index_ptr_);
     } catch (std::exception& e) {
         return Status(DB_ERROR, e.what());
     }

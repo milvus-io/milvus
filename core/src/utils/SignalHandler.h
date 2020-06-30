@@ -9,39 +9,20 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
-#include "db/snapshot/ReferenceProxy.h"
-#include <assert.h>
-#include <iostream>
+#pragma once
+
+#include <cstdint>
 
 namespace milvus {
-namespace engine {
-namespace snapshot {
 
-void
-ReferenceProxy::Ref() {
-    ++refcnt_;
-}
+typedef void (*signal_func_ptr)(int32_t);
 
-void
-ReferenceProxy::UnRef() {
-    if (refcnt_ == 0)
-        return;
-    if (refcnt_.fetch_sub(1) == 1) {
-        for (auto& cb : on_no_ref_cbs_) {
-            cb();
-        }
-    }
-}
+extern signal_func_ptr signal_routine_func;
 
-void
-ReferenceProxy::RegisterOnNoRefCB(OnNoRefCBF cb) {
-    on_no_ref_cbs_.emplace_back(cb);
-}
+extern void
+HandleSignal(int signum);
 
-ReferenceProxy::~ReferenceProxy() {
-    /* OnDeRef(); */
-}
+extern void
+PrintStacktrace();
 
-}  // namespace snapshot
-}  // namespace engine
 }  // namespace milvus

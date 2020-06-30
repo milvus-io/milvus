@@ -53,7 +53,7 @@ class ConnectionImpl : public Connection {
     SetConfig(const std::string& node_name, const std::string& value) const override;
 
     Status
-    CreateCollection(const CollectionParam& param) override;
+    CreateCollection(const std::string& collection_name, std::vector<FieldPtr>& fields) override;
 
     bool
     HasCollection(const std::string& collection_name) override;
@@ -62,24 +62,28 @@ class ConnectionImpl : public Connection {
     DropCollection(const std::string& collection_name) override;
 
     Status
-    CreateIndex(const IndexParam& index_param) override;
+    CreateIndex(const std::string& collection_name, const std::string& field_name, const std::string& index_name,
+                const std::string& index_params) override;
 
     Status
-    Insert(const std::string& collection_name, const std::string& partition_tag,
-           const std::vector<Entity>& entity_array, std::vector<int64_t>& id_array) override;
+    Insert(const std::string& collection_name, const std::string& partition_tag, const FieldValue& entity_array,
+           std::vector<int64_t>& id_array) override;
 
     Status
     GetEntityByID(const std::string& collection_name, const std::vector<int64_t>& id_array,
-                  std::vector<Entity>& entities_data) override;
+                  std::string& entities) override;
 
     Status
     ListIDInSegment(const std::string& collection_name, const std::string& segment_name,
                     std::vector<int64_t>& id_array) override;
 
     Status
-    Search(const std::string& collection_name, const PartitionTagList& partition_tag_array,
-           const std::vector<Entity>& entity_array, int64_t topk, const std::string& extra_params,
-           TopKQueryResult& topk_query_result) override;
+    Search(const std::string& collection_name, const std::vector<std::string>& partition_list, const std::string& dsl,
+           const VectorParam& vector_param, TopKQueryResult& query_result) override;
+
+    Status
+    SearchPB(const std::string& collection_name, const std::vector<std::string>& partition_list,
+             BooleanQueryPtr& boolean_query, const std::string& extra_params, TopKQueryResult& query_result) override;
 
     Status
     GetCollectionInfo(const std::string& collection_name, CollectionParam& collection_param) override;
@@ -122,29 +126,6 @@ class ConnectionImpl : public Connection {
 
     Status
     Compact(const std::string& collection_name) override;
-
-    /*******************************New Interface**********************************/
-
-    Status
-    CreateHybridCollection(const HMapping& mapping) override;
-
-    Status
-    InsertEntity(const std::string& collection_name, const std::string& partition_tag, HEntity& entities,
-                 std::vector<uint64_t>& id_array) override;
-
-    Status
-    HybridSearchPB(const std::string& collection_name, const std::vector<std::string>& partition_list,
-                   BooleanQueryPtr& boolean_query, const std::string& extra_params,
-                   TopKHybridQueryResult& topk_query_result) override;
-
-    Status
-    HybridSearch(const std::string& collection_name, const std::vector<std::string>& partition_list,
-                 const std::string& dsl, const std::string& vector_param, const std::vector<Entity>& entity_array,
-                 TopKHybridQueryResult& query_result) override;
-
-    Status
-    GetHEntityByID(const std::string& collection_name, const std::vector<int64_t>& id_array,
-                   HybridQueryResult& result) override;
 
  private:
     std::shared_ptr<ClientProxy> client_proxy_;

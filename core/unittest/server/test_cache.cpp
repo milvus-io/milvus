@@ -18,6 +18,8 @@
 #include "knowhere/index/vector_index/VecIndex.h"
 #include "utils/Error.h"
 
+INITIALIZE_EASYLOGGINGPP
+
 namespace {
 
 class InvalidCacheMgr : public milvus::cache::CacheMgr<milvus::cache::DataObjPtr> {

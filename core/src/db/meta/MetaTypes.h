@@ -114,7 +114,8 @@ enum class DataType {
     FLOAT = 40,
     DOUBLE = 41,
 
-    VECTOR = 100,
+    FLOAT_VECTOR = 100,
+    BINARY_VECTOR = 101,
     UNKNOWN = 9999,
 };
 
@@ -154,6 +155,8 @@ struct FieldSchema {
     std::string collection_id_;
     std::string field_name_;
     int32_t field_type_ = (int)INT8;
+    std::string index_name_;
+    std::string index_param_;
     std::string field_params_;
 };
 

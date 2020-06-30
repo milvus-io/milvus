@@ -20,6 +20,10 @@
 #include <regex>
 #include <vector>
 
+#include "cache/CpuCacheMgr.h"
+#ifdef MILVUS_GPU_VERSION
+#include "cache/GpuCacheMgr.h"
+#endif
 #include "config/Config.h"
 //#include "storage/s3/S3ClientWrapper.h"
 #include "utils/CommonUtil.h"
@@ -56,7 +60,7 @@ Status
 CreateCollectionPath(const DBMetaOptions& options, const std::string& collection_id) {
     std::string db_path = options.path_;
     std::string table_path = db_path + TABLES_FOLDER + collection_id;
-    auto status = server::CommonUtil::CreateDirectory(table_path);
+    auto status = CommonUtil::CreateDirectory(table_path);
     if (!status.ok()) {
         LOG_ENGINE_ERROR_ << status.message();
         return status;
@@ -96,7 +100,7 @@ Status
 CreateCollectionFilePath(const DBMetaOptions& options, meta::SegmentSchema& table_file) {
     std::string parent_path = ConstructParentFolder(options.path_, table_file);
 
-    auto status = server::CommonUtil::CreateDirectory(parent_path);
+    auto status = CommonUtil::CreateDirectory(parent_path);
     fiu_do_on("CreateCollectionFilePath.fail_create", status = Status(DB_INVALID_PATH, ""));
     if (!status.ok()) {
         LOG_ENGINE_ERROR_ << status.message();
@@ -275,6 +279,25 @@ ExitOnWriteError(Status& status) {
     if (status.code() == SERVER_WRITE_ERROR) {
         utils::SendExitSignal();
     }
+}
+
+void
+EraseFromCache(const std::string& item_key) {
+    if (item_key.empty()) {
+        LOG_SERVER_ERROR_ << "Empty key cannot be erased from cache";
+        return;
+    }
+
+    cache::CpuCacheMgr::GetInstance()->EraseItem(item_key);
+
+#ifdef MILVUS_GPU_VERSION
+    server::Config& config = server::Config::GetInstance();
+    std::vector<int64_t> gpus;
+    config.GetGpuResourceConfigSearchResources(gpus);
+    for (auto& gpu : gpus) {
+        cache::GpuCacheMgr::GetInstance(gpu)->EraseItem(item_key);
+    }
+#endif
 }
 
 }  // namespace utils

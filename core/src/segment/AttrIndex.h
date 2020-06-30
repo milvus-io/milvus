@@ -19,16 +19,51 @@
 
 #include <memory>
 #include <string>
+#include <utility>
+#include "db/meta/MetaTypes.h"
+#include "knowhere/index/Index.h"
 
 namespace milvus {
 namespace segment {
 
 class AttrIndex {
  public:
-    explicit AttrIndex(AttrIndexWrapper attr_index_wrapper);
+    explicit AttrIndex(knowhere::IndexPtr index_ptr, engine::meta::hybrid::DataType& data_type,
+                       const std::string& field_name)
+        : index_ptr_(std::move(index_ptr)), data_type_(data_type), field_name_(std::move(field_name)) {
+    }
+
+    AttrIndex() = default;
+
+    knowhere::IndexPtr
+    GetAttrIndex() const {
+        return index_ptr_;
+    }
+
+    engine::meta::hybrid::DataType
+    GetDataType() const {
+        return data_type_;
+    }
+
+    const std::string&
+    GetFieldName() const {
+        return field_name_;
+    }
 
     void
-    Get(AttrIndexWrapper& attr_index_wrapper);
+    SetAttrIndex(const knowhere::IndexPtr& index_ptr) {
+        index_ptr_ = index_ptr;
+    }
+
+    void
+    SetDataType(const engine::meta::hybrid::DataType data_type) {
+        data_type_ = data_type;
+    }
+
+    void
+    SetFieldName(const std::string& field_name) {
+        field_name_ = field_name;
+    }
 
     // No copy and move
     AttrIndex(const AttrIndex&) = delete;
@@ -40,7 +75,9 @@ class AttrIndex {
     operator=(AttrIndex&&) = delete;
 
  private:
-    AttrIndexWrapper attr_index_wrapper_;
+    knowhere::IndexPtr index_ptr_ = nullptr;
+    engine::meta::hybrid::DataType data_type_;
+    std::string field_name_;
 };
 
 using AttrIndexPtr = std::shared_ptr<AttrIndex>;

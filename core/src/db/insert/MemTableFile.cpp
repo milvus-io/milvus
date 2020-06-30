@@ -23,7 +23,6 @@
 #include "metrics/Metrics.h"
 #include "segment/SegmentReader.h"
 #include "utils/Log.h"
-#include "utils/ValidationUtil.h"
 
 namespace milvus {
 namespace engine {

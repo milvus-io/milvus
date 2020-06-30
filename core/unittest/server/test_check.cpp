@@ -65,6 +65,7 @@ TEST_F(ServerCheckerTest, STORAGE_TEST) {
 }
 
 TEST_F(ServerCheckerTest, STORAGE_FAIL_TEST) {
+    fiu_init(0);
     fiu_enable("StorageChecker.CheckStoragePermission.logs_path_access_fail", 1, NULL, 0);
     ASSERT_FALSE(ms::StorageChecker::CheckStoragePermission().ok());
     fiu_disable("StorageChecker.CheckStoragePermission.logs_path_access_fail");
@@ -84,6 +85,7 @@ TEST_F(ServerCheckerTest, CPU_TEST) {
 }
 
 TEST_F(ServerCheckerTest, CPU_FAIL_TEST) {
+    fiu_init(0);
     fiu_enable("CpuChecker.CheckCpuInstructionSet.instruction_sets_empty", 1, NULL, 0);
     ASSERT_FALSE(ms::CpuChecker::CheckCpuInstructionSet().ok());
     fiu_disable("CpuChecker.CheckCpuInstructionSet.instruction_sets_empty");
@@ -122,6 +124,7 @@ TEST_F(ServerCheckerTest, GPU_TEST) {
 }
 
 TEST_F(ServerCheckerTest, GPU_FAIL_TEST) {
+    fiu_init(0);
     auto& config = ms::Config::GetInstance();
     auto status = config.SetGpuResourceConfigEnable("true");
     ASSERT_TRUE(status.ok()) << status.message();

@@ -11,7 +11,9 @@
 
 #include <gtest/gtest.h>
 #include <algorithm>
+#include <chrono>
 #include <iostream>
+#include <random>
 #include <sstream>
 
 #include "knowhere/index/structured_index/StructuredIndexSort.h"
@@ -25,6 +27,27 @@ gen_rand_data(int range, int n, int*& p) {
     int* q = p;
     for (auto i = 0; i < n; ++i) {
         *q++ = (int)random() % range;
+    }
+}
+
+void
+gen_rand_int64_data(int64_t range, int64_t n, int64_t*& p) {
+    srand((int64_t)time(nullptr));
+    p = (int64_t*)malloc(n * sizeof(int64_t));
+    int64_t* q = p;
+    for (auto i = 0; i < n; ++i) {
+        *q++ = (int64_t)random() % range;
+    }
+}
+
+void
+gen_rand_double_data(double range, int64_t n, double*& p) {
+    std::uniform_real_distribution<double> unif(0, range);
+    std::default_random_engine re;
+    p = (double*)malloc(n * sizeof(double));
+    double* q = p;
+    for (auto i = 0; i < n; ++i) {
+        *q++ = unif(re);
     }
 }
 

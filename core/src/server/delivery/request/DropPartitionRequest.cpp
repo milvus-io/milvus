@@ -11,9 +11,9 @@
 
 #include "server/delivery/request/DropPartitionRequest.h"
 #include "server/DBWrapper.h"
+#include "server/ValidationUtil.h"
 #include "utils/Log.h"
 #include "utils/TimeRecorder.h"
-#include "utils/ValidationUtil.h"
 
 #include <fiu-local.h>
 #include <memory>
@@ -42,7 +42,7 @@ DropPartitionRequest::OnExecute() {
     std::string partition_tag = tag_;
 
     // step 1: check collection name
-    auto status = ValidationUtil::ValidateCollectionName(collection_name);
+    auto status = ValidateCollectionName(collection_name);
     fiu_do_on("DropPartitionRequest.OnExecute.invalid_collection_name",
               status = Status(milvus::SERVER_UNEXPECTED_ERROR, ""));
     if (!status.ok()) {
@@ -56,7 +56,7 @@ DropPartitionRequest::OnExecute() {
         return Status(SERVER_INVALID_COLLECTION_NAME, msg);
     }
 
-    status = ValidationUtil::ValidatePartitionTags({partition_tag});
+    status = ValidatePartitionTags({partition_tag});
     if (!status.ok()) {
         return status;
     }

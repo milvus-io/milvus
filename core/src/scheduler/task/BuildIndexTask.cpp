@@ -26,7 +26,6 @@
 #include "utils/Exception.h"
 #include "utils/Log.h"
 #include "utils/TimeRecorder.h"
-#include "utils/ValidationUtil.h"
 
 namespace milvus {
 namespace scheduler {
@@ -204,7 +203,7 @@ XBuildIndexTask::Execute() {
 
         // step 5: update meta
         table_file.file_type_ = engine::meta::SegmentSchema::INDEX;
-        table_file.file_size_ = server::CommonUtil::GetFileSize(table_file.location_);
+        table_file.file_size_ = CommonUtil::GetFileSize(table_file.location_);
         table_file.row_count_ = file_->row_count_;  // index->Count();
 
         auto origin_file = *file_;

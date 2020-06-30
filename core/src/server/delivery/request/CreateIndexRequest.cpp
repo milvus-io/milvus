@@ -13,9 +13,9 @@
 #include "config/Config.h"
 #include "db/Utils.h"
 #include "server/DBWrapper.h"
+#include "server/ValidationUtil.h"
 #include "utils/Log.h"
 #include "utils/TimeRecorder.h"
-#include "utils/ValidationUtil.h"
 
 #include <fiu-local.h>
 #include <memory>
@@ -25,18 +25,21 @@ namespace milvus {
 namespace server {
 
 CreateIndexRequest::CreateIndexRequest(const std::shared_ptr<milvus::server::Context>& context,
-                                       const std::string& collection_name, int64_t index_type,
-                                       const milvus::json& json_params)
+                                       const std::string& collection_name, const std::string& field_name,
+                                       const std::string& index_name, const milvus::json& json_params)
     : BaseRequest(context, BaseRequest::kCreateIndex),
       collection_name_(collection_name),
-      index_type_(index_type),
+      field_name_(field_name),
+      index_name_(index_name),
       json_params_(json_params) {
 }
 
 BaseRequestPtr
 CreateIndexRequest::Create(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name,
-                           int64_t index_type, const milvus::json& json_params) {
-    return std::shared_ptr<BaseRequest>(new CreateIndexRequest(context, collection_name, index_type, json_params));
+                           const std::string& field_name, const std::string& index_name,
+                           const milvus::json& json_params) {
+    return std::shared_ptr<BaseRequest>(
+        new CreateIndexRequest(context, collection_name, field_name, index_name, json_params));
 }
 
 Status
@@ -46,7 +49,7 @@ CreateIndexRequest::OnExecute() {
         TimeRecorderAuto rc(hdr);
 
         // step 1: check arguments
-        auto status = ValidationUtil::ValidateCollectionName(collection_name_);
+        auto status = ValidateCollectionName(collection_name_);
         if (!status.ok()) {
             return status;
         }
@@ -70,12 +73,17 @@ CreateIndexRequest::OnExecute() {
             }
         }
 
-        status = ValidationUtil::ValidateCollectionIndexType(index_type_);
+        int32_t index_type;
+        if (json_params_.contains("index_type")) {
+            index_type = json_params_["index_type"].get<int32_t>();
+        }
+
+        status = ValidateCollectionIndexType(index_type);
         if (!status.ok()) {
             return status;
         }
 
-        status = ValidationUtil::ValidateIndexParams(json_params_, collection_schema, index_type_);
+        status = ValidateIndexParams(json_params_, collection_schema, index_type);
         if (!status.ok()) {
             return status;
         }
@@ -85,7 +93,7 @@ CreateIndexRequest::OnExecute() {
         collection_info.collection_id_ = collection_name_;
         status = DBWrapper::DB()->DescribeCollection(collection_info);
 
-        int32_t adapter_index_type = index_type_;
+        int32_t adapter_index_type = index_type;
         if (engine::utils::IsBinaryMetricType(collection_info.metric_type_)) {  // binary vector not allow
             if (adapter_index_type == static_cast<int32_t>(engine::EngineType::FAISS_IDMAP)) {
                 adapter_index_type = static_cast<int32_t>(engine::EngineType::FAISS_BIN_IDMAP);
@@ -95,20 +103,6 @@ CreateIndexRequest::OnExecute() {
                 return Status(SERVER_INVALID_INDEX_TYPE, "Invalid index type for collection metric type");
             }
         }
-
-#ifdef MILVUS_GPU_VERSION
-        Status s;
-        bool enable_gpu = false;
-        server::Config& config = server::Config::GetInstance();
-        s = config.GetGpuResourceConfigEnable(enable_gpu);
-        fiu_do_on("CreateIndexRequest.OnExecute.ip_meteric",
-                  collection_info.metric_type_ = static_cast<int>(engine::MetricType::IP));
-
-        if (s.ok() && adapter_index_type == (int)engine::EngineType::FAISS_PQ &&
-            collection_info.metric_type_ == (int)engine::MetricType::IP) {
-            return Status(SERVER_UNEXPECTED_ERROR, "PQ not support IP in GPU version!");
-        }
-#endif
 
         rc.RecordSection("check validation");
 

@@ -25,15 +25,13 @@
 #include <sstream>
 #include <unordered_map>
 
-#include "MetaConsts.h"
 #include "db/IDGenerator.h"
 #include "db/Utils.h"
+#include "db/meta/MetaConsts.h"
 #include "metrics/Metrics.h"
-#include "utils/CommonUtil.h"
 #include "utils/Exception.h"
 #include "utils/Log.h"
 #include "utils/StringHelpFunctions.h"
-#include "utils/ValidationUtil.h"
 
 #define USING_SQLITE_WARNING                                                                                       \
     LOG_ENGINE_WARNING_ << "You are using SQLite as the meta data management, which can't be used in production. " \
@@ -103,6 +101,8 @@ StoragePrototype(const std::string& path) {
         make_table(META_FIELDS, make_column("collection_id", &hybrid::FieldSchema::collection_id_),
                    make_column("field_name", &hybrid::FieldSchema::field_name_),
                    make_column("field_type", &hybrid::FieldSchema::field_type_),
+                   make_column("index_name", &hybrid::FieldSchema::index_name_),
+                   make_column("index_param", &hybrid::FieldSchema::index_param_),
                    make_column("field_params", &hybrid::FieldSchema::field_params_)),
         make_table(META_TABLEFILES, make_column("id", &SegmentSchema::id_, primary_key()),
                    make_column("table_id", &SegmentSchema::collection_id_),
@@ -920,7 +920,7 @@ SqliteMetaImpl::CreatePartition(const std::string& collection_id, const std::str
     // trim side-blank of tag, only compare valid characters
     // for example: " ab cd " is treated as "ab cd"
     std::string valid_tag = tag;
-    server::StringHelpFunctions::TrimStringBlank(valid_tag);
+    StringHelpFunctions::TrimStringBlank(valid_tag);
 
     // not allow duplicated partition
     std::string exist_partition;
@@ -959,7 +959,7 @@ SqliteMetaImpl::HasPartition(const std::string& collection_id, const std::string
         // trim side-blank of tag, only compare valid characters
         // for example: " ab cd " is treated as "ab cd"
         std::string valid_tag = tag;
-        server::StringHelpFunctions::TrimStringBlank(valid_tag);
+        StringHelpFunctions::TrimStringBlank(valid_tag);
 
         auto name = ConnectorPtr->select(columns(&CollectionSchema::collection_id_),
                                          where(c(&CollectionSchema::owner_collection_) == collection_id and
@@ -1033,7 +1033,7 @@ SqliteMetaImpl::GetPartitionName(const std::string& collection_id, const std::st
         // trim side-blank of tag, only compare valid characters
         // for example: " ab cd " is treated as "ab cd"
         std::string valid_tag = tag;
-        server::StringHelpFunctions::TrimStringBlank(valid_tag);
+        StringHelpFunctions::TrimStringBlank(valid_tag);
 
         auto name = ConnectorPtr->select(columns(&CollectionSchema::collection_id_),
                                          where(c(&CollectionSchema::owner_collection_) == collection_id and
@@ -1868,7 +1868,7 @@ SqliteMetaImpl::CleanUpFilesWithTTL(uint64_t seconds /*, CleanUpFilter* filter*/
                 // because GetCollectionFilePath won't able to generate file path after the file is deleted
                 // TODO(zhiru): clean up
                 utils::GetCollectionFilePath(options_, collection_file);
-                server::CommonUtil::EraseFromCache(collection_file.location_);
+                utils::EraseFromCache(collection_file.location_);
 
                 if (collection_file.file_type_ == (int)SegmentSchema::TO_DELETE) {
                     // delete file from meta
@@ -2238,7 +2238,8 @@ SqliteMetaImpl::DescribeHybridCollection(milvus::engine::meta::CollectionSchema&
 
         auto field_groups =
             ConnectorPtr->select(columns(&hybrid::FieldSchema::collection_id_, &hybrid::FieldSchema::field_name_,
-                                         &hybrid::FieldSchema::field_type_, &hybrid::FieldSchema::field_params_),
+                                         &hybrid::FieldSchema::field_type_, &hybrid::FieldSchema::field_params_,
+                                         &hybrid::FieldSchema::index_name_, &hybrid::FieldSchema::index_param_),
                                  where(c(&hybrid::FieldSchema::collection_id_) == collection_schema.collection_id_));
 
         if (field_groups.size() >= 1) {
@@ -2248,6 +2249,8 @@ SqliteMetaImpl::DescribeHybridCollection(milvus::engine::meta::CollectionSchema&
                 fields_schema.fields_schema_[i].field_name_ = std::get<1>(field_groups[i]);
                 fields_schema.fields_schema_[i].field_type_ = std::get<2>(field_groups[i]);
                 fields_schema.fields_schema_[i].field_params_ = std::get<3>(field_groups[i]);
+                fields_schema.fields_schema_[i].index_name_ = std::get<4>(field_groups[i]);
+                fields_schema.fields_schema_[i].index_param_ = std::get<5>(field_groups[i]);
             }
         } else {
             return Status(DB_NOT_FOUND, "Collection " + collection_schema.collection_id_ + " fields not found");
