@@ -1,9 +1,11 @@
 import pdb
-import pytest
+import copy
 import logging
 import itertools
 from time import sleep
 from multiprocessing import Process
+
+import pytest
 from milvus import IndexType, MetricType
 from utils import *
 
@@ -15,7 +17,7 @@ vectors = gen_vectors(100, dim)
 default_fields = gen_default_fields() 
 
 
-class TestCollection:
+class TestCreateCollection:
 
     """
     ******************************************************************
@@ -104,6 +106,27 @@ class TestCollection:
         finally:
             enable_flush(connect)
 
+    def test_create_collection_after_insert(self, connect, collection):
+        '''
+        target: test insert vector, then create collection again
+        method: insert vector and create collection
+        expected: error raised
+        '''
+        connect.insert(collection, entities)
+        with pytest.raises(Exception) as e:
+            connect.create_collection(collection, default_fields)
+
+    def test_create_collection_after_insert_flush(self, connect, collection):
+        '''
+        target: test insert vector, then create collection again
+        method: insert vector and create collection
+        expected: error raised
+        '''
+        connect.insert(collection, entities)
+        connect.flush([collection])
+        with pytest.raises(Exception) as e:
+            connect.create_collection(collection, default_fields)
+
     # TODO: assert exception
     @pytest.mark.level(2)
     def test_create_collection_without_connection(self, dis_connect):
@@ -182,11 +205,17 @@ class TestCreateCollectionInvalid(object):
 
     @pytest.fixture(
         scope="function",
-        params=gen_invalid_collection_names()
+        params=gen_invalid_strings()
     )
-    def get_collection_name(self, request):
+    def get_invalid_string(self, request):
         yield request.param
 
+    @pytest.fixture(
+        scope="function",
+        params=gen_invalid_field_types()
+    )
+    def get_field_type(self, request):
+        yield request.param
 
     @pytest.mark.level(2)
     def test_create_collection_with_invalid_segment_size(self, connect, get_segment_size):
@@ -209,12 +238,12 @@ class TestCreateCollectionInvalid(object):
         dimension = get_dim
         collection_name = gen_unique_str()
         fields = copy.deepcopy(default_fields)
-        fields["fields"][-1]["dimension"] = dimension
+        fields["fields"][-1]["extra_params"]["dimension"] = dimension
         with pytest.raises(Exception) as e:
              connect.create_collection(collection_name, fields)
 
     @pytest.mark.level(2)
-    def test_create_collection_with_invalid_collectionname(self, connect, get_collection_name):
+    def test_create_collection_with_invalid_collectionname(self, connect, get_invalid_string):
         collection_name = get_collection_name
         with pytest.raises(Exception) as e:
             connect.create_collection(collection_name, default_fields)
@@ -248,7 +277,7 @@ class TestCreateCollectionInvalid(object):
         '''
         collection_name = gen_unique_str("test_collection")
         fields = copy.deepcopy(default_fields)
-        fields["fields"][-1].pop("dimension")
+        fields["fields"][-1]["extra_params"].pop("dimension")
         with pytest.raises(Exception) as e:
             connect.create_collection(collection_name, fields)
 
@@ -279,3 +308,35 @@ class TestCreateCollectionInvalid(object):
         res = connect.get_collection_info(collection_name)
         logging.getLogger().info(res)
         # assert result.metric_type == MetricType.L2
+
+    # TODO: assert exception
+    def test_create_collection_limit_fields(self, connect):
+        collection_name = gen_unique_str("test_collection")
+        limit_num = 64
+        fields = copy.deepcopy(default_fields)
+        for i in range(limit_num):
+            field_name = gen_unique_str("field_name")
+            field = {"field": field_name, "type": DataType.INT8}
+            fields["fields"].append(field)
+        with pytest.raises(Exception) as e:
+            connect.create_collection(collection_name, fields)
+
+    # TODO: assert exception
+    def test_create_collection_invalid_field_name(self, connect, get_invalid_string):
+        collection_name = gen_unique_str("test_collection")
+        fields = copy.deepcopy(default_fields)
+        field_name = get_invalid_string
+        field = {"field": field_name, "type": DataType.INT8}
+        fields["fields"].append(field)
+        with pytest.raises(Exception) as e:
+            connect.create_collection(collection_name, fields)
+
+    # TODO: assert exception
+    def test_create_collection_invalid_field_type(self, connect, get_field_type):
+        collection_name = gen_unique_str("test_collection")
+        fields = copy.deepcopy(default_fields)
+        field_type = get_field_type
+        field = {"field": "test_field", "type": field_type}
+        fields["fields"].append(field)
+        with pytest.raises(Exception) as e:
+            connect.create_collection(collection_name, fields)
