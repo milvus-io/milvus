@@ -462,7 +462,6 @@ class WebController : public oatpp::web::server::api::ApiController {
 
     ENDPOINT("GET", "/collections/{collection_name}/partitions", ShowPartitions, PATH(String, collection_name),
              QUERIES(const QueryParams&, query_params)) {
-        std::cout << "Show partition start ..." << std::endl;
         TimeRecorder tr(std::string(WEB_LOG_PREFIX) + "GET \'/collections/" + collection_name->std_str() +
                         "/partitions\'");
         tr.RecordSection("Received request.");
