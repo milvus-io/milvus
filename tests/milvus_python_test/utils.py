@@ -1,12 +1,14 @@
 import os
 import sys
 import random
+import pdb
 import string
 import struct
 import logging
 import time, datetime
 import copy
 import numpy as np
+from sklearn import preprocessing
 from milvus import Milvus, IndexType, MetricType, DataType
 
 port = 19530
@@ -18,14 +20,14 @@ segment_size = 10
 
 
 all_index_types = [
-    IndexType.FLAT,
-    IndexType.IVFLAT,
-    IndexType.IVF_SQ8,
-    IndexType.IVF_SQ8H,
-    IndexType.IVF_PQ,
-    IndexType.HNSW,
-    IndexType.RNSG,
-    IndexType.ANNOY
+    "FLAT",
+    "IVFFLAT",
+    "IVFSQ8",
+    "IVFSQ8H",
+    "IVFPQ",
+    "HNSW",
+    "RNSG",
+    "ANNOY"
 ]
 
 
@@ -71,16 +73,13 @@ def get_milvus(host, port, uri=None, handler=None, **kwargs):
 
 
 def disable_flush(connect):
-    status, reply = connect.set_config("storage", "auto_flush_interval", big_flush_interval)
-    assert status.OK()
+    connect.set_config("storage", "auto_flush_interval", big_flush_interval)
 
 
 def enable_flush(connect):
     # reset auto_flush_interval=1
-    status, reply = connect.set_config("storage", "auto_flush_interval", default_flush_interval)
-    assert status.OK()
-    status, config_value = connect.get_config("storage", "auto_flush_interval")
-    assert status.OK()
+    connect.set_config("storage", "auto_flush_interval", default_flush_interval)
+    config_value = connect.get_config("storage", "auto_flush_interval")
     assert config_value == str(default_flush_interval)
 
 
@@ -90,14 +89,14 @@ def gen_inaccuracy(num):
 
 def gen_vectors(num, dim, is_normal=False):
     vectors = [[random.random() for _ in range(dim)] for _ in range(num)]
-    vectors = sklearn.preprocessing.normalize(vectors, axis=1, norm='l2')
+    vectors = preprocessing.normalize(vectors, axis=1, norm='l2')
     return vectors.tolist()
 
 
-def gen_vectors(nb, d, seed=np.random.RandomState(1234), is_normal=False):
-    xb = seed.rand(nb, d).astype("float32")
-    xb = klearn.preprocessing.normalize(xb, axis=1, norm='l2')
-    return xb.tolist()
+# def gen_vectors(num, dim, seed=np.random.RandomState(1234), is_normal=False):
+#     xb = seed.rand(num, dim).astype("float32")
+#     xb = preprocessing.normalize(xb, axis=1, norm='l2')
+#     return xb.tolist()
 
 
 def gen_binary_vectors(num, dim):
@@ -152,18 +151,19 @@ def gen_unique_str(str_value=None):
 
 def gen_single_filter_fields():
     fields = []
-    for data_type in [i.value for i in DataType]:
-        fields.append({"field": data_type.name, "type": data_type})
+    for data_type in DataType:
+        if data_type in [DataType.INT8, DataType.INT16, DataType.INT32, DataType.INT64, DataType.FLOAT, DataType.DOUBLE]:
+            fields.append({"field": data_type.name, "type": data_type})
     return fields
 
 
 def gen_single_vector_fields():
     fields = []
-    for metric_type in MetricType:
-        for data_type in [DataType.FLOAT_VECTOR, DataType.BINARY_VECTOR]:
-            if metric_type in [MetricType.L2, MetricType.IP] and data_type == DataType.BINARY_VECTOR:
+    for metric_type in ['HAMMING', 'IP', 'JACCARD', 'L2', 'SUBSTRUCTURE', 'SUPERSTRUCTURE', 'TANIMOTO']:
+        for data_type in [DataType.VECTOR, DataType.BINARY_VECTOR]:
+            if metric_type in ["L2", "IP"] and data_type == DataType.BINARY_VECTOR:
                 continue
-            field = {"field": data_type.name, "type": data_type, "extra_params": {"metric_type": metric_type, "dimension": dimension}}
+            field = {"field": data_type.name, "type": data_type, "params": {"metric_type": metric_type, "dimension": dimension}}
             fields.append(field)
     return fields
 
@@ -174,7 +174,7 @@ def gen_default_fields():
             {"field": "int8", "type": DataType.INT8},
             {"field": "int64", "type": DataType.INT64},
             {"field": "float", "type": DataType.FLOAT},
-            {"field": "float_vector", "type": DataType.FLOAT_VECTOR, "extra_params": {"metric_type": MetricType.L2, "dimension": dimension}}
+            {"field": "vector", "type": DataType.VECTOR, "params": {"metric_type": "L2", "dimension": dimension}}
         ],
         "segment_size": segment_size
     }
@@ -187,7 +187,7 @@ def gen_entities(nb, is_normal=False):
         {"field": "int8", "type": DataType.INT8, "values": [1 for i in range(nb)]},
         {"field": "int64", "type": DataType.INT64, "values": [2 for i in range(nb)]},
         {"field": "float", "type": DataType.FLOAT, "values": [3.0 for i in range(nb)]},
-        {"field": "float_vector", "type": DataType.FLOAT_VECTOR, "values": vectors}
+        {"field": "vector", "type": DataType.VECTOR, "values": vectors}
     ]
     return entities
 
@@ -217,7 +217,7 @@ def add_vector_field(entities, is_normal=False):
     vectors = gen_vectors(nb, dimension, is_normal)
     field = {
         "field": gen_unique_str(), 
-        "type": DataType.FLOAT_VECTOR, 
+        "type": DataType.VECTOR, 
         "values": vectors
     }
     entities.append(field)
@@ -256,11 +256,11 @@ def update_field_value(entities, old_type, new_value):
     return entities
 
 
-def add_float_vector_field(nb, dimension):
+def add_vector_field(nb, dimension):
     field_name = gen_unique_str()
     field = {
         "field": field_name,
-        "type": DataType.FLOAT_VECTOR,
+        "type": DataType.VECTOR,
         "values": gen_vectors(nb, dimension)
     }
     return field_name
@@ -357,6 +357,18 @@ def gen_invalid_field_types():
             "a".join("a" for i in range(256))
     ]
     return field_types
+
+
+def gen_invalid_metric_types():
+    metric_types = [
+            1,
+            "=c",
+            0,
+            None,
+            "",
+            "a".join("a" for i in range(256))
+    ]
+    return metric_types
 
 
 def gen_invalid_ints():
@@ -570,11 +582,6 @@ def get_search_param(index_type):
 
     else:
         logging.getLogger().info("Invalid index_type.")
-
-
-def assert_has_collection(conn, collection_name):
-    res = conn.has_collection(collection_name)
-    return res
 
 
 def assert_equal_vector(v1, v2):

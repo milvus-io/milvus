@@ -1,7 +1,6 @@
-import socket 
 import pdb
 import logging
-
+import socket
 import pytest
 from utils import gen_unique_str
 from milvus import Milvus, IndexType, MetricType, DataType
@@ -10,6 +9,7 @@ from utils import *
 timeout = 60
 dimension = 128
 delete_timeout = 60
+default_fields = gen_default_fields() 
 
 
 def pytest_addoption(parser):
@@ -101,14 +101,15 @@ def collection(request, connect):
     ori_collection_name = getattr(request.module, "collection_id", "test")
     collection_name = gen_unique_str(ori_collection_name)
     try:
-        milvus.create_collection(collection_name, default_fields())
+        connect.create_collection(collection_name, default_fields)
     except Exception as e:
         pytest.exit(str(e))
     def teardown():
-        status, collection_names = connect.list_collections()
+        collection_names = connect.list_collections()
         for collection_name in collection_names:
             connect.drop_collection(collection_name, timeout=delete_timeout)
-    request.addfinalizer(teardown())
+    request.addfinalizer(teardown)
+    assert connect.has_collection(collection_name)
     return collection_name
 
 
@@ -117,16 +118,17 @@ def ip_collection(request, connect):
     ori_collection_name = getattr(request.module, "collection_id", "test")
     collection_name = gen_unique_str(ori_collection_name)
     fields = gen_default_fields()
-    fields["fields"][-1]["extra_params"]["metric_type"] = MetricType.IP
+    fields["fields"][-1]["params"]["metric_type"] = "IP"
     try:
         milvus.create_collection(collection_name, fields)
     except Exception as e:
         pytest.exit(str(e))
     def teardown():
-        status, collection_names = connect.list_collections()
+        collection_names = connect.list_collections()
         for collection_name in collection_names:
             connect.drop_collection(collection_name, timeout=delete_timeout)
-    request.addfinalizer(teardown())
+    request.addfinalizer(teardown)
+    assert connect.has_collection(collection_name)
     return collection_name
 
 
@@ -135,16 +137,17 @@ def jac_collection(request, connect):
     ori_collection_name = getattr(request.module, "collection_id", "test")
     collection_name = gen_unique_str(ori_collection_name)
     fields = gen_default_fields()
-    fields["fields"][-1] = {"field": "binary_vector", "type": DataType.BINARY_VECTOR, "dimension": dimension, "extra_params": {"metric_type": MetricType.JACCARD}}
+    fields["fields"][-1] = {"field": "binary_vector", "type": DataType.BINARY_VECTOR, "dimension": dimension, "params": {"metric_type": "JACCARD"}}
     try:
         milvus.create_collection(collection_name, fields)
     except Exception as e:
         pytest.exit(str(e))
     def teardown():
-        status, collection_names = connect.list_collections()
+        collection_names = connect.list_collections()
         for collection_name in collection_names:
             connect.drop_collection(collection_name, timeout=delete_timeout)
-    request.addfinalizer(teardown())
+    request.addfinalizer(teardown)
+    assert connect.has_collection(collection_name)
     return collection_name
 
 
@@ -153,16 +156,17 @@ def ham_collection(request, connect):
     ori_collection_name = getattr(request.module, "collection_id", "test")
     collection_name = gen_unique_str(ori_collection_name)
     fields = gen_default_fields()
-    fields["fields"][-1] = {"field": "binary_vector", "type": DataType.BINARY_VECTOR, "dimension": dimension, "extra_params": {"metric_type": MetricType.HAMMING}}
+    fields["fields"][-1] = {"field": "binary_vector", "type": DataType.BINARY_VECTOR, "dimension": dimension, "params": {"metric_type": "HAMMING"}}
     try:
         milvus.create_collection(collection_name, fields)
     except Exception as e:
         pytest.exit(str(e))
     def teardown():
-        status, collection_names = connect.list_collections()
+        collection_names = connect.list_collections()
         for collection_name in collection_names:
             connect.drop_collection(collection_name, timeout=delete_timeout)
-    request.addfinalizer(teardown())
+    request.addfinalizer(teardown)
+    assert connect.has_collection(collection_name)
     return collection_name
 
 
@@ -171,16 +175,17 @@ def tanimoto_collection(request, connect):
     ori_collection_name = getattr(request.module, "collection_id", "test")
     collection_name = gen_unique_str(ori_collection_name)
     fields = gen_default_fields()
-    fields["fields"][-1] = {"field": "binary_vector", "type": DataType.BINARY_VECTOR, "dimension": dimension, "extra_params": {"metric_type": MetricType.TANIMOTO}}
+    fields["fields"][-1] = {"field": "binary_vector", "type": DataType.BINARY_VECTOR, "dimension": dimension, "params": {"metric_type": "TANIMOTO"}}
     try:
         milvus.create_collection(collection_name, fields)
     except Exception as e:
         pytest.exit(str(e))
     def teardown():
-        status, collection_names = connect.list_collections()
+        collection_names = connect.list_collections()
         for collection_name in collection_names:
             connect.drop_collection(collection_name, timeout=delete_timeout)
-    request.addfinalizer(teardown())
+    request.addfinalizer(teardown)
+    assert connect.has_collection(collection_name)
     return collection_name
 
 
@@ -189,16 +194,17 @@ def substructure_collection(request, connect):
     ori_collection_name = getattr(request.module, "collection_id", "test")
     collection_name = gen_unique_str(ori_collection_name)
     fields = gen_default_fields()
-    fields["fields"][-1] = {"field": "binary_vector", "type": DataType.BINARY_VECTOR, "dimension": dimension, "extra_params": {"metric_type": MetricType.SUBSTRUCTURE}}
+    fields["fields"][-1] = {"field": "binary_vector", "type": DataType.BINARY_VECTOR, "dimension": dimension, "params": {"metric_type": "SUBSTRUCTURE"}}
     try:
         milvus.create_collection(collection_name, fields)
     except Exception as e:
         pytest.exit(str(e))
     def teardown():
-        status, collection_names = connect.list_collections()
+        collection_names = connect.list_collections()
         for collection_name in collection_names:
             connect.drop_collection(collection_name, timeout=delete_timeout)
-    request.addfinalizer(teardown())
+    request.addfinalizer(teardown)
+    assert connect.has_collection(collection_name)
     return collection_name
 
 
@@ -208,14 +214,15 @@ def superstructure_collection(request, connect):
     ori_collection_name = getattr(request.module, "collection_id", "test")
     collection_name = gen_unique_str(ori_collection_name)
     fields = gen_default_fields()
-    fields["fields"][-1] = {"field": "binary_vector", "type": DataType.BINARY_VECTOR, "dimension": dimension, "extra_params": {"metric_type": MetricType.SUPERSTRUCTURE}}
+    fields["fields"][-1] = {"field": "binary_vector", "type": DataType.BINARY_VECTOR, "dimension": dimension, "params": {"metric_type": MetricType.SUPERSTRUCTURE}}
     try:
         milvus.create_collection(collection_name, fields)
     except Exception as e:
         pytest.exit(str(e))
     def teardown():
-        status, collection_names = connect.list_collections()
+        collection_names = connect.list_collections()
         for collection_name in collection_names:
             connect.drop_collection(collection_name, timeout=delete_timeout)
-    request.addfinalizer(teardown())
+    request.addfinalizer(teardown)
+    assert connect.has_collection(collection_name)
     return collection_name
