@@ -2,12 +2,15 @@ import pdb
 import pytest
 import logging
 import itertools
+import threading
 from time import sleep
 from multiprocessing import Process
 from milvus import IndexType, MetricType
 from utils import *
 
-drop_collection_interval_time = 3 
+
+drop_interval_time = 3
+collection_id = "list_collections"
 default_fields = gen_default_fields() 
 
 
@@ -34,7 +37,7 @@ class TestListCollections:
         '''
         collection_num = 100
         for i in range(collection_num):
-            collection_name = gen_unique_str("test_list_collections")
+            collection_name = gen_unique_str(collection_id)
             connect.create_collection(collection_name, default_fields)
             assert collection_name in connect.list_collections()
 
@@ -46,7 +49,7 @@ class TestListCollections:
         expected: list collections raise exception
         '''
         with pytest.raises(Exception) as e:
-            assert_list_collections(dis_connect)
+            dis_connect.list_collections()
 
     def test_list_collections_not_existed(self, connect):
         '''
@@ -55,8 +58,8 @@ class TestListCollections:
             assert the value returned by list_collections method
         expected: False
         '''
-        collection_name = gen_unique_str("test_collection")
-        assert collection_name not connect.list_collections()
+        collection_name = gen_unique_str(collection_id)
+        assert collection_name not in connect.list_collections()
 
     def test_list_collections_no_collection(self, connect):
         '''
@@ -69,7 +72,7 @@ class TestListCollections:
         if result:
             for collection_name in result:
                 connect.drop_collection(collection_name)
-        time.sleep(drop_collection_interval_time)
+        time.sleep(drop_interval_time)
         result = connect.list_collections()
         assert len(result) == 0
 
@@ -82,11 +85,11 @@ class TestListCollections:
         '''
         threads_num = 4 
         threads = []
-        collection_name = gen_unique_str("test_collection")
-        connect.create_collection(collection_name, fields)
+        collection_name = gen_unique_str(collection_id)
+        connect.create_collection(collection_name, default_fields)
 
         def _list():
-            assert collection_name not connect.list_collections()
+            assert collection_name in connect.list_collections()
         for i in range(threads_num):
             t = threading.Thread(target=_list, args=())
             threads.append(t)

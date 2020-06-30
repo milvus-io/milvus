@@ -1,12 +1,14 @@
 import os
 import sys
 import random
+import pdb
 import string
 import struct
 import logging
 import time, datetime
 import copy
 import numpy as np
+from sklearn import preprocessing
 from milvus import Milvus, IndexType, MetricType, DataType
 
 port = 19530
@@ -18,14 +20,14 @@ segment_size = 10
 
 
 all_index_types = [
-    IndexType.FLAT,
-    IndexType.IVFLAT,
-    IndexType.IVF_SQ8,
-    IndexType.IVF_SQ8H,
-    IndexType.IVF_PQ,
-    IndexType.HNSW,
-    IndexType.RNSG,
-    IndexType.ANNOY
+    "FLAT",
+    "IVFFLAT",
+    "IVFSQ8",
+    "IVFSQ8H",
+    "IVFPQ",
+    "HNSW",
+    "RNSG",
+    "ANNOY"
 ]
 
 
@@ -71,16 +73,13 @@ def get_milvus(host, port, uri=None, handler=None, **kwargs):
 
 
 def disable_flush(connect):
-    status, reply = connect.set_config("storage", "auto_flush_interval", big_flush_interval)
-    assert status.OK()
+    connect.set_config("storage", "auto_flush_interval", big_flush_interval)
 
 
 def enable_flush(connect):
     # reset auto_flush_interval=1
-    status, reply = connect.set_config("storage", "auto_flush_interval", default_flush_interval)
-    assert status.OK()
-    status, config_value = connect.get_config("storage", "auto_flush_interval")
-    assert status.OK()
+    connect.set_config("storage", "auto_flush_interval", default_flush_interval)
+    config_value = connect.get_config("storage", "auto_flush_interval")
     assert config_value == str(default_flush_interval)
 
 
@@ -90,14 +89,14 @@ def gen_inaccuracy(num):
 
 def gen_vectors(num, dim, is_normal=False):
     vectors = [[random.random() for _ in range(dim)] for _ in range(num)]
-    vectors = sklearn.preprocessing.normalize(vectors, axis=1, norm='l2')
+    vectors = preprocessing.normalize(vectors, axis=1, norm='l2')
     return vectors.tolist()
 
 
-def gen_vectors(nb, d, seed=np.random.RandomState(1234), is_normal=False):
-    xb = seed.rand(nb, d).astype("float32")
-    xb = klearn.preprocessing.normalize(xb, axis=1, norm='l2')
-    return xb.tolist()
+# def gen_vectors(num, dim, seed=np.random.RandomState(1234), is_normal=False):
+#     xb = seed.rand(num, dim).astype("float32")
+#     xb = preprocessing.normalize(xb, axis=1, norm='l2')
+#     return xb.tolist()
 
 
 def gen_binary_vectors(num, dim):
@@ -152,18 +151,19 @@ def gen_unique_str(str_value=None):
 
 def gen_single_filter_fields():
     fields = []
-    for data_type in [i.value for i in DataType]:
-        fields.append({"field": data_type.name, "type": data_type})
+    for data_type in DataType:
+        if data_type in [DataType.INT8, DataType.INT16, DataType.INT32, DataType.INT64, DataType.FLOAT, DataType.DOUBLE]:
+            fields.append({"field": data_type.name, "type": data_type})
     return fields
 
 
 def gen_single_vector_fields():
     fields = []
-    for metric_type in MetricType:
-        for data_type in [DataType.FLOAT_VECTOR, DataType.BINARY_VECTOR]:
-            if metric_type in [MetricType.L2, MetricType.IP] and data_type == DataType.BINARY_VECTOR:
+    for metric_type in ['HAMMING', 'IP', 'JACCARD', 'L2', 'SUBSTRUCTURE', 'SUPERSTRUCTURE', 'TANIMOTO']:
+        for data_type in [DataType.VECTOR, DataType.BINARY_VECTOR]:
+            if metric_type in ["L2", "IP"] and data_type == DataType.BINARY_VECTOR:
                 continue
-            field = {"field": data_type.name, "type": data_type, "extra_params": {"metric_type": metric_type, "dimension": dimension}}
+            field = {"field": data_type.name, "type": data_type, "params": {"metric_type": metric_type, "dimension": dimension}}
             fields.append(field)
     return fields
 
@@ -174,7 +174,7 @@ def gen_default_fields():
             {"field": "int8", "type": DataType.INT8},
             {"field": "int64", "type": DataType.INT64},
             {"field": "float", "type": DataType.FLOAT},
-            {"field": "float_vector", "type": DataType.FLOAT_VECTOR, "extra_params": {"metric_type": MetricType.L2, "dimension": dimension}}
+            {"field": "vector", "type": DataType.VECTOR, "params": {"metric_type": "L2", "dimension": dimension}}
         ],
         "segment_size": segment_size
     }
@@ -187,7 +187,7 @@ def gen_entities(nb, is_normal=False):
         {"field": "int8", "type": DataType.INT8, "values": [1 for i in range(nb)]},
         {"field": "int64", "type": DataType.INT64, "values": [2 for i in range(nb)]},
         {"field": "float", "type": DataType.FLOAT, "values": [3.0 for i in range(nb)]},
-        {"field": "float_vector", "type": DataType.FLOAT_VECTOR, "values": vectors}
+        {"field": "vector", "type": DataType.VECTOR, "values": vectors}
     ]
     return entities
 
@@ -217,11 +217,20 @@ def add_vector_field(entities, is_normal=False):
     vectors = gen_vectors(nb, dimension, is_normal)
     field = {
         "field": gen_unique_str(), 
-        "type": DataType.FLOAT_VECTOR, 
+        "type": DataType.VECTOR, 
         "values": vectors
     }
     entities.append(field)
     return entities
+
+
+def update_fields_metric_type(fields, metric_type):
+    if metric_type in ["L2", "IP"]:
+        fields["fields"][-1]["type"] = DataType.VECTOR
+    else:
+        fields["fields"][-1]["type"] = DataType.BINARY_VECTOR
+    fields["fields"][-1]["params"]["metric_type"] = metric_type
+    return fields
 
 
 def remove_field(entities):
@@ -256,11 +265,11 @@ def update_field_value(entities, old_type, new_value):
     return entities
 
 
-def add_float_vector_field(nb, dimension):
+def add_vector_field(nb, dimension):
     field_name = gen_unique_str()
     field = {
         "field": field_name,
-        "type": DataType.FLOAT_VECTOR,
+        "type": DataType.VECTOR,
         "values": gen_vectors(nb, dimension)
     }
     return field_name
@@ -359,6 +368,18 @@ def gen_invalid_field_types():
     return field_types
 
 
+def gen_invalid_metric_types():
+    metric_types = [
+            1,
+            "=c",
+            0,
+            None,
+            "",
+            "a".join("a" for i in range(256))
+    ]
+    return metric_types
+
+
 def gen_invalid_ints():
     top_ks = [
             1.0,
@@ -435,23 +456,23 @@ def gen_invaild_search_params():
     invalid_search_key = 100
     search_params = []
     for index_type in all_index_types:
-        if index_type == IndexType.FLAT:
+        if index_type == "FLAT":
             continue
         search_params.append({"index_type": index_type, "search_param": {"invalid_key": invalid_search_key}})
-        if index_type in [IndexType.IVFLAT, IndexType.IVF_SQ8, IndexType.IVF_SQ8H, IndexType.IVF_PQ]:
+        if index_type in ["IVFFLAT", "IVFSQ8", "IVFSQ8H", "IVFPQ"]:
             for nprobe in gen_invalid_params():
                 ivf_search_params = {"index_type": index_type, "search_param": {"nprobe": nprobe}}
                 search_params.append(ivf_search_params)
-        elif index_type == IndexType.HNSW:
+        elif index_type == "HNSW":
             for ef in gen_invalid_params():
                 hnsw_search_param = {"index_type": index_type, "search_param": {"ef": ef}}
                 search_params.append(hnsw_search_param)
-        elif index_type == IndexType.RNSG:
+        elif index_type == "RNSG":
             for search_length in gen_invalid_params():
                 nsg_search_param = {"index_type": index_type, "search_param": {"search_length": search_length}}
                 search_params.append(nsg_search_param)
             search_params.append({"index_type": index_type, "search_param": {"invalid_key": 100}})
-        elif index_type == IndexType.ANNOY:
+        elif index_type == "ANNOY":
             for search_k in gen_invalid_params():
                 if isinstance(search_k, int):
                     continue
@@ -466,36 +487,36 @@ def gen_invalid_index():
         index_param = {"index_type": index_type, "params": {"nlist": 1024}}
         index_params.append(index_param)
     for nlist in gen_invalid_params():
-        index_param = {"index_type": IndexType.IVFLAT, "params": {"nlist": nlist}}
+        index_param = {"index_type": "IVFFLAT", "params": {"nlist": nlist}}
         index_params.append(index_param)
     for M in gen_invalid_params():
-        index_param = {"index_type": IndexType.HNSW, "params": {"M": M, "efConstruction": 100}}
+        index_param = {"index_type": "HNSW", "params": {"M": M, "efConstruction": 100}}
         index_params.append(index_param)
     for efConstruction in gen_invalid_params():
-        index_param = {"index_type": IndexType.HNSW, "params": {"M": 16, "efConstruction": efConstruction}}
+        index_param = {"index_type": "HNSW", "params": {"M": 16, "efConstruction": efConstruction}}
         index_params.append(index_param)
     for search_length in gen_invalid_params():
-        index_param = {"index_type": IndexType.RNSG,
+        index_param = {"index_type": "RNSG",
                        "params": {"search_length": search_length, "out_degree": 40, "candidate_pool_size": 50,
                                        "knng": 100}}
         index_params.append(index_param)
     for out_degree in gen_invalid_params():
-        index_param = {"index_type": IndexType.RNSG,
+        index_param = {"index_type": "RNSG",
                        "params": {"search_length": 100, "out_degree": out_degree, "candidate_pool_size": 50,
                                        "knng": 100}}
         index_params.append(index_param)
     for candidate_pool_size in gen_invalid_params():
-        index_param = {"index_type": IndexType.RNSG, "params": {"search_length": 100, "out_degree": 40,
+        index_param = {"index_type": "RNSG", "params": {"search_length": 100, "out_degree": 40,
                                                                      "candidate_pool_size": candidate_pool_size,
                                                                      "knng": 100}}
         index_params.append(index_param)
-    index_params.append({"index_type": IndexType.IVF_FLAT, "params": {"invalid_key": 1024}})
-    index_params.append({"index_type": IndexType.HNSW, "params": {"invalid_key": 16, "efConstruction": 100}})
-    index_params.append({"index_type": IndexType.RNSG,
+    index_params.append({"index_type": "IVFFLAT", "params": {"invalid_key": 1024}})
+    index_params.append({"index_type": "HNSW", "params": {"invalid_key": 16, "efConstruction": 100}})
+    index_params.append({"index_type": "RNSG",
                          "params": {"invalid_key": 100, "out_degree": 40, "candidate_pool_size": 300,
                                          "knng": 100}})
     for invalid_n_trees in gen_invalid_params():
-        index_params.append({"index_type": IndexType.ANNOY, "params": {"n_trees": invalid_n_trees}})
+        index_params.append({"index_type": "ANNOY", "params": {"n_trees": invalid_n_trees}})
 
     return index_params
 
@@ -512,23 +533,23 @@ def gen_index():
 
     index_params = []
     for index_type in all_index_types:
-        if index_type == IndexType.FLAT:
+        if index_type == "FLAT":
             index_params.append({"index_type": index_type, "index_param": {"nlist": 1024}})
-        elif index_type in [IndexType.IVFLAT, IndexType.IVF_SQ8, IndexType.IVF_SQ8H]:
+        elif index_type in ["IVFFLAT", "IVFSQ8", "IVFSQ8H"]:
             ivf_params = [{"index_type": index_type, "index_param": {"nlist": nlist}} \
                           for nlist in nlists]
             index_params.extend(ivf_params)
-        elif index_type == IndexType.IVF_PQ:
-            ivf_pq_params = [{"index_type": index_type, "index_param": {"nlist": nlist, "m": m}} \
+        elif index_type == "IVFPQ":
+            IVFPQ_params = [{"index_type": index_type, "index_param": {"nlist": nlist, "m": m}} \
                         for nlist in nlists \
                         for m in pq_ms]
-            index_params.extend(ivf_pq_params)
-        elif index_type == IndexType.HNSW:
+            index_params.extend(IVFPQ_params)
+        elif index_type == "HNSW":
             hnsw_params = [{"index_type": index_type, "index_param": {"M": M, "efConstruction": efConstruction}} \
                            for M in Ms \
                            for efConstruction in efConstructions]
             index_params.extend(hnsw_params)
-        elif index_type == IndexType.RNSG:
+        elif index_type == "RNSG":
             nsg_params = [{"index_type": index_type,
                            "index_param": {"search_length": search_length, "out_degree": out_degree,
                                            "candidate_pool_size": candidate_pool_size, "knng": knng}} \
@@ -559,22 +580,17 @@ def gen_simple_index():
 
 
 def get_search_param(index_type):
-    if index_type in [IndexType.FLAT, IndexType.IVFLAT, IndexType.IVF_SQ8, IndexType.IVF_SQ8H, IndexType.IVF_PQ]:
+    if index_type in ["FLAT", "IVFFLAT", "IVFSQ8", "IVFSQ8H", "IVFPQ"]:
         return {"nprobe": 32}
-    elif index_type == IndexType.HNSW:
+    elif index_type == "HNSW":
         return {"ef": 64}
-    elif index_type == IndexType.RNSG:
+    elif index_type == "RNSG":
         return {"search_length": 100}
-    elif index_type == IndexType.ANNOY:
+    elif index_type == "ANNOY":
         return {"search_k": 100}
 
     else:
         logging.getLogger().info("Invalid index_type.")
-
-
-def assert_has_collection(conn, collection_name):
-    res = conn.has_collection(collection_name)
-    return res
 
 
 def assert_equal_vector(v1, v2):
