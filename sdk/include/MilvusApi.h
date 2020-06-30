@@ -93,6 +93,14 @@ struct FieldValue {
 };
 
 /**
+ * @brief Vector parameters
+ */
+struct VectorParam {
+    std::string json_param;
+    std::vector<VectorData> vector_records;
+};
+
+/**
  * @brief query result
  */
 struct QueryResult {
@@ -401,11 +409,11 @@ class Connection {
      */
     virtual Status
     Search(const std::string& collection_name, const std::vector<std::string>& partition_list, const std::string& dsl,
-           const std::string& vector_param, const FieldValue& field_value, TopKQueryResult& query_result) = 0;
+           const VectorParam& vector_param, TopKQueryResult& query_result) = 0;
 
     virtual Status
     SearchPB(const std::string& collection_name, const std::vector<std::string>& partition_list,
-             BooleanQueryPtr& boolean_query, const std::string& extra_params, TopKQueryResult& query_result) = 0;
+             BooleanQueryPtr& boolean_query, TopKQueryResult& query_result) = 0;
 
     /**
      * @brief Get collection information

@@ -247,13 +247,13 @@ ConstructEntityResults(const std::vector<engine::AttrsData>& attrs, const std::v
     //        }
     //    }
 
-    for (uint64_t i = 0; i < field_names.size() - 1; i++) {
+    std::string vector_field_name;
+    for (uint64_t i = 0; i < field_names.size(); i++) {
         auto field_name = field_names[i];
-
-        auto grpc_field = response->add_fields();
-        grpc_field->set_field_name(field_name);
         if (!attrs.empty()) {
             if (attrs[0].attr_type_.find(field_name) != attrs[0].attr_type_.end()) {
+                auto grpc_field = response->add_fields();
+                grpc_field->set_field_name(field_name);
                 grpc_field->set_type((::milvus::grpc::DataType)attrs[0].attr_type_.at(field_name));
                 auto grpc_attr_data = grpc_field->mutable_attr_record();
 
@@ -353,21 +353,26 @@ ConstructEntityResults(const std::vector<engine::AttrsData>& attrs, const std::v
                            double_data.size() * sizeof(double));
                 }
             } else {
-                ::milvus::grpc::VectorRecord* grpc_vector_data = grpc_field->mutable_vector_record();
-                for (auto& vector : vectors) {
-                    auto grpc_data = grpc_vector_data->add_records();
-                    if (!vector.float_data_.empty()) {
-                        grpc_field->set_type(::milvus::grpc::DataType::FLOAT_VECTOR);
-                        grpc_data->mutable_float_data()->Resize(vector.float_data_.size(), 0);
-                        memcpy(grpc_data->mutable_float_data()->mutable_data(), vector.float_data_.data(),
-                               vector.float_data_.size() * sizeof(float));
-                    } else if (!vector.binary_data_.empty()) {
-                        grpc_field->set_type(::milvus::grpc::DataType::BINARY_VECTOR);
-                        grpc_data->mutable_binary_data()->resize(vector.binary_data_.size());
-                        memcpy(grpc_data->mutable_binary_data()->data(), vector.binary_data_.data(),
-                               vector.binary_data_.size() * sizeof(uint8_t));
-                    }
-                }
+                vector_field_name = field_name;
+            }
+        }
+    }
+
+    if (!vector_field_name.empty()) {
+        auto grpc_field = response->add_fields();
+        ::milvus::grpc::VectorRecord* grpc_vector_data = grpc_field->mutable_vector_record();
+        for (auto& vector : vectors) {
+            auto grpc_data = grpc_vector_data->add_records();
+            if (!vector.float_data_.empty()) {
+                grpc_field->set_type(::milvus::grpc::DataType::FLOAT_VECTOR);
+                grpc_data->mutable_float_data()->Resize(vector.float_data_.size(), 0);
+                memcpy(grpc_data->mutable_float_data()->mutable_data(), vector.float_data_.data(),
+                       vector.float_data_.size() * sizeof(float));
+            } else if (!vector.binary_data_.empty()) {
+                grpc_field->set_type(::milvus::grpc::DataType::BINARY_VECTOR);
+                grpc_data->mutable_binary_data()->resize(vector.binary_data_.size());
+                memcpy(grpc_data->mutable_binary_data()->data(), vector.binary_data_.data(),
+                       vector.binary_data_.size() * sizeof(uint8_t));
             }
         }
     }

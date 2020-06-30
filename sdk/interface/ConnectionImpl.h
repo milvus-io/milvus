@@ -79,7 +79,7 @@ class ConnectionImpl : public Connection {
 
     Status
     Search(const std::string& collection_name, const std::vector<std::string>& partition_list, const std::string& dsl,
-           const std::string& vector_param, const FieldValue& field_value, TopKQueryResult& query_result) override;
+           const VectorParam& vector_param, TopKQueryResult& query_result) override;
 
     Status
     SearchPB(const std::string& collection_name, const std::vector<std::string>& partition_list,
