@@ -61,7 +61,7 @@ BuildCollectionSchema(milvus::engine::meta::CollectionSchema& collection_schema,
     milvus::engine::meta::hybrid::FieldSchema schema;
     schema.field_name_ = "field_3";
     schema.collection_id_ = COLLECTION_NAME;
-    schema.field_type_ = (int)(milvus::engine::meta::hybrid::DataType::VECTOR);
+    schema.field_type_ = (int)(milvus::engine::meta::hybrid::DataType::FLOAT_VECTOR);
     fields.emplace_back(schema);
 
     fields_schema.fields_schema_ = fields;
@@ -211,12 +211,12 @@ TEST_F(DBTest, HYBRID_DB_TEST) {
     stat = db_->Flush();
     ASSERT_TRUE(stat.ok());
 
-    //    milvus::engine::CollectionIndex index;
-    //    index.engine_type_ = (int)milvus::engine::EngineType::FAISS_IDMAP;
-    //    index.extra_params_ = {{"nlist", 16384}};
-    //
+    milvus::engine::CollectionIndex index;
+    index.engine_type_ = (int)milvus::engine::EngineType::FAISS_IDMAP;
+    index.extra_params_ = {{"nlist", 16384}};
+
     //    stat = db_->CreateIndex(COLLECTION_NAME, index);
-    //    ASSERT_TRUE(stat.ok());
+    ASSERT_TRUE(stat.ok());
 }
 
 TEST_F(DBTest, HYBRID_SEARCH_TEST) {
@@ -243,7 +243,7 @@ TEST_F(DBTest, HYBRID_SEARCH_TEST) {
     stat = db_->InsertEntities(COLLECTION_NAME, "", field_names, entity, attr_type);
     ASSERT_TRUE(stat.ok());
 
-    stat = db_->Flush();
+    stat = db_->Flush(COLLECTION_NAME);
     ASSERT_TRUE(stat.ok());
 
     // Construct general query
@@ -256,8 +256,8 @@ TEST_F(DBTest, HYBRID_SEARCH_TEST) {
     stat = db_->HybridQuery(dummy_context_, COLLECTION_NAME, tags, general_query, query_ptr, field_names, attr_type,
                             result);
     ASSERT_TRUE(stat.ok());
-    //    ASSERT_EQ(result.row_num_, NQ);
-    //    ASSERT_EQ(result.result_ids_.size(), NQ * TOPK);
+    ASSERT_EQ(result.row_num_, NQ);
+    ASSERT_EQ(result.result_ids_.size(), NQ * TOPK);
 }
 
 TEST_F(DBTest, COMPACT_TEST) {
@@ -336,7 +336,7 @@ TEST_F(DBTest2, GET_ENTITY_BY_ID_TEST) {
 
     std::vector<milvus::engine::AttrsData> attrs;
     std::vector<milvus::engine::VectorsData> vectors;
-    stat = db_->GetEntitiesByID(COLLECTION_NAME, entity.id_array_, vectors, attrs);
+    stat = db_->GetEntitiesByID(COLLECTION_NAME, entity.id_array_, field_names, vectors, attrs);
     ASSERT_TRUE(stat.ok());
     ASSERT_EQ(vectors.size(), entity.id_array_.size());
     ASSERT_EQ(vectors[0].float_data_.size(), COLLECTION_DIM);
@@ -349,7 +349,8 @@ TEST_F(DBTest2, GET_ENTITY_BY_ID_TEST) {
     std::vector<int64_t> empty_array;
     vectors.clear();
     attrs.clear();
-    stat = db_->GetEntitiesByID(COLLECTION_NAME, empty_array, vectors, attrs);
+    field_names.clear();
+    stat = db_->GetEntitiesByID(COLLECTION_NAME, empty_array, field_names, vectors, attrs);
     ASSERT_TRUE(stat.ok());
     for (auto& vector : vectors) {
         ASSERT_EQ(vector.vector_count_, 0);

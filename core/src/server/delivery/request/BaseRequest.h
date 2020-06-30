@@ -80,6 +80,7 @@ struct HybridQueryResult {
 struct IndexParam {
     std::string collection_name_;
     int64_t index_type_;
+    std::string index_name_;
     std::string extra_params_;
 
     IndexParam() {

@@ -749,16 +749,42 @@ DBImpl::InsertVectors(const std::string& collection_id, const std::string& parti
     return status;
 }
 
+// template <typename T>
+// Status
+// ConstructAttr(const uint8_t* record, int64_t row_num, const std::string& field_name,
+//              std::unordered_map<std::string, std::vector<uint8_t>>& attr_datas,
+//              std::unordered_map<std::string, uint64_t>& attr_nbytes,
+//              std::unordered_map<std::string, uint64_t>& attr_data_size) {
+//    std::vector<uint8_t> data;
+//    data.resize(row_num * sizeof(int8_t));
+//
+//    std::vector<int64_t> attr_value(row_num, 0);
+//    memcpy(attr_value.data(), record, row_num * sizeof(int64_t));
+//
+//    std::vector<T> raw_value(row_num, 0);
+//    for (int64_t i = 0; i < row_num; ++i) {
+//        raw_value[i] = attr_value[i];
+//    }
+//
+//    memcpy(data.data(), raw_value.data(), row_num * sizeof(T));
+//    attr_datas.insert(std::make_pair(field_name, data));
+//
+//    attr_nbytes.insert(std::make_pair(field_name, sizeof(T)));
+//    attr_data_size.insert(std::make_pair(field_name, row_num * sizeof(T)));
+//}
+
 Status
-CopyToAttr(std::vector<uint8_t>& record, uint64_t row_num, const std::vector<std::string>& field_names,
+CopyToAttr(const std::vector<uint8_t>& record, int64_t row_num, const std::vector<std::string>& field_names,
            std::unordered_map<std::string, meta::hybrid::DataType>& attr_types,
            std::unordered_map<std::string, std::vector<uint8_t>>& attr_datas,
            std::unordered_map<std::string, uint64_t>& attr_nbytes,
            std::unordered_map<std::string, uint64_t>& attr_data_size) {
-    uint64_t offset = 0;
+    int64_t offset = 0;
     for (auto name : field_names) {
         switch (attr_types.at(name)) {
             case meta::hybrid::DataType::INT8: {
+                //                ConstructAttr<int8_t>(record, row_num, name, attr_datas, attr_nbytes, attr_data_size);
+                //                offset += row_num * sizeof(int64_t);
                 std::vector<uint8_t> data;
                 data.resize(row_num * sizeof(int8_t));
 
@@ -964,7 +990,6 @@ DBImpl::InsertEntities(const std::string& collection_id, const std::string& part
 
         status = ExecWalRecord(record);
     }
-
 
     return status;
 }
@@ -1308,7 +1333,8 @@ DBImpl::GetVectorsByID(const engine::meta::CollectionSchema& collection, const I
 
 Status
 DBImpl::GetEntitiesByID(const std::string& collection_id, const milvus::engine::IDNumbers& id_array,
-                        std::vector<engine::VectorsData>& vectors, std::vector<engine::AttrsData>& attrs) {
+                        const std::vector<std::string>& field_names, std::vector<engine::VectorsData>& vectors,
+                        std::vector<engine::AttrsData>& attrs) {
     if (!initialized_.load(std::memory_order_acquire)) {
         return SHUTDOWN_ERROR;
     }
@@ -1332,10 +1358,16 @@ DBImpl::GetEntitiesByID(const std::string& collection_id, const milvus::engine::
     }
     std::unordered_map<std::string, engine::meta::hybrid::DataType> attr_type;
     for (auto schema : fields_schema.fields_schema_) {
-        if (schema.field_type_ == (int32_t)engine::meta::hybrid::DataType::VECTOR) {
+        if (schema.field_type_ == (int32_t)engine::meta::hybrid::DataType::FLOAT_VECTOR ||
+            schema.field_type_ == (int32_t)engine::meta::hybrid::DataType::BINARY_VECTOR) {
             continue;
         }
-        attr_type.insert(std::make_pair(schema.field_name_, (engine::meta::hybrid::DataType)schema.field_type_));
+        for (const auto& name : field_names) {
+            if (name == schema.field_name_) {
+                attr_type.insert(
+                    std::make_pair(schema.field_name_, (engine::meta::hybrid::DataType)schema.field_type_));
+            }
+        }
     }
 
     meta::FilesHolder files_holder;
@@ -1829,7 +1861,7 @@ DBImpl::FlushAttrsIndex(const std::string& collection_id) {
         }
 
         for (auto& field_schema : fields_schema.fields_schema_) {
-            if (field_schema.field_type_ != (int32_t)meta::hybrid::DataType::VECTOR) {
+            if (field_schema.field_type_ != (int32_t)meta::hybrid::DataType::FLOAT_VECTOR) {
                 attr_types.insert(
                     std::make_pair(field_schema.field_name_, (meta::hybrid::DataType)field_schema.field_type_));
                 field_names.emplace_back(field_schema.field_name_);
@@ -2445,28 +2477,28 @@ DBImpl::HybridQueryAsync(const std::shared_ptr<server::Context>& context, const 
     result.result_distances_ = job->GetResultDistances();
 
     // step 4: get entities by result ids
-    auto status = GetEntitiesByID(collection_id, result.result_ids_, result.vectors_, result.attrs_);
+    auto status = GetEntitiesByID(collection_id, result.result_ids_, field_names, result.vectors_, result.attrs_);
     if (!status.ok()) {
         query_async_ctx->GetTraceContext()->GetSpan()->Finish();
         return status;
     }
 
     // step 5: filter entities by field names
-    std::vector<engine::AttrsData> filter_attrs;
-    for (auto attr : result.attrs_) {
-        AttrsData attrs_data;
-        attrs_data.attr_type_ = attr.attr_type_;
-        attrs_data.attr_count_ = attr.attr_count_;
-        attrs_data.id_array_ = attr.id_array_;
-        for (auto& name : field_names) {
-            if (attr.attr_data_.find(name) != attr.attr_data_.end()) {
-                attrs_data.attr_data_.insert(std::make_pair(name, attr.attr_data_.at(name)));
-            }
-        }
-        filter_attrs.emplace_back(attrs_data);
-    }
-
-    result.attrs_ = filter_attrs;
+    //    std::vector<engine::AttrsData> filter_attrs;
+    //    for (auto attr : result.attrs_) {
+    //        AttrsData attrs_data;
+    //        attrs_data.attr_type_ = attr.attr_type_;
+    //        attrs_data.attr_count_ = attr.attr_count_;
+    //        attrs_data.id_array_ = attr.id_array_;
+    //        for (auto& name : field_names) {
+    //            if (attr.attr_data_.find(name) != attr.attr_data_.end()) {
+    //                attrs_data.attr_data_.insert(std::make_pair(name, attr.attr_data_.at(name)));
+    //            }
+    //        }
+    //        filter_attrs.emplace_back(attrs_data);
+    //    }
+    //
+    //    result.attrs_ = filter_attrs;
 
     rc.ElapseFromBegin("Engine query totally cost");
 
@@ -3169,10 +3201,10 @@ DBImpl::ExecWalRecord(const wal::MXLogRecord& record) {
                     }
                     flushed_collections.insert(collection_id);
 
-                    status = FlushAttrsIndex(collection_id);
-                    if (!status.ok()) {
-                        return status;
-                    }
+                    //                    status = FlushAttrsIndex(collection_id);
+                    //                    if (!status.ok()) {
+                    //                        return status;
+                    //                    }
                 }
 
                 collections_flushed(record.collection_id, flushed_collections);

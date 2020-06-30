@@ -121,7 +121,8 @@ class DB {
 
     virtual Status
     GetEntitiesByID(const std::string& collection_id, const IDNumbers& id_array,
-                    std::vector<engine::VectorsData>& vectors, std::vector<engine::AttrsData>& attrs) = 0;
+                    const std::vector<std::string>& field_names, std::vector<engine::VectorsData>& vectors,
+                    std::vector<engine::AttrsData>& attrs) = 0;
 
     virtual Status
     GetVectorIDs(const std::string& collection_id, const std::string& segment_id, IDNumbers& vector_ids) = 0;

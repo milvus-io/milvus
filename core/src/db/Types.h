@@ -50,7 +50,7 @@ struct VectorsData {
 };
 
 struct Entity {
-    uint64_t entity_count_ = 0;
+    int64_t entity_count_ = 0;
     std::vector<uint8_t> attr_value_;
     std::unordered_map<std::string, VectorsData> vector_data_;
     IDNumbers id_array_;

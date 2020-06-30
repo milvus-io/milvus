@@ -41,7 +41,8 @@ struct Field {
     uint64_t field_id;              ///< read-only
     std::string field_name;
     DataType field_type;
-    float boost;
+    std::string index_name;
+    std::string index_param;
     std::string extram_params;
 };
 using FieldPtr = std::shared_ptr<Field>;
