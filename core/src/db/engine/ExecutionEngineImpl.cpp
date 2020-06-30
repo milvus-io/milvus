@@ -449,7 +449,8 @@ ExecutionEngineImpl::Load(bool to_cache) {
                 segment::SegmentPtr segment_ptr;
                 segment_reader_ptr->GetSegment(segment_ptr);
                 if (index_type_ == EngineType::FAISS_IVFFLAT ||
-                    index_type_ == EngineType::HNSW) {
+                    index_type_ == EngineType::HNSW ||
+                    index_type_ == EngineType::NSG_MIX) {
                     auto status = segment_reader_ptr->LoadVectorIndexWithRawData(location_, segment_ptr->vector_index_ptr_);
                 } else {
                     auto status = segment_reader_ptr->LoadVectorIndex(location_, segment_ptr->vector_index_ptr_);
