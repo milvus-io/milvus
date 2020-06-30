@@ -1487,7 +1487,6 @@ WebRequestHandler::ShowPartitions(const OString& collection_name, const OQueryPa
             Status(SERVER_UNEXPECTED_ERROR, "Query param 'offset' or 'page_size' should equal or bigger than 0"));
     }
 
-
     bool all_required = false;
     auto required = query_params.get("all_required");
     if (nullptr != required.get()) {
