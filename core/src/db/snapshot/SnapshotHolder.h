@@ -35,7 +35,7 @@ class SnapshotHolder {
     Add(ID_TYPE id);
 
     Status
-    Get(ScopedSnapshotT& ss, ID_TYPE id = 0, bool scoped = true);
+    Get(ScopedSnapshotT& ss, ID_TYPE id = 0, bool scoped = true) const;
     Status
     Load(Store& store, ScopedSnapshotT& ss, ID_TYPE id = 0, bool scoped = true);
 
@@ -63,7 +63,7 @@ class SnapshotHolder {
         }
     }
 
-    std::mutex mutex_;
+    mutable std::mutex mutex_;
     ID_TYPE collection_id_;
     ID_TYPE min_id_ = std::numeric_limits<ID_TYPE>::max();
     ID_TYPE max_id_ = std::numeric_limits<ID_TYPE>::min();

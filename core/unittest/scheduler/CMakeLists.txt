@@ -38,6 +38,7 @@ add_executable(test_scheduler
         ${db_meta_files}
         ${db_merge_files}
         ${db_wal_files}
+        ${db_snapshot_files}
         ${scheduler_files}
         ${segment_files}
         ${server_init_files}
@@ -55,4 +56,3 @@ target_link_libraries(test_scheduler
         ${unittest_libs})
 
 install(TARGETS test_scheduler DESTINATION unittest)
-

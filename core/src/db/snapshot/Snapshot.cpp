@@ -122,7 +122,7 @@ Snapshot::Snapshot(ID_TYPE id) {
 }
 
 const std::string
-Snapshot::ToString() {
+Snapshot::ToString() const {
     auto to_matrix_string = [](const MappingT& mappings, int line_length, size_t ident = 0) -> std::string {
         std::stringstream ss;
         std::string l1_spaces;

@@ -334,19 +334,20 @@ DBImpl::HasNativeCollection(const std::string& collection_id, bool& has_or_not) 
 }
 
 Status
-DBImpl::AllCollections(std::vector<meta::CollectionSchema>& collection_schema_array) {
+DBImpl::AllCollections(std::vector<std::string>& names) {
     if (!initialized_.load(std::memory_order_acquire)) {
         return SHUTDOWN_ERROR;
     }
+
+    names.clear();
 
     std::vector<meta::CollectionSchema> all_collections;
     auto status = meta_ptr_->AllCollections(all_collections);
 
     // only return real collections, dont return partition collections
-    collection_schema_array.clear();
     for (auto& schema : all_collections) {
         if (schema.owner_collection_.empty()) {
-            collection_schema_array.push_back(schema);
+            names.push_back(schema.collection_id_);
         }
     }
 

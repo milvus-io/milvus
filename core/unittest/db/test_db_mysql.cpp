@@ -198,12 +198,12 @@ TEST_F(MySqlDBTest, ARHIVE_DISK_CHECK) {
     milvus::engine::meta::CollectionSchema collection_info = BuildCollectionSchema();
     auto stat = db_->CreateCollection(collection_info);
 
-    std::vector<milvus::engine::meta::CollectionSchema> collection_schema_array;
-    stat = db_->AllCollections(collection_schema_array);
+    std::vector<std::string> names;
+    stat = db_->AllCollections(names);
     ASSERT_TRUE(stat.ok());
     bool bfound = false;
-    for (auto& schema : collection_schema_array) {
-        if (schema.collection_id_ == COLLECTION_NAME) {
+    for (auto& name : names) {
+        if (name == COLLECTION_NAME) {
             bfound = true;
             break;
         }
@@ -212,11 +212,11 @@ TEST_F(MySqlDBTest, ARHIVE_DISK_CHECK) {
 
     fiu_init(0);
     FIU_ENABLE_FIU("MySQLMetaImpl.AllCollection.null_connection");
-    stat = db_->AllCollections(collection_schema_array);
+    stat = db_->AllCollections(names);
     ASSERT_FALSE(stat.ok());
 
     FIU_ENABLE_FIU("MySQLMetaImpl.AllCollection.throw_exception");
-    stat = db_->AllCollections(collection_schema_array);
+    stat = db_->AllCollections(names);
     ASSERT_FALSE(stat.ok());
     fiu_disable("MySQLMetaImpl.AllCollection.null_connection");
     fiu_disable("MySQLMetaImpl.AllCollection.throw_exception");
@@ -476,5 +476,3 @@ TEST_F(MySqlDBTest, PARTITION_TEST) {
         ASSERT_TRUE(stat.ok());
     }
 }
-
-
