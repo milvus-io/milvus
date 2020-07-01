@@ -277,9 +277,9 @@ ClientTest::CreateIndexNSG(const std::string& collection_name, milvus::IndexType
     std::cout << "Wait until create all index done" << std::endl;
     JSON json_params = {
         {"search_length", 45}, 
-        {"out_degree", 40},
-        {"candidate_pool_size", 200}, 
-        {"knng", 50}};
+        {"out_degree", 50},
+        {"candidate_pool_size", 300}, 
+        {"knng", 100}};
     milvus::IndexParam index1 = {collection_name, type, json_params.dump()};
     milvus_sdk::Utils::PrintIndexParam(index1);
     milvus::Status stat = conn_->CreateIndex(index1);
@@ -370,7 +370,10 @@ ClientTest::Test() {
 
     LoadCollection(collection_name);
     // SearchEntitiesHNSW(collection_name, TOP_K);
-    SearchEntitiesNSG(collection_name, TOP_K);
+    for (int i = 0; i < 1000; i++) {
+        printf("At search #%d\n", i);
+        SearchEntitiesNSG(collection_name, TOP_K);
+    }
     // SearchEntities(collection_name, TOP_K, NPROBE);
 
     DropIndex(collection_name);

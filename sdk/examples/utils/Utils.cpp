@@ -212,6 +212,7 @@ Utils::CheckSearchResult(const std::vector<std::pair<int64_t, milvus::Entity>>& 
 
         if (match_index >= one_result.ids.size()) {
             std::cout << "The topk result is wrong: not return search target in result set" << std::endl;
+            exit(0);
         } else {
             std::cout << "No." << i << " Check result successfully for target: " << search_id << " at top "
                       << match_index << std::endl;
