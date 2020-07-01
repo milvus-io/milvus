@@ -14,9 +14,9 @@
 
 #include "knowhere/common/Exception.h"
 #include "knowhere/common/Timer.h"
+#include "knowhere/index/non_materialized_index/IndexNSG_NM.h"
 #include "knowhere/index/vector_index/IndexIDMAP.h"
 #include "knowhere/index/vector_index/IndexIVF.h"
-#include "knowhere/index/non_materialized_index/IndexNSG_NM.h"
 #include "knowhere/index/vector_index/IndexType.h"
 #include "knowhere/index/vector_index/adapter/VectorAdapter.h"
 #include "knowhere/index/vector_index/impl/nsg/NSGIO.h"
@@ -97,7 +97,7 @@ NSG_NM::Query(const DatasetPtr& dataset_ptr, const Config& config) {
         {
             std::lock_guard<std::mutex> lk(mutex_);
             // index_->ori_data_ = (float*) data_.get();
-            index_->Search((float*)p_data, (float*) data_.get(), rows, dim, topK, p_dist, p_id, s_params, blacklist);
+            index_->Search((float*)p_data, (float*)data_.get(), rows, dim, topK, p_dist, p_id, s_params, blacklist);
         }
 
         auto ret_ds = std::make_shared<Dataset>();
@@ -146,7 +146,7 @@ NSG_NM::Train(const DatasetPtr& dataset_ptr, const Config& config) {
     GETTENSOR(dataset_ptr)
     index_ = std::make_shared<impl::NsgIndex>(dim, rows, config[Metric::TYPE].get<std::string>());
     index_->SetKnnGraph(knng);
-    index_->Build_with_ids(rows, (float*) p_data, (int64_t*)p_ids, b_params);
+    index_->Build_with_ids(rows, (float*)p_data, (int64_t*)p_ids, b_params);
 }
 
 int64_t

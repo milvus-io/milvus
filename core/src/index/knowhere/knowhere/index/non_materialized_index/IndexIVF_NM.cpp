@@ -63,14 +63,14 @@ IVF_NM::Load(const BinarySet& binary_set) {
 
     // Construct arranged data from original data
     auto binary = binary_set.GetByName(RAW_DATA);
-    const float* original_data = (const float*) binary->data.get();
+    const float* original_data = (const float*)binary->data.get();
     auto ivf_index = dynamic_cast<faiss::IndexIVF*>(index_.get());
     auto invlists = ivf_index->invlists;
 
 #ifdef USE_CPU
     auto ails = dynamic_cast<faiss::ArrayInvertedLists*>(invlists);
     auto d = ivf_index->d;
-    auto nb = (size_t) (binary->size / invlists->code_size);
+    auto nb = (size_t)(binary->size / invlists->code_size);
     arranged_data = new uint8_t[d * sizeof(float) * nb];
     prefix_sum.resize(invlists->nlist);
     size_t curr_index = 0;
@@ -86,10 +86,10 @@ IVF_NM::Load(const BinarySet& binary_set) {
 #else
     auto rol = dynamic_cast<faiss::ReadOnlyArrayInvertedLists*>(invlists);
     auto d = ivf_index->d;
-    auto nb = (size_t) (binary->size / invlists->code_size);
+    auto nb = (size_t)(binary->size / invlists->code_size);
     auto lengths = rol->readonly_length;
     // auto rol_data = (const float *) rol->pin_readonly_codes->data;
-    auto rol_ids = (const long *) rol->pin_readonly_ids->data;
+    auto rol_ids = (const long*)rol->pin_readonly_ids->data;
     arranged_data = new uint8_t[d * sizeof(float) * nb];
     prefix_sum.resize(invlists->nlist);
     size_t curr_index = 0;

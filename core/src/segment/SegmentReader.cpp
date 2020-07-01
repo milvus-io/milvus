@@ -139,7 +139,6 @@ SegmentReader::LoadVectorIndexWithRawData(const std::string& location, segment::
     return Status::OK();
 }
 
-
 Status
 SegmentReader::LoadBloomFilter(segment::IdBloomFilterPtr& id_bloom_filter_ptr) {
     codec::DefaultCodec default_codec;

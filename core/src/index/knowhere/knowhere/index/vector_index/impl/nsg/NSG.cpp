@@ -89,7 +89,7 @@ NsgIndex::Build_with_ids(size_t nb, float* data, const int64_t* ids, const Build
 }
 
 void
-NsgIndex::InitNavigationPoint(float *data) {
+NsgIndex::InitNavigationPoint(float* data) {
     // calculate the center of vectors
     auto center = new float[dimension];
     memset(center, 0, sizeof(float) * dimension);
@@ -124,7 +124,7 @@ NsgIndex::InitNavigationPoint(float *data) {
 
 // Specify Link
 void
-NsgIndex::GetNeighbors(const float* query, float *data, std::vector<Neighbor>& resset, std::vector<Neighbor>& fullset,
+NsgIndex::GetNeighbors(const float* query, float* data, std::vector<Neighbor>& resset, std::vector<Neighbor>& fullset,
                        boost::dynamic_bitset<>& has_calculated_dist) {
     auto& graph = knng;
     size_t buffer_size = search_length;
@@ -226,7 +226,7 @@ NsgIndex::GetNeighbors(const float* query, float *data, std::vector<Neighbor>& r
 
 // FindUnconnectedNode
 void
-NsgIndex::GetNeighbors(const float* query, float *data, std::vector<Neighbor>& resset, std::vector<Neighbor>& fullset) {
+NsgIndex::GetNeighbors(const float* query, float* data, std::vector<Neighbor>& resset, std::vector<Neighbor>& fullset) {
     auto& graph = nsg;
     size_t buffer_size = search_length;
 
@@ -323,7 +323,8 @@ NsgIndex::GetNeighbors(const float* query, float *data, std::vector<Neighbor>& r
 }
 
 void
-NsgIndex::GetNeighbors(const float* query, float *data, std::vector<Neighbor>& resset, Graph& graph, SearchParams* params) {
+NsgIndex::GetNeighbors(const float* query, float* data, std::vector<Neighbor>& resset, Graph& graph,
+                       SearchParams* params) {
     size_t buffer_size = params ? params->search_length : search_length;
 
     if (buffer_size > ntotal) {
@@ -422,7 +423,7 @@ NsgIndex::GetNeighbors(const float* query, float *data, std::vector<Neighbor>& r
 }
 
 void
-NsgIndex::Link(float *data) {
+NsgIndex::Link(float* data) {
     float* cut_graph_dist = new float[ntotal * out_degree];
     nsg.resize(ntotal);
 
@@ -470,7 +471,7 @@ NsgIndex::Link(float *data) {
 }
 
 void
-NsgIndex::SyncPrune(float *data, size_t n, std::vector<Neighbor>& pool, boost::dynamic_bitset<>& has_calculated,
+NsgIndex::SyncPrune(float* data, size_t n, std::vector<Neighbor>& pool, boost::dynamic_bitset<>& has_calculated,
                     float* cut_graph_dist) {
     // avoid lose nearest neighbor in knng
     for (size_t i = 0; i < knng[n].size(); ++i) {
@@ -507,7 +508,7 @@ NsgIndex::SyncPrune(float *data, size_t n, std::vector<Neighbor>& pool, boost::d
 
 //>> Optimize: remove read-lock
 void
-NsgIndex::InterInsert(float *data, unsigned n, std::vector<std::mutex>& mutex_vec, float* cut_graph_dist) {
+NsgIndex::InterInsert(float* data, unsigned n, std::vector<std::mutex>& mutex_vec, float* cut_graph_dist) {
     auto& current = n;
 
     auto& neighbor_id_pool = nsg[current];
@@ -580,7 +581,8 @@ NsgIndex::InterInsert(float *data, unsigned n, std::vector<std::mutex>& mutex_ve
 }
 
 void
-NsgIndex::SelectEdge(float *data, unsigned& cursor, std::vector<Neighbor>& sort_pool, std::vector<Neighbor>& result, bool limit) {
+NsgIndex::SelectEdge(float* data, unsigned& cursor, std::vector<Neighbor>& sort_pool, std::vector<Neighbor>& result,
+                     bool limit) {
     auto& pool = sort_pool;
 
     /*
@@ -594,8 +596,7 @@ NsgIndex::SelectEdge(float *data, unsigned& cursor, std::vector<Neighbor>& sort_
         auto& p = pool[cursor];
         bool should_link = true;
         for (size_t t = 0; t < result.size(); ++t) {
-            float dist =
-                distance_->Compare(data + dimension * result[t].id, data + dimension * p.id, dimension);
+            float dist = distance_->Compare(data + dimension * result[t].id, data + dimension * p.id, dimension);
 
             if (dist < p.distance) {
                 should_link = false;
@@ -608,7 +609,7 @@ NsgIndex::SelectEdge(float *data, unsigned& cursor, std::vector<Neighbor>& sort_
 }
 
 void
-NsgIndex::CheckConnectivity(float *data) {
+NsgIndex::CheckConnectivity(float* data) {
     auto root = navigation_point;
     boost::dynamic_bitset<> has_linked{ntotal, 0};
     int64_t linked_count = 0;
@@ -657,7 +658,7 @@ NsgIndex::DFS(size_t root, boost::dynamic_bitset<>& has_linked, int64_t& linked_
 }
 
 void
-NsgIndex::FindUnconnectedNode(float *data, boost::dynamic_bitset<>& has_linked, int64_t& root) {
+NsgIndex::FindUnconnectedNode(float* data, boost::dynamic_bitset<>& has_linked, int64_t& root) {
     // find any of unlinked-node
     size_t id = ntotal;
     for (size_t i = 0; i < ntotal; i++) {  // find not link
@@ -831,8 +832,8 @@ NsgIndex::FindUnconnectedNode(float *data, boost::dynamic_bitset<>& has_linked, 
 // }
 
 void
-NsgIndex::Search(const float* query, float *data, const unsigned& nq, const unsigned& dim, const unsigned& k, float* dist,
-                 int64_t* ids, SearchParams& params, faiss::ConcurrentBitsetPtr bitset) {
+NsgIndex::Search(const float* query, float* data, const unsigned& nq, const unsigned& dim, const unsigned& k,
+                 float* dist, int64_t* ids, SearchParams& params, faiss::ConcurrentBitsetPtr bitset) {
     std::vector<std::vector<Neighbor>> resset(nq);
 
     TimeRecorder rc("NsgIndex::search", 1);

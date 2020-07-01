@@ -94,8 +94,8 @@ NSG::Query(const DatasetPtr& dataset_ptr, const Config& config) {
         s_params.k = config[meta::TOPK];
         {
             std::lock_guard<std::mutex> lk(mutex_);
-            index_->Search((float*)p_data, nullptr, rows, dim, config[meta::TOPK].get<int64_t>(), p_dist, p_id, s_params,
-                           blacklist);
+            index_->Search((float*)p_data, nullptr, rows, dim, config[meta::TOPK].get<int64_t>(), p_dist, p_id,
+                           s_params, blacklist);
         }
 
         auto ret_ds = std::make_shared<Dataset>();

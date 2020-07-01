@@ -101,4 +101,4 @@ class IVF_NM : public VecIndex, public OffsetBaseIndex {
 using IVFNMPtr = std::shared_ptr<IVF_NM>;
 
 }  // namespace knowhere
-}  // namespace milvus 
+}  // namespace milvus

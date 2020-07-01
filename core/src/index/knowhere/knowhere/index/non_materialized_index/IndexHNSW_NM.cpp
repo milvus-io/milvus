@@ -88,8 +88,8 @@ IndexHNSW_NM::Train(const DatasetPtr& dataset_ptr, const Config& config) {
             space = new hnswlib::InnerProductSpace(dim);
             normalize = true;
         }
-        index_ = std::make_shared<hnswlib::HierarchicalNSW_NM<float>>(space, rows, config[IndexParams::M].get<int64_t>(),
-                                                                   config[IndexParams::efConstruction].get<int64_t>());
+        index_ = std::make_shared<hnswlib::HierarchicalNSW_NM<float>>(
+            space, rows, config[IndexParams::M].get<int64_t>(), config[IndexParams::efConstruction].get<int64_t>());
     } catch (std::exception& e) {
         KNOWHERE_THROW_MSG(e.what());
     }

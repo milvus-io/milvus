@@ -71,7 +71,7 @@ class NSG_NM : public VecIndex {
     std::mutex mutex_;
     int64_t gpu_;
     std::shared_ptr<impl::NsgIndex> index_ = nullptr;
-    std::shared_ptr<uint8_t []> data_ = nullptr;
+    std::shared_ptr<uint8_t[]> data_ = nullptr;
 };
 
 using NSG_NMIndexPtr = std::shared_ptr<NSG_NM>();

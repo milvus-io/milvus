@@ -19,8 +19,8 @@
 #include <string>
 
 #include "knowhere/common/Exception.h"
-#include "knowhere/index/non_materialized_index/gpu/IndexGPUIVF_NM.h"
 #include "knowhere/index/non_materialized_index/IndexIVF_NM.h"
+#include "knowhere/index/non_materialized_index/gpu/IndexGPUIVF_NM.h"
 #include "knowhere/index/vector_index/adapter/VectorAdapter.h"
 #include "knowhere/index/vector_index/helpers/Cloner.h"
 #include "knowhere/index/vector_index/helpers/FaissIO.h"
@@ -105,7 +105,7 @@ GPUIVF_NM::Load(const BinarySet& binary_set) {
     delete index;
     */
 
-   // not supported
+    // not supported
 }
 
 VecIndexPtr
