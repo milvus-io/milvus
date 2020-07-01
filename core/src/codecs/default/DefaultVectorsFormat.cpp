@@ -20,6 +20,7 @@
 #include <fcntl.h>
 #include <unistd.h>
 #include <algorithm>
+#include <memory>
 
 #include <boost/filesystem.hpp>
 

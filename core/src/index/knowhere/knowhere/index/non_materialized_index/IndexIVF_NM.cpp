@@ -89,7 +89,7 @@ IVF_NM::Load(const BinarySet& binary_set) {
     auto nb = (size_t)(binary->size / invlists->code_size);
     auto lengths = rol->readonly_length;
     // auto rol_data = (const float *) rol->pin_readonly_codes->data;
-    auto rol_ids = (const long*)rol->pin_readonly_ids->data;
+    auto rol_ids = (const int64_t*) rol->pin_readonly_ids->data;
     arranged_data = new uint8_t[d * sizeof(float) * nb];
     prefix_sum.resize(invlists->nlist);
     size_t curr_index = 0;
