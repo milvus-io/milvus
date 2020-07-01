@@ -21,6 +21,7 @@ Please mark all changes in change log and use the issue from GitHub
 -   \#2509 Count up query statistics for debug ease
 -   \#2572 Support structured data index
 -   \#2585 Support IVF_PQ on GPU with using metric_type IP
+-   \#2689 Construct Faiss Index Without Data
 
 ## Improvement
 -   \#2543 Remove secondary_path related code
