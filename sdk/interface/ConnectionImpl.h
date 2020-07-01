@@ -62,8 +62,7 @@ class ConnectionImpl : public Connection {
     DropCollection(const std::string& collection_name) override;
 
     Status
-    CreateIndex(const std::string& collection_name, const std::string& field_name, const std::string& index_name,
-                const std::string& index_params) override;
+    CreateIndex(const IndexParam& index_param) override;
 
     Status
     Insert(const std::string& collection_name, const std::string& partition_tag, const FieldValue& entity_array,

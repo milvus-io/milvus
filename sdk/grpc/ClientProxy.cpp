@@ -451,7 +451,7 @@ ClientProxy::CreateCollection(const Mapping& mapping) {
 
             auto grpc_extra_param = grpc_field->add_index_params();
             grpc_extra_param->set_key(EXTRA_PARAM_KEY);
-            grpc_extra_param->set_value(field->extram_params);
+            grpc_extra_param->set_value(field->extra_params);
         }
 
         return client_ptr_->CreateCollection(grpc_mapping);
@@ -484,16 +484,15 @@ ClientProxy::DropCollection(const std::string& collection_name) {
 }
 
 Status
-ClientProxy::CreateIndex(const std::string& collection_name, const std::string& field_name,
-                         const std::string& index_name, const std::string& index_params) {
+ClientProxy::CreateIndex(const IndexParam& index_param) {
     try {
         ::milvus::grpc::IndexParam grpc_index_param;
-        grpc_index_param.set_collection_name(collection_name);
-        grpc_index_param.set_field_name(field_name);
+        grpc_index_param.set_collection_name(index_param.collection_name);
+        grpc_index_param.set_field_name(index_param.field_name);
         milvus::grpc::KeyValuePair* kv = grpc_index_param.add_extra_params();
-        grpc_index_param.set_index_name(index_name);
+        grpc_index_param.set_index_name(index_param.index_name);
         kv->set_key(EXTRA_PARAM_KEY);
-        kv->set_value(index_params);
+        kv->set_value(index_param.extra_params);
         return client_ptr_->CreateIndex(grpc_index_param);
     } catch (std::exception& ex) {
         return Status(StatusCode::UnknownError, "Failed to build index: " + std::string(ex.what()));
@@ -628,7 +627,7 @@ ClientProxy::GetCollectionInfo(const std::string& collection_name, Mapping& mapp
                 json_param[grpc_field.extra_params(j).key()] = grpc_field.extra_params(j).value();
                 json_extra_params.emplace_back(json_param);
             }
-            field_ptr->extram_params = json_extra_params.dump();
+            field_ptr->extra_params = json_extra_params.dump();
             field_ptr->field_type = (DataType)grpc_field.type();
         }
         return status;

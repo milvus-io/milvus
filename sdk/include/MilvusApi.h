@@ -321,8 +321,7 @@ class Connection {
      * @return Indicate if create index successfully.
      */
     virtual Status
-    CreateIndex(const std::string& collection_name, const std::string& field_name, const std::string& index_name,
-                const std::string& index_params) = 0;
+    CreateIndex(const IndexParam& index_param) = 0;
 
     /**
      * @brief Insert entity to collection
