@@ -402,7 +402,7 @@ class Connection {
 
     virtual Status
     SearchPB(const std::string& collection_name, const std::vector<std::string>& partition_list,
-             BooleanQueryPtr& boolean_query, TopKQueryResult& query_result) = 0;
+             BooleanQueryPtr& boolean_query, const std::string& extra_params, TopKQueryResult& query_result) = 0;
 
     /**
      * @brief Get collection information

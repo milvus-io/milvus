@@ -148,7 +148,7 @@ Utils::PrintIndexParam(const milvus::IndexParam& index_param) {
 }
 
 void
-Utils::BuildEntities(int64_t from, int64_t to, std::vector<milvus::Entity>& entity_array,
+Utils::BuildEntities(int64_t from, int64_t to, std::vector<milvus::VectorData>& entity_array,
                      std::vector<int64_t>& entity_ids, int64_t dimension) {
     if (to <= from) {
         return;
@@ -159,13 +159,13 @@ Utils::BuildEntities(int64_t from, int64_t to, std::vector<milvus::Entity>& enti
     std::default_random_engine e;
     std::uniform_real_distribution<float> u(0, 1);
     for (int64_t k = from; k < to; k++) {
-        milvus::Entity entity;
-        entity.float_data.resize(dimension);
+        milvus::VectorData vector_data;
+        vector_data.float_data.resize(dimension);
         for (int64_t i = 0; i < dimension; i++) {
-            entity.float_data[i] = (float)((k + 100) % (i + 1));
+            vector_data.float_data[i] = (float)((k + 100) % (i + 1));
         }
 
-        entity_array.emplace_back(entity);
+        entity_array.emplace_back(vector_data);
         entity_ids.push_back(k);
     }
 }

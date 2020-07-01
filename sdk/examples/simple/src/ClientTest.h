@@ -37,7 +37,7 @@ class ClientTest {
     ShowCollections(std::vector<std::string>&);
 
     void
-    CreateCollection(const std::string&, int64_t, milvus::MetricType);
+    CreateCollection(const std::string& collection_name);
 
     void
     GetCollectionInfo(const std::string&);

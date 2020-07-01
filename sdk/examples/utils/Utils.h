@@ -54,7 +54,7 @@ class Utils {
     PrintIndexParam(const milvus::IndexParam& index_param);
 
     static void
-    BuildEntities(int64_t from, int64_t to, std::vector<milvus::Entity>& entity_array, std::vector<int64_t>& entity_ids,
+    BuildEntities(int64_t from, int64_t to, std::vector<milvus::VectorData>& entity_array, std::vector<int64_t>& entity_ids,
                   int64_t dimension);
 
     static void
