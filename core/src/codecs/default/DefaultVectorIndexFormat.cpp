@@ -93,7 +93,9 @@ DefaultVectorIndexFormat::read_internal(const storage::FSHandlerPtr& fs_ptr, con
         vec_index_factory.CreateVecIndex(knowhere::OldIndexTypeToStr(current_type), knowhere::IndexMode::MODE_CPU);
     if (index != nullptr) {
         if (raw_data != nullptr) {
+            LOG_ENGINE_DEBUG_ << "load index with row data " << raw_data->size;
             load_data_list.Append(RAW_DATA, raw_data);
+            length += raw_data->size;
         }
 
         index->Load(load_data_list);
