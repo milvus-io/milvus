@@ -90,9 +90,9 @@ MemTableFile::AddEntities(const VectorSourcePtr& source) {
     if (table_file_schema_.dimension_ <= 0) {
         std::string err_msg =
             "MemTableFile::Add: table_file_schema dimension = " + std::to_string(table_file_schema_.dimension_) +
-            ", table_id = " + table_file_schema_.collection_id_;
+            ", collection_id = " + table_file_schema_.collection_id_;
         LOG_ENGINE_ERROR_ << LogOut("[%s][%ld]", "insert", 0) << err_msg;
-        return Status(DB_ERROR, "Not able to create table file");
+        return Status(DB_ERROR, "Not able to create collection file");
     }
 
     size_t single_entity_mem_size = source->SingleEntitySize(table_file_schema_.dimension_);
