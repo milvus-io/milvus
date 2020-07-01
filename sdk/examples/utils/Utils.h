@@ -72,17 +72,6 @@ class Utils {
              milvus::TopKQueryResult& topk_query_result);
 
     static void
-    DoSearchHNSW(std::shared_ptr<milvus::Connection> conn, const std::string& collection_name,
-                 const std::vector<std::string>& partition_tags, int64_t top_k,
-                 const std::vector<std::pair<int64_t, milvus::Entity>>& entity_array,
-                 milvus::TopKQueryResult& topk_query_result);
-
-    static void
-    DoSearchNSG(std::shared_ptr<milvus::Connection> conn, const std::string& collection_name,
-                 const std::vector<std::string>& partition_tags, int64_t top_k,
-                 const std::vector<std::pair<int64_t, milvus::Entity>>& entity_array,
-                 milvus::TopKQueryResult& topk_query_result);
-    static void
     ConstructVector(uint64_t nq, uint64_t dimension, std::vector<milvus::Entity>& query_vector);
 
     static std::vector<milvus::LeafQueryPtr>

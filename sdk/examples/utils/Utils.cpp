@@ -212,7 +212,6 @@ Utils::CheckSearchResult(const std::vector<std::pair<int64_t, milvus::Entity>>& 
 
         if (match_index >= one_result.ids.size()) {
             std::cout << "The topk result is wrong: not return search target in result set" << std::endl;
-            exit(0);
         } else {
             std::cout << "No." << i << " Check result successfully for target: " << search_id << " at top "
                       << match_index << std::endl;
@@ -236,58 +235,6 @@ Utils::DoSearch(std::shared_ptr<milvus::Connection> conn, const std::string& col
     {
         BLOCK_SPLITER
         JSON json_params = {{"nprobe", nprobe}};
-        milvus_sdk::TimeRecorder rc("Search");
-        milvus::Status stat = conn->Search(collection_name, partition_tags, temp_entity_array, top_k,
-                                           json_params.dump(), topk_query_result);
-        std::cout << "Search function call status: " << stat.message() << std::endl;
-        BLOCK_SPLITER
-    }
-
-    PrintSearchResult(entity_array, topk_query_result);
-    CheckSearchResult(entity_array, topk_query_result);
-}
-
-void
-Utils::DoSearchHNSW(std::shared_ptr<milvus::Connection> conn, const std::string& collection_name,
-                    const std::vector<std::string>& partition_tags, int64_t top_k,
-                    const std::vector<std::pair<int64_t, milvus::Entity>>& entity_array,
-                    milvus::TopKQueryResult& topk_query_result) {
-    topk_query_result.clear();
-
-    std::vector<milvus::Entity> temp_entity_array;
-    for (auto& pair : entity_array) {
-        temp_entity_array.push_back(pair.second);
-    }
-
-    {
-        BLOCK_SPLITER
-        JSON json_params = {{"ef", 200}};
-        milvus_sdk::TimeRecorder rc("Search");
-        milvus::Status stat = conn->Search(collection_name, partition_tags, temp_entity_array, top_k,
-                                           json_params.dump(), topk_query_result);
-        std::cout << "Search function call status: " << stat.message() << std::endl;
-        BLOCK_SPLITER
-    }
-
-    PrintSearchResult(entity_array, topk_query_result);
-    CheckSearchResult(entity_array, topk_query_result);
-}
-
-void
-Utils::DoSearchNSG(std::shared_ptr<milvus::Connection> conn, const std::string& collection_name,
-                    const std::vector<std::string>& partition_tags, int64_t top_k,
-                    const std::vector<std::pair<int64_t, milvus::Entity>>& entity_array,
-                    milvus::TopKQueryResult& topk_query_result) {
-    topk_query_result.clear();
-
-    std::vector<milvus::Entity> temp_entity_array;
-    for (auto& pair : entity_array) {
-        temp_entity_array.push_back(pair.second);
-    }
-
-    {
-        BLOCK_SPLITER
-        JSON json_params = {{"search_length", 100}};
         milvus_sdk::TimeRecorder rc("Search");
         milvus::Status stat = conn->Search(collection_name, partition_tags, temp_entity_array, top_k,
                                            json_params.dump(), topk_query_result);

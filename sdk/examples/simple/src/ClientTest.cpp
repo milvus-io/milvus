@@ -24,17 +24,17 @@ namespace {
 
 const char* COLLECTION_NAME = milvus_sdk::Utils::GenCollectionName().c_str();
 
-constexpr int64_t COLLECTION_DIMENSION = 256;
+constexpr int64_t COLLECTION_DIMENSION = 512;
 constexpr int64_t COLLECTION_INDEX_FILE_SIZE = 1024;
 constexpr milvus::MetricType COLLECTION_METRIC_TYPE = milvus::MetricType::L2;
-constexpr int64_t BATCH_ENTITY_COUNT = 10000;
+constexpr int64_t BATCH_ENTITY_COUNT = 100000;
 constexpr int64_t NQ = 5;
 constexpr int64_t TOP_K = 10;
 constexpr int64_t NPROBE = 32;
 constexpr int64_t SEARCH_TARGET = BATCH_ENTITY_COUNT / 2;  // change this value, result is different
 constexpr int64_t ADD_ENTITY_LOOP = 5;
-constexpr milvus::IndexType INDEX_TYPE = milvus::IndexType::RNSG;
-constexpr int32_t NLIST = 1024;
+constexpr milvus::IndexType INDEX_TYPE = milvus::IndexType::IVFFLAT;
+constexpr int32_t NLIST = 16384;
 
 void
 PrintEntity(const std::string& tag, const milvus::Entity& entity) {
@@ -184,22 +184,6 @@ ClientTest::SearchEntities(const std::string& collection_name, int64_t topk, int
 }
 
 void
-ClientTest::SearchEntitiesHNSW(const std::string& collection_name, int64_t topk) {
-    std::vector<std::string> partition_tags;
-    milvus::TopKQueryResult topk_query_result;
-    milvus_sdk::Utils::DoSearchHNSW(conn_, collection_name, partition_tags, topk, search_entity_array_,
-                                    topk_query_result);
-}
-
-void
-ClientTest::SearchEntitiesNSG(const std::string& collection_name, int64_t topk) {
-    std::vector<std::string> partition_tags;
-    milvus::TopKQueryResult topk_query_result;
-    milvus_sdk::Utils::DoSearchNSG(conn_, collection_name, partition_tags, topk, search_entity_array_,
-                                    topk_query_result);
-}
-
-void
 ClientTest::SearchEntitiesByID(const std::string& collection_name, int64_t topk, int64_t nprobe) {
     std::vector<std::string> partition_tags;
     milvus::TopKQueryResult topk_query_result;
@@ -244,42 +228,6 @@ ClientTest::CreateIndex(const std::string& collection_name, milvus::IndexType ty
     milvus_sdk::TimeRecorder rc("Create index");
     std::cout << "Wait until create all index done" << std::endl;
     JSON json_params = {{"nlist", nlist}};
-    milvus::IndexParam index1 = {collection_name, type, json_params.dump()};
-    milvus_sdk::Utils::PrintIndexParam(index1);
-    milvus::Status stat = conn_->CreateIndex(index1);
-    std::cout << "CreateIndex function call status: " << stat.message() << std::endl;
-
-    milvus::IndexParam index2;
-    stat = conn_->GetIndexInfo(collection_name, index2);
-    std::cout << "GetIndexInfo function call status: " << stat.message() << std::endl;
-    milvus_sdk::Utils::PrintIndexParam(index2);
-}
-
-void
-ClientTest::CreateIndexHNSW(const std::string& collection_name, milvus::IndexType type) {
-    milvus_sdk::TimeRecorder rc("Create index");
-    std::cout << "Wait until create all index done" << std::endl;
-    JSON json_params = {{"M", 16}, {"efConstruction", 200}};
-    milvus::IndexParam index1 = {collection_name, type, json_params.dump()};
-    milvus_sdk::Utils::PrintIndexParam(index1);
-    milvus::Status stat = conn_->CreateIndex(index1);
-    std::cout << "CreateIndex function call status: " << stat.message() << std::endl;
-
-    milvus::IndexParam index2;
-    stat = conn_->GetIndexInfo(collection_name, index2);
-    std::cout << "GetIndexInfo function call status: " << stat.message() << std::endl;
-    milvus_sdk::Utils::PrintIndexParam(index2);
-}
-
-void
-ClientTest::CreateIndexNSG(const std::string& collection_name, milvus::IndexType type) {
-    milvus_sdk::TimeRecorder rc("Create index");
-    std::cout << "Wait until create all index done" << std::endl;
-    JSON json_params = {
-        {"search_length", 45}, 
-        {"out_degree", 50},
-        {"candidate_pool_size", 300}, 
-        {"knng", 100}};
     milvus::IndexParam index1 = {collection_name, type, json_params.dump()};
     milvus_sdk::Utils::PrintIndexParam(index1);
     milvus::Status stat = conn_->CreateIndex(index1);
@@ -356,25 +304,18 @@ ClientTest::Test() {
 
     BuildSearchEntities(NQ, dim);
     GetEntityByID(collection_name, search_id_array_);
-    SearchEntities(collection_name, TOP_K, NPROBE);
+//    SearchEntities(collection_name, TOP_K, NPROBE);
     SearchEntitiesByID(collection_name, TOP_K, NPROBE);
 
-    // CreateIndex(collection_name, INDEX_TYPE, NLIST);
-    // CreateIndexHNSW(collection_name, INDEX_TYPE);
-    CreateIndexNSG(collection_name, INDEX_TYPE);
+    CreateIndex(collection_name, INDEX_TYPE, NLIST);
     GetCollectionStats(collection_name);
 
-    // std::vector<int64_t> delete_ids = {search_id_array_[0], search_id_array_[1]};
-    // DeleteByIds(collection_name, delete_ids);
-    // CompactCollection(collection_name);
+    std::vector<int64_t> delete_ids = {search_id_array_[0], search_id_array_[1]};
+    DeleteByIds(collection_name, delete_ids);
+    CompactCollection(collection_name);
 
     LoadCollection(collection_name);
-    // SearchEntitiesHNSW(collection_name, TOP_K);
-    for (int i = 0; i < 1000; i++) {
-        printf("At search #%d\n", i);
-        SearchEntitiesNSG(collection_name, TOP_K);
-    }
-    // SearchEntities(collection_name, TOP_K, NPROBE);
+    SearchEntities(collection_name, TOP_K, NPROBE); // this line get two search error since we delete two entities
 
     DropIndex(collection_name);
     DropCollection(collection_name);
