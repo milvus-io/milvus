@@ -19,12 +19,10 @@
 #include "knowhere/index/vector_index/IndexAnnoy.h"
 #include "knowhere/index/vector_index/IndexBinaryIDMAP.h"
 #include "knowhere/index/vector_index/IndexBinaryIVF.h"
-#include "knowhere/index/vector_index/IndexHNSW.h"
 #include "knowhere/index/vector_index/IndexIDMAP.h"
 #include "knowhere/index/vector_index/IndexIVF.h"
 #include "knowhere/index/vector_index/IndexIVFPQ.h"
 #include "knowhere/index/vector_index/IndexIVFSQ.h"
-#include "knowhere/index/vector_index/IndexNSG.h"
 #ifdef MILVUS_SUPPORT_SPTAG
 #include "knowhere/index/vector_index/IndexSPTAG.h"
 #endif
