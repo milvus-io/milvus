@@ -286,7 +286,7 @@ Utils::DoSearchNSG(std::shared_ptr<milvus::Connection> conn, const std::string& 
 
     {
         BLOCK_SPLITER
-        JSON json_params = {{"search_length", 45}};
+        JSON json_params = {{"search_length", 100}};
         milvus_sdk::TimeRecorder rc("Search");
         milvus::Status stat = conn->Search(collection_name, partition_tags, temp_entity_array, top_k,
                                            json_params.dump(), topk_query_result);

@@ -97,7 +97,7 @@ NSG_NM::Query(const DatasetPtr& dataset_ptr, const Config& config) {
         {
             std::lock_guard<std::mutex> lk(mutex_);
             // index_->ori_data_ = (float*) data_.get();
-            index_->Search((float*)p_data, rows, dim, topK, p_dist, p_id, s_params, blacklist);
+            index_->Search((float*)p_data, (float*) data_.get(), rows, dim, topK, p_dist, p_id, s_params, blacklist);
         }
 
         auto ret_ds = std::make_shared<Dataset>();
@@ -116,7 +116,6 @@ NSG_NM::Train(const DatasetPtr& dataset_ptr, const Config& config) {
     idmap->AddWithoutIds(dataset_ptr, config);
     impl::Graph knng;
     const float* raw_data = idmap->GetRawVectors();
-    printf("this raw %p\n", raw_data);
     const int64_t k = config[IndexParams::knng].get<int64_t>();
 #ifdef MILVUS_GPU_VERSION
     const int64_t device_id = config[knowhere::meta::DEVICEID].get<int64_t>();
@@ -147,8 +146,7 @@ NSG_NM::Train(const DatasetPtr& dataset_ptr, const Config& config) {
     GETTENSOR(dataset_ptr)
     index_ = std::make_shared<impl::NsgIndex>(dim, rows, config[Metric::TYPE].get<std::string>());
     index_->SetKnnGraph(knng);
-    index_->Build_with_ids(rows, (const float*) p_data, (int64_t*)p_ids, b_params);
-    printf("hdedehh\n");
+    index_->Build_with_ids(rows, (float*) p_data, (int64_t*)p_ids, b_params);
 }
 
 int64_t
