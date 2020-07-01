@@ -88,6 +88,10 @@ ClientTest::ShowCollections(std::vector<std::string>& collection_array) {
 
 void
 ClientTest::CreateCollection(const std::string& collection_name, int64_t dim, milvus::MetricType type) {
+    std::vector<milvus::FieldPtr> fields;
+
+    milvus::Mapping mapping = {collection_name,};
+
     milvus::CollectionParam collection_param = {collection_name, dim, COLLECTION_INDEX_FILE_SIZE, type};
     milvus::Status stat = conn_->CreateCollection(collection_param);
     std::cout << "CreateCollection function call status: " << stat.message() << std::endl;

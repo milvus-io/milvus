@@ -64,27 +64,36 @@ ClientTest::~ClientTest() {
 }
 
 void
-ClientTest::CreateHybridCollection(const std::string& collection_name) {
+ClientTest::CreateCollection(const std::string& collection_name) {
     milvus::FieldPtr field_ptr1 = std::make_shared<milvus::Field>();
     milvus::FieldPtr field_ptr2 = std::make_shared<milvus::Field>();
-    milvus::VectorFieldPtr vec_field_ptr = std::make_shared<milvus::VectorField>();
-    field_ptr1->field_type = milvus::DataType::INT64;
+    milvus::FieldPtr field_ptr3 = std::make_shared<milvus::Field>();
     field_ptr1->field_name = "field_1";
-    field_ptr2->field_type = milvus::DataType::FLOAT;
+    field_ptr1->field_type = milvus::DataType::INT64;
+    JSON index_param_1;
+    index_param_1["name"] = "index_1";
+    field_ptr1->index_params = index_param_1.dump();
+
     field_ptr2->field_name = "field_2";
-    vec_field_ptr->field_type = milvus::DataType::VECTOR;
-    vec_field_ptr->field_name = "field_3";
-    vec_field_ptr->dimension = 128;
+    field_ptr2->field_type = milvus::DataType::FLOAT;
+    JSON index_param_2;
+    index_param_2["name"] = "index_2";
+    field_ptr2->index_params = index_param_2.dump();
 
-    std::vector<milvus::FieldPtr> numerica_fields;
-    std::vector<milvus::VectorFieldPtr> vector_fields;
-    numerica_fields.emplace_back(field_ptr1);
-    numerica_fields.emplace_back(field_ptr2);
-    vector_fields.emplace_back(vec_field_ptr);
+    field_ptr3->field_name = "field_3";
+    field_ptr3->field_type = milvus::DataType::FLOAT_VECTOR;
+    JSON index_param_3;
+    index_param_3["name"] = "index_3";
+    index_param_3["index_type"] = "IVFFLAT";
+    field_ptr3->index_params = index_param_3;
+    JSON extra_params;
+    extra_params["dimension"] = COLLECTION_DIMENSION;
+    field_ptr3->extram_params = extra_params.dump();
 
-    milvus::HMapping mapping = {collection_name, numerica_fields, vector_fields};
-    milvus::Status stat = conn_->CreateHybridCollection(mapping);
-    std::cout << "CreateHybridCollection function call status: " << stat.message() << std::endl;
+    milvus::Mapping mapping = {collection_name, {field_ptr1, field_ptr2, field_ptr3}};
+
+    milvus::Status stat = conn_->CreateCollection(mapping);
+    std::cout << "CreateCollection function call status: " << stat.message() << std::endl;
 }
 
 void
@@ -96,9 +105,11 @@ ClientTest::Flush(const std::string& collection_name) {
 }
 
 void
-ClientTest::InsertHybridEntities(std::string& collection_name, int64_t row_num) {
-    std::unordered_map<std::string, std::vector<int64_t>> numerica_int_value;
-    std::unordered_map<std::string, std::vector<double>> numerica_double_value;
+ClientTest::Insert(std::string& collection_name, int64_t row_num) {
+    milvus::FieldValue field_value;
+
+    std::unordered_map<std::string, std::vector<int64_t>> int64_value;
+    std::unordered_map<std::string, std::vector<float>> float_value;
     std::vector<int64_t> value1;
     std::vector<double> value2;
     value1.resize(row_num);

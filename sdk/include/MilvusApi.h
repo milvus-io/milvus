@@ -61,16 +61,6 @@ struct ConnectParam {
 };
 
 /**
- * @brief Collection parameters
- */
-struct CollectionParam {
-    std::string collection_name;              ///< Collection_name name
-    int64_t dimension = 0;                    ///< Vector dimension, must be a positive value
-    int64_t index_file_size = 1024;           ///< Index file size, must be a positive value, unit: MB
-    MetricType metric_type = MetricType::L2;  ///< Index metric type
-};
-
-/**
  * @brief Attribute record
  */
 struct AttrRecord {
@@ -147,8 +137,7 @@ using PartitionTagList = std::vector<std::string>;
 
 struct Mapping {
     std::string collection_name;
-    std::vector<FieldPtr> numerica_fields;
-    std::vector<VectorFieldPtr> vector_fields;
+    std::vector<FieldPtr> fields;
 };
 
 /**
@@ -293,7 +282,7 @@ class Connection {
      * @return Indicate if collection is created successfully
      */
     virtual Status
-    CreateCollection(const std::string& collection_name, std::vector<FieldPtr>& fields) = 0;
+    CreateCollection(const Mapping& mapping) = 0;
 
     /**
      * @brief Test collection existence method
@@ -426,7 +415,7 @@ class Connection {
      * @return Indicate if this operation is successful.
      */
     virtual Status
-    GetCollectionInfo(const std::string& collection_name, CollectionParam& collection_param) = 0;
+    GetCollectionInfo(const std::string& collection_name, Mapping& mapping) = 0;
 
     /**
      * @brief Get collection entity count
@@ -514,7 +503,8 @@ class Connection {
      * @return Indicate if this operation is successful.
      */
     virtual Status
-    DropIndex(const std::string& collection_name) const = 0;
+    DropIndex(const std::string& collection_name, const std::string& field_name,
+              const std::string& index_name) const = 0;
 
     /**
      * @brief Create partition method

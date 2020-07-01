@@ -148,37 +148,39 @@ DeSerialization(const ::milvus::grpc::GeneralQuery& general_query, query::Boolea
             } else {
                 auto leaf_query = std::make_shared<query::LeafQuery>();
                 auto query = general_query.boolean_query().general_query(i);
-                if (query.has_term_query()) {
-                    query::TermQueryPtr term_query = std::make_shared<query::TermQuery>();
-                    term_query->field_name = query.term_query().field_name();
-                    term_query->boost = query.term_query().boost();
-                    size_t int_size = query.term_query().int_value_size();
-                    size_t double_size = query.term_query().double_value_size();
-                    if (int_size > 0) {
-                        term_query->field_value.resize(int_size * sizeof(int64_t));
-                        memcpy(term_query->field_value.data(), query.term_query().int_value().data(),
-                               int_size * sizeof(int64_t));
-                    } else if (double_size > 0) {
-                        term_query->field_value.resize(double_size * sizeof(double));
-                        memcpy(term_query->field_value.data(), query.term_query().double_value().data(),
-                               double_size * sizeof(double));
-                    }
-                    leaf_query->term_query = term_query;
-                    boolean_clause->AddLeafQuery(leaf_query);
-                }
-                if (query.has_range_query()) {
-                    query::RangeQueryPtr range_query = std::make_shared<query::RangeQuery>();
-                    range_query->field_name = query.range_query().field_name();
-                    range_query->boost = query.range_query().boost();
-                    range_query->compare_expr.resize(query.range_query().operand_size());
-                    for (uint64_t j = 0; j < query.range_query().operand_size(); ++j) {
-                        range_query->compare_expr[j].compare_operator =
-                            query::CompareOperator(query.range_query().operand(j).operator_());
-                        range_query->compare_expr[j].operand = query.range_query().operand(j).operand();
-                    }
-                    leaf_query->range_query = range_query;
-                    boolean_clause->AddLeafQuery(leaf_query);
-                }
+                //                if (query.has_term_query()) {
+                //                    query::TermQueryPtr term_query = std::make_shared<query::TermQuery>();
+                //                    term_query->field_name = query.term_query().field_name();
+                //                    term_query->boost = query.term_query().boost();
+                //                    size_t int_size = query.term_query().int_value_size();
+                //                    size_t double_size = query.term_query().double_value_size();
+                //                    if (int_size > 0) {
+                //                        term_query->field_value.resize(int_size * sizeof(int64_t));
+                //                        memcpy(term_query->field_value.data(), query.term_query().int_value().data(),
+                //                               int_size * sizeof(int64_t));
+                //                    } else if (double_size > 0) {
+                //                        term_query->field_value.resize(double_size * sizeof(double));
+                //                        memcpy(term_query->field_value.data(),
+                //                        query.term_query().double_value().data(),
+                //                               double_size * sizeof(double));
+                //                    }
+                //                    leaf_query->term_query = term_query;
+                //                    boolean_clause->AddLeafQuery(leaf_query);
+                //                }
+                //                if (query.has_range_query()) {
+                //                    query::RangeQueryPtr range_query = std::make_shared<query::RangeQuery>();
+                //                    range_query->field_name = query.range_query().field_name();
+                //                    range_query->boost = query.range_query().boost();
+                //                    range_query->compare_expr.resize(query.range_query().operand_size());
+                //                    for (uint64_t j = 0; j < query.range_query().operand_size(); ++j) {
+                //                        range_query->compare_expr[j].compare_operator =
+                //                            query::CompareOperator(query.range_query().operand(j).operator_());
+                //                        range_query->compare_expr[j].operand =
+                //                        query.range_query().operand(j).operand();
+                //                    }
+                //                    leaf_query->range_query = range_query;
+                //                    boolean_clause->AddLeafQuery(leaf_query);
+                //                }
                 if (query.has_vector_query()) {
                     query::VectorQueryPtr vector_query = std::make_shared<query::VectorQuery>();
 
@@ -1286,6 +1288,7 @@ GrpcRequestHandler::SearchPB(::grpc::ServerContext* context, const ::milvus::grp
     return ::grpc::Status::OK;
 }
 
+#if 0
 Status
 ParseTermQuery(const nlohmann::json& term_json,
                std::unordered_map<std::string, engine::meta::hybrid::DataType> field_type,
@@ -1398,24 +1401,21 @@ ParseRangeQuery(const nlohmann::json& range_json, query::RangeQueryPtr& range_qu
     }
     return Status::OK();
 }
+#endif
 
 Status
 GrpcRequestHandler::ProcessLeafQueryJson(const nlohmann::json& json, query::BooleanQueryPtr& query) {
     auto status = Status::OK();
     if (json.contains("term")) {
         auto leaf_query = std::make_shared<query::LeafQuery>();
-        auto term_json = json["term"];
         auto term_query = std::make_shared<query::TermQuery>();
-        status = ParseTermQuery(term_json, field_type_, term_query);
-
+        term_query->json_obj = json["term"];
         leaf_query->term_query = term_query;
         query->AddLeafQuery(leaf_query);
     } else if (json.contains("range")) {
         auto leaf_query = std::make_shared<query::LeafQuery>();
         auto range_query = std::make_shared<query::RangeQuery>();
-        auto range_json = json["range"];
-        status = ParseRangeQuery(range_json, range_query);
-
+        range_query->json_obj = json["range"];
         leaf_query->range_query = range_query;
         query->AddLeafQuery(leaf_query);
     } else if (json.contains("vector")) {
@@ -1525,9 +1525,12 @@ GrpcRequestHandler::DeserializeJsonToBoolQuery(
             std::string placeholder = it.key();
 
             auto vector_query = std::make_shared<query::VectorQuery>();
-            vector_query->topk = it.value()["topk"].get<int64_t>();
-            vector_query->field_name = it.value()["field"].get<std::string>();
-            vector_query->extra_params = it.value()["params"];
+            json::iterator vector_param_it = it.value().begin();
+            if (vector_param_it != it.value().end()) {
+                vector_query->field_name = vector_param_it.key();
+                vector_query->topk = vector_param_it.value()["topk"];
+                vector_query->extra_params = vector_param_it.value()["params"];
+            }
 
             engine::VectorsData vector_data;
             CopyRowRecords(vector_params.at(i).row_record().records(),

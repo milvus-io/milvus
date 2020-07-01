@@ -516,109 +516,109 @@ WebRequestHandler::ProcessLeafQueryJson(const nlohmann::json& json, milvus::quer
             return Status{BODY_PARSE_FAIL, msg};
         }
 
-        auto term_size = term_value_json.size();
-        auto term_query = std::make_shared<query::TermQuery>();
-        term_query->field_name = field_name;
-        term_query->field_value.resize(term_size * sizeof(int64_t));
-
-        switch (field_type_.at(field_name)) {
-            case engine::meta::hybrid::DataType::INT8:
-            case engine::meta::hybrid::DataType::INT16:
-            case engine::meta::hybrid::DataType::INT32:
-            case engine::meta::hybrid::DataType::INT64: {
-                std::vector<int64_t> term_value(term_size, 0);
-                for (uint64_t i = 0; i < term_size; ++i) {
-                    term_value[i] = term_value_json[i].get<int64_t>();
-                }
-                memcpy(term_query->field_value.data(), term_value.data(), term_size * sizeof(int64_t));
-                break;
-            }
-            case engine::meta::hybrid::DataType::FLOAT:
-            case engine::meta::hybrid::DataType::DOUBLE: {
-                std::vector<double> term_value(term_size, 0);
-                for (uint64_t i = 0; i < term_size; ++i) {
-                    term_value[i] = term_value_json[i].get<double>();
-                }
-                memcpy(term_query->field_value.data(), term_value.data(), term_size * sizeof(double));
-                break;
-            }
-            default:
-                break;
-        }
-
-        leaf_query->term_query = term_query;
-        query->AddLeafQuery(leaf_query);
-    } else if (json.contains("range")) {
-        auto leaf_query = std::make_shared<query::LeafQuery>();
-        auto range_query = std::make_shared<query::RangeQuery>();
-
-        auto range_json = json["range"];
-        std::string field_name = range_json["field_name"];
-        range_query->field_name = field_name;
-
-        auto range_value_json = range_json["values"];
-        if (range_value_json.contains("lt")) {
-            query::CompareExpr compare_expr;
-            compare_expr.compare_operator = query::CompareOperator::LT;
-            compare_expr.operand = range_value_json["lt"].get<std::string>();
-            range_query->compare_expr.emplace_back(compare_expr);
-        }
-        if (range_value_json.contains("lte")) {
-            query::CompareExpr compare_expr;
-            compare_expr.compare_operator = query::CompareOperator::LTE;
-            compare_expr.operand = range_value_json["lte"].get<std::string>();
-            range_query->compare_expr.emplace_back(compare_expr);
-        }
-        if (range_value_json.contains("eq")) {
-            query::CompareExpr compare_expr;
-            compare_expr.compare_operator = query::CompareOperator::EQ;
-            compare_expr.operand = range_value_json["eq"].get<std::string>();
-            range_query->compare_expr.emplace_back(compare_expr);
-        }
-        if (range_value_json.contains("ne")) {
-            query::CompareExpr compare_expr;
-            compare_expr.compare_operator = query::CompareOperator::NE;
-            compare_expr.operand = range_value_json["ne"].get<std::string>();
-            range_query->compare_expr.emplace_back(compare_expr);
-        }
-        if (range_value_json.contains("gt")) {
-            query::CompareExpr compare_expr;
-            compare_expr.compare_operator = query::CompareOperator::GT;
-            compare_expr.operand = range_value_json["gt"].get<std::string>();
-            range_query->compare_expr.emplace_back(compare_expr);
-        }
-        if (range_value_json.contains("gte")) {
-            query::CompareExpr compare_expr;
-            compare_expr.compare_operator = query::CompareOperator::GTE;
-            compare_expr.operand = range_value_json["gte"].get<std::string>();
-            range_query->compare_expr.emplace_back(compare_expr);
-        }
-
-        leaf_query->range_query = range_query;
-        query->AddLeafQuery(leaf_query);
-    } else if (json.contains("vector")) {
-        auto leaf_query = std::make_shared<query::LeafQuery>();
-        auto vector_query = std::make_shared<query::VectorQuery>();
-
-        auto vector_json = json["vector"];
-        std::string field_name = vector_json["field_name"];
-        vector_query->field_name = field_name;
-
-        engine::VectorsData vectors;
-        // TODO(yukun): process binary vector
-        CopyRecordsFromJson(vector_json["values"], vectors, false);
-
-        vector_query->query_vector.float_data = vectors.float_data_;
-        vector_query->query_vector.binary_data = vectors.binary_data_;
-
-        vector_query->topk = vector_json["topk"].get<int64_t>();
-        vector_query->extra_params = vector_json["extra_params"];
-
-        // TODO(yukun): remove hardcode here
-        std::string vector_placeholder = "placeholder_1";
-        query_ptr_->vectors.insert(std::make_pair(vector_placeholder, vector_query));
-        leaf_query->vector_placeholder = vector_placeholder;
-        query->AddLeafQuery(leaf_query);
+        //        auto term_size = term_value_json.size();
+        //        auto term_query = std::make_shared<query::TermQuery>();
+        //        term_query->field_name = field_name;
+        //        term_query->field_value.resize(term_size * sizeof(int64_t));
+        //
+        //        switch (field_type_.at(field_name)) {
+        //            case engine::meta::hybrid::DataType::INT8:
+        //            case engine::meta::hybrid::DataType::INT16:
+        //            case engine::meta::hybrid::DataType::INT32:
+        //            case engine::meta::hybrid::DataType::INT64: {
+        //                std::vector<int64_t> term_value(term_size, 0);
+        //                for (uint64_t i = 0; i < term_size; ++i) {
+        //                    term_value[i] = term_value_json[i].get<int64_t>();
+        //                }
+        //                memcpy(term_query->field_value.data(), term_value.data(), term_size * sizeof(int64_t));
+        //                break;
+        //            }
+        //            case engine::meta::hybrid::DataType::FLOAT:
+        //            case engine::meta::hybrid::DataType::DOUBLE: {
+        //                std::vector<double> term_value(term_size, 0);
+        //                for (uint64_t i = 0; i < term_size; ++i) {
+        //                    term_value[i] = term_value_json[i].get<double>();
+        //                }
+        //                memcpy(term_query->field_value.data(), term_value.data(), term_size * sizeof(double));
+        //                break;
+        //            }
+        //            default:
+        //                break;
+        //        }
+        //
+        //        leaf_query->term_query = term_query;
+        //        query->AddLeafQuery(leaf_query);
+        //    } else if (json.contains("range")) {
+        //        auto leaf_query = std::make_shared<query::LeafQuery>();
+        //        auto range_query = std::make_shared<query::RangeQuery>();
+        //
+        //        auto range_json = json["range"];
+        //        std::string field_name = range_json["field_name"];
+        //        range_query->field_name = field_name;
+        //
+        //        auto range_value_json = range_json["values"];
+        //        if (range_value_json.contains("lt")) {
+        //            query::CompareExpr compare_expr;
+        //            compare_expr.compare_operator = query::CompareOperator::LT;
+        //            compare_expr.operand = range_value_json["lt"].get<std::string>();
+        //            range_query->compare_expr.emplace_back(compare_expr);
+        //        }
+        //        if (range_value_json.contains("lte")) {
+        //            query::CompareExpr compare_expr;
+        //            compare_expr.compare_operator = query::CompareOperator::LTE;
+        //            compare_expr.operand = range_value_json["lte"].get<std::string>();
+        //            range_query->compare_expr.emplace_back(compare_expr);
+        //        }
+        //        if (range_value_json.contains("eq")) {
+        //            query::CompareExpr compare_expr;
+        //            compare_expr.compare_operator = query::CompareOperator::EQ;
+        //            compare_expr.operand = range_value_json["eq"].get<std::string>();
+        //            range_query->compare_expr.emplace_back(compare_expr);
+        //        }
+        //        if (range_value_json.contains("ne")) {
+        //            query::CompareExpr compare_expr;
+        //            compare_expr.compare_operator = query::CompareOperator::NE;
+        //            compare_expr.operand = range_value_json["ne"].get<std::string>();
+        //            range_query->compare_expr.emplace_back(compare_expr);
+        //        }
+        //        if (range_value_json.contains("gt")) {
+        //            query::CompareExpr compare_expr;
+        //            compare_expr.compare_operator = query::CompareOperator::GT;
+        //            compare_expr.operand = range_value_json["gt"].get<std::string>();
+        //            range_query->compare_expr.emplace_back(compare_expr);
+        //        }
+        //        if (range_value_json.contains("gte")) {
+        //            query::CompareExpr compare_expr;
+        //            compare_expr.compare_operator = query::CompareOperator::GTE;
+        //            compare_expr.operand = range_value_json["gte"].get<std::string>();
+        //            range_query->compare_expr.emplace_back(compare_expr);
+        //        }
+        //
+        //        leaf_query->range_query = range_query;
+        //        query->AddLeafQuery(leaf_query);
+        //    } else if (json.contains("vector")) {
+        //        auto leaf_query = std::make_shared<query::LeafQuery>();
+        //        auto vector_query = std::make_shared<query::VectorQuery>();
+        //
+        //        auto vector_json = json["vector"];
+        //        std::string field_name = vector_json["field_name"];
+        //        vector_query->field_name = field_name;
+        //
+        //        engine::VectorsData vectors;
+        //        // TODO(yukun): process binary vector
+        //        CopyRecordsFromJson(vector_json["values"], vectors, false);
+        //
+        //        vector_query->query_vector.float_data = vectors.float_data_;
+        //        vector_query->query_vector.binary_data = vectors.binary_data_;
+        //
+        //        vector_query->topk = vector_json["topk"].get<int64_t>();
+        //        vector_query->extra_params = vector_json["extra_params"];
+        //
+        //        // TODO(yukun): remove hardcode here
+        //        std::string vector_placeholder = "placeholder_1";
+        //        query_ptr_->vectors.insert(std::make_pair(vector_placeholder, vector_query));
+        //        leaf_query->vector_placeholder = vector_placeholder;
+        //        query->AddLeafQuery(leaf_query);
     }
     return Status::OK();
 }
