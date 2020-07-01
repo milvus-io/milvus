@@ -7,10 +7,12 @@ from multiprocessing import Process
 from milvus import IndexType, MetricType
 from utils import *
 
-uniq_id = "test_load_collection"
+collection_id = "load_collection"
 index_name = "load_index_name"
+nb = 6000
 default_fields = gen_default_fields() 
-entities = gen_entities(6000)
+entities = gen_entities(nb)
+field_name = "fload_vector"
 
 
 class TestLoadCollection:
@@ -26,10 +28,8 @@ class TestLoadCollection:
     )
     def get_simple_index(self, request, connect):
         if str(connect._cmd("mode")[1]) == "CPU":
-            if request.param["index_type"] == IndexType.IVF_SQ8H:
+            if request.param["index_type"] == "IVFSQ8H":
                 pytest.skip("sq8h not support in cpu mode")
-        if request.param["index_type"] == IndexType.IVF_PQ:
-            pytest.skip("Skip PQ Temporary")
         return request.param
 
     def test_load_collection_after_index(self, connect, collection, get_simple_index):
@@ -40,7 +40,6 @@ class TestLoadCollection:
         ''' 
         connect.insert(collection, entities)
         connect.flush([collection])
-        field_name = "fload_vector"
         connect.create_index(collection, field_name, index_name, get_simple_index)
         connect.load_collection(collection)
 
@@ -64,7 +63,7 @@ class TestLoadCollection:
 
     @pytest.mark.level(2)
     def test_load_collection_not_existed(self, connect, collection):
-        collection_name = gen_unique_str()
+        collection_name = gen_unique_str(collection_id)
         with pytest.raises(Exception) as e:
             connect.load_collection(collection_name)
 
@@ -75,7 +74,7 @@ class TestLoadCollectionInvalid(object):
     """
     @pytest.fixture(
         scope="function",
-        params=gen_invalid_collection_names()
+        params=gen_invalid_strs()
     )
     def get_collection_name(self, request):
         yield request.param
@@ -83,17 +82,5 @@ class TestLoadCollectionInvalid(object):
     @pytest.mark.level(2)
     def test_load_collection_with_invalid_collectionname(self, connect, get_collection_name):
         collection_name = get_collection_name
-        with pytest.raises(Exception) as e:
-            connect.has_collection(collection_name)
-
-    @pytest.mark.level(2)
-    def test_load_collection_with_empty_collectionname(self, connect):
-        collection_name = ''
-        with pytest.raises(Exception) as e:
-            connect.has_collection(collection_name)
-
-    @pytest.mark.level(2)
-    def test_load_collection_with_none_collectionname(self, connect):
-        collection_name = None
         with pytest.raises(Exception) as e:
             connect.has_collection(collection_name)

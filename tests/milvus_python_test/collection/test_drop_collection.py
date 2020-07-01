@@ -7,7 +7,7 @@ from multiprocessing import Process
 from milvus import IndexType, MetricType
 from utils import *
 
-uniq_id = "test_drop_collection"
+uniq_id = "drop_collection"
 default_fields = gen_default_fields() 
 
 
@@ -26,7 +26,8 @@ class TestDropCollection:
         expected: status ok, and no collection in collections
         '''
         connect.drop_collection(collection)
-        assert not assert_has_collection(connect, collection)
+        time.sleep(2)
+        assert not connect.has_collection(collection)
 
     @pytest.mark.level(2)
     def test_drop_collection_without_connection(self, collection, dis_connect):
@@ -47,7 +48,7 @@ class TestDropCollection:
         '''
         collection_name = gen_unique_str(uniq_id)
         with pytest.raises(Exception) as e:
-            assert not assert_has_collection(connect, collection_name)
+            connect.drop_collection(collection_name)
 
 
 class TestDropCollectionInvalid(object):
@@ -56,7 +57,7 @@ class TestDropCollectionInvalid(object):
     """
     @pytest.fixture(
         scope="function",
-        params=gen_invalid_collection_names()
+        params=gen_invalid_strs()
     )
     def get_collection_name(self, request):
         yield request.param
