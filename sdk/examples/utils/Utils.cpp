@@ -247,6 +247,58 @@ Utils::DoSearch(std::shared_ptr<milvus::Connection> conn, const std::string& col
 }
 
 void
+Utils::DoSearchHNSW(std::shared_ptr<milvus::Connection> conn, const std::string& collection_name,
+                    const std::vector<std::string>& partition_tags, int64_t top_k,
+                    const std::vector<std::pair<int64_t, milvus::Entity>>& entity_array,
+                    milvus::TopKQueryResult& topk_query_result) {
+    topk_query_result.clear();
+
+    std::vector<milvus::Entity> temp_entity_array;
+    for (auto& pair : entity_array) {
+        temp_entity_array.push_back(pair.second);
+    }
+
+    {
+        BLOCK_SPLITER
+        JSON json_params = {{"ef", 200}};
+        milvus_sdk::TimeRecorder rc("Search");
+        milvus::Status stat = conn->Search(collection_name, partition_tags, temp_entity_array, top_k,
+                                           json_params.dump(), topk_query_result);
+        std::cout << "Search function call status: " << stat.message() << std::endl;
+        BLOCK_SPLITER
+    }
+
+    PrintSearchResult(entity_array, topk_query_result);
+    CheckSearchResult(entity_array, topk_query_result);
+}
+
+void
+Utils::DoSearchNSG(std::shared_ptr<milvus::Connection> conn, const std::string& collection_name,
+                    const std::vector<std::string>& partition_tags, int64_t top_k,
+                    const std::vector<std::pair<int64_t, milvus::Entity>>& entity_array,
+                    milvus::TopKQueryResult& topk_query_result) {
+    topk_query_result.clear();
+
+    std::vector<milvus::Entity> temp_entity_array;
+    for (auto& pair : entity_array) {
+        temp_entity_array.push_back(pair.second);
+    }
+
+    {
+        BLOCK_SPLITER
+        JSON json_params = {{"search_length", 45}};
+        milvus_sdk::TimeRecorder rc("Search");
+        milvus::Status stat = conn->Search(collection_name, partition_tags, temp_entity_array, top_k,
+                                           json_params.dump(), topk_query_result);
+        std::cout << "Search function call status: " << stat.message() << std::endl;
+        BLOCK_SPLITER
+    }
+
+    PrintSearchResult(entity_array, topk_query_result);
+    CheckSearchResult(entity_array, topk_query_result);
+}
+
+void
 Utils::ConstructVector(uint64_t nq, uint64_t dimension, std::vector<milvus::Entity>& query_vector) {
     query_vector.resize(nq);
     std::default_random_engine e;

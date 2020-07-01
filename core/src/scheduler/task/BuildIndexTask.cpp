@@ -159,6 +159,7 @@ XBuildIndexTask::Execute() {
         try {
             LOG_ENGINE_DEBUG_ << "Begin build index for file:" + table_file.location_;
             index = to_index_engine_->BuildIndex(table_file.location_, (EngineType)table_file.engine_type_);
+            printf("Build index success\n");
             fiu_do_on("XBuildIndexTask.Execute.build_index_fail", index = nullptr);
             if (index == nullptr) {
                 std::string log_msg = "Failed to build index " + table_file.file_id_ + ", reason: source index is null";

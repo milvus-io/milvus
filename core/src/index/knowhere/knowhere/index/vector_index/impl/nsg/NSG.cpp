@@ -49,9 +49,10 @@ NsgIndex::~NsgIndex() {
 void
 NsgIndex::Build_with_ids(size_t nb, const float* data, const int64_t* ids, const BuildParams& parameters) {
     ntotal = nb;
-    ori_data_ = new float[ntotal * dimension];
+    // ori_data_ = new float[ntotal * dimension];
     ids_ = new int64_t[ntotal];
-    memcpy((void*)ori_data_, (void*)data, sizeof(float) * ntotal * dimension);
+    // memcpy((void*)ori_data_, (void*)data, sizeof(float) * ntotal * dimension);
+    ori_data_ = (float *) data;
     memcpy((void*)ids_, (void*)ids, sizeof(int64_t) * ntotal);
 
     search_length = parameters.search_length;

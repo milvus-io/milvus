@@ -730,6 +730,7 @@ ExecutionEngineImpl::BuildIndex(const std::string& location, EngineType engine_t
         auto dataset =
             knowhere::GenDatasetWithIds(Count(), Dimension(), from_index->GetRawVectors(), from_index->GetRawIds());
         to_index->BuildAll(dataset, conf);
+        printf("11111\n");
         uids = from_index->GetUids();
         blacklist = from_index->GetBlacklist();
     } else if (bin_from_index) {

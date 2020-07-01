@@ -129,8 +129,11 @@ SegmentReader::LoadVectorIndexWithRawData(const std::string& location, segment::
     try {
         fs_ptr_->operation_ptr_->CreateDirectory();
         knowhere::BinaryPtr raw_data = nullptr;
+        printf("1 ok here\n");
         default_codec.GetVectorsFormat()->read_vectors(fs_ptr_, raw_data);
+        printf("11 ok here\n");
         default_codec.GetVectorIndexFormat()->read(fs_ptr_, location, raw_data, vector_index_ptr);
+        printf("111 ok here\n");
     } catch (std::exception& e) {
         std::string err_msg = "Failed to load vector index with row data: " + std::string(e.what());
         LOG_ENGINE_ERROR_ << err_msg;
