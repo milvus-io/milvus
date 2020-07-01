@@ -339,6 +339,14 @@ CreatePartitionOperation::DoExecute(Store& store) {
     auto collection = GetAdjustedSS()->GetCollection();
     auto partition = context_.new_partition;
 
+    if (context_.new_partition) {
+        if (GetAdjustedSS()->GetPartition(context_.new_partition->GetName())) {
+            std::stringstream emsg;
+            emsg << GetRepr() << ". Duplicate Partition \"" << context_.new_partition->GetName() << "\"";
+            return Status(SS_DUPLICATED_ERROR, emsg.str());
+        }
+    }
+
     PartitionCommitPtr pc;
     OperationContext pc_context;
     pc_context.new_partition = partition;
