@@ -32,6 +32,14 @@ class SSDBImpl {
  public:
     explicit SSDBImpl(const DBOptions& options);
 
+    ~SSDBImpl();
+
+    Status
+    Start();
+
+    Status
+    Stop();
+
     Status
     CreateCollection(const snapshot::CreateCollectionContext& context);
 
@@ -60,14 +68,6 @@ class SSDBImpl {
 
     Status
     ShowPartitions(const std::string& collection_name, std::vector<std::string>& partition_names);
-
-    ~SSDBImpl();
-
-    Status
-    Start();
-
-    Status
-    Stop();
 
  private:
     DBOptions options_;

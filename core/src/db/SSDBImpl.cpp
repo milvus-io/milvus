@@ -11,6 +11,7 @@
 
 #include "db/SSDBImpl.h"
 #include "db/snapshot/CompoundOperations.h"
+#include "db/snapshot/ResourceTypes.h"
 #include "db/snapshot/Snapshots.h"
 #include "wal/WalDefinations.h"
 
@@ -77,15 +78,11 @@ SSDBImpl::CreateCollection(const snapshot::CreateCollectionContext& context) {
     CHECK_INITIALIZED;
 
     auto ctx = context;
-
     if (options_.wal_enable_) {
         ctx.lsn = wal_mgr_->CreateCollection(context.collection->GetName());
     }
-
     auto op = std::make_shared<snapshot::CreateCollectionOperation>(ctx);
-    auto status = op->Push();
-
-    return status;
+    return op->Push();
 }
 
 Status
@@ -94,41 +91,32 @@ SSDBImpl::DescribeCollection(const std::string& collection_name, snapshot::Colle
     CHECK_INITIALIZED;
 
     snapshot::ScopedSnapshotT ss;
-    auto status = snapshot::Snapshots::GetInstance().GetSnapshot(ss, collection_name);
-    if (!status.ok()) {
-        return status;
-    }
+    STATUS_CHECK(snapshot::Snapshots::GetInstance().GetSnapshot(ss, collection_name));
 
     collection = ss->GetCollection();
-
     auto& fields = ss->GetResources<snapshot::Field>();
     for (auto& kv : fields) {
         fields_schema[kv.second.Get()] = ss->GetFieldElementsByField(kv.second->GetName());
     }
-    return status;
+    return Status::OK();
 }
 
 Status
 SSDBImpl::DropCollection(const std::string& name) {
     CHECK_INITIALIZED;
 
-    // dates partly delete files of the collection but currently we don't support
     LOG_ENGINE_DEBUG_ << "Prepare to delete collection " << name;
 
     snapshot::ScopedSnapshotT ss;
     auto& snapshots = snapshot::Snapshots::GetInstance();
-    auto status = snapshots.GetSnapshot(ss, name);
-    if (!status.ok()) {
-        return status;
-    }
+    STATUS_CHECK(snapshots.GetSnapshot(ss, name));
 
     if (options_.wal_enable_) {
         // SS TODO
         /* wal_mgr_->DropCollection(ss->GetCollectionId()); */
     }
 
-    status = snapshots.DropCollection(ss->GetCollectionId(), std::numeric_limits<snapshot::LSN_TYPE>::max());
-    return status;
+    return snapshots.DropCollection(ss->GetCollectionId(), std::numeric_limits<snapshot::LSN_TYPE>::max());
 }
 
 Status
@@ -154,13 +142,10 @@ Status
 SSDBImpl::CreatePartition(const std::string& collection_name, const std::string& partition_name) {
     CHECK_INITIALIZED;
 
-    uint64_t lsn = 0;
     snapshot::ScopedSnapshotT ss;
-    auto status = snapshot::Snapshots::GetInstance().GetSnapshot(ss, collection_name);
-    if (!status.ok()) {
-        return status;
-    }
+    STATUS_CHECK(snapshot::Snapshots::GetInstance().GetSnapshot(ss, collection_name));
 
+    snapshot::LSN_TYPE lsn = 0;
     if (options_.wal_enable_) {
         // SS TODO
         /* lsn = wal_mgr_->CreatePartition(collection_id, partition_tag); */
@@ -175,13 +160,8 @@ SSDBImpl::CreatePartition(const std::string& collection_name, const std::string&
     snapshot::PartitionContext p_ctx;
     p_ctx.name = partition_name;
     snapshot::PartitionPtr partition;
-    status = op->CommitNewPartition(p_ctx, partition);
-    if (!status.ok()) {
-        return status;
-    }
-
-    status = op->Push();
-    return status;
+    STATUS_CHECK(op->CommitNewPartition(p_ctx, partition));
+    return op->Push();
 }
 
 Status
@@ -189,10 +169,7 @@ SSDBImpl::DropPartition(const std::string& collection_name, const std::string& p
     CHECK_INITIALIZED;
 
     snapshot::ScopedSnapshotT ss;
-    auto status = snapshot::Snapshots::GetInstance().GetSnapshot(ss, collection_name);
-    if (!status.ok()) {
-        return status;
-    }
+    STATUS_CHECK(snapshot::Snapshots::GetInstance().GetSnapshot(ss, collection_name));
 
     // SS TODO: Is below step needed? Or How to implement it?
     /* mem_mgr_->EraseMemVector(partition_name); */
@@ -200,9 +177,7 @@ SSDBImpl::DropPartition(const std::string& collection_name, const std::string& p
     snapshot::PartitionContext context;
     context.name = partition_name;
     auto op = std::make_shared<snapshot::DropPartitionOperation>(context, ss);
-    status = op->Push();
-
-    return status;
+    return op->Push();
 }
 
 Status
@@ -210,13 +185,10 @@ SSDBImpl::ShowPartitions(const std::string& collection_name, std::vector<std::st
     CHECK_INITIALIZED;
 
     snapshot::ScopedSnapshotT ss;
-    auto status = snapshot::Snapshots::GetInstance().GetSnapshot(ss, collection_name);
-    if (!status.ok()) {
-        return status;
-    }
+    STATUS_CHECK(snapshot::Snapshots::GetInstance().GetSnapshot(ss, collection_name));
 
     partition_names = std::move(ss->GetPartitionNames());
-    return status;
+    return Status::OK();
 }
 
 Status
@@ -225,10 +197,7 @@ SSDBImpl::PreloadCollection(const std::shared_ptr<server::Context>& context, con
     CHECK_INITIALIZED;
 
     snapshot::ScopedSnapshotT ss;
-    auto status = snapshot::Snapshots::GetInstance().GetSnapshot(ss, collection_name);
-    if (!status.ok()) {
-        return status;
-    }
+    STATUS_CHECK(snapshot::Snapshots::GetInstance().GetSnapshot(ss, collection_name));
 
     auto handler = std::make_shared<LoadVectorFieldHandler>(context, ss);
     handler->Iterate();
