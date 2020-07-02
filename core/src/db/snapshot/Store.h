@@ -458,7 +458,8 @@ class Store {
                         for (auto field_element_id : f_c_m) {
                             SegmentFilePtr sf;
                             CreateResource<SegmentFile>(
-                                SegmentFile(c->GetID(), p->GetID(), s->GetID(), field_commit_id, 0, 0, 0, ACTIVE), sf);
+                                SegmentFile(c->GetID(), p->GetID(), s->GetID(), field_commit_id, 0, 0, 0, 0, ACTIVE),
+                                sf);
                             all_records.push_back(sf);
 
                             s_c_m.insert(sf->GetID());
@@ -466,12 +467,13 @@ class Store {
                     }
                     SegmentCommitPtr s_c;
                     CreateResource<SegmentCommit>(
-                        SegmentCommit(schema->GetID(), p->GetID(), s->GetID(), s_c_m, 0, 0, 0, ACTIVE), s_c);
+                        SegmentCommit(schema->GetID(), p->GetID(), s->GetID(), s_c_m, 0, 0, 0, 0, ACTIVE), s_c);
                     all_records.push_back(s_c);
                     p_c_m.insert(s_c->GetID());
                 }
                 PartitionCommitPtr p_c;
-                CreateResource<PartitionCommit>(PartitionCommit(c->GetID(), p->GetID(), p_c_m, 0, 0, 0, ACTIVE), p_c);
+                CreateResource<PartitionCommit>(PartitionCommit(c->GetID(), p->GetID(), p_c_m, 0, 0, 0, 0, ACTIVE),
+                                                p_c);
                 all_records.push_back(p_c);
                 c_c_m.insert(p_c->GetID());
             }

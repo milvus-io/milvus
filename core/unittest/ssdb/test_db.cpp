@@ -106,6 +106,12 @@ TEST_F(SSDBTest, CollectionTest) {
     ASSERT_TRUE(has);
     ASSERT_TRUE(status.ok());
 
+    ASSERT_EQ(ss->GetCollectionCommit()->GetRowCount(), 0);
+    milvus::engine::snapshot::SIZE_TYPE row_cnt = 10;
+    status = db_->GetCollectionRowCount(c1, row_cnt);
+    ASSERT_TRUE(status.ok());
+    ASSERT_EQ(row_cnt, 0);
+
     std::vector<std::string> names;
     status = db_->AllCollections(names);
     ASSERT_TRUE(status.ok());

@@ -49,6 +49,9 @@ class SSDBImpl {
     AllCollections(std::vector<std::string>& names);
 
     Status
+    GetCollectionRowCount(const std::string& collection_name, uint64_t& row_count);
+
+    Status
     PreloadCollection(const std::shared_ptr<server::Context>& context, const std::string& collection_name,
                       bool force = false);
 

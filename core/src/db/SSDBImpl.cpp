@@ -151,6 +151,20 @@ SSDBImpl::AllCollections(std::vector<std::string>& names) {
 }
 
 Status
+SSDBImpl::GetCollectionRowCount(const std::string& collection_name, uint64_t& row_count) {
+    CHECK_INITIALIZED;
+
+    snapshot::ScopedSnapshotT ss;
+    auto status = snapshot::Snapshots::GetInstance().GetSnapshot(ss, collection_name);
+    if (!status.ok()) {
+        return status;
+    }
+
+    row_count = ss->GetCollectionCommit()->GetRowCount();
+    return status;
+}
+
+Status
 SSDBImpl::CreatePartition(const std::string& collection_name, const std::string& partition_name) {
     CHECK_INITIALIZED;
 
