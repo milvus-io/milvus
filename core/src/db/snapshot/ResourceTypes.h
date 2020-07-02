@@ -23,8 +23,8 @@ using ID_TYPE = int64_t;
 using NUM_TYPE = int64_t;
 using FTYPE_TYPE = int64_t;
 using TS_TYPE = int64_t;
-using LSN_TYPE = uint64_t;
-using SIZE_TYPE = uint64_t;
+using LSN_TYPE = int64_t;
+using SIZE_TYPE = int64_t;
 using MappingT = std::set<ID_TYPE>;
 
 enum FieldType { VECTOR, INT32 };
