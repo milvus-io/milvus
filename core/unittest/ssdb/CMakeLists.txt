@@ -56,4 +56,4 @@ target_link_libraries(test_ssdb
         ${unittest_libs}
         oatpp)
 
-install(TARGETS test_db DESTINATION unittest)
+install(TARGETS test_ssdb DESTINATION unittest)
