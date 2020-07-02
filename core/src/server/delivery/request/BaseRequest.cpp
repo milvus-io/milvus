@@ -129,6 +129,7 @@ BaseRequest::OnPostExecute() {
 
 void
 BaseRequest::Done() {
+    std::unique_lock<std::mutex> lock(finish_mtx_);
     done_ = true;
     finish_cond_.notify_all();
 }
