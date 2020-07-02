@@ -80,7 +80,7 @@ struct VectorQuery : Query {
     uint64_t topk;
     float distance_limitation;
     float query_boost;
-    std::vector<Entity> query_vector;
+    std::vector<VectorData> query_vector;
     std::string extra_params;
 };
 using VectorQueryPtr = std::shared_ptr<VectorQuery>;

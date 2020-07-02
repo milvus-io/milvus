@@ -37,11 +37,12 @@ struct SegmentFileContext {
     std::string field_element_name;
     ID_TYPE segment_id;
     ID_TYPE partition_id;
+    ID_TYPE collection_id;
 };
 
 struct LoadOperationContext {
     ID_TYPE id = 0;
-    State status = INVALID;
+    State state = INVALID;
     std::string name;
 };
 

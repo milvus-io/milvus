@@ -121,12 +121,15 @@ Utils::IndexTypeName(const milvus::IndexType& index_type) {
 }
 
 void
-Utils::PrintCollectionParam(const milvus::CollectionParam& collection_param) {
+Utils::PrintCollectionParam(const milvus::Mapping& mapping) {
     BLOCK_SPLITER
-    std::cout << "Collection name: " << collection_param.collection_name << std::endl;
-    std::cout << "Collection dimension: " << collection_param.dimension << std::endl;
-    std::cout << "Collection index file size: " << collection_param.index_file_size << std::endl;
-    std::cout << "Collection metric type: " << MetricTypeName(collection_param.metric_type) << std::endl;
+    std::cout << "Collection name: " << mapping.collection_name << std::endl;
+    for (const auto& field : mapping.fields) {
+        std::cout << "field_name: " << field->field_name;
+        std::cout << "field_type: " << std::to_string((int)field->field_type);
+        std::cout << "index_param: " << field->index_params;
+        std::cout << "extra_param:" << field->extra_params;
+    }
     BLOCK_SPLITER
 }
 
@@ -142,13 +145,14 @@ void
 Utils::PrintIndexParam(const milvus::IndexParam& index_param) {
     BLOCK_SPLITER
     std::cout << "Index collection name: " << index_param.collection_name << std::endl;
-    std::cout << "Index type: " << IndexTypeName(index_param.index_type) << std::endl;
+    std::cout << "Index field name: " << index_param.field_name << std::endl;
+    std::cout << "Index name: " << index_param.index_name << std::endl;
     std::cout << "Index extra_params: " << index_param.extra_params << std::endl;
     BLOCK_SPLITER
 }
 
 void
-Utils::BuildEntities(int64_t from, int64_t to, std::vector<milvus::Entity>& entity_array,
+Utils::BuildEntities(int64_t from, int64_t to, std::vector<milvus::VectorData>& entity_array,
                      std::vector<int64_t>& entity_ids, int64_t dimension) {
     if (to <= from) {
         return;
@@ -159,19 +163,19 @@ Utils::BuildEntities(int64_t from, int64_t to, std::vector<milvus::Entity>& enti
     std::default_random_engine e;
     std::uniform_real_distribution<float> u(0, 1);
     for (int64_t k = from; k < to; k++) {
-        milvus::Entity entity;
-        entity.float_data.resize(dimension);
+        milvus::VectorData vector_data;
+        vector_data.float_data.resize(dimension);
         for (int64_t i = 0; i < dimension; i++) {
-            entity.float_data[i] = (float)((k + 100) % (i + 1));
+            vector_data.float_data[i] = (float)((k + 100) % (i + 1));
         }
 
-        entity_array.emplace_back(entity);
+        entity_array.emplace_back(vector_data);
         entity_ids.push_back(k);
     }
 }
 
 void
-Utils::PrintSearchResult(const std::vector<std::pair<int64_t, milvus::Entity>>& entity_array,
+Utils::PrintSearchResult(const std::vector<std::pair<int64_t, milvus::VectorData>>& entity_array,
                          const milvus::TopKQueryResult& topk_query_result) {
     BLOCK_SPLITER
     std::cout << "Returned result count: " << topk_query_result.size() << std::endl;
@@ -194,7 +198,7 @@ Utils::PrintSearchResult(const std::vector<std::pair<int64_t, milvus::Entity>>& 
 }
 
 void
-Utils::CheckSearchResult(const std::vector<std::pair<int64_t, milvus::Entity>>& entity_array,
+Utils::CheckSearchResult(const std::vector<std::pair<int64_t, milvus::VectorData>>& entity_array,
                          const milvus::TopKQueryResult& topk_query_result) {
     BLOCK_SPLITER
     size_t nq = topk_query_result.size();
@@ -223,11 +227,11 @@ Utils::CheckSearchResult(const std::vector<std::pair<int64_t, milvus::Entity>>& 
 void
 Utils::DoSearch(std::shared_ptr<milvus::Connection> conn, const std::string& collection_name,
                 const std::vector<std::string>& partition_tags, int64_t top_k, int64_t nprobe,
-                const std::vector<std::pair<int64_t, milvus::Entity>>& entity_array,
+                const std::vector<std::pair<int64_t, milvus::VectorData>>& entity_array,
                 milvus::TopKQueryResult& topk_query_result) {
     topk_query_result.clear();
 
-    std::vector<milvus::Entity> temp_entity_array;
+    std::vector<milvus::VectorData> temp_entity_array;
     for (auto& pair : entity_array) {
         temp_entity_array.push_back(pair.second);
     }
@@ -236,9 +240,6 @@ Utils::DoSearch(std::shared_ptr<milvus::Connection> conn, const std::string& col
         BLOCK_SPLITER
         JSON json_params = {{"nprobe", nprobe}};
         milvus_sdk::TimeRecorder rc("Search");
-        milvus::Status stat = conn->Search(collection_name, partition_tags, temp_entity_array, top_k,
-                                           json_params.dump(), topk_query_result);
-        std::cout << "Search function call status: " << stat.message() << std::endl;
         BLOCK_SPLITER
     }
 
@@ -247,14 +248,14 @@ Utils::DoSearch(std::shared_ptr<milvus::Connection> conn, const std::string& col
 }
 
 void
-Utils::ConstructVector(uint64_t nq, uint64_t dimension, std::vector<milvus::Entity>& query_vector) {
+Utils::ConstructVector(uint64_t nq, uint64_t dimension, std::vector<milvus::VectorData>& query_vector) {
     query_vector.resize(nq);
     std::default_random_engine e;
     std::uniform_real_distribution<float> u(0, 1);
     for (uint64_t i = 0; i < nq; ++i) {
         query_vector[i].float_data.resize(dimension);
         for (uint64_t j = 0; j < dimension; ++j) {
-            query_vector[i].float_data[j] = u(e);
+            query_vector[i].float_data[j] = (float)((j + 100) % (i + 1));
         }
     }
 }
@@ -317,15 +318,15 @@ Utils::GenDSLJson(nlohmann::json& dsl_json, nlohmann::json& vector_param_json) {
     }
 
     nlohmann::json bool_json, term_json, range_json, vector_json;
-    term_json["term"]["field_name"] = "field_1";
-    term_json["term"]["values"] = term_value;
+    nlohmann::json term_value_json;
+    term_value_json["values"] = term_value;
+    term_json["term"]["field_1"] = term_value_json;
     bool_json["must"].push_back(term_json);
 
-    range_json["range"]["field_name"] = "field_1";
     nlohmann::json comp_json;
-    comp_json["gte"] = "0";
-    comp_json["lte"] = "100000";
-    range_json["range"]["values"] = comp_json;
+    comp_json["GTE"] = "0";
+    comp_json["LTE"] = "100000";
+    range_json["range"]["field_1"] = comp_json;
     bool_json["must"].push_back(range_json);
 
     std::string placeholder = "placeholder_1";
@@ -334,34 +335,50 @@ Utils::GenDSLJson(nlohmann::json& dsl_json, nlohmann::json& vector_param_json) {
 
     dsl_json["bool"] = bool_json;
 
-    nlohmann::json vector_extra_params;
+    nlohmann::json query_vector_json, vector_extra_params;
     int64_t topk = 10;
-    vector_param_json[placeholder]["field_name"] = "field_3";
-    vector_param_json[placeholder]["topk"] = topk;
+    query_vector_json["topk"] = topk;
     vector_extra_params["nprobe"] = 64;
-    vector_param_json[placeholder]["params"] = vector_extra_params;
+    query_vector_json["params"] = vector_extra_params;
+    vector_param_json[placeholder]["field_3"] = query_vector_json;
 }
 
 void
-Utils::PrintTopKHybridQueryResult(milvus::TopKHybridQueryResult& topk_query_result) {
-    for (uint64_t i = 0; i < topk_query_result.size(); i++) {
-        for (auto attr : topk_query_result[i].attr_records) {
-            std::cout << "Field: " << attr.first << std::endl;
-            if (attr.second.int_record.size() > 0) {
-                for (auto record : attr.second.int_record) {
-                    std::cout << record << "\t";
-                }
-            } else if (attr.second.double_record.size() > 0) {
-                for (auto record : attr.second.double_record) {
-                    std::cout << record << "\t";
-                }
+Utils::PrintTopKQueryResult(milvus::TopKQueryResult& topk_query_result) {
+    for (size_t i = 0; i < topk_query_result.size(); i++) {
+        auto field_value = topk_query_result[i].field_value;
+        for (auto& int32_it : field_value.int32_value) {
+            std::cout << int32_it.first << ":";
+            for (auto& data : int32_it.second) {
+                std::cout << " " << data;
             }
             std::cout << std::endl;
         }
-    }
-
-    for (uint64_t i = 0; i < topk_query_result.size(); ++i) {
-        std::cout << topk_query_result[i].ids[1] << "  ---------  " << topk_query_result[i].distances[1] << std::endl;
+        for (auto& int64_it : field_value.int64_value) {
+            std::cout << int64_it.first << ":";
+            for (auto& data : int64_it.second) {
+                std::cout << " " << data;
+            }
+            std::cout << std::endl;
+        }
+        for (auto& float_it : field_value.float_value) {
+            std::cout << float_it.first << ":";
+            for (auto& data : float_it.second) {
+                std::cout << " " << data;
+            }
+            std::cout << std::endl;
+        }
+        for (auto& double_it : field_value.double_value) {
+            std::cout << double_it.first << ":";
+            for (auto& data : double_it.second) {
+                std::cout << " " << data;
+            }
+            std::cout << std::endl;
+        }
+        for (size_t j = 0; j < topk_query_result[i].ids.size(); j++) {
+            std::cout << topk_query_result[i].ids[j] << "  ---------  " << topk_query_result[i].distances[j]
+                      << std::endl;
+        }
     }
 }
 

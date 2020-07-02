@@ -321,8 +321,7 @@ class Connection {
      * @return Indicate if create index successfully.
      */
     virtual Status
-    CreateIndex(const std::string& collection_name, const std::string& field_name, const std::string& index_name,
-                const std::string& index_params) = 0;
+    CreateIndex(const IndexParam& index_param) = 0;
 
     /**
      * @brief Insert entity to collection
@@ -402,7 +401,7 @@ class Connection {
 
     virtual Status
     SearchPB(const std::string& collection_name, const std::vector<std::string>& partition_list,
-             BooleanQueryPtr& boolean_query, TopKQueryResult& query_result) = 0;
+             BooleanQueryPtr& boolean_query, const std::string& extra_params, TopKQueryResult& query_result) = 0;
 
     /**
      * @brief Get collection information

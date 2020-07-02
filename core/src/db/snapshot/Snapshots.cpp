@@ -86,7 +86,7 @@ Snapshots::LoadSnapshot(Store& store, ScopedSnapshotT& ss, ID_TYPE collection_id
 }
 
 Status
-Snapshots::GetSnapshot(ScopedSnapshotT& ss, ID_TYPE collection_id, ID_TYPE id, bool scoped) {
+Snapshots::GetSnapshot(ScopedSnapshotT& ss, ID_TYPE collection_id, ID_TYPE id, bool scoped) const {
     SnapshotHolderPtr holder;
     auto status = GetHolder(collection_id, holder);
     if (!status.ok())
@@ -96,7 +96,7 @@ Snapshots::GetSnapshot(ScopedSnapshotT& ss, ID_TYPE collection_id, ID_TYPE id, b
 }
 
 Status
-Snapshots::GetSnapshot(ScopedSnapshotT& ss, const std::string& name, ID_TYPE id, bool scoped) {
+Snapshots::GetSnapshot(ScopedSnapshotT& ss, const std::string& name, ID_TYPE id, bool scoped) const {
     SnapshotHolderPtr holder;
     auto status = GetHolder(name, holder);
     if (!status.ok())
@@ -115,13 +115,24 @@ Snapshots::GetCollectionIds(IDS_TYPE& ids) const {
 }
 
 Status
+Snapshots::GetCollectionNames(std::vector<std::string>& names) const {
+    std::shared_lock<std::shared_timed_mutex> lock(mutex_);
+    for (auto& kv : name_id_map_) {
+        names.push_back(kv.first);
+    }
+    return Status::OK();
+}
+
+Status
 Snapshots::LoadNoLock(Store& store, ID_TYPE collection_id, SnapshotHolderPtr& holder) {
     auto op = std::make_shared<GetSnapshotIDsOperation>(collection_id, false);
     /* op->Push(); */
     (*op)(store);
     auto& collection_commit_ids = op->GetIDs();
     if (collection_commit_ids.size() == 0) {
-        return Status(SS_NOT_FOUND_ERROR, "No collection commit found");
+        std::stringstream emsg;
+        emsg << "Snapshots::LoadNoLock: No collection commit is found for collection " << collection_id;
+        return Status(SS_NOT_FOUND_ERROR, emsg.str());
     }
     holder = std::make_shared<SnapshotHolder>(collection_id,
                                               std::bind(&Snapshots::SnapshotGCCallback, this, std::placeholders::_1));
@@ -146,18 +157,22 @@ Snapshots::Init() {
 }
 
 Status
-Snapshots::GetHolder(const std::string& name, SnapshotHolderPtr& holder) {
+Snapshots::GetHolder(const std::string& name, SnapshotHolderPtr& holder) const {
     std::shared_lock<std::shared_timed_mutex> lock(mutex_);
     auto kv = name_id_map_.find(name);
     if (kv != name_id_map_.end()) {
         lock.unlock();
         return GetHolder(kv->second, holder);
     }
-    return Status(SS_NOT_FOUND_ERROR, "Specified snapshot holder not found");
+    std::stringstream emsg;
+    emsg << "Snapshots::GetHolderNoLock: Specified snapshot holder for collection ";
+    emsg << "\"" << name << "\""
+         << " not found";
+    return Status(SS_NOT_FOUND_ERROR, emsg.str());
 }
 
 Status
-Snapshots::GetHolder(const ID_TYPE& collection_id, SnapshotHolderPtr& holder) {
+Snapshots::GetHolder(const ID_TYPE& collection_id, SnapshotHolderPtr& holder) const {
     Status status;
     std::shared_lock<std::shared_timed_mutex> lock(mutex_);
     status = GetHolderNoLock(collection_id, holder);
@@ -189,10 +204,13 @@ Snapshots::LoadHolder(Store& store, const ID_TYPE& collection_id, SnapshotHolder
 }
 
 Status
-Snapshots::GetHolderNoLock(ID_TYPE collection_id, SnapshotHolderPtr& holder) {
+Snapshots::GetHolderNoLock(ID_TYPE collection_id, SnapshotHolderPtr& holder) const {
     auto it = holders_.find(collection_id);
     if (it == holders_.end()) {
-        return Status(SS_NOT_FOUND_ERROR, "Specified snapshot holder not found");
+        std::stringstream emsg;
+        emsg << "Snapshots::GetHolderNoLock: Specified snapshot holder for collection " << collection_id;
+        emsg << " not found";
+        return Status(SS_NOT_FOUND_ERROR, emsg.str());
     }
     holder = it->second;
     return Status::OK();

@@ -514,7 +514,8 @@ TEST_F(DBTest, SHUTDOWN_TEST) {
     ASSERT_FALSE(stat.ok());
 
     std::vector<milvus::engine::meta::CollectionSchema> collection_infos;
-    stat = db_->AllCollections(collection_infos);
+    std::vector<std::string> names;
+    stat = db_->AllCollections(names);
     ASSERT_EQ(stat.code(), milvus::DB_ERROR);
 
     bool has_collection = false;
@@ -907,12 +908,12 @@ TEST_F(DBTest2, ARHIVE_DISK_CHECK) {
     milvus::engine::meta::CollectionSchema collection_info = BuildCollectionSchema();
     auto stat = db_->CreateCollection(collection_info);
 
-    std::vector<milvus::engine::meta::CollectionSchema> collection_schema_array;
-    stat = db_->AllCollections(collection_schema_array);
+    std::vector<std::string> names;
+    stat = db_->AllCollections(names);
     ASSERT_TRUE(stat.ok());
     bool bfound = false;
-    for (auto& schema : collection_schema_array) {
-        if (schema.collection_id_ == COLLECTION_NAME) {
+    for (auto& name : names) {
+        if (name == COLLECTION_NAME) {
             bfound = true;
             break;
         }

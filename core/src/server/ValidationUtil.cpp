@@ -248,11 +248,11 @@ ValidateIndexParams(const milvus::json& index_params, const engine::meta::Collec
             break;
         }
         case (int32_t)engine::EngineType::HNSW: {
-            auto status = CheckParameterRange(index_params, knowhere::IndexParams::M, 5, 48);
+            auto status = CheckParameterRange(index_params, knowhere::IndexParams::M, 4, 64);
             if (!status.ok()) {
                 return status;
             }
-            status = CheckParameterRange(index_params, knowhere::IndexParams::efConstruction, 100, 500);
+            status = CheckParameterRange(index_params, knowhere::IndexParams::efConstruction, 8, 512);
             if (!status.ok()) {
                 return status;
             }
@@ -303,8 +303,8 @@ ValidateSearchParams(const milvus::json& search_params, const engine::meta::Coll
             break;
         }
         case (int32_t)engine::EngineType::ANNOY: {
-            auto status = CheckParameterRange(search_params, knowhere::IndexParams::search_k, topk,
-                                              std::numeric_limits<int64_t>::max());
+            auto status = CheckParameterRange(search_params, knowhere::IndexParams::search_k,
+                                              std::numeric_limits<int64_t>::min(), std::numeric_limits<int64_t>::max());
             if (!status.ok()) {
                 return status;
             }

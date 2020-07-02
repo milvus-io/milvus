@@ -43,7 +43,7 @@ struct Field {
     std::string field_name;
     DataType field_type;
     std::string index_params;
-    std::string extram_params;
+    std::string extra_params;
 };
 using FieldPtr = std::shared_ptr<Field>;
 

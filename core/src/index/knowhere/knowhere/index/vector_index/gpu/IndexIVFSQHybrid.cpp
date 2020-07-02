@@ -45,19 +45,14 @@ IVFSQHybrid::Train(const DatasetPtr& dataset_ptr, const Config& config) {
         auto device_index = faiss::gpu::index_cpu_to_gpu(gpu_res->faiss_res.get(), gpu_id_, build_index);
         device_index->train(rows, (float*)p_data);
 
-        std::shared_ptr<faiss::Index> host_index = nullptr;
-        host_index.reset(faiss::gpu::index_gpu_to_cpu(device_index));
-
-        delete device_index;
-        delete build_index;
-
-        device_index = faiss::gpu::index_cpu_to_gpu(gpu_res->faiss_res.get(), gpu_id_, host_index.get());
         index_.reset(device_index);
         res_ = gpu_res;
         gpu_mode_ = 2;
     } else {
         KNOWHERE_THROW_MSG("Build IVFSQHybrid can't get gpu resource");
     }
+
+    delete build_index;
 }
 
 VecIndexPtr

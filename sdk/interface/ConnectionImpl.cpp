@@ -92,9 +92,8 @@ ConnectionImpl::DropCollection(const std::string& collection_name) {
 }
 
 Status
-ConnectionImpl::CreateIndex(const std::string& collection_name, const std::string& field_name,
-                            const std::string& index_name, const std::string& index_params) {
-    return client_proxy_->CreateIndex(collection_name, field_name, index_name, index_params);
+ConnectionImpl::CreateIndex(const IndexParam& index_param) {
+    return client_proxy_->CreateIndex(index_param);
 }
 
 Status

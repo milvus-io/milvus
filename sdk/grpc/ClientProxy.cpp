@@ -167,9 +167,10 @@ CopyFieldValue(const FieldValue& field_value, ::milvus::grpc::InsertParam& inser
             }
 
             grpc_int32_value->Resize(static_cast<int>(data_size), 0);
-            memcpy(grpc_int32_value->mutable_data(), int32_value.data(), data_size * sizeof(int32_value));
+            memcpy(grpc_int32_value->mutable_data(), int32_value.data(), data_size * sizeof(int32_t));
         }
-    } else if (!field_value.int16_value.empty()) {
+    }
+    if (!field_value.int16_value.empty()) {
         for (auto& field_it : field_value.int16_value) {
             auto grpc_field = insert_param.add_fields();
             grpc_field->set_field_name(field_it.first);
@@ -183,9 +184,10 @@ CopyFieldValue(const FieldValue& field_value, ::milvus::grpc::InsertParam& inser
             }
 
             grpc_int32_value->Resize(static_cast<int>(data_size), 0);
-            memcpy(grpc_int32_value->mutable_data(), int32_value.data(), data_size * sizeof(int32_value));
+            memcpy(grpc_int32_value->mutable_data(), int32_value.data(), data_size * sizeof(int32_t));
         }
-    } else if (!field_value.int32_value.empty()) {
+    }
+    if (!field_value.int32_value.empty()) {
         for (auto& field_it : field_value.int32_value) {
             auto grpc_field = insert_param.add_fields();
             grpc_field->set_field_name(field_it.first);
@@ -195,9 +197,10 @@ CopyFieldValue(const FieldValue& field_value, ::milvus::grpc::InsertParam& inser
             auto data_size = field_data.size();
 
             grpc_int32_value->Resize(static_cast<int>(data_size), 0);
-            memcpy(grpc_int32_value->mutable_data(), field_data.data(), data_size * sizeof(field_data));
+            memcpy(grpc_int32_value->mutable_data(), field_data.data(), data_size * sizeof(int32_t));
         }
-    } else if (!field_value.int64_value.empty()) {
+    }
+    if (!field_value.int64_value.empty()) {
         for (auto& field_it : field_value.int64_value) {
             auto grpc_field = insert_param.add_fields();
             grpc_field->set_field_name(field_it.first);
@@ -207,9 +210,10 @@ CopyFieldValue(const FieldValue& field_value, ::milvus::grpc::InsertParam& inser
             auto data_size = field_data.size();
 
             grpc_int64_value->Resize(static_cast<int>(data_size), 0);
-            memcpy(grpc_int64_value->mutable_data(), field_data.data(), data_size * sizeof(field_data));
+            memcpy(grpc_int64_value->mutable_data(), field_data.data(), data_size * sizeof(int64_t));
         }
-    } else if (!field_value.float_value.empty()) {
+    }
+    if (!field_value.float_value.empty()) {
         for (auto& field_it : field_value.float_value) {
             auto grpc_field = insert_param.add_fields();
             grpc_field->set_field_name(field_it.first);
@@ -219,9 +223,10 @@ CopyFieldValue(const FieldValue& field_value, ::milvus::grpc::InsertParam& inser
             auto data_size = field_data.size();
 
             grpc_float_value->Resize(static_cast<int>(data_size), 0.0);
-            memcpy(grpc_float_value->mutable_data(), field_data.data(), data_size * sizeof(field_data));
+            memcpy(grpc_float_value->mutable_data(), field_data.data(), data_size * sizeof(float));
         }
-    } else if (!field_value.double_value.empty()) {
+    }
+    if (!field_value.double_value.empty()) {
         for (auto& field_it : field_value.double_value) {
             auto grpc_field = insert_param.add_fields();
             grpc_field->set_field_name(field_it.first);
@@ -231,7 +236,18 @@ CopyFieldValue(const FieldValue& field_value, ::milvus::grpc::InsertParam& inser
             auto data_size = field_data.size();
 
             grpc_double_value->Resize(static_cast<int>(data_size), 0.0);
-            memcpy(grpc_double_value->mutable_data(), field_data.data(), data_size * sizeof(field_data));
+            memcpy(grpc_double_value->mutable_data(), field_data.data(), data_size * sizeof(double));
+        }
+    }
+    if (!field_value.vector_value.empty()) {
+        for (auto& field_it : field_value.vector_value) {
+            auto grpc_field = insert_param.add_fields();
+            grpc_field->set_field_name(field_it.first);
+            auto grpc_vector_record = grpc_field->mutable_vector_record();
+            for (const auto& vector_data : field_it.second) {
+                auto row_record = grpc_vector_record->add_records();
+                CopyRowRecord(row_record, vector_data);
+            }
         }
     }
 }
@@ -442,6 +458,7 @@ ClientProxy::CreateCollection(const Mapping& mapping) {
         for (auto& field : mapping.fields) {
             auto grpc_field = grpc_mapping.add_fields();
             grpc_field->set_name(field->field_name);
+            grpc_field->set_type((::milvus::grpc::DataType)field->field_type);
             JSON json_index_param = JSON::parse(field->index_params);
             for (auto& json_param : json_index_param.items()) {
                 auto grpc_index_param = grpc_field->add_index_params();
@@ -449,9 +466,9 @@ ClientProxy::CreateCollection(const Mapping& mapping) {
                 grpc_index_param->set_value(json_param.value());
             }
 
-            auto grpc_extra_param = grpc_field->add_index_params();
+            auto grpc_extra_param = grpc_field->add_extra_params();
             grpc_extra_param->set_key(EXTRA_PARAM_KEY);
-            grpc_extra_param->set_value(field->extram_params);
+            grpc_extra_param->set_value(field->extra_params);
         }
 
         return client_ptr_->CreateCollection(grpc_mapping);
@@ -484,16 +501,15 @@ ClientProxy::DropCollection(const std::string& collection_name) {
 }
 
 Status
-ClientProxy::CreateIndex(const std::string& collection_name, const std::string& field_name,
-                         const std::string& index_name, const std::string& index_params) {
+ClientProxy::CreateIndex(const IndexParam& index_param) {
     try {
         ::milvus::grpc::IndexParam grpc_index_param;
-        grpc_index_param.set_collection_name(collection_name);
-        grpc_index_param.set_field_name(field_name);
+        grpc_index_param.set_collection_name(index_param.collection_name);
+        grpc_index_param.set_field_name(index_param.field_name);
         milvus::grpc::KeyValuePair* kv = grpc_index_param.add_extra_params();
-        grpc_index_param.set_index_name(index_name);
+        grpc_index_param.set_index_name(index_param.index_name);
         kv->set_key(EXTRA_PARAM_KEY);
-        kv->set_value(index_params);
+        kv->set_value(index_param.extra_params);
         return client_ptr_->CreateIndex(grpc_index_param);
     } catch (std::exception& ex) {
         return Status(StatusCode::UnknownError, "Failed to build index: " + std::string(ex.what()));
@@ -588,9 +604,9 @@ ClientProxy::Search(const std::string& collection_name, const std::vector<std::s
         search_param.set_dsl(dsl);
         auto grpc_vector_param = search_param.add_vector_param();
         grpc_vector_param->set_json(vector_param.json_param);
-        auto gepc_vector_record = grpc_vector_param->mutable_row_record();
+        auto grpc_vector_record = grpc_vector_param->mutable_row_record();
         for (auto& vector_data : vector_param.vector_records) {
-            auto row_record = gepc_vector_record->add_records();
+            auto row_record = grpc_vector_record->add_records();
             CopyRowRecord(row_record, vector_data);
         }
 
@@ -628,7 +644,7 @@ ClientProxy::GetCollectionInfo(const std::string& collection_name, Mapping& mapp
                 json_param[grpc_field.extra_params(j).key()] = grpc_field.extra_params(j).value();
                 json_extra_params.emplace_back(json_param);
             }
-            field_ptr->extram_params = json_extra_params.dump();
+            field_ptr->extra_params = json_extra_params.dump();
             field_ptr->field_type = (DataType)grpc_field.type();
         }
         return status;

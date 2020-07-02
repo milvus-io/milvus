@@ -11,29 +11,28 @@
 
 #pragma once
 
-#include <set>
+#include "db/meta/FilesHolder.h"
+#include "db/snapshot/Snapshot.h"
+
+#include <memory>
 #include <string>
-#include <vector>
 
 namespace milvus {
 namespace engine {
-namespace snapshot {
 
-using ID_TYPE = int64_t;
-using NUM_TYPE = int64_t;
-using FTYPE_TYPE = int64_t;
-using TS_TYPE = int64_t;
-using LSN_TYPE = uint64_t;
-using SIZE_TYPE = uint64_t;
-using MappingT = std::set<ID_TYPE>;
+class SnapshotVisitor {
+ public:
+    explicit SnapshotVisitor(snapshot::ScopedSnapshotT ss);
+    explicit SnapshotVisitor(const std::string& collection_name);
+    explicit SnapshotVisitor(snapshot::ID_TYPE collection_id);
 
-enum FieldType { VECTOR, INT32 };
-enum FieldElementType { RAW, IVFSQ8 };
+    Status
+    SegmentsToSearch(meta::FilesHolder& files_holder);
 
-using IDS_TYPE = std::vector<ID_TYPE>;
+ protected:
+    snapshot::ScopedSnapshotT ss_;
+    Status status_;
+};
 
-enum State { PENDING = 0, ACTIVE = 1, DEACTIVE = 2, INVALID = 999 };
-
-}  // namespace snapshot
 }  // namespace engine
 }  // namespace milvus
