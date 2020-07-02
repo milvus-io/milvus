@@ -15,9 +15,8 @@
 #include <memory>
 
 #include "knowhere/common/Exception.h"
-#include "knowhere/index/vector_index/FaissBaseIndex.h"
-#include "knowhere/index/vector_index/IndexNSG.h"
 #include "knowhere/index/vector_index/helpers/IndexParameter.h"
+#include "knowhere/index/vector_offset_index/IndexNSG_NM.h"
 #ifdef MILVUS_GPU_VERSION
 #include "knowhere/index/vector_index/gpu/IndexGPUIDMAP.h"
 #include "knowhere/index/vector_index/helpers/Cloner.h"
@@ -45,7 +44,7 @@ class NSGInterfaceTest : public DataGen, public ::testing::Test {
 #endif
         int nsg_dim = 256;
         Generate(nsg_dim, 20000, nq);
-        index_ = std::make_shared<milvus::knowhere::NSG>();
+        index_ = std::make_shared<milvus::knowhere::NSG_NM>();
 
         train_conf = milvus::knowhere::Config{{milvus::knowhere::meta::DIM, 256},
                                               {milvus::knowhere::IndexParams::nlist, 163},
@@ -70,7 +69,7 @@ class NSGInterfaceTest : public DataGen, public ::testing::Test {
     }
 
  protected:
-    std::shared_ptr<milvus::knowhere::NSG> index_;
+    std::shared_ptr<milvus::knowhere::NSG_NM> index_;
     milvus::knowhere::Config train_conf;
     milvus::knowhere::Config search_conf;
 };
@@ -99,14 +98,14 @@ TEST_F(NSGInterfaceTest, basic_test) {
     }
 
     /* test NSG GPU train */
-    auto new_index_1 = std::make_shared<milvus::knowhere::NSG>(DEVICE_GPU0);
+    auto new_index_1 = std::make_shared<milvus::knowhere::NSG_NM>(DEVICE_GPU0);
     train_conf[milvus::knowhere::meta::DEVICEID] = DEVICE_GPU0;
     new_index_1->BuildAll(base_dataset, train_conf);
     auto new_result_1 = new_index_1->Query(query_dataset, search_conf);
     AssertAnns(new_result_1, nq, k);
 
     /* test NSG index load */
-    auto new_index_2 = std::make_shared<milvus::knowhere::NSG>();
+    auto new_index_2 = std::make_shared<milvus::knowhere::NSG_NM>();
     new_index_2->Load(binaryset);
     {
         fiu_enable("NSG.Load.throw_exception", 1, nullptr, 0);

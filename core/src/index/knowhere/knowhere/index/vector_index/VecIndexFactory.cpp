@@ -13,9 +13,6 @@
 
 #include "knowhere/common/Exception.h"
 #include "knowhere/common/Log.h"
-#include "knowhere/index/non_materialized_index/IndexHNSW_NM.h"
-#include "knowhere/index/non_materialized_index/IndexIVF_NM.h"
-#include "knowhere/index/non_materialized_index/IndexNSG_NM.h"
 #include "knowhere/index/vector_index/IndexAnnoy.h"
 #include "knowhere/index/vector_index/IndexBinaryIDMAP.h"
 #include "knowhere/index/vector_index/IndexBinaryIVF.h"
@@ -23,19 +20,22 @@
 #include "knowhere/index/vector_index/IndexIVF.h"
 #include "knowhere/index/vector_index/IndexIVFPQ.h"
 #include "knowhere/index/vector_index/IndexIVFSQ.h"
+#include "knowhere/index/vector_offset_index/IndexHNSW_NM.h"
+#include "knowhere/index/vector_offset_index/IndexIVF_NM.h"
+#include "knowhere/index/vector_offset_index/IndexNSG_NM.h"
 #ifdef MILVUS_SUPPORT_SPTAG
 #include "knowhere/index/vector_index/IndexSPTAG.h"
 #endif
 
 #ifdef MILVUS_GPU_VERSION
 #include <cuda.h>
-#include "knowhere/index/non_materialized_index/gpu/IndexGPUIVF_NM.h"
 #include "knowhere/index/vector_index/gpu/IndexGPUIDMAP.h"
 #include "knowhere/index/vector_index/gpu/IndexGPUIVF.h"
 #include "knowhere/index/vector_index/gpu/IndexGPUIVFPQ.h"
 #include "knowhere/index/vector_index/gpu/IndexGPUIVFSQ.h"
 #include "knowhere/index/vector_index/gpu/IndexIVFSQHybrid.h"
 #include "knowhere/index/vector_index/helpers/Cloner.h"
+#include "knowhere/index/vector_offset_index/gpu/IndexGPUIVF_NM.h"
 #endif
 
 namespace milvus {

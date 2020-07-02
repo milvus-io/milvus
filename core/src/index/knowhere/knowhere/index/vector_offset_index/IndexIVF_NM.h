@@ -19,8 +19,8 @@
 #include <faiss/IndexIVF.h>
 
 #include "knowhere/common/Typedef.h"
-#include "knowhere/index/non_materialized_index/OffsetBaseIndex.h"
 #include "knowhere/index/vector_index/VecIndex.h"
+#include "knowhere/index/vector_offset_index/OffsetBaseIndex.h"
 
 namespace milvus {
 namespace knowhere {
