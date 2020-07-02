@@ -11,6 +11,7 @@ Please mark all changes in change log and use the issue from GitHub
 -   \#2557 Fix random crash of INSERT_DUPLICATE_ID case
 -   \#2578 Result count doesn't match target vectors count
 -   \#2582 CreateHybridIndex.cpp compile error
+-   \#2585 IVF_PQ on GPU with using metric_type IP
 -   \#2598 Fix Milvus docker image report illegal instruction
 -   \#2617 Fix HNSW and RNSG index files size
 -   \#2637 Suit the range of HNSW parameters
