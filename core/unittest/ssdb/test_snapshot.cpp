@@ -13,7 +13,6 @@
 #include <fiu-local.h>
 #include <gtest/gtest.h>
 
-#include <random>
 #include <string>
 #include <set>
 #include <algorithm>
@@ -65,12 +64,118 @@ using ReferenceProxy = milvus::engine::snapshot::ReferenceProxy;
 using Queue = milvus::BlockingQueue<ID_TYPE>;
 using TQueue = milvus::BlockingQueue<std::tuple<ID_TYPE, ID_TYPE>>;
 using SoftDeleteCollectionOperation = milvus::engine::snapshot::SoftDeleteOperation<Collection>;
+using ParamsField = milvus::engine::snapshot::ParamsField;
+using IteratePartitionHandler = milvus::engine::snapshot::IterateHandler<Partition>;
 
-int RandomInt(int start, int end) {
-    std::random_device dev;
-    std::mt19937 rng(dev());
-    std::uniform_int_distribution<std::mt19937::result_type> dist(start, end);
-    return dist(rng);
+struct PartitionCollector : public IteratePartitionHandler {
+    using ResourceT = Partition;
+    using BaseT = IteratePartitionHandler;
+    explicit PartitionCollector(ScopedSnapshotT ss) : BaseT(ss) {}
+
+    milvus::Status
+    PreIterate() override {
+        partition_names_.clear();
+        return milvus::Status::OK();
+    }
+
+    milvus::Status
+    Handle(const typename ResourceT::Ptr& partition) override {
+        partition_names_.push_back(partition->GetName());
+        return milvus::Status::OK();
+    }
+
+    std::vector<std::string> partition_names_;
+};
+
+struct WaitableObj {
+    bool notified_ = false;
+    std::mutex mutex_;
+    std::condition_variable cv_;
+
+    void
+    Wait() {
+        std::unique_lock<std::mutex> lck(mutex_);
+        if (!notified_) {
+            cv_.wait(lck);
+        }
+        notified_ = false;
+    }
+
+    void
+    Notify() {
+        std::unique_lock<std::mutex> lck(mutex_);
+        notified_ = true;
+        lck.unlock();
+        cv_.notify_one();
+    }
+};
+
+ScopedSnapshotT
+CreateCollection(const std::string& collection_name, const LSN_TYPE& lsn) {
+    CreateCollectionContext context;
+    context.lsn = lsn;
+    auto collection_schema = std::make_shared<Collection>(collection_name);
+    context.collection = collection_schema;
+    auto vector_field = std::make_shared<Field>("vector", 0,
+            milvus::engine::snapshot::FieldType::VECTOR);
+    auto vector_field_element = std::make_shared<FieldElement>(0, 0, "ivfsq8",
+            milvus::engine::snapshot::FieldElementType::IVFSQ8);
+    auto int_field = std::make_shared<Field>("int", 0,
+            milvus::engine::snapshot::FieldType::INT32);
+    context.fields_schema[vector_field] = {vector_field_element};
+    context.fields_schema[int_field] = {};
+
+    auto op = std::make_shared<CreateCollectionOperation>(context);
+    op->Push();
+    ScopedSnapshotT ss;
+    auto status = op->GetSnapshot(ss);
+    return ss;
+}
+
+ScopedSnapshotT
+CreatePartition(const std::string& collection_name, const PartitionContext& p_context, const LSN_TYPE& lsn) {
+    ScopedSnapshotT curr_ss;
+    ScopedSnapshotT ss;
+    auto status = Snapshots::GetInstance().GetSnapshot(ss, collection_name);
+    if (!status.ok()) {
+        std::cout << status.ToString() << std::endl;
+        return curr_ss;
+    }
+
+    OperationContext context;
+    context.lsn = lsn;
+    auto op = std::make_shared<CreatePartitionOperation>(context, ss);
+
+    PartitionPtr partition;
+    status = op->CommitNewPartition(p_context, partition);
+    if (!status.ok()) {
+        std::cout << status.ToString() << std::endl;
+        return curr_ss;
+    }
+
+    status = op->Push();
+    if (!status.ok()) {
+        std::cout << status.ToString() << std::endl;
+        return curr_ss;
+    }
+
+    status = op->GetSnapshot(curr_ss);
+    if (!status.ok()) {
+        std::cout << status.ToString() << std::endl;
+        return curr_ss;
+    }
+    return curr_ss;
+}
+
+TEST_F(SnapshotTest, ResourcesTest) {
+    int nprobe = 16;
+    milvus::json params = {{"nprobe", nprobe}};
+    ParamsField p_field(params.dump());
+    ASSERT_EQ(params.dump(), p_field.GetParams());
+    ASSERT_EQ(params, p_field.GetParamsJson());
+
+    auto nprobe_real = p_field.GetParamsJson().at("nprobe").get<int>();
+    ASSERT_EQ(nprobe, nprobe_real);
 }
 
 TEST_F(SnapshotTest, ReferenceProxyTest) {
@@ -177,26 +282,6 @@ TEST_F(SnapshotTest, ResourceHoldersTest) {
         auto collection_4 = CollectionsHolder::GetInstance().GetResource(collection_id, false);
         ASSERT_TRUE(!collection_4);
     }
-}
-
-ScopedSnapshotT
-CreateCollection(const std::string& collection_name, const LSN_TYPE& lsn) {
-    CreateCollectionContext context;
-    context.lsn = lsn;
-    auto collection_schema = std::make_shared<Collection>(collection_name);
-    context.collection = collection_schema;
-    auto vector_field = std::make_shared<Field>("vector", 0);
-    auto vector_field_element = std::make_shared<FieldElement>(0, 0, "ivfsq8",
-            milvus::engine::snapshot::FieldElementType::IVFSQ8);
-    auto int_field = std::make_shared<Field>("int", 0);
-    context.fields_schema[vector_field] = {vector_field_element};
-    context.fields_schema[int_field] = {};
-
-    auto op = std::make_shared<CreateCollectionOperation>(context);
-    op->Push();
-    ScopedSnapshotT ss;
-    auto status = op->GetSnapshot(ss);
-    return ss;
 }
 
 TEST_F(SnapshotTest, DeleteOperationTest) {
@@ -381,41 +466,6 @@ TEST_F(SnapshotTest, ConCurrentCollectionOperation) {
     ASSERT_FALSE(c_c);
 }
 
-ScopedSnapshotT
-CreatePartition(const std::string& collection_name, const PartitionContext& p_context, const LSN_TYPE& lsn) {
-    ScopedSnapshotT curr_ss;
-    ScopedSnapshotT ss;
-    auto status = Snapshots::GetInstance().GetSnapshot(ss, collection_name);
-    if (!status.ok()) {
-        std::cout << status.ToString() << std::endl;
-        return curr_ss;
-    }
-
-    OperationContext context;
-    context.lsn = lsn;
-    auto op = std::make_shared<CreatePartitionOperation>(context, ss);
-
-    PartitionPtr partition;
-    status = op->CommitNewPartition(p_context, partition);
-    if (!status.ok()) {
-        std::cout << status.ToString() << std::endl;
-        return curr_ss;
-    }
-
-    status = op->Push();
-    if (!status.ok()) {
-        std::cout << status.ToString() << std::endl;
-        return curr_ss;
-    }
-
-    status = op->GetSnapshot(curr_ss);
-    if (!status.ok()) {
-        std::cout << status.ToString() << std::endl;
-        return curr_ss;
-    }
-    return curr_ss;
-}
-
 TEST_F(SnapshotTest, PartitionTest) {
     std::string collection_name("c1");
     LSN_TYPE lsn = 1;
@@ -423,6 +473,11 @@ TEST_F(SnapshotTest, PartitionTest) {
     ASSERT_TRUE(ss);
     ASSERT_EQ(ss->GetName(), collection_name);
     ASSERT_EQ(ss->NumberOfPartitions(), 1);
+
+    auto partition_iterator = std::make_shared<PartitionCollector>(ss);
+    partition_iterator->Iterate();
+    ASSERT_TRUE(partition_iterator->GetStatus().ok());
+    ASSERT_EQ(partition_iterator->partition_names_.size(), 1);
 
     OperationContext context;
     context.lsn = ++lsn;
@@ -448,6 +503,11 @@ TEST_F(SnapshotTest, PartitionTest) {
     ASSERT_EQ(curr_ss->GetName(), ss->GetName());
     ASSERT_GT(curr_ss->GetID(), ss->GetID());
     ASSERT_EQ(curr_ss->NumberOfPartitions(), 2);
+
+    partition_iterator = std::make_shared<PartitionCollector>(curr_ss);
+    partition_iterator->Iterate();
+    ASSERT_TRUE(partition_iterator->GetStatus().ok());
+    ASSERT_EQ(partition_iterator->partition_names_.size(), 2);
 
     p_ctx.lsn = ++lsn;
     auto drop_op = std::make_shared<DropPartitionOperation>(p_ctx, curr_ss);
@@ -709,30 +769,6 @@ TEST_F(SnapshotTest, OperationTest) {
     }
     Snapshots::GetInstance().Reset();
 }
-
-struct WaitableObj {
-    bool notified_ = false;
-    std::mutex mutex_;
-    std::condition_variable cv_;
-
-    void
-    Wait() {
-        std::unique_lock<std::mutex> lck(mutex_);
-        if (!notified_) {
-            cv_.wait(lck);
-        }
-        notified_ = false;
-    }
-
-    void
-    Notify() {
-        std::unique_lock<std::mutex> lck(mutex_);
-        notified_ = true;
-        lck.unlock();
-        cv_.notify_one();
-    }
-};
-
 
 TEST_F(SnapshotTest, CompoundTest1) {
     milvus::Status status;

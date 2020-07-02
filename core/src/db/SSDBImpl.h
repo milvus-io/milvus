@@ -12,9 +12,18 @@
 #pragma once
 
 #include <atomic>
+#include <map>
+#include <memory>
+#include <string>
+#include <vector>
 
 #include "db/Options.h"
+#include "db/SnapshotHandlers.h"
+#include "db/snapshot/Context.h"
+#include "db/snapshot/ResourceTypes.h"
+#include "db/snapshot/Resources.h"
 #include "utils/Status.h"
+#include "wal/WalManager.h"
 
 namespace milvus {
 namespace engine {
@@ -22,6 +31,35 @@ namespace engine {
 class SSDBImpl {
  public:
     explicit SSDBImpl(const DBOptions& options);
+
+    Status
+    CreateCollection(const snapshot::CreateCollectionContext& context);
+
+    Status
+    DropCollection(const std::string& name);
+
+    Status
+    DescribeCollection(const std::string& collection_name, snapshot::CollectionPtr& collection,
+                       std::map<snapshot::FieldPtr, std::vector<snapshot::FieldElementPtr>>& fields_schema);
+
+    Status
+    HasCollection(const std::string& collection_name, bool& has_or_not);
+
+    Status
+    AllCollections(std::vector<std::string>& names);
+
+    Status
+    PreloadCollection(const std::shared_ptr<server::Context>& context, const std::string& collection_name,
+                      bool force = false);
+
+    Status
+    CreatePartition(const std::string& collection_name, const std::string& partition_name);
+
+    Status
+    DropPartition(const std::string& collection_name, const std::string& partition_name);
+
+    Status
+    ShowPartitions(const std::string& collection_name, std::vector<std::string>& partition_names);
 
     ~SSDBImpl();
 
@@ -34,6 +72,7 @@ class SSDBImpl {
  private:
     DBOptions options_;
     std::atomic<bool> initialized_;
+    std::shared_ptr<wal::WalManager> wal_mgr_;
 };  // SSDBImpl
 
 }  // namespace engine

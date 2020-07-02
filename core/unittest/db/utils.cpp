@@ -25,10 +25,6 @@
 #include "cache/GpuCacheMgr.h"
 #include "db/DBFactory.h"
 #include "db/Options.h"
-#include "db/snapshot/EventExecutor.h"
-#include "db/snapshot/OperationExecutor.h"
-#include "db/snapshot/Snapshots.h"
-#include "db/snapshot/ResourceHolders.h"
 
 #ifdef MILVUS_GPU_VERSION
 #include "knowhere/index/vector_index/helpers/FaissGpuResourceMgr.h"

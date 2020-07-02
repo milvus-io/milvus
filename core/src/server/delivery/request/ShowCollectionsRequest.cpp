@@ -37,16 +37,16 @@ Status
 ShowCollectionsRequest::OnExecute() {
     TimeRecorderAuto rc("ShowCollectionsRequest");
 
-    std::vector<engine::meta::CollectionSchema> schema_array;
-    auto status = DBWrapper::DB()->AllCollections(schema_array);
+    std::vector<std::string> names;
+    auto status = DBWrapper::DB()->AllCollections(names);
     fiu_do_on("ShowCollectionsRequest.OnExecute.show_collections_fail",
               status = Status(milvus::SERVER_UNEXPECTED_ERROR, ""));
     if (!status.ok()) {
         return status;
     }
 
-    for (auto& schema : schema_array) {
-        collection_name_list_.push_back(schema.collection_id_);
+    for (auto& name : names) {
+        collection_name_list_.push_back(name);
     }
     return Status::OK();
 }

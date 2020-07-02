@@ -50,7 +50,7 @@ SnapshotHolder::Load(Store& store, ScopedSnapshotT& ss, ID_TYPE id, bool scoped)
 
     std::unique_lock<std::mutex> lock(mutex_);
     if (id == 0 || id == max_id_) {
-        auto raw = active_[max_id_];
+        auto raw = active_.at(max_id_);
         ss = ScopedSnapshotT(raw, scoped);
         return status;
     }
@@ -75,7 +75,7 @@ SnapshotHolder::Load(Store& store, ScopedSnapshotT& ss, ID_TYPE id, bool scoped)
 }
 
 Status
-SnapshotHolder::Get(ScopedSnapshotT& ss, ID_TYPE id, bool scoped) {
+SnapshotHolder::Get(ScopedSnapshotT& ss, ID_TYPE id, bool scoped) const {
     Status status;
     if (id > max_id_) {
         std::stringstream emsg;
@@ -87,7 +87,7 @@ SnapshotHolder::Get(ScopedSnapshotT& ss, ID_TYPE id, bool scoped) {
 
     std::unique_lock<std::mutex> lock(mutex_);
     if (id == 0 || id == max_id_) {
-        auto raw = active_[max_id_];
+        auto raw = active_.at(max_id_);
         ss = ScopedSnapshotT(raw, scoped);
         return status;
     }

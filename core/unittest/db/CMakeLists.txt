@@ -42,6 +42,7 @@ add_executable(test_db
         ${db_meta_files}
         ${db_merge_files}
         ${db_wal_files}
+        ${db_snapshot_files}
         ${grpc_server_files}
         ${grpc_service_files}
         ${metrics_files}
