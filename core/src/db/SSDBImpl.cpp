@@ -150,13 +150,10 @@ SSDBImpl::GetCollectionRowCount(const std::string& collection_name, uint64_t& ro
     CHECK_INITIALIZED;
 
     snapshot::ScopedSnapshotT ss;
-    auto status = snapshot::Snapshots::GetInstance().GetSnapshot(ss, collection_name);
-    if (!status.ok()) {
-        return status;
-    }
+    STATUS_CHECK(snapshot::Snapshots::GetInstance().GetSnapshot(ss, collection_name));
 
     row_count = ss->GetCollectionCommit()->GetRowCount();
-    return status;
+    return Status::OK();
 }
 
 Status
