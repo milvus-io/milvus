@@ -16,6 +16,7 @@ Please mark all changes in change log and use the issue from GitHub
 -   \#2637 Suit the range of HNSW parameters
 -   \#2649 Search parameter of annoy has conflict with document
 -   \#2693 Collection create success if no dimension value provided
+-   \#2694 Collection create success if an invalid field name provided
 
 ## Feature
 -   \#2319 Redo metadata to support MVCC

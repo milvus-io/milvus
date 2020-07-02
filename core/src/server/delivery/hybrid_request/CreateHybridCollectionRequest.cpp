@@ -75,6 +75,11 @@ CreateHybridCollectionRequest::OnExecute() {
         for (auto& field_type : field_types_) {
             engine::meta::hybrid::FieldSchema schema;
             auto field_name = field_type.first;
+            status = ValidateFieldName(field_name);
+            if (!status.ok()) {
+                return status;
+            }
+
             auto index_params = field_index_params_.at(field_name);
             schema.collection_id_ = collection_name_;
             schema.field_name_ = field_name;
