@@ -18,6 +18,7 @@
 #include <vector>
 
 #include "db/Options.h"
+#include "db/SimpleWaitNotify.h"
 #include "db/SnapshotHandlers.h"
 #include "db/snapshot/Context.h"
 #include "db/snapshot/ResourceTypes.h"
@@ -31,6 +32,14 @@ namespace engine {
 class SSDBImpl {
  public:
     explicit SSDBImpl(const DBOptions& options);
+
+    ~SSDBImpl();
+
+    Status
+    Start();
+
+    Status
+    Stop();
 
     Status
     CreateCollection(const snapshot::CreateCollectionContext& context);
@@ -61,18 +70,39 @@ class SSDBImpl {
     Status
     ShowPartitions(const std::string& collection_name, std::vector<std::string>& partition_names);
 
-    ~SSDBImpl();
+ private:
+    void
+    InternalFlush(const std::string& collection_id = "");
+
+    void
+    BackgroundFlushThread();
+
+    void
+    StartMetricTask();
+
+    void
+    BackgroundMetricThread();
 
     Status
-    Start();
+    ExecWalRecord(const wal::MXLogRecord& record);
 
-    Status
-    Stop();
+    void
+    BackgroundWalThread();
 
  private:
     DBOptions options_;
     std::atomic<bool> initialized_;
+
     std::shared_ptr<wal::WalManager> wal_mgr_;
+    std::shared_ptr<std::thread> bg_wal_thread_;
+
+    std::shared_ptr<std::thread> bg_flush_thread_;
+
+    SimpleWaitNotify swn_wal_;
+    SimpleWaitNotify swn_flush_;
+    SimpleWaitNotify swn_metric_;
+
+    SimpleWaitNotify flush_req_swn_;
 };  // SSDBImpl
 
 }  // namespace engine
