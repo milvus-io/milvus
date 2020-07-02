@@ -33,6 +33,7 @@ namespace server {
 namespace grpc {
 
 const char* EXTRA_PARAM_KEY = "params";
+const size_t MAXIMUM_FIELD_NUM = 64;
 
 ::milvus::grpc::ErrorCode
 ErrorMap(ErrorCode code) {
@@ -51,6 +52,8 @@ ErrorMap(ErrorCode code) {
         {SERVER_INVALID_COLLECTION_NAME, ::milvus::grpc::ErrorCode::ILLEGAL_COLLECTION_NAME},
         {SERVER_INVALID_COLLECTION_DIMENSION, ::milvus::grpc::ErrorCode::ILLEGAL_DIMENSION},
         {SERVER_INVALID_VECTOR_DIMENSION, ::milvus::grpc::ErrorCode::ILLEGAL_DIMENSION},
+        {SERVER_INVALID_FIELD_NAME, ::milvus::grpc::ErrorCode::ILLEGAL_ARGUMENT},
+        {SERVER_INVALID_FIELD_NUM, ::milvus::grpc::ErrorCode::ILLEGAL_ARGUMENT},
 
         {SERVER_INVALID_INDEX_TYPE, ::milvus::grpc::ErrorCode::ILLEGAL_INDEX_TYPE},
         {SERVER_INVALID_ROWRECORD, ::milvus::grpc::ErrorCode::ILLEGAL_ROWRECORD},
@@ -576,6 +579,12 @@ GrpcRequestHandler::CreateCollection(::grpc::ServerContext* context, const ::mil
     std::unordered_map<std::string, engine::meta::hybrid::DataType> field_types;
     std::unordered_map<std::string, milvus::json> field_index_params;
     std::unordered_map<std::string, std::string> field_params;
+    if (request->fields_size() > MAXIMUM_FIELD_NUM) {
+        Status status = Status{SERVER_INVALID_FIELD_NUM, "Maximum field's number should be limited to 64"};
+        LOG_SERVER_INFO_ << LogOut("Request [%s] %s end.", GetContext(context)->RequestID().c_str(), __func__);
+        SET_RESPONSE(response, status, context);
+        return ::grpc::Status::OK;
+    }
     for (int i = 0; i < request->fields_size(); ++i) {
         auto field = request->fields(i);
         auto field_name = field.name();

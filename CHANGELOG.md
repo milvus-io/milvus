@@ -17,6 +17,7 @@ Please mark all changes in change log and use the issue from GitHub
 -   \#2649 Search parameter of annoy has conflict with document
 -   \#2693 Collection create success if no dimension value provided
 -   \#2694 Collection create success if an invalid field name provided
+-   \#2695 The number of fields should be limited
 
 ## Feature
 -   \#2319 Redo metadata to support MVCC

@@ -94,6 +94,7 @@ constexpr ErrorCode SERVER_INVALID_PARTITION_TAG = ToServerErrorCode(118);
 constexpr ErrorCode SERVER_INVALID_BINARY_QUERY = ToServerErrorCode(119);
 constexpr ErrorCode SERVER_INVALID_DSL_PARAMETER = ToServerErrorCode(120);
 constexpr ErrorCode SERVER_INVALID_FIELD_NAME = ToServerErrorCode(121);
+constexpr ErrorCode SERVER_INVALID_FIELD_NUM = ToServerErrorCode(122);
 
 // db error code
 constexpr ErrorCode DB_META_TRANSACTION_FAILED = ToDbErrorCode(1);
