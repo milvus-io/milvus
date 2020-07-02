@@ -22,14 +22,14 @@
 
 #include "knowhere/common/Exception.h"
 #include "knowhere/common/Timer.h"
+#include "knowhere/index/vector_offset_index/IndexIVF_NM.h"
 #include "knowhere/index/vector_index/IndexType.h"
 #include "knowhere/index/vector_index/adapter/VectorAdapter.h"
-#include "knowhere/index/vector_offset_index/IndexIVF_NM.h"
 
 #ifdef MILVUS_GPU_VERSION
+#include "knowhere/index/vector_offset_index/gpu/IndexGPUIVF_NM.h"
 #include "knowhere/index/vector_index/helpers/Cloner.h"
 #include "knowhere/index/vector_index/helpers/FaissGpuResourceMgr.h"
-#include "knowhere/index/vector_offset_index/gpu/IndexGPUIVF_NM.h"
 #endif
 
 #include "unittest/Helper.h"
@@ -47,7 +47,8 @@ class IVFNMGPUTest : public DataGen,
 #ifdef MILVUS_GPU_VERSION
         milvus::knowhere::FaissGpuResourceMgr::GetInstance().InitDevice(DEVICEID, PINMEM, TEMPMEM, RESNUM);
 #endif
-        std::tie(index_type_, index_mode_) = GetParam();
+        index_type_ = milvus::knowhere::IndexEnum::INDEX_FAISS_IVFFLAT;
+        index_mode_ = milvus::knowhere::IndexMode::MODE_GPU;
         Generate(DIM, NB, NQ);
 #ifdef MILVUS_GPU_VERSION
         index_ = std::make_shared<milvus::knowhere::GPUIVF_NM>(DEVICEID);
@@ -90,7 +91,7 @@ TEST_F(IVFNMGPUTest, ivf_basic_gpu) {
     int64_t rows = base_dataset->Get<int64_t>(milvus::knowhere::meta::ROWS);
     auto raw_data = base_dataset->Get<const void*>(milvus::knowhere::meta::TENSOR);
     milvus::knowhere::BinaryPtr bptr = std::make_shared<milvus::knowhere::Binary>();
-    bptr->data = std::shared_ptr<uint8_t[]>((uint8_t*)raw_data, [&](uint8_t*) {});
+    bptr->data =  std::shared_ptr<uint8_t[]>((uint8_t*)raw_data, [&](uint8_t*){});
     bptr->size = dim * rows * sizeof(float);
     bs.Append(RAW_DATA, bptr);
     index_->Load(bs);
