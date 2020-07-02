@@ -6,8 +6,11 @@ Please mark all change in change log and use the issue from GitHub
 
 ## Bug
 
--   \#2450 The deleted vectors may be found on GPU
+-   \#1997 Index file missed after compact
+-   \#2264 Milvus opened too many files when the metric_config.enable_monitor=true
+-   \#2266 Server hangs when using multi-clients to query different collections
 -   \#2399 The nlist set by the user may not take effect
+-   \#2450 The deleted vectors may be found on GPU
 
 ## Feature
 
