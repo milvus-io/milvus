@@ -152,11 +152,11 @@ class Operations : public std::enable_shared_from_this<Operations> {
     FailureString() const;
 
     Status
-    DoneRequired() const;
+    CheckDone() const;
     Status
-    IDSNotEmptyRequried() const;
+    CheckIDSNotEmpty() const;
     Status
-    PrevSnapshotRequried() const;
+    CheckPrevSnapshot() const;
 
     Status
     ApplyRollBack(Store&);
@@ -212,20 +212,16 @@ class CommitOperation : public Operations {
         if (wait) {
             WaitToFinish();
         }
-        auto status = DoneRequired();
-        if (!status.ok())
-            return status;
-        status = IDSNotEmptyRequried();
-        if (!status.ok())
-            return status;
+        STATUS_CHECK(CheckDone());
+        STATUS_CHECK(CheckIDSNotEmpty());
         resource_->SetID(ids_[0]);
         res = resource_;
-        return status;
+        return Status::OK();
     }
 
  protected:
     Status
-    ResourceNotNullRequired() const {
+    CheckResource() const {
         Status status;
         if (!resource_)
             return Status(SS_CONSTRAINT_CHECK_ERROR, "No specified resource");
@@ -261,19 +257,15 @@ class LoadOperation : public Operations {
         if (wait) {
             WaitToFinish();
         }
-        auto status = DoneRequired();
-        if (!status.ok())
-            return status;
-        status = ResourceNotNullRequired();
-        if (!status.ok())
-            return status;
+        STATUS_CHECK(CheckDone());
+        STATUS_CHECK(CheckResource());
         res = resource_;
-        return status;
+        return Status::OK();
     }
 
  protected:
     Status
-    ResourceNotNullRequired() const {
+    CheckResource() const {
         Status status;
         if (!resource_)
             return Status(SS_CONSTRAINT_CHECK_ERROR, "No specified resource");
@@ -281,6 +273,47 @@ class LoadOperation : public Operations {
     }
 
     LoadOperationContext context_;
+    typename ResourceT::Ptr resource_;
+};
+
+template <typename ResourceT>
+class SoftDeleteOperation : public Operations {
+ public:
+    using BaseT = Operations;
+    explicit SoftDeleteOperation(ID_TYPE id) : BaseT(OperationContext(), ScopedSnapshotT()), id_(id) {
+    }
+
+    Status
+    GetResource(typename ResourceT::Ptr& res, bool wait = false) {
+        if (!status_.ok())
+            return status_;
+        if (wait) {
+            WaitToFinish();
+        }
+        STATUS_CHECK(CheckDone());
+        STATUS_CHECK(CheckIDSNotEmpty());
+        res = resource_;
+        return Status::OK();
+    }
+
+    Status
+    DoExecute(Store& store) override {
+        auto status = store.GetResource<ResourceT>(id_, resource_);
+        if (!status.ok()) {
+            return status;
+        }
+        if (!resource_) {
+            std::stringstream emsg;
+            emsg << "Specified " << typeid(ResourceT).name() << " id=" << id_ << " not found";
+            return Status(SS_NOT_FOUND_ERROR, emsg.str());
+        }
+        resource_->Deactivate();
+        AddStep(*resource_, false);
+        return status;
+    }
+
+ protected:
+    ID_TYPE id_;
     typename ResourceT::Ptr resource_;
 };
 

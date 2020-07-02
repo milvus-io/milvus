@@ -50,42 +50,62 @@ SnapshotHolder::Load(Store& store, ScopedSnapshotT& ss, ID_TYPE id, bool scoped)
 
     std::unique_lock<std::mutex> lock(mutex_);
     if (id == 0 || id == max_id_) {
-        auto raw = active_[max_id_];
+        auto raw = active_.at(max_id_);
         ss = ScopedSnapshotT(raw, scoped);
         return status;
     }
     if (id < min_id_) {
-        return Status(SS_STALE_ERROR, "Get stale snapshot");
+        std::stringstream emsg;
+        emsg << "SnapshotHolder::Load: Got stale snapshot " << id;
+        emsg << " current is " << max_id_;
+        emsg << " on collection " << collection_id_;
+        return Status(SS_STALE_ERROR, emsg.str());
     }
 
     auto it = active_.find(id);
     if (it == active_.end()) {
-        return Status(SS_NOT_FOUND_ERROR, "Specified Snapshot not found");
+        std::stringstream emsg;
+        emsg << "SnapshotHolder::Load: Specified snapshot " << id << " not found.";
+        emsg << " Current is " << max_id_;
+        emsg << " on collection " << collection_id_;
+        return Status(SS_NOT_FOUND_ERROR, emsg.str());
     }
     ss = ScopedSnapshotT(it->second, scoped);
     return status;
 }
 
 Status
-SnapshotHolder::Get(ScopedSnapshotT& ss, ID_TYPE id, bool scoped) {
+SnapshotHolder::Get(ScopedSnapshotT& ss, ID_TYPE id, bool scoped) const {
     Status status;
     if (id > max_id_) {
-        return Status(SS_NOT_FOUND_ERROR, "Specified Snapshot not found");
+        std::stringstream emsg;
+        emsg << "SnapshotHolder::Get: Specified snapshot " << id << " not found.";
+        emsg << " Current is " << max_id_;
+        emsg << " on collection " << collection_id_;
+        return Status(SS_NOT_FOUND_ERROR, emsg.str());
     }
 
     std::unique_lock<std::mutex> lock(mutex_);
     if (id == 0 || id == max_id_) {
-        auto raw = active_[max_id_];
+        auto raw = active_.at(max_id_);
         ss = ScopedSnapshotT(raw, scoped);
         return status;
     }
     if (id < min_id_) {
-        return Status(SS_STALE_ERROR, "Get stale snapshot");
+        std::stringstream emsg;
+        emsg << "SnapshotHolder::Get: Got stale snapshot " << id;
+        emsg << " current is " << max_id_;
+        emsg << " on collection " << collection_id_;
+        return Status(SS_STALE_ERROR, emsg.str());
     }
 
     auto it = active_.find(id);
     if (it == active_.end()) {
-        return Status(SS_NOT_FOUND_ERROR, "Specified Snapshot not found");
+        std::stringstream emsg;
+        emsg << "SnapshotHolder::Get: Specified snapshot " << id << " not found.";
+        emsg << " Current is " << max_id_;
+        emsg << " on collection " << collection_id_;
+        return Status(SS_NOT_FOUND_ERROR, emsg.str());
     }
     ss = ScopedSnapshotT(it->second, scoped);
     return status;
@@ -106,11 +126,16 @@ SnapshotHolder::Add(ID_TYPE id) {
     {
         std::unique_lock<std::mutex> lock(mutex_);
         if (active_.size() > 0 && id < max_id_) {
-            return Status(SS_INVALID_ARGUMENT_ERROR, "Invalid ID");
+            std::stringstream emsg;
+            emsg << "SnapshotHolder::Add: Invalid snapshot " << id << ".";
+            emsg << " Should larger than " << max_id_;
+            return Status(SS_INVALID_ARGUMENT_ERROR, emsg.str());
         }
         auto it = active_.find(id);
         if (it != active_.end()) {
-            return Status(SS_DUPLICATED_ERROR, "Duplicated ID");
+            std::stringstream emsg;
+            emsg << "SnapshotHolder::Add: Duplicated snapshot " << id << ".";
+            return Status(SS_DUPLICATED_ERROR, emsg.str());
         }
     }
     Snapshot::Ptr oldest_ss;
@@ -119,7 +144,9 @@ SnapshotHolder::Add(ID_TYPE id) {
 
         std::unique_lock<std::mutex> lock(mutex_);
         if (!IsActive(ss)) {
-            return Status(SS_NOT_ACTIVE_ERROR, "Specified collection is not active now");
+            std::stringstream emsg;
+            emsg << "SnapshotHolder::Add: Specified collection " << collection_id_;
+            return Status(SS_NOT_ACTIVE_ERROR, emsg.str());
         }
         ss->RegisterOnNoRefCB(std::bind(&Snapshot::UnRefAll, ss));
         ss->Ref();

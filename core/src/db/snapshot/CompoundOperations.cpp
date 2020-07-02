@@ -14,6 +14,7 @@
 #include <sstream>
 #include "db/snapshot/OperationExecutor.h"
 #include "db/snapshot/Snapshots.h"
+#include "utils/Status.h"
 
 namespace milvus {
 namespace engine {
@@ -24,75 +25,63 @@ BuildOperation::BuildOperation(const OperationContext& context, ScopedSnapshotT 
 
 Status
 BuildOperation::DoExecute(Store& store) {
-    auto status = CheckStale(std::bind(&BuildOperation::CheckSegmentStale, this, std::placeholders::_1,
-                                       context_.new_segment_files[0]->GetSegmentId()));
-    if (!status.ok())
-        return status;
+    STATUS_CHECK(CheckStale(std::bind(&BuildOperation::CheckSegmentStale, this, std::placeholders::_1,
+                                      context_.new_segment_files[0]->GetSegmentId())));
 
-    SegmentCommitOperation op(context_, GetAdjustedSS());
-    op(store);
-    status = op.GetResource(context_.new_segment_commit);
-    if (!status.ok())
-        return status;
+    SegmentCommitOperation sc_op(context_, GetAdjustedSS());
+    STATUS_CHECK(sc_op(store));
+    STATUS_CHECK(sc_op.GetResource(context_.new_segment_commit));
     AddStepWithLsn(*context_.new_segment_commit, context_.lsn);
 
     PartitionCommitOperation pc_op(context_, GetAdjustedSS());
-    pc_op(store);
-
+    STATUS_CHECK(pc_op(store));
     OperationContext cc_context;
-    status = pc_op.GetResource(cc_context.new_partition_commit);
-
-    if (!status.ok())
-        return status;
+    STATUS_CHECK(pc_op.GetResource(cc_context.new_partition_commit));
     AddStepWithLsn(*cc_context.new_partition_commit, context_.lsn);
-    context_.new_partition_commit = cc_context.new_partition_commit;
 
-    status = pc_op.GetResource(context_.new_partition_commit);
-    if (!status.ok())
-        return status;
+    context_.new_partition_commit = cc_context.new_partition_commit;
+    STATUS_CHECK(pc_op.GetResource(context_.new_partition_commit));
     AddStepWithLsn(*context_.new_partition_commit, context_.lsn);
 
     CollectionCommitOperation cc_op(cc_context, GetAdjustedSS());
-    cc_op(store);
-    status = cc_op.GetResource(context_.new_collection_commit);
-    if (!status.ok())
-        return status;
+    STATUS_CHECK(cc_op(store));
+    STATUS_CHECK(cc_op.GetResource(context_.new_collection_commit));
     AddStepWithLsn(*context_.new_collection_commit, context_.lsn);
 
-    return status;
+    return Status::OK();
 }
 
 Status
 BuildOperation::CheckSegmentStale(ScopedSnapshotT& latest_snapshot, ID_TYPE segment_id) const {
     auto segment = latest_snapshot->GetResource<Segment>(segment_id);
     if (!segment) {
-        return Status(SS_STALE_ERROR, "BuildOperation target segment is stale");
+        std::stringstream emsg;
+        emsg << GetRepr() << ". Target segment " << segment_id << " is stale";
+        return Status(SS_STALE_ERROR, emsg.str());
     }
     return Status::OK();
 }
 
 Status
 BuildOperation::CommitNewSegmentFile(const SegmentFileContext& context, SegmentFilePtr& created) {
-    auto status =
-        CheckStale(std::bind(&BuildOperation::CheckSegmentStale, this, std::placeholders::_1, context.segment_id));
-    if (!status.ok())
-        return status;
+    STATUS_CHECK(
+        CheckStale(std::bind(&BuildOperation::CheckSegmentStale, this, std::placeholders::_1, context.segment_id)));
+
     auto segment = GetStartedSS()->GetResource<Segment>(context.segment_id);
     if (!segment) {
-        return Status(SS_INVALID_CONTEX_ERROR, "Invalid segment_id in context");
+        std::stringstream emsg;
+        emsg << GetRepr() << ". Invalid segment " << context.segment_id << " in context";
+        return Status(SS_INVALID_CONTEX_ERROR, emsg.str());
     }
     auto ctx = context;
     ctx.partition_id = segment->GetPartitionId();
     auto new_sf_op = std::make_shared<SegmentFileOperation>(ctx, GetStartedSS());
-    status = new_sf_op->Push();
-    if (!status.ok())
-        return status;
-    status = new_sf_op->GetResource(created);
-    if (!status.ok())
-        return status;
+    STATUS_CHECK(new_sf_op->Push());
+    STATUS_CHECK(new_sf_op->GetResource(created));
     context_.new_segment_files.push_back(created);
     AddStepWithLsn(*created, context_.lsn);
-    return status;
+
+    return Status::OK();
 }
 
 NewSegmentOperation::NewSegmentOperation(const OperationContext& context, ScopedSnapshotT prev_ss)
@@ -107,13 +96,9 @@ NewSegmentOperation::DoExecute(Store& store) {
     /* auto status = PrevSnapshotRequried(); */
     /* if (!status.ok()) return status; */
     // TODO: Check Context
-    SegmentCommitOperation op(context_, GetAdjustedSS());
-    auto status = op(store);
-    if (!status.ok())
-        return status;
-    status = op.GetResource(context_.new_segment_commit);
-    if (!status.ok())
-        return status;
+    SegmentCommitOperation sc_op(context_, GetAdjustedSS());
+    STATUS_CHECK(sc_op(store));
+    STATUS_CHECK(sc_op.GetResource(context_.new_segment_commit));
     AddStepWithLsn(*context_.new_segment_commit, context_.lsn);
     /* std::cout << GetRepr() << " POST_SC_MAP=("; */
     /* for (auto id : context_.new_segment_commit->GetMappings()) { */
@@ -122,14 +107,9 @@ NewSegmentOperation::DoExecute(Store& store) {
     /* std::cout << ")" << std::endl; */
 
     OperationContext cc_context;
-
     PartitionCommitOperation pc_op(context_, GetAdjustedSS());
-    status = pc_op(store);
-    if (!status.ok())
-        return status;
-    status = pc_op.GetResource(cc_context.new_partition_commit);
-    if (!status.ok())
-        return status;
+    STATUS_CHECK(pc_op(store));
+    STATUS_CHECK(pc_op.GetResource(cc_context.new_partition_commit));
     AddStepWithLsn(*cc_context.new_partition_commit, context_.lsn);
     context_.new_partition_commit = cc_context.new_partition_commit;
     /* std::cout << GetRepr() << " POST_PC_MAP=("; */
@@ -139,46 +119,34 @@ NewSegmentOperation::DoExecute(Store& store) {
     /* std::cout << ")" << std::endl; */
 
     CollectionCommitOperation cc_op(cc_context, GetAdjustedSS());
-    status = cc_op(store);
-    if (!status.ok())
-        return status;
-    status = cc_op.GetResource(context_.new_collection_commit);
-    if (!status.ok())
-        return status;
+    STATUS_CHECK(cc_op(store));
+    STATUS_CHECK(cc_op.GetResource(context_.new_collection_commit));
     AddStepWithLsn(*context_.new_collection_commit, context_.lsn);
 
-    return status;
+    return Status::OK();
 }
 
 Status
 NewSegmentOperation::CommitNewSegment(SegmentPtr& created) {
     auto op = std::make_shared<SegmentOperation>(context_, GetStartedSS());
-    auto status = op->Push();
-    if (!status.ok())
-        return status;
-    status = op->GetResource(context_.new_segment);
-    if (!status.ok())
-        return status;
+    STATUS_CHECK(op->Push());
+    STATUS_CHECK(op->GetResource(context_.new_segment));
     created = context_.new_segment;
     AddStepWithLsn(*created, context_.lsn);
-    return status;
+    return Status::OK();
 }
 
 Status
 NewSegmentOperation::CommitNewSegmentFile(const SegmentFileContext& context, SegmentFilePtr& created) {
-    auto c = context;
-    c.segment_id = context_.new_segment->GetID();
-    c.partition_id = context_.new_segment->GetPartitionId();
-    auto new_sf_op = std::make_shared<SegmentFileOperation>(c, GetStartedSS());
-    auto status = new_sf_op->Push();
-    if (!status.ok())
-        return status;
-    status = new_sf_op->GetResource(created);
-    if (!status.ok())
-        return status;
+    auto ctx = context;
+    ctx.segment_id = context_.new_segment->GetID();
+    ctx.partition_id = context_.new_segment->GetPartitionId();
+    auto new_sf_op = std::make_shared<SegmentFileOperation>(ctx, GetStartedSS());
+    STATUS_CHECK(new_sf_op->Push());
+    STATUS_CHECK(new_sf_op->GetResource(created));
     AddStepWithLsn(*created, context_.lsn);
     context_.new_segment_files.push_back(created);
-    return status;
+    return Status::OK();
 }
 
 MergeOperation::MergeOperation(const OperationContext& context, ScopedSnapshotT prev_ss) : BaseT(context, prev_ss) {
@@ -190,7 +158,9 @@ MergeOperation::OnSnapshotStale() {
         auto expect_sc = GetStartedSS()->GetSegmentCommitBySegmentId(stale_seg->GetID());
         auto latest_sc = GetAdjustedSS()->GetSegmentCommitBySegmentId(stale_seg->GetID());
         if (!latest_sc || (latest_sc->GetID() != expect_sc->GetID())) {
-            return Status(SS_STALE_ERROR, "MergeOperation on stale segments");
+            std::stringstream emsg;
+            emsg << GetRepr() << ". Stale segment " << stale_seg->GetID() << " in context";
+            return Status(SS_STALE_ERROR, emsg.str());
         }
     }
     return Status::OK();
@@ -198,58 +168,42 @@ MergeOperation::OnSnapshotStale() {
 
 Status
 MergeOperation::CommitNewSegment(SegmentPtr& created) {
-    Status status;
     if (context_.new_segment) {
         created = context_.new_segment;
-        return status;
+        return Status::OK();
     }
     auto op = std::make_shared<SegmentOperation>(context_, GetStartedSS());
-    status = op->Push();
-    if (!status.ok())
-        return status;
-    status = op->GetResource(context_.new_segment);
-    if (!status.ok())
-        return status;
+    STATUS_CHECK(op->Push());
+    STATUS_CHECK(op->GetResource(context_.new_segment));
     created = context_.new_segment;
     AddStepWithLsn(*created, context_.lsn);
-    return status;
+    return Status::OK();
 }
 
 Status
 MergeOperation::CommitNewSegmentFile(const SegmentFileContext& context, SegmentFilePtr& created) {
     // PXU TODO: Check element type and segment file mapping rules
     SegmentPtr new_segment;
-    auto status = CommitNewSegment(new_segment);
-    if (!status.ok())
-        return status;
-    auto c = context;
-    c.segment_id = new_segment->GetID();
-    c.partition_id = new_segment->GetPartitionId();
-    auto new_sf_op = std::make_shared<SegmentFileOperation>(c, GetStartedSS());
-    status = new_sf_op->Push();
-    if (!status.ok())
-        return status;
-    status = new_sf_op->GetResource(created);
-    if (!status.ok())
-        return status;
+    STATUS_CHECK(CommitNewSegment(new_segment));
+    auto ctx = context;
+    ctx.segment_id = new_segment->GetID();
+    ctx.partition_id = new_segment->GetPartitionId();
+    auto new_sf_op = std::make_shared<SegmentFileOperation>(ctx, GetStartedSS());
+    STATUS_CHECK(new_sf_op->Push());
+    STATUS_CHECK(new_sf_op->GetResource(created));
     context_.new_segment_files.push_back(created);
     AddStepWithLsn(*created, context_.lsn);
-    return status;
+    return Status::OK();
 }
 
 Status
 MergeOperation::DoExecute(Store& store) {
     // PXU TODO:
-    // 1. Check all requried field elements have related segment files
+    // 1. Check all required field elements have related segment files
     // 2. Check Stale and others
-    SegmentCommitOperation op(context_, GetAdjustedSS());
-    auto status = op(store);
-    if (!status.ok())
-        return status;
-
-    status = op.GetResource(context_.new_segment_commit);
-    if (!status.ok())
-        return status;
+    SegmentCommitOperation sc_op(context_, GetAdjustedSS());
+    STATUS_CHECK(sc_op(store));
+    STATUS_CHECK(sc_op.GetResource(context_.new_segment_commit));
     AddStepWithLsn(*context_.new_segment_commit, context_.lsn);
     /* std::cout << GetRepr() << " POST_SC_MAP=("; */
     /* for (auto id : context_.new_segment_commit->GetMappings()) { */
@@ -258,14 +212,9 @@ MergeOperation::DoExecute(Store& store) {
     /* std::cout << ")" << std::endl; */
 
     PartitionCommitOperation pc_op(context_, GetAdjustedSS());
-    status = pc_op(store);
-    if (!status.ok())
-        return status;
-
+    STATUS_CHECK(pc_op(store));
     OperationContext cc_context;
-    status = pc_op.GetResource(cc_context.new_partition_commit);
-    if (!status.ok())
-        return status;
+    STATUS_CHECK(pc_op.GetResource(cc_context.new_partition_commit));
     AddStepWithLsn(*cc_context.new_partition_commit, context_.lsn);
     context_.new_partition_commit = cc_context.new_partition_commit;
 
@@ -276,15 +225,11 @@ MergeOperation::DoExecute(Store& store) {
     /* std::cout << ")" << std::endl; */
 
     CollectionCommitOperation cc_op(cc_context, GetAdjustedSS());
-    status = cc_op(store);
-    if (!status.ok())
-        return status;
-    status = cc_op.GetResource(context_.new_collection_commit);
-    if (!status.ok())
-        return status;
+    STATUS_CHECK(cc_op(store));
+    STATUS_CHECK(cc_op.GetResource(context_.new_collection_commit));
     AddStepWithLsn(*context_.new_collection_commit, context_.lsn);
 
-    return status;
+    return Status::OK();
 }
 
 GetSnapshotIDsOperation::GetSnapshotIDsOperation(ID_TYPE collection_id, bool reversed)
@@ -339,32 +284,27 @@ DropPartitionOperation::GetRepr() const {
 
 Status
 DropPartitionOperation::DoExecute(Store& store) {
-    Status status;
     PartitionPtr p;
     auto id = c_context_.id;
     if (id == 0) {
-        status = GetAdjustedSS()->GetPartitionId(c_context_.name, id);
+        STATUS_CHECK(GetAdjustedSS()->GetPartitionId(c_context_.name, id));
         c_context_.id = id;
     }
-    if (!status.ok())
-        return status;
     auto p_c = GetAdjustedSS()->GetPartitionCommitByPartitionId(id);
-    if (!p_c)
-        return Status(SS_NOT_FOUND_ERROR, "No partition commit found");
+    if (!p_c) {
+        std::stringstream emsg;
+        emsg << GetRepr() << ". PartitionCommit " << id << " not found";
+        return Status(SS_NOT_FOUND_ERROR, emsg.str());
+    }
     context_.stale_partition_commit = p_c;
 
     OperationContext op_ctx;
     op_ctx.stale_partition_commit = p_c;
-    auto op = CollectionCommitOperation(op_ctx, GetAdjustedSS());
-    status = op(store);
-    if (!status.ok())
-        return status;
-    status = op.GetResource(context_.new_collection_commit);
-    if (!status.ok())
-        return status;
-
+    auto cc_op = CollectionCommitOperation(op_ctx, GetAdjustedSS());
+    STATUS_CHECK(cc_op(store));
+    STATUS_CHECK(cc_op.GetResource(context_.new_collection_commit));
     AddStepWithLsn(*context_.new_collection_commit, c_context_.lsn);
-    return status;
+    return Status::OK();
 }
 
 CreatePartitionOperation::CreatePartitionOperation(const OperationContext& context, ScopedSnapshotT prev_ss)
@@ -373,37 +313,28 @@ CreatePartitionOperation::CreatePartitionOperation(const OperationContext& conte
 
 Status
 CreatePartitionOperation::PreCheck() {
-    Status status = BaseT::PreCheck();
-    if (!status.ok()) {
-        return status;
-    }
+    STATUS_CHECK(BaseT::PreCheck());
     if (!context_.new_partition) {
-        status = Status(SS_INVALID_CONTEX_ERROR, "No partition specified before push partition");
+        std::stringstream emsg;
+        emsg << GetRepr() << ". Partition is missing";
+        return Status(SS_INVALID_CONTEX_ERROR, emsg.str());
     }
-    return status;
+    return Status::OK();
 }
 
 Status
 CreatePartitionOperation::CommitNewPartition(const PartitionContext& context, PartitionPtr& partition) {
-    Status status;
     auto op = std::make_shared<PartitionOperation>(context, GetStartedSS());
-    status = op->Push();
-    if (!status.ok())
-        return status;
-    status = op->GetResource(partition);
-    if (!status.ok())
-        return status;
+    STATUS_CHECK(op->Push());
+    STATUS_CHECK(op->GetResource(partition));
     context_.new_partition = partition;
     AddStepWithLsn(*partition, context_.lsn);
-    return status;
+    return Status::OK();
 }
 
 Status
 CreatePartitionOperation::DoExecute(Store& store) {
-    Status status;
-    status = CheckStale();
-    if (!status.ok())
-        return status;
+    STATUS_CHECK(CheckStale());
 
     auto collection = GetAdjustedSS()->GetCollection();
     auto partition = context_.new_partition;
@@ -412,28 +343,21 @@ CreatePartitionOperation::DoExecute(Store& store) {
     OperationContext pc_context;
     pc_context.new_partition = partition;
     auto pc_op = PartitionCommitOperation(pc_context, GetAdjustedSS());
-    status = pc_op(store);
-    if (!status.ok())
-        return status;
-    status = pc_op.GetResource(pc);
-    if (!status.ok())
-        return status;
+    STATUS_CHECK(pc_op(store));
+    STATUS_CHECK(pc_op.GetResource(pc));
     AddStepWithLsn(*pc, context_.lsn);
+
     OperationContext cc_context;
     cc_context.new_partition_commit = pc;
     context_.new_partition_commit = pc;
     auto cc_op = CollectionCommitOperation(cc_context, GetAdjustedSS());
-    status = cc_op(store);
-    if (!status.ok())
-        return status;
+    STATUS_CHECK(cc_op(store));
     CollectionCommitPtr cc;
-    status = cc_op.GetResource(cc);
-    if (!status.ok())
-        return status;
+    STATUS_CHECK(cc_op.GetResource(cc));
     AddStepWithLsn(*cc, context_.lsn);
     context_.new_collection_commit = cc;
 
-    return status;
+    return Status::OK();
 }
 
 CreateCollectionOperation::CreateCollectionOperation(const CreateCollectionContext& context)
@@ -478,7 +402,8 @@ CreateCollectionOperation::DoExecute(Store& store) {
         auto& field_schema = field_kv.first;
         auto& field_elements = field_kv.second;
         FieldPtr field;
-        status = store.CreateResource<Field>(Field(field_schema->GetName(), field_idx), field);
+        status =
+            store.CreateResource<Field>(Field(field_schema->GetName(), field_idx, field_schema->GetFtype()), field);
         AddStepWithLsn(*field, c_context_.lsn);
         MappingT element_ids = {};
         FieldElementPtr raw_element;
@@ -525,23 +450,24 @@ CreateCollectionOperation::DoExecute(Store& store) {
 
 Status
 CreateCollectionOperation::GetSnapshot(ScopedSnapshotT& ss) const {
-    auto status = DoneRequired();
-    if (!status.ok())
-        return status;
-    status = IDSNotEmptyRequried();
-    if (!status.ok())
-        return status;
-    if (!c_context_.collection_commit)
-        return Status(SS_CONSTRAINT_CHECK_ERROR, "No Snapshot is available");
+    STATUS_CHECK(CheckDone());
+    STATUS_CHECK(CheckIDSNotEmpty());
+    if (!c_context_.collection_commit) {
+        std::stringstream emsg;
+        emsg << GetRepr() << ". No snapshot is available";
+        return Status(SS_CONSTRAINT_CHECK_ERROR, emsg.str());
+    }
     /* status = Snapshots::GetInstance().GetSnapshot(ss, c_context_.collection_commit->GetCollectionId()); */
     ss = context_.latest_ss;
-    return status;
+    return Status::OK();
 }
 
 Status
 DropCollectionOperation::DoExecute(Store& store) {
     if (!context_.collection) {
-        return Status(SS_INVALID_CONTEX_ERROR, "Invalid Context");
+        std::stringstream emsg;
+        emsg << GetRepr() << ". Collection is missing in context";
+        return Status(SS_INVALID_CONTEX_ERROR, emsg.str());
     }
     context_.collection->Deactivate();
     AddStepWithLsn(*context_.collection, context_.lsn);

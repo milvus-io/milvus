@@ -12,19 +12,11 @@
 #-------------------------------------------------------------------------------
 
 set(test_files
-        ${CMAKE_CURRENT_SOURCE_DIR}/test_algorithm.cpp
-        ${CMAKE_CURRENT_SOURCE_DIR}/test_event.cpp
-        ${CMAKE_CURRENT_SOURCE_DIR}/test_node.cpp
-        ${CMAKE_CURRENT_SOURCE_DIR}/test_resource.cpp
-        ${CMAKE_CURRENT_SOURCE_DIR}/test_resource_factory.cpp
-        ${CMAKE_CURRENT_SOURCE_DIR}/test_resource_mgr.cpp
-        ${CMAKE_CURRENT_SOURCE_DIR}/test_scheduler.cpp
-        ${CMAKE_CURRENT_SOURCE_DIR}/test_task.cpp
-        ${CMAKE_CURRENT_SOURCE_DIR}/test_job.cpp
-        ${CMAKE_CURRENT_SOURCE_DIR}/test_selector.cpp
-        ${CMAKE_CURRENT_SOURCE_DIR}/test_tasktable.cpp)
+        ${CMAKE_CURRENT_SOURCE_DIR}/utils.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/test_snapshot.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/test_db.cpp)
 
-add_executable(test_scheduler
+add_executable(test_ssdb
         ${common_files}
         ${log_files}
         ${cache_files}
@@ -34,26 +26,34 @@ add_executable(test_scheduler
         ${config_handler_files}
         ${db_main_files}
         ${db_engine_files}
-        ${db_attr_files}
         ${db_insert_files}
         ${db_meta_files}
         ${db_merge_files}
         ${db_wal_files}
         ${db_snapshot_files}
-        ${scheduler_files}
+        ${grpc_server_files}
+        ${grpc_service_files}
+        ${metrics_files}
+        ${query_files}
         ${segment_files}
+        ${scheduler_files}
+        ${server_files}
         ${server_init_files}
         ${server_context_files}
+        ${server_delivery_files}
         ${storage_files}
         ${tracing_files}
+        ${web_server_files}
+        ${wrapper_files}
         ${thirdparty_files}
-        ${entry_file}
         ${test_files}
         )
 
-target_link_libraries(test_scheduler
+target_link_libraries(test_ssdb
         knowhere
         metrics
-        ${unittest_libs})
+        stdc++
+        ${unittest_libs}
+        oatpp)
 
-install(TARGETS test_scheduler DESTINATION unittest)
+install(TARGETS test_db DESTINATION unittest)

@@ -72,7 +72,7 @@ class DBImpl : public DB, public server::CacheConfigHandler, public server::Engi
     HasNativeCollection(const std::string& collection_id, bool& has_or_not_) override;
 
     Status
-    AllCollections(std::vector<meta::CollectionSchema>& collection_schema_array) override;
+    AllCollections(std::vector<std::string>& names) override;
 
     Status
     GetCollectionInfo(const std::string& collection_id, std::string& collection_info) override;

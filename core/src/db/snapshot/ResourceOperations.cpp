@@ -19,8 +19,11 @@ namespace snapshot {
 Status
 CollectionCommitOperation::DoExecute(Store& store) {
     auto prev_resource = GetPrevResource();
-    if (!prev_resource)
-        return Status(SS_INVALID_CONTEX_ERROR, "Invalid CollectionCommitOperation Context");
+    if (!prev_resource) {
+        std::stringstream emsg;
+        emsg << GetRepr() << ". Cannot find prev collection commit resource";
+        return Status(SS_INVALID_CONTEX_ERROR, emsg.str());
+    }
     resource_ = std::make_shared<CollectionCommit>(*prev_resource);
     resource_->ResetStatus();
     if (context_.stale_partition_commit) {
@@ -89,7 +92,10 @@ PartitionCommitOperation::DoExecute(Store& store) {
         if (context_.stale_segments.size() > 0) {
             for (auto& stale_segment : context_.stale_segments) {
                 if (stale_segment->GetPartitionId() != prev_resource->GetPartitionId()) {
-                    return Status(SS_INVALID_CONTEX_ERROR, "All stale segments should from specified partition");
+                    std::stringstream emsg;
+                    emsg << GetRepr() << ". All stale segments should from partition ";
+                    emsg << prev_resource->GetPartitionId();
+                    return Status(SS_INVALID_CONTEX_ERROR, emsg.str());
                 }
                 auto stale_segment_commit = GetStartedSS()->GetSegmentCommitBySegmentId(stale_segment->GetID());
                 resource_->GetMappings().erase(stale_segment_commit->GetID());
@@ -97,7 +103,9 @@ PartitionCommitOperation::DoExecute(Store& store) {
         }
     } else {
         if (!context_.new_partition) {
-            return Status(SS_INVALID_CONTEX_ERROR, "Partition is required");
+            std::stringstream emsg;
+            emsg << GetRepr() << ". New partition is required";
+            return Status(SS_INVALID_CONTEX_ERROR, emsg.str());
         }
         resource_ =
             std::make_shared<PartitionCommit>(GetStartedSS()->GetCollectionId(), context_.new_partition->GetID());
@@ -127,18 +135,24 @@ SegmentOperation::SegmentOperation(const OperationContext& context, ScopedSnapsh
 
 Status
 SegmentOperation::PreCheck() {
-    if (!context_.prev_partition)
-        return Status(SS_INVALID_CONTEX_ERROR, "Invalid SegmentOperation Context");
+    if (!context_.prev_partition) {
+        std::stringstream emsg;
+        emsg << GetRepr() << ". prev_partition should be specified in context";
+        return Status(SS_INVALID_CONTEX_ERROR, emsg.str());
+    }
     return Status::OK();
 }
 
 Status
 SegmentOperation::DoExecute(Store& store) {
     if (!context_.prev_partition) {
-        return Status(SS_INVALID_CONTEX_ERROR, "Invalid SegmentOperation Context");
+        std::stringstream emsg;
+        emsg << GetRepr() << ". prev_partition should be specified in context";
+        return Status(SS_INVALID_CONTEX_ERROR, emsg.str());
     }
     auto prev_num = GetStartedSS()->GetMaxSegmentNumByPartition(context_.prev_partition->GetID());
-    resource_ = std::make_shared<Segment>(context_.prev_partition->GetID(), prev_num + 1);
+    resource_ = std::make_shared<Segment>(context_.prev_partition->GetCollectionId(), context_.prev_partition->GetID(),
+                                          prev_num + 1);
     AddStep(*resource_, false);
     return Status::OK();
 }
@@ -169,7 +183,9 @@ SegmentCommitOperation::DoExecute(Store& store) {
 Status
 SegmentCommitOperation::PreCheck() {
     if (context_.new_segment_files.size() == 0) {
-        return Status(SS_INVALID_CONTEX_ERROR, "Invalid SegmentCommitOperation Context");
+        std::stringstream emsg;
+        emsg << GetRepr() << ". new_segment_files should not be empty in context";
+        return Status(SS_INVALID_CONTEX_ERROR, emsg.str());
     }
     return Status::OK();
 }
@@ -181,7 +197,8 @@ SegmentFileOperation::SegmentFileOperation(const SegmentFileContext& sc, ScopedS
 Status
 SegmentFileOperation::DoExecute(Store& store) {
     auto field_element_id = GetStartedSS()->GetFieldElementId(context_.field_name, context_.field_element_name);
-    resource_ = std::make_shared<SegmentFile>(context_.partition_id, context_.segment_id, field_element_id);
+    resource_ = std::make_shared<SegmentFile>(context_.collection_id, context_.partition_id, context_.segment_id,
+                                              field_element_id);
     AddStep(*resource_, false);
     return Status::OK();
 }

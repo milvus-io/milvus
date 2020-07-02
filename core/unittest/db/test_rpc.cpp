@@ -31,6 +31,7 @@
 #include "server/grpc_impl/GrpcServer.h"
 #include "utils/CommonUtil.h"
 
+
 #include <fiu-control.h>
 #include <fiu-local.h>
 
@@ -197,6 +198,7 @@ class RpcHandlerTest : public testing::Test {
         milvus::scheduler::JobMgrInst::GetInstance()->Stop();
         milvus::scheduler::ResMgrInst::GetInstance()->Stop();
         milvus::scheduler::SchedInst::GetInstance()->Stop();
+
         boost::filesystem::remove_all("/tmp/milvus_test");
     }
 

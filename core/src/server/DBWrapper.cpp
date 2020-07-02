@@ -21,6 +21,7 @@
 #include "config/Config.h"
 #include "config/Utils.h"
 #include "db/DBFactory.h"
+#include "db/snapshot/OperationExecutor.h"
 #include "utils/CommonUtil.h"
 #include "utils/Log.h"
 #include "utils/StringHelpFunctions.h"
@@ -193,6 +194,9 @@ DBWrapper::StartService() {
         kill(0, SIGUSR1);
     }
 
+    // SS TODO
+    /* engine::snapshot::OperationExecutor::GetInstance().Start(); */
+
     // create db instance
     try {
         db_ = engine::DBFactory::Build(opt);
@@ -229,6 +233,8 @@ DBWrapper::StopService() {
         db_->Stop();
     }
 
+    // SS TODO
+    /* engine::snapshot::OperationExecutor::GetInstance().Stop(); */
     return Status::OK();
 }
 
@@ -238,11 +244,15 @@ DBWrapper::PreloadCollections(const std::string& preload_collections) {
         // do nothing
     } else if (preload_collections == "*") {
         // load all tables
-        std::vector<engine::meta::CollectionSchema> table_schema_array;
-        db_->AllCollections(table_schema_array);
+        // SS TODO: Replace name with id
+        std::vector<std::string> names;
+        auto status = db_->AllCollections(names);
+        if (!status.ok()) {
+            return status;
+        }
 
-        for (auto& schema : table_schema_array) {
-            auto status = db_->PreloadCollection(nullptr, schema.collection_id_);
+        for (auto& name : names) {
+            auto status = db_->PreloadCollection(nullptr, name);
             if (!status.ok()) {
                 return status;
             }

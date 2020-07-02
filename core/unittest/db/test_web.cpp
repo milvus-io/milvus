@@ -37,6 +37,7 @@
 #include "utils/CommonUtil.h"
 #include "utils/StringHelpFunctions.h"
 
+
 static const char* COLLECTION_NAME = "test_milvus_web_collection";
 
 using OStatus = oatpp::web::protocol::http::Status;
@@ -361,6 +362,7 @@ class WebControllerTest : public ::testing::Test {
         milvus::scheduler::JobMgrInst::GetInstance()->Stop();
         milvus::scheduler::ResMgrInst::GetInstance()->Stop();
         milvus::scheduler::SchedInst::GetInstance()->Stop();
+
         boost::filesystem::remove_all(CONTROLLER_TEST_CONFIG_DIR);
     }
 

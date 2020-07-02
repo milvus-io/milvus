@@ -130,14 +130,12 @@ class LoadOperation<Collection> : public Operations {
         if (wait) {
             WaitToFinish();
         }
-        auto status = DoneRequired();
-        if (!status.ok())
-            return status;
+        STATUS_CHECK(CheckDone());
         if (!resource_) {
             return Status(SS_NOT_FOUND_ERROR, "No specified resource");
         }
         res = resource_;
-        return status;
+        return Status::OK();
     }
 
  protected:
