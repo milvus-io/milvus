@@ -306,6 +306,8 @@ TEST_F(SnapshotTest, ResourceHoldersTest) {
         ASSERT_EQ(collection_3->ref_count(), 1+prev_cnt);
     }
 
+    std::this_thread::sleep_for(std::chrono::milliseconds(80));
+
     if (prev_cnt == 0) {
         auto collection_4 = CollectionsHolder::GetInstance().GetResource(collection_id, false);
         ASSERT_TRUE(!collection_4);
@@ -873,7 +875,7 @@ TEST_F(SnapshotTest, CompoundTest1) {
     auto next_lsn = [&]() -> decltype(lsn) {
         return ++lsn;
     };
-    LSN_TYPE pid = 0;
+    std::atomic<LSN_TYPE> pid = 0;
     auto next_pid = [&]() -> decltype(pid) {
         return ++pid;
     };
@@ -1214,7 +1216,7 @@ TEST_F(SnapshotTest, CompoundTest2) {
     auto next_lsn = [&]() -> LSN_TYPE& {
         return ++lsn;
     };
-    LSN_TYPE pid = 0;
+    std::atomic<LSN_TYPE> pid = 0;
     auto next_pid = [&]() -> LSN_TYPE {
         return ++pid;
     };

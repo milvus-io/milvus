@@ -516,7 +516,7 @@ DropCollectionOperation::DoExecute(Store& store) {
         return Status(SS_INVALID_CONTEX_ERROR, emsg.str());
     }
     context_.collection->Deactivate();
-    AddStepWithLsn(*context_.collection, context_.lsn);
+    AddStepWithLsn(*context_.collection, context_.lsn, false);
     return Status::OK();
 }
 

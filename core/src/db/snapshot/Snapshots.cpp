@@ -16,6 +16,10 @@ namespace milvus {
 namespace engine {
 namespace snapshot {
 
+/* Status */
+/* Snapshots::DropAll() { */
+/* } */
+
 Status
 Snapshots::DropCollection(ID_TYPE collection_id, const LSN_TYPE& lsn) {
     ScopedSnapshotT ss;

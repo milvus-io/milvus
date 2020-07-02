@@ -75,7 +75,7 @@ class EventExecutor {
             if (evt == nullptr) {
                 break;
             }
-            std::cout << std::this_thread::get_id() << " Dequeue Event " << std::endl;
+            /* std::cout << std::this_thread::get_id() << " Dequeue Event " << std::endl; */
             evt->Process();
         }
     }
@@ -84,7 +84,7 @@ class EventExecutor {
     Enqueue(const EventPtr& evt) {
         queue_.Put(evt);
         if (evt != nullptr) {
-            std::cout << std::this_thread::get_id() << " Enqueue Event " << std::endl;
+            /* std::cout << std::this_thread::get_id() << " Enqueue Event " << std::endl; */
         }
     }
 
