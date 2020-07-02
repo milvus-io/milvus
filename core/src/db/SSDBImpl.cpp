@@ -10,11 +10,16 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
 #include "db/SSDBImpl.h"
+#include "cache/CpuCacheMgr.h"
 #include "db/snapshot/CompoundOperations.h"
 #include "db/snapshot/ResourceTypes.h"
 #include "db/snapshot/Snapshots.h"
+#include "metrics/Metrics.h"
+#include "metrics/SystemInfo.h"
+#include "utils/Exception.h"
 #include "wal/WalDefinations.h"
 
+#include <fiu-local.h>
 #include <limits>
 #include <utility>
 
@@ -22,6 +27,8 @@ namespace milvus {
 namespace engine {
 
 namespace {
+constexpr int64_t BACKGROUND_METRIC_INTERVAL = 1;
+
 static const Status SHUTDOWN_ERROR = Status(DB_ERROR, "Milvus server is shutdown!");
 }  // namespace
 
@@ -46,9 +53,9 @@ SSDBImpl::~SSDBImpl() {
     Stop();
 }
 
-///////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-// external api
-///////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////
+// External APIs
+////////////////////////////////////////////////////////////////////////////////
 Status
 SSDBImpl::Start() {
     if (initialized_.load(std::memory_order_acquire)) {
@@ -203,6 +210,149 @@ SSDBImpl::PreloadCollection(const std::shared_ptr<server::Context>& context, con
     handler->Iterate();
 
     return handler->GetStatus();
+}
+
+////////////////////////////////////////////////////////////////////////////////
+// Internal APIs
+////////////////////////////////////////////////////////////////////////////////
+void
+SSDBImpl::InternalFlush(const std::string& collection_id) {
+    wal::MXLogRecord record;
+    record.type = wal::MXLogType::Flush;
+    record.collection_id = collection_id;
+    ExecWalRecord(record);
+}
+
+void
+SSDBImpl::BackgroundFlushThread() {
+    SetThreadName("flush_thread");
+    server::SystemInfo::GetInstance().Init();
+    while (true) {
+        if (!initialized_.load(std::memory_order_acquire)) {
+            LOG_ENGINE_DEBUG_ << "DB background flush thread exit";
+            break;
+        }
+
+        InternalFlush();
+        if (options_.auto_flush_interval_ > 0) {
+            swn_flush_.Wait_For(std::chrono::seconds(options_.auto_flush_interval_));
+        } else {
+            swn_flush_.Wait();
+        }
+    }
+}
+
+void
+SSDBImpl::StartMetricTask() {
+    server::Metrics::GetInstance().KeepingAliveCounterIncrement(BACKGROUND_METRIC_INTERVAL);
+    int64_t cache_usage = cache::CpuCacheMgr::GetInstance()->CacheUsage();
+    int64_t cache_total = cache::CpuCacheMgr::GetInstance()->CacheCapacity();
+    fiu_do_on("DBImpl.StartMetricTask.InvalidTotalCache", cache_total = 0);
+
+    if (cache_total > 0) {
+        double cache_usage_double = cache_usage;
+        server::Metrics::GetInstance().CpuCacheUsageGaugeSet(cache_usage_double * 100 / cache_total);
+    } else {
+        server::Metrics::GetInstance().CpuCacheUsageGaugeSet(0);
+    }
+
+    server::Metrics::GetInstance().GpuCacheUsageGaugeSet();
+    /* SS TODO */
+    // uint64_t size;
+    // Size(size);
+    // server::Metrics::GetInstance().DataFileSizeGaugeSet(size);
+    server::Metrics::GetInstance().CPUUsagePercentSet();
+    server::Metrics::GetInstance().RAMUsagePercentSet();
+    server::Metrics::GetInstance().GPUPercentGaugeSet();
+    server::Metrics::GetInstance().GPUMemoryUsageGaugeSet();
+    server::Metrics::GetInstance().OctetsSet();
+
+    server::Metrics::GetInstance().CPUCoreUsagePercentSet();
+    server::Metrics::GetInstance().GPUTemperature();
+    server::Metrics::GetInstance().CPUTemperature();
+    server::Metrics::GetInstance().PushToGateway();
+}
+
+void
+SSDBImpl::BackgroundMetricThread() {
+    SetThreadName("metric_thread");
+    server::SystemInfo::GetInstance().Init();
+    while (true) {
+        if (!initialized_.load(std::memory_order_acquire)) {
+            LOG_ENGINE_DEBUG_ << "DB background metric thread exit";
+            break;
+        }
+
+        swn_metric_.Wait_For(std::chrono::seconds(BACKGROUND_METRIC_INTERVAL));
+        StartMetricTask();
+        meta::FilesHolder::PrintInfo();
+    }
+}
+
+Status
+SSDBImpl::ExecWalRecord(const wal::MXLogRecord& record) {
+    return Status::OK();
+}
+
+void
+SSDBImpl::BackgroundWalThread() {
+    SetThreadName("wal_thread");
+    server::SystemInfo::GetInstance().Init();
+
+    std::chrono::system_clock::time_point next_auto_flush_time;
+    auto get_next_auto_flush_time = [&]() {
+        return std::chrono::system_clock::now() + std::chrono::seconds(options_.auto_flush_interval_);
+    };
+    if (options_.auto_flush_interval_ > 0) {
+        next_auto_flush_time = get_next_auto_flush_time();
+    }
+
+    InternalFlush();
+    while (true) {
+        if (options_.auto_flush_interval_ > 0) {
+            if (std::chrono::system_clock::now() >= next_auto_flush_time) {
+                InternalFlush();
+                next_auto_flush_time = get_next_auto_flush_time();
+            }
+        }
+
+        wal::MXLogRecord record;
+        auto error_code = wal_mgr_->GetNextRecord(record);
+        if (error_code != WAL_SUCCESS) {
+            LOG_ENGINE_ERROR_ << "WAL background GetNextRecord error";
+            break;
+        }
+
+        if (record.type != wal::MXLogType::None) {
+            ExecWalRecord(record);
+            if (record.type == wal::MXLogType::Flush) {
+                // notify flush request to return
+                flush_req_swn_.Notify();
+
+                // if user flush all manually, update auto flush also
+                if (record.collection_id.empty() && options_.auto_flush_interval_ > 0) {
+                    next_auto_flush_time = get_next_auto_flush_time();
+                }
+            }
+
+        } else {
+            if (!initialized_.load(std::memory_order_acquire)) {
+                InternalFlush();
+                flush_req_swn_.Notify();
+                // SS TODO
+                // WaitMergeFileFinish();
+                // WaitBuildIndexFinish();
+                LOG_ENGINE_DEBUG_ << "WAL background thread exit";
+                break;
+            }
+
+            if (options_.auto_flush_interval_ > 0) {
+                swn_wal_.Wait_Until(next_auto_flush_time);
+            } else {
+                swn_wal_.Wait();
+            }
+        }
+    }
 }
 
 }  // namespace engine
