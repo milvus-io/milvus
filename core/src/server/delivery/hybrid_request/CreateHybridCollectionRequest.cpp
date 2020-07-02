@@ -108,7 +108,12 @@ CreateHybridCollectionRequest::OnExecute() {
         collection_info.collection_id_ = collection_name_;
         collection_info.dimension_ = dimension;
         if (extra_params_.contains("segment_size")) {
-            collection_info.index_file_size_ = extra_params_["segment_size"].get<int64_t>();
+            auto segment_size = extra_params_["segment_size"].get<int64_t>();
+            collection_info.index_file_size_ = segment_size;
+            status = ValidateCollectionIndexFileSize(segment_size);
+            if (!status.ok()) {
+                return status;
+            }
         }
 
         if (vector_param.contains("metric_type")) {
