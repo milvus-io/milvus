@@ -6,13 +6,14 @@ Please mark all change in change log and use the issue from GitHub
 
 ## Bug
 -   \#2487 Enlarge timeout value for creating collection
--   \#2585 IVF_PQ on GPU with using metric_type IP
+-   \#2557 Fix random crash of INSERT_DUPLICATE_ID case
 -   \#2578 Result count doesn't match target vectors count
--   \#2557 fix random crash of INSERT_DUPLICATE_ID case
--   \#2598 fix Milvus docker image report illegal instruction
+-   \#2585 IVF_PQ on GPU with using metric_type IP
+-   \#2598 Fix Milvus docker image report illegal instruction
 -   \#2617 Fix HNSW and RNSG index files size
 -   \#2637 Suit the range of HNSW parameters
--   \#2649 search parameter of annoy has conflict with document
+-   \#2642 Create index failed and server crashed
+-   \#2649 Search parameter of annoy has conflict with document
 
 ## Feature
 

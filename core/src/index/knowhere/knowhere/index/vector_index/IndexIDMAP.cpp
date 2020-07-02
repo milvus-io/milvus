@@ -142,6 +142,22 @@ IDMAP::QueryById(const DatasetPtr& dataset_ptr, const Config& config) {
 }
 #endif
 
+int64_t
+IDMAP::Count() {
+    if (!index_) {
+        KNOWHERE_THROW_MSG("index not initialize");
+    }
+    return index_->ntotal;
+}
+
+int64_t
+IDMAP::Dim() {
+    if (!index_) {
+        KNOWHERE_THROW_MSG("index not initialize");
+    }
+    return index_->d;
+}
+
 VecIndexPtr
 IDMAP::CopyCpuToGpu(const int64_t device_id, const Config& config) {
 #ifdef MILVUS_GPU_VERSION
