@@ -28,16 +28,27 @@ class EngineConfigHandler : virtual public ConfigHandler {
     OnUseBlasThresholdChanged(int64_t threshold) {
     }
 
+    virtual void
+    OnSearchCombineMaxNqChanged(int64_t nq) {
+        search_combine_nq_ = nq;
+    }
+
  protected:
     void
     AddUseBlasThresholdListener();
 
- protected:
     void
     RemoveUseBlasThresholdListener();
 
+    void
+    AddSearchCombineMaxNqListener();
+
+    void
+    RemoveSearchCombineMaxNqListener();
+
  protected:
     int64_t use_blas_threshold_ = std::stoll(CONFIG_ENGINE_USE_BLAS_THRESHOLD_DEFAULT);
+    int64_t search_combine_nq_ = std::stoll(CONFIG_ENGINE_SEARCH_COMBINE_MAX_NQ_DEFAULT);
 };
 
 }  // namespace server

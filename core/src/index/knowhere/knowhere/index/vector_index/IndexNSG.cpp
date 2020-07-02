@@ -47,7 +47,7 @@ NSG::Serialize(const Config& config) {
         std::shared_ptr<uint8_t[]> data(writer.data_);
 
         BinarySet res_set;
-        res_set.Append("NSG", data, writer.total);
+        res_set.Append("NSG", data, writer.rp);
         return res_set;
     } catch (std::exception& e) {
         KNOWHERE_THROW_MSG(e.what());
@@ -149,11 +149,17 @@ NSG::Train(const DatasetPtr& dataset_ptr, const Config& config) {
 
 int64_t
 NSG::Count() {
+    if (!index_) {
+        KNOWHERE_THROW_MSG("index not initialize");
+    }
     return index_->ntotal;
 }
 
 int64_t
 NSG::Dim() {
+    if (!index_) {
+        KNOWHERE_THROW_MSG("index not initialize");
+    }
     return index_->dimension;
 }
 

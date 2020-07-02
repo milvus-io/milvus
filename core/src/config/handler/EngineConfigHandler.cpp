@@ -19,10 +19,12 @@ namespace server {
 EngineConfigHandler::EngineConfigHandler() {
     auto& config = Config::GetInstance();
     config.GetEngineConfigUseBlasThreshold(use_blas_threshold_);
+    config.GetEngineSearchCombineMaxNq(search_combine_nq_);
 }
 
 EngineConfigHandler::~EngineConfigHandler() {
     RemoveUseBlasThresholdListener();
+    RemoveSearchCombineMaxNqListener();
 }
 
 //////////////////////////// Listener methods //////////////////////////////////
@@ -46,6 +48,28 @@ void
 EngineConfigHandler::RemoveUseBlasThresholdListener() {
     auto& config = Config::GetInstance();
     config.CancelCallBack(CONFIG_ENGINE, CONFIG_ENGINE_USE_BLAS_THRESHOLD, identity_);
+}
+
+void
+EngineConfigHandler::AddSearchCombineMaxNqListener() {
+    ConfigCallBackF lambda = [this](const std::string& value) -> Status {
+        auto& config = server::Config::GetInstance();
+        auto status = config.GetEngineSearchCombineMaxNq(search_combine_nq_);
+        if (status.ok()) {
+            OnSearchCombineMaxNqChanged(search_combine_nq_);
+        }
+
+        return status;
+    };
+
+    auto& config = Config::GetInstance();
+    config.RegisterCallBack(CONFIG_ENGINE, CONFIG_ENGINE_SEARCH_COMBINE_MAX_NQ, identity_, lambda);
+}
+
+void
+EngineConfigHandler::RemoveSearchCombineMaxNqListener() {
+    auto& config = Config::GetInstance();
+    config.CancelCallBack(CONFIG_ENGINE, CONFIG_ENGINE_SEARCH_COMBINE_MAX_NQ, identity_);
 }
 
 }  // namespace server
