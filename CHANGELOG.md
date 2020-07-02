@@ -14,6 +14,7 @@ Please mark all change in change log and use the issue from GitHub
 -   \#2637 Suit the range of HNSW parameters
 -   \#2642 Create index failed and server crashed
 -   \#2649 Search parameter of annoy has conflict with document
+-   \#2690 Remove body parser in show-partitions endpoints
 -   \#2692 Milvus hangs during multi-thread concurrent search
 
 ## Feature

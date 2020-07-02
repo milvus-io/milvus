@@ -947,29 +947,6 @@ TEST_F(WebControllerTest, PARTITION) {
     ASSERT_EQ(OStatus::CODE_404.code, response->getStatusCode());
 }
 
-TEST_F(WebControllerTest, PARTITION_FILTER) {
-    const OString collection_name = "test_controller_partition_" + OString(RandomName().c_str());
-    GenCollection(client_ptr, conncetion_ptr, collection_name, 64, 100, "L2");
-
-    nlohmann::json body_json;
-    body_json["filter"]["partition_tag"] = "tag_not_exists_";
-    auto response = client_ptr->showPartitions(collection_name, "0", "10", body_json.dump().c_str());
-    ASSERT_EQ(OStatus::CODE_200.code, response->getStatusCode());
-    auto result_dto = response->readBodyToDto<milvus::server::web::PartitionListDto>(object_mapper.get());
-    ASSERT_EQ(result_dto->count->getValue(), 0);
-
-    auto par_param = milvus::server::web::PartitionRequestDto::createShared();
-    par_param->partition_tag = "tag01";
-    response = client_ptr->createPartition(collection_name, par_param);
-    ASSERT_EQ(OStatus::CODE_201.code, response->getStatusCode());
-
-    body_json["filter"]["partition_tag"] = "tag01";
-    response = client_ptr->showPartitions(collection_name, "0", "10", body_json.dump().c_str());
-    ASSERT_EQ(OStatus::CODE_200.code, response->getStatusCode());
-    result_dto = response->readBodyToDto<milvus::server::web::PartitionListDto>(object_mapper.get());
-    ASSERT_EQ(result_dto->count->getValue(), 1);
-}
-
 TEST_F(WebControllerTest, SHOW_SEGMENTS) {
     OString collection_name = OString("test_milvus_web_segments_test_") + RandomName().c_str();
 
