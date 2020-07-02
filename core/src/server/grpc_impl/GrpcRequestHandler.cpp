@@ -656,7 +656,7 @@ GrpcRequestHandler::DropCollection(::grpc::ServerContext* context, const ::milvu
 ::grpc::Status
 GrpcRequestHandler::CreateIndex(::grpc::ServerContext* context, const ::milvus::grpc::IndexParam* request,
                                 ::milvus::grpc::Status* response) {
-    CHECK_NULLPTR_RETURN(request);
+    CHECK_NULLPTR_RETURN(request)
     LOG_SERVER_INFO_ << LogOut("Request [%s] %s begin.", GetContext(context)->RequestID().c_str(), __func__);
 
     milvus::json json_params;
@@ -666,6 +666,8 @@ GrpcRequestHandler::CreateIndex(::grpc::ServerContext* context, const ::milvus::
             json_params = json::parse(extra.value());
         }
     }
+
+    std::string param = json_params.dump();
 
     Status status = request_handler_.CreateIndex(GetContext(context), request->collection_name(), request->field_name(),
                                                  request->index_name(), json_params);

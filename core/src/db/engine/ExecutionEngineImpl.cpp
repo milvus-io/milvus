@@ -958,6 +958,7 @@ ExecutionEngineImpl::HybridSearch(scheduler::SearchJobPtr search_job,
     search_job->SetVectors(vectors);
     search_job->vector_count() = nq;
     search_job->topk() = topk;
+    search_job->vector_params() = vector_query->extra_params;
 
     status = Search(search_ids, distances, search_job, hybrid);
     if (!status.ok()) {

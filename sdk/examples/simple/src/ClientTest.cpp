@@ -278,10 +278,10 @@ ClientTest::SearchEntitiesByID(const std::string& collection_name, int64_t topk,
 }
 
 void
-ClientTest::CreateIndex(const std::string& collection_name, milvus::IndexType type, int64_t nlist) {
+ClientTest::CreateIndex(const std::string& collection_name, int64_t nlist) {
     milvus_sdk::TimeRecorder rc("Create index");
     std::cout << "Wait until create all index done" << std::endl;
-    JSON json_params = {{"nlist", nlist}};
+    JSON json_params = {{"nlist", nlist}, {"index_type", "IVFFLAT"}};
     milvus::IndexParam index1 = {collection_name, "field_3", "index_3", json_params.dump()};
     milvus_sdk::Utils::PrintIndexParam(index1);
     milvus::Status stat = conn_->CreateIndex(index1);
@@ -357,12 +357,11 @@ ClientTest::Test() {
     Flush(collection_name);
     GetCollectionStats(collection_name);
 
-    //    BuildSearchEntities(NQ, dim);
     GetEntityByID(collection_name, search_id_array_);
     SearchEntities(collection_name, TOP_K, NPROBE);
-    //    SearchEntitiesByID(collection_name, TOP_K, NPROBE);
 
-    //    CreateIndex(collection_name, INDEX_TYPE, NLIST);
+    CreateIndex(collection_name, NLIST);
+    SearchEntities(collection_name, TOP_K, NPROBE);
     GetCollectionStats(collection_name);
 
     std::vector<int64_t> delete_ids = {search_id_array_[0], search_id_array_[1]};
