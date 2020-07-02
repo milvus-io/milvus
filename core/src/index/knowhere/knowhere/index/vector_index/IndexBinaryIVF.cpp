@@ -129,6 +129,22 @@ BinaryIVF::QueryById(const DatasetPtr& dataset_ptr, const Config& config) {
 }
 #endif
 
+int64_t
+BinaryIVF::Count() {
+    if (!index_) {
+        KNOWHERE_THROW_MSG("index not initialize");
+    }
+    return index_->ntotal;
+}
+
+int64_t
+BinaryIVF::Dim() {
+    if (!index_) {
+        KNOWHERE_THROW_MSG("index not initialize");
+    }
+    return index_->d;
+}
+
 void
 BinaryIVF::Train(const DatasetPtr& dataset_ptr, const Config& config) {
     GETTENSORWITHIDS(dataset_ptr)
