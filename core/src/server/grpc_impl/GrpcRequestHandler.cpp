@@ -583,9 +583,7 @@ GrpcRequestHandler::CreateCollection(::grpc::ServerContext* context, const ::mil
 
         milvus::json index_param;
         for (int j = 0; j < field.index_params_size(); j++) {
-            milvus::json json_param;
-            json_param[field.index_params(j).key()] = field.index_params(j).value();
-            index_param.emplace_back(json_param);
+            index_param[field.index_params(j).key()] = field.index_params(j).value();
         }
         field_index_params.insert(std::make_pair(field_name, index_param));
 
@@ -1540,7 +1538,6 @@ GrpcRequestHandler::DeserializeJsonToBoolQuery(
 
             vectors.insert(std::make_pair(placeholder, vector_query));
         }
-
         if (dsl_json.contains("bool")) {
             auto boolean_query_json = dsl_json["bool"];
             status = ProcessBooleanQueryJson(boolean_query_json, boolean_query);

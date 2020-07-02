@@ -318,15 +318,15 @@ Utils::GenDSLJson(nlohmann::json& dsl_json, nlohmann::json& vector_param_json) {
     }
 
     nlohmann::json bool_json, term_json, range_json, vector_json;
-    term_json["term"]["field_name"] = "field_1";
-    term_json["term"]["values"] = term_value;
+    nlohmann::json term_value_json;
+    term_value_json["values"] = term_value;
+    term_json["term"]["field_1"] = term_value_json;
     bool_json["must"].push_back(term_json);
 
-    range_json["range"]["field_name"] = "field_1";
     nlohmann::json comp_json;
-    comp_json["gte"] = "0";
-    comp_json["lte"] = "100000";
-    range_json["range"]["values"] = comp_json;
+    comp_json["GTE"] = "0";
+    comp_json["LTE"] = "100000";
+    range_json["range"]["field_1"] = comp_json;
     bool_json["must"].push_back(range_json);
 
     std::string placeholder = "placeholder_1";
@@ -335,12 +335,12 @@ Utils::GenDSLJson(nlohmann::json& dsl_json, nlohmann::json& vector_param_json) {
 
     dsl_json["bool"] = bool_json;
 
-    nlohmann::json vector_extra_params;
+    nlohmann::json query_vector_json, vector_extra_params;
     int64_t topk = 10;
-    vector_param_json[placeholder]["field_name"] = "field_3";
-    vector_param_json[placeholder]["topk"] = topk;
+    query_vector_json["topk"] = topk;
     vector_extra_params["nprobe"] = 64;
-    vector_param_json[placeholder]["params"] = vector_extra_params;
+    query_vector_json["params"] = vector_extra_params;
+    vector_param_json[placeholder]["field_3"] = query_vector_json;
 }
 
 void

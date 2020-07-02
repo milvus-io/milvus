@@ -76,8 +76,9 @@ GetEntityByIDRequest::OnExecute() {
 
         // only process root collection, ignore partition collection
         engine::meta::CollectionSchema collection_schema;
+        engine::meta::hybrid::FieldsSchema fields_schema;
         collection_schema.collection_id_ = collection_name_;
-        status = DBWrapper::DB()->DescribeCollection(collection_schema);
+        status = DBWrapper::DB()->DescribeHybridCollection(collection_schema, fields_schema);
         if (!status.ok()) {
             if (status.code() == DB_NOT_FOUND) {
                 return Status(SERVER_COLLECTION_NOT_EXIST, CollectionNotExistMsg(collection_name_));
@@ -87,6 +88,12 @@ GetEntityByIDRequest::OnExecute() {
         } else {
             if (!collection_schema.owner_collection_.empty()) {
                 return Status(SERVER_INVALID_COLLECTION_NAME, CollectionNotExistMsg(collection_name_));
+            }
+        }
+
+        if (field_names_.empty()) {
+            for (const auto& schema : fields_schema.fields_schema_) {
+                field_names_.emplace_back(schema.field_name_);
             }
         }
 

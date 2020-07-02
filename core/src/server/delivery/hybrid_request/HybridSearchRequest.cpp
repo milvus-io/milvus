@@ -93,15 +93,11 @@ HybridSearchRequest::OnExecute() {
                 std::make_pair(field_schema.field_name_, (engine::meta::hybrid::DataType)field_schema.field_type_));
         }
 
-        if (json_params.contains("field_names")) {
-            if (json_params["field_names"].is_array()) {
-                for (auto& name : json_params["field_names"]) {
+        if (json_params.contains("fields")) {
+            if (json_params["fields"].is_array()) {
+                for (auto& name : json_params["fields"]) {
                     field_names_.emplace_back(name.get<std::string>());
                 }
-            }
-        } else {
-            for (auto& field_schema : fields_schema.fields_schema_) {
-                field_names_.emplace_back(field_schema.field_name_);
             }
         }
 
