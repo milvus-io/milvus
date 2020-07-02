@@ -63,7 +63,7 @@ class ClientTest {
     SearchEntitiesByID(const std::string&, int64_t, int64_t);
 
     void
-    CreateIndex(const std::string&, milvus::IndexType, int64_t);
+    CreateIndex(const std::string&, int64_t);
 
     void
     LoadCollection(const std::string&);

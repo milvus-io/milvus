@@ -30,6 +30,7 @@ constexpr int64_t COLLECTION_DIMENSION_LIMIT = 32768;
 constexpr int32_t INDEX_FILE_SIZE_LIMIT = 4096;  // index trigger size max = 4096 MB
 constexpr int64_t M_BYTE = 1024 * 1024;
 constexpr int64_t MAX_INSERT_DATA_SIZE = 256 * M_BYTE;
+constexpr int64_t FIELD_NAME_SIZE_LIMIT = 255;
 
 Status
 CheckParameterRange(const milvus::json& json_params, const std::string& param_name, int64_t min, int64_t max,
@@ -122,6 +123,44 @@ ValidateCollectionName(const std::string& collection_name) {
             std::string msg = invalid_msg + "Collection name can only contain numbers, letters, and underscores.";
             LOG_SERVER_ERROR_ << msg;
             return Status(SERVER_INVALID_COLLECTION_NAME, msg);
+        }
+    }
+
+    return Status::OK();
+}
+
+Status
+ValidateFieldName(const std::string& field_name) {
+    // Field name shouldn't be empty.
+    if (field_name.empty()) {
+        std::string msg = "Field name should not be empty.";
+        LOG_SERVER_ERROR_ << msg;
+        return Status(SERVER_INVALID_FIELD_NAME, msg);
+    }
+
+    std::string invalid_msg = "Invalid field name: " + field_name + ". ";
+    // Field name size shouldn't exceed 255.
+    if (field_name.size() > FIELD_NAME_SIZE_LIMIT) {
+        std::string msg = invalid_msg + "The length of a field name must be less than 255 characters.";
+        LOG_SERVER_ERROR_ << msg;
+        return Status(SERVER_INVALID_FIELD_NAME, msg);
+    }
+
+    // Field name first character should be underscore or character.
+    char first_char = field_name[0];
+    if (first_char != '_' && std::isalpha(first_char) == 0) {
+        std::string msg = invalid_msg + "The first character of a field name must be an underscore or letter.";
+        LOG_SERVER_ERROR_ << msg;
+        return Status(SERVER_INVALID_FIELD_NAME, msg);
+    }
+
+    int64_t field_name_size = field_name.size();
+    for (int64_t i = 1; i < field_name_size; ++i) {
+        char name_char = field_name[i];
+        if (name_char != '_' && std::isalnum(name_char) == 0) {
+            std::string msg = invalid_msg + "Field name cannot only contain numbers, letters, and underscores.";
+            LOG_SERVER_ERROR_ << msg;
+            return Status(SERVER_INVALID_FIELD_NAME, msg);
         }
     }
 
