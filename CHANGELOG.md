@@ -19,6 +19,7 @@ Please mark all changes in change log and use the issue from GitHub
 -   \#2694 Collection create success if an invalid field name provided
 -   \#2695 The number of fields should be limited
 -   \#2696 Check the validity of the parameters of creating collection: segment_size
+-   \#2697 Index can not be created
 
 ## Feature
 -   \#2319 Redo metadata to support MVCC
