@@ -1,13 +1,13 @@
 import pdb
 import struct
 from random import sample
-
-import pytest
 import threading
 import datetime
 import logging
 from time import sleep
+import concurrent.futures
 from multiprocessing import Process
+import pytest
 import numpy
 import sklearn.preprocessing
 from milvus import IndexType, MetricType
@@ -802,28 +802,32 @@ class TestSearchBase:
         distance_1 = numpy.inner(numpy.array(query_vecs[0]), numpy.array(vectors[1]))
         assert abs(result[0][0].distance - max(distance_0, distance_1)) <= gen_inaccuracy(result[0][0].distance)
 
-    # TODO: enable
-    # @pytest.mark.repeat(5)
-    @pytest.mark.timeout(30)
-    def _test_search_concurrent(self, connect, collection):
-        vectors, ids = self.init_data(connect, collection)
-        thread_num = 10
-        nb = 100
-        top_k = 10
-        threads = []
-        query_vecs = vectors[nb//2:nb]
-        def search():
-            status, result = connect.search(collection, top_k, query_vecs)
-            assert len(result) == len(query_vecs)
-            for i in range(len(query_vecs)):
-                assert result[i][0].id in ids
-                assert result[i][0].distance == 0.0
-        for i in range(thread_num):
-            x = threading.Thread(target=search, args=())
-            threads.append(x)
-            x.start()
-        for th in threads:
-            th.join()
+    # def test_search_concurrent(self, connect, collection):
+    #     vectors, ids = self.init_data(connect, collection, nb=5000)
+    #     thread_num = 50
+    #     nq = 1
+    #     top_k = 2
+    #     threads = []
+    #     query_vecs = vectors[:nq]
+    #     def search(thread_number):
+    #         for i in range(1000000):
+    #             status, result = connect.search(collection, top_k, query_vecs, timeout=2)
+    #             assert len(result) == len(query_vecs)
+    #             assert status.OK()
+    #             if i % 1000 == 0:
+    #                 logging.getLogger().info("In %d, %d" % (thread_number, i))
+    #         logging.getLogger().info("%d finished" % thread_number)
+    #     # with concurrent.futures.ThreadPoolExecutor(max_workers=thread_num) as executor:
+    #     #     future_results = {executor.submit(
+    #     #         search): i for i in range(1000000)}
+    #     #     for future in concurrent.futures.as_completed(future_results):
+    #     #         future.result()
+    #     for i in range(thread_num):
+    #         t = threading.Thread(target=search, args=(i, ))
+    #         threads.append(t)
+    #         t.start()
+    #     for t in threads:
+    #         t.join()
 
     @pytest.mark.level(2)
     @pytest.mark.timeout(30)
