@@ -62,6 +62,19 @@ TEST_P(HNSWTest, HNSW_basic) {
     EXPECT_EQ(index_->Count(), nb);
     EXPECT_EQ(index_->Dim(), dim);
 
+    // Serialize and Load before Query
+    milvus::knowhere::BinarySet bs = index_->Serialize();
+
+    int64_t dim = base_dataset->Get<int64_t>(milvus::knowhere::meta::DIM);
+    int64_t rows = base_dataset->Get<int64_t>(milvus::knowhere::meta::ROWS);
+    auto raw_data = base_dataset->Get<const void*>(milvus::knowhere::meta::TENSOR);
+    milvus::knowhere::BinaryPtr bptr = std::make_shared<milvus::knowhere::Binary>();
+    bptr->data = std::shared_ptr<uint8_t[]>((uint8_t*)raw_data, [&](uint8_t*) {});
+    bptr->size = dim * rows * sizeof(float);
+    bs.Append(RAW_DATA, bptr);
+
+    index_->Load(bs);
+
     auto result = index_->Query(query_dataset, conf);
     AssertAnns(result, nq, k);
 }
@@ -78,6 +91,20 @@ TEST_P(HNSWTest, HNSW_delete) {
     for (auto i = 0; i < nq; ++i) {
         bitset->set(i);
     }
+
+    // Serialize and Load before Query
+    milvus::knowhere::BinarySet bs = index_->Serialize();
+
+    int64_t dim = base_dataset->Get<int64_t>(milvus::knowhere::meta::DIM);
+    int64_t rows = base_dataset->Get<int64_t>(milvus::knowhere::meta::ROWS);
+    auto raw_data = base_dataset->Get<const void*>(milvus::knowhere::meta::TENSOR);
+    milvus::knowhere::BinaryPtr bptr = std::make_shared<milvus::knowhere::Binary>();
+    bptr->data = std::shared_ptr<uint8_t[]>((uint8_t*)raw_data, [&](uint8_t*) {});
+    bptr->size = dim * rows * sizeof(float);
+    bs.Append(RAW_DATA, bptr);
+    
+    index_->Load(bs);
+
     auto result1 = index_->Query(query_dataset, conf);
     AssertAnns(result1, nq, k);
 
@@ -107,6 +134,7 @@ TEST_P(HNSWTest, HNSW_delete) {
     */
 }
 
+/*
 TEST_P(HNSWTest, HNSW_serialize) {
     auto serialize = [](const std::string& filename, milvus::knowhere::BinaryPtr& bin, uint8_t* ret) {
         {
@@ -138,7 +166,7 @@ TEST_P(HNSWTest, HNSW_serialize) {
         auto result = index_->Query(query_dataset, conf);
         AssertAnns(result, nq, conf[milvus::knowhere::meta::TOPK]);
     }
-}
+}*/
 
 /*
  * faiss style test
