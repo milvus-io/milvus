@@ -82,15 +82,15 @@ pipeline {
                         stages {
                             stage('Build') {
                                 steps {
-                                    try{
-                                        container("milvus-${BINARY_VERSION}-build-env") {
-                                            script {
+                                    container("milvus-${BINARY_VERSION}-build-env") {
+                                        script {
+                                            try{
                                                 load "${env.WORKSPACE}/ci/jenkins/step/build.groovy"
+                                            } catch (Exception e) {
+                                                containerLog "milvus-${BINARY_VERSION}-build-env"
+                                                throw e
                                             }
                                         }
-                                    } catch (Exception e) {
-                                        containerLog "milvus-${BINARY_VERSION}-build-env"
-                                        throw e
                                     }
                                 }
                             }
