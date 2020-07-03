@@ -26,14 +26,22 @@ CollectionCommitOperation::DoExecute(Store& store) {
     }
     resource_ = std::make_shared<CollectionCommit>(*prev_resource);
     resource_->ResetStatus();
+
+    auto handle_new_pc = [&](PartitionCommitPtr& pc) {
+        auto prev_partition_commit = GetStartedSS()->GetPartitionCommitByPartitionId(pc->GetPartitionId());
+        if (prev_partition_commit)
+            resource_->GetMappings().erase(prev_partition_commit->GetID());
+        resource_->GetMappings().insert(pc->GetID());
+    };
+
     if (context_.stale_partition_commit) {
         resource_->GetMappings().erase(context_.stale_partition_commit->GetID());
     } else if (context_.new_partition_commit) {
-        auto prev_partition_commit =
-            GetStartedSS()->GetPartitionCommitByPartitionId(context_.new_partition_commit->GetPartitionId());
-        if (prev_partition_commit)
-            resource_->GetMappings().erase(prev_partition_commit->GetID());
-        resource_->GetMappings().insert(context_.new_partition_commit->GetID());
+        handle_new_pc(context_.new_partition_commit);
+    } else if (context_.new_partition_commits.size() > 0) {
+        for (auto& pc : context_.new_partition_commits) {
+            handle_new_pc(pc);
+        }
     } else if (context_.new_schema_commit) {
         resource_->SetSchemaId(context_.new_schema_commit->GetID());
     }
@@ -72,10 +80,12 @@ PartitionCommitOperation::PreCheck() {
 
 PartitionCommitPtr
 PartitionCommitOperation::GetPrevResource() const {
-    auto& segment_commit = context_.new_segment_commit;
-    if (!segment_commit)
-        return nullptr;
-    return GetStartedSS()->GetPartitionCommitByPartitionId(segment_commit->GetPartitionId());
+    if (context_.new_segment_commit) {
+        return GetStartedSS()->GetPartitionCommitByPartitionId(context_.new_segment_commit->GetPartitionId());
+    } else if (context_.new_segment_commits.size() > 0) {
+        return GetStartedSS()->GetPartitionCommitByPartitionId(context_.new_segment_commits[0]->GetPartitionId());
+    }
+    return nullptr;
 }
 
 Status
@@ -85,10 +95,20 @@ PartitionCommitOperation::DoExecute(Store& store) {
         resource_ = std::make_shared<PartitionCommit>(*prev_resource);
         resource_->SetID(0);
         resource_->ResetStatus();
-        auto prev_segment_commit =
-            GetStartedSS()->GetSegmentCommitBySegmentId(context_.new_segment_commit->GetSegmentId());
-        if (prev_segment_commit)
-            resource_->GetMappings().erase(prev_segment_commit->GetID());
+        auto erase_sc = [&](SegmentCommitPtr& sc) {
+            if (!sc)
+                return;
+            auto prev_sc = GetStartedSS()->GetSegmentCommitBySegmentId(sc->GetSegmentId());
+            if (prev_sc) {
+                resource_->GetMappings().erase(prev_sc->GetID());
+            }
+        };
+
+        erase_sc(context_.new_segment_commit);
+        for (auto& sc : context_.new_segment_commits) {
+            erase_sc(sc);
+        }
+
         if (context_.stale_segments.size() > 0) {
             for (auto& stale_segment : context_.stale_segments) {
                 if (stale_segment->GetPartitionId() != prev_resource->GetPartitionId()) {
@@ -113,6 +133,10 @@ PartitionCommitOperation::DoExecute(Store& store) {
 
     if (context_.new_segment_commit) {
         resource_->GetMappings().insert(context_.new_segment_commit->GetID());
+    } else if (context_.new_segment_commits.size() > 0) {
+        for (auto& sc : context_.new_segment_commits) {
+            resource_->GetMappings().insert(sc->GetID());
+        }
     }
     AddStep(*resource_, false);
     return Status::OK();

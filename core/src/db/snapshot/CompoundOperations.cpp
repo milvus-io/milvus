@@ -10,8 +10,10 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
 #include "db/snapshot/CompoundOperations.h"
+#include <map>
 #include <memory>
 #include <sstream>
+#include <vector>
 #include "db/snapshot/OperationExecutor.h"
 #include "db/snapshot/Snapshots.h"
 #include "utils/Status.h"
@@ -96,7 +98,7 @@ DropAllIndexOperation::PreCheck() {
         return Status(SS_INVALID_CONTEX_ERROR, emsg.str());
     }
 
-    if (!GetAdjustedSS()->GetResource<FieldElement>(context_.stale_field_element->GetID())) {
+    if (!GetStartedSS()->GetResource<FieldElement>(context_.stale_field_element->GetID())) {
         std::stringstream emsg;
         emsg << GetRepr() << ".  Specified field element " << context_.stale_field_element->GetName();
         emsg << " is stale";
@@ -127,7 +129,7 @@ DropAllIndexOperation::DoExecute(Store& store) {
     }
 
     OperationContext cc_context;
-    for(auto& kv : p_sc_map) {
+    for (auto& kv : p_sc_map) {
         auto& partition_id = kv.first;
         auto context = context_;
         context.new_segment_commits = kv.second;
