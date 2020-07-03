@@ -364,6 +364,14 @@ ConstructEntityResults(const std::vector<engine::AttrsData>& attrs, const std::v
     }
 
     if (!vector_field_name.empty()) {
+        auto size = vectors.size();
+        response->mutable_ids()->Resize(static_cast<int>(vectors.size()), 0);
+        std::vector<int64_t> id_array(size);
+        for (int64_t i = 0; i < size; i++) {
+            id_array[i] = vectors[i].id_array_[0];
+        }
+        memcpy(response->mutable_ids()->mutable_data(), id_array.data(), size * sizeof(int64_t));
+
         auto grpc_field = response->add_fields();
         ::milvus::grpc::VectorRecord* grpc_vector_data = grpc_field->mutable_vector_record();
         for (auto& vector : vectors) {
