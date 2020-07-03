@@ -102,7 +102,7 @@ TEST_P(HNSWTest, HNSW_delete) {
     bptr->data = std::shared_ptr<uint8_t[]>((uint8_t*)raw_data, [&](uint8_t*) {});
     bptr->size = dim * rows * sizeof(float);
     bs.Append(RAW_DATA, bptr);
-    
+
     index_->Load(bs);
 
     auto result1 = index_->Query(query_dataset, conf);

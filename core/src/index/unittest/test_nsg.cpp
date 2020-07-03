@@ -98,7 +98,7 @@ TEST_F(NSGInterfaceTest, basic_test) {
     bptr->data = std::shared_ptr<uint8_t[]>((uint8_t*)raw_data, [&](uint8_t*) {});
     bptr->size = dim * rows * sizeof(float);
     bs.Append(RAW_DATA, bptr);
-    
+
     index_->Load(bs);
 
     auto result = index_->Query(query_dataset, search_conf);
@@ -119,23 +119,11 @@ TEST_F(NSGInterfaceTest, basic_test) {
     bptr->data = std::shared_ptr<uint8_t[]>((uint8_t*)raw_data, [&](uint8_t*) {});
     bptr->size = dim * rows * sizeof(float);
     bs.Append(RAW_DATA, bptr);
-    
+
     new_index_1->Load(bs);
 
     auto new_result_1 = new_index_1->Query(query_dataset, search_conf);
     AssertAnns(new_result_1, nq, k);
-
-    /* test NSG index load 
-    auto new_index_2 = std::make_shared<milvus::knowhere::NSG_NM>();
-    new_index_2->Load(binaryset);
-    {
-        fiu_enable("NSG.Load.throw_exception", 1, nullptr, 0);
-        ASSERT_ANY_THROW(new_index_2->Load(binaryset));
-        fiu_disable("NSG.Load.throw_exception");
-    }
-
-    auto new_result_2 = new_index_2->Query(query_dataset, search_conf);
-    AssertAnns(new_result_2, nq, k); */
 
     ASSERT_EQ(index_->Count(), nb);
     ASSERT_EQ(index_->Dim(), dim);
@@ -172,7 +160,7 @@ TEST_F(NSGInterfaceTest, delete_test) {
     bptr->data = std::shared_ptr<uint8_t[]>((uint8_t*)raw_data, [&](uint8_t*) {});
     bptr->size = dim * rows * sizeof(float);
     bs.Append(RAW_DATA, bptr);
-    
+
     index_->Load(bs);
 
     auto result = index_->Query(query_dataset, search_conf);
@@ -201,7 +189,7 @@ TEST_F(NSGInterfaceTest, delete_test) {
     bptr->data = std::shared_ptr<uint8_t[]>((uint8_t*)raw_data, [&](uint8_t*) {});
     bptr->size = dim * rows * sizeof(float);
     bs.Append(RAW_DATA, bptr);
-    
+
     index_->Load(bs);
     auto result_after = index_->Query(query_dataset, search_conf);
     AssertAnns(result_after, nq, k, CheckMode::CHECK_NOT_EQUAL);
