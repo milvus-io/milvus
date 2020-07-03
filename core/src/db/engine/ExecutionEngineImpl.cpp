@@ -948,7 +948,12 @@ ExecutionEngineImpl::HybridSearch(scheduler::SearchJobPtr search_job,
 
     auto vector_query = search_job->query_ptr()->vectors.at(vector_placeholder);
     int64_t topk = vector_query->topk;
-    int64_t nq = vector_query->query_vector.float_data.size() / dim_;
+    int64_t nq = 0;
+    if (!vector_query->query_vector.float_data.empty()) {
+        nq = vector_query->query_vector.float_data.size() / dim_;
+    } else if (!vector_query->query_vector.binary_data.empty()) {
+        nq = vector_query->query_vector.binary_data.size() * 8 / dim_;
+    }
 
     engine::VectorsData vectors;
     vectors.vector_count_ = nq;

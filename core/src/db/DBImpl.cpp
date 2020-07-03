@@ -974,24 +974,23 @@ DBImpl::InsertEntities(const std::string& collection_id, const std::string& part
         record.partition_tag = partition_tag;
         record.ids = entity.id_array_.data();
         record.length = entity.entity_count_;
+        record.attr_data = attr_data;
+        record.attr_nbytes = attr_nbytes;
+        record.attr_data_size = attr_data_size;
 
         auto vector_it = entity.vector_data_.begin();
         if (vector_it->second.binary_data_.empty()) {
-            record.type = wal::MXLogType::Entity;
+            record.type = wal::MXLogType::InsertVector;
             record.data = vector_it->second.float_data_.data();
             record.data_size = vector_it->second.float_data_.size() * sizeof(float);
-            record.attr_data = attr_data;
-            record.attr_nbytes = attr_nbytes;
-            record.attr_data_size = attr_data_size;
         } else {
-            //        record.type = wal::MXLogType::InsertBinary;
-            //        record.data = entities.vector_data_[0].binary_data_.data();
-            //        record.length = entities.vector_data_[0].binary_data_.size() * sizeof(uint8_t);
+            record.type = wal::MXLogType::InsertBinary;
+            record.data = vector_it->second.binary_data_.data();
+            record.data_size = vector_it->second.binary_data_.size() * sizeof(uint8_t);
         }
 
         status = ExecWalRecord(record);
     }
-
     return status;
 }
 
@@ -3111,9 +3110,16 @@ DBImpl::ExecWalRecord(const wal::MXLogRecord& record) {
                 return status;
             }
 
-            status = mem_mgr_->InsertVectors(target_collection_name, record.length, record.ids,
-                                             (record.data_size / record.length / sizeof(uint8_t)),
-                                             (const u_int8_t*)record.data, record.lsn);
+            Vectors vectors;
+            vectors.vector_type_ = Vectors::BINARY;
+            vectors.binary_vector = (const uint8_t*)record.data;
+            status = mem_mgr_->InsertEntities(target_collection_name, record.length, record.ids,
+                                              (record.data_size / record.length / sizeof(uint8_t)), vectors,
+                                              record.attr_nbytes, record.attr_data_size, record.attr_data, record.lsn);
+
+            //            status = mem_mgr_->InsertVectors(target_collection_name, record.length, record.ids,
+            //                                             (record.data_size / record.length / sizeof(uint8_t)),
+            //                                             (const u_int8_t*)record.data, record.lsn);
             force_flush_if_mem_full();
 
             // metrics
@@ -3129,9 +3135,16 @@ DBImpl::ExecWalRecord(const wal::MXLogRecord& record) {
                 return status;
             }
 
-            status = mem_mgr_->InsertVectors(target_collection_name, record.length, record.ids,
-                                             (record.data_size / record.length / sizeof(float)),
-                                             (const float*)record.data, record.lsn);
+            Vectors vectors;
+            vectors.vector_type_ = Vectors::FLOAT;
+            vectors.float_vector = (const float*)record.data;
+            status = mem_mgr_->InsertEntities(target_collection_name, record.length, record.ids,
+                                              (record.data_size / record.length / sizeof(uint8_t)), vectors,
+                                              record.attr_nbytes, record.attr_data_size, record.attr_data, record.lsn);
+
+            //            status = mem_mgr_->InsertVectors(target_collection_name, record.length, record.ids,
+            //                                             (record.data_size / record.length / sizeof(float)),
+            //                                             (const float*)record.data, record.lsn);
             force_flush_if_mem_full();
 
             // metrics
