@@ -247,7 +247,11 @@ XSearchTask::Execute() {
                 s = index_engine_->HybridSearch(search_job, types, output_distance, output_ids, hybrid);
                 auto vector_query = query_ptr->vectors.begin()->second;
                 topk = vector_query->topk;
-                nq = vector_query->query_vector.float_data.size() / file_->dimension_;
+                if (!vector_query->query_vector.float_data.empty()) {
+                    nq = vector_query->query_vector.float_data.size() / file_->dimension_;
+                } else if (!vector_query->query_vector.binary_data.empty()) {
+                    nq = vector_query->query_vector.binary_data.size() * 5 / file_->dimension_;
+                }
                 search_job->vector_count() = nq;
             } else {
                 s = index_engine_->Search(output_ids, output_distance, search_job, hybrid);

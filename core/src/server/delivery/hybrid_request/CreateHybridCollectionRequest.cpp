@@ -36,7 +36,8 @@ CreateHybridCollectionRequest::CreateHybridCollectionRequest(
       collection_name_(collection_name),
       field_types_(field_types),
       field_index_params_(field_index_params),
-      field_params_(field_params) {
+      field_params_(field_params),
+      extra_params_(extra_params) {
 }
 
 BaseRequestPtr

@@ -20,6 +20,7 @@ Please mark all changes in change log and use the issue from GitHub
 -   \#2695 The number of fields should be limited
 -   \#2696 Check the validity of the parameters of creating collection: segment_size
 -   \#2697 Index can not be created
+-   \#2698 Count entities got wrong result with binary vectors
 
 ## Feature
 -   \#2319 Redo metadata to support MVCC

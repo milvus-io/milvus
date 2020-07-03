@@ -126,9 +126,9 @@ Utils::PrintCollectionParam(const milvus::Mapping& mapping) {
     std::cout << "Collection name: " << mapping.collection_name << std::endl;
     for (const auto& field : mapping.fields) {
         std::cout << "field_name: " << field->field_name;
-        std::cout << "field_type: " << std::to_string((int)field->field_type);
-        std::cout << "index_param: " << field->index_params;
-        std::cout << "extra_param:" << field->extra_params;
+        std::cout << "\tfield_type: " << std::to_string((int)field->field_type);
+        std::cout << "\tindex_param: " << field->index_params;
+        std::cout << "\textra_param:" << field->extra_params << std::endl;
     }
     BLOCK_SPLITER
 }
@@ -227,24 +227,26 @@ Utils::CheckSearchResult(const std::vector<std::pair<int64_t, milvus::VectorData
 void
 Utils::DoSearch(std::shared_ptr<milvus::Connection> conn, const std::string& collection_name,
                 const std::vector<std::string>& partition_tags, int64_t top_k, int64_t nprobe,
-                const std::vector<std::pair<int64_t, milvus::VectorData>>& entity_array,
+                std::vector<std::pair<int64_t, milvus::VectorData>> entity_array,
                 milvus::TopKQueryResult& topk_query_result) {
     topk_query_result.clear();
+
+    nlohmann::json dsl_json, vector_param_json;
+    GenDSLJson(dsl_json, vector_param_json);
 
     std::vector<milvus::VectorData> temp_entity_array;
     for (auto& pair : entity_array) {
         temp_entity_array.push_back(pair.second);
     }
+    milvus::VectorParam vector_param = {vector_param_json.dump(), temp_entity_array};
 
-    {
-        BLOCK_SPLITER
-        JSON json_params = {{"nprobe", nprobe}};
-        milvus_sdk::TimeRecorder rc("Search");
-        BLOCK_SPLITER
-    }
+    JSON json_params = {{"nprobe", nprobe}};
+    milvus_sdk::TimeRecorder rc("Search");
 
-    PrintSearchResult(entity_array, topk_query_result);
-    CheckSearchResult(entity_array, topk_query_result);
+    auto status = conn->Search(collection_name, partition_tags, dsl_json.dump(), vector_param, topk_query_result);
+
+    PrintTopKQueryResult(topk_query_result);
+    //    PrintSearchResult(entity_array, topk_query_result);
 }
 
 void
@@ -286,7 +288,7 @@ Utils::GenLeafQuery() {
     uint64_t NPROBE = 32;
     milvus::VectorQueryPtr vq = std::make_shared<milvus::VectorQuery>();
     ConstructVector(NQ, DIMENSION, vq->query_vector);
-    vq->field_name = "field_3";
+    vq->field_name = "field_vec";
     vq->topk = 10;
     JSON json_params = {{"nprobe", NPROBE}};
     vq->extra_params = json_params.dump();
@@ -340,7 +342,7 @@ Utils::GenDSLJson(nlohmann::json& dsl_json, nlohmann::json& vector_param_json) {
     query_vector_json["topk"] = topk;
     vector_extra_params["nprobe"] = 64;
     query_vector_json["params"] = vector_extra_params;
-    vector_param_json[placeholder]["field_3"] = query_vector_json;
+    vector_param_json[placeholder]["field_vec"] = query_vector_json;
 }
 
 void

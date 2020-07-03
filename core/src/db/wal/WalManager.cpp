@@ -495,9 +495,9 @@ WalManager::InsertEntities(const std::string& collection_id, const std::string& 
                            const std::unordered_map<std::string, std::vector<uint8_t>>& attrs) {
     MXLogType log_type;
     if (std::is_same<T, float>::value) {
-        log_type = MXLogType::Entity;
-    } else {
-        return false;
+        log_type = MXLogType::InsertVector;
+    } else if (std::is_same<T, uint8_t>::value) {
+        log_type = MXLogType::InsertBinary;
     }
 
     size_t entity_num = entity_ids.size();

@@ -103,53 +103,26 @@ ClientTest::CreateCollection(const std::string& collection_name) {
     index_param_2["name"] = "index_2";
     field_ptr2->index_params = index_param_2.dump();
 
-    field_ptr3->field_name = "field_3";
+    field_ptr3->field_name = "field_vec";
     field_ptr3->field_type = milvus::DataType::FLOAT_VECTOR;
     JSON index_param_3;
     index_param_3["name"] = "index_3";
     index_param_3["index_type"] = "IVFFLAT";
     field_ptr3->index_params = index_param_3.dump();
-    JSON extra_params;
-    extra_params["dimension"] = COLLECTION_DIMENSION;
-    field_ptr3->extra_params = extra_params.dump();
+    JSON extra_params_3;
+    extra_params_3["dimension"] = COLLECTION_DIMENSION;
+    field_ptr3->extra_params = extra_params_3.dump();
 
+    JSON extra_params;
+    extra_params["segment_size"] = " ";
     milvus::Mapping mapping = {collection_name, {field_ptr1, field_ptr2, field_ptr3}};
 
-    milvus::Status stat = conn_->CreateCollection(mapping);
+    milvus::Status stat = conn_->CreateCollection(mapping, extra_params.dump());
     std::cout << "CreateCollection function call status: " << stat.message() << std::endl;
 }
 
 void
 ClientTest::GetCollectionInfo(const std::string& collection_name) {
-    //    milvus::FieldPtr field_ptr1 = std::make_shared<milvus::Field>();
-    //    milvus::FieldPtr field_ptr2 = std::make_shared<milvus::Field>();
-    //    milvus::FieldPtr field_ptr3 = std::make_shared<milvus::Field>();
-    //    field_ptr1->field_name = "field_1";
-    //    field_ptr1->field_type = milvus::DataType::INT64;
-    //    JSON index_param_1;
-    //    index_param_1["name"] = "index_1";
-    //    field_ptr1->index_params = index_param_1.dump();
-    //
-    //    field_ptr2->field_name = "field_2";
-    //    field_ptr2->field_type = milvus::DataType::FLOAT;
-    //    JSON index_param_2;
-    //    index_param_2["name"] = "index_2";
-    //    field_ptr2->index_params = index_param_2.dump();
-    //
-    //    field_ptr3->field_name = "field_3";
-    //    field_ptr3->field_type = milvus::DataType::FLOAT_VECTOR;
-    //    JSON index_param_3;
-    //    index_param_3["name"] = "index_3";
-    //    index_param_3["index_type"] = "IVFFLAT";
-    //    field_ptr3->index_params = index_param_3.dump();
-    //    JSON extra_params;
-    //    extra_params["dimension"] = COLLECTION_DIMENSION;
-    //    field_ptr3->extra_params = extra_params.dump();
-    //
-    //    milvus::Mapping mapping = {collection_name, {field_ptr1, field_ptr2, field_ptr3}};
-    //
-    //    milvus::Status stat = conn_->CreateCollection(mapping);
-    //    std::cout << "CreateCollection function call status: " << stat.message() << std::endl;
 }
 
 void
@@ -174,24 +147,10 @@ ClientTest::InsertEntities(const std::string& collection_name, int64_t row_num) 
         milvus_sdk::Utils::BuildEntities(0, row_num, entity_array, record_ids, COLLECTION_DIMENSION);
     }
 
-    field_value.vector_value.insert(std::make_pair("field_3", entity_array));
+    field_value.vector_value.insert(std::make_pair("field_vec", entity_array));
     milvus::Status status = conn_->Insert(collection_name, "", field_value, record_ids);
     std::cout << "InsertEntities function call status: " << status.message() << std::endl;
 }
-
-// void
-// ClientTest::BuildSearchEntities(int64_t nq, int64_t dim) {
-//    search_entity_array_.clear();
-//    search_id_array_.clear();
-//    for (int64_t i = 0; i < nq; i++) {
-//        std::vector<milvus::Entity> entity_array;
-//        std::vector<int64_t> record_ids;
-//        int64_t index = i * BATCH_ENTITY_COUNT + SEARCH_TARGET;
-//        milvus_sdk::Utils::BuildEntities(index, index + 1, entity_array, record_ids, dim);
-//        search_entity_array_.push_back(std::make_pair(record_ids[0], entity_array[0]));
-//        search_id_array_.push_back(record_ids[0]);
-//    }
-//}
 
 void
 ClientTest::Flush(const std::string& collection_name) {
@@ -282,7 +241,7 @@ ClientTest::CreateIndex(const std::string& collection_name, int64_t nlist) {
     milvus_sdk::TimeRecorder rc("Create index");
     std::cout << "Wait until create all index done" << std::endl;
     JSON json_params = {{"nlist", nlist}, {"index_type", "IVFFLAT"}};
-    milvus::IndexParam index1 = {collection_name, "field_3", "index_3", json_params.dump()};
+    milvus::IndexParam index1 = {collection_name, "field_vec", "index_3", json_params.dump()};
     milvus_sdk::Utils::PrintIndexParam(index1);
     milvus::Status stat = conn_->CreateIndex(index1);
     std::cout << "CreateIndex function call status: " << stat.message() << std::endl;
@@ -371,6 +330,6 @@ ClientTest::Test() {
     LoadCollection(collection_name);
     SearchEntities(collection_name, TOP_K, NPROBE);  // this line get two search error since we delete two entities
 
-    DropIndex(collection_name, "field_3", "index_3");
+    DropIndex(collection_name, "field_vec", "index_3");
     DropCollection(collection_name);
 }

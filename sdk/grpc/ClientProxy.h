@@ -51,7 +51,7 @@ class ClientProxy : public Connection {
     SetConfig(const std::string& node_name, const std::string& value) const override;
 
     Status
-    CreateCollection(const Mapping& mapping) override;
+    CreateCollection(const Mapping& mapping, const std::string& extra_params) override;
 
     bool
     HasCollection(const std::string& collection_name) override;

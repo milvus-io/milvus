@@ -618,7 +618,7 @@ GrpcRequestHandler::CreateCollection(::grpc::ServerContext* context, const ::mil
                                                             field_types, field_index_params, field_params, json_params);
 
     LOG_SERVER_INFO_ << LogOut("Request [%s] %s end.", GetContext(context)->RequestID().c_str(), __func__);
-    SET_RESPONSE(response, status, context);
+    SET_RESPONSE(response, status, context)
 
     return ::grpc::Status::OK;
 }
@@ -666,8 +666,6 @@ GrpcRequestHandler::CreateIndex(::grpc::ServerContext* context, const ::milvus::
             json_params = json::parse(extra.value());
         }
     }
-
-    std::string param = json_params.dump();
 
     Status status = request_handler_.CreateIndex(GetContext(context), request->collection_name(), request->field_name(),
                                                  request->index_name(), json_params);

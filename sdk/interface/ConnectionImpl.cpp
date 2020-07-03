@@ -77,8 +77,8 @@ ConnectionImpl::SetConfig(const std::string& node_name, const std::string& value
 }
 
 Status
-ConnectionImpl::CreateCollection(const Mapping& mapping) {
-    return client_proxy_->CreateCollection(mapping);
+ConnectionImpl::CreateCollection(const Mapping& mapping, const std::string& extra_params) {
+    return client_proxy_->CreateCollection(mapping, extra_params);
 }
 
 bool

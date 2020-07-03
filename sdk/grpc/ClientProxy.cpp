@@ -451,7 +451,7 @@ ClientProxy::SetConfig(const std::string& node_name, const std::string& value) c
 }
 
 Status
-ClientProxy::CreateCollection(const Mapping& mapping) {
+ClientProxy::CreateCollection(const Mapping& mapping, const std::string& extra_params) {
     try {
         ::milvus::grpc::Mapping grpc_mapping;
         grpc_mapping.set_collection_name(mapping.collection_name);
@@ -470,6 +470,9 @@ ClientProxy::CreateCollection(const Mapping& mapping) {
             grpc_extra_param->set_key(EXTRA_PARAM_KEY);
             grpc_extra_param->set_value(field->extra_params);
         }
+        auto grpc_param = grpc_mapping.add_extra_params();
+        grpc_param->set_key(EXTRA_PARAM_KEY);
+        grpc_param->set_value(extra_params);
 
         return client_ptr_->CreateCollection(grpc_mapping);
     } catch (std::exception& ex) {

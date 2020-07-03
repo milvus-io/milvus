@@ -282,7 +282,7 @@ class Connection {
      * @return Indicate if collection is created successfully
      */
     virtual Status
-    CreateCollection(const Mapping& mapping) = 0;
+    CreateCollection(const Mapping& mapping, const std::string& extra_params) = 0;
 
     /**
      * @brief Test collection existence method
