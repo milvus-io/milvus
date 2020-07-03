@@ -16,11 +16,10 @@
 #include "knowhere/common/Timer.h"
 #include "knowhere/index/vector_index/IndexIDMAP.h"
 #include "knowhere/index/vector_index/IndexIVF.h"
-#include "knowhere/index/vector_index/IndexNSG.h"
 #include "knowhere/index/vector_index/IndexType.h"
 #include "knowhere/index/vector_index/adapter/VectorAdapter.h"
-#include "knowhere/index/vector_index/impl/nsg/NSG.h"
 #include "knowhere/index/vector_index/impl/nsg/NSGIO.h"
+#include "knowhere/index/vector_offset_index/IndexNSG_NM.h"
 
 #ifdef MILVUS_GPU_VERSION
 #include "knowhere/index/vector_index/gpu/IndexGPUIDMAP.h"
@@ -32,13 +31,13 @@ namespace milvus {
 namespace knowhere {
 
 BinarySet
-NSG::Serialize(const Config& config) {
+NSG_NM::Serialize(const Config& config) {
     if (!index_ || !index_->is_trained) {
         KNOWHERE_THROW_MSG("index not initialize or trained");
     }
 
     try {
-        fiu_do_on("NSG.Serialize.throw_exception", throw std::exception());
+        fiu_do_on("NSG_NM.Serialize.throw_exception", throw std::exception());
         std::lock_guard<std::mutex> lk(mutex_);
         impl::NsgIndex* index = index_.get();
 
@@ -47,7 +46,7 @@ NSG::Serialize(const Config& config) {
         std::shared_ptr<uint8_t[]> data(writer.data_);
 
         BinarySet res_set;
-        res_set.Append("NSG", data, writer.rp);
+        res_set.Append("NSG_NM", data, writer.rp);
         return res_set;
     } catch (std::exception& e) {
         KNOWHERE_THROW_MSG(e.what());
@@ -55,11 +54,11 @@ NSG::Serialize(const Config& config) {
 }
 
 void
-NSG::Load(const BinarySet& index_binary) {
+NSG_NM::Load(const BinarySet& index_binary) {
     try {
-        fiu_do_on("NSG.Load.throw_exception", throw std::exception());
+        fiu_do_on("NSG_NM.Load.throw_exception", throw std::exception());
         std::lock_guard<std::mutex> lk(mutex_);
-        auto binary = index_binary.GetByName("NSG");
+        auto binary = index_binary.GetByName("NSG_NM");
 
         MemoryIOReader reader;
         reader.total = binary->size;
@@ -67,13 +66,15 @@ NSG::Load(const BinarySet& index_binary) {
 
         auto index = impl::read_index(reader);
         index_.reset(index);
+
+        data_ = index_binary.GetByName(RAW_DATA)->data;
     } catch (std::exception& e) {
         KNOWHERE_THROW_MSG(e.what());
     }
 }
 
 DatasetPtr
-NSG::Query(const DatasetPtr& dataset_ptr, const Config& config) {
+NSG_NM::Query(const DatasetPtr& dataset_ptr, const Config& config) {
     if (!index_ || !index_->is_trained) {
         KNOWHERE_THROW_MSG("index not initialize or trained");
     }
@@ -81,7 +82,8 @@ NSG::Query(const DatasetPtr& dataset_ptr, const Config& config) {
     GETTENSOR(dataset_ptr)
 
     try {
-        auto elems = rows * config[meta::TOPK].get<int64_t>();
+        auto topK = config[meta::TOPK].get<int64_t>();
+        auto elems = rows * topK;
         size_t p_id_size = sizeof(int64_t) * elems;
         size_t p_dist_size = sizeof(float) * elems;
         auto p_id = (int64_t*)malloc(p_id_size);
@@ -94,8 +96,8 @@ NSG::Query(const DatasetPtr& dataset_ptr, const Config& config) {
         s_params.k = config[meta::TOPK];
         {
             std::lock_guard<std::mutex> lk(mutex_);
-            index_->Search((float*)p_data, nullptr, rows, dim, config[meta::TOPK].get<int64_t>(), p_dist, p_id,
-                           s_params, blacklist);
+            // index_->ori_data_ = (float*) data_.get();
+            index_->Search((float*)p_data, (float*)data_.get(), rows, dim, topK, p_dist, p_id, s_params, blacklist);
         }
 
         auto ret_ds = std::make_shared<Dataset>();
@@ -108,15 +110,15 @@ NSG::Query(const DatasetPtr& dataset_ptr, const Config& config) {
 }
 
 void
-NSG::Train(const DatasetPtr& dataset_ptr, const Config& config) {
+NSG_NM::Train(const DatasetPtr& dataset_ptr, const Config& config) {
     auto idmap = std::make_shared<IDMAP>();
     idmap->Train(dataset_ptr, config);
     idmap->AddWithoutIds(dataset_ptr, config);
     impl::Graph knng;
     const float* raw_data = idmap->GetRawVectors();
-    const int64_t device_id = config[knowhere::meta::DEVICEID].get<int64_t>();
     const int64_t k = config[IndexParams::knng].get<int64_t>();
 #ifdef MILVUS_GPU_VERSION
+    const int64_t device_id = config[knowhere::meta::DEVICEID].get<int64_t>();
     if (device_id == -1) {
         auto preprocess_index = std::make_shared<IVF>();
         preprocess_index->Train(dataset_ptr, config);
@@ -148,12 +150,12 @@ NSG::Train(const DatasetPtr& dataset_ptr, const Config& config) {
 }
 
 int64_t
-NSG::Count() {
+NSG_NM::Count() {
     return index_->ntotal;
 }
 
 int64_t
-NSG::Dim() {
+NSG_NM::Dim() {
     return index_->dimension;
 }
 

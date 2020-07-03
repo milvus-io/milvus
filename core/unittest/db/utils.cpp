@@ -189,7 +189,7 @@ DBTest::SetUp() {
     milvus::scheduler::CPUBuilderInst::GetInstance()->Start();
 
     auto options = GetOptions();
-    options.insert_cache_immediately_ = true;
+    // options.insert_cache_immediately_ = true;
     BuildDB(options);
 
     std::string config_path(options.meta_.path_ + CONFIG_FILE);

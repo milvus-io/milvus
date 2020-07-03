@@ -34,6 +34,11 @@ class VectorIndexFormat {
     virtual void
     write(const storage::FSHandlerPtr& fs_ptr, const std::string& location,
           const segment::VectorIndexPtr& vector_index) = 0;
+
+    virtual void
+    read(const storage::FSHandlerPtr& fs_ptr, const std::string& location, knowhere::BinaryPtr raw_data,
+         segment::VectorIndexPtr& vector_index) {
+    }
 };
 
 using VectorIndexFormatPtr = std::shared_ptr<VectorIndexFormat>;

@@ -92,6 +92,11 @@ IsBinaryIndexType(knowhere::IndexType type) {
     return type == knowhere::IndexEnum::INDEX_FAISS_BIN_IDMAP || type == knowhere::IndexEnum::INDEX_FAISS_BIN_IVFFLAT;
 }
 
+bool
+IndexSupportOffset(EngineType type) {
+    return type == EngineType::FAISS_IVFFLAT || type == EngineType::HNSW || type == EngineType::NSG_MIX;
+}
+
 }  // namespace
 
 #ifdef MILVUS_GPU_VERSION
@@ -448,7 +453,12 @@ ExecutionEngineImpl::Load(bool to_cache) {
             try {
                 segment::SegmentPtr segment_ptr;
                 segment_reader_ptr->GetSegment(segment_ptr);
-                auto status = segment_reader_ptr->LoadVectorIndex(location_, segment_ptr->vector_index_ptr_);
+                if (IndexSupportOffset(index_type_)) {
+                    auto status =
+                        segment_reader_ptr->LoadVectorIndexWithRawData(location_, segment_ptr->vector_index_ptr_);
+                } else {
+                    auto status = segment_reader_ptr->LoadVectorIndex(location_, segment_ptr->vector_index_ptr_);
+                }
                 index_ = segment_ptr->vector_index_ptr_->GetVectorIndex();
 
                 if (index_ == nullptr) {

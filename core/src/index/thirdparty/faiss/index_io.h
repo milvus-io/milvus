@@ -37,6 +37,10 @@ void write_index (const Index *idx, const char *fname);
 void write_index (const Index *idx, FILE *f);
 void write_index (const Index *idx, IOWriter *writer);
 
+void write_index_nm (const Index *idx, const char *fname);
+void write_index_nm (const Index *idx, FILE *f);
+void write_index_nm (const Index *idx, IOWriter *writer);
+
 void write_index_binary (const IndexBinary *idx, const char *fname);
 void write_index_binary (const IndexBinary *idx, FILE *f);
 void write_index_binary (const IndexBinary *idx, IOWriter *writer);
@@ -51,6 +55,10 @@ const int IO_FLAG_ONDISK_SAME_DIR = 4;
 Index *read_index (const char *fname, int io_flags = 0);
 Index *read_index (FILE * f, int io_flags = 0);
 Index *read_index (IOReader *reader, int io_flags = 0);
+
+Index *read_index_nm (const char *fname, int io_flags = 0);
+Index *read_index_nm (FILE * f, int io_flags = 0);
+Index *read_index_nm (IOReader *reader, int io_flags = 0);
 
 IndexBinary *read_index_binary (const char *fname, int io_flags = 0);
 IndexBinary *read_index_binary (FILE * f, int io_flags = 0);
@@ -67,6 +75,9 @@ void write_ProductQuantizer (const ProductQuantizer*pq, IOWriter *f);
 
 void write_InvertedLists (const InvertedLists *ils, IOWriter *f);
 InvertedLists *read_InvertedLists (IOReader *reader, int io_flags = 0);
+
+void write_InvertedLists_nm (const InvertedLists *ils, IOWriter *f);
+InvertedLists *read_InvertedLists_nm (IOReader *reader, int io_flags = 0);
 
 
 } // namespace faiss

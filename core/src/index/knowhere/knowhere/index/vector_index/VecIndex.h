@@ -25,6 +25,8 @@
 namespace milvus {
 namespace knowhere {
 
+#define RAW_DATA "RAW_DATA"
+
 class VecIndex : public Index {
  public:
     virtual void

@@ -62,6 +62,8 @@ set(faiss_srcs
         ${INDEX_SOURCE_DIR}/knowhere/knowhere/index/vector_index/IndexIVF.cpp
         ${INDEX_SOURCE_DIR}/knowhere/knowhere/index/vector_index/IndexIVFSQ.cpp
         ${INDEX_SOURCE_DIR}/knowhere/knowhere/index/vector_index/IndexIVFPQ.cpp
+        ${INDEX_SOURCE_DIR}/knowhere/knowhere/index/vector_offset_index/OffsetBaseIndex.cpp
+        ${INDEX_SOURCE_DIR}/knowhere/knowhere/index/vector_offset_index/IndexIVF_NM.cpp
         )
 if (MILVUS_GPU_VERSION)
 set(faiss_srcs ${faiss_srcs}
@@ -71,6 +73,7 @@ set(faiss_srcs ${faiss_srcs}
         ${INDEX_SOURCE_DIR}/knowhere/knowhere/index/vector_index/gpu/IndexGPUIVFSQ.cpp
         ${INDEX_SOURCE_DIR}/knowhere/knowhere/index/vector_index/gpu/IndexGPUIVFPQ.cpp
         ${INDEX_SOURCE_DIR}/knowhere/knowhere/index/vector_index/gpu/IndexIVFSQHybrid.cpp
+        ${INDEX_SOURCE_DIR}/knowhere/knowhere/index/vector_offset_index/gpu/IndexGPUIVF_NM.cpp
         )
 endif ()
 
@@ -121,6 +124,22 @@ target_link_libraries(test_ivf ${depend_libs} ${unittest_libs} ${basic_libs})
 install(TARGETS test_ivf DESTINATION unittest)
 
 ################################################################################
+#<IVFNM-TEST-CPU>
+if (NOT TARGET test_ivf_cpu_nm)
+    add_executable(test_ivf_cpu_nm test_ivf_cpu_nm.cpp ${faiss_srcs} ${util_srcs})
+endif ()
+target_link_libraries(test_ivf_cpu_nm ${depend_libs} ${unittest_libs} ${basic_libs})
+install(TARGETS test_ivf_cpu_nm DESTINATION unittest)
+
+################################################################################
+#<IVFNM-TEST-GPU>
+if (NOT TARGET test_ivf_gpu_nm)
+    add_executable(test_ivf_gpu_nm test_ivf_gpu_nm.cpp ${faiss_srcs} ${util_srcs})
+endif ()
+target_link_libraries(test_ivf_gpu_nm ${depend_libs} ${unittest_libs} ${basic_libs})
+install(TARGETS test_ivf_gpu_nm DESTINATION unittest)
+
+################################################################################
 #<BinaryIDMAP-TEST>
 if (NOT TARGET test_binaryidmap)
     add_executable(test_binaryidmap test_binaryidmap.cpp ${faiss_srcs} ${util_srcs})
@@ -152,7 +171,7 @@ endif ()
 include_directories(${INDEX_SOURCE_DIR}/knowhere/knowhere/index/vector_index/impl/nsg)
 aux_source_directory(${INDEX_SOURCE_DIR}/knowhere/knowhere/index/vector_index/impl/nsg nsg_src)
 set(interface_src
-        ${INDEX_SOURCE_DIR}/knowhere/knowhere/index/vector_index/IndexNSG.cpp
+        ${INDEX_SOURCE_DIR}/knowhere/knowhere/index/vector_offset_index/IndexNSG_NM.cpp
         )
 if (NOT TARGET test_nsg)
     add_executable(test_nsg test_nsg.cpp ${interface_src} ${nsg_src} ${util_srcs} ${faiss_srcs})
@@ -163,7 +182,7 @@ install(TARGETS test_nsg DESTINATION unittest)
 ################################################################################
 #<HNSW-TEST>
 set(hnsw_srcs
-        ${INDEX_SOURCE_DIR}/knowhere/knowhere/index/vector_index/IndexHNSW.cpp
+        ${INDEX_SOURCE_DIR}/knowhere/knowhere/index/vector_offset_index/IndexHNSW_NM.cpp
         )
 if (NOT TARGET test_hnsw)
     add_executable(test_hnsw test_hnsw.cpp ${hnsw_srcs} ${util_srcs})
