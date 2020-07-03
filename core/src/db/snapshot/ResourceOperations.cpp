@@ -126,6 +126,8 @@ SegmentCommit::Ptr
 SegmentCommitOperation::GetPrevResource() const {
     if (context_.new_segment_files.size() > 0) {
         return GetStartedSS()->GetSegmentCommitBySegmentId(context_.new_segment_files[0]->GetSegmentId());
+    } else if (context_.stale_segment_file != nullptr) {
+        return GetStartedSS()->GetSegmentCommitBySegmentId(context_.stale_segment_file->GetSegmentId());
     }
     return nullptr;
 }
@@ -182,9 +184,13 @@ SegmentCommitOperation::DoExecute(Store& store) {
 
 Status
 SegmentCommitOperation::PreCheck() {
-    if (context_.new_segment_files.size() == 0) {
+    if (context_.stale_segment_file == nullptr && context_.new_segment_files.size() == 0) {
         std::stringstream emsg;
         emsg << GetRepr() << ". new_segment_files should not be empty in context";
+        return Status(SS_INVALID_CONTEX_ERROR, emsg.str());
+    } else if (context_.stale_segment_file != nullptr && context_.new_segment_files.size() > 0) {
+        std::stringstream emsg;
+        emsg << GetRepr() << ". new_segment_files should be empty in context";
         return Status(SS_INVALID_CONTEX_ERROR, emsg.str());
     }
     return Status::OK();

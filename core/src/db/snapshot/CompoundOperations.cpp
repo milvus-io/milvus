@@ -84,6 +84,44 @@ BuildOperation::CommitNewSegmentFile(const SegmentFileContext& context, SegmentF
     return Status::OK();
 }
 
+DropIndexOperation::DropIndexOperation(const OperationContext& context, ScopedSnapshotT prev_ss)
+    : BaseT(context, prev_ss) {
+}
+
+Status
+DropIndexOperation::PreCheck() {
+    if (context_.stale_segment_file == nullptr) {
+        std::stringstream emsg;
+        emsg << GetRepr() << ". Stale segment is requried";
+        return Status(SS_INVALID_CONTEX_ERROR, emsg.str());
+    }
+    // TODO: Check segment file type
+
+    return Status::OK();
+}
+
+Status
+DropIndexOperation::DoExecute(Store& store) {
+    SegmentCommitOperation sc_op(context_, GetAdjustedSS());
+    STATUS_CHECK(sc_op(store));
+    STATUS_CHECK(sc_op.GetResource(context_.new_segment_commit));
+    AddStepWithLsn(*context_.new_segment_commit, context_.lsn);
+
+    OperationContext cc_context;
+    PartitionCommitOperation pc_op(context_, GetAdjustedSS());
+    STATUS_CHECK(pc_op(store));
+    STATUS_CHECK(pc_op.GetResource(cc_context.new_partition_commit));
+    AddStepWithLsn(*cc_context.new_partition_commit, context_.lsn);
+    context_.new_partition_commit = cc_context.new_partition_commit;
+
+    CollectionCommitOperation cc_op(cc_context, GetAdjustedSS());
+    STATUS_CHECK(cc_op(store));
+    STATUS_CHECK(cc_op.GetResource(context_.new_collection_commit));
+    AddStepWithLsn(*context_.new_collection_commit, context_.lsn);
+
+    return Status::OK();
+}
+
 NewSegmentOperation::NewSegmentOperation(const OperationContext& context, ScopedSnapshotT prev_ss)
     : BaseT(context, prev_ss) {
 }
@@ -339,6 +377,14 @@ CreatePartitionOperation::DoExecute(Store& store) {
     auto collection = GetAdjustedSS()->GetCollection();
     auto partition = context_.new_partition;
 
+    if (context_.new_partition) {
+        if (GetAdjustedSS()->GetPartition(context_.new_partition->GetName())) {
+            std::stringstream emsg;
+            emsg << GetRepr() << ". Duplicate Partition \"" << context_.new_partition->GetName() << "\"";
+            return Status(SS_DUPLICATED_ERROR, emsg.str());
+        }
+    }
+
     PartitionCommitPtr pc;
     OperationContext pc_context;
     pc_context.new_partition = partition;
@@ -470,7 +516,7 @@ DropCollectionOperation::DoExecute(Store& store) {
         return Status(SS_INVALID_CONTEX_ERROR, emsg.str());
     }
     context_.collection->Deactivate();
-    AddStepWithLsn(*context_.collection, context_.lsn);
+    AddStepWithLsn(*context_.collection, context_.lsn, false);
     return Status::OK();
 }
 
