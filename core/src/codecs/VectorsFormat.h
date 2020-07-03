@@ -20,6 +20,7 @@
 #include <memory>
 #include <vector>
 
+#include "index/knowhere/knowhere/common/BinarySet.h"
 #include "segment/Vectors.h"
 #include "storage/FSHandler.h"
 
@@ -36,6 +37,9 @@ class VectorsFormat {
 
     virtual void
     read_uids(const storage::FSHandlerPtr& fs_ptr, std::vector<segment::doc_id_t>& uids) = 0;
+
+    virtual void
+    read_vectors(const storage::FSHandlerPtr& fs_ptr, knowhere::BinaryPtr& raw_vectors) = 0;
 
     virtual void
     read_vectors(const storage::FSHandlerPtr& fs_ptr, off_t offset, size_t num_bytes,

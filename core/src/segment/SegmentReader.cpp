@@ -124,6 +124,22 @@ SegmentReader::LoadVectorIndex(const std::string& location, segment::VectorIndex
 }
 
 Status
+SegmentReader::LoadVectorIndexWithRawData(const std::string& location, segment::VectorIndexPtr& vector_index_ptr) {
+    codec::DefaultCodec default_codec;
+    try {
+        fs_ptr_->operation_ptr_->CreateDirectory();
+        knowhere::BinaryPtr raw_data = nullptr;
+        default_codec.GetVectorsFormat()->read_vectors(fs_ptr_, raw_data);
+        default_codec.GetVectorIndexFormat()->read(fs_ptr_, location, raw_data, vector_index_ptr);
+    } catch (std::exception& e) {
+        std::string err_msg = "Failed to load vector index with row data: " + std::string(e.what());
+        LOG_ENGINE_ERROR_ << err_msg;
+        return Status(DB_ERROR, err_msg);
+    }
+    return Status::OK();
+}
+
+Status
 SegmentReader::LoadBloomFilter(segment::IdBloomFilterPtr& id_bloom_filter_ptr) {
     codec::DefaultCodec default_codec;
     try {

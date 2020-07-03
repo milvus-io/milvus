@@ -41,6 +41,9 @@ class DefaultVectorsFormat : public VectorsFormat {
     read_uids(const storage::FSHandlerPtr& fs_ptr, std::vector<segment::doc_id_t>& uids) override;
 
     void
+    read_vectors(const storage::FSHandlerPtr& fs_ptr, knowhere::BinaryPtr& raw_vectors) override;
+
+    void
     read_vectors(const storage::FSHandlerPtr& fs_ptr, off_t offset, size_t num_bytes,
                  std::vector<uint8_t>& raw_vectors) override;
 
@@ -57,6 +60,10 @@ class DefaultVectorsFormat : public VectorsFormat {
     void
     read_vectors_internal(const storage::FSHandlerPtr& fs_ptr, const std::string& file_path, off_t offset, size_t num,
                           std::vector<uint8_t>& raw_vectors);
+
+    void
+    read_vectors_internal(const storage::FSHandlerPtr& fs_ptr, const std::string& file_path,
+                          knowhere::BinaryPtr& raw_vectors);
 
     void
     read_uids_internal(const storage::FSHandlerPtr& fs_ptr, const std::string& file_path,
