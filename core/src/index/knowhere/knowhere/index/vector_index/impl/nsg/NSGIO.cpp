@@ -22,7 +22,7 @@ write_index(NsgIndex* index, MemoryIOWriter& writer) {
     writer(&index->ntotal, sizeof(index->ntotal), 1);
     writer(&index->dimension, sizeof(index->dimension), 1);
     writer(&index->navigation_point, sizeof(index->navigation_point), 1);
-    writer(index->ori_data_, sizeof(float) * index->ntotal * index->dimension, 1);
+    // writer(index->ori_data_, sizeof(float) * index->ntotal * index->dimension, 1);
     writer(index->ids_, sizeof(int64_t) * index->ntotal, 1);
 
     for (unsigned i = 0; i < index->ntotal; ++i) {
@@ -41,9 +41,9 @@ read_index(MemoryIOReader& reader) {
     auto index = new NsgIndex(dimension, ntotal);
     reader(&index->navigation_point, sizeof(index->navigation_point), 1);
 
-    index->ori_data_ = new float[index->ntotal * index->dimension];
+    // index->ori_data_ = new float[index->ntotal * index->dimension];
     index->ids_ = new int64_t[index->ntotal];
-    reader(index->ori_data_, sizeof(float) * index->ntotal * index->dimension, 1);
+    // reader(index->ori_data_, sizeof(float) * index->ntotal * index->dimension, 1);
     reader(index->ids_, sizeof(int64_t) * index->ntotal, 1);
 
     index->nsg.reserve(index->ntotal);

@@ -34,6 +34,10 @@ class DefaultVectorIndexFormat : public VectorIndexFormat {
          segment::VectorIndexPtr& vector_index) override;
 
     void
+    read(const storage::FSHandlerPtr& fs_ptr, const std::string& location, knowhere::BinaryPtr raw_data,
+         segment::VectorIndexPtr& vector_index) override;
+
+    void
     write(const storage::FSHandlerPtr& fs_ptr, const std::string& location,
           const segment::VectorIndexPtr& vector_index) override;
 
@@ -48,7 +52,7 @@ class DefaultVectorIndexFormat : public VectorIndexFormat {
 
  private:
     knowhere::VecIndexPtr
-    read_internal(const storage::FSHandlerPtr& fs_ptr, const std::string& path);
+    read_internal(const storage::FSHandlerPtr& fs_ptr, const std::string& path, knowhere::BinaryPtr raw_data = nullptr);
 
  private:
     std::mutex mutex_;
