@@ -56,5 +56,30 @@ struct SegmentsToSearchCollector : public snapshot::IterateHandler<snapshot::Seg
     meta::FilesHolder& holder_;
 };
 
+///////////////////////////////////////////////////////////////////////////////
+struct GetVectorByIdSegmentHandler : public snapshot::IterateHandler<snapshot::Segment> {
+    using ResourceT = snapshot::Segment;
+    using BaseT = snapshot::IterateHandler<ResourceT>;
+    GetVectorByIdSegmentHandler(const std::shared_ptr<server::Context>& context, snapshot::ScopedSnapshotT ss,
+                                const snapshot::PartitionPtr& partition);
+
+    Status
+    Handle(const typename ResourceT::Ptr&) override;
+
+    const std::shared_ptr<server::Context>& context_;
+    const snapshot::PartitionPtr& partition_;
+};
+
+struct GetVectorByIdPartitionHandler : public snapshot::IterateHandler<snapshot::Partition> {
+    using ResourceT = snapshot::Partition;
+    using BaseT = snapshot::IterateHandler<ResourceT>;
+    GetVectorByIdPartitionHandler(const std::shared_ptr<server::Context>& context, snapshot::ScopedSnapshotT ss);
+
+    Status
+    Handle(const typename ResourceT::Ptr&) override;
+
+    const std::shared_ptr<server::Context>& context_;
+};
+
 }  // namespace engine
 }  // namespace milvus

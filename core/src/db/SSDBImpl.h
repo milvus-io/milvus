@@ -70,7 +70,25 @@ class SSDBImpl {
     Status
     ShowPartitions(const std::string& collection_name, std::vector<std::string>& partition_names);
 
+    Status
+    GetVectorsByID(const std::string& collection_name, const IDNumbers& id_array,
+                   std::vector<engine::VectorsData>& vectors);
+
+    Status
+    GetEntitiesByID(const std::string& collection_name, const IDNumbers& id_array,
+                    std::vector<engine::VectorsData>& vectors, std::vector<engine::AttrsData>& attrs);
+
  private:
+    Status
+    GetVectorsByIdHelper(const IDNumbers& id_array, std::vector<engine::VectorsData>& vectors,
+                         meta::FilesHolder& files_holder);
+
+    Status
+    GetEntitiesByIdHelper(const std::string& collection_id, const IDNumbers& id_array,
+                          std::unordered_map<std::string, engine::meta::hybrid::DataType>& attr_type,
+                          std::vector<engine::VectorsData>& vectors, std::vector<engine::AttrsData>& attrs,
+                          meta::FilesHolder& files_holder);
+
     void
     InternalFlush(const std::string& collection_id = "");
 

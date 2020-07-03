@@ -62,6 +62,7 @@ LoadVectorFieldHandler::Handle(const snapshot::FieldPtr& field) {
     return status;
 }
 
+///////////////////////////////////////////////////////////////////////////////
 SegmentsToSearchCollector::SegmentsToSearchCollector(snapshot::ScopedSnapshotT ss, meta::FilesHolder& holder)
     : BaseT(ss), holder_(holder) {
 }
@@ -91,6 +92,42 @@ SegmentsToSearchCollector::Handle(const snapshot::SegmentCommitPtr& segment_comm
     /* } */
 
     holder_.MarkFile(schema);
+}
+
+///////////////////////////////////////////////////////////////////////////////
+GetVectorByIdSegmentHandler::GetVectorByIdSegmentHandler(const std::shared_ptr<milvus::server::Context>& context,
+                                                         milvus::engine::snapshot::ScopedSnapshotT ss,
+                                                         const snapshot::PartitionPtr& partition)
+    : BaseT(ss), context_(context), partition_(partition) {
+}
+
+Status
+GetVectorByIdSegmentHandler::Handle(const snapshot::SegmentPtr& segment) {
+    if (partition_->GetID() != segment->GetPartitionId()) {
+        return Status::OK();
+    }
+
+    // SS TODO
+
+    return Status::OK();
+}
+
+GetVectorByIdPartitionHandler::GetVectorByIdPartitionHandler(const std::shared_ptr<milvus::server::Context>& context,
+                                                             milvus::engine::snapshot::ScopedSnapshotT ss)
+    : BaseT(ss), context_(context) {
+}
+
+Status
+GetVectorByIdPartitionHandler::Handle(const snapshot::PartitionPtr& partion) {
+    if (context_ && context_->IsConnectionBroken()) {
+        LOG_ENGINE_DEBUG_ << "Connection broken";
+        return Status(DB_ERROR, "Connection broken");
+    }
+
+    auto segment_handler = std::make_shared<GetVectorByIdSegmentHandler>(context_, ss_, partion);
+    segment_handler->Iterate();
+
+    return segment_handler->GetStatus();
 }
 
 }  // namespace engine
