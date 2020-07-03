@@ -70,6 +70,7 @@ class IVFNMGPUTest : public DataGen,
     milvus::knowhere::IVFPtr index_ = nullptr;
 };
 
+#ifdef MILVUS_GPU_VERSION
 TEST_F(IVFNMGPUTest, ivf_basic_gpu) {
     assert(!xb.empty());
 
@@ -108,7 +109,6 @@ TEST_F(IVFNMGPUTest, ivf_basic_gpu) {
     auto result_bs_1 = index_->Query(query_dataset, conf_);
     AssertAnns(result_bs_1, nq, k, CheckMode::CHECK_NOT_EQUAL);
 
-#ifdef MILVUS_GPU_VERSION
     milvus::knowhere::FaissGpuResourceMgr::GetInstance().Dump();
-#endif
 }
+#endif

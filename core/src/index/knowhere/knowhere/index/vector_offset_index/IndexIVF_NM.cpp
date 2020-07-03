@@ -66,14 +66,14 @@ IVF_NM::Load(const BinarySet& binary_set) {
     const float* original_data = (const float*)binary->data.get();
     auto ivf_index = dynamic_cast<faiss::IndexIVF*>(index_.get());
     auto invlists = ivf_index->invlists;
-
-#ifdef USE_CPU
-    auto ails = dynamic_cast<faiss::ArrayInvertedLists*>(invlists);
     auto d = ivf_index->d;
     auto nb = (size_t)(binary->size / invlists->code_size);
     auto arranged_data = new uint8_t[d * sizeof(float) * nb];
     prefix_sum.resize(invlists->nlist);
     size_t curr_index = 0;
+
+#ifndef MILVUS_GPU_VERSION
+    auto ails = dynamic_cast<faiss::ArrayInvertedLists*>(invlists);
     for (int i = 0; i < invlists->nlist; i++) {
         auto list_size = ails->ids[i].size();
         for (int j = 0; j < list_size; j++) {
@@ -85,14 +85,8 @@ IVF_NM::Load(const BinarySet& binary_set) {
     }
 #else
     auto rol = dynamic_cast<faiss::ReadOnlyArrayInvertedLists*>(invlists);
-    auto d = ivf_index->d;
-    auto nb = (size_t)(binary->size / invlists->code_size);
     auto lengths = rol->readonly_length;
-    // auto rol_data = (const float *) rol->pin_readonly_codes->data;
     auto rol_ids = (const int64_t*)rol->pin_readonly_ids->data;
-    auto arranged_data = new uint8_t[d * sizeof(float) * nb];
-    prefix_sum.resize(invlists->nlist);
-    size_t curr_index = 0;
     for (int i = 0; i < invlists->nlist; i++) {
         auto list_size = lengths[i];
         for (int j = 0; j < list_size; j++) {
