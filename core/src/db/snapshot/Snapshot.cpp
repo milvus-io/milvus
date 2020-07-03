@@ -90,11 +90,11 @@ Snapshot::Snapshot(ID_TYPE ss_id) {
             for (auto s_f_id : segment_commit_mappings) {
                 auto segment_file = segment_files_holder.GetResource(s_f_id, false);
                 auto segment_file_id = segment_file->GetID();
-                auto segment_file_element_id = segment_file->GetFieldElementId();
-                auto field_element = field_elements_holder.GetResource(segment_file_element_id, false);
+                auto field_element_id = segment_file->GetFieldElementId();
+                auto field_element = field_elements_holder.GetResource(field_element_id, false);
                 AddResource<FieldElement>(field_element);
                 AddResource<SegmentFile>(segment_file);
-                element_segfiles_map_[segment_file_element_id][segment_id] = segment_file_id;
+                element_segfiles_map_[field_element_id][segment_id] = segment_file_id;
             }
         }
     }
