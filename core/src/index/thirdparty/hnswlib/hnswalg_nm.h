@@ -46,9 +46,6 @@ namespace hnswlib {
             dist_func_param_ = s->get_dist_func_param();
             M_ = M;
             maxM_ = M_;
-            cmli_cnt_ = 0;
-            cmli_cnt2_ = 0;
-            cmli_time_ = 0.0;
             maxM0_ = M_ * 2;
             ef_construction_ = std::max(ef_construction,M_);
             ef_ = 10;
@@ -124,9 +121,6 @@ namespace hnswlib {
         size_t M_;
         size_t maxM_;
         size_t maxM0_;
-        size_t cmli_cnt_;
-        size_t cmli_cnt2_;
-        double cmli_time_;
         size_t ef_construction_;
 
         double mult_, revSize_;
@@ -497,13 +491,8 @@ namespace hnswlib {
                                              dist_func_param_), data[j]);
                     }
 
-                    if (candidates.size() >= Mcurmax) cmli_cnt2_ ++;
                     size_t indx = 0;
-                    auto t0 = std::chrono::high_resolution_clock::now();
                     getNeighborsByHeuristic2(candidates, Mcurmax, data, indx, pdata);
-                    auto t1 = std::chrono::high_resolution_clock::now();
-                    cmli_time_ += (double)std::chrono::duration_cast<std::chrono::milliseconds>( t1 - t0 ).count();
-                    cmli_cnt_ ++;
 
 //                while (candidates.size() > 0) {
 //                    data[indx] = candidates.top().second;

@@ -59,14 +59,10 @@ class IVF : public VecIndex, public FaissBaseIndex {
 #endif
 
     int64_t
-    Count() override {
-        return index_->ntotal;
-    }
+    Count() override;
 
     int64_t
-    Dim() override {
-        return index_->d;
-    }
+    Dim() override;
 
 #if 0
     DatasetPtr

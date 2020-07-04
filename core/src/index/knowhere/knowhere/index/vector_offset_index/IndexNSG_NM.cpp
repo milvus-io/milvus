@@ -151,11 +151,17 @@ NSG_NM::Train(const DatasetPtr& dataset_ptr, const Config& config) {
 
 int64_t
 NSG_NM::Count() {
+    if (!index_) {
+        KNOWHERE_THROW_MSG("index not initialize");
+    }
     return index_->ntotal;
 }
 
 int64_t
 NSG_NM::Dim() {
+    if (!index_) {
+        KNOWHERE_THROW_MSG("index not initialize");
+    }
     return index_->dimension;
 }
 
