@@ -44,6 +44,7 @@
 #include "scheduler/job/SearchJob.h"
 #include "segment/SegmentReader.h"
 #include "segment/SegmentWriter.h"
+#include "server/ValidationUtil.h"
 #include "utils/CommonUtil.h"
 #include "utils/Error.h"
 #include "utils/Exception.h"
@@ -963,6 +964,10 @@ ExecutionEngineImpl::HybridSearch(scheduler::SearchJobPtr search_job,
     search_job->SetVectors(vectors);
     search_job->vector_count() = nq;
     search_job->topk() = topk;
+    status = server::ValidateSearchTopk(topk);
+    if (!status.ok()) {
+        return status;
+    }
     search_job->vector_params() = vector_query->extra_params;
 
     status = Search(search_ids, distances, search_job, hybrid);
