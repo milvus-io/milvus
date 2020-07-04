@@ -335,5 +335,21 @@ IVF_NM::SealImpl() {
 #endif
 }
 
+int64_t
+IVF_NM::Count() {
+    if (!index_) {
+        KNOWHERE_THROW_MSG("index not initialize");
+    }
+    return index_->ntotal;
+}
+
+int64_t
+IVF_NM::Dim() {
+    if (!index_) {
+        KNOWHERE_THROW_MSG("index not initialize");
+    }
+    return index_->d;
+}
+
 }  // namespace knowhere
 }  // namespace milvus
