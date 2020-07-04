@@ -21,6 +21,7 @@
 
 #include "Vectors.h"
 #include "codecs/default/DefaultCodec.h"
+#include "knowhere/index/vector_index/VecIndex.h"
 #include "storage/disk/DiskIOReader.h"
 #include "storage/disk/DiskIOWriter.h"
 #include "storage/disk/DiskOperation.h"
@@ -45,9 +46,8 @@ SegmentReader::LoadCache(bool& in_cache) {
 
 Status
 SegmentReader::Load() {
-    // TODO(zhiru)
-    codec::DefaultCodec default_codec;
     try {
+        auto& default_codec = codec::DefaultCodec::instance();
         fs_ptr_->operation_ptr_->CreateDirectory();
         default_codec.GetVectorsFormat()->read(fs_ptr_, segment_ptr_->vectors_ptr_);
         default_codec.GetAttrsFormat()->read(fs_ptr_, segment_ptr_->attrs_ptr_);
@@ -62,8 +62,8 @@ SegmentReader::Load() {
 
 Status
 SegmentReader::LoadVectors(off_t offset, size_t num_bytes, std::vector<uint8_t>& raw_vectors) {
-    codec::DefaultCodec default_codec;
     try {
+        auto& default_codec = codec::DefaultCodec::instance();
         fs_ptr_->operation_ptr_->CreateDirectory();
         default_codec.GetVectorsFormat()->read_vectors(fs_ptr_, offset, num_bytes, raw_vectors);
     } catch (std::exception& e) {
@@ -77,8 +77,8 @@ SegmentReader::LoadVectors(off_t offset, size_t num_bytes, std::vector<uint8_t>&
 Status
 SegmentReader::LoadAttrs(const std::string& field_name, off_t offset, size_t num_bytes,
                          std::vector<uint8_t>& raw_attrs) {
-    codec::DefaultCodec default_codec;
     try {
+        auto& default_codec = codec::DefaultCodec::instance();
         fs_ptr_->operation_ptr_->CreateDirectory();
         default_codec.GetAttrsFormat()->read_attrs(fs_ptr_, field_name, offset, num_bytes, raw_attrs);
     } catch (std::exception& e) {
@@ -91,8 +91,8 @@ SegmentReader::LoadAttrs(const std::string& field_name, off_t offset, size_t num
 
 Status
 SegmentReader::LoadUids(std::vector<doc_id_t>& uids) {
-    codec::DefaultCodec default_codec;
     try {
+        auto& default_codec = codec::DefaultCodec::instance();
         fs_ptr_->operation_ptr_->CreateDirectory();
         default_codec.GetVectorsFormat()->read_uids(fs_ptr_, uids);
     } catch (std::exception& e) {
@@ -111,8 +111,8 @@ SegmentReader::GetSegment(SegmentPtr& segment_ptr) {
 
 Status
 SegmentReader::LoadVectorIndex(const std::string& location, segment::VectorIndexPtr& vector_index_ptr) {
-    codec::DefaultCodec default_codec;
     try {
+        auto& default_codec = codec::DefaultCodec::instance();
         fs_ptr_->operation_ptr_->CreateDirectory();
         default_codec.GetVectorIndexFormat()->read(fs_ptr_, location, vector_index_ptr);
     } catch (std::exception& e) {
@@ -125,12 +125,12 @@ SegmentReader::LoadVectorIndex(const std::string& location, segment::VectorIndex
 
 Status
 SegmentReader::LoadVectorIndexWithRawData(const std::string& location, segment::VectorIndexPtr& vector_index_ptr) {
-    codec::DefaultCodec default_codec;
     try {
+        auto& default_codec = codec::DefaultCodec::instance();
         fs_ptr_->operation_ptr_->CreateDirectory();
         knowhere::BinaryPtr raw_data = nullptr;
         default_codec.GetVectorsFormat()->read_vectors(fs_ptr_, raw_data);
-        default_codec.GetVectorIndexFormat()->read(fs_ptr_, location, raw_data, vector_index_ptr);
+        default_codec.GetVectorIndexFormat()->read(fs_ptr_, location, RAW_DATA, raw_data, vector_index_ptr);
     } catch (std::exception& e) {
         std::string err_msg = "Failed to load vector index with row data: " + std::string(e.what());
         LOG_ENGINE_ERROR_ << err_msg;
@@ -141,8 +141,8 @@ SegmentReader::LoadVectorIndexWithRawData(const std::string& location, segment::
 
 Status
 SegmentReader::LoadBloomFilter(segment::IdBloomFilterPtr& id_bloom_filter_ptr) {
-    codec::DefaultCodec default_codec;
     try {
+        auto& default_codec = codec::DefaultCodec::instance();
         fs_ptr_->operation_ptr_->CreateDirectory();
         default_codec.GetIdBloomFilterFormat()->read(fs_ptr_, id_bloom_filter_ptr);
     } catch (std::exception& e) {
@@ -155,8 +155,8 @@ SegmentReader::LoadBloomFilter(segment::IdBloomFilterPtr& id_bloom_filter_ptr) {
 
 Status
 SegmentReader::LoadDeletedDocs(segment::DeletedDocsPtr& deleted_docs_ptr) {
-    codec::DefaultCodec default_codec;
     try {
+        auto& default_codec = codec::DefaultCodec::instance();
         fs_ptr_->operation_ptr_->CreateDirectory();
         default_codec.GetDeletedDocsFormat()->read(fs_ptr_, deleted_docs_ptr);
     } catch (std::exception& e) {
@@ -169,8 +169,8 @@ SegmentReader::LoadDeletedDocs(segment::DeletedDocsPtr& deleted_docs_ptr) {
 
 Status
 SegmentReader::ReadDeletedDocsSize(size_t& size) {
-    codec::DefaultCodec default_codec;
     try {
+        auto& default_codec = codec::DefaultCodec::instance();
         fs_ptr_->operation_ptr_->CreateDirectory();
         default_codec.GetDeletedDocsFormat()->readSize(fs_ptr_, size);
     } catch (std::exception& e) {

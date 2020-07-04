@@ -32,8 +32,6 @@ constexpr double bloom_filter_error_rate = 0.01;
 
 void
 DefaultIdBloomFilterFormat::read(const storage::FSHandlerPtr& fs_ptr, segment::IdBloomFilterPtr& id_bloom_filter_ptr) {
-    const std::lock_guard<std::mutex> lock(mutex_);
-
     std::string dir_path = fs_ptr->operation_ptr_->GetDirectory();
     const std::string bloom_filter_file_path = dir_path + "/" + bloom_filter_filename_;
     scaling_bloom_t* bloom_filter =
@@ -51,8 +49,6 @@ DefaultIdBloomFilterFormat::read(const storage::FSHandlerPtr& fs_ptr, segment::I
 void
 DefaultIdBloomFilterFormat::write(const storage::FSHandlerPtr& fs_ptr,
                                   const segment::IdBloomFilterPtr& id_bloom_filter_ptr) {
-    const std::lock_guard<std::mutex> lock(mutex_);
-
     std::string dir_path = fs_ptr->operation_ptr_->GetDirectory();
     const std::string bloom_filter_file_path = dir_path + "/" + bloom_filter_filename_;
     if (scaling_bloom_flush(id_bloom_filter_ptr->GetBloomFilter()) == -1) {

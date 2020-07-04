@@ -17,7 +17,6 @@
 
 #pragma once
 
-#include <mutex>
 #include <string>
 
 #include "codecs/DeletedDocsFormat.h"
@@ -48,8 +47,6 @@ class DefaultDeletedDocsFormat : public DeletedDocsFormat {
     operator=(DefaultDeletedDocsFormat&&) = delete;
 
  private:
-    std::mutex mutex_;
-
     const std::string deleted_docs_filename_ = "deleted_docs";
 };
 

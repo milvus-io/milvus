@@ -24,7 +24,8 @@ namespace codec {
 
 class DefaultCodec : public Codec {
  public:
-    DefaultCodec();
+    static DefaultCodec&
+    instance();
 
     VectorsFormatPtr
     GetVectorsFormat() override;
@@ -43,6 +44,9 @@ class DefaultCodec : public Codec {
 
     IdBloomFilterFormatPtr
     GetIdBloomFilterFormat() override;
+
+ private:
+    DefaultCodec();
 
  private:
     VectorsFormatPtr vectors_format_ptr_;
