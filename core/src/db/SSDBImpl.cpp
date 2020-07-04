@@ -211,12 +211,14 @@ SSDBImpl::ShowPartitions(const std::string& collection_name, std::vector<std::st
 
 Status
 SSDBImpl::DropIndex(const std::string& collection_name, const std::string& field_name,
-        const std::string& field_element_name) {
+                    const std::string& field_element_name) {
     CHECK_INITIALIZED;
 
     LOG_ENGINE_DEBUG_ << "Drop index for collection: " << collection_name;
     snapshot::ScopedSnapshotT ss;
     STATUS_CHECK(snapshot::Snapshots::GetInstance().GetSnapshot(ss, collection_name));
+
+    // SS TODO: Check Index Type
 
     snapshot::OperationContext context;
     // SS TODO: no lsn for drop index
@@ -234,7 +236,7 @@ SSDBImpl::DropIndex(const std::string& collection_name, const std::string& field
 
     // SS TODO: Start merge task needed?
     /* std::set<std::string> merge_collection_ids = {collection_id}; */
-    /* StartMergeTask(merge_collection_ids, true);  // merge small files after drop index */
+    /* StartMergeTask(merge_collection_ids, true); */
     return Status::OK();
 }
 
