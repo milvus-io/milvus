@@ -112,6 +112,22 @@ BinaryIDMAP::QueryById(const DatasetPtr& dataset_ptr, const Config& config) {
 }
 #endif
 
+int64_t
+BinaryIDMAP::Count() {
+    if (!index_) {
+        KNOWHERE_THROW_MSG("index not initialize");
+    }
+    return index_->ntotal;
+}
+
+int64_t
+BinaryIDMAP::Dim() {
+    if (!index_) {
+        KNOWHERE_THROW_MSG("index not initialize");
+    }
+    return index_->d;
+}
+
 void
 BinaryIDMAP::Add(const DatasetPtr& dataset_ptr, const Config& config) {
     if (!index_) {

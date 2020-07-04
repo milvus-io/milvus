@@ -217,6 +217,22 @@ IVF::GetVectorById(const DatasetPtr& dataset_ptr, const Config& config) {
 }
 #endif
 
+int64_t
+IVF::Count() {
+    if (!index_) {
+        KNOWHERE_THROW_MSG("index not initialize");
+    }
+    return index_->ntotal;
+}
+
+int64_t
+IVF::Dim() {
+    if (!index_) {
+        KNOWHERE_THROW_MSG("index not initialize");
+    }
+    return index_->d;
+}
+
 void
 IVF::Seal() {
     if (!index_ || !index_->is_trained) {

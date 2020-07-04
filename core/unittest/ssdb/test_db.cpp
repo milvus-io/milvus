@@ -106,6 +106,12 @@ TEST_F(SSDBTest, CollectionTest) {
     ASSERT_TRUE(has);
     ASSERT_TRUE(status.ok());
 
+    ASSERT_EQ(ss->GetCollectionCommit()->GetRowCount(), 0);
+    milvus::engine::snapshot::SIZE_TYPE row_cnt = 0;
+    status = db_->GetCollectionRowCount(c1, row_cnt);
+    ASSERT_TRUE(status.ok());
+    ASSERT_EQ(row_cnt, 0);
+
     std::vector<std::string> names;
     status = db_->AllCollections(names);
     ASSERT_TRUE(status.ok());
@@ -134,4 +140,43 @@ TEST_F(SSDBTest, CollectionTest) {
 
     status = db_->DropCollection(c1);
     ASSERT_FALSE(status.ok());
+}
+
+TEST_F(SSDBTest, PartitionTest) {
+    LSN_TYPE lsn = 0;
+    auto next_lsn = [&]() -> decltype(lsn) {
+        return ++lsn;
+    };
+    std::string c1 = "c1";
+    auto status = CreateCollection(db_, c1, next_lsn());
+    ASSERT_TRUE(status.ok());
+
+    std::vector<std::string> partition_names;
+    status = db_->ShowPartitions(c1, partition_names);
+    ASSERT_EQ(partition_names.size(), 1);
+    ASSERT_EQ(partition_names[0], "_default");
+
+    std::string p1 = "p1";
+    std::string c2 = "c2";
+    status = db_->CreatePartition(c2, p1);
+    ASSERT_FALSE(status.ok());
+
+    status = db_->CreatePartition(c1, p1);
+    ASSERT_TRUE(status.ok());
+
+    status = db_->ShowPartitions(c1, partition_names);
+    ASSERT_TRUE(status.ok());
+    ASSERT_EQ(partition_names.size(), 2);
+
+    status = db_->CreatePartition(c1, p1);
+    ASSERT_FALSE(status.ok());
+
+    status = db_->DropPartition(c1, "p3");
+    ASSERT_FALSE(status.ok());
+
+    status = db_->DropPartition(c1, p1);
+    ASSERT_TRUE(status.ok());
+    status = db_->ShowPartitions(c1, partition_names);
+    ASSERT_TRUE(status.ok());
+    ASSERT_EQ(partition_names.size(), 1);
 }

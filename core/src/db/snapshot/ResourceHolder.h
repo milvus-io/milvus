@@ -82,6 +82,9 @@ class ResourceHolder {
             std::unique_lock<std::mutex> lock(mutex_);
             auto cit = id_map_.find(id);
             if (cit != id_map_.end()) {
+                if (!cit->second->IsActive()) {
+                    return ScopedT();
+                }
                 return ScopedT(cit->second, scoped);
             }
         }
@@ -142,9 +145,10 @@ class ResourceHolder {
 
     virtual void
     OnNoRefCallBack(ResourcePtr resource) {
+        resource->Deactivate();
+        Release(resource->GetID());
         auto evt_ptr = std::make_shared<ResourceGCEvent<ResourceT>>(resource);
         EventExecutor::GetInstance().Submit(evt_ptr);
-        Release(resource->GetID());
     }
 
     virtual ResourcePtr
@@ -155,7 +159,8 @@ class ResourceHolder {
         (*op)(store);
         typename ResourceT::Ptr c;
         auto status = op->GetResource(c);
-        if (status.ok()) {
+        if (status.ok() && c->IsActive()) {
+            /* if (status.ok()) { */
             Add(c);
             return c;
         }
