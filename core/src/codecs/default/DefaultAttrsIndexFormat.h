@@ -18,7 +18,6 @@
 #pragma once
 
 #include <src/db/meta/MetaTypes.h>
-#include <mutex>
 #include <string>
 #include <vector>
 
@@ -56,8 +55,6 @@ class DefaultAttrsIndexFormat : public AttrsIndexFormat {
     create_structured_index(const engine::meta::hybrid::DataType data_type);
 
  private:
-    std::mutex mutex_;
-
     const std::string attr_index_extension_ = ".idx";
 };
 
