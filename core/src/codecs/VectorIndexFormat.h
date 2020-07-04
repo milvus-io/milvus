@@ -36,8 +36,8 @@ class VectorIndexFormat {
           const segment::VectorIndexPtr& vector_index) = 0;
 
     virtual void
-    read(const storage::FSHandlerPtr& fs_ptr, const std::string& location, knowhere::BinaryPtr raw_data,
-         segment::VectorIndexPtr& vector_index) {
+    read(const storage::FSHandlerPtr& fs_ptr, const std::string& location, const std::string& extern_key,
+         const knowhere::BinaryPtr& extern_data, segment::VectorIndexPtr& vector_index) {
     }
 };
 

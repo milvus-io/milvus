@@ -29,6 +29,12 @@
 namespace milvus {
 namespace codec {
 
+DefaultCodec&
+DefaultCodec::instance() {
+    static DefaultCodec s_instance;
+    return s_instance;
+}
+
 DefaultCodec::DefaultCodec() {
     vectors_format_ptr_ = std::make_shared<DefaultVectorsFormat>();
     attrs_format_ptr_ = std::make_shared<DefaultAttrsFormat>();

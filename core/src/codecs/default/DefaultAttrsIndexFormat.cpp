@@ -139,8 +139,6 @@ DefaultAttrsIndexFormat::read_internal(const milvus::storage::FSHandlerPtr& fs_p
 void
 DefaultAttrsIndexFormat::read(const milvus::storage::FSHandlerPtr& fs_ptr,
                               milvus::segment::AttrsIndexPtr& attrs_index) {
-    const std::lock_guard<std::mutex> lock(mutex_);
-
     std::string dir_path = fs_ptr->operation_ptr_->GetDirectory();
     if (!boost::filesystem::is_directory(dir_path)) {
         std::string err_msg = "Directory: " + dir_path + "does not exist";
@@ -170,8 +168,6 @@ DefaultAttrsIndexFormat::read(const milvus::storage::FSHandlerPtr& fs_ptr,
 void
 DefaultAttrsIndexFormat::write(const milvus::storage::FSHandlerPtr& fs_ptr,
                                const milvus::segment::AttrsIndexPtr& attrs_index) {
-    const std::lock_guard<std::mutex> lock(mutex_);
-
     milvus::TimeRecorder recorder("write_index");
     recorder.RecordSection("Start");
 

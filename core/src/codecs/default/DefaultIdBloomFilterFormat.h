@@ -17,7 +17,6 @@
 
 #pragma once
 
-#include <mutex>
 #include <string>
 
 #include "codecs/IdBloomFilterFormat.h"
@@ -50,8 +49,6 @@ class DefaultIdBloomFilterFormat : public IdBloomFilterFormat {
     operator=(DefaultIdBloomFilterFormat&&) = delete;
 
  private:
-    std::mutex mutex_;
-
     const std::string bloom_filter_filename_ = "bloom_filter";
 };
 

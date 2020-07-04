@@ -17,7 +17,6 @@
 
 #pragma once
 
-#include <mutex>
 #include <string>
 #include <vector>
 
@@ -62,8 +61,6 @@ class DefaultAttrsFormat : public AttrsFormat {
     read_uids_internal(const storage::FSHandlerPtr& fs_ptr, const std::string&, std::vector<int64_t>&);
 
  private:
-    std::mutex mutex_;
-
     const std::string raw_attr_extension_ = ".ra";
     const std::string user_id_extension_ = ".uid";
 };
