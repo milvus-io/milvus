@@ -73,6 +73,9 @@ class SSDBImpl {
     Status
     ShowPartitions(const std::string& collection_name, std::vector<std::string>& partition_names);
 
+    Status
+    DropIndex(const std::string& collection_name, const std::string& field_name, const std::string& field_element_name);
+
  private:
     void
     InternalFlush(const std::string& collection_id = "");

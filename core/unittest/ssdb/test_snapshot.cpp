@@ -18,183 +18,6 @@
 #include <algorithm>
 
 #include "ssdb/utils.h"
-#include "db/snapshot/CompoundOperations.h"
-#include "db/snapshot/Context.h"
-#include "db/snapshot/EventExecutor.h"
-#include "db/snapshot/OperationExecutor.h"
-#include "db/snapshot/ReferenceProxy.h"
-#include "db/snapshot/ResourceHolders.h"
-#include "db/snapshot/ScopedResource.h"
-#include "db/snapshot/Snapshots.h"
-#include "db/snapshot/Store.h"
-#include "db/snapshot/WrappedTypes.h"
-
-using ID_TYPE = milvus::engine::snapshot::ID_TYPE;
-using IDS_TYPE = milvus::engine::snapshot::IDS_TYPE;
-using LSN_TYPE = milvus::engine::snapshot::LSN_TYPE;
-using MappingT = milvus::engine::snapshot::MappingT;
-using LoadOperationContext = milvus::engine::snapshot::LoadOperationContext;
-using CreateCollectionContext = milvus::engine::snapshot::CreateCollectionContext;
-using SegmentFileContext = milvus::engine::snapshot::SegmentFileContext;
-using OperationContext = milvus::engine::snapshot::OperationContext;
-using PartitionContext = milvus::engine::snapshot::PartitionContext;
-using DropIndexOperation = milvus::engine::snapshot::DropIndexOperation;
-using DropAllIndexOperation = milvus::engine::snapshot::DropAllIndexOperation;
-using BuildOperation = milvus::engine::snapshot::BuildOperation;
-using MergeOperation = milvus::engine::snapshot::MergeOperation;
-using CreateCollectionOperation = milvus::engine::snapshot::CreateCollectionOperation;
-using NewSegmentOperation = milvus::engine::snapshot::NewSegmentOperation;
-using DropPartitionOperation = milvus::engine::snapshot::DropPartitionOperation;
-using CreatePartitionOperation = milvus::engine::snapshot::CreatePartitionOperation;
-using DropCollectionOperation = milvus::engine::snapshot::DropCollectionOperation;
-using CollectionCommitsHolder = milvus::engine::snapshot::CollectionCommitsHolder;
-using CollectionsHolder = milvus::engine::snapshot::CollectionsHolder;
-using CollectionScopedT = milvus::engine::snapshot::CollectionScopedT;
-using Collection = milvus::engine::snapshot::Collection;
-using CollectionPtr = milvus::engine::snapshot::CollectionPtr;
-using Partition = milvus::engine::snapshot::Partition;
-using PartitionPtr = milvus::engine::snapshot::PartitionPtr;
-using Segment = milvus::engine::snapshot::Segment;
-using SegmentPtr = milvus::engine::snapshot::SegmentPtr;
-using SegmentFile = milvus::engine::snapshot::SegmentFile;
-using SegmentFilePtr = milvus::engine::snapshot::SegmentFilePtr;
-using Field = milvus::engine::snapshot::Field;
-using FieldElement = milvus::engine::snapshot::FieldElement;
-using Snapshots = milvus::engine::snapshot::Snapshots;
-using ScopedSnapshotT = milvus::engine::snapshot::ScopedSnapshotT;
-using ReferenceProxy = milvus::engine::snapshot::ReferenceProxy;
-using Queue = milvus::BlockingQueue<ID_TYPE>;
-using TQueue = milvus::BlockingQueue<std::tuple<ID_TYPE, ID_TYPE>>;
-using SoftDeleteCollectionOperation = milvus::engine::snapshot::SoftDeleteOperation<Collection>;
-using ParamsField = milvus::engine::snapshot::ParamsField;
-using IteratePartitionHandler = milvus::engine::snapshot::IterateHandler<Partition>;
-using IterateSegmentFileHandler = milvus::engine::snapshot::IterateHandler<SegmentFile>;
-
-struct PartitionCollector : public IteratePartitionHandler {
-    using ResourceT = Partition;
-    using BaseT = IteratePartitionHandler;
-    explicit PartitionCollector(ScopedSnapshotT ss) : BaseT(ss) {}
-
-    milvus::Status
-    PreIterate() override {
-        partition_names_.clear();
-        return milvus::Status::OK();
-    }
-
-    milvus::Status
-    Handle(const typename ResourceT::Ptr& partition) override {
-        partition_names_.push_back(partition->GetName());
-        return milvus::Status::OK();
-    }
-
-    std::vector<std::string> partition_names_;
-};
-
-using FilterT = std::function<bool(SegmentFile::Ptr)>;
-struct SegmentFileCollector : public IterateSegmentFileHandler {
-    using ResourceT = SegmentFile;
-    using BaseT = IterateSegmentFileHandler;
-    explicit SegmentFileCollector(ScopedSnapshotT ss, const FilterT& filter)
-        : filter_(filter), BaseT(ss) {}
-
-    milvus::Status
-    PreIterate() override {
-        segment_files_.clear();
-        return milvus::Status::OK();
-    }
-
-    milvus::Status
-    Handle(const typename ResourceT::Ptr& segment_file) override {
-        if (!filter_(segment_file)) {
-            return milvus::Status::OK();
-        }
-        segment_files_.insert(segment_file->GetID());
-        return milvus::Status::OK();
-    }
-
-    FilterT filter_;
-    std::set<ID_TYPE> segment_files_;
-};
-
-struct WaitableObj {
-    bool notified_ = false;
-    std::mutex mutex_;
-    std::condition_variable cv_;
-
-    void
-    Wait() {
-        std::unique_lock<std::mutex> lck(mutex_);
-        if (!notified_) {
-            cv_.wait(lck);
-        }
-        notified_ = false;
-    }
-
-    void
-    Notify() {
-        std::unique_lock<std::mutex> lck(mutex_);
-        notified_ = true;
-        lck.unlock();
-        cv_.notify_one();
-    }
-};
-
-ScopedSnapshotT
-CreateCollection(const std::string& collection_name, const LSN_TYPE& lsn) {
-    CreateCollectionContext context;
-    context.lsn = lsn;
-    auto collection_schema = std::make_shared<Collection>(collection_name);
-    context.collection = collection_schema;
-    auto vector_field = std::make_shared<Field>("vector", 0,
-            milvus::engine::snapshot::FieldType::VECTOR);
-    auto vector_field_element = std::make_shared<FieldElement>(0, 0, "ivfsq8",
-            milvus::engine::snapshot::FieldElementType::IVFSQ8);
-    auto int_field = std::make_shared<Field>("int", 0,
-            milvus::engine::snapshot::FieldType::INT32);
-    context.fields_schema[vector_field] = {vector_field_element};
-    context.fields_schema[int_field] = {};
-
-    auto op = std::make_shared<CreateCollectionOperation>(context);
-    op->Push();
-    ScopedSnapshotT ss;
-    auto status = op->GetSnapshot(ss);
-    return ss;
-}
-
-ScopedSnapshotT
-CreatePartition(const std::string& collection_name, const PartitionContext& p_context, const LSN_TYPE& lsn) {
-    ScopedSnapshotT curr_ss;
-    ScopedSnapshotT ss;
-    auto status = Snapshots::GetInstance().GetSnapshot(ss, collection_name);
-    if (!status.ok()) {
-        std::cout << status.ToString() << std::endl;
-        return curr_ss;
-    }
-
-    OperationContext context;
-    context.lsn = lsn;
-    auto op = std::make_shared<CreatePartitionOperation>(context, ss);
-
-    PartitionPtr partition;
-    status = op->CommitNewPartition(p_context, partition);
-    if (!status.ok()) {
-        std::cout << status.ToString() << std::endl;
-        return curr_ss;
-    }
-
-    status = op->Push();
-    if (!status.ok()) {
-        std::cout << status.ToString() << std::endl;
-        return curr_ss;
-    }
-
-    status = op->GetSnapshot(curr_ss);
-    if (!status.ok()) {
-        std::cout << status.ToString() << std::endl;
-        return curr_ss;
-    }
-    return curr_ss;
-}
 
 TEST_F(SnapshotTest, ResourcesTest) {
     int nprobe = 16;
@@ -452,7 +275,7 @@ TEST_F(SnapshotTest, ConCurrentCollectionOperation) {
 
     ID_TYPE stale_ss_id;
     auto worker1 = [&]() {
-        milvus::Status status;
+        Status status;
         auto ss = CreateCollection(collection_name, ++lsn);
         ASSERT_TRUE(ss);
         ASSERT_EQ(ss->GetName(), collection_name);
@@ -628,24 +451,19 @@ TEST_F(SnapshotTest, IndexTest) {
         return ++lsn;
     };
 
-    SegmentFileContext sf_context;
-    sf_context.field_name = "f_1_1";
-    sf_context.field_element_name = "fe_1_1";
-    sf_context.segment_id = 1;
-    sf_context.partition_id = 1;
-
     ScopedSnapshotT ss;
     auto status = Snapshots::GetInstance().GetSnapshot(ss, 1);
-    std::cout << status.ToString() << std::endl;
     ASSERT_TRUE(status.ok());
+
+    SegmentFileContext sf_context;
+    SFContextBuilder(sf_context, ss);
 
     OperationContext context;
     context.lsn = next_lsn();
-    context.prev_partition = ss->GetResource<Partition>(1);
+    context.prev_partition = ss->GetResource<Partition>(sf_context.partition_id);
     auto build_op = std::make_shared<BuildOperation>(context, ss);
     SegmentFilePtr seg_file;
     status = build_op->CommitNewSegmentFile(sf_context, seg_file);
-    std::cout << status.ToString() << std::endl;
     ASSERT_TRUE(status.ok());
     ASSERT_TRUE(seg_file);
 
@@ -670,10 +488,6 @@ TEST_F(SnapshotTest, IndexTest) {
 
     auto it_found = sf_collector->segment_files_.find(seg_file->GetID());
     ASSERT_NE(it_found, sf_collector->segment_files_.end());
-    /* for (auto& i : sf_collector->segment_files_) { */
-    /*     std::cout << i << std::endl; */
-    /* } */
-    /* std::cout << "XX " << seg_file->GetID() << std::endl; */
 
     status = Snapshots::GetInstance().GetSnapshot(ss, 1);
     ASSERT_TRUE(status.ok());
@@ -683,7 +497,6 @@ TEST_F(SnapshotTest, IndexTest) {
     drop_ctx.stale_segment_file = seg_file;
     auto drop_op = std::make_shared<DropIndexOperation>(drop_ctx, ss);
     status = drop_op->Push();
-    std::cout << status.ToString() << std::endl;
     ASSERT_TRUE(status.ok());
 
     status = drop_op->GetSnapshot(ss);
@@ -712,37 +525,18 @@ TEST_F(SnapshotTest, IndexTest) {
     sf_collector->Iterate();
     auto prev_total = sf_collector->segment_files_.size();
 
-    auto create_segment = [&](ID_TYPE partition_id) {
-        OperationContext context;
-        context.lsn = next_lsn();
-        context.prev_partition = ss->GetResource<Partition>(partition_id);
-        auto op = std::make_shared<NewSegmentOperation>(context, ss);
-        SegmentPtr new_seg;
-        status = op->CommitNewSegment(new_seg);
-        ASSERT_TRUE(status.ok());
-        ASSERT_FALSE(new_seg->ToString().empty());
-        SegmentFilePtr seg_file;
-        auto nsf_context = sf_context;
-        nsf_context.segment_id = new_seg->GetID();
-        nsf_context.partition_id = new_seg->GetPartitionId();
-        status = op->CommitNewSegmentFile(nsf_context, seg_file);
-        ASSERT_TRUE(status.ok());
-        status = op->Push();
-        ASSERT_TRUE(status.ok());
-
-        status = op->GetSnapshot(ss);
-        ASSERT_TRUE(status.ok());
-    };
-
     auto new_total = 0;
     auto partitions = ss->GetResources<Partition>();
     for (auto& kv : partitions) {
         num = RandomInt(2, 5);
         for (auto i = 0; i < num; ++i) {
-            create_segment(kv.first);
+            ASSERT_TRUE(CreateSegment(ss, kv.first, next_lsn(), sf_context).ok());
         }
         new_total += num;
     }
+
+    status = Snapshots::GetInstance().GetSnapshot(ss, ss->GetName());
+    ASSERT_TRUE(status.ok());
 
     sf_collector = std::make_shared<SegmentFileCollector>(ss, filter2);
     sf_collector->Iterate();
@@ -753,31 +547,58 @@ TEST_F(SnapshotTest, IndexTest) {
             sf_context.field_element_name);
     ASSERT_NE(field_element_id, 0);
 
+    auto filter3 = [&](SegmentFile::Ptr segment_file) -> bool {
+        if (segment_file->GetFieldElementId() == field_element_id) {
+            return true;
+        }
+        return false;
+    };
+    sf_collector = std::make_shared<SegmentFileCollector>(ss, filter3);
+    sf_collector->Iterate();
+    auto specified_segment_files_cnt = sf_collector->segment_files_.size();
+
     OperationContext d_a_i_ctx;
     d_a_i_ctx.lsn = next_lsn();
     d_a_i_ctx.stale_field_element = ss->GetResource<FieldElement>(field_element_id);
     auto drop_all_index_op = std::make_shared<DropAllIndexOperation>(d_a_i_ctx, ss);
     status = drop_all_index_op->Push();
-    std::cout << status.ToString() << std::endl;
     ASSERT_TRUE(status.ok());
 
     status = drop_all_index_op->GetSnapshot(ss);
     ASSERT_TRUE(status.ok());
 
+    /* { */
+    /*     auto& fields = ss->GetResources<Field>(); */
+    /*     for (auto field_kv : fields) { */
+    /*         auto field = field_kv.second; */
+    /*         std::cout << "field " << field->GetID() << " " << field->GetName() << std::endl; */
+    /*         auto& field_elements = ss->GetResources<FieldElement>(); */
+    /*         for (auto element_kv : field_elements) { */
+    /*             auto element = element_kv.second; */
+    /*             if (element->GetFieldId() != field->GetID()) { */
+    /*                 continue; */
+    /*             } */
+    /*             std::cout << "\tfield_element " << element->GetID() << " " << element->GetName() << std::endl; */
+    /*         } */
+    /*     } */
+    /* } */
+
     sf_collector = std::make_shared<SegmentFileCollector>(ss, filter2);
     sf_collector->Iterate();
-    ASSERT_EQ(sf_collector->segment_files_.size(), total - new_total);
+    ASSERT_EQ(sf_collector->segment_files_.size(), total - specified_segment_files_cnt);
+
+    {
+        auto& field_elements = ss->GetResources<FieldElement>();
+        for (auto& kv : field_elements) {
+            ASSERT_NE(kv.second->GetID(), field_element_id);
+        }
+    }
 }
 
 TEST_F(SnapshotTest, OperationTest) {
-    milvus::Status status;
+    Status status;
     std::string to_string;
     LSN_TYPE lsn;
-    SegmentFileContext sf_context;
-    sf_context.field_name = "f_1_1";
-    sf_context.field_element_name = "fe_1_1";
-    sf_context.segment_id = 1;
-    sf_context.partition_id = 1;
 
     ScopedSnapshotT ss;
     status = Snapshots::GetInstance().GetSnapshot(ss, 1);
@@ -793,6 +614,9 @@ TEST_F(SnapshotTest, OperationTest) {
         ASSERT_TRUE(collection_commit);
         ASSERT_TRUE(collection_commit->ToString().empty());
     }
+
+    SegmentFileContext sf_context;
+    SFContextBuilder(sf_context, ss);
 
     OperationContext merge_ctx;
     std::set<ID_TYPE> stale_segment_commit_ids;
@@ -949,7 +773,7 @@ TEST_F(SnapshotTest, OperationTest) {
 }
 
 TEST_F(SnapshotTest, CompoundTest1) {
-    milvus::Status status;
+    Status status;
     std::atomic<LSN_TYPE> lsn = 0;
     auto next_lsn = [&]() -> decltype(lsn) {
         return ++lsn;
@@ -1290,7 +1114,7 @@ TEST_F(SnapshotTest, CompoundTest1) {
 
 
 TEST_F(SnapshotTest, CompoundTest2) {
-    milvus::Status status;
+    Status status;
     LSN_TYPE lsn = 0;
     auto next_lsn = [&]() -> LSN_TYPE& {
         return ++lsn;

@@ -75,6 +75,7 @@ BuildOperation::CommitNewSegmentFile(const SegmentFileContext& context, SegmentF
         emsg << GetRepr() << ". Invalid segment " << context.segment_id << " in context";
         return Status(SS_INVALID_CONTEX_ERROR, emsg.str());
     }
+
     auto ctx = context;
     ctx.partition_id = segment->GetPartitionId();
     auto new_sf_op = std::make_shared<SegmentFileOperation>(ctx, GetStartedSS());
@@ -112,8 +113,31 @@ Status
 DropAllIndexOperation::DoExecute(Store& store) {
     auto& segment_files = GetAdjustedSS()->GetResources<SegmentFile>();
 
-    std::map<ID_TYPE, std::vector<SegmentCommitPtr>> p_sc_map;
+    OperationContext cc_context;
+    {
+        auto context = context_;
+        context.stale_field_elements.push_back(context.stale_field_element);
 
+        FieldCommitOperation fc_op(context, GetAdjustedSS());
+        STATUS_CHECK(fc_op(store));
+        FieldCommitPtr new_field_commit;
+        STATUS_CHECK(fc_op.GetResource(new_field_commit));
+        AddStepWithLsn(*new_field_commit, context.lsn);
+        context.new_field_commits.push_back(new_field_commit);
+        for (auto& kv : GetAdjustedSS()->GetResources<FieldCommit>()) {
+            if (kv.second->GetFieldId() == new_field_commit->GetFieldId()) {
+                context.stale_field_commits.push_back(kv.second.Get());
+            }
+        }
+
+        SchemaCommitOperation sc_op(context, GetAdjustedSS());
+
+        STATUS_CHECK(sc_op(store));
+        STATUS_CHECK(sc_op.GetResource(cc_context.new_schema_commit));
+        AddStepWithLsn(*cc_context.new_schema_commit, context.lsn);
+    }
+
+    std::map<ID_TYPE, std::vector<SegmentCommitPtr>> p_sc_map;
     for (auto& kv : segment_files) {
         if (kv.second->GetFieldElementId() != context_.stale_field_element->GetID()) {
             continue;
@@ -128,7 +152,6 @@ DropAllIndexOperation::DoExecute(Store& store) {
         p_sc_map[context.new_segment_commit->GetPartitionId()].push_back(context.new_segment_commit);
     }
 
-    OperationContext cc_context;
     for (auto& kv : p_sc_map) {
         auto& partition_id = kv.first;
         auto context = context_;
