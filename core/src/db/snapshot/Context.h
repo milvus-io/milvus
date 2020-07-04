@@ -68,6 +68,11 @@ struct OperationContext {
     FieldPtr prev_field = nullptr;
     FieldElementPtr prev_field_element = nullptr;
     FieldElementPtr stale_field_element = nullptr;
+    std::vector<FieldElementPtr> new_field_elements;
+    std::vector<FieldElementPtr> stale_field_elements;
+
+    std::vector<FieldCommitPtr> new_field_commits;
+    std::vector<FieldCommitPtr> stale_field_commits;
 
     SegmentPtr prev_segment = nullptr;
     SegmentCommitPtr prev_segment_commit = nullptr;

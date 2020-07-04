@@ -241,6 +241,8 @@ class Store {
         resources[res->GetID()] = res;
         lock.unlock();
         GetResource<ResourceT>(res->GetID(), return_v);
+        /* std::cout << ">>> [Update] " << ResourceT::Name << " " << id; */
+        /* std::cout << " " << std::boolalpha << res->IsActive() << std::endl; */
         return Status::OK();
     }
 
@@ -415,7 +417,7 @@ class Store {
                 auto random_elements = rand_r(&seed) % 2 + 2;
                 for (auto fei = 1; fei <= random_elements; ++fei) {
                     std::stringstream fename;
-                    fename << "fe_" << fei << "_";
+                    fename << "fe_" << field->GetID() << "_" << fei << "_";
                     fename << std::get<Index<FieldElement::MapT, MockResourcesT>::value>(ids_) + 1;
 
                     FieldElementPtr element;
@@ -458,7 +460,7 @@ class Store {
                         for (auto field_element_id : f_c_m) {
                             SegmentFilePtr sf;
                             CreateResource<SegmentFile>(
-                                SegmentFile(c->GetID(), p->GetID(), s->GetID(), field_commit_id, 0, 0, 0, 0, ACTIVE),
+                                SegmentFile(c->GetID(), p->GetID(), s->GetID(), field_element_id, 0, 0, 0, 0, ACTIVE),
                                 sf);
                             all_records.push_back(sf);
 
