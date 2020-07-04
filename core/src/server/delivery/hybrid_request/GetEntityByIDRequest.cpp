@@ -30,9 +30,8 @@ namespace server {
 constexpr uint64_t MAX_COUNT_RETURNED = 1000;
 
 GetEntityByIDRequest::GetEntityByIDRequest(const std::shared_ptr<milvus::server::Context>& context,
-                                           const std::string& collection_name,
-                                           const std::vector<std::string>& field_names, const std::vector<int64_t>& ids,
-                                           std::vector<engine::AttrsData>& attrs,
+                                           const std::string& collection_name, std::vector<std::string>& field_names,
+                                           const std::vector<int64_t>& ids, std::vector<engine::AttrsData>& attrs,
                                            std::vector<engine::VectorsData>& vectors)
     : BaseRequest(context, BaseRequest::kGetVectorByID),
       collection_name_(collection_name),
@@ -44,7 +43,7 @@ GetEntityByIDRequest::GetEntityByIDRequest(const std::shared_ptr<milvus::server:
 
 BaseRequestPtr
 GetEntityByIDRequest::Create(const std::shared_ptr<milvus::server::Context>& context,
-                             const std::string& collection_name, const std::vector<std::string>& field_names,
+                             const std::string& collection_name, std::vector<std::string>& field_names,
                              const std::vector<int64_t>& ids, std::vector<engine::AttrsData>& attrs,
                              std::vector<engine::VectorsData>& vectors) {
     return std::shared_ptr<BaseRequest>(

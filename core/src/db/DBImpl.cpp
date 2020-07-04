@@ -1746,6 +1746,7 @@ DBImpl::GetEntitiesByIdHelper(const std::string& collection_id, const milvus::en
             data.float_data_ = vector_ref.float_data_;    // copy data since there could be duplicated id
             data.binary_data_ = vector_ref.binary_data_;  // copy data since there could be duplicated id
         }
+        data.id_array_.emplace_back(id);
         vectors.emplace_back(data);
 
         attrs.emplace_back(map_id2attr[id]);

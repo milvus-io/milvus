@@ -147,7 +147,7 @@ class RequestHandler {
 
     Status
     GetEntityByID(const std::shared_ptr<Context>& context, const std::string& collection_name,
-                  const std::vector<std::string>& field_names, const std::vector<int64_t>& ids,
+                  std::vector<std::string>& field_names, const std::vector<int64_t>& ids,
                   std::vector<engine::AttrsData>& attrs, std::vector<engine::VectorsData>& vectors);
 
     Status

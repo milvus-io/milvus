@@ -903,7 +903,7 @@ WebRequestHandler::DeleteByIDs(const std::string& collection_name, const nlohman
 
 Status
 WebRequestHandler::GetEntityByIDs(const std::string& collection_name, const std::vector<int64_t>& ids,
-                                  const std::vector<std::string>& field_names, nlohmann::json& json_out) {
+                                  std::vector<std::string>& field_names, nlohmann::json& json_out) {
     std::vector<engine::VectorsData> vector_batch;
     std::vector<engine::AttrsData> attr_batch;
     auto status =

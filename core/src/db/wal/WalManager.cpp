@@ -605,7 +605,7 @@ WalManager::DeleteById(const std::string& collection_id, const IDNumbers& vector
         record.data_size = 0;
         record.data = nullptr;
 
-        auto error_code = p_buffer_->Append(record);
+        auto error_code = p_buffer_->AppendEntity(record);
         if (error_code != WAL_SUCCESS) {
             p_buffer_->ResetWriteLsn(last_applied_lsn_);
             return false;
