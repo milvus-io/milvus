@@ -114,7 +114,13 @@ class DBImpl : public DB, public server::CacheConfigHandler, public server::Engi
     DeleteVector(const std::string& collection_id, IDNumber vector_id) override;
 
     Status
+    DeleteEntity(const std::string& collection_id, IDNumber entity_id) override;
+
+    Status
     DeleteVectors(const std::string& collection_id, IDNumbers vector_ids) override;
+
+    Status
+    DeleteEntities(const std::string& collection_id, IDNumbers entity_ids) override;
 
     Status
     Flush(const std::string& collection_id) override;
