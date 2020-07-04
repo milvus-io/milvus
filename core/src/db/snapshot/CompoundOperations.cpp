@@ -10,8 +10,10 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
 #include "db/snapshot/CompoundOperations.h"
+#include <map>
 #include <memory>
 #include <sstream>
+#include <vector>
 #include "db/snapshot/OperationExecutor.h"
 #include "db/snapshot/Snapshots.h"
 #include "utils/Status.h"
@@ -80,6 +82,68 @@ BuildOperation::CommitNewSegmentFile(const SegmentFileContext& context, SegmentF
     STATUS_CHECK(new_sf_op->GetResource(created));
     context_.new_segment_files.push_back(created);
     AddStepWithLsn(*created, context_.lsn);
+
+    return Status::OK();
+}
+
+DropAllIndexOperation::DropAllIndexOperation(const OperationContext& context, ScopedSnapshotT prev_ss)
+    : BaseT(context, prev_ss) {
+}
+
+Status
+DropAllIndexOperation::PreCheck() {
+    if (context_.stale_field_element == nullptr) {
+        std::stringstream emsg;
+        emsg << GetRepr() << ". Stale field element is requried";
+        return Status(SS_INVALID_CONTEX_ERROR, emsg.str());
+    }
+
+    if (!GetStartedSS()->GetResource<FieldElement>(context_.stale_field_element->GetID())) {
+        std::stringstream emsg;
+        emsg << GetRepr() << ".  Specified field element " << context_.stale_field_element->GetName();
+        emsg << " is stale";
+        return Status(SS_INVALID_CONTEX_ERROR, emsg.str());
+    }
+    // TODO: Check type
+    return Status::OK();
+}
+
+Status
+DropAllIndexOperation::DoExecute(Store& store) {
+    auto& segment_files = GetAdjustedSS()->GetResources<SegmentFile>();
+
+    std::map<ID_TYPE, std::vector<SegmentCommitPtr>> p_sc_map;
+
+    for (auto& kv : segment_files) {
+        if (kv.second->GetFieldElementId() != context_.stale_field_element->GetID()) {
+            continue;
+        }
+
+        auto context = context_;
+        context.stale_segment_file = kv.second.Get();
+        SegmentCommitOperation sc_op(context, GetAdjustedSS());
+        STATUS_CHECK(sc_op(store));
+        STATUS_CHECK(sc_op.GetResource(context.new_segment_commit));
+        AddStepWithLsn(*context.new_segment_commit, context.lsn);
+        p_sc_map[context.new_segment_commit->GetPartitionId()].push_back(context.new_segment_commit);
+    }
+
+    OperationContext cc_context;
+    for (auto& kv : p_sc_map) {
+        auto& partition_id = kv.first;
+        auto context = context_;
+        context.new_segment_commits = kv.second;
+        PartitionCommitOperation pc_op(context, GetAdjustedSS());
+        STATUS_CHECK(pc_op(store));
+        STATUS_CHECK(pc_op.GetResource(context.new_partition_commit));
+        AddStepWithLsn(*context.new_partition_commit, context.lsn);
+        cc_context.new_partition_commits.push_back(context.new_partition_commit);
+    }
+
+    CollectionCommitOperation cc_op(cc_context, GetAdjustedSS());
+    STATUS_CHECK(cc_op(store));
+    STATUS_CHECK(cc_op.GetResource(context_.new_collection_commit));
+    AddStepWithLsn(*context_.new_collection_commit, context_.lsn);
 
     return Status::OK();
 }

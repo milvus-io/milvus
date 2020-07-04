@@ -39,6 +39,7 @@ using SegmentFileContext = milvus::engine::snapshot::SegmentFileContext;
 using OperationContext = milvus::engine::snapshot::OperationContext;
 using PartitionContext = milvus::engine::snapshot::PartitionContext;
 using DropIndexOperation = milvus::engine::snapshot::DropIndexOperation;
+using DropAllIndexOperation = milvus::engine::snapshot::DropAllIndexOperation;
 using BuildOperation = milvus::engine::snapshot::BuildOperation;
 using MergeOperation = milvus::engine::snapshot::MergeOperation;
 using CreateCollectionOperation = milvus::engine::snapshot::CreateCollectionOperation;
@@ -622,7 +623,7 @@ TEST_F(SnapshotTest, PartitionTest) {
 /* } */
 
 TEST_F(SnapshotTest, IndexTest) {
-    LSN_TYPE lsn;
+    LSN_TYPE lsn = 0;
     auto next_lsn = [&]() -> decltype(lsn) {
         return ++lsn;
     };
@@ -659,6 +660,11 @@ TEST_F(SnapshotTest, IndexTest) {
 
         return false;
     };
+
+    auto filter2 = [&](SegmentFile::Ptr segment_file) -> bool {
+        return true;
+    };
+
     auto sf_collector = std::make_shared<SegmentFileCollector>(ss, filter);
     sf_collector->Iterate();
 
@@ -688,6 +694,79 @@ TEST_F(SnapshotTest, IndexTest) {
 
     it_found = sf_collector->segment_files_.find(seg_file->GetID());
     ASSERT_EQ(it_found, sf_collector->segment_files_.end());
+
+    PartitionContext pp_ctx;
+    std::stringstream p_name_stream;
+
+    auto num = RandomInt(3, 5);
+    for (auto i = 0; i < num; ++i) {
+        p_name_stream.str("");
+        p_name_stream << "partition_" << i;
+        pp_ctx.name = p_name_stream.str();
+        ss = CreatePartition(ss->GetName(), pp_ctx, next_lsn());
+        ASSERT_TRUE(ss);
+    }
+    ASSERT_EQ(ss->NumberOfPartitions(), num + 1);
+
+    sf_collector = std::make_shared<SegmentFileCollector>(ss, filter2);
+    sf_collector->Iterate();
+    auto prev_total = sf_collector->segment_files_.size();
+
+    auto create_segment = [&](ID_TYPE partition_id) {
+        OperationContext context;
+        context.lsn = next_lsn();
+        context.prev_partition = ss->GetResource<Partition>(partition_id);
+        auto op = std::make_shared<NewSegmentOperation>(context, ss);
+        SegmentPtr new_seg;
+        status = op->CommitNewSegment(new_seg);
+        ASSERT_TRUE(status.ok());
+        ASSERT_FALSE(new_seg->ToString().empty());
+        SegmentFilePtr seg_file;
+        auto nsf_context = sf_context;
+        nsf_context.segment_id = new_seg->GetID();
+        nsf_context.partition_id = new_seg->GetPartitionId();
+        status = op->CommitNewSegmentFile(nsf_context, seg_file);
+        ASSERT_TRUE(status.ok());
+        status = op->Push();
+        ASSERT_TRUE(status.ok());
+
+        status = op->GetSnapshot(ss);
+        ASSERT_TRUE(status.ok());
+    };
+
+    auto new_total = 0;
+    auto partitions = ss->GetResources<Partition>();
+    for (auto& kv : partitions) {
+        num = RandomInt(2, 5);
+        for (auto i = 0; i < num; ++i) {
+            create_segment(kv.first);
+        }
+        new_total += num;
+    }
+
+    sf_collector = std::make_shared<SegmentFileCollector>(ss, filter2);
+    sf_collector->Iterate();
+    auto total = sf_collector->segment_files_.size();
+    ASSERT_EQ(total, prev_total + new_total);
+
+    auto field_element_id = ss->GetFieldElementId(sf_context.field_name,
+            sf_context.field_element_name);
+    ASSERT_NE(field_element_id, 0);
+
+    OperationContext d_a_i_ctx;
+    d_a_i_ctx.lsn = next_lsn();
+    d_a_i_ctx.stale_field_element = ss->GetResource<FieldElement>(field_element_id);
+    auto drop_all_index_op = std::make_shared<DropAllIndexOperation>(d_a_i_ctx, ss);
+    status = drop_all_index_op->Push();
+    std::cout << status.ToString() << std::endl;
+    ASSERT_TRUE(status.ok());
+
+    status = drop_all_index_op->GetSnapshot(ss);
+    ASSERT_TRUE(status.ok());
+
+    sf_collector = std::make_shared<SegmentFileCollector>(ss, filter2);
+    sf_collector->Iterate();
+    ASSERT_EQ(sf_collector->segment_files_.size(), total - new_total);
 }
 
 TEST_F(SnapshotTest, OperationTest) {
