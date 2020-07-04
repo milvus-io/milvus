@@ -210,6 +210,35 @@ SSDBImpl::ShowPartitions(const std::string& collection_name, std::vector<std::st
 }
 
 Status
+SSDBImpl::DropIndex(const std::string& collection_name, const std::string& field_name,
+        const std::string& field_element_name) {
+    CHECK_INITIALIZED;
+
+    LOG_ENGINE_DEBUG_ << "Drop index for collection: " << collection_name;
+    snapshot::ScopedSnapshotT ss;
+    STATUS_CHECK(snapshot::Snapshots::GetInstance().GetSnapshot(ss, collection_name));
+
+    snapshot::OperationContext context;
+    // SS TODO: no lsn for drop index
+    context.lsn = ss->GetCollectionCommit()->GetLsn();
+    auto field_element_id = ss->GetFieldElementId(field_name, field_element_name);
+    if (field_element_id == 0) {
+        std::stringstream emsg;
+        emsg << "Invalid field name: \"" << field_name;
+        emsg << "\" or field element name: \"" << field_element_name << "\"";
+        return Status(SS_INVALID_CONTEX_ERROR, emsg.str());
+    }
+    context.stale_field_element = ss->GetResource<snapshot::FieldElement>(field_element_id);
+    auto op = std::make_shared<snapshot::DropAllIndexOperation>(context, ss);
+    STATUS_CHECK(op->Push());
+
+    // SS TODO: Start merge task needed?
+    /* std::set<std::string> merge_collection_ids = {collection_id}; */
+    /* StartMergeTask(merge_collection_ids, true);  // merge small files after drop index */
+    return Status::OK();
+}
+
+Status
 SSDBImpl::PreloadCollection(const std::shared_ptr<server::Context>& context, const std::string& collection_name,
                             bool force) {
     CHECK_INITIALIZED;

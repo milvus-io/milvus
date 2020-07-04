@@ -309,7 +309,7 @@ SegmentFileOperation::DoExecute(Store& store) {
     if (field_element_id == 0) {
         std::stringstream emsg;
         emsg << GetRepr() << ". Invalid field name: \"" << context_.field_name;
-        emsg << "\" or field element name: \"" << context_.field_element_name << "";
+        emsg << "\" or field element name: \"" << context_.field_element_name << "\"";
         return Status(SS_INVALID_CONTEX_ERROR, emsg.str());
     }
     resource_ = std::make_shared<SegmentFile>(context_.collection_id, context_.partition_id, context_.segment_id,
