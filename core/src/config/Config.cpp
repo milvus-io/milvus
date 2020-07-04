@@ -1356,7 +1356,7 @@ Status
 Config::CheckEngineSearchCombineMaxNq(const std::string& value) {
     fiu_return_on("check_config_search_combine_nq_fail", Status(SERVER_INVALID_ARGUMENT, ""));
 
-    if (!ValidationUtil::ValidateStringIsNumber(value).ok()) {
+    if (!ValidateStringIsNumber(value).ok()) {
         std::string msg = "Invalid omp thread num: " + value +
                           ". Possible reason: engine_config.omp_thread_num is not a positive integer.";
         return Status(SERVER_INVALID_ARGUMENT, msg);
