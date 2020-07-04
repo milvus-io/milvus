@@ -13,6 +13,7 @@
 
 #include "db/meta/FilesHolder.h"
 #include "db/snapshot/Snapshot.h"
+#include "db/Types.h"
 #include "server/context/Context.h"
 #include "utils/Log.h"
 
@@ -30,8 +31,8 @@ struct LoadVectorFieldElementHandler : public snapshot::IterateHandler<snapshot:
     Status
     Handle(const typename ResourceT::Ptr&) override;
 
-    const std::shared_ptr<server::Context>& context_;
-    const snapshot::FieldPtr& field_;
+    const server::ContextPtr context_;
+    const snapshot::FieldPtr field_;
 };
 
 struct LoadVectorFieldHandler : public snapshot::IterateHandler<snapshot::Field> {
@@ -42,7 +43,7 @@ struct LoadVectorFieldHandler : public snapshot::IterateHandler<snapshot::Field>
     Status
     Handle(const typename ResourceT::Ptr&) override;
 
-    const std::shared_ptr<server::Context>& context_;
+    const server::ContextPtr context_;
 };
 
 struct SegmentsToSearchCollector : public snapshot::IterateHandler<snapshot::SegmentCommit> {
@@ -61,24 +62,14 @@ struct GetVectorByIdSegmentHandler : public snapshot::IterateHandler<snapshot::S
     using ResourceT = snapshot::Segment;
     using BaseT = snapshot::IterateHandler<ResourceT>;
     GetVectorByIdSegmentHandler(const std::shared_ptr<server::Context>& context, snapshot::ScopedSnapshotT ss,
-                                const snapshot::PartitionPtr& partition);
+                                const VectorIds& ids);
 
     Status
     Handle(const typename ResourceT::Ptr&) override;
 
-    const std::shared_ptr<server::Context>& context_;
-    const snapshot::PartitionPtr& partition_;
-};
-
-struct GetVectorByIdPartitionHandler : public snapshot::IterateHandler<snapshot::Partition> {
-    using ResourceT = snapshot::Partition;
-    using BaseT = snapshot::IterateHandler<ResourceT>;
-    GetVectorByIdPartitionHandler(const std::shared_ptr<server::Context>& context, snapshot::ScopedSnapshotT ss);
-
-    Status
-    Handle(const typename ResourceT::Ptr&) override;
-
-    const std::shared_ptr<server::Context>& context_;
+    const server::ContextPtr context_;
+    const engine::VectorIds vector_ids_;
+    std::vector<engine::VectorsData> data_;
 };
 
 }  // namespace engine
