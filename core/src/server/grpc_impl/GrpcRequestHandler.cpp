@@ -21,8 +21,8 @@
 
 #include "context/HybridSearchContext.h"
 #include "query/BinaryQuery.h"
-#include "server/context/ConnectionContext.h"
 #include "server/ValidationUtil.h"
+#include "server/context/ConnectionContext.h"
 #include "tracing/TextMapCarrier.h"
 #include "tracing/TracerUtil.h"
 #include "utils/Log.h"
