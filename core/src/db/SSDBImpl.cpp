@@ -223,14 +223,7 @@ SSDBImpl::DropIndex(const std::string& collection_name, const std::string& field
     snapshot::OperationContext context;
     // SS TODO: no lsn for drop index
     context.lsn = ss->GetCollectionCommit()->GetLsn();
-    auto field_element_id = ss->GetFieldElementId(field_name, field_element_name);
-    if (field_element_id == 0) {
-        std::stringstream emsg;
-        emsg << "Invalid field name: \"" << field_name;
-        emsg << "\" or field element name: \"" << field_element_name << "\"";
-        return Status(SS_INVALID_CONTEX_ERROR, emsg.str());
-    }
-    context.stale_field_element = ss->GetResource<snapshot::FieldElement>(field_element_id);
+    STATUS_CHECK(ss->GetFieldElement(field_name, field_element_name, context.stale_field_element));
     auto op = std::make_shared<snapshot::DropAllIndexOperation>(context, ss);
     STATUS_CHECK(op->Push());
 
