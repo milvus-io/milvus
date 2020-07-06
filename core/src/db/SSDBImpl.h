@@ -76,12 +76,9 @@ class SSDBImpl {
     DropIndex(const std::string& collection_name, const std::string& field_name, const std::string& field_element_name);
 
     Status
-    GetVectorByID(const std::string& collection_name, const IDNumbers& id_array,
-                  std::vector<engine::VectorsData>& vector_data);
-
-    Status
     GetEntityByID(const std::string& collection_name, const IDNumbers& id_array,
-                  std::vector<engine::VectorsData>& vectors, std::vector<engine::AttrsData>& attrs);
+                  const std::vector<std::string>& field_names, std::vector<engine::VectorsData>& vector_data,
+                  std::vector<meta::hybrid::DataType>& attr_type, std::vector<engine::AttrsData>& attr_data);
 
  private:
     void

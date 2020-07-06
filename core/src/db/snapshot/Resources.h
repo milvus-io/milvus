@@ -296,7 +296,7 @@ class NameField {
 
 class ParamsField {
  public:
-    explicit ParamsField(std::string params) : params_(std::move(params)), json_params_(json::parse(params_)) {
+    explicit ParamsField(std::string params) : params_(std::move(params)), params_json_(json::parse(params_)) {
     }
 
     const std::string&
@@ -306,12 +306,12 @@ class ParamsField {
 
     const json&
     GetParamsJson() const {
-        return json_params_;
+        return params_json_;
     }
 
  protected:
     std::string params_;
-    json json_params_;
+    json params_json_;
 };
 
 class SizeField {

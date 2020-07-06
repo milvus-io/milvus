@@ -247,81 +247,23 @@ SSDBImpl::PreloadCollection(const server::ContextPtr& context, const std::string
 }
 
 Status
-SSDBImpl::GetVectorByID(const std::string& collection_name, const VectorIds& id_array,
-                        std::vector<engine::VectorsData>& vector_data) {
+SSDBImpl::GetEntityByID(const std::string& collection_name, const IDNumbers& id_array,
+                        const std::vector<std::string>& field_names, std::vector<VectorsData>& vector_data,
+                        std::vector<meta::hybrid::DataType>& attr_type, std::vector<AttrsData>& attr_data) {
     CHECK_INITIALIZED;
 
     snapshot::ScopedSnapshotT ss;
     STATUS_CHECK(snapshot::Snapshots::GetInstance().GetSnapshot(ss, collection_name));
 
-    auto handler = std::make_shared<GetVectorByIdSegmentHandler>(nullptr, ss, id_array);
+    auto handler = std::make_shared<GetEntityByIdSegmentHandler>(nullptr, ss, id_array, field_names);
     handler->Iterate();
     STATUS_CHECK(handler->GetStatus());
-    vector_data = std::move(handler->data_);
+
+    vector_data = std::move(handler->vector_data_);
+    attr_type = std::move(handler->attr_type_);
+    attr_data = std::move(handler->attr_data_);
 
     return Status::OK();
-}
-
-Status
-SSDBImpl::GetEntityByID(const std::string& collection_name, const VectorIds& id_array,
-                        std::vector<engine::VectorsData>& vectors, std::vector<engine::AttrsData>& attrs) {
-    CHECK_INITIALIZED;
-
-    snapshot::ScopedSnapshotT ss;
-    STATUS_CHECK(snapshot::Snapshots::GetInstance().GetSnapshot(ss, collection_name));
-
-//    engine::meta::CollectionSchema collection_schema;
-//    engine::meta::hybrid::FieldsSchema fields_schema;
-//    collection_schema.collection_id_ = collection_id;
-//    status = meta_ptr_->DescribeHybridCollection(collection_schema, fields_schema);
-//    if (!status.ok()) {
-//        return status;
-//    }
-//    std::unordered_map<std::string, engine::meta::hybrid::DataType> attr_type;
-//    for (auto schema : fields_schema.fields_schema_) {
-//        if (schema.field_type_ == (int32_t)engine::meta::hybrid::DataType::VECTOR) {
-//            continue;
-//        }
-//        attr_type.insert(std::make_pair(schema.field_name_, (engine::meta::hybrid::DataType)schema.field_type_));
-//    }
-//
-//    meta::FilesHolder files_holder;
-//    std::vector<int> file_types{meta::SegmentSchema::FILE_TYPE::RAW, meta::SegmentSchema::FILE_TYPE::TO_INDEX,
-//                                meta::SegmentSchema::FILE_TYPE::BACKUP};
-//
-//    status = meta_ptr_->FilesByType(collection_id, file_types, files_holder);
-//    if (!status.ok()) {
-//        std::string err_msg = "Failed to get files for GetEntitiesByID: " + status.message();
-//        LOG_ENGINE_ERROR_ << err_msg;
-//        return status;
-//    }
-//
-//    std::vector<meta::CollectionSchema> partition_array;
-//    status = meta_ptr_->ShowPartitions(collection_id, partition_array);
-//    if (!status.ok()) {
-//        std::string err_msg = "Failed to get partitions for GetEntitiesByID: " + status.message();
-//        LOG_ENGINE_ERROR_ << err_msg;
-//        return status;
-//    }
-//    for (auto& schema : partition_array) {
-//        status = meta_ptr_->FilesByType(schema.collection_id_, file_types, files_holder);
-//        if (!status.ok()) {
-//            std::string err_msg = "Failed to get files for GetEntitiesByID: " + status.message();
-//            LOG_ENGINE_ERROR_ << err_msg;
-//            return status;
-//        }
-//    }
-//
-//    if (files_holder.HoldFiles().empty()) {
-//        LOG_ENGINE_DEBUG_ << "No files to get vector by id from";
-//        return Status(DB_NOT_FOUND, "Collection is empty");
-//    }
-//
-//    cache::CpuCacheMgr::GetInstance()->PrintInfo();
-//    status = GetEntitiesByIdHelper(collection_id, id_array, attr_type, vectors, attrs, files_holder);
-//    cache::CpuCacheMgr::GetInstance()->PrintInfo();
-//
-//    return status;
 }
 
 ////////////////////////////////////////////////////////////////////////////////

@@ -12,7 +12,12 @@
 #include "db/SnapshotHandlers.h"
 #include "db/meta/MetaTypes.h"
 #include "db/snapshot/ResourceHelper.h"
+#include "db/snapshot/Snapshot.h"
+#include "knowhere/index/vector_index/helpers/IndexParameter.h"
 #include "segment/SegmentReader.h"
+
+#include <unordered_map>
+#include <utility>
 
 namespace milvus {
 namespace engine {
@@ -97,87 +102,121 @@ SegmentsToSearchCollector::Handle(const snapshot::SegmentCommitPtr& segment_comm
 }
 
 ///////////////////////////////////////////////////////////////////////////////
-GetVectorByIdSegmentHandler::GetVectorByIdSegmentHandler(const std::shared_ptr<milvus::server::Context>& context,
-                                                         engine::snapshot::ScopedSnapshotT ss, const VectorIds& ids)
-    : BaseT(ss), context_(context), vector_ids_(ids), data_() {
+GetEntityByIdSegmentHandler::GetEntityByIdSegmentHandler(const std::shared_ptr<milvus::server::Context>& context,
+                                                         engine::snapshot::ScopedSnapshotT ss, const IDNumbers& ids,
+                                                         const std::vector<std::string>& field_names)
+    : BaseT(ss), context_(context), ids_(ids), field_names_(field_names), vector_data_(), attr_type_(), attr_data_() {
 }
 
 Status
-GetVectorByIdSegmentHandler::Handle(const snapshot::SegmentPtr& segment) {
-    LOG_ENGINE_DEBUG_ << "Getting vector by id in segment " << segment->GetID();
-
-    // sometimes not all of id_array can be found, we need to return empty vector for id not found
-    // for example:
-    // id_array = [1, -1, 2, -1, 3]
-    // vectors should return [valid_vector, empty_vector, valid_vector, empty_vector, valid_vector]
-    // the ID2RAW is to ensure returned vector sequence is consist with id_array
-    std::map<int64_t, VectorsData> map_id2vector;
+GetEntityByIdSegmentHandler::Handle(const snapshot::SegmentPtr& segment) {
+    LOG_ENGINE_DEBUG_ << "Get entity by id in segment " << segment->GetID();
 
     // Load bloom filter
     std::string segment_dir = snapshot::GetResPath<snapshot::Segment>(segment);
     segment::SegmentReader segment_reader(segment_dir);
+
     segment::IdBloomFilterPtr id_bloom_filter_ptr;
     STATUS_CHECK(segment_reader.LoadBloomFilter(id_bloom_filter_ptr));
 
-    for (auto vector_id : vector_ids_) {
-        // each id must has a VectorsData
-        // if vector not found for an id, its VectorsData's vector_count = 0, else 1
-        VectorsData& vector_ref = map_id2vector[vector_id];
+    // Load uids and check if the id is indeed present. If yes, find its offset.
+    std::vector<segment::doc_id_t> uids;
+    STATUS_CHECK(segment_reader.LoadUids(uids));
 
-        // Check if the id is present in bloom filter.
-        if (!id_bloom_filter_ptr->Check(vector_id)) {
+    // Check whether the id has been deleted
+    segment::DeletedDocsPtr deleted_docs_ptr;
+    STATUS_CHECK(segment_reader.LoadDeletedDocs(deleted_docs_ptr));
+    auto& deleted_docs = deleted_docs_ptr->GetDeletedDocs();
+
+    for (auto id : ids_) {
+        AttrsData& attr_ref = attr_data_[id];
+        VectorsData& vector_ref = vector_data_[id];
+
+        /* fast check using bloom filter */
+        if (!id_bloom_filter_ptr->Check(id)) {
             continue;
         }
 
-        // Load uids and check if the id is indeed present. If yes, find its offset.
-        std::vector<segment::doc_id_t> uids;
-        STATUS_CHECK(segment_reader.LoadUids(uids));
+        /* check if id really exists in uids */
+        auto found = std::find(uids.begin(), uids.end(), id);
+        if (found == uids.end()) {
+            continue;
+        }
 
-        auto found = std::find(uids.begin(), uids.end(), vector_id);
-        if (found != uids.end()) {
-            auto offset = std::distance(uids.begin(), found);
+        /* check if this id is deleted */
+        auto offset = std::distance(uids.begin(), found);
+        auto deleted = std::find(deleted_docs.begin(), deleted_docs.end(), offset);
+        if (deleted != deleted_docs.end()) {
+            continue;
+        }
 
-            // Check whether the id has been deleted
-            segment::DeletedDocsPtr deleted_docs_ptr;
-            STATUS_CHECK(segment_reader.LoadDeletedDocs(deleted_docs_ptr));
-            auto& deleted_docs = deleted_docs_ptr->GetDeletedDocs();
+        std::unordered_map<std::string, std::vector<uint8_t>> raw_attrs;
+        for (auto& field_name : field_names_) {
+            auto field_ptr = ss_->GetField(field_name);
+            auto field_params = field_ptr->GetParamsJson();
+            auto dim = field_params[knowhere::meta::DIM].get<int64_t>();
+            auto field_type = field_ptr->GetFtype();
 
-            auto deleted = std::find(deleted_docs.begin(), deleted_docs.end(), offset);
-            if (deleted == deleted_docs.end()) {
-                // SS TODO
-                // Load raw vector
-//                bool is_binary = utils::IsBinaryMetricType(file.metric_type_);
-//                size_t single_vector_bytes = is_binary ? file.dimension_ / 8 : file.dimension_ * sizeof(float);
-//                std::vector<uint8_t> raw_vector;
-//                STATUS_CHECK(segment_reader.LoadVectors(offset * single_vector_bytes, single_vector_bytes, raw_vector));
-//
-//                vector_ref.vector_count_ = 1;
-//                if (is_binary) {
-//                    vector_ref.binary_data_.swap(raw_vector);
-//                } else {
-//                    std::vector<float> float_vector;
-//                    float_vector.resize(file.dimension_);
-//                    memcpy(float_vector.data(), raw_vector.data(), single_vector_bytes);
-//                    vector_ref.float_data_.swap(float_vector);
-//                }
+            if (field_ptr->GetFtype() == (int64_t)meta::hybrid::DataType::VECTOR_BINARY) {
+                size_t vector_size = dim / 8;
+                std::vector<uint8_t> raw_vector;
+                STATUS_CHECK(segment_reader.LoadVectors(offset * vector_size, vector_size, raw_vector));
+
+                vector_ref.vector_count_ = 1;
+                vector_ref.binary_data_.swap(raw_vector);
+            } else if (field_ptr->GetFtype() == (int64_t)meta::hybrid::DataType::VECTOR_FLOAT) {
+                size_t vector_size = dim * sizeof(float);
+                std::vector<uint8_t> raw_vector;
+                STATUS_CHECK(segment_reader.LoadVectors(offset * vector_size, vector_size, raw_vector));
+
+                vector_ref.vector_count_ = 1;
+                std::vector<float> float_vector;
+                float_vector.resize(dim);
+                memcpy(float_vector.data(), raw_vector.data(), vector_size);
+                vector_ref.float_data_.swap(float_vector);
+            } else {
+                size_t num_bytes;
+                switch (field_type) {
+                    case (int64_t)meta::hybrid::DataType::INT8: {
+                        num_bytes = sizeof(int8_t);
+                        break;
+                    }
+                    case (int64_t)meta::hybrid::DataType::INT16: {
+                        num_bytes = sizeof(int16_t);
+                        break;
+                    }
+                    case (int64_t)meta::hybrid::DataType::INT32: {
+                        num_bytes = sizeof(int32_t);
+                        break;
+                    }
+                    case (int64_t)meta::hybrid::DataType::INT64: {
+                        num_bytes = sizeof(int64_t);
+                        break;
+                    }
+                    case (int64_t)meta::hybrid::DataType::FLOAT: {
+                        num_bytes = sizeof(float);
+                        break;
+                    }
+                    case (int64_t)meta::hybrid::DataType::DOUBLE: {
+                        num_bytes = sizeof(double);
+                        break;
+                    }
+                    default: {
+                        std::string msg = "Field type of " + field_name + " not supported";
+                        return Status(DB_ERROR, msg);
+                    }
+                }
+                std::vector<uint8_t> raw_attr;
+                STATUS_CHECK(segment_reader.LoadAttrs(field_name, offset * num_bytes, num_bytes, raw_attr));
+                raw_attrs.insert(std::make_pair(field_name, raw_attr));
             }
         }
-    }
 
-    for (auto id : vector_ids_) {
-        VectorsData& vector_ref = map_id2vector[id];
-
-        VectorsData data;
-        data.vector_count_ = vector_ref.vector_count_;
-        if (data.vector_count_ > 0) {
-            data.float_data_ = vector_ref.float_data_;    // copy data since there could be duplicated id
-            data.binary_data_ = vector_ref.binary_data_;  // copy data since there could be duplicated id
-        }
-        data_.emplace_back(data);
+        attr_ref.attr_count_ = 1;
+        attr_ref.attr_data_ = raw_attrs;
     }
 
     return Status::OK();
 }
-
 }  // namespace engine
 }  // namespace milvus

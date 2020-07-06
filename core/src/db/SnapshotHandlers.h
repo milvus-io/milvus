@@ -11,13 +11,15 @@
 
 #pragma once
 
+#include "db/Types.h"
 #include "db/meta/FilesHolder.h"
 #include "db/snapshot/Snapshot.h"
-#include "db/Types.h"
 #include "server/context/Context.h"
 #include "utils/Log.h"
 
 #include <memory>
+#include <string>
+#include <vector>
 
 namespace milvus {
 namespace engine {
@@ -25,7 +27,7 @@ namespace engine {
 struct LoadVectorFieldElementHandler : public snapshot::IterateHandler<snapshot::FieldElement> {
     using ResourceT = snapshot::FieldElement;
     using BaseT = snapshot::IterateHandler<ResourceT>;
-    LoadVectorFieldElementHandler(const std::shared_ptr<server::Context>& context, snapshot::ScopedSnapshotT ss,
+    LoadVectorFieldElementHandler(const server::ContextPtr& context, snapshot::ScopedSnapshotT ss,
                                   const snapshot::FieldPtr& field);
 
     Status
@@ -38,7 +40,7 @@ struct LoadVectorFieldElementHandler : public snapshot::IterateHandler<snapshot:
 struct LoadVectorFieldHandler : public snapshot::IterateHandler<snapshot::Field> {
     using ResourceT = snapshot::Field;
     using BaseT = snapshot::IterateHandler<ResourceT>;
-    LoadVectorFieldHandler(const std::shared_ptr<server::Context>& context, snapshot::ScopedSnapshotT ss);
+    LoadVectorFieldHandler(const server::ContextPtr& context, snapshot::ScopedSnapshotT ss);
 
     Status
     Handle(const typename ResourceT::Ptr&) override;
@@ -58,18 +60,21 @@ struct SegmentsToSearchCollector : public snapshot::IterateHandler<snapshot::Seg
 };
 
 ///////////////////////////////////////////////////////////////////////////////
-struct GetVectorByIdSegmentHandler : public snapshot::IterateHandler<snapshot::Segment> {
+struct GetEntityByIdSegmentHandler : public snapshot::IterateHandler<snapshot::Segment> {
     using ResourceT = snapshot::Segment;
     using BaseT = snapshot::IterateHandler<ResourceT>;
-    GetVectorByIdSegmentHandler(const std::shared_ptr<server::Context>& context, snapshot::ScopedSnapshotT ss,
-                                const VectorIds& ids);
+    GetEntityByIdSegmentHandler(const server::ContextPtr& context, snapshot::ScopedSnapshotT ss, const IDNumbers& ids,
+                                const std::vector<std::string>& field_names);
 
     Status
     Handle(const typename ResourceT::Ptr&) override;
 
     const server::ContextPtr context_;
-    const engine::VectorIds vector_ids_;
-    std::vector<engine::VectorsData> data_;
+    const engine::IDNumbers ids_;
+    const std::vector<std::string> field_names_;
+    std::vector<engine::VectorsData> vector_data_;
+    std::vector<meta::hybrid::DataType> attr_type_;
+    std::vector<engine::AttrsData> attr_data_;
 };
 
 }  // namespace engine

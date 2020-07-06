@@ -182,7 +182,6 @@ class Snapshot : public ReferenceProxy {
         return it != field_names_map_.end();
     }
 
-    bool
     FieldPtr
     GetField(const std::string& name) const;
 
