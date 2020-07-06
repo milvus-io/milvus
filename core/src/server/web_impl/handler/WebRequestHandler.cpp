@@ -1315,7 +1315,7 @@ WebRequestHandler::CreatePartition(const OString& collection_name, const Partiti
 }
 
 StatusDto::ObjectWrapper
-WebRequestHandler::ShowPartitions(const OString& collection_name, const OQueryParams& query_params, const OString& body,
+WebRequestHandler::ShowPartitions(const OString& collection_name, const OQueryParams& query_params,
                                   PartitionListDto::ObjectWrapper& partition_list_dto) {
     int64_t offset = 0;
     auto status = ParseQueryInteger(query_params, "offset", offset);
@@ -1332,35 +1332,6 @@ WebRequestHandler::ShowPartitions(const OString& collection_name, const OQueryPa
     if (offset < 0 || page_size < 0) {
         ASSIGN_RETURN_STATUS_DTO(
             Status(SERVER_UNEXPECTED_ERROR, "Query param 'offset' or 'page_size' should equal or bigger than 0"));
-    }
-
-    if (nullptr != body.get() && body->getSize() > 0) {
-        auto body_json = nlohmann::json::parse(body->c_str());
-        if (!body_json.contains("filter")) {
-            RETURN_STATUS_DTO(BODY_FIELD_LOSS, "Field \'filter\' is required.")
-        }
-        auto filter_json = body_json["filter"];
-        if (filter_json.contains("partition_tag")) {
-            std::string tag = filter_json["partition_tag"];
-            bool exists = false;
-            status = request_handler_.HasPartition(context_ptr_, collection_name->std_str(), tag, exists);
-            if (!status.ok()) {
-                ASSIGN_RETURN_STATUS_DTO(status)
-            }
-            auto partition_dto = PartitionFieldsDto::createShared();
-            if (exists) {
-                partition_list_dto->count = 1;
-                partition_dto->partition_tag = tag.c_str();
-            } else {
-                partition_list_dto->count = 0;
-            }
-            partition_list_dto->partitions = partition_list_dto->partitions->createShared();
-            partition_list_dto->partitions->pushBack(partition_dto);
-
-            ASSIGN_RETURN_STATUS_DTO(status)
-        } else {
-            RETURN_STATUS_DTO(BODY_FIELD_LOSS, "Unknown field.")
-        }
     }
 
     bool all_required = false;

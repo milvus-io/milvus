@@ -118,7 +118,7 @@ class TestDeleteBase:
         assert status.OK()
         status = connect.delete_entity_by_id(collection, ids)
         assert status.OK()
-        time.sleep(2)
+        time.sleep(5)
         status, res = connect.count_entities(collection)
         assert status.OK()
         assert res == 0
