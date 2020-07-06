@@ -74,12 +74,26 @@ class BuildOperation : public CompoundBaseOperation<BuildOperation> {
     CheckSegmentStale(ScopedSnapshotT& latest_snapshot, ID_TYPE segment_id) const;
 };
 
-class DropIndexOperation : public CompoundBaseOperation<BuildOperation> {
+class DropIndexOperation : public CompoundBaseOperation<DropIndexOperation> {
  public:
-    using BaseT = CompoundBaseOperation<BuildOperation>;
-    static constexpr const char* Name = "B";
+    using BaseT = CompoundBaseOperation<DropIndexOperation>;
+    static constexpr const char* Name = "DI";
 
     DropIndexOperation(const OperationContext& context, ScopedSnapshotT prev_ss);
+
+    Status
+    PreCheck() override;
+
+    Status
+    DoExecute(Store&) override;
+};
+
+class DropAllIndexOperation : public CompoundBaseOperation<DropAllIndexOperation> {
+ public:
+    using BaseT = CompoundBaseOperation<DropAllIndexOperation>;
+    static constexpr const char* Name = "DAI";
+
+    DropAllIndexOperation(const OperationContext& context, ScopedSnapshotT prev_ss);
 
     Status
     PreCheck() override;

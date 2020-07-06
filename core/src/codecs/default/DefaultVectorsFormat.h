@@ -17,7 +17,6 @@
 
 #pragma once
 
-#include <mutex>
 #include <string>
 #include <vector>
 
@@ -70,8 +69,6 @@ class DefaultVectorsFormat : public VectorsFormat {
                        std::vector<segment::doc_id_t>& uids);
 
  private:
-    std::mutex mutex_;
-
     const std::string raw_vector_extension_ = ".rv";
     const std::string user_id_extension_ = ".uid";
 };

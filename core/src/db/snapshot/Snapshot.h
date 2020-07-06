@@ -208,7 +208,7 @@ class Snapshot : public ReferenceProxy {
     GetFieldElementId(const std::string& field_name, const std::string& field_element_name) const {
         auto itf = field_element_names_map_.find(field_name);
         if (itf == field_element_names_map_.end())
-            return false;
+            return 0;
         auto itfe = itf->second.find(field_element_name);
         if (itfe == itf->second.end()) {
             return 0;

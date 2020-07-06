@@ -170,6 +170,24 @@ Snapshot::ToString() const {
     ss << ",mappings=";
     auto& cc_m = GetCollectionCommit()->GetMappings();
     ss << to_matrix_string(cc_m, row_element_size, 2);
+
+    auto& schema_m = GetSchemaCommit()->GetMappings();
+    ss << "\nSchemaCommit: id=" << GetSchemaCommit()->GetID() << ",mappings=";
+    ss << to_matrix_string(schema_m, row_element_size, 2);
+    for (auto& fc_id : schema_m) {
+        auto fc = GetResource<FieldCommit>(fc_id);
+        auto f = GetResource<Field>(fc->GetFieldId());
+        ss << "\n  Field: id=" << f->GetID() << ",name=\"" << f->GetName() << "\"";
+        ss << ", FieldCommit: id=" << fc->GetID();
+        ss << ",mappings=";
+        auto& fc_m = fc->GetMappings();
+        ss << to_matrix_string(fc_m, row_element_size, 2);
+        for (auto& fe_id : fc_m) {
+            auto fe = GetResource<FieldElement>(fe_id);
+            ss << "\n\tFieldElement: id=" << fe_id << ",name=" << fe->GetName();
+        }
+    }
+
     for (auto& p_c_id : cc_m) {
         auto p_c = GetResource<PartitionCommit>(p_c_id);
         auto p = GetResource<Partition>(p_c->GetPartitionId());

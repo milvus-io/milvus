@@ -101,6 +101,33 @@ class SegmentFileOperation : public CommitOperation<SegmentFile> {
     SegmentFileContext context_;
 };
 
+class FieldCommitOperation : public CommitOperation<FieldCommit> {
+ public:
+    using BaseT = CommitOperation<FieldCommit>;
+    FieldCommitOperation(const OperationContext& context, ScopedSnapshotT prev_ss);
+
+    FieldCommit::Ptr
+    GetPrevResource() const override;
+
+    Status
+    DoExecute(Store&) override;
+
+    /* Status */
+    /* PreCheck() override; */
+};
+
+class SchemaCommitOperation : public CommitOperation<SchemaCommit> {
+ public:
+    using BaseT = CommitOperation<SchemaCommit>;
+    SchemaCommitOperation(const OperationContext& context, ScopedSnapshotT prev_ss);
+
+    SchemaCommit::Ptr
+    GetPrevResource() const override;
+
+    Status
+    DoExecute(Store&) override;
+};
+
 template <>
 class LoadOperation<Collection> : public Operations {
  public:
