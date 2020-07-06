@@ -112,6 +112,10 @@ class Snapshot : public ReferenceProxy {
         return latest_schema_commit_id_;
     }
 
+    Status
+    GetFieldElement(const std::string& field_name, const std::string& field_element_name,
+                    FieldElementPtr& field_element) const;
+
     // PXU TODO: add const. Need to change Scopedxxxx::Get
     SegmentCommitPtr
     GetSegmentCommitBySegmentId(ID_TYPE segment_id) const {
@@ -177,6 +181,9 @@ class Snapshot : public ReferenceProxy {
         auto it = field_names_map_.find(name);
         return it != field_names_map_.end();
     }
+
+    FieldPtr
+    GetField(const std::string& name) const;
 
     [[nodiscard]] bool
     HasFieldElement(const std::string& field_name, const std::string& field_element_name) const {
