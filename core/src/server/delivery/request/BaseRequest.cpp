@@ -104,14 +104,25 @@ BaseRequest::PreExecute() {
 
 Status
 BaseRequest::Execute() {
-    status_ = OnExecute();
+    LOG_SERVER_INFO_ << "BaseRequest execute OnExecute() ...";
+    try {
+        status_ = OnExecute();
+    } catch (std::exception& ex) {
+        LOG_SERVER_INFO_ << "Error: BaseRequest execute error occurred. " << ex.what();
+    }
+
+    LOG_SERVER_INFO_ << "BaseRequest execute Done() ...";
     Done();
+    LOG_SERVER_INFO_ << "BaseRequest execute done.";
     return status_;
 }
 
 Status
 BaseRequest::PostExecute() {
+    LOG_SERVER_INFO_ << "BaseRequest post execute ...";
+    Done();
     status_ = OnPostExecute();
+    LOG_SERVER_INFO_ << "BaseRequest done";
     return status_;
 }
 
@@ -127,7 +138,9 @@ BaseRequest::OnPostExecute() {
 
 void
 BaseRequest::Done() {
+    LOG_SERVER_INFO_ << "BaseRequest::Done() start ...";
     std::unique_lock<std::mutex> lock(finish_mtx_);
+    LOG_SERVER_INFO_ << "BaseRequest::Done() done";
     done_ = true;
     finish_cond_.notify_all();
 }
@@ -149,8 +162,11 @@ BaseRequest::CollectionNotExistMsg(const std::string& collection_name) {
 
 Status
 BaseRequest::WaitToFinish() {
+    LOG_SERVER_INFO_ << "Try to get finish lock ...";
     std::unique_lock<std::mutex> lock(finish_mtx_);
+    LOG_SERVER_INFO_ << "Wait lock for done ...";
     finish_cond_.wait(lock, [this] { return done_; });
+    LOG_SERVER_INFO_ << "Lock done.";
     return status_;
 }
 

@@ -98,6 +98,7 @@ RequestScheduler::ExecuteRequest(const BaseRequestPtr& request_ptr) {
 
     LOG_SERVER_INFO_ << "Put request to queue";
     status = PutToQueue(request_ptr);
+    LOG_SERVER_INFO_ << "Put request to queue done";
     fiu_do_on("RequestScheduler.ExecuteRequest.push_queue_fail", status = Status(SERVER_INVALID_ARGUMENT, ""));
 
     if (!status.ok()) {
