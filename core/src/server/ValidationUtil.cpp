@@ -193,8 +193,14 @@ Status
 ValidateCollectionIndexType(int32_t index_type) {
     int engine_type = static_cast<int>(engine::EngineType(index_type));
     if (engine_type <= 0 || engine_type > static_cast<int>(engine::EngineType::MAX_VALUE)) {
-        std::string msg = "Invalid index type: " + std::to_string(index_type) + ". " +
-                          "Make sure the index type is in IndexType list.";
+        std::string index_type_str;
+        for (auto it = engine::s_map_engine_type.begin(); it != engine::s_map_engine_type.end(); it++) {
+            if (it->second == (engine::EngineType)index_type) {
+                index_type_str = it->first;
+            }
+        }
+        std::string msg =
+            "Invalid index type: " + index_type_str + ". " + "Make sure the index type is in IndexType list.";
         LOG_SERVER_ERROR_ << msg;
         return Status(SERVER_INVALID_INDEX_TYPE, msg);
     }

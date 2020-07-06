@@ -21,6 +21,7 @@
 
 #include "context/HybridSearchContext.h"
 #include "query/BinaryQuery.h"
+#include "server/ValidationUtil.h"
 #include "server/context/ConnectionContext.h"
 #include "tracing/TextMapCarrier.h"
 #include "tracing/TracerUtil.h"
@@ -1543,7 +1544,12 @@ GrpcRequestHandler::DeserializeJsonToBoolQuery(
             json::iterator vector_param_it = it.value().begin();
             if (vector_param_it != it.value().end()) {
                 vector_query->field_name = vector_param_it.key();
-                vector_query->topk = vector_param_it.value()["topk"];
+                int64_t topk = vector_param_it.value()["topk"];
+                status = server::ValidateSearchTopk(topk);
+                if (!status.ok()) {
+                    return status;
+                }
+                vector_query->topk = topk;
                 vector_query->extra_params = vector_param_it.value()["params"];
             }
 

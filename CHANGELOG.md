@@ -21,7 +21,10 @@ Please mark all changes in change log and use the issue from GitHub
 -   \#2696 Check the validity of the parameters of creating collection: segment_size
 -   \#2697 Index can not be created
 -   \#2698 Count entities got wrong result with binary vectors
+-   \#2728 Index type name should returned if index type is not supported
 -   \#2731 No entity returned with `get_entity_by_id`
+-   \#2732 Server destroyed after `delete by id`
+-   \#2733 The max value of top-k should be limited
 
 ## Feature
 -   \#2319 Redo metadata to support MVCC

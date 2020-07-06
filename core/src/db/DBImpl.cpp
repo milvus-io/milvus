@@ -1002,6 +1002,12 @@ DBImpl::DeleteVector(const std::string& collection_id, IDNumber vector_id) {
 }
 
 Status
+DBImpl::DeleteEntity(const std::string& collection_id, milvus::engine::IDNumber entity_id) {
+    IDNumbers ids;
+    ids.push_back(entity_id);
+}
+
+Status
 DBImpl::DeleteVectors(const std::string& collection_id, IDNumbers vector_ids) {
     if (!initialized_.load(std::memory_order_acquire)) {
         return SHUTDOWN_ERROR;
@@ -1018,6 +1024,30 @@ DBImpl::DeleteVectors(const std::string& collection_id, IDNumbers vector_ids) {
         record.collection_id = collection_id;
         record.ids = vector_ids.data();
         record.length = vector_ids.size();
+
+        status = ExecWalRecord(record);
+    }
+
+    return status;
+}
+
+Status
+DBImpl::DeleteEntities(const std::string& collection_id, milvus::engine::IDNumbers entity_ids) {
+    if (!initialized_.load(std::memory_order_acquire)) {
+        return SHUTDOWN_ERROR;
+    }
+
+    Status status;
+    if (options_.wal_enable_) {
+        wal_mgr_->DeleteById(collection_id, entity_ids);
+        swn_wal_.Notify();
+    } else {
+        wal::MXLogRecord record;
+        record.lsn = 0;  // need to get from meta ?
+        record.type = wal::MXLogType::Delete;
+        record.collection_id = collection_id;
+        record.ids = entity_ids.data();
+        record.length = entity_ids.size();
 
         status = ExecWalRecord(record);
     }
