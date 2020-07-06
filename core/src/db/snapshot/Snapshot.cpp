@@ -129,6 +129,40 @@ Snapshot::Snapshot(ID_TYPE ss_id) {
     RefAll();
 }
 
+FieldPtr
+Snapshot::GetField(const std::string& name) const {
+    auto it = field_names_map_.find(name);
+    if (it == field_names_map_.end()) {
+        return nullptr;
+    }
+
+    return GetResource<Field>(it->second);
+}
+
+Status
+Snapshot::GetFieldElement(const std::string& field_name, const std::string& field_element_name,
+                          FieldElementPtr& field_element) const {
+    field_element = nullptr;
+    auto itf = field_element_names_map_.find(field_name);
+    if (itf == field_element_names_map_.end()) {
+        std::stringstream emsg;
+        emsg << "Snapshot::GetFieldElement: Specified field \"" << field_name;
+        emsg << "\" not found";
+        return Status(SS_NOT_FOUND_ERROR, emsg.str());
+    }
+
+    auto itfe = itf->second.find(field_element_name);
+    if (itfe == itf->second.end()) {
+        std::stringstream emsg;
+        emsg << "Snapshot::GetFieldElement: Specified field element \"" << field_element_name;
+        emsg << "\" not found";
+        return Status(SS_NOT_FOUND_ERROR, emsg.str());
+    }
+
+    field_element = GetResource<FieldElement>(itfe->second);
+    return Status::OK();
+}
+
 const std::string
 Snapshot::ToString() const {
     auto to_matrix_string = [](const MappingT& mappings, int line_length, size_t ident = 0) -> std::string {

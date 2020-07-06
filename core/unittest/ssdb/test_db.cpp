@@ -182,8 +182,6 @@ TEST_F(SSDBTest, IndexTest) {
     ASSERT_TRUE(status.ok());
     auto sf_collector = std::make_shared<SegmentFileCollector>(ss, filter1);
     sf_collector->Iterate();
-    std::cout << "Total " << sf_collector->segment_files_.size() << " of field_element_id ";
-    std::cout << field_element_id << std::endl;
     ASSERT_EQ(new_total, sf_collector->segment_files_.size());
 
     status = db_->DropIndex(c1, sf_context.field_name, sf_context.field_element_name);
@@ -193,8 +191,6 @@ TEST_F(SSDBTest, IndexTest) {
     ASSERT_TRUE(status.ok());
     sf_collector = std::make_shared<SegmentFileCollector>(ss, filter1);
     sf_collector->Iterate();
-    std::cout << "Total " << sf_collector->segment_files_.size() << " of field_element_id ";
-    std::cout << field_element_id << std::endl;
     ASSERT_EQ(0, sf_collector->segment_files_.size());
 
     {
