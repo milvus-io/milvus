@@ -34,8 +34,18 @@ RequestScheduler::ExecRequest(BaseRequestPtr& request_ptr) {
         return;
     }
 
-    RequestScheduler& scheduler = RequestScheduler::GetInstance();
-    scheduler.ExecuteRequest(request_ptr);
+    LOG_SERVER_INFO_ << "Scheduler Exec Request start ... ";
+
+    try {
+        RequestScheduler& scheduler = RequestScheduler::GetInstance();
+        scheduler.ExecuteRequest(request_ptr);
+    } catch (std::exception& ex) {
+        std::string err = "Error occurred when scheduler execute request: " + std::string(ex.what());
+        LOG_SERVER_INFO_ << err;
+        LOG_SERVER_ERROR_ << err;
+    }
+
+    LOG_SERVER_INFO_ << "Scheduler Exec Request done.";
 }
 
 void
@@ -86,6 +96,7 @@ RequestScheduler::ExecuteRequest(const BaseRequestPtr& request_ptr) {
         return status;
     }
 
+    LOG_SERVER_INFO_ << "Put request to queue";
     status = PutToQueue(request_ptr);
     fiu_do_on("RequestScheduler.ExecuteRequest.push_queue_fail", status = Status(SERVER_INVALID_ARGUMENT, ""));
 
@@ -100,6 +111,7 @@ RequestScheduler::ExecuteRequest(const BaseRequestPtr& request_ptr) {
     }
 
     status = request_ptr->WaitToFinish();  // sync execution
+    LOG_SERVER_INFO_ << "Finished wait done";
     if (!status.ok()) {
         return status;
     }
