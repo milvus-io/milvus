@@ -18,10 +18,10 @@
 #include <unordered_map>
 
 #include "config/Config.h"
+#include "db/snapshot/Snapshots.h"
 #include "utils/CommonUtil.h"
 #include "utils/Exception.h"
 #include "utils/Log.h"
-#include "db/snapshot/Snapshots.h"
 
 namespace milvus {
 namespace engine {

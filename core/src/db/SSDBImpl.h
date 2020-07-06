@@ -25,10 +25,10 @@
 #include "db/Options.h"
 #include "db/SimpleWaitNotify.h"
 #include "db/SnapshotHandlers.h"
+#include "db/insert/MemManager.h"
 #include "db/snapshot/Context.h"
 #include "db/snapshot/ResourceTypes.h"
 #include "db/snapshot/Resources.h"
-#include "db/insert/MemManager.h"
 #include "utils/Status.h"
 #include "utils/ThreadPool.h"
 #include "wal/WalManager.h"
@@ -151,7 +151,6 @@ class SSDBImpl {
     ThreadPool index_thread_pool_;
     std::mutex index_result_mutex_;
     std::list<std::future<void>> index_thread_results_;
-
 };  // SSDBImpl
 
 }  // namespace engine

@@ -585,7 +585,7 @@ SSDBImpl::WaitBuildIndexFinish() {
 
 Status
 SSDBImpl::ExecWalRecord(const wal::MXLogRecord& record) {
-    // TODO: 
+    // TODO:
     return Status::OK();
 }
 
