@@ -160,6 +160,7 @@ pipeline {
                             FORMAT_OS_NAME = "${OS_NAME}".replaceAll("\\.", "-").replaceAll("_", "-")
                             HELM_RELEASE_NAME = "${env.PIPELINE_NAME}-${env.FROMAT_SEMVER}-${env.BUILD_NUMBER}-single-${FORMAT_OS_NAME}-${BINARY_VERSION}".toLowerCase()
                             SHARDS_HELM_RELEASE_NAME = "${env.PIPELINE_NAME}-${env.FROMAT_SEMVER}-${env.BUILD_NUMBER}-shards-${FORMAT_OS_NAME}-${BINARY_VERSION}".toLowerCase()
+                            DEV_TEST_ARTIFACTS = "_artifacts/${FROMAT_SEMVER}/${FORMAT_OS_NAME}"
                         }
 
                         agent {
@@ -175,6 +176,7 @@ pipeline {
                                 steps {
                                     container('milvus-test-env') {
                                         script {
+                                            sh "mkdir -p ${env.DEV_TEST_ARTIFACTS}"
                                             boolean isNightlyTest = isTimeTriggeredBuild()
                                             if (isNightlyTest) {
                                                 load "${env.WORKSPACE}/ci/jenkins/step/singleDevNightlyTest.groovy"
@@ -192,6 +194,7 @@ pipeline {
                             cleanup {
                                 container('milvus-test-env') {
                                     script {
+                                        archiveArtifacts artifacts: "${env.DEV_TEST_ARTIFACTS}/**", allowEmptyArchive: true
                                         load "${env.WORKSPACE}/ci/jenkins/step/cleanupSingleDev.groovy"
                                         boolean isNightlyTest = isTimeTriggeredBuild()
                                         if (isNightlyTest) {
