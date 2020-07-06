@@ -153,7 +153,7 @@ GetEntityByIdSegmentHandler::Handle(const snapshot::SegmentPtr& segment) {
         std::unordered_map<std::string, std::vector<uint8_t>> raw_attrs;
         for (auto& field_name : field_names_) {
             auto field_ptr = ss_->GetField(field_name);
-            auto field_params = field_ptr->GetParamsJson();
+            auto field_params = field_ptr->GetParams();
             auto dim = field_params[knowhere::meta::DIM].get<int64_t>();
             auto field_type = field_ptr->GetFtype();
 

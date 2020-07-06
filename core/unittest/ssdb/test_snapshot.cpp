@@ -22,11 +22,10 @@
 TEST_F(SnapshotTest, ResourcesTest) {
     int nprobe = 16;
     milvus::json params = {{"nprobe", nprobe}};
-    ParamsField p_field(params.dump());
-    ASSERT_EQ(params.dump(), p_field.GetParams());
-    ASSERT_EQ(params, p_field.GetParamsJson());
+    ParamsField p_field(params);
+    ASSERT_EQ(params, p_field.GetParams());
 
-    auto nprobe_real = p_field.GetParamsJson().at("nprobe").get<int>();
+    auto nprobe_real = p_field.GetParams().at("nprobe").get<int>();
     ASSERT_EQ(nprobe, nprobe_real);
 }
 
