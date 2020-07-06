@@ -114,7 +114,7 @@ class Snapshot : public ReferenceProxy {
 
     Status
     GetFieldElement(const std::string& field_name, const std::string& field_element_name,
-        FieldElementPtr& field_element) const;
+                    FieldElementPtr& field_element) const;
 
     // PXU TODO: add const. Need to change Scopedxxxx::Get
     SegmentCommitPtr

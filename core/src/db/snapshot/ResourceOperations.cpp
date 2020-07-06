@@ -307,8 +307,8 @@ Status
 SegmentFileOperation::DoExecute(Store& store) {
     FieldElementPtr fe;
     STATUS_CHECK(GetStartedSS()->GetFieldElement(context_.field_name, context_.field_element_name, fe));
-    resource_ = std::make_shared<SegmentFile>(context_.collection_id, context_.partition_id, context_.segment_id,
-                                              fe->GetID());
+    resource_ =
+        std::make_shared<SegmentFile>(context_.collection_id, context_.partition_id, context_.segment_id, fe->GetID());
     AddStep(*resource_, false);
     return Status::OK();
 }

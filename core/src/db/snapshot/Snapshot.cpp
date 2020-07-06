@@ -133,7 +133,7 @@ Snapshot::GetField(const std::string& name) const {
 
 Status
 Snapshot::GetFieldElement(const std::string& field_name, const std::string& field_element_name,
-        FieldElementPtr& field_element) const {
+                          FieldElementPtr& field_element) const {
     field_element = nullptr;
     auto itf = field_element_names_map_.find(field_name);
     if (itf == field_element_names_map_.end()) {
