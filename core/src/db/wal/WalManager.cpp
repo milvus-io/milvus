@@ -18,6 +18,7 @@
 #include <unordered_map>
 
 #include "config/Config.h"
+#include "db/snapshot/Snapshots.h"
 #include "utils/CommonUtil.h"
 #include "utils/Exception.h"
 #include "utils/Log.h"
@@ -111,6 +112,101 @@ WalManager::Init(const meta::MetaPtr& meta) {
                 for (auto& part : col.second) {
                     part.second.wal_lsn = applied_lsn;
                 }
+            }
+        }
+    }
+
+    // all tables are droped and a new wal path?
+    if (applied_lsn < recovery_start) {
+        applied_lsn = recovery_start;
+    }
+
+    ErrorCode error_code = WAL_ERROR;
+    p_buffer_ = std::make_shared<MXLogBuffer>(mxlog_config_.mxlog_path, mxlog_config_.buffer_size);
+    if (p_buffer_ != nullptr) {
+        if (p_buffer_->Init(recovery_start, applied_lsn)) {
+            error_code = WAL_SUCCESS;
+        } else if (mxlog_config_.recovery_error_ignore) {
+            p_buffer_->Reset(applied_lsn);
+            error_code = WAL_SUCCESS;
+        } else {
+            error_code = WAL_FILE_ERROR;
+        }
+    }
+
+    // buffer size may changed
+    mxlog_config_.buffer_size = p_buffer_->GetBufferSize();
+
+    last_applied_lsn_ = applied_lsn;
+    return error_code;
+}
+
+ErrorCode
+WalManager::Init() {
+    uint64_t applied_lsn = 0;
+    p_meta_handler_ = std::make_shared<MXLogMetaHandler>(mxlog_config_.mxlog_path);
+    if (p_meta_handler_ != nullptr) {
+        p_meta_handler_->GetMXLogInternalMeta(applied_lsn);
+    }
+
+    uint64_t recovery_start = 0;
+    std::vector<std::string> collection_names;
+    auto status = snapshot::Snapshots::GetInstance().GetCollectionNames(collection_names);
+    if (!status.ok()) {
+        return WAL_META_ERROR;
+    }
+
+    if (!collection_names.empty()) {
+        u_int64_t min_flushed_lsn = ~(u_int64_t)0;
+        u_int64_t max_flushed_lsn = 0;
+        auto update_limit_lsn = [&](u_int64_t lsn) {
+            if (min_flushed_lsn > lsn) {
+                min_flushed_lsn = lsn;
+            }
+            if (max_flushed_lsn < lsn) {
+                max_flushed_lsn = lsn;
+            }
+        };
+
+        for (auto& col_name : collection_names) {
+            auto& collection = collections_[col_name];
+            auto& default_part = collection[""];
+
+            snapshot::ScopedSnapshotT ss;
+            status = snapshot::Snapshots::GetInstance().GetSnapshot(ss, col_name);
+            if (!status.ok()) {
+                return WAL_META_ERROR;
+            }
+
+            default_part.flush_lsn = ss->GetMaxLsn();
+            update_limit_lsn(default_part.flush_lsn);
+
+            std::vector<std::string> partition_names = ss->GetPartitionNames();
+            for (auto& part_name : partition_names) {
+                auto& partition = collection[part_name];
+
+                snapshot::PartitionPtr ss_part = ss->GetPartition(part_name);
+                if (ss_part == nullptr) {
+                    return WAL_META_ERROR;
+                }
+
+                partition.flush_lsn = ss_part->GetLsn();
+                update_limit_lsn(partition.flush_lsn);
+            }
+        }
+
+        if (applied_lsn < max_flushed_lsn) {
+            // a new WAL folder?
+            applied_lsn = max_flushed_lsn;
+        }
+        if (recovery_start < min_flushed_lsn) {
+            // not flush all yet
+            recovery_start = min_flushed_lsn;
+        }
+
+        for (auto& col : collections_) {
+            for (auto& part : col.second) {
+                part.second.wal_lsn = applied_lsn;
             }
         }
     }

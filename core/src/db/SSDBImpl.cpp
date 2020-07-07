@@ -27,7 +27,9 @@ namespace milvus {
 namespace engine {
 
 namespace {
-constexpr int64_t BACKGROUND_METRIC_INTERVAL = 1;
+constexpr uint64_t BACKGROUND_METRIC_INTERVAL = 1;
+constexpr uint64_t BACKGROUND_INDEX_INTERVAL = 1;
+constexpr uint64_t WAIT_BUILD_INDEX_INTERVAL = 5;
 
 static const Status SHUTDOWN_ERROR = Status(DB_ERROR, "Milvus server is shutdown!");
 }  // namespace
@@ -37,7 +39,8 @@ static const Status SHUTDOWN_ERROR = Status(DB_ERROR, "Milvus server is shutdown
         return SHUTDOWN_ERROR;                           \
     }
 
-SSDBImpl::SSDBImpl(const DBOptions& options) : options_(options), initialized_(false) {
+SSDBImpl::SSDBImpl(const DBOptions& options)
+    : options_(options), initialized_(false), merge_thread_pool_(1, 1), index_thread_pool_(1, 1) {
     if (options_.wal_enable_) {
         wal::MXLogConfiguration mxlog_config;
         mxlog_config.recovery_error_ignore = options_.recovery_error_ignore_;
@@ -65,6 +68,56 @@ SSDBImpl::Start() {
     // LOG_ENGINE_TRACE_ << "DB service start";
     initialized_.store(true, std::memory_order_release);
 
+    // TODO: merge files
+
+    // wal
+    if (options_.wal_enable_) {
+        auto error_code = DB_ERROR;
+        if (wal_mgr_ != nullptr) {
+            error_code = wal_mgr_->Init();
+        }
+        if (error_code != WAL_SUCCESS) {
+            throw Exception(error_code, "Wal init error!");
+        }
+
+        // recovery
+        while (1) {
+            wal::MXLogRecord record;
+            auto error_code = wal_mgr_->GetNextRecovery(record);
+            if (error_code != WAL_SUCCESS) {
+                throw Exception(error_code, "Wal recovery error!");
+            }
+            if (record.type == wal::MXLogType::None) {
+                break;
+            }
+            ExecWalRecord(record);
+        }
+
+        // for distribute version, some nodes are read only
+        if (options_.mode_ != DBOptions::MODE::CLUSTER_READONLY) {
+            // background wal thread
+            bg_wal_thread_ = std::thread(&SSDBImpl::BackgroundWalThread, this);
+        }
+    } else {
+        // for distribute version, some nodes are read only
+        if (options_.mode_ != DBOptions::MODE::CLUSTER_READONLY) {
+            // background flush thread
+            bg_flush_thread_ = std::thread(&SSDBImpl::BackgroundFlushThread, this);
+        }
+    }
+
+    // for distribute version, some nodes are read only
+    if (options_.mode_ != DBOptions::MODE::CLUSTER_READONLY) {
+        // background build index thread
+        bg_index_thread_ = std::thread(&SSDBImpl::BackgroundIndexThread, this);
+    }
+
+    // background metric thread
+    fiu_do_on("options_metric_enable", options_.metric_enable_ = true);
+    if (options_.metric_enable_) {
+        bg_metric_thread_ = std::thread(&SSDBImpl::BackgroundMetricThread, this);
+    }
+
     return Status::OK();
 }
 
@@ -75,6 +128,34 @@ SSDBImpl::Stop() {
     }
 
     initialized_.store(false, std::memory_order_release);
+
+    if (options_.mode_ != DBOptions::MODE::CLUSTER_READONLY) {
+        if (options_.wal_enable_) {
+            // wait wal thread finish
+            swn_wal_.Notify();
+            bg_wal_thread_.join();
+        } else {
+            // flush all without merge
+            wal::MXLogRecord record;
+            record.type = wal::MXLogType::Flush;
+            ExecWalRecord(record);
+
+            // wait flush thread finish
+            swn_flush_.Notify();
+            bg_flush_thread_.join();
+        }
+
+        WaitMergeFileFinish();
+
+        swn_index_.Notify();
+        bg_index_thread_.join();
+    }
+
+    // wait metric thread exit
+    if (options_.metric_enable_) {
+        swn_metric_.Notify();
+        bg_metric_thread_.join();
+    }
 
     // LOG_ENGINE_TRACE_ << "DB service stop";
     return Status::OK();
@@ -324,9 +405,51 @@ SSDBImpl::BackgroundMetricThread() {
     }
 }
 
-Status
-SSDBImpl::ExecWalRecord(const wal::MXLogRecord& record) {
-    return Status::OK();
+void
+SSDBImpl::StartBuildIndexTask() {
+    // build index has been finished?
+    {
+        std::lock_guard<std::mutex> lck(index_result_mutex_);
+        if (!index_thread_results_.empty()) {
+            std::chrono::milliseconds span(10);
+            if (index_thread_results_.back().wait_for(span) == std::future_status::ready) {
+                index_thread_results_.pop_back();
+            }
+        }
+    }
+
+    // add new build index task
+    {
+        std::lock_guard<std::mutex> lck(index_result_mutex_);
+        if (index_thread_results_.empty()) {
+            index_thread_results_.push_back(index_thread_pool_.enqueue(&SSDBImpl::BackgroundWaitBuildIndex, this));
+        }
+    }
+}
+
+void
+SSDBImpl::BackgroundWaitBuildIndex() {
+    // TODO: update segment to index state and wait BackgroundIndexThread to build index
+}
+
+void
+SSDBImpl::BackgroundIndexThread() {
+    SetThreadName("index_thread");
+    server::SystemInfo::GetInstance().Init();
+    while (true) {
+        if (!initialized_.load(std::memory_order_acquire)) {
+            WaitMergeFileFinish();
+            WaitBuildIndexFinish();
+
+            LOG_ENGINE_DEBUG_ << "DB background thread exit";
+            break;
+        }
+
+        swn_index_.Wait_For(std::chrono::seconds(BACKGROUND_INDEX_INTERVAL));
+
+        WaitMergeFileFinish();
+        StartBuildIndexTask();
+    }
 }
 
 void
@@ -388,6 +511,75 @@ SSDBImpl::BackgroundWalThread() {
             }
         }
     }
+}
+
+void
+SSDBImpl::StartMergeTask(const std::set<std::string>& merge_collection_ids, bool force_merge_all) {
+    // LOG_ENGINE_DEBUG_ << "Begin StartMergeTask";
+    // merge task has been finished?
+    {
+        std::lock_guard<std::mutex> lck(merge_result_mutex_);
+        if (!merge_thread_results_.empty()) {
+            std::chrono::milliseconds span(10);
+            if (merge_thread_results_.back().wait_for(span) == std::future_status::ready) {
+                merge_thread_results_.pop_back();
+            }
+        }
+    }
+
+    // add new merge task
+    {
+        std::lock_guard<std::mutex> lck(merge_result_mutex_);
+        if (merge_thread_results_.empty()) {
+            // start merge file thread
+            merge_thread_results_.push_back(
+                merge_thread_pool_.enqueue(&SSDBImpl::BackgroundMerge, this, merge_collection_ids, force_merge_all));
+        }
+    }
+
+    // LOG_ENGINE_DEBUG_ << "End StartMergeTask";
+}
+
+void
+SSDBImpl::BackgroundMerge(std::set<std::string> collection_ids, bool force_merge_all) {
+    // LOG_ENGINE_TRACE_ << " Background merge thread start";
+
+    Status status;
+    for (auto& collection_id : collection_ids) {
+        // TODO: merge files
+        if (!initialized_.load(std::memory_order_acquire)) {
+            LOG_ENGINE_DEBUG_ << "Server will shutdown, skip merge action for collection: " << collection_id;
+            break;
+        }
+    }
+
+    // TODO: cleanup with ttl
+}
+
+void
+SSDBImpl::WaitMergeFileFinish() {
+    //    LOG_ENGINE_DEBUG_ << "Begin WaitMergeFileFinish";
+    std::lock_guard<std::mutex> lck(merge_result_mutex_);
+    for (auto& iter : merge_thread_results_) {
+        iter.wait();
+    }
+    //    LOG_ENGINE_DEBUG_ << "End WaitMergeFileFinish";
+}
+
+void
+SSDBImpl::WaitBuildIndexFinish() {
+    //    LOG_ENGINE_DEBUG_ << "Begin WaitBuildIndexFinish";
+    std::lock_guard<std::mutex> lck(index_result_mutex_);
+    for (auto& iter : index_thread_results_) {
+        iter.wait();
+    }
+    //    LOG_ENGINE_DEBUG_ << "End WaitBuildIndexFinish";
+}
+
+Status
+SSDBImpl::ExecWalRecord(const wal::MXLogRecord& record) {
+    // TODO:
+    return Status::OK();
 }
 
 }  // namespace engine

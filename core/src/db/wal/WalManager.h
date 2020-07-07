@@ -41,6 +41,9 @@ class WalManager {
     ErrorCode
     Init(const meta::MetaPtr& meta);
 
+    ErrorCode
+    Init();
+
     /*
      * Get next recovery
      * @param record[out]: record
