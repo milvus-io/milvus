@@ -30,7 +30,6 @@ namespace milvus {
 namespace engine {
 namespace snapshot {
 
-using StepsT = std::vector<std::any>;
 using CheckStaleFunc = std::function<Status(ScopedSnapshotT&)>;
 using StepsHolderT = std::tuple<CollectionCommit::SetT, Collection::SetT, SchemaCommit::SetT, FieldCommit::SetT,
       Field::SetT, FieldElement::SetT, PartitionCommit::SetT, Partition::SetT,
@@ -74,9 +73,9 @@ class Operations : public std::enable_shared_from_this<Operations> {
         ids_.push_back(id);
     }
 
-    StepsT&
-    GetSteps() {
-        return steps_;
+    const size_t
+    GetPos() const {
+        return last_pos_;
     }
 
     StepsHolderT&
@@ -171,7 +170,6 @@ class Operations : public std::enable_shared_from_this<Operations> {
 
     OperationContext context_;
     ScopedSnapshotT prev_ss_;
-    StepsT steps_;
     StepsHolderT holders_;
     size_t last_pos_;
     std::vector<ID_TYPE> ids_;
@@ -190,7 +188,6 @@ Operations::AddStep(const StepT& step, bool activate) {
     if (activate)
         s->Activate();
 
-    steps_.push_back(s);
     last_pos_ = Index<typename StepT::SetT, StepsHolderT>::value;
     auto& holder = std::get<Index<typename StepT::SetT, StepsHolderT>::value>(holders_);
     holder.insert(s);
@@ -203,7 +200,6 @@ Operations::AddStepWithLsn(const StepT& step, const LSN_TYPE& lsn, bool activate
     if (activate)
         s->Activate();
     s->SetLsn(lsn);
-    steps_.push_back(s);
     last_pos_ = Index<typename StepT::SetT, StepsHolderT>::value;
     auto& holder = std::get<Index<typename StepT::SetT, StepsHolderT>::value>(holders_);
     holder.insert(s);

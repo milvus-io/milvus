@@ -98,8 +98,15 @@ Operations::Done(Store& store) {
     if (GetType() == OperationsType::W_Compound) {
         if (!context_.latest_ss && ids_.size() > 0 && context_.new_collection_commit) {
             Snapshots::GetInstance().LoadSnapshot(store, context_.latest_ss,
-                                                  context_.new_collection_commit->GetCollectionId(), ids_.back());
+                    context_.new_collection_commit->GetCollectionId(), ids_.back());
         }
+        /* if (!context_.latest_ss && context_.new_collection_commit) { */
+        /*     auto& holder = std::get<ConstPos(last_pos_)>(holders_); */
+        /*     if (holder.size() > 0) */
+        /*         Snapshots::GetInstance().LoadSnapshot(store, context_.latest_ss, */
+        /*                 context_.new_collection_commit->GetCollectionId(), holder.rbegin()->GetID()); */
+        /*     } */
+        /* } */
         std::cout << ToString() << std::endl;
     }
     finish_cond_.notify_all();
@@ -230,8 +237,7 @@ Operations::DoExecute(Store& store) {
 
 Status
 Operations::PostExecute(Store& store) {
-    store.ApplyOperation(*this);
-    return store.DoCommitOperation(*this);
+    return store.ApplyOperation(*this);
 }
 
 Status
