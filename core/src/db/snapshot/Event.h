@@ -49,17 +49,14 @@ class ResourceGCEvent : public Event {
         STATUS_CHECK((*sd_op)(store));
 
         /* TODO: physically clean resource */
-        std::vector<std::string> res_file_list;
-        STATUS_CHECK(GetResFiles<ResourceT>(res_file_list, res_));
-        for (auto& res_file : res_file_list) {
-            if (!boost::filesystem::exists(res_file)) {
-                continue;
-            }
-            if (boost::filesystem::is_directory(res_file)) {
-                boost::filesystem::remove_all(res_file);
-            } else {
-                boost::filesystem::remove(res_file);
-            }
+        std::string res_path = GetResPath<ResourceT>(res_);
+        if (!boost::filesystem::exists(res_path)) {
+            return Status::OK();
+        }
+        if (boost::filesystem::is_directory(res_path)) {
+            boost::filesystem::remove_all(res_path);
+        } else {
+            boost::filesystem::remove(res_path);
         }
 
         /* remove resource from meta */

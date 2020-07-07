@@ -50,7 +50,7 @@ class Snapshot : public ReferenceProxy {
         return GetCollectionCommit()->GetID();
     }
 
-    [[nodiscard]] ID_TYPE
+    ID_TYPE
     GetCollectionId() const {
         auto it = GetResources<Collection>().cbegin();
         return it->first;
@@ -67,17 +67,17 @@ class Snapshot : public ReferenceProxy {
         return GetResource<SchemaCommit>(id);
     }
 
-    [[nodiscard]] const std::string&
+    const std::string&
     GetName() const {
         return GetResources<Collection>().cbegin()->second->GetName();
     }
 
-    [[nodiscard]] size_t
+    size_t
     NumberOfPartitions() const {
         return GetResources<Partition>().size();
     }
 
-    [[nodiscard]] const LSN_TYPE&
+    const LSN_TYPE&
     GetMaxLsn() const {
         return max_lsn_;
     }
@@ -107,7 +107,7 @@ class Snapshot : public ReferenceProxy {
         return GetResources<CollectionCommit>().cbegin()->second.Get();
     }
 
-    [[nodiscard]] ID_TYPE
+    ID_TYPE
     GetLatestSchemaCommitId() const {
         return latest_schema_commit_id_;
     }
@@ -167,7 +167,7 @@ class Snapshot : public ReferenceProxy {
         handler->SetStatus(status);
     }
 
-    [[nodiscard]] std::vector<std::string>
+    std::vector<std::string>
     GetFieldNames() const {
         std::vector<std::string> names;
         for (auto& kv : field_names_map_) {
@@ -176,7 +176,7 @@ class Snapshot : public ReferenceProxy {
         return std::move(names);
     }
 
-    [[nodiscard]] bool
+    bool
     HasField(const std::string& name) const {
         auto it = field_names_map_.find(name);
         return it != field_names_map_.end();
@@ -185,13 +185,13 @@ class Snapshot : public ReferenceProxy {
     FieldPtr
     GetField(const std::string& name) const;
 
-    [[nodiscard]] bool
+    bool
     HasFieldElement(const std::string& field_name, const std::string& field_element_name) const {
         auto id = GetFieldElementId(field_name, field_element_name);
         return id > 0;
     }
 
-    [[nodiscard]] ID_TYPE
+    ID_TYPE
     GetSegmentFileId(const std::string& field_name, const std::string& field_element_name, ID_TYPE segment_id) const {
         auto field_element_id = GetFieldElementId(field_name, field_element_name);
         auto it = element_segfiles_map_.find(field_element_id);
@@ -205,13 +205,13 @@ class Snapshot : public ReferenceProxy {
         return its->second;
     }
 
-    [[nodiscard]] bool
+    bool
     HasSegmentFile(const std::string& field_name, const std::string& field_element_name, ID_TYPE segment_id) const {
         auto id = GetSegmentFileId(field_name, field_element_name, segment_id);
         return id > 0;
     }
 
-    [[nodiscard]] ID_TYPE
+    ID_TYPE
     GetFieldElementId(const std::string& field_name, const std::string& field_element_name) const {
         auto itf = field_element_names_map_.find(field_name);
         if (itf == field_element_names_map_.end())
@@ -287,7 +287,7 @@ class Snapshot : public ReferenceProxy {
     }
 
     template <typename ResourceT>
-    [[nodiscard]] const typename ResourceT::ScopedMapT&
+    const typename ResourceT::ScopedMapT&
     GetResources() const {
         return std::get<Index<typename ResourceT::ScopedMapT, ScopedResourcesT>::value>(resources_);
     }
@@ -300,7 +300,6 @@ class Snapshot : public ReferenceProxy {
         if (it == resources.end()) {
             return nullptr;
         }
-
         return it->second.Get();
     }
 
