@@ -26,7 +26,7 @@ namespace engine {
 
 class SSMemTableFile : public server::CacheConfigHandler {
  public:
-    SSMemTableFile(const std::string& collection_id, const DBOptions& options);
+    SSMemTableFile(int64_t collection_id, int64_t partition_id, const DBOptions& options);
 
     ~SSMemTableFile() = default;
 
@@ -70,7 +70,9 @@ class SSMemTableFile : public server::CacheConfigHandler {
     CreateCollectionFile();
 
  private:
-    const std::string collection_id_;
+    int64_t collection_id_;
+    int64_t partition_id_;
+
     meta::SegmentSchema table_file_schema_;
     DBOptions options_;
     size_t current_mem_;

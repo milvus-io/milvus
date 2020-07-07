@@ -27,8 +27,8 @@
 namespace milvus {
 namespace engine {
 
-SSMemTableFile::SSMemTableFile(const std::string& collection_id, const DBOptions& options)
-    : collection_id_(collection_id), options_(options) {
+SSMemTableFile::SSMemTableFile(int64_t collection_id, int64_t partition_id, const DBOptions& options)
+    : collection_id_(collection_id), partition_id_(partition_id), options_(options) {
     current_mem_ = 0;
     auto status = CreateCollectionFile();
     if (status.ok()) {

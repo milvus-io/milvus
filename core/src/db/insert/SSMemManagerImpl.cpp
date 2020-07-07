@@ -22,19 +22,35 @@ namespace milvus {
 namespace engine {
 
 SSMemTablePtr
-SSMemManagerImpl::GetMemByTable(const std::string& collection_id) {
-    auto memIt = mem_id_map_.find(collection_id);
-    if (memIt != mem_id_map_.end()) {
-        return memIt->second;
+SSMemManagerImpl::GetMemByTable(int64_t collection_id, int64_t partition_id) {
+    auto mem_collection = mem_map_.find(collection_id);
+    if (mem_collection != mem_map_.end()) {
+        auto mem_partition = mem_collection->second.find(partition_id);
+        if (mem_partition != mem_collection->second.end()) {
+            return mem_partition->second;
+        }
     }
 
-    mem_id_map_[collection_id] = std::make_shared<SSMemTable>(collection_id, options_);
-    return mem_id_map_[collection_id];
+    auto mem = std::make_shared<SSMemTable>(collection_id, partition_id, options_);
+    mem_map_[collection_id][partition_id] = mem;
+    return mem;
+}
+
+std::vector<SSMemTablePtr>
+SSMemManagerImpl::GetMemByTable(int64_t collection_id) {
+    std::vector<SSMemTablePtr> result;
+    auto mem_collection = mem_map_.find(collection_id);
+    if (mem_collection != mem_map_.end()) {
+        for (auto& pair : mem_collection->second) {
+            result.push_back(pair.second);
+        }
+    }
+    return result;
 }
 
 Status
-SSMemManagerImpl::InsertVectors(const std::string& collection_name, const std::string& partition_name, int64_t length,
-                                const IDNumber* vector_ids, int64_t dim, const float* vectors, uint64_t lsn) {
+SSMemManagerImpl::InsertVectors(int64_t collection_id, int64_t partition_id, int64_t length, const IDNumber* vector_ids,
+                                int64_t dim, const float* vectors, uint64_t lsn) {
     VectorsData vectors_data;
     vectors_data.vector_count_ = length;
     vectors_data.float_data_.resize(length * dim);
@@ -45,12 +61,12 @@ SSMemManagerImpl::InsertVectors(const std::string& collection_name, const std::s
 
     std::unique_lock<std::mutex> lock(mutex_);
 
-    return InsertVectorsNoLock(collection_name, partition_name, source, lsn);
+    return InsertVectorsNoLock(collection_id, partition_id, source, lsn);
 }
 
 Status
-SSMemManagerImpl::InsertVectors(const std::string& collection_name, const std::string& partition_name, int64_t length,
-                                const IDNumber* vector_ids, int64_t dim, const uint8_t* vectors, uint64_t lsn) {
+SSMemManagerImpl::InsertVectors(int64_t collection_id, int64_t partition_id, int64_t length, const IDNumber* vector_ids,
+                                int64_t dim, const uint8_t* vectors, uint64_t lsn) {
     VectorsData vectors_data;
     vectors_data.vector_count_ = length;
     vectors_data.binary_data_.resize(length * dim);
@@ -61,11 +77,11 @@ SSMemManagerImpl::InsertVectors(const std::string& collection_name, const std::s
 
     std::unique_lock<std::mutex> lock(mutex_);
 
-    return InsertVectorsNoLock(collection_name, partition_name, source, lsn);
+    return InsertVectorsNoLock(collection_id, partition_id, source, lsn);
 }
 
 Status
-SSMemManagerImpl::InsertEntities(const std::string& collection_name, const std::string& partition_name, int64_t length,
+SSMemManagerImpl::InsertEntities(int64_t collection_id, int64_t partition_id, int64_t length,
                                  const IDNumber* vector_ids, int64_t dim, const float* vectors,
                                  const std::unordered_map<std::string, uint64_t>& attr_nbytes,
                                  const std::unordered_map<std::string, uint64_t>& attr_size,
@@ -81,13 +97,13 @@ SSMemManagerImpl::InsertEntities(const std::string& collection_name, const std::
 
     std::unique_lock<std::mutex> lock(mutex_);
 
-    return InsertEntitiesNoLock(collection_name, partition_name, source, lsn);
+    return InsertEntitiesNoLock(collection_id, partition_id, source, lsn);
 }
 
 Status
-SSMemManagerImpl::InsertVectorsNoLock(const std::string& collection_name, const std::string& partition_name,
-                                      const VectorSourcePtr& source, uint64_t lsn) {
-    SSMemTablePtr mem = GetMemByTable(collection_name);
+SSMemManagerImpl::InsertVectorsNoLock(int64_t collection_id, int64_t partition_id, const VectorSourcePtr& source,
+                                      uint64_t lsn) {
+    SSMemTablePtr mem = GetMemByTable(collection_id, partition_id);
     mem->SetLSN(lsn);
 
     auto status = mem->Add(source);
@@ -95,9 +111,9 @@ SSMemManagerImpl::InsertVectorsNoLock(const std::string& collection_name, const 
 }
 
 Status
-SSMemManagerImpl::InsertEntitiesNoLock(const std::string& collection_name, const std::string& partition_name,
+SSMemManagerImpl::InsertEntitiesNoLock(int64_t collection_id, int64_t partition_id,
                                        const milvus::engine::VectorSourcePtr& source, uint64_t lsn) {
-    SSMemTablePtr mem = GetMemByTable(collection_name);
+    SSMemTablePtr mem = GetMemByTable(collection_id, partition_id);
     mem->SetLSN(lsn);
 
     auto status = mem->AddEntities(source);
@@ -105,43 +121,44 @@ SSMemManagerImpl::InsertEntitiesNoLock(const std::string& collection_name, const
 }
 
 Status
-SSMemManagerImpl::DeleteVector(const std::string& collection_id, IDNumber vector_id, uint64_t lsn) {
+SSMemManagerImpl::DeleteVector(int64_t collection_id, IDNumber vector_id, uint64_t lsn) {
     std::unique_lock<std::mutex> lock(mutex_);
-    SSMemTablePtr mem = GetMemByTable(collection_id);
-    mem->SetLSN(lsn);
-    auto status = mem->Delete(vector_id);
-    return status;
-}
+    std::vector<SSMemTablePtr> mems = GetMemByTable(collection_id);
 
-Status
-SSMemManagerImpl::DeleteVectors(const std::string& collection_id, int64_t length, const IDNumber* vector_ids,
-                                uint64_t lsn) {
-    std::unique_lock<std::mutex> lock(mutex_);
-    SSMemTablePtr mem = GetMemByTable(collection_id);
-    mem->SetLSN(lsn);
-
-    IDNumbers ids;
-    ids.resize(length);
-    memcpy(ids.data(), vector_ids, length * sizeof(IDNumber));
-
-    auto status = mem->Delete(ids);
-    if (!status.ok()) {
-        return status;
+    for (auto& mem : mems) {
+        mem->SetLSN(lsn);
+        auto status = mem->Delete(vector_id);
+        if (status.ok()) {
+            return status;
+        }
     }
-
-    //    // TODO(zhiru): loop for now
-    //    for (auto& id : ids) {
-    //        auto status = mem->Delete(id);
-    //        if (!status.ok()) {
-    //            return status;
-    //        }
-    //    }
 
     return Status::OK();
 }
 
 Status
-SSMemManagerImpl::Flush(const std::string& collection_id) {
+SSMemManagerImpl::DeleteVectors(int64_t collection_id, int64_t length, const IDNumber* vector_ids, uint64_t lsn) {
+    std::unique_lock<std::mutex> lock(mutex_);
+    std::vector<SSMemTablePtr> mems = GetMemByTable(collection_id);
+
+    for (auto& mem : mems) {
+        mem->SetLSN(lsn);
+
+        IDNumbers ids;
+        ids.resize(length);
+        memcpy(ids.data(), vector_ids, length * sizeof(IDNumber));
+
+        auto status = mem->Delete(ids);
+        if (!status.ok()) {
+            return status;
+        }
+    }
+
+    return Status::OK();
+}
+
+Status
+SSMemManagerImpl::Flush(int64_t collection_id) {
     ToImmutable(collection_id);
     // TODO: There is actually only one memTable in the immutable list
     MemList temp_immutable_list;
@@ -153,20 +170,20 @@ SSMemManagerImpl::Flush(const std::string& collection_id) {
     std::unique_lock<std::mutex> lock(serialization_mtx_);
     auto max_lsn = GetMaxLSN(temp_immutable_list);
     for (auto& mem : temp_immutable_list) {
-        LOG_ENGINE_DEBUG_ << "Flushing collection: " << mem->GetTableId();
+        LOG_ENGINE_DEBUG_ << "Flushing collection: " << mem->GetCollectionId();
         auto status = mem->Serialize(max_lsn, true);
         if (!status.ok()) {
-            LOG_ENGINE_ERROR_ << "Flush collection " << mem->GetTableId() << " failed";
+            LOG_ENGINE_ERROR_ << "Flush collection " << mem->GetCollectionId() << " failed";
             return status;
         }
-        LOG_ENGINE_DEBUG_ << "Flushed collection: " << mem->GetTableId();
+        LOG_ENGINE_DEBUG_ << "Flushed collection: " << mem->GetCollectionId();
     }
 
     return Status::OK();
 }
 
 Status
-SSMemManagerImpl::Flush(std::set<std::string>& collection_ids) {
+SSMemManagerImpl::Flush(std::set<int64_t>& collection_ids) {
     ToImmutable();
 
     MemList temp_immutable_list;
@@ -179,14 +196,14 @@ SSMemManagerImpl::Flush(std::set<std::string>& collection_ids) {
     collection_ids.clear();
     auto max_lsn = GetMaxLSN(temp_immutable_list);
     for (auto& mem : temp_immutable_list) {
-        LOG_ENGINE_DEBUG_ << "Flushing collection: " << mem->GetTableId();
+        LOG_ENGINE_DEBUG_ << "Flushing collection: " << mem->GetCollectionId();
         auto status = mem->Serialize(max_lsn, true);
         if (!status.ok()) {
-            LOG_ENGINE_ERROR_ << "Flush collection " << mem->GetTableId() << " failed";
+            LOG_ENGINE_ERROR_ << "Flush collection " << mem->GetCollectionId() << " failed";
             return status;
         }
-        collection_ids.insert(mem->GetTableId());
-        LOG_ENGINE_DEBUG_ << "Flushed collection: " << mem->GetTableId();
+        collection_ids.insert(mem->GetCollectionId());
+        LOG_ENGINE_DEBUG_ << "Flushed collection: " << mem->GetCollectionId();
     }
 
     // TODO: global lsn?
@@ -196,17 +213,24 @@ SSMemManagerImpl::Flush(std::set<std::string>& collection_ids) {
 }
 
 Status
-SSMemManagerImpl::ToImmutable(const std::string& collection_id) {
+SSMemManagerImpl::ToImmutable(int64_t collection_id) {
     std::unique_lock<std::mutex> lock(mutex_);
-    auto memIt = mem_id_map_.find(collection_id);
-    if (memIt != mem_id_map_.end()) {
-        if (!memIt->second->Empty()) {
-            immu_mem_list_.push_back(memIt->second);
-            mem_id_map_.erase(memIt);
+
+    auto mem_collection = mem_map_.find(collection_id);
+    if (mem_collection != mem_map_.end()) {
+        MemPartitionMap temp_map;
+        for (auto& mem : mem_collection->second) {
+            if (mem.second->Empty()) {
+                temp_map.insert(mem);
+            } else {
+                immu_mem_list_.push_back(mem.second);
+            }
         }
-        //        std::string err_msg = "Could not find collection = " + collection_id + " to flush";
-        //        LOG_ENGINE_ERROR_ << err_msg;
-        //        return Status(DB_NOT_FOUND, err_msg);
+
+        mem_collection->second.swap(temp_map);
+        if (temp_map.empty()) {
+            mem_map_.erase(mem_collection);
+        }
     }
 
     return Status::OK();
@@ -215,32 +239,62 @@ SSMemManagerImpl::ToImmutable(const std::string& collection_id) {
 Status
 SSMemManagerImpl::ToImmutable() {
     std::unique_lock<std::mutex> lock(mutex_);
-    MemIdMap temp_map;
-    for (auto& kv : mem_id_map_) {
-        if (kv.second->Empty()) {
-            // empty collection without any deletes, no need to serialize
-            temp_map.insert(kv);
-        } else {
-            immu_mem_list_.push_back(kv.second);
+
+    for (auto& mem_collection : mem_map_) {
+        MemPartitionMap temp_map;
+        for (auto& mem : mem_collection.second) {
+            if (mem.second->Empty()) {
+                temp_map.insert(mem);
+            } else {
+                immu_mem_list_.push_back(mem.second);
+            }
         }
+
+        mem_collection.second.swap(temp_map);
     }
 
-    mem_id_map_.swap(temp_map);
     return Status::OK();
 }
 
 Status
-SSMemManagerImpl::EraseMemVector(const std::string& collection_id) {
+SSMemManagerImpl::EraseMemVector(int64_t collection_id) {
     {  // erase MemVector from rapid-insert cache
         std::unique_lock<std::mutex> lock(mutex_);
-        mem_id_map_.erase(collection_id);
+        mem_map_.erase(collection_id);
     }
 
     {  // erase MemVector from serialize cache
         std::unique_lock<std::mutex> lock(serialization_mtx_);
         MemList temp_list;
         for (auto& mem : immu_mem_list_) {
-            if (mem->GetTableId() != collection_id) {
+            if (mem->GetCollectionId() != collection_id) {
+                temp_list.push_back(mem);
+            }
+        }
+        immu_mem_list_.swap(temp_list);
+    }
+
+    return Status::OK();
+}
+
+Status
+SSMemManagerImpl::EraseMemVector(int64_t collection_id, int64_t partition_id) {
+    {  // erase MemVector from rapid-insert cache
+        std::unique_lock<std::mutex> lock(mutex_);
+        auto mem_collection = mem_map_.find(collection_id);
+        if (mem_collection != mem_map_.end()) {
+            mem_collection->second.erase(partition_id);
+            if (mem_collection->second.empty()) {
+                mem_map_.erase(collection_id);
+            }
+        }
+    }
+
+    {  // erase MemVector from serialize cache
+        std::unique_lock<std::mutex> lock(serialization_mtx_);
+        MemList temp_list;
+        for (auto& mem : immu_mem_list_) {
+            if (mem->GetCollectionId() != collection_id && mem->GetPartitionId() != partition_id) {
                 temp_list.push_back(mem);
             }
         }
@@ -254,9 +308,10 @@ size_t
 SSMemManagerImpl::GetCurrentMutableMem() {
     size_t total_mem = 0;
     std::unique_lock<std::mutex> lock(mutex_);
-    for (auto& kv : mem_id_map_) {
-        auto memTable = kv.second;
-        total_mem += memTable->GetCurrentMem();
+    for (auto& mem_collection : mem_map_) {
+        for (auto& mem : mem_collection.second) {
+            total_mem += mem.second->GetCurrentMem();
+        }
     }
     return total_mem;
 }

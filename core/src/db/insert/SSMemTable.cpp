@@ -26,8 +26,8 @@
 namespace milvus {
 namespace engine {
 
-SSMemTable::SSMemTable(const std::string& collection_id, const DBOptions& options)
-    : collection_id_(collection_id), options_(options) {
+SSMemTable::SSMemTable(int64_t collection_id, int64_t partition_id, const DBOptions& options)
+    : collection_id_(collection_id), partition_id_(partition_id), options_(options) {
     SetIdentity("SSMemTable");
     AddCacheInsertDataListener();
 }
@@ -42,7 +42,8 @@ SSMemTable::Add(const VectorSourcePtr& source) {
 
         Status status;
         if (mem_table_file_list_.empty() || current_mem_table_file->IsFull()) {
-            SSMemTableFilePtr new_mem_table_file = std::make_shared<SSMemTableFile>(collection_id_, options_);
+            SSMemTableFilePtr new_mem_table_file =
+                std::make_shared<SSMemTableFile>(collection_id_, partition_id_, options_);
             status = new_mem_table_file->Add(source);
             if (status.ok()) {
                 mem_table_file_list_.emplace_back(new_mem_table_file);
@@ -70,7 +71,8 @@ SSMemTable::AddEntities(const milvus::engine::VectorSourcePtr& source) {
 
         Status status;
         if (mem_table_file_list_.empty() || current_mem_table_file->IsFull()) {
-            SSMemTableFilePtr new_mem_table_file = std::make_shared<SSMemTableFile>(collection_id_, options_);
+            SSMemTableFilePtr new_mem_table_file =
+                std::make_shared<SSMemTableFile>(collection_id_, partition_id_, options_);
             status = new_mem_table_file->AddEntities(source);
             if (status.ok()) {
                 mem_table_file_list_.emplace_back(new_mem_table_file);
@@ -175,9 +177,14 @@ SSMemTable::Empty() {
     return mem_table_file_list_.empty() && doc_ids_to_delete_.empty();
 }
 
-const std::string&
-SSMemTable::GetTableId() const {
+int64_t
+SSMemTable::GetCollectionId() const {
     return collection_id_;
+}
+
+int64_t
+SSMemTable::GetPartitionId() const {
+    return partition_id_;
 }
 
 size_t

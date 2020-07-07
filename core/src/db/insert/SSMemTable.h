@@ -30,7 +30,7 @@ class SSMemTable : public server::CacheConfigHandler {
  public:
     using SSMemTableFileList = std::vector<SSMemTableFilePtr>;
 
-    SSMemTable(const std::string& collection_id, const DBOptions& options);
+    SSMemTable(int64_t collection_id, int64_t partition_id, const DBOptions& options);
 
     Status
     Add(const VectorSourcePtr& source);
@@ -56,8 +56,11 @@ class SSMemTable : public server::CacheConfigHandler {
     bool
     Empty();
 
-    const std::string&
-    GetTableId() const;
+    int64_t
+    GetCollectionId() const;
+
+    int64_t
+    GetPartitionId() const;
 
     size_t
     GetCurrentMem();
@@ -77,7 +80,8 @@ class SSMemTable : public server::CacheConfigHandler {
     ApplyDeletes();
 
  private:
-    const std::string collection_id_;
+    int64_t collection_id_;
+    int64_t partition_id_;
 
     SSMemTableFileList mem_table_file_list_;
 
