@@ -789,8 +789,8 @@ CopyToAttr(const std::vector<uint8_t>& record, int64_t row_num, const std::vecto
                 std::vector<uint8_t> data;
                 data.resize(row_num * sizeof(int8_t));
 
-                std::vector<int64_t> attr_value(row_num, 0);
-                memcpy(attr_value.data(), record.data() + offset, row_num * sizeof(int64_t));
+                std::vector<int32_t> attr_value(row_num, 0);
+                memcpy(attr_value.data(), record.data() + offset, row_num * sizeof(int32_t));
 
                 std::vector<int8_t> raw_value(row_num, 0);
                 for (uint64_t i = 0; i < row_num; ++i) {
@@ -809,8 +809,8 @@ CopyToAttr(const std::vector<uint8_t>& record, int64_t row_num, const std::vecto
                 std::vector<uint8_t> data;
                 data.resize(row_num * sizeof(int16_t));
 
-                std::vector<int64_t> attr_value(row_num, 0);
-                memcpy(attr_value.data(), record.data() + offset, row_num * sizeof(int64_t));
+                std::vector<int32_t> attr_value(row_num, 0);
+                memcpy(attr_value.data(), record.data() + offset, row_num * sizeof(int32_t));
 
                 std::vector<int16_t> raw_value(row_num, 0);
                 for (uint64_t i = 0; i < row_num; ++i) {
@@ -829,15 +829,10 @@ CopyToAttr(const std::vector<uint8_t>& record, int64_t row_num, const std::vecto
                 std::vector<uint8_t> data;
                 data.resize(row_num * sizeof(int32_t));
 
-                std::vector<int64_t> attr_value(row_num, 0);
-                memcpy(attr_value.data(), record.data() + offset, row_num * sizeof(int64_t));
+                std::vector<int32_t> attr_value(row_num, 0);
+                memcpy(attr_value.data(), record.data() + offset, row_num * sizeof(int32_t));
 
-                std::vector<int32_t> raw_value(row_num, 0);
-                for (uint64_t i = 0; i < row_num; ++i) {
-                    raw_value[i] = attr_value[i];
-                }
-
-                memcpy(data.data(), raw_value.data(), row_num * sizeof(int32_t));
+                memcpy(data.data(), attr_value.data(), row_num * sizeof(int32_t));
                 attr_datas.insert(std::make_pair(name, data));
 
                 attr_nbytes.insert(std::make_pair(name, sizeof(int32_t)));
@@ -863,15 +858,10 @@ CopyToAttr(const std::vector<uint8_t>& record, int64_t row_num, const std::vecto
                 std::vector<uint8_t> data;
                 data.resize(row_num * sizeof(float));
 
-                std::vector<double> attr_value(row_num, 0);
-                memcpy(attr_value.data(), record.data() + offset, row_num * sizeof(double));
+                std::vector<float> attr_value(row_num, 0);
+                memcpy(attr_value.data(), record.data() + offset, row_num * sizeof(float));
 
-                std::vector<float> raw_value(row_num, 0);
-                for (uint64_t i = 0; i < row_num; ++i) {
-                    raw_value[i] = attr_value[i];
-                }
-
-                memcpy(data.data(), raw_value.data(), row_num * sizeof(float));
+                memcpy(data.data(), attr_value.data(), row_num * sizeof(float));
                 attr_datas.insert(std::make_pair(name, data));
 
                 attr_nbytes.insert(std::make_pair(name, sizeof(float)));
@@ -1395,7 +1385,7 @@ DBImpl::GetEntitiesByID(const std::string& collection_id, const milvus::engine::
         return status;
     }
     std::unordered_map<std::string, engine::meta::hybrid::DataType> attr_type;
-    for (auto schema : fields_schema.fields_schema_) {
+    for (const auto& schema : fields_schema.fields_schema_) {
         if (schema.field_type_ == (int32_t)engine::meta::hybrid::DataType::FLOAT_VECTOR ||
             schema.field_type_ == (int32_t)engine::meta::hybrid::DataType::BINARY_VECTOR) {
             continue;
@@ -1705,27 +1695,27 @@ DBImpl::GetEntitiesByIdHelper(const std::string& collection_id, const milvus::en
                             size_t num_bytes;
                             switch (attr_it->second) {
                                 case engine::meta::hybrid::DataType::INT8: {
-                                    num_bytes = 1;
+                                    num_bytes = sizeof(int8_t);
                                     break;
                                 }
                                 case engine::meta::hybrid::DataType::INT16: {
-                                    num_bytes = 2;
+                                    num_bytes = sizeof(int16_t);
                                     break;
                                 }
                                 case engine::meta::hybrid::DataType::INT32: {
-                                    num_bytes = 4;
+                                    num_bytes = sizeof(int32_t);
                                     break;
                                 }
                                 case engine::meta::hybrid::DataType::INT64: {
-                                    num_bytes = 8;
+                                    num_bytes = sizeof(int64_t);
                                     break;
                                 }
                                 case engine::meta::hybrid::DataType::FLOAT: {
-                                    num_bytes = 4;
+                                    num_bytes = sizeof(float);
                                     break;
                                 }
                                 case engine::meta::hybrid::DataType::DOUBLE: {
-                                    num_bytes = 8;
+                                    num_bytes = sizeof(double);
                                     break;
                                 }
                                 default: {
@@ -1775,11 +1765,11 @@ DBImpl::GetEntitiesByIdHelper(const std::string& collection_id, const milvus::en
         if (data.vector_count_ > 0) {
             data.float_data_ = vector_ref.float_data_;    // copy data since there could be duplicated id
             data.binary_data_ = vector_ref.binary_data_;  // copy data since there could be duplicated id
-        }
-        data.id_array_.emplace_back(id);
-        vectors.emplace_back(data);
+            data.id_array_.emplace_back(id);
+            vectors.emplace_back(data);
 
-        attrs.emplace_back(map_id2attr[id]);
+            attrs.emplace_back(map_id2attr[id]);
+        }
     }
 
     if (vectors.empty()) {
@@ -3170,7 +3160,7 @@ DBImpl::ExecWalRecord(const wal::MXLogRecord& record) {
             vectors.vector_type_ = Vectors::FLOAT;
             vectors.float_vector = (const float*)record.data;
             status = mem_mgr_->InsertEntities(target_collection_name, record.length, record.ids,
-                                              (record.data_size / record.length / sizeof(uint8_t)), vectors,
+                                              (record.data_size / record.length / sizeof(float)), vectors,
                                               record.attr_nbytes, record.attr_data_size, record.attr_data, record.lsn);
 
             //            status = mem_mgr_->InsertVectors(target_collection_name, record.length, record.ids,
@@ -3237,11 +3227,6 @@ DBImpl::ExecWalRecord(const wal::MXLogRecord& record) {
                         break;
                     }
                     flushed_collections.insert(collection_id);
-
-                    //                    status = FlushAttrsIndex(collection_id);
-                    //                    if (!status.ok()) {
-                    //                        return status;
-                    //                    }
                 }
 
                 collections_flushed(record.collection_id, flushed_collections);

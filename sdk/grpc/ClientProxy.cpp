@@ -292,10 +292,10 @@ CopyEntityToJson(::milvus::grpc::Entities& grpc_entities, JSON& json_entity) {
             case ::milvus::grpc::FLOAT: {
                 row_num = grpc_attr_record.float_value_size();
                 std::vector<float> data(row_num);
-                memcpy(data.data(), grpc_attr_record.int64_value().data(), row_num * sizeof(float));
+                memcpy(data.data(), grpc_attr_record.float_value().data(), row_num * sizeof(float));
                 float_data.insert(std::make_pair(grpc_field.field_name(), data));
                 break;
-            }
+        }
             case ::milvus::grpc::DOUBLE: {
                 row_num = grpc_attr_record.double_value_size();
                 std::vector<double> data(row_num);
@@ -307,7 +307,8 @@ CopyEntityToJson(::milvus::grpc::Entities& grpc_entities, JSON& json_entity) {
                 row_num = grpc_vector_record.records_size();
                 std::vector<milvus::VectorData> data(row_num);
                 for (int j = 0; j < row_num; j++) {
-                    data[j].float_data.resize(row_num);
+                    size_t dim = grpc_vector_record.records(j).float_data_size();
+                    data[j].float_data.resize(dim);
                     memcpy(data[j].float_data.data(), grpc_vector_record.records(j).float_data().data(),
                            row_num * sizeof(float));
                 }
@@ -568,6 +569,7 @@ ClientProxy::GetEntityByID(const std::string& collection_name, const std::vector
 
         JSON json_entities;
         CopyEntityToJson(grpc_entities, json_entities);
+        entities = json_entities.dump();
         return status;
     } catch (std::exception& ex) {
         return Status(StatusCode::UnknownError, "Failed to get entity by id: " + std::string(ex.what()));

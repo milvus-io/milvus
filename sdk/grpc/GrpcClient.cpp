@@ -130,7 +130,7 @@ GrpcClient::GetEntityByID(const grpc::EntityIdentity& entity_identity, ::milvus:
     ::grpc::Status grpc_status = stub_->GetEntityByID(&context, entity_identity, &entities);
 
     if (!grpc_status.ok()) {
-        std::cerr << "GetVectorByID rpc failed!" << std::endl;
+        std::cerr << "GetEntityByID rpc failed!" << std::endl;
         return Status(StatusCode::RPCFailed, grpc_status.error_message());
     }
     if (entities.status().error_code() != grpc::SUCCESS) {

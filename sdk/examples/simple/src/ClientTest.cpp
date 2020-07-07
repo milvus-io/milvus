@@ -27,12 +27,12 @@ const char* COLLECTION_NAME = milvus_sdk::Utils::GenCollectionName().c_str();
 constexpr int64_t COLLECTION_DIMENSION = 512;
 constexpr int64_t COLLECTION_INDEX_FILE_SIZE = 1024;
 constexpr milvus::MetricType COLLECTION_METRIC_TYPE = milvus::MetricType::L2;
-constexpr int64_t BATCH_ENTITY_COUNT = 100000;
+constexpr int64_t BATCH_ENTITY_COUNT = 10000;
 constexpr int64_t NQ = 5;
 constexpr int64_t TOP_K = 10;
 constexpr int64_t NPROBE = 32;
 constexpr int64_t SEARCH_TARGET = BATCH_ENTITY_COUNT / 2;  // change this value, result is different
-constexpr int64_t ADD_ENTITY_LOOP = 5;
+constexpr int64_t ADD_ENTITY_LOOP = 1;
 constexpr milvus::IndexType INDEX_TYPE = milvus::IndexType::IVFFLAT;
 constexpr int32_t NLIST = 16384;
 
@@ -114,7 +114,7 @@ ClientTest::CreateCollection(const std::string& collection_name) {
     field_ptr3->extra_params = extra_params_3.dump();
 
     JSON extra_params;
-    extra_params["segment_size"] = " ";
+    extra_params["segment_size"] = 1024;
     milvus::Mapping mapping = {collection_name, {field_ptr1, field_ptr2, field_ptr3}};
 
     milvus::Status stat = conn_->CreateCollection(mapping, extra_params.dump());
@@ -126,30 +126,21 @@ ClientTest::GetCollectionInfo(const std::string& collection_name) {
 }
 
 void
-ClientTest::InsertEntities(const std::string& collection_name, int64_t row_num) {
-    milvus::FieldValue field_value;
+ClientTest::InsertEntities(const std::string& collection_name) {
+    for (int64_t i = 0; i < ADD_ENTITY_LOOP; i++) {
+        milvus::FieldValue field_value;
+        std::vector<int64_t> entity_ids;
 
-    std::vector<int64_t> value1;
-    std::vector<float> value2;
-    value1.resize(row_num);
-    value2.resize(row_num);
-    for (uint64_t i = 0; i < row_num; ++i) {
-        value1[i] = i;
-        value2[i] = (float)(i + row_num);
+        int64_t begin_index = i * BATCH_ENTITY_COUNT;
+        {
+            milvus_sdk::TimeRecorder rc("Build entities No." + std::to_string(i));
+            milvus_sdk::Utils::BuildEntities(begin_index, begin_index + BATCH_ENTITY_COUNT, field_value, entity_ids,
+                                             COLLECTION_DIMENSION);
+        }
+        milvus::Status status = conn_->Insert(collection_name, "", field_value, entity_ids);
+        std::cout << "InsertEntities function call status: " << status.message() << std::endl;
+        std::cout << "Returned id array count: " << entity_ids.size() << std::endl;
     }
-    field_value.int64_value.insert(std::make_pair("field_1", value1));
-    field_value.float_value.insert(std::make_pair("field_2", value2));
-
-    std::unordered_map<std::string, std::vector<milvus::VectorData>> vector_value;
-    std::vector<milvus::VectorData> entity_array;
-    std::vector<int64_t> record_ids;
-    {  // generate vectors
-        milvus_sdk::Utils::BuildEntities(0, row_num, entity_array, record_ids, COLLECTION_DIMENSION);
-    }
-
-    field_value.vector_value.insert(std::make_pair("field_vec", entity_array));
-    milvus::Status status = conn_->Insert(collection_name, "", field_value, record_ids);
-    std::cout << "InsertEntities function call status: " << status.message() << std::endl;
 }
 
 void
@@ -169,14 +160,28 @@ ClientTest::GetCollectionStats(const std::string& collection_name) {
 }
 
 void
+ClientTest::BuildVectors(int64_t nq, int64_t dimension) {
+    search_entity_array_.clear();
+    search_id_array_.clear();
+
+    for (int64_t i = 0; i < nq; i++) {
+        std::vector<milvus::VectorData> entity_array;
+        std::vector<int64_t> record_ids;
+        int64_t index = i * BATCH_ENTITY_COUNT + SEARCH_TARGET;
+        milvus_sdk::Utils::ConstructVectors(index, index + 1, entity_array, record_ids, dimension);
+        search_entity_array_.push_back(std::make_pair(record_ids[0], entity_array[0]));
+        search_id_array_.push_back(record_ids[0]);
+    }
+}
+
+void
 ClientTest::GetEntityByID(const std::string& collection_name, const std::vector<int64_t>& id_array) {
     std::string result;
     {
-        milvus_sdk::TimeRecorder rc("GetHybridEntityByID");
+        milvus_sdk::TimeRecorder rc("GetEntityByID");
         milvus::Status stat = conn_->GetEntityByID(collection_name, id_array, result);
-        std::cout << "GetEntitiesByID function call status: " << stat.message() << std::endl;
+        std::cout << "GetEntityByID function call status: " << stat.message() << std::endl;
     }
-
     std::cout << "GetEntityByID function result: " << result << std::endl;
 }
 
@@ -185,18 +190,19 @@ ClientTest::SearchEntities(const std::string& collection_name, int64_t topk, int
     nlohmann::json dsl_json, vector_param_json;
     milvus_sdk::Utils::GenDSLJson(dsl_json, vector_param_json);
 
-    std::vector<milvus::VectorData> entity_array;
     std::vector<int64_t> record_ids;
-    {  // generate vectors
-        milvus_sdk::Utils::ConstructVector(NQ, COLLECTION_DIMENSION, entity_array);
+    std::vector<milvus::VectorData> temp_entity_array;
+    for (auto& pair : search_entity_array_) {
+        temp_entity_array.push_back(pair.second);
     }
 
-    milvus::VectorParam vector_param = {vector_param_json.dump(), entity_array};
+    milvus::VectorParam vector_param = {vector_param_json.dump(), temp_entity_array};
 
     std::vector<std::string> partition_tags;
     milvus::TopKQueryResult topk_query_result;
     auto status = conn_->Search(collection_name, partition_tags, dsl_json.dump(), vector_param, topk_query_result);
 
+    std::cout << "Search function call result: " << std::endl;
     milvus_sdk::Utils::PrintTopKQueryResult(topk_query_result);
     std::cout << "Search function call status: " << status.message() << std::endl;
 }
@@ -312,19 +318,21 @@ ClientTest::Test() {
     CreateCollection(collection_name);
     GetCollectionInfo(collection_name);
 
-    InsertEntities(collection_name, 10000);
+    InsertEntities(collection_name);
     Flush(collection_name);
     GetCollectionStats(collection_name);
 
+    BuildVectors(NQ, COLLECTION_DIMENSION);
     GetEntityByID(collection_name, search_id_array_);
     SearchEntities(collection_name, TOP_K, NPROBE);
 
-    CreateIndex(collection_name, NLIST);
-    SearchEntities(collection_name, TOP_K, NPROBE);
+    //    CreateIndex(collection_name, NLIST);
+    //    SearchEntities(collection_name, TOP_K, NPROBE);
     GetCollectionStats(collection_name);
 
     std::vector<int64_t> delete_ids = {search_id_array_[0], search_id_array_[1]};
     DeleteByIds(collection_name, delete_ids);
+    GetEntityByID(collection_name, search_id_array_);
     CompactCollection(collection_name);
 
     LoadCollection(collection_name);

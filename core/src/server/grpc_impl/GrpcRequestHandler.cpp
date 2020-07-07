@@ -268,6 +268,9 @@ ConstructEntityResults(const std::vector<engine::AttrsData>& attrs, const std::v
                 std::vector<float> float_data;
                 std::vector<double> double_data;
                 for (auto& attr : attrs) {
+                    if (attr.attr_data_.find(field_name) == attr.attr_data_.end()) {
+                        continue;
+                    }
                     auto attr_data = attr.attr_data_.at(field_name);
                     int32_t grpc_int32_data;
                     int64_t grpc_int64_data;
@@ -374,6 +377,7 @@ ConstructEntityResults(const std::vector<engine::AttrsData>& attrs, const std::v
         memcpy(response->mutable_ids()->mutable_data(), id_array.data(), size * sizeof(int64_t));
 
         auto grpc_field = response->add_fields();
+        grpc_field->set_field_name(vector_field_name);
         ::milvus::grpc::VectorRecord* grpc_vector_data = grpc_field->mutable_vector_record();
         for (auto& vector : vectors) {
             auto grpc_data = grpc_vector_data->add_records();
@@ -1534,8 +1538,8 @@ GrpcRequestHandler::DeserializeJsonToBoolQuery(
         nlohmann::json dsl_json = json::parse(dsl_string);
 
         auto status = Status::OK();
-        for (size_t i = 0; i < vector_params.size(); i++) {
-            std::string vector_string = vector_params.at(i).json();
+        for (const auto& vector_param : vector_params) {
+            std::string vector_string = vector_param.json();
             nlohmann::json vector_json = json::parse(vector_string);
             json::iterator it = vector_json.begin();
             std::string placeholder = it.key();
@@ -1554,7 +1558,7 @@ GrpcRequestHandler::DeserializeJsonToBoolQuery(
             }
 
             engine::VectorsData vector_data;
-            CopyRowRecords(vector_params.at(i).row_record().records(),
+            CopyRowRecords(vector_param.row_record().records(),
                            google::protobuf::RepeatedField<google::protobuf::int64>(), vector_data);
             vector_query->query_vector.binary_data = vector_data.binary_data_;
             vector_query->query_vector.float_data = vector_data.float_data_;

@@ -64,6 +64,8 @@ DescribeHybridCollectionRequest::OnExecute() {
 
         for (auto schema : fields_schema.fields_schema_) {
             field_types_.insert(std::make_pair(schema.field_name_, (engine::meta::hybrid::DataType)schema.field_type_));
+            milvus::json json_param = milvus::json::parse(schema.index_param_);
+            index_params_.insert(std::make_pair("index_params", json_param));
         }
     } catch (std::exception& ex) {
         return Status(SERVER_UNEXPECTED_ERROR, ex.what());

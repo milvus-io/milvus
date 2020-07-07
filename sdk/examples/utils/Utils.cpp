@@ -25,6 +25,8 @@
 namespace milvus_sdk {
 
 constexpr int64_t SECONDS_EACH_HOUR = 3600;
+constexpr int64_t BATCH_ENTITY_COUNT = 100000;
+constexpr int64_t SEARCH_TARGET = BATCH_ENTITY_COUNT / 2;  // change this value, result is different
 
 #define BLOCK_SPLITER std::cout << "===========================================" << std::endl;
 
@@ -152,16 +154,18 @@ Utils::PrintIndexParam(const milvus::IndexParam& index_param) {
 }
 
 void
-Utils::BuildEntities(int64_t from, int64_t to, std::vector<milvus::VectorData>& entity_array,
-                     std::vector<int64_t>& entity_ids, int64_t dimension) {
+Utils::BuildEntities(int64_t from, int64_t to, milvus::FieldValue& field_value, std::vector<int64_t>& entity_ids,
+                     int64_t dimension) {
     if (to <= from) {
         return;
     }
 
+    int64_t row_num = to - from;
+    std::vector<int64_t> int_data(row_num);
+    std::vector<float> float_data(row_num);
+    std::vector<milvus::VectorData> entity_array;
     entity_array.clear();
     entity_ids.clear();
-    std::default_random_engine e;
-    std::uniform_real_distribution<float> u(0, 1);
     for (int64_t k = from; k < to; k++) {
         milvus::VectorData vector_data;
         vector_data.float_data.resize(dimension);
@@ -169,9 +173,15 @@ Utils::BuildEntities(int64_t from, int64_t to, std::vector<milvus::VectorData>& 
             vector_data.float_data[i] = (float)((k + 100) % (i + 1));
         }
 
+        int_data[k - from] = k;
+        float_data[k - from] = (float)k + row_num;
+
         entity_array.emplace_back(vector_data);
         entity_ids.push_back(k);
     }
+    field_value.int64_value.insert(std::make_pair("field_1", int_data));
+    field_value.float_value.insert(std::make_pair("field_2", float_data));
+    field_value.vector_value.insert(std::make_pair("field_vec", entity_array));
 }
 
 void
@@ -250,15 +260,23 @@ Utils::DoSearch(std::shared_ptr<milvus::Connection> conn, const std::string& col
 }
 
 void
-Utils::ConstructVector(uint64_t nq, uint64_t dimension, std::vector<milvus::VectorData>& query_vector) {
-    query_vector.resize(nq);
-    std::default_random_engine e;
-    std::uniform_real_distribution<float> u(0, 1);
-    for (uint64_t i = 0; i < nq; ++i) {
-        query_vector[i].float_data.resize(dimension);
-        for (uint64_t j = 0; j < dimension; ++j) {
-            query_vector[i].float_data[j] = (float)((j + 100) % (i + 1));
+Utils::ConstructVectors(int64_t from, int64_t to, std::vector<milvus::VectorData>& query_vector,
+                        std::vector<int64_t>& search_ids, int64_t dimension) {
+    if (to <= from) {
+        return;
+    }
+
+    query_vector.clear();
+    search_ids.clear();
+    for (int64_t k = from; k < to; k++) {
+        milvus::VectorData entity;
+        entity.float_data.resize(dimension);
+        for (int64_t i = 0; i < dimension; i++) {
+            entity.float_data[i] = (float)((k + 100) % (i + 1));
         }
+
+        query_vector.emplace_back(entity);
+        search_ids.push_back(k);
     }
 }
 
@@ -287,7 +305,17 @@ Utils::GenLeafQuery() {
     uint64_t DIMENSION = 128;
     uint64_t NPROBE = 32;
     milvus::VectorQueryPtr vq = std::make_shared<milvus::VectorQuery>();
-    ConstructVector(NQ, DIMENSION, vq->query_vector);
+
+    std::vector<milvus::VectorData> search_entity_array;
+    for (int64_t i = 0; i < NQ; i++) {
+        std::vector<milvus::VectorData> entity_array;
+        std::vector<int64_t> record_ids;
+        int64_t index = i * BATCH_ENTITY_COUNT + SEARCH_TARGET;
+        milvus_sdk::Utils::ConstructVectors(index, index + 1, entity_array, record_ids, DIMENSION);
+        search_entity_array.push_back(entity_array[0]);
+    }
+
+    vq->query_vector = search_entity_array;
     vq->field_name = "field_vec";
     vq->topk = 10;
     JSON json_params = {{"nprobe", NPROBE}};

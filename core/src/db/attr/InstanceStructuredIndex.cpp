@@ -46,11 +46,6 @@ InstanceStructuredIndex::CreateStructuredIndex(const std::string& collection_id,
         return Status::OK();
     }
 
-    std::unordered_map<std::string, std::vector<uint8_t>> attr_datas;
-    std::unordered_map<std::string, int64_t> attr_sizes;
-    std::unordered_map<std::string, engine::meta::hybrid::DataType> attr_types;
-    std::vector<std::string> field_names;
-
     for (auto& segment_schema : files_holder.HoldFiles()) {
         std::string segment_dir;
         engine::utils::GetParentPath(segment_schema.location_, segment_dir);
@@ -62,6 +57,11 @@ InstanceStructuredIndex::CreateStructuredIndex(const std::string& collection_id,
         if (!status.ok()) {
             return status;
         }
+
+        std::unordered_map<std::string, std::vector<uint8_t>> attr_datas;
+        std::unordered_map<std::string, int64_t> attr_sizes;
+        std::unordered_map<std::string, engine::meta::hybrid::DataType> attr_types;
+        std::vector<std::string> field_names;
 
         for (auto& field_schema : fields_schema.fields_schema_) {
             if (field_schema.field_type_ != (int32_t)engine::meta::hybrid::DataType::FLOAT_VECTOR) {

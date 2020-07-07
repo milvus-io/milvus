@@ -2152,7 +2152,7 @@ SqliteMetaImpl::CreateHybridCollection(meta::CollectionSchema& collection_schema
         // multi-threads call sqlite update may get exception('bad logic', etc), so we add a lock here
         std::lock_guard<std::mutex> meta_lock(meta_mutex_);
 
-        if (collection_schema.collection_id_ == "") {
+        if (collection_schema.collection_id_.empty()) {
             NextCollectionId(collection_schema.collection_id_);
         } else {
             fiu_do_on("SqliteMetaImpl.CreateCollection.throw_exception", throw std::exception());
