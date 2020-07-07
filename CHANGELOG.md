@@ -16,6 +16,7 @@ Please mark all change in change log and use the issue from GitHub
 -   \#2649 Search parameter of annoy has conflict with document
 -   \#2690 Remove body parser in show-partitions endpoints
 -   \#2692 Milvus hangs during multi-thread concurrent search
+-   \#2739 Fix mishards start failed
 
 ## Feature
 
