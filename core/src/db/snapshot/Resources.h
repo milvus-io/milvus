@@ -354,6 +354,7 @@ class Collection : public BaseResource,
  public:
     using Ptr = std::shared_ptr<Collection>;
     using MapT = std::map<ID_TYPE, Ptr>;
+    using SetT = std::set<Ptr>;
     using ScopedMapT = std::map<ID_TYPE, ScopedResource<Collection>>;
     using VecT = std::vector<Ptr>;
     static constexpr const char* Name = "Collection";
@@ -380,6 +381,7 @@ class CollectionCommit : public BaseResource,
     static constexpr const char* Name = "CollectionCommit";
     using Ptr = std::shared_ptr<CollectionCommit>;
     using MapT = std::map<ID_TYPE, Ptr>;
+    using SetT = std::set<Ptr>;
     using ScopedMapT = std::map<ID_TYPE, ScopedResource<CollectionCommit>>;
     using VecT = std::vector<Ptr>;
     CollectionCommit(ID_TYPE collection_id, ID_TYPE schema_id, const MappingT& mappings = {}, SIZE_TYPE row_cnt = 0,
@@ -402,6 +404,7 @@ class Partition : public BaseResource,
  public:
     using Ptr = std::shared_ptr<Partition>;
     using MapT = std::map<ID_TYPE, Ptr>;
+    using SetT = std::set<Ptr>;
     using ScopedMapT = std::map<ID_TYPE, ScopedResource<Partition>>;
     using VecT = std::vector<Ptr>;
     static constexpr const char* Name = "Partition";
@@ -426,6 +429,7 @@ class PartitionCommit : public BaseResource,
  public:
     using Ptr = std::shared_ptr<PartitionCommit>;
     using MapT = std::map<ID_TYPE, Ptr>;
+    using SetT = std::set<Ptr>;
     using ScopedMapT = std::map<ID_TYPE, ScopedResource<PartitionCommit>>;
     using VecT = std::vector<Ptr>;
     static constexpr const char* Name = "PartitionCommit";
@@ -454,6 +458,7 @@ class Segment : public BaseResource,
  public:
     using Ptr = std::shared_ptr<Segment>;
     using MapT = std::map<ID_TYPE, Ptr>;
+    using SetT = std::set<Ptr>;
     using ScopedMapT = std::map<ID_TYPE, ScopedResource<Segment>>;
     using VecT = std::vector<Ptr>;
     static constexpr const char* Name = "Segment";
@@ -483,6 +488,7 @@ class SegmentCommit : public BaseResource,
  public:
     using Ptr = std::shared_ptr<SegmentCommit>;
     using MapT = std::map<ID_TYPE, Ptr>;
+    using SetT = std::set<Ptr>;
     using ScopedMapT = std::map<ID_TYPE, ScopedResource<SegmentCommit>>;
     using VecT = std::vector<Ptr>;
     static constexpr const char* Name = "SegmentCommit";
@@ -514,6 +520,7 @@ class SegmentFile : public BaseResource,
  public:
     using Ptr = std::shared_ptr<SegmentFile>;
     using MapT = std::map<ID_TYPE, Ptr>;
+    using SetT = std::set<Ptr>;
     using ScopedMapT = std::map<ID_TYPE, ScopedResource<SegmentFile>>;
     using VecT = std::vector<Ptr>;
     static constexpr const char* Name = "SegmentFile";
@@ -538,6 +545,7 @@ class SchemaCommit : public BaseResource,
  public:
     using Ptr = std::shared_ptr<SchemaCommit>;
     using MapT = std::map<ID_TYPE, Ptr>;
+    using SetT = std::set<Ptr>;
     using ScopedMapT = std::map<ID_TYPE, ScopedResource<SchemaCommit>>;
     using VecT = std::vector<Ptr>;
     static constexpr const char* Name = "SchemaCommit";
@@ -564,6 +572,7 @@ class Field : public BaseResource,
  public:
     using Ptr = std::shared_ptr<Field>;
     using MapT = std::map<ID_TYPE, Ptr>;
+    using SetT = std::set<Ptr>;
     using ScopedMapT = std::map<ID_TYPE, ScopedResource<Field>>;
     using VecT = std::vector<Ptr>;
     static constexpr const char* Name = "Field";
@@ -587,6 +596,7 @@ class FieldCommit : public BaseResource,
  public:
     using Ptr = std::shared_ptr<FieldCommit>;
     using MapT = std::map<ID_TYPE, Ptr>;
+    using SetT = std::set<Ptr>;
     using ScopedMapT = std::map<ID_TYPE, ScopedResource<FieldCommit>>;
     using VecT = std::vector<Ptr>;
     static constexpr const char* Name = "FieldCommit";
@@ -614,6 +624,7 @@ class FieldElement : public BaseResource,
  public:
     using Ptr = std::shared_ptr<FieldElement>;
     using MapT = std::map<ID_TYPE, Ptr>;
+    using SetT = std::set<Ptr>;
     using ScopedMapT = std::map<ID_TYPE, ScopedResource<FieldElement>>;
     using VecT = std::vector<Ptr>;
     static constexpr const char* Name = "FieldElement";

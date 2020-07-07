@@ -78,6 +78,23 @@ class Store {
     }
 
     template <typename OpT>
+    Status
+    ApplyOperation(OpT& op) {
+        std::apply([this](auto&... steps_set) { ((ApplyStep(steps_set)), ...); }, op.GetStepHolders());
+        return Status::OK();
+    }
+
+    template <typename T>
+    void
+    ApplyStep(T& steps_set) {
+        for (auto& res : steps_set) {
+            /* kv.second->Ref(); */
+            /* std::cout << "XXXXXXXXXXXXXX " << res->GetID() << " " << typeid(*res).name() << std::endl; */
+
+        }
+    }
+
+    template <typename OpT>
     void
     Apply(OpT& op) {
         op.ApplyToStore(*this);

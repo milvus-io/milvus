@@ -230,6 +230,7 @@ Operations::DoExecute(Store& store) {
 
 Status
 Operations::PostExecute(Store& store) {
+    store.ApplyOperation(*this);
     return store.DoCommitOperation(*this);
 }
 
