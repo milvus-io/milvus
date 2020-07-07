@@ -320,8 +320,7 @@ SSDBImpl::DropIndex(const std::string& collection_name, const std::string& field
 }
 
 Status
-SSDBImpl::PreloadCollection(const std::shared_ptr<server::Context>& context, const std::string& collection_name,
-                            bool force) {
+SSDBImpl::PreloadCollection(const server::ContextPtr& context, const std::string& collection_name, bool force) {
     CHECK_INITIALIZED;
 
     snapshot::ScopedSnapshotT ss;
@@ -331,6 +330,26 @@ SSDBImpl::PreloadCollection(const std::shared_ptr<server::Context>& context, con
     handler->Iterate();
 
     return handler->GetStatus();
+}
+
+Status
+SSDBImpl::GetEntityByID(const std::string& collection_name, const IDNumbers& id_array,
+                        const std::vector<std::string>& field_names, std::vector<VectorsData>& vector_data,
+                        std::vector<meta::hybrid::DataType>& attr_type, std::vector<AttrsData>& attr_data) {
+    CHECK_INITIALIZED;
+
+    snapshot::ScopedSnapshotT ss;
+    STATUS_CHECK(snapshot::Snapshots::GetInstance().GetSnapshot(ss, collection_name));
+
+    auto handler = std::make_shared<GetEntityByIdSegmentHandler>(nullptr, ss, id_array, field_names);
+    handler->Iterate();
+    STATUS_CHECK(handler->GetStatus());
+
+    vector_data = std::move(handler->vector_data_);
+    attr_type = std::move(handler->attr_type_);
+    attr_data = std::move(handler->attr_data_);
+
+    return Status::OK();
 }
 
 ////////////////////////////////////////////////////////////////////////////////

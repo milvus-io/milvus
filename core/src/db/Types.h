@@ -33,6 +33,9 @@ typedef segment::doc_id_t IDNumber;
 typedef IDNumber* IDNumberPtr;
 typedef std::vector<IDNumber> IDNumbers;
 
+typedef faiss::Index::distance_t VectorDistance;
+typedef std::vector<VectorDistance> VectorDistances;
+
 typedef std::vector<faiss::Index::idx_t> ResultIds;
 typedef std::vector<faiss::Index::distance_t> ResultDistances;
 

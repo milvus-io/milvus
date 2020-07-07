@@ -20,55 +20,51 @@
 namespace milvus::engine::snapshot {
 
 template <class ResourceT>
-inline Status
-GetResFiles(std::vector<std::string>& file_list, typename ResourceT::Ptr& res_ptr) {
-    return Status::OK();
+inline std::string
+GetResPath(const typename ResourceT::Ptr& res_ptr) {
+    return std::string();
 }
 
 template <>
-inline Status
-GetResFiles<Collection>(std::vector<std::string>& file_list, Collection::Ptr& res_ptr) {
+inline std::string
+GetResPath<Collection>(const Collection::Ptr& res_ptr) {
     std::stringstream ss;
     ss << res_ptr->GetID();
 
-    file_list.push_back(ss.str());
-    return Status::OK();
+    return ss.str();
 }
 
 template <>
-inline Status
-GetResFiles<Partition>(std::vector<std::string>& file_list, Partition::Ptr& res_ptr) {
+inline std::string
+GetResPath<Partition>(const Partition::Ptr& res_ptr) {
     std::stringstream ss;
     ss << res_ptr->GetCollectionId() << "/";
     ss << res_ptr->GetID();
 
-    file_list.push_back(ss.str());
-    return Status::OK();
+    return ss.str();
 }
 
 template <>
-inline Status
-GetResFiles<Segment>(std::vector<std::string>& file_list, Segment::Ptr& res_ptr) {
+inline std::string
+GetResPath<Segment>(const Segment::Ptr& res_ptr) {
     std::stringstream ss;
     ss << res_ptr->GetCollectionId() << "/";
     ss << res_ptr->GetPartitionId() << "/";
     ss << res_ptr->GetID();
 
-    file_list.push_back(ss.str());
-    return Status::OK();
+    return ss.str();
 }
 
 template <>
-inline Status
-GetResFiles<SegmentFile>(std::vector<std::string>& file_list, SegmentFile::Ptr& res_ptr) {
+inline std::string
+GetResPath<SegmentFile>(const SegmentFile::Ptr& res_ptr) {
     std::stringstream ss;
     ss << res_ptr->GetCollectionId() << "/";
     ss << res_ptr->GetPartitionId() << "/";
     ss << res_ptr->GetSegmentId() << "/";
     ss << res_ptr->GetID();
 
-    file_list.push_back(ss.str());
-    return Status::OK();
+    return ss.str();
 }
 
 }  // namespace milvus::engine::snapshot

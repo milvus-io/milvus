@@ -102,20 +102,21 @@ using Table2FileRef = std::map<std::string, File2RefCount>;
 namespace hybrid {
 
 enum class DataType {
-    INT8 = 1,
-    INT16 = 2,
-    INT32 = 3,
-    INT64 = 4,
+    NONE = 0,
+    BOOL = 1,
+    INT8 = 2,
+    INT16 = 3,
+    INT32 = 4,
+    INT64 = 5,
+
+    FLOAT = 10,
+    DOUBLE = 11,
 
     STRING = 20,
 
-    BOOL = 30,
-
-    FLOAT = 40,
-    DOUBLE = 41,
-
-    VECTOR = 100,
-    UNKNOWN = 9999,
+    VECTOR_BINARY = 100,
+    VECTOR_FLOAT = 101,
+    VECTOR = 200,
 };
 
 struct VectorFieldSchema {
@@ -133,27 +134,10 @@ struct VectorFieldsSchema {
 using VectorFieldSchemaPtr = std::shared_ptr<VectorFieldSchema>;
 
 struct FieldSchema {
-    typedef enum {
-        INT8 = 1,
-        INT16 = 2,
-        INT32 = 3,
-        INT64 = 4,
-
-        STRING = 20,
-
-        BOOL = 30,
-
-        FLOAT = 40,
-        DOUBLE = 41,
-
-        VECTOR = 100,
-        UNKNOWN = 9999,
-    } FIELD_TYPE;
-
     // TODO(yukun): need field_id?
     std::string collection_id_;
     std::string field_name_;
-    int32_t field_type_ = (int)INT8;
+    int32_t field_type_;
     std::string field_params_;
 };
 

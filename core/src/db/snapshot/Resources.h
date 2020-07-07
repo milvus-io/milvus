@@ -29,7 +29,7 @@ using milvus::engine::utils::GetMicroSecTimeStamp;
 
 namespace milvus::engine::snapshot {
 
-static constexpr const char* JEmpty = "{}";
+static const json JEmpty = {};
 
 class MappingsField {
  public:
@@ -296,22 +296,16 @@ class NameField {
 
 class ParamsField {
  public:
-    explicit ParamsField(std::string params) : params_(std::move(params)), json_params_(json::parse(params_)) {
+    explicit ParamsField(const json& params) : params_(params) {
     }
 
-    const std::string&
+    const json&
     GetParams() const {
         return params_;
     }
 
-    const json&
-    GetParamsJson() const {
-        return json_params_;
-    }
-
  protected:
-    std::string params_;
-    json json_params_;
+    json params_;
 };
 
 class SizeField {
@@ -364,7 +358,7 @@ class Collection : public BaseResource,
     using VecT = std::vector<Ptr>;
     static constexpr const char* Name = "Collection";
 
-    explicit Collection(const std::string& name, const std::string& params = JEmpty, ID_TYPE id = 0, LSN_TYPE lsn = 0,
+    explicit Collection(const std::string& name, const json& params = JEmpty, ID_TYPE id = 0, LSN_TYPE lsn = 0,
                         State status = PENDING, TS_TYPE created_on = GetMicroSecTimeStamp(),
                         TS_TYPE UpdatedOnField = GetMicroSecTimeStamp());
 };
@@ -574,7 +568,7 @@ class Field : public BaseResource,
     using VecT = std::vector<Ptr>;
     static constexpr const char* Name = "Field";
 
-    Field(const std::string& name, NUM_TYPE num, FTYPE_TYPE ftype, const std::string& params = JEmpty, ID_TYPE id = 0,
+    Field(const std::string& name, NUM_TYPE num, FTYPE_TYPE ftype, const json& params = JEmpty, ID_TYPE id = 0,
           LSN_TYPE lsn = 0, State status = PENDING, TS_TYPE created_on = GetMicroSecTimeStamp(),
           TS_TYPE UpdatedOnField = GetMicroSecTimeStamp());
 };
@@ -624,7 +618,7 @@ class FieldElement : public BaseResource,
     using VecT = std::vector<Ptr>;
     static constexpr const char* Name = "FieldElement";
     FieldElement(ID_TYPE collection_id, ID_TYPE field_id, const std::string& name, FTYPE_TYPE ftype,
-                 const std::string& params = JEmpty, ID_TYPE id = 0, LSN_TYPE lsn = 0, State status = PENDING,
+                 const json& params = JEmpty, ID_TYPE id = 0, LSN_TYPE lsn = 0, State status = PENDING,
                  TS_TYPE created_on = GetMicroSecTimeStamp(), TS_TYPE UpdatedOnField = GetMicroSecTimeStamp());
 };
 

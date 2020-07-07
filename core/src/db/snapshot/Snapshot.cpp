@@ -29,91 +29,99 @@ Snapshot::UnRefAll() {
     std::apply([this](auto&... resource) { ((DoUnRef(resource)), ...); }, resources_);
 }
 
-Snapshot::Snapshot(ID_TYPE id) {
-    auto collection_commit = CollectionCommitsHolder::GetInstance().GetResource(id, false);
-    AddResource<CollectionCommit>(collection_commit);
-    max_lsn_ = collection_commit->GetLsn();
-    auto& schema_holder = SchemaCommitsHolder::GetInstance();
-    auto current_schema = schema_holder.GetResource(collection_commit->GetSchemaId(), false);
-    AddResource<SchemaCommit>(current_schema);
-    current_schema_id_ = current_schema->GetID();
+Snapshot::Snapshot(ID_TYPE ss_id) {
+    auto& collection_commits_holder = CollectionCommitsHolder::GetInstance();
+    auto& collections_holder = CollectionsHolder::GetInstance();
+    auto& schema_commits_holder = SchemaCommitsHolder::GetInstance();
     auto& field_commits_holder = FieldCommitsHolder::GetInstance();
     auto& fields_holder = FieldsHolder::GetInstance();
     auto& field_elements_holder = FieldElementsHolder::GetInstance();
-
-    auto collection = CollectionsHolder::GetInstance().GetResource(collection_commit->GetCollectionId(), false);
-    AddResource<Collection>(collection);
-    auto& mappings = collection_commit->GetMappings();
     auto& partition_commits_holder = PartitionCommitsHolder::GetInstance();
     auto& partitions_holder = PartitionsHolder::GetInstance();
-    auto& segments_holder = SegmentsHolder::GetInstance();
     auto& segment_commits_holder = SegmentCommitsHolder::GetInstance();
+    auto& segments_holder = SegmentsHolder::GetInstance();
     auto& segment_files_holder = SegmentFilesHolder::GetInstance();
 
-    auto ssid = id;
-    for (auto& id : mappings) {
-        auto partition_commit = partition_commits_holder.GetResource(id, false);
-        auto partition = partitions_holder.GetResource(partition_commit->GetPartitionId(), false);
+    auto collection_commit = collection_commits_holder.GetResource(ss_id, false);
+    AddResource<CollectionCommit>(collection_commit);
+
+    max_lsn_ = collection_commit->GetLsn();
+    auto schema_commit = schema_commits_holder.GetResource(collection_commit->GetSchemaId(), false);
+    AddResource<SchemaCommit>(schema_commit);
+
+    current_schema_id_ = schema_commit->GetID();
+    auto collection = collections_holder.GetResource(collection_commit->GetCollectionId(), false);
+    AddResource<Collection>(collection);
+
+    auto& collection_commit_mappings = collection_commit->GetMappings();
+    for (auto p_c_id : collection_commit_mappings) {
+        auto partition_commit = partition_commits_holder.GetResource(p_c_id, false);
+        auto partition_id = partition_commit->GetPartitionId();
+        auto partition = partitions_holder.GetResource(partition_id, false);
+        auto partition_name = partition->GetName();
         AddResource<PartitionCommit>(partition_commit);
-        p_pc_map_[partition_commit->GetPartitionId()] = partition_commit->GetID();
+
+        p_pc_map_[partition_id] = partition_commit->GetID();
         AddResource<Partition>(partition);
-        partition_names_map_[partition->GetName()] = partition->GetID();
-        p_max_seg_num_[partition->GetID()] = 0;
-        auto& s_c_mappings = partition_commit->GetMappings();
-        /* std::cout << "SS-" << ssid << "PC_MAP=("; */
+        partition_names_map_[partition_name] = partition_id;
+        p_max_seg_num_[partition_id] = 0;
+        /* std::cout << "SS-" << ss_id << "PC_MAP=("; */
         /* for (auto id : s_c_mappings) { */
         /*     std::cout << id << ","; */
         /* } */
         /* std::cout << ")" << std::endl; */
-        for (auto& s_c_id : s_c_mappings) {
+        auto& partition_commit_mappings = partition_commit->GetMappings();
+        for (auto s_c_id : partition_commit_mappings) {
             auto segment_commit = segment_commits_holder.GetResource(s_c_id, false);
-            auto segment = segments_holder.GetResource(segment_commit->GetSegmentId(), false);
-            auto schema = schema_holder.GetResource(segment_commit->GetSchemaId(), false);
-            AddResource<SchemaCommit>(schema);
+            auto segment_id = segment_commit->GetSegmentId();
+            auto segment = segments_holder.GetResource(segment_id, false);
+            auto segment_schema_id = segment_commit->GetSchemaId();
+            auto segment_schema = schema_commits_holder.GetResource(segment_schema_id, false);
+            auto segment_partition_id = segment->GetPartitionId();
+            AddResource<SchemaCommit>(segment_schema);
             AddResource<SegmentCommit>(segment_commit);
-            if (segment->GetNum() > p_max_seg_num_[segment->GetPartitionId()]) {
-                p_max_seg_num_[segment->GetPartitionId()] = segment->GetNum();
+            if (segment->GetNum() > p_max_seg_num_[segment_partition_id]) {
+                p_max_seg_num_[segment_partition_id] = segment->GetNum();
             }
             AddResource<Segment>(segment);
-            seg_segc_map_[segment->GetID()] = segment_commit->GetID();
-            auto& s_f_mappings = segment_commit->GetMappings();
-            for (auto& s_f_id : s_f_mappings) {
+
+            seg_segc_map_[segment_id] = segment_commit->GetID();
+            auto& segment_commit_mappings = segment_commit->GetMappings();
+            for (auto s_f_id : segment_commit_mappings) {
                 auto segment_file = segment_files_holder.GetResource(s_f_id, false);
-                auto field_element = field_elements_holder.GetResource(segment_file->GetFieldElementId(), false);
+                auto segment_file_id = segment_file->GetID();
+                auto field_element_id = segment_file->GetFieldElementId();
+                auto field_element = field_elements_holder.GetResource(field_element_id, false);
                 AddResource<FieldElement>(field_element);
                 AddResource<SegmentFile>(segment_file);
-                auto entry = element_segfiles_map_.find(segment_file->GetFieldElementId());
-                if (entry == element_segfiles_map_.end()) {
-                    element_segfiles_map_[segment_file->GetFieldElementId()] = {
-                        {segment_file->GetSegmentId(), segment_file->GetID()}};
-                } else {
-                    entry->second[segment_file->GetSegmentId()] = segment_file->GetID();
-                }
+                element_segfiles_map_[field_element_id][segment_id] = segment_file_id;
             }
         }
     }
 
-    for (auto& kv : GetResources<SchemaCommit>()) {
-        if (kv.first > latest_schema_commit_id_)
+    auto& schema_commit_mappings = schema_commit->GetMappings();
+    auto& schema_commits = GetResources<SchemaCommit>();
+    for (auto& kv : schema_commits) {
+        if (kv.first > latest_schema_commit_id_) {
             latest_schema_commit_id_ = kv.first;
+        }
         auto& schema_commit = kv.second;
-        auto& s_c_m = current_schema->GetMappings();
-        for (auto field_commit_id : s_c_m) {
+        for (auto field_commit_id : schema_commit_mappings) {
             auto field_commit = field_commits_holder.GetResource(field_commit_id, false);
             AddResource<FieldCommit>(field_commit);
-            auto field = fields_holder.GetResource(field_commit->GetFieldId(), false);
+
+            auto field_id = field_commit->GetFieldId();
+            auto field = fields_holder.GetResource(field_id, false);
+            auto field_name = field->GetName();
             AddResource<Field>(field);
-            field_names_map_[field->GetName()] = field->GetID();
-            auto& f_c_m = field_commit->GetMappings();
-            for (auto field_element_id : f_c_m) {
+
+            field_names_map_[field_name] = field_id;
+            auto& field_commit_mappings = field_commit->GetMappings();
+            for (auto field_element_id : field_commit_mappings) {
                 auto field_element = field_elements_holder.GetResource(field_element_id, false);
                 AddResource<FieldElement>(field_element);
-                auto entry = field_element_names_map_.find(field->GetName());
-                if (entry == field_element_names_map_.end()) {
-                    field_element_names_map_[field->GetName()] = {{field_element->GetName(), field_element->GetID()}};
-                } else {
-                    entry->second[field_element->GetName()] = field_element->GetID();
-                }
+                auto field_element_name = field_element->GetName();
+                field_element_names_map_[field_name][field_element_name] = field_element_id;
             }
         }
     }
