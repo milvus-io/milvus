@@ -17,8 +17,10 @@
 #include <condition_variable>
 #include <memory>
 #include <mutex>
+#include <set>
 #include <string>
 #include <thread>
+#include <tuple>
 #include <vector>
 #include "Context.h"
 #include "db/snapshot/Snapshot.h"
@@ -30,8 +32,10 @@ namespace milvus {
 namespace engine {
 namespace snapshot {
 
-using StepsT = std::vector<std::any>;
 using CheckStaleFunc = std::function<Status(ScopedSnapshotT&)>;
+using StepsHolderT = std::tuple<CollectionCommit::SetT, Collection::SetT, SchemaCommit::SetT, FieldCommit::SetT,
+                                Field::SetT, FieldElement::SetT, PartitionCommit::SetT, Partition::SetT,
+                                SegmentCommit::SetT, Segment::SetT, SegmentFile::SetT>;
 
 enum OperationsType { Invalid, W_Leaf, O_Leaf, W_Compound, O_Compound };
 
@@ -71,9 +75,14 @@ class Operations : public std::enable_shared_from_this<Operations> {
         ids_.push_back(id);
     }
 
-    StepsT&
-    GetSteps() {
-        return steps_;
+    const size_t
+    GetPos() const {
+        return last_pos_;
+    }
+
+    StepsHolderT&
+    GetStepHolders() {
+        return holders_;
     }
 
     ID_TYPE
@@ -132,9 +141,6 @@ class Operations : public std::enable_shared_from_this<Operations> {
     virtual std::string
     ToString() const;
 
-    Status
-    RollBack();
-
     virtual Status
     OnSnapshotStale();
     virtual Status
@@ -158,12 +164,13 @@ class Operations : public std::enable_shared_from_this<Operations> {
     Status
     CheckPrevSnapshot() const;
 
-    Status
-    ApplyRollBack(Store&);
+    void
+    RollBack();
 
     OperationContext context_;
     ScopedSnapshotT prev_ss_;
-    StepsT steps_;
+    StepsHolderT holders_;
+    size_t last_pos_;
     std::vector<ID_TYPE> ids_;
     bool done_ = false;
     Status status_;
@@ -179,7 +186,10 @@ Operations::AddStep(const StepT& step, bool activate) {
     auto s = std::make_shared<StepT>(step);
     if (activate)
         s->Activate();
-    steps_.push_back(s);
+
+    last_pos_ = Index<typename StepT::SetT, StepsHolderT>::value;
+    auto& holder = std::get<Index<typename StepT::SetT, StepsHolderT>::value>(holders_);
+    holder.insert(s);
 }
 
 template <typename StepT>
@@ -189,7 +199,9 @@ Operations::AddStepWithLsn(const StepT& step, const LSN_TYPE& lsn, bool activate
     if (activate)
         s->Activate();
     s->SetLsn(lsn);
-    steps_.push_back(s);
+    last_pos_ = Index<typename StepT::SetT, StepsHolderT>::value;
+    auto& holder = std::get<Index<typename StepT::SetT, StepsHolderT>::value>(holders_);
+    holder.insert(s);
 }
 
 template <typename ResourceT>
