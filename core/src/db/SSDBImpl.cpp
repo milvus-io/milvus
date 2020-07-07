@@ -12,10 +12,12 @@
 #include "db/SSDBImpl.h"
 #include "cache/CpuCacheMgr.h"
 #include "db/snapshot/CompoundOperations.h"
+#include "db/snapshot/ResourceHelper.h"
 #include "db/snapshot/ResourceTypes.h"
 #include "db/snapshot/Snapshots.h"
 #include "metrics/Metrics.h"
 #include "metrics/SystemInfo.h"
+#include "segment/SegmentReader.h"
 #include "utils/Exception.h"
 #include "wal/WalDefinations.h"
 
@@ -343,6 +345,41 @@ SSDBImpl::GetEntityByID(const std::string& collection_name, const IDNumbers& id_
     vector_data = std::move(handler->vector_data_);
     attr_type = std::move(handler->attr_type_);
     attr_data = std::move(handler->attr_data_);
+
+    return Status::OK();
+}
+
+Status
+SSDBImpl::GetIDsInSegment(const std::string& collection_name, const std::string& segment_id, IDNumbers& ids) {
+    CHECK_INITIALIZED;
+
+    snapshot::ScopedSnapshotT ss;
+    STATUS_CHECK(snapshot::Snapshots::GetInstance().GetSnapshot(ss, collection_name));
+
+//    auto segment_ptr = ss->GetResources<snapshot::Segment>(segment_id);
+//    if (segment_ptr == nullptr) {
+//        return Status(DB_NOT_FOUND, "Segment does not exist");
+//    }
+//
+//    std::string segment_dir = snapshot::GetResPath<snapshot::Segment>(segment_ptr);
+//    segment::SegmentReader segment_reader(segment_dir);
+//
+//    std::vector<segment::doc_id_t> uids;
+//    STATUS_CHECK(segment_reader.LoadUids(uids));
+//
+//    segment::DeletedDocsPtr deleted_docs_ptr;
+//    STATUS_CHECK(segment_reader.LoadDeletedDocs(deleted_docs_ptr));
+//
+//    // avoid duplicate offset and erase from max offset to min offset
+//    auto& deleted_offset = deleted_docs_ptr->GetDeletedDocs();
+//    std::set<segment::offset_t, std::greater<segment::offset_t>> ordered_offset;
+//    for (auto offset : deleted_offset) {
+//        ordered_offset.insert(offset);
+//    }
+//    for (auto offset : ordered_offset) {
+//        uids.erase(uids.begin() + offset);
+//    }
+//    ids.swap(uids);
 
     return Status::OK();
 }

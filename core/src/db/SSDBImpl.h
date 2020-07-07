@@ -87,6 +87,9 @@ class SSDBImpl {
                   const std::vector<std::string>& field_names, std::vector<engine::VectorsData>& vector_data,
                   std::vector<meta::hybrid::DataType>& attr_type, std::vector<engine::AttrsData>& attr_data);
 
+    Status
+    GetIDsInSegment(const std::string& collection_name, const std::string& segment_id, IDNumbers& ids);
+
  private:
     void
     InternalFlush(const std::string& collection_id = "");
