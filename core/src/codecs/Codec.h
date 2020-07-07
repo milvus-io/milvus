@@ -22,6 +22,7 @@
 #include "DeletedDocsFormat.h"
 #include "IdBloomFilterFormat.h"
 #include "IdIndexFormat.h"
+#include "VectorCompressFormat.h"
 #include "VectorIndexFormat.h"
 #include "VectorsFormat.h"
 #include "utils/Exception.h"
@@ -59,6 +60,11 @@ class Codec {
     virtual IdBloomFilterFormatPtr
     GetIdBloomFilterFormat() {
         throw Exception(SERVER_UNSUPPORTED_ERROR, "id bloom filter not supported");
+    }
+
+    virtual VectorCompressFormatPtr
+    GetVectorCompressFormat() {
+        throw Exception(SERVER_UNSUPPORTED_ERROR, "vector compress not supported");
     }
 };
 

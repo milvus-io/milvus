@@ -17,48 +17,35 @@
 
 #pragma once
 
-#include "codecs/Codec.h"
+#include <string>
+
+#include "codecs/VectorCompressFormat.h"
 
 namespace milvus {
 namespace codec {
 
-class DefaultCodec : public Codec {
+class DefaultVectorCompressFormat : public VectorCompressFormat {
  public:
-    static DefaultCodec&
-    instance();
+    DefaultVectorCompressFormat() = default;
 
-    VectorsFormatPtr
-    GetVectorsFormat() override;
+    void
+    read(const storage::FSHandlerPtr& fs_ptr, const std::string& location, knowhere::BinaryPtr& compress) override;
 
-    AttrsFormatPtr
-    GetAttrsFormat() override;
+    void
+    write(const storage::FSHandlerPtr& fs_ptr, const std::string& location,
+          const knowhere::BinaryPtr& compress) override;
 
-    VectorIndexFormatPtr
-    GetVectorIndexFormat() override;
+    // No copy and move
+    DefaultVectorCompressFormat(const DefaultVectorCompressFormat&) = delete;
+    DefaultVectorCompressFormat(DefaultVectorCompressFormat&&) = delete;
 
-    AttrsIndexFormatPtr
-    GetAttrsIndexFormat() override;
+    DefaultVectorCompressFormat&
+    operator=(const DefaultVectorCompressFormat&) = delete;
+    DefaultVectorCompressFormat&
+    operator=(DefaultVectorCompressFormat&&) = delete;
 
-    DeletedDocsFormatPtr
-    GetDeletedDocsFormat() override;
-
-    IdBloomFilterFormatPtr
-    GetIdBloomFilterFormat() override;
-
-    VectorCompressFormatPtr
-    GetVectorCompressFormat() override;
-
- private:
-    DefaultCodec();
-
- private:
-    VectorsFormatPtr vectors_format_ptr_;
-    AttrsFormatPtr attrs_format_ptr_;
-    VectorIndexFormatPtr vector_index_format_ptr_;
-    AttrsIndexFormatPtr attrs_index_format_ptr_;
-    DeletedDocsFormatPtr deleted_docs_format_ptr_;
-    IdBloomFilterFormatPtr id_bloom_filter_format_ptr_;
-    VectorCompressFormatPtr vector_compress_format_ptr_;
+private:
+    const std::string sq8_vector_extension_ = ".sq8";
 };
 
 }  // namespace codec
