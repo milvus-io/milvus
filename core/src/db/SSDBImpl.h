@@ -12,18 +12,25 @@
 #pragma once
 
 #include <atomic>
+#include <list>
 #include <map>
 #include <memory>
+#include <mutex>
+#include <set>
 #include <string>
+#include <thread>
+#include <unordered_map>
 #include <vector>
 
 #include "db/Options.h"
 #include "db/SimpleWaitNotify.h"
 #include "db/SnapshotHandlers.h"
+#include "db/insert/MemManager.h"
 #include "db/snapshot/Context.h"
 #include "db/snapshot/ResourceTypes.h"
 #include "db/snapshot/Resources.h"
 #include "utils/Status.h"
+#include "utils/ThreadPool.h"
 #include "wal/WalManager.h"
 
 namespace milvus {
@@ -89,26 +96,61 @@ class SSDBImpl {
     void
     BackgroundMetricThread();
 
-    Status
-    ExecWalRecord(const wal::MXLogRecord& record);
+    void
+    StartBuildIndexTask();
+
+    void
+    BackgroundWaitBuildIndex();
+
+    void
+    BackgroundIndexThread();
+
+    void
+    WaitBuildIndexFinish();
 
     void
     BackgroundWalThread();
+
+    void
+    StartMergeTask(const std::set<std::string>& merge_collection_ids, bool force_merge_all = false);
+
+    void
+    BackgroundMerge(std::set<std::string> collection_ids, bool force_merge_all);
+
+    void
+    WaitMergeFileFinish();
+
+    Status
+    ExecWalRecord(const wal::MXLogRecord& record);
 
  private:
     DBOptions options_;
     std::atomic<bool> initialized_;
 
-    std::shared_ptr<wal::WalManager> wal_mgr_;
-    std::shared_ptr<std::thread> bg_wal_thread_;
+    MemManagerPtr mem_mgr_;
 
-    std::shared_ptr<std::thread> bg_flush_thread_;
+    std::shared_ptr<wal::WalManager> wal_mgr_;
+    std::thread bg_wal_thread_;
+
+    std::thread bg_flush_thread_;
+    std::thread bg_metric_thread_;
+    std::thread bg_index_thread_;
 
     SimpleWaitNotify swn_wal_;
     SimpleWaitNotify swn_flush_;
     SimpleWaitNotify swn_metric_;
+    SimpleWaitNotify swn_index_;
 
     SimpleWaitNotify flush_req_swn_;
+    SimpleWaitNotify index_req_swn_;
+
+    ThreadPool merge_thread_pool_;
+    std::mutex merge_result_mutex_;
+    std::list<std::future<void>> merge_thread_results_;
+
+    ThreadPool index_thread_pool_;
+    std::mutex index_result_mutex_;
+    std::list<std::future<void>> index_thread_results_;
 };  // SSDBImpl
 
 }  // namespace engine
