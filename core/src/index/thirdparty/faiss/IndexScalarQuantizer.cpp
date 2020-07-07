@@ -165,7 +165,7 @@ IndexIVFScalarQuantizer::IndexIVFScalarQuantizer (
             MetricType metric, bool encode_residual)
     : IndexIVF(quantizer, d, nlist, 0, metric),
       sq(d, qtype),
-      by_residual(encode_residual)
+      by_residual(false)
 {
     code_size = sq.code_size;
     // was not known at construction time
@@ -175,7 +175,7 @@ IndexIVFScalarQuantizer::IndexIVFScalarQuantizer (
 
 IndexIVFScalarQuantizer::IndexIVFScalarQuantizer ():
     IndexIVF(),
-    by_residual(true)
+    by_residual(false)
 {
 }
 
