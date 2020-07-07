@@ -85,9 +85,35 @@ class SSDBImpl {
     Status
     GetEntityByID(const std::string& collection_name, const IDNumbers& id_array,
                   const std::vector<std::string>& field_names, std::vector<engine::VectorsData>& vector_data,
-                  std::vector<meta::hybrid::DataType>& attr_type, std::vector<engine::AttrsData>& attr_data);
+                  /*std::vector<meta::hybrid::DataType>& attr_type,*/ std::vector<engine::AttrsData>& attr_data);
+
+    Status
+    InsertEntities(const std::string& collection_name, const std::string& partition_name,
+                   const std::vector<std::string>& field_names, Entity& entity,
+                   std::unordered_map<std::string, meta::hybrid::DataType>& attr_types);
+
+    Status
+    DeleteEntities(const std::string& collection_id, engine::IDNumbers entity_ids);
+
+    Status
+    HybridQuery(const server::ContextPtr& context, const std::string& collection_name,
+                const std::vector<std::string>& partition_patterns, query::GeneralQueryPtr general_query,
+                query::QueryPtr query_ptr, std::vector<std::string>& field_names,
+                std::unordered_map<std::string, engine::meta::hybrid::DataType>& attr_type,
+                engine::QueryResult& result);
 
  private:
+    Status
+    GetPartitionsByTags(const std::string& collection_name, const std::vector<std::string>& partition_patterns,
+                        std::set<std::string>& partition_names);
+
+    Status
+    HybridQueryAsync(const server::ContextPtr& context, const std::string& collection_name,
+                     meta::FilesHolder& files_holder, query::GeneralQueryPtr general_query, query::QueryPtr query_ptr,
+                     std::vector<std::string>& field_names,
+                     std::unordered_map<std::string, engine::meta::hybrid::DataType>& attr_type,
+                     engine::QueryResult& result);
+
     void
     InternalFlush(const std::string& collection_id = "");
 
@@ -127,6 +153,12 @@ class SSDBImpl {
     Status
     ExecWalRecord(const wal::MXLogRecord& record);
 
+    void
+    SuspendIfFirst();
+
+    void
+    ResumeIfLast();
+
  private:
     DBOptions options_;
     std::atomic<bool> initialized_;
@@ -155,6 +187,9 @@ class SSDBImpl {
     ThreadPool index_thread_pool_;
     std::mutex index_result_mutex_;
     std::list<std::future<void>> index_thread_results_;
+
+    int64_t live_search_num_ = 0;
+    std::mutex suspend_build_mutex_;
 };  // SSDBImpl
 
 }  // namespace engine

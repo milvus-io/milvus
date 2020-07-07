@@ -15,6 +15,8 @@
 #include <string>
 #include <vector>
 
+#include "db/meta/MetaTypes.h"
+
 namespace milvus {
 namespace engine {
 namespace snapshot {
@@ -27,7 +29,7 @@ using LSN_TYPE = int64_t;
 using SIZE_TYPE = uint64_t;
 using MappingT = std::set<ID_TYPE>;
 
-enum FieldType { VECTOR, INT32 };
+using FieldType = meta::hybrid::DataType;
 enum FieldElementType { RAW, IVFSQ8 };
 
 using IDS_TYPE = std::vector<ID_TYPE>;

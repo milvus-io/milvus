@@ -289,7 +289,7 @@ class Store {
                 std::stringstream fname;
                 fname << "f_" << fi << "_" << std::get<Index<Field::MapT, MockResourcesT>::value>(ids_) + 1;
                 FieldPtr field;
-                Field temp_f(fname.str(), fi, FieldType::VECTOR);
+                Field temp_f(fname.str(), fi, FieldType::VECTOR_FLOAT);
                 temp_f.Activate();
                 CreateResource<Field>(std::move(temp_f), field);
                 all_records.push_back(field);
