@@ -15,6 +15,7 @@
 #include "db/snapshot/ResourceHelper.h"
 #include "db/snapshot/ResourceTypes.h"
 #include "db/snapshot/Snapshots.h"
+#include "db/IDGenerator.h"
 #include "metrics/Metrics.h"
 #include "metrics/SystemInfo.h"
 #include "segment/SegmentReader.h"
@@ -83,7 +84,7 @@ SSDBImpl::Start() {
         }
 
         // recovery
-        while (1) {
+        while (true) {
             wal::MXLogRecord record;
             auto error_code = wal_mgr_->GetNextRecovery(record);
             if (error_code != WAL_SUCCESS) {
@@ -350,38 +351,211 @@ SSDBImpl::GetEntityByID(const std::string& collection_name, const IDNumbers& id_
 }
 
 Status
-SSDBImpl::GetIDsInSegment(const std::string& collection_name, const std::string& segment_id, IDNumbers& ids) {
+CopyToAttr(const std::vector<uint8_t>& record, int64_t row_num, const std::vector<std::string>& field_names,
+           std::unordered_map<std::string, meta::hybrid::DataType>& attr_types,
+           std::unordered_map<std::string, std::vector<uint8_t>>& attr_datas,
+           std::unordered_map<std::string, uint64_t>& attr_nbytes,
+           std::unordered_map<std::string, uint64_t>& attr_data_size) {
+    int64_t offset = 0;
+    for (auto name : field_names) {
+        switch (attr_types.at(name)) {
+            case meta::hybrid::DataType::INT8: {
+                std::vector<uint8_t> data;
+                data.resize(row_num * sizeof(int8_t));
+
+                std::vector<int64_t> attr_value(row_num, 0);
+                memcpy(attr_value.data(), record.data() + offset, row_num * sizeof(int64_t));
+
+                std::vector<int8_t> raw_value(row_num, 0);
+                for (uint64_t i = 0; i < row_num; ++i) {
+                    raw_value[i] = attr_value[i];
+                }
+
+                memcpy(data.data(), raw_value.data(), row_num * sizeof(int8_t));
+                attr_datas.insert(std::make_pair(name, data));
+
+                attr_nbytes.insert(std::make_pair(name, sizeof(int8_t)));
+                attr_data_size.insert(std::make_pair(name, row_num * sizeof(int8_t)));
+                offset += row_num * sizeof(int64_t);
+                break;
+            }
+            case meta::hybrid::DataType::INT16: {
+                std::vector<uint8_t> data;
+                data.resize(row_num * sizeof(int16_t));
+
+                std::vector<int64_t> attr_value(row_num, 0);
+                memcpy(attr_value.data(), record.data() + offset, row_num * sizeof(int64_t));
+
+                std::vector<int16_t> raw_value(row_num, 0);
+                for (uint64_t i = 0; i < row_num; ++i) {
+                    raw_value[i] = attr_value[i];
+                }
+
+                memcpy(data.data(), raw_value.data(), row_num * sizeof(int16_t));
+                attr_datas.insert(std::make_pair(name, data));
+
+                attr_nbytes.insert(std::make_pair(name, sizeof(int16_t)));
+                attr_data_size.insert(std::make_pair(name, row_num * sizeof(int16_t)));
+                offset += row_num * sizeof(int64_t);
+                break;
+            }
+            case meta::hybrid::DataType::INT32: {
+                std::vector<uint8_t> data;
+                data.resize(row_num * sizeof(int32_t));
+
+                std::vector<int64_t> attr_value(row_num, 0);
+                memcpy(attr_value.data(), record.data() + offset, row_num * sizeof(int64_t));
+
+                std::vector<int32_t> raw_value(row_num, 0);
+                for (uint64_t i = 0; i < row_num; ++i) {
+                    raw_value[i] = attr_value[i];
+                }
+
+                memcpy(data.data(), raw_value.data(), row_num * sizeof(int32_t));
+                attr_datas.insert(std::make_pair(name, data));
+
+                attr_nbytes.insert(std::make_pair(name, sizeof(int32_t)));
+                attr_data_size.insert(std::make_pair(name, row_num * sizeof(int32_t)));
+                offset += row_num * sizeof(int64_t);
+                break;
+            }
+            case meta::hybrid::DataType::INT64: {
+                std::vector<uint8_t> data;
+                data.resize(row_num * sizeof(int64_t));
+                memcpy(data.data(), record.data() + offset, row_num * sizeof(int64_t));
+                attr_datas.insert(std::make_pair(name, data));
+
+                std::vector<int64_t> test_data(row_num);
+                memcpy(test_data.data(), record.data(), row_num * sizeof(int64_t));
+
+                attr_nbytes.insert(std::make_pair(name, sizeof(int64_t)));
+                attr_data_size.insert(std::make_pair(name, row_num * sizeof(int64_t)));
+                offset += row_num * sizeof(int64_t);
+                break;
+            }
+            case meta::hybrid::DataType::FLOAT: {
+                std::vector<uint8_t> data;
+                data.resize(row_num * sizeof(float));
+
+                std::vector<double> attr_value(row_num, 0);
+                memcpy(attr_value.data(), record.data() + offset, row_num * sizeof(double));
+
+                std::vector<float> raw_value(row_num, 0);
+                for (uint64_t i = 0; i < row_num; ++i) {
+                    raw_value[i] = attr_value[i];
+                }
+
+                memcpy(data.data(), raw_value.data(), row_num * sizeof(float));
+                attr_datas.insert(std::make_pair(name, data));
+
+                attr_nbytes.insert(std::make_pair(name, sizeof(float)));
+                attr_data_size.insert(std::make_pair(name, row_num * sizeof(float)));
+                offset += row_num * sizeof(double);
+                break;
+            }
+            case meta::hybrid::DataType::DOUBLE: {
+                std::vector<uint8_t> data;
+                data.resize(row_num * sizeof(double));
+                memcpy(data.data(), record.data() + offset, row_num * sizeof(double));
+                attr_datas.insert(std::make_pair(name, data));
+
+                attr_nbytes.insert(std::make_pair(name, sizeof(double)));
+                attr_data_size.insert(std::make_pair(name, row_num * sizeof(double)));
+                offset += row_num * sizeof(double);
+                break;
+            }
+            default:
+                break;
+        }
+    }
+    return Status::OK();
+}
+
+Status
+SSDBImpl::InsertEntities(const std::string& collection_name, const std::string& partition_name,
+                       const std::vector<std::string>& field_names, Entity& entity,
+                       std::unordered_map<std::string, meta::hybrid::DataType>& attr_types) {
     CHECK_INITIALIZED;
 
     snapshot::ScopedSnapshotT ss;
     STATUS_CHECK(snapshot::Snapshots::GetInstance().GetSnapshot(ss, collection_name));
 
-//    auto segment_ptr = ss->GetResources<snapshot::Segment>(segment_id);
-//    if (segment_ptr == nullptr) {
-//        return Status(DB_NOT_FOUND, "Segment does not exist");
-//    }
-//
-//    std::string segment_dir = snapshot::GetResPath<snapshot::Segment>(segment_ptr);
-//    segment::SegmentReader segment_reader(segment_dir);
-//
-//    std::vector<segment::doc_id_t> uids;
-//    STATUS_CHECK(segment_reader.LoadUids(uids));
-//
-//    segment::DeletedDocsPtr deleted_docs_ptr;
-//    STATUS_CHECK(segment_reader.LoadDeletedDocs(deleted_docs_ptr));
-//
-//    // avoid duplicate offset and erase from max offset to min offset
-//    auto& deleted_offset = deleted_docs_ptr->GetDeletedDocs();
-//    std::set<segment::offset_t, std::greater<segment::offset_t>> ordered_offset;
-//    for (auto offset : deleted_offset) {
-//        ordered_offset.insert(offset);
-//    }
-//    for (auto offset : ordered_offset) {
-//        uids.erase(uids.begin() + offset);
-//    }
-//    ids.swap(uids);
+    auto partition_ptr = ss->GetPartition(partition_name);
+    if (partition_ptr == nullptr) {
+        return Status(DB_NOT_FOUND, "Fail to get partition " + partition_name);
+    }
+
+    /* Generate id */
+    if (entity.id_array_.empty()) {
+        SafeIDGenerator& id_generator = SafeIDGenerator::GetInstance();
+        STATUS_CHECK(id_generator.GetNextIDNumbers(entity.entity_count_, entity.id_array_));
+    }
+
+    std::unordered_map<std::string, std::vector<uint8_t>> attr_data;
+    std::unordered_map<std::string, uint64_t> attr_nbytes;
+    std::unordered_map<std::string, uint64_t> attr_data_size;
+    STATUS_CHECK(CopyToAttr(entity.attr_value_, entity.entity_count_, field_names, attr_types, attr_data, attr_nbytes,
+                            attr_data_size));
+
+    if (options_.wal_enable_) {
+        auto vector_it = entity.vector_data_.begin();
+        if (!vector_it->second.binary_data_.empty()) {
+            wal_mgr_->InsertEntities(collection_name, partition_name, entity.id_array_, vector_it->second.binary_data_,
+                                     attr_nbytes, attr_data);
+        } else if (!vector_it->second.float_data_.empty()) {
+            wal_mgr_->InsertEntities(collection_name, partition_name, entity.id_array_, vector_it->second.float_data_,
+                                     attr_nbytes, attr_data);
+        }
+        swn_wal_.Notify();
+    } else {
+        // insert entities: collection_name is field id
+        wal::MXLogRecord record;
+        record.lsn = 0;
+        record.collection_id = collection_name;
+        record.partition_tag = partition_name;
+        record.ids = entity.id_array_.data();
+        record.length = entity.entity_count_;
+        record.attr_data = attr_data;
+        record.attr_nbytes = attr_nbytes;
+        record.attr_data_size = attr_data_size;
+
+        auto vector_it = entity.vector_data_.begin();
+        if (vector_it->second.binary_data_.empty()) {
+            record.type = wal::MXLogType::InsertVector;
+            record.data = vector_it->second.float_data_.data();
+            record.data_size = vector_it->second.float_data_.size() * sizeof(float);
+        } else {
+            record.type = wal::MXLogType::InsertBinary;
+            record.data = vector_it->second.binary_data_.data();
+            record.data_size = vector_it->second.binary_data_.size() * sizeof(uint8_t);
+        }
+
+        STATUS_CHECK(ExecWalRecord(record));
+    }
 
     return Status::OK();
+}
+
+Status
+SSDBImpl::DeleteEntities(const std::string& collection_id, engine::IDNumbers entity_ids) {
+    CHECK_INITIALIZED;
+
+    Status status;
+    if (options_.wal_enable_) {
+        wal_mgr_->DeleteById(collection_id, entity_ids);
+        swn_wal_.Notify();
+    } else {
+        wal::MXLogRecord record;
+        record.lsn = 0;  // need to get from meta ?
+        record.type = wal::MXLogType::Delete;
+        record.collection_id = collection_id;
+        record.ids = entity_ids.data();
+        record.length = entity_ids.size();
+
+        status = ExecWalRecord(record);
+    }
+
+    return status;
 }
 
 ////////////////////////////////////////////////////////////////////////////////

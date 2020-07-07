@@ -88,7 +88,12 @@ class SSDBImpl {
                   std::vector<meta::hybrid::DataType>& attr_type, std::vector<engine::AttrsData>& attr_data);
 
     Status
-    GetIDsInSegment(const std::string& collection_name, const std::string& segment_id, IDNumbers& ids);
+    InsertEntities(const std::string& collection_name, const std::string& partition_name,
+                   const std::vector<std::string>& field_names, Entity& entity,
+                   std::unordered_map<std::string, meta::hybrid::DataType>& attr_types);
+
+    Status
+    DeleteEntities(const std::string& collection_id, engine::IDNumbers entity_ids);
 
  private:
     void
