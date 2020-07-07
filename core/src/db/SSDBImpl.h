@@ -68,8 +68,7 @@ class SSDBImpl {
     GetCollectionRowCount(const std::string& collection_name, uint64_t& row_count);
 
     Status
-    PreloadCollection(const std::shared_ptr<server::Context>& context, const std::string& collection_name,
-                      bool force = false);
+    PreloadCollection(const server::ContextPtr& context, const std::string& collection_name, bool force = false);
 
     Status
     CreatePartition(const std::string& collection_name, const std::string& partition_name);
@@ -82,6 +81,11 @@ class SSDBImpl {
 
     Status
     DropIndex(const std::string& collection_name, const std::string& field_name, const std::string& field_element_name);
+
+    Status
+    GetEntityByID(const std::string& collection_name, const IDNumbers& id_array,
+                  const std::vector<std::string>& field_names, std::vector<engine::VectorsData>& vector_data,
+                  std::vector<meta::hybrid::DataType>& attr_type, std::vector<engine::AttrsData>& attr_data);
 
  private:
     void
