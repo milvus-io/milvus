@@ -25,7 +25,7 @@
 #include "db/Options.h"
 #include "db/SimpleWaitNotify.h"
 #include "db/SnapshotHandlers.h"
-#include "db/insert/MemManager.h"
+#include "db/insert/SSMemManager.h"
 #include "db/snapshot/Context.h"
 #include "db/snapshot/ResourceTypes.h"
 #include "db/snapshot/Resources.h"
@@ -127,7 +127,7 @@ class SSDBImpl {
     DBOptions options_;
     std::atomic<bool> initialized_;
 
-    MemManagerPtr mem_mgr_;
+    SSMemManagerPtr mem_mgr_;
 
     std::shared_ptr<wal::WalManager> wal_mgr_;
     std::thread bg_wal_thread_;

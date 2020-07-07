@@ -14,6 +14,7 @@
 #include "db/snapshot/CompoundOperations.h"
 #include "db/snapshot/ResourceTypes.h"
 #include "db/snapshot/Snapshots.h"
+#include "insert/MemManagerFactory.h"
 #include "metrics/Metrics.h"
 #include "metrics/SystemInfo.h"
 #include "utils/Exception.h"
@@ -41,6 +42,8 @@ static const Status SHUTDOWN_ERROR = Status(DB_ERROR, "Milvus server is shutdown
 
 SSDBImpl::SSDBImpl(const DBOptions& options)
     : options_(options), initialized_(false), merge_thread_pool_(1, 1), index_thread_pool_(1, 1) {
+    mem_mgr_ = MemManagerFactory::SSBuild(options_);
+
     if (options_.wal_enable_) {
         wal::MXLogConfiguration mxlog_config;
         mxlog_config.recovery_error_ignore = options_.recovery_error_ignore_;
@@ -203,6 +206,8 @@ SSDBImpl::DropCollection(const std::string& name) {
         // SS TODO
         /* wal_mgr_->DropCollection(ss->GetCollectionId()); */
     }
+
+    auto status = mem_mgr_->EraseMemVector(name);  // not allow insert
 
     return snapshots.DropCollection(ss->GetCollectionId(), std::numeric_limits<snapshot::LSN_TYPE>::max());
 }
@@ -578,7 +583,183 @@ SSDBImpl::WaitBuildIndexFinish() {
 
 Status
 SSDBImpl::ExecWalRecord(const wal::MXLogRecord& record) {
-    // TODO:
+    //    auto collections_flushed = [&](const std::string collection_id,
+    //                                   const std::set<std::string>& target_collection_names) -> uint64_t {
+    //        uint64_t max_lsn = 0;
+    //        if (options_.wal_enable_ && !target_collection_names.empty()) {
+    //            uint64_t lsn = 0;
+    //            for (auto& collection_name : target_collection_names) {
+    //                snapshot::ScopedSnapshotT ss;
+    //                snapshot::Snapshots::GetInstance().GetSnapshot(ss, collection_name);
+    //                lsn = ss->GetMaxLsn();
+    //                if (lsn > max_lsn) {
+    //                    max_lsn = lsn;
+    //                }
+    //            }
+    //            wal_mgr_->CollectionFlushed(collection_id, lsn);
+    //        }
+    //
+    //        std::set<std::string> merge_collection_ids;
+    //        for (auto& collection : target_collection_names) {
+    //            merge_collection_ids.insert(collection);
+    //        }
+    //        StartMergeTask(merge_collection_ids);
+    //        return max_lsn;
+    //    };
+    //
+    //    auto force_flush_if_mem_full = [&]() -> uint64_t {
+    //        if (mem_mgr_->GetCurrentMem() > options_.insert_buffer_size_) {
+    //            LOG_ENGINE_DEBUG_ << LogOut("[%s][%ld] ", "insert", 0) << "Insert buffer size exceeds limit. Force
+    //            flush"; InternalFlush();
+    //        }
+    //    };
+    //
+    //    Status status;
+    //
+    //    switch (record.type) {
+    //        case wal::MXLogType::Entity: {
+    //            snapshot::ScopedSnapshotT ss;
+    //            status = snapshot::Snapshots::GetInstance().GetSnapshot(ss, record.collection_id);
+    //            if (!status.ok()) {
+    //                LOG_WAL_ERROR_ << LogOut("[%s][%ld] ", "insert", 0) << "Get partition fail: " << status.message();
+    //                return status;
+    //            }
+    //            snapshot::PartitionPtr part = ss->GetPartition(record.partition_tag);
+    //            if (part == nullptr) {
+    //                LOG_WAL_ERROR_ << LogOut("[%s][%ld] ", "insert", 0) << "Get partition fail: " << status.message();
+    //                return status;
+    //            }
+    //
+    //            status = mem_mgr_->InsertEntities(
+    //                target_collection_name, record.length, record.ids, (record.data_size / record.length /
+    //                sizeof(float)), (const float*)record.data, record.attr_nbytes, record.attr_data_size,
+    //                record.attr_data, record.lsn);
+    //            force_flush_if_mem_full();
+    //
+    //            // metrics
+    //            milvus::server::CollectInsertMetrics metrics(record.length, status);
+    //            break;
+    //        }
+    //        case wal::MXLogType::InsertBinary: {
+    //            std::string target_collection_name;
+    //            status = GetPartitionByTag(record.collection_id, record.partition_tag, target_collection_name);
+    //            if (!status.ok()) {
+    //                LOG_WAL_ERROR_ << LogOut("[%s][%ld] ", "insert", 0) << "Get partition fail: " << status.message();
+    //                return status;
+    //            }
+    //
+    //            status = mem_mgr_->InsertVectors(target_collection_name, record.length, record.ids,
+    //                                             (record.data_size / record.length / sizeof(uint8_t)),
+    //                                             (const u_int8_t*)record.data, record.lsn);
+    //            force_flush_if_mem_full();
+    //
+    //            // metrics
+    //            milvus::server::CollectInsertMetrics metrics(record.length, status);
+    //            break;
+    //        }
+    //
+    //        case wal::MXLogType::InsertVector: {
+    //            std::string target_collection_name;
+    //            status = GetPartitionByTag(record.collection_id, record.partition_tag, target_collection_name);
+    //            if (!status.ok()) {
+    //                LOG_WAL_ERROR_ << LogOut("[%s][%ld] ", "insert", 0) << "Get partition fail: " << status.message();
+    //                return status;
+    //            }
+    //
+    //            status = mem_mgr_->InsertVectors(target_collection_name, record.length, record.ids,
+    //                                             (record.data_size / record.length / sizeof(float)),
+    //                                             (const float*)record.data, record.lsn);
+    //            force_flush_if_mem_full();
+    //
+    //            // metrics
+    //            milvus::server::CollectInsertMetrics metrics(record.length, status);
+    //            break;
+    //        }
+    //
+    //        case wal::MXLogType::Delete: {
+    //            std::vector<meta::CollectionSchema> partition_array;
+    //            status = meta_ptr_->ShowPartitions(record.collection_id, partition_array);
+    //            if (!status.ok()) {
+    //                return status;
+    //            }
+    //
+    //            std::vector<std::string> collection_ids{record.collection_id};
+    //            for (auto& partition : partition_array) {
+    //                auto& partition_collection_id = partition.collection_id_;
+    //                collection_ids.emplace_back(partition_collection_id);
+    //            }
+    //
+    //            if (record.length == 1) {
+    //                for (auto& collection_id : collection_ids) {
+    //                    status = mem_mgr_->DeleteVector(collection_id, *record.ids, record.lsn);
+    //                    if (!status.ok()) {
+    //                        return status;
+    //                    }
+    //                }
+    //            } else {
+    //                for (auto& collection_id : collection_ids) {
+    //                    status = mem_mgr_->DeleteVectors(collection_id, record.length, record.ids, record.lsn);
+    //                    if (!status.ok()) {
+    //                        return status;
+    //                    }
+    //                }
+    //            }
+    //            break;
+    //        }
+    //
+    //        case wal::MXLogType::Flush: {
+    //            if (!record.collection_id.empty()) {
+    //                // flush one collection
+    //                std::vector<meta::CollectionSchema> partition_array;
+    //                status = meta_ptr_->ShowPartitions(record.collection_id, partition_array);
+    //                if (!status.ok()) {
+    //                    return status;
+    //                }
+    //
+    //                std::vector<std::string> collection_ids{record.collection_id};
+    //                for (auto& partition : partition_array) {
+    //                    auto& partition_collection_id = partition.collection_id_;
+    //                    collection_ids.emplace_back(partition_collection_id);
+    //                }
+    //
+    //                std::set<std::string> flushed_collections;
+    //                for (auto& collection_id : collection_ids) {
+    //                    const std::lock_guard<std::mutex> lock(flush_merge_compact_mutex_);
+    //                    status = mem_mgr_->Flush(collection_id);
+    //                    if (!status.ok()) {
+    //                        break;
+    //                    }
+    //                    flushed_collections.insert(collection_id);
+    //
+    //                    status = FlushAttrsIndex(collection_id);
+    //                    if (!status.ok()) {
+    //                        return status;
+    //                    }
+    //                }
+    //
+    //                collections_flushed(record.collection_id, flushed_collections);
+    //
+    //            } else {
+    //                // flush all collections
+    //                std::set<std::string> collection_ids;
+    //                {
+    //                    const std::lock_guard<std::mutex> lock(flush_merge_compact_mutex_);
+    //                    status = mem_mgr_->Flush(collection_ids);
+    //                }
+    //
+    //                uint64_t lsn = collections_flushed("", collection_ids);
+    //                if (options_.wal_enable_) {
+    //                    wal_mgr_->RemoveOldFiles(lsn);
+    //                }
+    //            }
+    //            break;
+    //        }
+    //
+    //        default:
+    //            break;
+    //    }
+    //
+    //    return status;
     return Status::OK();
 }
 
