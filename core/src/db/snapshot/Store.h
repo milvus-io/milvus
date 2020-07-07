@@ -24,6 +24,7 @@
 #include <iostream>
 #include <map>
 #include <memory>
+#include <set>
 #include <shared_mutex>
 #include <sstream>
 #include <string>
@@ -57,12 +58,11 @@ class Store {
     Status
     ApplyOperation(OpT& op) {
         std::apply(
-                [&] (auto&... steps_set) {
-                    std::size_t n{0};
-                    ((ApplyOpStep(op, n++, steps_set)), ...);
-                },
-                op.GetStepHolders()
-        );
+            [&](auto&... steps_set) {
+                std::size_t n{0};
+                ((ApplyOpStep(op, n++, steps_set)), ...);
+            },
+            op.GetStepHolders());
         return Status::OK();
     }
 
@@ -264,7 +264,6 @@ class Store {
     }
 
  private:
-
     Store() {
     }
 

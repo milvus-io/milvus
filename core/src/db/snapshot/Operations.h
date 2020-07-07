@@ -17,8 +17,10 @@
 #include <condition_variable>
 #include <memory>
 #include <mutex>
+#include <set>
 #include <string>
 #include <thread>
+#include <tuple>
 #include <vector>
 #include "Context.h"
 #include "db/snapshot/Snapshot.h"
@@ -32,8 +34,8 @@ namespace snapshot {
 
 using CheckStaleFunc = std::function<Status(ScopedSnapshotT&)>;
 using StepsHolderT = std::tuple<CollectionCommit::SetT, Collection::SetT, SchemaCommit::SetT, FieldCommit::SetT,
-      Field::SetT, FieldElement::SetT, PartitionCommit::SetT, Partition::SetT,
-      SegmentCommit::SetT, Segment::SetT, SegmentFile::SetT>;
+                                Field::SetT, FieldElement::SetT, PartitionCommit::SetT, Partition::SetT,
+                                SegmentCommit::SetT, Segment::SetT, SegmentFile::SetT>;
 
 enum OperationsType { Invalid, W_Leaf, O_Leaf, W_Compound, O_Compound };
 
@@ -139,9 +141,6 @@ class Operations : public std::enable_shared_from_this<Operations> {
     virtual std::string
     ToString() const;
 
-    Status
-    RollBack();
-
     virtual Status
     OnSnapshotStale();
     virtual Status
@@ -165,8 +164,8 @@ class Operations : public std::enable_shared_from_this<Operations> {
     Status
     CheckPrevSnapshot() const;
 
-    Status
-    ApplyRollBack(Store&);
+    void
+    RollBack();
 
     OperationContext context_;
     ScopedSnapshotT prev_ss_;
