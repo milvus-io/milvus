@@ -101,7 +101,7 @@ using Table2FileRef = std::map<std::string, File2RefCount>;
 
 namespace hybrid {
 
-enum class DataType {
+enum DataType {
     NONE = 0,
     BOOL = 1,
     INT8 = 2,

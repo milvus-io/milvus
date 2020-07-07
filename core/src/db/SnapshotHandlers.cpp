@@ -30,7 +30,8 @@ LoadVectorFieldElementHandler::LoadVectorFieldElementHandler(const std::shared_p
 
 Status
 LoadVectorFieldElementHandler::Handle(const snapshot::FieldElementPtr& field_element) {
-    if (field_->GetFtype() != snapshot::FieldType::VECTOR) {
+    if (field_->GetFtype() != snapshot::FieldType::VECTOR_FLOAT &&
+        field_->GetFtype() != snapshot::FieldType::VECTOR_BINARY) {
         return Status(DB_ERROR, "Should be VECTOR field");
     }
     if (field_->GetID() != field_element->GetFieldId()) {
@@ -47,7 +48,8 @@ LoadVectorFieldHandler::LoadVectorFieldHandler(const std::shared_ptr<server::Con
 
 Status
 LoadVectorFieldHandler::Handle(const snapshot::FieldPtr& field) {
-    if (field->GetFtype() != snapshot::FieldType::VECTOR) {
+    if (field->GetFtype() != snapshot::FieldType::VECTOR_FLOAT &&
+        field->GetFtype() != snapshot::FieldType::VECTOR_BINARY) {
         return Status::OK();
     }
     if (context_ && context_->IsConnectionBroken()) {
