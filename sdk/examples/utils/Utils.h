@@ -54,8 +54,8 @@ class Utils {
     PrintIndexParam(const milvus::IndexParam& index_param);
 
     static void
-    BuildEntities(int64_t from, int64_t to, std::vector<milvus::VectorData>& entity_array,
-                  std::vector<int64_t>& entity_ids, int64_t dimension);
+    BuildEntities(int64_t from, int64_t to, milvus::FieldValue& field_value, std::vector<int64_t>& entity_ids,
+                  int64_t dimension);
 
     static void
     PrintSearchResult(const std::vector<std::pair<int64_t, milvus::VectorData>>& entity_array,
@@ -72,7 +72,8 @@ class Utils {
              milvus::TopKQueryResult& topk_query_result);
 
     static void
-    ConstructVector(uint64_t nq, uint64_t dimension, std::vector<milvus::VectorData>& query_vector);
+    ConstructVectors(int64_t from, int64_t to, std::vector<milvus::VectorData>& query_vector,
+                     std::vector<int64_t>& search_ids, int64_t dimension);
 
     static std::vector<milvus::LeafQueryPtr>
     GenLeafQuery();

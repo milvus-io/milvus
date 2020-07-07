@@ -43,7 +43,7 @@ class ClientTest {
     GetCollectionInfo(const std::string&);
 
     void
-    InsertEntities(const std::string&, int64_t);
+    InsertEntities(const std::string&);
 
     void BuildSearchEntities(int64_t, int64_t);
 
@@ -52,6 +52,9 @@ class ClientTest {
 
     void
     GetCollectionStats(const std::string&);
+
+    void
+    BuildVectors(int64_t nq, int64_t dimension);
 
     void
     GetEntityByID(const std::string&, const std::vector<int64_t>&);
@@ -82,6 +85,6 @@ class ClientTest {
 
  private:
     std::shared_ptr<milvus::Connection> conn_;
-    //    std::vector<std::pair<int64_t, milvus::Entity>> search_entity_array_;
+    std::vector<std::pair<int64_t, milvus::VectorData>> search_entity_array_;
     std::vector<int64_t> search_id_array_;
 };
