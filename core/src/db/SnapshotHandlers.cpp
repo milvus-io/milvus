@@ -186,6 +186,12 @@ GetEntityByIdSegmentHandler::Handle(const snapshot::SegmentPtr& segment) {
             } else {
                 size_t num_bytes;
                 switch (field_type) {
+                    case meta::hybrid::DataType::INT8:
+                        num_bytes = 1;
+                        break;
+                    case meta::hybrid::DataType::INT16:
+                        num_bytes = 2;
+                        break;
                     case meta::hybrid::DataType::INT32:
                     case meta::hybrid::DataType::FLOAT:
                         num_bytes = 4;
