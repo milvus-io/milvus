@@ -11,12 +11,20 @@
 
 #include "db/SSDBImpl.h"
 #include "cache/CpuCacheMgr.h"
+#include "db/IDGenerator.h"
 #include "db/snapshot/CompoundOperations.h"
+#include "db/snapshot/ResourceHelper.h"
 #include "db/snapshot/ResourceTypes.h"
 #include "db/snapshot/Snapshots.h"
+#include "knowhere/index/vector_index/helpers/BuilderSuspend.h"
 #include "metrics/Metrics.h"
 #include "metrics/SystemInfo.h"
+#include "scheduler/Definition.h"
+#include "scheduler/SchedInst.h"
+#include "segment/SegmentReader.h"
 #include "utils/Exception.h"
+#include "utils/StringHelpFunctions.h"
+#include "utils/TimeRecorder.h"
 #include "wal/WalDefinations.h"
 
 #include <fiu-local.h>
@@ -81,7 +89,7 @@ SSDBImpl::Start() {
         }
 
         // recovery
-        while (1) {
+        while (true) {
             wal::MXLogRecord record;
             auto error_code = wal_mgr_->GetNextRecovery(record);
             if (error_code != WAL_SUCCESS) {
@@ -330,7 +338,7 @@ SSDBImpl::PreloadCollection(const server::ContextPtr& context, const std::string
 Status
 SSDBImpl::GetEntityByID(const std::string& collection_name, const IDNumbers& id_array,
                         const std::vector<std::string>& field_names, std::vector<VectorsData>& vector_data,
-                        std::vector<meta::hybrid::DataType>& attr_type, std::vector<AttrsData>& attr_data) {
+                        /*std::vector<meta::hybrid::DataType>& attr_type,*/ std::vector<AttrsData>& attr_data) {
     CHECK_INITIALIZED;
 
     snapshot::ScopedSnapshotT ss;
@@ -341,15 +349,380 @@ SSDBImpl::GetEntityByID(const std::string& collection_name, const IDNumbers& id_
     STATUS_CHECK(handler->GetStatus());
 
     vector_data = std::move(handler->vector_data_);
-    attr_type = std::move(handler->attr_type_);
+    // attr_type = std::move(handler->attr_type_);
     attr_data = std::move(handler->attr_data_);
 
     return Status::OK();
 }
 
+Status
+CopyToAttr(const std::vector<uint8_t>& record, int64_t row_num, const std::vector<std::string>& field_names,
+           std::unordered_map<std::string, meta::hybrid::DataType>& attr_types,
+           std::unordered_map<std::string, std::vector<uint8_t>>& attr_datas,
+           std::unordered_map<std::string, uint64_t>& attr_nbytes,
+           std::unordered_map<std::string, uint64_t>& attr_data_size) {
+    int64_t offset = 0;
+    for (auto name : field_names) {
+        switch (attr_types.at(name)) {
+            case meta::hybrid::DataType::INT8: {
+                std::vector<uint8_t> data;
+                data.resize(row_num * sizeof(int8_t));
+
+                std::vector<int64_t> attr_value(row_num, 0);
+                memcpy(attr_value.data(), record.data() + offset, row_num * sizeof(int64_t));
+
+                std::vector<int8_t> raw_value(row_num, 0);
+                for (uint64_t i = 0; i < row_num; ++i) {
+                    raw_value[i] = attr_value[i];
+                }
+
+                memcpy(data.data(), raw_value.data(), row_num * sizeof(int8_t));
+                attr_datas.insert(std::make_pair(name, data));
+
+                attr_nbytes.insert(std::make_pair(name, sizeof(int8_t)));
+                attr_data_size.insert(std::make_pair(name, row_num * sizeof(int8_t)));
+                offset += row_num * sizeof(int64_t);
+                break;
+            }
+            case meta::hybrid::DataType::INT16: {
+                std::vector<uint8_t> data;
+                data.resize(row_num * sizeof(int16_t));
+
+                std::vector<int64_t> attr_value(row_num, 0);
+                memcpy(attr_value.data(), record.data() + offset, row_num * sizeof(int64_t));
+
+                std::vector<int16_t> raw_value(row_num, 0);
+                for (uint64_t i = 0; i < row_num; ++i) {
+                    raw_value[i] = attr_value[i];
+                }
+
+                memcpy(data.data(), raw_value.data(), row_num * sizeof(int16_t));
+                attr_datas.insert(std::make_pair(name, data));
+
+                attr_nbytes.insert(std::make_pair(name, sizeof(int16_t)));
+                attr_data_size.insert(std::make_pair(name, row_num * sizeof(int16_t)));
+                offset += row_num * sizeof(int64_t);
+                break;
+            }
+            case meta::hybrid::DataType::INT32: {
+                std::vector<uint8_t> data;
+                data.resize(row_num * sizeof(int32_t));
+
+                std::vector<int64_t> attr_value(row_num, 0);
+                memcpy(attr_value.data(), record.data() + offset, row_num * sizeof(int64_t));
+
+                std::vector<int32_t> raw_value(row_num, 0);
+                for (uint64_t i = 0; i < row_num; ++i) {
+                    raw_value[i] = attr_value[i];
+                }
+
+                memcpy(data.data(), raw_value.data(), row_num * sizeof(int32_t));
+                attr_datas.insert(std::make_pair(name, data));
+
+                attr_nbytes.insert(std::make_pair(name, sizeof(int32_t)));
+                attr_data_size.insert(std::make_pair(name, row_num * sizeof(int32_t)));
+                offset += row_num * sizeof(int64_t);
+                break;
+            }
+            case meta::hybrid::DataType::INT64: {
+                std::vector<uint8_t> data;
+                data.resize(row_num * sizeof(int64_t));
+                memcpy(data.data(), record.data() + offset, row_num * sizeof(int64_t));
+                attr_datas.insert(std::make_pair(name, data));
+
+                std::vector<int64_t> test_data(row_num);
+                memcpy(test_data.data(), record.data(), row_num * sizeof(int64_t));
+
+                attr_nbytes.insert(std::make_pair(name, sizeof(int64_t)));
+                attr_data_size.insert(std::make_pair(name, row_num * sizeof(int64_t)));
+                offset += row_num * sizeof(int64_t);
+                break;
+            }
+            case meta::hybrid::DataType::FLOAT: {
+                std::vector<uint8_t> data;
+                data.resize(row_num * sizeof(float));
+
+                std::vector<double> attr_value(row_num, 0);
+                memcpy(attr_value.data(), record.data() + offset, row_num * sizeof(double));
+
+                std::vector<float> raw_value(row_num, 0);
+                for (uint64_t i = 0; i < row_num; ++i) {
+                    raw_value[i] = attr_value[i];
+                }
+
+                memcpy(data.data(), raw_value.data(), row_num * sizeof(float));
+                attr_datas.insert(std::make_pair(name, data));
+
+                attr_nbytes.insert(std::make_pair(name, sizeof(float)));
+                attr_data_size.insert(std::make_pair(name, row_num * sizeof(float)));
+                offset += row_num * sizeof(double);
+                break;
+            }
+            case meta::hybrid::DataType::DOUBLE: {
+                std::vector<uint8_t> data;
+                data.resize(row_num * sizeof(double));
+                memcpy(data.data(), record.data() + offset, row_num * sizeof(double));
+                attr_datas.insert(std::make_pair(name, data));
+
+                attr_nbytes.insert(std::make_pair(name, sizeof(double)));
+                attr_data_size.insert(std::make_pair(name, row_num * sizeof(double)));
+                offset += row_num * sizeof(double);
+                break;
+            }
+            default:
+                break;
+        }
+    }
+    return Status::OK();
+}
+
+Status
+SSDBImpl::InsertEntities(const std::string& collection_name, const std::string& partition_name,
+                         const std::vector<std::string>& field_names, Entity& entity,
+                         std::unordered_map<std::string, meta::hybrid::DataType>& attr_types) {
+    CHECK_INITIALIZED;
+
+    snapshot::ScopedSnapshotT ss;
+    STATUS_CHECK(snapshot::Snapshots::GetInstance().GetSnapshot(ss, collection_name));
+
+    auto partition_ptr = ss->GetPartition(partition_name);
+    if (partition_ptr == nullptr) {
+        return Status(DB_NOT_FOUND, "Fail to get partition " + partition_name);
+    }
+
+    /* Generate id */
+    if (entity.id_array_.empty()) {
+        SafeIDGenerator& id_generator = SafeIDGenerator::GetInstance();
+        STATUS_CHECK(id_generator.GetNextIDNumbers(entity.entity_count_, entity.id_array_));
+    }
+
+    std::unordered_map<std::string, std::vector<uint8_t>> attr_data;
+    std::unordered_map<std::string, uint64_t> attr_nbytes;
+    std::unordered_map<std::string, uint64_t> attr_data_size;
+    STATUS_CHECK(CopyToAttr(entity.attr_value_, entity.entity_count_, field_names, attr_types, attr_data, attr_nbytes,
+                            attr_data_size));
+
+    if (options_.wal_enable_) {
+        auto vector_it = entity.vector_data_.begin();
+        if (!vector_it->second.binary_data_.empty()) {
+            wal_mgr_->InsertEntities(collection_name, partition_name, entity.id_array_, vector_it->second.binary_data_,
+                                     attr_nbytes, attr_data);
+        } else if (!vector_it->second.float_data_.empty()) {
+            wal_mgr_->InsertEntities(collection_name, partition_name, entity.id_array_, vector_it->second.float_data_,
+                                     attr_nbytes, attr_data);
+        }
+        swn_wal_.Notify();
+    } else {
+        // insert entities: collection_name is field id
+        wal::MXLogRecord record;
+        record.lsn = 0;
+        record.collection_id = collection_name;
+        record.partition_tag = partition_name;
+        record.ids = entity.id_array_.data();
+        record.length = entity.entity_count_;
+        record.attr_data = attr_data;
+        record.attr_nbytes = attr_nbytes;
+        record.attr_data_size = attr_data_size;
+
+        auto vector_it = entity.vector_data_.begin();
+        if (vector_it->second.binary_data_.empty()) {
+            record.type = wal::MXLogType::InsertVector;
+            record.data = vector_it->second.float_data_.data();
+            record.data_size = vector_it->second.float_data_.size() * sizeof(float);
+        } else {
+            record.type = wal::MXLogType::InsertBinary;
+            record.data = vector_it->second.binary_data_.data();
+            record.data_size = vector_it->second.binary_data_.size() * sizeof(uint8_t);
+        }
+
+        STATUS_CHECK(ExecWalRecord(record));
+    }
+
+    return Status::OK();
+}
+
+Status
+SSDBImpl::DeleteEntities(const std::string& collection_id, engine::IDNumbers entity_ids) {
+    CHECK_INITIALIZED;
+
+    Status status;
+    if (options_.wal_enable_) {
+        wal_mgr_->DeleteById(collection_id, entity_ids);
+        swn_wal_.Notify();
+    } else {
+        wal::MXLogRecord record;
+        record.lsn = 0;  // need to get from meta ?
+        record.type = wal::MXLogType::Delete;
+        record.collection_id = collection_id;
+        record.ids = entity_ids.data();
+        record.length = entity_ids.size();
+
+        status = ExecWalRecord(record);
+    }
+
+    return status;
+}
+
+Status
+SSDBImpl::GetPartitionsByTags(const std::string& collection_name, const std::vector<std::string>& partition_patterns,
+                              std::set<std::string>& partition_names) {
+    snapshot::ScopedSnapshotT ss;
+    STATUS_CHECK(snapshot::Snapshots::GetInstance().GetSnapshot(ss, collection_name));
+
+    std::vector<std::string> partition_array;
+    STATUS_CHECK(ShowPartitions(collection_name, partition_array));
+
+    for (auto& pattern : partition_patterns) {
+        if (pattern == milvus::engine::DEFAULT_PARTITON_TAG) {
+            partition_names.insert(collection_name);
+            return Status::OK();
+        }
+
+        for (auto& p_name : partition_array) {
+            if (StringHelpFunctions::IsRegexMatch(p_name, pattern)) {
+                partition_names.insert(p_name);
+            }
+        }
+    }
+
+    if (partition_names.empty()) {
+        return Status(DB_PARTITION_NOT_FOUND, "Specified partition does not exist");
+    }
+
+    return Status::OK();
+}
+
+Status
+SSDBImpl::HybridQuery(const server::ContextPtr& context, const std::string& collection_id,
+                      const std::vector<std::string>& partition_patterns, query::GeneralQueryPtr general_query,
+                      query::QueryPtr query_ptr, std::vector<std::string>& field_names,
+                      std::unordered_map<std::string, engine::meta::hybrid::DataType>& attr_type,
+                      engine::QueryResult& result) {
+    CHECK_INITIALIZED;
+
+    auto query_ctx = context->Child("Query");
+
+    Status status;
+    meta::FilesHolder files_holder;
+#if 0
+    if (partition_patterns.empty()) {
+        // no partition tag specified, means search in whole table
+        // get all table files from parent table
+        STATUS_CHECK(meta_ptr_->FilesToSearch(collection_id, files_holder));
+
+        std::vector<meta::CollectionSchema> partition_array;
+        STATUS_CHECK(meta_ptr_->ShowPartitions(collection_id, partition_array));
+
+        for (auto& schema : partition_array) {
+            status = meta_ptr_->FilesToSearch(schema.collection_id_, files_holder);
+            if (!status.ok()) {
+                return Status(DB_ERROR, "get files to search failed in HybridQuery");
+            }
+        }
+
+        if (files_holder.HoldFiles().empty()) {
+            return Status::OK();  // no files to search
+        }
+    } else {
+        // get files from specified partitions
+        std::set<std::string> partition_name_array;
+        GetPartitionsByTags(collection_id, partition_patterns, partition_name_array);
+
+        for (auto& partition_name : partition_name_array) {
+            status = meta_ptr_->FilesToSearch(partition_name, files_holder);
+            if (!status.ok()) {
+                return Status(DB_ERROR, "get files to search failed in HybridQuery");
+            }
+        }
+
+        if (files_holder.HoldFiles().empty()) {
+            return Status::OK();
+        }
+    }
+#endif
+
+    cache::CpuCacheMgr::GetInstance()->PrintInfo();  // print cache info before query
+    status = HybridQueryAsync(query_ctx, collection_id, files_holder, general_query, query_ptr, field_names, attr_type,
+                              result);
+    if (!status.ok()) {
+        return status;
+    }
+    cache::CpuCacheMgr::GetInstance()->PrintInfo();  // print cache info after query
+
+    query_ctx->GetTraceContext()->GetSpan()->Finish();
+
+    return status;
+}
+
 ////////////////////////////////////////////////////////////////////////////////
 // Internal APIs
 ////////////////////////////////////////////////////////////////////////////////
+Status
+SSDBImpl::HybridQueryAsync(const server::ContextPtr& context, const std::string& collection_name,
+                           meta::FilesHolder& files_holder, query::GeneralQueryPtr general_query,
+                           query::QueryPtr query_ptr, std::vector<std::string>& field_names,
+                           std::unordered_map<std::string, engine::meta::hybrid::DataType>& attr_type,
+                           engine::QueryResult& result) {
+    auto query_async_ctx = context->Child("Query Async");
+
+    TimeRecorder rc("");
+
+    // step 1: construct search job
+    VectorsData vectors;
+    milvus::engine::meta::SegmentsSchema& files = files_holder.HoldFiles();
+    LOG_ENGINE_DEBUG_ << LogOut("Engine query begin, index file count: %ld", files_holder.HoldFiles().size());
+    scheduler::SearchJobPtr job =
+        std::make_shared<scheduler::SearchJob>(query_async_ctx, general_query, query_ptr, attr_type, vectors);
+    for (auto& file : files) {
+        scheduler::SegmentSchemaPtr file_ptr = std::make_shared<meta::SegmentSchema>(file);
+        job->AddIndexFile(file_ptr);
+    }
+
+    // step 2: put search job to scheduler and wait result
+    scheduler::JobMgrInst::GetInstance()->Put(job);
+    job->WaitResult();
+
+    files_holder.ReleaseFiles();
+    if (!job->GetStatus().ok()) {
+        return job->GetStatus();
+    }
+
+    // step 3: construct results
+    result.row_num_ = job->vector_count();
+    result.result_ids_ = job->GetResultIds();
+    result.result_distances_ = job->GetResultDistances();
+
+    // step 4: get entities by result ids
+    auto status = GetEntityByID(collection_name, result.result_ids_, field_names, result.vectors_, result.attrs_);
+    if (!status.ok()) {
+        query_async_ctx->GetTraceContext()->GetSpan()->Finish();
+        return status;
+    }
+
+    // step 5: filter entities by field names
+    //    std::vector<engine::AttrsData> filter_attrs;
+    //    for (auto attr : result.attrs_) {
+    //        AttrsData attrs_data;
+    //        attrs_data.attr_type_ = attr.attr_type_;
+    //        attrs_data.attr_count_ = attr.attr_count_;
+    //        attrs_data.id_array_ = attr.id_array_;
+    //        for (auto& name : field_names) {
+    //            if (attr.attr_data_.find(name) != attr.attr_data_.end()) {
+    //                attrs_data.attr_data_.insert(std::make_pair(name, attr.attr_data_.at(name)));
+    //            }
+    //        }
+    //        filter_attrs.emplace_back(attrs_data);
+    //    }
+    //
+    //    result.attrs_ = filter_attrs;
+
+    rc.ElapseFromBegin("Engine query totally cost");
+
+    query_async_ctx->GetTraceContext()->GetSpan()->Finish();
+
+    return Status::OK();
+}
+
 void
 SSDBImpl::InternalFlush(const std::string& collection_id) {
     wal::MXLogRecord record;
@@ -599,6 +972,24 @@ Status
 SSDBImpl::ExecWalRecord(const wal::MXLogRecord& record) {
     // TODO:
     return Status::OK();
+}
+
+void
+SSDBImpl::SuspendIfFirst() {
+    std::lock_guard<std::mutex> lock(suspend_build_mutex_);
+    if (++live_search_num_ == 1) {
+        LOG_ENGINE_TRACE_ << "live_search_num_: " << live_search_num_;
+        knowhere::BuilderSuspend();
+    }
+}
+
+void
+SSDBImpl::ResumeIfLast() {
+    std::lock_guard<std::mutex> lock(suspend_build_mutex_);
+    if (--live_search_num_ == 0) {
+        LOG_ENGINE_TRACE_ << "live_search_num_: " << live_search_num_;
+        knowhere::BuildResume();
+    }
 }
 
 }  // namespace engine
